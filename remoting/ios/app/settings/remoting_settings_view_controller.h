@@ -13,8 +13,6 @@
 
 @optional  // Applies to all methods.
 
-// Sets the setting to shrink the display of the host to the client window.
-- (void)setShrinkToFit:(BOOL)shrinkToFit;
 // Sets the setting to resize the host to fix the client window.
 - (void)setResizeToFit:(BOOL)resizeToFit;
 // Use the direct input mode for the current connection.
@@ -25,6 +23,8 @@
 - (void)sendCtrAltDel;
 // Sends the key Print Screen to the host.
 - (void)sendPrintScreen;
+// Sends feedback to the developers.
+- (void)sendFeedback;
 
 @end
 
@@ -36,6 +36,7 @@
 
 @property(weak, nonatomic) id<RemotingSettingsViewControllerDelegate> delegate;
 @property(nonatomic) remoting::GestureInterpreter::InputMode inputMode;
+@property(nonatomic) BOOL shouldResizeHostToFit;
 
 @end
 

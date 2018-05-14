@@ -66,6 +66,8 @@ class FindFrameViewPropertiesNeedingUpdateScope {
       original_pre_translation_ = pre_translation->Clone();
     if (auto* content_clip = frame_view_->ContentClip())
       original_content_clip_ = content_clip->Clone();
+    if (auto* scroll_node = frame_view_->ScrollNode())
+      original_scroll_node_ = scroll_node->Clone();
     if (auto* scroll_translation = frame_view_->ScrollTranslation())
       original_scroll_translation_ = scroll_translation->Clone();
   }
@@ -85,6 +87,8 @@ class FindFrameViewPropertiesNeedingUpdateScope {
                                  frame_view_->PreTranslation());
     DCHECK_FRAMEVIEW_PROPERTY_EQ(original_content_clip_,
                                  frame_view_->ContentClip());
+    DCHECK_FRAMEVIEW_PROPERTY_EQ(original_scroll_node_,
+                                 frame_view_->ScrollNode());
     DCHECK_FRAMEVIEW_PROPERTY_EQ(original_scroll_translation_,
                                  frame_view_->ScrollTranslation());
 
@@ -96,9 +100,10 @@ class FindFrameViewPropertiesNeedingUpdateScope {
   Persistent<LocalFrameView> frame_view_;
   bool needed_paint_property_update_;
   bool needed_forced_subtree_update_;
-  RefPtr<const TransformPaintPropertyNode> original_pre_translation_;
-  RefPtr<const ClipPaintPropertyNode> original_content_clip_;
-  RefPtr<const TransformPaintPropertyNode> original_scroll_translation_;
+  scoped_refptr<const TransformPaintPropertyNode> original_pre_translation_;
+  scoped_refptr<const ClipPaintPropertyNode> original_content_clip_;
+  scoped_refptr<const ScrollPaintPropertyNode> original_scroll_node_;
+  scoped_refptr<const TransformPaintPropertyNode> original_scroll_translation_;
 };
 
 #define DCHECK_OBJECT_PROPERTY_EQ(object, original, updated)            \
@@ -108,25 +113,27 @@ class FindFrameViewPropertiesNeedingUpdateScope {
 class FindObjectPropertiesNeedingUpdateScope {
  public:
   FindObjectPropertiesNeedingUpdateScope(const LayoutObject& object,
+                                         const FragmentData& fragment_data,
                                          bool force_subtree_update)
       : object_(object),
+        fragment_data_(fragment_data),
         needed_paint_property_update_(object.NeedsPaintPropertyUpdate()),
         needed_forced_subtree_update_(force_subtree_update),
-        original_paint_offset_(object.PaintOffset()) {
+        original_paint_offset_(fragment_data.PaintOffset()) {
     // No need to check if an update was already needed.
     if (needed_paint_property_update_ || needed_forced_subtree_update_)
       return;
 
     // Mark the properties as needing an update to ensure they are rebuilt.
-    object_.GetMutableForPainting()
+    object.GetMutableForPainting()
         .SetOnlyThisNeedsPaintPropertyUpdateForTesting();
 
-    if (const auto* properties = object_.PaintProperties())
+    if (const auto* properties = fragment_data_.PaintProperties())
       original_properties_ = properties->Clone();
 
-    if (const auto* local_border_box = object_.LocalBorderBoxProperties()) {
-      original_local_border_box_properties_ =
-          WTF::WrapUnique(new PropertyTreeState(*local_border_box));
+    if (fragment_data_.HasLocalBorderBoxProperties()) {
+      original_local_border_box_properties_ = WTF::WrapUnique(
+          new PropertyTreeState(fragment_data_.LocalBorderBoxProperties()));
     }
   }
 
@@ -134,9 +141,9 @@ class FindObjectPropertiesNeedingUpdateScope {
     // Paint offset and paintOffsetTranslation should not change under
     // FindObjectPropertiesNeedingUpdateScope no matter if we needed paint
     // property update.
-    DCHECK_OBJECT_PROPERTY_EQ(object_, &original_paint_offset_,
-                              &object_.PaintOffset());
-    const auto* object_properties = object_.PaintProperties();
+    LayoutPoint paint_offset = fragment_data_.PaintOffset();
+    DCHECK_OBJECT_PROPERTY_EQ(object_, &original_paint_offset_, &paint_offset);
+    const auto* object_properties = fragment_data_.PaintProperties();
     if (original_properties_ && object_properties) {
       DCHECK_OBJECT_PROPERTY_EQ(object_,
                                 original_properties_->PaintOffsetTranslation(),
@@ -162,6 +169,10 @@ class FindObjectPropertiesNeedingUpdateScope {
                                 object_properties->Filter());
       DCHECK_OBJECT_PROPERTY_EQ(object_, original_properties_->Mask(),
                                 object_properties->Mask());
+      DCHECK_OBJECT_PROPERTY_EQ(object_, original_properties_->ClipPath(),
+                                object_properties->ClipPath());
+      DCHECK_OBJECT_PROPERTY_EQ(object_, original_properties_->ClipPathClip(),
+                                object_properties->ClipPathClip());
       DCHECK_OBJECT_PROPERTY_EQ(object_, original_properties_->MaskClip(),
                                 object_properties->MaskClip());
       DCHECK_OBJECT_PROPERTY_EQ(object_, original_properties_->CssClip(),
@@ -170,39 +181,43 @@ class FindObjectPropertiesNeedingUpdateScope {
                                 original_properties_->CssClipFixedPosition(),
                                 object_properties->CssClipFixedPosition());
       DCHECK_OBJECT_PROPERTY_EQ(object_,
+                                original_properties_->OverflowControlsClip(),
+                                object_properties->OverflowControlsClip());
+      DCHECK_OBJECT_PROPERTY_EQ(object_,
                                 original_properties_->InnerBorderRadiusClip(),
                                 object_properties->InnerBorderRadiusClip());
-      DCHECK_OBJECT_PROPERTY_EQ(object_, original_properties_->OverflowClip(),
-                                object_properties->OverflowClip());
+      DCHECK_OBJECT_PROPERTY_EQ(object_, OverflowClip(*original_properties_),
+                                OverflowClip(*object_properties));
       DCHECK_OBJECT_PROPERTY_EQ(object_, original_properties_->Perspective(),
                                 object_properties->Perspective());
       DCHECK_OBJECT_PROPERTY_EQ(
           object_, original_properties_->SvgLocalToBorderBoxTransform(),
           object_properties->SvgLocalToBorderBoxTransform());
+      DCHECK_OBJECT_PROPERTY_EQ(object_, original_properties_->Scroll(),
+                                object_properties->Scroll());
       DCHECK_OBJECT_PROPERTY_EQ(object_,
                                 original_properties_->ScrollTranslation(),
                                 object_properties->ScrollTranslation());
-      DCHECK_OBJECT_PROPERTY_EQ(object_,
-                                original_properties_->ScrollbarPaintOffset(),
-                                object_properties->ScrollbarPaintOffset());
     } else {
       DCHECK_EQ(!!original_properties_, !!object_properties)
           << " Object: " << object_.DebugName();
     }
 
-    const auto* object_border_box = object_.LocalBorderBoxProperties();
-    if (original_local_border_box_properties_ && object_border_box) {
+    if (original_local_border_box_properties_ &&
+        fragment_data_.HasLocalBorderBoxProperties()) {
+      const auto object_border_box = fragment_data_.LocalBorderBoxProperties();
       DCHECK_OBJECT_PROPERTY_EQ(
           object_, original_local_border_box_properties_->Transform(),
-          object_border_box->Transform());
+          object_border_box.Transform());
       DCHECK_OBJECT_PROPERTY_EQ(object_,
                                 original_local_border_box_properties_->Clip(),
-                                object_border_box->Clip());
+                                object_border_box.Clip());
       DCHECK_OBJECT_PROPERTY_EQ(object_,
                                 original_local_border_box_properties_->Effect(),
-                                object_border_box->Effect());
+                                object_border_box.Effect());
     } else {
-      DCHECK_EQ(!!original_local_border_box_properties_, !!object_border_box)
+      DCHECK_EQ(!!original_local_border_box_properties_,
+                fragment_data_.HasLocalBorderBoxProperties())
           << " Object: " << object_.DebugName();
     }
 
@@ -212,6 +227,7 @@ class FindObjectPropertiesNeedingUpdateScope {
 
  private:
   const LayoutObject& object_;
+  const FragmentData& fragment_data_;
   bool needed_paint_property_update_;
   bool needed_forced_subtree_update_;
   LayoutPoint original_paint_offset_;

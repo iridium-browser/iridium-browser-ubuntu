@@ -9,8 +9,9 @@
 
 #include <memory>
 
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/default_tick_clock.h"
 #include "chrome/browser/media/cast_remoting_sender.h"
@@ -18,14 +19,16 @@
 #include "media/cast/cast_sender.h"
 #include "media/cast/logging/logging_defines.h"
 #include "media/cast/net/cast_transport.h"
-#include "media/cast/net/udp_transport.h"
-#include "services/device/public/interfaces/wake_lock.mojom.h"
+#include "net/url_request/url_request_context_getter.h"
+#include "services/device/public/mojom/wake_lock.mojom.h"
+
+class Profile;
 
 namespace cast {
 
 class CastTransportHostFilter : public content::BrowserMessageFilter {
  public:
-  CastTransportHostFilter();
+  explicit CastTransportHostFilter(Profile* profile);
 
   // Used by unit test only.
   void InitializeNoOpWakeLockForTesting();
@@ -95,10 +98,7 @@ class CastTransportHostFilter : public content::BrowserMessageFilter {
 
   device::mojom::WakeLock* GetWakeLock();
 
-  IDMap<std::unique_ptr<media::cast::CastTransport>> id_map_;
-
-  // Clock used by Cast transport.
-  base::DefaultTickClock clock_;
+  base::IDMap<std::unique_ptr<media::cast::CastTransport>> id_map_;
 
   // While |id_map_| is non-empty, we use |wake_lock_| to request and
   // hold a wake lock. This prevents Chrome from being suspended while remoting
@@ -108,11 +108,13 @@ class CastTransportHostFilter : public content::BrowserMessageFilter {
 
   // This map records all active remoting senders. It uses the unique RTP
   // stream ID as the key.
-  IDMap<std::unique_ptr<CastRemotingSender>> remoting_sender_map_;
+  base::IDMap<std::unique_ptr<CastRemotingSender>> remoting_sender_map_;
 
   // This map stores all active remoting streams for each channel. It uses the
   // channel ID as the key.
   std::multimap<int32_t, int32_t> stream_id_map_;
+
+  scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
 
   base::WeakPtrFactory<CastTransportHostFilter> weak_factory_;
 

@@ -13,13 +13,16 @@
 #import "remoting/ios/app/app_delegate.h"
 #import "remoting/ios/app/remoting_theme.h"
 #import "remoting/ios/app/settings/setting_option.h"
+#import "remoting/ios/app/settings/settings_view_cell.h"
+#import "remoting/ios/app/view_utils.h"
 
 #include "base/logging.h"
 #include "remoting/base/string_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 static NSString* const kReusableIdentifierItem = @"remotingSettingsVCItem";
-static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
+
+static const CGFloat kSectionSeparatorHeight = 1.f;
 
 @interface RemotingSettingsViewController () {
   MDCAppBar* _appBar;
@@ -32,27 +35,22 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
 
 @synthesize delegate = _delegate;
 @synthesize inputMode = _inputMode;
-
-- (id)init {
-  self = [super init];
-  if (self) {
-    _appBar = [[MDCAppBar alloc] init];
-    [self addChildViewController:_appBar.headerViewController];
-
-    self.view.backgroundColor = RemotingTheme.menuBlueColor;
-    _appBar.headerViewController.headerView.backgroundColor =
-        RemotingTheme.menuBlueColor;
-    _appBar.navigationBar.tintColor = [UIColor whiteColor];
-    _appBar.navigationBar.titleTextAttributes =
-        @{NSForegroundColorAttributeName : [UIColor whiteColor]};
-  }
-  return self;
-}
+@synthesize shouldResizeHostToFit = _shouldResizeHostToFit;
 
 #pragma mark - UIViewController
 
 - (void)viewDidLoad {
   [super viewDidLoad];
+
+  _appBar = [[MDCAppBar alloc] init];
+  [self addChildViewController:_appBar.headerViewController];
+
+  self.view.backgroundColor = RemotingTheme.menuBlueColor;
+  _appBar.headerViewController.headerView.backgroundColor =
+      RemotingTheme.menuBlueColor;
+  MDCNavigationBarTextColorAccessibilityMutator* mutator =
+      [[MDCNavigationBarTextColorAccessibilityMutator alloc] init];
+  [mutator mutate:_appBar.navigationBar];
 
   _appBar.headerViewController.headerView.trackingScrollView =
       self.collectionView;
@@ -60,30 +58,38 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
 
   self.collectionView.backgroundColor = RemotingTheme.menuBlueColor;
 
-  // TODO(nicholss): X should be an image.
   UIBarButtonItem* closeButton =
       [[UIBarButtonItem alloc] initWithImage:RemotingTheme.closeIcon
                                        style:UIBarButtonItemStyleDone
                                       target:self
                                       action:@selector(didTapClose:)];
+  remoting::SetAccessibilityInfoFromImage(closeButton);
   self.navigationItem.leftBarButtonItem = nil;
   self.navigationItem.rightBarButtonItem = closeButton;
 
-  [self.collectionView registerClass:[MDCCollectionViewTextCell class]
+  [self.collectionView registerClass:[SettingsViewCell class]
           forCellWithReuseIdentifier:kReusableIdentifierItem];
 
   [self.collectionView registerClass:[MDCCollectionViewTextCell class]
           forSupplementaryViewOfKind:UICollectionElementKindSectionHeader
                  withReuseIdentifier:UICollectionElementKindSectionHeader];
 
-  // TODO(nicholss): All of these strings need to be setup for l18n.
+  // A 1px height cell acting as the separator. Not being shown on the last
+  // section. See also:
+  // -collectionView:layout:referenceSizeForFooterInSection:
+  [self.collectionView registerClass:[UICollectionViewCell class]
+          forSupplementaryViewOfKind:UICollectionElementKindSectionFooter
+                 withReuseIdentifier:UICollectionElementKindSectionFooter];
+
   _sections = @[
     l10n_util::GetNSString(IDS_DISPLAY_OPTIONS),
     l10n_util::GetNSString(IDS_MOUSE_OPTIONS),
     l10n_util::GetNSString(IDS_KEYBOARD_OPTIONS),
     l10n_util::GetNSString(IDS_SUPPORT_MENU),
   ];
-  self.styler.cellStyle = MDCCollectionViewCellStyleCard;
+  self.styler.cellStyle = MDCCollectionViewCellStyleDefault;
+  self.styler.cellBackgroundColor = UIColor.clearColor;
+  self.styler.shouldHideSeparators = YES;
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -111,40 +117,10 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
 - (UICollectionViewCell*)collectionView:(UICollectionView*)collectionView
                  cellForItemAtIndexPath:(NSIndexPath*)indexPath {
   SettingOption* setting = _content[indexPath.section][indexPath.item];
-  // TODO(nicholss): There is a bug in MDCCollectionViewTextCell, it has a
-  // wrapping UIView that leaves behind a one pixel edge. Filed a bug:
-  // https://github.com/material-components/material-components-ios/issues/1519
-  MDCCollectionViewTextCell* cell = [collectionView
+  SettingsViewCell* cell = [collectionView
       dequeueReusableCellWithReuseIdentifier:kReusableIdentifierItem
                                 forIndexPath:indexPath];
-  cell.contentView.backgroundColor = RemotingTheme.menuBlueColor;
-  cell.textLabel.text = setting.title;
-  cell.textLabel.textColor = [UIColor whiteColor];
-  cell.textLabel.numberOfLines = 1;
-  cell.detailTextLabel.text = setting.subtext;
-  cell.detailTextLabel.textColor = [UIColor whiteColor];
-  cell.detailTextLabel.numberOfLines = 1;
-  cell.tintColor = RemotingTheme.menuBlueColor;
-
-  switch (setting.style) {
-    case OptionCheckbox:
-      if (setting.checked) {
-        cell.imageView.image = RemotingTheme.checkboxCheckedIcon;
-      } else {
-        cell.imageView.image = RemotingTheme.checkboxOutlineIcon;
-      }
-      break;
-    case OptionSelector:
-      if (setting.checked) {
-        cell.imageView.image = RemotingTheme.radioCheckedIcon;
-      } else {
-        cell.imageView.image = RemotingTheme.radioOutlineIcon;
-      }
-      break;
-    case FlatButton:  // Fall-through.
-    default:
-      cell.imageView.image = [[UIImage alloc] init];
-  }
+  [cell setSettingOption:setting];
   return cell;
 }
 
@@ -200,16 +176,25 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
 - (UICollectionReusableView*)collectionView:(UICollectionView*)collectionView
           viewForSupplementaryElementOfKind:(NSString*)kind
                                 atIndexPath:(NSIndexPath*)indexPath {
-  MDCCollectionViewTextCell* supplementaryView =
+  if ([kind isEqualToString:UICollectionElementKindSectionHeader]) {
+    MDCCollectionViewTextCell* supplementaryView =
+        [collectionView dequeueReusableSupplementaryViewOfKind:kind
+                                           withReuseIdentifier:kind
+                                                  forIndexPath:indexPath];
+    supplementaryView.contentView.backgroundColor = RemotingTheme.menuBlueColor;
+    supplementaryView.textLabel.text = _sections[(NSUInteger)indexPath.section];
+    supplementaryView.textLabel.textColor = RemotingTheme.menuTextColor;
+    supplementaryView.isAccessibilityElement = YES;
+    supplementaryView.accessibilityLabel = supplementaryView.textLabel.text;
+    return supplementaryView;
+  }
+  DCHECK([kind isEqualToString:UICollectionElementKindSectionFooter]);
+  UICollectionViewCell* view =
       [collectionView dequeueReusableSupplementaryViewOfKind:kind
                                          withReuseIdentifier:kind
                                                 forIndexPath:indexPath];
-  if ([kind isEqualToString:UICollectionElementKindSectionHeader]) {
-    supplementaryView.contentView.backgroundColor = RemotingTheme.menuBlueColor;
-    supplementaryView.textLabel.text = _sections[(NSUInteger)indexPath.section];
-    supplementaryView.textLabel.textColor = [UIColor whiteColor];
-  }
-  return supplementaryView;
+  view.contentView.backgroundColor = RemotingTheme.menuSeparatorColor;
+  return view;
 }
 
 #pragma mark - <UICollectionViewDelegateFlowLayout>
@@ -220,6 +205,18 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
     referenceSizeForHeaderInSection:(NSInteger)section {
   return CGSizeMake(collectionView.bounds.size.width,
                     MDCCellDefaultOneLineHeight);
+}
+
+- (CGSize)collectionView:(UICollectionView*)collectionView
+                             layout:
+                                 (UICollectionViewLayout*)collectionViewLayout
+    referenceSizeForFooterInSection:(NSInteger)section {
+  if (section == (NSInteger)(_sections.count - 1)) {
+    // No separator for last section. Note that the footer cell will not be
+    // created if 0 is returned.
+    return CGSizeZero;
+  }
+  return CGSizeMake(collectionView.bounds.size.width, kSectionSeparatorHeight);
 }
 
 #pragma mark - Private
@@ -233,25 +230,12 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
 
   __weak RemotingSettingsViewController* weakSelf = self;
 
-  SettingOption* shrinkOption = [[SettingOption alloc] init];
-  shrinkOption.title = l10n_util::GetNSString(IDS_SHRINK_TO_FIT);
-  // TODO(nicholss): I think this text changes based on value. Confirm.
-  shrinkOption.subtext = l10n_util::GetNSString(IDS_SHRINK_TO_FIT_SUBTITLE);
-  shrinkOption.style = OptionCheckbox;
-  shrinkOption.checked = NO;
-  __weak SettingOption* weakShrinkOption = shrinkOption;
-  shrinkOption.action = ^{
-    if ([weakSelf.delegate respondsToSelector:@selector(setShrinkToFit:)]) {
-      [weakSelf.delegate setShrinkToFit:weakShrinkOption.checked];
-    }
-  };
-
   SettingOption* resizeOption = [[SettingOption alloc] init];
   resizeOption.title = l10n_util::GetNSString(IDS_RESIZE_TO_CLIENT);
   // TODO(nicholss): I think this text changes based on value. Confirm.
   resizeOption.subtext = l10n_util::GetNSString(IDS_RESIZE_TO_CLIENT_SUBTITLE);
   resizeOption.style = OptionCheckbox;
-  resizeOption.checked = YES;
+  resizeOption.checked = self.shouldResizeHostToFit;
   __weak SettingOption* weakResizeOption = resizeOption;
   resizeOption.action = ^{
     if ([weakSelf.delegate respondsToSelector:@selector(setResizeToFit:)]) {
@@ -259,12 +243,12 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
     }
   };
 
-  [_content addObject:@[ shrinkOption, resizeOption ]];
+  [_content addObject:@[ resizeOption ]];
 
   SettingOption* directMode = [[SettingOption alloc] init];
   directMode.title = l10n_util::GetNSString(IDS_SELECT_TOUCH_MODE);
   // TODO(nicholss): I think this text changes based on value. Confirm.
-  directMode.subtext = @"Screen acts like a touch screen";
+  directMode.subtext = l10n_util::GetNSString(IDS_TOUCH_MODE_DESCRIPTION);
   directMode.style = OptionSelector;
   directMode.checked =
       self.inputMode == remoting::GestureInterpreter::DIRECT_INPUT_MODE;
@@ -277,7 +261,7 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
   SettingOption* trackpadMode = [[SettingOption alloc] init];
   trackpadMode.title = l10n_util::GetNSString(IDS_SELECT_TRACKPAD_MODE);
   // TODO(nicholss): I think this text changes based on value. Confirm.
-  trackpadMode.subtext = @"Screen acts like a trackpad";
+  trackpadMode.subtext = l10n_util::GetNSString(IDS_TRACKPAD_MODE_DESCRIPTION);
   trackpadMode.style = OptionSelector;
   trackpadMode.checked =
       self.inputMode == remoting::GestureInterpreter::TRACKPAD_INPUT_MODE;
@@ -296,6 +280,7 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
   ctrlAltDelOption.action = ^{
     if ([weakSelf.delegate respondsToSelector:@selector(sendCtrAltDel)]) {
       [weakSelf.delegate sendCtrAltDel];
+      [weakSelf dismissViewControllerAnimated:YES completion:nil];
     }
   };
 
@@ -305,6 +290,7 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
   printScreenOption.action = ^{
     if ([weakSelf.delegate respondsToSelector:@selector(sendPrintScreen)]) {
       [weakSelf.delegate sendPrintScreen];
+      [weakSelf dismissViewControllerAnimated:YES completion:nil];
     }
   };
 
@@ -318,14 +304,6 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
     [weakSelf.navigationController setNavigationBarHidden:NO animated:YES];
   };
 
-  SettingOption* faqsOption = [[SettingOption alloc] init];
-  faqsOption.title = l10n_util::GetNSString(IDS_FAQS);
-  faqsOption.style = FlatButton;
-  faqsOption.action = ^{
-    [AppDelegate.instance navigateToFAQs:weakSelf.navigationController];
-    [weakSelf.navigationController setNavigationBarHidden:NO animated:YES];
-  };
-
   // TODO(yuweih): Currently the EAGLView is not captured by the feedback tool.
   // To get it working we need to override renderInContext in CAEAGLLayer.
   SettingOption* sendFeedbackOption = [[SettingOption alloc] init];
@@ -336,13 +314,11 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
     // Dismiss self so that it can capture the screenshot of HostView.
     [weakSelf dismissViewControllerAnimated:YES
                                  completion:^{
-                                   [AppDelegate.instance
-                                       presentFeedbackFlowWithContext:
-                                           kFeedbackContext];
+                                   [weakSelf.delegate sendFeedback];
                                  }];
   };
 
-  [_content addObject:@[ helpCenterOption, faqsOption, sendFeedbackOption ]];
+  [_content addObject:@[ helpCenterOption, sendFeedbackOption ]];
 
   DCHECK_EQ(_content.count, _sections.count);
 }

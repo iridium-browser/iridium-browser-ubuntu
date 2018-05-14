@@ -6,13 +6,14 @@
 #define CHROME_BROWSER_UI_VIEWS_HUNG_RENDERER_VIEW_H_
 
 #include "base/macros.h"
+#include "base/scoped_observer.h"
 #include "components/favicon/content/content_favicon_driver.h"
-#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/browser/web_contents_unresponsive_state.h"
 #include "ui/base/models/table_model.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/table/table_grouper.h"
 #include "ui/views/controls/table/table_view.h"
 #include "ui/views/window/dialog_delegate.h"
 
@@ -25,12 +26,17 @@ class Label;
 }
 
 // Provides functionality to display information about a hung renderer.
-class HungPagesTableModel : public ui::TableModel, public views::TableGrouper {
+class HungPagesTableModel : public ui::TableModel,
+                            public content::RenderProcessHostObserver,
+                            public content::NotificationObserver {
  public:
-  // The Delegate is notified any time a WebContents the model is listening to
-  // is destroyed.
   class Delegate {
    public:
+    // Notification when the model is updated (eg. new location) yet
+    // still hung.
+    virtual void TabUpdated() = 0;
+
+    // Notification when the model is destroyed.
     virtual void TabDestroyed() = 0;
 
    protected:
@@ -40,14 +46,11 @@ class HungPagesTableModel : public ui::TableModel, public views::TableGrouper {
   explicit HungPagesTableModel(Delegate* delegate);
   ~HungPagesTableModel() override;
 
-  void InitForWebContents(content::WebContents* hung_contents);
+  void InitForWebContents(content::WebContents* hung_contents,
+                          content::RenderWidgetHost* render_widget_host);
 
-  // Returns the first RenderProcessHost, or NULL if there aren't any
-  // WebContents.
-  content::RenderProcessHost* GetRenderProcessHost();
-
-  // Returns the first RenderViewHost, or NULL if there aren't any WebContents.
-  content::RenderViewHost* GetRenderViewHost();
+  // Returns the hung RenderWidgetHost, or null if there aren't any WebContents.
+  content::RenderWidgetHost* GetRenderWidgetHost();
 
   // Overridden from ui::TableModel:
   int RowCount() override;
@@ -55,10 +58,19 @@ class HungPagesTableModel : public ui::TableModel, public views::TableGrouper {
   gfx::ImageSkia GetIcon(int row) override;
   void SetObserver(ui::TableModelObserver* observer) override;
 
-  // Overridden from views::TableGrouper:
-  void GetGroupRange(int model_index, views::GroupRange* range) override;
+  // Overridden from RenderProcessHostObserver:
+  void RenderProcessExited(content::RenderProcessHost* host,
+                           base::TerminationStatus status,
+                           int exit_code) override;
+
+  // Overridden from NotificationObserver:
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
  private:
+  friend class HungRendererDialogViewBrowserTest;
+
   // Used to track a single WebContents. If the WebContents is destroyed
   // TabDestroyed() is invoked on the model.
   class WebContentsObserverImpl : public content::WebContentsObserver {
@@ -71,7 +83,8 @@ class HungPagesTableModel : public ui::TableModel, public views::TableGrouper {
     }
 
     // WebContentsObserver overrides:
-    void RenderProcessGone(base::TerminationStatus status) override;
+    void RenderViewHostChanged(content::RenderViewHost* old_host,
+                               content::RenderViewHost* new_host) override;
     void WebContentsDestroyed() override;
 
    private:
@@ -84,10 +97,21 @@ class HungPagesTableModel : public ui::TableModel, public views::TableGrouper {
   // notifies the observer and delegate.
   void TabDestroyed(WebContentsObserverImpl* tab);
 
+  // Invoked when a WebContents have been updated. The title or location of
+  // the WebContents may have changed.
+  void TabUpdated(WebContentsObserverImpl* tab);
+
   std::vector<std::unique_ptr<WebContentsObserverImpl>> tab_observers_;
 
-  ui::TableModelObserver* observer_;
-  Delegate* delegate_;
+  ui::TableModelObserver* observer_ = nullptr;
+  Delegate* delegate_ = nullptr;
+
+  content::RenderWidgetHost* render_widget_host_ = nullptr;
+
+  ScopedObserver<content::RenderProcessHost, content::RenderProcessHostObserver>
+      process_observer_;
+
+  content::NotificationRegistrar notification_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(HungPagesTableModel);
 };
@@ -105,21 +129,23 @@ class HungRendererDialogView : public views::DialogDelegateView,
   static HungRendererDialogView* GetInstance();
 
   // Shows or hides the hung renderer dialog for the given WebContents.
-  static void Show(
-      content::WebContents* contents,
-      const content::WebContentsUnresponsiveState& unresponsive_state);
-  static void Hide(content::WebContents* contents);
+  static void Show(content::WebContents* contents,
+                   content::RenderWidgetHost* render_widget_host);
+  static void Hide(content::WebContents* contents,
+                   content::RenderWidgetHost* render_widget_host);
 
   // Returns true if the frame is in the foreground.
   static bool IsFrameActive(content::WebContents* contents);
 
   virtual void ShowForWebContents(
       content::WebContents* contents,
-      const content::WebContentsUnresponsiveState& unresponsive_state);
-  virtual void EndForWebContents(content::WebContents* contents);
+      content::RenderWidgetHost* render_widget_host);
+  virtual void EndForWebContents(content::WebContents* contents,
+                                 content::RenderWidgetHost* render_widget_host);
 
   // views::DialogDelegateView overrides:
   base::string16 GetWindowTitle() const override;
+  bool ShouldShowCloseButton() const override;
   void WindowClosing() override;
   int GetDialogButtons() const override;
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
@@ -129,6 +155,7 @@ class HungRendererDialogView : public views::DialogDelegateView,
   bool ShouldUseCustomFrame() const override;
 
   // HungPagesTableModel::Delegate overrides:
+  void TabUpdated() override;
   void TabDestroyed() override;
 
  protected:
@@ -142,13 +169,17 @@ class HungRendererDialogView : public views::DialogDelegateView,
   static HungRendererDialogView* g_instance_;
 
  private:
+  friend class HungRendererDialogViewBrowserTest;
+
   // Initialize the controls in this dialog.
   void Init();
 
-  static void InitClass();
+  // Restart the hang timer, giving the page more time.
+  void RestartHangTimer();
 
-  // An amusing icon image.
-  static gfx::ImageSkia* frozen_icon_;
+  void UpdateLabels();
+
+  void CloseDialogWithNoAction();
 
   // The label describing the list.
   views::Label* info_label_;
@@ -162,10 +193,6 @@ class HungRendererDialogView : public views::DialogDelegateView,
 
   // Whether or not we've created controls for ourself.
   bool initialized_;
-
-  // A copy of the unresponsive state which ShowForWebContents was
-  // called with.
-  content::WebContentsUnresponsiveState unresponsive_state_;
 
   DISALLOW_COPY_AND_ASSIGN(HungRendererDialogView);
 };

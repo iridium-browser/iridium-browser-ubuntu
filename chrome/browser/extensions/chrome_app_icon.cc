@@ -92,7 +92,7 @@ void ChromeAppIcon::Reload() {
   const gfx::ImageSkia default_icon = extension && extension->is_app()
                                           ? util::GetDefaultAppIcon()
                                           : util::GetDefaultExtensionIcon();
-  icon_ = base::MakeUnique<IconImage>(
+  icon_ = std::make_unique<IconImage>(
       browser_context_, extension,
       extension ? IconsInfo::GetIcons(extension) : ExtensionIconSet(),
       resource_size_in_dip_, default_icon, this);
@@ -109,7 +109,8 @@ void ChromeAppIcon::UpdateIcon() {
 
   image_skia_ = icon_->image_skia();
 #if defined(OS_CHROMEOS)
-  util::MaybeApplyChromeBadge(browser_context_, app_id_, &image_skia_);
+  icon_is_badged_ =
+      util::MaybeApplyChromeBadge(browser_context_, app_id_, &image_skia_);
 #endif
 
   if (!util::IsAppLaunchable(app_id_, browser_context_)) {
@@ -120,8 +121,9 @@ void ChromeAppIcon::UpdateIcon() {
 
   const Extension* extension = GetExtension();
   if (extension && extension->from_bookmark()) {
-    image_skia_ = gfx::ImageSkia(new RoundedCornersImageSource(image_skia_),
-                                 image_skia_.size());
+    image_skia_ =
+        gfx::ImageSkia(std::make_unique<RoundedCornersImageSource>(image_skia_),
+                       image_skia_.size());
   }
 
   delegate_->OnIconUpdated(this);

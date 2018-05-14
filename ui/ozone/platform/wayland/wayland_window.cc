@@ -4,21 +4,51 @@
 
 #include "ui/ozone/platform/wayland/wayland_window.h"
 
-#include <xdg-shell-unstable-v5-client-protocol.h>
+#include <wayland-client.h>
 
 #include "base/bind.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/memory/ptr_util.h"
+#include "ui/base/cursor/ozone/bitmap_cursor_factory_ozone.h"
 #include "ui/events/event.h"
 #include "ui/events/ozone/events_ozone.h"
 #include "ui/ozone/platform/wayland/wayland_connection.h"
-#include "ui/platform_window/platform_window_delegate.h"
+#include "ui/ozone/platform/wayland/xdg_surface_wrapper_v5.h"
+#include "ui/ozone/platform/wayland/xdg_surface_wrapper_v6.h"
 
 namespace ui {
+
+namespace {
+
+// Factory, which decides which version type of xdg object to build.
+class XDGShellObjectFactory {
+ public:
+  XDGShellObjectFactory() = default;
+  ~XDGShellObjectFactory() = default;
+
+  std::unique_ptr<XDGSurfaceWrapper> CreateXDGSurface(
+      WaylandConnection* connection,
+      WaylandWindow* wayland_window) {
+    if (connection->shell_v6())
+      return std::make_unique<XDGSurfaceWrapperV6>(wayland_window);
+
+    DCHECK(connection->shell());
+    return std::make_unique<XDGSurfaceWrapperV5>(wayland_window);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(XDGShellObjectFactory);
+};
+
+}  // namespace
 
 WaylandWindow::WaylandWindow(PlatformWindowDelegate* delegate,
                              WaylandConnection* connection,
                              const gfx::Rect& bounds)
-    : delegate_(delegate), connection_(connection), bounds_(bounds) {}
+    : delegate_(delegate),
+      connection_(connection),
+      xdg_shell_objects_factory_(new XDGShellObjectFactory()),
+      bounds_(bounds),
+      state_(PlatformWindowState::PLATFORM_WINDOW_STATE_UNKNOWN) {}
 
 WaylandWindow::~WaylandWindow() {
   if (xdg_surface_) {
@@ -34,9 +64,7 @@ WaylandWindow* WaylandWindow::FromSurface(wl_surface* surface) {
 }
 
 bool WaylandWindow::Initialize() {
-  static const xdg_surface_listener xdg_surface_listener = {
-      &WaylandWindow::Configure, &WaylandWindow::Close,
-  };
+  DCHECK(xdg_shell_objects_factory_);
 
   surface_.reset(wl_compositor_create_surface(connection_->compositor()));
   if (!surface_) {
@@ -44,13 +72,9 @@ bool WaylandWindow::Initialize() {
     return false;
   }
   wl_surface_set_user_data(surface_.get(), this);
-  xdg_surface_.reset(
-      xdg_shell_get_xdg_surface(connection_->shell(), surface_.get()));
-  if (!xdg_surface_) {
-    LOG(ERROR) << "Failed to create xdg_surface";
-    return false;
-  }
-  xdg_surface_add_listener(xdg_surface_.get(), &xdg_surface_listener, this);
+
+  CreateXdgSurface();
+
   connection_->ScheduleFlush();
 
   connection_->AddWindow(surface_.id(), this);
@@ -60,13 +84,22 @@ bool WaylandWindow::Initialize() {
   return true;
 }
 
+void WaylandWindow::CreateXdgSurface() {
+  xdg_surface_ =
+      xdg_shell_objects_factory_->CreateXDGSurface(connection_, this);
+  if (!xdg_surface_ || !xdg_surface_->Initialize(connection_, surface_.get())) {
+    CHECK(false) << "Failed to create xdg_surface";
+  }
+}
+
 void WaylandWindow::ApplyPendingBounds() {
   if (pending_bounds_.IsEmpty())
     return;
 
   SetBounds(pending_bounds_);
   DCHECK(xdg_surface_);
-  xdg_surface_ack_configure(xdg_surface_.get(), pending_configure_serial_);
+  xdg_surface_->SetWindowGeometry(bounds_);
+  xdg_surface_->AckConfigure();
   pending_bounds_ = gfx::Rect();
   connection_->ScheduleFlush();
 }
@@ -96,7 +129,7 @@ gfx::Rect WaylandWindow::GetBounds() {
 
 void WaylandWindow::SetTitle(const base::string16& title) {
   DCHECK(xdg_surface_);
-  xdg_surface_set_title(xdg_surface_.get(), UTF16ToUTF8(title).c_str());
+  xdg_surface_->SetTitle(title);
   connection_->ScheduleFlush();
 }
 
@@ -109,29 +142,83 @@ void WaylandWindow::ReleaseCapture() {
 }
 
 void WaylandWindow::ToggleFullscreen() {
-  NOTIMPLEMENTED();
+  DCHECK(xdg_surface_);
+
+  // TODO(msisov, tonikitoo): add multiscreen support. As the documentation says
+  // if xdg_surface_set_fullscreen() is not provided with wl_output, it's up to
+  // the compositor to choose which display will be used to map this surface.
+  if (!IsFullscreen()) {
+    // Client might have requested a fullscreen state while the window was in
+    // a maximized state. Thus, |restored_bounds_| can contain the bounds of a
+    // "normal" state before the window was maximized. We don't override them
+    // unless they are empty, because |bounds_| can contain bounds of a
+    // maximized window instead.
+    if (restored_bounds_.IsEmpty())
+      restored_bounds_ = bounds_;
+    xdg_surface_->SetFullscreen();
+  } else {
+    xdg_surface_->UnSetFullscreen();
+  }
+
+  connection_->ScheduleFlush();
 }
 
 void WaylandWindow::Maximize() {
   DCHECK(xdg_surface_);
-  xdg_surface_set_maximized(xdg_surface_.get());
+
+  if (IsFullscreen())
+    ToggleFullscreen();
+
+  // Keeps track of the previous bounds, which are used to restore a window
+  // after unmaximize call. We don't override |restored_bounds_| if they have
+  // already had value, which means the previous state has been a fullscreen
+  // state. That is, the bounds can be stored during a change from a normal
+  // state to a maximize state, and then preserved to be the same, when changing
+  // from maximized to fullscreen and back to a maximized state.
+  if (restored_bounds_.IsEmpty())
+    restored_bounds_ = bounds_;
+
+  xdg_surface_->SetMaximized();
   connection_->ScheduleFlush();
 }
 
 void WaylandWindow::Minimize() {
   DCHECK(xdg_surface_);
-  xdg_surface_set_minimized(xdg_surface_.get());
+
+  DCHECK(xdg_surface_);
+  xdg_surface_->SetMinimized();
   connection_->ScheduleFlush();
+
+  // Wayland doesn't say if a window is minimized. Handle this case manually
+  // here. We can track if the window was unminimized once wayland sends the
+  // window is activated, and the previous state was minimized.
+  state_ = PlatformWindowState::PLATFORM_WINDOW_STATE_MINIMIZED;
 }
 
 void WaylandWindow::Restore() {
   DCHECK(xdg_surface_);
-  xdg_surface_unset_maximized(xdg_surface_.get());
+
+  // Unfullscreen the window if it is fullscreen.
+  if (IsFullscreen())
+    ToggleFullscreen();
+
+  xdg_surface_->UnSetMaximized();
   connection_->ScheduleFlush();
 }
 
 void WaylandWindow::SetCursor(PlatformCursor cursor) {
-  NOTIMPLEMENTED();
+  scoped_refptr<BitmapCursorOzone> bitmap =
+      BitmapCursorFactoryOzone::GetBitmapCursor(cursor);
+  if (bitmap_ == bitmap)
+    return;
+
+  bitmap_ = bitmap;
+
+  if (bitmap_) {
+    connection_->SetCursorBitmap(bitmap_->bitmaps(), bitmap_->hotspot());
+  } else {
+    connection_->SetCursorBitmap(std::vector<SkBitmap>(), gfx::Point());
+  }
 }
 
 void WaylandWindow::MoveCursorTo(const gfx::Point& location) {
@@ -153,36 +240,79 @@ bool WaylandWindow::CanDispatchEvent(const PlatformEvent& native_event) {
     return has_pointer_focus_;
   if (event->IsKeyEvent())
     return has_keyboard_focus_;
+  if (event->IsTouchEvent())
+    return has_touch_focus_;
   return false;
 }
 
 uint32_t WaylandWindow::DispatchEvent(const PlatformEvent& native_event) {
   DispatchEventFromNativeUiEvent(
-      native_event, base::Bind(&PlatformWindowDelegate::DispatchEvent,
-                               base::Unretained(delegate_)));
+      native_event, base::BindOnce(&PlatformWindowDelegate::DispatchEvent,
+                                   base::Unretained(delegate_)));
   return POST_DISPATCH_STOP_PROPAGATION;
 }
 
-// static
-void WaylandWindow::Configure(void* data,
-                              xdg_surface* obj,
-                              int32_t width,
-                              int32_t height,
-                              wl_array* states,
-                              uint32_t serial) {
-  WaylandWindow* window = static_cast<WaylandWindow*>(data);
+void WaylandWindow::HandleSurfaceConfigure(int32_t width,
+                                           int32_t height,
+                                           bool is_maximized,
+                                           bool is_fullscreen,
+                                           bool is_activated) {
+  // Propagate the window state information to the client.
+  PlatformWindowState old_state = state_;
+  if (IsMinimized() && !is_activated)
+    state_ = PlatformWindowState::PLATFORM_WINDOW_STATE_MINIMIZED;
+  else if (is_fullscreen)
+    state_ = PlatformWindowState::PLATFORM_WINDOW_STATE_FULLSCREEN;
+  else if (is_maximized)
+    state_ = PlatformWindowState::PLATFORM_WINDOW_STATE_MAXIMIZED;
+  else
+    state_ = PlatformWindowState::PLATFORM_WINDOW_STATE_NORMAL;
+
+  if (old_state != state_)
+    delegate_->OnWindowStateChanged(state_);
 
   // Rather than call SetBounds here for every configure event, just save the
   // most recent bounds, and have WaylandConnection call ApplyPendingBounds
   // when it has finished processing events. We may get many configure events
   // in a row during an interactive resize, and only the last one matters.
-  window->pending_bounds_ = gfx::Rect(0, 0, width, height);
-  window->pending_configure_serial_ = serial;
+  SetPendingBounds(width, height);
 }
 
-// static
-void WaylandWindow::Close(void* data, xdg_surface* obj) {
+void WaylandWindow::OnCloseRequest() {
   NOTIMPLEMENTED();
+}
+
+bool WaylandWindow::IsMinimized() const {
+  return state_ == PlatformWindowState::PLATFORM_WINDOW_STATE_MINIMIZED;
+}
+
+bool WaylandWindow::IsMaximized() const {
+  return state_ == PlatformWindowState::PLATFORM_WINDOW_STATE_MAXIMIZED;
+}
+
+bool WaylandWindow::IsFullscreen() const {
+  return state_ == PlatformWindowState::PLATFORM_WINDOW_STATE_FULLSCREEN;
+}
+
+void WaylandWindow::SetPendingBounds(int32_t width, int32_t height) {
+  // Width or height set to 0 means that we should decide on width and height by
+  // ourselves, but we don't want to set them to anything else. Use restored
+  // bounds size or the current bounds.
+  //
+  // Note: if the browser was started with --start-fullscreen and a user exits
+  // the fullscreen mode, wayland may set the width and height to be 1. Instead,
+  // explicitly set the bounds to the current desired ones or the previous
+  // bounds.
+  if (width <= 1 || height <= 1) {
+    pending_bounds_.set_size(restored_bounds_.IsEmpty()
+                                 ? GetBounds().size()
+                                 : restored_bounds_.size());
+  } else {
+    pending_bounds_ = gfx::Rect(0, 0, width, height);
+  }
+
+  if (!IsFullscreen() && !IsMaximized())
+    restored_bounds_ = gfx::Rect();
 }
 
 }  // namespace ui

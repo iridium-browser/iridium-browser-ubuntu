@@ -9,6 +9,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "remoting/proto/video.pb.h"
 #include "remoting/protocol/message_pipe.h"
 #include "remoting/protocol/message_serialization.h"
@@ -32,8 +33,7 @@ StreamConnectionTester::StreamConnectionTester(P2PStreamSocket* client_socket,
       write_errors_(0),
       read_errors_(0) {}
 
-StreamConnectionTester::~StreamConnectionTester() {
-}
+StreamConnectionTester::~StreamConnectionTester() = default;
 
 void StreamConnectionTester::Start() {
   InitBuffers();
@@ -78,9 +78,9 @@ void StreamConnectionTester::DoWrite() {
     int bytes_to_write = std::min(output_buffer_->BytesRemaining(),
                                   message_size_);
     result = client_socket_->Write(
-        output_buffer_.get(),
-        bytes_to_write,
-        base::Bind(&StreamConnectionTester::OnWritten, base::Unretained(this)));
+        output_buffer_.get(), bytes_to_write,
+        base::Bind(&StreamConnectionTester::OnWritten, base::Unretained(this)),
+        TRAFFIC_ANNOTATION_FOR_TESTS);
     HandleWriteResult(result);
   }
 }
@@ -152,8 +152,7 @@ DatagramConnectionTester::DatagramConnectionTester(
   sent_packets_.resize(message_count_);
 }
 
-DatagramConnectionTester::~DatagramConnectionTester() {
-}
+DatagramConnectionTester::~DatagramConnectionTester() = default;
 
 void DatagramConnectionTester::Start() {
   DoRead();
@@ -307,7 +306,7 @@ MessagePipeConnectionTester::MessagePipeConnectionTester(
     : client_pipe_(client_pipe),
       sender_(new MessageSender(host_pipe, message_size, message_count)) {}
 
-MessagePipeConnectionTester::~MessagePipeConnectionTester() {}
+MessagePipeConnectionTester::~MessagePipeConnectionTester() = default;
 
 void MessagePipeConnectionTester::RunAndCheckResults() {
   sender_->Start();

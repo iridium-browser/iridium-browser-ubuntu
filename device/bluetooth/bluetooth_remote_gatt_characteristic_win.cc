@@ -27,6 +27,7 @@ BluetoothRemoteGattCharacteristicWin::BluetoothRemoteGattCharacteristicWin(
       characteristic_added_notified_(false),
       characteristic_value_read_or_write_in_progress_(false),
       gatt_event_handle_(nullptr),
+      discovery_pending_count_(0),
       weak_ptr_factory_(this) {
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
   DCHECK(parent_service_);
@@ -182,7 +183,8 @@ void BluetoothRemoteGattCharacteristicWin::WriteRemoteCharacteristic(
     const ErrorCallback& error_callback) {
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
 
-  if (!characteristic_info_.get()->IsWritable) {
+  if (!characteristic_info_->IsWritable &&
+      !characteristic_info_->IsWritableWithoutResponse) {
     error_callback.Run(BluetoothRemoteGattService::GATT_ERROR_NOT_PERMITTED);
     return;
   }
@@ -205,6 +207,7 @@ void BluetoothRemoteGattCharacteristicWin::WriteRemoteCharacteristic(
 void BluetoothRemoteGattCharacteristicWin::Update() {
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
 
+  ++discovery_pending_count_;
   task_manager_->PostGetGattIncludedDescriptors(
       parent_service_->GetServicePath(), characteristic_info_.get(),
       base::Bind(&BluetoothRemoteGattCharacteristicWin::
@@ -251,6 +254,10 @@ void BluetoothRemoteGattCharacteristicWin::OnGetIncludedDescriptorsCallback(
     characteristic_added_notified_ = true;
     parent_service_->GetWinAdapter()->NotifyGattCharacteristicAdded(this);
   }
+
+  // Report discovery complete.
+  if (--discovery_pending_count_ == 0)
+    parent_service_->GattCharacteristicDiscoveryComplete(this);
 }
 
 void BluetoothRemoteGattCharacteristicWin::UpdateIncludedDescriptors(
@@ -327,6 +334,7 @@ void BluetoothRemoteGattCharacteristicWin::
         std::unique_ptr<BTH_LE_GATT_CHARACTERISTIC_VALUE> value,
         HRESULT hr) {
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
+  characteristic_value_read_or_write_in_progress_ = false;
 
   std::pair<ValueCallback, ErrorCallback> callbacks;
   callbacks.swap(read_characteristic_value_callbacks_);
@@ -339,12 +347,12 @@ void BluetoothRemoteGattCharacteristicWin::
 
     callbacks.first.Run(characteristic_value_);
   }
-  characteristic_value_read_or_write_in_progress_ = false;
 }
 
 void BluetoothRemoteGattCharacteristicWin::
     OnWriteRemoteCharacteristicValueCallback(HRESULT hr) {
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
+  characteristic_value_read_or_write_in_progress_ = false;
 
   std::pair<base::Closure, ErrorCallback> callbacks;
   callbacks.swap(write_characteristic_value_callbacks_);
@@ -353,7 +361,6 @@ void BluetoothRemoteGattCharacteristicWin::
   } else {
     callbacks.first.Run();
   }
-  characteristic_value_read_or_write_in_progress_ = false;
 }
 
 BluetoothRemoteGattService::GattErrorCode

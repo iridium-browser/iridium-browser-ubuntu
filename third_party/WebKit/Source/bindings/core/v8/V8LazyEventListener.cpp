@@ -45,7 +45,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLElement.h"
-#include "core/html/HTMLFormElement.h"
+#include "core/html/forms/HTMLFormElement.h"
 #include "platform/bindings/V8DOMWrapper.h"
 #include "platform/bindings/V8PrivateProperty.h"
 #include "platform/wtf/StdLibExtras.h"
@@ -60,7 +60,7 @@ V8LazyEventListener::V8LazyEventListener(
     const String source_url,
     const TextPosition& position,
     Node* node)
-    : V8AbstractEventListener(true, DOMWrapperWorld::MainWorld(), isolate),
+    : V8AbstractEventListener(isolate, true, DOMWrapperWorld::MainWorld()),
       was_compilation_failed_(false),
       function_name_(function_name),
       event_parameter_name_(event_parameter_name),
@@ -88,8 +88,9 @@ v8::Local<v8::Value> V8LazyEventListener::CallListenerFunction(
     v8::Local<v8::Value> js_event,
     Event* event) {
   DCHECK(!js_event.IsEmpty());
-  v8::Local<v8::Object> listener_object =
-      GetListenerObject(ExecutionContext::From(script_state));
+  ExecutionContext* execution_context =
+      ToExecutionContext(script_state->GetContext());
+  v8::Local<v8::Object> listener_object = GetListenerObject(execution_context);
   if (listener_object.IsEmpty())
     return v8::Local<v8::Value>();
 
@@ -98,16 +99,14 @@ v8::Local<v8::Value> V8LazyEventListener::CallListenerFunction(
   if (handler_function.IsEmpty() || receiver.IsEmpty())
     return v8::Local<v8::Value>();
 
-  if (!ExecutionContext::From(script_state)->IsDocument())
+  if (!execution_context->IsDocument())
     return v8::Local<v8::Value>();
 
-  LocalFrame* frame =
-      ToDocument(ExecutionContext::From(script_state))->GetFrame();
+  LocalFrame* frame = ToDocument(execution_context)->GetFrame();
   if (!frame)
     return v8::Local<v8::Value>();
 
-  if (!ExecutionContext::From(script_state)
-           ->CanExecuteScripts(kAboutToExecuteScript))
+  if (!execution_context->CanExecuteScripts(kAboutToExecuteScript))
     return v8::Local<v8::Value>();
 
   v8::Local<v8::Value> parameters[1] = {js_event};
@@ -118,13 +117,6 @@ v8::Local<v8::Value> V8LazyEventListener::CallListenerFunction(
            .ToLocal(&result))
     return v8::Local<v8::Value>();
   return result;
-}
-
-static void V8LazyEventListenerToString(
-    const v8::FunctionCallbackInfo<v8::Value>& info) {
-  V8SetReturnValue(
-      info, V8PrivateProperty::GetLazyEventListenerToString(info.GetIsolate())
-                .GetOrUndefined(info.Holder()));
 }
 
 v8::Local<v8::Object> V8LazyEventListener::GetListenerObjectInternal(
@@ -180,8 +172,8 @@ void V8LazyEventListener::CompileScript(ScriptState* script_state,
   v8::Local<v8::Object> scopes[3];
   scopes[2] = ToObjectWrapper<Node>(node_, script_state);
   scopes[1] = ToObjectWrapper<HTMLFormElement>(form_element, script_state);
-  scopes[0] = ToObjectWrapper<Document>(node_ ? node_->ownerDocument() : 0,
-                                        script_state);
+  scopes[0] = ToObjectWrapper<Document>(
+      node_ ? node_->ownerDocument() : nullptr, script_state);
 
   v8::Local<v8::String> parameter_name =
       V8String(GetIsolate(), event_parameter_name_);
@@ -198,10 +190,10 @@ void V8LazyEventListener::CompileScript(ScriptState* script_state,
     // exception because we're not running any program code.  Instead,
     // it should be reported as an ErrorEvent.
     v8::TryCatch block(GetIsolate());
-    wrapped_function = v8::ScriptCompiler::CompileFunctionInContext(
-        GetIsolate(), &source, script_state->GetContext(), 1, &parameter_name,
-        3, scopes);
-    if (block.HasCaught()) {
+    v8::MaybeLocal<v8::Function> maybe_result =
+        v8::ScriptCompiler::CompileFunctionInContext(
+            script_state->GetContext(), &source, 1, &parameter_name, 3, scopes);
+    if (!maybe_result.ToLocal(&wrapped_function)) {
       was_compilation_failed_ = true;  // Do not compile the same code twice.
       FireErrorEvent(script_state->GetContext(), execution_context,
                      block.Message());
@@ -209,28 +201,6 @@ void V8LazyEventListener::CompileScript(ScriptState* script_state,
     }
   }
 
-  // Change the toString function on the wrapper function to avoid it
-  // returning the source for the actual wrapper function. Instead it
-  // returns source for a clean wrapper function with the event
-  // argument wrapping the event source code. The reason for this is
-  // that some web sites use toString on event functions and eval the
-  // source returned (sometimes a RegExp is applied as well) for some
-  // other use. That fails miserably if the actual wrapper source is
-  // returned.
-  v8::Local<v8::Function> to_string_function;
-  if (!v8::Function::New(script_state->GetContext(),
-                         V8LazyEventListenerToString, v8::Local<v8::Value>(), 0,
-                         v8::ConstructorBehavior::kThrow)
-           .ToLocal(&to_string_function))
-    return;
-  String to_string_string = "function " + function_name_ + "(" +
-                            event_parameter_name_ + ") {\n  " + code_ + "\n}";
-  V8PrivateProperty::GetLazyEventListenerToString(GetIsolate())
-      .Set(wrapped_function, V8String(GetIsolate(), to_string_string));
-  if (!V8CallBoolean(wrapped_function->CreateDataProperty(
-          script_state->GetContext(), V8AtomicString(GetIsolate(), "toString"),
-          to_string_function)))
-    return;
   wrapped_function->SetName(V8String(GetIsolate(), function_name_));
 
   SetListenerObject(wrapped_function);

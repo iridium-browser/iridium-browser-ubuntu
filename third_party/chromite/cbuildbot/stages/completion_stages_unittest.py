@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -6,7 +7,6 @@
 
 from __future__ import print_function
 
-import itertools
 import mock
 import sys
 
@@ -14,26 +14,21 @@ from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import prebuilts
-from chromite.cbuildbot import relevant_changes
 from chromite.cbuildbot.stages import completion_stages
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import generic_stages_unittest
 from chromite.cbuildbot.stages import sync_stages_unittest
 from chromite.cbuildbot.stages import sync_stages
+from chromite.lib.const import waterfall
 from chromite.lib import alerts
 from chromite.lib import auth
 from chromite.lib import buildbucket_lib
 from chromite.lib import builder_status_lib
 from chromite.lib import build_failure_message
 from chromite.lib import cidb
-from chromite.lib import clactions
 from chromite.lib import cros_logging as logging
 from chromite.lib import config_lib
 from chromite.lib import constants
-from chromite.lib import fake_cidb
-from chromite.lib import hwtest_results
-from chromite.lib import patch_unittest
-from chromite.lib import timeout_util
 from chromite.lib import tree_status
 
 
@@ -126,12 +121,12 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         master=True,
         slave_configs=['test3', 'test5'],
         manifest_version=True,
-        active_waterfall=constants.WATERFALL_INTERNAL,
+        active_waterfall=waterfall.WATERFALL_INTERNAL,
     )
     test_config.Add(
         'test1',
         config_lib.BuildConfig(),
-        boards=['x86-generic'],
+        boards=['amd64-generic'],
         manifest_version=True,
         build_type=constants.PFQ_TYPE,
         overlays='public',
@@ -140,12 +135,12 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         branch=False,
         internal=False,
         master=False,
-        active_waterfall=constants.WATERFALL_INTERNAL,
+        active_waterfall=waterfall.WATERFALL_INTERNAL,
     )
     test_config.Add(
         'test2',
         config_lib.BuildConfig(),
-        boards=['x86-generic'],
+        boards=['amd64-generic'],
         manifest_version=False,
         build_type=constants.PFQ_TYPE,
         overlays='public',
@@ -154,12 +149,12 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         branch=False,
         internal=False,
         master=False,
-        active_waterfall=constants.WATERFALL_INTERNAL,
+        active_waterfall=waterfall.WATERFALL_INTERNAL,
     )
     test_config.Add(
         'test3',
         config_lib.BuildConfig(),
-        boards=['x86-generic'],
+        boards=['amd64-generic'],
         manifest_version=True,
         build_type=constants.PFQ_TYPE,
         overlays='both',
@@ -168,12 +163,12 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         branch=False,
         internal=True,
         master=False,
-        active_waterfall=constants.WATERFALL_INTERNAL,
+        active_waterfall=waterfall.WATERFALL_INTERNAL,
     )
     test_config.Add(
         'test4',
         config_lib.BuildConfig(),
-        boards=['x86-generic'],
+        boards=['amd64-generic'],
         manifest_version=True,
         build_type=constants.PFQ_TYPE,
         overlays='both',
@@ -182,12 +177,12 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         branch=True,
         internal=True,
         master=False,
-        active_waterfall=constants.WATERFALL_INTERNAL,
+        active_waterfall=waterfall.WATERFALL_INTERNAL,
     )
     test_config.Add(
         'test5',
         config_lib.BuildConfig(),
-        boards=['x86-generic'],
+        boards=['amd64-generic'],
         manifest_version=True,
         build_type=constants.PFQ_TYPE,
         overlays='public',
@@ -196,7 +191,7 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         branch=False,
         internal=False,
         master=False,
-        active_waterfall=constants.WATERFALL_INTERNAL,
+        active_waterfall=waterfall.WATERFALL_INTERNAL,
     )
     return test_config
 
@@ -211,22 +206,18 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
 class MasterSlaveSyncCompletionStageTest(
     generic_stages_unittest.AbstractStageTestCase):
   """Tests MasterSlaveSyncCompletionStage with ManifestVersionedSyncStage."""
-  BOT_ID = 'x86-generic-paladin'
+  BOT_ID = 'amd64-generic-paladin'
 
   def setUp(self):
     self.source_repo = 'ssh://source/repo'
     self.manifest_version_url = 'fake manifest url'
     self.branch = 'master'
-    self.build_type = constants.PFQ_TYPE
 
     self._Prepare()
 
   def _Prepare(self, bot_id=None, **kwargs):
     super(MasterSlaveSyncCompletionStageTest, self)._Prepare(bot_id, **kwargs)
-
     self._run.config['manifest_version'] = True
-    self._run.config['build_type'] = self.build_type
-    self._run.config['master'] = True
 
   def ConstructStage(self):
     sync_stage = sync_stages.ManifestVersionedSyncStage(self._run)
@@ -243,16 +234,6 @@ class MasterSlaveSyncCompletionStageTest(
     self.assertTrue(stage._IsFailureFatal(set(), set(['test5']), set()))
     self.assertTrue(stage._IsFailureFatal(set(), set(), set(['test1'])))
 
-    # Test behavior where there is a sanity check builder
-    stage._run.config.sanity_check_slaves = ['sanity']
-    self.assertTrue(stage._IsFailureFatal(set(['test5']), set(['sanity']),
-                                          set()))
-    self.assertFalse(stage._IsFailureFatal(set(), set(['sanity']), set()))
-    self.assertTrue(stage._IsFailureFatal(set(), set(['sanity']),
-                                          set(['test1'])))
-    self.assertFalse(stage._IsFailureFatal(set(), set(),
-                                           set(['sanity'])))
-
   def testExceptionHandler(self):
     """Verify _HandleStageException is sane."""
     stage = self.ConstructStage()
@@ -265,6 +246,15 @@ class MasterSlaveSyncCompletionStageTest(
       self.assertEqual(len(ret), 3)
       self.assertEqual(ret[0], e)
 
+  def testGetBuilderStatusesFetcher(self):
+    """Test GetBuilderStatusesFetcher."""
+    mock_fetcher = mock.Mock()
+    self.PatchObject(
+        builder_status_lib, 'BuilderStatusesFetcher',
+        return_value=mock_fetcher)
+
+    stage = self.ConstructStage()
+    self.assertEqual(stage._GetBuilderStatusesFetcher(), mock_fetcher)
 
 class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
     generic_stages_unittest.AbstractStageTestCase):
@@ -288,8 +278,13 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
                      return_value=buildbucket_lib.BUILDBUCKET_TEST_HOST)
     self.mock_handle_failure = self.PatchObject(
         completion_stages.MasterSlaveSyncCompletionStage, 'HandleFailure')
+    self.PatchObject(builder_status_lib.BuilderStatusesFetcher, '__init__',
+                     return_value=None)
 
     self._Prepare()
+
+  def tearDown(self):
+    cidb.CIDBConnectionFactory.ClearMock()
 
   def ConstructStage(self):
     sync_stage = sync_stages.ManifestVersionedSyncStage(self._run)
@@ -299,9 +294,24 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
         ('build_2', 'buildbucket_id_2', 2)
     }
     self._run.attrs.metadata.ExtendKeyListWithList(
-        constants.METADATA_SCHEDULED_SLAVES, scheduled_slaves_list)
+        constants.METADATA_SCHEDULED_IMPORTANT_SLAVES, scheduled_slaves_list)
     return completion_stages.MasterSlaveSyncCompletionStage(
         self._run, sync_stage, success=True)
+
+  def testGetBuilderStatusesFetcher(self):
+    """Test GetBuilderStatusesFetcher."""
+    mock_fetcher = mock.Mock()
+    self.PatchObject(
+        builder_status_lib, 'BuilderStatusesFetcher',
+        return_value=mock_fetcher)
+    mock_wait = self.PatchObject(
+        completion_stages.MasterSlaveSyncCompletionStage,
+        '_WaitForSlavesToComplete')
+    stage = self.ConstructStage()
+    stage._run.attrs.manifest_manager = mock.Mock()
+
+    self.assertEqual(stage._GetBuilderStatusesFetcher(), mock_fetcher)
+    self.assertEqual(mock_wait.call_count, 1)
 
   def testPerformStageWithFatalFailure(self):
     """Test PerformStage on master-paladin."""
@@ -316,8 +326,8 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
             constants.BUILDER_STATUS_MISSING, None)
     }
 
-    self.PatchObject(completion_stages.MasterSlaveSyncCompletionStage,
-                     '_FetchSlaveStatuses', return_value=statuses)
+    self.PatchObject(builder_status_lib.BuilderStatusesFetcher,
+                     'GetBuilderStatuses', return_value=(statuses, {}))
     mock_annotate = self.PatchObject(
         completion_stages.MasterSlaveSyncCompletionStage,
         '_AnnotateFailingBuilders')
@@ -325,7 +335,7 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
     with self.assertRaises(completion_stages.ImportantBuilderFailedException):
       stage.PerformStage()
     mock_annotate.assert_called_once_with(
-        set(), {'build_1'}, {'build_2'}, statuses, False)
+        set(), {'build_1'}, {'build_2'}, statuses, {}, False)
     self.mock_handle_failure.assert_called_once_with(
         set(), {'build_1'}, {'build_2'}, False)
 
@@ -336,9 +346,25 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
     with self.assertRaises(completion_stages.ImportantBuilderFailedException):
       stage.PerformStage()
     mock_annotate.assert_called_once_with(
-        set(), {'build_1'}, {'build_2'}, statuses, True)
+        set(), {'build_1'}, {'build_2'}, statuses, {}, True)
     self.mock_handle_failure.assert_called_once_with(
         set(), {'build_1'}, {'build_2'}, True)
+
+  def testStageRunWithImportantBuilderFailedException(self):
+    """Test stage.Run on master-paladin with ImportantBuilderFailedException."""
+    stage = self.ConstructStage()
+    stage._run.attrs.manifest_manager = mock.MagicMock()
+    statuses = {
+        'build_1': builder_status_lib.BuilderStatus(
+            constants.BUILDER_STATUS_INFLIGHT, None),
+        'build_2': builder_status_lib.BuilderStatus(
+            constants.BUILDER_STATUS_MISSING, None)
+    }
+    self.PatchObject(builder_status_lib.BuilderStatusesFetcher,
+                     'GetBuilderStatuses', return_value=(statuses, {}))
+
+    with self.assertRaises(completion_stages.ImportantBuilderFailedException):
+      stage.Run()
 
   def testAnnotateBuildStatusFromBuildbucket(self):
     """Test AnnotateBuildStatusFromBuildbucket"""
@@ -442,65 +468,66 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
     statuses = {'failing_build' : failed_status,
                 'inflight_build': inflight_status}
 
-    stage._AnnotateFailingBuilders(failing, inflight, set(), statuses, False)
+    stage._AnnotateFailingBuilders(failing, inflight, set(), statuses, {},
+                                   False)
     self.assertEqual(annotate_mock.call_count, 1)
 
-    stage._AnnotateFailingBuilders(failing, inflight, no_stat, statuses, False)
+    stage._AnnotateFailingBuilders(failing, inflight, no_stat, statuses, {},
+                                   False)
     self.assertEqual(annotate_mock.call_count, 2)
 
-    stage._AnnotateFailingBuilders(failing, inflight, no_stat, statuses, True)
+    stage._AnnotateFailingBuilders(failing, inflight, no_stat, statuses, {},
+                                   True)
     self.assertEqual(annotate_mock.call_count, 3)
 
-  def testPerformStageWithException(self):
-    """Test PerformStage with exception."""
+  def testAnnotateFailingExperimentalBuilders(self):
+    """Tests _AnnotateFailingBuilders with experimental builders."""
+    stage = self.ConstructStage()
+
+    print_build_message_mock = self.PatchObject(
+        completion_stages.MasterSlaveSyncCompletionStage,
+        '_PrintBuildMessage')
+
+    failed_msg = build_failure_message.BuildFailureMessage(
+        'message', [], True, 'reason', 'bot')
+    experimental_statuses = {
+        'passed_experimental' : builder_status_lib.BuilderStatus(
+            constants.BUILDER_STATUS_PASSED, None, 'url'),
+        'failing_experimental' : builder_status_lib.BuilderStatus(
+            constants.BUILDER_STATUS_FAILED, failed_msg, 'url'),
+        'inflight_experimental': builder_status_lib.BuilderStatus(
+            constants.BUILDER_STATUS_INFLIGHT, None, 'url')
+    }
+
+    stage._AnnotateFailingBuilders(set(), set(), set(), {},
+                                   experimental_statuses, False)
+    # Build message should not be printed for the passed builder.
+    self.assertEqual(print_build_message_mock.call_count, 2)
+
+  def testPerformStageWithFailedExperimentalBuilder(self):
+    """Test PerformStage with a failed experimental builder."""
     stage = self.ConstructStage()
     stage._run.attrs.manifest_manager = mock.MagicMock()
-    statuses = {
+    status = {
         'build_1': builder_status_lib.BuilderStatus(
-            constants.BUILDER_STATUS_INFLIGHT, None),
+            constants.BUILDER_STATUS_PASSED, None)
+    }
+    experimental_status = {
         'build_2': builder_status_lib.BuilderStatus(
-            constants.BUILDER_STATUS_MISSING, None),
-        'build_3': builder_status_lib.BuilderStatus(
             constants.BUILDER_STATUS_FAILED, None)
     }
-    self.PatchObject(completion_stages.MasterSlaveSyncCompletionStage,
-                     '_FetchSlaveStatuses', return_value=statuses)
-
-    # Not self-destructed CQ
-    with self.assertRaises(completion_stages.ImportantBuilderFailedException):
-      stage.PerformStage()
-
-    # Self-destructed and successful CQ, all slaves passed the desired stage.
-    stage._run.attrs.metadata.UpdateWithDict(
-        {constants.SELF_DESTRUCTED_BUILD: True})
-    stage._run.attrs.metadata.UpdateWithDict(
-        {constants.SELF_DESTRUCTED_WITH_SUCCESS_BUILD: True})
-    with self.assertRaises(completion_stages.ImportantBuilderFailedException):
-      stage.PerformStage()
+    self.PatchObject(builder_status_lib.BuilderStatusesFetcher,
+                     'GetBuilderStatuses',
+                     return_value=(status, experimental_status))
+    mock_annotate = self.PatchObject(
+        completion_stages.MasterSlaveSyncCompletionStage,
+        '_AnnotateFailingBuilders')
 
     stage._run.attrs.metadata.UpdateWithDict(
-        {constants.SELF_DESTRUCTED_WITH_SUCCESS_BUILD: False})
-    with self.assertRaises(completion_stages.ImportantBuilderFailedException):
-      stage.PerformStage()
-
-  def testPerformStageWithoutException(self):
-    """Test PerformStage without exception."""
-    stage = self.ConstructStage()
-    stage._run.attrs.manifest_manager = mock.MagicMock()
-    statuses = {
-        'build_1': builder_status_lib.BuilderStatus(
-            constants.BUILDER_STATUS_INFLIGHT, None),
-        'build_2': builder_status_lib.BuilderStatus(
-            constants.BUILDER_STATUS_MISSING, None)
-    }
-    self.PatchObject(completion_stages.MasterSlaveSyncCompletionStage,
-                     '_FetchSlaveStatuses', return_value=statuses)
-    stage._run.attrs.metadata.UpdateWithDict(
-        {constants.SELF_DESTRUCTED_BUILD: True})
-    stage._run.attrs.metadata.UpdateWithDict(
-        {constants.SELF_DESTRUCTED_WITH_SUCCESS_BUILD: True})
+        {constants.METADATA_EXPERIMENTAL_BUILDERS: ['build_2']})
     stage.PerformStage()
-
+    mock_annotate.assert_called_once_with(
+        set(), set(), set(), status, experimental_status, False)
 
 class CanaryCompletionStageTest(
     generic_stages_unittest.AbstractStageTestCase):
@@ -530,10 +557,24 @@ class CanaryCompletionStageTest(
         stage._ComposeTreeStatusMessage(failing, inflight, no_stat),
         'bar timed out; foo1,foo2 and 3 others failed')
 
+  def testGetBuilderStatusesFetcher(self):
+    """Test GetBuilderStatusesFetcher."""
+    mock_fetcher = mock.Mock()
+    self.PatchObject(
+        builder_status_lib, 'BuilderStatusesFetcher',
+        return_value=mock_fetcher)
+    mock_wait = self.PatchObject(
+        completion_stages.MasterSlaveSyncCompletionStage,
+        '_WaitForSlavesToComplete')
+    stage = self.ConstructStage()
+    stage._run.attrs.manifest_manager = mock.Mock()
+
+    self.assertEqual(stage._GetBuilderStatusesFetcher(), mock_fetcher)
+    self.assertEqual(mock_wait.call_count, 1)
+
 
 class BaseCommitQueueCompletionStageTest(
-    generic_stages_unittest.AbstractStageTestCase,
-    patch_unittest.MockPatchBase):
+    generic_stages_unittest.AbstractStageTestCase):
   """Tests how CQ handles changes in CommitQueueCompletionStage."""
 
   def setUp(self):
@@ -543,74 +584,47 @@ class BaseCommitQueueCompletionStageTest(
     self.partial_submit_changes = ['C', 'D']
     self.other_changes = ['A', 'B']
     self.changes = self.other_changes + self.partial_submit_changes
-    self.tot_sanity_mock = self.PatchObject(
-        completion_stages.CommitQueueCompletionStage,
-        '_ToTSanity',
-        return_value=True)
 
     self.alert_email_mock = self.PatchObject(alerts, 'SendEmail')
     self.PatchObject(cbuildbot_run._BuilderRunBase,
                      'InEmailReportingEnvironment', return_value=True)
     self.PatchObject(completion_stages.MasterSlaveSyncCompletionStage,
                      'HandleFailure')
-    self.PatchObject(completion_stages.CommitQueueCompletionStage,
-                     '_GetFailedMessages')
-    self.PatchObject(relevant_changes.RelevantChanges,
-                     '_GetSlaveMappingAndCLActions',
-                     return_value=(dict(), []))
-    self.PatchObject(clactions, 'GetRelevantChangesForBuilds')
-    self.PatchObject(tree_status, 'WaitForTreeStatus',
-                     return_value=constants.TREE_OPEN)
-    self.PatchObject(relevant_changes.RelevantChanges,
-                     'GetPreviouslyPassedSlavesForChanges')
+    self.PatchObject(builder_status_lib.BuilderStatusesFetcher, '__init__',
+                     return_value=None)
+    self.PatchObject(builder_status_lib, 'GetFailedMessages')
 
-  # pylint: disable=W0221
-  def ConstructStage(self, tree_was_open=True):
-    """Returns a CommitQueueCompletionStage object.
-
-    Args:
-      tree_was_open: If not true, tree was not open when we acquired changes.
-    """
+  def ConstructStage(self):
+    """Returns a CommitQueueCompletionStage object."""
     sync_stage = sync_stages.CommitQueueSyncStage(self._run)
     sync_stage.pool = mock.MagicMock()
     sync_stage.pool.applied = self.changes
-    sync_stage.pool.tree_was_open = tree_was_open
 
-    sync_stage.pool.handle_failure_mock = self.PatchObject(
-        sync_stage.pool, 'HandleValidationFailure')
-    sync_stage.pool.handle_timeout_mock = self.PatchObject(
-        sync_stage.pool, 'HandleValidationTimeout')
     return completion_stages.CommitQueueCompletionStage(
         self._run, sync_stage, success=True)
 
-  def VerifyStage(self, failing, inflight, handle_failure=True,
-                  handle_timeout=False, sane_tot=True,
-                  alert=False, stage=None, all_slaves=None, slave_stages=None,
-                  build_passed=False):
+  def VerifyStage(self, failing=(), inflight=(), no_stat=(), alert=False,
+                  stage=None, build_passed=False):
     """Runs and Verifies PerformStage.
 
     Args:
       failing: The names of the builders that failed.
       inflight: The names of the buiders that timed out.
-      handle_failure: If True, calls HandleValidationFailure.
-      handle_timeout: If True, calls HandleValidationTimeout.
-      sane_tot: If not true, assumes TOT is not sane.
+      no_stat: The names of the builders that had status None.
       alert: If True, sends out an alert email for infra failures.
       stage: If set, use this constructed stage, otherwise create own.
-      all_slaves: Optional set of all slave configs.
-      slave_stages: Optional list of slave stages.
       build_passed: Whether the build passed or failed.
     """
     if not stage:
       stage = self.ConstructStage()
 
+    stage._run.attrs.manifest_manager = mock.Mock()
+
     # Setup the stage to look at the specified configs.
-    all_slaves = list(all_slaves or set(failing + inflight))
+    all_slaves = set(failing) | set(inflight) | set(no_stat)
     configs = [config_lib.BuildConfig(name=x) for x in all_slaves]
     self.PatchObject(stage, '_GetSlaveConfigs', return_value=configs)
 
-    # Setup builder statuses.
-    stage._run.attrs.manifest_manager = mock.MagicMock()
     statuses = {}
     for x in failing:
       statuses[x] = builder_status_lib.BuilderStatus(
@@ -618,29 +632,12 @@ class BaseCommitQueueCompletionStageTest(
     for x in inflight:
       statuses[x] = builder_status_lib.BuilderStatus(
           constants.BUILDER_STATUS_INFLIGHT, message=None)
-    if self._run.config.master:
-      self.PatchObject(stage._run.attrs.manifest_manager, 'GetBuildersStatus',
-                       return_value=statuses)
-    else:
-      self.PatchObject(stage, '_GetLocalBuildStatus', return_value=statuses)
+    for x in no_stat:
+      statuses[x] = builder_status_lib.BuilderStatus(
+          constants.BUILDER_STATUS_MISSING, message=None)
 
-    # Setup DB and provide list of slave stages.
-    mock_cidb = mock.MagicMock()
-    cidb.CIDBConnectionFactory.SetupMockCidb(mock_cidb)
-    if slave_stages is None:
-      slave_stages = []
-      critical_stages = (
-          completion_stages.CommitQueueCompletionStage._CRITICAL_STAGES)
-      for stage_name, slave in itertools.product(critical_stages, all_slaves):
-        slave_stages.append({'name': stage_name,
-                             'build_config': slave,
-                             'status': constants.BUILDER_STATUS_PASSED})
-    self.PatchObject(mock_cidb, 'GetSlaveStages', return_value=slave_stages)
-
-
-    # Set up SubmitPartialPool to provide a list of changes to look at.
-    self.PatchObject(stage.sync_stage.pool, 'SubmitPartialPool',
-                     return_value=self.other_changes)
+    self.PatchObject(builder_status_lib.BuilderStatusesFetcher,
+                     'GetBuilderStatuses', return_value=(statuses, {}))
 
     # Track whether 'HandleSuccess' is called.
     success_mock = self.PatchObject(stage, 'HandleSuccess')
@@ -656,21 +653,10 @@ class BaseCommitQueueCompletionStageTest(
     self.assertEqual(success_mock.called, build_passed)
 
     if not build_passed and self._run.config.master:
-      self.tot_sanity_mock.assert_called_once_with(mock.ANY, mock.ANY)
-
       if alert:
         self.alert_email_mock.assert_called_once_with(
             mock.ANY, mock.ANY, server=mock.ANY, message=mock.ANY,
             extra_fields=mock.ANY)
-
-      if handle_failure:
-        stage.sync_stage.pool.handle_failure_mock.assert_called_once_with(
-            mock.ANY, no_stat=set([]), sanity=sane_tot,
-            changes=self.other_changes, failed_hwtests=mock.ANY)
-
-      if handle_timeout:
-        stage.sync_stage.pool.handle_timeout_mock.assert_called_once_with(
-            sanity=mock.ANY, changes=self.other_changes)
 
 
 # pylint: disable=too-many-ancestors
@@ -680,15 +666,15 @@ class SlaveCommitQueueCompletionStageTest(BaseCommitQueueCompletionStageTest):
 
   def testSuccess(self):
     """Test the slave succeeding."""
-    self.VerifyStage([], [], build_passed=True)
+    self.VerifyStage(build_passed=True)
 
   def testFail(self):
     """Test the slave failing."""
-    self.VerifyStage(['foo'], [], build_passed=False)
+    self.VerifyStage(failing=['foo'], build_passed=False)
 
   def testTimeout(self):
     """Test the slave timing out."""
-    self.VerifyStage([], ['foo'], build_passed=False)
+    self.VerifyStage(inflight=['foo'], build_passed=False)
 
 
 class MasterCommitQueueCompletionStageTest(BaseCommitQueueCompletionStageTest):
@@ -702,99 +688,57 @@ class MasterCommitQueueCompletionStageTest(BaseCommitQueueCompletionStageTest):
   def tearDown(self):
     cidb.CIDBConnectionFactory.ClearMock()
 
-  def testNoInflightBuildersWithInfraFail(self):
-    """Test case where there are no inflight builders but are infra failures."""
-    failing = ['foo']
-    inflight = []
+  def testImportantBuildFailing(self):
+    """Test stage when important builds in failing."""
+    self.VerifyStage(failing=['foo'])
 
+  def testImportantBuildInflight(self):
+    """Test stage when important builds in inflight."""
+    self.VerifyStage(inflight=['foo'])
+
+  def testImportantBuildNostat(self):
+    """Test stage when important builds in no_stat."""
+    self.VerifyStage(no_stat=['foo'])
+
+  def testFailingBuildersWithInfraFail(self):
+    """Alert when the failing builders have infra failure messages."""
     self.PatchObject(completion_stages.CommitQueueCompletionStage,
                      '_GetInfraFailMessages', return_value=['msg'])
-    self.PatchObject(completion_stages.CommitQueueCompletionStage,
-                     '_GetBuildersWithNoneMessages', return_value=[])
+    self.PatchObject(builder_status_lib,
+                     'GetBuildersWithNoneMessages', return_value=[])
+
     # An alert is sent, since there are infra failures.
-    self.VerifyStage(failing, inflight, alert=True)
+    self.VerifyStage(failing=['foo'], alert=True)
 
-  def testMissingCriticalStage(self):
-    """Test case where a slave failed to run a critical stage."""
-    self.VerifyStage(['foo'], [], slave_stages=[])
-
-  def testFailedCriticalStage(self):
-    """Test case where a slave failed a critical stage."""
-    fake_stages = [{'name': 'CommitQueueSync', 'build_config': 'foo',
-                    'status': constants.BUILDER_STATUS_FAILED}]
-    self.VerifyStage(['foo'], [],
-                     slave_stages=fake_stages)
-
-  def testMissingCriticalStageOnSanitySlave(self):
-    """Test case where a sanity slave failed to run a critical stage."""
-    stage = self.ConstructStage()
-    fake_stages = [{'name': 'CommitQueueSync', 'build_config': 'foo',
-                    'status': constants.BUILDER_STATUS_PASSED}]
-    stage._run.config.sanity_check_slaves = ['sanity']
-    self.VerifyStage(['sanity', 'foo'], [], slave_stages=fake_stages,
-                     stage=stage)
-
-  def testMissingCriticalStageOnTimedOutSanitySlave(self):
-    """Test case where a sanity slave failed to run a critical stage."""
-    stage = self.ConstructStage()
-    fake_stages = [{'name': 'CommitQueueSync', 'build_config': 'foo',
-                    'status': constants.BUILDER_STATUS_PASSED}]
-    stage._run.config.sanity_check_slaves = ['sanity']
-    self.VerifyStage(['foo'], ['sanity'], slave_stages=fake_stages,
-                     stage=stage, handle_failure=False, handle_timeout=True)
-
-  def testNoInflightBuildersWithNoneFailureMessages(self):
-    """Test case where failed builders reported NoneType messages."""
-    failing = ['foo']
-    inflight = []
-
+  def testAlertFailingBuildersWithNoneFailureMessages(self):
+    """Alert when failing builders don't have failure messages."""
     self.PatchObject(completion_stages.CommitQueueCompletionStage,
                      '_GetInfraFailMessages', return_value=[])
-    self.PatchObject(completion_stages.CommitQueueCompletionStage,
-                     '_GetBuildersWithNoneMessages', return_value=['foo'])
+    self.PatchObject(builder_status_lib,
+                     'GetBuildersWithNoneMessages', return_value=['foo'])
+
     # An alert is sent, since NonType messages are considered infra failures.
-    self.VerifyStage(failing, inflight, alert=True)
+    self.VerifyStage(failing=['foo'], alert=True)
 
-  def testWithInflightBuildersNoInfraFail(self):
-    """Tests that we don't submit partial pool on non-empty inflight."""
-    failing = ['foo', 'bar']
-    inflight = ['inflight']
-
+  def testAlertInflightBuildersWithNoneInfraFail(self):
+    """Alert when inflight builders don't have failure messages."""
     self.PatchObject(completion_stages.CommitQueueCompletionStage,
                      '_GetInfraFailMessages', return_value=[])
-    self.PatchObject(completion_stages.CommitQueueCompletionStage,
-                     '_GetBuildersWithNoneMessages', return_value=[])
+    self.PatchObject(builder_status_lib,
+                     'GetBuildersWithNoneMessages', return_value=[])
 
     # An alert is sent, since we have an inflight build still.
-    self.VerifyStage(failing, inflight, handle_failure=False,
-                     handle_timeout=True, alert=True)
+    self.VerifyStage(inflight=['foo'], alert=True)
 
-  def testSanityFailed(self):
-    """Test case where the sanity builder failed."""
-    stage = self.ConstructStage()
-    stage._run.config.sanity_check_slaves = ['sanity']
-    self.VerifyStage(['sanity'], [], build_passed=True)
-
-  def testSanityTimeout(self):
-    """Test case where the sanity builder timed out."""
-    stage = self.ConstructStage()
-    stage._run.config.sanity_check_slaves = ['sanity']
-    self.VerifyStage([], ['sanity'], build_passed=True)
-
-  def testWithExponentialFallbackApplied(self):
-    """Tests that we don't treat TOT as sane when it isn't."""
-    failing = ['foo', 'bar']
-    inflight = ['inflight']
-    stage = self.ConstructStage(tree_was_open=False)
+  def testAlertNostatBuildersWithNoneInfraFail(self):
+    """Alert when no_stat builders don't have failure messages."""
     self.PatchObject(completion_stages.CommitQueueCompletionStage,
                      '_GetInfraFailMessages', return_value=[])
-    self.PatchObject(completion_stages.CommitQueueCompletionStage,
-                     '_GetBuildersWithNoneMessages', return_value=['foo'])
+    self.PatchObject(builder_status_lib,
+                     'GetBuildersWithNoneMessages', return_value=[])
 
     # An alert is sent, since we have an inflight build still.
-    self.VerifyStage(failing, inflight, handle_failure=False,
-                     handle_timeout=False, sane_tot=False, alert=True,
-                     stage=stage)
+    self.VerifyStage(no_stat=['no_stat'], alert=True)
 
   def test_IsFailureFatalWithCLs(self):
     """Test _IsFailureFatal with CLs."""
@@ -812,13 +756,45 @@ class MasterCommitQueueCompletionStageTest(BaseCommitQueueCompletionStageTest):
     self.assertFalse(stage._IsFailureFatal(set(), set(), set()))
     self.assertFalse(stage._IsFailureFatal(set(['test3']), set(), set()))
 
+  def testIsFailureFatalWithSelfDestruction(self):
+    """test _IsFailureFatal with self-destruction."""
+    mock_cidb = mock.MagicMock()
+    cidb.CIDBConnectionFactory.SetupMockCidb(mock_cidb)
+    self.PatchObject(builder_status_lib,
+                     'GetSlavesAbortedBySelfDestructedMaster',
+                     return_value={'slave-1', 'slave-2', 'slave-3'})
+    stage = self.ConstructStage()
+
+    self.assertFalse(stage._IsFailureFatal(
+        {'slave-1'}, {'slave-2'}, {'slave-3'}, True))
+
+    self.assertTrue(stage._IsFailureFatal(
+        {'slave-1', 'slave-4'}, {'slave-2'}, {'slave-3'}, True))
+
+  def testIsFailureFatalWithSelfDestructionWithSuccess(self):
+    """test _IsFailureFatal with self-destruction-with-success."""
+    mock_cidb = mock.MagicMock()
+    cidb.CIDBConnectionFactory.SetupMockCidb(mock_cidb)
+    self.PatchObject(builder_status_lib,
+                     'GetSlavesAbortedBySelfDestructedMaster',
+                     return_value={'slave-1', 'slave-2', 'slave-3'})
+    stage = self.ConstructStage()
+    stage._run.attrs.metadata.UpdateWithDict(
+        {constants.SELF_DESTRUCTED_WITH_SUCCESS_BUILD: True})
+
+    self.assertFalse(stage._IsFailureFatal(
+        {'slave-1', 'slave-4'}, {'slave-2'}, {'slave-3'}, True))
+
+    self.assertTrue(stage._IsFailureFatal(
+        {stage._run.config.name}, {'slave-2'}, {'slave-3'}, True))
+
   def testSendInfraAlertIfNeededWithAlerts(self):
     """Test SendInfraAlertIfNeeded which sends alerts."""
     mock_send_alert = self.PatchObject(tree_status, 'SendHealthAlert')
     self.PatchObject(completion_stages.CommitQueueCompletionStage,
                      '_GetInfraFailMessages', return_value=['failure_message'])
-    self.PatchObject(completion_stages.CommitQueueCompletionStage,
-                     '_GetBuildersWithNoneMessages', return_value=[])
+    self.PatchObject(builder_status_lib,
+                     'GetBuildersWithNoneMessages', return_value=[])
     stage = self.ConstructStage()
     failing = {'failing_build'}
     inflight = {'inflight_build'}
@@ -834,101 +810,14 @@ class MasterCommitQueueCompletionStageTest(BaseCommitQueueCompletionStageTest):
     mock_send_alert = self.PatchObject(tree_status, 'SendHealthAlert')
     self.PatchObject(completion_stages.CommitQueueCompletionStage,
                      '_GetInfraFailMessages', return_value=[])
-    self.PatchObject(completion_stages.CommitQueueCompletionStage,
-                     '_GetBuildersWithNoneMessages', return_value=[])
+    self.PatchObject(builder_status_lib,
+                     'GetBuildersWithNoneMessages', return_value=[])
     stage = self.ConstructStage()
     inflight = {'inflight_build'}
     no_stat = {'no_stat_build'}
 
     stage.SendInfraAlertIfNeeded({}, inflight, no_stat, True)
     self.assertEqual(mock_send_alert.call_count, 0)
-
-  def test_GetBuildsPassedSyncStage(self):
-    """Test _GetBuildsPassedSyncStage."""
-    stage = self.ConstructStage()
-    mock_cidb = mock.Mock()
-    mock_cidb.GetSlaveStages.return_value = [
-        {'build_config': 's_1', 'status': 'pass', 'name': 'CommitQueueSync'},
-        {'build_config': 's_2', 'status': 'pass', 'name': 'CommitQueueSync'},
-        {'build_config': 's_3', 'status': 'fail', 'name': 'CommitQueueSync'}]
-    mock_cidb.GetBuildStages.return_value = [
-        {'status': 'pass', 'name': 'CommitQueueSync'}]
-
-    builds = stage._GetBuildsPassedSyncStage(
-        'build_id', mock_cidb, ['id_1', 'id_2'])
-    self.assertItemsEqual(builds, ['s_1', 's_2', 'master-paladin'])
-
-  def _MockPartialSubmit(self, stage):
-    self.PatchObject(completion_stages.CommitQueueCompletionStage,
-                     'SendInfraAlertIfNeeded')
-    self.PatchObject(tree_status, 'SendHealthAlert')
-    self.PatchObject(relevant_changes.RelevantChanges,
-                     'GetRelevantChangesForSlaves',
-                     return_value={'master-paladin': {mock.Mock()}})
-    self.PatchObject(relevant_changes.RelevantChanges,
-                     'GetSubsysResultForSlaves')
-    self.PatchObject(completion_stages.CommitQueueCompletionStage,
-                     '_GetBuildsPassedSyncStage')
-    stage.sync_stage.pool.SubmitPartialPool.return_value = self.changes
-
-  def testCQMasterHandleFailureWithOpenTree(self):
-    """Test CQMasterHandleFailure with open tree."""
-    stage = self.ConstructStage()
-    self._MockPartialSubmit(stage)
-    self.PatchObject(tree_status, 'WaitForTreeStatus',
-                     return_value=constants.TREE_OPEN)
-
-    stage.CQMasterHandleFailure(set(['test1']), set(), set(), False, [])
-    stage.sync_stage.pool.handle_failure_mock.assert_called_once_with(
-        mock.ANY, sanity=True, no_stat=set(), changes=self.changes,
-        failed_hwtests=None)
-
-  def testCQMasterHandleFailureWithThrottledTree(self):
-    """Test CQMasterHandleFailure with throttled tree."""
-    stage = self.ConstructStage()
-    self._MockPartialSubmit(stage)
-    self.PatchObject(tree_status, 'WaitForTreeStatus',
-                     return_value=constants.TREE_THROTTLED)
-
-    stage.CQMasterHandleFailure(set(['test1']), set(), set(), False, [])
-    stage.sync_stage.pool.handle_failure_mock.assert_called_once_with(
-        mock.ANY, sanity=False, no_stat=set(), changes=self.changes,
-        failed_hwtests=None)
-
-  def testCQMasterHandleFailureWithClosedTree(self):
-    """Test CQMasterHandleFailure with cloased tree."""
-    stage = self.ConstructStage()
-    self._MockPartialSubmit(stage)
-    self.PatchObject(tree_status, 'WaitForTreeStatus',
-                     side_effect=timeout_util.TimeoutError())
-
-    stage.CQMasterHandleFailure(set(['test1']), set(), set(), False, [])
-    stage.sync_stage.pool.handle_failure_mock.assert_called_once_with(
-        mock.ANY, sanity=False, no_stat=set(), changes=self.changes,
-        failed_hwtests=None)
-
-  def testCQMasterHandleFailureWithFailedHWtests(self):
-    """Test CQMasterHandleFailure with failed HWtests."""
-    stage = self.ConstructStage()
-    self._MockPartialSubmit(stage)
-    master_build_id = stage._run.attrs.metadata.GetValue('build_id')
-    db = fake_cidb.FakeCIDBConnection()
-    slave_build_id = db.InsertBuild(
-        'slave_1', constants.WATERFALL_INTERNAL, 1, 'slave_1', 'bot_hostname',
-        master_build_id=master_build_id, buildbucket_id='123')
-    cidb.CIDBConnectionFactory.SetupMockCidb(db)
-    mock_failed_hwtests = mock.Mock()
-    mock_get_hwtests = self.PatchObject(
-        hwtest_results.HWTestResultManager,
-        'GetFailedHWTestsFromCIDB', return_value=mock_failed_hwtests)
-    self.PatchObject(tree_status, 'WaitForTreeStatus',
-                     return_value=constants.TREE_OPEN)
-
-    stage.CQMasterHandleFailure(set(['test1']), set(), set(), False, ['123'])
-    stage.sync_stage.pool.handle_failure_mock.assert_called_once_with(
-        mock.ANY, sanity=True, no_stat=set(), changes=self.changes,
-        failed_hwtests=mock_failed_hwtests)
-    mock_get_hwtests.assert_called_once_with(db, [slave_build_id])
 
 
 class PublishUprevChangesStageTest(
@@ -1031,7 +920,7 @@ class PublishUprevChangesStageTest(
 
   def testAndroidPush(self):
     """Test values for PublishUprevChanges with Android PFQ."""
-    self._Prepare(bot_id=constants.MNC_ANDROID_PFQ_MASTER,
+    self._Prepare(bot_id=constants.NYC_ANDROID_PFQ_MASTER,
                   extra_config={'push_overlays': constants.PUBLIC_OVERLAYS},
                   extra_cmd_args=['--android_rev',
                                   constants.ANDROID_REV_LATEST])

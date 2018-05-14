@@ -4,9 +4,8 @@ include_rules = [
   "+components/infobars/core",
   "+components/keyed_service/core",
   "+components/metrics",
+  "+components/policy",
   "+components/security_state",
-  "+components/signin/core/browser",
-  "+components/signin/core/common",
   "+components/sync",
   "+components/variations",
   "+components/version_info",
@@ -16,12 +15,12 @@ include_rules = [
   "+google_apis/gaia",
   "+google_apis/google_api_keys.h",
   "+net",
+  "+services/identity/public",
   "+services/metrics/public",
   "+sql",
   "+third_party/fips181",
   "+third_party/libaddressinput", # For address i18n.
   "+third_party/libphonenumber",  # For phone number i18n.
-  "+third_party/libxml",
   "+third_party/re2",
   "+ui/base",
   "+ui/gfx",
@@ -32,6 +31,9 @@ specific_include_rules = {
     "+components/ukm",
   ],
   "autofill_metrics_unittest\.cc": [
+    "+components/ukm",
+  ],
+  "credit_card_save_manager_unittest\.cc": [
     "+components/ukm",
   ],
   "test_autofill_client\.h": [

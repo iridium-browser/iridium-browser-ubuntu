@@ -25,13 +25,15 @@ class GlobalCacheStorageImpl final
   USING_GARBAGE_COLLECTED_MIXIN(GlobalCacheStorageImpl);
 
  public:
+  static const char kSupplementName[];
+
   static GlobalCacheStorageImpl& From(T& supplementable,
                                       ExecutionContext* execution_context) {
-    GlobalCacheStorageImpl* supplement = static_cast<GlobalCacheStorageImpl*>(
-        Supplement<T>::From(supplementable, GetName()));
+    GlobalCacheStorageImpl* supplement =
+        Supplement<T>::template From<GlobalCacheStorageImpl>(supplementable);
     if (!supplement) {
       supplement = new GlobalCacheStorageImpl;
-      Supplement<T>::ProvideTo(supplementable, GetName(), supplement);
+      Supplement<T>::ProvideTo(supplementable, supplement);
     }
     return *supplement;
   }
@@ -55,6 +57,8 @@ class GlobalCacheStorageImpl final
         exception_state.ThrowSecurityError(
             "Access to cache storage is denied.");
       return nullptr;
+    } else if (context->GetSecurityOrigin()->IsLocal()) {
+      UseCounter::Count(context, WebFeature::kFileAccessedCache);
     }
 
     if (!caches_) {
@@ -68,18 +72,21 @@ class GlobalCacheStorageImpl final
 
   // Promptly dispose of associated CacheStorage.
   EAGERLY_FINALIZE();
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(caches_);
     Supplement<T>::Trace(visitor);
   }
 
  private:
-  GlobalCacheStorageImpl() {}
-
-  static const char* GetName() { return "CacheStorage"; }
+  GlobalCacheStorageImpl() = default;
 
   Member<CacheStorage> caches_;
 };
+
+// static
+template <typename T>
+const char GlobalCacheStorageImpl<T>::kSupplementName[] =
+    "GlobalCacheStorageImpl";
 
 }  // namespace
 

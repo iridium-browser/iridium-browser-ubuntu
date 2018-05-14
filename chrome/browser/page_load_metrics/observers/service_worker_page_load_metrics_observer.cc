@@ -13,6 +13,9 @@
 
 namespace internal {
 
+const char kHistogramServiceWorkerPageTransition[] =
+    "PageLoad.Clients.ServiceWorker.PageTransition";
+
 const char kHistogramServiceWorkerParseStart[] =
     "PageLoad.Clients.ServiceWorker.ParseTiming.NavigationToParseStart";
 const char kHistogramServiceWorkerParseStartForwardBack[] =
@@ -322,6 +325,17 @@ void ServiceWorkerPageLoadMetricsObserver::OnParseStart(
     const page_load_metrics::PageLoadExtraInfo& info) {
   if (!IsServiceWorkerControlled(info))
     return;
+
+  // TODO(falken): It may be cleaner to record page transition in OnCommit() but
+  // at that point we don't yet know if the page is controlled by a service
+  // worker. It should be possible to plumb the information there since the
+  // browser process already sends the controller service worker in the
+  // navigation commit IPC.
+  UMA_HISTOGRAM_ENUMERATION(
+      internal::kHistogramServiceWorkerPageTransition,
+      static_cast<int>(ui::PageTransitionStripQualifier(transition_)),
+      static_cast<int>(ui::PAGE_TRANSITION_LAST_CORE) + 1);
+
   if (WasStartedInForegroundOptionalEventInForeground(
           timing.parse_timing->parse_start, info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramServiceWorkerParseStart,
@@ -354,7 +368,7 @@ void ServiceWorkerPageLoadMetricsObserver::OnLoadingBehaviorObserved(
     const page_load_metrics::PageLoadExtraInfo& info) {
   if (!IsServiceWorkerControlled(info) || logged_ukm_event_)
     return;
-  ukm::UkmRecorder* ukm_recorder = g_browser_process->ukm_recorder();
+  ukm::UkmRecorder* ukm_recorder = ukm::UkmRecorder::Get();
   if (ukm_recorder) {
     ukm_recorder->GetEntryBuilder(info.source_id,
                                   internal::kUkmServiceWorkerName);

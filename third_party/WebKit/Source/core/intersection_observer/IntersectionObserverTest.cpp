@@ -4,38 +4,50 @@
 
 #include "core/intersection_observer/IntersectionObserver.h"
 
-#include "core/exported/WebViewBase.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/LocalFrameView.h"
-#include "core/intersection_observer/IntersectionObserverCallback.h"
+#include "core/intersection_observer/IntersectionObserverDelegate.h"
 #include "core/intersection_observer/IntersectionObserverInit.h"
 #include "core/testing/sim/SimCompositor.h"
-#include "core/testing/sim/SimDisplayItemList.h"
 #include "core/testing/sim/SimRequest.h"
 #include "core/testing/sim/SimTest.h"
+#include "platform/geometry/FloatRect.h"
 #include "platform/testing/UnitTestHelpers.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
 
 namespace blink {
 
 namespace {
 
-class TestIntersectionObserverCallback : public IntersectionObserverCallback {
+class TestIntersectionObserverDelegate : public IntersectionObserverDelegate {
  public:
-  TestIntersectionObserverCallback(Document& document)
+  TestIntersectionObserverDelegate(Document& document)
       : document_(document), call_count_(0) {}
-  void HandleEvent(const HeapVector<Member<IntersectionObserverEntry>>&,
-                   IntersectionObserver&) override {
+  void Deliver(const HeapVector<Member<IntersectionObserverEntry>>& entry,
+               IntersectionObserver&) override {
     call_count_++;
+
+    if (!entry.back()->intersectionRect()) {
+      last_intersection_rect_ = FloatRect();
+    } else {
+      last_intersection_rect_ =
+          FloatRect(entry.back()->intersectionRect()->x(),
+                    entry.back()->intersectionRect()->y(),
+                    entry.back()->intersectionRect()->width(),
+                    entry.back()->intersectionRect()->height());
+    }
   }
   ExecutionContext* GetExecutionContext() const override { return document_; }
   int CallCount() const { return call_count_; }
+  FloatRect LastIntersectionRect() const { return last_intersection_rect_; }
 
-  DEFINE_INLINE_TRACE() {
-    IntersectionObserverCallback::Trace(visitor);
+  void Trace(blink::Visitor* visitor) {
+    IntersectionObserverDelegate::Trace(visitor);
     visitor->Trace(document_);
   }
 
  private:
+  FloatRect last_intersection_rect_;
   Member<Document> document_;
   int call_count_;
 };
@@ -51,16 +63,16 @@ TEST_F(IntersectionObserverTest, ObserveSchedulesFrame) {
 
   IntersectionObserverInit observer_init;
   DummyExceptionStateForTesting exception_state;
-  TestIntersectionObserverCallback* observer_callback =
-      new TestIntersectionObserverCallback(GetDocument());
+  TestIntersectionObserverDelegate* observer_delegate =
+      new TestIntersectionObserverDelegate(GetDocument());
   IntersectionObserver* observer = IntersectionObserver::Create(
-      observer_init, *observer_callback, exception_state);
+      observer_init, *observer_delegate, exception_state);
   ASSERT_FALSE(exception_state.HadException());
 
   Compositor().BeginFrame();
   ASSERT_FALSE(Compositor().NeedsBeginFrame());
   EXPECT_TRUE(observer->takeRecords(exception_state).IsEmpty());
-  EXPECT_EQ(observer_callback->CallCount(), 0);
+  EXPECT_EQ(observer_delegate->CallCount(), 0);
 
   Element* target = GetDocument().getElementById("target");
   ASSERT_TRUE(target);
@@ -72,17 +84,18 @@ TEST_F(IntersectionObserverTest, ResumePostsTask) {
   WebView().Resize(WebSize(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
-  main_resource.Complete(
-      "<div id='leading-space' style='height: 700px;'></div>"
-      "<div id='target'></div>"
-      "<div id='trailing-space' style='height: 700px;'></div>");
+  main_resource.Complete(R"HTML(
+    <div id='leading-space' style='height: 700px;'></div>
+    <div id='target'></div>
+    <div id='trailing-space' style='height: 700px;'></div>
+  )HTML");
 
   IntersectionObserverInit observer_init;
   DummyExceptionStateForTesting exception_state;
-  TestIntersectionObserverCallback* observer_callback =
-      new TestIntersectionObserverCallback(GetDocument());
+  TestIntersectionObserverDelegate* observer_delegate =
+      new TestIntersectionObserverDelegate(GetDocument());
   IntersectionObserver* observer = IntersectionObserver::Create(
-      observer_init, *observer_callback, exception_state);
+      observer_init, *observer_delegate, exception_state);
   ASSERT_FALSE(exception_state.HadException());
 
   Element* target = GetDocument().getElementById("target");
@@ -91,27 +104,27 @@ TEST_F(IntersectionObserverTest, ResumePostsTask) {
 
   Compositor().BeginFrame();
   testing::RunPendingTasks();
-  EXPECT_EQ(observer_callback->CallCount(), 1);
+  EXPECT_EQ(observer_delegate->CallCount(), 1);
 
   // When document is not suspended, beginFrame() will generate notifications
   // and post a task to deliver them.
   GetDocument().View()->LayoutViewportScrollableArea()->SetScrollOffset(
       ScrollOffset(0, 300), kProgrammaticScroll);
   Compositor().BeginFrame();
-  EXPECT_EQ(observer_callback->CallCount(), 1);
+  EXPECT_EQ(observer_delegate->CallCount(), 1);
   testing::RunPendingTasks();
-  EXPECT_EQ(observer_callback->CallCount(), 2);
+  EXPECT_EQ(observer_delegate->CallCount(), 2);
 
   // When a document is suspended, beginFrame() will generate a notification,
   // but it will not be delivered.  The notification will, however, be
   // available via takeRecords();
-  GetDocument().SuspendScheduledTasks();
+  GetDocument().PauseScheduledTasks();
   GetDocument().View()->LayoutViewportScrollableArea()->SetScrollOffset(
       ScrollOffset(0, 0), kProgrammaticScroll);
   Compositor().BeginFrame();
-  EXPECT_EQ(observer_callback->CallCount(), 2);
+  EXPECT_EQ(observer_delegate->CallCount(), 2);
   testing::RunPendingTasks();
-  EXPECT_EQ(observer_callback->CallCount(), 2);
+  EXPECT_EQ(observer_delegate->CallCount(), 2);
   EXPECT_FALSE(observer->takeRecords(exception_state).IsEmpty());
 
   // Generate a notification while document is suspended; then resume document.
@@ -120,28 +133,29 @@ TEST_F(IntersectionObserverTest, ResumePostsTask) {
       ScrollOffset(0, 300), kProgrammaticScroll);
   Compositor().BeginFrame();
   testing::RunPendingTasks();
-  EXPECT_EQ(observer_callback->CallCount(), 2);
-  GetDocument().ResumeScheduledTasks();
-  EXPECT_EQ(observer_callback->CallCount(), 2);
+  EXPECT_EQ(observer_delegate->CallCount(), 2);
+  GetDocument().UnpauseScheduledTasks();
+  EXPECT_EQ(observer_delegate->CallCount(), 2);
   testing::RunPendingTasks();
-  EXPECT_EQ(observer_callback->CallCount(), 3);
+  EXPECT_EQ(observer_delegate->CallCount(), 3);
 }
 
 TEST_F(IntersectionObserverTest, DisconnectClearsNotifications) {
   WebView().Resize(WebSize(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
-  main_resource.Complete(
-      "<div id='leading-space' style='height: 700px;'></div>"
-      "<div id='target'></div>"
-      "<div id='trailing-space' style='height: 700px;'></div>");
+  main_resource.Complete(R"HTML(
+    <div id='leading-space' style='height: 700px;'></div>
+    <div id='target'></div>
+    <div id='trailing-space' style='height: 700px;'></div>
+  )HTML");
 
   IntersectionObserverInit observer_init;
   DummyExceptionStateForTesting exception_state;
-  TestIntersectionObserverCallback* observer_callback =
-      new TestIntersectionObserverCallback(GetDocument());
+  TestIntersectionObserverDelegate* observer_delegate =
+      new TestIntersectionObserverDelegate(GetDocument());
   IntersectionObserver* observer = IntersectionObserver::Create(
-      observer_init, *observer_callback, exception_state);
+      observer_init, *observer_delegate, exception_state);
   ASSERT_FALSE(exception_state.HadException());
 
   Element* target = GetDocument().getElementById("target");
@@ -150,7 +164,7 @@ TEST_F(IntersectionObserverTest, DisconnectClearsNotifications) {
 
   Compositor().BeginFrame();
   testing::RunPendingTasks();
-  EXPECT_EQ(observer_callback->CallCount(), 1);
+  EXPECT_EQ(observer_delegate->CallCount(), 1);
 
   // If disconnect() is called while an observer has unsent notifications,
   // those notifications should be discarded.
@@ -159,7 +173,65 @@ TEST_F(IntersectionObserverTest, DisconnectClearsNotifications) {
   Compositor().BeginFrame();
   observer->disconnect();
   testing::RunPendingTasks();
-  EXPECT_EQ(observer_callback->CallCount(), 1);
+  EXPECT_EQ(observer_delegate->CallCount(), 1);
+}
+
+TEST_F(IntersectionObserverTest, RootIntersectionWithForceZeroLayoutHeight) {
+  WebView().GetSettings()->SetForceZeroLayoutHeight(true);
+  WebView().Resize(WebSize(800, 600));
+  SimRequest main_resource("https://example.com/", "text/html");
+  LoadURL("https://example.com/");
+  main_resource.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+      body {
+        margin: 0;
+        height: 2000px;
+      }
+
+      #target {
+        width: 100px;
+        height: 100px;
+        position: absolute;
+        top: 1000px;
+        left: 200px;
+      }
+    </style>
+    <div id='target'></div>
+  )HTML");
+
+  IntersectionObserverInit observer_init;
+  DummyExceptionStateForTesting exception_state;
+  TestIntersectionObserverDelegate* observer_delegate =
+      new TestIntersectionObserverDelegate(GetDocument());
+  IntersectionObserver* observer = IntersectionObserver::Create(
+      observer_init, *observer_delegate, exception_state);
+  ASSERT_FALSE(exception_state.HadException());
+
+  Element* target = GetDocument().getElementById("target");
+  ASSERT_TRUE(target);
+  observer->observe(target, exception_state);
+
+  Compositor().BeginFrame();
+  testing::RunPendingTasks();
+  ASSERT_EQ(observer_delegate->CallCount(), 1);
+  EXPECT_TRUE(observer_delegate->LastIntersectionRect().IsEmpty());
+
+  GetDocument().View()->LayoutViewportScrollableArea()->SetScrollOffset(
+      ScrollOffset(0, 600), kProgrammaticScroll);
+  Compositor().BeginFrame();
+  testing::RunPendingTasks();
+  ASSERT_EQ(observer_delegate->CallCount(), 2);
+  EXPECT_FALSE(observer_delegate->LastIntersectionRect().IsEmpty());
+  EXPECT_EQ(FloatRect(200, 400, 100, 100),
+            observer_delegate->LastIntersectionRect());
+
+  GetDocument().View()->LayoutViewportScrollableArea()->SetScrollOffset(
+      ScrollOffset(0, 1200), kProgrammaticScroll);
+  Compositor().BeginFrame();
+  testing::RunPendingTasks();
+  ASSERT_EQ(observer_delegate->CallCount(), 3);
+  EXPECT_TRUE(observer_delegate->LastIntersectionRect().IsEmpty());
 }
 
 }  // namespace blink

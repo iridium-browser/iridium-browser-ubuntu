@@ -7,6 +7,9 @@
 
 #include <stddef.h>
 
+#include <string>
+#include <vector>
+
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
@@ -16,7 +19,7 @@
 namespace base {
 
 // Callback that runs a test suite and returns exit code.
-typedef base::Callback<int(void)> RunTestSuiteCallback;
+using RunTestSuiteCallback = Callback<int(void)>;
 
 // Launches unit tests in given test suite. Returns exit code.
 int LaunchUnitTests(int argc,
@@ -56,7 +59,11 @@ class UnitTestPlatformDelegate {
   // must put the result in |output| and return true on success.
   virtual bool GetTests(std::vector<TestIdentifier>* output) = 0;
 
-  // Called to create a temporary file. The delegate must put the resulting
+  // Called to create a temporary for storing test results. The delegate
+  // must put the resulting path in |path| and return true on success.
+  virtual bool CreateResultsFile(base::FilePath* path) = 0;
+
+  // Called to create a new temporary file. The delegate must put the resulting
   // path in |path| and return true on success.
   virtual bool CreateTemporaryFile(base::FilePath* path) = 0;
 
@@ -65,7 +72,8 @@ class UnitTestPlatformDelegate {
   // (e.g. "A.B"), |output_file| is path to the GTest XML output file.
   virtual CommandLine GetCommandLineForChildGTestProcess(
       const std::vector<std::string>& test_names,
-      const base::FilePath& output_file) = 0;
+      const base::FilePath& output_file,
+      const base::FilePath& flag_file) = 0;
 
   // Returns wrapper to use for child GTest process. Empty string means
   // no wrapper.
@@ -77,7 +85,7 @@ class UnitTestPlatformDelegate {
                              int launch_flags) = 0;
 
  protected:
-  ~UnitTestPlatformDelegate() {}
+  ~UnitTestPlatformDelegate() = default;
 };
 
 // Runs tests serially, each in its own process.

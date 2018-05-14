@@ -131,6 +131,10 @@ bool FakeDiskMountManager::FinishAllUnmountPathRequests() {
 void FakeDiskMountManager::FormatMountedDevice(const std::string& mount_path) {
 }
 
+void FakeDiskMountManager::RenameMountedDevice(const std::string& mount_path,
+                                               const std::string& volume_name) {
+}
+
 void FakeDiskMountManager::UnmountDeviceRecursively(
     const std::string& device_path,
     const UnmountDeviceRecursivelyCallbackType& callback) {
@@ -149,8 +153,10 @@ bool FakeDiskMountManager::AddMountPointForTest(
 void FakeDiskMountManager::InvokeDiskEventForTest(
     chromeos::disks::DiskMountManager::DiskEvent event,
     const chromeos::disks::DiskMountManager::Disk* disk) {
-  for (auto& observer : observers_)
-    observer.OnDiskEvent(event, disk);
+  for (auto& observer : observers_) {
+    disk->IsAutoMountable() ? observer.OnAutoMountableDiskEvent(event, *disk)
+                            : observer.OnBootDeviceDiskEvent(event, *disk);
+  }
 }
 
 }  // namespace file_manager

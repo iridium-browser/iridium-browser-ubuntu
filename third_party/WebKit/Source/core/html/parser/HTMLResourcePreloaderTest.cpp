@@ -4,10 +4,10 @@
 
 #include "core/html/parser/HTMLResourcePreloader.h"
 
-#include "core/html/parser/PreloadRequest.h"
-#include "core/testing/DummyPageHolder.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include <memory>
+#include "core/html/parser/PreloadRequest.h"
+#include "core/testing/PageTestBase.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
@@ -22,7 +22,7 @@ class PreloaderNetworkHintsMock : public NetworkHintsInterface {
  public:
   PreloaderNetworkHintsMock() : did_preconnect_(false) {}
 
-  void DnsPrefetchHost(const String& host) const {}
+  void DnsPrefetchHost(const String& host) const override {}
   void PreconnectHost(
       const KURL& host,
       const CrossOriginAttributeValue cross_origin) const override {
@@ -41,33 +41,29 @@ class PreloaderNetworkHintsMock : public NetworkHintsInterface {
   mutable bool is_cross_origin_;
 };
 
-class HTMLResourcePreloaderTest : public ::testing::Test {
+class HTMLResourcePreloaderTest : public PageTestBase {
  protected:
-  HTMLResourcePreloaderTest() : dummy_page_holder_(DummyPageHolder::Create()) {}
+  void SetUp() override { PageTestBase::SetUp(IntSize()); }
 
   void Test(HTMLResourcePreconnectTestCase test_case) {
     // TODO(yoav): Need a mock loader here to verify things are happenning
     // beyond preconnect.
     PreloaderNetworkHintsMock network_hints;
     auto preload_request = PreloadRequest::CreateIfNeeded(
-        String(), TextPosition(), test_case.url,
-        KURL(ParsedURLStringTag(), test_case.base_url), Resource::kImage,
-        ReferrerPolicy(), PreloadRequest::kDocumentIsReferrer,
+        String(), TextPosition(), test_case.url, KURL(test_case.base_url),
+        Resource::kImage, ReferrerPolicy(), PreloadRequest::kDocumentIsReferrer,
         ResourceFetcher::kImageNotImageSet, FetchParameters::ResourceWidth(),
         ClientHintsPreferences(), PreloadRequest::kRequestTypePreconnect);
     DCHECK(preload_request);
     if (test_case.is_cors)
       preload_request->SetCrossOrigin(kCrossOriginAttributeAnonymous);
     HTMLResourcePreloader* preloader =
-        HTMLResourcePreloader::Create(dummy_page_holder_->GetDocument());
+        HTMLResourcePreloader::Create(GetDocument());
     preloader->Preload(std::move(preload_request), network_hints);
     ASSERT_TRUE(network_hints.DidPreconnect());
     ASSERT_EQ(test_case.is_cors, network_hints.IsCrossOrigin());
     ASSERT_EQ(test_case.is_https, network_hints.IsHTTPS());
   }
-
- private:
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
 };
 
 TEST_F(HTMLResourcePreloaderTest, testPreconnect) {

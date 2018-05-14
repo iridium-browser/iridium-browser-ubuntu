@@ -11,6 +11,7 @@
 #include "ipc/ipc_message.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace content {
 
@@ -33,7 +34,7 @@ bool RenderFrameHostDelegate::DidAddMessageToConsole(
 }
 
 WebContents* RenderFrameHostDelegate::GetAsWebContents() {
-  return NULL;
+  return nullptr;
 }
 
 InterstitialPage* RenderFrameHostDelegate::GetAsInterstitialPage() {
@@ -50,7 +51,7 @@ void RenderFrameHostDelegate::RequestMediaAccessPermission(
 }
 
 bool RenderFrameHostDelegate::CheckMediaAccessPermission(
-    const GURL& security_origin,
+    const url::Origin& security_origin,
     MediaStreamType type) {
   LOG(ERROR) << "RenderFrameHostDelegate::CheckMediaAccessPermission: "
              << "Not supported.";
@@ -62,17 +63,18 @@ std::string RenderFrameHostDelegate::GetDefaultMediaDeviceID(
   return std::string();
 }
 
-AccessibilityMode RenderFrameHostDelegate::GetAccessibilityMode() const {
-  return AccessibilityMode();
+ui::AXMode RenderFrameHostDelegate::GetAccessibilityMode() const {
+  return ui::AXMode();
 }
 
 RenderFrameHost* RenderFrameHostDelegate::GetGuestByInstanceID(
     RenderFrameHost* render_frame_host,
     int browser_plugin_instance_id) {
-  return NULL;
+  return nullptr;
 }
 
-device::GeolocationContext* RenderFrameHostDelegate::GetGeolocationContext() {
+device::mojom::GeolocationContext*
+RenderFrameHostDelegate::GetGeolocationContext() {
   return nullptr;
 }
 

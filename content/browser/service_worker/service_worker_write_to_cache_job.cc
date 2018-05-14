@@ -5,7 +5,6 @@
 #include "content/browser/service_worker/service_worker_write_to_cache_job.h"
 
 #include "base/bind.h"
-#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
@@ -28,6 +27,7 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
+#include "third_party/WebKit/public/common/mime_util/mime_util.h"
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
 
 namespace content {
@@ -54,7 +54,7 @@ bool ShouldIgnoreSSLError(net::URLRequest* request) {
     return true;
   bool allow_localhost = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kAllowInsecureLocalhost);
-  if (allow_localhost && net::IsLocalhost(request->url().host()))
+  if (allow_localhost && net::IsLocalhost(request->url()))
     return true;
   return false;
 }
@@ -80,9 +80,6 @@ ServiceWorkerWriteToCacheJob::ServiceWorkerWriteToCacheJob(
       resource_id_(resource_id),
       incumbent_resource_id_(incumbent_resource_id),
       version_(version),
-      has_been_killed_(false),
-      did_notify_started_(false),
-      did_notify_finished_(false),
       weak_factory_(this) {
   DCHECK(version_);
   DCHECK(resource_type_ == RESOURCE_TYPE_SCRIPT ||
@@ -98,8 +95,8 @@ ServiceWorkerWriteToCacheJob::~ServiceWorkerWriteToCacheJob() {
 
 void ServiceWorkerWriteToCacheJob::Start() {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ServiceWorkerWriteToCacheJob::StartAsync,
-                            weak_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&ServiceWorkerWriteToCacheJob::StartAsync,
+                                weak_factory_.GetWeakPtr()));
 }
 
 void ServiceWorkerWriteToCacheJob::StartAsync() {
@@ -114,9 +111,19 @@ void ServiceWorkerWriteToCacheJob::StartAsync() {
     return;
   }
 
-  cache_writer_.reset(new ServiceWorkerCacheWriter(
-      CreateCacheResponseReader(), CreateCacheResponseReader(),
-      CreateCacheResponseWriter()));
+  // Create response readers only when we have to do the byte-for-byte check.
+  std::unique_ptr<ServiceWorkerResponseReader> compare_reader;
+  std::unique_ptr<ServiceWorkerResponseReader> copy_reader;
+  if (ShouldByteForByteCheck()) {
+    compare_reader =
+        context_->storage()->CreateResponseReader(incumbent_resource_id_);
+    copy_reader =
+        context_->storage()->CreateResponseReader(incumbent_resource_id_);
+  }
+  cache_writer_ = std::make_unique<ServiceWorkerCacheWriter>(
+      std::move(compare_reader), std::move(copy_reader),
+      context_->storage()->CreateResponseWriter(resource_id_));
+
   version_->script_cache_map()->NotifyStartedCaching(url_, resource_id_);
   did_notify_started_ = true;
   StartNetRequest();
@@ -209,7 +216,7 @@ void ServiceWorkerWriteToCacheJob::InitNetRequest(
             destination: WEBSITE
           }
           policy {
-            cookies_allowed: true
+            cookies_allowed: YES
             cookies_store: "user"
             setting:
               "Users can control this feature via the 'Cookies' setting under "
@@ -226,12 +233,11 @@ void ServiceWorkerWriteToCacheJob::InitNetRequest(
           })");
   net_request_ = request()->context()->CreateRequest(
       request()->url(), request()->priority(), this, traffic_annotation);
-  net_request_->set_first_party_for_cookies(
-      request()->first_party_for_cookies());
+  net_request_->set_site_for_cookies(request()->site_for_cookies());
   net_request_->set_initiator(request()->initiator());
   net_request_->SetReferrer(request()->referrer());
   net_request_->SetUserData(URLRequestServiceWorkerData::kUserDataKey,
-                            base::MakeUnique<URLRequestServiceWorkerData>());
+                            std::make_unique<URLRequestServiceWorkerData>());
   if (extra_load_flags)
     net_request_->SetLoadFlags(net_request_->load_flags() | extra_load_flags);
 
@@ -297,10 +303,13 @@ void ServiceWorkerWriteToCacheJob::OnSSLCertificateError(
   DCHECK_EQ(net_request_.get(), request);
   TRACE_EVENT0("ServiceWorker",
                "ServiceWorkerWriteToCacheJob::OnSSLCertificateError");
-  if (ShouldIgnoreSSLError(request))
+  if (ShouldIgnoreSSLError(request)) {
     request->ContinueDespiteLastError();
-  else
-    NotifyStartErrorHelper(net::ERR_INSECURE_RESPONSE, kSSLError);
+  } else {
+    NotifyStartErrorHelper(
+        net::Error(net::MapCertStatusToNetError(ssl_info.cert_status)),
+        kSSLError);
+  }
 }
 
 void ServiceWorkerWriteToCacheJob::OnResponseStarted(net::URLRequest* request,
@@ -325,16 +334,16 @@ void ServiceWorkerWriteToCacheJob::OnResponseStarted(net::URLRequest* request,
   // So we check cert_status here.
   if (net::IsCertStatusError(request->ssl_info().cert_status) &&
       !ShouldIgnoreSSLError(request)) {
-    NotifyStartErrorHelper(net::ERR_INSECURE_RESPONSE, kSSLError);
+    NotifyStartErrorHelper(net::Error(net::MapCertStatusToNetError(
+                               request->ssl_info().cert_status)),
+                           kSSLError);
     return;
   }
 
   if (resource_type_ == RESOURCE_TYPE_SERVICE_WORKER) {
     std::string mime_type;
     request->GetMimeType(&mime_type);
-    if (mime_type != "application/x-javascript" &&
-        mime_type != "text/javascript" &&
-        mime_type != "application/javascript") {
+    if (!blink::IsSupportedJavascriptMimeType(mime_type)) {
       std::string error_message =
           mime_type.empty()
               ? kNoMIMEError
@@ -360,8 +369,8 @@ void ServiceWorkerWriteToCacheJob::OnResponseStarted(net::URLRequest* request,
           new net::HttpResponseInfo(net_request_->response_info()));
   net::Error error = cache_writer_->MaybeWriteHeaders(
       info_buffer.get(),
-      base::Bind(&ServiceWorkerWriteToCacheJob::OnWriteHeadersComplete,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&ServiceWorkerWriteToCacheJob::OnWriteHeadersComplete,
+                     weak_factory_.GetWeakPtr()));
   if (error == net::ERR_IO_PENDING)
     return;
   OnWriteHeadersComplete(error);
@@ -434,8 +443,8 @@ int ServiceWorkerWriteToCacheJob::HandleNetData(int bytes_read) {
   io_buffer_bytes_ = bytes_read;
   net::Error error = cache_writer_->MaybeWriteData(
       io_buffer_.get(), bytes_read,
-      base::Bind(&ServiceWorkerWriteToCacheJob::OnWriteDataComplete,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&ServiceWorkerWriteToCacheJob::OnWriteDataComplete,
+                     weak_factory_.GetWeakPtr()));
 
   // In case of ERR_IO_PENDING, this logic is done in OnWriteDataComplete.
   if (error != net::ERR_IO_PENDING && bytes_read == 0) {
@@ -488,18 +497,9 @@ net::Error ServiceWorkerWriteToCacheJob::NotifyFinishedCaching(
   return net_error;
 }
 
-std::unique_ptr<ServiceWorkerResponseReader>
-ServiceWorkerWriteToCacheJob::CreateCacheResponseReader() {
-  if (incumbent_resource_id_ == kInvalidServiceWorkerResourceId ||
-      !version_->pause_after_download()) {
-    return nullptr;
-  }
-  return context_->storage()->CreateResponseReader(incumbent_resource_id_);
-}
-
-std::unique_ptr<ServiceWorkerResponseWriter>
-ServiceWorkerWriteToCacheJob::CreateCacheResponseWriter() {
-  return context_->storage()->CreateResponseWriter(resource_id_);
+bool ServiceWorkerWriteToCacheJob::ShouldByteForByteCheck() const {
+  return incumbent_resource_id_ != kInvalidServiceWorkerResourceId &&
+         version_->pause_after_download();
 }
 
 }  // namespace content

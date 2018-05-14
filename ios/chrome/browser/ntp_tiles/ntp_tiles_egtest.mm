@@ -4,6 +4,7 @@
 
 #import <EarlGrey/EarlGrey.h>
 
+#include "base/ios/ios_util.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/app/history_test_util.h"
 #import "ios/chrome/test/app/tab_test_util.h"
@@ -29,8 +30,10 @@ using web::test::HttpServer;
 @implementation NTPTilesTest
 
 - (void)tearDown {
-  chrome_test_util::ClearBrowsingHistory();
+  GREYAssertTrue(chrome_test_util::ClearBrowsingHistory(),
+                 @"Clearing Browsing History timed out");
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [super tearDown];
 }
 
 // Tests that loading a URL ends up creating an NTP tile.
@@ -43,7 +46,8 @@ using web::test::HttpServer;
   web::test::SetUpSimpleHttpServer(responses);
 
   // Clear history and verify that the tile does not exist.
-  chrome_test_util::ClearBrowsingHistory();
+  GREYAssertTrue(chrome_test_util::ClearBrowsingHistory(),
+                 @"Clearing Browsing History timed out");
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
   chrome_test_util::OpenNewTab();
 
@@ -58,6 +62,9 @@ using web::test::HttpServer;
   [ChromeEarlGrey goBack];
 
   chrome_test_util::OpenNewTab();
+  // New tab page is not loaded within a single tick so wait before assert.
+  [ChromeEarlGrey waitForPageToFinishLoading];
+
   [[EarlGrey selectElementWithMatcher:
                  chrome_test_util::StaticTextWithAccessibilityLabel(@"title1")]
       assertWithMatcher:grey_notNil()];
@@ -87,7 +94,8 @@ using web::test::HttpServer;
   web::test::SetUpHttpServer(std::move(provider));
 
   // Clear history and verify that the tile does not exist.
-  chrome_test_util::ClearBrowsingHistory();
+  GREYAssertTrue(chrome_test_util::ClearBrowsingHistory(),
+                 @"Clearing Browsing History timed out");
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
   chrome_test_util::OpenNewTab();
   [[EarlGrey selectElementWithMatcher:

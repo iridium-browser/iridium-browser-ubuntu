@@ -13,10 +13,30 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/buffer_format_util.h"
 
+#if defined(OS_WIN)
+#include "base/command_line.h"
+#include "build/build_config.h"
+#include "ui/gl/gl_switches.h"
+#include "ui/gl/init/gl_factory.h"
+#include "ui/gl/test/gl_surface_test_support.h"
+#endif
+
 namespace gpu {
 
 template <typename GpuMemoryBufferFactoryType>
 class GpuMemoryBufferFactoryTest : public testing::Test {
+ public:
+#if defined(OS_WIN)
+  // Overridden from testing::Test:
+  void SetUp() override {
+    // This test only works with hardware rendering.
+    DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kUseGpuInTests));
+    gl::GLSurfaceTestSupport::InitializeOneOff();
+  }
+  void TearDown() override { gl::init::ShutdownGL(false); }
+#endif
+
  protected:
   GpuMemoryBufferFactoryType factory_;
 };
@@ -31,8 +51,11 @@ TYPED_TEST_P(GpuMemoryBufferFactoryTest, CreateGpuMemoryBuffer) {
 
   for (auto format : gfx::GetBufferFormatsForTesting()) {
     gfx::BufferUsage usages[] = {
-        gfx::BufferUsage::GPU_READ, gfx::BufferUsage::SCANOUT,
+        gfx::BufferUsage::GPU_READ,
+        gfx::BufferUsage::SCANOUT,
+        gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE,
         gfx::BufferUsage::SCANOUT_CPU_READ_WRITE,
+        gfx::BufferUsage::SCANOUT_VDA_WRITE,
         gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
         gfx::BufferUsage::GPU_READ_CPU_READ_WRITE_PERSISTENT};
     for (auto usage : usages) {

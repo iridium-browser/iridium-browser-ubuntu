@@ -6,10 +6,10 @@
 
 #include <memory>
 #include "core/dom/Document.h"
-#include "core/dom/FrameRequestCallback.h"
-#include "core/events/Event.h"
-#include "core/events/EventListener.h"
-#include "core/events/EventTarget.h"
+#include "core/dom/FrameRequestCallbackCollection.h"
+#include "core/dom/events/Event.h"
+#include "core/dom/events/EventListener.h"
+#include "core/dom/events/EventTarget.h"
 #include "core/testing/DummyPageHolder.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Functional.h"
@@ -44,8 +44,9 @@ namespace {
 
 class TaskOrderObserver {
  public:
-  std::unique_ptr<WTF::Closure> CreateTask(int id) {
-    return WTF::Bind(&TaskOrderObserver::RunTask, WTF::Unretained(this), id);
+  base::RepeatingClosure CreateTask(int id) {
+    return WTF::BindRepeating(&TaskOrderObserver::RunTask,
+                              WTF::Unretained(this), id);
   }
   const Vector<int>& Order() const { return order_; }
 
@@ -118,15 +119,15 @@ namespace {
 
 class RunTaskEventListener final : public EventListener {
  public:
-  RunTaskEventListener(std::unique_ptr<WTF::Closure> task)
+  RunTaskEventListener(base::RepeatingClosure task)
       : EventListener(kCPPEventListenerType), task_(std::move(task)) {}
-  void handleEvent(ExecutionContext*, Event*) override { (*task_)(); }
+  void handleEvent(ExecutionContext*, Event*) override { task_.Run(); }
   bool operator==(const EventListener& other) const override {
     return this == &other;
   }
 
  private:
-  std::unique_ptr<WTF::Closure> task_;
+  base::RepeatingClosure task_;
 };
 
 }  // anonymous namespace
@@ -152,14 +153,14 @@ TEST_F(ScriptedAnimationControllerTest, EnqueueTaskAndEvent) {
 
 namespace {
 
-class RunTaskCallback final : public FrameRequestCallback {
+class RunTaskCallback final
+    : public FrameRequestCallbackCollection::FrameCallback {
  public:
-  RunTaskCallback(std::unique_ptr<WTF::Closure> task)
-      : task_(std::move(task)) {}
-  void handleEvent(double) override { (*task_)(); }
+  RunTaskCallback(base::RepeatingClosure task) : task_(std::move(task)) {}
+  void Invoke(double) override { task_.Run(); }
 
  private:
-  std::unique_ptr<WTF::Closure> task_;
+  base::RepeatingClosure task_;
 };
 
 }  // anonymous namespace
@@ -180,6 +181,28 @@ TEST_F(ScriptedAnimationControllerTest, RegisterCallbackAndEnqueueTask) {
   EXPECT_EQ(2u, observer.Order().size());
   EXPECT_EQ(2, observer.Order()[0]);
   EXPECT_EQ(1, observer.Order()[1]);
+}
+
+TEST_F(ScriptedAnimationControllerTest, TestHasCallback) {
+  TaskOrderObserver observer;
+
+  Controller().RegisterCallback(new RunTaskCallback(observer.CreateTask(1)));
+  EXPECT_TRUE(Controller().HasCallback());
+
+  Controller().CancelCallback(1);
+  EXPECT_FALSE(Controller().HasCallback());
+
+  Controller().RegisterCallback(new RunTaskCallback(observer.CreateTask(1)));
+  Controller().RegisterCallback(new RunTaskCallback(observer.CreateTask(2)));
+  EXPECT_TRUE(Controller().HasCallback());
+
+  Controller().CancelCallback(1);
+  EXPECT_TRUE(Controller().HasCallback());
+
+  // Servicing the scripted animations should call the remaining callback and
+  // clear it.
+  Controller().ServiceScriptedAnimations(0);
+  EXPECT_FALSE(Controller().HasCallback());
 }
 
 }  // namespace blink

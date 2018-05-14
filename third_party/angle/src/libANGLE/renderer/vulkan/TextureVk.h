@@ -11,15 +11,18 @@
 #define LIBANGLE_RENDERER_VULKAN_TEXTUREVK_H_
 
 #include "libANGLE/renderer/TextureImpl.h"
+#include "libANGLE/renderer/vulkan/RenderTargetVk.h"
+#include "libANGLE/renderer/vulkan/vk_utils.h"
 
 namespace rx
 {
 
-class TextureVk : public TextureImpl
+class TextureVk : public TextureImpl, public ResourceVk
 {
   public:
     TextureVk(const gl::TextureState &state);
     ~TextureVk() override;
+    gl::Error onDestroy(const gl::Context *context) override;
 
     gl::Error setImage(const gl::Context *context,
                        GLenum target,
@@ -103,7 +106,29 @@ class TextureVk : public TextureImpl
                                     GLsizei samples,
                                     GLint internalformat,
                                     const gl::Extents &size,
-                                    GLboolean fixedSampleLocations) override;
+                                    bool fixedSampleLocations) override;
+
+    gl::Error initializeContents(const gl::Context *context,
+                                 const gl::ImageIndex &imageIndex) override;
+
+    const vk::Image &getImage() const;
+    const vk::ImageView &getImageView() const;
+    const vk::Sampler &getSampler() const;
+
+  private:
+    gl::Error setSubImageImpl(ContextVk *contextVk,
+                              const gl::InternalFormat &formatInfo,
+                              const gl::PixelUnpackState &unpack,
+                              GLenum type,
+                              const uint8_t *pixels);
+
+    // TODO(jmadill): support a more flexible storage back-end.
+    vk::Image mImage;
+    vk::DeviceMemory mDeviceMemory;
+    vk::ImageView mImageView;
+    vk::Sampler mSampler;
+
+    RenderTargetVk mRenderTarget;
 };
 
 }  // namespace rx

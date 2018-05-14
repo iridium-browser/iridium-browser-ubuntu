@@ -12,15 +12,12 @@
 @class TabSwitcherHeaderView;
 @class TabSwitcherView;
 
-namespace ios_internal {
-enum NewTabButtonStyle { UNINITIALIZED, BLUE, GRAY, HIDDEN };
-}  // namespace ios_internal
+enum class NewTabButtonStyle { UNINITIALIZED, BLUE, GRAY, HIDDEN };
 
 @protocol TabSwitcherViewDelegate<NSObject>
 
 - (void)openNewTabInPanelAtIndex:(NSInteger)panelIndex;
-- (ios_internal::NewTabButtonStyle)buttonStyleForPanelAtIndex:
-    (NSInteger)panelIndex;
+- (NewTabButtonStyle)buttonStyleForPanelAtIndex:(NSInteger)panelIndex;
 - (BOOL)shouldShowDismissButtonForPanelAtIndex:(NSInteger)panelIndex;
 - (void)tabSwitcherViewDelegateDismissTabSwitcher:(TabSwitcherView*)delegate;
 
@@ -28,11 +25,10 @@ enum NewTabButtonStyle { UNINITIALIZED, BLUE, GRAY, HIDDEN };
 
 @interface TabSwitcherView : UIView<UIScrollViewDelegate>
 
-@property(unsafe_unretained, nonatomic, readonly)
-    TabSwitcherHeaderView* headerView;
-@property(unsafe_unretained, nonatomic, readonly) UIScrollView* scrollView;
+@property(nonatomic, readonly, weak) TabSwitcherHeaderView* headerView;
+@property(nonatomic, readonly, weak) UIScrollView* scrollView;
 
-@property(nonatomic, unsafe_unretained) id<TabSwitcherViewDelegate> delegate;
+@property(nonatomic, weak) id<TabSwitcherViewDelegate> delegate;
 
 // Select the panel at the given index, updating both the header and content.
 // The panel selection will be animated if VoiceOver is disabled.
@@ -49,6 +45,10 @@ enum NewTabButtonStyle { UNINITIALIZED, BLUE, GRAY, HIDDEN };
 // Overlay buttons are the top right dismiss button and the bottom right new tab
 // button.
 - (void)updateOverlayButtonState;
+// Should be called when the tab switcher was shown.
+- (void)wasShown;
+// Should be called when the tab switcher was hidden.
+- (void)wasHidden;
 
 @end
 

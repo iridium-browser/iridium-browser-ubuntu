@@ -9,9 +9,11 @@ namespace metrics {
 const char kNewMetricsServerUrl[] =
     "trk:265:https://clientservices.googleapis.com/uma/v2";
 
-const char kOldMetricsServerUrl[] = "trk:265:https://clients4.google.com/uma/v2";
+const char kNewMetricsServerUrlInsecure[] =
+    "http://clientservices.googleapis.com/uma/v2";
+
+const char kOldMetricsServerUrl[] = "https://clients4.google.com/uma/v2";
 
 const char kDefaultMetricsMimeType[] = "application/vnd.chrome.uma";
 
 } // namespace metrics
-

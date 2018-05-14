@@ -4,6 +4,7 @@
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_mutable_config_values.h"
 
+#include <memory>
 #include <vector>
 
 #include "base/command_line.h"
@@ -11,7 +12,7 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_server.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
-#include "net/proxy/proxy_server.h"
+#include "net/base/proxy_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace data_reduction_proxy {
@@ -24,9 +25,8 @@ class DataReductionProxyMutableConfigValuesTest : public testing::Test {
   ~DataReductionProxyMutableConfigValuesTest() override {}
 
   void Init() {
-    params_.reset(new DataReductionProxyParams());
     mutable_config_values_ =
-        DataReductionProxyMutableConfigValues::CreateFromParams(params_.get());
+        std::make_unique<DataReductionProxyMutableConfigValues>();
   }
 
   DataReductionProxyMutableConfigValues* mutable_config_values() const {
@@ -34,7 +34,6 @@ class DataReductionProxyMutableConfigValuesTest : public testing::Test {
   }
 
  private:
-  std::unique_ptr<DataReductionProxyParams> params_;
   std::unique_ptr<DataReductionProxyMutableConfigValues> mutable_config_values_;
 };
 
@@ -118,7 +117,7 @@ TEST_F(DataReductionProxyMutableConfigValuesTest, OverrideDataReductionProxy) {
 
   for (const auto& test : tests) {
     // Reset all flags.
-    base::CommandLine::ForCurrentProcess()->InitFromArgv(0, NULL);
+    base::CommandLine::ForCurrentProcess()->InitFromArgv(0, nullptr);
     if (test.set_primary) {
       base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
           switches::kDataReductionProxy, "http://override-first.net");

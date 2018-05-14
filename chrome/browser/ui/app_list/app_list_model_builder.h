@@ -5,34 +5,31 @@
 #ifndef CHROME_BROWSER_UI_APP_LIST_APP_LIST_MODEL_BUILDER_H_
 #define CHROME_BROWSER_UI_APP_LIST_APP_LIST_MODEL_BUILDER_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
+#include "chrome/browser/ui/app_list/app_list_model_updater.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
-#include "ui/app_list/app_list_item_list_observer.h"
-#include "ui/app_list/app_list_model.h"
 
 class AppListControllerDelegate;
+class ChromeAppListItem;
 class Profile;
 
 // This abstract class populates and maintains the given |model| with
 // information from |profile| for the specific item type.
-class AppListModelBuilder : public app_list::AppListItemListObserver {
+class AppListModelBuilder {
  public:
   // |controller| is owned by implementation of AppListService.
   AppListModelBuilder(AppListControllerDelegate* controller,
                       const char* item_type);
-   ~AppListModelBuilder() override;
+  virtual ~AppListModelBuilder();
 
   // Initialize to use app-list sync and sets |service_| to |service|.
-  // |service| is the owner of this instance and |model|.
-  void InitializeWithService(app_list::AppListSyncableService* service,
-                             app_list::AppListModel* model);
-
-  // Initialize to use extension sync and sets |service_| to nullptr. Used in
-  // tests and when AppList sync is not enabled.
-  // app_list::AppListSyncableService is the owner of |model|
-  void InitializeWithProfile(Profile* profile, app_list::AppListModel* model);
+  // |service| is the owner of this instance.
+  void Initialize(app_list::AppListSyncableService* service,
+                  Profile* profile,
+                  AppListModelUpdater* model_updater);
 
  protected:
   // Builds the model with the current profile.
@@ -44,10 +41,10 @@ class AppListModelBuilder : public app_list::AppListItemListObserver {
 
   AppListControllerDelegate* controller() { return controller_; }
 
-  app_list::AppListModel* model() { return model_; }
+  AppListModelUpdater* model_updater() { return model_updater_; }
 
   // Inserts an app based on app ordinal prefs.
-  void InsertApp(std::unique_ptr<app_list::AppListItem> app);
+  void InsertApp(std::unique_ptr<ChromeAppListItem> app);
 
   // Removes an app based on app id. If |unsynced_change| is set to true then
   // app is removed only from model and sync service is not used.
@@ -57,15 +54,15 @@ class AppListModelBuilder : public app_list::AppListItemListObserver {
       const std::string& id);
 
   // Returns app instance matching |id| or nullptr.
-  app_list::AppListItem* GetAppItem(const std::string& id);
+  ChromeAppListItem* GetAppItem(const std::string& id);
 
  private:
   // Unowned pointers to the service that owns this and associated profile.
   app_list::AppListSyncableService* service_ = nullptr;
   Profile* profile_ = nullptr;
 
-  // Unowned pointer to the app list model.
-  app_list::AppListModel* model_ = nullptr;
+  // Unowned pointer to an app list model updater.
+  AppListModelUpdater* model_updater_ = nullptr;
 
   // Unowned pointer to the app list controller.
   AppListControllerDelegate* controller_;

@@ -5,16 +5,14 @@
 #ifndef SnapCoordinator_h
 #define SnapCoordinator_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSPrimitiveValueMappings.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Vector.h"
 
 namespace blink {
 
 class LayoutBox;
-struct ScrollSnapType;
-struct ScrollSnapAlign;
 
 // Snap Coordinator keeps track of snap containers and all of their associated
 // snap areas. It also contains the logic to generate the list of valid snap
@@ -31,26 +29,52 @@ struct ScrollSnapAlign;
 // For more information see spec: https://drafts.csswg.org/css-snappoints/
 class CORE_EXPORT SnapCoordinator final
     : public GarbageCollectedFinalized<SnapCoordinator> {
-  WTF_MAKE_NONCOPYABLE(SnapCoordinator);
-
  public:
   static SnapCoordinator* Create();
   ~SnapCoordinator();
-  DEFINE_INLINE_TRACE() {}
+  void Trace(blink::Visitor* visitor) {}
 
   void SnapContainerDidChange(LayoutBox&, ScrollSnapType);
   void SnapAreaDidChange(LayoutBox&, ScrollSnapAlign);
 
+  // Returns the SnapContainerData if the snap container has one.
+  Optional<SnapContainerData> GetSnapContainerData(
+      const LayoutBox& snap_container) const;
+
+  // Calculate the SnapAreaData for the specific snap area in its snap
+  // container.
+  SnapAreaData CalculateSnapAreaData(const LayoutBox& snap_area,
+                                     const LayoutBox& snap_container,
+                                     const FloatPoint& max_position);
+
+  // Called by LocalFrameView::PerformPostLayoutTasks(), so that the snap data
+  // are updated whenever a layout happens.
+  void UpdateAllSnapContainerData();
+  void UpdateSnapContainerData(const LayoutBox&);
+
+  // Called by ScrollManager::HandleGestureScrollEnd() to animate to the snap
+  // position for the current scroll on the specific direction if there is
+  // a valid snap position.
+  void PerformSnapping(const LayoutBox& snap_container,
+                       bool did_scroll_x,
+                       bool did_scroll_y);
+  FloatPoint GetSnapPositionForPoint(const LayoutBox& snap_container,
+                                     const FloatPoint& natural_position,
+                                     bool did_scroll_x,
+                                     bool did_scroll_y);
+
 #ifndef NDEBUG
   void ShowSnapAreaMap();
   void ShowSnapAreasFor(const LayoutBox*);
+  void ShowSnapDataFor(const LayoutBox*);
 #endif
 
  private:
   friend class SnapCoordinatorTest;
   explicit SnapCoordinator();
 
-  HashSet<const LayoutBox*> snap_containers_;
+  HashMap<const LayoutBox*, SnapContainerData> snap_container_map_;
+  DISALLOW_COPY_AND_ASSIGN(SnapCoordinator);
 };
 
 }  // namespace blink

@@ -5,14 +5,14 @@
 #include "core/html/parser/HTMLPreloadScanner.h"
 
 #include <memory>
-#include "core/MediaTypeNames.h"
 #include "core/css/MediaValuesCached.h"
 #include "core/frame/Settings.h"
 #include "core/html/CrossOriginAttribute.h"
 #include "core/html/parser/HTMLParserOptions.h"
 #include "core/html/parser/HTMLResourcePreloader.h"
 #include "core/html/parser/PreloadRequest.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/media_type_names.h"
+#include "core/testing/PageTestBase.h"
 #include "platform/exported/WrappedResourceResponse.h"
 #include "platform/loader/fetch/ClientHintsPreferences.h"
 #include "platform/weborigin/SecurityOrigin.h"
@@ -20,6 +20,7 @@
 #include "public/platform/WebClientHintsType.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/WebRuntimeFeatures.h"
 
 namespace blink {
 
@@ -51,6 +52,13 @@ struct ReferrerPolicyTestCase {
   // Expected referrer header of the preload request, or nullptr if the header
   // shouldn't be checked (and no network request should be created).
   const char* expected_referrer;
+};
+
+struct CORSTestCase {
+  const char* base_url;
+  const char* input_html;
+  network::mojom::FetchRequestMode request_mode;
+  network::mojom::FetchCredentialsMode credentials_mode;
 };
 
 struct NonceTestCase {
@@ -85,15 +93,17 @@ class HTMLMockHTMLResourcePreloader : public ResourcePreloader {
       EXPECT_STREQ(base_url,
                    preload_request_->BaseURL().GetString().Ascii().data());
       EXPECT_EQ(width, preload_request_->ResourceWidth());
+      EXPECT_EQ(preferences.ShouldSend(mojom::WebClientHintsType::kDpr),
+                preload_request_->Preferences().ShouldSend(
+                    mojom::WebClientHintsType::kDpr));
       EXPECT_EQ(
-          preferences.ShouldSend(kWebClientHintsTypeDpr),
-          preload_request_->Preferences().ShouldSend(kWebClientHintsTypeDpr));
-      EXPECT_EQ(preferences.ShouldSend(kWebClientHintsTypeResourceWidth),
-                preload_request_->Preferences().ShouldSend(
-                    kWebClientHintsTypeResourceWidth));
-      EXPECT_EQ(preferences.ShouldSend(kWebClientHintsTypeViewportWidth),
-                preload_request_->Preferences().ShouldSend(
-                    kWebClientHintsTypeViewportWidth));
+          preferences.ShouldSend(mojom::WebClientHintsType::kResourceWidth),
+          preload_request_->Preferences().ShouldSend(
+              mojom::WebClientHintsType::kResourceWidth));
+      EXPECT_EQ(
+          preferences.ShouldSend(mojom::WebClientHintsType::kViewportWidth),
+          preload_request_->Preferences().ShouldSend(
+              mojom::WebClientHintsType::kViewportWidth));
     }
   }
 
@@ -115,7 +125,7 @@ class HTMLMockHTMLResourcePreloader : public ResourcePreloader {
                                   Document* document,
                                   const char* expected_referrer) {
     PreloadRequestVerification(type, url, base_url, width, referrer_policy);
-    Resource* resource = preload_request_->Start(document);
+    Resource* resource = preload_request_->Start(document, nullptr);
     ASSERT_TRUE(resource);
     EXPECT_EQ(expected_referrer, resource->GetResourceRequest().HttpReferrer());
   }
@@ -128,6 +138,19 @@ class HTMLMockHTMLResourcePreloader : public ResourcePreloader {
                    host.Ascii().data());
       EXPECT_EQ(preload_request_->CrossOrigin(), cross_origin);
     }
+  }
+
+  void CORSRequestVerification(
+      Document* document,
+      network::mojom::FetchRequestMode request_mode,
+      network::mojom::FetchCredentialsMode credentials_mode) {
+    ASSERT_TRUE(preload_request_.get());
+    Resource* resource = preload_request_->Start(document, nullptr);
+    ASSERT_TRUE(resource);
+    EXPECT_EQ(request_mode,
+              resource->GetResourceRequest().GetFetchRequestMode());
+    EXPECT_EQ(credentials_mode,
+              resource->GetResourceRequest().GetFetchCredentialsMode());
   }
 
   void NonceRequestVerification(const char* nonce) {
@@ -153,7 +176,7 @@ class HTMLMockHTMLResourcePreloader : public ResourcePreloader {
   std::unique_ptr<PreloadRequest> preload_request_;
 };
 
-class HTMLPreloadScannerTest : public ::testing::Test {
+class HTMLPreloadScannerTest : public PageTestBase {
  protected:
   enum ViewportState {
     kViewportEnabled,
@@ -164,8 +187,6 @@ class HTMLPreloadScannerTest : public ::testing::Test {
     kPreloadEnabled,
     kPreloadDisabled,
   };
-
-  HTMLPreloadScannerTest() : dummy_page_holder_(DummyPageHolder::Create()) {}
 
   MediaValuesCached::MediaValuesCachedData CreateMediaValuesData() {
     MediaValuesCached::MediaValuesCachedData data;
@@ -188,32 +209,35 @@ class HTMLPreloadScannerTest : public ::testing::Test {
   void RunSetUp(
       ViewportState viewport_state,
       PreloadState preload_state = kPreloadEnabled,
-      ReferrerPolicy document_referrer_policy = kReferrerPolicyDefault) {
-    HTMLParserOptions options(&dummy_page_holder_->GetDocument());
-    KURL document_url(kParsedURLString, "http://whatever.test/");
-    dummy_page_holder_->GetDocument().SetURL(document_url);
-    dummy_page_holder_->GetDocument().SetSecurityOrigin(
-        SecurityOrigin::Create(document_url));
-    dummy_page_holder_->GetDocument().GetSettings()->SetViewportEnabled(
-        viewport_state == kViewportEnabled);
-    dummy_page_holder_->GetDocument().GetSettings()->SetViewportMetaEnabled(
-        viewport_state == kViewportEnabled);
-    dummy_page_holder_->GetDocument().GetSettings()->SetDoHtmlPreloadScanning(
-        preload_state == kPreloadEnabled);
-    dummy_page_holder_->GetDocument().SetReferrerPolicy(
-        document_referrer_policy);
+      ReferrerPolicy document_referrer_policy = kReferrerPolicyDefault,
+      bool use_secure_document_url = false) {
+    HTMLParserOptions options(&GetDocument());
+    KURL document_url = KURL("http://whatever.test/");
+    if (use_secure_document_url)
+      document_url = KURL("https://whatever.test/");
+    GetDocument().SetURL(document_url);
+    GetDocument().SetSecurityOrigin(SecurityOrigin::Create(document_url));
+    GetDocument().GetSettings()->SetViewportEnabled(viewport_state ==
+                                                    kViewportEnabled);
+    GetDocument().GetSettings()->SetViewportMetaEnabled(viewport_state ==
+                                                        kViewportEnabled);
+    GetDocument().GetSettings()->SetDoHtmlPreloadScanning(preload_state ==
+                                                          kPreloadEnabled);
+    GetDocument().SetReferrerPolicy(document_referrer_policy);
     scanner_ = HTMLPreloadScanner::Create(
-        options, document_url,
-        CachedDocumentParameters::Create(&dummy_page_holder_->GetDocument()),
+        options, document_url, CachedDocumentParameters::Create(&GetDocument()),
         CreateMediaValuesData(),
         TokenPreloadScanner::ScannerType::kMainDocument);
   }
 
-  void SetUp() override { RunSetUp(kViewportEnabled); }
+  void SetUp() override {
+    PageTestBase::SetUp(IntSize());
+    RunSetUp(kViewportEnabled);
+  }
 
   void Test(PreloadScannerTestCase test_case) {
     HTMLMockHTMLResourcePreloader preloader;
-    KURL base_url(kParsedURLString, test_case.base_url);
+    KURL base_url(test_case.base_url);
     scanner_->AppendToEnd(String(test_case.input_html));
     PreloadRequestStream requests = scanner_->Scan(base_url, nullptr);
     preloader.TakeAndPreload(requests);
@@ -225,7 +249,7 @@ class HTMLPreloadScannerTest : public ::testing::Test {
 
   void Test(HTMLPreconnectTestCase test_case) {
     HTMLMockHTMLResourcePreloader preloader;
-    KURL base_url(kParsedURLString, test_case.base_url);
+    KURL base_url(test_case.base_url);
     scanner_->AppendToEnd(String(test_case.input_html));
     PreloadRequestStream requests = scanner_->Scan(base_url, nullptr);
     preloader.TakeAndPreload(requests);
@@ -235,7 +259,7 @@ class HTMLPreloadScannerTest : public ::testing::Test {
 
   void Test(ReferrerPolicyTestCase test_case) {
     HTMLMockHTMLResourcePreloader preloader;
-    KURL base_url(kParsedURLString, test_case.base_url);
+    KURL base_url(test_case.base_url);
     scanner_->AppendToEnd(String(test_case.input_html));
     PreloadRequestStream requests = scanner_->Scan(base_url, nullptr);
     preloader.TakeAndPreload(requests);
@@ -243,8 +267,8 @@ class HTMLPreloadScannerTest : public ::testing::Test {
     if (test_case.expected_referrer) {
       preloader.PreloadRequestVerification(
           test_case.type, test_case.preloaded_url, test_case.output_base_url,
-          test_case.resource_width, test_case.referrer_policy,
-          &dummy_page_holder_->GetDocument(), test_case.expected_referrer);
+          test_case.resource_width, test_case.referrer_policy, &GetDocument(),
+          test_case.expected_referrer);
     } else {
       preloader.PreloadRequestVerification(
           test_case.type, test_case.preloaded_url, test_case.output_base_url,
@@ -252,9 +276,20 @@ class HTMLPreloadScannerTest : public ::testing::Test {
     }
   }
 
+  void Test(CORSTestCase test_case) {
+    HTMLMockHTMLResourcePreloader preloader;
+    KURL base_url(test_case.base_url);
+    scanner_->AppendToEnd(String(test_case.input_html));
+    PreloadRequestStream requests = scanner_->Scan(base_url, nullptr);
+    preloader.TakeAndPreload(requests);
+
+    preloader.CORSRequestVerification(&GetDocument(), test_case.request_mode,
+                                      test_case.credentials_mode);
+  }
+
   void Test(NonceTestCase test_case) {
     HTMLMockHTMLResourcePreloader preloader;
-    KURL base_url(kParsedURLString, test_case.base_url);
+    KURL base_url(test_case.base_url);
     scanner_->AppendToEnd(String(test_case.input_html));
     PreloadRequestStream requests = scanner_->Scan(base_url, nullptr);
     preloader.TakeAndPreload(requests);
@@ -264,7 +299,7 @@ class HTMLPreloadScannerTest : public ::testing::Test {
 
   void Test(ContextTestCase test_case) {
     HTMLMockHTMLResourcePreloader preloader;
-    KURL base_url(kParsedURLString, test_case.base_url);
+    KURL base_url(test_case.base_url);
     scanner_->AppendToEnd(String(test_case.input_html));
     PreloadRequestStream requests = scanner_->Scan(base_url, nullptr);
     preloader.TakeAndPreload(requests);
@@ -273,7 +308,6 @@ class HTMLPreloadScannerTest : public ::testing::Test {
   }
 
  private:
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
   std::unique_ptr<HTMLPreloadScanner> scanner_;
 };
 
@@ -507,12 +541,14 @@ TEST_F(HTMLPreloadScannerTest, testMetaAcceptCH) {
   ClientHintsPreferences resource_width;
   ClientHintsPreferences all;
   ClientHintsPreferences viewport_width;
-  dpr.SetShouldSendForTesting(kWebClientHintsTypeDpr);
-  all.SetShouldSendForTesting(kWebClientHintsTypeDpr);
-  resource_width.SetShouldSendForTesting(kWebClientHintsTypeResourceWidth);
-  all.SetShouldSendForTesting(kWebClientHintsTypeResourceWidth);
-  viewport_width.SetShouldSendForTesting(kWebClientHintsTypeViewportWidth);
-  all.SetShouldSendForTesting(kWebClientHintsTypeViewportWidth);
+  dpr.SetShouldSendForTesting(mojom::WebClientHintsType::kDpr);
+  all.SetShouldSendForTesting(mojom::WebClientHintsType::kDpr);
+  resource_width.SetShouldSendForTesting(
+      mojom::WebClientHintsType::kResourceWidth);
+  all.SetShouldSendForTesting(mojom::WebClientHintsType::kResourceWidth);
+  viewport_width.SetShouldSendForTesting(
+      mojom::WebClientHintsType::kViewportWidth);
+  all.SetShouldSendForTesting(mojom::WebClientHintsType::kViewportWidth);
   PreloadScannerTestCase test_cases[] = {
       {"http://example.test",
        "<meta http-equiv='accept-ch' content='bla'><img srcset='bla.gif 320w, "
@@ -562,9 +598,56 @@ TEST_F(HTMLPreloadScannerTest, testMetaAcceptCH) {
   };
 
   for (const auto& test_case : test_cases) {
-    RunSetUp(kViewportDisabled);
+    RunSetUp(kViewportDisabled, kPreloadEnabled, kReferrerPolicyDefault,
+             true /* use_secure_document_url */);
     Test(test_case);
   }
+}
+
+TEST_F(HTMLPreloadScannerTest, testMetaAcceptCHInsecureDocument) {
+  ClientHintsPreferences all;
+  all.SetShouldSendForTesting(mojom::WebClientHintsType::kDpr);
+  all.SetShouldSendForTesting(mojom::WebClientHintsType::kResourceWidth);
+  all.SetShouldSendForTesting(mojom::WebClientHintsType::kViewportWidth);
+
+  const PreloadScannerTestCase expect_no_client_hint = {
+      "http://example.test",
+      "<meta http-equiv='accept-ch' content='  viewport-width  ,width, "
+      "wutever, dpr \t'><img sizes='90vw' srcset='bla.gif 320w, blabla.gif "
+      "640w'>",
+      "blabla.gif",
+      "http://example.test/",
+      Resource::kImage,
+      450};
+
+  const PreloadScannerTestCase expect_client_hint = {
+      "http://example.test",
+      "<meta http-equiv='accept-ch' content='  viewport-width  ,width, "
+      "wutever, dpr \t'><img sizes='90vw' srcset='bla.gif 320w, blabla.gif "
+      "640w'>",
+      "blabla.gif",
+      "http://example.test/",
+      Resource::kImage,
+      450,
+      all};
+
+  // For an insecure document, client hint should not be attached.
+  WebRuntimeFeatures::EnableClientHintsPersistent(true);
+  RunSetUp(kViewportDisabled, kPreloadEnabled, kReferrerPolicyDefault,
+           false /* use_secure_document_url */);
+  Test(expect_no_client_hint);
+
+  // For a secure document, client hint should be attached.
+  RunSetUp(kViewportDisabled, kPreloadEnabled, kReferrerPolicyDefault,
+           true /* use_secure_document_url */);
+  Test(expect_client_hint);
+
+  // For an insecure document, client hint should be attached if the persistent
+  // client hints are not enabled.
+  WebRuntimeFeatures::EnableClientHintsPersistent(false);
+  RunSetUp(kViewportDisabled, kPreloadEnabled, kReferrerPolicyDefault,
+           false /* use_secure_document_url */);
+  Test(expect_client_hint);
 }
 
 TEST_F(HTMLPreloadScannerTest, testPreconnect) {
@@ -756,6 +839,38 @@ TEST_F(HTMLPreloadScannerTest, testReferrerPolicy) {
     Test(test_case);
 }
 
+TEST_F(HTMLPreloadScannerTest, testCORS) {
+  CORSTestCase test_cases[] = {
+      {"http://example.test", "<script src='/script'></script>",
+       network::mojom::FetchRequestMode::kNoCORS,
+       network::mojom::FetchCredentialsMode::kInclude},
+      {"http://example.test", "<script crossorigin src='/script'></script>",
+       network::mojom::FetchRequestMode::kCORS,
+       network::mojom::FetchCredentialsMode::kSameOrigin},
+      {"http://example.test",
+       "<script crossorigin=use-credentials src='/script'></script>",
+       network::mojom::FetchRequestMode::kCORS,
+       network::mojom::FetchCredentialsMode::kInclude},
+      {"http://example.test", "<script type='module' src='/script'></script>",
+       network::mojom::FetchRequestMode::kCORS,
+       network::mojom::FetchCredentialsMode::kOmit},
+      {"http://example.test",
+       "<script type='module' crossorigin='anonymous' src='/script'></script>",
+       network::mojom::FetchRequestMode::kCORS,
+       network::mojom::FetchCredentialsMode::kSameOrigin},
+      {"http://example.test",
+       "<script type='module' crossorigin='use-credentials' "
+       "src='/script'></script>",
+       network::mojom::FetchRequestMode::kCORS,
+       network::mojom::FetchCredentialsMode::kInclude},
+  };
+
+  for (const auto& test_case : test_cases) {
+    SCOPED_TRACE(test_case.input_html);
+    Test(test_case);
+  }
+}
+
 TEST_F(HTMLPreloadScannerTest, testNonce) {
   NonceTestCase test_cases[] = {
       {"http://example.test", "<script src='/script'></script>", ""},
@@ -849,7 +964,7 @@ TEST_F(HTMLPreloadScannerTest, testLinkRelPreload) {
        "<link rel=preload href=bla as=font type='font/bla'>", nullptr,
        "http://example.test/", Resource::kFont, 0},
       {"http://example.test", "<link rel=preload href=bla as=video>", "bla",
-       "http://example.test/", Resource::kMedia, 0},
+       "http://example.test/", Resource::kVideo, 0},
       {"http://example.test", "<link rel=preload href=bla as=track>", "bla",
        "http://example.test/", Resource::kTextTrack, 0},
       {"http://example.test",
@@ -945,7 +1060,7 @@ TEST_F(HTMLPreloadScannerTest, testUppercaseAsValues) {
 TEST_F(HTMLPreloadScannerTest, ReferrerHeader) {
   RunSetUp(kViewportEnabled, kPreloadEnabled, kReferrerPolicyAlways);
 
-  KURL preload_url(kParsedURLString, "http://example.test/sheet.css");
+  KURL preload_url("http://example.test/sheet.css");
   Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
       preload_url, WrappedResourceResponse(ResourceResponse()), "");
 

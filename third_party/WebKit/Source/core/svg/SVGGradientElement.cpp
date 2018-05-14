@@ -21,9 +21,9 @@
 
 #include "core/svg/SVGGradientElement.h"
 
+#include "core/css/StyleChangeReason.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/ElementTraversal.h"
-#include "core/dom/StyleChangeReason.h"
 #include "core/layout/svg/LayoutSVGResourceContainer.h"
 #include "core/svg/GradientAttributes.h"
 #include "core/svg/SVGStopElement.h"
@@ -64,7 +64,7 @@ SVGGradientElement::SVGGradientElement(const QualifiedName& tag_name,
   AddToPropertyMap(gradient_units_);
 }
 
-DEFINE_TRACE(SVGGradientElement) {
+void SVGGradientElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(gradient_transform_);
   visitor->Trace(spread_method_);
   visitor->Trace(gradient_units_);
@@ -75,11 +75,11 @@ DEFINE_TRACE(SVGGradientElement) {
 void SVGGradientElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == SVGNames::gradientTransformAttr) {
     AddPropertyToPresentationAttributeStyle(
         style, CSSPropertyTransform,
-        gradient_transform_->CurrentValue()->CssValue());
+        *gradient_transform_->CurrentValue()->CssValue());
     return;
   }
   SVGElement::CollectStyleForPresentationAttribute(name, value, style);
@@ -97,12 +97,7 @@ void SVGGradientElement::SvgAttributeChanged(const QualifiedName& attr_name) {
       attr_name == SVGNames::spreadMethodAttr ||
       SVGURIReference::IsKnownAttribute(attr_name)) {
     SVGElement::InvalidationGuard invalidation_guard(this);
-
-    LayoutSVGResourceContainer* layout_object =
-        ToLayoutSVGResourceContainer(this->GetLayoutObject());
-    if (layout_object)
-      layout_object->InvalidateCacheAndMarkForLayout();
-
+    InvalidateGradient(LayoutInvalidationReason::kAttributeChanged);
     return;
   }
 
@@ -115,9 +110,13 @@ void SVGGradientElement::ChildrenChanged(const ChildrenChange& change) {
   if (change.by_parser)
     return;
 
-  if (LayoutObject* object = GetLayoutObject())
-    object->SetNeedsLayoutAndFullPaintInvalidation(
-        LayoutInvalidationReason::kChildChanged);
+  InvalidateGradient(LayoutInvalidationReason::kChildChanged);
+}
+
+void SVGGradientElement::InvalidateGradient(
+    LayoutInvalidationReasonForTracing reason) {
+  if (auto* layout_object = ToLayoutSVGResourceContainer(GetLayoutObject()))
+    layout_object->InvalidateCacheAndMarkForLayout(reason);
 }
 
 void SVGGradientElement::CollectCommonAttributes(

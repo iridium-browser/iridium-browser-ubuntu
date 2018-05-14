@@ -48,7 +48,7 @@ class PLATFORM_EXPORT LayoutRect {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
  public:
-  LayoutRect() {}
+  LayoutRect() = default;
   LayoutRect(const LayoutPoint& location, const LayoutSize& size)
       : location_(location), size_(size) {}
   LayoutRect(LayoutUnit x, LayoutUnit y, LayoutUnit width, LayoutUnit height)
@@ -143,6 +143,12 @@ class PLATFORM_EXPORT LayoutRect {
                      LayoutUnit left) {
     location_.Move(left, top);
     size_.Shrink(left + right, top + bottom);
+  }
+
+  // Convert to an outsets for {{0, 0}, size} rect.
+  LayoutRectOutsets ToOutsets(const LayoutSize& size) const {
+    return LayoutRectOutsets(-Y(), MaxX() - size.Width(),
+                             MaxY() - size.Height(), -X());
   }
 
   void ShiftXEdgeTo(LayoutUnit edge) {
@@ -308,6 +314,8 @@ inline IntRect PixelSnappedIntRect(LayoutPoint location, LayoutSize size) {
   return IntRect(RoundedIntPoint(location),
                  PixelSnappedIntSize(size, location));
 }
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, const LayoutRect&);
 
 // Redeclared here to avoid ODR issues.
 // See platform/testing/GeometryPrinters.h.

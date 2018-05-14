@@ -5,10 +5,12 @@
 #include "modules/permissions/Permissions.h"
 
 #include <memory>
+#include <utility>
+
 #include "bindings/core/v8/Dictionary.h"
-#include "bindings/core/v8/Nullable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "bindings/modules/v8/V8ClipboardPermissionDescriptor.h"
 #include "bindings/modules/v8/V8MidiPermissionDescriptor.h"
 #include "bindings/modules/v8/V8PermissionDescriptor.h"
 #include "bindings/modules/v8/V8PushPermissionDescriptor.h"
@@ -16,14 +18,15 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/UserGestureIndicator.h"
+#include "core/frame/Frame.h"
 #include "core/frame/LocalFrame.h"
+#include "core/origin_trials/origin_trials.h"
 #include "modules/permissions/PermissionDescriptor.h"
 #include "modules/permissions/PermissionStatus.h"
 #include "modules/permissions/PermissionUtils.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Functional.h"
 #include "platform/wtf/NotFound.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/Vector.h"
 #include "public/platform/Platform.h"
 
@@ -60,6 +63,10 @@ PermissionDescriptorPtr ParsePermission(ScriptState* script_state,
   const String& name = permission.name();
   if (name == "geolocation")
     return CreatePermissionDescriptor(PermissionName::GEOLOCATION);
+  if (name == "camera")
+    return CreatePermissionDescriptor(PermissionName::VIDEO_CAPTURE);
+  if (name == "microphone")
+    return CreatePermissionDescriptor(PermissionName::AUDIO_CAPTURE);
   if (name == "notifications")
     return CreatePermissionDescriptor(PermissionName::NOTIFICATIONS);
   if (name == "push") {
@@ -80,7 +87,7 @@ PermissionDescriptorPtr ParsePermission(ScriptState* script_state,
       return nullptr;
     }
 
-    return CreatePermissionDescriptor(PermissionName::PUSH_NOTIFICATIONS);
+    return CreatePermissionDescriptor(PermissionName::NOTIFICATIONS);
   }
   if (name == "midi") {
     MidiPermissionDescriptor midi_permission =
@@ -91,6 +98,48 @@ PermissionDescriptorPtr ParsePermission(ScriptState* script_state,
   }
   if (name == "background-sync")
     return CreatePermissionDescriptor(PermissionName::BACKGROUND_SYNC);
+  // TODO(riju): Remove runtime flag check when Generic Sensor feature is
+  // stable.
+  if (name == "ambient-light-sensor" || name == "accelerometer" ||
+      name == "gyroscope" || name == "magnetometer") {
+    if (!OriginTrials::sensorEnabled(ExecutionContext::From(script_state))) {
+      exception_state.ThrowTypeError("GenericSensor flag is not enabled.");
+      return nullptr;
+    }
+
+    // Magnetometer and ALS require an extra flag.
+    if (name == "ambient-light-sensor") {
+      if (!RuntimeEnabledFeatures::SensorExtraClassesEnabled()) {
+        exception_state.ThrowTypeError(
+            "GenericSensorExtraClasses flag is not enabled.");
+        return nullptr;
+      }
+    }
+
+    return CreatePermissionDescriptor(PermissionName::SENSORS);
+  }
+  if (name == "accessibility-events") {
+    if (!RuntimeEnabledFeatures::AccessibilityObjectModelEnabled()) {
+      exception_state.ThrowTypeError(
+          "Accessibility Object Model is not enabled.");
+      return nullptr;
+    }
+    return CreatePermissionDescriptor(PermissionName::ACCESSIBILITY_EVENTS);
+  }
+  if (name == "clipboard-read" || name == "clipboard-write") {
+    PermissionName permission_name = PermissionName::CLIPBOARD_READ;
+    if (name == "clipboard-write")
+      permission_name = PermissionName::CLIPBOARD_WRITE;
+
+    ClipboardPermissionDescriptor clipboard_permission =
+        NativeValueTraits<ClipboardPermissionDescriptor>::NativeValue(
+            script_state->GetIsolate(), raw_permission.V8Value(),
+            exception_state);
+    return CreateClipboardPermissionDescriptor(
+        permission_name, clipboard_permission.allowWithoutGesture());
+  }
+  if (name == "payment-handler")
+    return CreatePermissionDescriptor(PermissionName::PAYMENT_HANDLER);
 
   return nullptr;
 }
@@ -107,16 +156,6 @@ ScriptPromise Permissions::query(ScriptState* script_state,
   if (exception_state.HadException())
     return exception_state.Reject(script_state);
 
-  // This must be called after `parsePermission` because the website might
-  // be able to run code.
-  PermissionService* service = GetService(ExecutionContext::From(script_state));
-  if (!service)
-    return ScriptPromise::RejectWithDOMException(
-        script_state,
-        DOMException::Create(
-            kInvalidStateError,
-            "In its current state, the global scope can't query permissions."));
-
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
 
@@ -125,12 +164,11 @@ ScriptPromise Permissions::query(ScriptState* script_state,
   // permission prompt will be shown even if the returned permission will most
   // likely be "prompt".
   PermissionDescriptorPtr descriptor_copy = descriptor->Clone();
-  service->HasPermission(
-      std::move(descriptor),
-      ExecutionContext::From(script_state)->GetSecurityOrigin(),
-      ConvertToBaseCallback(WTF::Bind(
-          &Permissions::TaskComplete, WrapPersistent(this),
-          WrapPersistent(resolver), WTF::Passed(std::move(descriptor_copy)))));
+  GetService(ExecutionContext::From(script_state))
+      .HasPermission(std::move(descriptor),
+                     WTF::Bind(&Permissions::TaskComplete, WrapPersistent(this),
+                               WrapPersistent(resolver),
+                               WTF::Passed(std::move(descriptor_copy))));
   return promise;
 }
 
@@ -144,26 +182,22 @@ ScriptPromise Permissions::request(ScriptState* script_state,
   if (exception_state.HadException())
     return exception_state.Reject(script_state);
 
-  // This must be called after `parsePermission` because the website might
-  // be able to run code.
-  PermissionService* service = GetService(ExecutionContext::From(script_state));
-  if (!service)
-    return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(kInvalidStateError,
-                                           "In its current state, the global "
-                                           "scope can't request permissions."));
+  ExecutionContext* context = ExecutionContext::From(script_state);
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
 
   PermissionDescriptorPtr descriptor_copy = descriptor->Clone();
-  service->RequestPermission(
-      std::move(descriptor),
-      ExecutionContext::From(script_state)->GetSecurityOrigin(),
-      UserGestureIndicator::ProcessingUserGestureThreadSafe(),
-      ConvertToBaseCallback(WTF::Bind(
-          &Permissions::TaskComplete, WrapPersistent(this),
-          WrapPersistent(resolver), WTF::Passed(std::move(descriptor_copy)))));
+  Document* doc = ToDocumentOrNull(context);
+  Frame* frame = doc ? doc->GetFrame() : nullptr;
+  GetService(ExecutionContext::From(script_state))
+      .RequestPermission(
+          std::move(descriptor),
+          Frame::HasTransientUserActivation(frame,
+                                            true /* checkIfMainThread */),
+          WTF::Bind(&Permissions::TaskComplete, WrapPersistent(this),
+                    WrapPersistent(resolver),
+                    WTF::Passed(std::move(descriptor_copy))));
   return promise;
 }
 
@@ -177,25 +211,16 @@ ScriptPromise Permissions::revoke(ScriptState* script_state,
   if (exception_state.HadException())
     return exception_state.Reject(script_state);
 
-  // This must be called after `parsePermission` because the website might
-  // be able to run code.
-  PermissionService* service = GetService(ExecutionContext::From(script_state));
-  if (!service)
-    return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(kInvalidStateError,
-                                           "In its current state, the global "
-                                           "scope can't revoke permissions."));
-
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
 
   PermissionDescriptorPtr descriptor_copy = descriptor->Clone();
-  service->RevokePermission(
-      std::move(descriptor),
-      ExecutionContext::From(script_state)->GetSecurityOrigin(),
-      ConvertToBaseCallback(WTF::Bind(
-          &Permissions::TaskComplete, WrapPersistent(this),
-          WrapPersistent(resolver), WTF::Passed(std::move(descriptor_copy)))));
+  GetService(ExecutionContext::From(script_state))
+      .RevokePermission(
+          std::move(descriptor),
+          WTF::Bind(&Permissions::TaskComplete, WrapPersistent(this),
+                    WrapPersistent(resolver),
+                    WTF::Passed(std::move(descriptor_copy))));
   return promise;
 }
 
@@ -231,14 +256,7 @@ ScriptPromise Permissions::requestAll(
     caller_index_to_internal_index[i] = internal_index;
   }
 
-  // This must be called after `parsePermission` because the website might
-  // be able to run code.
-  PermissionService* service = GetService(ExecutionContext::From(script_state));
-  if (!service)
-    return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(kInvalidStateError,
-                                           "In its current state, the global "
-                                           "scope can't request permissions."));
+  ExecutionContext* context = ExecutionContext::From(script_state);
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
@@ -248,25 +266,28 @@ ScriptPromise Permissions::requestAll(
   for (const auto& descriptor : internal_permissions)
     internal_permissions_copy.push_back(descriptor->Clone());
 
-  service->RequestPermissions(
-      std::move(internal_permissions),
-      ExecutionContext::From(script_state)->GetSecurityOrigin(),
-      UserGestureIndicator::ProcessingUserGestureThreadSafe(),
-      ConvertToBaseCallback(
+  Document* doc = ToDocumentOrNull(context);
+  Frame* frame = doc ? doc->GetFrame() : nullptr;
+  GetService(ExecutionContext::From(script_state))
+      .RequestPermissions(
+          std::move(internal_permissions),
+          Frame::HasTransientUserActivation(frame,
+                                            true /* checkIfMainThread */),
           WTF::Bind(&Permissions::BatchTaskComplete, WrapPersistent(this),
                     WrapPersistent(resolver),
                     WTF::Passed(std::move(internal_permissions_copy)),
-                    WTF::Passed(std::move(caller_index_to_internal_index)))));
+                    WTF::Passed(std::move(caller_index_to_internal_index))));
   return promise;
 }
 
-PermissionService* Permissions::GetService(
+PermissionService& Permissions::GetService(
     ExecutionContext* execution_context) {
-  if (!service_ && ConnectToPermissionService(execution_context,
-                                              mojo::MakeRequest(&service_)))
-    service_.set_connection_error_handler(ConvertToBaseCallback(WTF::Bind(
-        &Permissions::ServiceConnectionError, WrapWeakPersistent(this))));
-  return service_.get();
+  if (!service_) {
+    ConnectToPermissionService(execution_context, mojo::MakeRequest(&service_));
+    service_.set_connection_error_handler(WTF::Bind(
+        &Permissions::ServiceConnectionError, WrapWeakPersistent(this)));
+  }
+  return *service_;
 }
 
 void Permissions::ServiceConnectionError() {

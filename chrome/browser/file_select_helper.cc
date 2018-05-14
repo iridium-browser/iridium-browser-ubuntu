@@ -23,6 +23,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/grit/generated_resources.h"
@@ -50,7 +51,8 @@
 #endif
 
 #if defined(FULL_SAFE_BROWSING)
-#include "chrome/browser/safe_browsing/download_protection_service.h"
+#include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
+#include "chrome/browser/safe_browsing/download_protection/download_protection_util.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #endif
 
@@ -78,7 +80,7 @@ std::vector<ui::SelectedFileInfo> FilePathListToSelectedFileInfoList(
   return selected_files;
 }
 
-void DeleteFiles(const std::vector<base::FilePath>& paths) {
+void DeleteFiles(std::vector<base::FilePath> paths) {
   for (auto& file_path : paths)
     base::DeleteFile(file_path, false);
 }
@@ -94,8 +96,8 @@ bool IsValidProfile(Profile* profile) {
 #if defined(FULL_SAFE_BROWSING)
 
 bool IsDownloadAllowedBySafeBrowsing(
-    safe_browsing::DownloadProtectionService::DownloadCheckResult result) {
-  using Result = safe_browsing::DownloadProtectionService::DownloadCheckResult;
+    safe_browsing::DownloadCheckResult result) {
+  using Result = safe_browsing::DownloadCheckResult;
   switch (result) {
     // Only allow downloads that are marked as SAFE or UNKNOWN by SafeBrowsing.
     // All other types are going to be blocked. UNKNOWN could be the result of a
@@ -114,9 +116,8 @@ bool IsDownloadAllowedBySafeBrowsing(
   return false;
 }
 
-void InterpretSafeBrowsingVerdict(
-    const base::Callback<void(bool)>& recipient,
-    safe_browsing::DownloadProtectionService::DownloadCheckResult result) {
+void InterpretSafeBrowsingVerdict(const base::Callback<void(bool)>& recipient,
+                                  safe_browsing::DownloadCheckResult result) {
   recipient.Run(IsDownloadAllowedBySafeBrowsing(result));
 }
 
@@ -125,11 +126,13 @@ void InterpretSafeBrowsingVerdict(
 }  // namespace
 
 struct FileSelectHelper::ActiveDirectoryEnumeration {
-  ActiveDirectoryEnumeration() : rvh_(NULL) {}
+  explicit ActiveDirectoryEnumeration(const base::FilePath& path)
+      : rvh_(NULL), path_(path) {}
 
   std::unique_ptr<DirectoryListerDispatchDelegate> delegate_;
   std::unique_ptr<net::DirectoryLister> lister_;
   RenderViewHost* rvh_;
+  const base::FilePath path_;
   std::vector<base::FilePath> results_;
 };
 
@@ -244,8 +247,7 @@ void FileSelectHelper::FileSelectionCanceled(void* params) {
 void FileSelectHelper::StartNewEnumeration(const base::FilePath& path,
                                            int request_id,
                                            RenderViewHost* render_view_host) {
-  std::unique_ptr<ActiveDirectoryEnumeration> entry(
-      new ActiveDirectoryEnumeration);
+  auto entry = std::make_unique<ActiveDirectoryEnumeration>(path);
   entry->rvh_ = render_view_host;
   entry->delegate_.reset(new DirectoryListerDispatchDelegate(this, request_id));
   entry->lister_.reset(new net::DirectoryLister(
@@ -266,6 +268,15 @@ void FileSelectHelper::OnListFile(
   entry->results_.push_back(data.path);
 }
 
+void FileSelectHelper::LaunchConfirmationDialog(
+    const base::FilePath& path,
+    std::vector<ui::SelectedFileInfo> selected_files) {
+  ShowFolderUploadConfirmationDialog(
+      path,
+      base::BindOnce(&FileSelectHelper::NotifyRenderFrameHostAndEnd, this),
+      std::move(selected_files), web_contents_);
+}
+
 void FileSelectHelper::OnListDone(int id, int error) {
   // This entry needs to be cleaned up when this function is done.
   std::unique_ptr<ActiveDirectoryEnumeration> entry(
@@ -282,7 +293,7 @@ void FileSelectHelper::OnListDone(int id, int error) {
       FilePathListToSelectedFileInfoList(entry->results_);
 
   if (id == kFileSelectEnumerationId) {
-    NotifyRenderFrameHostAndEnd(selected_files);
+    LaunchConfirmationDialog(entry->path_, std::move(selected_files));
   } else {
     entry->rvh_->DirectoryEnumerationFinished(id, entry->results_);
     EnumerateDirectoryEnd();
@@ -339,9 +350,11 @@ void FileSelectHelper::NotifyRenderFrameHostAndEndAfterConversion(
 }
 
 void FileSelectHelper::DeleteTemporaryFiles() {
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                          base::BindOnce(&DeleteFiles, temporary_files_));
-  temporary_files_.clear();
+  base::PostTaskWithTraits(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
+      base::BindOnce(&DeleteFiles, std::move(temporary_files_)));
 }
 
 void FileSelectHelper::CleanUp() {
@@ -440,7 +453,7 @@ void FileSelectHelper::RunFileChooser(
   scoped_refptr<FileSelectHelper> file_select_helper(
       new FileSelectHelper(profile));
   file_select_helper->RunFileChooser(
-      render_frame_host, base::MakeUnique<content::FileChooserParams>(params));
+      render_frame_host, std::make_unique<content::FileChooserParams>(params));
 }
 
 // static
@@ -476,10 +489,10 @@ void FileSelectHelper::RunFileChooser(
       content::Source<RenderWidgetHost>(
           render_frame_host_->GetRenderViewHost()->GetWidget()));
 
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::BindOnce(&FileSelectHelper::GetFileTypesOnFileThread, this,
-                     base::Passed(&params)));
+  base::PostTaskWithTraits(
+      FROM_HERE, {base::MayBlock()},
+      base::BindOnce(&FileSelectHelper::GetFileTypesInThreadPool, this,
+                     std::move(params)));
 
   // Because this class returns notifications to the RenderViewHost, it is
   // difficult for callers to know how long to keep a reference to this
@@ -489,7 +502,7 @@ void FileSelectHelper::RunFileChooser(
   AddRef();
 }
 
-void FileSelectHelper::GetFileTypesOnFileThread(
+void FileSelectHelper::GetFileTypesInThreadPool(
     std::unique_ptr<FileChooserParams> params) {
   select_file_types_ = GetFileTypesFromAcceptType(params->accept_types);
   select_file_types_->allowed_paths =
@@ -499,7 +512,7 @@ void FileSelectHelper::GetFileTypesOnFileThread(
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::BindOnce(&FileSelectHelper::GetSanitizedFilenameOnUIThread, this,
-                     base::Passed(&params)));
+                     std::move(params)));
 }
 
 void FileSelectHelper::GetSanitizedFilenameOnUIThread(
@@ -574,7 +587,7 @@ void FileSelectHelper::RunFileChooserOnUIThread(
     return;
 
   select_file_dialog_ = ui::SelectFileDialog::Create(
-      this, new ChromeSelectFilePolicy(web_contents_));
+      this, std::make_unique<ChromeSelectFilePolicy>(web_contents_));
   if (!select_file_dialog_.get())
     return;
 

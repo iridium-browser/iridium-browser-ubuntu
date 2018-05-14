@@ -11,18 +11,20 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "gpu/command_buffer/service/feature_info.h"
-#include "gpu/command_buffer/service/mailbox_manager.h"
+#include "gpu/command_buffer/service/gpu_tracer.h"
+#include "gpu/command_buffer/service/mailbox_manager_factory.h"
 #include "gpu/command_buffer/service/memory_program_cache.h"
-#include "gpu/command_buffer/service/preemption_flag.h"
+#include "gpu/command_buffer/service/passthrough_program_cache.h"
 #include "gpu/command_buffer/service/scheduler.h"
+#include "gpu/command_buffer/service/service_utils.h"
 #include "gpu/command_buffer/service/sync_point_manager.h"
 #include "gpu/ipc/common/gpu_messages.h"
 #include "gpu/ipc/service/gpu_channel.h"
@@ -47,7 +49,6 @@ const int kMaxKeepAliveTimeMs = 200;
 
 GpuChannelManager::GpuChannelManager(
     const GpuPreferences& gpu_preferences,
-    const GpuDriverBugWorkarounds& workarounds,
     GpuChannelManagerDelegate* delegate,
     GpuWatchdogThread* watchdog,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
@@ -60,11 +61,12 @@ GpuChannelManager::GpuChannelManager(
     : task_runner_(task_runner),
       io_task_runner_(io_task_runner),
       gpu_preferences_(gpu_preferences),
-      gpu_driver_bug_workarounds_(workarounds),
+      gpu_driver_bug_workarounds_(
+          gpu_feature_info.enabled_gpu_driver_bug_workarounds),
       delegate_(delegate),
       watchdog_(watchdog),
       share_group_(new gl::GLShareGroup()),
-      mailbox_manager_(gles2::MailboxManager::Create(gpu_preferences)),
+      mailbox_manager_(gles2::CreateMailboxManager(gpu_preferences)),
       gpu_memory_manager_(this),
       scheduler_(scheduler),
       sync_point_manager_(sync_point_manager),
@@ -89,8 +91,7 @@ GpuChannelManager::GpuChannelManager(
   // |application_status_listener_| must be created on the right task runner.
   DCHECK(task_runner->BelongsToCurrentThread());
   DCHECK(io_task_runner);
-  if (gpu_preferences.ui_prioritize_in_gpu_process)
-    preemption_flag_ = new PreemptionFlag;
+  DCHECK(scheduler);
 }
 
 GpuChannelManager::~GpuChannelManager() {
@@ -102,17 +103,30 @@ GpuChannelManager::~GpuChannelManager() {
   }
 }
 
+gles2::Outputter* GpuChannelManager::outputter() {
+  if (!outputter_)
+    outputter_.reset(new gles2::TraceOutputter("GpuChannelManager Trace"));
+  return outputter_.get();
+}
+
 gles2::ProgramCache* GpuChannelManager::program_cache() {
-  if (!program_cache_.get() &&
-      !gpu_preferences_.disable_gpu_program_cache) {
+  if (!program_cache_.get()) {
     const GpuDriverBugWorkarounds& workarounds = gpu_driver_bug_workarounds_;
     bool disable_disk_cache =
         gpu_preferences_.disable_gpu_shader_disk_cache ||
         workarounds.disable_program_disk_cache;
-    program_cache_.reset(new gles2::MemoryProgramCache(
-        gpu_preferences_.gpu_program_cache_size, disable_disk_cache,
-        workarounds.disable_program_caching_for_transform_feedback,
-        &activity_flags_));
+
+    // Use the EGL cache control extension for the passthrough decoder.
+    if (gpu_preferences_.use_passthrough_cmd_decoder &&
+        gles2::PassthroughCommandDecoderSupported()) {
+      program_cache_.reset(new gles2::PassthroughProgramCache(
+          gpu_preferences_.gpu_program_cache_size, disable_disk_cache));
+    } else {
+      program_cache_.reset(new gles2::MemoryProgramCache(
+          gpu_preferences_.gpu_program_cache_size, disable_disk_cache,
+          workarounds.disable_program_caching_for_transform_feedback,
+          &activity_flags_));
+    }
   }
   return program_cache_.get();
 }
@@ -130,11 +144,9 @@ GpuChannel* GpuChannelManager::LookupChannel(int32_t client_id) const {
 GpuChannel* GpuChannelManager::EstablishChannel(int client_id,
                                                 uint64_t client_tracing_id,
                                                 bool is_gpu_host) {
-  std::unique_ptr<GpuChannel> gpu_channel = base::MakeUnique<GpuChannel>(
-      this, scheduler_, sync_point_manager_, share_group_,
-      is_gpu_host ? preemption_flag_ : nullptr,
-      is_gpu_host ? nullptr : preemption_flag_, task_runner_, io_task_runner_,
-      client_id, client_tracing_id, is_gpu_host);
+  std::unique_ptr<GpuChannel> gpu_channel = std::make_unique<GpuChannel>(
+      this, scheduler_, sync_point_manager_, share_group_, task_runner_,
+      io_task_runner_, client_id, client_tracing_id, is_gpu_host);
 
   GpuChannel* gpu_channel_ptr = gpu_channel.get();
   gpu_channels_[client_id] = std::move(gpu_channel);
@@ -189,7 +201,7 @@ void GpuChannelManager::MaybeExitOnContextLost() {
                << " from problems.";
     // Signal the message loop to quit to shut down other threads
     // gracefully.
-    base::MessageLoop::current()->QuitNow();
+    base::RunLoop::QuitCurrentDeprecated();
     exiting_for_lost_context_ = true;
   }
 }
@@ -237,16 +249,16 @@ void GpuChannelManager::ScheduleWakeUpGpu() {
 }
 
 void GpuChannelManager::DoWakeUpGpu() {
-  const GpuCommandBufferStub* stub = nullptr;
+  const CommandBufferStub* stub = nullptr;
   for (const auto& kv : gpu_channels_) {
     const GpuChannel* channel = kv.second.get();
     stub = channel->GetOneStub();
     if (stub) {
-      DCHECK(stub->decoder());
+      DCHECK(stub->decoder_context());
       break;
     }
   }
-  if (!stub || !stub->decoder()->MakeCurrent())
+  if (!stub || !stub->decoder_context()->MakeCurrent())
     return;
   glFinish();
   DidAccessGpu();
@@ -254,6 +266,10 @@ void GpuChannelManager::DoWakeUpGpu() {
 
 void GpuChannelManager::OnApplicationStateChange(
     base::android::ApplicationState state) {
+  // TODO(ericrk): Temporarily disable the context release logic due to
+  // https://crbug.com/792120. Re-enable when the fix lands.
+  return;
+
   if (state != base::android::APPLICATION_STATE_HAS_STOPPED_ACTIVITIES ||
       !is_running_on_low_end_mode_) {
     return;
@@ -270,6 +286,11 @@ void GpuChannelManager::OnApplicationStateChange(
                  weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kDelayToClearContextMs));
   return;
+}
+
+void GpuChannelManager::OnApplicationBackgroundedForTesting() {
+  is_backgrounded_for_testing_ = true;
+  OnApplicationBackgrounded();
 }
 
 void GpuChannelManager::OnApplicationBackgrounded() {
@@ -305,23 +326,9 @@ void GpuChannelManager::OnApplicationBackgrounded() {
 
 void GpuChannelManager::HandleMemoryPressure(
     base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
-  // Set a low limit on cache size for MEMORY_PRESSURE_LEVEL_MODERATE.
-  size_t limit = gpu_preferences_.gpu_program_cache_size / 4;
-  if (memory_pressure_level ==
-      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL) {
-    limit = 0;
-  }
-
-  if (!program_cache_) {
-    return;
-  }
-
-  size_t bytes_freed = program_cache_->Trim(limit);
-  if (bytes_freed > 0) {
-    UMA_HISTOGRAM_COUNTS_100000(
-        "GPU.ProgramCache.MemoryReleasedOnPressure",
-        static_cast<base::HistogramBase::Sample>(bytes_freed) / 1024);
-  }
+  if (program_cache_)
+    program_cache_->HandleMemoryPressure(memory_pressure_level);
+  discardable_manager_.HandleMemoryPressure(memory_pressure_level);
 }
 
 }  // namespace gpu

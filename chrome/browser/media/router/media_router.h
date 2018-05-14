@@ -13,10 +13,10 @@
 #include "base/callback.h"
 #include "base/callback_list.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/media/cast_remoting_connector.h"
 #include "chrome/browser/media/router/route_message_observer.h"
 #include "chrome/common/media_router/discovery/media_sink_internal.h"
-#include "chrome/common/media_router/issue.h"
 #include "chrome/common/media_router/media_route.h"
 #include "chrome/common/media_router/media_sink.h"
 #include "chrome/common/media_router/media_source.h"
@@ -33,12 +33,14 @@ class Origin;
 
 namespace media_router {
 
-class IssuesObserver;
-class MediaRouteController;
+class IssueManager;
 class MediaRoutesObserver;
 class MediaSinksObserver;
 class PresentationConnectionStateObserver;
 class RouteRequestResult;
+#if !defined(OS_ANDROID)
+class MediaRouteController;
+#endif  // !defined(OS_ANDROID)
 
 // Type of callback used in |CreateRoute()|, |JoinRoute()|, and
 // |ConnectRouteByRouteId()|. Callback is invoked when the route request either
@@ -149,11 +151,9 @@ class MediaRouter : public KeyedService {
       std::unique_ptr<std::vector<uint8_t>> data,
       SendRouteMessageCallback callback) = 0;
 
-  // Adds a new issue with info |issue_info|.
-  virtual void AddIssue(const IssueInfo& issue_info) = 0;
-
-  // Clears the issue with the id |issue_id|.
-  virtual void ClearIssue(const Issue::Id& issue_id) = 0;
+  // Returns the IssueManager owned by the MediaRouter. Guaranteed to be
+  // non-null.
+  virtual IssueManager* GetIssueManager() = 0;
 
   // Notifies the Media Router that the user has taken an action involving the
   // Media Router. This can be used to perform any initialization that is not
@@ -170,13 +170,6 @@ class MediaRouter : public KeyedService {
                            const std::string& search_input,
                            const std::string& domain,
                            MediaSinkSearchResponseCallback sink_callback) = 0;
-
-  // Notifies the Media Router that the list of MediaSinks discovered by a
-  // MediaSinkService has been updated.
-  // |provider_name|: Name of the MediaSinkService providing the sinks.
-  // |sinks|: sinks discovered by MediaSinkService.
-  virtual void ProvideSinks(const std::string& provider_name,
-                            std::vector<MediaSinkInternal> sinks) = 0;
 
   // Adds |callback| to listen for state changes for presentation connected to
   // |route_id|. The returned Subscription object is owned by the caller.
@@ -195,10 +188,12 @@ class MediaRouter : public KeyedService {
   // there is a change to the media routes, subclass MediaRoutesObserver.
   virtual std::vector<MediaRoute> GetCurrentRoutes() const = 0;
 
+#if !defined(OS_ANDROID)
   // Returns a controller for sending media commands to a route. Returns a
   // nullptr if no MediaRoute exists for the given |route_id|.
   virtual scoped_refptr<MediaRouteController> GetRouteController(
       const MediaRoute::Id& route_id) = 0;
+#endif  // !defined(OS_ANDROID)
 
   // Registers/Unregisters a CastRemotingConnector with the |tab_id|. For a
   // given |tab_id|, only one CastRemotingConnector can be registered. The
@@ -211,10 +206,12 @@ class MediaRouter : public KeyedService {
  private:
   friend class IssuesObserver;
   friend class MediaSinksObserver;
-  friend class MediaRouteController;
   friend class MediaRoutesObserver;
   friend class PresentationConnectionStateObserver;
   friend class RouteMessageObserver;
+#if !defined(OS_ANDROID)
+  friend class MediaRouteController;
+#endif  // !defined(OS_ANDROID)
 
   // The following functions are called by friend Observer classes above.
 
@@ -248,14 +245,6 @@ class MediaRouter : public KeyedService {
   // receiving further updates.
   virtual void UnregisterMediaRoutesObserver(MediaRoutesObserver* observer) = 0;
 
-  // Adds the IssuesObserver |observer|.
-  // It is invalid to register the same observer more than once and will result
-  // in undefined behavior.
-  virtual void RegisterIssuesObserver(IssuesObserver* observer) = 0;
-
-  // Removes the IssuesObserver |observer|.
-  virtual void UnregisterIssuesObserver(IssuesObserver* observer) = 0;
-
   // Registers |observer| with this MediaRouter. |observer| specifies a media
   // route and will receive messages from the MediaSink connected to the
   // route. Note that MediaRouter does not own |observer|. |observer| should be
@@ -268,11 +257,13 @@ class MediaRouter : public KeyedService {
   virtual void UnregisterRouteMessageObserver(
       RouteMessageObserver* observer) = 0;
 
+#if !defined(OS_ANDROID)
   // Removes the MediaRouteController for |route_id| from the list of
   // controllers held by |this|. Called by MediaRouteController when it is
   // invalidated.
   virtual void DetachRouteController(const MediaRoute::Id& route_id,
                                      MediaRouteController* controller) = 0;
+#endif  // !defined(OS_ANDROID)
 };
 
 }  // namespace media_router

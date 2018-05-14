@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -108,6 +109,10 @@ struct HistoryURLProviderParams {
                            const SearchTermsData& search_terms_data);
   ~HistoryURLProviderParams();
 
+  // Estimates dynamic memory usage.
+  // See base/trace_event/memory_usage_estimator.h for more info.
+  size_t EstimateMemoryUsage() const;
+
   const scoped_refptr<base::SequencedTaskRunner> origin_task_runner;
 
   // A copy of the autocomplete input. We need the copy since this object will
@@ -198,6 +203,10 @@ class HistoryURLProvider : public HistoryProvider {
   void Start(const AutocompleteInput& input, bool minimal_changes) override;
   void Stop(bool clear_cached_results, bool due_to_user_inactivity) override;
 
+  // Estimates dynamic memory usage.
+  // See base/trace_event/memory_usage_estimator.h for more info.
+  size_t EstimateMemoryUsage() const override;
+
   // Returns a match representing a navigation to |destination_url|, highlighted
   // appropriately against |input|.  |trim_http| controls whether the match's
   // |fill_into_edit| and |contents| should have any HTTP stripped off, and
@@ -220,6 +229,14 @@ class HistoryURLProvider : public HistoryProvider {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(HistoryURLProviderTest, HUPScoringExperiment);
+  FRIEND_TEST_ALL_PREFIXES(HistoryURLProviderTest, DoTrimHttpScheme);
+  FRIEND_TEST_ALL_PREFIXES(HistoryURLProviderTest,
+                           DontTrimHttpSchemeIfInputHasScheme);
+  FRIEND_TEST_ALL_PREFIXES(HistoryURLProviderTest,
+                           DontTrimHttpSchemeIfInputMatchesInScheme);
+  FRIEND_TEST_ALL_PREFIXES(HistoryURLProviderTest,
+                           DontTrimHttpsSchemeIfInputMatchesInScheme);
+  FRIEND_TEST_ALL_PREFIXES(HistoryURLProviderTest, DoTrimHttpsScheme);
 
   enum MatchType {
     NORMAL,
@@ -271,10 +288,13 @@ class HistoryURLProvider : public HistoryProvider {
                             const VisitClassifier& classifier,
                             HistoryURLProviderParams* params) const;
 
-  // Helper function for FixupExactSuggestion, this returns true if the input
-  // corresponds to some intranet URL where the user has previously visited the
-  // host in question.  In this case the input should be treated as a URL.
-  bool CanFindIntranetURL(history::URLDatabase* db,
+  // Helper function for FixupExactSuggestion. If a URL with the same host name
+  // has been visited by the user in the past, the function returns a valid URL.
+  // The return value is built from the canonicalized version of the
+  // autocomplete input in |params|. The scheme and host format (e.g. prefixed
+  // with "www.") of the return value is the same as one of the corresponding
+  // entries in the database.
+  GURL AsKnownIntranetURL(history::URLDatabase* db,
                           const AutocompleteInput& input) const;
 
   // Sees if a shorter version of the best match should be created, and if so

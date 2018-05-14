@@ -7,11 +7,14 @@
 
 #include "build/build_config.h"
 #include "platform/heap/Heap.h"
+#include "platform/heap/HeapFlags.h"
 #include "platform/heap/Persistent.h"
 #include "platform/heap/TraceTraits.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Assertions.h"
+#include "platform/wtf/ConstructTraits.h"
 #include "platform/wtf/Deque.h"
+#include "platform/wtf/DoublyLinkedList.h"
 #include "platform/wtf/HashCountedSet.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/HashSet.h"
@@ -50,7 +53,7 @@ class PLATFORM_EXPORT HeapAllocator {
 
  public:
   using Visitor = blink::Visitor;
-  static const bool kIsGarbageCollected = true;
+  static constexpr bool kIsGarbageCollected = true;
 
   template <typename T>
   static size_t MaxElementCountInBackingStore() {
@@ -69,8 +72,8 @@ class PLATFORM_EXPORT HeapAllocator {
         ThreadStateFor<ThreadingTrait<T>::kAffinity>::GetState();
     DCHECK(state->IsAllocationAllowed());
     size_t gc_info_index = GCInfoTrait<HeapVectorBacking<T>>::Index();
-    NormalPageArena* arena =
-        static_cast<NormalPageArena*>(state->VectorBackingArena(gc_info_index));
+    NormalPageArena* arena = static_cast<NormalPageArena*>(
+        state->Heap().VectorBackingArena(gc_info_index));
     return reinterpret_cast<T*>(arena->AllocateObject(
         ThreadHeap::AllocationSizeFromSize(size), gc_info_index));
   }
@@ -81,7 +84,7 @@ class PLATFORM_EXPORT HeapAllocator {
     DCHECK(state->IsAllocationAllowed());
     size_t gc_info_index = GCInfoTrait<HeapVectorBacking<T>>::Index();
     NormalPageArena* arena = static_cast<NormalPageArena*>(
-        state->ExpandedVectorBackingArena(gc_info_index));
+        state->Heap().ExpandedVectorBackingArena(gc_info_index));
     return reinterpret_cast<T*>(arena->AllocateObject(
         ThreadHeap::AllocationSizeFromSize(size), gc_info_index));
   }
@@ -96,7 +99,7 @@ class PLATFORM_EXPORT HeapAllocator {
     ThreadState* state =
         ThreadStateFor<ThreadingTrait<T>::kAffinity>::GetState();
     const char* type_name = WTF_HEAP_PROFILER_TYPE_NAME(HeapVectorBacking<T>);
-    return reinterpret_cast<T*>(ThreadHeap::AllocateOnArenaIndex(
+    return reinterpret_cast<T*>(state->Heap().AllocateOnArenaIndex(
         state, size, BlinkGC::kInlineVectorArenaIndex, gc_info_index,
         type_name));
   }
@@ -114,15 +117,19 @@ class PLATFORM_EXPORT HeapAllocator {
         ThreadStateFor<ThreadingTrait<T>::kAffinity>::GetState();
     const char* type_name =
         WTF_HEAP_PROFILER_TYPE_NAME(HeapHashTableBacking<HashTable>);
-    return reinterpret_cast<T*>(ThreadHeap::AllocateOnArenaIndex(
+    return reinterpret_cast<T*>(state->Heap().AllocateOnArenaIndex(
         state, size, BlinkGC::kHashTableArenaIndex, gc_info_index, type_name));
   }
   template <typename T, typename HashTable>
   static T* AllocateZeroedHashTableBacking(size_t size) {
     return AllocateHashTableBacking<T, HashTable>(size);
   }
-  static void FreeHashTableBacking(void* address);
+  static void FreeHashTableBacking(void* address, bool is_weak_table);
   static bool ExpandHashTableBacking(void*, size_t);
+
+  static void BackingWriteBarrier(void* address) {
+    ThreadState::Current()->Heap().WriteBarrier(address);
+  }
 
   template <typename Return, typename Metadata>
   static Return Malloc(size_t size, const char* type_name) {
@@ -143,7 +150,7 @@ class PLATFORM_EXPORT HeapAllocator {
   template <typename T>
   static void* NewArray(size_t bytes) {
     NOTREACHED();
-    return 0;
+    return nullptr;
   }
 
   static void DeleteArray(void* ptr) { NOTREACHED(); }
@@ -168,10 +175,8 @@ class PLATFORM_EXPORT HeapAllocator {
 
   template <typename VisitorDispatcher, typename T, typename Traits>
   static void Trace(VisitorDispatcher visitor, T& t) {
-    TraceCollectionIfEnabled<WTF::IsTraceableInCollectionTrait<Traits>::value,
-                             Traits::kWeakHandlingFlag,
-                             WTF::kWeakPointersActWeak, T,
-                             Traits>::Trace(visitor, t);
+    TraceCollectionIfEnabled<Traits::kWeakHandlingFlag, T, Traits>::Trace(
+        visitor, t);
   }
 
   template <typename VisitorDispatcher>
@@ -188,12 +193,12 @@ class PLATFORM_EXPORT HeapAllocator {
   }
 
   template <typename VisitorDispatcher>
-  static void RegisterWeakTable(VisitorDispatcher visitor,
+  static bool RegisterWeakTable(VisitorDispatcher visitor,
                                 const void* closure,
                                 EphemeronCallback iteration_callback,
                                 EphemeronCallback iteration_done_callback) {
-    visitor->RegisterWeakTable(closure, iteration_callback,
-                               iteration_done_callback);
+    return visitor->RegisterWeakTable(closure, iteration_callback,
+                                      iteration_done_callback);
   }
 
 #if DCHECK_IS_ON()
@@ -227,6 +232,73 @@ class PLATFORM_EXPORT HeapAllocator {
     ThreadState::Current()->LeaveGCForbiddenScope();
   }
 
+  template <typename T, typename Traits>
+  static void NotifyNewObject(T* object) {
+#if BUILDFLAG(BLINK_HEAP_INCREMENTAL_MARKING)
+    // The object may have been in-place constructed as part of a large object.
+    // It is not safe to retrieve the page from the object here.
+    ThreadState* const thread_state = ThreadState::Current();
+    if (thread_state->IsIncrementalMarking()) {
+      // Eagerly trace the object ensuring that the object and all its children
+      // are discovered by the marker.
+      ThreadState::NoAllocationScope no_allocation_scope(thread_state);
+      DCHECK(thread_state->CurrentVisitor());
+      // This check ensures that the visitor will not eagerly recurse into
+      // children but rather push all blink::GarbageCollected objects and only
+      // eagerly trace non-managed objects.
+      DCHECK(!thread_state->Heap().GetStackFrameDepth().IsEnabled());
+      // No weak handling for write barriers. Modifying weakly reachable objects
+      // strongifies them for the current cycle.
+      TraceCollectionIfEnabled<
+          WTF::kNoWeakHandling, T, Traits>::Trace(thread_state
+                                                      ->CurrentVisitor(),
+                                                  *object);
+    }
+#endif  // BUILDFLAG(BLINK_HEAP_INCREMENTAL_MARKING)
+  }
+
+  template <typename T, typename Traits>
+  static void NotifyNewObjects(T* array, size_t len) {
+#if BUILDFLAG(BLINK_HEAP_INCREMENTAL_MARKING)
+    // The object may have been in-place constructed as part of a large object.
+    // It is not safe to retrieve the page from the object here.
+    ThreadState* const thread_state = ThreadState::Current();
+    if (thread_state->IsIncrementalMarking()) {
+      // See |NotifyNewObject| for details.
+      ThreadState::NoAllocationScope no_allocation_scope(thread_state);
+      DCHECK(thread_state->CurrentVisitor());
+      DCHECK(!thread_state->Heap().GetStackFrameDepth().IsEnabled());
+      // No weak handling for write barriers. Modifying weakly reachable objects
+      // strongifies them for the current cycle.
+      while (len-- > 0) {
+        TraceCollectionIfEnabled<
+            WTF::kNoWeakHandling, T, Traits>::Trace(thread_state
+                                                        ->CurrentVisitor(),
+                                                    *array);
+        array++;
+      }
+    }
+#endif  // BUILDFLAG(BLINK_HEAP_INCREMENTAL_MARKING)
+  }
+
+  template <typename T, typename VisitorDispatcher>
+  static void TraceVectorBacking(VisitorDispatcher visitor,
+                                 T* backing,
+                                 T** backing_slot) {
+    HeapVectorBacking<T>* vector_backing =
+        reinterpret_cast<HeapVectorBacking<T>*>(backing);
+    visitor->RegisterBackingStoreReference(backing_slot);
+    visitor->Trace(vector_backing);
+  }
+
+  template <typename T, typename HashTable, typename VisitorDispatcher>
+  static void TraceHashTableBacking(VisitorDispatcher visitor, T* backing) {
+    HeapHashTableBacking<HashTable>* hashtable_backing =
+        reinterpret_cast<HeapHashTableBacking<HashTable>*>(backing);
+    // Backing store reference is registered by the caller.
+    visitor->Trace(hashtable_backing);
+  }
+
  private:
   static void BackingFree(void*);
   static bool BackingExpand(void*, size_t);
@@ -255,10 +327,8 @@ static void TraceListHashSetValue(VisitorDispatcher visitor, Value& value) {
   // (there's an assert elsewhere), but we have to specify some value for the
   // strongify template argument, so we specify WTF::WeakPointersActWeak,
   // arbitrarily.
-  TraceCollectionIfEnabled<
-      WTF::IsTraceableInCollectionTrait<WTF::HashTraits<Value>>::value,
-      WTF::kNoWeakHandlingInCollections, WTF::kWeakPointersActWeak, Value,
-      WTF::HashTraits<Value>>::Trace(visitor, value);
+  TraceCollectionIfEnabled<WTF::kNoWeakHandling, Value,
+                           WTF::HashTraits<Value>>::Trace(visitor, value);
 }
 
 // The inline capacity is just a dummy template argument to match the off-heap
@@ -280,7 +350,7 @@ class HeapListHashSetAllocator : public HeapAllocator {
    public:
     // For the heap allocation we don't need an actual allocator object, so
     // we just return null.
-    HeapListHashSetAllocator* Get() const { return 0; }
+    HeapListHashSetAllocator* Get() const { return nullptr; }
 
     // No allocator object is needed.
     void CreateAllocatorIfNeeded() {}
@@ -329,23 +399,22 @@ void HeapVectorBacking<T, Traits>::Finalize(void* pointer) {
   // Use the payload size as recorded by the heap to determine how many
   // elements to finalize.
   size_t length = header->PayloadSize() / sizeof(T);
-  T* buffer = reinterpret_cast<T*>(pointer);
+  char* payload = static_cast<char*>(pointer);
 #ifdef ANNOTATE_CONTIGUOUS_CONTAINER
+  ANNOTATE_CHANGE_SIZE(payload, length * sizeof(T), 0, length * sizeof(T));
+#endif
   // As commented above, HeapVectorBacking calls finalizers for unused slots
   // (which are already zeroed out).
-  ANNOTATE_CHANGE_SIZE(buffer, length, 0, length);
-#endif
   if (std::is_polymorphic<T>::value) {
-    char* pointer = reinterpret_cast<char*>(buffer);
     for (unsigned i = 0; i < length; ++i) {
-      char* element = pointer + i * sizeof(T);
+      char* element = payload + i * sizeof(T);
       if (blink::VTableInitialized(element))
         reinterpret_cast<T*>(element)->~T();
     }
   } else {
-    for (unsigned i = 0; i < length; ++i) {
+    T* buffer = reinterpret_cast<T*>(payload);
+    for (unsigned i = 0; i < length; ++i)
       buffer[i].~T();
-    }
   }
 }
 
@@ -480,6 +549,23 @@ class HeapDeque : public Deque<T, inlineCapacity, HeapAllocator> {
       : Deque<T, inlineCapacity, HeapAllocator>(other) {}
 };
 
+template <typename T>
+class HeapDoublyLinkedList : public DoublyLinkedList<T, Member<T>> {
+  IS_GARBAGE_COLLECTED_TYPE();
+  DISALLOW_NEW();
+
+ public:
+  HeapDoublyLinkedList() {
+    static_assert(WTF::IsGarbageCollectedType<T>::value,
+                  "This should only be used for garbage collected types.");
+  }
+
+  void Trace(Visitor* visitor) {
+    visitor->Trace(this->head_);
+    visitor->Trace(this->tail_);
+  }
+};
+
 }  // namespace blink
 
 namespace WTF {
@@ -490,6 +576,7 @@ struct VectorTraits<blink::Member<T>> : VectorTraitsBase<blink::Member<T>> {
   static const bool kNeedsDestruction = false;
   static const bool kCanInitializeWithMemset = true;
   static const bool kCanClearUnusedSlotsWithMemset = true;
+  static const bool kCanCopyWithMemcpy = true;
   static const bool kCanMoveWithMemcpy = true;
 };
 
@@ -576,24 +663,24 @@ template <typename T, size_t inlineCapacity>
 struct VectorTraits<blink::HeapVector<T, inlineCapacity>>
     : VectorTraitsBase<blink::HeapVector<T, inlineCapacity>> {
   STATIC_ONLY(VectorTraits);
-  static const bool kNeedsDestruction = VectorTraits<T>::needsDestruction;
+  static const bool kNeedsDestruction = VectorTraits<T>::kNeedsDestruction;
   static const bool kCanInitializeWithMemset =
-      VectorTraits<T>::canInitializeWithMemset;
+      VectorTraits<T>::kCanInitializeWithMemset;
   static const bool kCanClearUnusedSlotsWithMemset =
-      VectorTraits<T>::canClearUnusedSlotsWithMemset;
-  static const bool kCanMoveWithMemcpy = VectorTraits<T>::canMoveWithMemcpy;
+      VectorTraits<T>::kCanClearUnusedSlotsWithMemset;
+  static const bool kCanMoveWithMemcpy = VectorTraits<T>::kCanMoveWithMemcpy;
 };
 
 template <typename T, size_t inlineCapacity>
 struct VectorTraits<blink::HeapDeque<T, inlineCapacity>>
     : VectorTraitsBase<blink::HeapDeque<T, inlineCapacity>> {
   STATIC_ONLY(VectorTraits);
-  static const bool kNeedsDestruction = VectorTraits<T>::needsDestruction;
+  static const bool kNeedsDestruction = VectorTraits<T>::kNeedsDestruction;
   static const bool kCanInitializeWithMemset =
-      VectorTraits<T>::canInitializeWithMemset;
+      VectorTraits<T>::kCanInitializeWithMemset;
   static const bool kCanClearUnusedSlotsWithMemset =
-      VectorTraits<T>::canClearUnusedSlotsWithMemset;
-  static const bool kCanMoveWithMemcpy = VectorTraits<T>::canMoveWithMemcpy;
+      VectorTraits<T>::kCanClearUnusedSlotsWithMemset;
+  static const bool kCanMoveWithMemcpy = VectorTraits<T>::kCanMoveWithMemcpy;
 };
 
 template <typename T>
@@ -622,6 +709,13 @@ struct HashTraits<blink::Member<T>> : SimpleClassHashTraits<blink::Member<T>> {
   }
 
   static PeekOutType Peek(const blink::Member<T>& value) { return value; }
+
+  static void ConstructDeletedValue(blink::Member<T>& slot, bool) {
+    slot = WTF::kHashTableDeletedValue;
+  }
+  static bool IsDeletedValue(const blink::Member<T>& value) {
+    return value.IsHashTableDeletedValue();
+  }
 };
 
 template <typename T>
@@ -690,9 +784,7 @@ struct HashTraits<blink::TraceWrapperMember<T>>
     return value;
   }
 
-  static blink::TraceWrapperMember<T> EmptyValue() {
-    return blink::TraceWrapperMember<T>(nullptr, nullptr);
-  }
+  static blink::TraceWrapperMember<T> EmptyValue() { return nullptr; }
 };
 
 template <typename T>
@@ -724,11 +816,15 @@ struct HashTraits<blink::WeakMember<T>>
 
   static PeekOutType Peek(const blink::WeakMember<T>& value) { return value; }
 
+  static bool IsAlive(blink::WeakMember<T>& weak_member) {
+    return blink::ThreadHeap::IsHeapObjectAlive(weak_member);
+  }
+
   template <typename VisitorDispatcher>
   static bool TraceInCollection(VisitorDispatcher visitor,
                                 blink::WeakMember<T>& weak_member,
-                                ShouldWeakPointersBeMarkedStrongly strongify) {
-    if (strongify == kWeakPointersActStrong) {
+                                WeakHandlingFlag weakness) {
+    if (weakness == kNoWeakHandling) {
       visitor->Trace(weak_member.Get());  // Strongified visit.
       return false;
     }

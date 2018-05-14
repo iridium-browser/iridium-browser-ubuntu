@@ -12,11 +12,12 @@
 #include "media/base/video_frame.h"
 #include "media/capture/capture_export.h"
 #include "media/capture/content/video_capture_oracle.h"
+#include "media/capture/video/video_capture_buffer_handle.h"
 #include "media/capture/video/video_capture_device.h"
 
-namespace tracked_objects {
+namespace base {
 class Location;
-}  // namespace tracked_objects
+}  // namespace base
 
 namespace media {
 
@@ -59,12 +60,6 @@ class CAPTURE_EXPORT ThreadSafeCaptureOracle
                                     scoped_refptr<VideoFrame>* storage,
                                     CaptureFrameCallback* callback);
 
-  // Attempt to re-send the last frame to the VideoCaptureDevice::Client.
-  // Returns true if successful. This can fail if the last frame is no longer
-  // available in the buffer pool, or if the VideoCaptureOracle decides to
-  // reject the "passive" refresh.
-  bool AttemptPassiveRefresh();
-
   base::TimeDelta min_capture_period() const {
     return oracle_.min_capture_period();
   }
@@ -88,8 +83,7 @@ class CAPTURE_EXPORT ThreadSafeCaptureOracle
   void Stop();
 
   // Signal an error to the client.
-  void ReportError(const tracked_objects::Location& from_here,
-                   const std::string& reason);
+  void ReportError(const base::Location& from_here, const std::string& reason);
 
   // Signal device started to the client.
   void ReportStarted();
@@ -97,14 +91,16 @@ class CAPTURE_EXPORT ThreadSafeCaptureOracle
   void OnConsumerReportingUtilization(int frame_number, double utilization);
 
  private:
+  // Helper struct to hold the many arguments needed by DidCaptureFrame(), and
+  // also ensure that teardown of these objects happens in the correct order if
+  // bound to an aborted callback.
+  struct InFlightFrameCapture;
+
   friend class base::RefCountedThreadSafe<ThreadSafeCaptureOracle>;
   virtual ~ThreadSafeCaptureOracle();
 
   // Callback invoked on completion of all captures.
-  void DidCaptureFrame(int frame_number,
-                       VideoCaptureDevice::Client::Buffer buffer,
-                       base::TimeTicks capture_begin_time,
-                       base::TimeDelta estimated_frame_duration,
+  void DidCaptureFrame(std::unique_ptr<InFlightFrameCapture> capture,
                        scoped_refptr<VideoFrame> frame,
                        base::TimeTicks reference_time,
                        bool success);

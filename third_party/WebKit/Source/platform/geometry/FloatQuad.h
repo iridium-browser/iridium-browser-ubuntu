@@ -47,7 +47,7 @@ class PLATFORM_EXPORT FloatQuad {
   USING_FAST_MALLOC(FloatQuad);
 
  public:
-  FloatQuad() {}
+  FloatQuad() = default;
 
   FloatQuad(const FloatPoint& p1,
             const FloatPoint& p2,
@@ -173,6 +173,8 @@ inline bool operator!=(const FloatQuad& a, const FloatQuad& b) {
   return a.P1() != b.P1() || a.P2() != b.P2() || a.P3() != b.P3() ||
          a.P4() != b.P4();
 }
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, const FloatQuad&);
 
 // Redeclared here to avoid ODR issues.
 // See platform/testing/GeometryPrinters.h.

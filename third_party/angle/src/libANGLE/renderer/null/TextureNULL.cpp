@@ -146,7 +146,13 @@ gl::Error TextureNULL::setStorageMultisample(const gl::Context *context,
                                              GLsizei samples,
                                              GLint internalformat,
                                              const gl::Extents &size,
-                                             GLboolean fixedSampleLocations)
+                                             bool fixedSampleLocations)
+{
+    return gl::NoError();
+}
+
+gl::Error TextureNULL::initializeContents(const gl::Context *context,
+                                          const gl::ImageIndex &imageIndex)
 {
     return gl::NoError();
 }

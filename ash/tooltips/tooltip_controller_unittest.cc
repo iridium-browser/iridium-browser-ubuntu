@@ -74,8 +74,8 @@ TooltipController* GetController() {
 
 class TooltipControllerTest : public AshTestBase {
  public:
-  TooltipControllerTest() {}
-  ~TooltipControllerTest() override {}
+  TooltipControllerTest() = default;
+  ~TooltipControllerTest() override = default;
 
   void SetUp() override {
     AshTestBase::SetUp();
@@ -111,10 +111,6 @@ TEST_F(TooltipControllerTest, HideTooltipWhenCursorHidden) {
 
   // Mouse event triggers tooltip update so it becomes visible.
   EXPECT_TRUE(helper_->IsTooltipVisible());
-
-  // TODO: CursorManager not created in mash. http://crbug.com/631103.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
 
   // Disable mouse event which hides the cursor and check again.
   ash::Shell::Get()->cursor_manager()->DisableMouseEvents();

@@ -38,6 +38,10 @@ IF YOU MODIFY THIS FILE YOU ALSO NEED TO RUN generate_parser.sh.
 #elif defined(_MSC_VER)
 #pragma warning(disable: 4244)
 #endif
+#if defined(__clang__)
+// Flex uses `/*FALLTHROUGH*/` instead of dedicated statements.
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+#endif
 
 // Workaround for flex using the register keyword, deprecated in C++11.
 #ifdef __cplusplus
@@ -277,11 +281,17 @@ FRACTIONAL_CONSTANT  ({DIGIT}*"."{DIGIT}+)|({DIGIT}+".")
     yylloc->line = yylineno;
     yylval->clear();
 
-    if (YY_START == COMMENT)
+    // Line number overflows fake EOFs to exit early, check for this case.
+    if (yylineno == INT_MAX) {
+        yyextra->diagnostics->report(pp::Diagnostics::PP_TOKENIZER_ERROR,
+                pp::SourceLocation(yyfileno, yylineno),
+                "Integer overflow on line number");
+    }
+    else if (YY_START == COMMENT)
     {
         yyextra->diagnostics->report(pp::Diagnostics::PP_EOF_IN_COMMENT,
                                      pp::SourceLocation(yyfileno, yylineno),
-                                     "");
+                                     "EOF while in a comment");
     }
     yyterminate();
 }

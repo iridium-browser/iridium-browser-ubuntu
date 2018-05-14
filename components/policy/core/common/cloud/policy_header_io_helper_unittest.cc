@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/test/test_simple_task_runner.h"
 #include "net/http/http_request_headers.h"
@@ -25,12 +24,12 @@ const char kInitialPolicyHeader[] = "initial_header";
 class PolicyHeaderIOHelperTest : public testing::Test {
  public:
   PolicyHeaderIOHelperTest() {
-    task_runner_ = make_scoped_refptr(new base::TestSimpleTaskRunner());
+    task_runner_ = base::MakeRefCounted<base::TestSimpleTaskRunner>();
   }
   ~PolicyHeaderIOHelperTest() override {}
 
   void SetUp() override {
-    helper_ = base::MakeUnique<PolicyHeaderIOHelper>(
+    helper_ = std::make_unique<PolicyHeaderIOHelper>(
         kDMServerURL, kInitialPolicyHeader, task_runner_);
     task_runner_->RunUntilIdle();
   }
@@ -56,7 +55,7 @@ class PolicyHeaderIOHelperTest : public testing::Test {
 
 TEST_F(PolicyHeaderIOHelperTest, InitialHeader) {
   std::unique_ptr<net::URLRequest> request(
-      context_.CreateRequest(GURL(kDMServerURL), net::DEFAULT_PRIORITY, NULL,
+      context_.CreateRequest(GURL(kDMServerURL), net::DEFAULT_PRIORITY, nullptr,
                              TRAFFIC_ANNOTATION_FOR_TESTS));
   helper_->AddPolicyHeaders(request->url(), request.get());
   ValidateHeader(request->extra_request_headers(), kInitialPolicyHeader);
@@ -64,7 +63,7 @@ TEST_F(PolicyHeaderIOHelperTest, InitialHeader) {
 
 TEST_F(PolicyHeaderIOHelperTest, NoHeaderOnNonMatchingURL) {
   std::unique_ptr<net::URLRequest> request(context_.CreateRequest(
-      GURL("http://non-matching.com"), net::DEFAULT_PRIORITY, NULL,
+      GURL("http://non-matching.com"), net::DEFAULT_PRIORITY, nullptr,
       TRAFFIC_ANNOTATION_FOR_TESTS));
   helper_->AddPolicyHeaders(request->url(), request.get());
   EXPECT_TRUE(request->extra_request_headers().IsEmpty());
@@ -75,7 +74,7 @@ TEST_F(PolicyHeaderIOHelperTest, HeaderChange) {
   helper_->UpdateHeader(new_header);
   task_runner_->RunUntilIdle();
   std::unique_ptr<net::URLRequest> request(
-      context_.CreateRequest(GURL(kDMServerURL), net::DEFAULT_PRIORITY, NULL,
+      context_.CreateRequest(GURL(kDMServerURL), net::DEFAULT_PRIORITY, nullptr,
                              TRAFFIC_ANNOTATION_FOR_TESTS));
   helper_->AddPolicyHeaders(request->url(), request.get());
   ValidateHeader(request->extra_request_headers(), new_header);
@@ -85,7 +84,7 @@ TEST_F(PolicyHeaderIOHelperTest, ChangeToNoHeader) {
   helper_->UpdateHeader("");
   task_runner_->RunUntilIdle();
   std::unique_ptr<net::URLRequest> request(
-      context_.CreateRequest(GURL(kDMServerURL), net::DEFAULT_PRIORITY, NULL,
+      context_.CreateRequest(GURL(kDMServerURL), net::DEFAULT_PRIORITY, nullptr,
                              TRAFFIC_ANNOTATION_FOR_TESTS));
   helper_->AddPolicyHeaders(request->url(), request.get());
   EXPECT_TRUE(request->extra_request_headers().IsEmpty());

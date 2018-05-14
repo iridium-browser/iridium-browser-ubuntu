@@ -7,25 +7,22 @@
 #include <GLES2/gl2extchromium.h>
 #include <GLES3/gl3.h>
 
-#include "base/command_line.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "gpu/command_buffer/tests/gl_manager.h"
 #include "gpu/command_buffer/tests/gl_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gl/gl_switches.h"
 
 namespace gpu {
 
 class RequestExtensionCHROMIUMTest
-    : public testing::TestWithParam<gles2::ContextType> {
+    : public testing::TestWithParam<ContextType> {
  protected:
   void SetUp() override {
-    base::CommandLine command_line(*base::CommandLine::ForCurrentProcess());
     GLManager::Options options;
     options.context_type = GetParam();
-    gl_.InitializeWithCommandLine(options, command_line);
+    gl_.Initialize(options);
   }
   void TearDown() override { gl_.Destroy(); }
   bool IsApplicable() const { return gl_.IsInitialized(); }
@@ -70,8 +67,8 @@ TEST_P(RequestExtensionCHROMIUMTest, Basic) {
     std::set<std::string> extensions_from_string(extensions.begin(),
                                                  extensions.end());
 
-    if (GetParam() == gles2::CONTEXT_TYPE_WEBGL2 ||
-        GetParam() == gles2::CONTEXT_TYPE_OPENGLES3) {
+    if (GetParam() == CONTEXT_TYPE_WEBGL2 ||
+        GetParam() == CONTEXT_TYPE_OPENGLES3) {
       // Test that GetString(GL_EXTENSIONS) is consistent with
       // GetStringi(GL_EXTENSIONS, index)
       GLint num_extensions = 0;
@@ -97,8 +94,8 @@ TEST_P(RequestExtensionCHROMIUMTest, Basic) {
 }
 INSTANTIATE_TEST_CASE_P(WithContextTypes,
                         RequestExtensionCHROMIUMTest,
-                        ::testing::Values(gles2::CONTEXT_TYPE_WEBGL1,
-                                          gles2::CONTEXT_TYPE_WEBGL2,
-                                          gles2::CONTEXT_TYPE_OPENGLES2,
-                                          gles2::CONTEXT_TYPE_OPENGLES3));
+                        ::testing::Values(CONTEXT_TYPE_WEBGL1,
+                                          CONTEXT_TYPE_WEBGL2,
+                                          CONTEXT_TYPE_OPENGLES2,
+                                          CONTEXT_TYPE_OPENGLES3));
 }

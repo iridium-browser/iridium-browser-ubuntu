@@ -48,7 +48,7 @@ LayoutSVGImage::LayoutSVGImage(SVGImageElement* impl)
   image_resource_->Initialize(this);
 }
 
-LayoutSVGImage::~LayoutSVGImage() {}
+LayoutSVGImage::~LayoutSVGImage() = default;
 
 void LayoutSVGImage::WillBeDestroyed() {
   image_resource_->Shutdown();
@@ -90,27 +90,21 @@ bool LayoutSVGImage::UpdateBoundingBox() {
   FloatRect old_object_bounding_box = object_bounding_box_;
 
   SVGLengthContext length_context(GetElement());
+  const ComputedStyle& style = StyleRef();
+  const SVGComputedStyle& svg_style = style.SvgStyle();
   object_bounding_box_ = FloatRect(
-      length_context.ValueForLength(StyleRef().SvgStyle().X(), StyleRef(),
-                                    SVGLengthMode::kWidth),
-      length_context.ValueForLength(StyleRef().SvgStyle().Y(), StyleRef(),
-                                    SVGLengthMode::kHeight),
-      length_context.ValueForLength(StyleRef().Width(), StyleRef(),
-                                    SVGLengthMode::kWidth),
-      length_context.ValueForLength(StyleRef().Height(), StyleRef(),
-                                    SVGLengthMode::kHeight));
+      length_context.ResolveLengthPair(svg_style.X(), svg_style.Y(), style),
+      ToFloatSize(length_context.ResolveLengthPair(style.Width(),
+                                                   style.Height(), style)));
 
-  if (StyleRef().Width().IsAuto() || StyleRef().Height().IsAuto())
+  if (style.Width().IsAuto() || style.Height().IsAuto())
     object_bounding_box_.SetSize(CalculateObjectSize());
 
   if (old_object_bounding_box != object_bounding_box_) {
+    GetElement()->SetNeedsResizeObserverUpdate();
     SetShouldDoFullPaintInvalidation(PaintInvalidationReason::kImage);
     needs_boundaries_update_ = true;
   }
-
-  if (GetElement())
-    GetElement()->SetNeedsResizeObserverUpdate();
-
   return old_object_bounding_box.Size() != object_bounding_box_.Size();
 }
 
@@ -120,14 +114,14 @@ void LayoutSVGImage::UpdateLayout() {
 
   // Invalidate all resources of this client if our layout changed.
   if (EverHadLayout() && SelfNeedsLayout())
-    SVGResourcesCache::ClientLayoutChanged(this);
+    SVGResourcesCache::ClientLayoutChanged(*this);
 
   UpdateBoundingBox();
 
   bool update_parent_boundaries = false;
   if (needs_transform_update_) {
     local_transform_ =
-        toSVGImageElement(GetElement())
+        ToSVGImageElement(GetElement())
             ->CalculateTransform(SVGElement::kIncludeMotionTransform);
     needs_transform_update_ = false;
     update_parent_boundaries = true;
@@ -135,7 +129,7 @@ void LayoutSVGImage::UpdateLayout() {
 
   if (needs_boundaries_update_) {
     local_visual_rect_ = object_bounding_box_;
-    SVGLayoutSupport::AdjustVisualRectWithResources(this, local_visual_rect_);
+    SVGLayoutSupport::AdjustVisualRectWithResources(*this, local_visual_rect_);
     needs_boundaries_update_ = false;
     update_parent_boundaries = true;
   }
@@ -185,11 +179,13 @@ bool LayoutSVGImage::NodeAtFloatPoint(HitTestResult& result,
   return false;
 }
 
-void LayoutSVGImage::ImageChanged(WrappedImagePtr, const IntRect*) {
+void LayoutSVGImage::ImageChanged(WrappedImagePtr,
+                                  CanDeferInvalidation defer,
+                                  const IntRect*) {
   // Notify parent resources that we've changed. This also invalidates
   // references from resources (filters) that may have a cached
   // representation of this image/layout object.
-  LayoutSVGResourceContainer::MarkForLayoutAndParentResourceInvalidation(this,
+  LayoutSVGResourceContainer::MarkForLayoutAndParentResourceInvalidation(*this,
                                                                          false);
 
   if (StyleRef().Width().IsAuto() || StyleRef().Height().IsAuto()) {

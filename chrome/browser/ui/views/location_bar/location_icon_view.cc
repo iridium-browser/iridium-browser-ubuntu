@@ -4,11 +4,14 @@
 
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 
+#include "chrome/browser/ui/page_info/page_info_dialog.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_bubble_view.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
+#include "components/strings/grit/components_strings.h"
+#include "components/toolbar/toolbar_model.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -18,17 +21,12 @@ using content::WebContents;
 
 LocationIconView::LocationIconView(const gfx::FontList& font_list,
                                    LocationBarView* location_bar)
-    : IconLabelBubbleView(font_list, true),
+    : IconLabelBubbleView(font_list),
       location_bar_(location_bar),
       animation_(this) {
+  label()->SetElideBehavior(gfx::ELIDE_MIDDLE);
   set_id(VIEW_ID_LOCATION_ICON);
-  SetInkDropMode(InkDropMode::ON);
-
-#if defined(OS_MACOSX)
-  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
-#else
-  SetFocusBehavior(FocusBehavior::ALWAYS);
-#endif
+  Update();
 
   animation_.SetSlideDuration(kOpenTimeMS);
 }
@@ -73,16 +71,26 @@ SkColor LocationIconView::GetTextColor() const {
 }
 
 bool LocationIconView::ShowBubble(const ui::Event& event) {
-  WebContents* contents = location_bar_->GetWebContents();
-  if (!contents)
-    return false;
-  location_bar_->delegate()->ShowPageInfo(contents);
-  return true;
+  return ShowPageInfoDialog(location_bar_->GetWebContents());
 }
 
 void LocationIconView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  if (location_bar_->GetOmniboxView()->IsEditingOrEmpty()) {
+    node_data->role = ax::mojom::Role::kNone;
+    return;
+  }
+
+  security_state::SecurityLevel security_level =
+      location_bar_->GetToolbarModel()->GetSecurityLevel(false);
+  if (label()->text().empty() && (security_level == security_state::EV_SECURE ||
+                                  security_level == security_state::SECURE)) {
+    node_data->AddStringAttribute(
+        ax::mojom::StringAttribute::kDescription,
+        l10n_util::GetStringUTF8(IDS_SECURE_VERBOSE_STATE));
+  }
+
   IconLabelBubbleView::GetAccessibleNodeData(node_data);
-  node_data->role = ui::AX_ROLE_POP_UP_BUTTON;
+  node_data->role = ax::mojom::Role::kPopUpButton;
 }
 
 bool LocationIconView::IsBubbleShowing() const {
@@ -108,6 +116,27 @@ void LocationIconView::SetTextVisibility(bool should_show,
   }
   // The label text color may have changed.
   OnNativeThemeChanged(GetNativeTheme());
+}
+
+void LocationIconView::Update() {
+  // If the omnibox is empty or editing, the user should not be able to left
+  // click on the icon. As such, the icon should not show a highlight or be
+  // focusable. Note: using the middle mouse to copy-and-paste should still
+  // work on the icon.
+  if (location_bar_->GetOmniboxView() &&
+      location_bar_->GetOmniboxView()->IsEditingOrEmpty()) {
+    SetInkDropMode(InkDropMode::OFF);
+    SetFocusBehavior(FocusBehavior::NEVER);
+    return;
+  }
+
+  SetInkDropMode(InkDropMode::ON);
+
+#if defined(OS_MACOSX)
+  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
+#else
+  SetFocusBehavior(FocusBehavior::ALWAYS);
+#endif
 }
 
 bool LocationIconView::IsTriggerableEvent(const ui::Event& event) {

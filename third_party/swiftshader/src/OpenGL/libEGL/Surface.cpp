@@ -76,13 +76,13 @@ bool Surface::initialize()
 {
 	ASSERT(!backBuffer && !depthStencil);
 
-	if(libGLES_CM)
-	{
-		backBuffer = libGLES_CM->createBackBuffer(width, height, config->mRenderTargetFormat, config->mSamples);
-	}
-	else if(libGLESv2)
+	if(libGLESv2)
 	{
 		backBuffer = libGLESv2->createBackBuffer(width, height, config->mRenderTargetFormat, config->mSamples);
+	}
+	else if(libGLES_CM)
+	{
+		backBuffer = libGLES_CM->createBackBuffer(width, height, config->mRenderTargetFormat, config->mSamples);
 	}
 
 	if(!backBuffer)
@@ -94,13 +94,13 @@ bool Surface::initialize()
 
 	if(config->mDepthStencilFormat != sw::FORMAT_NULL)
 	{
-		if(libGLES_CM)
-		{
-			depthStencil = libGLES_CM->createDepthStencil(width, height, config->mDepthStencilFormat, config->mSamples);
-		}
-		else if(libGLESv2)
+		if(libGLESv2)
 		{
 			depthStencil = libGLESv2->createDepthStencil(width, height, config->mDepthStencilFormat, config->mSamples);
+		}
+		else if(libGLES_CM)
+		{
+			depthStencil = libGLES_CM->createDepthStencil(width, height, config->mDepthStencilFormat, config->mSamples);
 		}
 
 		if(!depthStencil)
@@ -182,11 +182,6 @@ EGLenum Surface::getSurfaceType() const
 	return config->mSurfaceType;
 }
 
-sw::Format Surface::getInternalFormat() const
-{
-	return config->mRenderTargetFormat;
-}
-
 EGLint Surface::getWidth() const
 {
 	return width;
@@ -259,9 +254,7 @@ void WindowSurface::swap()
 {
 	if(backBuffer && frameBuffer)
 	{
-		void *source = backBuffer->lockInternal(0, 0, 0, sw::LOCK_READONLY, sw::PUBLIC);
-		frameBuffer->flip(source, backBuffer->sw::Surface::getInternalFormat(), backBuffer->getInternalPitchB());
-		backBuffer->unlockInternal();
+		frameBuffer->flip(backBuffer);
 
 		checkForResize();
 	}
@@ -276,10 +269,11 @@ bool WindowSurface::checkForResize()
 {
 	#if defined(_WIN32)
 		RECT client;
-		if(!GetClientRect(window, &client))
+		BOOL status = GetClientRect(window, &client);
+
+		if(status == 0)
 		{
-			ASSERT(false);
-			return false;
+			return error(EGL_BAD_NATIVE_WINDOW, false);
 		}
 
 		int windowWidth = client.right - client.left;
@@ -289,7 +283,12 @@ bool WindowSurface::checkForResize()
 		int windowHeight; window->query(window, NATIVE_WINDOW_HEIGHT, &windowHeight);
 	#elif defined(__linux__)
 		XWindowAttributes windowAttributes;
-		libX11->XGetWindowAttributes((::Display*)display->getNativeDisplay(), window, &windowAttributes);
+		Status status = libX11->XGetWindowAttributes((::Display*)display->getNativeDisplay(), window, &windowAttributes);
+
+		if(status == 0)
+		{
+			return error(EGL_BAD_NATIVE_WINDOW, false);
+		}
 
 		int windowWidth = windowAttributes.width;
 		int windowHeight = windowAttributes.height;
@@ -297,6 +296,10 @@ bool WindowSurface::checkForResize()
 		int windowWidth;
 		int windowHeight;
 		sw::OSX::GetNativeWindowSize(window, windowWidth, windowHeight);
+	#elif defined(__Fuchsia__)
+		// TODO(crbug.com/800951): Integrate with Mozart.
+		int windowWidth = 100;
+		int windowHeight = 100;
 	#else
 		#error "WindowSurface::checkForResize unimplemented for this platform"
 	#endif
@@ -333,13 +336,13 @@ bool WindowSurface::reset(int backBufferWidth, int backBufferHeight)
 
 	if(window)
 	{
-		if(libGLES_CM)
-		{
-			frameBuffer = libGLES_CM->createFrameBuffer(display->getNativeDisplay(), window, width, height);
-		}
-		else if(libGLESv2)
+		if(libGLESv2)
 		{
 			frameBuffer = libGLESv2->createFrameBuffer(display->getNativeDisplay(), window, width, height);
+		}
+		else if(libGLES_CM)
+		{
+			frameBuffer = libGLES_CM->createFrameBuffer(display->getNativeDisplay(), window, width, height);
 		}
 
 		if(!frameBuffer)

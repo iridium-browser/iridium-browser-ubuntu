@@ -9,24 +9,18 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/frame/LocalFrameView.h"
-#include "core/html/FormData.h"
-#include "core/html/HTMLFormElement.h"
 #include "core/html/forms/FormController.h"
-#include "core/testing/DummyPageHolder.h"
-#include "core/url/URLSearchParams.h"
+#include "core/html/forms/FormData.h"
+#include "core/html/forms/HTMLFormElement.h"
+#include "core/testing/PageTestBase.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
-class PasswordCredentialTest : public ::testing::Test {
+class PasswordCredentialTest : public PageTestBase {
  protected:
-  void SetUp() override {
-    dummy_page_holder_ = DummyPageHolder::Create();
-    document_ = &dummy_page_holder_->GetDocument();
-  }
-
-  Document& GetDocument() const { return *document_; }
+  void SetUp() override { PageTestBase::SetUp(IntSize()); }
 
   HTMLFormElement* PopulateForm(const char* enctype, const char* html) {
     StringBuilder b;
@@ -35,17 +29,11 @@ class PasswordCredentialTest : public ::testing::Test {
     b.Append("'>");
     b.Append(html);
     b.Append("</form></body></html>");
-    GetDocument().documentElement()->setInnerHTML(b.ToString());
-    GetDocument().View()->UpdateAllLifecyclePhases();
-    HTMLFormElement* form =
-        toHTMLFormElement(GetDocument().getElementById("theForm"));
+    SetHtmlInnerHTML(b.ToString().Utf8().data());
+    HTMLFormElement* form = ToHTMLFormElement(GetElementById("theForm"));
     EXPECT_NE(nullptr, form);
     return form;
   }
-
- private:
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
-  Persistent<Document> document_;
 };
 
 TEST_F(PasswordCredentialTest, CreateFromMultipartForm) {
@@ -63,24 +51,12 @@ TEST_F(PasswordCredentialTest, CreateFromMultipartForm) {
   PasswordCredential* credential =
       PasswordCredential::Create(form, ASSERT_NO_EXCEPTION);
   ASSERT_NE(nullptr, credential);
-  EXPECT_EQ("theId", credential->idName());
-  EXPECT_EQ("thePassword", credential->passwordName());
 
   EXPECT_EQ("musterman", credential->id());
   EXPECT_EQ("sekrit", credential->password());
-  EXPECT_EQ(KURL(kParsedURLString, "https://example.com/photo"),
-            credential->iconURL());
+  EXPECT_EQ(KURL("https://example.com/photo"), credential->iconURL());
   EXPECT_EQ("friendly name", credential->name());
   EXPECT_EQ("password", credential->type());
-
-  FormDataOrURLSearchParams additional_data;
-  credential->additionalData(additional_data);
-  ASSERT_TRUE(additional_data.isFormData());
-  EXPECT_TRUE(additional_data.getAsFormData()->has("theId"));
-  EXPECT_TRUE(additional_data.getAsFormData()->has("thePassword"));
-  EXPECT_TRUE(additional_data.getAsFormData()->has("theIcon"));
-  EXPECT_TRUE(additional_data.getAsFormData()->has("theName"));
-  EXPECT_TRUE(additional_data.getAsFormData()->has("theExtraField"));
 }
 
 TEST_F(PasswordCredentialTest, CreateFromURLEncodedForm) {
@@ -98,24 +74,12 @@ TEST_F(PasswordCredentialTest, CreateFromURLEncodedForm) {
   PasswordCredential* credential =
       PasswordCredential::Create(form, ASSERT_NO_EXCEPTION);
   ASSERT_NE(nullptr, credential);
-  EXPECT_EQ("theId", credential->idName());
-  EXPECT_EQ("thePassword", credential->passwordName());
 
   EXPECT_EQ("musterman", credential->id());
   EXPECT_EQ("sekrit", credential->password());
-  EXPECT_EQ(KURL(kParsedURLString, "https://example.com/photo"),
-            credential->iconURL());
+  EXPECT_EQ(KURL("https://example.com/photo"), credential->iconURL());
   EXPECT_EQ("friendly name", credential->name());
   EXPECT_EQ("password", credential->type());
-
-  FormDataOrURLSearchParams additional_data;
-  credential->additionalData(additional_data);
-  ASSERT_TRUE(additional_data.isURLSearchParams());
-  EXPECT_TRUE(additional_data.getAsURLSearchParams()->has("theId"));
-  EXPECT_TRUE(additional_data.getAsURLSearchParams()->has("thePassword"));
-  EXPECT_TRUE(additional_data.getAsURLSearchParams()->has("theIcon"));
-  EXPECT_TRUE(additional_data.getAsURLSearchParams()->has("theName"));
-  EXPECT_TRUE(additional_data.getAsURLSearchParams()->has("theExtraField"));
 }
 
 TEST_F(PasswordCredentialTest, CreateFromFormNoPassword) {

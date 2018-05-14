@@ -14,14 +14,13 @@ namespace cc {
 CCTestSuite::CCTestSuite(int argc, char** argv)
     : base::TestSuite(argc, argv) {}
 
-CCTestSuite::~CCTestSuite() {}
+CCTestSuite::~CCTestSuite() = default;
 
 void CCTestSuite::Initialize() {
   base::TestSuite::Initialize();
+  message_loop_ = std::make_unique<base::MessageLoop>();
   gl::GLSurfaceTestSupport::InitializeOneOff();
   viz::Paths::RegisterPathProvider();
-
-  message_loop_.reset(new base::MessageLoop);
 
   base::ThreadIdNameManager::GetInstance()->SetName(
       base::PlatformThread::CurrentId(),

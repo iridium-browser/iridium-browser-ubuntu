@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "base/test/mock_callback.h"
@@ -126,29 +128,13 @@ TEST_F(ShillDeviceClientTest, GetProperties) {
 
   // Set expectations.
   base::DictionaryValue value;
-  value.SetBooleanWithoutPathExpansion(shill::kCellularAllowRoamingProperty,
-                                       kValue);
+  value.SetKey(shill::kCellularAllowRoamingProperty, base::Value(kValue));
   PrepareForMethodCall(shill::kGetPropertiesFunction,
                        base::Bind(&ExpectNoArgument),
                        response.get());
   // Call method.
   client_->GetProperties(dbus::ObjectPath(kExampleDevicePath),
                          base::Bind(&ExpectDictionaryValueResult, &value));
-  // Run the message loop.
-  base::RunLoop().RunUntilIdle();
-}
-
-TEST_F(ShillDeviceClientTest, ProposeScan) {
-  // Create response.
-  std::unique_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
-
-  // Set expectations.
-  PrepareForMethodCall(shill::kProposeScanFunction,
-                       base::Bind(&ExpectNoArgument),
-                       response.get());
-  // Call method.
-  client_->ProposeScan(dbus::ObjectPath(kExampleDevicePath),
-                       base::Bind(&ExpectNoResultValue));
   // Run the message loop.
   base::RunLoop().RunUntilIdle();
 }
@@ -191,25 +177,6 @@ TEST_F(ShillDeviceClientTest, ClearProperty) {
   client_->ClearProperty(dbus::ObjectPath(kExampleDevicePath),
                          shill::kCellularAllowRoamingProperty,
                          base::Bind(&ExpectNoResultValue));
-  // Run the message loop.
-  base::RunLoop().RunUntilIdle();
-}
-
-TEST_F(ShillDeviceClientTest, AddIPConfig) {
-  const dbus::ObjectPath expected_result("/result/path");
-  // Create response.
-  std::unique_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
-  dbus::MessageWriter writer(response.get());
-  writer.AppendObjectPath(expected_result);
-
-  // Set expectations.
-  PrepareForMethodCall(shill::kAddIPConfigFunction,
-                       base::Bind(&ExpectStringArgument, shill::kTypeDHCP),
-                       response.get());
-  // Call method.
-  client_->AddIPConfig(dbus::ObjectPath(kExampleDevicePath),
-                       shill::kTypeDHCP,
-                       base::Bind(&ExpectObjectPathResult, expected_result));
   // Run the message loop.
   base::RunLoop().RunUntilIdle();
 }

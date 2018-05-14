@@ -30,16 +30,14 @@
 #include <cassert>
 #include <memory>
 
+#include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "platform/Histogram.h"
 #include "platform/InstanceCounters.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/SharedBuffer.h"
-#include "platform/WebTaskRunner.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/loader/cors/CORS.h"
 #include "platform/loader/fetch/CachedMetadata.h"
-#include "platform/loader/fetch/CrossOriginAccessControl.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/IntegrityMetadata.h"
 #include "platform/loader/fetch/MemoryCache.h"
@@ -47,18 +45,19 @@
 #include "platform/loader/fetch/ResourceClientWalker.h"
 #include "platform/loader/fetch/ResourceFinishObserver.h"
 #include "platform/loader/fetch/ResourceLoader.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/scheduler/child/web_scheduler.h"
 #include "platform/weborigin/KURL.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/MathExtras.h"
 #include "platform/wtf/StdLibExtras.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/CString.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebCachePolicy.h"
 #include "public/platform/WebSecurityOrigin.h"
+#include "services/network/public/mojom/fetch_api.mojom-blink.h"
 
 namespace blink {
 
@@ -115,39 +114,65 @@ static inline bool ShouldUpdateHeaderAfterRevalidation(
   return true;
 }
 
+// CachedMetadataHandlerImpl should be created when a response is received,
+// and can be used independently from Resource.
+// - It doesn't have any references to Resource. Necessary data are captured
+//   from Resource when the handler is created.
+// - It is not affected by Resource's revalidation on MemoryCache.
+//   The validity of the handler is solely checked by |response_url_| and
+//   |response_time_| (not by Resource) by the browser process, and the cached
+//   metadata written to the handler is rejected if e.g. the disk cache entry
+//   has been updated and the handler refers to an older response.
 class Resource::CachedMetadataHandlerImpl : public CachedMetadataHandler {
  public:
-  static Resource::CachedMetadataHandlerImpl* Create(Resource* resource) {
+  static Resource::CachedMetadataHandlerImpl* Create(const Resource* resource) {
     return new CachedMetadataHandlerImpl(resource);
   }
-  ~CachedMetadataHandlerImpl() override {}
-  DECLARE_VIRTUAL_TRACE();
+  ~CachedMetadataHandlerImpl() override = default;
+  void Trace(blink::Visitor*) override;
   void SetCachedMetadata(uint32_t, const char*, size_t, CacheType) override;
   void ClearCachedMetadata(CacheType) override;
-  RefPtr<CachedMetadata> GetCachedMetadata(uint32_t) const override;
-  String Encoding() const override;
+  scoped_refptr<CachedMetadata> GetCachedMetadata(uint32_t) const override;
+
+  // This returns the encoding at the time of ResponseReceived().
+  // Therefore this does NOT reflect encoding detection from body contents,
+  // but the final encoding after the encoding detection can be determined
+  // uniquely from Encoding(), provided the body content is the same,
+  // as we can assume the encoding detection will results in the same final
+  // encoding.
+  // TODO(hiroshige): Make this semantics cleaner.
+  String Encoding() const override { return String(encoding_.GetName()); }
+
+  bool IsServedFromCacheStorage() const override {
+    return !cache_storage_cache_name_.IsNull();
+  }
+
   // Sets the serialized metadata retrieved from the platform's cache.
   void SetSerializedCachedMetadata(const char*, size_t);
 
  protected:
-  explicit CachedMetadataHandlerImpl(Resource*);
+  explicit CachedMetadataHandlerImpl(const Resource*);
   virtual void SendToPlatform();
-  const ResourceResponse& GetResponse() const {
-    return resource_->GetResponse();
-  }
 
-  RefPtr<CachedMetadata> cached_metadata_;
+  scoped_refptr<CachedMetadata> cached_metadata_;
+
+  const KURL response_url_;
+  const Time response_time_;
+  const String cache_storage_cache_name_;
 
  private:
-  Member<Resource> resource_;
+  const WTF::TextEncoding encoding_;
 };
 
 Resource::CachedMetadataHandlerImpl::CachedMetadataHandlerImpl(
-    Resource* resource)
-    : resource_(resource) {}
+    const Resource* resource)
+    : response_url_(resource->GetResponse().Url()),
+      response_time_(resource->GetResponse().ResponseTime()),
+      cache_storage_cache_name_(
+          resource->GetResponse().CacheStorageCacheName()),
+      encoding_(resource->Encoding()) {}
 
-DEFINE_TRACE(Resource::CachedMetadataHandlerImpl) {
-  visitor->Trace(resource_);
+void Resource::CachedMetadataHandlerImpl::Trace(blink::Visitor* visitor) {
   CachedMetadataHandler::Trace(visitor);
 }
 
@@ -167,20 +192,17 @@ void Resource::CachedMetadataHandlerImpl::SetCachedMetadata(
 
 void Resource::CachedMetadataHandlerImpl::ClearCachedMetadata(
     CachedMetadataHandler::CacheType cache_type) {
-  cached_metadata_.Clear();
+  cached_metadata_ = nullptr;
   if (cache_type == CachedMetadataHandler::kSendToPlatform)
     SendToPlatform();
 }
 
-RefPtr<CachedMetadata> Resource::CachedMetadataHandlerImpl::GetCachedMetadata(
+scoped_refptr<CachedMetadata>
+Resource::CachedMetadataHandlerImpl::GetCachedMetadata(
     uint32_t data_type_id) const {
   if (!cached_metadata_ || cached_metadata_->DataTypeID() != data_type_id)
     return nullptr;
   return cached_metadata_;
-}
-
-String Resource::CachedMetadataHandlerImpl::Encoding() const {
-  return String(resource_->Encoding().GetName());
 }
 
 void Resource::CachedMetadataHandlerImpl::SetSerializedCachedMetadata(
@@ -196,43 +218,44 @@ void Resource::CachedMetadataHandlerImpl::SetSerializedCachedMetadata(
 void Resource::CachedMetadataHandlerImpl::SendToPlatform() {
   if (cached_metadata_) {
     const Vector<char>& serialized_data = cached_metadata_->SerializedData();
-    Platform::Current()->CacheMetadata(
-        GetResponse().Url(), GetResponse().ResponseTime(),
-        serialized_data.data(), serialized_data.size());
+    Platform::Current()->CacheMetadata(response_url_, response_time_,
+                                       serialized_data.data(),
+                                       serialized_data.size());
   } else {
-    Platform::Current()->CacheMetadata(
-        GetResponse().Url(), GetResponse().ResponseTime(), nullptr, 0);
+    Platform::Current()->CacheMetadata(response_url_, response_time_, nullptr,
+                                       0);
   }
 }
 
-class Resource::ServiceWorkerResponseCachedMetadataHandler
+class Resource::ServiceWorkerResponseCachedMetadataHandler final
     : public Resource::CachedMetadataHandlerImpl {
  public:
   static Resource::CachedMetadataHandlerImpl* Create(
-      Resource* resource,
-      SecurityOrigin* security_origin) {
+      const Resource* resource,
+      const SecurityOrigin* security_origin) {
     return new ServiceWorkerResponseCachedMetadataHandler(resource,
                                                           security_origin);
   }
-  ~ServiceWorkerResponseCachedMetadataHandler() override {}
-  DECLARE_VIRTUAL_TRACE();
+  ~ServiceWorkerResponseCachedMetadataHandler() override = default;
+  void Trace(blink::Visitor*) override;
 
  protected:
   void SendToPlatform() override;
 
  private:
-  explicit ServiceWorkerResponseCachedMetadataHandler(Resource*,
-                                                      SecurityOrigin*);
-  String cache_storage_cache_name_;
-  RefPtr<SecurityOrigin> security_origin_;
+  explicit ServiceWorkerResponseCachedMetadataHandler(const Resource*,
+                                                      const SecurityOrigin*);
+  scoped_refptr<const SecurityOrigin> security_origin_;
 };
 
 Resource::ServiceWorkerResponseCachedMetadataHandler::
-    ServiceWorkerResponseCachedMetadataHandler(Resource* resource,
-                                               SecurityOrigin* security_origin)
+    ServiceWorkerResponseCachedMetadataHandler(
+        const Resource* resource,
+        const SecurityOrigin* security_origin)
     : CachedMetadataHandlerImpl(resource), security_origin_(security_origin) {}
 
-DEFINE_TRACE(Resource::ServiceWorkerResponseCachedMetadataHandler) {
+void Resource::ServiceWorkerResponseCachedMetadataHandler::Trace(
+    blink::Visitor* visitor) {
   CachedMetadataHandlerImpl::Trace(visitor);
 }
 
@@ -241,21 +264,19 @@ void Resource::ServiceWorkerResponseCachedMetadataHandler::SendToPlatform() {
   // directly fetched via a ServiceWorker (eg:
   // FetchEvent.respondWith(fetch(FetchEvent.request))) to prevent an attacker's
   // Service Worker from poisoning the metadata cache of HTTPCache.
-  if (GetResponse().CacheStorageCacheName().IsNull())
+  if (cache_storage_cache_name_.IsNull())
     return;
 
   if (cached_metadata_) {
     const Vector<char>& serialized_data = cached_metadata_->SerializedData();
     Platform::Current()->CacheMetadataInCacheStorage(
-        GetResponse().Url(), GetResponse().ResponseTime(),
-        serialized_data.data(), serialized_data.size(),
-        WebSecurityOrigin(security_origin_),
-        GetResponse().CacheStorageCacheName());
+        response_url_, response_time_, serialized_data.data(),
+        serialized_data.size(), WebSecurityOrigin(security_origin_),
+        cache_storage_cache_name_);
   } else {
     Platform::Current()->CacheMetadataInCacheStorage(
-        GetResponse().Url(), GetResponse().ResponseTime(), nullptr, 0,
-        WebSecurityOrigin(security_origin_),
-        GetResponse().CacheStorageCacheName());
+        response_url_, response_time_, nullptr, 0,
+        WebSecurityOrigin(security_origin_), cache_storage_cache_name_);
   }
 }
 
@@ -272,7 +293,6 @@ Resource::Resource(const ResourceRequest& request,
       decoded_size_(0),
       overhead_size_(CalculateOverheadSize()),
       cache_identifier_(MemoryCache::DefaultCacheIdentifier()),
-      needs_synchronous_cache_hit_(false),
       link_preload_(false),
       is_revalidating_(false),
       is_alive_(false),
@@ -280,25 +300,9 @@ Resource::Resource(const ResourceRequest& request,
       integrity_disposition_(ResourceIntegrityDisposition::kNotChecked),
       options_(options),
       response_timestamp_(CurrentTime()),
-      cancel_timer_(
-          // We use MainThread() for main-thread cases to avoid syscall cost
-          // when checking main_thread_->isCurrentThread() in currentThread().
-          IsMainThread() ? Platform::Current()
-                               ->MainThread()
-                               ->Scheduler()
-                               ->LoadingTaskRunner()
-                         : Platform::Current()
-                               ->CurrentThread()
-                               ->Scheduler()
-                               ->LoadingTaskRunner(),
-          this,
-          &Resource::CancelTimerFired),
       resource_request_(request) {
   InstanceCounters::IncrementCounter(InstanceCounters::kResourceCounter);
 
-  // Currently we support the metadata caching only for HTTP family.
-  if (GetResourceRequest().Url().ProtocolIsInHTTPFamily())
-    cache_handler_ = CachedMetadataHandlerImpl::Create(this);
   if (IsMainThread())
     MemoryCoordinator::Instance().RegisterClient(this);
 }
@@ -307,7 +311,7 @@ Resource::~Resource() {
   InstanceCounters::DecrementCounter(InstanceCounters::kResourceCounter);
 }
 
-DEFINE_TRACE(Resource) {
+void Resource::Trace(blink::Visitor* visitor) {
   visitor->Trace(loader_);
   visitor->Trace(cache_handler_);
   visitor->Trace(clients_);
@@ -324,11 +328,49 @@ void Resource::SetLoader(ResourceLoader* loader) {
   status_ = ResourceStatus::kPending;
 }
 
-void Resource::CheckNotify() {
-  if (IsLoading())
+void Resource::CheckResourceIntegrity() {
+  // Skip the check and reuse the previous check result, especially on
+  // successful revalidation.
+  if (IntegrityDisposition() != ResourceIntegrityDisposition::kNotChecked)
     return;
 
-  TriggerNotificationForFinishObservers();
+  // Loading error occurred? Then result is uncheckable.
+  integrity_report_info_.Clear();
+  if (ErrorOccurred()) {
+    CHECK(!Data());
+    integrity_disposition_ = ResourceIntegrityDisposition::kFailed;
+    return;
+  }
+
+  // No integrity attributes to check? Then we're passing.
+  if (IntegrityMetadata().IsEmpty()) {
+    integrity_disposition_ = ResourceIntegrityDisposition::kPassed;
+    return;
+  }
+
+  const char* data = nullptr;
+  size_t data_length = 0;
+
+  // Edge case: If a resource actually has zero bytes then it will not
+  // typically have a resource buffer, but we still need to check integrity
+  // because people might want to assert a zero-length resource.
+  CHECK(DecodedSize() == 0 || Data());
+  if (Data()) {
+    data = Data()->Data();
+    data_length = Data()->size();
+  }
+
+  if (SubresourceIntegrity::CheckSubresourceIntegrity(IntegrityMetadata(), data,
+                                                      data_length, Url(), *this,
+                                                      integrity_report_info_))
+    integrity_disposition_ = ResourceIntegrityDisposition::kPassed;
+  else
+    integrity_disposition_ = ResourceIntegrityDisposition::kFailed;
+  DCHECK_NE(IntegrityDisposition(), ResourceIntegrityDisposition::kNotChecked);
+}
+
+void Resource::NotifyFinished() {
+  DCHECK(IsLoaded());
 
   ResourceClientWalker<ResourceClient> w(clients_);
   while (ResourceClient* c = w.Next()) {
@@ -348,16 +390,19 @@ void Resource::AppendData(const char* data, size_t length) {
   TRACE_EVENT0("blink", "Resource::appendData");
   DCHECK(!is_revalidating_);
   DCHECK(!ErrorOccurred());
-  if (options_.data_buffering_policy == kDoNotBufferData)
-    return;
-  if (data_)
-    data_->Append(data, length);
-  else
-    data_ = SharedBuffer::Create(data, length);
-  SetEncodedSize(data_->size());
+  if (options_.data_buffering_policy == kBufferData) {
+    if (data_)
+      data_->Append(data, length);
+    else
+      data_ = SharedBuffer::Create(data, length);
+    SetEncodedSize(data_->size());
+  }
+  ResourceClientWalker<ResourceClient> w(Clients());
+  while (ResourceClient* c = w.Next())
+    c->DataReceived(this, data, length);
 }
 
-void Resource::SetResourceBuffer(RefPtr<SharedBuffer> resource_buffer) {
+void Resource::SetResourceBuffer(scoped_refptr<SharedBuffer> resource_buffer) {
   DCHECK(!is_revalidating_);
   DCHECK(!ErrorOccurred());
   DCHECK_EQ(options_.data_buffering_policy, kBufferData);
@@ -366,24 +411,21 @@ void Resource::SetResourceBuffer(RefPtr<SharedBuffer> resource_buffer) {
 }
 
 void Resource::ClearData() {
-  data_.Clear();
+  data_ = nullptr;
   encoded_size_memory_usage_ = 0;
 }
 
-void Resource::TriggerNotificationForFinishObservers() {
+void Resource::TriggerNotificationForFinishObservers(
+    base::SingleThreadTaskRunner* task_runner) {
   if (finish_observers_.IsEmpty())
     return;
 
-  auto new_collections = new HeapHashSet<WeakMember<ResourceFinishObserver>>(
+  auto* new_collections = new HeapHashSet<WeakMember<ResourceFinishObserver>>(
       std::move(finish_observers_));
   finish_observers_.clear();
 
-  Platform::Current()
-      ->CurrentThread()
-      ->Scheduler()
-      ->LoadingTaskRunner()
-      ->PostTask(BLINK_FROM_HERE, WTF::Bind(&NotifyFinishObservers,
-                                            WrapPersistent(new_collections)));
+  task_runner->PostTask(FROM_HERE, WTF::Bind(&NotifyFinishObservers,
+                                             WrapPersistent(new_collections)));
 
   DidRemoveClientOrObserver();
 }
@@ -395,12 +437,12 @@ void Resource::SetDataBufferingPolicy(
   SetEncodedSize(0);
 }
 
-void Resource::FinishAsError(const ResourceError& error) {
-  DCHECK(!error.IsNull());
+void Resource::FinishAsError(const ResourceError& error,
+                             base::SingleThreadTaskRunner* task_runner) {
   error_ = error;
   is_revalidating_ = false;
 
-  if ((error_.IsCancellation() || !is_unused_preload_) && IsMainThread())
+  if (IsMainThread())
     GetMemoryCache()->Remove(this);
 
   if (!ErrorOccurred())
@@ -408,27 +450,35 @@ void Resource::FinishAsError(const ResourceError& error) {
   DCHECK(ErrorOccurred());
   ClearData();
   loader_ = nullptr;
-  CheckNotify();
+  CheckResourceIntegrity();
+  TriggerNotificationForFinishObservers(task_runner);
+  NotifyFinished();
 }
 
-void Resource::Finish(double load_finish_time) {
+void Resource::Finish(double load_finish_time,
+                      base::SingleThreadTaskRunner* task_runner) {
   DCHECK(!is_revalidating_);
   load_finish_time_ = load_finish_time;
   if (!ErrorOccurred())
     status_ = ResourceStatus::kCached;
   loader_ = nullptr;
-  CheckNotify();
+  CheckResourceIntegrity();
+  TriggerNotificationForFinishObservers(task_runner);
+  NotifyFinished();
 }
 
 AtomicString Resource::HttpContentType() const {
   return GetResponse().HttpContentType();
 }
 
-void Resource::SetIntegrityDisposition(
-    ResourceIntegrityDisposition disposition) {
-  DCHECK_NE(disposition, ResourceIntegrityDisposition::kNotChecked);
-  DCHECK(type_ == Resource::kScript || type_ == Resource::kCSSStyleSheet);
-  integrity_disposition_ = disposition;
+bool Resource::PassesAccessControlCheck(
+    const SecurityOrigin& security_origin) const {
+  WTF::Optional<network::mojom::CORSError> cors_error = CORS::CheckAccess(
+      GetResponse().Url(), GetResponse().HttpStatusCode(),
+      GetResponse().HttpHeaderFields(),
+      LastResourceRequest().GetFetchCredentialsMode(), security_origin);
+
+  return !cors_error;
 }
 
 bool Resource::MustRefetchDueToIntegrityMetadata(
@@ -436,7 +486,7 @@ bool Resource::MustRefetchDueToIntegrityMetadata(
   if (params.IntegrityMetadata().IsEmpty())
     return false;
 
-  return !IntegrityMetadata::SetsEqual(integrity_metadata_,
+  return !IntegrityMetadata::SetsEqual(IntegrityMetadata(),
                                        params.IntegrityMetadata());
 }
 
@@ -492,8 +542,6 @@ static bool CanUseResponse(const ResourceResponse& response,
   if (response.IsNull())
     return false;
 
-  // FIXME: Why isn't must-revalidate considered a reason we can't use the
-  // response?
   if (response.CacheControlContainsNoCache() ||
       response.CacheControlContainsNoStore())
     return false;
@@ -542,9 +590,19 @@ bool Resource::WillFollowRedirect(const ResourceRequest& new_request,
 
 void Resource::SetResponse(const ResourceResponse& response) {
   response_ = response;
-  if (this->GetResponse().WasFetchedViaServiceWorker()) {
+
+  // Currently we support the metadata caching only for HTTP family.
+  if (!GetResourceRequest().Url().ProtocolIsInHTTPFamily() ||
+      !GetResponse().Url().ProtocolIsInHTTPFamily()) {
+    cache_handler_.Clear();
+    return;
+  }
+
+  if (GetResponse().WasFetchedViaServiceWorker()) {
     cache_handler_ = ServiceWorkerResponseCachedMetadataHandler::Create(
-        this, fetcher_security_origin_.Get());
+        this, fetcher_security_origin_.get());
+  } else {
+    cache_handler_ = CachedMetadataHandlerImpl::Create(this);
   }
 }
 
@@ -553,7 +611,7 @@ void Resource::ResponseReceived(const ResourceResponse& response,
   response_timestamp_ = CurrentTime();
   if (preload_discovery_time_) {
     int time_since_discovery = static_cast<int>(
-        1000 * (MonotonicallyIncreasingTime() - preload_discovery_time_));
+        1000 * (CurrentTimeTicksInSeconds() - preload_discovery_time_));
     DEFINE_STATIC_LOCAL(CustomCountHistogram,
                         preload_discovery_to_first_byte_histogram,
                         ("PreloadScanner.TTFB", 0, 10000, 50));
@@ -613,6 +671,17 @@ String Resource::ReasonNotDeletable() const {
 }
 
 void Resource::DidAddClient(ResourceClient* c) {
+  if (scoped_refptr<SharedBuffer> data = Data()) {
+    data->ForEachSegment([this, &c](const char* segment, size_t segment_size,
+                                    size_t segment_offset) -> bool {
+      c->DataReceived(this, segment, segment_size);
+
+      // Stop pushing data if the client removed itself.
+      return HasClient(c);
+    });
+  }
+  if (!HasClient(c))
+    return;
   if (IsLoaded()) {
     c->NotifyFinished(this);
     if (clients_.Contains(c)) {
@@ -629,8 +698,6 @@ static bool TypeNeedsSynchronousCacheHit(Resource::Type type) {
   // performance regression.
   // FIXME: Get to the point where we don't need to special-case sync/async
   // behavior for different resource types.
-  if (type == Resource::kImage)
-    return true;
   if (type == Resource::kCSSStyleSheet)
     return true;
   if (type == Resource::kScript)
@@ -646,7 +713,8 @@ void Resource::WillAddClientOrObserver() {
   }
 }
 
-void Resource::AddClient(ResourceClient* client) {
+void Resource::AddClient(ResourceClient* client,
+                         base::SingleThreadTaskRunner* task_runner) {
   CHECK(!is_add_remove_client_prohibited_);
 
   WillAddClientOrObserver();
@@ -657,20 +725,14 @@ void Resource::AddClient(ResourceClient* client) {
   }
 
   // If an error has occurred or we have existing data to send to the new client
-  // and the resource type supprts it, send it asynchronously.
+  // and the resource type supports it, send it asynchronously.
   if ((ErrorOccurred() || !GetResponse().IsNull()) &&
-      !TypeNeedsSynchronousCacheHit(GetType()) &&
-      !needs_synchronous_cache_hit_) {
+      !TypeNeedsSynchronousCacheHit(GetType())) {
     clients_awaiting_callback_.insert(client);
     if (!async_finish_pending_clients_task_.IsActive()) {
-      async_finish_pending_clients_task_ =
-          Platform::Current()
-              ->CurrentThread()
-              ->Scheduler()
-              ->LoadingTaskRunner()
-              ->PostCancellableTask(BLINK_FROM_HERE,
-                                    WTF::Bind(&Resource::FinishPendingClients,
-                                              WrapWeakPersistent(this)));
+      async_finish_pending_clients_task_ = PostCancellableTask(
+          *task_runner, FROM_HERE,
+          WTF::Bind(&Resource::FinishPendingClients, WrapWeakPersistent(this)));
     }
     return;
   }
@@ -701,14 +763,15 @@ void Resource::RemoveClient(ResourceClient* client) {
   DidRemoveClientOrObserver();
 }
 
-void Resource::AddFinishObserver(ResourceFinishObserver* client) {
+void Resource::AddFinishObserver(ResourceFinishObserver* client,
+                                 base::SingleThreadTaskRunner* task_runner) {
   CHECK(!is_add_remove_client_prohibited_);
   DCHECK(!finish_observers_.Contains(client));
 
   WillAddClientOrObserver();
   finish_observers_.insert(client);
   if (IsLoaded())
-    TriggerNotificationForFinishObservers();
+    TriggerNotificationForFinishObservers(task_runner);
 }
 
 void Resource::RemoveFinishObserver(ResourceFinishObserver* client) {
@@ -737,16 +800,8 @@ void Resource::DidRemoveClientOrObserver() {
 }
 
 void Resource::AllClientsAndObserversRemoved() {
-  if (!loader_)
-    return;
-  if (!cancel_timer_.IsActive())
-    cancel_timer_.StartOneShot(0, BLINK_FROM_HERE);
-}
-
-void Resource::CancelTimerFired(TimerBase* timer) {
-  DCHECK_EQ(timer, &cancel_timer_);
-  if (!HasClientsOrObservers() && loader_)
-    loader_->Cancel();
+  if (loader_ && !detachable_)
+    loader_->ScheduleCancel();
 }
 
 void Resource::SetDecodedSize(size_t decoded_size) {
@@ -806,9 +861,32 @@ void Resource::FinishPendingClients() {
   DCHECK(clients_awaiting_callback_.IsEmpty() || scheduled);
 }
 
-bool Resource::CanReuse(const FetchParameters& params) const {
+bool Resource::CanReuse(
+    const FetchParameters& params,
+    scoped_refptr<const SecurityOrigin> new_source_origin) const {
   const ResourceRequest& new_request = params.GetResourceRequest();
   const ResourceLoaderOptions& new_options = params.Options();
+
+  // Never reuse opaque responses from a service worker for requests that are
+  // not no-cors. https://crbug.com/625575
+  // TODO(yhirano): Remove this.
+  if (GetResponse().WasFetchedViaServiceWorker() &&
+      GetResponse().ResponseTypeViaServiceWorker() ==
+          network::mojom::FetchResponseType::kOpaque &&
+      new_request.GetFetchRequestMode() !=
+          network::mojom::FetchRequestMode::kNoCORS) {
+    return false;
+  }
+
+  // If credentials were sent with the previous request and won't be with this
+  // one, or vice versa, re-fetch the resource.
+  //
+  // This helps with the case where the server sends back
+  // "Access-Control-Allow-Origin: *" all the time, but some of the client's
+  // requests are made without CORS and some with.
+  if (GetResourceRequest().AllowStoredCredentials() !=
+      new_request.AllowStoredCredentials())
+    return false;
 
   // Certain requests (e.g., XHRs) might have manually set headers that require
   // revalidation. In theory, this should be a Revalidate case. In practice, the
@@ -854,38 +932,53 @@ bool Resource::CanReuse(const FetchParameters& params) const {
     return false;
   }
 
+  DCHECK(source_origin_);
+  DCHECK(new_source_origin);
+
+  // Don't reuse an existing resource when the source origin is different.
+  if (!source_origin_->IsSameSchemeHostPort(new_source_origin.get()))
+    return false;
+
   // securityOrigin has more complicated checks which callers are responsible
   // for.
 
-  // TODO(yhirano): Clean up this condition. This is generated to keep the old
-  // behavior across refactoring.
-  //
-  // TODO(tyoshino): Consider returning false when the credentials mode
-  // differs.
+  if (new_request.GetFetchCredentialsMode() !=
+      resource_request_.GetFetchCredentialsMode())
+    return false;
 
-  bool new_is_with_fetcher_cors_suppressed =
-      new_options.cors_handling_by_resource_fetcher ==
-      kDisableCORSHandlingByResourceFetcher;
-  bool existing_was_with_fetcher_cors_suppressed =
-      options_.cors_handling_by_resource_fetcher ==
-      kDisableCORSHandlingByResourceFetcher;
+  const auto new_mode = new_request.GetFetchRequestMode();
+  const auto existing_mode = resource_request_.GetFetchRequestMode();
 
-  auto new_mode = new_request.GetFetchRequestMode();
-  auto existing_mode = resource_request_.GetFetchRequestMode();
+  if (new_mode != existing_mode)
+    return false;
 
-  if (new_is_with_fetcher_cors_suppressed) {
-    if (existing_was_with_fetcher_cors_suppressed)
-      return true;
+  switch (new_mode) {
+    case network::mojom::FetchRequestMode::kNoCORS:
+    case network::mojom::FetchRequestMode::kNavigate:
+      break;
 
-    return existing_mode != WebURLRequest::kFetchRequestModeCORS;
+    case network::mojom::FetchRequestMode::kCORS:
+    case network::mojom::FetchRequestMode::kSameOrigin:
+    case network::mojom::FetchRequestMode::kCORSWithForcedPreflight:
+      // We have two separate CORS handling logics in DocumentThreadableLoader
+      // and ResourceLoader and sharing resources is difficult when they are
+      // handled differently.
+      if (options_.cors_handling_by_resource_fetcher !=
+          new_options.cors_handling_by_resource_fetcher) {
+        // If the existing one is handled in DocumentThreadableLoader and the
+        // new one is handled in ResourceLoader, reusing the existing one will
+        // lead to CORS violations.
+        if (!options_.cors_handling_by_resource_fetcher)
+          return false;
+
+        // Otherwise (i.e., if the existing one is handled in ResourceLoader
+        // and the new one is handled in DocumentThreadableLoader), reusing
+        // the existing one will lead to double check which is harmless.
+      }
+      break;
   }
 
-  if (existing_was_with_fetcher_cors_suppressed)
-    return new_mode != WebURLRequest::kFetchRequestModeCORS;
-
-  return existing_mode == new_mode &&
-         new_request.GetFetchCredentialsMode() ==
-             resource_request_.GetFetchCredentialsMode();
+  return true;
 }
 
 void Resource::Prune() {
@@ -972,7 +1065,7 @@ String Resource::GetMemoryDumpName() const {
 }
 
 void Resource::SetCachePolicyBypassingCache() {
-  resource_request_.SetCachePolicy(WebCachePolicy::kBypassingCache);
+  resource_request_.SetCacheMode(mojom::FetchCacheMode::kBypassCache);
 }
 
 void Resource::SetPreviewsState(WebURLRequest::PreviewsState previews_state) {
@@ -1011,6 +1104,8 @@ void Resource::RevalidationFailed() {
   SECURITY_CHECK(redirect_chain_.IsEmpty());
   ClearData();
   cache_handler_.Clear();
+  integrity_disposition_ = ResourceIntegrityDisposition::kNotChecked;
+  integrity_report_info_.Clear();
   DestroyDecodedDataForFailedRevalidation();
   is_revalidating_ = false;
 }
@@ -1020,17 +1115,19 @@ void Resource::MarkAsPreload() {
   is_unused_preload_ = true;
 }
 
-void Resource::MatchPreload() {
+bool Resource::MatchPreload(const FetchParameters& params,
+                            base::SingleThreadTaskRunner*) {
   DCHECK(is_unused_preload_);
   is_unused_preload_ = false;
 
   if (preload_discovery_time_) {
     int time_since_discovery = static_cast<int>(
-        1000 * (MonotonicallyIncreasingTime() - preload_discovery_time_));
+        1000 * (CurrentTimeTicksInSeconds() - preload_discovery_time_));
     DEFINE_STATIC_LOCAL(CustomCountHistogram, preload_discovery_histogram,
                         ("PreloadScanner.ReferenceTime", 0, 10000, 50));
     preload_discovery_histogram.Count(time_since_discovery);
   }
+  return true;
 }
 
 bool Resource::CanReuseRedirectChain() const {
@@ -1121,13 +1218,15 @@ static const char* InitiatorTypeNameToString(
     return "Processing instruction";
   if (initiator_type_name == FetchInitiatorTypeNames::texttrack)
     return "Text track";
+  if (initiator_type_name == FetchInitiatorTypeNames::uacss)
+    return "User Agent CSS resource";
   if (initiator_type_name == FetchInitiatorTypeNames::xml)
     return "XML resource";
   if (initiator_type_name == FetchInitiatorTypeNames::xmlhttprequest)
     return "XMLHttpRequest";
 
   static_assert(
-      FetchInitiatorTypeNames::FetchInitiatorTypeNamesCount == 12,
+      FetchInitiatorTypeNames::FetchInitiatorTypeNamesCount == 13,
       "New FetchInitiatorTypeNames should be handled correctly here.");
 
   return "Resource";
@@ -1159,8 +1258,10 @@ const char* Resource::ResourceTypeToString(
       return "Text track";
     case Resource::kImportResource:
       return "Imported resource";
-    case Resource::kMedia:
-      return "Media";
+    case Resource::kAudio:
+      return "Audio";
+    case Resource::kVideo:
+      return "Video";
     case Resource::kManifest:
       return "Manifest";
     case Resource::kMock:
@@ -1188,7 +1289,8 @@ bool Resource::IsLoadEventBlockingResourceType() const {
     case Resource::kRaw:
     case Resource::kLinkPrefetch:
     case Resource::kTextTrack:
-    case Resource::kMedia:
+    case Resource::kAudio:
+    case Resource::kVideo:
     case Resource::kManifest:
     case Resource::kMock:
       return false;

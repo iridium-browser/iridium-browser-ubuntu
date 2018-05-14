@@ -15,6 +15,10 @@ bool PasswordManagerClient::IsFillingEnabledForCurrentPage() const {
   return true;
 }
 
+bool PasswordManagerClient::IsFillingFallbackEnabledForCurrentPage() const {
+  return true;
+}
+
 void PasswordManagerClient::PostHSTSQueryForHost(
     const GURL& origin,
     const HSTSCallback& callback) const {
@@ -44,8 +48,8 @@ bool PasswordManagerClient::WasLastNavigationHTTPError() const {
   return false;
 }
 
-bool PasswordManagerClient::DidLastPageLoadEncounterSSLErrors() const {
-  return false;
+net::CertStatus PasswordManagerClient::GetMainFrameCertStatus() const {
+  return 0;
 }
 
 bool PasswordManagerClient::IsIncognito() const {

@@ -23,7 +23,7 @@ class WebDatabaseService;
 class PasswordWebDataService;
 #endif
 
-#if defined(OS_ANDROID)
+#if !defined(OS_IOS)
 namespace payments {
 class PaymentManifestWebDataService;
 }  // namespace payments
@@ -57,9 +57,10 @@ class WebDataServiceWrapper : public KeyedService {
   // database.
   // |diagnostics| contains information about the underlying database
   // which can help in identifying the cause of the error.
-  using ShowErrorCallback = void (*)(ErrorType error_type,
-                                     sql::InitStatus init_status,
-                                     const std::string& diagnostics);
+  using ShowErrorCallback =
+      base::RepeatingCallback<void(ErrorType error_type,
+                                   sql::InitStatus init_status,
+                                   const std::string& diagnostics)>;
 
   // Constructor for WebDataServiceWrapper that initializes the different
   // WebDataServices and starts the synchronization services using |flare|.
@@ -69,8 +70,7 @@ class WebDataServiceWrapper : public KeyedService {
   WebDataServiceWrapper(
       const base::FilePath& context_path,
       const std::string& application_locale,
-      const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
-      const scoped_refptr<base::SingleThreadTaskRunner>& db_thread,
+      const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner,
       const syncer::SyncableService::StartSyncFlare& flare,
       const ShowErrorCallback& show_error_callback);
   ~WebDataServiceWrapper() override;
@@ -86,7 +86,7 @@ class WebDataServiceWrapper : public KeyedService {
 #if defined(OS_WIN)
   virtual scoped_refptr<PasswordWebDataService> GetPasswordWebData();
 #endif
-#if defined(OS_ANDROID)
+#if !defined(OS_IOS)
   virtual scoped_refptr<payments::PaymentManifestWebDataService>
   GetPaymentManifestWebData();
 #endif
@@ -106,7 +106,7 @@ class WebDataServiceWrapper : public KeyedService {
   scoped_refptr<PasswordWebDataService> password_web_data_;
 #endif
 
-#if defined(OS_ANDROID)
+#if !defined(OS_IOS)
   scoped_refptr<payments::PaymentManifestWebDataService>
       payment_manifest_web_data_;
 #endif

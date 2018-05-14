@@ -4,16 +4,11 @@
 
 package org.chromium.chrome.browser.download.ui;
 
-import android.content.ComponentName;
-import android.support.annotation.Nullable;
-
 import org.chromium.chrome.browser.download.DownloadItem;
 import org.chromium.chrome.browser.download.DownloadManagerService;
-import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadBridge;
-import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadItem;
+import org.chromium.chrome.browser.widget.ThumbnailProvider;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
-
-import java.util.List;
+import org.chromium.components.offline_items_collection.OfflineContentProvider;
 
 /**
  * Provides classes that need to be interacted with by the {@link DownloadHistoryAdapter}.
@@ -38,7 +33,7 @@ public interface BackendProvider {
         void checkForExternallyRemovedDownloads(boolean isOffTheRecord);
 
         /** See {@link DownloadManagerService#removeDownload}. */
-        void removeDownload(String guid, boolean isOffTheRecord);
+        void removeDownload(String guid, boolean isOffTheRecord, boolean externallyRemoved);
 
         /** See {@link DownloadManagerService#isDownloadOpenableInBrowser}. */
         boolean isDownloadOpenableInBrowser(boolean isOffTheRecord, String mimeType);
@@ -47,47 +42,38 @@ public interface BackendProvider {
         void updateLastAccessTime(String downloadGuid, boolean isOffTheRecord);
     }
 
-    /** Interacts with the Offline Pages backend. */
-    public static interface OfflinePageDelegate {
-        /** See {@link OfflinePageDownloadBridge#addObserver}. */
-        void addObserver(OfflinePageDownloadBridge.Observer observer);
+    /**
+     * Processes actions from the UI that require front end management before hitting the backend.
+     * This should eventually get merged into a proper delegate with other UI actions, but currently
+     * that is not possible.
+     */
+    public static interface UIDelegate {
+        /**
+         * Requests that {@code item} be deleted.  This might not hit the backend quiet yet if the
+         * user can undo the action.
+         */
+        void deleteItem(DownloadHistoryItemWrapper item);
 
-        /** See {@link OfflinePageDownloadBridge#removeObserver}. */
-        void removeObserver(OfflinePageDownloadBridge.Observer observer);
-
-        /** See {@link OfflinePageDownloadBridge#getAllItems}. */
-        List<OfflinePageDownloadItem> getAllItems();
-
-        /** See {@link OfflinePageDownloadBridge#openItem}. */
-        void openItem(String guid, @Nullable ComponentName componentName);
-
-        /** See {@link OfflinePageDownloadBridge#pauseDownload} */
-        void pauseDownload(String guid);
-
-        /** See {@link OfflinePageDownloadBridge#resumeDownload} */
-        void resumeDownload(String guid);
-
-        /** See {@link OfflinePageDownloadBridge#cancelDownload} */
-        void cancelDownload(String guid);
-
-        /** See {@link OfflinePageDownloadBridge#deleteItem}. */
-        void deleteItem(String guid);
-
-        /** See {@link OfflinePageDownloadBridge#destroy}. */
-        void destroy();
+        /**
+         * Requests that {@code item} be shared.
+         */
+        void shareItem(DownloadHistoryItemWrapper item);
     }
 
     /** Returns the {@link DownloadDelegate} that works with the Downloads backend. */
     DownloadDelegate getDownloadDelegate();
 
-    /** Returns the {@link OfflinePageDelegate} that works with the Offline Pages backend. */
-    OfflinePageDelegate getOfflinePageBridge();
+    /** Returns the associated {@link OfflineContentProvider}. */
+    OfflineContentProvider getOfflineContentProvider();
 
     /** Returns the {@link ThumbnailProvider} that gets thumbnails for files. */
     ThumbnailProvider getThumbnailProvider();
 
     /** Returns the {@link SelectionDelegate} that tracks selected items. */
     SelectionDelegate<DownloadHistoryItemWrapper> getSelectionDelegate();
+
+    /** Returns the {@link UIDelegate} responsible for handling download system UI events. */
+    UIDelegate getUIDelegate();
 
     /** Destroys the BackendProvider. */
     void destroy();

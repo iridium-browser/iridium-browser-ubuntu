@@ -27,7 +27,7 @@
 #define CSSStyleSheetResource_h
 
 #include "core/CoreExport.h"
-#include "core/loader/resource/StyleSheetResource.h"
+#include "core/loader/resource/TextResource.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/TextResourceDecoderOptions.h"
 #include "platform/wtf/text/TextEncoding.h"
@@ -37,29 +37,27 @@ namespace blink {
 class CSSParserContext;
 class FetchParameters;
 class KURL;
-class ResourceClient;
 class ResourceFetcher;
 class StyleSheetContents;
 
-class CORE_EXPORT CSSStyleSheetResource final : public StyleSheetResource {
+class CORE_EXPORT CSSStyleSheetResource final : public TextResource {
  public:
   enum class MIMETypeCheck { kStrict, kLax };
 
-  static CSSStyleSheetResource* Fetch(FetchParameters&, ResourceFetcher*);
+  static CSSStyleSheetResource* Fetch(FetchParameters&,
+                                      ResourceFetcher*,
+                                      ResourceClient*);
   static CSSStyleSheetResource* CreateForTest(const KURL&,
                                               const WTF::TextEncoding&);
 
   ~CSSStyleSheetResource() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
-  const String SheetText(MIMETypeCheck = MIMETypeCheck::kStrict) const;
-
-  void DidAddClient(ResourceClient*) override;
-
-  StyleSheetContents* RestoreParsedStyleSheet(const CSSParserContext*);
+  const String SheetText(const CSSParserContext*,
+                         MIMETypeCheck = MIMETypeCheck::kStrict) const;
+  StyleSheetContents* CreateParsedStyleSheetFromCache(const CSSParserContext*);
   void SaveParsedStyleSheet(StyleSheetContents*);
-
-  void AppendData(const char* data, size_t length) override;
+  ReferrerPolicy GetReferrerPolicy() const;
 
  private:
   class CSSStyleSheetResourceFactory : public ResourceFactory {
@@ -79,8 +77,8 @@ class CORE_EXPORT CSSStyleSheetResource final : public StyleSheetResource {
                         const ResourceLoaderOptions&,
                         const TextResourceDecoderOptions&);
 
-  bool CanUseSheet(MIMETypeCheck) const;
-  void CheckNotify() override;
+  bool CanUseSheet(const CSSParserContext*, MIMETypeCheck) const;
+  void NotifyFinished() override;
 
   void SetParsedStyleSheetCache(StyleSheetContents*);
   void SetDecodedSheetText(const String&);
@@ -94,8 +92,6 @@ class CORE_EXPORT CSSStyleSheetResource final : public StyleSheetResource {
   String decoded_sheet_text_;
 
   Member<StyleSheetContents> parsed_style_sheet_cache_;
-
-  bool did_notify_first_data_;
 };
 
 DEFINE_RESOURCE_TYPE_CASTS(CSSStyleSheet);

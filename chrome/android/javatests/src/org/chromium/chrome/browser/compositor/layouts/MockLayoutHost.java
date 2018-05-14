@@ -11,7 +11,6 @@ import android.graphics.RectF;
 import org.chromium.chrome.browser.compositor.TitleCache;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.content.browser.ContentViewCore;
 import org.chromium.ui.resources.ResourceManager;
 
 /**
@@ -128,20 +127,12 @@ class MockLayoutHost implements LayoutManagerHost, LayoutRenderHost {
     }
 
     @Override
-    public boolean areBrowserControlsPermanentlyHidden() {
-        return false;
-    }
-
-    @Override
     public ResourceManager getResourceManager() {
         return null;
     }
 
     @Override
     public void invalidateAccessibilityProvider() { }
-
-    @Override
-    public void onOverlayPanelContentViewCoreAdded(ContentViewCore content) { }
 
     @Override
     public void onContentChanged() { }

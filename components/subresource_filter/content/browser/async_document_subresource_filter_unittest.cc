@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/test/test_simple_task_runner.h"
@@ -68,7 +67,7 @@ class AsyncDocumentSubresourceFilterTest : public ::testing::Test {
   }
 
   std::unique_ptr<VerifiedRuleset::Handle> CreateRulesetHandle() {
-    return base::MakeUnique<VerifiedRuleset::Handle>(dealer_handle());
+    return std::make_unique<VerifiedRuleset::Handle>(dealer_handle());
   }
 
  private:
@@ -144,7 +143,7 @@ TEST_F(AsyncDocumentSubresourceFilterTest, ActivationStateIsReported) {
       GURL("http://example.com"), ActivationLevel::ENABLED, false);
 
   testing::TestActivationStateCallbackReceiver activation_state;
-  auto filter = base::MakeUnique<AsyncDocumentSubresourceFilter>(
+  auto filter = std::make_unique<AsyncDocumentSubresourceFilter>(
       ruleset_handle.get(), std::move(params), activation_state.GetCallback());
 
   RunUntilIdle();
@@ -158,10 +157,11 @@ TEST_F(AsyncDocumentSubresourceFilterTest, ActivationStateIsComputedCorrectly) {
 
   AsyncDocumentSubresourceFilter::InitializationParams params(
       GURL("http://whitelisted.subframe.com"), ActivationLevel::ENABLED, false);
-  params.parent_document_origin = url::Origin(GURL("http://example.com"));
+  params.parent_document_origin =
+      url::Origin::Create(GURL("http://example.com"));
 
   testing::TestActivationStateCallbackReceiver activation_state;
-  auto filter = base::MakeUnique<AsyncDocumentSubresourceFilter>(
+  auto filter = std::make_unique<AsyncDocumentSubresourceFilter>(
       ruleset_handle.get(), std::move(params), activation_state.GetCallback());
 
   RunUntilIdle();
@@ -181,7 +181,7 @@ TEST_F(AsyncDocumentSubresourceFilterTest, DisabledForCorruptRuleset) {
       GURL("http://example.com"), ActivationLevel::ENABLED, false);
 
   testing::TestActivationStateCallbackReceiver activation_state;
-  auto filter = base::MakeUnique<AsyncDocumentSubresourceFilter>(
+  auto filter = std::make_unique<AsyncDocumentSubresourceFilter>(
       ruleset_handle.get(), std::move(params), activation_state.GetCallback());
 
   RunUntilIdle();
@@ -197,7 +197,7 @@ TEST_F(AsyncDocumentSubresourceFilterTest, GetLoadPolicyForSubdocument) {
       GURL("http://example.com"), ActivationLevel::ENABLED, false);
 
   testing::TestActivationStateCallbackReceiver activation_state;
-  auto filter = base::MakeUnique<AsyncDocumentSubresourceFilter>(
+  auto filter = std::make_unique<AsyncDocumentSubresourceFilter>(
       ruleset_handle.get(), std::move(params), activation_state.GetCallback());
 
   LoadPolicyCallbackReceiver load_policy_1;
@@ -221,7 +221,7 @@ TEST_F(AsyncDocumentSubresourceFilterTest, FirstDisallowedLoadIsReported) {
       GURL("http://example.com"), ActivationLevel::ENABLED, false);
 
   testing::TestActivationStateCallbackReceiver activation_state;
-  auto filter = base::MakeUnique<AsyncDocumentSubresourceFilter>(
+  auto filter = std::make_unique<AsyncDocumentSubresourceFilter>(
       ruleset_handle.get(), std::move(params), activation_state.GetCallback());
   filter->set_first_disallowed_load_callback(
       first_disallowed_load_receiver.GetClosure());
@@ -350,7 +350,8 @@ TEST_F(SubresourceFilterComputeActivationStateTest,
     const auto& test_case = kTestCases[i];
 
     GURL document_url(test_case.document_url);
-    url::Origin parent_document_origin(GURL(test_case.parent_document_origin));
+    url::Origin parent_document_origin =
+        url::Origin::Create(GURL(test_case.parent_document_origin));
     ActivationState activation_state =
         ComputeActivationState(document_url, parent_document_origin,
                                test_case.parent_activation, ruleset());

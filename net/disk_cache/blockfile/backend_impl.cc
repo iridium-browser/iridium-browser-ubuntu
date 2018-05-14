@@ -13,7 +13,9 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/hash.h"
+#include "base/lazy_instance.h"
 #include "base/location.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
@@ -22,12 +24,14 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
+#include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "net/base/net_errors.h"
+#include "net/disk_cache/backend_cleanup_tracker.h"
 #include "net/disk_cache/blockfile/disk_format.h"
 #include "net/disk_cache/blockfile/entry_impl.h"
 #include "net/disk_cache/blockfile/errors.h"
@@ -109,6 +113,32 @@ void FinalCleanupCallback(disk_cache::BackendImpl* backend) {
   backend->CleanupCache();
 }
 
+class CacheThread : public base::Thread {
+ public:
+  CacheThread() : base::Thread("CacheThread_BlockFile") {
+    CHECK(
+        StartWithOptions(base::Thread::Options(base::MessageLoop::TYPE_IO, 0)));
+  }
+
+  ~CacheThread() override {
+    // We don't expect to be deleted, but call Stop() in dtor 'cause docs
+    // say we should.
+    Stop();
+  }
+};
+
+static base::LazyInstance<CacheThread>::Leaky g_internal_cache_thread =
+    LAZY_INSTANCE_INITIALIZER;
+
+scoped_refptr<base::SingleThreadTaskRunner> InternalCacheThread() {
+  return g_internal_cache_thread.Get().task_runner();
+}
+
+scoped_refptr<base::SingleThreadTaskRunner> FallbackToInternalIfNull(
+    const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread) {
+  return cache_thread ? cache_thread : InternalCacheThread();
+}
+
 }  // namespace
 
 // ------------------------------------------------------------------------
@@ -117,9 +147,11 @@ namespace disk_cache {
 
 BackendImpl::BackendImpl(
     const base::FilePath& path,
+    scoped_refptr<BackendCleanupTracker> cleanup_tracker,
     const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread,
     net::NetLog* net_log)
-    : background_queue_(this, cache_thread),
+    : cleanup_tracker_(std::move(cleanup_tracker)),
+      background_queue_(this, FallbackToInternalIfNull(cache_thread)),
       path_(path),
       block_files_(path),
       mask_(0),
@@ -136,6 +168,7 @@ BackendImpl::BackendImpl(
       new_eviction_(false),
       first_timer_(true),
       user_load_(false),
+      consider_evicting_at_op_end_(false),
       net_log_(net_log),
       done_(base::WaitableEvent::ResetPolicy::MANUAL,
             base::WaitableEvent::InitialState::NOT_SIGNALED),
@@ -146,7 +179,7 @@ BackendImpl::BackendImpl(
     uint32_t mask,
     const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread,
     net::NetLog* net_log)
-    : background_queue_(this, cache_thread),
+    : background_queue_(this, FallbackToInternalIfNull(cache_thread)),
       path_(path),
       block_files_(path),
       mask_(mask),
@@ -163,6 +196,7 @@ BackendImpl::BackendImpl(
       new_eviction_(false),
       first_timer_(true),
       user_load_(false),
+      consider_evicting_at_op_end_(false),
       net_log_(net_log),
       done_(base::WaitableEvent::ResetPolicy::MANUAL,
             base::WaitableEvent::InitialState::NOT_SIGNALED),
@@ -297,6 +331,7 @@ int BackendImpl::SyncInit() {
 
   if (!disabled_ && should_create_timer) {
     // Create a recurrent timer of 30 secs.
+    DCHECK(background_queue_.BackgroundIsCurrentSequence());
     int timer_delay = unit_test_ ? 1000 : 30000;
     timer_.reset(new base::RepeatingTimer());
     timer_->Start(FROM_HERE, TimeDelta::FromMilliseconds(timer_delay), this,
@@ -307,6 +342,7 @@ int BackendImpl::SyncInit() {
 }
 
 void BackendImpl::CleanupCache() {
+  DCHECK(background_queue_.BackgroundIsCurrentSequence());
   Trace("Backend Cleanup");
   eviction_.Stop();
   timer_.reset();
@@ -879,9 +915,16 @@ void BackendImpl::OnEntryDestroyBegin(Addr address) {
 
 void BackendImpl::OnEntryDestroyEnd() {
   DecreaseNumRefs();
-  if (data_->header.num_bytes > max_size_ && !read_only_ &&
-      (up_ticks_ > kTrimDelay || user_flags_ & kNoRandom))
-    eviction_.TrimCache(false);
+  consider_evicting_at_op_end_ = true;
+}
+
+void BackendImpl::OnSyncBackendOpComplete() {
+  if (consider_evicting_at_op_end_) {
+    if (data_->header.num_bytes > max_size_ && !read_only_ &&
+        (up_ticks_ > kTrimDelay || user_flags_ & kNoRandom))
+      eviction_.TrimCache(false);
+    consider_evicting_at_op_end_ = false;
+  }
 }
 
 EntryImpl* BackendImpl::GetOpenEntry(CacheRankingsBlock* rankings) const {
@@ -1527,7 +1570,7 @@ int BackendImpl::NewEntry(Addr address, scoped_refptr<EntryImpl>* entry) {
   EntriesMap::iterator it = open_entries_.find(address.value());
   if (it != open_entries_.end()) {
     // Easy job. This entry is already in memory.
-    *entry = make_scoped_refptr(it->second);
+    *entry = base::WrapRefCounted(it->second);
     return 0;
   }
 
@@ -2098,6 +2141,10 @@ int BackendImpl::MaxBuffersSize() {
   }
 
   return static_cast<int>(total_memory);
+}
+
+void BackendImpl::FlushForTesting() {
+  g_internal_cache_thread.Get().FlushForTesting();
 }
 
 }  // namespace disk_cache

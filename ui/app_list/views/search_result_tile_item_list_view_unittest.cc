@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "ash/app_list/model/app_list_model.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
@@ -15,10 +16,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/app_list/app_list_features.h"
-#include "ui/app_list/app_list_model.h"
 #include "ui/app_list/test/app_list_test_view_delegate.h"
 #include "ui/app_list/test/test_search_result.h"
-#include "ui/app_list/views/search_result_list_view_delegate.h"
+#include "ui/app_list/views/search_result_tile_item_view.h"
 #include "ui/app_list/views/search_result_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/test/views_test_base.h"
@@ -44,39 +44,37 @@ class SearchResultTileItemListViewTest
     // feature.
     if (IsPlayStoreAppSearchEnabled()) {
       scoped_feature_list_.InitWithFeatures(
-          {features::kEnableFullscreenAppList,
-           features::kEnablePlayStoreAppSearch},
-          {});
+          {features::kEnablePlayStoreAppSearch}, {});
     } else {
       scoped_feature_list_.InitWithFeatures(
-          {features::kEnableFullscreenAppList},
-          {features::kEnablePlayStoreAppSearch});
+          {}, {features::kEnablePlayStoreAppSearch});
     }
     ASSERT_EQ(IsPlayStoreAppSearchEnabled(),
               features::IsPlayStoreAppSearchEnabled());
 
     // Sets up the views.
-    textfield_ = base::MakeUnique<views::Textfield>();
-    view_ = base::MakeUnique<SearchResultTileItemListView>(textfield_.get(),
-                                                           &view_delegate_);
-    view_->SetResults(view_delegate_.GetModel()->results());
+    textfield_ = std::make_unique<views::Textfield>();
+    view_ = std::make_unique<SearchResultTileItemListView>(
+        nullptr, textfield_.get(), &view_delegate_);
+    view_->SetResults(view_delegate_.GetSearchModel()->results());
   }
 
   bool IsPlayStoreAppSearchEnabled() const { return GetParam(); }
 
   SearchResultTileItemListView* view() { return view_.get(); }
 
-  AppListModel::SearchResults* GetResults() {
-    return view_delegate_.GetModel()->results();
+  SearchModel::SearchResults* GetResults() {
+    return view_delegate_.GetSearchModel()->results();
   }
 
   void SetUpSearchResults() {
-    AppListModel::SearchResults* results = GetResults();
+    SearchModel::SearchResults* results = GetResults();
 
     // Populate results for installed applications.
     for (int i = 0; i < kInstalledApps; ++i) {
       std::unique_ptr<TestSearchResult> result =
-          base::MakeUnique<TestSearchResult>();
+          std::make_unique<TestSearchResult>();
+      result->set_result_id(base::StringPrintf("InstalledApp %d", i));
       result->set_display_type(SearchResult::DISPLAY_TILE);
       result->set_result_type(SearchResult::RESULT_INSTALLED_APP);
       result->set_title(
@@ -88,7 +86,8 @@ class SearchResultTileItemListViewTest
     if (IsPlayStoreAppSearchEnabled()) {
       for (int i = 0; i < kPlayStoreApps; ++i) {
         std::unique_ptr<TestSearchResult> result =
-            base::MakeUnique<TestSearchResult>();
+            std::make_unique<TestSearchResult>();
+        result->set_result_id(base::StringPrintf("PlayStoreApp %d", i));
         result->set_display_type(SearchResult::DISPLAY_TILE);
         result->set_result_type(SearchResult::RESULT_PLAYSTORE_APP);
         result->set_title(
@@ -116,10 +115,6 @@ class SearchResultTileItemListViewTest
   }
 
   int GetResultCount() const { return view_->num_results(); }
-
-  int GetSelectedIndex() const { return view_->selected_index(); }
-
-  void ResetSelectedIndex() const { view_->SetSelectedIndex(0); }
 
   bool KeyPress(ui::KeyboardCode key_code) {
     ui::KeyEvent event(ui::ET_KEY_PRESSED, key_code, ui::EF_NONE);
@@ -160,9 +155,9 @@ TEST_P(SearchResultTileItemListViewTest, Basic) {
     view()
         ->child_at(first_child + i * child_step)
         ->GetAccessibleNodeData(&node_data);
-    EXPECT_EQ(ui::AX_ROLE_BUTTON, node_data.role);
+    EXPECT_EQ(ax::mojom::Role::kButton, node_data.role);
     EXPECT_EQ(base::StringPrintf("InstalledApp %d", i),
-              node_data.GetStringAttribute(ui::AX_ATTR_NAME));
+              node_data.GetStringAttribute(ax::mojom::StringAttribute::kName));
   }
 
   for (int i = kInstalledApps; i < expected_results; ++i) {
@@ -170,32 +165,19 @@ TEST_P(SearchResultTileItemListViewTest, Basic) {
     view()
         ->child_at(first_child + i * child_step)
         ->GetAccessibleNodeData(&node_data);
-    EXPECT_EQ(ui::AX_ROLE_BUTTON, node_data.role);
-    EXPECT_EQ(base::StringPrintf("PlayStoreApp %d, %d.0, Price %d",
+    EXPECT_EQ(ax::mojom::Role::kButton, node_data.role);
+    EXPECT_EQ(base::StringPrintf("PlayStoreApp %d, Star rating %d.0, Price %d",
                                  i - kInstalledApps, i + 1 - kInstalledApps,
                                  i - kInstalledApps),
-              node_data.GetStringAttribute(ui::AX_ATTR_NAME));
+              node_data.GetStringAttribute(ax::mojom::StringAttribute::kName));
   }
 
-  // Tests item indexing by pressing TAB.
-  for (int i = 1; i < results; ++i) {
-    EXPECT_TRUE(KeyPress(ui::VKEY_TAB));
-    EXPECT_EQ(i, GetSelectedIndex());
-  }
-
-  // Extra TAB events won't be handled by the view.
-  EXPECT_FALSE(KeyPress(ui::VKEY_TAB));
-  EXPECT_EQ(results - 1, GetSelectedIndex());
-
-  // Tests app opening.
-  ResetSelectedIndex();
   ResetOpenResultCount();
-  for (int i = 1; i < results; ++i) {
-    EXPECT_TRUE(KeyPress(ui::VKEY_TAB));
-    EXPECT_EQ(i, GetSelectedIndex());
-    for (int j = 0; j < i; j++)
-      EXPECT_TRUE(KeyPress(ui::VKEY_RETURN));
-    EXPECT_EQ(i, GetOpenResultCount(i));
+  for (int i = 0; i < results; ++i) {
+    ui::KeyEvent event(ui::ET_KEY_PRESSED, ui::VKEY_RETURN, ui::EF_NONE);
+    for (int j = 0; j <= i; ++j)
+      view()->tile_views_for_test()[i]->OnKeyEvent(&event);
+    EXPECT_EQ(i + 1, GetOpenResultCount(i));
   }
 }
 

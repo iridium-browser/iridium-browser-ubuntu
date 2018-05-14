@@ -26,12 +26,13 @@
 #ifndef CSSTimingFunctionValue_h
 #define CSSTimingFunctionValue_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/css/CSSValue.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/animation/TimingFunction.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "platform/runtime_enabled_features.h"
 
 namespace blink {
+namespace cssvalue {
 
 class CSSCubicBezierTimingFunctionValue : public CSSValue {
  public:
@@ -51,7 +52,7 @@ class CSSCubicBezierTimingFunctionValue : public CSSValue {
 
   bool Equals(const CSSCubicBezierTimingFunctionValue&) const;
 
-  DEFINE_INLINE_TRACE_AFTER_DISPATCH() {
+  void TraceAfterDispatch(blink::Visitor* visitor) {
     CSSValue::TraceAfterDispatch(visitor);
   }
 
@@ -89,7 +90,7 @@ class CSSStepsTimingFunctionValue : public CSSValue {
 
   bool Equals(const CSSStepsTimingFunctionValue&) const;
 
-  DEFINE_INLINE_TRACE_AFTER_DISPATCH() {
+  void TraceAfterDispatch(blink::Visitor* visitor) {
     CSSValue::TraceAfterDispatch(visitor);
   }
 
@@ -119,7 +120,7 @@ class CSSFramesTimingFunctionValue : public CSSValue {
 
   bool Equals(const CSSFramesTimingFunctionValue&) const;
 
-  DEFINE_INLINE_TRACE_AFTER_DISPATCH() {
+  void TraceAfterDispatch(blink::Visitor* visitor) {
     CSSValue::TraceAfterDispatch(visitor);
   }
 
@@ -135,6 +136,7 @@ class CSSFramesTimingFunctionValue : public CSSValue {
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSFramesTimingFunctionValue,
                             IsFramesTimingFunctionValue());
 
+}  // namespace cssvalue
 }  // namespace blink
 
 #endif

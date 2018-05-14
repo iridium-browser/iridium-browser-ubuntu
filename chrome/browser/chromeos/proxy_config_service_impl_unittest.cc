@@ -13,7 +13,6 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -34,8 +33,8 @@
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
-#include "net/proxy/proxy_config.h"
-#include "net/proxy/proxy_config_service_common_unittest.h"
+#include "net/proxy_resolution/proxy_config.h"
+#include "net/proxy_resolution/proxy_config_service_common_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -62,7 +61,7 @@ struct Input {
 // Shortcuts to declare enums within chromeos's ProxyConfig.
 #define MK_MODE(mode) UIProxyConfig::MODE_##mode
 
-// Inspired from net/proxy/proxy_config_service_linux_unittest.cc.
+// Inspired from net/proxy_resolution/proxy_config_service_linux_unittest.cc.
 const struct TestParams {
   // Short description to identify the test
   std::string description;
@@ -520,7 +519,7 @@ TEST_F(ProxyConfigServiceImplTest, SharedEthernetAndUserPolicy) {
   network_configs->Append(std::move(ethernet_policy));
 
   profile_prefs_.SetUserPref(::proxy_config::prefs::kUseSharedProxies,
-                             base::MakeUnique<base::Value>(false));
+                             std::make_unique<base::Value>(false));
   profile_prefs_.SetManagedPref(::onc::prefs::kOpenNetworkConfiguration,
                                 std::move(network_configs));
 

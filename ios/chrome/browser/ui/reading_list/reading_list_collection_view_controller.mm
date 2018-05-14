@@ -10,15 +10,16 @@
 #include "base/metrics/user_metrics_action.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/alert_coordinator/action_sheet_coordinator.h"
-#import "ios/chrome/browser/ui/collection_view/cells/collection_view_item+collection_view_controller.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_text_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
+#import "ios/chrome/browser/ui/list_model/list_item+Controller.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_collection_view_item_accessibility_delegate.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_data_sink.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_data_source.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_empty_collection_background.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_toolbar.h"
 #include "ios/chrome/grit/ios_strings.h"
+#import "ios/third_party/material_components_ios/src/components/AppBar/src/MaterialAppBar.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -45,7 +46,8 @@ typedef void (^EntryUpdater)(CollectionViewItem* item);
 
 @interface ReadingListCollectionViewController ()<
     ReadingListCollectionViewItemAccessibilityDelegate,
-    ReadingListDataSink> {
+    ReadingListDataSink,
+    UIGestureRecognizerDelegate> {
   // Toolbar with the actions.
   ReadingListToolbar* _toolbar;
   // Action sheet presenting the subactions of the toolbar.
@@ -66,7 +68,7 @@ typedef void (^EntryUpdater)(CollectionViewItem* item);
 // Fills section |sectionIdentifier| with the items from |array|.
 - (void)loadItemsFromArray:(NSArray<CollectionViewItem*>*)array
                  toSection:(SectionIdentifier)sectionIdentifier;
-// Reloads the data if a changed occured during editing
+// Reloads the data if a change occurred during editing
 - (void)applyPendingUpdates;
 // Returns whether there are elements in the section identified by
 // |sectionIdentifier|.
@@ -140,6 +142,10 @@ typedef void (^EntryUpdater)(CollectionViewItem* item);
 
 @synthesize shouldMonitorDataSource = _shouldMonitorDataSource;
 
++ (NSString*)accessibilityIdentifier {
+  return @"ReadingListCollectionView";
+}
+
 #pragma mark lifecycle
 
 - (instancetype)initWithDataSource:(id<ReadingListDataSource>)dataSource
@@ -181,7 +187,8 @@ typedef void (^EntryUpdater)(CollectionViewItem* item);
   [super viewDidLoad];
 
   self.title = l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_READING_LIST);
-
+  self.collectionView.accessibilityIdentifier =
+      [ReadingListCollectionViewController accessibilityIdentifier];
   // Add "Done" button.
   UIBarButtonItem* doneItem = [[UIBarButtonItem alloc]
       initWithTitle:l10n_util::GetNSString(IDS_IOS_READING_LIST_DONE_BUTTON)
@@ -199,8 +206,13 @@ typedef void (^EntryUpdater)(CollectionViewItem* item);
       [[UILongPressGestureRecognizer alloc]
           initWithTarget:self
                   action:@selector(handleLongPress:)];
-  longPressRecognizer.numberOfTouchesRequired = 1;
+  longPressRecognizer.delegate = self;
   [self.collectionView addGestureRecognizer:longPressRecognizer];
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  [_toolbar updateHeight];
 }
 
 #pragma mark - UICollectionViewDelegate
@@ -224,7 +236,7 @@ typedef void (^EntryUpdater)(CollectionViewItem* item);
   [super collectionView:collectionView didDeselectItemAtIndexPath:indexPath];
   if (self.editor.editing) {
     // When deselecting an item, if we are editing, we want to update the
-    // toolbar base on the selected items.
+    // toolbar based on the selected items.
     [self updateToolbarState];
   }
 }
@@ -359,6 +371,16 @@ typedef void (^EntryUpdater)(CollectionViewItem* item);
     [self markItemsUnreadAtIndexPath:@[ [self.collectionViewModel
                                          indexPathForItem:entry] ]];
   }
+}
+
+#pragma mark - UIGestureRecognizerDelegate
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer*)gestureRecognizer
+       shouldReceiveTouch:(UITouch*)touch {
+  // Prevent the context menu to be displayed if the long press is done on the
+  // App Bar.
+  CGPoint location = [touch locationInView:self.appBar.navigationBar];
+  return !CGRectContainsPoint(self.appBar.navigationBar.frame, location);
 }
 
 #pragma mark - Private methods

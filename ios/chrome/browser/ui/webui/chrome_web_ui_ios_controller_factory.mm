@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/experimental_flags.h"
 #include "ios/chrome/browser/ui/webui/about_ui.h"
@@ -16,11 +15,12 @@
 #include "ios/chrome/browser/ui/webui/net_export/net_export_ui.h"
 #include "ios/chrome/browser/ui/webui/ntp_tiles_internals_ui.h"
 #include "ios/chrome/browser/ui/webui/omaha_ui.h"
-#include "ios/chrome/browser/ui/webui/physical_web_ui.h"
+#include "ios/chrome/browser/ui/webui/password_manager_internals_ui_ios.h"
 #include "ios/chrome/browser/ui/webui/signin_internals_ui_ios.h"
 #include "ios/chrome/browser/ui/webui/suggestions_ui.h"
 #include "ios/chrome/browser/ui/webui/sync_internals/sync_internals_ui.h"
 #include "ios/chrome/browser/ui/webui/terms_ui.h"
+#include "ios/chrome/browser/ui/webui/url_keyed_metrics_ui.h"
 #include "ios/chrome/browser/ui/webui/version_ui.h"
 #include "url/gurl.h"
 
@@ -41,13 +41,13 @@ using WebUIIOSFactoryFunction =
 template <class T>
 std::unique_ptr<WebUIIOSController> NewWebUIIOS(WebUIIOS* web_ui,
                                                 const GURL& url) {
-  return base::MakeUnique<T>(web_ui);
+  return std::make_unique<T>(web_ui);
 }
 
 template <class T>
 std::unique_ptr<WebUIIOSController> NewWebUIIOSWithHost(WebUIIOS* web_ui,
                                                         const GURL& url) {
-  return base::MakeUnique<T>(web_ui, url.host());
+  return std::make_unique<T>(web_ui, url.host());
 }
 
 // Returns a function that can be used to create the right type of WebUIIOS for
@@ -76,10 +76,8 @@ WebUIIOSFactoryFunction GetWebUIIOSFactoryFunction(WebUIIOS* web_ui,
     return &NewWebUIIOS<NTPTilesInternalsUI>;
   if (url_host == kChromeUIOmahaHost)
     return &NewWebUIIOS<OmahaUI>;
-  if (experimental_flags::IsPhysicalWebEnabled()) {
-    if (url_host == kChromeUIPhysicalWebHost)
-      return &NewWebUIIOS<PhysicalWebUI>;
-  }
+  if (url_host == kChromeUIPasswordManagerInternalsHost)
+    return &NewWebUIIOS<PasswordManagerInternalsUIIOS>;
   if (url_host == kChromeUISignInInternalsHost)
     return &NewWebUIIOS<SignInInternalsUIIOS>;
   if (url.host_piece() == kChromeUISuggestionsHost)
@@ -92,6 +90,8 @@ WebUIIOSFactoryFunction GetWebUIIOSFactoryFunction(WebUIIOS* web_ui,
     return &NewWebUIIOS<VersionUI>;
   if (url_host == kChromeUIFlagsHost)
     return &NewWebUIIOS<FlagsUI>;
+  if (url_host == kChromeUIURLKeyedMetricsHost)
+    return &NewWebUIIOSWithHost<URLKeyedMetricsUI>;
 
   return nullptr;
 }

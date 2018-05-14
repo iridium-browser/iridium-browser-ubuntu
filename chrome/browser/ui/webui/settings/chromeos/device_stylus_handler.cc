@@ -4,11 +4,12 @@
 
 #include "chrome/browser/ui/webui/settings/chromeos/device_stylus_handler.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "ash/system/palette/palette_utils.h"
+#include "ash/public/cpp/stylus_utils.h"
 #include "base/bind.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -28,36 +29,43 @@ constexpr char kAppLockScreenSupportKey[] = "lockScreenSupport";
 
 }  // namespace
 
-StylusHandler::StylusHandler() {
-  NoteTakingHelper::Get()->AddObserver(this);
-  ui::InputDeviceManager::GetInstance()->AddObserver(this);
-}
+StylusHandler::StylusHandler() : note_observer_(this), input_observer_(this) {}
 
-StylusHandler::~StylusHandler() {
-  ui::InputDeviceManager::GetInstance()->RemoveObserver(this);
-  NoteTakingHelper::Get()->RemoveObserver(this);
-}
+StylusHandler::~StylusHandler() = default;
 
 void StylusHandler::RegisterMessages() {
   DCHECK(web_ui());
 
+  // Note: initializeStylusSettings must be called before observers will be
+  // added.
   web_ui()->RegisterMessageCallback(
       "initializeStylusSettings",
       base::Bind(&StylusHandler::HandleInitialize, base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "requestNoteTakingApps",
-      base::Bind(&StylusHandler::RequestApps, base::Unretained(this)));
+      base::Bind(&StylusHandler::HandleRequestApps, base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "setPreferredNoteTakingApp",
-      base::Bind(&StylusHandler::SetPreferredNoteTakingApp,
+      base::Bind(&StylusHandler::HandleSetPreferredNoteTakingApp,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "setPreferredNoteTakingAppEnabledOnLockScreen",
-      base::Bind(&StylusHandler::SetPreferredNoteTakingAppEnabledOnLockScreen,
-                 base::Unretained(this)));
+      base::Bind(
+          &StylusHandler::HandleSetPreferredNoteTakingAppEnabledOnLockScreen,
+          base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      "showPlayStoreApps",
-      base::Bind(&StylusHandler::ShowPlayStoreApps, base::Unretained(this)));
+      "showPlayStoreApps", base::Bind(&StylusHandler::HandleShowPlayStoreApps,
+                                      base::Unretained(this)));
+}
+
+void StylusHandler::OnJavascriptAllowed() {
+  note_observer_.Add(NoteTakingHelper::Get());
+  input_observer_.Add(ui::InputDeviceManager::GetInstance());
+}
+
+void StylusHandler::OnJavascriptDisallowed() {
+  note_observer_.RemoveAll();
+  input_observer_.RemoveAll();
 }
 
 void StylusHandler::OnAvailableNoteTakingAppsUpdated() {
@@ -87,7 +95,7 @@ void StylusHandler::UpdateNoteTakingApps() {
     std::vector<NoteTakingAppInfo> available_apps =
         helper->GetAvailableApps(Profile::FromWebUI(web_ui()));
     for (const NoteTakingAppInfo& info : available_apps) {
-      auto dict = base::MakeUnique<base::DictionaryValue>();
+      auto dict = std::make_unique<base::DictionaryValue>();
       dict->SetString(kAppNameKey, info.name);
       dict->SetString(kAppIdKey, info.app_id);
       dict->SetBoolean(kAppPreferredKey, info.preferred);
@@ -99,16 +107,17 @@ void StylusHandler::UpdateNoteTakingApps() {
     }
   }
 
-  AllowJavascript();
   FireWebUIListener("onNoteTakingAppsUpdated", apps_list,
                     base::Value(waiting_for_android));
 }
 
-void StylusHandler::RequestApps(const base::ListValue* unused_args) {
+void StylusHandler::HandleRequestApps(const base::ListValue* unused_args) {
+  AllowJavascript();
   UpdateNoteTakingApps();
 }
 
-void StylusHandler::SetPreferredNoteTakingApp(const base::ListValue* args) {
+void StylusHandler::HandleSetPreferredNoteTakingApp(
+    const base::ListValue* args) {
   std::string app_id;
   CHECK(args->GetString(0, &app_id));
 
@@ -123,7 +132,7 @@ void StylusHandler::SetPreferredNoteTakingApp(const base::ListValue* args) {
                                            app_id);
 }
 
-void StylusHandler::SetPreferredNoteTakingAppEnabledOnLockScreen(
+void StylusHandler::HandleSetPreferredNoteTakingAppEnabledOnLockScreen(
     const base::ListValue* args) {
   bool enabled = false;
   CHECK(args->GetBoolean(0, &enabled));
@@ -133,18 +142,18 @@ void StylusHandler::SetPreferredNoteTakingAppEnabledOnLockScreen(
 }
 
 void StylusHandler::HandleInitialize(const base::ListValue* args) {
+  AllowJavascript();
   if (ui::InputDeviceManager::GetInstance()->AreDeviceListsComplete())
     SendHasStylus();
 }
 
 void StylusHandler::SendHasStylus() {
   DCHECK(ui::InputDeviceManager::GetInstance()->AreDeviceListsComplete());
-  AllowJavascript();
   FireWebUIListener("has-stylus-changed",
-                    base::Value(ash::palette_utils::HasStylusInput()));
+                    base::Value(ash::stylus_utils::HasStylusInput()));
 }
 
-void StylusHandler::ShowPlayStoreApps(const base::ListValue* args) {
+void StylusHandler::HandleShowPlayStoreApps(const base::ListValue* args) {
   std::string apps_url;
   args->GetString(0, &apps_url);
   Profile* profile = Profile::FromWebUI(web_ui());

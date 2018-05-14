@@ -10,7 +10,6 @@ const char kCryptohomeInterface[] = "org.chromium.CryptohomeInterface";
 const char kCryptohomeServicePath[] = "/org/chromium/Cryptohome";
 const char kCryptohomeServiceName[] = "org.chromium.Cryptohome";
 // Methods
-const char kCryptohomeAsyncAddKey[] = "AsyncAddKey";
 const char kCryptohomeCheckKey[] = "CheckKey";
 const char kCryptohomeMigrateKey[] = "MigrateKey";
 const char kCryptohomeRemove[] = "Remove";
@@ -19,7 +18,6 @@ const char kCryptohomeGetSanitizedUsername[] = "GetSanitizedUsername";
 const char kCryptohomeIsMounted[] = "IsMounted";
 const char kCryptohomeMount[] = "Mount";
 const char kCryptohomeMountGuest[] = "MountGuest";
-const char kCryptohomeMountPublic[] = "MountPublic";
 const char kCryptohomeUnmount[] = "Unmount";
 const char kCryptohomeTpmIsReady[] = "TpmIsReady";
 const char kCryptohomeTpmIsEnabled[] = "TpmIsEnabled";
@@ -38,7 +36,6 @@ const char kCryptohomeAsyncCheckKey[] = "AsyncCheckKey";
 const char kCryptohomeAsyncMigrateKey[] = "AsyncMigrateKey";
 const char kCryptohomeAsyncMount[] = "AsyncMount";
 const char kCryptohomeAsyncMountGuest[] = "AsyncMountGuest";
-const char kCryptohomeAsyncMountPublic[] = "AsyncMountPublic";
 const char kCryptohomeAsyncRemove[] = "AsyncRemove";
 const char kCryptohomeGetStatusString[] = "GetStatusString";
 const char kCryptohomeRemoveTrackedSubdirectories[] =
@@ -62,23 +59,26 @@ const char kCryptohomeInstallAttributesIsInvalid[] =
     "InstallAttributesIsInvalid";
 const char kCryptohomeInstallAttributesIsFirstInstall[] =
     "InstallAttributesIsFirstInstall";
-const char kCryptohomeStoreEnrollmentState[] =
-    "StoreEnrollmentState";
-const char kCryptohomeLoadEnrollmentState[] =
-    "LoadEnrollmentState";
 const char kCryptohomeTpmIsAttestationPrepared[] = "TpmIsAttestationPrepared";
 const char kCryptohomeTpmIsAttestationEnrolled[] = "TpmIsAttestationEnrolled";
+const char kCryptohomeTpmAttestationCreateEnrollRequest[] =
+    "TpmAttestationCreateEnrollRequest";
 const char kCryptohomeAsyncTpmAttestationCreateEnrollRequest[] =
     "AsyncTpmAttestationCreateEnrollRequest";
 const char kCryptohomeAsyncTpmAttestationCreateEnrollRequestNew[] =
     "AsyncTpmAttestationCreateEnrollRequestNew";
+const char kCryptohomeTpmAttestationEnroll[] = "TpmAttestationEnroll";
 const char kCryptohomeAsyncTpmAttestationEnroll[] = "AsyncTpmAttestationEnroll";
 const char kCryptohomeAsyncTpmAttestationEnrollNew[] =
     "AsyncTpmAttestationEnrollNew";
+const char kCryptohomeTpmAttestationCreateCertRequest[] =
+    "TpmAttestationCreateCertRequest";
 const char kCryptohomeAsyncTpmAttestationCreateCertRequest[] =
     "AsyncTpmAttestationCreateCertRequest";
 const char kCryptohomeAsyncTpmAttestationCreateCertRequestByProfile[] =
     "AsyncTpmAttestationCreateCertRequestByProfile";
+const char kCryptohomeTpmAttestationFinishCertRequest[] =
+    "TpmAttestationFinishCertRequest";
 const char kCryptohomeAsyncTpmAttestationFinishCertRequest[] =
     "AsyncTpmAttestationFinishCertRequest";
 const char kCryptohomeTpmAttestationDoesKeyExist[] =
@@ -88,8 +88,11 @@ const char kCryptohomeTpmAttestationGetCertificate[] =
 const char kCryptohomeTpmAttestationGetPublicKey[] =
     "TpmAttestationGetPublicKey";
 const char kCryptohomeTpmAttestationRegisterKey[] = "TpmAttestationRegisterKey";
+// TODO(crbug.com/789419): Remove this deprecated API.
 const char kCryptohomeTpmAttestationSignEnterpriseChallenge[] =
     "TpmAttestationSignEnterpriseChallenge";
+const char kCryptohomeTpmAttestationSignEnterpriseVaChallenge[] =
+    "TpmAttestationSignEnterpriseVaChallenge";
 const char kCryptohomeTpmAttestationSignSimpleChallenge[] =
     "TpmAttestationSignSimpleChallenge";
 const char kCryptohomeTpmAttestationGetKeyPayload[] =
@@ -98,7 +101,12 @@ const char kCryptohomeTpmAttestationSetKeyPayload[] =
     "TpmAttestationSetKeyPayload";
 const char kCryptohomeTpmAttestationDeleteKeys[] =
     "TpmAttestationDeleteKeys";
+const char kCryptohomeTpmAttestationGetEnrollmentId[] =
+    "TpmAttestationGetEnrollmentId";
+// TODO(isandrk): Deprecated, remove on (or before) 2017/09/21 - after the
+// Chromium side has been changed to use the new TpmGetVersionStructured.
 const char kCryptohomeTpmGetVersion[] = "TpmGetVersion";
+const char kCryptohomeTpmGetVersionStructured[] = "TpmGetVersionStructured";
 const char kCryptohomeGetKeyDataEx[] = "GetKeyDataEx";
 const char kCryptohomeCheckKeyEx[] = "CheckKeyEx";
 const char kCryptohomeMountEx[] = "MountEx";
@@ -126,6 +134,7 @@ const char kCryptohomeRemoveFirmwareManagementParameters[] =
 const char kCryptohomeMigrateToDircrypto[] = "MigrateToDircrypto";
 const char kCryptohomeMigrateToDircryptoEx[] = "MigrateToDircryptoEx";
 const char kCryptohomeNeedsDircryptoMigration[] = "NeedsDircryptoMigration";
+const char kCryptohomeGetSupportedKeyPolicies[] = "GetSupportedKeyPolicies";
 
 // Signals
 const char kSignalAsyncCallStatus[] = "AsyncCallStatus";

@@ -93,7 +93,7 @@ invalid_non_object_type_regex = re.compile(r'@(?:' + type_checked_jsdoc_tags_or 
 error_warning_regex = re.compile(r'WARNING|ERROR')
 loaded_css_regex = re.compile(r'(?:registerRequiredCSS|WebInspector\.View\.createStyleElement)\s*\(\s*"(.+)"\s*\)')
 
-java_build_regex = re.compile(r'^\w+ version "(\d+)\.(\d+)')
+java_build_regex = re.compile(r'\w+ version "(\d+)\.(\d+)')
 
 
 def log_error(message):
@@ -108,12 +108,11 @@ def error_excepthook(exctype, value, traceback):
 sys.excepthook = error_excepthook
 
 application_descriptors = [
-    'inspector.json',
-    'toolbox.json',
-    'integration_test_runner.json',
-    'unit_test_runner.json',
-    'formatter_worker.json',
-    'heap_snapshot_worker.json',
+    'inspector',
+    'toolbox',
+    'integration_test_runner',
+    'formatter_worker',
+    'heap_snapshot_worker',
 ]
 
 skipped_namespaces = {
@@ -245,19 +244,22 @@ common_closure_args = [
     'SIMPLE_OPTIMIZATIONS',
     '--warning_level',
     'VERBOSE',
-    '--language_in=ECMASCRIPT_NEXT',
+    '--language_in=ECMASCRIPT_2017',
     '--language_out=ES5_STRICT',
     '--extra_annotation_name',
     'suppressReceiverCheck',
     '--extra_annotation_name',
     'suppressGlobalPropertiesCheck',
     '--checks-only',
+    '--allow_method_call_decomposing',
 ]
 
 
 def check_conditional_dependencies(modules_by_name):
     errors_found = False
     for name in modules_by_name:
+        if 'test_runner' in name:
+            continue
         for dep_name in modules_by_name[name].get('dependencies', []):
             dependency = modules_by_name[dep_name]
             if dependency.get('experiment') or dependency.get('condition'):

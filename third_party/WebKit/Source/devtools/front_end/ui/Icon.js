@@ -21,7 +21,7 @@ UI.Icon = class extends HTMLSpanElement {
     if (!UI.Icon._constructor)
       UI.Icon._constructor = UI.registerCustomElement('span', 'ui-icon', UI.Icon.prototype);
 
-    var icon = /** @type {!UI.Icon} */ (new UI.Icon._constructor());
+    const icon = /** @type {!UI.Icon} */ (new UI.Icon._constructor());
     if (className)
       icon.className = className;
     if (iconType)
@@ -54,7 +54,7 @@ UI.Icon = class extends HTMLSpanElement {
       this._descriptor = null;
       this._spriteSheet = null;
     }
-    var descriptor = UI.Icon.Descriptors[iconType] || null;
+    const descriptor = UI.Icon.Descriptors[iconType] || null;
     if (descriptor) {
       this._iconType = iconType;
       this._descriptor = descriptor;
@@ -88,8 +88,8 @@ UI.Icon = class extends HTMLSpanElement {
     if (!this._descriptor.coordinates) {
       if (!this._descriptor.position || !UI.Icon._positionRegex.test(this._descriptor.position))
         throw new Error(`ERROR: icon '${this._iconType}' has malformed position: '${this._descriptor.position}'`);
-      var column = this._descriptor.position[0].toLowerCase().charCodeAt(0) - 97;
-      var row = parseInt(this._descriptor.position.substring(1), 10) - 1;
+      const column = this._descriptor.position[0].toLowerCase().charCodeAt(0) - 97;
+      const row = parseInt(this._descriptor.position.substring(1), 10) - 1;
       this._descriptor.coordinates = {
         x: -(this._spriteSheet.cellWidth + this._spriteSheet.padding) * column,
         y: (this._spriteSheet.cellHeight + this._spriteSheet.padding) * (row + 1) - this._spriteSheet.padding
@@ -119,15 +119,21 @@ UI.Icon.SpriteSheets = {
 UI.Icon.Descriptors = {
   'smallicon-bezier': {position: 'a5', spritesheet: 'smallicons', isMask: true},
   'smallicon-checkmark': {position: 'b5', spritesheet: 'smallicons'},
+  'smallicon-checkmark-square': {position: 'b6', spritesheet: 'smallicons', isMask: true},
+  'smallicon-checkmark-behind': {position: 'd6', spritesheet: 'smallicons', isMask: true},
   'smallicon-command-result': {position: 'a4', spritesheet: 'smallicons'},
+  'smallicon-contrast-ratio': {position: 'a6', spritesheet: 'smallicons', isMask: true},
   'smallicon-cross': {position: 'b4', spritesheet: 'smallicons'},
   'smallicon-device': {position: 'c5', spritesheet: 'smallicons'},
   'smallicon-error': {position: 'c4', spritesheet: 'smallicons'},
+  'smallicon-expand-less': {position: 'f5', spritesheet: 'smallicons', isMask: true},
+  'smallicon-expand-more': {position: 'e6', spritesheet: 'smallicons', isMask: true},
   'smallicon-green-arrow': {position: 'a3', spritesheet: 'smallicons'},
   'smallicon-green-ball': {position: 'b3', spritesheet: 'smallicons'},
   'smallicon-info': {position: 'c3', spritesheet: 'smallicons'},
   'smallicon-inline-breakpoint-conditional': {position: 'd5', spritesheet: 'smallicons'},
   'smallicon-inline-breakpoint': {position: 'd4', spritesheet: 'smallicons'},
+  'smallicon-no': {position: 'c6', spritesheet: 'smallicons', isMask: true},
   'smallicon-orange-ball': {position: 'd3', spritesheet: 'smallicons'},
   'smallicon-red-ball': {position: 'a2', spritesheet: 'smallicons'},
   'smallicon-shadow': {position: 'b2', spritesheet: 'smallicons', isMask: true},
@@ -142,10 +148,15 @@ UI.Icon.Descriptors = {
   'smallicon-user-command': {position: 'c1', spritesheet: 'smallicons'},
   'smallicon-warning': {position: 'd1', spritesheet: 'smallicons'},
   'smallicon-network-product': {position: 'e1', spritesheet: 'smallicons'},
+  'smallicon-clear-warning': {position: 'f1', spritesheet: 'smallicons', isMask: true},
+  'smallicon-clear-info': {position: 'f2', spritesheet: 'smallicons'},
+  'smallicon-clear-error': {position: 'f3', spritesheet: 'smallicons'},
+  'smallicon-account-circle': {position: 'f4', spritesheet: 'smallicons'},
 
   'mediumicon-clear-storage': {position: 'a4', spritesheet: 'mediumicons', isMask: true},
   'mediumicon-cookie': {position: 'b4', spritesheet: 'mediumicons', isMask: true},
   'mediumicon-database': {position: 'c4', spritesheet: 'mediumicons', isMask: true},
+  'mediumicon-info': {position: 'c1', spritesheet: 'mediumicons', isMask: true},
   'mediumicon-manifest': {position: 'd4', spritesheet: 'mediumicons', isMask: true},
   'mediumicon-service-worker': {position: 'a3', spritesheet: 'mediumicons', isMask: true},
   'mediumicon-table': {position: 'b3', spritesheet: 'mediumicons', isMask: true},
@@ -157,6 +168,14 @@ UI.Icon.Descriptors = {
   'mediumicon-red-cross-active': {position: 'd2', spritesheet: 'mediumicons'},
   'mediumicon-red-cross-hover': {position: 'a1', spritesheet: 'mediumicons'},
   'mediumicon-search': {position: 'b1', spritesheet: 'mediumicons'},
+  'mediumicon-replace': {position: 'c5', spritesheet: 'mediumicons', isMask: true},
+  'mediumicon-account-circle': {position: 'e4', spritesheet: 'mediumicons'},
+  'mediumicon-warning-triangle': {position: 'e1', spritesheet: 'mediumicons'},
+  'mediumicon-error-circle': {position: 'e3', spritesheet: 'mediumicons'},
+  'mediumicon-info-circle': {position: 'e2', spritesheet: 'mediumicons'},
+  'mediumicon-bug': {position: 'd1', spritesheet: 'mediumicons'},
+  'mediumicon-list': {position: 'e5', spritesheet: 'mediumicons'},
+  'mediumicon-warning': {position: 'd5', spritesheet: 'mediumicons', isMask: true},
 
   'badge-navigator-file-sync': {position: 'a9', spritesheet: 'largeicons'},
   'largeicon-activate-breakpoints': {position: 'b9', spritesheet: 'largeicons', isMask: true},
@@ -216,9 +235,10 @@ UI.Icon.Descriptors = {
   'largeicon-show-right-sidebar': {position: 'g4', spritesheet: 'largeicons', isMask: true},
   'largeicon-show-top-sidebar': {position: 'g3', spritesheet: 'largeicons', isMask: true},
   'largeicon-start-recording': {position: 'g2', spritesheet: 'largeicons', isMask: true},
-  'largeicon-step-in': {position: 'a1', spritesheet: 'largeicons', isMask: true},
+  'largeicon-step-into': {position: 'a1', spritesheet: 'largeicons', isMask: true},
   'largeicon-step-out': {position: 'b1', spritesheet: 'largeicons', isMask: true},
   'largeicon-step-over': {position: 'c1', spritesheet: 'largeicons', isMask: true},
+  'largeicon-step': {position: 'h1', spritesheet: 'largeicons', isMask: true},
   'largeicon-stop-recording': {position: 'd1', spritesheet: 'largeicons', isMask: true},
   'largeicon-text-shadow': {position: 'e1', spritesheet: 'largeicons', isMask: true},
   'largeicon-trash-bin': {position: 'f1', spritesheet: 'largeicons', isMask: true},

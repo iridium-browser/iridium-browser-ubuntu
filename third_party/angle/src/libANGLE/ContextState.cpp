@@ -86,10 +86,10 @@ ContextState::ContextState(ContextID contextIn,
       mRenderbuffers(
           AllocateOrGetSharedResourceManager(shareContextState, &ContextState::mRenderbuffers)),
       mSamplers(AllocateOrGetSharedResourceManager(shareContextState, &ContextState::mSamplers)),
-      mFenceSyncs(
-          AllocateOrGetSharedResourceManager(shareContextState, &ContextState::mFenceSyncs)),
+      mSyncs(AllocateOrGetSharedResourceManager(shareContextState, &ContextState::mSyncs)),
       mPaths(AllocateOrGetSharedResourceManager(shareContextState, &ContextState::mPaths)),
-      mFramebuffers(new FramebufferManager())
+      mFramebuffers(new FramebufferManager()),
+      mPipelines(new ProgramPipelineManager())
 {
 }
 
@@ -98,9 +98,14 @@ ContextState::~ContextState()
     // Handles are released by the Context.
 }
 
+bool ContextState::isWebGL() const
+{
+    return mExtensions.webglCompatibility;
+}
+
 bool ContextState::isWebGL1() const
 {
-    return (mExtensions.webglCompatibility && mClientVersion.major == 2);
+    return (isWebGL() && mClientVersion.major == 2);
 }
 
 const TextureCaps &ContextState::getTextureCap(GLenum internalFormat) const
@@ -131,6 +136,10 @@ ValidationContext::ValidationContext(const ValidationContext *shareContext,
 {
 }
 
+ValidationContext::~ValidationContext()
+{
+}
+
 bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsigned int *numParams)
 {
     // Please note: the query type returned for DEPTH_CLEAR_VALUE in this implementation
@@ -146,12 +155,6 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
         {
             *type      = GL_INT;
             *numParams = static_cast<unsigned int>(getCaps().compressedTextureFormats.size());
-            return true;
-        }
-        case GL_PROGRAM_BINARY_FORMATS_OES:
-        {
-            *type      = GL_INT;
-            *numParams = static_cast<unsigned int>(getCaps().programBinaryFormats.size());
             return true;
         }
         case GL_SHADER_BINARY_FORMATS:
@@ -172,13 +175,10 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
         case GL_NUM_SHADER_BINARY_FORMATS:
         case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
         case GL_ARRAY_BUFFER_BINDING:
-        // case GL_FRAMEBUFFER_BINDING: // equivalent to DRAW_FRAMEBUFFER_BINDING_ANGLE
-        case GL_DRAW_FRAMEBUFFER_BINDING_ANGLE:
-        case GL_READ_FRAMEBUFFER_BINDING_ANGLE:
+        case GL_FRAMEBUFFER_BINDING:
         case GL_RENDERBUFFER_BINDING:
         case GL_CURRENT_PROGRAM:
         case GL_PACK_ALIGNMENT:
-        case GL_PACK_REVERSE_ROW_ORDER_ANGLE:
         case GL_UNPACK_ALIGNMENT:
         case GL_GENERATE_MIPMAP_HINT:
         case GL_RED_BITS:
@@ -223,8 +223,28 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
         case GL_TEXTURE_BINDING_2D:
         case GL_TEXTURE_BINDING_CUBE_MAP:
         case GL_RESET_NOTIFICATION_STRATEGY_EXT:
-        case GL_NUM_PROGRAM_BINARY_FORMATS_OES:
         {
+            *type      = GL_INT;
+            *numParams = 1;
+            return true;
+        }
+        case GL_PACK_REVERSE_ROW_ORDER_ANGLE:
+        {
+            if (!getExtensions().packReverseRowOrder)
+            {
+                return false;
+            }
+            *type      = GL_INT;
+            *numParams = 1;
+            return true;
+        }
+        case GL_MAX_RECTANGLE_TEXTURE_SIZE_ANGLE:
+        case GL_TEXTURE_BINDING_RECTANGLE_ANGLE:
+        {
+            if (!getExtensions().textureRectangle)
+            {
+                return false;
+            }
             *type      = GL_INT;
             *numParams = 1;
             return true;
@@ -426,7 +446,7 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
     }
 
     if (getExtensions().robustResourceInitialization &&
-        pname == GL_CONTEXT_ROBUST_RESOURCE_INITIALIZATION_ANGLE)
+        pname == GL_ROBUST_RESOURCE_INITIALIZATION_ANGLE)
     {
         *type      = GL_BOOL;
         *numParams = 1;
@@ -443,6 +463,34 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
     // Check for ES3.0+ parameter names which are also exposed as ES2 extensions
     switch (pname)
     {
+        // case GL_DRAW_FRAMEBUFFER_BINDING_ANGLE  // equivalent to FRAMEBUFFER_BINDING
+        case GL_READ_FRAMEBUFFER_BINDING_ANGLE:
+            if ((getClientMajorVersion() < 3) && !getExtensions().framebufferBlit)
+            {
+                return false;
+            }
+            *type      = GL_INT;
+            *numParams = 1;
+            return true;
+
+        case GL_NUM_PROGRAM_BINARY_FORMATS_OES:
+            if ((getClientMajorVersion() < 3) && !getExtensions().getProgramBinary)
+            {
+                return false;
+            }
+            *type      = GL_INT;
+            *numParams = 1;
+            return true;
+
+        case GL_PROGRAM_BINARY_FORMATS_OES:
+            if ((getClientMajorVersion() < 3) && !getExtensions().getProgramBinary)
+            {
+                return false;
+            }
+            *type      = GL_INT;
+            *numParams = static_cast<unsigned int>(getCaps().programBinaryFormats.size());
+            return true;
+
         case GL_PACK_ROW_LENGTH:
         case GL_PACK_SKIP_ROWS:
         case GL_PACK_SKIP_PIXELS:
@@ -617,6 +665,7 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
     {
         case GL_ATOMIC_COUNTER_BUFFER_BINDING:
         case GL_DRAW_INDIRECT_BUFFER_BINDING:
+        case GL_DISPATCH_INDIRECT_BUFFER_BINDING:
         case GL_MAX_FRAMEBUFFER_WIDTH:
         case GL_MAX_FRAMEBUFFER_HEIGHT:
         case GL_MAX_FRAMEBUFFER_SAMPLES:
@@ -667,6 +716,35 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
             *type      = GL_INT_64_ANGLEX;
             *numParams = 1;
             return true;
+        case GL_SAMPLE_MASK:
+            *type      = GL_BOOL;
+            *numParams = 1;
+            return true;
+    }
+
+    if (getExtensions().geometryShader)
+    {
+        switch (pname)
+        {
+            case GL_MAX_FRAMEBUFFER_LAYERS_EXT:
+            case GL_LAYER_PROVOKING_VERTEX_EXT:
+            case GL_MAX_GEOMETRY_UNIFORM_COMPONENTS_EXT:
+            case GL_MAX_GEOMETRY_UNIFORM_BLOCKS_EXT:
+            case GL_MAX_COMBINED_GEOMETRY_UNIFORM_COMPONENTS_EXT:
+            case GL_MAX_GEOMETRY_INPUT_COMPONENTS_EXT:
+            case GL_MAX_GEOMETRY_OUTPUT_COMPONENTS_EXT:
+            case GL_MAX_GEOMETRY_OUTPUT_VERTICES_EXT:
+            case GL_MAX_GEOMETRY_TOTAL_OUTPUT_COMPONENTS_EXT:
+            case GL_MAX_GEOMETRY_SHADER_INVOCATIONS_EXT:
+            case GL_MAX_GEOMETRY_TEXTURE_IMAGE_UNITS_EXT:
+            case GL_MAX_GEOMETRY_ATOMIC_COUNTER_BUFFERS_EXT:
+            case GL_MAX_GEOMETRY_ATOMIC_COUNTERS_EXT:
+            case GL_MAX_GEOMETRY_IMAGE_UNIFORMS_EXT:
+            case GL_MAX_GEOMETRY_SHADER_STORAGE_BLOCKS_EXT:
+                *type      = GL_INT;
+                *numParams = 1;
+                return true;
+        }
     }
 
     return false;
@@ -708,6 +786,12 @@ bool ValidationContext::getIndexedQueryParameterInfo(GLenum target,
 
     switch (target)
     {
+        case GL_IMAGE_BINDING_LAYERED:
+        {
+            *type      = GL_BOOL;
+            *numParams = 1;
+            return true;
+        }
         case GL_MAX_COMPUTE_WORK_GROUP_COUNT:
         case GL_MAX_COMPUTE_WORK_GROUP_SIZE:
         case GL_ATOMIC_COUNTER_BUFFER_BINDING:
@@ -716,6 +800,12 @@ bool ValidationContext::getIndexedQueryParameterInfo(GLenum target,
         case GL_VERTEX_BINDING_DIVISOR:
         case GL_VERTEX_BINDING_OFFSET:
         case GL_VERTEX_BINDING_STRIDE:
+        case GL_SAMPLE_MASK_VALUE:
+        case GL_IMAGE_BINDING_NAME:
+        case GL_IMAGE_BINDING_LEVEL:
+        case GL_IMAGE_BINDING_LAYER:
+        case GL_IMAGE_BINDING_ACCESS:
+        case GL_IMAGE_BINDING_FORMAT:
         {
             *type      = GL_INT;
             *numParams = 1;
@@ -763,6 +853,11 @@ bool ValidationContext::isRenderbufferGenerated(GLuint renderbuffer) const
 bool ValidationContext::isFramebufferGenerated(GLuint framebuffer) const
 {
     return mState.mFramebuffers->isHandleGenerated(framebuffer);
+}
+
+bool ValidationContext::isProgramPipelineGenerated(GLuint pipeline) const
+{
+    return mState.mPipelines->isHandleGenerated(pipeline);
 }
 
 bool ValidationContext::usingDisplayTextureShareGroup() const

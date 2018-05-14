@@ -10,7 +10,6 @@
 
 #include "base/macros.h"
 #include "components/sync/base/cryptographer.h"
-#include "components/sync/protocol/attachments.pb.h"
 #include "components/sync/protocol/password_specifics.pb.h"
 #include "components/sync/protocol/sync.pb.h"
 
@@ -56,7 +55,7 @@ void SyncAPINameToServerName(const std::string& syncer_name, std::string* out) {
 // server-illegal name followed by one or more spaces, remove the trailing
 // space.
 void ServerNameToSyncAPIName(const std::string& server_name, std::string* out) {
-  CHECK(out);
+  DCHECK(out);
   int length_to_copy = server_name.length();
   if (IsNameServerIllegalAfterTrimming(server_name) &&
       EndsWithSpace(server_name)) {
@@ -104,14 +103,6 @@ bool AreSpecificsEqual(const Cryptographer* cryptographer,
     right_plaintext = right.SerializeAsString();
   }
   if (left_plaintext == right_plaintext) {
-    return true;
-  }
-  return false;
-}
-
-bool AreAttachmentMetadataEqual(const sync_pb::AttachmentMetadata& left,
-                                const sync_pb::AttachmentMetadata& right) {
-  if (left.SerializeAsString() == right.SerializeAsString()) {
     return true;
   }
   return false;

@@ -19,9 +19,9 @@
 namespace {
 
 // Functions for enabling policies.
-typedef BOOL (WINAPI *SetProcessDEPPolicyFunction)(DWORD dwFlags);
+typedef BOOL(WINAPI* SetProcessDEPPolicyFunction)(DWORD dwFlags);
 
-typedef BOOL (WINAPI *SetProcessMitigationPolicyFunction)(
+typedef BOOL(WINAPI* SetProcessMitigationPolicyFunction)(
     PROCESS_MITIGATION_POLICY mitigation_policy,
     PVOID buffer,
     SIZE_T length);
@@ -59,17 +59,17 @@ bool ApplyProcessMitigationsToCurrentProcess(MitigationFlags flags) {
 
   // Set the heap to terminate on corruption
   if (flags & MITIGATION_HEAP_TERMINATE) {
-    if (!::HeapSetInformation(NULL, HeapEnableTerminationOnCorruption,
-                              NULL, 0) &&
+    if (!::HeapSetInformation(nullptr, HeapEnableTerminationOnCorruption,
+                              nullptr, 0) &&
         ERROR_ACCESS_DENIED != ::GetLastError()) {
       return false;
     }
   }
 
   if (flags & MITIGATION_HARDEN_TOKEN_IL_POLICY) {
-      DWORD error = HardenProcessIntegrityLevelPolicy();
-      if ((error != ERROR_SUCCESS) && (error != ERROR_ACCESS_DENIED))
-        return false;
+    DWORD error = HardenProcessIntegrityLevelPolicy();
+    if ((error != ERROR_SUCCESS) && (error != ERROR_ACCESS_DENIED))
+      return false;
   }
 
 #if !defined(_WIN64)  // DEP is always enabled on 64-bit.
@@ -84,7 +84,7 @@ bool ApplyProcessMitigationsToCurrentProcess(MitigationFlags flags) {
             ::GetProcAddress(module, "SetProcessDEPPolicy"));
     if (set_process_dep_policy) {
       if (!set_process_dep_policy(dep_flags) &&
-        ERROR_ACCESS_DENIED != ::GetLastError()) {
+          ERROR_ACCESS_DENIED != ::GetLastError()) {
         return false;
       }
     } else
@@ -106,8 +106,8 @@ bool ApplyProcessMitigationsToCurrentProcess(MitigationFlags flags) {
   if (flags & MITIGATION_RELOCATE_IMAGE) {
     PROCESS_MITIGATION_ASLR_POLICY policy = {};
     policy.EnableForceRelocateImages = true;
-    policy.DisallowStrippedImages = (flags &
-        MITIGATION_RELOCATE_IMAGE_REQUIRED) ==
+    policy.DisallowStrippedImages =
+        (flags & MITIGATION_RELOCATE_IMAGE_REQUIRED) ==
         MITIGATION_RELOCATE_IMAGE_REQUIRED;
 
     if (!set_process_mitigation_policy(ProcessASLRPolicy, &policy,
@@ -256,7 +256,7 @@ bool ApplyMitigationsToCurrentThread(MitigationFlags flags) {
     SetThreadInformationFunction set_thread_info_function =
         reinterpret_cast<SetThreadInformationFunction>(
             dll.GetFunctionPointer("SetThreadInformation"));
-    if (set_thread_info_function == nullptr)
+    if (!set_thread_info_function)
       return false;
 
     // NOTE: Must use the pseudo-handle here, a thread HANDLE won't work.
@@ -287,7 +287,7 @@ void ConvertProcessMitigationsToPolicy(MitigationFlags flags,
 #error This platform is not supported.
 #endif
 
-  // DEP and SEHOP are not valid for 64-bit Windows
+// DEP and SEHOP are not valid for 64-bit Windows
 #if !defined(_WIN64)
   if (flags & MITIGATION_DEP) {
     *policy_flags |= PROCESS_CREATION_MITIGATION_POLICY_DEP_ENABLE;
@@ -396,14 +396,12 @@ MitigationFlags FilterPostStartupProcessMitigations(MitigationFlags flags) {
 
   // Windows 7.
   if (version < base::win::VERSION_WIN8) {
-    return flags & (MITIGATION_BOTTOM_UP_ASLR |
-                    MITIGATION_DLL_SEARCH_ORDER |
+    return flags & (MITIGATION_BOTTOM_UP_ASLR | MITIGATION_DLL_SEARCH_ORDER |
                     MITIGATION_HEAP_TERMINATE);
   }
 
   // Windows 8 and above.
-  return flags & (MITIGATION_BOTTOM_UP_ASLR |
-                  MITIGATION_DLL_SEARCH_ORDER);
+  return flags & (MITIGATION_BOTTOM_UP_ASLR | MITIGATION_DLL_SEARCH_ORDER);
 }
 
 bool ApplyProcessMitigationsToSuspendedProcess(HANDLE process,
@@ -433,26 +431,28 @@ bool ApplyProcessMitigationsToSuspendedProcess(HANDLE process,
   return true;
 }
 
+MitigationFlags GetAllowedPostStartupProcessMitigations() {
+  return MITIGATION_HEAP_TERMINATE | MITIGATION_DEP |
+         MITIGATION_DEP_NO_ATL_THUNK | MITIGATION_RELOCATE_IMAGE |
+         MITIGATION_RELOCATE_IMAGE_REQUIRED | MITIGATION_BOTTOM_UP_ASLR |
+         MITIGATION_STRICT_HANDLE_CHECKS | MITIGATION_EXTENSION_POINT_DISABLE |
+         MITIGATION_DLL_SEARCH_ORDER | MITIGATION_HARDEN_TOKEN_IL_POLICY |
+         MITIGATION_WIN32K_DISABLE | MITIGATION_DYNAMIC_CODE_DISABLE |
+         MITIGATION_DYNAMIC_CODE_DISABLE_WITH_OPT_OUT |
+         MITIGATION_FORCE_MS_SIGNED_BINS | MITIGATION_NONSYSTEM_FONT_DISABLE |
+         MITIGATION_IMAGE_LOAD_NO_REMOTE | MITIGATION_IMAGE_LOAD_NO_LOW_LABEL |
+         MITIGATION_IMAGE_LOAD_PREFER_SYS32;
+}
+
 bool CanSetProcessMitigationsPostStartup(MitigationFlags flags) {
   // All of these mitigations can be enabled after startup.
-  return !(
-      flags &
-      ~(MITIGATION_HEAP_TERMINATE | MITIGATION_DEP |
-        MITIGATION_DEP_NO_ATL_THUNK | MITIGATION_RELOCATE_IMAGE |
-        MITIGATION_RELOCATE_IMAGE_REQUIRED | MITIGATION_BOTTOM_UP_ASLR |
-        MITIGATION_STRICT_HANDLE_CHECKS | MITIGATION_EXTENSION_POINT_DISABLE |
-        MITIGATION_DLL_SEARCH_ORDER | MITIGATION_HARDEN_TOKEN_IL_POLICY |
-        MITIGATION_WIN32K_DISABLE | MITIGATION_DYNAMIC_CODE_DISABLE |
-        MITIGATION_DYNAMIC_CODE_DISABLE_WITH_OPT_OUT |
-        MITIGATION_FORCE_MS_SIGNED_BINS | MITIGATION_NONSYSTEM_FONT_DISABLE |
-        MITIGATION_IMAGE_LOAD_NO_REMOTE | MITIGATION_IMAGE_LOAD_NO_LOW_LABEL |
-        MITIGATION_IMAGE_LOAD_PREFER_SYS32));
+  return !(flags & ~GetAllowedPostStartupProcessMitigations());
 }
 
 bool CanSetProcessMitigationsPreStartup(MitigationFlags flags) {
   // These mitigations cannot be enabled prior to startup.
-  return !(flags & (MITIGATION_STRICT_HANDLE_CHECKS |
-                    MITIGATION_DLL_SEARCH_ORDER));
+  return !(flags &
+           (MITIGATION_STRICT_HANDLE_CHECKS | MITIGATION_DLL_SEARCH_ORDER));
 }
 
 bool CanSetMitigationsPerThread(MitigationFlags flags) {
@@ -464,4 +464,3 @@ bool CanSetMitigationsPerThread(MitigationFlags flags) {
 }
 
 }  // namespace sandbox
-

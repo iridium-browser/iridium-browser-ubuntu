@@ -16,8 +16,6 @@ from telemetry import story
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
 
-from metrics import power
-
 
 DESCRIPTIONS = {
     'ai-astar':
@@ -75,24 +73,12 @@ class _KrakenMeasurement(legacy_page_test.LegacyPageTest):
 
   def __init__(self):
     super(_KrakenMeasurement, self).__init__()
-    self._power_metric = None
 
-  def CustomizeBrowserOptions(self, options):
-    power.PowerMetric.CustomizeBrowserOptions(options)
-
-  def WillStartBrowser(self, platform):
-    self._power_metric = power.PowerMetric(platform)
-
-  def DidNavigateToPage(self, page, tab):
-    self._power_metric.Start(page, tab)
 
   def ValidateAndMeasurePage(self, page, tab, results):
     tab.WaitForJavaScriptCondition(
         'document.title.indexOf("Results") != -1', timeout=700)
     tab.WaitForDocumentReadyStateToBeComplete()
-
-    self._power_metric.Stop(page, tab)
-    self._power_metric.AddResults(tab, results)
 
     result_dict = json.loads(tab.EvaluateJavaScript("""
         var formElement = document.getElementsByTagName("input")[0];
@@ -116,7 +102,7 @@ class _KrakenMeasurement(legacy_page_test.LegacyPageTest):
                     '(http://krakenbenchmark.mozilla.org/)'))
 
 
-@benchmark.Owner(emails=['bmeurer@chromium.org', 'mvstanton@chromium.org'])
+@benchmark.Owner(emails=['hablich@chromium.org'])
 class Kraken(perf_benchmark.PerfBenchmark):
   """Mozilla's Kraken JavaScript benchmark.
 
@@ -138,11 +124,3 @@ class Kraken(perf_benchmark.PerfBenchmark):
         ps, ps.base_dir,
         name='http://krakenbenchmark.mozilla.org/kraken-1.1/driver.html'))
     return ps
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        self.DisableStory(
-            'http://krakenbenchmark.mozilla.org/kraken-1.1/driver.html',
-            [story.expectations.ANDROID_SVELTE], 'crbug.com/624411')
-    return StoryExpectations()

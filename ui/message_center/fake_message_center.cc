@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "ui/message_center/fake_message_center.h"
+#include "base/strings/string_util.h"
 #include "ui/message_center/notification_list.h"
 
 namespace message_center {
@@ -30,10 +31,6 @@ size_t FakeMessageCenter::NotificationCount() const {
   return 0u;
 }
 
-size_t FakeMessageCenter::UnreadNotificationCount() const {
-  return 0u;
-}
-
 bool FakeMessageCenter::HasPopupNotifications() const {
   return false;
 }
@@ -42,17 +39,13 @@ bool FakeMessageCenter::IsQuietMode() const {
   return false;
 }
 
-bool FakeMessageCenter::IsLockedState() const {
-  return false;
-}
-
-bool FakeMessageCenter::HasClickedListener(const std::string& id) {
-  return false;
-}
-
-message_center::Notification* FakeMessageCenter::FindVisibleNotificationById(
+Notification* FakeMessageCenter::FindVisibleNotificationById(
     const std::string& id) {
-  return NULL;
+  for (auto* notification : GetVisibleNotifications()) {
+    if (id == notification->id())
+      return notification;
+  }
+  return nullptr;
 }
 
 const NotificationList::Notifications&
@@ -76,6 +69,9 @@ void FakeMessageCenter::RemoveNotification(const std::string& id,
                                            bool by_user) {
 }
 
+void FakeMessageCenter::RemoveNotificationsForNotifierId(
+    const NotifierId& notifier_id) {}
+
 void FakeMessageCenter::RemoveAllNotifications(bool by_user, RemoveType type) {}
 
 void FakeMessageCenter::SetNotificationIcon(const std::string& notification_id,
@@ -92,10 +88,6 @@ void FakeMessageCenter::SetNotificationButtonIcon(
     const gfx::Image& image) {
 }
 
-void FakeMessageCenter::DisableNotificationsByNotifier(
-    const NotifierId& notifier_id) {
-}
-
 void FakeMessageCenter::ClickOnNotification(const std::string& id) {
 }
 
@@ -103,29 +95,23 @@ void FakeMessageCenter::ClickOnNotificationButton(const std::string& id,
                                                   int button_index) {
 }
 
+void FakeMessageCenter::ClickOnNotificationButtonWithReply(
+    const std::string& id,
+    int button_index,
+    const base::string16& reply) {}
+
 void FakeMessageCenter::ClickOnSettingsButton(const std::string& id) {}
+
+void FakeMessageCenter::DisableNotification(const std::string& id) {}
 
 void FakeMessageCenter::MarkSinglePopupAsShown(const std::string& id,
                                                bool mark_notification_as_read) {
 }
 
-void FakeMessageCenter::DisplayedNotification(
-    const std::string& id,
-    const DisplaySource source) {
-}
+void FakeMessageCenter::DisplayedNotification(const std::string& id,
+                                              const DisplaySource source) {}
 
-void FakeMessageCenter::SetNotifierSettingsProvider(
-    NotifierSettingsProvider* provider) {
-}
-
-NotifierSettingsProvider* FakeMessageCenter::GetNotifierSettingsProvider() {
-  return NULL;
-}
-
-void FakeMessageCenter::SetQuietMode(bool in_quiet_mode) {
-}
-
-void FakeMessageCenter::SetLockedState(bool locked) {}
+void FakeMessageCenter::SetQuietMode(bool in_quiet_mode) {}
 
 void FakeMessageCenter::EnterQuietModeWithExpire(
     const base::TimeDelta& expires_in) {
@@ -142,8 +128,13 @@ void FakeMessageCenter::RestartPopupTimers() {}
 
 void FakeMessageCenter::PausePopupTimers() {}
 
-void FakeMessageCenter::DisableTimersForTest() {}
+const base::string16& FakeMessageCenter::GetSystemNotificationAppName() const {
+  return base::EmptyString16();
+}
 
-void FakeMessageCenter::EnableChangeQueueForTest(bool enabled) {}
+void FakeMessageCenter::SetSystemNotificationAppName(
+    const base::string16& product_os_name) {}
+
+void FakeMessageCenter::DisableTimersForTest() {}
 
 }  // namespace message_center

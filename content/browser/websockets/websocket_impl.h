@@ -17,29 +17,25 @@
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/WebKit/public/platform/modules/websockets/websocket.mojom.h"
+#include "url/origin.h"
 
 class GURL;
 
-namespace url {
-class Origin;
-}  // namespace url
-
 namespace net {
+class URLRequestContext;
 class WebSocketChannel;
 }  // namespace net
 
 namespace content {
-class StoragePartition;
 
 // Host of net::WebSocketChannel.
-class CONTENT_EXPORT WebSocketImpl
-    : NON_EXPORTED_BASE(public blink::mojom::WebSocket) {
+class CONTENT_EXPORT WebSocketImpl : public blink::mojom::WebSocket {
  public:
   class Delegate {
    public:
     virtual ~Delegate() {}
     virtual int GetClientProcessId() = 0;
-    virtual StoragePartition* GetStoragePartition() = 0;
+    virtual net::URLRequestContext* GetURLRequestContext() = 0;
     virtual void OnReceivedResponseFromServer(WebSocketImpl* impl) = 0;
     virtual void OnLostConnectionToClient(WebSocketImpl* impl) = 0;
   };
@@ -48,6 +44,7 @@ class CONTENT_EXPORT WebSocketImpl
                 blink::mojom::WebSocketRequest request,
                 int child_id,
                 int frame_id,
+                url::Origin origin,
                 base::TimeDelta delay);
   ~WebSocketImpl() override;
 
@@ -58,8 +55,7 @@ class CONTENT_EXPORT WebSocketImpl
   // blink::mojom::WebSocket methods:
   void AddChannelRequest(const GURL& url,
                          const std::vector<std::string>& requested_protocols,
-                         const url::Origin& origin,
-                         const GURL& first_party_for_cookies,
+                         const GURL& site_for_cookies,
                          const std::string& user_agent_override,
                          blink::mojom::WebSocketClientPtr client) override;
   void SendFrame(bool fin,
@@ -77,8 +73,7 @@ class CONTENT_EXPORT WebSocketImpl
   void OnConnectionError();
   void AddChannel(const GURL& socket_url,
                   const std::vector<std::string>& requested_protocols,
-                  const url::Origin& origin,
-                  const GURL& first_party_for_cookies,
+                  const GURL& site_for_cookies,
                   const std::string& user_agent_override);
 
   Delegate* delegate_;
@@ -99,6 +94,9 @@ class CONTENT_EXPORT WebSocketImpl
 
   int child_id_;
   int frame_id_;
+
+  // The web origin to use for the WebSocket.
+  const url::Origin origin_;
 
   // handshake_succeeded_ is set and used by WebSocketManager to manage
   // counters for per-renderer WebSocket throttling.

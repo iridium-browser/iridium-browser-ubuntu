@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <map>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -15,16 +16,45 @@
 #include "tools/gn/parse_tree.h"
 #include "tools/gn/parser.h"
 #include "tools/gn/scheduler.h"
+#include "tools/gn/test_with_scheduler.h"
 #include "tools/gn/tokenizer.h"
 
 namespace {
+
+bool ItemContainsBuildDependencyFile(const Item* item,
+                                     const SourceFile& source_file) {
+  const auto& build_dependency_files = item->build_dependency_files();
+  return build_dependency_files.end() !=
+         build_dependency_files.find(source_file);
+}
+
+class MockBuilder {
+ public:
+  void OnItemDefined(std::unique_ptr<Item> item);
+  std::vector<const Item*> GetAllItems() const;
+
+ private:
+  std::vector<std::unique_ptr<Item>> items_;
+};
+
+void MockBuilder::OnItemDefined(std::unique_ptr<Item> item) {
+  items_.push_back(std::move(item));
+}
+
+std::vector<const Item*> MockBuilder::GetAllItems() const {
+  std::vector<const Item*> result;
+  for (const auto& item : items_) {
+    result.push_back(item.get());
+  }
+
+  return result;
+}
 
 class MockInputFileManager {
  public:
   typedef base::Callback<void(const ParseNode*)> Callback;
 
-  MockInputFileManager() {
-  }
+  MockInputFileManager() = default;
 
   LoaderImpl::AsyncLoadFileCallback GetCallback();
 
@@ -68,8 +98,8 @@ LoaderImpl::AsyncLoadFileCallback MockInputFileManager::GetCallback() {
 // Sets a given response for a given source file.
 void MockInputFileManager::AddCannedResponse(const SourceFile& source_file,
                                              const std::string& source) {
-  std::unique_ptr<CannedResult> canned(new CannedResult);
-  canned->input_file.reset(new InputFile(source_file));
+  std::unique_ptr<CannedResult> canned = std::make_unique<CannedResult>();
+  canned->input_file = std::make_unique<InputFile>(source_file);
   canned->input_file->SetContents(source);
 
   // Tokenize.
@@ -108,55 +138,18 @@ void MockInputFileManager::IssueAllPending() {
   pending_.clear();
 }
 
-class MockBuilder {
- public:
-  void OnItemDefined(std::unique_ptr<Item> item);
-
-  bool HasOneDefined(std::set<std::string> source_files) const;
-  void Cleanup();
-
- private:
-  std::vector<std::unique_ptr<Item>> items_;
-};
-
-void MockBuilder::OnItemDefined(std::unique_ptr<Item> item) {
-  items_.push_back(std::move(item));
-}
-
-bool MockBuilder::HasOneDefined(std::set<std::string> source_files) const {
-  if (items_.size() != 1u)
-    return false;
-
-  const auto& input_files = items_[0]->input_files();
-  for (const InputFile* input_file : input_files) {
-    auto found_source_file = source_files.find(input_file->name().value());
-    if (found_source_file == source_files.end())
-      return false;
-
-    source_files.erase(found_source_file);
-  }
-
-  return source_files.empty();
-};
-
-void MockBuilder::Cleanup() {
-  items_.clear();
-}
-
 // LoaderTest ------------------------------------------------------------------
 
-class LoaderTest : public testing::Test {
+class LoaderTest : public TestWithScheduler {
  public:
   LoaderTest() {
     build_settings_.SetBuildDir(SourceDir("//out/Debug/"));
   }
 
  protected:
-  Scheduler scheduler_;
   BuildSettings build_settings_;
   MockBuilder mock_builder_;
   MockInputFileManager mock_ifm_;
-  std::vector<std::unique_ptr<Item>> items_;
 };
 
 }  // namespace
@@ -204,7 +197,7 @@ TEST_F(LoaderTest, Foo) {
   // We have to tell it we have a toolchain definition now (normally the
   // builder would do this).
   const Settings* default_settings = loader->GetToolchainSettings(Label());
-  Toolchain second_tc_object(default_settings, second_tc, {});
+  Toolchain second_tc_object(default_settings, second_tc);
   loader->ToolchainLoaded(&second_tc_object);
   EXPECT_TRUE(mock_ifm_.HasOnePending(build_config));
 
@@ -219,23 +212,26 @@ TEST_F(LoaderTest, Foo) {
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(mock_ifm_.HasTwoPending(second_file, third_file));
 
-  EXPECT_FALSE(scheduler_.is_failed());
+  EXPECT_FALSE(scheduler().is_failed());
 }
 
-TEST_F(LoaderTest, SourceFilesAreCollected) {
+TEST_F(LoaderTest, BuildDependencyFilesAreCollected) {
   SourceFile build_config("//build/config/BUILDCONFIG.gn");
   SourceFile root_build("//BUILD.gn");
   build_settings_.set_build_config_file(build_config);
-
   build_settings_.set_item_defined_callback(base::Bind(
       &MockBuilder::OnItemDefined, base::Unretained(&mock_builder_)));
 
   scoped_refptr<LoaderImpl> loader(new LoaderImpl(&build_settings_));
-
   mock_ifm_.AddCannedResponse(build_config,
                               "set_default_toolchain(\"//tc:tc\")");
-  mock_ifm_.AddCannedResponse(root_build,
-                              "executable(\"a\") { sources = [ \"a.cc\" ] }");
+  mock_ifm_.AddCannedResponse(SourceFile("//test.gni"), "concurrent_jobs = 1");
+  std::string root_build_content =
+      "executable(\"a\") { sources = [ \"a.cc\" ] }\n"
+      "config(\"b\") { configs = [\"//t:t\"] }\n"
+      "toolchain(\"c\") {}\n"
+      "pool(\"d\") { depth = 1 }";
+  mock_ifm_.AddCannedResponse(root_build, root_build_content);
 
   loader->set_async_load_file(mock_ifm_.GetCallback());
 
@@ -253,7 +249,16 @@ TEST_F(LoaderTest, SourceFilesAreCollected) {
   // set of source files hashes.
   mock_ifm_.IssueAllPending();
   base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(mock_builder_.HasOneDefined({"//BUILD.gn"}));
 
-  EXPECT_FALSE(scheduler_.is_failed());
+  std::vector<const Item*> items = mock_builder_.GetAllItems();
+  EXPECT_TRUE(items[0]->AsTarget());
+  EXPECT_TRUE(ItemContainsBuildDependencyFile(items[0], root_build));
+  EXPECT_TRUE(items[1]->AsConfig());
+  EXPECT_TRUE(ItemContainsBuildDependencyFile(items[1], root_build));
+  EXPECT_TRUE(items[2]->AsToolchain());
+  EXPECT_TRUE(ItemContainsBuildDependencyFile(items[2], root_build));
+  EXPECT_TRUE(items[3]->AsPool());
+  EXPECT_TRUE(ItemContainsBuildDependencyFile(items[3], root_build));
+
+  EXPECT_FALSE(scheduler().is_failed());
 }

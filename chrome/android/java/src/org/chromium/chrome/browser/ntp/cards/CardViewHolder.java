@@ -125,7 +125,7 @@ public abstract class CardViewHolder
         // lateral shadow of the card 9-patch and avoid a rounded corner effect.
         int cardCornerRadius = resources.getDimensionPixelSize(R.dimen.card_corner_radius);
         assert mCardShadow.left == mCardShadow.right;
-        if (SuggestionsConfig.useModern()) {
+        if (SuggestionsConfig.useModernLayout()) {
             mDefaultLateralMargin =
                     resources.getDimensionPixelSize(R.dimen.content_suggestions_card_modern_margin);
         } else {
@@ -175,7 +175,7 @@ public abstract class CardViewHolder
      * with data.
      */
     @CallSuper
-    protected void onBindViewHolder() {
+    public void onBindViewHolder() {
         // Reset the transparency and translation in case a dismissed card is being recycled.
         itemView.setAlpha(1f);
         itemView.setTranslationX(0f);
@@ -215,7 +215,7 @@ public abstract class CardViewHolder
         if (getAdapterPosition() == RecyclerView.NO_POSITION) return;
 
         // Nothing to do for the modern layout.
-        if (SuggestionsConfig.useModern()) return;
+        if (SuggestionsConfig.useModernLayout()) return;
 
         NewTabPageAdapter adapter = mRecyclerView.getNewTabPageAdapter();
 
@@ -244,8 +244,10 @@ public abstract class CardViewHolder
         // height of their shadows. We want |mCardGap| instead, so we set the bottom margin to
         // the difference.
         // noinspection ResourceType
-        getParams().bottomMargin =
+        RecyclerView.LayoutParams layoutParams = getParams();
+        layoutParams.bottomMargin =
                 hasCardBelow ? (mCardGap - (mCardShadow.top + mCardShadow.bottom)) : 0;
+        itemView.setLayoutParams(layoutParams);
     }
 
     /**
@@ -324,7 +326,7 @@ public abstract class CardViewHolder
             case ItemViewType.PROMO:
                 return true;
             case ItemViewType.ABOVE_THE_FOLD:
-            case ItemViewType.TILE_GRID:
+            case ItemViewType.SITE_SECTION:
             case ItemViewType.HEADER:
             case ItemViewType.SPACING:
             case ItemViewType.PROGRESS:

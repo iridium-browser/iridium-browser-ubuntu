@@ -36,16 +36,13 @@ class JobsTest(unittest.TestCase):
   def testPost_ValidRequest(self):
     # Create job.
     job = job_module.Job.New(
-        configuration='Mac',
-        test_suite='suite',
-        test='filter',
-        metric='metric',
-        auto_explore=True,
-        bug_id=None)
+        arguments={},
+        quests=(),
+        auto_explore=True)
     job.put()
 
-    data = json.loads(self.testapp.post('/jobs').body)
+    data = json.loads(self.testapp.get('/jobs?o=STATE').body)
 
-    self.assertEqual(1, data['jobs_count'])
-    self.assertEqual(1, len(data['jobs_list']))
-    self.assertEqual(job.AsDict(), data['jobs_list'][0])
+    self.assertEqual(1, data['count'])
+    self.assertEqual(1, len(data['jobs']))
+    self.assertEqual(job.AsDict([job_module.OPTION_STATE]), data['jobs'][0])

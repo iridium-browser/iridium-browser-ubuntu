@@ -10,8 +10,12 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
+#include "base/process/process_handle.h"
+#include "base/sequence_checker.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
 #include "components/ukm/ukm_source.h"
+#include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 
 namespace content {
 class BrowserContext;
@@ -27,17 +31,6 @@ namespace internal {
 // Various UMA histogram names for DataReductionProxy core page load metrics.
 extern const char kHistogramDataReductionProxyPrefix[];
 extern const char kHistogramDataReductionProxyLoFiOnPrefix[];
-extern const char kHistogramDOMContentLoadedEventFiredSuffix[];
-extern const char kHistogramFirstLayoutSuffix[];
-extern const char kHistogramLoadEventFiredSuffix[];
-extern const char kHistogramFirstContentfulPaintSuffix[];
-extern const char kHistogramFirstMeaningfulPaintSuffix[];
-extern const char kHistogramFirstImagePaintSuffix[];
-extern const char kHistogramFirstPaintSuffix[];
-extern const char kHistogramFirstTextPaintSuffix[];
-extern const char kHistogramParseStartSuffix[];
-extern const char kHistogramParseBlockedOnScriptLoadSuffix[];
-extern const char kHistogramParseDurationSuffix[];
 
 // Byte and request specific histogram suffixes.
 extern const char kResourcesPercentProxied[];
@@ -104,6 +97,7 @@ class DataReductionProxyMetricsObserver
                    const page_load_metrics::PageLoadExtraInfo& info) override;
   void OnLoadedResource(const page_load_metrics::ExtraRequestCompleteInfo&
                             extra_request_compelte_info) override;
+  void OnEventOccurred(const void* const event_key) override;
 
  private:
   // Sends the page load information to the pingback client.
@@ -117,11 +111,26 @@ class DataReductionProxyMetricsObserver
   // Gets the default DataReductionProxyPingbackClient. Overridden in testing.
   virtual DataReductionProxyPingbackClient* GetPingbackClient() const;
 
+  // Used as a callback to getting a memory dump of the related renderer
+  // process.
+  void ProcessMemoryDump(
+      bool success,
+      std::unique_ptr<memory_instrumentation::GlobalMemoryDump> memory_dump);
+
+  // Gets the memory coordinator for Chrome. Virtual for testing.
+  virtual void RequestProcessDump(
+      base::ProcessId pid,
+      memory_instrumentation::MemoryInstrumentation::RequestGlobalDumpCallback
+          callback);
+
   // Data related to this navigation.
   std::unique_ptr<DataReductionProxyData> data_;
 
   // The browser context this navigation is operating in.
   content::BrowserContext* browser_context_;
+
+  // True if a Preview opt out occurred during this page load.
+  bool opted_out_;
 
   // The number of resources that used data reduction proxy.
   int num_data_reduction_proxy_resources_;
@@ -138,6 +147,22 @@ class DataReductionProxyMetricsObserver
 
   // The total network bytes used.
   int64_t network_bytes_;
+
+  // The process ID of the main frame renderer during OnCommit.
+  base::ProcessId process_id_;
+
+  // The memory usage of the main frame renderer shortly after OnLoadEventStart.
+  // Available after ProcessMemoryDump is called. 0 before that point.
+  int64_t renderer_memory_usage_kb_;
+
+  // A unique identifier to the child process of the render frame, stored in
+  // case of a renderer crash.
+  // Set at navigation commit time.
+  int render_process_host_id_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
+
+  base::WeakPtrFactory<DataReductionProxyMetricsObserver> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyMetricsObserver);
 };

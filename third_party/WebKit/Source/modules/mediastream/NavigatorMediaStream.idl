@@ -18,10 +18,10 @@
  */
 
 // https://w3c.github.io/mediacapture-main/#navigatorusermedia-interface-extensions
-
-partial interface Navigator {
+[
+    ImplementedAs=NavigatorMediaStream
+] partial interface Navigator {
     [RaisesException,
-     RuntimeEnabled=GetUserMedia,
      MeasureAs=GetUserMediaLegacy
     ] void getUserMedia(MediaStreamConstraints constraints,
                         NavigatorUserMediaSuccessCallback successCallback,
@@ -35,3 +35,15 @@ partial interface Navigator {
                               NavigatorUserMediaSuccessCallback successCallback,
                               NavigatorUserMediaErrorCallback errorCallback);
 };
+
+// https://w3c.github.io/mediacapture-main/#navigatorusermediasuccesscallback
+callback NavigatorUserMediaSuccessCallback = void (MediaStream stream);
+
+// https://w3c.github.io/mediacapture-main/#navigatorusermediaerrorcallback
+callback NavigatorUserMediaErrorCallback = void (MediaStreamError error);
+
+// TODO(orphis): The only valid types for MediaStreamError are DOMException and
+// OverconstrainedError. The spec defines MediaStreamError as object because
+// neither DOMException nor OverconstrainedError is an IDL type in the spec.
+// Bug: http://crbug.com/737497 http://crbug.com/769726
+typedef (DOMException or OverconstrainedError) MediaStreamError;

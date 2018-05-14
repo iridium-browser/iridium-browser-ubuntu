@@ -21,6 +21,7 @@
 #include "base/strings/string16.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/threading/thread_checker.h"
+#include "base/trace_event/memory_dump_provider.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
@@ -28,6 +29,7 @@
 #include "components/omnibox/browser/scored_history_match.h"
 #include "components/search_engines/template_url_service.h"
 
+class FakeAutocompleteProviderClient;
 class HistoryQuickProviderTest;
 
 namespace base {
@@ -70,7 +72,8 @@ typedef std::set<std::string> SchemeSet;
 // multi-char16 instance.
 class InMemoryURLIndex : public KeyedService,
                          public history::HistoryServiceObserver,
-                         public base::SupportsWeakPtr<InMemoryURLIndex> {
+                         public base::SupportsWeakPtr<InMemoryURLIndex>,
+                         public base::trace_event::MemoryDumpProvider {
  public:
   // Defines an abstract class which is notified upon completion of restoring
   // the index's private data either by reading from the cache file or by
@@ -142,6 +145,7 @@ class InMemoryURLIndex : public KeyedService,
   }
 
  private:
+  friend class ::FakeAutocompleteProviderClient;
   friend class ::HistoryQuickProviderTest;
   friend class history::HQPPerfTestOnePopularURL;
   friend class InMemoryURLIndexTest;
@@ -245,6 +249,11 @@ class InMemoryURLIndex : public KeyedService,
                      const std::set<GURL>& favicon_urls) override;
   void OnHistoryServiceLoaded(
       history::HistoryService* history_service) override;
+
+  // MemoryDumpProvider:
+  bool OnMemoryDump(
+      const base::trace_event::MemoryDumpArgs& args,
+      base::trace_event::ProcessMemoryDump* process_memory_dump) override;
 
   // Sets the directory wherein the cache file will be maintained.
   // For unit test usage only.

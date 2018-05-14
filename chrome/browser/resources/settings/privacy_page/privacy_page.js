@@ -13,7 +13,12 @@
  * Must be kept in sync with the C++ enum of the same name.
  * @enum {number}
  */
-var NetworkPredictionOptions = {ALWAYS: 0, WIFI_ONLY: 1, NEVER: 2, DEFAULT: 1};
+const NetworkPredictionOptions = {
+  ALWAYS: 0,
+  WIFI_ONLY: 1,
+  NEVER: 2,
+  DEFAULT: 1,
+};
 
 Polymer({
   is: 'settings-privacy-page',
@@ -99,11 +104,36 @@ Polymer({
       }
     },
 
+    /** @private */
+    enableSoundContentSetting_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('enableSoundContentSetting');
+      }
+    },
+
+    /** @private */
+    enableClipboardContentSetting_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('enableClipboardContentSetting');
+      }
+    },
+
+    /** @private */
+    enableSensorsContentSetting_: {
+      type: Boolean,
+      readOnly: true,
+      value: function() {
+        return loadTimeData.getBoolean('enableSensorsContentSetting');
+      }
+    },
+
     /** @private {!Map<string, string>} */
     focusConfig_: {
       type: Object,
       value: function() {
-        var map = new Map();
+        const map = new Map();
         // <if expr="use_nss_certs">
         if (settings.routes.CERTIFICATES) {
           map.set(
@@ -132,12 +162,12 @@ Polymer({
     this.browserProxy_ = settings.PrivacyPageBrowserProxyImpl.getInstance();
 
     // <if expr="_google_chrome and not chromeos">
-    var setMetricsReportingPref = this.setMetricsReportingPref_.bind(this);
+    const setMetricsReportingPref = this.setMetricsReportingPref_.bind(this);
     this.addWebUIListener('metrics-reporting-change', setMetricsReportingPref);
     this.browserProxy_.getMetricsReporting().then(setMetricsReportingPref);
     // </if>
 
-    var setSber = this.setSafeBrowsingExtendedReporting_.bind(this);
+    const setSber = this.setSafeBrowsingExtendedReporting_.bind(this);
     this.addWebUIListener('safe-browsing-extended-reporting-change', setSber);
     this.browserProxy_.getSafeBrowsingExtendedReporting().then(setSber);
   },
@@ -164,7 +194,7 @@ Polymer({
    * @private
    */
   onDoNotTrackChange_: function(event) {
-    var target = /** @type {!SettingsToggleButtonElement} */ (event.target);
+    const target = /** @type {!SettingsToggleButtonElement} */ (event.target);
     if (!target.checked) {
       // Always allow disabling the pref.
       target.sendPrefChange();
@@ -178,7 +208,7 @@ Polymer({
 
   /** @private */
   maybeShowDoNotTrackDialog_: function() {
-    var dialog = this.$$('#confirmDoNotTrackDialog');
+    const dialog = this.$$('#confirmDoNotTrackDialog');
     if (dialog && !dialog.open)
       dialog.showModal();
   },
@@ -230,10 +260,15 @@ Polymer({
    * @private
    */
   onRemoveAllCookiesFromSite_: function() {
-    var node = /** @type {?SiteDataDetailsSubpageElement} */ (
+    const node = /** @type {?SiteDataDetailsSubpageElement} */ (
         this.$$('site-data-details-subpage'));
     if (node)
       node.removeAll();
+  },
+
+  /** @private */
+  onSiteDataTap_: function() {
+    settings.navigateTo(settings.routes.SITE_SETTINGS_SITE_DATA);
   },
 
   /** @private */
@@ -248,20 +283,20 @@ Polymer({
 
   /** @private */
   onDialogClosed_: function() {
-    settings.navigateToPreviousRoute();
+    settings.navigateTo(settings.routes.CLEAR_BROWSER_DATA.parent);
     cr.ui.focusWithoutInk(assert(this.$.clearBrowsingDataTrigger));
   },
 
   /** @private */
   onSberChange_: function() {
-    var enabled = this.$.safeBrowsingExtendedReportingControl.checked;
+    const enabled = this.$.safeBrowsingExtendedReportingControl.checked;
     this.browserProxy_.setSafeBrowsingExtendedReportingEnabled(enabled);
   },
 
   // <if expr="_google_chrome and not chromeos">
   /** @private */
   onMetricsReportingChange_: function() {
-    var enabled = this.$.metricsReportingControl.checked;
+    const enabled = this.$.metricsReportingControl.checked;
     this.browserProxy_.setMetricsReportingEnabled(enabled);
   },
 
@@ -270,8 +305,8 @@ Polymer({
    * @private
    */
   setMetricsReportingPref_: function(metricsReporting) {
-    var hadPreviousPref = this.metricsReportingPref_.value !== undefined;
-    var pref = {
+    const hadPreviousPref = this.metricsReportingPref_.value !== undefined;
+    const pref = {
       key: '',
       type: chrome.settingsPrivate.PrefType.BOOLEAN,
       value: metricsReporting.enabled,
@@ -303,16 +338,21 @@ Polymer({
   // </if>
 
   /**
-   * @param {boolean} enabled Whether reporting is enabled or not.
+   * @param {!SberPrefState} sberPrefState SBER enabled and managed state.
    * @private
    */
-  setSafeBrowsingExtendedReporting_: function(enabled) {
+  setSafeBrowsingExtendedReporting_: function(sberPrefState) {
     // Ignore the next change because it will happen when we set the pref.
-    this.safeBrowsingExtendedReportingPref_ = {
+    const pref = {
       key: '',
       type: chrome.settingsPrivate.PrefType.BOOLEAN,
-      value: enabled,
+      value: sberPrefState.enabled,
     };
+    if (sberPrefState.managed) {
+      pref.enforcement = chrome.settingsPrivate.Enforcement.ENFORCED;
+      pref.controlledBy = chrome.settingsPrivate.ControlledBy.USER_POLICY;
+    }
+    this.safeBrowsingExtendedReportingPref_ = pref;
   },
 
   /**

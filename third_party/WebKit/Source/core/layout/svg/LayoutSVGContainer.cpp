@@ -40,7 +40,7 @@ LayoutSVGContainer::LayoutSVGContainer(SVGElement* node)
       has_non_isolated_blending_descendants_(false),
       has_non_isolated_blending_descendants_dirty_(false) {}
 
-LayoutSVGContainer::~LayoutSVGContainer() {}
+LayoutSVGContainer::~LayoutSVGContainer() = default;
 
 void LayoutSVGContainer::UpdateLayout() {
   DCHECK(NeedsLayout());
@@ -64,7 +64,7 @@ void LayoutSVGContainer::UpdateLayout() {
 
   // Invalidate all resources of this client if our layout changed.
   if (EverHadLayout() && NeedsLayout())
-    SVGResourcesCache::ClientLayoutChanged(this);
+    SVGResourcesCache::ClientLayoutChanged(*this);
 
   if (needs_boundaries_update_ ||
       transform_change != SVGTransformChange::kNone) {
@@ -82,7 +82,7 @@ void LayoutSVGContainer::UpdateLayout() {
 void LayoutSVGContainer::AddChild(LayoutObject* child,
                                   LayoutObject* before_child) {
   LayoutSVGModelObject::AddChild(child, before_child);
-  SVGResourcesCache::ClientWasAddedToTree(child, child->StyleRef());
+  SVGResourcesCache::ClientWasAddedToTree(*child, child->StyleRef());
 
   bool should_isolate_descendants =
       (child->IsBlendingAllowed() && child->Style()->HasBlendMode()) ||
@@ -92,7 +92,7 @@ void LayoutSVGContainer::AddChild(LayoutObject* child,
 }
 
 void LayoutSVGContainer::RemoveChild(LayoutObject* child) {
-  SVGResourcesCache::ClientWillBeRemovedFromTree(child);
+  SVGResourcesCache::ClientWillBeRemovedFromTree(*child);
   LayoutSVGModelObject::RemoveChild(child);
 
   bool had_non_isolated_descendants =
@@ -178,8 +178,7 @@ void LayoutSVGContainer::UpdateCachedBoundaries() {
   SVGLayoutSupport::ComputeContainerBoundingBoxes(
       this, object_bounding_box_, object_bounding_box_valid_,
       stroke_bounding_box_, local_visual_rect_);
-  if (GetElement())
-    GetElement()->SetNeedsResizeObserverUpdate();
+  GetElement()->SetNeedsResizeObserverUpdate();
 }
 
 bool LayoutSVGContainer::NodeAtFloatPoint(HitTestResult& result,

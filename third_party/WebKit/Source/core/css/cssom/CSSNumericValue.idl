@@ -4,15 +4,24 @@
 
 // CSSNumericValue is the base class for numeric and length typed CSS Values.
 // https://drafts.css-houdini.org/css-typed-om/#numeric-objects
-[
-  Exposed(Window CSSTypedOM, PaintWorklet CSSPaintAPI)
-] interface CSSNumericValue : CSSStyleValue {
-  [RaisesException, NewObject] CSSNumericValue add(CSSNumericValue value);
-  [RaisesException, NewObject] CSSNumericValue sub(CSSNumericValue value);
-  [RaisesException, NewObject] CSSNumericValue mul(double value);
-  [RaisesException, NewObject] CSSNumericValue div(double value);
+typedef (double or CSSNumericValue) CSSNumberish;
 
-  [RaisesException, NewObject] CSSNumericValue to(DOMString unit);
+[
+  RuntimeEnabled=CSSTypedOM,
+  Exposed=(Window,LayoutWorklet,PaintWorklet)
+] interface CSSNumericValue : CSSStyleValue {
+  [RaisesException, NewObject] CSSNumericValue add(CSSNumberish... values);
+  [RaisesException, NewObject] CSSNumericValue sub(CSSNumberish... values);
+  [RaisesException, NewObject] CSSNumericValue mul(CSSNumberish... values);
+  [RaisesException, NewObject] CSSNumericValue div(CSSNumberish... values);
+  [RaisesException, NewObject] CSSNumericValue min(CSSNumberish... values);
+  [RaisesException, NewObject] CSSNumericValue max(CSSNumberish... values);
+
+  boolean equals(CSSNumberish... values);
+
+  [RaisesException, NewObject] CSSUnitValue to(DOMString unit);
+  [RaisesException, NewObject] CSSMathSum toSum(DOMString... units);
+  CSSNumericType type();
 
   // Putting Exposed=Window in the next line makes |parse| not exposed to PaintWorklet.
   [RaisesException, NewObject, Exposed=Window] static CSSNumericValue parse(DOMString cssText);

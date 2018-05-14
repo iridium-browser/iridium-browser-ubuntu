@@ -10,9 +10,10 @@
 
 #include <memory>
 
-#include "webrtc/rtc_base/rtccertificate.h"
+#include "rtc_base/rtccertificate.h"
 
-#include "webrtc/rtc_base/checks.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/refcountedobject.h"
 
 namespace rtc {
 
@@ -43,6 +44,10 @@ bool RTCCertificate::HasExpired(uint64_t now) const {
 
 const SSLCertificate& RTCCertificate::ssl_certificate() const {
   return identity_->certificate();
+}
+
+const SSLCertChain& RTCCertificate::ssl_cert_chain() const {
+  return identity_->cert_chain();
 }
 
 RTCCertificatePEM RTCCertificate::ToPEM() const {

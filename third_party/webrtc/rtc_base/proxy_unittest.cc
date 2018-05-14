@@ -10,13 +10,13 @@
 
 #include <memory>
 #include <string>
-#include "webrtc/rtc_base/gunit.h"
-#include "webrtc/rtc_base/httpserver.h"
-#include "webrtc/rtc_base/proxyserver.h"
-#include "webrtc/rtc_base/socketadapters.h"
-#include "webrtc/rtc_base/testclient.h"
-#include "webrtc/rtc_base/testechoserver.h"
-#include "webrtc/rtc_base/virtualsocketserver.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/httpserver.h"
+#include "rtc_base/proxyserver.h"
+#include "rtc_base/socketadapters.h"
+#include "rtc_base/testclient.h"
+#include "rtc_base/testechoserver.h"
+#include "rtc_base/virtualsocketserver.h"
 
 using rtc::Socket;
 using rtc::Thread;
@@ -37,7 +37,6 @@ class ProxyTest : public testing::Test {
     https_.reset(new rtc::HttpListenServer());
     https_->Listen(kHttpsProxyIntAddr);
   }
-  ~ProxyTest() {}
 
   rtc::SocketServer* ss() { return ss_.get(); }
 

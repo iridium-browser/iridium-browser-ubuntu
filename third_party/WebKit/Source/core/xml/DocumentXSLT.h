@@ -5,9 +5,10 @@
 #ifndef DocumentXSLT_h
 #define DocumentXSLT_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/dom/Document.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -16,10 +17,11 @@ class ProcessingInstruction;
 
 class DocumentXSLT final : public GarbageCollected<DocumentXSLT>,
                            public Supplement<Document> {
-  WTF_MAKE_NONCOPYABLE(DocumentXSLT);
   USING_GARBAGE_COLLECTED_MIXIN(DocumentXSLT);
 
  public:
+  static const char kSupplementName[];
+
   Document* TransformSourceDocument() {
     return transform_source_document_.Get();
   }
@@ -30,7 +32,6 @@ class DocumentXSLT final : public GarbageCollected<DocumentXSLT>,
   }
 
   static DocumentXSLT& From(Document&);
-  static const char* SupplementName();
 
   // The following static methods don't use any instance of DocumentXSLT.
   // They are just using DocumentXSLT namespace.
@@ -43,12 +44,13 @@ class DocumentXSLT final : public GarbageCollected<DocumentXSLT>,
   static bool SheetLoaded(Document&, ProcessingInstruction*);
   static bool HasTransformSourceDocument(Document&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit DocumentXSLT(Document&);
 
   Member<Document> transform_source_document_;
+  DISALLOW_COPY_AND_ASSIGN(DocumentXSLT);
 };
 
 }  // namespace blink

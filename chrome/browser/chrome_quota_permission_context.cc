@@ -22,16 +22,14 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/web_contents.h"
-#include "storage/common/quota/quota_types.h"
+#include "third_party/WebKit/public/mojom/quota/quota_types.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/android_theme_resources.h"
-#include "chrome/browser/infobars/infobar_service.h"
-#include "components/infobars/core/confirm_infobar_delegate.h"
-#include "components/infobars/core/infobar.h"
 #else
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "components/vector_icons/vector_icons.h"
 #endif
 
@@ -91,11 +89,10 @@ QuotaPermissionRequest::QuotaPermissionRequest(
 QuotaPermissionRequest::~QuotaPermissionRequest() {}
 
 PermissionRequest::IconId QuotaPermissionRequest::GetIconId() const {
-  // TODO(gbillock): get the proper image here
 #if defined(OS_ANDROID)
-  return IDR_ANDROID_INFOBAR_WARNING;
+  return IDR_ANDROID_INFOBAR_FOLDER;
 #else
-  return vector_icons::kWarningIcon;
+  return kFolderIcon;
 #endif
 }
 
@@ -104,8 +101,8 @@ base::string16 QuotaPermissionRequest::GetMessageText() const {
   // If the site requested larger quota than this threshold, show a different
   // message to the user.
   return l10n_util::GetStringFUTF16(
-      (is_large_quota_request_ ? IDS_REQUEST_LARGE_QUOTA_INFOBAR_QUESTION
-                               : IDS_REQUEST_QUOTA_INFOBAR_QUESTION),
+      (is_large_quota_request_ ? IDS_REQUEST_LARGE_QUOTA_INFOBAR_TEXT
+                               : IDS_REQUEST_QUOTA_INFOBAR_TEXT),
       url_formatter::FormatUrlForSecurityDisplay(origin_url_));
 }
 #endif
@@ -149,103 +146,6 @@ PermissionRequestType QuotaPermissionRequest::GetPermissionRequestType() const {
   return PermissionRequestType::QUOTA;
 }
 
-#if defined(OS_ANDROID)
-// RequestQuotaInfoBarDelegate ------------------------------------------------
-
-class RequestQuotaInfoBarDelegate : public ConfirmInfoBarDelegate {
- public:
-  // Creates a request quota infobar and delegate and adds the infobar to
-  // |infobar_service|.
-  static void Create(
-      InfoBarService* infobar_service,
-      ChromeQuotaPermissionContext* context,
-      const GURL& origin_url,
-      int64_t requested_quota,
-      const content::QuotaPermissionContext::PermissionCallback& callback);
-
- private:
-  RequestQuotaInfoBarDelegate(
-      ChromeQuotaPermissionContext* context,
-      const GURL& origin_url,
-      int64_t requested_quota,
-      const content::QuotaPermissionContext::PermissionCallback& callback);
-  ~RequestQuotaInfoBarDelegate() override;
-
-  // ConfirmInfoBarDelegate:
-  infobars::InfoBarDelegate::InfoBarIdentifier GetIdentifier() const override;
-  base::string16 GetMessageText() const override;
-  bool Accept() override;
-  bool Cancel() override;
-
-  scoped_refptr<ChromeQuotaPermissionContext> context_;
-  GURL origin_url_;
-  int64_t requested_quota_;
-  content::QuotaPermissionContext::PermissionCallback callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(RequestQuotaInfoBarDelegate);
-};
-
-// static
-void RequestQuotaInfoBarDelegate::Create(
-    InfoBarService* infobar_service,
-    ChromeQuotaPermissionContext* context,
-    const GURL& origin_url,
-    int64_t requested_quota,
-    const content::QuotaPermissionContext::PermissionCallback& callback) {
-  infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
-      std::unique_ptr<ConfirmInfoBarDelegate>(new RequestQuotaInfoBarDelegate(
-          context, origin_url, requested_quota, callback))));
-}
-
-RequestQuotaInfoBarDelegate::RequestQuotaInfoBarDelegate(
-    ChromeQuotaPermissionContext* context,
-    const GURL& origin_url,
-    int64_t requested_quota,
-    const content::QuotaPermissionContext::PermissionCallback& callback)
-    : ConfirmInfoBarDelegate(),
-      context_(context),
-      origin_url_(origin_url),
-      requested_quota_(requested_quota),
-      callback_(callback) {}
-
-RequestQuotaInfoBarDelegate::~RequestQuotaInfoBarDelegate() {
-  if (!callback_.is_null()) {
-    context_->DispatchCallbackOnIOThread(
-        callback_,
-        content::QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_CANCELLED);
-  }
-}
-
-infobars::InfoBarDelegate::InfoBarIdentifier
-RequestQuotaInfoBarDelegate::GetIdentifier() const {
-  return REQUEST_QUOTA_INFOBAR_DELEGATE;
-}
-
-base::string16 RequestQuotaInfoBarDelegate::GetMessageText() const {
-  // If the site requested larger quota than this threshold, show a different
-  // message to the user.
-  return l10n_util::GetStringFUTF16(
-      (requested_quota_ > kRequestLargeQuotaThreshold
-           ? IDS_REQUEST_LARGE_QUOTA_INFOBAR_QUESTION
-           : IDS_REQUEST_QUOTA_INFOBAR_QUESTION),
-      url_formatter::FormatUrlForSecurityDisplay(origin_url_));
-}
-
-bool RequestQuotaInfoBarDelegate::Accept() {
-  context_->DispatchCallbackOnIOThread(
-      callback_,
-      content::QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_ALLOW);
-  return true;
-}
-
-bool RequestQuotaInfoBarDelegate::Cancel() {
-  context_->DispatchCallbackOnIOThread(
-      callback_,
-      content::QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_CANCELLED);
-  return true;
-}
-#endif
-
 }  // namespace
 
 
@@ -258,7 +158,7 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
     const content::StorageQuotaParams& params,
     int render_process_id,
     const PermissionCallback& callback) {
-  if (params.storage_type != storage::kStorageTypePersistent) {
+  if (params.storage_type != blink::mojom::StorageType::kPersistent) {
     // For now we only support requesting quota with this interface
     // for Persistent storage type.
     callback.Run(QUOTA_PERMISSION_RESPONSE_DISALLOW);
@@ -284,6 +184,8 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
   }
 
   if (vr::VrTabHelper::IsInVr(web_contents)) {
+    vr::VrTabHelper::UISuppressed(vr::UiSuppressedElement::kQuotaPermission);
+
     // Permission request UI cannot currently be rendered binocularly in VR
     // mode, so we suppress the UI and return cancelled to inform the caller
     // that the request will not progress. crbug.com/736568
@@ -291,27 +193,14 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
     return;
   }
 
-  if (PermissionRequestManager::IsEnabled()) {
-    PermissionRequestManager* permission_request_manager =
-        PermissionRequestManager::FromWebContents(web_contents);
-    if (permission_request_manager) {
-      bool is_large_quota_request =
-          params.requested_size > kRequestLargeQuotaThreshold;
-      permission_request_manager->AddRequest(new QuotaPermissionRequest(
-          this, params.origin_url, is_large_quota_request, callback));
-      return;
-    }
-#if defined(OS_ANDROID)
-  } else {
-    InfoBarService* infobar_service =
-        InfoBarService::FromWebContents(web_contents);
-    if (infobar_service) {
-      RequestQuotaInfoBarDelegate::Create(infobar_service, this,
-                                          params.origin_url,
-                                          params.requested_size, callback);
-      return;
-    }
-#endif
+  PermissionRequestManager* permission_request_manager =
+      PermissionRequestManager::FromWebContents(web_contents);
+  if (permission_request_manager) {
+    bool is_large_quota_request =
+        params.requested_size > kRequestLargeQuotaThreshold;
+    permission_request_manager->AddRequest(new QuotaPermissionRequest(
+        this, params.origin_url, is_large_quota_request, callback));
+    return;
   }
 
   // The tab has no UI service for presenting the permissions request.

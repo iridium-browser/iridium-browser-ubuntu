@@ -234,8 +234,7 @@ void WebContentsObserverSanityChecker::DidFailLoad(
     RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description,
-    bool was_ignored_by_handler) {
+    const base::string16& error_description) {
   AssertRenderFrameExists(render_frame_host);
 }
 
@@ -262,7 +261,8 @@ void WebContentsObserverSanityChecker::MediaStartedPlaying(
 
 void WebContentsObserverSanityChecker::MediaStoppedPlaying(
     const MediaPlayerInfo& media_info,
-    const MediaPlayerId& id) {
+    const MediaPlayerId& id,
+    WebContentsObserver::MediaStoppedReason reason) {
   CHECK(!web_contents_destroyed_);
   CHECK(std::find(active_media_players_.begin(), active_media_players_.end(),
                   id) != active_media_players_.end());

@@ -35,19 +35,19 @@
 #include "public/platform/WebPrivatePtr.h"
 #include "WebNavigationType.h"
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
 #include "platform/heap/Handle.h"
 #endif
 
 namespace blink {
 
-class Performance;
+class WindowPerformance;
 
 class WebPerformance {
  public:
   ~WebPerformance() { Reset(); }
 
-  WebPerformance() {}
+  WebPerformance() = default;
 
   WebPerformance(const WebPerformance& p) { Assign(p); }
 
@@ -90,6 +90,11 @@ class WebPerformance {
   BLINK_EXPORT double FirstImagePaint() const;
   BLINK_EXPORT double FirstContentfulPaint() const;
   BLINK_EXPORT double FirstMeaningfulPaint() const;
+  BLINK_EXPORT double PageInteractive() const;
+  BLINK_EXPORT double PageInteractiveDetection() const;
+  BLINK_EXPORT double FirstInputInvalidatingInteractive() const;
+  BLINK_EXPORT double FirstInputDelay() const;
+  BLINK_EXPORT double FirstInputTimestamp() const;
   BLINK_EXPORT double ParseStart() const;
   BLINK_EXPORT double ParseStop() const;
   BLINK_EXPORT double ParseBlockedOnScriptLoadDuration() const;
@@ -100,13 +105,13 @@ class WebPerformance {
   BLINK_EXPORT double AuthorStyleSheetParseDurationBeforeFCP() const;
   BLINK_EXPORT double UpdateStyleDurationBeforeFCP() const;
 
-#if BLINK_IMPLEMENTATION
-  BLINK_EXPORT WebPerformance(Performance*);
-  BLINK_EXPORT WebPerformance& operator=(Performance*);
+#if INSIDE_BLINK
+  BLINK_EXPORT WebPerformance(WindowPerformance*);
+  BLINK_EXPORT WebPerformance& operator=(WindowPerformance*);
 #endif
 
  private:
-  WebPrivatePtr<Performance> private_;
+  WebPrivatePtr<WindowPerformance> private_;
 };
 
 }  // namespace blink

@@ -31,9 +31,8 @@
 #include "core/exported/WebSettingsImpl.h"
 
 #include "core/frame/Settings.h"
-#include "platform/graphics/DeferredImageDecoder.h"
-
 #include "core/inspector/DevToolsEmulator.h"
+#include "platform/graphics/DeferredImageDecoder.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
 
@@ -70,6 +69,10 @@ void WebSettingsImpl::SetFixedFontFamily(const WebString& font,
                                          UScriptCode script) {
   if (settings_->GetGenericFontFamilySettings().UpdateFixed(font, script))
     settings_->NotifyGenericFontFamilyChange();
+}
+
+void WebSettingsImpl::SetForceMainWorldInitialization(bool enabled) {
+  settings_->SetForceMainWorldInitialization(enabled);
 }
 
 void WebSettingsImpl::SetForcePreloadNoneForMediaElements(bool enabled) {
@@ -261,18 +264,14 @@ void WebSettingsImpl::SetShouldReuseGlobalForUnownedMainFrame(bool enabled) {
   settings_->SetShouldReuseGlobalForUnownedMainFrame(enabled);
 }
 
-void WebSettingsImpl::SetProgressBarCompletion(
-    ProgressBarCompletion progress_bar_completion) {
-  settings_->SetProgressBarCompletion(
-      static_cast<blink::ProgressBarCompletion>(progress_bar_completion));
+void WebSettingsImpl::SetSavePreviousDocumentResources(
+    SavePreviousDocumentResources save_resources) {
+  settings_->SetSavePreviousDocumentResources(
+      static_cast<blink::SavePreviousDocumentResources>(save_resources));
 }
 
 void WebSettingsImpl::SetPluginsEnabled(bool enabled) {
   dev_tools_emulator_->SetPluginsEnabled(enabled);
-}
-
-void WebSettingsImpl::SetEncryptedMediaEnabled(bool enabled) {
-  settings_->SetEncryptedMediaEnabled(enabled);
 }
 
 void WebSettingsImpl::SetAvailablePointerTypes(int pointers) {
@@ -395,10 +394,6 @@ void WebSettingsImpl::SetDNSPrefetchingEnabled(bool enabled) {
   settings_->SetDNSPrefetchingEnabled(enabled);
 }
 
-void WebSettingsImpl::SetDataSaverEnabled(bool enabled) {
-  settings_->SetDataSaverEnabled(enabled);
-}
-
 void WebSettingsImpl::SetLocalStorageEnabled(bool enabled) {
   settings_->SetLocalStorageEnabled(enabled);
 }
@@ -431,12 +426,20 @@ void WebSettingsImpl::SetTouchDragDropEnabled(bool enabled) {
   settings_->SetTouchDragDropEnabled(enabled);
 }
 
+void WebSettingsImpl::SetBarrelButtonForDragEnabled(bool enabled) {
+  settings_->SetBarrelButtonForDragEnabled(enabled);
+}
+
 void WebSettingsImpl::SetOfflineWebApplicationCacheEnabled(bool enabled) {
   settings_->SetOfflineWebApplicationCacheEnabled(enabled);
 }
 
-void WebSettingsImpl::SetExperimentalWebGLEnabled(bool enabled) {
-  settings_->SetWebGLEnabled(enabled);
+void WebSettingsImpl::SetWebGL1Enabled(bool enabled) {
+  settings_->SetWebGL1Enabled(enabled);
+}
+
+void WebSettingsImpl::SetWebGL2Enabled(bool enabled) {
+  settings_->SetWebGL2Enabled(enabled);
 }
 
 void WebSettingsImpl::SetRenderVSyncNotificationEnabled(bool enabled) {
@@ -614,6 +617,10 @@ void WebSettingsImpl::SetShouldRespectImageOrientation(bool enabled) {
   settings_->SetShouldRespectImageOrientation(enabled);
 }
 
+void WebSettingsImpl::SetPictureInPictureEnabled(bool enabled) {
+  settings_->SetPictureInPictureEnabled(enabled);
+}
+
 void WebSettingsImpl::SetMediaPlaybackGestureWhitelistScope(
     const WebString& scope) {
   settings_->SetMediaPlaybackGestureWhitelistScope(scope);
@@ -627,8 +634,8 @@ void WebSettingsImpl::SetEmbeddedMediaExperienceEnabled(bool enabled) {
   settings_->SetEmbeddedMediaExperienceEnabled(enabled);
 }
 
-void WebSettingsImpl::SetPagePopupsSuppressed(bool suppressed) {
-  settings_->SetPagePopupsSuppressed(suppressed);
+void WebSettingsImpl::SetImmersiveModeEnabled(bool enabled) {
+  settings_->SetImmersiveModeEnabled(enabled);
 }
 
 void WebSettingsImpl::SetViewportEnabled(bool enabled) {
@@ -683,12 +690,6 @@ void WebSettingsImpl::SetV8CacheOptions(V8CacheOptions options) {
   settings_->SetV8CacheOptions(static_cast<blink::V8CacheOptions>(options));
 }
 
-void WebSettingsImpl::SetV8CacheStrategiesForCacheStorage(
-    V8CacheStrategiesForCacheStorage strategies) {
-  settings_->SetV8CacheStrategiesForCacheStorage(
-      static_cast<blink::V8CacheStrategiesForCacheStorage>(strategies));
-}
-
 void WebSettingsImpl::SetViewportStyle(WebViewportStyle style) {
   dev_tools_emulator_->SetViewportStyle(style);
 }
@@ -700,6 +701,15 @@ void WebSettingsImpl::SetMediaControlsEnabled(bool enabled) {
 void WebSettingsImpl::SetDoNotUpdateSelectionOnMutatingSelectionRange(
     bool enabled) {
   settings_->SetDoNotUpdateSelectionOnMutatingSelectionRange(enabled);
+}
+
+void WebSettingsImpl::SetMediaDownloadInProductHelpEnabled(bool enabled) {
+  settings_->SetMediaDownloadInProductHelpEnabled(enabled);
+}
+
+void WebSettingsImpl::SetLowPriorityIframesThreshold(
+    WebEffectiveConnectionType effective_connection_type) {
+  settings_->SetLowPriorityIframesThreshold(effective_connection_type);
 }
 
 }  // namespace blink

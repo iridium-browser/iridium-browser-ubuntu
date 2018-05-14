@@ -19,7 +19,9 @@ namespace metrics {
 
 namespace {
 
-const int kMaxSuggestionsPerCategory = 10;
+// Keep in sync with MAX_SUGGESTIONS_PER_SECTION in NewTabPageUma.java.
+const int kMaxSuggestionsPerCategory = 20;
+
 const int kMaxSuggestionsTotal = 50;
 const int kMaxCategories = 10;
 
@@ -63,6 +65,14 @@ const char kHistogramCategoryDismissed[] =
 const char kHistogramTimeSinceSuggestionFetched[] =
     "NewTabPage.ContentSuggestions.TimeSinceSuggestionFetched";
 
+// Histograms related to prefetching.
+const char kHistogramPrefetchedArticleOpenedWhenOffline[] =
+    "NewTabPage.ContentSuggestions.Opened.Articles.Prefetched.Offline";
+// NewTabPage.ContentSuggestions.CountOnNtpOpenedIfVisible.Articles.\
+// Prefetched.Offline2 and
+// NewTabPage.ContentSuggestions.Shown.Articles.Prefetched.Offline2 are recorded
+// in Java to avoid race condition.
+
 const char kPerCategoryHistogramFormat[] = "%s.%s";
 
 // This mostly corresponds to the KnownCategories enum, but it is contiguous
@@ -78,7 +88,7 @@ enum HistogramCategories {
   FOREIGN_TABS,
   ARTICLES,
   READING_LIST,
-  BREAKING_NEWS,
+  CONTEXTUAL,
   // Insert new values here!
   COUNT
 };
@@ -108,8 +118,8 @@ HistogramCategories GetHistogramCategory(Category category) {
       return HistogramCategories::ARTICLES;
     case KnownCategories::READING_LIST:
       return HistogramCategories::READING_LIST;
-    case KnownCategories::BREAKING_NEWS:
-      return HistogramCategories::BREAKING_NEWS;
+    case KnownCategories::CONTEXTUAL:
+      return HistogramCategories::CONTEXTUAL;
     case KnownCategories::LOCAL_CATEGORIES_COUNT:
     case KnownCategories::REMOTE_CATEGORIES_OFFSET:
       NOTREACHED();
@@ -140,8 +150,8 @@ std::string GetCategorySuffix(Category category) {
       return "Experimental";
     case HistogramCategories::READING_LIST:
       return "ReadingList";
-    case HistogramCategories::BREAKING_NEWS:
-      return "BreakingNews";
+    case HistogramCategories::CONTEXTUAL:
+      return "Contextual";
     case HistogramCategories::COUNT:
       NOTREACHED();
       break;
@@ -264,7 +274,7 @@ void OnSuggestionShown(int global_position,
         /*bucket_count=*/100);
   }
 
-  // TODO(markusheintz): Discuss whether the code below should be move into a
+  // TODO(markusheintz): Discuss whether the code below should be moved into a
   // separate method called OnSuggestionsListShown.
   // When the first of the articles suggestions is shown, then we count this as
   // a single usage of content suggestions.
@@ -280,7 +290,9 @@ void OnSuggestionOpened(int global_position,
                         int position_in_category,
                         base::Time publish_date,
                         float score,
-                        WindowOpenDisposition disposition) {
+                        WindowOpenDisposition disposition,
+                        bool is_prefetched,
+                        bool is_offline) {
   UMA_HISTOGRAM_EXACT_LINEAR(kHistogramOpenedCategoryIndex, category_index,
                              kMaxCategories);
   LogCategoryHistogramPosition(kHistogramOpenedCategoryIndex, category,
@@ -308,6 +320,11 @@ void OnSuggestionOpened(int global_position,
 
   if (category.IsKnownCategory(KnownCategories::ARTICLES)) {
     RecordContentSuggestionsUsage();
+    if (is_offline && is_prefetched) {
+      UMA_HISTOGRAM_EXACT_LINEAR(kHistogramPrefetchedArticleOpenedWhenOffline,
+                                 position_in_category,
+                                 kMaxSuggestionsPerCategory);
+    }
   }
 
   base::RecordAction(base::UserMetricsAction("Suggestions.Content.Opened"));

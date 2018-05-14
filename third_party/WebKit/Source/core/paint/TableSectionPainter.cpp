@@ -8,14 +8,17 @@
 #include "core/layout/LayoutTableCell.h"
 #include "core/layout/LayoutTableCol.h"
 #include "core/layout/LayoutTableRow.h"
+#include "core/paint/AdjustPaintOffsetScope.h"
 #include "core/paint/BoxClipper.h"
 #include "core/paint/BoxPainter.h"
+#include "core/paint/BoxPainterBase.h"
 #include "core/paint/CollapsedBorderPainter.h"
-#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/ObjectPainter.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/TableCellPainter.h"
 #include "core/paint/TableRowPainter.h"
+#include "platform/graphics/paint/DisplayItemCacheSkipper.h"
+#include "platform/graphics/paint/DrawingRecorder.h"
 
 namespace blink {
 
@@ -23,10 +26,25 @@ void TableSectionPainter::PaintRepeatingHeaderGroup(
     const PaintInfo& paint_info,
     const LayoutPoint& paint_offset,
     ItemToPaint item_to_paint) {
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled() &&
+      // TODO(wangxianzhu): Use the PaintPropertyTreeBuilder path for printing.
+      (!paint_info.IsPrinting() ||
+       layout_table_section_.FirstFragment().NextFragment()))
+    return;
+
   if (!layout_table_section_.IsRepeatingHeaderGroup())
     return;
 
   LayoutTable* table = layout_table_section_.Table();
+  // TODO(crbug.com/757947): This shouldn't be possible but happens to
+  // column-spanners in nested multi-col contexts.
+  if (!table->IsPageLogicalHeightKnown())
+    return;
+
+  // We may paint the header multiple times so can't uniquely identify each
+  // display item.
+  DisplayItemCacheSkipper cache_skipper(paint_info.context);
+
   LayoutPoint pagination_offset = paint_offset;
   LayoutUnit page_height = table->PageLogicalHeightForOffset(LayoutUnit());
 
@@ -39,9 +57,9 @@ void TableSectionPainter::PaintRepeatingHeaderGroup(
   header_group_offset += strut_on_first_row;
   LayoutUnit offset_to_next_page =
       page_height - IntMod(header_group_offset, page_height);
-  // Move paginationOffset to the top of the next page.
+  // Move pagination_offset to the top of the next page.
   pagination_offset.Move(LayoutUnit(), offset_to_next_page);
-  // Now move paginationOffset to the top of the page the cull rect starts on.
+  // Now move pagination_offset to the top of the page the cull rect starts on.
   if (paint_info.GetCullRect().rect_.Y() > pagination_offset.Y()) {
     pagination_offset.Move(LayoutUnit(),
                            page_height * ((paint_info.GetCullRect().rect_.Y() -
@@ -75,14 +93,101 @@ void TableSectionPainter::PaintRepeatingHeaderGroup(
   }
 }
 
+void TableSectionPainter::PaintRepeatingFooterGroup(
+    const PaintInfo& paint_info,
+    const LayoutPoint& paint_offset,
+    ItemToPaint item_to_paint) {
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled() &&
+      // TODO(wangxianzhu): Use the PaintPropertyTreeBuilder path for printing.
+      (!paint_info.IsPrinting() ||
+       layout_table_section_.FirstFragment().NextFragment()))
+    return;
+
+  if (!layout_table_section_.IsRepeatingFooterGroup())
+    return;
+
+  // Work out the top position of the table so we can decide
+  // which page to paint the first footer on.
+  LayoutTable* table = layout_table_section_.Table();
+  // TODO(crbug.com/757947): This shouldn't be possible but happens to
+  // column-spanners in nested multi-col contexts.
+  if (!table->IsPageLogicalHeightKnown())
+    return;
+
+  // We may paint the footer multiple times so can't uniquely identify each
+  // display item.
+  DisplayItemCacheSkipper cache_skipper(paint_info.context);
+
+  LayoutRect sections_rect(LayoutPoint(), table->Size());
+  table->SubtractCaptionRect(sections_rect);
+  LayoutUnit page_height = table->PageLogicalHeightForOffset(LayoutUnit());
+  LayoutUnit height_of_previous_footers = table->RowOffsetFromRepeatingFooter();
+  LayoutUnit offset_for_footer = page_height - height_of_previous_footers;
+  // TODO: Accounting for the border-spacing here is wrong.
+  LayoutUnit header_group_offset =
+      table->BlockOffsetToFirstRepeatableHeader() + table->VBorderSpacing();
+  // The first row in the table may have a pagination strut before it so we need
+  // to account for that when establishing its position.
+  LayoutUnit strut_on_first_row;
+  LayoutTableSection* top_section = table->TopSection();
+  if (top_section) {
+    if (LayoutTableRow* row = top_section->FirstRow())
+      strut_on_first_row = row->PaginationStrut();
+  }
+  header_group_offset += strut_on_first_row;
+  LayoutUnit total_height_of_rows =
+      sections_rect.Height() + IntMod(header_group_offset, page_height);
+  LayoutUnit first_row_strut =
+      layout_table_section_.FirstRow()
+          ? layout_table_section_.FirstRow()->PaginationStrut()
+          : LayoutUnit();
+  total_height_of_rows -=
+      layout_table_section_.LogicalHeight() - first_row_strut;
+
+  // Move the offset to the top of the page the table starts on.
+  LayoutPoint pagination_offset = paint_offset;
+  pagination_offset.Move(LayoutUnit(), -total_height_of_rows);
+
+  // Paint up to the last page that needs painting.
+  LayoutUnit bottom_bound =
+      std::min(LayoutUnit(paint_info.GetCullRect().rect_.MaxY()),
+               pagination_offset.Y() + total_height_of_rows - page_height);
+
+  // If the first row in the table would overlap with the footer on the first
+  // page then don't repeat the footer there.
+  if (top_section && top_section->FirstRow() &&
+      IntMod(header_group_offset, page_height) +
+              top_section->FirstRow()->LogicalHeight() >
+          offset_for_footer) {
+    pagination_offset.Move(LayoutUnit(), page_height);
+  }
+
+  // Paint a footer on each page from first to next-to-last.
+  while (pagination_offset.Y() < bottom_bound) {
+    LayoutPoint nested_offset = pagination_offset;
+    nested_offset.Move(LayoutUnit(), offset_for_footer);
+    if (item_to_paint == kPaintCollapsedBorders) {
+      PaintCollapsedSectionBorders(paint_info, nested_offset);
+    } else {
+      PaintSection(paint_info, nested_offset);
+    }
+    pagination_offset.Move(0, page_height.ToInt());
+  }
+}
+
 void TableSectionPainter::Paint(const PaintInfo& paint_info,
                                 const LayoutPoint& paint_offset) {
-  ObjectPainter(layout_table_section_)
-      .CheckPaintOffset(paint_info, paint_offset);
+  // TODO(crbug.com/805514): Paint mask for table section.
+  if (paint_info.phase == PaintPhase::kMask)
+    return;
+
   PaintSection(paint_info, paint_offset);
   LayoutTable* table = layout_table_section_.Table();
-  if (table->Header() == layout_table_section_)
+  if (table->Header() == layout_table_section_) {
     PaintRepeatingHeaderGroup(paint_info, paint_offset, kPaintSection);
+  } else if (table->Footer() == layout_table_section_) {
+    PaintRepeatingFooterGroup(paint_info, paint_offset, kPaintSection);
+  }
 }
 
 void TableSectionPainter::PaintSection(const PaintInfo& paint_info,
@@ -98,20 +203,24 @@ void TableSectionPainter::PaintSection(const PaintInfo& paint_info,
   if (!total_rows || !total_cols)
     return;
 
-  LayoutPoint adjusted_paint_offset =
-      paint_offset + layout_table_section_.Location();
+  AdjustPaintOffsetScope adjustment(layout_table_section_, paint_info,
+                                    paint_offset);
+  const auto& local_paint_info = adjustment.GetPaintInfo();
+  auto adjusted_paint_offset = adjustment.AdjustedPaintOffset();
 
-  if (paint_info.phase != kPaintPhaseSelfOutlineOnly) {
+  if (local_paint_info.phase != PaintPhase::kSelfOutlineOnly) {
     Optional<BoxClipper> box_clipper;
-    if (paint_info.phase != kPaintPhaseSelfBlockBackgroundOnly)
-      box_clipper.emplace(layout_table_section_, paint_info,
+    if (local_paint_info.phase != PaintPhase::kSelfBlockBackgroundOnly) {
+      box_clipper.emplace(layout_table_section_, local_paint_info,
                           adjusted_paint_offset, kForceContentsClip);
-    PaintObject(paint_info, adjusted_paint_offset);
+    }
+    PaintObject(local_paint_info, adjusted_paint_offset);
   }
 
-  if (ShouldPaintSelfOutline(paint_info.phase))
+  if (ShouldPaintSelfOutline(local_paint_info.phase)) {
     ObjectPainter(layout_table_section_)
-        .PaintOutline(paint_info, adjusted_paint_offset);
+        .PaintOutline(local_paint_info, adjusted_paint_offset);
+  }
 }
 
 void TableSectionPainter::PaintCollapsedBorders(
@@ -119,8 +228,11 @@ void TableSectionPainter::PaintCollapsedBorders(
     const LayoutPoint& paint_offset) {
   PaintCollapsedSectionBorders(paint_info, paint_offset);
   LayoutTable* table = layout_table_section_.Table();
-  if (table->Header() == layout_table_section_)
+  if (table->Header() == layout_table_section_) {
     PaintRepeatingHeaderGroup(paint_info, paint_offset, kPaintCollapsedBorders);
+  } else if (table->Footer() == layout_table_section_) {
+    PaintRepeatingFooterGroup(paint_info, paint_offset, kPaintCollapsedBorders);
+  }
 }
 
 void TableSectionPainter::PaintCollapsedSectionBorders(
@@ -130,12 +242,15 @@ void TableSectionPainter::PaintCollapsedSectionBorders(
       !layout_table_section_.Table()->EffectiveColumns().size())
     return;
 
-  LayoutPoint adjusted_paint_offset =
-      paint_offset + layout_table_section_.Location();
-  BoxClipper box_clipper(layout_table_section_, paint_info,
+  AdjustPaintOffsetScope adjustment(layout_table_section_, paint_info,
+                                    paint_offset);
+  const auto& local_paint_info = adjustment.GetPaintInfo();
+  auto adjusted_paint_offset = adjustment.AdjustedPaintOffset();
+  BoxClipper box_clipper(layout_table_section_, local_paint_info,
                          adjusted_paint_offset, kForceContentsClip);
 
-  LayoutRect local_visual_rect = LayoutRect(paint_info.GetCullRect().rect_);
+  LayoutRect local_visual_rect =
+      LayoutRect(local_paint_info.GetCullRect().rect_);
   local_visual_rect.MoveBy(-adjusted_paint_offset);
 
   LayoutRect table_aligned_rect =
@@ -162,7 +277,7 @@ void TableSectionPainter::PaintCollapsedSectionBorders(
   for (unsigned r = dirtied_rows.End(); r > dirtied_rows.Start(); r--) {
     if (const auto* row = layout_table_section_.RowLayoutObjectAt(r - 1)) {
       TableRowPainter(*row).PaintCollapsedBorders(
-          paint_info, adjusted_paint_offset, dirtied_columns);
+          local_paint_info, adjusted_paint_offset, dirtied_columns);
     }
   }
 }
@@ -188,7 +303,7 @@ void TableSectionPainter::PaintObject(const PaintInfo& paint_info,
                                  dirtied_columns);
   }
 
-  if (paint_info.phase == kPaintPhaseSelfBlockBackgroundOnly)
+  if (paint_info.phase == PaintPhase::kSelfBlockBackgroundOnly)
     return;
 
   if (ShouldPaintDescendantBlockBackgrounds(paint_info.phase)) {
@@ -292,21 +407,18 @@ void TableSectionPainter::PaintBoxDecorationBackground(
   layout_table_section_.GetMutableForPainting().UpdatePaintResult(
       paint_result, paint_info.GetCullRect());
 
-  if (LayoutObjectDrawingRecorder::UseCachedDrawingIfPossible(
+  if (DrawingRecorder::UseCachedDrawingIfPossible(
           paint_info.context, layout_table_section_,
           DisplayItem::kBoxDecorationBackground))
     return;
 
-  LayoutRect bounds = BoxPainter(layout_table_section_)
-                          .BoundsForDrawingRecorder(paint_info, paint_offset);
-  LayoutObjectDrawingRecorder recorder(
-      paint_info.context, layout_table_section_,
-      DisplayItem::kBoxDecorationBackground, bounds);
+  DrawingRecorder recorder(paint_info.context, layout_table_section_,
+                           DisplayItem::kBoxDecorationBackground);
   LayoutRect paint_rect(paint_offset, layout_table_section_.Size());
 
   if (has_box_shadow) {
-    BoxPainter::PaintNormalBoxShadow(paint_info, paint_rect,
-                                     layout_table_section_.StyleRef());
+    BoxPainterBase::PaintNormalBoxShadow(paint_info, paint_rect,
+                                         layout_table_section_.StyleRef());
   }
 
   if (may_have_background) {
@@ -321,10 +433,8 @@ void TableSectionPainter::PaintBoxDecorationBackground(
   }
 
   if (has_box_shadow) {
-    // TODO(wangxianzhu): Calculate the inset shadow bounds by insetting
-    // paintRect by half widths of collapsed borders.
-    BoxPainter::PaintInsetBoxShadow(paint_info, paint_rect,
-                                    layout_table_section_.StyleRef());
+    BoxPainterBase::PaintInsetBoxShadowWithInnerRect(
+        paint_info, paint_rect, layout_table_section_.StyleRef());
   }
 }
 

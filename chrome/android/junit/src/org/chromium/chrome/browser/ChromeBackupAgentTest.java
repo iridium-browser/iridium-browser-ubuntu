@@ -38,7 +38,8 @@ import org.robolectric.annotation.Config;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 
-import org.chromium.base.BaseChromiumApplication;
+import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.PathUtils;
 import org.chromium.base.library_loader.ProcessInitException;
@@ -63,8 +64,7 @@ import java.util.concurrent.CountDownLatch;
  * Unit tests for {@link org.chromium.chrome.browser.ChromeBackupAgent}.
  */
 @RunWith(LocalRobolectricTestRunner.class)
-@Config(manifest = Config.NONE, application = BaseChromiumApplication.class,
-        shadows = {ChromeBackupAgentTest.BackupManagerShadow.class})
+@Config(manifest = Config.NONE, shadows = {ChromeBackupAgentTest.BackupManagerShadow.class})
 public class ChromeBackupAgentTest {
     /**
      * Shadow to allow counting of dataChanged calls.
@@ -108,6 +108,7 @@ public class ChromeBackupAgentTest {
         // Set up the context.
         mContext = RuntimeEnvironment.application.getApplicationContext();
         ContextUtils.initApplicationContextForTests(mContext);
+        CommandLine.init(null);
 
         // Clear any app preferences
         clearPrefs();
@@ -177,7 +178,7 @@ public class ChromeBackupAgentTest {
                 .writeEntityHeader(
                         "AndroidDefault." + FirstRunSignInProcessor.FIRST_RUN_FLOW_SIGNIN_SETUP, 1);
         verify(backupData).writeEntityData(new byte[] {0}, 1);
-        byte[] unameBytes = "user1".getBytes();
+        byte[] unameBytes = ApiCompatibilityUtils.getBytesUtf8("user1");
         verify(backupData)
                 .writeEntityHeader("AndroidDefault." + ChromeSigninController.SIGNED_IN_ACCOUNT_KEY,
                         unameBytes.length);
@@ -379,7 +380,7 @@ public class ChromeBackupAgentTest {
         final String[] keys = {"native.pref1", "native.pref2",
                 "AndroidDefault." + FirstRunStatus.FIRST_RUN_FLOW_COMPLETE, "AndroidDefault.junk",
                 "AndroidDefault." + ChromeSigninController.SIGNED_IN_ACCOUNT_KEY};
-        byte[] unameBytes = "user1".getBytes();
+        byte[] unameBytes = ApiCompatibilityUtils.getBytesUtf8("user1");
         final byte[][] values = {{0}, {1}, {1}, {23, 42}, unameBytes};
         when(backupData.getKey()).thenAnswer(new Answer<String>() {
             private int mPos = 0;

@@ -20,6 +20,7 @@
 extern const char kNewOperatorName[];
 extern const char kCreateName[];
 extern const char kTraceName[];
+extern const char kTraceWrappersName[];
 extern const char kFinalizeName[];
 extern const char kTraceAfterDispatchName[];
 extern const char kRegisterWeakMembersName[];
@@ -34,6 +35,8 @@ extern const char kConstIteratorName[];
 extern const char kIteratorName[];
 extern const char kConstReverseIteratorName[];
 extern const char kReverseIteratorName[];
+
+extern const char* kIgnoredTraceWrapperNames[];
 
 class Config {
  public:
@@ -62,10 +65,6 @@ class Config {
 
   static bool IsRefPtr(const std::string& name) {
     return name == "RefPtr";
-  }
-
-  static bool IsOwnPtr(const std::string& name) {
-    return name == "OwnPtr";
   }
 
   static bool IsUniquePtr(const std::string& name) {
@@ -141,6 +140,10 @@ class Config {
     return name == "GarbageCollected" ||
            IsGCFinalizedBase(name) ||
            IsGCMixinBase(name);
+  }
+
+  static bool IsTraceWrapperBase(const std::string& name) {
+    return name == "TraceWrapperBase";
   }
 
   static bool IsIterator(const std::string& name) {
@@ -242,6 +245,17 @@ class Config {
   static bool IsTraceMethod(const clang::FunctionDecl* method) {
     return GetTraceMethodType(method) != NOT_TRACE_METHOD;
   }
+
+  enum TraceWrappersMethodType {
+    NOT_TRACE_WRAPPERS_METHOD,
+    TRACE_WRAPPERS_METHOD,
+    // TODO(mlippautz): TRACE_WRAPPERS_AFTER_DISPATCH_METHOD
+  };
+
+  static TraceWrappersMethodType GetTraceWrappersMethodType(
+      const clang::FunctionDecl* method);
+
+  static bool IsTraceWrappersMethod(const clang::FunctionDecl* method);
 
   static bool StartsWith(const std::string& str, const std::string& prefix) {
     if (prefix.size() > str.size())

@@ -8,7 +8,7 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
@@ -23,8 +23,9 @@ namespace {
 const char kSbIncidentReportUrl[] =
     "trk:268:https://sb-ssl.google.com/safebrowsing/clientreport/incident";
 
-constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
-    net::DefineNetworkTrafficAnnotation("safe_browsing_incident", R"(
+constexpr net::NetworkTrafficAnnotationTag
+    kSafeBrowsingIncidentTrafficAnnotation =
+        net::DefineNetworkTrafficAnnotation("safe_browsing_incident", R"(
     semantics {
       sender: "Safe Browsing Incident Reporting"
       description:
@@ -40,7 +41,7 @@ constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
       destination: GOOGLE_OWNED_SERVICE
     }
     policy {
-      cookies_allowed: true
+      cookies_allowed: YES
       cookies_store: "Safe Browsing cookie store"
       setting:
         "Users can control this feature via the 'Automatically report details "
@@ -81,11 +82,12 @@ IncidentReportUploaderImpl::IncidentReportUploaderImpl(
     const scoped_refptr<net::URLRequestContextGetter>& request_context_getter,
     const std::string& post_data)
     : IncidentReportUploader(callback),
-      url_fetcher_(net::URLFetcher::Create(kTestUrlFetcherId,
-                                           GetIncidentReportUrl(),
-                                           net::URLFetcher::POST,
-                                           this,
-                                           kTrafficAnnotation)),
+      url_fetcher_(
+          net::URLFetcher::Create(kTestUrlFetcherId,
+                                  GetIncidentReportUrl(),
+                                  net::URLFetcher::POST,
+                                  this,
+                                  kSafeBrowsingIncidentTrafficAnnotation)),
       time_begin_(base::TimeTicks::Now()) {
   data_use_measurement::DataUseUserData::AttachToFetcher(
       url_fetcher_.get(), data_use_measurement::DataUseUserData::SAFE_BROWSING);

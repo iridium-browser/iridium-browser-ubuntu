@@ -88,17 +88,6 @@ void EnsureMethodsLoaded() {
 
   g_attempted_load = true;
 
-  // Only use libappindicator where it is needed to support dbus based status
-  // icons. In particular, libappindicator does not support a click action.
-  std::unique_ptr<base::Environment> env(base::Environment::Create());
-  base::nix::DesktopEnvironment environment =
-      base::nix::GetDesktopEnvironment(env.get());
-  if (environment != base::nix::DESKTOP_ENVIRONMENT_KDE4 &&
-      environment != base::nix::DESKTOP_ENVIRONMENT_KDE5 &&
-      environment != base::nix::DESKTOP_ENVIRONMENT_UNITY) {
-    return;
-  }
-
   void* indicator_lib = nullptr;
 
   // These include guards might be unnecessary, but let's keep them as a
@@ -274,11 +263,11 @@ AppIndicatorIcon::WriteKDE4TempImageOnWorkerThread(
   base::FilePath icon_theme_path = temp_dir.AppendASCII("icons");
 
   // On KDE4, an image located in a directory ending with
-  // "icons/hicolor/24x24/apps" can be used as the app indicator image because
-  // "/usr/share/icons/hicolor/24x24/apps" exists.
-  base::FilePath image_dir = icon_theme_path.AppendASCII("hicolor")
-                                 .AppendASCII("24x24")
-                                 .AppendASCII("apps");
+  // "icons/hicolor/22x22/apps" can be used as the app indicator image because
+  // "/usr/share/icons/hicolor/22x22/apps" exists.
+  base::FilePath image_dir =
+      icon_theme_path.AppendASCII("hicolor").AppendASCII("22x22").AppendASCII(
+          "apps");
 
   if (!base::CreateDirectory(image_dir))
     return SetImageFromFileParams();
@@ -296,9 +285,9 @@ AppIndicatorIcon::WriteKDE4TempImageOnWorkerThread(
   std::string icon_name = base::StringPrintf(
       "chrome_app_indicator2_%s", base::MD5DigestToBase16(digest).c_str());
 
-  // If |bitmap| is not 24x24, KDE does some really ugly resizing. Pad |bitmap|
-  // with transparent pixels to make it 24x24.
-  const int kDesiredSize = 24;
+  // If |bitmap| is not 22x22, KDE does some really ugly resizing. Pad |bitmap|
+  // with transparent pixels to make it 22x22.
+  const int kDesiredSize = 22;
   SkBitmap scaled_bitmap;
   scaled_bitmap.allocN32Pixels(kDesiredSize, kDesiredSize);
   scaled_bitmap.eraseARGB(0, 0, 0, 0);

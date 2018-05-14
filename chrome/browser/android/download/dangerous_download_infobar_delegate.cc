@@ -16,14 +16,14 @@
 // static
 void DangerousDownloadInfoBarDelegate::Create(
     InfoBarService* infobar_service,
-    content::DownloadItem* download_item) {
+    download::DownloadItem* download_item) {
   infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
       std::unique_ptr<ConfirmInfoBarDelegate>(
           new DangerousDownloadInfoBarDelegate(download_item))));
 }
 
 DangerousDownloadInfoBarDelegate::DangerousDownloadInfoBarDelegate(
-    content::DownloadItem* download_item)
+    download::DownloadItem* download_item)
     : download_item_(download_item) {
   download_item_->AddObserver(this);
   message_text_ = l10n_util::GetStringFUTF16(
@@ -37,14 +37,14 @@ DangerousDownloadInfoBarDelegate::~DangerousDownloadInfoBarDelegate() {
 }
 
 void DangerousDownloadInfoBarDelegate::OnDownloadDestroyed(
-    content::DownloadItem* download_item) {
+    download::DownloadItem* download_item) {
   DCHECK_EQ(download_item, download_item_);
   download_item_ = nullptr;
 }
 
 infobars::InfoBarDelegate::InfoBarIdentifier
 DangerousDownloadInfoBarDelegate::GetIdentifier() const {
-  return CONFIRM_DANGEROUS_DOWNLOAD;
+  return DANGEROUS_DOWNLOAD_INFOBAR_DELEGATE_ANDROID;
 }
 
 int DangerousDownloadInfoBarDelegate::GetIconId() const {

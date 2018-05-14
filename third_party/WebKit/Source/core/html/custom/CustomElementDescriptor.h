@@ -33,18 +33,11 @@ class CORE_EXPORT CustomElementDescriptor final {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
  public:
-  CustomElementDescriptor() {}
+  CustomElementDescriptor() = default;
 
   CustomElementDescriptor(const AtomicString& name,
                           const AtomicString& local_name)
       : name_(name), local_name_(local_name) {}
-
-  explicit CustomElementDescriptor(WTF::HashTableDeletedValueType value)
-      : name_(value) {}
-
-  bool IsHashTableDeletedValue() const {
-    return name_.IsHashTableDeletedValue();
-  }
 
   bool operator==(const CustomElementDescriptor& other) const {
     return name_ == other.name_ && local_name_ == other.local_name_;
@@ -55,14 +48,14 @@ class CORE_EXPORT CustomElementDescriptor final {
 
   bool Matches(const Element& element) const {
     return LocalName() == element.localName() &&
-           (IsAutonomous() ||
-            GetName() == element.getAttribute(HTMLNames::isAttr)) &&
+           (IsAutonomous() || GetName() == element.IsValue()) &&
            element.namespaceURI() == HTMLNames::xhtmlNamespaceURI;
   }
 
   bool IsAutonomous() const { return name_ == local_name_; }
 
  private:
+  friend struct WTF::HashTraits<blink::CustomElementDescriptor>;
   AtomicString name_;
   AtomicString local_name_;
 };

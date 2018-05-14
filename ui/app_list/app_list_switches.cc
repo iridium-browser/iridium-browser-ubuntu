@@ -21,10 +21,6 @@ const char kDisableAppListDismissOnBlur[] = "disable-app-list-dismiss-on-blur";
 // If set, the app list will be enabled as if enabled from CWS.
 const char kEnableAppList[] = "enable-app-list";
 
-// Enable/disable syncing of the app list independent of extensions.
-const char kEnableSyncAppList[] = "enable-sync-app-list";
-const char kDisableSyncAppList[] = "disable-sync-app-list";
-
 // Enable/disable drive search in chrome launcher.
 const char kEnableDriveSearchInChromeLauncher[] =
     "enable-drive-search-in-app-launcher";
@@ -36,29 +32,9 @@ const char kDisableDriveSearchInChromeLauncher[] =
 // list hasn't been enabled (as in kEnableAppList) yet.
 const char kResetAppListInstallState[] = "reset-app-list-install-state";
 
-bool IsAppListSyncEnabled() {
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      kDisableSyncAppList);
-}
-
-bool IsFolderUIEnabled() {
-  // Folder UI is available only when AppList sync is enabled, and should
-  // not be disabled separately.
-  return IsAppListSyncEnabled();
-}
-
-bool IsVoiceSearchEnabled() {
-  // Speech recognition in AppList is only for ChromeOS right now.
-  return true;
-}
-
 bool ShouldNotDismissOnBlur() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       kDisableAppListDismissOnBlur);
-}
-
-bool IsDriveAppsInAppListEnabled() {
-  return true;
 }
 
 bool IsDriveSearchInChromeLauncherEnabled() {

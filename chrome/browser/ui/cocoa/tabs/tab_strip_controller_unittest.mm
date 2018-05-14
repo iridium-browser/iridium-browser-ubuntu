@@ -57,8 +57,7 @@ using content::WebContents;
 @implementation TestTabStripControllerDelegate
 - (void)onActivateTabWithContents:(WebContents*)contents {
 }
-- (void)onTabChanged:(TabStripModelObserver::TabChangeType)change
-        withContents:(WebContents*)contents {
+- (void)onTabChanged:(TabChangeType)change withContents:(WebContents*)contents {
 }
 - (void)onTabDetachedWithContents:(WebContents*)contents {
 }
@@ -321,7 +320,7 @@ TEST_F(TabStripControllerTest, CorrectTitleAndToolTipTextFromSetTabTitle) {
       content::MEDIA_TAB_VIDEO_CAPTURE, "dummy_id", "dummy name");
   std::unique_ptr<MediaStreamUI> streamUi(indicator->RegisterMediaStream(
       contents, MediaStreamDevices(1, dummyVideoCaptureDevice)));
-  streamUi->OnStarted(base::Bind(&base::DoNothing));
+  streamUi->OnStarted(base::DoNothing());
   EXPECT_EQ(TabAlertState::TAB_CAPTURING,
             chrome::GetTabAlertStateForContents(contents));
   [controller_ setTabTitle:tabController withContents:contents];

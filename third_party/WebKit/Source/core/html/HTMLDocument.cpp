@@ -55,9 +55,8 @@
 
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/WindowProxy.h"
-#include "core/HTMLNames.h"
 #include "core/frame/LocalFrame.h"
-#include "core/html/HTMLBodyElement.h"
+#include "core/html_names.h"
 
 namespace blink {
 
@@ -73,74 +72,12 @@ HTMLDocument::HTMLDocument(const DocumentInit& initializer,
   }
 }
 
-HTMLDocument::~HTMLDocument() {}
+HTMLDocument::~HTMLDocument() = default;
 
-HTMLBodyElement* HTMLDocument::HtmlBodyElement() const {
-  HTMLElement* body = this->body();
-  return isHTMLBodyElement(body) ? toHTMLBodyElement(body) : 0;
-}
-
-const AtomicString& HTMLDocument::BodyAttributeValue(
-    const QualifiedName& name) const {
-  if (HTMLBodyElement* body = HtmlBodyElement())
-    return body->FastGetAttribute(name);
-  return g_null_atom;
-}
-
-void HTMLDocument::SetBodyAttribute(const QualifiedName& name,
-                                    const AtomicString& value) {
-  if (HTMLBodyElement* body = HtmlBodyElement()) {
-    // FIXME: This check is apparently for benchmarks that set the same value
-    // repeatedly.  It's not clear what benchmarks though, it's also not clear
-    // why we don't avoid causing a style recalc when setting the same value to
-    // a presentational attribute in the common case.
-    if (body->FastGetAttribute(name) != value)
-      body->setAttribute(name, value);
-  }
-}
-
-const AtomicString& HTMLDocument::bgColor() const {
-  return BodyAttributeValue(bgcolorAttr);
-}
-
-void HTMLDocument::setBgColor(const AtomicString& value) {
-  SetBodyAttribute(bgcolorAttr, value);
-}
-
-const AtomicString& HTMLDocument::fgColor() const {
-  return BodyAttributeValue(textAttr);
-}
-
-void HTMLDocument::setFgColor(const AtomicString& value) {
-  SetBodyAttribute(textAttr, value);
-}
-
-const AtomicString& HTMLDocument::alinkColor() const {
-  return BodyAttributeValue(alinkAttr);
-}
-
-void HTMLDocument::setAlinkColor(const AtomicString& value) {
-  SetBodyAttribute(alinkAttr, value);
-}
-
-const AtomicString& HTMLDocument::linkColor() const {
-  return BodyAttributeValue(linkAttr);
-}
-
-void HTMLDocument::setLinkColor(const AtomicString& value) {
-  SetBodyAttribute(linkAttr, value);
-}
-
-const AtomicString& HTMLDocument::vlinkColor() const {
-  return BodyAttributeValue(vlinkAttr);
-}
-
-void HTMLDocument::setVlinkColor(const AtomicString& value) {
-  SetBodyAttribute(vlinkAttr, value);
-}
-
-Document* HTMLDocument::CloneDocumentWithoutChildren() {
-  return Create(DocumentInit::FromContext(ContextDocument(), Url())
+Document* HTMLDocument::CloneDocumentWithoutChildren() const {
+  return Create(DocumentInit::Create()
+                    .WithContextDocument(ContextDocument())
+                    .WithURL(Url())
                     .WithRegistrationContext(RegistrationContext()));
 }
 
@@ -148,11 +85,10 @@ Document* HTMLDocument::CloneDocumentWithoutChildren() {
 // not part of the DOM
 // --------------------------------------------------------------------------
 
-void HTMLDocument::AddItemToMap(HashCountedSet<AtomicString>& map,
-                                const AtomicString& name) {
+void HTMLDocument::AddNamedItem(const AtomicString& name) {
   if (name.IsEmpty())
     return;
-  map.insert(name);
+  named_item_counts_.insert(name);
   if (LocalFrame* f = GetFrame()) {
     f->GetScriptController()
         .WindowProxy(DOMWrapperWorld::MainWorld())
@@ -160,32 +96,15 @@ void HTMLDocument::AddItemToMap(HashCountedSet<AtomicString>& map,
   }
 }
 
-void HTMLDocument::RemoveItemFromMap(HashCountedSet<AtomicString>& map,
-                                     const AtomicString& name) {
+void HTMLDocument::RemoveNamedItem(const AtomicString& name) {
   if (name.IsEmpty())
     return;
-  map.erase(name);
+  named_item_counts_.erase(name);
   if (LocalFrame* f = GetFrame()) {
     f->GetScriptController()
         .WindowProxy(DOMWrapperWorld::MainWorld())
         ->NamedItemRemoved(this, name);
   }
-}
-
-void HTMLDocument::AddNamedItem(const AtomicString& name) {
-  AddItemToMap(named_item_counts_, name);
-}
-
-void HTMLDocument::RemoveNamedItem(const AtomicString& name) {
-  RemoveItemFromMap(named_item_counts_, name);
-}
-
-void HTMLDocument::AddExtraNamedItem(const AtomicString& name) {
-  AddItemToMap(extra_named_item_counts_, name);
-}
-
-void HTMLDocument::RemoveExtraNamedItem(const AtomicString& name) {
-  RemoveItemFromMap(extra_named_item_counts_, name);
 }
 
 static HashSet<StringImpl*>* CreateHtmlCaseInsensitiveAttributesSet() {

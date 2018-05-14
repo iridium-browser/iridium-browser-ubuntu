@@ -5,8 +5,6 @@
 #ifndef ANDROID_WEBVIEW_BROWSER_AW_SETTINGS_H_
 #define ANDROID_WEBVIEW_BROWSER_AW_SETTINGS_H_
 
-#include <jni.h>
-
 #include <memory>
 
 #include "base/android/jni_weak_ref.h"
@@ -24,6 +22,7 @@ class AwRenderViewHostExt;
 class AwSettings : public content::WebContentsObserver {
  public:
   static AwSettings* FromWebContents(content::WebContents* web_contents);
+  static bool GetAllowSniffingFileUrls();
 
   AwSettings(JNIEnv* env, jobject obj, content::WebContents* web_contents);
   ~AwSettings() override;
@@ -76,8 +75,6 @@ class AwSettings : public content::WebContentsObserver {
 
   JavaObjectWeakGlobalRef aw_settings_;
 };
-
-bool RegisterAwSettings(JNIEnv* env);
 
 }  // namespace android_webview
 

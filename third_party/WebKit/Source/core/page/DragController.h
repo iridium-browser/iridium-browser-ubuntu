@@ -26,8 +26,9 @@
 #ifndef DragController_h
 #define DragController_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
-#include "core/events/EventTarget.h"
+#include "core/dom/events/EventTarget.h"
 #include "core/page/DragActions.h"
 #include "platform/geometry/IntPoint.h"
 #include "platform/heap/Handle.h"
@@ -43,6 +44,7 @@ class DragImage;
 struct DragSession;
 class DragState;
 class LocalFrame;
+class FloatRect;
 class FrameSelection;
 class HTMLInputElement;
 class Node;
@@ -51,8 +53,6 @@ class WebMouseEvent;
 
 class CORE_EXPORT DragController final
     : public GarbageCollected<DragController> {
-  WTF_MAKE_NONCOPYABLE(DragController);
-
  public:
   static DragController* Create(Page*);
 
@@ -84,7 +84,11 @@ class CORE_EXPORT DragController final
   static std::unique_ptr<DragImage> DragImageForSelection(const LocalFrame&,
                                                           float);
 
-  DECLARE_TRACE();
+  // Return the selection bounds in absolute coordinates for the frame, clipped
+  // to the visual viewport.
+  static FloatRect ClippedSelection(const LocalFrame&);
+
+  void Trace(blink::Visitor*);
 
  private:
   explicit DragController(Page*);
@@ -105,6 +109,8 @@ class CORE_EXPORT DragController final
 
   void MouseMovedIntoDocument(Document*);
 
+  // drag_location and drag_origin should be in the coordinate space of the
+  // LocalFrame's contents.
   void DoSystemDrag(DragImage*,
                     const IntPoint& drag_location,
                     const IntPoint& drag_origin,
@@ -126,6 +132,7 @@ class CORE_EXPORT DragController final
 
   DragDestinationAction drag_destination_action_;
   bool did_initiate_drag_;
+  DISALLOW_COPY_AND_ASSIGN(DragController);
 };
 
 }  // namespace blink

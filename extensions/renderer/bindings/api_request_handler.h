@@ -48,13 +48,7 @@ class APIRequestHandler {
   using SendRequestMethod =
       base::Callback<void(std::unique_ptr<Request>, v8::Local<v8::Context>)>;
 
-  using CallJSFunction = base::Callback<void(v8::Local<v8::Function>,
-                                             v8::Local<v8::Context>,
-                                             int argc,
-                                             v8::Local<v8::Value>[])>;
-
   APIRequestHandler(const SendRequestMethod& send_request,
-                    const CallJSFunction& call_js,
                     APILastError last_error,
                     ExceptionHandler* exception_handler);
   ~APIRequestHandler();
@@ -79,8 +73,13 @@ class APIRequestHandler {
   // Responds to the request with the given |request_id|, calling the callback
   // with the given |response| arguments.
   // Invalid ids are ignored.
+  // Warning: This can run arbitrary JS code, so the |context| may be
+  // invalidated after this!
   void CompleteRequest(int request_id,
                        const base::ListValue& response,
+                       const std::string& error);
+  void CompleteRequest(int request_id,
+                       const std::vector<v8::Local<v8::Value>>& response,
                        const std::string& error);
 
   // Invalidates any requests that are associated with |context|.
@@ -120,12 +119,6 @@ class APIRequestHandler {
   std::map<int, PendingRequest> pending_requests_;
 
   SendRequestMethod send_request_;
-
-  // The method to call into a JS with specific arguments. We curry this in
-  // because the manner we want to do this is a unittest (e.g.
-  // v8::Function::Call) can be significantly different than in production
-  // (where we have to deal with e.g. blocking javascript).
-  CallJSFunction call_js_;
 
   APILastError last_error_;
 

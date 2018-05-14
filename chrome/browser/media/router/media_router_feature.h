@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_MEDIA_ROUTER_MEDIA_ROUTER_FEATURE_H_
 #define CHROME_BROWSER_MEDIA_ROUTER_MEDIA_ROUTER_FEATURE_H_
 
+#include "base/feature_list.h"
+
 namespace content {
 class BrowserContext;
 }
@@ -15,14 +17,30 @@ namespace media_router {
 bool MediaRouterEnabled(content::BrowserContext* context);
 
 #if !defined(OS_ANDROID)
-// Returns true if browser side DIAL discovery is enabled.
-bool DialLocalDiscoveryEnabled();
+
+extern const base::Feature kEnableDialSinkQuery;
+extern const base::Feature kEnableCastDiscovery;
+extern const base::Feature kCastMediaRouteProvider;
+extern const base::Feature kEnableCastLocalMedia;
+
+// Returns true if browser side DIAL sink query is enabled.
+bool DialSinkQueryEnabled();
 
 // Returns true if browser side Cast discovery is enabled.
 bool CastDiscoveryEnabled();
 
+// Returns true if browser side Cast Media Route Provider and sink query are
+// enabled.
+bool CastMediaRouteProviderEnabled();
+
 // Returns true if local media casting is enabled.
 bool CastLocalMediaEnabled();
+
+// Returns true if the presentation receiver window for local media casting is
+// available on the current platform.
+// TODO(crbug.com/802332): Remove this when mac_views_browser=1 by default.
+bool PresentationReceiverWindowEnabled();
+
 #endif
 
 }  // namespace media_router

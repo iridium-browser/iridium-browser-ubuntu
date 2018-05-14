@@ -10,12 +10,12 @@
 
 #include <memory>
 
-#include "webrtc/call/call.h"
-#include "webrtc/modules/rtp_rtcp/include/rtp_header_parser.h"
-#include "webrtc/system_wrappers/include/clock.h"
-#include "webrtc/test/fake_network_pipe.h"
-#include "webrtc/test/gmock.h"
-#include "webrtc/test/gtest.h"
+#include "call/call.h"
+#include "modules/rtp_rtcp/include/rtp_header_parser.h"
+#include "system_wrappers/include/clock.h"
+#include "test/fake_network_pipe.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
 
 using ::testing::_;
 using ::testing::AnyNumber;
@@ -50,9 +50,10 @@ class ReorderTestDemuxer : public TestDemuxer {
 
 class MockReceiver : public PacketReceiver {
  public:
-  MOCK_METHOD4(
-      DeliverPacket,
-      DeliveryStatus(MediaType, const uint8_t*, size_t, const PacketTime&));
+  MOCK_METHOD3(DeliverPacket,
+               DeliveryStatus(MediaType,
+                              rtc::CopyOnWriteBuffer,
+                              const PacketTime&));
 };
 
 class FakeNetworkPipeTest : public ::testing::Test {
@@ -430,14 +431,14 @@ TEST(DemuxerImplTest, Demuxing) {
   data[1] = kVideoPayloadType;
   std::unique_ptr<NetworkPacket> packet(
       new NetworkPacket(&data[0], kPacketSize, kTimeNow, kArrivalTime));
-  EXPECT_CALL(mock_receiver, DeliverPacket(MediaType::VIDEO, _, _, _))
+  EXPECT_CALL(mock_receiver, DeliverPacket(MediaType::VIDEO, _, _))
       .WillOnce(Return(PacketReceiver::DELIVERY_OK));
   demuxer.DeliverPacket(packet.get(), PacketTime());
 
   data[1] = kAudioPayloadType;
   packet.reset(
       new NetworkPacket(&data[0], kPacketSize, kTimeNow, kArrivalTime));
-  EXPECT_CALL(mock_receiver, DeliverPacket(MediaType::AUDIO, _, _, _))
+  EXPECT_CALL(mock_receiver, DeliverPacket(MediaType::AUDIO, _, _))
       .WillOnce(Return(PacketReceiver::DELIVERY_OK));
   demuxer.DeliverPacket(packet.get(), PacketTime());
 }

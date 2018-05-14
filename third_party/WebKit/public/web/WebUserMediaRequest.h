@@ -45,7 +45,22 @@ class WebMediaStream;
 
 class BLINK_EXPORT WebUserMediaRequest {
  public:
-  WebUserMediaRequest() {}
+  enum class Error {
+    kNotSupported,
+    kSecurityError,
+    kPermissionDenied,
+    kPermissionDismissed,
+    kInvalidState,
+    kDevicesNotFound,
+    kTabCapture,
+    kScreenCapture,
+    kCapture,
+    kTrackStart,
+    kFailedDueToShutdown,
+    kKillSwitchOn
+  };
+
+  WebUserMediaRequest() = default;
   WebUserMediaRequest(const WebUserMediaRequest& request) { Assign(request); }
   ~WebUserMediaRequest() { Reset(); }
 
@@ -64,28 +79,27 @@ class BLINK_EXPORT WebUserMediaRequest {
   WebMediaConstraints AudioConstraints() const;
   WebMediaConstraints VideoConstraints() const;
 
+  // Flag tied to whether or not the similarly named Origin Trial is
+  // enabled. Will be removed at end of trial. See: http://crbug.com/789152.
+  bool ShouldDisableHardwareNoiseSuppression() const;
+
+  // TODO(ossu): Explain this and link to bug.
+  bool ShouldEnableExperimentalHardwareEchoCancellation() const;
+
   WebSecurityOrigin GetSecurityOrigin() const;
   WebDocument OwnerDocument() const;
 
   void RequestSucceeded(const WebMediaStream&);
 
-  void RequestDenied(const WebString& description = WebString());
   void RequestFailedConstraint(const WebString& constraint_name,
                                const WebString& description = WebString());
-  void RequestFailedUASpecific(const WebString& name,
-                               const WebString& constraint_name = WebString(),
-                               const WebString& description = WebString());
-
-  // DEPRECATED
-  void RequestFailed(const WebString& description = WebString()) {
-    RequestDenied(description);
-  }
+  void RequestFailed(Error name, const WebString& description = WebString());
 
   // For testing in content/
   static WebUserMediaRequest CreateForTesting(const WebMediaConstraints& audio,
                                               const WebMediaConstraints& video);
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebUserMediaRequest(UserMediaRequest*);
   operator UserMediaRequest*() const;
 #endif

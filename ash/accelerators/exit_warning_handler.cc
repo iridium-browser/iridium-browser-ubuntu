@@ -4,12 +4,13 @@
 
 #include "ash/accelerators/exit_warning_handler.h"
 
-#include "ash/metrics/user_metrics_recorder.h"
+#include <memory>
+
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/session/session_controller.h"
 #include "ash/shell.h"
-#include "ash/shell_delegate.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "base/memory/ptr_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -60,7 +61,7 @@ class ExitWarningWidgetDelegateView : public views::WidgetDelegateView {
     label->SetAutoColorReadabilityEnabled(false);
     label->SetSubpixelRenderingEnabled(false);
     AddChildView(label);
-    SetLayoutManager(new views::FillLayout);
+    SetLayoutManager(std::make_unique<views::FillLayout>());
   }
 
   void OnPaint(gfx::Canvas* canvas) override {
@@ -73,7 +74,7 @@ class ExitWarningWidgetDelegateView : public views::WidgetDelegateView {
 
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
     node_data->SetName(accessible_name_);
-    node_data->role = ui::AX_ROLE_ALERT;
+    node_data->role = ax::mojom::Role::kAlert;
   }
 
  private:
@@ -100,14 +101,14 @@ void ExitWarningHandler::HandleAccelerator() {
       state_ = WAIT_FOR_DOUBLE_PRESS;
       Show();
       StartTimer();
-      Shell::Get()->metrics()->RecordUserMetricsAction(UMA_ACCEL_EXIT_FIRST_Q);
+      base::RecordAction(base::UserMetricsAction("Accel_Exit_First_Q"));
       break;
     case WAIT_FOR_DOUBLE_PRESS:
       state_ = EXITING;
       CancelTimer();
       Hide();
-      Shell::Get()->metrics()->RecordUserMetricsAction(UMA_ACCEL_EXIT_SECOND_Q);
-      Shell::Get()->shell_delegate()->Exit();
+      base::RecordAction(base::UserMetricsAction("Accel_Exit_Second_Q"));
+      Shell::Get()->session_controller()->RequestSignOut();
       break;
     case EXITING:
       break;
@@ -153,11 +154,11 @@ void ExitWarningHandler::Show() {
   params.name = "ExitWarningWindow";
   params.parent =
       root_window->GetChildById(kShellWindowId_SettingBubbleContainer);
-  widget_ = base::MakeUnique<views::Widget>();
+  widget_ = std::make_unique<views::Widget>();
   widget_->Init(params);
   widget_->Show();
 
-  delegate->NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, true);
+  delegate->NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
 }
 
 void ExitWarningHandler::Hide() {

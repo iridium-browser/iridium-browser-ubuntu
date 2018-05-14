@@ -5,12 +5,13 @@
 #include "core/animation/CSSBorderImageLengthBoxInterpolationType.h"
 
 #include <memory>
-#include "core/animation/BorderImageLengthBoxPropertyFunctions.h"
+#include "core/CSSPropertyNames.h"
 #include "core/animation/LengthInterpolationFunctions.h"
 #include "core/animation/SideIndex.h"
 #include "core/css/CSSIdentifierValue.h"
 #include "core/css/CSSQuadValue.h"
 #include "core/css/resolver/StyleResolverState.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
@@ -71,30 +72,73 @@ struct SideTypes {
   SideType type[kSideIndexCount];
 };
 
+const BorderImageLengthBox& GetBorderImageLengthBox(
+    const CSSProperty& property,
+    const ComputedStyle& style) {
+  switch (property.PropertyID()) {
+    case CSSPropertyBorderImageOutset:
+      return style.BorderImageOutset();
+    case CSSPropertyBorderImageWidth:
+      return style.BorderImageWidth();
+    case CSSPropertyWebkitMaskBoxImageOutset:
+      return style.MaskBoxImageOutset();
+    case CSSPropertyWebkitMaskBoxImageWidth:
+      return style.MaskBoxImageWidth();
+    default:
+      NOTREACHED();
+      return GetBorderImageLengthBox(
+          CSSProperty::Get(CSSPropertyBorderImageOutset),
+          ComputedStyle::InitialStyle());
+  }
+}
+
+void SetBorderImageLengthBox(const CSSProperty& property,
+                             ComputedStyle& style,
+                             const BorderImageLengthBox& box) {
+  switch (property.PropertyID()) {
+    case CSSPropertyBorderImageOutset:
+      style.SetBorderImageOutset(box);
+      break;
+    case CSSPropertyWebkitMaskBoxImageOutset:
+      style.SetMaskBoxImageOutset(box);
+      break;
+    case CSSPropertyBorderImageWidth:
+      style.SetBorderImageWidth(box);
+      break;
+    case CSSPropertyWebkitMaskBoxImageWidth:
+      style.SetMaskBoxImageWidth(box);
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+}
+
 }  // namespace
 
 class CSSBorderImageLengthBoxNonInterpolableValue
     : public NonInterpolableValue {
  public:
-  static PassRefPtr<CSSBorderImageLengthBoxNonInterpolableValue> Create(
+  static scoped_refptr<CSSBorderImageLengthBoxNonInterpolableValue> Create(
       const SideTypes& side_types,
-      Vector<RefPtr<NonInterpolableValue>>&& side_non_interpolable_values) {
-    return AdoptRef(new CSSBorderImageLengthBoxNonInterpolableValue(
+      Vector<scoped_refptr<NonInterpolableValue>>&&
+          side_non_interpolable_values) {
+    return base::AdoptRef(new CSSBorderImageLengthBoxNonInterpolableValue(
         side_types, std::move(side_non_interpolable_values)));
   }
 
-  PassRefPtr<CSSBorderImageLengthBoxNonInterpolableValue> Clone() {
-    return AdoptRef(new CSSBorderImageLengthBoxNonInterpolableValue(
-        side_types_,
-        Vector<RefPtr<NonInterpolableValue>>(side_non_interpolable_values_)));
+  scoped_refptr<CSSBorderImageLengthBoxNonInterpolableValue> Clone() {
+    return base::AdoptRef(new CSSBorderImageLengthBoxNonInterpolableValue(
+        side_types_, Vector<scoped_refptr<NonInterpolableValue>>(
+                         side_non_interpolable_values_)));
   }
 
   const SideTypes& GetSideTypes() const { return side_types_; }
-  const Vector<RefPtr<NonInterpolableValue>>& SideNonInterpolableValues()
+  const Vector<scoped_refptr<NonInterpolableValue>>& SideNonInterpolableValues()
       const {
     return side_non_interpolable_values_;
   }
-  Vector<RefPtr<NonInterpolableValue>>& SideNonInterpolableValues() {
+  Vector<scoped_refptr<NonInterpolableValue>>& SideNonInterpolableValues() {
     return side_non_interpolable_values_;
   }
 
@@ -103,14 +147,15 @@ class CSSBorderImageLengthBoxNonInterpolableValue
  private:
   CSSBorderImageLengthBoxNonInterpolableValue(
       const SideTypes& side_types,
-      Vector<RefPtr<NonInterpolableValue>>&& side_non_interpolable_values)
+      Vector<scoped_refptr<NonInterpolableValue>>&&
+          side_non_interpolable_values)
       : side_types_(side_types),
         side_non_interpolable_values_(side_non_interpolable_values) {
     DCHECK_EQ(side_non_interpolable_values_.size(), kSideIndexCount);
   }
 
   const SideTypes side_types_;
-  Vector<RefPtr<NonInterpolableValue>> side_non_interpolable_values_;
+  Vector<scoped_refptr<NonInterpolableValue>> side_non_interpolable_values_;
 };
 
 DEFINE_NON_INTERPOLABLE_VALUE_TYPE(CSSBorderImageLengthBoxNonInterpolableValue);
@@ -151,26 +196,24 @@ class InheritedSideTypesChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
   static std::unique_ptr<InheritedSideTypesChecker> Create(
-      CSSPropertyID property,
+      const CSSProperty& property,
       const SideTypes& inherited_side_types) {
     return WTF::WrapUnique(
         new InheritedSideTypesChecker(property, inherited_side_types));
   }
 
  private:
-  InheritedSideTypesChecker(CSSPropertyID property,
+  InheritedSideTypesChecker(const CSSProperty& property,
                             const SideTypes& inherited_side_types)
       : property_(property), inherited_side_types_(inherited_side_types) {}
 
   bool IsValid(const StyleResolverState& state,
                const InterpolationValue& underlying) const final {
     return inherited_side_types_ ==
-           SideTypes(
-               BorderImageLengthBoxPropertyFunctions::GetBorderImageLengthBox(
-                   property_, *state.ParentStyle()));
+           SideTypes(GetBorderImageLengthBox(property_, *state.ParentStyle()));
   }
 
-  const CSSPropertyID property_;
+  const CSSProperty& property_;
   const SideTypes inherited_side_types_;
 };
 
@@ -178,7 +221,8 @@ InterpolationValue ConvertBorderImageLengthBox(const BorderImageLengthBox& box,
                                                double zoom) {
   std::unique_ptr<InterpolableList> list =
       InterpolableList::Create(kSideIndexCount);
-  Vector<RefPtr<NonInterpolableValue>> non_interpolable_values(kSideIndexCount);
+  Vector<scoped_refptr<NonInterpolableValue>> non_interpolable_values(
+      kSideIndexCount);
   const BorderImageLength* sides[kSideIndexCount] = {};
   sides[kSideTop] = &box.Top();
   sides[kSideRight] = &box.Right();
@@ -228,9 +272,7 @@ CSSBorderImageLengthBoxInterpolationType::MaybeConvertInitial(
     const StyleResolverState&,
     ConversionCheckers&) const {
   return ConvertBorderImageLengthBox(
-      BorderImageLengthBoxPropertyFunctions::GetInitialBorderImageLengthBox(
-          CssProperty()),
-      1);
+      GetBorderImageLengthBox(CssProperty(), ComputedStyle::InitialStyle()), 1);
 }
 
 InterpolationValue
@@ -238,8 +280,7 @@ CSSBorderImageLengthBoxInterpolationType::MaybeConvertInherit(
     const StyleResolverState& state,
     ConversionCheckers& conversion_checkers) const {
   const BorderImageLengthBox& inherited =
-      BorderImageLengthBoxPropertyFunctions::GetBorderImageLengthBox(
-          CssProperty(), *state.ParentStyle());
+      GetBorderImageLengthBox(CssProperty(), *state.ParentStyle());
   conversion_checkers.push_back(
       InheritedSideTypesChecker::Create(CssProperty(), SideTypes(inherited)));
   return ConvertBorderImageLengthBox(inherited,
@@ -256,7 +297,8 @@ InterpolationValue CSSBorderImageLengthBoxInterpolationType::MaybeConvertValue(
   const CSSQuadValue& quad = ToCSSQuadValue(value);
   std::unique_ptr<InterpolableList> list =
       InterpolableList::Create(kSideIndexCount);
-  Vector<RefPtr<NonInterpolableValue>> non_interpolable_values(kSideIndexCount);
+  Vector<scoped_refptr<NonInterpolableValue>> non_interpolable_values(
+      kSideIndexCount);
   const CSSValue* sides[kSideIndexCount] = {};
   sides[kSideTop] = quad.Top();
   sides[kSideRight] = quad.Right();
@@ -292,9 +334,7 @@ InterpolationValue CSSBorderImageLengthBoxInterpolationType::
     MaybeConvertStandardPropertyUnderlyingValue(
         const ComputedStyle& style) const {
   return ConvertBorderImageLengthBox(
-      BorderImageLengthBoxPropertyFunctions::GetBorderImageLengthBox(
-          CssProperty(), style),
-      style.EffectiveZoom());
+      GetBorderImageLengthBox(CssProperty(), style), style.EffectiveZoom());
 }
 
 PairwiseInterpolationValue
@@ -338,14 +378,15 @@ void CSSBorderImageLengthBoxInterpolationType::Composite(
   InterpolationValue& underlying_value = underlying_value_owner.MutableValue();
   InterpolableList& underlying_list =
       ToInterpolableList(*underlying_value.interpolable_value);
-  Vector<RefPtr<NonInterpolableValue>>&
+  Vector<scoped_refptr<NonInterpolableValue>>&
       underlying_side_non_interpolable_values =
           ToCSSBorderImageLengthBoxNonInterpolableValue(
               *underlying_value.non_interpolable_value)
               .SideNonInterpolableValues();
   const InterpolableList& list = ToInterpolableList(*value.interpolable_value);
-  const Vector<RefPtr<NonInterpolableValue>>& side_non_interpolable_values =
-      non_interpolable_value.SideNonInterpolableValues();
+  const Vector<scoped_refptr<NonInterpolableValue>>&
+      side_non_interpolable_values =
+          non_interpolable_value.SideNonInterpolableValues();
 
   for (size_t i = 0; i < kSideIndexCount; i++) {
     switch (side_types.type[i]) {
@@ -357,7 +398,7 @@ void CSSBorderImageLengthBoxInterpolationType::Composite(
         LengthInterpolationFunctions::Composite(
             underlying_list.GetMutable(i),
             underlying_side_non_interpolable_values[i], underlying_fraction,
-            *list.Get(i), side_non_interpolable_values[i].Get());
+            *list.Get(i), side_non_interpolable_values[i].get());
         break;
       case SideType::kAuto:
         break;
@@ -375,7 +416,7 @@ void CSSBorderImageLengthBoxInterpolationType::ApplyStandardPropertyValue(
   const SideTypes& side_types =
       ToCSSBorderImageLengthBoxNonInterpolableValue(non_interpolable_value)
           ->GetSideTypes();
-  const Vector<RefPtr<NonInterpolableValue>>& non_interpolable_values =
+  const Vector<scoped_refptr<NonInterpolableValue>>& non_interpolable_values =
       ToCSSBorderImageLengthBoxNonInterpolableValue(non_interpolable_value)
           ->SideNonInterpolableValues();
   const InterpolableList& list = ToInterpolableList(interpolable_value);
@@ -390,7 +431,7 @@ void CSSBorderImageLengthBoxInterpolationType::ApplyStandardPropertyValue(
         return Length(kAuto);
       case SideType::kLength:
         return LengthInterpolationFunctions::CreateLength(
-            *list.Get(index), non_interpolable_values[index].Get(),
+            *list.Get(index), non_interpolable_values[index].get(),
             state.CssToLengthConversionData(), kValueRangeNonNegative);
       default:
         NOTREACHED();
@@ -399,8 +440,7 @@ void CSSBorderImageLengthBoxInterpolationType::ApplyStandardPropertyValue(
   };
   BorderImageLengthBox box(convert_side(kSideTop), convert_side(kSideRight),
                            convert_side(kSideBottom), convert_side(kSideLeft));
-  BorderImageLengthBoxPropertyFunctions::SetBorderImageLengthBox(
-      CssProperty(), *state.Style(), box);
+  SetBorderImageLengthBox(CssProperty(), *state.Style(), box);
 }
 
 }  // namespace blink

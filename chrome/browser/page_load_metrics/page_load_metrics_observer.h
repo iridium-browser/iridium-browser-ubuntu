@@ -25,41 +25,47 @@ namespace page_load_metrics {
 // This enum represents how a page load ends. If the action occurs before the
 // page load finishes (or reaches some point like first paint), then we consider
 // the load to be aborted.
+//
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused. For any additions, also update the
+// corresponding PageEndReason enum in enums.xml.
 enum PageEndReason {
   // Page lifetime has not yet ended (page is still active).
-  END_NONE,
+  END_NONE = 0,
 
   // The page was reloaded, possibly by the user.
-  END_RELOAD,
+  END_RELOAD = 1,
 
   // The page was navigated away from, via a back or forward navigation.
-  END_FORWARD_BACK,
+  END_FORWARD_BACK = 2,
 
   // The navigation is replaced with a navigation with the qualifier
   // ui::PAGE_TRANSITION_CLIENT_REDIRECT, which is caused by Javascript, or the
   // meta refresh tag.
-  END_CLIENT_REDIRECT,
+  END_CLIENT_REDIRECT = 3,
 
   // If the page load is replaced by a new navigation. This includes link
   // clicks, typing in the omnibox (not a reload), and form submissions.
-  END_NEW_NAVIGATION,
+  END_NEW_NAVIGATION = 4,
 
   // The page load was stopped (e.g. the user presses the stop X button).
-  END_STOP,
+  END_STOP = 5,
 
   // Page load ended due to closing the tab or browser.
-  END_CLOSE,
+  END_CLOSE = 6,
 
   // The provisional load for this page load failed before committing.
-  END_PROVISIONAL_LOAD_FAILED,
+  END_PROVISIONAL_LOAD_FAILED = 7,
 
   // The render process hosting the page terminated unexpectedly.
-  END_RENDER_PROCESS_GONE,
+  END_RENDER_PROCESS_GONE = 8,
 
   // We don't know why the page load ended. This is the value we assign to a
   // terminated provisional load if the only signal we get is the load finished
   // without committing, either without error or with net::ERR_ABORTED.
-  END_OTHER
+  END_OTHER = 9,
+
+  PAGE_END_REASON_COUNT
 };
 
 // Information related to failed provisional loads.
@@ -217,7 +223,8 @@ struct ExtraRequestCompleteInfo {
       std::unique_ptr<data_reduction_proxy::DataReductionProxyData>
           data_reduction_proxy_data,
       content::ResourceType detected_resource_type,
-      int net_error);
+      int net_error,
+      std::unique_ptr<net::LoadTimingInfo> load_timing_info);
 
   ExtraRequestCompleteInfo(const ExtraRequestCompleteInfo& other);
 
@@ -256,6 +263,9 @@ struct ExtraRequestCompleteInfo {
   // net/base/net_error_list.h. If no error was encountered, this value will be
   // 0.
   const int net_error;
+
+  // Additional timing information.
+  const std::unique_ptr<net::LoadTimingInfo> load_timing_info;
 };
 
 // Interface for PageLoadMetrics observers. All instances of this class are
@@ -390,10 +400,19 @@ class PageLoadMetricsObserver {
       const mojom::PageLoadTiming& timing,
       const PageLoadExtraInfo& extra_info) {}
 
+  virtual void OnPageInteractive(const mojom::PageLoadTiming& timing,
+                                 const PageLoadExtraInfo& extra_info) {}
+
+  virtual void OnFirstInputInPage(const mojom::PageLoadTiming& timing,
+                                  const PageLoadExtraInfo& extra_info) {}
+
   // Invoked when there is a change in either the main_frame_metadata or the
   // subframe_metadata's loading behavior_flags.
-  virtual void OnLoadingBehaviorObserved(
-      const page_load_metrics::PageLoadExtraInfo& extra_info) {}
+  virtual void OnLoadingBehaviorObserved(const PageLoadExtraInfo& extra_info) {}
+
+  // Invoked when new use counter features are observed across all frames.
+  virtual void OnFeaturesUsageObserved(const mojom::PageLoadFeatures& features,
+                                       const PageLoadExtraInfo& extra_info) {}
 
   // Invoked when a media element starts playing.
   virtual void MediaStartedPlaying(
@@ -446,9 +465,8 @@ class PageLoadMetricsObserver {
       const FailedProvisionalLoadInfo& failed_provisional_load_info,
       const PageLoadExtraInfo& extra_info) {}
 
-  // Called whenever a request is loaded for this page load. This comes
-  // unfiltered from the ResourceDispatcherHost and may include blob requests
-  // and data uris.
+  // Called whenever a request is loaded for this page load. This is restricted
+  // to requests with HTTP or HTTPS only schemes.
   virtual void OnLoadedResource(
       const ExtraRequestCompleteInfo& extra_request_complete_info) {}
 

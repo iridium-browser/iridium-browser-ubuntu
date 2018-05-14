@@ -76,10 +76,7 @@ TemplateURLParserTest::~TemplateURLParserTest() {
 
 void TemplateURLParserTest::SetUp() {
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &osdd_dir_));
-  // TODO(https://crbug.com/739331): Rename the path to "osdd" after most
-  // developers have synced over the removal of the old osdd directory from the
-  // internal repository.
-  osdd_dir_ = osdd_dir_.AppendASCII("osdd_new");
+  osdd_dir_ = osdd_dir_.AppendASCII("osdd");
   ASSERT_TRUE(base::PathExists(osdd_dir_));
 }
 
@@ -247,4 +244,24 @@ TEST_F(TemplateURLParserTest, TestEmptyKeyword) {
   EXPECT_EQ("https://www.example.com/search?q={searchTerms}",
             template_url_->url());
   EXPECT_EQ(ASCIIToUTF16("example.com"), template_url_->keyword());
+}
+
+// An invalid template URL should not crash the parser.
+// crbug.com/770734
+TEST_F(TemplateURLParserTest, InvalidInput) {
+  struct DumbFilter : TemplateURLParser::ParameterFilter {
+    bool KeepParameter(const std::string& key,
+                       const std::string& value) override {
+      return true;
+    }
+  } filter;
+  constexpr char char_data[] = R"(
+    <OpenSearchDescription>
+    <Url template=")R:RRR?>RRR0" type="application/x-suggestions+json">
+      <Param name="name" value="value"/>
+    </Url>
+    </OpenSearchDescription>
+  )";
+  TemplateURLParser::Parse(SearchTermsData(), char_data, arraysize(char_data),
+                           &filter);
 }

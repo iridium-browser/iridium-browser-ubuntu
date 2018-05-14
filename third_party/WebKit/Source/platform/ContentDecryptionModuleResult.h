@@ -19,7 +19,7 @@ class WebString;
 class ContentDecryptionModuleResult
     : public GarbageCollectedFinalized<ContentDecryptionModuleResult> {
  public:
-  virtual ~ContentDecryptionModuleResult() {}
+  virtual ~ContentDecryptionModuleResult() = default;
 
   virtual void Complete() = 0;
   virtual void CompleteWithContentDecryptionModule(
@@ -36,7 +36,7 @@ class ContentDecryptionModuleResult
     return WebContentDecryptionModuleResult(this);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
 };
 
 }  // namespace blink

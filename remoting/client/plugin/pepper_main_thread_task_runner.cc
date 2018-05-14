@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/core.h"
 #include "ppapi/cpp/module.h"
@@ -31,10 +30,10 @@ PepperMainThreadTaskRunner::PepperMainThreadTaskRunner()
 }
 
 bool PepperMainThreadTaskRunner::PostDelayedTask(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     base::OnceClosure task,
     base::TimeDelta delay) {
-  auto task_ptr = base::MakeUnique<base::OnceClosure>(base::Bind(
+  auto task_ptr = std::make_unique<base::OnceClosure>(base::Bind(
       &PepperMainThreadTaskRunner::RunTask, weak_ptr_, base::Passed(&task)));
   core_->CallOnMainThread(
       delay.InMillisecondsRoundedUp(),
@@ -43,7 +42,7 @@ bool PepperMainThreadTaskRunner::PostDelayedTask(
 }
 
 bool PepperMainThreadTaskRunner::PostNonNestableDelayedTask(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     base::OnceClosure task,
     base::TimeDelta delay) {
   return PostDelayedTask(from_here, std::move(task), delay);

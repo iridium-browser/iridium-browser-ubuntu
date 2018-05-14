@@ -15,8 +15,8 @@
 #include "chrome/browser/android/metrics/uma_utils.h"
 #include "chrome/browser/media/android/remote/remote_media_player_manager.h"
 #include "components/policy/core/browser/android/android_combined_policy_provider.h"
-#include "components/safe_browsing_db/android/safe_browsing_api_handler_bridge.h"
-#include "components/safe_browsing_db/safe_browsing_api_handler.h"
+#include "components/safe_browsing/android/safe_browsing_api_handler.h"
+#include "components/safe_browsing/android/safe_browsing_api_handler_bridge.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #include "content/browser/media/android/browser_media_player_manager.h"
 #include "content/public/browser/browser_main_runner.h"
@@ -92,8 +92,9 @@ int ChromeMainDelegateAndroid::RunProcess(
     // Also only record the start time the first time round, since this is the
     // start time of the application, and will be same for all requests.
     if (!browser_runner_.get()) {
-      base::Time time = chrome::android::GetMainEntryPointTime();
-      startup_metric_utils::RecordMainEntryPointTime(time);
+      startup_metric_utils::RecordMainEntryPointTime(
+          chrome::android::GetMainEntryPointTimeWallClock(),
+          chrome::android::GetMainEntryPointTimeTicks());
       browser_runner_.reset(content::BrowserMainRunner::Create());
     }
     return browser_runner_->Initialize(main_function_params);

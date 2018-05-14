@@ -31,8 +31,7 @@
 
 namespace blink {
 
-class TypeConversions final : public GarbageCollectedFinalized<TypeConversions>,
-                              public ScriptWrappable {
+class TypeConversions final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -66,7 +65,10 @@ class TypeConversions final : public GarbageCollectedFinalized<TypeConversions>,
   const String& testUSVString() const { return usv_string_; }
   void setTestUSVString(const String& value) { usv_string_ = value; }
 
-  DEFINE_INLINE_TRACE() {}
+  const String& testUSVStringOrNull() const { return usv_string_or_null_; }
+  void setTestUSVStringOrNull(const String& value) {
+    usv_string_or_null_ = value;
+  }
 
  private:
   TypeConversions()
@@ -89,6 +91,7 @@ class TypeConversions final : public GarbageCollectedFinalized<TypeConversions>,
   uint16_t unsigned_short_;
   String byte_string_;
   String usv_string_;
+  String usv_string_or_null_;
 };
 
 }  // namespace blink

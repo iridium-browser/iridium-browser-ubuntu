@@ -20,19 +20,6 @@ struct AutoRepeatRate {
   unsigned int repeat_interval_in_ms;
 };
 
-enum ModifierKey {
-  kSearchKey = 0,  // Customizable.
-  kControlKey,  // Customizable.
-  kAltKey,  // Customizable.
-  kVoidKey,
-  kCapsLockKey,  // Customizable.
-  kEscapeKey,  // Customizable.
-  kBackspaceKey,  // Customizable.
-  // IMPORTANT: Add new key to the end, because the keys may have been stored
-  // in user preferences.
-  kNumModifierKeys,
-};
-
 class UI_BASE_IME_EXPORT ImeKeyboard {
  public:
   class Observer {
@@ -112,10 +99,6 @@ class UI_BASE_IME_EXPORT ImeKeyboard {
   // Returns false if |layout_name| contains a bad character.
   static UI_BASE_IME_EXPORT bool CheckLayoutNameForTesting(
       const std::string& layout_name);
-
-  // Note: At this moment, classes other than InputMethodManager should not
-  // instantiate the ImeKeyboard class.
-  static UI_BASE_IME_EXPORT ImeKeyboard* Create();
 
   bool caps_lock_is_enabled_;
   std::string last_layout_;

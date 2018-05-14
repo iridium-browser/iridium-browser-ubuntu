@@ -5,10 +5,11 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#include "base/command_line.h"
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -28,7 +29,6 @@
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
@@ -38,7 +38,6 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/history/core/browser/history_service_observer.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/history_quick_provider.h"
@@ -56,10 +55,12 @@
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/point.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#endif
+
 using base::ASCIIToUTF16;
 using base::UTF16ToUTF8;
-using base::Time;
-using base::TimeDelta;
 using bookmarks::BookmarkModel;
 
 namespace {
@@ -147,16 +148,9 @@ const int kCtrlOrCmdMask = ui::EF_CONTROL_DOWN;
 }  // namespace
 
 class OmniboxViewTest : public InProcessBrowserTest,
-                        public content::NotificationObserver,
-                        public history::HistoryServiceObserver {
+                        public content::NotificationObserver {
  public:
-  OmniboxViewTest() : observer_(this) {}
-
-  // history::HisoryServiceObserver
-  void OnHistoryServiceLoaded(
-      history::HistoryService* history_service) override {
-    base::MessageLoop::current()->QuitWhenIdle();
-  }
+  OmniboxViewTest() {}
 
  protected:
   void SetUpOnMainThread() override {
@@ -277,11 +271,11 @@ class OmniboxViewTest : public InProcessBrowserTest,
     data.SetShortName(ASCIIToUTF16(kSearchShortName));
     data.SetKeyword(ASCIIToUTF16(kSearchKeyword));
     data.SetURL(kSearchURL);
-    TemplateURL* template_url = model->Add(base::MakeUnique<TemplateURL>(data));
+    TemplateURL* template_url = model->Add(std::make_unique<TemplateURL>(data));
     model->SetUserSelectedDefaultSearchProvider(template_url);
 
     data.SetKeyword(ASCIIToUTF16(kSearchKeyword2));
-    model->Add(base::MakeUnique<TemplateURL>(data));
+    model->Add(std::make_unique<TemplateURL>(data));
 
     // Remove built-in template urls, like google.com, bing.com etc., as they
     // may appear as autocomplete suggests and interfere with our tests.
@@ -294,7 +288,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     }
   }
 
-  void AddHistoryEntry(const TestHistoryEntry& entry, const Time& time) {
+  void AddHistoryEntry(const TestHistoryEntry& entry, const base::Time& time) {
     Profile* profile = browser()->profile();
     history::HistoryService* history_service =
         HistoryServiceFactory::GetForProfile(
@@ -302,8 +296,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(history_service);
 
     if (!history_service->BackendLoaded()) {
-      observer_.Add(history_service);
-      content::RunMessageLoop();
+      // Running the task scheduler until idle loads the history backend.
+      content::RunAllTasksUntilIdle();
+      ASSERT_TRUE(history_service->BackendLoaded());
     }
 
     BookmarkModel* bookmark_model =
@@ -320,19 +315,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
                                         history::SOURCE_BROWSED);
     if (entry.starred)
       bookmarks::AddIfNotBookmarked(bookmark_model, url, base::string16());
-    // Wait at least for the AddPageWithDetails() call to finish.
-    {
-      ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
-          observer(this);
-      observer.Add(history_service);
-      content::RunMessageLoop();
-      // We don't want to return until all observers have processed this
-      // notification, because some (e.g. the in-memory history database) may do
-      // something important.  Since we don't know where in the observer list we
-      // stand, just spin the message loop once more to allow the current
-      // callstack to complete.
-      content::RunAllPendingInMessageLoop();
-    }
+
+    // Running the task scheduler until idle finishes AddPageWithDetails.
+    content::RunAllTasksUntilIdle();
   }
 
   void SetupHistory() {
@@ -341,7 +326,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     for (size_t i = 0; i < arraysize(kHistoryEntries); i++) {
       // Add everything in order of time. We don't want to have a time that
       // is "right now" or it will nondeterministically appear in the results.
-      Time t = Time::Now() - TimeDelta::FromHours(i + 1);
+      base::Time t = base::Time::Now() - base::TimeDelta::FromHours(i + 1);
       ASSERT_NO_FATAL_FAILURE(AddHistoryEntry(kHistoryEntries[i], t));
     }
   }
@@ -357,6 +342,22 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_NO_FATAL_FAILURE(SetupHistory());
   }
 
+  void SetTestToolbarPermanentText(const base::string16& text) {
+    OmniboxView* omnibox_view = nullptr;
+    ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+    OmniboxEditModel* edit_model = omnibox_view->model();
+    ASSERT_NE(nullptr, edit_model);
+
+    if (!test_toolbar_model_) {
+      test_toolbar_model_ = new TestToolbarModel;
+      std::unique_ptr<ToolbarModel> toolbar_model(test_toolbar_model_);
+      browser()->swap_toolbar_models(&toolbar_model);
+    }
+
+    test_toolbar_model_->set_text(text);
+    omnibox_view->Update();
+  }
+
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override {
@@ -368,16 +369,12 @@ class OmniboxViewTest : public InProcessBrowserTest,
       default:
         FAIL() << "Unexpected notification type";
     }
-    base::MessageLoop::current()->QuitWhenIdle();
-  }
-
-  void OnURLsModified(history::HistoryService* history_service,
-                      const history::URLRows& changed_urls) override {
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
  private:
-  ScopedObserver<history::HistoryService, OmniboxViewTest> observer_;
+  // Non-owning pointer.
+  TestToolbarModel* test_toolbar_model_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewTest);
 };
@@ -563,7 +560,13 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_BackspaceInKeywordMode) {
             UTF16ToUTF8(omnibox_view->GetText()));
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, Escape) {
+// Flaky on Windows and Linux. http://crbug.com/751543
+#if defined(OS_WIN) || defined(OS_LINUX)
+#define MAYBE_Escape DISABLED_Escape
+#else
+#define MAYBE_Escape Escape
+#endif
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_Escape) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIHistoryURL));
   chrome::FocusLocationBar(browser());
 
@@ -639,7 +642,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_DesiredTLDWithTemporaryText) {
   data.SetShortName(ASCIIToUTF16("abc"));
   data.SetKeyword(ASCIIToUTF16(kSearchText));
   data.SetURL("http://abc.com/");
-  template_url_service->Add(base::MakeUnique<TemplateURL>(data));
+  template_url_service->Add(std::make_unique<TemplateURL>(data));
 
   // Send "ab", so that an "abc" entry appears in the popup.
   const ui::KeyboardCode kSearchTextPrefixKeys[] = {
@@ -691,7 +694,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, ClearUserTextAfterBackgroundCommit) {
 
   // Navigate in the first tab, currently in the background.
   GURL url2("data:text/html,page2");
-  chrome::NavigateParams params(browser(), url2, ui::PAGE_TRANSITION_LINK);
+  NavigateParams params(browser(), url2, ui::PAGE_TRANSITION_LINK);
   params.source_contents = contents;
   params.disposition = WindowOpenDisposition::CURRENT_TAB;
   ui_test_utils::NavigateToURL(&params);
@@ -981,7 +984,13 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, AcceptKeywordByTypingQuestionMark) {
   EXPECT_FALSE(omnibox_view->model()->is_keyword_selected());
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, AcceptKeywordBySpace) {
+// Flaky on Windows and Linux. http://crbug.com/751543
+#if defined(OS_WIN) || defined(OS_LINUX)
+#define MAYBE_AcceptKeywordBySpace DISABLED_AcceptKeywordBySpace
+#else
+#define MAYBE_AcceptKeywordBySpace AcceptKeywordBySpace
+#endif
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_AcceptKeywordBySpace) {
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
 
@@ -1108,8 +1117,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, AcceptKeywordBySpace) {
   };
 
   // Add a history entry to trigger inline autocomplete when typing "foo".
-  ASSERT_NO_FATAL_FAILURE(
-      AddHistoryEntry(kHistoryFoobar, Time::Now() - TimeDelta::FromHours(1)));
+  ASSERT_NO_FATAL_FAILURE(AddHistoryEntry(
+      kHistoryFoobar, base::Time::Now() - base::TimeDelta::FromHours(1)));
 
   // Type "fo" to trigger inline autocomplete.
   ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchKeywordPrefixKeys));
@@ -1167,8 +1176,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, AcceptKeywordBySpace) {
 
   // Add a history entry to trigger HQP matching with text == keyword when
   // typing "fo te".
-  ASSERT_NO_FATAL_FAILURE(
-      AddHistoryEntry(kHistoryFoo, Time::Now() - TimeDelta::FromMinutes(10)));
+  ASSERT_NO_FATAL_FAILURE(AddHistoryEntry(
+      kHistoryFoo, base::Time::Now() - base::TimeDelta::FromMinutes(10)));
 
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_F, 0));
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_O, 0));
@@ -1204,7 +1213,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, NonSubstitutingKeywordTest) {
   data.SetKeyword(ASCIIToUTF16(kSearchText));
   data.SetURL("http://abc.com/{searchTerms}");
   TemplateURL* template_url =
-      template_url_service->Add(base::MakeUnique<TemplateURL>(data));
+      template_url_service->Add(std::make_unique<TemplateURL>(data));
 
   omnibox_view->SetUserText(base::string16());
 
@@ -1227,7 +1236,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, NonSubstitutingKeywordTest) {
   template_url_service->Remove(template_url);
   data.SetShortName(ASCIIToUTF16("abc"));
   data.SetURL("http://abc.com/");
-  template_url_service->Add(base::MakeUnique<TemplateURL>(data));
+  template_url_service->Add(std::make_unique<TemplateURL>(data));
 
   // We always allow exact matches for non-substituting keywords.
   ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
@@ -1239,7 +1248,13 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, NonSubstitutingKeywordTest) {
             popup_model->result().default_match()->destination_url.spec());
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DeleteItem) {
+// crbug.com/751031
+#if defined(OS_MACOSX)
+#define MAYBE_DeleteItem DISABLED_DeleteItem
+#else
+#define MAYBE_DeleteItem DeleteItem
+#endif
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_DeleteItem) {
   // Disable the search provider, to make sure the popup contains only history
   // items.
   TemplateURLService* model =
@@ -1284,7 +1299,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DeleteItem) {
   ASSERT_FALSE(omnibox_view->IsSelectAll());
 
   // Delete the item.
-  popup_model->TryDeletingCurrentItem();
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_DELETE, ui::EF_SHIFT_DOWN));
   ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
   // The selected line shouldn't be changed, because we have more than two
   // items.
@@ -1447,8 +1462,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_TabTraverseResultsTest) {
   };
 
   // Add a history entry so "foo" gets multiple matches.
-  ASSERT_NO_FATAL_FAILURE(
-      AddHistoryEntry(kHistoryFoo, Time::Now() - TimeDelta::FromHours(1)));
+  ASSERT_NO_FATAL_FAILURE(AddHistoryEntry(
+      kHistoryFoo, base::Time::Now() - base::TimeDelta::FromHours(1)));
 
   // Load results.
   ASSERT_NO_FATAL_FAILURE(omnibox_view->SelectAll(false));
@@ -1493,8 +1508,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_TabTraverseResultsTest) {
 #define MAYBE_PersistKeywordModeOnTabSwitch PersistKeywordModeOnTabSwitch
 #endif
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
-                       MAYBE_PersistKeywordModeOnTabSwitch) {
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_PersistKeywordModeOnTabSwitch) {
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
 
@@ -1728,15 +1742,9 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, Paste) {
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CopyURLToClipboard) {
   // Set permanent text thus making sure that omnibox treats 'google.com'
   // as URL (not as ordinary user input).
-  TestToolbarModel* test_toolbar_model = new TestToolbarModel;
-  std::unique_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
-  test_toolbar_model->set_text(ASCIIToUTF16("http://www.google.com/"));
-  browser()->swap_toolbar_models(&toolbar_model);
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-  OmniboxEditModel* edit_model = omnibox_view->model();
-  ASSERT_NE(static_cast<OmniboxEditModel*>(NULL), edit_model);
-  edit_model->UpdatePermanentText();
+  SetTestToolbarPermanentText(ASCIIToUTF16("http://www.google.com"));
 
   const char* target_url = "http://www.google.com/calendar";
   omnibox_view->SetUserText(ASCIIToUTF16(target_url));
@@ -1762,7 +1770,9 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CopyURLToClipboard) {
       ui::Clipboard::GetHtmlFormatType(), ui::CLIPBOARD_TYPE_COPY_PASTE));
 
 // Windows clipboard only supports text URLs.
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+// Mac clipboard not reporting URL format available for some reason.
+// crbug.com/751031
+#if defined(OS_LINUX)
   EXPECT_TRUE(clipboard->IsFormatAvailable(ui::Clipboard::GetUrlFormatType(),
                                            ui::CLIPBOARD_TYPE_COPY_PASTE));
 #endif
@@ -1775,15 +1785,9 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CopyURLToClipboard) {
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CutURLToClipboard) {
   // Set permanent text thus making sure that omnibox treats 'google.com'
   // as URL (not as ordinary user input).
-  TestToolbarModel* test_toolbar_model = new TestToolbarModel;
-  std::unique_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
-  test_toolbar_model->set_text(ASCIIToUTF16("http://www.google.com/"));
-  browser()->swap_toolbar_models(&toolbar_model);
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-  OmniboxEditModel* edit_model = omnibox_view->model();
-  ASSERT_NE(static_cast<OmniboxEditModel*>(NULL), edit_model);
-  edit_model->UpdatePermanentText();
+  SetTestToolbarPermanentText(ASCIIToUTF16("http://www.google.com"));
 
   const char* target_url = "http://www.google.com/calendar";
   omnibox_view->SetUserText(ASCIIToUTF16(target_url));
@@ -1809,7 +1813,9 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CutURLToClipboard) {
       ui::Clipboard::GetHtmlFormatType(), ui::CLIPBOARD_TYPE_COPY_PASTE));
 
 // Windows clipboard only supports text URLs.
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+// Mac clipboard not reporting URL format available for some reason.
+// crbug.com/751031
+#if defined(OS_LINUX)
   EXPECT_TRUE(clipboard->IsFormatAvailable(ui::Clipboard::GetUrlFormatType(),
                                            ui::CLIPBOARD_TYPE_COPY_PASTE));
 #endif
@@ -1866,16 +1872,24 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CutTextToClipboard) {
 }
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, EditSearchEngines) {
-  // Disable settings-in-a-window to simplify test.
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      ::switches::kDisableSettingsWindow);
-  OmniboxView* omnibox_view = NULL;
+  OmniboxView* omnibox_view = nullptr;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+#if defined(OS_CHROMEOS)
+  EXPECT_FALSE(
+      chrome::SettingsWindowManager::GetInstance()->FindBrowserForProfile(
+          browser()->profile()));
+#endif
   EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_EDIT_SEARCH_ENGINES));
   ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+#if defined(OS_CHROMEOS)
+  EXPECT_TRUE(
+      chrome::SettingsWindowManager::GetInstance()->FindBrowserForProfile(
+          browser()->profile()));
+#else
   const std::string target_url =
       std::string(chrome::kChromeUISettingsURL) + chrome::kSearchEnginesSubPage;
   EXPECT_EQ(ASCIIToUTF16(target_url), omnibox_view->GetText());
+#endif
   EXPECT_FALSE(omnibox_view->model()->popup_model()->IsOpen());
 }
 
@@ -1932,44 +1946,36 @@ size_t GetSelectionSize(OmniboxView* omnibox_view) {
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, SelectAllStaysAfterUpdate) {
   OmniboxView* omnibox_view = nullptr;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-  TestToolbarModel* test_toolbar_model = new TestToolbarModel;
-  std::unique_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
-  browser()->swap_toolbar_models(&toolbar_model);
 
   base::string16 url_a(ASCIIToUTF16("http://www.a.com/"));
   base::string16 url_b(ASCIIToUTF16("http://www.b.com/"));
   chrome::FocusLocationBar(browser());
 
-  test_toolbar_model->set_text(url_a);
-  omnibox_view->Update();
+  SetTestToolbarPermanentText(url_a);
   EXPECT_EQ(url_a, omnibox_view->GetText());
   EXPECT_TRUE(omnibox_view->IsSelectAll());
 
   // Updating while selected should retain SelectAll().
-  test_toolbar_model->set_text(url_b);
-  omnibox_view->Update();
+  SetTestToolbarPermanentText(url_b);
   EXPECT_EQ(url_b, omnibox_view->GetText());
   EXPECT_TRUE(omnibox_view->IsSelectAll());
 
-  // Select nothing, then switch back. Shouldn't gain a selection.
+  // Select nothing, then update. Should gain SelectAll().
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, 0));
-  test_toolbar_model->set_text(url_a);
-  omnibox_view->Update();
+  SetTestToolbarPermanentText(url_a);
   EXPECT_EQ(url_a, omnibox_view->GetText());
-  EXPECT_FALSE(omnibox_view->IsSelectAll());
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
 
   // Test behavior of the "reversed" attribute of OmniboxView::SelectAll().
-  test_toolbar_model->set_text(ASCIIToUTF16("AB"));
-  omnibox_view->Update();
-  // Should be at the end already. Shift+Left to select "reversed".
-  EXPECT_EQ(0u, GetSelectionSize(omnibox_view));
+  SetTestToolbarPermanentText(ASCIIToUTF16("AB"));
+  // Should be at beginning. Shift+left should do nothing.
+  EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, ui::EF_SHIFT_DOWN));
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, ui::EF_SHIFT_DOWN));
   EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
   EXPECT_TRUE(omnibox_view->IsSelectAll());
 
-  test_toolbar_model->set_text(ASCIIToUTF16("CD"));
-  omnibox_view->Update();
+  SetTestToolbarPermanentText(ASCIIToUTF16("CD"));
   EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
 
   // At the start, so Shift+Left should do nothing.
@@ -1985,16 +1991,15 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, SelectAllStaysAfterUpdate) {
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, 0));
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, ui::EF_SHIFT_DOWN));
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, ui::EF_SHIFT_DOWN));
-  test_toolbar_model->set_text(ASCIIToUTF16("AB"));
-  omnibox_view->Update();
+  SetTestToolbarPermanentText(ASCIIToUTF16("AB"));
   EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
 
-  // Now Shift+Right should do nothing, and Shift+Left should reduce.
-  // At the end, so Shift+Right should do nothing.
-  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, ui::EF_SHIFT_DOWN));
-  EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
-
-  // And Left should reduce by one character.
+  // We reverse select all on Update() so shift-left won't do anything.
+  // On Cocoa, shift-left will just anchor it on the left.
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, ui::EF_SHIFT_DOWN));
+  EXPECT_EQ(2u, GetSelectionSize(omnibox_view));
+
+  // And shift-right should reduce by one character.
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, ui::EF_SHIFT_DOWN));
   EXPECT_EQ(1u, GetSelectionSize(omnibox_view));
 }

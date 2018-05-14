@@ -7,19 +7,22 @@
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_button.h"
+#include "ash/shelf/shelf_controller.h"
 #include "ash/shelf/shelf_view.h"
 #include "ash/shelf/shelf_view_test_api.h"
 #include "ash/shelf/shelf_widget.h"
+#include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/strings/string_number_conversions.h"
+#include "mojo/public/cpp/bindings/associated_binding.h"
 
 namespace ash {
+namespace {
 
 class ShelfTest : public AshTestBase {
  public:
-  ShelfTest() : shelf_model_(nullptr) {}
-
-  ~ShelfTest() override {}
+  ShelfTest() = default;
+  ~ShelfTest() override = default;
 
   void SetUp() override {
     AshTestBase::SetUp();
@@ -35,7 +38,7 @@ class ShelfTest : public AshTestBase {
   ShelfViewTestAPI* test_api() { return test_.get(); }
 
  private:
-  ShelfModel* shelf_model_;
+  ShelfModel* shelf_model_ = nullptr;
   std::unique_ptr<ShelfViewTestAPI> test_;
 
   DISALLOW_COPY_AND_ASSIGN(ShelfTest);
@@ -102,12 +105,13 @@ TEST_F(ShelfTest, ShowOverflowBubble) {
   EXPECT_TRUE(shelf_widget->IsShowingOverflowBubble());
 
   // Remove one of the first items in the main shelf view.
-  ASSERT_GT(shelf_model()->item_count(), 1);
-  shelf_model()->RemoveItemAt(1);
+  ASSERT_GT(shelf_model()->item_count(), 2);
+  shelf_model()->RemoveItemAt(2);
 
   // Waits for all transitions to finish and there should be no crash.
   test_api()->RunMessageLoopUntilAnimationsDone();
   EXPECT_FALSE(shelf_widget->IsShowingOverflowBubble());
 }
 
+}  // namespace
 }  // namespace ash

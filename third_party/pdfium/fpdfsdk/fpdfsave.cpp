@@ -31,10 +31,11 @@
 #include "xfa/fxfa/cxfa_ffapp.h"
 #include "xfa/fxfa/cxfa_ffdocview.h"
 #include "xfa/fxfa/cxfa_ffwidgethandler.h"
-#include "xfa/fxfa/cxfa_widgetacciterator.h"
+#include "xfa/fxfa/cxfa_readynodeiterator.h"
+#include "xfa/fxfa/parser/cxfa_object.h"
 #endif
 
-#if _FX_OS_ == _FX_ANDROID_
+#if _FX_OS_ == _FX_OS_ANDROID_
 #include <time.h>
 #else
 #include <ctime>
@@ -43,16 +44,13 @@
 namespace {
 
 #ifdef PDF_ENABLE_XFA
-bool SaveXFADocumentData(
-    CPDFXFA_Context* pContext,
-    std::vector<CFX_RetainPtr<IFX_SeekableStream>>* fileList) {
+bool SaveXFADocumentData(CPDFXFA_Context* pContext,
+                         std::vector<RetainPtr<IFX_SeekableStream>>* fileList) {
   if (!pContext)
     return false;
 
-  if (pContext->GetDocType() != XFA_DocType::Dynamic &&
-      pContext->GetDocType() != XFA_DocType::Static) {
+  if (!pContext->ContainsXFAForm())
     return true;
-  }
 
   CXFA_FFDocView* pXFADocView = pContext->GetXFADocView();
   if (!pXFADocView)
@@ -62,7 +60,7 @@ bool SaveXFADocumentData(
   if (!pPDFDocument)
     return false;
 
-  CPDF_Dictionary* pRoot = pPDFDocument->GetRoot();
+  const CPDF_Dictionary* pRoot = pPDFDocument->GetRoot();
   if (!pRoot)
     return false;
 
@@ -101,8 +99,8 @@ bool SaveXFADocumentData(
   if (iTemplate > -1) {
     CPDF_Stream* pTemplateStream = pArray->GetStreamAt(iTemplate);
     auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(pTemplateStream);
-    pAcc->LoadAllData();
-    CFX_RetainPtr<IFX_SeekableStream> pTemplate =
+    pAcc->LoadAllDataFiltered();
+    RetainPtr<IFX_SeekableStream> pTemplate =
         pdfium::MakeRetain<CFX_MemoryStream>(
             const_cast<uint8_t*>(pAcc->GetData()), pAcc->GetSize(), false);
     pChecksum->UpdateChecksum(pTemplate);
@@ -137,10 +135,12 @@ bool SaveXFADocumentData(
   }
   // L"datasets"
   {
-    CFX_RetainPtr<IFX_SeekableStream> pDsfileWrite =
+    RetainPtr<IFX_SeekableStream> pDsfileWrite =
         pdfium::MakeRetain<CFX_MemoryStream>(false);
-    if (pXFADocView->GetDoc()->SavePackage(XFA_HASHCODE_Datasets, pDsfileWrite,
-                                           nullptr) &&
+    CXFA_FFDoc* ffdoc = pXFADocView->GetDoc();
+    if (ffdoc->SavePackage(
+            ToNode(ffdoc->GetXFADoc()->GetXFAObject(XFA_HASHCODE_Datasets)),
+            pDsfileWrite, nullptr) &&
         pDsfileWrite->GetSize() > 0) {
       // Datasets
       pChecksum->UpdateChecksum(pDsfileWrite);
@@ -165,10 +165,13 @@ bool SaveXFADocumentData(
   }
   // L"form"
   {
-    CFX_RetainPtr<IFX_SeekableStream> pfileWrite =
+    RetainPtr<IFX_SeekableStream> pfileWrite =
         pdfium::MakeRetain<CFX_MemoryStream>(false);
-    if (pXFADocView->GetDoc()->SavePackage(XFA_HASHCODE_Form, pfileWrite,
-                                           pChecksum.get()) &&
+
+    CXFA_FFDoc* ffdoc = pXFADocView->GetDoc();
+    if (ffdoc->SavePackage(
+            ToNode(ffdoc->GetXFADoc()->GetXFAObject(XFA_HASHCODE_Form)),
+            pfileWrite, pChecksum.get()) &&
         pfileWrite->GetSize() > 0) {
       auto pDataDict = pdfium::MakeUnique<CPDF_Dictionary>(
           pPDFDocument->GetByteStringPool());
@@ -193,8 +196,7 @@ bool SendPostSaveToXFADoc(CPDFXFA_Context* pContext) {
   if (!pContext)
     return false;
 
-  if (pContext->GetDocType() != XFA_DocType::Dynamic &&
-      pContext->GetDocType() != XFA_DocType::Static)
+  if (!pContext->ContainsXFAForm())
     return true;
 
   CXFA_FFDocView* pXFADocView = pContext->GetXFADocView();
@@ -202,23 +204,20 @@ bool SendPostSaveToXFADoc(CPDFXFA_Context* pContext) {
     return false;
 
   CXFA_FFWidgetHandler* pWidgetHandler = pXFADocView->GetWidgetHandler();
-  std::unique_ptr<CXFA_WidgetAccIterator> pWidgetAccIterator =
-      pXFADocView->CreateWidgetAccIterator();
-  while (CXFA_WidgetAcc* pWidgetAcc = pWidgetAccIterator->MoveToNext()) {
+  auto it = pXFADocView->CreateReadyNodeIterator();
+  while (CXFA_Node* pNode = it->MoveToNext()) {
     CXFA_EventParam preParam;
     preParam.m_eType = XFA_EVENT_PostSave;
-    pWidgetHandler->ProcessEvent(pWidgetAcc, &preParam);
+    pWidgetHandler->ProcessEvent(pNode, &preParam);
   }
   pXFADocView->UpdateDocView();
   pContext->ClearChangeMark();
   return true;
 }
 
-bool SendPreSaveToXFADoc(
-    CPDFXFA_Context* pContext,
-    std::vector<CFX_RetainPtr<IFX_SeekableStream>>* fileList) {
-  if (pContext->GetDocType() != XFA_DocType::Dynamic &&
-      pContext->GetDocType() != XFA_DocType::Static)
+bool SendPreSaveToXFADoc(CPDFXFA_Context* pContext,
+                         std::vector<RetainPtr<IFX_SeekableStream>>* fileList) {
+  if (!pContext->ContainsXFAForm())
     return true;
 
   CXFA_FFDocView* pXFADocView = pContext->GetXFADocView();
@@ -226,12 +225,11 @@ bool SendPreSaveToXFADoc(
     return true;
 
   CXFA_FFWidgetHandler* pWidgetHandler = pXFADocView->GetWidgetHandler();
-  std::unique_ptr<CXFA_WidgetAccIterator> pWidgetAccIterator =
-      pXFADocView->CreateWidgetAccIterator();
-  while (CXFA_WidgetAcc* pWidgetAcc = pWidgetAccIterator->MoveToNext()) {
+  auto it = pXFADocView->CreateReadyNodeIterator();
+  while (CXFA_Node* pNode = it->MoveToNext()) {
     CXFA_EventParam preParam;
     preParam.m_eType = XFA_EVENT_PreSave;
-    pWidgetHandler->ProcessEvent(pWidgetAcc, &preParam);
+    pWidgetHandler->ProcessEvent(pNode, &preParam);
   }
   pXFADocView->UpdateDocView();
   return SaveXFADocumentData(pContext, fileList);
@@ -249,7 +247,7 @@ bool FPDF_Doc_Save(FPDF_DOCUMENT document,
 
 #ifdef PDF_ENABLE_XFA
   CPDFXFA_Context* pContext = static_cast<CPDFXFA_Context*>(document);
-  std::vector<CFX_RetainPtr<IFX_SeekableStream>> fileList;
+  std::vector<RetainPtr<IFX_SeekableStream>> fileList;
   SendPreSaveToXFADoc(pContext, &fileList);
 #endif  // PDF_ENABLE_XFA
 
@@ -274,15 +272,16 @@ bool FPDF_Doc_Save(FPDF_DOCUMENT document,
 
 }  // namespace
 
-DLLEXPORT FPDF_BOOL STDCALL FPDF_SaveAsCopy(FPDF_DOCUMENT document,
-                                            FPDF_FILEWRITE* pFileWrite,
-                                            FPDF_DWORD flags) {
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDF_SaveAsCopy(FPDF_DOCUMENT document,
+                                                    FPDF_FILEWRITE* pFileWrite,
+                                                    FPDF_DWORD flags) {
   return FPDF_Doc_Save(document, pFileWrite, flags, false, 0);
 }
 
-DLLEXPORT FPDF_BOOL STDCALL FPDF_SaveWithVersion(FPDF_DOCUMENT document,
-                                                 FPDF_FILEWRITE* pFileWrite,
-                                                 FPDF_DWORD flags,
-                                                 int fileVersion) {
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
+FPDF_SaveWithVersion(FPDF_DOCUMENT document,
+                     FPDF_FILEWRITE* pFileWrite,
+                     FPDF_DWORD flags,
+                     int fileVersion) {
   return FPDF_Doc_Save(document, pFileWrite, flags, true, fileVersion);
 }

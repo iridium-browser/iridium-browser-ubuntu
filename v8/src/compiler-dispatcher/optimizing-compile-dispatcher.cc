@@ -5,9 +5,9 @@
 #include "src/compiler-dispatcher/optimizing-compile-dispatcher.h"
 
 #include "src/base/atomicops.h"
+#include "src/cancelable-task.h"
 #include "src/compilation-info.h"
 #include "src/compiler.h"
-#include "src/full-codegen/full-codegen.h"
 #include "src/isolate.h"
 #include "src/objects-inl.h"
 #include "src/tracing/trace-event.h"
@@ -20,26 +20,26 @@ namespace {
 
 void DisposeCompilationJob(CompilationJob* job, bool restore_function_code) {
   if (restore_function_code) {
-    Handle<JSFunction> function = job->info()->closure();
-    function->ReplaceCode(function->shared()->code());
+    Handle<JSFunction> function = job->compilation_info()->closure();
+    function->set_code(function->shared()->code());
     if (function->IsInOptimizationQueue()) {
       function->ClearOptimizationMarker();
     }
-    // TODO(mvstanton): We can't call ensureliterals here due to allocation,
-    // but we probably shouldn't call ReplaceCode either, as this
+    // TODO(mvstanton): We can't call EnsureFeedbackVector here due to
+    // allocation, but we probably shouldn't call set_code either, as this
     // sometimes runs on the worker thread!
-    // JSFunction::EnsureLiterals(function);
+    // JSFunction::EnsureFeedbackVector(function);
   }
   delete job;
 }
 
 }  // namespace
 
-class OptimizingCompileDispatcher::CompileTask : public v8::Task {
+class OptimizingCompileDispatcher::CompileTask : public CancelableTask {
  public:
   explicit CompileTask(Isolate* isolate,
                        OptimizingCompileDispatcher* dispatcher)
-      : isolate_(isolate), dispatcher_(dispatcher) {
+      : CancelableTask(isolate), isolate_(isolate), dispatcher_(dispatcher) {
     base::LockGuard<base::Mutex> lock_guard(&dispatcher_->ref_count_mutex_);
     ++dispatcher_->ref_count_;
   }
@@ -48,7 +48,7 @@ class OptimizingCompileDispatcher::CompileTask : public v8::Task {
 
  private:
   // v8::Task overrides.
-  void Run() override {
+  void RunInternal() override {
     DisallowHeapAllocation no_allocation;
     DisallowHandleAllocation no_handles;
     DisallowHandleDereference no_deref;
@@ -93,7 +93,7 @@ OptimizingCompileDispatcher::~OptimizingCompileDispatcher() {
 
 CompilationJob* OptimizingCompileDispatcher::NextInput(bool check_if_flushing) {
   base::LockGuard<base::Mutex> access_input_queue_(&input_queue_mutex_);
-  if (input_queue_length_ == 0) return NULL;
+  if (input_queue_length_ == 0) return nullptr;
   CompilationJob* job = input_queue_[InputQueueIndex(0)];
   DCHECK_NOT_NULL(job);
   input_queue_shift_ = InputQueueIndex(1);
@@ -102,7 +102,7 @@ CompilationJob* OptimizingCompileDispatcher::NextInput(bool check_if_flushing) {
     if (static_cast<ModeFlag>(base::Acquire_Load(&mode_)) == FLUSH) {
       AllowHandleDereference allow_handle_dereference;
       DisposeCompilationJob(job, true);
-      return NULL;
+      return nullptr;
     }
   }
   return job;
@@ -125,7 +125,7 @@ void OptimizingCompileDispatcher::CompileNext(CompilationJob* job) {
 
 void OptimizingCompileDispatcher::FlushOutputQueue(bool restore_function_code) {
   for (;;) {
-    CompilationJob* job = NULL;
+    CompilationJob* job = nullptr;
     {
       base::LockGuard<base::Mutex> access_output_queue_(&output_queue_mutex_);
       if (output_queue_.empty()) return;
@@ -190,14 +190,14 @@ void OptimizingCompileDispatcher::InstallOptimizedFunctions() {
   HandleScope handle_scope(isolate_);
 
   for (;;) {
-    CompilationJob* job = NULL;
+    CompilationJob* job = nullptr;
     {
       base::LockGuard<base::Mutex> access_output_queue_(&output_queue_mutex_);
       if (output_queue_.empty()) return;
       job = output_queue_.front();
       output_queue_.pop();
     }
-    CompilationInfo* info = job->info();
+    CompilationInfo* info = job->compilation_info();
     Handle<JSFunction> function(*info->closure());
     if (function->HasOptimizedCode()) {
       if (FLAG_trace_concurrent_recompilation) {
@@ -207,7 +207,7 @@ void OptimizingCompileDispatcher::InstallOptimizedFunctions() {
       }
       DisposeCompilationJob(job, false);
     } else {
-      Compiler::FinalizeCompilationJob(job);
+      Compiler::FinalizeCompilationJob(job, isolate_);
     }
   }
 }

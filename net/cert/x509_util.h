@@ -23,13 +23,13 @@ class RSAPrivateKey;
 
 namespace net {
 
+struct ParseCertificateOptions;
 class X509Certificate;
 
 namespace x509_util {
 
 // Supported digest algorithms for signing certificates.
 enum DigestAlgorithm {
-  DIGEST_SHA1,
   DIGEST_SHA256
 };
 
@@ -65,8 +65,7 @@ NET_EXPORT bool CreateKeyAndSelfSignedCert(
     std::string* der_cert);
 
 // Creates a self-signed certificate from a provided key, using the specified
-// hash algorithm.  You should not re-use a key for signing data with multiple
-// signature algorithms or parameters.
+// hash algorithm.
 NET_EXPORT bool CreateSelfSignedCert(crypto::RSAPrivateKey* key,
                                      DigestAlgorithm alg,
                                      const std::string& subject,
@@ -74,17 +73,6 @@ NET_EXPORT bool CreateSelfSignedCert(crypto::RSAPrivateKey* key,
                                      base::Time not_valid_before,
                                      base::Time not_valid_after,
                                      std::string* der_cert);
-
-// Provides a method to parse a DER-encoded X509 certificate without calling any
-// OS primitives. This is useful in sandboxed processes.
-NET_EXPORT bool ParseCertificateSandboxed(
-    const base::StringPiece& certificate,
-    std::string* subject,
-    std::string* issuer,
-    base::Time* not_before,
-    base::Time* not_after,
-    std::vector<std::string>* dns_names,
-    std::vector<std::string>* ip_addresses);
 
 // Returns a CRYPTO_BUFFER_POOL for deduplicating certificates.
 NET_EXPORT CRYPTO_BUFFER_POOL* GetBufferPool();
@@ -102,6 +90,27 @@ NET_EXPORT bssl::UniquePtr<CRYPTO_BUFFER> CreateCryptoBuffer(
 // char* due to StringPiece implicit ctor.
 NET_EXPORT bssl::UniquePtr<CRYPTO_BUFFER> CreateCryptoBuffer(
     const char* invalid_data);
+
+// Increments the reference count of |buffer| and returns a UniquePtr owning
+// that reference.
+NET_EXPORT bssl::UniquePtr<CRYPTO_BUFFER> DupCryptoBuffer(
+    CRYPTO_BUFFER* buffer);
+
+// Compares two CRYPTO_BUFFERs and returns true if they have the same contents.
+NET_EXPORT bool CryptoBufferEqual(const CRYPTO_BUFFER* a,
+                                  const CRYPTO_BUFFER* b);
+
+// Returns a StringPiece pointing to the data in |buffer|.
+NET_EXPORT base::StringPiece CryptoBufferAsStringPiece(
+    const CRYPTO_BUFFER* buffer);
+
+// Creates a new X509Certificate from the chain in |buffers|, which must have at
+// least one element.
+scoped_refptr<X509Certificate> CreateX509CertificateFromBuffers(
+    STACK_OF(CRYPTO_BUFFER) * buffers);
+
+// Returns the default ParseCertificateOptions for the net stack.
+ParseCertificateOptions DefaultParseCertificateOptions();
 
 } // namespace x509_util
 

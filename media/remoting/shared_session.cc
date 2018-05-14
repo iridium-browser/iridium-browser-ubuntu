@@ -6,15 +6,25 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "media/remoting/proto_utils.h"
+#include "build/build_config.h"
+#include "build/buildflag.h"
+#include "media/media_features.h"
+
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING_RPC)
+#include "media/remoting/proto_utils.h"  // nogncheck
+#endif
 
 namespace media {
 namespace remoting {
 
 SharedSession::SharedSession(mojom::RemotingSourceRequest source_request,
                              mojom::RemoterPtr remoter)
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING_RPC)
     : rpc_broker_(base::Bind(&SharedSession::SendMessageToSink,
                              base::Unretained(this))),
+#else
+    :
+#endif
       binding_(this, std::move(source_request)),
       remoter_(std::move(remoter)) {
   DCHECK(remoter_);
@@ -29,15 +39,48 @@ SharedSession::~SharedSession() {
   }
 }
 
-void SharedSession::OnSinkAvailable(
-    mojom::RemotingSinkCapabilities capabilities) {
+bool SharedSession::HasVideoCapability(
+    mojom::RemotingSinkVideoCapability capability) const {
+#if defined(OS_ANDROID)
+  return true;
+#else
+  return std::find(std::begin(sink_metadata_.video_capabilities),
+                   std::end(sink_metadata_.video_capabilities),
+                   capability) != std::end(sink_metadata_.video_capabilities);
+#endif
+}
+
+bool SharedSession::HasAudioCapability(
+    mojom::RemotingSinkAudioCapability capability) const {
+#if defined(OS_ANDROID)
+  return true;
+#else
+  return std::find(std::begin(sink_metadata_.audio_capabilities),
+                   std::end(sink_metadata_.audio_capabilities),
+                   capability) != std::end(sink_metadata_.audio_capabilities);
+#endif
+}
+
+bool SharedSession::HasFeatureCapability(
+    mojom::RemotingSinkFeature capability) const {
+  return std::find(std::begin(sink_metadata_.features),
+                   std::end(sink_metadata_.features),
+                   capability) != std::end(sink_metadata_.features);
+}
+
+bool SharedSession::IsRemoteDecryptionAvailable() const {
+  return HasFeatureCapability(mojom::RemotingSinkFeature::CONTENT_DECRYPTION);
+}
+
+void SharedSession::OnSinkAvailable(mojom::RemotingSinkMetadataPtr metadata) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (capabilities == mojom::RemotingSinkCapabilities::NONE) {
+  sink_metadata_ = *metadata;
+
+  if (!HasFeatureCapability(mojom::RemotingSinkFeature::RENDERING)) {
     OnSinkGone();
     return;
   }
-  sink_capabilities_ = capabilities;
   if (state_ == SESSION_UNAVAILABLE)
     UpdateAndNotifyState(SESSION_CAN_START);
 }
@@ -45,19 +88,11 @@ void SharedSession::OnSinkAvailable(
 void SharedSession::OnSinkGone() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  sink_capabilities_ = mojom::RemotingSinkCapabilities::NONE;
-
-  if (state_ == SESSION_PERMANENTLY_STOPPED)
-    return;
-  if (state_ == SESSION_CAN_START) {
-    UpdateAndNotifyState(SESSION_UNAVAILABLE);
-    return;
-  }
-  if (state_ == SESSION_STARTED || state_ == SESSION_STARTING) {
-    VLOG(1) << "Sink is gone in a remoting session.";
-    // Remoting is being stopped by Remoter.
-    UpdateAndNotifyState(SESSION_STOPPING);
-  }
+  // Prevent the clients to start any future remoting sessions. Won't affect the
+  // behavior of the currently-running session (if any).
+  sink_metadata_ = mojom::RemotingSinkMetadata();
+  if (state_ == SESSION_CAN_START)
+    state_ = SESSION_UNAVAILABLE;
 }
 
 void SharedSession::OnStarted() {
@@ -90,21 +125,26 @@ void SharedSession::OnStopped(mojom::RemotingStopReason reason) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   VLOG(1) << "Remoting stopped: " << reason;
+  stop_reason_ = reason;
   if (state_ == SESSION_PERMANENTLY_STOPPED)
     return;
+  // This call will stop the current remoting session if started.
   UpdateAndNotifyState(SESSION_UNAVAILABLE);
 }
 
 void SharedSession::OnMessageFromSink(const std::vector<uint8_t>& message) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING_RPC)
   std::unique_ptr<pb::RpcMessage> rpc(new pb::RpcMessage());
   if (!rpc->ParseFromArray(message.data(), message.size())) {
     VLOG(1) << "corrupted Rpc message";
     Shutdown();
     return;
   }
+
   rpc_broker_.ProcessMessageFromRemote(std::move(rpc));
+#endif
 }
 
 void SharedSession::UpdateAndNotifyState(SessionState state) {
@@ -218,6 +258,12 @@ void SharedSession::SendMessageToSink(
     std::unique_ptr<std::vector<uint8_t>> message) {
   DCHECK(thread_checker_.CalledOnValidThread());
   remoter_->SendMessageToSink(*message);
+}
+
+void SharedSession::EstimateTransmissionCapacity(
+    mojom::Remoter::EstimateTransmissionCapacityCallback callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  remoter_->EstimateTransmissionCapacity(std::move(callback));
 }
 
 }  // namespace remoting

@@ -32,9 +32,8 @@
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
-#include "core/events/Event.h"
-#include "core/events/GenericEventQueue.h"
+#include "core/dom/events/Event.h"
+#include "core/dom/events/MediaElementEventQueue.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "modules/encryptedmedia/ContentDecryptionModuleResultPromise.h"
 #include "modules/encryptedmedia/EncryptedMediaUtils.h"
@@ -48,7 +47,7 @@
 #include "platform/bindings/V8ThrowException.h"
 #include "platform/network/mime/ContentType.h"
 #include "platform/wtf/ASCIICType.h"
-#include "platform/wtf/PtrUtil.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebContentDecryptionModule.h"
 #include "public/platform/WebContentDecryptionModuleException.h"
 #include "public/platform/WebContentDecryptionModuleSession.h"
@@ -195,9 +194,9 @@ class MediaKeySession::PendingAction final
                              String());
   }
 
-  ~PendingAction() {}
+  ~PendingAction() = default;
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(result_);
     visitor->Trace(data_);
   }
@@ -231,7 +230,7 @@ class NewSessionResultPromise : public ContentDecryptionModuleResultPromise {
   NewSessionResultPromise(ScriptState* script_state, MediaKeySession* session)
       : ContentDecryptionModuleResultPromise(script_state), session_(session) {}
 
-  ~NewSessionResultPromise() override {}
+  ~NewSessionResultPromise() override = default;
 
   // ContentDecryptionModuleResult implementation.
   void CompleteWithSession(
@@ -248,7 +247,7 @@ class NewSessionResultPromise : public ContentDecryptionModuleResultPromise {
     Resolve();
   }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(session_);
     ContentDecryptionModuleResultPromise::Trace(visitor);
   }
@@ -267,7 +266,7 @@ class LoadSessionResultPromise : public ContentDecryptionModuleResultPromise {
   LoadSessionResultPromise(ScriptState* script_state, MediaKeySession* session)
       : ContentDecryptionModuleResultPromise(script_state), session_(session) {}
 
-  ~LoadSessionResultPromise() override {}
+  ~LoadSessionResultPromise() override = default;
 
   // ContentDecryptionModuleResult implementation.
   void CompleteWithSession(
@@ -294,7 +293,7 @@ class LoadSessionResultPromise : public ContentDecryptionModuleResultPromise {
     NOTREACHED();
   }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(session_);
     ContentDecryptionModuleResultPromise::Trace(visitor);
   }
@@ -312,7 +311,7 @@ class SimpleResultPromise : public ContentDecryptionModuleResultPromise {
   SimpleResultPromise(ScriptState* script_state, MediaKeySession* session)
       : ContentDecryptionModuleResultPromise(script_state), session_(session) {}
 
-  ~SimpleResultPromise() override {}
+  ~SimpleResultPromise() override = default;
 
   // ContentDecryptionModuleResultPromise implementation.
   void Complete() override {
@@ -322,7 +321,7 @@ class SimpleResultPromise : public ContentDecryptionModuleResultPromise {
     Resolve();
   }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(session_);
     ContentDecryptionModuleResultPromise::Trace(visitor);
   }
@@ -344,7 +343,9 @@ MediaKeySession::MediaKeySession(ScriptState* script_state,
                                  MediaKeys* media_keys,
                                  WebEncryptedMediaSessionType session_type)
     : ContextLifecycleObserver(ExecutionContext::From(script_state)),
-      async_event_queue_(GenericEventQueue::Create(this)),
+      async_event_queue_(
+          MediaElementEventQueue::Create(this,
+                                         ExecutionContext::From(script_state))),
       media_keys_(media_keys),
       session_type_(session_type),
       expiration_(std::numeric_limits<double>::quiet_NaN()),
@@ -355,10 +356,10 @@ MediaKeySession::MediaKeySession(ScriptState* script_state,
       closed_promise_(new ClosedPromise(ExecutionContext::From(script_state),
                                         this,
                                         ClosedPromise::kClosed)),
-      action_timer_(
-          TaskRunnerHelper::Get(TaskType::kMiscPlatformAPI, script_state),
-          this,
-          &MediaKeySession::ActionTimerFired) {
+      action_timer_(ExecutionContext::From(script_state)
+                        ->GetTaskRunner(TaskType::kMiscPlatformAPI),
+                    this,
+                    &MediaKeySession::ActionTimerFired) {
   DVLOG(MEDIA_KEY_SESSION_LOG_LEVEL) << __func__ << "(" << this << ")";
   InstanceCounters::IncrementCounter(InstanceCounters::kMediaKeySessionCounter);
 
@@ -499,7 +500,7 @@ ScriptPromise MediaKeySession::generateRequest(
   pending_actions_.push_back(PendingAction::CreatePendingGenerateRequest(
       result, init_data_type, init_data_buffer));
   DCHECK(!action_timer_.IsActive());
-  action_timer_.StartOneShot(0, BLINK_FROM_HERE);
+  action_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 
   // 11. Return promise.
   return promise;
@@ -594,7 +595,7 @@ ScriptPromise MediaKeySession::load(ScriptState* script_state,
   pending_actions_.push_back(
       PendingAction::CreatePendingLoadRequest(result, session_id));
   DCHECK(!action_timer_.IsActive());
-  action_timer_.StartOneShot(0, BLINK_FROM_HERE);
+  action_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 
   // 9. Return promise.
   return promise;
@@ -713,7 +714,7 @@ ScriptPromise MediaKeySession::update(ScriptState* script_state,
   pending_actions_.push_back(
       PendingAction::CreatePendingUpdate(result, response_copy));
   if (!action_timer_.IsActive())
-    action_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    action_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 
   // 7. Return promise.
   return promise;
@@ -757,7 +758,7 @@ ScriptPromise MediaKeySession::close(ScriptState* script_state) {
   // 5. Run the following steps in parallel (done in closeTask()).
   pending_actions_.push_back(PendingAction::CreatePendingClose(result));
   if (!action_timer_.IsActive())
-    action_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    action_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 
   // 6. Return promise.
   return promise;
@@ -797,7 +798,7 @@ ScriptPromise MediaKeySession::remove(ScriptState* script_state) {
   // 4. Run the following steps asynchronously (done in removeTask()).
   pending_actions_.push_back(PendingAction::CreatePendingRemove(result));
   if (!action_timer_.IsActive())
-    action_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    action_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 
   // 5. Return promise.
   return promise;
@@ -881,6 +882,10 @@ void MediaKeySession::Message(MessageType message_type,
         kLicenseRelease:
       init.setMessageType("license-release");
       break;
+    case WebContentDecryptionModuleSession::Client::MessageType::
+        kIndividualizationRequest:
+      init.setMessageType("individualization-request");
+      break;
   }
   init.setMessage(DOMArrayBuffer::Create(static_cast<const void*>(message),
                                          message_length));
@@ -888,7 +893,7 @@ void MediaKeySession::Message(MessageType message_type,
   MediaKeyMessageEvent* event =
       MediaKeyMessageEvent::Create(EventTypeNames::message, init);
   event->SetTarget(this);
-  async_event_queue_->EnqueueEvent(BLINK_FROM_HERE, event);
+  async_event_queue_->EnqueueEvent(FROM_HERE, event);
 }
 
 void MediaKeySession::Close() {
@@ -973,7 +978,7 @@ void MediaKeySession::KeysStatusesChange(
   //    at the session.
   Event* event = Event::Create(EventTypeNames::keystatuseschange);
   event->SetTarget(this);
-  async_event_queue_->EnqueueEvent(BLINK_FROM_HERE, event);
+  async_event_queue_->EnqueueEvent(FROM_HERE, event);
 
   // 6. Queue a task to run the attempt to resume playback if necessary
   //    algorithm on each of the media element(s) whose mediaKeys attribute
@@ -1015,7 +1020,7 @@ void MediaKeySession::ContextDestroyed(ExecutionContext*) {
   async_event_queue_->Close();
 }
 
-DEFINE_TRACE(MediaKeySession) {
+void MediaKeySession::Trace(blink::Visitor* visitor) {
   visitor->Trace(async_event_queue_);
   visitor->Trace(pending_actions_);
   visitor->Trace(media_keys_);

@@ -1,11 +1,20 @@
 {
   "name": "content_browser",
   "interface_provider_specs": {
+    "service_manager:connector": {
+      "provides": {
+        "renderer": [
+          "safe_browsing::mojom::SafeBrowsing",
+          "spellcheck::mojom::SpellCheckHost"
+        ]
+      }
+    },
     "navigation:frame": {
       "provides": {
         "renderer": [
           "autofill::mojom::AutofillDriver",
           "autofill::mojom::PasswordManagerDriver",
+          "blink::mojom::TextSuggestionHost",
           "web_restrictions::mojom::WebRestrictions"
         ]
       }

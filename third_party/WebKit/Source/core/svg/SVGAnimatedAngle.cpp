@@ -30,7 +30,7 @@
 
 #include "core/svg/SVGAnimatedAngle.h"
 
-#include "core/SVGNames.h"
+#include "core/svg_names.h"
 
 namespace blink {
 
@@ -43,14 +43,16 @@ SVGAnimatedAngle::SVGAnimatedAngle(SVGElement* context_element)
           SVGNames::orientAttr,
           BaseValue()->OrientType())) {}
 
-SVGAnimatedAngle::~SVGAnimatedAngle() {}
+SVGAnimatedAngle::~SVGAnimatedAngle() = default;
 
-DEFINE_TRACE(SVGAnimatedAngle) {
+void SVGAnimatedAngle::Trace(blink::Visitor* visitor) {
   visitor->Trace(orient_type_);
   SVGAnimatedProperty<SVGAngle>::Trace(visitor);
+  ScriptWrappable::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(SVGAnimatedAngle) {
+void SVGAnimatedAngle::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   SVGAnimatedProperty<SVGAngle>::TraceWrappers(visitor);
   ScriptWrappable::TraceWrappers(visitor);
 }

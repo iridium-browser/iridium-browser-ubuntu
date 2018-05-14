@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.payments;
 
 import android.graphics.drawable.Drawable;
 
+import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.browser.payments.ui.PaymentOption;
 import org.chromium.payments.mojom.PaymentDetailsModifier;
 import org.chromium.payments.mojom.PaymentItem;
@@ -46,8 +47,23 @@ public abstract class PaymentInstrument extends PaymentOption {
         void onInstrumentDetailsError();
     }
 
+    /** The interface for the requester to abort payment. */
+    public interface AbortCallback {
+        /**
+         * Called after aborting payment is finished.
+         *
+         * @param abortSucceeded Indicates whether abort is succeed.
+         */
+        void onInstrumentAbortResult(boolean abortSucceeded);
+    }
+
     protected PaymentInstrument(String id, String label, String sublabel, Drawable icon) {
         super(id, label, sublabel, icon);
+    }
+
+    protected PaymentInstrument(
+            String id, String label, String sublabel, String tertiarylabel, Drawable icon) {
+        super(id, label, sublabel, tertiarylabel, icon);
     }
 
     /**
@@ -56,7 +72,7 @@ public abstract class PaymentInstrument extends PaymentOption {
      * @param modifiedTotal The new modified total to use.
      */
     public void setModifiedTotal(@Nullable String modifiedTotal) {
-        updateTertiarylabel(modifiedTotal);
+        updatePromoMessage(modifiedTotal);
     }
 
     /**
@@ -70,7 +86,7 @@ public abstract class PaymentInstrument extends PaymentOption {
 
     /**
      * @return Whether this is an autofill instrument. All autofill instruments are sorted below all
-     * non-autofill instruments.
+     *         non-autofill instruments.
      */
     public boolean isAutofillInstrument() {
         return false;
@@ -92,11 +108,20 @@ public abstract class PaymentInstrument extends PaymentOption {
 
     /**
      * @return Whether the instrument is exactly matching all filters provided by the merchant. For
-     * example, this can return false for unknown card types, if the merchant requested only debit
-     * cards.
+     *         example, this can return false for unknown card types, if the merchant requested only
+     *         debit cards.
      */
     public boolean isExactlyMatchingMerchantRequest() {
         return true;
+    }
+
+    /**
+     * @return Whether the instrument supports the payment method with the method data. For example,
+     *         supported card types and networks in the data should be verified for 'basic-card'
+     *         payment method.
+     */
+    public boolean isValidForPaymentMethodData(String method, PaymentMethodData data) {
+        return getInstrumentMethodNames().contains(method);
     }
 
     /** @return The country code (or null if none) associated with this payment instrument. */
@@ -107,7 +132,7 @@ public abstract class PaymentInstrument extends PaymentOption {
 
     /**
      * @return Whether presence of this payment instrument should cause the
-     * PaymentRequest.canMakePayment() to return true.
+     *         PaymentRequest.canMakePayment() to return true.
      */
     public boolean canMakePayment() {
         return true;
@@ -142,6 +167,20 @@ public abstract class PaymentInstrument extends PaymentOption {
             Map<String, PaymentMethodData> methodDataMap, PaymentItem total,
             List<PaymentItem> displayItems, Map<String, PaymentDetailsModifier> modifiers,
             InstrumentDetailsCallback callback);
+
+    /**
+     * Abort invocation of the payment app.
+     *
+     * @param callback The callback to return abort result.
+     */
+    public void abortPaymentApp(AbortCallback callback) {
+        ThreadUtils.postOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                callback.onInstrumentAbortResult(false);
+            }
+        });
+    }
 
     /**
      * Cleans up any resources held by the payment instrument. For example, closes server

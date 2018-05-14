@@ -5,13 +5,12 @@
 #ifndef NET_QUIC_CORE_QUIC_SERVER_ID_H_
 #define NET_QUIC_CORE_QUIC_SERVER_ID_H_
 
-#include <stdint.h>
-
-#include <string>
+#include <cstdint>
 
 #include "net/base/host_port_pair.h"
 #include "net/base/privacy_mode.h"
 #include "net/quic/platform/api/quic_export.h"
+#include "net/quic/platform/api/quic_string.h"
 
 namespace net {
 
@@ -21,10 +20,8 @@ class QUIC_EXPORT_PRIVATE QuicServerId {
  public:
   QuicServerId();
   QuicServerId(const HostPortPair& host_port_pair, PrivacyMode privacy_mode);
-  QuicServerId(const std::string& host, uint16_t port);
-  QuicServerId(const std::string& host,
-               uint16_t port,
-               PrivacyMode privacy_mode);
+  QuicServerId(const QuicString& host, uint16_t port);
+  QuicServerId(const QuicString& host, uint16_t port, PrivacyMode privacy_mode);
   ~QuicServerId();
 
   // Needed to be an element of std::set.
@@ -33,12 +30,12 @@ class QUIC_EXPORT_PRIVATE QuicServerId {
 
   // ToString() will convert the QuicServerId to "scheme:hostname:port" or
   // "scheme:hostname:port/private". "scheme" will be "https".
-  std::string ToString() const;
+  QuicString ToString() const;
 
   // Used in Chromium, but not internally.
   const HostPortPair& host_port_pair() const { return host_port_pair_; }
 
-  const std::string& host() const { return host_port_pair_.host(); }
+  const QuicString& host() const { return host_port_pair_.host(); }
 
   uint16_t port() const { return host_port_pair_.port(); }
 

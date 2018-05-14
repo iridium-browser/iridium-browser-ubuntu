@@ -2,15 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef DEVICE_GEOLOCATION_GEOLOCATION_IMPL_H_
+#define DEVICE_GEOLOCATION_GEOLOCATION_IMPL_H_
+
 #include <memory>
 
 #include "base/macros.h"
 #include "device/geolocation/geolocation_provider_impl.h"
-#include "device/geolocation/public/interfaces/geolocation.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
-
-#ifndef DEVICE_GEOLOCATION_GEOLOCATION_IMPL_H_
-#define DEVICE_GEOLOCATION_GEOLOCATION_IMPL_H_
+#include "services/device/public/mojom/geolocation.mojom.h"
 
 namespace device {
 
@@ -20,9 +20,7 @@ class GeolocationContext;
 // Implements the Geolocation Mojo interface.
 class GeolocationImpl : public mojom::Geolocation {
  public:
-  // |context| must outlive this object. |update_callback| will be called when
-  // location updates are sent, allowing the client to know when the service
-  // is being used.
+  // |context| must outlive this object.
   GeolocationImpl(mojo::InterfaceRequest<mojom::Geolocation> request,
                   GeolocationContext* context);
   ~GeolocationImpl() override;
@@ -35,7 +33,7 @@ class GeolocationImpl : public mojom::Geolocation {
   void ResumeUpdates();
 
   // Enables and disables geolocation override.
-  void SetOverride(const Geoposition& position);
+  void SetOverride(const mojom::Geoposition& position);
   void ClearOverride();
 
  private:
@@ -45,7 +43,7 @@ class GeolocationImpl : public mojom::Geolocation {
 
   void OnConnectionError();
 
-  void OnLocationUpdate(const Geoposition& position);
+  void OnLocationUpdate(const mojom::Geoposition& position);
   void ReportCurrentPosition();
 
   // The binding between this object and the other end of the pipe.
@@ -53,14 +51,16 @@ class GeolocationImpl : public mojom::Geolocation {
 
   // Owns this object.
   GeolocationContext* context_;
+
+  // Token that unsubscribes from GeolocationProvider updates when destroyed.
   std::unique_ptr<GeolocationProvider::Subscription> geolocation_subscription_;
 
   // The callback passed to QueryNextPosition.
   QueryNextPositionCallback position_callback_;
 
-  // Valid iff SetOverride() has been called and ClearOverride() has not
+  // Valid if SetOverride() has been called and ClearOverride() has not
   // subsequently been called.
-  Geoposition position_override_;
+  mojom::Geoposition position_override_;
 
   mojom::Geoposition current_position_;
 

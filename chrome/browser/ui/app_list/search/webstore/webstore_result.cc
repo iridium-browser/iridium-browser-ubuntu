@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <vector>
 
 #include "base/bind.h"
@@ -23,10 +24,13 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
+#include "content/public/browser/storage_partition.h"
+#include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension_urls.h"
 #include "net/base/url_util.h"
+#include "ui/app_list/app_list_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -54,14 +58,11 @@ WebstoreResult::WebstoreResult(Profile* profile,
   InitAndStartObserving();
   UpdateActions();
 
-  int icon_dimension = GetPreferredIconDimension();
+  int icon_dimension = GetPreferredIconDimension(this);
   icon_ = gfx::ImageSkia(
-      new UrlIconSource(
+      std::make_unique<UrlIconSource>(
           base::Bind(&WebstoreResult::OnIconLoaded, weak_factory_.GetWeakPtr()),
-          profile_->GetRequestContext(),
-          icon_url_,
-          icon_dimension,
-          IDR_WEBSTORE_ICON_32),
+          profile_, icon_url_, icon_dimension, IDR_WEBSTORE_ICON_32),
       gfx::Size(icon_dimension, icon_dimension));
   SetIcon(icon_);
 }
@@ -173,13 +174,9 @@ void WebstoreResult::StartInstall() {
   SetPercentDownloaded(0);
   SetIsInstalling(true);
 
-  scoped_refptr<WebstoreInstaller> installer =
-      new WebstoreInstaller(
-          app_id_,
-          profile_,
-          controller_->GetAppListWindow(),
-          base::Bind(&WebstoreResult::InstallCallback,
-                     weak_factory_.GetWeakPtr()));
+  scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
+      app_id_, profile_,
+      base::Bind(&WebstoreResult::InstallCallback, weak_factory_.GetWeakPtr()));
   installer->BeginInstall();
 }
 

@@ -102,7 +102,7 @@ struct sctp_common_header {
 } SCTP_PACKED;
 
 #if defined(_WIN32) && defined(_MSC_VER)
-#pragma pack()
+#pragma pack(pop)
 #endif
 #undef SCTP_PACKED
 
@@ -896,6 +896,13 @@ usrsctp_getsockopt(struct socket *so,
                    int option_name,
                    void *option_value,
                    socklen_t *option_len);
+
+int
+usrsctp_opt_info(struct socket *so,
+                 sctp_assoc_t id,
+                 int opt,
+                 void *arg,
+                 socklen_t *size);
 
 int
 usrsctp_getpaddrs(struct socket *so,

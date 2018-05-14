@@ -4,6 +4,8 @@
 
 // Contains holistic tests of the bindings infrastructure
 
+#include "base/run_loop.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/net/url_request_mock_util.h"
@@ -12,9 +14,11 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/process_manager.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 #include "net/dns/mock_host_resolver.h"
@@ -23,16 +27,38 @@
 namespace extensions {
 namespace {
 
-class ExtensionBindingsApiTest : public ExtensionApiTest {
+enum BindingsType { NATIVE_BINDINGS, JAVASCRIPT_BINDINGS };
+
+class ExtensionBindingsApiTest
+    : public ExtensionApiTest,
+      public ::testing::WithParamInterface<BindingsType> {
  public:
+  ExtensionBindingsApiTest() {}
+  ~ExtensionBindingsApiTest() override {}
+
+  void SetUp() override {
+    if (GetParam() == NATIVE_BINDINGS) {
+      scoped_feature_list_.InitAndEnableFeature(features::kNativeCrxBindings);
+    } else {
+      DCHECK_EQ(JAVASCRIPT_BINDINGS, GetParam());
+      scoped_feature_list_.InitAndDisableFeature(features::kNativeCrxBindings);
+    }
+    ExtensionApiTest::SetUp();
+  }
+
   void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(StartEmbeddedTestServer());
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionBindingsApiTest);
 };
 
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest,
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
                        UnavailableBindingsNeverRegistered) {
   // Test will request the 'storage' permission.
   PermissionsRequestFunction::SetIgnoreUserGestureForTests(true);
@@ -40,7 +66,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest,
       "bindings/unavailable_bindings_never_registered")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest,
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
                        ExceptionInHandlerShouldNotCrash) {
   ASSERT_TRUE(RunExtensionSubtest(
       "bindings/exception_in_handler_should_not_crash",
@@ -49,10 +75,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest,
 
 // Tests that an error raised during an async function still fires
 // the callback, but sets chrome.runtime.lastError.
-// FIXME should be in ExtensionBindingsApiTest.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, LastError) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, LastError) {
   ASSERT_TRUE(LoadExtension(
-      test_data_dir_.AppendASCII("browsertest").AppendASCII("last_error")));
+      test_data_dir_.AppendASCII("bindings").AppendASCII("last_error")));
 
   // Get the ExtensionHost that is hosting our background page.
   extensions::ProcessManager* manager =
@@ -67,7 +92,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, LastError) {
 
 // Regression test that we don't delete our own bindings with about:blank
 // iframes.
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, AboutBlankIframe) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, AboutBlankIframe) {
   ResultCatcher catcher;
   ExtensionTestMessageListener listener("load", true);
 
@@ -85,7 +110,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, AboutBlankIframe) {
   ASSERT_TRUE(catcher.GetNextResult()) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest,
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
                        InternalAPIsNotOnChromeObject) {
   ASSERT_TRUE(RunExtensionSubtest(
       "bindings/internal_apis_not_on_chrome_object",
@@ -101,7 +126,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest,
 #else
 #define MAYBE_EventOverriding EventOverriding
 #endif
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, MAYBE_EventOverriding) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, MAYBE_EventOverriding) {
   ASSERT_TRUE(RunExtensionTest("bindings/event_overriding")) << message_;
   // The extension test removes a window and, during window removal, sends the
   // success message. Make sure we flush all pending tasks.
@@ -110,22 +135,22 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, MAYBE_EventOverriding) {
 
 // Tests the effectiveness of the 'nocompile' feature file property.
 // Regression test for http://crbug.com/356133.
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, Nocompile) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, Nocompile) {
   ASSERT_TRUE(RunExtensionSubtest("bindings/nocompile", "page.html"))
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, ApiEnums) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, ApiEnums) {
   ASSERT_TRUE(RunExtensionTest("bindings/api_enums")) << message_;
 };
 
 // Regression test for http://crbug.com/504011 - proper access checks on
 // getModuleSystem().
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, ModuleSystem) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, ModuleSystem) {
   ASSERT_TRUE(RunExtensionTest("bindings/module_system")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, NoExportOverriding) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, NoExportOverriding) {
   // We need to create runtime bindings in the web page. An extension that's
   // externally connectable will do that for us.
   ASSERT_TRUE(LoadExtension(
@@ -147,7 +172,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, NoExportOverriding) {
   EXPECT_EQ("success", result);
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, NoGinDefineOverriding) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, NoGinDefineOverriding) {
   // We need to create runtime bindings in the web page. An extension that's
   // externally connectable will do that for us.
   ASSERT_TRUE(LoadExtension(
@@ -171,7 +196,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, NoGinDefineOverriding) {
   EXPECT_EQ("success", result);
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, HandlerFunctionTypeChecking) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, HandlerFunctionTypeChecking) {
   ui_test_utils::NavigateToURL(
       browser(),
       embedded_test_server()->GetURL(
@@ -189,7 +214,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, HandlerFunctionTypeChecking) {
   EXPECT_EQ("success", result);
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest,
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
                        MoreNativeFunctionInterceptionTests) {
   // We need to create runtime bindings in the web page. An extension that's
   // externally connectable will do that for us.
@@ -216,7 +241,7 @@ class FramesExtensionBindingsApiTest : public ExtensionBindingsApiTest {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBindingsApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kDisablePopupBlocking);
+    command_line->AppendSwitch(::switches::kDisablePopupBlocking);
   }
 };
 
@@ -229,7 +254,7 @@ class FramesExtensionBindingsApiTest : public ExtensionBindingsApiTest {
 // messages ("receiver") and one which we'll try first faking messages from in
 // the web page's iframe, as well as actually send a message from later
 // ("sender").
-IN_PROC_BROWSER_TEST_F(FramesExtensionBindingsApiTest, FramesBeforeNavigation) {
+IN_PROC_BROWSER_TEST_P(FramesExtensionBindingsApiTest, FramesBeforeNavigation) {
   // Load the sender and receiver extensions, and make sure they are ready.
   ExtensionTestMessageListener sender_ready("sender_ready", true);
   const Extension* sender = LoadExtension(
@@ -271,7 +296,7 @@ IN_PROC_BROWSER_TEST_F(FramesExtensionBindingsApiTest, FramesBeforeNavigation) {
   EXPECT_EQ(1, message_count);
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, TestFreezingChrome) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, TestFreezingChrome) {
   ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL(
                      "/extensions/api_test/bindings/freeze.html"));
@@ -281,7 +306,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, TestFreezingChrome) {
 }
 
 // Tests interaction with event filter parsing.
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, TestEventFilterParsing) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, TestEventFilterParsing) {
   ExtensionTestMessageListener listener("ready", false);
   ASSERT_TRUE(
       LoadExtension(test_data_dir_.AppendASCII("bindings/event_filter")));
@@ -294,7 +319,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, TestEventFilterParsing) {
 }
 
 // crbug.com/733337
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, ValidationInterception) {
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, ValidationInterception) {
   // We need to create runtime bindings in the web page. An extension that's
   // externally connectable will do that for us.
   ASSERT_TRUE(
@@ -314,6 +339,116 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, ValidationInterception) {
       web_contents, "domAutomationController.send(caught)", &caught));
   EXPECT_TRUE(caught);
 }
+
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, UncaughtExceptionLogging) {
+  ASSERT_TRUE(RunExtensionTest("bindings/uncaught_exception_logging"))
+      << message_;
+}
+
+// Verify that when a web frame embeds an extension subframe, and that subframe
+// is the only active portion of the extension, the subframe gets proper JS
+// bindings. See https://crbug.com/760341.
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
+                       ExtensionSubframeGetsBindings) {
+  // Load an extension that does not have a background page or popup, so it
+  // won't be activated just yet.
+  const extensions::Extension* extension =
+      LoadExtension(test_data_dir_.AppendASCII("bindings")
+                        .AppendASCII("extension_subframe_gets_bindings"));
+  ASSERT_TRUE(extension);
+
+  // Navigate current tab to a web URL with a subframe.
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ui_test_utils::NavigateToURL(browser(),
+                               embedded_test_server()->GetURL("/iframe.html"));
+
+  // Navigate the subframe to the extension URL, which should activate the
+  // extension.
+  GURL extension_url(extension->GetResourceURL("page.html"));
+  ResultCatcher catcher;
+  content::NavigateIframeToURL(web_contents, "test", extension_url);
+  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
+                       ExtensionListenersRemoveContext) {
+  const Extension* extension = LoadExtension(
+      test_data_dir_.AppendASCII("bindings/listeners_destroy_context"));
+  ASSERT_TRUE(extension);
+
+  ExtensionTestMessageListener listener("ready", true);
+
+  // Navigate to a web page with an iframe (the iframe is title1.html).
+  GURL main_frame_url = embedded_test_server()->GetURL("a.com", "/iframe.html");
+  ui_test_utils::NavigateToURL(browser(), main_frame_url);
+
+  content::WebContents* tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  content::RenderFrameHost* main_frame = tab->GetMainFrame();
+  content::RenderFrameHost* subframe = ChildFrameAt(main_frame, 0);
+  content::RenderFrameDeletedObserver subframe_deleted(subframe);
+
+  // Wait for the extension's content script to be ready.
+  ASSERT_TRUE(listener.WaitUntilSatisfied());
+
+  // It's actually critical to the test that these frames are in the same
+  // process, because otherwise a crash in the iframe wouldn't be detectable
+  // (since we rely on JS execution in the main frame to tell if the renderer
+  // crashed - see comment below).
+  content::RenderProcessHost* main_frame_process = main_frame->GetProcess();
+  EXPECT_EQ(main_frame_process, subframe->GetProcess());
+
+  ExtensionTestMessageListener failure_listener("failed", false);
+
+  // Tell the extension to register listeners that will remove the iframe, and
+  // trigger them.
+  listener.Reply("go!");
+
+  // The frame will be deleted.
+  subframe_deleted.WaitUntilDeleted();
+
+  // Unfortunately, we don't have a good way of checking if something crashed
+  // after the frame was removed. WebContents::IsCrashed() seems like it should
+  // work, but is insufficient. Instead, use JS execution as the source of
+  // true.
+  EXPECT_FALSE(tab->IsCrashed());
+  EXPECT_EQ(main_frame_url, main_frame->GetLastCommittedURL());
+  EXPECT_EQ(main_frame_process, main_frame->GetProcess());
+  bool renderer_valid = false;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+      main_frame, "domAutomationController.send(true);", &renderer_valid));
+  EXPECT_TRUE(renderer_valid);
+  EXPECT_FALSE(failure_listener.was_satisfied());
+}
+
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, UseAPIsAfterContextRemoval) {
+  EXPECT_TRUE(RunExtensionTest("bindings/invalidate_context")) << message_;
+}
+
+// TODO(devlin): Can this be combined with
+// ExtensionBindingsApiTest.UseAPIsAfterContextRemoval?
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, UseAppAPIAfterFrameRemoval) {
+  ASSERT_TRUE(RunExtensionTest("crazy_extension"));
+}
+
+// Run core bindings API tests with both native and JS-based bindings. This
+// ensures we have some minimum level of coverage while in the experimental
+// phase, when native bindings may be enabled on trunk but not at 100% stable.
+INSTANTIATE_TEST_CASE_P(Native,
+                        ExtensionBindingsApiTest,
+                        ::testing::Values(NATIVE_BINDINGS));
+INSTANTIATE_TEST_CASE_P(JavaScript,
+                        ExtensionBindingsApiTest,
+                        ::testing::Values(JAVASCRIPT_BINDINGS));
+
+INSTANTIATE_TEST_CASE_P(Native,
+                        FramesExtensionBindingsApiTest,
+                        ::testing::Values(NATIVE_BINDINGS));
+INSTANTIATE_TEST_CASE_P(JavaScript,
+                        FramesExtensionBindingsApiTest,
+                        ::testing::Values(JAVASCRIPT_BINDINGS));
 
 }  // namespace
 }  // namespace extensions

@@ -13,8 +13,9 @@
 #include "content/shell/browser/shell.h"
 #include "media/base/media.h"
 #include "media/base/media_switches.h"
+#include "media/base/test_data_util.h"
+#include "media/media_features.h"
 #include "media/mojo/features.h"
-#include "ppapi/features/features.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/build_info.h"
@@ -24,7 +25,7 @@
 #include "base/win/windows_version.h"
 #endif
 
-#if BUILDFLAG(ENABLE_MOJO_CDM) && !BUILDFLAG(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_MOJO_CDM) && !BUILDFLAG(ENABLE_LIBRARY_CDMS)
 // When mojo CDM is enabled, External Clear Key is supported in //content/shell/
 // by using mojo CDM with AesDecryptor running in the remote (e.g. GPU or
 // Browser) process. When pepper CDM is supported, External Clear Key is
@@ -95,7 +96,7 @@ class EncryptedMediaTest : public MediaBrowserTest,
     RunEncryptedMediaTest("encrypted_frame_size_change.html",
                           "frame_size_change-av_enc-v.webm",
                           kWebMVorbisAudioVP8Video, CurrentKeySystem(),
-                          CurrentSourceType(), kEnded);
+                          CurrentSourceType(), media::kEnded);
   }
 
   void TestConfigChange(ConfigChangeType config_change_type) {
@@ -108,11 +109,12 @@ class EncryptedMediaTest : public MediaBrowserTest,
     }
 
     base::StringPairs query_params;
-    query_params.push_back(std::make_pair("keySystem", CurrentKeySystem()));
-    query_params.push_back(std::make_pair(
+    query_params.emplace_back("keySystem", CurrentKeySystem());
+    query_params.emplace_back(
         "configChangeType",
-        base::IntToString(static_cast<int>(config_change_type))));
-    RunMediaTestPage("mse_config_change.html", query_params, kEnded, true);
+        base::IntToString(static_cast<int>(config_change_type)));
+    RunMediaTestPage("mse_config_change.html", query_params, media::kEnded,
+                     true);
   }
 
   void RunEncryptedMediaTest(const std::string& html_page,
@@ -122,11 +124,11 @@ class EncryptedMediaTest : public MediaBrowserTest,
                              SrcType src_type,
                              const std::string& expectation) {
     base::StringPairs query_params;
-    query_params.push_back(std::make_pair("mediaFile", media_file));
-    query_params.push_back(std::make_pair("mediaType", media_type));
-    query_params.push_back(std::make_pair("keySystem", key_system));
+    query_params.emplace_back("mediaFile", media_file);
+    query_params.emplace_back("mediaType", media_type);
+    query_params.emplace_back("keySystem", key_system);
     if (src_type == SrcType::MSE)
-      query_params.push_back(std::make_pair("useMSE", "1"));
+      query_params.emplace_back("useMSE", "1");
     RunMediaTestPage(html_page, query_params, expectation, true);
   }
 
@@ -134,12 +136,8 @@ class EncryptedMediaTest : public MediaBrowserTest,
                                    const std::string& media_type,
                                    const std::string& key_system,
                                    SrcType src_type) {
-    RunEncryptedMediaTest(kDefaultEmePlayer,
-                          media_file,
-                          media_type,
-                          key_system,
-                          src_type,
-                          kEnded);
+    RunEncryptedMediaTest(kDefaultEmePlayer, media_file, media_type, key_system,
+                          src_type, media::kEnded);
   }
 
  protected:
@@ -151,7 +149,9 @@ class EncryptedMediaTest : public MediaBrowserTest,
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kIgnoreAutoplayRestrictionsForTests);
+    command_line->AppendSwitchASCII(
+        switches::kAutoplayPolicy,
+        switches::autoplay::kNoUserGestureRequiredPolicy);
 #if defined(SUPPORTS_EXTERNAL_CLEAR_KEY_IN_CONTENT_SHELL)
     scoped_feature_list_.InitWithFeatures({media::kExternalClearKeyForTesting},
                                           {});
@@ -260,7 +260,13 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
   TestConfigChange(ConfigChangeType::ENCRYPTED_TO_ENCRYPTED);
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, FrameSizeChangeVideo) {
+// https://crbug.com/788748 https://crbug.com/794080
+#if (defined(OS_ANDROID) || defined(OS_LINUX)) && defined(ADDRESS_SANITIZER)
+#define MAYBE_FrameSizeChangeVideo DISABLED_FrameSizeChangeVideo
+#else
+#define MAYBE_FrameSizeChangeVideo FrameSizeChangeVideo
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, MAYBE_FrameSizeChangeVideo) {
   TestFrameSizeChange();
 }
 

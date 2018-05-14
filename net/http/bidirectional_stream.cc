@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
@@ -39,7 +38,7 @@ namespace {
 std::unique_ptr<base::Value> NetLogHeadersCallback(
     const SpdyHeaderBlock* headers,
     NetLogCaptureMode capture_mode) {
-  auto dict = base::MakeUnique<base::DictionaryValue>();
+  auto dict = std::make_unique<base::DictionaryValue>();
   dict->Set("headers", ElideSpdyHeaderBlockForNetLog(*headers, capture_mode));
   return std::move(dict);
 }
@@ -48,7 +47,7 @@ std::unique_ptr<base::Value> NetLogCallback(const GURL* url,
                                             const std::string* method,
                                             const HttpRequestHeaders* headers,
                                             NetLogCaptureMode capture_mode) {
-  auto dict = base::MakeUnique<base::DictionaryValue>();
+  auto dict = std::make_unique<base::DictionaryValue>();
   dict->SetString("url", url->possibly_invalid_spec());
   dict->SetString("method", *method);
   std::string empty;
@@ -60,9 +59,9 @@ std::unique_ptr<base::Value> NetLogCallback(const GURL* url,
 
 }  // namespace
 
-BidirectionalStream::Delegate::Delegate() {}
+BidirectionalStream::Delegate::Delegate() = default;
 
-BidirectionalStream::Delegate::~Delegate() {}
+BidirectionalStream::Delegate::~Delegate() = default;
 
 BidirectionalStream::BidirectionalStream(
     std::unique_ptr<BidirectionalStreamRequestInfo> request_info,
@@ -73,7 +72,7 @@ BidirectionalStream::BidirectionalStream(
                           session,
                           send_request_headers_automatically,
                           delegate,
-                          base::MakeUnique<base::Timer>(false, false)) {}
+                          std::make_unique<base::Timer>(false, false)) {}
 
 BidirectionalStream::BidirectionalStream(
     std::unique_ptr<BidirectionalStreamRequestInfo> request_info,
@@ -120,6 +119,7 @@ BidirectionalStream::BidirectionalStream(
   http_request_info.url = request_info_->url;
   http_request_info.method = request_info_->method;
   http_request_info.extra_headers = request_info_->extra_headers;
+  http_request_info.socket_tag = request_info_->socket_tag;
   stream_request_ =
       session->http_stream_factory()->RequestBidirectionalStreamImpl(
           http_request_info, request_info_->priority, server_ssl_config,
@@ -343,8 +343,10 @@ void BidirectionalStream::OnWebSocketHandshakeStreamReady(
   NOTREACHED();
 }
 
-void BidirectionalStream::OnStreamFailed(int result,
-                                         const SSLConfig& used_ssl_config) {
+void BidirectionalStream::OnStreamFailed(
+    int result,
+    const NetErrorDetails& net_error_details,
+    const SSLConfig& used_ssl_config) {
   DCHECK_LT(result, 0);
   DCHECK_NE(result, ERR_IO_PENDING);
   DCHECK(stream_request_);

@@ -32,6 +32,8 @@
 
 namespace blink {
 
+class FragmentData;
+
 // PaintLayerFragment is the representation of a fragment.
 // https://drafts.csswg.org/css-break/#fragment
 //
@@ -59,7 +61,6 @@ struct PaintLayerFragment {
     layer_bounds.MoveBy(offset);
     background_rect.MoveBy(offset);
     foreground_rect.MoveBy(offset);
-    pagination_clip.MoveBy(offset);
   }
 
   void Intersect(const LayoutRect& rect) {
@@ -109,14 +110,7 @@ struct PaintLayerFragment {
   // painting/hit-testing.
   LayoutPoint pagination_offset;
 
-  // Only set on paginated fragments.
-  //
-  // This is the additional clip from the fragmentainer (i.e. column or
-  // page) that applies to the layer. |backgroundRect| and |foregroundRect|
-  // are intersected with it (see collectFragments).
-  //
-  // It is in layer-local (physical) coordinates.
-  LayoutRect pagination_clip;
+  const FragmentData* fragment_data = nullptr;
 };
 
 typedef Vector<PaintLayerFragment, 1> PaintLayerFragments;

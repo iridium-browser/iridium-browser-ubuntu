@@ -128,7 +128,7 @@ Profiler.ProfileType = class extends Common.Object {
    * @return {?Profiler.ProfileHeader}
    */
   getProfile(uid) {
-    for (var i = 0; i < this._profiles.length; ++i) {
+    for (let i = 0; i < this._profiles.length; ++i) {
       if (this._profiles[i].uid === uid)
         return this._profiles[i];
     }
@@ -137,17 +137,18 @@ Profiler.ProfileType = class extends Common.Object {
 
   /**
    * @param {!File} file
+   * @return {!Promise<?Error>}
    */
   loadFromFile(file) {
-    var name = file.name;
-    var fileExtension = this.fileExtension();
+    let name = file.name;
+    const fileExtension = this.fileExtension();
     if (fileExtension && name.endsWith(fileExtension))
       name = name.substr(0, name.length - fileExtension.length);
-    var profile = this.createProfileLoadedFromFile(name);
+    const profile = this.createProfileLoadedFromFile(name);
     profile.setFromFile();
     this.setProfileBeingRecorded(profile);
     this.addProfile(profile);
-    profile.loadFromFile(file);
+    return profile.loadFromFile(file);
   }
 
   /**
@@ -170,7 +171,7 @@ Profiler.ProfileType = class extends Common.Object {
    * @param {!Profiler.ProfileHeader} profile
    */
   removeProfile(profile) {
-    var index = this._profiles.indexOf(profile);
+    const index = this._profiles.indexOf(profile);
     if (index === -1)
       return;
     this._profiles.splice(index, 1);
@@ -178,7 +179,7 @@ Profiler.ProfileType = class extends Common.Object {
   }
 
   _clearTempStorage() {
-    for (var i = 0; i < this._profiles.length; ++i)
+    for (let i = 0; i < this._profiles.length; ++i)
       this._profiles[i].removeTempFile();
   }
 
@@ -200,7 +201,7 @@ Profiler.ProfileType = class extends Common.Object {
   }
 
   reset() {
-    for (var profile of this._profiles.slice())
+    for (const profile of this._profiles.slice())
       this._disposeProfile(profile);
     this._profiles = [];
     this._nextProfileUid = 1;

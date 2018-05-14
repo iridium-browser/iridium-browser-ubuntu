@@ -34,17 +34,17 @@
 #include "core/html/parser/HTMLResourcePreloader.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/resource/CSSStyleSheetResource.h"
-#include "platform/HTTPNames.h"
 #include "platform/Histogram.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
+#include "platform/network/http_names.h"
 #include "platform/text/SegmentedString.h"
 #include "platform/weborigin/SecurityPolicy.h"
 
 namespace blink {
 
-CSSPreloadScanner::CSSPreloadScanner() {}
+CSSPreloadScanner::CSSPreloadScanner() = default;
 
-CSSPreloadScanner::~CSSPreloadScanner() {}
+CSSPreloadScanner::~CSSPreloadScanner() = default;
 
 void CSSPreloadScanner::Reset() {
   state_ = kInitial;
@@ -257,36 +257,31 @@ void CSSPreloadScanner::EmitRule(const SegmentedString& source) {
 }
 
 CSSPreloaderResourceClient::CSSPreloaderResourceClient(
-    Resource* resource,
     HTMLResourcePreloader* preloader)
     : policy_(preloader->GetDocument()
                       ->GetSettings()
                       ->GetCSSExternalScannerPreload()
                   ? kScanAndPreload
                   : kScanOnly),
-      preloader_(preloader),
-      resource_(ToCSSStyleSheetResource(resource)) {
-  resource_->AddClient(this);
-}
+      preloader_(preloader) {}
 
-CSSPreloaderResourceClient::~CSSPreloaderResourceClient() {}
+CSSPreloaderResourceClient::~CSSPreloaderResourceClient() = default;
 
-void CSSPreloaderResourceClient::SetCSSStyleSheet(
-    const String& href,
-    const KURL& base_url,
-    ReferrerPolicy referrer_policy,
-    const WTF::TextEncoding&,
-    const CSSStyleSheetResource*) {
-  ClearResource();
+void CSSPreloaderResourceClient::NotifyFinished(Resource*) {
+  MaybeClearResource();
 }
 
 // Only attach for one appendData call, as that's where most imports will likely
 // be (according to spec).
-void CSSPreloaderResourceClient::DidAppendFirstData(
-    const CSSStyleSheetResource* resource) {
+void CSSPreloaderResourceClient::DataReceived(Resource* resource,
+                                              const char*,
+                                              size_t) {
+  if (received_first_data_)
+    return;
+  received_first_data_ = true;
   if (preloader_)
-    ScanCSS(resource);
-  ClearResource();
+    ScanCSS(ToCSSStyleSheetResource(resource));
+  MaybeClearResource();
 }
 
 void CSSPreloaderResourceClient::ScanCSS(
@@ -303,8 +298,8 @@ void CSSPreloaderResourceClient::ScanCSS(
   // TODO(csharrison): If this becomes an issue the CSSPreloadScanner may be
   // augmented to take care of this case without performing an additional
   // copy.
-  double start_time = MonotonicallyIncreasingTimeMS();
-  const String& chunk = resource->SheetText();
+  double start_time = CurrentTimeTicksInMilliseconds();
+  const String& chunk = resource->SheetText(nullptr);
   if (chunk.IsNull())
     return;
   CSSPreloadScanner css_preload_scanner;
@@ -323,8 +318,8 @@ void CSSPreloaderResourceClient::ScanCSS(
                            resource->GetResponse().Url());
   DEFINE_STATIC_LOCAL(CustomCountHistogram, css_scan_time_histogram,
                       ("PreloadScanner.ExternalCSS.ScanTime", 1, 1000000, 50));
-  css_scan_time_histogram.Count((MonotonicallyIncreasingTimeMS() - start_time) *
-                                1000);
+  css_scan_time_histogram.Count(
+      (CurrentTimeTicksInMilliseconds() - start_time) * 1000);
   FetchPreloads(preloads);
 }
 
@@ -345,7 +340,7 @@ void CSSPreloaderResourceClient::FetchPreloads(PreloadRequestStream& preloads) {
   }
 }
 
-void CSSPreloaderResourceClient::ClearResource() {
+void CSSPreloaderResourceClient::MaybeClearResource() {
   // Do not remove the client for unused, speculative markup preloads. This will
   // trigger cancellation of the request and potential removal from memory
   // cache. Link preloads are an exception because they support dynamic removal
@@ -353,20 +348,17 @@ void CSSPreloaderResourceClient::ClearResource() {
   // Note: Speculative preloads which remain unused for their lifetime will
   // never have this client removed. This should be fine because we only hold
   // weak references to the resource.
-  if (resource_ && resource_->IsUnusedPreload() &&
-      !resource_->IsLinkPreload()) {
+  if (GetResource() && GetResource()->IsUnusedPreload() &&
+      !GetResource()->IsLinkPreload()) {
     return;
   }
 
-  if (resource_)
-    resource_->RemoveClient(this);
-  resource_.Clear();
+  ClearResource();
 }
 
-DEFINE_TRACE(CSSPreloaderResourceClient) {
+void CSSPreloaderResourceClient::Trace(blink::Visitor* visitor) {
   visitor->Trace(preloader_);
-  visitor->Trace(resource_);
-  StyleSheetResourceClient::Trace(visitor);
+  ResourceClient::Trace(visitor);
 }
 
 }  // namespace blink

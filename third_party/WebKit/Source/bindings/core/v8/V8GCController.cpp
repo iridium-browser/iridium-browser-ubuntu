@@ -33,7 +33,9 @@
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/RetainedDOMInfo.h"
+#include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/V8AbstractEventListener.h"
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/core/v8/V8Node.h"
@@ -44,12 +46,9 @@
 #include "core/html/imports/HTMLImportsController.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "platform/Histogram.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
-#include "platform/bindings/ScriptWrappableVisitor.h"
+#include "platform/bindings/ScriptWrappableMarkingVisitor.h"
 #include "platform/bindings/WrapperTypeInfo.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
-#include "platform/wtf/Vector.h"
 #include "platform/wtf/allocator/Partitions.h"
 #include "public/platform/BlameContext.h"
 #include "public/platform/Platform.h"
@@ -58,12 +57,8 @@ namespace blink {
 
 Node* V8GCController::OpaqueRootForGC(v8::Isolate*, Node* node) {
   DCHECK(node);
-  if (node->isConnected()) {
-    Document& document = node->GetDocument();
-    if (HTMLImportsController* controller = document.ImportsController())
-      return controller->Master();
-    return &document;
-  }
+  if (node->isConnected())
+    return &node->GetDocument().MasterDocument();
 
   if (node->IsAttributeNode()) {
     Node* owner_element = ToAttr(node)->ownerElement();
@@ -108,7 +103,7 @@ class MinorGCUnmodifiedWrapperVisitor : public v8::PersistentHandleVisitor {
 
     if (class_id == WrapperTypeInfo::kNodeClassId) {
       DCHECK(V8Node::hasInstance(wrapper, isolate_));
-      Node* node = V8Node::toImpl(wrapper);
+      Node* node = V8Node::ToImpl(wrapper);
       if (node->HasEventListeners()) {
         v8::Persistent<v8::Object>::Cast(*value).MarkActive();
         return;
@@ -128,11 +123,13 @@ class MinorGCUnmodifiedWrapperVisitor : public v8::PersistentHandleVisitor {
   v8::Isolate* isolate_;
 };
 
-class HeapSnaphotWrapperVisitor : public ScriptWrappableVisitor,
+// TODO(ulan): Refactor this class to derive from ScriptWrappableVisitor
+// and not rely on marking infrastructure.
+class HeapSnaphotWrapperVisitor : public ScriptWrappableMarkingVisitor,
                                   public v8::PersistentHandleVisitor {
  public:
   explicit HeapSnaphotWrapperVisitor(v8::Isolate* isolate)
-      : ScriptWrappableVisitor(isolate),
+      : ScriptWrappableMarkingVisitor(isolate),
         current_parent_(nullptr),
         only_trace_single_level_(false),
         first_script_wrappable_traced_(false) {
@@ -141,19 +138,18 @@ class HeapSnaphotWrapperVisitor : public ScriptWrappableVisitor,
 
   // Collect interesting V8 roots for the heap snapshot. Currently these are
   // DOM nodes.
-  void CollectV8Roots() { isolate_->VisitHandlesWithClassIds(this); }
+  void CollectV8Roots() { isolate()->VisitHandlesWithClassIds(this); }
 
   void VisitPersistentHandle(v8::Persistent<v8::Value>* value,
                              uint16_t class_id) override {
     if (class_id != WrapperTypeInfo::kNodeClassId)
       return;
 
-    DCHECK(!value->IsIndependent());
     v8::Local<v8::Object> wrapper = v8::Local<v8::Object>::New(
-        isolate_, v8::Persistent<v8::Object>::Cast(*value));
-    DCHECK(V8Node::hasInstance(wrapper, isolate_));
-    Node* node = V8Node::toImpl(wrapper);
-    Node* root = V8GCController::OpaqueRootForGC(isolate_, node);
+        isolate(), v8::Persistent<v8::Object>::Cast(*value));
+    DCHECK(V8Node::hasInstance(wrapper, isolate()));
+    Node* node = V8Node::ToImpl(wrapper);
+    Node* root = V8GCController::OpaqueRootForGC(isolate(), node);
     nodes_requiring_tracing_[root].push_back(node);
   }
 
@@ -164,7 +160,7 @@ class HeapSnaphotWrapperVisitor : public ScriptWrappableVisitor,
     current_parent_ = nullptr;
 
     TracePrologue();
-    ActiveScriptWrappableBase::TraceActiveScriptWrappables(isolate_, this);
+    ActiveScriptWrappableBase::TraceActiveScriptWrappables(isolate(), this);
     AdvanceTracing(
         0,
         v8::EmbedderHeapTracer::AdvanceTracingActions(
@@ -173,7 +169,7 @@ class HeapSnaphotWrapperVisitor : public ScriptWrappableVisitor,
     AbortTracing();
 
     groups_.push_back(
-        std::make_pair(new SuspendableObjectsInfo(found_v8_wrappers_.size()),
+        std::make_pair(new PausableObjectsInfo(found_v8_wrappers_.size()),
                        std::move(found_v8_wrappers_)));
   }
 
@@ -197,21 +193,9 @@ class HeapSnaphotWrapperVisitor : public ScriptWrappableVisitor,
   v8::HeapProfiler::RetainerEdges Edges() { return std::move(edges_); }
   v8::HeapProfiler::RetainerGroups Groups() { return std::move(groups_); }
 
-  void MarkWrappersInAllWorlds(
-      const ScriptWrappable* traceable) const override {
-    // Only mark the main thread wrapper as we cannot properly intercept
-    // DOMWrapperMap::markWrapper. This means that edges from the isolated
-    // worlds are missing in the snapshot.
-    traceable->MarkWrapper(this);
-  }
+  // ScriptWrappableVisitor overrides.
 
-  void MarkWrapper(const v8::PersistentBase<v8::Value>* value) const override {
-    if (current_parent_ && current_parent_ != value)
-      edges_.push_back(std::make_pair(current_parent_, value));
-    found_v8_wrappers_.insert(value);
-  }
-
-  void DispatchTraceWrappers(const TraceWrapperBase* traceable) const override {
+  void DispatchTraceWrappers(const TraceWrapperBase* traceable) const final {
     if (!only_trace_single_level_ || !traceable->IsScriptWrappable() ||
         !reinterpret_cast<const ScriptWrappable*>(traceable)
              ->ContainsWrapper() ||
@@ -219,6 +203,24 @@ class HeapSnaphotWrapperVisitor : public ScriptWrappableVisitor,
       first_script_wrappable_traced_ = true;
       traceable->TraceWrappers(this);
     }
+  }
+
+ protected:
+  // ScriptWrappableVisitor override.
+  void Visit(
+      const TraceWrapperV8Reference<v8::Value>& traced_wrapper) const final {
+    const v8::PersistentBase<v8::Value>* value = &traced_wrapper.Get();
+    if (current_parent_ && current_parent_ != value)
+      edges_.push_back(std::make_pair(current_parent_, value));
+    found_v8_wrappers_.insert(value);
+  }
+
+  void Visit(DOMWrapperMap<ScriptWrappable>*,
+             const ScriptWrappable* key) const final {
+    // The found_v8_wrappers are PersistentBase pointers. We only mark the
+    // main world wrapper as we cannot properly record DOMWrapperMap values.
+    // This means that edges from the isolated worlds are missing in the
+    // snapshot. This will be fixed with crbug.com/749490.
   }
 
  private:
@@ -235,7 +237,7 @@ class HeapSnaphotWrapperVisitor : public ScriptWrappableVisitor,
     current_parent_ = PersistentForWrappable(traceable);
 
     TracePrologue();
-    traceable->GetWrapperTypeInfo()->TraceWrappers(this, traceable);
+    traceable->TraceWrappers(this);
     AdvanceTracing(
         0,
         v8::EmbedderHeapTracer::AdvanceTracingActions(
@@ -298,8 +300,8 @@ void VisitWeakHandlesForMinorGC(v8::Isolate* isolate) {
 void V8GCController::GcPrologue(v8::Isolate* isolate,
                                 v8::GCType type,
                                 v8::GCCallbackFlags flags) {
-  if (IsMainThread())
-    ScriptForbiddenScope::Enter();
+  RUNTIME_CALL_TIMER_SCOPE(isolate, RuntimeCallStats::CounterId::kGcPrologue);
+  ScriptForbiddenScope::Enter();
 
   // Attribute garbage collection to the all frames instead of a specific
   // frame.
@@ -363,6 +365,7 @@ void UpdateCollectedPhantomHandles(v8::Isolate* isolate) {
 void V8GCController::GcEpilogue(v8::Isolate* isolate,
                                 v8::GCType type,
                                 v8::GCCallbackFlags flags) {
+  RUNTIME_CALL_TIMER_SCOPE(isolate, RuntimeCallStats::CounterId::kGcEpilogue);
   UpdateCollectedPhantomHandles(isolate);
   switch (type) {
     case v8::kGCTypeScavenge:
@@ -392,8 +395,7 @@ void V8GCController::GcEpilogue(v8::Isolate* isolate,
       NOTREACHED();
   }
 
-  if (IsMainThread())
-    ScriptForbiddenScope::Exit();
+  ScriptForbiddenScope::Exit();
 
   if (BlameContext* blame_context =
           Platform::Current()->GetTopLevelBlameContext())
@@ -455,17 +457,19 @@ void V8GCController::GcEpilogue(v8::Isolate* isolate,
 
 void V8GCController::CollectGarbage(v8::Isolate* isolate, bool only_minor_gc) {
   v8::HandleScope handle_scope(isolate);
-  RefPtr<ScriptState> script_state = ScriptState::Create(
+  scoped_refptr<ScriptState> script_state = ScriptState::Create(
       v8::Context::New(isolate),
       DOMWrapperWorld::Create(isolate,
                               DOMWrapperWorld::WorldType::kGarbageCollector));
-  ScriptState::Scope scope(script_state.Get());
+  ScriptState::Scope scope(script_state.get());
   StringBuilder builder;
   builder.Append("if (gc) gc(");
   builder.Append(only_minor_gc ? "true" : "false");
   builder.Append(")");
   V8ScriptRunner::CompileAndRunInternalScript(
-      V8String(isolate, builder.ToString()), isolate);
+      isolate, script_state.get(),
+      ScriptSourceCode(builder.ToString(), ScriptSourceLocationType::kInternal,
+                       nullptr, KURL(), TextPosition()));
   script_state->DisposePerContextData();
 }
 
@@ -490,8 +494,8 @@ class DOMWrapperTracer : public v8::PersistentHandleVisitor {
     const v8::Persistent<v8::Object>& wrapper =
         v8::Persistent<v8::Object>::Cast(*value);
 
-    if (ScriptWrappable* script_wrappable = ToScriptWrappable(wrapper))
-      ToWrapperTypeInfo(wrapper)->Trace(visitor_, script_wrappable);
+    ScriptWrappable* script_wrappable = ToScriptWrappable(wrapper);
+    visitor_->Trace(script_wrappable);
   }
 
  private:

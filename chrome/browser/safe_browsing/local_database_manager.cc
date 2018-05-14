@@ -21,11 +21,10 @@
 #include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
-#include "chrome/browser/safe_browsing/download_protection_service.h"
+#include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_database.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -36,7 +35,8 @@
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/common/safebrowsing_switches.h"
-#include "components/safe_browsing_db/util.h"
+#include "components/safe_browsing/db/notification_types.h"
+#include "components/safe_browsing/db/util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -84,7 +84,6 @@ int GetThreatSeverity(ListType threat) {
     case BINURL:              // Falls through.
     case CSDWHITELIST:        // Falls through.
     case DOWNLOADWHITELIST:   // Falls through.
-    case MODULEWHITELIST:     // Falls through.
     case EXTENSIONBLACKLIST:  // Falls through.
     case IPBLACKLIST:
       return 0;
@@ -276,7 +275,6 @@ LocalSafeBrowsingDatabaseManager::LocalSafeBrowsingDatabaseManager(
       enable_extension_blacklist_(false),
       enable_ip_blacklist_(false),
       enable_unwanted_software_blacklist_(true),
-      enable_module_whitelist_(true),
       update_in_progress_(false),
       database_update_in_progress_(false),
       closing_database_(false),
@@ -352,7 +350,7 @@ bool LocalSafeBrowsingDatabaseManager::CheckDownloadUrl(
   // We need to check the database for url prefix, and later may fetch the url
   // from the safebrowsing backends. These need to be asynchronous.
   std::unique_ptr<SafeBrowsingCheck> check =
-      base::MakeUnique<SafeBrowsingCheck>(
+      std::make_unique<SafeBrowsingCheck>(
           url_chain, std::vector<SBFullHash>(), client, BINURL,
           CreateSBThreatTypeSet({SB_THREAT_TYPE_URL_BINARY_MALWARE}));
   std::vector<SBPrefix> prefixes;
@@ -380,7 +378,7 @@ bool LocalSafeBrowsingDatabaseManager::CheckExtensionIDs(
     prefixes.push_back(hash.prefix);
 
   std::unique_ptr<SafeBrowsingCheck> check =
-      base::MakeUnique<SafeBrowsingCheck>(
+      std::make_unique<SafeBrowsingCheck>(
           std::vector<GURL>(), extension_id_hashes, client, EXTENSIONBLACKLIST,
           CreateSBThreatTypeSet({SB_THREAT_TYPE_EXTENSION}));
   StartSafeBrowsingCheck(
@@ -465,31 +463,6 @@ bool LocalSafeBrowsingDatabaseManager::MatchDownloadWhitelistString(
     return true;
   }
   return database_->ContainsDownloadWhitelistedString(str);
-}
-
-bool LocalSafeBrowsingDatabaseManager::MatchModuleWhitelistString(
-    const std::string& str) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (!enabled_ || !enable_module_whitelist_ || !MakeDatabaseAvailable()) {
-    return true;
-  }
-  return database_->ContainsModuleWhitelistedString(str);
-}
-
-bool LocalSafeBrowsingDatabaseManager::IsMalwareKillSwitchOn() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (!enabled_ || !MakeDatabaseAvailable()) {
-    return true;
-  }
-  return database_->IsMalwareIPMatchKillSwitchOn();
-}
-
-bool LocalSafeBrowsingDatabaseManager::IsCsdWhitelistKillSwitchOn() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (!enabled_ || !MakeDatabaseAvailable()) {
-    return true;
-  }
-  return database_->IsCsdWhitelistKillSwitchOn();
 }
 
 bool LocalSafeBrowsingDatabaseManager::CheckBrowseUrl(
@@ -645,7 +618,7 @@ void LocalSafeBrowsingDatabaseManager::AddChunks(
   safe_browsing_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&LocalSafeBrowsingDatabaseManager::AddDatabaseChunks, this,
-                     list, base::Passed(&chunks), callback));
+                     list, std::move(chunks), callback));
 }
 
 void LocalSafeBrowsingDatabaseManager::DeleteChunks(
@@ -655,7 +628,7 @@ void LocalSafeBrowsingDatabaseManager::DeleteChunks(
   safe_browsing_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&LocalSafeBrowsingDatabaseManager::DeleteDatabaseChunks,
-                     this, base::Passed(&chunk_deletes)));
+                     this, std::move(chunk_deletes)));
 }
 
 void LocalSafeBrowsingDatabaseManager::UpdateStarted() {
@@ -723,7 +696,7 @@ void LocalSafeBrowsingDatabaseManager::NotifyDatabaseUpdateFinished(
     bool update_succeeded) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE,
+      NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE,
       content::Source<SafeBrowsingDatabaseManager>(this),
       content::Details<bool>(&update_succeeded));
 }
@@ -827,7 +800,7 @@ SafeBrowsingDatabase* LocalSafeBrowsingDatabaseManager::GetDatabase() {
       safe_browsing_task_runner_, enable_download_protection_,
       enable_csd_whitelist_, enable_download_whitelist_,
       enable_extension_blacklist_, enable_ip_blacklist_,
-      enable_unwanted_software_blacklist_, enable_module_whitelist_);
+      enable_unwanted_software_blacklist_);
 
   database->Init(SafeBrowsingService::GetBaseFilename());
   {

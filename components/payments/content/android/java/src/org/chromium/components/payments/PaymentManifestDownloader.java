@@ -5,7 +5,6 @@
 package org.chromium.components.payments;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.content_public.browser.WebContents;
@@ -14,7 +13,7 @@ import java.net.URI;
 
 /**
  * See comment in:
- * components/payments/content/payment_manifest_downloader.h
+ * components/payments/core/payment_manifest_downloader.h
  */
 @JNINamespace("payments")
 public class PaymentManifestDownloader {
@@ -61,14 +60,6 @@ public class PaymentManifestDownloader {
         return mNativeObject != 0;
     }
 
-    /** Allows HTTP URLs. Should be used for testing only. */
-    @VisibleForTesting
-    public void allowHttpForTest() {
-        ThreadUtils.assertOnUiThread();
-        assert mNativeObject != 0;
-        nativeAllowHttpForTest(mNativeObject);
-    }
-
     /**
      * Downloads the payment method manifest file asynchronously.
      *
@@ -107,7 +98,6 @@ public class PaymentManifestDownloader {
     }
 
     private static native long nativeInit(WebContents webContents);
-    private native void nativeAllowHttpForTest(long nativePaymentManifestDownloaderAndroid);
     private native void nativeDownloadPaymentMethodManifest(
             long nativePaymentManifestDownloaderAndroid, URI methodName,
             ManifestDownloadCallback callback);

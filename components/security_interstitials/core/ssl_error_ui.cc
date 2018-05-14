@@ -15,7 +15,7 @@
 namespace security_interstitials {
 namespace {
 
-// Path to the relevant help center page.
+// Path to the relevant help center page. Used if |support_url_| is invalid.
 const char kHelpPath[] = "answer/6098869";
 
 bool IsMasked(int options, SSLErrorUI::SSLErrorOptionsMask mask) {
@@ -29,11 +29,13 @@ SSLErrorUI::SSLErrorUI(const GURL& request_url,
                        const net::SSLInfo& ssl_info,
                        int display_options,
                        const base::Time& time_triggered,
+                       const GURL& support_url,
                        ControllerClient* controller)
     : request_url_(request_url),
       cert_error_(cert_error),
       ssl_info_(ssl_info),
       time_triggered_(time_triggered),
+      support_url_(support_url),
       requested_strict_enforcement_(
           IsMasked(display_options, STRICT_ENFORCEMENT)),
       soft_override_enabled_(IsMasked(display_options, SOFT_OVERRIDE_ENABLED)),
@@ -161,7 +163,7 @@ void SSLErrorUI::PopulateNonOverridableStrings(
                             l10n_util::GetStringFUTF16(help_string, url));
 }
 
-void SSLErrorUI::HandleCommand(SecurityInterstitialCommands command) {
+void SSLErrorUI::HandleCommand(SecurityInterstitialCommand command) {
   switch (command) {
     case CMD_DONT_PROCEED:
       controller_->metrics_helper()->RecordUserDecision(
@@ -190,8 +192,12 @@ void SSLErrorUI::HandleCommand(SecurityInterstitialCommands command) {
     case CMD_OPEN_HELP_CENTER:
       controller_->metrics_helper()->RecordUserInteraction(
           security_interstitials::MetricsHelper::SHOW_LEARN_MORE);
+
+      // If |support_url_| is invalid, use the default help center url.
       controller_->OpenUrlInNewForegroundTab(
-          controller_->GetBaseHelpCenterUrl().Resolve(kHelpPath));
+          support_url_.is_valid()
+              ? support_url_
+              : controller_->GetBaseHelpCenterUrl().Resolve(kHelpPath));
       break;
     case CMD_RELOAD:
       controller_->metrics_helper()->RecordUserInteraction(
@@ -210,6 +216,7 @@ void SSLErrorUI::HandleCommand(SecurityInterstitialCommands command) {
     case CMD_REPORT_PHISHING_ERROR:
       // Not supported by the SSL error page.
       NOTREACHED() << "Unsupported command: " << command;
+      break;
     case CMD_ERROR:
     case CMD_TEXT_FOUND:
     case CMD_TEXT_NOT_FOUND:

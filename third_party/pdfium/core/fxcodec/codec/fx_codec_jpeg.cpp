@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "core/fxcodec/codec/ccodec_jpegmodule.h"
+#include "core/fxcodec/codec/ccodec_scanlinedecoder.h"
 #include "core/fxcodec/fx_codec.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxge/dib/cfx_dibsource.h"
@@ -32,6 +33,8 @@ class CJpegContext : public CCodec_JpegModule::Context {
  public:
   CJpegContext();
   ~CJpegContext() override;
+
+  jmp_buf* GetJumpMark() override { return &m_JumpMark; }
 
   jmp_buf m_JumpMark;
   jpeg_decompress_struct m_Info;
@@ -87,13 +90,13 @@ static void _error_do_nothing1(j_common_ptr cinfo, int) {}
 
 static void _error_do_nothing2(j_common_ptr cinfo, char*) {}
 
-#if _FX_OS_ == _FX_WIN32_DESKTOP_ || _FX_OS_ == _FX_WIN64_DESKTOP_
+#if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
 static void _dest_do_nothing(j_compress_ptr cinfo) {}
 
 static boolean _dest_empty(j_compress_ptr cinfo) {
   return false;
 }
-#endif
+#endif  // _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
 }  // extern "C"
 
 #define JPEG_MARKER_ICC (JPEG_APP0 + 2)
@@ -368,7 +371,7 @@ static void _error_fatal1(j_common_ptr cinfo) {
 }
 
 static void _src_skip_data1(struct jpeg_decompress_struct* cinfo, long num) {
-  if (cinfo->src->bytes_in_buffer < (size_t)num) {
+  if (cinfo->src->bytes_in_buffer < static_cast<size_t>(num)) {
     auto* pContext = reinterpret_cast<CJpegContext*>(cinfo->client_data);
     pContext->m_SkipSize = (unsigned int)(num - cinfo->src->bytes_in_buffer);
     cinfo->src->bytes_in_buffer = 0;
@@ -414,10 +417,12 @@ CJpegContext::~CJpegContext() {
 }
 
 std::unique_ptr<CCodec_JpegModule::Context> CCodec_JpegModule::Start() {
-  // Use ordinary pointer until past the fear of a longjump.
+  // Use ordinary pointer until past the possibility of a longjump.
   auto* pContext = new CJpegContext();
-  if (setjmp(pContext->m_JumpMark) == -1)
+  if (setjmp(pContext->m_JumpMark) == -1) {
+    delete pContext;
     return nullptr;
+  }
 
   jpeg_create_decompress(&pContext->m_Info);
   pContext->m_Info.src = &pContext->m_SrcMgr;
@@ -456,9 +461,6 @@ int CCodec_JpegModule::ReadHeader(Context* pContext,
                                   int* nComps) {
 #endif  // PDF_ENABLE_XFA
   auto* ctx = static_cast<CJpegContext*>(pContext);
-  if (setjmp(ctx->m_JumpMark) == -1)
-    return 1;
-
   int ret = jpeg_read_header(&ctx->m_Info, true);
   if (ret == JPEG_SUSPENDED)
     return 2;
@@ -476,20 +478,14 @@ int CCodec_JpegModule::ReadHeader(Context* pContext,
 
 bool CCodec_JpegModule::StartScanline(Context* pContext, int down_scale) {
   auto* ctx = static_cast<CJpegContext*>(pContext);
-  if (setjmp(ctx->m_JumpMark) == -1)
-    return false;
-
-  ctx->m_Info.scale_denom = down_scale;
+  ctx->m_Info.scale_denom = static_cast<unsigned int>(down_scale);
   return !!jpeg_start_decompress(&ctx->m_Info);
 }
 
 bool CCodec_JpegModule::ReadScanline(Context* pContext,
                                      unsigned char* dest_buf) {
   auto* ctx = static_cast<CJpegContext*>(pContext);
-  if (setjmp(ctx->m_JumpMark) == -1)
-    return false;
-
-  int nlines = jpeg_read_scanlines(&ctx->m_Info, &dest_buf, 1);
+  unsigned int nlines = jpeg_read_scanlines(&ctx->m_Info, &dest_buf, 1);
   return nlines == 1;
 }
 
@@ -505,11 +501,11 @@ uint32_t CCodec_JpegModule::GetAvailInput(Context* pContext,
   return (uint32_t)ctx->m_SrcMgr.bytes_in_buffer;
 }
 
-#if _FX_OS_ == _FX_WIN32_DESKTOP_ || _FX_OS_ == _FX_WIN64_DESKTOP_
+#if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
 #define JPEG_BLOCK_SIZE 1048576
-bool CCodec_JpegModule::JpegEncode(const CFX_RetainPtr<CFX_DIBSource>& pSource,
+bool CCodec_JpegModule::JpegEncode(const RetainPtr<CFX_DIBSource>& pSource,
                                    uint8_t** dest_buf,
-                                   FX_STRSIZE* dest_size) {
+                                   size_t* dest_size) {
   struct jpeg_error_mgr jerr;
   jerr.error_exit = _error_do_nothing;
   jerr.emit_message = _error_do_nothing1;
@@ -602,8 +598,8 @@ bool CCodec_JpegModule::JpegEncode(const CFX_RetainPtr<CFX_DIBSource>& pSource,
   jpeg_finish_compress(&cinfo);
   jpeg_destroy_compress(&cinfo);
   FX_Free(line_buf);
-  *dest_size = dest_buf_length - (FX_STRSIZE)dest.free_in_buffer;
+  *dest_size = dest_buf_length - static_cast<size_t>(dest.free_in_buffer);
 
   return true;
 }
-#endif
+#endif  // _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_

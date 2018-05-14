@@ -23,7 +23,6 @@ class QuicSpdySessionPeer {
   static QuicHeadersStream* GetHeadersStream(QuicSpdySession* session);
   static void SetHeadersStream(QuicSpdySession* session,
                                QuicHeadersStream* headers_stream);
-  static void SetForceHolBlocking(QuicSpdySession* session, bool value);
   static const SpdyFramer& GetSpdyFramer(QuicSpdySession* session);
   static void SetHpackEncoderDebugVisitor(
       QuicSpdySession* session,
@@ -39,7 +38,9 @@ class QuicSpdySessionPeer {
       QuicStreamId id,
       SpdyHeaderBlock headers,
       bool fin,
-      SpdyPriority priority,
+      int weight,
+      QuicStreamId parent_stream_id,
+      bool exclusive,
       QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
   // Helper functions for stream ids, to allow test logic to abstract
   // over the HTTP stream numbering scheme (i.e. whether one or

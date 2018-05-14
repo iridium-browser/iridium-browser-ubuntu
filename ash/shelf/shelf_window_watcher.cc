@@ -20,8 +20,6 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/display/display.h"
-#include "ui/display/screen.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/wm/public/activation_client.h"
 
@@ -63,11 +61,13 @@ void UpdateShelfItemForWindow(ShelfItem* item, aura::Window* window) {
   item->type = GetShelfItemType(window);
   item->title = window->GetTitle();
 
-  item->status = STATUS_RUNNING;
-  if (wm::IsActiveWindow(window))
-    item->status = STATUS_ACTIVE;
-  else if (window->GetProperty(aura::client::kDrawAttentionKey))
+  // Active windows don't draw attention because the user is looking at them.
+  if (window->GetProperty(aura::client::kDrawAttentionKey) &&
+      !wm::IsActiveWindow(window)) {
     item->status = STATUS_ATTENTION;
+  } else {
+    item->status = STATUS_RUNNING;
+  }
 
   // Prefer app icons over window icons, they're typically larger.
   gfx::ImageSkia* image = window->GetProperty(aura::client::kAppIconKey);
@@ -91,7 +91,8 @@ ShelfWindowWatcher::ContainerWindowObserver::ContainerWindowObserver(
     ShelfWindowWatcher* window_watcher)
     : window_watcher_(window_watcher) {}
 
-ShelfWindowWatcher::ContainerWindowObserver::~ContainerWindowObserver() {}
+ShelfWindowWatcher::ContainerWindowObserver::~ContainerWindowObserver() =
+    default;
 
 void ShelfWindowWatcher::ContainerWindowObserver::OnWindowHierarchyChanged(
     const HierarchyChangeParams& params) {
@@ -114,7 +115,7 @@ ShelfWindowWatcher::UserWindowObserver::UserWindowObserver(
     ShelfWindowWatcher* window_watcher)
     : window_watcher_(window_watcher) {}
 
-ShelfWindowWatcher::UserWindowObserver::~UserWindowObserver() {}
+ShelfWindowWatcher::UserWindowObserver::~UserWindowObserver() = default;
 
 void ShelfWindowWatcher::UserWindowObserver::OnWindowPropertyChanged(
     aura::Window* window,
@@ -122,7 +123,8 @@ void ShelfWindowWatcher::UserWindowObserver::OnWindowPropertyChanged(
     intptr_t old) {
   // ShelfIDs should never change except when replacing Mash temporary defaults.
   // TODO(msw): Extend this Mash behavior to all Ash configs.
-  if (Shell::GetAshConfig() == Config::MASH && key == kShelfIDKey) {
+  if (Shell::GetAshConfig() == Config::MASH && key == kShelfIDKey &&
+      window_watcher_->user_windows_with_items_.count(window) > 0) {
     ShelfID old_id = ShelfID::Deserialize(reinterpret_cast<std::string*>(old));
     ShelfID new_id = ShelfID::Deserialize(window->GetProperty(kShelfIDKey));
     if (old_id != new_id && !old_id.IsNull() && !new_id.IsNull() &&
@@ -168,13 +170,13 @@ ShelfWindowWatcher::ShelfWindowWatcher(ShelfModel* model)
       observed_container_windows_(&container_window_observer_),
       observed_user_windows_(&user_window_observer_) {
   Shell::Get()->activation_client()->AddObserver(this);
-  for (const auto& display : display::Screen::GetScreen()->GetAllDisplays())
-    OnDisplayAdded(display);
-  display::Screen::GetScreen()->AddObserver(this);
+  Shell::Get()->AddShellObserver(this);
+  for (aura::Window* window : Shell::GetAllRootWindows())
+    OnRootWindowAdded(window);
 }
 
 ShelfWindowWatcher::~ShelfWindowWatcher() {
-  display::Screen::GetScreen()->RemoveObserver(this);
+  Shell::Get()->RemoveShellObserver(this);
   Shell::Get()->activation_client()->RemoveObserver(this);
 }
 
@@ -185,7 +187,7 @@ void ShelfWindowWatcher::AddShelfItem(aura::Window* window) {
 
   model_->SetShelfItemDelegate(
       item.id,
-      base::MakeUnique<ShelfWindowWatcherItemDelegate>(item.id, window));
+      std::make_unique<ShelfWindowWatcherItemDelegate>(item.id, window));
 
   // Panels are inserted on the left so as not to push all existing panels over.
   model_->AddAt(item.type == TYPE_APP_PANEL ? 0 : model_->item_count(), item);
@@ -259,31 +261,15 @@ void ShelfWindowWatcher::OnWindowActivated(ActivationReason reason,
     OnUserWindowPropertyChanged(lost_active);
 }
 
-void ShelfWindowWatcher::OnDisplayAdded(const display::Display& new_display) {
-  aura::Window* root = Shell::GetRootWindowForDisplayId(new_display.id());
-
-  // When the primary root window's display is removed, the existing root window
-  // is taken over by the new display, and the observer is already set.
-  aura::Window* default_container =
-      root->GetChildById(kShellWindowId_DefaultContainer);
-  if (!observed_container_windows_.IsObserving(default_container)) {
-    for (aura::Window* window : default_container->children())
+void ShelfWindowWatcher::OnRootWindowAdded(aura::Window* root_window) {
+  constexpr int container_ids[] = {kShellWindowId_DefaultContainer,
+                                   kShellWindowId_PanelContainer};
+  for (const int container_id : container_ids) {
+    aura::Window* container = root_window->GetChildById(container_id);
+    for (aura::Window* window : container->children())
       OnUserWindowAdded(window);
-    observed_container_windows_.Add(default_container);
-  }
-  aura::Window* panel_container =
-      root->GetChildById(kShellWindowId_PanelContainer);
-  if (!observed_container_windows_.IsObserving(panel_container)) {
-    for (aura::Window* window : panel_container->children())
-      OnUserWindowAdded(window);
-    observed_container_windows_.Add(panel_container);
+    observed_container_windows_.Add(container);
   }
 }
-
-void ShelfWindowWatcher::OnDisplayRemoved(const display::Display& old_display) {
-}
-
-void ShelfWindowWatcher::OnDisplayMetricsChanged(const display::Display&,
-                                                 uint32_t) {}
 
 }  // namespace ash

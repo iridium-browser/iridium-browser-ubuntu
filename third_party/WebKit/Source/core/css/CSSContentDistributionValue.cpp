@@ -8,6 +8,7 @@
 #include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
+namespace cssvalue {
 
 CSSContentDistributionValue::CSSContentDistributionValue(
     CSSValueID distribution,
@@ -18,13 +19,13 @@ CSSContentDistributionValue::CSSContentDistributionValue(
       position_(position),
       overflow_(overflow) {}
 
-CSSContentDistributionValue::~CSSContentDistributionValue() {}
+CSSContentDistributionValue::~CSSContentDistributionValue() = default;
 
 String CSSContentDistributionValue::CustomCSSText() const {
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
 
   if (distribution_ != CSSValueInvalid)
-    list->Append(*Distribution());
+    list->Append(*CSSIdentifierValue::Create(distribution_));
   if (position_ != CSSValueInvalid) {
     if (position_ == CSSValueFirstBaseline ||
         position_ == CSSValueLastBaseline) {
@@ -33,12 +34,11 @@ String CSSContentDistributionValue::CustomCSSText() const {
       list->Append(*CSSIdentifierValue::Create(preference));
       list->Append(*CSSIdentifierValue::Create(CSSValueBaseline));
     } else {
-      list->Append(*GetPosition());
+      if (overflow_ != CSSValueInvalid)
+        list->Append(*CSSIdentifierValue::Create(overflow_));
+      list->Append(*CSSIdentifierValue::Create(position_));
     }
   }
-  if (overflow_ != CSSValueInvalid)
-    list->Append(*Overflow());
-
   return list->CustomCSSText();
 }
 
@@ -48,4 +48,5 @@ bool CSSContentDistributionValue::Equals(
          overflow_ == other.overflow_;
 }
 
+}  // namespace cssvalue
 }  // namespace blink

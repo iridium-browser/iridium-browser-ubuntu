@@ -8,13 +8,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <string>
 
 #include "base/macros.h"
-#include "net/quic/core/quic_iovector.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/platform/api/quic_endian.h"
 #include "net/quic/platform/api/quic_export.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
@@ -67,12 +66,13 @@ class QUIC_EXPORT_PRIVATE QuicFramerVisitorInterface {
   // Called if an error is detected in the QUIC protocol.
   virtual void OnError(QuicFramer* framer) = 0;
 
-  // Called only when |perspective_| is IS_SERVER and the the framer gets a
+  // Called only when |perspective_| is IS_SERVER and the framer gets a
   // packet with version flag true and the version on the packet doesn't match
   // |quic_version_|. The visitor should return true after it updates the
   // version of the |framer_| to |received_version| or false to stop processing
   // this packet.
-  virtual bool OnProtocolVersionMismatch(QuicVersion received_version) = 0;
+  virtual bool OnProtocolVersionMismatch(
+      ParsedQuicVersion received_version) = 0;
 
   // Called when a new packet has been received, before it
   // has been validated or processed.
@@ -87,10 +87,11 @@ class QUIC_EXPORT_PRIVATE QuicFramerVisitorInterface {
   virtual void OnVersionNegotiationPacket(
       const QuicVersionNegotiationPacket& packet) = 0;
 
-  // Called when the public header has been parsed, but has not been
-  // authenticated. If it returns false, framing for this packet will cease.
+  // Called when all fields except packet number has been parsed, but has not
+  // been authenticated. If it returns false, framing for this packet will
+  // cease.
   virtual bool OnUnauthenticatedPublicHeader(
-      const QuicPacketPublicHeader& header) = 0;
+      const QuicPacketHeader& header) = 0;
 
   // Called when the unauthenticated portion of the header has been parsed.
   // If OnUnauthenticatedHeader returns false, framing for this packet will
@@ -111,6 +112,15 @@ class QUIC_EXPORT_PRIVATE QuicFramerVisitorInterface {
   // Called when a AckFrame has been parsed.  If OnAckFrame returns false,
   // the framer will stop parsing the current packet.
   virtual bool OnAckFrame(const QuicAckFrame& frame) = 0;
+
+  // Called when largest acked of an AckFrame has been parsed.
+  virtual bool OnAckFrameStart(QuicPacketNumber largest_acked,
+                               QuicTime::Delta ack_delay_time) = 0;
+
+  // Called when ack range [start, end) of an AckFrame has been parsed.
+  virtual bool OnAckRange(QuicPacketNumber start,
+                          QuicPacketNumber end,
+                          bool last_range) = 0;
 
   // Called when a StopWaitingFrame has been parsed.
   virtual bool OnStopWaitingFrame(const QuicStopWaitingFrame& frame) = 0;
@@ -149,14 +159,17 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // QuicDecrypter for level ENCRYPTION_NONE. |supported_versions| specifies the
   // list of supported QUIC versions. |quic_version_| is set to the maximum
   // version in |supported_versions|.
-  QuicFramer(const QuicVersionVector& supported_versions,
+  QuicFramer(const ParsedQuicVersionVector& supported_versions,
              QuicTime creation_time,
              Perspective perspective);
 
   virtual ~QuicFramer();
 
+  // Returns true if |version| is a supported transport version.
+  bool IsSupportedTransportVersion(const QuicTransportVersion version) const;
+
   // Returns true if |version| is a supported protocol version.
-  bool IsSupportedVersion(const QuicVersion version) const;
+  bool IsSupportedVersion(const ParsedQuicVersion version) const;
 
   // Set callbacks to be called from the framer.  A visitor must be set, or
   // else the framer will likely crash.  It is acceptable for the visitor
@@ -164,21 +177,29 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // will be used.
   void set_visitor(QuicFramerVisitorInterface* visitor) { visitor_ = visitor; }
 
-  const QuicVersionVector& supported_versions() const {
+  const ParsedQuicVersionVector& supported_versions() const {
     return supported_versions_;
   }
 
-  QuicVersion version() const { return quic_version_; }
+  QuicTransportVersion transport_version() const {
+    return version_.transport_version;
+  }
 
-  void set_version(const QuicVersion version);
+  ParsedQuicVersion version() const { return version_; }
+
+  void set_version(const ParsedQuicVersion version);
 
   // Does not DCHECK for supported version. Used by tests to set unsupported
   // version to trigger version negotiation.
-  void set_version_for_tests(const QuicVersion version) {
-    quic_version_ = version;
+  void set_version_for_tests(const ParsedQuicVersion version) {
+    version_ = version;
   }
 
   QuicErrorCode error() const { return error_; }
+
+  bool use_incremental_ack_processing() const {
+    return use_incremental_ack_processing_;
+  }
 
   // Pass a UDP packet into the framer for parsing.
   // Return true if the packet was processed succesfully. |packet| must be a
@@ -188,17 +209,18 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   bool ProcessPacket(const QuicEncryptedPacket& packet);
 
   // Largest size in bytes of all stream frame fields without the payload.
-  static size_t GetMinStreamFrameSize(QuicStreamId stream_id,
+  static size_t GetMinStreamFrameSize(QuicTransportVersion version,
+                                      QuicStreamId stream_id,
                                       QuicStreamOffset offset,
                                       bool last_frame_in_packet);
   // Size in bytes of all ack frame fields without the missing packets or ack
   // blocks.
   static size_t GetMinAckFrameSize(
-      QuicVersion version,
+      QuicTransportVersion version,
       QuicPacketNumberLength largest_observed_length);
   // Size in bytes of a stop waiting frame.
   static size_t GetStopWaitingFrameSize(
-      QuicVersion version,
+      QuicTransportVersion version,
       QuicPacketNumberLength packet_number_length);
   // Size in bytes of all reset stream frame fields.
   static size_t GetRstStreamFrameSize();
@@ -214,7 +236,8 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // Size in bytes required to serialize the stream id.
   static size_t GetStreamIdSize(QuicStreamId stream_id);
   // Size in bytes required to serialize the stream offset.
-  static size_t GetStreamOffsetSize(QuicStreamOffset offset);
+  static size_t GetStreamOffsetSize(QuicTransportVersion version,
+                                    QuicStreamOffset offset);
   // Size in bytes required for a serialized version negotiation packet
   static size_t GetVersionNegotiationPacketSize(size_t number_versions);
 
@@ -230,7 +253,7 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // Returns the associated data from the encrypted packet |encrypted| as a
   // stringpiece.
   static QuicStringPiece GetAssociatedDataFromEncryptedPacket(
-      QuicVersion version,
+      QuicTransportVersion version,
       const QuicEncryptedPacket& encrypted,
       QuicConnectionIdLength connection_id_length,
       bool includes_version,
@@ -245,6 +268,12 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
                          char* buffer,
                          size_t packet_length);
 
+  // Serializes a probing packet, which is a padded PING packet. Returns the
+  // length of the packet. Returns 0 if it fails to serialize.
+  size_t BuildConnectivityProbingPacket(const QuicPacketHeader& header,
+                                        char* buffer,
+                                        size_t packet_length);
+
   // Returns a new public reset packet.
   static std::unique_ptr<QuicEncryptedPacket> BuildPublicResetPacket(
       const QuicPublicResetPacket& packet);
@@ -252,11 +281,11 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // Returns a new version negotiation packet.
   static std::unique_ptr<QuicEncryptedPacket> BuildVersionNegotiationPacket(
       QuicConnectionId connection_id,
-      const QuicVersionVector& versions);
+      const ParsedQuicVersionVector& versions);
 
-  // If header.public_header.version_flag is set, the version in the
-  // packet will be set -- but it will be set from quic_version_ not
-  // header.public_header.versions.
+  // If header.version_flag is set, the version in the
+  // packet will be set -- but it will be set from version_ not
+  // header.versions.
   bool AppendPacketHeader(const QuicPacketHeader& header,
                           QuicDataWriter* writer);
   bool AppendTypeByte(const QuicFrame& frame,
@@ -312,27 +341,20 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // to ciphertext no larger than |ciphertext_size|.
   size_t GetMaxPlaintextSize(size_t ciphertext_size);
 
-  // Let data_producer_ save |data_length| data starts at |iov_offset| in |iov|.
-  // TODO(fayang): Remove this method when data is saved before it is consumed.
-  void SaveStreamData(QuicStreamId id,
-                      QuicIOVector iov,
-                      size_t iov_offset,
-                      QuicStreamOffset offset,
-                      QuicByteCount data_length);
-
-  const std::string& detailed_error() { return detailed_error_; }
+  const QuicString& detailed_error() { return detailed_error_; }
 
   // The minimum packet number length required to represent |packet_number|.
   static QuicPacketNumberLength GetMinPacketNumberLength(
+      QuicTransportVersion version,
       QuicPacketNumber packet_number);
 
-  void SetSupportedVersions(const QuicVersionVector& versions) {
+  void SetSupportedVersions(const ParsedQuicVersionVector& versions) {
     supported_versions_ = versions;
-    quic_version_ = versions[0];
+    version_ = versions[0];
   }
 
-  // Returns true if data_producer_ is not null.
-  bool HasDataProducer() const { return data_producer_ != nullptr; }
+  // Returns true if data with |offset| of stream |id| starts with 'CHLO'.
+  bool StartsWithChlo(QuicStreamId id, QuicStreamOffset offset) const;
 
   // Returns byte order to read/write integers and floating numbers.
   Endianness endianness() const;
@@ -341,7 +363,7 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
 
   Perspective perspective() const { return perspective_; }
 
-  QuicTag last_version_tag() { return last_version_tag_; }
+  QuicVersionLabel last_version_label() const { return last_version_label_; }
 
   void set_data_producer(QuicStreamFrameDataProducer* data_producer) {
     data_producer_ = data_producer;
@@ -366,19 +388,18 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   };
 
   bool ProcessDataPacket(QuicDataReader* reader,
-                         const QuicPacketPublicHeader& public_header,
+                         QuicPacketHeader* header,
                          const QuicEncryptedPacket& packet,
                          char* decrypted_buffer,
                          size_t buffer_length);
 
   bool ProcessPublicResetPacket(QuicDataReader* reader,
-                                const QuicPacketPublicHeader& public_header);
+                                const QuicPacketHeader& header);
 
   bool ProcessVersionNegotiationPacket(QuicDataReader* reader,
-                                       QuicPacketPublicHeader* public_header);
+                                       const QuicPacketHeader& header);
 
-  bool ProcessPublicHeader(QuicDataReader* reader,
-                           QuicPacketPublicHeader* header);
+  bool ProcessPublicHeader(QuicDataReader* reader, QuicPacketHeader* header);
 
   // Processes the unauthenticated portion of the header into |header| from
   // the current QuicDataReader.  Returns true on success, false on failure.
@@ -400,9 +421,11 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   bool ProcessAckFrame(QuicDataReader* reader,
                        uint8_t frame_type,
                        QuicAckFrame* frame);
-  bool ProcessTimestampsInAckFrame(QuicDataReader* reader, QuicAckFrame* frame);
+  bool ProcessTimestampsInAckFrame(uint8_t num_received_packets,
+                                   QuicDataReader* reader,
+                                   QuicAckFrame* ack_frame);
   bool ProcessStopWaitingFrame(QuicDataReader* reader,
-                               const QuicPacketHeader& public_header,
+                               const QuicPacketHeader& header,
                                QuicStopWaitingFrame* stop_waiting);
   bool ProcessRstStreamFrame(QuicDataReader* reader, QuicRstStreamFrame* frame);
   bool ProcessConnectionCloseFrame(QuicDataReader* reader,
@@ -419,10 +442,6 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
                       char* decrypted_buffer,
                       size_t buffer_length,
                       size_t* decrypted_length);
-
-  // Sets last_packet_number_. This can only be called after the packet is
-  // successfully decrypted.
-  void SetLastPacketNumber(const QuicPacketHeader& header);
 
   // Returns the full packet number from the truncated
   // wire format version and the last seen packet number.
@@ -477,8 +496,9 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
 
   bool AppendAckFrameAndTypeByte(const QuicAckFrame& frame,
                                  QuicDataWriter* builder);
-  bool AppendTimestampToAckFrame(const QuicAckFrame& frame,
-                                 QuicDataWriter* builder);
+  bool AppendTimestampsToAckFrame(const QuicAckFrame& frame,
+                                  size_t num_timestamps_offset,
+                                  QuicDataWriter* writer);
   bool AppendStopWaitingFrame(const QuicPacketHeader& header,
                               const QuicStopWaitingFrame& frame,
                               QuicDataWriter* builder);
@@ -494,30 +514,72 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   bool AppendPaddingFrame(const QuicPaddingFrame& frame,
                           QuicDataWriter* writer);
 
+  // IETF defined frame append/process methods.
+  bool ProcessIetfStreamFrame(QuicDataReader* reader,
+                              uint8_t frame_type,
+                              QuicStreamFrame* frame);
+  // Append a stream frame and data to the packet.
+  bool AppendIetfStreamFrame(const QuicStreamFrame& frame,
+                             bool last_frame_in_packet,
+                             QuicDataWriter* writer);
+
+  // Add/process an IETF-Formatted Connection and Application close frames.
+  bool AppendIetfConnectionCloseFrame(const QuicConnectionCloseFrame& frame,
+                                      QuicDataWriter* writer);
+  bool AppendIetfConnectionCloseFrame(const QuicIetfTransportErrorCodes code,
+                                      const QuicString& phrase,
+                                      QuicDataWriter* writer);
+  bool AppendIetfApplicationCloseFrame(const QuicConnectionCloseFrame& frame,
+                                       QuicDataWriter* writer);
+  bool AppendIetfApplicationCloseFrame(const uint16_t code,
+                                       const QuicString& phrase,
+                                       QuicDataWriter* writer);
+  bool AppendIetfCloseFrame(const QuicIetfFrameType type,
+                            const uint16_t code,
+                            const QuicString& phrase,
+                            QuicDataWriter* writer);
+  bool ProcessIetfConnectionCloseFrame(QuicDataReader* reader,
+                                       const uint8_t frame_type,
+                                       QuicConnectionCloseFrame* frame);
+  bool ProcessIetfApplicationCloseFrame(QuicDataReader* reader,
+                                        const uint8_t frame_type,
+                                        QuicConnectionCloseFrame* frame);
+  bool ProcessIetfCloseFrame(QuicDataReader* reader,
+                             const uint8_t frame_type,
+                             QuicConnectionCloseFrame* frame);
+
+  // Parse an IETF-format Ack frame from the packet
+  bool ProcessIetfAckFrame(QuicDataReader* reader,
+                           uint8_t frame_type,
+                           QuicAckFrame* ack_frame);
+  // Append an IETf-format Ack frame to the packet
+  bool AppendIetfAckFrameAndTypeByte(const QuicAckFrame& frame,
+                                     QuicDataWriter* writer);
+
   bool RaiseError(QuicErrorCode error);
 
   void set_error(QuicErrorCode error) { error_ = error; }
 
   void set_detailed_error(const char* error) { detailed_error_ = error; }
 
-  std::string detailed_error_;
+  QuicStringPiece TruncateErrorString(QuicStringPiece error);
+
+  QuicString detailed_error_;
   QuicFramerVisitorInterface* visitor_;
   QuicErrorCode error_;
-  // Updated by ProcessPacketHeader when it succeeds.
-  QuicPacketNumber last_packet_number_;
   // Updated by ProcessPacketHeader when it succeeds decrypting a larger packet.
   QuicPacketNumber largest_packet_number_;
   // Updated by WritePacketHeader.
   QuicConnectionId last_serialized_connection_id_;
-  // The last QUIC version tag received.
-  QuicTag last_version_tag_;
+  // The last QUIC version label received.
+  QuicVersionLabel last_version_label_;
   // Version of the protocol being used.
-  QuicVersion quic_version_;
+  ParsedQuicVersion version_;
   // This vector contains QUIC versions which we currently support.
   // This should be ordered such that the highest supported version is the first
   // element, with subsequent elements in descending order (versions can be
   // skipped as necessary).
-  QuicVersionVector supported_versions_;
+  ParsedQuicVersionVector supported_versions_;
   // Primary decrypter used to decrypt packets during parsing.
   std::unique_ptr<QuicDecrypter> decrypter_;
   // Alternative decrypter that can also be used to decrypt packets.
@@ -546,9 +608,12 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // The diversification nonce from the last received packet.
   DiversificationNonce last_nonce_;
 
-  // If not null, framer asks data_producer_ to save and write stream frame
-  // data. Not owned.
+  // If not null, framer asks data_producer_ to write stream frame data. Not
+  // owned. TODO(fayang): Consider add data producer to framer's constructor.
   QuicStreamFrameDataProducer* data_producer_;
+
+  // Latched value of quic_reloadable_flag_quic_use_incremental_ack_processing.
+  const bool use_incremental_ack_processing_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicFramer);
 };

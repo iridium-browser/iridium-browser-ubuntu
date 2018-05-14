@@ -12,20 +12,18 @@
 #include <sstream>
 #include <utility>
 
-#include "ash/ime/ime_controller.h"
 #include "ash/public/interfaces/ime_info.mojom.h"
-#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/feature_list.h"
 #include "base/hash.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/sys_info.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part_chromeos.h"
 #include "chrome/browser/chromeos/ash_config.h"
@@ -45,16 +43,13 @@
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/fake_ime_keyboard.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
+#include "ui/base/ime/chromeos/ime_keyboard_mus.h"
 #include "ui/base/ime/chromeos/input_method_delegate.h"
 #include "ui/base/ime/ime_bridge.h"
 #include "ui/chromeos/ime/input_method_menu_item.h"
 #include "ui/chromeos/ime/input_method_menu_manager.h"
+#include "ui/keyboard/content/keyboard_content_util.h"
 #include "ui/keyboard/keyboard_controller.h"
-#include "ui/keyboard/keyboard_util.h"
-
-#if defined(USE_OZONE)
-#include "ui/base/ime/chromeos/ime_keyboard_mus.h"
-#endif
 
 namespace chromeos {
 namespace input_method {
@@ -507,6 +502,26 @@ void InputMethodManagerImpl::StateImpl::ChangeInputMethod(
   manager_->RecordInputMethodUsage(current_input_method.id());
 }
 
+void InputMethodManagerImpl::StateImpl::ChangeInputMethodToJpKeyboard() {
+  ChangeInputMethod(
+      extension_ime_util::GetInputMethodIDByEngineID("xkb:jp::jpn"), true);
+}
+
+void InputMethodManagerImpl::StateImpl::ChangeInputMethodToJpIme() {
+  ChangeInputMethod(
+      extension_ime_util::GetInputMethodIDByEngineID("nacl_mozc_jp"), true);
+}
+
+void InputMethodManagerImpl::StateImpl::ToggleInputMethodForJpIme() {
+  std::string jp_ime_id =
+      extension_ime_util::GetInputMethodIDByEngineID("nacl_mozc_jp");
+  ChangeInputMethod(
+      GetCurrentInputMethod().id() == jp_ime_id
+          ? extension_ime_util::GetInputMethodIDByEngineID("xkb:jp::jpn")
+          : jp_ime_id,
+      true);
+}
+
 bool InputMethodManagerImpl::StateImpl::MethodAwaitsExtensionLoad(
     const std::string& input_method_id) const {
   // For 3rd party IME, when the user just logged in, SetEnabledExtensionImes
@@ -866,12 +881,8 @@ InputMethodManagerImpl::InputMethodManagerImpl(
       is_ime_menu_activated_(false),
       features_enabled_state_(InputMethodManager::FEATURE_ALL) {
   if (IsRunningAsSystemCompositor()) {
-#if defined(USE_OZONE)
-    keyboard_ = base::MakeUnique<ImeKeyboardMus>(
+    keyboard_ = std::make_unique<ImeKeyboardMus>(
         g_browser_process->platform_part()->GetInputDeviceControllerClient());
-#else
-    keyboard_.reset(ImeKeyboard::Create());
-#endif
   } else {
     keyboard_.reset(new FakeImeKeyboard());
   }
@@ -897,13 +908,18 @@ void InputMethodManagerImpl::RecordInputMethodUsage(
   UMA_HISTOGRAM_ENUMERATION("InputMethod.Category",
                             GetInputMethodCategory(input_method_id),
                             INPUT_METHOD_CATEGORY_MAX);
-  UMA_HISTOGRAM_SPARSE_SLOWLY(
-      "InputMethod.ID2", static_cast<int32_t>(base::Hash(input_method_id)));
+  base::UmaHistogramSparse("InputMethod.ID2",
+                           static_cast<int32_t>(base::Hash(input_method_id)));
 }
 
 void InputMethodManagerImpl::AddObserver(
     InputMethodManager::Observer* observer) {
   observers_.AddObserver(observer);
+  observer->OnExtraInputEnabledStateChange(
+      base::FeatureList::IsEnabled(features::kEHVInputOnImeMenu),
+      features_enabled_state_ & InputMethodManager::FEATURE_EMOJI,
+      features_enabled_state_ & InputMethodManager::FEATURE_HANDWRITING,
+      features_enabled_state_ & InputMethodManager::FEATURE_VOICE);
 }
 
 void InputMethodManagerImpl::AddCandidateWindowObserver(
@@ -1032,7 +1048,8 @@ void InputMethodManagerImpl::ChangeInputMethodInternal(
       extension_ime_util::GetComponentIDByInputMethodID(descriptor.id());
   if (engine_map_.find(profile) == engine_map_.end() ||
       engine_map_[profile].find(extension_id) == engine_map_[profile].end()) {
-    LOG(ERROR) << "IMEEngine for \"" << extension_id << "\" is not registered";
+    LOG_IF(ERROR, base::SysInfo::IsRunningOnChromeOS())
+        << "IMEEngine for \"" << extension_id << "\" is not registered";
   }
   engine = engine_map_[profile][extension_id];
 
@@ -1282,21 +1299,36 @@ void InputMethodManagerImpl::OverrideKeyboardUrlRef(const std::string& keyset) {
     keyboard_controller->Reload();
 }
 
-bool InputMethodManagerImpl::IsEmojiHandwritingVoiceOnImeMenuEnabled() {
-  return base::FeatureList::IsEnabled(features::kEHVInputOnImeMenu);
-}
-
 void InputMethodManagerImpl::SetImeMenuFeatureEnabled(ImeMenuFeature feature,
                                                       bool enabled) {
+  const uint32_t original_state = features_enabled_state_;
   if (enabled)
     features_enabled_state_ |= feature;
   else
     features_enabled_state_ &= ~feature;
+  if (original_state != features_enabled_state_)
+    NotifyObserversImeExtraInputStateChange();
 }
 
 bool InputMethodManagerImpl::GetImeMenuFeatureEnabled(
     ImeMenuFeature feature) const {
   return features_enabled_state_ & feature;
+}
+
+void InputMethodManagerImpl::NotifyObserversImeExtraInputStateChange() {
+  for (auto& observer : observers_) {
+    const bool is_ehv_enabled =
+        base::FeatureList::IsEnabled(features::kEHVInputOnImeMenu);
+    const bool is_emoji_enabled =
+        (features_enabled_state_ & InputMethodManager::FEATURE_EMOJI);
+    const bool is_handwriting_enabled =
+        (features_enabled_state_ & InputMethodManager::FEATURE_HANDWRITING);
+    const bool is_voice_enabled =
+        (features_enabled_state_ & InputMethodManager::FEATURE_VOICE);
+    observer.OnExtraInputEnabledStateChange(is_ehv_enabled, is_emoji_enabled,
+                                            is_handwriting_enabled,
+                                            is_voice_enabled);
+  }
 }
 
 }  // namespace input_method

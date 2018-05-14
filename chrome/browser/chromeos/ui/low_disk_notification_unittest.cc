@@ -6,16 +6,19 @@
 
 #include <stdint.h>
 
-#include "base/threading/platform_thread.h"
+#include <utility>
+
 #include "base/time/time.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/notifications/notification_display_service_tester.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/test/base/browser_with_test_window_test.h"
+#include "chrome/test/base/testing_profile_manager.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_cryptohome_client.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/message_center/fake_message_center.h"
-#include "ui/message_center/message_center.h"
+#include "ui/message_center/public/cpp/notification.h"
 
 namespace {
 
@@ -27,78 +30,86 @@ const uint64_t kHighNotification = (512 << 20) - 1;
 
 namespace chromeos {
 
-class LowDiskNotificationTest : public testing::Test,
-                                public message_center::FakeMessageCenter {
+class LowDiskNotificationTest : public BrowserWithTestWindowTest {
  public:
   LowDiskNotificationTest() {}
+  ~LowDiskNotificationTest() override {}
 
   void SetUp() override {
     DBusThreadManager::GetSetterForTesting()->SetCryptohomeClient(
         std::unique_ptr<CryptohomeClient>(new FakeCryptohomeClient));
-    message_center::MessageCenter::Initialize();
+
+    BrowserWithTestWindowTest::SetUp();
+
+    tester_ = std::make_unique<NotificationDisplayServiceTester>(
+        ProfileHelper::GetSigninProfile());
+    tester_->SetNotificationAddedClosure(base::BindRepeating(
+        &LowDiskNotificationTest::OnNotificationAdded, base::Unretained(this)));
     low_disk_notification_.reset(new LowDiskNotification());
-    low_disk_notification_->SetMessageCenterForTest(this);
-    low_disk_notification_->SetNotificationIntervalForTest(
-        base::TimeDelta::FromMilliseconds(10));
     notification_count_ = 0;
   }
 
   void TearDown() override {
     low_disk_notification_.reset();
-    last_notification_.reset();
-    message_center::MessageCenter::Shutdown();
-    DBusThreadManager::Shutdown();
+    BrowserWithTestWindowTest::TearDown();
   }
 
-  void AddNotification(
-      std::unique_ptr<message_center::Notification> notification) override {
-    last_notification_ = std::move(notification);
-    notification_count_++;
+  base::Optional<message_center::Notification> GetNotification() {
+    return tester_->GetNotification("low_disk");
   }
+
+  void SetNotificationThrottlingInterval(int ms) {
+    low_disk_notification_->SetNotificationIntervalForTest(
+        base::TimeDelta::FromMilliseconds(ms));
+  }
+
+  void OnNotificationAdded() { notification_count_++; }
 
  protected:
+  std::unique_ptr<NotificationDisplayServiceTester> tester_;
   std::unique_ptr<LowDiskNotification> low_disk_notification_;
-  std::unique_ptr<message_center::Notification> last_notification_;
   int notification_count_;
 };
 
 TEST_F(LowDiskNotificationTest, MediumLevelNotification) {
   base::string16 expected_title =
       l10n_util::GetStringUTF16(IDS_LOW_DISK_NOTIFICATION_TITLE);
-  low_disk_notification_->OnLowDiskSpace(kMediumNotification);
-  EXPECT_NE(nullptr, last_notification_);
-  EXPECT_EQ(expected_title, last_notification_->title());
+  low_disk_notification_->LowDiskSpace(kMediumNotification);
+  auto notification = GetNotification();
+  ASSERT_TRUE(notification);
+  EXPECT_EQ(expected_title, notification->title());
   EXPECT_EQ(1, notification_count_);
 }
 
 TEST_F(LowDiskNotificationTest, HighLevelReplacesMedium) {
   base::string16 expected_title =
       l10n_util::GetStringUTF16(IDS_CRITICALLY_LOW_DISK_NOTIFICATION_TITLE);
-  low_disk_notification_->OnLowDiskSpace(kMediumNotification);
-  low_disk_notification_->OnLowDiskSpace(kHighNotification);
-  EXPECT_NE(nullptr, last_notification_);
-  EXPECT_EQ(expected_title, last_notification_->title());
+  low_disk_notification_->LowDiskSpace(kMediumNotification);
+  low_disk_notification_->LowDiskSpace(kHighNotification);
+  auto notification = GetNotification();
+  ASSERT_TRUE(notification);
+  EXPECT_EQ(expected_title, notification->title());
   EXPECT_EQ(2, notification_count_);
 }
 
 TEST_F(LowDiskNotificationTest, NotificationsAreThrottled) {
-  low_disk_notification_->OnLowDiskSpace(kHighNotification);
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(5));
-  low_disk_notification_->OnLowDiskSpace(kHighNotification);
+  SetNotificationThrottlingInterval(10000000);
+  low_disk_notification_->LowDiskSpace(kHighNotification);
+  low_disk_notification_->LowDiskSpace(kHighNotification);
   EXPECT_EQ(1, notification_count_);
 }
 
 TEST_F(LowDiskNotificationTest, HighNotificationsAreShownAfterThrottling) {
-  low_disk_notification_->OnLowDiskSpace(kHighNotification);
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(15));
-  low_disk_notification_->OnLowDiskSpace(kHighNotification);
+  SetNotificationThrottlingInterval(-1);
+  low_disk_notification_->LowDiskSpace(kHighNotification);
+  low_disk_notification_->LowDiskSpace(kHighNotification);
   EXPECT_EQ(2, notification_count_);
 }
 
 TEST_F(LowDiskNotificationTest, MediumNotificationsAreNotShownAfterThrottling) {
-  low_disk_notification_->OnLowDiskSpace(kMediumNotification);
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(15));
-  low_disk_notification_->OnLowDiskSpace(kMediumNotification);
+  SetNotificationThrottlingInterval(-1);
+  low_disk_notification_->LowDiskSpace(kMediumNotification);
+  low_disk_notification_->LowDiskSpace(kMediumNotification);
   EXPECT_EQ(1, notification_count_);
 }
 

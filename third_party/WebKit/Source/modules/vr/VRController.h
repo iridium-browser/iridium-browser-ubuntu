@@ -7,7 +7,7 @@
 
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/Document.h"
-#include "device/vr/vr_service.mojom-blink.h"
+#include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "modules/vr/VRDisplay.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "platform/heap/Handle.h"
@@ -29,32 +29,37 @@ class VRController final : public GarbageCollectedFinalized<VRController>,
 
  public:
   VRController(NavigatorVR*);
-  virtual ~VRController();
+  ~VRController() override;
 
   void GetDisplays(ScriptPromiseResolver*);
   void SetListeningForActivate(bool);
 
-  void OnDisplayConnected(device::mojom::blink::VRDisplayPtr,
+  void OnDisplayConnected(device::mojom::blink::VRMagicWindowProviderPtr,
+                          device::mojom::blink::VRDisplayHostPtr,
                           device::mojom::blink::VRDisplayClientRequest,
                           device::mojom::blink::VRDisplayInfoPtr) override;
 
   void FocusChanged();
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
-  void OnDisplaysSynced(unsigned);
+  void OnDisplaysSynced();
   void OnGetDisplays();
 
   // ContextLifecycleObserver.
   void ContextDestroyed(ExecutionContext*) override;
   void Dispose();
 
+  void LogGetDisplayResult();
+
   Member<NavigatorVR> navigator_vr_;
   VRDisplayVector displays_;
 
   bool display_synced_;
-  unsigned number_of_synced_displays_;
+
+  bool has_presentation_capable_display_ = false;
+  bool has_display_ = false;
 
   Deque<std::unique_ptr<VRGetDevicesCallback>> pending_get_devices_callbacks_;
   device::mojom::blink::VRServicePtr service_;

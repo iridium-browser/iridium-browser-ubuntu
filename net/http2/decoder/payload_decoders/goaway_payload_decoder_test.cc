@@ -29,13 +29,6 @@ class GoAwayPayloadDecoderPeer {
   // Returns the mask of flags that affect the decoding of the payload (i.e.
   // flags that that indicate the presence of certain fields or padding).
   static constexpr uint8_t FlagsAffectingPayloadDecoding() { return 0; }
-
-  static void Randomize(GoAwayPayloadDecoder* p, RandomBase* rng) {
-    CorruptEnum(&p->payload_state_, rng);
-    test::Randomize(&p->goaway_fields_, rng);
-    VLOG(1) << "GoAwayPayloadDecoderPeer::Randomize goaway_fields: "
-            << p->goaway_fields_;
-  }
 };
 
 namespace {
@@ -105,7 +98,7 @@ TEST_P(GoAwayOpaqueDataLengthTests, ValidLength) {
                           RandStreamId());
   set_frame_header(header);
   FrameParts expected(header, opaque_data);
-  expected.opt_goaway = goaway;
+  expected.SetOptGoaway(goaway);
   ASSERT_TRUE(DecodePayloadAndValidateSeveralWays(fb.buffer(), expected));
 }
 

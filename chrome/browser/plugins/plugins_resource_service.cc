@@ -14,12 +14,14 @@
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_json/safe_json_parser.h"
+#include "content/public/common/service_manager_connection.h"
+#include "services/data_decoder/public/cpp/safe_json_parser.h"
 #include "url/gurl.h"
 
 namespace {
-constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
-    net::DefineNetworkTrafficAnnotation("plugins_resource_service", R"(
+constexpr net::NetworkTrafficAnnotationTag
+    kPluginResourceServiceTrafficAnnotation =
+        net::DefineNetworkTrafficAnnotation("plugins_resource_service", R"(
         semantics {
           sender: "Plugins Resource Service"
           description:
@@ -32,7 +34,7 @@ constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting: "This feature cannot be disabled in settings."
           policy_exception_justification:
             "Not implemented. AllowOutdatedPlugins policy silences local "
@@ -51,7 +53,7 @@ const int kStartResourceFetchDelayMs = 60 * 1000;
 const int kCacheUpdateDelayMs = 24 * 60 * 60 * 1000;
 
 const char kPluginsServerUrl[] =
-    "https://cache.iridiumbrowser.de/";
+    "https://cache.iridiumbrowser.de/plugins_3/";
 
 GURL GetPluginsServerURL() {
   std::string filename;
@@ -82,8 +84,10 @@ PluginsResourceService::PluginsResourceService(PrefService* local_state)
           kCacheUpdateDelayMs,
           g_browser_process->system_request_context(),
           switches::kDisableBackgroundNetworking,
-          base::Bind(safe_json::SafeJsonParser::Parse),
-          kTrafficAnnotation) {}
+          base::Bind(data_decoder::SafeJsonParser::Parse,
+                     content::ServiceManagerConnection::GetForProcess()
+                         ->GetConnector()),
+          kPluginResourceServiceTrafficAnnotation) {}
 
 void PluginsResourceService::Init() {
   const base::DictionaryValue* metadata =
@@ -98,7 +102,7 @@ PluginsResourceService::~PluginsResourceService() {
 // static
 void PluginsResourceService::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(prefs::kPluginsMetadata,
-                                   base::MakeUnique<base::DictionaryValue>());
+                                   std::make_unique<base::DictionaryValue>());
   registry->RegisterStringPref(prefs::kPluginsResourceCacheUpdate, "0");
 }
 

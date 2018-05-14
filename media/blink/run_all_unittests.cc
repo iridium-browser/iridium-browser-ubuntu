@@ -10,6 +10,7 @@
 #include "base/test/test_suite.h"
 #include "build/build_config.h"
 #include "media/base/media.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebThread.h"
 #include "third_party/WebKit/public/platform/scheduler/renderer/renderer_scheduler.h"
@@ -17,9 +18,7 @@
 #include "third_party/WebKit/public/web/WebKit.h"
 
 #if defined(OS_ANDROID)
-#include "base/android/jni_android.h"
 #include "media/base/android/media_codec_util.h"
-#include "media/base/android/media_jni_registrar.h"
 #endif
 
 #if !defined(OS_IOS)
@@ -29,6 +28,18 @@
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
 #include "gin/v8_initializer.h"
 #endif
+
+namespace {
+#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
+#if defined(USE_V8_CONTEXT_SNAPSHOT)
+constexpr gin::V8Initializer::V8SnapshotFileType kSnapshotType =
+    gin::V8Initializer::V8SnapshotFileType::kWithAdditionalContext;
+#else
+constexpr gin::V8Initializer::V8SnapshotFileType kSnapshotType =
+    gin::V8Initializer::V8SnapshotFileType::kDefault;
+#endif
+#endif
+}
 
 class TestBlinkPlatformSupport : public blink::Platform {
  public:
@@ -69,15 +80,13 @@ BlinkMediaTestSuite::BlinkMediaTestSuite(int argc, char** argv)
       blink_platform_support_(new TestBlinkPlatformSupport()) {
 }
 
-BlinkMediaTestSuite::~BlinkMediaTestSuite() {}
+BlinkMediaTestSuite::~BlinkMediaTestSuite() = default;
 
 void BlinkMediaTestSuite::Initialize() {
   // Run TestSuite::Initialize first so that logging is initialized.
   base::TestSuite::Initialize();
 
 #if defined(OS_ANDROID)
-  media::RegisterJni(base::android::AttachCurrentThread());
-
   if (media::MediaCodecUtil::IsMediaCodecAvailable())
     media::EnablePlatformDecoderSupport();
 #endif
@@ -87,7 +96,7 @@ void BlinkMediaTestSuite::Initialize() {
   media::InitializeMediaLibrary();
 
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
-  gin::V8Initializer::LoadV8Snapshot();
+  gin::V8Initializer::LoadV8Snapshot(kSnapshotType);
   gin::V8Initializer::LoadV8Natives();
 #endif
 
@@ -101,7 +110,8 @@ void BlinkMediaTestSuite::Initialize() {
   std::unique_ptr<base::MessageLoop> message_loop;
   if (!base::MessageLoop::current())
     message_loop.reset(new base::MessageLoop());
-  blink::Initialize(blink_platform_support_.get());
+  service_manager::BinderRegistry empty_registry;
+  blink::Initialize(blink_platform_support_.get(), &empty_registry);
 }
 
 int main(int argc, char** argv) {

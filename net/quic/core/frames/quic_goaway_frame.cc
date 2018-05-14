@@ -3,24 +3,26 @@
 // found in the LICENSE file.
 
 #include "net/quic/core/frames/quic_goaway_frame.h"
-
-using std::string;
+#include "net/quic/platform/api/quic_string.h"
 
 namespace net {
 
 QuicGoAwayFrame::QuicGoAwayFrame()
     : error_code(QUIC_NO_ERROR), last_good_stream_id(0) {}
 
-QuicGoAwayFrame::QuicGoAwayFrame(QuicErrorCode error_code,
+QuicGoAwayFrame::QuicGoAwayFrame(QuicControlFrameId control_frame_id,
+                                 QuicErrorCode error_code,
                                  QuicStreamId last_good_stream_id,
-                                 const string& reason)
-    : error_code(error_code),
+                                 const QuicString& reason)
+    : QuicControlFrame(control_frame_id),
+      error_code(error_code),
       last_good_stream_id(last_good_stream_id),
       reason_phrase(reason) {}
 
 std::ostream& operator<<(std::ostream& os,
                          const QuicGoAwayFrame& goaway_frame) {
-  os << "{ error_code: " << goaway_frame.error_code
+  os << "{ control_frame_id: " << goaway_frame.control_frame_id
+     << ", error_code: " << goaway_frame.error_code
      << ", last_good_stream_id: " << goaway_frame.last_good_stream_id
      << ", reason_phrase: '" << goaway_frame.reason_phrase << "' }\n";
   return os;

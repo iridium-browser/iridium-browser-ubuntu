@@ -4,8 +4,10 @@
 
 #include "core/dom/IdleDeadline.h"
 
-#include "platform/testing/TestingPlatformSupport.h"
-#include "platform/wtf/CurrentTime.h"
+#include "base/single_thread_task_runner.h"
+#include "platform/scheduler/child/web_scheduler.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/Platform.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -14,30 +16,36 @@ namespace {
 
 class MockIdleDeadlineScheduler final : public WebScheduler {
  public:
-  MockIdleDeadlineScheduler() {}
-  ~MockIdleDeadlineScheduler() override {}
+  MockIdleDeadlineScheduler() = default;
+  ~MockIdleDeadlineScheduler() override = default;
 
   // WebScheduler implementation:
-  WebTaskRunner* LoadingTaskRunner() override { return nullptr; }
-  WebTaskRunner* TimerTaskRunner() override { return nullptr; }
+  base::SingleThreadTaskRunner* V8TaskRunner() override { return nullptr; }
   void Shutdown() override {}
   bool ShouldYieldForHighPriorityWork() override { return true; }
   bool CanExceedIdleDeadlineIfRequired() override { return false; }
-  void PostIdleTask(const WebTraceLocation&, WebThread::IdleTask*) override {}
-  void PostNonNestableIdleTask(const WebTraceLocation&,
-                               WebThread::IdleTask*) override {}
+  void PostIdleTask(const base::Location&, WebThread::IdleTask) override {}
+  void PostNonNestableIdleTask(const base::Location&,
+                               WebThread::IdleTask) override {}
   std::unique_ptr<WebViewScheduler> CreateWebViewScheduler(
       InterventionReporter*,
       WebViewScheduler::WebViewSchedulerDelegate*) override {
     return nullptr;
   }
-  WebTaskRunner* CompositorTaskRunner() override { return nullptr; }
-  void SuspendTimerQueue() override {}
-  void ResumeTimerQueue() override {}
+  base::SingleThreadTaskRunner* CompositorTaskRunner() override {
+    return nullptr;
+  }
+  std::unique_ptr<RendererPauseHandle> PauseScheduler() override {
+    return nullptr;
+  }
   void AddPendingNavigation(
       scheduler::RendererScheduler::NavigatingFrameType) override {}
   void RemovePendingNavigation(
       scheduler::RendererScheduler::NavigatingFrameType) override {}
+
+  base::TimeTicks MonotonicallyIncreasingVirtualTime() const override {
+    return base::TimeTicks();
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockIdleDeadlineScheduler);
@@ -45,8 +53,8 @@ class MockIdleDeadlineScheduler final : public WebScheduler {
 
 class MockIdleDeadlineThread final : public WebThread {
  public:
-  MockIdleDeadlineThread() {}
-  ~MockIdleDeadlineThread() override {}
+  MockIdleDeadlineThread() = default;
+  ~MockIdleDeadlineThread() override = default;
   bool IsCurrentThread() const override { return true; }
   WebScheduler* Scheduler() const override { return &scheduler_; }
 
@@ -57,8 +65,8 @@ class MockIdleDeadlineThread final : public WebThread {
 
 class MockIdleDeadlinePlatform : public TestingPlatformSupport {
  public:
-  MockIdleDeadlinePlatform() {}
-  ~MockIdleDeadlinePlatform() override {}
+  MockIdleDeadlinePlatform() = default;
+  ~MockIdleDeadlinePlatform() override = default;
   WebThread* CurrentThread() override { return &thread_; }
 
  private:
@@ -86,7 +94,7 @@ TEST_F(IdleDeadlineTest, deadlineInFuture) {
   IdleDeadline* deadline =
       IdleDeadline::Create(1.25, IdleDeadline::CallbackType::kCalledWhenIdle);
   // Note: the deadline is computed with reduced resolution.
-  EXPECT_FLOAT_EQ(249.995, deadline->timeRemaining());
+  EXPECT_FLOAT_EQ(250.0, deadline->timeRemaining());
 }
 
 TEST_F(IdleDeadlineTest, deadlineInPast) {

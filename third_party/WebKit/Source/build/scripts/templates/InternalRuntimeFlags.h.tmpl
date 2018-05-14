@@ -7,17 +7,14 @@
 #define InternalRuntimeFlags_h
 
 #include "platform/bindings/ScriptWrappable.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/RefPtr.h"
+#include "platform/runtime_enabled_features.h"
+#include "base/memory/scoped_refptr.h"
 #include "platform/wtf/RefCounted.h"
 
 namespace blink {
 
-class InternalRuntimeFlags :
-    public GarbageCollected<InternalRuntimeFlags>,
-    public ScriptWrappable {
+class InternalRuntimeFlags : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
  public:
   static InternalRuntimeFlags* create() {
@@ -34,11 +31,13 @@ class InternalRuntimeFlags :
 
   {% for feature in standard_features %}
   bool {{feature.first_lowered_name}}Enabled() {
+    {% if feature.origin_trial_feature_name %}
+    return RuntimeEnabledFeatures::{{feature.name}}EnabledByRuntimeFlag();
+    {% else %}
     return RuntimeEnabledFeatures::{{feature.name}}Enabled();
+    {% endif %}
   }
   {% endfor %}
-
-  DEFINE_INLINE_TRACE() {}
 
  private:
   InternalRuntimeFlags() {}

@@ -37,7 +37,8 @@
 const char GoogleURLTracker::kDefaultGoogleHomepage[] =
     "trk:192:https://www.google.com/";
 const char GoogleURLTracker::kSearchDomainCheckURL[] =
-/* trk:193: */ "https://www.google.com/searchdomaincheck?format=domain&type=chrome";
+/* trk:193 */
+    "https://www.google.com/searchdomaincheck?format=domain&type=chrome";
 
 GoogleURLTracker::GoogleURLTracker(
     std::unique_ptr<GoogleURLTrackerClient> client,
@@ -187,7 +188,7 @@ void GoogleURLTracker::StartFetchIfDesirable() {
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: true
+          cookies_allowed: YES
           cookies_store: "user"
           setting:
             "To disable this check, users can change the default search engine "
@@ -199,8 +200,11 @@ void GoogleURLTracker::StartFetchIfDesirable() {
             "requests.\nFinally, running Chromium with "
             "--disable-background-networking will disable this, as well as "
             "various other features that make network requests automatically."
-          policy_exception_justification:
-            "Not implemented."
+           policy_exception_justification:
+            "Setting DefaultSearchProviderEnabled Chrome settings policy to "
+            "false suffices as a way of setting the default search engine to "
+            "not be Google. But there is no policy that controls navigation "
+            "error resolution."
         })");
   fetcher_ =
       net::URLFetcher::Create(fetcher_id_, GURL(kSearchDomainCheckURL),

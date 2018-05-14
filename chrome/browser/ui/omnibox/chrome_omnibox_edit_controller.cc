@@ -4,20 +4,19 @@
 
 #include "chrome/browser/ui/omnibox/chrome_omnibox_edit_controller.h"
 
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "components/toolbar/toolbar_model.h"
 #include "extensions/features/features.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/ui/extensions/settings_api_bubble_helpers.h"
 #endif
-
-ChromeOmniboxEditController::ChromeOmniboxEditController(
-    CommandUpdater* command_updater)
-    : command_updater_(command_updater) {}
-
-ChromeOmniboxEditController::~ChromeOmniboxEditController() {}
 
 void ChromeOmniboxEditController::OnAutocompleteAccept(
     const GURL& destination_url,
@@ -39,3 +38,9 @@ void ChromeOmniboxEditController::OnInputInProgress(bool in_progress) {
   GetToolbarModel()->set_input_in_progress(in_progress);
   UpdateWithoutTabRestore();
 }
+
+ChromeOmniboxEditController::ChromeOmniboxEditController(
+    CommandUpdater* command_updater)
+    : command_updater_(command_updater) {}
+
+ChromeOmniboxEditController::~ChromeOmniboxEditController() {}

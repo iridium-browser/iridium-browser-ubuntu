@@ -13,8 +13,10 @@ if (is_android) {
   import("//build/config/android/rules.gni")
 }
 
-source_set("browser") {
+cast_source_set("browser") {
   sources = [
+    "application_media_capabilities.cc",
+    "application_media_capabilities.h",
     "cast_browser_context.cc",
     "cast_browser_context.h",
     "cast_browser_main_parts.cc",
@@ -30,6 +32,8 @@ source_set("browser") {
     "cast_http_user_agent_settings.h",
     "cast_media_blocker.cc",
     "cast_media_blocker.h",
+    "cast_navigation_ui_data.cc",
+    "cast_navigation_ui_data.h",
     "cast_net_log.cc",
     "cast_net_log.h",
     "cast_network_delegate.cc",
@@ -40,14 +44,17 @@ source_set("browser") {
     "cast_quota_permission_context.h",
     "cast_resource_dispatcher_host_delegate.cc",
     "cast_resource_dispatcher_host_delegate.h",
-    "cast_web_view.cc",
+    "cast_web_contents_manager.cc",
+    "cast_web_contents_manager.h",
     "cast_web_view.h",
+    "cast_web_view_default.cc",
+    "cast_web_view_default.h",
+    "cast_web_view_factory.cc",
+    "cast_web_view_factory.h",
     "devtools/cast_devtools_manager_delegate.cc",
     "devtools/cast_devtools_manager_delegate.h",
     "devtools/remote_debugging_server.cc",
     "devtools/remote_debugging_server.h",
-    "geolocation/cast_access_token_store.cc",
-    "geolocation/cast_access_token_store.h",
     "media/media_caps_impl.cc",
     "media/media_caps_impl.h",
     "media/supported_codec_finder.cc",
@@ -70,6 +77,7 @@ source_set("browser") {
 
   if (chromecast_branding == "public") {
     sources += [
+      "cast_browser_main_parts_simple.cc",
       "cast_content_browser_client_simple.cc",
       "cast_network_delegate_simple.cc",
       "pref_service_helper_simple.cc",
@@ -80,7 +88,7 @@ source_set("browser") {
     "//base",
     "//base:i18n",
     "//cc",
-    "//chromecast:chromecast_features",
+    "//chromecast:chromecast_buildflags",
     "//chromecast/app:cast_crash_client",
     "//chromecast/app:chromecast_settings",
     "//chromecast/app:resources",
@@ -89,19 +97,20 @@ source_set("browser") {
     "//chromecast/base:cast_version",
     "//chromecast/browser:resources",
     "//chromecast/common",
+    "//chromecast/common:interfaces",
     "//chromecast/common/media",
     "//chromecast/common/media:interfaces",
     "//chromecast/graphics",
     "//chromecast/media",
+    "//chromecast/media:libcast_media",
+    "//chromecast/media/base:video_plane_controller",
     "//chromecast/media/service",
     "//chromecast/net",
     "//chromecast/service",
-    "//components/crash/content/app",
-    "//components/crash/content/browser",
+    "//components/download/public/common:public",
     "//components/metrics",
     "//components/metrics:gpu",
     "//components/metrics:net",
-    "//components/metrics:profiler",
 
     # TODO(gfhuang): Eliminate this dependency if ScreenInfoMetricsProvider
     # isn't needed. crbug.com/541577
@@ -127,10 +136,34 @@ source_set("browser") {
     "//ui/gl",
   ]
 
+  if (is_android) {
+    sources += [
+      "android/cast_content_window_android.cc",
+      "android/cast_content_window_android.h",
+      "android/cast_metrics_helper_android.cc",
+      "android/cast_web_contents_surface_helper.cc",
+      "android/cast_web_contents_surface_helper.h",
+    ]
+    deps += [
+      ":jni_headers",
+      "//components/cdm/browser",
+    ]
+  } else {
+    sources += [
+      "cast_display_configurator.cc",
+      "cast_display_configurator.h",
+      "cast_touch_device_manager.cc",
+      "cast_touch_device_manager.h",
+    ]
+
+    deps += [
+      "//mojo/public/cpp/bindings",
+      "//ui/aura",
+    ]
+  }
+
   if (is_linux) {
     sources += [
-      "cast_content_window_linux.cc",
-      "cast_content_window_linux.h",
       "cast_memory_pressure_monitor.cc",
       "cast_memory_pressure_monitor.h",
       "memory_pressure_controller_impl.cc",
@@ -140,27 +173,23 @@ source_set("browser") {
     ]
 
     deps += [
-      "//chromecast/common:interfaces",
       "//components/metrics:serialization",
-      "//mojo/public/cpp/bindings",
       "//third_party/fontconfig",
-      "//ui/aura",
     ]
-  } else if (is_android) {
-    sources += [
-      "android/cast_content_window_android.cc",
-      "android/cast_content_window_android.h",
-      "android/cast_metrics_helper_android.cc",
-      "android/cast_metrics_helper_android.h",
-      "android/cast_web_contents_activity.cc",
-      "android/cast_web_contents_activity.h",
-      "android/jni_registrar.cc",
-      "android/jni_registrar.h",
-    ]
+  }
 
+  if (use_aura) {
+    sources += [
+      "cast_content_window_aura.cc",
+      "cast_content_window_aura.h",
+    ]
+  }
+
+  if (!is_fuchsia) {
+    # TODO(crbug.com/753619): Enable crash reporting on Fuchsia.
     deps += [
-      ":jni_headers",
-      "//components/cdm/browser",
+      "//components/crash/content/app",
+      "//components/crash/content/browser",
     ]
   }
 
@@ -172,6 +201,50 @@ source_set("browser") {
     deps += [
       "//media/mojo/interfaces:constants",
       "//media/mojo/services",
+    ]
+  }
+
+  if (enable_chromecast_extensions) {
+    sources += [
+      "cast_extension_host.cc",
+      "cast_extension_host.h",
+      "cast_web_view_extension.cc",
+      "cast_web_view_extension.h",
+      "extension_request_protocol_handler.cc",
+      "extension_request_protocol_handler.h",
+      "extensions/api/identity/identity_api.cc",
+      "extensions/api/identity/identity_api.h",
+      "extensions/cast_display_info_provider.cc",
+      "extensions/cast_display_info_provider.h",
+      "extensions/cast_extension_host_delegate.cc",
+      "extensions/cast_extension_host_delegate.h",
+      "extensions/cast_extension_system.cc",
+      "extensions/cast_extension_system.h",
+      "extensions/cast_extension_system_factory.cc",
+      "extensions/cast_extension_system_factory.h",
+      "extensions/cast_extension_web_contents_observer.cc",
+      "extensions/cast_extension_web_contents_observer.h",
+      "extensions/cast_extensions_api_client.cc",
+      "extensions/cast_extensions_api_client.h",
+      "extensions/cast_extensions_browser_client.cc",
+      "extensions/cast_extensions_browser_client.h",
+      "extensions/cast_prefs.cc",
+      "extensions/cast_prefs.h",
+      "extensions/stub_storage_monitor.cc",
+    ]
+
+    deps += [
+      "//components/guest_view/browser",
+      "//components/keyed_service/content",
+      "//components/pref_registry",
+      "//components/storage_monitor",
+      "//components/user_prefs:user_prefs",
+      "//components/version_info",
+      "//extensions/browser",
+      "//extensions/common",
+      "//extensions/common/api",
+      "//extensions/shell/common/api:api_registration_bundle_generator_registration",
+      "//google_apis:google_apis",
     ]
   }
 
@@ -235,11 +308,13 @@ grit("resources") {
   ]
 }
 
-source_set("test_support") {
+cast_source_set("test_support") {
   testonly = true
   sources = [
     "test/cast_browser_test.cc",
     "test/cast_browser_test.h",
+    "test/fake_web_contents_observer.cc",
+    "test/fake_web_contents_observer.h",
   ]
 
   public_deps = [
@@ -250,13 +325,14 @@ source_set("test_support") {
   deps = [
     "//base",
     "//chromecast/base",
+    "//chromecast/common:interfaces",
     "//content/public/browser",
     "//content/public/common",
     "//testing/gtest",
   ]
 }
 
-source_set("browsertests") {
+cast_source_set("browsertests") {
   testonly = true
   sources = [
     "cast_media_blocker_browsertest.cc",
@@ -269,20 +345,21 @@ source_set("browsertests") {
 
   deps = [
     ":test_support",
-    "//chromecast:chromecast_features",
+    "//chromecast:chromecast_buildflags",
     "//chromecast/base",
     "//chromecast/base:chromecast_switches",
     "//chromecast/base/metrics",
     "//components/prefs",
-    "//media/base:test_support",
+    "//media:test_support",
   ]
 }
 
-source_set("unittests") {
+cast_source_set("unittests") {
   testonly = true
 
   sources = [
     "cast_media_blocker_unittest.cc",
+    "cast_touch_device_manager_unittest.cc",
     "devtools/cast_devtools_manager_delegate_unittest.cc",
   ]
 
@@ -292,6 +369,7 @@ source_set("unittests") {
     "//chromecast/base",
     "//content/public/browser",
     "//content/test:test_support",
+    "//ui/events/devices:devices",
     "//ui/gl:test_support",
   ]
 }
@@ -303,7 +381,7 @@ if (is_android) {
       "android/apk/src/org/chromium/chromecast/shell/CastCrashHandler.java",
       "android/apk/src/org/chromium/chromecast/shell/CastMetricsHelper.java",
       "android/apk/src/org/chromium/chromecast/shell/CastSysInfoAndroid.java",
-      "android/apk/src/org/chromium/chromecast/shell/CastWebContentsActivity.java",
+      "android/apk/src/org/chromium/chromecast/shell/CastWebContentsSurfaceHelper.java",
     ]
 
     jni_package = "chromecast"

@@ -12,7 +12,10 @@
 
 #include <stdint.h>
 
-#include <unordered_map>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "base/strings/string_split.h"
 #include "net/disk_cache/disk_cache.h"
@@ -31,6 +34,7 @@ class MockDiskEntry : public disk_cache::Entry,
     DEFER_NONE,
     DEFER_CREATE,
     DEFER_READ,
+    DEFER_WRITE,
   };
 
   explicit MockDiskEntry(const std::string& key);
@@ -69,6 +73,9 @@ class MockDiskEntry : public disk_cache::Entry,
   bool CouldBeSparse() const override;
   void CancelSparseIO() override;
   int ReadyForSparseIO(const CompletionCallback& completion_callback) override;
+
+  uint8_t in_memory_data() const { return in_memory_data_; }
+  void set_in_memory_data(uint8_t val) { in_memory_data_ = val; }
 
   // Fail most subsequent requests.
   void set_fail_requests() { fail_requests_ = true; }
@@ -112,6 +119,7 @@ class MockDiskEntry : public disk_cache::Entry,
 
   std::string key_;
   std::vector<char> data_[kNumCacheEntryDataIndices];
+  uint8_t in_memory_data_;
   int test_mode_;
   bool doomed_;
   bool sparse_;
@@ -157,6 +165,8 @@ class MockDiskCache : public disk_cache::Backend {
   size_t DumpMemoryStats(
       base::trace_event::ProcessMemoryDump* pmd,
       const std::string& parent_absolute_name) const override;
+  uint8_t GetEntryInMemoryData(const std::string& key) override;
+  void SetEntryInMemoryData(const std::string& key, uint8_t data) override;
 
   // Returns number of times a cache entry was successfully opened.
   int open_count() const { return open_count_; }
@@ -175,6 +185,12 @@ class MockDiskCache : public disk_cache::Backend {
 
   // Makes sure that CreateEntry is not called twice for a given key.
   void set_double_create_check(bool value) { double_create_check_ = value; }
+
+  // Determines whether to provide the GetEntryInMemoryData/SetEntryInMemoryData
+  // interface.  Default is true.
+  void set_support_in_memory_entry_data(bool value) {
+    support_in_memory_entry_data_ = value;
+  }
 
   // Makes all requests for data ranges to fail as not implemented.
   void set_fail_sparse_requests() { fail_sparse_requests_ = true; }
@@ -196,7 +212,7 @@ class MockDiskCache : public disk_cache::Backend {
   scoped_refptr<MockDiskEntry> GetDiskEntryRef(const std::string& key);
 
  private:
-  using EntryMap = std::unordered_map<std::string, MockDiskEntry*>;
+  using EntryMap = std::map<std::string, MockDiskEntry*>;
   class NotImplementedIterator;
 
   void CallbackLater(const CompletionCallback& callback, int result);
@@ -209,6 +225,7 @@ class MockDiskCache : public disk_cache::Backend {
   bool soft_failures_;
   bool double_create_check_;
   bool fail_sparse_requests_;
+  bool support_in_memory_entry_data_;
 
   // Used for pause and restart.
   MockDiskEntry::DeferOp defer_op_;
@@ -286,6 +303,7 @@ class MockHttpCache {
   int GetCountReaders(const std::string& key);
   int GetCountAddToEntryQueue(const std::string& key);
   int GetCountDoneHeadersQueue(const std::string& key);
+  int GetCountWriterTransactions(const std::string& key);
 
  private:
   HttpCache http_cache_;

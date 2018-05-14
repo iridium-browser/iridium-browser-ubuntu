@@ -10,6 +10,7 @@ import os.path
 import shutil
 import subprocess
 import sys
+import stat
 import tempfile
 
 # How to patch libxml2 in Chromium:
@@ -137,8 +138,10 @@ XML_WIN32_CONFIGURE_OPTIONS = (
 FILES_TO_REMOVE = [
     'src/DOCBparser.c',
     'src/HACKING',
+    'src/INSTALL',
     'src/INSTALL.libxml2',
     'src/MAINTAINERS',
+    'src/Makefile.in',
     'src/Makefile.win',
     'src/README.cvs-commits',
     # This is unneeded "legacy" SAX API, even though we enable SAX1.
@@ -150,18 +153,29 @@ FILES_TO_REMOVE = [
     'src/build_glob.py',
     'src/c14n.c',
     'src/catalog.c',
+    'src/compile',
+    'src/config.guess',
+    'src/config.sub',
+    'src/configure',
     'src/chvalid.def',
     'src/debugXML.c',
+    'src/depcomp',
     'src/doc',
     'src/example',
     'src/genChRanges.py',
     'src/global.data',
+    'src/include/libxml/Makefile.in',
     'src/include/libxml/xmlversion.h',
     'src/include/libxml/xmlwin32version.h',
     'src/include/libxml/xmlwin32version.h.in',
+    'src/include/Makefile.in',
+    'src/install-sh',
     'src/legacy.c',
     'src/libxml2.doap',
+    'src/ltmain.sh',
+    'src/m4',
     'src/macos/libxml2.mcp.xml.sit.hqx',
+    'src/missing',
     'src/optim',
     'src/os400',
     'src/python',
@@ -245,7 +259,8 @@ def remove_tracked_files(files_to_remove):
         files_to_remove: The files to remove.
     """
     files_to_remove = [f for f in files_to_remove if os.path.exists(f)]
-    git('rm', '-rf', *files_to_remove)
+    if files_to_remove:
+        git('rm', '-rf', *files_to_remove)
 
 
 def sed_in_place(input_filename, program):
@@ -383,6 +398,8 @@ def roll_libxml_mac(src_path):
 
     with WorkingDir(os.path.join(full_path_to_third_party_libxml, 'mac')):
         subprocess.check_call(['autoreconf', '-i', '../src'])
+        os.chmod('../src/configure',
+                 os.stat('../src/configure').st_mode | stat.S_IXUSR)
         subprocess.check_call(['../src/configure'] + XML_CONFIGURE_OPTIONS)
         sed_in_place('config.h', 's/#define HAVE_RAND_R 1//')
 

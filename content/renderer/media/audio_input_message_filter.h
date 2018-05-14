@@ -9,7 +9,7 @@
 
 #include <memory>
 
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/macros.h"
 #include "base/memory/shared_memory.h"
 #include "base/sync_socket.h"
@@ -72,8 +72,6 @@ class CONTENT_EXPORT AudioInputMessageFilter : public IPC::MessageFilter {
 #else
                        base::FileDescriptor socket_descriptor,
 #endif
-                       uint32_t length,
-                       uint32_t total_segments,
                        bool initially_muted);
 
   // Received when internal state of browser process' audio input stream has
@@ -84,7 +82,7 @@ class CONTENT_EXPORT AudioInputMessageFilter : public IPC::MessageFilter {
   void OnStreamMuted(int stream_id, bool is_muted);
 
   // A map of stream ids to delegates.
-  IDMap<media::AudioInputIPCDelegate*> delegates_;
+  base::IDMap<media::AudioInputIPCDelegate*> delegates_;
 
   // IPC sender for Send(), must only be accesed on |io_task_runner_|.
   IPC::Sender* sender_;

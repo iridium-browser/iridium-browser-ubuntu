@@ -12,8 +12,6 @@
 
 namespace content {
 
-void RenderWidgetHostDelegate::GetScreenInfo(ScreenInfo*) {}
-
 KeyboardEventProcessingResult RenderWidgetHostDelegate::PreHandleKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
   return KeyboardEventProcessingResult::NOT_HANDLED;
@@ -31,12 +29,12 @@ bool RenderWidgetHostDelegate::PreHandleGestureEvent(
 
 BrowserAccessibilityManager*
     RenderWidgetHostDelegate::GetRootBrowserAccessibilityManager() {
-  return NULL;
+  return nullptr;
 }
 
 BrowserAccessibilityManager*
     RenderWidgetHostDelegate::GetOrCreateRootBrowserAccessibilityManager() {
-  return NULL;
+  return nullptr;
 }
 
 // If a delegate does not override this, the RenderWidgetHostView will

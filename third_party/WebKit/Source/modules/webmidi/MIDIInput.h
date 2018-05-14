@@ -50,7 +50,7 @@ class MIDIInput final : public MIDIPort {
                            const String& name,
                            const String& version,
                            midi::mojom::PortState);
-  ~MIDIInput() override {}
+  ~MIDIInput() override = default;
 
   EventListener* onmidimessage();
   void setOnmidimessage(EventListener*);
@@ -60,14 +60,12 @@ class MIDIInput final : public MIDIPort {
     return EventTargetNames::MIDIInput;
   }
 
-  // |timeStamp| is a DOMHighResTimeStamp in the time coordinate system of
-  // performance.now().
   void DidReceiveMIDIData(unsigned port_index,
                           const unsigned char* data,
                           size_t length,
-                          double time_stamp);
+                          base::TimeTicks time_stamp);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   void AddedEventListener(const AtomicString& event_type,

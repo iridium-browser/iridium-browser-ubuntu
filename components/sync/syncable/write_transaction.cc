@@ -12,14 +12,14 @@ namespace syncer {
 
 //////////////////////////////////////////////////////////////////////////
 // WriteTransaction member definitions
-WriteTransaction::WriteTransaction(const tracked_objects::Location& from_here,
+WriteTransaction::WriteTransaction(const base::Location& from_here,
                                    UserShare* share)
     : BaseTransaction(share), transaction_(nullptr) {
   transaction_ = new syncable::WriteTransaction(from_here, syncable::SYNCAPI,
                                                 share->directory.get());
 }
 
-WriteTransaction::WriteTransaction(const tracked_objects::Location& from_here,
+WriteTransaction::WriteTransaction(const base::Location& from_here,
                                    UserShare* share,
                                    int64_t* new_model_version)
     : BaseTransaction(share), transaction_(nullptr) {
@@ -72,18 +72,6 @@ void WriteTransaction::SetDataTypeContext(
   // after the context update to override the cleared progress markers.
   // TODO(zea): add a flag in the directory to prevent this from happening.
   // See crbug.com/360280
-}
-
-void WriteTransaction::UpdateEntriesMarkAttachmentAsOnServer(
-    const AttachmentId& attachment_id) {
-  syncable::Directory::Metahandles handles;
-  GetDirectory()->GetMetahandlesByAttachmentId(
-      transaction_, attachment_id.GetProto(), &handles);
-  for (syncable::Directory::Metahandles::iterator iter = handles.begin();
-       iter != handles.end(); ++iter) {
-    syncable::MutableEntry entry(transaction_, syncable::GET_BY_HANDLE, *iter);
-    entry.MarkAttachmentAsOnServer(attachment_id.GetProto());
-  }
 }
 
 }  // namespace syncer

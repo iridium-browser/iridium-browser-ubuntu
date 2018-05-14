@@ -61,6 +61,8 @@ blink_modules_sources("webdatabase") {
     "SQLTransactionStateMachine.cpp",
     "SQLTransactionStateMachine.h",
     "StorageLog.h",
+    "WebDatabaseImpl.cpp",
+    "WebDatabaseImpl.h",
     "sqlite/SQLLog.h",
     "sqlite/SQLValue.cpp",
     "sqlite/SQLValue.h",
@@ -73,6 +75,11 @@ blink_modules_sources("webdatabase") {
     "sqlite/SQLiteStatement.h",
     "sqlite/SQLiteTransaction.cpp",
     "sqlite/SQLiteTransaction.h",
+  ]
+
+  deps = [
+    "//sql",
+    "//third_party/sqlite",
   ]
 
   if (is_win) {

@@ -6,7 +6,8 @@
 
 #include <utility>
 
-#include "base/memory/ptr_util.h"
+#include "base/command_line.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/views/chrome_constrained_window_views_client.h"
 #include "chrome/browser/ui/views/chrome_views_delegate.h"
 #include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
@@ -16,8 +17,9 @@
 #if defined(USE_AURA)
 #include "base/run_loop.h"
 #include "components/ui_devtools/devtools_server.h"
-#include "components/ui_devtools/views/ui_devtools_css_agent.h"
-#include "components/ui_devtools/views/ui_devtools_dom_agent.h"
+#include "components/ui_devtools/views/css_agent.h"
+#include "components/ui_devtools/views/dom_agent.h"
+#include "components/ui_devtools/views/overlay_agent.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/service_manager_connection.h"
 #include "services/service_manager/public/cpp/connector.h"
@@ -26,6 +28,7 @@
 #include "services/ui/public/cpp/input_devices/input_device_client.h"
 #include "services/ui/public/interfaces/constants.mojom.h"
 #include "services/ui/public/interfaces/input_devices/input_device_server.mojom.h"
+#include "ui/aura/env.h"
 #include "ui/display/screen.h"
 #include "ui/views/mus/mus_client.h"
 #include "ui/views/widget/desktop_aura/desktop_screen.h"
@@ -37,7 +40,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "base/command_line.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -46,8 +48,12 @@
 #endif  // defined(OS_LINUX) && !defined(OS_CHROMEOS)
 
 #if defined(OS_CHROMEOS)
+#include "ash/public/interfaces/constants.mojom.h"
 #include "chrome/browser/chromeos/ash_config.h"
-#endif
+#include "content/public/common/content_switches.h"
+#else  // defined(OS_CHROMEOS)
+#include "chrome/browser/ui/views/relaunch_notification/relaunch_notification_controller.h"
+#endif  // defined(OS_CHROMEOS)
 
 namespace {
 
@@ -74,7 +80,7 @@ void ChromeBrowserMainExtraPartsViews::ToolkitInitialized() {
   // The delegate needs to be set before any UI is created so that windows
   // display the correct icon.
   if (!views::ViewsDelegate::GetInstance())
-    views_delegate_ = base::MakeUnique<ChromeViewsDelegate>();
+    views_delegate_ = std::make_unique<ChromeViewsDelegate>();
 
   SetConstrainedWindowViewsClient(CreateChromeConstrainedWindowViewsClient());
 
@@ -103,19 +109,22 @@ void ChromeBrowserMainExtraPartsViews::PreCreateThreads() {
 void ChromeBrowserMainExtraPartsViews::PreProfileInit() {
 #if defined(USE_AURA)
   // IME driver must be available at login screen, so initialize before profile.
-  if (service_manager::ServiceManagerIsRemote())
+  if (aura::Env::GetInstance()->mode() == aura::Env::Mode::MUS)
     IMEDriver::Register();
 
   // Start devtools server
   devtools_server_ = ui_devtools::UiDevToolsServer::Create(nullptr);
   if (devtools_server_) {
-    auto dom_backend = base::MakeUnique<ui_devtools::UIDevToolsDOMAgent>();
+    auto dom_backend = std::make_unique<ui_devtools::DOMAgent>();
+    auto overlay_backend =
+        std::make_unique<ui_devtools::OverlayAgent>(dom_backend.get());
     auto css_backend =
-        base::MakeUnique<ui_devtools::UIDevToolsCSSAgent>(dom_backend.get());
-    auto devtools_client = base::MakeUnique<ui_devtools::UiDevToolsClient>(
+        std::make_unique<ui_devtools::CSSAgent>(dom_backend.get());
+    auto devtools_client = std::make_unique<ui_devtools::UiDevToolsClient>(
         "UiDevToolsClient", devtools_server_.get());
     devtools_client->AddAgent(std::move(dom_backend));
     devtools_client->AddAgent(std::move(css_backend));
+    devtools_client->AddAgent(std::move(overlay_backend));
     devtools_server_->AttachClient(std::move(devtools_client));
   }
 #endif
@@ -158,10 +167,20 @@ void ChromeBrowserMainExtraPartsViews::ServiceManagerConnectionStarted(
     content::ServiceManagerConnection* connection) {
   DCHECK(connection);
 #if defined(USE_AURA)
-  if (!service_manager::ServiceManagerIsRemote())
+  if (aura::Env::GetInstance()->mode() == aura::Env::Mode::LOCAL)
     return;
 
-  input_device_client_ = base::MakeUnique<ui::InputDeviceClient>();
+#if defined(OS_CHROMEOS)
+  // Start up the window service and the ash system UI service.
+  if (chromeos::GetAshConfig() == ash::Config::MASH) {
+    connection->GetConnector()->StartService(
+        service_manager::Identity(ui::mojom::kServiceName));
+    connection->GetConnector()->StartService(
+        service_manager::Identity(ash::mojom::kServiceName));
+  }
+#endif
+
+  input_device_client_ = std::make_unique<ui::InputDeviceClient>();
   ui::mojom::InputDeviceServerPtr server;
   connection->GetConnector()->BindInterface(ui::mojom::kServiceName, &server);
   input_device_client_->Connect(std::move(server));
@@ -173,10 +192,27 @@ void ChromeBrowserMainExtraPartsViews::ServiceManagerConnectionStarted(
 
   // WMState is owned as a member, so don't have MusClient create it.
   const bool create_wm_state = false;
-  mus_client_ = base::MakeUnique<views::MusClient>(
+  mus_client_ = std::make_unique<views::MusClient>(
       connection->GetConnector(), service_manager::Identity(),
       content::BrowserThread::GetTaskRunnerForThread(
           content::BrowserThread::IO),
       create_wm_state);
 #endif  // defined(USE_AURA)
+}
+
+void ChromeBrowserMainExtraPartsViews::PostBrowserStart() {
+#if !defined(OS_CHROMEOS)
+  relaunch_notification_controller_ =
+      std::make_unique<RelaunchNotificationController>(
+          UpgradeDetector::GetInstance());
+#endif
+}
+
+void ChromeBrowserMainExtraPartsViews::PostMainMessageLoopRun() {
+#if !defined(OS_CHROMEOS)
+  // The relaunch notification controller acts on timer-based events. Tear it
+  // down explicitly here to avoid a case where such an event arrives during
+  // shutdown.
+  relaunch_notification_controller_.reset();
+#endif
 }

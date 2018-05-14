@@ -8,14 +8,14 @@
 #include <utility>
 #include <vector>
 
-#include "ash/ash_switches.h"
 #include "ash/display/screen_orientation_controller_chromeos.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/shell.h"
-#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/overview/window_selector_controller.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
+#include "base/test/histogram_tester.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/user_action_tester.h"
 #include "chromeos/accelerometer/accelerometer_reader.h"
@@ -30,20 +30,17 @@
 #include "ui/gfx/geometry/vector3d_f.h"
 #include "ui/message_center/message_center.h"
 
-#if defined(USE_X11)
-#include "ui/events/test/events_test_utils_x11.h"
-#endif
-
 namespace ash {
 
 namespace {
 
-const float kDegreesToRadians = 3.1415926f / 180.0f;
-const float kMeanGravity = 9.8066f;
+constexpr float kDegreesToRadians = 3.1415926f / 180.0f;
+constexpr float kMeanGravity = 9.8066f;
 
-const char kTouchViewInitiallyDisabled[] = "Touchview_Initially_Disabled";
-const char kTouchViewEnabled[] = "Touchview_Enabled";
-const char kTouchViewDisabled[] = "Touchview_Disabled";
+// The strings are "Touchview" as they're already used in metrics.
+constexpr char kTabletModeInitiallyDisabled[] = "Touchview_Initially_Disabled";
+constexpr char kTabletModeEnabled[] = "Touchview_Enabled";
+constexpr char kTabletModeDisabled[] = "Touchview_Disabled";
 
 }  // namespace
 
@@ -72,12 +69,12 @@ extern const size_t kAccelerometerVerticalHingeUnstableAnglesTestDataLength;
 
 class TabletModeControllerTest : public AshTestBase {
  public:
-  TabletModeControllerTest() {}
-  ~TabletModeControllerTest() override {}
+  TabletModeControllerTest() = default;
+  ~TabletModeControllerTest() override = default;
 
   void SetUp() override {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kAshEnableTouchView);
+        switches::kAshEnableTabletMode);
     AshTestBase::SetUp();
     chromeos::AccelerometerReader::GetInstance()->RemoveObserver(
         tablet_mode_controller());
@@ -124,15 +121,12 @@ class TabletModeControllerTest : public AshTestBase {
   // Attaches a SimpleTestTickClock to the TabletModeController with a non
   // null value initial value.
   void AttachTickClockForTest() {
-    std::unique_ptr<base::TickClock> tick_clock(
-        test_tick_clock_ = new base::SimpleTestTickClock());
-    test_tick_clock_->Advance(base::TimeDelta::FromSeconds(1));
-    tablet_mode_controller()->SetTickClockForTest(std::move(tick_clock));
+    test_tick_clock_.Advance(base::TimeDelta::FromSeconds(1));
+    tablet_mode_controller()->SetTickClockForTest(&test_tick_clock_);
   }
 
   void AdvanceTickClock(const base::TimeDelta& delta) {
-    DCHECK(test_tick_clock_);
-    test_tick_clock_->Advance(delta);
+    test_tick_clock_.Advance(delta);
   }
 
   void OpenLidToAngle(float degrees) {
@@ -164,8 +158,8 @@ class TabletModeControllerTest : public AshTestBase {
         tablet_mode_controller()->tick_clock_->NowTicks());
   }
 
-  bool WasLidOpenedRecently() {
-    return tablet_mode_controller()->WasLidOpenedRecently();
+  bool CanUseUnstableLidAngle() {
+    return tablet_mode_controller()->CanUseUnstableLidAngle();
   }
 
   void SetTabletMode(bool on) {
@@ -179,14 +173,14 @@ class TabletModeControllerTest : public AshTestBase {
     return !!tablet_mode_controller()->event_blocker_.get();
   }
 
-  TabletModeController::ForceTabletMode forced_tablet_mode() {
-    return tablet_mode_controller()->force_tablet_mode_;
+  TabletModeController::UiMode forced_ui_mode() {
+    return tablet_mode_controller()->force_ui_mode_;
   }
 
   base::UserActionTester* user_action_tester() { return &user_action_tester_; }
 
  private:
-  base::SimpleTestTickClock* test_tick_clock_;
+  base::SimpleTestTickClock test_tick_clock_;
 
   // Tracks user action counts.
   base::UserActionTester user_action_tester_;
@@ -194,28 +188,28 @@ class TabletModeControllerTest : public AshTestBase {
   DISALLOW_COPY_AND_ASSIGN(TabletModeControllerTest);
 };
 
-// Verify TouchView enabled/disabled user action metrics are recorded.
-TEST_F(TabletModeControllerTest, VerifyTouchViewEnabledDisabledCounts) {
+// Verify TabletMode enabled/disabled user action metrics are recorded.
+TEST_F(TabletModeControllerTest, VerifyTabletModeEnabledDisabledCounts) {
   ASSERT_EQ(1,
-            user_action_tester()->GetActionCount(kTouchViewInitiallyDisabled));
-  ASSERT_EQ(0, user_action_tester()->GetActionCount(kTouchViewEnabled));
-  ASSERT_EQ(0, user_action_tester()->GetActionCount(kTouchViewDisabled));
+            user_action_tester()->GetActionCount(kTabletModeInitiallyDisabled));
+  ASSERT_EQ(0, user_action_tester()->GetActionCount(kTabletModeEnabled));
+  ASSERT_EQ(0, user_action_tester()->GetActionCount(kTabletModeDisabled));
 
   user_action_tester()->ResetCounts();
   tablet_mode_controller()->EnableTabletModeWindowManager(true);
-  EXPECT_EQ(1, user_action_tester()->GetActionCount(kTouchViewEnabled));
-  EXPECT_EQ(0, user_action_tester()->GetActionCount(kTouchViewDisabled));
+  EXPECT_EQ(1, user_action_tester()->GetActionCount(kTabletModeEnabled));
+  EXPECT_EQ(0, user_action_tester()->GetActionCount(kTabletModeDisabled));
   tablet_mode_controller()->EnableTabletModeWindowManager(true);
-  EXPECT_EQ(1, user_action_tester()->GetActionCount(kTouchViewEnabled));
-  EXPECT_EQ(0, user_action_tester()->GetActionCount(kTouchViewDisabled));
+  EXPECT_EQ(1, user_action_tester()->GetActionCount(kTabletModeEnabled));
+  EXPECT_EQ(0, user_action_tester()->GetActionCount(kTabletModeDisabled));
 
   user_action_tester()->ResetCounts();
   tablet_mode_controller()->EnableTabletModeWindowManager(false);
-  EXPECT_EQ(0, user_action_tester()->GetActionCount(kTouchViewEnabled));
-  EXPECT_EQ(1, user_action_tester()->GetActionCount(kTouchViewDisabled));
+  EXPECT_EQ(0, user_action_tester()->GetActionCount(kTabletModeEnabled));
+  EXPECT_EQ(1, user_action_tester()->GetActionCount(kTabletModeDisabled));
   tablet_mode_controller()->EnableTabletModeWindowManager(false);
-  EXPECT_EQ(0, user_action_tester()->GetActionCount(kTouchViewEnabled));
-  EXPECT_EQ(1, user_action_tester()->GetActionCount(kTouchViewDisabled));
+  EXPECT_EQ(0, user_action_tester()->GetActionCount(kTabletModeEnabled));
+  EXPECT_EQ(1, user_action_tester()->GetActionCount(kTabletModeDisabled));
 }
 
 // Verify that closing the lid will exit tablet mode.
@@ -243,49 +237,40 @@ TEST_F(TabletModeControllerTest, HingeAnglesWithLidClosed) {
   EXPECT_FALSE(IsTabletModeStarted());
 }
 
-// Verify the tablet mode state for unstable hinge angles when the lid was
-// recently open.
-TEST_F(TabletModeControllerTest, UnstableHingeAnglesWhenLidRecentlyOpened) {
+// Verify the unstable lid angle is suppressed during opening the lid.
+TEST_F(TabletModeControllerTest, OpenLidUnstableLidAngle) {
   AttachTickClockForTest();
 
   OpenLid();
-  ASSERT_TRUE(WasLidOpenedRecently());
 
+  // Simulate the erroneous accelerometer readings.
+  OpenLidToAngle(355.0f);
+  EXPECT_FALSE(IsTabletModeStarted());
+
+  // Simulate the correct accelerometer readings.
+  OpenLidToAngle(5.0f);
+  EXPECT_FALSE(IsTabletModeStarted());
+}
+
+// Verify the unstable lid angle is suppressed during closing the lid.
+TEST_F(TabletModeControllerTest, CloseLidUnstableLidAngle) {
+  AttachTickClockForTest();
+
+  OpenLid();
+
+  OpenLidToAngle(45.0f);
+  EXPECT_FALSE(IsTabletModeStarted());
+
+  // Simulate the correct accelerometer readings.
   OpenLidToAngle(5.0f);
   EXPECT_FALSE(IsTabletModeStarted());
 
+  // Simulate the erroneous accelerometer readings.
   OpenLidToAngle(355.0f);
   EXPECT_FALSE(IsTabletModeStarted());
-
-  // This is a stable reading and should clear the last lid opened time.
-  OpenLidToAngle(45.0f);
-  EXPECT_FALSE(IsTabletModeStarted());
-  EXPECT_FALSE(WasLidOpenedRecently());
-
-  OpenLidToAngle(355.0f);
-  EXPECT_TRUE(IsTabletModeStarted());
-}
-
-// Verify the WasLidOpenedRecently signal with respect to time.
-TEST_F(TabletModeControllerTest, WasLidOpenedRecentlyOverTime) {
-  AttachTickClockForTest();
-
-  // No lid open time initially.
-  ASSERT_FALSE(WasLidOpenedRecently());
 
   CloseLid();
-  EXPECT_FALSE(WasLidOpenedRecently());
-
-  OpenLid();
-  EXPECT_TRUE(WasLidOpenedRecently());
-
-  // 1 second after lid open.
-  AdvanceTickClock(base::TimeDelta::FromSeconds(1));
-  EXPECT_TRUE(WasLidOpenedRecently());
-
-  // 3 seconds after lid open.
-  AdvanceTickClock(base::TimeDelta::FromSeconds(2));
-  EXPECT_FALSE(WasLidOpenedRecently());
+  EXPECT_FALSE(IsTabletModeStarted());
 }
 
 TEST_F(TabletModeControllerTest, TabletModeTransition) {
@@ -337,7 +322,6 @@ TEST_F(TabletModeControllerTest, TabletModeTransitionNoKeyboardAccelerometer) {
 // Verify the tablet mode enter/exit thresholds for stable angles.
 TEST_F(TabletModeControllerTest, StableHingeAnglesWithLidOpened) {
   ASSERT_FALSE(IsTabletModeStarted());
-  ASSERT_FALSE(WasLidOpenedRecently());
 
   OpenLidToAngle(180.0f);
   EXPECT_FALSE(IsTabletModeStarted());
@@ -358,20 +342,59 @@ TEST_F(TabletModeControllerTest, StableHingeAnglesWithLidOpened) {
   EXPECT_FALSE(IsTabletModeStarted());
 }
 
-// Verify the tablet mode state for unstable hinge angles when the lid is open
-// but not recently.
-TEST_F(TabletModeControllerTest, UnstableHingeAnglesWithLidOpened) {
+// Verify entering tablet mode for unstable lid angles when a certain range of
+// time has passed.
+TEST_F(TabletModeControllerTest, EnterTabletModeWithUnstableLidAngle) {
   AttachTickClockForTest();
 
-  ASSERT_FALSE(WasLidOpenedRecently());
+  OpenLid();
+
   ASSERT_FALSE(IsTabletModeStarted());
 
   OpenLidToAngle(5.0f);
   EXPECT_FALSE(IsTabletModeStarted());
 
+  EXPECT_FALSE(CanUseUnstableLidAngle());
+  OpenLidToAngle(355.0f);
+  EXPECT_FALSE(IsTabletModeStarted());
+
+  // 1 second after entering unstable angle zone.
+  AdvanceTickClock(base::TimeDelta::FromSeconds(1));
+  EXPECT_FALSE(CanUseUnstableLidAngle());
+  OpenLidToAngle(355.0f);
+  EXPECT_FALSE(IsTabletModeStarted());
+
+  // 2 seconds after entering unstable angle zone.
+  AdvanceTickClock(base::TimeDelta::FromSeconds(1));
+  EXPECT_TRUE(CanUseUnstableLidAngle());
   OpenLidToAngle(355.0f);
   EXPECT_TRUE(IsTabletModeStarted());
+}
 
+// Verify not exiting tablet mode for unstable lid angles even after a certain
+// range of time has passed.
+TEST_F(TabletModeControllerTest, NotExitTabletModeWithUnstableLidAngle) {
+  AttachTickClockForTest();
+
+  OpenLid();
+
+  ASSERT_FALSE(IsTabletModeStarted());
+
+  OpenLidToAngle(280.0f);
+  EXPECT_TRUE(IsTabletModeStarted());
+
+  OpenLidToAngle(5.0f);
+  EXPECT_TRUE(IsTabletModeStarted());
+
+  // 1 second after entering unstable angle zone.
+  AdvanceTickClock(base::TimeDelta::FromSeconds(1));
+  EXPECT_FALSE(CanUseUnstableLidAngle());
+  OpenLidToAngle(5.0f);
+  EXPECT_TRUE(IsTabletModeStarted());
+
+  // 2 seconds after entering unstable angle zone.
+  AdvanceTickClock(base::TimeDelta::FromSeconds(1));
+  EXPECT_TRUE(CanUseUnstableLidAngle());
   OpenLidToAngle(5.0f);
   EXPECT_TRUE(IsTabletModeStarted());
 }
@@ -408,7 +431,7 @@ TEST_F(TabletModeControllerTest, HingeAligned) {
 
 TEST_F(TabletModeControllerTest, LaptopTest) {
   // Feeds in sample accelerometer data and verifies that there are no
-  // transitions into touchview / tablet mode while shaking the device around
+  // transitions into tabletmode / tablet mode while shaking the device around
   // with the hinge at less than 180 degrees. Note the conversion from device
   // data to accelerometer updates consistent with accelerometer_reader.cc.
   ASSERT_EQ(0u, kAccelerometerLaptopModeTestDataLength % 6);
@@ -435,7 +458,7 @@ TEST_F(TabletModeControllerTest, TabletModeTest) {
   ASSERT_TRUE(IsTabletModeStarted());
 
   // Feeds in sample accelerometer data and verifies that there are no
-  // transitions out of touchview / tablet mode while shaking the device
+  // transitions out of tabletmode / tablet mode while shaking the device
   // around. Note the conversion from device data to accelerometer updates
   // consistent with accelerometer_reader.cc.
   ASSERT_EQ(0u, kAccelerometerFullyOpenTestDataLength % 6);
@@ -457,7 +480,7 @@ TEST_F(TabletModeControllerTest, TabletModeTest) {
 
 TEST_F(TabletModeControllerTest, VerticalHingeTest) {
   // Feeds in sample accelerometer data and verifies that there are no
-  // transitions out of touchview / tablet mode while shaking the device
+  // transitions out of tabletmode / tablet mode while shaking the device
   // around, while the hinge is nearly vertical. The data was captured from
   // maxmimize_mode_controller.cc and does not require conversion.
   ASSERT_EQ(0u, kAccelerometerVerticalHingeTestDataLength % 6);
@@ -558,7 +581,7 @@ TEST_F(TabletModeControllerTest, TabletModeAfterExitingDockedMode) {
   EXPECT_TRUE(IsTabletModeStarted());
 }
 
-// Verify that the device won't exit touchview / tablet mode for unstable
+// Verify that the device won't exit tabletmode / tablet mode for unstable
 // angles when hinge is nearly vertical
 TEST_F(TabletModeControllerTest, VerticalHingeUnstableAnglesTest) {
   // Trigger tablet mode by opening to 270 to begin the test in tablet mode.
@@ -567,7 +590,7 @@ TEST_F(TabletModeControllerTest, VerticalHingeUnstableAnglesTest) {
   ASSERT_TRUE(IsTabletModeStarted());
 
   // Feeds in sample accelerometer data and verifies that there are no
-  // transitions out of touchview / tablet mode while shaking the device
+  // transitions out of tabletmode / tablet mode while shaking the device
   // around, while the hinge is nearly vertical. The data was captured
   // from maxmimize_mode_controller.cc and does not require conversion.
   ASSERT_EQ(0u, kAccelerometerVerticalHingeUnstableAnglesTestDataLength % 6);
@@ -596,8 +619,8 @@ TEST_F(TabletModeControllerTest, InitializedWhileTabletModeSwitchOn) {
   chromeos::FakePowerManagerClient* power_manager_client =
       static_cast<chromeos::FakePowerManagerClient*>(
           chromeos::DBusThreadManager::Get()->GetPowerManagerClient());
-  power_manager_client->set_tablet_mode(
-      chromeos::PowerManagerClient::TabletMode::ON);
+  power_manager_client->SetTabletMode(
+      chromeos::PowerManagerClient::TabletMode::ON, base::TimeTicks::Now());
   TabletModeController controller;
   EXPECT_FALSE(controller.IsTabletModeWindowManagerEnabled());
   // PowerManagerClient callback is a posted task.
@@ -609,10 +632,9 @@ TEST_F(TabletModeControllerTest, InitializedWhileTabletModeSwitchOn) {
 // 180 degrees or setting tablet mode to true will no turn on tablet mode.
 TEST_F(TabletModeControllerTest, ForceClamshellModeTest) {
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kAshForceTabletMode, switches::kAshForceTabletModeClamshell);
+      switches::kAshUiMode, switches::kAshUiModeClamshell);
   tablet_mode_controller()->OnShellInitialized();
-  EXPECT_EQ(TabletModeController::ForceTabletMode::CLAMSHELL,
-            forced_tablet_mode());
+  EXPECT_EQ(TabletModeController::UiMode::CLAMSHELL, forced_ui_mode());
   EXPECT_FALSE(IsTabletModeStarted());
 
   OpenLidToAngle(300.0f);
@@ -625,14 +647,13 @@ TEST_F(TabletModeControllerTest, ForceClamshellModeTest) {
 }
 
 // Verify when the force touch view mode flag is turned on, tablet mode is on
-// intially, and opening the lid to less than 180 degress or setting tablet mode
-// to off will not turn off tablet mode.
-TEST_F(TabletModeControllerTest, ForceTouchViewModeTest) {
+// initially, and opening the lid to less than 180 degress or setting tablet
+// mode to off will not turn off tablet mode.
+TEST_F(TabletModeControllerTest, ForceTabletModeModeTest) {
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kAshForceTabletMode, switches::kAshForceTabletModeTouchView);
+      switches::kAshUiMode, switches::kAshUiModeTablet);
   tablet_mode_controller()->OnShellInitialized();
-  EXPECT_EQ(TabletModeController::ForceTabletMode::TOUCHVIEW,
-            forced_tablet_mode());
+  EXPECT_EQ(TabletModeController::UiMode::TABLETMODE, forced_ui_mode());
   EXPECT_TRUE(IsTabletModeStarted());
   EXPECT_TRUE(AreEventsBlocked());
 
@@ -664,6 +685,41 @@ TEST_F(TabletModeControllerTest, RestoreAfterExit) {
   // The bounds should be restored to the original bounds, and
   // should not be clamped by the portrait display in touch view.
   EXPECT_EQ(gfx::Rect(10, 10, 900, 300), w1->bounds());
+}
+
+TEST_F(TabletModeControllerTest, RecordLidAngle) {
+  // The timer shouldn't be running before we've received accelerometer data.
+  EXPECT_FALSE(
+      tablet_mode_controller()->TriggerRecordLidAngleTimerForTesting());
+
+  base::HistogramTester histogram_tester;
+  OpenLidToAngle(300.0f);
+  ASSERT_TRUE(tablet_mode_controller()->TriggerRecordLidAngleTimerForTesting());
+  histogram_tester.ExpectBucketCount(
+      TabletModeController::kLidAngleHistogramName, 300, 1);
+
+  ASSERT_TRUE(tablet_mode_controller()->TriggerRecordLidAngleTimerForTesting());
+  histogram_tester.ExpectBucketCount(
+      TabletModeController::kLidAngleHistogramName, 300, 2);
+
+  OpenLidToAngle(90.0f);
+  ASSERT_TRUE(tablet_mode_controller()->TriggerRecordLidAngleTimerForTesting());
+  histogram_tester.ExpectBucketCount(
+      TabletModeController::kLidAngleHistogramName, 90, 1);
+
+  // The timer should be stopped in response to a lid-only update since we can
+  // no longer compute an angle.
+  TriggerLidUpdate(gfx::Vector3dF(0.0f, 0.0f, kMeanGravity));
+  EXPECT_FALSE(
+      tablet_mode_controller()->TriggerRecordLidAngleTimerForTesting());
+  histogram_tester.ExpectTotalCount(
+      TabletModeController::kLidAngleHistogramName, 3);
+
+  // When lid and base data is received, the timer should be started again.
+  OpenLidToAngle(180.0f);
+  ASSERT_TRUE(tablet_mode_controller()->TriggerRecordLidAngleTimerForTesting());
+  histogram_tester.ExpectBucketCount(
+      TabletModeController::kLidAngleHistogramName, 180, 1);
 }
 
 }  // namespace ash

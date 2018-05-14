@@ -19,6 +19,7 @@
 #include "ui/base/cocoa/window_size_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_features.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
@@ -67,10 +68,17 @@ gfx::NativeViewId ScreenCaptureNotificationUICocoa::OnStarted(
 }
 
 std::unique_ptr<ScreenCaptureNotificationUI>
-ScreenCaptureNotificationUI::Create(const base::string16& text) {
+ScreenCaptureNotificationUI::CreateCocoa(const base::string16& text) {
   return std::unique_ptr<ScreenCaptureNotificationUI>(
       new ScreenCaptureNotificationUICocoa(text));
 }
+
+#if !BUILDFLAG(MAC_VIEWS_BROWSER)
+std::unique_ptr<ScreenCaptureNotificationUI>
+ScreenCaptureNotificationUI::Create(const base::string16& text) {
+  return CreateCocoa(text);
+}
+#endif
 
 @implementation ScreenCaptureNotificationController
 - (id)initWithCallback:(const base::Closure&)stop_callback
@@ -177,7 +185,8 @@ ScreenCaptureNotificationUI::Create(const base::string16& text) {
                       kHorizontalMargin * 2 - gripWidth - buttonsWidth;
   gfx::FontList font_list;
   base::string16 elidedText =
-      ElideText(text, font_list, maxLabelWidth, gfx::ELIDE_MIDDLE);
+      gfx::ElideText(text, font_list, maxLabelWidth, gfx::ELIDE_MIDDLE,
+                     gfx::Typesetter::NATIVE);
   NSString* statusText = base::SysUTF16ToNSString(elidedText);
   base::scoped_nsobject<NSTextField> statusTextField(
       [[NSTextField alloc] initWithFrame:ui::kWindowSizeDeterminedLater]);

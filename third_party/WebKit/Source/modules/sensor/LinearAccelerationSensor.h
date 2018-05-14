@@ -14,15 +14,15 @@ class LinearAccelerationSensor final : public Accelerometer {
 
  public:
   static LinearAccelerationSensor* Create(ExecutionContext*,
-                                          const SensorOptions&,
+                                          const SpatialSensorOptions&,
                                           ExceptionState&);
   static LinearAccelerationSensor* Create(ExecutionContext*, ExceptionState&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   LinearAccelerationSensor(ExecutionContext*,
-                           const SensorOptions&,
+                           const SpatialSensorOptions&,
                            ExceptionState&);
 };
 

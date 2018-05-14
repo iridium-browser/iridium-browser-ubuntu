@@ -15,6 +15,7 @@ namespace rx
 {
 
 class BlitGL;
+class ClearMultiviewGL;
 class FunctionsGL;
 class StateManagerGL;
 struct WorkaroundsGL;
@@ -27,6 +28,7 @@ class FramebufferGL : public FramebufferImpl
                   StateManagerGL *stateManager,
                   const WorkaroundsGL &workarounds,
                   BlitGL *blitter,
+                  ClearMultiviewGL *multiviewClearer,
                   bool isDefault);
     // Constructor called when we need to create a FramebufferGL from an
     // existing framebuffer name, for example for the default framebuffer
@@ -36,6 +38,7 @@ class FramebufferGL : public FramebufferImpl
                   const FunctionsGL *functions,
                   const WorkaroundsGL &workarounds,
                   BlitGL *blitter,
+                  ClearMultiviewGL *multiviewClearer,
                   StateManagerGL *stateManager);
     ~FramebufferGL() override;
 
@@ -74,7 +77,7 @@ class FramebufferGL : public FramebufferImpl
                          const gl::Rectangle &area,
                          GLenum format,
                          GLenum type,
-                         void *pixels) const override;
+                         void *pixels) override;
 
     gl::Error blit(const gl::Context *context,
                    const gl::Rectangle &sourceArea,
@@ -84,7 +87,7 @@ class FramebufferGL : public FramebufferImpl
 
     gl::Error getSamplePosition(size_t index, GLfloat *xy) const override;
 
-    bool checkStatus() const override;
+    bool checkStatus(const gl::Context *context) const override;
 
     void syncState(const gl::Context *context,
                    const gl::Framebuffer::DirtyBits &dirtyBits) override;
@@ -92,7 +95,7 @@ class FramebufferGL : public FramebufferImpl
     GLuint getFramebufferID() const;
     bool isDefault() const;
 
-    void maskOutInactiveOutputDrawBuffers(gl::DrawBufferMask maxSet);
+    void maskOutInactiveOutputDrawBuffers(GLenum binding, gl::DrawBufferMask maxSet);
 
   private:
     void syncClearState(const gl::Context *context, GLbitfield mask);
@@ -122,6 +125,7 @@ class FramebufferGL : public FramebufferImpl
     StateManagerGL *mStateManager;
     const WorkaroundsGL &mWorkarounds;
     BlitGL *mBlitter;
+    ClearMultiviewGL *mMultiviewClearer;
 
     GLuint mFramebufferID;
     bool mIsDefault;

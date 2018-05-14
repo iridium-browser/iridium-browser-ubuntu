@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/callback_forward.h"
 #include "base/macros.h"
 
@@ -26,6 +27,7 @@ struct DisplayLayout;
 struct DisplayProperties;
 struct DisplayUnitInfo;
 struct Insets;
+struct MirrorModeInfo;
 struct TouchCalibrationPairQuad;
 }
 }
@@ -34,7 +36,7 @@ class DisplayInfoProvider {
  public:
   using DisplayUnitInfoList = std::vector<api::system_display::DisplayUnitInfo>;
   using DisplayLayoutList = std::vector<api::system_display::DisplayLayout>;
-  using TouchCalibrationCallback = base::Callback<void(bool)>;
+  using TouchCalibrationCallback = base::OnceCallback<void(bool)>;
 
   virtual ~DisplayInfoProvider();
 
@@ -55,7 +57,8 @@ class DisplayInfoProvider {
 
   // Implements SetDisplayLayout methods. See system_display.idl. Returns
   // false if the layout input is invalid.
-  virtual bool SetDisplayLayout(const DisplayLayoutList& layouts);
+  virtual bool SetDisplayLayout(const DisplayLayoutList& layouts,
+                                std::string* error);
 
   // Enables the unified desktop feature.
   virtual void EnableUnifiedDesktop(bool enable);
@@ -80,10 +83,9 @@ class DisplayInfoProvider {
   // Implements touch calibration methods. See system_display.idl. This returns
   // false in case any error occurs. In such cases the |error| string will also
   // be set.
-  virtual bool ShowNativeTouchCalibration(
-      const std::string& id,
-      std::string* error,
-      const TouchCalibrationCallback& callback);
+  virtual bool ShowNativeTouchCalibration(const std::string& id,
+                                          std::string* error,
+                                          TouchCalibrationCallback callback);
   virtual bool StartCustomTouchCalibration(const std::string& id,
                                            std::string* error);
   virtual bool CompleteCustomTouchCalibration(
@@ -92,6 +94,13 @@ class DisplayInfoProvider {
       std::string* error);
   virtual bool ClearTouchCalibration(const std::string& id, std::string* error);
   virtual bool IsNativeTouchCalibrationActive(std::string* error);
+
+  // Sets the display mode to the specified mirror mode. See system_display.idl.
+  // Returns false if the parameters are invalid.
+  // |info|: The information of the mirror mode that should be applied to the
+  //     display mode.
+  virtual bool SetMirrorMode(const api::system_display::MirrorModeInfo& info,
+                             std::string* out_error);
 
  protected:
   DisplayInfoProvider();

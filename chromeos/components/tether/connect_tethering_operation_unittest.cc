@@ -35,33 +35,48 @@ const char kTestPassword[] = "testPassword";
 constexpr base::TimeDelta kConnectTetheringResponseTime =
     base::TimeDelta::FromSeconds(15);
 
-class TestObserver : public ConnectTetheringOperation::Observer {
+class TestObserver final : public ConnectTetheringOperation::Observer {
  public:
-  TestObserver() : has_received_failure(false) {}
+  TestObserver() = default;
+  ~TestObserver() = default;
+
+  const cryptauth::RemoteDevice& remote_device() { return remote_device_; }
+  const std::string& ssid() { return ssid_; }
+  const std::string& password() { return password_; }
+  bool has_received_failure() { return has_received_failure_; }
+  bool has_sent_request() { return has_sent_request_; }
+  ConnectTetheringResponse_ResponseCode error_code() { return error_code_; }
+
+  // ConnectTetheringOperation::Observer:
+  void OnConnectTetheringRequestSent(
+      const cryptauth::RemoteDevice& remote_device) override {
+    has_sent_request_ = true;
+  }
 
   void OnSuccessfulConnectTetheringResponse(
       const cryptauth::RemoteDevice& remote_device,
       const std::string& ssid,
       const std::string& password) override {
-    this->remote_device = remote_device;
-    this->ssid = ssid;
-    this->password = password;
+    remote_device_ = remote_device;
+    ssid_ = ssid;
+    password_ = password;
   }
 
   void OnConnectTetheringFailure(
       const cryptauth::RemoteDevice& remote_device,
       ConnectTetheringResponse_ResponseCode error_code) override {
-    has_received_failure = true;
-    this->remote_device = remote_device;
-    this->error_code = error_code;
+    has_received_failure_ = true;
+    remote_device_ = remote_device;
+    error_code_ = error_code;
   }
 
-  cryptauth::RemoteDevice remote_device;
-  std::string ssid;
-  std::string password;
-
-  bool has_received_failure;
-  ConnectTetheringResponse_ResponseCode error_code;
+ private:
+  cryptauth::RemoteDevice remote_device_;
+  std::string ssid_;
+  std::string password_;
+  bool has_received_failure_ = false;
+  bool has_sent_request_ = false;
+  ConnectTetheringResponse_ResponseCode error_code_;
 };
 
 std::string CreateConnectTetheringRequestString() {
@@ -96,16 +111,12 @@ class ConnectTetheringOperationTest : public testing::Test {
   ConnectTetheringOperationTest()
       : connect_tethering_request_string_(
             CreateConnectTetheringRequestString()),
-        test_device_(cryptauth::GenerateTestRemoteDevices(1)[0]) {
-    // These tests are written under the assumption that there are a maximum of
-    // 3 connection attempts; they need to be edited if this value changes.
-    EXPECT_EQ(3u, MessageTransferOperation::kMaxConnectionAttemptsPerDevice);
-  }
+        test_device_(cryptauth::GenerateTestRemoteDevices(1)[0]) {}
 
   void SetUp() override {
-    fake_ble_connection_manager_ = base::MakeUnique<FakeBleConnectionManager>();
+    fake_ble_connection_manager_ = std::make_unique<FakeBleConnectionManager>();
     mock_tether_host_response_recorder_ =
-        base::MakeUnique<StrictMock<MockTetherHostResponseRecorder>>();
+        std::make_unique<StrictMock<MockTetherHostResponseRecorder>>();
     test_observer_ = base::WrapUnique(new TestObserver());
 
     operation_ = base::WrapUnique(new ConnectTetheringOperation(
@@ -113,9 +124,8 @@ class ConnectTetheringOperationTest : public testing::Test {
         mock_tether_host_response_recorder_.get(), false /* setup_required */));
     operation_->AddObserver(test_observer_.get());
 
-    test_clock_ = new base::SimpleTestClock();
-    test_clock_->SetNow(base::Time::UnixEpoch());
-    operation_->SetClockForTest(base::WrapUnique(test_clock_));
+    test_clock_.SetNow(base::Time::UnixEpoch());
+    operation_->SetClockForTest(&test_clock_);
 
     operation_->Initialize();
   }
@@ -129,18 +139,27 @@ class ConnectTetheringOperationTest : public testing::Test {
     std::vector<FakeBleConnectionManager::SentMessage>& sent_messages =
         fake_ble_connection_manager_->sent_messages();
     ASSERT_EQ(1u, sent_messages.size());
-    EXPECT_EQ(test_device_, sent_messages[0].remote_device);
+    EXPECT_EQ(test_device_.GetDeviceId(), sent_messages[0].device_id);
     EXPECT_EQ(connect_tethering_request_string_, sent_messages[0].message);
+
+    // Simulate BleConnectionManager notifying ConnectTetheringOperation that
+    // the message was delivered.
+    int last_sequence_number =
+        fake_ble_connection_manager_->last_sequence_number();
+    EXPECT_NE(last_sequence_number, -1);
+    fake_ble_connection_manager_->SetMessageSent(last_sequence_number);
+    EXPECT_TRUE(test_observer_->has_sent_request());
   }
 
   void SimulateResponseReceivedAndVerifyObserverCallbackInvoked(
       ConnectTetheringResponse_ResponseCode response_code,
       bool use_proto_without_ssid_and_password) {
-    test_clock_->Advance(kConnectTetheringResponseTime);
+    test_clock_.Advance(kConnectTetheringResponseTime);
 
     fake_ble_connection_manager_->ReceiveMessage(
-        test_device_, CreateConnectTetheringResponseString(
-                          response_code, use_proto_without_ssid_and_password));
+        test_device_.GetDeviceId(),
+        CreateConnectTetheringResponseString(
+            response_code, use_proto_without_ssid_and_password));
 
     bool is_success_response =
         response_code == ConnectTetheringResponse_ResponseCode::
@@ -159,12 +178,12 @@ class ConnectTetheringOperationTest : public testing::Test {
     if (expected_response_code ==
         ConnectTetheringResponse_ResponseCode::
             ConnectTetheringResponse_ResponseCode_SUCCESS) {
-      EXPECT_EQ(test_device_, test_observer_->remote_device);
-      EXPECT_EQ(std::string(kTestSsid), test_observer_->ssid);
-      EXPECT_EQ(std::string(kTestPassword), test_observer_->password);
+      EXPECT_EQ(test_device_, test_observer_->remote_device());
+      EXPECT_EQ(std::string(kTestSsid), test_observer_->ssid());
+      EXPECT_EQ(std::string(kTestPassword), test_observer_->password());
     } else {
-      EXPECT_TRUE(test_observer_->has_received_failure);
-      EXPECT_EQ(expected_response_code, test_observer_->error_code);
+      EXPECT_TRUE(test_observer_->has_received_failure());
+      EXPECT_EQ(expected_response_code, test_observer_->error_code());
     }
 
     histogram_tester_.ExpectTimeBucketCount(
@@ -176,7 +195,8 @@ class ConnectTetheringOperationTest : public testing::Test {
     uint32_t expected_response_timeout_seconds =
         setup_required
             ? ConnectTetheringOperation::kSetupRequiredResponseTimeoutSeconds
-            : MessageTransferOperation::kDefaultTimeoutSeconds;
+            : ConnectTetheringOperation::
+                  kSetupNotRequiredResponseTimeoutSeconds;
 
     EXPECT_EQ(expected_response_timeout_seconds,
               operation_->GetTimeoutSeconds());
@@ -189,7 +209,7 @@ class ConnectTetheringOperationTest : public testing::Test {
   std::unique_ptr<StrictMock<MockTetherHostResponseRecorder>>
       mock_tether_host_response_recorder_;
   std::unique_ptr<TestObserver> test_observer_;
-  base::SimpleTestClock* test_clock_;
+  base::SimpleTestClock test_clock_;
   std::unique_ptr<ConnectTetheringOperation> operation_;
 
   base::HistogramTester histogram_tester_;
@@ -251,24 +271,15 @@ TEST_F(ConnectTetheringOperationTest, TestCannotConnect) {
       .Times(0);
 
   // Simulate the device failing to connect.
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::CONNECTING);
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::DISCONNECTED);
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::CONNECTING);
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::DISCONNECTED);
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::CONNECTING);
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::DISCONNECTED);
+  fake_ble_connection_manager_->SimulateUnansweredConnectionAttempts(
+      test_device_.GetDeviceId(),
+      MessageTransferOperation::kMaxEmptyScansPerDevice);
 
   // The maximum number of connection failures has occurred.
-  EXPECT_TRUE(test_observer_->has_received_failure);
+  EXPECT_TRUE(test_observer_->has_received_failure());
   EXPECT_EQ(ConnectTetheringResponse_ResponseCode::
                 ConnectTetheringResponse_ResponseCode_UNKNOWN_ERROR,
-            test_observer_->error_code);
+            test_observer_->error_code());
 
   histogram_tester_.ExpectTotalCount(
       "InstantTethering.Performance.ConnectTetheringResponseDuration", 0);

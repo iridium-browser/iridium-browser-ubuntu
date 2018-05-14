@@ -91,7 +91,7 @@ QuicRandom* Simulator::GetRandomGenerator() {
   return random_generator_;
 }
 
-QuicBufferAllocator* Simulator::GetBufferAllocator() {
+QuicBufferAllocator* Simulator::GetStreamSendBufferAllocator() {
   return &buffer_allocator_;
 }
 

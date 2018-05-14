@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -138,7 +139,7 @@ class BuildRowController(object):
   Unit-test this class please.
   """
 
-  DEFAULT_NUM_BUILDS = 100
+  DEFAULT_NUM_BUILDS = 30
 
   def __init__(self):
     self._latest_build_id = 0

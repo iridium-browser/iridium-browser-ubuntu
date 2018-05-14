@@ -10,19 +10,15 @@
 
 namespace blink {
 
-class CORE_EXPORT AnimationTimeline
-    : public GarbageCollectedFinalized<AnimationTimeline>,
-      public ScriptWrappable {
+class CORE_EXPORT AnimationTimeline : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  virtual ~AnimationTimeline() {}
+  virtual ~AnimationTimeline() = default;
 
   virtual double currentTime(bool&) = 0;
 
   virtual bool IsDocumentTimeline() const { return false; }
-
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
 };
 
 }  // namespace blink

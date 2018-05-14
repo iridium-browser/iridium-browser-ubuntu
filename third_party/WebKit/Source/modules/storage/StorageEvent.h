@@ -26,7 +26,7 @@
 #ifndef StorageEvent_h
 #define StorageEvent_h
 
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -72,7 +72,7 @@ class StorageEvent final : public Event {
 
   const AtomicString& InterfaceName() const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   StorageEvent();

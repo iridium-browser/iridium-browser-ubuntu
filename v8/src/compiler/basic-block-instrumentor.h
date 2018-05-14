@@ -21,11 +21,12 @@ class Schedule;
 class BasicBlockInstrumentor : public AllStatic {
  public:
   static BasicBlockProfiler::Data* Instrument(CompilationInfo* info,
-                                              Graph* graph, Schedule* schedule);
+                                              Graph* graph, Schedule* schedule,
+                                              Isolate* isolate);
 };
 
 }  // namespace compiler
 }  // namespace internal
 }  // namespace v8
 
-#endif
+#endif  // V8_COMPILER_BASIC_BLOCK_INSTRUMENTOR_H_

@@ -5,17 +5,16 @@
 #include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/ownership/fake_owner_settings_service.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_cache.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/ownership/mock_owner_key_util.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -23,7 +22,7 @@ namespace chromeos {
 
 ScopedCrosSettingsTestHelper::ScopedCrosSettingsTestHelper(
     bool create_settings_service)
-    : stub_settings_provider_(base::MakeUnique<StubCrosSettingsProvider>()),
+    : stub_settings_provider_(std::make_unique<StubCrosSettingsProvider>()),
       stub_settings_provider_ptr_(static_cast<StubCrosSettingsProvider*>(
           stub_settings_provider_.get())) {
   Initialize(create_settings_service);
@@ -35,7 +34,7 @@ ScopedCrosSettingsTestHelper::~ScopedCrosSettingsTestHelper() {
 
 std::unique_ptr<FakeOwnerSettingsService>
 ScopedCrosSettingsTestHelper::CreateOwnerSettingsService(Profile* profile) {
-  return base::MakeUnique<FakeOwnerSettingsService>(
+  return std::make_unique<FakeOwnerSettingsService>(
       profile, new ownership::MockOwnerKeyUtil(), stub_settings_provider_ptr_);
 }
 

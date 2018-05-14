@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include <algorithm>
+
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -57,8 +59,8 @@ bool BrowserMatches(Browser* browser,
 #if defined(OS_CHROMEOS)
   // Get the profile on which the window is currently shown.
   // MultiUserWindowManager might be NULL under test scenario.
-  chrome::MultiUserWindowManager* const window_manager =
-      chrome::MultiUserWindowManager::GetInstance();
+  MultiUserWindowManager* const window_manager =
+      MultiUserWindowManager::GetInstance();
   Profile* shown_profile = nullptr;
   if (window_manager) {
     const AccountId& shown_account_id = window_manager->GetUserPresentingWindow(
@@ -200,13 +202,17 @@ Browser* FindBrowserWithWindow(gfx::NativeWindow window) {
   return NULL;
 }
 
+Browser* FindBrowserWithActiveWindow() {
+  Browser* browser = BrowserList::GetInstance()->GetLastActive();
+  return browser && browser->window()->IsActive() ? browser : nullptr;
+}
+
 Browser* FindBrowserWithWebContents(const WebContents* web_contents) {
   DCHECK(web_contents);
-  for (TabContentsIterator it; !it.done(); it.Next()) {
-    if (*it == web_contents)
-      return it.browser();
-  }
-  return NULL;
+  auto& all_tabs = AllTabContentses();
+  auto it = std::find(all_tabs.begin(), all_tabs.end(), web_contents);
+
+  return (it == all_tabs.end()) ? nullptr : it.browser();
 }
 
 Browser* FindLastActiveWithProfile(Profile* profile) {

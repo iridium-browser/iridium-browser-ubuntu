@@ -7,16 +7,17 @@
 
 #include <map>
 #include <memory>
-#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/installable/installable_data.h"
 #include "chrome/browser/installable/installable_logging.h"
 #include "chrome/browser/installable/installable_metrics.h"
+#include "chrome/browser/installable/installable_params.h"
+#include "chrome/browser/installable/installable_task_queue.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/service_worker_context_observer.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -24,88 +25,6 @@
 #include "content/public/common/manifest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
-
-// This struct specifies the work to be done by the InstallableManager.
-// Data is cached and fetched in the order specified in this struct. A web app
-// manifest will always be fetched first.
-struct InstallableParams {
-  // The ideal primary icon size to fetch. Used only if
-  // |fetch_valid_primary_icon| is true.
-  int ideal_primary_icon_size_in_px = -1;
-
-  // The minimum primary icon size to fetch. Used only if
-  // |fetch_valid_primary_icon| is true.
-  int minimum_primary_icon_size_in_px = -1;
-
-  // The ideal badge icon size to fetch. Used only if
-  // |fetch_valid_badge_icon| is true.
-  int ideal_badge_icon_size_in_px = -1;
-
-  // The minimum badge icon size to fetch. Used only if
-  // |fetch_valid_badge_icon| is true.
-  int minimum_badge_icon_size_in_px = -1;
-
-  // Check whether there is a fetchable, non-empty icon in the manifest
-  // conforming to the primary icon size parameters.
-  bool fetch_valid_primary_icon = false;
-
-  // Check whether there is a fetchable, non-empty icon in the manifest
-  // conforming to the badge icon size parameters.
-  bool fetch_valid_badge_icon = false;
-
-  // Check whether the site is installable. That is, it has a manifest valid for
-  // a web app and a service worker controlling the manifest start URL and the
-  // current URL.
-  bool check_installable = false;
-
-  // Whether or not to wait indefinitely for a service worker. If this is set to
-  // false, the worker status will not be cached and will be re-checked if
-  // GetData() is called again for the current page.
-  bool wait_for_worker = true;
-};
-
-// This struct is passed to an InstallableCallback when the InstallableManager
-// has finished working. Each reference is owned by InstallableManager, and
-// callers should copy any objects which they wish to use later. Non-requested
-// fields will be set to null, empty, or false.
-struct InstallableData {
-  // NO_ERROR_DETECTED if there were no issues.
-  const InstallableStatusCode error_code;
-
-  // Empty if the site has no <link rel="manifest"> tag.
-  const GURL& manifest_url;
-
-  // Empty if the site has an unparseable manifest.
-  const content::Manifest& manifest;
-
-  // Empty if no primary_icon was requested.
-  const GURL& primary_icon_url;
-
-  // nullptr if the most appropriate primary icon couldn't be determined or
-  // downloaded. The underlying primary icon is owned by the InstallableManager;
-  // clients must copy the bitmap if they want to to use it. If
-  // fetch_valid_primary_icon was true and a primary icon could not be
-  // retrieved, the reason will be in error_code.
-  const SkBitmap* primary_icon;
-
-  // Empty if no badge_icon was requested.
-  const GURL& badge_icon_url;
-
-  // nullptr if the most appropriate badge icon couldn't be determined or
-  // downloaded. The underlying badge icon is owned by the InstallableManager;
-  // clients must copy the bitmap if they want to to use it. Since the badge
-  // icon is optional, no error code is set if it cannot be fetched, and clients
-  // specifying fetch_valid_badge_icon must check that the bitmap exists before
-  // using it.
-  const SkBitmap* badge_icon;
-
-  // true if the site has a service worker with a fetch handler and a viable web
-  // app manifest. If check_installable was true and the site isn't installable,
-  // the reason will be in error_code.
-  const bool is_installable;
-};
-
-using InstallableCallback = base::Callback<void(const InstallableData&)>;
 
 // This class is responsible for fetching the resources required to check and
 // install a site.
@@ -117,13 +36,7 @@ class InstallableManager
   explicit InstallableManager(content::WebContents* web_contents);
   ~InstallableManager() override;
 
-  // Returns true if the overall security state of |web_contents| is sufficient
-  // to be considered installable.
-  static bool IsContentSecure(content::WebContents* web_contents);
-
   // Returns the minimum icon size in pixels for a site to be installable.
-  // TODO(dominickn): consolidate this concept with minimum_icon_size_in_px
-  // across all platforms.
   static int GetMinimumIconSizeInPx();
 
   // Get the installable data, fetching the resources specified in |params|.
@@ -145,12 +58,18 @@ class InstallableManager
   // is opened on Android.
   void RecordMenuOpenHistogram();
   void RecordMenuItemAddToHomescreenHistogram();
-  void RecordQueuedMetricsOnTaskCompletion(const InstallableParams& params,
-                                           bool check_passed);
+
+  // Called via AddToHomescreenDataFetcher to record metrics on how often the
+  // installable check is completed before timing out when a user is shown the
+  // add to homescreen dialog for a shortcut or PWA on Android.
+  void RecordAddToHomescreenNoTimeout();
+  void RecordAddToHomescreenManifestAndIconTimeout();
+  void RecordAddToHomescreenInstallabilityTimeout();
 
  protected:
   // For mocking in tests.
   virtual void OnWaitingForServiceWorker() {}
+  virtual void OnResetData() {}
 
  private:
   friend class AddToHomescreenDataFetcherTest;
@@ -159,14 +78,21 @@ class InstallableManager
   friend class TestInstallableManager;
   FRIEND_TEST_ALL_PREFIXES(InstallableManagerBrowserTest,
                            ManagerBeginsInEmptyState);
+  FRIEND_TEST_ALL_PREFIXES(InstallableManagerBrowserTest, ManagerInIncognito);
   FRIEND_TEST_ALL_PREFIXES(InstallableManagerBrowserTest, CheckWebapp);
   FRIEND_TEST_ALL_PREFIXES(InstallableManagerBrowserTest,
                            CheckLazyServiceWorkerPassesWhenWaiting);
   FRIEND_TEST_ALL_PREFIXES(InstallableManagerBrowserTest,
                            CheckLazyServiceWorkerNoFetchHandlerFails);
+  FRIEND_TEST_ALL_PREFIXES(InstallableManagerBrowserTest,
+                           ManifestUrlChangeFlushesState);
 
-  using Task = std::pair<InstallableParams, InstallableCallback>;
-  using IconParams = std::tuple<int, int, content::Manifest::Icon::IconPurpose>;
+  using IconPurpose = content::Manifest::Icon::IconPurpose;
+
+  struct EligiblityProperty {
+    InstallableStatusCode error = NO_ERROR_DETECTED;
+    bool fetched = false;
+  };
 
   struct ManifestProperty {
     InstallableStatusCode error = NO_ERROR_DETECTED;
@@ -204,32 +130,26 @@ class InstallableManager
     DISALLOW_COPY_AND_ASSIGN(IconProperty);
   };
 
-  // Returns an IconParams object that queries for a primary icon conforming to
-  // the primary icon size parameters in |params|.
-  IconParams ParamsForPrimaryIcon(const InstallableParams& params) const;
-  // Returns an IconParams object that queries for a badge icon conforming to
-  // the badge icon size parameters in |params|.
-  IconParams ParamsForBadgeIcon(const InstallableParams& params) const;
-
-  // Returns true if |params| matches any fetched icon, or false if no icon has
+  // Returns true if |purpose| matches any fetched icon, or false if no icon has
   // been requested yet or there is no match.
-  bool IsIconFetched(const IconParams& params) const;
+  bool IsIconFetched(const IconPurpose purpose) const;
 
-  // Sets the icon matching |params| as fetched.
-  void SetIconFetched(const IconParams& params);
+  // Sets the icon matching |purpose| as fetched.
+  void SetIconFetched(const IconPurpose purpose);
 
   // Returns the error code associated with the resources requested in |params|,
   // or NO_ERROR_DETECTED if there is no error.
   InstallableStatusCode GetErrorCode(const InstallableParams& params);
 
   // Gets/sets parts of particular properties. Exposed for testing.
+  InstallableStatusCode eligibility_error() const;
   InstallableStatusCode manifest_error() const;
   InstallableStatusCode valid_manifest_error() const;
   void set_valid_manifest_error(InstallableStatusCode error_code);
   InstallableStatusCode worker_error() const;
-  InstallableStatusCode icon_error(const IconParams& icon_params);
-  GURL& icon_url(const IconParams& icon_params);
-  const SkBitmap* icon(const IconParams& icon);
+  InstallableStatusCode icon_error(const IconPurpose purpose);
+  GURL& icon_url(const IconPurpose purpose);
+  const SkBitmap* icon(const IconPurpose purpose);
 
   // Returns the WebContents to which this object is attached, or nullptr if the
   // WebContents doesn't exist or is currently being destroyed.
@@ -237,6 +157,8 @@ class InstallableManager
 
   // Returns true if |params| requires no more work to be done.
   bool IsComplete(const InstallableParams& params) const;
+
+  void ResolveMetrics(const InstallableParams& params, bool check_passed);
 
   // Resets members to empty and removes all queued tasks.
   // Called when navigating to a new page or if the WebContents is destroyed
@@ -248,23 +170,25 @@ class InstallableManager
   void SetManifestDependentTasksComplete();
 
   // Methods coordinating and dispatching work for the current task.
-  void RunCallback(const Task& task, InstallableStatusCode error);
-  void StartNextTask();
+  void RunCallback(const InstallableTask& task, InstallableStatusCode error);
   void WorkOnTask();
 
   // Data retrieval methods.
+  void CheckEligiblity();
   void FetchManifest();
   void OnDidGetManifest(const GURL& manifest_url,
                         const content::Manifest& manifest);
 
-  void CheckInstallable();
+  void CheckManifestValid();
   bool IsManifestValidForWebApp(const content::Manifest& manifest);
   void CheckServiceWorker();
   void OnDidCheckHasServiceWorker(content::ServiceWorkerCapability capability);
 
-  void CheckAndFetchBestIcon(const IconParams& params);
+  void CheckAndFetchBestIcon(int ideal_icon_size_in_px,
+                             int minimum_icon_size_in_px,
+                             const IconPurpose purpose);
   void OnIconFetched(const GURL icon_url,
-                     const IconParams& params,
+                     const IconPurpose purpose,
                      const SkBitmap& bitmap);
 
   // content::ServiceWorkerContextObserver overrides
@@ -272,41 +196,32 @@ class InstallableManager
 
   // content::WebContentsObserver overrides
   void DidFinishNavigation(content::NavigationHandle* handle) override;
+  void DidUpdateWebManifestURL(
+      const base::Optional<GURL>& manifest_url) override;
   void WebContentsDestroyed() override;
 
   const GURL& manifest_url() const;
   const content::Manifest& manifest() const;
-  bool is_installable() const;
+  bool valid_manifest();
+  bool has_worker();
 
-  // The list of <params, callback> pairs that have come from a call to GetData.
-  std::vector<Task> tasks_;
-
-  // Tasks which are waiting indefinitely for a service worker to be detected.
-  std::vector<Task> paused_tasks_;
+  InstallableTaskQueue task_queue_;
+  std::unique_ptr<InstallableMetrics> metrics_;
 
   // Installable properties cached on this object.
+  std::unique_ptr<EligiblityProperty> eligibility_;
   std::unique_ptr<ManifestProperty> manifest_;
   std::unique_ptr<ValidManifestProperty> valid_manifest_;
   std::unique_ptr<ServiceWorkerProperty> worker_;
-  std::map<IconParams, IconProperty> icons_;
+  std::map<IconPurpose, IconProperty> icons_;
 
   // Owned by the storage partition attached to the content::WebContents which
   // this object is scoped to.
   content::ServiceWorkerContext* service_worker_context_;
 
-  // Whether or not the current page is a PWA. This is reset per navigation and
-  // is independent of the caching mechanism, i.e. if a PWA check is run
-  // multiple times for one page, this will be set on the first check.
-  InstallabilityCheckStatus page_status_;
-
-  // Counts for the number of queued requests of the menu and add to homescreen
-  // menu item there have been whilst the installable check is awaiting
-  // completion. Used for metrics recording.
-  int menu_open_count_;
-  int menu_item_add_to_homescreen_count_;
-
-  bool is_active_;
-  bool is_pwa_check_complete_;
+  // True if for the current page load we have in queue or completed a task
+  // which queries the full PWA parameters.
+  bool has_pwa_check_;
 
   base::WeakPtrFactory<InstallableManager> weak_factory_;
 

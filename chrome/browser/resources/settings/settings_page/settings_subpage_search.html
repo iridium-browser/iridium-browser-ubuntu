@@ -11,13 +11,6 @@
   <template>
     <style include="cr-shared-style">
       :host {
-        --subpage-search-underline: {
-          margin-bottom: -2px;
-          margin-top: -2px;
-        }
-      }
-
-      :host {
         --paper-input-container-underline: var(--subpage-search-underline);
         --paper-input-container-underline-focus:
             var(--subpage-search-underline);
@@ -27,6 +20,11 @@
           /* Required to align the icon in |clearSearch| vertically. */
           line-height: 0;
         };
+        --subpage-search-underline: {
+          margin-bottom: -2px;
+          margin-top: -2px;
+        }
+        user-select: none;
       }
 
       #searchIcon {
@@ -73,10 +71,10 @@
     <paper-input-container no-label-float>
       <input id="searchInput" type="search" on-search="onSearchTermSearch"
           on-input="onSearchTermInput" aria-label$="[[label]]" incremental
-          autofocus$="[[autofocus]]" placeholder="[[label]]">
-      <button suffix is="paper-icon-button-light" id="clearSearch"
-          class="icon-cancel" on-tap="onTapClear_" title="[[clearLabel]]"
-          hidden$="[[!hasSearchText]]">
+          autofocus$="[[autofocus]]" placeholder="[[label]]" slot="input">
+      <button is="paper-icon-button-light" id="clearSearch"
+          class="icon-cancel" on-click="onTapClear_" title="[[clearLabel]]"
+          hidden$="[[!hasSearchText]]" slot="suffix">
       </button>
     </paper-input-container>
   </template>

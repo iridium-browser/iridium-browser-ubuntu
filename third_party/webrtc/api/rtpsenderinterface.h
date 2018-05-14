@@ -11,19 +11,20 @@
 // This file contains interfaces for RtpSenders
 // http://w3c.github.io/webrtc-pc/#rtcrtpsender-interface
 
-#ifndef WEBRTC_API_RTPSENDERINTERFACE_H_
-#define WEBRTC_API_RTPSENDERINTERFACE_H_
+#ifndef API_RTPSENDERINTERFACE_H_
+#define API_RTPSENDERINTERFACE_H_
 
 #include <string>
 #include <vector>
 
-#include "webrtc/api/dtmfsenderinterface.h"
-#include "webrtc/api/mediastreaminterface.h"
-#include "webrtc/api/mediatypes.h"
-#include "webrtc/api/proxy.h"
-#include "webrtc/api/rtpparameters.h"
-#include "webrtc/rtc_base/refcount.h"
-#include "webrtc/rtc_base/scoped_ref_ptr.h"
+#include "api/dtmfsenderinterface.h"
+#include "api/mediastreaminterface.h"
+#include "api/mediatypes.h"
+#include "api/proxy.h"
+#include "api/rtcerror.h"
+#include "api/rtpparameters.h"
+#include "rtc_base/refcount.h"
+#include "rtc_base/scoped_ref_ptr.h"
 
 namespace webrtc {
 
@@ -54,7 +55,7 @@ class RtpSenderInterface : public rtc::RefCountInterface {
   virtual RtpParameters GetParameters() const = 0;
   // Note that only a subset of the parameters can currently be changed. See
   // rtpparameters.h
-  virtual bool SetParameters(const RtpParameters& parameters) = 0;
+  virtual RTCError SetParameters(const RtpParameters& parameters) = 0;
 
   // Returns null for a video sender.
   virtual rtc::scoped_refptr<DtmfSenderInterface> GetDtmfSender() const = 0;
@@ -75,10 +76,10 @@ BEGIN_SIGNALING_PROXY_MAP(RtpSender)
   PROXY_CONSTMETHOD0(std::string, id)
   PROXY_CONSTMETHOD0(std::vector<std::string>, stream_ids)
   PROXY_CONSTMETHOD0(RtpParameters, GetParameters);
-  PROXY_METHOD1(bool, SetParameters, const RtpParameters&)
+  PROXY_METHOD1(RTCError, SetParameters, const RtpParameters&)
   PROXY_CONSTMETHOD0(rtc::scoped_refptr<DtmfSenderInterface>, GetDtmfSender);
-END_PROXY_MAP()
+  END_PROXY_MAP()
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_RTPSENDERINTERFACE_H_
+#endif  // API_RTPSENDERINTERFACE_H_

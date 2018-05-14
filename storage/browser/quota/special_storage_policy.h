@@ -58,6 +58,13 @@ class STORAGE_EXPORT SpecialStoragePolicy
   // when the session ends.
   virtual bool IsStorageSessionOnly(const GURL& origin) = 0;
 
+  // Cookies should be deleted if the origin is session only or blocked because
+  // it is possible to e.g. create an .example.com cookie from www.example.com.
+  // If www.example.com is SESSION_ONLY and example.com is BLOCKED, this cookie
+  // could be created but not deleted. If http://example.com is BLOCKED, but
+  // https://example.com is ALLOWED, the cookie will be kept.
+  virtual bool ShouldDeleteCookieOnExit(const GURL& origin) = 0;
+
   // Returns true if some origins are only allowed session-only storage.
   virtual bool HasSessionOnlyOrigins() = 0;
 

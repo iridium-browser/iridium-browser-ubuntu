@@ -8,14 +8,18 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -39,12 +43,15 @@
 #include "components/google/core/browser/google_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/browser/threat_details.h"
+#include "components/safe_browsing/common/safe_browsing.mojom.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/db/database_manager.h"
+#include "components/safe_browsing/db/test_database_manager.h"
+#include "components/safe_browsing/db/util.h"
+#include "components/safe_browsing/db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/features.h"
+#include "components/safe_browsing/renderer/threat_dom_details.h"
 #include "components/safe_browsing/web_ui/constants.h"
-#include "components/safe_browsing_db/database_manager.h"
-#include "components/safe_browsing_db/test_database_manager.h"
-#include "components/safe_browsing_db/util.h"
-#include "components/safe_browsing_db/v4_protocol_manager_util.h"
 #include "components/security_interstitials/content/security_interstitial_controller_client.h"
 #include "components/security_interstitials/core/controller_client.h"
 #include "components/security_interstitials/core/metrics_helper.h"
@@ -65,6 +72,7 @@
 #include "content/public/test/test_utils.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/mock_cert_verifier.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
@@ -82,14 +90,14 @@ namespace safe_browsing {
 
 namespace {
 
-const char kEmptyPage[] = "empty.html";
+const char kEmptyPage[] = "/empty.html";
 const char kHTTPSPage[] = "/ssl/google.html";
-const char kMaliciousPage[] = "safe_browsing/malware.html";
-const char kCrossSiteMaliciousPage[] = "safe_browsing/malware2.html";
+const char kMaliciousPage[] = "/safe_browsing/malware.html";
+const char kCrossSiteMaliciousPage[] = "/safe_browsing/malware2.html";
 const char kPageWithCrossOriginMaliciousIframe[] =
-    "safe_browsing/malware3.html";
+    "/safe_browsing/malware3.html";
 const char kCrossOriginMaliciousIframeHost[] = "malware.test";
-const char kMaliciousIframe[] = "safe_browsing/malware_iframe.html";
+const char kMaliciousIframe[] = "/safe_browsing/malware_iframe.html";
 const char kUnrelatedUrl[] = "https://www.google.com";
 
 // A SafeBrowsingDatabaseManager class that allows us to inject the malicious
@@ -244,9 +252,12 @@ class TestThreatDetailsFactory : public ThreatDetailsFactory {
       WebContents* web_contents,
       const security_interstitials::UnsafeResource& unsafe_resource,
       net::URLRequestContextGetter* request_context_getter,
-      history::HistoryService* history_service) override {
+      history::HistoryService* history_service,
+      bool trim_to_ad_tags,
+      ThreatDetailsDoneCallback done_callback) override {
     details_ = new ThreatDetails(delegate, web_contents, unsafe_resource,
-                                 request_context_getter, history_service);
+                                 request_context_getter, history_service,
+                                 trim_to_ad_tags, done_callback);
     return details_;
   }
 
@@ -280,7 +291,7 @@ class TestSafeBrowsingBlockingPage : public SafeBrowsingBlockingPage {
       return;
 
     // Notify that we are gone
-    base::MessageLoopForUI::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
     wait_for_delete_ = false;
   }
 
@@ -324,8 +335,9 @@ class TestSafeBrowsingBlockingPageFactory
         is_extended_reporting_opt_in_allowed,
         web_contents->GetBrowserContext()->IsOffTheRecord(),
         IsExtendedReportingEnabled(*prefs), IsScout(*prefs),
-        is_proceed_anyway_disabled,
-        true,  // should_open_links_in_new_tab
+        IsExtendedReportingPolicyManaged(*prefs), is_proceed_anyway_disabled,
+        true,   // should_open_links_in_new_tab
+        false,  // check_can_go_back_to_safety
         "cpn_safe_browsing" /* help_center_article_link */);
     return new TestSafeBrowsingBlockingPage(delegate, web_contents,
                                             main_frame_url, unsafe_resources,
@@ -345,7 +357,14 @@ class SafeBrowsingBlockingPageBrowserTest
   };
 
   SafeBrowsingBlockingPageBrowserTest()
-      : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {}
+      : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {
+    std::map<std::string, std::string> parameters = {
+        {safe_browsing::kTagAndAttributeParamName, "div,foo,div,baz"}};
+    scoped_feature_list_.InitAndEnableFeatureWithParameters(
+        safe_browsing::kThreatDomDetailsTagAndAttributeFeature, parameters);
+  }
+
+  ~SafeBrowsingBlockingPageBrowserTest() override {}
 
   void SetUp() override {
     // Test UI manager and test database manager should be set before
@@ -366,22 +385,18 @@ class SafeBrowsingBlockingPageBrowserTest
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII("enable-features",
-                                    "ThreatDomDetailsTagAttributes<SBDomStudy");
-    command_line->AppendSwitchASCII("force-fieldtrials",
-                                    "SBDomStudy/SBDomGroup");
-    command_line->AppendSwitchASCII(
-        "force-fieldtrial-params",
-        "SBDomStudy.SBDomGroup:tag_attribute_csv/div%2Cfoo%2Cdiv%2Cbaz");
-
+    CertVerifierBrowserTest::SetUpCommandLine(command_line);
     if (testing::get<1>(GetParam()))
       content::IsolateAllSitesForTesting(command_line);
   }
 
   void SetUpOnMainThread() override {
+    host_resolver()->AddRule("*", "127.0.0.1");
+    content::SetupCrossSiteRedirector(embedded_test_server());
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::BindOnce(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
+    ASSERT_TRUE(embedded_test_server()->Start());
   }
 
   void SetURLThreatType(const GURL& url, SBThreatType threat_type) {
@@ -405,7 +420,7 @@ class SafeBrowsingBlockingPageBrowserTest
   // The basic version of this method, which uses an HTTP test URL.
   GURL SetupWarningAndNavigate(Browser* browser) {
     return SetupWarningAndNavigateToURL(
-        net::URLRequestMockHTTPJob::GetMockUrl(kEmptyPage), browser);
+        embedded_test_server()->GetURL(kEmptyPage), browser);
   }
 
   // Navigates to a warning on a valid HTTPS website.
@@ -448,8 +463,8 @@ class SafeBrowsingBlockingPageBrowserTest
   // navigates to a page with an iframe containing the threat site, and returns
   // the url of the parent page.
   GURL SetupThreatIframeWarningAndNavigate() {
-    GURL url = net::URLRequestMockHTTPJob::GetMockUrl(kCrossSiteMaliciousPage);
-    GURL iframe_url = net::URLRequestMockHTTPJob::GetMockUrl(kMaliciousIframe);
+    GURL url = embedded_test_server()->GetURL(kCrossSiteMaliciousPage);
+    GURL iframe_url = embedded_test_server()->GetURL(kMaliciousIframe);
     SetURLThreatType(iframe_url, testing::get<0>(GetParam()));
 
     ui_test_utils::NavigateToURL(browser(), url);
@@ -462,12 +477,9 @@ class SafeBrowsingBlockingPageBrowserTest
   // Returns the url of the parent page and sets |iframe_url| to the malicious
   // cross-origin iframe.
   GURL SetupCrossOriginThreatIframeWarningAndNavigate(GURL* iframe_url) {
-    content::SetupCrossSiteRedirector(embedded_test_server());
-    EXPECT_TRUE(embedded_test_server()->Start());
-    GURL url = embedded_test_server()->GetURL(
-        std::string("/") + kPageWithCrossOriginMaliciousIframe);
-    *iframe_url =
-        embedded_test_server()->GetURL(std::string("/") + kMaliciousIframe);
+    GURL url =
+        embedded_test_server()->GetURL(kPageWithCrossOriginMaliciousIframe);
+    *iframe_url = embedded_test_server()->GetURL(kMaliciousIframe);
     GURL::Replacements replace_host;
     replace_host.SetHostStr(kCrossOriginMaliciousIframeHost);
     *iframe_url = iframe_url->ReplaceComponents(replace_host);
@@ -488,12 +500,12 @@ class SafeBrowsingBlockingPageBrowserTest
   }
 
   void SendCommand(
-      security_interstitials::SecurityInterstitialCommands command) {
+      security_interstitials::SecurityInterstitialCommand command) {
     WebContents* contents =
         browser()->tab_strip_model()->GetActiveWebContents();
     // We use InterstitialPage::GetInterstitialPage(tab) instead of
     // tab->GetInterstitialPage() because the tab doesn't have a pointer
-    // to its interstital page until it gets a command from the renderer
+    // to its interstitial page until it gets a command from the renderer
     // that it has indeed displayed it -- and this sometimes happens after
     // NavigateToURL returns.
     SafeBrowsingBlockingPage* interstitial_page =
@@ -546,9 +558,9 @@ class SafeBrowsingBlockingPageBrowserTest
   }
 
   void MalwareRedirectCancelAndProceed(const std::string& open_function) {
-    GURL load_url = net::URLRequestMockHTTPJob::GetMockUrl(
-        "safe_browsing/interstitial_cancel.html");
-    GURL malware_url = net::URLRequestMockHTTPJob::GetMockUrl(kMaliciousPage);
+    GURL load_url = embedded_test_server()->GetURL(
+        "/safe_browsing/interstitial_cancel.html");
+    GURL malware_url = embedded_test_server()->GetURL(kMaliciousPage);
     SetURLThreatType(malware_url, testing::get<0>(GetParam()));
 
     // Load the test page.
@@ -583,8 +595,9 @@ class SafeBrowsingBlockingPageBrowserTest
   }
 
   bool WaitForReady(Browser* browser) {
-    InterstitialPage* interstitial = InterstitialPage::GetInterstitialPage(
-        browser->tab_strip_model()->GetActiveWebContents());
+    WebContents* contents = browser->tab_strip_model()->GetActiveWebContents();
+    content::WaitForInterstitialAttach(contents);
+    InterstitialPage* interstitial = contents->GetInterstitialPage();
     if (!interstitial)
       return false;
     return content::WaitForRenderFrameReady(interstitial->GetMainFrame());
@@ -690,18 +703,18 @@ class SafeBrowsingBlockingPageBrowserTest
       const HTMLElement& actual_element,
       const std::string& expected_tag_name,
       const int expected_child_ids_size,
-      const std::vector<AttributeNameValue>& expected_attributes) {
+      const std::vector<mojom::AttributeNameValuePtr>& expected_attributes) {
     EXPECT_EQ(expected_tag_name, actual_element.tag());
     EXPECT_EQ(expected_child_ids_size, actual_element.child_ids_size());
     ASSERT_EQ(static_cast<int>(expected_attributes.size()),
               actual_element.attribute_size());
     for (size_t i = 0; i < expected_attributes.size(); ++i) {
-      const AttributeNameValue& expected_attribute_pair =
-          expected_attributes[i];
+      const mojom::AttributeNameValue& expected_attribute =
+          *expected_attributes[i];
       const HTMLElement::Attribute& actual_attribute_pb =
           actual_element.attribute(i);
-      EXPECT_EQ(expected_attribute_pair.first, actual_attribute_pb.name());
-      EXPECT_EQ(expected_attribute_pair.second, actual_attribute_pb.value());
+      EXPECT_EQ(expected_attribute.name, actual_attribute_pb.name());
+      EXPECT_EQ(expected_attribute.value, actual_attribute_pb.value());
     }
   }
 
@@ -772,6 +785,7 @@ class SafeBrowsingBlockingPageBrowserTest
     return url;
   }
 
+  base::test::ScopedFeatureList scoped_feature_list_;
   TestSafeBrowsingServiceFactory factory_;
   TestSafeBrowsingBlockingPageFactory blocking_page_factory_;
   net::EmbeddedTestServer https_server_;
@@ -954,10 +968,10 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
     EXPECT_TRUE(report.complete());
     // Do some basic verification of report contents.
     EXPECT_EQ(url.spec(), report.page_url());
-    EXPECT_EQ(net::URLRequestMockHTTPJob::GetMockUrl(kMaliciousIframe).spec(),
+    EXPECT_EQ(embedded_test_server()->GetURL(kMaliciousIframe).spec(),
               report.url());
     std::vector<ClientSafeBrowsingReportRequest::Resource> resources;
-    for (auto resource: report.resources()) {
+    for (auto resource : report.resources()) {
       resources.push_back(resource);
     }
     // Sort resources based on their urls.
@@ -969,14 +983,12 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
     ASSERT_EQ(2U, resources.size());
     VerifyResource(
         report, resources[0],
-        net::URLRequestMockHTTPJob::GetMockUrl(kCrossSiteMaliciousPage).spec(),
-        net::URLRequestMockHTTPJob::GetMockUrl(kCrossSiteMaliciousPage).spec(),
-        1, "");
-    VerifyResource(
-        report, resources[1],
-        net::URLRequestMockHTTPJob::GetMockUrl(kMaliciousIframe).spec(),
-        url.spec(),  // kCrossSiteMaliciousPage
-        0, "IFRAME");
+        embedded_test_server()->GetURL(kCrossSiteMaliciousPage).spec(),
+        embedded_test_server()->GetURL(kCrossSiteMaliciousPage).spec(), 1, "");
+    VerifyResource(report, resources[1],
+                   embedded_test_server()->GetURL(kMaliciousIframe).spec(),
+                   url.spec(),  // kCrossSiteMaliciousPage
+                   0, "IFRAME");
 
     ASSERT_EQ(2, report.dom_size());
     // Because the order of elements is not deterministic, we basically need to
@@ -987,7 +999,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
       if (elem.tag() == "IFRAME") {
         iframe_node_id = elem.id();
         VerifyElement(report, elem, "IFRAME", /*child_size=*/0,
-                      std::vector<AttributeNameValue>());
+                      std::vector<mojom::AttributeNameValuePtr>());
         break;
       }
     }
@@ -996,9 +1008,10 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
     // Find the parent DIV that is the parent of the iframe.
     for (const HTMLElement& elem : report.dom()) {
       if (elem.id() != iframe_node_id) {
+        std::vector<mojom::AttributeNameValuePtr> attributes;
+        attributes.push_back(mojom::AttributeNameValue::New("foo", "1"));
         // Not the IIFRAME, so this is the parent DIV
-        VerifyElement(report, elem, "DIV", /*child_size=*/1,
-                      {std::make_pair("foo", "1")});
+        VerifyElement(report, elem, "DIV", /*child_size=*/1, attributes);
         // Make sure this DIV has the IFRAME as a child.
         EXPECT_EQ(iframe_node_id, elem.child_ids(0));
       }
@@ -1020,7 +1033,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
   // Navigate to a safe page which contains multiple potential DOM details.
   // (Despite the name, kMaliciousPage is not the page flagged as bad in this
   // test.)
-  GURL safe_url(net::URLRequestMockHTTPJob::GetMockUrl(kMaliciousPage));
+  GURL safe_url(embedded_test_server()->GetURL(kMaliciousPage));
   ui_test_utils::NavigateToURL(browser(), safe_url);
 
   EXPECT_EQ(nullptr, details_factory_.get_details());
@@ -1071,8 +1084,8 @@ IN_PROC_BROWSER_TEST_P(
   // Navigate to a safe page which contains multiple potential DOM details.
   // (Despite the name, kMaliciousPage is not the page flagged as bad in this
   // test.)
-  ui_test_utils::NavigateToURL(
-      browser(), net::URLRequestMockHTTPJob::GetMockUrl(kMaliciousPage));
+  ui_test_utils::NavigateToURL(browser(),
+                               embedded_test_server()->GetURL(kMaliciousPage));
 
   EXPECT_EQ(nullptr, details_factory_.get_details());
 
@@ -1133,15 +1146,22 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ProceedDisabled) {
 }
 
 // Verifies that the reporting checkbox is hidden when opt-in is
-// disabled by policy.
+// disabled by policy. However, reports can still be sent if extended
+// reporting is enabled (eg: by its own policy).
+// Note: this combination will be deprecated along with the OptInAllowed
+// policy, to be replaced by a policy on the SBER setting itself.
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
                        ReportingDisabledByPolicy) {
   SetExtendedReportingPref(browser()->profile()->GetPrefs(), true);
   browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kSafeBrowsingExtendedReportingOptInAllowed, false);
 
+  scoped_refptr<content::MessageLoopRunner> threat_report_sent_runner(
+      new content::MessageLoopRunner);
+  SetReportSentCallback(threat_report_sent_runner->QuitClosure());
+
   TestReportingDisabledAndDontProceed(
-      net::URLRequestMockHTTPJob::GetMockUrl(kEmptyPage));
+      embedded_test_server()->GetURL(kEmptyPage));
 }
 
 // Verifies that the reporting checkbox is still shown if the page is reloaded
@@ -1173,10 +1193,8 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
   // Checkbox should be showing.
   EXPECT_EQ(VISIBLE, GetVisibility("extended-reporting-opt-in"));
 
-  // TODO(crbug.com/666172): Security indicator should be showing.
-  // Call |ExpectSecurityIndicatorDowngrade(tab, 0u);| here once the bug is
-  // fixed.
-
+  // Security indicator should be showing.
+  ExpectSecurityIndicatorDowngrade(tab, 0u);
   // Check navigation entry state.
   ASSERT_TRUE(controller.GetVisibleEntry());
   EXPECT_EQ(url, controller.GetVisibleEntry()->GetURL());
@@ -1479,12 +1497,11 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
                        SecurityStateGoBack) {
   // Navigate to a page so that there is somewhere to go back to.
-  GURL start_url =
-      net::URLRequestMockHTTPJob::GetMockUrl("http://example.test");
+  GURL start_url = embedded_test_server()->GetURL(kEmptyPage);
   ui_test_utils::NavigateToURL(browser(), start_url);
 
   // The security indicator should be downgraded while the interstitial shows.
-  GURL bad_url = net::URLRequestMockHTTPJob::GetMockUrl(kEmptyPage);
+  GURL bad_url = embedded_test_server()->GetURL(kEmptyPage);
   SetupWarningAndNavigate(browser());
   WebContents* error_tab = browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(error_tab);
@@ -1528,8 +1545,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
                        SecurityStateGoBackOnSubresourceInterstitial) {
   // Navigate to a page so that there is somewhere to go back to.
-  GURL start_url =
-      net::URLRequestMockHTTPJob::GetMockUrl("http://example.test");
+  GURL start_url = embedded_test_server()->GetURL(kEmptyPage);
   ui_test_utils::NavigateToURL(browser(), start_url);
 
   // The security indicator should be downgraded while the interstitial
@@ -1637,6 +1653,27 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
   ExpectSecurityIndicatorDowngrade(post_tab, net::CERT_STATUS_INVALID);
 }
 
+// Test that no safe browsing interstitial will be shown, if URL matches
+// enterprise safe browsing whitelist domains.
+IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
+                       VerifyEnterpriseWhitelist) {
+  base::test::ScopedFeatureList scoped_features;
+  scoped_features.InitAndEnableFeature(kEnterprisePasswordProtectionV1);
+  GURL url = embedded_test_server()->GetURL(kEmptyPage);
+  // Add test server domain into the enterprise whitelist.
+  base::ListValue whitelist;
+  whitelist.AppendString(url.host());
+  browser()->profile()->GetPrefs()->Set(prefs::kSafeBrowsingWhitelistDomains,
+                                        whitelist);
+
+  SetURLThreatType(url, testing::get<0>(GetParam()));
+  ui_test_utils::NavigateToURL(browser(), url);
+  base::RunLoop().RunUntilIdle();
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_TRUE(content::WaitForRenderFrameReady(contents->GetMainFrame()));
+  EXPECT_FALSE(YesInterstitial());
+}
+
 INSTANTIATE_TEST_CASE_P(
     SafeBrowsingBlockingPageBrowserTestWithThreatTypeAndIsolationSetting,
     SafeBrowsingBlockingPageBrowserTest,
@@ -1668,7 +1705,7 @@ class SafeBrowsingBlockingPageIDNTest
     resource.threat_type = testing::get<1>(GetParam());
     resource.web_contents_getter =
         security_interstitials::UnsafeResource::GetWebContentsGetter(
-            contents->GetRenderProcessHost()->GetID(),
+            contents->GetMainFrame()->GetProcess()->GetID(),
             contents->GetMainFrame()->GetRoutingID());
     resource.threat_source = safe_browsing::ThreatSource::LOCAL_PVER3;
 

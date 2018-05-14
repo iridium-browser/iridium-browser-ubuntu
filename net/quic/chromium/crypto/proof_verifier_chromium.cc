@@ -10,7 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "crypto/signature_verifier.h"
@@ -33,7 +33,7 @@ using std::string;
 namespace net {
 
 ProofVerifyDetailsChromium::ProofVerifyDetailsChromium()
-    : pkp_bypassed(false) {}
+    : pkp_bypassed(false), is_fatal_cert_error(false) {}
 
 ProofVerifyDetailsChromium::~ProofVerifyDetailsChromium() {}
 
@@ -67,7 +67,7 @@ class ProofVerifierChromium::Job {
       const std::string& hostname,
       const uint16_t port,
       const std::string& server_config,
-      QuicVersion quic_version,
+      QuicTransportVersion quic_version,
       QuicStringPiece chlo_hash,
       const std::vector<std::string>& certs,
       const std::string& cert_sct,
@@ -112,7 +112,7 @@ class ProofVerifierChromium::Job {
   int DoVerifyCertComplete(int result);
 
   bool VerifySignature(const std::string& signed_data,
-                       QuicVersion quic_version,
+                       QuicTransportVersion quic_version,
                        QuicStringPiece chlo_hash,
                        const std::string& signature,
                        const std::string& cert);
@@ -198,7 +198,7 @@ QuicAsyncStatus ProofVerifierChromium::Job::VerifyProof(
     const string& hostname,
     const uint16_t port,
     const string& server_config,
-    QuicVersion quic_version,
+    QuicTransportVersion quic_version,
     QuicStringPiece chlo_hash,
     const std::vector<string>& certs,
     const std::string& cert_sct,
@@ -227,9 +227,9 @@ QuicAsyncStatus ProofVerifierChromium::Job::VerifyProof(
   // Note that this is a completely synchronous operation: The CT Log Verifier
   // gets all the data it needs for SCT verification and does not do any
   // external communication.
-  cert_transparency_verifier_->Verify(cert_.get(), std::string(), cert_sct,
-                                      &verify_details_->ct_verify_result.scts,
-                                      net_log_);
+  cert_transparency_verifier_->Verify(
+      hostname, cert_.get(), std::string(), cert_sct,
+      &verify_details_->ct_verify_result.scts, net_log_);
 
   // We call VerifySignature first to avoid copying of server_config and
   // signature.
@@ -379,12 +379,12 @@ int ProofVerifierChromium::Job::DoVerifyCert(int result) {
 }
 
 int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
+  base::UmaHistogramSparse("Net.QuicSession.CertVerificationResult", -result);
   cert_verifier_request_.reset();
 
   const CertVerifyResult& cert_verify_result =
       verify_details_->cert_verify_result;
   const CertStatus cert_status = cert_verify_result.cert_status;
-  verify_details_->ct_verify_result.ct_policies_applied = result == OK;
 
   // If the connection was good, check HPKP and CT status simultaneously,
   // but prefer to treat the HPKP error as more serious, if there was one.
@@ -394,30 +394,75 @@ int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
     SCTList verified_scts = ct::SCTsMatchingStatus(
         verify_details_->ct_verify_result.scts, ct::SCT_STATUS_OK);
 
-    verify_details_->ct_verify_result.cert_policy_compliance =
-        policy_enforcer_->DoesConformToCertPolicy(
+    verify_details_->ct_verify_result.policy_compliance =
+        policy_enforcer_->CheckCompliance(
             cert_verify_result.verified_cert.get(), verified_scts, net_log_);
-    if ((verify_details_->cert_verify_result.cert_status & CERT_STATUS_IS_EV) &&
-        (verify_details_->ct_verify_result.cert_policy_compliance !=
-         ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS)) {
-      verify_details_->cert_verify_result.cert_status |=
-          CERT_STATUS_CT_COMPLIANCE_FAILED;
-      verify_details_->cert_verify_result.cert_status &= ~CERT_STATUS_IS_EV;
+    if (verify_details_->cert_verify_result.cert_status & CERT_STATUS_IS_EV) {
+      if (verify_details_->ct_verify_result.policy_compliance !=
+          ct::CTPolicyCompliance::CT_POLICY_COMPLIES_VIA_SCTS) {
+        verify_details_->cert_verify_result.cert_status |=
+            CERT_STATUS_CT_COMPLIANCE_FAILED;
+        verify_details_->cert_verify_result.cert_status &= ~CERT_STATUS_IS_EV;
+      }
+
+      // Record the CT compliance status for connections with EV certificates,
+      // to distinguish how often EV status is being dropped due to failing CT
+      // compliance.
+      if (verify_details_->cert_verify_result.is_issued_by_known_root) {
+        UMA_HISTOGRAM_ENUMERATION(
+            "Net.CertificateTransparency.EVCompliance2.QUIC",
+            verify_details_->ct_verify_result.policy_compliance,
+            ct::CTPolicyCompliance::CT_POLICY_MAX);
+      }
+    }
+
+    // Record the CT compliance of every connection to get an overall picture of
+    // how many connections are CT-compliant.
+    if (verify_details_->cert_verify_result.is_issued_by_known_root) {
+      UMA_HISTOGRAM_ENUMERATION(
+          "Net.CertificateTransparency.ConnectionComplianceStatus2.QUIC",
+          verify_details_->ct_verify_result.policy_compliance,
+          ct::CTPolicyCompliance::CT_POLICY_MAX);
     }
 
     int ct_result = OK;
-    if (transport_security_state_->CheckCTRequirements(
+    TransportSecurityState::CTRequirementsStatus ct_requirement_status =
+        transport_security_state_->CheckCTRequirements(
             HostPortPair(hostname_, port_),
             cert_verify_result.is_issued_by_known_root,
             cert_verify_result.public_key_hashes,
             cert_verify_result.verified_cert.get(), cert_.get(),
             verify_details_->ct_verify_result.scts,
             TransportSecurityState::ENABLE_EXPECT_CT_REPORTS,
-            verify_details_->ct_verify_result.cert_policy_compliance) !=
-        TransportSecurityState::CT_REQUIREMENTS_MET) {
-      verify_details_->cert_verify_result.cert_status |=
-          CERT_STATUS_CERTIFICATE_TRANSPARENCY_REQUIRED;
-      ct_result = ERR_CERTIFICATE_TRANSPARENCY_REQUIRED;
+            verify_details_->ct_verify_result.policy_compliance);
+    if (ct_requirement_status != TransportSecurityState::CT_NOT_REQUIRED) {
+      verify_details_->ct_verify_result.policy_compliance_required = true;
+      if (verify_details_->cert_verify_result.is_issued_by_known_root) {
+        // Record the CT compliance of connections for which compliance is
+        // required; this helps answer the question: "Of all connections that
+        // are supposed to be serving valid CT information, how many fail to do
+        // so?"
+        UMA_HISTOGRAM_ENUMERATION(
+            "Net.CertificateTransparency.CTRequiredConnectionComplianceStatus2."
+            "QUIC",
+            verify_details_->ct_verify_result.policy_compliance,
+            ct::CTPolicyCompliance::CT_POLICY_MAX);
+      }
+    } else {
+      verify_details_->ct_verify_result.policy_compliance_required = false;
+    }
+
+    switch (ct_requirement_status) {
+      case TransportSecurityState::CT_REQUIREMENTS_NOT_MET:
+        verify_details_->cert_verify_result.cert_status |=
+            CERT_STATUS_CERTIFICATE_TRANSPARENCY_REQUIRED;
+        ct_result = ERR_CERTIFICATE_TRANSPARENCY_REQUIRED;
+        break;
+      case TransportSecurityState::CT_REQUIREMENTS_MET:
+      case TransportSecurityState::CT_NOT_REQUIRED:
+        // Intentional fallthrough; this case is just here to make sure that all
+        // possible values of CheckCTRequirements() are handled.
+        break;
     }
 
     TransportSecurityState::PKPStatus pin_validity =
@@ -436,7 +481,7 @@ int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
         break;
       case TransportSecurityState::PKPStatus::BYPASSED:
         verify_details_->pkp_bypassed = true;
-      // Fall through.
+        FALLTHROUGH;
       case TransportSecurityState::PKPStatus::OK:
         // Do nothing.
         break;
@@ -444,6 +489,10 @@ int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
     if (result != ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN && ct_result != OK)
       result = ct_result;
   }
+
+  verify_details_->is_fatal_cert_error =
+      IsCertStatusError(cert_status) && !IsCertStatusMinorError(cert_status) &&
+      transport_security_state_->ShouldSSLErrorsBeFatal(hostname_);
 
   if (result != OK) {
     std::string error_string = ErrorToString(result);
@@ -457,47 +506,40 @@ int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
   return result;
 }
 
-bool ProofVerifierChromium::Job::VerifySignature(const string& signed_data,
-                                                 QuicVersion quic_version,
-                                                 QuicStringPiece chlo_hash,
-                                                 const string& signature,
-                                                 const string& cert) {
+bool ProofVerifierChromium::Job::VerifySignature(
+    const string& signed_data,
+    QuicTransportVersion quic_version,
+    QuicStringPiece chlo_hash,
+    const string& signature,
+    const string& cert) {
   QuicStringPiece spki;
   if (!asn1::ExtractSPKIFromDERCert(cert, &spki)) {
     DLOG(WARNING) << "ExtractSPKIFromDERCert failed";
     return false;
   }
 
-  crypto::SignatureVerifier verifier;
-
   size_t size_bits;
   X509Certificate::PublicKeyType type;
-  X509Certificate::GetPublicKeyInfo(cert_->os_cert_handle(), &size_bits, &type);
-  if (type == X509Certificate::kPublicKeyTypeRSA) {
-    crypto::SignatureVerifier::HashAlgorithm hash_alg =
-        crypto::SignatureVerifier::SHA256;
-    crypto::SignatureVerifier::HashAlgorithm mask_hash_alg = hash_alg;
-    unsigned int hash_len = 32;  // 32 is the length of a SHA-256 hash.
+  X509Certificate::GetPublicKeyInfo(cert_->cert_buffer(), &size_bits, &type);
+  crypto::SignatureVerifier::SignatureAlgorithm algorithm;
+  switch (type) {
+    case X509Certificate::kPublicKeyTypeRSA:
+      algorithm = crypto::SignatureVerifier::RSA_PSS_SHA256;
+      break;
+    case X509Certificate::kPublicKeyTypeECDSA:
+      algorithm = crypto::SignatureVerifier::ECDSA_SHA256;
+      break;
+    default:
+      LOG(ERROR) << "Unsupported public key type " << type;
+      return false;
+  }
 
-    bool ok = verifier.VerifyInitRSAPSS(
-        hash_alg, mask_hash_alg, hash_len,
-        reinterpret_cast<const uint8_t*>(signature.data()), signature.size(),
-        reinterpret_cast<const uint8_t*>(spki.data()), spki.size());
-    if (!ok) {
-      DLOG(WARNING) << "VerifyInitRSAPSS failed";
-      return false;
-    }
-  } else if (type == X509Certificate::kPublicKeyTypeECDSA) {
-    if (!verifier.VerifyInit(crypto::SignatureVerifier::ECDSA_SHA256,
-                             reinterpret_cast<const uint8_t*>(signature.data()),
-                             signature.size(),
-                             reinterpret_cast<const uint8_t*>(spki.data()),
-                             spki.size())) {
-      DLOG(WARNING) << "VerifyInit failed";
-      return false;
-    }
-  } else {
-    LOG(ERROR) << "Unsupported public key type " << type;
+  crypto::SignatureVerifier verifier;
+  if (!verifier.VerifyInit(
+          algorithm, reinterpret_cast<const uint8_t*>(signature.data()),
+          signature.size(), reinterpret_cast<const uint8_t*>(spki.data()),
+          spki.size())) {
+    DLOG(WARNING) << "VerifyInit failed";
     return false;
   }
 
@@ -542,7 +584,7 @@ QuicAsyncStatus ProofVerifierChromium::VerifyProof(
     const std::string& hostname,
     const uint16_t port,
     const std::string& server_config,
-    QuicVersion quic_version,
+    QuicTransportVersion quic_version,
     QuicStringPiece chlo_hash,
     const std::vector<std::string>& certs,
     const std::string& cert_sct,
@@ -557,7 +599,7 @@ QuicAsyncStatus ProofVerifierChromium::VerifyProof(
   }
   const ProofVerifyContextChromium* chromium_context =
       reinterpret_cast<const ProofVerifyContextChromium*>(verify_context);
-  std::unique_ptr<Job> job = base::MakeUnique<Job>(
+  std::unique_ptr<Job> job = std::make_unique<Job>(
       this, cert_verifier_, ct_policy_enforcer_, transport_security_state_,
       cert_transparency_verifier_, chromium_context->cert_verify_flags,
       chromium_context->net_log);
@@ -584,7 +626,7 @@ QuicAsyncStatus ProofVerifierChromium::VerifyCertChain(
   }
   const ProofVerifyContextChromium* chromium_context =
       reinterpret_cast<const ProofVerifyContextChromium*>(verify_context);
-  std::unique_ptr<Job> job = base::MakeUnique<Job>(
+  std::unique_ptr<Job> job = std::make_unique<Job>(
       this, cert_verifier_, ct_policy_enforcer_, transport_security_state_,
       cert_transparency_verifier_, chromium_context->cert_verify_flags,
       chromium_context->net_log);

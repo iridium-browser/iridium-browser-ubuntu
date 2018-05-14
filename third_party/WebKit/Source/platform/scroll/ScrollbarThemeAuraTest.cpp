@@ -5,7 +5,7 @@
 #include "platform/scroll/ScrollbarThemeAura.h"
 
 #include "platform/scroll/ScrollbarTestSuite.h"
-#include "platform/testing/TestingPlatformSupport.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 
 namespace blink {
 
@@ -29,7 +29,10 @@ class ScrollbarThemeAuraButtonOverride final : public ScrollbarThemeAura {
 
 }  // namespace
 
-using ScrollbarThemeAuraTest = ::testing::Test;
+class ScrollbarThemeAuraTest : public ::testing::Test {
+ private:
+  base::MessageLoop message_loop_;
+};
 
 TEST_F(ScrollbarThemeAuraTest, ButtonSizeHorizontal) {
   ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>

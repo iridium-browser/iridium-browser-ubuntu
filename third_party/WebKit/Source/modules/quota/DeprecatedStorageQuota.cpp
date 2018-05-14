@@ -30,88 +30,182 @@
 
 #include "modules/quota/DeprecatedStorageQuota.h"
 
+#include "base/location.h"
+#include "bindings/modules/v8/v8_storage_error_callback.h"
+#include "bindings/modules/v8/v8_storage_quota_callback.h"
+#include "bindings/modules/v8/v8_storage_usage_callback.h"
+#include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
-#include "modules/quota/DeprecatedStorageQuotaCallbacksImpl.h"
-#include "modules/quota/StorageErrorCallback.h"
-#include "modules/quota/StorageQuotaClient.h"
-#include "modules/quota/StorageUsageCallback.h"
-#include "platform/StorageQuotaCallbacks.h"
-#include "platform/WebTaskRunner.h"
+#include "modules/quota/DOMError.h"
+#include "modules/quota/QuotaUtils.h"
+#include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebStorageQuotaCallbacks.h"
-#include "public/platform/WebStorageQuotaType.h"
-#include "public/platform/WebTraceLocation.h"
+#include "public/platform/TaskType.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace blink {
+
+using mojom::StorageType;
+
+namespace {
+
+StorageType GetStorageType(DeprecatedStorageQuota::Type type) {
+  switch (type) {
+    case DeprecatedStorageQuota::kTemporary:
+      return StorageType::kTemporary;
+    case DeprecatedStorageQuota::kPersistent:
+      return StorageType::kPersistent;
+    default:
+      return StorageType::kUnknown;
+  }
+}
+
+void DeprecatedQueryStorageUsageAndQuotaCallback(
+    V8PersistentCallbackFunction<V8StorageUsageCallback>* success_callback,
+    V8PersistentCallbackFunction<V8StorageErrorCallback>* error_callback,
+    mojom::QuotaStatusCode status_code,
+    int64_t usage_in_bytes,
+    int64_t quota_in_bytes) {
+  if (status_code != mojom::QuotaStatusCode::kOk) {
+    if (error_callback) {
+      error_callback->InvokeAndReportException(
+          nullptr, DOMError::Create(static_cast<ExceptionCode>(status_code)));
+    }
+    return;
+  }
+
+  if (success_callback) {
+    success_callback->InvokeAndReportException(nullptr, usage_in_bytes,
+                                               quota_in_bytes);
+  }
+}
+
+void RequestStorageQuotaCallback(
+    V8PersistentCallbackFunction<V8StorageQuotaCallback>* success_callback,
+    V8PersistentCallbackFunction<V8StorageErrorCallback>* error_callback,
+    mojom::QuotaStatusCode status_code,
+    int64_t usage_in_bytes,
+    int64_t granted_quota_in_bytes) {
+  if (status_code != mojom::QuotaStatusCode::kOk) {
+    if (error_callback) {
+      error_callback->InvokeAndReportException(
+          nullptr, DOMError::Create(static_cast<ExceptionCode>(status_code)));
+    }
+    return;
+  }
+
+  if (success_callback) {
+    success_callback->InvokeAndReportException(nullptr, granted_quota_in_bytes);
+  }
+}
+
+}  // namespace
+
+void DeprecatedStorageQuota::EnqueueStorageErrorCallback(
+    ScriptState* script_state,
+    V8StorageErrorCallback* error_callback,
+    ExceptionCode exception_code) {
+  if (!error_callback)
+    return;
+
+  ExecutionContext::From(script_state)
+      ->GetTaskRunner(TaskType::kMiscPlatformAPI)
+      ->PostTask(
+          FROM_HERE,
+          WTF::Bind(
+              &V8PersistentCallbackFunction<
+                  V8StorageErrorCallback>::InvokeAndReportException,
+              WrapPersistent(ToV8PersistentCallbackFunction(error_callback)),
+              nullptr, WrapPersistent(DOMError::Create(exception_code))));
+}
 
 DeprecatedStorageQuota::DeprecatedStorageQuota(Type type) : type_(type) {}
 
 void DeprecatedStorageQuota::queryUsageAndQuota(
     ScriptState* script_state,
-    StorageUsageCallback* success_callback,
-    StorageErrorCallback* error_callback) {
+    V8StorageUsageCallback* success_callback,
+    V8StorageErrorCallback* error_callback) {
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   DCHECK(execution_context);
 
-  WebStorageQuotaType storage_type = static_cast<WebStorageQuotaType>(type_);
-  if (storage_type != kWebStorageQuotaTypeTemporary &&
-      storage_type != kWebStorageQuotaTypePersistent) {
+  StorageType storage_type = GetStorageType(type_);
+  if (storage_type != StorageType::kTemporary &&
+      storage_type != StorageType::kPersistent) {
     // Unknown storage type is requested.
-    TaskRunnerHelper::Get(TaskType::kMiscPlatformAPI, script_state)
-        ->PostTask(BLINK_FROM_HERE, StorageErrorCallback::CreateSameThreadTask(
-                                        error_callback, kNotSupportedError));
+    EnqueueStorageErrorCallback(script_state, error_callback,
+                                kNotSupportedError);
     return;
   }
 
-  SecurityOrigin* security_origin = execution_context->GetSecurityOrigin();
+  const SecurityOrigin* security_origin =
+      execution_context->GetSecurityOrigin();
   if (security_origin->IsUnique()) {
-    TaskRunnerHelper::Get(TaskType::kMiscPlatformAPI, script_state)
-        ->PostTask(BLINK_FROM_HERE, StorageErrorCallback::CreateSameThreadTask(
-                                        error_callback, kNotSupportedError));
+    EnqueueStorageErrorCallback(script_state, error_callback,
+                                kNotSupportedError);
     return;
   }
 
-  KURL storage_partition = KURL(NullURL(), security_origin->ToString());
-  StorageQuotaCallbacks* callbacks =
-      DeprecatedStorageQuotaCallbacksImpl::Create(success_callback,
-                                                  error_callback);
-  Platform::Current()->QueryStorageUsageAndQuota(storage_partition,
-                                                 storage_type, callbacks);
+  auto callback = WTF::Bind(
+      &DeprecatedQueryStorageUsageAndQuotaCallback,
+      WrapPersistent(ToV8PersistentCallbackFunction(success_callback)),
+      WrapPersistent(ToV8PersistentCallbackFunction(error_callback)));
+  GetQuotaHost(execution_context)
+      .QueryStorageUsageAndQuota(
+          WrapRefCounted(security_origin), storage_type,
+          mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+              std::move(callback), mojom::QuotaStatusCode::kErrorAbort, 0, 0));
 }
 
 void DeprecatedStorageQuota::requestQuota(
     ScriptState* script_state,
     unsigned long long new_quota_in_bytes,
-    StorageQuotaCallback* success_callback,
-    StorageErrorCallback* error_callback) {
+    V8StorageQuotaCallback* success_callback,
+    V8StorageErrorCallback* error_callback) {
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   DCHECK(execution_context);
+  DCHECK(execution_context->IsDocument())
+      << "Quota requests are not supported in workers";
 
-  WebStorageQuotaType storage_type = static_cast<WebStorageQuotaType>(type_);
-  if (storage_type != kWebStorageQuotaTypeTemporary &&
-      storage_type != kWebStorageQuotaTypePersistent) {
+  StorageType storage_type = GetStorageType(type_);
+  if (storage_type != StorageType::kTemporary &&
+      storage_type != StorageType::kPersistent) {
     // Unknown storage type is requested.
-    TaskRunnerHelper::Get(TaskType::kMiscPlatformAPI, script_state)
-        ->PostTask(BLINK_FROM_HERE, StorageErrorCallback::CreateSameThreadTask(
-                                        error_callback, kNotSupportedError));
+    EnqueueStorageErrorCallback(script_state, error_callback,
+                                kNotSupportedError);
     return;
   }
 
-  StorageQuotaClient* client = StorageQuotaClient::From(execution_context);
-  if (!client) {
-    TaskRunnerHelper::Get(TaskType::kMiscPlatformAPI, script_state)
-        ->PostTask(BLINK_FROM_HERE, StorageErrorCallback::CreateSameThreadTask(
-                                        error_callback, kNotSupportedError));
+  auto callback = WTF::Bind(
+      &RequestStorageQuotaCallback,
+      WrapPersistent(ToV8PersistentCallbackFunction(success_callback)),
+      WrapPersistent(ToV8PersistentCallbackFunction(error_callback)));
+
+  Document* document = ToDocument(execution_context);
+  const SecurityOrigin* security_origin = document->GetSecurityOrigin();
+  if (security_origin->IsUnique()) {
+    // Unique origins cannot store persistent state.
+    std::move(callback).Run(blink::mojom::QuotaStatusCode::kErrorAbort, 0, 0);
     return;
   }
 
-  client->RequestQuota(script_state, storage_type, new_quota_in_bytes,
-                       success_callback, error_callback);
+  GetQuotaHost(execution_context)
+      .RequestStorageQuota(
+          WrapRefCounted(security_origin), storage_type, new_quota_in_bytes,
+          mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+              std::move(callback), mojom::QuotaStatusCode::kErrorAbort, 0, 0));
+}
+
+mojom::blink::QuotaDispatcherHost& DeprecatedStorageQuota::GetQuotaHost(
+    ExecutionContext* execution_context) {
+  if (!quota_host_) {
+    ConnectToQuotaDispatcherHost(execution_context,
+                                 mojo::MakeRequest(&quota_host_));
+  }
+  return *quota_host_;
 }
 
 }  // namespace blink

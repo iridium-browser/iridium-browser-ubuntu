@@ -294,10 +294,10 @@ TEST(PlatformThreadTest, ThreadPriorityCurrentThread) {
   }
 }
 
-// Test for a function defined in platform_thread_internal_posix.cc. On OSX and
-// iOS, platform_thread_internal_posix.cc is not compiled, so these platforms
-// are excluded here, too.
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS)
+// This tests internal PlatformThread APIs used under some POSIX platforms,
+// with the exception of Mac OS X, iOS and Fuchsia.
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS) && \
+    !defined(OS_FUCHSIA)
 TEST(PlatformThreadTest, GetNiceValueToThreadPriority) {
   using internal::NiceValueToThreadPriority;
   using internal::kThreadPriorityToNiceValueMap;
@@ -352,6 +352,16 @@ TEST(PlatformThreadTest, GetNiceValueToThreadPriority) {
   EXPECT_EQ(ThreadPriority::REALTIME_AUDIO,
             NiceValueToThreadPriority(kLowestNiceValue));
 }
-#endif
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS) &&
+        // !defined(OS_FUCHSIA)
+
+TEST(PlatformThreadTest, SetHugeThreadName) {
+  // Construct an excessively long thread name.
+  std::string long_name(1024, 'a');
+
+  // SetName has no return code, so just verify that implementations
+  // don't [D]CHECK().
+  PlatformThread::SetName(long_name);
+}
 
 }  // namespace base

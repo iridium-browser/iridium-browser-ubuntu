@@ -7,10 +7,12 @@
 
 #include <string>
 
+#include "base/files/file_path.h"
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "components/offline_items_collection/core/offline_item_filter.h"
 #include "components/offline_items_collection/core/offline_item_state.h"
+#include "components/offline_items_collection/core/pending_state.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
 
@@ -104,6 +106,9 @@ struct OfflineItem {
   // persistent UI spaces and will only show up as notifications.
   bool is_transient;
 
+  // Whether this item should show up as a suggested item for the user.
+  bool is_suggested;
+
   // TODO(dtrainor): Build out custom per-item icon support.
 
   // Content Metadata.
@@ -123,6 +128,12 @@ struct OfflineItem {
   // Whether or not this item can be opened after it is done being downloaded.
   bool is_openable;
 
+  // The target file path for this offline item.
+  base::FilePath file_path;
+
+  // The mime type for this offline item.
+  std::string mime_type;
+
   // Request Metadata.
   // ---------------------------------------------------------------------------
   // The URL of the top level frame at the time the content was offlined.
@@ -138,6 +149,9 @@ struct OfflineItem {
   // ---------------------------------------------------------------------------
   // The current state of the OfflineItem.
   OfflineItemState state;
+
+  // Reason OfflineItem is pending.
+  PendingState pendingState;
 
   // Whether or not the offlining of this content can be resumed if it was
   // paused or interrupted.

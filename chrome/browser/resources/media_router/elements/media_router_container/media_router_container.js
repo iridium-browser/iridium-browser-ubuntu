@@ -959,6 +959,8 @@ Polymer({
         return 'media-router:hangout';
       case media_router.SinkIconType.EDUCATION:
         return 'media-router:education';
+      case media_router.SinkIconType.WIRED_DISPLAY:
+        return 'media-router:tv';
       case media_router.SinkIconType.GENERIC:
         return 'media-router:tv';
       default:
@@ -2565,9 +2567,9 @@ Polymer({
           firstRunFlowHeight - issueHeight - searchHeight + searchPadding -
           sinkListPadding;
 
-      // Limit the height of the dialog to five items, including search.
+      // Limit the height of the dialog to ten items, including search.
       var sinkItemHeight = 41;
-      var maxSinkItems = hasSearch ? 4 : 5;
+      var maxSinkItems = hasSearch ? 9 : 10;
       this.sinkListMaxHeight_ =
           Math.min(sinkItemHeight * maxSinkItems, this.sinkListMaxHeight_);
       if (sinkList)

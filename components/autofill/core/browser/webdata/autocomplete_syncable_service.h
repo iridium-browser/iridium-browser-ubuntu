@@ -49,7 +49,7 @@ class AutofillTable;
 class AutocompleteSyncableService
     : public base::SupportsUserData::Data,
       public syncer::SyncableService,
-      public AutofillWebDataServiceObserverOnDBThread {
+      public AutofillWebDataServiceObserverOnDBSequence {
  public:
   ~AutocompleteSyncableService() override;
 
@@ -74,10 +74,10 @@ class AutocompleteSyncableService
   void StopSyncing(syncer::ModelType type) override;
   syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
   syncer::SyncError ProcessSyncChanges(
-      const tracked_objects::Location& from_here,
+      const base::Location& from_here,
       const syncer::SyncChangeList& change_list) override;
 
-  // AutofillWebDataServiceObserverOnDBThread:
+  // AutofillWebDataServiceObserverOnDBSequence:
   void AutofillEntriesChanged(const AutofillChangeList& changes) override;
 
   // Provides a StartSyncFlare to the SyncableService. See sync_start_util for

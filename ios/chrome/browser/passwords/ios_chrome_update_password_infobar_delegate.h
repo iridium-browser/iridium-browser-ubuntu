@@ -10,6 +10,9 @@
 #include "base/macros.h"
 #include "ios/chrome/browser/passwords/ios_chrome_password_manager_infobar_delegate.h"
 
+@protocol ApplicationCommands;
+@class UIViewController;
+
 namespace password_manager {
 class PasswordFormManager;
 }
@@ -23,11 +26,15 @@ class IOSChromeUpdatePasswordInfoBarDelegate
     : public IOSChromePasswordManagerInfoBarDelegate {
  public:
   // Creates the infobar for |form_to_save| and adds it to |infobar_manager|.
-  // |is_smart_lock_enabled| controls the branding string.
+  // |is_smart_lock_enabled| controls the branding string. |baseViewController|
+  // is the base view controller from which to present UI, and is not retained.
+  // |dispatcher| is not retained.
   static void Create(
       bool is_smart_lock_branding_enabled,
       infobars::InfoBarManager* infobar_manager,
-      std::unique_ptr<password_manager::PasswordFormManager> form_to_save);
+      std::unique_ptr<password_manager::PasswordFormManager> form_to_save,
+      UIViewController* baseViewController,
+      id<ApplicationCommands> dispatcher);
 
   ~IOSChromeUpdatePasswordInfoBarDelegate() override;
 

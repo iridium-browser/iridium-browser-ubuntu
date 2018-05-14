@@ -22,12 +22,15 @@ class CONTENT_EXPORT OverscrollControllerDelegate {
   OverscrollControllerDelegate() {}
   virtual ~OverscrollControllerDelegate() {}
 
-  // Get the size of the view corresponding to the delegate.
-  virtual gfx::Size GetVisibleSize() const = 0;
-
   // Get the size of the display containing the view corresponding to the
   // delegate.
   virtual gfx::Size GetDisplaySize() const = 0;
+
+  // This is called whenever an overscroll event is generated on the renderer
+  // side, and is called before OnOverscrollUpdate. The params contains an
+  // OverscrollBehavior that can prevent overscroll navigation.
+  virtual void OnOverscrollBehaviorUpdate(
+      cc::OverscrollBehavior overscroll_behavior) = 0;
 
   // This is called for each update in the overscroll amount. Returns true if
   // the delegate consumed the event.

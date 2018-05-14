@@ -4,10 +4,11 @@
 
 #include "chrome/browser/chromeos/system_logs/single_debug_daemon_log_source.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/debug_daemon_client.h"
-#include "components/feedback/anonymizer_tool.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace system_logs {
@@ -23,6 +24,12 @@ std::string GetLogName(SupportedSource source_type) {
       return "modetest";
     case SupportedSource::kLsusb:
       return "lsusb";
+    case SupportedSource::kLspci:
+      return "lspci";
+    case SupportedSource::kIfconfig:
+      return "ifconfig";
+    case SupportedSource::kUptime:
+      return "uptime";
   }
   NOTREACHED();
   return "";
@@ -36,33 +43,31 @@ SingleDebugDaemonLogSource::SingleDebugDaemonLogSource(
 
 SingleDebugDaemonLogSource::~SingleDebugDaemonLogSource() {}
 
-void SingleDebugDaemonLogSource::Fetch(const SysLogsSourceCallback& callback) {
+void SingleDebugDaemonLogSource::Fetch(SysLogsSourceCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   chromeos::DebugDaemonClient* client =
       chromeos::DBusThreadManager::Get()->GetDebugDaemonClient();
 
-  client->GetLog(
-      source_name(),
-      base::Bind(&SingleDebugDaemonLogSource::OnFetchComplete,
-                 weak_ptr_factory_.GetWeakPtr(), source_name(), callback));
+  client->GetLog(source_name(),
+                 base::BindOnce(&SingleDebugDaemonLogSource::OnFetchComplete,
+                                weak_ptr_factory_.GetWeakPtr(), source_name(),
+                                std::move(callback)));
 }
 
 void SingleDebugDaemonLogSource::OnFetchComplete(
     const std::string& log_name,
-    const SysLogsSourceCallback& callback,
-    bool success,
-    const std::string& result) const {
+    SysLogsSourceCallback callback,
+    base::Optional<std::string> result) const {
   // |result| and |response| are the same type, but |result| is passed in from
   // DebugDaemonClient, which does not use the SystemLogsResponse alias.
-  SystemLogsResponse response;
+  auto response = std::make_unique<SystemLogsResponse>();
   // Return an empty result if the call to GetLog() failed.
-  std::string final_result;
-  if (success)
-    response.emplace(log_name, feedback::AnonymizerTool().Anonymize(result));
+  if (result.has_value())
+    response->emplace(log_name, result.value());
 
-  callback.Run(&response);
+  std::move(callback).Run(std::move(response));
 }
 
 }  // namespace system_logs

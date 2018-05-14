@@ -1,23 +1,19 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/showcase/tab_grid/sc_tab_grid_coordinator.h"
 
-#import "base/format_macros.h"
-#import "ios/clean/chrome/browser/ui/commands/settings_commands.h"
-#import "ios/clean/chrome/browser/ui/commands/tab_grid_commands.h"
-#import "ios/clean/chrome/browser/ui/commands/tools_menu_commands.h"
-#import "ios/clean/chrome/browser/ui/tab_collection/tab_collection_consumer.h"
-#import "ios/clean/chrome/browser/ui/tab_collection/tab_collection_item.h"
-#import "ios/clean/chrome/browser/ui/tab_grid/tab_grid_view_controller.h"
+#import "ios/chrome/browser/ui/tab_grid/grid_consumer.h"
+#import "ios/chrome/browser/ui/tab_grid/grid_item.h"
+#import "ios/chrome/browser/ui/tab_grid/tab_grid_view_controller.h"
 #import "ios/showcase/common/protocol_alerter.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-@interface SCTabGridCoordinator ()
+@interface SCTabGridCoordinator ()<UINavigationControllerDelegate>
 @property(nonatomic, strong) TabGridViewController* viewController;
 @property(nonatomic, strong) ProtocolAlerter* alerter;
 @end
@@ -28,24 +24,43 @@
 @synthesize alerter = _alerter;
 
 - (void)start {
-  self.alerter = [[ProtocolAlerter alloc] initWithProtocols:@[
-    @protocol(SettingsCommands), @protocol(TabGridCommands),
-    @protocol(ToolsMenuCommands)
-  ]];
-  self.alerter.baseViewController = self.baseViewController;
-
+  self.alerter = [[ProtocolAlerter alloc]
+      initWithProtocols:@[ @protocol(GridViewControllerDelegate) ]];
   self.viewController = [[TabGridViewController alloc] init];
-  self.viewController.title = @"Tab Grid";
-  self.viewController.dispatcher =
-      static_cast<id<SettingsCommands, TabGridCommands, ToolsMenuCommands>>(
-          self.alerter);
-
-  TabCollectionItem* item0 = [[TabCollectionItem alloc] init];
-  item0.title = @"Tab 0";
-  [self.viewController populateItems:@[ item0 ] selectedIndex:0];
-
-  [self.baseViewController setHidesBarsOnSwipe:YES];
+  self.alerter.baseViewController = self.viewController;
+  self.viewController.incognitoTabsDelegate =
+      static_cast<id<GridViewControllerDelegate>>(self.alerter);
+  self.viewController.regularTabsDelegate =
+      static_cast<id<GridViewControllerDelegate>>(self.alerter);
+  self.viewController.title = @"Full TabGrid UI";
+  self.baseViewController.delegate = self;
+  self.baseViewController.hidesBarsOnSwipe = YES;
   [self.baseViewController pushViewController:self.viewController animated:YES];
+
+  NSMutableArray* items = [[NSMutableArray alloc] init];
+  for (int i = 0; i < 10; i++) {
+    GridItem* item = [[GridItem alloc] init];
+    item.title = @"YouTube - Cat Videos";
+    [items addObject:item];
+  }
+  [self.viewController.incognitoTabsConsumer populateItems:items
+                                             selectedIndex:0];
+  items = [[NSMutableArray alloc] init];
+  for (int i = 0; i < 10; i++) {
+    GridItem* item = [[GridItem alloc] init];
+    item.title = @"The New York Times - Breaking News";
+    [items addObject:item];
+  }
+  [self.viewController.regularTabsConsumer populateItems:items selectedIndex:0];
+}
+
+#pragma mark - UINavigationControllerDelegate
+
+// This delegate method is used as a way to have a completion handler after
+// pushing onto a navigation controller.
+- (void)navigationController:(UINavigationController*)navigationController
+       didShowViewController:(UIViewController*)viewController
+                    animated:(BOOL)animated {
 }
 
 @end

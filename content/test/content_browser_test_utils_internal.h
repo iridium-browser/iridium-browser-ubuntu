@@ -14,11 +14,14 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "base/run_loop.h"
-#include "components/viz/common/surfaces/surface_id.h"
+#include "base/test/histogram_tester.h"
+#include "content/browser/bad_message.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/file_chooser_params.h"
@@ -32,14 +35,15 @@ class RenderFrameHost;
 class Shell;
 class SiteInstance;
 class ToRenderFrameHost;
+struct ScreenInfo;
 
 // Navigates the frame represented by |node| to |url|, blocking until the
 // navigation finishes.
 void NavigateFrameToURL(FrameTreeNode* node, const GURL& url);
 
 // Sets the DialogManager to proceed by default or not when showing a
-// BeforeUnload dialog.
-void SetShouldProceedOnBeforeUnload(Shell* shell, bool proceed);
+// BeforeUnload dialog, and if it proceeds, what value to return.
+void SetShouldProceedOnBeforeUnload(Shell* shell, bool proceed, bool success);
 
 // Extends the ToRenderFrameHost mechanism to FrameTreeNodes.
 RenderFrameHost* ConvertToRenderFrameHost(FrameTreeNode* frame_tree_node);
@@ -118,7 +122,7 @@ class FileChooserDelegate : public WebContentsDelegate {
  public:
   // Constructs a WebContentsDelegate that mocks a file dialog.
   // The mocked file dialog will always reply that the user selected |file|.
-  FileChooserDelegate(const base::FilePath& file);
+  explicit FileChooserDelegate(const base::FilePath& file);
 
   // Implementation of WebContentsDelegate::RunFileChooser.
   void RunFileChooser(RenderFrameHost* render_frame_host,
@@ -177,6 +181,75 @@ class UrlCommitObserver : WebContentsObserver {
   base::RunLoop run_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(UrlCommitObserver);
+};
+
+// Class to sniff incoming IPCs for FrameHostMsg_UpdateResizeParams messages.
+// This allows the message to continue to the target child so that processing
+// can be verified by tests.
+class UpdateResizeParamsMessageFilter : public content::BrowserMessageFilter {
+ public:
+  UpdateResizeParamsMessageFilter();
+
+  gfx::Rect last_rect() const { return last_rect_; }
+
+  void WaitForRect();
+  void ResetRectRunLoop();
+
+  // Returns the new viz::FrameSinkId immediately if the IPC has been received.
+  // Otherwise this will block the UI thread until it has been received, then it
+  // will return the new viz::FrameSinkId.
+  viz::FrameSinkId GetOrWaitForId();
+
+ protected:
+  ~UpdateResizeParamsMessageFilter() override;
+
+ private:
+  void OnUpdateResizeParams(const gfx::Rect& screen_space_rect,
+                            const gfx::Size& local_frame_size,
+                            const ScreenInfo& screen_info,
+                            uint64_t sequence_number,
+                            const viz::SurfaceId& surface_id);
+  // |rect| is in DIPs.
+  void OnUpdatedFrameRectOnUI(const gfx::Rect& rect);
+  void OnUpdatedFrameSinkIdOnUI();
+
+  bool OnMessageReceived(const IPC::Message& message) override;
+
+  viz::FrameSinkId frame_sink_id_;
+  base::RunLoop frame_sink_id_run_loop_;
+
+  std::unique_ptr<base::RunLoop> screen_space_rect_run_loop_;
+  bool screen_space_rect_received_;
+  gfx::Rect last_rect_;
+
+  DISALLOW_COPY_AND_ASSIGN(UpdateResizeParamsMessageFilter);
+};
+
+// Waits for a kill of the given RenderProcessHost and returns the
+// BadMessageReason that caused a //content-triggerred kill.
+//
+// Example usage:
+//   RenderProcessHostKillWaiter kill_waiter(render_process_host);
+//   ... test code that triggers a renderer kill ...
+//   EXPECT_EQ(bad_message::RFH_INVALID_ORIGIN_ON_COMMIT, kill_waiter.Wait());
+//
+// Tests that don't expect kills (e.g. tests where a renderer process exits
+// normally, like RenderFrameHostManagerTest.ProcessExitWithSwappedOutViews)
+// should use RenderProcessHostWatcher instead of RenderProcessHostKillWaiter.
+class RenderProcessHostKillWaiter {
+ public:
+  explicit RenderProcessHostKillWaiter(RenderProcessHost* render_process_host);
+
+  // Waits until the renderer process exits.  Returns the bad message that made
+  // //content kill the renderer.  |base::nullopt| is returned if the renderer
+  // was killed outside of //content or exited normally.
+  base::Optional<bad_message::BadMessageReason> Wait() WARN_UNUSED_RESULT;
+
+ private:
+  RenderProcessHostWatcher exit_watcher_;
+  base::HistogramTester histogram_tester_;
+
+  DISALLOW_COPY_AND_ASSIGN(RenderProcessHostKillWaiter);
 };
 
 }  // namespace content

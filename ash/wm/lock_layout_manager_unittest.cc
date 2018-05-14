@@ -33,7 +33,7 @@ const int kVirtualKeyboardHeight = 100;
 class LoginTestWidgetDelegate : public views::WidgetDelegate {
  public:
   explicit LoginTestWidgetDelegate(views::Widget* widget) : widget_(widget) {}
-  ~LoginTestWidgetDelegate() override {}
+  ~LoginTestWidgetDelegate() override = default;
 
   // Overridden from WidgetDelegate:
   void DeleteDelegate() override { delete this; }
@@ -94,7 +94,7 @@ class LockLayoutManagerTest : public AshTestBase {
       keyboard->ShowKeyboard(false);
       if (keyboard->ui()->GetContentsWindow()->bounds().height() == 0) {
         keyboard->ui()->GetContentsWindow()->SetBounds(
-            keyboard::FullWidthKeyboardBoundsFromRootBounds(
+            keyboard::KeyboardBoundsFromRootBounds(
                 Shell::GetPrimaryRootWindow()->bounds(),
                 kVirtualKeyboardHeight));
       }
@@ -119,7 +119,7 @@ TEST_F(LockLayoutManagerTest, NorwmalWindowBoundsArePreserved) {
   EXPECT_EQ(bounds.ToString(), window->GetBoundsInScreen().ToString());
 
   gfx::Rect work_area =
-      ScreenUtil::GetDisplayWorkAreaBoundsInParent(window.get());
+      screen_util::GetDisplayWorkAreaBoundsInParent(window.get());
   window->SetBounds(work_area);
 
   EXPECT_EQ(work_area.ToString(), window->GetBoundsInScreen().ToString());
@@ -155,7 +155,7 @@ TEST_F(LockLayoutManagerTest, MaximizedFullscreenWindowBoundsAreEqualToScreen) {
             fullscreen_window->GetBoundsInScreen().ToString());
 
   gfx::Rect work_area =
-      ScreenUtil::GetDisplayWorkAreaBoundsInParent(maximized_window.get());
+      screen_util::GetDisplayWorkAreaBoundsInParent(maximized_window.get());
   maximized_window->SetBounds(work_area);
 
   EXPECT_NE(work_area.ToString(),
@@ -164,7 +164,7 @@ TEST_F(LockLayoutManagerTest, MaximizedFullscreenWindowBoundsAreEqualToScreen) {
             maximized_window->GetBoundsInScreen().ToString());
 
   work_area =
-      ScreenUtil::GetDisplayWorkAreaBoundsInParent(fullscreen_window.get());
+      screen_util::GetDisplayWorkAreaBoundsInParent(fullscreen_window.get());
   fullscreen_window->SetBounds(work_area);
   EXPECT_NE(work_area.ToString(),
             fullscreen_window->GetBoundsInScreen().ToString());
@@ -251,13 +251,13 @@ TEST_F(LockLayoutManagerTest, KeyboardBounds) {
   ShowKeyboard(false);
   display_manager()->SetDisplayRotation(
       primary_display.id(), display::Display::ROTATE_90,
-      display::Display::ROTATION_SOURCE_ACTIVE);
+      display::Display::RotationSource::ACTIVE);
   primary_display = display::Screen::GetScreen()->GetPrimaryDisplay();
   screen_bounds = primary_display.bounds();
   EXPECT_EQ(screen_bounds.ToString(), window->GetBoundsInScreen().ToString());
   display_manager()->SetDisplayRotation(
       primary_display.id(), display::Display::ROTATE_0,
-      display::Display::ROTATION_SOURCE_ACTIVE);
+      display::Display::RotationSource::ACTIVE);
 
   // When virtual keyboard overscroll is disabled keyboard bounds do
   // affect window bounds.
@@ -277,6 +277,14 @@ TEST_F(LockLayoutManagerTest, KeyboardBounds) {
 
   keyboard::SetKeyboardOverscrollOverride(
       keyboard::KEYBOARD_OVERSCROLL_OVERRIDE_NONE);
+
+  keyboard->SetContainerType(keyboard::ContainerType::FLOATING,
+                             base::BindOnce([](bool success) {}));
+  ShowKeyboard(true);
+  primary_display = display::Screen::GetScreen()->GetPrimaryDisplay();
+  screen_bounds = primary_display.bounds();
+  EXPECT_EQ(screen_bounds.ToString(), window->GetBoundsInScreen().ToString());
+  ShowKeyboard(false);
 }
 
 TEST_F(LockLayoutManagerTest, MultipleMonitors) {
@@ -320,7 +328,7 @@ TEST_F(LockLayoutManagerTest, MultipleMonitors) {
   EXPECT_EQ("0,0 300x400", window->GetBoundsInScreen().ToString());
 
   gfx::Rect work_area =
-      ScreenUtil::GetDisplayWorkAreaBoundsInParent(window.get());
+      screen_util::GetDisplayWorkAreaBoundsInParent(window.get());
   window->SetBounds(work_area);
   // Usually work_area takes Shelf into account but that doesn't affect
   // LockScreen container windows.

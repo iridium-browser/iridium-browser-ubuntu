@@ -20,31 +20,29 @@
 
 #include "core/svg/SVGScriptElement.h"
 
-#include "bindings/core/v8/HTMLScriptElementOrSVGScriptElement.h"
 #include "bindings/core/v8/ScriptEventListener.h"
-#include "core/HTMLNames.h"
-#include "core/XLinkNames.h"
+#include "bindings/core/v8/html_script_element_or_svg_script_element.h"
 #include "core/dom/Attribute.h"
-#include "core/dom/ScriptLoader.h"
-#include "core/dom/ScriptRunner.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
+#include "core/html_names.h"
+#include "core/script/ScriptLoader.h"
+#include "core/script/ScriptRunner.h"
+#include "core/xlink_names.h"
 
 namespace blink {
 
 inline SVGScriptElement::SVGScriptElement(Document& document,
-                                          bool was_inserted_by_parser,
-                                          bool already_started)
+                                          const CreateElementFlags flags)
     : SVGElement(SVGNames::scriptTag, document),
       SVGURIReference(this),
-      loader_(this,
-              InitializeScriptLoader(was_inserted_by_parser,
-                                     already_started,
+      loader_(InitializeScriptLoader(flags.IsCreatedByParser(),
+                                     flags.WasAlreadyStarted(),
                                      false)) {}
 
 SVGScriptElement* SVGScriptElement::Create(Document& document,
-                                           bool inserted_by_parser) {
-  return new SVGScriptElement(document, inserted_by_parser, false);
+                                           const CreateElementFlags flags) {
+  return new SVGScriptElement(document, flags);
 }
 
 void SVGScriptElement::ParseAttribute(
@@ -144,16 +142,16 @@ bool SVGScriptElement::AllowInlineScriptForCSP(
       inline_type);
 }
 
-AtomicString SVGScriptElement::InitiatorName() const {
-  return Element::localName();
-}
-
 Document& SVGScriptElement::GetDocument() const {
   return Node::GetDocument();
 }
 
-Element* SVGScriptElement::CloneElementWithoutAttributesAndChildren() {
-  return new SVGScriptElement(GetDocument(), false, loader_->AlreadyStarted());
+Element* SVGScriptElement::CloneWithoutAttributesAndChildren(
+    Document& factory) const {
+  CreateElementFlags flags =
+      CreateElementFlags::ByCloneNode().SetAlreadyStarted(
+          loader_->AlreadyStarted());
+  return factory.CreateElement(TagQName(), flags, IsValue());
 }
 
 void SVGScriptElement::DispatchLoadEvent() {
@@ -167,7 +165,7 @@ void SVGScriptElement::DispatchErrorEvent() {
 void SVGScriptElement::SetScriptElementForBinding(
     HTMLScriptElementOrSVGScriptElement& element) {
   if (!IsInV1ShadowTree())
-    element.setSVGScriptElement(this);
+    element.SetSVGScriptElement(this);
 }
 
 #if DCHECK_IS_ON()
@@ -179,14 +177,15 @@ bool SVGScriptElement::IsAnimatableAttribute(const QualifiedName& name) const {
 }
 #endif
 
-DEFINE_TRACE(SVGScriptElement) {
+void SVGScriptElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(loader_);
   SVGElement::Trace(visitor);
   SVGURIReference::Trace(visitor);
   ScriptElementBase::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(SVGScriptElement) {
+void SVGScriptElement::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(loader_);
   SVGElement::TraceWrappers(visitor);
 }

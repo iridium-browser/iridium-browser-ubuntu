@@ -6,7 +6,7 @@
 #define WTF_Time_h
 
 #include "base/time/time.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/WTFExport.h"
 
 namespace WTF {
 // Provides thin wrappers around the following basic time types from
@@ -22,76 +22,54 @@ namespace WTF {
 
 using TimeDelta = base::TimeDelta;
 using Time = base::Time;
+using TimeTicks = base::TimeTicks;
 
-namespace internal {
+// Returns the current UTC time in seconds, counted from January 1, 1970.
+// Precision varies depending on platform but is usually as good or better
+// than a millisecond.
+WTF_EXPORT double CurrentTime();
 
-template <class WrappedTimeType>
-class TimeWrapper {
- public:
-  TimeWrapper() {}
+// Same thing, in milliseconds.
+inline double CurrentTimeMS() {
+  return CurrentTime() * 1000.0;
+}
 
-  static TimeWrapper Now() {
-    if (WTF::GetTimeFunctionForTesting()) {
-      double seconds = (WTF::GetTimeFunctionForTesting())();
-      return TimeWrapper() + TimeDelta::FromSecondsD(seconds);
-    }
-    return TimeWrapper(WrappedTimeType::Now());
-  }
+using TimeFunction = double (*)();
 
-  int64_t ToInternalValueForTesting() const { return value_.ToInternalValue(); }
+// Make all the time functions (currentTime(), monotonicallyIncreasingTime(),
+// systemTraceTime()) return the result of the supplied function. Returns the
+// pointer to the old time function. For both setting and getting, nullptr
+// means using the default timing function returning the actual time.
+WTF_EXPORT TimeFunction SetTimeFunctionsForTesting(TimeFunction);
 
-  // Only use this conversion when interfacing with legacy code that represents
-  // time in double. Converting to double can lead to losing information for
-  // large time values.
-  double InSeconds() const { return (value_ - WrappedTimeType()).InSecondsF(); }
+// Allows wtf/Time.h to use the same mock time function
+WTF_EXPORT TimeFunction GetTimeFunctionForTesting();
 
-  static TimeWrapper FromSeconds(double seconds) {
-    return WrappedTimeType() + TimeDelta::FromSecondsD(seconds);
-  }
+// Monotonically increasing clock time since an arbitrary and unspecified origin
+// time. Mockable using SetTimeFunctionsForTesting().
+WTF_EXPORT TimeTicks CurrentTimeTicks();
+// Convenience functions that return seconds and milliseconds since the origin
+// time. Prefer CurrentTimeTicks() where possible to avoid potential unit
+// confusion errors.
+WTF_EXPORT double CurrentTimeTicksInSeconds();
+WTF_EXPORT double CurrentTimeTicksInMilliseconds();
 
-  TimeWrapper& operator=(TimeWrapper other) {
-    value_ = other.value_;
-    return *this;
-  }
-
-  TimeDelta operator-(TimeWrapper other) const { return value_ - other.value_; }
-
-  TimeWrapper operator+(TimeDelta delta) const {
-    return TimeWrapper(value_ + delta);
-  }
-  TimeWrapper operator-(TimeDelta delta) const {
-    return TimeWrapper(value_ - delta);
-  }
-
-  TimeWrapper& operator+=(TimeDelta delta) {
-    value_ += delta;
-    return *this;
-  }
-  TimeWrapper& operator-=(TimeDelta delta) {
-    value_ -= delta;
-    return *this;
-  }
-
-  bool operator==(TimeWrapper other) const { return value_ == other.value_; }
-  bool operator!=(TimeWrapper other) const { return value_ != other.value_; }
-  bool operator<(TimeWrapper other) const { return value_ < other.value_; }
-  bool operator<=(TimeWrapper other) const { return value_ <= other.value_; }
-  bool operator>(TimeWrapper other) const { return value_ > other.value_; }
-  bool operator>=(TimeWrapper other) const { return value_ >= other.value_; }
-
- private:
-  WrappedTimeType value_;
-  TimeWrapper(WrappedTimeType value) : value_(value) {}
-};
-
-}  // namespace internal
-
-using TimeTicks = internal::TimeWrapper<base::TimeTicks>;
+WTF_EXPORT TimeTicks TimeTicksFromSeconds(double);
+WTF_EXPORT double TimeTicksInSeconds(TimeTicks);
 
 }  // namespace WTF
 
+using WTF::CurrentTime;
+using WTF::CurrentTimeMS;
+using WTF::CurrentTimeTicks;
+using WTF::CurrentTimeTicksInMilliseconds;
+using WTF::CurrentTimeTicksInSeconds;
+using WTF::SetTimeFunctionsForTesting;
 using WTF::Time;
 using WTF::TimeDelta;
+using WTF::TimeFunction;
 using WTF::TimeTicks;
+using WTF::TimeTicksFromSeconds;
+using WTF::TimeTicksInSeconds;
 
 #endif  // Time_h

@@ -416,7 +416,7 @@ TEST_F(NativeWidgetAuraTest, DontCaptureOnGesture) {
   GestureTrackingView* view = new GestureTrackingView();
   GestureTrackingView* child = new GestureTrackingView();
   child->set_consume_gesture_event(false);
-  view->SetLayoutManager(new FillLayout);
+  view->SetLayoutManager(std::make_unique<FillLayout>());
   view->AddChildView(child);
   std::unique_ptr<TestWidget> widget(new TestWidget());
   Widget::InitParams params(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
@@ -675,7 +675,7 @@ TEST_F(NativeWidgetAuraTest, VisibilityOfChildBubbleWindow) {
   // Check that the bubble window is added as the transient child and it is
   // hidden because parent window is hidden.
   wm::TransientWindowManager* manager =
-      wm::TransientWindowManager::Get(child.GetNativeWindow());
+      wm::TransientWindowManager::GetOrCreate(child.GetNativeWindow());
   EXPECT_EQ(parent.GetNativeWindow(), manager->transient_parent());
   EXPECT_FALSE(parent.IsVisible());
   EXPECT_FALSE(child.IsVisible());

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "base/command_line.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
@@ -69,8 +70,7 @@ class WebContentsMainFrameHelper : public content::WebContentsObserver {
       loaded_distiller_page_ = true;
   }
 
-  void TitleWasSet(content::NavigationEntry* entry,
-                   bool explicit_set) override {
+  void TitleWasSet(content::NavigationEntry* entry) override {
     // The title will be set twice on distilled pages; once for the placeholder
     // and once when the distillation has finished. Watch for the second time
     // as a signal that the JavaScript that sets the content has run.
@@ -86,12 +86,12 @@ class WebContentsMainFrameHelper : public content::WebContentsObserver {
   bool loaded_distiller_page_;
 };
 
-#if (defined(OS_LINUX) && defined(OS_CHROMEOS))
+// https://crbug.com/751730.
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 #define MAYBE_TestSwapWebContents DISABLED_TestSwapWebContents
 #else
 #define MAYBE_TestSwapWebContents TestSwapWebContents
 #endif
-
 IN_PROC_BROWSER_TEST_F(DomDistillerTabUtilsBrowserTest,
                        MAYBE_TestSwapWebContents) {
   ASSERT_TRUE(embedded_test_server()->Start());

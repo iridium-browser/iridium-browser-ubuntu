@@ -25,10 +25,10 @@
 #ifndef TransformOperations_h
 #define TransformOperations_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/geometry/LayoutSize.h"
 #include "platform/transforms/TransformOperation.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -49,22 +49,32 @@ class PLATFORM_EXPORT TransformOperations {
   bool operator!=(const TransformOperations& o) const { return !(*this == o); }
 
   void Apply(const FloatSize& sz, TransformationMatrix& t) const {
-    for (unsigned i = 0; i < operations_.size(); ++i)
-      operations_[i]->Apply(t, sz);
+    for (auto& operation : operations_)
+      operation->Apply(t, sz);
   }
 
   // Return true if any of the operation types are 3D operation types (even if
   // the values describe affine transforms)
   bool Has3DOperation() const {
-    for (unsigned i = 0; i < operations_.size(); ++i)
-      if (operations_[i]->Is3DOperation())
+    for (auto& operation : operations_)
+      if (operation->Is3DOperation())
         return true;
     return false;
   }
 
+  // Returns true if any operation has a non-trivial component in the Z
+  // axis.
+  bool HasNonTrivial3DComponent() const {
+    for (auto& operation : operations_) {
+      if (operation->HasNonTrivial3DComponent())
+        return true;
+    }
+    return false;
+  }
+
   bool DependsOnBoxSize() const {
-    for (unsigned i = 0; i < operations_.size(); ++i) {
-      if (operations_[i]->DependsOnBoxSize())
+    for (auto& operation : operations_) {
+      if (operation->DependsOnBoxSize())
         return true;
     }
     return false;
@@ -74,14 +84,16 @@ class PLATFORM_EXPORT TransformOperations {
 
   void clear() { operations_.clear(); }
 
-  Vector<RefPtr<TransformOperation>>& Operations() { return operations_; }
-  const Vector<RefPtr<TransformOperation>>& Operations() const {
+  Vector<scoped_refptr<TransformOperation>>& Operations() {
+    return operations_;
+  }
+  const Vector<scoped_refptr<TransformOperation>>& Operations() const {
     return operations_;
   }
 
   size_t size() const { return operations_.size(); }
   const TransformOperation* at(size_t index) const {
-    return index < operations_.size() ? operations_.at(index).Get() : 0;
+    return index < operations_.size() ? operations_.at(index).get() : nullptr;
   }
 
   bool BlendedBoundsForBox(const FloatBox&,
@@ -91,7 +103,7 @@ class PLATFORM_EXPORT TransformOperations {
                            FloatBox* bounds) const;
   TransformOperations BlendByMatchingOperations(const TransformOperations& from,
                                                 const double& progress) const;
-  PassRefPtr<TransformOperation> BlendByUsingMatrixInterpolation(
+  scoped_refptr<TransformOperation> BlendByUsingMatrixInterpolation(
       const TransformOperations& from,
       double progress) const;
   TransformOperations Blend(const TransformOperations& from,
@@ -100,7 +112,7 @@ class PLATFORM_EXPORT TransformOperations {
   TransformOperations Zoom(double factor) const;
 
  private:
-  Vector<RefPtr<TransformOperation>> operations_;
+  Vector<scoped_refptr<TransformOperation>> operations_;
 };
 
 }  // namespace blink

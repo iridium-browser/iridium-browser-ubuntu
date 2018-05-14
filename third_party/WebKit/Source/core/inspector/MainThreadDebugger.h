@@ -32,8 +32,8 @@
 #define MainThreadDebugger_h
 
 #include <memory>
+#include "base/macros.h"
 #include "core/CoreExport.h"
-#include "core/inspector/InspectorTaskRunner.h"
 #include "core/inspector/ThreadDebugger.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/heap/Handle.h"
@@ -46,16 +46,15 @@ class ErrorEvent;
 class LocalFrame;
 class SecurityOrigin;
 class SourceLocation;
+class DocumentLifecycle;
 
 class CORE_EXPORT MainThreadDebugger final : public ThreadDebugger {
-  WTF_MAKE_NONCOPYABLE(MainThreadDebugger);
-
  public:
   class ClientMessageLoop {
     USING_FAST_MALLOC(ClientMessageLoop);
 
    public:
-    virtual ~ClientMessageLoop() {}
+    virtual ~ClientMessageLoop() = default;
     virtual void Run(LocalFrame*) = 0;
     virtual void QuitNow() = 0;
     virtual void RunIfWaitingForDebugger(LocalFrame*) = 0;
@@ -65,10 +64,7 @@ class CORE_EXPORT MainThreadDebugger final : public ThreadDebugger {
   ~MainThreadDebugger() override;
 
   static MainThreadDebugger* Instance();
-  static void InterruptMainThreadAndRun(
-      std::unique_ptr<InspectorTaskRunner::Task>);
 
-  InspectorTaskRunner* TaskRunner() const { return task_runner_.get(); }
   bool IsWorker() override { return false; }
   bool IsPaused() const { return paused_; }
   void SetClientMessageLoop(std::unique_ptr<ClientMessageLoop>);
@@ -78,9 +74,12 @@ class CORE_EXPORT MainThreadDebugger final : public ThreadDebugger {
   // performance.
   int ContextGroupId(LocalFrame*);
   void DidClearContextsForFrame(LocalFrame*);
-  void ContextCreated(ScriptState*, LocalFrame*, SecurityOrigin*);
+  void ContextCreated(ScriptState*, LocalFrame*, const SecurityOrigin*);
   void ContextWillBeDestroyed(ScriptState*);
   void ExceptionThrown(ExecutionContext*, ErrorEvent*);
+
+  void SetPostponeTransitionScopeForTesting(Document&);
+  void ResetPostponeTransitionScopeForTesting();
 
  private:
   void ReportConsoleMessage(ExecutionContext*,
@@ -120,9 +119,11 @@ class CORE_EXPORT MainThreadDebugger final : public ThreadDebugger {
   static void XpathSelectorCallback(const v8::FunctionCallbackInfo<v8::Value>&);
 
   std::unique_ptr<ClientMessageLoop> client_message_loop_;
-  std::unique_ptr<InspectorTaskRunner> task_runner_;
   bool paused_;
   static MainThreadDebugger* instance_;
+  std::unique_ptr<DocumentLifecycle::PostponeTransitionScope>
+      postponed_transition_scope_;
+  DISALLOW_COPY_AND_ASSIGN(MainThreadDebugger);
 };
 
 }  // namespace blink

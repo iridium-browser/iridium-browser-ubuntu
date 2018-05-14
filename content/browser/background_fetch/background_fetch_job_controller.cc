@@ -4,127 +4,141 @@
 
 #include "content/browser/background_fetch/background_fetch_job_controller.h"
 
+#include <utility>
+
 #include "base/memory/ptr_util.h"
-#include "content/browser/background_fetch/background_fetch_data_manager.h"
+#include "content/browser/background_fetch/background_fetch_request_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "net/url_request/url_request_context_getter.h"
 
 namespace content {
 
 BackgroundFetchJobController::BackgroundFetchJobController(
+    BackgroundFetchDelegateProxy* delegate_proxy,
     const BackgroundFetchRegistrationId& registration_id,
     const BackgroundFetchOptions& options,
-    BackgroundFetchDataManager* data_manager,
-    BrowserContext* browser_context,
-    scoped_refptr<net::URLRequestContextGetter> request_context,
-    CompletedCallback completed_callback)
-    : registration_id_(registration_id),
+    const BackgroundFetchRegistration& registration,
+    BackgroundFetchRequestManager* request_manager,
+    ProgressCallback progress_callback,
+    BackgroundFetchScheduler::FinishedCallback finished_callback)
+    : BackgroundFetchScheduler::Controller(registration_id,
+                                           std::move(finished_callback)),
       options_(options),
-      data_manager_(data_manager),
-      delegate_proxy_(this, registration_id, browser_context, request_context),
-      completed_callback_(std::move(completed_callback)),
+      complete_requests_downloaded_bytes_cache_(registration.downloaded),
+      request_manager_(request_manager),
+      delegate_proxy_(delegate_proxy),
+      progress_callback_(std::move(progress_callback)),
       weak_ptr_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 }
 
+void BackgroundFetchJobController::InitializeRequestStatus(
+    int completed_downloads,
+    int total_downloads,
+    const std::vector<std::string>& outstanding_guids) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  // Don't allow double initialization.
+  DCHECK_GT(total_downloads, 0);
+  DCHECK_EQ(total_downloads_, 0);
+
+  completed_downloads_ = completed_downloads;
+  total_downloads_ = total_downloads;
+
+  delegate_proxy_->CreateDownloadJob(
+      registration_id().unique_id(), options_.title, registration_id().origin(),
+      GetWeakPtr(), completed_downloads, total_downloads, outstanding_guids);
+}
+
 BackgroundFetchJobController::~BackgroundFetchJobController() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-};
+}
 
-void BackgroundFetchJobController::Start() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK_EQ(state_, State::INITIALIZED);
-
-  state_ = State::FETCHING;
-
-  // TODO(crbug.com/741609): Enforce kMaximumBackgroundFetchParallelRequests
-  // globally and/or per origin rather than per fetch.
-  for (size_t i = 0; i < kMaximumBackgroundFetchParallelRequests; i++) {
-    data_manager_->PopNextRequest(
-        registration_id_,
-        base::BindOnce(&BackgroundFetchJobController::StartRequest,
-                       weak_ptr_factory_.GetWeakPtr()));
-  }
+bool BackgroundFetchJobController::HasMoreRequests() {
+  return completed_downloads_ < total_downloads_;
 }
 
 void BackgroundFetchJobController::StartRequest(
     scoped_refptr<BackgroundFetchRequestInfo> request) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK_EQ(state_, State::FETCHING);
-  if (!request) {
-    // This can happen when |Start| tries to start multiple initial requests,
-    // but the fetch does not contain that many pending requests; or when
-    // |DidMarkRequestCompleted| tries to start the next request but there are
-    // none left.
-    return;
-  }
+  DCHECK_LT(completed_downloads_, total_downloads_);
+  DCHECK(request);
 
-  delegate_proxy_.StartRequest(request);
+  active_request_download_bytes_[request->download_guid()] = 0;
+
+  delegate_proxy_->StartRequest(registration_id().unique_id(),
+                                registration_id().origin(), request);
 }
 
 void BackgroundFetchJobController::DidStartRequest(
-    scoped_refptr<BackgroundFetchRequestInfo> request,
-    const std::string& download_guid) {
+    const scoped_refptr<BackgroundFetchRequestInfo>& request) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  data_manager_->MarkRequestAsStarted(registration_id_, request.get(),
-                                      download_guid);
+  // TODO(delphick): Either add CORS check here or remove this function and do
+  // the CORS check in BackgroundFetchDelegateImpl (since
+  // download::Client::OnDownloadStarted returns a value that can abort the
+  // download).
+}
+
+void BackgroundFetchJobController::DidUpdateRequest(
+    const scoped_refptr<BackgroundFetchRequestInfo>& request,
+    uint64_t bytes_downloaded) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  const std::string& download_guid = request->download_guid();
+  if (active_request_download_bytes_[download_guid] == bytes_downloaded)
+    return;
+
+  active_request_download_bytes_[download_guid] = bytes_downloaded;
+
+  progress_callback_.Run(registration_id().unique_id(), options_.download_total,
+                         complete_requests_downloaded_bytes_cache_ +
+                             GetInProgressDownloadedBytes());
 }
 
 void BackgroundFetchJobController::DidCompleteRequest(
-    scoped_refptr<BackgroundFetchRequestInfo> request) {
+    const scoped_refptr<BackgroundFetchRequestInfo>& request) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  // The DataManager must acknowledge that it stored the data and that there are
-  // no more pending requests to avoid marking this job as completed too early.
-  data_manager_->MarkRequestAsComplete(
-      registration_id_, request.get(),
-      base::BindOnce(&BackgroundFetchJobController::DidMarkRequestCompleted,
-                     weak_ptr_factory_.GetWeakPtr()));
+  active_request_download_bytes_.erase(request->download_guid());
+  complete_requests_downloaded_bytes_cache_ += request->GetFileSize();
+  ++completed_downloads_;
+
+  request_manager_->MarkRequestAsComplete(registration_id(), request.get());
 }
 
-void BackgroundFetchJobController::DidMarkRequestCompleted(
-    bool has_pending_or_active_requests) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK_EQ(state_, State::FETCHING);
-
-  // If not all requests have completed, start a pending request if there are
-  // any left, and bail.
-  if (has_pending_or_active_requests) {
-    data_manager_->PopNextRequest(
-        registration_id_,
-        base::BindOnce(&BackgroundFetchJobController::StartRequest,
-                       weak_ptr_factory_.GetWeakPtr()));
-    return;
-  }
-
-  // Otherwise the job this controller is responsible for has completed.
-  state_ = State::COMPLETED;
-  std::move(completed_callback_).Run(this);
+void BackgroundFetchJobController::AbortFromUser() {
+  // Aborts from user come via the BackgroundFetchDelegate, which will have
+  // already cancelled the download.
+  Abort(false /* cancel_download */);
 }
 
 void BackgroundFetchJobController::UpdateUI(const std::string& title) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  delegate_proxy_.UpdateUI(title);
+  delegate_proxy_->UpdateUI(registration_id().unique_id(), title);
+}
+
+uint64_t BackgroundFetchJobController::GetInProgressDownloadedBytes() {
+  uint64_t sum = 0;
+  for (const auto& entry : active_request_download_bytes_)
+    sum += entry.second;
+  return sum;
 }
 
 void BackgroundFetchJobController::Abort() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  switch (state_) {
-    case State::INITIALIZED:
-    case State::FETCHING:
-      break;
-    case State::ABORTED:
-    case State::COMPLETED:
-      return;  // Ignore attempt to abort after completion/abort.
-  }
+  Abort(true /* cancel_download */);
+}
 
-  delegate_proxy_.Abort();
+void BackgroundFetchJobController::Abort(bool cancel_download) {
+  if (cancel_download)
+    delegate_proxy_->Abort(registration_id().unique_id());
 
-  state_ = State::ABORTED;
-  // Inform the owner of the controller about the job having aborted.
-  std::move(completed_callback_).Run(this);
+  std::vector<std::string> aborted_guids;
+  for (const auto& pair : active_request_download_bytes_)
+    aborted_guids.push_back(pair.first);
+  request_manager_->OnJobAborted(registration_id(), std::move(aborted_guids));
+  Finish(true /* aborted */);
 }
 
 }  // namespace content

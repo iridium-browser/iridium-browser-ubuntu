@@ -20,10 +20,12 @@
  *   BLUETOOTH_DEVICES: (undefined|!settings.Route),
  *   CERTIFICATES: (undefined|!settings.Route),
  *   CHANGE_PICTURE: (undefined|!settings.Route),
+ *   CHROME_CLEANUP: (undefined|!settings.Route),
  *   CLEAR_BROWSER_DATA: (undefined|!settings.Route),
  *   CLOUD_PRINTERS: (undefined|!settings.Route),
  *   CUPS_PRINTERS: (undefined|!settings.Route),
  *   DATETIME: (undefined|!settings.Route),
+ *   DATETIME_TIMEZONE_SUBPAGE: (undefined|!settings.Route),
  *   DEFAULT_BROWSER: (undefined|!settings.Route),
  *   DETAILED_BUILD_INFO: (undefined|!settings.Route),
  *   DEVICE: (undefined|!settings.Route),
@@ -34,6 +36,7 @@
  *   FONTS: (undefined|!settings.Route),
  *   GOOGLE_ASSISTANT: (undefined|!settings.Route),
  *   IMPORT_DATA: (undefined|!settings.Route),
+ *   INCOMPATIBLE_APPLICATIONS: (undefined|!settings.Route),
  *   INPUT_METHODS: (undefined|!settings.Route),
  *   INTERNET: (undefined|!settings.Route),
  *   INTERNET_NETWORKS: (undefined|!settings.Route),
@@ -45,7 +48,6 @@
  *   MANAGE_PASSWORDS: (undefined|!settings.Route),
  *   MANAGE_PROFILE: (undefined|!settings.Route),
  *   MULTIDEVICE: (undefined|!settings.Route),
- *   NETWORK_CONFIG: (undefined|!settings.Route),
  *   NETWORK_DETAIL: (undefined|!settings.Route),
  *   ON_STARTUP: (undefined|!settings.Route),
  *   PASSWORDS: (undefined|!settings.Route),
@@ -65,12 +67,15 @@
  *   SITE_SETTINGS_AUTOMATIC_DOWNLOADS: (undefined|!settings.Route),
  *   SITE_SETTINGS_BACKGROUND_SYNC: (undefined|!settings.Route),
  *   SITE_SETTINGS_CAMERA: (undefined|!settings.Route),
+ *   SITE_SETTINGS_CLIPBOARD: (undefined|!settings.Route),
  *   SITE_SETTINGS_COOKIES: (undefined|!settings.Route),
  *   SITE_SETTINGS_DATA_DETAILS: (undefined|!settings.Route),
  *   SITE_SETTINGS_FLASH: (undefined|!settings.Route),
  *   SITE_SETTINGS_HANDLERS: (undefined|!settings.Route),
  *   SITE_SETTINGS_IMAGES: (undefined|!settings.Route),
  *   SITE_SETTINGS_JAVASCRIPT: (undefined|!settings.Route),
+ *   SITE_SETTINGS_SENSORS: (undefined|!settings.Route),
+ *   SITE_SETTINGS_SOUND: (undefined|!settings.Route),
  *   SITE_SETTINGS_LOCATION: (undefined|!settings.Route),
  *   SITE_SETTINGS_MICROPHONE: (undefined|!settings.Route),
  *   SITE_SETTINGS_MIDI_DEVICES: (undefined|!settings.Route),
@@ -78,6 +83,7 @@
  *   SITE_SETTINGS_PDF_DOCUMENTS: (undefined|!settings.Route),
  *   SITE_SETTINGS_POPUPS: (undefined|!settings.Route),
  *   SITE_SETTINGS_PROTECTED_CONTENT: (undefined|!settings.Route),
+ *   SITE_SETTINGS_SITE_DATA: (undefined|!settings.Route),
  *   SITE_SETTINGS_SITE_DETAILS: (undefined|!settings.Route),
  *   SITE_SETTINGS_UNSANDBOXED_PLUGINS: (undefined|!settings.Route),
  *   SITE_SETTINGS_USB_DEVICES: (undefined|!settings.Route),
@@ -89,7 +95,7 @@
  *   TRIGGERED_RESET_DIALOG: (undefined|!settings.Route),
  * }}
  */
-var SettingsRoutes;
+let SettingsRoutes;
 
 cr.define('settings', function() {
 
@@ -133,9 +139,9 @@ cr.define('settings', function() {
 
       // |path| extends this route's path if it doesn't have a leading slash.
       // If it does have a leading slash, it's just set as the new route's URL.
-      var newUrl = path[0] == '/' ? path : this.path + '/' + path;
+      const newUrl = path[0] == '/' ? path : `${this.path}/${path}`;
 
-      var route = new Route(newUrl);
+      const route = new Route(newUrl);
       route.parent = this;
       route.section = this.section;
       route.depth = this.depth + 1;
@@ -152,9 +158,18 @@ cr.define('settings', function() {
      * @private
      */
     createSection(path, section) {
-      var route = this.createChild(path);
+      const route = this.createChild(path);
       route.section = section;
       return route;
+    }
+
+    /**
+     * Returns the absolute path string for this Route, assuming this function
+     * has been called from within chrome://settings.
+     * @return {string}
+     */
+    getAbsolutePath() {
+      return window.location.origin + this.path;
     }
 
     /**
@@ -163,7 +178,7 @@ cr.define('settings', function() {
      * @return {boolean}
      */
     contains(route) {
-      for (var r = route; r != null; r = r.parent) {
+      for (let r = route; r != null; r = r.parent) {
         if (this == r)
           return true;
       }
@@ -184,11 +199,11 @@ cr.define('settings', function() {
    * Computes and return all available routes based on settings.pageVisibility.
    * @return {!SettingsRoutes}
    */
-  var computeAvailableRoutes = function() {
-    var pageVisibility = settings.pageVisibility || {};
+  const computeAvailableRoutes = function() {
+    const pageVisibility = settings.pageVisibility || {};
 
     /** @type {!SettingsRoutes} */
-    var r = {};
+    const r = {};
 
     // Root pages.
     r.BASIC = new Route('/');
@@ -205,7 +220,6 @@ cr.define('settings', function() {
     // <if expr="chromeos">
     r.INTERNET = r.BASIC.createSection('/internet', 'internet');
     r.INTERNET_NETWORKS = r.INTERNET.createChild('/networks');
-    r.NETWORK_CONFIG = r.INTERNET.createChild('/networkConfig');
     r.NETWORK_DETAIL = r.INTERNET.createChild('/networkDetail');
     r.KNOWN_NETWORKS = r.INTERNET.createChild('/knownNetworks');
     r.BLUETOOTH = r.BASIC.createSection('/bluetooth', 'bluetooth');
@@ -235,7 +249,7 @@ cr.define('settings', function() {
 
     if (pageVisibility.onStartup !== false) {
       r.ON_STARTUP = r.BASIC.createSection('/onStartup', 'onStartup');
-      r.STARTUP_URLS = r.ON_STARTUP.createChild('/startupUrls');
+      r.STARTUP_PAGES = r.ON_STARTUP.createChild('/startupPages');
     }
 
     if (pageVisibility.people !== false) {
@@ -262,7 +276,7 @@ cr.define('settings', function() {
     r.POWER = r.DEVICE.createChild('/power');
     // </if>
 
-    // Advacned Routes
+    // Advanced Routes
     if (pageVisibility.advancedSettings !== false) {
       r.ADVANCED = new Route('/advanced');
 
@@ -279,10 +293,9 @@ cr.define('settings', function() {
         r.SITE_SETTINGS_ALL = r.SITE_SETTINGS.createChild('all');
         r.SITE_SETTINGS_SITE_DETAILS =
             r.SITE_SETTINGS_ALL.createChild('/content/siteDetails');
-      } else if (loadTimeData.getBoolean('enableSiteDetails')) {
+      } else {
         // When there is no "All Sites", pressing 'back' from "Site Details"
-        // should return to "Content Settings". This should only occur when
-        // |kSiteSettings| is off and |kSiteDetails| is on.
+        // should return to "Content Settings".
         r.SITE_SETTINGS_SITE_DETAILS =
             r.SITE_SETTINGS.createChild('/content/siteDetails');
       }
@@ -297,11 +310,16 @@ cr.define('settings', function() {
       r.SITE_SETTINGS_BACKGROUND_SYNC =
           r.SITE_SETTINGS.createChild('backgroundSync');
       r.SITE_SETTINGS_CAMERA = r.SITE_SETTINGS.createChild('camera');
+      r.SITE_SETTINGS_CLIPBOARD = r.SITE_SETTINGS.createChild('clipboard');
       r.SITE_SETTINGS_COOKIES = r.SITE_SETTINGS.createChild('cookies');
+      r.SITE_SETTINGS_SITE_DATA =
+          r.SITE_SETTINGS_COOKIES.createChild('/siteData');
       r.SITE_SETTINGS_DATA_DETAILS =
-          r.SITE_SETTINGS_COOKIES.createChild('/cookies/detail');
+          r.SITE_SETTINGS_SITE_DATA.createChild('/cookies/detail');
       r.SITE_SETTINGS_IMAGES = r.SITE_SETTINGS.createChild('images');
       r.SITE_SETTINGS_JAVASCRIPT = r.SITE_SETTINGS.createChild('javascript');
+      r.SITE_SETTINGS_SOUND = r.SITE_SETTINGS.createChild('sound');
+      r.SITE_SETTINGS_SENSORS = r.SITE_SETTINGS.createChild('sensors');
       r.SITE_SETTINGS_LOCATION = r.SITE_SETTINGS.createChild('location');
       r.SITE_SETTINGS_MICROPHONE = r.SITE_SETTINGS.createChild('microphone');
       r.SITE_SETTINGS_NOTIFICATIONS =
@@ -321,6 +339,8 @@ cr.define('settings', function() {
       // <if expr="chromeos">
       if (pageVisibility.dateTime !== false) {
         r.DATETIME = r.ADVANCED.createSection('/dateTime', 'dateTime');
+        r.DATETIME_TIMEZONE_SUBPAGE =
+            r.DATETIME.createChild('/dateTime/timeZone');
       }
       // </if>
 
@@ -366,6 +386,16 @@ cr.define('settings', function() {
         r.TRIGGERED_RESET_DIALOG =
             r.ADVANCED.createChild('/triggeredResetProfileSettings');
         r.TRIGGERED_RESET_DIALOG.isNavigableDialog = true;
+        // <if expr="_google_chrome and is_win">
+        // This should only be added if the feature is enabled.
+        if (loadTimeData.getBoolean('userInitiatedCleanupsEnabled')) {
+          r.CHROME_CLEANUP = r.RESET.createChild('/cleanup');
+        }
+        if (loadTimeData.getBoolean('showIncompatibleApplications')) {
+          r.INCOMPATIBLE_APPLICATIONS =
+              r.RESET.createChild('/incompatibleApplications');
+        }
+        // </if>
       }
     }
 
@@ -426,13 +456,15 @@ cr.define('settings', function() {
      * @param {boolean} isPopstate
      */
     setCurrentRoute(route, queryParameters, isPopstate) {
-      var oldRoute = this.currentRoute;
+      this.recordMetrics(route.path);
+
+      const oldRoute = this.currentRoute;
       this.currentRoute = route;
       this.currentQueryParameters_ = queryParameters;
       this.wasLastRouteChangePopstate_ = isPopstate;
-      routeObservers.forEach(function(observer) {
+      new Set(routeObservers).forEach((observer) => {
         observer.currentRouteChanged(this.currentRoute, oldRoute);
-      }.bind(this));
+      });
     }
 
     /** @return {!settings.Route} */
@@ -458,12 +490,12 @@ cr.define('settings', function() {
      */
     getRouteForPath(path) {
       // Allow trailing slash in paths.
-      var canonicalPath = path.replace(CANONICAL_PATH_REGEX, '$1$2');
+      const canonicalPath = path.replace(CANONICAL_PATH_REGEX, '$1$2');
 
       // TODO(tommycli): Use Object.values once Closure compilation supports it.
-      var matchingKey = Object.keys(this.routes_).find(function(key) {
-        return this.routes_[key].path == canonicalPath;
-      }.bind(this));
+      const matchingKey =
+          Object.keys(this.routes_)
+              .find((key) => this.routes_[key].path == canonicalPath);
 
       return !!matchingKey ? this.routes_[matchingKey] : null;
     }
@@ -482,17 +514,17 @@ cr.define('settings', function() {
       if (route == this.routes_.ADVANCED)
         route = /** @type {!settings.Route} */ (this.routes_.BASIC);
 
-      var params = opt_dynamicParameters || new URLSearchParams();
-      var removeSearch = !!opt_removeSearch;
+      const params = opt_dynamicParameters || new URLSearchParams();
+      const removeSearch = !!opt_removeSearch;
 
-      var oldSearchParam = this.getQueryParameters().get('search') || '';
-      var newSearchParam = params.get('search') || '';
+      const oldSearchParam = this.getQueryParameters().get('search') || '';
+      const newSearchParam = params.get('search') || '';
 
       if (!removeSearch && oldSearchParam && !newSearchParam)
         params.append('search', oldSearchParam);
 
-      var url = route.path;
-      var queryString = params.toString();
+      let url = route.path;
+      const queryString = params.toString();
       if (queryString)
         url += '?' + queryString;
 
@@ -507,7 +539,7 @@ cr.define('settings', function() {
      * this navigates to the immediate parent. This will never exit Settings.
      */
     navigateToPreviousRoute() {
-      var previousRoute = window.history.state &&
+      const previousRoute = window.history.state &&
           assert(this.getRouteForPath(
               /** @type {string} */ (window.history.state)));
 
@@ -523,10 +555,12 @@ cr.define('settings', function() {
      * Initialize the route and query params from the URL.
      */
     initializeRouteFromUrl() {
+      this.recordMetrics(window.location.pathname);
+
       assert(!this.initializeRouteFromUrlCalled_);
       this.initializeRouteFromUrlCalled_ = true;
 
-      var route = this.getRouteForPath(window.location.pathname);
+      const route = this.getRouteForPath(window.location.pathname);
       // Never allow direct navigation to ADVANCED.
       if (route && route != this.routes_.ADVANCED) {
         this.currentRoute = route;
@@ -537,6 +571,18 @@ cr.define('settings', function() {
       }
     }
 
+    /**
+     * Make a UMA note about visiting this URL path.
+     * @param {string} urlPath The url path (only).
+     */
+    recordMetrics(urlPath) {
+      assert(!urlPath.startsWith('chrome://'));
+      assert(!urlPath.startsWith('settings'));
+      assert(urlPath.startsWith('/'));
+      chrome.metricsPrivate.recordSparseHashable(
+          'WebUI.Settings.PathVisited', urlPath);
+    }
+
     resetRouteForTesting() {
       this.initializeRouteFromUrlCalled_ = false;
       this.wasLastRouteChangePopstate_ = false;
@@ -545,12 +591,12 @@ cr.define('settings', function() {
     }
   }
 
-  var routerInstance = new Router();
+  const routerInstance = new Router();
 
-  var routeObservers = new Set();
+  const routeObservers = new Set();
 
   /** @polymerBehavior */
-  var RouteObserverBehavior = {
+  const RouteObserverBehavior = {
     /** @override */
     attached: function() {
       assert(!routeObservers.has(this));
@@ -569,7 +615,6 @@ cr.define('settings', function() {
     /**
      * @param {!settings.Route|undefined} opt_newRoute
      * @param {!settings.Route|undefined} opt_oldRoute
-     * @abstract
      */
     currentRouteChanged: function(opt_newRoute, opt_oldRoute) {
       assertNotReached();
@@ -579,9 +624,9 @@ cr.define('settings', function() {
   /**
    * Regular expression that captures the leading slash, the content and the
    * trailing slash in three different groups.
-   * @const {!RegExp}
+   * @type {!RegExp}
    */
-  var CANONICAL_PATH_REGEX = /(^\/)([\/-\w]+)(\/$)/;
+  const CANONICAL_PATH_REGEX = /(^\/)([\/-\w]+)(\/$)/;
 
   window.addEventListener('popstate', function(event) {
     // On pop state, do not push the state onto the window.history again.
@@ -594,22 +639,22 @@ cr.define('settings', function() {
 
   // TODO(scottchen): Change to 'get routes() {}' in export when we fix a bug in
   // ChromePass that limits the syntax of what can be returned from cr.define().
-  var routes = routerInstance.getRoutes();
+  const routes = routerInstance.getRoutes();
 
   // TODO(scottchen): Stop exposing all those methods directly on settings.*,
   // and instead update all clients to use the singleton instance directly
-  var getCurrentRoute = routerInstance.getCurrentRoute.bind(routerInstance);
-  var getRouteForPath = routerInstance.getRouteForPath.bind(routerInstance);
-  var initializeRouteFromUrl =
+  const getCurrentRoute = routerInstance.getCurrentRoute.bind(routerInstance);
+  const getRouteForPath = routerInstance.getRouteForPath.bind(routerInstance);
+  const initializeRouteFromUrl =
       routerInstance.initializeRouteFromUrl.bind(routerInstance);
-  var resetRouteForTesting =
+  const resetRouteForTesting =
       routerInstance.resetRouteForTesting.bind(routerInstance);
-  var getQueryParameters =
+  const getQueryParameters =
       routerInstance.getQueryParameters.bind(routerInstance);
-  var lastRouteChangeWasPopstate =
+  const lastRouteChangeWasPopstate =
       routerInstance.lastRouteChangeWasPopstate.bind(routerInstance);
-  var navigateTo = routerInstance.navigateTo.bind(routerInstance);
-  var navigateToPreviousRoute =
+  const navigateTo = routerInstance.navigateTo.bind(routerInstance);
+  const navigateToPreviousRoute =
       routerInstance.navigateToPreviousRoute.bind(routerInstance);
 
   return {

@@ -10,26 +10,20 @@ namespace net {
 namespace test {
 
 // static
-QuicCryptoClientConfig* QuicClientPeer::GetCryptoConfig(QuicClient* client) {
-  return client->crypto_config();
-}
-
-// static
 bool QuicClientPeer::CreateUDPSocketAndBind(QuicClient* client) {
-  return client->CreateUDPSocketAndBind(client->server_address(),
-                                        client->bind_to_address(),
-                                        client->local_port());
+  return client->network_helper()->CreateUDPSocketAndBind(
+      client->server_address(), client->bind_to_address(),
+      client->local_port());
 }
 
 // static
 void QuicClientPeer::CleanUpUDPSocket(QuicClient* client, int fd) {
-  client->CleanUpUDPSocket(fd);
+  client->epoll_network_helper()->CleanUpUDPSocket(fd);
 }
 
 // static
 void QuicClientPeer::SetClientPort(QuicClient* client, int port) {
-  client->fd_address_map_.back().second =
-      QuicSocketAddress(client->GetLatestClientAddress().host(), port);
+  client->epoll_network_helper()->SetClientPort(port);
 }
 
 // static

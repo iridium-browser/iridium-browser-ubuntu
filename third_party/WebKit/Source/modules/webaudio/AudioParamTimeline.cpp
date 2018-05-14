@@ -26,14 +26,18 @@
 #include "modules/webaudio/AudioParamTimeline.h"
 
 #include <algorithm>
+#include <memory>
+
+#include "base/memory/ptr_util.h"
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "build/build_config.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/frame/Deprecation.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "platform/audio/AudioUtilities.h"
 #include "platform/wtf/CPU.h"
 #include "platform/wtf/MathExtras.h"
-#include "platform/wtf/PtrUtil.h"
 
 #if defined(ARCH_CPU_X86_FAMILY)
 #include <emmintrin.h>
@@ -80,7 +84,7 @@ static bool IsPositiveAudioParamTime(double time,
   return false;
 }
 
-String AudioParamTimeline::EventToString(const ParamEvent& event) {
+String AudioParamTimeline::EventToString(const ParamEvent& event) const {
   // The default arguments for most automation methods is the value and the
   // time.
   String args =
@@ -110,8 +114,9 @@ String AudioParamTimeline::EventToString(const ParamEvent& event) {
              String::Number(event.Duration(), 16);
       break;
     case ParamEvent::kCancelValues:
+    case ParamEvent::kSetValueCurveEnd:
     // Fall through; we should never have to print out the internal
-    // CancelValues event.
+    // |kCancelValues| or |kSetValueCurveEnd| event.
     case ParamEvent::kLastType:
       NOTREACHED();
       break;
@@ -169,7 +174,7 @@ float AudioParamTimeline::ValueCurveAtTime(double t,
 
 std::unique_ptr<AudioParamTimeline::ParamEvent>
 AudioParamTimeline::ParamEvent::CreateSetValueEvent(float value, double time) {
-  return WTF::WrapUnique(new ParamEvent(ParamEvent::kSetValue, value, time));
+  return base::WrapUnique(new ParamEvent(ParamEvent::kSetValue, value, time));
 }
 
 std::unique_ptr<AudioParamTimeline::ParamEvent>
@@ -177,8 +182,8 @@ AudioParamTimeline::ParamEvent::CreateLinearRampEvent(float value,
                                                       double time,
                                                       float initial_value,
                                                       double call_time) {
-  return WTF::WrapUnique(new ParamEvent(ParamEvent::kLinearRampToValue, value,
-                                        time, initial_value, call_time));
+  return base::WrapUnique(new ParamEvent(ParamEvent::kLinearRampToValue, value,
+                                         time, initial_value, call_time));
 }
 
 std::unique_ptr<AudioParamTimeline::ParamEvent>
@@ -186,8 +191,9 @@ AudioParamTimeline::ParamEvent::CreateExponentialRampEvent(float value,
                                                            double time,
                                                            float initial_value,
                                                            double call_time) {
-  return WTF::WrapUnique(new ParamEvent(ParamEvent::kExponentialRampToValue,
-                                        value, time, initial_value, call_time));
+  return base::WrapUnique(new ParamEvent(ParamEvent::kExponentialRampToValue,
+                                         value, time, initial_value,
+                                         call_time));
 }
 
 std::unique_ptr<AudioParamTimeline::ParamEvent>
@@ -198,7 +204,7 @@ AudioParamTimeline::ParamEvent::CreateSetTargetEvent(float value,
   // returns NaN or Infinity due to division by zero.  The caller
   // should have converted this to a SetValueEvent.
   DCHECK_NE(time_constant, 0);
-  return WTF::WrapUnique(
+  return base::WrapUnique(
       new ParamEvent(ParamEvent::kSetTarget, value, time, time_constant));
 }
 
@@ -210,9 +216,16 @@ AudioParamTimeline::ParamEvent::CreateSetValueCurveEvent(
   double curve_points = (curve.size() - 1) / duration;
   float end_value = curve.data()[curve.size() - 1];
 
-  return WTF::WrapUnique(new ParamEvent(ParamEvent::kSetValueCurve, time,
-                                        duration, curve, curve_points,
-                                        end_value));
+  return base::WrapUnique(new ParamEvent(ParamEvent::kSetValueCurve, time,
+                                         duration, curve, curve_points,
+                                         end_value));
+}
+
+std::unique_ptr<AudioParamTimeline::ParamEvent>
+AudioParamTimeline::ParamEvent::CreateSetValueCurveEndEvent(float value,
+                                                            double time) {
+  return WTF::WrapUnique(
+      new ParamEvent(ParamEvent::kSetValueCurveEnd, value, time));
 }
 
 std::unique_ptr<AudioParamTimeline::ParamEvent>
@@ -229,7 +242,7 @@ AudioParamTimeline::ParamEvent::CreateCancelValuesEvent(
            saved_type == ParamEvent::kSetValueCurve);
   }
 
-  return WTF::WrapUnique(
+  return base::WrapUnique(
       new ParamEvent(ParamEvent::kCancelValues, time, std::move(saved_event)));
 }
 
@@ -246,7 +259,7 @@ AudioParamTimeline::ParamEvent::CreateGeneralEvent(
     double curve_points_per_second,
     float curve_end_value,
     std::unique_ptr<ParamEvent> saved_event) {
-  return WTF::WrapUnique(new ParamEvent(
+  return base::WrapUnique(new ParamEvent(
       type, value, time, initial_value, call_time, time_constant, duration,
       curve, curve_points_per_second, curve_end_value, std::move(saved_event)));
 }
@@ -291,7 +304,6 @@ AudioParamTimeline::ParamEvent::ParamEvent(
       curve_points_per_second_(curve_points_per_second),
       curve_end_value_(curve_end_value),
       saved_event_(std::move(saved_event)),
-      needs_time_clamp_check_(true),
       has_default_cancelled_value_(false) {
   curve_ = curve;
 }
@@ -310,9 +322,9 @@ AudioParamTimeline::ParamEvent::ParamEvent(ParamEvent::Type type,
       curve_points_per_second_(0),
       curve_end_value_(0),
       saved_event_(nullptr),
-      needs_time_clamp_check_(true),
       has_default_cancelled_value_(false) {
-  DCHECK_EQ(type, ParamEvent::kSetValue);
+  DCHECK(type == ParamEvent::kSetValue ||
+         type == ParamEvent::kSetValueCurveEnd);
 }
 
 // Create a linear or exponential ramp that requires an initial value and
@@ -333,7 +345,6 @@ AudioParamTimeline::ParamEvent::ParamEvent(ParamEvent::Type type,
       curve_points_per_second_(0),
       curve_end_value_(0),
       saved_event_(nullptr),
-      needs_time_clamp_check_(true),
       has_default_cancelled_value_(false) {
   DCHECK(type == ParamEvent::kLinearRampToValue ||
          type == ParamEvent::kExponentialRampToValue);
@@ -354,7 +365,6 @@ AudioParamTimeline::ParamEvent::ParamEvent(ParamEvent::Type type,
       curve_points_per_second_(0),
       curve_end_value_(0),
       saved_event_(nullptr),
-      needs_time_clamp_check_(true),
       has_default_cancelled_value_(false) {
   DCHECK_EQ(type, ParamEvent::kSetTarget);
 }
@@ -376,7 +386,6 @@ AudioParamTimeline::ParamEvent::ParamEvent(ParamEvent::Type type,
       curve_points_per_second_(curve_points_per_second),
       curve_end_value_(curve_end_value),
       saved_event_(nullptr),
-      needs_time_clamp_check_(true),
       has_default_cancelled_value_(false) {
   DCHECK_EQ(type, ParamEvent::kSetValueCurve);
   unsigned curve_length = curve.size();
@@ -399,7 +408,6 @@ AudioParamTimeline::ParamEvent::ParamEvent(
       curve_points_per_second_(0),
       curve_end_value_(0),
       saved_event_(std::move(saved_event)),
-      needs_time_clamp_check_(true),
       has_default_cancelled_value_(false) {
   DCHECK_EQ(type, ParamEvent::kCancelValues);
 }
@@ -507,8 +515,8 @@ void AudioParamTimeline::SetValueCurveAtTime(const Vector<float>& curve,
   // Insert a setValueAtTime event too to establish an event so that all
   // following events will process from the end of the curve instead of the
   // beginning.
-  InsertEvent(ParamEvent::CreateSetValueEvent(curve.data()[curve.size() - 1],
-                                              time + duration),
+  InsertEvent(ParamEvent::CreateSetValueCurveEndEvent(
+                  curve.data()[curve.size() - 1], time + duration),
               exception_state);
 }
 
@@ -534,10 +542,13 @@ void AudioParamTimeline::InsertEvent(std::unique_ptr<ParamEvent> event,
   if (!events_.size() &&
       (event->GetType() == ParamEvent::kLinearRampToValue ||
        event->GetType() == ParamEvent::kExponentialRampToValue)) {
-    // There are no events preceding these ramps.  Insert a new setValueAtTime
-    // event to set the starting point for these events.
+    // There are no events preceding these ramps.  Insert a new
+    // setValueAtTime event to set the starting point for these
+    // events.  Use a time of 0 to make sure it preceeds all other
+    // events.  This will get fixed when when handle new events.
     events_.insert(0, AudioParamTimeline::ParamEvent::CreateSetValueEvent(
-                          event->InitialValue(), event->CallTime()));
+                          event->InitialValue(), 0));
+    new_events_.insert(events_[0].get());
   }
 
   for (i = 0; i < events_.size(); ++i) {
@@ -546,7 +557,12 @@ void AudioParamTimeline::InsertEvent(std::unique_ptr<ParamEvent> event,
       // existing event. It's ok if the SetValueCurve starts at the same time as
       // the end of some other duration.
       double end_time = event->Time() + event->Duration();
-      if (events_[i]->Time() > event->Time() && events_[i]->Time() < end_time) {
+      ParamEvent::Type test_type = events_[i]->GetType();
+      // Events of type |kSetValueCurveEnd| or |kCancelValues| never
+      // conflict.
+      if (!(test_type == ParamEvent::kSetValueCurveEnd ||
+            test_type == ParamEvent::kCancelValues) &&
+          events_[i]->Time() > event->Time() && events_[i]->Time() < end_time) {
         exception_state.ThrowDOMException(
             kNotSupportedError,
             EventToString(*event) + " overlaps " + EventToString(*events_[i]));
@@ -557,7 +573,8 @@ void AudioParamTimeline::InsertEvent(std::unique_ptr<ParamEvent> event,
       // SetValueCurve event.
       if (events_[i]->GetType() == ParamEvent::kSetValueCurve) {
         double end_time = events_[i]->Time() + events_[i]->Duration();
-        if (event->Time() >= events_[i]->Time() && event->Time() < end_time) {
+        if (event->GetType() != ParamEvent::kSetValueCurveEnd &&
+            event->Time() >= events_[i]->Time() && event->Time() < end_time) {
           exception_state.ThrowDOMException(
               kNotSupportedError, EventToString(*event) + " overlaps " +
                                       EventToString(*events_[i]));
@@ -569,7 +586,13 @@ void AudioParamTimeline::InsertEvent(std::unique_ptr<ParamEvent> event,
     // Overwrite same event type and time.
     if (events_[i]->Time() == insert_time &&
         events_[i]->GetType() == event->GetType()) {
+      // Be sure to remove the old event from |new_events_| too, in
+      // case it was just added.
+      if (new_events_.Contains(events_[i].get())) {
+        new_events_.erase(events_[i].get());
+      }
       events_[i] = std::move(event);
+      new_events_.insert(events_[i].get());
       return;
     }
 
@@ -578,13 +601,32 @@ void AudioParamTimeline::InsertEvent(std::unique_ptr<ParamEvent> event,
   }
 
   events_.insert(i, std::move(event));
+  new_events_.insert(events_[i].get());
 }
 
-bool AudioParamTimeline::HasValues() const {
+bool AudioParamTimeline::HasValues(size_t current_frame,
+                                   double sample_rate) const {
   MutexTryLocker try_locker(events_lock_);
 
-  if (try_locker.Locked())
-    return events_.size();
+  if (try_locker.Locked()) {
+    if (events_.size() == 0)
+      return false;
+
+    switch (events_[0]->GetType()) {
+      case ParamEvent::kSetValue:
+      case ParamEvent::kSetValueCurve:
+      case ParamEvent::kSetTarget:
+        // Need automation if the event starts somewhere before the
+        // end of the current render quantum.
+        return events_[0]->Time() <=
+               (current_frame + AudioUtilities::kRenderQuantumFrames) /
+                   sample_rate;
+      default:
+        // Otherwise, there's some kind of other event running, so we
+        // need to do automation.
+        return true;
+    }
+  }
 
   // Can't get the lock so that means the main thread is trying to insert an
   // event.  Just return true then.  If the main thread releases the lock before
@@ -612,7 +654,7 @@ void AudioParamTimeline::CancelScheduledValues(
   // Remove all events starting at startTime.
   for (unsigned i = 0; i < events_.size(); ++i) {
     if (events_[i]->Time() >= start_time) {
-      events_.erase(i, events_.size() - i);
+      RemoveCancelledEvents(i);
       break;
     }
   }
@@ -714,6 +756,7 @@ void AudioParamTimeline::CancelAndHoldAtTime(double cancel_time,
       }
     } break;
     case ParamEvent::kSetValue:
+    case ParamEvent::kSetValueCurveEnd:
     case ParamEvent::kCancelValues:
       // Nothing needs to be done for a SetValue or CancelValues event.
       break;
@@ -723,9 +766,9 @@ void AudioParamTimeline::CancelAndHoldAtTime(double cancel_time,
   }
 
   // Now remove all the following events from the timeline.
-  if (cancelled_event_index < events_.size())
-    events_.erase(cancelled_event_index,
-                  events_.size() - cancelled_event_index);
+  if (cancelled_event_index < events_.size()) {
+    RemoveCancelledEvents(cancelled_event_index);
+  }
 
   // Insert the new event, if any.
   if (new_event) {
@@ -816,9 +859,19 @@ float AudioParamTimeline::ValuesForFrameRangeImpl(size_t start_frame,
 
   int number_of_events = events_.size();
 
+  // MUST clamp event before |events_| is possibly mutated because
+  // |new_events_| has raw pointers to objects in |events_|.  Clamping
+  // will clear out all of these pointers before |events_| is
+  // potentially modified.
+  //
+  // TODO(rtoy): Consider making |events_| be scoped_refptr instead of
+  // unique_ptr.
+  if (new_events_.size() > 0) {
+    ClampNewEventsToCurrentTime(start_frame / sample_rate);
+  }
+
   if (number_of_events > 0) {
     double current_time = start_frame / sample_rate;
-    ClampToCurrentTime(number_of_events, start_frame, sample_rate);
 
     if (HandleAllEventsInThePast(current_time, sample_rate, default_value,
                                  number_of_values, values))
@@ -843,7 +896,7 @@ float AudioParamTimeline::ValuesForFrameRangeImpl(size_t start_frame,
   for (int i = 0; i < number_of_events && write_index < number_of_values; ++i) {
     ParamEvent* event = events_[i].get();
     ParamEvent* next_event =
-        i < number_of_events - 1 ? events_[i + 1].get() : 0;
+        i < number_of_events - 1 ? events_[i + 1].get() : nullptr;
 
     // Wait until we get a more recent event.
     if (!IsEventCurrent(event, next_event, current_frame, sample_rate)) {
@@ -925,6 +978,7 @@ float AudioParamTimeline::ValuesForFrameRangeImpl(size_t start_frame,
       // Handle event types not requiring looking ahead to the next event.
       switch (event->GetType()) {
         case ParamEvent::kSetValue:
+        case ParamEvent::kSetValueCurveEnd:
         case ParamEvent::kLinearRampToValue: {
           current_frame = fill_to_end_frame;
 
@@ -983,8 +1037,12 @@ float AudioParamTimeline::ValuesForFrameRangeImpl(size_t start_frame,
   // remove them so we don't have to check them ever again.  (This MUST be
   // running with the m_events lock so we can safely modify the m_events
   // array.)
-  if (last_skipped_event_index > 0)
-    events_.erase(0, last_skipped_event_index - 1);
+  if (last_skipped_event_index > 0) {
+    // |new_events_| should be empty here so we don't have to
+    // do any updates due to this mutation of |events_|.
+    DCHECK_EQ(new_events_.size(), 0u);
+    events_.EraseAt(0, last_skipped_event_index - 1);
+  }
 
   // If there's any time left after processing the last event then just
   // propagate the last value to the end of the values buffer.
@@ -1029,7 +1087,7 @@ std::tuple<size_t, unsigned> AudioParamTimeline::HandleFirstEvent(
 bool AudioParamTimeline::IsEventCurrent(const ParamEvent* event,
                                         const ParamEvent* next_event,
                                         size_t current_frame,
-                                        double sample_rate) {
+                                        double sample_rate) const {
   // WARNING: due to round-off it might happen that nextEvent->time() is
   // just larger than currentFrame/sampleRate.  This means that we will end
   // up running the |event| again.  The code below had better be prepared
@@ -1054,7 +1112,8 @@ bool AudioParamTimeline::IsEventCurrent(const ParamEvent* event,
     // Condition is currentFrame - 1 < eventFrame <= currentFrame, but
     // currentFrame is unsigned and could be 0, so use
     // currentFrame < eventFrame + 1 instead.
-    if (!((event->GetType() == ParamEvent::kSetValue &&
+    if (!(((event->GetType() == ParamEvent::kSetValue ||
+            event->GetType() == ParamEvent::kSetValueCurveEnd) &&
            (event_frame <= current_frame) &&
            (current_frame < event_frame + 1)))) {
       // This is not the special SetValue event case, and nextEvent is
@@ -1066,46 +1125,60 @@ bool AudioParamTimeline::IsEventCurrent(const ParamEvent* event,
   return true;
 }
 
-void AudioParamTimeline::ClampToCurrentTime(int number_of_events,
-                                            size_t start_frame,
-                                            double sample_rate) {
-  if (number_of_events > 0) {
-    bool clamped_some_event_time = false;
-    double current_time = start_frame / sample_rate;
+void AudioParamTimeline::ClampNewEventsToCurrentTime(double current_time) {
+  bool clamped_some_event_time = false;
 
-    // Look at all the events in the timeline and check to see if any needs
-    // to clamp the start time to the current time.
-    for (int k = 0; k < number_of_events; ++k) {
-      ParamEvent* event = events_[k].get();
-
-      // We're examining the event for the first time and the event time is
-      // in the past so clamp the event time to the current time (start of
-      // the rendering quantum).
-      if (event->NeedsTimeClampCheck()) {
-        if (event->Time() < current_time) {
-          event->SetTime(current_time);
-          clamped_some_event_time = true;
-        }
-
-        // In all cases, we can clear the flag because the event is either
-        // in the future, or we've already checked it (just now).
-        event->ClearTimeClampCheck();
-      }
-    }
-
-    if (clamped_some_event_time) {
-      // If we clamped some event time to current time, we need to
-      // sort the event list in time order again, but it must be
-      // stable!
-      std::stable_sort(events_.begin(), events_.end(),
-                       ParamEvent::EventPreceeds);
+  for (auto event : new_events_) {
+    if (event->Time() < current_time) {
+      event->SetTime(current_time);
+      clamped_some_event_time = true;
     }
   }
+
+  if (clamped_some_event_time) {
+    // If we clamped some event time to current time, we need to sort
+    // the event list in time order again, but it must be stable!
+    std::stable_sort(events_.begin(), events_.end(), ParamEvent::EventPreceeds);
+  }
+
+  new_events_.clear();
+}
+
+// Test that for a SetTarget event, the current value is close enough
+// to the target value that we can consider the event to have
+// converged to the target.
+static bool HasSetTargetConverged(float value,
+                                  float target,
+                                  float discrete_time_constant) {
+  // Let c = |discrete_time_constant|.  Then SetTarget computes
+  //
+  // new value = value + (target - value) * c
+  //           = value * (1 + (target - value)*c/value)
+  //
+  // We consider the value converged if (target - value) * c is
+  // sufficiently small so as not to change value.  This happens if
+  // (target-value)*c/value is a small value, say, eps.  Thus, we've converged
+  // if
+  //
+  //   |(target-value)*c/value| < eps
+  // or
+  //   |target-value|*c < eps*|value|
+  //
+  // However, if target is zero, we need to be careful:
+  //
+  //   new value = value + (0 - value) * c
+  //             = value * (1 - c)
+  //
+  // So the new value is sufficiently close to zero if |value|*(1-c)
+  // is close enough to zero.
+  return fabs(target - value) * discrete_time_constant <
+             kSetTargetThreshold * fabs(value) ||
+         (target == 0 && fabs(value) < kSetTargetZeroThreshold);
 }
 
 bool AudioParamTimeline::HandleAllEventsInThePast(double current_time,
                                                   double sample_rate,
-                                                  float default_value,
+                                                  float& default_value,
                                                   unsigned number_of_values,
                                                   float* values) {
   // Optimize the case where the last event is in the past.
@@ -1119,9 +1192,29 @@ bool AudioParamTimeline::HandleAllEventsInThePast(double current_time,
   // the curve, so we don't need to worry that SetValueCurve time is a
   // start time, not an end time.
   if (last_event_time +
-              1.5 * AudioUtilities::kRenderQuantumFrames / sample_rate <
-          current_time &&
-      last_event_type != ParamEvent::kSetTarget) {
+          1.5 * AudioUtilities::kRenderQuantumFrames / sample_rate <
+      current_time) {
+    // If the last event is SetTarget, make sure we've converged and, that
+    // we're at least 5 time constants past the start of the event.  If not, we
+    // have to continue processing it.
+    if (last_event_type == ParamEvent::kSetTarget) {
+      float discrete_time_constant =
+          static_cast<float>(AudioUtilities::DiscreteTimeConstantForSampleRate(
+              last_event->TimeConstant(), sample_rate));
+      if (HasSetTargetConverged(default_value, last_event->Value(),
+                                discrete_time_constant) &&
+          current_time > last_event_time + 5 * last_event->TimeConstant()) {
+        // We've converged. Slam the default value with the target value.
+        default_value = last_event->Value();
+      } else {
+        // Not converged, so give up; we can't remove this event yet.
+        return false;
+      }
+    }
+
+    // |events_| is being mutated.  |new_events_| better be empty because there
+    // are raw pointers there.
+    DCHECK_EQ(new_events_.size(), 0U);
     // The event has finished, so just copy the default value out.
     // Since all events are now also in the past, we can just remove all
     // timeline events too because |defaultValue| has the expected
@@ -1190,7 +1283,6 @@ void AudioParamTimeline::ProcessSetTargetFollowedByRamp(
     // Clear the clamp check because this doesn't need it.
     events_[event_index] =
         ParamEvent::CreateSetValueEvent(value, current_frame / sample_rate);
-    events_[event_index]->ClearTimeClampCheck();
 
     // Update our pointer to the current event because we just changed it.
     event = events_[event_index].get();
@@ -1214,6 +1306,7 @@ AudioParamTimeline::HandleCancelValues(const ParamEvent* current_event,
     switch (current_event->GetType()) {
       case ParamEvent::kLinearRampToValue:
       case ParamEvent::kExponentialRampToValue:
+      case ParamEvent::kSetValueCurveEnd:
       case ParamEvent::kSetValue: {
         // These three events potentially establish a starting value for
         // the following event, so we need to examine the cancelled
@@ -1246,6 +1339,7 @@ AudioParamTimeline::HandleCancelValues(const ParamEvent* current_event,
                                              saved_event->Time());
               break;
             case ParamEvent::kSetValueCurve:
+            case ParamEvent::kSetValueCurveEnd:
             case ParamEvent::kSetValue:
             case ParamEvent::kSetTarget:
             case ParamEvent::kCancelValues:
@@ -1402,10 +1496,10 @@ std::tuple<size_t, float, unsigned> AudioParamTimeline::ProcessExponentialRamp(
 
     // Compute the per-sample multiplier.
     float multiplier = powf(value2 / value1, 1 / num_sample_frames);
-    // Set the starting value of the exponential ramp.
-    value = value1 * powf(value2 / value1,
-                          (current_frame / sample_rate - time1) / delta_time);
-
+    // Set the starting value of the exponential ramp.  Do not attempt
+    // to optimize pow to powf.  See crbug.com/771306.
+    value = value1 * pow(value2 / static_cast<double>(value1),
+                         (current_frame / sample_rate - time1) / delta_time);
     for (; write_index < fill_to_frame; ++write_index) {
       values[write_index] = value;
       value *= multiplier;
@@ -1477,8 +1571,7 @@ std::tuple<size_t, float, unsigned> AudioParamTimeline::ProcessSetTarget(
 
   // If the value is close enough to the target, just fill in the data
   // with the target value.
-  if (fabs(value - target) < kSetTargetThreshold * fabs(target) ||
-      (!target && fabs(value) < kSetTargetZeroThreshold)) {
+  if (HasSetTargetConverged(value, target, discrete_time_constant)) {
     for (; write_index < fill_to_frame; ++write_index)
       values[write_index] = target;
   } else {
@@ -1779,6 +1872,120 @@ unsigned AudioParamTimeline::FillWithDefault(float* values,
     values[index] = default_value;
 
   return index;
+}
+
+std::tuple<bool, size_t> AudioParamTimeline::EventAtFrame(
+    size_t current_frame,
+    float sample_rate) const {
+
+  size_t number_of_events = events_.size();
+  ParamEvent* event = nullptr;
+  ParamEvent* next_event = nullptr;
+  size_t current_event_index = 0;
+
+  for (current_event_index = 0; current_event_index < number_of_events;
+       ++current_event_index) {
+    event = events_[current_event_index].get();
+    next_event = current_event_index < number_of_events - 1
+                     ? events_[current_event_index + 1].get()
+                     : nullptr;
+
+    // Exit when we find a current event
+    if (IsEventCurrent(event, next_event, current_frame, sample_rate)) {
+      break;
+    }
+  }
+
+  // No current event, so no conflict.
+  if (current_event_index >= number_of_events) {
+    return std::make_tuple(false, 0);
+  }
+
+  double current_time = current_frame / sample_rate;
+
+  // Determine if setting the value at this time would overlap some
+  // event.
+  if (next_event) {
+    // There's a following event.  If the current event has ended
+    // and the next event hasn't started, then there's no conflict.
+    ParamEvent::Type next_type = next_event->GetType();
+    switch (event->GetType()) {
+      case ParamEvent::kSetValue:
+      case ParamEvent::kLinearRampToValue:
+      case ParamEvent::kExponentialRampToValue:
+        // The current event is happening right now or is in the
+        // past and is followed by some automation that starts in
+        // the future (like SetValue, SetTarget, etc.).  Then
+        // there's no overlap. Otherwise there is.
+        if (current_time < next_event->Time() &&
+            (next_type == ParamEvent::kSetValue ||
+             next_type == ParamEvent::kSetTarget ||
+             next_type == ParamEvent::kSetValueCurve)) {
+          return std::make_tuple(false, 0);
+        }
+        return std::make_tuple(true, current_event_index);
+        break;
+      default:
+        return std::make_tuple(true, current_event_index);
+    }
+  }
+
+  // No next event.
+  switch (event->GetType()) {
+    case ParamEvent::kSetValue:
+      return std::make_tuple(false, 0);
+    case ParamEvent::kSetValueCurve:
+      if (current_time <= event->Time() + event->Duration()) {
+        return std::make_tuple(true, current_event_index);
+      }
+      break;
+    case ParamEvent::kSetTarget:
+      if (current_time >= event->Time()) {
+        return std::make_tuple(true, current_event_index);
+      }
+      break;
+    default:
+      break;
+  }
+
+  return std::make_tuple(false, 0);
+}
+
+// TODO(crbug.com/764396): Remove this when fixed.
+void AudioParamTimeline::WarnSetterOverlapsEvent(
+    String param_name,
+    size_t event_index,
+    BaseAudioContext& context) const {
+
+  DCHECK_LT(event_index, events_.size());
+
+  ParamEvent* event = events_[event_index].get();
+  size_t next_index = event_index + 1;
+  ParamEvent* next =
+      next_index < events_.size() ? events_[next_index].get() : nullptr;
+
+  String message = EventToString(*event) +
+                   (next ? " to " + EventToString(*next) : String(""));
+
+  context.GetExecutionContext()->AddConsoleMessage(
+      ConsoleMessage::Create(kJSMessageSource, kWarningMessageLevel,
+                             param_name + ".value setter called at time " +
+                                 String::Number(context.currentTime(), 16) +
+                                 " overlaps event " + message));
+}
+
+void AudioParamTimeline::RemoveCancelledEvents(size_t first_event_to_remove) {
+  // For all the events that are being removed, also remove that event
+  // from |new_events_|.
+  if (new_events_.size() > 0) {
+    for (size_t k = first_event_to_remove; k < events_.size(); ++k) {
+      new_events_.erase(events_[k].get());
+    }
+  }
+
+  // Now we can remove the cancelled events from the list.
+  events_.EraseAt(first_event_to_remove,
+                  events_.size() - first_event_to_remove);
 }
 
 }  // namespace blink

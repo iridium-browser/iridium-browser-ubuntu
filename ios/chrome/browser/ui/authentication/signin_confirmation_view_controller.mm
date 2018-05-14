@@ -15,6 +15,7 @@
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_footer_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/browser/ui/util/constraints_ui_util.h"
 #import "ios/chrome/common/string_util.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -32,6 +33,9 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+NSString* const kSigninConfirmationCollectionViewId =
+    @"SigninConfirmationCollectionView";
 
 namespace {
 const CGFloat kAccountImageDimension = 64.;
@@ -83,6 +87,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
   UIImageView* _imageView;
   UILabel* _titleLabel;
   UILabel* _emailLabel;
+  // List of string ids used for the user consent. The string ids order matches
+  // the way they appear on the screen.
+  std::vector<int> _consentStringIds;
 }
 @end
 
@@ -109,10 +116,19 @@ typedef NS_ENUM(NSInteger, ItemType) {
   [self.collectionView setContentOffset:bottomOffset animated:YES];
 }
 
+- (const std::vector<int>&)consentStringIds {
+  return _consentStringIds;
+}
+
+- (int)openSettingsStringId {
+  return IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_OPEN_SETTINGS;
+}
+
 #pragma mark - UIViewController
 
 - (void)viewDidLoad {
   [super viewDidLoad];
+  self.view.accessibilityIdentifier = kSigninConfirmationCollectionViewId;
 
   // Configure the header.
   MDCFlexibleHeaderView* headerView =
@@ -248,10 +264,11 @@ typedef NS_ENUM(NSInteger, ItemType) {
 - (CollectionViewItem*)syncItem {
   AccountControlItem* item =
       [[AccountControlItem alloc] initWithType:ItemTypeSync];
-  item.text = l10n_util::GetNSString(
-      IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_SYNC_TITLE);
-  item.detailText = l10n_util::GetNSString(
-      IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_SYNC_DESCRIPTION);
+  item.text = [self localizedConsentStringWithId:
+                        IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_SYNC_TITLE];
+  item.detailText =
+      [self localizedConsentStringWithId:
+                IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_SYNC_DESCRIPTION];
   item.image = ios::GetChromeBrowserProvider()
                    ->GetBrandedImageProvider()
                    ->GetSigninConfirmationSyncSettingsImage();
@@ -261,10 +278,12 @@ typedef NS_ENUM(NSInteger, ItemType) {
 - (CollectionViewItem*)googleServicesItem {
   AccountControlItem* item =
       [[AccountControlItem alloc] initWithType:ItemTypeGoogleServices];
-  item.text = l10n_util::GetNSString(
-      IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_SERVICES_TITLE);
-  item.detailText = l10n_util::GetNSString(
-      IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_SERVICES_DESCRIPTION);
+  item.text =
+      [self localizedConsentStringWithId:
+                IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_SERVICES_TITLE];
+  item.detailText =
+      [self localizedConsentStringWithId:
+                IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_SERVICES_DESCRIPTION];
   item.image = ios::GetChromeBrowserProvider()
                    ->GetBrandedImageProvider()
                    ->GetSigninConfirmationPersonalizeServicesImage();
@@ -274,8 +293,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 - (CollectionViewItem*)openSettingsItem {
   CollectionViewFooterItem* item =
       [[CollectionViewFooterItem alloc] initWithType:ItemTypeFooter];
-  item.text = l10n_util::GetNSString(
-      IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_OPEN_SETTINGS);
+  item.text = [self localizedConsentStringWithId:self.openSettingsStringId];
   item.linkURL = google_util::AppendGoogleLocaleParam(
       GURL("internal://settings-sync"),
       GetApplicationContext()->GetApplicationLocale());
@@ -297,6 +315,13 @@ typedef NS_ENUM(NSInteger, ItemType) {
     return YES;
   }
   return NO;
+}
+
+// Adds the string id to the list of string for the user consent, and returns
+// the NSString related to the string id.
+- (NSString*)localizedConsentStringWithId:(int)stringId {
+  _consentStringIds.push_back(stringId);
+  return l10n_util::GetNSString(stringId);
 }
 
 #pragma mark - ChromeIdentityServiceObserver

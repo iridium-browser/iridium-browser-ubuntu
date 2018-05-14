@@ -30,9 +30,11 @@
 
 #include "modules/webdatabase/DatabaseTracker.h"
 
+#include <memory>
+
+#include "base/location.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseClient.h"
 #include "modules/webdatabase/DatabaseContext.h"
@@ -43,12 +45,11 @@
 #include "platform/weborigin/SecurityOriginHash.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/Functional.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebDatabaseObserver.h"
 #include "public/platform/WebSecurityOrigin.h"
-#include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 
@@ -66,7 +67,7 @@ DatabaseTracker& DatabaseTracker::Tracker() {
 }
 
 DatabaseTracker::DatabaseTracker() {
-  SQLiteFileSystem::RegisterSQLiteVFS();
+  SQLiteFileSystem::InitializeSQLite();
 }
 
 bool DatabaseTracker::CanEstablishDatabase(DatabaseContext* database_context,
@@ -83,7 +84,7 @@ bool DatabaseTracker::CanEstablishDatabase(DatabaseContext* database_context,
   return success;
 }
 
-String DatabaseTracker::FullPathForDatabase(SecurityOrigin* origin,
+String DatabaseTracker::FullPathForDatabase(const SecurityOrigin* origin,
                                             const String& name,
                                             bool) {
   return String(Platform::Current()->DatabaseCreateOriginIdentifier(
@@ -94,7 +95,7 @@ String DatabaseTracker::FullPathForDatabase(SecurityOrigin* origin,
 void DatabaseTracker::AddOpenDatabase(Database* database) {
   MutexLocker open_database_map_lock(open_database_map_guard_);
   if (!open_database_map_)
-    open_database_map_ = WTF::WrapUnique(new DatabaseOriginMap);
+    open_database_map_ = std::make_unique<DatabaseOriginMap>();
 
   String origin_string = database->GetSecurityOrigin()->ToRawString();
   DatabaseNameMap* name_map = open_database_map_->at(origin_string);
@@ -148,10 +149,21 @@ void DatabaseTracker::PrepareToOpenDatabase(Database* database) {
   DCHECK(
       database->GetDatabaseContext()->GetExecutionContext()->IsContextThread());
   if (Platform::Current()->DatabaseObserver()) {
+    // This is an asynchronous call to the browser to open the database,
+    // however we can't actually use the database until we revieve an RPC back
+    // that advises is of the actual size of the database, so there is a race
+    // condition where the database is in an unusable state. To assist, we
+    // will record the size of the database straight away so we can use it
+    // immediately, and the real size will eventually be updated by the RPC from
+    // the browser.
     Platform::Current()->DatabaseObserver()->DatabaseOpened(
         WebSecurityOrigin(database->GetSecurityOrigin()),
         database->StringIdentifier(), database->DisplayName(),
         database->EstimatedSize());
+    // We write a temporary size of 0 to the QuotaTracker - we will be updated
+    // with the correct size via RPC asynchronously.
+    QuotaTracker::Instance().UpdateDatabaseSize(
+        database->GetSecurityOrigin(), database->StringIdentifier(), 0);
   }
 }
 
@@ -169,7 +181,7 @@ unsigned long long DatabaseTracker::GetMaxSizeForDatabase(
   return database_size + space_available;
 }
 
-void DatabaseTracker::CloseDatabasesImmediately(SecurityOrigin* origin,
+void DatabaseTracker::CloseDatabasesImmediately(const SecurityOrigin* origin,
                                                 const String& name) {
   String origin_string = origin->ToRawString();
   MutexLocker open_database_map_lock(open_database_map_guard_);
@@ -187,16 +199,15 @@ void DatabaseTracker::CloseDatabasesImmediately(SecurityOrigin* origin,
   // We have to call closeImmediately() on the context thread.
   for (DatabaseSet::iterator it = database_set->begin();
        it != database_set->end(); ++it) {
-    (*it)->GetDatabaseTaskRunner()->PostTask(
-        BLINK_FROM_HERE,
+    PostCrossThreadTask(
+        *(*it)->GetDatabaseTaskRunner(), FROM_HERE,
         CrossThreadBind(&DatabaseTracker::CloseOneDatabaseImmediately,
                         CrossThreadUnretained(this), origin_string, name, *it));
   }
 }
 
-void DatabaseTracker::ForEachOpenDatabaseInPage(
-    Page* page,
-    std::unique_ptr<DatabaseCallback> callback) {
+void DatabaseTracker::ForEachOpenDatabaseInPage(Page* page,
+                                                DatabaseCallback callback) {
   MutexLocker open_database_map_lock(open_database_map_guard_);
   if (!open_database_map_)
     return;
@@ -206,7 +217,7 @@ void DatabaseTracker::ForEachOpenDatabaseInPage(
         ExecutionContext* context = database->GetExecutionContext();
         DCHECK(context->IsDocument());
         if (ToDocument(context)->GetFrame()->GetPage() == page)
-          (*callback)(database);
+          callback.Run(database);
       }
     }
   }

@@ -10,10 +10,12 @@
 #include "core/frame/LocalFrameView.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebCanvas.h"
 
 namespace blink {
 
 class CullRect;
+class ElementVisibilityObserver;
 class GraphicsContext;
 class RemoteFrame;
 
@@ -40,8 +42,10 @@ class RemoteFrameView final : public GarbageCollectedFinalized<RemoteFrameView>,
   void FrameRectsChanged() override;
   void InvalidateRect(const IntRect&);
   void SetFrameRect(const IntRect&) override;
-  const IntRect& FrameRect() const override { return frame_rect_; }
-  void Paint(GraphicsContext&, const CullRect&) const override {}
+  IntRect FrameRect() const override;
+  void Paint(GraphicsContext&,
+             const GlobalPaintFlags,
+             const CullRect&) const override;
   void UpdateGeometry() override;
   void Hide() override;
   void Show() override;
@@ -50,13 +54,24 @@ class RemoteFrameView final : public GarbageCollectedFinalized<RemoteFrameView>,
   void UpdateViewportIntersectionsForSubtree(
       DocumentLifecycle::LifecycleState) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  bool GetIntrinsicSizingInfo(IntrinsicSizingInfo&) const override;
+
+  void SetIntrinsicSizeInfo(const IntrinsicSizingInfo& size_info);
+  bool HasIntrinsicSizingInfo() const override;
+
+  uint32_t Print(const IntRect&, WebCanvas*) const;
+
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit RemoteFrameView(RemoteFrame*);
 
   LocalFrameView* ParentFrameView() const;
   IntRect ConvertFromRootFrame(const IntRect&) const;
+
+  void UpdateRenderThrottlingStatus(bool hidden, bool subtree_throttled);
+  bool CanThrottleRendering() const;
+  void SetupRenderThrottling();
 
   // The properties and handling of the cycle between RemoteFrame
   // and its RemoteFrameView corresponds to that between LocalFrame
@@ -68,6 +83,12 @@ class RemoteFrameView final : public GarbageCollectedFinalized<RemoteFrameView>,
   IntRect frame_rect_;
   bool self_visible_;
   bool parent_visible_;
+
+  Member<ElementVisibilityObserver> visibility_observer_;
+  bool subtree_throttled_ = false;
+  bool hidden_for_throttling_ = false;
+  IntrinsicSizingInfo intrinsic_sizing_info_;
+  bool has_intrinsic_sizing_info_ = false;
 };
 
 }  // namespace blink

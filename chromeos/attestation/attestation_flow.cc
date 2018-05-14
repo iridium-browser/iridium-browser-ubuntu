@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/optional.h"
 #include "base/timer/timer.h"
 #include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
@@ -36,38 +37,37 @@ constexpr uint16_t kRetryDelayInMilliseconds = 300;
 //   on_true - Called when status=success and value=true.
 //   on_false - Called when status=success and value=false.
 //   on_fail - Called when status=failure.
-//   status - The D-Bus operation status.
-//   value - The value returned by the D-Bus operation.
+//   result - The result returned by the D-Bus operation.
 void DBusBoolRedirectCallback(const base::Closure& on_true,
                               const base::Closure& on_false,
                               const base::Closure& on_fail,
                               const std::string& on_fail_message,
-                              DBusMethodCallStatus status,
-                              bool value) {
-  if (status != DBUS_METHOD_CALL_SUCCESS) {
+                              base::Optional<bool> result) {
+  if (!result.has_value()) {
     LOG(ERROR) << "Attestation: Failed to " << on_fail_message << ".";
     if (!on_fail.is_null())
       on_fail.Run();
     return;
   }
-  const base::Closure& task = value ? on_true : on_false;
+  const base::Closure& task = result.value() ? on_true : on_false;
   if (!task.is_null())
     task.Run();
 }
 
-void DBusDataMethodCallback(
+void DBusCertificateMethodCallback(
     const AttestationFlow::CertificateCallback& callback,
-    DBusMethodCallStatus status,
-    bool result,
-    const std::string& data) {
-  if (status != DBUS_METHOD_CALL_SUCCESS) {
+    base::Optional<CryptohomeClient::TpmAttestationDataResult> result) {
+  if (!result.has_value()) {
     LOG(ERROR) << "Attestation: DBus data operation failed.";
     if (!callback.is_null())
-      callback.Run(false, "");
+      callback.Run(ATTESTATION_UNSPECIFIED_FAILURE, "");
     return;
   }
-  if (!callback.is_null())
-    callback.Run(result, data);
+  if (!callback.is_null()) {
+    callback.Run(
+        result->success ? ATTESTATION_SUCCESS : ATTESTATION_UNSPECIFIED_FAILURE,
+        result->data);
+  }
 }
 
 }  // namespace
@@ -91,8 +91,9 @@ std::string AttestationFlow::GetKeyNameForProfile(
     const std::string& request_origin) {
   switch (certificate_profile) {
     case PROFILE_ENTERPRISE_MACHINE_CERTIFICATE:
-    case PROFILE_ENTERPRISE_ENROLLMENT_CERTIFICATE:
       return kEnterpriseMachineKey;
+    case PROFILE_ENTERPRISE_ENROLLMENT_CERTIFICATE:
+      return kEnterpriseEnrollmentKey;
     case PROFILE_ENTERPRISE_USER_CERTIFICATE:
       return kEnterpriseUserKey;
     case PROFILE_CONTENT_PROTECTION_CERTIFICATE:
@@ -113,8 +114,7 @@ AttestationFlow::AttestationFlow(cryptohome::AsyncMethodCaller* async_caller,
           base::TimeDelta::FromMilliseconds(kRetryDelayInMilliseconds)),
       weak_factory_(this) {}
 
-AttestationFlow::~AttestationFlow() {
-}
+AttestationFlow::~AttestationFlow() = default;
 
 void AttestationFlow::GetCertificate(
     AttestationCertificateProfile certificate_profile,
@@ -127,18 +127,19 @@ void AttestationFlow::GetCertificate(
   const base::Closure do_cert_request = base::Bind(
       &AttestationFlow::StartCertificateRequest, weak_factory_.GetWeakPtr(),
       certificate_profile, account_id, request_origin, force_new_key, callback);
-  const base::Closure on_failure = base::Bind(callback, false, "");
+  const base::RepeatingClosure on_failure =
+      base::BindRepeating(callback, ATTESTATION_UNSPECIFIED_FAILURE, "");
   const base::Closure initiate_enroll = base::Bind(
       &AttestationFlow::WaitForAttestationReadyAndStartEnroll,
       weak_factory_.GetWeakPtr(), base::TimeTicks::Now() + ready_timeout_,
       on_failure,
       base::Bind(&AttestationFlow::StartEnroll, weak_factory_.GetWeakPtr(),
                  on_failure, do_cert_request));
-  cryptohome_client_->TpmAttestationIsEnrolled(
-      base::Bind(&DBusBoolRedirectCallback,
-                 do_cert_request,  // If enrolled, proceed with cert request.
-                 initiate_enroll,  // If not enrolled, initiate enrollment.
-                 on_failure, "check enrollment state"));
+  cryptohome_client_->TpmAttestationIsEnrolled(base::BindOnce(
+      &DBusBoolRedirectCallback,
+      do_cert_request,  // If enrolled, proceed with cert request.
+      initiate_enroll,  // If not enrolled, initiate enrollment.
+      on_failure, "check enrollment state"));
 }
 
 void AttestationFlow::WaitForAttestationReadyAndStartEnroll(
@@ -148,9 +149,9 @@ void AttestationFlow::WaitForAttestationReadyAndStartEnroll(
   const base::Closure retry_initiate_enroll =
       base::Bind(&AttestationFlow::CheckAttestationReadyAndReschedule,
                  weak_factory_.GetWeakPtr(), end_time, on_failure, next_task);
-  cryptohome_client_->TpmAttestationIsPrepared(
-      base::Bind(&DBusBoolRedirectCallback, next_task, retry_initiate_enroll,
-                 on_failure, "check for attestation readiness"));
+  cryptohome_client_->TpmAttestationIsPrepared(base::BindOnce(
+      &DBusBoolRedirectCallback, next_task, retry_initiate_enroll, on_failure,
+      "check for attestation readiness"));
 }
 
 void AttestationFlow::StartEnroll(const base::Closure& on_failure,
@@ -251,9 +252,10 @@ void AttestationFlow::StartCertificateRequest(
         certificate_profile, account_id, request_origin, true, callback);
     cryptohome_client_->TpmAttestationDoesKeyExist(
         key_type, cryptohome::Identification(account_id), key_name,
-        base::Bind(&DBusBoolRedirectCallback, on_key_exists, on_key_not_exists,
-                   base::Bind(callback, false, ""),
-                   "check for existence of attestation key"));
+        base::BindRepeating(
+            &DBusBoolRedirectCallback, on_key_exists, on_key_not_exists,
+            base::BindRepeating(callback, ATTESTATION_UNSPECIFIED_FAILURE, ""),
+            "check for existence of attestation key"));
   }
 }
 
@@ -267,7 +269,7 @@ void AttestationFlow::SendCertificateRequestToPCA(
   if (!success) {
     LOG(ERROR) << "Attestation: Failed to create certificate request.";
     if (!callback.is_null())
-      callback.Run(false, "");
+      callback.Run(ATTESTATION_UNSPECIFIED_FAILURE, "");
     return;
   }
 
@@ -288,14 +290,24 @@ void AttestationFlow::SendCertificateResponseToDaemon(
   if (!success) {
     LOG(ERROR) << "Attestation: Certificate request failed.";
     if (!callback.is_null())
-      callback.Run(false, "");
+      callback.Run(ATTESTATION_UNSPECIFIED_FAILURE, "");
     return;
   }
 
   // Forward the response to the attestation service to complete the operation.
   async_caller_->AsyncTpmAttestationFinishCertRequest(
       data, key_type, cryptohome::Identification(account_id), key_name,
-      callback);
+      base::BindRepeating(&AttestationFlow::OnCertRequestFinished,
+                          weak_factory_.GetWeakPtr(), callback));
+}
+
+void AttestationFlow::OnCertRequestFinished(const CertificateCallback& callback,
+                                            bool success,
+                                            const std::string& data) {
+  if (success)
+    callback.Run(ATTESTATION_SUCCESS, data);
+  else
+    callback.Run(ATTESTATION_SERVER_BAD_REQUEST_FAILURE, data);
 }
 
 void AttestationFlow::GetExistingCertificate(
@@ -305,7 +317,7 @@ void AttestationFlow::GetExistingCertificate(
     const CertificateCallback& callback) {
   cryptohome_client_->TpmAttestationGetCertificate(
       key_type, cryptohome::Identification(account_id), key_name,
-      base::Bind(&DBusDataMethodCallback, callback));
+      base::BindRepeating(&DBusCertificateMethodCallback, callback));
 }
 
 void AttestationFlow::CheckAttestationReadyAndReschedule(
@@ -327,7 +339,7 @@ void AttestationFlow::CheckAttestationReadyAndReschedule(
   }
 }
 
-ServerProxy::~ServerProxy() {}
+ServerProxy::~ServerProxy() = default;
 
 PrivacyCAType ServerProxy::GetType() {
   return DEFAULT_PCA;

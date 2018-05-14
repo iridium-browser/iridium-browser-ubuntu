@@ -41,7 +41,7 @@ EntryBase::EntryBase(DOMFileSystemBase* file_system, const String& full_path)
       full_path_(full_path),
       name_(DOMFilePath::GetName(full_path)) {}
 
-EntryBase::~EntryBase() {}
+EntryBase::~EntryBase() = default;
 
 String EntryBase::toURL() const {
   if (!cached_url_.IsNull())
@@ -55,8 +55,9 @@ String EntryBase::toURL() const {
   return cached_url_;
 }
 
-DEFINE_TRACE(EntryBase) {
+void EntryBase::Trace(blink::Visitor* visitor) {
   visitor->Trace(file_system_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

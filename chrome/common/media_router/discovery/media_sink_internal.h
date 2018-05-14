@@ -7,9 +7,9 @@
 
 #include <utility>
 
-#include "base/memory/manual_constructor.h"
 #include "chrome/common/media_router/media_sink.h"
 #include "net/base/ip_address.h"
+#include "net/base/ip_endpoint.h"
 #include "url/gurl.h"
 
 namespace media_router {
@@ -33,7 +33,9 @@ struct DialSinkExtraData {
 
 // Extra data for Cast media sink.
 struct CastSinkExtraData {
-  net::IPAddress ip_address;
+  net::IPEndPoint ip_endpoint;
+
+  int port = 0;
 
   // Model name of the sink.
   std::string model_name;
@@ -46,6 +48,9 @@ struct CastSinkExtraData {
   // valid cast_channel_id. The cast_channel_id may change over time as the
   // browser reconnects to a device.
   int cast_channel_id = 0;
+
+  // True if Cast channel is opened from DIAL sink.
+  bool discovered_by_dial = false;
 
   CastSinkExtraData();
   CastSinkExtraData(const CastSinkExtraData& other);
@@ -77,17 +82,9 @@ class MediaSinkInternal {
   // Sorted by sink id.
   bool operator<(const MediaSinkInternal& other) const;
 
-  // Used by mojo.
-  void set_sink_id(const MediaSink::Id& sink_id) { sink_.set_sink_id(sink_id); }
-  void set_name(const std::string& name) { sink_.set_name(name); }
-  void set_description(const std::string& description) {
-    sink_.set_description(description);
-  }
-  void set_domain(const std::string& domain) { sink_.set_domain(domain); }
-  void set_icon_type(SinkIconType icon_type) { sink_.set_icon_type(icon_type); }
-
   void set_sink(const MediaSink& sink);
   const MediaSink& sink() const { return sink_; }
+  MediaSink& sink() { return sink_; }
 
   void set_dial_data(const DialSinkExtraData& dial_data);
 
@@ -104,8 +101,12 @@ class MediaSinkInternal {
 
   static bool IsValidSinkId(const std::string& sink_id);
 
+  // Returns processed device id without "uuid:" and "-", e.g. input
+  // "uuid:6d238518-a574-eab1-017e-d0975c039081" and output
+  // "6d238518a574eab1017ed0975c039081"
+  static std::string ProcessDeviceUUID(const std::string& device_uuid);
+
  private:
-  void InternalCopyAssignFrom(const MediaSinkInternal& other);
   void InternalCopyConstructFrom(const MediaSinkInternal& other);
   void InternalCleanup();
 
@@ -117,10 +118,10 @@ class MediaSinkInternal {
 
   union {
     // Set if sink is DIAL sink.
-    base::ManualConstructor<DialSinkExtraData> dial_data_;
+    DialSinkExtraData dial_data_;
 
     // Set if sink is Cast sink.
-    base::ManualConstructor<CastSinkExtraData> cast_data_;
+    CastSinkExtraData cast_data_;
   };
 };
 

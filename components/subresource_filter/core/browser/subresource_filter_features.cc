@@ -4,15 +4,14 @@
 
 #include "components/subresource_filter/core/browser/subresource_filter_features.h"
 
+#include <algorithm>
 #include <map>
 #include <ostream>
 #include <sstream>
-#include <string>
 #include <tuple>
 #include <utility>
 
 #include "base/lazy_instance.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -29,7 +28,7 @@ namespace {
 
 class CommaSeparatedStrings {
  public:
-  CommaSeparatedStrings(std::string comma_separated_strings)
+  explicit CommaSeparatedStrings(std::string comma_separated_strings)
       : backing_string_(comma_separated_strings),
         pieces_(base::SplitStringPiece(backing_string_,
                                        ",",
@@ -80,19 +79,21 @@ ActivationScope ParseActivationScope(const base::StringPiece activation_scope) {
 }
 
 ActivationList ParseActivationList(std::string activation_lists_string) {
-  ActivationList activation_list_type = ActivationList::NONE;
   CommaSeparatedStrings activation_lists(std::move(activation_lists_string));
   if (activation_lists.CaseInsensitiveContains(
           kActivationListPhishingInterstitial)) {
     return ActivationList::PHISHING_INTERSTITIAL;
   } else if (activation_lists.CaseInsensitiveContains(
                  kActivationListSocialEngineeringAdsInterstitial)) {
-    activation_list_type = ActivationList::SOCIAL_ENG_ADS_INTERSTITIAL;
+    return ActivationList::SOCIAL_ENG_ADS_INTERSTITIAL;
   } else if (activation_lists.CaseInsensitiveContains(
                  kActivationListSubresourceFilter)) {
-    activation_list_type = ActivationList::SUBRESOURCE_FILTER;
+    return ActivationList::SUBRESOURCE_FILTER;
+  } else if (activation_lists.CaseInsensitiveContains(
+                 kActivationListBetterAds)) {
+    return ActivationList::BETTER_ADS;
   }
-  return activation_list_type;
+  return ActivationList::NONE;
 }
 
 double ParsePerformanceMeasurementRate(const std::string& rate) {
@@ -114,15 +115,19 @@ int ParseInt(const base::StringPiece value) {
 
 std::vector<Configuration> FillEnabledPresetConfigurations(
     std::map<std::string, std::string>* params) {
+  // If ad tagging is enabled, turn on the dryrun automatically.
+  bool ad_tagging_enabled = base::FeatureList::IsEnabled(kAdTagging);
   const struct {
     const char* name;
     bool enabled_by_default;
     Configuration (*factory_method)();
   } kAvailablePresetConfigurations[] = {
-      {kPresetLiveRunOnPhishingSites, false,
+      {kPresetLiveRunOnPhishingSites, true,
        &Configuration::MakePresetForLiveRunOnPhishingSites},
-      {kPresetPerformanceTestingDryRunOnAllSites, false,
-       &Configuration::MakePresetForPerformanceTestingDryRunOnAllSites}};
+      {kPresetPerformanceTestingDryRunOnAllSites, ad_tagging_enabled,
+       &Configuration::MakePresetForPerformanceTestingDryRunOnAllSites},
+      {kPresetLiveRunForBetterAds, true,
+       &Configuration::MakePresetForLiveRunForBetterAds}};
 
   CommaSeparatedStrings enabled_presets(
       TakeVariationParamOrReturnEmpty(params, kEnablePresetsParameterName));
@@ -172,13 +177,6 @@ Configuration ParseExperimentalConfiguration(
       ParseBool(TakeVariationParamOrReturnEmpty(
           params, kWhitelistSiteOnReloadParameterName));
 
-  configuration.activation_options.should_strengthen_popup_blocker =
-      ParseBool(TakeVariationParamOrReturnEmpty(
-          params, kStrengthenPopupBlockerParameterName));
-
-  configuration.activation_options.should_disable_ruleset_rules =
-      ParseBool(TakeVariationParamOrReturnEmpty(params, kDisableRulesetRules));
-
   // GeneralSettings:
   configuration.general_settings.ruleset_flavor =
       TakeVariationParamOrReturnEmpty(params, kRulesetFlavorParameterName);
@@ -190,7 +188,9 @@ std::vector<Configuration> ParseEnabledConfigurations() {
   std::map<std::string, std::string> params;
   base::GetFieldTrialParamsByFeature(kSafeBrowsingSubresourceFilter, &params);
 
-  std::vector<Configuration> configs = FillEnabledPresetConfigurations(&params);
+  std::vector<Configuration> configs;
+  if (base::FeatureList::IsEnabled(kSafeBrowsingSubresourceFilter))
+    configs = FillEnabledPresetConfigurations(&params);
 
   Configuration experimental_config = ParseExperimentalConfiguration(&params);
   configs.push_back(std::move(experimental_config));
@@ -238,10 +238,11 @@ base::LazyInstance<scoped_refptr<ConfigurationList>>::Leaky
 // Constant definitions -------------------------------------------------------
 
 const base::Feature kSafeBrowsingSubresourceFilter{
-    "SubresourceFilter", base::FEATURE_DISABLED_BY_DEFAULT};
+    "SubresourceFilter", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kSafeBrowsingSubresourceFilterExperimentalUI{
-    "SubresourceFilterExperimentalUI", base::FEATURE_DISABLED_BY_DEFAULT};
+    "SubresourceFilterExperimentalUI", base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kAdTagging{"AdTagging", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Legacy name `activation_state` is used in variation parameters.
 const char kActivationLevelParameterName[] = "activation_state";
@@ -259,6 +260,7 @@ const char kActivationListSocialEngineeringAdsInterstitial[] =
     "social_engineering_ads_interstitial";
 const char kActivationListPhishingInterstitial[] = "phishing_interstitial";
 const char kActivationListSubresourceFilter[] = "subresource_filter";
+const char kActivationListBetterAds[] = "better_ads";
 
 const char kActivationPriorityParameterName[] = "activation_priority";
 
@@ -266,9 +268,6 @@ const char kPerformanceMeasurementRateParameterName[] =
     "performance_measurement_rate";
 const char kSuppressNotificationsParameterName[] = "suppress_notifications";
 const char kWhitelistSiteOnReloadParameterName[] = "whitelist_site_on_reload";
-const char kStrengthenPopupBlockerParameterName[] = "strengthen_popup_blocker";
-const char kDisableRulesetRules[] = "disable_ruleset_rules";
-
 const char kRulesetFlavorParameterName[] = "ruleset_flavor";
 
 const char kEnablePresetsParameterName[] = "enable_presets";
@@ -276,6 +275,8 @@ const char kDisablePresetsParameterName[] = "disable_presets";
 const char kPresetLiveRunOnPhishingSites[] = "liverun_on_phishing_sites";
 const char kPresetPerformanceTestingDryRunOnAllSites[] =
     "performance_testing_dryrun_on_all_sites";
+const char kPresetLiveRunForBetterAds[] =
+    "liverun_on_better_ads_violating_sites";
 
 // Configuration --------------------------------------------------------------
 
@@ -293,6 +294,25 @@ Configuration Configuration::MakePresetForPerformanceTestingDryRunOnAllSites() {
   Configuration config(ActivationLevel::DRYRUN, ActivationScope::ALL_SITES);
   config.activation_options.performance_measurement_rate = 1.0;
   config.activation_conditions.priority = 500;
+  return config;
+}
+
+// static
+Configuration Configuration::MakeForForcedActivation() {
+  // This is a strange configuration, but it is generated on-the-fly rather than
+  // via finch configs, and is separate from the standard activation computation
+  // (which is why scope is no_sites).
+  Configuration config(ActivationLevel::ENABLED, ActivationScope::NO_SITES);
+  config.activation_conditions.forced_activation = true;
+  return config;
+}
+
+// static
+Configuration Configuration::MakePresetForLiveRunForBetterAds() {
+  Configuration config(ActivationLevel::ENABLED,
+                       ActivationScope::ACTIVATION_LIST,
+                       ActivationList::BETTER_ADS);
+  config.activation_conditions.priority = 800;
   return config;
 }
 
@@ -315,12 +335,11 @@ bool Configuration::operator==(const Configuration& rhs) const {
     return std::tie(config.activation_conditions.activation_scope,
                     config.activation_conditions.activation_list,
                     config.activation_conditions.priority,
+                    config.activation_conditions.forced_activation,
                     config.activation_options.activation_level,
                     config.activation_options.performance_measurement_rate,
                     config.activation_options.should_whitelist_site_on_reload,
                     config.activation_options.should_suppress_notifications,
-                    config.activation_options.should_strengthen_popup_blocker,
-                    config.activation_options.should_disable_ruleset_rules,
                     config.general_settings.ruleset_flavor);
   };
   return tie(*this) == tie(rhs);
@@ -332,16 +351,17 @@ bool Configuration::operator!=(const Configuration& rhs) const {
 
 std::unique_ptr<base::trace_event::TracedValue>
 Configuration::ActivationConditions::ToTracedValue() const {
-  auto value = base::MakeUnique<base::trace_event::TracedValue>();
+  auto value = std::make_unique<base::trace_event::TracedValue>();
   value->SetString("activation_scope", StreamToString(activation_scope));
   value->SetString("activation_list", StreamToString(activation_list));
   value->SetInteger("priority", priority);
+  value->SetBoolean("forced_activation", forced_activation);
   return value;
 }
 
 std::unique_ptr<base::trace_event::TracedValue> Configuration::ToTracedValue()
     const {
-  auto value = base::MakeUnique<base::trace_event::TracedValue>();
+  auto value = std::make_unique<base::trace_event::TracedValue>();
   auto traced_conditions = activation_conditions.ToTracedValue();
   value->SetValue("activation_conditions", *traced_conditions);
   value->SetString("activation_level",
@@ -352,13 +372,14 @@ std::unique_ptr<base::trace_event::TracedValue> Configuration::ToTracedValue()
                     activation_options.should_suppress_notifications);
   value->SetBoolean("should_whitelist_site_on_reload",
                     activation_options.should_whitelist_site_on_reload);
-  value->SetBoolean("should_strengthen_popup_blocker",
-                    activation_options.should_strengthen_popup_blocker);
-  value->SetBoolean("should_disable_ruleset_rules",
-                    activation_options.should_disable_ruleset_rules);
   value->SetString("ruleset_flavor",
                    StreamToString(general_settings.ruleset_flavor));
   return value;
+}
+
+std::ostream& operator<<(std::ostream& os, const Configuration& config) {
+  os << config.ToTracedValue()->ToString();
+  return os;
 }
 
 // ConfigurationList ----------------------------------------------------------
@@ -378,6 +399,11 @@ scoped_refptr<ConfigurationList> GetEnabledConfigurations() {
         base::MakeRefCounted<ConfigurationList>(ParseEnabledConfigurations());
   }
   return g_active_configurations.Get();
+}
+
+bool HasEnabledConfiguration(const Configuration& config) {
+  return base::ContainsValue(
+      GetEnabledConfigurations()->configs_by_decreasing_priority(), config);
 }
 
 namespace testing {

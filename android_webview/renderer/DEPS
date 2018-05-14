@@ -9,17 +9,20 @@ include_rules = [
   "+components/printing/common",
   "+components/printing/renderer",
   "+components/safe_browsing/common",
+  "+components/safe_browsing/features.h",
   "+components/safe_browsing/renderer",
   "+components/spellcheck/renderer",
   "+components/visitedlink/renderer",
 
   "+content/public/child",
+  "+content/public/common",
   "+content/public/renderer",
 
   "+media/base",
 
   "+printing",
-  
+
+  "+services/network/public/cpp",
   "+services/service_manager/public/cpp",
 
   "+third_party/WebKit/public/platform",

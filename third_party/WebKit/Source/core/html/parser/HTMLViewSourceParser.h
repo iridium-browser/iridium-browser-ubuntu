@@ -44,13 +44,13 @@ class CORE_EXPORT HTMLViewSourceParser final
                                       const String& mime_type) {
     return new HTMLViewSourceParser(document, mime_type);
   }
-  ~HTMLViewSourceParser() override {}
+  ~HTMLViewSourceParser() override = default;
 
  private:
   HTMLViewSourceParser(HTMLViewSourceDocument&, const String& mime_type);
 
   // DocumentParser
-  void insert(const SegmentedString&) override { NOTREACHED(); }
+  void insert(const String&) override { NOTREACHED(); }
   void Append(const String&) override;
   void Finish() override;
 

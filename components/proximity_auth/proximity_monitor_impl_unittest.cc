@@ -84,8 +84,7 @@ CreateAndRegisterMockBluetoothAdapter() {
 class ProximityAuthProximityMonitorImplTest : public testing::Test {
  public:
   ProximityAuthProximityMonitorImplTest()
-      : clock_(new base::SimpleTestTickClock()),
-        bluetooth_adapter_(CreateAndRegisterMockBluetoothAdapter()),
+      : bluetooth_adapter_(CreateAndRegisterMockBluetoothAdapter()),
         remote_bluetooth_device_(&*bluetooth_adapter_,
                                  0,
                                  kRemoteDeviceName,
@@ -97,10 +96,12 @@ class ProximityAuthProximityMonitorImplTest : public testing::Test {
                        kRemoteDevicePublicKey,
                        kBluetoothAddress,
                        kPersistentSymmetricKey,
-                       std::string()),
+                       true /* unlock_key */,
+                       true /* mobile_hotspot_supported */,
+                       0 /* last_update_time_millis */),
         connection_(remote_device_),
         pref_manager_(new NiceMock<MockProximityAuthPrefManager>()),
-        monitor_(&connection_, base::WrapUnique(clock_), pref_manager_.get()),
+        monitor_(&connection_, pref_manager_.get()),
         task_runner_(new base::TestSimpleTaskRunner()),
         thread_task_runner_handle_(task_runner_) {
     ON_CALL(*bluetooth_adapter_, GetDevice(kBluetoothAddress))
@@ -129,9 +130,6 @@ class ProximityAuthProximityMonitorImplTest : public testing::Test {
  protected:
   // Mock for verifying interactions with the proximity monitor's observer.
   NiceMock<MockProximityMonitorObserver> observer_;
-
-  // Clock used for verifying time calculations. Owned by the monitor_.
-  base::SimpleTestTickClock* clock_;
 
   // Mocks used for verifying interactions with the Bluetooth subsystem.
   scoped_refptr<device::MockBluetoothAdapter> bluetooth_adapter_;
@@ -333,10 +331,8 @@ TEST_F(ProximityAuthProximityMonitorImplTest,
   monitor_.Start();
   ProvideConnectionInfo({0, 0, 4});
 
-  clock_->Advance(base::TimeDelta::FromMilliseconds(101));
   ProvideConnectionInfo({-20, 3, 4});
 
-  clock_->Advance(base::TimeDelta::FromMilliseconds(203));
   base::HistogramTester histogram_tester;
   monitor_.RecordProximityMetricsOnAuthSuccess();
   histogram_tester.ExpectUniqueSample("EasyUnlock.AuthProximity.RollingRssi",
@@ -362,12 +358,11 @@ TEST_F(ProximityAuthProximityMonitorImplTest,
   // Note: A device without a recorded name will have "Unknown" as its name.
   cryptauth::RemoteDevice unnamed_remote_device(
       kRemoteDeviceUserId, "" /* name */, kRemoteDevicePublicKey,
-      kBluetoothAddress, kPersistentSymmetricKey, std::string());
+      kBluetoothAddress, kPersistentSymmetricKey, true /* unlock_key */,
+      true /* supports_mobile_hotspot */, 0 /* last_update_time_millis */);
   cryptauth::FakeConnection connection(unnamed_remote_device);
 
-  std::unique_ptr<base::TickClock> clock(new base::SimpleTestTickClock());
-  ProximityMonitorImpl monitor(&connection, std::move(clock),
-                               pref_manager_.get());
+  ProximityMonitorImpl monitor(&connection, pref_manager_.get());
   monitor.AddObserver(&observer_);
   monitor.Start();
   ProvideConnectionInfo({127, 127, 127});

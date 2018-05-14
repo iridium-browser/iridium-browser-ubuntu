@@ -4,24 +4,33 @@
 
 #include "cc/test/fake_raster_buffer_provider.h"
 
+#include "cc/resources/resource_pool.h"
+
 namespace cc {
 
-FakeRasterBufferProviderImpl::FakeRasterBufferProviderImpl() {}
+class StubGpuBacking : public ResourcePool::GpuBacking {
+ public:
+  base::trace_event::MemoryAllocatorDumpGuid MemoryDumpGuid(
+      uint64_t tracing_process_id) override {
+    return {};
+  }
+  base::UnguessableToken SharedMemoryGuid() override { return {}; }
+};
 
-FakeRasterBufferProviderImpl::~FakeRasterBufferProviderImpl() {}
+FakeRasterBufferProviderImpl::FakeRasterBufferProviderImpl() = default;
+
+FakeRasterBufferProviderImpl::~FakeRasterBufferProviderImpl() = default;
 
 std::unique_ptr<RasterBuffer>
 FakeRasterBufferProviderImpl::AcquireBufferForRaster(
-    const Resource* resource,
+    const ResourcePool::InUsePoolResource& resource,
     uint64_t resource_content_id,
     uint64_t previous_content_id) {
+  auto backing = std::make_unique<StubGpuBacking>();
+  backing->mailbox = gpu::Mailbox::Generate();
+  resource.set_gpu_backing(std::move(backing));
   return nullptr;
 }
-
-void FakeRasterBufferProviderImpl::ReleaseBufferForRaster(
-    std::unique_ptr<RasterBuffer> buffer) {}
-
-void FakeRasterBufferProviderImpl::OrderingBarrier() {}
 
 void FakeRasterBufferProviderImpl::Flush() {}
 
@@ -41,12 +50,12 @@ bool FakeRasterBufferProviderImpl::CanPartialRasterIntoProvidedResource()
 }
 
 bool FakeRasterBufferProviderImpl::IsResourceReadyToDraw(
-    ResourceId resource_id) const {
+    const ResourcePool::InUsePoolResource& resource) const {
   return true;
 }
 
 uint64_t FakeRasterBufferProviderImpl::SetReadyToDrawCallback(
-    const ResourceProvider::ResourceIdArray& resource_ids,
+    const std::vector<const ResourcePool::InUsePoolResource*>& resources,
     const base::Callback<void()>& callback,
     uint64_t pending_callback_id) const {
   return 0;

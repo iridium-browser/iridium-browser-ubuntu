@@ -7,7 +7,7 @@
  * flush storage", or "mounted zip archive" etc.
  * @interface
  */
-function VolumeInfo() {};
+function VolumeInfo() {}
 
 /** @type {VolumeManagerCommon.VolumeType} */
 VolumeInfo.prototype.volumeType;
@@ -74,10 +74,16 @@ VolumeInfo.prototype.profile;
 VolumeInfo.prototype.label;
 
 /**
- * ID of an extennsion providing this volume.
+ * ID of a provider for this volume.
  * @type {(string|undefined)}
  */
-VolumeInfo.prototype.extensionId;
+VolumeInfo.prototype.providerId;
+
+/**
+ * Set of icons for this volume.
+ * @type {!IconSet}
+ */
+VolumeInfo.prototype.iconSet;
 
 /**
  * True if the volume contains media.
@@ -101,6 +107,9 @@ VolumeInfo.prototype.watchable;
 /**  @type {VolumeManagerCommon.Source} */
 VolumeInfo.prototype.source;
 
+/**  @type {VolumeManagerCommon.FileSystemType} */
+VolumeInfo.prototype.diskFileSystemType;
+
 /**
  * Starts resolving the display root and obtains it.  It may take long time for
  * Drive. Once resolved, it is cached.
@@ -108,7 +117,7 @@ VolumeInfo.prototype.source;
  * @param {function(!DirectoryEntry)=} opt_onSuccess Success callback with the
  *     display root directory as an argument.
  * @param {function(*)=} opt_onFailure Failure callback.
- * @return {!Promise.<!DirectoryEntry>}
+ * @return {!Promise<!DirectoryEntry>}
  */
 VolumeInfo.prototype.resolveDisplayRoot = function(
     opt_onSuccess, opt_onFailure) {};

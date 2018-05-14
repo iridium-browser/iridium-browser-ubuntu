@@ -8,16 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/desktop_capture/win/dxgi_frame.h"
+#include "modules/desktop_capture/win/dxgi_frame.h"
 
 #include <string.h>
 
 #include <utility>
 
-#include "webrtc/modules/desktop_capture/desktop_frame.h"
-#include "webrtc/modules/desktop_capture/win/dxgi_duplicator_controller.h"
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/logging.h"
+#include "modules/desktop_capture/desktop_frame.h"
+#include "modules/desktop_capture/win/dxgi_duplicator_controller.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
 
@@ -33,10 +33,9 @@ bool DxgiFrame::Prepare(DesktopSize size, DesktopCapturer::SourceId source_id) {
     context_.Reset();
   }
 
-  if (resolution_change_detector_.IsChanged(size)) {
+  if (resolution_tracker_.SetResolution(size)) {
     // Once the output size changed, recreate the SharedDesktopFrame.
     frame_.reset();
-    resolution_change_detector_.Reset();
   }
 
   if (!frame_) {
@@ -47,7 +46,7 @@ bool DxgiFrame::Prepare(DesktopSize size, DesktopCapturer::SourceId source_id) {
       frame.reset(new BasicDesktopFrame(size));
     }
     if (!frame) {
-      LOG(LS_WARNING) << "DxgiFrame cannot create a new DesktopFrame.";
+      RTC_LOG(LS_WARNING) << "DxgiFrame cannot create a new DesktopFrame.";
       return false;
     }
     // DirectX capturer won't paint each pixel in the frame due to its one

@@ -4,8 +4,9 @@
 
 #include "components/network_time/network_time_test_utils.h"
 
+#include <memory>
+
 #include "base/feature_list.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/mock_entropy_provider.h"
@@ -66,7 +67,7 @@ void FieldTrialTest::SetNetworkQueriesWithVariationsService(
   variations::testing::ClearAllVariationParams();
 
   std::map<std::string, std::string> params;
-  params["RandomQueryProbability"] = base::DoubleToString(query_probability);
+  params["RandomQueryProbability"] = base::NumberToString(query_probability);
   params["CheckTimeIntervalSeconds"] = base::Int64ToString(360);
   std::string fetch_behavior_param;
   switch (fetch_behavior) {
@@ -104,7 +105,7 @@ void FieldTrialTest::SetNetworkQueriesWithVariationsService(
   // one. (See https://crbug.com/684216#c5 for more discussion.)
   field_trial_list_.reset();
   field_trial_list_.reset(
-      new base::FieldTrialList(base::MakeUnique<base::MockEntropyProvider>()));
+      new base::FieldTrialList(std::make_unique<base::MockEntropyProvider>()));
 
   // refcounted, and reference held by the singleton FieldTrialList.
   base::FieldTrial* trial = base::FieldTrialList::FactoryGetFieldTrial(

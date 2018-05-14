@@ -7,9 +7,9 @@
 
 #include "core/CoreExport.h"
 #include "core/layout/ng/geometry/ng_logical_offset.h"
-#include "core/layout/ng/ng_writing_mode.h"
 #include "platform/LayoutUnit.h"
 #include "platform/text/TextDirection.h"
+#include "platform/text/WritingMode.h"
 
 namespace blink {
 
@@ -18,7 +18,7 @@ struct NGPhysicalBoxStrut;
 // This struct is used for storing margins, borders or padding of a box on all
 // four edges.
 struct CORE_EXPORT NGBoxStrut {
-  NGBoxStrut() {}
+  NGBoxStrut() = default;
   NGBoxStrut(LayoutUnit inline_start,
              LayoutUnit inline_end,
              LayoutUnit block_start,
@@ -38,13 +38,11 @@ struct CORE_EXPORT NGBoxStrut {
   LayoutUnit InlineSum() const { return inline_start + inline_end; }
   LayoutUnit BlockSum() const { return block_start + block_end; }
 
-  NGLogicalOffset InlineBlockStartOffset() {
-    return {inline_start, block_start};
-  }
+  NGLogicalOffset StartOffset() const { return {inline_start, block_start}; }
 
   bool IsEmpty() const;
 
-  NGPhysicalBoxStrut ConvertToPhysical(NGWritingMode, TextDirection) const;
+  NGPhysicalBoxStrut ConvertToPhysical(WritingMode, TextDirection) const;
 
   // The following two operators exist primarily to have an easy way to access
   // the sum of border and padding.
@@ -80,14 +78,14 @@ struct NGPixelSnappedPhysicalBoxStrut;
 // direction.
 // See https://drafts.csswg.org/css-writing-modes-3/#abstract-box
 struct CORE_EXPORT NGPhysicalBoxStrut {
-  NGPhysicalBoxStrut() {}
+  NGPhysicalBoxStrut() = default;
   NGPhysicalBoxStrut(LayoutUnit top,
                      LayoutUnit right,
                      LayoutUnit bottom,
                      LayoutUnit left)
       : top(top), right(right), bottom(bottom), left(left) {}
 
-  NGBoxStrut ConvertToLogical(NGWritingMode, TextDirection) const;
+  NGBoxStrut ConvertToLogical(WritingMode, TextDirection) const;
   NGPixelSnappedPhysicalBoxStrut SnapToDevicePixels() const;
 
   LayoutUnit HorizontalSum() const { return left + right; }
@@ -101,7 +99,7 @@ struct CORE_EXPORT NGPhysicalBoxStrut {
 
 // Struct to store pixel snapped physical dimensions.
 struct CORE_EXPORT NGPixelSnappedPhysicalBoxStrut {
-  NGPixelSnappedPhysicalBoxStrut() {}
+  NGPixelSnappedPhysicalBoxStrut() = default;
   NGPixelSnappedPhysicalBoxStrut(int top, int right, int bottom, int left)
       : top(top), right(right), bottom(bottom), left(left) {}
   int top;

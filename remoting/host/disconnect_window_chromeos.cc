@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <string>
 
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "remoting/host/client_session_control.h"
 #include "remoting/host/host_window.h"
 
@@ -29,7 +29,7 @@ class DisconnectWindowAura : public HostWindow {
   DISALLOW_COPY_AND_ASSIGN(DisconnectWindowAura);
 };
 
-DisconnectWindowAura::DisconnectWindowAura() {}
+DisconnectWindowAura::DisconnectWindowAura() = default;
 
 DisconnectWindowAura::~DisconnectWindowAura() {
   ash::Shell::Get()->system_tray_notifier()->NotifyScreenShareStop();
@@ -50,7 +50,7 @@ void DisconnectWindowAura::Start(
 
 // static
 std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
-  return base::MakeUnique<DisconnectWindowAura>();
+  return std::make_unique<DisconnectWindowAura>();
 }
 
 }  // namespace remoting

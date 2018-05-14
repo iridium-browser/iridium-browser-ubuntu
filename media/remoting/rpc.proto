@@ -152,6 +152,7 @@ message VideoDecoderConfig {
     kCodecVP9 = 7;
     kCodecHEVC = 8;
     kCodecDolbyVision = 9;
+    kCodecAV1 = 10;
   }
 
   // Proto version of media::VideoCodecProfile.
@@ -181,6 +182,8 @@ message VideoDecoderConfig {
     DOLBYVISION_PROFILE4 = 20;
     DOLBYVISION_PROFILE5 = 21;
     DOLBYVISION_PROFILE7 = 22;
+    THEORAPROFILE_ANY = 23;
+    AV1PROFILE_PROFILE0 = 24;
   };
 
   // Proto version of media::VideoPixelFormat.
@@ -189,9 +192,9 @@ message VideoDecoderConfig {
     PIXEL_FORMAT_UNKNOWN = 0;
     PIXEL_FORMAT_I420 = 1;
     PIXEL_FORMAT_YV12 = 2;
-    PIXEL_FORMAT_YV16 = 3;
-    PIXEL_FORMAT_YV12A = 4;
-    PIXEL_FORMAT_YV24 = 5;
+    PIXEL_FORMAT_I422 = 3;
+    PIXEL_FORMAT_I420A = 4;
+    PIXEL_FORMAT_I444 = 5;
     PIXEL_FORMAT_NV12 = 6;
     PIXEL_FORMAT_NV21 = 7;
     PIXEL_FORMAT_UYVY = 8;
@@ -211,9 +214,8 @@ message VideoDecoderConfig {
     PIXEL_FORMAT_YUV420P12 = 22;
     PIXEL_FORMAT_YUV422P12 = 23;
     PIXEL_FORMAT_YUV444P12 = 24;
-    PIXEL_FORMAT_Y8 = 25;
+    PIXEL_FORMAT_Y8 = 25 [deprecated = true];
     PIXEL_FORMAT_Y16 = 26;
-    PIXEL_FORMAT_I422 = 27;
   };
 
   // Proto version of media::ColorSpace.
@@ -255,6 +257,8 @@ message PipelineStatistics {
   optional int64 audio_memory_usage = 5;
   optional int64 video_memory_usage = 6;
   optional int64 video_frame_duration_average_usec = 7;
+  optional string audio_decoder_name = 8;
+  optional string video_decoder_name = 9;
 };
 
 message CdmKeyInformation {
@@ -280,11 +284,12 @@ message CdmKeyInformation {
 enum CdmException {
   NOT_SUPPORTED_ERROR = 0;
   INVALID_STATE_ERROR = 1;
-  INVALID_ACCESS_ERROR = 2;
+  INVALID_ACCESS_ERROR = 2 [deprecated = true];
   QUOTA_EXCEEDED_ERROR = 3;
-  UNKNOWN_ERROR = 4;
-  CLIENT_ERROR = 5;
-  OUTPUT_ERROR = 6;
+  UNKNOWN_ERROR = 4 [deprecated = true];
+  CLIENT_ERROR = 5 [deprecated = true];
+  OUTPUT_ERROR = 6 [deprecated = true];
+  TYPE_ERROR = 7;
 }
 
 // Proto version of media::CdmMessageType.
@@ -293,6 +298,7 @@ enum CdmMessageType {
   LICENSE_REQUEST = 0;
   LICENSE_RENEWAL = 1;
   LICENSE_RELEASE = 2;
+  INDIVIDUALIZATION_REQUEST = 3;
 }
 
 // Proto version of media::CdmSessionType.
@@ -363,6 +369,7 @@ message DemuxerStreamReadUntilCallback {
     kOk = 0;
     kAborted = 1;
     kConfigChanged = 2;
+    kError = 3;
   };
 
   optional Status status = 1;

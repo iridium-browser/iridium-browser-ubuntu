@@ -21,16 +21,18 @@ class PushController final : public GarbageCollected<PushController>,
   WTF_MAKE_NONCOPYABLE(PushController);
 
  public:
+  static const char kSupplementName[];
+
   PushController(LocalFrame&, WebPushClient*);
 
-  static const char* SupplementName();
   static PushController* From(LocalFrame* frame) {
-    return static_cast<PushController*>(
-        Supplement<LocalFrame>::From(frame, SupplementName()));
+    return Supplement<LocalFrame>::From<PushController>(frame);
   }
   static WebPushClient& ClientFrom(LocalFrame*);
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { Supplement<LocalFrame>::Trace(visitor); }
+  virtual void Trace(blink::Visitor* visitor) {
+    Supplement<LocalFrame>::Trace(visitor);
+  }
 
  private:
   WebPushClient* Client() const { return client_; }

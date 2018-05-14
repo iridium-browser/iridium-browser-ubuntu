@@ -5,13 +5,14 @@
 #ifndef WebRemoteFrameClient_h
 #define WebRemoteFrameClient_h
 
+#include "public/platform/WebCanvas.h"
 #include "public/platform/WebFocusType.h"
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/web/WebDOMMessageEvent.h"
 #include "public/web/WebFrame.h"
 
 namespace blink {
-enum class WebClientRedirectPolicy;
+enum class ClientRedirectPolicy;
 enum class WebFrameLoadType;
 class WebURLRequest;
 struct WebRect;
@@ -25,18 +26,24 @@ class WebRemoteFrameClient {
   // and release any resources associated with it.
   virtual void FrameDetached(DetachType) {}
 
+  // Notifies the remote frame to check whether it is done loading, after one
+  // of its children finishes loading.
+  virtual void CheckCompleted() {}
+
   // Notifies the embedder that a postMessage was issued to a remote frame.
   virtual void ForwardPostMessage(WebLocalFrame* source_frame,
                                   WebRemoteFrame* target_frame,
                                   WebSecurityOrigin target_origin,
-                                  WebDOMMessageEvent) {}
+                                  WebDOMMessageEvent,
+                                  bool has_user_gesture) {}
 
   // A remote frame was asked to start a navigation.
   virtual void Navigate(const WebURLRequest& request,
                         bool should_replace_current_entry) {}
-  virtual void Reload(WebFrameLoadType, WebClientRedirectPolicy) {}
+  virtual void Reload(WebFrameLoadType, ClientRedirectPolicy) {}
 
-  virtual void FrameRectsChanged(const WebRect&) {}
+  virtual void FrameRectsChanged(const WebRect& local_frame_rect,
+                                 const WebRect& screen_space_rect) {}
 
   virtual void UpdateRemoteViewportIntersection(
       const WebRect& viewport_intersection) {}
@@ -45,6 +52,10 @@ class WebRemoteFrameClient {
 
   // Set or clear the inert property on the remote frame.
   virtual void SetIsInert(bool) {}
+
+  // Toggles render throttling for the remote frame.
+  virtual void UpdateRenderThrottlingStatus(bool is_throttled,
+                                            bool subtree_throttled) {}
 
   // This frame updated its opener to another frame.
   virtual void DidChangeOpener(WebFrame* opener) {}
@@ -56,6 +67,23 @@ class WebRemoteFrameClient {
 
   // This frame was focused by another frame.
   virtual void FrameFocused() {}
+
+  // Returns token to be used as a frame id in the devtools protocol.
+  // It is derived from the content's devtools_frame_token, is
+  // defined by the browser and passed into Blink upon frame creation.
+  virtual base::UnguessableToken GetDevToolsFrameToken() {
+    return base::UnguessableToken::Create();
+  }
+
+  // Print out this frame.
+  // |rect| is the rectangular area where this frame resides in its parent
+  // frame.
+  // |canvas| is the canvas we are printing on.
+  // Returns the id of the placeholder content.
+  virtual uint32_t Print(const WebRect& rect, WebCanvas* canvas) { return 0; }
+
+ protected:
+  virtual ~WebRemoteFrameClient() = default;
 };
 
 }  // namespace blink

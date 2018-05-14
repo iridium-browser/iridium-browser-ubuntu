@@ -10,12 +10,20 @@
 #include "base/ios/block_types.h"
 #include "ios/web/public/navigation_manager.h"
 
+@protocol ApplicationCommands;
+
 // Describes the mode of the Sad Tab, whether it should offer an attempt to
 // reload content, or whether it should offer a way to provide feedback.
 enum class SadTabViewMode {
   RELOAD = 0,  // A mode which allows the user to attempt a reload
   FEEDBACK,    // A mode which allows the user to provide feedback
 };
+
+// Protocol for actions from the SadTabView.
+@protocol SadTabActionDelegate
+// Shows reportAnIssue UI.
+- (void)showReportAnIssue;
+@end
 
 // The view used to show "sad tab" content to the user when WKWebView's renderer
 // process crashes.
@@ -33,6 +41,12 @@ enum class SadTabViewMode {
 
 // Determines the type of Sad Tab information that will be displayed.
 @property(nonatomic, readonly) SadTabViewMode mode;
+
+// The dispatcher for this view.
+@property(nonatomic, weak) id<ApplicationCommands> dispatcher;
+
+// The delegate for actions from this view.
+@property(nonatomic, weak) id<SadTabActionDelegate> actionDelegate;
 
 @end
 

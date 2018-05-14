@@ -9,16 +9,22 @@
 #import "remoting/ios/app/app_initializer.h"
 
 #import "remoting/ios/app/help_and_feedback.h"
+#import "remoting/ios/app/refresh_control_provider_chromium.h"
 #import "remoting/ios/facade/remoting_oauth_authentication.h"
 #import "remoting/ios/facade/remoting_service.h"
 
 @implementation AppInitializer
 
-+ (void)initializeApp {
++ (void)onAppWillFinishLaunching {
   // |authentication| is nil by default and needs to be injected here.
   RemotingService.instance.authentication =
       [[RemotingOAuthAuthentication alloc] init];
   HelpAndFeedback.instance = [[HelpAndFeedback alloc] init];
+  RefreshControlProvider.instance =
+      [[RefreshControlProviderChromium alloc] init];
+}
+
++ (void)onAppDidFinishLaunching {
 }
 
 @end

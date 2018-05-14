@@ -36,14 +36,6 @@ const bool kSupportsWindowShape =
     false;
 #endif
 
-// Whether this build supports the plugins.npapi requirement.
-const bool kSupportsNPAPI =
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-    false;
-#else
-    true;
-#endif
-
 // Returns true if a WebGL check might not fail immediately.
 bool MightSupportWebGL() {
   return content::GpuDataManager::GetInstance()->GpuAccessAllowed(nullptr);
@@ -58,8 +50,8 @@ const char kFeatureCSS3d[] = "css3d";
 class RequirementsCheckerTest : public ExtensionsTest {
  public:
   RequirementsCheckerTest()
-      : ExtensionsTest(base::MakeUnique<content::TestBrowserThreadBundle>()) {
-    manifest_dict_ = base::MakeUnique<base::DictionaryValue>();
+      : ExtensionsTest(std::make_unique<content::TestBrowserThreadBundle>()) {
+    manifest_dict_ = std::make_unique<base::DictionaryValue>();
   }
 
   ~RequirementsCheckerTest() override {}
@@ -77,7 +69,7 @@ class RequirementsCheckerTest : public ExtensionsTest {
 
  protected:
   void StartChecker() {
-    checker_ = base::MakeUnique<RequirementsChecker>(extension_);
+    checker_ = std::make_unique<RequirementsChecker>(extension_);
     // TODO(michaelpg): This should normally not have to be async. Use Run()
     // instead of RunUntilComplete() after crbug.com/708354 is addressed.
     runner_.RunUntilComplete(checker_.get());
@@ -87,13 +79,9 @@ class RequirementsCheckerTest : public ExtensionsTest {
     manifest_dict_->SetBoolean("requirements.window.shape", true);
   }
 
-  void RequireNPAPI() {
-    manifest_dict_->SetBoolean("requirements.plugins.npapi", true);
-  }
-
   void RequireFeature(const char feature[]) {
     if (!manifest_dict_->HasKey(kFeaturesKey))
-      manifest_dict_->Set(kFeaturesKey, base::MakeUnique<base::ListValue>());
+      manifest_dict_->Set(kFeaturesKey, std::make_unique<base::ListValue>());
     base::ListValue* features_list = nullptr;
     ASSERT_TRUE(manifest_dict_->GetList(kFeaturesKey, &features_list));
     features_list->AppendString(feature);
@@ -120,8 +108,7 @@ TEST_F(RequirementsCheckerTest, RequirementsEmpty) {
 TEST_F(RequirementsCheckerTest, RequirementsSuccess) {
   if (kSupportsWindowShape)
     RequireWindowShape();
-  if (kSupportsNPAPI)
-    RequireNPAPI();
+
   RequireFeature(kFeatureCSS3d);
 
   CreateExtension();
@@ -136,10 +123,6 @@ TEST_F(RequirementsCheckerTest, RequirementsFailMultiple) {
   size_t expected_errors = 0u;
   if (!kSupportsWindowShape) {
     RequireWindowShape();
-    expected_errors++;
-  }
-  if (!kSupportsNPAPI) {
-    RequireNPAPI();
     expected_errors++;
   }
   if (!MightSupportWebGL()) {

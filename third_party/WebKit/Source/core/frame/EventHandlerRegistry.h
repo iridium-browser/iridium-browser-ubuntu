@@ -14,6 +14,7 @@ namespace blink {
 class AddEventListenerOptions;
 class Document;
 class EventTarget;
+class LocalFrame;
 
 typedef HashCountedSet<UntracedMember<EventTarget>> EventTargetSet;
 
@@ -32,6 +33,7 @@ class CORE_EXPORT EventHandlerRegistry final
     kScrollEvent,
     kWheelEventBlocking,
     kWheelEventPassive,
+    kTouchAction,
     kTouchStartOrMoveEventBlocking,
     kTouchStartOrMoveEventBlockingLowLatency,
     kTouchStartOrMoveEventPassive,
@@ -72,7 +74,7 @@ class CORE_EXPORT EventHandlerRegistry final
   // references to handlers that are no longer related to it.
   void DocumentDetached(Document&);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
   void ClearWeakMembers(Visitor*);
 
  private:
@@ -105,7 +107,7 @@ class CORE_EXPORT EventHandlerRegistry final
   // Called to notify clients whenever a single event handler target is
   // registered or unregistered. If several handlers are registered for the
   // same target, only the first registration will trigger this notification.
-  void NotifyDidAddOrRemoveEventHandlerTarget(EventHandlerClass);
+  void NotifyDidAddOrRemoveEventHandlerTarget(LocalFrame*, EventHandlerClass);
 
   // Record a change operation to a given event handler class and notify any
   // parent registry and other clients accordingly.

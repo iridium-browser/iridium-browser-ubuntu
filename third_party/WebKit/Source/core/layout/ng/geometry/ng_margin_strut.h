@@ -12,21 +12,36 @@ namespace blink {
 
 // This struct is used for the margin collapsing calculation.
 struct CORE_EXPORT NGMarginStrut {
-  LayoutUnit margin;
+  LayoutUnit positive_margin;
   LayoutUnit negative_margin;
 
+  // Store quirky margins separately, quirky containers need to ignore
+  // quirky end margins.  Quirky margins are always default margins,
+  // which are always positive.
+  LayoutUnit quirky_positive_margin;
+
+  // If this flag is set, we only Append non-quirky margins to this strut.
+  // See comment inside NGBlockLayoutAlgorithm for when this occurs.
+  bool is_quirky_container_start = false;
+
   // Appends negative or positive value to the current margin strut.
-  void Append(const LayoutUnit& value);
+  void Append(const LayoutUnit& value, bool is_quirky);
 
   // Sum up negative and positive margins of this strut.
   LayoutUnit Sum() const;
 
+  // Sum up non-quirky margins of this strut, used by quirky
+  // containers to sum up the last margin.
+  LayoutUnit QuirkyContainerSum() const;
+
+  // Whether there have been no margins appended to this margin strut.
+  bool IsEmpty() const;
+
   bool operator==(const NGMarginStrut& other) const;
-
-  String ToString() const;
+  bool operator!=(const NGMarginStrut& other) const {
+    return !(*this == other);
+  }
 };
-
-CORE_EXPORT std::ostream& operator<<(std::ostream&, const NGMarginStrut&);
 
 }  // namespace blink
 

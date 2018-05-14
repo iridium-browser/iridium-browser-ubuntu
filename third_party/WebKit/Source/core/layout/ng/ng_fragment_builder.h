@@ -5,121 +5,138 @@
 #ifndef NGFragmentBuilder_h
 #define NGFragmentBuilder_h
 
-#include "core/layout/ng/geometry/ng_static_position.h"
+#include "core/layout/ng/geometry/ng_border_edges.h"
+#include "core/layout/ng/geometry/ng_box_strut.h"
+#include "core/layout/ng/geometry/ng_physical_offset_rect.h"
+#include "core/layout/ng/geometry/ng_physical_rect.h"
 #include "core/layout/ng/inline/ng_baseline.h"
-#include "core/layout/ng/inline/ng_physical_text_fragment.h"
 #include "core/layout/ng/ng_break_token.h"
-#include "core/layout/ng/ng_constraint_space.h"
+#include "core/layout/ng/ng_container_fragment_builder.h"
 #include "core/layout/ng/ng_layout_result.h"
 #include "core/layout/ng/ng_out_of_flow_positioned_descendant.h"
-#include "core/layout/ng/ng_physical_fragment.h"
-#include "core/layout/ng/ng_positioned_float.h"
-#include "core/layout/ng/ng_unpositioned_float.h"
+#include "core/style/ComputedStyleConstants.h"
+#include "platform/heap/Handle.h"
 #include "platform/wtf/Allocator.h"
-
 namespace blink {
 
-class CORE_EXPORT NGFragmentBuilder final {
+class NGPhysicalFragment;
+class NGPhysicalLineBoxFragment;
+
+class CORE_EXPORT NGFragmentBuilder final : public NGContainerFragmentBuilder {
   DISALLOW_NEW();
 
  public:
-  NGFragmentBuilder(NGPhysicalFragment::NGFragmentType, NGLayoutInputNode);
+  NGFragmentBuilder(NGLayoutInputNode,
+                    scoped_refptr<const ComputedStyle>,
+                    WritingMode,
+                    TextDirection);
 
   // Build a fragment for LayoutObject without NGLayoutInputNode. LayoutInline
   // has NGInlineItem but does not have corresponding NGLayoutInputNode.
-  NGFragmentBuilder(NGPhysicalFragment::NGFragmentType, LayoutObject*);
+  NGFragmentBuilder(LayoutObject*,
+                    scoped_refptr<const ComputedStyle>,
+                    WritingMode,
+                    TextDirection);
+
+  ~NGFragmentBuilder() override;
 
   using WeakBoxList = PersistentHeapLinkedHashSet<WeakMember<NGBlockNode>>;
 
-  NGWritingMode WritingMode() const { return writing_mode_; }
-  NGFragmentBuilder& SetWritingMode(NGWritingMode);
-  NGFragmentBuilder& SetDirection(TextDirection);
+  NGLogicalSize Size() const final { return {inline_size_, block_size_}; }
 
-  NGFragmentBuilder& SetSize(const NGLogicalSize&);
-  NGFragmentBuilder& SetBlockSize(LayoutUnit);
-  NGLogicalSize Size() const { return size_; }
+  NGFragmentBuilder& SetIntrinsicBlockSize(LayoutUnit);
+  NGFragmentBuilder& SetPadding(const NGBoxStrut&);
 
-  NGFragmentBuilder& SetOverflowSize(const NGLogicalSize&);
-  NGFragmentBuilder& SetBlockOverflow(LayoutUnit);
+  using NGContainerFragmentBuilder::AddChild;
 
-  NGFragmentBuilder& AddChild(RefPtr<NGLayoutResult>, const NGLogicalOffset&);
-  NGFragmentBuilder& AddChild(RefPtr<NGPhysicalFragment>,
-                              const NGLogicalOffset&);
+  // Our version of AddChild captures any child NGBreakTokens.
+  NGContainerFragmentBuilder& AddChild(scoped_refptr<NGPhysicalFragment>,
+                                       const NGLogicalOffset&) final;
 
-  NGFragmentBuilder& SetBfcOffset(const NGLogicalOffset& offset);
+  // Remove all children.
+  void RemoveChildren();
 
-  // Builder has non-trivial out-of-flow descendant methods.
-  // These methods are building blocks for implementation of
-  // out-of-flow descendants by layout algorithms.
-  //
-  // They are intended to be used by layout algorithm like this:
-  //
-  // Part 1: layout algorithm positions in-flow children.
-  //   out-of-flow children, and out-of-flow descendants of fragments
-  //   are stored inside builder.
-  //
-  // for (child : children)
-  //   if (child->position == (Absolute or Fixed))
-  //     builder->AddOutOfFlowChildCandidate(child);
-  //   else
-  //     fragment = child->Layout()
-  //     builder->AddChild(fragment)
-  // end
-  //
-  // builder->SetSize
-  //
-  // Part 2: Out-of-flow layout part positions out-of-flow descendants.
-  //
-  // NGOutOfFlowLayoutPart(container_style, builder).Run();
-  //
-  // See layout part for builder interaction.
-  NGFragmentBuilder& AddOutOfFlowChildCandidate(NGBlockNode,
-                                                const NGLogicalOffset&);
+  // Add a break token for a child that doesn't yet have any fragments, because
+  // its first fragment is to be produced in the next fragmentainer. This will
+  // add a break token for the child, but no fragment.
+  NGFragmentBuilder& AddBreakBeforeChild(NGLayoutInputNode child);
 
-  void GetAndClearOutOfFlowDescendantCandidates(
-      Vector<NGOutOfFlowPositionedDescendant>* descendant_candidates);
+  // Prepare for a break token before the specified line.
+  NGFragmentBuilder& AddBreakBeforeLine(int line_number);
 
-  NGFragmentBuilder& AddOutOfFlowDescendant(NGOutOfFlowPositionedDescendant);
+  // Update if we have fragmented in this flow.
+  NGFragmentBuilder& PropagateBreak(scoped_refptr<NGLayoutResult>);
+  NGFragmentBuilder& PropagateBreak(scoped_refptr<NGPhysicalFragment>);
 
-  // Sets how much of the block size we've used so far for this box.
-  //
-  // This will result in a fragment which has an unfinished break token, which
-  // contains this information.
+  void AddOutOfFlowLegacyCandidate(NGBlockNode,
+                                   const NGStaticPosition&,
+                                   LayoutObject* inline_container);
+
+  // Set how much of the block size we've used so far for this box.
   NGFragmentBuilder& SetUsedBlockSize(LayoutUnit used_block_size) {
     used_block_size_ = used_block_size;
+    return *this;
+  }
+
+  // Specify that we broke.
+  //
+  // This will result in a fragment which has an unfinished break token.
+  NGFragmentBuilder& SetDidBreak() {
     did_break_ = true;
     return *this;
   }
 
-  NGFragmentBuilder& SetEndMarginStrut(const NGMarginStrut& from) {
-    end_margin_strut_ = from;
+  NGFragmentBuilder& SetHasForcedBreak() {
+    has_forced_break_ = true;
+    minimal_space_shortage_ = LayoutUnit();
     return *this;
   }
+
+  // Report space shortage, i.e. how much more space would have been sufficient
+  // to prevent some piece of content from breaking. This information may be
+  // used by the column balancer to stretch columns.
+  NGFragmentBuilder& PropagateSpaceShortage(LayoutUnit space_shortage) {
+    DCHECK_GT(space_shortage, LayoutUnit());
+    if (minimal_space_shortage_ > space_shortage)
+      minimal_space_shortage_ = space_shortage;
+    return *this;
+  }
+
+  void SetInitialBreakBefore(EBreakBetween break_before) {
+    initial_break_before_ = break_before;
+  }
+
+  void SetPreviousBreakAfter(EBreakBetween break_after) {
+    previous_break_after_ = break_after;
+  }
+
+  // Join/"collapse" the previous (stored) break-after value with the next
+  // break-before value, to determine how to deal with breaking between two
+  // in-flow siblings.
+  EBreakBetween JoinedBreakBetweenValue(EBreakBetween break_before) const;
+
+  // Return the number of line boxes laid out.
+  int LineCount() const { return inline_break_tokens_.size(); }
+
+  // Call when we're setting an undersirable break. It may be possible to avoid
+  // the break if we instead break at an earlier element.
+  void SetHasLastResortBreak() { has_last_resort_break_ = true; }
 
   // Offsets are not supposed to be set during fragment construction, so we
   // do not provide a setter here.
 
   // Creates the fragment. Can only be called once.
-  RefPtr<NGLayoutResult> ToBoxFragment();
+  scoped_refptr<NGLayoutResult> ToBoxFragment();
 
-  RefPtr<NGLayoutResult> Abort(NGLayoutResult::NGLayoutResultStatus);
+  scoped_refptr<NGLayoutResult> Abort(NGLayoutResult::NGLayoutResultStatus);
 
   // A vector of child offsets. Initially set by AddChild().
   const Vector<NGLogicalOffset>& Offsets() const { return offsets_; }
   Vector<NGLogicalOffset>& MutableOffsets() { return offsets_; }
 
-  void SwapUnpositionedFloats(
-      Vector<RefPtr<NGUnpositionedFloat>>* unpositioned_floats) {
-    unpositioned_floats_.swap(*unpositioned_floats);
-  }
-
-  const WTF::Optional<NGLogicalOffset>& BfcOffset() const {
-    return bfc_offset_;
-  }
-
-  const Vector<RefPtr<NGPhysicalFragment>>& Children() const {
-    return children_;
-  }
+  NGPhysicalFragment::NGBoxType BoxType() const;
+  NGFragmentBuilder& SetBoxType(NGPhysicalFragment::NGBoxType);
+  NGFragmentBuilder& SetIsOldLayoutRoot();
 
   bool DidBreak() const { return did_break_; }
 
@@ -138,55 +155,57 @@ class CORE_EXPORT NGFragmentBuilder final {
   // type pair.
   void AddBaseline(NGBaselineRequest, LayoutUnit);
 
- private:
-  // An out-of-flow positioned-candidate is a temporary data structure used
-  // within the NGFragmentBuilder.
-  //
-  // A positioned-candidate can be:
-  // 1. A direct out-of-flow positioned child. The child_offset is (0,0).
-  // 2. A fragment containing an out-of-flow positioned-descendant. The
-  //    child_offset in this case is the containing fragment's offset.
-  //
-  // The child_offset is stored as a NGLogicalOffset as the physical offset
-  // cannot be computed until we know the current fragment's size.
-  //
-  // When returning the positioned-candidates (from
-  // GetAndClearOutOfFlowDescendantCandidates), the NGFragmentBuilder will
-  // convert the positioned-candidate to a positioned-descendant using the
-  // physical size the fragment builder.
-  struct NGOutOfFlowPositionedCandidate {
-    NGOutOfFlowPositionedDescendant descendant;
-    NGLogicalOffset child_offset;
+  // Inline containing block geometry is defined by two fragments:
+  // start and end. FragmentPair holds the information needed to compute
+  // inline containing block geometry wrt enclosing container block.
+  struct FragmentPair {
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+    // Linebox that contains start_fragment.
+    const NGPhysicalLineBoxFragment* start_linebox_fragment;
+    // Offset of start_linebox from containing block.
+    NGLogicalOffset start_linebox_offset;
+    // Start fragment of inline containing block.
+    const NGPhysicalFragment* start_fragment;
+    // Start fragment rect combined with rectangles of all fragments
+    // generated by same Element as start_fragment.
+    NGPhysicalOffsetRect start_fragment_union_rect;
+    // end_** variables are end fragment counterparts to start fragment.
+    const NGPhysicalLineBoxFragment* end_linebox_fragment;
+    NGLogicalOffset end_linebox_offset;
+    const NGPhysicalFragment* end_fragment;
+    NGPhysicalOffsetRect end_fragment_union_rect;
   };
 
-  NGPhysicalFragment::NGFragmentType type_;
-  NGWritingMode writing_mode_;
-  TextDirection direction_;
+  void ComputeInlineContainerFragments(
+      HashMap<const LayoutObject*, FragmentPair>* inline_container_fragments,
+      NGLogicalSize* container_size);
 
+  LayoutObject* GetLayoutObject() { return layout_object_; }
+
+ private:
   NGLayoutInputNode node_;
   LayoutObject* layout_object_;
 
-  NGLogicalSize size_;
-  NGLogicalSize overflow_;
+  LayoutUnit intrinsic_block_size_;
+  NGBoxStrut padding_;
 
-  Vector<RefPtr<NGPhysicalFragment>> children_;
-  Vector<NGLogicalOffset> offsets_;
-
+  NGPhysicalFragment::NGBoxType box_type_;
+  bool is_old_layout_root_;
   bool did_break_;
+  bool has_forced_break_ = false;
   LayoutUnit used_block_size_;
 
-  Vector<RefPtr<NGBreakToken>> child_break_tokens_;
-  RefPtr<NGBreakToken> last_inline_break_token_;
+  LayoutUnit minimal_space_shortage_ = LayoutUnit::Max();
 
-  Vector<NGOutOfFlowPositionedCandidate> oof_positioned_candidates_;
-  Vector<NGOutOfFlowPositionedDescendant> oof_positioned_descendants_;
+  // The break-before value on the initial child we cannot honor. There's no
+  // valid class A break point before a first child, only *between* siblings.
+  EBreakBetween initial_break_before_ = EBreakBetween::kAuto;
 
-  // Floats that need to be positioned by the next in-flow fragment that can
-  // determine its block position in space.
-  Vector<RefPtr<NGUnpositionedFloat>> unpositioned_floats_;
+  // The break-after value of the previous in-flow sibling.
+  EBreakBetween previous_break_after_ = EBreakBetween::kAuto;
 
-  WTF::Optional<NGLogicalOffset> bfc_offset_;
-  NGMarginStrut end_margin_strut_;
+  Vector<scoped_refptr<NGBreakToken>> child_break_tokens_;
+  Vector<scoped_refptr<NGBreakToken>> inline_break_tokens_;
 
   Vector<NGBaseline> baselines_;
 

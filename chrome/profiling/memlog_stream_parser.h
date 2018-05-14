@@ -5,10 +5,10 @@
 #ifndef CHROME_PROFILING_MEMLOG_STREAM_PARSER_H_
 #define CHROME_PROFILING_MEMLOG_STREAM_PARSER_H_
 
-#include <deque>
-
+#include "base/callback.h"
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
-#include "chrome/profiling/memlog_control_receiver.h"
+#include "base/synchronization/lock.h"
 #include "chrome/profiling/memlog_receiver.h"
 #include "chrome/profiling/memlog_stream_receiver.h"
 
@@ -19,19 +19,24 @@ class MemlogStreamParser : public MemlogStreamReceiver {
  public:
   // Both receivers must either outlive this class or live until
   // DisconnectReceivers is called.
-  explicit MemlogStreamParser(MemlogControlReceiver* control_receiver,
-                              MemlogReceiver* receiver);
+  explicit MemlogStreamParser(MemlogReceiver* receiver);
 
   // For tear-down, resets both receivers so they will not be called.
   void DisconnectReceivers();
 
   // StreamReceiver implementation.
-  void OnStreamData(std::unique_ptr<char[]> data, size_t sz) override;
+  bool OnStreamData(std::unique_ptr<char[]> data, size_t sz) override;
   void OnStreamComplete() override;
+
+  base::Lock* GetLock() { return &lock_; }
+
+  // Returns true if this stream has encountered a fatal parse error.
+  bool has_error() const { return error_; }
 
  private:
   struct Block {
     Block(std::unique_ptr<char[]> d, size_t s);
+    Block(Block&& other) noexcept;
     ~Block();
 
     std::unique_ptr<char[]> data;
@@ -58,17 +63,26 @@ class MemlogStreamParser : public MemlogStreamReceiver {
   ReadStatus ParseHeader();
   ReadStatus ParseAlloc();
   ReadStatus ParseFree();
+  ReadStatus ParseBarrier();
+  ReadStatus ParseStringMapping();
+
+  void SetErrorState();
 
   // Not owned by this class.
-  MemlogControlReceiver* control_receiver_;
   MemlogReceiver* receiver_;
 
-  std::deque<Block> blocks_;
+  base::circular_deque<Block> blocks_;
 
   bool received_header_ = false;
+  bool error_ = false;
 
   // Current offset into blocks_[0] of the next packet to process.
   size_t block_zero_offset_ = 0;
+
+  // This lock must be acquired anytime the stream is being parsed. This
+  // prevents concurrent access to data structures used by both the parser and
+  // the memory dumper.
+  base::Lock lock_;
 
   DISALLOW_COPY_AND_ASSIGN(MemlogStreamParser);
 };

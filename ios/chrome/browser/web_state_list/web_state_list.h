@@ -11,7 +11,6 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
-#include "ui/base/page_transition_types.h"
 
 class WebStateListDelegate;
 class WebStateListObserver;
@@ -25,6 +24,36 @@ class WebState;
 // Manages a list of WebStates.
 class WebStateList {
  public:
+  // Constants used when inserting WebStates.
+  enum InsertionFlags {
+    // Used to indicate that nothing special should happen to the newly
+    // inserted WebState.
+    INSERT_NO_FLAGS = 0,
+
+    // Used to indicate that the WebState should be activated on insertion.
+    INSERT_ACTIVATE = 1 << 0,
+
+    // If not set, the insertion index of the WebState is left up to the
+    // order controller associated with the WebStateList so the insertion
+    // index may differ from the specified index. Otherwise the supplied
+    // index is used.
+    INSERT_FORCE_INDEX = 1 << 1,
+
+    // If set, the WebState opener is set to the active WebState, otherwise
+    // it must be explicitly passed.
+    INSERT_INHERIT_OPENER = 1 << 2,
+  };
+
+  // Constants used when closing WebStates.
+  enum ClosingFlags {
+    // Used to indicate that nothing special should happen to the closed
+    // WebState.
+    CLOSE_NO_FLAGS = 0,
+
+    // Used to indicate that the WebState was closed due to user action.
+    CLOSE_USER_ACTION = 1 << 0,
+  };
+
   explicit WebStateList(WebStateListDelegate* delegate);
   ~WebStateList();
 
@@ -77,15 +106,14 @@ class WebStateList {
                                      int start_index,
                                      bool use_group) const;
 
-  // Inserts the specified WebState at the specified index.
-  void InsertWebState(int index, std::unique_ptr<web::WebState> web_state);
-
   // Inserts the specified WebState at the best position in the WebStateList
-  // given the specified transition, opener, etc. It defaults to inserting the
-  // WebState at the end of the list.
-  void AppendWebState(ui::PageTransition transition,
-                      std::unique_ptr<web::WebState> web_state,
-                      WebStateOpener opener);
+  // given the specified opener, recommended index, insertion flags, ... The
+  // |insertion_flags| is a bitwise combination of InsertionFlags values.
+  // Returns the effective insertion index.
+  int InsertWebState(int index,
+                     std::unique_ptr<web::WebState> web_state,
+                     int insertion_flags,
+                     WebStateOpener opener);
 
   // Moves the WebState at the specified index to another index.
   void MoveWebStateAt(int from_index, int to_index);
@@ -101,11 +129,13 @@ class WebStateList {
   // to the caller (abandon ownership of the returned WebState).
   std::unique_ptr<web::WebState> DetachWebStateAt(int index);
 
-  // Closes and destroys the WebState at the specified index.
-  void CloseWebStateAt(int index);
+  // Closes and destroys the WebState at the specified index. The |close_flags|
+  // is a bitwise combination of ClosingFlags values.
+  void CloseWebStateAt(int index, int close_flags);
 
-  // Closes and destroys all WebStates.
-  void CloseAllWebStates();
+  // Closes and destroys all WebStates. The |close_flags| is a bitwise
+  // combination of ClosingFlags values.
+  void CloseAllWebStates(int close_flags);
 
   // Makes the WebState at the specified index the active WebState.
   void ActivateWebStateAt(int index);
@@ -126,9 +156,9 @@ class WebStateList {
   // specified index to null.
   void ClearOpenersReferencing(int index);
 
-  // Notify the observers if the active WebState change.
-  void NotifyIfActiveWebStateChanged(web::WebState* old_web_state,
-                                     bool user_action);
+  // Notify the observers if the active WebState change. |reason| is the value
+  // passed to the WebStateListObservers.
+  void NotifyIfActiveWebStateChanged(web::WebState* old_web_state, int reason);
 
   // Returns the index of the |n|-th WebState (with n > 0) in the sequence of
   // WebStates opened from the specified WebState after |start_index|, or

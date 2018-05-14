@@ -19,8 +19,8 @@
 #include "chrome/browser/themes/custom_theme_supplier.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -159,7 +159,6 @@ TEST_F(ThemeServiceTest, ThemeInstallUninstall) {
   // Now uninstall the extension, should revert to the default theme.
   service_->UninstallExtension(extension_id,
                                extensions::UNINSTALL_REASON_FOR_TESTING,
-                               base::Bind(&base::DoNothing),
                                NULL);
   EXPECT_TRUE(theme_service->UsingDefaultTheme());
 }
@@ -217,7 +216,7 @@ TEST_F(ThemeServiceTest, DisableUnusedTheme) {
   theme_service->OnInfobarDestroyed();
   EXPECT_FALSE(theme_service->UsingDefaultTheme());
   service_->DisableExtension(extension2_id,
-      extensions::Extension::DISABLE_USER_ACTION);
+                             extensions::disable_reason::DISABLE_USER_ACTION);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(theme_service->UsingDefaultTheme());
   EXPECT_FALSE(service_->GetInstalledExtension(extension1_id));

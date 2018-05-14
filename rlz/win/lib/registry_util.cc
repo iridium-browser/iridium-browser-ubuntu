@@ -14,6 +14,8 @@
 #include "rlz/lib/assert.h"
 #include "rlz/win/lib/process_info.h"
 
+#include <windows.h>
+
 namespace rlz_lib {
 
 bool RegKeyReadValue(const base::win::RegKey& key, const wchar_t* name,
@@ -58,9 +60,6 @@ bool HasUserKeyAccess(bool write_access) {
   }
 
   if (write_access) {
-    if (base::win::GetVersion() < base::win::VERSION_VISTA)
-      return true;
-
     if (base::GetCurrentProcessIntegrityLevel() <= base::LOW_INTEGRITY) {
       ASSERT_STRING("UserKey::HasAccess: Cannot write from Low Integrity.");
       return false;

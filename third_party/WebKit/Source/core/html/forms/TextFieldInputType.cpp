@@ -32,17 +32,17 @@
 #include "core/html/forms/TextFieldInputType.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/editing/FrameSelection.h"
 #include "core/events/BeforeTextInsertedEvent.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/events/TextEvent.h"
 #include "core/frame/LocalFrame.h"
-#include "core/html/FormData.h"
-#include "core/html/HTMLInputElement.h"
+#include "core/html/forms/FormData.h"
+#include "core/html/forms/HTMLInputElement.h"
 #include "core/html/forms/TextControlInnerElements.h"
 #include "core/html/shadow/ShadowElementNames.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutDetailsMarker.h"
 #include "core/layout/LayoutTextControlSingleLine.h"
 #include "core/layout/LayoutTheme.h"
@@ -61,7 +61,7 @@ class DataListIndicatorElement final : public HTMLDivElement {
   inline DataListIndicatorElement(Document& document)
       : HTMLDivElement(document) {}
   inline HTMLInputElement* HostInput() const {
-    return toHTMLInputElement(OwnerShadowHost());
+    return ToHTMLInputElement(OwnerShadowHost());
   }
 
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override {
@@ -107,9 +107,9 @@ class DataListIndicatorElement final : public HTMLDivElement {
 TextFieldInputType::TextFieldInputType(HTMLInputElement& element)
     : InputType(element), InputTypeView(element) {}
 
-TextFieldInputType::~TextFieldInputType() {}
+TextFieldInputType::~TextFieldInputType() = default;
 
-DEFINE_TRACE(TextFieldInputType) {
+void TextFieldInputType::Trace(blink::Visitor* visitor) {
   InputTypeView::Trace(visitor);
   InputType::Trace(visitor);
 }
@@ -194,7 +194,7 @@ void TextFieldInputType::SetValue(const String& sanitized_value,
 void TextFieldInputType::HandleKeydownEvent(KeyboardEvent* event) {
   if (!GetElement().IsFocused())
     return;
-  if (ChromeClient* chrome_client = this->GetChromeClient()) {
+  if (ChromeClient* chrome_client = GetChromeClient()) {
     chrome_client->HandleKeyboardEventOnTextField(GetElement(), *event);
     return;
   }
@@ -251,12 +251,6 @@ void TextFieldInputType::ForwardEvent(Event* event) {
   }
 }
 
-void TextFieldInputType::HandleFocusEvent(Element* old_focused_node,
-                                          WebFocusType focus_type) {
-  InputTypeView::HandleFocusEvent(old_focused_node, focus_type);
-  GetElement().BeginEditing();
-}
-
 void TextFieldInputType::HandleBlurEvent() {
   InputTypeView::HandleBlurEvent();
   GetElement().EndEditing();
@@ -281,18 +275,17 @@ bool TextFieldInputType::ShouldHaveSpinButton() const {
 }
 
 void TextFieldInputType::CreateShadowSubtree() {
-  DCHECK(GetElement().Shadow());
+  DCHECK(IsShadowHost(GetElement()));
   ShadowRoot* shadow_root = GetElement().UserAgentShadowRoot();
   DCHECK(!shadow_root->HasChildren());
 
   Document& document = GetElement().GetDocument();
-  bool should_have_spin_button = this->ShouldHaveSpinButton();
+  bool should_have_spin_button = ShouldHaveSpinButton();
   bool should_have_data_list_indicator = GetElement().HasValidDataListOptions();
   bool creates_container = should_have_spin_button ||
                            should_have_data_list_indicator || NeedsContainer();
 
-  TextControlInnerEditorElement* inner_editor =
-      TextControlInnerEditorElement::Create(document);
+  HTMLElement* inner_editor = GetElement().CreateInnerEditorElement();
   if (!creates_container) {
     shadow_root->AppendChild(inner_editor);
     return;
@@ -332,7 +325,7 @@ void TextFieldInputType::DestroyShadowSubtree() {
 }
 
 void TextFieldInputType::ListAttributeTargetChanged() {
-  if (ChromeClient* chrome_client = this->GetChromeClient())
+  if (ChromeClient* chrome_client = GetChromeClient())
     chrome_client->TextFieldDataListChanged(GetElement());
   Element* picker = GetElement().UserAgentShadowRoot()->getElementById(
       ShadowElementNames::PickerIndicator());
@@ -437,10 +430,10 @@ void TextFieldInputType::HandleBeforeTextInsertedEvent(
   // Selected characters will be removed by the next text event.
   unsigned base_length = old_length - selection_length;
   unsigned max_length;
-  if (this->MaxLength() < 0)
+  if (MaxLength() < 0)
     max_length = std::numeric_limits<int>::max();
   else
-    max_length = static_cast<unsigned>(this->MaxLength());
+    max_length = static_cast<unsigned>(MaxLength());
   unsigned appendable_length =
       max_length > base_length ? max_length - base_length : 0;
 
@@ -466,7 +459,7 @@ void TextFieldInputType::UpdatePlaceholderText() {
   if (!SupportsPlaceholder())
     return;
   HTMLElement* placeholder = GetElement().PlaceholderElement();
-  String placeholder_text = GetElement().StrippedPlaceholder();
+  String placeholder_text = GetElement().GetPlaceholderValue();
   if (placeholder_text.IsEmpty()) {
     if (placeholder)
       placeholder->remove(ASSERT_NO_EXCEPTION);
@@ -518,7 +511,7 @@ void TextFieldInputType::SubtreeHasChanged() {
 void TextFieldInputType::DidSetValueByUserEdit() {
   if (!GetElement().IsFocused())
     return;
-  if (ChromeClient* chrome_client = this->GetChromeClient())
+  if (ChromeClient* chrome_client = GetChromeClient())
     chrome_client->DidChangeValueInTextField(GetElement());
 }
 
@@ -531,10 +524,8 @@ void TextFieldInputType::SpinButtonStepUp() {
 }
 
 void TextFieldInputType::UpdateView() {
-  if (!GetElement().SuggestedValue().IsNull()) {
-    GetElement().SetInnerEditorValue(GetElement().SuggestedValue());
-    GetElement().UpdatePlaceholderVisibility();
-  } else if (GetElement().NeedsToUpdateViewValue()) {
+  if (GetElement().SuggestedValue().IsEmpty() &&
+      GetElement().NeedsToUpdateViewValue()) {
     // Update the view only if needsToUpdateViewValue is true. It protects
     // an unacceptable view value from being overwritten with the DOM value.
     //

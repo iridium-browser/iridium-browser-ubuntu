@@ -28,14 +28,12 @@
 #include "core/probe/CoreProbes.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "platform/weborigin/Suborigin.h"
 
 namespace blink {
 
 DOMWindow::DOMWindow(Frame& frame)
     : frame_(frame),
       window_proxy_manager_(frame.GetWindowProxyManager()),
-      location_(this, nullptr),
       window_is_closing_(false) {}
 
 DOMWindow::~DOMWindow() {
@@ -151,7 +149,7 @@ bool DOMWindow::IsInsecureScriptAccess(LocalDOMWindow& calling_window,
   return true;
 }
 
-void DOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message,
+void DOMWindow::postMessage(scoped_refptr<SerializedScriptValue> message,
                             const MessagePortArray& ports,
                             const String& target_origin,
                             LocalDOMWindow* source,
@@ -163,7 +161,7 @@ void DOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message,
 
   // Compute the target origin.  We need to do this synchronously in order
   // to generate the SyntaxError exception correctly.
-  RefPtr<SecurityOrigin> target;
+  scoped_refptr<const SecurityOrigin> target;
   if (target_origin == "/") {
     if (!source_document)
       return;
@@ -180,8 +178,8 @@ void DOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message,
     }
   }
 
-  MessagePortChannelArray channels = MessagePort::DisentanglePorts(
-      GetExecutionContext(), ports, exception_state);
+  auto channels = MessagePort::DisentanglePorts(GetExecutionContext(), ports,
+                                                exception_state);
   if (exception_state.HadException())
     return;
 
@@ -191,17 +189,8 @@ void DOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message,
     return;
 
   const SecurityOrigin* security_origin = source_document->GetSecurityOrigin();
-  bool has_suborigin = source_document->GetSecurityOrigin()->HasSuborigin();
-  Suborigin::SuboriginPolicyOptions unsafe_send_opt =
-      Suborigin::SuboriginPolicyOptions::kUnsafePostMessageSend;
 
-  String source_origin =
-      (has_suborigin &&
-       security_origin->GetSuborigin()->PolicyContains(unsafe_send_opt))
-          ? security_origin->ToPhysicalOriginString()
-          : security_origin->ToString();
-  String source_suborigin =
-      has_suborigin ? security_origin->GetSuborigin()->GetName() : String();
+  String source_origin = security_origin->ToString();
 
   KURL target_url = IsLocalDOMWindow()
                         ? blink::ToLocalDOMWindow(this)->document()->Url()
@@ -234,9 +223,8 @@ void DOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message,
         WebFeature::kPostMessageOutgoingWouldBeBlockedByConnectSrc);
   }
 
-  MessageEvent* event =
-      MessageEvent::Create(std::move(channels), std::move(message),
-                           source_origin, String(), source, source_suborigin);
+  MessageEvent* event = MessageEvent::Create(
+      std::move(channels), std::move(message), source_origin, String(), source);
 
   SchedulePostMessage(event, std::move(target), source_document);
 }
@@ -357,7 +345,7 @@ String DOMWindow::CrossDomainAccessErrorMessage(
   return message + "Protocols, domains, and ports must match.";
 }
 
-void DOMWindow::close(ExecutionContext* context) {
+void DOMWindow::close(LocalDOMWindow* incumbent_window) {
   if (!GetFrame() || !GetFrame()->IsMainFrame())
     return;
 
@@ -366,9 +354,9 @@ void DOMWindow::close(ExecutionContext* context) {
     return;
 
   Document* active_document = nullptr;
-  if (context) {
+  if (incumbent_window) {
     DCHECK(IsMainThread());
-    active_document = ToDocument(context);
+    active_document = incumbent_window->document();
     if (!active_document)
       return;
 
@@ -395,7 +383,11 @@ void DOMWindow::close(ExecutionContext* context) {
   if (!GetFrame()->ShouldClose())
     return;
 
-  probe::breakableLocation(context, "DOMWindow.close");
+  ExecutionContext* execution_context = nullptr;
+  if (IsLocalDOMWindow()) {
+    execution_context = blink::ToLocalDOMWindow(this)->GetExecutionContext();
+  }
+  probe::breakableLocation(execution_context, "DOMWindow.close");
 
   page->CloseSoon();
 
@@ -406,7 +398,7 @@ void DOMWindow::close(ExecutionContext* context) {
   window_is_closing_ = true;
 }
 
-void DOMWindow::focus(ExecutionContext* context) {
+void DOMWindow::focus(LocalDOMWindow* incumbent_window) {
   if (!GetFrame())
     return;
 
@@ -414,20 +406,23 @@ void DOMWindow::focus(ExecutionContext* context) {
   if (!page)
     return;
 
-  DCHECK(context);
+  DCHECK(incumbent_window);
+  ExecutionContext* incumbent_execution_context =
+      incumbent_window->GetExecutionContext();
 
-  bool allow_focus = context->IsWindowInteractionAllowed();
+  bool allow_focus = incumbent_execution_context->IsWindowInteractionAllowed();
   if (allow_focus) {
-    context->ConsumeWindowInteraction();
+    incumbent_execution_context->ConsumeWindowInteraction();
   } else {
     DCHECK(IsMainThread());
-    allow_focus = opener() && (opener() != this) &&
-                  (ToDocument(context)->domWindow() == opener());
+    allow_focus =
+        opener() && (opener() != this) &&
+        (ToDocument(incumbent_execution_context)->domWindow() == opener());
   }
 
   // If we're a top level window, bring the window to the front.
   if (GetFrame()->IsMainFrame() && allow_focus)
-    page->GetChromeClient().Focus();
+    page->GetChromeClient().Focus(incumbent_window->GetFrame());
 
   page->GetFocusController().FocusDocumentView(GetFrame(),
                                                true /* notifyEmbedder */);
@@ -439,7 +434,7 @@ InputDeviceCapabilitiesConstants* DOMWindow::GetInputDeviceCapabilities() {
   return input_capabilities_;
 }
 
-DEFINE_TRACE(DOMWindow) {
+void DOMWindow::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(window_proxy_manager_);
   visitor->Trace(input_capabilities_);
@@ -447,7 +442,7 @@ DEFINE_TRACE(DOMWindow) {
   EventTargetWithInlineData::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(DOMWindow) {
+void DOMWindow::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(location_);
   EventTargetWithInlineData::TraceWrappers(visitor);
 }

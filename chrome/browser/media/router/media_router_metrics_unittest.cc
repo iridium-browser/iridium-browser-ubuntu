@@ -10,13 +10,17 @@
 #include "base/test/simple_test_clock.h"
 #include "base/time/time.h"
 #include "chrome/browser/ui/webui/media_router/media_cast_mode.h"
+#include "chrome/common/media_router/media_sink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using base::Bucket;
 using testing::ElementsAre;
 
 namespace media_router {
+
+using DialParsingError = SafeDialDeviceDescriptionParser::ParsingError;
 
 TEST(MediaRouterMetricsTest, RecordMediaRouterDialogOrigin) {
   base::HistogramTester tester;
@@ -117,41 +121,72 @@ TEST(MediaRouterMetricsTest, RecordMediaRouterCastingSource) {
                           Bucket(static_cast<int>(source3), 1)));
 }
 
-TEST(MediaRouterMetricsTest, RecordDialDeviceCounts) {
-  MediaRouterMetrics metrics;
-  base::SimpleTestClock* clock = new base::SimpleTestClock();
-  metrics.SetClockForTest(base::WrapUnique(clock));
+TEST(MediaRouterMetricsTest, RecordDialDeviceDescriptionParsingError) {
   base::HistogramTester tester;
-  tester.ExpectTotalCount(
-      MediaRouterMetrics::kHistogramDialAvailableDeviceCount, 0);
-  tester.ExpectTotalCount(MediaRouterMetrics::kHistogramDialKnownDeviceCount,
-                          0);
+  const DialParsingError action1 = DialParsingError::kMissingUniqueId;
+  const DialParsingError action2 = DialParsingError::kMissingFriendlyName;
+  const DialParsingError action3 = DialParsingError::kMissingAppUrl;
 
-  clock->SetNow(base::Time::Now());
-  metrics.RecordDialDeviceCounts(6, 10);
-  metrics.RecordDialDeviceCounts(7, 10);
-  tester.ExpectTotalCount(
-      MediaRouterMetrics::kHistogramDialAvailableDeviceCount, 1);
-  tester.ExpectTotalCount(MediaRouterMetrics::kHistogramDialKnownDeviceCount,
-                          1);
-  tester.ExpectBucketCount(
-      MediaRouterMetrics::kHistogramDialAvailableDeviceCount, 6, 1);
-  tester.ExpectBucketCount(MediaRouterMetrics::kHistogramDialKnownDeviceCount,
-                           10, 1);
+  tester.ExpectTotalCount(MediaRouterMetrics::kHistogramDialParsingError, 0);
+  MediaRouterMetrics::RecordDialParsingError(action3);
+  MediaRouterMetrics::RecordDialParsingError(action2);
+  MediaRouterMetrics::RecordDialParsingError(action3);
+  MediaRouterMetrics::RecordDialParsingError(action1);
+  tester.ExpectTotalCount(MediaRouterMetrics::kHistogramDialParsingError, 4);
+  EXPECT_THAT(
+      tester.GetAllSamples(MediaRouterMetrics::kHistogramDialParsingError),
+      ElementsAre(Bucket(static_cast<int>(action1), 1),
+                  Bucket(static_cast<int>(action2), 1),
+                  Bucket(static_cast<int>(action3), 2)));
+}
 
-  clock->Advance(base::TimeDelta::FromHours(2));
-  metrics.RecordDialDeviceCounts(7, 10);
+TEST(MediaRouterMetricsTest, RecordPresentationUrlType) {
+  base::HistogramTester tester;
 
-  tester.ExpectTotalCount(
-      MediaRouterMetrics::kHistogramDialAvailableDeviceCount, 2);
-  tester.ExpectTotalCount(MediaRouterMetrics::kHistogramDialKnownDeviceCount,
-                          2);
-  tester.ExpectBucketCount(
-      MediaRouterMetrics::kHistogramDialAvailableDeviceCount, 6, 1);
-  tester.ExpectBucketCount(
-      MediaRouterMetrics::kHistogramDialAvailableDeviceCount, 7, 1);
-  tester.ExpectBucketCount(MediaRouterMetrics::kHistogramDialKnownDeviceCount,
-                           10, 2);
+  tester.ExpectTotalCount(MediaRouterMetrics::kHistogramPresentationUrlType, 0);
+  MediaRouterMetrics::RecordPresentationUrlType(GURL("cast:DEADBEEF"));
+  MediaRouterMetrics::RecordPresentationUrlType(GURL("dial:AppName"));
+  MediaRouterMetrics::RecordPresentationUrlType(GURL("cast-dial:AppName"));
+  MediaRouterMetrics::RecordPresentationUrlType(GURL("https://example.com"));
+  MediaRouterMetrics::RecordPresentationUrlType(GURL("http://example.com"));
+  MediaRouterMetrics::RecordPresentationUrlType(
+      GURL("https://google.com/cast#__castAppId__=DEADBEEF"));
+  MediaRouterMetrics::RecordPresentationUrlType(GURL("remote-playback:foo"));
+  MediaRouterMetrics::RecordPresentationUrlType(GURL("test:test"));
+
+  tester.ExpectTotalCount(MediaRouterMetrics::kHistogramPresentationUrlType, 8);
+  EXPECT_THAT(
+      tester.GetAllSamples(MediaRouterMetrics::kHistogramPresentationUrlType),
+      ElementsAre(
+          Bucket(static_cast<int>(PresentationUrlType::kOther), 1),
+          Bucket(static_cast<int>(PresentationUrlType::kCast), 1),
+          Bucket(static_cast<int>(PresentationUrlType::kCastDial), 1),
+          Bucket(static_cast<int>(PresentationUrlType::kCastLegacy), 1),
+          Bucket(static_cast<int>(PresentationUrlType::kDial), 1),
+          Bucket(static_cast<int>(PresentationUrlType::kHttp), 1),
+          Bucket(static_cast<int>(PresentationUrlType::kHttps), 1),
+          Bucket(static_cast<int>(PresentationUrlType::kRemotePlayback), 1)));
+}
+
+TEST(MediaRouterMetricsTest, RecordMediaSinkType) {
+  base::HistogramTester tester;
+  tester.ExpectTotalCount(MediaRouterMetrics::kHistogramMediaSinkType, 0);
+
+  MediaRouterMetrics::RecordMediaSinkType(SinkIconType::WIRED_DISPLAY);
+  MediaRouterMetrics::RecordMediaSinkType(SinkIconType::CAST);
+  MediaRouterMetrics::RecordMediaSinkType(SinkIconType::CAST_AUDIO);
+  MediaRouterMetrics::RecordMediaSinkType(SinkIconType::HANGOUT);
+  MediaRouterMetrics::RecordMediaSinkType(SinkIconType::CAST);
+  MediaRouterMetrics::RecordMediaSinkType(SinkIconType::GENERIC);
+
+  tester.ExpectTotalCount(MediaRouterMetrics::kHistogramMediaSinkType, 6);
+  EXPECT_THAT(
+      tester.GetAllSamples(MediaRouterMetrics::kHistogramMediaSinkType),
+      ElementsAre(Bucket(static_cast<int>(SinkIconType::CAST), 2),
+                  Bucket(static_cast<int>(SinkIconType::CAST_AUDIO), 1),
+                  Bucket(static_cast<int>(SinkIconType::HANGOUT), 1),
+                  Bucket(static_cast<int>(SinkIconType::WIRED_DISPLAY), 1),
+                  Bucket(static_cast<int>(SinkIconType::GENERIC), 1)));
 }
 
 }  // namespace media_router

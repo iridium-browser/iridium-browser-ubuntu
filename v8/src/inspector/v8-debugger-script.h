@@ -27,8 +27,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef V8_INSPECTOR_V8DEBUGGERSCRIPT_H_
-#define V8_INSPECTOR_V8DEBUGGERSCRIPT_H_
+#ifndef V8_INSPECTOR_V8_DEBUGGER_SCRIPT_H_
+#define V8_INSPECTOR_V8_DEBUGGER_SCRIPT_H_
 
 #include "src/base/macros.h"
 #include "src/inspector/string-16.h"
@@ -71,10 +71,8 @@ class V8DebuggerScript {
 
   void setSourceURL(const String16&);
   virtual void setSourceMappingURL(const String16&) = 0;
-  void setSource(const String16& source) {
-    m_source = source;
-    m_hash = String16();
-  }
+  virtual void setSource(const String16& source, bool preview,
+                         bool* stackChanged) = 0;
 
   virtual bool getPossibleBreakpoints(
       const v8::debug::Location& start, const v8::debug::Location& end,
@@ -86,8 +84,13 @@ class V8DebuggerScript {
   virtual int offset(int lineNumber, int columnNumber) const = 0;
   virtual v8::debug::Location location(int offset) const = 0;
 
+  virtual bool setBreakpoint(const String16& condition,
+                             v8::debug::Location* location, int* id) const = 0;
+
  protected:
   V8DebuggerScript(v8::Isolate*, String16 id, String16 url);
+
+  virtual v8::Local<v8::debug::Script> script() const = 0;
 
   String16 m_id;
   String16 m_url;
@@ -108,4 +111,4 @@ class V8DebuggerScript {
 
 }  // namespace v8_inspector
 
-#endif  // V8_INSPECTOR_V8DEBUGGERSCRIPT_H_
+#endif  // V8_INSPECTOR_V8_DEBUGGER_SCRIPT_H_

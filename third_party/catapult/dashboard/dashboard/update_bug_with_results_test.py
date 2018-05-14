@@ -12,18 +12,15 @@ import mock
 import webapp2
 import webtest
 
-from dashboard import bisect_fyi
-from dashboard import bisect_fyi_test
 from dashboard import layered_cache
 from dashboard import update_bug_with_results
+from dashboard.common import namespaced_stored_object
 from dashboard.common import testing_common
 from dashboard.common import utils
-from dashboard.common import stored_object
 from dashboard.models import anomaly
 from dashboard.models import bug_data
 from dashboard.models import try_job
 from dashboard.services import buildbucket_service
-from dashboard.services import rietveld_service
 
 _SAMPLE_BISECT_RESULTS_JSON = {
     'try_job_id': 6789,
@@ -42,13 +39,13 @@ _SAMPLE_BISECT_RESULTS_JSON = {
     'issue_url': 'https://issue_url/123456',
     'culprit_data': {
         'subject': 'subject',
-        'author': 'author',
+        'author': u'author \u2265 unicode',
         'email': 'author@email.com',
         'cl_date': '1/2/2015',
         'commit_info': 'commit_info',
         'revisions_links': ['http://src.chromium.org/viewvc/chrome?view='
                             'revision&revision=20798'],
-        'cl': '2a1781d64d'  # Should match config in bisect_fyi_test.py.
+        'cl': '2a1781d64d'
     },
     'revision_data': [
         {
@@ -190,21 +187,14 @@ class UpdateBugWithResultsTest(testing_common.TestCase):
         '/update_bug_with_results',
         update_bug_with_results.UpdateBugWithResultsHandler)])
     self.testapp = webtest.TestApp(app)
-    self._AddRietveldConfig()
 
-  def _AddRietveldConfig(self):
-    """Adds a RietveldConfig entity to the datastore.
+    self.SetCurrentUser('internal@chromium.org', is_admin=True)
 
-    This is used in order to get the Rietveld URL when requests are made to the
-    handler in te tests below. In the real datastore, the RietveldConfig entity
-    would contain credentials.
-    """
-    rietveld_service.RietveldConfig(
-        id='default_rietveld_config',
-        client_email='sullivan@google.com',
-        service_account_key='Fake Account Key',
-        server_url='https://test-rietveld.appspot.com',
-        internal_server_url='https://test-rietveld.appspot.com').put()
+    namespaced_stored_object.Set('repositories', {
+        'chromium': {
+            'repository_url': 'https://chromium.googlesource.com/chromium/src'
+        },
+    })
 
   def _AddTryJob(self, bug_id, status, bot, **kwargs):
     job = try_job.TryJob(bug_id=bug_id, status=status, bot=bot, **kwargs)
@@ -319,9 +309,25 @@ class UpdateBugWithResultsTest(testing_common.TestCase):
 
     self.testapp.get('/update_bug_with_results')
     mock_update_bug.assert_called_once_with(
-        mock.ANY, mock.ANY,
-        cc_list=['author@email.com', 'prasadv@google.com'],
-        merge_issue=None, labels=None, owner='author@email.com')
+        mock.ANY,
+        '\n=== Auto-CCing suspected CL author author@email.com ===\n\nHi '
+        'author@email.com, the bisect results pointed to your CL, please take '
+        'a look at the\nresults.\n\n\n=== BISECT JOB RESULTS ===\n<b>Perf '
+        'regression found with culprit</b>\n\nSuspected Commit\n  Author : '
+        'author \xe2\x89\xa5 unicode\n  Commit : 2a1781d64d\n  Date   : '
+        '1/2/2015\n  Subject: subject\n\nBisect Details\n  Configuration: '
+        'linux\n  Benchmark    : page_cycler.intl_ar_fa_he\n  Metric       : '
+        'warm_times/page_load_time\n\nRevision              Result       '
+        'N\nchromium@unknown      70 +- 0      3      '
+        'good\nchromium@unknown      80 +- 0      3      bad\n\nTo Run This '
+        'Test\n  tools/perf/run_benchmark -v --browser=release page_cycler.'
+        'intl_ar_fa_he\n\nMore information on addressing performance '
+        'regressions:\n  http://g.co/ChromePerformanceRegressions\n\n'
+        'Debug information about this bisect:\n  https://issue_url/123456\n\n\n'
+        'For feedback, file a bug with component Speed>Bisection',
+        cc_list=[u'author@email.com', 'prasadv@google.com'],
+        merge_issue=None, labels=None, owner=u'author@email.com',
+        status='Assigned')
 
   @mock.patch(
       'google.appengine.api.urlfetch.fetch',
@@ -348,7 +354,8 @@ class UpdateBugWithResultsTest(testing_common.TestCase):
     self.testapp.get('/update_bug_with_results')
     mock_update_bug.assert_called_once_with(
         mock.ANY, mock.ANY,
-        cc_list=[], merge_issue='111222', labels=None, owner=None)
+        cc_list=[], merge_issue='111222', labels=None, owner=None,
+        status=None)
     # Should have skipped updating cache.
     self.assertEqual(
         layered_cache.GetExternal('commit_hash_2a1781d64d'), 111222)
@@ -384,7 +391,8 @@ class UpdateBugWithResultsTest(testing_common.TestCase):
     mock_update_bug.assert_called_once_with(
         mock.ANY, mock.ANY,
         cc_list=['author@email.com', 'prasadv@google.com'],
-        merge_issue=None, labels=None, owner='author@email.com')
+        merge_issue=None, labels=None, owner='author@email.com',
+        status='Assigned')
     # Should have skipped updating cache.
     self.assertEqual(
         layered_cache.GetExternal('commit_hash_2a1781d64d'), 111222)
@@ -416,7 +424,8 @@ class UpdateBugWithResultsTest(testing_common.TestCase):
                                                   'prasadv@google.com'],
                                          merge_issue=None,
                                          labels=None,
-                                         owner='author@email.com')
+                                         owner='author@email.com',
+                                         status='Assigned')
 
   @mock.patch(
       'google.appengine.api.urlfetch.fetch',
@@ -530,7 +539,8 @@ class UpdateBugWithResultsTest(testing_common.TestCase):
     mock_update_bug.assert_called_once_with(
         mock.ANY, mock.ANY,
         cc_list=mock.ANY,
-        merge_issue=None, labels=['Restrict-View-Google'], owner=mock.ANY)
+        merge_issue=None, labels=['Restrict-View-Google'], owner=mock.ANY,
+        status='Assigned')
 
   @mock.patch(
       'google.appengine.api.urlfetch.fetch',
@@ -555,142 +565,6 @@ class UpdateBugWithResultsTest(testing_common.TestCase):
         'Additional errors:\n'
         'The metric was not found in the test output.\n'
         'The test failed to produce parseable results.\n')
-
-  @mock.patch(
-      'google.appengine.api.urlfetch.fetch',
-      mock.MagicMock(side_effect=_MockFetch))
-  @mock.patch.object(
-      update_bug_with_results.issue_tracker_service, 'IssueTrackerService',
-      mock.MagicMock())
-  def testFYI_Send_No_Email_On_Success(self):
-    stored_object.Set(
-        bisect_fyi._BISECT_FYI_CONFIGS_KEY,
-        bisect_fyi_test.TEST_FYI_CONFIGS)
-    test_config = bisect_fyi_test.TEST_FYI_CONFIGS['positive_culprit']
-    bisect_config = test_config.get('bisect_config')
-    self._AddTryJob(12345, 'started', 'win_perf',
-                    results_data=_SAMPLE_BISECT_RESULTS_JSON,
-                    internal_only=True,
-                    config=utils.BisectConfigPythonString(bisect_config),
-                    job_type='bisect-fyi',
-                    job_name='positive_culprit',
-                    email='chris@email.com')
-
-    self.testapp.get('/update_bug_with_results')
-    messages = self.mail_stub.get_sent_messages()
-    self.assertEqual(0, len(messages))
-
-  @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
-  @mock.patch(
-      'google.appengine.api.urlfetch.fetch',
-      mock.MagicMock(side_effect=_MockFetch))
-  @mock.patch.object(
-      update_bug_with_results.bisect_fyi, 'IsBugUpdated',
-      mock.MagicMock(return_value=True))
-  @mock.patch.object(
-      update_bug_with_results.issue_tracker_service, 'IssueTrackerService',
-      mock.MagicMock())
-  @mock.patch.object(
-      update_bug_with_results, '_ValidateBuildbucketResponse',
-      mock.MagicMock(return_value=True))
-  @mock.patch.object(
-      buildbucket_service, 'GetJobStatus',
-      mock.MagicMock(
-          return_value=_MockBuildBucketResponse(
-              result='FAILURE',
-              updated_ts=int(round(time.time() * 1000000)))))
-  def testFYI_Failed_Job_SendEmail(self):
-    stored_object.Set(
-        bisect_fyi._BISECT_FYI_CONFIGS_KEY,
-        bisect_fyi_test.TEST_FYI_CONFIGS)
-    test_config = bisect_fyi_test.TEST_FYI_CONFIGS['positive_culprit']
-    bisect_config = test_config.get('bisect_config')
-    sample_bisect_results = copy.deepcopy(_SAMPLE_BISECT_RESULTS_JSON)
-    sample_bisect_results['status'] = 'failed'
-    self._AddTryJob(12345, 'started', 'win_perf',
-                    results_data=sample_bisect_results,
-                    internal_only=True,
-                    buildbucket_job_id='12345',
-                    config=utils.BisectConfigPythonString(bisect_config),
-                    job_type='bisect-fyi',
-                    job_name='positive_culprit',
-                    email='chris@email.com')
-
-    self.testapp.get('/update_bug_with_results')
-    messages = self.mail_stub.get_sent_messages()
-    self.assertEqual(1, len(messages))
-
-  @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
-  @mock.patch(
-      'google.appengine.api.urlfetch.fetch',
-      mock.MagicMock(side_effect=_MockFetch))
-  @mock.patch.object(
-      update_bug_with_results.bisect_fyi, 'IsBugUpdated',
-      mock.MagicMock(return_value=True))
-  @mock.patch.object(
-      update_bug_with_results.issue_tracker_service, 'IssueTrackerService',
-      mock.MagicMock())
-  @mock.patch.object(
-      update_bug_with_results, '_ValidateBuildbucketResponse',
-      mock.MagicMock(side_effect=update_bug_with_results.BisectJobFailure))
-  @mock.patch.object(
-      buildbucket_service, 'GetJobStatus',
-      mock.MagicMock(
-          return_value=_MockBuildBucketResponse(
-              result='FAILURE',
-              updated_ts=int(round(time.time() * 1000000)))))
-  def testFYI_Failed_Job_SendEmail_On_Exception(self):
-    stored_object.Set(
-        bisect_fyi._BISECT_FYI_CONFIGS_KEY,
-        bisect_fyi_test.TEST_FYI_CONFIGS)
-    test_config = bisect_fyi_test.TEST_FYI_CONFIGS['positive_culprit']
-    bisect_config = test_config.get('bisect_config')
-    sample_bisect_results = copy.deepcopy(_SAMPLE_BISECT_RESULTS_JSON)
-    sample_bisect_results['status'] = 'failed'
-    self._AddTryJob(12345, 'started', 'win_perf',
-                    results_data=sample_bisect_results,
-                    internal_only=True,
-                    buildbucket_job_id='12345',
-                    config=utils.BisectConfigPythonString(bisect_config),
-                    job_type='bisect-fyi',
-                    job_name='positive_culprit',
-                    email='chris@email.com')
-
-    self.testapp.get('/update_bug_with_results')
-    messages = self.mail_stub.get_sent_messages()
-    self.assertEqual(1, len(messages))
-
-  @mock.patch(
-      'google.appengine.api.urlfetch.fetch',
-      mock.MagicMock(side_effect=_MockFetch))
-  @mock.patch.object(
-      update_bug_with_results.bisect_fyi, 'IsBugUpdated',
-      mock.MagicMock(return_value=True))
-  @mock.patch.object(
-      update_bug_with_results.issue_tracker_service, 'IssueTrackerService',
-      mock.MagicMock())
-  @mock.patch.object(
-      update_bug_with_results, '_ValidateBuildbucketResponse',
-      mock.MagicMock(return_value=False))
-  def testFYI_Failed_Job_NoSendEmail(self):
-    stored_object.Set(
-        bisect_fyi._BISECT_FYI_CONFIGS_KEY,
-        bisect_fyi_test.TEST_FYI_CONFIGS)
-    test_config = bisect_fyi_test.TEST_FYI_CONFIGS['positive_culprit']
-    bisect_config = test_config.get('bisect_config')
-    sample_bisect_results = copy.deepcopy(_SAMPLE_BISECT_RESULTS_JSON)
-    sample_bisect_results['status'] = 'failed'
-    self._AddTryJob(12345, 'started', 'win_perf',
-                    results_data=sample_bisect_results,
-                    internal_only=True,
-                    config=utils.BisectConfigPythonString(bisect_config),
-                    job_type='bisect-fyi',
-                    job_name='positive_culprit',
-                    email='chris@email.com')
-
-    self.testapp.get('/update_bug_with_results')
-    messages = self.mail_stub.get_sent_messages()
-    self.assertEqual(0, len(messages))
 
   @mock.patch.object(
       update_bug_with_results.quick_logger.QuickLogger,
@@ -729,7 +603,7 @@ class UpdateBugWithResultsTest(testing_common.TestCase):
     self.testapp.get('/update_bug_with_results')
     mock_update_bug.assert_called_once_with(
         12345, mock.ANY, cc_list=mock.ANY, merge_issue=mock.ANY,
-        labels=mock.ANY, owner=mock.ANY)
+        labels=mock.ANY, owner=mock.ANY, status='Assigned')
 
   def testValidateBuildbucketResponse_Scheduled(self):
     job = try_job.TryJob(bug_id=12345, status='started', bot='win_perf')

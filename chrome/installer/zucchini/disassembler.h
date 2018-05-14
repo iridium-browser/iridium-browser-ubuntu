@@ -5,41 +5,19 @@
 #ifndef CHROME_INSTALLER_ZUCCHINI_DISASSEMBLER_H_
 #define CHROME_INSTALLER_ZUCCHINI_DISASSEMBLER_H_
 
+#include <stddef.h>
+
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "base/optional.h"
+#include "base/macros.h"
 #include "chrome/installer/zucchini/buffer_view.h"
 #include "chrome/installer/zucchini/image_utils.h"
 
 namespace zucchini {
 
 class Disassembler;
-
-// Interface for extracting References through member function GetNext().
-// This is used by Disassemblers to extract references from an image file.
-// Typycally, a Reader lazily extracts values and does not hold any storage.
-class ReferenceReader {
- public:
-  virtual ~ReferenceReader() = default;
-
-  // Returns the next available Reference, or nullopt_t if exhausted.
-  // Extracted References must be ordered by their location in the image.
-  virtual base::Optional<Reference> GetNext() = 0;
-};
-
-// Interface for writing References through member function
-// PutNext(reference). This is used by Disassemblers to write new References
-// in the image file.
-class ReferenceWriter {
- public:
-  virtual ~ReferenceWriter() = default;
-
-  // Writes |reference| in the underlying image file. This operation always
-  // succeeds.
-  virtual void PutNext(Reference reference) = 0;
-};
 
 // A ReferenceGroup is associated with a specific |type| and has convenience
 // methods to obtain readers and writers for that type. A ReferenceGroup does
@@ -110,6 +88,17 @@ class ReferenceGroup {
 // - Correct target for some references.
 class Disassembler {
  public:
+  // Attempts to parse |image| and create an architecture-specifc Disassembler,
+  // as determined by DIS, which is inherited from Disassembler. Returns an
+  // instance of DIS if successful, and null otherwise.
+  template <class DIS>
+  static std::unique_ptr<DIS> Make(ConstBufferView image) {
+    auto disasm = std::make_unique<DIS>();
+    if (!disasm->Parse(image))
+      return nullptr;
+    return disasm;
+  }
+
   virtual ~Disassembler();
 
   // Returns the type of executable handled by the Disassembler.
@@ -120,7 +109,7 @@ class Disassembler {
 
   // Creates and returns a vector that contains all groups of references.
   // Groups must be aggregated by pool.
-  virtual std::vector<ReferenceGroup> GetReferenceGroups() const = 0;
+  virtual std::vector<ReferenceGroup> MakeReferenceGroups() const = 0;
 
   ConstBufferView GetImage() const { return image_; }
   size_t size() const { return image_.size(); }
@@ -135,6 +124,8 @@ class Disassembler {
   // Raw image data. After Parse(), a Disassembler should shrink this to contain
   // only the portion containing the executable file it recognizes.
   ConstBufferView image_;
+
+  DISALLOW_COPY_AND_ASSIGN(Disassembler);
 };
 
 }  // namespace zucchini

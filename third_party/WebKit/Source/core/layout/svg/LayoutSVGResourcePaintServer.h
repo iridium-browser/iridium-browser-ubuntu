@@ -43,8 +43,8 @@ class SVGPaintServer {
 
  public:
   explicit SVGPaintServer(Color);
-  SVGPaintServer(PassRefPtr<Gradient>, const AffineTransform&);
-  SVGPaintServer(PassRefPtr<Pattern>, const AffineTransform&);
+  SVGPaintServer(scoped_refptr<Gradient>, const AffineTransform&);
+  SVGPaintServer(scoped_refptr<Pattern>, const AffineTransform&);
 
   static SVGPaintServer RequestForLayoutObject(const LayoutObject&,
                                                const ComputedStyle&,
@@ -64,8 +64,8 @@ class SVGPaintServer {
   void PrependTransform(const AffineTransform&);
 
  private:
-  RefPtr<Gradient> gradient_;
-  RefPtr<Pattern> pattern_;
+  scoped_refptr<Gradient> gradient_;
+  scoped_refptr<Pattern> pattern_;
   AffineTransform transform_;  // Used for gradient/pattern shaders.
   Color color_;
 };
@@ -102,7 +102,9 @@ class LayoutSVGResourcePaintServer : public LayoutSVGResourceContainer {
   LayoutSVGResourcePaintServer(SVGElement*);
   ~LayoutSVGResourcePaintServer() override;
 
-  virtual SVGPaintServer PreparePaintServer(const LayoutObject&) = 0;
+  virtual SVGPaintServer PreparePaintServer(
+      const LayoutObject&,
+      const FloatRect& object_bounding_box) = 0;
 
   // Helper utilities used in to access the underlying resources for DRT.
   static SVGPaintDescription RequestPaintDescription(const LayoutObject&,

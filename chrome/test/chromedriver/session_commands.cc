@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"  // For CHECK macros.
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
@@ -131,7 +132,8 @@ std::unique_ptr<base::DictionaryValue> CreateCapabilities(
   caps->SetBoolean("cssSelectorsEnabled", true);
   caps->SetBoolean("webStorageEnabled", true);
   caps->SetBoolean("rotatable", false);
-  caps->SetBoolean("acceptSslCerts", true);
+  caps->SetBoolean("acceptSslCerts", capabilities.accept_insecure_certs);
+  caps->SetBoolean("acceptInsecureCerts", capabilities.accept_insecure_certs);
   caps->SetBoolean("nativeEvents", true);
   caps->SetBoolean("hasTouchScreen", session->chrome->HasTouchScreen());
   caps->SetString("unexpectedAlertBehaviour",
@@ -189,13 +191,39 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
   session->driver_log.reset(
       new WebDriverLog(WebDriverLog::kDriverType, Log::kAll));
   const base::DictionaryValue* desired_caps;
+  base::DictionaryValue merged_caps;
+
   bool w3c_capability = false;
   if (params.GetDictionary("capabilities.alwaysMatch", &desired_caps) &&
       (desired_caps->GetBoolean("goog:chromeOptions.w3c", &w3c_capability) ||
        desired_caps->GetBoolean("chromeOptions.w3c", &w3c_capability)) &&
       w3c_capability) {
-    // TODO(johnchen): Handle capabilities.firstMatch.
     session->w3c_compliant = true;
+    // TODO(johnchen): Handle capabilities.firstMatch. Currently, we're just
+    // merging, not validating or matching as per the spec.
+    const base::ListValue* first_match_list;
+    std::unique_ptr<base::ListValue> tmp_list;
+    if (!(params.GetList("capabilities.firstMatch", &first_match_list))) {
+      // if no firstMatch, make first_match_list a list with an empty dictionary
+      tmp_list = std::unique_ptr<base::ListValue>(new base::ListValue());
+      std::unique_ptr<base::DictionaryValue> inner(new base::DictionaryValue());
+      tmp_list->Append(std::move(inner));
+      first_match_list = tmp_list.get();
+    }
+    for (size_t i = 0; i < first_match_list->GetSize(); ++i) {
+      const base::DictionaryValue* first_match;
+      if (!first_match_list->GetDictionary(i, &first_match)) {
+        continue;
+      }
+      if (!MergeCapabilities(desired_caps, first_match, &merged_caps)) {
+        return Status(kSessionNotCreatedException, "Invalid capabilities");
+      }
+      if (MatchCapabilities(&merged_caps)) {
+        // If a match is found, we want to use these matched setcapabilities.
+        desired_caps = &merged_caps;
+        break;
+      }
+    }
   } else if (params.GetDictionary("capabilities.desiredCapabilities",
                                   &desired_caps) &&
              (desired_caps->GetBoolean("goog:chromeOptions.w3c",
@@ -247,6 +275,12 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
   if (status.IsError())
     return status;
 
+  if (capabilities.accept_insecure_certs) {
+    status = session->chrome->SetAcceptInsecureCerts();
+    if (status.IsError())
+      return status;
+  }
+
   status = session->chrome->GetWebViewIdForFirstTab(&session->window,
                                                     session->w3c_compliant);
   if (status.IsError())
@@ -254,11 +288,41 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
   session->detach = capabilities.detach;
   session->force_devtools_screenshot = capabilities.force_devtools_screenshot;
   session->capabilities = CreateCapabilities(session, capabilities);
-  value->reset(session->capabilities->DeepCopy());
+
+  if (w3c_capability) {
+    base::DictionaryValue body;
+    body.SetDictionary("capabilities", std::move(session->capabilities));
+    body.SetString("sessionId", session->id);
+    value->reset(body.DeepCopy());
+  } else {
+    value->reset(session->capabilities->DeepCopy());
+  }
   return CheckSessionCreated(session);
 }
 
 }  // namespace
+
+bool MergeCapabilities(const base::DictionaryValue* always_match,
+                       const base::DictionaryValue* first_match,
+                       base::DictionaryValue* merged) {
+  CHECK(always_match);
+  CHECK(first_match);
+  CHECK(merged);
+  merged->Clear();
+
+  for (base::DictionaryValue::Iterator it(*first_match); !it.IsAtEnd();
+       it.Advance()) {
+    if (always_match->HasKey(it.key())) {
+      // firstMatch cannot have the same |keys| as alwaysMatch.
+      return false;
+    }
+  }
+
+  // merge the capabilities together since guarenteed no key collisions
+  merged->MergeDictionary(always_match);
+  merged->MergeDictionary(first_match);
+  return true;
+}
 
 bool MatchCapabilities(base::DictionaryValue* capabilities) {
   // attempt to match the capabilities requested to the actual capabilities
@@ -270,7 +334,6 @@ bool MatchCapabilities(base::DictionaryValue* capabilities) {
       return false;
     }
   }
-
   return true;
 }
 
@@ -390,8 +453,13 @@ Status ExecuteSwitchToWindow(Session* session,
                              const base::DictionaryValue& params,
                              std::unique_ptr<base::Value>* value) {
   std::string name;
-  if (!params.GetString("name", &name))
-    return Status(kUnknownError, "'name' must be a string");
+  if (session->w3c_compliant) {
+    if (!params.GetString("handle", &name))
+      return Status(kInvalidArgument, "'handle' must be a string");
+  } else {
+    if (!params.GetString("name", &name))
+      return Status(kUnknownError, "'name' must be a string");
+  }
 
   std::list<std::string> web_view_ids;
   Status status = session->chrome->GetWebViewIds(&web_view_ids,
@@ -503,6 +571,18 @@ Status ExecuteSetTimeout(Session* session,
   } else {
     return Status(kUnknownError, "unknown type of timeout:" + type);
   }
+  return Status(kOk);
+}
+
+Status ExecuteGetTimeouts(Session* session,
+                          const base::DictionaryValue& params,
+                          std::unique_ptr<base::Value>* value) {
+  base::DictionaryValue timeouts;
+  timeouts.SetInteger("script", session->script_timeout.InMilliseconds());
+  timeouts.SetInteger("pageLoad", session->page_load_timeout.InMilliseconds());
+  timeouts.SetInteger("implicit", session->implicit_wait.InMilliseconds());
+
+  value->reset(timeouts.DeepCopy());
   return Status(kOk);
 }
 
@@ -677,6 +757,46 @@ Status ExecuteSetNetworkConnection(Session* session,
   return Status(kOk);
 }
 
+Status ExecuteGetWindowRect(Session* session,
+                            const base::DictionaryValue& params,
+                            std::unique_ptr<base::Value>* value) {
+  ChromeDesktopImpl* desktop = NULL;
+  Status status = session->chrome->GetAsDesktop(&desktop);
+  if (status.IsError())
+    return status;
+
+  int x, y;
+  int width, height;
+
+  if (desktop->GetBrowserInfo()->build_no >= kBrowserWindowDevtoolsBuildNo) {
+    status = desktop->GetWindowPosition(session->window, &x, &y);
+    if (status.IsError())
+      return status;
+    status = desktop->GetWindowSize(session->window, &width, &height);
+  } else {
+    AutomationExtension* extension = NULL;
+    status =
+        desktop->GetAutomationExtension(&extension, session->w3c_compliant);
+    if (status.IsError())
+      return status;
+
+    status = extension->GetWindowPosition(&x, &y);
+    if (status.IsError())
+      return status;
+    status = extension->GetWindowSize(&width, &height);
+  }
+  if (status.IsError())
+    return status;
+
+  base::DictionaryValue rect;
+  rect.SetInteger("x", x);
+  rect.SetInteger("y", y);
+  rect.SetInteger("width", width);
+  rect.SetInteger("height", height);
+  value->reset(rect.DeepCopy());
+  return Status(kOk);
+}
+
 Status ExecuteGetWindowPosition(Session* session,
                                 const base::DictionaryValue& params,
                                 std::unique_ptr<base::Value>* value) {
@@ -765,6 +885,40 @@ Status ExecuteGetWindowSize(Session* session,
   return Status(kOk);
 }
 
+Status ExecuteSetWindowRect(Session* session,
+                            const base::DictionaryValue& params,
+                            std::unique_ptr<base::Value>* value) {
+  double width = 0;
+  double height = 0;
+  double x = 0;
+  double y = 0;
+
+  ChromeDesktopImpl* desktop = NULL;
+  Status status = session->chrome->GetAsDesktop(&desktop);
+  if (status.IsError())
+    return status;
+
+  // to pass to the set window rect command
+  base::DictionaryValue rect_params;
+
+  // only set position if both x and y are given
+  if (params.GetDouble("x", &x) && params.GetDouble("y", &y)) {
+    rect_params.SetInteger("x", static_cast<int>(x));
+    rect_params.SetInteger("y", static_cast<int>(y));
+  }  // only set size if both height and width are given
+  if (params.GetDouble("width", &width) &&
+      params.GetDouble("height", &height)) {
+    rect_params.SetInteger("width", static_cast<int>(width));
+    rect_params.SetInteger("height", static_cast<int>(height));
+  }
+  status = desktop->SetWindowRect(session->window, rect_params);
+  if (status.IsError())
+    return status;
+
+  // return the current window rect
+  return ExecuteGetWindowRect(session, params, value);
+}
+
 Status ExecuteSetWindowSize(Session* session,
                             const base::DictionaryValue& params,
                             std::unique_ptr<base::Value>* value) {
@@ -810,6 +964,25 @@ Status ExecuteMaximizeWindow(Session* session,
     return status;
 
   return extension->MaximizeWindow();
+}
+
+Status ExecuteFullScreenWindow(Session* session,
+                               const base::DictionaryValue& params,
+                               std::unique_ptr<base::Value>* value) {
+  ChromeDesktopImpl* desktop = NULL;
+  Status status = session->chrome->GetAsDesktop(&desktop);
+  if (status.IsError())
+    return status;
+
+  if (desktop->GetBrowserInfo()->build_no >= kBrowserWindowDevtoolsBuildNo)
+    return desktop->FullScreenWindow(session->window);
+
+  AutomationExtension* extension = NULL;
+  status = desktop->GetAutomationExtension(&extension, session->w3c_compliant);
+  if (status.IsError())
+    return status;
+
+  return extension->FullScreenWindow();
 }
 
 Status ExecuteGetAvailableLogTypes(Session* session,

@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <memory>
 
-#include "net/spdy/core/spdy_framer.h"
+#include "net/spdy/core/http2_frame_decoder_adapter.h"
 #include "net/spdy/core/spdy_test_utils.h"
 #include "net/spdy/platform/api/spdy_ptr_util.h"
 #include "net/spdy/platform/api/spdy_string_piece.h"
@@ -26,12 +26,13 @@ class MockSpdyFramerVisitor : public SpdyFramerVisitorInterface {
   MockSpdyFramerVisitor();
   ~MockSpdyFramerVisitor() override;
 
-  MOCK_METHOD1(OnError, void(SpdyFramer* framer));
+  MOCK_METHOD1(OnError, void(Http2DecoderAdapter::SpdyFramerError error));
   MOCK_METHOD3(OnDataFrameHeader,
                void(SpdyStreamId stream_id, size_t length, bool fin));
   MOCK_METHOD3(OnStreamFrameData,
                void(SpdyStreamId stream_id, const char* data, size_t len));
   MOCK_METHOD1(OnStreamEnd, void(SpdyStreamId stream_id));
+  MOCK_METHOD2(OnStreamPadLength, void(SpdyStreamId stream_id, size_t value));
   MOCK_METHOD2(OnStreamPadding, void(SpdyStreamId stream_id, size_t len));
   MOCK_METHOD1(OnHeaderFrameStart,
                SpdyHeadersHandlerInterface*(SpdyStreamId stream_id));
@@ -39,7 +40,7 @@ class MockSpdyFramerVisitor : public SpdyFramerVisitorInterface {
   MOCK_METHOD2(OnRstStream,
                void(SpdyStreamId stream_id, SpdyErrorCode error_code));
   MOCK_METHOD0(OnSettings, void());
-  MOCK_METHOD2(OnSetting, void(SpdySettingsIds id, uint32_t value));
+  MOCK_METHOD2(OnSetting, void(SpdyKnownSettingsId id, uint32_t value));
   MOCK_METHOD2(OnPing, void(SpdyPingId unique_id, bool is_ack));
   MOCK_METHOD0(OnSettingsEnd, void());
   MOCK_METHOD2(OnGoAway,

@@ -14,6 +14,9 @@ namespace gpu {
 
 class GpuChannelManagerDelegate {
  public:
+  // Called on any successful context creation.
+  virtual void DidCreateContextSuccessfully() = 0;
+
   // Tells the delegate that an offscreen context was created for the provided
   // |active_url|.
   virtual void DidCreateOffscreenContext(const GURL& active_url) = 0;
@@ -47,7 +50,7 @@ class GpuChannelManagerDelegate {
   virtual void SetActiveURL(const GURL& url) = 0;
 
  protected:
-  virtual ~GpuChannelManagerDelegate() {}
+  virtual ~GpuChannelManagerDelegate() = default;
 };
 
 }  // namespace gpu

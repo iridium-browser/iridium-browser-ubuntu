@@ -10,6 +10,7 @@
 #include "src/compiler/common-operator.h"
 #include "src/compiler/instruction-scheduler.h"
 #include "src/compiler/instruction.h"
+#include "src/compiler/linkage.h"
 #include "src/compiler/machine-operator.h"
 #include "src/compiler/node.h"
 #include "src/globals.h"
@@ -30,17 +31,13 @@ class StateObjectDeduplicator;
 
 // This struct connects nodes of parameters which are going to be pushed on the
 // call stack with their parameter index in the call descriptor of the callee.
-class PushParameter {
- public:
-  PushParameter() : node_(nullptr), type_(MachineType::None()) {}
-  PushParameter(Node* node, MachineType type) : node_(node), type_(type) {}
+struct PushParameter {
+  PushParameter(Node* n = nullptr,
+                LinkageLocation l = LinkageLocation::ForAnyRegister())
+      : node(n), location(l) {}
 
-  Node* node() const { return node_; }
-  MachineType type() const { return type_; }
-
- private:
-  Node* node_;
-  MachineType type_;
+  Node* node;
+  LinkageLocation location;
 };
 
 enum class FrameStateInputKind { kAny, kStackSlot };
@@ -54,17 +51,28 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   enum SourcePositionMode { kCallSourcePositions, kAllSourcePositions };
   enum EnableScheduling { kDisableScheduling, kEnableScheduling };
   enum EnableSerialization { kDisableSerialization, kEnableSerialization };
+  enum EnableSwitchJumpTable {
+    kDisableSwitchJumpTable,
+    kEnableSwitchJumpTable
+  };
+  enum EnableSpeculationPoison {
+    kDisableSpeculationPoison,
+    kEnableSpeculationPoison
+  };
 
   InstructionSelector(
       Zone* zone, size_t node_count, Linkage* linkage,
       InstructionSequence* sequence, Schedule* schedule,
       SourcePositionTable* source_positions, Frame* frame,
+      EnableSwitchJumpTable enable_switch_jump_table,
+      EnableSpeculationPoison enable_speculation_poison,
       SourcePositionMode source_position_mode = kCallSourcePositions,
       Features features = SupportedFeatures(),
       EnableScheduling enable_scheduling = FLAG_turbo_instruction_scheduling
                                                ? kEnableScheduling
                                                : kDisableScheduling,
-      EnableSerialization enable_serialization = kDisableSerialization);
+      EnableSerialization enable_serialization = kDisableSerialization,
+      LoadPoisoning poisoning = LoadPoisoning::kDontPoison);
 
   // Visit code for the entire graph with the included schedule.
   bool SelectInstructions();
@@ -115,15 +123,20 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
 
   Instruction* EmitDeoptimize(InstructionCode opcode, InstructionOperand output,
                               InstructionOperand a, DeoptimizeKind kind,
-                              DeoptimizeReason reason, Node* frame_state);
+                              DeoptimizeReason reason,
+                              VectorSlotPair const& feedback,
+                              Node* frame_state);
   Instruction* EmitDeoptimize(InstructionCode opcode, InstructionOperand output,
                               InstructionOperand a, InstructionOperand b,
                               DeoptimizeKind kind, DeoptimizeReason reason,
+                              VectorSlotPair const& feedback,
                               Node* frame_state);
   Instruction* EmitDeoptimize(InstructionCode opcode, size_t output_count,
                               InstructionOperand* outputs, size_t input_count,
                               InstructionOperand* inputs, DeoptimizeKind kind,
-                              DeoptimizeReason reason, Node* frame_state);
+                              DeoptimizeReason reason,
+                              VectorSlotPair const& feedback,
+                              Node* frame_state);
 
   // ===========================================================================
   // ============== Architecture-independent CPU feature methods. ==============
@@ -155,6 +168,9 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   static MachineOperatorBuilder::Flags SupportedMachineOperatorFlags();
 
   static MachineOperatorBuilder::AlignmentRequirements AlignmentRequirements();
+
+  // TODO(jarin) This is temporary until the poisoning is universally supported.
+  static bool SupportsSpeculationPoisoning();
 
   // ===========================================================================
   // ============ Architecture-independent graph covering methods. =============
@@ -275,7 +291,8 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   enum CallBufferFlag {
     kCallCodeImmediate = 1u << 0,
     kCallAddressImmediate = 1u << 1,
-    kCallTail = 1u << 2
+    kCallTail = 1u << 2,
+    kCallFixedTargetRegister = 1u << 3,
   };
   typedef base::Flags<CallBufferFlag> CallBufferFlags;
 
@@ -285,7 +302,8 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   // {call_code_immediate} to generate immediate operands to calls of code.
   // {call_address_immediate} to generate immediate operands to address calls.
   void InitializeCallBuffer(Node* call, CallBuffer* buffer,
-                            CallBufferFlags flags, int stack_slot_delta = 0);
+                            CallBufferFlags flags, bool is_tail_call,
+                            int stack_slot_delta = 0);
   bool IsTailCallAddressImmediate();
   int GetTempsCountForTailCallFromJSFunction();
 
@@ -333,6 +351,8 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   void VisitProjection(Node* node);
   void VisitConstant(Node* node);
   void VisitCall(Node* call, BasicBlock* handler = nullptr);
+  void VisitCallWithCallerSavedRegisters(Node* call,
+                                         BasicBlock* handler = nullptr);
   void VisitDeoptimizeIf(Node* node);
   void VisitDeoptimizeUnless(Node* node);
   void VisitTrapIf(Node* node, Runtime::FunctionId func_id);
@@ -342,16 +362,67 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   void VisitBranch(Node* input, BasicBlock* tbranch, BasicBlock* fbranch);
   void VisitSwitch(Node* node, const SwitchInfo& sw);
   void VisitDeoptimize(DeoptimizeKind kind, DeoptimizeReason reason,
-                       Node* value);
+                       VectorSlotPair const& feedback, Node* value);
   void VisitReturn(Node* ret);
   void VisitThrow(Node* node);
   void VisitRetain(Node* node);
+  void VisitUnreachable(Node* node);
+  void VisitDeadValue(Node* node);
+
+  void VisitWordCompareZero(Node* user, Node* value, FlagsContinuation* cont);
 
   void EmitPrepareArguments(ZoneVector<compiler::PushParameter>* arguments,
-                            const CallDescriptor* descriptor, Node* node);
+                            const CallDescriptor* call_descriptor, Node* node);
+  void EmitPrepareResults(ZoneVector<compiler::PushParameter>* results,
+                          const CallDescriptor* call_descriptor, Node* node);
 
   void EmitIdentity(Node* node);
   bool CanProduceSignalingNaN(Node* node);
+
+  // ===========================================================================
+  // ============= Vector instruction (SIMD) helper fns. =======================
+  // ===========================================================================
+
+  // Tries to match a byte shuffle to a scalar splat operation. Returns the
+  // index of the lane if successful.
+  template <int LANES>
+  static bool TryMatchDup(const uint8_t* shuffle, int* index) {
+    const int kBytesPerLane = kSimd128Size / LANES;
+    // Get the first lane's worth of bytes and check that indices start at a
+    // lane boundary and are consecutive.
+    uint8_t lane0[kBytesPerLane];
+    lane0[0] = shuffle[0];
+    if (lane0[0] % kBytesPerLane != 0) return false;
+    for (int i = 1; i < kBytesPerLane; ++i) {
+      lane0[i] = shuffle[i];
+      if (lane0[i] != lane0[0] + i) return false;
+    }
+    // Now check that the other lanes are identical to lane0.
+    for (int i = 1; i < LANES; ++i) {
+      for (int j = 0; j < kBytesPerLane; ++j) {
+        if (lane0[j] != shuffle[i * kBytesPerLane + j]) return false;
+      }
+    }
+    *index = lane0[0] / kBytesPerLane;
+    return true;
+  }
+
+  // Tries to match 8x16 byte shuffle to an equivalent 32x4 word shuffle. If
+  // successful, it writes the 32x4 shuffle word indices.
+  static bool TryMatch32x4Shuffle(const uint8_t* shuffle, uint8_t* shuffle32x4);
+
+  // Tries to match a byte shuffle to a concatenate operation. If successful,
+  // it writes the byte offset.
+  static bool TryMatchConcat(const uint8_t* shuffle, uint8_t mask,
+                             uint8_t* offset);
+
+  // Packs 4 bytes of shuffle into a 32 bit immediate, using a mask from
+  // CanonicalizeShuffle to convert unary shuffles.
+  static int32_t Pack4Lanes(const uint8_t* shuffle, uint8_t mask);
+
+  // Canonicalize shuffles to make pattern matching simpler. Returns a mask that
+  // will ignore the high bit of indices if shuffle is unary.
+  uint8_t CanonicalizeShuffle(Node* node);
 
   // ===========================================================================
 
@@ -391,6 +462,9 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   InstructionScheduler* scheduler_;
   EnableScheduling enable_scheduling_;
   EnableSerialization enable_serialization_;
+  EnableSwitchJumpTable enable_switch_jump_table_;
+  EnableSpeculationPoison enable_speculation_poison_;
+  LoadPoisoning load_poisoning_;
   Frame* frame_;
   bool instruction_selection_failed_;
 };

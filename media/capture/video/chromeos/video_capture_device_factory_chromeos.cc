@@ -11,15 +11,26 @@
 
 namespace media {
 
+namespace {
+
+gpu::GpuMemoryBufferManager* g_gpu_buffer_manager = nullptr;
+
+}  // namespace
+
 VideoCaptureDeviceFactoryChromeOS::VideoCaptureDeviceFactoryChromeOS(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner_for_screen_observer)
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner_for_screen_observer,
+    gpu::GpuMemoryBufferManager* gpu_buffer_manager,
+    MojoJpegDecodeAcceleratorFactoryCB jda_factory)
     : task_runner_for_screen_observer_(task_runner_for_screen_observer),
       camera_hal_ipc_thread_("CameraHalIpcThread"),
-      initialized_(Init()) {}
+      initialized_(Init(jda_factory)) {
+  g_gpu_buffer_manager = gpu_buffer_manager;
+}
 
 VideoCaptureDeviceFactoryChromeOS::~VideoCaptureDeviceFactoryChromeOS() {
   camera_hal_delegate_->Reset();
   camera_hal_ipc_thread_.Stop();
+  g_gpu_buffer_manager = nullptr;
 }
 
 std::unique_ptr<VideoCaptureDevice>
@@ -58,18 +69,36 @@ bool VideoCaptureDeviceFactoryChromeOS::ShouldEnable() {
   // Checks whether the Chrome OS binary which provides the HAL v3 camera
   // service is installed on the device.  If the binary exists we assume the
   // device is using the new camera HAL v3 stack.
+  //
+  // TODO(jcliang): Remove kArcCamera3Service once we've fully transitioned all
+  //                boards to the new package.
   const base::FilePath kArcCamera3Service("/usr/bin/arc_camera3_service");
-  return base::PathExists(kArcCamera3Service);
+  const base::FilePath kCrosCameraService("/usr/bin/cros_camera_service");
+  return base::PathExists(kArcCamera3Service) ||
+         base::PathExists(kCrosCameraService);
 }
 
-bool VideoCaptureDeviceFactoryChromeOS::Init() {
+// static
+gpu::GpuMemoryBufferManager*
+VideoCaptureDeviceFactoryChromeOS::GetBufferManager() {
+  return g_gpu_buffer_manager;
+}
+
+// static
+void VideoCaptureDeviceFactoryChromeOS::SetBufferManagerForTesting(
+    gpu::GpuMemoryBufferManager* buffer_manager) {
+  g_gpu_buffer_manager = buffer_manager;
+}
+
+bool VideoCaptureDeviceFactoryChromeOS::Init(
+    MojoJpegDecodeAcceleratorFactoryCB jda_factory) {
   if (!camera_hal_ipc_thread_.Start()) {
     LOG(ERROR) << "Module thread failed to start";
     return false;
   }
 
   if (!CameraHalDispatcherImpl::GetInstance()->IsStarted() &&
-      !CameraHalDispatcherImpl::GetInstance()->Start()) {
+      !CameraHalDispatcherImpl::GetInstance()->Start(jda_factory)) {
     LOG(ERROR) << "Failed to start CameraHalDispatcherImpl";
     return false;
   }
@@ -84,8 +113,9 @@ bool VideoCaptureDeviceFactoryChromeOS::Init() {
 // static
 VideoCaptureDeviceFactory*
 VideoCaptureDeviceFactory::CreateVideoCaptureDeviceFactory(
-    scoped_refptr<base::SingleThreadTaskRunner>
-        task_runner_for_screen_observer) {
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner_for_screen_observer,
+    gpu::GpuMemoryBufferManager* gpu_buffer_manager,
+    MojoJpegDecodeAcceleratorFactoryCB jda_factory) {
   // On Chrome OS we have to support two use cases:
   //
   // 1. For devices that have the camera HAL v3 service running on Chrome OS,
@@ -97,7 +127,7 @@ VideoCaptureDeviceFactory::CreateVideoCaptureDeviceFactory(
   //    v3.
   if (VideoCaptureDeviceFactoryChromeOS::ShouldEnable()) {
     return new VideoCaptureDeviceFactoryChromeOS(
-        task_runner_for_screen_observer);
+        task_runner_for_screen_observer, gpu_buffer_manager, jda_factory);
   } else {
     return new VideoCaptureDeviceFactoryLinux(task_runner_for_screen_observer);
   }

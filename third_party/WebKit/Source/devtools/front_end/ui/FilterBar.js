@@ -101,7 +101,7 @@ UI.FilterBar = class extends UI.HBox {
   _updateFilterBar() {
     if (!this.parentWidget() || this._showingWidget)
       return;
-    var visible = this._alwaysShowFilters || (this._stateSetting.get() && this._enabled);
+    const visible = this._alwaysShowFilters || (this._stateSetting.get() && this._enabled);
     if (visible) {
       this._showingWidget = true;
       this.showWidget();
@@ -115,9 +115,9 @@ UI.FilterBar = class extends UI.HBox {
    * @override
    */
   focus() {
-    for (var i = 0; i < this._filters.length; ++i) {
+    for (let i = 0; i < this._filters.length; ++i) {
       if (this._filters[i] instanceof UI.TextFilterUI) {
-        var textFilterUI = /** @type {!UI.TextFilterUI} */ (this._filters[i]);
+        const textFilterUI = /** @type {!UI.TextFilterUI} */ (this._filters[i]);
         textFilterUI.focus();
         break;
       }
@@ -125,8 +125,8 @@ UI.FilterBar = class extends UI.HBox {
   }
 
   _updateFilterButton() {
-    var isActive = false;
-    for (var filter of this._filters)
+    let isActive = false;
+    for (const filter of this._filters)
       isActive = isActive || filter.isActive();
     this._filterButton.setDefaultWithRedColor(isActive);
     this._filterButton.setToggleWithRedColor(isActive);
@@ -167,14 +167,8 @@ UI.FilterUI.prototype = {
  * @unrestricted
  */
 UI.TextFilterUI = class extends Common.Object {
-  /**
-   * @param {boolean=} supportRegex
-   */
-  constructor(supportRegex) {
+  constructor() {
     super();
-    this._supportRegex = !!supportRegex;
-    this._regex = null;
-
     this._filterElement = createElement('div');
     this._filterElement.className = 'filter-text-filter';
 
@@ -183,24 +177,12 @@ UI.TextFilterUI = class extends Common.Object {
     this._prompt = new UI.TextPrompt();
     this._prompt.initialize(this._completions.bind(this), ' ');
     this._proxyElement = this._prompt.attach(this._filterInputElement);
+    this._proxyElement.title = Common.UIString('e.g. /small[\\d]+/ url:a.com/b');
     this._prompt.setPlaceholder(Common.UIString('Filter'));
-
-    this._proxyElement.addEventListener('keydown', this._onInputKeyDown.bind(this), false);
     this._prompt.addEventListener(UI.TextPrompt.Events.TextChanged, this._valueChanged.bind(this));
 
     /** @type {?function(string, string, boolean=):!Promise<!UI.SuggestBox.Suggestions>} */
     this._suggestionProvider = null;
-
-    if (this._supportRegex) {
-      this._filterElement.classList.add('supports-regex');
-      var label = UI.CheckboxLabel.create(Common.UIString('Regex'));
-      this._regexCheckBox = label.checkboxElement;
-      this._regexCheckBox.id = 'text-filter-regex';
-      this._regexCheckBox.addEventListener('change', this._valueChanged.bind(this), false);
-      this._filterElement.appendChild(label);
-
-      this._regexLabel = this._filterElement.textElement;
-    }
   }
 
   /**
@@ -210,7 +192,7 @@ UI.TextFilterUI = class extends Common.Object {
    * @return {!Promise<!UI.SuggestBox.Suggestions>}
    */
   _completions(expression, prefix, force) {
-    if (this._suggestionProvider && !this.isRegexChecked())
+    if (this._suggestionProvider)
       return this._suggestionProvider(expression, prefix, force);
     return Promise.resolve([]);
   }
@@ -231,13 +213,6 @@ UI.TextFilterUI = class extends Common.Object {
   }
 
   /**
-   * @return {boolean}
-   */
-  isRegexChecked() {
-    return this._supportRegex ? this._regexCheckBox.checked : false;
-  }
-
-  /**
    * @return {string}
    */
   value() {
@@ -250,21 +225,6 @@ UI.TextFilterUI = class extends Common.Object {
   setValue(value) {
     this._prompt.setText(value);
     this._valueChanged();
-  }
-
-  /**
-   * @param {boolean} checked
-   */
-  setRegexChecked(checked) {
-    if (this._supportRegex)
-      this._regexCheckBox.checked = checked;
-  }
-
-  /**
-   * @return {?RegExp}
-   */
-  regex() {
-    return this._regex;
   }
 
   focus() {
@@ -280,35 +240,7 @@ UI.TextFilterUI = class extends Common.Object {
   }
 
   _valueChanged() {
-    var filterQuery = this.value();
-
-    this._regex = null;
-    this._filterInputElement.classList.remove('filter-text-invalid');
-    if (filterQuery) {
-      if (this.isRegexChecked()) {
-        try {
-          this._regex = new RegExp(filterQuery, 'i');
-        } catch (e) {
-          this._filterInputElement.classList.add('filter-text-invalid');
-        }
-      } else {
-        this._regex = createPlainTextSearchRegex(filterQuery, 'i');
-      }
-    }
-
-    this._dispatchFilterChanged();
-  }
-
-  _dispatchFilterChanged() {
     this.dispatchEventToListeners(UI.FilterUI.Events.FilterChanged, null);
-  }
-
-  /**
-   * @param {!Event} event
-   */
-  _onInputKeyDown(event) {
-    if (isEnterKey(event))
-      event.consume(true);
   }
 };
 
@@ -333,7 +265,7 @@ UI.NamedBitSetFilterUI = class extends Common.Object {
     this._addBit(UI.NamedBitSetFilterUI.ALL_TYPES, Common.UIString('All'));
     this._filtersElement.createChild('div', 'filter-bitset-filter-divider');
 
-    for (var i = 0; i < items.length; ++i)
+    for (let i = 0; i < items.length; ++i)
       this._addBit(items[i].name, items[i].label, items[i].title);
 
     if (setting) {
@@ -374,9 +306,9 @@ UI.NamedBitSetFilterUI = class extends Common.Object {
   }
 
   _settingChanged() {
-    var allowedTypes = this._setting.get();
+    const allowedTypes = this._setting.get();
     this._allowedTypes = {};
-    for (var typeName in this._typeFilterElements) {
+    for (const typeName in this._typeFilterElements) {
       if (allowedTypes[typeName])
         this._allowedTypes[typeName] = true;
     }
@@ -388,7 +320,7 @@ UI.NamedBitSetFilterUI = class extends Common.Object {
       this._allowedTypes = {};
       this._allowedTypes[UI.NamedBitSetFilterUI.ALL_TYPES] = true;
     }
-    for (var typeName in this._typeFilterElements)
+    for (const typeName in this._typeFilterElements)
       this._typeFilterElements[typeName].classList.toggle('selected', this._allowedTypes[typeName]);
     this.dispatchEventToListeners(UI.FilterUI.Events.FilterChanged, null);
   }
@@ -399,7 +331,7 @@ UI.NamedBitSetFilterUI = class extends Common.Object {
    * @param {string=} title
    */
   _addBit(name, label, title) {
-    var typeFilterElement = this._filtersElement.createChild('li', name);
+    const typeFilterElement = this._filtersElement.createChild('li', name);
     typeFilterElement.typeName = name;
     typeFilterElement.createTextChild(label);
     if (title)
@@ -412,7 +344,7 @@ UI.NamedBitSetFilterUI = class extends Common.Object {
    * @param {!Event} e
    */
   _onTypeFilterClicked(e) {
-    var toggle;
+    let toggle;
     if (Host.isMac())
       toggle = e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
     else

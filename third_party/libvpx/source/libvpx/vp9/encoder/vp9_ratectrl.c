@@ -31,10 +31,13 @@
 #include "vp9/encoder/vp9_encodemv.h"
 #include "vp9/encoder/vp9_ratectrl.h"
 
-// Max rate target for 1080P and below encodes under normal circumstances
-// (1920 * 1080 / (16 * 16)) * MAX_MB_RATE bits per MB
+// Max rate per frame for 1080P and below encodes if no level requirement given.
+// For larger formats limit to MAX_MB_RATE bits per MB
+// 4Mbits is derived from the level requirement for level 4 (1080P 30) which
+// requires that HW can sustain a rate of 16Mbits over a 4 frame group.
+// If a lower level requirement is specified then this may over ride this value.
 #define MAX_MB_RATE 250
-#define MAXRATE_1080P 2025000
+#define MAXRATE_1080P 4000000
 
 #define DEFAULT_KF_BOOST 2000
 #define DEFAULT_GF_BOOST 2000
@@ -43,11 +46,6 @@
 
 #define MIN_BPB_FACTOR 0.005
 #define MAX_BPB_FACTOR 50
-
-#define FRAME_OVERHEAD_BITS 200
-
-// Use this macro to turn on/off use of alt-refs in one-pass vbr mode.
-#define USE_ALTREF_FOR_ONE_PASS 0
 
 #if CONFIG_VP9_HIGHBITDEPTH
 #define ASSIGN_MINQ_TABLE(bit_depth, name)                   \
@@ -215,18 +213,23 @@ int vp9_estimate_bits_at_q(FRAME_TYPE frame_type, int q, int mbs,
 int vp9_rc_clamp_pframe_target_size(const VP9_COMP *const cpi, int target) {
   const RATE_CONTROL *rc = &cpi->rc;
   const VP9EncoderConfig *oxcf = &cpi->oxcf;
-  const int min_frame_target =
-      VPXMAX(rc->min_frame_bandwidth, rc->avg_frame_bandwidth >> 5);
-  if (target < min_frame_target) target = min_frame_target;
-  if (cpi->refresh_golden_frame && rc->is_src_frame_alt_ref) {
-    // If there is an active ARF at this location use the minimum
-    // bits on this frame even if it is a constructed arf.
-    // The active maximum quantizer insures that an appropriate
-    // number of bits will be spent if needed for constructed ARFs.
-    target = min_frame_target;
+
+  if (cpi->oxcf.pass != 2) {
+    const int min_frame_target =
+        VPXMAX(rc->min_frame_bandwidth, rc->avg_frame_bandwidth >> 5);
+    if (target < min_frame_target) target = min_frame_target;
+    if (cpi->refresh_golden_frame && rc->is_src_frame_alt_ref) {
+      // If there is an active ARF at this location use the minimum
+      // bits on this frame even if it is a constructed arf.
+      // The active maximum quantizer insures that an appropriate
+      // number of bits will be spent if needed for constructed ARFs.
+      target = min_frame_target;
+    }
   }
+
   // Clip the frame target to the maximum allowed value.
   if (target > rc->max_frame_bandwidth) target = rc->max_frame_bandwidth;
+
   if (oxcf->rc_max_inter_bitrate_pct) {
     const int max_rate =
         rc->avg_frame_bandwidth * oxcf->rc_max_inter_bitrate_pct / 100;
@@ -356,6 +359,7 @@ void vp9_rc_init(const VP9EncoderConfig *oxcf, int pass, RATE_CONTROL *rc) {
   rc->reset_high_source_sad = 0;
   rc->high_source_sad_lagindex = -1;
   rc->alt_ref_gf_group = 0;
+  rc->last_frame_is_src_altref = 0;
   rc->fac_active_worst_inter = 150;
   rc->fac_active_worst_gf = 100;
   rc->force_qpmin = 0;
@@ -594,13 +598,6 @@ int vp9_rc_regulate_q(const VP9_COMP *cpi, int target_bits_per_frame,
     q = clamp(q, VPXMIN(cpi->rc.q_1_frame, cpi->rc.q_2_frame),
               VPXMAX(cpi->rc.q_1_frame, cpi->rc.q_2_frame));
   }
-#if USE_ALTREF_FOR_ONE_PASS
-  if (cpi->oxcf.enable_auto_arf && cpi->oxcf.pass == 0 &&
-      cpi->oxcf.rc_mode == VPX_VBR && cpi->oxcf.lag_in_frames > 0 &&
-      cpi->rc.is_src_frame_alt_ref && !cpi->rc.alt_ref_gf_group) {
-    q = VPXMIN(q, (q + cpi->rc.last_boosted_qindex) >> 1);
-  }
-#endif
   return q;
 }
 
@@ -1013,6 +1010,7 @@ static int rc_pick_q_and_bounds_one_pass_vbr(const VP9_COMP *cpi,
       qdelta = vp9_compute_qdelta_by_rate(
           &cpi->rc, cm->frame_type, active_worst_quality, 1.75, cm->bit_depth);
     }
+    if (rc->high_source_sad && cpi->sf.use_altref_onepass) qdelta = 0;
     *top_index = active_worst_quality + qdelta;
     *top_index = (*top_index > *bottom_index) ? *top_index : *bottom_index;
   }
@@ -1105,6 +1103,9 @@ static int rc_pick_q_and_bounds_two_pass(const VP9_COMP *cpi, int *bottom_index,
       // Baseline value derived from cpi->active_worst_quality and kf boost.
       active_best_quality =
           get_kf_active_quality(rc, active_worst_quality, cm->bit_depth);
+      if (cpi->twopass.kf_zeromotion_pct >= STATIC_KF_GROUP_THRESH) {
+        active_best_quality /= 4;
+      }
 
       // Allow somewhat lower kf minq with small image formats.
       if ((cm->width * cm->height) <= (352 * 288)) {
@@ -1341,6 +1342,28 @@ static void update_golden_frame_stats(VP9_COMP *cpi) {
   }
 }
 
+static void update_altref_usage(VP9_COMP *const cpi) {
+  VP9_COMMON *const cm = &cpi->common;
+  int sum_ref_frame_usage = 0;
+  int arf_frame_usage = 0;
+  int mi_row, mi_col;
+  if (cpi->rc.alt_ref_gf_group && !cpi->rc.is_src_frame_alt_ref &&
+      !cpi->refresh_golden_frame && !cpi->refresh_alt_ref_frame)
+    for (mi_row = 0; mi_row < cm->mi_rows; mi_row += 8) {
+      for (mi_col = 0; mi_col < cm->mi_cols; mi_col += 8) {
+        int sboffset = ((cm->mi_cols + 7) >> 3) * (mi_row >> 3) + (mi_col >> 3);
+        sum_ref_frame_usage += cpi->count_arf_frame_usage[sboffset] +
+                               cpi->count_lastgolden_frame_usage[sboffset];
+        arf_frame_usage += cpi->count_arf_frame_usage[sboffset];
+      }
+    }
+  if (sum_ref_frame_usage > 0) {
+    double altref_count = 100.0 * arf_frame_usage / sum_ref_frame_usage;
+    cpi->rc.perc_arf_usage =
+        0.75 * cpi->rc.perc_arf_usage + 0.25 * altref_count;
+  }
+}
+
 static void compute_frame_low_motion(VP9_COMP *const cpi) {
   VP9_COMMON *const cm = &cpi->common;
   int mi_row, mi_col;
@@ -1464,18 +1487,29 @@ void vp9_rc_postencode_update(VP9_COMP *cpi, uint64_t bytes_used) {
   }
 
   if (oxcf->pass == 0) {
-    if (cm->frame_type != KEY_FRAME) compute_frame_low_motion(cpi);
+    if (cm->frame_type != KEY_FRAME) {
+      compute_frame_low_motion(cpi);
+      if (cpi->sf.use_altref_onepass) update_altref_usage(cpi);
+    }
+    cpi->rc.last_frame_is_src_altref = cpi->rc.is_src_frame_alt_ref;
   }
   if (cm->frame_type != KEY_FRAME) rc->reset_high_source_sad = 0;
+
+  rc->last_avg_frame_bandwidth = rc->avg_frame_bandwidth;
+  if (cpi->use_svc &&
+      cpi->svc.spatial_layer_id < cpi->svc.number_spatial_layers - 1)
+    cpi->svc.lower_layer_qindex = cm->base_qindex;
 }
 
 void vp9_rc_postencode_update_drop_frame(VP9_COMP *cpi) {
   // Update buffer level with zero size, update frame counters, and return.
   update_buffer_level(cpi, 0);
+  cpi->common.current_video_frame++;
   cpi->rc.frames_since_key++;
   cpi->rc.frames_to_key--;
   cpi->rc.rc_2_frame = 0;
   cpi->rc.rc_1_frame = 0;
+  cpi->rc.last_avg_frame_bandwidth = cpi->rc.avg_frame_bandwidth;
 }
 
 static int calc_pframe_target_size_one_pass_vbr(const VP9_COMP *const cpi) {
@@ -1568,12 +1602,10 @@ void vp9_rc_get_one_pass_vbr_params(VP9_COMP *cpi) {
     cpi->refresh_golden_frame = 1;
     rc->source_alt_ref_pending = 0;
     rc->alt_ref_gf_group = 0;
-#if USE_ALTREF_FOR_ONE_PASS
-    if (cpi->oxcf.enable_auto_arf) {
+    if (cpi->sf.use_altref_onepass && cpi->oxcf.enable_auto_arf) {
       rc->source_alt_ref_pending = 1;
       rc->alt_ref_gf_group = 1;
     }
-#endif
   }
   if (cm->frame_type == KEY_FRAME)
     target = calc_iframe_target_size_one_pass_vbr(cpi);
@@ -1837,19 +1869,34 @@ void vp9_rc_set_gf_interval_range(const VP9_COMP *const cpi,
       rc->max_gf_interval = vp9_rc_get_default_max_gf_interval(
           cpi->framerate, rc->min_gf_interval);
 
-    // Extended interval for genuinely static scenes
-    rc->static_scene_max_gf_interval = MAX_LAG_BUFFERS * 2;
-
-    if (is_altref_enabled(cpi)) {
-      if (rc->static_scene_max_gf_interval > oxcf->lag_in_frames - 1)
-        rc->static_scene_max_gf_interval = oxcf->lag_in_frames - 1;
-    }
+    // Extended max interval for genuinely static scenes like slide shows.
+    rc->static_scene_max_gf_interval = MAX_STATIC_GF_GROUP_LENGTH;
 
     if (rc->max_gf_interval > rc->static_scene_max_gf_interval)
       rc->max_gf_interval = rc->static_scene_max_gf_interval;
 
     // Clamp min to max
     rc->min_gf_interval = VPXMIN(rc->min_gf_interval, rc->max_gf_interval);
+
+    if (oxcf->target_level == LEVEL_AUTO) {
+      const uint32_t pic_size = cpi->common.width * cpi->common.height;
+      const uint32_t pic_breadth =
+          VPXMAX(cpi->common.width, cpi->common.height);
+      int i;
+      for (i = LEVEL_1; i < LEVEL_MAX; ++i) {
+        if (vp9_level_defs[i].max_luma_picture_size >= pic_size &&
+            vp9_level_defs[i].max_luma_picture_breadth >= pic_breadth) {
+          if (rc->min_gf_interval <=
+              (int)vp9_level_defs[i].min_altref_distance) {
+            rc->min_gf_interval =
+                (int)vp9_level_defs[i].min_altref_distance + 1;
+            rc->max_gf_interval =
+                VPXMAX(rc->max_gf_interval, rc->min_gf_interval);
+          }
+          break;
+        }
+      }
+    }
   }
 }
 
@@ -1867,12 +1914,12 @@ void vp9_rc_update_framerate(VP9_COMP *cpi) {
       VPXMAX(rc->min_frame_bandwidth, FRAME_OVERHEAD_BITS);
 
   // A maximum bitrate for a frame is defined.
-  // The baseline for this aligns with HW implementations that
-  // can support decode of 1080P content up to a bitrate of MAX_MB_RATE bits
-  // per 16x16 MB (averaged over a frame). However this limit is extended if
-  // a very high rate is given on the command line or the the rate cannnot
-  // be acheived because of a user specificed max q (e.g. when the user
-  // specifies lossless encode.
+  // However this limit is extended if a very high rate is given on the command
+  // line or the the rate cannnot be acheived because of a user specificed max q
+  // (e.g. when the user specifies lossless encode).
+  //
+  // If a level is specified that requires a lower maximum rate then the level
+  // value take precedence.
   vbr_max_bits =
       (int)(((int64_t)rc->avg_frame_bandwidth * oxcf->two_pass_vbrmax_section) /
             100);
@@ -1936,9 +1983,11 @@ void vp9_set_target_rate(VP9_COMP *cpi) {
   else
     target_rate = vp9_rc_clamp_pframe_target_size(cpi, target_rate);
 
-  // Correction to rate target based on prior over or under shoot.
-  if (cpi->oxcf.rc_mode == VPX_VBR || cpi->oxcf.rc_mode == VPX_CQ)
-    vbr_rate_correction(cpi, &target_rate);
+  if (!cpi->oxcf.vbr_corpus_complexity) {
+    // Correction to rate target based on prior over or under shoot.
+    if (cpi->oxcf.rc_mode == VPX_VBR || cpi->oxcf.rc_mode == VPX_CQ)
+      vbr_rate_correction(cpi, &target_rate);
+  }
   vp9_rc_set_frame_target(cpi, target_rate);
 }
 
@@ -2085,7 +2134,7 @@ static void adjust_gf_boost_lag_one_pass_vbr(VP9_COMP *cpi,
   uint64_t avg_source_sad_lag = avg_sad_current;
   int high_source_sad_lagindex = -1;
   int steady_sad_lagindex = -1;
-  uint32_t sad_thresh1 = 60000;
+  uint32_t sad_thresh1 = 70000;
   uint32_t sad_thresh2 = 120000;
   int low_content = 0;
   int high_content = 0;
@@ -2189,11 +2238,16 @@ static void adjust_gf_boost_lag_one_pass_vbr(VP9_COMP *cpi,
       rc->af_ratio_onepass_vbr = 5;
       rc->gfu_boost = DEFAULT_GF_BOOST >> 2;
     }
-#if USE_ALTREF_FOR_ONE_PASS
-    if (cpi->oxcf.enable_auto_arf) {
-      // Don't use alt-ref if there is a scene cut within the group,
-      // or content is not low.
-      if ((rc->high_source_sad_lagindex > 0 &&
+    if (cpi->sf.use_altref_onepass && cpi->oxcf.enable_auto_arf) {
+      // Flag to disable usage of ARF based on past usage, only allow this
+      // disabling if current frame/group does not start with key frame or
+      // scene cut. Note perc_arf_usage is only computed for speed >= 5.
+      int arf_usage_low =
+          (cm->frame_type != KEY_FRAME && !rc->high_source_sad &&
+           cpi->rc.perc_arf_usage < 15 && cpi->oxcf.speed >= 5);
+      // Don't use alt-ref for this group under certain conditions.
+      if (arf_usage_low ||
+          (rc->high_source_sad_lagindex > 0 &&
            rc->high_source_sad_lagindex <= rc->frames_till_gf_update_due) ||
           (avg_source_sad_lag > 3 * sad_thresh1 >> 3)) {
         rc->source_alt_ref_pending = 0;
@@ -2202,12 +2256,12 @@ static void adjust_gf_boost_lag_one_pass_vbr(VP9_COMP *cpi,
         rc->source_alt_ref_pending = 1;
         rc->alt_ref_gf_group = 1;
         // If alt-ref is used for this gf group, limit the interval.
-        if (rc->baseline_gf_interval > 10 &&
-            rc->baseline_gf_interval < rc->frames_to_key)
-          rc->baseline_gf_interval = 10;
+        if (rc->baseline_gf_interval > 12) {
+          rc->baseline_gf_interval = 12;
+          rc->frames_till_gf_update_due = rc->baseline_gf_interval;
+        }
       }
     }
-#endif
     target = calc_pframe_target_size_one_pass_vbr(cpi);
     vp9_rc_set_frame_target(cpi, target);
   }
@@ -2237,11 +2291,14 @@ void vp9_scene_detection_onepass(VP9_COMP *cpi) {
     int start_frame = 0;
     int frames_to_buffer = 1;
     int frame = 0;
+    int scene_cut_force_key_frame = 0;
     uint64_t avg_sad_current = 0;
     uint32_t min_thresh = 4000;
     float thresh = 8.0f;
+    uint32_t thresh_key = 140000;
+    if (cpi->oxcf.speed <= 5) thresh_key = 240000;
     if (cpi->oxcf.rc_mode == VPX_VBR) {
-      min_thresh = 60000;
+      min_thresh = 65000;
       thresh = 2.1f;
     }
     if (cpi->oxcf.lag_in_frames > 0) {
@@ -2267,6 +2324,8 @@ void vp9_scene_detection_onepass(VP9_COMP *cpi) {
         rc->high_source_sad = 1;
       else
         rc->high_source_sad = 0;
+      if (rc->high_source_sad && avg_sad_current > thresh_key)
+        scene_cut_force_key_frame = 1;
       // Update recursive average for current frame.
       if (avg_sad_current > 0)
         rc->avg_source_sad[0] =
@@ -2327,6 +2386,8 @@ void vp9_scene_detection_onepass(VP9_COMP *cpi) {
             rc->high_source_sad = 1;
           else
             rc->high_source_sad = 0;
+          if (rc->high_source_sad && avg_sad > thresh_key)
+            scene_cut_force_key_frame = 1;
           if (avg_sad > 0 || cpi->oxcf.rc_mode == VPX_CBR)
             rc->avg_source_sad[0] = (3 * rc->avg_source_sad[0] + avg_sad) >> 2;
         } else {
@@ -2358,10 +2419,10 @@ void vp9_scene_detection_onepass(VP9_COMP *cpi) {
         cpi->ext_refresh_frame_flags_pending == 0) {
       int target;
       cpi->refresh_golden_frame = 1;
+      if (scene_cut_force_key_frame) cm->frame_type = KEY_FRAME;
       rc->source_alt_ref_pending = 0;
-#if USE_ALTREF_FOR_ONE_PASS
-      if (cpi->oxcf.enable_auto_arf) rc->source_alt_ref_pending = 1;
-#endif
+      if (cpi->sf.use_altref_onepass && cpi->oxcf.enable_auto_arf)
+        rc->source_alt_ref_pending = 1;
       rc->gfu_boost = DEFAULT_GF_BOOST >> 1;
       rc->baseline_gf_interval =
           VPXMIN(20, VPXMAX(10, rc->baseline_gf_interval));

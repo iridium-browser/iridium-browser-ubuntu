@@ -22,15 +22,21 @@ struct CONTENT_EXPORT ResizeParams {
   // Information about the screen (dpi, depth, etc..).
   ScreenInfo screen_info;
 
-  // The size of the renderer.
+  // The size for the widget in DIPs.
   gfx::Size new_size;
 
-  // The size of the view's backing surface in non-DPI-adjusted pixels.
-  gfx::Size physical_backing_size;
+  // The size of compositor's viewport in pixels. Note that this may differ
+  // from a ScaleToCeiledSize of |new_size| due to Android's keyboard or due
+  // to rounding particulars.
+  gfx::Size compositor_viewport_pixel_size;
 
   // Whether or not Blink's viewport size should be shrunk by the height of the
   // URL-bar (always false on platforms where URL-bar hiding isn't supported).
   bool browser_controls_shrink_blink_size;
+
+  // Whether or not the focused node should be scrolled into view after the
+  // resize.
+  bool scroll_focused_node_into_view;
 
   // The height of the top controls (always 0 on platforms where URL-bar hiding
   // isn't supported).
@@ -53,9 +59,15 @@ struct CONTENT_EXPORT ResizeParams {
   // The display mode.
   blink::WebDisplayMode display_mode;
 
-  // If set, requests the renderer to reply with a ViewHostMsg_UpdateRect
-  // with the ViewHostMsg_UpdateRect_Flags::IS_RESIZE_ACK bit set in flags.
+  // If set, requests the renderer to reply with a
+  // ViewHostMsg_ResizeOrRepaint_ACK with the
+  // ViewHostMsg_ResizeOrRepaint_ACK_Flags::IS_RESIZE_ACK bit set in flags.
   bool needs_resize_ack;
+
+  // This variable is increased after each cross-document navigation. If the
+  // renderer receives a ResizeParams with stale content_source_id, it still
+  // performs the resize but doesn't use the given LocalSurfaceId.
+  uint32_t content_source_id;
 };
 
 }  // namespace content

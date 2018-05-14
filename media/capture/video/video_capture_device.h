@@ -29,15 +29,14 @@
 #include "media/base/video_frame.h"
 #include "media/capture/capture_export.h"
 #include "media/capture/mojo/image_capture.mojom.h"
-#include "media/capture/video/scoped_result_callback.h"
 #include "media/capture/video/video_capture_buffer_handle.h"
 #include "media/capture/video/video_capture_device_descriptor.h"
 #include "media/capture/video_capture_types.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 
-namespace tracked_objects {
+namespace base {
 class Location;
-}  // namespace tracked_objects
+}  // namespace base
 
 namespace media {
 
@@ -96,8 +95,8 @@ class CAPTURE_EXPORT VideoCaptureDevice
       class CAPTURE_EXPORT HandleProvider {
        public:
         virtual ~HandleProvider() {}
-        virtual mojo::ScopedSharedBufferHandle
-        GetHandleForInterProcessTransit() = 0;
+        virtual mojo::ScopedSharedBufferHandle GetHandleForInterProcessTransit(
+            bool read_only) = 0;
         virtual base::SharedMemoryHandle
         GetNonOwnedSharedMemoryHandleForLegacyIPC() = 0;
         virtual std::unique_ptr<VideoCaptureBufferHandle>
@@ -195,7 +194,7 @@ class CAPTURE_EXPORT VideoCaptureDevice
 
     // An error has occurred that cannot be handled and VideoCaptureDevice must
     // be StopAndDeAllocate()-ed. |reason| is a text description of the error.
-    virtual void OnError(const tracked_objects::Location& from_here,
+    virtual void OnError(const base::Location& from_here,
                          const std::string& reason) = 0;
 
     // VideoCaptureDevice requests the |message| to be logged.
@@ -274,23 +273,21 @@ class CAPTURE_EXPORT VideoCaptureDevice
   // Retrieve the photo capabilities and settings of the device (e.g. zoom
   // levels etc). On success, invokes |callback|. On failure, drops callback
   // without invoking it.
-  using GetPhotoStateCallback =
-      ScopedResultCallback<base::OnceCallback<void(mojom::PhotoStatePtr)>>;
+  using GetPhotoStateCallback = base::OnceCallback<void(mojom::PhotoStatePtr)>;
   virtual void GetPhotoState(GetPhotoStateCallback callback);
 
   // On success, invokes |callback| with value |true|. On failure, drops
   // callback without invoking it.
-  using SetPhotoOptionsCallback =
-      ScopedResultCallback<base::OnceCallback<void(bool)>>;
+  using SetPhotoOptionsCallback = base::OnceCallback<void(bool)>;
   virtual void SetPhotoOptions(mojom::PhotoSettingsPtr settings,
                                SetPhotoOptionsCallback callback);
 
   // Asynchronously takes a photo, possibly reconfiguring the capture objects
-  // and/or interrupting the capture flow. Runs |callback| on the thread
-  // where TakePhoto() is called, if the photo was successfully taken. On
-  // failure, drops callback without invoking it.
-  using TakePhotoCallback =
-      ScopedResultCallback<base::OnceCallback<void(mojom::BlobPtr blob)>>;
+  // and/or interrupting the capture flow. Runs |callback|, if the photo was
+  // successfully taken. On failure, drops callback without invoking it.
+  // Note that |callback| may be runned on a thread different than the thread
+  // where TakePhoto() was called.
+  using TakePhotoCallback = base::OnceCallback<void(mojom::BlobPtr blob)>;
   virtual void TakePhoto(TakePhotoCallback callback);
 
   // Gets the power line frequency, either from the params if specified by the

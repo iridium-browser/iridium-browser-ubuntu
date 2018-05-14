@@ -28,6 +28,7 @@
 
 #include "device/gamepad/public/cpp/gamepad.h"
 #include "modules/gamepad/GamepadButton.h"
+#include "modules/gamepad/GamepadHapticActuator.h"
 #include "modules/gamepad/GamepadPose.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
@@ -36,8 +37,7 @@
 
 namespace blink {
 
-class Gamepad final : public GarbageCollectedFinalized<Gamepad>,
-                      public ScriptWrappable {
+class Gamepad final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -61,11 +61,18 @@ class Gamepad final : public GarbageCollectedFinalized<Gamepad>,
   const String& mapping() const { return mapping_; }
   void SetMapping(const String& val) { mapping_ = val; }
 
-  const DoubleVector& axes() const { return axes_; }
+  const DoubleVector& axes();
   void SetAxes(unsigned count, const double* data);
+  bool isAxisDataDirty() const { return is_axis_data_dirty_; }
 
-  const GamepadButtonVector& buttons() const { return buttons_; }
+  const GamepadButtonVector& buttons();
   void SetButtons(unsigned count, const device::GamepadButton* data);
+  bool isButtonDataDirty() const { return is_button_data_dirty_; }
+
+  GamepadHapticActuator* vibrationActuator() const {
+    return vibration_actuator_;
+  }
+  void SetVibrationActuator(const device::GamepadHapticActuator&);
 
   GamepadPose* pose() const { return pose_; }
   void SetPose(const device::GamepadPose&);
@@ -76,7 +83,7 @@ class Gamepad final : public GarbageCollectedFinalized<Gamepad>,
   unsigned displayId() const { return display_id_; }
   void SetDisplayId(unsigned val) { display_id_ = val; }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   Gamepad();
@@ -88,9 +95,12 @@ class Gamepad final : public GarbageCollectedFinalized<Gamepad>,
   String mapping_;
   DoubleVector axes_;
   GamepadButtonVector buttons_;
+  Member<GamepadHapticActuator> vibration_actuator_;
   Member<GamepadPose> pose_;
   String hand_;
   unsigned display_id_;
+  bool is_axis_data_dirty_;
+  bool is_button_data_dirty_;
 };
 
 }  // namespace blink

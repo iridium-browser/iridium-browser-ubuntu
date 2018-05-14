@@ -12,10 +12,9 @@
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
-#include "base/profiler/scoped_tracker.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
 #include "ios/chrome/browser/pref_names.h"
@@ -53,12 +52,12 @@ void ReportInvalidReferrerSend(const GURL& target_url,
 void RecordNetworkErrorHistograms(const net::URLRequest* request,
                                   int net_error) {
   if (request->url().SchemeIs("http")) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Net.HttpRequestCompletionErrorCodes",
-                                std::abs(net_error));
+    base::UmaHistogramSparse("Net.HttpRequestCompletionErrorCodes",
+                             std::abs(net_error));
 
     if (request->load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED) {
-      UMA_HISTOGRAM_SPARSE_SLOWLY(
-          "Net.HttpRequestCompletionErrorCodes.MainFrame", std::abs(net_error));
+      base::UmaHistogramSparse("Net.HttpRequestCompletionErrorCodes.MainFrame",
+                               std::abs(net_error));
     }
   }
 }
@@ -86,24 +85,8 @@ int IOSChromeNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     GURL* new_url) {
-  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "456327 URLRequest::IOSChromeNetworkDelegate::OnBeforeURLRequest"));
-
-  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
-  tracked_objects::ScopedTracker tracking_profile2(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "456327 URLRequest::IOSChromeNetworkDelegate::OnBeforeURLRequest 2"));
-
   if (enable_do_not_track_ && enable_do_not_track_->GetValue())
     request->SetExtraRequestHeaderByName(kDNTHeader, "1", true /* override */);
-
-  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
-  tracked_objects::ScopedTracker tracking_profile4(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "456327 URLRequest::IOSChromeNetworkDelegate::OnBeforeURLRequest 4"));
-
   return net::OK;
 }
 
@@ -129,19 +112,20 @@ bool IOSChromeNetworkDelegate::OnCanGetCookies(
   if (!cookie_settings_)
     return true;
 
-  return cookie_settings_->IsCookieAccessAllowed(
-      request.url(), request.first_party_for_cookies());
+  return cookie_settings_->IsCookieAccessAllowed(request.url(),
+                                                 request.site_for_cookies());
 }
 
-bool IOSChromeNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
-                                              const std::string& cookie_line,
-                                              net::CookieOptions* options) {
+bool IOSChromeNetworkDelegate::OnCanSetCookie(
+    const net::URLRequest& request,
+    const net::CanonicalCookie& cookie,
+    net::CookieOptions* options) {
   // Null during tests, or when we're running in the system context.
   if (!cookie_settings_)
     return true;
 
-  return cookie_settings_->IsCookieAccessAllowed(
-      request.url(), request.first_party_for_cookies());
+  return cookie_settings_->IsCookieAccessAllowed(request.url(),
+                                                 request.site_for_cookies());
 }
 
 bool IOSChromeNetworkDelegate::OnCanAccessFile(
@@ -153,12 +137,12 @@ bool IOSChromeNetworkDelegate::OnCanAccessFile(
 
 bool IOSChromeNetworkDelegate::OnCanEnablePrivacyMode(
     const GURL& url,
-    const GURL& first_party_for_cookies) const {
+    const GURL& site_for_cookies) const {
   // Null during tests, or when we're running in the system context.
   if (!cookie_settings_.get())
     return false;
 
-  return !cookie_settings_->IsCookieAccessAllowed(url, first_party_for_cookies);
+  return !cookie_settings_->IsCookieAccessAllowed(url, site_for_cookies);
 }
 
 bool IOSChromeNetworkDelegate::

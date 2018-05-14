@@ -16,15 +16,18 @@
 #include "base/memory/singleton.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "device/geolocation/geolocation_delegate.h"
 #include "device/geolocation/location_arbitrator.h"
+#include "device/geolocation/public/cpp/geoposition.h"
 
 namespace device {
 
 namespace {
-base::LazyInstance<std::unique_ptr<GeolocationDelegate>>::Leaky g_delegate =
-    LAZY_INSTANCE_INITIALIZER;
-}  // anonymous namespace
+base::LazyInstance<CustomLocationProviderCallback>::Leaky
+    g_custom_location_provider_callback = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<GeolocationProvider::RequestContextProducer>::Leaky
+    g_request_context_producer = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<std::string>::Leaky g_api_key = LAZY_INSTANCE_INITIALIZER;
+}  // namespace
 
 // static
 GeolocationProvider* GeolocationProvider::GetInstance() {
@@ -32,10 +35,13 @@ GeolocationProvider* GeolocationProvider::GetInstance() {
 }
 
 // static
-void GeolocationProvider::SetGeolocationDelegate(
-    GeolocationDelegate* delegate) {
-  DCHECK(!g_delegate.Get());
-  g_delegate.Get().reset(delegate);
+void GeolocationProviderImpl::SetGeolocationGlobals(
+    const GeolocationProvider::RequestContextProducer request_context_producer,
+    const std::string& api_key,
+    const CustomLocationProviderCallback& callback) {
+  g_request_context_producer.Get() = request_context_producer;
+  g_api_key.Get() = api_key;
+  g_custom_location_provider_callback.Get() = callback;
 }
 
 std::unique_ptr<GeolocationProvider::Subscription>
@@ -51,20 +57,12 @@ GeolocationProviderImpl::AddLocationUpdateCallback(
   }
 
   OnClientsChanged();
-  if (position_.Validate() ||
-      position_.error_code != Geoposition::ERROR_CODE_NONE) {
+  if (ValidateGeoposition(position_) ||
+      position_.error_code != mojom::Geoposition::ErrorCode::NONE) {
     callback.Run(position_);
   }
 
   return subscription;
-}
-
-void GeolocationProviderImpl::UserDidOptIntoLocationServices() {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-  bool was_permission_granted = user_did_opt_into_location_services_;
-  user_did_opt_into_location_services_ = true;
-  if (IsRunning() && !was_permission_granted)
-    InformProvidersPermissionGranted();
 }
 
 bool GeolocationProviderImpl::HighAccuracyLocationInUse() {
@@ -72,14 +70,15 @@ bool GeolocationProviderImpl::HighAccuracyLocationInUse() {
 }
 
 void GeolocationProviderImpl::OverrideLocationForTesting(
-    const Geoposition& position) {
+    const mojom::Geoposition& position) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   ignore_location_updates_ = true;
   NotifyClients(position);
 }
 
-void GeolocationProviderImpl::OnLocationUpdate(const LocationProvider* provider,
-                                               const Geoposition& position) {
+void GeolocationProviderImpl::OnLocationUpdate(
+    const LocationProvider* provider,
+    const mojom::Geoposition& position) {
   DCHECK(OnGeolocationThread());
   // Will be true only in testing.
   if (ignore_location_updates_)
@@ -94,11 +93,29 @@ GeolocationProviderImpl* GeolocationProviderImpl::GetInstance() {
   return base::Singleton<GeolocationProviderImpl>::get();
 }
 
+void GeolocationProviderImpl::BindGeolocationControlRequest(
+    mojom::GeolocationControlRequest request) {
+  // The |binding_| has been bound already here means that more than one
+  // GeolocationPermissionContext in chrome tried to bind to Device Service.
+  // We only bind the first request. See more info in geolocation_control.mojom.
+  if (!binding_.is_bound())
+    binding_.Bind(std::move(request));
+}
+
+void GeolocationProviderImpl::UserDidOptIntoLocationServices() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+  bool was_permission_granted = user_did_opt_into_location_services_;
+  user_did_opt_into_location_services_ = true;
+  if (IsRunning() && !was_permission_granted)
+    InformProvidersPermissionGranted();
+}
+
 GeolocationProviderImpl::GeolocationProviderImpl()
     : base::Thread("Geolocation"),
       user_did_opt_into_location_services_(false),
       ignore_location_updates_(false),
-      main_task_runner_(base::ThreadTaskRunnerHandle::Get()) {
+      main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      binding_(this) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   high_accuracy_callbacks_.set_removal_callback(base::Bind(
       &GeolocationProviderImpl::OnClientsChanged, base::Unretained(this)));
@@ -128,7 +145,7 @@ void GeolocationProviderImpl::OnClientsChanged() {
     if (!ignore_location_updates_) {
       // We have no more observers, so we clear the cached geoposition so that
       // when the next observer is added we will not provide a stale position.
-      position_ = Geoposition();
+      position_ = mojom::Geoposition();
     }
     task = base::Bind(&GeolocationProviderImpl::StopProviders,
                       base::Unretained(this));
@@ -175,10 +192,11 @@ void GeolocationProviderImpl::InformProvidersPermissionGranted() {
   arbitrator_->OnPermissionGranted();
 }
 
-void GeolocationProviderImpl::NotifyClients(const Geoposition& position) {
+void GeolocationProviderImpl::NotifyClients(
+    const mojom::Geoposition& position) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
-  DCHECK(position.Validate() ||
-         position.error_code != Geoposition::ERROR_CODE_NONE);
+  DCHECK(ValidateGeoposition(position) ||
+         position.error_code != mojom::Geoposition::ErrorCode::NONE);
   position_ = position;
   high_accuracy_callbacks_.Notify(position_);
   low_accuracy_callbacks_.Notify(position_);
@@ -187,17 +205,16 @@ void GeolocationProviderImpl::NotifyClients(const Geoposition& position) {
 void GeolocationProviderImpl::Init() {
   DCHECK(OnGeolocationThread());
 
-  if (!arbitrator_) {
-    LocationProvider::LocationProviderUpdateCallback callback = base::Bind(
-        &GeolocationProviderImpl::OnLocationUpdate, base::Unretained(this));
-    // Use the embedder's |g_delegate| or fall back to the default one.
-    if (!g_delegate.Get())
-      g_delegate.Get().reset(new GeolocationDelegate);
+  if (arbitrator_)
+    return;
 
-    arbitrator_ = base::MakeUnique<LocationArbitrator>(
-        base::WrapUnique(g_delegate.Get().get()));
-    arbitrator_->SetUpdateCallback(callback);
-  }
+  LocationProvider::LocationProviderUpdateCallback callback = base::Bind(
+      &GeolocationProviderImpl::OnLocationUpdate, base::Unretained(this));
+
+  arbitrator_ = std::make_unique<LocationArbitrator>(
+      g_custom_location_provider_callback.Get(),
+      g_request_context_producer.Get(), g_api_key.Get());
+  arbitrator_->SetUpdateCallback(callback);
 }
 
 void GeolocationProviderImpl::CleanUp() {

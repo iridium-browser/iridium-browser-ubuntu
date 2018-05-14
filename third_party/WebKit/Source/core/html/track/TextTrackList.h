@@ -26,17 +26,17 @@
 #ifndef TextTrackList_h
 #define TextTrackList_h
 
-#include "core/events/EventListener.h"
-#include "core/events/EventTarget.h"
-#include "core/html/HTMLMediaElement.h"
+#include "base/memory/scoped_refptr.h"
+#include "core/dom/events/EventListener.h"
+#include "core/dom/events/EventTarget.h"
+#include "core/html/media/HTMLMediaElement.h"
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
 
-class GenericEventQueue;
+class MediaElementEventQueue;
 class TextTrack;
 
 class CORE_EXPORT TextTrackList final : public EventTargetWithInlineData {
@@ -73,9 +73,9 @@ class CORE_EXPORT TextTrackList final : public EventTargetWithInlineData {
 
   bool HasShowingTracks();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   explicit TextTrackList(HTMLMediaElement*);
@@ -89,7 +89,7 @@ class CORE_EXPORT TextTrackList final : public EventTargetWithInlineData {
 
   Member<HTMLMediaElement> owner_;
 
-  Member<GenericEventQueue> async_event_queue_;
+  Member<MediaElementEventQueue> async_event_queue_;
 
   HeapVector<TraceWrapperMember<TextTrack>> add_track_tracks_;
   HeapVector<TraceWrapperMember<TextTrack>> element_tracks_;

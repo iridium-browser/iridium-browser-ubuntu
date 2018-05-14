@@ -6,25 +6,25 @@
  */
 UI.ReportView = class extends UI.VBox {
   /**
-   * @param {string} title
+   * @param {string=} title
    */
   constructor(title) {
     super(true);
     this.registerRequiredCSS('ui/reportView.css');
 
-    var contentBox = this.contentElement.createChild('div', 'report-content-box');
-    this._headerElement = contentBox.createChild('div', 'report-header vbox');
+    this._contentBox = this.contentElement.createChild('div', 'report-content-box');
+    this._headerElement = this._contentBox.createChild('div', 'report-header vbox');
     this._titleElement = this._headerElement.createChild('div', 'report-title');
     this._titleElement.textContent = title;
 
-    this._sectionList = contentBox.createChild('div', 'vbox');
+    this._sectionList = this._contentBox.createChild('div', 'vbox');
   }
 
   /**
    * @param {string} title
    */
   setTitle(title) {
-    if (this._titleElement && this._titleElement.textContent === title)
+    if (this._titleElement.textContent === title)
       return;
     this._titleElement.textContent = title;
   }
@@ -55,7 +55,7 @@ UI.ReportView = class extends UI.VBox {
    * @return {!UI.Toolbar}
    */
   createToolbar() {
-    var toolbar = new UI.Toolbar('');
+    const toolbar = new UI.Toolbar('');
     this._headerElement.appendChild(toolbar.element);
     return toolbar;
   }
@@ -66,13 +66,39 @@ UI.ReportView = class extends UI.VBox {
    * @return {!UI.ReportView.Section}
    */
   appendSection(title, className) {
-    var section = new UI.ReportView.Section(title, className);
+    const section = new UI.ReportView.Section(title, className);
     section.show(this._sectionList);
     return section;
   }
 
-  removeAllSection() {
-    this._sectionList.removeChildren();
+  /**
+   * @param {function(!UI.ReportView.Section, !UI.ReportView.Section): number} comparator
+   */
+  sortSections(comparator) {
+    const sections = /** @type {!Array<!UI.ReportView.Section>} */ (this.children().slice());
+    const sorted = sections.every((e, i, a) => !i || comparator(a[i - 1], a[i]) <= 0);
+    if (sorted)
+      return;
+
+    this.detachChildWidgets();
+    sections.sort(comparator);
+    for (const section of sections)
+      section.show(this._sectionList);
+  }
+
+  /**
+   * @param {boolean} visible
+   */
+  setHeaderVisible(visible) {
+    this._headerElement.classList.toggle('hidden', !visible);
+  }
+
+
+  /**
+   * @param {boolean} scrollable
+   */
+  setBodyScrollable(scrollable) {
+    this._contentBox.classList.toggle('no-scroll', !scrollable);
   }
 };
 
@@ -98,6 +124,13 @@ UI.ReportView.Section = class extends UI.VBox {
   }
 
   /**
+   * @return {string}
+   */
+  title() {
+    return this._titleElement.textContent;
+  }
+
+  /**
    * @param {string} title
    */
   setTitle(title) {
@@ -109,7 +142,7 @@ UI.ReportView.Section = class extends UI.VBox {
    * @return {!UI.Toolbar}
    */
   createToolbar() {
-    var toolbar = new UI.Toolbar('');
+    const toolbar = new UI.Toolbar('');
     this._headerElement.appendChild(toolbar.element);
     return toolbar;
   }
@@ -120,7 +153,7 @@ UI.ReportView.Section = class extends UI.VBox {
    * @return {!Element}
    */
   appendField(title, textValue) {
-    var row = this._fieldMap.get(title);
+    let row = this._fieldMap.get(title);
     if (!row) {
       row = this._fieldList.createChild('div', 'report-field');
       row.createChild('div', 'report-field-name').textContent = title;
@@ -132,15 +165,11 @@ UI.ReportView.Section = class extends UI.VBox {
     return /** @type {!Element} */ (row.lastElementChild);
   }
 
-  remove() {
-    this.element.remove();
-  }
-
   /**
    * @param {string} title
    */
   removeField(title) {
-    var row = this._fieldMap.get(title);
+    const row = this._fieldMap.get(title);
     if (row)
       row.remove();
     this._fieldMap.delete(title);
@@ -151,7 +180,7 @@ UI.ReportView.Section = class extends UI.VBox {
    * @param {boolean} visible
    */
   setFieldVisible(title, visible) {
-    var row = this._fieldMap.get(title);
+    const row = this._fieldMap.get(title);
     if (row)
       row.classList.toggle('hidden', !visible);
   }
@@ -161,7 +190,7 @@ UI.ReportView.Section = class extends UI.VBox {
    * @return {?Element}
    */
   fieldValue(title) {
-    var row = this._fieldMap.get(title);
+    const row = this._fieldMap.get(title);
     return row ? row.lastElementChild : null;
   }
 

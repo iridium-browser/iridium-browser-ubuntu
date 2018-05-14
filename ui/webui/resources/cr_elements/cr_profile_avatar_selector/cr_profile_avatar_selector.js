@@ -12,7 +12,7 @@
  *            label: string,
  *            isGaiaAvatar: (boolean|undefined)}}
  */
-var AvatarIcon;
+let AvatarIcon;
 
 Polymer({
   is: 'cr-profile-avatar-selector',
@@ -49,10 +49,10 @@ Polymer({
 
   /**
    * @param {string} iconUrl
-   * @return {string} A CSS imageset for multiple scale factors.
+   * @return {string} A CSS image-set for multiple scale factors.
    * @private
    */
-  getIconImageset_: function(iconUrl) {
+  getIconImageSet_: function(iconUrl) {
     return cr.icon.getImage(iconUrl);
   },
 

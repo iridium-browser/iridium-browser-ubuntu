@@ -24,7 +24,7 @@
 
 namespace {
 
-char kPDFiumKey_HasGeneratedAP[] = "PDFIUM_HasGeneratedAP";
+const char kPDFiumKey_HasGeneratedAP[] = "PDFIUM_HasGeneratedAP";
 
 bool IsTextMarkupAnnotation(CPDF_Annot::Subtype type) {
   return type == CPDF_Annot::Subtype::HIGHLIGHT ||
@@ -52,12 +52,49 @@ CPDF_Form* AnnotGetMatrix(const CPDF_Page* pPage,
   if (!pForm)
     return nullptr;
 
-  CFX_FloatRect form_bbox = pForm->m_pFormDict->GetRectFor("BBox");
   CFX_Matrix form_matrix = pForm->m_pFormDict->GetMatrixFor("Matrix");
-  form_matrix.TransformRect(form_bbox);
+  CFX_FloatRect form_bbox =
+      form_matrix.TransformRect(pForm->m_pFormDict->GetRectFor("BBox"));
   matrix->MatchRect(pAnnot->GetRect(), form_bbox);
   matrix->Concat(*pUser2Device);
   return pForm;
+}
+
+CPDF_Stream* FPDFDOC_GetAnnotAPInternal(const CPDF_Dictionary* pAnnotDict,
+                                        CPDF_Annot::AppearanceMode eMode,
+                                        bool bFallbackToNormal) {
+  CPDF_Dictionary* pAP = pAnnotDict->GetDictFor("AP");
+  if (!pAP)
+    return nullptr;
+
+  const char* ap_entry = "N";
+  if (eMode == CPDF_Annot::Down)
+    ap_entry = "D";
+  else if (eMode == CPDF_Annot::Rollover)
+    ap_entry = "R";
+  if (bFallbackToNormal && !pAP->KeyExist(ap_entry))
+    ap_entry = "N";
+
+  CPDF_Object* psub = pAP->GetDirectObjectFor(ap_entry);
+  if (!psub)
+    return nullptr;
+  if (CPDF_Stream* pStream = psub->AsStream())
+    return pStream;
+
+  CPDF_Dictionary* pDict = psub->AsDictionary();
+  if (!pDict)
+    return nullptr;
+
+  ByteString as = pAnnotDict->GetStringFor("AS");
+  if (as.IsEmpty()) {
+    ByteString value = pAnnotDict->GetStringFor("V");
+    if (value.IsEmpty()) {
+      CPDF_Dictionary* pParentDict = pAnnotDict->GetDictFor("Parent");
+      value = pParentDict ? pParentDict->GetStringFor("V") : ByteString();
+    }
+    as = (!value.IsEmpty() && pDict->KeyExist(value)) ? value : "Off";
+  }
+  return pDict->GetStreamFor(as);
 }
 
 }  // namespace
@@ -87,32 +124,13 @@ void CPDF_Annot::Init() {
 void CPDF_Annot::GenerateAPIfNeeded() {
   if (!ShouldGenerateAPForAnnotation(m_pAnnotDict.Get()))
     return;
-
-  CPDF_Dictionary* pDict = m_pAnnotDict.Get();
-  bool result = false;
-  if (m_nSubtype == CPDF_Annot::Subtype::CIRCLE)
-    result = CPVT_GenerateAP::GenerateCircleAP(m_pDocument.Get(), pDict);
-  else if (m_nSubtype == CPDF_Annot::Subtype::HIGHLIGHT)
-    result = CPVT_GenerateAP::GenerateHighlightAP(m_pDocument.Get(), pDict);
-  else if (m_nSubtype == CPDF_Annot::Subtype::INK)
-    result = CPVT_GenerateAP::GenerateInkAP(m_pDocument.Get(), pDict);
-  else if (m_nSubtype == CPDF_Annot::Subtype::POPUP)
-    result = CPVT_GenerateAP::GeneratePopupAP(m_pDocument.Get(), pDict);
-  else if (m_nSubtype == CPDF_Annot::Subtype::SQUARE)
-    result = CPVT_GenerateAP::GenerateSquareAP(m_pDocument.Get(), pDict);
-  else if (m_nSubtype == CPDF_Annot::Subtype::SQUIGGLY)
-    result = CPVT_GenerateAP::GenerateSquigglyAP(m_pDocument.Get(), pDict);
-  else if (m_nSubtype == CPDF_Annot::Subtype::STRIKEOUT)
-    result = CPVT_GenerateAP::GenerateStrikeOutAP(m_pDocument.Get(), pDict);
-  else if (m_nSubtype == CPDF_Annot::Subtype::TEXT)
-    result = CPVT_GenerateAP::GenerateTextAP(m_pDocument.Get(), pDict);
-  else if (m_nSubtype == CPDF_Annot::Subtype::UNDERLINE)
-    result = CPVT_GenerateAP::GenerateUnderlineAP(m_pDocument.Get(), pDict);
-
-  if (result) {
-    m_pAnnotDict->SetNewFor<CPDF_Boolean>(kPDFiumKey_HasGeneratedAP, result);
-    m_bHasGeneratedAP = result;
+  if (!CPVT_GenerateAP::GenerateAnnotAP(m_nSubtype, m_pDocument.Get(),
+                                        m_pAnnotDict.Get())) {
+    return;
   }
+
+  m_pAnnotDict->SetNewFor<CPDF_Boolean>(kPDFiumKey_HasGeneratedAP, true);
+  m_bHasGeneratedAP = true;
 }
 
 bool CPDF_Annot::ShouldDrawAnnotation() {
@@ -159,41 +177,13 @@ uint32_t CPDF_Annot::GetFlags() const {
 }
 
 CPDF_Stream* FPDFDOC_GetAnnotAP(const CPDF_Dictionary* pAnnotDict,
-                                CPDF_Annot::AppearanceMode mode) {
-  CPDF_Dictionary* pAP = pAnnotDict->GetDictFor("AP");
-  if (!pAP) {
-    return nullptr;
-  }
-  const char* ap_entry = "N";
-  if (mode == CPDF_Annot::Down)
-    ap_entry = "D";
-  else if (mode == CPDF_Annot::Rollover)
-    ap_entry = "R";
-  if (!pAP->KeyExist(ap_entry))
-    ap_entry = "N";
+                                CPDF_Annot::AppearanceMode eMode) {
+  return FPDFDOC_GetAnnotAPInternal(pAnnotDict, eMode, true);
+}
 
-  CPDF_Object* psub = pAP->GetDirectObjectFor(ap_entry);
-  if (!psub)
-    return nullptr;
-  if (CPDF_Stream* pStream = psub->AsStream())
-    return pStream;
-
-  if (CPDF_Dictionary* pDict = psub->AsDictionary()) {
-    CFX_ByteString as = pAnnotDict->GetStringFor("AS");
-    if (as.IsEmpty()) {
-      CFX_ByteString value = pAnnotDict->GetStringFor("V");
-      if (value.IsEmpty()) {
-        CPDF_Dictionary* pParentDict = pAnnotDict->GetDictFor("Parent");
-        value = pParentDict ? pParentDict->GetStringFor("V") : CFX_ByteString();
-      }
-      if (value.IsEmpty() || !pDict->KeyExist(value))
-        as = "Off";
-      else
-        as = value;
-    }
-    return pDict->GetStreamFor(as);
-  }
-  return nullptr;
+CPDF_Stream* FPDFDOC_GetAnnotAPNoFallback(const CPDF_Dictionary* pAnnotDict,
+                                          CPDF_Annot::AppearanceMode eMode) {
+  return FPDFDOC_GetAnnotAPInternal(pAnnotDict, eMode, false);
 }
 
 CPDF_Form* CPDF_Annot::GetAPForm(const CPDF_Page* pPage, AppearanceMode mode) {
@@ -207,7 +197,7 @@ CPDF_Form* CPDF_Annot::GetAPForm(const CPDF_Page* pPage, AppearanceMode mode) {
 
   auto pNewForm = pdfium::MakeUnique<CPDF_Form>(
       m_pDocument.Get(), pPage->m_pResources.Get(), pStream);
-  pNewForm->ParseContent(nullptr, nullptr, nullptr);
+  pNewForm->ParseContent();
 
   CPDF_Form* pResult = pNewForm.get();
   m_APMap[pStream] = std::move(pNewForm);
@@ -241,7 +231,7 @@ bool CPDF_Annot::IsAnnotationHidden(CPDF_Dictionary* pAnnotDict) {
 
 // Static.
 CPDF_Annot::Subtype CPDF_Annot::StringToAnnotSubtype(
-    const CFX_ByteString& sSubtype) {
+    const ByteString& sSubtype) {
   if (sSubtype == "Text")
     return CPDF_Annot::Subtype::TEXT;
   if (sSubtype == "Link")
@@ -300,7 +290,7 @@ CPDF_Annot::Subtype CPDF_Annot::StringToAnnotSubtype(
 }
 
 // Static.
-CFX_ByteString CPDF_Annot::AnnotSubtypeToString(CPDF_Annot::Subtype nSubtype) {
+ByteString CPDF_Annot::AnnotSubtypeToString(CPDF_Annot::Subtype nSubtype) {
   if (nSubtype == CPDF_Annot::Subtype::TEXT)
     return "Text";
   if (nSubtype == CPDF_Annot::Subtype::LINK)
@@ -360,7 +350,7 @@ CFX_ByteString CPDF_Annot::AnnotSubtypeToString(CPDF_Annot::Subtype nSubtype) {
 
 bool CPDF_Annot::DrawAppearance(CPDF_Page* pPage,
                                 CFX_RenderDevice* pDevice,
-                                const CFX_Matrix* pUser2Device,
+                                const CFX_Matrix& mtUser2Device,
                                 AppearanceMode mode,
                                 const CPDF_RenderOptions* pOptions) {
   if (!ShouldDrawAnnotation())
@@ -374,7 +364,7 @@ bool CPDF_Annot::DrawAppearance(CPDF_Page* pPage,
   GenerateAPIfNeeded();
 
   CFX_Matrix matrix;
-  CPDF_Form* pForm = AnnotGetMatrix(pPage, this, mode, pUser2Device, &matrix);
+  CPDF_Form* pForm = AnnotGetMatrix(pPage, this, mode, &mtUser2Device, &matrix);
   if (!pForm)
     return false;
 
@@ -418,7 +408,7 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
     return;
   }
   bool bPrinting = pDevice->GetDeviceClass() == FXDC_PRINTER ||
-                   (pOptions && (pOptions->m_Flags & RENDER_PRINTPREVIEW));
+                   (pOptions && (pOptions->HasFlag(RENDER_PRINTPREVIEW)));
   if (bPrinting && (annot_flags & ANNOTFLAG_PRINT) == 0) {
     return;
   }
@@ -456,7 +446,7 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
       width = 1;
     }
   } else {
-    CFX_ByteString style = pBS->GetStringFor("S");
+    ByteString style = pBS->GetStringFor("S");
     pDashArray = pBS->GetArrayFor("D");
     style_char = style[1];
     width = pBS->GetNumberFor("W");
@@ -501,7 +491,7 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
   path.AppendRect(rect.left + width, rect.bottom + width, rect.right - width,
                   rect.top - width);
   int fill_type = 0;
-  if (pOptions && (pOptions->m_Flags & RENDER_NOPATHSMOOTH))
+  if (pOptions && (pOptions->HasFlag(RENDER_NOPATHSMOOTH)))
     fill_type |= FXFILL_NOPATHSMOOTH;
 
   pDevice->DrawPath(&path, pUser2Device, &graph_state, argb, argb, fill_type);

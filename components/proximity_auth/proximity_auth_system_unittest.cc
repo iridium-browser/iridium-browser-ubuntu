@@ -55,7 +55,9 @@ void CompareRemoteDeviceLists(const RemoteDeviceList& list1,
 RemoteDevice CreateRemoteDevice(const std::string& user_id,
                                 const std::string& name) {
   return RemoteDevice(user_id, name + "_pk", name, name + "_btaddr",
-                      name + "_psk", name + "_challenge");
+                      name + "_psk", true /* unlock_key */,
+                      true /* supports_mobile_hotspot */,
+                      0 /* last_update_time_millis */);
 }
 
 // Mock implementation of UnlockManager.
@@ -89,12 +91,12 @@ class TestableProximityAuthSystem : public ProximityAuthSystem {
   TestableProximityAuthSystem(ScreenlockType screenlock_type,
                               ProximityAuthClient* proximity_auth_client,
                               std::unique_ptr<UnlockManager> unlock_manager,
-                              std::unique_ptr<base::Clock> clock,
+                              base::Clock* clock,
                               ProximityAuthPrefManager* pref_manager)
       : ProximityAuthSystem(screenlock_type,
                             proximity_auth_client,
                             std::move(unlock_manager),
-                            std::move(clock),
+                            clock,
                             pref_manager),
         life_cycle_(nullptr) {}
   ~TestableProximityAuthSystem() override {}
@@ -151,17 +153,13 @@ class ProximityAuthSystemTest : public testing::Test {
         new NiceMock<MockUnlockManager>());
     unlock_manager_ = unlock_manager.get();
 
-    std::unique_ptr<base::SimpleTestClock> clock =
-        base::MakeUnique<base::SimpleTestClock>();
-    clock_ = clock.get();
-
-    clock_->SetNow(base::Time::FromJavaTime(kTimestampBeforeReauthMs));
+    clock_.SetNow(base::Time::FromJavaTime(kTimestampBeforeReauthMs));
     ON_CALL(*pref_manager_, GetLastPasswordEntryTimestampMs())
         .WillByDefault(Return(kLastPasswordEntryTimestampMs));
 
     proximity_auth_system_.reset(new TestableProximityAuthSystem(
-        type, &proximity_auth_client_, std::move(unlock_manager),
-        std::move(clock), pref_manager_.get()));
+        type, &proximity_auth_client_, std::move(unlock_manager), &clock_,
+        pref_manager_.get()));
   }
 
   void LockScreen() {
@@ -189,7 +187,7 @@ class ProximityAuthSystemTest : public testing::Test {
   NiceMock<MockProximityAuthClient> proximity_auth_client_;
   std::unique_ptr<TestableProximityAuthSystem> proximity_auth_system_;
   MockUnlockManager* unlock_manager_;
-  base::SimpleTestClock* clock_;
+  base::SimpleTestClock clock_;
   std::unique_ptr<MockProximityAuthPrefManager> pref_manager_;
 
   RemoteDeviceList user1_remote_devices_;

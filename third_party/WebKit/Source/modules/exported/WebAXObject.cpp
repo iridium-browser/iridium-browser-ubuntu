@@ -31,19 +31,18 @@
 #include "public/web/WebAXObject.h"
 
 #include "SkMatrix44.h"
-#include "core/HTMLNames.h"
 #include "core/css/CSSPrimitiveValueMappings.h"
-#include "core/dom/Document.h"
 #include "core/dom/Node.h"
+#include "core/editing/VisiblePosition.h"
 #include "core/editing/markers/DocumentMarker.h"
-#include "core/exported/WebViewBase.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/VisualViewport.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
+#include "core/html_names.h"
 #include "core/input/KeyboardEventManager.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/api/LayoutAPIShim.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/page/Page.h"
 #include "core/style/ComputedStyle.h"
 #include "modules/accessibility/AXObject.h"
@@ -69,7 +68,7 @@ class WebAXSparseAttributeClientAdapter : public AXSparseAttributeClient {
  public:
   WebAXSparseAttributeClientAdapter(WebAXSparseAttributeClient& attribute_map)
       : attribute_map_(attribute_map) {}
-  virtual ~WebAXSparseAttributeClientAdapter() {}
+  virtual ~WebAXSparseAttributeClientAdapter() = default;
 
  private:
   WebAXSparseAttributeClient& attribute_map_;
@@ -120,7 +119,7 @@ WebScopedAXContext::WebScopedAXContext(WebDocument& root_document)
 }
 
 WebScopedAXContext::~WebScopedAXContext() {
-  private_.reset(0);
+  private_.reset(nullptr);
 }
 
 WebAXObject WebScopedAXContext::Root() const {
@@ -150,22 +149,22 @@ int WebAXObject::AxID() const {
   if (IsDetached())
     return -1;
 
-  return private_->AxObjectID();
+  return private_->AXObjectID();
 }
 
 int WebAXObject::GenerateAXID() const {
   if (IsDetached())
     return -1;
 
-  return private_->AxObjectCache().GenerateAXID();
+  return private_->AXObjectCache().GenerateAXID();
 }
 
 bool WebAXObject::UpdateLayoutAndCheckValidity() {
   if (!IsDetached()) {
     Document* document = private_->GetDocument();
-    if (!document || !document->View())
+    if (!document || !document->View() ||
+        !document->View()->UpdateLifecycleToCompositingCleanPlusScrolling())
       return false;
-    document->View()->UpdateLifecycleToCompositingCleanPlusScrolling();
   }
 
   // Doing a layout can cause this object to be invalid, so check again.
@@ -177,20 +176,6 @@ WebAXDefaultActionVerb WebAXObject::Action() const {
     return WebAXDefaultActionVerb::kNone;
 
   return static_cast<WebAXDefaultActionVerb>(private_->Action());
-}
-
-bool WebAXObject::CanDecrement() const {
-  if (IsDetached())
-    return false;
-
-  return private_->IsSlider();
-}
-
-bool WebAXObject::CanIncrement() const {
-  if (IsDetached())
-    return false;
-
-  return private_->IsSlider();
 }
 
 bool WebAXObject::CanPress() const {
@@ -246,13 +231,6 @@ void WebAXObject::GetSparseAXAttributes(
 
   WebAXSparseAttributeClientAdapter adapter(client);
   private_->GetSparseAXAttributes(adapter);
-}
-
-bool WebAXObject::CanSetSelectedAttribute() const {
-  if (IsDetached())
-    return false;
-
-  return private_->CanSetSelectedAttribute();
 }
 
 bool WebAXObject::IsAnchor() const {
@@ -381,11 +359,11 @@ bool WebAXObject::IsRequired() const {
   return private_->IsRequired();
 }
 
-bool WebAXObject::IsSelected() const {
+WebAXSelectedState WebAXObject::IsSelected() const {
   if (IsDetached())
-    return false;
+    return kWebAXSelectedStateUndefined;
 
-  return private_->IsSelected();
+  return static_cast<WebAXSelectedState>(private_->IsSelected());
 }
 
 bool WebAXObject::IsSelectedOptionActive() const {
@@ -465,6 +443,13 @@ bool WebAXObject::AriaHasPopup() const {
   return private_->AriaHasPopup();
 }
 
+bool WebAXObject::IsEditableRoot() const {
+  if (IsDetached())
+    return false;
+
+  return private_->IsEditableRoot();
+}
+
 bool WebAXObject::IsEditable() const {
   if (IsDetached())
     return false;
@@ -504,7 +489,7 @@ bool WebAXObject::IsInLiveRegion() const {
   if (IsDetached())
     return false;
 
-  return 0 != private_->LiveRegionRoot();
+  return !!private_->LiveRegionRoot();
 }
 
 bool WebAXObject::LiveRegionAtomic() const {
@@ -512,13 +497,6 @@ bool WebAXObject::LiveRegionAtomic() const {
     return false;
 
   return private_->LiveRegionAtomic();
-}
-
-bool WebAXObject::LiveRegionBusy() const {
-  if (IsDetached())
-    return false;
-
-  return private_->LiveRegionBusy();
 }
 
 WebString WebAXObject::LiveRegionRelevant() const {
@@ -705,33 +683,25 @@ WebString WebAXObject::Language() const {
   return private_->Language();
 }
 
-bool WebAXObject::PerformDefaultAction() const {
+bool WebAXObject::Click() const {
   if (IsDetached())
     return false;
 
-  return private_->PerformDefaultAction();
+  return private_->RequestClickAction();
 }
 
 bool WebAXObject::Increment() const {
   if (IsDetached())
     return false;
 
-  if (CanIncrement()) {
-    private_->Increment();
-    return true;
-  }
-  return false;
+  return private_->RequestIncrementAction();
 }
 
 bool WebAXObject::Decrement() const {
   if (IsDetached())
     return false;
 
-  if (CanDecrement()) {
-    private_->Decrement();
-    return true;
-  }
-  return false;
+  return private_->RequestDecrementAction();
 }
 
 WebAXObject WebAXObject::InPageLinkTarget() const {
@@ -748,13 +718,6 @@ WebAXOrientation WebAXObject::Orientation() const {
     return kWebAXOrientationUndefined;
 
   return static_cast<WebAXOrientation>(private_->Orientation());
-}
-
-bool WebAXObject::Press() const {
-  if (IsDetached())
-    return false;
-
-  return private_->Press();
 }
 
 WebVector<WebAXObject> WebAXObject::RadioButtonsInGroup() const {
@@ -802,18 +765,24 @@ void WebAXObject::Selection(WebAXObject& anchor_object,
   return;
 }
 
-void WebAXObject::SetSelection(const WebAXObject& anchor_object,
+bool WebAXObject::SetSelected(bool selected) const {
+  if (IsDetached())
+    return false;
+
+  return private_->RequestSetSelectedAction(selected);
+}
+
+bool WebAXObject::SetSelection(const WebAXObject& anchor_object,
                                int anchor_offset,
                                const WebAXObject& focus_object,
                                int focus_offset) const {
   if (IsDetached())
-    return;
+    return false;
 
   AXObject::AXRange ax_selection(anchor_object, anchor_offset,
                                  TextAffinity::kUpstream, focus_object,
                                  focus_offset, TextAffinity::kDownstream);
-  private_->SetSelection(ax_selection);
-  return;
+  return private_->RequestSetSelectionAction(ax_selection);
 }
 
 unsigned WebAXObject::SelectionEnd() const {
@@ -863,67 +832,32 @@ unsigned WebAXObject::SelectionStartLineNumber() const {
   return line_number;
 }
 
-void WebAXObject::SetFocused(bool on) const {
-  if (!IsDetached())
-    private_->SetFocused(on);
+bool WebAXObject::Focus() const {
+  if (IsDetached())
+    return false;
+
+  return private_->RequestFocusAction();
 }
 
-void WebAXObject::SetSelectedTextRange(int selection_start,
-                                       int selection_end) const {
+bool WebAXObject::SetSequentialFocusNavigationStartingPoint() const {
   if (IsDetached())
-    return;
+    return false;
 
-  private_->SetSelection(AXObject::AXRange(selection_start, selection_end));
+  return private_->RequestSetSequentialFocusNavigationStartingPointAction();
 }
 
-void WebAXObject::SetSequentialFocusNavigationStartingPoint() const {
+bool WebAXObject::SetValue(WebString value) const {
   if (IsDetached())
-    return;
+    return false;
 
-  private_->SetSequentialFocusNavigationStartingPoint();
+  return private_->RequestSetValueAction(value);
 }
 
-void WebAXObject::SetValue(WebString value) const {
+bool WebAXObject::ShowContextMenu() const {
   if (IsDetached())
-    return;
+    return false;
 
-  private_->SetValue(value);
-}
-
-void WebAXObject::ShowContextMenu() const {
-  if (IsDetached())
-    return;
-
-  Node* node = private_->GetNode();
-  if (!node)
-    return;
-
-  Element* element = nullptr;
-  if (node->IsElementNode()) {
-    element = ToElement(node);
-  } else if (node->IsDocumentNode()) {
-    element = node->GetDocument().documentElement();
-  } else {
-    node->UpdateDistribution();
-    ContainerNode* parent = FlatTreeTraversal::Parent(*node);
-    if (!parent)
-      return;
-    SECURITY_DCHECK(parent->IsElementNode());
-    element = ToElement(parent);
-  }
-
-  if (!element)
-    return;
-
-  LocalFrame* frame = element->GetDocument().GetFrame();
-  if (!frame)
-    return;
-
-  WebViewBase* view = WebLocalFrameBase::FromFrame(frame)->ViewImpl();
-  if (!view)
-    return;
-
-  view->ShowContextMenuForElement(WebElement(element));
+  return private_->RequestShowContextMenuAction();
 }
 
 WebString WebAXObject::StringValue() const {
@@ -1023,25 +957,32 @@ WebString WebAXObject::ValueDescription() const {
   return private_->ValueDescription();
 }
 
-float WebAXObject::ValueForRange() const {
+bool WebAXObject::ValueForRange(float* out_value) const {
   if (IsDetached())
-    return 0.0;
+    return false;
 
-  return private_->ValueForRange();
+  return private_->ValueForRange(out_value);
 }
 
-float WebAXObject::MaxValueForRange() const {
+bool WebAXObject::MaxValueForRange(float* out_value) const {
   if (IsDetached())
-    return 0.0;
+    return false;
 
-  return private_->MaxValueForRange();
+  return private_->MaxValueForRange(out_value);
 }
 
-float WebAXObject::MinValueForRange() const {
+bool WebAXObject::MinValueForRange(float* out_value) const {
   if (IsDetached())
-    return 0.0;
+    return false;
 
-  return private_->MinValueForRange();
+  return private_->MinValueForRange(out_value);
+}
+
+bool WebAXObject::StepValueForRange(float* out_value) const {
+  if (IsDetached())
+    return false;
+
+  return private_->StepValueForRange(out_value);
 }
 
 WebNode WebAXObject::GetNode() const {
@@ -1097,8 +1038,11 @@ WebString WebAXObject::ComputedStyleDisplay() const {
   if (!computed_style)
     return WebString();
 
-  return WebString(
-      CSSIdentifierValue::Create(computed_style->Display())->CssText());
+  return WebString(CSSProperty::Get(CSSPropertyDisplay)
+                       .CSSValueFromComputedStyle(
+                           *computed_style, /* layout_object */ nullptr, node,
+                           /* allow_visited_style */ false)
+                       ->CssText());
 }
 
 bool WebAXObject::AccessibilityIsIgnored() const {
@@ -1492,7 +1436,8 @@ void WebAXObject::SetScrollOffset(const WebPoint& offset) const {
 
 void WebAXObject::GetRelativeBounds(WebAXObject& offset_container,
                                     WebFloatRect& bounds_in_container,
-                                    SkMatrix44& container_transform) const {
+                                    SkMatrix44& container_transform,
+                                    bool* clips_children) const {
   if (IsDetached())
     return;
 
@@ -1502,25 +1447,32 @@ void WebAXObject::GetRelativeBounds(WebAXObject& offset_container,
 
   AXObject* container = nullptr;
   FloatRect bounds;
-  private_->GetRelativeBounds(&container, bounds, container_transform);
+  private_->GetRelativeBounds(&container, bounds, container_transform,
+                              clips_children);
   offset_container = WebAXObject(container);
   bounds_in_container = WebFloatRect(bounds);
 }
 
-void WebAXObject::ScrollToMakeVisible() const {
-  if (!IsDetached())
-    private_->ScrollToMakeVisible();
+bool WebAXObject::ScrollToMakeVisible() const {
+  if (IsDetached())
+    return false;
+
+  return private_->RequestScrollToMakeVisibleAction();
 }
 
-void WebAXObject::ScrollToMakeVisibleWithSubFocus(
+bool WebAXObject::ScrollToMakeVisibleWithSubFocus(
     const WebRect& subfocus) const {
-  if (!IsDetached())
-    private_->ScrollToMakeVisibleWithSubFocus(subfocus);
+  if (IsDetached())
+    return false;
+
+  return private_->RequestScrollToMakeVisibleWithSubFocusAction(subfocus);
 }
 
-void WebAXObject::ScrollToGlobalPoint(const WebPoint& point) const {
-  if (!IsDetached())
-    private_->ScrollToGlobalPoint(point);
+bool WebAXObject::ScrollToGlobalPoint(const WebPoint& point) const {
+  if (IsDetached())
+    return false;
+
+  return private_->RequestScrollToGlobalPointAction(point);
 }
 
 WebAXObject::WebAXObject(AXObject* object) : private_(object) {}
@@ -1546,10 +1498,9 @@ WebAXObject WebAXObject::FromWebNode(const WebNode& web_node) {
 // static
 WebAXObject WebAXObject::FromWebDocument(const WebDocument& web_document) {
   const Document* document = web_document.ConstUnwrap<Document>();
-  AXObjectCacheImpl* cache = ToAXObjectCacheImpl(document->AxObjectCache());
-  return cache ? WebAXObject(cache->GetOrCreate(
-                     ToLayoutView(LayoutAPIShim::LayoutObjectFrom(
-                         document->GetLayoutViewItem()))))
+  AXObjectCacheImpl* cache =
+      ToAXObjectCacheImpl(document->GetOrCreateAXObjectCache());
+  return cache ? WebAXObject(cache->GetOrCreate(document->GetLayoutView()))
                : WebAXObject();
 }
 
@@ -1557,7 +1508,8 @@ WebAXObject WebAXObject::FromWebDocument(const WebDocument& web_document) {
 WebAXObject WebAXObject::FromWebDocumentByID(const WebDocument& web_document,
                                              int ax_id) {
   const Document* document = web_document.ConstUnwrap<Document>();
-  AXObjectCacheImpl* cache = ToAXObjectCacheImpl(document->AxObjectCache());
+  AXObjectCacheImpl* cache =
+      ToAXObjectCacheImpl(document->GetOrCreateAXObjectCache());
   return cache ? WebAXObject(cache->ObjectFromAXID(ax_id)) : WebAXObject();
 }
 
@@ -1565,7 +1517,8 @@ WebAXObject WebAXObject::FromWebDocumentByID(const WebDocument& web_document,
 WebAXObject WebAXObject::FromWebDocumentFocused(
     const WebDocument& web_document) {
   const Document* document = web_document.ConstUnwrap<Document>();
-  AXObjectCacheImpl* cache = ToAXObjectCacheImpl(document->AxObjectCache());
+  AXObjectCacheImpl* cache =
+      ToAXObjectCacheImpl(document->GetOrCreateAXObjectCache());
   return cache ? WebAXObject(cache->FocusedObject()) : WebAXObject();
 }
 

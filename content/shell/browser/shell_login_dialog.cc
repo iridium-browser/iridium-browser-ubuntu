@@ -10,21 +10,20 @@
 #include "build/build_config.h"
 #include "components/url_formatter/elide_url.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/resource_dispatcher_host.h"
 #include "net/base/auth.h"
-#include "net/url_request/url_request.h"
 #include "ui/gfx/text_elider.h"
 
 namespace content {
 
 ShellLoginDialog::ShellLoginDialog(
     net::AuthChallengeInfo* auth_info,
-    net::URLRequest* request) : auth_info_(auth_info),
-                                request_(request) {
+    base::Callback<void(const base::Optional<net::AuthCredentials>&)>
+        auth_required_callback)
+    : auth_required_callback_(auth_required_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           &ShellLoginDialog::PrepDialog, this,
           url_formatter::FormatOriginForSecurityDisplay(auth_info->challenger),
           base::UTF8ToUTF16(auth_info->realm)));
@@ -34,27 +33,26 @@ void ShellLoginDialog::OnRequestCancelled() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&ShellLoginDialog::PlatformRequestCancelled, this));
+      base::BindOnce(&ShellLoginDialog::PlatformRequestCancelled, this));
 }
 
 void ShellLoginDialog::UserAcceptedAuth(const base::string16& username,
                                         const base::string16& password) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&ShellLoginDialog::SendAuthToRequester, this,
-                 true, username, password));
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::BindOnce(&ShellLoginDialog::SendAuthToRequester,
+                                         this, true, username, password));
 }
 
 void ShellLoginDialog::UserCancelledAuth() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&ShellLoginDialog::SendAuthToRequester, this,
-                 false, base::string16(), base::string16()));
+      base::BindOnce(&ShellLoginDialog::SendAuthToRequester, this, false,
+                     base::string16(), base::string16()));
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&ShellLoginDialog::PlatformCleanUp, this));
+      base::BindOnce(&ShellLoginDialog::PlatformCleanUp, this));
 }
 
 ShellLoginDialog::~ShellLoginDialog() {
@@ -96,15 +94,19 @@ void ShellLoginDialog::SendAuthToRequester(bool success,
                                            const base::string16& username,
                                            const base::string16& password) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (success)
-    request_->SetAuth(net::AuthCredentials(username, password));
-  else
-    request_->CancelAuth();
-  ResourceDispatcherHost::Get()->ClearLoginDelegateForRequest(request_);
+
+  if (!auth_required_callback_.is_null()) {
+    if (success) {
+      std::move(auth_required_callback_)
+          .Run(net::AuthCredentials(username, password));
+    } else {
+      std::move(auth_required_callback_).Run(base::nullopt);
+    }
+  }
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&ShellLoginDialog::PlatformCleanUp, this));
+      base::BindOnce(&ShellLoginDialog::PlatformCleanUp, this));
 }
 
 }  // namespace content

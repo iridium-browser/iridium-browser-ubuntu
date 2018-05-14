@@ -12,15 +12,9 @@ blink_core_sources("intersection_observer") {
     "IntersectionObservation.h",
     "IntersectionObserver.cpp",
     "IntersectionObserver.h",
-    "IntersectionObserverCallback.h",
     "IntersectionObserverController.cpp",
     "IntersectionObserverController.h",
     "IntersectionObserverEntry.cpp",
     "IntersectionObserverEntry.h",
-  ]
-
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
   ]
 }

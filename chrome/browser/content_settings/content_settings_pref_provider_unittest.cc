@@ -153,7 +153,7 @@ TEST_F(PrefProviderTest, DiscardObsoleteFullscreenAndMouselockPreferences) {
   // Set some pref data. Each content setting type has the following value:
   // {"[*.]example.com": {"setting": 1}}
   base::DictionaryValue pref_data;
-  auto data_for_pattern = base::MakeUnique<base::DictionaryValue>();
+  auto data_for_pattern = std::make_unique<base::DictionaryValue>();
   data_for_pattern->SetInteger("setting", CONTENT_SETTING_ALLOW);
   pref_data.SetWithoutPathExpansion(kPattern, std::move(data_for_pattern));
   prefs->Set(kFullscreenPrefPath, pref_data);
@@ -189,22 +189,22 @@ TEST_F(PrefProviderTest, Incognito) {
       new OverlayUserPrefStore(user_prefs);
 
   sync_preferences::PrefServiceMockFactory factory;
-  factory.set_user_prefs(make_scoped_refptr(user_prefs));
+  factory.set_user_prefs(base::WrapRefCounted(user_prefs));
   scoped_refptr<user_prefs::PrefRegistrySyncable> registry(
       new user_prefs::PrefRegistrySyncable);
   sync_preferences::PrefServiceSyncable* regular_prefs =
       factory.CreateSyncable(registry.get()).release();
 
-  chrome::RegisterUserProfilePrefs(registry.get());
+  RegisterUserProfilePrefs(registry.get());
 
   sync_preferences::PrefServiceMockFactory otr_factory;
-  otr_factory.set_user_prefs(make_scoped_refptr(otr_user_prefs));
+  otr_factory.set_user_prefs(base::WrapRefCounted(otr_user_prefs));
   scoped_refptr<user_prefs::PrefRegistrySyncable> otr_registry(
       new user_prefs::PrefRegistrySyncable);
   sync_preferences::PrefServiceSyncable* otr_prefs =
       otr_factory.CreateSyncable(otr_registry.get()).release();
 
-  chrome::RegisterUserProfilePrefs(otr_registry.get());
+  RegisterUserProfilePrefs(otr_registry.get());
 
   TestingProfile::Builder profile_builder;
   profile_builder.SetPrefService(base::WrapUnique(regular_prefs));
@@ -397,7 +397,7 @@ TEST_F(PrefProviderTest, Deadlock) {
     DictionaryPrefUpdate update(&prefs, info->pref_name());
     base::DictionaryValue* mutable_settings = update.Get();
     mutable_settings->SetWithoutPathExpansion(
-        "www.example.com,*", base::MakeUnique<base::DictionaryValue>());
+        "www.example.com,*", std::make_unique<base::DictionaryValue>());
   }
   EXPECT_TRUE(observer.notification_received());
 
@@ -554,17 +554,16 @@ TEST_F(PrefProviderTest, LastModified) {
       ContentSettingsPattern::FromString("google.com");
   ContentSettingsPattern pattern_2 =
       ContentSettingsPattern::FromString("www.google.com");
-  auto value = base::MakeUnique<base::Value>(CONTENT_SETTING_ALLOW);
+  auto value = std::make_unique<base::Value>(CONTENT_SETTING_ALLOW);
 
   // Create a  provider and set a few settings.
   PrefProvider provider(&prefs, false /* incognito */,
                         true /* store_last_modified */);
-  auto test_clock = base::MakeUnique<base::SimpleTestClock>();
-  test_clock->SetNow(base::Time::Now());
-  base::SimpleTestClock* clock = test_clock.get();
-  provider.SetClockForTesting(std::move(test_clock));
+  base::SimpleTestClock test_clock;
+  test_clock.SetNow(base::Time::Now());
+  provider.SetClockForTesting(&test_clock);
 
-  base::Time t1 = clock->Now();
+  base::Time t1 = test_clock.Now();
 
   provider.SetWebsiteSetting(pattern_1, ContentSettingsPattern::Wildcard(),
                              CONTENT_SETTINGS_TYPE_COOKIES, std::string(),
@@ -573,8 +572,8 @@ TEST_F(PrefProviderTest, LastModified) {
                              CONTENT_SETTINGS_TYPE_COOKIES, std::string(),
                              value->DeepCopy());
   // Make sure that the timestamps for pattern_1 and patter_2 are before |t2|.
-  clock->Advance(base::TimeDelta::FromSeconds(1));
-  base::Time t2 = clock->Now();
+  test_clock.Advance(base::TimeDelta::FromSeconds(1));
+  base::Time t2 = test_clock.Now();
 
   base::Time last_modified = provider.GetWebsiteSettingLastModified(
       pattern_1, ContentSettingsPattern::Wildcard(),
@@ -586,7 +585,7 @@ TEST_F(PrefProviderTest, LastModified) {
   EXPECT_EQ(last_modified, t1);
 
   // A change for pattern_1, which will update the last_modified timestamp.
-  auto value2 = base::MakeUnique<base::Value>(CONTENT_SETTING_BLOCK);
+  auto value2 = std::make_unique<base::Value>(CONTENT_SETTING_BLOCK);
   provider.SetWebsiteSetting(pattern_1, ContentSettingsPattern::Wildcard(),
                              CONTENT_SETTINGS_TYPE_COOKIES, std::string(),
                              value2->DeepCopy());

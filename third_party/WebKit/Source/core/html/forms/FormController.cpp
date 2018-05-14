@@ -21,11 +21,13 @@
 #include "core/html/forms/FormController.h"
 
 #include <memory>
-#include "core/events/ScopedEventQueue.h"
-#include "core/html/HTMLFormControlElementWithState.h"
-#include "core/html/HTMLFormElement.h"
-#include "core/html/HTMLInputElement.h"
-#include "platform/FileChooser.h"
+
+#include "base/macros.h"
+#include "core/dom/events/ScopedEventQueue.h"
+#include "core/html/forms/FileChooser.h"
+#include "core/html/forms/HTMLFormControlElementWithState.h"
+#include "core/html/forms/HTMLFormElement.h"
+#include "core/html/forms/HTMLInputElement.h"
 #include "platform/wtf/Deque.h"
 #include "platform/wtf/HashTableDeletedValueType.h"
 #include "platform/wtf/PtrUtil.h"
@@ -40,7 +42,7 @@ static inline HTMLFormElement* OwnerFormForState(
   // Assume controls with form attribute have no owners because we restore
   // state during parsing and form owners of such controls might be
   // indeterminate.
-  return control.FastHasAttribute(formAttr) ? 0 : control.Form();
+  return control.FastHasAttribute(formAttr) ? nullptr : control.Form();
 }
 
 // ----------------------------------------------------------------------------
@@ -85,7 +87,7 @@ FormControlState FormControlState::Deserialize(
 
 class FormElementKey {
  public:
-  FormElementKey(StringImpl* = 0, StringImpl* = 0);
+  FormElementKey(StringImpl* = nullptr, StringImpl* = nullptr);
   ~FormElementKey();
   FormElementKey(const FormElementKey&);
   FormElementKey& operator=(const FormElementKey&);
@@ -137,16 +139,16 @@ FormElementKey& FormElementKey::operator=(const FormElementKey& other) {
 
 void FormElementKey::Ref() const {
   if (GetName())
-    GetName()->Ref();
+    GetName()->AddRef();
   if (GetType())
-    GetType()->Ref();
+    GetType()->AddRef();
 }
 
 void FormElementKey::Deref() const {
   if (GetName())
-    GetName()->Deref();
+    GetName()->Release();
   if (GetType())
-    GetType()->Deref();
+    GetType()->Release();
 }
 
 inline bool operator==(const FormElementKey& a, const FormElementKey& b) {
@@ -177,7 +179,6 @@ struct FormElementKeyHashTraits : WTF::GenericHashTraits<FormElementKey> {
 // ----------------------------------------------------------------------------
 
 class SavedFormState {
-  WTF_MAKE_NONCOPYABLE(SavedFormState);
   USING_FAST_MALLOC(SavedFormState);
 
  public:
@@ -203,6 +204,8 @@ class SavedFormState {
                                       FormElementKeyHashTraits>;
   FormElementStateMap state_for_new_form_elements_;
   size_t control_state_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(SavedFormState);
 };
 
 std::unique_ptr<SavedFormState> SavedFormState::Create() {
@@ -306,21 +309,22 @@ Vector<String> SavedFormState::GetReferencedFilePaths() const {
 
 class FormKeyGenerator final
     : public GarbageCollectedFinalized<FormKeyGenerator> {
-  WTF_MAKE_NONCOPYABLE(FormKeyGenerator);
 
  public:
   static FormKeyGenerator* Create() { return new FormKeyGenerator; }
-  DEFINE_INLINE_TRACE() { visitor->Trace(form_to_key_map_); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(form_to_key_map_); }
   const AtomicString& FormKey(const HTMLFormControlElementWithState&);
   void WillDeleteForm(HTMLFormElement*);
 
  private:
-  FormKeyGenerator() {}
+  FormKeyGenerator() = default;
 
   using FormToKeyMap = HeapHashMap<Member<HTMLFormElement>, AtomicString>;
   using FormSignatureToNextIndexMap = HashMap<String, unsigned>;
   FormToKeyMap form_to_key_map_;
   FormSignatureToNextIndexMap form_signature_to_next_index_map_;
+
+  DISALLOW_COPY_AND_ASSIGN(FormKeyGenerator);
 };
 
 static inline void RecordFormStructure(const HTMLFormElement& form,
@@ -401,18 +405,19 @@ DocumentState* DocumentState::Create() {
   return new DocumentState;
 }
 
-DEFINE_TRACE(DocumentState) {
+void DocumentState::Trace(blink::Visitor* visitor) {
   visitor->Trace(form_controls_);
 }
 
 void DocumentState::AddControl(HTMLFormControlElementWithState* control) {
-  DCHECK(!form_controls_.Contains(control));
-  form_controls_.insert(control);
+  DCHECK(!control->Next() && !control->Prev());
+  form_controls_.Append(control);
 }
 
 void DocumentState::RemoveControl(HTMLFormControlElementWithState* control) {
-  CHECK(form_controls_.Contains(control));
-  form_controls_.erase(control);
+  form_controls_.Remove(control);
+  control->SetPrev(nullptr);
+  control->SetNext(nullptr);
 }
 
 static String FormStateSignature() {
@@ -428,8 +433,8 @@ Vector<String> DocumentState::ToStateVector() {
   FormKeyGenerator* key_generator = FormKeyGenerator::Create();
   std::unique_ptr<SavedFormStateMap> state_map =
       WTF::WrapUnique(new SavedFormStateMap);
-  for (const auto& form_control : form_controls_) {
-    HTMLFormControlElementWithState* control = form_control.Get();
+  for (HTMLFormControlElementWithState* control = form_controls_.Head();
+       control; control = control->Next()) {
     DCHECK(control->isConnected());
     if (!control->ShouldSaveAndRestoreFormControlState())
       continue;
@@ -458,9 +463,9 @@ Vector<String> DocumentState::ToStateVector() {
 
 FormController::FormController() : document_state_(DocumentState::Create()) {}
 
-FormController::~FormController() {}
+FormController::~FormController() = default;
 
-DEFINE_TRACE(FormController) {
+void FormController::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_state_);
   visitor->Trace(form_key_generator_);
 }

@@ -162,9 +162,9 @@ bool GIFLZWContext::OutputRow(GIFRow::const_iterator row_begin) {
                                    frame_context_->Interlaced() && ipass > 1))
     return false;
 
-  if (!frame_context_->Interlaced())
+  if (!frame_context_->Interlaced()) {
     irow++;
-  else {
+  } else {
     do {
       switch (ipass) {
         case 1:
@@ -347,7 +347,7 @@ bool GIFFrameContext::Decode(FastSharedBufferReader* reader,
     if (!IsDataSizeDefined() || !IsHeaderDefined())
       return true;
 
-    lzw_context_ = WTF::MakeUnique<GIFLZWContext>(client, this);
+    lzw_context_ = std::make_unique<GIFLZWContext>(client, this);
     if (!lzw_context_->PrepareToDecode()) {
       lzw_context_.reset();
       return false;
@@ -366,7 +366,7 @@ bool GIFFrameContext::Decode(FastSharedBufferReader* reader,
       return false;
 
     while (block_size) {
-      const char* segment = 0;
+      const char* segment = nullptr;
       size_t segment_length = reader->GetSomeData(segment, block_position);
       size_t decode_size = std::min(segment_length, block_size);
       if (!lzw_context_->DoLZW(reinterpret_cast<const unsigned char*>(segment),
@@ -806,9 +806,9 @@ bool GIFImageReader::ParseData(size_t data_position,
       case kGIFSubBlock: {
         const size_t bytes_in_block = static_cast<unsigned char>(
             reader.GetOneByte(current_component_position));
-        if (bytes_in_block)
+        if (bytes_in_block) {
           GETN(bytes_in_block, GIFLZW);
-        else {
+        } else {
           // Finished parsing one frame; Process next frame.
           DCHECK(!frames_.IsEmpty());
           // Note that some broken GIF files do not have enough LZW blocks to

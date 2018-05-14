@@ -10,18 +10,18 @@
 
 // Handling of certificates and keypairs for SSLStreamAdapter's peer mode.
 
-#ifndef WEBRTC_RTC_BASE_SSLIDENTITY_H_
-#define WEBRTC_RTC_BASE_SSLIDENTITY_H_
+#ifndef RTC_BASE_SSLIDENTITY_H_
+#define RTC_BASE_SSLIDENTITY_H_
 
 #include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "webrtc/rtc_base/buffer.h"
-#include "webrtc/rtc_base/constructormagic.h"
-#include "webrtc/rtc_base/messagedigest.h"
-#include "webrtc/rtc_base/timeutils.h"
+#include "rtc_base/buffer.h"
+#include "rtc_base/constructormagic.h"
+#include "rtc_base/messagedigest.h"
+#include "rtc_base/timeutils.h"
 
 namespace rtc {
 
@@ -60,13 +60,12 @@ class SSLCertificate {
   virtual ~SSLCertificate() {}
 
   // Returns a new SSLCertificate object instance wrapping the same
-  // underlying certificate, including its chain if present.
-  // Caller is responsible for freeing the returned object.
+  // underlying certificate, including its chain if present.  Caller is
+  // responsible for freeing the returned object. Use GetUniqueReference
+  // instead.
   virtual SSLCertificate* GetReference() const = 0;
 
-  // Provides the cert chain, or null. The chain includes a copy of each
-  // certificate, excluding the leaf.
-  virtual std::unique_ptr<SSLCertChain> GetChain() const = 0;
+  std::unique_ptr<SSLCertificate> GetUniqueReference() const;
 
   // Returns a PEM encoded string representation of the certificate.
   virtual std::string ToPEMString() const = 0;
@@ -88,14 +87,10 @@ class SSLCertificate {
   // or -1 if an expiration time could not be retrieved.
   virtual int64_t CertificateExpirationTime() const = 0;
 
-  // Gets information (fingerprint, etc.) about this certificate and its chain
-  // (if it has a certificate chain). This is used for certificate stats, see
+  // Gets information (fingerprint, etc.) about this certificate. This is used
+  // for certificate stats, see
   // https://w3c.github.io/webrtc-stats/#certificatestats-dict*.
   std::unique_ptr<SSLCertificateStats> GetStats() const;
-
- private:
-  std::unique_ptr<SSLCertificateStats> GetStats(
-    std::unique_ptr<SSLCertificateStats> issuer) const;
 };
 
 // SSLCertChain is a simple wrapper for a vector of SSLCertificates. It serves
@@ -103,6 +98,7 @@ class SSLCertificate {
 // SSLCertificate pointers.
 class SSLCertChain {
  public:
+  explicit SSLCertChain(std::vector<std::unique_ptr<SSLCertificate>> certs);
   // These constructors copy the provided SSLCertificate(s), so the caller
   // retains ownership.
   explicit SSLCertChain(const std::vector<SSLCertificate*>& certs);
@@ -117,20 +113,17 @@ class SSLCertChain {
 
   // Returns a new SSLCertChain object instance wrapping the same underlying
   // certificate chain.  Caller is responsible for freeing the returned object.
-  SSLCertChain* Copy() const {
-    return new SSLCertChain(certs_);
-  }
+  SSLCertChain* Copy() const;
+  // Same as above, but returning a unique_ptr for convenience.
+  std::unique_ptr<SSLCertChain> UniqueCopy() const;
+
+  // Gets information (fingerprint, etc.) about this certificate chain. This is
+  // used for certificate stats, see
+  // https://w3c.github.io/webrtc-stats/#certificatestats-dict*.
+  std::unique_ptr<SSLCertificateStats> GetStats() const;
 
  private:
-  // Helper function for duplicating a vector of certificates.
-  static SSLCertificate* DupCert(const SSLCertificate* cert) {
-    return cert->GetReference();
-  }
-
-  // Helper function for deleting a vector of certificates.
-  static void DeleteCert(SSLCertificate* cert) { delete cert; }
-
-  std::vector<SSLCertificate*> certs_;
+  std::vector<std::unique_ptr<SSLCertificate>> certs_;
 
   RTC_DISALLOW_COPY_AND_ASSIGN(SSLCertChain);
 };
@@ -235,6 +228,10 @@ class SSLIdentity {
   static SSLIdentity* FromPEMStrings(const std::string& private_key,
                                      const std::string& certificate);
 
+  // Construct an identity from a private key and a certificate chain.
+  static SSLIdentity* FromPEMChainStrings(const std::string& private_key,
+                                          const std::string& certificate_chain);
+
   virtual ~SSLIdentity() {}
 
   // Returns a new SSLIdentity object instance wrapping the same
@@ -243,8 +240,10 @@ class SSLIdentity {
   // TODO(hbos,torbjorng): Rename to a less confusing name.
   virtual SSLIdentity* GetReference() const = 0;
 
-  // Returns a temporary reference to the certificate.
+  // Returns a temporary reference to the end-entity (leaf) certificate.
   virtual const SSLCertificate& certificate() const = 0;
+  // Returns a temporary reference to the entire certificate chain.
+  virtual const SSLCertChain& cert_chain() const = 0;
   virtual std::string PrivateKeyToPEMString() const = 0;
   virtual std::string PublicKeyToPEMString() const = 0;
 
@@ -271,4 +270,4 @@ extern const char kPemTypeEcPrivateKey[];
 
 }  // namespace rtc
 
-#endif  // WEBRTC_RTC_BASE_SSLIDENTITY_H_
+#endif  // RTC_BASE_SSLIDENTITY_H_

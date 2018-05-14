@@ -25,8 +25,7 @@ ActionTargetGenerator::ActionTargetGenerator(
       output_type_(type) {
 }
 
-ActionTargetGenerator::~ActionTargetGenerator() {
-}
+ActionTargetGenerator::~ActionTargetGenerator() = default;
 
 void ActionTargetGenerator::DoRun() {
   target_->set_output_type(output_type_);
@@ -205,5 +204,18 @@ bool ActionTargetGenerator::CheckOutputs() {
       return false;
     }
   }
+  return true;
+}
+
+bool ActionTargetGenerator::FillInputs() {
+  const Value* value = scope_->GetValue(variables::kInputs, true);
+  if (!value)
+    return true;
+
+  Target::FileList dest_inputs;
+  if (!ExtractListOfRelativeFiles(scope_->settings()->build_settings(), *value,
+                                  scope_->GetSourceDir(), &dest_inputs, err_))
+    return false;
+  target_->config_values().inputs().swap(dest_inputs);
   return true;
 }

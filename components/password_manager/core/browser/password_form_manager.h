@@ -20,6 +20,7 @@
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/autofill/core/common/signatures_util.h"
 #include "components/password_manager/core/browser/form_fetcher.h"
 #include "components/password_manager/core/browser/password_form_metrics_recorder.h"
 #include "components/password_manager/core/browser/password_form_user_action.h"
@@ -72,15 +73,17 @@ class PasswordFormManager : public FormFetcher::Consumer {
   // RESULT_COMPLETE_MATCH will also be returned to indicate non-HTML forms
   // completely matching.
   // The ordering of these flags is important. Larger matches are more
-  // preferred than lower matches. That is, since RESULT_HTML_ATTRIBUTES_MATCH
-  // is greater than RESULT_ACTION_MATCH, a match of only attributes and not
-  // actions will be preferred to one of actions and not attributes.
+  // preferred than lower matches. That is, since RESULT_FORM_NAME_MATCH
+  // is greater than RESULT_ACTION_MATCH, a match of only names and not
+  // actions will be preferred to one of actions and not names.
   enum MatchResultFlags {
     RESULT_NO_MATCH = 0,
     RESULT_ACTION_MATCH = 1 << 0,
-    RESULT_HTML_ATTRIBUTES_MATCH = 1 << 1,
-    RESULT_ORIGINS_OR_FRAMES_MATCH = 1 << 2,
-    RESULT_COMPLETE_MATCH = RESULT_ACTION_MATCH | RESULT_HTML_ATTRIBUTES_MATCH |
+    RESULT_FORM_NAME_MATCH = 1 << 1,
+    RESULT_SIGNATURE_MATCH = 1 << 2,
+    RESULT_ORIGINS_OR_FRAMES_MATCH = 1 << 3,
+    RESULT_COMPLETE_MATCH = RESULT_ACTION_MATCH | RESULT_FORM_NAME_MATCH |
+                            RESULT_SIGNATURE_MATCH |
                             RESULT_ORIGINS_OR_FRAMES_MATCH
   };
   // Use MatchResultMask to contain combinations of MatchResultFlags values.
@@ -92,6 +95,10 @@ class PasswordFormManager : public FormFetcher::Consumer {
     ALLOW_OTHER_POSSIBLE_USERNAMES,
     IGNORE_OTHER_POSSIBLE_USERNAMES
   };
+
+  // The upper limit on how many times Chrome will try to autofill the same
+  // form.
+  static constexpr int kMaxTimesAutofill = 5;
 
   // Chooses between the current and new password value which one to save. This
   // is whichever is non-empty, with the preference being given to the new one.
@@ -105,10 +112,8 @@ class PasswordFormManager : public FormFetcher::Consumer {
       const autofill::PasswordForm& form,
       const password_manager::PasswordManagerDriver* driver) const;
 
-  // Update |this| with the |form| that was actually submitted. Used to
-  // determine what type the submitted form is for
-  // IsIgnorableChangePasswordForm() and UMA stats.
-  void SetSubmittedForm(const autofill::PasswordForm& form);
+  // Used to determine what type the submitted form is for UMA stats.
+  void SaveSubmittedFormTypeForMetrics(const autofill::PasswordForm& form);
 
   // Determines if the user opted to 'never remember' passwords for this form.
   bool IsBlacklisted() const;
@@ -159,6 +164,12 @@ class PasswordFormManager : public FormFetcher::Consumer {
   // the save button. Updates the username and modifies internal state
   // accordingly. This function should be called after ProvisionallySave().
   void UpdateUsername(const base::string16& new_username);
+
+  // Updates the password value. Called when user selects a password from the
+  // password selection dropdown and clicks the save button. Updates the
+  // password and modifies internal state accordingly. This function should be
+  // called after ProvisionallySave().
+  void UpdatePasswordValue(const base::string16& new_password);
 
   // Call these if/when we know the form submission worked or failed.
   // These routines are used to update internal statistics ("ActionsTaken").
@@ -362,18 +373,19 @@ class PasswordFormManager : public FormFetcher::Consumer {
   bool UpdatePendingCredentialsIfOtherPossibleUsername(
       const base::string16& username);
 
-  // Searches for |username| in |other_possible_usernames| of |best_matches_|
-  // and |not_best_matches_|. If the username value is found in
-  // |other_possible_usernames| and the password value of the match is equal to
-  // |password|, the match is saved to |username_correction_vote_|.
-  void FindCorrectedUsernameElement(const base::string16& username,
-                                    const base::string16& password);
-
   // Searches for |username| in |other_possible_usernames| of |match|. If the
   // username value is found, the match is saved to |username_correction_vote_|
   // and the function returns true.
   bool FindUsernameInOtherPossibleUsernames(const autofill::PasswordForm& match,
                                             const base::string16& username);
+
+  // Searches for |username| in |other_possible_usernames| of |best_matches_|
+  // and |not_best_matches_|. If the username value is found in
+  // |other_possible_usernames| and the password value of the match is equal to
+  // |password|, the match is saved to |username_correction_vote_| and the
+  // method returns true.
+  bool FindCorrectedUsernameElement(const base::string16& username,
+                                    const base::string16& password);
 
   // Returns true if |form| is a username update of a credential already in
   // |best_matches_|. Sets |pending_credentials_| to the appropriate
@@ -466,6 +478,9 @@ class PasswordFormManager : public FormFetcher::Consumer {
 
   // The PasswordForm from the page or dialog managed by |this|.
   const autofill::PasswordForm observed_form_;
+
+  // The form signature of |observed_form_|
+  const autofill::FormSignature observed_form_signature_;
 
   // Stores a submitted form.
   std::unique_ptr<const autofill::PasswordForm> submitted_form_;
@@ -581,6 +596,16 @@ class PasswordFormManager : public FormFetcher::Consumer {
   // Takes care of recording metrics and events for this PasswordFormManager.
   // Make sure to call Init before using |*this|, to ensure it is not null.
   scoped_refptr<PasswordFormMetricsRecorder> metrics_recorder_;
+
+  // True iff a user edited the username value in a prompt and new username is
+  // the value of another field of the observed form.
+  bool has_username_edited_vote_ = false;
+
+  // If Chrome has already autofilled a few times, it is probable that autofill
+  // is triggered by programmatic changes in the page. We set a maximum number
+  // of times that Chrome will autofill to avoid being stuck in an infinite
+  // loop.
+  int autofills_left_ = kMaxTimesAutofill;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordFormManager);
 };

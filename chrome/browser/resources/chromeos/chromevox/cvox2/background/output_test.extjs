@@ -101,7 +101,7 @@ OutputE2ETest.prototype = {
   setUp: function() {
     window.Dir = AutomationUtil.Dir;
     window.RoleType = chrome.automation.RoleType;
-    this.forceContextualLastOutput();   
+    this.forceContextualLastOutput();
   }
 };
 
@@ -111,7 +111,8 @@ TEST_F('OutputE2ETest', 'Links', function() {
       var el = root.firstChild.firstChild;
       var range = cursors.Range.fromNode(el);
       var o = new Output().withSpeechAndBraille(range, null, 'navigate');
-      assertEqualsJSON({string_: 'Click here|Link', 'spans_': [
+      assertEqualsJSON({string_:
+          'Click here|Link|Press Search+Space to activate.', 'spans_': [
         // Attributes.
         {value: 'name', start: 0, end: 10},
 
@@ -121,7 +122,7 @@ TEST_F('OutputE2ETest', 'Links', function() {
         {value: 'role', start: 11, end: 15}
       ]}, o.speechOutputForTest);
       checkBrailleOutput(
-          'Click here lnk',
+          'Click here lnk Press Search+Space to activate.',
           [{value: new Output.NodeSpan(el), start: 0, end: 14}],
           o);
   });
@@ -133,14 +134,14 @@ TEST_F('OutputE2ETest', 'Checkbox', function() {
       var el = root.firstChild.firstChild;
       var range = cursors.Range.fromNode(el);
       var o = new Output().withSpeechAndBraille(range, null, 'navigate');
-      checkSpeechOutput('|Check box|Not checked',
+      checkSpeechOutput('|Check box|Not checked|Press Search+Space to toggle.',
           [
             {value: new Output.EarconAction('CHECK_OFF'), start: 0, end: 0},
             {value: 'role', start: 1, end: 10}
           ],
           o);
       checkBrailleOutput(
-          'chk ( )',
+          'chk ( ) Press Search+Space to toggle.',
           [{value: new Output.NodeSpan(el), start: 0, end: 7}],
           o);
   });
@@ -189,23 +190,33 @@ TEST_F('OutputE2ETest', 'Headings', function() {
         var letter = String.fromCharCode('a'.charCodeAt(0) + i -1);
         assertEqualsJSON({string_: letter + '|Heading ' + i, 'spans_': [
           // Attributes.
-          {value: 'nameOrDescendants', start: 0, end: 1}
+          {value: 'name', start: 0, end: 1}
         ]}, o.speechOutputForTest);
         checkBrailleOutput(
             letter + ' h' + i,
-            [{value: new Output.NodeSpan(el), start: 0, end: 4}],
+            [
+              {value: new Output.NodeSpan(el.firstChild), start: 0, end: 1},
+              {value: new Output.NodeSpan(el), start: 0, end: 4}
+            ],
             o);
         el = el.nextSibling;
       }
 
       range = cursors.Range.fromNode(el);
       o = new Output().withSpeechAndBraille(range, null, 'navigate');
-      assertEqualsJSON({string_: 'b|Heading 1', 'spans_': [
-        {value: 'nameOrDescendants', start: 0, end: 1}
+      assertEqualsJSON({string_: 'b|Link|Heading 1', 'spans_': [
+        {value: 'name', start: 0, end: 1},
+        {value: new Output.EarconAction('LINK'), start: 0, end: 1},
+        {value: 'role', start: 2, end: 6}
       ]}, o.speechOutputForTest);
       checkBrailleOutput(
-          'b h1',
-          [{value: new Output.NodeSpan(el), start: 0, end: 4}],
+          'b lnk h1',
+          [
+            {value: new Output.NodeSpan(el.firstChild.firstChild),
+             start: 0, end: 1},
+            {value: new Output.NodeSpan(el), start: 0, end: 8},
+            {value: new Output.NodeSpan(el.firstChild), start: 2, end: 5}
+          ],
           o);
   });
 });
@@ -215,7 +226,9 @@ TEST_F('OutputE2ETest', 'Audio', function() {
     function(root) {
       var el = root.find({role: 'button'});
       var range = cursors.Range.fromNode(el);
-      var o = new Output().withSpeechAndBraille(range, null, 'navigate');
+      var o = new Output()
+          .withoutHints()
+          .withSpeechAndBraille(range, null, 'navigate');
 
       checkSpeechOutput('play|Button|begin playback|audio|Tool bar',
           [
@@ -235,7 +248,9 @@ TEST_F('OutputE2ETest', 'Audio', function() {
       el = el.nextSibling.nextSibling;
       var prevRange = range;
       range = cursors.Range.fromNode(el);
-      var o = new Output().withSpeechAndBraille(range, prevRange, 'navigate');
+      var o = new Output()
+          .withoutHints()
+          .withSpeechAndBraille(range, prevRange, 'navigate');
       checkSpeechOutput('0|Min 0|Max 0||Slider|audio time scrubber',
           [
             {value: 'valueForRange', start: 0, end: 1},
@@ -278,11 +293,12 @@ TEST_F('OutputE2ETest', 'Input', function() {
         '||Edit text, email entry',
         '||Password edit text',
         '||Edit text numeric only',
-        ['0|Min 0|Max 0||Spin button',
-         [{value: 'valueForRange', start: 0, end: 1},
-          {value: 'name', start: 14, end: 14},
-          {value: new Output.EarconAction('LISTBOX'), start: 14, end: 14},
-          {value: 'role', start: 15, end: 26}]
+        ['||Spin button',
+          [{value: new Output.SelectionSpan(0, 0), start: 0, end: 0},
+           {value: 'value', start: 0, end: 0},
+           {value: 'name', start: 1, end: 1},
+           {value: new Output.EarconAction('LISTBOX'), start: 1, end: 1},
+           {value: 'role', start: 2, end: 13}]
         ],
         ['Time control',
          [{value: 'role', start: 0, end: 12}]
@@ -306,7 +322,7 @@ TEST_F('OutputE2ETest', 'Input', function() {
         ' @ed 8dot',
         ' pwded',
         ' #ed',
-        {string_: '0 min:0 max:0 spnbtn'},
+        ' spnbtn',
         {string_: 'time'},
         {string_: 'date'},
         {string_: 'Choose File No file chosen btn'},
@@ -318,7 +334,9 @@ TEST_F('OutputE2ETest', 'Input', function() {
       var el = root.firstChild.firstChild;
       expectedSpeechValues.forEach(function(expectedValue) {
         var range = cursors.Range.fromNode(el);
-        var o = new Output().withSpeechAndBraille(range, null, 'navigate');
+        var o = new Output()
+            .withoutHints()
+            .withSpeechAndBraille(range, null, 'navigate');
         if (typeof expectedValue == 'object') {
           checkSpeechOutput(expectedValue[0], expectedValue[1], o);
         } else {
@@ -331,7 +349,9 @@ TEST_F('OutputE2ETest', 'Input', function() {
       el = root.firstChild.firstChild;
       expectedBrailleValues.forEach(function(expectedValue) {
         var range = cursors.Range.fromNode(el);
-        var o = new Output().withBraille(range, null, 'navigate');
+        var o = new Output()
+            .withoutHints()
+            .withBraille(range, null, 'navigate');
         if (typeof expectedValue === 'string') {
           checkBrailleOutput(
               expectedValue,
@@ -359,20 +379,20 @@ TEST_F('OutputE2ETest', 'List', function() {
       var el = root.firstChild.firstChild;
       var range = cursors.Range.fromNode(el);
       var o = new Output().withSpeechAndBraille(range, null, 'navigate');
-      checkSpeechOutput('a||List item|list|with 3 items',
+      checkSpeechOutput('a|List item|List|with 3 items',
           [
-            { value: 'nameOrDescendants', start: 0, end: 1 },
-            { value: { earconId: 'LIST_ITEM' }, start: 2, end: 2 },
-            { value: 'role', start: 13, end: 17 }
+            { value: 'name', start: 0, end: 1 },
+            { value: { earconId: 'LIST_ITEM' }, start: 0, end: 1 },
+            { value: 'role', start: 12, end: 16 }
           ],
           o);
       // TODO(plundblad): This output is wrong.  Add special handling for
       // braille here.
       checkBrailleOutput(
-          'a lstitm list +3',
+          'a lstitm lst +3',
           [
             {value: new Output.NodeSpan(el), start: 0, end: 8},
-            {value: new Output.NodeSpan(el.parent), start: 9, end: 16}
+            {value: new Output.NodeSpan(el.parent), start: 9, end: 15}
           ],
           o);
   });
@@ -380,7 +400,7 @@ TEST_F('OutputE2ETest', 'List', function() {
 
 TEST_F('OutputE2ETest', 'Tree', function() {
   this.runWithLoadedTree(function() {/*!
-    <ul role="tree">
+    <ul role="tree" style="list-style-type:none">
       <li aria-expanded="true" role="treeitem">a
       <li role="treeitem">b
       <li aria-expanded="false" role="treeitem">c
@@ -544,9 +564,9 @@ TEST_F('OutputE2ETest', 'DivOmitsRole', function() {
 
 TEST_F('OutputE2ETest', 'LessVerboseAncestry', function() {
   this.runWithLoadedTree(function() {/*!
-    <div role="article"><p>inside</p></div>
-    <div role="article"><p>inside</p></div>
     <div role="banner"><p>inside</p></div>
+    <div role="banner"><p>inside</p></div>
+    <div role="navigation"><p>inside</p></div>
   */},
   function(root) {
     var first = root.children[0].firstChild;
@@ -561,13 +581,13 @@ TEST_F('OutputE2ETest', 'LessVerboseAncestry', function() {
         new Output().withSpeech(secondRange, firstRange, 'navigate');
     var oWithPrevExit =
         new Output().withSpeech(thirdRange, secondRange, 'navigate');
-    assertEquals('inside|Article', oWithoutPrev.speechOutputForTest.string_);
+    assertEquals('inside|Banner', oWithoutPrev.speechOutputForTest.string_);
 
-    // Make sure we don't read the exited article ancestry change.
-    assertEquals('inside|Article', oWithPrev.speechOutputForTest.string_);
+    // Make sure we don't read the exited ancestry change.
+    assertEquals('inside|Banner', oWithPrev.speechOutputForTest.string_);
 
-    // Different role; do read the exited article ancestry here.
-    assertEquals('inside|Exited Article.|Banner',
+    // Different role; do read the exited ancestry here.
+    assertEquals('inside|Exited Banner.|Navigation',
                  oWithPrevExit.speechOutputForTest.string_);
   });
 });
@@ -587,7 +607,6 @@ TEST_F('OutputE2ETest', 'Brief', function() {
 });
 
 TEST_F('OutputE2ETest', 'AuralStyledHeadings', function() {
-
   function toFixed(num) {
     return parseFloat(Number(num).toFixed(1));
   }
@@ -605,7 +624,7 @@ TEST_F('OutputE2ETest', 'AuralStyledHeadings', function() {
           {value: {'relativePitch': toFixed(-0.1 * i)}, start: 0, end: 0},
 
           // Attributes.
-          {value: 'nameOrDescendants', start: 0, end: 1},
+          {value: 'name', start: 0, end: 1},
 
           {value: {'relativePitch': -0.2}, start: 2, end: 2}
         ]}, o.speechOutputForTest);
@@ -613,13 +632,15 @@ TEST_F('OutputE2ETest', 'AuralStyledHeadings', function() {
       }
   });
 });
+
 TEST_F('OutputE2ETest', 'ToggleButton', function() {
   this.runWithLoadedTree(function() {/*!
       <div role="button" aria-pressed="true">Subscribe</div>*/},
     function(root) {
       var el = root.firstChild;
       var o = new Output().withSpeech(cursors.Range.fromNode(el));
-      assertEqualsJSON({string_: '|Subscribe|Button|Pressed', spans_: [
+      assertEqualsJSON({string_: '|Subscribe|Button|Pressed|Press Search+Space to activate.',
+            spans_: [
         {value: {earconId: 'CHECK_ON'}, start: 0, end: 0},
         {value: 'name', start: 1, end:10},
         {value: 'role', start: 11, end: 17}
@@ -704,12 +725,12 @@ TEST_F('OutputE2ETest', 'BrailleAncestry', function() {
     var range = cursors.Range.fromNode(text);
     var o = new Output().withBraille(range, null, 'navigate');
     checkBrailleOutput(
-        'test lnk lstitm list +1',
+        'test lnk lstitm lst +1',
         [
           {value: new Output.NodeSpan(text), start: 0, end: 4},
           {value: new Output.NodeSpan(link), start: 5, end: 8},
           {value: new Output.NodeSpan(listItem), start: 9, end: 15},
-          {value: new Output.NodeSpan(list), start: 16, end: 23}
+          {value: new Output.NodeSpan(list), start: 16, end: 22}
         ],
 
         o);
@@ -729,7 +750,9 @@ TEST_F('OutputE2ETest', 'RangeOutput', function() {
   */}, function(root) {
 
     var obj = root.find({role: RoleType.SLIDER});
-    var o = new Output().withSpeech(cursors.Range.fromNode(obj));
+    var o = new Output()
+        .withoutHints()
+        .withSpeech(cursors.Range.fromNode(obj));
       checkSpeechOutput('2|Min 1|Max 10|volume|Slider',
           [
             {value: 'valueForRange', start: 0, end: 1},
@@ -740,7 +763,9 @@ TEST_F('OutputE2ETest', 'RangeOutput', function() {
           o);
 
     obj = root.find({role: RoleType.PROGRESS_INDICATOR});
-    o = new Output().withSpeech(cursors.Range.fromNode(obj));
+    o = new Output()
+        .withoutHints()
+        .withSpeech(cursors.Range.fromNode(obj));
       checkSpeechOutput('2|Min 1|Max 10|volume|Progress indicator',
           [
             {value: 'valueForRange', start: 0, end: 1},
@@ -750,7 +775,9 @@ TEST_F('OutputE2ETest', 'RangeOutput', function() {
           o);
 
     obj = root.find({role: RoleType.METER});
-    o = new Output().withSpeech(cursors.Range.fromNode(obj));
+    o = new Output()
+        .withoutHints()
+        .withSpeech(cursors.Range.fromNode(obj));
       checkSpeechOutput('2|Min 1|Max 10|volume|Meter',
           [
             {value: 'valueForRange', start: 0, end: 1},
@@ -760,7 +787,9 @@ TEST_F('OutputE2ETest', 'RangeOutput', function() {
           o);
 
     obj = root.find({role: RoleType.SPIN_BUTTON});
-    o = new Output().withSpeech(cursors.Range.fromNode(obj));
+    o = new Output()
+        .withoutHints()
+        .withSpeech(cursors.Range.fromNode(obj));
       checkSpeechOutput('2|Min 1|Max 10|volume|Spin button',
           [
             {value: 'valueForRange', start: 0, end: 1},
@@ -777,7 +806,9 @@ TEST_F('OutputE2ETest', 'RoleDescription', function() {
     <div aria-label="hi" role="button" aria-roledescription="foo"></div>
   */}, function(root) {
     var obj = root.find({role: RoleType.BUTTON});
-    var o = new Output().withSpeech(cursors.Range.fromNode(obj));
+    var o = new Output()
+        .withoutHints()
+        .withSpeech(cursors.Range.fromNode(obj));
     checkSpeechOutput('hi|foo',
         [
           {value: 'name', start: 0, end: 2},
@@ -810,18 +841,19 @@ SYNC_TEST_F('OutputE2ETest', 'ValidateCommonProperties', function() {
 
   // This filters out known roles that don't have states or descriptions.
   var notStated = [RoleType.CLIENT, RoleType.EMBEDDED_OBJECT,
-      RoleType.INLINE_TEXT_BOX, RoleType.LIST_MARKER,
+      RoleType.INLINE_TEXT_BOX, RoleType.LINE_BREAK, RoleType.LIST_MARKER,
       RoleType.PARAGRAPH, RoleType.ROOT_WEB_AREA,
       RoleType.STATIC_TEXT, RoleType.WINDOW];
   var notRestricted = [RoleType.ALERT, RoleType.ALERT_DIALOG, RoleType.CELL,
       RoleType.CLIENT, RoleType.EMBEDDED_OBJECT, RoleType.GENERIC_CONTAINER,
-      RoleType.IMAGE, RoleType.INLINE_TEXT_BOX, RoleType.LIST,
-      RoleType.LIST_MARKER, RoleType.PARAGRAPH, RoleType.REGION,
+      RoleType.IMAGE, RoleType.INLINE_TEXT_BOX, RoleType.LINE_BREAK,
+      RoleType.LIST, RoleType.LIST_MARKER, RoleType.PARAGRAPH, RoleType.REGION,
       RoleType.ROOT_WEB_AREA, RoleType.ROW_HEADER, RoleType.STATIC_TEXT,
       RoleType.TABLE_HEADER_CONTAINER, RoleType.TIMER, RoleType.WINDOW];
   var notDescribed = [RoleType.CLIENT, RoleType.EMBEDDED_OBJECT,
-      RoleType.INLINE_TEXT_BOX, RoleType.LIST_MARKER, RoleType.PARAGRAPH,
-      RoleType.ROOT_WEB_AREA, RoleType.STATIC_TEXT, RoleType.WINDOW];
+      RoleType.INLINE_TEXT_BOX, RoleType.LINE_BREAK, RoleType.LIST_MARKER,
+      RoleType.PARAGRAPH, RoleType.ROOT_WEB_AREA, RoleType.STATIC_TEXT,
+      RoleType.WINDOW];
   missingState = missingState.filter(function(state) {
     return notStated.indexOf(state) == -1;
   });
@@ -836,7 +868,7 @@ SYNC_TEST_F('OutputE2ETest', 'ValidateCommonProperties', function() {
                'Unexpected missing states for output rules ' +
                    missingState.join(' '));
   assertEquals(0, missingRestriction.length,
-               'Unexpected missing rectriction for output rules ' +
+               'Unexpected missing restriction for output rules ' +
                    missingRestriction.join(' '));
   assertEquals(0, missingDescription.length,
                'Unexpected missing descriptions for output rules ' +
@@ -855,4 +887,40 @@ SYNC_TEST_F('OutputE2ETest', 'ValidateCommonProperties', function() {
   // $childCount)'.
   // In such cases, you are responsible for ensuring you include all states and
   // descriptions somewhere in the output.
+});
+
+TEST_F('OutputE2ETest', 'InlineBraille', function() {
+  this.runWithLoadedTree(function(root) {/*!
+    <table border=1>
+      <tr><td>Name</td><td id="active">Age</td><td>Address</td></tr>
+    </table>
+  */}, function(root) {
+    var obj = root.find({role: RoleType.CELL});
+    var o = new Output().withRichSpeechAndBraille(cursors.Range.fromNode(obj));
+    assertEquals('Name|row 1 column 1|Table , 1 by 3',
+                 o.speechOutputForTest.string_);
+    assertEquals('Name r1c1 Age r1c2 Address r1c3',
+                 o.brailleOutputForTest.string_);
+  });
+});
+
+TEST_F('OutputE2ETest', 'TextFieldObeysRoleDescription', function() {
+  this.runWithLoadedTree(function(root) {/*!
+    <div role="textbox" aria-roledescription="square"></div>
+    <div role="region" aria-roledescription="circle"></div>
+  */}, function(root) {
+    var text = root.find({role: RoleType.TEXT_FIELD});
+
+    // True even though |text| does not have editable state.
+    assertTrue(AutomationPredicate.editText(text));
+
+    var o = new Output().withRichSpeechAndBraille(cursors.Range.fromNode(text));
+    assertEquals('|square', o.speechOutputForTest.string_);
+    assertEquals('square', o.brailleOutputForTest.string_);
+
+    var region = root.find({role: RoleType.REGION});
+    o = new Output().withRichSpeechAndBraille(cursors.Range.fromNode(region));
+    assertEquals('circle', o.speechOutputForTest.string_);
+    assertEquals('circle', o.brailleOutputForTest.string_);
+  });
 });

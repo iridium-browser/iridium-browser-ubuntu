@@ -12,6 +12,7 @@
 #include "core/page/Page.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/system/wait.h"
+#include "platform/SharedBuffer.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/core/mojo/tests/JsToCpp.mojom-blink.h"
@@ -69,7 +70,7 @@ String TestScriptPath() {
 
 v8::Local<v8::Value> ExecuteScript(const String& script_path,
                                    LocalFrame& frame) {
-  RefPtr<SharedBuffer> script_src = testing::ReadFromFile(script_path);
+  scoped_refptr<SharedBuffer> script_src = testing::ReadFromFile(script_path);
   return frame.GetScriptController().ExecuteScriptInMainWorldAndReturnValue(
       ScriptSourceCode(String(script_src->Data(), script_src->size())));
 }
@@ -80,14 +81,14 @@ void CheckDataPipe(mojo::DataPipeConsumerHandle data_pipe_handle) {
 
   const void* buffer = nullptr;
   unsigned num_bytes = 0;
-  result = BeginReadDataRaw(data_pipe_handle, &buffer, &num_bytes,
-                            MOJO_READ_DATA_FLAG_NONE);
+  result = data_pipe_handle.BeginReadData(&buffer, &num_bytes,
+                                          MOJO_READ_DATA_FLAG_NONE);
   EXPECT_EQ(MOJO_RESULT_OK, result);
   EXPECT_EQ(64u, num_bytes);
   for (unsigned i = 0; i < num_bytes; ++i) {
     EXPECT_EQ(i, static_cast<unsigned>(static_cast<const char*>(buffer)[i]));
   }
-  EndReadDataRaw(data_pipe_handle, num_bytes);
+  data_pipe_handle.EndReadData(num_bytes);
 }
 
 void CheckMessagePipe(mojo::MessagePipeHandle message_pipe_handle) {
@@ -176,8 +177,8 @@ void CheckCorruptedStringArray(const Optional<Vector<String>>& string_array) {
 void CheckCorruptedDataPipe(mojo::DataPipeConsumerHandle data_pipe_handle) {
   unsigned char buffer[100];
   uint32_t buffer_size = static_cast<uint32_t>(sizeof(buffer));
-  MojoResult result = ReadDataRaw(data_pipe_handle, buffer, &buffer_size,
-                                  MOJO_READ_DATA_FLAG_NONE);
+  MojoResult result =
+      data_pipe_handle.ReadData(buffer, &buffer_size, MOJO_READ_DATA_FLAG_NONE);
   if (result != MOJO_RESULT_OK)
     return;
   for (uint32_t i = 0; i < buffer_size; ++i)
@@ -218,7 +219,7 @@ void CheckCorruptedEchoArgsList(const js_to_cpp::blink::EchoArgsListPtr& list) {
 class CppSideConnection : public js_to_cpp::blink::CppSide {
  public:
   CppSideConnection() : mishandled_messages_(0), binding_(this) {}
-  ~CppSideConnection() override {}
+  ~CppSideConnection() override = default;
 
   void set_js_side(js_to_cpp::blink::JsSidePtr js_side) {
     js_side_ = std::move(js_side);
@@ -262,7 +263,7 @@ class CppSideConnection : public js_to_cpp::blink::CppSide {
 class PingCppSideConnection : public CppSideConnection {
  public:
   PingCppSideConnection() : got_message_(false) {}
-  ~PingCppSideConnection() override {}
+  ~PingCppSideConnection() override = default;
 
   // js_to_cpp::CppSide:
   void StartTest() override { js_side_->Ping(); }
@@ -282,7 +283,7 @@ class PingCppSideConnection : public CppSideConnection {
 class EchoCppSideConnection : public CppSideConnection {
  public:
   EchoCppSideConnection() : message_count_(0), termination_seen_(false) {}
-  ~EchoCppSideConnection() override {}
+  ~EchoCppSideConnection() override = default;
 
   // js_to_cpp::CppSide:
   void StartTest() override {
@@ -324,7 +325,7 @@ class EchoCppSideConnection : public CppSideConnection {
 class BitFlipCppSideConnection : public CppSideConnection {
  public:
   BitFlipCppSideConnection() : termination_seen_(false) {}
-  ~BitFlipCppSideConnection() override {}
+  ~BitFlipCppSideConnection() override = default;
 
   // js_to_cpp::CppSide:
   void StartTest() override { js_side_->BitFlip(BuildSampleEchoArgs()); }
@@ -350,7 +351,7 @@ class BitFlipCppSideConnection : public CppSideConnection {
 class BackPointerCppSideConnection : public CppSideConnection {
  public:
   BackPointerCppSideConnection() : termination_seen_(false) {}
-  ~BackPointerCppSideConnection() override {}
+  ~BackPointerCppSideConnection() override = default;
 
   // js_to_cpp::CppSide:
   void StartTest() override { js_side_->BackPointer(BuildSampleEchoArgs()); }

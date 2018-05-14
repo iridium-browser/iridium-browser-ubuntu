@@ -22,8 +22,8 @@ class CONTENT_EXPORT SyntheticWebMouseEventBuilder {
   static blink::WebMouseEvent Build(blink::WebInputEvent::Type type);
   static blink::WebMouseEvent Build(
       blink::WebInputEvent::Type type,
-      int window_x,
-      int window_y,
+      float window_x,
+      float window_y,
       int modifiers,
       blink::WebPointerProperties::PointerType pointer_type =
           blink::WebPointerProperties::PointerType::kMouse);
@@ -81,8 +81,7 @@ class CONTENT_EXPORT SyntheticWebGestureEventBuilder {
       blink::WebGestureDevice source_device);
 };
 
-class CONTENT_EXPORT SyntheticWebTouchEvent
-    : public NON_EXPORTED_BASE(blink::WebTouchEvent) {
+class CONTENT_EXPORT SyntheticWebTouchEvent : public blink::WebTouchEvent {
  public:
   SyntheticWebTouchEvent();
 

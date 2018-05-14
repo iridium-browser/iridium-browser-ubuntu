@@ -29,16 +29,17 @@
  */
 
 #include "core/page/PageVisibilityState.h"
+#include "platform/wtf/Assertions.h"
 
 namespace blink {
 
-String PageVisibilityStateString(PageVisibilityState state) {
+String PageVisibilityStateString(mojom::PageVisibilityState state) {
   switch (state) {
-    case kPageVisibilityStateVisible:
+    case mojom::PageVisibilityState::kVisible:
       return "visible";
-    case kPageVisibilityStateHidden:
+    case mojom::PageVisibilityState::kHidden:
       return "hidden";
-    case kPageVisibilityStatePrerender:
+    case mojom::PageVisibilityState::kPrerender:
       return "prerender";
   }
 

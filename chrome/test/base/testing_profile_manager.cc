@@ -10,10 +10,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -44,8 +46,7 @@ TestingProfileManager::TestingProfileManager(TestingBrowserProcess* process)
     : called_set_up_(false),
       browser_process_(process),
       local_state_(process),
-      profile_manager_(NULL) {
-}
+      profile_manager_(nullptr) {}
 
 TestingProfileManager::~TestingProfileManager() {
   // Destroying this class also destroys the LocalState, so make sure the
@@ -99,13 +100,13 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
   profile_manager_->AddProfile(profile);  // Takes ownership.
 
   // Update the user metadata.
-  ProfileInfoCache& cache = profile_manager_->GetProfileInfoCache();
-  size_t index = cache.GetIndexOfProfileWithPath(profile_path);
-  cache.SetAvatarIconOfProfileAtIndex(index, avatar_id);
-  cache.SetSupervisedUserIdOfProfileAtIndex(index, supervised_user_id);
-  // SetNameOfProfileAtIndex may reshuffle the list of profiles, so we do it
-  // last.
-  cache.SetNameOfProfileAtIndex(index, user_name);
+  ProfileAttributesEntry* entry;
+  bool success = profile_manager_->GetProfileAttributesStorage()
+                     .GetProfileAttributesWithPath(profile_path, &entry);
+  DCHECK(success);
+  entry->SetAvatarIconIndex(avatar_id);
+  entry->SetSupervisedUserId(supervised_user_id);
+  entry->SetName(user_name);
 
   testing_profiles_.insert(std::make_pair(profile_name, profile));
 
@@ -170,8 +171,8 @@ void TestingProfileManager::DeleteTestingProfile(const std::string& name) {
 
   TestingProfile* profile = it->second;
 
-  ProfileInfoCache& cache = profile_manager_->GetProfileInfoCache();
-  cache.DeleteProfileFromCache(profile->GetPath());
+  profile_manager_->GetProfileAttributesStorage().RemoveProfile(
+      profile->GetPath());
 
   profile_manager_->profiles_info_.erase(profile->GetPath());
 
@@ -179,11 +180,12 @@ void TestingProfileManager::DeleteTestingProfile(const std::string& name) {
 }
 
 void TestingProfileManager::DeleteAllTestingProfiles() {
+  ProfileAttributesStorage& storage =
+      profile_manager_->GetProfileAttributesStorage();
   for (TestingProfilesMap::iterator it = testing_profiles_.begin();
        it != testing_profiles_.end(); ++it) {
     TestingProfile* profile = it->second;
-    ProfileInfoCache& cache = profile_manager_->GetProfileInfoCache();
-    cache.DeleteProfileFromCache(profile->GetPath());
+    storage.RemoveProfile(profile->GetPath());
   }
   testing_profiles_.clear();
 }
@@ -247,6 +249,8 @@ void TestingProfileManager::SetUpInternal() {
 
   // Set up the directory for profiles.
   ASSERT_TRUE(profiles_dir_.CreateUniqueTempDir());
+  user_data_dir_override_ = std::make_unique<base::ScopedPathOverride>(
+      chrome::DIR_USER_DATA, profiles_dir_.GetPath());
 
   profile_manager_ = new testing::ProfileManager(profiles_dir_.GetPath());
   browser_process_->SetProfileManager(profile_manager_);  // Takes ownership.

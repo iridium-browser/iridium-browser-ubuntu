@@ -31,9 +31,11 @@
 #include <functional>
 #include <list>
 #include <memory>
+#include "core/dom/Element.h"
 #include "core/dom/NodeTraversal.h"
 #include "core/frame/FrameTestHelpers.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
+#include "core/html_element_type_helpers.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/wtf/PtrUtil.h"
@@ -58,10 +60,10 @@ WebURL ToWebURL(const char* url) {
   return WebURL(blink::URLTestHelpers::ToKURL(url));
 }
 
-class TestPrerendererClient : public WebPrerendererClient {
+class TestWebPrerendererClient : public WebPrerendererClient {
  public:
-  TestPrerendererClient() {}
-  virtual ~TestPrerendererClient() {}
+  TestWebPrerendererClient() = default;
+  virtual ~TestWebPrerendererClient() = default;
 
   void SetExtraDataForNextPrerender(WebPrerender::ExtraData* extra_data) {
     DCHECK(!extra_data_);
@@ -169,14 +171,14 @@ class PrerenderingTest : public ::testing::Test {
         WebString::FromUTF8(base_url), blink::testing::CoreTestDataPath(),
         WebString::FromUTF8(file_name));
     web_view_helper_.Initialize();
-    web_view_helper_.WebView()->SetPrerendererClient(&prerenderer_client_);
+    web_view_helper_.GetWebView()->SetPrerendererClient(&prerenderer_client_);
 
-    FrameTestHelpers::LoadFrame(web_view_helper_.WebView()->MainFrameImpl(),
+    FrameTestHelpers::LoadFrame(web_view_helper_.GetWebView()->MainFrameImpl(),
                                 std::string(base_url) + file_name);
   }
 
   void NavigateAway() {
-    FrameTestHelpers::LoadFrame(web_view_helper_.WebView()->MainFrameImpl(),
+    FrameTestHelpers::LoadFrame(web_view_helper_.GetWebView()->MainFrameImpl(),
                                 "about:blank");
   }
 
@@ -191,7 +193,7 @@ class PrerenderingTest : public ::testing::Test {
     Document* document =
         web_view_helper_.LocalMainFrame()->GetFrame()->GetDocument();
     Element* console = document->getElementById("console");
-    DCHECK(isHTMLUListElement(console));
+    DCHECK(IsHTMLUListElement(console));
     return *console;
   }
 
@@ -203,7 +205,7 @@ class PrerenderingTest : public ::testing::Test {
     Node* item = NodeTraversal::ChildAt(Console(), 1 + i);
 
     DCHECK(item);
-    DCHECK(isHTMLLIElement(item));
+    DCHECK(IsHTMLLIElement(item));
     DCHECK(item->hasChildren());
 
     return item->textContent();
@@ -218,11 +220,11 @@ class PrerenderingTest : public ::testing::Test {
     return &prerendering_support_;
   }
 
-  TestPrerendererClient* PrerendererClient() { return &prerenderer_client_; }
+  TestWebPrerendererClient* PrerendererClient() { return &prerenderer_client_; }
 
  private:
   TestPrerenderingSupport prerendering_support_;
-  TestPrerendererClient prerenderer_client_;
+  TestWebPrerendererClient prerenderer_client_;
 
   FrameTestHelpers::WebViewHelper web_view_helper_;
 };
@@ -235,7 +237,8 @@ TEST_F(PrerenderingTest, SinglePrerender) {
   WebPrerender web_prerender = PrerendererClient()->ReleaseWebPrerender();
   EXPECT_FALSE(web_prerender.IsNull());
   EXPECT_EQ(ToWebURL("http://prerender.com/"), web_prerender.Url());
-  EXPECT_EQ(kPrerenderRelTypePrerender, web_prerender.RelTypes());
+  EXPECT_EQ(static_cast<unsigned>(kPrerenderRelTypePrerender),
+            web_prerender.RelTypes());
 
   EXPECT_EQ(1u, PrerenderingSupport()->AddCount(web_prerender));
   EXPECT_EQ(1u, PrerenderingSupport()->TotalCount());
@@ -456,22 +459,6 @@ TEST_F(PrerenderingTest, MutateRel) {
   ExecuteScript("mutateRel()");
   EXPECT_EQ(1u, PrerenderingSupport()->CancelCount(web_prerender));
   EXPECT_EQ(2u, PrerenderingSupport()->TotalCount());
-}
-
-TEST_F(PrerenderingTest, RelNext) {
-  Initialize("http://www.foo.com/", "prerender/rel_next_prerender.html");
-
-  WebPrerender rel_next_only = PrerendererClient()->ReleaseWebPrerender();
-  EXPECT_EQ(ToWebURL("http://rel-next-only.com/"), rel_next_only.Url());
-  EXPECT_EQ(kPrerenderRelTypeNext, rel_next_only.RelTypes());
-
-  WebPrerender rel_next_and_prerender =
-      PrerendererClient()->ReleaseWebPrerender();
-  EXPECT_EQ(ToWebURL("http://rel-next-and-prerender.com/"),
-            rel_next_and_prerender.Url());
-  EXPECT_EQ(
-      static_cast<unsigned>(kPrerenderRelTypeNext | kPrerenderRelTypePrerender),
-      rel_next_and_prerender.RelTypes());
 }
 
 }  // namespace blink

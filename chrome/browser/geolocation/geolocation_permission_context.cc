@@ -11,13 +11,15 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "device/geolocation/geolocation_provider.h"
+#include "content/public/common/service_manager_connection.h"
+#include "services/device/public/mojom/constants.mojom.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "url/origin.h"
 
 GeolocationPermissionContext::GeolocationPermissionContext(Profile* profile)
     : PermissionContextBase(profile,
                             CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                            blink::WebFeaturePolicyFeature::kGeolocation),
+                            blink::mojom::FeaturePolicyFeature::kGeolocation),
       extensions_context_(profile) {}
 
 GeolocationPermissionContext::~GeolocationPermissionContext() {
@@ -58,16 +60,6 @@ void GeolocationPermissionContext::DecidePermission(
                                           callback);
 }
 
-void GeolocationPermissionContext::CancelPermissionRequest(
-    content::WebContents* web_contents,
-    const PermissionRequestID& id) {
-
-    if (extensions_context_.CancelPermissionRequest(
-        web_contents, id.request_id()))
-      return;
-    PermissionContextBase::CancelPermissionRequest(web_contents, id);
-}
-
 void GeolocationPermissionContext::UpdateTabContext(
     const PermissionRequestID& id,
     const GURL& requesting_frame,
@@ -83,11 +75,26 @@ void GeolocationPermissionContext::UpdateTabContext(
         requesting_frame.GetOrigin(), allowed);
 
   if (allowed) {
-    device::GeolocationProvider::GetInstance()
-        ->UserDidOptIntoLocationServices();
+    GetGeolocationControl()->UserDidOptIntoLocationServices();
   }
 }
 
 bool GeolocationPermissionContext::IsRestrictedToSecureOrigins() const {
   return true;
+}
+
+device::mojom::GeolocationControl*
+GeolocationPermissionContext::GetGeolocationControl() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (geolocation_control_)
+    return geolocation_control_.get();
+
+  auto request = mojo::MakeRequest(&geolocation_control_);
+  if (!content::ServiceManagerConnection::GetForProcess())
+    return geolocation_control_.get();
+
+  service_manager::Connector* connector =
+      content::ServiceManagerConnection::GetForProcess()->GetConnector();
+  connector->BindInterface(device::mojom::kServiceName, std::move(request));
+  return geolocation_control_.get();
 }

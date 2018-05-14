@@ -11,7 +11,6 @@
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -32,9 +31,9 @@ namespace {
 void SetOverrides(sync_preferences::TestingPrefServiceSyncable* prefs,
                   bool update) {
   prefs->SetUserPref(prefs::kSearchProviderOverridesVersion,
-                     base::MakeUnique<base::Value>(1));
-  auto overrides = base::MakeUnique<base::ListValue>();
-  auto entry = base::MakeUnique<base::DictionaryValue>();
+                     std::make_unique<base::Value>(1));
+  auto overrides = std::make_unique<base::ListValue>();
+  auto entry = std::make_unique<base::DictionaryValue>();
 
   entry->SetString("name", update ? "new_foo" : "foo");
   entry->SetString("keyword", update ? "new_fook" : "fook");
@@ -43,19 +42,17 @@ void SetOverrides(sync_preferences::TestingPrefServiceSyncable* prefs,
   entry->SetString("encoding", "UTF-8");
   entry->SetInteger("id", 1001);
   entry->SetString("suggest_url", "http://foo.com/suggest?q={searchTerms}");
-  entry->SetString("instant_url", "http://foo.com/instant?q={searchTerms}");
-  auto alternate_urls = base::MakeUnique<base::ListValue>();
+  auto alternate_urls = std::make_unique<base::ListValue>();
   alternate_urls->AppendString("http://foo.com/alternate?q={searchTerms}");
   entry->Set("alternate_urls", std::move(alternate_urls));
-  entry->SetString("search_terms_replacement_key", "espv");
   overrides->Append(std::move(entry));
 
-  entry = base::MakeUnique<base::DictionaryValue>();
+  entry = std::make_unique<base::DictionaryValue>();
   entry->SetInteger("id", 1002);
   entry->SetString("name", update ? "new_bar" : "bar");
   entry->SetString("keyword", update ? "new_bark" : "bark");
   entry->SetString("encoding", std::string());
-  overrides->Append(base::MakeUnique<base::Value>(*entry));
+  overrides->Append(std::make_unique<base::Value>(entry->Clone()));
   entry->SetInteger("id", 1003);
   entry->SetString("name", "baz");
   entry->SetString("keyword", "bazk");
@@ -188,9 +185,9 @@ TEST_F(DefaultSearchManagerTest, DefaultSearchSetByOverrides) {
   ExpectSimilar(prepopulated_urls[default_search_index].get(),
                 manager.GetDefaultSearchEngine(&source));
   EXPECT_EQ(DefaultSearchManager::FROM_FALLBACK, source);
-  EXPECT_NE(manager.GetDefaultSearchEngine(NULL)->short_name(),
+  EXPECT_NE(manager.GetDefaultSearchEngine(nullptr)->short_name(),
             first_default.short_name());
-  EXPECT_NE(manager.GetDefaultSearchEngine(NULL)->keyword(),
+  EXPECT_NE(manager.GetDefaultSearchEngine(nullptr)->keyword(),
             first_default.keyword());
 }
 
@@ -214,7 +211,7 @@ TEST_F(DefaultSearchManagerTest, DefaultSearchSetByPolicy) {
 
   TemplateURLData null_policy_data;
   SetPolicy(pref_service(), false, &null_policy_data);
-  EXPECT_EQ(NULL, manager.GetDefaultSearchEngine(&source));
+  EXPECT_EQ(nullptr, manager.GetDefaultSearchEngine(&source));
   EXPECT_EQ(DefaultSearchManager::FROM_POLICY, source);
 
   pref_service()->RemoveManagedPref(

@@ -8,9 +8,8 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/debug/crash_logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
+#include "components/crash/core/common/crash_key.h"
 #include "components/policy/core/common/cloud/cloud_external_data_manager.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/cloud_policy_service.h"
@@ -29,13 +28,11 @@ UserCloudPolicyManager::UserCloudPolicyManager(
     const base::FilePath& component_policy_cache_path,
     std::unique_ptr<CloudExternalDataManager> external_data_manager,
     const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-    const scoped_refptr<base::SequencedTaskRunner>& file_task_runner,
     const scoped_refptr<base::SequencedTaskRunner>& io_task_runner)
     : CloudPolicyManager(dm_protocol::kChromeUserPolicyType,
                          std::string(),
                          store.get(),
                          task_runner,
-                         file_task_runner,
                          io_task_runner),
       store_(std::move(store)),
       component_policy_cache_path_(component_policy_cache_path),
@@ -60,8 +57,10 @@ void UserCloudPolicyManager::Connect(
   // TODO(emaxx): Remove the crash key after the crashes tracked at
   // https://crbug.com/685996 are fixed.
   if (core()->client()) {
-    base::debug::SetCrashKeyToStackTrace(
-        "user-cloud-policy-manager-connect-trace", connect_callstack_);
+    static crash_reporter::CrashKeyString<1024> connect_callstack_key(
+        "user-cloud-policy-manager-connect-trace");
+    crash_reporter::SetCrashKeyStringToStackTrace(&connect_callstack_key,
+                                                  connect_callstack_);
   } else {
     connect_callstack_ = base::debug::StackTrace();
   }
@@ -83,10 +82,10 @@ std::unique_ptr<CloudPolicyClient>
 UserCloudPolicyManager::CreateCloudPolicyClient(
     DeviceManagementService* device_management_service,
     scoped_refptr<net::URLRequestContextGetter> request_context) {
-  return base::MakeUnique<CloudPolicyClient>(
+  return std::make_unique<CloudPolicyClient>(
       std::string() /* machine_id */, std::string() /* machine_model */,
-      device_management_service, request_context,
-      nullptr /* signing_service */);
+      device_management_service, request_context, nullptr /* signing_service */,
+      CloudPolicyClient::DeviceDMTokenCallback());
 }
 
 void UserCloudPolicyManager::DisconnectAndRemovePolicy() {
@@ -121,7 +120,7 @@ void UserCloudPolicyManager::GetChromePolicy(PolicyMap* policy_map) {
       !policy_map->Get(key::kNTPContentSuggestionsEnabled)) {
     policy_map->Set(key::kNTPContentSuggestionsEnabled, POLICY_LEVEL_MANDATORY,
                     POLICY_SCOPE_USER, POLICY_SOURCE_ENTERPRISE_DEFAULT,
-                    base::MakeUnique<base::Value>(false),
+                    std::make_unique<base::Value>(false),
                     nullptr /* external_data_fetcher */);
   }
 }

@@ -26,7 +26,6 @@
 
 #include "core/CSSValueKeywords.h"
 #include "core/layout/LayoutThemeFontProvider.h"
-#include "core/paint/MediaControlsPainter.h"
 #include "core/style/ComputedStyle.h"
 #include "platform/DataResourceHelper.h"
 #include "platform/LayoutTestSupport.h"
@@ -53,14 +52,14 @@ unsigned LayoutThemeDefault::active_selection_foreground_color_ = Color::kBlack;
 unsigned LayoutThemeDefault::inactive_selection_background_color_ = 0xffc8c8c8;
 unsigned LayoutThemeDefault::inactive_selection_foreground_color_ = 0xff323232;
 
-double LayoutThemeDefault::caret_blink_interval_;
+TimeDelta LayoutThemeDefault::caret_blink_interval_;
 
 LayoutThemeDefault::LayoutThemeDefault()
     : LayoutTheme(nullptr), painter_(*this) {
   caret_blink_interval_ = LayoutTheme::CaretBlinkInterval();
 }
 
-LayoutThemeDefault::~LayoutThemeDefault() {}
+LayoutThemeDefault::~LayoutThemeDefault() = default;
 
 bool LayoutThemeDefault::ThemeDrawsFocusRing(const ComputedStyle& style) const {
   if (UseMockTheme()) {
@@ -174,8 +173,6 @@ void LayoutThemeDefault::AdjustSliderThumbSize(ComputedStyle& style) const {
   } else if (style.Appearance() == kSliderThumbVerticalPart) {
     style.SetWidth(Length(size.Height() * zoom_level, kFixed));
     style.SetHeight(Length(size.Width() * zoom_level, kFixed));
-  } else {
-    MediaControlsPainter::AdjustMediaSliderThumbSize(style);
   }
 }
 
@@ -200,6 +197,7 @@ void LayoutThemeDefault::SetCheckboxSize(ComputedStyle& style) const {
   float zoom_level = style.EffectiveZoom();
   size.SetWidth(size.Width() * zoom_level);
   size.SetHeight(size.Height() * zoom_level);
+  SetMinimumSizeIfAuto(style, size);
   SetSizeIfAuto(style, size);
 }
 
@@ -213,6 +211,7 @@ void LayoutThemeDefault::SetRadioSize(ComputedStyle& style) const {
   float zoom_level = style.EffectiveZoom();
   size.SetWidth(size.Width() * zoom_level);
   size.SetHeight(size.Height() * zoom_level);
+  SetMinimumSizeIfAuto(style, size);
   SetSizeIfAuto(style, size);
 }
 
@@ -252,11 +251,11 @@ Color LayoutThemeDefault::PlatformFocusRingColor() const {
 }
 
 void LayoutThemeDefault::SystemFont(CSSValueID system_font_id,
-                                    FontStyle& font_style,
-                                    FontWeight& font_weight,
+                                    FontSelectionValue& font_slope,
+                                    FontSelectionValue& font_weight,
                                     float& font_size,
                                     AtomicString& font_family) const {
-  LayoutThemeFontProvider::SystemFont(system_font_id, font_style, font_weight,
+  LayoutThemeFontProvider::SystemFont(system_font_id, font_slope, font_weight,
                                       font_size, font_family);
 }
 
@@ -278,13 +277,13 @@ IntRect Center(const IntRect& original, int width, int height) {
 void LayoutThemeDefault::AdjustButtonStyle(ComputedStyle& style) const {
   if (style.Appearance() == kPushButtonPart) {
     // Ignore line-height.
-    style.SetLineHeight(ComputedStyle::InitialLineHeight());
+    style.SetLineHeight(ComputedStyleInitialValues::InitialLineHeight());
   }
 }
 
 void LayoutThemeDefault::AdjustSearchFieldStyle(ComputedStyle& style) const {
   // Ignore line-height.
-  style.SetLineHeight(ComputedStyle::InitialLineHeight());
+  style.SetLineHeight(ComputedStyleInitialValues::InitialLineHeight());
 }
 
 void LayoutThemeDefault::AdjustSearchFieldCancelButtonStyle(
@@ -301,7 +300,7 @@ void LayoutThemeDefault::AdjustSearchFieldCancelButtonStyle(
 void LayoutThemeDefault::AdjustMenuListStyle(ComputedStyle& style,
                                              Element*) const {
   // Height is locked to auto on all browsers.
-  style.SetLineHeight(ComputedStyle::InitialLineHeight());
+  style.SetLineHeight(ComputedStyleInitialValues::InitialLineHeight());
 }
 
 void LayoutThemeDefault::AdjustMenuListButtonStyle(ComputedStyle& style,
@@ -372,11 +371,6 @@ float LayoutThemeDefault::ClampedMenuListArrowPaddingSize(
 void LayoutThemeDefault::DidChangeThemeEngine() {
   cached_menu_list_arrow_zoom_level_ = 0;
   cached_menu_list_arrow_padding_size_ = 0;
-}
-
-// static
-void LayoutThemeDefault::SetDefaultFontSize(int font_size) {
-  LayoutThemeFontProvider::SetDefaultFontSize(font_size);
 }
 
 int LayoutThemeDefault::MenuListInternalPadding(const ComputedStyle& style,

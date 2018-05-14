@@ -2,6 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+class Iteratable {
+ public:
+  using const_iterator = int* const*;
+
+  const_iterator begin() { return nullptr; }
+  const_iterator end() { return nullptr; }
+};
+
 class Foo {
  public:
   void foo() {}
@@ -49,4 +57,12 @@ int main() {
   const auto&& const_int_ptr_rref = static_cast<int*&&>(int_ptr);
 
   static auto static_ptr = new int;
+
+  Iteratable iteratable;
+  for (auto& it : iteratable)
+    (void)it;
+
+  // This is a valid usecase of deducing a type to be a raw pointer and should
+  // not trigger a warning / error.
+  auto lambda = [foo_ptr = &foo] { return *foo_ptr; };
 }

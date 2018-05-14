@@ -259,7 +259,8 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     return true;
   }
 
-  void TestVideoQuality(const std::string& video_codec) {
+  void TestVideoQuality(const std::string& video_codec,
+                        bool prefer_hw_video_codec) {
     ASSERT_GE(TestTimeouts::action_max_timeout().InSeconds(), 150)
         << "This is a long-running test; you must specify "
            "--ui-test-action-max-timeout to have a value of at least 150000.";
@@ -279,8 +280,8 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     SetupPeerconnectionWithLocalStream(right_tab);
 
     if (!video_codec.empty()) {
-      SetDefaultVideoCodec(left_tab, video_codec);
-      SetDefaultVideoCodec(right_tab, video_codec);
+      SetDefaultVideoCodec(left_tab, video_codec, prefer_hw_video_codec);
+      SetDefaultVideoCodec(right_tab, video_codec, prefer_hw_video_codec);
     }
     NegotiateCall(left_tab, right_tab);
 
@@ -345,21 +346,28 @@ INSTANTIATE_TEST_CASE_P(
 
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
                        MANUAL_TestVideoQualityVp8) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
-  TestVideoQuality("VP8");
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  TestVideoQuality("VP8", false /* prefer_hw_video_codec */);
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
                        MANUAL_TestVideoQualityVp9) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
-  TestVideoQuality("VP9");
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  TestVideoQuality("VP9", false /* prefer_hw_video_codec */);
 }
 
 #if BUILDFLAG(RTC_USE_H264)
 
+// Flaky on mac: crbug.com/754684
+#if defined(OS_MACOSX)
+#define MAYBE_MANUAL_TestVideoQualityH264 DISABLED_MANUAL_TestVideoQualityH264
+#else
+#define MAYBE_MANUAL_TestVideoQualityH264 MANUAL_TestVideoQualityH264
+#endif
+
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
-                       MANUAL_TestVideoQualityH264) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+                       MAYBE_MANUAL_TestVideoQualityH264) {
+  base::ScopedAllowBlockingForTesting allow_blocking;
   // Only run test if run-time feature corresponding to |rtc_use_h264| is on.
   if (!base::FeatureList::IsEnabled(content::kWebRtcH264WithOpenH264FFmpeg)) {
     LOG(WARNING) << "Run-time feature WebRTC-H264WithOpenH264FFmpeg disabled. "
@@ -367,7 +375,7 @@ IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
         "(test \"OK\")";
     return;
   }
-  TestVideoQuality("H264");
+  TestVideoQuality("H264", true /* prefer_hw_video_codec */);
 }
 
 #endif  // BUILDFLAG(RTC_USE_H264)

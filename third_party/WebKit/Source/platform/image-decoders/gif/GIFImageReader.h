@@ -97,7 +97,7 @@ class GIFLZWContext final {
         ipass(0),
         irow(0),
         rows_remaining(0),
-        row_iter(0),
+        row_iter(nullptr),
         client_(client),
         frame_context_(frame_context) {}
 
@@ -117,13 +117,13 @@ class GIFLZWContext final {
   int codesize;
   int codemask;
   int clear_code;  // Codeword used to trigger dictionary reset.
-  int avail;      // Index of next available slot in dictionary.
+  int avail;       // Index of next available slot in dictionary.
   int oldcode;
   unsigned char firstchar;
-  int bits;              // Number of unread bits in "datum".
-  int datum;             // 32-bit input buffer.
-  int ipass;             // Interlace pass; Ranges 1-4 if interlaced.
-  size_t irow;           // Current output row, starting at zero.
+  int bits;               // Number of unread bits in "datum".
+  int datum;              // 32-bit input buffer.
+  int ipass;              // Interlace pass; Ranges 1-4 if interlaced.
+  size_t irow;            // Current output row, starting at zero.
   size_t rows_remaining;  // Rows remaining to be output.
 
   unsigned short prefix[kMaxDictionaryEntries];
@@ -199,7 +199,7 @@ struct GIFFrameContext {
         is_header_defined_(false),
         is_data_size_defined_(false) {}
 
-  ~GIFFrameContext() {}
+  ~GIFFrameContext() = default;
 
   void AddLzwBlock(size_t position, size_t size) {
     lzw_blocks_.push_back(GIFLZWBlock(position, size));
@@ -287,7 +287,7 @@ class PLATFORM_EXPORT GIFImageReader final {
   WTF_MAKE_NONCOPYABLE(GIFImageReader);
 
  public:
-  GIFImageReader(blink::GIFImageDecoder* client = 0)
+  GIFImageReader(blink::GIFImageDecoder* client = nullptr)
       : client_(client),
         state_(kGIFType),
         // Number of bytes for GIF type, either "GIF87a" or "GIF89a".
@@ -300,9 +300,9 @@ class PLATFORM_EXPORT GIFImageReader final {
         loop_count_(kCLoopCountNotSeen),
         parse_completed_(false) {}
 
-  ~GIFImageReader() {}
+  ~GIFImageReader() = default;
 
-  void SetData(PassRefPtr<blink::SegmentReader> data) {
+  void SetData(scoped_refptr<blink::SegmentReader> data) {
     data_ = std::move(data);
   }
   bool Parse(blink::GIFImageDecoder::GIFParseQuery);
@@ -324,7 +324,7 @@ class PLATFORM_EXPORT GIFImageReader final {
   const GIFColorMap& GlobalColorMap() const { return global_color_map_; }
 
   const GIFFrameContext* FrameContext(size_t index) const {
-    return index < frames_.size() ? frames_[index].get() : 0;
+    return index < frames_.size() ? frames_[index].get() : nullptr;
   }
 
   bool ParseCompleted() const { return parse_completed_; }
@@ -362,7 +362,7 @@ class PLATFORM_EXPORT GIFImageReader final {
 
   Vector<std::unique_ptr<GIFFrameContext>> frames_;
 
-  RefPtr<blink::SegmentReader> data_;
+  scoped_refptr<blink::SegmentReader> data_;
   bool parse_completed_;
 };
 

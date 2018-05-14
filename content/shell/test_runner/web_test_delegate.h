@@ -11,6 +11,8 @@
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
+#include "base/strings/string16.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
@@ -30,8 +32,11 @@ class WebPlugin;
 struct WebPluginParams;
 struct WebSize;
 class WebURLRequest;
-class WebURLResponse;
 class WebView;
+}
+
+namespace content {
+struct Manifest;
 }
 
 namespace device {
@@ -49,6 +54,8 @@ class GamepadController;
 class WebTask;
 class WebWidgetTestProxyBase;
 struct TestPreferences;
+
+constexpr int kDefaultDatabaseQuota = -1;
 
 class WebTestDelegate {
  public:
@@ -124,31 +131,19 @@ class WebTestDelegate {
                                     const blink::WebSize& max_size) = 0;
   virtual void DisableAutoResizeMode(const blink::WebSize& new_size) = 0;
 
-  // Clears DevTools' localStorage when an inspector test is started.
-  virtual void ClearDevToolsLocalStorage() = 0;
-
-  // Opens and closes the inspector.
-  virtual void ShowDevTools(const std::string& settings,
-                            const std::string& frontend_url) = 0;
-  virtual void CloseDevTools() = 0;
-
-  // Evaluate the given script in the DevTools agent.
-  virtual void EvaluateInWebInspector(int call_id,
-                                      const std::string& script) = 0;
-
-  // Evaluate the given script in the inspector overlay page.
-  virtual std::string EvaluateInWebInspectorOverlay(
-      const std::string& script) = 0;
+  virtual void NavigateSecondaryWindow(const GURL& url) = 0;
+  virtual void InspectSecondaryWindow() = 0;
 
   // Controls WebSQL databases.
   virtual void ClearAllDatabases() = 0;
+  // Setting quota to kDefaultDatabaseQuota will reset it to the default value.
   virtual void SetDatabaseQuota(int quota) = 0;
 
   // Controls Web Notifications.
   virtual void SimulateWebNotificationClick(
       const std::string& title,
-      int action_index,
-      const base::NullableString16& reply) = 0;
+      const base::Optional<int>& action_index,
+      const base::Optional<base::string16>& reply) = 0;
   virtual void SimulateWebNotificationClose(const std::string& title,
                                             bool by_user) = 0;
 
@@ -248,9 +243,8 @@ class WebTestDelegate {
   // Fetch the manifest for a given WebView from the given url.
   virtual void FetchManifest(
       blink::WebView* view,
-      const GURL& url,
-      const base::Callback<void(const blink::WebURLResponse& response,
-                                const std::string& data)>& callback) = 0;
+      base::OnceCallback<void(const GURL&, const content::Manifest&)>
+          callback) = 0;
 
   // Sends a message to the LayoutTestPermissionManager in order for it to
   // update its database.

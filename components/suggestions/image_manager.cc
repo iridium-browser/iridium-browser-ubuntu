@@ -55,7 +55,7 @@ constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "Users can disable this feature by signing out of Chrome, or "
             "disabling Sync or History Sync in Chrome settings under 'Advanced "
@@ -92,6 +92,7 @@ ImageManager::ImageManager(
       weak_ptr_factory_(this) {
   image_fetcher_->SetImageFetcherDelegate(this);
   database_->Init(kDatabaseUMAClientName, database_dir,
+                  leveldb_proto::CreateSimpleOptions(),
                   base::Bind(&ImageManager::OnDatabaseInit,
                              weak_ptr_factory_.GetWeakPtr()));
 }
@@ -156,20 +157,22 @@ bool ImageManager::GetImageURL(const GURL& url, GURL* image_url) {
   return true;
 }
 
-void ImageManager::QueueCacheRequest(
-    const GURL& url, const GURL& image_url, ImageCallback callback) {
+void ImageManager::QueueCacheRequest(const GURL& url,
+                                     const GURL& image_url,
+                                     ImageCallback callback) {
   // To be served when the database has loaded.
   ImageCacheRequestMap::iterator it = pending_cache_requests_.find(url);
-  if (it == pending_cache_requests_.end()) {
-    ImageCacheRequest request;
-    request.url = url;
-    request.image_url = image_url;
-    request.callbacks.push_back(callback);
-    pending_cache_requests_[url] = request;
-  } else {
+  if (it != pending_cache_requests_.end()) {
     // Request already queued for this url.
     it->second.callbacks.push_back(callback);
+    return;
   }
+
+  ImageCacheRequest request;
+  request.url = url;
+  request.image_url = image_url;
+  request.callbacks.push_back(callback);
+  pending_cache_requests_[url] = request;
 }
 
 void ImageManager::OnCacheImageDecoded(
@@ -297,6 +300,7 @@ void ImageManager::ServePendingCacheRequests() {
       ServeFromCacheOrNetwork(request.url, request.image_url, *callback_it);
     }
   }
+  pending_cache_requests_.clear();
 }
 
 }  // namespace suggestions

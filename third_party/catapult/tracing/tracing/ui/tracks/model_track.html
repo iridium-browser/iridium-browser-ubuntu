@@ -20,7 +20,7 @@ found in the LICENSE file.
 
 <style>
 .model-track {
-  -webkit-box-flex: 1;
+  flex-grow: 1;
 }
 </style>
 
@@ -60,7 +60,7 @@ tr.exportTo('tr.ui.tracks', function() {
     if (times.length === 0) return [];
 
     // Find the lowest and highest index within the viewport.
-    const lowIndex = tr.b.math.findLowIndexInSortedArray(
+    const lowIndex = tr.b.findLowIndexInSortedArray(
         times, (x => x), minTime);
     let highIndex = lowIndex - 1;
     while (times[highIndex + 1] <= maxTime) {
@@ -262,10 +262,11 @@ tr.exportTo('tr.ui.tracks', function() {
       const dt = this.viewport.currentDisplayTransform;
       const viewLWorld = dt.xViewToWorld(0);
       const viewRWorld = dt.xViewToWorld(canvasBounds.width * pixelRatio);
+      const viewHeight = bounds.height * pixelRatio;
 
       switch (type) {
         case tr.ui.tracks.DrawType.GRID:
-          this.viewport.drawMajorMarkLines(ctx);
+          this.viewport.drawMajorMarkLines(ctx, viewHeight);
           // The model is the only thing that draws grid lines.
           ctx.restore();
           return;
@@ -299,7 +300,8 @@ tr.exportTo('tr.ui.tracks', function() {
 
         case tr.ui.tracks.DrawType.MARKERS:
           if (!this.viewport.interestRange.isEmpty) {
-            this.viewport.interestRange.draw(ctx, viewLWorld, viewRWorld);
+            this.viewport.interestRange.draw(
+                ctx, viewLWorld, viewRWorld, viewHeight);
             this.viewport.interestRange.drawIndicators(
                 ctx, viewLWorld, viewRWorld);
           }
@@ -308,7 +310,7 @@ tr.exportTo('tr.ui.tracks', function() {
 
         case tr.ui.tracks.DrawType.HIGHLIGHTS:
           this.drawVSyncHighlight(
-              ctx, dt, viewLWorld, viewRWorld, bounds.height);
+              ctx, dt, viewLWorld, viewRWorld, viewHeight);
           ctx.restore();
           return;
 
@@ -365,16 +367,22 @@ tr.exportTo('tr.ui.tracks', function() {
         ctx.shadowBlur = 1;
         ctx.shadowColor = 'red';
         ctx.shadowOffsety = 2;
-        ctx.strokeStyle = 'red';
+        ctx.strokeStyle = tr.b.ColorScheme.colorsAsStrings[
+          tr.b.ColorScheme.getVariantColorId(
+              flowEvent.colorId,
+              tr.b.ColorScheme.properties.brightenedOffsets[0])];
       } else if (flowEvent.selectionState === SelectionState.HIGHLIGHTED) {
         ctx.shadowBlur = 1;
         ctx.shadowColor = 'red';
         ctx.shadowOffsety = 2;
-        ctx.strokeStyle = 'red';
+        ctx.strokeStyle = tr.b.ColorScheme.colorsAsStrings[
+          tr.b.ColorScheme.getVariantColorId(
+              flowEvent.colorId,
+              tr.b.ColorScheme.properties.brightenedOffsets[0])];
       } else if (flowEvent.selectionState === SelectionState.DIMMED) {
         ctx.shadowBlur = 0;
         ctx.shadowOffsetX = 0;
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.strokeStyle = tr.b.ColorScheme.colorsAsStrings[flowEvent.colorId];
       } else {
         let hasBoost = false;
         const startSlice = flowEvent.startSlice;
@@ -387,11 +395,14 @@ tr.exportTo('tr.ui.tracks', function() {
           ctx.shadowBlur = 1;
           ctx.shadowColor = 'rgba(255, 0, 0, 0.4)';
           ctx.shadowOffsety = 2;
-          ctx.strokeStyle = 'rgba(255, 0, 0, 0.4)';
+          ctx.strokeStyle = tr.b.ColorScheme.colorsAsStrings[
+            tr.b.ColorScheme.getVariantColorId(
+                flowEvent.colorId,
+                tr.b.ColorScheme.properties.brightenedOffsets[0])];
         } else {
           ctx.shadowBlur = 0;
           ctx.shadowOffsetX = 0;
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+          ctx.strokeStyle = tr.b.ColorScheme.colorsAsStrings[flowEvent.colorId];
         }
       }
 
@@ -465,16 +476,13 @@ tr.exportTo('tr.ui.tracks', function() {
         return;
       }
 
-      const pixelRatio = window.devicePixelRatio || 1;
-      const height = viewHeight * pixelRatio;
-
       ctx.fillStyle = vSyncHighlightColor.toStringWithAlphaOverride(
           ModelTrack.VSYNC_HIGHLIGHT_ALPHA * opacity);
 
       for (let i = 0; i < stripes.length; i++) {
         const xLeftView = dt.xWorldToView(stripes[i].min);
         const xRightView = dt.xWorldToView(stripes[i].max);
-        ctx.fillRect(xLeftView, 0, xRightView - xLeftView, height);
+        ctx.fillRect(xLeftView, 0, xRightView - xLeftView, viewHeight);
       }
     },
 
@@ -495,7 +503,7 @@ tr.exportTo('tr.ui.tracks', function() {
         selection.push(instantEvent);
       }
       const instantEventWidth = 3 * viewPixWidthWorld;
-      tr.b.math.iterateOverIntersectingIntervals(this.model_.instantEvents,
+      tr.b.iterateOverIntersectingIntervals(this.model_.instantEvents,
           function(x) { return x.start; },
           function(x) { return x.duration + instantEventWidth; },
           loWX, hiWX,

@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "gpu/config/gpu_info.h"
 #include "media/mojo/clients/mojo_video_encode_accelerator.h"
 #include "media/mojo/interfaces/video_encode_accelerator.mojom.h"
@@ -121,7 +122,7 @@ class MojoVideoEncodeAcceleratorTest : public ::testing::Test {
   void SetUp() override {
     mojom::VideoEncodeAcceleratorPtr mojo_vea;
     mojo_vea_binding_ = mojo::MakeStrongBinding(
-        base::MakeUnique<MockMojoVideoEncodeAccelerator>(),
+        std::make_unique<MockMojoVideoEncodeAccelerator>(),
         mojo::MakeRequest(&mojo_vea));
 
     mojo_vea_.reset(new MojoVideoEncodeAccelerator(
@@ -180,7 +181,7 @@ TEST_F(MojoVideoEncodeAcceleratorTest, CreateAndDestroy) {}
 // This test verifies the Initialize() communication prologue in isolation.
 TEST_F(MojoVideoEncodeAcceleratorTest, InitializeAndRequireBistreamBuffers) {
   std::unique_ptr<MockVideoEncodeAcceleratorClient> mock_vea_client =
-      base::MakeUnique<MockVideoEncodeAcceleratorClient>();
+      std::make_unique<MockVideoEncodeAcceleratorClient>();
   Initialize(mock_vea_client.get());
 }
 
@@ -188,7 +189,7 @@ TEST_F(MojoVideoEncodeAcceleratorTest, InitializeAndRequireBistreamBuffers) {
 // sharing of a single bitstream buffer and the Encode() of one frame.
 TEST_F(MojoVideoEncodeAcceleratorTest, EncodeOneFrame) {
   std::unique_ptr<MockVideoEncodeAcceleratorClient> mock_vea_client =
-      base::MakeUnique<MockVideoEncodeAcceleratorClient>();
+      std::make_unique<MockVideoEncodeAcceleratorClient>();
   Initialize(mock_vea_client.get());
 
   const int32_t kBitstreamBufferId = 17;
@@ -243,7 +244,7 @@ TEST_F(MojoVideoEncodeAcceleratorTest, EncodingParametersChange) {
 // FakeVEA is configured to do so.
 TEST_F(MojoVideoEncodeAcceleratorTest, InitializeFailure) {
   std::unique_ptr<MockVideoEncodeAcceleratorClient> mock_vea_client =
-      base::MakeUnique<MockVideoEncodeAcceleratorClient>();
+      std::make_unique<MockVideoEncodeAcceleratorClient>();
 
   const uint32_t kInitialBitrate = 100000u;
 

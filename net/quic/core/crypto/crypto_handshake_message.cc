@@ -14,9 +14,9 @@
 #include "net/quic/platform/api/quic_endian.h"
 #include "net/quic/platform/api/quic_map_util.h"
 #include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 
-using std::string;
 
 namespace net {
 
@@ -70,6 +70,23 @@ void CryptoHandshakeMessage::MarkDirty() {
   serialized_.reset();
 }
 
+void CryptoHandshakeMessage::SetVersionVector(
+    QuicTag tag,
+    QuicTransportVersionVector versions) {
+  QuicVersionLabelVector version_labels;
+  for (QuicTransportVersion version : versions) {
+    version_labels.push_back(
+        QuicEndian::HostToNet32(QuicVersionToQuicVersionLabel(version)));
+  }
+  SetVector(tag, version_labels);
+}
+
+void CryptoHandshakeMessage::SetVersion(QuicTag tag,
+                                        QuicTransportVersion version) {
+  SetValue(tag,
+           QuicEndian::HostToNet32(QuicVersionToQuicVersionLabel(version)));
+}
+
 void CryptoHandshakeMessage::SetStringPiece(QuicTag tag,
                                             QuicStringPiece value) {
   tag_value_map_[tag] = value.as_string();
@@ -104,6 +121,33 @@ QuicErrorCode CryptoHandshakeMessage::GetTaglist(
     (*out_tags)[i] = tag;
   }
   return ret;
+}
+
+QuicErrorCode CryptoHandshakeMessage::GetVersionLabelList(
+    QuicTag tag,
+    QuicVersionLabelVector* out) const {
+  QuicErrorCode error = GetTaglist(tag, out);
+  if (error != QUIC_NO_ERROR) {
+    return error;
+  }
+
+  for (size_t i = 0; i < out->size(); ++i) {
+    (*out)[i] = QuicEndian::HostToNet32((*out)[i]);
+  }
+
+  return QUIC_NO_ERROR;
+}
+
+QuicErrorCode CryptoHandshakeMessage::GetVersionLabel(
+    QuicTag tag,
+    QuicVersionLabel* out) const {
+  QuicErrorCode error = GetUint32(tag, out);
+  if (error != QUIC_NO_ERROR) {
+    return error;
+  }
+
+  *out = QuicEndian::HostToNet32(*out);
+  return QUIC_NO_ERROR;
 }
 
 bool CryptoHandshakeMessage::GetStringPiece(QuicTag tag,
@@ -167,6 +211,11 @@ QuicErrorCode CryptoHandshakeMessage::GetUint64(QuicTag tag,
   return GetPOD(tag, out, sizeof(uint64_t));
 }
 
+QuicErrorCode CryptoHandshakeMessage::GetUint128(QuicTag tag,
+                                                 uint128* out) const {
+  return GetPOD(tag, out, sizeof(uint128));
+}
+
 size_t CryptoHandshakeMessage::size() const {
   size_t ret = sizeof(QuicTag) + sizeof(uint16_t) /* number of entries */ +
                sizeof(uint16_t) /* padding */;
@@ -192,7 +241,7 @@ size_t CryptoHandshakeMessage::minimum_size() const {
   return minimum_size_;
 }
 
-string CryptoHandshakeMessage::DebugString(Perspective perspective) const {
+QuicString CryptoHandshakeMessage::DebugString(Perspective perspective) const {
   return DebugStringInternal(0, perspective);
 }
 
@@ -217,14 +266,14 @@ QuicErrorCode CryptoHandshakeMessage::GetPOD(QuicTag tag,
   return ret;
 }
 
-string CryptoHandshakeMessage::DebugStringInternal(
+QuicString CryptoHandshakeMessage::DebugStringInternal(
     size_t indent,
     Perspective perspective) const {
-  string ret = string(2 * indent, ' ') + QuicTagToString(tag_) + "<\n";
+  QuicString ret = QuicString(2 * indent, ' ') + QuicTagToString(tag_) + "<\n";
   ++indent;
   for (QuicTagValueMap::const_iterator it = tag_value_map_.begin();
        it != tag_value_map_.end(); ++it) {
-    ret += string(2 * indent, ' ') + QuicTagToString(it->first) + ": ";
+    ret += QuicString(2 * indent, ' ') + QuicTagToString(it->first) + ": ";
 
     bool done = false;
     switch (it->first) {
@@ -305,7 +354,7 @@ string CryptoHandshakeMessage::DebugStringInternal(
         if (!it->second.empty()) {
           std::unique_ptr<CryptoHandshakeMessage> msg(
               CryptoFramer::ParseMessage(it->second, perspective));
-          if (msg.get()) {
+          if (msg) {
             ret += "\n";
             ret += msg->DebugStringInternal(indent + 1, perspective);
 
@@ -333,7 +382,7 @@ string CryptoHandshakeMessage::DebugStringInternal(
     ret += "\n";
   }
   --indent;
-  ret += string(2 * indent, ' ') + ">";
+  ret += QuicString(2 * indent, ' ') + ">";
   return ret;
 }
 

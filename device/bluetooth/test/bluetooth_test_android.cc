@@ -34,9 +34,6 @@ BluetoothTestAndroid::~BluetoothTestAndroid() {
 }
 
 void BluetoothTestAndroid::SetUp() {
-  // Register in SetUp so that ASSERT can be used.
-  ASSERT_TRUE(RegisterNativesImpl(AttachCurrentThread()));
-
   // Set the permission to true so that we can use the API.
   Java_Fakes_setLocationServicesState(
       AttachCurrentThread(), true /* hasPermission */, true /* isEnabled */);
@@ -45,9 +42,14 @@ void BluetoothTestAndroid::SetUp() {
 }
 
 void BluetoothTestAndroid::TearDown() {
-  BluetoothAdapter::DeviceList devices = adapter_->GetDevices();
-  for (auto* device : devices) {
-    DeleteDevice(device);
+  // Unit tests are able to reset the adapter themselves (e.g.
+  // BluetoothTest::TogglePowerFakeAdapter_DestroyWithPending), so this check is
+  // necessary.
+  if (adapter_) {
+    BluetoothAdapter::DeviceList devices = adapter_->GetDevices();
+    for (auto* device : devices) {
+      DeleteDevice(device);
+    }
   }
   EXPECT_EQ(0, gatt_open_connections_);
 
@@ -544,7 +546,11 @@ void BluetoothTestAndroid::OnFakeAdapterStateChanged(
     JNIEnv* env,
     const JavaParamRef<jobject>& caller,
     const bool powered) {
-  adapter_->NotifyAdapterPoweredChanged(powered);
+  // Delegate to the real implementation if the adapter is still alive.
+  if (adapter_) {
+    static_cast<BluetoothAdapterAndroid*>(adapter_.get())
+        ->OnAdapterStateChanged(env, caller, powered);
+  }
 }
 
 }  // namespace device

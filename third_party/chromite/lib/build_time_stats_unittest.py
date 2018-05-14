@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -22,8 +23,8 @@ class BuildTimeStatsTest(cros_test_lib.TestCase):
         {'status': 'fail', 'waterfall': 'chromeos'},
         {'status': 'pass', 'waterfall': 'chromiumos'},
         {'status': 'fail', 'waterfall': 'chromiumos'},
-        {'status': 'pass', 'waterfall': 'chromiumos.tryserver'},
-        {'status': 'fail', 'waterfall': 'chromiumos.tryserver'},
+        {'status': 'pass', 'waterfall': 'chromiumos.release'},
+        {'status': 'fail', 'waterfall': 'chromiumos.release'},
         {'status': 'pass', 'waterfall': 'bogus'},
         {'status': 'fail', 'waterfall': 'bogus'},
     ]

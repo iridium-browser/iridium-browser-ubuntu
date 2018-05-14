@@ -19,7 +19,6 @@
 #include "chrome/browser/themes/theme_properties.h"
 #include "components/url_formatter/elide_url.h"
 #include "components/url_formatter/url_formatter.h"
-#include "services/service_manager/runner/common/client_util.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/pathops/SkPathOps.h"
 #include "ui/base/theme_provider.h"
@@ -40,12 +39,10 @@
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
 
-#if defined(USE_ASH)
-#include "ash/wm/window_state.h"  // nogncheck
-#endif
-
-#if defined(USE_AURA)
-#include "services/ui/public/cpp/property_type_converters.h"  // nogncheck
+#if defined(OS_CHROMEOS)
+#include "ash/shell.h"                                           // mash-ok
+#include "ash/wm/window_state.h"                                 // mash-ok
+#include "services/ui/public/cpp/property_type_converters.h"     // nogncheck
 #include "services/ui/public/interfaces/window_manager.mojom.h"  // nogncheck
 #endif
 
@@ -657,7 +654,7 @@ void StatusBubbleViews::Init() {
     params.parent = frame->GetNativeView();
     params.context = frame->GetNativeWindow();
     params.name = "StatusBubble";
-#if defined(USE_AURA)
+#if defined(OS_CHROMEOS)
     params.mus_properties
         [ui::mojom::WindowManager::kWindowIgnoredByShelf_InitProperty] =
         mojo::ConvertTo<std::vector<uint8_t>>(true);
@@ -668,7 +665,8 @@ void StatusBubbleViews::Init() {
     popup_->SetOpacity(0.f);
     popup_->SetContentsView(view_);
 #if defined(OS_CHROMEOS)
-    if (!service_manager::ServiceManagerIsRemote()) {
+    // Mash is handled via mus_properties.
+    if (ash::Shell::HasInstance()) {
       ash::wm::GetWindowState(popup_->GetNativeWindow())
           ->set_ignored_by_shelf(true);
     }
@@ -796,8 +794,13 @@ void StatusBubbleViews::Hide() {
     view_->Hide();
 }
 
-void StatusBubbleViews::MouseMoved(const gfx::Point& location,
-                                   bool left_content) {
+void StatusBubbleViews::MouseMoved(bool left_content) {
+  MouseMovedAt(display::Screen::GetScreen()->GetCursorScreenPoint(),
+               left_content);
+}
+
+void StatusBubbleViews::MouseMovedAt(const gfx::Point& location,
+                                     bool left_content) {
   contains_mouse_ = !left_content;
   if (left_content) {
     RepositionPopup();

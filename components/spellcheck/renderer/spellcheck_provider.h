@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/macros.h"
 #include "components/spellcheck/common/spellcheck.mojom.h"
 #include "components/spellcheck/spellcheck_build_features.h"
@@ -23,6 +23,10 @@ class WebTextCheckingCompletion;
 struct WebTextCheckingResult;
 }
 
+namespace service_manager {
+class LocalInterfaceProvider;
+}
+
 // This class deals with asynchronously invoking text spelling and grammar
 // checking services provided by the browser process (host).
 class SpellCheckProvider
@@ -30,10 +34,13 @@ class SpellCheckProvider
       public content::RenderFrameObserverTracker<SpellCheckProvider>,
       public blink::WebTextCheckClient {
  public:
-  using WebTextCheckCompletions = IDMap<blink::WebTextCheckingCompletion*>;
+  using WebTextCheckCompletions =
+      base::IDMap<blink::WebTextCheckingCompletion*>;
 
-  SpellCheckProvider(content::RenderFrame* render_frame,
-                     SpellCheck* spellcheck);
+  SpellCheckProvider(
+      content::RenderFrame* render_frame,
+      SpellCheck* spellcheck,
+      service_manager::LocalInterfaceProvider* embedder_provider);
   ~SpellCheckProvider() override;
 
   // Requests async spell and grammar checks from the platform text checker
@@ -51,11 +58,7 @@ class SpellCheckProvider
   // Replace shared spellcheck data.
   void set_spellcheck(SpellCheck* spellcheck) { spellcheck_ = spellcheck; }
 
-  // Enables document-wide spellchecking.
-  void EnableSpellcheck(bool enabled);
-
   // content::RenderFrameObserver:
-  bool OnMessageReceived(const IPC::Message& message) override;
   void FocusedNodeChanged(const blink::WebNode& node) override;
 
  private:
@@ -79,6 +82,7 @@ class SpellCheckProvider
   void OnDestruct() override;
 
   // blink::WebTextCheckClient:
+  bool IsSpellCheckingEnabled() const override;
   void CheckSpelling(
       const blink::WebString& text,
       int& offset,
@@ -119,8 +123,13 @@ class SpellCheckProvider
   // Weak pointer to shared (per renderer) spellcheck data.
   SpellCheck* spellcheck_;
 
+  // Not owned. |embedder_provider_| should outlive SpellCheckProvider.
+  service_manager::LocalInterfaceProvider* embedder_provider_;
+
   // Interface to the SpellCheckHost.
   spellcheck::mojom::SpellCheckHostPtr spell_check_host_;
+
+  base::WeakPtrFactory<SpellCheckProvider> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SpellCheckProvider);
 };

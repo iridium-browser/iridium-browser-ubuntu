@@ -12,6 +12,7 @@ __version__ = '1.8.0'
 # caching (between all different invocations of presubmit scripts for a given
 # change). We should add it as our presubmit scripts start feeling slow.
 
+import ast  # Exposed through the API.
 import cpplint
 import cPickle  # Exposed through the API.
 import cStringIO  # Exposed through the API.
@@ -93,6 +94,7 @@ class PresubmitOutput(object):
     self.input_stream = input_stream
     self.output_stream = output_stream
     self.reviewers = []
+    self.more_cc = []
     self.written_output = []
     self.error_count = 0
 
@@ -135,8 +137,6 @@ class _PresubmitResult(object):
     """
     self._message = message
     self._items = items or []
-    if items:
-      self._items = items
     self._long_text = long_text.rstrip()
 
   def handle(self, output):
@@ -243,14 +243,31 @@ class GerritAccessor(object):
 
     return rev_info['commit']['message']
 
+  def GetDestRef(self, issue):
+    ref = self.GetChangeInfo(issue)['branch']
+    if not ref.startswith('refs/'):
+      # NOTE: it is possible to create 'refs/x' branch,
+      # aka 'refs/heads/refs/x'. However, this is ill-advised.
+      ref = 'refs/heads/%s' % ref
+    return ref
+
   def GetChangeOwner(self, issue):
     return self.GetChangeInfo(issue)['owner']['email']
 
   def GetChangeReviewers(self, issue, approving_only=True):
-    cr = self.GetChangeInfo(issue)['labels']['Code-Review']
-    max_value = max(int(k) for k in cr['values'].keys())
-    return [r.get('email') for r in cr.get('all', [])
-            if not approving_only or r.get('value', 0) == max_value]
+    changeinfo = self.GetChangeInfo(issue)
+    if approving_only:
+      labelinfo = changeinfo.get('labels', {}).get('Code-Review', {})
+      values = labelinfo.get('values', {}).keys()
+      try:
+        max_value = max(int(v) for v in values)
+        reviewers = [r for r in labelinfo.get('all', [])
+                     if r.get('value', 0) == max_value]
+      except ValueError:  # values is the empty list
+        reviewers = []
+    else:
+      reviewers = changeinfo.get('reviewers', {}).get('REVIEWER', [])
+    return [r.get('email') for r in reviewers]
 
 
 class OutputApi(object):
@@ -265,6 +282,11 @@ class OutputApi(object):
 
   def __init__(self, is_committing):
     self.is_committing = is_committing
+    self.more_cc = []
+
+  def AppendCC(self, cc):
+    """Appends a user to cc for this change."""
+    self.more_cc.append(cc)
 
   def PresubmitPromptOrNotify(self, *args, **kwargs):
     """Warn the user when uploading, but only notify if committing."""
@@ -393,6 +415,7 @@ class InputApi(object):
 
     # We expose various modules and functions as attributes of the input_api
     # so that presubmit scripts don't have to import them.
+    self.ast = ast
     self.basename = os.path.basename
     self.cPickle = cPickle
     self.cpplint = cpplint
@@ -436,6 +459,8 @@ class InputApi(object):
     # We carry the canned checks so presubmit scripts can easily use them.
     self.canned_checks = presubmit_canned_checks
 
+    # Temporary files we must manually remove at the end of a run.
+    self._named_temporary_files = []
 
     # TODO(dpranke): figure out a list of all approved owners for a repo
     # in order to be able to handle wildcard OWNERS files?
@@ -443,6 +468,7 @@ class InputApi(object):
                                      fopen=file, os_path=self.os_path)
     self.owners_finder = owners_finder.OwnersFinder
     self.verbose = verbose
+    self.is_windows = sys.platform == 'win32'
     self.Command = CommandData
 
     # Replace <hash_map> and <hash_set> as headers that need to be included
@@ -565,10 +591,44 @@ class InputApi(object):
       raise IOError('Access outside the repository root is denied.')
     return gclient_utils.FileRead(file_item, mode)
 
+  def CreateTemporaryFile(self, **kwargs):
+    """Returns a named temporary file that must be removed with a call to
+    RemoveTemporaryFiles().
+
+    All keyword arguments are forwarded to tempfile.NamedTemporaryFile(),
+    except for |delete|, which is always set to False.
+
+    Presubmit checks that need to create a temporary file and pass it for
+    reading should use this function instead of NamedTemporaryFile(), as
+    Windows fails to open a file that is already open for writing.
+
+      with input_api.CreateTemporaryFile() as f:
+        f.write('xyz')
+        f.close()
+        input_api.subprocess.check_output(['script-that', '--reads-from',
+                                           f.name])
+
+
+    Note that callers of CreateTemporaryFile() should not worry about removing
+    any temporary file; this is done transparently by the presubmit handling
+    code.
+    """
+    if 'delete' in kwargs:
+      # Prevent users from passing |delete|; we take care of file deletion
+      # ourselves and this prevents unintuitive error messages when we pass
+      # delete=False and 'delete' is also in kwargs.
+      raise TypeError('CreateTemporaryFile() does not take a "delete" '
+                      'argument, file deletion is handled automatically by '
+                      'the same presubmit_support code that creates InputApi '
+                      'objects.')
+    temp_file = self.tempfile.NamedTemporaryFile(delete=False, **kwargs)
+    self._named_temporary_files.append(temp_file.name)
+    return temp_file
+
   @property
   def tbr(self):
     """Returns if a change is TBR'ed."""
-    return 'TBR' in self.change.tags
+    return 'TBR' in self.change.tags or self.change.TBRsFromDescription()
 
   def RunTests(self, tests_mix, parallel=True):
     tests = []
@@ -673,6 +733,10 @@ class AffectedFile(object):
 
   def LocalPath(self):
     """Returns the path of this file on the local disk relative to client root.
+
+    This should be used for error messages but not for accessing files,
+    because presubmit checks are run with CWD=PresubmitLocalPath() (which is
+    often != client root).
     """
     return normpath(self._path)
 
@@ -980,7 +1044,8 @@ class GitChange(Change):
     """List all files under source control in the repo."""
     root = root or self.RepositoryRoot()
     return subprocess.check_output(
-        ['git', 'ls-files', '--', '.'], cwd=root).splitlines()
+        ['git', '-c', 'core.quotePath=false', 'ls-files', '--', '.'],
+        cwd=root).splitlines()
 
 
 def ListRelevantPresubmitFiles(files, root):
@@ -1219,6 +1284,7 @@ class PresubmitExecuter(object):
     self.gerrit = gerrit_obj
     self.verbose = verbose
     self.dry_run = dry_run
+    self.more_cc = []
 
   def ExecPresubmitScript(self, script_text, presubmit_path):
     """Executes a single presubmit script.
@@ -1240,6 +1306,7 @@ class PresubmitExecuter(object):
     input_api = InputApi(self.change, presubmit_path, self.committing,
                          self.rietveld, self.verbose,
                          gerrit_obj=self.gerrit, dry_run=self.dry_run)
+    output_api = OutputApi(self.committing)
     context = {}
     try:
       exec script_text in context
@@ -1253,10 +1320,14 @@ class PresubmitExecuter(object):
     else:
       function_name = 'CheckChangeOnUpload'
     if function_name in context:
-      context['__args'] = (input_api, OutputApi(self.committing))
-      logging.debug('Running %s in %s', function_name, presubmit_path)
-      result = eval(function_name + '(*__args)', context)
-      logging.debug('Running %s done.', function_name)
+      try:
+        context['__args'] = (input_api, output_api)
+        logging.debug('Running %s in %s', function_name, presubmit_path)
+        result = eval(function_name + '(*__args)', context)
+        logging.debug('Running %s done.', function_name)
+        self.more_cc.extend(output_api.more_cc)
+      finally:
+        map(os.remove, input_api._named_temporary_files)
       if not (isinstance(result, types.TupleType) or
               isinstance(result, types.ListType)):
         raise PresubmitFailure(
@@ -1347,6 +1418,7 @@ def DoPresubmitChecks(change,
       presubmit_script = gclient_utils.FileRead(filename, 'rU')
       results += executer.ExecPresubmitScript(presubmit_script, filename)
 
+    output.more_cc.extend(executer.more_cc)
     errors = []
     notifications = []
     warnings = []
@@ -1611,7 +1683,6 @@ def main(argv=None):
   except PresubmitFailure, e:
     print >> sys.stderr, e
     print >> sys.stderr, 'Maybe your depot_tools is out of date?'
-    print >> sys.stderr, 'If all fails, contact maruel@'
     return 2
 
 

@@ -25,10 +25,7 @@ interface CameraSession {
     void onCameraError(CameraSession session, String error);
     void onCameraDisconnected(CameraSession session);
     void onCameraClosed(CameraSession session);
-    void onByteBufferFrameCaptured(
-        CameraSession session, byte[] data, int width, int height, int rotation, long timestamp);
-    void onTextureFrameCaptured(CameraSession session, int width, int height, int oesTextureId,
-        float[] transformMatrix, int rotation, long timestamp);
+    void onFrameCaptured(CameraSession session, VideoFrame frame);
   }
 
   /**

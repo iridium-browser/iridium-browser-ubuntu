@@ -10,13 +10,23 @@
 #include "content/public/browser/browser_thread.h"
 #include "url/gurl.h"
 
-FakeSafeBrowsingDatabaseManager::FakeSafeBrowsingDatabaseManager() {}
+FakeSafeBrowsingDatabaseManager::FakeSafeBrowsingDatabaseManager()
+    : weak_factory_(this) {}
+
+void FakeSafeBrowsingDatabaseManager::AddBlacklistedUrl(
+    const GURL& url,
+    safe_browsing::SBThreatType threat_type,
+    const safe_browsing::ThreatMetadata& metadata) {
+  url_to_threat_type_[url] = std::make_pair(threat_type, metadata);
+}
 
 void FakeSafeBrowsingDatabaseManager::AddBlacklistedUrl(
     const GURL& url,
     safe_browsing::SBThreatType threat_type,
     safe_browsing::ThreatPatternType pattern_type) {
-  url_to_threat_type_[url] = std::make_pair(threat_type, pattern_type);
+  safe_browsing::ThreatMetadata metadata;
+  metadata.threat_pattern_type = pattern_type;
+  AddBlacklistedUrl(url, threat_type, metadata);
 }
 
 void FakeSafeBrowsingDatabaseManager::RemoveBlacklistedUrl(const GURL& url) {
@@ -52,7 +62,7 @@ bool FakeSafeBrowsingDatabaseManager::CheckUrlForSubresourceFilter(
       content::BrowserThread::IO, FROM_HERE,
       base::Bind(&FakeSafeBrowsingDatabaseManager::
                      OnCheckUrlForSubresourceFilterComplete,
-                 base::Unretained(this), base::Unretained(client), url));
+                 weak_factory_.GetWeakPtr(), base::Unretained(client), url));
   return false;
 }
 
@@ -68,7 +78,7 @@ void FakeSafeBrowsingDatabaseManager::OnCheckUrlForSubresourceFilterComplete(
   auto it = url_to_threat_type_.find(url);
   if (it != url_to_threat_type_.end()) {
     threat_type = it->second.first;
-    metadata.threat_pattern_type = it->second.second;
+    metadata = it->second.second;
   }
   client->OnCheckBrowseUrlResult(url, threat_type, metadata);
 

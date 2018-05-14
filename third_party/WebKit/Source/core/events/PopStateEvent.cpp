@@ -32,26 +32,26 @@
 namespace blink {
 
 PopStateEvent::PopStateEvent()
-    : serialized_state_(nullptr), state_(this), history_(nullptr) {}
+    : serialized_state_(nullptr), history_(nullptr) {}
 
 PopStateEvent::PopStateEvent(ScriptState* script_state,
                              const AtomicString& type,
                              const PopStateEventInit& initializer)
-    : Event(type, initializer), state_(this), history_(nullptr) {
+    : Event(type, initializer), history_(nullptr) {
   if (initializer.hasState()) {
-    world_ = RefPtr<DOMWrapperWorld>(script_state->World());
+    world_ = WrapRefCounted(&script_state->World());
     state_.Set(initializer.state().GetIsolate(), initializer.state().V8Value());
   }
 }
 
-PopStateEvent::PopStateEvent(PassRefPtr<SerializedScriptValue> serialized_state,
-                             History* history)
+PopStateEvent::PopStateEvent(
+    scoped_refptr<SerializedScriptValue> serialized_state,
+    History* history)
     : Event(EventTypeNames::popstate, false, true),
       serialized_state_(std::move(serialized_state)),
-      state_(this),
       history_(history) {}
 
-PopStateEvent::~PopStateEvent() {}
+PopStateEvent::~PopStateEvent() = default;
 
 ScriptValue PopStateEvent::state(ScriptState* script_state) const {
   if (state_.IsEmpty())
@@ -60,7 +60,7 @@ ScriptValue PopStateEvent::state(ScriptState* script_state) const {
   v8::Isolate* isolate = script_state->GetIsolate();
   if (world_->GetWorldId() != script_state->World().GetWorldId()) {
     v8::Local<v8::Value> value = state_.NewLocal(isolate);
-    RefPtr<SerializedScriptValue> serialized =
+    scoped_refptr<SerializedScriptValue> serialized =
         SerializedScriptValue::SerializeAndSwallowExceptions(isolate, value);
     return ScriptValue(script_state, serialized->Deserialize(isolate));
   }
@@ -72,7 +72,7 @@ PopStateEvent* PopStateEvent::Create() {
 }
 
 PopStateEvent* PopStateEvent::Create(
-    PassRefPtr<SerializedScriptValue> serialized_state,
+    scoped_refptr<SerializedScriptValue> serialized_state,
     History* history) {
   return new PopStateEvent(std::move(serialized_state), history);
 }
@@ -87,12 +87,12 @@ const AtomicString& PopStateEvent::InterfaceName() const {
   return EventNames::PopStateEvent;
 }
 
-DEFINE_TRACE(PopStateEvent) {
+void PopStateEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(history_);
   Event::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(PopStateEvent) {
+void PopStateEvent::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(state_);
   Event::TraceWrappers(visitor);
 }

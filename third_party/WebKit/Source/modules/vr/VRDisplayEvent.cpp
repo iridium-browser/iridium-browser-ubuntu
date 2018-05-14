@@ -37,7 +37,7 @@ VRDisplayEvent* VRDisplayEvent::Create(
                             VRDisplayEventReasonToString(reason));
 }
 
-VRDisplayEvent::VRDisplayEvent() {}
+VRDisplayEvent::VRDisplayEvent() = default;
 
 VRDisplayEvent::VRDisplayEvent(const AtomicString& type,
                                bool can_bubble,
@@ -56,13 +56,13 @@ VRDisplayEvent::VRDisplayEvent(const AtomicString& type,
     reason_ = initializer.reason();
 }
 
-VRDisplayEvent::~VRDisplayEvent() {}
+VRDisplayEvent::~VRDisplayEvent() = default;
 
 const AtomicString& VRDisplayEvent::InterfaceName() const {
   return EventNames::VRDisplayEvent;
 }
 
-DEFINE_TRACE(VRDisplayEvent) {
+void VRDisplayEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(display_);
   Event::Trace(visitor);
 }

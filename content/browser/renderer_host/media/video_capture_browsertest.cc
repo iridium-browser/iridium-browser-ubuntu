@@ -4,17 +4,18 @@
 
 #include "base/command_line.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_controller.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/content_browser_test.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/media_switches.h"
 #include "media/capture/video_capture_types.h"
-#include "services/video_capture/public/cpp/constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using testing::_;
@@ -110,7 +111,14 @@ class VideoCaptureBrowserTest : public ContentBrowserTest,
                                                ExerciseAcceleratedJpegDecoding,
                                                UseMojoService>> {
  public:
-  VideoCaptureBrowserTest() { params_ = TestParams(GetParam()); }
+  VideoCaptureBrowserTest() {
+    params_ = TestParams(GetParam());
+    if (params_.use_mojo_service) {
+      scoped_feature_list_.InitAndEnableFeature(features::kMojoVideoCapture);
+    }
+  }
+
+  ~VideoCaptureBrowserTest() override {}
 
   void SetUpAndStartCaptureDeviceOnIOThread(base::Closure continuation) {
     video_capture_manager_ = media_stream_manager_->video_capture_manager();
@@ -130,8 +138,9 @@ class VideoCaptureBrowserTest : public ContentBrowserTest,
     if (post_to_end_of_message_queue) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
-          base::Bind(&VideoCaptureBrowserTest::TearDownCaptureDeviceOnIOThread,
-                     base::Unretained(this), continuation, false));
+          base::BindOnce(
+              &VideoCaptureBrowserTest::TearDownCaptureDeviceOnIOThread,
+              base::Unretained(this), continuation, false));
       return;
     }
 
@@ -157,10 +166,6 @@ class VideoCaptureBrowserTest : public ContentBrowserTest,
       base::CommandLine::ForCurrentProcess()->AppendSwitch(
           switches::kDisableAcceleratedMjpegDecode);
     }
-    if (params_.use_mojo_service) {
-      base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-          switches::kEnableFeatures, video_capture::kMojoVideoCapture.name);
-    }
   }
 
   // This cannot be part of an override of SetUp(), because at the time when
@@ -179,7 +184,7 @@ class VideoCaptureBrowserTest : public ContentBrowserTest,
     const auto& descriptor = descriptors[params_.device_index_to_use];
     MediaStreamDevice media_stream_device(
         MEDIA_DEVICE_VIDEO_CAPTURE, descriptor.device_id,
-        descriptor.display_name, descriptor.facing);
+        descriptor.display_name(), descriptor.facing);
     session_id_ = video_capture_manager_->Open(media_stream_device);
     media::VideoCaptureParams capture_params;
     capture_params.requested_format = media::VideoCaptureFormat(
@@ -203,6 +208,8 @@ class VideoCaptureBrowserTest : public ContentBrowserTest,
   }
 
  protected:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
   TestParams params_;
   MediaStreamManager* media_stream_manager_ = nullptr;
   VideoCaptureManager* video_capture_manager_ = nullptr;
@@ -211,6 +218,9 @@ class VideoCaptureBrowserTest : public ContentBrowserTest,
   MockMediaStreamProviderListener mock_stream_provider_listener_;
   MockVideoCaptureControllerEventHandler mock_controller_event_handler_;
   base::WeakPtr<VideoCaptureController> controller_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(VideoCaptureBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_P(VideoCaptureBrowserTest, StartAndImmediatelyStop) {
@@ -237,8 +247,9 @@ IN_PROC_BROWSER_TEST_P(VideoCaptureBrowserTest, StartAndImmediatelyStop) {
                  std::move(quit_run_loop_on_current_thread_cb), true);
   BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&VideoCaptureBrowserTest::SetUpAndStartCaptureDeviceOnIOThread,
-                 base::Unretained(this), std::move(after_start_continuation)));
+      base::BindOnce(
+          &VideoCaptureBrowserTest::SetUpAndStartCaptureDeviceOnIOThread,
+          base::Unretained(this), std::move(after_start_continuation)));
   run_loop.Run();
 }
 
@@ -326,8 +337,9 @@ IN_PROC_BROWSER_TEST_P(VideoCaptureBrowserTest,
   base::Closure do_nothing;
   BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&VideoCaptureBrowserTest::SetUpAndStartCaptureDeviceOnIOThread,
-                 base::Unretained(this), std::move(do_nothing)));
+      base::BindOnce(
+          &VideoCaptureBrowserTest::SetUpAndStartCaptureDeviceOnIOThread,
+          base::Unretained(this), std::move(do_nothing)));
   run_loop.Run();
 
   EXPECT_FALSE(must_wait_for_gpu_decode_to_start);
@@ -337,7 +349,7 @@ IN_PROC_BROWSER_TEST_P(VideoCaptureBrowserTest,
   bool first_frame = true;
   for (const auto& frame_info : received_frame_infos) {
     EXPECT_EQ(params_.GetPixelFormatToUse(), frame_info.pixel_format);
-    EXPECT_EQ(media::PIXEL_STORAGE_CPU, frame_info.storage_type);
+    EXPECT_EQ(media::VideoPixelStorage::CPU, frame_info.storage_type);
     EXPECT_EQ(params_.resolution_to_use, frame_info.size);
     // Timestamps are expected to increase
     if (!first_frame)

@@ -16,8 +16,14 @@ static_library("child") {
 
   deps = [
     "//base",
+    "//chrome/common:buildflags",
     "//content/public/child",
     "//gin",
+    "//tools/v8_context_snapshot",
     "//v8",
   ]
+
+  if (is_win) {
+    deps += [ "//components/crash/content/app:crash_export_thunk_include" ]
+  }
 }

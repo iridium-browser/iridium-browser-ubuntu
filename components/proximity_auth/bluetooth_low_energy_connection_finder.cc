@@ -12,7 +12,6 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/cryptauth/background_eid_generator.h"
@@ -43,7 +42,7 @@ BluetoothLowEnergyConnectionFinder::BluetoothLowEnergyConnectionFinder(
     : BluetoothLowEnergyConnectionFinder(
           remote_device,
           kBLEGattServiceUUID,
-          base::MakeUnique<cryptauth::BackgroundEidGenerator>()) {}
+          std::make_unique<cryptauth::BackgroundEidGenerator>()) {}
 
 BluetoothLowEnergyConnectionFinder::BluetoothLowEnergyConnectionFinder(
     const cryptauth::RemoteDevice remote_device,
@@ -66,7 +65,7 @@ BluetoothLowEnergyConnectionFinder::~BluetoothLowEnergyConnectionFinder() {
 
   if (adapter_) {
     adapter_->RemoveObserver(this);
-    adapter_ = NULL;
+    adapter_ = nullptr;
   }
 }
 
@@ -140,7 +139,7 @@ void BluetoothLowEnergyConnectionFinder::HandleDeviceUpdated(
 
   if (IsRightDevice(device)) {
     PA_LOG(INFO) << "Connecting to device " << device->GetAddress();
-    connection_ = CreateConnection(device->GetAddress());
+    connection_ = CreateConnection(device);
     connection_->AddObserver(this);
     connection_->Connect();
 
@@ -225,10 +224,11 @@ void BluetoothLowEnergyConnectionFinder::StopDiscoverySession() {
 
 std::unique_ptr<cryptauth::Connection>
 BluetoothLowEnergyConnectionFinder::CreateConnection(
-    const std::string& device_address) {
+    device::BluetoothDevice* bluetooth_device) {
   return cryptauth::weave::BluetoothLowEnergyWeaveClientConnection::Factory::
-      NewInstance(remote_device_, device_address, adapter_,
-                  device::BluetoothUUID(service_uuid_));
+      NewInstance(remote_device_, adapter_,
+                  device::BluetoothUUID(service_uuid_), bluetooth_device,
+                  true /* should_set_low_connection_latency */);
 }
 
 void BluetoothLowEnergyConnectionFinder::OnConnectionStatusChanged(

@@ -23,8 +23,8 @@
 // ssrc_groups = {{SIM,{10,20,30}, {FEC,{10,11}, {FEC, {20,21}, {FEC {30,31}}}
 // Please see RFC 5576.
 
-#ifndef WEBRTC_MEDIA_BASE_STREAMPARAMS_H_
-#define WEBRTC_MEDIA_BASE_STREAMPARAMS_H_
+#ifndef MEDIA_BASE_STREAMPARAMS_H_
+#define MEDIA_BASE_STREAMPARAMS_H_
 
 #include <stdint.h>
 
@@ -33,7 +33,7 @@
 #include <string>
 #include <vector>
 
-#include "webrtc/rtc_base/constructormagic.h"
+#include "rtc_base/constructormagic.h"
 
 namespace cricket {
 
@@ -146,6 +146,10 @@ struct StreamParams {
   void GetFidSsrcs(const std::vector<uint32_t>& primary_ssrcs,
                    std::vector<uint32_t>* fid_ssrcs) const;
 
+  // Stream labels serialized to SDP.
+  std::vector<std::string> stream_labels() const;
+  void set_stream_labels(const std::vector<std::string>& stream_labels);
+
   std::string ToString() const;
 
   // Resource of the MUC jid of the participant of with this stream.
@@ -161,6 +165,7 @@ struct StreamParams {
   // Friendly name describing stream
   std::string display;
   std::string cname;  // RTCP CNAME
+  // TODO(steveanton): Move callers to |stream_labels()| and make private.
   std::string sync_label;  // Friendly name of cname.
 
  private:
@@ -329,4 +334,4 @@ bool IsSimulcastStream(const StreamParams& sp);
 
 }  // namespace cricket
 
-#endif  // WEBRTC_MEDIA_BASE_STREAMPARAMS_H_
+#endif  // MEDIA_BASE_STREAMPARAMS_H_

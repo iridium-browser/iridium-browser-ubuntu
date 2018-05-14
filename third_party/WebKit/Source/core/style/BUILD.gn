@@ -19,6 +19,7 @@ blink_core_sources("rendering") {
     "BorderImageLengthBox.h",
     "BorderStyle.h",
     "BorderValue.h",
+    "CachedUAStyle.cpp",
     "CachedUAStyle.h",
     "ClipPathOperation.cpp",
     "ClipPathOperation.h",
@@ -40,6 +41,7 @@ blink_core_sources("rendering") {
     "FilterOperation.h",
     "FilterOperations.cpp",
     "FilterOperations.h",
+    "GapLength.h",
     "GridArea.h",
     "GridLength.h",
     "GridPosition.h",
@@ -56,7 +58,6 @@ blink_core_sources("rendering") {
     "QuadLengthValue.h",
     "QuotesData.cpp",
     "QuotesData.h",
-    "ScrollSnap.h",
     "ShadowData.cpp",
     "ShadowData.h",
     "ShadowList.cpp",
@@ -76,7 +77,6 @@ blink_core_sources("rendering") {
     "StyleImage.h",
     "StyleInheritedVariables.cpp",
     "StyleInheritedVariables.h",
-    "StyleInvalidImage.h",
     "StyleNonInheritedVariables.cpp",
     "StyleNonInheritedVariables.h",
     "StyleOffsetRotation.h",
@@ -89,10 +89,6 @@ blink_core_sources("rendering") {
     "StyleSelfAlignmentData.h",
     "TextSizeAdjust.h",
   ]
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
-  ]
 }
 
 blink_core_sources("svg_style") {
@@ -101,9 +97,5 @@ blink_core_sources("svg_style") {
     "SVGComputedStyle.h",
     "SVGComputedStyleDefs.cpp",
     "SVGComputedStyleDefs.h",
-  ]
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
   ]
 }

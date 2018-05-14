@@ -19,6 +19,7 @@ import android.util.Pair;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewGroup.MarginLayoutParams;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.ImageView;
@@ -194,9 +195,10 @@ public class TabularContextMenuUi implements ContextMenuUi, AdapterView.OnItemCl
         final TextView headerTextView =
                 (TextView) baseLayout.findViewById(R.id.context_header_text);
         if (TextUtils.isEmpty(headerText)) {
-            baseLayout.findViewById(R.id.context_header_layout).setVisibility(View.GONE);
-            headerTextView.setVisibility(View.GONE);
-            baseLayout.findViewById(R.id.context_divider).setVisibility(View.GONE);
+            MarginLayoutParams marginParams =
+                    (MarginLayoutParams) baseLayout.findViewById(R.id.context_header_image)
+                            .getLayoutParams();
+            marginParams.bottomMargin = marginParams.topMargin;
             return;
         }
         headerTextView.setVisibility(View.VISIBLE);
@@ -295,5 +297,40 @@ public class TabularContextMenuUi implements ContextMenuUi, AdapterView.OnItemCl
      */
     public void setTopContentOffsetY(float topContentOffsetPx) {
         mTopContentOffsetPx = topContentOffsetPx;
+    }
+
+    /**
+     * Calculates the maximum possible width of the thumbnail in pixels.
+     * @param res The resources from where to pull the device dimensions.
+     * @return The calculated maximum thumbnail width in pixels.
+     */
+    public int getMaxThumbnailWidthPx(Resources res) {
+        int deviceWidthPx = res.getDisplayMetrics().widthPixels;
+        int contextMenuMinimumPaddingPx =
+                res.getDimensionPixelSize(R.dimen.context_menu_min_padding);
+        int contextMenuWidth = Math.min(deviceWidthPx - 2 * contextMenuMinimumPaddingPx,
+                res.getDimensionPixelSize(R.dimen.context_menu_max_width));
+
+        return contextMenuWidth
+                - res.getDimensionPixelSize(R.dimen.context_menu_header_image_width_padding) * 2;
+    }
+
+    /**
+     * Calculates the maximum possible height of the thumbnail in pixels.
+     * @param res The resources from where to pull the device dimensions.
+     * @return The calculated maximum thumbnail height in pixels.
+     */
+    public int getMaxThumbnailHeightPx(Resources res) {
+        // Use deviceWidthPx instead of deviceHeightPx because we want to make sure that the context
+        // menu shows when the device is in its smaller height (i.e. landscape mode).
+        int deviceWidthPx = res.getDisplayMetrics().widthPixels;
+        int tabLayoutSize = mContextMenuDialog.findViewById(R.id.tab_layout).getHeight();
+        int contextMenuMinimumPaddingPx =
+                res.getDimensionPixelSize(R.dimen.context_menu_min_padding);
+
+        return Math.min(deviceWidthPx - tabLayoutSize - (2 * contextMenuMinimumPaddingPx)
+                        - res.getDimensionPixelSize(R.dimen.context_menu_image_vertical_margin) * 2
+                        - res.getDimensionPixelSize(R.dimen.context_menu_selectable_items_min_size),
+                res.getDimensionPixelSize(R.dimen.context_menu_header_image_max_height));
     }
 }

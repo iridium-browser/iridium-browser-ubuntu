@@ -15,11 +15,34 @@
 
 namespace profiling {
 
+// Backtraces are stored effectively as atoms, and this class is the backing
+// store for the atoms. When you insert a backtrace, it will get de-duped with
+// existing ones, one refcount added, and returned. When you're done with a
+// backtrace, call Free() which will release the refcount. This may or may not
+// release the underlying Backtrace itself, depending on whether other refs are
+// held.
+//
 // This class is threadsafe.
 class BacktraceStorage {
  public:
-  using Container = std::unordered_set<Backtrace>;
-  using Key = Container::iterator;
+  // Instantiating this lock will prevent backtraces from being deleted from
+  // the strorage for as long as it's alive. This class is moveable but not
+  // copyable.
+  class Lock {
+   public:
+    Lock();                                    // Doesn't take the lock.
+    explicit Lock(BacktraceStorage* storage);  // Takes the lock.
+    Lock(const Lock&) = delete;
+    Lock(Lock&&);
+    ~Lock();
+
+    Lock& operator=(Lock&& other);
+    Lock& operator=(const Lock&) = delete;
+    bool IsLocked();
+
+   private:
+    BacktraceStorage* storage_;  // May be null if moved from.
+  };
 
   BacktraceStorage();
   ~BacktraceStorage();
@@ -30,21 +53,53 @@ class BacktraceStorage {
   //
   // The returned key will have a reference count associated with it, call
   // Free when the key is no longer needed.
-  Key Insert(std::vector<Address>&& bt);
+  const Backtrace* Insert(std::vector<Address>&& bt);
 
   // Frees one reference to a backtrace.
-  void Free(const Key& key);
-  void Free(const std::vector<Key>& keys);
-
-  // Returns the backtrace associated with the given key. Assumes the caller
-  // holds a key to it that will keep the backtrace in scope.
-  const Backtrace& GetBacktraceForKey(const Key& key) const;
+  void Free(const Backtrace* bt);
+  void Free(const std::vector<const Backtrace*>& bts);
 
  private:
-  mutable base::Lock lock_;
+  friend Lock;
+  using Container = std::unordered_set<Backtrace>;
 
-  // List of live backtraces for de-duping. Protected by the lock_.
-  Container backtraces_;
+  // Called by the BacktraceStorage::Lock class.
+  void LockStorage();
+  void UnlockStorage();
+
+  // Releases all backtraces in the vector assuming |lock| is already held
+  // and |consumer_count| is zero.
+  void ReleaseBacktracesLocked(const std::vector<const Backtrace*>& bts,
+                               size_t shard_index);
+
+  struct ContainerShard {
+    ContainerShard();
+    ~ContainerShard();
+
+    // Container of de-duped, live backtraces. All modifications to |backtraces|
+    // or the Backtrace elements owned by |backtraces| must be protected by
+    // |lock|.
+    Container backtraces;
+    mutable base::Lock lock;
+
+    // Protected by |lock|. This indicates the number of consumers that have
+    // raw backtrace pointers owned by |backtraces|. As long as this count is
+    // non-zero, Backtraces owned by |backtraces| cannot be modified or
+    // destroyed. Elements can be inserted into |backtraces| even when this is
+    // non-zero because existing raw backtrace pointers are stable.
+    int consumer_count = 0;
+
+    // When |consumer_count| is non-zero, no backtraces will be deleted from
+    // the storage. Instead, they are accumulated here for releasing after
+    // consumer_count becomes non-zero.
+    std::vector<const Backtrace*> release_after_lock;
+
+    DISALLOW_COPY_AND_ASSIGN(ContainerShard);
+  };
+
+  // Backtraces are sharded by fingerprint to reduce lock contention.
+  std::vector<ContainerShard> shards_;
+  DISALLOW_COPY_AND_ASSIGN(BacktraceStorage);
 };
 
 }  // namespace profiling

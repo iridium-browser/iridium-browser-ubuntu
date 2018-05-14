@@ -4,16 +4,22 @@
 
 #include "ui/aura/test/aura_test_base.h"
 
+#include "base/command_line.h"
 #include "base/memory/ptr_util.h"
+#include "base/test/scoped_feature_list.h"
 #include "ui/aura/client/window_parenting_client.h"
 #include "ui/aura/mus/property_utils.h"
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/mus/window_tree_host_mus.h"
+#include "ui/aura/test/aura_test_context_factory.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/base/ime/input_method_initializer.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/test/material_design_controller_test_api.h"
+#include "ui/base/ui_base_features.h"
+#include "ui/base/ui_base_switches.h"
+#include "ui/base/ui_base_switches_util.h"
 #include "ui/compositor/test/context_factories_for_test.h"
 #include "ui/events/event_dispatcher.h"
 #include "ui/events/event_sink.h"
@@ -77,13 +83,18 @@ void AuraTestBase::SetUp() {
       ui::VelocityTracker::Strategy::LSQ2_RESTRICTED);
 
   // The ContextFactory must exist before any Compositors are created.
-  bool enable_pixel_output = false;
   ui::ContextFactory* context_factory = nullptr;
   ui::ContextFactoryPrivate* context_factory_private = nullptr;
-  ui::InitializeContextFactoryForTests(enable_pixel_output, &context_factory,
-                                       &context_factory_private);
+  if (use_mus_ && base::FeatureList::IsEnabled(features::kMash)) {
+    mus_context_factory_ = std::make_unique<AuraTestContextFactory>();
+    context_factory = mus_context_factory_.get();
+  } else {
+    const bool enable_pixel_output = false;
+    ui::InitializeContextFactoryForTests(enable_pixel_output, &context_factory,
+                                         &context_factory_private);
+  }
 
-  helper_ = base::MakeUnique<AuraTestHelper>();
+  helper_ = std::make_unique<AuraTestHelper>();
   if (use_mus_) {
     helper_->EnableMusWithTestWindowTree(window_tree_client_delegate_,
                                          window_manager_delegate_);
@@ -98,9 +109,18 @@ void AuraTestBase::TearDown() {
   // and these tasks if un-executed would upset Valgrind.
   RunAllPendingInMessageLoop();
 
-  window_tree_hosts_.clear();
+  // AuraTestHelper may own a WindowTreeHost, don't delete it here else
+  // AuraTestHelper will have use after frees.
+  for (size_t i = window_tree_hosts_.size(); i > 0; --i) {
+    if (window_tree_hosts_[i - 1].get() == helper_->host()) {
+      window_tree_hosts_[i - 1].release();
+      window_tree_hosts_.erase(window_tree_hosts_.begin() + i - 1);
+      break;
+    }
+  }
 
   helper_->TearDown();
+  window_tree_hosts_.clear();
   ui::TerminateContextFactoryForTests();
   ui::ShutdownInputMethodForTesting();
   testing::Test::TearDown();
@@ -130,8 +150,12 @@ void AuraTestBase::DeleteWindowTreeClient() {
 }
 
 void AuraTestBase::ConfigureBackend(BackendType type) {
-  if (type == BackendType::MUS)
+  if (type != BackendType::CLASSIC)
     EnableMusWithTestWindowTree();
+  if (type == BackendType::MASH) {
+    feature_list_ = std::make_unique<base::test::ScopedFeatureList>();
+    feature_list_->InitAndEnableFeature(features::kMash);
+  }
 }
 
 void AuraTestBase::RunAllPendingInMessageLoop() {
@@ -162,7 +186,10 @@ void AuraTestBase::OnEmbedRootDestroyed(WindowTreeHostMus* window_tree_host) {}
 void AuraTestBase::OnLostConnection(WindowTreeClient* client) {}
 
 void AuraTestBase::OnPointerEventObserved(const ui::PointerEvent& event,
-                                          Window* target) {}
+                                          Window* target) {
+  observed_pointer_events_.push_back(std::unique_ptr<ui::PointerEvent>(
+      static_cast<ui::PointerEvent*>(ui::Event::Clone(event).release())));
+}
 
 void AuraTestBase::SetWindowManagerClient(WindowManagerClient* client) {}
 
@@ -222,6 +249,8 @@ ui::mojom::EventResult AuraTestBase::OnAccelerator(
     std::unordered_map<std::string, std::vector<uint8_t>>* properties) {
   return ui::mojom::EventResult::HANDLED;
 }
+
+void AuraTestBase::OnCursorTouchVisibleChanged(bool enabled) {}
 
 void AuraTestBase::OnWmPerformMoveLoop(
     Window* window,

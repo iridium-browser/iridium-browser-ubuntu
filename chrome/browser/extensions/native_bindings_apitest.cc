@@ -6,23 +6,26 @@
 
 #include "base/command_line.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/lazy_background_page_test_util.h"
-#include "chrome/browser/extensions/test_extension_dir.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/api/file_system/file_system_api.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/process_manager.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
+#include "extensions/test/test_extension_dir.h"
 #include "net/dns/mock_host_resolver.h"
 
 namespace extensions {
@@ -33,6 +36,11 @@ class NativeBindingsApiTest : public ExtensionApiTest {
   NativeBindingsApiTest() {}
   ~NativeBindingsApiTest() override {}
 
+  void SetUp() override {
+    scoped_feature_list_.InitAndEnableFeature(features::kNativeCrxBindings);
+    ExtensionApiTest::SetUp();
+  }
+
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     // We whitelist the extension so that it can use the cast.streaming.* APIs,
@@ -40,10 +48,6 @@ class NativeBindingsApiTest : public ExtensionApiTest {
     command_line->AppendSwitchASCII(
         switches::kWhitelistedExtensionID,
         "ddchlicdkolnonkihahngkmmmjnjlkkf");
-    // Note: We don't use a FeatureSwitch::ScopedOverride here because we need
-    // the switch to be propogated to the renderer, which doesn't happen with
-    // a ScopedOverride.
-    command_line->AppendSwitchASCII(switches::kNativeCrxBindings, "1");
   }
 
   void SetUpOnMainThread() override {
@@ -52,6 +56,8 @@ class NativeBindingsApiTest : public ExtensionApiTest {
   }
 
  private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
   DISALLOW_COPY_AND_ASSIGN(NativeBindingsApiTest);
 };
 
@@ -251,6 +257,30 @@ IN_PROC_BROWSER_TEST_F(NativeBindingsApiTest, ErrorsInCallbackTest) {
   ExtensionTestMessageListener listener("callback", false);
   ASSERT_TRUE(LoadExtension(test_dir.UnpackedPath()));
   EXPECT_TRUE(listener.WaitUntilSatisfied());
+}
+
+// Tests that bindings are available in WebUI pages.
+IN_PROC_BROWSER_TEST_F(NativeBindingsApiTest, WebUIBindings) {
+  ui_test_utils::NavigateToURL(browser(), GURL("chrome://extensions"));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  auto api_exists = [web_contents](const std::string& api_name) {
+    bool exists = false;
+    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+        web_contents,
+        base::StringPrintf("window.domAutomationController.send(!!%s);",
+                           api_name.c_str()),
+        &exists));
+    return exists;
+  };
+
+  EXPECT_TRUE(api_exists("chrome.developerPrivate"));
+  EXPECT_TRUE(api_exists("chrome.developerPrivate.getProfileConfiguration"));
+  EXPECT_TRUE(api_exists("chrome.management"));
+  EXPECT_TRUE(api_exists("chrome.management.setEnabled"));
+  EXPECT_FALSE(api_exists("chrome.networkingPrivate"));
+  EXPECT_FALSE(api_exists("chrome.sockets"));
+  EXPECT_FALSE(api_exists("chrome.browserAction"));
 }
 
 }  // namespace extensions

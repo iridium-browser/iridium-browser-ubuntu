@@ -16,93 +16,34 @@ cr.define('extensions', function() {
     constructor() {
       /** @private {boolean} */
       this.isDeleting_ = false;
-
-      /** @private {extensions.Manager} */
-      this.manager_;
-
-      /** @private {Array<chrome.developerPrivate.ExtensionInfo>} */
-      this.extensions_;
     }
 
-    /** @param {extensions.Manager} manager */
-    managerReady(manager) {
-      this.manager_ = manager;
-      this.manager_.set('delegate', this);
-
-      var keyboardShortcuts = this.manager_.keyboardShortcuts;
-      keyboardShortcuts.addEventListener(
-          'shortcut-updated', this.onExtensionCommandUpdated_.bind(this));
-      keyboardShortcuts.addEventListener(
-          'shortcut-capture-started',
-          this.onShortcutCaptureChanged_.bind(this, true));
-      keyboardShortcuts.addEventListener(
-          'shortcut-capture-ended',
-          this.onShortcutCaptureChanged_.bind(this, false));
-      chrome.developerPrivate.onProfileStateChanged.addListener(
-          this.onProfileStateChanged_.bind(this));
-      chrome.developerPrivate.onItemStateChanged.addListener(
-          this.onItemStateChanged_.bind(this));
-      chrome.developerPrivate.getExtensionsInfo(
-          {includeDisabled: true, includeTerminated: true},
-          function(extensions) {
-            this.extensions_ = extensions;
-            for (let extension of extensions)
-              this.manager_.addItem(extension);
-
-            this.manager_.initPage();
-          }.bind(this));
-      chrome.developerPrivate.getProfileConfiguration(
-          this.onProfileStateChanged_.bind(this));
-    }
-
-    /**
-     * @param {chrome.developerPrivate.ProfileInfo} profileInfo
-     * @private
-     */
-    onProfileStateChanged_(profileInfo) {
-      this.manager_.set('inDevMode', profileInfo.inDeveloperMode);
-    }
-
-    /**
-     * @param {chrome.developerPrivate.EventData} eventData
-     * @private
-     */
-    onItemStateChanged_(eventData) {
-      var currentIndex = this.extensions_.findIndex(function(extension) {
-        return extension.id == eventData.item_id;
+    getProfileConfiguration() {
+      return new Promise(function(resolve, reject) {
+        chrome.developerPrivate.getProfileConfiguration(resolve);
       });
+    }
 
-      var EventType = chrome.developerPrivate.EventType;
-      switch (eventData.event_type) {
-        case EventType.VIEW_REGISTERED:
-        case EventType.VIEW_UNREGISTERED:
-        case EventType.INSTALLED:
-        case EventType.LOADED:
-        case EventType.UNLOADED:
-        case EventType.ERROR_ADDED:
-        case EventType.ERRORS_REMOVED:
-        case EventType.PREFS_CHANGED:
-          // |extensionInfo| can be undefined in the case of an extension
-          // being unloaded right before uninstallation. There's nothing to do
-          // here.
-          if (!eventData.extensionInfo)
-            break;
+    getItemStateChangedTarget() {
+      return chrome.developerPrivate.onItemStateChanged;
+    }
 
-          if (currentIndex >= 0) {
-            this.extensions_[currentIndex] = eventData.extensionInfo;
-            this.manager_.updateItem(eventData.extensionInfo);
-          } else {
-            this.extensions_.push(eventData.extensionInfo);
-            this.manager_.addItem(eventData.extensionInfo);
-          }
-          break;
-        case EventType.UNINSTALLED:
-          this.manager_.removeItem(this.extensions_[currentIndex]);
-          this.extensions_.splice(currentIndex, 1);
-          break;
-        default:
-          assertNotReached();
-      }
+    getProfileStateChangedTarget() {
+      return chrome.developerPrivate.onProfileStateChanged;
+    }
+
+    getExtensionsInfo() {
+      return new Promise(function(resolve, reject) {
+        chrome.developerPrivate.getExtensionsInfo(
+            {includeDisabled: true, includeTerminated: true}, resolve);
+      });
+    }
+
+    /** @override */
+    getExtensionSize(id) {
+      return new Promise(function(resolve, reject) {
+        chrome.developerPrivate.getExtensionSize(id, resolve);
+      });
     }
 
     /**
@@ -128,14 +69,15 @@ cr.define('extensions', function() {
 
     /**
      * Updates an extension command.
-     * @param {!CustomEvent} e
-     * @private
+     * @param {string} extensionId
+     * @param {string} commandName
+     * @param {string} keybinding
      */
-    onExtensionCommandUpdated_(e) {
+    updateExtensionCommand(extensionId, commandName, keybinding) {
       chrome.developerPrivate.updateExtensionCommand({
-        extensionId: e.detail.item,
-        commandName: e.detail.commandName,
-        keybinding: e.detail.keybinding,
+        extensionId: extensionId,
+        commandName: commandName,
+        keybinding: keybinding,
       });
     }
 
@@ -147,10 +89,8 @@ cr.define('extensions', function() {
      * the default handling on the event also does this. Investigate more in the
      * future.
      * @param {boolean} isCapturing
-     * @param {!CustomEvent} e
-     * @private
      */
-    onShortcutCaptureChanged_(isCapturing, e) {
+    setShortcutHandlingSuspended(isCapturing) {
       chrome.developerPrivate.setShortcutHandlingSuspended(isCapturing);
     }
 
@@ -158,22 +98,26 @@ cr.define('extensions', function() {
      * Attempts to load an unpacked extension, optionally as another attempt at
      * a previously-specified load.
      * @param {string=} opt_retryGuid
+     * @return {!Promise} A signal that loading finished, rejected if any error
+     *     occurred.
      * @private
      */
     loadUnpackedHelper_(opt_retryGuid) {
-      chrome.developerPrivate.loadUnpacked(
-          {failQuietly: true, populateError: true, retryGuid: opt_retryGuid},
-          (loadError) => {
-            if (chrome.runtime.lastError &&
-                chrome.runtime.lastError.message !=
-                    'File selection was canceled.') {
-              throw new Error(chrome.runtime.lastError.message);
-            }
-            if (loadError) {
-              this.manager_.loadError.loadError = loadError;
-              this.manager_.loadError.show();
-            }
-          });
+      return new Promise(function(resolve, reject) {
+        chrome.developerPrivate.loadUnpacked(
+            {failQuietly: true, populateError: true, retryGuid: opt_retryGuid},
+            (loadError) => {
+              if (chrome.runtime.lastError &&
+                  chrome.runtime.lastError.message !=
+                      'File selection was canceled.') {
+                throw new Error(chrome.runtime.lastError.message);
+              }
+              if (loadError)
+                return reject(loadError);
+
+              resolve();
+            });
+      });
     }
 
     /** @override */
@@ -181,13 +125,13 @@ cr.define('extensions', function() {
       if (this.isDeleting_)
         return;
       this.isDeleting_ = true;
-      chrome.management.uninstall(id, {showConfirmDialog: true}, function() {
+      chrome.management.uninstall(id, {showConfirmDialog: true}, () => {
         // The "last error" was almost certainly the user canceling the dialog.
         // Do nothing. We only check it so we don't get noisy logs.
         /** @suppress {suspiciousCode} */
         chrome.runtime.lastError;
         this.isDeleting_ = false;
-      }.bind(this));
+      });
     }
 
     /** @override */
@@ -237,9 +181,28 @@ cr.define('extensions', function() {
       });
     }
 
+    /**
+     * @param {string} url
+     * @override
+     */
+    openUrl(url) {
+      window.open(url);
+    }
+
     /** @override */
     reloadItem(id) {
-      chrome.developerPrivate.reload(id, {failQuietly: false});
+      return new Promise(function(resolve, reject) {
+        chrome.developerPrivate.reload(
+            id, {failQuietly: true, populateErrorForUnpacked: true},
+            (loadError) => {
+              if (loadError) {
+                reject(loadError);
+                return;
+              }
+
+              resolve();
+            });
+      });
     }
 
     /** @override */
@@ -248,16 +211,16 @@ cr.define('extensions', function() {
     }
 
     /** @override */
-    showItemOptionsPage(id) {
-      var extension = this.extensions_.find(function(e) {
-        return e.id == id;
-      });
+    showItemOptionsPage(extension) {
       assert(extension && extension.optionsPage);
       if (extension.optionsPage.openInTab) {
-        chrome.developerPrivate.showOptions(id);
+        chrome.developerPrivate.showOptions(extension.id);
       } else {
-        this.manager_.changePage(
-            {page: Page.DETAILS, subpage: Dialog.OPTIONS, extensionId: id});
+        extensions.navigation.navigateTo({
+          page: Page.DETAILS,
+          subpage: Dialog.OPTIONS,
+          extensionId: extension.id,
+        });
       }
     }
 
@@ -269,12 +232,12 @@ cr.define('extensions', function() {
 
     /** @override */
     loadUnpacked() {
-      this.loadUnpackedHelper_();
+      return this.loadUnpackedHelper_();
     }
 
     /** @override */
     retryLoadUnpacked(retryGuid) {
-      this.loadUnpackedHelper_(retryGuid);
+      return this.loadUnpackedHelper_(retryGuid);
     }
 
     /** @override */
@@ -292,13 +255,16 @@ cr.define('extensions', function() {
     }
 
     /** @override */
-    packExtension(rootPath, keyPath) {
-      chrome.developerPrivate.packDirectory(rootPath, keyPath);
+    packExtension(rootPath, keyPath, flag, callback) {
+      chrome.developerPrivate.packDirectory(rootPath, keyPath, flag, callback);
     }
 
     /** @override */
     updateAllExtensions() {
-      chrome.developerPrivate.autoUpdate();
+      return new Promise((resolve) => {
+        chrome.developerPrivate.autoUpdate(resolve);
+        chrome.metricsPrivate.recordUserAction('Options_UpdateExtensions');
+      });
     }
 
     /** @override */
@@ -317,6 +283,16 @@ cr.define('extensions', function() {
           resolve(code);
         });
       });
+    }
+
+    /** @override */
+    openDevTools(args) {
+      chrome.developerPrivate.openDevTools(args);
+    }
+
+    /** @override */
+    showInFolder(id) {
+      chrome.developerPrivate.showPath(id);
     }
   }
 

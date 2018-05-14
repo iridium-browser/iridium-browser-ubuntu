@@ -5,6 +5,8 @@
 #include "core/editing/SelectionTemplate.h"
 
 #include <ostream>  // NOLINT
+#include "core/editing/EphemeralRange.h"
+#include "core/editing/PositionWithAffinity.h"
 #include "platform/wtf/Assertions.h"
 
 namespace blink {
@@ -14,8 +16,7 @@ SelectionTemplate<Strategy>::SelectionTemplate(const SelectionTemplate& other)
     : base_(other.base_),
       extent_(other.extent_),
       affinity_(other.affinity_),
-      is_directional_(other.is_directional_),
-      is_handle_visible_(other.is_handle_visible_)
+      direction_(other.direction_)
 #if DCHECK_IS_ON()
       ,
       dom_tree_version_(other.dom_tree_version_)
@@ -38,9 +39,7 @@ bool SelectionTemplate<Strategy>::operator==(
     return false;
   DCHECK_EQ(base_.GetDocument(), other.GetDocument()) << *this << ' ' << other;
   return base_ == other.base_ && extent_ == other.extent_ &&
-         affinity_ == other.affinity_ &&
-         is_directional_ == other.is_directional_ &&
-         is_handle_visible_ == other.is_handle_visible_;
+         affinity_ == other.affinity_;
 }
 
 template <typename Strategy>
@@ -50,13 +49,13 @@ bool SelectionTemplate<Strategy>::operator!=(
 }
 
 template <typename Strategy>
-DEFINE_TRACE(SelectionTemplate<Strategy>) {
+void SelectionTemplate<Strategy>::Trace(blink::Visitor* visitor) {
   visitor->Trace(base_);
   visitor->Trace(extent_);
 }
 
 template <typename Strategy>
-const PositionTemplate<Strategy>& SelectionTemplate<Strategy>::Base() const {
+PositionTemplate<Strategy> SelectionTemplate<Strategy>::Base() const {
   DCHECK(AssertValid());
   DCHECK(!base_.IsOrphan()) << base_;
   return base_;
@@ -69,7 +68,7 @@ Document* SelectionTemplate<Strategy>::GetDocument() const {
 }
 
 template <typename Strategy>
-const PositionTemplate<Strategy>& SelectionTemplate<Strategy>::Extent() const {
+PositionTemplate<Strategy> SelectionTemplate<Strategy>::Extent() const {
   DCHECK(AssertValid());
   DCHECK(!extent_.IsOrphan()) << extent_;
   return extent_;
@@ -83,6 +82,13 @@ bool SelectionTemplate<Strategy>::IsCaret() const {
 template <typename Strategy>
 bool SelectionTemplate<Strategy>::IsRange() const {
   return base_ != extent_;
+}
+
+template <typename Strategy>
+bool SelectionTemplate<Strategy>::IsValidFor(const Document& document) const {
+  if (IsNone())
+    return true;
+  return base_.IsValidFor(document) && extent_.IsValidFor(document);
 }
 
 template <typename Strategy>
@@ -136,19 +142,50 @@ void SelectionTemplate<Strategy>::ShowTreeForThis() const {
 #endif
 
 template <typename Strategy>
-const PositionTemplate<Strategy>&
-SelectionTemplate<Strategy>::ComputeEndPosition() const {
-  if (base_ == extent_)
-    return base_;
-  return base_ < extent_ ? extent_ : base_;
+PositionTemplate<Strategy> SelectionTemplate<Strategy>::ComputeEndPosition()
+    const {
+  return IsBaseFirst() ? extent_ : base_;
 }
 
 template <typename Strategy>
-const PositionTemplate<Strategy>&
-SelectionTemplate<Strategy>::ComputeStartPosition() const {
-  if (base_ == extent_)
-    return base_;
-  return base_ < extent_ ? base_ : extent_;
+PositionTemplate<Strategy> SelectionTemplate<Strategy>::ComputeStartPosition()
+    const {
+  return IsBaseFirst() ? base_ : extent_;
+}
+
+template <typename Strategy>
+EphemeralRangeTemplate<Strategy> SelectionTemplate<Strategy>::ComputeRange()
+    const {
+  return EphemeralRangeTemplate<Strategy>(ComputeStartPosition(),
+                                          ComputeEndPosition());
+}
+
+template <typename Strategy>
+bool SelectionTemplate<Strategy>::IsBaseFirst() const {
+  DCHECK(AssertValid());
+  if (base_ == extent_) {
+    DCHECK_EQ(direction_, Direction::kForward);
+    return true;
+  }
+  if (direction_ == Direction::kForward) {
+    DCHECK_LE(base_, extent_);
+    return true;
+  }
+  if (direction_ == Direction::kBackward) {
+    DCHECK_GT(base_, extent_);
+    return false;
+  }
+  // Note: Since same position can be represented in different anchor type,
+  // e.g. Position(div, 0) and BeforeNode(first-child), we use |<=| to check
+  // forward selection.
+  DCHECK_EQ(direction_, Direction::kNotComputed);
+  direction_ = base_ <= extent_ ? Direction::kForward : Direction::kBackward;
+  return direction_ == Direction::kForward;
+}
+
+template <typename Strategy>
+void SelectionTemplate<Strategy>::ResetDirectionCache() const {
+  direction_ = base_ == extent_ ? Direction::kForward : Direction::kNotComputed;
 }
 
 template <typename Strategy>
@@ -203,6 +240,18 @@ template <typename Strategy>
 SelectionTemplate<Strategy> SelectionTemplate<Strategy>::Builder::Build()
     const {
   DCHECK(selection_.AssertValid());
+  if (selection_.direction_ == Direction::kBackward) {
+    DCHECK_LE(selection_.extent_, selection_.base_);
+    return selection_;
+  }
+  if (selection_.direction_ == Direction::kForward) {
+    if (selection_.IsNone())
+      return selection_;
+    DCHECK_LE(selection_.base_, selection_.extent_);
+    return selection_;
+  }
+  DCHECK_EQ(selection_.direction_, Direction::kNotComputed);
+  selection_.ResetDirectionCache();
   return selection_;
 }
 
@@ -237,6 +286,7 @@ SelectionTemplate<Strategy>::Builder::Extend(
   DCHECK(selection_.Base().IsConnected()) << selection_.Base();
   DCHECK(selection_.AssertValid());
   selection_.extent_ = position;
+  selection_.direction_ = Direction::kNotComputed;
   return *this;
 }
 
@@ -257,6 +307,39 @@ SelectionTemplate<Strategy>::Builder::SetAffinity(TextAffinity affinity) {
 
 template <typename Strategy>
 typename SelectionTemplate<Strategy>::Builder&
+SelectionTemplate<Strategy>::Builder::SetAsBackwardSelection(
+    const EphemeralRangeTemplate<Strategy>& range) {
+  DCHECK(range.IsNotNull());
+  DCHECK(!range.IsCollapsed());
+  DCHECK(selection_.IsNone()) << selection_;
+  selection_.base_ = range.EndPosition();
+  selection_.extent_ = range.StartPosition();
+  selection_.direction_ = Direction::kBackward;
+  DCHECK_GT(selection_.base_, selection_.extent_);
+#if DCHECK_IS_ON()
+  selection_.dom_tree_version_ = range.GetDocument().DomTreeVersion();
+#endif
+  return *this;
+}
+
+template <typename Strategy>
+typename SelectionTemplate<Strategy>::Builder&
+SelectionTemplate<Strategy>::Builder::SetAsForwardSelection(
+    const EphemeralRangeTemplate<Strategy>& range) {
+  DCHECK(range.IsNotNull());
+  DCHECK(selection_.IsNone()) << selection_;
+  selection_.base_ = range.StartPosition();
+  selection_.extent_ = range.EndPosition();
+  selection_.direction_ = Direction::kForward;
+  DCHECK_LE(selection_.base_, selection_.extent_);
+#if DCHECK_IS_ON()
+  selection_.dom_tree_version_ = range.GetDocument().DomTreeVersion();
+#endif
+  return *this;
+}
+
+template <typename Strategy>
+typename SelectionTemplate<Strategy>::Builder&
 SelectionTemplate<Strategy>::Builder::SetBaseAndExtent(
     const EphemeralRangeTemplate<Strategy>& range) {
   if (range.IsNull()) {
@@ -267,7 +350,7 @@ SelectionTemplate<Strategy>::Builder::SetBaseAndExtent(
 #endif
     return *this;
   }
-  return Collapse(range.StartPosition()).Extend(range.EndPosition());
+  return SetAsForwardSelection(range);
 }
 
 template <typename Strategy>
@@ -298,19 +381,54 @@ SelectionTemplate<Strategy>::Builder::SetBaseAndExtentDeprecated(
   return SetBaseAndExtent(EphemeralRangeTemplate<Strategy>());
 }
 
+// ---
+
 template <typename Strategy>
-typename SelectionTemplate<Strategy>::Builder&
-SelectionTemplate<Strategy>::Builder::SetIsDirectional(bool is_directional) {
-  selection_.is_directional_ = is_directional;
-  return *this;
+SelectionTemplate<Strategy>::InvalidSelectionResetter::InvalidSelectionResetter(
+    const SelectionTemplate<Strategy>& selection)
+    : document_(selection.GetDocument()),
+      selection_(const_cast<SelectionTemplate&>(selection)) {
+  DCHECK(selection_.AssertValid());
 }
 
 template <typename Strategy>
-typename SelectionTemplate<Strategy>::Builder&
-SelectionTemplate<Strategy>::Builder::SetIsHandleVisible(
-    bool is_handle_visible) {
-  selection_.is_handle_visible_ = is_handle_visible;
-  return *this;
+SelectionTemplate<
+    Strategy>::InvalidSelectionResetter::~InvalidSelectionResetter() {
+  if (selection_.IsNone())
+    return;
+  DCHECK(document_);
+  if (!selection_.IsValidFor(*document_)) {
+    selection_ = SelectionTemplate<Strategy>();
+    return;
+  }
+#if DCHECK_IS_ON()
+  selection_.dom_tree_version_ = document_->DomTreeVersion();
+#endif
+  selection_.ResetDirectionCache();
+}
+
+SelectionInDOMTree ConvertToSelectionInDOMTree(
+    const SelectionInFlatTree& selection_in_flat_tree) {
+  return SelectionInDOMTree::Builder()
+      .SetAffinity(selection_in_flat_tree.Affinity())
+      .SetBaseAndExtent(ToPositionInDOMTree(selection_in_flat_tree.Base()),
+                        ToPositionInDOMTree(selection_in_flat_tree.Extent()))
+      .Build();
+}
+
+SelectionInFlatTree ConvertToSelectionInFlatTree(
+    const SelectionInDOMTree& selection) {
+  return SelectionInFlatTree::Builder()
+      .SetAffinity(selection.Affinity())
+      .SetBaseAndExtent(ToPositionInFlatTree(selection.Base()),
+                        ToPositionInFlatTree(selection.Extent()))
+      .Build();
+}
+
+template <typename Strategy>
+void SelectionTemplate<Strategy>::InvalidSelectionResetter::Trace(
+    blink::Visitor* visitor) {
+  visitor->Trace(document_);
 }
 
 template class CORE_TEMPLATE_EXPORT SelectionTemplate<EditingStrategy>;

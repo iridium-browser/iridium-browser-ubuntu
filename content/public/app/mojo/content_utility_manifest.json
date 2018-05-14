@@ -6,7 +6,13 @@
       "provides": {
         "browser": [
           "content::mojom::Child",
+          "content::mojom::ChildControl",
+          "content::mojom::ChildHistogramFetcher",
+          "content::mojom::ChildHistogramFetcherFactory",
+          "content::mojom::ResourceUsageReporter",
           "IPC::mojom::ChannelBootstrap",
+          "printing::mojom::PdfToEmfConverterFactory",
+          "printing::mojom::PdfToPwgRasterConverter",
           "service_manager::mojom::ServiceFactory"
         ],
         "service_manager:service_factory": [
@@ -14,7 +20,12 @@
         ]
       },
       "requires": {
-        "content_browser": [ "memory_instrumentation" ],
+        "*": [ "app" ],
+        "content_browser": [
+          "dwrite_font_proxy",
+          "field_trials",
+          "font_cache"
+        ],
         "device": [
           "device:power_monitor",
           "device:time_zone_monitor"
@@ -33,10 +44,6 @@
         "platform": "android"
       }
     ],
-    "v8_snapshot_data" : [{
-      "path": "snapshot_blob.bin",
-      "platform": "linux"
-    }],
     "v8_snapshot_32_data" : [{
       "path": "assets/snapshot_blob_32.bin",
       "platform": "android"

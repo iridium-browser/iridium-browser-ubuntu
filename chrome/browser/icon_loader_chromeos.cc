@@ -202,12 +202,13 @@ void IconLoader::ReadIcon() {
   static base::LazyInstance<IconMapper>::Leaky icon_mapper =
       LAZY_INSTANCE_INITIALIZER;
   int idr = icon_mapper.Get().Lookup(group_, icon_size_);
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   gfx::ImageSkia image_skia(ResizeImage(*(rb.GetImageNamed(idr)).ToImageSkia(),
                                         IconSizeToDIPSize(icon_size_)));
   image_skia.MakeThreadSafe();
-  std::unique_ptr<gfx::Image> image = base::MakeUnique<gfx::Image>(image_skia);
+  std::unique_ptr<gfx::Image> image = std::make_unique<gfx::Image>(image_skia);
   target_task_runner_->PostTask(
-      FROM_HERE, base::Bind(callback_, base::Passed(&image), group_));
+      FROM_HERE,
+      base::BindOnce(std::move(callback_), std::move(image), group_));
   delete this;
 }

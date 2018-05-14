@@ -8,29 +8,29 @@
 
 namespace blink {
 
-static const char kSupplementName[] = "CSSTiming";
+// static
+const char CSSTiming::kSupplementName[] = "CSSTiming";
 
 CSSTiming& CSSTiming::From(Document& document) {
-  CSSTiming* timing = static_cast<CSSTiming*>(
-      Supplement<Document>::From(document, kSupplementName));
+  CSSTiming* timing = Supplement<Document>::From<CSSTiming>(document);
   if (!timing) {
     timing = new CSSTiming(document);
-    Supplement<Document>::ProvideTo(document, kSupplementName, timing);
+    ProvideTo(document, timing);
   }
   return *timing;
 }
 
 void CSSTiming::RecordAuthorStyleSheetParseTime(double seconds) {
-  if (!paint_timing_->FirstContentfulPaint())
+  if (paint_timing_->FirstContentfulPaint().is_null())
     parse_time_before_fcp_ += seconds;
 }
 
 void CSSTiming::RecordUpdateDuration(double seconds) {
-  if (!paint_timing_->FirstContentfulPaint())
+  if (paint_timing_->FirstContentfulPaint().is_null())
     update_time_before_fcp_ += seconds;
 }
 
-DEFINE_TRACE(CSSTiming) {
+void CSSTiming::Trace(blink::Visitor* visitor) {
   visitor->Trace(paint_timing_);
   Supplement<Document>::Trace(visitor);
 }

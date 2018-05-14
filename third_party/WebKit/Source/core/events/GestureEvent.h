@@ -27,7 +27,7 @@
 #define GestureEvent_h
 
 #include "core/CoreExport.h"
-#include "core/events/EventDispatcher.h"
+#include "core/dom/events/EventDispatcher.h"
 #include "core/events/UIEventWithKeyState.h"
 #include "public/platform/WebGestureEvent.h"
 
@@ -36,7 +36,7 @@ namespace blink {
 class CORE_EXPORT GestureEvent final : public UIEventWithKeyState {
  public:
   static GestureEvent* Create(AbstractView*, const WebGestureEvent&);
-  ~GestureEvent() override {}
+  ~GestureEvent() override = default;
 
   bool IsGestureEvent() const override;
 
@@ -44,7 +44,7 @@ class CORE_EXPORT GestureEvent final : public UIEventWithKeyState {
 
   const WebGestureEvent& NativeEvent() const { return native_event_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   GestureEvent(const AtomicString&, AbstractView*, const WebGestureEvent&);

@@ -26,13 +26,13 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.download.DownloadTestRule;
 import org.chromium.chrome.browser.download.DownloadTestRule.CustomMainActivityStart;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.browser.contextmenu.ContextMenuUtils;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -44,10 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Tests that toasts don't trigger HW acceleration.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP)
 public class ToastHWATest implements CustomMainActivityStart {
     @Rule
@@ -72,8 +69,7 @@ public class ToastHWATest implements CustomMainActivityStart {
         });
 
         mDownloadTestRule.deleteFilesInDownloadDirectory(TEST_FILES);
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
     }
 
     @After
@@ -132,6 +128,7 @@ public class ToastHWATest implements CustomMainActivityStart {
     @Test
     @SmallTest
     @CommandLineFlags.Add(BaseSwitches.ENABLE_LOW_END_DEVICE_MODE)
+    @RetryOnFailure
     public void testOpenedInBackgroundToast() throws Exception {
         mDownloadTestRule.loadUrl(mTestServer.getURL(URL_PATH));
         mDownloadTestRule.assertWaitForPageScaleFactorMatch(0.5f);

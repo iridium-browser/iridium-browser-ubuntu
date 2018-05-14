@@ -15,7 +15,7 @@
 namespace cc {
 
 scoped_refptr<UIResourceLayer> UIResourceLayer::Create() {
-  return make_scoped_refptr(new UIResourceLayer());
+  return base::WrapRefCounted(new UIResourceLayer());
 }
 
 UIResourceLayer::UIResourceLayer()
@@ -26,7 +26,7 @@ UIResourceLayer::UIResourceLayer()
   vertex_opacity_[3] = 1.0f;
 }
 
-UIResourceLayer::~UIResourceLayer() {}
+UIResourceLayer::~UIResourceLayer() = default;
 
 std::unique_ptr<LayerImpl> UIResourceLayer::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {

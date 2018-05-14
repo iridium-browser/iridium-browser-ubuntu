@@ -19,18 +19,20 @@ class NavigatorNFC final : public GarbageCollected<NavigatorNFC>,
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorNFC);
 
  public:
+  static const char kSupplementName[];
+
   // Gets, or creates, NavigatorNFC supplement on Navigator.
   static NavigatorNFC& From(Navigator&);
 
   static NFC* nfc(Navigator&);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*) override;
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  private:
   explicit NavigatorNFC(Navigator&);
-  static const char* SupplementName();
 
-  Member<NFC> nfc_;
+  TraceWrapperMember<NFC> nfc_;
 };
 
 }  // namespace blink

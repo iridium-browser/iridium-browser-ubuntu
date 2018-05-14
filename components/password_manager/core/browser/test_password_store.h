@@ -37,6 +37,9 @@ class TestPasswordStore : public PasswordStore {
  protected:
   ~TestPasswordStore() override;
 
+  scoped_refptr<base::SequencedTaskRunner> CreateBackgroundTaskRunner()
+      const override;
+
   // PasswordStore interface
   PasswordStoreChangeList AddLoginImpl(
       const autofill::PasswordForm& form) override;
@@ -46,8 +49,14 @@ class TestPasswordStore : public PasswordStore {
       const autofill::PasswordForm& form) override;
   std::vector<std::unique_ptr<autofill::PasswordForm>> FillMatchingLogins(
       const FormDigest& form) override;
+  bool FillAutofillableLogins(
+      std::vector<std::unique_ptr<autofill::PasswordForm>>* forms) override;
+  bool FillBlacklistLogins(
+      std::vector<std::unique_ptr<autofill::PasswordForm>>* forms) override;
   std::vector<std::unique_ptr<autofill::PasswordForm>>
   FillLoginsForSameOrganizationName(const std::string& signon_realm) override;
+  std::vector<InteractionsStats> GetSiteStatsImpl(
+      const GURL& origin_domain) override;
 
   // Unused portions of PasswordStore interface
   void ReportMetricsImpl(const std::string& sync_username,
@@ -68,15 +77,9 @@ class TestPasswordStore : public PasswordStore {
       const base::Callback<bool(const GURL&)>& origin_filter,
       base::Time delete_begin,
       base::Time delete_end) override;
-  bool FillAutofillableLogins(
-      std::vector<std::unique_ptr<autofill::PasswordForm>>* forms) override;
-  bool FillBlacklistLogins(
-      std::vector<std::unique_ptr<autofill::PasswordForm>>* forms) override;
   void AddSiteStatsImpl(const InteractionsStats& stats) override;
   void RemoveSiteStatsImpl(const GURL& origin_domain) override;
   std::vector<InteractionsStats> GetAllSiteStatsImpl() override;
-  std::vector<InteractionsStats> GetSiteStatsImpl(
-      const GURL& origin_domain) override;
 
  private:
   PasswordMap stored_passwords_;

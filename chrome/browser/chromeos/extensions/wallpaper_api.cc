@@ -8,18 +8,20 @@
 #include <utility>
 #include <vector>
 
+#include "ash/wallpaper/wallpaper_controller.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
@@ -123,9 +125,8 @@ bool WallpaperSetWallpaperFunction::RunAsync() {
   // Gets account id from the caller, ensuring multiprofile compatibility.
   const user_manager::User* user = GetUserFromBrowserContext(browser_context());
   account_id_ = user->GetAccountId();
-  chromeos::WallpaperManager* wallpaper_manager =
-      chromeos::WallpaperManager::Get();
-  wallpaper_files_id_ = wallpaper_manager->GetFilesId(account_id_);
+  wallpaper_files_id_ =
+      WallpaperControllerClient::Get()->GetFilesId(account_id_);
 
   if (params_->details.data) {
     StartDecode(*params_->details.data);
@@ -148,28 +149,21 @@ bool WallpaperSetWallpaperFunction::RunAsync() {
 
 void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
     const gfx::ImageSkia& image) {
-  chromeos::WallpaperManager* wallpaper_manager =
-      chromeos::WallpaperManager::Get();
-  base::FilePath thumbnail_path = wallpaper_manager->GetCustomWallpaperPath(
-      wallpaper::kThumbnailWallpaperSubDir, wallpaper_files_id_,
-      params_->details.filename);
+  base::FilePath thumbnail_path =
+      ash::WallpaperController::GetCustomWallpaperPath(
+          ash::WallpaperController::kThumbnailWallpaperSubDir,
+          wallpaper_files_id_.id(), params_->details.filename);
 
-  scoped_refptr<base::SequencedTaskRunner> task_runner =
-      BrowserThread::GetBlockingPool()
-          ->GetSequencedTaskRunnerWithShutdownBehavior(
-              BrowserThread::GetBlockingPool()->GetNamedSequenceToken(
-                  wallpaper::kWallpaperSequenceTokenName),
-              base::SequencedWorkerPool::BLOCK_SHUTDOWN);
   wallpaper::WallpaperLayout layout = wallpaper_api_util::GetLayoutEnum(
       extensions::api::wallpaper::ToString(params_->details.layout));
   wallpaper_api_util::RecordCustomWallpaperLayout(layout);
 
-  bool update_wallpaper =
+  bool show_wallpaper =
       account_id_ ==
       user_manager::UserManager::Get()->GetActiveUser()->GetAccountId();
-  wallpaper_manager->SetCustomWallpaper(
+  WallpaperControllerClient::Get()->SetCustomWallpaper(
       account_id_, wallpaper_files_id_, params_->details.filename, layout,
-      wallpaper::CUSTOMIZED, image, update_wallpaper);
+      image, show_wallpaper);
   unsafe_wallpaper_decoder_ = NULL;
 
   // Save current extension name. It will be displayed in the component
@@ -195,7 +189,7 @@ void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
   std::unique_ptr<gfx::ImageSkia> deep_copy(image.DeepCopy());
   // Generates thumbnail before call api function callback. We can then
   // request thumbnail in the javascript callback.
-  task_runner->PostTask(
+  GetBlockingTaskRunner()->PostTask(
       FROM_HERE,
       base::BindOnce(&WallpaperSetWallpaperFunction::GenerateThumbnail, this,
                      thumbnail_path, std::move(deep_copy)));
@@ -204,19 +198,20 @@ void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
 void WallpaperSetWallpaperFunction::GenerateThumbnail(
     const base::FilePath& thumbnail_path,
     std::unique_ptr<gfx::ImageSkia> image) {
-  wallpaper::AssertCalledOnWallpaperSequence();
+  AssertCalledOnWallpaperSequence(GetBlockingTaskRunner());
   if (!base::PathExists(thumbnail_path.DirName()))
     base::CreateDirectory(thumbnail_path.DirName());
 
   scoped_refptr<base::RefCountedBytes> original_data;
   scoped_refptr<base::RefCountedBytes> thumbnail_data;
-  chromeos::WallpaperManager::Get()->ResizeImage(
+  ash::WallpaperController::ResizeImage(
       *image, wallpaper::WALLPAPER_LAYOUT_STRETCH, image->width(),
       image->height(), &original_data, NULL);
-  chromeos::WallpaperManager::Get()->ResizeImage(
+  ash::WallpaperController::ResizeImage(
       *image, wallpaper::WALLPAPER_LAYOUT_STRETCH,
-      wallpaper::kWallpaperThumbnailWidth, wallpaper::kWallpaperThumbnailHeight,
-      &thumbnail_data, NULL);
+      ash::WallpaperController::kWallpaperThumbnailWidth,
+      ash::WallpaperController::kWallpaperThumbnailHeight, &thumbnail_data,
+      NULL);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::BindOnce(&WallpaperSetWallpaperFunction::ThumbnailGenerated, this,

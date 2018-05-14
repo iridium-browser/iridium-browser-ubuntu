@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,7 +8,6 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
-import random
 import time
 
 from chromite.lib import commandline
@@ -72,7 +72,7 @@ class _TimedCallback(object):
     """
     self._callback = callback
     self._interval = interval
-    self._last_called = time.time() - interval
+    self._last_called = float('-inf')
 
   def __call__(self):
     if time.time() >= self._next_call:
@@ -96,13 +96,16 @@ def main():
   parser.add_argument(
       '--collect-prod-hosts',
       action='store_true',
-      help='Enable collection of prod host metrics, like roles')
+      help='[DEPRECATED. Use --collect-host-manifest instead.] '
+           'Enable collection of prod host metrics, like roles')
+  parser.add_argument(
+      '--collect-host-manifest',
+      default=None,
+      choices=['prod', 'staging'],
+      help='Enable collection of server metrics (e.g. roles) for servers in '
+           'the given lab environment.')
   opts = parser.parse_args()
   opts.Freeze()
-
-  # Wait a random amount of time before starting the loop in case sysmon
-  # is started at exactly the same time on all machines.
-  time.sleep(random.uniform(0, opts.interval))
 
   # This call returns a context manager that doesn't do anything, so we
   # ignore the return value.
@@ -111,6 +114,9 @@ def main():
   interface.state.metric_name_prefix = (interface.state.metric_name_prefix
                                         + 'chromeos/sysmon/')
 
+  # Transitional, while we migrate users off of |collect_prod_hosts|
+  if opts.collect_host_manifest is not None:
+    opts.collect_prod_hosts = True
   collector = _MetricCollector(collect_prod_hosts=opts.collect_prod_hosts)
   loop.SleepLoop(callback=collector,
                  interval=opts.interval).loop_forever()

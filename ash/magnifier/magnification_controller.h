@@ -7,6 +7,7 @@
 
 #include "ash/ash_export.h"
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "ui/gfx/geometry/point.h"
@@ -52,6 +53,11 @@ class ASH_EXPORT MagnificationController {
   // Returns the current magnification ratio.
   virtual float GetScale() const = 0;
 
+  // Maps the current scale value to an index in the range between the minimum
+  // and maximum scale values, and steps up or down the scale depending on the
+  // value of |delta_index|.
+  void StepToNextScaleValue(int delta_index);
+
   // Set the top-left point of the magnification window.
   virtual void MoveWindow(int x, int y, bool animate) = 0;
   virtual void MoveWindow(const gfx::Point& point, bool animate) = 0;
@@ -69,8 +75,8 @@ class ASH_EXPORT MagnificationController {
       bool is_editable_node,
       const gfx::Rect& node_bounds_in_screen) = 0;
 
-  // Returns |point_of_interest_| in MagnificationControllerImpl. This is
-  // the internal variable to stores the last mouse cursor (or last touched)
+  // Returns |point_of_interest_in_root_| in MagnificationControllerImpl. This
+  // is the internal variable to stores the last mouse cursor (or last touched)
   // location. This method is only for test purpose.
   virtual gfx::Point GetPointOfInterestForTesting() = 0;
 
@@ -90,6 +96,8 @@ class ASH_EXPORT MagnificationController {
 
  protected:
   MagnificationController() {}
+
+  FRIEND_TEST_ALL_PREFIXES(MagnificationControllerTest, AdjustScaleFromScroll);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MagnificationController);

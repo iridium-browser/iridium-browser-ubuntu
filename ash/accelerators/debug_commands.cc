@@ -5,14 +5,13 @@
 #include "ash/accelerators/debug_commands.h"
 
 #include "ash/accelerators/accelerator_commands.h"
-#include "ash/ash_switches.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
-#include "ash/shell_delegate.h"
 #include "ash/system/toast/toast_data.h"
 #include "ash/system/toast/toast_manager.h"
+#include "ash/touch/touch_devices_controller.h"
 #include "ash/wallpaper/wallpaper_controller.h"
-#include "ash/wallpaper/wallpaper_delegate.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/widget_finder.h"
 #include "ash/wm/window_properties.h"
@@ -115,7 +114,7 @@ void HandleToggleWallpaperMode() {
                                 base::Time::Now().LocalMidnight());
   switch (++index % 4) {
     case 0:
-      Shell::Get()->wallpaper_delegate()->InitializeWallpaper();
+      wallpaper_controller->ShowDefaultWallpaperForTesting();
       break;
     case 1:
       wallpaper_controller->SetWallpaperImage(
@@ -136,19 +135,18 @@ void HandleToggleWallpaperMode() {
 
 void HandleToggleTouchpad() {
   base::RecordAction(base::UserMetricsAction("Accel_Toggle_Touchpad"));
-  Shell::Get()->shell_delegate()->ToggleTouchpad();
+  Shell::Get()->touch_devices_controller()->ToggleTouchpad();
 }
 
 void HandleToggleTouchscreen() {
   base::RecordAction(base::UserMetricsAction("Accel_Toggle_Touchscreen"));
-  ShellDelegate* delegate = Shell::Get()->shell_delegate();
-  delegate->SetTouchscreenEnabledInPrefs(
-      !delegate->IsTouchscreenEnabledInPrefs(false /* use_local_state */),
-      false /* use_local_state */);
-  delegate->UpdateTouchscreenStatusFromPrefs();
+  TouchDevicesController* controller = Shell::Get()->touch_devices_controller();
+  controller->SetTouchscreenEnabled(
+      !controller->GetTouchscreenEnabled(TouchDeviceEnabledSource::USER_PREF),
+      TouchDeviceEnabledSource::USER_PREF);
 }
 
-void HandleToggleTouchView() {
+void HandleToggleTabletMode() {
   TabletModeController* controller = Shell::Get()->tablet_mode_controller();
   controller->EnableTabletModeWindowManager(
       !controller->IsTabletModeWindowManagerEnabled());
@@ -207,8 +205,8 @@ void PerformDebugActionIfEnabled(AcceleratorAction action) {
     case DEBUG_TOGGLE_TOUCH_SCREEN:
       HandleToggleTouchscreen();
       break;
-    case DEBUG_TOGGLE_TOUCH_VIEW:
-      HandleToggleTouchView();
+    case DEBUG_TOGGLE_TABLET_MODE:
+      HandleToggleTabletMode();
       break;
     case DEBUG_TOGGLE_WALLPAPER_MODE:
       HandleToggleWallpaperMode();

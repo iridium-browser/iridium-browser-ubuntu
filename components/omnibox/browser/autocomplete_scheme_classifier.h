@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "components/metrics/proto/omnibox_input_type.pb.h"
+#include "third_party/metrics_proto/omnibox_input_type.pb.h"
 
 // An interface that gives embedders the ability to automatically classify the
 // omnibox input type based on an explicitly-specified schemes.  If users type
@@ -23,7 +23,7 @@ class AutocompleteSchemeClassifier {
   // Checks |scheme| and returns the type of the input if the scheme is known
   // and not blocked. Returns metrics::OmniboxInputType::INVALID if it's unknown
   // or the classifier implementation cannot handle.
-  virtual metrics::OmniboxInputType::Type GetInputTypeForScheme(
+  virtual metrics::OmniboxInputType GetInputTypeForScheme(
       const std::string& scheme) const = 0;
 };
 

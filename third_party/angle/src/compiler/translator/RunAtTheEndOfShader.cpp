@@ -25,6 +25,7 @@
 #include "compiler/translator/IntermNode.h"
 #include "compiler/translator/IntermNode_util.h"
 #include "compiler/translator/IntermTraverse.h"
+#include "compiler/translator/StaticType.h"
 #include "compiler/translator/SymbolTable.h"
 
 namespace sh
@@ -32,6 +33,8 @@ namespace sh
 
 namespace
 {
+
+constexpr const ImmutableString kMainString("main");
 
 class ContainsReturnTraverser : public TIntermTraverser
 {
@@ -66,33 +69,33 @@ void WrapMainAndAppend(TIntermBlock *root,
                        TSymbolTable *symbolTable)
 {
     // Replace main() with main0() with the same body.
-    TSymbolUniqueId oldMainId(symbolTable);
-    std::stringstream oldMainName;
-    oldMainName << "main" << oldMainId.get();
-    TIntermFunctionDefinition *oldMain = CreateInternalFunctionDefinitionNode(
-        TType(EbtVoid), oldMainName.str().c_str(), main->getBody(), oldMainId);
+    TFunction *oldMain = new TFunction(symbolTable, ImmutableString(""), SymbolType::AngleInternal,
+                                       StaticType::GetBasic<EbtVoid>(), false);
+    TIntermFunctionDefinition *oldMainDefinition =
+        CreateInternalFunctionDefinitionNode(*oldMain, main->getBody());
 
-    bool replaced = root->replaceChildNode(main, oldMain);
+    bool replaced = root->replaceChildNode(main, oldMainDefinition);
     ASSERT(replaced);
 
     // void main()
-    TIntermFunctionPrototype *newMainProto = new TIntermFunctionPrototype(
-        TType(EbtVoid), main->getFunctionPrototype()->getFunctionSymbolInfo()->getId());
-    newMainProto->getFunctionSymbolInfo()->setName("main");
+    TFunction *newMain = new TFunction(symbolTable, kMainString, SymbolType::UserDefined,
+                                       StaticType::GetBasic<EbtVoid>(), false);
+    TIntermFunctionPrototype *newMainProto = new TIntermFunctionPrototype(newMain);
 
     // {
     //     main0();
     //     codeToRun
     // }
     TIntermBlock *newMainBody     = new TIntermBlock();
-    TIntermAggregate *oldMainCall = CreateInternalFunctionCallNode(
-        TType(EbtVoid), oldMainName.str().c_str(), oldMainId, new TIntermSequence());
+    TIntermAggregate *oldMainCall =
+        TIntermAggregate::CreateFunctionCall(*oldMain, new TIntermSequence());
     newMainBody->appendStatement(oldMainCall);
     newMainBody->appendStatement(codeToRun);
 
     // Add the new main() to the root node.
-    TIntermFunctionDefinition *newMain = new TIntermFunctionDefinition(newMainProto, newMainBody);
-    root->appendStatement(newMain);
+    TIntermFunctionDefinition *newMainDefinition =
+        new TIntermFunctionDefinition(newMainProto, newMainBody);
+    root->appendStatement(newMainDefinition);
 }
 
 }  // anonymous namespace

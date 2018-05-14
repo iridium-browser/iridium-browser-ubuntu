@@ -4,7 +4,7 @@
 
 #include "ash/app_list/app_list_presenter_delegate.h"
 
-#include "ash/ash_switches.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
@@ -31,32 +31,6 @@
 
 namespace ash {
 namespace {
-
-// Gets the point at the center of the display containing the given |window|.
-// This calculation excludes the virtual keyboard area. If the height of the
-// display area is less than |minimum_height|, its bottom will be extended to
-// that height (so that the app list never starts above the top of the screen).
-gfx::Point GetCenterOfDisplayForWindow(aura::Window* window,
-                                       int minimum_height) {
-  DCHECK(window);
-  gfx::Rect bounds = ScreenUtil::GetDisplayBoundsWithShelf(window);
-  ::wm::ConvertRectToScreen(window->GetRootWindow(), &bounds);
-
-  // If the virtual keyboard is active, subtract it from the display bounds, so
-  // that the app list is centered in the non-keyboard area of the display.
-  // (Note that work_area excludes the keyboard, but it doesn't get updated
-  // until after this function is called.)
-  keyboard::KeyboardController* keyboard_controller =
-      keyboard::KeyboardController::GetInstance();
-  if (keyboard_controller && keyboard_controller->keyboard_visible())
-    bounds.Subtract(keyboard_controller->current_keyboard_bounds());
-
-  // Apply the |minimum_height|.
-  if (bounds.height() < minimum_height)
-    bounds.set_height(minimum_height);
-
-  return bounds.CenterPoint();
-}
 
 // Whether the shelf is oriented on the side, not on the bottom.
 bool IsSideShelf(aura::Window* root_window) {
@@ -90,10 +64,6 @@ AppListPresenterDelegate::AppListPresenterDelegate(
 
 AppListPresenterDelegate::~AppListPresenterDelegate() {
   DCHECK(view_);
-  keyboard::KeyboardController* keyboard_controller =
-      keyboard::KeyboardController::GetInstance();
-  if (keyboard_controller)
-    keyboard_controller->RemoveObserver(this);
   if (Shell::Get()->tablet_mode_controller())
     Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
   Shell::Get()->RemovePreTargetHandler(this);
@@ -114,25 +84,19 @@ void AppListPresenterDelegate::Init(app_list::AppListView* view,
       ->UpdateAutoHideState();
   view_ = view;
   aura::Window* root_window = Shell::GetRootWindowForDisplayId(display_id);
-  aura::Window* container = RootWindowController::ForWindow(root_window)
-                                ->GetContainer(kShellWindowId_AppListContainer);
 
-  view->Initialize(container, current_apps_page,
-                   Shell::Get()
-                       ->tablet_mode_controller()
-                       ->IsTabletModeWindowManagerEnabled(),
-                   IsSideShelf(root_window));
+  app_list::AppListView::InitParams params;
+  params.parent = RootWindowController::ForWindow(root_window)
+                      ->GetContainer(kShellWindowId_AppListContainer);
+  params.initial_apps_page = current_apps_page;
+  params.is_tablet_mode = Shell::Get()
+                              ->tablet_mode_controller()
+                              ->IsTabletModeWindowManagerEnabled();
+  params.is_side_shelf = IsSideShelf(root_window);
+  view->Initialize(params);
 
-  if (!is_fullscreen_app_list_enabled_) {
-    view->MaybeSetAnchorPoint(GetCenterOfDisplayForWindow(
-        root_window, GetMinimumBoundsHeightForAppList(view)));
-  }
   wm::GetWindowState(view->GetWidget()->GetNativeWindow())
       ->set_ignored_by_shelf(true);
-  keyboard::KeyboardController* keyboard_controller =
-      keyboard::KeyboardController::GetInstance();
-  if (keyboard_controller)
-    keyboard_controller->AddObserver(this);
   Shell::Get()->AddPreTargetHandler(this);
 
   // By setting us as DnD recipient, the app list knows that we can
@@ -144,31 +108,12 @@ void AppListPresenterDelegate::Init(app_list::AppListView* view,
 
 void AppListPresenterDelegate::OnShown(int64_t display_id) {
   is_visible_ = true;
-  aura::Window* root_window = Shell::GetRootWindowForDisplayId(display_id);
-  Shell::Get()->NotifyAppListVisibilityChanged(is_visible_, root_window);
 }
 
 void AppListPresenterDelegate::OnDismissed() {
   DCHECK(is_visible_);
   DCHECK(view_);
-
   is_visible_ = false;
-  aura::Window* root_window = Shell::GetRootWindowForDisplayId(
-      display::Screen::GetScreen()
-          ->GetDisplayNearestWindow(view_->GetWidget()->GetNativeWindow())
-          .id());
-
-  Shell::Get()->NotifyAppListVisibilityChanged(is_visible_, root_window);
-}
-
-void AppListPresenterDelegate::UpdateBounds() {
-  if (!view_ || !is_visible_)
-    return;
-
-  view_->UpdateBounds();
-  view_->MaybeSetAnchorPoint(
-      GetCenterOfDisplayForWindow(view_->GetWidget()->GetNativeWindow(),
-                                  GetMinimumBoundsHeightForAppList(view_)));
 }
 
 gfx::Vector2d AppListPresenterDelegate::GetVisibilityAnimationOffset(
@@ -241,7 +186,7 @@ void AppListPresenterDelegate::ProcessLocatedEvent(ui::LocatedEvent* event) {
   }
 
   aura::Window* window = view_->GetWidget()->GetNativeView()->parent();
-  if (!window->Contains(target) &&
+  if (!window->Contains(target) && !presenter_->Back() &&
       !app_list::switches::ShouldNotDismissOnBlur()) {
     presenter_->Dismiss();
   }
@@ -258,20 +203,10 @@ void AppListPresenterDelegate::OnMouseEvent(ui::MouseEvent* event) {
 void AppListPresenterDelegate::OnGestureEvent(ui::GestureEvent* event) {
   if (event->type() == ui::ET_GESTURE_TAP ||
       event->type() == ui::ET_GESTURE_TWO_FINGER_TAP ||
-      event->type() == ui::ET_GESTURE_LONG_PRESS)
+      event->type() == ui::ET_GESTURE_LONG_PRESS) {
     ProcessLocatedEvent(event);
+  }
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// AppListPresenterDelegate, keyboard::KeyboardControllerObserver
-// implementation:
-
-void AppListPresenterDelegate::OnKeyboardBoundsChanging(
-    const gfx::Rect& new_bounds) {
-  UpdateBounds();
-}
-
-void AppListPresenterDelegate::OnKeyboardClosed() {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // AppListPresenterDelegate, ShellObserver implementation:

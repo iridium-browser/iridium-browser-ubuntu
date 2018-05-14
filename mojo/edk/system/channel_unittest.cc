@@ -27,7 +27,7 @@ class TestChannel : public Channel {
                bool(size_t num_handles,
                     const void* extra_header,
                     size_t extra_header_size,
-                    ScopedPlatformHandleVectorPtr* handles));
+                    std::vector<ScopedPlatformHandle>* handles));
   MOCK_METHOD0(Start, void());
   MOCK_METHOD0(ShutDownImpl, void());
   MOCK_METHOD0(LeakHandle, void());
@@ -50,7 +50,7 @@ class MockChannelDelegate : public Channel::Delegate {
  protected:
   void OnChannelMessage(const void* payload,
                         size_t payload_size,
-                        ScopedPlatformHandleVectorPtr handles) override {
+                        std::vector<ScopedPlatformHandle> handles) override {
     payload_.reset(new char[payload_size]);
     memcpy(payload_.get(), payload, payload_size);
     payload_size_ = payload_size;
@@ -66,7 +66,7 @@ class MockChannelDelegate : public Channel::Delegate {
 
 Channel::MessagePtr CreateDefaultMessage(bool legacy_message) {
   const size_t payload_size = 100;
-  Channel::MessagePtr message = base::MakeUnique<Channel::Message>(
+  Channel::MessagePtr message = std::make_unique<Channel::Message>(
       payload_size, 0,
       legacy_message ? Channel::Message::MessageType::NORMAL_LEGACY
                      : Channel::Message::MessageType::NORMAL);

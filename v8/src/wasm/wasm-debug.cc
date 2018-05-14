@@ -6,6 +6,7 @@
 
 #include "src/assembler-inl.h"
 #include "src/assert-scope.h"
+#include "src/base/optional.h"
 #include "src/compiler/wasm-compiler.h"
 #include "src/debug/debug-scopes.h"
 #include "src/debug/debug.h"
@@ -14,14 +15,16 @@
 #include "src/identity-map.h"
 #include "src/isolate.h"
 #include "src/wasm/module-decoder.h"
+#include "src/wasm/wasm-code-manager.h"
 #include "src/wasm/wasm-interpreter.h"
 #include "src/wasm/wasm-limits.h"
 #include "src/wasm/wasm-module.h"
-#include "src/wasm/wasm-objects.h"
+#include "src/wasm/wasm-objects-inl.h"
 #include "src/zone/accounting-allocator.h"
 
-using namespace v8::internal;
-using namespace v8::internal::wasm;
+namespace v8 {
+namespace internal {
+namespace wasm {
 
 namespace {
 
@@ -67,10 +70,9 @@ MaybeHandle<String> GetLocalName(Isolate* isolate,
   DCHECK_LE(0, func_index);
   DCHECK_LE(0, local_index);
   if (!debug_info->has_locals_names()) {
-    Handle<WasmCompiledModule> compiled_module(
-        debug_info->wasm_instance()->compiled_module(), isolate);
-    Handle<FixedArray> locals_names =
-        wasm::DecodeLocalNames(isolate, compiled_module);
+    Handle<WasmSharedModuleData> shared(
+        debug_info->wasm_instance()->compiled_module()->shared(), isolate);
+    Handle<FixedArray> locals_names = wasm::DecodeLocalNames(isolate, shared);
     debug_info->set_locals_names(*locals_names);
   }
 
@@ -89,14 +91,11 @@ MaybeHandle<String> GetLocalName(Isolate* isolate,
   return handle(String::cast(func_locals_names->get(local_index)));
 }
 
-// Forward declaration.
-class InterpreterHandle;
-InterpreterHandle* GetInterpreterHandle(WasmDebugInfo* debug_info);
-
 class InterpreterHandle {
-  WasmInstance instance_;
-  WasmInterpreter interpreter_;
+  MOVE_ONLY_NO_DEFAULT_CONSTRUCTOR(InterpreterHandle);
   Isolate* isolate_;
+  const WasmModule* module_;
+  WasmInterpreter interpreter_;
   StepAction next_step_action_ = StepNone;
   int last_step_stack_depth_ = 0;
   std::unordered_map<Address, uint32_t> activations_;
@@ -130,50 +129,28 @@ class InterpreterHandle {
     return {frame_base, frame_limit};
   }
 
- public:
-  // Initialize in the right order, using helper methods to make this possible.
-  // WasmInterpreter has to be allocated in place, since it is not movable.
-  InterpreterHandle(Isolate* isolate, WasmDebugInfo* debug_info,
-                    WasmInstance* external_instance = nullptr)
-      : instance_(debug_info->wasm_instance()->compiled_module()->module()),
-        interpreter_(isolate, GetBytesEnv(external_instance ? external_instance
-                                                            : &instance_,
-                                          debug_info)),
-        isolate_(isolate) {
-    DisallowHeapAllocation no_gc;
-
-    WasmInstanceObject* instance = debug_info->wasm_instance();
-
-    // Set memory start pointer and size.
-    instance_.mem_start = nullptr;
-    instance_.mem_size = 0;
-    if (instance->has_memory_buffer()) {
-      UpdateMemory(instance->memory_buffer());
-    } else {
-      DCHECK_EQ(0, instance_.module->min_mem_pages);
-    }
-
-    // Set pointer to globals storage.
-    instance_.globals_start =
-        debug_info->wasm_instance()->compiled_module()->GetGlobalsStartOrNull();
-  }
-
-  ~InterpreterHandle() {
-    DCHECK_EQ(0, activations_.size());
-  }
-
-  static ModuleBytesEnv GetBytesEnv(WasmInstance* instance,
-                                    WasmDebugInfo* debug_info) {
+  static Vector<const byte> GetBytes(WasmDebugInfo* debug_info) {
     // Return raw pointer into heap. The WasmInterpreter will make its own copy
     // of this data anyway, and there is no heap allocation in-between.
-    SeqOneByteString* bytes_str =
-        debug_info->wasm_instance()->compiled_module()->module_bytes();
-    Vector<const byte> bytes(bytes_str->GetChars(), bytes_str->length());
-    return ModuleBytesEnv(instance->module, instance, bytes);
+    SeqOneByteString* bytes_str = debug_info->wasm_instance()
+                                      ->compiled_module()
+                                      ->shared()
+                                      ->module_bytes();
+    return {bytes_str->GetChars(), static_cast<size_t>(bytes_str->length())};
   }
 
+ public:
+  InterpreterHandle(Isolate* isolate, WasmDebugInfo* debug_info)
+      : isolate_(isolate),
+        module_(
+            debug_info->wasm_instance()->compiled_module()->shared()->module()),
+        interpreter_(isolate, module_, GetBytes(debug_info),
+                     debug_info->wasm_instance()->wasm_context()->get()) {}
+
+  ~InterpreterHandle() { DCHECK_EQ(0, activations_.size()); }
+
   WasmInterpreter* interpreter() { return &interpreter_; }
-  const WasmModule* module() { return instance_.module; }
+  const WasmModule* module() const { return module_; }
 
   void PrepareStep(StepAction step_action) {
     next_step_action_ = step_action;
@@ -187,9 +164,9 @@ class InterpreterHandle {
     return interpreter()->GetThread(0)->GetFrameCount();
   }
 
-  // Returns true if exited regularly, false if a trap/exception occured and was
-  // not handled inside this activation. In the latter case, a pending exception
-  // will have been set on the isolate.
+  // Returns true if exited regularly, false if a trap/exception occurred and
+  // was not handled inside this activation. In the latter case, a pending
+  // exception will have been set on the isolate.
   bool Execute(Handle<WasmInstanceObject> instance_object,
                Address frame_pointer, uint32_t func_index,
                uint8_t* arg_buffer) {
@@ -313,7 +290,12 @@ class InterpreterHandle {
     WasmInterpreterEntryFrame* frame =
         WasmInterpreterEntryFrame::cast(it.frame());
     Handle<WasmInstanceObject> instance_obj(frame->wasm_instance(), isolate_);
-    DCHECK_EQ(this, GetInterpreterHandle(instance_obj->debug_info()));
+    // Check that this is indeed the instance which is connected to this
+    // interpreter.
+    DCHECK_EQ(this, Managed<wasm::InterpreterHandle>::cast(
+                        instance_obj->debug_info()->get(
+                            WasmDebugInfo::kInterpreterHandleIndex))
+                        ->get());
     return instance_obj;
   }
 
@@ -327,17 +309,16 @@ class InterpreterHandle {
 
     // Check whether we hit a breakpoint.
     if (isolate_->debug()->break_points_active()) {
-      Handle<WasmCompiledModule> compiled_module(
-          GetInstanceObject()->compiled_module(), isolate_);
-      int position = GetTopPosition(compiled_module);
+      Handle<WasmSharedModuleData> shared(
+          GetInstanceObject()->compiled_module()->shared(), isolate_);
+      int position = GetTopPosition(shared);
       Handle<FixedArray> breakpoints;
-      if (compiled_module->CheckBreakPoints(position).ToHandle(&breakpoints)) {
+      if (WasmSharedModuleData::CheckBreakPoints(isolate_, shared, position)
+              .ToHandle(&breakpoints)) {
         // We hit one or several breakpoints. Clear stepping, notify the
         // listeners and return.
         ClearStepping();
-        Handle<Object> hit_breakpoints_js =
-            isolate_->factory()->NewJSArrayWithElements(breakpoints);
-        isolate_->debug()->OnDebugBreak(hit_breakpoints_js);
+        isolate_->debug()->OnDebugBreak(breakpoints);
         return;
       }
     }
@@ -362,16 +343,16 @@ class InterpreterHandle {
     }
     if (!hit_step) return;
     ClearStepping();
-    isolate_->debug()->OnDebugBreak(isolate_->factory()->undefined_value());
+    isolate_->debug()->OnDebugBreak(isolate_->factory()->empty_fixed_array());
   }
 
-  int GetTopPosition(Handle<WasmCompiledModule> compiled_module) {
+  int GetTopPosition(Handle<WasmSharedModuleData> shared) {
     DCHECK_EQ(1, interpreter()->GetThreadCount());
     WasmInterpreter::Thread* thread = interpreter()->GetThread(0);
     DCHECK_LT(0, thread->GetFrameCount());
 
     auto frame = thread->GetFrame(thread->GetFrameCount() - 1);
-    return compiled_module->GetFunctionOffset(frame->function()->func_index) +
+    return shared->GetFunctionOffset(frame->function()->func_index) +
            frame->pc();
   }
 
@@ -392,8 +373,8 @@ class InterpreterHandle {
     return stack;
   }
 
-  std::unique_ptr<wasm::InterpretedFrame> GetInterpretedFrame(
-      Address frame_pointer, int idx) {
+  WasmInterpreter::FramePtr GetInterpretedFrame(Address frame_pointer,
+                                                int idx) {
     DCHECK_EQ(1, interpreter()->GetThreadCount());
     WasmInterpreter::Thread* thread = interpreter()->GetThread(0);
 
@@ -430,34 +411,19 @@ class InterpreterHandle {
     return interpreter()->GetThread(0)->NumInterpretedCalls();
   }
 
-  void UpdateMemory(JSArrayBuffer* new_memory) {
-    byte* mem_start = reinterpret_cast<byte*>(new_memory->backing_store());
-    uint32_t mem_size;
-    CHECK(new_memory->byte_length()->ToUint32(&mem_size));
-    interpreter()->UpdateMemory(mem_start, mem_size);
-  }
-
-  Handle<JSArray> GetScopeDetails(Address frame_pointer, int frame_index,
-                                  Handle<WasmDebugInfo> debug_info) {
-    auto frame = GetInterpretedFrame(frame_pointer, frame_index);
+  Handle<JSObject> GetGlobalScopeObject(wasm::InterpretedFrame* frame,
+                                        Handle<WasmDebugInfo> debug_info) {
     Isolate* isolate = debug_info->GetIsolate();
     Handle<WasmInstanceObject> instance(debug_info->wasm_instance(), isolate);
 
-    Handle<FixedArray> global_scope =
-        isolate_->factory()->NewFixedArray(ScopeIterator::kScopeDetailsSize);
-    global_scope->set(ScopeIterator::kScopeDetailsTypeIndex,
-                      Smi::FromInt(ScopeIterator::ScopeTypeGlobal));
+    // TODO(clemensh): Add globals to the global scope.
     Handle<JSObject> global_scope_object =
         isolate_->factory()->NewJSObjectWithNullProto();
-    global_scope->set(ScopeIterator::kScopeDetailsObjectIndex,
-                      *global_scope_object);
-
-    // TODO(clemensh): Add globals to the global scope.
-
-    if (instance->has_memory_buffer()) {
+    if (instance->has_memory_object()) {
       Handle<String> name = isolate_->factory()->InternalizeOneByteString(
           STATIC_CHAR_VECTOR("memory"));
-      Handle<JSArrayBuffer> memory_buffer(instance->memory_buffer(), isolate_);
+      Handle<JSArrayBuffer> memory_buffer(
+          instance->memory_object()->array_buffer(), isolate_);
       uint32_t byte_length;
       CHECK(memory_buffer->byte_length()->ToUint32(&byte_length));
       Handle<JSTypedArray> uint8_array = isolate_->factory()->NewJSTypedArray(
@@ -466,16 +432,15 @@ class InterpreterHandle {
                                                uint8_array, NONE)
           .Assert();
     }
+    return global_scope_object;
+  }
 
-    Handle<FixedArray> local_scope =
-        isolate_->factory()->NewFixedArray(ScopeIterator::kScopeDetailsSize);
-    local_scope->set(ScopeIterator::kScopeDetailsTypeIndex,
-                     Smi::FromInt(ScopeIterator::ScopeTypeLocal));
+  Handle<JSObject> GetLocalScopeObject(wasm::InterpretedFrame* frame,
+                                       Handle<WasmDebugInfo> debug_info) {
+    Isolate* isolate = debug_info->GetIsolate();
+
     Handle<JSObject> local_scope_object =
         isolate_->factory()->NewJSObjectWithNullProto();
-    local_scope->set(ScopeIterator::kScopeDetailsObjectIndex,
-                     *local_scope_object);
-
     // Fill parameters and locals.
     int num_params = frame->GetParameterCount();
     int num_locals = frame->GetLocalCount();
@@ -525,6 +490,30 @@ class InterpreterHandle {
           stack_obj, static_cast<uint32_t>(i), value_obj, NONE)
           .Assert();
     }
+    return local_scope_object;
+  }
+
+  Handle<JSArray> GetScopeDetails(Address frame_pointer, int frame_index,
+                                  Handle<WasmDebugInfo> debug_info) {
+    auto frame = GetInterpretedFrame(frame_pointer, frame_index);
+
+    Handle<FixedArray> global_scope =
+        isolate_->factory()->NewFixedArray(ScopeIterator::kScopeDetailsSize);
+    global_scope->set(ScopeIterator::kScopeDetailsTypeIndex,
+                      Smi::FromInt(ScopeIterator::ScopeTypeGlobal));
+    Handle<JSObject> global_scope_object =
+        GetGlobalScopeObject(frame.get(), debug_info);
+    global_scope->set(ScopeIterator::kScopeDetailsObjectIndex,
+                      *global_scope_object);
+
+    Handle<FixedArray> local_scope =
+        isolate_->factory()->NewFixedArray(ScopeIterator::kScopeDetailsSize);
+    local_scope->set(ScopeIterator::kScopeDetailsTypeIndex,
+                     Smi::FromInt(ScopeIterator::ScopeTypeLocal));
+    Handle<JSObject> local_scope_object =
+        GetLocalScopeObject(frame.get(), debug_info);
+    local_scope->set(ScopeIterator::kScopeDetailsObjectIndex,
+                     *local_scope_object);
 
     Handle<JSArray> global_jsarr =
         isolate_->factory()->NewJSArrayWithElements(global_scope);
@@ -537,34 +526,40 @@ class InterpreterHandle {
   }
 };
 
-InterpreterHandle* GetOrCreateInterpreterHandle(
+}  // namespace
+
+}  // namespace wasm
+
+namespace {
+
+wasm::InterpreterHandle* GetOrCreateInterpreterHandle(
     Isolate* isolate, Handle<WasmDebugInfo> debug_info) {
   Handle<Object> handle(debug_info->get(WasmDebugInfo::kInterpreterHandleIndex),
                         isolate);
   if (handle->IsUndefined(isolate)) {
-    InterpreterHandle* cpp_handle = new InterpreterHandle(isolate, *debug_info);
-    handle = Managed<InterpreterHandle>::New(isolate, cpp_handle);
+    handle = Managed<wasm::InterpreterHandle>::Allocate(isolate, isolate,
+                                                        *debug_info);
     debug_info->set(WasmDebugInfo::kInterpreterHandleIndex, *handle);
   }
 
-  return Handle<Managed<InterpreterHandle>>::cast(handle)->get();
+  return Handle<Managed<wasm::InterpreterHandle>>::cast(handle)->get();
 }
 
-InterpreterHandle* GetInterpreterHandle(WasmDebugInfo* debug_info) {
+wasm::InterpreterHandle* GetInterpreterHandle(WasmDebugInfo* debug_info) {
   Object* handle_obj = debug_info->get(WasmDebugInfo::kInterpreterHandleIndex);
   DCHECK(!handle_obj->IsUndefined(debug_info->GetIsolate()));
-  return Managed<InterpreterHandle>::cast(handle_obj)->get();
+  return Managed<wasm::InterpreterHandle>::cast(handle_obj)->get();
 }
 
-InterpreterHandle* GetInterpreterHandleOrNull(WasmDebugInfo* debug_info) {
+wasm::InterpreterHandle* GetInterpreterHandleOrNull(WasmDebugInfo* debug_info) {
   Object* handle_obj = debug_info->get(WasmDebugInfo::kInterpreterHandleIndex);
   if (handle_obj->IsUndefined(debug_info->GetIsolate())) return nullptr;
-  return Managed<InterpreterHandle>::cast(handle_obj)->get();
+  return Managed<wasm::InterpreterHandle>::cast(handle_obj)->get();
 }
 
 int GetNumFunctions(WasmInstanceObject* instance) {
   size_t num_functions =
-      instance->compiled_module()->module()->functions.size();
+      instance->compiled_module()->shared()->module()->functions.size();
   DCHECK_GE(kMaxInt, num_functions);
   return static_cast<int>(num_functions);
 }
@@ -581,9 +576,11 @@ Handle<FixedArray> GetOrCreateInterpretedFunctions(
   return new_arr;
 }
 
-using CodeRelocationMap = IdentityMap<Handle<Code>, FreeStoreAllocationPolicy>;
+using CodeRelocationMap = std::map<Address, Address>;
+using CodeRelocationMapGC =
+    IdentityMap<Handle<Code>, FreeStoreAllocationPolicy>;
 
-void RedirectCallsitesInCode(Code* code, CodeRelocationMap& map) {
+void RedirectCallsitesInCodeGC(Code* code, CodeRelocationMapGC& map) {
   DisallowHeapAllocation no_gc;
   for (RelocIterator it(code, RelocInfo::kCodeTargetMask); !it.done();
        it.next()) {
@@ -591,28 +588,77 @@ void RedirectCallsitesInCode(Code* code, CodeRelocationMap& map) {
     Code* target = Code::GetCodeFromTargetAddress(it.rinfo()->target_address());
     Handle<Code>* new_target = map.Find(target);
     if (!new_target) continue;
-    it.rinfo()->set_target_address(code->GetIsolate(),
-                                   (*new_target)->instruction_start());
+    it.rinfo()->set_target_address((*new_target)->instruction_start());
   }
 }
 
-void RedirectCallsitesInInstance(Isolate* isolate, WasmInstanceObject* instance,
-                                 CodeRelocationMap& map) {
+void RedirectCallsitesInCode(Isolate* isolate, const wasm::WasmCode* code,
+                             CodeRelocationMap* map) {
+  DisallowHeapAllocation no_gc;
+  for (RelocIterator it(code->instructions(), code->reloc_info(),
+                        code->constant_pool(),
+                        RelocInfo::ModeMask(RelocInfo::WASM_CALL));
+       !it.done(); it.next()) {
+    Address target = it.rinfo()->target_address();
+    auto new_target = map->find(target);
+    if (new_target == map->end()) continue;
+    it.rinfo()->set_wasm_call_address(new_target->second);
+  }
+}
+
+void RedirectCallsitesInJSWrapperCode(Isolate* isolate, Code* code,
+                                      CodeRelocationMap* map) {
+  DisallowHeapAllocation no_gc;
+  for (RelocIterator it(code, RelocInfo::ModeMask(RelocInfo::JS_TO_WASM_CALL));
+       !it.done(); it.next()) {
+    Address target = it.rinfo()->js_to_wasm_address();
+    auto new_target = map->find(target);
+    if (new_target == map->end()) continue;
+    it.rinfo()->set_js_to_wasm_address(new_target->second);
+  }
+}
+
+void RedirectCallsitesInInstanceGC(Isolate* isolate,
+                                   WasmInstanceObject* instance,
+                                   CodeRelocationMapGC& map) {
   DisallowHeapAllocation no_gc;
   // Redirect all calls in wasm functions.
-  FixedArray* code_table = instance->compiled_module()->ptr_to_code_table();
+  FixedArray* code_table = instance->compiled_module()->code_table();
   for (int i = 0, e = GetNumFunctions(instance); i < e; ++i) {
-    RedirectCallsitesInCode(Code::cast(code_table->get(i)), map);
+    RedirectCallsitesInCodeGC(Code::cast(code_table->get(i)), map);
   }
+  // TODO(6668): Find instances that imported our code and also patch those.
 
   // Redirect all calls in exported functions.
   FixedArray* weak_exported_functions =
-      instance->compiled_module()->ptr_to_weak_exported_functions();
+      instance->compiled_module()->weak_exported_functions();
   for (int i = 0, e = weak_exported_functions->length(); i != e; ++i) {
     WeakCell* weak_function = WeakCell::cast(weak_exported_functions->get(i));
     if (weak_function->cleared()) continue;
     Code* code = JSFunction::cast(weak_function->value())->code();
-    RedirectCallsitesInCode(code, map);
+    RedirectCallsitesInCodeGC(code, map);
+  }
+}
+
+void RedirectCallsitesInInstance(Isolate* isolate, WasmInstanceObject* instance,
+                                 CodeRelocationMap* map) {
+  DisallowHeapAllocation no_gc;
+  // Redirect all calls in wasm functions.
+  for (uint32_t i = 0, e = GetNumFunctions(instance); i < e; ++i) {
+    wasm::WasmCode* code =
+        instance->compiled_module()->GetNativeModule()->GetCode(i);
+    RedirectCallsitesInCode(isolate, code, map);
+  }
+  // TODO(6668): Find instances that imported our code and also patch those.
+
+  // Redirect all calls in exported functions.
+  FixedArray* weak_exported_functions =
+      instance->compiled_module()->weak_exported_functions();
+  for (int i = 0, e = weak_exported_functions->length(); i != e; ++i) {
+    WeakCell* weak_function = WeakCell::cast(weak_exported_functions->get(i));
+    if (weak_function->cleared()) continue;
+    Code* code = JSFunction::cast(weak_function->value())->code();
+    RedirectCallsitesInJSWrapperCode(isolate, code, map);
   }
 }
 
@@ -628,15 +674,16 @@ Handle<WasmDebugInfo> WasmDebugInfo::New(Handle<WasmInstanceObject> instance) {
   return debug_info;
 }
 
-WasmInterpreter* WasmDebugInfo::SetupForTesting(
-    Handle<WasmInstanceObject> instance_obj, WasmInstance* instance) {
+wasm::WasmInterpreter* WasmDebugInfo::SetupForTesting(
+    Handle<WasmInstanceObject> instance_obj) {
   Handle<WasmDebugInfo> debug_info = WasmDebugInfo::New(instance_obj);
   Isolate* isolate = instance_obj->GetIsolate();
-  InterpreterHandle* cpp_handle =
-      new InterpreterHandle(isolate, *debug_info, instance);
-  Handle<Object> handle = Managed<InterpreterHandle>::New(isolate, cpp_handle);
-  debug_info->set(kInterpreterHandleIndex, *handle);
-  return cpp_handle->interpreter();
+  auto interp_handle =
+      Managed<wasm::InterpreterHandle>::Allocate(isolate, isolate, *debug_info);
+  debug_info->set(kInterpreterHandleIndex, *interp_handle);
+  auto ret = interp_handle->get()->interpreter();
+  ret->SetCallIndirectTestMode();
+  return ret;
 }
 
 bool WasmDebugInfo::IsWasmDebugInfo(Object* object) {
@@ -663,9 +710,9 @@ WasmInstanceObject* WasmDebugInfo::wasm_instance() {
 void WasmDebugInfo::SetBreakpoint(Handle<WasmDebugInfo> debug_info,
                                   int func_index, int offset) {
   Isolate* isolate = debug_info->GetIsolate();
-  InterpreterHandle* handle = GetOrCreateInterpreterHandle(isolate, debug_info);
+  auto* handle = GetOrCreateInterpreterHandle(isolate, debug_info);
   RedirectToInterpreter(debug_info, Vector<int>(&func_index, 1));
-  const WasmFunction* func = &handle->module()->functions[func_index];
+  const wasm::WasmFunction* func = &handle->module()->functions[func_index];
   handle->interpreter()->SetBreakpoint(func, offset, true);
 }
 
@@ -677,25 +724,51 @@ void WasmDebugInfo::RedirectToInterpreter(Handle<WasmDebugInfo> debug_info,
   Handle<FixedArray> interpreted_functions =
       GetOrCreateInterpretedFunctions(isolate, debug_info);
   Handle<WasmInstanceObject> instance(debug_info->wasm_instance(), isolate);
-  Handle<FixedArray> code_table = instance->compiled_module()->code_table();
-  CodeRelocationMap code_to_relocate(isolate->heap());
+  wasm::NativeModule* native_module =
+      instance->compiled_module()->GetNativeModule();
+  wasm::WasmModule* module = instance->module();
+  CodeRelocationMap code_to_relocate;
+
+  Handle<FixedArray> code_table(instance->compiled_module()->code_table(),
+                                isolate);
+  CodeRelocationMapGC code_to_relocate_gc(isolate->heap());
+  // We may modify js wrappers, as well as wasm functions. Hence the 2
+  // modification scopes.
+  CodeSpaceMemoryModificationScope modification_scope(isolate->heap());
+  wasm::NativeModuleModificationScope native_module_modification_scope(
+      native_module);
+
   for (int func_index : func_indexes) {
     DCHECK_LE(0, func_index);
-    DCHECK_GT(debug_info->wasm_instance()->module()->functions.size(),
-              func_index);
+    DCHECK_GT(module->functions.size(), func_index);
     if (!interpreted_functions->get(func_index)->IsUndefined(isolate)) continue;
 
     Handle<Code> new_code = compiler::CompileWasmInterpreterEntry(
-        isolate, func_index,
-        instance->compiled_module()->module()->functions[func_index].sig,
-        instance);
-
-    Code* old_code = Code::cast(code_table->get(func_index));
-    interpreted_functions->set(func_index, *new_code);
-    DCHECK_NULL(code_to_relocate.Find(old_code));
-    code_to_relocate.Set(old_code, new_code);
+        isolate, func_index, module->functions[func_index].sig, instance);
+    if (FLAG_wasm_jit_to_native) {
+      const wasm::WasmCode* wasm_new_code =
+          native_module->AddInterpreterWrapper(new_code, func_index);
+      const wasm::WasmCode* old_code =
+          native_module->GetCode(static_cast<uint32_t>(func_index));
+      Handle<Foreign> foreign_holder = isolate->factory()->NewForeign(
+          wasm_new_code->instructions().start(), TENURED);
+      interpreted_functions->set(func_index, *foreign_holder);
+      DCHECK_EQ(0, code_to_relocate.count(old_code->instructions().start()));
+      code_to_relocate.insert(
+          std::make_pair(old_code->instructions().start(),
+                         wasm_new_code->instructions().start()));
+    } else {
+      Code* old_code = Code::cast(code_table->get(func_index));
+      interpreted_functions->set(func_index, *new_code);
+      DCHECK_NULL(code_to_relocate_gc.Find(old_code));
+      code_to_relocate_gc.Set(old_code, new_code);
+    }
   }
-  RedirectCallsitesInInstance(isolate, *instance, code_to_relocate);
+  if (FLAG_wasm_jit_to_native) {
+    RedirectCallsitesInInstance(isolate, *instance, &code_to_relocate);
+  } else {
+    RedirectCallsitesInInstanceGC(isolate, *instance, code_to_relocate_gc);
+  }
 }
 
 void WasmDebugInfo::PrepareStep(StepAction step_action) {
@@ -715,7 +788,7 @@ std::vector<std::pair<uint32_t, int>> WasmDebugInfo::GetInterpretedStack(
   return GetInterpreterHandle(this)->GetInterpretedStack(frame_pointer);
 }
 
-std::unique_ptr<wasm::InterpretedFrame> WasmDebugInfo::GetInterpretedFrame(
+wasm::WasmInterpreter::FramePtr WasmDebugInfo::GetInterpretedFrame(
     Address frame_pointer, int idx) {
   return GetInterpreterHandle(this)->GetInterpretedFrame(frame_pointer, idx);
 }
@@ -725,20 +798,73 @@ void WasmDebugInfo::Unwind(Address frame_pointer) {
 }
 
 uint64_t WasmDebugInfo::NumInterpretedCalls() {
-  auto handle = GetInterpreterHandleOrNull(this);
+  auto* handle = GetInterpreterHandleOrNull(this);
   return handle ? handle->NumInterpretedCalls() : 0;
 }
 
-void WasmDebugInfo::UpdateMemory(JSArrayBuffer* new_memory) {
-  InterpreterHandle* interp_handle = GetInterpreterHandleOrNull(this);
-  if (!interp_handle) return;
-  interp_handle->UpdateMemory(new_memory);
+// static
+Handle<JSObject> WasmDebugInfo::GetScopeDetails(
+    Handle<WasmDebugInfo> debug_info, Address frame_pointer, int frame_index) {
+  auto* interp_handle = GetInterpreterHandle(*debug_info);
+  return interp_handle->GetScopeDetails(frame_pointer, frame_index, debug_info);
 }
 
 // static
-Handle<JSArray> WasmDebugInfo::GetScopeDetails(Handle<WasmDebugInfo> debug_info,
-                                               Address frame_pointer,
-                                               int frame_index) {
-  InterpreterHandle* interp_handle = GetInterpreterHandle(*debug_info);
-  return interp_handle->GetScopeDetails(frame_pointer, frame_index, debug_info);
+Handle<JSObject> WasmDebugInfo::GetGlobalScopeObject(
+    Handle<WasmDebugInfo> debug_info, Address frame_pointer, int frame_index) {
+  auto* interp_handle = GetInterpreterHandle(*debug_info);
+  auto frame = interp_handle->GetInterpretedFrame(frame_pointer, frame_index);
+  return interp_handle->GetGlobalScopeObject(frame.get(), debug_info);
 }
+
+// static
+Handle<JSObject> WasmDebugInfo::GetLocalScopeObject(
+    Handle<WasmDebugInfo> debug_info, Address frame_pointer, int frame_index) {
+  auto* interp_handle = GetInterpreterHandle(*debug_info);
+  auto frame = interp_handle->GetInterpretedFrame(frame_pointer, frame_index);
+  return interp_handle->GetLocalScopeObject(frame.get(), debug_info);
+}
+
+// static
+Handle<JSFunction> WasmDebugInfo::GetCWasmEntry(
+    Handle<WasmDebugInfo> debug_info, wasm::FunctionSig* sig) {
+  Isolate* isolate = debug_info->GetIsolate();
+  DCHECK_EQ(debug_info->has_c_wasm_entries(),
+            debug_info->has_c_wasm_entry_map());
+  if (!debug_info->has_c_wasm_entries()) {
+    auto entries = isolate->factory()->NewFixedArray(4, TENURED);
+    debug_info->set_c_wasm_entries(*entries);
+    auto managed_map = Managed<wasm::SignatureMap>::Allocate(isolate);
+    debug_info->set_c_wasm_entry_map(*managed_map);
+  }
+  Handle<FixedArray> entries(debug_info->c_wasm_entries(), isolate);
+  wasm::SignatureMap* map = debug_info->c_wasm_entry_map()->get();
+  int32_t index = map->Find(sig);
+  if (index == -1) {
+    index = static_cast<int32_t>(map->FindOrInsert(sig));
+    if (index == entries->length()) {
+      entries = isolate->factory()->CopyFixedArrayAndGrow(
+          entries, entries->length(), TENURED);
+      debug_info->set_c_wasm_entries(*entries);
+    }
+    DCHECK(entries->get(index)->IsUndefined(isolate));
+    Handle<Code> new_entry_code = compiler::CompileCWasmEntry(isolate, sig);
+    Handle<String> name = isolate->factory()->InternalizeOneByteString(
+        STATIC_CHAR_VECTOR("c-wasm-entry"));
+    Handle<SharedFunctionInfo> shared =
+        isolate->factory()->NewSharedFunctionInfo(name, new_entry_code, false);
+    shared->set_internal_formal_parameter_count(
+        compiler::CWasmEntryParameters::kNumParameters);
+    NewFunctionArgs args = NewFunctionArgs::ForWasm(
+        name, new_entry_code, isolate->sloppy_function_map());
+    Handle<JSFunction> new_entry = isolate->factory()->NewFunction(args);
+    new_entry->set_context(
+        debug_info->wasm_instance()->compiled_module()->native_context());
+    new_entry->set_shared(*shared);
+    entries->set(index, *new_entry);
+  }
+  return handle(JSFunction::cast(entries->get(index)));
+}
+
+}  // namespace internal
+}  // namespace v8

@@ -6,7 +6,7 @@
 
 #include "modules/sensor/SensorProxy.h"
 #include "platform/mojo/MojoHelper.h"
-#include "services/device/public/interfaces/constants.mojom-blink.h"
+#include "services/device/public/mojom/constants.mojom-blink.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace blink {
@@ -21,31 +21,30 @@ void SensorProviderProxy::InitializeIfNeeded() {
 
   GetSupplementable()->GetInterfaceProvider().GetInterface(
       mojo::MakeRequest(&sensor_provider_));
-  sensor_provider_.set_connection_error_handler(ConvertToBaseCallback(
+  sensor_provider_.set_connection_error_handler(
       WTF::Bind(&SensorProviderProxy::OnSensorProviderConnectionError,
-                WrapWeakPersistent(this))));
+                WrapWeakPersistent(this)));
 }
 
-const char* SensorProviderProxy::SupplementName() {
-  return "SensorProvider";
-}
+// static
+const char SensorProviderProxy::kSupplementName[] = "SensorProvider";
 
 // static
 SensorProviderProxy* SensorProviderProxy::From(LocalFrame* frame) {
   DCHECK(frame);
-  SensorProviderProxy* provider_proxy = static_cast<SensorProviderProxy*>(
-      Supplement<LocalFrame>::From(*frame, SupplementName()));
+  SensorProviderProxy* provider_proxy =
+      Supplement<LocalFrame>::From<SensorProviderProxy>(*frame);
   if (!provider_proxy) {
     provider_proxy = new SensorProviderProxy(*frame);
-    Supplement<LocalFrame>::ProvideTo(*frame, SupplementName(), provider_proxy);
+    Supplement<LocalFrame>::ProvideTo(*frame, provider_proxy);
   }
   provider_proxy->InitializeIfNeeded();
   return provider_proxy;
 }
 
-SensorProviderProxy::~SensorProviderProxy() {}
+SensorProviderProxy::~SensorProviderProxy() = default;
 
-DEFINE_TRACE(SensorProviderProxy) {
+void SensorProviderProxy::Trace(blink::Visitor* visitor) {
   visitor->Trace(sensor_proxies_);
   Supplement<LocalFrame>::Trace(visitor);
 }

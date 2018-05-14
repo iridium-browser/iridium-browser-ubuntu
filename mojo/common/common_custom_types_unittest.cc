@@ -9,7 +9,6 @@
 #include "base/numerics/safe_math.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "mojo/common/common_custom_types_struct_traits.h"
 #include "mojo/common/process_id.mojom.h"
@@ -143,21 +142,6 @@ class TestValueImpl : public TestValue {
   mojo::Binding<TestValue> binding_;
 };
 
-class TestString16Impl : public TestString16 {
- public:
-  explicit TestString16Impl(TestString16Request request)
-      : binding_(this, std::move(request)) {}
-
-  // TestString16 implementation:
-  void BounceString16(const base::string16& in,
-                      BounceString16Callback callback) override {
-    std::move(callback).Run(in);
-  }
-
- private:
-  mojo::Binding<TestString16> binding_;
-};
-
 class TestFileImpl : public TestFile {
  public:
   explicit TestFileImpl(TestFileRequest request)
@@ -284,39 +268,39 @@ TEST_F(CommonCustomTypesTest, Value) {
   ASSERT_TRUE(ptr->BounceValue(nullptr, &output));
   EXPECT_FALSE(output);
 
-  auto input = base::MakeUnique<base::Value>();
+  auto input = std::make_unique<base::Value>();
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
-  EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
+  EXPECT_EQ(*input, *output);
 
-  input = base::MakeUnique<base::Value>(123);
+  input = std::make_unique<base::Value>(123);
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
-  EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
+  EXPECT_EQ(*input, *output);
 
-  input = base::MakeUnique<base::Value>(1.23);
+  input = std::make_unique<base::Value>(1.23);
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
-  EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
+  EXPECT_EQ(*input, *output);
 
-  input = base::MakeUnique<base::Value>(false);
+  input = std::make_unique<base::Value>(false);
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
-  EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
+  EXPECT_EQ(*input, *output);
 
-  input = base::MakeUnique<base::Value>("test string");
+  input = std::make_unique<base::Value>("test string");
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
-  EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
+  EXPECT_EQ(*input, *output);
 
   input = base::Value::CreateWithCopiedBuffer("mojo", 4);
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
-  EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
+  EXPECT_EQ(*input, *output);
 
-  auto dict = base::MakeUnique<base::DictionaryValue>();
+  auto dict = std::make_unique<base::DictionaryValue>();
   dict->SetBoolean("bool", false);
   dict->SetInteger("int", 2);
   dict->SetString("string", "some string");
   dict->SetBoolean("nested.bool", true);
   dict->SetInteger("nested.int", 9);
   dict->Set("some_binary", base::Value::CreateWithCopiedBuffer("mojo", 4));
-  dict->Set("null_value", base::MakeUnique<base::Value>());
-  dict->SetIntegerWithoutPathExpansion("non_nested.int", 10);
+  dict->Set("null_value", std::make_unique<base::Value>());
+  dict->SetKey("non_nested.int", base::Value(10));
   {
     std::unique_ptr<base::ListValue> dict_list(new base::ListValue());
     dict_list->AppendString("string");
@@ -326,18 +310,18 @@ TEST_F(CommonCustomTypesTest, Value) {
 
   std::unique_ptr<base::DictionaryValue> dict_output;
   ASSERT_TRUE(ptr->BounceDictionaryValue(dict->CreateDeepCopy(), &dict_output));
-  EXPECT_TRUE(base::Value::Equals(dict.get(), dict_output.get()));
+  EXPECT_EQ(*dict, *dict_output);
 
   input = std::move(dict);
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
-  EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
+  EXPECT_EQ(*input, *output);
 
-  auto list = base::MakeUnique<base::ListValue>();
+  auto list = std::make_unique<base::ListValue>();
   list->AppendString("string");
   list->AppendDouble(42.1);
   list->AppendBoolean(true);
   list->Append(base::Value::CreateWithCopiedBuffer("mojo", 4));
-  list->Append(base::MakeUnique<base::Value>());
+  list->Append(std::make_unique<base::Value>());
   {
     std::unique_ptr<base::DictionaryValue> list_dict(
         new base::DictionaryValue());
@@ -346,37 +330,11 @@ TEST_F(CommonCustomTypesTest, Value) {
   }
   std::unique_ptr<base::ListValue> list_output;
   ASSERT_TRUE(ptr->BounceListValue(list->CreateDeepCopy(), &list_output));
-  EXPECT_TRUE(base::Value::Equals(list.get(), list_output.get()));
+  EXPECT_EQ(*list, *list_output);
 
   input = std::move(list);
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
-  ASSERT_TRUE(base::Value::Equals(input.get(), output.get()));
-}
-
-TEST_F(CommonCustomTypesTest, String16) {
-  base::RunLoop run_loop;
-
-  TestString16Ptr ptr;
-  TestString16Impl impl(MakeRequest(&ptr));
-
-  base::string16 str16 = base::ASCIIToUTF16("hello world");
-
-  ptr->BounceString16(str16, ExpectResponse(&str16, run_loop.QuitClosure()));
-
-  run_loop.Run();
-}
-
-TEST_F(CommonCustomTypesTest, EmptyString16) {
-  base::RunLoop run_loop;
-
-  TestString16Ptr ptr;
-  TestString16Impl impl(MakeRequest(&ptr));
-
-  base::string16 str16;
-
-  ptr->BounceString16(str16, ExpectResponse(&str16, run_loop.QuitClosure()));
-
-  run_loop.Run();
+  ASSERT_EQ(*input, *output);
 }
 
 TEST_F(CommonCustomTypesTest, File) {

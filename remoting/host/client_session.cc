@@ -8,15 +8,17 @@
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
+#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "remoting/base/capabilities.h"
 #include "remoting/base/constants.h"
+#include "remoting/base/session_options.h"
 #include "remoting/base/logging.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/desktop_environment.h"
+#include "remoting/host/file_transfer_message_handler.h"
 #include "remoting/host/host_extension_session.h"
 #include "remoting/host/input_injector.h"
 #include "remoting/host/mouse_shape_pump.h"
@@ -25,6 +27,7 @@
 #include "remoting/proto/control.pb.h"
 #include "remoting/proto/event.pb.h"
 #include "remoting/protocol/audio_stream.h"
+#include "remoting/protocol/capability_names.h"
 #include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/clipboard_thread_proxy.h"
 #include "remoting/protocol/pairing_registry.h"
@@ -173,13 +176,20 @@ void ClientSession::SetCapabilities(
   }
 
   // Compute the set of capabilities supported by both client and host.
-  client_capabilities_ = base::MakeUnique<std::string>();
+  client_capabilities_ = std::make_unique<std::string>();
   if (capabilities.has_capabilities())
     *client_capabilities_ = capabilities.capabilities();
   capabilities_ = IntersectCapabilities(*client_capabilities_,
                                         host_capabilities_);
   extension_manager_->OnNegotiatedCapabilities(
       connection_->client_stub(), capabilities_);
+
+  if (HasCapability(capabilities_, protocol::kFileTransferCapability)) {
+    data_channel_manager_.RegisterCreateHandlerCallback(
+        kFileTransferDataChannelPrefix,
+        base::Bind(&ClientSession::CreateFileTransferMessageHandler,
+                   base::Unretained(this)));
+  }
 
   VLOG(1) << "Client capabilities: " << *client_capabilities_;
 
@@ -233,9 +243,13 @@ void ClientSession::OnConnectionAuthenticated() {
   // Notify EventHandler.
   event_handler_->OnSessionAuthenticated(this);
 
+  const SessionOptions session_options(
+      host_experiment_session_plugin_.configuration());
+
+  connection_->ApplySessionOptions(session_options);
+
   DesktopEnvironmentOptions options = desktop_environment_options_;
-  options.ApplyHostSessionOptions(HostSessionOptions(
-      host_experiment_session_plugin_.configuration()));
+  options.ApplySessionOptions(session_options);
   // Create the desktop environment. Drop the connection if it could not be
   // created for any reason (for instance the curtain could not initialize).
   desktop_environment_ =
@@ -427,7 +441,7 @@ void ClientSession::SetEventTimestampsSourceForTests(
 
 std::unique_ptr<protocol::ClipboardStub> ClientSession::CreateClipboardProxy() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return base::MakeUnique<protocol::ClipboardThreadProxy>(
+  return std::make_unique<protocol::ClipboardThreadProxy>(
       client_clipboard_factory_.GetWeakPtr(),
       base::ThreadTaskRunnerHandle::Get());
 }
@@ -473,6 +487,17 @@ void ClientSession::OnVideoSizeChanged(protocol::VideoStream* video_stream,
       break;
     }
   }
+}
+
+void ClientSession::CreateFileTransferMessageHandler(
+    const std::string& channel_name,
+    std::unique_ptr<protocol::MessagePipe> pipe) {
+  // FileTransferMessageHandler manages its own lifetime and is tied to the
+  // lifetime of |pipe|. Once |pipe| is closed, this instance will be cleaned
+  // up.
+  new FileTransferMessageHandler(
+      channel_name, std::move(pipe),
+      desktop_environment_->CreateFileProxyWrapper());
 }
 
 }  // namespace remoting

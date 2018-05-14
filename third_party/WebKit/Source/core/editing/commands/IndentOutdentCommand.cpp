@@ -25,14 +25,18 @@
 
 #include "core/editing/commands/IndentOutdentCommand.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/editing/EditingUtilities.h"
+#include "core/editing/SelectionTemplate.h"
+#include "core/editing/VisiblePosition.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/editing/VisibleUnits.h"
+#include "core/editing/commands/EditingCommandsUtilities.h"
 #include "core/editing/commands/InsertListCommand.h"
 #include "core/html/HTMLBRElement.h"
 #include "core/html/HTMLElement.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutObject.h"
 
 namespace blink {
@@ -50,7 +54,7 @@ static bool IsHTMLListOrBlockquoteElement(const Node* node) {
   const HTMLElement& element = ToHTMLElement(*node);
   // TODO(yosin): We should check OL/UL element has "list-style-type" CSS
   // property to make sure they layout contents as list.
-  return isHTMLUListElement(element) || isHTMLOListElement(element) ||
+  return IsHTMLUListElement(element) || IsHTMLOListElement(element) ||
          element.HasTagName(blockquoteTag);
 }
 
@@ -76,7 +80,7 @@ bool IndentOutdentCommand::TryIndentingAsListItem(const Position& start,
   Element* selected_list_item = EnclosingBlock(last_node_in_selected_paragraph);
 
   // FIXME: we need to deal with the case where there is no li (malformed HTML)
-  if (!isHTMLLIElement(selected_list_item))
+  if (!IsHTMLLIElement(selected_list_item))
     return false;
 
   // FIXME: previousElementSibling does not ignore non-rendered content like
@@ -88,8 +92,9 @@ bool IndentOutdentCommand::TryIndentingAsListItem(const Position& start,
   // We should calculate visible range in list item because inserting new
   // list element will change visibility of list item, e.g. :first-child
   // CSS selector.
-  HTMLElement* new_list = ToHTMLElement(GetDocument().createElement(
-      list_element->TagQName(), kCreatedByCloneNode));
+  HTMLElement* new_list = ToHTMLElement(GetDocument().CreateElement(
+      list_element->TagQName(), CreateElementFlags::ByCloneNode(),
+      g_null_atom));
   InsertNodeBefore(new_list, selected_list_item, editing_state);
   if (editing_state->IsAborted())
     return false;
@@ -131,14 +136,15 @@ bool IndentOutdentCommand::TryIndentingAsListItem(const Position& start,
   }
 
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
-  if (CanMergeLists(previous_list, new_list)) {
+  DCHECK(new_list);
+  if (previous_list && CanMergeLists(*previous_list, *new_list)) {
     MergeIdenticalElements(previous_list, new_list, editing_state);
     if (editing_state->IsAborted())
       return false;
   }
 
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
-  if (CanMergeLists(new_list, next_list)) {
+  if (next_list && CanMergeLists(*new_list, *next_list)) {
     MergeIdenticalElements(new_list, next_list, editing_state);
     if (editing_state->IsAborted())
       return false;
@@ -199,7 +205,7 @@ void IndentOutdentCommand::IndentIntoBlockquote(const Position& start,
 
 void IndentOutdentCommand::OutdentParagraph(EditingState* editing_state) {
   VisiblePosition visible_start_of_paragraph =
-      StartOfParagraph(EndingSelection().VisibleStart());
+      StartOfParagraph(EndingVisibleSelection().VisibleStart());
   VisiblePosition visible_end_of_paragraph =
       EndOfParagraph(visible_start_of_paragraph);
 
@@ -211,13 +217,13 @@ void IndentOutdentCommand::OutdentParagraph(EditingState* editing_state) {
     return;
 
   // Use InsertListCommand to remove the selection from the list
-  if (isHTMLOListElement(*enclosing_element)) {
+  if (IsHTMLOListElement(*enclosing_element)) {
     ApplyCommandToComposite(InsertListCommand::Create(
                                 GetDocument(), InsertListCommand::kOrderedList),
                             editing_state);
     return;
   }
-  if (isHTMLUListElement(*enclosing_element)) {
+  if (IsHTMLUListElement(*enclosing_element)) {
     ApplyCommandToComposite(
         InsertListCommand::Create(GetDocument(),
                                   InsertListCommand::kUnorderedList),
@@ -288,8 +294,25 @@ void IndentOutdentCommand::OutdentParagraph(EditingState* editing_state) {
   if (Element* enclosing_block_flow = EnclosingBlock(
           visible_start_of_paragraph.DeepEquivalent().AnchorNode())) {
     if (enclosing_block_flow != enclosing_element) {
-      split_blockquote_node =
-          SplitTreeToNode(enclosing_block_flow, enclosing_element, true);
+      // We should check if the blockquotes are nested, as nested blockquotes
+      // may be at different indentations.
+      const Position& previous_element =
+          PreviousCandidate(visible_start_of_paragraph.DeepEquivalent());
+      HTMLElement* const previous_element_is_blockquote =
+          ToHTMLElement(EnclosingNodeOfType(previous_element,
+                                            &IsHTMLListOrBlockquoteElement));
+      const bool is_previous_blockquote_same =
+          !previous_element_is_blockquote ||
+          (enclosing_element == previous_element_is_blockquote);
+      const bool split_ancestor = true;
+      if (is_previous_blockquote_same) {
+        split_blockquote_node = SplitTreeToNode(
+            enclosing_block_flow, enclosing_element, split_ancestor);
+      } else {
+        SplitTreeToNode(
+            visible_start_of_paragraph.DeepEquivalent().AnchorNode(),
+            enclosing_element, split_ancestor);
+      }
     } else {
       // We split the blockquote at where we start outdenting.
       Node* highest_inline_node = HighestEnclosingNodeOfType(
@@ -306,16 +329,18 @@ void IndentOutdentCommand::OutdentParagraph(EditingState* editing_state) {
 
     // Re-canonicalize visible{Start,End}OfParagraph, make them valid again
     // after DOM change.
-    // TODO(xiaochengh): We should not store a VisiblePosition and later inspect
-    // its properties when it is already invalidated.
+    // TODO(editing-dev): We should not store a VisiblePosition and later
+    // inspect its properties when it is already invalidated.
+    // See crbug.com/648949 for details.
     visible_start_of_paragraph = CreateVisiblePosition(
         visible_start_of_paragraph.ToPositionWithAffinity());
     visible_end_of_paragraph = CreateVisiblePosition(
         visible_end_of_paragraph.ToPositionWithAffinity());
   }
 
-  // TODO(xiaochengh): We should not store a VisiblePosition and later inspect
-  // its properties when it is already invalidated.
+  // TODO(editing-dev): We should not store a VisiblePosition and later
+  // inspect its properties when it is already invalidated.
+  // See crbug.com/648949 for details.
   VisiblePosition start_of_paragraph_to_move =
       StartOfParagraph(visible_start_of_paragraph);
   VisiblePosition end_of_paragraph_to_move =
@@ -352,7 +377,7 @@ void IndentOutdentCommand::OutdentRegion(
     return;
   }
 
-  Position original_selection_end = EndingSelection().End();
+  Position original_selection_end = EndingVisibleSelection().End();
   Position end_after_selection =
       EndOfParagraph(NextPositionOf(end_of_last_paragraph)).DeepEquivalent();
 
@@ -365,12 +390,12 @@ void IndentOutdentCommand::OutdentRegion(
       SelectionInDOMTree::Builder builder;
       if (original_selection_end.IsNotNull())
         builder.Collapse(original_selection_end);
-      SetEndingSelection(builder.Build());
+      SetEndingSelection(SelectionForUndoStep::From(builder.Build()));
     } else {
-      SetEndingSelection(
+      SetEndingSelection(SelectionForUndoStep::From(
           SelectionInDOMTree::Builder()
               .Collapse(end_of_current_paragraph.DeepEquivalent())
-              .Build());
+              .Build()));
     }
 
     OutdentParagraph(editing_state);
@@ -386,7 +411,8 @@ void IndentOutdentCommand::OutdentRegion(
     GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
     if (end_of_next_paragraph.IsNotNull() &&
         !end_of_next_paragraph.IsConnected()) {
-      end_of_current_paragraph = CreateVisiblePosition(EndingSelection().End());
+      end_of_current_paragraph =
+          CreateVisiblePosition(EndingVisibleSelection().End());
       end_of_next_paragraph =
           EndOfParagraph(NextPositionOf(end_of_current_paragraph))
               .ToPositionWithAffinity();

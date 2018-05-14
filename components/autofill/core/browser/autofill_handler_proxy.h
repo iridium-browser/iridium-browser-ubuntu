@@ -28,8 +28,6 @@ class AutofillHandlerProxy : public AutofillHandler {
   void OnFormsSeen(const std::vector<FormData>& forms,
                    const base::TimeTicks timestamp) override;
 
-  bool OnFormSubmitted(const FormData& form) override;
-
   void OnDidEndTextFieldEditing() override;
   void OnHidePopup() override;
   void OnSetDataList(const std::vector<base::string16>& values,
@@ -42,13 +40,19 @@ class AutofillHandlerProxy : public AutofillHandler {
   }
 
  protected:
-  bool OnWillSubmitFormImpl(const FormData& form,
-                            const base::TimeTicks timestamp) override;
+  bool OnFormSubmittedImpl(const FormData& form,
+                           bool known_success,
+                           SubmissionSource source,
+                           base::TimeTicks timestamp) override;
 
   void OnTextFieldDidChangeImpl(const FormData& form,
                                 const FormFieldData& field,
                                 const gfx::RectF& bounding_box,
                                 const base::TimeTicks timestamp) override;
+
+  void OnTextFieldDidScrollImpl(const FormData& form,
+                                const FormFieldData& field,
+                                const gfx::RectF& bounding_box) override;
 
   void OnQueryFormFieldAutofillImpl(int query_id,
                                     const FormData& form,

@@ -42,9 +42,9 @@ class CORE_EXPORT LiveNodeList : public NodeList, public LiveNodeListBase {
   LiveNodeList(ContainerNode& owner_node,
                CollectionType collection_type,
                NodeListInvalidationType invalidation_type,
-               NodeListRootType root_type = NodeListRootType::kNode)
+               NodeListSearchRoot search_root = NodeListSearchRoot::kOwnerNode)
       : LiveNodeListBase(owner_node,
-                         root_type,
+                         search_root,
                          invalidation_type,
                          collection_type) {
     // Keep this in the child class because |registerNodeList| requires wrapper
@@ -57,7 +57,7 @@ class CORE_EXPORT LiveNodeList : public NodeList, public LiveNodeListBase {
   Element* item(unsigned offset) const final;
   virtual bool ElementMatches(const Element&) const = 0;
 
-  void InvalidateCache(Document* old_document = 0) const final;
+  void InvalidateCache(Document* old_document = nullptr) const final;
   void InvalidateCacheForAttribute(const QualifiedName*) const;
 
   // Collection IndexCache API.
@@ -71,7 +71,7 @@ class CORE_EXPORT LiveNodeList : public NodeList, public LiveNodeListBase {
                                     Element& current_node,
                                     unsigned& current_offset) const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   Node* VirtualOwnerNode() const final;

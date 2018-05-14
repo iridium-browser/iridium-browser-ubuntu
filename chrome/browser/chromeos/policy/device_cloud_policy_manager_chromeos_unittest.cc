@@ -24,7 +24,6 @@
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
 #include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service_factory.h"
@@ -53,6 +52,7 @@
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/core/common/schema_registry.h"
 #include "components/policy/policy_constants.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
@@ -90,7 +90,9 @@ void CertCallbackSuccess(
     const chromeos::attestation::AttestationFlow::CertificateCallback&
         callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(callback, true, "fake_cert"));
+      FROM_HERE,
+      base::BindOnce(callback, chromeos::attestation::ATTESTATION_SUCCESS,
+                     "fake_cert"));
 }
 
 class TestingDeviceCloudPolicyManagerChromeOS
@@ -150,7 +152,7 @@ class DeviceCloudPolicyManagerChromeOSTest
         base::WrapUnique(store_), base::ThreadTaskRunnerHandle::Get(),
         &state_keys_broker_));
 
-    chrome::RegisterLocalState(local_state_.registry());
+    RegisterLocalState(local_state_.registry());
     manager_->Init(&schema_registry_);
 
     // DeviceOAuth2TokenService uses the system request context to fetch
@@ -214,14 +216,14 @@ class DeviceCloudPolicyManagerChromeOSTest
         CreateAttestationFlow());
     manager_->Initialize(&local_state_);
     manager_->AddDeviceCloudPolicyManagerObserver(this);
-    initializer_ = base::MakeUnique<DeviceCloudPolicyInitializer>(
+    initializer_ = std::make_unique<DeviceCloudPolicyInitializer>(
         &local_state_, &device_management_service_,
         base::ThreadTaskRunnerHandle::Get(), install_attributes_.get(),
         &state_keys_broker_, store_, manager_.get(),
         cryptohome::AsyncMethodCaller::GetInstance(), std::move(unique_flow),
         &fake_statistics_provider_);
     initializer_->SetSigningServiceForTesting(
-        base::MakeUnique<FakeSigningService>());
+        std::make_unique<FakeSigningService>());
     initializer_->Init();
   }
 
@@ -230,7 +232,7 @@ class DeviceCloudPolicyManagerChromeOSTest
     bundle.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
         .Set(key::kDeviceMetricsReportingEnabled, POLICY_LEVEL_MANDATORY,
              POLICY_SCOPE_MACHINE, POLICY_SOURCE_CLOUD,
-             base::MakeUnique<base::Value>(false), nullptr);
+             std::make_unique<base::Value>(false), nullptr);
     EXPECT_TRUE(manager_->policies().Equals(bundle));
   }
 
@@ -321,7 +323,7 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, EnrolledDevice) {
 TEST_F(DeviceCloudPolicyManagerChromeOSTest, UnmanagedDevice) {
   device_policy_.policy_data().set_state(em::PolicyData::UNMANAGED);
   device_policy_.Build();
-  device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+  session_manager_client_.set_device_policy(device_policy_.GetBlob());
 
   LockDevice();
   FlushDeviceSettings();
@@ -352,7 +354,7 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, UnmanagedDevice) {
   // Switch back to ACTIVE, service the policy fetch and let it propagate.
   device_policy_.policy_data().set_state(em::PolicyData::ACTIVE);
   device_policy_.Build();
-  device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+  session_manager_client_.set_device_policy(device_policy_.GetBlob());
   em::DeviceManagementResponse policy_fetch_response;
   policy_fetch_response.mutable_policy_response()->add_response()->CopyFrom(
       device_policy_.policy());
@@ -422,7 +424,6 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
       : register_status_(DM_STATUS_SUCCESS),
         policy_fetch_status_(DM_STATUS_SUCCESS),
         robot_auth_fetch_status_(DM_STATUS_SUCCESS),
-        store_result_(true),
         status_(EnrollmentStatus::ForStatus(EnrollmentStatus::SUCCESS)),
         done_(false) {}
 
@@ -585,23 +586,19 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
       url_fetcher->delegate()->OnURLFetchComplete(url_fetcher);
     }
 
+    // Process robot refresh token store and policy store.
     base::RunLoop().RunUntilIdle();
-
-    if (done_)
-      return;
-
-    // Process robot refresh token store.
-    chromeos::DeviceOAuth2TokenService* token_service =
-        chromeos::DeviceOAuth2TokenServiceFactory::Get();
-    EXPECT_TRUE(token_service->RefreshTokenIsAvailable(
-        token_service->GetRobotAccountId()));
-
-    // Process policy store.
-    device_settings_test_helper_.set_store_result(store_result_);
-    device_settings_test_helper_.FlushStore();
-    EXPECT_EQ(device_policy_.GetBlob(),
-              device_settings_test_helper_.policy_blob());
-
+    if (!done_ || status_.status() == EnrollmentStatus::SUCCESS) {
+      // Verify the state only if the task is not yet failed.
+      // Note that, if the flow is not yet |done_| here, assume that it is
+      // in the "succeeding" flow, so verify here, too.
+      chromeos::DeviceOAuth2TokenService* token_service =
+          chromeos::DeviceOAuth2TokenServiceFactory::Get();
+      EXPECT_TRUE(token_service->RefreshTokenIsAvailable(
+          token_service->GetRobotAccountId()));
+      EXPECT_EQ(device_policy_.GetBlob(),
+                session_manager_client_.device_policy());
+    }
     if (done_)
       return;
 
@@ -618,7 +615,7 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
         .Times(AtMost(1));
 
     // Key installation and policy load.
-    device_settings_test_helper_.set_policy_blob(loaded_blob_);
+    session_manager_client_.set_device_policy(loaded_blob_);
     owner_key_util_->SetPublicKeyFromPrivateKey(
         *device_policy_.GetNewSigningKey());
     ReloadDeviceSettings();
@@ -634,7 +631,7 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
   bool ShouldRegisterWithCert() const override { return GetParam(); }
 
   const std::unique_ptr<em::DeviceRegisterRequest> GetDeviceRegisterRequest() {
-    auto req = base::MakeUnique<em::DeviceRegisterRequest>();
+    auto req = std::make_unique<em::DeviceRegisterRequest>();
     if (ShouldRegisterWithCert()) {
       em::CertificateBasedDeviceRegistrationData data;
       const em::SignedData& signed_request =
@@ -663,7 +660,6 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
   DeviceManagementStatus robot_auth_fetch_status_;
   em::DeviceManagementResponse robot_auth_fetch_response_;
 
-  bool store_result_;
   std::string loaded_blob_;
 
   em::DeviceManagementRequest register_request_;
@@ -749,7 +745,7 @@ TEST_P(DeviceCloudPolicyManagerChromeOSEnrollmentTest, ValidationFailed) {
 }
 
 TEST_P(DeviceCloudPolicyManagerChromeOSEnrollmentTest, StoreError) {
-  store_result_ = false;
+  session_manager_client_.set_store_device_policy_success(false);
   RunTest();
   ExpectFailedEnrollment(EnrollmentStatus::STORE_ERROR);
   EXPECT_EQ(CloudPolicyStore::STATUS_STORE_ERROR,

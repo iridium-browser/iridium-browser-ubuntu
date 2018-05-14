@@ -33,11 +33,10 @@ import sys
 import xml.dom.minidom
 
 from util import build_utils
-from util import md5_check
-
 
 # Types that should never be used as a dependency of another build config.
-_ROOT_TYPES = ('android_apk', 'deps_dex', 'java_binary', 'resource_rewriter')
+_ROOT_TYPES = ('android_apk', 'java_binary',
+               'java_annotation_processor', 'junit_binary', 'resource_rewriter')
 # Types that should not allow code deps to pass through.
 _RESOURCE_TYPES = ('android_assets', 'android_resources')
 
@@ -150,16 +149,20 @@ def _MergeAssets(all_assets):
   """Merges all assets from the given deps.
 
   Returns:
-    A tuple of lists: (compressed, uncompressed)
-    Each tuple entry is a list of "srcPath:zipPath". srcPath is the path of the
-    asset to add, and zipPath is the location within the zip (excluding assets/
-    prefix)
+    A tuple of: (compressed, uncompressed, locale_paks)
+    |compressed| and |uncompressed| are lists of "srcPath:zipPath". srcPath is
+    the path of the asset to add, and zipPath is the location within the zip
+    (excluding assets/ prefix).
+    |locale_paks| is a set of all zipPaths that have been marked as
+    treat_as_locale_paks=true.
   """
   compressed = {}
   uncompressed = {}
+  locale_paks = set()
   for asset_dep in all_assets:
     entry = asset_dep['assets']
-    disable_compression = entry.get('disable_compression', False)
+    disable_compression = entry.get('disable_compression')
+    treat_as_locale_paks = entry.get('treat_as_locale_paks')
     dest_map = uncompressed if disable_compression else compressed
     other_map = compressed if disable_compression else uncompressed
     outputs = entry.get('outputs', [])
@@ -170,6 +173,8 @@ def _MergeAssets(all_assets):
       # deps of the same target override previous ones.
       other_map.pop(dest, 0)
       dest_map[dest] = src
+      if treat_as_locale_paks:
+        locale_paks.add(dest)
 
   def create_list(asset_map):
     ret = ['%s:%s' % (src, dest) for dest, src in asset_map.iteritems()]
@@ -177,7 +182,7 @@ def _MergeAssets(all_assets):
     ret.sort()
     return ret
 
-  return create_list(compressed), create_list(uncompressed)
+  return create_list(compressed), create_list(uncompressed), locale_paks
 
 
 def _ResolveGroups(configs):
@@ -193,7 +198,7 @@ def _ResolveGroups(configs):
       ret[index:index + 1] = expanded_configs
 
 
-def _FilterDepsPaths(dep_paths, target_type):
+def _DepsFromPaths(dep_paths, target_type, filter_root_targets=True):
   """Resolves all groups and trims dependency branches that we never want.
 
   E.g. When a resource or asset depends on an apk target, the intent is to
@@ -202,16 +207,13 @@ def _FilterDepsPaths(dep_paths, target_type):
   configs = [GetDepConfig(p) for p in dep_paths]
   configs = _ResolveGroups(configs)
   # Don't allow root targets to be considered as a dep.
-  configs = [c for c in configs if c['type'] not in _ROOT_TYPES]
+  if filter_root_targets:
+    configs = [c for c in configs if c['type'] not in _ROOT_TYPES]
 
   # Don't allow java libraries to cross through assets/resources.
   if target_type in _RESOURCE_TYPES:
     configs = [c for c in configs if c['type'] in _RESOURCE_TYPES]
-  return [c['path'] for c in configs]
-
-
-def _AsInterfaceJar(jar_path):
-  return jar_path[:-3] + 'interface.jar'
+  return Deps([c['path'] for c in configs])
 
 
 def _ExtractSharedLibsFromRuntimeDeps(runtime_deps_files):
@@ -222,7 +224,9 @@ def _ExtractSharedLibsFromRuntimeDeps(runtime_deps_files):
         line = line.rstrip()
         if not line.endswith('.so'):
           continue
-        ret.append(os.path.normpath(line))
+        # Only unstripped .so files are listed in runtime deps.
+        # Convert to the stripped .so by going up one directory.
+        ret.append(os.path.normpath(line.replace('lib.unstripped/', '')))
   ret.reverse()
   return ret
 
@@ -234,11 +238,11 @@ def _CreateJavaLibrariesList(library_paths):
   return ('{%s}' % ','.join(['"%s"' % s[3:-3] for s in library_paths]))
 
 
-def _CreateLocalePaksAssetJavaList(assets):
+def _CreateLocalePaksAssetJavaList(assets, locale_paks):
   """Returns a java literal array from a list of assets in the form src:dst."""
-  names_only = (a.split(':')[1][:-4] for a in assets if a.endswith('.pak'))
-  locales_only = (a for a in names_only if '-' in a or len(a) == 2)
-  return '{%s}' % ','.join(sorted('"%s"' % a for a in locales_only))
+  asset_paths = [a.split(':')[1] for a in assets]
+  return '{%s}' % ','.join(
+      sorted('"%s"' % a[:-4] for a in asset_paths if a in locale_paks))
 
 
 def main(argv):
@@ -250,7 +254,14 @@ def main(argv):
       help='Type of this target (e.g. android_library).')
   parser.add_option(
       '--deps-configs',
-      help='List of paths for dependency\'s build_config files. ')
+      help='GN-list of dependent build_config files.')
+  parser.add_option(
+      '--annotation-processor-configs',
+      help='GN-list of build_config files for annotation processors.')
+  parser.add_option(
+      '--classpath-deps-configs',
+      help='GN-list of build_config files for libraries to include as '
+           'build-time-only classpath.')
 
   # android_resources options
   parser.add_option('--srcjar', help='Path to target\'s resources srcjar.')
@@ -270,9 +281,17 @@ def main(argv):
                     help='List of asset custom destinations.')
   parser.add_option('--disable-asset-compression', action='store_true',
                     help='Whether to disable asset compression.')
+  parser.add_option('--treat-as-locale-paks', action='store_true',
+      help='Consider the assets as locale paks in BuildConfig.java')
 
   # java library options
   parser.add_option('--jar-path', help='Path to target\'s jar output.')
+  parser.add_option('--unprocessed-jar-path',
+      help='Path to the .jar to use for javac classpath purposes.')
+  parser.add_option('--interface-jar-path',
+      help='Path to the .interface.jar to use for javac classpath purposes.')
+  parser.add_option('--is-prebuilt', action='store_true',
+                    help='Whether the jar was compiled or pre-compiled.')
   parser.add_option('--java-sources-file', help='Path to .sources file')
   parser.add_option('--bundled-srcjars',
       help='GYP-list of .srcjars that have been included in this java_library.')
@@ -288,7 +307,8 @@ def main(argv):
   parser.add_option('--gradle-treat-as-prebuilt', action='store_true',
       help='Whether this library should be treated as a prebuilt library by '
            'generate_gradle.py.')
-  parser.add_option('--main-class', help='Java class for java_binary targets.')
+  parser.add_option('--main-class',
+      help='Main class for java_binary or java_annotation_processor targets.')
   parser.add_option('--java-resources-jar-path',
                     help='Path to JAR that contains java resources. Everything '
                     'from this JAR except meta-inf/ content and .class files '
@@ -305,14 +325,18 @@ def main(argv):
   parser.add_option('--secondary-abi-shared-libraries-runtime-deps',
                     help='Path to file containing runtime deps for secondary '
                          'abi shared libraries.')
+  parser.add_option('--non-native-packed-relocations',
+                    action='store_true', default=False,
+                    help='Whether relocation packing was applied using the '
+                         'Android relocation_packer tool.')
 
   # apk options
   parser.add_option('--apk-path', help='Path to the target\'s apk output.')
   parser.add_option('--incremental-apk-path',
                     help="Path to the target's incremental apk output.")
-  parser.add_option('--incremental-install-script-path',
+  parser.add_option('--incremental-install-json-path',
                     help="Path to the target's generated incremental install "
-                    "script.")
+                    "json.")
 
   parser.add_option('--tested-apk-config',
       help='Path to the build config of the tested apk (for an instrumentation '
@@ -320,11 +344,9 @@ def main(argv):
   parser.add_option('--proguard-enabled', action='store_true',
       help='Whether proguard is enabled for this apk.')
   parser.add_option('--proguard-configs',
-      help='GYP-list of proguard flag files to use in final apk.')
-  parser.add_option('--proguard-info',
-      help='Path to the proguard .info output for this apk.')
+      help='GN-list of proguard flag files to use in final apk.')
   parser.add_option('--fail',
-      help='GYP-list of error message lines to fail with.')
+      help='GN-list of error message lines to fail with.')
 
   options, args = parser.parse_args(argv)
 
@@ -333,18 +355,19 @@ def main(argv):
   if options.fail:
     parser.error('\n'.join(build_utils.ParseGnList(options.fail)))
 
+  jar_path_options = ['jar_path', 'unprocessed_jar_path', 'interface_jar_path']
   required_options_map = {
-      'java_binary': ['build_config', 'jar_path'],
-      'java_library': ['build_config', 'jar_path'],
-      'java_prebuilt': ['build_config', 'jar_path'],
+      'java_binary': ['build_config'],
+      'java_annotation_processor': ['build_config', 'main_class'],
+      'junit_binary': ['build_config'],
+      'java_library': ['build_config'] + jar_path_options,
       'android_assets': ['build_config'],
       'android_resources': ['build_config', 'resources_zip'],
-      'android_apk': ['build_config', 'jar_path', 'dex_path', 'resources_zip'],
-      'deps_dex': ['build_config', 'dex_path'],
+      'android_apk': ['build_config','dex_path'] + jar_path_options,
       'dist_jar': ['build_config'],
+      'dist_aar': ['build_config'],
       'resource_rewriter': ['build_config'],
       'group': ['build_config'],
-      'junit_binary': ['build_config'],
   }
   required_options = required_options_map.get(options.type)
   if not required_options:
@@ -352,34 +375,39 @@ def main(argv):
 
   build_utils.CheckOptions(options, parser, required_options)
 
-  # Java prebuilts are the same as libraries except for in gradle files.
-  is_java_prebuilt = options.type == 'java_prebuilt'
-  if is_java_prebuilt:
-    options.type = 'java_library'
+  if options.jar_path and options.supports_android and not options.dex_path:
+    raise Exception('java_library that supports Android requires a dex path.')
+  if any(getattr(options, x) for x in jar_path_options):
+    for attr in jar_path_options:
+      if not getattr(options, attr):
+        raise('Expected %s to be set.' % attr)
 
-  if options.type == 'java_library':
-    if options.supports_android and not options.dex_path:
-      raise Exception('java_library that supports Android requires a dex path.')
+  if options.requires_android and not options.supports_android:
+    raise Exception(
+        '--supports-android is required when using --requires-android')
 
-    if options.requires_android and not options.supports_android:
-      raise Exception(
-          '--supports-android is required when using --requires-android')
+  is_java_target = options.type in (
+      'java_binary', 'junit_binary', 'java_annotation_processor',
+      'java_library', 'android_apk', 'dist_aar', 'dist_jar')
 
-  direct_deps_config_paths = build_utils.ParseGnList(options.deps_configs)
-  direct_deps_config_paths = _FilterDepsPaths(direct_deps_config_paths,
-                                              options.type)
+  deps = _DepsFromPaths(
+      build_utils.ParseGnList(options.deps_configs), options.type)
+  processor_deps = _DepsFromPaths(
+      build_utils.ParseGnList(options.annotation_processor_configs or ''),
+      options.type, filter_root_targets=False)
+  classpath_deps = _DepsFromPaths(
+      build_utils.ParseGnList(options.classpath_deps_configs or ''),
+      options.type)
 
-  deps = Deps(direct_deps_config_paths)
-  all_inputs = deps.AllConfigPaths()
+  all_inputs = sorted(set(deps.AllConfigPaths() +
+                          processor_deps.AllConfigPaths() +
+                          classpath_deps.AllConfigPaths()))
 
   direct_library_deps = deps.Direct('java_library')
   all_library_deps = deps.All('java_library')
 
   direct_resources_deps = deps.Direct('android_resources')
   all_resources_deps = deps.All('android_resources')
-  # Resources should be ordered with the highest-level dependency first so that
-  # overrides are done correctly.
-  all_resources_deps.reverse()
 
   # Initialize some common config.
   # Any value that needs to be queryable by dependents must go within deps_info.
@@ -388,7 +416,7 @@ def main(argv):
       'name': os.path.basename(options.build_config),
       'path': options.build_config,
       'type': options.type,
-      'deps_configs': direct_deps_config_paths
+      'deps_configs': deps.direct_deps_config_paths
     },
     # Info needed only by generate_gradle.py.
     'gradle': {}
@@ -406,20 +434,18 @@ def main(argv):
 
   # Required for generating gradle files.
   if options.type == 'java_library':
-    deps_info['is_prebuilt'] = is_java_prebuilt
+    deps_info['is_prebuilt'] = bool(options.is_prebuilt)
     deps_info['gradle_treat_as_prebuilt'] = options.gradle_treat_as_prebuilt
 
   if options.android_manifest:
     deps_info['android_manifest'] = options.android_manifest
 
-  if options.type in ('java_binary', 'java_library', 'android_apk'):
+  if is_java_target:
     if options.java_sources_file:
       deps_info['java_sources_file'] = options.java_sources_file
     if options.bundled_srcjars:
       gradle['bundled_srcjars'] = (
           build_utils.ParseGnList(options.bundled_srcjars))
-    else:
-      gradle['bundled_srcjars'] = []
 
     gradle['dependent_android_projects'] = []
     gradle['dependent_java_projects'] = []
@@ -428,14 +454,13 @@ def main(argv):
     if options.bootclasspath:
       gradle['bootclasspath'] = options.bootclasspath
     if options.main_class:
-      gradle['main_class'] = options.main_class
+      deps_info['main_class'] = options.main_class
 
     for c in deps.GradleLibraryProjectDeps():
       if c['requires_android']:
         gradle['dependent_android_projects'].append(c['path'])
       else:
         gradle['dependent_java_projects'].append(c['path'])
-
 
   if options.type == 'android_apk':
     config['jni'] = {}
@@ -445,7 +470,7 @@ def main(argv):
       all_java_sources.append(options.java_sources_file)
     config['jni']['all_source'] = all_java_sources
 
-  if (options.type in ('java_binary', 'java_library')):
+  if is_java_target:
     deps_info['requires_android'] = options.requires_android
     deps_info['supports_android'] = options.supports_android
 
@@ -463,39 +488,41 @@ def main(argv):
         raise Exception('Not all deps support the Android platform: '
             + str(deps_not_support_android))
 
-  if options.type in ('java_binary', 'java_library', 'android_apk'):
-    deps_info['jar_path'] = options.jar_path
-    if options.type == 'android_apk' or options.supports_android:
+  if is_java_target:
+    # Classpath values filled in below (after applying tested_apk_config).
+    config['javac'] = {}
+    if options.jar_path:
+      deps_info['jar_path'] = options.jar_path
+      deps_info['unprocessed_jar_path'] = options.unprocessed_jar_path
+      deps_info['interface_jar_path'] = options.interface_jar_path
+    if options.dex_path:
       deps_info['dex_path'] = options.dex_path
     if options.type == 'android_apk':
       deps_info['apk_path'] = options.apk_path
       deps_info['incremental_apk_path'] = options.incremental_apk_path
-      deps_info['incremental_install_script_path'] = (
-          options.incremental_install_script_path)
+      deps_info['incremental_install_json_path'] = (
+          options.incremental_install_json_path)
+      deps_info['non_native_packed_relocations'] = str(
+          options.non_native_packed_relocations)
 
-  if options.type in ('java_binary', 'java_library', 'android_apk', 'dist_jar'):
-    # Classpath values filled in below (after applying tested_apk_config).
-    config['javac'] = {}
-
-  if options.type in ('java_binary', 'java_library'):
-    # Only resources might have srcjars (normal srcjar targets are listed in
-    # srcjar_deps). A resource's srcjar contains the R.java file for those
-    # resources, and (like Android's default build system) we allow a library to
-    # refer to the resources in any of its dependents.
-    config['javac']['srcjars'] = [
-        c['srcjar'] for c in all_resources_deps if 'srcjar' in c]
-
-    # Used to strip out R.class for android_prebuilt()s.
     if options.type == 'java_library':
+      # android_resources targets use this srcjars field to expose R.java files.
+      # Since there is no java_library associated with an android_resources(),
+      # Each java_library recompiles the R.java files.
+      # junit_binary and android_apk create their own R.java srcjars, so should
+      # not pull them in from deps here.
+      config['javac']['srcjars'] = [
+          c['srcjar'] for c in all_resources_deps if 'srcjar' in c]
+
+      # Used to strip out R.class for android_prebuilt()s.
       config['javac']['resource_packages'] = [
           c['package_name'] for c in all_resources_deps if 'package_name' in c]
-
-  if options.type == 'android_apk':
-    # Apks will get their resources srcjar explicitly passed to the java step
-    config['javac']['srcjars'] = []
-    # Gradle may need to generate resources for some apks.
-    gradle['srcjars'] = [
-        c['srcjar'] for c in direct_resources_deps if 'srcjar' in c]
+    else:
+      # Apks will get their resources srcjar explicitly passed to the java step
+      config['javac']['srcjars'] = []
+      # Gradle may need to generate resources for some apks.
+      gradle['srcjars'] = [
+          c['srcjar'] for c in direct_resources_deps if 'srcjar' in c]
 
   if options.type == 'android_assets':
     all_asset_sources = []
@@ -513,6 +540,8 @@ def main(argv):
           build_utils.ParseGnList(options.asset_renaming_destinations))
     if options.disable_asset_compression:
       deps_info['assets']['disable_compression'] = True
+    if options.treat_as_locale_paks:
+      deps_info['assets']['treat_as_locale_paks'] = True
 
   if options.type == 'android_resources':
     deps_info['resources_zip'] = options.resources_zip
@@ -549,34 +578,83 @@ def main(argv):
       if c['supports_android']:
         owned_resource_dirs.difference_update(c['owned_resources_dirs'])
         owned_resource_zips.difference_update(c['owned_resources_zips'])
-    deps_info['owned_resources_dirs'] = list(owned_resource_dirs)
-    deps_info['owned_resources_zips'] = list(owned_resource_zips)
+    deps_info['owned_resources_dirs'] = sorted(owned_resource_dirs)
+    deps_info['owned_resources_zips'] = sorted(owned_resource_zips)
 
   if options.type in (
-      'android_resources', 'android_apk', 'junit_binary', 'resource_rewriter'):
+      'android_resources', 'android_apk', 'junit_binary', 'resource_rewriter',
+      'dist_aar'):
     config['resources'] = {}
     config['resources']['dependency_zips'] = [
         c['resources_zip'] for c in all_resources_deps]
-    config['resources']['extra_package_names'] = []
-    config['resources']['extra_r_text_files'] = []
+    extra_package_names = []
+    extra_r_text_files = []
+    if options.type != 'android_resources':
+      extra_package_names = [
+          c['package_name'] for c in all_resources_deps if 'package_name' in c]
+      extra_r_text_files = [
+          c['r_text'] for c in all_resources_deps if 'r_text' in c]
 
-  if options.type == 'android_apk' or options.type == 'resource_rewriter':
-    config['resources']['extra_package_names'] = [
-        c['package_name'] for c in all_resources_deps if 'package_name' in c]
-    config['resources']['extra_r_text_files'] = [
-        c['r_text'] for c in all_resources_deps if 'r_text' in c]
+    config['resources']['extra_package_names'] = extra_package_names
+    config['resources']['extra_r_text_files'] = extra_r_text_files
 
-  if options.type in ['android_apk', 'deps_dex']:
+  if options.type == 'android_apk':
     deps_dex_files = [c['dex_path'] for c in all_library_deps]
 
-  if options.type in ('java_binary', 'java_library', 'android_apk', 'dist_jar'):
-    javac_classpath = [c['jar_path'] for c in direct_library_deps]
-    java_full_classpath = [c['jar_path'] for c in all_library_deps]
+  if is_java_target:
+    # The classpath used to compile this target when annotation processors are
+    # present.
+    javac_classpath = [c['unprocessed_jar_path'] for c in direct_library_deps]
+    # The classpath used to compile this target when annotation processors are
+    # not present. These are also always used to know when a target needs to be
+    # rebuilt.
+    javac_interface_classpath = [
+        c['interface_jar_path'] for c in direct_library_deps]
+    # The classpath used for error prone.
+    javac_full_interface_classpath = [
+        c['interface_jar_path'] for c in all_library_deps]
+    # The classpath used for bytecode-rewritting.
+    javac_full_classpath = [c['unprocessed_jar_path'] for c in all_library_deps]
+    # The classpath to use to run this target (or as an input to ProGuard).
+    java_full_classpath = []
+    if options.jar_path:
+      java_full_classpath.append(options.jar_path)
+    java_full_classpath.extend(c['jar_path'] for c in all_library_deps)
+
+    # Deps to add to the compile-time classpath (but not the runtime classpath).
+    # TODO(agrieve): Might be less confusing to fold these into bootclasspath.
+    extra_jars = [c['unprocessed_jar_path']
+                  for c in classpath_deps.Direct('java_library')]
 
     if options.extra_classpath_jars:
-      extra_jars = build_utils.ParseGnList(options.extra_classpath_jars)
+      # These are .jars to add to javac classpath but not to runtime classpath.
+      extra_jars.extend(build_utils.ParseGnList(options.extra_classpath_jars))
+
+    extra_jars = [p for p in extra_jars if p not in javac_classpath]
+    javac_classpath.extend(extra_jars)
+    javac_interface_classpath.extend(extra_jars)
+    javac_full_interface_classpath.extend(
+        p for p in extra_jars if p not in javac_full_classpath)
+    javac_full_classpath.extend(
+        p for p in extra_jars if p not in javac_full_classpath)
+    if extra_jars:
       deps_info['extra_classpath_jars'] = extra_jars
-      javac_classpath += extra_jars
+
+  if options.proguard_configs:
+    deps_info['proguard_configs'] = (
+        build_utils.ParseGnList(options.proguard_configs))
+
+  if options.type in ('android_apk', 'dist_aar', 'dist_jar'):
+    all_configs = deps_info.get('proguard_configs', [])
+    extra_jars = []
+    for c in all_library_deps:
+      all_configs.extend(
+          p for p in c.get('proguard_configs', []) if p not in all_configs)
+      extra_jars.extend(
+          p for p in c.get('extra_classpath_jars', []) if p not in extra_jars)
+    deps_info['proguard_all_configs'] = all_configs
+    deps_info['proguard_all_extra_jars'] = extra_jars
+    deps_info['proguard_enabled'] = options.proguard_enabled
 
   # The java code for an instrumentation test apk is assembled differently for
   # ProGuard vs. non-ProGuard.
@@ -595,24 +673,37 @@ def main(argv):
   if options.type == 'android_apk' and options.tested_apk_config:
     tested_apk_config = GetDepConfig(options.tested_apk_config)
 
-    expected_tested_package = tested_apk_config['package_name']
-    AndroidManifest(options.android_manifest).CheckInstrumentationElements(
-        expected_tested_package)
-    if options.proguard_enabled:
-      # Add all tested classes to the test's classpath to ensure that the test's
-      # java code is a superset of the tested apk's java code
-      java_full_classpath += [
-          jar for jar in tested_apk_config['java']['full_classpath']
-          if jar not in java_full_classpath]
-
     if tested_apk_config['proguard_enabled']:
       assert options.proguard_enabled, ('proguard must be enabled for '
           'instrumentation apks if it\'s enabled for the tested apk.')
+      # Mutating lists, so no need to explicitly re-assign to dict.
+      all_configs.extend(p for p in tested_apk_config['proguard_all_configs']
+                         if p not in all_configs)
+      extra_jars.extend(p for p in tested_apk_config['proguard_all_extra_jars']
+                        if p not in extra_jars)
 
+    expected_tested_package = tested_apk_config['package_name']
+    AndroidManifest(options.android_manifest).CheckInstrumentationElements(
+        expected_tested_package)
+
+    # Add all tested classes to the test's classpath to ensure that the test's
+    # java code is a superset of the tested apk's java code
+    java_full_classpath.extend(
+        p for p in tested_apk_config['java_runtime_classpath']
+        if p not in java_full_classpath)
     # Include in the classpath classes that are added directly to the apk under
     # test (those that are not a part of a java_library).
-    javac_classpath.append(tested_apk_config['jar_path'])
-    java_full_classpath.append(tested_apk_config['jar_path'])
+    javac_classpath.append(tested_apk_config['unprocessed_jar_path'])
+    javac_full_classpath.append(tested_apk_config['unprocessed_jar_path'])
+    javac_interface_classpath.append(tested_apk_config['interface_jar_path'])
+    javac_full_interface_classpath.append(
+        tested_apk_config['interface_jar_path'])
+    javac_full_interface_classpath.extend(
+        p for p in tested_apk_config['javac_full_interface_classpath']
+        if p not in javac_full_interface_classpath)
+    javac_full_classpath.extend(
+        p for p in tested_apk_config['javac_full_classpath']
+        if p not in javac_full_classpath)
 
     # Exclude dex files from the test apk that exist within the apk under test.
     # TODO(agrieve): When proguard is enabled, this filtering logic happens
@@ -623,52 +714,39 @@ def main(argv):
     deps_dex_files = [
         p for p in deps_dex_files if not p in tested_apk_deps_dex_files]
 
-  if options.proguard_configs:
-    assert options.type == 'java_library'
-    deps_info['proguard_configs'] = (
-        build_utils.ParseGnList(options.proguard_configs))
-
+  # Dependencies for the final dex file of an apk.
   if options.type == 'android_apk':
-    deps_info['proguard_enabled'] = options.proguard_enabled
-    deps_info['proguard_info'] = options.proguard_info
-    config['proguard'] = {}
-    proguard_config = config['proguard']
-    proguard_config['input_paths'] = [options.jar_path] + java_full_classpath
-    extra_jars = set()
-    lib_configs = set()
-    for c in all_library_deps:
-      extra_jars.update(c.get('extra_classpath_jars', ()))
-      lib_configs.update(c.get('proguard_configs', ()))
-    proguard_config['lib_paths'] = list(extra_jars)
-    proguard_config['lib_configs'] = list(lib_configs)
-
-  # Dependencies for the final dex file of an apk or a 'deps_dex'.
-  if options.type in ['android_apk', 'deps_dex']:
     config['final_dex'] = {}
     dex_config = config['final_dex']
     dex_config['dependency_dex_files'] = deps_dex_files
 
-  if options.type in ('java_binary', 'java_library', 'android_apk', 'dist_jar'):
+  if is_java_target:
     config['javac']['classpath'] = javac_classpath
-    config['javac']['interface_classpath'] = [
-        _AsInterfaceJar(p) for p in javac_classpath]
-    deps_info['java'] = {
-      'full_classpath': java_full_classpath
-    }
+    config['javac']['interface_classpath'] = javac_interface_classpath
+    # Direct() will be of type 'java_annotation_processor'.
+    config['javac']['processor_classpath'] = [
+        c['jar_path'] for c in processor_deps.Direct() if c.get('jar_path')] + [
+        c['jar_path'] for c in processor_deps.All('java_library')]
+    config['javac']['processor_classes'] = [
+        c['main_class'] for c in processor_deps.Direct()]
+    deps_info['javac_full_classpath'] = javac_full_classpath
+    deps_info['javac_full_interface_classpath'] = javac_full_interface_classpath
+
+    if options.type in (
+        'android_apk', 'dist_jar', 'java_binary', 'junit_binary'):
+      deps_info['java_runtime_classpath'] = java_full_classpath
 
   if options.type in ('android_apk', 'dist_jar'):
-    dependency_jars = [c['jar_path'] for c in all_library_deps]
-    all_interface_jars = [_AsInterfaceJar(p) for p in dependency_jars]
-    if options.type == 'android_apk':
-      all_interface_jars.append(_AsInterfaceJar(options.jar_path))
+    all_interface_jars = []
+    if options.jar_path:
+      all_interface_jars.append(options.interface_jar_path)
+    all_interface_jars.extend(c['interface_jar_path'] for c in all_library_deps)
 
     config['dist_jar'] = {
-      'dependency_jars': dependency_jars,
       'all_interface_jars': all_interface_jars,
     }
 
   if options.type == 'android_apk':
-    dependency_jars = [c['jar_path'] for c in all_library_deps]
     manifest = AndroidManifest(options.android_manifest)
     deps_info['package_name'] = manifest.GetPackageName()
     if not options.tested_apk_config and manifest.GetInstrumentationElements():
@@ -700,12 +778,12 @@ def main(argv):
       'java_libraries_list': java_libraries_list,
       'secondary_abi_java_libraries_list': secondary_abi_java_libraries_list,
     }
-    config['assets'], config['uncompressed_assets'] = (
+    config['assets'], config['uncompressed_assets'], locale_paks = (
         _MergeAssets(deps.All('android_assets')))
-    config['compressed_locales_java_list'] = (
-        _CreateLocalePaksAssetJavaList(config['assets']))
-    config['uncompressed_locales_java_list'] = (
-        _CreateLocalePaksAssetJavaList(config['uncompressed_assets']))
+    config['compressed_locales_java_list'] = _CreateLocalePaksAssetJavaList(
+        config['assets'], locale_paks)
+    config['uncompressed_locales_java_list'] = _CreateLocalePaksAssetJavaList(
+        config['uncompressed_assets'], locale_paks)
 
     config['extra_android_manifests'] = filter(None, (
         d.get('android_manifest') for d in all_resources_deps))
@@ -721,7 +799,7 @@ def main(argv):
                              if jar not in tested_apk_resource_jars]
     config['java_resources_jars'] = java_resources_jars
 
-  if options.type == 'java_library' and options.java_resources_jar_path:
+  if options.java_resources_jar_path:
     deps_info['java_resources_jar'] = options.java_resources_jar_path
 
   build_utils.WriteJson(config, options.build_config, only_if_changed=True)

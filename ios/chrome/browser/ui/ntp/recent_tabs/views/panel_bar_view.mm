@@ -8,6 +8,7 @@
 #include "ios/chrome/browser/ui/rtl_geometry.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/browser/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -20,6 +21,7 @@ namespace {
 
 const int kBackgroundColor = 0xf2f2f2;
 const CGFloat kFontSize = 20;
+const CGFloat kSpacing = 16;
 
 }  // namespace
 
@@ -77,10 +79,20 @@ const CGFloat kFontSize = 20;
     };
     NSArray* constraints = @[
       @"V:|-0-[statusBar]-14-[closeButton]-13-|",
-      @"H:|-16-[title]-(>=0)-[closeButton]-16-|",
+      @"H:[title]-(>=0)-[closeButton]",
     ];
     ApplyVisualConstraintsWithOptions(constraints, viewsDictionary,
                                       LayoutOptionForRTLSupport(), self);
+    id<LayoutGuideProvider> safeAreaLayoutGuide =
+        SafeAreaLayoutGuideForView(self);
+    [NSLayoutConstraint activateConstraints:@[
+      [title.leadingAnchor
+          constraintEqualToAnchor:safeAreaLayoutGuide.leadingAnchor
+                         constant:kSpacing],
+      [_closeButton.trailingAnchor
+          constraintEqualToAnchor:safeAreaLayoutGuide.trailingAnchor
+                         constant:-kSpacing],
+    ]];
     AddSameCenterYConstraint(self, title, _closeButton);
     _statusBarSpacerConstraint =
         [NSLayoutConstraint constraintWithItem:statusBarSpacer

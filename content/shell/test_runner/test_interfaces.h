@@ -11,7 +11,6 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/shell/test_runner/mock_web_theme_engine.h"
-#include "third_party/WebKit/public/platform/WebNonCopyable.h"
 
 namespace blink {
 class WebLocalFrame;
@@ -40,7 +39,8 @@ class TestInterfaces {
   bool TestIsRunning();
   void SetTestIsRunning(bool running);
   void ConfigureForTestWithURL(const blink::WebURL& test_url,
-                               bool generate_pixels);
+                               bool generate_pixels,
+                               bool initial_configuration);
 
   void WindowOpened(WebViewTestProxyBase* proxy);
   void WindowClosed(WebViewTestProxyBase* proxy);

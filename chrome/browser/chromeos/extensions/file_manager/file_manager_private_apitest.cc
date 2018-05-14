@@ -6,11 +6,11 @@
 #include <stdint.h>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/extensions/file_manager/event_router.h"
 #include "chrome/browser/chromeos/file_manager/file_watcher.h"
 #include "chrome/browser/chromeos/file_manager/mount_test_util.h"
+#include "chrome/browser/chromeos/file_system_provider/icon_set.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_info.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/common/extensions/api/file_system_provider_capabilities/file_system_provider_capabilities_handler.h"
@@ -50,6 +50,8 @@ struct TestDiskInfo {
   bool on_boot_device;
   bool on_removable_device;
   bool is_hidden;
+  const char* file_system_type;
+  const char* base_mount_path;
 };
 
 struct TestMountPoint {
@@ -62,71 +64,69 @@ struct TestMountPoint {
   int disk_info_index;
 };
 
-TestDiskInfo kTestDisks[] = {
-  {
-    "system_path1",
-    "file_path1",
-    false,
-    "device_label1",
-    "drive_label1",
-    "0123",
-    "vendor1",
-    "abcd",
-    "product1",
-    "FFFF-FFFF",
-    "system_path_prefix1",
-    chromeos::DEVICE_TYPE_USB,
-    1073741824,
-    false,
-    false,
-    false,
-    false,
-    false,
-    false
-  },
-  {
-    "system_path2",
-    "file_path2",
-    false,
-    "device_label2",
-    "drive_label2",
-    "4567",
-    "vendor2",
-    "cdef",
-    "product2",
-    "0FFF-FFFF",
-    "system_path_prefix2",
-    chromeos::DEVICE_TYPE_MOBILE,
-    47723,
-    true,
-    true,
-    true,
-    true,
-    false,
-    false
-  },
-  {
-    "system_path3",
-    "file_path3",
-    true,  // write_disabled_by_policy
-    "device_label3",
-    "drive_label3",
-    "89ab",
-    "vendor3",
-    "ef01",
-    "product3",
-    "00FF-FFFF",
-    "system_path_prefix3",
-    chromeos::DEVICE_TYPE_OPTICAL_DISC,
-    0,
-    true,
-    false,  // is_hardware_read_only
-    false,
-    true,
-    false,
-    false
-  }
-};
+TestDiskInfo kTestDisks[] = {{"system_path1",
+                              "file_path1",
+                              false,
+                              "device_label1",
+                              "drive_label1",
+                              "0123",
+                              "vendor1",
+                              "abcd",
+                              "product1",
+                              "FFFF-FFFF",
+                              "system_path_prefix1",
+                              chromeos::DEVICE_TYPE_USB,
+                              1073741824,
+                              false,
+                              false,
+                              false,
+                              false,
+                              false,
+                              false,
+                              "exfat",
+                              ""},
+                             {"system_path2",
+                              "file_path2",
+                              false,
+                              "device_label2",
+                              "drive_label2",
+                              "4567",
+                              "vendor2",
+                              "cdef",
+                              "product2",
+                              "0FFF-FFFF",
+                              "system_path_prefix2",
+                              chromeos::DEVICE_TYPE_MOBILE,
+                              47723,
+                              true,
+                              true,
+                              true,
+                              true,
+                              false,
+                              false,
+                              "exfat",
+                              ""},
+                             {"system_path3",
+                              "file_path3",
+                              true,  // write_disabled_by_policy
+                              "device_label3",
+                              "drive_label3",
+                              "89ab",
+                              "vendor3",
+                              "ef01",
+                              "product3",
+                              "00FF-FFFF",
+                              "system_path_prefix3",
+                              chromeos::DEVICE_TYPE_OPTICAL_DISC,
+                              0,
+                              true,
+                              false,  // is_hardware_read_only
+                              false,
+                              true,
+                              false,
+                              false,
+                              "exfat",
+                              ""}};
 
 void DispatchDirectoryChangeEventImpl(
     int* counter,
@@ -272,7 +272,7 @@ class FileManagerPrivateApiTest : public ExtensionApiTest {
 
         volumes_.insert(DiskMountManager::DiskMap::value_type(
             kTestMountPoints[i].source_path,
-            base::MakeUnique<DiskMountManager::Disk>(
+            std::make_unique<DiskMountManager::Disk>(
                 kTestMountPoints[i].source_path, kTestMountPoints[i].mount_path,
                 kTestDisks[disk_info_index].write_disabled_by_policy,
                 kTestDisks[disk_info_index].system_path,
@@ -292,7 +292,9 @@ class FileManagerPrivateApiTest : public ExtensionApiTest {
                 kTestDisks[disk_info_index].has_media,
                 kTestDisks[disk_info_index].on_boot_device,
                 kTestDisks[disk_info_index].on_removable_device,
-                kTestDisks[disk_info_index].is_hidden)));
+                kTestDisks[disk_info_index].is_hidden,
+                kTestDisks[disk_info_index].file_system_type,
+                kTestDisks[disk_info_index].base_mount_path)));
       }
     }
   }
@@ -312,15 +314,21 @@ class FileManagerPrivateApiTest : public ExtensionApiTest {
 };
 
 IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, Mount) {
+  using chromeos::file_system_provider::IconSet;
   file_manager::test_util::WaitUntilDriveMountPointIsAdded(
       browser()->profile());
 
   // Add a provided file system, to test passing the |configurable| and
   // |source| flags properly down to Files app.
+  IconSet icon_set;
+  icon_set.SetIcon(IconSet::IconSize::SIZE_16x16,
+                   GURL("chrome://resources/testing-provider-id-16.jpg"));
+  icon_set.SetIcon(IconSet::IconSize::SIZE_32x32,
+                   GURL("chrome://resources/testing-provider-id-32.jpg"));
   chromeos::file_system_provider::ProvidedFileSystemInfo info(
-      "testing-extension-id", chromeos::file_system_provider::MountOptions(),
+      "testing-provider-id", chromeos::file_system_provider::MountOptions(),
       base::FilePath(), true /* configurable */, false /* watchable */,
-      extensions::SOURCE_NETWORK);
+      extensions::SOURCE_NETWORK, icon_set);
 
   file_manager::VolumeManager::Get(browser()->profile())
       ->AddVolumeForTesting(file_manager::Volume::CreateForProvidedFileSystem(

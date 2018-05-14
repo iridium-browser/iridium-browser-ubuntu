@@ -11,17 +11,16 @@
 #include <map>
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string_piece.h"
-#include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
+#include "net/dns/dns_config_service.h"
 #include "net/dns/host_cache.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/host_resolver_proc.h"
+#include "net/url_request/url_request_context_getter.h"
+#include "url/gurl.h"
 
 namespace net {
 
@@ -33,10 +32,10 @@ class NetLogWithSource;
 
 // For each hostname that is requested, HostResolver creates a
 // HostResolverImpl::Job. When this job gets dispatched it creates a ProcTask
-// which runs the given HostResolverProc on a worker thread (a WorkerPool
-// thread, in production code.) If requests for that same host are made during
-// the job's lifetime, they are attached to the existing job rather than
-// creating a new one. This avoids doing parallel resolves for the same host.
+// which runs the given HostResolverProc in TaskScheduler. If requests for that
+// same host are made during the job's lifetime, they are attached to the
+// existing job rather than creating a new one. This avoids doing parallel
+// resolves for the same host.
 //
 // The way these classes fit together is illustrated by:
 //
@@ -103,8 +102,8 @@ class NET_EXPORT HostResolverImpl
     uint32_t retry_factor;
   };
 
-  // Creates a HostResolver as specified by |options|. Blocking tasks are run on
-  // the WorkerPool.
+  // Creates a HostResolver as specified by |options|. Blocking tasks are run in
+  // TaskScheduler.
   //
   // If Options.enable_caching is true, a cache is created using
   // HostCache::CreateDefaultCache(). Otherwise no cache is used.
@@ -141,17 +140,24 @@ class NET_EXPORT HostResolverImpl
   int ResolveFromCache(const RequestInfo& info,
                        AddressList* addresses,
                        const NetLogWithSource& source_net_log) override;
-  void SetDnsClientEnabled(bool enabled) override;
-  HostCache* GetHostCache() override;
-  std::unique_ptr<base::Value> GetDnsConfigAsValue() const override;
-
-  // Like |ResolveFromCache()|, but can return a stale result if the
-  // implementation supports it. Fills in |*stale_info| if a response is
-  // returned to indicate how stale (or not) it is.
   int ResolveStaleFromCache(const RequestInfo& info,
                             AddressList* addresses,
                             HostCache::EntryStaleness* stale_info,
-                            const NetLogWithSource& source_net_log);
+                            const NetLogWithSource& source_net_log) override;
+  void SetDnsClientEnabled(bool enabled) override;
+
+  HostCache* GetHostCache() override;
+  bool HasCached(base::StringPiece hostname,
+                 HostCache::Entry::Source* source_out,
+                 HostCache::EntryStaleness* stale_out) const override;
+
+  std::unique_ptr<base::Value> GetDnsConfigAsValue() const override;
+
+  // Returns the number of host cache entries that were restored, or 0 if there
+  // is no cache.
+  size_t LastRestoredCacheSize() const;
+  // Returns the number of entries in the host cache, or 0 if there is no cache.
+  size_t CacheSize() const;
 
   void InitializePersistence(
       const PersistCallback& persist_callback,
@@ -160,19 +166,20 @@ class NET_EXPORT HostResolverImpl
   void SetNoIPv6OnWifi(bool no_ipv6_on_wifi) override;
   bool GetNoIPv6OnWifi() override;
 
+  void SetRequestContext(URLRequestContext* request_context) override;
+  void AddDnsOverHttpsServer(std::string server, bool use_post) override;
+  void ClearDnsOverHttpsServers() override;
+
   void set_proc_params_for_test(const ProcTaskParams& proc_params) {
     proc_params_ = proc_params;
   }
 
  protected:
-  // Just like the public constructor, but allows the task runner used for
-  // blocking tasks to be specified. Intended for testing only.
-  HostResolverImpl(const Options& options,
-                   NetLog* net_log,
-                   scoped_refptr<base::TaskRunner> worker_task_runner);
-
   // Callback from HaveOnlyLoopbackAddresses probe.
   void SetHaveOnlyLoopbackAddresses(bool result);
+
+  // Sets the task runner used for HostResolverProc tasks.
+  void SetTaskRunnerForTesting(scoped_refptr<base::TaskRunner> task_runner);
 
  private:
   friend class HostResolverImplTest;
@@ -366,14 +373,16 @@ class NET_EXPORT HostResolverImpl
   // Allow fallback to ProcTask if DnsTask fails.
   bool fallback_to_proctask_;
 
-  // Task runner used for DNS lookups using the platform resolver, and other
-  // blocking operations. Usually just the WorkerPool's task runner for slow
-  // tasks, but can be overridden for tests.
-  scoped_refptr<base::TaskRunner> worker_task_runner_;
+  // Task runner used for DNS lookups using the system resolver. Normally a
+  // TaskScheduler task runner, but can be overridden for tests.
+  scoped_refptr<base::TaskRunner> proc_task_runner_;
 
   bool persist_initialized_;
   PersistCallback persist_callback_;
   base::OneShotTimer persist_timer_;
+
+  URLRequestContext* url_request_context_;
+  std::vector<DnsConfig::DnsOverHttpsServerConfig> dns_over_https_servers_;
 
   THREAD_CHECKER(thread_checker_);
 

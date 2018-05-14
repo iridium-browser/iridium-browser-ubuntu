@@ -42,7 +42,6 @@
 
 namespace blink {
 
-class CachedMetadataHandler;
 class ErrorEvent;
 class ExceptionState;
 class ScriptSourceCode;
@@ -63,7 +62,6 @@ class CORE_EXPORT WorkerOrWorkletScriptController
   // Returns true if the evaluation completed with no uncaught exception.
   bool Evaluate(const ScriptSourceCode&,
                 ErrorEvent** = nullptr,
-                CachedMetadataHandler* = nullptr,
                 V8CacheOptions = kV8CacheOptionsDefault);
 
   // Prevents future JavaScript execution.
@@ -78,7 +76,7 @@ class CORE_EXPORT WorkerOrWorkletScriptController
   void DisableEval(const String&);
 
   // Used by Inspector agents:
-  ScriptState* GetScriptState() { return script_state_.Get(); }
+  ScriptState* GetScriptState() { return script_state_.get(); }
 
   // Used by V8 bindings:
   v8::Local<v8::Context> GetContext() {
@@ -87,10 +85,10 @@ class CORE_EXPORT WorkerOrWorkletScriptController
   }
 
   RejectedPromises* GetRejectedPromises() const {
-    return rejected_promises_.Get();
+    return rejected_promises_.get();
   }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   bool IsContextInitialized() const {
     return script_state_ && !!script_state_->PerContextData();
@@ -103,11 +101,8 @@ class CORE_EXPORT WorkerOrWorkletScriptController
   class ExecutionState;
 
   // Evaluate a script file in the current execution environment.
-  ScriptValue Evaluate(const String& script,
-                       const String& file_name,
-                       const TextPosition& script_start_position,
-                       CachedMetadataHandler*,
-                       V8CacheOptions);
+  ScriptValue EvaluateInternal(const ScriptSourceCode&,
+                               V8CacheOptions);
   void DisposeContextIfNeeded();
 
   Member<WorkerOrWorkletGlobalScope> global_scope_;
@@ -117,12 +112,12 @@ class CORE_EXPORT WorkerOrWorkletScriptController
   // usually the main thread's isolate is used.
   v8::Isolate* isolate_;
 
-  RefPtr<ScriptState> script_state_;
-  RefPtr<DOMWrapperWorld> world_;
+  scoped_refptr<ScriptState> script_state_;
+  scoped_refptr<DOMWrapperWorld> world_;
   String disable_eval_pending_;
   bool execution_forbidden_;
 
-  RefPtr<RejectedPromises> rejected_promises_;
+  scoped_refptr<RejectedPromises> rejected_promises_;
 
   // |m_executionState| refers to a stack object that evaluate() allocates;
   // evaluate() ensuring that the pointer reference to it is removed upon

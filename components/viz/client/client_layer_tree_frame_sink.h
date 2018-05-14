@@ -5,83 +5,127 @@
 #ifndef COMPONENTS_VIZ_CLIENT_CLIENT_LAYER_TREE_FRAME_SINK_H_
 #define COMPONENTS_VIZ_CLIENT_CLIENT_LAYER_TREE_FRAME_SINK_H_
 
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "cc/ipc/compositor_frame_sink.mojom.h"
-#include "cc/output/layer_tree_frame_sink.h"
-#include "cc/scheduler/begin_frame_source.h"
+#include "cc/trees/layer_tree_frame_sink.h"
+#include "components/viz/client/viz_client_export.h"
+#include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "components/viz/common/gpu/context_provider.h"
-#include "components/viz/common/surfaces/local_surface_id_allocator.h"
+#include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom.h"
 
 namespace viz {
 
+class HitTestDataProvider;
 class LocalSurfaceIdProvider;
 class SharedBitmapManager;
 
-class ClientLayerTreeFrameSink : public cc::LayerTreeFrameSink,
-                                 public cc::mojom::CompositorFrameSinkClient,
-                                 public cc::ExternalBeginFrameSourceClient {
+class VIZ_CLIENT_EXPORT ClientLayerTreeFrameSink
+    : public cc::LayerTreeFrameSink,
+      public mojom::CompositorFrameSinkClient,
+      public ExternalBeginFrameSourceClient {
  public:
-  ClientLayerTreeFrameSink(
-      scoped_refptr<ContextProvider> context_provider,
-      scoped_refptr<ContextProvider> worker_context_provider,
-      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-      SharedBitmapManager* shared_bitmap_manager,
-      std::unique_ptr<cc::SyntheticBeginFrameSource>
-          synthetic_begin_frame_source,
-      cc::mojom::CompositorFrameSinkPtrInfo compositor_frame_sink_info,
-      cc::mojom::CompositorFrameSinkClientRequest client_request,
-      std::unique_ptr<LocalSurfaceIdProvider> local_surface_id_provider,
-      bool enable_surface_synchronization);
+  struct VIZ_CLIENT_EXPORT UnboundMessagePipes {
+    UnboundMessagePipes();
+    ~UnboundMessagePipes();
+    UnboundMessagePipes(UnboundMessagePipes&& other);
+
+    bool HasUnbound() const;
+
+    // Only one of |compositor_frame_sink_info| or
+    // |compositor_frame_sink_associated_info| should be set.
+    mojom::CompositorFrameSinkPtrInfo compositor_frame_sink_info;
+    mojom::CompositorFrameSinkAssociatedPtrInfo
+        compositor_frame_sink_associated_info;
+    mojom::CompositorFrameSinkClientRequest client_request;
+  };
+
+  struct VIZ_CLIENT_EXPORT InitParams {
+    InitParams();
+    ~InitParams();
+
+    scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner;
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager = nullptr;
+    SharedBitmapManager* shared_bitmap_manager = nullptr;
+    std::unique_ptr<SyntheticBeginFrameSource> synthetic_begin_frame_source;
+    std::unique_ptr<HitTestDataProvider> hit_test_data_provider;
+    std::unique_ptr<LocalSurfaceIdProvider> local_surface_id_provider;
+    UnboundMessagePipes pipes;
+    bool enable_surface_synchronization = false;
+    bool wants_animate_only_begin_frames = false;
+  };
 
   ClientLayerTreeFrameSink(
-      scoped_refptr<cc::VulkanContextProvider> vulkan_context_provider,
-      std::unique_ptr<cc::SyntheticBeginFrameSource>
-          synthetic_begin_frame_source,
-      cc::mojom::CompositorFrameSinkPtrInfo compositor_frame_sink_info,
-      cc::mojom::CompositorFrameSinkClientRequest client_request,
-      std::unique_ptr<LocalSurfaceIdProvider> local_surface_id_provider,
-      bool enable_surface_synchronization);
+      scoped_refptr<ContextProvider> context_provider,
+      scoped_refptr<RasterContextProvider> worker_context_provider,
+      InitParams* params);
 
   ~ClientLayerTreeFrameSink() override;
 
-  base::WeakPtr<ClientLayerTreeFrameSink> GetWeakPtr();
+  const HitTestDataProvider* hit_test_data_provider() const {
+    return hit_test_data_provider_.get();
+  }
+
+  const LocalSurfaceId& local_surface_id() const { return local_surface_id_; }
 
   // cc::LayerTreeFrameSink implementation.
   bool BindToClient(cc::LayerTreeFrameSinkClient* client) override;
   void DetachFromClient() override;
   void SetLocalSurfaceId(const LocalSurfaceId& local_surface_id) override;
-  void SubmitCompositorFrame(cc::CompositorFrame frame) override;
-  void DidNotProduceFrame(const cc::BeginFrameAck& ack) override;
+  void SubmitCompositorFrame(CompositorFrame frame) override;
+  void DidNotProduceFrame(const BeginFrameAck& ack) override;
+  void DidAllocateSharedBitmap(mojo::ScopedSharedBufferHandle buffer,
+                               const SharedBitmapId& id) override;
+  void DidDeleteSharedBitmap(const SharedBitmapId& id) override;
 
  private:
-  // cc::mojom::CompositorFrameSinkClient implementation:
+  // mojom::CompositorFrameSinkClient implementation:
   void DidReceiveCompositorFrameAck(
-      const std::vector<cc::ReturnedResource>& resources) override;
-  void OnBeginFrame(const cc::BeginFrameArgs& begin_frame_args) override;
+      const std::vector<ReturnedResource>& resources) override;
+  void DidPresentCompositorFrame(uint32_t presentation_token,
+                                 base::TimeTicks time,
+                                 base::TimeDelta refresh,
+                                 uint32_t flags) override;
+  void DidDiscardCompositorFrame(uint32_t presentation_token) override;
+  void OnBeginFrame(const BeginFrameArgs& begin_frame_args) override;
   void OnBeginFramePausedChanged(bool paused) override;
   void ReclaimResources(
-      const std::vector<cc::ReturnedResource>& resources) override;
+      const std::vector<ReturnedResource>& resources) override;
 
-  // cc::ExternalBeginFrameSourceClient implementation.
+  // ExternalBeginFrameSourceClient implementation.
   void OnNeedsBeginFrames(bool needs_begin_frames) override;
 
-  static void OnMojoConnectionError(uint32_t custom_reason,
-                                    const std::string& description);
+  void OnMojoConnectionError(uint32_t custom_reason,
+                             const std::string& description);
 
   bool begin_frames_paused_ = false;
+  bool needs_begin_frames_ = false;
   LocalSurfaceId local_surface_id_;
+  std::unique_ptr<HitTestDataProvider> hit_test_data_provider_;
   std::unique_ptr<LocalSurfaceIdProvider> local_surface_id_provider_;
-  std::unique_ptr<cc::ExternalBeginFrameSource> begin_frame_source_;
-  std::unique_ptr<cc::SyntheticBeginFrameSource> synthetic_begin_frame_source_;
-  cc::mojom::CompositorFrameSinkPtrInfo compositor_frame_sink_info_;
-  cc::mojom::CompositorFrameSinkClientRequest client_request_;
-  cc::mojom::CompositorFrameSinkPtr compositor_frame_sink_;
-  mojo::Binding<cc::mojom::CompositorFrameSinkClient> client_binding_;
+  std::unique_ptr<ExternalBeginFrameSource> begin_frame_source_;
+  std::unique_ptr<SyntheticBeginFrameSource> synthetic_begin_frame_source_;
+
+  // Message pipes that will be bound when BindToClient() is called.
+  UnboundMessagePipes pipes_;
+
+  // One of |compositor_frame_sink_| or |compositor_frame_sink_associated_| will
+  // be bound after calling BindToClient(). |compositor_frame_sink_ptr_| will
+  // point to message pipe we want to use.
+  mojom::CompositorFrameSink* compositor_frame_sink_ptr_ = nullptr;
+  mojom::CompositorFrameSinkPtr compositor_frame_sink_;
+  mojom::CompositorFrameSinkAssociatedPtr compositor_frame_sink_associated_;
+  mojo::Binding<mojom::CompositorFrameSinkClient> client_binding_;
+
   THREAD_CHECKER(thread_checker_);
   const bool enable_surface_synchronization_;
+  const bool wants_animate_only_begin_frames_;
 
   base::WeakPtrFactory<ClientLayerTreeFrameSink> weak_factory_;
 

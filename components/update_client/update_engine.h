@@ -9,12 +9,12 @@
 #include <list>
 #include <map>
 #include <memory>
-#include <queue>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
@@ -28,7 +28,6 @@
 
 namespace base {
 class TimeTicks;
-class SequencedTaskRunner;
 }  // namespace base
 
 namespace update_client {
@@ -41,16 +40,16 @@ struct UpdateContext;
 // applied one at a time.
 class UpdateEngine {
  public:
-  using Callback = base::Callback<void(Error error)>;
+  using Callback = base::OnceCallback<void(Error error)>;
   using NotifyObserversCallback =
       base::Callback<void(UpdateClient::Observer::Events event,
                           const std::string& id)>;
   using CrxDataCallback = UpdateClient::CrxDataCallback;
 
-  UpdateEngine(const scoped_refptr<Configurator>& config,
+  UpdateEngine(scoped_refptr<Configurator> config,
                UpdateChecker::Factory update_checker_factory,
                CrxDownloader::Factory crx_downloader_factory,
-               PingManager* ping_manager,
+               scoped_refptr<PingManager> ping_manager,
                const NotifyObserversCallback& notify_observers_callback);
   ~UpdateEngine();
 
@@ -58,50 +57,42 @@ class UpdateEngine {
 
   void Update(bool is_foreground,
               const std::vector<std::string>& ids,
-              const UpdateClient::CrxDataCallback& crx_data_callback,
-              const Callback& update_callback);
+              UpdateClient::CrxDataCallback crx_data_callback,
+              Callback update_callback);
 
   void SendUninstallPing(const std::string& id,
                          const base::Version& version,
                          int reason,
-                         const Callback& update_callback);
+                         Callback update_callback);
 
  private:
   using UpdateContexts = std::set<std::unique_ptr<UpdateContext>>;
   using UpdateContextIterator = UpdateContexts::iterator;
 
-  void UpdateComplete(const UpdateContextIterator& it, Error error);
+  void UpdateComplete(UpdateContextIterator it, Error error);
 
-  void ComponentCheckingForUpdatesStart(const UpdateContextIterator& it,
-                                        const Component& component);
-  void ComponentCheckingForUpdatesComplete(const UpdateContextIterator& it,
-                                           const Component& component);
-  void UpdateCheckComplete(const UpdateContextIterator& it);
+  void ComponentCheckingForUpdatesStart(UpdateContextIterator it,
+                                        const std::string& id);
+  void ComponentCheckingForUpdatesComplete(UpdateContextIterator it);
+  void UpdateCheckComplete(UpdateContextIterator it);
 
-  void DoUpdateCheck(const UpdateContextIterator& it);
-  void UpdateCheckDone(const UpdateContextIterator& it,
+  void DoUpdateCheck(UpdateContextIterator it);
+  void UpdateCheckDone(UpdateContextIterator it,
                        int error,
                        int retry_after_sec);
 
-  void HandleComponent(const UpdateContextIterator& it);
-  void HandleComponentComplete(const UpdateContextIterator& it);
+  void HandleComponent(UpdateContextIterator it);
+  void HandleComponentComplete(UpdateContextIterator it);
 
   // Returns true if the update engine rejects this update call because it
   // occurs too soon.
   bool IsThrottled(bool is_foreground) const;
 
-  // base::TimeDelta GetNextUpdateDelay(const Component& component) const;
-
   base::ThreadChecker thread_checker_;
-
   scoped_refptr<Configurator> config_;
-
   UpdateChecker::Factory update_checker_factory_;
   CrxDownloader::Factory crx_downloader_factory_;
-
-  // TODO(sorin): refactor as a ref counted class.
-  PingManager* ping_manager_;  // Not owned by this class.
-
+  scoped_refptr<PingManager> ping_manager_;
   std::unique_ptr<PersistedData> metadata_;
 
   // Called when CRX state changes occur.
@@ -120,14 +111,15 @@ class UpdateEngine {
 };
 
 // TODO(sorin): consider making this a ref counted type.
+// Describes a group of components which are installed or updated together.
 struct UpdateContext {
   UpdateContext(
-      const scoped_refptr<Configurator>& config,
+      scoped_refptr<Configurator> config,
       bool is_foreground,
       const std::vector<std::string>& ids,
-      const UpdateClient::CrxDataCallback& crx_data_callback,
+      UpdateClient::CrxDataCallback crx_data_callback,
       const UpdateEngine::NotifyObserversCallback& notify_observers_callback,
-      const UpdateEngine::Callback& callback,
+      UpdateEngine::Callback callback,
       CrxDownloader::Factory crx_downloader_factory);
 
   ~UpdateContext();
@@ -144,16 +136,13 @@ struct UpdateContext {
   const std::vector<std::string> ids;
 
   // Called before an update check, when update metadata is needed.
-  const UpdateEngine::CrxDataCallback& crx_data_callback;
+  UpdateEngine::CrxDataCallback crx_data_callback;
 
   // Called when there is a state change for any update in this context.
   const UpdateEngine::NotifyObserversCallback notify_observers_callback;
 
   // Called when the all updates associated with this context have completed.
-  const UpdateEngine::Callback callback;
-
-  // Runs tasks in a blocking thread pool.
-  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner;
+  UpdateEngine::Callback callback;
 
   // Creates instances of CrxDownloader;
   CrxDownloader::Factory crx_downloader_factory;
@@ -169,7 +158,7 @@ struct UpdateContext {
 
   IdToComponentPtrMap components;
 
-  std::queue<std::string> component_queue;
+  base::queue<std::string> component_queue;
 
   // The time to wait before handling the update for a component.
   // The wait time is proportional with the cost incurred by updating
@@ -177,6 +166,9 @@ struct UpdateContext {
   // update for the current component, the longer the wait until the engine
   // is handling the next component in the queue.
   base::TimeDelta next_update_delay;
+
+  // The session id this context is associated with.
+  const std::string session_id;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(UpdateContext);

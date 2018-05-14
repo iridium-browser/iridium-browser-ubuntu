@@ -43,8 +43,7 @@ class HTMLSelectElement;
 class WebSelectElement final : public WebFormControlElement {
  public:
   WebSelectElement() : WebFormControlElement() {}
-  WebSelectElement(const WebSelectElement& element)
-      : WebFormControlElement(element) {}
+  WebSelectElement(const WebSelectElement& element) = default;
 
   WebSelectElement& operator=(const WebSelectElement& element) {
     WebFormControlElement::Assign(element);
@@ -56,7 +55,7 @@ class WebSelectElement final : public WebFormControlElement {
 
   BLINK_EXPORT WebVector<WebElement> GetListItems() const;
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebSelectElement(HTMLSelectElement*);
   WebSelectElement& operator=(HTMLSelectElement*);
   operator HTMLSelectElement*() const;

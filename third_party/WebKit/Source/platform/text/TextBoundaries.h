@@ -40,16 +40,12 @@ PLATFORM_EXPORT int EndOfFirstWordBoundaryContext(const UChar* characters,
 PLATFORM_EXPORT int StartOfLastWordBoundaryContext(const UChar* characters,
                                                    int length);
 
-PLATFORM_EXPORT void FindWordBoundary(const UChar*,
-                                      int len,
-                                      int position,
-                                      int* start,
-                                      int* end);
+// |UChar*| should be a string in logical order instead of visual order, since
+// |FindWordBoundary()| uses ICU, which works on logical order strings
+PLATFORM_EXPORT int FindWordStartBoundary(const UChar*, int len, int position);
 PLATFORM_EXPORT int FindWordEndBoundary(const UChar*, int len, int position);
-PLATFORM_EXPORT int FindNextWordFromIndex(const UChar*,
-                                          int len,
-                                          int position,
-                                          bool forward);
+PLATFORM_EXPORT int FindNextWordBackward(const UChar*, int len, int position);
+PLATFORM_EXPORT int FindNextWordForward(const UChar*, int len, int position);
 
 }  // namespace blink
 

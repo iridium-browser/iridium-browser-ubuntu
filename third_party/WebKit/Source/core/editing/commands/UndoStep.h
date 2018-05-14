@@ -31,7 +31,7 @@
 #ifndef UndoStep_h
 #define UndoStep_h
 
-#include "core/editing/VisibleSelection.h"
+#include "core/editing/commands/SelectionForUndoStep.h"
 #include "core/events/InputEvent.h"
 #include "platform/heap/Handle.h"
 
@@ -42,8 +42,8 @@ class SimpleEditCommand;
 class UndoStep : public GarbageCollectedFinalized<UndoStep> {
  public:
   static UndoStep* Create(Document*,
-                          const VisibleSelection&,
-                          const VisibleSelection&,
+                          const SelectionForUndoStep&,
+                          const SelectionForUndoStep&,
                           InputEvent::InputType);
 
   void Unapply();
@@ -52,12 +52,18 @@ class UndoStep : public GarbageCollectedFinalized<UndoStep> {
   void Append(SimpleEditCommand*);
   void Append(UndoStep*);
 
-  const VisibleSelection& StartingSelection() const {
+  const SelectionForUndoStep& StartingSelection() const {
     return starting_selection_;
   }
-  const VisibleSelection& EndingSelection() const { return ending_selection_; }
-  void SetStartingSelection(const VisibleSelection&);
-  void SetEndingSelection(const VisibleSelection&);
+  const SelectionForUndoStep& EndingSelection() const {
+    return ending_selection_;
+  }
+  bool SelectionIsDirectional() const { return selection_is_directional_; }
+  void SetStartingSelection(const SelectionForUndoStep&);
+  void SetEndingSelection(const SelectionForUndoStep&);
+  void SetSelectionIsDirectional(bool is_directional) {
+    selection_is_directional_ = is_directional;
+  }
   Element* StartingRootEditableElement() const {
     return starting_root_editable_element_.Get();
   }
@@ -67,22 +73,23 @@ class UndoStep : public GarbageCollectedFinalized<UndoStep> {
 
   uint64_t SequenceNumber() const { return sequence_number_; }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   UndoStep(Document*,
-           const VisibleSelection& starting_selection,
-           const VisibleSelection& ending_selection,
+           const SelectionForUndoStep& starting_selection,
+           const SelectionForUndoStep& ending_selection,
            InputEvent::InputType);
 
   Member<Document> document_;
-  VisibleSelection starting_selection_;
-  VisibleSelection ending_selection_;
+  SelectionForUndoStep starting_selection_;
+  SelectionForUndoStep ending_selection_;
   HeapVector<Member<SimpleEditCommand>> commands_;
   Member<Element> starting_root_editable_element_;
   Member<Element> ending_root_editable_element_;
   InputEvent::InputType input_type_;
   const uint64_t sequence_number_;
+  bool selection_is_directional_ = false;
 };
 
 }  // namespace blink

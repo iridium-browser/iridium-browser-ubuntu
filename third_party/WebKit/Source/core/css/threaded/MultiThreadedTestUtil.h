@@ -7,6 +7,9 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include <memory>
+
+#include "base/single_thread_task_runner.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/WaitableEvent.h"
 #include "platform/WebTaskRunner.h"
@@ -55,34 +58,36 @@ class MultiThreadedTest : public ::testing::Test {
     Vector<std::unique_ptr<WaitableEvent>> waits;
 
     for (int i = 0; i < num_threads_; ++i) {
-      threads.push_back(WebThreadSupportingGC::Create(""));
-      waits.push_back(WTF::MakeUnique<WaitableEvent>());
+      threads.push_back(WebThreadSupportingGC::Create(
+          WebThreadCreationParams(WebThreadType::kTestThread)));
+      waits.push_back(std::make_unique<WaitableEvent>());
     }
 
     for (int i = 0; i < num_threads_; ++i) {
-      WebTaskRunner* task_runner =
-          threads[i]->PlatformThread().GetWebTaskRunner();
+      base::SingleThreadTaskRunner* task_runner =
+          threads[i]->PlatformThread().GetTaskRunner().get();
 
-      task_runner->PostTask(FROM_HERE,
-                            CrossThreadBind(
-                                [](WebThreadSupportingGC* thread) {
-                                  thread->InitializeOnThread();
-                                },
-                                CrossThreadUnretained(threads[i].get())));
+      PostCrossThreadTask(*task_runner, FROM_HERE,
+                          CrossThreadBind(
+                              [](WebThreadSupportingGC* thread) {
+                                thread->InitializeOnThread();
+                              },
+                              CrossThreadUnretained(threads[i].get())));
 
       for (int j = 0; j < callbacks_per_thread_; ++j) {
-        task_runner->PostTask(FROM_HERE,
-                              CrossThreadBind(function, parameters...));
+        PostCrossThreadTask(*task_runner, FROM_HERE,
+                            CrossThreadBind(function, parameters...));
       }
 
-      task_runner->PostTask(
-          FROM_HERE, CrossThreadBind(
-                         [](WebThreadSupportingGC* thread, WaitableEvent* w) {
-                           thread->ShutdownOnThread();
-                           w->Signal();
-                         },
-                         CrossThreadUnretained(threads[i].get()),
-                         CrossThreadUnretained(waits[i].get())));
+      PostCrossThreadTask(
+          *task_runner, FROM_HERE,
+          CrossThreadBind(
+              [](WebThreadSupportingGC* thread, WaitableEvent* w) {
+                thread->ShutdownOnThread();
+                w->Signal();
+              },
+              CrossThreadUnretained(threads[i].get()),
+              CrossThreadUnretained(waits[i].get())));
     }
 
     for (int i = 0; i < num_threads_; ++i) {

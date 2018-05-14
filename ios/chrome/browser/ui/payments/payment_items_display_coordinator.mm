@@ -5,9 +5,9 @@
 #import "ios/chrome/browser/ui/payments/payment_items_display_coordinator.h"
 
 #include "base/logging.h"
+#include "components/payments/core/web_payment_request.h"
 #include "ios/chrome/browser/payments/payment_request.h"
 #import "ios/chrome/browser/ui/payments/payment_items_display_mediator.h"
-#include "ios/web/public/payments/payment_request.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -26,9 +26,7 @@
 @synthesize delegate = _delegate;
 
 - (void)start {
-  BOOL payButtonEnabled = _paymentRequest->selected_payment_method() != nil;
-  _viewController = [[PaymentItemsDisplayViewController alloc]
-      initWithPayButtonEnabled:payButtonEnabled];
+  _viewController = [[PaymentItemsDisplayViewController alloc] init];
   [_viewController setDelegate:self];
   _mediator = [[PaymentItemsDisplayMediator alloc]
       initWithPaymentRequest:self.paymentRequest];

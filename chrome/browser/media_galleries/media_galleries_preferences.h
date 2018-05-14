@@ -186,7 +186,7 @@ class MediaGalleriesPreferences
   // Before the callback is run, other calls may not return the correct results.
   // Should be invoked on the UI thread; callbacks will be run on the UI thread.
   // This call also ensures that the StorageMonitor is initialized.
-  // Note for unit tests: This requires an active FILE thread and
+  // Note for unit tests: This requires an active ScopedTaskEnvironment and
   // EnsureMediaDirectoriesExists instance to complete reliably.
   void EnsureInitialized(base::Closure callback);
 
@@ -283,28 +283,10 @@ class MediaGalleriesPreferences
   typedef std::map<std::string /*device id*/, MediaGalleryPrefIdSet>
       DeviceIdPrefIdsMap;
 
-  // These must be called on the UI thread.
-  void OnInitializationCallbackReturned();
-  void FinishInitialization();
-
   // Populates the default galleries. Call only on fresh profiles.
   void AddDefaultGalleries();
 
-  // This is a hack - Some devices (iTunes, Picasa) are singletons in that only
-  // one instance of that type is supported at a time. As such, the device id
-  // should just be "itunes:" or "picasa:" but that would mean finding the
-  // location of the database file multiple times, which may be an async
-  // operation. Storing the location of the backing database in the device
-  // id allows that look up to be avoided. However, the cost is that if the
-  // database moves, the device id in preferences has to be updated.  This
-  // method searches for a gallery of the type passed in and updates its
-  // device id.  It returns true if the device id is up to date.
-  bool UpdateDeviceIDForSingletonType(const std::string& device_id);
-
   void OnStorageMonitorInit(bool api_has_been_used);
-
-  // Handle an iTunes or Picasa finder returning a device ID to us.
-  void OnFinderDeviceID(const std::string& device_id);
 
   // Builds |known_galleries_| from the persistent store.
   void InitFromPrefs();
@@ -367,7 +349,6 @@ class MediaGalleriesPreferences
 
   bool initialized_;
   std::vector<base::Closure> on_initialize_callbacks_;
-  int pre_initialization_callbacks_waiting_;
 
   // The profile that owns |this|.
   Profile* profile_;

@@ -44,12 +44,9 @@ TestMediaStreamRendererFactory::GetVideoRenderer(
     const blink::WebMediaStream& web_stream,
     const base::Closure& error_cb,
     const MediaStreamVideoRenderer::RepaintCB& repaint_cb,
-    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
-    const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
-    const scoped_refptr<base::TaskRunner>& worker_task_runner,
-    media::GpuVideoAcceleratorFactories* gpu_factories) {
+    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner) {
   if (!IsMockMediaStreamWithVideo(web_stream))
-    return NULL;
+    return nullptr;
 
   return new TestMediaStreamVideoRenderer(
       io_task_runner, gfx::Size(kVideoCaptureWidth, kVideoCaptureHeight),
@@ -63,7 +60,7 @@ TestMediaStreamRendererFactory::GetAudioRenderer(
     int render_frame_id,
     const std::string& device_id,
     const url::Origin& security_origin) {
-  return NULL;
+  return nullptr;
 }
 
 }  // namespace content

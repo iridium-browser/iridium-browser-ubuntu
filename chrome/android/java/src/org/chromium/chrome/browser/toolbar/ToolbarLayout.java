@@ -9,7 +9,6 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.content.Context;
 import android.content.res.ColorStateList;
-import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
@@ -40,6 +39,7 @@ import org.chromium.chrome.browser.widget.PulseDrawable;
 import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.chrome.browser.widget.ToolbarProgressBar;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
+import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.ui.UiUtils;
 
 import javax.annotation.Nullable;
@@ -164,13 +164,23 @@ public abstract class ToolbarLayout extends FrameLayout implements Toolbar {
             }
 
             @Override
+            public boolean hasTab() {
+                return false;
+            }
+
+            @Override
             public String getCurrentUrl() {
-                return null;
+                return "";
             }
 
             @Override
             public String getText() {
                 return null;
+            }
+
+            @Override
+            public String getTitle() {
+                return "";
             }
 
             @Override
@@ -185,6 +195,46 @@ public abstract class ToolbarLayout extends FrameLayout implements Toolbar {
 
             @Override
             public boolean isUsingBrandColor() {
+                return false;
+            }
+
+            @Override
+            public boolean isOfflinePage() {
+                return false;
+            }
+
+            @Override
+            public boolean isShowingUntrustedOfflinePage() {
+                return false;
+            }
+
+            @Override
+            public boolean shouldShowGoogleG(String urlBarText) {
+                return false;
+            }
+
+            @Override
+            public boolean shouldShowSecurityIcon() {
+                return false;
+            }
+
+            @Override
+            public boolean shouldShowVerboseStatus() {
+                return false;
+            }
+
+            @Override
+            public int getSecurityLevel() {
+                return ConnectionSecurityLevel.NONE;
+            }
+
+            @Override
+            public int getSecurityIconResource() {
+                return 0;
+            }
+
+            @Override
+            public boolean isDisplayingQueryTerms() {
                 return false;
             }
         };
@@ -459,18 +509,34 @@ public abstract class ToolbarLayout extends FrameLayout implements Toolbar {
     protected void onPrimaryColorChanged(boolean shouldAnimate) { }
 
     /**
-     * Sets the icon drawable that the close button in the toolbar (if any) should show.
+     * Sets the icon drawable that the close button in the toolbar (if any) should show, or hides
+     * it if {@code drawable} is {@code null}.
      */
-    public void setCloseButtonImageResource(Drawable drawable) { }
+    public void setCloseButtonImageResource(@Nullable Drawable drawable) { }
 
     /**
-     * Sets/adds a custom action button to the {@link ToolbarLayout} if it is supported.
-     * @param description  The content description for the button.
-     * @param listener     The {@link OnClickListener} to use for clicks to the button.
-     * @param buttonSource The {@link Bitmap} resource to use as the source for the button.
+     * Adds a custom action button to the toolbar layout, if it is supported.
+     * @param drawable The icon for the button.
+     * @param description The content description for the button.
+     * @param listener The {@link OnClickListener} to use for clicks to the button.
      */
-    public void setCustomActionButton(Drawable drawable, String description,
-            OnClickListener listener) { }
+    public void addCustomActionButton(
+            Drawable drawable, String description, OnClickListener listener) {
+        // This method should only be called for subclasses that override it.
+        assert false;
+    }
+
+    /**
+     * Updates the visual appearance of a custom action button in the toolbar layout,
+     * if it is supported.
+     * @param index The index of the button.
+     * @param drawable The icon for the button.
+     * @param description The content description for the button.
+     */
+    public void updateCustomActionButton(int index, Drawable drawable, String description) {
+        // This method should only be called for subclasses that override it.
+        assert false;
+    }
 
     /**
      * @return The height of the tab strip. Return 0 for toolbars that do not have a tabstrip.
@@ -706,6 +772,14 @@ public abstract class ToolbarLayout extends FrameLayout implements Toolbar {
     protected void openHomepage() {
         getLocationBar().hideSuggestions();
         if (mToolbarTabController != null) mToolbarTabController.openHomepage();
+    }
+
+    /**
+     * Opens the Memex UI in the current tab.
+     */
+    protected void openMemexUI() {
+        getLocationBar().hideSuggestions();
+        if (mToolbarTabController != null) mToolbarTabController.openMemexUI();
     }
 
     @Override

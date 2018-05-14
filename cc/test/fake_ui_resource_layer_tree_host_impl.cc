@@ -14,7 +14,7 @@ FakeUIResourceLayerTreeHostImpl::FakeUIResourceLayerTreeHostImpl(
     TaskGraphRunner* task_graph_runner)
     : FakeLayerTreeHostImpl(task_runner_provider, task_graph_runner) {}
 
-FakeUIResourceLayerTreeHostImpl::~FakeUIResourceLayerTreeHostImpl() {}
+FakeUIResourceLayerTreeHostImpl::~FakeUIResourceLayerTreeHostImpl() = default;
 
 void FakeUIResourceLayerTreeHostImpl::CreateUIResource(
     UIResourceId uid,
@@ -23,21 +23,21 @@ void FakeUIResourceLayerTreeHostImpl::CreateUIResource(
     DeleteUIResource(uid);
 
   UIResourceData data;
-  data.resource_id = resource_provider()->CreateResource(
-      bitmap.GetSize(), ResourceProvider::TEXTURE_HINT_IMMUTABLE,
-      viz::RGBA_8888, gfx::ColorSpace());
+  data.resource_id = resource_provider()->CreateGpuTextureResource(
+      bitmap.GetSize(), viz::ResourceTextureHint::kDefault, viz::RGBA_8888,
+      gfx::ColorSpace());
 
   data.opaque = bitmap.GetOpaque();
   fake_ui_resource_map_[uid] = data;
 }
 
 void FakeUIResourceLayerTreeHostImpl::DeleteUIResource(UIResourceId uid) {
-  ResourceId id = ResourceIdForUIResource(uid);
+  viz::ResourceId id = ResourceIdForUIResource(uid);
   if (id)
     fake_ui_resource_map_.erase(uid);
 }
 
-ResourceId FakeUIResourceLayerTreeHostImpl::ResourceIdForUIResource(
+viz::ResourceId FakeUIResourceLayerTreeHostImpl::ResourceIdForUIResource(
     UIResourceId uid) const {
   UIResourceMap::const_iterator iter = fake_ui_resource_map_.find(uid);
   if (iter != fake_ui_resource_map_.end())

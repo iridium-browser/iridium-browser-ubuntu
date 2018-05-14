@@ -7,12 +7,13 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#include "webrtc/modules/audio_processing/aec3/echo_canceller3.h"
+#include "modules/audio_processing/aec3/echo_canceller3.h"
 
 #include <sstream>
 
-#include "webrtc/modules/audio_processing/logging/apm_data_dumper.h"
-#include "webrtc/rtc_base/atomicops.h"
+#include "modules/audio_processing/logging/apm_data_dumper.h"
+#include "rtc_base/atomicops.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
 
@@ -27,6 +28,43 @@ bool DetectSaturation(rtc::ArrayView<const float> y) {
     }
   }
   return false;
+}
+
+// Method for adjusting config parameter dependencies..
+EchoCanceller3Config AdjustConfig(const EchoCanceller3Config& config) {
+  EchoCanceller3Config adjusted_cfg = config;
+
+  // Use customized parameters when the system has clock-drift.
+  if (config.echo_removal_control.has_clock_drift) {
+    RTC_LOG(LS_WARNING)
+        << "Customizing parameters to work well for the clock-drift case.";
+    if (config.ep_strength.bounded_erl) {
+      adjusted_cfg.ep_strength.default_len = 0.85f;
+      adjusted_cfg.ep_strength.lf = 0.01f;
+      adjusted_cfg.ep_strength.mf = 0.01f;
+      adjusted_cfg.ep_strength.hf = 0.01f;
+      adjusted_cfg.echo_model.render_pre_window_size = 1;
+      adjusted_cfg.echo_model.render_post_window_size = 1;
+      adjusted_cfg.echo_model.nonlinear_hold = 3;
+      adjusted_cfg.echo_model.nonlinear_release = 0.001f;
+    } else {
+      adjusted_cfg.ep_strength.bounded_erl = true;
+      adjusted_cfg.delay.down_sampling_factor = 2;
+      adjusted_cfg.ep_strength.default_len = 0.8f;
+      adjusted_cfg.ep_strength.lf = 0.01f;
+      adjusted_cfg.ep_strength.mf = 0.01f;
+      adjusted_cfg.ep_strength.hf = 0.01f;
+      adjusted_cfg.filter.main = {30, 0.1f, 0.8f, 0.001f, 20075344.f};
+      adjusted_cfg.filter.shadow = {30, 0.7f, 20075344.f};
+      adjusted_cfg.filter.main_initial = {30, 0.1f, 1.5f, 0.001f, 20075344.f};
+      adjusted_cfg.filter.shadow_initial = {30, 0.9f, 20075344.f};
+      adjusted_cfg.echo_model.render_pre_window_size = 2;
+      adjusted_cfg.echo_model.render_post_window_size = 2;
+      adjusted_cfg.echo_model.nonlinear_hold = 3;
+      adjusted_cfg.echo_model.nonlinear_release = 0.6f;
+    }
+  }
+  return adjusted_cfg;
 }
 
 void FillSubFrameView(AudioBuffer* frame,
@@ -146,7 +184,7 @@ class EchoCanceller3::RenderWriter {
                int frame_length,
                int num_bands);
   ~RenderWriter();
-  void Insert(AudioBuffer* render);
+  void Insert(AudioBuffer* input);
 
  private:
   ApmDataDumper* data_dumper_;
@@ -184,6 +222,12 @@ EchoCanceller3::RenderWriter::~RenderWriter() = default;
 void EchoCanceller3::RenderWriter::Insert(AudioBuffer* input) {
   RTC_DCHECK_EQ(1, input->num_channels());
   RTC_DCHECK_EQ(frame_length_, input->num_frames_per_band());
+  RTC_DCHECK_EQ(num_bands_, input->num_bands());
+
+  // TODO(bugs.webrtc.org/8759) Temporary work-around.
+  if (num_bands_ != static_cast<int>(input->num_bands()))
+    return;
+
   data_dumper_->DumpWav("aec3_render_input", frame_length_,
                         &input->split_bands_f(0)[0][0],
                         LowestBandRate(sample_rate_hz_), 1);
@@ -200,15 +244,17 @@ void EchoCanceller3::RenderWriter::Insert(AudioBuffer* input) {
 
 int EchoCanceller3::instance_count_ = 0;
 
-EchoCanceller3::EchoCanceller3(
-    const AudioProcessing::Config::EchoCanceller3& config,
-    int sample_rate_hz,
-    bool use_highpass_filter)
-    : EchoCanceller3(sample_rate_hz,
-                     use_highpass_filter,
-                     std::unique_ptr<BlockProcessor>(
-                         BlockProcessor::Create(config, sample_rate_hz))) {}
-EchoCanceller3::EchoCanceller3(int sample_rate_hz,
+EchoCanceller3::EchoCanceller3(const EchoCanceller3Config& config,
+                               int sample_rate_hz,
+                               bool use_highpass_filter)
+    : EchoCanceller3(
+          AdjustConfig(config),
+          sample_rate_hz,
+          use_highpass_filter,
+          std::unique_ptr<BlockProcessor>(
+              BlockProcessor::Create(AdjustConfig(config), sample_rate_hz))) {}
+EchoCanceller3::EchoCanceller3(const EchoCanceller3Config& config,
+                               int sample_rate_hz,
                                bool use_highpass_filter,
                                std::unique_ptr<BlockProcessor> block_processor)
     : data_dumper_(
@@ -220,7 +266,7 @@ EchoCanceller3::EchoCanceller3(int sample_rate_hz,
       capture_blocker_(num_bands_),
       render_blocker_(num_bands_),
       render_transfer_queue_(
-          kRenderTransferQueueSize,
+          kRenderTransferQueueSizeFrames,
           std::vector<std::vector<float>>(
               num_bands_,
               std::vector<float>(frame_length_, 0.f)),
@@ -324,17 +370,11 @@ void EchoCanceller3::ProcessCapture(AudioBuffer* capture, bool level_change) {
                         LowestBandRate(sample_rate_hz_), 1);
 }
 
-std::string EchoCanceller3::ToString(
-    const AudioProcessing::Config::EchoCanceller3& config) {
-  std::stringstream ss;
-  ss << "{"
-     << "enabled: " << (config.enabled ? "true" : "false") << "}";
-  return ss.str();
-}
-
-bool EchoCanceller3::Validate(
-    const AudioProcessing::Config::EchoCanceller3& config) {
-  return true;
+EchoControl::Metrics EchoCanceller3::GetMetrics() const {
+  RTC_DCHECK_RUNS_SERIALIZED(&capture_race_checker_);
+  Metrics metrics;
+  block_processor_->GetMetrics(&metrics);
+  return metrics;
 }
 
 void EchoCanceller3::EmptyRenderQueue() {
@@ -358,5 +398,4 @@ void EchoCanceller3::EmptyRenderQueue() {
         render_transfer_queue_.Remove(&render_queue_output_frame_);
   }
 }
-
 }  // namespace webrtc

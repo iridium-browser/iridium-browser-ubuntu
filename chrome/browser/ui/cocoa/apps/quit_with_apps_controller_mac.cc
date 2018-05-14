@@ -12,8 +12,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/notifications/notification.h"
-#include "chrome/browser/notifications/notification_ui_manager.h"
+#include "chrome/browser/notifications/notification_display_service.h"
+#include "chrome/browser/notifications/notification_handler.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -34,27 +34,32 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/message_center/public/cpp/notification.h"
 
 using extensions::ExtensionRegistry;
+
+namespace {
 
 const char kQuitWithAppsOriginUrl[] = "chrome://quit-with-apps";
 const int kQuitAllAppsButtonIndex = 0;
 const int kDontShowAgainButtonIndex = 1;
 
+void CloseNotification(Profile* profile) {
+  NotificationDisplayService::GetForProfile(profile)->Close(
+      NotificationHandler::Type::TRANSIENT,
+      QuitWithAppsController::kQuitWithAppsNotificationID);
+}
+
+}  // namespace
+
 const char QuitWithAppsController::kQuitWithAppsNotificationID[] =
     "quit-with-apps";
 
 QuitWithAppsController::QuitWithAppsController()
-    : notification_profile_(NULL), suppress_for_session_(false) {
+    : hosted_app_quit_notification_(
+          base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kHostedAppQuitNotification)) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-  hosted_app_quit_notification_ =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kHostedAppQuitNotification);
-
-  // There is only ever one notification to replace, so use the same tag
-  // each time.
-  std::string tag = id();
 
   message_center::ButtonInfo quit_apps_button_info(
       l10n_util::GetStringUTF16(IDS_QUIT_WITH_APPS_QUIT_LABEL));
@@ -66,36 +71,32 @@ QuitWithAppsController::QuitWithAppsController()
     rich_notification_data.buttons.push_back(suppression_button_info);
   }
 
-  notification_.reset(new Notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
+  notification_.reset(new message_center::Notification(
+      message_center::NOTIFICATION_TYPE_SIMPLE, kQuitWithAppsNotificationID,
       l10n_util::GetStringUTF16(IDS_QUIT_WITH_APPS_TITLE),
       l10n_util::GetStringUTF16(IDS_QUIT_WITH_APPS_EXPLANATION),
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_PRODUCT_LOGO_128),
+      l10n_util::GetStringUTF16(IDS_QUIT_WITH_APPS_NOTIFICATION_DISPLAY_SOURCE),
+      GURL(kQuitWithAppsOriginUrl),
       message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
                                  kQuitWithAppsNotificationID),
-      l10n_util::GetStringUTF16(IDS_QUIT_WITH_APPS_NOTIFICATION_DISPLAY_SOURCE),
-      GURL(kQuitWithAppsOriginUrl), tag, rich_notification_data, this));
+      rich_notification_data, this));
 }
 
 QuitWithAppsController::~QuitWithAppsController() {}
 
-void QuitWithAppsController::Display() {}
-
 void QuitWithAppsController::Close(bool by_user) {
-  if (by_user) {
-    suppress_for_session_ = hosted_app_quit_notification_ ? false : true;
-  }
+  if (by_user)
+    suppress_for_session_ = !hosted_app_quit_notification_;
 }
 
 void QuitWithAppsController::Click() {
-  g_browser_process->notification_ui_manager()->CancelById(
-      id(), NotificationUIManager::GetProfileID(notification_profile_));
+  CloseNotification(notification_profile_);
 }
 
 void QuitWithAppsController::ButtonClick(int button_index) {
-  g_browser_process->notification_ui_manager()->CancelById(
-      id(), NotificationUIManager::GetProfileID(notification_profile_));
+  CloseNotification(notification_profile_);
 
   if (button_index == kQuitAllAppsButtonIndex) {
     if (hosted_app_quit_notification_) {
@@ -111,10 +112,6 @@ void QuitWithAppsController::ButtonClick(int button_index) {
     g_browser_process->local_state()->SetBoolean(
         prefs::kNotifyWhenAppsKeepChromeAlive, false);
   }
-}
-
-std::string QuitWithAppsController::id() const {
-  return kQuitWithAppsNotificationID;
 }
 
 bool QuitWithAppsController::ShouldQuit() {
@@ -183,13 +180,11 @@ bool QuitWithAppsController::ShouldQuit() {
   // Delete any existing notification to ensure this one is shown. If
   // notification_profile_ is NULL then it must be that no notification has been
   // added by this class yet.
-  if (notification_profile_) {
-    g_browser_process->notification_ui_manager()->CancelById(
-        id(), NotificationUIManager::GetProfileID(notification_profile_));
-  }
+  if (notification_profile_)
+    CloseNotification(notification_profile_);
   notification_profile_ = profiles[0];
-  g_browser_process->notification_ui_manager()->Add(*notification_,
-                                                    notification_profile_);
+  NotificationDisplayService::GetForProfile(notification_profile_)
+      ->Display(NotificationHandler::Type::TRANSIENT, *notification_);
 
   // Always return false, the notification UI can be used to quit all apps which
   // will cause Chrome to quit.

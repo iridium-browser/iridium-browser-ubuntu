@@ -10,33 +10,58 @@ import android.view.View;
 import android.widget.TextView;
 
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.RuleChain;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.params.ParameterAnnotations.ClassParameter;
+import org.chromium.base.test.params.ParameterAnnotations.UseRunnerDelegate;
+import org.chromium.base.test.params.ParameterSet;
+import org.chromium.base.test.params.ParameterizedRunner;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.vr_shell.mock.MockVrCoreVersionCheckerImpl;
+import org.chromium.chrome.browser.vr_shell.rules.VrActivityRestriction;
 import org.chromium.chrome.browser.vr_shell.util.VrInfoBarUtils;
 import org.chromium.chrome.browser.vr_shell.util.VrShellDelegateUtils;
+import org.chromium.chrome.browser.vr_shell.util.VrTestRuleUtils;
 import org.chromium.chrome.test.ChromeActivityTestRule;
-import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
+
+import java.util.List;
+import java.util.concurrent.Callable;
 
 /**
  * End-to-end tests for the InfoBar that prompts the user to update or install
  * VrCore (VR Services) when attempting to use a VR feature with an outdated
  * or entirely missing version.
  */
-@RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@RunWith(ParameterizedRunner.class)
+@UseRunnerDelegate(ChromeJUnit4RunnerDelegate.class)
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT) // WebVR is only supported on K+
 public class VrInstallUpdateInfoBarTest {
+    @ClassParameter
+    private static List<ParameterSet> sClassParams =
+            VrTestRuleUtils.generateDefaultVrTestRuleParameters();
     @Rule
-    public VrTestRule mVrTestRule = new VrTestRule();
+    public RuleChain mRuleChain;
+
+    private ChromeActivityTestRule mVrTestRule;
+    private VrTestFramework mVrTestFramework;
+
+    public VrInstallUpdateInfoBarTest(Callable<ChromeActivityTestRule> callable) throws Exception {
+        mVrTestRule = callable.call();
+        mRuleChain = VrTestRuleUtils.wrapRuleInVrActivityRestrictionRule(mVrTestRule);
+    }
+
+    @Before
+    public void setUp() throws Exception {
+        mVrTestFramework = new VrTestFramework(mVrTestRule);
+    }
 
     /**
      * Helper function to run the tests checking for the upgrade/install InfoBar being present since
@@ -45,20 +70,10 @@ public class VrInstallUpdateInfoBarTest {
      * @param checkerReturnCompatibility The compatibility to have the VrCoreVersionChecker return
      */
     private void infoBarTestHelper(final int checkerReturnCompatibility) {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                MockVrCoreVersionCheckerImpl mockChecker = new MockVrCoreVersionCheckerImpl();
-                mockChecker.setMockReturnValue(new VrCoreInfo(null, checkerReturnCompatibility));
-                VrShellDelegateUtils.getDelegateInstance().overrideVrCoreVersionCheckerForTesting(
-                        mockChecker);
-                Assert.assertEquals(
-                        checkerReturnCompatibility, mockChecker.getLastReturnValue().compatibility);
-            }
-        });
+        VrShellDelegateUtils.setVrCoreCompatibility(checkerReturnCompatibility);
         View decorView = mVrTestRule.getActivity().getWindow().getDecorView();
         if (checkerReturnCompatibility == VrCoreCompatibility.VR_READY) {
-            VrInfoBarUtils.expectInfoBarPresent(mVrTestRule, false);
+            VrInfoBarUtils.expectInfoBarPresent(mVrTestFramework, false);
         } else if (checkerReturnCompatibility == VrCoreCompatibility.VR_OUT_OF_DATE
                 || checkerReturnCompatibility == VrCoreCompatibility.VR_NOT_AVAILABLE) {
             // Out of date and missing cases are the same, but with different text
@@ -74,13 +89,13 @@ public class VrInstallUpdateInfoBarTest {
                 expectedButton = mVrTestRule.getActivity().getString(
                         R.string.vr_services_check_infobar_install_button);
             }
-            VrInfoBarUtils.expectInfoBarPresent(mVrTestRule, true);
+            VrInfoBarUtils.expectInfoBarPresent(mVrTestFramework, true);
             TextView tempView = (TextView) decorView.findViewById(R.id.infobar_message);
             Assert.assertEquals(expectedMessage, tempView.getText().toString());
             tempView = (TextView) decorView.findViewById(R.id.button_primary);
             Assert.assertEquals(expectedButton, tempView.getText().toString());
         } else if (checkerReturnCompatibility == VrCoreCompatibility.VR_NOT_SUPPORTED) {
-            VrInfoBarUtils.expectInfoBarPresent(mVrTestRule, false);
+            VrInfoBarUtils.expectInfoBarPresent(mVrTestFramework, false);
         } else {
             Assert.fail("Invalid VrCoreVersionChecker compatibility: "
                     + String.valueOf(checkerReturnCompatibility));
@@ -93,6 +108,7 @@ public class VrInstallUpdateInfoBarTest {
      */
     @Test
     @MediumTest
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testInfoBarNotPresentWhenVrServicesCurrent() throws InterruptedException {
         infoBarTestHelper(VrCoreCompatibility.VR_READY);
     }
@@ -102,6 +118,7 @@ public class VrInstallUpdateInfoBarTest {
      */
     @Test
     @MediumTest
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testInfoBarPresentWhenVrServicesOutdated() throws InterruptedException {
         infoBarTestHelper(VrCoreCompatibility.VR_OUT_OF_DATE);
     }
@@ -111,6 +128,7 @@ public class VrInstallUpdateInfoBarTest {
      */
     @Test
     @MediumTest
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testInfoBarPresentWhenVrServicesMissing() throws InterruptedException {
         infoBarTestHelper(VrCoreCompatibility.VR_NOT_AVAILABLE);
     }
@@ -121,6 +139,7 @@ public class VrInstallUpdateInfoBarTest {
      */
     @Test
     @MediumTest
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testInfoBarNotPresentWhenVrServicesNotSupported() throws InterruptedException {
         infoBarTestHelper(VrCoreCompatibility.VR_NOT_SUPPORTED);
     }

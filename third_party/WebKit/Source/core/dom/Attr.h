@@ -59,8 +59,8 @@ class CORE_EXPORT Attr final : public Node {
   const AtomicString& namespaceURI() const { return name_.NamespaceURI(); }
   const AtomicString& prefix() const { return name_.Prefix(); }
 
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void Trace(blink::Visitor*);
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   Attr(Element&, const QualifiedName&);
@@ -74,7 +74,7 @@ class CORE_EXPORT Attr final : public Node {
 
   String nodeValue() const override { return value(); }
   void setNodeValue(const String&) override;
-  Node* cloneNode(bool deep, ExceptionState&) override;
+  Node* Clone(Document&, CloneChildrenFlag) const override;
 
   bool IsAttributeNode() const override { return true; }
 

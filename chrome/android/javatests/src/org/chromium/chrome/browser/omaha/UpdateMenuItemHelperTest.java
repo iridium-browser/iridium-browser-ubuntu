@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.omaha;
 
 import android.content.Context;
 import android.support.test.filters.MediumTest;
-import android.view.View;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -22,21 +21,18 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.UrlConstants;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.OverviewModeBehaviorWatcher;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.TouchCommon;
+import org.chromium.ui.test.util.UiRestriction;
 
 /**
  * Tests for the UpdateMenuItemHelper.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG, "enable_update_menu_item"})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE, "enable_update_menu_item"})
 public class UpdateMenuItemHelperTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
@@ -206,7 +202,7 @@ public class UpdateMenuItemHelperTest {
     @Test
     @MediumTest
     @Feature({"Omaha"})
-    @Restriction(ChromeRestriction.RESTRICTION_TYPE_PHONE)
+    @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
     @RetryOnFailure
     public void testMenuItemNotShownInOverview() throws Exception {
         checkUpdateMenuItemIsShowing("0.0.0.0", "1.2.3.4");
@@ -214,14 +210,14 @@ public class UpdateMenuItemHelperTest {
         // checkUpdateMenuItemIsShowing() opens the menu; hide it and assert it's dismissed.
         hideAppMenuAndAssertMenuShown();
 
-        // Ensure not shown in tab switcher app menu.
+        // Enter the tab switcher.
         OverviewModeBehaviorWatcher overviewModeWatcher = new OverviewModeBehaviorWatcher(
                 mActivityTestRule.getActivity().getLayoutManager(), true, false);
-        View tabSwitcherButton =
-                mActivityTestRule.getActivity().findViewById(R.id.tab_switcher_button);
-        Assert.assertNotNull("'tab_switcher_button' view is not found", tabSwitcherButton);
-        TouchCommon.singleClickView(tabSwitcherButton);
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> mActivityTestRule.getActivity().getLayoutManager().showOverview(false));
         overviewModeWatcher.waitForBehavior();
+
+        // Make sure the item is not shown in tab switcher app menu.
         showAppMenuAndAssertMenuShown();
         Assert.assertFalse("Update menu item is showing.",
                 mActivityTestRule.getActivity()

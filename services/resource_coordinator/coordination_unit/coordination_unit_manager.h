@@ -5,24 +5,25 @@
 #ifndef SERVICES_RESOURCE_COORDINATOR_COORDINATION_UNIT_COORDINATION_UNIT_MANAGER_H_
 #define SERVICES_RESOURCE_COORDINATOR_COORDINATION_UNIT_COORDINATION_UNIT_MANAGER_H_
 
+#include <stdint.h>
+
 #include <memory>
 #include <vector>
 
 #include "base/macros.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
-
-namespace ukm {
-class MojoUkmRecorder;
-class UkmEntryBuilder;
-}  // namespace ukm
+#include "services/metrics/public/cpp/mojo_ukm_recorder.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 
 namespace service_manager {
+template <typename... BinderArgs>
+class BinderRegistryWithArgs;
+struct BindSourceInfo;
 class ServiceContextRefFactory;
 }  // service_manager
 
 namespace resource_coordinator {
 
-class CoordinationUnitImpl;
+class CoordinationUnitBase;
 class CoordinationUnitGraphObserver;
 class CoordinationUnitProviderImpl;
 
@@ -35,20 +36,19 @@ class CoordinationUnitManager {
   CoordinationUnitManager();
   ~CoordinationUnitManager();
 
-  void set_ukm_recorder(ukm::MojoUkmRecorder* ukm_recorder) {
+  void set_ukm_recorder(ukm::UkmRecorder* ukm_recorder) {
     ukm_recorder_ = ukm_recorder;
   }
+  ukm::UkmRecorder* ukm_recorder() const { return ukm_recorder_; }
 
-  void OnStart(service_manager::BinderRegistry* registry,
+  void OnStart(service_manager::BinderRegistryWithArgs<
+                   const service_manager::BindSourceInfo&>* registry,
                service_manager::ServiceContextRefFactory* service_ref_factory);
   void RegisterObserver(
       std::unique_ptr<CoordinationUnitGraphObserver> observer);
-  void OnCoordinationUnitCreated(CoordinationUnitImpl* coordination_unit);
+  void OnCoordinationUnitCreated(CoordinationUnitBase* coordination_unit);
   void OnBeforeCoordinationUnitDestroyed(
-      CoordinationUnitImpl* coordination_unit);
-
-  std::unique_ptr<ukm::UkmEntryBuilder> CreateUkmEntryBuilder(
-      const char* event_name);
+      CoordinationUnitBase* coordination_unit);
 
   std::vector<std::unique_ptr<CoordinationUnitGraphObserver>>&
   observers_for_testing() {
@@ -57,7 +57,7 @@ class CoordinationUnitManager {
 
  private:
   std::vector<std::unique_ptr<CoordinationUnitGraphObserver>> observers_;
-  ukm::MojoUkmRecorder* ukm_recorder_ = nullptr;
+  ukm::UkmRecorder* ukm_recorder_ = nullptr;
   std::unique_ptr<CoordinationUnitProviderImpl> provider_;
 
   static void Create(

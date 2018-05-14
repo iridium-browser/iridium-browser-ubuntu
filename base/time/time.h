@@ -15,7 +15,7 @@
 //
 // TimeTicks and ThreadTicks represent an abstract time that is most of the time
 // incrementing, for use in measuring time durations. Internally, they are
-// represented in microseconds. They can not be converted to a human-readable
+// represented in microseconds. They cannot be converted to a human-readable
 // time, but are guaranteed not to decrease (unlike the Time class). Note that
 // TimeTicks may "stand still" (e.g., if the computer is suspended), and
 // ThreadTicks will "stand still" whenever the thread has been de-scheduled by
@@ -33,11 +33,11 @@
 //
 // So many choices!  Which time class should you use?  Examples:
 //
-//   Time:        Interpreting the wall-clock time provided by a remote
-//                system. Detecting whether cached resources have
-//                expired. Providing the user with a display of the current date
-//                and time. Determining the amount of time between events across
-//                re-boots of the machine.
+//   Time:        Interpreting the wall-clock time provided by a remote system.
+//                Detecting whether cached resources have expired. Providing the
+//                user with a display of the current date and time. Determining
+//                the amount of time between events across re-boots of the
+//                machine.
 //
 //   TimeTicks:   Tracking the amount of time a task runs. Executing delayed
 //                tasks at the right time. Computing presentation timestamps.
@@ -64,7 +64,7 @@
 #include "build/build_config.h"
 
 #if defined(OS_FUCHSIA)
-#include <magenta/types.h>
+#include <zircon/types.h>
 #endif
 
 #if defined(OS_MACOSX)
@@ -73,16 +73,18 @@
 #undef TYPE_BOOL
 #endif
 
+#if defined(OS_ANDROID)
+#include <jni.h>
+#endif
+
 #if defined(OS_POSIX)
 #include <unistd.h>
 #include <sys/time.h>
 #endif
 
 #if defined(OS_WIN)
-// For FILETIME in FromFileTime, until it moves to a new converter class.
-// See TODO(iyengar) below.
-#include <windows.h>
 #include "base/gtest_prod_util.h"
+#include "base/win/windows_types.h"
 #endif
 
 namespace base {
@@ -106,8 +108,7 @@ BASE_EXPORT int64_t SaturatedSub(TimeDelta delta, int64_t value);
 
 class BASE_EXPORT TimeDelta {
  public:
-  TimeDelta() : delta_(0) {
-  }
+  constexpr TimeDelta() : delta_(0) {}
 
   // Converts units of time to TimeDeltas.
   static constexpr TimeDelta FromDays(int days);
@@ -115,9 +116,12 @@ class BASE_EXPORT TimeDelta {
   static constexpr TimeDelta FromMinutes(int minutes);
   static constexpr TimeDelta FromSeconds(int64_t secs);
   static constexpr TimeDelta FromMilliseconds(int64_t ms);
+  static constexpr TimeDelta FromMicroseconds(int64_t us);
+  static constexpr TimeDelta FromNanoseconds(int64_t ns);
   static constexpr TimeDelta FromSecondsD(double secs);
   static constexpr TimeDelta FromMillisecondsD(double ms);
-  static constexpr TimeDelta FromMicroseconds(int64_t us);
+  static constexpr TimeDelta FromMicrosecondsD(double us);
+  static constexpr TimeDelta FromNanosecondsD(double ns);
 #if defined(OS_POSIX)
   static TimeDelta FromTimeSpec(const timespec& ts);
 #endif
@@ -131,7 +135,9 @@ class BASE_EXPORT TimeDelta {
   // may be unclear from the perspective of a caller.
   //
   // DEPRECATED - Do not use in new code. http://crbug.com/634507
-  static TimeDelta FromInternalValue(int64_t delta) { return TimeDelta(delta); }
+  static constexpr TimeDelta FromInternalValue(int64_t delta) {
+    return TimeDelta(delta);
+  }
 
   // Returns the maximum time delta, which should be greater than any reasonable
   // time delta we might compare it to. Adding or subtracting the maximum time
@@ -149,10 +155,10 @@ class BASE_EXPORT TimeDelta {
   // For serializing, use FromInternalValue to reconstitute.
   //
   // DEPRECATED - Do not use in new code. http://crbug.com/634507
-  int64_t ToInternalValue() const { return delta_; }
+  constexpr int64_t ToInternalValue() const { return delta_; }
 
   // Returns the magnitude (absolute value) of this TimeDelta.
-  TimeDelta magnitude() const {
+  constexpr TimeDelta magnitude() const {
     // Some toolchains provide an incomplete C++11 implementation and lack an
     // int64_t overload for std::abs().  The following is a simple branchless
     // implementation:
@@ -161,13 +167,15 @@ class BASE_EXPORT TimeDelta {
   }
 
   // Returns true if the time delta is zero.
-  bool is_zero() const {
-    return delta_ == 0;
-  }
+  constexpr bool is_zero() const { return delta_ == 0; }
 
   // Returns true if the time delta is the maximum/minimum time delta.
-  bool is_max() const { return delta_ == std::numeric_limits<int64_t>::max(); }
-  bool is_min() const { return delta_ == std::numeric_limits<int64_t>::min(); }
+  constexpr bool is_max() const {
+    return delta_ == std::numeric_limits<int64_t>::max();
+  }
+  constexpr bool is_min() const {
+    return delta_ == std::numeric_limits<int64_t>::min();
+  }
 
 #if defined(OS_POSIX)
   struct timespec ToTimeSpec() const;
@@ -189,12 +197,15 @@ class BASE_EXPORT TimeDelta {
   int64_t InMicroseconds() const;
   int64_t InNanoseconds() const;
 
-  TimeDelta& operator=(TimeDelta other) {
+  constexpr TimeDelta& operator=(TimeDelta other) {
     delta_ = other.delta_;
     return *this;
   }
 
-  // Computations with other deltas.
+  // Computations with other deltas. Can easily be made constexpr with C++17 but
+  // hard to do until then per limitations around
+  // __builtin_(add|sub)_overflow in safe_math_clang_gcc_impl.h :
+  // https://chromium-review.googlesource.com/c/chromium/src/+/873352#message-59594ab70827795a67e0780404adf37b4b6c2f14
   TimeDelta operator+(TimeDelta other) const {
     return TimeDelta(time_internal::SaturatedAdd(*this, other.delta_));
   }
@@ -208,12 +219,12 @@ class BASE_EXPORT TimeDelta {
   TimeDelta& operator-=(TimeDelta other) {
     return *this = (*this - other);
   }
-  TimeDelta operator-() const {
-    return TimeDelta(-delta_);
-  }
+  constexpr TimeDelta operator-() const { return TimeDelta(-delta_); }
 
-  // Computations with numeric types.
-  template<typename T>
+  // Computations with numeric types. operator*() isn't constexpr because of a
+  // limitation around __builtin_mul_overflow (but operator/(1.0/a) works for
+  // |a|'s of "reasonable" size -- i.e. that don't risk overflow).
+  template <typename T>
   TimeDelta operator*(T a) const {
     CheckedNumeric<int64_t> rv(delta_);
     rv *= a;
@@ -224,8 +235,8 @@ class BASE_EXPORT TimeDelta {
       return TimeDelta(std::numeric_limits<int64_t>::min());
     return TimeDelta(std::numeric_limits<int64_t>::max());
   }
-  template<typename T>
-  TimeDelta operator/(T a) const {
+  template <typename T>
+  constexpr TimeDelta operator/(T a) const {
     CheckedNumeric<int64_t> rv(delta_);
     rv /= a;
     if (rv.IsValid())
@@ -236,17 +247,17 @@ class BASE_EXPORT TimeDelta {
       return TimeDelta(std::numeric_limits<int64_t>::min());
     return TimeDelta(std::numeric_limits<int64_t>::max());
   }
-  template<typename T>
+  template <typename T>
   TimeDelta& operator*=(T a) {
     return *this = (*this * a);
   }
-  template<typename T>
-  TimeDelta& operator/=(T a) {
+  template <typename T>
+  constexpr TimeDelta& operator/=(T a) {
     return *this = (*this / a);
   }
 
-  int64_t operator/(TimeDelta a) const { return delta_ / a.delta_; }
-  TimeDelta operator%(TimeDelta a) const {
+  constexpr int64_t operator/(TimeDelta a) const { return delta_ / a.delta_; }
+  constexpr TimeDelta operator%(TimeDelta a) const {
     return TimeDelta(delta_ % a.delta_);
   }
 
@@ -295,8 +306,8 @@ class BASE_EXPORT TimeDelta {
   int64_t delta_;
 };
 
-template<typename T>
-inline TimeDelta operator*(T a, TimeDelta td) {
+template <typename T>
+TimeDelta operator*(T a, TimeDelta td) {
   return td * a;
 }
 
@@ -360,8 +371,17 @@ class TimeBase {
   // use this and do arithmetic on it, as it is more error prone than using the
   // provided operators.
   //
-  // DEPRECATED - Do not use in new code. http://crbug.com/634507
+  // DEPRECATED - Do not use in new code. For serializing Time values, prefer
+  // Time::ToDeltaSinceWindowsEpoch().InMicroseconds(). http://crbug.com/634507
   int64_t ToInternalValue() const { return us_; }
+
+  // The amount of time since the origin (or "zero") point. This is a syntactic
+  // convenience to aid in code readability, mainly for debugging/testing use
+  // cases.
+  //
+  // Warning: While the Time subclass has a fixed origin point, the origin for
+  // the other subclasses can vary each time the application is restarted.
+  TimeDelta since_origin() const { return TimeDelta::FromMicroseconds(us_); }
 
   TimeClass& operator=(TimeClass other) {
     us_ = other.us_;
@@ -409,12 +429,13 @@ class TimeBase {
     return us_ >= other.us_;
   }
 
-  // Converts an integer value representing TimeClass to a class. This is used
-  // when deserializing a |TimeClass| structure, using a value known to be
+  // Converts an integer value representing TimeClass to a class. This may be
+  // used when deserializing a |TimeClass| structure, using a value known to be
   // compatible. It is not provided as a constructor because the integer type
   // may be unclear from the perspective of a caller.
   //
-  // DEPRECATED - Do not use in new code. http://crbug.com/634507
+  // DEPRECATED - Do not use in new code. For deserializing Time values, prefer
+  // Time::FromDeltaSinceWindowsEpoch(). http://crbug.com/634507
   static TimeClass FromInternalValue(int64_t us) { return TimeClass(us); }
 
  protected:
@@ -452,6 +473,33 @@ class BASE_EXPORT Time : public time_internal::TimeBase<Time> {
   static constexpr int64_t kQPCOverflowThreshold = INT64_C(0x8637BD05AF7);
 #endif
 
+// kExplodedMinYear and kExplodedMaxYear define the platform-specific limits
+// for values passed to FromUTCExploded() and FromLocalExploded(). Those
+// functions will return false if passed values outside these limits. The limits
+// are inclusive, meaning that the API should support all dates within a given
+// limit year.
+#if defined(OS_WIN)
+  static constexpr int kExplodedMinYear = 1601;
+  static constexpr int kExplodedMaxYear = 30827;
+#elif defined(OS_IOS)
+  static constexpr int kExplodedMinYear = std::numeric_limits<int>::min();
+  static constexpr int kExplodedMaxYear = std::numeric_limits<int>::max();
+#elif defined(OS_MACOSX)
+  static constexpr int kExplodedMinYear = 1902;
+  static constexpr int kExplodedMaxYear = std::numeric_limits<int>::max();
+#elif defined(OS_ANDROID)
+  // Though we use 64-bit time APIs on both 32 and 64 bit Android, some OS
+  // versions like KitKat (ARM but not x86 emulator) can't handle some early
+  // dates (e.g. before 1170). So we set min conservatively here.
+  static constexpr int kExplodedMinYear = 1902;
+  static constexpr int kExplodedMaxYear = std::numeric_limits<int>::max();
+#else
+  static constexpr int kExplodedMinYear =
+      (sizeof(time_t) == 4 ? 1902 : std::numeric_limits<int>::min());
+  static constexpr int kExplodedMaxYear =
+      (sizeof(time_t) == 4 ? 2037 : std::numeric_limits<int>::max());
+#endif
+
   // Represents an exploded time that can be formatted nicely. This is kind of
   // like the Win32 SYSTEMTIME structure or the Unix "struct tm" with a few
   // additions and changes to prevent errors.
@@ -473,8 +521,7 @@ class BASE_EXPORT Time : public time_internal::TimeBase<Time> {
   };
 
   // Contains the NULL time. Use Time::Now() to get the current time.
-  Time() : TimeBase(0) {
-  }
+  constexpr Time() : TimeBase(0) {}
 
   // Returns the time for epoch in Unix-like system (Jan 1, 1970).
   static Time UnixEpoch();
@@ -489,6 +536,20 @@ class BASE_EXPORT Time : public time_internal::TimeBase<Time> {
   // time and system time even on virtual environments including our test bot.
   // For timing sensitive unittests, this function should be used.
   static Time NowFromSystemTime();
+
+  // Converts to/from TimeDeltas relative to the Windows epoch (1601-01-01
+  // 00:00:00 UTC). Prefer these methods for opaque serialization and
+  // deserialization of time values, e.g.
+  //
+  //   // Serialization:
+  //   base::Time last_updated = ...;
+  //   SaveToDatabase(last_updated.ToDeltaSinceWindowsEpoch().InMicroseconds());
+  //
+  //   // Deserialization:
+  //   base::Time last_updated = base::Time::FromDeltaSinceWindowsEpoch(
+  //       base::TimeDelta::FromMicroseconds(LoadFromDatabase()));
+  static Time FromDeltaSinceWindowsEpoch(TimeDelta delta);
+  TimeDelta ToDeltaSinceWindowsEpoch() const;
 
   // Converts to/from time_t in UTC and a Time class.
   static Time FromTimeT(time_t tt);
@@ -678,6 +739,16 @@ constexpr TimeDelta TimeDelta::FromMilliseconds(int64_t ms) {
 }
 
 // static
+constexpr TimeDelta TimeDelta::FromMicroseconds(int64_t us) {
+  return TimeDelta(us);
+}
+
+// static
+constexpr TimeDelta TimeDelta::FromNanoseconds(int64_t ns) {
+  return TimeDelta(ns / Time::kNanosecondsPerMicrosecond);
+}
+
+// static
 constexpr TimeDelta TimeDelta::FromSecondsD(double secs) {
   return FromDouble(secs * Time::kMicrosecondsPerSecond);
 }
@@ -688,8 +759,13 @@ constexpr TimeDelta TimeDelta::FromMillisecondsD(double ms) {
 }
 
 // static
-constexpr TimeDelta TimeDelta::FromMicroseconds(int64_t us) {
-  return TimeDelta(us);
+constexpr TimeDelta TimeDelta::FromMicrosecondsD(double us) {
+  return FromDouble(us);
+}
+
+// static
+constexpr TimeDelta TimeDelta::FromNanosecondsD(double ns) {
+  return FromDouble(ns / Time::kNanosecondsPerMicrosecond);
 }
 
 // static
@@ -716,18 +792,12 @@ constexpr TimeDelta TimeDelta::FromDouble(double value) {
 // static
 constexpr TimeDelta TimeDelta::FromProduct(int64_t value,
                                            int64_t positive_value) {
-  return (
-#if !defined(_PREFAST_) || !defined(OS_WIN)
-      // Avoid internal compiler errors in /analyze builds with VS 2015
-      // update 3.
-      // https://connect.microsoft.com/VisualStudio/feedback/details/2870865
-      DCHECK(positive_value > 0),
-#endif
-      value > std::numeric_limits<int64_t>::max() / positive_value
-          ? Max()
-          : value < std::numeric_limits<int64_t>::min() / positive_value
-                ? Min()
-                : TimeDelta(value * positive_value));
+  DCHECK(positive_value > 0);
+  return value > std::numeric_limits<int64_t>::max() / positive_value
+             ? Max()
+             : value < std::numeric_limits<int64_t>::min() / positive_value
+                   ? Min()
+                   : TimeDelta(value * positive_value);
 }
 
 // For logging use only.
@@ -740,7 +810,7 @@ class BASE_EXPORT TimeTicks : public time_internal::TimeBase<TimeTicks> {
  public:
   // The underlying clock used to generate new TimeTicks.
   enum class Clock {
-    FUCHSIA_MX_CLOCK_MONOTONIC,
+    FUCHSIA_ZX_CLOCK_MONOTONIC,
     LINUX_CLOCK_MONOTONIC,
     IOS_CF_ABSOLUTE_TIME_MINUS_KERN_BOOTTIME,
     MAC_MACH_ABSOLUTE_TIME,
@@ -770,9 +840,9 @@ class BASE_EXPORT TimeTicks : public time_internal::TimeBase<TimeTicks> {
   static bool IsConsistentAcrossProcesses() WARN_UNUSED_RESULT;
 
 #if defined(OS_FUCHSIA)
-  // Converts between TimeTicks and an MX_CLOCK_MONOTONIC mx_time_t value.
-  static TimeTicks FromMXTime(mx_time_t nanos_since_boot);
-  mx_time_t ToMXTime() const;
+  // Converts between TimeTicks and an ZX_CLOCK_MONOTONIC zx_time_t value.
+  static TimeTicks FromZxTime(zx_time_t nanos_since_boot);
+  zx_time_t ToZxTime() const;
 #endif
 
 #if defined(OS_WIN)
@@ -785,6 +855,14 @@ class BASE_EXPORT TimeTicks : public time_internal::TimeBase<TimeTicks> {
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   static TimeTicks FromMachAbsoluteTime(uint64_t mach_absolute_time);
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+
+#if defined(OS_ANDROID)
+  // Converts to TimeTicks the value obtained from SystemClock.uptimeMillis().
+  // Note: this convertion may be non-monotonic in relation to previously
+  // obtained TimeTicks::Now() values because of the truncation (to
+  // milliseconds) performed by uptimeMillis().
+  static TimeTicks FromUptimeMillis(jlong uptime_millis_value);
+#endif
 
   // Get an estimate of the TimeTick value at the time of the UnixEpoch. Because
   // Time and TimeTicks respond differently to user-set time and NTP

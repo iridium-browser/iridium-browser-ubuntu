@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import SocketServer
+import sys
 import threading
 import time
 
@@ -23,15 +24,14 @@ AccessToken = collections.namedtuple('AccessToken', [
 
 
 class TokenError(Exception):
-  """Raised by TokenProvider if the token can't be created.
+  """Raised by TokenProvider if the token can't be created (fatal error).
 
   See TokenProvider docs for more info.
   """
 
-  def __init__(self, code, msg, fatal=False):
+  def __init__(self, code, msg):
     super(TokenError, self).__init__(msg)
     self.code = code
-    self.fatal = fatal
 
 
 class RPCError(Exception):
@@ -42,13 +42,17 @@ class RPCError(Exception):
     self.code = code
 
 
+# Account describes one logical account.
+Account = collections.namedtuple('Account', ['id', 'email'])
+
+
 class TokenProvider(object):
   """Interface for an object that can create OAuth tokens on demand.
 
   Defined as a concrete class only for documentation purposes.
   """
 
-  def generate_token(self, scopes):
+  def generate_token(self, account_id, scopes):
     """Generates a new access token with given scopes.
 
     Will be called from multiple threads (possibly concurrently) whenever
@@ -59,9 +63,9 @@ class TokenProvider(object):
     low-level or transient errors.
 
     Can also raise TokenError. It will be converted to GetOAuthToken reply with
-    non-zero error_code. It will also optionally be cached, so that the provider
-    would never be called again for the same set of scopes. This is appropriate
-    for high-level or fatal errors.
+    non-zero error_code. It will also be cached, so that the provider would
+    never be called again for the same set of scopes. This is appropriate for
+    high-level fatal errors.
 
     Returns AccessToken on success.
     """
@@ -81,21 +85,31 @@ class LocalAuthServer(object):
   def __init__(self):
     self._lock = threading.Lock() # guards everything below
     self._accept_thread = None
-    self._cache = {} # dict (tuple of scopes => AccessToken | TokenError).
+    self._cache = {}  # dict ((account_id, scopes) => AccessToken | TokenError).
     self._token_provider = None
+    self._accounts = frozenset()  # set of Account tuples
     self._rpc_secret = None
     self._server = None
 
-  def start(self, token_provider, port=0):
+  def start(self, token_provider, accounts, default_account_id, port=0):
     """Starts the local auth RPC server on some 127.0.0.1 port.
 
     Args:
       token_provider: instance of TokenProvider to use for making tokens.
+      accounts: a list of Account tuples to allow getting a token for.
+      default_account_id: goes directly into LUCI_CONTEXT['local_auth'].
       port: local TCP port to bind to, or 0 to bind to any available port.
 
     Returns:
       A dict to put into 'local_auth' section of LUCI_CONTEXT.
     """
+    assert all(isinstance(acc, Account) for acc in accounts), accounts
+
+    # 'default_account_id' is either not set, or one of the supported accounts.
+    assert (
+        not default_account_id or
+        any(default_account_id == acc.id for acc in accounts))
+
     server = _HTTPServer(self, ('127.0.0.1', port))
 
     # This secret will be placed in a file on disk accessible only to current
@@ -107,14 +121,22 @@ class LocalAuthServer(object):
       assert not self._server, 'Already running'
       logging.info('Local auth server: http://127.0.0.1:%d', server.server_port)
       self._token_provider = token_provider
+      self._accounts = frozenset(accounts)
       self._rpc_secret = rpc_secret
       self._server = server
       self._accept_thread = threading.Thread(target=self._server.serve_forever)
       self._accept_thread.start()
-      return {
+      local_auth = {
         'rpc_port': self._server.server_port,
         'secret': self._rpc_secret,
+        'accounts': sorted(
+            {'id': acc.id, 'email': acc.email} for acc in accounts),
       }
+      # TODO(vadimsh): Some clients don't understand 'null' value for
+      # default_account_id, so just omit it completely for now.
+      if default_account_id:
+        local_auth['default_account_id'] = default_account_id
+      return local_auth
 
   def stop(self):
     """Stops the server and resets the state."""
@@ -124,6 +146,7 @@ class LocalAuthServer(object):
       server, self._server = self._server, None
       thread, self._accept_thread = self._accept_thread, None
       self._token_provider = None
+      self._accounts = frozenset()
       self._rpc_secret = None
       self._cache.clear()
     logging.debug('Stopping the local auth server...')
@@ -162,8 +185,9 @@ class LocalAuthServer(object):
 
     Request body:
     {
+      "account_id": <str>,
       "scopes": [<str scope1>, <str scope2>, ...],
-      "secret": <str from LUCI_CONTEXT.local_auth.secret>
+      "secret": <str from LUCI_CONTEXT.local_auth.secret>,
     }
 
     Response body:
@@ -174,6 +198,14 @@ class LocalAuthServer(object):
       "expiry": <int with unix timestamp in seconds (on success)>
     }
     """
+    # Logical account to get a token for (e.g. "task" or "system").
+    account_id = request.get('account_id')
+    if not account_id:
+      raise RPCError(400, 'Field "account_id" is required.')
+    if not isinstance(account_id, basestring):
+      raise RPCError(400, 'Field "account_id" must be a string')
+    account_id = str(account_id)
+
     # Validate scopes. It is conceptually a set, so remove duplicates.
     scopes = request.get('scopes')
     if not scopes:
@@ -191,11 +223,12 @@ class LocalAuthServer(object):
       raise RPCError(400, 'Field "secret" must be a string.')
     secret = str(secret)
 
-    # Grab the correct secret and the provider from the lock-guarded state.
+    # Grab the state from the lock-guarded state.
     with self._lock:
       if not self._server:
         raise RPCError(503, 'Stopped already.')
       rpc_secret = self._rpc_secret
+      accounts = self._accounts
       token_provider = self._token_provider
 
     # Use constant time check to prevent malicious processes from discovering
@@ -203,14 +236,19 @@ class LocalAuthServer(object):
     if not constant_time_equals(secret, rpc_secret):
       raise RPCError(403, 'Invalid "secret".')
 
+    # Make sure we know about the requested account.
+    if not any(account_id == acc.id for acc in accounts):
+      raise RPCError(404, 'Unrecognized account ID %r.' % account_id)
+
     # Grab the token (or a fatal error) from the memory cache, checks token
     # expiration time.
+    cache_key = (account_id, scopes)
     tok_or_err = None
     need_refresh = False
     with self._lock:
       if not self._server:
         raise RPCError(503, 'Stopped already.')
-      tok_or_err = self._cache.get(scopes)
+      tok_or_err = self._cache.get(cache_key)
       need_refresh = (
           not tok_or_err or
           isinstance(tok_or_err, AccessToken) and should_refresh(tok_or_err))
@@ -220,16 +258,15 @@ class LocalAuthServer(object):
     # synchronization.
     if need_refresh:
       try:
-        tok_or_err = token_provider.generate_token(scopes)
+        tok_or_err = token_provider.generate_token(account_id, scopes)
         assert isinstance(tok_or_err, AccessToken), tok_or_err
       except TokenError as exc:
         tok_or_err = exc
       # Cache the token or fatal errors (to avoid useless retry later).
-      if isinstance(tok_or_err, AccessToken) or tok_or_err.fatal:
-        with self._lock:
-          if not self._server:
-            raise RPCError(503, 'Stopped already.')
-          self._cache[scopes] = tok_or_err
+      with self._lock:
+        if not self._server:
+          raise RPCError(503, 'Stopped already.')
+        self._cache[cache_key] = tok_or_err
 
     # Done.
     if isinstance(tok_or_err, AccessToken):
@@ -366,25 +403,39 @@ class _RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     self.wfile.write(response_body)
 
 
-def main():
+def testing_main():
   """Launches a local HTTP auth service and waits for Ctrl+C.
 
   Useful during development and manual testing.
   """
+  # Don't mess with sys.path outside of adhoc testing.
+  ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+  sys.path.insert(0, ROOT_DIR)
+  from libs import luci_context
+
   logging.basicConfig(level=logging.DEBUG)
 
   class DumbProvider(object):
-    def generate_token(self, scopes):
-      logging.info('generate_token(%s) called', scopes)
-      return AccessToken('fake_tok', time.time() + 80)
+    def generate_token(self, account_id, scopes):
+      logging.info('generate_token(%r, %r) called', account_id, scopes)
+      return AccessToken('fake_tok_for_%s' % account_id, time.time() + 80)
 
   server = LocalAuthServer()
-  ctx = server.start(token_provider=DumbProvider(), port=11111)
-  print 'LUCI_CONTEXT:\n' + json.dumps(
-      {'local_auth': ctx}, indent=2, sort_keys=True)
+  ctx = server.start(
+      token_provider=DumbProvider(),
+      accounts=[
+          Account('a', 'a@example.com'),
+          Account('b', 'b@example.com'),
+          Account('c', 'c@example.com'),
+      ],
+      default_account_id='a',
+      port=11111)
   try:
-    while True:
-      time.sleep(1)
+    with luci_context.write(local_auth=ctx):
+      print 'Copy-paste this into another shell:'
+      print 'export LUCI_CONTEXT=%s' % os.getenv('LUCI_CONTEXT')
+      while True:
+        time.sleep(1)
   except KeyboardInterrupt:
     pass
   finally:
@@ -392,4 +443,4 @@ def main():
 
 
 if __name__ == '__main__':
-  main()
+  testing_main()

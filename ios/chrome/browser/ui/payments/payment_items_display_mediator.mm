@@ -10,6 +10,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/payments/core/currency_formatter.h"
+#include "components/payments/core/payment_item.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/payments/payment_request.h"
 #import "ios/chrome/browser/ui/payments/cells/price_item.h"
@@ -21,8 +22,8 @@
 
 @interface PaymentItemsDisplayMediator ()
 
-// The PaymentRequest object owning an instance of web::PaymentRequest as
-// provided by the page invoking the Payment Request API. This is a weak
+// The PaymentRequest object owning an instance of payments::WebPaymentRequest
+// as provided by the page invoking the Payment Request API. This is a weak
 // pointer and should outlive this class.
 @property(nonatomic, assign) payments::PaymentRequest* paymentRequest;
 
@@ -43,33 +44,40 @@
 
 #pragma mark - PaymentItemsDisplayViewControllerDataSource
 
+- (BOOL)canPay {
+  return self.paymentRequest->IsAbleToPay();
+}
+
 - (CollectionViewItem*)totalItem {
   PriceItem* totalItem = [[PriceItem alloc] init];
-  totalItem.item =
-      base::SysUTF16ToNSString(_paymentRequest->payment_details().total.label);
+  totalItem.item = base::SysUTF8ToNSString(
+      _paymentRequest->GetTotal(_paymentRequest->selected_payment_method())
+          .label);
   payments::CurrencyFormatter* currencyFormatter =
       _paymentRequest->GetOrCreateCurrencyFormatter();
-  totalItem.price = SysUTF16ToNSString(l10n_util::GetStringFUTF16(
+  totalItem.price = base::SysUTF16ToNSString(l10n_util::GetStringFUTF16(
       IDS_PAYMENT_REQUEST_ORDER_SUMMARY_SHEET_TOTAL_FORMAT,
       base::UTF8ToUTF16(currencyFormatter->formatted_currency_code()),
-      currencyFormatter->Format(base::UTF16ToASCII(
-          _paymentRequest->payment_details().total.amount.value))));
+      currencyFormatter->Format(
+          _paymentRequest->GetTotal(_paymentRequest->selected_payment_method())
+              .amount->value)));
   return totalItem;
 }
 
 - (NSArray<CollectionViewItem*>*)lineItems {
-  const std::vector<web::PaymentItem>& paymentItems =
-      _paymentRequest->payment_details().display_items;
+  const std::vector<payments::PaymentItem>& paymentItems =
+      _paymentRequest->GetDisplayItems(
+          _paymentRequest->selected_payment_method());
   NSMutableArray<CollectionViewItem*>* lineItems =
       [NSMutableArray arrayWithCapacity:paymentItems.size()];
 
   for (const auto& paymentItem : paymentItems) {
     PriceItem* item = [[PriceItem alloc] init];
-    item.item = base::SysUTF16ToNSString(paymentItem.label);
+    item.item = base::SysUTF8ToNSString(paymentItem.label);
     payments::CurrencyFormatter* currencyFormatter =
         _paymentRequest->GetOrCreateCurrencyFormatter();
-    item.price = SysUTF16ToNSString(currencyFormatter->Format(
-        base::UTF16ToASCII(paymentItem.amount.value)));
+    item.price = base::SysUTF16ToNSString(
+        currencyFormatter->Format(paymentItem.amount->value));
 
     [lineItems addObject:item];
   }

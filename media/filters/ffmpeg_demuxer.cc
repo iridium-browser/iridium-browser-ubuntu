@@ -14,8 +14,8 @@
 #include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -23,23 +23,24 @@
 #include "base/sys_byteorder.h"
 #include "base/task_runner_util.h"
 #include "base/task_scheduler/post_task.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "media/audio/sample_rates.h"
+#include "build/build_config.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/decrypt_config.h"
+#include "media/base/demuxer_memory_limit.h"
 #include "media/base/limits.h"
 #include "media/base/media_log.h"
 #include "media/base/media_tracks.h"
+#include "media/base/sample_rates.h"
 #include "media/base/timestamp_constants.h"
 #include "media/base/video_codecs.h"
+#include "media/base/webvtt_util.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/ffmpeg_aac_bitstream_converter.h"
 #include "media/filters/ffmpeg_bitstream_converter.h"
 #include "media/filters/ffmpeg_glue.h"
 #include "media/filters/ffmpeg_h264_to_annex_b_bitstream_converter.h"
-#include "media/filters/webvtt_util.h"
 #include "media/formats/webm/webm_crypto_helpers.h"
 #include "media/media_features.h"
 #include "third_party/ffmpeg/ffmpeg_features.h"
@@ -242,8 +243,9 @@ std::unique_ptr<FFmpegDemuxerStream> FFmpegDemuxerStream::Create(
     // IsValidConfig internally and return a null scoped_ptr if not valid.
     if (!AVStreamToAudioDecoderConfig(stream, audio_config.get()) ||
         !audio_config->IsValidConfig()) {
-      MEDIA_LOG(ERROR, media_log)
-          << "FFmpegDemuxer: failed creating audio stream";
+      MEDIA_LOG(DEBUG, media_log) << "Warning, FFmpegDemuxer failed to create "
+                                     "a valid audio decoder configuration from "
+                                     "muxed stream";
       return nullptr;
     }
 
@@ -259,8 +261,9 @@ std::unique_ptr<FFmpegDemuxerStream> FFmpegDemuxerStream::Create(
     // IsValidConfig internally and return a null scoped_ptr if not valid.
     if (!AVStreamToVideoDecoderConfig(stream, video_config.get()) ||
         !video_config->IsValidConfig()) {
-      MEDIA_LOG(ERROR, media_log)
-          << "FFmpegDemuxer: failed creating video stream";
+      MEDIA_LOG(DEBUG, media_log) << "Warning, FFmpegDemuxer failed to create "
+                                     "a valid video decoder configuration from "
+                                     "muxed stream";
       return nullptr;
     }
 
@@ -299,16 +302,14 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(
       end_of_stream_(false),
       last_packet_timestamp_(kNoTimestamp),
       last_packet_duration_(kNoTimestamp),
-      video_rotation_(VIDEO_ROTATION_0),
       is_enabled_(true),
       waiting_for_keyframe_(false),
       aborted_(false),
-      fixup_negative_timestamps_(false) {
+      fixup_negative_timestamps_(false),
+      fixup_chained_ogg_(false) {
   DCHECK(demuxer_);
 
   bool is_encrypted = false;
-  int rotation = 0;
-  AVDictionaryEntry* rotation_entry = NULL;
 
   // Determine our media format.
   switch (stream->codecpar->codec_type) {
@@ -321,28 +322,6 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(
       DCHECK(video_config_.get() && !audio_config_.get());
       type_ = VIDEO;
       is_encrypted = video_config_->is_encrypted();
-
-      rotation_entry = av_dict_get(stream->metadata, "rotate", NULL, 0);
-      if (rotation_entry && rotation_entry->value && rotation_entry->value[0])
-        base::StringToInt(rotation_entry->value, &rotation);
-
-      switch (rotation) {
-        case 0:
-          break;
-        case 90:
-          video_rotation_ = VIDEO_ROTATION_90;
-          break;
-        case 180:
-          video_rotation_ = VIDEO_ROTATION_180;
-          break;
-        case 270:
-          video_rotation_ = VIDEO_ROTATION_270;
-          break;
-        default:
-          LOG(ERROR) << "Unsupported video rotation metadata: " << rotation;
-          break;
-      }
-
       break;
     case AVMEDIA_TYPE_SUBTITLE:
       DCHECK(!video_config_.get() && !audio_config_.get());
@@ -406,10 +385,7 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
   }
 #endif
 
-  // Get side data if any. For now, the only type of side_data is VP8 Alpha. We
-  // keep this generic so that other side_data types in the future can be
-  // handled the same way as well.
-  av_packet_split_side_data(packet.get());
+  const bool is_audio = type() == AUDIO;
 
   scoped_refptr<DecoderBuffer> buffer;
 
@@ -476,11 +452,15 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
 
       const int discard_end_samples =
           base::ByteSwapToLE32(*(skip_samples_ptr + kSkipEndSamplesOffset));
-      const int samples_per_second =
-          audio_decoder_config().samples_per_second();
-      buffer->set_discard_padding(std::make_pair(
-          FramesToTimeDelta(discard_front_samples, samples_per_second),
-          FramesToTimeDelta(discard_end_samples, samples_per_second)));
+
+      if (discard_front_samples || discard_end_samples) {
+        DCHECK(is_audio);
+        const int samples_per_second =
+            audio_decoder_config().samples_per_second();
+        buffer->set_discard_padding(std::make_pair(
+            FramesToTimeDelta(discard_front_samples, samples_per_second),
+            FramesToTimeDelta(discard_end_samples, samples_per_second)));
+      }
     }
 
     if (decrypt_config)
@@ -508,8 +488,6 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
     return;
   }
 
-  const bool is_audio = type() == AUDIO;
-
   // If this file has negative timestamps don't rebase any other stream types
   // against the negative starting time.
   base::TimeDelta start_time = demuxer_->start_time();
@@ -526,9 +504,22 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
 
   buffer->set_timestamp(stream_timestamp - start_time);
 
+  if (packet->flags & AV_PKT_FLAG_DISCARD) {
+    buffer->set_discard_padding(
+        std::make_pair(kInfiniteDuration, base::TimeDelta()));
+    if (buffer->timestamp() < base::TimeDelta()) {
+      // These timestamps should never be used, but to ensure they are dropped
+      // correctly give them unique timestamps.
+      buffer->set_timestamp(last_packet_timestamp_ == kNoTimestamp
+                                ? base::TimeDelta()
+                                : last_packet_timestamp_ +
+                                      base::TimeDelta::FromMicroseconds(1));
+    }
+  }
+
   // Only allow negative timestamps past if we know they'll be fixed up by the
   // code paths below; otherwise they should be treated as a parse error.
-  if ((!fixup_negative_timestamps_ || last_packet_timestamp_ == kNoTimestamp) &&
+  if ((!fixup_chained_ogg_ || last_packet_timestamp_ == kNoTimestamp) &&
       buffer->timestamp() < base::TimeDelta()) {
     MEDIA_LOG(DEBUG, media_log_)
         << "FFmpegDemuxer: unfixable negative timestamp";
@@ -571,8 +562,10 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
     // Fixing chained ogg is non-trivial, so for now just reuse the last good
     // timestamp.  The decoder will rewrite the timestamps to be sample accurate
     // later.  See http://crbug.com/396864.
-    if (fixup_negative_timestamps_ &&
-        buffer->timestamp() < last_packet_timestamp_) {
+    //
+    // Note: This will not work with codecs that have out of order frames like
+    // H.264 with b-frames, but luckily you can't put those in ogg files...
+    if (fixup_chained_ogg_ && buffer->timestamp() < last_packet_timestamp_) {
       buffer->set_timestamp(last_packet_timestamp_ +
                             (last_packet_duration_ != kNoTimestamp
                                  ? last_packet_duration_
@@ -746,10 +739,6 @@ VideoDecoderConfig FFmpegDemuxerStream::video_decoder_config() {
   return *video_config_;
 }
 
-VideoRotation FFmpegDemuxerStream::video_rotation() {
-  return video_rotation_;
-}
-
 bool FFmpegDemuxerStream::IsEnabled() const {
   DCHECK(task_runner_->BelongsToCurrentThread());
   return is_enabled_;
@@ -867,8 +856,7 @@ FFmpegDemuxer::FFmpegDemuxer(
       // the BlockingUrlProtocol to handle hops to the render thread for network
       // reads and seeks.
       blocking_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::WithBaseSyncPrimitives(),
-           base::TaskPriority::USER_BLOCKING})),
+          {base::MayBlock(), base::TaskPriority::USER_BLOCKING})),
       stopped_(false),
       pending_read_(false),
       data_source_(data_source),
@@ -1200,6 +1188,15 @@ void FFmpegDemuxer::OnOpenContextDone(const PipelineStatusCB& status_cb,
     return;
   }
 
+#if defined(OS_ANDROID)
+  if (glue_->detected_hls()) {
+    MEDIA_LOG(INFO, media_log_)
+        << GetDisplayName() << ": detected HLS manifest";
+    status_cb.Run(DEMUXER_ERROR_DETECTED_HLS);
+    return;
+  }
+#endif
+
   if (!result) {
     MEDIA_LOG(ERROR, media_log_) << GetDisplayName() << ": open context failed";
     status_cb.Run(DEMUXER_ERROR_COULD_NOT_OPEN);
@@ -1285,23 +1282,32 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
   int detected_audio_track_count = 0;
   int detected_video_track_count = 0;
   int detected_text_track_count = 0;
+  int supported_audio_track_count = 0;
+  int supported_video_track_count = 0;
+  bool has_opus_or_vorbis_audio = false;
+  bool needs_negative_timestamp_fixup = false;
   for (size_t i = 0; i < format_context->nb_streams; ++i) {
     AVStream* stream = format_context->streams[i];
     const AVCodecParameters* codec_parameters = stream->codecpar;
     const AVMediaType codec_type = codec_parameters->codec_type;
     const AVCodecID codec_id = codec_parameters->codec_id;
+    // Skip streams which are not properly detected.
+    if (codec_id == AV_CODEC_ID_NONE) {
+      stream->discard = AVDISCARD_ALL;
+      continue;
+    }
 
     if (codec_type == AVMEDIA_TYPE_AUDIO) {
       // Log the codec detected, whether it is supported or not, and whether or
       // not we have already detected a supported codec in another stream.
-      UMA_HISTOGRAM_SPARSE_SLOWLY("Media.DetectedAudioCodecHash",
-                                  HashCodecName(GetCodecName(codec_id)));
+      base::UmaHistogramSparse("Media.DetectedAudioCodecHash",
+                               HashCodecName(GetCodecName(codec_id)));
       detected_audio_track_count++;
     } else if (codec_type == AVMEDIA_TYPE_VIDEO) {
       // Log the codec detected, whether it is supported or not, and whether or
       // not we have already detected a supported codec in another stream.
-      UMA_HISTOGRAM_SPARSE_SLOWLY("Media.DetectedVideoCodecHash",
-                                  HashCodecName(GetCodecName(codec_id)));
+      base::UmaHistogramSparse("Media.DetectedVideoCodecHash",
+                               HashCodecName(GetCodecName(codec_id)));
       detected_video_track_count++;
 
 #if BUILDFLAG(ENABLE_HEVC_DEMUXING)
@@ -1365,10 +1371,12 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
     }
 
     if (codec_type == AVMEDIA_TYPE_AUDIO) {
-      streams_[i]->SetEnabled(detected_audio_track_count == 1,
+      ++supported_audio_track_count;
+      streams_[i]->SetEnabled(supported_audio_track_count == 1,
                               base::TimeDelta());
     } else if (codec_type == AVMEDIA_TYPE_VIDEO) {
-      streams_[i]->SetEnabled(detected_video_track_count == 1,
+      ++supported_video_track_count;
+      streams_[i]->SetEnabled(supported_video_track_count == 1,
                               base::TimeDelta());
     }
 
@@ -1411,12 +1419,29 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
 
     max_duration = std::max(max_duration, streams_[i]->duration());
 
-    const base::TimeDelta start_time =
+    base::TimeDelta start_time =
         ExtractStartTime(stream, start_time_estimates[i]);
-    streams_[i]->set_start_time(start_time);
-    if (start_time < start_time_) {
+
+    // Note: This value is used for seeking, so we must take the true value and
+    // not the one possibly clamped to zero below.
+    if (start_time < start_time_)
       start_time_ = start_time;
+
+    const bool is_opus_or_vorbis =
+        codec_id == AV_CODEC_ID_OPUS || codec_id == AV_CODEC_ID_VORBIS;
+    if (!has_opus_or_vorbis_audio)
+      has_opus_or_vorbis_audio = is_opus_or_vorbis;
+
+    if (codec_type == AVMEDIA_TYPE_AUDIO && start_time < base::TimeDelta() &&
+        is_opus_or_vorbis) {
+      needs_negative_timestamp_fixup = true;
+
+      // Fixup the seeking information to avoid selecting the audio stream
+      // simply because it has a lower starting time.
+      start_time = base::TimeDelta();
     }
+
+    streams_[i]->set_start_time(start_time);
   }
 
   RecordDetectedTrackTypeStats(detected_audio_track_count,
@@ -1445,10 +1470,16 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
     max_duration = kInfiniteDuration;
   }
 
+  // Chained ogg is only allowed on single track audio only opus/vorbis media.
+  const bool needs_chained_ogg_fixup =
+      glue_->container() == container_names::CONTAINER_OGG &&
+      supported_audio_track_count == 1 && !supported_video_track_count &&
+      has_opus_or_vorbis_audio;
+
   // FFmpeg represents audio data marked as before the beginning of stream as
   // having negative timestamps.  This data must be discarded after it has been
   // decoded, not before since it is used to warmup the decoder.  There are
-  // currently two known cases for this: vorbis in ogg and opus in ogg and webm.
+  // currently two known cases for this: vorbis in ogg and opus.
   //
   // For API clarity, it was decided that the rest of the media pipeline should
   // not be exposed to negative timestamps.  Which means we need to rebase these
@@ -1461,33 +1492,20 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
   // FFmpeg's use of negative timestamps for opus pre-skip is nonstandard, but
   // for more information on pre-skip see section 4.2 of the Ogg Opus spec:
   // https://tools.ietf.org/html/draft-ietf-codec-oggopus-08#section-4.2
-  for (const auto& stream : streams_) {
-    if (!stream || stream->type() != DemuxerStream::AUDIO)
-      continue;
-    const AVStream* audio_stream = stream->av_stream();
-    DCHECK(audio_stream);
-    if (audio_stream->codecpar->codec_id == AV_CODEC_ID_OPUS ||
-        (glue_->container() == container_names::CONTAINER_OGG &&
-         audio_stream->codecpar->codec_id == AV_CODEC_ID_VORBIS)) {
-      for (size_t i = 0; i < streams_.size(); ++i) {
-        if (!streams_[i])
-          continue;
-        streams_[i]->enable_negative_timestamp_fixups();
-
-        // Fixup the seeking information to avoid selecting the audio stream
-        // simply because it has a lower starting time.
-        if (streams_[i]->av_stream() == audio_stream &&
-            streams_[i]->start_time() < base::TimeDelta()) {
-          streams_[i]->set_start_time(base::TimeDelta());
-        }
-      }
+  if (needs_negative_timestamp_fixup || needs_chained_ogg_fixup) {
+    for (auto& stream : streams_) {
+      if (!stream)
+        continue;
+      if (needs_negative_timestamp_fixup)
+        stream->enable_negative_timestamp_fixups();
+      if (needs_chained_ogg_fixup)
+        stream->enable_chained_ogg_fixups();
     }
   }
 
   // If no start time could be determined, default to zero.
-  if (start_time_ == kInfiniteDuration) {
+  if (start_time_ == kInfiniteDuration)
     start_time_ = base::TimeDelta();
-  }
 
   // MPEG-4 B-frames cause grief for a simple container like AVI. Enable PTS
   // generation so we always get timestamps, see http://crbug.com/169570
@@ -1690,8 +1708,10 @@ void FFmpegDemuxer::OnEnabledAudioTracksChanged(
 
   std::set<FFmpegDemuxerStream*> enabled_streams;
   for (const auto& id : track_ids) {
-    FFmpegDemuxerStream* stream = track_id_to_demux_stream_map_[id];
-    DCHECK(stream);
+    auto it = track_id_to_demux_stream_map_.find(id);
+    if (it == track_id_to_demux_stream_map_.end())
+      continue;
+    FFmpegDemuxerStream* stream = it->second;
     DCHECK_EQ(DemuxerStream::AUDIO, stream->type());
     // TODO(servolk): Remove after multiple enabled audio tracks are supported
     // by the media::RendererImpl.
@@ -1726,9 +1746,12 @@ void FFmpegDemuxer::OnSelectedVideoTrackChanged(
 
   FFmpegDemuxerStream* selected_stream = nullptr;
   if (track_id) {
-    selected_stream = track_id_to_demux_stream_map_[*track_id];
-    DCHECK(selected_stream);
-    DCHECK_EQ(DemuxerStream::VIDEO, selected_stream->type());
+    auto it = track_id_to_demux_stream_map_.find(*track_id);
+    if (it != track_id_to_demux_stream_map_.end()) {
+      selected_stream = it->second;
+      DCHECK(selected_stream);
+      DCHECK_EQ(DemuxerStream::VIDEO, selected_stream->type());
+    }
   }
 
   // First disable all streams that need to be disabled and then enable the
@@ -1859,10 +1882,7 @@ bool FFmpegDemuxer::StreamsHaveAvailableCapacity() {
 bool FFmpegDemuxer::IsMaxMemoryUsageReached() const {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
-  // Max allowed memory usage, all streams combined.
-  const size_t kDemuxerMemoryLimit = 150 * 1024 * 1024;
-
-  size_t memory_left = kDemuxerMemoryLimit;
+  size_t memory_left = GetDemuxerMemoryLimit();
   for (const auto& stream : streams_) {
     if (!stream)
       continue;

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -167,7 +168,7 @@ class BranchUtilStageTest(generic_stages_unittest.AbstractStageTestCase,
     if 'cmd_args' not in kwargs:
       # Fill in cmd_args so we do not use the default, which specifies
       # --branch.  That is incompatible with some branch-util flows.
-      kwargs['cmd_args'] = ['-r', self.build_root]
+      kwargs['cmd_args'] = ['-r', self.build_root, self.BOT_ID]
     super(BranchUtilStageTest, self)._Prepare(bot_id, **kwargs)
 
   def ConstructStage(self):
@@ -208,7 +209,8 @@ class BranchUtilStageTest(generic_stages_unittest.AbstractStageTestCase,
 
   def testRelease(self):
     """Run-through of branch creation."""
-    self._Prepare(extra_cmd_args=['--branch-name', self.RELEASE_BRANCH_NAME,
+    self._Prepare(extra_cmd_args=['--buildbot',
+                                  '--branch-name', self.RELEASE_BRANCH_NAME,
                                   '--version', self.DEFAULT_VERSION])
     # Simulate branch not existing.
     self.rc_mock.AddCmdResult(
@@ -269,7 +271,8 @@ class BranchUtilStageTest(generic_stages_unittest.AbstractStageTestCase,
 
   def testNonRelease(self):
     """Non-release branch creation."""
-    self._Prepare(extra_cmd_args=['--branch-name', 'refs/heads/test-branch',
+    self._Prepare(extra_cmd_args=['--buildbot',
+                                  '--branch-name', 'refs/heads/test-branch',
                                   '--version', self.DEFAULT_VERSION])
     # Simulate branch not existing.
     self.rc_mock.AddCmdResult(
@@ -290,7 +293,8 @@ class BranchUtilStageTest(generic_stages_unittest.AbstractStageTestCase,
 
   def testDeletion(self):
     """Branch deletion."""
-    self._Prepare(extra_cmd_args=['--branch-name', self.RELEASE_BRANCH_NAME,
+    self._Prepare(extra_cmd_args=['--buildbot',
+                                  '--branch-name', self.RELEASE_BRANCH_NAME,
                                   '--delete-branch'])
     self.rc_mock.AddCmdResult(
         partial_mock.ListRegex('git show-ref .*release-test-branch.*'),
@@ -301,7 +305,8 @@ class BranchUtilStageTest(generic_stages_unittest.AbstractStageTestCase,
 
   def testRename(self):
     """Branch rename."""
-    self._Prepare(extra_cmd_args=['--branch-name', self.RELEASE_BRANCH_NAME,
+    self._Prepare(extra_cmd_args=['--buildbot',
+                                  '--branch-name', self.RELEASE_BRANCH_NAME,
                                   '--rename-to', 'refs/heads/release-rename'])
     # Simulate source branch existing and destination branch not existing.
     self.rc_mock.AddCmdResult(
@@ -348,7 +353,8 @@ class BranchUtilStageTest(generic_stages_unittest.AbstractStageTestCase,
 
   def _SimulateIncrementFailure(self):
     """Simulates a git push failure during source branch increment."""
-    self._Prepare(extra_cmd_args=['--branch-name', self.RELEASE_BRANCH_NAME,
+    self._Prepare(extra_cmd_args=['--buildbot',
+                                  '--branch-name', self.RELEASE_BRANCH_NAME,
                                   '--version', self.DEFAULT_VERSION])
     overlay_dir = os.path.join(
         self.build_root, constants.CHROMIUMOS_OVERLAY_DIR)

@@ -7,14 +7,18 @@
 
 #include <string>
 
+#include "ash/app_list/model/app_list_model_observer.h"
+#include "ash/app_list/model/search/search_model.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "ui/app_list/app_list_export.h"
-#include "ui/app_list/app_list_model_observer.h"
-#include "ui/app_list/views/search_box_view_delegate.h"
-#include "ui/app_list/views/search_result_list_view_delegate.h"
+#include "ui/chromeos/search_box/search_box_view_delegate.h"
 #include "ui/views/view.h"
+
+namespace search_box {
+class SearchBoxViewBase;
+}  // namespace search_box
 
 namespace app_list {
 
@@ -29,17 +33,15 @@ class SearchBoxView;
 
 // AppListMainView contains the normal view of the app list, which is shown
 // when the user is signed in.
-class APP_LIST_EXPORT AppListMainView : public views::View,
-                                        public AppListModelObserver,
-                                        public SearchBoxViewDelegate,
-                                        public SearchResultListViewDelegate {
+class APP_LIST_EXPORT AppListMainView
+    : public views::View,
+      public AppListModelObserver,
+      public search_box::SearchBoxViewDelegate {
  public:
   AppListMainView(AppListViewDelegate* delegate, AppListView* app_list_view);
   ~AppListMainView() override;
 
-  void Init(gfx::NativeView parent,
-            int initial_apps_page,
-            SearchBoxView* search_box_view);
+  void Init(int initial_apps_page, SearchBoxView* search_box_view);
 
   void ShowAppListWhenReady();
 
@@ -58,20 +60,14 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
 
   ContentsView* contents_view() const { return contents_view_; }
   AppListModel* model() { return model_; }
+  SearchModel* search_model() { return search_model_; }
   AppListViewDelegate* view_delegate() { return delegate_; }
 
   // Called when the search box's visibility is changed.
   void NotifySearchBoxVisibilityChanged();
 
-  bool ShouldShowCustomLauncherPage() const;
-  void UpdateCustomLauncherPageVisibility();
-
   // Overridden from views::View:
   const char* GetClassName() const override;
-
-  // Overridden from AppListModelObserver:
-  void OnCustomLauncherPageEnabledStateChanged(bool enabled) override;
-  void OnSearchEngineIsGoogleChanged(bool is_google) override;
 
   // Invoked when an item is activated on the grid view. |event_flags| contains
   // the flags of the keyboard/mouse event that triggers the activation request.
@@ -82,6 +78,9 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
   // changes, necessitating a cancel of the drag operation.
   void CancelDragInActiveFolder();
 
+  // Called when the app represented by |result| is installed.
+  void OnResultInstalled(SearchResult* result);
+
  private:
   // Adds the ContentsView.
   void AddContentsViews();
@@ -90,15 +89,13 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
   PaginationModel* GetAppsPaginationModel();
 
   // Overridden from SearchBoxViewDelegate:
-  void QueryChanged(SearchBoxView* sender) override;
+  void QueryChanged(search_box::SearchBoxViewBase* sender) override;
   void BackButtonPressed() override;
-  void SetSearchResultSelection(bool select) override;
-
-  // Overridden from SearchResultListViewDelegate:
-  void OnResultInstalled(SearchResult* result) override;
+  void ActiveChanged(search_box::SearchBoxViewBase* sender) override {}
 
   AppListViewDelegate* delegate_;  // Owned by parent view (AppListView).
   AppListModel* model_;  // Unowned; ownership is handled by |delegate_|.
+  SearchModel* search_model_;  // Unowned; ownership is handled by |delegate_|.
 
   // Created by AppListView. Owned by views hierarchy.
   SearchBoxView* search_box_view_;

@@ -9,22 +9,24 @@
 #include "jni/SceneLayer_jni.h"
 
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 
 namespace android {
 
 // static
-SceneLayer* SceneLayer::FromJavaObject(JNIEnv* env, jobject jobj) {
-  if (!jobj)
+SceneLayer* SceneLayer::FromJavaObject(JNIEnv* env,
+                                       const JavaRef<jobject>& jobj) {
+  if (jobj.is_null())
     return nullptr;
   return reinterpret_cast<SceneLayer*>(Java_SceneLayer_getNativePtr(env, jobj));
 }
 
-SceneLayer::SceneLayer(JNIEnv* env, jobject jobj)
+SceneLayer::SceneLayer(JNIEnv* env, const JavaRef<jobject>& jobj)
     : SceneLayer(env, jobj, cc::Layer::Create()) {}
 
 SceneLayer::SceneLayer(JNIEnv* env,
-                       jobject jobj,
+                       const JavaRef<jobject>& jobj,
                        scoped_refptr<cc::Layer> layer)
     : weak_java_scene_layer_(env, jobj), layer_(layer) {
   Java_SceneLayer_setNativePtr(env, jobj, reinterpret_cast<intptr_t>(this));
@@ -56,7 +58,8 @@ SkColor SceneLayer::GetBackgroundColor() {
   return SK_ColorWHITE;
 }
 
-static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
+static jlong JNI_SceneLayer_Init(JNIEnv* env,
+                                 const JavaParamRef<jobject>& jobj) {
   // This will automatically bind to the Java object and pass ownership there.
   SceneLayer* tree_provider = new SceneLayer(env, jobj);
   return reinterpret_cast<intptr_t>(tree_provider);

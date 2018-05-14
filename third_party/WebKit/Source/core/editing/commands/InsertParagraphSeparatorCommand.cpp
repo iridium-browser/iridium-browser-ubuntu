@@ -25,17 +25,22 @@
 
 #include "core/editing/commands/InsertParagraphSeparatorCommand.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/Text.h"
 #include "core/editing/EditingStyle.h"
 #include "core/editing/EditingUtilities.h"
+#include "core/editing/SelectionTemplate.h"
+#include "core/editing/VisiblePosition.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/editing/VisibleUnits.h"
+#include "core/editing/commands/DeleteSelectionOptions.h"
+#include "core/editing/commands/EditingCommandsUtilities.h"
 #include "core/editing/commands/InsertLineBreakCommand.h"
 #include "core/html/HTMLBRElement.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLQuoteElement.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutText.h"
 
@@ -52,7 +57,7 @@ static Element* HighestVisuallyEquivalentDivBelowRoot(Element* start_block) {
   // We don't want to return a root node (if it happens to be a div, e.g., in a
   // document fragment) because there are no siblings for us to append to.
   while (!cur_block->nextSibling() &&
-         isHTMLDivElement(*cur_block->parentElement()) &&
+         IsHTMLDivElement(*cur_block->parentElement()) &&
          cur_block->parentElement()->parentElement()) {
     if (cur_block->parentElement()->hasAttributes())
       break;
@@ -92,7 +97,7 @@ void InsertParagraphSeparatorCommand::CalculateStyleBeforeInsertion(
   // boundaries of a paragraph. Otherwise, content that is moved as part of the
   // work of the command will lend their styles to the new paragraph without any
   // extra work needed.
-  VisiblePosition visible_pos = CreateVisiblePosition(pos, VP_DEFAULT_AFFINITY);
+  VisiblePosition visible_pos = CreateVisiblePosition(pos);
   if (!IsStartOfParagraph(visible_pos) && !IsEndOfParagraph(visible_pos))
     return;
 
@@ -117,7 +122,7 @@ void InsertParagraphSeparatorCommand::ApplyStyleAfterInsertion(
   if (!style_)
     return;
 
-  style_->PrepareToApplyAt(EndingSelection().Start());
+  style_->PrepareToApplyAt(EndingVisibleSelection().Start());
   if (!style_->IsEmpty())
     ApplyStyle(style_.Get(), editing_state);
 }
@@ -130,7 +135,7 @@ bool InsertParagraphSeparatorCommand::ShouldUseDefaultParagraphElement(
     return true;
 
   // Assumes that if there was a range selection, it was already deleted.
-  if (!IsEndOfBlock(EndingSelection().VisibleStart()))
+  if (!IsEndOfBlock(EndingVisibleSelection().VisibleStart()))
     return false;
 
   return enclosing_block->HasTagName(h1Tag) ||
@@ -162,7 +167,7 @@ Element* InsertParagraphSeparatorCommand::CloneHierarchyUnderNewBlock(
   // Make clones of ancestors in between the start node and the start block.
   Element* parent = block_to_insert;
   for (size_t i = ancestors.size(); i != 0; --i) {
-    Element* child = ancestors[i - 1]->CloneElementWithoutChildren();
+    Element* child = ancestors[i - 1]->CloneWithoutChildren();
     // It should always be okay to remove id from the cloned elements, since the
     // originals are not deleted.
     child->removeAttribute(idAttr);
@@ -176,22 +181,27 @@ Element* InsertParagraphSeparatorCommand::CloneHierarchyUnderNewBlock(
 }
 
 void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
-  if (!EndingSelection().IsNonOrphanedCaretOrRange())
+  // TODO(editing-dev): We shouldn't construct an
+  // InsertParagraphSeparatorCommand with none or invalid selection.
+  const VisibleSelection& visible_selection = EndingVisibleSelection();
+  if (visible_selection.IsNone() ||
+      !visible_selection.IsValidFor(GetDocument()))
     return;
 
-  Position insertion_position = EndingSelection().Start();
+  Position insertion_position = visible_selection.Start();
 
-  TextAffinity affinity = EndingSelection().Affinity();
+  TextAffinity affinity = visible_selection.Affinity();
 
   // Delete the current selection.
   if (EndingSelection().IsRange()) {
     GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
     CalculateStyleBeforeInsertion(insertion_position);
-    DeleteSelection(editing_state, false, true);
-    if (editing_state->IsAborted())
+    if (!DeleteSelection(editing_state, DeleteSelectionOptions::NormalDelete()))
       return;
-    insertion_position = EndingSelection().Start();
-    affinity = EndingSelection().Affinity();
+    const VisibleSelection& visble_selection_after_delete =
+        EndingVisibleSelection();
+    insertion_position = visble_selection_after_delete.Start();
+    affinity = visble_selection_after_delete.Affinity();
   }
 
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
@@ -204,19 +214,19 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
       insertion_position.ParentAnchoredEquivalent().ComputeContainerNode());
   HTMLElement* list_child = list_child_node && list_child_node->IsHTMLElement()
                                 ? ToHTMLElement(list_child_node)
-                                : 0;
+                                : nullptr;
   Position canonical_pos =
       CreateVisiblePosition(insertion_position).DeepEquivalent();
   if (!start_block || !start_block->NonShadowBoundaryParentNode() ||
       IsTableCell(start_block) ||
-      isHTMLFormElement(*start_block)
+      IsHTMLFormElement(*start_block)
       // FIXME: If the node is hidden, we don't have a canonical position so we
       // will do the wrong thing for tables and <hr>.
       // https://bugs.webkit.org/show_bug.cgi?id=40342
       || (!canonical_pos.IsNull() &&
           IsDisplayInsideTable(canonical_pos.AnchorNode())) ||
       (!canonical_pos.IsNull() &&
-       isHTMLHRElement(*canonical_pos.AnchorNode()))) {
+       IsHTMLHRElement(*canonical_pos.AnchorNode()))) {
     ApplyCommandToComposite(InsertLineBreakCommand::Create(GetDocument()),
                             editing_state);
     return;
@@ -235,6 +245,8 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
       PositionAvoidingSpecialElementBoundary(insertion_position, editing_state);
   if (editing_state->IsAborted())
     return;
+  // InsertTextCommandTest.AnchorElementWithBlockCrash reaches here.
+  ABORT_EDITING_COMMAND_IF(!start_block->parentNode());
   if (list_child == enclosing_anchor) {
     // |positionAvoidingSpecialElementBoundary()| creates new A element and
     // move to another place.
@@ -262,7 +274,7 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
   } else if (ShouldUseDefaultParagraphElement(start_block)) {
     block_to_insert = CreateDefaultParagraphElement(GetDocument());
   } else {
-    block_to_insert = start_block->CloneElementWithoutChildren();
+    block_to_insert = start_block->CloneWithoutChildren();
   }
 
   VisiblePosition visible_pos =
@@ -302,8 +314,7 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
       }
 
       if (list_child && list_child != start_block) {
-        Element* list_child_to_insert =
-            list_child->CloneElementWithoutChildren();
+        Element* list_child_to_insert = list_child->CloneWithoutChildren();
         AppendNode(block_to_insert, list_child_to_insert, editing_state);
         if (editing_state->IsAborted())
           return;
@@ -313,7 +324,7 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
         // startBlock (e.g., when nesting within lists). However, for div nodes,
         // this can result in nested div tags that are hard to break out of.
         Element* sibling_element = start_block;
-        if (isHTMLDivElement(*block_to_insert))
+        if (IsHTMLDivElement(*block_to_insert))
           sibling_element = HighestVisuallyEquivalentDivBelowRoot(start_block);
         InsertNodeAfter(block_to_insert, sibling_element, editing_state);
       }
@@ -336,10 +347,10 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
     if (editing_state->IsAborted())
       return;
 
-    SetEndingSelection(SelectionInDOMTree::Builder()
-                           .Collapse(Position::FirstPositionInNode(*parent))
-                           .SetIsDirectional(EndingSelection().IsDirectional())
-                           .Build());
+    SetEndingSelection(SelectionForUndoStep::From(
+        SelectionInDOMTree::Builder()
+            .Collapse(Position::FirstPositionInNode(*parent))
+            .Build()));
     return;
   }
 
@@ -354,8 +365,7 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
 
     if (is_first_in_block && !nest_new_block) {
       if (list_child && list_child != start_block) {
-        Element* list_child_to_insert =
-            list_child->CloneElementWithoutChildren();
+        Element* list_child_to_insert = list_child->CloneWithoutChildren();
         AppendNode(block_to_insert, list_child_to_insert, editing_state);
         if (editing_state->IsAborted())
           return;
@@ -409,10 +419,10 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
       return;
 
     // In this case, we need to set the new ending selection.
-    SetEndingSelection(SelectionInDOMTree::Builder()
-                           .Collapse(insertion_position)
-                           .SetIsDirectional(EndingSelection().IsDirectional())
-                           .Build());
+    SetEndingSelection(SelectionForUndoStep::From(
+        SelectionInDOMTree::Builder()
+            .Collapse(insertion_position)
+            .Build()));
     return;
   }
 
@@ -434,12 +444,12 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
     visible_pos = CreateVisiblePosition(insertion_position);
     // If the insertion point is a break element, there is nothing else
     // we need to do.
-    if (visible_pos.DeepEquivalent().AnchorNode()->GetLayoutObject()->IsBR()) {
-      SetEndingSelection(
+    if (visible_pos.IsNotNull() &&
+        visible_pos.DeepEquivalent().AnchorNode()->GetLayoutObject()->IsBR()) {
+      SetEndingSelection(SelectionForUndoStep::From(
           SelectionInDOMTree::Builder()
               .Collapse(insertion_position)
-              .SetIsDirectional(EndingSelection().IsDirectional())
-              .Build());
+              .Build()));
       return;
     }
   }
@@ -452,9 +462,12 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
   // want to make sure we include all of the correct nodes when building the
   // ancestor list. So this needs to be the deepest representation of the
   // position before we walk the DOM tree.
-  insertion_position = PositionOutsideTabSpan(
-      CreateVisiblePosition(insertion_position).DeepEquivalent());
+  VisiblePosition visible_insertion_position =
+      CreateVisiblePosition(insertion_position);
+  ABORT_EDITING_COMMAND_IF(visible_insertion_position.IsNull());
 
+  insertion_position =
+      PositionOutsideTabSpan(visible_insertion_position.DeepEquivalent());
   // If the returned position lies either at the end or at the start of an
   // element that is ignored by editing we should move to its upstream or
   // downstream position.
@@ -465,14 +478,15 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
       insertion_position = MostBackwardCaretPosition(insertion_position);
   }
 
+  ABORT_EDITING_COMMAND_IF(!IsEditablePosition(insertion_position));
   // Make sure we do not cause a rendered space to become unrendered.
   // FIXME: We need the affinity for pos, but mostForwardCaretPosition does not
   // give it
-  Position leading_whitespace =
-      LeadingWhitespacePosition(insertion_position, VP_DEFAULT_AFFINITY);
-  // FIXME: leadingWhitespacePosition is returning the position before preserved
-  // newlines for positions after the preserved newline, causing the newline to
-  // be turned into a nbsp.
+  Position leading_whitespace = LeadingCollapsibleWhitespacePosition(
+      insertion_position, TextAffinity::kDefault);
+  // FIXME: leadingCollapsibleWhitespacePosition is returning the position
+  // before preserved newlines for positions after the preserved newline,
+  // causing the newline to be turned into a nbsp.
   if (leading_whitespace.IsNotNull() &&
       leading_whitespace.AnchorNode()->IsTextNode()) {
     Text* text_node = ToText(leading_whitespace.AnchorNode());
@@ -509,7 +523,7 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
   if (nest_new_block) {
     AppendNode(block_to_insert, start_block, editing_state);
   } else if (list_child && list_child != start_block) {
-    Element* list_child_to_insert = list_child->CloneElementWithoutChildren();
+    Element* list_child_to_insert = list_child->CloneWithoutChildren();
     AppendNode(block_to_insert, list_child_to_insert, editing_state);
     if (editing_state->IsAborted())
       return;
@@ -571,8 +585,6 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
   // Handle whitespace that occurs after the split
   if (position_after_split.IsNotNull()) {
     GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
-    // TODO(yosin) |isRenderedCharacter()| should be removed, and we should
-    // use |VisiblePosition::characterAfter()|.
     if (!IsRenderedCharacter(position_after_split)) {
       // Clear out all whitespace and insert one non-breaking space
       DCHECK(!position_after_split.ComputeContainerNode()->GetLayoutObject() ||
@@ -588,15 +600,14 @@ void InsertParagraphSeparatorCommand::DoApply(EditingState* editing_state) {
     }
   }
 
-  SetEndingSelection(
+  SetEndingSelection(SelectionForUndoStep::From(
       SelectionInDOMTree::Builder()
           .Collapse(Position::FirstPositionInNode(*block_to_insert))
-          .SetIsDirectional(EndingSelection().IsDirectional())
-          .Build());
+          .Build()));
   ApplyStyleAfterInsertion(start_block, editing_state);
 }
 
-DEFINE_TRACE(InsertParagraphSeparatorCommand) {
+void InsertParagraphSeparatorCommand::Trace(blink::Visitor* visitor) {
   visitor->Trace(style_);
   CompositeEditCommand::Trace(visitor);
 }

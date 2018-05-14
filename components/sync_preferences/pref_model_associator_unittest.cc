@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "components/prefs/scoped_user_pref_update.h"
@@ -62,16 +61,16 @@ class AbstractPreferenceMergeTest : public testing::Test {
         pref_service_->GetSyncableService(syncer::PREFERENCES));
   }
 
-  void SetContentPattern(base::DictionaryValue* patterns_dict,
+  void SetContentPattern(base::Value* patterns_dict,
                          const std::string& expression,
                          int setting) {
-    base::DictionaryValue* expression_dict = nullptr;
-    if (!patterns_dict->GetDictionaryWithoutPathExpansion(expression,
-                                                          &expression_dict)) {
-      expression_dict = patterns_dict->SetDictionaryWithoutPathExpansion(
-          expression, base::MakeUnique<base::DictionaryValue>());
+    base::Value* expression_dict =
+        patterns_dict->FindKeyOfType(expression, base::Value::Type::DICTIONARY);
+    if (!expression_dict) {
+      expression_dict = patterns_dict->SetKey(
+          expression, base::Value(base::Value::Type::DICTIONARY));
     }
-    expression_dict->SetIntegerWithoutPathExpansion("setting", setting);
+    expression_dict->SetKey("setting", base::Value(setting));
   }
 
   void SetPrefToEmpty(const std::string& pref_name) {
@@ -132,7 +131,7 @@ TEST_F(ListPreferenceMergeTest, LocalEmpty) {
 }
 
 TEST_F(ListPreferenceMergeTest, ServerNull) {
-  auto null_value = base::MakeUnique<base::Value>();
+  auto null_value = std::make_unique<base::Value>();
   {
     ListPrefUpdate update(pref_service_.get(), kListPrefName);
     base::ListValue* local_list_value = update.Get();
@@ -254,7 +253,7 @@ TEST_F(DictionaryPreferenceMergeTest, LocalEmpty) {
 }
 
 TEST_F(DictionaryPreferenceMergeTest, ServerNull) {
-  auto null_value = base::MakeUnique<base::Value>();
+  auto null_value = std::make_unique<base::Value>();
   {
     DictionaryPrefUpdate update(pref_service_.get(), kDictionaryPrefName);
     base::DictionaryValue* local_dict_value = update.Get();

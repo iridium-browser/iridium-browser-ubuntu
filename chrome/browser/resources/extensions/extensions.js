@@ -4,7 +4,7 @@
 
 // <include src="../../../../ui/webui/resources/js/cr/ui/focus_row.js">
 // <include src="../../../../ui/webui/resources/js/cr/ui/focus_grid.js">
-// <include src="drag_and_drop_handler.js">
+// <include src="../md_extensions/drag_and_drop_handler.js">
 // <include src="extension_code.js">
 // <include src="extension_commands_overlay.js">
 // <include src="extension_error_overlay.js">
@@ -18,10 +18,6 @@
 // <if expr="chromeos">
 // <include src="chromeos/kiosk_apps.js">
 // </if>
-
-// Used for observing function of the backend datasource for this page by
-// tests.
-var webuiResponded = false;
 
 cr.define('extensions', function() {
   var ExtensionList = extensions.ExtensionList;
@@ -108,7 +104,7 @@ cr.define('extensions', function() {
       var dragTarget = document.documentElement;
       /** @private {extensions.DragAndDropHandler} */
       this.dragWrapperHandler_ =
-          new extensions.DragAndDropHandler(true, dragTarget);
+          new extensions.DragAndDropHandler(true, false, dragTarget);
       dragTarget.addEventListener('extension-drag-started', function() {
         ExtensionSettings.showOverlay($('drop-target-overlay'));
       });
@@ -185,7 +181,6 @@ cr.define('extensions', function() {
       // don't need to display the interstitial spinner.
       if (!this.hasLoaded_)
         this.setLoading_(true);
-      webuiResponded = true;
 
       /** @const */
       var supervised = profileInfo.isSupervised;

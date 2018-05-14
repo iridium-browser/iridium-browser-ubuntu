@@ -14,11 +14,12 @@
 #include "base/memory/ptr_util.h"
 #include "base/process/process.h"
 #include "base/run_loop.h"
+#include "base/test/gtest_util.h"
 #include "base/test/test_suite.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service_test.h"
-#include "services/service_manager/public/interfaces/service_manager.mojom.h"
+#include "services/service_manager/public/mojom/service_manager.mojom.h"
 #include "services/service_manager/tests/connect/connect_test.mojom.h"
 #include "services/service_manager/tests/util.h"
 
@@ -34,6 +35,8 @@ const char kTestPackageName[] = "connect_test_package";
 const char kTestAppName[] = "connect_test_app";
 const char kTestAppAName[] = "connect_test_a";
 const char kTestAppBName[] = "connect_test_b";
+const char kTestNonexistentAppName[] = "connect_test_nonexistent_app";
+const char kTestSandboxedAppName[] = "connect_test_sandboxed_app";
 const char kTestClassAppName[] = "connect_test_class_app";
 const char kTestSingletonAppName[] = "connect_test_singleton_app";
 
@@ -51,6 +54,16 @@ void ReceiveTwoStrings(std::string* out_string_1,
                        const std::string& in_string_2) {
   *out_string_1 = in_string_1;
   *out_string_2 = in_string_2;
+  loop->Quit();
+}
+
+void ReceiveQueryResult(mojom::ConnectResult* out_result,
+                        std::string* out_string,
+                        base::RunLoop* loop,
+                        mojom::ConnectResult in_result,
+                        const std::string& in_string) {
+  *out_result = in_result;
+  *out_string = in_string;
   loop->Quit();
 }
 
@@ -144,7 +157,7 @@ class ConnectTest : public test::ServiceTest,
     run_loop.Run();
   }
   std::unique_ptr<Service> CreateService() override {
-    return base::MakeUnique<TestService>(this);
+    return std::make_unique<TestService>(this);
   }
 
   void Create(test::mojom::ExposedInterfaceRequest request) {
@@ -206,9 +219,40 @@ TEST_F(ConnectTest, Instances) {
   EXPECT_NE(instance_a1, instance_b);
 }
 
+TEST_F(ConnectTest, QueryService) {
+  mojom::ConnectResult result;
+  std::string sandbox_type;
+  base::RunLoop run_loop;
+  connector()->QueryService(
+      Identity(kTestSandboxedAppName, mojom::kInheritUserID, "A"),
+      base::BindOnce(&ReceiveQueryResult, &result, &sandbox_type, &run_loop));
+  run_loop.Run();
+  EXPECT_EQ(mojom::ConnectResult::SUCCEEDED, result);
+  EXPECT_EQ("superduper", sandbox_type);
+}
+
+TEST_F(ConnectTest, QueryNonexistentService) {
+  mojom::ConnectResult result;
+  std::string sandbox_type;
+  base::RunLoop run_loop;
+  connector()->QueryService(
+      Identity(kTestNonexistentAppName, mojom::kInheritUserID, "A"),
+      base::BindOnce(&ReceiveQueryResult, &result, &sandbox_type, &run_loop));
+  run_loop.Run();
+  EXPECT_EQ(mojom::ConnectResult::INVALID_ARGUMENT, result);
+  EXPECT_EQ("", sandbox_type);
+}
+
+#if DCHECK_IS_ON()
+// This test triggers intentional DCHECKs but is not suitable for death testing.
+#define MAYBE_BlockedInterface DISABLED_BlockedInterface
+#else
+#define MAYBE_BlockedInterface BlockedInterface
+#endif
+
 // BlockedInterface should not be exposed to this application because it is not
 // in our CapabilityFilter whitelist.
-TEST_F(ConnectTest, BlockedInterface) {
+TEST_F(ConnectTest, MAYBE_BlockedInterface) {
   base::RunLoop run_loop;
   test::mojom::BlockedInterfacePtr blocked;
   connector()->BindInterface(kTestAppName, &blocked);
@@ -235,12 +279,19 @@ TEST_F(ConnectTest, PackagedApp) {
   EXPECT_EQ(resolved_identity.name(), kTestAppAName);
 }
 
+#if DCHECK_IS_ON()
+// This test triggers intentional DCHECKs but is not suitable for death testing.
+#define MAYBE_BlockedPackage DISABLED_BlockedPackage
+#else
+#define MAYBE_BlockedPackage BlockedPackage
+#endif
+
 // Ask the target application to attempt to connect to a third application
 // provided by a package whose id is permitted by the primary target's
 // CapabilityFilter but whose package is not. The connection should be
 // allowed regardless of the target's CapabilityFilter with respect to the
 // package.
-TEST_F(ConnectTest, BlockedPackage) {
+TEST_F(ConnectTest, MAYBE_BlockedPackage) {
   test::mojom::StandaloneAppPtr standalone_app;
   connector()->BindInterface(kTestAppName, &standalone_app);
   base::RunLoop run_loop;
@@ -251,9 +302,16 @@ TEST_F(ConnectTest, BlockedPackage) {
   EXPECT_EQ("A", title);
 }
 
+#if DCHECK_IS_ON()
+// This test triggers intentional DCHECKs but is not suitable for death testing.
+#define MAYBE_PackagedApp_BlockedInterface DISABLED_PackagedApp_BlockedInterface
+#else
+#define MAYBE_PackagedApp_BlockedInterface PackagedApp_BlockedInterface
+#endif
+
 // BlockedInterface should not be exposed to this application because it is not
 // in our CapabilityFilter whitelist.
-TEST_F(ConnectTest, PackagedApp_BlockedInterface) {
+TEST_F(ConnectTest, MAYBE_PackagedApp_BlockedInterface) {
   base::RunLoop run_loop;
   test::mojom::BlockedInterfacePtr blocked;
   connector()->BindInterface(kTestAppAName, &blocked);
@@ -261,9 +319,16 @@ TEST_F(ConnectTest, PackagedApp_BlockedInterface) {
   run_loop.Run();
 }
 
+#if DCHECK_IS_ON()
+// This test triggers intentional DCHECKs but is not suitable for death testing.
+#define MAYBE_BlockedPackagedApplication DISABLED_BlockedPackagedApplication
+#else
+#define MAYBE_BlockedPackagedApplication BlockedPackagedApplication
+#endif
+
 // Connection to another application provided by the same package, blocked
 // because it's not in the capability filter whitelist.
-TEST_F(ConnectTest, BlockedPackagedApplication) {
+TEST_F(ConnectTest, MAYBE_BlockedPackagedApplication) {
   test::mojom::ConnectTestServicePtr service_b;
   connector()->BindInterface(kTestAppBName, &service_b);
   Connector::TestApi test_api(connector());
@@ -288,7 +353,16 @@ TEST_F(ConnectTest, CapabilityClasses) {
   EXPECT_EQ("CLASS APP", string2);
 }
 
-TEST_F(ConnectTest, ConnectWithoutExplicitClassBlocked) {
+#if DCHECK_IS_ON()
+// This test triggers intentional DCHECKs but is not suitable for death testing.
+#define MAYBE_ConnectWithoutExplicitClassBlocked \
+  DISABLED_ConnectWithoutExplicitClassBlocked
+#else
+#define MAYBE_ConnectWithoutExplicitClassBlocked \
+  ConnectWithoutExplicitClassBlocked
+#endif
+
+TEST_F(ConnectTest, MAYBE_ConnectWithoutExplicitClassBlocked) {
   // We not be able to bind a ClassInterfacePtr since the connect_unittest app
   // does not explicitly request the "class" capability from
   // connect_test_class_app. This test will hang if it is bound.
@@ -356,8 +430,7 @@ TEST_F(ConnectTest, ConnectToClientProcess_Blocked) {
 TEST_F(ConnectTest, AllUsersSingleton) {
   // Connect to an instance with an explicitly different user_id. This supplied
   // user id should be ignored by the service manager (which will generate its
-  // own
-  // synthetic user id for all-user singleton instances).
+  // own synthetic user id for all-user singleton instances).
   const std::string singleton_userid = base::GenerateGUID();
   Identity singleton_id(kTestSingletonAppName, singleton_userid);
   connector()->StartService(singleton_id);

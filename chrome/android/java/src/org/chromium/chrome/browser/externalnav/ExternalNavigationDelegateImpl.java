@@ -19,8 +19,10 @@ import android.os.Build;
 import android.os.StrictMode;
 import android.provider.Browser;
 import android.provider.Telephony;
+import android.support.customtabs.CustomTabsIntent;
 import android.support.v7.app.AlertDialog;
 import android.text.TextUtils;
+import android.view.WindowManager.BadTokenException;
 import android.webkit.MimeTypeMap;
 
 import org.chromium.base.ApplicationState;
@@ -30,19 +32,24 @@ import org.chromium.base.PathUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.blink_public.web.WebReferrerPolicy;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeTabbedActivity2;
 import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.LaunchIntentDispatcher;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.chrome.browser.instantapps.AuthenticatedProxyActivity;
 import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
+import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.chrome.browser.webapps.WebappActivity;
+import org.chromium.chrome.browser.webapps.WebappScopePolicy;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
@@ -66,10 +73,19 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
 
     protected final Context mApplicationContext;
     private final Tab mTab;
+    private final TabObserver mTabObserver;
+    private boolean mIsTabDestroyed;
 
     public ExternalNavigationDelegateImpl(Tab tab) {
         mTab = tab;
         mApplicationContext = ContextUtils.getApplicationContext();
+        mTabObserver = new EmptyTabObserver() {
+            @Override
+            public void onDestroyed(Tab tab) {
+                mIsTabDestroyed = true;
+            }
+        };
+        mTab.addObserver(mTabObserver);
     }
 
     /**
@@ -240,18 +256,14 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public boolean isSpecializedHandlerAvailable(List<ResolveInfo> infos) {
-        return countSpecializedHandlers(infos) > 0;
-    }
-
-    @Override
-    public boolean isWithinCurrentWebappScope(String url) {
+    public @WebappScopePolicy.NavigationDirective int applyWebappScopePolicyForUrl(String url) {
         Context context = getAvailableContext();
         if (context instanceof WebappActivity) {
-            String scope = ((WebappActivity) context).getWebappScope();
-            return url.startsWith(scope);
+            WebappActivity webappActivity = (WebappActivity) context;
+            return webappActivity.scopePolicy().applyPolicyForNavigationToUrl(
+                    webappActivity.getWebappInfo(), url);
         }
-        return false;
+        return WebappScopePolicy.NavigationDirective.NORMAL_BEHAVIOR;
     }
 
     @Override
@@ -360,6 +372,11 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             }
             if (activityWasLaunched) recordExternalNavigationDispatched(intent);
             return activityWasLaunched;
+        } catch (SecurityException e) {
+            // https://crbug.com/808494: Handle the URL in Chrome if dispatching to another
+            // application fails with a SecurityException. This happens due to malformed manifests
+            // in another app.
+            return false;
         } catch (RuntimeException e) {
             IntentUtils.logTransactionTooLargeOrRethrow(e, intent);
             return false;
@@ -377,7 +394,19 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public void startIncognitoIntent(final Intent intent, final String referrerUrl,
+    public boolean startIncognitoIntent(final Intent intent, final String referrerUrl,
+            final String fallbackUrl, final Tab tab, final boolean needsToCloseTab,
+            final boolean proxy) {
+        try {
+            startIncognitoIntentInternal(
+                    intent, referrerUrl, fallbackUrl, tab, needsToCloseTab, proxy);
+        } catch (BadTokenException e) {
+            return false;
+        }
+        return true;
+    }
+
+    private void startIncognitoIntentInternal(final Intent intent, final String referrerUrl,
             final String fallbackUrl, final Tab tab, final boolean needsToCloseTab,
             final boolean proxy) {
         Context context = tab.getWindowAndroid().getContext().get();
@@ -486,10 +515,22 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
 
         LoadUrlParams loadUrlParams = new LoadUrlParams(url, PageTransition.AUTO_TOPLEVEL);
         if (!TextUtils.isEmpty(referrerUrl)) {
-            Referrer referrer = new Referrer(referrerUrl, Referrer.REFERRER_POLICY_ALWAYS);
+            Referrer referrer =
+                    new Referrer(referrerUrl, WebReferrerPolicy.ALWAYS);
             loadUrlParams.setReferrer(referrer);
         }
         tab.loadUrl(loadUrlParams);
+    }
+
+    @Override
+    public void launchCctForWebappUrl(String url, boolean launchInNewTask) {
+        Context context = getAvailableContext();
+        if (!(context instanceof WebappActivity)) return;
+
+        CustomTabsIntent customTabIntent =
+                ((WebappActivity) context).buildCustomTabIntentForURL(url);
+        if (launchInNewTask) customTabIntent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        customTabIntent.launchUrl(context, Uri.parse(url));
     }
 
     @Override
@@ -498,7 +539,8 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         int transitionType = PageTransition.LINK;
         final LoadUrlParams loadUrlParams = new LoadUrlParams(url, transitionType);
         if (!TextUtils.isEmpty(referrerUrl)) {
-            Referrer referrer = new Referrer(referrerUrl, Referrer.REFERRER_POLICY_ALWAYS);
+            Referrer referrer =
+                    new Referrer(referrerUrl, WebReferrerPolicy.ALWAYS);
             loadUrlParams.setReferrer(referrer);
         }
         if (tab != null) {
@@ -508,7 +550,10 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             ThreadUtils.postOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    tab.loadUrl(loadUrlParams);
+                    // Tab might be closed when this is run. See https://crbug.com/662877
+                    if (!mIsTabDestroyed) {
+                        tab.loadUrl(loadUrlParams);
+                    }
                 }
             });
             return OverrideUrlLoadingResult.OVERRIDE_WITH_CLOBBERING_TAB;
@@ -596,7 +641,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             Intent resolvedIntent = new Intent(intent);
             resolvedIntent.setData(Uri.parse(url));
             return handler.handleIncomingIntent(getAvailableContext(), resolvedIntent,
-                    ChromeLauncherActivity.isCustomTabIntent(resolvedIntent), true);
+                    LaunchIntentDispatcher.isCustomTabIntent(resolvedIntent), true);
         } else if (!isIncomingRedirect) {
             // Check if the navigation is coming from SERP and skip instant app handling.
             if (isSerpReferrer(tab)) return false;

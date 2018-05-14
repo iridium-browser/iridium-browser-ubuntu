@@ -11,11 +11,6 @@
   </outputs>
   <release seq="1">
     <structures fallback_to_low_resolution="true">
-      <!-- Filesystem notification icons. -->
-      <structure type="chrome_scaled_image" name="IDR_DISK_SPACE_NOTIFICATION_LOW" file="filesystem/notification_disk_space_low.png" />
-      <structure type="chrome_scaled_image" name="IDR_DISK_SPACE_NOTIFICATION_CRITICAL" file="filesystem/notification_disk_space_critical.png" />
-      <structure type="chrome_scaled_image" name="IDR_STORAGE_MANAGER_BUTTON" file="filesystem/button_storage_manager.png" />
-
       <!-- Badge for Chrome Apps if Arc is enabled. -->
       <structure type="chrome_scaled_image" name="IDR_ARC_DUAL_ICON_BADGE" file="arc/dual-icon-badge.png" />
 
@@ -86,15 +81,18 @@
       <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_63" file="default_user_images/abstract/avatar_onigiri.png" />
       <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_64" file="default_user_images/abstract/avatar_melon.png" />
       <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_65" file="default_user_images/abstract/avatar_avocado.png" />
+      <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_66" file="default_user_images/geo/avatar_geo1.png" />
+      <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_67" file="default_user_images/geo/avatar_geo2.png" />
+      <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_68" file="default_user_images/geo/avatar_geo3.png" />
+      <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_69" file="default_user_images/geo/avatar_geo4.png" />
+      <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_70" file="default_user_images/geo/avatar_geo5.png" />
 
       <!-- Print Job Notification images. -->
       <structure type="chrome_scaled_image" name="IDR_PRINT_NOTIFICATION_CANCEL" file="print_notification/cancel.png" />
       <structure type="chrome_scaled_image" name="IDR_PRINT_NOTIFICATION_PAUSE" file="print_notification/pause.png" />
       <structure type="chrome_scaled_image" name="IDR_PRINT_NOTIFICATION_PLAY" file="print_notification/play.png" />
       <structure type="chrome_scaled_image" name="IDR_PRINT_NOTIFICATION_HELP" file="print_notification/help.png" />
-      <structure type="chrome_scaled_image" name="IDR_PRINT_NOTIFICATION_PRINTING" file="print_notification/print_job_printing.png" />
-      <structure type="chrome_scaled_image" name="IDR_PRINT_NOTIFICATION_DONE" file="print_notification/print_job_done.png" />
-      <structure type="chrome_scaled_image" name="IDR_PRINT_NOTIFICATION_ERROR" file="print_notification/print_job_error.png" />
+
     </structures>
   </release>
 </grit>

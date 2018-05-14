@@ -123,4 +123,11 @@ void AppCacheNavigationHandleCore::OnContentBlocked(int host_id,
   DCHECK(false);
 }
 
+void AppCacheNavigationHandleCore::OnSetSubresourceFactory(
+    int host_id,
+    network::mojom::URLLoaderFactoryPtr url_loader_factory) {
+  // Should never be called.
+  DCHECK(false);
+}
+
 }  // namespace content

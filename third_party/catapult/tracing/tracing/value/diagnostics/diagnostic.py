@@ -2,19 +2,25 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import os
 import uuid
 
-from py_utils import camel_case
-from py_utils import discover
-from tracing import tracing_project
+from py_utils import slots_metaclass
+
+from tracing.value.diagnostics import all_diagnostics
 
 
 class Diagnostic(object):
-  _subtypes = None
+  __slots__ = '_guid',
+
+  # Ensure that new subclasses remember to specify __slots__ in order to prevent
+  # regressing memory consumption:
+  __metaclass__ = slots_metaclass.SlotsMetaclass
 
   def __init__(self):
     self._guid = None
+
+  def __ne__(self, other):
+    return not self == other
 
   @property
   def guid(self):
@@ -48,7 +54,7 @@ class Diagnostic(object):
 
   @staticmethod
   def FromDict(dct):
-    cls = Diagnostic.GetDiagnosticType(dct['type'])
+    cls = all_diagnostics.GetDiagnosticClassForName(dct['type'])
     if not cls:
       raise ValueError('Unrecognized diagnostic type: ' + dct['type'])
     diagnostic = cls.FromDict(dct)
@@ -56,17 +62,8 @@ class Diagnostic(object):
       diagnostic.guid = dct['guid']
     return diagnostic
 
-  @staticmethod
-  def GetDiagnosticType(typename):
-    if not Diagnostic._subtypes:
-      Diagnostic._subtypes = discover.DiscoverClasses(
-          os.path.join(tracing_project.TracingProject.tracing_src_path,
-                       'value'),
-          tracing_project.TracingProject.tracing_root_path,
-          Diagnostic, index_by_class_name=True)
-
-    # TODO(eakuefner): Add camelcase mode to discover.DiscoverClasses.
-    return Diagnostic._subtypes.get(camel_case.ToUnderscore(typename))
+  def ResetGuid(self):
+    self._guid = str(uuid.uuid4())
 
   def Inline(self):
     """Inlines a shared diagnostic.
@@ -81,11 +78,9 @@ class Diagnostic(object):
     """
     self._guid = None
 
-  def CanAddDiagnostic(self, unused_other_diagnostic, unused_name,
-                       unused_parent_hist, unused_other_parent_hist):
+  def CanAddDiagnostic(self, unused_other_diagnostic):
     return False
 
-  def AddDiagnostic(self, unused_other_diagnostic, unused_name,
-                    unused_parent_hist, unused_other_parent_hist):
+  def AddDiagnostic(self, unused_other_diagnostic):
     raise Exception('Abstract virtual method: subclasses must override '
                     'this method if they override canAddDiagnostic')

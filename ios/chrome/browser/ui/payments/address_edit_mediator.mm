@@ -11,9 +11,9 @@
 
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
+#include "components/autofill/core/browser/address_i18n.h"
 #include "components/autofill/core/browser/autofill_address_util.h"
 #include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_profile.h"
@@ -21,6 +21,8 @@
 #include "components/autofill/core/browser/country_combobox_model.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/phone_number_i18n.h"
+#include "components/autofill/core/browser/validation.h"
 #include "components/payments/core/payment_request_data_util.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/payments/payment_request.h"
@@ -36,12 +38,46 @@
 #error "This file requires ARC support."
 #endif
 
+namespace {
+
+// If |region| is either a valid region code or name in |regions|, then the
+// region's name is returned. Otherwise, returns |nil|.
+NSString* NormalizeRegionName(NSString* region, NSArray<RegionData*>* regions) {
+  // See if |region| is a region code, and return the region's name if that's
+  // the case.
+  NSIndexSet* matchingRegions =
+      [regions indexesOfObjectsPassingTest:^BOOL(RegionData* testRegion,
+                                                 NSUInteger index, BOOL* stop) {
+        return [testRegion.regionCode isEqualToString:region];
+      }];
+  if ([matchingRegions count]) {
+    DCHECK_EQ(1U, [matchingRegions count]);
+    return [regions objectAtIndex:[matchingRegions firstIndex]].regionName;
+  }
+
+  // See if |region| is a valid region name, and return that if it is.
+  matchingRegions =
+      [regions indexesOfObjectsPassingTest:^BOOL(RegionData* testRegion,
+                                                 NSUInteger index, BOOL* stop) {
+        return [testRegion.regionName isEqualToString:region];
+      }];
+  if ([matchingRegions count]) {
+    DCHECK_EQ(1U, [matchingRegions count]);
+    return region;
+  }
+
+  // |region| was neither a valid region code or region name, so return |nil|.
+  return nil;
+}
+
+}  // namespace
+
 @interface AddressEditMediator () {
   std::unique_ptr<RegionDataLoader> _regionDataLoader;
 }
 
-// The PaymentRequest object owning an instance of web::PaymentRequest as
-// provided by the page invoking the Payment Request API. This is a weak
+// The PaymentRequest object owning an instance of payments::WebPaymentRequest
+// as provided by the page invoking the Payment Request API. This is a weak
 // pointer and should outlive this class.
 @property(nonatomic, assign) payments::PaymentRequest* paymentRequest;
 
@@ -112,10 +148,17 @@
 #pragma mark - CreditCardEditViewControllerDataSource
 
 - (NSString*)title {
-  // TODO(crbug.com/602666): Title varies depending on what field is missing.
-  // e.g., Add Email vs. Add Phone Number.
-  return self.address ? l10n_util::GetNSString(IDS_PAYMENTS_EDIT_ADDRESS)
-                      : l10n_util::GetNSString(IDS_PAYMENTS_ADD_ADDRESS);
+  if (!self.address)
+    return l10n_util::GetNSString(IDS_PAYMENTS_ADD_ADDRESS);
+
+  if (self.paymentRequest->profile_comparator()->IsShippingComplete(
+          self.address)) {
+    return l10n_util::GetNSString(IDS_PAYMENTS_EDIT_ADDRESS);
+  }
+
+  return base::SysUTF16ToNSString(
+      self.paymentRequest->profile_comparator()
+          ->GetTitleForMissingShippingFields(*self.address));
 }
 
 - (CollectionViewItem*)headerItem {
@@ -126,23 +169,53 @@
   return NO;
 }
 
-- (void)formatValueForEditorField:(EditorField*)field {
-  if (field.autofillUIType == AutofillUITypeProfileHomePhoneWholeNumber) {
-    field.value =
-        base::SysUTF8ToNSString(payments::data_util::FormatPhoneForDisplay(
-            base::SysNSStringToUTF8(field.value),
-            base::SysNSStringToUTF8(self.selectedCountryCode)));
+- (BOOL)shouldFormatValueForAutofillUIType:(AutofillUIType)type {
+  return (type == AutofillUITypeProfileHomePhoneWholeNumber);
+}
+
+- (NSString*)formatValue:(NSString*)value autofillUIType:(AutofillUIType)type {
+  if (type == AutofillUITypeProfileHomePhoneWholeNumber) {
+    return base::SysUTF8ToNSString(autofill::i18n::FormatPhoneForDisplay(
+        base::SysNSStringToUTF8(value),
+        base::SysNSStringToUTF8(self.selectedCountryCode)));
   }
+  return nil;
 }
 
 - (UIImage*)iconIdentifyingEditorField:(EditorField*)field {
   return nil;
 }
 
+#pragma mark - PaymentRequestEditViewControllerValidator
+
+- (NSString*)paymentRequestEditViewController:
+                 (PaymentRequestEditViewController*)controller
+                                validateField:(EditorField*)field {
+  if (field.value.length) {
+    switch (field.autofillUIType) {
+      case AutofillUITypeProfileHomePhoneWholeNumber: {
+        const std::string selectedCountryCode =
+            base::SysNSStringToUTF8(self.selectedCountryCode);
+        if (!autofill::IsPossiblePhoneNumber(
+                base::SysNSStringToUTF16(field.value), selectedCountryCode)) {
+          return l10n_util::GetNSString(
+              IDS_PAYMENTS_PHONE_INVALID_VALIDATION_MESSAGE);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  } else if (field.isRequired) {
+    return l10n_util::GetNSString(
+        IDS_PAYMENTS_FIELD_REQUIRED_VALIDATION_MESSAGE);
+  }
+  return nil;
+}
+
 #pragma mark - RegionDataLoaderConsumer
 
-- (void)regionDataLoaderDidSucceedWithRegions:
-    (NSDictionary<NSString*, NSString*>*)regions {
+- (void)regionDataLoaderDidSucceedWithRegions:(NSArray<RegionData*>*)regions {
   // Enable the previously disabled field.
   self.regionField.enabled = YES;
 
@@ -153,21 +226,28 @@
   // nil.
   self.regionField.value = nil;
   if (self.address) {
-    NSString* region =
+    self.regionField.value = NormalizeRegionName(
         [self fieldValueFromProfile:self.address
-                          fieldType:autofill::ADDRESS_HOME_STATE];
-    if ([regions objectForKey:region]) {
-      self.regionField.value = region;
-    } else if ([[regions allKeysForObject:region] count]) {
-      DCHECK_EQ(1U, [[regions allKeysForObject:region] count]);
-      self.regionField.value = [regions allKeysForObject:region][0];
-    }
+                          fieldType:autofill::ADDRESS_HOME_STATE],
+        regions);
   }
 
   // Notify the view controller asynchronously to allow for the view to update.
   __weak AddressEditMediator* weakSelf = self;
   dispatch_async(dispatch_get_main_queue(), ^{
-    [weakSelf.consumer setOptions:@[ [regions allKeys] ]
+    NSMutableArray<NSString*>* values = [[NSMutableArray alloc] init];
+
+    // If the field contains no value, insert an empty value at the beginning
+    // of the list of options, as the first option is selected when the UI
+    // opens. Otherwise, it would be impossible for the user to select the first
+    // option without selecting another option first.
+    if (!weakSelf.regionField.value)
+      [values addObject:@""];
+
+    for (RegionData* region in regions)
+      [values addObject:region.regionName];
+
+    [weakSelf.consumer setOptions:@[ values ]
                    forEditorField:weakSelf.regionField];
   });
 }
@@ -216,7 +296,7 @@
 
 // Queries the region names based on the selected country code.
 - (void)loadRegions {
-  _regionDataLoader = base::MakeUnique<RegionDataLoader>(self);
+  _regionDataLoader = std::make_unique<RegionDataLoader>(self);
   _regionDataLoader->LoadRegionData(
       base::SysNSStringToUTF8(self.selectedCountryCode),
       _paymentRequest->GetRegionDataLoader());
@@ -255,17 +335,19 @@
         NOTREACHED();
         return @[];
       }
-      AutofillUIType autofillUIType = AutofillUITypeFromAutofillType(
-          autofill::GetFieldTypeFromString(autofillType));
+      autofill::ServerFieldType serverFieldType =
+          autofill::GetFieldTypeFromString(autofillType);
+      AutofillUIType autofillUIType =
+          AutofillUITypeFromAutofillType(serverFieldType);
 
       NSNumber* fieldKey = [NSNumber numberWithInt:autofillUIType];
       EditorField* field = self.fieldsMap[fieldKey];
       if (!field) {
         NSString* value =
-            [self fieldValueFromProfile:self.address
-                              fieldType:autofill::GetFieldTypeFromString(
-                                            autofillType)];
-        BOOL required = autofillUIType != AutofillUITypeProfileCompanyName;
+            [self fieldValueFromProfile:self.address fieldType:serverFieldType];
+
+        BOOL required = autofill::i18n::IsFieldRequired(
+            serverFieldType, base::SysNSStringToUTF8(self.selectedCountryCode));
         field =
             [[EditorField alloc] initWithAutofillUIType:autofillUIType
                                               fieldType:EditorFieldTypeTextField
@@ -332,7 +414,7 @@
     NSString* value =
         self.address
             ? base::SysUTF16ToNSString(
-                  payments::data_util::GetFormattedPhoneNumberForDisplay(
+                  autofill::i18n::GetFormattedPhoneNumberForDisplay(
                       *self.address, _paymentRequest->GetApplicationLocale()))
             : nil;
     field = [[EditorField alloc]

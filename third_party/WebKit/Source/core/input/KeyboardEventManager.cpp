@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "KeyboardEventManager.h"
+#include "core/input/KeyboardEventManager.h"
 
 #include <memory>
 
@@ -141,7 +141,7 @@ KeyboardEventManager::KeyboardEventManager(LocalFrame& frame,
                                            ScrollManager& scroll_manager)
     : frame_(frame), scroll_manager_(scroll_manager) {}
 
-DEFINE_TRACE(KeyboardEventManager) {
+void KeyboardEventManager::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(scroll_manager_);
 }
@@ -197,10 +197,8 @@ WebInputEventResult KeyboardEventManager::KeyEvent(
       Platform::Current()->IsDomKeyForModifier(initial_key_event.dom_key);
 
   std::unique_ptr<UserGestureIndicator> gesture_indicator;
-  if (!is_modifier) {
-    gesture_indicator.reset(new UserGestureIndicator(
-        UserGestureToken::Create(frame_->GetDocument())));
-  }
+  if (!is_modifier)
+    gesture_indicator = Frame::NotifyUserActivation(frame_);
 
   // In IE, access keys are special, they are handled after default keydown
   // processing, but cannot be canceled - this is hard to match.  On Mac OS X,

@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 from py_trace_event import trace_event
+from telemetry.util import wpr_modes
 
 
 class NetworkController(object):
@@ -17,11 +18,17 @@ class NetworkController(object):
   def __init__(self, network_controller_backend):
     self._network_controller_backend = network_controller_backend
 
-  def InitializeIfNeeded(self, use_live_traffic=False):
-    self._network_controller_backend.InitializeIfNeeded(use_live_traffic)
+  @property
+  def is_open(self):
+    return self._network_controller_backend.is_open
 
-  def Open(self, wpr_mode, extra_wpr_args, use_wpr_go=False):
-    self._network_controller_backend.Open(wpr_mode, extra_wpr_args, use_wpr_go)
+  def Open(self, wpr_mode=None):
+    if wpr_mode is None:
+      wpr_mode = wpr_modes.WPR_REPLAY
+    self._network_controller_backend.Open(wpr_mode)
+
+  def Close(self):
+    self._network_controller_backend.Close()
 
   def UpdateTrafficSettings(self,
                             round_trip_latency_ms=None,
@@ -30,16 +37,11 @@ class NetworkController(object):
     self._network_controller_backend.ts_proxy_server.UpdateTrafficSettings(
         round_trip_latency_ms, download_bandwidth_kbps, upload_bandwidth_kbps)
 
-  @property
-  def is_open(self):
-    return self._network_controller_backend.is_open
-
-  def Close(self):
-    self._network_controller_backend.Close()
-
-  def StartReplay(self, archive_path, make_javascript_deterministic=False):
-    self._network_controller_backend.StartReplay(archive_path,
-                                                 make_javascript_deterministic)
+  def StartReplay(self, archive_path, make_javascript_deterministic=False,
+                  extra_wpr_args=None):
+    extra_wpr_args = tuple(extra_wpr_args) if extra_wpr_args else ()
+    self._network_controller_backend.StartReplay(
+        archive_path, make_javascript_deterministic, extra_wpr_args)
 
   def StopReplay(self):
     self._network_controller_backend.StopReplay()

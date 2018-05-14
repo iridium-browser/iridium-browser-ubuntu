@@ -4,18 +4,16 @@
 
 #include "core/editing/VisibleUnits.h"
 
-#include <ostream>  // NOLINT
 #include "bindings/core/v8/V8BindingForTesting.h"
 #include "core/dom/Text.h"
-#include "core/editing/EditingTestBase.h"
+#include "core/editing/PositionWithAffinity.h"
 #include "core/editing/VisiblePosition.h"
-#include "core/html/TextControlElement.h"
+#include "core/editing/testing/EditingTestBase.h"
+#include "core/html/forms/TextControlElement.h"
 #include "core/layout/LayoutTextFragment.h"
-#include "core/layout/line/InlineTextBox.h"
 
 namespace blink {
-
-namespace {
+namespace visible_units_test {
 
 PositionWithAffinity PositionWithAffinityInDOMTree(
     Node& anchor,
@@ -47,17 +45,6 @@ VisiblePositionInFlatTree CreateVisiblePositionInFlatTree(
   return CreateVisiblePosition(PositionInFlatTree(&anchor, offset), affinity);
 }
 
-}  // namespace
-
-std::ostream& operator<<(std::ostream& ostream,
-                         const InlineBoxPosition& inline_box_position) {
-  if (!inline_box_position.inline_box)
-    return ostream << "null";
-  return ostream
-         << inline_box_position.inline_box->GetLineLayoutItem().GetNode() << "@"
-         << inline_box_position.offset_in_box;
-}
-
 class VisibleUnitsTest : public EditingTestBase {};
 
 TEST_F(VisibleUnitsTest, absoluteCaretBoundsOf) {
@@ -79,78 +66,6 @@ TEST_F(VisibleUnitsTest, absoluteCaretBoundsOf) {
 
   EXPECT_FALSE(bounds_in_dom_tree.IsEmpty());
   EXPECT_EQ(bounds_in_dom_tree, bounds_in_flat_tree);
-}
-
-TEST_F(VisibleUnitsTest, associatedLayoutObjectOfFirstLetterPunctuations) {
-  const char* body_content =
-      "<style>p:first-letter {color:red;}</style><p id=sample>(a)bc</p>";
-  SetBodyContent(body_content);
-
-  Node* sample = GetDocument().getElementById("sample");
-  Node* text = sample->firstChild();
-
-  LayoutTextFragment* layout_object0 =
-      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 0));
-  EXPECT_FALSE(layout_object0->IsRemainingTextLayoutObject());
-
-  LayoutTextFragment* layout_object1 =
-      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 1));
-  EXPECT_EQ(layout_object0, layout_object1)
-      << "A character 'a' should be part of first letter.";
-
-  LayoutTextFragment* layout_object2 =
-      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 2));
-  EXPECT_EQ(layout_object0, layout_object2)
-      << "close parenthesis should be part of first letter.";
-
-  LayoutTextFragment* layout_object3 =
-      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 3));
-  EXPECT_TRUE(layout_object3->IsRemainingTextLayoutObject());
-}
-
-TEST_F(VisibleUnitsTest, associatedLayoutObjectOfFirstLetterSplit) {
-  V8TestingScope scope;
-
-  const char* body_content =
-      "<style>p:first-letter {color:red;}</style><p id=sample>abc</p>";
-  SetBodyContent(body_content);
-
-  Node* sample = GetDocument().getElementById("sample");
-  Node* first_letter = sample->firstChild();
-  // Split "abc" into "a" "bc"
-  ToText(first_letter)->splitText(1, ASSERT_NO_EXCEPTION);
-  UpdateAllLifecyclePhases();
-
-  LayoutTextFragment* layout_object0 =
-      ToLayoutTextFragment(AssociatedLayoutObjectOf(*first_letter, 0));
-  EXPECT_FALSE(layout_object0->IsRemainingTextLayoutObject());
-
-  LayoutTextFragment* layout_object1 =
-      ToLayoutTextFragment(AssociatedLayoutObjectOf(*first_letter, 1));
-  EXPECT_EQ(layout_object0, layout_object1);
-}
-
-TEST_F(VisibleUnitsTest,
-       associatedLayoutObjectOfFirstLetterWithTrailingWhitespace) {
-  const char* body_content =
-      "<style>div:first-letter {color:red;}</style><div id=sample>a\n "
-      "<div></div></div>";
-  SetBodyContent(body_content);
-
-  Node* sample = GetDocument().getElementById("sample");
-  Node* text = sample->firstChild();
-
-  LayoutTextFragment* layout_object0 =
-      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 0));
-  EXPECT_FALSE(layout_object0->IsRemainingTextLayoutObject());
-
-  LayoutTextFragment* layout_object1 =
-      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 1));
-  EXPECT_TRUE(layout_object1->IsRemainingTextLayoutObject());
-
-  LayoutTextFragment* layout_object2 =
-      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 2));
-  EXPECT_EQ(layout_object1, layout_object2);
 }
 
 TEST_F(VisibleUnitsTest, caretMinOffset) {
@@ -208,7 +123,7 @@ TEST_F(VisibleUnitsTest, canonicalPositionOfWithHTMLHtmlElement) {
   Node* two = GetDocument().QuerySelector("#two");
   Node* three = GetDocument().QuerySelector("#three");
   Node* four = GetDocument().QuerySelector("#four");
-  Element* html = GetDocument().createElement("html");
+  Element* html = GetDocument().CreateRawElement(HTMLNames::htmlTag);
   // Move two, three and four into second html element.
   html->AppendChild(two);
   html->AppendChild(three);
@@ -277,33 +192,6 @@ TEST_F(VisibleUnitsTest, characterBefore) {
 
   EXPECT_EQ('4', CharacterBefore(CreateVisiblePositionInDOMTree(*five, 0)));
   EXPECT_EQ('1', CharacterBefore(CreateVisiblePositionInFlatTree(*five, 0)));
-}
-
-TEST_F(VisibleUnitsTest, computeInlineBoxPositionBidiIsolate) {
-  // "|" is bidi-level 0, and "foo" and "bar" are bidi-level 2
-  SetBodyContent(
-      "|<span id=sample style='unicode-bidi: isolate;'>foo<br>bar</span>|");
-
-  Element* sample = GetDocument().getElementById("sample");
-  Node* text = sample->firstChild();
-
-  const InlineBoxPosition& actual =
-      ComputeInlineBoxPosition(Position(text, 0), TextAffinity::kDownstream);
-  EXPECT_EQ(ToLayoutText(text->GetLayoutObject())->FirstTextBox(),
-            actual.inline_box);
-}
-
-// http://crbug.com/716093
-TEST_F(VisibleUnitsTest, ComputeInlineBoxPositionMixedEditable) {
-  SetBodyContent(
-      "<div contenteditable id=sample>abc<input contenteditable=false></div>");
-  Element* const sample = GetDocument().getElementById("sample");
-
-  const InlineBoxPosition& actual = ComputeInlineBoxPosition(
-      Position::LastPositionInNode(*sample), TextAffinity::kDownstream);
-  // Should not be in infinite-loop
-  EXPECT_EQ(nullptr, actual.inline_box);
-  EXPECT_EQ(0, actual.offset_in_box);
 }
 
 TEST_F(VisibleUnitsTest, endOfDocument) {
@@ -577,7 +465,6 @@ TEST_F(VisibleUnitsTest, endOfSentence) {
       "<p><i id=three>333</i> <content select=#two></content> <content "
       "select=#one></content> <i id=four>4444</i></p>";
   SetBodyContent(body_content);
-  SetShadowContent(shadow_content, "host");
   ShadowRoot* shadow_root = SetShadowContent(shadow_content, "host");
 
   Node* one = GetDocument().getElementById("one")->firstChild();
@@ -626,71 +513,6 @@ TEST_F(VisibleUnitsTest, endOfSentence) {
   EXPECT_EQ(PositionInFlatTree(four, 4),
             EndOfSentence(CreateVisiblePositionInFlatTree(*four, 1))
                 .DeepEquivalent());
-}
-
-TEST_F(VisibleUnitsTest, endOfWord) {
-  const char* body_content =
-      "<a id=host><b id=one>1</b> <b id=two>22</b></a><i id=three>333</i>";
-  const char* shadow_content =
-      "<p><u id=four>44444</u><content select=#two></content><span id=space> "
-      "</span><content select=#one></content><u id=five>55555</u></p>";
-  SetBodyContent(body_content);
-  ShadowRoot* shadow_root = SetShadowContent(shadow_content, "host");
-
-  Node* one = GetDocument().getElementById("one")->firstChild();
-  Node* two = GetDocument().getElementById("two")->firstChild();
-  Node* three = GetDocument().getElementById("three")->firstChild();
-  Node* four = shadow_root->getElementById("four")->firstChild();
-  Node* five = shadow_root->getElementById("five")->firstChild();
-
-  EXPECT_EQ(
-      Position(three, 3),
-      EndOfWord(CreateVisiblePositionInDOMTree(*one, 0)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(five, 5),
-      EndOfWord(CreateVisiblePositionInFlatTree(*one, 0)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(three, 3),
-      EndOfWord(CreateVisiblePositionInDOMTree(*one, 1)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(five, 5),
-      EndOfWord(CreateVisiblePositionInFlatTree(*one, 1)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(three, 3),
-      EndOfWord(CreateVisiblePositionInDOMTree(*two, 0)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(two, 2),
-      EndOfWord(CreateVisiblePositionInFlatTree(*two, 0)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(three, 3),
-      EndOfWord(CreateVisiblePositionInDOMTree(*two, 1)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(two, 2),
-      EndOfWord(CreateVisiblePositionInFlatTree(*two, 1)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(three, 3),
-      EndOfWord(CreateVisiblePositionInDOMTree(*three, 1)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(three, 3),
-      EndOfWord(CreateVisiblePositionInFlatTree(*three, 1)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(four, 5),
-      EndOfWord(CreateVisiblePositionInDOMTree(*four, 1)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(two, 2),
-      EndOfWord(CreateVisiblePositionInFlatTree(*four, 1)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(five, 5),
-      EndOfWord(CreateVisiblePositionInDOMTree(*five, 1)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(five, 5),
-      EndOfWord(CreateVisiblePositionInFlatTree(*five, 1)).DeepEquivalent());
 }
 
 TEST_F(VisibleUnitsTest, isEndOfEditableOrNonEditableContent) {
@@ -1007,7 +829,7 @@ TEST_F(VisibleUnitsTest, isVisuallyEquivalentCandidateWithHTMLHtmlElement) {
   Node* two = GetDocument().QuerySelector("#two");
   Node* three = GetDocument().QuerySelector("#three");
   Node* four = GetDocument().QuerySelector("#four");
-  Element* html = GetDocument().createElement("html");
+  Element* html = GetDocument().CreateRawElement(HTMLNames::htmlTag);
   // Move two, three and four into second html element.
   html->AppendChild(two);
   html->AppendChild(three);
@@ -1036,28 +858,6 @@ TEST_F(VisibleUnitsTest, isVisuallyEquivalentCandidateWithDocument) {
   UpdateAllLifecyclePhases();
 
   EXPECT_FALSE(IsVisuallyEquivalentCandidate(Position(&GetDocument(), 0)));
-}
-
-TEST_F(VisibleUnitsTest, localCaretRectOfPosition) {
-  const char* body_content =
-      "<p id='host'><b id='one'>1</b></p><b id='two'>22</b>";
-  const char* shadow_content =
-      "<b id='two'>22</b><content select=#one></content><b id='three'>333</b>";
-  SetBodyContent(body_content);
-  SetShadowContent(shadow_content, "host");
-
-  Element* one = GetDocument().getElementById("one");
-
-  const LocalCaretRect& caret_rect_from_dom_tree =
-      LocalCaretRectOfPosition(Position(one->firstChild(), 0));
-
-  const LocalCaretRect& caret_rect_from_flat_tree =
-      LocalCaretRectOfPosition(PositionInFlatTree(one->firstChild(), 0));
-
-  EXPECT_FALSE(caret_rect_from_dom_tree.IsEmpty());
-  EXPECT_EQ(caret_rect_from_dom_tree.layout_object,
-            caret_rect_from_flat_tree.layout_object);
-  EXPECT_EQ(caret_rect_from_dom_tree.rect, caret_rect_from_flat_tree.rect);
 }
 
 TEST_F(VisibleUnitsTest, logicalEndOfLine) {
@@ -1725,12 +1525,12 @@ TEST_F(VisibleUnitsTest, startOfParagraph) {
   // crbug.com/563777. startOfParagraph() unexpectedly returned a null
   // position with nested editable <BODY>s.
   Element* root = GetDocument().documentElement();
-  root->setInnerHTML(
+  root->SetInnerHTMLFromString(
       "<style>* { display:inline-table; }</style><body "
       "contenteditable=true><svg><svg><foreignObject>abc<svg></svg></"
       "foreignObject></svg></svg></body>");
   Element* old_body = GetDocument().body();
-  root->setInnerHTML(
+  root->SetInnerHTMLFromString(
       "<body contenteditable=true><svg><foreignObject><style>def</style>");
   DCHECK_NE(old_body, GetDocument().body());
   Node* foreign_object = GetDocument().body()->firstChild()->firstChild();
@@ -1799,72 +1599,6 @@ TEST_F(VisibleUnitsTest, startOfSentence) {
                 .DeepEquivalent());
 }
 
-TEST_F(VisibleUnitsTest, startOfWord) {
-  const char* body_content =
-      "<a id=host><b id=one>1</b> <b id=two>22</b></a><i id=three>333</i>";
-  const char* shadow_content =
-      "<p><u id=four>44444</u><content select=#two></content><span id=space> "
-      "</span><content select=#one></content><u id=five>55555</u></p>";
-  SetBodyContent(body_content);
-  ShadowRoot* shadow_root = SetShadowContent(shadow_content, "host");
-
-  Node* one = GetDocument().getElementById("one")->firstChild();
-  Node* two = GetDocument().getElementById("two")->firstChild();
-  Node* three = GetDocument().getElementById("three")->firstChild();
-  Node* four = shadow_root->getElementById("four")->firstChild();
-  Node* five = shadow_root->getElementById("five")->firstChild();
-  Node* space = shadow_root->getElementById("space")->firstChild();
-
-  EXPECT_EQ(
-      Position(one, 0),
-      StartOfWord(CreateVisiblePositionInDOMTree(*one, 0)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(space, 1),
-      StartOfWord(CreateVisiblePositionInFlatTree(*one, 0)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(one, 0),
-      StartOfWord(CreateVisiblePositionInDOMTree(*one, 1)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(space, 1),
-      StartOfWord(CreateVisiblePositionInFlatTree(*one, 1)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(one, 0),
-      StartOfWord(CreateVisiblePositionInDOMTree(*two, 0)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(four, 0),
-      StartOfWord(CreateVisiblePositionInFlatTree(*two, 0)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(one, 0),
-      StartOfWord(CreateVisiblePositionInDOMTree(*two, 1)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(four, 0),
-      StartOfWord(CreateVisiblePositionInFlatTree(*two, 1)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(one, 0),
-      StartOfWord(CreateVisiblePositionInDOMTree(*three, 1)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(space, 1),
-      StartOfWord(CreateVisiblePositionInFlatTree(*three, 1)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(four, 0),
-      StartOfWord(CreateVisiblePositionInDOMTree(*four, 1)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(four, 0),
-      StartOfWord(CreateVisiblePositionInFlatTree(*four, 1)).DeepEquivalent());
-
-  EXPECT_EQ(
-      Position(space, 1),
-      StartOfWord(CreateVisiblePositionInDOMTree(*five, 1)).DeepEquivalent());
-  EXPECT_EQ(
-      PositionInFlatTree(space, 1),
-      StartOfWord(CreateVisiblePositionInFlatTree(*five, 1)).DeepEquivalent());
-}
-
 TEST_F(VisibleUnitsTest,
        endsOfNodeAreVisuallyDistinctPositionsWithInvisibleChild) {
   // Repro case of crbug.com/582247
@@ -1925,4 +1659,23 @@ TEST_F(VisibleUnitsTest,
                 two->lastChild(), visible_position, kContentIsEditable));
 }
 
+static unsigned MockBoundarySearch(const UChar*,
+                                   unsigned,
+                                   unsigned,
+                                   BoundarySearchContextAvailability,
+                                   bool&) {
+  return true;
+}
+
+// Regression test for crbug.com/788661
+TEST_F(VisibleUnitsTest, NextBoundaryOfEditableTableWithLeadingSpaceInOutput) {
+  VisiblePosition pos = CreateVisiblePosition(SetCaretTextToBody(
+      // The leading whitespace is necessary for bug repro
+      "<output> <table contenteditable><!--|--></table></output>"));
+  Position result = NextBoundary(pos, MockBoundarySearch);
+  EXPECT_EQ("<output> <table contenteditable>|</table></output>",
+            GetCaretTextFromBody(result));
+}
+
+}  // namespace visible_units_test
 }  // namespace blink

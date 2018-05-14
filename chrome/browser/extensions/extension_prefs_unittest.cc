@@ -127,7 +127,7 @@ class ExtensionPrefsExtensionState : public ExtensionPrefsTest {
   void Initialize() override {
     extension = prefs_.AddExtension("test");
     prefs()->SetExtensionDisabled(extension->id(),
-                                  Extension::DISABLE_USER_ACTION);
+                                  disable_reason::DISABLE_USER_ACTION);
   }
 
   void Verify() override {
@@ -144,7 +144,7 @@ class ExtensionPrefsEscalatePermissions : public ExtensionPrefsTest {
   void Initialize() override {
     extension = prefs_.AddExtension("test");
     prefs()->SetExtensionDisabled(extension->id(),
-                                  Extension::DISABLE_PERMISSIONS_INCREASE);
+                                  disable_reason::DISABLE_PERMISSIONS_INCREASE);
   }
 
   void Verify() override {
@@ -223,7 +223,6 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
       EXPECT_FALSE(granted_permissions->IsEmpty());
       EXPECT_EQ(expected_apis, granted_permissions->apis());
       EXPECT_TRUE(granted_permissions->effective_hosts().is_empty());
-      EXPECT_FALSE(granted_permissions->HasEffectiveFullAccess());
     }
 
     {
@@ -234,7 +233,6 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
       std::unique_ptr<const PermissionSet> granted_permissions =
           prefs()->GetGrantedPermissions(extension_id_);
       EXPECT_FALSE(granted_permissions->IsEmpty());
-      EXPECT_FALSE(granted_permissions->HasEffectiveFullAccess());
       EXPECT_EQ(expected_apis, granted_permissions->apis());
       EXPECT_EQ(ehost_perm_set1_, granted_permissions->explicit_hosts());
       EXPECT_EQ(ehost_perm_set1_, granted_permissions->effective_hosts());
@@ -248,7 +246,6 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
       std::unique_ptr<const PermissionSet> granted_permissions =
           prefs()->GetGrantedPermissions(extension_id_);
       EXPECT_FALSE(granted_permissions->IsEmpty());
-      EXPECT_FALSE(granted_permissions->HasEffectiveFullAccess());
       EXPECT_EQ(expected_apis, granted_permissions->apis());
       EXPECT_EQ(ehost_perm_set1_, granted_permissions->explicit_hosts());
       EXPECT_EQ(shost_perm_set1_, granted_permissions->scriptable_hosts());
@@ -283,7 +280,6 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
     std::unique_ptr<const PermissionSet> permissions =
         prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_TRUE(permissions.get());
-    EXPECT_FALSE(permissions->HasEffectiveFullAccess());
     EXPECT_EQ(api_permissions_, permissions->apis());
     EXPECT_EQ(ehost_permissions_,
               permissions->explicit_hosts());
@@ -343,6 +339,12 @@ class ExtensionPrefsActivePermissions : public ExtensionPrefsTest {
     EXPECT_EQ(active_perms_->apis(), active->apis());
     EXPECT_EQ(active_perms_->explicit_hosts(), active->explicit_hosts());
     EXPECT_EQ(active_perms_->scriptable_hosts(), active->scriptable_hosts());
+    EXPECT_EQ(*active_perms_, *active);
+
+    // Reset the active permissions.
+    active_perms_ = std::make_unique<PermissionSet>();
+    prefs()->SetActivePermissions(extension_id_, *active_perms_);
+    active = prefs()->GetActivePermissions(extension_id_);
     EXPECT_EQ(*active_perms_, *active);
   }
 

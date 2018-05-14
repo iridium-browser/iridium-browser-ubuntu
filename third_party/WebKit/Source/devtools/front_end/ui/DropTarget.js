@@ -7,7 +7,7 @@
 UI.DropTarget = class {
   /**
    * @param {!Element} element
-   * @param {!Array.<string>} transferTypes
+   * @param {!Array<{kind: string, type: !RegExp}>} transferTypes
    * @param {string} messageText
    * @param {function(!DataTransfer)} handleDrop
    */
@@ -41,8 +41,11 @@ UI.DropTarget = class {
    * @return {boolean}
    */
   _hasMatchingType(event) {
-    for (var type of this._transferTypes) {
-      if (event.dataTransfer.types.indexOf(type) !== -1)
+    for (const transferType of this._transferTypes) {
+      const found = Array.from(event.dataTransfer.items).find(item => {
+        return transferType.kind === item.kind && !!transferType.type.exec(item.type);
+      });
+      if (found)
         return true;
     }
     return false;
@@ -59,7 +62,7 @@ UI.DropTarget = class {
     if (this._dragMaskElement)
       return;
     this._dragMaskElement = this._element.createChild('div', '');
-    var shadowRoot = UI.createShadowRootWithCoreStyles(this._dragMaskElement, 'ui/dropTarget.css');
+    const shadowRoot = UI.createShadowRootWithCoreStyles(this._dragMaskElement, 'ui/dropTarget.css');
     shadowRoot.createChild('div', 'drop-target-message').textContent = this._messageText;
     this._dragMaskElement.addEventListener('drop', this._onDrop.bind(this), true);
     this._dragMaskElement.addEventListener('dragleave', this._onDragLeave.bind(this), true);
@@ -89,7 +92,10 @@ UI.DropTarget = class {
   }
 };
 
-UI.DropTarget.Types = {
-  Files: 'Files',
-  URIList: 'text/uri-list'
+UI.DropTarget.Type = {
+  URI: {kind: 'string', type: /text\/uri-list/},
+  Folder: {kind: 'file', type: /$^/},
+  File: {kind: 'file', type: /.*/},
+  WebFile: {kind: 'file', type: /[\w]+/},
+  ImageFile: {kind: 'file', type: /image\/.*/},
 };

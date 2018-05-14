@@ -9,8 +9,8 @@
 
 #include "base/logging.h"
 #include "base/strings/string_util.h"
-#include "content/child/request_extra_data.h"
 #include "content/common/fileapi/file_system_messages.h"
+#include "content/renderer/loader/request_extra_data.h"
 #include "content/renderer/pepper/host_globals.h"
 #include "content/renderer/pepper/pepper_file_ref_renderer_host.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
@@ -176,7 +176,13 @@ bool CreateWebURLRequest(PP_Instance instance,
   if (!data->method.empty())
     dest->SetHTTPMethod(WebString::FromUTF8(data->method));
 
-  dest->SetFirstPartyForCookies(frame->GetDocument().FirstPartyForCookies());
+  dest->SetSiteForCookies(frame->GetDocument().SiteForCookies());
+
+  // Plug-ins should not load via service workers as plug-ins may have their own
+  // origin checking logic that may get confused if service workers respond with
+  // resources from another origin.
+  // https://w3c.github.io/ServiceWorker/#implementer-concerns
+  dest->SetSkipServiceWorker(true);
 
   const std::string& headers = data->headers;
   if (!headers.empty()) {
@@ -225,7 +231,7 @@ bool CreateWebURLRequest(PP_Instance instance,
   }
 
   if (data->has_custom_user_agent || !name_version.empty()) {
-    RequestExtraData* extra_data = new RequestExtraData();
+    auto extra_data = std::make_unique<RequestExtraData>();
     if (data->has_custom_user_agent) {
       extra_data->set_custom_user_agent(
           WebString::FromUTF8(data->custom_user_agent));
@@ -233,7 +239,7 @@ bool CreateWebURLRequest(PP_Instance instance,
     if (!name_version.empty()) {
       extra_data->set_requested_with(WebString::FromUTF8(name_version));
     }
-    dest->SetExtraData(extra_data);
+    dest->SetExtraData(std::move(extra_data));
   }
 
   return true;
@@ -243,7 +249,7 @@ bool URLRequestRequiresUniversalAccess(const URLRequestInfoData& data) {
   return data.has_custom_referrer_url ||
          data.has_custom_content_transfer_encoding ||
          data.has_custom_user_agent ||
-         url::FindAndCompareScheme(data.url, url::kJavaScriptScheme, NULL);
+         url::FindAndCompareScheme(data.url, url::kJavaScriptScheme, nullptr);
 }
 
 }  // namespace content

@@ -56,6 +56,7 @@ class TestSaveCardBubbleController : public SaveCardBubbleController {
     return lines_;
   }
 
+  MOCK_METHOD0(ContinueToRequestCvcStage, void());
   MOCK_CONST_METHOD1(InputCvcIsValid, bool(const base::string16& input_text));
 
   // Testing state.
@@ -130,7 +131,7 @@ class SaveCardBubbleViewTest : public CocoaProfileTest {
   }
 
   void TearDown() override {
-    [browser_window_controller_ close];
+    [[browser_window_controller_ nsWindowController] close];
     CocoaProfileTest::TearDown();
   }
 

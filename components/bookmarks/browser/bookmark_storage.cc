@@ -62,7 +62,8 @@ void LoadCallback(const base::FilePath& path,
     // all bookmarks if some titles have invalid utf.
     JSONFileValueDeserializer deserializer(
         path, base::JSON_REPLACE_INVALID_CHARACTERS);
-    std::unique_ptr<base::Value> root = deserializer.Deserialize(NULL, NULL);
+    std::unique_ptr<base::Value> root =
+        deserializer.Deserialize(nullptr, nullptr);
 
     if (root.get()) {
       // Building the index can take a while, so we do it on the background
@@ -81,6 +82,15 @@ void LoadCallback(const base::FilePath& path,
           codec.model_sync_transaction_version());
       UMA_HISTOGRAM_TIMES("Bookmarks.DecodeTime",
                           TimeTicks::Now() - start_time);
+      int64_t size = 0;
+      if (base::GetFileSize(path, &size)) {
+        int64_t size_kb = size / 1024;
+        // For 0 bookmarks, file size is 700 bytes (less than 1KB)
+        // Bookmarks file size is not expected to exceed 50000KB (50MB) for most
+        // of the users.
+        UMA_HISTOGRAM_CUSTOM_COUNTS("Bookmarks.FileSize", size_kb, 1, 50000,
+                                    25);
+      }
 
       load_index = true;
     }
@@ -110,9 +120,9 @@ void LoadCallback(const base::FilePath& path,
                         TimeTicks::Now() - start_time);
   }
 
-  task_runner->PostTask(FROM_HERE,
-                        base::Bind(&BookmarkStorage::OnLoadFinished, storage,
-                                   base::Passed(&details)));
+  task_runner->PostTask(
+      FROM_HERE, base::BindOnce(&BookmarkStorage::OnLoadFinished, storage,
+                                std::move(details)));
 }
 
 }  // namespace
@@ -168,8 +178,8 @@ void BookmarkStorage::LoadBookmarks(
     const scoped_refptr<base::SequencedTaskRunner>& task_runner) {
   sequenced_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&LoadCallback, writer_.path(), weak_factory_.GetWeakPtr(),
-                 base::Passed(&details), base::RetainedRef(task_runner)));
+      base::BindOnce(&LoadCallback, writer_.path(), weak_factory_.GetWeakPtr(),
+                     std::move(details), base::RetainedRef(task_runner)));
 }
 
 void BookmarkStorage::ScheduleSave() {
@@ -201,7 +211,7 @@ void BookmarkStorage::BookmarkModelDeleted() {
   // the model is gone.
   if (writer_.HasPendingWrite())
     SaveNow();
-  model_ = NULL;
+  model_ = nullptr;
 }
 
 bool BookmarkStorage::SerializeData(std::string* output) {

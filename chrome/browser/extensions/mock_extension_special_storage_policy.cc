@@ -20,6 +20,11 @@ bool MockExtensionSpecialStoragePolicy::IsStorageSessionOnly(
   return false;
 }
 
+bool MockExtensionSpecialStoragePolicy::ShouldDeleteCookieOnExit(
+    const GURL& origin) {
+  return false;
+}
+
 bool MockExtensionSpecialStoragePolicy::HasSessionOnlyOrigins() {
   return false;
 }

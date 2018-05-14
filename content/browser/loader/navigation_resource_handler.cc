@@ -8,8 +8,9 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/optional.h"
+#include "content/browser/loader/navigation_metrics.h"
 #include "content/browser/loader/navigation_url_loader_impl_core.h"
-#include "content/browser/loader/netlog_observer.h"
 #include "content/browser/loader/resource_controller.h"
 #include "content/browser/loader/resource_loader.h"
 #include "content/browser/loader/resource_request_info_impl.h"
@@ -18,20 +19,16 @@
 #include "content/browser/streams/stream_context.h"
 #include "content/public/browser/navigation_data.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
-#include "content/public/browser/ssl_status.h"
 #include "content/public/browser/stream_handle.h"
-#include "content/public/common/resource_response.h"
 #include "net/base/net_errors.h"
+#include "net/http/transport_security_state.h"
+#include "net/ssl/ssl_info.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
+#include "services/network/public/cpp/resource_response.h"
+#include "url/gurl.h"
 
 namespace content {
-
-void NavigationResourceHandler::GetSSLStatusForRequest(
-    const net::SSLInfo& ssl_info,
-    SSLStatus* ssl_status) {
-  DCHECK(ssl_info.cert);
-  *ssl_status = SSLStatus(ssl_info);
-}
 
 NavigationResourceHandler::NavigationResourceHandler(
     net::URLRequest* request,
@@ -48,7 +45,7 @@ NavigationResourceHandler::NavigationResourceHandler(
 
 NavigationResourceHandler::~NavigationResourceHandler() {
   if (core_) {
-    core_->NotifyRequestFailed(false, net::ERR_ABORTED);
+    core_->NotifyRequestFailed(false, net::ERR_ABORTED, base::nullopt);
     DetachFromCore();
   }
 }
@@ -57,7 +54,7 @@ void NavigationResourceHandler::Cancel() {
   if (core_) {
     DetachFromCore();
     if (has_controller()) {
-      CancelAndIgnore();
+      LayeredResourceHandler::Cancel();
     } else {
       OutOfBandCancel(net::ERR_ABORTED, true /* tell_renderer */);
     }
@@ -77,6 +74,9 @@ void NavigationResourceHandler::FollowRedirect() {
 void NavigationResourceHandler::ProceedWithResponse() {
   DCHECK(response_);
   DCHECK(has_controller());
+
+  time_proceed_with_response_ = base::TimeTicks::Now();
+
   // Detach from the loader; at this point, the request is now owned by the
   // StreamHandle sent in OnResponseStarted.
   DetachFromCore();
@@ -86,39 +86,39 @@ void NavigationResourceHandler::ProceedWithResponse() {
 
 void NavigationResourceHandler::OnRequestRedirected(
     const net::RedirectInfo& redirect_info,
-    ResourceResponse* response,
+    network::ResourceResponse* response,
     std::unique_ptr<ResourceController> controller) {
   DCHECK(!has_controller());
 
   // The UI thread already cancelled the navigation. Do not proceed.
   if (!core_) {
-    controller->CancelAndIgnore();
+    controller->Cancel();
     return;
   }
 
-  NetLogObserver::PopulateResponseInfo(request(), response);
   response->head.encoded_data_length = request()->GetTotalReceivedBytes();
   core_->NotifyRequestRedirected(redirect_info, response);
 
   HoldController(std::move(controller));
   response_ = response;
-  redirect_info_ = base::MakeUnique<net::RedirectInfo>(redirect_info);
+  redirect_info_ = std::make_unique<net::RedirectInfo>(redirect_info);
 }
 
 void NavigationResourceHandler::OnResponseStarted(
-    ResourceResponse* response,
+    network::ResourceResponse* response,
     std::unique_ptr<ResourceController> controller) {
   DCHECK(!has_controller());
 
+  time_response_started_ = base::TimeTicks::Now();
+
   // The UI thread already cancelled the navigation. Do not proceed.
   if (!core_) {
-    controller->CancelAndIgnore();
+    controller->Cancel();
     return;
   }
 
   ResourceRequestInfoImpl* info = GetRequestInfo();
 
-  NetLogObserver::PopulateResponseInfo(request(), response);
   response->head.encoded_data_length = request()->raw_header_size();
 
   std::unique_ptr<NavigationData> cloned_data;
@@ -132,24 +132,41 @@ void NavigationResourceHandler::OnResponseStarted(
       cloned_data = navigation_data->Clone();
   }
 
-  SSLStatus ssl_status;
-  if (request()->ssl_info().cert.get())
-    GetSSLStatusForRequest(request()->ssl_info(), &ssl_status);
-
-  core_->NotifyResponseStarted(
-      response, std::move(stream_handle_), ssl_status, std::move(cloned_data),
-      info->GetGlobalRequestID(), info->IsDownload(), info->is_stream());
+  core_->NotifyResponseStarted(response, std::move(stream_handle_),
+                               request()->ssl_info(), std::move(cloned_data),
+                               info->GetGlobalRequestID(), info->IsDownload(),
+                               info->is_stream());
   HoldController(std::move(controller));
   response_ = response;
+}
+
+void NavigationResourceHandler::OnReadCompleted(
+    int bytes_read,
+    std::unique_ptr<ResourceController> controller) {
+  if (!has_completed_one_read_) {
+    has_completed_one_read_ = true;
+    base::TimeTicks time_first_read_completed = base::TimeTicks::Now();
+    RecordNavigationResourceHandlerMetrics(time_response_started_,
+                                           time_proceed_with_response_,
+                                           time_first_read_completed);
+  }
+  next_handler_->OnReadCompleted(bytes_read, std::move(controller));
 }
 
 void NavigationResourceHandler::OnResponseCompleted(
     const net::URLRequestStatus& status,
     std::unique_ptr<ResourceController> controller) {
   if (core_) {
-    DCHECK_NE(net::OK, status.error());
-    core_->NotifyRequestFailed(request()->response_info().was_cached,
-                               status.error());
+    int net_error = status.error();
+    DCHECK_NE(net::OK, net_error);
+
+    base::Optional<net::SSLInfo> ssl_info;
+    if (net::IsCertStatusError(request()->ssl_info().cert_status)) {
+      ssl_info = request()->ssl_info();
+    }
+
+    core_->NotifyRequestFailed(request()->response_info().was_cached, net_error,
+                               ssl_info);
     DetachFromCore();
   }
   next_handler_->OnResponseCompleted(status, std::move(controller));

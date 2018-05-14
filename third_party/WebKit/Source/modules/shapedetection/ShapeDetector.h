@@ -9,26 +9,25 @@
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/imagebitmap/ImageBitmapFactories.h"
 #include "modules/ModulesExport.h"
-#include "modules/canvas2d/CanvasRenderingContext2D.h"
+#include "modules/canvas/canvas2d/CanvasRenderingContext2D.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "skia/public/interfaces/bitmap.mojom-blink.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 namespace blink {
 
-class MODULES_EXPORT ShapeDetector
-    : public GarbageCollectedFinalized<ShapeDetector> {
+class MODULES_EXPORT ShapeDetector : public ScriptWrappable {
  public:
   virtual ~ShapeDetector() = default;
 
   ScriptPromise detect(ScriptState*, const ImageBitmapSourceUnion&);
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
 
  private:
   ScriptPromise DetectShapesOnImageData(ScriptPromiseResolver*, ImageData*);
   ScriptPromise DetectShapesOnImageElement(ScriptPromiseResolver*,
                                            const HTMLImageElement*);
 
-  virtual ScriptPromise DoDetect(ScriptPromiseResolver*,
-                                 skia::mojom::blink::BitmapPtr) = 0;
+  virtual ScriptPromise DoDetect(ScriptPromiseResolver*, SkBitmap) = 0;
 };
 
 }  // namespace blink

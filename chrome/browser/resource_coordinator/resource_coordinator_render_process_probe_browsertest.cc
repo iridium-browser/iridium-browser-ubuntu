@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/test/test_utils.h"
 #include "services/resource_coordinator/public/cpp/resource_coordinator_features.h"
@@ -30,7 +31,7 @@ class MockResourceCoordinatorRenderProcessMetricsHandler
 
   bool HandleMetrics(
       const RenderProcessInfoMap& render_process_info_map) override {
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
     return false;
   }
 
@@ -71,7 +72,7 @@ IN_PROC_BROWSER_TEST_F(ResourceCoordinatorRenderProcessProbeBrowserTest,
 
   resource_coordinator::ResourceCoordinatorRenderProcessProbe probe;
   probe.set_render_process_metrics_handler_for_testing(
-      base::MakeUnique<MockResourceCoordinatorRenderProcessMetricsHandler>());
+      std::make_unique<MockResourceCoordinatorRenderProcessMetricsHandler>());
   set_probe(&probe);
 
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -98,7 +99,8 @@ IN_PROC_BROWSER_TEST_F(ResourceCoordinatorRenderProcessProbeBrowserTest,
   EXPECT_TRUE(browser()
                   ->tab_strip_model()
                   ->GetActiveWebContents()
-                  ->GetRenderProcessHost()
+                  ->GetMainFrame()
+                  ->GetProcess()
                   ->FastShutdownIfPossible());
   StartGatherCycleAndWait();
   EXPECT_EQ(3u, probe.current_gather_cycle_for_testing());

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -28,8 +29,8 @@ from chromite.lib.paygen import urilib
 from chromite.lib.paygen import utils
 
 
-# Needed for the dev.host.lib import below.
-sys.path.insert(0, os.path.join(constants.SOURCE_ROOT, 'src', 'platform'))
+# Needed for the update_payload import below.
+sys.path.insert(0, constants.UPDATE_ENGINE_SCRIPTS_PATH)
 
 
 DESCRIPTION_FILE_VERSION = 2
@@ -99,7 +100,7 @@ class _PaygenPayload(object):
 
     # If we are a bootstrap environment, this import will fail, so don't
     # perform it until we need it.
-    from dev.host.lib import update_payload
+    import update_payload
 
     self._update_payload = update_payload
 
@@ -637,8 +638,10 @@ class _PaygenPayload(object):
     ref_new_root_part = part_files['new_rootfs_part']
     part_files['new_rootfs_part'] += '.test'
     bspatch_path = os.path.join(self.generator_dir, 'bspatch')
+    puffpatch_path = os.path.join(self.generator_dir, 'puffin')
     try:
-      payload.Apply(bspatch_path=bspatch_path, **part_files)
+      payload.Apply(bspatch_path=bspatch_path, puffpatch_path=puffpatch_path,
+                    **part_files)
     except self._update_payload.PayloadError as e:
       raise PayloadVerificationError('Payload failed to apply: %s' % e)
 
@@ -750,16 +753,6 @@ def DefaultPayloadUri(payload, random_str=None):
     raise Error('Unknown image type %s' % type(payload.tgt_image))
 
 
-def SetPayloadUri(payload, uri):
-  """Sets (overrides) the URI in a payload object.
-
-  Args:
-    payload: gspaths.Payload instance.
-    uri: A URI (string) to the payload file.
-  """
-  payload.uri = uri
-
-
 def FillInPayloadUri(payload, random_str=None):
   """Fill in default output URI for a payload if missing.
 
@@ -768,7 +761,7 @@ def FillInPayloadUri(payload, random_str=None):
     random_str: A hook to force a specific random_str. None means generate it.
   """
   if not payload.uri:
-    SetPayloadUri(payload, DefaultPayloadUri(payload, random_str))
+    payload.uri = DefaultPayloadUri(payload, random_str)
 
 
 def _FilterNonPayloadUris(payload_uris):

@@ -16,12 +16,15 @@
 #include "compiler/translator/IntermNode_util.h"
 #include "compiler/translator/IntermTraverse.h"
 #include "compiler/translator/RunAtTheEndOfShader.h"
+#include "compiler/translator/Symbol.h"
 
 namespace sh
 {
 
 namespace
 {
+
+constexpr const ImmutableString kGlFragDataString("gl_FragData");
 
 class GLFragColorBroadcastTraverser : public TIntermTraverser
 {
@@ -53,7 +56,7 @@ class GLFragColorBroadcastTraverser : public TIntermTraverser
 TIntermBinary *GLFragColorBroadcastTraverser::constructGLFragDataNode(int index) const
 {
     TIntermSymbol *symbol =
-        ReferenceBuiltInVariable(TString("gl_FragData"), *mSymbolTable, mShaderVersion);
+        ReferenceBuiltInVariable(kGlFragDataString, *mSymbolTable, mShaderVersion);
     TIntermTyped *indexNode = CreateIndexNode(index);
 
     TIntermBinary *binary = new TIntermBinary(EOpIndexDirect, symbol, indexNode);
@@ -70,7 +73,7 @@ TIntermBinary *GLFragColorBroadcastTraverser::constructGLFragDataAssignNode(int 
 
 void GLFragColorBroadcastTraverser::visitSymbol(TIntermSymbol *node)
 {
-    if (node->getSymbol() == "gl_FragColor")
+    if (node->variable().symbolType() == SymbolType::BuiltIn && node->getName() == "gl_FragColor")
     {
         queueReplacement(constructGLFragDataNode(0), OriginalNode::IS_DROPPED);
         mGLFragColorUsed = true;
@@ -119,7 +122,8 @@ void EmulateGLFragColorBroadcast(TIntermBlock *root,
                 // TODO(zmo): Find a way to keep the original variable information.
                 var.name       = "gl_FragData";
                 var.mappedName = "gl_FragData";
-                var.arraySize  = maxDrawBuffers;
+                var.arraySizes.push_back(maxDrawBuffers);
+                ASSERT(var.arraySizes.size() == 1u);
             }
         }
     }

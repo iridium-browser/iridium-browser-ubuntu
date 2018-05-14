@@ -36,10 +36,7 @@ enum TokenBindingParam {
 };
 
 enum TLS13Variant {
-  kTLS13VariantDraft,
-  kTLS13VariantExperiment,
-  kTLS13VariantRecordTypeExperiment,
-  kTLS13VariantNoSessionIDExperiment,
+  kTLS13VariantDraft23,
 };
 
 // Default minimum protocol version.
@@ -88,11 +85,10 @@ struct NET_EXPORT SSLConfig {
   // local (non-public) trust anchor should be allowed.
   bool sha1_local_anchors_enabled;
 
-  // common_name_fallback_local_anchors_enabled is true if certificates which
-  // only have a commonName in the Subject (i.e. lacking a subjectAltName)
-  // should be checked if the name matches. Only those issued by a local
-  // (non-public) trust anchor will be allowed to match.
-  bool common_name_fallback_local_anchors_enabled;
+  // symantec_enforcement_disabled is true if the policies outlined in
+  // https://security.googleblog.com/2017/09/chromes-plan-to-distrust-symantec.html
+  // should not be enforced.
+  bool symantec_enforcement_disabled;
 
   // The minimum and maximum protocol versions that are enabled.
   // (Use the SSL_PROTOCOL_VERSION_xxx enumerators defined above.)

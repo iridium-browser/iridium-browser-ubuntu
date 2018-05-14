@@ -2,57 +2,59 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <type_traits>
 #include <utility>
 
 namespace base {
 namespace internal {
 
-enum class CopyMode { MoveOnly, Copyable };
-enum class RepeatMode { Once, Repeating };
+template <typename T>
+class PassedWrapper {
+ public:
+  explicit PassedWrapper(T&& scoper) {}
+  PassedWrapper(PassedWrapper&& other) {}
+};
 
 }  // namespace internal
 
-template <typename Signature,
-          internal::CopyMode copy_mode = internal::CopyMode::Copyable,
-          internal::RepeatMode repeat_mode = internal::RepeatMode::Repeating>
-class Callback;
+template <typename T,
+          std::enable_if_t<!std::is_lvalue_reference<T>::value>* = nullptr>
+internal::PassedWrapper<T> Passed(T&& scoper) {
+  return internal::PassedWrapper<T>(std::move(scoper));
+}
+
+template <typename T>
+internal::PassedWrapper<T> Passed(T* scoper) {
+  return internal::PassedWrapper<T>(std::move(*scoper));
+}
 
 template <typename Signature>
-using OnceCallback = Callback<Signature,
-                              internal::CopyMode::MoveOnly,
-                              internal::RepeatMode::Once>;
-template <typename Signature>
-using RepeatingCallback = Callback<Signature,
-                                   internal::CopyMode::Copyable,
-                                   internal::RepeatMode::Repeating>;
+class OnceCallback;
 
-using Closure = Callback<void()>;
+template <typename Signature>
+class RepeatingCallback;
+
+template <typename Signature>
+using Callback = RepeatingCallback<Signature>;
+
 using OnceClosure = OnceCallback<void()>;
 using RepeatingClosure = RepeatingCallback<void()>;
-
-namespace internal {
-
-template <typename From, typename To>
-struct IsCallbackConvertible : std::false_type {};
+using Closure = Callback<void()>;
 
 template <typename Signature>
-struct IsCallbackConvertible<RepeatingCallback<Signature>,
-                             OnceCallback<Signature>> : std::true_type {};
-
-}  // namespace internal
-
-template <typename Signature, internal::CopyMode, internal::RepeatMode>
-class Callback {
+class OnceCallback {
  public:
-  Callback() {}
-  Callback(const Callback&) {}
-  Callback(Callback&&) {}
+  OnceCallback() {}
+  OnceCallback(OnceCallback&&) {}
+  OnceCallback(RepeatingCallback<Signature> other) {}
+};
 
-  template <typename OtherCallback,
-            typename = typename std::enable_if<
-                internal::IsCallbackConvertible<OtherCallback,
-                                                Callback>::value>::type>
-  Callback(OtherCallback other) {}
+template <typename Signature>
+class RepeatingCallback {
+ public:
+  RepeatingCallback() {}
+  RepeatingCallback(const RepeatingCallback&) {}
+  RepeatingCallback(RepeatingCallback&&) {}
 };
 
 template <typename Functor, typename... Args>

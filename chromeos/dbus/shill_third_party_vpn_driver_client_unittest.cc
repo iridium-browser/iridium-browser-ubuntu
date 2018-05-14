@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/bind.h"
@@ -24,8 +25,8 @@ const char kExampleIPConfigPath[] = "/foo/bar";
 
 class MockShillThirdPartyVpnObserver : public ShillThirdPartyVpnObserver {
  public:
-  MockShillThirdPartyVpnObserver() {}
-  ~MockShillThirdPartyVpnObserver() override {}
+  MockShillThirdPartyVpnObserver() = default;
+  ~MockShillThirdPartyVpnObserver() override = default;
   MOCK_METHOD1(OnPacketReceived, void(const std::vector<char>& data));
   MOCK_METHOD1(OnPlatformMessage, void(uint32_t message));
 };
@@ -133,8 +134,8 @@ TEST_F(ShillThirdPartyVpnDriverClientTest, SetParameters) {
 
   base::DictionaryValue parameters;
   const std::string kAddress("1.1.1.1");
-  parameters.SetStringWithoutPathExpansion(
-      shill::kAddressParameterThirdPartyVpn, kAddress);
+  parameters.SetKey(shill::kAddressParameterThirdPartyVpn,
+                    base::Value(kAddress));
 
   EXPECT_CALL(*this, MockSuccessWithWarning(std::string("deadbeef"))).Times(1);
 

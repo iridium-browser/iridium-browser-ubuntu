@@ -24,6 +24,10 @@
 #include "ui/events/android/scroller.h"
 #endif
 
+#if !defined(OS_ANDROID) && defined(CHROMECAST_BUILD)
+#include "ui/events/chromecast/scroller.h"
+#endif
+
 using blink::WebGestureCurve;
 
 namespace ui {
@@ -32,14 +36,13 @@ namespace {
 std::unique_ptr<GestureCurve> CreateDefaultPlatformCurve(
     blink::WebGestureDevice device_source,
     const gfx::Vector2dF& initial_velocity) {
-  DCHECK(!initial_velocity.IsZero());
   if (device_source == blink::kWebGestureDeviceSyntheticAutoscroll) {
-    return base::MakeUnique<FixedVelocityCurve>(initial_velocity,
+    return std::make_unique<FixedVelocityCurve>(initial_velocity,
                                                 base::TimeTicks());
   }
 
-#if defined(OS_ANDROID)
-  auto scroller = base::MakeUnique<Scroller>(Scroller::Config());
+#if defined(OS_ANDROID) || defined(CHROMECAST_BUILD)
+  auto scroller = std::make_unique<Scroller>(Scroller::Config());
   scroller->Fling(0,
                   0,
                   initial_velocity.x(),
@@ -51,7 +54,7 @@ std::unique_ptr<GestureCurve> CreateDefaultPlatformCurve(
                   base::TimeTicks());
   return std::move(scroller);
 #else
-  return base::MakeUnique<FlingCurve>(initial_velocity, base::TimeTicks());
+  return std::make_unique<FlingCurve>(initial_velocity, base::TimeTicks());
 #endif
 }
 
@@ -83,40 +86,15 @@ WebGestureCurveImpl::WebGestureCurveImpl(std::unique_ptr<GestureCurve> curve,
                                          ThreadType animating_thread_type)
     : curve_(std::move(curve)),
       last_offset_(initial_offset),
-      animating_thread_type_(animating_thread_type),
       ticks_since_first_animate_(0),
       first_animate_time_(0),
       last_animate_time_(0) {}
 
-WebGestureCurveImpl::~WebGestureCurveImpl() {
-  if (ticks_since_first_animate_ <= 1)
-    return;
+WebGestureCurveImpl::~WebGestureCurveImpl() {}
 
-  if (last_animate_time_ <= first_animate_time_)
-    return;
-
-  switch (animating_thread_type_) {
-    case ThreadType::MAIN:
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "Event.Frequency.Renderer.FlingAnimate",
-          gfx::ToRoundedInt(ticks_since_first_animate_ /
-                            (last_animate_time_ - first_animate_time_)),
-          1, 240, 120);
-      break;
-    case ThreadType::IMPL:
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "Event.Frequency.RendererImpl.FlingAnimate",
-          gfx::ToRoundedInt(ticks_since_first_animate_ /
-                            (last_animate_time_ - first_animate_time_)),
-          1, 240, 120);
-      break;
-    case ThreadType::TEST:
-      break;
-  }
-}
-
-bool WebGestureCurveImpl::Apply(double time,
-                                blink::WebGestureCurveTarget* target) {
+bool WebGestureCurveImpl::Advance(double time,
+                                  gfx::Vector2dF& out_current_velocity,
+                                  gfx::Vector2dF& out_delta_to_scroll) {
   // If the fling has yet to start, simply return and report true to prevent
   // fling termination.
   if (time <= 0)
@@ -134,23 +112,14 @@ bool WebGestureCurveImpl::Apply(double time,
 
   const base::TimeTicks time_ticks =
       base::TimeTicks() + base::TimeDelta::FromSecondsD(time);
-  gfx::Vector2dF offset, velocity;
+  gfx::Vector2dF offset;
   bool still_active =
-      curve_->ComputeScrollOffset(time_ticks, &offset, &velocity);
+      curve_->ComputeScrollOffset(time_ticks, &offset, &out_current_velocity);
 
-  gfx::Vector2dF delta = offset - last_offset_;
+  out_delta_to_scroll = offset - last_offset_;
   last_offset_ = offset;
 
-  // As successive timestamps can be arbitrarily close (but monotonic!), don't
-  // assume that a zero delta means the curve has terminated.
-  if (delta.IsZero())
-    return still_active;
-
-  // scrollBy() could delete this curve if the animation is over, so don't touch
-  // any member variables after making that call.
-  bool did_scroll = target->ScrollBy(blink::WebFloatSize(delta),
-                                     blink::WebFloatSize(velocity));
-  return did_scroll && still_active;
+  return still_active;
 }
 
 }  // namespace ui

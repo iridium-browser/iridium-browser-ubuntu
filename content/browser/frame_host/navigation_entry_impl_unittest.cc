@@ -16,15 +16,42 @@ using base::ASCIIToUTF16;
 
 namespace content {
 
+namespace {
+
+// A test class for testing SSLStatus user data.
+class TestSSLStatusData : public SSLStatus::UserData {
+ public:
+  TestSSLStatusData() {}
+  ~TestSSLStatusData() override {}
+
+  void set_user_data_flag(bool user_data_flag) {
+    user_data_flag_ = user_data_flag;
+  }
+  bool user_data_flag() { return user_data_flag_; }
+
+  // SSLStatus implementation:
+  std::unique_ptr<SSLStatus::UserData> Clone() override {
+    std::unique_ptr<TestSSLStatusData> cloned =
+        std::make_unique<TestSSLStatusData>();
+    cloned->set_user_data_flag(user_data_flag_);
+    return std::move(cloned);
+  }
+
+ private:
+  bool user_data_flag_ = false;
+  DISALLOW_COPY_AND_ASSIGN(TestSSLStatusData);
+};
+
+}  // namespace
+
 class NavigationEntryTest : public testing::Test {
  public:
-  NavigationEntryTest() : instance_(NULL) {
-  }
+  NavigationEntryTest() : instance_(nullptr) {}
 
   void SetUp() override {
     entry1_.reset(new NavigationEntryImpl);
 
-    instance_ = SiteInstanceImpl::Create(NULL);
+    instance_ = SiteInstanceImpl::Create(nullptr);
     entry2_.reset(new NavigationEntryImpl(
         instance_, GURL("test:url"),
         Referrer(GURL("from"), blink::kWebReferrerPolicyDefault),
@@ -144,10 +171,29 @@ TEST_F(NavigationEntryTest, NavigationEntrySSLStatus) {
   EXPECT_FALSE(!!(content_status & SSLStatus::RAN_INSECURE_CONTENT));
 }
 
+// Tests that SSLStatus user data can be added, retrieved, and copied.
+TEST_F(NavigationEntryTest, SSLStatusUserData) {
+  // Set up an SSLStatus with some user data on it.
+  SSLStatus ssl;
+  ssl.user_data = std::make_unique<TestSSLStatusData>();
+  TestSSLStatusData* ssl_data =
+      static_cast<TestSSLStatusData*>(ssl.user_data.get());
+  ASSERT_TRUE(ssl_data);
+  ssl_data->set_user_data_flag(true);
+
+  // Clone the SSLStatus and test that the user data has been cloned.
+  SSLStatus cloned(ssl);
+  TestSSLStatusData* cloned_ssl_data =
+      static_cast<TestSSLStatusData*>(cloned.user_data.get());
+  ASSERT_TRUE(cloned_ssl_data);
+  EXPECT_TRUE(cloned_ssl_data->user_data_flag());
+  EXPECT_NE(cloned_ssl_data, ssl_data);
+}
+
 // Test other basic accessors
 TEST_F(NavigationEntryTest, NavigationEntryAccessors) {
   // SiteInstance
-  EXPECT_TRUE(entry1_->site_instance() == NULL);
+  EXPECT_TRUE(entry1_->site_instance() == nullptr);
   EXPECT_EQ(instance_, entry2_->site_instance());
   entry1_->set_site_instance(instance_);
   EXPECT_EQ(instance_, entry1_->site_instance());
@@ -224,8 +270,8 @@ TEST_F(NavigationEntryTest, NavigationEntryAccessors) {
   EXPECT_FALSE(entry2_->GetPostData());
   const int length = 11;
   const char* raw_data = "post\n\n\0data";
-  scoped_refptr<ResourceRequestBody> post_data =
-      ResourceRequestBody::CreateFromBytes(raw_data, length);
+  scoped_refptr<network::ResourceRequestBody> post_data =
+      network::ResourceRequestBody::CreateFromBytes(raw_data, length);
   entry2_->SetPostData(post_data);
   EXPECT_EQ(post_data, entry2_->GetPostData());
 }

@@ -7,19 +7,16 @@
 namespace blink {
 
 struct SameSizeAsDisplayItem {
-  virtual ~SameSizeAsDisplayItem() {}  // Allocate vtable pointer.
+  virtual ~SameSizeAsDisplayItem() = default;  // Allocate vtable pointer.
   void* pointer;
   LayoutRect rect;
   LayoutUnit outset;
   int i;
-#ifndef NDEBUG
-  WTF::String debug_string_;
-#endif
 };
 static_assert(sizeof(DisplayItem) == sizeof(SameSizeAsDisplayItem),
               "DisplayItem should stay small");
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
 
 static WTF::String PaintPhaseAsDebugString(int paint_phase) {
   // Must be kept in sync with PaintPhase.
@@ -78,6 +75,7 @@ static WTF::String SpecialDrawingTypeAsDebugString(DisplayItem::Type type) {
     DEBUG_STRING_CASE(DocumentBackground);
     DEBUG_STRING_CASE(DragImage);
     DEBUG_STRING_CASE(DragCaret);
+    DEBUG_STRING_CASE(EmptyContentForFilters);
     DEBUG_STRING_CASE(SVGImage);
     DEBUG_STRING_CASE(LinkHighlight);
     DEBUG_STRING_CASE(ImageAreaFocusRing);
@@ -125,6 +123,13 @@ static String ForeignLayerTypeAsDebugString(DisplayItem::Type type) {
     DEBUG_STRING_CASE(ForeignLayerCanvas);
     DEBUG_STRING_CASE(ForeignLayerPlugin);
     DEBUG_STRING_CASE(ForeignLayerVideo);
+    DEFAULT_CASE;
+  }
+}
+
+static String ScrollHitTestTypeAsDebugString(DisplayItem::Type type) {
+  switch (type) {
+    DEBUG_STRING_CASE(ScrollHitTest);
     DEFAULT_CASE;
   }
 }
@@ -180,6 +185,8 @@ WTF::String DisplayItem::TypeAsDebugString(Type type) {
     return "End" + ClipTypeAsDebugString(endClipTypeToClipType(type));
 
   PAINT_PHASE_BASED_DEBUG_STRINGS(FloatClip);
+  if (type == kFloatClipClipPathBounds)
+    return "FloatClipClipPathBounds";
   if (IsEndFloatClipType(type))
     return "End" + TypeAsDebugString(endFloatClipTypeToFloatClipType(type));
 
@@ -188,11 +195,17 @@ WTF::String DisplayItem::TypeAsDebugString(Type type) {
   if (IsEndScrollType(type))
     return "End" + ScrollTypeAsDebugString(endScrollTypeToScrollType(type));
 
+  PAINT_PHASE_BASED_DEBUG_STRINGS(SVGTransform);
+  PAINT_PHASE_BASED_DEBUG_STRINGS(SVGEffect);
+
   if (IsTransform3DType(type))
     return Transform3DTypeAsDebugString(type);
   if (IsEndTransform3DType(type))
     return "End" + Transform3DTypeAsDebugString(
                        endTransform3DTypeToTransform3DType(type));
+
+  if (IsScrollHitTestType(type))
+    return ScrollHitTestTypeAsDebugString(type);
 
   switch (type) {
     DEBUG_STRING_CASE(BeginFilter);
@@ -209,41 +222,33 @@ WTF::String DisplayItem::TypeAsDebugString(Type type) {
 }
 
 WTF::String DisplayItem::AsDebugString() const {
-  WTF::StringBuilder string_builder;
-  string_builder.Append('{');
-  DumpPropertiesAsDebugString(string_builder);
-  string_builder.Append('}');
-  return string_builder.ToString();
+  auto json = JSONObject::Create();
+  PropertiesAsJSON(*json);
+  return json->ToPrettyJSONString();
 }
 
-void DisplayItem::DumpPropertiesAsDebugString(
-    WTF::StringBuilder& string_builder) const {
-  if (!HasValidClient()) {
-    string_builder.Append("validClient: false, originalDebugString: ");
-    // This is the original debug string which is in json format.
-    string_builder.Append(ClientDebugString());
-    return;
-  }
+void DisplayItem::PropertiesAsJSON(JSONObject& json) const {
+  if (IsTombstone())
+    json.SetBoolean("ISTOMBSTONE", true);
 
-  string_builder.Append(String::Format("client: \"%p", &Client()));
-  if (!ClientDebugString().IsEmpty()) {
-    string_builder.Append(' ');
-    string_builder.Append(ClientDebugString());
-  }
-  string_builder.Append("\", visualRect: \"");
-  string_builder.Append(VisualRect().ToString());
-  string_builder.Append("\", ");
-  if (OutsetForRasterEffects()) {
-    string_builder.Append(
-        String::Format("outset: %f, ", OutsetForRasterEffects().ToFloat()));
-  }
-  string_builder.Append("type: \"");
-  string_builder.Append(TypeAsDebugString(GetType()));
-  string_builder.Append('"');
+  json.SetString("id", GetId().ToString());
+  json.SetString("visualRect", VisualRect().ToString());
+  if (OutsetForRasterEffects())
+    json.SetDouble("outset", OutsetForRasterEffects().ToDouble());
   if (skipped_cache_)
-    string_builder.Append(", skippedCache: true");
+    json.SetBoolean("skippedCache", true);
 }
 
 #endif
+
+String DisplayItem::Id::ToString() const {
+#if DCHECK_IS_ON()
+  return String::Format("%p:%s:%d", &client,
+                        DisplayItem::TypeAsDebugString(type).Ascii().data(),
+                        fragment);
+#else
+  return String::Format("%p:%d:%d", &client, static_cast<int>(type), fragment);
+#endif
+}
 
 }  // namespace blink

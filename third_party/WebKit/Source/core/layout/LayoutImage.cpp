@@ -28,13 +28,13 @@
 
 #include "core/layout/LayoutImage.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/PseudoElement.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLAreaElement.h"
 #include "core/html/HTMLImageElement.h"
+#include "core/html_names.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutView.h"
 #include "core/loader/resource/ImageResourceContent.h"
@@ -57,7 +57,7 @@ LayoutImage* LayoutImage::CreateAnonymous(PseudoElement& pseudo) {
   return image;
 }
 
-LayoutImage::~LayoutImage() {}
+LayoutImage::~LayoutImage() = default;
 
 void LayoutImage::WillBeDestroyed() {
   DCHECK(image_resource_);
@@ -69,9 +69,9 @@ void LayoutImage::StyleDidChange(StyleDifference diff,
                                  const ComputedStyle* old_style) {
   LayoutReplaced::StyleDidChange(diff, old_style);
 
-  bool old_orientation = old_style
-                             ? old_style->RespectImageOrientation()
-                             : ComputedStyle::InitialRespectImageOrientation();
+  bool old_orientation =
+      old_style ? old_style->RespectImageOrientation()
+                : ComputedStyleInitialValues::InitialRespectImageOrientation();
   if (Style() && Style()->RespectImageOrientation() != old_orientation)
     IntrinsicSizeChanged();
 }
@@ -82,7 +82,9 @@ void LayoutImage::SetImageResource(LayoutImageResource* image_resource) {
   image_resource_->Initialize(this);
 }
 
-void LayoutImage::ImageChanged(WrappedImagePtr new_image, const IntRect* rect) {
+void LayoutImage::ImageChanged(WrappedImagePtr new_image,
+                               CanDeferInvalidation defer,
+                               const IntRect* rect) {
   DCHECK(View());
   DCHECK(View()->GetFrameView());
   if (DocumentBeingDestroyed())
@@ -90,7 +92,7 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image, const IntRect* rect) {
 
   if (HasBoxDecorationBackground() || HasMask() || HasShapeOutside() ||
       HasReflection())
-    LayoutReplaced::ImageChanged(new_image, rect);
+    LayoutReplaced::ImageChanged(new_image, defer, rect);
 
   if (!image_resource_)
     return;
@@ -98,9 +100,9 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image, const IntRect* rect) {
   if (new_image != image_resource_->ImagePtr())
     return;
 
-  if (IsGeneratedContent() && isHTMLImageElement(GetNode()) &&
+  if (IsGeneratedContent() && IsHTMLImageElement(GetNode()) &&
       image_resource_->ErrorOccurred()) {
-    toHTMLImageElement(GetNode())->EnsureFallbackForGeneratedContent();
+    ToHTMLImageElement(GetNode())->EnsureFallbackForGeneratedContent();
     return;
   }
 
@@ -122,7 +124,7 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image, const IntRect* rect) {
     did_increment_visually_non_empty_pixel_count_ = true;
   }
 
-  InvalidatePaintAndMarkForLayoutIfNeeded();
+  InvalidatePaintAndMarkForLayoutIfNeeded(defer);
 }
 
 void LayoutImage::UpdateIntrinsicSizeIfNeeded(const LayoutSize& new_size) {
@@ -131,10 +133,11 @@ void LayoutImage::UpdateIntrinsicSizeIfNeeded(const LayoutSize& new_size) {
   SetIntrinsicSize(new_size);
 }
 
-void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded() {
+void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded(
+    CanDeferInvalidation defer) {
   LayoutSize old_intrinsic_size = IntrinsicSize();
   LayoutSize new_intrinsic_size =
-      image_resource_->ImageSize(Style()->EffectiveZoom());
+      RoundedLayoutSize(image_resource_->ImageSize(Style()->EffectiveZoom()));
   UpdateIntrinsicSizeIfNeeded(new_intrinsic_size);
 
   // In the case of generated image content using :before/:after/content, we
@@ -171,7 +174,8 @@ void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded() {
   }
 
   SetShouldDoFullPaintInvalidationWithoutGeometryChange(
-      ImageResource() && ImageResource()->MaybeAnimated()
+      defer == CanDeferInvalidation::kYes && ImageResource() &&
+              ImageResource()->MaybeAnimated()
           ? PaintInvalidationReason::kDelayedFull
           : PaintInvalidationReason::kImage);
 
@@ -211,7 +215,7 @@ void LayoutImage::AreaElementFocusChanged(HTMLAreaElement* area_element) {
   if (area_element->GetPath(this).IsEmpty())
     return;
 
-  InvalidatePaintAndMarkForLayoutIfNeeded();
+  InvalidatePaintAndMarkForLayoutIfNeeded(CanDeferInvalidation::kYes);
 }
 
 bool LayoutImage::ForegroundIsKnownToBeOpaqueInRect(
@@ -219,36 +223,35 @@ bool LayoutImage::ForegroundIsKnownToBeOpaqueInRect(
     unsigned) const {
   if (!image_resource_->HasImage() || image_resource_->ErrorOccurred())
     return false;
-  if (!image_resource_->CachedImage() ||
-      !image_resource_->CachedImage()->IsLoaded())
+  ImageResourceContent* image_content = image_resource_->CachedImage();
+  if (!image_content || !image_content->IsLoaded())
     return false;
   if (!ContentBoxRect().Contains(local_rect))
     return false;
   EFillBox background_clip = Style()->BackgroundClip();
   // Background paints under borders.
-  if (background_clip == kBorderFillBox && Style()->HasBorder() &&
+  if (background_clip == EFillBox::kBorder && Style()->HasBorder() &&
       !Style()->BorderObscuresBackground())
     return false;
   // Background shows in padding area.
-  if ((background_clip == kBorderFillBox ||
-       background_clip == kPaddingFillBox) &&
+  if ((background_clip == EFillBox::kBorder ||
+       background_clip == EFillBox::kPadding) &&
       Style()->HasPadding())
     return false;
   // Object-position may leave parts of the content box empty, regardless of the
   // value of object-fit.
-  if (Style()->ObjectPosition() != ComputedStyle::InitialObjectPosition())
+  if (Style()->ObjectPosition() !=
+      ComputedStyleInitialValues::InitialObjectPosition())
     return false;
   // Object-fit may leave parts of the content box empty.
   EObjectFit object_fit = Style()->GetObjectFit();
   if (object_fit != EObjectFit::kFill && object_fit != EObjectFit::kCover)
     return false;
   // Check for image with alpha.
-  TRACE_EVENT1(
-      TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage", "data",
-      InspectorPaintImageEvent::Data(this, *image_resource_->CachedImage()));
-  return image_resource_->CachedImage()
-      ->GetImage()
-      ->CurrentFrameKnownToBeOpaque(Image::kPreCacheMetadata);
+  TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage",
+               "data", InspectorPaintImageEvent::Data(this, *image_content));
+  return image_content->GetImage()->CurrentFrameKnownToBeOpaque(
+      Image::kPreCacheMetadata);
 }
 
 bool LayoutImage::ComputeBackgroundIsKnownToBeObscured() const {
@@ -267,9 +270,9 @@ LayoutUnit LayoutImage::MinimumReplacedHeight() const {
 }
 
 HTMLMapElement* LayoutImage::ImageMap() const {
-  HTMLImageElement* i =
-      isHTMLImageElement(GetNode()) ? toHTMLImageElement(GetNode()) : 0;
-  return i ? i->GetTreeScope().GetImageMap(i->FastGetAttribute(usemapAttr)) : 0;
+  HTMLImageElement* i = ToHTMLImageElementOrNull(GetNode());
+  return i ? i->GetTreeScope().GetImageMap(i->FastGetAttribute(usemapAttr))
+           : nullptr;
 }
 
 bool LayoutImage::NodeAtPoint(HitTestResult& result,
@@ -297,7 +300,7 @@ void LayoutImage::ComputeIntrinsicSizingInfo(
   if (intrinsic_sizing_info.size.IsEmpty() &&
       image_resource_->ImageHasRelativeSize()) {
     LayoutObject* containing_block =
-        IsOutOfFlowPositioned() ? Container() : this->ContainingBlock();
+        IsOutOfFlowPositioned() ? Container() : ContainingBlock();
     if (containing_block->IsBox()) {
       LayoutBox* box = ToLayoutBox(containing_block);
       intrinsic_sizing_info.size.SetWidth(
@@ -322,16 +325,27 @@ bool LayoutImage::NeedsPreferredWidthsRecalculation() const {
   return EmbeddedReplacedContent();
 }
 
+bool LayoutImage::GetNestedIntrinsicSizingInfo(
+    IntrinsicSizingInfo& intrinsic_sizing_info) const {
+  if (LayoutReplaced* content_layout_object = EmbeddedReplacedContent()) {
+    content_layout_object->ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
+    return true;
+  }
+  return false;
+}
+
 LayoutReplaced* LayoutImage::EmbeddedReplacedContent() const {
   if (!image_resource_)
     return nullptr;
-
   ImageResourceContent* cached_image = image_resource_->CachedImage();
-  if (cached_image && cached_image->GetImage() &&
-      cached_image->GetImage()->IsSVGImage())
-    return ToSVGImage(cached_image->GetImage())->EmbeddedReplacedContent();
-
-  return nullptr;
+  // TODO(japhet): This shouldn't need to worry about cache validation.
+  // https://crbug.com/761026
+  if (!cached_image || cached_image->IsCacheValidator())
+    return nullptr;
+  Image* image = cached_image->GetImage();
+  if (!image->IsSVGImage())
+    return nullptr;
+  return ToSVGImage(image)->EmbeddedReplacedContent();
 }
 
 }  // namespace blink

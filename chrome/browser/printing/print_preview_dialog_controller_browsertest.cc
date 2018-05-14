@@ -94,7 +94,7 @@ class PrintPreviewDialogClonedObserver : public WebContentsObserver {
   void DidCloneToNewWebContents(WebContents* old_web_contents,
                                 WebContents* new_web_contents) override {
     request_preview_dialog_observer_ =
-        base::MakeUnique<RequestPrintPreviewObserver>(new_web_contents);
+        std::make_unique<RequestPrintPreviewObserver>(new_web_contents);
   }
 
   std::unique_ptr<RequestPrintPreviewObserver> request_preview_dialog_observer_;
@@ -192,7 +192,7 @@ class PrintPreviewDialogControllerBrowserTest : public InProcessBrowserTest {
     // RequestPrintPreviewObserver to get messages first for the purposes of
     // this test.
     cloned_tab_observer_ =
-        base::MakeUnique<PrintPreviewDialogClonedObserver>(first_tab);
+        std::make_unique<PrintPreviewDialogClonedObserver>(first_tab);
     chrome::DuplicateTab(browser());
 
     initiator_ = browser()->tab_strip_model()->GetActiveWebContents();
@@ -298,10 +298,10 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
   ChromePluginServiceFilter* filter = ChromePluginServiceFilter::GetInstance();
   content::WebPluginInfo dummy_pdf_plugin_info = pdf_plugin_info;
   EXPECT_FALSE(filter->IsPluginAvailable(
-      initiator()->GetRenderProcessHost()->GetID(),
+      initiator()->GetMainFrame()->GetProcess()->GetID(),
       initiator()->GetMainFrame()->GetRoutingID(),
       browser()->profile()->GetResourceContext(), GURL(),
-      url::Origin(GURL("http://google.com")), &dummy_pdf_plugin_info));
+      url::Origin::Create(GURL("http://google.com")), &dummy_pdf_plugin_info));
 
   PrintPreview();
 
@@ -322,15 +322,14 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
 
     frame_count = 0;
     preview_dialog->ForEachFrame(
-        base::Bind(&CountFrames, base::Unretained(&frame_count)));
+        base::BindRepeating(&CountFrames, base::Unretained(&frame_count)));
   } while (frame_count < kExpectedFrameCount);
   ASSERT_EQ(kExpectedFrameCount, frame_count);
 
   // Make sure all the frames in the dialog has access to the PDF plugin.
-  preview_dialog->ForEachFrame(base::Bind(&CheckPdfPluginForRenderFrame));
+  preview_dialog->ForEachFrame(
+      base::BindRepeating(&CheckPdfPluginForRenderFrame));
 }
-
-#if !defined(OS_ANDROID)
 
 namespace {
 
@@ -395,5 +394,3 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
 }
 
 }  // namespace
-
-#endif  // !defined(OS_ANDROID)

@@ -7,7 +7,6 @@
 
 #include "base/macros.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/engagement/site_engagement_metrics.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -144,14 +143,14 @@ class SiteEngagementService::Helper
     void TrackingStarted() override;
 
     // content::WebContentsObserver overrides.
+    void DidFinishNavigation(content::NavigationHandle* handle) override;
     void MediaStartedPlaying(const MediaPlayerInfo& media_info,
                              const MediaPlayerId& id) override;
-    void MediaStoppedPlaying(const MediaPlayerInfo& media_info,
-                             const MediaPlayerId& id) override;
-    void WasShown() override;
-    void WasHidden() override;
+    void MediaStoppedPlaying(
+        const MediaPlayerInfo& media_info,
+        const MediaPlayerId& id,
+        WebContentsObserver::MediaStoppedReason reason) override;
 
-    bool is_hidden_;
     std::vector<MediaPlayerId> active_media_players_;
 
     DISALLOW_COPY_AND_ASSIGN(MediaTracker);
@@ -163,7 +162,7 @@ class SiteEngagementService::Helper
 
   // Ask the SiteEngagementService to record engagement via user input at the
   // current WebContents URL.
-  void RecordUserInput(SiteEngagementMetrics::EngagementType type);
+  void RecordUserInput(SiteEngagementService::EngagementType type);
 
   // Ask the SiteEngagementService to record engagement via media playing at the
   // current WebContents URL.
@@ -180,8 +179,7 @@ class SiteEngagementService::Helper
   // content::WebContentsObserver overrides.
   void DidFinishNavigation(content::NavigationHandle* handle) override;
   void ReadyToCommitNavigation(content::NavigationHandle* handle) override;
-  void WasShown() override;
-  void WasHidden() override;
+  void OnVisibilityChanged(content::Visibility visibility) override;
 
   InputTracker input_tracker_;
   MediaTracker media_tracker_;

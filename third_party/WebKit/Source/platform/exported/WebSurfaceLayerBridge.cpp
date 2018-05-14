@@ -4,12 +4,17 @@
 
 #include "public/platform/WebSurfaceLayerBridge.h"
 
+#include <memory>
 #include "third_party/WebKit/Source/platform/graphics/SurfaceLayerBridge.h"
 
 namespace blink {
 
-WebSurfaceLayerBridge* WebSurfaceLayerBridge::Create() {
-  return new SurfaceLayerBridge(nullptr, nullptr);
+std::unique_ptr<WebSurfaceLayerBridge> WebSurfaceLayerBridge::Create(
+    WebLayerTreeView* layer_tree_view,
+    WebSurfaceLayerBridgeObserver* observer) {
+  return std::make_unique<SurfaceLayerBridge>(layer_tree_view, observer);
 }
+
+WebSurfaceLayerBridge::~WebSurfaceLayerBridge() = default;
 
 }  // namespace blink

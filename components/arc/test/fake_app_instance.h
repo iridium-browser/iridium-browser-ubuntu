@@ -79,43 +79,51 @@ class FakeAppInstance : public mojom::AppInstance {
   ~FakeAppInstance() override;
 
   // mojom::AppInstance overrides:
-  void Init(mojom::AppHostPtr host_ptr) override;
+  void InitDeprecated(mojom::AppHostPtr host_ptr) override;
+  void Init(mojom::AppHostPtr host_ptr, InitCallback callback) override;
   void RefreshAppList() override;
+  void LaunchAppDeprecated(const std::string& package_name,
+                           const std::string& activity,
+                           const base::Optional<gfx::Rect>& dimension) override;
   void LaunchApp(const std::string& package_name,
                  const std::string& activity,
-                 const base::Optional<gfx::Rect>& dimension) override;
+                 int64_t display_id) override;
   void RequestAppIcon(const std::string& package_name,
                       const std::string& activity,
                       mojom::ScaleFactor scale_factor) override;
-  void LaunchIntent(
+  void LaunchIntentDeprecated(
       const std::string& intent_uri,
       const base::Optional<gfx::Rect>& dimension_on_screen) override;
+  void LaunchIntent(const std::string& intent_uri, int64_t display_id) override;
   void RequestIcon(const std::string& icon_resource_id,
                    mojom::ScaleFactor scale_factor,
-                   const RequestIconCallback& callback) override;
+                   RequestIconCallback callback) override;
   void RemoveCachedIcon(const std::string& icon_resource_id) override;
-  void CanHandleResolution(
+  void CanHandleResolutionDeprecated(
       const std::string& package_name,
       const std::string& activity,
       const gfx::Rect& dimension,
-      const CanHandleResolutionCallback& callback) override;
+      CanHandleResolutionDeprecatedCallback callback) override;
   void UninstallPackage(const std::string& package_name) override;
-  void GetTaskInfo(int32_t task_id,
-                   const GetTaskInfoCallback& callback) override;
+  void GetTaskInfo(int32_t task_id, GetTaskInfoCallback callback) override;
   void SetTaskActive(int32_t task_id) override;
   void CloseTask(int32_t task_id) override;
   void ShowPackageInfoDeprecated(const std::string& package_name,
                                  const gfx::Rect& dimension_on_screen) override;
+  void ShowPackageInfoOnPageDeprecated(
+      const std::string& package_name,
+      mojom::ShowPackageInfoPage page,
+      const gfx::Rect& dimension_on_screen) override;
   void ShowPackageInfoOnPage(const std::string& package_name,
                              mojom::ShowPackageInfoPage page,
-                             const gfx::Rect& dimension_on_screen) override;
+                             int64_t display_id) override;
   void SetNotificationsEnabled(const std::string& package_name,
                                bool enabled) override;
   void InstallPackage(mojom::ArcPackageInfoPtr arcPackageInfo) override;
   void GetRecentAndSuggestedAppsFromPlayStore(
       const std::string& query,
       int32_t max_results,
-      const GetRecentAndSuggestedAppsFromPlayStoreCallback& callback) override;
+      GetRecentAndSuggestedAppsFromPlayStoreCallback callback) override;
   void StartPaiFlow() override;
 
   // Methods to reply messages.
@@ -191,6 +199,10 @@ class FakeAppInstance : public mojom::AppInstance {
   std::vector<std::unique_ptr<ShortcutIconRequest>> shortcut_icon_requests_;
   // Keeps information for running tasks.
   TaskIdToInfo task_id_to_info_;
+
+  // Keeps the binding alive so that calls to this class can be correctly
+  // routed.
+  mojom::AppHostPtr host_;
 
   bool GetFakeIcon(mojom::ScaleFactor scale_factor,
                    std::string* png_data_as_string);

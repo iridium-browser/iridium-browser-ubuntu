@@ -13,14 +13,16 @@
 #include <sys/socket.h>
 
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/debug/alias.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/rand_util.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
@@ -34,23 +36,27 @@
 #include "net/log/net_log_source_type.h"
 #include "net/socket/socket_descriptor.h"
 #include "net/socket/socket_options.h"
+#include "net/socket/socket_tag.h"
 #include "net/socket/udp_net_log_parameters.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 #if defined(OS_ANDROID)
 #include <dlfcn.h>
-// This was added in Lollipop to dlfcn.h
-#define RTLD_NOLOAD 4
 #include "base/android/build_info.h"
 #include "base/native_library.h"
 #include "base/strings/utf_string_conversions.h"
-#endif
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 // This was needed to debug crbug.com/640281.
 // TODO(zhongyi): Remove once the bug is resolved.
 #include <dlfcn.h>
 #include <pthread.h>
-#endif
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+
+#if defined(OS_FUCHSIA)
+#include <netstack/netconfig.h>
+#endif  // defined(OS_FUCHSIA)
 
 namespace net {
 
@@ -59,15 +65,26 @@ namespace {
 const int kBindRetries = 10;
 const int kPortStart = 1024;
 const int kPortEnd = 65535;
+const int kActivityMonitorBytesThreshold = 65535;
+const int kActivityMonitorMinimumSamplesForThroughputEstimate = 2;
+const base::TimeDelta kActivityMonitorMsThreshold =
+    base::TimeDelta::FromMilliseconds(100);
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_FUCHSIA)
 
-// Returns IPv4 address in network order.
+// When enabling multicast using setsockopt(IP_MULTICAST_IF) MacOS and Fuchsia
+// require passing IPv4 address instead of interface index. This function
+// resolves IPv4 address by interface index. The |address| is returned in
+// network order.
 int GetIPv4AddressFromIndex(int socket, uint32_t index, uint32_t* address) {
   if (!index) {
     *address = htonl(INADDR_ANY);
     return OK;
   }
+
+  sockaddr_in* result = nullptr;
+
+#if defined(OS_MACOSX)
   ifreq ifr;
   ifr.ifr_addr.sa_family = AF_INET;
   if (!if_indextoname(index, ifr.ifr_name))
@@ -75,11 +92,29 @@ int GetIPv4AddressFromIndex(int socket, uint32_t index, uint32_t* address) {
   int rv = ioctl(socket, SIOCGIFADDR, &ifr);
   if (rv == -1)
     return MapSystemError(errno);
-  *address = reinterpret_cast<sockaddr_in*>(&ifr.ifr_addr)->sin_addr.s_addr;
+  result = reinterpret_cast<sockaddr_in*>(&ifr.ifr_addr);
+#elif defined(OS_FUCHSIA)
+  netc_get_if_info_t netconfig;
+  int size = ioctl_netc_get_if_info(socket, &netconfig);
+  if (size < 0)
+    return MapSystemError(errno);
+  for (size_t i = 0; i < netconfig.n_info; ++i) {
+    netc_if_info_t* interface = netconfig.info + i;
+    if (interface->index == index && interface->addr.ss_family == AF_INET) {
+      result = reinterpret_cast<sockaddr_in*>(&(interface->addr));
+      break;
+    }
+  }
+#endif
+
+  if (!result)
+    return ERR_ADDRESS_INVALID;
+
+  *address = result->sin_addr.s_addr;
   return OK;
 }
 
-#endif  // OS_MACOSX
+#endif  // OS_MACOSX || OS_FUCHSIA
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 
@@ -171,7 +206,8 @@ UDPSocketPosix::UDPSocketPosix(DatagramSocket::BindType bind_type,
       recv_from_address_(NULL),
       write_buf_len_(0),
       net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::UDP_SOCKET)),
-      bound_network_(NetworkChangeNotifier::kInvalidNetworkHandle) {
+      bound_network_(NetworkChangeNotifier::kInvalidNetworkHandle),
+      experimental_recv_optimization_enabled_(false) {
   net_log_.BeginEvent(NetLogEventType::SOCKET_ALIVE,
                       source.ToEventParametersCallback());
   if (bind_type == DatagramSocket::RANDOM_BIND)
@@ -201,7 +237,64 @@ int UDPSocketPosix::Open(AddressFamily address_family) {
     Close();
     return err;
   }
+  if (tag_ != SocketTag())
+    tag_.Apply(socket_);
   return OK;
+}
+
+void UDPSocketPosix::ActivityMonitor::Increment(uint32_t bytes) {
+  if (!bytes)
+    return;
+  bool timer_running = timer_.IsRunning();
+  bytes_ += bytes;
+  increments_++;
+  // Allow initial updates to make sure throughput estimator has
+  // enough samples to generate a value. (low water mark)
+  // Or once the bytes threshold has be met. (high water mark)
+  if (increments_ < kActivityMonitorMinimumSamplesForThroughputEstimate ||
+      bytes_ > kActivityMonitorBytesThreshold) {
+    Update();
+    if (timer_running)
+      timer_.Reset();
+  }
+  if (!timer_running) {
+    timer_.Start(FROM_HERE, kActivityMonitorMsThreshold, this,
+                 &UDPSocketPosix::ActivityMonitor::OnTimerFired);
+  }
+}
+
+void UDPSocketPosix::ActivityMonitor::Update() {
+  if (!bytes_)
+    return;
+  NetworkActivityMonitorIncrement(bytes_);
+  bytes_ = 0;
+}
+
+void UDPSocketPosix::ActivityMonitor::OnClose() {
+  timer_.Stop();
+  Update();
+}
+
+void UDPSocketPosix::ActivityMonitor::OnTimerFired() {
+  increments_ = 0;
+  if (!bytes_) {
+    // Can happen if the socket has been idle and have had no
+    // increments since the timer previously fired.  Don't bother
+    // keeping the timer running in this case.
+    timer_.Stop();
+    return;
+  }
+  Update();
+}
+
+void UDPSocketPosix::SentActivityMonitor::NetworkActivityMonitorIncrement(
+    uint32_t bytes) {
+  NetworkActivityMonitor::GetInstance()->IncrementBytesSent(bytes);
+}
+
+void UDPSocketPosix::ReceivedActivityMonitor::NetworkActivityMonitorIncrement(
+    uint32_t bytes) {
+  NetworkActivityMonitor::GetInstance()->IncrementBytesReceived(bytes);
 }
 
 void UDPSocketPosix::Close() {
@@ -234,6 +327,10 @@ void UDPSocketPosix::Close() {
   socket_ = kInvalidSocket;
   addr_family_ = 0;
   is_connected_ = false;
+  tag_ = SocketTag();
+
+  sent_activity_monitor_.OnClose();
+  received_activity_monitor_.OnClose();
 }
 
 int UDPSocketPosix::GetPeerAddress(IPEndPoint* address) const {
@@ -316,9 +413,11 @@ int UDPSocketPosix::RecvFrom(IOBuffer* buf,
   return ERR_IO_PENDING;
 }
 
-int UDPSocketPosix::Write(IOBuffer* buf,
-                          int buf_len,
-                          const CompletionCallback& callback) {
+int UDPSocketPosix::Write(
+    IOBuffer* buf,
+    int buf_len,
+    const CompletionCallback& callback,
+    const NetworkTrafficAnnotationTag& traffic_annotation) {
   return SendToOrWrite(buf, buf_len, NULL, callback);
 }
 
@@ -369,6 +468,8 @@ int UDPSocketPosix::Connect(const IPEndPoint& address) {
   int rv = InternalConnect(address);
   net_log_.EndEventWithNetErrorCode(NetLogEventType::UDP_CONNECT, rv);
   is_connected_ = (rv == OK);
+  if (rv != OK)
+    tag_ = SocketTag();
   return rv;
 }
 
@@ -389,7 +490,7 @@ int UDPSocketPosix::InternalConnect(const IPEndPoint& address) {
   // else connect() does the DatagramSocket::DEFAULT_BIND
 
   if (rv < 0) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Net.UdpSocketRandomBindErrorCode", -rv);
+    base::UmaHistogramSparse("Net.UdpSocketRandomBindErrorCode", -rv);
     return rv;
   }
 
@@ -587,20 +688,18 @@ void UDPSocketPosix::DoReadCallback(int rv) {
   DCHECK_NE(rv, ERR_IO_PENDING);
   DCHECK(!read_callback_.is_null());
 
-  // since Run may result in Read being called, clear read_callback_ up front.
-  CompletionCallback c = read_callback_;
-  read_callback_.Reset();
-  c.Run(rv);
+  // Since Run() may result in Read() being called,
+  // clear |read_callback_| up front.
+  base::ResetAndReturn(&read_callback_).Run(rv);
 }
 
 void UDPSocketPosix::DoWriteCallback(int rv) {
   DCHECK_NE(rv, ERR_IO_PENDING);
   DCHECK(!write_callback_.is_null());
 
-  // since Run may result in Write being called, clear write_callback_ up front.
-  CompletionCallback c = write_callback_;
-  write_callback_.Reset();
-  c.Run(rv);
+  // Since Run() may result in Write() being called,
+  // clear |write_callback_| up front.
+  base::ResetAndReturn(&write_callback_).Run(rv);
 }
 
 void UDPSocketPosix::DidCompleteRead() {
@@ -619,7 +718,7 @@ void UDPSocketPosix::DidCompleteRead() {
 void UDPSocketPosix::LogRead(int result,
                              const char* bytes,
                              socklen_t addr_len,
-                             const sockaddr* addr) const {
+                             const sockaddr* addr) {
   if (result < 0) {
     net_log_.AddEventWithNetErrorCode(NetLogEventType::UDP_RECEIVE_ERROR,
                                       result);
@@ -637,7 +736,7 @@ void UDPSocketPosix::LogRead(int result,
                           result, bytes, is_address_valid ? &address : NULL));
   }
 
-  NetworkActivityMonitor::GetInstance()->IncrementBytesReceived(result);
+  received_activity_monitor_.Increment(result);
 }
 
 void UDPSocketPosix::DidCompleteWrite() {
@@ -655,7 +754,7 @@ void UDPSocketPosix::DidCompleteWrite() {
 
 void UDPSocketPosix::LogWrite(int result,
                               const char* bytes,
-                              const IPEndPoint* address) const {
+                              const IPEndPoint* address) {
   if (result < 0) {
     net_log_.AddEventWithNetErrorCode(NetLogEventType::UDP_SEND_ERROR, result);
     return;
@@ -667,29 +766,78 @@ void UDPSocketPosix::LogWrite(int result,
         CreateNetLogUDPDataTranferCallback(result, bytes, address));
   }
 
-  NetworkActivityMonitor::GetInstance()->IncrementBytesSent(result);
+  sent_activity_monitor_.Increment(result);
 }
 
 int UDPSocketPosix::InternalRecvFrom(IOBuffer* buf,
                                      int buf_len,
                                      IPEndPoint* address) {
+  // If the socket is connected and the remote address is known
+  // use the more efficient method that uses read() instead of recvmsg().
+  if (experimental_recv_optimization_enabled_ && is_connected_ &&
+      remote_address_) {
+    return InternalRecvFromConnectedSocket(buf, buf_len, address);
+  }
+  return InternalRecvFromNonConnectedSocket(buf, buf_len, address);
+}
+
+int UDPSocketPosix::InternalRecvFromConnectedSocket(IOBuffer* buf,
+                                                    int buf_len,
+                                                    IPEndPoint* address) {
+  DCHECK(is_connected_);
+  DCHECK(remote_address_);
   int bytes_transferred;
-  int flags = 0;
+  bytes_transferred = HANDLE_EINTR(read(socket_, buf->data(), buf_len));
+  int result;
+
+  if (bytes_transferred < 0) {
+    result = MapSystemError(errno);
+  } else if (bytes_transferred == buf_len) {
+    result = ERR_MSG_TOO_BIG;
+  } else {
+    result = bytes_transferred;
+    if (address)
+      *address = *remote_address_.get();
+  }
+
+  if (result != ERR_IO_PENDING) {
+    SockaddrStorage sock_addr;
+    bool success =
+        remote_address_->ToSockAddr(sock_addr.addr, &sock_addr.addr_len);
+    DCHECK(success);
+    LogRead(result, buf->data(), sock_addr.addr_len, sock_addr.addr);
+  }
+  return result;
+}
+
+int UDPSocketPosix::InternalRecvFromNonConnectedSocket(IOBuffer* buf,
+                                                       int buf_len,
+                                                       IPEndPoint* address) {
+  int bytes_transferred;
+
+  struct iovec iov = {};
+  iov.iov_base = buf->data();
+  iov.iov_len = buf_len;
+
+  struct msghdr msg = {};
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
 
   SockaddrStorage storage;
+  msg.msg_name = storage.addr;
+  msg.msg_namelen = storage.addr_len;
 
-  bytes_transferred =
-      HANDLE_EINTR(recvfrom(socket_,
-                            buf->data(),
-                            buf_len,
-                            flags,
-                            storage.addr,
-                            &storage.addr_len));
+  bytes_transferred = HANDLE_EINTR(recvmsg(socket_, &msg, 0));
+  storage.addr_len = msg.msg_namelen;
   int result;
   if (bytes_transferred >= 0) {
-    result = bytes_transferred;
-    if (address && !address->FromSockAddr(storage.addr, storage.addr_len))
-      result = ERR_ADDRESS_INVALID;
+    if (msg.msg_flags & MSG_TRUNC) {
+      result = ERR_MSG_TOO_BIG;
+    } else {
+      result = bytes_transferred;
+      if (address && !address->FromSockAddr(storage.addr, storage.addr_len))
+        result = ERR_ADDRESS_INVALID;
+    }
   } else {
     result = MapSystemError(errno);
   }
@@ -760,17 +908,17 @@ int UDPSocketPosix::SetMulticastOptions() {
   if (multicast_interface_ != 0) {
     switch (addr_family_) {
       case AF_INET: {
-#if !defined(OS_MACOSX)
-        ip_mreqn mreq;
-        mreq.imr_ifindex = multicast_interface_;
-        mreq.imr_address.s_addr = htonl(INADDR_ANY);
-#else
+#if defined(OS_MACOSX) || defined(OS_FUCHSIA)
         ip_mreq mreq;
         int error = GetIPv4AddressFromIndex(socket_, multicast_interface_,
                                             &mreq.imr_interface.s_addr);
         if (error != OK)
           return error;
-#endif
+#else   //  defined(OS_MACOSX) || defined(OS_FUCHSIA)
+        ip_mreqn mreq;
+        mreq.imr_ifindex = multicast_interface_;
+        mreq.imr_address.s_addr = htonl(INADDR_ANY);
+#endif  //  !defined(OS_MACOSX) && !defined(OS_FUCHSIA)
         int rv = setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_IF,
                             reinterpret_cast<const char*>(&mreq), sizeof(mreq));
         if (rv)
@@ -802,7 +950,6 @@ int UDPSocketPosix::DoBind(const IPEndPoint& address) {
   if (rv == 0)
     return OK;
   int last_error = errno;
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.UdpSocketBindErrorFromPosix", last_error);
 #if defined(OS_CHROMEOS)
   if (last_error == EINVAL)
     return ERR_ADDRESS_IN_USE;
@@ -835,16 +982,16 @@ int UDPSocketPosix::JoinGroup(const IPAddress& group_address) const {
       if (addr_family_ != AF_INET)
         return ERR_ADDRESS_INVALID;
 
-#if !defined(OS_MACOSX)
-      ip_mreqn mreq;
-      mreq.imr_ifindex = multicast_interface_;
-      mreq.imr_address.s_addr = htonl(INADDR_ANY);
-#else
+#if defined(OS_MACOSX) || defined(OS_FUCHSIA)
       ip_mreq mreq;
       int error = GetIPv4AddressFromIndex(socket_, multicast_interface_,
                                           &mreq.imr_interface.s_addr);
       if (error != OK)
         return error;
+#else
+      ip_mreqn mreq;
+      mreq.imr_ifindex = multicast_interface_;
+      mreq.imr_address.s_addr = htonl(INADDR_ANY);
 #endif
       memcpy(&mreq.imr_multiaddr, group_address.bytes().data(),
              IPAddress::kIPv4AddressSize);
@@ -884,7 +1031,15 @@ int UDPSocketPosix::LeaveGroup(const IPAddress& group_address) const {
       if (addr_family_ != AF_INET)
         return ERR_ADDRESS_INVALID;
       ip_mreq mreq;
+#if defined(OS_FUCHSIA)
+      // Fuchsia currently doesn't support INADDR_ANY in ip_mreq.imr_interface.
+      int error = GetIPv4AddressFromIndex(socket_, multicast_interface_,
+                                          &mreq.imr_interface.s_addr);
+      if (error != OK)
+        return error;
+#else   // defined(OS_FUCHSIA)
       mreq.imr_interface.s_addr = INADDR_ANY;
+#endif  // !defined(OS_FUCHSIA)
       memcpy(&mreq.imr_multiaddr, group_address.bytes().data(),
              IPAddress::kIPv4AddressSize);
       int rv = setsockopt(socket_, IPPROTO_IP, IP_DROP_MEMBERSHIP,
@@ -897,7 +1052,11 @@ int UDPSocketPosix::LeaveGroup(const IPAddress& group_address) const {
       if (addr_family_ != AF_INET6)
         return ERR_ADDRESS_INVALID;
       ipv6_mreq mreq;
+#if defined(OS_FUCHSIA)
+      mreq.ipv6mr_interface = multicast_interface_;
+#else   // defined(OS_FUCHSIA)
       mreq.ipv6mr_interface = 0;  // 0 indicates default multicast interface.
+#endif  // !defined(OS_FUCHSIA)
       memcpy(&mreq.ipv6mr_multiaddr, group_address.bytes().data(),
              IPAddress::kIPv6AddressSize);
       int rv = setsockopt(socket_, IPPROTO_IPV6, IPV6_LEAVE_GROUP,
@@ -964,6 +1123,14 @@ int UDPSocketPosix::SetDiffServCodePoint(DiffServCodePoint dscp) {
 
 void UDPSocketPosix::DetachFromThread() {
   DETACH_FROM_THREAD(thread_checker_);
+}
+
+void UDPSocketPosix::ApplySocketTag(const SocketTag& tag) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  if (socket_ != kInvalidSocket && tag != tag_) {
+    tag.Apply(socket_);
+  }
+  tag_ = tag;
 }
 
 }  // namespace net

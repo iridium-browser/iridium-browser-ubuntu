@@ -2,10 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import weakref
-
 from battor import battor_wrapper
-from telemetry.internal import forwarders
 from telemetry.internal.forwarders import do_nothing_forwarder
 from telemetry.internal.platform import network_controller_backend
 from telemetry.internal.platform import tracing_controller_backend
@@ -28,7 +25,6 @@ class PlatformBackend(object):
     if device and not self.SupportsDevice(device):
       raise ValueError('Unsupported device: %s' % device.name)
     self._platform = None
-    self._running_browser_backends = weakref.WeakSet()
     self._network_controller_backend = None
     self._tracing_controller_backend = None
     self._forwarder_factory = None
@@ -68,10 +64,6 @@ class PlatformBackend(object):
     return self._platform.is_host_platform
 
   @property
-  def running_browser_backends(self):
-    return list(self._running_browser_backends)
-
-  @property
   def network_controller_backend(self):
     return self._network_controller_backend
 
@@ -82,11 +74,11 @@ class PlatformBackend(object):
   @property
   def forwarder_factory(self):
     if not self._forwarder_factory:
-      self._forwarder_factory = do_nothing_forwarder.DoNothingForwarderFactory()
+      self._forwarder_factory = self._CreateForwarderFactory()
     return self._forwarder_factory
 
-  def GetPortPairForForwarding(self, local_port):
-    return forwarders.PortPair(local_port=local_port, remote_port=local_port)
+  def _CreateForwarderFactory(self):
+    return do_nothing_forwarder.DoNothingForwarderFactory()
 
   def GetRemotePort(self, port):
     return port
@@ -94,20 +86,16 @@ class PlatformBackend(object):
   def GetSystemLog(self):
     return None
 
-  def DidCreateBrowser(self, browser, browser_backend):
-    browser_options = browser_backend.browser_options
-    self.SetFullPerformanceModeEnabled(browser_options.full_performance_mode)
 
-  def DidStartBrowser(self, browser, browser_backend):
-    assert browser not in self._running_browser_backends
-    self._running_browser_backends.add(browser_backend)
+  def IsRemoteDevice(self):
+    """Check if target platform is on remote device.
 
-  def WillCloseBrowser(self, browser, browser_backend):
-    is_last_browser = len(self._running_browser_backends) <= 1
-    if is_last_browser:
-      self.SetFullPerformanceModeEnabled(False)
-
-    self._running_browser_backends.discard(browser_backend)
+    Returns True if device is remote, i.e. android
+    device connected via adb or running a test with
+    remote option specifying the ip address of a cros device.
+    Return False for other platforms.
+    """
+    return False
 
   def IsDisplayTracingSupported(self):
     return False
@@ -137,9 +125,6 @@ class PlatformBackend(object):
   def HasBeenThermallyThrottled(self):
     raise NotImplementedError()
 
-  def GetSystemCommitCharge(self):
-    raise NotImplementedError()
-
   def GetSystemTotalPhysicalMemory(self):
     raise NotImplementedError()
 
@@ -147,12 +132,6 @@ class PlatformBackend(object):
     return {}
 
   def GetCpuTimestamp(self):
-    return {}
-
-  def PurgeUnpinnedMemory(self):
-    pass
-
-  def GetMemoryStats(self, pid):
     return {}
 
   def GetChildPids(self, pid):
@@ -169,6 +148,9 @@ class PlatformBackend(object):
 
   def GetOSName(self):
     raise NotImplementedError()
+
+  def GetDeviceId(self):
+    return None
 
   def GetOSVersionName(self):
     raise NotImplementedError()
@@ -193,6 +175,9 @@ class PlatformBackend(object):
 
   def LaunchApplication(
       self, application, parameters=None, elevate_privilege=False):
+    raise NotImplementedError()
+
+  def StartActivity(self, intent, blocking):
     raise NotImplementedError()
 
   def IsApplicationRunning(self, application):
@@ -233,33 +218,6 @@ class PlatformBackend(object):
     return False
 
   def GetNetworkData(self, browser):
-    raise NotImplementedError()
-
-  def ReadMsr(self, msr_number, start=0, length=64):
-    """Read a CPU model-specific register (MSR).
-
-    Which MSRs are available depends on the CPU model.
-    On systems with multiple CPUs, this function may run on any CPU.
-
-    Args:
-      msr_number: The number of the register to read.
-      start: The least significant bit to read, zero-indexed.
-          (Said another way, the number of bits to right-shift the MSR value.)
-      length: The number of bits to read. MSRs are 64 bits, even on 32-bit CPUs.
-    """
-    raise NotImplementedError()
-
-  @property
-  def supports_test_ca(self):
-    """Indicates whether the platform supports installing test CA."""
-    return False
-
-  def InstallTestCa(self, ca_cert_path):
-    """Install a test CA on the platform."""
-    raise NotImplementedError()
-
-  def RemoveTestCa(self):
-    """Remove a previously installed test CA from the platform."""
     raise NotImplementedError()
 
   def CanTakeScreenshot(self):

@@ -177,31 +177,11 @@ abstract class CameraCapturer implements CameraVideoCapturer {
     }
 
     @Override
-    public void onByteBufferFrameCaptured(
-        CameraSession session, byte[] data, int width, int height, int rotation, long timestamp) {
-      checkIsOnCameraThread();
-      synchronized (stateLock) {
-        if (session != currentSession) {
-          Logging.w(TAG, "onByteBufferFrameCaptured from another session.");
-          return;
-        }
-        if (!firstFrameObserved) {
-          eventsHandler.onFirstFrameAvailable();
-          firstFrameObserved = true;
-        }
-        cameraStatistics.addFrame();
-        capturerObserver.onByteBufferFrameCaptured(data, width, height, rotation, timestamp);
-      }
-    }
-
-    @Override
-    public void onTextureFrameCaptured(CameraSession session, int width, int height,
-        int oesTextureId, float[] transformMatrix, int rotation, long timestamp) {
+    public void onFrameCaptured(CameraSession session, VideoFrame frame) {
       checkIsOnCameraThread();
       synchronized (stateLock) {
         if (session != currentSession) {
           Logging.w(TAG, "onTextureFrameCaptured from another session.");
-          surfaceHelper.returnTextureFrame();
           return;
         }
         if (!firstFrameObserved) {
@@ -209,8 +189,7 @@ abstract class CameraCapturer implements CameraVideoCapturer {
           firstFrameObserved = true;
         }
         cameraStatistics.addFrame();
-        capturerObserver.onTextureFrameCaptured(
-            width, height, oesTextureId, transformMatrix, rotation, timestamp);
+        capturerObserver.onFrameCaptured(frame);
       }
     }
   };
@@ -333,7 +312,13 @@ abstract class CameraCapturer implements CameraVideoCapturer {
     synchronized (stateLock) {
       while (sessionOpening) {
         Logging.d(TAG, "Stop capture: Waiting for session to open");
-        ThreadUtils.waitUninterruptibly(stateLock);
+        try {
+          stateLock.wait();
+        } catch (InterruptedException e) {
+          Logging.w(TAG, "Stop capture interrupted while waiting for the session to open.");
+          Thread.currentThread().interrupt();
+          return;
+        }
       }
 
       if (currentSession != null) {

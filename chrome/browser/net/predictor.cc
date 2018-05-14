@@ -31,6 +31,7 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/predictors/loading_predictor_config.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/common/chrome_features.h"
@@ -47,8 +48,8 @@
 #include "net/base/net_errors.h"
 #include "net/http/transport_security_state.h"
 #include "net/log/net_log_with_source.h"
-#include "net/proxy/proxy_info.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_info.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -128,7 +129,7 @@ const int Predictor::kMaxSpeculativeResolveQueueDelayMs =
     Predictor::kMaxSpeculativeParallelResolves;
 
 // The default value of the credentials flag when preconnecting.
-static bool kAllowCredentialsOnPreconnectByDefault = true;
+static constexpr bool kAllowCredentialsOnPreconnectByDefault = true;
 
 static int g_max_queueing_delay_ms =
     Predictor::kMaxSpeculativeResolveQueueDelayMs;
@@ -152,7 +153,7 @@ Predictor::Predictor(bool predictor_enabled)
           TimeDelta::FromMilliseconds(g_max_queueing_delay_ms)),
       transport_security_state_(nullptr),
       ssl_config_service_(nullptr),
-      proxy_service_(nullptr),
+      proxy_resolution_service_(nullptr),
       consecutive_omnibox_preconnect_count_(0),
       referrers_(kMaxReferrers),
       observer_(nullptr),
@@ -170,7 +171,8 @@ Predictor::~Predictor() {
 // static
 Predictor* Predictor::CreatePredictor(bool simple_shutdown) {
   bool predictor_enabled =
-      base::FeatureList::IsEnabled(features::kNetworkPrediction);
+      base::FeatureList::IsEnabled(features::kNetworkPrediction) &&
+      !predictors::ShouldDisableOtherPreconnects();
   if (simple_shutdown)
     return new SimplePredictor(predictor_enabled);
   return new Predictor(predictor_enabled);
@@ -204,9 +206,8 @@ void Predictor::InitNetworkPredictor(PrefService* user_prefs,
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::BindOnce(&Predictor::FinalizeInitializationOnIOThread,
-                     base::Unretained(this), urls,
-                     base::Passed(std::move(referral_list)), io_thread,
-                     profile_io_data));
+                     base::Unretained(this), urls, std::move(referral_list),
+                     io_thread, profile_io_data));
 }
 
 void Predictor::AnticipateOmniboxUrl(const GURL& url, bool preconnectable) {
@@ -281,7 +282,7 @@ void Predictor::AnticipateOmniboxUrl(const GURL& url, bool preconnectable) {
 }
 
 void Predictor::PreconnectUrlAndSubresources(const GURL& url,
-    const GURL& first_party_for_cookies) {
+                                             const GURL& site_for_cookies) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!PredictorEnabled())
@@ -293,10 +294,10 @@ void Predictor::PreconnectUrlAndSubresources(const GURL& url,
     return;
   UrlInfo::ResolutionMotivation motivation(UrlInfo::EARLY_LOAD_MOTIVATED);
   const int kConnectionsNeeded = 1;
-  PreconnectUrl(canonicalized_url, first_party_for_cookies, motivation,
+  PreconnectUrl(canonicalized_url, site_for_cookies, motivation,
                 kAllowCredentialsOnPreconnectByDefault, kConnectionsNeeded);
   PredictFrameSubresources(canonicalized_url.GetWithEmptyPath(),
-                           first_party_for_cookies);
+                           site_for_cookies);
 }
 
 std::vector<GURL> Predictor::GetPredictedUrlListAtStartup(
@@ -643,13 +644,13 @@ void Predictor::FinalizeInitializationOnIOThread(
 
   profile_io_data_ = profile_io_data;
   if (kInitialDnsPrefetchListEnabled)
-    initial_observer_ = base::MakeUnique<InitialObserver>();
+    initial_observer_ = std::make_unique<InitialObserver>();
 
   net::URLRequestContext* context =
       url_request_context_getter_->GetURLRequestContext();
   transport_security_state_ = context->transport_security_state();
   ssl_config_service_ = context->ssl_config_service();
-  proxy_service_ = context->proxy_service();
+  proxy_resolution_service_ = context->proxy_resolution_service();
 
   // base::WeakPtrFactory instances need to be created and destroyed
   // on the same thread. Initialize the IO thread weak factory now.
@@ -728,8 +729,8 @@ void Predictor::SaveStateForNextStartup() {
   if (!CanPreresolveAndPreconnect())
     return;
 
-  auto startup_list = base::MakeUnique<base::ListValue>();
-  auto referral_list = base::MakeUnique<base::ListValue>();
+  auto startup_list = std::make_unique<base::ListValue>();
+  auto referral_list = std::make_unique<base::ListValue>();
 
   // Get raw pointers to pass to the first task. Ownership of the unique_ptrs
   // will be passed to the reply task.
@@ -743,9 +744,8 @@ void Predictor::SaveStateForNextStartup() {
       base::BindOnce(&Predictor::WriteDnsPrefetchState, base::Unretained(this),
                      startup_list_raw, referral_list_raw),
       base::BindOnce(&Predictor::UpdatePrefsOnUIThread,
-                     ui_weak_factory_->GetWeakPtr(),
-                     base::Passed(std::move(startup_list)),
-                     base::Passed(std::move(referral_list))));
+                     ui_weak_factory_->GetWeakPtr(), std::move(startup_list),
+                     std::move(referral_list)));
 }
 
 void Predictor::UpdatePrefsOnUIThread(
@@ -769,7 +769,7 @@ void Predictor::WriteDnsPrefetchState(base::ListValue* startup_list,
 }
 
 void Predictor::PreconnectUrl(const GURL& url,
-                              const GURL& first_party_for_cookies,
+                              const GURL& site_for_cookies,
                               UrlInfo::ResolutionMotivation motivation,
                               bool allow_credentials,
                               int count) {
@@ -778,20 +778,20 @@ void Predictor::PreconnectUrl(const GURL& url,
   DCHECK(url.is_valid());
 
   if (BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    PreconnectUrlOnIOThread(url, first_party_for_cookies, motivation,
+    PreconnectUrlOnIOThread(url, site_for_cookies, motivation,
                             allow_credentials, count);
   } else {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::BindOnce(&Predictor::PreconnectUrlOnIOThread,
-                       base::Unretained(this), url, first_party_for_cookies,
+                       base::Unretained(this), url, site_for_cookies,
                        motivation, allow_credentials, count));
   }
 }
 
 void Predictor::PreconnectUrlOnIOThread(
     const GURL& original_url,
-    const GURL& first_party_for_cookies,
+    const GURL& site_for_cookies,
     UrlInfo::ResolutionMotivation motivation,
     bool allow_credentials,
     int count) {
@@ -802,8 +802,7 @@ void Predictor::PreconnectUrlOnIOThread(
   // for the URLRequestContextGetter. The predictor tests should be fixed to
   // allow for this, as they currently expect a callback with no getter.
   if (observer_) {
-    observer_->OnPreconnectUrl(
-        url, first_party_for_cookies, motivation, count);
+    observer_->OnPreconnectUrl(url, site_for_cookies, motivation, count);
   }
 
   net::URLRequestContextGetter* getter = url_request_context_getter_.get();
@@ -833,12 +832,12 @@ void Predictor::PreconnectUrlOnIOThread(
   }
   UMA_HISTOGRAM_ENUMERATION("Net.PreconnectMotivation", motivation,
                             UrlInfo::MAX_MOTIVATED);
-  content::PreconnectUrl(getter, url, first_party_for_cookies, count,
+  content::PreconnectUrl(getter, url, site_for_cookies, count,
                          allow_credentials, request_motivation);
 }
 
 void Predictor::PredictFrameSubresources(const GURL& url,
-                                         const GURL& first_party_for_cookies) {
+                                         const GURL& site_for_cookies) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!PredictorEnabled())
@@ -849,12 +848,12 @@ void Predictor::PredictFrameSubresources(const GURL& url,
   // Add one pass through the message loop to allow current navigation to
   // proceed.
   if (BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    PrepareFrameSubresources(url, first_party_for_cookies);
+    PrepareFrameSubresources(url, site_for_cookies);
   } else {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::BindOnce(&Predictor::PrepareFrameSubresources,
-                       base::Unretained(this), url, first_party_for_cookies));
+                       base::Unretained(this), url, site_for_cookies));
   }
 }
 
@@ -886,7 +885,7 @@ enum SubresourceValue {
 };
 
 void Predictor::PrepareFrameSubresources(const GURL& original_url,
-                                         const GURL& first_party_for_cookies) {
+                                         const GURL& site_for_cookies) {
   // Apply HSTS redirect early so it is taken into account when looking up
   // subresources.
   GURL url = GetHSTSRedirectOnIOThread(original_url);
@@ -903,7 +902,7 @@ void Predictor::PrepareFrameSubresources(const GURL& original_url,
     // size of the list with all the "Leaf" nodes in the tree (nodes that don't
     // load any subresources).  If we learn about this resource, we will instead
     // provide a more carefully estimated preconnection count.
-    PreconnectUrlOnIOThread(url, first_party_for_cookies,
+    PreconnectUrlOnIOThread(url, site_for_cookies,
                             UrlInfo::SELF_REFERAL_MOTIVATED,
                             kAllowCredentialsOnPreconnectByDefault, 2);
     return;
@@ -927,16 +926,12 @@ void Predictor::PrepareFrameSubresources(const GURL& original_url,
       int count = static_cast<int>(std::ceil(connection_expectation));
       if (url.host_piece() == future_url->first.host_piece())
         ++count;
-      PreconnectUrlOnIOThread(future_url->first, first_party_for_cookies,
-                              motivation,
+      PreconnectUrlOnIOThread(future_url->first, site_for_cookies, motivation,
                               kAllowCredentialsOnPreconnectByDefault, count);
     } else if (connection_expectation > kDNSPreresolutionWorthyExpectedValue) {
       evalution = PRERESOLUTION;
       future_url->second.preresolution_increment();
-      UrlInfo* queued_info = AppendToResolutionQueue(future_url->first,
-                                                     motivation);
-      if (queued_info)
-        queued_info->SetReferringHostname(url);
+      AppendToResolutionQueue(future_url->first, motivation);
     }
     // Remove future urls that are below the discardable threshold here. This is
     // the only place where the future urls of a referrer are iterated through,
@@ -966,64 +961,63 @@ void Predictor::OnLookupFinished(const GURL& url, int result) {
 
 void Predictor::LookupFinished(const GURL& url, bool found) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  UrlInfo* info = &results_[url];
+  auto info_it = results_.find(url);
+  UrlInfo* info = &info_it->second;
   DCHECK(info->HasUrl(url));
-  if (info->is_marked_to_delete()) {
-    results_.erase(url);
-  } else {
-    if (found)
-      info->SetFoundState();
-    else
-      info->SetNoSuchNameState();
-  }
+  bool is_marked_to_delete = info->is_marked_to_delete();
+
+  if (found)
+    info->SetFoundState();
+  else
+    info->SetNoSuchNameState();
+
+  if (is_marked_to_delete)
+    results_.erase(info_it);
 }
 
 bool Predictor::WouldLikelyProxyURL(const GURL& url) {
-  if (!proxy_service_)
+  if (!proxy_resolution_service_)
     return false;
 
   net::ProxyInfo info;
-  bool synchronous_success = proxy_service_->TryResolveProxySynchronously(
+  bool synchronous_success = proxy_resolution_service_->TryResolveProxySynchronously(
       url, std::string(), &info, nullptr, net::NetLogWithSource());
 
   return synchronous_success && !info.is_direct();
 }
 
-UrlInfo* Predictor::AppendToResolutionQueue(
+void Predictor::AppendToResolutionQueue(
     const GURL& url,
     UrlInfo::ResolutionMotivation motivation) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(url.has_host());
 
   if (shutdown_)
-    return nullptr;
+    return;
 
   UrlInfo* info = &results_[url];
   info->SetUrl(url);  // Initialize or DCHECK.
-  // TODO(jar):  I need to discard names that have long since expired.
-  // Currently we only add to the domain map :-/
-
   DCHECK(info->HasUrl(url));
 
   if (!info->NeedsDnsUpdate()) {
     info->DLogResultsStats("DNS PrefetchNotUpdated");
-    return nullptr;
+    return;
   }
 
   if (WouldLikelyProxyURL(url)) {
     info->DLogResultsStats("DNS PrefetchForProxiedRequest");
-    return nullptr;
+    return;
   }
 
   info->SetQueuedState(motivation);
   work_queue_.Push(url, motivation);
 
   StartSomeQueuedResolutions();
-  return info;
 }
 
-bool Predictor::CongestionControlPerformed(UrlInfo* info) {
+bool Predictor::CongestionControlPerformed(Results::iterator info_it) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  UrlInfo* info = &info_it->second;
   // Note: queue_duration is ONLY valid after we go to assigned state.
   if (info->queue_duration() < max_dns_queue_delay_)
     return false;
@@ -1032,9 +1026,11 @@ bool Predictor::CongestionControlPerformed(UrlInfo* info) {
   // resolutions, and not have a bogged down system.
   while (true) {
     info->RemoveFromQueue();
+    results_.erase(info_it);
     if (work_queue_.IsEmpty())
       break;
-    info = &results_[work_queue_.Pop()];
+    info_it = results_.find(work_queue_.Pop());
+    info = &info_it->second;
     info->SetAssignedState();
   }
   return true;
@@ -1046,15 +1042,17 @@ void Predictor::StartSomeQueuedResolutions() {
   while (!work_queue_.IsEmpty() &&
          num_pending_lookups_ < max_concurrent_dns_lookups_) {
     const GURL url(work_queue_.Pop());
-    UrlInfo* info = &results_[url];
+    auto info_it = results_.find(url);
+    UrlInfo* info = &info_it->second;
     DCHECK(info->HasUrl(url));
     info->SetAssignedState();
 
-    if (CongestionControlPerformed(info)) {
+    if (CongestionControlPerformed(info_it)) {
       DCHECK(work_queue_.IsEmpty());
       return;
     }
 
+    info->SetPendingDeleteState();
     int status =
         content::PreresolveUrl(url_request_context_getter_.get(), url,
                                base::Bind(&Predictor::OnLookupFinished,
@@ -1145,8 +1143,8 @@ bool Predictor::HostNameQueue::IsEmpty() const {
 
 GURL Predictor::HostNameQueue::Pop() {
   DCHECK(!IsEmpty());
-  std::queue<GURL> *queue(rush_queue_.empty() ? &background_queue_
-                                              : &rush_queue_);
+  base::queue<GURL>* queue(rush_queue_.empty() ? &background_queue_
+                                               : &rush_queue_);
   GURL url(queue->front());
   queue->pop();
   return url;

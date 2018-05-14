@@ -10,7 +10,7 @@
 #include "base/macros.h"
 #include "services/metrics/public/cpp/metrics_export.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
-#include "services/metrics/public/interfaces/ukm_interface.mojom.h"
+#include "services/metrics/public/mojom/ukm_interface.mojom.h"
 
 namespace ukm {
 
@@ -22,6 +22,8 @@ class METRICS_EXPORT UkmEntryBuilderBase {
  public:
   virtual ~UkmEntryBuilderBase();
 
+  // Records the complete entry into the recorder.  If recorder is null, the
+  // entry is simply discarded.
   void Record(UkmRecorder* recorder);
 
  protected:

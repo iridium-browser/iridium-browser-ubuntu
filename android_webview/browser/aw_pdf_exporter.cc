@@ -20,9 +20,9 @@ namespace android_webview {
 
 namespace {
 
-void GetPageRanges(JNIEnv* env,
-                   jintArray int_arr,
-                   printing::PageRanges* range_vector) {
+void JNI_AwPdfExporter_GetPageRanges(JNIEnv* env,
+                                     jintArray int_arr,
+                                     printing::PageRanges* range_vector) {
   std::vector<int> pages;
   base::android::JavaIntArrayToIntVector(env, int_arr, &pages);
   for (int page : pages) {
@@ -61,7 +61,7 @@ void AwPdfExporter::ExportToPdf(JNIEnv* env,
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   printing::PrintSettings print_settings;
   printing::PageRanges page_ranges;
-  GetPageRanges(env, pages, &page_ranges);
+  JNI_AwPdfExporter_GetPageRanges(env, pages, &page_ranges);
   InitPdfSettings(env, obj, page_ranges, print_settings);
   AwPrintManager* print_manager = AwPrintManager::CreateForWebContents(
       web_contents_, print_settings, base::FileDescriptor(fd, false),
@@ -119,10 +119,6 @@ void AwPdfExporter::DidExportPdf(int fd, int page_count) {
   if (obj.is_null())
     return;
   Java_AwPdfExporter_didExportPdf(env, obj, page_count);
-}
-
-bool RegisterAwPdfExporter(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace android_webview

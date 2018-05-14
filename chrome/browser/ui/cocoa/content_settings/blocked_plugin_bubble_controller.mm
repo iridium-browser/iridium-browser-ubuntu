@@ -45,7 +45,7 @@ void SetControlSize(NSControl* control, NSControlSize control_size) {
   // The size of this bubble, and the other layout constants elsewhere in this
   // file, were lifted from ContentBlockedPlugins.xib
   base::scoped_nsobject<InfoBubbleWindow> window([[InfoBubbleWindow alloc]
-      initWithContentRect:NSMakeRect(0, 0, 314, 179)
+      initWithContentRect:NSMakeRect(0, 0, 314, 145)
                 styleMask:NSBorderlessWindowMask
                   backing:NSBackingStoreBuffered
                     defer:NO]);
@@ -61,13 +61,11 @@ void SetControlSize(NSControl* control, NSControlSize control_size) {
 }
 
 - (NSString*)manageButtonTitle {
-  return base::SysUTF16ToNSString(
-      contentSettingBubbleModel_->bubble_content().manage_text);
+  return base::SysUTF16ToNSString([super model]->bubble_content().manage_text);
 }
 
 - (NSString*)customLinkTitle {
-  return base::SysUTF16ToNSString(
-      contentSettingBubbleModel_->bubble_content().custom_link);
+  return base::SysUTF16ToNSString([super model]->bubble_content().custom_link);
 }
 
 // This method requires that the plugin items all be plain strings instead of
@@ -75,7 +73,7 @@ void SetControlSize(NSControl* control, NSControlSize control_size) {
 // enforced.
 - (NSArray*)pluginNames {
   const ContentSettingBubbleModel::ListItems& items =
-      contentSettingBubbleModel_->bubble_content().list_items;
+      [super model]->bubble_content().list_items;
 
   NSMutableArray* names = [NSMutableArray arrayWithCapacity:items.size()];
   for (const auto& item : items) {

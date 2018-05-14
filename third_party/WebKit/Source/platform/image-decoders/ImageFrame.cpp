@@ -26,17 +26,15 @@
 
 #include "platform/image-decoders/ImageFrame.h"
 
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/skia/SkiaUtils.h"
 #include "platform/image-decoders/ImageDecoder.h"
 
 namespace blink {
 
 ImageFrame::ImageFrame()
-    : allocator_(0),
+    : allocator_(nullptr),
       has_alpha_(true),
       status_(kFrameEmpty),
-      duration_(0),
       disposal_method_(kDisposeNotSpecified),
       alpha_blend_source_(kBlendAtopPreviousFrame),
       premultiply_alpha_(true),

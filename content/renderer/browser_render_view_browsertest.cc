@@ -12,6 +12,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
@@ -51,16 +52,16 @@ class TestShellContentRendererClient : public ShellContentRendererClient {
         latest_error_reason_(0),
         latest_error_stale_copy_in_cache_(false) {}
 
-  void GetNavigationErrorStrings(content::RenderFrame* render_frame,
-                                 const blink::WebURLRequest& failed_request,
-                                 const blink::WebURLError& error,
-                                 std::string* error_html,
-                                 base::string16* error_description) override {
+  void PrepareErrorPage(content::RenderFrame* render_frame,
+                        const blink::WebURLRequest& failed_request,
+                        const blink::WebURLError& error,
+                        std::string* error_html,
+                        base::string16* error_description) override {
     if (error_html)
       *error_html = "A suffusion of yellow.";
     latest_error_valid_ = true;
-    latest_error_reason_ = error.reason;
-    latest_error_stale_copy_in_cache_ = error.stale_copy_in_cache;
+    latest_error_reason_ = error.reason();
+    latest_error_stale_copy_in_cache_ = error.has_copy_in_cache();
   }
 
   bool GetLatestError(int* error_code, bool* stale_cache_entry_present) {
@@ -195,23 +196,35 @@ class RenderViewBrowserTest : public ContentBrowserTest {
   TestShellContentRendererClient* renderer_client_;
 };
 
-IN_PROC_BROWSER_TEST_F(RenderViewBrowserTest, ConfirmCacheInformationPlumbed) {
+// https://crbug.com/788788
+#if defined(OS_ANDROID) && defined(ADDRESS_SANITIZER)
+#define MAYBE_ConfirmCacheInformationPlumbed \
+  DISABLED_ConfirmCacheInformationPlumbed
+#else
+#define MAYBE_ConfirmCacheInformationPlumbed ConfirmCacheInformationPlumbed
+#endif  // defined(OS_ANDROID) && defined(ADDRESS_SANITIZER)
+IN_PROC_BROWSER_TEST_F(RenderViewBrowserTest,
+                       MAYBE_ConfirmCacheInformationPlumbed) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   // Load URL with "nocache" set, to create stale cache.
-  GURL test_url(embedded_test_server()->GetURL("/nocache.html"));
+  GURL test_url(embedded_test_server()->GetURL("/nocache-with-etag.html"));
   NavigateToURLAndWaitForTitle(test_url, "Nocache Test Page", 1);
 
   // Reload same URL after forcing an error from the the network layer;
   // confirm that the error page is told the cached copy exists.
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter =
-      shell()->web_contents()->GetRenderProcessHost()->GetStoragePartition()->
-          GetURLRequestContext();
+      shell()
+          ->web_contents()
+          ->GetMainFrame()
+          ->GetProcess()
+          ->GetStoragePartition()
+          ->GetURLRequestContext();
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&InterceptNetworkTransactions,
-                 base::RetainedRef(url_request_context_getter),
-                 net::ERR_FAILED));
+      base::BindOnce(&InterceptNetworkTransactions,
+                     base::RetainedRef(url_request_context_getter),
+                     net::ERR_FAILED));
 
   // An error results in one completed navigation.
   NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
@@ -226,8 +239,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewBrowserTest, ConfirmCacheInformationPlumbed) {
   scoped_refptr<MessageLoopRunner> runner = new MessageLoopRunner;
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&ClearCache, base::RetainedRef(url_request_context_getter),
-                 runner->QuitClosure()));
+      base::BindOnce(&ClearCache, base::RetainedRef(url_request_context_getter),
+                     runner->QuitClosure()));
   runner->Run();
 
   content::NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);

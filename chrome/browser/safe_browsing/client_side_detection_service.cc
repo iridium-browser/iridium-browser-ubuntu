@@ -8,24 +8,27 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/containers/queue.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/constants.mojom.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/client_model.pb.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/common/safe_browsing.mojom.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/common/safebrowsing_messages.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -41,6 +44,7 @@
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "url/gurl.h"
 
 using content::BrowserThread;
@@ -246,7 +250,17 @@ void ClientSideDetectionService::SendModelToProcess(
     DVLOG(2) << "Disabling client-side phishing detection for "
              << "RenderProcessHost @" << process;
   }
-  process->Send(new SafeBrowsingMsg_SetPhishingModel(model));
+  safe_browsing::mojom::PhishingModelSetterPtr phishing;
+  // Null in unit tests.
+  if (!ChromeService::GetInstance()->connector()) {
+    return;
+  }
+  ChromeService::GetInstance()->connector()->BindInterface(
+      service_manager::Identity(chrome::mojom::kRendererServiceName,
+                                process->GetChildIdentity().user_id(),
+                                process->GetChildIdentity().instance()),
+      &phishing);
+  phishing->SetPhishingModel(model);
 }
 
 void ClientSideDetectionService::SendModelToRenderers() {
@@ -317,7 +331,7 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
             destination: GOOGLE_OWNED_SERVICE
           }
           policy {
-            cookies_allowed: true
+            cookies_allowed: YES
             cookies_store: "Safe browsing cookie store"
             setting:
               "Users can enable or disable this feature by toggling 'Protect "
@@ -400,7 +414,7 @@ void ClientSideDetectionService::StartClientReportMalwareRequest(
             destination: GOOGLE_OWNED_SERVICE
           }
           policy {
-            cookies_allowed: true
+            cookies_allowed: YES
             cookies_store: "Safe browsing cookie store"
             setting:
               "Users can enable or disable this feature by toggling 'Protect "
@@ -481,12 +495,12 @@ void ClientSideDetectionService::HandleMalwareVerdict(
     int response_code,
     const std::string& data) {
   if (status.is_success()) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY(
-        "SBClientMalware.IPBlacklistRequestResponseCode", response_code);
+    base::UmaHistogramSparse("SBClientMalware.IPBlacklistRequestResponseCode",
+                             response_code);
   }
   // status error is negative, so we put - in front of it.
-  UMA_HISTOGRAM_SPARSE_SLOWLY(
-      "SBClientMalware.IPBlacklistRequestNetError", -status.error());
+  base::UmaHistogramSparse("SBClientMalware.IPBlacklistRequestNetError",
+                           -status.error());
 
   ClientMalwareResponse response;
   std::unique_ptr<ClientMalwareReportInfo> info =
@@ -583,7 +597,7 @@ int ClientSideDetectionService::GetPhishingNumReports() {
 }
 
 int ClientSideDetectionService::GetNumReports(
-    std::queue<base::Time>* report_times) {
+    base::queue<base::Time>* report_times) {
   base::Time cutoff =
       base::Time::Now() - base::TimeDelta::FromDays(kReportsIntervalDays);
 

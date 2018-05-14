@@ -19,11 +19,11 @@
 
 #include "core/layout/LayoutSlider.h"
 
-#include "core/InputTypeNames.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/html/HTMLInputElement.h"
+#include "core/html/forms/HTMLInputElement.h"
 #include "core/html/forms/SliderThumbElement.h"
 #include "core/html/shadow/ShadowElementNames.h"
+#include "core/input_type_names.h"
 #include "core/layout/LayoutSliderThumb.h"
 #include "platform/wtf/MathExtras.h"
 
@@ -37,15 +37,16 @@ LayoutSlider::LayoutSlider(HTMLInputElement* element)
   DCHECK_EQ(element->type(), InputTypeNames::range);
 }
 
-LayoutSlider::~LayoutSlider() {}
+LayoutSlider::~LayoutSlider() = default;
 
-int LayoutSlider::BaselinePosition(FontBaseline,
-                                   bool /*firstLine*/,
-                                   LineDirectionMode,
-                                   LinePositionMode line_position_mode) const {
+LayoutUnit LayoutSlider::BaselinePosition(
+    FontBaseline,
+    bool /*firstLine*/,
+    LineDirectionMode,
+    LinePositionMode line_position_mode) const {
   DCHECK_EQ(line_position_mode, kPositionOnContainingLine);
   // FIXME: Patch this function for writing-mode.
-  return (Size().Height() + MarginTop()).ToInt();
+  return Size().Height() + MarginTop();
 }
 
 void LayoutSlider::ComputeIntrinsicLogicalWidths(

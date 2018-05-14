@@ -7,6 +7,8 @@
 import copy
 import math
 
+from dashboard.common import namespaced_stored_object
+
 
 _BISECT_HEADER = """
 === BISECT JOB RESULTS ===
@@ -23,18 +25,35 @@ Debug information about this bisect:
   %(issue_url)s
 """
 
-_MEMORY_BENCHMARKS = [
-    'system_health.memory_',
-    'memory.top_10_mobile'
-]
+_BENCHMARK_DOC_URLS = {
+    'memory': {
+        'benchmarks': [
+            'system_health.memory_',
+            'memory.top_10_mobile'
+        ],
+        'url': ('https://chromium.googlesource.com/chromium/src/+/'\
+            'master/docs/memory-infra/memory_benchmarks.md'),
+    },
+    'blink_perf': {
+        'benchmarks': [
+            'blink_perf.',
+        ],
+        'url': ('https://chromium.googlesource.com/chromium/src/+/'\
+            'master/docs/speed/benchmark_harnesses/blink_perf.md'),
+    },
+    'webrtc': {
+        'benchmarks': [
+            'webrtc.',
+        ],
+        'url': ('https://chromium.googlesource.com/chromium/src/+/'\
+            'master/docs/speed/benchmark_harnesses/webrtc_perf.md'),
+    },
+}
 
-_MEMORY_DOC_URL = ('https://chromium.googlesource.com/chromium/src/+/'\
-    'master/docs/memory-infra/memory_benchmarks.md')
-
-_BISECT_MEMORY_DOC_INFO = """
-Please refer to the following doc on diagnosing memory regressions:
-  %s
-""" % _MEMORY_DOC_URL
+_BENCHMARK_DOC_INFO = """
+Please refer to the following doc on diagnosing %(name)s regressions:
+  %(url)s
+"""
 
 _BISECT_ADDRESSING_DOC_URL = ('http://g.co/ChromePerformanceRegressions')
 
@@ -87,13 +106,6 @@ _BISECT_WARNING = ' * %s\n'
 
 _REVISION_TABLE_TEMPLATE = """
 %(table)s"""
-
-COMMIT_RANGE_URL_BY_DEPOT = {
-    'chromium': 'https://chromium.googlesource.com/chromium/src/+log/',
-    'angle': 'https://chromium.googlesource.com/angle/angle/+log/',
-    'v8': 'https://chromium.googlesource.com/v8/v8.git/+log/',
-    'skia': 'https://chromium.googlesource.com/skia/+log/',
-}
 
 STATUS_REPRO_WITH_CULPRIT = '%(test_type)s found with culprit'
 
@@ -157,6 +169,8 @@ _NON_TELEMETRY_TEST_COMMANDS = {
     'performance_browser_tests': 'performance_browser_tests',
     'resource_sizes': 'resource_sizes.py',
 }
+
+_REPOSITORIES_KEY = 'repositories'
 
 
 def _GuessBenchmarkFromRunCommand(run_command):
@@ -312,11 +326,14 @@ def _GenerateReport(results_data):
   # a log containing all entries in the suspected range.
   if message == STATUS_REPRO_UNABLE_NARROW:
     depot_name = lkgr.get('depot_name')
-    depot_url = COMMIT_RANGE_URL_BY_DEPOT.get(depot_name)
+
+    repositories = namespaced_stored_object.Get(_REPOSITORIES_KEY)
+    depot_url = repositories.get(depot_name, {}).get('repository_url')
     result += _BISECT_SUSPECTED_RANGE % {'num': fkbr_index - lkgr_index}
     if depot_url and lkgr.get('depot_name') == fkbr.get('depot_name'):
+      git_url = depot_url + '/+log/'
       result += _BISECT_SUSPECTED_RANGE_URL % {
-          'url': depot_url,
+          'url': git_url,
           'lkgr': lkgr.get('commit_hash'),
           'fkbr': fkbr.get('commit_hash')}
     elif not depot_url:
@@ -337,11 +354,14 @@ def _GenerateReport(results_data):
   # and how to contact the team.
   result += '\n'
 
-  # (github:3128): Requested that all memory benchmarks include a doc url.
   # TODO(eakuefner): Replace this with a generic property in TestMetadata
   # when data pipe is available.
-  if any(results_data['benchmark'].startswith(b) for b in _MEMORY_BENCHMARKS):
-    result += _BISECT_MEMORY_DOC_INFO
+  # github:3690: Include doc url for benchmarks if available.
+  for benchmark, benchmark_details in _BENCHMARK_DOC_URLS.iteritems():
+    benchmark_names = benchmark_details['benchmarks']
+    if any(results_data['benchmark'].startswith(b) for b in benchmark_names):
+      result += _BENCHMARK_DOC_INFO % {
+          'name': benchmark, 'url': benchmark_details['url']}
 
   result += _BISECT_TO_RUN % results_data
   result += _BISECT_ADDRESSING_DOC_INFO

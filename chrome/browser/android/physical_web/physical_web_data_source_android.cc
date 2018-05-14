@@ -4,9 +4,10 @@
 
 #include "chrome/browser/android/physical_web/physical_web_data_source_android.h"
 
+#include <memory>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/browser_process.h"
 #include "jni/UrlManager_jni.h"
 
@@ -16,7 +17,7 @@ using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 
 PhysicalWebCollection::PhysicalWebCollection()
-    : metadata_list_(base::MakeUnique<physical_web::MetadataList>()),
+    : metadata_list_(std::make_unique<physical_web::MetadataList>()),
       accessed_once_(false) {}
 
 PhysicalWebCollection::~PhysicalWebCollection() {}
@@ -80,8 +81,8 @@ std::unique_ptr<physical_web::MetadataList>
     PhysicalWebDataSourceAndroid::GetMetadataList() {
   JNIEnv* env = AttachCurrentThread();
 
-  auto pw_collection = base::MakeUnique<PhysicalWebCollection>();
-  Java_UrlManager_getPwCollection(env, url_manager_.obj(),
+  auto pw_collection = std::make_unique<PhysicalWebCollection>();
+  Java_UrlManager_getPwCollection(env, url_manager_,
                                   reinterpret_cast<long>(pw_collection.get()));
 
   return pw_collection->GetMetadataList();
@@ -115,7 +116,8 @@ void PhysicalWebDataSourceAndroid::OnDistanceChanged(
                           distance_estimate);
 }
 
-static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+static jlong JNI_UrlManager_Init(JNIEnv* env,
+                                 const JavaParamRef<jobject>& obj) {
   physical_web::PhysicalWebDataSource* data_source =
       g_browser_process->GetPhysicalWebDataSource();
   return reinterpret_cast<intptr_t>(data_source);

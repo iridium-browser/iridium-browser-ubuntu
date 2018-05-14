@@ -5,24 +5,46 @@
 #include "chrome/browser/media/router/media_router_metrics.h"
 
 #include "base/macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/string_util.h"
 #include "base/time/default_clock.h"
-
-namespace {
-// How long to wait between device counts metrics are recorded. Set to 1 hour.
-const int kDeviceCountMetricThresholdMins = 60;
-}  // namespace
+#include "chrome/common/media_router/media_sink.h"
+#include "chrome/common/media_router/media_source_helper.h"
+#include "url/gurl.h"
+#include "url/url_constants.h"
 
 namespace media_router {
 
-MediaRouterMetrics::MediaRouterMetrics() : clock_(new base::DefaultClock()) {}
+namespace {
+
+PresentationUrlType GetPresentationUrlType(const GURL& url) {
+  if (url.SchemeIs(kDialPresentationUrlScheme))
+    return PresentationUrlType::kDial;
+  if (url.SchemeIs(kCastPresentationUrlScheme))
+    return PresentationUrlType::kCast;
+  if (url.SchemeIs(kCastDialPresentationUrlScheme))
+    return PresentationUrlType::kCastDial;
+  if (url.SchemeIs(kRemotePlaybackPresentationUrlScheme))
+    return PresentationUrlType::kRemotePlayback;
+  if (base::StartsWith(url.spec(), kLegacyCastPresentationUrlPrefix,
+                       base::CompareCase::INSENSITIVE_ASCII))
+    return PresentationUrlType::kCastLegacy;
+  if (url.SchemeIs(url::kHttpsScheme))
+    return PresentationUrlType::kHttps;
+  if (url.SchemeIs(url::kHttpScheme))
+    return PresentationUrlType::kHttp;
+  return PresentationUrlType::kOther;
+}
+
+}  // namespace
+
+MediaRouterMetrics::MediaRouterMetrics() {}
 MediaRouterMetrics::~MediaRouterMetrics() = default;
 
 // static
-const char MediaRouterMetrics::kHistogramDialAvailableDeviceCount[] =
-    "MediaRouter.Dial.AvailableDevicesCount";
-const char MediaRouterMetrics::kHistogramDialKnownDeviceCount[] =
-    "MediaRouter.Dial.KnownDevicesCount";
+const char MediaRouterMetrics::kHistogramDialParsingError[] =
+    "MediaRouter.Dial.ParsingError";
 const char MediaRouterMetrics::kHistogramIconClickLocation[] =
     "MediaRouter.Icon.Click.Location";
 const char MediaRouterMetrics::kHistogramMediaRouterCastingSource[] =
@@ -31,6 +53,10 @@ const char MediaRouterMetrics::kHistogramMediaRouterFileFormat[] =
     "MediaRouter.Source.LocalFileFormat";
 const char MediaRouterMetrics::kHistogramMediaRouterFileSize[] =
     "MediaRouter.Source.LocalFileSize";
+const char MediaRouterMetrics::kHistogramMediaSinkType[] =
+    "MediaRouter.MediaSink.SelectedType";
+const char MediaRouterMetrics::kHistogramPresentationUrlType[] =
+    "MediaRouter.PresentationRequest.AvailabilityUrlType";
 const char MediaRouterMetrics::kHistogramRouteCreationOutcome[] =
     "MediaRouter.Route.CreationOutcome";
 const char MediaRouterMetrics::kHistogramUiDialogPaint[] =
@@ -84,33 +110,42 @@ void MediaRouterMetrics::RecordRouteCreationOutcome(
 
 // static
 void MediaRouterMetrics::RecordMediaRouterCastingSource(MediaCastMode source) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY(kHistogramMediaRouterCastingSource, source);
+  base::UmaHistogramSparse(kHistogramMediaRouterCastingSource, source);
 }
 
+// static
 void MediaRouterMetrics::RecordMediaRouterFileFormat(
     const media::container_names::MediaContainerName format) {
   UMA_HISTOGRAM_ENUMERATION(kHistogramMediaRouterFileFormat, format,
                             media::container_names::CONTAINER_MAX);
 }
 
+// static
 void MediaRouterMetrics::RecordMediaRouterFileSize(int64_t size) {
   UMA_HISTOGRAM_MEMORY_LARGE_MB(kHistogramMediaRouterFileSize, size);
 }
 
-void MediaRouterMetrics::RecordDialDeviceCounts(size_t available_device_count,
-                                                size_t known_device_count) {
-  if (clock_->Now() - device_count_metrics_record_time_ <
-      base::TimeDelta::FromMinutes(kDeviceCountMetricThresholdMins)) {
-    return;
-  }
-  UMA_HISTOGRAM_COUNTS_100(kHistogramDialAvailableDeviceCount,
-                           available_device_count);
-  UMA_HISTOGRAM_COUNTS_100(kHistogramDialKnownDeviceCount, known_device_count);
-  device_count_metrics_record_time_ = clock_->Now();
+// static
+void MediaRouterMetrics::RecordDialParsingError(
+    SafeDialDeviceDescriptionParser::ParsingError parsing_error) {
+  DCHECK_LT(parsing_error,
+            SafeDialDeviceDescriptionParser::ParsingError::kTotalCount);
+  UMA_HISTOGRAM_ENUMERATION(
+      kHistogramDialParsingError, parsing_error,
+      SafeDialDeviceDescriptionParser::ParsingError::kTotalCount);
 }
 
-void MediaRouterMetrics::SetClockForTest(std::unique_ptr<base::Clock> clock) {
-  clock_ = std::move(clock);
+// static
+void MediaRouterMetrics::RecordPresentationUrlType(const GURL& url) {
+  PresentationUrlType type = GetPresentationUrlType(url);
+  UMA_HISTOGRAM_ENUMERATION(kHistogramPresentationUrlType, type,
+                            PresentationUrlType::kPresentationUrlTypeCount);
+}
+
+// static
+void MediaRouterMetrics::RecordMediaSinkType(SinkIconType sink_icon_type) {
+  UMA_HISTOGRAM_ENUMERATION(kHistogramMediaSinkType, sink_icon_type,
+                            SinkIconType::TOTAL_COUNT);
 }
 
 }  // namespace media_router

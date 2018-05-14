@@ -8,22 +8,24 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_BASE_FILEUTILS_H_
-#define WEBRTC_RTC_BASE_FILEUTILS_H_
+#ifndef RTC_BASE_FILEUTILS_H_
+#define RTC_BASE_FILEUTILS_H_
 
 #include <string>
 
-#if !defined(WEBRTC_WIN)
+#if defined(WEBRTC_WIN)
+#include <windows.h>
+#else
 #include <dirent.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#endif
+#endif  // WEBRTC_WIN
 
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/constructormagic.h"
-#include "webrtc/rtc_base/platform_file.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/constructormagic.h"
+#include "rtc_base/platform_file.h"
 
 namespace rtc {
 
@@ -83,10 +85,6 @@ class FilesystemInterface {
   // non-existent file.
   virtual bool DeleteFile(const Pathname &filename) = 0;
 
-  // Creates a directory. This will call itself recursively to create /foo/bar
-  // even if /foo does not exist. Returns true if the function succeeds.
-  virtual bool CreateFolder(const Pathname &pathname) = 0;
-
   // This moves a file from old_path to new_path, where "old_path" is a
   // plain file. This DCHECKs and returns false if old_path points to a
   // directory, and returns true if the function succeeds.
@@ -97,18 +95,6 @@ class FilesystemInterface {
 
   // Returns true if pathname refers to a file
   virtual bool IsFile(const Pathname& pathname) = 0;
-
-  // Returns true if pathname refers to no filesystem object, every parent
-  // directory either exists, or is also absent.
-  virtual bool IsAbsent(const Pathname& pathname) = 0;
-
-  // A folder appropriate for storing temporary files (Contents are
-  // automatically deleted when the program exits)
-  virtual bool GetTemporaryFolder(Pathname &path, bool create,
-                                  const std::string *append) = 0;
-
-  virtual std::string TempFilename(const Pathname &dir,
-                                   const std::string &prefix) = 0;
 
   // Determines the size of the file indicated by path.
   virtual bool GetFileSize(const Pathname& path, size_t* size) = 0;
@@ -132,10 +118,6 @@ class Filesystem {
     return cur;
   }
 
-  static bool CreateFolder(const Pathname &pathname) {
-    return EnsureDefaultFilesystem()->CreateFolder(pathname);
-  }
-
   static bool DeleteFile(const Pathname &filename) {
     return EnsureDefaultFilesystem()->DeleteFile(filename);
   }
@@ -152,20 +134,6 @@ class Filesystem {
     return EnsureDefaultFilesystem()->IsFile(pathname);
   }
 
-  static bool IsAbsent(const Pathname &pathname) {
-    return EnsureDefaultFilesystem()->IsAbsent(pathname);
-  }
-
-  static bool GetTemporaryFolder(Pathname &path, bool create,
-                                 const std::string *append) {
-    return EnsureDefaultFilesystem()->GetTemporaryFolder(path, create, append);
-  }
-
-  static std::string TempFilename(const Pathname &dir,
-                                  const std::string &prefix) {
-    return EnsureDefaultFilesystem()->TempFilename(dir, prefix);
-  }
-
   static bool GetFileSize(const Pathname& path, size_t* size) {
     return EnsureDefaultFilesystem()->GetFileSize(path, size);
   }
@@ -179,4 +147,4 @@ class Filesystem {
 
 }  // namespace rtc
 
-#endif  // WEBRTC_RTC_BASE_FILEUTILS_H_
+#endif  // RTC_BASE_FILEUTILS_H_

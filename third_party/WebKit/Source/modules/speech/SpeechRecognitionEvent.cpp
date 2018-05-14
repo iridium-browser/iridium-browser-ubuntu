@@ -76,9 +76,9 @@ SpeechRecognitionEvent::SpeechRecognitionEvent(
       result_index_(result_index),
       results_(results) {}
 
-SpeechRecognitionEvent::~SpeechRecognitionEvent() {}
+SpeechRecognitionEvent::~SpeechRecognitionEvent() = default;
 
-DEFINE_TRACE(SpeechRecognitionEvent) {
+void SpeechRecognitionEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(results_);
   Event::Trace(visitor);
 }

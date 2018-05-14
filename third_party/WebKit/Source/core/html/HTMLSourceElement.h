@@ -29,6 +29,7 @@
 #include "core/css/MediaQueryListListener.h"
 #include "core/html/HTMLElement.h"
 #include "platform/Timer.h"
+#include "platform/WebTaskRunner.h"
 
 namespace blink {
 
@@ -53,7 +54,7 @@ class HTMLSourceElement final : public HTMLElement {
   void RemoveMediaQueryListListener();
   void AddMediaQueryListListener();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit HTMLSourceElement(Document&);

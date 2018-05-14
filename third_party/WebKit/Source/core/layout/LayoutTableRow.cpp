@@ -26,7 +26,7 @@
 
 #include "core/layout/LayoutTableRow.h"
 
-#include "core/HTMLNames.h"
+#include "core/html_names.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutState.h"
@@ -66,7 +66,7 @@ void LayoutTableRow::StyleDidChange(StyleDifference diff,
 
   if (!Parent())
     return;
-  LayoutTable* table = this->Table();
+  LayoutTable* table = Table();
   if (!table)
     return;
 
@@ -95,6 +95,25 @@ void LayoutTableRow::StyleDidChange(StyleDifference diff,
     // at the table.
     // TODO(dgrogan): Make LayoutTableSection clear its dirty bit.
     table->SetPreferredLogicalWidthsDirty();
+  }
+
+  // When a row gets collapsed or uncollapsed, it's necessary to check all the
+  // rows to find any cell that may span the current row.
+  if ((old_style->Visibility() == EVisibility::kCollapse) !=
+      (Style()->Visibility() == EVisibility::kCollapse)) {
+    for (LayoutTableRow* row = Section()->FirstRow(); row;
+         row = row->NextRow()) {
+      for (LayoutTableCell* cell = row->FirstCell(); cell;
+           cell = cell->NextCell()) {
+        if (!cell->IsSpanningCollapsedRow())
+          continue;
+        unsigned rowIndex = RowIndex();
+        unsigned spanStart = cell->RowIndex();
+        unsigned spanEnd = spanStart + cell->ResolvedRowSpan();
+        if (spanStart <= rowIndex && rowIndex <= spanEnd)
+          cell->SetCellChildrenNeedLayout();
+      }
+    }
   }
 }
 
@@ -161,7 +180,7 @@ void LayoutTableRow::AddChild(LayoutObject* child, LayoutObject* before_child) {
     }
   }
 
-  if (before_child || NextRow())
+  if (before_child || NextRow() || !cell->ParsedRowSpan())
     Section()->SetNeedsCellRecalc();
 }
 
@@ -175,8 +194,13 @@ void LayoutTableRow::UpdateLayout() {
     cell->SetLogicalTop(LogicalTop());
     if (!cell->NeedsLayout())
       Section()->MarkChildForPaginationRelayoutIfNeeded(*cell, layouter);
-    if (cell->NeedsLayout())
+    if (cell->NeedsLayout()) {
+      // If we are laying out the cell's children clear its intrinsic
+      // padding so it doesn't skew the position of the content.
+      if (cell->CellChildrenNeedLayout())
+        cell->ClearIntrinsicPadding();
       cell->UpdateLayout();
+    }
     if (paginated)
       Section()->UpdateFragmentationInfoForChild(*cell);
   }
@@ -257,7 +281,7 @@ LayoutTableRow* LayoutTableRow::CreateAnonymousWithParent(
     const LayoutObject* parent) {
   LayoutTableRow* new_row =
       LayoutTableRow::CreateAnonymous(&parent->GetDocument());
-  RefPtr<ComputedStyle> new_style =
+  scoped_refptr<ComputedStyle> new_style =
       ComputedStyle::CreateAnonymousStyleWithDisplay(parent->StyleRef(),
                                                      EDisplay::kTableRow);
   new_row->SetStyle(std::move(new_style));
@@ -276,7 +300,7 @@ void LayoutTableRow::AddOverflowFromCell(const LayoutTableCell* cell) {
   // rows, the row's visual rect should be expanded to cover the cell.
   // Here don't check background existence to avoid requirement to invalidate
   // overflow on change of background existence.
-  if (cell->RowSpan() > 1) {
+  if (cell->ResolvedRowSpan() > 1) {
     LayoutRect cell_background_rect = cell->FrameRect();
     cell_background_rect.MoveBy(-Location());
     AddSelfVisualOverflow(cell_background_rect);
@@ -299,7 +323,7 @@ void LayoutTableRow::AddOverflowFromCell(const LayoutTableCell* cell) {
 
   // Should propagate cell's overflow to row if the cell has row span or has
   // overflow.
-  if (cell->RowSpan() == 1 && !cell->HasOverflowModel())
+  if (cell->ResolvedRowSpan() == 1 && !cell->HasOverflowModel())
     return;
 
   LayoutRect cell_visual_overflow_rect =

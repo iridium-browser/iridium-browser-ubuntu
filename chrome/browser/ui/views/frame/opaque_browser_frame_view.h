@@ -16,12 +16,17 @@
 #include "chrome/browser/ui/views/tab_icon_view_model.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
+#include "ui/views/linux_ui/linux_ui.h"
 #include "ui/views/window/non_client_view.h"
 
 class BrowserView;
 class OpaqueBrowserFrameViewLayout;
 class OpaqueBrowserFrameViewPlatformSpecific;
 class TabIconView;
+
+namespace chrome {
+enum class FrameButtonDisplayType;
+}
 
 namespace views {
 class ImageButton;
@@ -36,16 +41,20 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
                                public OpaqueBrowserFrameViewLayoutDelegate {
  public:
   // Constructs a non-client view for an BrowserFrame.
-  OpaqueBrowserFrameView(BrowserFrame* frame, BrowserView* browser_view);
+  OpaqueBrowserFrameView(BrowserFrame* frame,
+                         BrowserView* browser_view,
+                         OpaqueBrowserFrameViewLayout* layout);
   ~OpaqueBrowserFrameView() override;
 
   // BrowserNonClientFrameView:
+  void OnBrowserViewInitViewsComplete() override;
+  void OnMaximizedStateChanged() override;
+  void OnFullscreenStateChanged() override;
   gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const override;
   int GetTopInset(bool restored) const override;
   int GetThemeBackgroundXInset() const override;
   void UpdateThrobber(bool running) override;
   gfx::Size GetMinimumSize() const override;
-  views::View* GetProfileSwitcherView() const override;
 
   // views::NonClientFrameView:
   gfx::Rect GetBoundsForClientView() const override;
@@ -57,9 +66,11 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   void UpdateWindowIcon() override;
   void UpdateWindowTitle() override;
   void SizeConstraintsChanged() override;
+  void ActivationChanged(bool active) override;
 
   // views::View:
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  void OnNativeThemeChanged(const ui::NativeTheme* native_theme) override;
 
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
@@ -74,6 +85,7 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   gfx::ImageSkia GetFaviconForTabIconView() override;
 
   // OpaqueBrowserFrameViewLayoutDelegate implementation:
+  bool IsIncognito() const override;
   bool ShouldShowWindowIcon() const override;
   bool ShouldShowWindowTitle() const override;
   base::string16 GetWindowTitle() const override;
@@ -89,6 +101,8 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   int GetTabStripHeight() const override;
   bool IsToolbarVisible() const override;
   gfx::Size GetTabstripPreferredSize() const override;
+  int GetTopAreaHeight() const override;
+  bool UseCustomFrame() const override;
 
  protected:
   views::ImageButton* minimize_button() const { return minimize_button_; }
@@ -101,7 +115,13 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
 
   // BrowserNonClientFrameView:
   bool ShouldPaintAsThemed() const override;
-  void UpdateProfileIcons() override;
+  AvatarButtonStyle GetAvatarButtonStyle() const override;
+
+  OpaqueBrowserFrameViewLayout* layout() { return layout_; }
+
+  // If native window frame buttons are enabled, redraws the image resources
+  // associated with |{minimize,maximize,restore,close}_button_|.
+  virtual void MaybeRedrawFrameButtons();
 
  private:
   // Creates, adds and returns a new image button with |this| as its listener.
@@ -133,15 +153,11 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // Returns true if the view should draw its own custom title bar.
   bool ShouldShowWindowTitleBar() const;
 
-  // Computes the height of the top area of the frame.
-  int GetTopAreaHeight() const;
-
   // Paint various sub-components of this view.  The *FrameBorder() functions
   // also paint the background of the titlebar area, since the top frame border
   // and titlebar background are a contiguous component.
   void PaintRestoredFrameBorder(gfx::Canvas* canvas) const;
   void PaintMaximizedFrameBorder(gfx::Canvas* canvas) const;
-  void PaintToolbarBackground(gfx::Canvas* canvas) const;
   void PaintClientEdge(gfx::Canvas* canvas) const;
   void FillClientEdgeRects(int x,
                            int y,
@@ -163,9 +179,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // The window icon and title.
   TabIconView* window_icon_;
   views::Label* window_title_;
-
-  // Wrapper around the in-frame avatar switcher.
-  AvatarButtonManager profile_switcher_;
 
   // Background painter for the window frame.
   std::unique_ptr<views::FrameBackground> frame_background_;

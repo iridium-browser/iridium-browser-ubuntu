@@ -18,10 +18,19 @@ class Font;
 
 class PLATFORM_EXPORT Hyphenation : public RefCounted<Hyphenation> {
  public:
-  virtual ~Hyphenation() {}
+  virtual ~Hyphenation() = default;
 
+  // Find the last hyphenation location before |before_index|.
+  // Returns 0 if no hyphenation locations were found.
   virtual size_t LastHyphenLocation(const StringView&,
                                     size_t before_index) const = 0;
+
+  // Find the first hyphenation location after |after_index|.
+  // Returns 0 if no hyphenation locations were found.
+  virtual size_t FirstHyphenLocation(const StringView&,
+                                     size_t after_index) const;
+
+  // Find all hyphenation locations in the reverse order.
   virtual Vector<size_t, 8> HyphenLocations(const StringView&) const;
 
   static const unsigned kMinimumPrefixLength = 2;
@@ -30,7 +39,8 @@ class PLATFORM_EXPORT Hyphenation : public RefCounted<Hyphenation> {
 
  private:
   friend class LayoutLocale;
-  static RefPtr<Hyphenation> PlatformGetHyphenation(const AtomicString& locale);
+  static scoped_refptr<Hyphenation> PlatformGetHyphenation(
+      const AtomicString& locale);
 };
 
 }  // namespace blink

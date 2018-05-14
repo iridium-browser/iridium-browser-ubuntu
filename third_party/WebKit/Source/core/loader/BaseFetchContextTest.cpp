@@ -31,7 +31,8 @@
 #include "core/loader/BaseFetchContext.h"
 
 #include "core/testing/NullExecutionContext.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
+#include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -41,24 +42,27 @@ class MockBaseFetchContext final : public BaseFetchContext {
  public:
   explicit MockBaseFetchContext(ExecutionContext* execution_context)
       : execution_context_(execution_context) {}
-  ~MockBaseFetchContext() override {}
+  ~MockBaseFetchContext() override = default;
 
   // BaseFetchContext overrides:
-  KURL GetFirstPartyForCookies() const override { return KURL(); }
-  bool AllowScriptFromSource(const KURL&) const { return false; }
+  KURL GetSiteForCookies() const override { return KURL(); }
+  bool AllowScriptFromSource(const KURL&) const override { return false; }
   SubresourceFilter* GetSubresourceFilter() const override { return nullptr; }
-  bool ShouldBlockRequestByInspector(const ResourceRequest&) const override {
+  bool ShouldBlockRequestByInspector(const KURL&) const override {
     return false;
   }
   void DispatchDidBlockRequest(const ResourceRequest&,
                                const FetchInitiatorInfo&,
-                               ResourceRequestBlockedReason) const override {}
+                               ResourceRequestBlockedReason,
+                               Resource::Type) const override {}
   bool ShouldBypassMainWorldCSP() const override { return false; }
   bool IsSVGImageChromeClient() const override { return false; }
   void CountUsage(WebFeature) const override {}
   void CountDeprecation(WebFeature) const override {}
   bool ShouldBlockFetchByMixedContentCheck(
-      const ResourceRequest&,
+      WebURLRequest::RequestContext,
+      network::mojom::RequestContextFrameType,
+      ResourceRequest::RedirectStatus,
       const KURL&,
       SecurityViolationReportingPolicy) const override {
     return false;
@@ -75,13 +79,13 @@ class MockBaseFetchContext final : public BaseFetchContext {
   }
   const KURL& Url() const override { return execution_context_->Url(); }
 
-  SecurityOrigin* GetSecurityOrigin() const override {
+  const SecurityOrigin* GetSecurityOrigin() const override {
     return execution_context_->GetSecurityOrigin();
   }
   const SecurityOrigin* GetParentSecurityOrigin() const override {
     return nullptr;
   }
-  Optional<WebAddressSpace> GetAddressSpace() const override {
+  Optional<mojom::IPAddressSpace> GetAddressSpace() const override {
     return WTF::make_optional(
         execution_context_->GetSecurityContext().AddressSpace());
   }
@@ -90,7 +94,7 @@ class MockBaseFetchContext final : public BaseFetchContext {
   }
   void AddConsoleMessage(ConsoleMessage*) const override {}
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(execution_context_);
     BaseFetchContext::Trace(visitor);
   }
@@ -117,7 +121,7 @@ class BaseFetchContextTest : public ::testing::Test {
 };
 
 TEST_F(BaseFetchContextTest, SetIsExternalRequestForPublicContext) {
-  EXPECT_EQ(kWebAddressSpacePublic,
+  EXPECT_EQ(mojom::IPAddressSpace::kPublic,
             execution_context_->GetSecurityContext().AddressSpace());
 
   struct TestCase {
@@ -133,37 +137,43 @@ TEST_F(BaseFetchContextTest, SetIsExternalRequestForPublicContext) {
 
       {"http://localhost/", true},         {"http://127.0.0.1/", true},
       {"http://127.0.0.1:8000/", true}};
-  RuntimeEnabledFeatures::SetCorsRFC1918Enabled(false);
-  for (const auto& test : cases) {
-    SCOPED_TRACE(test.url);
-    ResourceRequest main_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(main_request,
-                                                kFetchMainResource);
-    EXPECT_FALSE(main_request.IsExternalRequest());
+  {
+    ScopedCorsRFC1918ForTest cors_rfc1918(false);
+    for (const auto& test : cases) {
+      SCOPED_TRACE(test.url);
+      ResourceRequest main_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(main_request,
+                                                  kFetchMainResource);
+      EXPECT_FALSE(main_request.IsExternalRequest());
 
-    ResourceRequest sub_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(sub_request, kFetchSubresource);
-    EXPECT_FALSE(sub_request.IsExternalRequest());
+      ResourceRequest sub_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(sub_request,
+                                                  kFetchSubresource);
+      EXPECT_FALSE(sub_request.IsExternalRequest());
+    }
   }
 
-  RuntimeEnabledFeatures::SetCorsRFC1918Enabled(true);
-  for (const auto& test : cases) {
-    SCOPED_TRACE(test.url);
-    ResourceRequest main_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(main_request,
-                                                kFetchMainResource);
-    EXPECT_EQ(test.is_external_expectation, main_request.IsExternalRequest());
+  {
+    ScopedCorsRFC1918ForTest cors_rfc1918(true);
+    for (const auto& test : cases) {
+      SCOPED_TRACE(test.url);
+      ResourceRequest main_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(main_request,
+                                                  kFetchMainResource);
+      EXPECT_EQ(test.is_external_expectation, main_request.IsExternalRequest());
 
-    ResourceRequest sub_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(sub_request, kFetchSubresource);
-    EXPECT_EQ(test.is_external_expectation, sub_request.IsExternalRequest());
+      ResourceRequest sub_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(sub_request,
+                                                  kFetchSubresource);
+      EXPECT_EQ(test.is_external_expectation, sub_request.IsExternalRequest());
+    }
   }
 }
 
 TEST_F(BaseFetchContextTest, SetIsExternalRequestForPrivateContext) {
   execution_context_->GetSecurityContext().SetAddressSpace(
-      kWebAddressSpacePrivate);
-  EXPECT_EQ(kWebAddressSpacePrivate,
+      mojom::IPAddressSpace::kPrivate);
+  EXPECT_EQ(mojom::IPAddressSpace::kPrivate,
             execution_context_->GetSecurityContext().AddressSpace());
 
   struct TestCase {
@@ -179,37 +189,43 @@ TEST_F(BaseFetchContextTest, SetIsExternalRequestForPrivateContext) {
 
       {"http://localhost/", true},         {"http://127.0.0.1/", true},
       {"http://127.0.0.1:8000/", true}};
-  RuntimeEnabledFeatures::SetCorsRFC1918Enabled(false);
-  for (const auto& test : cases) {
-    SCOPED_TRACE(test.url);
-    ResourceRequest main_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(main_request,
-                                                kFetchMainResource);
-    EXPECT_FALSE(main_request.IsExternalRequest());
+  {
+    ScopedCorsRFC1918ForTest cors_rfc1918(false);
+    for (const auto& test : cases) {
+      SCOPED_TRACE(test.url);
+      ResourceRequest main_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(main_request,
+                                                  kFetchMainResource);
+      EXPECT_FALSE(main_request.IsExternalRequest());
 
-    ResourceRequest sub_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(sub_request, kFetchSubresource);
-    EXPECT_FALSE(sub_request.IsExternalRequest());
+      ResourceRequest sub_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(sub_request,
+                                                  kFetchSubresource);
+      EXPECT_FALSE(sub_request.IsExternalRequest());
+    }
   }
 
-  RuntimeEnabledFeatures::SetCorsRFC1918Enabled(true);
-  for (const auto& test : cases) {
-    SCOPED_TRACE(test.url);
-    ResourceRequest main_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(main_request,
-                                                kFetchMainResource);
-    EXPECT_EQ(test.is_external_expectation, main_request.IsExternalRequest());
+  {
+    ScopedCorsRFC1918ForTest cors_rfc1918(true);
+    for (const auto& test : cases) {
+      SCOPED_TRACE(test.url);
+      ResourceRequest main_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(main_request,
+                                                  kFetchMainResource);
+      EXPECT_EQ(test.is_external_expectation, main_request.IsExternalRequest());
 
-    ResourceRequest sub_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(sub_request, kFetchSubresource);
-    EXPECT_EQ(test.is_external_expectation, sub_request.IsExternalRequest());
+      ResourceRequest sub_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(sub_request,
+                                                  kFetchSubresource);
+      EXPECT_EQ(test.is_external_expectation, sub_request.IsExternalRequest());
+    }
   }
 }
 
 TEST_F(BaseFetchContextTest, SetIsExternalRequestForLocalContext) {
   execution_context_->GetSecurityContext().SetAddressSpace(
-      kWebAddressSpaceLocal);
-  EXPECT_EQ(kWebAddressSpaceLocal,
+      mojom::IPAddressSpace::kLocal);
+  EXPECT_EQ(mojom::IPAddressSpace::kLocal,
             execution_context_->GetSecurityContext().AddressSpace());
 
   struct TestCase {
@@ -225,35 +241,39 @@ TEST_F(BaseFetchContextTest, SetIsExternalRequestForLocalContext) {
 
       {"http://localhost/", false},        {"http://127.0.0.1/", false},
       {"http://127.0.0.1:8000/", false}};
+  {
+    ScopedCorsRFC1918ForTest cors_rfc1918(false);
+    for (const auto& test : cases) {
+      ResourceRequest main_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(main_request,
+                                                  kFetchMainResource);
+      EXPECT_FALSE(main_request.IsExternalRequest());
 
-  RuntimeEnabledFeatures::SetCorsRFC1918Enabled(false);
-  for (const auto& test : cases) {
-    ResourceRequest main_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(main_request,
-                                                kFetchMainResource);
-    EXPECT_FALSE(main_request.IsExternalRequest());
-
-    ResourceRequest sub_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(sub_request, kFetchSubresource);
-    EXPECT_FALSE(sub_request.IsExternalRequest());
+      ResourceRequest sub_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(sub_request,
+                                                  kFetchSubresource);
+      EXPECT_FALSE(sub_request.IsExternalRequest());
+    }
   }
 
-  RuntimeEnabledFeatures::SetCorsRFC1918Enabled(true);
-  for (const auto& test : cases) {
-    ResourceRequest main_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(main_request,
-                                                kFetchMainResource);
-    EXPECT_EQ(test.is_external_expectation, main_request.IsExternalRequest());
+  {
+    ScopedCorsRFC1918ForTest cors_rfc1918(true);
+    for (const auto& test : cases) {
+      ResourceRequest main_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(main_request,
+                                                  kFetchMainResource);
+      EXPECT_EQ(test.is_external_expectation, main_request.IsExternalRequest());
 
-    ResourceRequest sub_request(test.url);
-    fetch_context_->AddAdditionalRequestHeaders(sub_request, kFetchSubresource);
-    EXPECT_EQ(test.is_external_expectation, sub_request.IsExternalRequest());
+      ResourceRequest sub_request(test.url);
+      fetch_context_->AddAdditionalRequestHeaders(sub_request,
+                                                  kFetchSubresource);
+      EXPECT_EQ(test.is_external_expectation, sub_request.IsExternalRequest());
+    }
   }
 }
 
-// Tests that CanFollowRedirect() checks both report-only and enforced CSP
-// headers.
-TEST_F(BaseFetchContextTest, RedirectChecksReportedAndEnforcedCSP) {
+// Tests that CanRequest() checks the enforced CSP headers.
+TEST_F(BaseFetchContextTest, CanRequest) {
   ContentSecurityPolicy* policy =
       execution_context_->GetContentSecurityPolicy();
   policy->DidReceiveHeader("script-src https://foo.test",
@@ -267,20 +287,21 @@ TEST_F(BaseFetchContextTest, RedirectChecksReportedAndEnforcedCSP) {
   ResourceRequest resource_request(url);
   resource_request.SetRequestContext(WebURLRequest::kRequestContextScript);
   resource_request.SetFetchCredentialsMode(
-      WebURLRequest::kFetchCredentialsModeOmit);
+      network::mojom::FetchCredentialsMode::kOmit);
 
   ResourceLoaderOptions options;
 
   EXPECT_EQ(ResourceRequestBlockedReason::kCSP,
-            fetch_context_->CanFollowRedirect(
+            fetch_context_->CanRequest(
                 Resource::kScript, resource_request, url, options,
                 SecurityViolationReportingPolicy::kReport,
-                FetchParameters::kUseDefaultOriginRestrictionForType));
-  EXPECT_EQ(2u, policy->violation_reports_sent_.size());
+                FetchParameters::kUseDefaultOriginRestrictionForType,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+  EXPECT_EQ(1u, policy->violation_reports_sent_.size());
 }
 
-// Tests that AllowResponse() checks both report-only and enforced CSP headers.
-TEST_F(BaseFetchContextTest, AllowResponseChecksReportedAndEnforcedCSP) {
+// Tests that CheckCSPForRequest() checks the report-only CSP headers.
+TEST_F(BaseFetchContextTest, CheckCSPForRequest) {
   ContentSecurityPolicy* policy =
       execution_context_->GetContentSecurityPolicy();
   policy->DidReceiveHeader("script-src https://foo.test",
@@ -291,17 +312,15 @@ TEST_F(BaseFetchContextTest, AllowResponseChecksReportedAndEnforcedCSP) {
                            kContentSecurityPolicyHeaderSourceHTTP);
 
   KURL url(NullURL(), "http://baz.test");
-  ResourceRequest resource_request(url);
-  resource_request.SetRequestContext(WebURLRequest::kRequestContextScript);
-  resource_request.SetFetchCredentialsMode(
-      WebURLRequest::kFetchCredentialsModeOmit);
 
   ResourceLoaderOptions options;
 
-  EXPECT_EQ(ResourceRequestBlockedReason::kCSP,
-            fetch_context_->AllowResponse(Resource::kScript, resource_request,
-                                          url, options));
-  EXPECT_EQ(2u, policy->violation_reports_sent_.size());
+  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+            fetch_context_->CheckCSPForRequest(
+                WebURLRequest::kRequestContextScript, url, options,
+                SecurityViolationReportingPolicy::kReport,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+  EXPECT_EQ(1u, policy->violation_reports_sent_.size());
 }
 
 TEST_F(BaseFetchContextTest, CanRequestWhenDetached) {
@@ -314,13 +333,29 @@ TEST_F(BaseFetchContextTest, CanRequestWhenDetached) {
             fetch_context_->CanRequest(
                 Resource::kRaw, request, url, ResourceLoaderOptions(),
                 SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction));
+                FetchParameters::kNoOriginRestriction,
+                ResourceRequest::RedirectStatus::kNoRedirect));
 
   EXPECT_EQ(ResourceRequestBlockedReason::kNone,
             fetch_context_->CanRequest(
                 Resource::kRaw, keepalive_request, url, ResourceLoaderOptions(),
                 SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction));
+                FetchParameters::kNoOriginRestriction,
+                ResourceRequest::RedirectStatus::kNoRedirect));
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+            fetch_context_->CanRequest(
+                Resource::kRaw, request, url, ResourceLoaderOptions(),
+                SecurityViolationReportingPolicy::kSuppressReporting,
+                FetchParameters::kNoOriginRestriction,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+            fetch_context_->CanRequest(
+                Resource::kRaw, keepalive_request, url, ResourceLoaderOptions(),
+                SecurityViolationReportingPolicy::kSuppressReporting,
+                FetchParameters::kNoOriginRestriction,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
 
   fetch_context_->SetIsDetached(true);
 
@@ -328,13 +363,82 @@ TEST_F(BaseFetchContextTest, CanRequestWhenDetached) {
             fetch_context_->CanRequest(
                 Resource::kRaw, request, url, ResourceLoaderOptions(),
                 SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction));
+                FetchParameters::kNoOriginRestriction,
+                ResourceRequest::RedirectStatus::kNoRedirect));
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kOther,
+            fetch_context_->CanRequest(
+                Resource::kRaw, keepalive_request, url, ResourceLoaderOptions(),
+                SecurityViolationReportingPolicy::kSuppressReporting,
+                FetchParameters::kNoOriginRestriction,
+                ResourceRequest::RedirectStatus::kNoRedirect));
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kOther,
+            fetch_context_->CanRequest(
+                Resource::kRaw, request, url, ResourceLoaderOptions(),
+                SecurityViolationReportingPolicy::kSuppressReporting,
+                FetchParameters::kNoOriginRestriction,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
 
   EXPECT_EQ(ResourceRequestBlockedReason::kNone,
             fetch_context_->CanRequest(
                 Resource::kRaw, keepalive_request, url, ResourceLoaderOptions(),
                 SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction));
+                FetchParameters::kNoOriginRestriction,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+}
+
+// Test that User Agent CSS can only load images with data urls.
+TEST_F(BaseFetchContextTest, UACSSTest) {
+  KURL test_url("https://example.com");
+  KURL data_url("data:image/png;base64,test");
+
+  ResourceRequest resource_request(test_url);
+  ResourceLoaderOptions options;
+  options.initiator_info.name = FetchInitiatorTypeNames::uacss;
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kOther,
+            fetch_context_->CanRequest(
+                Resource::kScript, resource_request, test_url, options,
+                SecurityViolationReportingPolicy::kReport,
+                FetchParameters::kUseDefaultOriginRestrictionForType,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kOther,
+            fetch_context_->CanRequest(
+                Resource::kImage, resource_request, test_url, options,
+                SecurityViolationReportingPolicy::kReport,
+                FetchParameters::kUseDefaultOriginRestrictionForType,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+            fetch_context_->CanRequest(
+                Resource::kImage, resource_request, data_url, options,
+                SecurityViolationReportingPolicy::kReport,
+                FetchParameters::kUseDefaultOriginRestrictionForType,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+}
+
+// Test that User Agent CSS can bypass CSP to load embedded images.
+TEST_F(BaseFetchContextTest, UACSSTest_BypassCSP) {
+  ContentSecurityPolicy* policy =
+      execution_context_->GetContentSecurityPolicy();
+  policy->DidReceiveHeader("default-src 'self'",
+                           kContentSecurityPolicyHeaderTypeEnforce,
+                           kContentSecurityPolicyHeaderSourceHTTP);
+
+  KURL data_url("data:image/png;base64,test");
+
+  ResourceRequest resource_request(data_url);
+  ResourceLoaderOptions options;
+  options.initiator_info.name = FetchInitiatorTypeNames::uacss;
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+            fetch_context_->CanRequest(
+                Resource::kImage, resource_request, data_url, options,
+                SecurityViolationReportingPolicy::kReport,
+                FetchParameters::kUseDefaultOriginRestrictionForType,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
 }
 
 }  // namespace blink

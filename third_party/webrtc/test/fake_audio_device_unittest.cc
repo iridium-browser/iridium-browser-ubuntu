@@ -11,11 +11,11 @@
 #include <algorithm>
 #include <array>
 
-#include "webrtc/common_audio/wav_file.h"
-#include "webrtc/common_audio/wav_header.h"
-#include "webrtc/test/fake_audio_device.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/testsupport/fileutils.h"
+#include "common_audio/wav_file.h"
+#include "common_audio/wav_header.h"
+#include "test/fake_audio_device.h"
+#include "test/gtest.h"
+#include "test/testsupport/fileutils.h"
 
 namespace webrtc {
 namespace test {
@@ -125,6 +125,32 @@ TEST(BoundedWavFileWriterTest, EndSilenceCutoff) {
   static const std::vector<int16_t> kExpectedSamples(kInputSamples.begin(),
                                                      kInputSamples.end() - 4);
   RunTest(kInputSamples, kExpectedSamples, 8);
+}
+
+TEST(PulsedNoiseCapturerTest, SetMaxAmplitude) {
+  const int16_t kAmplitude = 50;
+  std::unique_ptr<FakeAudioDevice::PulsedNoiseCapturer> capturer =
+      FakeAudioDevice::CreatePulsedNoiseCapturer(
+          kAmplitude, /*sampling_frequency_in_hz=*/8000);
+  rtc::BufferT<int16_t> recording_buffer;
+
+  // Verify that the capturer doesn't create entries louder than than
+  // kAmplitude. Since the pulse generator alternates between writing
+  // zeroes and actual entries, we need to do the capturing twice.
+  capturer->Capture(&recording_buffer);
+  capturer->Capture(&recording_buffer);
+  int16_t max_sample =
+      *std::max_element(recording_buffer.begin(), recording_buffer.end());
+  EXPECT_LE(max_sample, kAmplitude);
+
+  // Increase the amplitude and verify that the samples can now be louder
+  // than the previous max.
+  capturer->SetMaxAmplitude(kAmplitude * 2);
+  capturer->Capture(&recording_buffer);
+  capturer->Capture(&recording_buffer);
+  max_sample =
+      *std::max_element(recording_buffer.begin(), recording_buffer.end());
+  EXPECT_GT(max_sample, kAmplitude);
 }
 
 }  // namespace test

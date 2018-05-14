@@ -29,7 +29,7 @@ const char kBrowserTabRestorerKey[] = "BrowserTabRestorer";
 // BrowserTabRestorer is installed on the Profile (by way of user data), only
 // one instance is created per profile at a time.
 class BrowserTabRestorer : public sessions::TabRestoreServiceObserver,
-                           public chrome::BrowserListObserver,
+                           public BrowserListObserver,
                            public base::SupportsUserData::Data {
  public:
   ~BrowserTabRestorer() override;
@@ -40,7 +40,6 @@ class BrowserTabRestorer : public sessions::TabRestoreServiceObserver,
   explicit BrowserTabRestorer(Browser* browser);
 
   // TabRestoreServiceObserver:
-  void TabRestoreServiceChanged(sessions::TabRestoreService* service) override;
   void TabRestoreServiceDestroyed(
       sessions::TabRestoreService* service) override;
   void TabRestoreServiceLoaded(sessions::TabRestoreService* service) override;
@@ -81,9 +80,6 @@ BrowserTabRestorer::BrowserTabRestorer(Browser* browser)
                                    base::WrapUnique(this));
   tab_restore_service_->LoadTabsFromLastSession();
 }
-
-void BrowserTabRestorer::TabRestoreServiceChanged(
-    sessions::TabRestoreService* service) {}
 
 void BrowserTabRestorer::TabRestoreServiceDestroyed(
     sessions::TabRestoreService* service) {}

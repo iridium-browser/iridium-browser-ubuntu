@@ -4,25 +4,23 @@
 
 #import "ios/chrome/browser/ui/payments/contact_info_edit_coordinator.h"
 
+#include <memory>
+
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/ios/wait_util.h"
-#include "base/test/scoped_task_environment.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/test_personal_data_manager.h"
 #include "components/autofill/core/browser/test_region_data_loader.h"
-#include "components/payments/core/payments_profile_comparator.h"
-#include "components/prefs/pref_service.h"
-#include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #include "ios/chrome/browser/payments/payment_request_test_util.h"
+#include "ios/chrome/browser/payments/payment_request_unittest_base.h"
 #include "ios/chrome/browser/payments/test_payment_request.h"
 #import "ios/chrome/browser/ui/payments/payment_request_edit_view_controller.h"
 #import "ios/chrome/browser/ui/payments/payment_request_editor_field.h"
+#import "ios/chrome/browser/ui/payments/payment_request_navigation_controller.h"
 #import "ios/chrome/test/scoped_key_window.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -34,25 +32,12 @@
 #endif
 
 namespace {
-class MockTestPersonalDataManager : public autofill::TestPersonalDataManager {
- public:
-  MockTestPersonalDataManager() : TestPersonalDataManager() {}
-  MOCK_METHOD1(AddProfile, void(const autofill::AutofillProfile&));
-  MOCK_METHOD1(UpdateProfile, void(const autofill::AutofillProfile&));
-};
 
-class MockPaymentsProfileComparator
-    : public payments::PaymentsProfileComparator {
- public:
-  MockPaymentsProfileComparator(const std::string& app_locale,
-                                const payments::PaymentOptionsProvider& options)
-      : PaymentsProfileComparator(app_locale, options) {}
-  MOCK_METHOD1(Invalidate, void(const autofill::AutofillProfile&));
-};
+using ::testing::_;
 
 class MockTestPaymentRequest : public payments::TestPaymentRequest {
  public:
-  MockTestPaymentRequest(web::PaymentRequest web_payment_request,
+  MockTestPaymentRequest(payments::WebPaymentRequest web_payment_request,
                          ios::ChromeBrowserState* browser_state,
                          web::WebState* web_state,
                          autofill::PersonalDataManager* personal_data_manager)
@@ -62,6 +47,7 @@ class MockTestPaymentRequest : public payments::TestPaymentRequest {
                                      personal_data_manager) {}
   MOCK_METHOD1(AddAutofillProfile,
                autofill::AutofillProfile*(const autofill::AutofillProfile&));
+  MOCK_METHOD1(UpdateAutofillProfile, void(const autofill::AutofillProfile&));
 };
 
 MATCHER_P3(ProfileMatches, name, email, phone_number, "") {
@@ -92,41 +78,35 @@ NSArray<EditorField*>* GetEditorFields() {
                       required:YES],
   ];
 }
-
-using ::testing::_;
 }  // namespace
 
-class PaymentRequestContactInfoEditCoordinatorTest : public PlatformTest {
+class PaymentRequestContactInfoEditCoordinatorTest
+    : public PaymentRequestUnitTestBase,
+      public PlatformTest {
  protected:
-  PaymentRequestContactInfoEditCoordinatorTest()
-      : pref_service_(autofill::test::PrefServiceForTesting()),
-        chrome_browser_state_(TestChromeBrowserState::Builder().Build()) {
-    personal_data_manager_.SetTestingPrefService(pref_service_.get());
+  PaymentRequestContactInfoEditCoordinatorTest() {}
 
-    payment_request_ = base::MakeUnique<MockTestPaymentRequest>(
+  void SetUp() override {
+    PaymentRequestUnitTestBase::SetUp();
+
+    personal_data_manager_.SetPrefService(pref_service());
+
+    payment_request_ = std::make_unique<MockTestPaymentRequest>(
         payment_request_test_util::CreateTestWebPaymentRequest(),
-        chrome_browser_state_.get(), &web_state_, &personal_data_manager_);
-
-    profile_comparator_ = base::MakeUnique<MockPaymentsProfileComparator>(
-        payment_request_->GetApplicationLocale(), *payment_request_.get());
-    payment_request_->SetProfileComparator(profile_comparator_.get());
+        browser_state(), web_state(), &personal_data_manager_);
 
     test_region_data_loader_.set_synchronous_callback(true);
     payment_request_->SetRegionDataLoader(&test_region_data_loader_);
   }
 
   void TearDown() override {
-    personal_data_manager_.SetTestingPrefService(nullptr);
+    personal_data_manager_.SetPrefService(nullptr);
+
+    PaymentRequestUnitTestBase::TearDown();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_evironment_;
-
-  web::TestWebState web_state_;
-  std::unique_ptr<PrefService> pref_service_;
-  MockTestPersonalDataManager personal_data_manager_;
+  autofill::TestPersonalDataManager personal_data_manager_;
   autofill::TestRegionDataLoader test_region_data_loader_;
-  std::unique_ptr<MockPaymentsProfileComparator> profile_comparator_;
-  std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
   std::unique_ptr<MockTestPaymentRequest> payment_request_;
 };
 
@@ -147,9 +127,9 @@ TEST_F(PaymentRequestContactInfoEditCoordinatorTest, StartAndStop) {
   // Spin the run loop to trigger the animation.
   base::test::ios::SpinRunLoopWithMaxDelay(base::TimeDelta::FromSecondsD(1.0));
   EXPECT_TRUE([base_view_controller.presentedViewController
-      isMemberOfClass:[UINavigationController class]]);
-  UINavigationController* navigation_controller =
-      base::mac::ObjCCastStrict<UINavigationController>(
+      isMemberOfClass:[PaymentRequestNavigationController class]]);
+  PaymentRequestNavigationController* navigation_controller =
+      base::mac::ObjCCastStrict<PaymentRequestNavigationController>(
           base_view_controller.presentedViewController);
   EXPECT_TRUE([navigation_controller.visibleViewController
       isMemberOfClass:[PaymentRequestEditViewController class]]);
@@ -198,21 +178,14 @@ TEST_F(PaymentRequestContactInfoEditCoordinatorTest, DidFinishCreating) {
               AddAutofillProfile(
                   ProfileMatches("John Doe", "john@doe.com", "1 650-211-1111")))
       .Times(1);
-  // Expect an autofill profile to be added to the PersonalDataManager.
-  EXPECT_CALL(
-      personal_data_manager_,
-      AddProfile(ProfileMatches("John Doe", "john@doe.com", "1 650-211-1111")))
-      .Times(1);
-  // No autofill profile should get updated in the PersonalDataManager.
-  EXPECT_CALL(personal_data_manager_, UpdateProfile(_)).Times(0);
-  // No autofill profile should get invalidated in PaymentsProfileComparator.
-  EXPECT_CALL(*profile_comparator_, Invalidate(_)).Times(0);
+  // No autofill profile should get updated in the PaymentRequest.
+  EXPECT_CALL(*payment_request_, UpdateAutofillProfile(_)).Times(0);
 
   // Call the controller delegate method.
   EXPECT_TRUE([base_view_controller.presentedViewController
-      isMemberOfClass:[UINavigationController class]]);
-  UINavigationController* navigation_controller =
-      base::mac::ObjCCastStrict<UINavigationController>(
+      isMemberOfClass:[PaymentRequestNavigationController class]]);
+  PaymentRequestNavigationController* navigation_controller =
+      base::mac::ObjCCastStrict<PaymentRequestNavigationController>(
           base_view_controller.presentedViewController);
   PaymentRequestEditViewController* view_controller =
       base::mac::ObjCCastStrict<PaymentRequestEditViewController>(
@@ -259,24 +232,17 @@ TEST_F(PaymentRequestContactInfoEditCoordinatorTest, DidFinishEditing) {
 
   // No autofill profile should get added to the PaymentRequest.
   EXPECT_CALL(*payment_request_, AddAutofillProfile(_)).Times(0);
-  // No autofill profile should get added to the PersonalDataManager.
-  EXPECT_CALL(personal_data_manager_, AddProfile(_)).Times(0);
-  // Expect an autofill profile to be updated in the PersonalDataManager.
-  EXPECT_CALL(personal_data_manager_,
-              UpdateProfile(
+  // Expect an autofill profile to be updated in the PaymentRequest.
+  EXPECT_CALL(*payment_request_,
+              UpdateAutofillProfile(
                   ProfileMatches("John Doe", "john@doe.com", "1 650-211-1111")))
-      .Times(1);
-  // Expect an autofill profile to be invalidated in PaymentsProfileComparator.
-  EXPECT_CALL(
-      *profile_comparator_,
-      Invalidate(ProfileMatches("John Doe", "john@doe.com", "1 650-211-1111")))
       .Times(1);
 
   // Call the controller delegate method.
   EXPECT_TRUE([base_view_controller.presentedViewController
-      isMemberOfClass:[UINavigationController class]]);
-  UINavigationController* navigation_controller =
-      base::mac::ObjCCastStrict<UINavigationController>(
+      isMemberOfClass:[PaymentRequestNavigationController class]]);
+  PaymentRequestNavigationController* navigation_controller =
+      base::mac::ObjCCastStrict<PaymentRequestNavigationController>(
           base_view_controller.presentedViewController);
   PaymentRequestEditViewController* view_controller =
       base::mac::ObjCCastStrict<PaymentRequestEditViewController>(
@@ -314,9 +280,9 @@ TEST_F(PaymentRequestContactInfoEditCoordinatorTest, DidCancel) {
 
   // Call the controller delegate method.
   EXPECT_TRUE([base_view_controller.presentedViewController
-      isMemberOfClass:[UINavigationController class]]);
-  UINavigationController* navigation_controller =
-      base::mac::ObjCCastStrict<UINavigationController>(
+      isMemberOfClass:[PaymentRequestNavigationController class]]);
+  PaymentRequestNavigationController* navigation_controller =
+      base::mac::ObjCCastStrict<PaymentRequestNavigationController>(
           base_view_controller.presentedViewController);
   PaymentRequestEditViewController* view_controller =
       base::mac::ObjCCastStrict<PaymentRequestEditViewController>(

@@ -21,8 +21,8 @@ enum class ColorSpaceGamut;
 
 class CORE_EXPORT MediaValues : public GarbageCollectedFinalized<MediaValues> {
  public:
-  virtual ~MediaValues() {}
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual ~MediaValues() = default;
+  virtual void Trace(blink::Visitor* visitor) {}
 
   static MediaValues* CreateDynamicIfFrameExists(LocalFrame*);
   virtual MediaValues* Copy() const = 0;
@@ -66,6 +66,7 @@ class CORE_EXPORT MediaValues : public GarbageCollectedFinalized<MediaValues> {
   virtual HoverType PrimaryHoverType() const = 0;
   virtual int AvailableHoverTypes() const = 0;
   virtual bool ThreeDEnabled() const = 0;
+  virtual bool InImmersiveMode() const = 0;
   virtual const String MediaType() const = 0;
   virtual WebDisplayMode DisplayMode() const = 0;
   virtual bool StrictMode() const = 0;
@@ -89,13 +90,13 @@ class CORE_EXPORT MediaValues : public GarbageCollectedFinalized<MediaValues> {
   static const String CalculateMediaType(LocalFrame*);
   static WebDisplayMode CalculateDisplayMode(LocalFrame*);
   static bool CalculateThreeDEnabled(LocalFrame*);
+  static bool CalculateInImmersiveMode(LocalFrame*);
   static PointerType CalculatePrimaryPointerType(LocalFrame*);
   static int CalculateAvailablePointerTypes(LocalFrame*);
   static HoverType CalculatePrimaryHoverType(LocalFrame*);
   static int CalculateAvailableHoverTypes(LocalFrame*);
   static DisplayShape CalculateDisplayShape(LocalFrame*);
   static ColorSpaceGamut CalculateColorGamut(LocalFrame*);
-  static LocalFrame* FrameFrom(Document&);
 };
 
 }  // namespace blink

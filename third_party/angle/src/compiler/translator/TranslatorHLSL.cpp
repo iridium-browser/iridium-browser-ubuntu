@@ -14,15 +14,18 @@
 #include "compiler/translator/IntermNodePatternMatcher.h"
 #include "compiler/translator/OutputHLSL.h"
 #include "compiler/translator/RemoveDynamicIndexing.h"
+#include "compiler/translator/RemoveNoOpCasesFromEndOfSwitchStatements.h"
 #include "compiler/translator/RewriteElseBlocks.h"
 #include "compiler/translator/RewriteTexelFetchOffset.h"
 #include "compiler/translator/RewriteUnaryMinusOperatorInt.h"
+#include "compiler/translator/SeparateArrayConstructorStatements.h"
 #include "compiler/translator/SeparateArrayInitialization.h"
 #include "compiler/translator/SeparateDeclarations.h"
 #include "compiler/translator/SeparateExpressionsReturningArrays.h"
 #include "compiler/translator/SimplifyLoopConditions.h"
 #include "compiler/translator/SplitSequenceOperator.h"
 #include "compiler/translator/UnfoldShortCircuitToIf.h"
+#include "compiler/translator/WrapSwitchStatementsInBlocks.h"
 
 namespace sh
 {
@@ -32,7 +35,9 @@ TranslatorHLSL::TranslatorHLSL(sh::GLenum type, ShShaderSpec spec, ShShaderOutpu
 {
 }
 
-void TranslatorHLSL::translate(TIntermBlock *root, ShCompileOptions compileOptions)
+void TranslatorHLSL::translate(TIntermBlock *root,
+                               ShCompileOptions compileOptions,
+                               PerformanceDiagnostics *perfDiagnostics)
 {
     const ShBuiltInResources &resources = getResources();
     int numRenderTargets                = resources.EXT_draw_buffers ? resources.MaxDrawBuffers : 1;
@@ -41,25 +46,23 @@ void TranslatorHLSL::translate(TIntermBlock *root, ShCompileOptions compileOptio
 
     // Note that SimplifyLoopConditions needs to be run before any other AST transformations that
     // may need to generate new statements from loop conditions or loop expressions.
+    // Note that SeparateDeclarations has already been run in TCompiler::compileTreeImpl().
     SimplifyLoopConditions(root,
                            IntermNodePatternMatcher::kExpressionReturningArray |
                                IntermNodePatternMatcher::kUnfoldedShortCircuitExpression |
-                               IntermNodePatternMatcher::kDynamicIndexingOfVectorOrMatrixInLValue |
-                               IntermNodePatternMatcher::kMultiDeclaration,
-                           &getSymbolTable(), getShaderVersion());
-
-    // Note that separate declarations need to be run before other AST transformations that
-    // generate new statements from expressions.
-    SeparateDeclarations(root);
+                               IntermNodePatternMatcher::kDynamicIndexingOfVectorOrMatrixInLValue,
+                           &getSymbolTable());
 
     SplitSequenceOperator(root,
                           IntermNodePatternMatcher::kExpressionReturningArray |
                               IntermNodePatternMatcher::kUnfoldedShortCircuitExpression |
                               IntermNodePatternMatcher::kDynamicIndexingOfVectorOrMatrixInLValue,
-                          &getSymbolTable(), getShaderVersion());
+                          &getSymbolTable());
 
     // Note that SeparateDeclarations needs to be run before UnfoldShortCircuitToIf.
     UnfoldShortCircuitToIf(root, &getSymbolTable());
+
+    SeparateArrayConstructorStatements(root);
 
     SeparateExpressionsReturningArrays(root, &getSymbolTable());
 
@@ -73,7 +76,7 @@ void TranslatorHLSL::translate(TIntermBlock *root, ShCompileOptions compileOptio
     if (!shouldRunLoopAndIndexingValidation(compileOptions))
     {
         // HLSL doesn't support dynamic indexing of vectors and matrices.
-        RemoveDynamicIndexing(root, &getSymbolTable(), getShaderVersion());
+        RemoveDynamicIndexing(root, &getSymbolTable(), perfDiagnostics);
     }
 
     // Work around D3D9 bug that would manifest in vertex shaders with selection blocks which
@@ -89,12 +92,21 @@ void TranslatorHLSL::translate(TIntermBlock *root, ShCompileOptions compileOptio
     // version and only apply the workaround if it is too old.
     sh::BreakVariableAliasingInInnerLoops(root);
 
+    // WrapSwitchStatementsInBlocks should be called after any AST transformations that might
+    // introduce variable declarations inside the main scope of any switch statement.
+    if (WrapSwitchStatementsInBlocks(root))
+    {
+        // The WrapSwitchStatementsInBlocks step might introduce new no-op cases to the end of
+        // switch statements, so make sure to clean up the AST.
+        RemoveNoOpCasesFromEndOfSwitchStatements(root, &getSymbolTable());
+    }
+
     bool precisionEmulation =
         getResources().WEBGL_debug_shader_precision && getPragma().debugShaderPrecision;
 
     if (precisionEmulation)
     {
-        EmulatePrecision emulatePrecision(&getSymbolTable(), getShaderVersion());
+        EmulatePrecision emulatePrecision(&getSymbolTable());
         root->traverse(&emulatePrecision);
         emulatePrecision.updateTree();
         emulatePrecision.writeEmulationHelpers(getInfoSink().obj, getShaderVersion(),
@@ -119,11 +131,11 @@ void TranslatorHLSL::translate(TIntermBlock *root, ShCompileOptions compileOptio
 
     sh::OutputHLSL outputHLSL(getShaderType(), getShaderVersion(), getExtensionBehavior(),
                               getSourcePath(), getOutputType(), numRenderTargets, getUniforms(),
-                              compileOptions);
+                              compileOptions, &getSymbolTable(), perfDiagnostics);
 
     outputHLSL.output(root, getInfoSink().obj);
 
-    mInterfaceBlockRegisterMap = outputHLSL.getInterfaceBlockRegisterMap();
+    mUniformBlockRegisterMap   = outputHLSL.getUniformBlockRegisterMap();
     mUniformRegisterMap        = outputHLSL.getUniformRegisterMap();
 }
 
@@ -133,15 +145,15 @@ bool TranslatorHLSL::shouldFlattenPragmaStdglInvariantAll()
     return false;
 }
 
-bool TranslatorHLSL::hasInterfaceBlock(const std::string &interfaceBlockName) const
+bool TranslatorHLSL::hasUniformBlock(const std::string &uniformBlockName) const
 {
-    return (mInterfaceBlockRegisterMap.count(interfaceBlockName) > 0);
+    return (mUniformBlockRegisterMap.count(uniformBlockName) > 0);
 }
 
-unsigned int TranslatorHLSL::getInterfaceBlockRegister(const std::string &interfaceBlockName) const
+unsigned int TranslatorHLSL::getUniformBlockRegister(const std::string &uniformBlockName) const
 {
-    ASSERT(hasInterfaceBlock(interfaceBlockName));
-    return mInterfaceBlockRegisterMap.find(interfaceBlockName)->second;
+    ASSERT(hasUniformBlock(uniformBlockName));
+    return mUniformBlockRegisterMap.find(uniformBlockName)->second;
 }
 
 const std::map<std::string, unsigned int> *TranslatorHLSL::getUniformRegisterMap() const

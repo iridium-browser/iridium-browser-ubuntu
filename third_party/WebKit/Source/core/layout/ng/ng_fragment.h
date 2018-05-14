@@ -6,26 +6,26 @@
 #define NGFragment_h
 
 #include "core/CoreExport.h"
-#include "core/layout/ng/geometry/ng_logical_offset.h"
 #include "core/layout/ng/ng_physical_fragment.h"
-#include "core/layout/ng/ng_writing_mode.h"
 #include "platform/LayoutUnit.h"
-#include "platform/heap/Handle.h"
+#include "platform/text/WritingMode.h"
 
 namespace blink {
 
+struct NGBorderEdges;
 struct NGLogicalSize;
 
 class CORE_EXPORT NGFragment {
   STACK_ALLOCATED();
 
  public:
-  NGFragment(NGWritingMode writing_mode,
-             const NGPhysicalFragment* physical_fragment)
-      : physical_fragment_(physical_fragment), writing_mode_(writing_mode) {}
+  NGFragment(WritingMode writing_mode,
+             const NGPhysicalFragment& physical_fragment)
+      : physical_fragment_(physical_fragment),
+        writing_mode_(static_cast<unsigned>(writing_mode)) {}
 
-  NGWritingMode WritingMode() const {
-    return static_cast<NGWritingMode>(writing_mode_);
+  WritingMode GetWritingMode() const {
+    return static_cast<WritingMode>(writing_mode_);
   }
 
   // Returns the border-box size.
@@ -33,17 +33,13 @@ class CORE_EXPORT NGFragment {
   LayoutUnit BlockSize() const;
   NGLogicalSize Size() const;
 
-  // Returns the offset relative to the parent fragment's content-box.
-  LayoutUnit InlineOffset() const;
-  LayoutUnit BlockOffset() const;
-  NGLogicalOffset Offset() const;
-
   NGBorderEdges BorderEdges() const;
 
   NGPhysicalFragment::NGFragmentType Type() const;
+  const ComputedStyle& Style() const { return physical_fragment_.Style(); }
 
  protected:
-  const NGPhysicalFragment* physical_fragment_;
+  const NGPhysicalFragment& physical_fragment_;
 
   unsigned writing_mode_ : 3;
 };

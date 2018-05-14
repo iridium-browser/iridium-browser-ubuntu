@@ -31,7 +31,7 @@ class NET_EXPORT CertVerifyResult {
   // The certificate chain that was constructed during verification.
   //
   // Note: Although |verified_cert| will match the originally supplied
-  // certificate to be validated, the results of GetIntermediateCertificates()
+  // certificate to be validated, the results of intermediate_buffers()
   // may be substantially different, both in order and in content, then the
   // originally supplied intermediates.
   //
@@ -40,9 +40,9 @@ class NET_EXPORT CertVerifyResult {
   // the implementation.
   //
   // In the event of validation success, the trust anchor will be
-  // |verified_cert->GetIntermediateCertificates().back()| if
+  // |verified_cert->intermediate_buffers().back()| if
   // there was a certificate chain to the trust anchor, and will
-  // be |verified_cert->os_cert_handle()| if the certificate was
+  // be |verified_cert->cert_buffer()| if the certificate was
   // the trust anchor.
   scoped_refptr<X509Certificate> verified_cert;
 
@@ -77,10 +77,6 @@ class NET_EXPORT CertVerifyResult {
   // is_issued_by_additional_trust_anchor is true if the root CA used for this
   // verification came from the list of additional trust anchors.
   bool is_issued_by_additional_trust_anchor;
-
-  // True if a fallback to the common name was used when matching the host
-  // name, rather than using the subjectAltName.
-  bool common_name_fallback_used;
 
   // Verification of stapled OCSP response, if present.
   OCSPVerifyResult ocsp_result;

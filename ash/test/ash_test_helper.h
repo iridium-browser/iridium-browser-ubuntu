@@ -21,6 +21,9 @@
 namespace aura {
 class Window;
 class WindowTreeClientPrivate;
+namespace test {
+class EnvWindowTreeClientSetter;
+}
 }
 
 namespace display {
@@ -47,15 +50,11 @@ namespace ash {
 class AshTestEnvironment;
 class AshTestViewsDelegate;
 class RootWindowController;
-class TestScreenshotDelegate;
 class TestShellDelegate;
 class TestSessionControllerClient;
+class WindowManagerService;
 
 enum class Config;
-
-namespace mus {
-class WindowManagerApplication;
-}
 
 // A helper class that does common initialization required for Ash. Creates a
 // root window and an ash::Shell instance with a test delegate.
@@ -64,13 +63,18 @@ class AshTestHelper {
   explicit AshTestHelper(AshTestEnvironment* ash_test_environment);
   ~AshTestHelper();
 
+  // This is intended to be called from TestSuites, not individual configs.
+  static void set_config(Config config) { config_ = config; }
+
   // Returns the configuration that tests are run in. See ash::Config enum for
   // details.
   static Config config() { return config_; }
 
   // Creates the ash::Shell and performs associated initialization.  Set
   // |start_session| to true if the user should log in before the test is run.
-  void SetUp(bool start_session);
+  // Set |provide_local_state| to true to inject local-state PrefService into
+  // the Shell before the test is run.
+  void SetUp(bool start_session, bool provide_local_state = true);
 
   // Destroys the ash::Shell and performs associated cleanup.
   void TearDown();
@@ -82,12 +86,11 @@ class AshTestHelper {
 
   void RunAllPendingInMessageLoop();
 
+  void NotifyClientAboutAcceleratedWidgets();
+
   TestShellDelegate* test_shell_delegate() { return test_shell_delegate_; }
   void set_test_shell_delegate(TestShellDelegate* test_shell_delegate) {
     test_shell_delegate_ = test_shell_delegate;
-  }
-  TestScreenshotDelegate* test_screenshot_delegate() {
-    return test_screenshot_delegate_;
   }
   AshTestViewsDelegate* test_views_delegate() {
     return test_views_delegate_.get();
@@ -98,8 +101,8 @@ class AshTestHelper {
   display::Display GetSecondaryDisplay();
 
   // Null in classic ash.
-  mus::WindowManagerApplication* window_manager_app() {
-    return window_manager_app_.get();
+  WindowManagerService* window_manager_service() {
+    return window_manager_service_.get();
   }
   aura::TestWindowTreeClientSetup* window_tree_client_setup() {
     return &window_tree_client_setup_;
@@ -134,12 +137,11 @@ class AshTestHelper {
 
   static Config config_;
 
+  std::unique_ptr<aura::test::EnvWindowTreeClientSetter>
+      env_window_tree_client_setter_;
   AshTestEnvironment* ash_test_environment_;  // Not owned.
   TestShellDelegate* test_shell_delegate_;  // Owned by ash::Shell.
   std::unique_ptr<ui::ScopedAnimationDurationScaleMode> zero_duration_mode_;
-
-  // Owned by ash::AcceleratorController.
-  TestScreenshotDelegate* test_screenshot_delegate_;
 
   std::unique_ptr<::wm::WMState> wm_state_;
   std::unique_ptr<AshTestViewsDelegate> test_views_delegate_;
@@ -150,7 +152,7 @@ class AshTestHelper {
   bool bluez_dbus_manager_initialized_;
 
   aura::TestWindowTreeClientSetup window_tree_client_setup_;
-  std::unique_ptr<mus::WindowManagerApplication> window_manager_app_;
+  std::unique_ptr<WindowManagerService> window_manager_service_;
   std::unique_ptr<aura::WindowTreeClientPrivate> window_tree_client_private_;
   // Id for the next Display created by CreateRootWindowController().
   int64_t next_display_id_ = 1;

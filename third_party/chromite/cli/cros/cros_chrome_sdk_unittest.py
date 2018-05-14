@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -267,7 +268,7 @@ class RunThroughTest(cros_test_lib.MockTempDirTestCase,
     components = [constants.BASE_IMAGE_TAR, constants.CHROME_SYSROOT_TAR]
     with sdk.Prepare(components=components) as ctx:
       for c in components:
-        self.assertTrue(os.path.exists(ctx.key_map[c].path))
+        self.assertExists(ctx.key_map[c].path)
       for c in [constants.IMAGE_SCRIPTS_TAR, constants.CHROME_ENV_TAR]:
         self.assertFalse(c in ctx.key_map)
 

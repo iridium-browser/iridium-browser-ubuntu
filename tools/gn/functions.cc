@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include <iostream>
+#include <memory>
 #include <utility>
 
 #include "base/environment.h"
@@ -337,8 +338,8 @@ Value RunConfig(const FunctionCallNode* function,
     g_scheduler->Log("Defining config", label.GetUserVisibleName(true));
 
   // Create the new config.
-  std::unique_ptr<Config> config(
-      new Config(scope->settings(), label, scope->input_files()));
+  std::unique_ptr<Config> config = std::make_unique<Config>(
+      scope->settings(), label, scope->build_dependency_files());
   config->set_defined_from(function);
   if (!Visibility::FillItemVisibility(config.get(), scope, err))
     return Value();
@@ -553,7 +554,7 @@ const char kGetEnv_Help[] =
 
   value = getenv(env_var_name)
 
-  Returns the value of the given enironment variable. If the value is not
+  Returns the value of the given environment variable. If the value is not
   found, it will try to look up the variable with the "opposite" case (based on
   the case of the first letter of the variable), but is otherwise
   case-sensitive.
@@ -632,6 +633,7 @@ Value RunImport(Scope* scope,
   SourceFile import_file =
       input_dir.ResolveRelativeFile(args[0], err,
           scope->settings()->build_settings()->root_path_utf8());
+  scope->AddBuildDependencyFile(import_file);
   if (!err->has_error()) {
     scope->settings()->import_manager().DoImport(import_file, function,
                                                  scope, err);
@@ -669,7 +671,7 @@ Value RunNotNeeded(Scope* scope,
                    const ListNode* args_list,
                    Err* err) {
   const auto& args_vector = args_list->contents();
-  if (args_vector.size() < 1 && args_vector.size() > 3) {
+  if (args_vector.size() < 1 || args_vector.size() > 3) {
     *err = Err(function, "Wrong number of arguments.",
                "Expecting one, two or three arguments.");
     return Value();
@@ -826,7 +828,7 @@ Value RunSetSourcesAssignmentFilter(Scope* scope,
   if (args.size() != 1) {
     *err = Err(function, "set_sources_assignment_filter takes one argument.");
   } else {
-    std::unique_ptr<PatternList> f(new PatternList);
+    std::unique_ptr<PatternList> f = std::make_unique<PatternList>();
     f->SetFromValue(args[0], err);
     if (!err->has_error())
       scope->set_sources_assignment_filter(std::move(f));
@@ -909,8 +911,8 @@ Value RunPool(const FunctionCallNode* function,
   }
 
   // Create the new pool.
-  std::unique_ptr<Pool> pool(
-      new Pool(scope->settings(), label, scope->input_files()));
+  std::unique_ptr<Pool> pool = std::make_unique<Pool>(
+      scope->settings(), label, scope->build_dependency_files());
   pool->set_depth(depth->int_value());
 
   // Save the generated item.
@@ -962,9 +964,10 @@ Value RunPrint(Scope* scope,
 
   const BuildSettings::PrintCallback& cb =
       scope->settings()->build_settings()->print_callback();
-  if (cb.is_null())
+  if (cb.is_null()) {
     printf("%s", output.c_str());
-  else
+    fflush(stdout);
+  } else
     cb.Run(output);
 
   return Value();

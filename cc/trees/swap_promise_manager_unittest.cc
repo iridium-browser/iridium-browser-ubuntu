@@ -18,7 +18,7 @@ class MockSwapPromiseMonitor : public SwapPromiseMonitor {
  public:
   explicit MockSwapPromiseMonitor(SwapPromiseManager* manager)
       : SwapPromiseMonitor(manager, nullptr) {}
-  ~MockSwapPromiseMonitor() override {}
+  ~MockSwapPromiseMonitor() override = default;
 
   MOCK_METHOD0(OnSetNeedsCommitOnMain, void());
   void OnSetNeedsRedrawOnImpl() override {}
@@ -27,11 +27,11 @@ class MockSwapPromiseMonitor : public SwapPromiseMonitor {
 
 class MockSwapPromise : public SwapPromise {
  public:
-  MockSwapPromise() {}
-  ~MockSwapPromise() override {}
+  MockSwapPromise() = default;
+  ~MockSwapPromise() override = default;
 
   void DidActivate() override {}
-  void WillSwap(CompositorFrameMetadata* metadata) override {}
+  void WillSwap(viz::CompositorFrameMetadata* metadata) override {}
   void DidSwap() override {}
   DidNotSwapAction DidNotSwap(DidNotSwapReason reason) override {
     return DidNotSwapAction::BREAK_PROMISE;
@@ -53,7 +53,7 @@ TEST(SwapPromiseManagerTest, SwapPromiseMonitors) {
 TEST(SwapPromiseManagerTest, SwapPromises) {
   SwapPromiseManager manager;
   std::unique_ptr<StrictMock<MockSwapPromise>> swap_promise =
-      base::MakeUnique<StrictMock<MockSwapPromise>>();
+      std::make_unique<StrictMock<MockSwapPromise>>();
   MockSwapPromise* mock_promise = swap_promise.get();
 
   manager.QueueSwapPromise(std::move(swap_promise));

@@ -34,9 +34,10 @@
 #include "platform/Histogram.h"
 #include "platform/MemoryCoordinator.h"
 #include "platform/bindings/V8PerIsolateData.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/scheduler/child/web_scheduler.h"
 #include "platform/wtf/ProcessMetrics.h"
 #include "platform/wtf/StdLibExtras.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/Platform.h"
 #include "v8/include/v8.h"
 
@@ -54,7 +55,10 @@ size_t GetMemoryUsage() {
 namespace blink {
 
 V8GCForContextDispose::V8GCForContextDispose()
-    : pseudo_idle_timer_(this, &V8GCForContextDispose::PseudoIdleTimerFired) {
+    : pseudo_idle_timer_(
+          Platform::Current()->MainThread()->Scheduler()->V8TaskRunner(),
+          this,
+          &V8GCForContextDispose::PseudoIdleTimerFired) {
   Reset();
 }
 
@@ -92,7 +96,7 @@ void V8GCForContextDispose::NotifyIdle() {
   if (!did_dispose_context_for_main_frame_ && !pseudo_idle_timer_.IsActive() &&
       last_context_disposal_time_ + max_time_since_last_context_disposal >=
           WTF::CurrentTime()) {
-    pseudo_idle_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    pseudo_idle_timer_.StartOneShot(TimeDelta(), FROM_HERE);
   }
 }
 
@@ -103,7 +107,7 @@ V8GCForContextDispose& V8GCForContextDispose::Instance() {
 
 void V8GCForContextDispose::PseudoIdleTimerFired(TimerBase*) {
   V8PerIsolateData::MainThreadIsolate()->IdleNotificationDeadline(
-      MonotonicallyIncreasingTime());
+      CurrentTimeTicksInSeconds());
   Reset();
 }
 

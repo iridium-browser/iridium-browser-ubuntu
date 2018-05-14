@@ -24,7 +24,7 @@ PageAnimator* PageAnimator::Create(Page& page) {
   return new PageAnimator(page);
 }
 
-DEFINE_TRACE(PageAnimator) {
+void PageAnimator::Trace(blink::Visitor* visitor) {
   visitor->Trace(page_);
 }
 
@@ -98,6 +98,12 @@ void PageAnimator::UpdateAllLifecyclePhases(LocalFrame& root_frame) {
   LocalFrameView* view = root_frame.View();
   AutoReset<bool> servicing(&updating_layout_and_style_for_painting_, true);
   view->UpdateAllLifecyclePhases();
+}
+
+void PageAnimator::UpdateLifecycleToPrePaintClean(LocalFrame& root_frame) {
+  LocalFrameView* view = root_frame.View();
+  AutoReset<bool> servicing(&updating_layout_and_style_for_painting_, true);
+  view->UpdateLifecycleToPrePaintClean();
 }
 
 }  // namespace blink

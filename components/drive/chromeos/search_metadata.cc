@@ -10,7 +10,6 @@
 
 #include "base/bind.h"
 #include "base/i18n/string_search.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -172,7 +171,7 @@ FileError MaybeAddEntryToResult(
   if (result_candidates->size() == at_most_num_matches)
     result_candidates->pop();
   result_candidates->push(
-      base::MakeUnique<ResultCandidate>(it->GetID(), entry, highlighted));
+      std::make_unique<ResultCandidate>(it->GetID(), entry, highlighted));
   return FILE_ERROR_OK;
 }
 
@@ -196,7 +195,7 @@ FileError SearchMetadataOnBlockingPool(ResourceMetadata* resource_metadata,
       queries;
   for (const auto& keyword : keywords) {
     queries.push_back(
-        base::MakeUnique<
+        std::make_unique<
             base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>(
             keyword));
   }
@@ -293,10 +292,10 @@ void SearchMetadata(
   MetadataSearchResultVector* results_ptr = results.get();
   base::PostTaskAndReplyWithResult(
       blocking_task_runner.get(), FROM_HERE,
-      base::Bind(&SearchMetadataOnBlockingPool, resource_metadata, query,
-                 predicate, at_most_num_matches, order, results_ptr),
-      base::Bind(&RunSearchMetadataCallback, callback, start_time,
-                 base::Passed(&results)));
+      base::BindOnce(&SearchMetadataOnBlockingPool, resource_metadata, query,
+                     predicate, at_most_num_matches, order, results_ptr),
+      base::BindOnce(&RunSearchMetadataCallback, callback, start_time,
+                     std::move(results)));
 }
 
 bool MatchesType(int options, const ResourceEntry& entry) {
@@ -320,9 +319,8 @@ bool MatchesType(int options, const ResourceEntry& entry) {
              mime_type == drive::util::kGoogleSpreadsheetMimeType ||
              mime_type == drive::util::kGooglePresentationMimeType ||
              mime_type == drive::util::kGoogleDrawingMimeType;
-    } else {
-      return entry.file_specific_info().cache_state().is_present();
     }
+    return entry.file_specific_info().cache_state().is_present();
   }
 
   return true;

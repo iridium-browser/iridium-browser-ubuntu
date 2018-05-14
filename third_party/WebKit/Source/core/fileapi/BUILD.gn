@@ -8,7 +8,6 @@ blink_core_sources("fileapi") {
   sources = [
     "Blob.cpp",
     "Blob.h",
-    "BlobCallback.h",
     "File.cpp",
     "File.h",
     "FileError.cpp",
@@ -22,12 +21,31 @@ blink_core_sources("fileapi") {
     "FileReaderLoaderClient.h",
     "FileReaderSync.cpp",
     "FileReaderSync.h",
+    "PublicURLManager.cpp",
+    "PublicURLManager.h",
     "URLFileAPI.cpp",
     "URLFileAPI.h",
+    "URLRegistry.h",
+  ]
+}
+
+jumbo_source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "FileListTest.cpp",
+    "FileTest.cpp",
+    "PublicURLManagerTest.cpp",
   ]
 
   configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
+    "//third_party/WebKit/Source/core:blink_core_pch",
+    "//third_party/WebKit/Source:config",
+    "//third_party/WebKit/Source:inside_blink",
+  ]
+
+  deps = [
+    "//testing/gmock",
+    "//testing/gtest",
+    "//third_party/WebKit/Source/core",
   ]
 }

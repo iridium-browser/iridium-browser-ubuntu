@@ -60,7 +60,11 @@ class SVGFETurbulenceElement final
   SVGAnimatedEnumeration<TurbulenceType>* type() { return type_.Get(); }
   SVGAnimatedInteger* numOctaves() { return num_octaves_.Get(); }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
+
+  // Turbulence takes no inputs and doesn't taint origin, so we can always
+  // return false.
+  bool TaintsOrigin(bool inputs_taint_origin) const override { return false; }
 
  private:
   explicit SVGFETurbulenceElement(Document&);

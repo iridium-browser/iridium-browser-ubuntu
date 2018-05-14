@@ -58,8 +58,7 @@ RefreshTokenStoreOnDisk::RefreshTokenStoreOnDisk(
     refresh_token_file_path_(base::MakeAbsoluteFilePath(refresh_token_path)) {
 }
 
-RefreshTokenStoreOnDisk::~RefreshTokenStoreOnDisk() {
-}
+RefreshTokenStoreOnDisk::~RefreshTokenStoreOnDisk() = default;
 
 std::string RefreshTokenStoreOnDisk::FetchRefreshToken() {
   base::FilePath refresh_token_file_path(GetPathForRefreshTokenFile());
@@ -124,7 +123,7 @@ bool RefreshTokenStoreOnDisk::StoreRefreshToken(
   }
 
   std::string json_string;
-  tokens->SetStringWithoutPathExpansion(user_name_, refresh_token);
+  tokens->SetKey(user_name_, base::Value(refresh_token));
   if (!base::JSONWriter::Write(*token_data, &json_string)) {
     LOG(ERROR) << "Couldn't convert JSON data to string";
     return false;

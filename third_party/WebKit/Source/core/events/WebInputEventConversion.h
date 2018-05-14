@@ -35,36 +35,37 @@
 #include "core/CoreExport.h"
 #include "platform/scroll/ScrollTypes.h"
 #include "platform/wtf/Compiler.h"
+#include "public/platform/WebCoalescedInputEvent.h"
 #include "public/platform/WebInputEvent.h"
 #include "public/platform/WebKeyboardEvent.h"
 #include "public/platform/WebMouseWheelEvent.h"
+#include "public/platform/WebPointerEvent.h"
 #include "public/platform/WebTouchEvent.h"
 
 namespace blink {
 
 class KeyboardEvent;
-class LayoutItem;
+class LayoutObject;
 class LocalFrameView;
 class MouseEvent;
 class TouchEvent;
 class WebGestureEvent;
 class WebKeyboardEvent;
 
-// These classes are used to convert from WebInputEvent subclasses to
-// corresponding WebCore events.
+// These classes are used for conversion from Blink events to WebInputEvents
+// (for plugins).
 
-class CORE_EXPORT WebMouseEventBuilder
-    : NON_EXPORTED_BASE(public WebMouseEvent) {
+class CORE_EXPORT WebMouseEventBuilder : public WebMouseEvent {
  public:
   // Converts a MouseEvent to a corresponding WebMouseEvent.
   // NOTE: This is only implemented for mousemove, mouseover, mouseout,
   // mousedown and mouseup. If the event mapping fails, the event type will
   // be set to Undefined.
   WebMouseEventBuilder(const LocalFrameView*,
-                       const LayoutItem,
+                       const LayoutObject*,
                        const MouseEvent&);
   WebMouseEventBuilder(const LocalFrameView*,
-                       const LayoutItem,
+                       const LayoutObject*,
                        const TouchEvent&);
 };
 
@@ -72,8 +73,7 @@ class CORE_EXPORT WebMouseEventBuilder
 // NOTE: For KeyboardEvent, this is only implemented for keydown,
 // keyup, and keypress. If the event mapping fails, the event type will be set
 // to Undefined.
-class CORE_EXPORT WebKeyboardEventBuilder
-    : NON_EXPORTED_BASE(public WebKeyboardEvent) {
+class CORE_EXPORT WebKeyboardEventBuilder : public WebKeyboardEvent {
  public:
   WebKeyboardEventBuilder(const KeyboardEvent&);
 };
@@ -81,10 +81,9 @@ class CORE_EXPORT WebKeyboardEventBuilder
 // Converts a TouchEvent to a corresponding WebTouchEvent.
 // NOTE: WebTouchEvents have a cap on the number of WebTouchPoints. Any points
 // exceeding that cap will be dropped.
-class CORE_EXPORT WebTouchEventBuilder
-    : NON_EXPORTED_BASE(public WebTouchEvent) {
+class CORE_EXPORT WebTouchEventBuilder : public WebTouchEvent {
  public:
-  WebTouchEventBuilder(const LayoutItem, const TouchEvent&);
+  WebTouchEventBuilder(const LayoutObject*, const TouchEvent&);
 };
 
 // Return a new transformed WebGestureEvent by applying the Widget's scale
@@ -97,15 +96,15 @@ CORE_EXPORT WebMouseEvent TransformWebMouseEvent(LocalFrameView*,
 CORE_EXPORT WebMouseWheelEvent
 TransformWebMouseWheelEvent(LocalFrameView*, const WebMouseWheelEvent&);
 
-CORE_EXPORT WebTouchEvent TransformWebTouchEvent(LocalFrameView*,
-                                                 const WebTouchEvent&);
+CORE_EXPORT WebPointerEvent TransformWebPointerEvent(LocalFrameView*,
+                                                     const WebPointerEvent&);
 
 Vector<WebMouseEvent> CORE_EXPORT
 TransformWebMouseEventVector(LocalFrameView*,
                              const std::vector<const WebInputEvent*>&);
-Vector<WebTouchEvent> CORE_EXPORT
-TransformWebTouchEventVector(LocalFrameView*,
-                             const std::vector<const WebInputEvent*>&);
+Vector<WebPointerEvent> CORE_EXPORT
+TransformWebPointerEventVector(LocalFrameView*,
+                               const std::vector<const WebInputEvent*>&);
 
 }  // namespace blink
 

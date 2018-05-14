@@ -5,6 +5,7 @@
 #include "platform/heap/HeapCompact.h"
 
 #include "platform/heap/Handle.h"
+#include "platform/heap/HeapTestUtilities.h"
 #include "platform/heap/SparseHeapBitmap.h"
 #include "platform/wtf/Deque.h"
 #include "platform/wtf/HashMap.h"
@@ -28,9 +29,9 @@ class IntWrapper : public blink::GarbageCollectedFinalized<IntWrapper> {
     return new IntWrapper(x, verify);
   }
 
-  virtual ~IntWrapper() {}
+  virtual ~IntWrapper() = default;
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     // Verify if compaction is indeed activated.
     //
     // What arenas end up being compacted is dependent on residency,
@@ -60,7 +61,7 @@ class IntWrapper : public blink::GarbageCollectedFinalized<IntWrapper> {
   IntWrapper(int x, VerifyArenaCompaction verify) : x_(x), verify_(verify) {}
 
  private:
-  IntWrapper();
+  IntWrapper() = delete;
 
   int x_;
   VerifyArenaCompaction verify_;
@@ -70,6 +71,8 @@ static_assert(WTF::IsTraceable<IntWrapper>::value,
 
 }  // namespace
 
+#if ENABLE_HEAP_COMPACTION
+
 using IntVector = blink::HeapVector<blink::Member<IntWrapper>>;
 using IntDeque = blink::HeapDeque<blink::Member<IntWrapper>>;
 using IntMap = blink::HeapHashMap<blink::Member<IntWrapper>, int>;
@@ -78,7 +81,6 @@ using IntMap = blink::HeapHashMap<blink::Member<IntWrapper>, int>;
 WTF_ALLOW_CLEAR_UNUSED_SLOTS_WITH_MEM_FUNCTIONS(IntMap);
 
 namespace blink {
-#if ENABLE_HEAP_COMPACTION
 
 static const size_t kChunkRange = SparseHeapBitmap::kBitmapChunkRange;
 static const size_t kUnitPointer = 0x1u
@@ -217,28 +219,10 @@ TEST(HeapCompactTest, SparseBitmapLeftExtension) {
   EXPECT_NE(bitmap->HasRange(base, 1), bitmap->HasRange(base - kChunkRange, 1));
 }
 
-static void PreciselyCollectGarbage() {
-  ThreadState::Current()->CollectGarbage(BlinkGC::kNoHeapPointersOnStack,
-                                         BlinkGC::kGCWithSweep,
-                                         BlinkGC::kForcedGC);
-}
-
 static void PerformHeapCompaction() {
   EXPECT_FALSE(HeapCompact::ScheduleCompactionGCForTesting(true));
   PreciselyCollectGarbage();
   EXPECT_FALSE(HeapCompact::ScheduleCompactionGCForTesting(false));
-}
-
-// Do several GCs to make sure that later GCs don't free up old memory from
-// previously run tests in this process.
-static void ClearOutOldGarbage() {
-  ThreadHeap& heap = ThreadState::Current()->Heap();
-  while (true) {
-    size_t used = heap.ObjectPayloadSizeForTesting();
-    PreciselyCollectGarbage();
-    if (heap.ObjectPayloadSizeForTesting() >= used)
-      break;
-  }
 }
 
 TEST(HeapCompactTest, CompactVector) {
@@ -485,5 +469,7 @@ TEST(HeapCompactTest, CompactLinkedHashSetNested) {
     expected++;
   }
 }
-#endif
+
 }  // namespace blink
+
+#endif  // ENABLE_HEAP_COMPACTION

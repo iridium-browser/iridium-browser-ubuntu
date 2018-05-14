@@ -13,14 +13,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/strings/stringprintf.h"
 #include "base/task_scheduler/post_task.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/version.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/content_hash_fetcher.h"
-#include "extensions/browser/content_verifier_delegate.h"
+#include "extensions/browser/content_verifier/test_utils.h"
 #include "extensions/browser/extensions_test.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_paths.h"
@@ -67,7 +65,7 @@ class ContentHashFetcherWaiter {
                 bool success,
                 bool force,
                 const std::set<base::FilePath>& mismatch_paths) {
-    result_ = base::MakeUnique<ContentHashFetcherResult>();
+    result_ = std::make_unique<ContentHashFetcherResult>();
     result_->extension_id = extension_id;
     result_->success = success;
     result_->force = force;
@@ -83,53 +81,12 @@ class ContentHashFetcherWaiter {
   DISALLOW_COPY_AND_ASSIGN(ContentHashFetcherWaiter);
 };
 
-// Used in setting up the behavior of our ContentHashFetcher.
-class MockDelegate : public ContentVerifierDelegate {
- public:
-  MockDelegate() {}
-  ~MockDelegate() override {}
-
-  ContentVerifierDelegate::Mode ShouldBeVerified(
-      const Extension& extension) override {
-    return ContentVerifierDelegate::ENFORCE_STRICT;
-  }
-
-  ContentVerifierKey GetPublicKey() override {
-    return ContentVerifierKey(kWebstoreSignaturesPublicKey,
-                              kWebstoreSignaturesPublicKeySize);
-  }
-
-  GURL GetSignatureFetchUrl(const std::string& extension_id,
-                            const base::Version& version) override {
-    std::string url =
-        base::StringPrintf("http://localhost/getsignature?id=%s&version=%s",
-                           extension_id.c_str(), version.GetString().c_str());
-    return GURL(url);
-  }
-
-  std::set<base::FilePath> GetBrowserImagePaths(
-      const extensions::Extension* extension) override {
-    ADD_FAILURE() << "Unexpected call for this test";
-    return std::set<base::FilePath>();
-  }
-
-  void VerifyFailed(const std::string& extension_id,
-                    ContentVerifyJob::FailureReason reason) override {
-    ADD_FAILURE() << "Unexpected call for this test";
-  }
-
-  void Shutdown() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockDelegate);
-};
-
 class ContentHashFetcherTest : public ExtensionsTest {
  public:
   ContentHashFetcherTest()
       // We need a real IO thread to be able to intercept the network request
       // for the missing verified_contents.json file.
-      : ExtensionsTest(base::MakeUnique<content::TestBrowserThreadBundle>(
+      : ExtensionsTest(std::make_unique<content::TestBrowserThreadBundle>(
             content::TestBrowserThreadBundle::REAL_IO_THREAD)) {
     request_context_ = new net::TestURLRequestContextGetter(
         content::BrowserThread::GetTaskRunnerForThread(
@@ -169,7 +126,7 @@ class ContentHashFetcherTest : public ExtensionsTest {
   // of the file at |response_path|.
   void RegisterInterception(const GURL& url,
                             const base::FilePath& response_path) {
-    interceptor_ = base::MakeUnique<net::TestURLRequestInterceptor>(
+    interceptor_ = std::make_unique<net::TestURLRequestInterceptor>(
         url.scheme(), url.host(),
         content::BrowserThread::GetTaskRunnerForThread(
             content::BrowserThread::IO),
@@ -200,10 +157,10 @@ TEST_F(ContentHashFetcherTest, MissingVerifiedContents) {
   EXPECT_FALSE(
       base::PathExists(file_util::GetVerifiedContentsPath(extension->path())));
 
-  MockDelegate delegate;
+  MockContentVerifierDelegate delegate;
   ContentHashFetcherWaiter waiter;
   GURL fetch_url =
-      delegate.GetSignatureFetchUrl(extension->id(), *extension->version());
+      delegate.GetSignatureFetchUrl(extension->id(), extension->version());
 
   RegisterInterception(fetch_url,
                        test_dir_base.AppendASCII("verified_contents.json"));
@@ -238,10 +195,10 @@ TEST_F(ContentHashFetcherTest, MissingVerifiedContentsAndCorrupt) {
   std::string addition = "//hello world";
   ASSERT_TRUE(
       base::AppendToFile(script_path, addition.c_str(), addition.size()));
-  MockDelegate delegate;
+  MockContentVerifierDelegate delegate;
   ContentHashFetcherWaiter waiter;
   GURL fetch_url =
-      delegate.GetSignatureFetchUrl(extension->id(), *extension->version());
+      delegate.GetSignatureFetchUrl(extension->id(), extension->version());
 
   RegisterInterception(fetch_url,
                        test_dir_base.AppendASCII("verified_contents.json"));

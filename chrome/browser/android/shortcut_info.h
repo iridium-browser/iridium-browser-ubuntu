@@ -43,7 +43,7 @@ struct ShortcutInfo {
     // Used for bookmark-type shortcuts that launch the tabbed browser.
     SOURCE_ADD_TO_HOMESCREEN_SHORTCUT = 8,
 
-    // Used for WebAPKs launched via an external intent.
+    // Used for WebAPKs launched via an external intent and not from Chrome.
     SOURCE_EXTERNAL_INTENT = 9,
 
     // Used for WebAPK PWAs added via the banner.
@@ -52,7 +52,18 @@ struct ShortcutInfo {
     // Used for WebAPK PWAs whose install source info was lost.
     SOURCE_WEBAPK_UNKNOWN = 11,
 
-    SOURCE_COUNT = 12
+    // Used for Trusted Web Activities launched from third party Android apps.
+    SOURCE_TRUSTED_WEB_ACTIVITY = 12,
+
+    // Used for WebAPK intents received as a result of share events.
+    SOURCE_WEBAPK_SHARE_TARGET = 13,
+
+    // Used for WebAPKs launched via an external intent from this Chrome APK.
+    // WebAPKs launched from a different Chrome APK (e.g. Chrome Canary) will
+    // report SOURCE_EXTERNAL_INTENT.
+    SOURCE_EXTERNAL_INTENT_FROM_CHROME = 14,
+
+    SOURCE_COUNT = 15
   };
 
   explicit ShortcutInfo(const GURL& shortcut_url);
@@ -76,12 +87,14 @@ struct ShortcutInfo {
   Source source;
   int64_t theme_color;
   int64_t background_color;
+  GURL splash_screen_url;
   int ideal_splash_image_size_in_px;
   int minimum_splash_image_size_in_px;
   GURL splash_image_url;
   GURL best_primary_icon_url;
   GURL best_badge_icon_url;
   std::vector<std::string> icon_urls;
+  base::string16 share_target_url_template;
 };
 
 #endif  // CHROME_BROWSER_ANDROID_SHORTCUT_INFO_H_

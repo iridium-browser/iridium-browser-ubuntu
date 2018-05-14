@@ -28,7 +28,7 @@ PaginationController::PaginationController(PaginationModel* model,
     : pagination_model_(model), scroll_axis_(scroll_axis) {}
 
 bool PaginationController::OnScroll(const gfx::Vector2d& offset,
-                                    ScrollEventType type) {
+                                    ui::EventType type) {
   int offset_magnitude;
   if (scroll_axis_ == SCROLL_AXIS_HORIZONTAL) {
     // If the view scrolls horizontally, both horizontal and vertical scroll
@@ -47,10 +47,11 @@ bool PaginationController::OnScroll(const gfx::Vector2d& offset,
       !pagination_model_->has_transition()) {
     const int delta = offset_magnitude > 0 ? -1 : 1;
     if (pagination_model_->IsValidPageRelative(delta)) {
-      UMA_HISTOGRAM_ENUMERATION(
-          kAppListPageSwitcherSourceHistogram,
-          type == SCROLL_MOUSE_WHEEL ? kMouseWheelScroll : kMousePadScroll,
-          kMaxAppListPageSwitcherSource);
+      UMA_HISTOGRAM_ENUMERATION(kAppListPageSwitcherSourceHistogram,
+                                type == ui::EventType::ET_MOUSEWHEEL
+                                    ? kMouseWheelScroll
+                                    : kMousePadScroll,
+                                kMaxAppListPageSwitcherSource);
     }
     pagination_model_->SelectPageRelative(delta, true);
     return true;
@@ -63,33 +64,27 @@ bool PaginationController::OnGestureEvent(const ui::GestureEvent& event,
                                           const gfx::Rect& bounds) {
   const ui::GestureEventDetails& details = event.details();
   switch (event.type()) {
-    case ui::ET_GESTURE_SCROLL_BEGIN:
-      // Reset |drag_moved_app_grid_| to give the AppListView a chance to
-      // consume this scroll sequence.
-      drag_moved_app_grid_ = false;
+    case ui::ET_GESTURE_SCROLL_BEGIN: {
+      float scroll = scroll_axis_ == SCROLL_AXIS_HORIZONTAL
+                         ? details.scroll_x_hint()
+                         : details.scroll_y_hint();
+      if (scroll == 0 ||
+          !pagination_model_->IsValidPageRelative(scroll < 0 ? 1 : -1)) {
+        // scroll > 0 means moving contents right or down. That is,
+        // transitioning to the previous page. If scrolling to an invalid page,
+        // do not handle this event.
+        return false;
+      }
       pagination_model_->StartScroll();
       return true;
+    }
     case ui::ET_GESTURE_SCROLL_UPDATE: {
       float scroll = scroll_axis_ == SCROLL_AXIS_HORIZONTAL
                          ? details.scroll_x()
                          : details.scroll_y();
       int width = scroll_axis_ == SCROLL_AXIS_HORIZONTAL ? bounds.width()
                                                          : bounds.height();
-      // scroll > 0 means moving contents right or down. That is, transitioning
-      // to the previous page.
-      const int delta = scroll < 0 ? 1 : -1;
-      // If the scroll is not going to animate the app grid, return false early
-      // and let the AppsGridView redirect the scroll sequence to the
-      // AppListView.
-      // TODO(759179): find a better way to handle this interaction.
-      if (!pagination_model_->IsValidPageRelative(delta) && delta < 0 &&
-          !drag_moved_app_grid_ && !pagination_model_->transition().progress) {
-        return false;
-      }
       pagination_model_->UpdateScroll(scroll / width);
-      // If a scroll sequence animates the app grid, we do not want the
-      // AppListView to be able to consume the scroll sequence.
-      drag_moved_app_grid_ = true;
       return true;
     }
     case ui::ET_GESTURE_SCROLL_END: {

@@ -30,11 +30,10 @@ const char* Toolchain::kToolAction = "action";
 
 Toolchain::Toolchain(const Settings* settings,
                      const Label& label,
-                     const InputFileSet& input_files)
-    : Item(settings, label, input_files), setup_complete_(false) {}
+                     const std::set<SourceFile>& build_dependency_files)
+    : Item(settings, label, build_dependency_files), setup_complete_(false) {}
 
-Toolchain::~Toolchain() {
-}
+Toolchain::~Toolchain() = default;
 
 Toolchain* Toolchain::AsToolchain() {
   return this;

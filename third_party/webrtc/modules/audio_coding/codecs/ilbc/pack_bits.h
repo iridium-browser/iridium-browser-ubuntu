@@ -16,10 +16,10 @@
 
 ******************************************************************/
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_PACK_BITS_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_PACK_BITS_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_PACK_BITS_H_
+#define MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_PACK_BITS_H_
 
-#include "defines.h"
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  *  unpacking of bits from bitstream, i.e., vector of bytes

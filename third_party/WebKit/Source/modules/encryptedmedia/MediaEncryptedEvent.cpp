@@ -36,13 +36,13 @@ MediaEncryptedEvent::MediaEncryptedEvent(
       init_data_type_(initializer.initDataType()),
       init_data_(initializer.initData()) {}
 
-MediaEncryptedEvent::~MediaEncryptedEvent() {}
+MediaEncryptedEvent::~MediaEncryptedEvent() = default;
 
 const AtomicString& MediaEncryptedEvent::InterfaceName() const {
   return EventNames::MediaEncryptedEvent;
 }
 
-DEFINE_TRACE(MediaEncryptedEvent) {
+void MediaEncryptedEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(init_data_);
   Event::Trace(visitor);
 }

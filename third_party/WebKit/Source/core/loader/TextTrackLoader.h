@@ -30,7 +30,6 @@
 #include "platform/CrossOriginAttributeValue.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/RawResource.h"
-#include "platform/loader/fetch/ResourceOwner.h"
 
 namespace blink {
 
@@ -39,14 +38,14 @@ class TextTrackLoader;
 
 class TextTrackLoaderClient : public GarbageCollectedMixin {
  public:
-  virtual ~TextTrackLoaderClient() {}
+  virtual ~TextTrackLoaderClient() = default;
 
   virtual void NewCuesAvailable(TextTrackLoader*) = 0;
   virtual void CueLoadingCompleted(TextTrackLoader*, bool loading_failed) = 0;
 };
 
 class TextTrackLoader final : public GarbageCollectedFinalized<TextTrackLoader>,
-                              public ResourceOwner<RawResource>,
+                              public RawResourceClient,
                               private VTTParserClient {
   USING_GARBAGE_COLLECTED_MIXIN(TextTrackLoader);
 
@@ -60,15 +59,18 @@ class TextTrackLoader final : public GarbageCollectedFinalized<TextTrackLoader>,
   bool Load(const KURL&, CrossOriginAttributeValue);
   void CancelLoad();
 
-  enum State { kIdle, kLoading, kFinished, kFailed };
+  enum State { kLoading, kFinished, kFailed };
   State LoadState() { return state_; }
 
   void GetNewCues(HeapVector<Member<TextTrackCue>>& output_cues);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   // RawResourceClient
+  void ResponseReceived(Resource*,
+                        const ResourceResponse&,
+                        std::unique_ptr<WebDataConsumerHandle>) override;
   bool RedirectReceived(Resource*,
                         const ResourceRequest&,
                         const ResourceResponse&) override;
@@ -83,7 +85,7 @@ class TextTrackLoader final : public GarbageCollectedFinalized<TextTrackLoader>,
   TextTrackLoader(TextTrackLoaderClient&, Document&);
 
   void CueLoadTimerFired(TimerBase*);
-  void CorsPolicyPreventedLoad(SecurityOrigin*, const KURL&);
+  void CorsPolicyPreventedLoad(const SecurityOrigin*, const KURL&);
 
   Document& GetDocument() const { return *document_; }
 

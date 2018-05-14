@@ -118,7 +118,7 @@ void LookupAndLogNameAndIdOfFirstCamera() {
   base::RunLoop run_loop;
   BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           [](MediaStreamManager* media_stream_manager,
              base::Closure quit_closure) {
             media_stream_manager->video_capture_manager()->EnumerateDevices(
@@ -130,9 +130,9 @@ void LookupAndLogNameAndIdOfFirstCamera() {
                         LOG(WARNING) << "No camera found";
                         return;
                       }
-                      LOG(INFO)
-                          << "Using camera " << descriptors.front().display_name
-                          << " (" << descriptors.front().model_id << ")";
+                      LOG(INFO) << "Using camera "
+                                << descriptors.front().display_name() << " ("
+                                << descriptors.front().model_id << ")";
                       quit_closure.Run();
                     },
                     quit_closure));
@@ -141,7 +141,7 @@ void LookupAndLogNameAndIdOfFirstCamera() {
   run_loop.Run();
 }
 
-ShellAddedObserver::ShellAddedObserver() : shell_(NULL) {
+ShellAddedObserver::ShellAddedObserver() : shell_(nullptr) {
   Shell::SetShellCreatedCallback(
       base::Bind(&ShellAddedObserver::ShellCreated, base::Unretained(this)));
 }

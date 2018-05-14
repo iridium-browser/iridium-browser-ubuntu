@@ -4,6 +4,7 @@
 
 #include "components/net_log/net_export_file_writer.h"
 
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -12,9 +13,9 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_runner_util.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -99,6 +100,17 @@ base::FilePath GetPathWithAllPermissions(const base::FilePath& path) {
 #endif
 }
 
+scoped_refptr<base::SequencedTaskRunner> CreateFileTaskRunner() {
+  // The tasks posted to this sequenced task runner do synchronous File I/O for
+  // checking paths and setting permissions on files.
+  //
+  // These operations can be skipped on shutdown since FileNetLogObserver's API
+  // doesn't require things to have completed until notified of completion.
+  return base::CreateSequencedTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
+}
+
 }  // namespace
 
 NetExportFileWriter::NetExportFileWriter(ChromeNetLog* chrome_net_log)
@@ -126,15 +138,11 @@ void NetExportFileWriter::RemoveObserver(StateObserver* observer) {
 }
 
 void NetExportFileWriter::Initialize(
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> net_task_runner) {
+    scoped_refptr<base::TaskRunner> net_task_runner) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(file_task_runner);
   DCHECK(net_task_runner);
 
-  if (file_task_runner_)
-    DCHECK_EQ(file_task_runner_, file_task_runner);
-  file_task_runner_ = file_task_runner;
+  file_task_runner_ = CreateFileTaskRunner();
   if (net_task_runner_)
     DCHECK_EQ(net_task_runner_, net_task_runner);
   net_task_runner_ = net_task_runner;
@@ -221,9 +229,9 @@ void NetExportFileWriter::StopNetLog(
   if (context_getter) {
     base::PostTaskAndReplyWithResult(
         net_task_runner_.get(), FROM_HERE,
-        base::Bind(&AddNetInfo, context_getter, base::Passed(&polled_data)),
-        base::Bind(&NetExportFileWriter::StopNetLogAfterAddNetInfo,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindOnce(&AddNetInfo, context_getter, std::move(polled_data)),
+        base::BindOnce(&NetExportFileWriter::StopNetLogAfterAddNetInfo,
+                       weak_ptr_factory_.GetWeakPtr()));
   } else {
     StopNetLogAfterAddNetInfo(std::move(polled_data));
   }
@@ -232,7 +240,7 @@ void NetExportFileWriter::StopNetLog(
 std::unique_ptr<base::DictionaryValue> NetExportFileWriter::GetState() const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  auto dict = base::MakeUnique<base::DictionaryValue>();
+  auto dict = std::make_unique<base::DictionaryValue>();
 
   dict->SetString("file", log_path_.LossyDisplayName());
 
@@ -285,31 +293,26 @@ void NetExportFileWriter::GetFilePathToCompletedLog(
 
 std::string NetExportFileWriter::CaptureModeToString(
     net::NetLogCaptureMode capture_mode) {
-  if (capture_mode == net::NetLogCaptureMode::Default()) {
+  if (capture_mode == net::NetLogCaptureMode::Default())
     return "STRIP_PRIVATE_DATA";
-  } else if (capture_mode ==
-             net::NetLogCaptureMode::IncludeCookiesAndCredentials()) {
+  if (capture_mode == net::NetLogCaptureMode::IncludeCookiesAndCredentials())
     return "NORMAL";
-  } else if (capture_mode == net::NetLogCaptureMode::IncludeSocketBytes()) {
+  if (capture_mode == net::NetLogCaptureMode::IncludeSocketBytes())
     return "LOG_BYTES";
-  } else {
-    NOTREACHED();
-    return "STRIP_PRIVATE_DATA";
-  }
+  NOTREACHED();
+  return "STRIP_PRIVATE_DATA";
 }
 
 net::NetLogCaptureMode NetExportFileWriter::CaptureModeFromString(
     const std::string& capture_mode_string) {
-  if (capture_mode_string == "STRIP_PRIVATE_DATA") {
+  if (capture_mode_string == "STRIP_PRIVATE_DATA")
     return net::NetLogCaptureMode::Default();
-  } else if (capture_mode_string == "NORMAL") {
+  if (capture_mode_string == "NORMAL")
     return net::NetLogCaptureMode::IncludeCookiesAndCredentials();
-  } else if (capture_mode_string == "LOG_BYTES") {
+  if (capture_mode_string == "LOG_BYTES")
     return net::NetLogCaptureMode::IncludeSocketBytes();
-  } else {
-    NOTREACHED();
-    return net::NetLogCaptureMode::Default();
-  }
+  NOTREACHED();
+  return net::NetLogCaptureMode::Default();
 }
 
 void NetExportFileWriter::SetDefaultLogBaseDirectoryGetterForTest(

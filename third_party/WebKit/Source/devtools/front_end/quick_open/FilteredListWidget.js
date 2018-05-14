@@ -26,7 +26,7 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
     this._promptElement.setAttribute('contenteditable', 'plaintext-only');
     this._prompt = new UI.TextPrompt();
     this._prompt.initialize(() => Promise.resolve([]));
-    var promptProxy = this._prompt.attach(this._promptElement);
+    const promptProxy = this._prompt.attach(this._promptElement);
     promptProxy.addEventListener('input', this._onInput.bind(this), false);
     promptProxy.classList.add('filtered-list-widget-prompt-element');
 
@@ -54,24 +54,6 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
   }
 
   /**
-   * @param {string} query
-   * @return {!RegExp}
-   */
-  static filterRegex(query) {
-    const toEscape = String.regexSpecialCharacters();
-    var regexString = '';
-    for (var i = 0; i < query.length; ++i) {
-      var c = query.charAt(i);
-      if (toEscape.indexOf(c) !== -1)
-        c = '\\' + c;
-      if (i)
-        regexString += '[^\\0' + c + ']*';
-      regexString += c;
-    }
-    return new RegExp(regexString, 'i');
-  }
-
-  /**
    * @param {!Element} element
    * @param {string} query
    * @param {boolean=} caseInsensitive
@@ -87,11 +69,11 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
      * @return {?Array.<!TextUtils.SourceRange>}
      */
     function rangesForMatch(text, query) {
-      var opcodes = Diff.Diff.charDiff(query, text);
-      var offset = 0;
-      var ranges = [];
-      for (var i = 0; i < opcodes.length; ++i) {
-        var opcode = opcodes[i];
+      const opcodes = Diff.Diff.charDiff(query, text);
+      let offset = 0;
+      const ranges = [];
+      for (let i = 0; i < opcodes.length; ++i) {
+        const opcode = opcodes[i];
         if (opcode[0] === Diff.Diff.Operation.Equal)
           ranges.push(new TextUtils.SourceRange(offset, opcode[1].length));
         else if (opcode[0] !== Diff.Diff.Operation.Insert)
@@ -101,8 +83,8 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
       return ranges;
     }
 
-    var text = element.textContent;
-    var ranges = rangesForMatch(text, query);
+    const text = element.textContent;
+    let ranges = rangesForMatch(text, query);
     if (!ranges || caseInsensitive)
       ranges = rangesForMatch(text.toUpperCase(), query.toUpperCase());
     if (ranges) {
@@ -202,10 +184,9 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
    * @param {!Event} event
    */
   _onEnter(event) {
-    event.preventDefault();
     if (!this._provider)
       return;
-    var selectedIndexInProvider = this._provider.itemCount() ? this._list.selectedItem() : null;
+    const selectedIndexInProvider = this._provider.itemCount() ? this._list.selectedItem() : null;
 
     this._selectItem(selectedIndexInProvider);
     if (this._dialog)
@@ -232,10 +213,10 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
    * @return {!Element}
    */
   createElementForItem(item) {
-    var itemElement = createElement('div');
+    const itemElement = createElement('div');
     itemElement.className = 'filtered-list-widget-item ' + (this._provider.renderAsTwoRows() ? 'two-rows' : 'one-row');
-    var titleElement = itemElement.createChild('div', 'filtered-list-widget-title');
-    var subtitleElement = itemElement.createChild('div', 'filtered-list-widget-subtitle');
+    const titleElement = itemElement.createChild('div', 'filtered-list-widget-title');
+    const subtitleElement = itemElement.createChild('div', 'filtered-list-widget-subtitle');
     subtitleElement.textContent = '\u200B';
     this._provider.renderItem(item, this._cleanValue(), titleElement, subtitleElement);
     return itemElement;
@@ -270,15 +251,17 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
   selectedItemChanged(from, to, fromElement, toElement) {
     if (fromElement)
       fromElement.classList.remove('selected');
-    if (toElement)
+    if (toElement) {
       toElement.classList.add('selected');
+      UI.ARIAUtils.alert(toElement.textContent, toElement);
+    }
   }
 
   /**
    * @param {!Event} event
    */
   _onClick(event) {
-    var item = this._list.itemForNode(/** @type {?Node} */ (event.target));
+    const item = this._list.itemForNode(/** @type {?Node} */ (event.target));
     if (item === null)
       return;
 
@@ -302,9 +285,9 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
    * @return {boolean}
    */
   _tabKeyPressed() {
-    var userEnteredText = this._prompt.text();
-    var completion;
-    for (var i = this._promptHistory.length - 1; i >= 0; i--) {
+    const userEnteredText = this._prompt.text();
+    let completion;
+    for (let i = this._promptHistory.length - 1; i >= 0; i--) {
       if (this._promptHistory[i] !== userEnteredText && this._promptHistory[i].startsWith(userEnteredText)) {
         completion = this._promptHistory[i];
         break;
@@ -344,21 +327,21 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
     this._progressBarElement.classList.remove('filtered-widget-progress-fade');
     this._progressBarElement.classList.remove('hidden');
 
-    var query = this._provider.rewriteQuery(this._cleanValue());
+    const query = this._provider.rewriteQuery(this._cleanValue());
     this._query = query;
 
-    var filterRegex = query ? QuickOpen.FilteredListWidget.filterRegex(query) : null;
+    const filterRegex = query ? String.filterRegex(query) : null;
 
-    var filteredItems = [];
+    const filteredItems = [];
 
-    var bestScores = [];
-    var bestItems = [];
-    var bestItemsToCollect = 100;
-    var minBestScore = 0;
-    var overflowItems = [];
-    var scoreStartTime = window.performance.now();
+    const bestScores = [];
+    const bestItems = [];
+    const bestItemsToCollect = 100;
+    let minBestScore = 0;
+    const overflowItems = [];
+    const scoreStartTime = window.performance.now();
 
-    var maxWorkItems = Number.constrain(10, 500, (this._provider.itemCount() / 10) | 0);
+    const maxWorkItems = Number.constrain(10, 500, (this._provider.itemCount() / 10) | 0);
 
     scoreItems.call(this, 0);
 
@@ -377,21 +360,22 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
      */
     function scoreItems(fromIndex) {
       delete this._scoringTimer;
-      var workDone = 0;
+      let workDone = 0;
+      let i;
 
-      for (var i = fromIndex; i < this._provider.itemCount() && workDone < maxWorkItems; ++i) {
+      for (i = fromIndex; i < this._provider.itemCount() && workDone < maxWorkItems; ++i) {
         // Filter out non-matching items quickly.
         if (filterRegex && !filterRegex.test(this._provider.itemKeyAt(i)))
           continue;
 
         // Score item.
-        var score = this._provider.itemScoreAt(i, query);
+        const score = this._provider.itemScoreAt(i, query);
         if (query)
           workDone++;
 
         // Find its index in the scores array (earlier elements have bigger scores).
         if (score > minBestScore || bestScores.length < bestItemsToCollect) {
-          var index = bestScores.upperBound(score, compareIntegers);
+          const index = bestScores.upperBound(score, compareIntegers);
           bestScores.splice(index, 0, score);
           bestItems.splice(index, 0, i);
           if (bestScores.length > bestItemsToCollect) {
@@ -434,7 +418,7 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
     delete this._refreshListWithCurrentResult;
     filteredItems = [].concat(bestItems, overflowItems, filteredItems);
     this._updateNotFoundMessage(!!filteredItems.length);
-    var oldHeight = this._list.element.offsetHeight;
+    const oldHeight = this._list.element.offsetHeight;
     this._items.replaceAll(filteredItems);
     if (filteredItems.length)
       this._list.selectItem(filteredItems[0]);
@@ -469,7 +453,7 @@ QuickOpen.FilteredListWidget = class extends UI.VBox {
    * @param {!Event} event
    */
   _onKeyDown(event) {
-    var handled = false;
+    let handled = false;
     switch (event.key) {
       case 'Enter':
         this._onEnter(event);

@@ -20,7 +20,6 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/browser/win/titlebar_config.h"
-#include "chrome/grit/theme_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/resource/resource_bundle_win.h"
@@ -88,7 +87,6 @@ GlassBrowserFrameView::GlassBrowserFrameView(BrowserFrame* frame,
     : BrowserNonClientFrameView(frame, browser_view),
       window_icon_(nullptr),
       window_title_(nullptr),
-      profile_switcher_(this),
       minimize_button_(nullptr),
       maximize_button_(nullptr),
       restore_button_(nullptr),
@@ -152,9 +150,13 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
       // In non-tablet mode, allow the new tab button to slide completely
       // under the profile switcher button.
       if (!IsMaximized()) {
-        end_x = std::min(end_x + GetLayoutSize(NEW_TAB_BUTTON).width() +
-                             kNewTabCaptionRestoredSpacing,
-                         old_end_x);
+        const int new_tab_button_width =
+            GetLayoutSize(NEW_TAB_BUTTON,
+                          browser_view()->tabstrip()->IsIncognito())
+                .width();
+        end_x = std::min(
+            end_x + new_tab_button_width + kNewTabCaptionRestoredSpacing,
+            old_end_x);
       }
     }
   }
@@ -208,10 +210,6 @@ gfx::Size GlassBrowserFrameView::GetMinimumSize() const {
   }
 
   return min_size;
-}
-
-views::View* GlassBrowserFrameView::GetProfileSwitcherView() const {
-  return profile_switcher_.view();
 }
 
 void GlassBrowserFrameView::OnBrowserViewInitViewsComplete() {
@@ -272,11 +270,13 @@ int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
     return HTNOWHERE;
 
   // See if the point is within the incognito icon or the profile switcher menu.
+  views::View* profile_switcher_view = GetProfileSwitcherView();
   if ((profile_indicator_icon() &&
        profile_indicator_icon()->GetMirroredBounds().Contains(point)) ||
-      (profile_switcher_.view() &&
-       profile_switcher_.view()->GetMirroredBounds().Contains(point)))
+      (profile_switcher_view &&
+       profile_switcher_view->GetMirroredBounds().Contains(point))) {
     return HTCLIENT;
+  }
 
   int frame_component = frame()->client_view()->NonClientHitTest(point);
 
@@ -436,11 +436,8 @@ void GlassBrowserFrameView::Layout() {
 // GlassBrowserFrameView, protected:
 
 // BrowserNonClientFrameView:
-void GlassBrowserFrameView::UpdateProfileIcons() {
-  if (browser_view()->IsRegularOrGuestSession())
-    profile_switcher_.Update(AvatarButtonStyle::NATIVE);
-  else
-    UpdateProfileIndicatorIcon();
+AvatarButtonStyle GlassBrowserFrameView::GetAvatarButtonStyle() const {
+  return AvatarButtonStyle::NATIVE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -459,9 +456,10 @@ bool GlassBrowserFrameView::DoesIntersectRect(const views::View* target,
   bool hit_incognito_icon =
       profile_indicator_icon() &&
       profile_indicator_icon()->GetMirroredBounds().Intersects(rect);
+  views::View* profile_switcher_view = GetProfileSwitcherView();
   bool hit_profile_switcher_button =
-      profile_switcher_.view() &&
-      profile_switcher_.view()->GetMirroredBounds().Intersects(rect);
+      profile_switcher_view &&
+      profile_switcher_view->GetMirroredBounds().Intersects(rect);
   return hit_incognito_icon || hit_profile_switcher_button ||
          !frame()->client_view()->bounds().Intersects(rect);
 }
@@ -654,48 +652,6 @@ void GlassBrowserFrameView::PaintTitlebar(gfx::Canvas* canvas) const {
   }
 }
 
-void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) const {
-  // TODO(estade): can this be shared with OpaqueBrowserFrameView?
-  gfx::Rect toolbar_bounds(browser_view()->GetToolbarBounds());
-  if (toolbar_bounds.IsEmpty())
-    return;
-  gfx::Point toolbar_origin(toolbar_bounds.origin());
-  ConvertPointToTarget(browser_view(), this, &toolbar_origin);
-  toolbar_bounds.set_origin(toolbar_origin);
-
-  const ui::ThemeProvider* tp = GetThemeProvider();
-  const int x = toolbar_bounds.x();
-  const int y = toolbar_bounds.y();
-  const int w = toolbar_bounds.width();
-
-  // Background.
-  if (tp->HasCustomImage(IDR_THEME_TOOLBAR)) {
-    canvas->TileImageInt(*tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR),
-                         x + GetThemeBackgroundXInset(),
-                         y - GetTopInset(false) - GetLayoutInsets(TAB).top(), x,
-                         y, w, toolbar_bounds.height());
-  } else {
-    canvas->FillRect(toolbar_bounds,
-                     tp->GetColor(ThemeProperties::COLOR_TOOLBAR));
-  }
-
-  // Top stroke.
-  gfx::Rect separator_rect(x, y, w, 0);
-  gfx::ScopedCanvas scoped_canvas(canvas);
-  gfx::Rect tabstrip_bounds =
-      GetMirroredRect(GetBoundsForTabStrip(browser_view()->tabstrip()));
-  canvas->sk_canvas()->clipRect(gfx::RectToSkRect(tabstrip_bounds),
-                                SkClipOp::kDifference);
-  separator_rect.set_y(tabstrip_bounds.bottom());
-  BrowserView::Paint1pxHorizontalLine(canvas, GetToolbarTopSeparatorColor(),
-                                      separator_rect, true);
-
-  // Toolbar/content separator.
-  BrowserView::Paint1pxHorizontalLine(
-      canvas, tp->GetColor(ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR),
-      toolbar_bounds, true);
-}
-
 void GlassBrowserFrameView::PaintClientEdge(gfx::Canvas* canvas) const {
   // Draw the client edge images.
   gfx::Rect client_bounds = CalculateClientAreaBounds();
@@ -744,7 +700,7 @@ void GlassBrowserFrameView::FillClientEdgeRects(int x,
 void GlassBrowserFrameView::LayoutProfileSwitcher() {
   DCHECK(browser_view()->IsRegularOrGuestSession());
 
-  View* profile_switcher = profile_switcher_.view();
+  View* profile_switcher = GetProfileSwitcherView();
   if (!profile_switcher)
     return;
 
@@ -773,7 +729,7 @@ void GlassBrowserFrameView::LayoutProfileSwitcher() {
   // new tab button is on the left, so it can never slide under the avatar
   // button, which is still on the right [http://crbug.com/560619].
   TabStrip* tabstrip = browser_view()->tabstrip();
-  if (tabstrip && !base::i18n::IsRTL() && tabstrip->max_x() >= button_x)
+  if (tabstrip && !base::i18n::IsRTL() && tabstrip->GetMaxX() >= button_x)
     button_height = profile_switcher->GetMinimumSize().height();
 
   profile_switcher->SetBounds(button_x, button_y, button_width, button_height);

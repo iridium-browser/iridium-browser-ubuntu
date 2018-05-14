@@ -20,7 +20,6 @@
 #include "base/strings/string_split.h"
 #include "base/sys_byteorder.h"
 #include "base/task_runner_util.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "net/socket/socket_descriptor.h"
@@ -149,11 +148,9 @@ void SeekDeviceByAddress(const std::string& device_address,
                          const ErrorCallback& error_callback,
                          base::TaskRunner* task_runner) {
   base::PostTaskAndReplyWithResult(
-      task_runner,
-      FROM_HERE,
-      base::Bind(&SeekDeviceByAddressImpl,
-                 device_address,
-                 make_scoped_refptr(task_runner)),
+      task_runner, FROM_HERE,
+      base::Bind(&SeekDeviceByAddressImpl, device_address,
+                 base::WrapRefCounted(task_runner)),
       base::Bind(&OnSeekDeviceResult, callback, error_callback));
 }
 

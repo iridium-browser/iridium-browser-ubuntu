@@ -15,9 +15,11 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.download.DownloadNotificationService.Observer;
 import org.chromium.components.offline_items_collection.ContentId;
+import org.chromium.components.offline_items_collection.PendingState;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Set;
 
 import javax.annotation.Nullable;
@@ -39,10 +41,11 @@ public class SystemDownloadNotifier implements DownloadNotifier, Observer {
     private static final int DOWNLOAD_NOTIFICATION_TYPE_REMOVE_NOTIFICATION = 7;
 
     private final Context mApplicationContext;
-    @Nullable private DownloadNotificationService mBoundService;
+
+    @Nullable
+    private DownloadNotificationService mBoundService;
     private Set<String> mActiveDownloads = new HashSet<String>();
-    private ArrayList<PendingNotificationInfo> mPendingNotifications =
-            new ArrayList<PendingNotificationInfo>();
+    private ArrayList<PendingNotificationInfo> mPendingNotifications = new ArrayList<>();
 
     private boolean mIsServiceBound;
 
@@ -82,8 +85,9 @@ public class SystemDownloadNotifier implements DownloadNotifier, Observer {
         @Override
         public void onServiceConnected(ComponentName className, IBinder service) {
             if (!(service instanceof DownloadNotificationService.LocalBinder)) {
-                Log.w(TAG, "Not from DownloadNotificationService, do not connect."
-                        + " Component name: " + className);
+                Log.w(TAG,
+                        "Not from DownloadNotificationService, do not connect."
+                                + " Component name: " + className);
                 assert false;
                 return;
             }
@@ -113,9 +117,12 @@ public class SystemDownloadNotifier implements DownloadNotifier, Observer {
     @VisibleForTesting
     void handlePendingNotifications() {
         if (mPendingNotifications.isEmpty()) return;
-        for (int i = 0; i < mPendingNotifications.size(); i++) {
-            updateDownloadNotification(
-                    mPendingNotifications.get(i), i == mPendingNotifications.size() - 1);
+        Iterator<PendingNotificationInfo> iter = mPendingNotifications.iterator();
+        while (iter.hasNext()) {
+            // Get the next PendingNotification, set autoRelease to be true for the last element.
+            PendingNotificationInfo nextPendingNotification = iter.next();
+            boolean autoRelease = !iter.hasNext();
+            updateDownloadNotification(nextPendingNotification, autoRelease);
         }
         mPendingNotifications.clear();
     }
@@ -202,7 +209,8 @@ public class SystemDownloadNotifier implements DownloadNotifier, Observer {
     }
 
     @Override
-    public void notifyDownloadInterrupted(DownloadInfo downloadInfo, boolean isAutoResumable) {
+    public void notifyDownloadInterrupted(
+            DownloadInfo downloadInfo, boolean isAutoResumable, @PendingState int notUsed) {
         PendingNotificationInfo info =
                 new PendingNotificationInfo(DOWNLOAD_NOTIFICATION_TYPE_INTERRUPT, downloadInfo);
         info.isAutoResumable = isAutoResumable;
@@ -220,7 +228,6 @@ public class SystemDownloadNotifier implements DownloadNotifier, Observer {
     @Override
     public void resumePendingDownloads() {
         if (!DownloadNotificationService.isTrackingResumableDownloads(mApplicationContext)) return;
-
         updateDownloadNotification(
                 new PendingNotificationInfo(DOWNLOAD_NOTIFICATION_TYPE_RESUME_ALL, null), true);
     }
@@ -254,6 +261,17 @@ public class SystemDownloadNotifier implements DownloadNotifier, Observer {
         startAndBindToServiceIfNeeded();
 
         if (mBoundService == null) {
+            if (notificationInfo == null) return;
+            if (notificationInfo.downloadInfo != null) {
+                for (PendingNotificationInfo pendingNotification : mPendingNotifications) {
+                    if (pendingNotification.downloadInfo != null
+                            && pendingNotification.downloadInfo.getContentId().equals(
+                                       notificationInfo.downloadInfo.getContentId())) {
+                        mPendingNotifications.remove(pendingNotification);
+                        break;
+                    }
+                }
+            }
             mPendingNotifications.add(notificationInfo);
             return;
         }
@@ -274,9 +292,8 @@ public class SystemDownloadNotifier implements DownloadNotifier, Observer {
                         info.getIsTransient(), info.getIcon());
                 break;
             case DOWNLOAD_NOTIFICATION_TYPE_PAUSE:
-                mBoundService.notifyDownloadPaused(
-                        info.getContentId(), info.getFileName(), true, false, info.isOffTheRecord(),
-                        info.getIsTransient(), info.getIcon());
+                mBoundService.notifyDownloadPaused(info.getContentId(), info.getFileName(), true,
+                        false, info.isOffTheRecord(), info.getIsTransient(), info.getIcon());
                 break;
             case DOWNLOAD_NOTIFICATION_TYPE_INTERRUPT:
                 mBoundService.notifyDownloadPaused(info.getContentId(), info.getFileName(),

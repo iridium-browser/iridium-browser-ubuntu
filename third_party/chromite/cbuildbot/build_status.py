@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -12,13 +13,18 @@ import datetime
 from chromite.cbuildbot import relevant_changes
 from chromite.lib import buildbucket_lib
 from chromite.lib import builder_status_lib
+from chromite.lib import build_requests
 from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cros_logging as logging
 from chromite.lib import metrics
+from chromite.lib import timeout_util
 from chromite.lib import tree_status
 
 
+# TODO(nxia): Rename this module to slave_status, since this module is for
+# a master build which has slave builds and there is builder_status_lib for
+# managing the status of an indivudual build.
 class SlaveStatus(object):
   """Keep track of statuses of all slaves from CIDB and Buildbucket(optional).
 
@@ -77,10 +83,13 @@ class SlaveStatus(object):
     # Dict mapping config names of slaves not in self.completed_builds to
     # their new BuildbucketInfo. Everytime UpdateSlaveStatus is called,
     # new (current) status will be pulled from Buildbucket.
+    # TODO(jkop): The code uses 'is not None' checks to determine if it's using
+    # Buildbucket. Initialize this to a dict for simplicity when that's been
+    # refactored.
     self.new_buildbucket_info_dict = None
     # Dict mapping all slave config names to BuildbucketInfo
-    self.all_buildbucket_info_dict = None
-    self.status_buildset_dict = None
+    self.all_buildbucket_info_dict = {}
+    self.status_buildset_dict = {}
 
     # Records history (per-tick) of self.completed_builds. Keep only the most
     # recent 2 entries of history. Used only for metrics purposes, not used for
@@ -93,7 +102,6 @@ class SlaveStatus(object):
       # Pre-compute dependency map for applied changes.
       self.dependency_map = self.pool.GetDependMapForChanges(
           self.pool.applied, self.pool.GetAppliedPatches())
-
     self.UpdateSlaveStatus()
 
   def _GetNewSlaveCIDBStatusInfo(self, all_cidb_status_dict, completed_builds):
@@ -140,11 +148,33 @@ class SlaveStatus(object):
   def UpdateSlaveStatus(self):
     """Update slave statuses by querying CIDB and Buildbucket(if supported)."""
     logging.info('Updating slave status...')
+
+    # Fetch experimental builders from tree status and update experimental
+    # builders in metedata before querying and updating any slave status.
+    if self.metadata is not None:
+      try:
+        experimental_builders = tree_status.GetExperimentalBuilders()
+        self.metadata.UpdateWithDict({
+            constants.METADATA_EXPERIMENTAL_BUILDERS: experimental_builders
+        })
+      except timeout_util.TimeoutError:
+        logging.error('Timeout getting experimental builders from the tree'
+                      'status. Not updating metadata.')
+
+      # If a slave build was important in previous loop and got added to the
+      # completed_builds because it completed, but in the current loop it's
+      # marked as experimental, take it out from the completed_builds list.
+      self.completed_builds = set([build for build in self.completed_builds
+                                   if build not in experimental_builders])
+
     if (self.config is not None and
         self.metadata is not None and
         config_lib.UseBuildbucketScheduler(self.config)):
       scheduled_buildbucket_info_dict = buildbucket_lib.GetBuildInfoDict(
           self.metadata)
+      # It's possible that CQ-master has a list of important slaves configured
+      # but doesn't schedule any slaves as no CLs were picked up in SyncStage.
+      # These are set to include only important builds.
       self.all_builders = scheduled_buildbucket_info_dict.keys()
       self.all_buildbucket_info_dict = (
           builder_status_lib.SlaveBuilderStatus.GetAllSlaveBuildbucketInfo(
@@ -165,11 +195,7 @@ class SlaveStatus(object):
     self.builds_to_retry = self._GetBuildsToRetry()
     self.completed_builds = self._GetCompletedBuilds()
 
-    if self.metadata is not None:
-      experimental_builders = tree_status.GetExperimentalBuilders()
-      self.metadata.UpdateWithDict({
-          constants.METADATA_EXPERIMENTAL_BUILDERS: experimental_builders
-      })
+
 
   def GetBuildbucketBuilds(self, build_status):
     """Get the buildbucket builds which are in the build_status status.
@@ -346,15 +372,56 @@ class SlaveStatus(object):
 
 
   def _GetUncompletedBuilds(self, completed_builds):
-    """Get uncompleted builds.
+    """Get uncompleted important builds.
 
     Args:
       completed_builds: a set of config names (strings) of completed builds.
 
     Returns:
-      A set of config names (strings) of uncompleted builds.
+      A set of config names (strings) of uncompleted important builds.
     """
     return set(self._GetExpectedBuilders()) - completed_builds
+
+  def _GetUncompletedExperimentalBuildbucketIDs(self):
+    """Get buildbucket_ids for uncompleted experimental builds.
+
+    Returns:
+      A set of Buildbucket IDs (strings) of uncompleted experimental builds.
+    """
+    flagged_experimental_builders = self.metadata.GetValueWithDefault(
+        constants.METADATA_EXPERIMENTAL_BUILDERS, [])
+    experimental_slaves = self.metadata.GetValueWithDefault(
+        constants.METADATA_SCHEDULED_EXPERIMENTAL_SLAVES, [])
+    important_slaves = self.metadata.GetValueWithDefault(
+        constants.METADATA_SCHEDULED_IMPORTANT_SLAVES, [])
+    experimental_slaves += [
+        (name, bb_id, time) for (name, bb_id, time) in important_slaves
+        if name in flagged_experimental_builders
+    ]
+
+    all_experimental_bb_info_dict = (
+        builder_status_lib.SlaveBuilderStatus.GetAllSlaveBuildbucketInfo(
+            self.buildbucket_client,
+            buildbucket_lib.GetScheduledBuildDict(experimental_slaves),
+            self.dry_run
+        )
+    )
+    all_experimental_cidb_status_dict = (
+        builder_status_lib.SlaveBuilderStatus.GetAllSlaveCIDBStatusInfo(
+            self.db, self.master_build_id, all_experimental_bb_info_dict)
+    )
+
+    completed_experimental_builds = set(
+        name for name, info in all_experimental_bb_info_dict.iteritems() if
+        info.status == constants.BUILDBUCKET_BUILDER_STATUS_COMPLETED
+    )
+    completed_experimental_builds |= set(
+        name for name, info in all_experimental_cidb_status_dict.iteritems()
+        if info.status in constants.BUILDER_COMPLETED_STATUSES
+    )
+
+    return set([bb_id for (name, bb_id, time) in experimental_slaves
+                if name not in completed_experimental_builds])
 
   def _ShouldFailForBuilderStartTimeout(self, current_time):
     """Decides if we should fail if a build hasn't started within 5 mins.
@@ -409,7 +476,8 @@ class SlaveStatus(object):
     """
     assert builds is not None
 
-    new_scheduled_slaves = []
+    new_scheduled_important_slaves = []
+    new_scheduled_build_reqs = []
     for build in builds:
       try:
         buildbucket_id = self.new_buildbucket_info_dict[build].buildbucket_id
@@ -430,7 +498,12 @@ class SlaveStatus(object):
 
         new_buildbucket_id = buildbucket_lib.GetBuildId(content)
         new_created_ts = buildbucket_lib.GetBuildCreated_ts(content)
-        new_scheduled_slaves.append((build, new_buildbucket_id, new_created_ts))
+
+        new_scheduled_important_slaves.append(
+            (build, new_buildbucket_id, new_created_ts))
+        new_scheduled_build_reqs.append(build_requests.BuildRequest(
+            None, self.master_build_id, build, None, new_buildbucket_id,
+            build_requests.REASON_IMPORTANT_CQ_SLAVE, None))
 
         logging.info('Retried build %s buildbucket_id %s created_ts %s',
                      build, new_buildbucket_id, new_created_ts)
@@ -438,11 +511,15 @@ class SlaveStatus(object):
         logging.error('Failed to retry build %s buildbucket_id %s: %s',
                       build, buildbucket_id, e)
 
-    if new_scheduled_slaves:
-      self.metadata.ExtendKeyListWithList(
-          constants.METADATA_SCHEDULED_SLAVES, new_scheduled_slaves)
+    if config_lib.IsMasterCQ(self.config) and new_scheduled_build_reqs:
+      self.db.InsertBuildRequests(new_scheduled_build_reqs)
 
-    return set([build for build, _, _ in new_scheduled_slaves])
+    if new_scheduled_important_slaves:
+      self.metadata.ExtendKeyListWithList(
+          constants.METADATA_SCHEDULED_IMPORTANT_SLAVES,
+          new_scheduled_important_slaves)
+
+    return set([build for build, _, _ in new_scheduled_important_slaves])
 
   @staticmethod
   def _LastSlavesToComplete(completed_builds_history):
@@ -497,17 +574,38 @@ class SlaveStatus(object):
     """
     self._completed_build_history.append(list(self.completed_builds))
 
+    uncompleted_experimental_build_buildbucket_ids = (
+        self._GetUncompletedExperimentalBuildbucketIDs())
+
     # Check if all builders completed.
     if self._Completed():
+      builder_status_lib.CancelBuilds(
+          list(uncompleted_experimental_build_buildbucket_ids),
+          self.buildbucket_client,
+          self.dry_run,
+          self.config)
       return False, False, True
 
     current_time = datetime.datetime.now()
 
-    # Guess there are some builders building, check if there is a problem.
+    uncompleted_important_builds = self._GetUncompletedBuilds(
+        self.completed_builds)
+    uncompleted_important_build_buildbucket_ids = set(
+        v.buildbucket_id
+        for k, v in self.all_buildbucket_info_dict.iteritems() if k in
+        uncompleted_important_builds)
+    uncompleted_build_buildbucket_ids = list(
+        uncompleted_important_build_buildbucket_ids |
+        uncompleted_experimental_build_buildbucket_ids)
+
     if self._ShouldFailForBuilderStartTimeout(current_time):
       logging.error('Ending build since at least one builder has not started '
                     'within 5 mins.')
-      return False, True, False
+      builder_status_lib.CancelBuilds(uncompleted_build_buildbucket_ids,
+                                      self.buildbucket_client,
+                                      self.dry_run,
+                                      self.config)
+      return False, False, False
 
     if self.pool is not None:
       triage_relevant_changes = relevant_changes.TriageRelevantChanges(
@@ -539,16 +637,18 @@ class SlaveStatus(object):
 
         # For every uncompleted build, the master build will insert an
         # ignored_reason message into the buildMessageTable.
-        uncompleted_builds = self._GetUncompletedBuilds(self.completed_builds)
-        for build in uncompleted_builds:
+        for build in uncompleted_important_builds:
           if build in self.all_cidb_status_dict:
             self.db.InsertBuildMessage(
                 self.master_build_id,
                 message_type=constants.MESSAGE_TYPE_IGNORED_REASON,
                 message_subtype=constants.MESSAGE_SUBTYPE_SELF_DESTRUCTION,
                 message_value=str(self.all_cidb_status_dict[build].build_id))
-
-        return False, True, True
+        builder_status_lib.CancelBuilds(uncompleted_build_buildbucket_ids,
+                                        self.buildbucket_client,
+                                        self.dry_run,
+                                        self.config)
+        return False, False, True
 
     # We got here which means no problems, we should still wait.
     logging.info('Still waiting for the following builds to complete: %r',

@@ -29,7 +29,7 @@ class WindowTreeHostMusDelegate;
 struct DisplayInitParams;
 struct WindowTreeHostMusInitParams;
 
-class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
+class AURA_EXPORT WindowTreeHostMus : public WindowTreeHostPlatform {
  public:
   explicit WindowTreeHostMus(WindowTreeHostMusInitParams init_params);
 
@@ -52,10 +52,6 @@ class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   void SetClientArea(const gfx::Insets& insets,
                      const std::vector<gfx::Rect>& additional_client_area);
 
-  // Sets the hit test mask on the underlying mus window. Pass base::nullopt to
-  // clear.
-  void SetHitTestMask(const base::Optional<gfx::Rect>& rect);
-
   // Sets the opacity of the underlying mus window.
   void SetOpacity(float value);
 
@@ -70,6 +66,9 @@ class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   // windows which we might not own.
   void StackAtTop();
 
+  // Requests that the window manager perform |action| on the window.
+  void PerformWmAction(const std::string& action);
+
   // Tells the window manager to take control of moving the window. Returns
   // true if the move wasn't canceled.
   void PerformWindowMove(ui::mojom::MoveLoopSource mus_source,
@@ -80,6 +79,9 @@ class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   // PerformWindowMove().
   void CancelWindowMove();
 
+  // Tells the window manager to confine the cursor to these specific bounds.
+  void ConfineCursorToBounds(const gfx::Rect& pixel_bounds);
+
   // Used during initial setup. Returns the DisplayInitParams
   // supplied to the constructor.
   std::unique_ptr<DisplayInitParams> ReleaseDisplayInitParams();
@@ -88,6 +90,10 @@ class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   void set_display_id(int64_t id) { display_id_ = id; }
   int64_t display_id() const { return display_id_; }
   display::Display GetDisplay() const;
+
+  // Forces WindowTreeHost to re-setup the compositor to use the provided
+  // |widget|.
+  void OverrideAcceleratedWidget(gfx::AcceleratedWidget widget);
 
   // aura::WindowTreeHostPlatform:
   void HideImpl() override;
@@ -98,6 +104,8 @@ class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   void OnCloseRequest() override;
   void MoveCursorToScreenLocationInPixels(
       const gfx::Point& location_in_pixels) override;
+  gfx::Transform GetRootTransformForLocalEventCoordinates() const override;
+  int64_t GetDisplayId() override;
 
  private:
   int64_t display_id_;

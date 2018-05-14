@@ -28,7 +28,7 @@
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/Text.h"
-#include "core/events/ScopedEventQueue.h"
+#include "core/dom/events/ScopedEventQueue.h"
 #include "platform/wtf/text/AtomicString.h"
 #include "platform/wtf/text/StringBuilder.h"
 
@@ -38,14 +38,13 @@ using namespace HTMLNames;
 
 Attr::Attr(Element& element, const QualifiedName& name)
     : Node(&element.GetDocument(), kCreateOther),
-      element_(this, &element),
+      element_(&element),
       name_(name) {}
 
 Attr::Attr(Document& document,
            const QualifiedName& name,
            const AtomicString& standalone_value)
     : Node(&document, kCreateOther),
-      element_(this, nullptr),
       name_(name),
       standalone_value_or_attached_local_name_(standalone_value) {}
 
@@ -59,7 +58,7 @@ Attr* Attr::Create(Document& document,
   return new Attr(document, name, value);
 }
 
-Attr::~Attr() {}
+Attr::~Attr() = default;
 
 const QualifiedName Attr::GetQualifiedName() const {
   if (element_ && !standalone_value_or_attached_local_name_.IsNull()) {
@@ -96,8 +95,8 @@ void Attr::setNodeValue(const String& v) {
   setValue(v.IsNull() ? g_empty_atom : AtomicString(v));
 }
 
-Node* Attr::cloneNode(bool /*deep*/, ExceptionState&) {
-  return new Attr(GetDocument(), name_, value());
+Node* Attr::Clone(Document& factory, CloneChildrenFlag) const {
+  return new Attr(factory, name_, value());
 }
 
 void Attr::DetachFromElementWithValue(const AtomicString& value) {
@@ -113,12 +112,12 @@ void Attr::AttachToElement(Element* element,
   standalone_value_or_attached_local_name_ = attached_local_name;
 }
 
-DEFINE_TRACE(Attr) {
+void Attr::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
   Node::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(Attr) {
+void Attr::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(element_);
   Node::TraceWrappers(visitor);
 }

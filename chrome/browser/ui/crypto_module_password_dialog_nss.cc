@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "content/public/browser/browser_thread.h"
-#include "net/cert/x509_certificate.h"
 
 using content::BrowserThread;
 
@@ -27,7 +26,7 @@ bool ShouldShowDialog(PK11SlotInfo* slot) {
 class SlotUnlocker {
  public:
   SlotUnlocker(std::vector<crypto::ScopedPK11Slot> modules,
-               chrome::CryptoModulePasswordReason reason,
+               CryptoModulePasswordReason reason,
                const net::HostPortPair& server,
                gfx::NativeWindow parent,
                const base::Closure& callback);
@@ -40,7 +39,7 @@ class SlotUnlocker {
 
   size_t current_;
   std::vector<crypto::ScopedPK11Slot> modules_;
-  chrome::CryptoModulePasswordReason reason_;
+  CryptoModulePasswordReason reason_;
   net::HostPortPair server_;
   gfx::NativeWindow parent_;
   base::Closure callback_;
@@ -48,7 +47,7 @@ class SlotUnlocker {
 };
 
 SlotUnlocker::SlotUnlocker(std::vector<crypto::ScopedPK11Slot> modules,
-                           chrome::CryptoModulePasswordReason reason,
+                           CryptoModulePasswordReason reason,
                            const net::HostPortPair& server,
                            gfx::NativeWindow parent,
                            const base::Closure& callback)
@@ -119,7 +118,7 @@ void SlotUnlocker::Done() {
 namespace chrome {
 
 void UnlockSlotsIfNecessary(std::vector<crypto::ScopedPK11Slot> modules,
-                            chrome::CryptoModulePasswordReason reason,
+                            CryptoModulePasswordReason reason,
                             const net::HostPortPair& server,
                             gfx::NativeWindow parent,
                             const base::Closure& callback) {
@@ -134,14 +133,13 @@ void UnlockSlotsIfNecessary(std::vector<crypto::ScopedPK11Slot> modules,
   callback.Run();
 }
 
-void UnlockCertSlotIfNecessary(net::X509Certificate* cert,
-                               chrome::CryptoModulePasswordReason reason,
+void UnlockCertSlotIfNecessary(CERTCertificate* cert,
+                               CryptoModulePasswordReason reason,
                                const net::HostPortPair& server,
                                gfx::NativeWindow parent,
                                const base::Closure& callback) {
   std::vector<crypto::ScopedPK11Slot> modules;
-  modules.push_back(
-      crypto::ScopedPK11Slot(PK11_ReferenceSlot(cert->os_cert_handle()->slot)));
+  modules.push_back(crypto::ScopedPK11Slot(PK11_ReferenceSlot(cert->slot)));
   UnlockSlotsIfNecessary(std::move(modules), reason, server, parent, callback);
 }
 

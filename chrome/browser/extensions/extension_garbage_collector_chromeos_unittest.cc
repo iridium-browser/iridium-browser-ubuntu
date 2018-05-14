@@ -4,17 +4,16 @@
 
 #include "chrome/browser/extensions/extension_garbage_collector_chromeos.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/files/file_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_assets_manager_chromeos.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -26,6 +25,7 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/signin/core/account_id/account_id.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_names.h"
 #include "content/public/browser/plugin_service.h"
@@ -59,8 +59,8 @@ class ExtensionGarbageCollectorChromeOSUnitTest
 
     // Initialize the UserManager singleton to a fresh FakeChromeUserManager
     // instance.
-    user_manager_enabler_.reset(new chromeos::ScopedUserManagerEnabler(
-        new chromeos::FakeChromeUserManager));
+    user_manager_enabler_ = std::make_unique<user_manager::ScopedUserManager>(
+        std::make_unique<chromeos::FakeChromeUserManager>());
 
     GetFakeUserManager()->AddUser(user_manager::StubAccountId());
     GetFakeUserManager()->LoginUser(user_manager::StubAccountId());
@@ -72,7 +72,7 @@ class ExtensionGarbageCollectorChromeOSUnitTest
     ExtensionGarbageCollector::Get(profile_.get())
         ->GarbageCollectExtensionsForTest();
     // Wait for GarbageCollectExtensions task to complete.
-    content::RunAllBlockingPoolTasksUntilIdle();
+    content::RunAllTasksUntilIdle();
   }
 
   base::FilePath CreateSharedExtensionDir(const std::string& id,
@@ -92,16 +92,16 @@ class ExtensionGarbageCollectorChromeOSUnitTest
 
     base::DictionaryValue* extension_info_weak = NULL;
     if (!shared_extensions->GetDictionary(id, &extension_info_weak)) {
-      auto extension_info = base::MakeUnique<base::DictionaryValue>();
+      auto extension_info = std::make_unique<base::DictionaryValue>();
       extension_info_weak = extension_info.get();
       shared_extensions->Set(id, std::move(extension_info));
     }
 
-    auto version_info = base::MakeUnique<base::DictionaryValue>();
+    auto version_info = std::make_unique<base::DictionaryValue>();
     version_info->SetString(
         ExtensionAssetsManagerChromeOS::kSharedExtensionPath, path.value());
 
-    auto users = base::MakeUnique<base::ListValue>();
+    auto users = std::make_unique<base::ListValue>();
     for (const std::string& user :
          base::SplitString(users_string, ",", base::KEEP_WHITESPACE,
                            base::SPLIT_WANT_NONEMPTY)) {
@@ -139,7 +139,7 @@ class ExtensionGarbageCollectorChromeOSUnitTest
   }
 
  private:
-  std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
+  std::unique_ptr<user_manager::ScopedUserManager> user_manager_enabler_;
   base::ScopedTempDir cache_dir_;
 };
 

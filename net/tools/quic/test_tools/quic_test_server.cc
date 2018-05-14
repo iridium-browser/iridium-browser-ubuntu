@@ -38,7 +38,6 @@ class CustomStreamSession : public QuicSimpleServerSession {
         crypto_stream_factory_(crypto_stream_factory) {}
 
   QuicSpdyStream* CreateIncomingDynamicStream(QuicStreamId id) override {
-    DCHECK(!FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
     if (!ShouldCreateIncomingDynamicStream(id)) {
       return nullptr;
     }
@@ -49,14 +48,6 @@ class CustomStreamSession : public QuicSimpleServerSession {
       return stream;
     }
     return QuicSimpleServerSession::CreateIncomingDynamicStream(id);
-  }
-
-  std::unique_ptr<QuicStream> CreateStream(QuicStreamId id) override {
-    if (stream_factory_) {
-      return QuicWrapUnique<QuicSpdyStream>(
-          stream_factory_->CreateStream(id, this, response_cache()));
-    }
-    return QuicSimpleServerSession::CreateStream(id);
   }
 
   QuicCryptoServerStreamBase* CreateQuicCryptoServerStream(
@@ -156,10 +147,11 @@ QuicTestServer::QuicTestServer(std::unique_ptr<ProofSource> proof_source,
                                QuicHttpResponseCache* response_cache)
     : QuicServer(std::move(proof_source), response_cache) {}
 
-QuicTestServer::QuicTestServer(std::unique_ptr<ProofSource> proof_source,
-                               const QuicConfig& config,
-                               const QuicVersionVector& supported_versions,
-                               QuicHttpResponseCache* response_cache)
+QuicTestServer::QuicTestServer(
+    std::unique_ptr<ProofSource> proof_source,
+    const QuicConfig& config,
+    const ParsedQuicVersionVector& supported_versions,
+    QuicHttpResponseCache* response_cache)
     : QuicServer(std::move(proof_source),
                  config,
                  QuicCryptoServerConfig::ConfigOptions(),
@@ -169,13 +161,11 @@ QuicTestServer::QuicTestServer(std::unique_ptr<ProofSource> proof_source,
 QuicDispatcher* QuicTestServer::CreateQuicDispatcher() {
   return new QuicTestDispatcher(
       config(), &crypto_config(), version_manager(),
-      std::unique_ptr<QuicEpollConnectionHelper>(new QuicEpollConnectionHelper(
-          epoll_server(), QuicAllocator::BUFFER_POOL)),
+      QuicMakeUnique<QuicEpollConnectionHelper>(epoll_server(),
+                                                QuicAllocator::BUFFER_POOL),
       std::unique_ptr<QuicCryptoServerStream::Helper>(
           new QuicSimpleCryptoServerStreamHelper(QuicRandom::GetInstance())),
-      std::unique_ptr<QuicEpollAlarmFactory>(
-          new QuicEpollAlarmFactory(epoll_server())),
-      response_cache());
+      QuicMakeUnique<QuicEpollAlarmFactory>(epoll_server()), response_cache());
 }
 
 void QuicTestServer::SetSessionFactory(SessionFactory* factory) {

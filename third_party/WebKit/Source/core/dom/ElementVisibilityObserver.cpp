@@ -13,7 +13,7 @@ namespace blink {
 
 ElementVisibilityObserver::ElementVisibilityObserver(
     Element* element,
-    std::unique_ptr<VisibilityCallback> callback)
+    VisibilityCallback callback)
     : element_(element), callback_(std::move(callback)) {}
 
 ElementVisibilityObserver::~ElementVisibilityObserver() = default;
@@ -27,8 +27,8 @@ void ElementVisibilityObserver::Start(float threshold) {
 
   intersection_observer_ = IntersectionObserver::Create(
       {} /* root_margin */, {threshold}, &document,
-      WTF::Bind(&ElementVisibilityObserver::OnVisibilityChanged,
-                WrapWeakPersistent(this)));
+      WTF::BindRepeating(&ElementVisibilityObserver::OnVisibilityChanged,
+                         WrapWeakPersistent(this)));
   DCHECK(intersection_observer_);
 
   intersection_observer_->observe(element_.Release());
@@ -45,7 +45,7 @@ void ElementVisibilityObserver::DeliverObservationsForTesting() {
   intersection_observer_->Deliver();
 }
 
-DEFINE_TRACE(ElementVisibilityObserver) {
+void ElementVisibilityObserver::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
   visitor->Trace(intersection_observer_);
 }
@@ -54,7 +54,7 @@ void ElementVisibilityObserver::OnVisibilityChanged(
     const HeapVector<Member<IntersectionObserverEntry>>& entries) {
   bool is_visible = entries.back()->intersectionRatio() >=
                     intersection_observer_->thresholds()[0];
-  (*callback_.get())(is_visible);
+  callback_.Run(is_visible);
 }
 
 }  // namespace blink

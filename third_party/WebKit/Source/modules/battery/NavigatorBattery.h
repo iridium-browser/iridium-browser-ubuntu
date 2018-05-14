@@ -20,16 +20,17 @@ class NavigatorBattery final : public GarbageCollected<NavigatorBattery>,
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorBattery);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorBattery& From(Navigator&);
 
   static ScriptPromise getBattery(ScriptState*, Navigator&);
   ScriptPromise getBattery(ScriptState*);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   explicit NavigatorBattery(Navigator&);
-  static const char* SupplementName();
 
   Member<BatteryManager> battery_manager_;
 };

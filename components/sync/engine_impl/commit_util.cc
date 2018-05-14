@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/strings/string_util.h"
-#include "components/sync/base/attachment_id_proto.h"
 #include "components/sync/base/time.h"
 #include "components/sync/base/unique_position.h"
 #include "components/sync/engine_impl/syncer_proto_util.h"
@@ -81,17 +80,10 @@ void SetEntrySpecifics(const Entry& meta_entry,
   sync_entry->mutable_specifics()->CopyFrom(meta_entry.GetSpecifics());
   sync_entry->set_folder(meta_entry.GetIsDir());
 
+  // Purposefully crash if we have client only data, as this could result in
+  // sending password in plain text.
   CHECK(!sync_entry->specifics().password().has_client_only_encrypted_data());
   DCHECK_EQ(meta_entry.GetModelType(), GetModelType(*sync_entry));
-}
-
-void SetAttachmentIds(const Entry& meta_entry,
-                      sync_pb::SyncEntity* sync_entry) {
-  const sync_pb::AttachmentMetadata& attachment_metadata =
-      meta_entry.GetAttachmentMetadata();
-  for (int i = 0; i < attachment_metadata.record_size(); ++i) {
-    *sync_entry->add_attachment_id() = attachment_metadata.record(i).id();
-  }
 }
 
 }  // namespace
@@ -102,7 +94,7 @@ void BuildCommitItem(const syncable::Entry& meta_entry,
   sync_entry->set_id_string(SyncableIdToProto(id));
 
   string name = meta_entry.GetNonUniqueName();
-  CHECK(!name.empty());  // Make sure this isn't an update.
+  DCHECK(!name.empty());  // Make sure this isn't an update.
   // Note: Truncation is also performed in WriteNode::SetTitle(..). But this
   // call is still necessary to handle any title changes that might originate
   // elsewhere, or already be persisted in the directory.
@@ -158,8 +150,6 @@ void BuildCommitItem(const syncable::Entry& meta_entry,
   }
   sync_entry->set_ctime(TimeToProtoTime(meta_entry.GetCtime()));
   sync_entry->set_mtime(TimeToProtoTime(meta_entry.GetMtime()));
-
-  SetAttachmentIds(meta_entry, sync_entry);
 
   // Handle bookmarks separately.
   if (meta_entry.GetSpecifics().has_bookmark()) {
@@ -297,8 +287,6 @@ void UpdateServerFieldsAfterCommit(
       (committed_entry.folder() ||
        committed_entry.bookmarkdata().bookmark_folder()));
   local_entry->PutServerSpecifics(committed_entry.specifics());
-  local_entry->PutServerAttachmentMetadata(
-      CreateAttachmentMetadata(committed_entry.attachment_id()));
   local_entry->PutServerMtime(ProtoTimeToTime(committed_entry.mtime()));
   local_entry->PutServerCtime(ProtoTimeToTime(committed_entry.ctime()));
   if (committed_entry.has_unique_position()) {
@@ -378,7 +366,7 @@ sync_pb::CommitResponse::ResponseType ProcessSingleCommitResponse(
     set<syncable::Id>* deleted_folders) {
   syncable::ModelNeutralMutableEntry local_entry(trans, syncable::GET_BY_HANDLE,
                                                  metahandle);
-  CHECK(local_entry.good());
+  DCHECK(local_entry.good());
   bool dirty_sync_was_set = local_entry.GetDirtySync();
   local_entry.PutDirtySync(false);
   local_entry.PutSyncing(false);
@@ -395,7 +383,7 @@ sync_pb::CommitResponse::ResponseType ProcessSingleCommitResponse(
     return sync_pb::CommitResponse::TRANSIENT_ERROR;
   }
   if (sync_pb::CommitResponse::INVALID_MESSAGE == response) {
-    LOG(ERROR) << "Error Commiting: " << local_entry;
+    LOG(ERROR) << "Error Committing: " << local_entry;
     LogServerError(server_entry);
     return response;
   }
@@ -425,7 +413,7 @@ sync_pb::CommitResponse::ResponseType ProcessSingleCommitResponse(
   if (local_entry.GetId() != server_entry_id) {
     Entry e(trans, syncable::GET_BY_ID, server_entry_id);
     if (e.good()) {
-      LOG(ERROR) << "Got duplicate id when commiting id: "
+      LOG(ERROR) << "Got duplicate id when committing id: "
                  << local_entry.GetId() << ". Treating as an error return";
       return sync_pb::CommitResponse::INVALID_MESSAGE;
     }

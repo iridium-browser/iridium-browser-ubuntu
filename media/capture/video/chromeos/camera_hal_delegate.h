@@ -13,12 +13,15 @@
 #include "base/sequence_checker.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
-#include "media/capture/video/chromeos/mojo/arc_camera3.mojom.h"
+#include "media/capture/video/chromeos/mojo/camera3.mojom.h"
+#include "media/capture/video/chromeos/mojo/camera_common.mojom.h"
 #include "media/capture/video/video_capture_device_factory.h"
 #include "media/capture/video_capture_types.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
 namespace media {
+
+class CameraBufferFactory;
 
 // CameraHalDelegate is the component which does Mojo IPCs to the camera HAL
 // process on Chrome OS to access the module-level camera functionalities such
@@ -111,6 +114,8 @@ class CAPTURE_EXPORT CameraHalDelegate final
   void CameraDeviceStatusChange(
       int32_t camera_id,
       arc::mojom::CameraDeviceStatus new_status) final;
+  void TorchModeStatusChange(int32_t camera_id,
+                             arc::mojom::TorchModeStatus new_status) final;
 
   base::WaitableEvent camera_module_has_been_set_;
 
@@ -129,6 +134,8 @@ class CAPTURE_EXPORT CameraHalDelegate final
   std::unordered_map<std::string, arc::mojom::CameraInfoPtr> camera_info_;
 
   SEQUENCE_CHECKER(sequence_checker_);
+
+  std::unique_ptr<CameraBufferFactory> camera_buffer_factory_;
 
   // The task runner where all the camera module Mojo communication takes place.
   const scoped_refptr<base::SingleThreadTaskRunner> ipc_task_runner_;

@@ -7,20 +7,20 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/prefs/testing_pref_service.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/manifest.h"
-#include "extensions/common/test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extensions::file_system_api::ConsentProvider;
@@ -108,8 +108,9 @@ class FileSystemApiConsentProviderTest : public testing::Test {
     TestingBrowserProcess::GetGlobal()->SetLocalState(
         testing_pref_service_.get());
     user_manager_ = new chromeos::FakeChromeUserManager;
-    scoped_user_manager_enabler_.reset(
-        new chromeos::ScopedUserManagerEnabler(user_manager_));
+    scoped_user_manager_enabler_ =
+        std::make_unique<user_manager::ScopedUserManager>(
+            base::WrapUnique(user_manager_));
   }
 
   void TearDown() override {
@@ -124,8 +125,7 @@ class FileSystemApiConsentProviderTest : public testing::Test {
   std::unique_ptr<TestingPrefServiceSimple> testing_pref_service_;
   chromeos::FakeChromeUserManager*
       user_manager_;  // Owned by the scope enabler.
-  std::unique_ptr<chromeos::ScopedUserManagerEnabler>
-      scoped_user_manager_enabler_;
+  std::unique_ptr<user_manager::ScopedUserManager> scoped_user_manager_enabler_;
   content::TestBrowserThreadBundle thread_bundle_;
 };
 
@@ -133,8 +133,8 @@ TEST_F(FileSystemApiConsentProviderTest, ForNonKioskApps) {
   // Component apps are not granted unless they are whitelisted.
   {
     scoped_refptr<Extension> component_extension(
-        test_util::BuildApp(
-            std::move(ExtensionBuilder().SetLocation(Manifest::COMPONENT)))
+        ExtensionBuilder("Test", ExtensionBuilder::Type::PLATFORM_APP)
+            .SetLocation(Manifest::COMPONENT)
             .Build());
     TestingConsentProviderDelegate delegate;
     ConsentProvider provider(&delegate);
@@ -145,8 +145,8 @@ TEST_F(FileSystemApiConsentProviderTest, ForNonKioskApps) {
   // user.
   {
     scoped_refptr<Extension> whitelisted_component_extension(
-        test_util::BuildApp(
-            std::move(ExtensionBuilder().SetLocation(Manifest::COMPONENT)))
+        ExtensionBuilder("Test", ExtensionBuilder::Type::PLATFORM_APP)
+            .SetLocation(Manifest::COMPONENT)
             .Build());
     TestingConsentProviderDelegate delegate;
     delegate.SetComponentWhitelist(whitelisted_component_extension->id());
@@ -168,7 +168,7 @@ TEST_F(FileSystemApiConsentProviderTest, ForNonKioskApps) {
   // asking for user consent.
   {
     scoped_refptr<Extension> non_component_extension(
-        test_util::CreateEmptyExtension());
+        ExtensionBuilder("Test").Build());
     TestingConsentProviderDelegate delegate;
     ConsentProvider provider(&delegate);
     EXPECT_FALSE(provider.IsGrantable(*non_component_extension));
@@ -180,7 +180,7 @@ TEST_F(FileSystemApiConsentProviderTest, ForKioskApps) {
   // instantly without asking for user consent, but with a notification.
   {
     scoped_refptr<Extension> auto_launch_kiosk_app(
-        test_util::BuildApp(ExtensionBuilder())
+        ExtensionBuilder("Test", ExtensionBuilder::Type::PLATFORM_APP)
             .MergeManifest(DictionaryBuilder()
                                .SetBoolean("kiosk_enabled", true)
                                .SetBoolean("kiosk_only", true)
@@ -210,7 +210,7 @@ TEST_F(FileSystemApiConsentProviderTest, ForKioskApps) {
   // Non-component apps in manual-launch kiosk mode will be granted access after
   // receiving approval from the user.
   scoped_refptr<Extension> manual_launch_kiosk_app(
-      test_util::BuildApp(ExtensionBuilder())
+      ExtensionBuilder("Test", ExtensionBuilder::Type::PLATFORM_APP)
           .MergeManifest(DictionaryBuilder()
                              .SetBoolean("kiosk_enabled", true)
                              .SetBoolean("kiosk_only", true)

@@ -13,7 +13,7 @@
 #include "base/memory/singleton.h"
 #include "base/stl_util.h"
 #include "ui/accessibility/ax_action_data.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/platform/ax_platform_node_auralinux.h"
 #include "ui/accessibility/platform/ax_platform_node_delegate.h"
@@ -60,6 +60,8 @@ class AuraLinuxApplication
     return platform_node_->GetNativeViewAccessible();
   }
 
+  const ui::AXUniqueId& GetUniqueId() const override { return unique_id_; }
+
   // WidgetObserver:
 
   void OnWidgetDestroying(Widget* widget) override {
@@ -96,7 +98,10 @@ class AuraLinuxApplication
     return widget->GetRootView()->GetNativeViewAccessible();
   }
 
-  gfx::Rect GetScreenBoundsRect() const override { return gfx::Rect(); }
+  gfx::Rect GetClippedScreenBoundsRect() const override { return gfx::Rect(); }
+  gfx::Rect GetUnclippedScreenBoundsRect() const override {
+    return gfx::Rect();
+  }
 
   gfx::NativeViewAccessible HitTestSync(int x, int y) override {
     return nullptr;
@@ -105,6 +110,13 @@ class AuraLinuxApplication
   gfx::NativeViewAccessible GetFocus() override {
     return nullptr;
   }
+
+  bool IsOffscreen() const override {
+    // TODO: need to implement.
+    return false;
+  }
+
+  int GetIndexInParent() const override { return -1; }
 
   ui::AXPlatformNode* GetFromNodeID(int32_t id) override { return nullptr; }
 
@@ -118,25 +130,30 @@ class AuraLinuxApplication
 
   bool ShouldIgnoreHoveredStateForTesting() override { return false; }
 
+  std::set<int32_t> GetReverseRelations(ax::mojom::IntAttribute attr,
+                                        int32_t dst_id) override {
+    return std::set<int32_t>();
+  }
+
+  std::set<int32_t> GetReverseRelations(ax::mojom::IntListAttribute attr,
+                                        int32_t dst_id) override {
+    return std::set<int32_t>();
+  }
+
  private:
   friend struct base::DefaultSingletonTraits<AuraLinuxApplication>;
 
-  AuraLinuxApplication()
-      : platform_node_(ui::AXPlatformNode::Create(this)) {
-    data_.role = ui::AX_ROLE_APPLICATION;
+  AuraLinuxApplication() {
+    data_.role = ax::mojom::Role::kApplication;
+    platform_node_ = ui::AXPlatformNode::Create(this);
     if (ViewsDelegate::GetInstance()) {
       data_.AddStringAttribute(
-          ui::AX_ATTR_NAME,
+          ax::mojom::StringAttribute::kName,
           ViewsDelegate::GetInstance()->GetApplicationName());
     }
     ui::AXPlatformNodeAuraLinux::SetApplication(platform_node_);
     if (ViewsDelegate::GetInstance()) {
-      // This should be on the a blocking pool thread so that we can open
-      // libatk-bridge.so without blocking this thread.
-      scoped_refptr<base::TaskRunner> init_task_runner =
-          ViewsDelegate::GetInstance()->GetBlockingPoolTaskRunner();
-      if (init_task_runner)
-        ui::AXPlatformNodeAuraLinux::StaticInitialize(init_task_runner);
+      ui::AXPlatformNodeAuraLinux::StaticInitialize();
     }
   }
 
@@ -147,6 +164,7 @@ class AuraLinuxApplication
 
   ui::AXPlatformNode* platform_node_;
   ui::AXNodeData data_;
+  ui::AXUniqueId unique_id_;
   std::vector<Widget*> widgets_;
 
   DISALLOW_COPY_AND_ASSIGN(AuraLinuxApplication);
@@ -155,10 +173,9 @@ class AuraLinuxApplication
 }  // namespace
 
 // static
-std::unique_ptr<NativeViewAccessibility> NativeViewAccessibility::Create(
-    View* view) {
+std::unique_ptr<ViewAccessibility> ViewAccessibility::Create(View* view) {
   AuraLinuxApplication::GetInstance()->RegisterWidget(view->GetWidget());
-  return base::MakeUnique<NativeViewAccessibilityAuraLinux>(view);
+  return std::make_unique<NativeViewAccessibilityAuraLinux>(view);
 }
 
 NativeViewAccessibilityAuraLinux::NativeViewAccessibilityAuraLinux(View* view)

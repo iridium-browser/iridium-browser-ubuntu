@@ -5,6 +5,7 @@
 #import "ios/chrome/browser/ui/payments/cells/page_info_item.h"
 
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
+#import "ios/chrome/browser/ui/payments/cells/accessibility_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
@@ -35,6 +36,9 @@ const CGFloat kFaviconAndLabelsHorizontalSpacing = 12;
 
 // Dimension for lock indicator in points.
 const CGFloat kLockIndicatorDimension = 16;
+
+// Dimension for the favicon in points.
+const CGFloat kFaviconDimension = 16;
 
 // There is some empty space between the left and right edges of the lock
 // indicator image contents and the square box it is contained within.
@@ -70,10 +74,10 @@ const CGFloat kLockIndicatorVerticalPadding = 4;
   [super configureCell:cell];
   cell.pageFaviconView.image = self.pageFavicon;
   cell.pageTitleLabel.text = self.pageTitle;
+  cell.pageHostLabel.text = self.pageHost;
+  cell.pageLockIndicatorView.image = nil;
 
   if (self.connectionSecure) {
-    cell.pageHostLabel.text = [NSString
-        stringWithFormat:@"%s://%@", url::kHttpsScheme, self.pageHost];
     NSMutableAttributedString* text = [[NSMutableAttributedString alloc]
         initWithString:cell.pageHostLabel.text];
     [text addAttribute:NSForegroundColorAttributeName
@@ -87,9 +91,6 @@ const CGFloat kLockIndicatorVerticalPadding = 4;
         CGSizeMake(kLockIndicatorDimension, kLockIndicatorDimension),
         ProjectionMode::kAspectFillNoClipping)
         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-  } else {
-    cell.pageHostLabel.text = self.pageHost;
-    cell.pageLockIndicatorView.image = nil;
   }
 
   // Invalidate the constraints so that layout can account for whether or not a
@@ -155,10 +156,6 @@ const CGFloat kLockIndicatorVerticalPadding = 4;
         setTintColor:[[MDCPalette cr_greenPalette] tint700]];
     [self.contentView addSubview:_pageLockIndicatorView];
 
-    CGFloat faviconHeight = _pageTitleLabel.font.pointSize +
-                            _pageHostLabel.font.pointSize +
-                            kLabelsVerticalSpacing;
-
     // Layout
     [NSLayoutConstraint activateConstraints:@[
       [_pageFaviconView.leadingAnchor
@@ -166,7 +163,8 @@ const CGFloat kLockIndicatorVerticalPadding = 4;
                          constant:kHorizontalPadding],
       [_pageFaviconView.centerYAnchor
           constraintEqualToAnchor:self.contentView.centerYAnchor],
-      [_pageFaviconView.heightAnchor constraintEqualToConstant:faviconHeight],
+      [_pageFaviconView.heightAnchor
+          constraintEqualToConstant:kFaviconDimension],
       [_pageFaviconView.widthAnchor
           constraintEqualToAnchor:_pageFaviconView.heightAnchor],
 
@@ -237,8 +235,10 @@ const CGFloat kLockIndicatorVerticalPadding = 4;
 #pragma mark - Accessibility
 
 - (NSString*)accessibilityLabel {
-  return [NSString stringWithFormat:@"%@, %@", self.pageTitleLabel.text,
-                                    self.pageHostLabel.text];
+  AccessibilityLabelBuilder* builder = [[AccessibilityLabelBuilder alloc] init];
+  [builder appendItem:self.pageTitleLabel.text];
+  [builder appendItem:self.pageHostLabel.text];
+  return [builder buildAccessibilityLabel];
 }
 
 @end

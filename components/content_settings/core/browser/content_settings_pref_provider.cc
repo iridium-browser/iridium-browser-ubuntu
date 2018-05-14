@@ -13,7 +13,6 @@
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/default_clock.h"
 #include "components/content_settings/core/browser/content_settings_pref.h"
@@ -37,6 +36,9 @@ namespace content_settings {
 namespace {
 
 // These settings are no longer used, and should be deleted on profile startup.
+const char kObsoleteDomainToOriginMigrationStatus[] =
+    "profile.content_settings.domain_to_origin_migration_status";
+
 #if !defined(OS_IOS)
 const char kObsoleteFullscreenExceptionsPref[] =
     "profile.content_settings.exceptions.fullscreen";
@@ -70,6 +72,7 @@ void PrefProvider::RegisterProfilePrefs(
 
   // These prefs have been removed, but need to be registered so they can
   // be deleted on startup.
+  registry->RegisterIntegerPref(kObsoleteDomainToOriginMigrationStatus, 0);
 #if !defined(OS_IOS)
   registry->RegisterDictionaryPref(
       kObsoleteFullscreenExceptionsPref,
@@ -88,7 +91,7 @@ PrefProvider::PrefProvider(PrefService* prefs,
     : prefs_(prefs),
       is_incognito_(incognito),
       store_last_modified_(store_last_modified),
-      clock_(new base::DefaultClock) {
+      clock_(base::DefaultClock::GetInstance()) {
   DCHECK(prefs_);
   // Verify preferences version.
   if (!prefs_->HasPrefPath(prefs::kContentSettingsVersion)) {
@@ -109,7 +112,7 @@ PrefProvider::PrefProvider(PrefService* prefs,
   for (const WebsiteSettingsInfo* info : *website_settings) {
     content_settings_prefs_.insert(std::make_pair(
         info->type(),
-        base::MakeUnique<ContentSettingsPref>(
+        std::make_unique<ContentSettingsPref>(
             info->type(), prefs_, &pref_change_registrar_, info->pref_name(),
             is_incognito_,
             base::Bind(&PrefProvider::Notify, base::Unretained(this)))));
@@ -190,7 +193,7 @@ void PrefProvider::ShutdownOnUIThread() {
   DCHECK(prefs_);
   RemoveAllObservers();
   pref_change_registrar_.RemoveAll();
-  prefs_ = NULL;
+  prefs_ = nullptr;
 }
 
 void PrefProvider::ClearPrefs() {
@@ -221,6 +224,9 @@ void PrefProvider::Notify(
 void PrefProvider::DiscardObsoletePreferences() {
   if (is_incognito_)
     return;
+
+  prefs_->ClearPref(kObsoleteDomainToOriginMigrationStatus);
+
   // These prefs were never stored on iOS/Android so they don't need to be
   // deleted.
 #if !defined(OS_IOS)
@@ -229,33 +235,10 @@ void PrefProvider::DiscardObsoletePreferences() {
   prefs_->ClearPref(kObsoleteMouseLockExceptionsPref);
 #endif  // !defined(OS_ANDROID)
 #endif  // !defined(OS_IOS)
-
-#if !defined(OS_IOS)
-  // Migrate CONTENT_SETTINGS_TYPE_PROMPT_NO_DECISION_COUNT to
-  // CONTENT_SETTINGS_TYPE_PERMISSION_AUTOBLOCKER_DATA.
-  // TODO(raymes): See crbug.com/681709. Remove after M60.
-  const std::string prompt_no_decision_count_pref =
-      WebsiteSettingsRegistry::GetInstance()
-          ->Get(CONTENT_SETTINGS_TYPE_PROMPT_NO_DECISION_COUNT)
-          ->pref_name();
-  const base::DictionaryValue* old_dict =
-      prefs_->GetDictionary(prompt_no_decision_count_pref);
-
-  const std::string permission_autoblocker_data_pref =
-      WebsiteSettingsRegistry::GetInstance()
-          ->Get(CONTENT_SETTINGS_TYPE_PERMISSION_AUTOBLOCKER_DATA)
-          ->pref_name();
-  const base::DictionaryValue* new_dict =
-      prefs_->GetDictionary(permission_autoblocker_data_pref);
-
-  if (!old_dict->empty() && new_dict->empty())
-    prefs_->Set(permission_autoblocker_data_pref, *old_dict);
-  prefs_->ClearPref(prompt_no_decision_count_pref);
-#endif  // !defined(OS_IOS)
 }
 
-void PrefProvider::SetClockForTesting(std::unique_ptr<base::Clock> clock) {
-  clock_ = std::move(clock);
+void PrefProvider::SetClockForTesting(base::Clock* clock) {
+  clock_ = clock;
 }
 
 }  // namespace content_settings

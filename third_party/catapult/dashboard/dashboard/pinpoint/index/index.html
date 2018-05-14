@@ -4,8 +4,19 @@ Copyright 2017 The Chromium Authors. All rights reserved.
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
-<link type="text/css" rel="stylesheet" href="/dashboard/static/base.css">
+<meta charset="utf-8">
+<title>Pinpoint</title>
+
+<style type="text/css">
+  body {
+    font: 0.8em helvetica,arial,sans-serif;
+    margin: 0;
+  }
+</style>
+
 <script src="/components/webcomponentsjs/webcomponents-lite.min.js"></script>
+
+<link rel="icon" type="image/png" href="/static/logo.png">
 
 <link rel="import" href="/components/app-route/app-location.html">
 <link rel="import" href="/components/app-route/app-route.html">
@@ -13,15 +24,24 @@ found in the LICENSE file.
 <link rel="import" href="/components/polymer/polymer.html">
 
 <link rel="import" href="/dashboard/elements/load-analytics.html">
-<link rel="import" href="/dashboard/pinpoint/elements/error-page.html">
-<link rel="import" href="/dashboard/pinpoint/elements/job-page.html">
-<link rel="import" href="/dashboard/pinpoint/elements/jobs-page.html">
-<link rel="import" href="/dashboard/pinpoint/elements/main-page.html">
-<link rel="import" href="/dashboard/pinpoint/elements/navigation-bar.html">
-<link rel="import" href="/dashboard/pinpoint/elements/new-page.html">
+<link rel="import" href="/elements/navigation-bar.html">
 
 <dom-module id="index-page">
+  <link rel="lazy-import" href="/elements/error-page.html">
+  <link rel="lazy-import" href="/elements/job-page.html">
+  <link rel="lazy-import" href="/elements/jobs-page.html">
+  <link rel="lazy-import" href="/elements/migrate-page.html">
+  <link rel="lazy-import" href="/elements/stats-page.html">
+
   <template>
+    <style>
+      #content {
+        /* Add some extra space at the bottom to ensure any
+           Floating Action Buttons don't overlap anything. */
+        margin: 1em 1em 7em 1em;
+      }
+    </style>
+
     <!--
     The <app-location> element is what provides the sync between the
     url and the app via the "route" object. This is passed to the
@@ -32,23 +52,24 @@ found in the LICENSE file.
     that route matches and is active.
     -->
     <app-location route="{{route}}"></app-location>
-    <app-route route="{{route}}" pattern="/:page" data="{{routeData}}" tail="{{tail}}"></app-route>
+    <app-route route="{{route}}" pattern="/:page" data="{{routeData}}" tail="{{subroute}}"></app-route>
 
-    <navigation-bar></navigation-bar>
+    <navigation-bar auth-headers="{{authHeaders}}"></navigation-bar>
 
     <!--
-    The <iron-pages> element can be used as a simpe content switcher. We have a
+    The <iron-pages> element can be used as a simple content switcher. We have a
     single <app-route> defined which matches to a page, which is passed to
     the <iron-pages> element via routeData.page.
     -->
-    <iron-pages selected="[[routeData.page]]" attr-for-selected="name" fallback-selection="error" on-iron-select="onSelectedPage" on-iron-deselect="onDeselectedPage">
-      <main-page name=""></main-page>
-      <error-page name="error"></error-page>
-
-      <job-page name="job" route="{{tail}}"></job-page>
-      <jobs-page name="jobs" route="{{tail}}"></jobs-page>
-      <new-page name="new" abs-route="{{route}}"></new-page>
-    </iron-pages>
+    <div id="content">
+      <iron-pages selected="[[page]]" attr-for-selected="name" fallback-selection="error" on-iron-select="onSelectedPage" on-iron-deselect="onDeselectedPage">
+        <error-page name="error"></error-page>
+        <job-page name="job" route="{{subroute}}" auth-headers="[[authHeaders]]"></job-page>
+        <jobs-page name="jobs" route="{{subroute}}" auth-headers="[[authHeaders]]"></jobs-page>
+        <migrate-page name="migrate"></migrate-page>
+        <stats-page name="stats"></stats-page>
+      </iron-pages>
+    </div>
 
     <load-analytics></load-analytics>
   </template>
@@ -56,6 +77,18 @@ found in the LICENSE file.
     'use strict';
     Polymer({
       is: 'index-page',
+
+      properties: {
+        page: {
+          type: String,
+          reflectToAttribute: true,
+          observer: '_pageChanged',
+        },
+      },
+
+      observers: [
+        '_routePageChanged(routeData.page)',
+      ],
 
       onDeselectedPage(e) {
         const page = e.detail.item;
@@ -75,8 +108,19 @@ found in the LICENSE file.
         }
       },
 
-      ready() {
-      }
+      _routePageChanged(page) {
+        this.page = page || 'jobs';
+      },
+
+      _pageChanged(page) {
+        // Load page import on demand. Show 404 page on failure.
+        const url = '/elements/' + page + '-page.html';
+        this.importHref(url, null, this._showPage404, true);
+      },
+
+      _showPage404() {
+        this.page = 'error';
+      },
     });
   </script>
 

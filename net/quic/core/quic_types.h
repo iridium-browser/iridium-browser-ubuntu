@@ -17,6 +17,7 @@
 namespace net {
 
 typedef uint16_t QuicPacketLength;
+typedef uint32_t QuicControlFrameId;
 typedef uint32_t QuicHeaderId;
 typedef uint32_t QuicStreamId;
 typedef uint64_t QuicByteCount;
@@ -27,6 +28,10 @@ typedef uint64_t QuicPublicResetNonceProof;
 typedef uint64_t QuicStreamOffset;
 typedef std::array<char, 32> DiversificationNonce;
 typedef std::vector<std::pair<QuicPacketNumber, QuicTime>> PacketTimeVector;
+
+typedef uint64_t QuicIetfStreamDataLength;
+typedef uint64_t QuicIetfStreamId;
+typedef uint64_t QuicIetfStreamOffset;
 
 // A struct for functions which consume data payloads and fins.
 struct QUIC_EXPORT_PRIVATE QuicConsumedData {
@@ -52,7 +57,7 @@ struct QUIC_EXPORT_PRIVATE QuicConsumedData {
 enum QuicAsyncStatus {
   QUIC_SUCCESS = 0,
   QUIC_FAILURE = 1,
-  // QUIC_PENDING results from an operation that will occur asynchonously. When
+  // QUIC_PENDING results from an operation that will occur asynchronously. When
   // the operation is complete, a callback's |Run| method will be called.
   QUIC_PENDING = 2,
 };
@@ -86,7 +91,8 @@ enum TransmissionType : int8_t {
   LOSS_RETRANSMISSION,         // Retransmits due to loss detection.
   RTO_RETRANSMISSION,          // Retransmits due to retransmit time out.
   TLP_RETRANSMISSION,          // Tail loss probes.
-  LAST_TRANSMISSION_TYPE = TLP_RETRANSMISSION,
+  PROBING_RETRANSMISSION,      // Retransmission in order to probe bandwidth.
+  LAST_TRANSMISSION_TYPE = PROBING_RETRANSMISSION,
 };
 
 enum HasRetransmittableData : int8_t {
@@ -110,7 +116,7 @@ enum class ConnectionCloseBehavior {
   SEND_CONNECTION_CLOSE_PACKET_WITH_NO_ACK
 };
 
-enum QuicFrameType {
+enum QuicFrameType : int8_t {
   // Regular frame types. The values set here cannot change without the
   // introduction of a new QUIC version.
   PADDING_FRAME = 0,
@@ -131,6 +137,48 @@ enum QuicFrameType {
   NUM_FRAME_TYPES
 };
 
+// Ietf frame types. These are defined in the IETF QUIC Specification.
+// Explicit values are given in the enum so that we can be sure that
+// the symbol will map to the correct stream type.
+// All types are defined here, even if we have not yet implmented the
+// quic/core/stream/.... stuff needed.
+enum QuicIetfFrameType : int8_t {
+  IETF_PADDING = 0x00,
+  IETF_RST_STREAM = 0x01,
+  IETF_CONNECTION_CLOSE = 0x02,
+  IETF_APPLICATION_CLOSE = 0x03,
+  IETF_MAX_DATA = 0x04,
+  IETF_MAX_STREAM_DATA = 0x05,
+  IETF_MAX_STREAM_ID = 0x06,
+  IETF_PING = 0x07,
+  IETF_BLOCKED = 0x08,
+  IETF_STREAM_BLOCKED = 0x09,
+  IETF_STREAM_ID_BLOCKED = 0x0a,
+  IETF_NEW_CONNECTION_ID = 0x0b,
+  IETF_STOP_SENDING = 0x0c,
+  IETF_PONG = 0x0d,
+  IETF_ACK = 0x0e,
+  // the low-3 bits of the stream frame type value are actually flags
+  // declaring what parts of the frame are/are-not present, as well as
+  // some other control information. The code would then do something
+  // along the lines of "if ((frame_type & 0xf8) == 0x10)" to determine
+  // whether the frame is a stream frame or not, and then examine each
+  // bit specifically when/as needed.
+  IETF_STREAM = 0x10
+};
+// Masks for the bits that indicate the frame is a Stream frame vs the
+// bits used as flags.
+#define IETF_STREAM_FRAME_TYPE_MASK 0xf8
+#define IETF_STREAM_FRAME_FLAG_MASK 0x07
+#define IS_IETF_STREAM_FRAME(_stype_) \
+  (((_stype_)&IETF_STREAM_FRAME_TYPE_MASK) == IETF_STREAM)
+
+// These are the values encoded in the low-order 3 bits of the
+// IETF_STREAMx frame type.
+#define IETF_STREAM_FRAME_FIN_BIT 0x01
+#define IETF_STREAM_FRAME_LEN_BIT 0x02
+#define IETF_STREAM_FRAME_OFF_BIT 0x04
+
 enum QuicConnectionIdLength {
   PACKET_0BYTE_CONNECTION_ID = 0,
   PACKET_8BYTE_CONNECTION_ID = 8
@@ -140,7 +188,9 @@ enum QuicPacketNumberLength : int8_t {
   PACKET_1BYTE_PACKET_NUMBER = 1,
   PACKET_2BYTE_PACKET_NUMBER = 2,
   PACKET_4BYTE_PACKET_NUMBER = 4,
-  PACKET_6BYTE_PACKET_NUMBER = 6
+  // TODO(rch): Remove this when we remove QUIC_VERSION_39.
+  PACKET_6BYTE_PACKET_NUMBER = 6,
+  PACKET_8BYTE_PACKET_NUMBER = 8
 };
 
 // Used to indicate a QuicSequenceNumberLength using two flag bits.
@@ -148,7 +198,7 @@ enum QuicPacketNumberLengthFlags {
   PACKET_FLAGS_1BYTE_PACKET = 0,           // 00
   PACKET_FLAGS_2BYTE_PACKET = 1,           // 01
   PACKET_FLAGS_4BYTE_PACKET = 1 << 1,      // 10
-  PACKET_FLAGS_6BYTE_PACKET = 1 << 1 | 1,  // 11
+  PACKET_FLAGS_8BYTE_PACKET = 1 << 1 | 1,  // 11
 };
 
 // The public flags are specified in one byte.
@@ -161,7 +211,7 @@ enum QuicPacketPublicFlags {
   // Bit 1: Is this packet a public reset packet?
   PACKET_PUBLIC_FLAGS_RST = 1 << 1,
 
-  // Bit 2: indicates the that public header includes a nonce.
+  // Bit 2: indicates the header includes a nonce.
   PACKET_PUBLIC_FLAGS_NONCE = 1 << 2,
 
   // Bit 3: indicates whether a ConnectionID is included.
@@ -180,7 +230,7 @@ enum QuicPacketPublicFlags {
   PACKET_PUBLIC_FLAGS_1BYTE_PACKET = PACKET_FLAGS_1BYTE_PACKET << 4,
   PACKET_PUBLIC_FLAGS_2BYTE_PACKET = PACKET_FLAGS_2BYTE_PACKET << 4,
   PACKET_PUBLIC_FLAGS_4BYTE_PACKET = PACKET_FLAGS_4BYTE_PACKET << 4,
-  PACKET_PUBLIC_FLAGS_6BYTE_PACKET = PACKET_FLAGS_6BYTE_PACKET << 4,
+  PACKET_PUBLIC_FLAGS_6BYTE_PACKET = PACKET_FLAGS_8BYTE_PACKET << 4,
 
   // Reserved, unimplemented flags:
 
@@ -206,14 +256,7 @@ enum QuicPacketPrivateFlags {
 // QUIC. Note that this is separate from the congestion feedback type -
 // some congestion control algorithms may use the same feedback type
 // (Reno and Cubic are the classic example for that).
-enum CongestionControlType {
-  kCubic,
-  kCubicBytes,
-  kReno,
-  kRenoBytes,
-  kBBR,
-  kPCC
-};
+enum CongestionControlType { kCubicBytes, kRenoBytes, kBBR, kPCC };
 
 enum LossDetectionType {
   kNack,          // Used to mimic TCP's loss detection.
@@ -234,7 +277,7 @@ enum EncryptionLevel : int8_t {
   NUM_ENCRYPTION_LEVELS,
 };
 
-enum PeerAddressChangeType {
+enum AddressChangeType {
   // IP address and port remain unchanged.
   NO_CHANGE,
   // Port changed, but IP address remains unchanged.
@@ -259,6 +302,82 @@ enum StreamSendingState {
   // Sender is done sending on this stream and random padding needs to be
   // appended after all stream frames.
   FIN_AND_PADDING,
+};
+
+enum SentPacketState : uint8_t {
+  // The packet has been sent and waiting to be acked.
+  OUTSTANDING,
+  FIRST_PACKET_STATE = OUTSTANDING,
+  // The packet was never sent.
+  NEVER_SENT,
+  // The packet has been acked.
+  ACKED,
+  // This packet is not expected to be acked.
+  UNACKABLE,
+
+  // States below are corresponding to retransmission types in TransmissionType.
+
+  // This packet has been retransmitted when retransmission timer fires in
+  // HANDSHAKE mode.
+  HANDSHAKE_RETRANSMITTED,
+  // This packet is considered as lost, this is used for LOST_RETRANSMISSION.
+  LOST,
+  // This packet has been retransmitted when TLP fires.
+  TLP_RETRANSMITTED,
+  // This packet has been retransmitted when RTO fires.
+  RTO_RETRANSMITTED,
+  // This packet has been retransmitted for probing purpose.
+  PROBE_RETRANSMITTED,
+  LAST_PACKET_STATE = PROBE_RETRANSMITTED,
+};
+
+// Information about a newly acknowledged packet.
+struct AckedPacket {
+  AckedPacket(QuicPacketNumber packet_number,
+              QuicPacketLength bytes_acked,
+              QuicTime receive_timestamp)
+      : packet_number(packet_number),
+        bytes_acked(bytes_acked),
+        receive_timestamp(receive_timestamp) {}
+
+  QuicPacketNumber packet_number;
+  // Number of bytes sent in the packet that was acknowledged.
+  QuicPacketLength bytes_acked;
+  // The time |packet_number| was received by the peer, according to the
+  // optional timestamp the peer included in the ACK frame which acknowledged
+  // |packet_number|. Zero if no timestamp was available for this packet.
+  QuicTime receive_timestamp;
+};
+
+// A vector of acked packets.
+typedef std::vector<AckedPacket> AckedPacketVector;
+
+// Information about a newly lost packet.
+struct LostPacket {
+  LostPacket(QuicPacketNumber packet_number, QuicPacketLength bytes_lost)
+      : packet_number(packet_number), bytes_lost(bytes_lost) {}
+
+  QuicPacketNumber packet_number;
+  // Number of bytes sent in the packet that was lost.
+  QuicPacketLength bytes_lost;
+};
+
+// A vector of lost packets.
+typedef std::vector<LostPacket> LostPacketVector;
+
+enum QuicIetfTransportErrorCodes : uint16_t {
+  NO_IETF_QUIC_ERROR = 0x0,
+  INTERNAL_ERROR = 0x1,
+  FLOW_CONTROL_ERROR = 0x3,
+  STREAM_ID_ERROR = 0x4,
+  STREAM_STATE_ERROR = 0x5,
+  FINAL_OFFSET_ERROR = 0x6,
+  FRAME_FORMAT_ERROR = 0x7,
+  TRANSPORT_PARAMETER_ERROR = 0x8,
+  VERSION_NEGOTIATION_ERROR = 0x9,
+  PROTOCOL_VIOLATION = 0xA,
+  UNSOLICITED_PONG = 0xB,
+  FRAME_ERROR_base = 0x100,  // add frame type to this base
 };
 
 }  // namespace net

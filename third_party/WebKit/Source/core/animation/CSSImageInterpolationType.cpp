@@ -5,22 +5,40 @@
 #include "core/animation/CSSImageInterpolationType.h"
 
 #include <memory>
-#include "core/animation/ImagePropertyFunctions.h"
+#include "core/CSSPropertyNames.h"
 #include "core/css/CSSCrossfadeValue.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/resolver/StyleResolverState.h"
+#include "core/style/ComputedStyle.h"
 #include "core/style/StyleImage.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
+namespace {
+const StyleImage* GetStyleImage(const CSSProperty& property,
+                                const ComputedStyle& style) {
+  switch (property.PropertyID()) {
+    case CSSPropertyBorderImageSource:
+      return style.BorderImageSource();
+    case CSSPropertyListStyleImage:
+      return style.ListStyleImage();
+    case CSSPropertyWebkitMaskBoxImageSource:
+      return style.MaskBoxImageSource();
+    default:
+      NOTREACHED();
+      return nullptr;
+  }
+}
+}  // namespace
+
 class CSSImageNonInterpolableValue : public NonInterpolableValue {
  public:
-  ~CSSImageNonInterpolableValue() final {}
+  ~CSSImageNonInterpolableValue() final = default;
 
-  static PassRefPtr<CSSImageNonInterpolableValue> Create(CSSValue* start,
-                                                         CSSValue* end) {
-    return AdoptRef(new CSSImageNonInterpolableValue(start, end));
+  static scoped_refptr<CSSImageNonInterpolableValue> Create(CSSValue* start,
+                                                            CSSValue* end) {
+    return base::AdoptRef(new CSSImageNonInterpolableValue(start, end));
   }
 
   bool IsSingle() const { return is_single_; }
@@ -29,9 +47,9 @@ class CSSImageNonInterpolableValue : public NonInterpolableValue {
            DataEquivalent(end_, other.end_);
   }
 
-  static PassRefPtr<CSSImageNonInterpolableValue> Merge(
-      PassRefPtr<NonInterpolableValue> start,
-      PassRefPtr<NonInterpolableValue> end);
+  static scoped_refptr<CSSImageNonInterpolableValue> Merge(
+      scoped_refptr<NonInterpolableValue> start,
+      scoped_refptr<NonInterpolableValue> end);
 
   CSSValue* Crossfade(double progress) const {
     if (is_single_ || progress <= 0)
@@ -61,9 +79,9 @@ class CSSImageNonInterpolableValue : public NonInterpolableValue {
 DEFINE_NON_INTERPOLABLE_VALUE_TYPE(CSSImageNonInterpolableValue);
 DEFINE_NON_INTERPOLABLE_VALUE_TYPE_CASTS(CSSImageNonInterpolableValue);
 
-PassRefPtr<CSSImageNonInterpolableValue> CSSImageNonInterpolableValue::Merge(
-    PassRefPtr<NonInterpolableValue> start,
-    PassRefPtr<NonInterpolableValue> end) {
+scoped_refptr<CSSImageNonInterpolableValue> CSSImageNonInterpolableValue::Merge(
+    scoped_refptr<NonInterpolableValue> start,
+    scoped_refptr<NonInterpolableValue> end) {
   const CSSImageNonInterpolableValue& start_image_pair =
       ToCSSImageNonInterpolableValue(*start);
   const CSSImageNonInterpolableValue& end_image_pair =
@@ -121,13 +139,13 @@ const CSSValue* CSSImageInterpolationType::StaticCreateCSSValue(
 }
 
 StyleImage* CSSImageInterpolationType::ResolveStyleImage(
-    CSSPropertyID property,
+    const CSSProperty& property,
     const InterpolableValue& interpolable_value,
     const NonInterpolableValue* non_interpolable_value,
     StyleResolverState& state) {
   const CSSValue* image =
       StaticCreateCSSValue(interpolable_value, non_interpolable_value);
-  return state.GetStyleImage(property, *image);
+  return state.GetStyleImage(property.PropertyID(), *image);
 }
 
 bool CSSImageInterpolationType::EqualNonInterpolableValues(
@@ -140,7 +158,7 @@ bool CSSImageInterpolationType::EqualNonInterpolableValues(
 class UnderlyingImageChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
-  ~UnderlyingImageChecker() final {}
+  ~UnderlyingImageChecker() final = default;
 
   static std::unique_ptr<UnderlyingImageChecker> Create(
       const InterpolationValue& underlying) {
@@ -160,8 +178,8 @@ class UnderlyingImageChecker
     return underlying_.interpolable_value->Equals(
                *underlying.interpolable_value) &&
            CSSImageInterpolationType::EqualNonInterpolableValues(
-               underlying_.non_interpolable_value.Get(),
-               underlying.non_interpolable_value.Get());
+               underlying_.non_interpolable_value.get(),
+               underlying.non_interpolable_value.get());
   }
 
   const InterpolationValue underlying_;
@@ -177,30 +195,30 @@ InterpolationValue CSSImageInterpolationType::MaybeConvertNeutral(
 InterpolationValue CSSImageInterpolationType::MaybeConvertInitial(
     const StyleResolverState&,
     ConversionCheckers& conversion_checkers) const {
-  return MaybeConvertStyleImage(
-      ImagePropertyFunctions::GetInitialStyleImage(CssProperty()), true);
+  return nullptr;
 }
 
 class InheritedImageChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
-  ~InheritedImageChecker() final {}
+  ~InheritedImageChecker() final = default;
 
   static std::unique_ptr<InheritedImageChecker> Create(
-      CSSPropertyID property,
+      const CSSProperty& property,
       StyleImage* inherited_image) {
     return WTF::WrapUnique(
         new InheritedImageChecker(property, inherited_image));
   }
 
  private:
-  InheritedImageChecker(CSSPropertyID property, StyleImage* inherited_image)
+  InheritedImageChecker(const CSSProperty& property,
+                        StyleImage* inherited_image)
       : property_(property), inherited_image_(inherited_image) {}
 
   bool IsValid(const StyleResolverState& state,
                const InterpolationValue& underlying) const final {
     const StyleImage* inherited_image =
-        ImagePropertyFunctions::GetStyleImage(property_, *state.ParentStyle());
+        GetStyleImage(property_, *state.ParentStyle());
     if (!inherited_image_ && !inherited_image)
       return true;
     if (!inherited_image_ || !inherited_image)
@@ -208,7 +226,7 @@ class InheritedImageChecker
     return *inherited_image_ == *inherited_image;
   }
 
-  CSSPropertyID property_;
+  const CSSProperty& property_;
   Persistent<StyleImage> inherited_image_;
 };
 
@@ -218,8 +236,8 @@ InterpolationValue CSSImageInterpolationType::MaybeConvertInherit(
   if (!state.ParentStyle())
     return nullptr;
 
-  const StyleImage* inherited_image = ImagePropertyFunctions::GetStyleImage(
-      CssProperty(), *state.ParentStyle());
+  const StyleImage* inherited_image =
+      GetStyleImage(CssProperty(), *state.ParentStyle());
   StyleImage* refable_image = const_cast<StyleImage*>(inherited_image);
   conversion_checkers.push_back(
       InheritedImageChecker::Create(CssProperty(), refable_image));
@@ -236,8 +254,7 @@ InterpolationValue CSSImageInterpolationType::MaybeConvertValue(
 InterpolationValue
 CSSImageInterpolationType::MaybeConvertStandardPropertyUnderlyingValue(
     const ComputedStyle& style) const {
-  return MaybeConvertStyleImage(
-      ImagePropertyFunctions::GetStyleImage(CssProperty(), style), true);
+  return MaybeConvertStyleImage(GetStyleImage(CssProperty(), style), true);
 }
 
 void CSSImageInterpolationType::Composite(
@@ -252,10 +269,21 @@ void CSSImageInterpolationType::ApplyStandardPropertyValue(
     const InterpolableValue& interpolable_value,
     const NonInterpolableValue* non_interpolable_value,
     StyleResolverState& state) const {
-  ImagePropertyFunctions::SetStyleImage(
-      CssProperty(), *state.Style(),
-      ResolveStyleImage(CssProperty(), interpolable_value,
-                        non_interpolable_value, state));
+  StyleImage* image = ResolveStyleImage(CssProperty(), interpolable_value,
+                                        non_interpolable_value, state);
+  switch (CssProperty().PropertyID()) {
+    case CSSPropertyBorderImageSource:
+      state.Style()->SetBorderImageSource(image);
+      break;
+    case CSSPropertyListStyleImage:
+      state.Style()->SetListStyleImage(image);
+      break;
+    case CSSPropertyWebkitMaskBoxImageSource:
+      state.Style()->SetMaskBoxImageSource(image);
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 }  // namespace blink

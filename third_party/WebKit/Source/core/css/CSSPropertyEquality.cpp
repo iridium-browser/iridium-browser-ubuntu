@@ -24,12 +24,12 @@ bool FillLayersEqual(const FillLayer& a_layers, const FillLayer& b_layers) {
     switch (property) {
       case CSSPropertyBackgroundPositionX:
       case CSSPropertyWebkitMaskPositionX:
-        if (a_layer->XPosition() != b_layer->XPosition())
+        if (a_layer->PositionX() != b_layer->PositionX())
           return false;
         break;
       case CSSPropertyBackgroundPositionY:
       case CSSPropertyWebkitMaskPositionY:
-        if (a_layer->YPosition() != b_layer->YPosition())
+        if (a_layer->PositionY() != b_layer->PositionY())
           return false;
         break;
       case CSSPropertyBackgroundSize:
@@ -64,7 +64,7 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
     return DataEquivalent(a.GetRegisteredVariable(name),
                           b.GetRegisteredVariable(name));
   }
-  switch (property.CssProperty()) {
+  switch (property.GetCSSProperty().PropertyID()) {
     case CSSPropertyBackgroundColor:
       return a.BackgroundColor() == b.BackgroundColor() &&
              a.VisitedLinkBackgroundColor() == b.VisitedLinkBackgroundColor();
@@ -206,6 +206,8 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
       return a.OffsetAnchor() == b.OffsetAnchor();
     case CSSPropertyOffsetDistance:
       return a.OffsetDistance() == b.OffsetDistance();
+    case CSSPropertyOffsetPath:
+      return DataEquivalent(a.OffsetPath(), b.OffsetPath());
     case CSSPropertyOffsetPosition:
       return a.OffsetPosition() == b.OffsetPosition();
     case CSSPropertyOffsetRotate:
@@ -269,8 +271,8 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
       return a.TextDecorationColor() == b.TextDecorationColor() &&
              a.VisitedLinkTextDecorationColor() ==
                  b.VisitedLinkTextDecorationColor();
-    case CSSPropertyTextDecorationSkip:
-      return a.GetTextDecorationSkip() == b.GetTextDecorationSkip();
+    case CSSPropertyTextDecorationSkipInk:
+      return a.TextDecorationSkipInk() == b.TextDecorationSkipInk();
     case CSSPropertyTextIndent:
       return a.TextIndent() == b.TextIndent();
     case CSSPropertyTextShadow:
@@ -293,6 +295,8 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
       return a.ColumnCount() == b.ColumnCount();
     case CSSPropertyColumnGap:
       return a.ColumnGap() == b.ColumnGap();
+    case CSSPropertyRowGap:
+      return a.RowGap() == b.RowGap();
     case CSSPropertyColumnRuleColor:
       return a.ColumnRuleColor() == b.ColumnRuleColor() &&
              a.VisitedLinkColumnRuleColor() == b.VisitedLinkColumnRuleColor();

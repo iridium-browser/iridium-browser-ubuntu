@@ -4,9 +4,8 @@
 
 #include "chrome/browser/notifications/notification_permission_context.h"
 
-#include <deque>
-
 #include "base/callback.h"
+#include "base/containers/circular_deque.h"
 #include "base/location.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
@@ -22,6 +21,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "third_party/WebKit/public/mojom/page/page_visibility_state.mojom.h"
 #include "url/gurl.h"
 
 namespace {
@@ -37,7 +37,7 @@ class VisibilityTimerTabHelper
 
   // Runs |task| after the WebContents has been visible for a consecutive
   // duration of at least |visible_delay|.
-  void PostTaskAfterVisibleDelay(const tracked_objects::Location& from_here,
+  void PostTaskAfterVisibleDelay(const base::Location& from_here,
                                  const base::Closure& task,
                                  base::TimeDelta visible_delay,
                                  const PermissionRequestID& id);
@@ -46,8 +46,7 @@ class VisibilityTimerTabHelper
   void CancelTask(const PermissionRequestID& id);
 
   // WebContentsObserver:
-  void WasShown() override;
-  void WasHidden() override;
+  void OnVisibilityChanged(content::Visibility visibility) override;
   void WebContentsDestroyed() override;
 
  private:
@@ -62,6 +61,10 @@ class VisibilityTimerTabHelper
     Task(const PermissionRequestID& id, std::unique_ptr<base::Timer> timer)
         : id(id), timer(std::move(timer)) {}
 
+    // Move-only.
+    Task(Task&&) noexcept = default;
+    Task(const Task&) = delete;
+
     Task& operator=(Task&& other) {
       id = other.id;
       timer = std::move(other.timer);
@@ -70,11 +73,8 @@ class VisibilityTimerTabHelper
 
     PermissionRequestID id;
     std::unique_ptr<base::Timer> timer;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Task);
   };
-  std::deque<Task> task_queue_;
+  base::circular_deque<Task> task_queue_;
 
   DISALLOW_COPY_AND_ASSIGN(VisibilityTimerTabHelper);
 };
@@ -86,11 +86,11 @@ VisibilityTimerTabHelper::VisibilityTimerTabHelper(
     is_visible_ = false;
   } else {
     switch (contents->GetMainFrame()->GetVisibilityState()) {
-      case blink::kWebPageVisibilityStateHidden:
-      case blink::kWebPageVisibilityStatePrerender:
+      case blink::mojom::PageVisibilityState::kHidden:
+      case blink::mojom::PageVisibilityState::kPrerender:
         is_visible_ = false;
         break;
-      case blink::kWebPageVisibilityStateVisible:
+      case blink::mojom::PageVisibilityState::kVisible:
         is_visible_ = true;
         break;
     }
@@ -98,7 +98,7 @@ VisibilityTimerTabHelper::VisibilityTimerTabHelper(
 }
 
 void VisibilityTimerTabHelper::PostTaskAfterVisibleDelay(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const base::Closure& task,
     base::TimeDelta visible_delay,
     const PermissionRequestID& id) {
@@ -128,16 +128,17 @@ void VisibilityTimerTabHelper::CancelTask(const PermissionRequestID& id) {
     task_queue_.front().timer->Reset();
 }
 
-void VisibilityTimerTabHelper::WasShown() {
-  if (!is_visible_ && !task_queue_.empty())
-    task_queue_.front().timer->Reset();
-  is_visible_ = true;
-}
-
-void VisibilityTimerTabHelper::WasHidden() {
-  if (is_visible_ && !task_queue_.empty())
-    task_queue_.front().timer->Stop();
-  is_visible_ = false;
+void VisibilityTimerTabHelper::OnVisibilityChanged(
+    content::Visibility visibility) {
+  if (visibility == content::Visibility::VISIBLE) {
+    if (!is_visible_ && !task_queue_.empty())
+      task_queue_.front().timer->Reset();
+    is_visible_ = true;
+  } else {
+    if (is_visible_ && !task_queue_.empty())
+      task_queue_.front().timer->Stop();
+    is_visible_ = false;
+  }
 }
 
 void VisibilityTimerTabHelper::WebContentsDestroyed() {
@@ -156,16 +157,11 @@ void VisibilityTimerTabHelper::RunTask(const base::Closure& task) {
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(VisibilityTimerTabHelper);
 
-NotificationPermissionContext::NotificationPermissionContext(
-    Profile* profile,
-    ContentSettingsType content_settings_type)
+NotificationPermissionContext::NotificationPermissionContext(Profile* profile)
     : PermissionContextBase(profile,
-                            content_settings_type,
-                            blink::WebFeaturePolicyFeature::kNotFound),
-      weak_factory_ui_thread_(this) {
-  DCHECK(content_settings_type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS ||
-         content_settings_type == CONTENT_SETTINGS_TYPE_PUSH_MESSAGING);
-}
+                            CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                            blink::mojom::FeaturePolicyFeature::kNotFound),
+      weak_factory_ui_thread_(this) {}
 
 NotificationPermissionContext::~NotificationPermissionContext() {}
 
@@ -173,30 +169,19 @@ ContentSetting NotificationPermissionContext::GetPermissionStatusInternal(
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     const GURL& embedding_origin) const {
-  // Push messaging is only allowed to be granted on top-level origins.
-  if (content_settings_type() == CONTENT_SETTINGS_TYPE_PUSH_MESSAGING
-          && requesting_origin != embedding_origin) {
-    return CONTENT_SETTING_BLOCK;
-  }
-
-  return PermissionContextBase::GetPermissionStatusInternal(
+  ContentSetting setting = PermissionContextBase::GetPermissionStatusInternal(
       render_frame_host, requesting_origin, embedding_origin);
+
+  if (requesting_origin != embedding_origin && setting == CONTENT_SETTING_ASK)
+    return CONTENT_SETTING_BLOCK;
+
+  return setting;
 }
 
 void NotificationPermissionContext::ResetPermission(
     const GURL& requesting_origin,
     const GURL& embedder_origin) {
   DesktopNotificationProfileUtil::ClearSetting(profile(), requesting_origin);
-}
-
-void NotificationPermissionContext::CancelPermissionRequest(
-    content::WebContents* web_contents,
-    const PermissionRequestID& id) {
-  if (profile()->IsOffTheRecord()) {
-    VisibilityTimerTabHelper::FromWebContents(web_contents)->CancelTask(id);
-  } else {
-    PermissionContextBase::CancelPermissionRequest(web_contents, id);
-  }
 }
 
 void NotificationPermissionContext::DecidePermission(
@@ -207,6 +192,16 @@ void NotificationPermissionContext::DecidePermission(
     bool user_gesture,
     const BrowserPermissionCallback& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  // Permission requests for either Web Notifications and Push Notifications may
+  // only happen on top-level frames and same-origin iframes. Usage will
+  // continue to be allowed in all iframes: such frames could trivially work
+  // around the restriction by posting a message to their Service Worker, where
+  // showing a notification is allowed.
+  if (requesting_origin != embedding_origin) {
+    callback.Run(CONTENT_SETTING_BLOCK);
+    return;
+  }
 
   // Notifications permission is always denied in incognito. To prevent sites
   // from using that to detect whether incognito mode is active, we deny after a
@@ -257,5 +252,5 @@ void NotificationPermissionContext::UpdateContentSetting(
 }
 
 bool NotificationPermissionContext::IsRestrictedToSecureOrigins() const {
-  return content_settings_type() == CONTENT_SETTINGS_TYPE_PUSH_MESSAGING;
+  return true;
 }

@@ -7,10 +7,8 @@
 
 #include <stdint.h>
 
-#include <map>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/service_worker/service_worker_status_code.h"
@@ -41,15 +39,9 @@ class NotificationMessageFilter : public BrowserMessageFilter {
       const scoped_refptr<ServiceWorkerContextWrapper>& service_worker_context,
       BrowserContext* browser_context);
 
-  // To be called by non-persistent notification delegates when they are closed,
-  // so that the close closure associated with that notification can be removed.
-  void DidCloseNotification(const std::string& notification_id);
-
   // BrowserMessageFilter implementation. Called on the UI thread.
   void OnDestruct() const override;
   bool OnMessageReceived(const IPC::Message& message) override;
-  void OverrideThreadForMessage(const IPC::Message& message,
-                                content::BrowserThread::ID* thread) override;
 
  protected:
   ~NotificationMessageFilter() override;
@@ -58,11 +50,6 @@ class NotificationMessageFilter : public BrowserMessageFilter {
   friend class base::DeleteHelper<NotificationMessageFilter>;
   friend class BrowserThread;
 
-  void OnShowPlatformNotification(
-      int non_persistent_notification_id,
-      const GURL& origin,
-      const PlatformNotificationData& notification_data,
-      const NotificationResources& notification_resources);
   void OnShowPersistentNotification(
       int request_id,
       int64_t service_worker_registration_id,
@@ -73,9 +60,6 @@ class NotificationMessageFilter : public BrowserMessageFilter {
                           int64_t service_worker_registration_id,
                           const GURL& origin,
                           const std::string& filter_tag);
-  void OnClosePlatformNotification(const GURL& origin,
-                                   const std::string& tag,
-                                   int non_persistent_notification_id);
   void OnClosePersistentNotification(const GURL& origin,
                                      const std::string& tag,
                                      const std::string& notification_id);
@@ -134,15 +118,10 @@ class NotificationMessageFilter : public BrowserMessageFilter {
   NotificationIdGenerator* GetNotificationIdGenerator() const;
 
   int process_id_;
-  bool non_persistent__notification_shown_;
   scoped_refptr<PlatformNotificationContextImpl> notification_context_;
   ResourceContext* resource_context_;
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
   BrowserContext* browser_context_;
-
-  // Map mapping notification IDs associated with non-persistent notifications
-  // to the closures that may be used for programmatically closing them.
-  std::unordered_map<std::string, base::Closure> close_closures_;
 
   base::WeakPtrFactory<NotificationMessageFilter> weak_factory_io_;
 

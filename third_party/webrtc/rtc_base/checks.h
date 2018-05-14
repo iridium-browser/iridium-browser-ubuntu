@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_BASE_CHECKS_H_
-#define WEBRTC_RTC_BASE_CHECKS_H_
+#ifndef RTC_BASE_CHECKS_H_
+#define RTC_BASE_CHECKS_H_
 
-#include "webrtc/typedefs.h"
+#include "typedefs.h"  // NOLINT(build/include)
 
 // If you for some reson need to know if DCHECKs are on, test the value of
 // RTC_DCHECK_IS_ON. (Test its value, not if it's defined; it'll always be
@@ -36,7 +36,7 @@ NO_RETURN void rtc_FatalMessage(const char* file, int line, const char* msg);
 #include <sstream>
 #include <string>
 
-#include "webrtc/rtc_base/safe_compare.h"
+#include "rtc_base/numerics/safe_compare.h"
 
 // The macros here print a message to stderr and abort under various
 // conditions. All will accept additional stream messages. For example:
@@ -221,6 +221,7 @@ class FatalMessageVoidify {
 #define RTC_UNREACHABLE_CODE_HIT false
 #define RTC_NOTREACHED() RTC_DCHECK(RTC_UNREACHABLE_CODE_HIT)
 
+// TODO(bugs.webrtc.org/8454): Add an RTC_ prefix or rename differently.
 #define FATAL() rtc::FatalMessage(__FILE__, __LINE__).stream()
 // TODO(ajm): Consider adding RTC_NOTIMPLEMENTED macro when
 // base/logging.h and system_wrappers/logging.h are consolidated such that we
@@ -286,4 +287,4 @@ inline T CheckedDivExact(T a, T b) {
 
 #endif  // __cplusplus
 
-#endif  // WEBRTC_RTC_BASE_CHECKS_H_
+#endif  // RTC_BASE_CHECKS_H_

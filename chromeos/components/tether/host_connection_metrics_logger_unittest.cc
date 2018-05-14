@@ -4,7 +4,8 @@
 
 #include "chromeos/components/tether/host_connection_metrics_logger.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/test/histogram_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -14,10 +15,10 @@ namespace tether {
 
 class HostConnectionMetricsLoggerTest : public testing::Test {
  protected:
-  HostConnectionMetricsLoggerTest() {}
+  HostConnectionMetricsLoggerTest() = default;
 
   void SetUp() override {
-    metrics_logger_ = base::MakeUnique<HostConnectionMetricsLogger>();
+    metrics_logger_ = std::make_unique<HostConnectionMetricsLogger>();
   }
 
   void VerifyProvisioningFailure(
@@ -202,6 +203,57 @@ TEST_F(HostConnectionMetricsLoggerTest,
   VerifyProvisioningFailure(
       HostConnectionMetricsLogger::
           ConnectionToHostResult_ProvisioningFailureEventType::OTHER);
+}
+
+TEST_F(HostConnectionMetricsLoggerTest,
+       RecordConnectionResultFailureTetheringUnsupported) {
+  metrics_logger_->RecordConnectionToHostResult(
+      HostConnectionMetricsLogger::ConnectionToHostResult::
+          CONNECTION_RESULT_FAILURE_TETHERING_UNSUPPORTED);
+
+  VerifyFailure(
+      HostConnectionMetricsLogger::ConnectionToHostResult_FailureEventType::
+          TETHERING_UNSUPPORTED);
+  VerifySuccess(HostConnectionMetricsLogger::
+                    ConnectionToHostResult_SuccessEventType::FAILURE);
+}
+
+TEST_F(HostConnectionMetricsLoggerTest,
+       RecordConnectionResultFailureNoCellData) {
+  metrics_logger_->RecordConnectionToHostResult(
+      HostConnectionMetricsLogger::ConnectionToHostResult::
+          CONNECTION_RESULT_FAILURE_NO_CELL_DATA);
+
+  VerifyFailure(HostConnectionMetricsLogger::
+                    ConnectionToHostResult_FailureEventType::NO_CELL_DATA);
+  VerifySuccess(HostConnectionMetricsLogger::
+                    ConnectionToHostResult_SuccessEventType::FAILURE);
+}
+
+TEST_F(HostConnectionMetricsLoggerTest,
+       RecordConnectionResultFailureEnablingHotspotFailed) {
+  metrics_logger_->RecordConnectionToHostResult(
+      HostConnectionMetricsLogger::ConnectionToHostResult::
+          CONNECTION_RESULT_FAILURE_ENABLING_HOTSPOT_FAILED);
+
+  VerifyFailure(
+      HostConnectionMetricsLogger::ConnectionToHostResult_FailureEventType::
+          ENABLING_HOTSPOT_FAILED);
+  VerifySuccess(HostConnectionMetricsLogger::
+                    ConnectionToHostResult_SuccessEventType::FAILURE);
+}
+
+TEST_F(HostConnectionMetricsLoggerTest,
+       RecordConnectionResultFailureEnablingHotspotTimeout) {
+  metrics_logger_->RecordConnectionToHostResult(
+      HostConnectionMetricsLogger::ConnectionToHostResult::
+          CONNECTION_RESULT_FAILURE_ENABLING_HOTSPOT_TIMEOUT);
+
+  VerifyFailure(
+      HostConnectionMetricsLogger::ConnectionToHostResult_FailureEventType::
+          ENABLING_HOTSPOT_TIMEOUT);
+  VerifySuccess(HostConnectionMetricsLogger::
+                    ConnectionToHostResult_SuccessEventType::FAILURE);
 }
 
 }  // namespace tether

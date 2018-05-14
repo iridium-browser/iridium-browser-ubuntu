@@ -89,7 +89,6 @@ class ProxyBrowserTest : public InProcessBrowserTest {
  public:
   ProxyBrowserTest()
       : proxy_server_(net::SpawnedTestServer::TYPE_BASIC_AUTH_PROXY,
-                      net::SpawnedTestServer::kLocalhost,
                       base::FilePath()) {
   }
 
@@ -122,7 +121,6 @@ class ProxyBrowserTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(ProxyBrowserTest, MAYBE_BasicAuthWSConnect) {
   // Launch WebSocket server.
   net::SpawnedTestServer ws_server(net::SpawnedTestServer::TYPE_WS,
-                                   net::SpawnedTestServer::kLocalhost,
                                    net::GetWebSocketTestDataDirectory());
   ASSERT_TRUE(ws_server.Start());
 
@@ -181,109 +179,6 @@ IN_PROC_BROWSER_TEST_F(HttpProxyScriptBrowserTest, Verify) {
   VerifyProxyScript(browser());
 }
 
-// Fetch PAC script via a file:// URL.
-class FileProxyScriptBrowserTest : public InProcessBrowserTest {
- public:
-  FileProxyScriptBrowserTest() {}
-  ~FileProxyScriptBrowserTest() override {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(switches::kProxyPacUrl,
-        ui_test_utils::GetTestUrl(
-            base::FilePath(base::FilePath::kCurrentDirectory),
-            base::FilePath(kPACScript)).spec());
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FileProxyScriptBrowserTest);
-};
-
-IN_PROC_BROWSER_TEST_F(FileProxyScriptBrowserTest, Verify) {
-  VerifyProxyScript(browser());
-}
-
-// Fetch PAC script via an ftp:// URL.
-class FtpProxyScriptBrowserTest : public InProcessBrowserTest {
- public:
-  FtpProxyScriptBrowserTest()
-      : ftp_server_(net::SpawnedTestServer::TYPE_FTP,
-                    net::SpawnedTestServer::kLocalhost,
-                    base::FilePath(FILE_PATH_LITERAL("chrome/test/data"))) {
-  }
-  ~FtpProxyScriptBrowserTest() override {}
-
-  void SetUp() override {
-    ASSERT_TRUE(ftp_server_.Start());
-    InProcessBrowserTest::SetUp();
-  }
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    base::FilePath pac_script_path(kPACScript);
-    command_line->AppendSwitchASCII(
-        switches::kProxyPacUrl,
-        ftp_server_.GetURL(pac_script_path.MaybeAsASCII()).spec());
-  }
-
- private:
-  net::SpawnedTestServer ftp_server_;
-
-  DISALLOW_COPY_AND_ASSIGN(FtpProxyScriptBrowserTest);
-};
-
-IN_PROC_BROWSER_TEST_F(FtpProxyScriptBrowserTest, Verify) {
-  VerifyProxyScript(browser());
-}
-
-// Fetch PAC script via a data: URL.
-class DataProxyScriptBrowserTest : public InProcessBrowserTest {
- public:
-  DataProxyScriptBrowserTest() {}
-  ~DataProxyScriptBrowserTest() override {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    std::string contents;
-    // Read in kPACScript contents.
-    ASSERT_TRUE(base::ReadFileToString(ui_test_utils::GetTestFilePath(
-        base::FilePath(base::FilePath::kCurrentDirectory),
-        base::FilePath(kPACScript)),
-        &contents));
-    command_line->AppendSwitchASCII(switches::kProxyPacUrl,
-        std::string("data:,") + contents);
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DataProxyScriptBrowserTest);
-};
-
-IN_PROC_BROWSER_TEST_F(DataProxyScriptBrowserTest, Verify) {
-  VerifyProxyScript(browser());
-}
-
-// Fetch PAC script via a data: URL.
-class OutOfProcessProxyResolverBrowserTest : public InProcessBrowserTest {
- public:
-  OutOfProcessProxyResolverBrowserTest() {}
-  ~OutOfProcessProxyResolverBrowserTest() override {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    std::string contents;
-    // Read in kPACScript contents.
-    ASSERT_TRUE(base::ReadFileToString(ui_test_utils::GetTestFilePath(
-        base::FilePath(base::FilePath::kCurrentDirectory),
-        base::FilePath(kPACScript)),
-        &contents));
-    command_line->AppendSwitchASCII(
-        switches::kProxyPacUrl, "data:," + contents);
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(OutOfProcessProxyResolverBrowserTest);
-};
-
-IN_PROC_BROWSER_TEST_F(OutOfProcessProxyResolverBrowserTest, Verify) {
-  VerifyProxyScript(browser());
-}
-
 // Fetch PAC script via a hanging http:// URL.
 class HangingPacRequestProxyScriptBrowserTest : public InProcessBrowserTest {
  public:
@@ -307,7 +202,7 @@ class HangingPacRequestProxyScriptBrowserTest : public InProcessBrowserTest {
     // This must be created after the main message loop has been set up.
     // Waits for one connection.  Additional connections are fine.
     connection_listener_ =
-        base::MakeUnique<net::test_server::SimpleConnectionListener>(
+        std::make_unique<net::test_server::SimpleConnectionListener>(
             1, net::test_server::SimpleConnectionListener::
                    ALLOW_ADDITIONAL_CONNECTIONS);
     embedded_test_server()->SetConnectionListener(connection_listener_.get());

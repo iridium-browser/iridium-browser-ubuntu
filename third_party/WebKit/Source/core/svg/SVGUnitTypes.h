@@ -26,8 +26,7 @@
 
 namespace blink {
 
-class SVGUnitTypes final : public GarbageCollected<SVGUnitTypes>,
-                           public ScriptWrappable {
+class SVGUnitTypes final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -37,10 +36,8 @@ class SVGUnitTypes final : public GarbageCollected<SVGUnitTypes>,
     kSvgUnitTypeObjectboundingbox = 2
   };
 
-  DEFINE_INLINE_TRACE() {}
-
  private:
-  SVGUnitTypes();  // No instantiation.
+  SVGUnitTypes() = delete;  // No instantiation.
 };
 
 template <>

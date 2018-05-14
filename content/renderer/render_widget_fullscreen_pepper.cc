@@ -13,6 +13,7 @@
 #include "build/build_config.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/use_zoom_for_dsf_policy.h"
 #include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
 #include "content/renderer/render_thread_impl.h"
@@ -25,12 +26,13 @@
 #include "third_party/WebKit/public/platform/WebMouseWheelEvent.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
+#include "ui/gfx/geometry/dip_util.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gl/gpu_preference.h"
 
 using blink::WebCanvas;
 using blink::WebCoalescedInputEvent;
-using blink::WebCompositionUnderline;
+using blink::WebImeTextSpan;
 using blink::WebCursorInfo;
 using blink::WebGestureEvent;
 using blink::WebInputEvent;
@@ -137,6 +139,8 @@ class PepperWidget : public WebWidget {
   void Close() override { delete this; }
 
   WebSize Size() override { return size_; }
+
+  bool IsPepperWidget() const override { return true; }
 
   void Resize(const WebSize& size) override {
     if (!widget_->plugin() || size_ == size)
@@ -280,10 +284,11 @@ RenderWidgetFullscreenPepper::RenderWidgetFullscreenPepper(
                    false,
                    false,
                    false,
+                   base::ThreadTaskRunnerHandle::Get(),
                    std::move(widget_request)),
       active_url_(active_url),
       plugin_(plugin),
-      layer_(NULL),
+      layer_(nullptr),
       mouse_lock_dispatcher_(new FullscreenMouseLockDispatcher(this)) {}
 
 RenderWidgetFullscreenPepper::~RenderWidgetFullscreenPepper() {
@@ -302,14 +307,19 @@ void RenderWidgetFullscreenPepper::ScrollRect(
 }
 
 void RenderWidgetFullscreenPepper::Destroy() {
+  // The plugin instance is going away reset any lock target that is set
+  // on the dispatcher since this object can still live and receive IPC
+  // responses and may call a dangling lock_target.
+  mouse_lock_dispatcher_->ClearLockTarget();
+
   // This function is called by the plugin instance as it's going away, so reset
   // plugin_ to NULL to avoid calling into a dangling pointer e.g. on Close().
-  plugin_ = NULL;
+  plugin_ = nullptr;
 
   // After calling Destroy(), the plugin instance assumes that the layer is not
   // used by us anymore, so it may destroy the layer before this object goes
   // away.
-  SetLayer(NULL);
+  SetLayer(nullptr);
 
   Send(new ViewHostMsg_Close(routing_id_));
   Release();
@@ -329,9 +339,8 @@ void RenderWidgetFullscreenPepper::SetLayer(blink::WebLayer* layer) {
   }
   if (!compositor())
     InitializeLayerTreeView();
-  layer_->SetBounds(blink::WebSize(size()));
+  UpdateLayerBounds();
   layer_->SetDrawsContent(true);
-  compositor_->SetDeviceScaleFactor(device_scale_factor_);
   compositor_->SetRootLayer(*layer_);
 }
 
@@ -368,18 +377,31 @@ void RenderWidgetFullscreenPepper::Close() {
 }
 
 void RenderWidgetFullscreenPepper::OnResize(const ResizeParams& params) {
-  if (layer_)
-    layer_->SetBounds(blink::WebSize(params.new_size));
   RenderWidget::OnResize(params);
+  UpdateLayerBounds();
 }
 
 GURL RenderWidgetFullscreenPepper::GetURLForGraphicsContext3D() {
   return active_url_;
 }
 
-void RenderWidgetFullscreenPepper::OnDeviceScaleFactorChanged() {
-  if (compositor_)
-    compositor_->SetDeviceScaleFactor(device_scale_factor_);
+void RenderWidgetFullscreenPepper::UpdateLayerBounds() {
+  if (!layer_)
+    return;
+
+  if (IsUseZoomForDSFEnabled()) {
+    // Note that root cc::Layers' bounds are specified in pixels (in contrast
+    // with non-root cc::Layers' bounds, which are specified in DIPs).
+    layer_->SetBounds(blink::WebSize(compositor_viewport_pixel_size()));
+  } else {
+    // For reasons that are unclear, the above comment doesn't appear to apply
+    // when zoom for DSF is not enabled.
+    // https://crbug.com/822252
+    gfx::Size dip_size =
+        gfx::ConvertSizeToDIP(GetOriginalScreenInfo().device_scale_factor,
+                              compositor_viewport_pixel_size());
+    layer_->SetBounds(blink::WebSize(dip_size));
+  }
 }
 
 }  // namespace content

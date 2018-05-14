@@ -13,7 +13,7 @@
 class ContextualSearchFieldTrial {
  public:
   ContextualSearchFieldTrial();
-  ~ContextualSearchFieldTrial();
+  virtual ~ContextualSearchFieldTrial();
 
   // Returns a partial URL to use for a Contextual Search Resolve request, or
   // an empty string if no override is required.  The returned value is a prefix
@@ -33,9 +33,6 @@ class ContextualSearchFieldTrial {
 
   // Gets whether decoding the mentions fields in the Resolve is disabled.
   bool IsDecodeMentionsDisabled();
-
-  // Gets whether Bar integration with Contextual Cards data is enabled.
-  bool IsContextualCardsBarIntegrationEnabled();
 
   // Gets an explicit version to use for Contextual Cards integration, or 0 if
   // not set.

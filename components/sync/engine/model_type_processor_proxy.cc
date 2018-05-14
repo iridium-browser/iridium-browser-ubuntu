@@ -21,13 +21,34 @@ ModelTypeProcessorProxy::~ModelTypeProcessorProxy() {}
 
 void ModelTypeProcessorProxy::ConnectSync(std::unique_ptr<CommitQueue> worker) {
   task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ModelTypeProcessor::ConnectSync, processor_,
-                            base::Passed(std::move(worker))));
+      FROM_HERE, base::BindOnce(&ModelTypeProcessor::ConnectSync, processor_,
+                                std::move(worker)));
 }
 
 void ModelTypeProcessorProxy::DisconnectSync() {
   task_runner_->PostTask(
       FROM_HERE, base::Bind(&ModelTypeProcessor::DisconnectSync, processor_));
+}
+
+void ForwardGetLocalChangesCall(
+    base::WeakPtr<ModelTypeProcessor> processor,
+    size_t max_entries,
+    const ModelTypeProcessor::GetLocalChangesCallback& callback) {
+  if (processor) {
+    processor->GetLocalChanges(max_entries, callback);
+  } else {
+    // If the processor is not valid anymore call the callback to unblock sync
+    // thread.
+    callback.Run(CommitRequestDataList());
+  }
+}
+
+void ModelTypeProcessorProxy::GetLocalChanges(
+    size_t max_entries,
+    const GetLocalChangesCallback& callback) {
+  task_runner_->PostTask(FROM_HERE,
+                         base::Bind(&ForwardGetLocalChangesCall, processor_,
+                                    max_entries, callback));
 }
 
 void ModelTypeProcessorProxy::OnCommitCompleted(

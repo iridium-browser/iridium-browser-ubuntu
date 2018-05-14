@@ -176,7 +176,7 @@ bool ModelNeutralMutableEntry::PutIsUnsynced(bool value) {
       }
     } else {
       if (!SyncAssert(1U == index->erase(kernel_->ref(META_HANDLE)), FROM_HERE,
-                      "Entry Not succesfully erased",
+                      "Entry Not successfully erased",
                       base_write_transaction())) {
         return false;
       }
@@ -208,7 +208,7 @@ bool ModelNeutralMutableEntry::PutIsUnappliedUpdate(bool value) {
       }
     } else {
       if (!SyncAssert(1U == index->erase(kernel_->ref(META_HANDLE)), FROM_HERE,
-                      "Entry Not succesfully erased",
+                      "Entry Not successfully erased",
                       base_write_transaction())) {
         return false;
       }
@@ -339,7 +339,11 @@ void ModelNeutralMutableEntry::PutUniqueBookmarkTag(const std::string& tag) {
 void ModelNeutralMutableEntry::PutServerSpecifics(
     const sync_pb::EntitySpecifics& value) {
   DCHECK(kernel_);
+
+  // Purposefully crash if we have client only data, as this could result in
+  // sending password in plain text.
   CHECK(!value.password().has_client_only_encrypted_data());
+
   // TODO(ncarter): This is unfortunately heavyweight.  Can we do
   // better?
   const std::string& serialized_value = value.SerializeAsString();
@@ -379,7 +383,11 @@ void ModelNeutralMutableEntry::PutServerSpecifics(
 void ModelNeutralMutableEntry::PutBaseServerSpecifics(
     const sync_pb::EntitySpecifics& value) {
   DCHECK(kernel_);
+
+  // Purposefully crash if we have client only data, as this could result in
+  // sending password in plain text.
   CHECK(!value.password().has_client_only_encrypted_data());
+
   // TODO(ncarter): This is unfortunately heavyweight.  Can we do
   // better?
   const std::string& serialized_value = value.SerializeAsString();
@@ -407,25 +415,6 @@ void ModelNeutralMutableEntry::PutServerUniquePosition(
     DCHECK(value.IsValid());
     ScopedKernelLock lock(dir());
     kernel_->put(SERVER_UNIQUE_POSITION, value);
-    MarkDirty();
-  }
-}
-
-void ModelNeutralMutableEntry::PutServerAttachmentMetadata(
-    const sync_pb::AttachmentMetadata& value) {
-  DCHECK(kernel_);
-  const std::string& serialized_value = value.SerializeAsString();
-  if (serialized_value !=
-      kernel_->ref(SERVER_ATTACHMENT_METADATA).SerializeAsString()) {
-    base_write_transaction_->TrackChangesTo(kernel_);
-    // Check for potential sharing - SERVER_ATTACHMENT_METADATA is often
-    // copied from ATTACHMENT_METADATA.
-    if (serialized_value ==
-        kernel_->ref(ATTACHMENT_METADATA).SerializeAsString()) {
-      kernel_->copy(ATTACHMENT_METADATA, SERVER_ATTACHMENT_METADATA);
-    } else {
-      kernel_->put(SERVER_ATTACHMENT_METADATA, value);
-    }
     MarkDirty();
   }
 }

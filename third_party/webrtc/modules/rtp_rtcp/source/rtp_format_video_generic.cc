@@ -10,10 +10,10 @@
 
 #include <string>
 
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/modules/rtp_rtcp/source/rtp_format_video_generic.h"
-#include "webrtc/modules/rtp_rtcp/source/rtp_packet_to_send.h"
-#include "webrtc/rtc_base/logging.h"
+#include "modules/include/module_common_types.h"
+#include "modules/rtp_rtcp/source/rtp_format_video_generic.h"
+#include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
 
@@ -108,25 +108,18 @@ bool RtpPacketizerGeneric::NextPacket(RtpPacketToSend* packet) {
   return true;
 }
 
-ProtectionType RtpPacketizerGeneric::GetProtectionType() {
-  return kProtectedPacket;
-}
-
-StorageType RtpPacketizerGeneric::GetStorageType(
-    uint32_t retransmission_settings) {
-  return kAllowRetransmission;
-}
-
 std::string RtpPacketizerGeneric::ToString() {
   return "RtpPacketizerGeneric";
 }
+
+RtpDepacketizerGeneric::~RtpDepacketizerGeneric() = default;
 
 bool RtpDepacketizerGeneric::Parse(ParsedPayload* parsed_payload,
                                    const uint8_t* payload_data,
                                    size_t payload_data_length) {
   assert(parsed_payload != NULL);
   if (payload_data_length == 0) {
-    LOG(LS_ERROR) << "Empty payload.";
+    RTC_LOG(LS_ERROR) << "Empty payload.";
     return false;
   }
 

@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
@@ -145,7 +146,7 @@ class ShillClientUnittestBase : public testing::Test {
   static base::DictionaryValue* CreateExampleServiceProperties();
 
   // Expects the call status to be SUCCESS.
-  static void ExpectNoResultValue(DBusMethodCallStatus call_status);
+  static void ExpectNoResultValue(bool result);
 
   // Checks the result and expects the call status to be SUCCESS.
   static void ExpectObjectPathResult(const dbus::ObjectPath& expected_result,
@@ -187,7 +188,7 @@ class ShillClientUnittestBase : public testing::Test {
       const std::string& interface_name,
       const std::string& signal_name,
       const dbus::ObjectProxy::SignalCallback& signal_callback,
-      const dbus::ObjectProxy::OnConnectedCallback& on_connected_callback);
+      dbus::ObjectProxy::OnConnectedCallback* on_connected_callback);
 
   // Checks the requested interface name and signal name.
   // Used to implement the mock proxy.
@@ -195,7 +196,7 @@ class ShillClientUnittestBase : public testing::Test {
       const std::string& interface_name,
       const std::string& signal_name,
       const dbus::ObjectProxy::SignalCallback& signal_callback,
-      const dbus::ObjectProxy::OnConnectedCallback& on_connected_callback);
+      dbus::ObjectProxy::OnConnectedCallback* on_connected_callback);
 
   // Checks the requested interface name and signal name.
   // Used to implement the mock proxy.
@@ -203,22 +204,21 @@ class ShillClientUnittestBase : public testing::Test {
       const std::string& interface_name,
       const std::string& signal_name,
       const dbus::ObjectProxy::SignalCallback& signal_callback,
-      const dbus::ObjectProxy::OnConnectedCallback& on_connected_callback);
+      dbus::ObjectProxy::OnConnectedCallback* on_connected_callback);
 
   // Checks the content of the method call and returns the response.
   // Used to implement the mock proxy.
-  void OnCallMethod(
-      dbus::MethodCall* method_call,
-      int timeout_ms,
-      const dbus::ObjectProxy::ResponseCallback& response_callback);
+  void OnCallMethod(dbus::MethodCall* method_call,
+                    int timeout_ms,
+                    dbus::ObjectProxy::ResponseCallback* response_callback);
 
   // Checks the content of the method call and returns the response.
   // Used to implement the mock proxy.
   void OnCallMethodWithErrorCallback(
       dbus::MethodCall* method_call,
       int timeout_ms,
-      const dbus::ObjectProxy::ResponseCallback& response_callback,
-      const dbus::ObjectProxy::ErrorCallback& error_callback);
+      dbus::ObjectProxy::ResponseCallback* response_callback,
+      dbus::ObjectProxy::ErrorCallback* error_callback);
 
   // The interface name.
   const std::string interface_name_;

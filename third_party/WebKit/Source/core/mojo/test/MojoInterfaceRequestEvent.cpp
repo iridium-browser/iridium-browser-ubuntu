@@ -9,9 +9,9 @@
 
 namespace blink {
 
-MojoInterfaceRequestEvent::~MojoInterfaceRequestEvent() {}
+MojoInterfaceRequestEvent::~MojoInterfaceRequestEvent() = default;
 
-DEFINE_TRACE(MojoInterfaceRequestEvent) {
+void MojoInterfaceRequestEvent::Trace(blink::Visitor* visitor) {
   Event::Trace(visitor);
   visitor->Trace(handle_);
 }

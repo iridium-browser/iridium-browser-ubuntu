@@ -51,6 +51,21 @@ struct CORE_EXPORT ViewportDescription {
     kAuthorStyleSheet
   } type;
 
+  // Enums used to record the kind of viewport in the Viewport.MetaTagType
+  // histogram. These must match the enums in histograms.xml and existing
+  // entries must not be changed.
+  enum class ViewportUMAType : int {
+    kNoViewportTag = 0,
+    kDeviceWidth = 1,
+    kConstantWidth = 2,
+    kMetaWidthOther = 3,
+    kMetaHandheldFriendly = 4,
+    kMetaMobileOptimized = 5,
+    kXhtmlMobileProfile = 6,
+
+    kTypeCount = 7
+  };
+
   enum {
     kValueAuto = -1,
     kValueDeviceWidth = -2,
@@ -81,6 +96,10 @@ struct CORE_EXPORT ViewportDescription {
   PageScaleConstraints Resolve(const FloatSize& initial_viewport_size,
                                Length legacy_fallback_width) const;
 
+  // When --use-zoom-for-dsf is enabled, if the type is kFixed, these Length
+  // values (i.e., |min_width|, |max_width|, |min_height|, and |max_height|)
+  // must be in physical pixel scale. When --use-zoom-for-dsf is disabled, if
+  // the type is kFixed, these Length values must be in DIP scale.
   Length min_width;
   Length max_width;
   Length min_height;

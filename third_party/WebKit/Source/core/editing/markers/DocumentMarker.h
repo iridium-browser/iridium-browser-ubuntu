@@ -44,6 +44,7 @@ class CORE_EXPORT DocumentMarker
     kTextMatchMarkerIndex,
     kCompositionMarkerIndex,
     kActiveSuggestionMarkerIndex,
+    kSuggestionMarkerIndex,
     kMarkerTypeIndexesCount
   };
 
@@ -53,6 +54,7 @@ class CORE_EXPORT DocumentMarker
     kTextMatch = 1 << kTextMatchMarkerIndex,
     kComposition = 1 << kCompositionMarkerIndex,
     kActiveSuggestion = 1 << kActiveSuggestionMarkerIndex,
+    kSuggestion = 1 << kSuggestionMarkerIndex,
   };
 
   class MarkerTypesIterator
@@ -150,7 +152,7 @@ class CORE_EXPORT DocumentMarker
   void SetEndOffset(unsigned offset) { end_offset_ = offset; }
   void ShiftOffsets(int delta);
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
 
  protected:
   DocumentMarker(unsigned start_offset, unsigned end_offset);

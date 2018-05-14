@@ -25,8 +25,8 @@ const char kAccountId[] = "account@gmail.com";
 
 std::string BuildResponse() {
   base::DictionaryValue dict;
-  auto permission_dict = base::MakeUnique<base::DictionaryValue>();
-  permission_dict->SetStringWithoutPathExpansion("id", "requestid");
+  auto permission_dict = std::make_unique<base::DictionaryValue>();
+  permission_dict->SetKey("id", base::Value("requestid"));
   dict.SetWithoutPathExpansion("permissionRequest", std::move(permission_dict));
   std::string result;
   base::JSONWriter::Write(dict, &result);

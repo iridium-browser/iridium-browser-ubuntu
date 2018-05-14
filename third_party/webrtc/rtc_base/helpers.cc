@@ -8,18 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/helpers.h"
+#include "rtc_base/helpers.h"
 
 #include <limits>
 #include <memory>
 
 #include <openssl/rand.h>
 
-#include "webrtc/rtc_base/base64.h"
-#include "webrtc/rtc_base/basictypes.h"
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/timeutils.h"
+#include "rtc_base/base64.h"
+#include "rtc_base/basictypes.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/timeutils.h"
 
 // Protect against max macro inclusion.
 #undef max
@@ -110,7 +110,7 @@ bool InitRandom(int seed) {
 
 bool InitRandom(const char* seed, size_t len) {
   if (!Rng().Init(seed, len)) {
-    LOG(LS_ERROR) << "Failed to init random generator!";
+    RTC_LOG(LS_ERROR) << "Failed to init random generator!";
     return false;
   }
   return true;
@@ -128,12 +128,12 @@ static bool CreateRandomString(size_t len,
   str->clear();
   // Avoid biased modulo division below.
   if (256 % table_size) {
-    LOG(LS_ERROR) << "Table size must divide 256 evenly!";
+    RTC_LOG(LS_ERROR) << "Table size must divide 256 evenly!";
     return false;
   }
   std::unique_ptr<uint8_t[]> bytes(new uint8_t[len]);
   if (!Rng().Generate(bytes.get(), len)) {
-    LOG(LS_ERROR) << "Failed to generate random string!";
+    RTC_LOG(LS_ERROR) << "Failed to generate random string!";
     return false;
   }
   str->reserve(len);
@@ -213,6 +213,10 @@ uint32_t CreateRandomNonZeroId() {
 double CreateRandomDouble() {
   return CreateRandomId() / (std::numeric_limits<uint32_t>::max() +
                              std::numeric_limits<double>::epsilon());
+}
+
+double GetNextMovingAverage(double prev_average, double cur, double ratio) {
+  return (ratio * prev_average + cur) / (ratio + 1);
 }
 
 }  // namespace rtc

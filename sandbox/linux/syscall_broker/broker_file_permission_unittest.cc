@@ -161,8 +161,9 @@ void CheckPerm(const BrokerFilePermission& perm,
         ASSERT_TRUE(
             perm.CheckOpen(path, access_flags | flag, &file_to_open, NULL));
         break;
-      case O_CLOEXEC:
       case O_CREAT:
+        continue;  // Handled below.
+      case O_CLOEXEC:
       default:
         ASSERT_FALSE(
             perm.CheckOpen(path, access_flags | flag, &file_to_open, NULL));
@@ -225,26 +226,16 @@ void CheckUnlink(BrokerFilePermission& perm,
                  int access_flags) {
   bool unlink;
   ASSERT_FALSE(perm.CheckOpen(path, access_flags, NULL, &unlink));
-  ASSERT_FALSE(perm.CheckOpen(path, access_flags | O_CREAT, NULL, &unlink));
   ASSERT_TRUE(
       perm.CheckOpen(path, access_flags | O_CREAT | O_EXCL, NULL, &unlink));
   ASSERT_TRUE(unlink);
 }
 
-TEST(BrokerFilePermission, ReadWriteCreateUnlink) {
-  const char kPath[] = "/tmp/good";
-  BrokerFilePermission perm =
-      BrokerFilePermission::ReadWriteCreateUnlink(kPath);
-  CheckUnlink(perm, kPath, O_RDWR);
-  // Don't do anything here, so that ASSERT works in the subfunction as
-  // expected.
-}
-
-TEST(BrokerFilePermission, ReadWriteCreateUnlinkRecursive) {
+TEST(BrokerFilePermission, ReadWriteCreateTemporaryRecursive) {
   const char kPath[] = "/tmp/good/";
   const char kPathFile[] = "/tmp/good/file";
   BrokerFilePermission perm =
-      BrokerFilePermission::ReadWriteCreateUnlinkRecursive(kPath);
+      BrokerFilePermission::ReadWriteCreateTemporaryRecursive(kPath);
   CheckUnlink(perm, kPathFile, O_RDWR);
   // Don't do anything here, so that ASSERT works in the subfunction as
   // expected.

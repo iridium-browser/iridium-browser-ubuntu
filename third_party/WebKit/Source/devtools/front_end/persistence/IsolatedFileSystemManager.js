@@ -59,6 +59,8 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
 
     this._initExcludePatterSetting();
 
+    /** @type {?function(?Persistence.IsolatedFileSystem)} */
+    this._fileSystemRequestResolve = null;
     this._fileSystemsLoadedPromise = this._requestFileSystems();
   }
 
@@ -66,8 +68,8 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
    * @return {!Promise<!Array<!Persistence.IsolatedFileSystem>>}
    */
   _requestFileSystems() {
-    var fulfill;
-    var promise = new Promise(f => fulfill = f);
+    let fulfill;
+    const promise = new Promise(f => fulfill = f);
     InspectorFrontendHost.events.addEventListener(
         InspectorFrontendHostAPI.Events.FileSystemsLoaded, onFileSystemsLoaded, this);
     InspectorFrontendHost.requestFileSystems();
@@ -78,9 +80,9 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
      * @this {Persistence.IsolatedFileSystemManager}
      */
     function onFileSystemsLoaded(event) {
-      var fileSystems = /** @type {!Array.<!Persistence.IsolatedFileSystemManager.FileSystem>} */ (event.data);
-      var promises = [];
-      for (var i = 0; i < fileSystems.length; ++i)
+      const fileSystems = /** @type {!Array.<!Persistence.IsolatedFileSystemManager.FileSystem>} */ (event.data);
+      const promises = [];
+      for (let i = 0; i < fileSystems.length; ++i)
         promises.push(this._innerAddFileSystem(fileSystems[i], false));
       Promise.all(promises).then(onFileSystemsAdded);
     }
@@ -93,8 +95,15 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
     }
   }
 
-  addFileSystem() {
-    InspectorFrontendHost.addFileSystem('');
+  /**
+   * @param {string=} type
+   * @return {!Promise<?Persistence.IsolatedFileSystem>}
+   */
+  addFileSystem(type) {
+    return new Promise(resolve => {
+      this._fileSystemRequestResolve = resolve;
+      InspectorFrontendHost.addFileSystem(type || '');
+    });
   }
 
   /**
@@ -117,10 +126,10 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
    * @return {!Promise<?Persistence.IsolatedFileSystem>}
    */
   _innerAddFileSystem(fileSystem, dispatchEvent) {
-    var embedderPath = fileSystem.fileSystemPath;
-    var fileSystemURL = Common.ParsedURL.platformPathToURL(fileSystem.fileSystemPath);
-    var promise = Persistence.IsolatedFileSystem.create(
-        this, fileSystemURL, embedderPath, fileSystem.fileSystemName, fileSystem.rootURL);
+    const embedderPath = fileSystem.fileSystemPath;
+    const fileSystemURL = Common.ParsedURL.platformPathToURL(fileSystem.fileSystemPath);
+    const promise = Persistence.IsolatedFileSystem.create(
+        this, fileSystemURL, embedderPath, fileSystem.type, fileSystem.fileSystemName, fileSystem.rootURL);
     return promise.then(storeFileSystem.bind(this));
 
     /**
@@ -140,22 +149,31 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
   /**
    * @param {!Common.Event} event
    */
-  _onFileSystemAdded(event) {
-    var errorMessage = /** @type {string} */ (event.data['errorMessage']);
-    var fileSystem = /** @type {?Persistence.IsolatedFileSystemManager.FileSystem} */ (event.data['fileSystem']);
-    if (errorMessage)
-      Common.console.error(errorMessage);
-    else if (fileSystem)
-      this._innerAddFileSystem(fileSystem, true);
+  async _onFileSystemAdded(event) {
+    const errorMessage = /** @type {string} */ (event.data['errorMessage']);
+    let fileSystem = /** @type {?Persistence.IsolatedFileSystemManager.FileSystem} */ (event.data['fileSystem']);
+    if (errorMessage) {
+      Common.console.error(Common.UIString('Unable to add filesystem: %s', errorMessage));
+      if (!this._fileSystemRequestResolve)
+        return;
+      this._fileSystemRequestResolve.call(null, null);
+      this._fileSystemRequestResolve = null;
+    } else if (fileSystem) {
+      fileSystem = await this._innerAddFileSystem(fileSystem, true);
+      if (this._fileSystemRequestResolve) {
+        this._fileSystemRequestResolve.call(null, fileSystem);
+        this._fileSystemRequestResolve = null;
+      }
+    }
   }
 
   /**
    * @param {!Common.Event} event
    */
   _onFileSystemRemoved(event) {
-    var embedderPath = /** @type {string} */ (event.data);
-    var fileSystemPath = Common.ParsedURL.platformPathToURL(embedderPath);
-    var isolatedFileSystem = this._fileSystems.get(fileSystemPath);
+    const embedderPath = /** @type {string} */ (event.data);
+    const fileSystemPath = Common.ParsedURL.platformPathToURL(embedderPath);
+    const isolatedFileSystem = this._fileSystems.get(fileSystemPath);
     if (!isolatedFileSystem)
       return;
     this._fileSystems.delete(fileSystemPath);
@@ -167,12 +185,34 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
    * @param {!Common.Event} event
    */
   _onFileSystemFilesChanged(event) {
-    var paths = /** @type {!Persistence.IsolatedFileSystemManager.FilesChangedData} */ (event.data);
-    var urlPaths = {};
-    urlPaths.changed = paths.changed.map(embedderPath => Common.ParsedURL.platformPathToURL(embedderPath));
-    urlPaths.added = paths.added.map(embedderPath => Common.ParsedURL.platformPathToURL(embedderPath));
-    urlPaths.removed = paths.removed.map(embedderPath => Common.ParsedURL.platformPathToURL(embedderPath));
+    const urlPaths = {
+      changed: groupFilePathsIntoFileSystemPaths.call(this, event.data.changed),
+      added: groupFilePathsIntoFileSystemPaths.call(this, event.data.added),
+      removed: groupFilePathsIntoFileSystemPaths.call(this, event.data.removed)
+    };
+
     this.dispatchEventToListeners(Persistence.IsolatedFileSystemManager.Events.FileSystemFilesChanged, urlPaths);
+
+    /**
+     * @param {!Array<string>} embedderPaths
+     * @return {!Multimap<string, string>}
+     * @this {Persistence.IsolatedFileSystemManager}
+     */
+    function groupFilePathsIntoFileSystemPaths(embedderPaths) {
+      const paths = new Multimap();
+      for (const embedderPath of embedderPaths) {
+        const filePath = Common.ParsedURL.platformPathToURL(embedderPath);
+        for (const fileSystemPath of this._fileSystems.keys()) {
+          if (this._fileSystems.get(fileSystemPath).isFileExcluded(embedderPath))
+            continue;
+          const pathPrefix = fileSystemPath.endsWith('/') ? fileSystemPath : fileSystemPath + '/';
+          if (!filePath.startsWith(pathPrefix))
+            continue;
+          paths.set(fileSystemPath, filePath);
+        }
+      }
+      return paths;
+    }
   }
 
   /**
@@ -191,24 +231,24 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
   }
 
   _initExcludePatterSetting() {
-    var defaultCommonExcludedFolders = [
+    const defaultCommonExcludedFolders = [
       '/node_modules/', '/bower_components/', '/\\.devtools', '/\\.git/', '/\\.sass-cache/', '/\\.hg/', '/\\.idea/',
       '/\\.svn/', '/\\.cache/', '/\\.project/'
     ];
-    var defaultWinExcludedFolders = ['/Thumbs.db$', '/ehthumbs.db$', '/Desktop.ini$', '/\\$RECYCLE.BIN/'];
-    var defaultMacExcludedFolders = [
+    const defaultWinExcludedFolders = ['/Thumbs.db$', '/ehthumbs.db$', '/Desktop.ini$', '/\\$RECYCLE.BIN/'];
+    const defaultMacExcludedFolders = [
       '/\\.DS_Store$', '/\\.Trashes$', '/\\.Spotlight-V100$', '/\\.AppleDouble$', '/\\.LSOverride$', '/Icon$',
       '/\\._.*$'
     ];
-    var defaultLinuxExcludedFolders = ['/.*~$'];
-    var defaultExcludedFolders = defaultCommonExcludedFolders;
+    const defaultLinuxExcludedFolders = ['/.*~$'];
+    let defaultExcludedFolders = defaultCommonExcludedFolders;
     if (Host.isWin())
       defaultExcludedFolders = defaultExcludedFolders.concat(defaultWinExcludedFolders);
     else if (Host.isMac())
       defaultExcludedFolders = defaultExcludedFolders.concat(defaultMacExcludedFolders);
     else
       defaultExcludedFolders = defaultExcludedFolders.concat(defaultLinuxExcludedFolders);
-    var defaultExcludedFoldersPattern = defaultExcludedFolders.join('|');
+    const defaultExcludedFoldersPattern = defaultExcludedFolders.join('|');
     this._workspaceFolderExcludePatternSetting = Common.settings.createRegExpSetting(
         'workspaceFolderExcludePattern', defaultExcludedFoldersPattern, Host.isWin() ? 'i' : '');
   }
@@ -225,7 +265,7 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
    * @return {number}
    */
   registerCallback(callback) {
-    var requestId = ++Persistence.IsolatedFileSystemManager._lastRequestId;
+    const requestId = ++Persistence.IsolatedFileSystemManager._lastRequestId;
     this._callbacks.set(requestId, callback);
     return requestId;
   }
@@ -235,7 +275,7 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
    * @return {number}
    */
   registerProgress(progress) {
-    var requestId = ++Persistence.IsolatedFileSystemManager._lastRequestId;
+    const requestId = ++Persistence.IsolatedFileSystemManager._lastRequestId;
     this._progresses.set(requestId, progress);
     return requestId;
   }
@@ -244,10 +284,10 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
    * @param {!Common.Event} event
    */
   _onIndexingTotalWorkCalculated(event) {
-    var requestId = /** @type {number} */ (event.data['requestId']);
-    var totalWork = /** @type {number} */ (event.data['totalWork']);
+    const requestId = /** @type {number} */ (event.data['requestId']);
+    const totalWork = /** @type {number} */ (event.data['totalWork']);
 
-    var progress = this._progresses.get(requestId);
+    const progress = this._progresses.get(requestId);
     if (!progress)
       return;
     progress.setTotalWork(totalWork);
@@ -257,10 +297,10 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
    * @param {!Common.Event} event
    */
   _onIndexingWorked(event) {
-    var requestId = /** @type {number} */ (event.data['requestId']);
-    var worked = /** @type {number} */ (event.data['worked']);
+    const requestId = /** @type {number} */ (event.data['requestId']);
+    const worked = /** @type {number} */ (event.data['worked']);
 
-    var progress = this._progresses.get(requestId);
+    const progress = this._progresses.get(requestId);
     if (!progress)
       return;
     progress.worked(worked);
@@ -274,9 +314,9 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
    * @param {!Common.Event} event
    */
   _onIndexingDone(event) {
-    var requestId = /** @type {number} */ (event.data['requestId']);
+    const requestId = /** @type {number} */ (event.data['requestId']);
 
-    var progress = this._progresses.get(requestId);
+    const progress = this._progresses.get(requestId);
     if (!progress)
       return;
     progress.done();
@@ -287,10 +327,10 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
    * @param {!Common.Event} event
    */
   _onSearchCompleted(event) {
-    var requestId = /** @type {number} */ (event.data['requestId']);
-    var files = /** @type {!Array.<string>} */ (event.data['files']);
+    const requestId = /** @type {number} */ (event.data['requestId']);
+    const files = /** @type {!Array.<string>} */ (event.data['files']);
 
-    var callback = this._callbacks.get(requestId);
+    const callback = this._callbacks.get(requestId);
     if (!callback)
       return;
     callback.call(null, files);
@@ -298,10 +338,10 @@ Persistence.IsolatedFileSystemManager = class extends Common.Object {
   }
 };
 
-/** @typedef {!{fileSystemName: string, rootURL: string, fileSystemPath: string}} */
+/** @typedef {!{type: string, fileSystemName: string, rootURL: string, fileSystemPath: string}} */
 Persistence.IsolatedFileSystemManager.FileSystem;
 
-/** @typedef {!{changed:!Array<string>, added:!Array<string>, removed:!Array<string>}} */
+/** @typedef {!{changed:!Multimap<string, string>, added:!Multimap<string, string>, removed:!Multimap<string, string>}} */
 Persistence.IsolatedFileSystemManager.FilesChangedData;
 
 /** @enum {symbol} */

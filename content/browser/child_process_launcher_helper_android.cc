@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/child_process_launcher_helper_android.h"
-
 #include <memory>
 
 #include "base/android/apk_assets.h"
@@ -11,9 +9,10 @@
 #include "base/i18n/icu_util.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
+#include "content/browser/child_process_launcher.h"
 #include "content/browser/child_process_launcher_helper.h"
 #include "content/browser/child_process_launcher_helper_posix.h"
-#include "content/browser/file_descriptor_info_impl.h"
+#include "content/browser/posix_file_descriptor_info_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -63,7 +62,7 @@ ChildProcessLauncherHelper::PrepareMojoPipeHandlesOnClientThread() {
   return mojo::edk::ScopedPlatformHandle();
 }
 
-std::unique_ptr<FileDescriptorInfo>
+std::unique_ptr<PosixFileDescriptorInfo>
 ChildProcessLauncherHelper::GetFilesToMap() {
   DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
 
@@ -71,7 +70,7 @@ ChildProcessLauncherHelper::GetFilesToMap() {
   // running in single process mode.
   CHECK(!command_line()->HasSwitch(switches::kSingleProcess));
 
-  std::unique_ptr<FileDescriptorInfo> files_to_register =
+  std::unique_ptr<PosixFileDescriptorInfo> files_to_register =
       CreateDefaultPosixFilesToMap(child_process_id(), mojo_client_handle(),
                                    true /* include_service_required_files */,
                                    GetProcessType(), command_line());
@@ -85,15 +84,16 @@ ChildProcessLauncherHelper::GetFilesToMap() {
   return files_to_register;
 }
 
-void ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
-    const FileDescriptorInfo& files_to_register,
+bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
+    const PosixFileDescriptorInfo& files_to_register,
     base::LaunchOptions* options) {
+  return true;
 }
 
 ChildProcessLauncherHelper::Process
 ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
     const base::LaunchOptions& options,
-    std::unique_ptr<FileDescriptorInfo> files_to_register,
+    std::unique_ptr<PosixFileDescriptorInfo> files_to_register,
     bool* is_synchronous_launch,
     int* launch_result) {
   *is_synchronous_launch = false;
@@ -130,10 +130,14 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
     }
   }
 
-  constexpr int param_key = 0;  // TODO(boliu): Use this.
   java_peer_.Reset(Java_ChildProcessLauncherHelper_createAndStart(
-      env, reinterpret_cast<intptr_t>(this), param_key, j_argv, j_file_infos));
+      env, reinterpret_cast<intptr_t>(this), j_argv, j_file_infos));
   AddRef();  // Balanced by OnChildProcessStarted.
+  BrowserThread::PostTask(
+      client_thread_id_, FROM_HERE,
+      base::Bind(
+          &ChildProcessLauncherHelper::set_java_peer_available_on_client_thread,
+          this));
 
   return Process();
 }
@@ -147,7 +151,8 @@ base::TerminationStatus ChildProcessLauncherHelper::GetTerminationStatus(
     const ChildProcessLauncherHelper::Process& process,
     bool known_dead,
     int* exit_code) {
-  if (Java_ChildProcessLauncherHelper_isOomProtected(AttachCurrentThread(),
+  if (java_peer_avaiable_on_client_thread_ &&
+      Java_ChildProcessLauncherHelper_isOomProtected(AttachCurrentThread(),
                                                      java_peer_)) {
     return base::TERMINATION_STATUS_OOM_PROTECTED;
   }
@@ -173,12 +178,12 @@ void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
 
 void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
     base::Process process,
-    bool background,
-    bool boost_for_pending_views) {
+    const ChildProcessLauncherPriority& priority) {
   JNIEnv* env = AttachCurrentThread();
   DCHECK(env);
-  return Java_ChildProcessLauncherHelper_setInForeground(
-      env, java_peer_, process.Handle(), !background, boost_for_pending_views);
+  return Java_ChildProcessLauncherHelper_setPriority(
+      env, java_peer_, process.Handle(), !priority.background,
+      priority.boost_for_pending_views, static_cast<jint>(priority.importance));
 }
 
 // static
@@ -227,9 +232,5 @@ size_t ChildProcessLauncherHelper::GetNumberOfRendererSlots() {
 }
 
 }  // namespace internal
-
-bool RegisterChildProcessLauncher(JNIEnv* env) {
-  return internal::RegisterNativesImpl(env);
-}
 
 }  // namespace content

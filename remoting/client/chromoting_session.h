@@ -17,6 +17,7 @@
 #include "remoting/client/client_telemetry_logger.h"
 #include "remoting/client/client_user_interface.h"
 #include "remoting/client/connect_to_host_info.h"
+#include "remoting/client/feedback_data.h"
 #include "remoting/client/input/client_input_injector.h"
 #include "remoting/proto/control.pb.h"
 #include "remoting/proto/event.pb.h"
@@ -43,6 +44,7 @@ class ChromotingSession : public ClientUserInterface,
                           public protocol::ClipboardStub,
                           public ClientInputInjector {
  public:
+  // All methods of the delegate are called on the UI threads.
   class Delegate {
    public:
     virtual ~Delegate() {}
@@ -71,6 +73,9 @@ class ChromotingSession : public ClientUserInterface,
                                         const std::string& message) = 0;
   };
 
+  using GetFeedbackDataCallback =
+      base::OnceCallback<void(std::unique_ptr<FeedbackData>)>;
+
   // Initiates a connection with the specified host. Call from the UI thread.
   ChromotingSession(
       base::WeakPtr<ChromotingSession::Delegate> delegate,
@@ -90,14 +95,25 @@ class ChromotingSession : public ClientUserInterface,
   // Must be called before destruction.
   void Disconnect();
 
-  // Requests the android app to fetch a third-party token.
+  // Similar to Disconnect(), except that this method allows you to specify the
+  // reason to disconnect, which will be reported to telemetry.
+  void DisconnectForReason(protocol::ErrorCode error);
+
+  // Requests the client to fetch a third-party token.
   void FetchThirdPartyToken(
       const std::string& host_public_key,
       const std::string& token_url,
       const std::string& scope,
       const protocol::ThirdPartyTokenFetchedCallback& token_fetched_callback);
 
-  // Called by the android app when the token is fetched.
+  // Gets the current feedback data and returns it to the callback on the
+  // caller's thread. If the session is never connected, then an empty feedback
+  // will be returned, otherwise feedback for current session (either still
+  // connected or already disconnected) will be returned.
+  void GetFeedbackData(GetFeedbackDataCallback callback) const;
+
+  // Called by the client when the token is fetched. Can be called on any
+  // thread.
   void HandleOnThirdPartyTokenFetched(const std::string& token,
                                       const std::string& shared_secret);
 
@@ -123,6 +139,8 @@ class ChromotingSession : public ClientUserInterface,
   // Sends the provided touch event payload to the host.
   void SendTouchEvent(const protocol::TouchEvent& touch_event);
 
+  void SendClientResolution(int dips_width, int dips_height, int scale);
+
   // Enables or disables the video channel. May be called from any thread.
   void EnableVideoChannel(bool enable);
 
@@ -145,10 +163,6 @@ class ChromotingSession : public ClientUserInterface,
   // CursorShapeStub implementation.
   void InjectClipboardEvent(const protocol::ClipboardEvent& event) override;
 
-  // Get the weak pointer of the instance. Please only use it on the network
-  // thread.
-  base::WeakPtr<ChromotingSession> GetWeakPtr();
-
  private:
   void ConnectToHostOnNetworkThread();
 
@@ -165,6 +179,10 @@ class ChromotingSession : public ClientUserInterface,
   // triggers another call to this function after the logging time interval.
   // Called on the network thread.
   void LogPerfStats();
+
+  void GetFeedbackDataOnNetworkThread(
+      GetFeedbackDataCallback callback,
+      scoped_refptr<base::SingleThreadTaskRunner> response_thread) const;
 
   // Releases the resource in the right order.
   void ReleaseResources();
@@ -209,14 +227,29 @@ class ChromotingSession : public ClientUserInterface,
   // set of capabilities for this remoting session.
   std::string capabilities_;
 
-  // Indicates whether the client is connected to the host. Used on network
-  // thread.
-  bool connected_ = false;
+  // The current session state. Used on network thread.
+  protocol::ConnectionToHost::State session_state_ =
+      protocol::ConnectionToHost::INITIALIZING;
 
+  // The logger is created when the session is connected and destroyed when the
+  // session object is destroyed, rather than when the session is disconnected,
+  // so that caller can have a chance to see logs from a previously disconnected
+  // session.
   std::unique_ptr<ClientTelemetryLogger> logger_;
 
-  base::WeakPtr<ChromotingSession> weak_ptr_;
-  base::WeakPtrFactory<ChromotingSession> weak_factory_;
+  // These weak pointers are used on network thread.
+  base::WeakPtr<ChromotingSession> weak_ptr_per_connection_;
+  base::WeakPtr<ChromotingSession> weak_ptr_per_instance_lifetime_;
+
+  // Both weak_ptr's are constructed when the instance is created, while
+  // |weak_ptr_per_connection_| is invalidated when the session is disconnected,
+  // so that tasks do not leak after the session is disconnected, while
+  // |weak_factory_per_instance_lifetime_| is invalidated when the instace
+  // itself is invalidated.
+  // TODO(crbug/817566): Once we have a shell-core pair, make
+  // |weak_factory_per_connection_| the weak pointer of the core.
+  base::WeakPtrFactory<ChromotingSession> weak_factory_per_connection_;
+  base::WeakPtrFactory<ChromotingSession> weak_factory_per_instance_lifetime_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingSession);
 };

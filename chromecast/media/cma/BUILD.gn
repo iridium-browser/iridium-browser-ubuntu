@@ -14,7 +14,7 @@ group("cma") {
   ]
 }
 
-source_set("test_support") {
+cast_source_set("test_support") {
   testonly = true
   sources = [
     "test/frame_generator_for_test.cc",
@@ -35,15 +35,14 @@ source_set("test_support") {
     "//base",
     "//chromecast/media/cma/backend",
     "//chromecast/media/cma/base",
-    "//media",
-    "//media/base:test_support",
+    "//media:test_support",
     "//testing/gmock",
     "//testing/gtest",
     "//ui/gfx/geometry",
   ]
 }
 
-source_set("unittests") {
+cast_source_set("unittests") {
   testonly = true
   sources = [
     "backend/audio_video_pipeline_device_unittest.cc",
@@ -64,6 +63,7 @@ source_set("unittests") {
     "//base/test:test_support",
     "//chromecast/base",
     "//chromecast/media",
+    "//chromecast/media:libcast_media",
     "//media",
     "//testing/gmock",
     "//testing/gtest",

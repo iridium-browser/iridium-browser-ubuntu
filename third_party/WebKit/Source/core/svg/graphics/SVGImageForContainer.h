@@ -39,7 +39,7 @@ namespace blink {
 // about how the image is being used (size, fragment identifier).
 //
 // The concrete size of an SVG image is calculated based on the image itself and
-// the dimensions where the image is used (see: SVGImage::concreteObjectSize).
+// the dimensions where the image is used (see: SVGImage::ConcreteObjectSize).
 // This concrete size cannot be stored on the SVGImage itself because only a
 // single SVGImage is created per SVG image resource, but this SVGImage can be
 // referenced multiple times by containers of different sizes. Similarly, each
@@ -58,14 +58,15 @@ class SVGImageForContainer final : public Image {
   USING_FAST_MALLOC(SVGImageForContainer);
 
  public:
-  static PassRefPtr<SVGImageForContainer> Create(SVGImage* image,
-                                                 const IntSize& container_size,
-                                                 float zoom,
-                                                 const KURL& url) {
-    FloatSize container_size_without_zoom(container_size);
+  static scoped_refptr<SVGImageForContainer> Create(
+      SVGImage* image,
+      const FloatSize& target_size,
+      float zoom,
+      const KURL& url) {
+    FloatSize container_size_without_zoom(target_size);
     container_size_without_zoom.Scale(1 / zoom);
-    return AdoptRef(new SVGImageForContainer(image, container_size_without_zoom,
-                                             zoom, url));
+    return base::AdoptRef(new SVGImageForContainer(
+        image, container_size_without_zoom, zoom, url));
   }
 
   IntSize Size() const override;
@@ -82,7 +83,8 @@ class SVGImageForContainer final : public Image {
             const FloatRect&,
             const FloatRect&,
             RespectImageOrientationEnum,
-            ImageClampingMode) override;
+            ImageClampingMode,
+            ImageDecodingMode) override;
 
   // FIXME: Implement this to be less conservative.
   bool CurrentFrameKnownToBeOpaque(
@@ -90,7 +92,7 @@ class SVGImageForContainer final : public Image {
     return false;
   }
 
-  sk_sp<SkImage> ImageForCurrentFrame() override;
+  PaintImage PaintImageForCurrentFrame() override;
 
  protected:
   void DrawPattern(GraphicsContext&,

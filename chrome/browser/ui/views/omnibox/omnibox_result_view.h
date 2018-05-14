@@ -6,13 +6,14 @@
 #define CHROME_BROWSER_UI_VIEWS_OMNIBOX_OMNIBOX_RESULT_VIEW_H_
 
 #include <stddef.h>
-
-#include <vector>
+#include <memory>
+#include <utility>
 
 #include "base/macros.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/suggestion_answer.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/font_list.h"
@@ -24,8 +25,11 @@ class OmniboxPopupContentsView;
 
 namespace gfx {
 class Canvas;
+class Image;
 class RenderText;
 }
+
+class OmniboxTabSwitchButton;
 
 class OmniboxResultView : public views::View,
                           private gfx::AnimationDelegate {
@@ -44,6 +48,7 @@ class OmniboxResultView : public views::View,
     TEXT,
     DIMMED_TEXT,
     URL,
+    INVISIBLE_TEXT,
     NUM_KINDS
   };
 
@@ -66,24 +71,28 @@ class OmniboxResultView : public views::View,
   // Invoked when this result view has been selected.
   void OnSelected();
 
-  // views::View:
-  gfx::Size CalculatePreferredSize() const override;
-  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
-  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
-
   ResultViewState GetState() const;
 
-  // Returns the height of the text portion of the result view. In the base
-  // class, this is the height of one line of text.
-  virtual int GetTextHeight() const;
-
-  // Returns the display width required for the match contents.
-  int GetMatchContentsWidth() const;
+  // Notification that the match icon has changed and schedules a repaint.
+  void OnMatchIconUpdated();
 
   // Stores the image in a local data member and schedules a repaint.
   void SetAnswerImage(const gfx::ImageSkia& image);
 
- protected:
+  // Allow other classes to trigger navigation.
+  void OpenMatch(WindowOpenDisposition disposition);
+
+  // views::View:
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  void OnMouseMoved(const ui::MouseEvent& event) override;
+  void OnMouseExited(const ui::MouseEvent& event) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  gfx::Size CalculatePreferredSize() const override;
+  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
+
+ private:
   enum RenderTextType {
     CONTENTS = 0,
     SEPARATOR,
@@ -91,13 +100,16 @@ class OmniboxResultView : public views::View,
     NUM_TYPES
   };
 
+  // Returns the height of the text portion of the result view.
+  int GetTextHeight() const;
+
   // Paints the given |match| using the RenderText instances |contents| and
   // |description| at offset |x| in the bounds of this view.
-  virtual void PaintMatch(const AutocompleteMatch& match,
-                          gfx::RenderText* contents,
-                          gfx::RenderText* description,
-                          gfx::Canvas* canvas,
-                          int x) const;
+  void PaintMatch(const AutocompleteMatch& match,
+                  gfx::RenderText* contents,
+                  gfx::RenderText* description,
+                  gfx::Canvas* canvas,
+                  int x) const;
 
   // Draws given |render_text| on |canvas| at given location (|x|, |y|).
   // |contents| indicates if the |render_text| is for the match contents,
@@ -126,14 +138,9 @@ class OmniboxResultView : public views::View,
 
   const gfx::Rect& text_bounds() const { return text_bounds_; }
 
- private:
-  // views::View:
-  const char* GetClassName() const override;
+  gfx::Image GetIcon() const;
 
-  gfx::ImageSkia GetIcon() const;
-
-  // Utility function for creating vector icons.
-  gfx::ImageSkia GetVectorIcon(const gfx::VectorIcon& icon_id) const;
+  SkColor GetVectorIconColor() const;
 
   // Whether to render only the keyword match.  Returns true if |match_| has an
   // associated keyword match that has been animated so close to the start that
@@ -142,21 +149,6 @@ class OmniboxResultView : public views::View,
 
   // Initializes |contents_rendertext_| if it is NULL.
   void InitContentsRenderTextIfNecessary() const;
-
-  // views::View:
-  void Layout() override;
-  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
-  void OnPaint(gfx::Canvas* canvas) override;
-
-  // gfx::AnimationDelegate:
-  void AnimationProgressed(const gfx::Animation* animation) override;
-
-  // Returns the offset at which the contents of the |match| should be displayed
-  // within the text bounds. The directionality of UI and match contents is used
-  // to determine the offset relative to the correct edge.
-  int GetDisplayOffset(const AutocompleteMatch& match,
-                       bool is_ui_rtl,
-                       bool is_match_contents_rtl) const;
 
   // Returns the font to use for the description section of answer suggestions.
   const gfx::FontList& GetAnswerFont() const;
@@ -187,10 +179,26 @@ class OmniboxResultView : public views::View,
                               int text_type,
                               bool is_bold) const;
 
+  // Sets the hovered state of this result.
+  void SetHovered(bool hovered);
+
+  // views::View:
+  void Layout() override;
+  const char* GetClassName() const override;
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+  void OnPaint(gfx::Canvas* canvas) override;
+
+  // gfx::AnimationDelegate:
+  void AnimationProgressed(const gfx::Animation* animation) override;
+
   // This row's model and model index.
   OmniboxPopupContentsView* model_;
   size_t model_index_;
 
+  // Whether this view is in the hovered state.
+  bool is_hovered_;
+
+  // Font settings for this view.
   const gfx::FontList font_list_;
   int font_height_;
 
@@ -205,6 +213,7 @@ class OmniboxResultView : public views::View,
 
   gfx::Rect keyword_text_bounds_;
   std::unique_ptr<views::ImageView> keyword_icon_;
+  std::unique_ptr<OmniboxTabSwitchButton> tab_switch_button_;
 
   std::unique_ptr<gfx::SlideAnimation> animation_;
 
@@ -212,7 +221,7 @@ class OmniboxResultView : public views::View,
   gfx::ImageSkia answer_image_;
 
   // We preserve these RenderTexts so that we won't recreate them on every call
-  // to GetMatchContentsWidth() or OnPaint().
+  // to OnPaint().
   mutable std::unique_ptr<gfx::RenderText> contents_rendertext_;
   mutable std::unique_ptr<gfx::RenderText> description_rendertext_;
   mutable std::unique_ptr<gfx::RenderText> separator_rendertext_;

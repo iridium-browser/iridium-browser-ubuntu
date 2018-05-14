@@ -21,6 +21,8 @@ class PrinterDetector;
 class PrinterEventTracker;
 class SyncedPrintersManager;
 
+// Top level manager of available CUPS printers in ChromeOS.  All functions
+// in this class must be called from a sequenced context.
 class CupsPrintersManager {
  public:
   // Classes of printers tracked.  See doc/cups_printers_management.md for
@@ -48,7 +50,7 @@ class CupsPrintersManager {
   // is not taken of any of the raw-pointer arguments.
   static std::unique_ptr<CupsPrintersManager> Create(
       SyncedPrintersManager* synced_printers_manager,
-      PrinterDetector* usb_printer_detector,
+      std::unique_ptr<PrinterDetector> usb_printer_detector,
       std::unique_ptr<PrinterDetector> zeroconf_printer_detector,
       scoped_refptr<PpdProvider> ppd_provider,
       PrinterEventTracker* event_tracker);
@@ -76,7 +78,9 @@ class CupsPrintersManager {
   // the printer_id is not that of a configured printer.
   virtual void RemoveConfiguredPrinter(const std::string& printer_id) = 0;
 
-  // Add or remove observers.
+  // Add or remove observers.  Observers do not need to be on the same
+  // sequence as the CupsPrintersManager.  Callbacks for a given observer
+  // will be on the same sequence as was used to call AddObserver().
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;
 

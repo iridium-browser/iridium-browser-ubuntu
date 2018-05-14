@@ -25,13 +25,15 @@
 #include "core/html/HTMLIFrameElement.h"
 
 #include "core/CSSPropertyNames.h"
-#include "core/HTMLNames.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLDocument.h"
+#include "core/html_names.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/LayoutIFrame.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "core/page/Page.h"
+#include "core/policy/IFramePolicy.h"
+#include "platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -39,22 +41,20 @@ using namespace HTMLNames;
 
 inline HTMLIFrameElement::HTMLIFrameElement(Document& document)
     : HTMLFrameElementBase(iframeTag, document),
-      did_load_non_empty_document_(false),
       collapsed_by_client_(false),
       sandbox_(HTMLIFrameElementSandbox::Create(this)),
-      allow_(HTMLIFrameElementAllow::Create(this)),
       referrer_policy_(kReferrerPolicyDefault) {}
 
 DEFINE_NODE_FACTORY(HTMLIFrameElement)
 
-DEFINE_TRACE(HTMLIFrameElement) {
+void HTMLIFrameElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(sandbox_);
-  visitor->Trace(allow_);
+  visitor->Trace(policy_);
   HTMLFrameElementBase::Trace(visitor);
   Supplementable<HTMLIFrameElement>::Trace(visitor);
 }
 
-HTMLIFrameElement::~HTMLIFrameElement() {}
+HTMLIFrameElement::~HTMLIFrameElement() = default;
 
 void HTMLIFrameElement::SetCollapsed(bool collapse) {
   if (collapsed_by_client_ == collapse)
@@ -72,8 +72,12 @@ DOMTokenList* HTMLIFrameElement::sandbox() const {
   return sandbox_.Get();
 }
 
-DOMTokenList* HTMLIFrameElement::allow() const {
-  return allow_.Get();
+Policy* HTMLIFrameElement::policy() {
+  if (!policy_) {
+    policy_ = new IFramePolicy(&GetDocument(), ContainerPolicy(),
+                               GetOriginForFeaturePolicy());
+  }
+  return policy_.Get();
 }
 
 bool HTMLIFrameElement::IsPresentationAttribute(
@@ -87,7 +91,7 @@ bool HTMLIFrameElement::IsPresentationAttribute(
 void HTMLIFrameElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == widthAttr) {
     AddHTMLLengthToStyle(style, CSSPropertyWidth, value);
   } else if (name == heightAttr) {
@@ -116,9 +120,9 @@ void HTMLIFrameElement::ParseAttribute(
   const AtomicString& value = params.new_value;
   if (name == nameAttr) {
     if (IsInDocumentTree() && GetDocument().IsHTMLDocument()) {
-      HTMLDocument& document = ToHTMLDocument(this->GetDocument());
-      document.RemoveExtraNamedItem(name_);
-      document.AddExtraNamedItem(value);
+      HTMLDocument& document = ToHTMLDocument(GetDocument());
+      document.RemoveNamedItem(name_);
+      document.AddNamedItem(value);
     }
     AtomicString old_name = name_;
     name_ = value;
@@ -168,65 +172,93 @@ void HTMLIFrameElement::ParseAttribute(
     }
   } else if (RuntimeEnabledFeatures::EmbedderCSPEnforcementEnabled() &&
              name == cspAttr) {
-    if (!ContentSecurityPolicy::IsValidCSPAttr(value.GetString())) {
-      csp_ = g_null_atom;
+    if (!ContentSecurityPolicy::IsValidCSPAttr(
+            value.GetString(), GetDocument().RequiredCSP().GetString())) {
+      required_csp_ = g_null_atom;
       GetDocument().AddConsoleMessage(ConsoleMessage::Create(
           kOtherMessageSource, kErrorMessageLevel,
           "'csp' attribute is not a valid policy: " + value));
       return;
     }
-    AtomicString old_csp = csp_;
-    csp_ = value;
-    if (csp_ != old_csp)
+    if (required_csp_ != value) {
+      required_csp_ = value;
       FrameOwnerPropertiesChanged();
-  } else if (RuntimeEnabledFeatures::FeaturePolicyEnabled() &&
-             name == allowAttr) {
-    allow_->DidUpdateAttributeValue(params.old_value, value);
-    String invalid_tokens;
-    allowed_features_ = allow_->ParseAllowedFeatureNames(invalid_tokens);
-    if (!invalid_tokens.IsNull()) {
-      GetDocument().AddConsoleMessage(ConsoleMessage::Create(
-          kOtherMessageSource, kErrorMessageLevel,
-          "Error while parsing the 'allow' attribute: " + invalid_tokens));
     }
-    FrameOwnerPropertiesChanged();
-    UpdateContainerPolicy();
-    UseCounter::Count(GetDocument(), WebFeature::kFeaturePolicyAllowAttribute);
+  } else if (name == allowAttr) {
+    if (allow_ != value) {
+      allow_ = value;
+      Vector<String> messages;
+      bool old_syntax = false;
+      UpdateContainerPolicy(&messages, &old_syntax);
+      if (!messages.IsEmpty()) {
+        for (const String& message : messages) {
+          GetDocument().AddConsoleMessage(ConsoleMessage::Create(
+              kOtherMessageSource, kWarningMessageLevel, message));
+        }
+      }
+      if (!value.IsEmpty()) {
+        if (old_syntax) {
+          UseCounter::Count(
+              GetDocument(),
+              WebFeature::kFeaturePolicyAllowAttributeDeprecatedSyntax);
+        } else {
+          UseCounter::Count(GetDocument(),
+                            WebFeature::kFeaturePolicyAllowAttribute);
+        }
+      }
+    }
   } else {
+    // Websites picked up a Chromium article that used this non-specified
+    // attribute which ended up changing shape after the specification process.
+    // This error message and use count will help developers to move to the
+    // proper solution.
+    // To avoid polluting the console, this is being recorded only once per
+    // page.
+    if (name == "gesture" && value == "media" && GetDocument().GetPage() &&
+        !GetDocument().GetPage()->GetUseCounter().HasRecordedMeasurement(
+            WebFeature::kHTMLIFrameElementGestureMedia)) {
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kHTMLIFrameElementGestureMedia);
+      GetDocument().AddConsoleMessage(
+          ConsoleMessage::Create(kOtherMessageSource, kWarningMessageLevel,
+                                 "<iframe gesture=\"media\"> is not supported. "
+                                 "Use <iframe allow=\"autoplay\">, "
+                                 "https://goo.gl/ximf56"));
+    }
+
     if (name == srcAttr)
       LogUpdateAttributeIfIsolatedWorldAndInDocument("iframe", params);
     HTMLFrameElementBase::ParseAttribute(params);
   }
 }
 
-Vector<WebParsedFeaturePolicyDeclaration>
-HTMLIFrameElement::ConstructContainerPolicy() const {
-  RefPtr<SecurityOrigin> origin = GetOriginForFeaturePolicy();
-  Vector<WebParsedFeaturePolicyDeclaration> container_policy;
-
-  // Populate the initial container policy from the allow attribute.
-  for (const WebFeaturePolicyFeature feature : AllowedFeatures()) {
-    WebParsedFeaturePolicyDeclaration whitelist;
-    whitelist.feature = feature;
-    whitelist.origins = Vector<WebSecurityOrigin>(1UL, {origin});
-    container_policy.push_back(whitelist);
-  }
+ParsedFeaturePolicy HTMLIFrameElement::ConstructContainerPolicy(
+    Vector<String>* messages,
+    bool* old_syntax) const {
+  scoped_refptr<const SecurityOrigin> src_origin = GetOriginForFeaturePolicy();
+  scoped_refptr<const SecurityOrigin> self_origin =
+      GetDocument().GetSecurityOrigin();
+  ParsedFeaturePolicy container_policy = ParseFeaturePolicyAttribute(
+      allow_, self_origin, src_origin, messages, old_syntax);
 
   // If allowfullscreen attribute is present and no fullscreen policy is set,
   // enable the feature for all origins.
   if (AllowFullscreen()) {
     bool has_fullscreen_policy = false;
     for (const auto& declaration : container_policy) {
-      if (declaration.feature == WebFeaturePolicyFeature::kFullscreen) {
+      if (declaration.feature == mojom::FeaturePolicyFeature::kFullscreen) {
         has_fullscreen_policy = true;
+        if (messages) {
+          messages->push_back(
+              "allow attribute is overriding 'allowfullscreen'.");
+        }
         break;
       }
     }
     if (!has_fullscreen_policy) {
-      WebParsedFeaturePolicyDeclaration whitelist;
-      whitelist.feature = WebFeaturePolicyFeature::kFullscreen;
+      ParsedFeaturePolicyDeclaration whitelist;
+      whitelist.feature = mojom::FeaturePolicyFeature::kFullscreen;
       whitelist.matches_all_origins = true;
-      whitelist.origins = Vector<WebSecurityOrigin>(0UL);
       container_policy.push_back(whitelist);
     }
   }
@@ -235,19 +267,27 @@ HTMLIFrameElement::ConstructContainerPolicy() const {
   if (AllowPaymentRequest()) {
     bool has_payment_policy = false;
     for (const auto& declaration : container_policy) {
-      if (declaration.feature == WebFeaturePolicyFeature::kPayment) {
+      if (declaration.feature == mojom::FeaturePolicyFeature::kPayment) {
         has_payment_policy = true;
+        if (messages) {
+          messages->push_back(
+              "allow attribute is overriding 'allowpaymentrequest'.");
+        }
         break;
       }
     }
     if (!has_payment_policy) {
-      WebParsedFeaturePolicyDeclaration whitelist;
-      whitelist.feature = WebFeaturePolicyFeature::kPayment;
+      ParsedFeaturePolicyDeclaration whitelist;
+      whitelist.feature = mojom::FeaturePolicyFeature::kPayment;
       whitelist.matches_all_origins = true;
-      whitelist.origins = Vector<WebSecurityOrigin>(0UL);
+      whitelist.origins = std::vector<url::Origin>(0UL);
       container_policy.push_back(whitelist);
     }
   }
+
+  // Update Policy associated with this iframe, if exists.
+  if (policy_)
+    policy_->UpdateContainerPolicy(container_policy, src_origin);
 
   return container_policy;
 }
@@ -265,8 +305,23 @@ Node::InsertionNotificationRequest HTMLIFrameElement::InsertedInto(
     ContainerNode* insertion_point) {
   InsertionNotificationRequest result =
       HTMLFrameElementBase::InsertedInto(insertion_point);
-  if (insertion_point->IsInDocumentTree() && GetDocument().IsHTMLDocument())
-    ToHTMLDocument(GetDocument()).AddExtraNamedItem(name_);
+
+  if (insertion_point->IsInDocumentTree() && GetDocument().IsHTMLDocument()) {
+    ToHTMLDocument(GetDocument()).AddNamedItem(name_);
+
+    if (!ContentSecurityPolicy::IsValidCSPAttr(
+            required_csp_, GetDocument().RequiredCSP().GetString())) {
+      if (!required_csp_.IsEmpty()) {
+        GetDocument().AddConsoleMessage(ConsoleMessage::Create(
+            kOtherMessageSource, kErrorMessageLevel,
+            "'csp' attribute is not a valid policy: " + required_csp_));
+      }
+      if (required_csp_ != GetDocument().RequiredCSP()) {
+        required_csp_ = GetDocument().RequiredCSP();
+        FrameOwnerPropertiesChanged();
+      }
+    }
+  }
   LogAddElementIfIsolatedWorldAndInDocument("iframe", srcAttr);
   return result;
 }
@@ -274,7 +329,7 @@ Node::InsertionNotificationRequest HTMLIFrameElement::InsertedInto(
 void HTMLIFrameElement::RemovedFrom(ContainerNode* insertion_point) {
   HTMLFrameElementBase::RemovedFrom(insertion_point);
   if (insertion_point->IsInDocumentTree() && GetDocument().IsHTMLDocument())
-    ToHTMLDocument(GetDocument()).RemoveExtraNamedItem(name_);
+    ToHTMLDocument(GetDocument()).RemoveNamedItem(name_);
 }
 
 bool HTMLIFrameElement::IsInteractiveContent() const {

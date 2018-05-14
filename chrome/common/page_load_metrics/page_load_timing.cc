@@ -9,8 +9,9 @@ namespace page_load_metrics {
 mojom::PageLoadTimingPtr CreatePageLoadTiming() {
   return mojom::PageLoadTiming::New(
       base::Time(), base::Optional<base::TimeDelta>(),
-      mojom::DocumentTiming::New(), mojom::PaintTiming::New(),
-      mojom::ParseTiming::New(), mojom::StyleSheetTiming::New());
+      mojom::DocumentTiming::New(), mojom::InteractiveTiming::New(),
+      mojom::PaintTiming::New(), mojom::ParseTiming::New(),
+      mojom::StyleSheetTiming::New());
 }
 
 bool IsEmpty(const page_load_metrics::mojom::DocumentTiming& timing) {
@@ -18,6 +19,11 @@ bool IsEmpty(const page_load_metrics::mojom::DocumentTiming& timing) {
          !timing.first_layout;
 }
 
+bool IsEmpty(const page_load_metrics::mojom::InteractiveTiming& timing) {
+  return !timing.interactive && !timing.interactive_detection &&
+         !timing.first_invalidating_input && !timing.first_input_delay &&
+         !timing.first_input_timestamp;
+}
 bool IsEmpty(const page_load_metrics::mojom::PaintTiming& timing) {
   return !timing.first_paint && !timing.first_text_paint &&
          !timing.first_image_paint && !timing.first_contentful_paint &&
@@ -41,6 +47,8 @@ bool IsEmpty(const page_load_metrics::mojom::PageLoadTiming& timing) {
   return timing.navigation_start.is_null() && !timing.response_start &&
          (!timing.document_timing ||
           page_load_metrics::IsEmpty(*timing.document_timing)) &&
+         (!timing.interactive_timing ||
+          page_load_metrics::IsEmpty(*timing.interactive_timing)) &&
          (!timing.paint_timing ||
           page_load_metrics::IsEmpty(*timing.paint_timing)) &&
          (!timing.parse_timing ||
@@ -51,6 +59,7 @@ bool IsEmpty(const page_load_metrics::mojom::PageLoadTiming& timing) {
 
 void InitPageLoadTimingForTest(mojom::PageLoadTiming* timing) {
   timing->document_timing = mojom::DocumentTiming::New();
+  timing->interactive_timing = mojom::InteractiveTiming::New();
   timing->paint_timing = mojom::PaintTiming::New();
   timing->parse_timing = mojom::ParseTiming::New();
   timing->style_sheet_timing = mojom::StyleSheetTiming::New();

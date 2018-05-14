@@ -61,7 +61,8 @@ class FlexBoxIterator {
   }
 
   void Reset() {
-    current_child_ = 0;
+    current_child_ = nullptr;
+    natural_current_child_ = nullptr;
     ordinal_iteration_ = -1;
   }
 
@@ -107,6 +108,19 @@ class FlexBoxIterator {
     } while (!current_child_ ||
              (!current_child_->IsAnonymous() &&
               current_child_->Style()->BoxOrdinalGroup() != current_ordinal_));
+
+    // This peice of code just exists for detecting if this iterator actually
+    // does something other than returning the default order.
+    if (!natural_current_child_)
+      natural_current_child_ = box_->FirstChildBox();
+    else
+      natural_current_child_ = natural_current_child_->NextSiblingBox();
+
+    if (natural_current_child_ != current_child_) {
+      UseCounter::Count(box_->GetDocument(),
+                        WebFeature::kWebkitBoxNotDefaultOrder);
+    }
+
     return current_child_;
   }
 
@@ -119,6 +133,7 @@ class FlexBoxIterator {
 
   LayoutDeprecatedFlexibleBox* box_;
   LayoutBox* current_child_;
+  LayoutBox* natural_current_child_;
   bool forward_;
   unsigned current_ordinal_;
   unsigned largest_ordinal_;
@@ -281,7 +296,7 @@ LayoutDeprecatedFlexibleBox::LayoutDeprecatedFlexibleBox(Element& element)
   }
 }
 
-LayoutDeprecatedFlexibleBox::~LayoutDeprecatedFlexibleBox() {}
+LayoutDeprecatedFlexibleBox::~LayoutDeprecatedFlexibleBox() = default;
 
 static LayoutUnit MarginWidthForChild(LayoutBox* child) {
   // A margin basically has three types: fixed, percentage, and auto (variable).
@@ -364,6 +379,35 @@ void LayoutDeprecatedFlexibleBox::ComputeIntrinsicLogicalWidths(
 void LayoutDeprecatedFlexibleBox::UpdateBlockLayout(bool relayout_children) {
   DCHECK(NeedsLayout());
 
+  UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxLayout);
+
+  if (Style()->BoxAlign() != ComputedStyleInitialValues::InitialBoxAlign())
+    UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxAlignNotInitial);
+
+  if (Style()->BoxDirection() !=
+      ComputedStyleInitialValues::InitialBoxDirection())
+    UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxDirectionNotInitial);
+
+  if (Style()->BoxLines() != ComputedStyleInitialValues::InitialBoxLines())
+    UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxLinesNotInitial);
+
+  if (Style()->BoxPack() != ComputedStyleInitialValues::InitialBoxPack())
+    UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxPackNotInitial);
+
+  if (!FirstChildBox()) {
+    UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxNoChildren);
+  } else if (!FirstChildBox()->NextSiblingBox()) {
+    UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxOneChild);
+
+    if (FirstChildBox()->IsLayoutBlockFlow() &&
+        ToLayoutBlockFlow(FirstChildBox())->ChildrenInline()) {
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kWebkitBoxOneChildIsLayoutBlockFlowInline);
+    }
+  } else {
+    UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxManyChildren);
+  }
+
   if (!relayout_children && SimplifiedLayout())
     return;
 
@@ -388,10 +432,13 @@ void LayoutDeprecatedFlexibleBox::UpdateBlockLayout(bool relayout_children) {
 
     stretching_children_ = false;
 
-    if (IsHorizontal())
+    if (IsHorizontal()) {
+      UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxLayoutHorizontal);
       LayoutHorizontalBox(relayout_children);
-    else
+    } else {
+      UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxLayoutVertical);
       LayoutVerticalBox(relayout_children);
+    }
 
     LayoutUnit old_client_after_edge = ClientLogicalBottom();
     UpdateLogicalHeight();
@@ -411,11 +458,28 @@ void LayoutDeprecatedFlexibleBox::UpdateBlockLayout(bool relayout_children) {
 
 // The first walk over our kids is to find out if we have any flexible children.
 static void GatherFlexChildrenInfo(FlexBoxIterator& iterator,
+                                   Document& document,
                                    bool relayout_children,
                                    unsigned& highest_flex_group,
                                    unsigned& lowest_flex_group,
                                    bool& have_flex) {
   for (LayoutBox* child = iterator.First(); child; child = iterator.Next()) {
+    if (child->Style()->BoxFlex() !=
+        ComputedStyleInitialValues::InitialBoxFlex())
+      UseCounter::Count(document, WebFeature::kWebkitBoxChildFlexNotInitial);
+
+    if (child->Style()->BoxFlexGroup() !=
+        ComputedStyleInitialValues::InitialBoxFlexGroup()) {
+      UseCounter::Count(document,
+                        WebFeature::kWebkitBoxChildFlexGroupNotInitial);
+    }
+
+    if (child->Style()->BoxOrdinalGroup() !=
+        ComputedStyleInitialValues::InitialBoxOrdinalGroup()) {
+      UseCounter::Count(document,
+                        WebFeature::kWebkitBoxChildOrdinalGroupNotInitial);
+    }
+
     // Check to see if this child flexes.
     if (!ChildDoesNotAffectWidthOrFlexing(child) &&
         child->Style()->BoxFlex() > 0.0f) {
@@ -452,8 +516,8 @@ void LayoutDeprecatedFlexibleBox::LayoutHorizontalBox(bool relayout_children) {
   unsigned highest_flex_group = 0;
   unsigned lowest_flex_group = 0;
   bool have_flex = false, flexing_children = false;
-  GatherFlexChildrenInfo(iterator, relayout_children, highest_flex_group,
-                         lowest_flex_group, have_flex);
+  GatherFlexChildrenInfo(iterator, GetDocument(), relayout_children,
+                         highest_flex_group, lowest_flex_group, have_flex);
 
   PaintLayerScrollableArea::DelayScrollOffsetClampScope delay_clamp_scope;
 
@@ -798,8 +862,8 @@ void LayoutDeprecatedFlexibleBox::LayoutVerticalBox(bool relayout_children) {
   unsigned highest_flex_group = 0;
   unsigned lowest_flex_group = 0;
   bool have_flex = false, flexing_children = false;
-  GatherFlexChildrenInfo(iterator, relayout_children, highest_flex_group,
-                         lowest_flex_group, have_flex);
+  GatherFlexChildrenInfo(iterator, GetDocument(), relayout_children,
+                         highest_flex_group, lowest_flex_group, have_flex);
 
   // We confine the line clamp ugliness to vertical flexible boxes (thus keeping
   // it out of
@@ -1091,6 +1155,27 @@ void LayoutDeprecatedFlexibleBox::LayoutVerticalBox(bool relayout_children) {
 void LayoutDeprecatedFlexibleBox::ApplyLineClamp(FlexBoxIterator& iterator,
                                                  bool relayout_children) {
   UseCounter::Count(GetDocument(), WebFeature::kLineClamp);
+  UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxLineClamp);
+
+  if (Style()->LineClamp().IsPercentage())
+    UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxLineClampPercentage);
+
+  LayoutBox* child = FirstChildBox();
+  if (!child) {
+    UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxLineClampNoChildren);
+  } else if (!child->NextSiblingBox()) {
+    UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxLineClampOneChild);
+
+    if (child->IsLayoutBlockFlow() &&
+        ToLayoutBlockFlow(child)->ChildrenInline()) {
+      UseCounter::Count(
+          GetDocument(),
+          WebFeature::kWebkitBoxLineClampOneChildIsLayoutBlockFlowInline);
+    }
+  } else {
+    UseCounter::Count(GetDocument(),
+                      WebFeature::kWebkitBoxLineClampManyChildren);
+  }
 
   int max_line_count = 0;
   for (LayoutBox* child = iterator.First(); child; child = iterator.Next()) {
@@ -1190,6 +1275,9 @@ void LayoutDeprecatedFlexibleBox::ApplyLineClamp(FlexBoxIterator& iterator,
             LayoutUnit(total_width)))
       continue;
 
+    UseCounter::Count(GetDocument(),
+                      WebFeature::kWebkitBoxLineClampDoesSomething);
+
     // Let the truncation code kick in.
     // FIXME: the text alignment should be recomputed after the width changes
     // due to truncation.
@@ -1268,17 +1356,18 @@ LayoutUnit LayoutDeprecatedFlexibleBox::AllowedChildFlex(LayoutBox* child,
   if (IsHorizontal()) {
     LayoutUnit min_width = child->MinPreferredLogicalWidth();
     LayoutUnit width = ContentWidthForChild(child);
-    if (child->Style()->MinWidth().IsFixed())
-      min_width = LayoutUnit(child->Style()->MinWidth().Value());
-    else if (child->Style()->MinWidth().GetType() == kAuto)
+    const Length& min_width_length = child->Style()->MinWidth();
+    if (min_width_length.IsFixed())
+      min_width = LayoutUnit(min_width_length.Value());
+    else if (min_width_length.IsAuto())
       min_width = LayoutUnit();
 
     LayoutUnit allowed_shrinkage = (min_width - width).ClampPositiveToZero();
     return allowed_shrinkage;
   }
-  Length min_height = child->Style()->MinHeight();
-  if (min_height.IsFixed() || min_height.IsAuto()) {
-    LayoutUnit min_height(child->Style()->MinHeight().Value());
+  const Length& min_height_length = child->Style()->MinHeight();
+  if (min_height_length.IsFixed() || min_height_length.IsAuto()) {
+    LayoutUnit min_height(min_height_length.Value());
     LayoutUnit height = ContentHeightForChild(child);
     LayoutUnit allowed_shrinkage = (min_height - height).ClampPositiveToZero();
     return allowed_shrinkage;

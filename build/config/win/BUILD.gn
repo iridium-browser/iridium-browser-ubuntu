@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chrome_build.gni")
+import("//build/config/c++/c++.gni")
 import("//build/config/clang/clang.gni")
 import("//build/config/compiler/compiler.gni")
 import("//build/config/sanitizers/sanitizers.gni")
@@ -19,6 +21,9 @@ declare_args() {
 
   # Turn this on to have the linker output extra timing information.
   win_linker_timing = false
+
+  # Turn this on to have the compiler output extra timing information.
+  win_compiler_timing = false
 }
 
 # This is included by reference in the //build/config/compiler config that
@@ -57,10 +62,8 @@ config("compiler") {
     "/Zc:sizedDealloc-",
   ]
 
-  # Building with Clang on Windows is a work in progress and very
-  # experimental. See crbug.com/82385.
   if (is_clang) {
-    cflags += [ "-fmsc-version=1900" ]
+    cflags += [ "-fmsc-version=1911" ]
 
     if (current_cpu == "x86") {
       cflags += [ "-m32" ]
@@ -79,6 +82,14 @@ config("compiler") {
 
     # Clang runtime libraries, such as the sanitizer runtimes, live here.
     lib_dirs = [ "$clang_base_path/lib/clang/$clang_version/lib/windows" ]
+  }
+
+  if (use_lld) {
+    # /Brepro lets the compiler not write the mtime field in the .obj output.
+    # link.exe /incremental relies on this field to work correctly, but lld
+    # never looks at this timestamp, so it's safe to pass this flag with
+    # lld and get more deterministic compiler output in return.
+    cflags += [ "/Brepro" ]
   }
 
   # /PROFILE ensures that the PDB file contains FIXUP information (growing the
@@ -120,6 +131,21 @@ config("compiler") {
     # the source file is a no-op.
     "/ignore:4221",
   ]
+
+  if (win_compiler_timing) {
+    if (is_clang) {
+      cflags += [
+        "-Xclang",
+        "-ftime-report",
+      ]
+    } else {
+      cflags += [
+        # "Documented" here:
+        # http://aras-p.info/blog/2017/10/23/Best-unknown-MSVC-flag-d2cgsummary/
+        "/d2cgsummary",
+      ]
+    }
+  }
 }
 
 config("vs_code_analysis") {
@@ -174,9 +200,14 @@ config("runtime_library") {
     "__STD_C",
     "_CRT_RAND_S",
     "_CRT_SECURE_NO_DEPRECATE",
-    "_HAS_EXCEPTIONS=0",
     "_SCL_SECURE_NO_DEPRECATE",
   ]
+
+  if (is_clang) {
+    # Work around Fall Creators Update SDK bug - crbug.com/773476 has details.
+    # https://developercommunity.visualstudio.com/content/problem/131391/154-fails-to-define-deprecatedenumerator-2.html
+    defines += [ "DEPRECATEDENUMERATOR(x)=[[deprecated(x)]]" ]
+  }
 
   # Defines that set up the Windows SDK.
   defines += [
@@ -193,13 +224,26 @@ config("runtime_library") {
     # However it is prohibited when using /analyze
     defines += [ "_USING_V110_SDK71_" ]
   }
+
+  if (use_custom_libcxx) {
+    cflags_cc = [ "-I" + rebase_path("$libcxx_prefix/include", root_build_dir) ]
+    if (libcpp_is_static) {
+      defines += [ "_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS" ]
+    }
+
+    # Prevent libc++ from embedding linker flags to try to automatically link
+    # against its runtime library. This is unnecessary with our build system,
+    # and can also result in build failures if libc++'s name for a library does
+    # not match ours.
+    defines += [ "_LIBCPP_NO_AUTO_LINK" ]
+  }
 }
 
 # Sets the default Windows build version. This is separated because some
 # targets need to manually override it for their compiles.
 config("winver") {
   defines = [
-    "NTDDI_VERSION=0x0A000000",
+    "NTDDI_VERSION=0x0A000002",
     "_WIN32_WINNT=0x0A00",
     "WINVER=0x0A00",
   ]
@@ -238,19 +282,8 @@ config("common_linker_setup") {
     "/ignore:4199",
     "/ignore:4221",
     "/NXCOMPAT",
+    "/DYNAMICBASE",
   ]
-
-  # ASLR makes debugging with windbg difficult because Chrome.exe and
-  # Chrome.dll share the same base name. As result, windbg will name the
-  # Chrome.dll module like chrome_<base address>, where <base address>
-  # typically changes with each launch. This in turn means that breakpoints in
-  # Chrome.dll don't stick from one launch to the next. For this reason, we
-  # turn ASLR off in debug builds.
-  if (is_debug) {
-    ldflags += [ "/DYNAMICBASE:NO" ]
-  } else {
-    ldflags += [ "/DYNAMICBASE" ]
-  }
 
   if (win_linker_timing) {
     ldflags += [
@@ -265,10 +298,13 @@ config("cfi_linker") {
   # https://msdn.microsoft.com/en-us/library/windows/desktop/mt637065.aspx
   # /DYNAMICBASE (ASLR) is turned off in debug builds, therefore CFG can’t be
   # turned on either.
-  # TODO(thakis): Turn this on with lld once supported, https://crbug.com/693709
-  if (!is_debug && !use_lld) {
-    # Turn on CFG in msvc linker, regardless of compiler used.
-    ldflags = [ "/guard:cf" ]
+  # CFG seems to lead to random corruption with incremental linking so turn off
+  # CFG in component builds. https://crbug.com/812421
+  if (!is_debug && !is_component_build) {
+    # Turn on CFG in msvc linker, regardless of compiler used. Turn off CFG for
+    # longjmp (new in VS 2017) because it relies on compiler support which we do
+    # not have enabled.
+    ldflags = [ "/guard:cf,nolongjmp" ]
   }
 }
 
@@ -347,6 +383,9 @@ config("windowed") {
 
 incremental_linking_on_switch = [ "/INCREMENTAL" ]
 incremental_linking_off_switch = [ "/INCREMENTAL:NO" ]
+if (use_lld) {
+  incremental_linking_on_switch += [ "/OPT:NOREF" ]
+}
 
 # Disable incremental linking for syzyasan, enable for debug builds and all
 # component builds - any builds where performance is not job one.
@@ -373,13 +412,12 @@ config("no_incremental_linking") {
 # config should be applied to large modules to turn off incremental linking
 # when it won't work.
 config("default_large_module_incremental_linking") {
-  if (symbol_level > 0 && (current_cpu == "x86" || !is_component_build)) {
-    # When symbols are on, things get so large that the tools fail due to the
-    # size of the .ilk files.
-    ldflags = incremental_linking_off_switch
-  } else {
-    # Otherwise just do the default incremental linking for this build type.
+  if (symbol_level == 0 || (current_cpu == "x86" && is_component_build)) {
+    # In these configurations, ilk file sizes stay low enough that we can
+    # link incrementally.
     ldflags = default_incremental_linking_switch
+  } else {
+    ldflags = incremental_linking_off_switch
   }
 }
 
@@ -397,7 +435,7 @@ config("unicode") {
 
 # Some third party code might not compile with WIN32_LEAN_AND_MEAN so we have
 # to have a separate config for it. Remove this config from your target to
-# get the "bloaty and accomodating" version of windows.h.
+# get the "bloaty and accommodating" version of windows.h.
 config("lean_and_mean") {
   defines = [ "WIN32_LEAN_AND_MEAN" ]
 }
@@ -427,12 +465,20 @@ config("target_winrt") {
   ]
 }
 
-# Internal stuff --------------------------------------------------------------
+# Generating order files -------------------------------------------------------
 
-# Config used by the MIDL template to disable warnings.
-config("midl_warnings") {
-  if (is_clang) {
-    # MIDL generates code like "#endif !_MIDL_USE_GUIDDEF_".
-    cflags = [ "-Wno-extra-tokens" ]
+config("default_cygprofile_instrumentation") {
+  if (generate_order_files) {
+    assert(is_clang, "cygprofile instrumentation only works with clang")
+    assert(is_official_build, "order files should be made w/ official builds")
+    assert(!is_chrome_branded, "order files could leak internal symbol names")
+    configs = [ ":cygprofile_instrumentation" ]
   }
+}
+
+config("cygprofile_instrumentation") {
+  cflags = [
+    "-Xclang",
+    "-finstrument-functions-after-inlining",
+  ]
 }

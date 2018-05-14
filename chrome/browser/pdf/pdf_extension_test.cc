@@ -15,8 +15,10 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
 #include "base/strings/pattern.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/test_timeouts.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -27,6 +29,7 @@
 #include "chrome/browser/pdf/pdf_extension_util.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/renderer_context_menu/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -35,21 +38,24 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/download/public/common/download_item.h"
 #include "components/zoom/page_zoom.h"
 #include "components/zoom/test/zoom_test_utils.h"
 #include "components/zoom/zoom_controller.h"
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/browser_plugin_guest_manager.h"
-#include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/context_menu_params.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "extensions/browser/extension_registry.h"
@@ -57,7 +63,11 @@
 #include "extensions/test/result_catcher.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "ui/accessibility/ax_enum_util.h"
+#include "ui/base/clipboard/clipboard.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/test/test_clipboard.h"
+#include "ui/gfx/geometry/point.h"
 #include "url/gurl.h"
 
 #if defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
@@ -112,20 +122,21 @@ class PDFExtensionTest : public ExtensionApiTest,
     ExtensionApiTest::TearDownOnMainThread();
   }
 
-  bool PdfIsExpectedToFailLoad(const std::string& pdf_file) {
+  bool PdfIsExpectedToLoad(const std::string& pdf_file) {
     const char* const kFailingPdfs[] = {
-        // TODO(thestig): Investigate why this file doesn't fail when served by
-        // EmbeddedTestServer or another webserver.
-        // "pdf_private/cfuzz5.pdf",
-        "pdf_private/cfuzz6.pdf", "pdf_private/crash-11-14-44.pdf",
-        "pdf_private/js.pdf",     "pdf_private/segv-ecx.pdf",
+        "pdf_private/accessibility_crash_1.pdf",
+        "pdf_private/cfuzz5.pdf",
+        "pdf_private/cfuzz6.pdf",
+        "pdf_private/crash-11-14-44.pdf",
+        "pdf_private/js.pdf",
+        "pdf_private/segv-ecx.pdf",
         "pdf_private/tests.pdf",
     };
-    for (size_t i = 0; i < arraysize(kFailingPdfs); ++i) {
-      if (kFailingPdfs[i] == pdf_file)
-        return true;
+    for (const char* failing_pdf : kFailingPdfs) {
+      if (failing_pdf == pdf_file)
+        return false;
     }
-    return false;
+    return true;
   }
 
   // Runs the extensions test at chrome/test/data/pdf/<filename> on the PDF file
@@ -139,7 +150,7 @@ class PDFExtensionTest : public ExtensionApiTest,
     // It should be good enough to just navigate to the URL. But loading up the
     // BrowserPluginGuest seems to happen asynchronously as there was flakiness
     // being seen due to the BrowserPluginGuest not being available yet (see
-    // crbug.com/498077). So instead use |LoadPdf| which ensures that the PDF is
+    // crbug.com/498077). So instead use LoadPdf() which ensures that the PDF is
     // loaded before continuing.
     WebContents* guest_contents = LoadPdfGetGuestContents(url);
     ASSERT_TRUE(guest_contents);
@@ -147,7 +158,7 @@ class PDFExtensionTest : public ExtensionApiTest,
     std::string mock_interactions_js;
 
     {
-      base::ThreadRestrictions::ScopedAllowIO allow_io;
+      base::ScopedAllowBlockingForTesting allow_blocking;
       base::FilePath test_data_dir;
       PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
       test_data_dir = test_data_dir.Append(FILE_PATH_LITERAL("pdf"));
@@ -187,7 +198,7 @@ class PDFExtensionTest : public ExtensionApiTest,
     return pdf_extension_test_util::EnsurePDFHasLoaded(web_contents);
   }
 
-  // Same as |LoadPdf|, but also returns a pointer to the guest WebContents for
+  // Same as LoadPdf(), but also returns a pointer to the guest WebContents for
   // the loaded PDF. Returns nullptr if the load fails.
   WebContents* LoadPdfGetGuestContents(const GURL& url) {
     if (!LoadPdf(url))
@@ -204,7 +215,7 @@ class PDFExtensionTest : public ExtensionApiTest,
   // the test if base::Hash(filename) mod kNumberLoadTestParts == k in order
   // to shard the files evenly across values of k in [0, kNumberLoadTestParts).
   void LoadAllPdfsTest(const std::string& dir_name, int k) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     base::FilePath test_data_dir;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
     base::FileEnumerator file_enumerator(test_data_dir.AppendASCII(dir_name),
@@ -221,7 +232,7 @@ class PDFExtensionTest : public ExtensionApiTest,
       if (static_cast<int>(base::Hash(filename) % kNumberLoadTestParts) == k) {
         LOG(INFO) << "Loading: " << pdf_file;
         bool success = LoadPdf(embedded_test_server()->GetURL("/" + pdf_file));
-        EXPECT_EQ(!PdfIsExpectedToFailLoad(pdf_file), success);
+        EXPECT_EQ(PdfIsExpectedToLoad(pdf_file), success) << pdf_file;
       }
       ++count;
     }
@@ -332,7 +343,7 @@ class DisablePluginHelper : public content::DownloadManager::Observer {
 
   // content::DownloadManager::Observer implementation.
   void OnDownloadCreated(content::DownloadManager* manager,
-                         content::DownloadItem* item) override {
+                         download::DownloadItem* item) override {
     last_url_ = item->GetURL();
     download_run_loop_.Quit();
   }
@@ -363,7 +374,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, DisablePlugin) {
 
   // Cancel the download to shutdown cleanly.
   download_manager->RemoveObserver(&helper);
-  std::vector<content::DownloadItem*> downloads;
+  std::vector<download::DownloadItem*> downloads;
   download_manager->GetAllDownloads(&downloads);
   ASSERT_EQ(1u, downloads.size());
   downloads[0]->Cancel(false);
@@ -432,6 +443,10 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PageChange) {
   RunTestsInFile("page_change_test.js", "test-bookmarks.pdf");
 }
 
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Metrics) {
+  RunTestsInFile("metrics_test.js", "test.pdf");
+}
+
 // Ensure that the internal PDF plugin application/x-google-chrome-pdf won't be
 // loaded if it's not loaded in the chrome extension page.
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsureInternalPluginDisabled) {
@@ -495,7 +510,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, BlockDirectAccess) {
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsurePDFFromLocalFileLoads) {
   GURL test_pdf_url;
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     base::FilePath test_data_dir;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
     test_data_dir = test_data_dir.Append(FILE_PATH_LITERAL("pdf"));
@@ -519,7 +534,8 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, LinkPermissions) {
   GURL invalid_link_url("chrome://settings");
 
   GURL unfiltered_valid_link_url(valid_link_url);
-  content::RenderProcessHost* rph = guest_contents->GetRenderProcessHost();
+  content::RenderProcessHost* rph =
+      guest_contents->GetMainFrame()->GetProcess();
   rph->FilterURL(true, &valid_link_url);
   rph->FilterURL(true, &invalid_link_url);
 
@@ -562,9 +578,13 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, TabTitleWithEmbeddedPdf) {
             GetActiveWebContents()->GetTitle());
 }
 
-IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfZoomWithoutBubble) {
-  using namespace zoom;
-
+// Flaky, http://crbug.com/767427
+#if defined(OS_WIN)
+#define MAYBE_PdfZoomWithoutBubble DISABLED_PdfZoomWithoutBubble
+#else
+#define MAYBE_PdfZoomWithoutBubble PdfZoomWithoutBubble
+#endif
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, MAYBE_PdfZoomWithoutBubble) {
   GURL test_pdf_url(embedded_test_server()->GetURL("/pdf/test.pdf"));
   WebContents* guest_contents = LoadPdfGetGuestContents(test_pdf_url);
   ASSERT_TRUE(guest_contents);
@@ -575,21 +595,20 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfZoomWithoutBubble) {
   // above 0. Ideally we should look at the zoom levels from the PDF viewer
   // javascript, but we assume they'll always match the browser presets, which
   // are easier to access.
-  std::vector<double> preset_zoom_levels = PageZoom::PresetZoomLevels(0.0);
-  std::vector<double>::iterator it =
-      std::find(preset_zoom_levels.begin(), preset_zoom_levels.end(), 0.0);
+  std::vector<double> preset_zoom_levels = zoom::PageZoom::PresetZoomLevels(0);
+  auto it = std::find(preset_zoom_levels.begin(), preset_zoom_levels.end(), 0);
   ASSERT_TRUE(it != preset_zoom_levels.end());
   it++;
   ASSERT_TRUE(it != preset_zoom_levels.end());
   double new_zoom_level = *it;
 
-  auto* zoom_controller = ZoomController::FromWebContents(web_contents);
+  auto* zoom_controller = zoom::ZoomController::FromWebContents(web_contents);
   // We expect a ZoomChangedEvent with can_show_bubble == false if the PDF
   // extension behaviour is properly picked up. The test times out otherwise.
-  ZoomChangedWatcher watcher(zoom_controller,
-                             ZoomController::ZoomChangedEventData(
-                                 web_contents, 0.f, new_zoom_level,
-                                 ZoomController::ZOOM_MODE_MANUAL, false));
+  zoom::ZoomChangedWatcher watcher(
+      zoom_controller, zoom::ZoomController::ZoomChangedEventData(
+                           web_contents, 0, new_zoom_level,
+                           zoom::ZoomController::ZOOM_MODE_MANUAL, false));
 
   // Zoom PDF via script.
 #if defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
@@ -611,7 +630,7 @@ static std::string DumpPdfAccessibilityTree(const ui::AXTreeUpdate& ax_tree) {
   std::map<int32_t, int> id_to_indentation;
   bool found_embedded_object = false;
   for (auto& node : ax_tree.nodes) {
-    if (node.role == ui::AX_ROLE_EMBEDDED_OBJECT)
+    if (node.role == ax::mojom::Role::kEmbeddedObject)
       found_embedded_object = true;
     if (!found_embedded_object)
       continue;
@@ -620,7 +639,8 @@ static std::string DumpPdfAccessibilityTree(const ui::AXTreeUpdate& ax_tree) {
     ax_tree_dump += std::string(2 * indent, ' ');
     ax_tree_dump += ui::ToString(node.role);
 
-    std::string name = node.GetStringAttribute(ui::AX_ATTR_NAME);
+    std::string name =
+        node.GetStringAttribute(ax::mojom::StringAttribute::kName);
     base::ReplaceChars(name, "\r\n", "", &name);
     if (!name.empty())
       ax_tree_dump += " '" + name + "'";
@@ -680,21 +700,6 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfAccessibility) {
 
   ASSERT_MULTILINE_STR_MATCHES(kExpectedPDFAXTreePattern, ax_tree_dump);
 }
-
-#if defined(GOOGLE_CHROME_BUILD)
-// Test a particular PDF encountered in the wild that triggered a crash
-// when accessibility is enabled.  (http://crbug.com/648981)
-IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfAccessibilityCharCountCrash) {
-  content::BrowserAccessibilityState::GetInstance()->EnableAccessibility();
-  GURL test_pdf_url(embedded_test_server()->GetURL(
-      "/pdf_private/accessibility_crash_1.pdf"));
-
-  WebContents* guest_contents = LoadPdfGetGuestContents(test_pdf_url);
-  ASSERT_TRUE(guest_contents);
-
-  WaitForAccessibilityTreeToContainNodeWithName(guest_contents, "Page 1");
-}
-#endif
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfAccessibilityEnableLater) {
   // In this test, load the PDF file first, with accessibility off.
@@ -761,6 +766,39 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfAccessibilityInOOPIF) {
   ASSERT_MULTILINE_STR_MATCHES(kExpectedPDFAXTreePattern, ax_tree_dump);
 }
 
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfAccessibilityWordBoundaries) {
+  content::BrowserAccessibilityState::GetInstance()->EnableAccessibility();
+
+  GURL test_pdf_url(embedded_test_server()->GetURL("/pdf/test-bookmarks.pdf"));
+  WebContents* guest_contents = LoadPdfGetGuestContents(test_pdf_url);
+  ASSERT_TRUE(guest_contents);
+
+  WaitForAccessibilityTreeToContainNodeWithName(guest_contents,
+                                                "1 First Section\r\n");
+  ui::AXTreeUpdate ax_tree = GetAccessibilityTreeSnapshot(guest_contents);
+
+  bool found = false;
+  for (auto& node : ax_tree.nodes) {
+    std::string name =
+        node.GetStringAttribute(ax::mojom::StringAttribute::kName);
+    if (node.role == ax::mojom::Role::kInlineTextBox &&
+        name == "First Section\r\n") {
+      found = true;
+      std::vector<int32_t> word_starts =
+          node.GetIntListAttribute(ax::mojom::IntListAttribute::kWordStarts);
+      std::vector<int32_t> word_ends =
+          node.GetIntListAttribute(ax::mojom::IntListAttribute::kWordEnds);
+      ASSERT_EQ(2U, word_starts.size());
+      ASSERT_EQ(2U, word_ends.size());
+      EXPECT_EQ(0, word_starts[0]);
+      EXPECT_EQ(5, word_ends[0]);
+      EXPECT_EQ(6, word_starts[1]);
+      EXPECT_EQ(13, word_ends[1]);
+    }
+  }
+  ASSERT_TRUE(found);
+}
+
 #if defined(GOOGLE_CHROME_BUILD)
 // Test a particular PDF encountered in the wild that triggered a crash
 // when accessibility is enabled.  (http://crbug.com/668724)
@@ -809,7 +847,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, NavigationOnCorrectTab) {
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, OpenFromFTP) {
   net::SpawnedTestServer ftp_server(
-      net::SpawnedTestServer::TYPE_FTP, net::SpawnedTestServer::kLocalhost,
+      net::SpawnedTestServer::TYPE_FTP,
       base::FilePath(FILE_PATH_LITERAL("chrome/test/data/pdf")));
   ASSERT_TRUE(ftp_server.Start());
 
@@ -1035,4 +1073,443 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionLinkClickTest, OpenPDFWithReplaceState) {
 
   const GURL& url = new_web_contents->GetURL();
   EXPECT_EQ("http://www.example.com/", url.spec());
+}
+
+class PDFExtensionClipboardTest : public PDFExtensionTest {
+ public:
+  PDFExtensionClipboardTest() : guest_contents_(nullptr) {}
+  ~PDFExtensionClipboardTest() override {}
+
+  void SetUpOnMainThread() override {
+    PDFExtensionTest::SetUpOnMainThread();
+    ui::TestClipboard::CreateForCurrentThread();
+  }
+
+  void TearDownOnMainThread() override {
+    ui::Clipboard::DestroyClipboardForCurrentThread();
+    PDFExtensionTest::TearDownOnMainThread();
+  }
+
+  void LoadTestComboBoxPdfGetGuestContents() {
+    GURL test_pdf_url(embedded_test_server()->GetURL("/pdf/combobox_form.pdf"));
+    guest_contents_ = LoadPdfGetGuestContents(test_pdf_url);
+    ASSERT_TRUE(guest_contents_);
+  }
+
+  // Returns a point near the left edge of the editable combo box in
+  // combobox_form.pdf, inside the combo box rect. The point is in Blink screen
+  // coordinates.
+  //
+  // The combo box's rect is [100 50 200 80] in PDF user space. (136, 318) in
+  // Blink page coordinates corresponds to approximately (102, 62) in PDF user
+  // space coordinates. See PDFExtensionLinkClickTest::GetLinkPosition() for
+  // more information on all the coordinate systems involved.
+  gfx::Point GetEditableComboBoxLeftPosition() {
+    gfx::Point position(136, 318);
+    ConvertPageCoordToScreenCoord(guest_contents_, &position);
+    return position;
+  }
+
+  void ClickLeftSideOfEditableComboBox() {
+    content::SimulateMouseClickAt(GetActiveWebContents(), 0,
+                                  blink::WebMouseEvent::Button::kLeft,
+                                  GetEditableComboBoxLeftPosition());
+  }
+
+  void TypeHello() {
+    auto* web_contents = GetActiveWebContents();
+    content::SimulateKeyPress(web_contents, ui::DomKey::FromCharacter('H'),
+                              ui::DomCode::US_H, ui::VKEY_H, false, false,
+                              false, false);
+    content::SimulateKeyPress(web_contents, ui::DomKey::FromCharacter('E'),
+                              ui::DomCode::US_E, ui::VKEY_E, false, false,
+                              false, false);
+    content::SimulateKeyPress(web_contents, ui::DomKey::FromCharacter('L'),
+                              ui::DomCode::US_L, ui::VKEY_L, false, false,
+                              false, false);
+    content::SimulateKeyPress(web_contents, ui::DomKey::FromCharacter('L'),
+                              ui::DomCode::US_L, ui::VKEY_L, false, false,
+                              false, false);
+    content::SimulateKeyPress(web_contents, ui::DomKey::FromCharacter('O'),
+                              ui::DomCode::US_O, ui::VKEY_O, false, false,
+                              false, false);
+  }
+
+  // Presses the left arrow key.
+  void PressLeftArrow() {
+    content::SimulateKeyPressWithoutChar(
+        GetActiveWebContents(), ui::DomKey::ARROW_LEFT, ui::DomCode::ARROW_LEFT,
+        ui::VKEY_LEFT, false, false, false, false);
+  }
+
+  // Presses down shift, presses the left arrow, and lets go of shift.
+  void PressShiftLeftArrow() {
+    content::SimulateKeyPressWithoutChar(
+        GetActiveWebContents(), ui::DomKey::ARROW_LEFT, ui::DomCode::ARROW_LEFT,
+        ui::VKEY_LEFT, false, /*shift=*/true, false, false);
+  }
+
+  // Presses the right arrow key.
+  void PressRightArrow() {
+    content::SimulateKeyPressWithoutChar(
+        GetActiveWebContents(), ui::DomKey::ARROW_RIGHT,
+        ui::DomCode::ARROW_RIGHT, ui::VKEY_RIGHT, false, false, false, false);
+  }
+
+  // Presses down shift, presses the right arrow, and lets go of shift.
+  void PressShiftRightArrow() {
+    content::SimulateKeyPressWithoutChar(
+        GetActiveWebContents(), ui::DomKey::ARROW_RIGHT,
+        ui::DomCode::ARROW_RIGHT, ui::VKEY_RIGHT, false, /*shift=*/true, false,
+        false);
+  }
+
+  // Checks the Linux selection clipboard by polling.
+  void CheckSelectionClipboard(const std::string& expected) {
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+    CheckClipboard(ui::CLIPBOARD_TYPE_SELECTION, expected);
+#endif
+  }
+
+  // Sends a copy command and checks the copy/paste clipboard by
+  // polling. Note: Trying to send ctrl+c does not work correctly with
+  // SimulateKeyPress(). Using IDC_COPY does not work on Mac in browser_tests.
+  void SendCopyCommandAndCheckCopyPasteClipboard(const std::string& expected) {
+    content::RunAllPendingInMessageLoop();
+    GetActiveWebContents()->Copy();
+    CheckClipboard(ui::CLIPBOARD_TYPE_COPY_PASTE, expected);
+  }
+
+ private:
+  // Waits and polls the clipboard of a given |clipboard_type| until its
+  // contents reaches the length of |expected|. Then checks and see if the
+  // clipboard contents matches |expected|.
+  // TODO(thestig): Change this to avoid polling after https://crbug.com/755826
+  // has been fixed.
+  void CheckClipboard(ui::ClipboardType clipboard_type,
+                      const std::string& expected) {
+    auto* clipboard = ui::Clipboard::GetForCurrentThread();
+    std::string clipboard_data;
+    const std::string& last_data = last_clipboard_data_[clipboard_type];
+    if (last_data.size() == expected.size()) {
+      DCHECK_EQ(last_data, expected);
+      clipboard->ReadAsciiText(clipboard_type, &clipboard_data);
+      EXPECT_EQ(expected, clipboard_data);
+      return;
+    }
+
+    const bool expect_increase = last_data.size() < expected.size();
+    while (true) {
+      clipboard->ReadAsciiText(clipboard_type, &clipboard_data);
+      if (expect_increase) {
+        if (clipboard_data.size() >= expected.size())
+          break;
+      } else {
+        if (clipboard_data.size() <= expected.size())
+          break;
+      }
+
+      content::RunAllPendingInMessageLoop();
+    }
+    EXPECT_EQ(expected, clipboard_data);
+
+    last_clipboard_data_[clipboard_type] = clipboard_data;
+  }
+
+  std::map<ui::ClipboardType, std::string> last_clipboard_data_;
+  WebContents* guest_contents_;
+};
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionClipboardTest,
+                       IndividualShiftRightArrowPresses) {
+  LoadTestComboBoxPdfGetGuestContents();
+
+  // Give the editable combo box focus.
+  ClickLeftSideOfEditableComboBox();
+
+  TypeHello();
+
+  // Put the cursor back to the left side of the combo box.
+  ClickLeftSideOfEditableComboBox();
+
+  // Press shift + right arrow 3 times. Letting go of shift in between.
+  PressShiftRightArrow();
+  CheckSelectionClipboard("H");
+  PressShiftRightArrow();
+  CheckSelectionClipboard("HE");
+  PressShiftRightArrow();
+  CheckSelectionClipboard("HEL");
+  SendCopyCommandAndCheckCopyPasteClipboard("HEL");
+}
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionClipboardTest,
+                       IndividualShiftLeftArrowPresses) {
+  LoadTestComboBoxPdfGetGuestContents();
+
+  // Give the editable combo box focus.
+  ClickLeftSideOfEditableComboBox();
+
+  TypeHello();
+
+  // Put the cursor back to the left side of the combo box.
+  ClickLeftSideOfEditableComboBox();
+
+  for (int i = 0; i < 3; ++i)
+    PressRightArrow();
+
+  // Press shift + left arrow 2 times. Letting go of shift in between.
+  PressShiftLeftArrow();
+  CheckSelectionClipboard("L");
+  PressShiftLeftArrow();
+  CheckSelectionClipboard("EL");
+  SendCopyCommandAndCheckCopyPasteClipboard("EL");
+
+  // Press shift + left arrow 2 times. Letting go of shift in between.
+  PressShiftLeftArrow();
+  CheckSelectionClipboard("HEL");
+  PressShiftLeftArrow();
+  CheckSelectionClipboard("HEL");
+  SendCopyCommandAndCheckCopyPasteClipboard("HEL");
+}
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionClipboardTest,
+                       CombinedShiftRightArrowPresses) {
+  LoadTestComboBoxPdfGetGuestContents();
+
+  // Give the editable combo box focus.
+  ClickLeftSideOfEditableComboBox();
+
+  TypeHello();
+
+  // Put the cursor back to the left side of the combo box.
+  ClickLeftSideOfEditableComboBox();
+
+  // Press shift + right arrow 3 times. Holding down shift in between.
+  {
+    content::ScopedSimulateModifierKeyPress hold_shift(
+        GetActiveWebContents(), false, true, false, false);
+    hold_shift.KeyPressWithoutChar(ui::DomKey::ARROW_RIGHT,
+                                   ui::DomCode::ARROW_RIGHT, ui::VKEY_RIGHT);
+    CheckSelectionClipboard("H");
+    hold_shift.KeyPressWithoutChar(ui::DomKey::ARROW_RIGHT,
+                                   ui::DomCode::ARROW_RIGHT, ui::VKEY_RIGHT);
+    CheckSelectionClipboard("HE");
+    hold_shift.KeyPressWithoutChar(ui::DomKey::ARROW_RIGHT,
+                                   ui::DomCode::ARROW_RIGHT, ui::VKEY_RIGHT);
+    CheckSelectionClipboard("HEL");
+  }
+  SendCopyCommandAndCheckCopyPasteClipboard("HEL");
+}
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionClipboardTest, CombinedShiftArrowPresses) {
+  LoadTestComboBoxPdfGetGuestContents();
+
+  // Give the editable combo box focus.
+  ClickLeftSideOfEditableComboBox();
+
+  TypeHello();
+
+  // Put the cursor back to the left side of the combo box.
+  ClickLeftSideOfEditableComboBox();
+
+  for (int i = 0; i < 3; ++i)
+    PressRightArrow();
+
+  // Press shift + left arrow 3 times. Holding down shift in between.
+  {
+    content::ScopedSimulateModifierKeyPress hold_shift(
+        GetActiveWebContents(), false, true, false, false);
+    hold_shift.KeyPressWithoutChar(ui::DomKey::ARROW_LEFT,
+                                   ui::DomCode::ARROW_LEFT, ui::VKEY_LEFT);
+    CheckSelectionClipboard("L");
+    hold_shift.KeyPressWithoutChar(ui::DomKey::ARROW_LEFT,
+                                   ui::DomCode::ARROW_LEFT, ui::VKEY_LEFT);
+    CheckSelectionClipboard("EL");
+    hold_shift.KeyPressWithoutChar(ui::DomKey::ARROW_LEFT,
+                                   ui::DomCode::ARROW_LEFT, ui::VKEY_LEFT);
+    CheckSelectionClipboard("HEL");
+  }
+  SendCopyCommandAndCheckCopyPasteClipboard("HEL");
+
+  // Press shift + right arrow 2 times. Holding down shift in between.
+  {
+    content::ScopedSimulateModifierKeyPress hold_shift(
+        GetActiveWebContents(), false, true, false, false);
+    hold_shift.KeyPressWithoutChar(ui::DomKey::ARROW_RIGHT,
+                                   ui::DomCode::ARROW_RIGHT, ui::VKEY_RIGHT);
+    CheckSelectionClipboard("EL");
+    hold_shift.KeyPressWithoutChar(ui::DomKey::ARROW_RIGHT,
+                                   ui::DomCode::ARROW_RIGHT, ui::VKEY_RIGHT);
+    CheckSelectionClipboard("L");
+  }
+  SendCopyCommandAndCheckCopyPasteClipboard("L");
+}
+
+// Verifies that an <embed> of size zero will still instantiate a guest and post
+// message to the <embed> is correctly forwarded to the extension. This is for
+// catching future regression in docs/ and slides/ pages (see
+// https://crbug.com/763812).
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PostMessageForZeroSizedEmbed) {
+  content::DOMMessageQueue queue;
+  GURL url(embedded_test_server()->GetURL(
+      "/pdf/post_message_zero_sized_embed.html"));
+  ui_test_utils::NavigateToURL(browser(), url);
+  std::string message;
+  EXPECT_TRUE(queue.WaitForMessage(&message));
+  EXPECT_EQ("\"POST_MESSAGE_OK\"", message);
+}
+
+// In response to the events sent in |send_events|, ensures the PDF viewer zooms
+// in and that the viewer's custom pinch zooming mechanism is used to do so.
+void EnsureCustomPinchZoomInvoked(WebContents* guest_contents,
+                                  WebContents* contents,
+                                  base::OnceClosure send_events) {
+  ASSERT_TRUE(content::ExecuteScript(
+      guest_contents,
+      "var gestureDetector = new GestureDetector(viewer.plugin_); "
+      "var updatePromise = new Promise(function(resolve) { "
+      "  gestureDetector.addEventListener('pinchupdate', resolve); "
+      "});"));
+
+  zoom::ZoomChangedWatcher zoom_watcher(
+      contents,
+      base::BindRepeating(
+          [](const zoom::ZoomController::ZoomChangedEventData& event) {
+            return event.new_zoom_level > event.old_zoom_level &&
+                   event.zoom_mode == zoom::ZoomController::ZOOM_MODE_MANUAL &&
+                   !event.can_show_bubble;
+          }));
+
+  std::move(send_events).Run();
+
+  bool got_update;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      guest_contents,
+      "updatePromise.then(function(update) { "
+      "  window.domAutomationController.send(!!update); "
+      "});",
+      &got_update));
+  EXPECT_TRUE(got_update);
+
+  zoom_watcher.Wait();
+}
+
+#if defined(OS_MACOSX)
+
+// Test that "smart zoom" (double-tap with two fingers on Mac trackpad)
+// is disabled for the PDF viewer. This prevents the viewer's controls from
+// being scaled off screen (see crbug.com/676668).
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, SmartZoomDisabled) {
+  GURL test_pdf_url(embedded_test_server()->GetURL("/pdf/test.pdf"));
+  ASSERT_TRUE(LoadPdf(test_pdf_url));
+
+  blink::WebGestureEvent smart_zoom_event(
+      blink::WebInputEvent::kGestureDoubleTap,
+      blink::WebInputEvent::kNoModifiers,
+      blink::WebInputEvent::GetStaticTimeStampForTests());
+  smart_zoom_event.source_device = blink::kWebGestureDeviceTouchpad;
+  smart_zoom_event.data.tap.tap_count = 1;
+
+  EXPECT_TRUE(browser()->PreHandleGestureEvent(GetActiveWebContents(),
+                                               smart_zoom_event));
+}
+
+// Ensure that Mac trackpad pinch events are handled by the PDF viewer.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, TrackpadPinchInvokesCustomZoom) {
+  GURL test_pdf_url(embedded_test_server()->GetURL("/pdf/test.pdf"));
+  WebContents* guest_contents = LoadPdfGetGuestContents(test_pdf_url);
+  ASSERT_TRUE(guest_contents);
+
+  base::OnceClosure send_pinch = base::BindOnce(
+      [](WebContents* guest_contents) {
+        const gfx::Rect guest_rect = guest_contents->GetContainerBounds();
+        const gfx::Point mouse_position(guest_rect.width() / 2,
+                                        guest_rect.height() / 2);
+        content::SimulateGesturePinchSequence(guest_contents, mouse_position,
+                                              1.23,
+                                              blink::kWebGestureDeviceTouchpad);
+      },
+      guest_contents);
+
+  EnsureCustomPinchZoomInvoked(guest_contents, GetActiveWebContents(),
+                               std::move(send_pinch));
+}
+
+#else  // !defined(OS_MACOSX)
+
+// Ensure that ctrl-wheel events are handled by the PDF viewer.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, CtrlWheelInvokesCustomZoom) {
+  GURL test_pdf_url(embedded_test_server()->GetURL("/pdf/test.pdf"));
+  WebContents* guest_contents = LoadPdfGetGuestContents(test_pdf_url);
+  ASSERT_TRUE(guest_contents);
+
+  base::OnceClosure send_ctrl_wheel = base::BindOnce(
+      [](WebContents* guest_contents) {
+        const gfx::Rect guest_rect = guest_contents->GetContainerBounds();
+        const gfx::Point mouse_position(guest_rect.width() / 2,
+                                        guest_rect.height() / 2);
+        content::SimulateMouseWheelCtrlZoomEvent(
+            guest_contents, mouse_position, true,
+            blink::WebMouseWheelEvent::kPhaseBegan);
+      },
+      guest_contents);
+
+  EnsureCustomPinchZoomInvoked(guest_contents, GetActiveWebContents(),
+                               std::move(send_ctrl_wheel));
+}
+
+#endif  // defined(OS_MACOSX)
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, ContextMenuCoordinates) {
+  GURL url = embedded_test_server()->GetURL("/pdf/pdf_embed.html");
+
+  // Load page with embedded PDF and make sure it succeeds.
+  ASSERT_TRUE(LoadPdf(url));
+  WebContents* guest_contents = nullptr;
+  WebContents* embedder_contents = GetActiveWebContents();
+  content::BrowserPluginGuestManager* guest_manager =
+      embedder_contents->GetBrowserContext()->GetGuestManager();
+  ASSERT_NO_FATAL_FAILURE(guest_manager->ForEachGuest(
+      embedder_contents, base::Bind(&GetGuestCallback, &guest_contents)));
+  ASSERT_NE(nullptr, guest_contents);
+#if defined(USE_AURA)
+  // TODO(wjmaclean): In theory this should be used to make sure the hit testing
+  // for routing to the guest process works as intended. Not sure if not having
+  // this on Mac is an issue.
+  content::WaitForGuestSurfaceReady(guest_contents);
+#endif
+  content::RenderProcessHost* guest_process_host =
+      guest_contents->GetMainFrame()->GetProcess();
+
+  // Get coords for mouse event.
+  content::RenderWidgetHostView* guest_view =
+      guest_contents->GetRenderWidgetHostView();
+  gfx::Point local_context_menu_position(30, 80);
+  gfx::Point root_context_menu_position =
+      guest_view->TransformPointToRootCoordSpace(local_context_menu_position);
+
+  auto context_menu_filter = base::MakeRefCounted<content::ContextMenuFilter>();
+  guest_process_host->AddFilter(context_menu_filter.get());
+
+  ContextMenuWaiter menu_observer(content::NotificationService::AllSources());
+  // Send mouse right-click to activate context menu.
+  content::SimulateRoutedMouseClickAt(embedder_contents, kDefaultKeyModifier,
+                                      blink::WebMouseEvent::Button::kRight,
+                                      root_context_menu_position);
+
+  // We expect the context menu, invoked via the RenderFrameHost, to be using
+  // root view coordinates.
+  menu_observer.WaitForMenuOpenAndClose();
+  ASSERT_EQ(root_context_menu_position.x(), menu_observer.params().x);
+  ASSERT_EQ(root_context_menu_position.y(), menu_observer.params().y);
+
+  // We expect the IPC, received from the renderer, to be using local coords.
+  context_menu_filter->Wait();
+  content::ContextMenuParams params = context_menu_filter->get_params();
+  EXPECT_EQ(local_context_menu_position.x(), params.x);
+  EXPECT_EQ(local_context_menu_position.y(), params.y);
+
+  // TODO(wjmaclean): If it ever becomes possible to filter outgoing IPCs
+  // from the RenderProcessHost, we should verify the ViewMsg_PluginActionAt
+  // message is sent with the same coordinates as in the ContextMenuParams.
 }

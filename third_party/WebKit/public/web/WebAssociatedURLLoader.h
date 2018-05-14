@@ -35,22 +35,25 @@
 
 #include "public/platform/WebCommon.h"
 
+namespace base {
+class SingleThreadTaskRunner;
+}
+
 namespace blink {
 
 class WebAssociatedURLLoaderClient;
-class WebTaskRunner;
 class WebURLRequest;
 
 // This class is used to implement WebFrame::createAssociatedURLLoader.
 class BLINK_EXPORT WebAssociatedURLLoader {
  public:
-  virtual ~WebAssociatedURLLoader() {}
+  virtual ~WebAssociatedURLLoader() = default;
 
   virtual void LoadAsynchronously(const WebURLRequest&,
                                   WebAssociatedURLLoaderClient*) = 0;
   virtual void Cancel() = 0;
   virtual void SetDefersLoading(bool) = 0;
-  virtual void SetLoadingTaskRunner(WebTaskRunner*) = 0;
+  virtual void SetLoadingTaskRunner(base::SingleThreadTaskRunner*) = 0;
 };
 
 }  // namespace blink

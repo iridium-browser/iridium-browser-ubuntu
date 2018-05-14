@@ -6,9 +6,8 @@
 
 #include "base/logging.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
+#include "ios/chrome/browser/ui/commands/start_voice_search_command.h"
 #import "ios/chrome/browser/ui/keyboard/UIKeyCommand+Chrome.h"
 #include "ios/chrome/browser/ui/rtl_geometry.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -20,18 +19,17 @@
 
 @implementation KeyCommandsProvider
 
-- (NSArray*)keyCommandsForConsumer:(id<KeyCommandsPlumbing>)consumer
-                        dispatcher:
-                            (id<ApplicationCommands, BrowserCommands>)dispatcher
-                       editingText:(BOOL)editingText {
+- (NSArray*)
+keyCommandsForConsumer:(id<KeyCommandsPlumbing>)consumer
+    baseViewController:(UIViewController*)baseViewController
+            dispatcher:
+                (id<ApplicationCommands, BrowserCommands, OmniboxFocuser>)
+                    dispatcher
+           editingText:(BOOL)editingText {
   __weak id<KeyCommandsPlumbing> weakConsumer = consumer;
-  __weak id<ApplicationCommands, BrowserCommands> weakDispatcher = dispatcher;
-
-  // Block to execute a command from the |tag|.
-  void (^execute)(NSInteger) = ^(NSInteger tag) {
-    [weakConsumer
-        chromeExecuteCommand:[GenericChromeCommand commandWithTag:tag]];
-  };
+  __weak UIViewController* weakBaseViewController = baseViewController;
+  __weak id<ApplicationCommands, BrowserCommands, OmniboxFocuser>
+      weakDispatcher = dispatcher;
 
   // Block to have the tab model open the tab at |index|, if there is one.
   void (^focusTab)(NSUInteger) = ^(NSUInteger index) {
@@ -67,11 +65,16 @@
 
   // New tab blocks.
   void (^newTab)() = ^{
-    [weakDispatcher openNewTab:[OpenNewTabCommand command]];
+    OpenNewTabCommand* newTabCommand = [OpenNewTabCommand command];
+    newTabCommand.shouldFocusOmnibox = YES;
+    [weakDispatcher openNewTab:newTabCommand];
   };
 
   void (^newIncognitoTab)() = ^{
-    [weakDispatcher openNewTab:[OpenNewTabCommand incognitoTabCommand]];
+    OpenNewTabCommand* newIncognitoTabCommand =
+        [OpenNewTabCommand incognitoTabCommand];
+    newIncognitoTabCommand.shouldFocusOmnibox = YES;
+    [weakDispatcher openNewTab:newIncognitoTabCommand];
   };
 
   const int browseLeftDescriptionID = useRTLLayout
@@ -117,7 +120,7 @@
                                      title:l10n_util::GetNSStringWithFixup(
                                                IDS_IOS_KEYBOARD_OPEN_LOCATION)
                                     action:^{
-                                      [weakConsumer focusOmnibox];
+                                      [weakDispatcher focusOmnibox];
                                     }],
       [UIKeyCommand cr_keyCommandWithInput:@"w"
                              modifierFlags:UIKeyModifierCommand
@@ -139,20 +142,20 @@
                                      title:l10n_util::GetNSStringWithFixup(
                                                IDS_IOS_TOOLS_MENU_FIND_IN_PAGE)
                                     action:^{
-                                      execute(IDC_FIND);
+                                      [weakDispatcher showFindInPage];
                                     }],
       [UIKeyCommand cr_keyCommandWithInput:@"g"
                              modifierFlags:UIKeyModifierCommand
                                      title:nil
                                     action:^{
-                                      execute(IDC_FIND_NEXT);
+                                      [weakDispatcher findNextStringInPage];
                                     }],
       [UIKeyCommand
           cr_keyCommandWithInput:@"g"
                    modifierFlags:UIKeyModifierCommand | UIKeyModifierShift
                            title:nil
                           action:^{
-                            execute(IDC_FIND_PREVIOUS);
+                            [weakDispatcher findPreviousStringInPage];
                           }],
       [UIKeyCommand cr_keyCommandWithInput:@"r"
                              modifierFlags:UIKeyModifierCommand
@@ -188,14 +191,17 @@
                                      title:l10n_util::GetNSStringWithFixup(
                                                IDS_HISTORY_SHOW_HISTORY)
                                     action:^{
-                                      execute(IDC_SHOW_HISTORY);
+                                      [weakDispatcher showHistory];
                                     }],
       [UIKeyCommand
           cr_keyCommandWithInput:@"."
                    modifierFlags:UIKeyModifierCommand | UIKeyModifierShift
                            title:voiceSearchTitle
                           action:^{
-                            execute(IDC_VOICE_SEARCH);
+                            StartVoiceSearchCommand* command =
+                                [[StartVoiceSearchCommand alloc]
+                                    initWithOriginView:nil];
+                            [weakDispatcher startVoiceSearch:command];
                           }],
     ]];
   }
@@ -206,7 +212,7 @@
                            modifierFlags:Cr_UIKeyModifierNone
                                    title:nil
                                   action:^{
-                                    execute(IDC_CLOSE_MODALS);
+                                    [weakDispatcher dismissModalDialogs];
                                   }],
     [UIKeyCommand cr_keyCommandWithInput:@"n"
                            modifierFlags:UIKeyModifierCommand
@@ -216,7 +222,9 @@
                            modifierFlags:UIKeyModifierCommand
                                    title:nil
                                   action:^{
-                                    [weakDispatcher showSettings];
+                                    [weakDispatcher
+                                        showSettingsFromViewController:
+                                            weakBaseViewController];
                                   }],
   ]];
 
@@ -242,7 +250,7 @@
                              modifierFlags:UIKeyModifierCommand
                                      title:nil
                                     action:^{
-                                      execute(IDC_HELP_PAGE_VIA_MENU);
+                                      [weakDispatcher showHelpPage];
                                     }],
       [UIKeyCommand cr_keyCommandWithInput:@"1"
                              modifierFlags:UIKeyModifierCommand
@@ -308,6 +316,20 @@
       [UIKeyCommand
           cr_keyCommandWithInput:UIKeyInputRightArrow
                    modifierFlags:UIKeyModifierCommand | UIKeyModifierAlternate
+                           title:nil
+                          action:^{
+                            [weakConsumer focusNextTab];
+                          }],
+      [UIKeyCommand
+          cr_keyCommandWithInput:@"\t"
+                   modifierFlags:UIKeyModifierControl | UIKeyModifierShift
+                           title:nil
+                          action:^{
+                            [weakConsumer focusPreviousTab];
+                          }],
+      [UIKeyCommand
+          cr_keyCommandWithInput:@"\t"
+                   modifierFlags:UIKeyModifierControl
                            title:nil
                           action:^{
                             [weakConsumer focusNextTab];

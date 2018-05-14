@@ -31,9 +31,9 @@
 
 #include "core/html/forms/CheckboxInputType.h"
 
-#include "core/InputTypeNames.h"
 #include "core/events/KeyboardEvent.h"
-#include "core/html/HTMLInputElement.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/input_type_names.h"
 #include "platform/text/PlatformLocale.h"
 
 namespace blink {
@@ -86,7 +86,7 @@ void CheckboxInputType::DidDispatchClick(Event* event,
     GetElement().setIndeterminate(state.indeterminate);
     GetElement().setChecked(state.checked);
   } else {
-    GetElement().DispatchChangeEventIfNeeded();
+    GetElement().DispatchInputAndChangeEventIfNeeded();
   }
   is_in_click_handler_ = false;
   // The work we did in willDispatchClick was default handling.

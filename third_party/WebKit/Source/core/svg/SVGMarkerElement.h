@@ -77,12 +77,10 @@ class SVGMarkerElement final : public SVGElement, public SVGFitToViewBox {
     return orient_angle_->OrientType();
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit SVGMarkerElement(Document&);
-
-  bool NeedsPendingResourceHandling() const override { return false; }
 
   void SvgAttributeChanged(const QualifiedName&) override;
   void ChildrenChanged(const ChildrenChange&) override;

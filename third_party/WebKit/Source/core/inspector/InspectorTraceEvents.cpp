@@ -12,10 +12,10 @@
 #include "bindings/core/v8/SourceLocation.h"
 #include "core/animation/Animation.h"
 #include "core/animation/KeyframeEffectReadOnly.h"
+#include "core/css/StyleChangeReason.h"
 #include "core/css/invalidation/InvalidationSet.h"
 #include "core/dom/DOMNodeIds.h"
-#include "core/dom/StyleChangeReason.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/html/HTMLFrameOwnerElement.h"
@@ -42,6 +42,7 @@
 #include "platform/wtf/DynamicAnnotations.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/TextPosition.h"
+#include "services/network/public/mojom/request_context_frame_type.mojom-shared.h"
 #include "v8/include/v8-profiler.h"
 #include "v8/include/v8.h"
 
@@ -50,6 +51,7 @@ namespace blink {
 namespace {
 
 void* AsyncId(unsigned long identifier) {
+  // This value should be odd to avoid collisions with regular pointers.
   return reinterpret_cast<void*>((identifier << 1) | 1);
 }
 
@@ -77,7 +79,7 @@ String ToHexString(const void* p) {
 }
 
 void SetCallStack(TracedValue* value) {
-  static const unsigned char* trace_category_enabled = 0;
+  static const unsigned char* trace_category_enabled = nullptr;
   WTF_ANNOTATE_BENIGN_RACE(&trace_category_enabled, "trace_event category");
   if (!trace_category_enabled)
     trace_category_enabled = TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED(
@@ -88,24 +90,7 @@ void SetCallStack(TracedValue* value) {
   // So we collect the top frame with SourceLocation::capture() to get the
   // binding call site info.
   SourceLocation::Capture()->ToTracedValue(value, "stackTrace");
-  v8::Isolate::GetCurrent()->GetCpuProfiler()->CollectSample();
-}
-
-void InspectorTraceEvents::Init(CoreProbeSink* instrumenting_agents,
-                                protocol::UberDispatcher*,
-                                protocol::DictionaryValue*) {
-  instrumenting_agents_ = instrumenting_agents;
-  instrumenting_agents_->addInspectorTraceEvents(this);
-}
-
-void InspectorTraceEvents::Dispose() {
-  instrumenting_agents_->removeInspectorTraceEvents(this);
-  instrumenting_agents_ = nullptr;
-}
-
-DEFINE_TRACE(InspectorTraceEvents) {
-  visitor->Trace(instrumenting_agents_);
-  InspectorAgent::Trace(visitor);
+  v8::CpuProfiler::CollectSample(v8::Isolate::GetCurrent());
 }
 
 void InspectorTraceEvents::WillSendRequest(
@@ -114,11 +99,13 @@ void InspectorTraceEvents::WillSendRequest(
     DocumentLoader* loader,
     ResourceRequest& request,
     const ResourceResponse& redirect_response,
-    const FetchInitiatorInfo&) {
+    const FetchInitiatorInfo&,
+    Resource::Type) {
   LocalFrame* frame = loader ? loader->GetFrame() : nullptr;
   TRACE_EVENT_INSTANT1(
       "devtools.timeline", "ResourceSendRequest", TRACE_EVENT_SCOPE_THREAD,
-      "data", InspectorSendRequestEvent::Data(identifier, frame, request));
+      "data",
+      InspectorSendRequestEvent::Data(loader, identifier, frame, request));
   probe::AsyncTaskScheduled(frame ? frame->GetDocument() : nullptr,
                             "SendRequest", AsyncId(identifier));
 }
@@ -131,7 +118,8 @@ void InspectorTraceEvents::DidReceiveResourceResponse(
   LocalFrame* frame = loader ? loader->GetFrame() : nullptr;
   TRACE_EVENT_INSTANT1(
       "devtools.timeline", "ResourceReceiveResponse", TRACE_EVENT_SCOPE_THREAD,
-      "data", InspectorReceiveResponseEvent::Data(identifier, frame, response));
+      "data",
+      InspectorReceiveResponseEvent::Data(loader, identifier, frame, response));
   probe::AsyncTask async_task(frame ? frame->GetDocument() : nullptr,
                               AsyncId(identifier), "response");
 }
@@ -141,10 +129,10 @@ void InspectorTraceEvents::DidReceiveData(unsigned long identifier,
                                           const char* data,
                                           int encoded_data_length) {
   LocalFrame* frame = loader ? loader->GetFrame() : nullptr;
-  TRACE_EVENT_INSTANT1(
-      "devtools.timeline", "ResourceReceivedData", TRACE_EVENT_SCOPE_THREAD,
-      "data",
-      InspectorReceiveDataEvent::Data(identifier, frame, encoded_data_length));
+  TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceReceivedData",
+                       TRACE_EVENT_SCOPE_THREAD, "data",
+                       InspectorReceiveDataEvent::Data(
+                           loader, identifier, frame, encoded_data_length));
   probe::AsyncTask async_task(frame ? frame->GetDocument() : nullptr,
                               AsyncId(identifier), "data");
 }
@@ -153,22 +141,24 @@ void InspectorTraceEvents::DidFinishLoading(unsigned long identifier,
                                             DocumentLoader* loader,
                                             double finish_time,
                                             int64_t encoded_data_length,
-                                            int64_t decoded_body_length) {
+                                            int64_t decoded_body_length,
+                                            bool blocked_cross_site_document) {
   LocalFrame* frame = loader ? loader->GetFrame() : nullptr;
-  TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceFinish",
-                       TRACE_EVENT_SCOPE_THREAD, "data",
-                       InspectorResourceFinishEvent::Data(
-                           identifier, finish_time, false, encoded_data_length,
-                           decoded_body_length));
+  TRACE_EVENT_INSTANT1(
+      "devtools.timeline", "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data",
+      InspectorResourceFinishEvent::Data(loader, identifier, finish_time, false,
+                                         encoded_data_length,
+                                         decoded_body_length));
   probe::AsyncTask async_task(frame ? frame->GetDocument() : nullptr,
                               AsyncId(identifier));
 }
 
 void InspectorTraceEvents::DidFailLoading(unsigned long identifier,
+                                          DocumentLoader* loader,
                                           const ResourceError&) {
   TRACE_EVENT_INSTANT1(
       "devtools.timeline", "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data",
-      InspectorResourceFinishEvent::Data(identifier, 0, true, 0, 0));
+      InspectorResourceFinishEvent::Data(loader, identifier, 0, true, 0, 0));
 }
 
 void InspectorTraceEvents::Will(const probe::ExecuteScript&) {}
@@ -213,6 +203,14 @@ void InspectorTraceEvents::Did(const probe::CallFunction& probe) {
                        InspectorUpdateCountersEvent::Data());
 }
 
+void InspectorTraceEvents::PaintTiming(Document* document,
+                                       const char* name,
+                                       double timestamp) {
+  TRACE_EVENT_MARK_WITH_TIMESTAMP1("loading,rail,devtools.timeline", name,
+                                   TraceEvent::ToTraceTimestamp(timestamp),
+                                   "frame", document->GetFrame());
+}
+
 namespace {
 
 void SetNodeInfo(TracedValue* value,
@@ -246,6 +244,8 @@ const char* PseudoTypeToString(CSSSelector::PseudoType pseudo_type) {
     DEFINE_STRING_MAPPING(PseudoLink)
     DEFINE_STRING_MAPPING(PseudoVisited)
     DEFINE_STRING_MAPPING(PseudoAny)
+    DEFINE_STRING_MAPPING(PseudoMatches)
+    DEFINE_STRING_MAPPING(PseudoWebkitAnyLink)
     DEFINE_STRING_MAPPING(PseudoAnyLink)
     DEFINE_STRING_MAPPING(PseudoAutofill)
     DEFINE_STRING_MAPPING(PseudoHover)
@@ -299,6 +299,7 @@ const char* PseudoTypeToString(CSSSelector::PseudoType pseudo_type) {
     DEFINE_STRING_MAPPING(PseudoFirstPage)
     DEFINE_STRING_MAPPING(PseudoFullScreen)
     DEFINE_STRING_MAPPING(PseudoFullScreenAncestor)
+    DEFINE_STRING_MAPPING(PseudoFullscreen)
     DEFINE_STRING_MAPPING(PseudoInRange)
     DEFINE_STRING_MAPPING(PseudoOutOfRange)
     DEFINE_STRING_MAPPING(PseudoWebKitCustomElement)
@@ -331,6 +332,24 @@ String UrlForFrame(LocalFrame* frame) {
   return url.GetString();
 }
 
+const char* CompileOptionsString(v8::ScriptCompiler::CompileOptions options) {
+  switch (options) {
+    case v8::ScriptCompiler::kNoCompileOptions:
+      return "code";
+    case v8::ScriptCompiler::kConsumeCodeCache:
+      return "code";
+    case v8::ScriptCompiler::kEagerCompile:
+      return "full code";
+    case v8::ScriptCompiler::kProduceParserCache:
+    case v8::ScriptCompiler::kConsumeParserCache:
+    case v8::ScriptCompiler::kProduceCodeCache:
+    case v8::ScriptCompiler::kProduceFullCodeCache:
+      NOTREACHED();
+  }
+  NOTREACHED();
+  return "";
+}
+
 }  // namespace
 
 namespace InspectorScheduleStyleInvalidationTrackingEvent {
@@ -359,24 +378,24 @@ const char InspectorScheduleStyleInvalidationTrackingEvent::kRuleSet[] =
     "ruleset";
 
 const char* ResourcePriorityString(ResourceLoadPriority priority) {
-  const char* priority_string = 0;
+  const char* priority_string = nullptr;
   switch (priority) {
-    case kResourceLoadPriorityVeryLow:
+    case ResourceLoadPriority::kVeryLow:
       priority_string = "VeryLow";
       break;
-    case kResourceLoadPriorityLow:
+    case ResourceLoadPriority::kLow:
       priority_string = "Low";
       break;
-    case kResourceLoadPriorityMedium:
+    case ResourceLoadPriority::kMedium:
       priority_string = "Medium";
       break;
-    case kResourceLoadPriorityHigh:
+    case ResourceLoadPriority::kHigh:
       priority_string = "High";
       break;
-    case kResourceLoadPriorityVeryHigh:
+    case ResourceLoadPriority::kVeryHigh:
       priority_string = "VeryHigh";
       break;
-    case kResourceLoadPriorityUnresolved:
+    case ResourceLoadPriority::kUnresolved:
       break;
   }
   return priority_string;
@@ -455,9 +474,6 @@ const char
 const char
     InspectorStyleInvalidatorInvalidateEvent::kInvalidationSetMatchedTagName[] =
         "Invalidation set matched tagName";
-const char
-    InspectorStyleInvalidatorInvalidateEvent::kPreventStyleSharingForParent[] =
-        "Prevent style sharing for parent";
 
 namespace InspectorStyleInvalidatorInvalidateEvent {
 std::unique_ptr<TracedValue> FillCommonPart(ContainerNode& node,
@@ -493,7 +509,7 @@ InspectorStyleInvalidatorInvalidateEvent::SelectorPart(
 std::unique_ptr<TracedValue>
 InspectorStyleInvalidatorInvalidateEvent::InvalidationList(
     ContainerNode& node,
-    const Vector<RefPtr<InvalidationSet>>& invalidation_list) {
+    const Vector<scoped_refptr<InvalidationSet>>& invalidation_list) {
   std::unique_ptr<TracedValue> value =
       FillCommonPart(node, kElementHasPendingInvalidationList);
   value->BeginArray("invalidationList");
@@ -627,13 +643,14 @@ std::unique_ptr<TracedValue> InspectorLayoutInvalidationTrackingEvent::Data(
 }
 
 std::unique_ptr<TracedValue> InspectorPaintInvalidationTrackingEvent::Data(
-    const LayoutObject* layout_object,
-    const LayoutObject& paint_container) {
-  DCHECK(layout_object);
+    const LayoutObject& layout_object) {
   std::unique_ptr<TracedValue> value = TracedValue::Create();
-  value->SetString("frame", ToHexString(layout_object->GetFrame()));
-  SetGeneratingNodeInfo(value.get(), &paint_container, "paintId");
-  SetGeneratingNodeInfo(value.get(), layout_object, "nodeId", "nodeName");
+  value->SetString("frame", ToHexString(layout_object.GetFrame()));
+  const auto* paint_container =
+      layout_object.IsRooted() ? &layout_object.ContainerForPaintInvalidation()
+                               : nullptr;
+  SetGeneratingNodeInfo(value.get(), paint_container, "paintId");
+  SetGeneratingNodeInfo(value.get(), &layout_object, "nodeId", "nodeName");
   return value;
 }
 
@@ -651,9 +668,10 @@ std::unique_ptr<TracedValue> InspectorScrollInvalidationTrackingEvent::Data(
 }
 
 std::unique_ptr<TracedValue> InspectorChangeResourcePriorityEvent::Data(
+    DocumentLoader* loader,
     unsigned long identifier,
     const ResourceLoadPriority& load_priority) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
 
   std::unique_ptr<TracedValue> value = TracedValue::Create();
   value->SetString("requestId", request_id);
@@ -662,10 +680,13 @@ std::unique_ptr<TracedValue> InspectorChangeResourcePriorityEvent::Data(
 }
 
 std::unique_ptr<TracedValue> InspectorSendRequestEvent::Data(
+    DocumentLoader* loader,
     unsigned long identifier,
     LocalFrame* frame,
     const ResourceRequest& request) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
+  if (request.GetFrameType() != network::mojom::RequestContextFrameType::kNone)
+    request_id = IdentifiersFactory::LoaderId(loader);
 
   std::unique_ptr<TracedValue> value = TracedValue::Create();
   value->SetString("requestId", request_id);
@@ -681,7 +702,7 @@ std::unique_ptr<TracedValue> InspectorSendRequestEvent::Data(
 
 namespace {
 void RecordTiming(const ResourceLoadTiming& timing, TracedValue* value) {
-  value->SetDouble("requestTime", timing.RequestTime());
+  value->SetDouble("requestTime", TimeTicksInSeconds(timing.RequestTime()));
   value->SetDouble("proxyStart",
                    timing.CalculateMillisecondDelta(timing.ProxyStart()));
   value->SetDouble("proxyEnd",
@@ -706,16 +727,17 @@ void RecordTiming(const ResourceLoadTiming& timing, TracedValue* value) {
                    timing.CalculateMillisecondDelta(timing.SendEnd()));
   value->SetDouble("receiveHeadersEnd", timing.CalculateMillisecondDelta(
                                             timing.ReceiveHeadersEnd()));
-  value->SetDouble("pushStart", timing.PushStart());
-  value->SetDouble("pushEnd", timing.PushEnd());
+  value->SetDouble("pushStart", TimeTicksInSeconds(timing.PushStart()));
+  value->SetDouble("pushEnd", TimeTicksInSeconds(timing.PushEnd()));
 }
 }  // namespace
 
 std::unique_ptr<TracedValue> InspectorReceiveResponseEvent::Data(
+    DocumentLoader* loader,
     unsigned long identifier,
     LocalFrame* frame,
     const ResourceResponse& response) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
 
   std::unique_ptr<TracedValue> value = TracedValue::Create();
   value->SetString("requestId", request_id);
@@ -736,10 +758,11 @@ std::unique_ptr<TracedValue> InspectorReceiveResponseEvent::Data(
 }
 
 std::unique_ptr<TracedValue> InspectorReceiveDataEvent::Data(
+    DocumentLoader* loader,
     unsigned long identifier,
     LocalFrame* frame,
     int encoded_data_length) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
 
   std::unique_ptr<TracedValue> value = TracedValue::Create();
   value->SetString("requestId", request_id);
@@ -749,12 +772,13 @@ std::unique_ptr<TracedValue> InspectorReceiveDataEvent::Data(
 }
 
 std::unique_ptr<TracedValue> InspectorResourceFinishEvent::Data(
+    DocumentLoader* loader,
     unsigned long identifier,
     double finish_time,
     bool did_fail,
     int64_t encoded_data_length,
     int64_t decoded_body_length) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
 
   std::unique_ptr<TracedValue> value = TracedValue::Create();
   value->SetString("requestId", request_id);
@@ -785,10 +809,10 @@ static std::unique_ptr<TracedValue> GenericTimerData(ExecutionContext* context,
 std::unique_ptr<TracedValue> InspectorTimerInstallEvent::Data(
     ExecutionContext* context,
     int timer_id,
-    int timeout,
+    TimeDelta timeout,
     bool single_shot) {
   std::unique_ptr<TracedValue> value = GenericTimerData(context, timer_id);
-  value->SetInteger("timeout", timeout);
+  value->SetInteger("timeout", timeout.InMilliseconds());
   value->SetBoolean("singleShot", single_shot);
   SetCallStack(value.get());
   return value;
@@ -1018,17 +1042,62 @@ std::unique_ptr<TracedValue> InspectorEvaluateScriptEvent::Data(
 std::unique_ptr<TracedValue> InspectorParseScriptEvent::Data(
     unsigned long identifier,
     const String& url) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(nullptr, identifier);
   std::unique_ptr<TracedValue> value = TracedValue::Create();
   value->SetString("requestId", request_id);
   value->SetString("url", url);
   return value;
 }
 
+InspectorCompileScriptEvent::V8CacheResult::ProduceResult::ProduceResult(
+    v8::ScriptCompiler::CompileOptions produce_options,
+    int cache_size)
+    : produce_options(produce_options), cache_size(cache_size) {
+  DCHECK(produce_options == v8::ScriptCompiler::kNoCompileOptions ||
+         produce_options == v8::ScriptCompiler::kEagerCompile);
+}
+
+InspectorCompileScriptEvent::V8CacheResult::ConsumeResult::ConsumeResult(
+    v8::ScriptCompiler::CompileOptions consume_options,
+    int cache_size,
+    bool rejected)
+    : consume_options(consume_options),
+      cache_size(cache_size),
+      rejected(rejected) {
+  DCHECK_EQ(consume_options, v8::ScriptCompiler::kConsumeCodeCache);
+}
+
+InspectorCompileScriptEvent::V8CacheResult::V8CacheResult(
+    Optional<ProduceResult> produce_result,
+    Optional<ConsumeResult> consume_result)
+    : produce_result(std::move(produce_result)),
+      consume_result(std::move(consume_result)) {}
+
 std::unique_ptr<TracedValue> InspectorCompileScriptEvent::Data(
     const String& url,
-    const TextPosition& text_position) {
-  return FillLocation(url, text_position);
+    const TextPosition& text_position,
+    const V8CacheResult& cache_result,
+    bool streamed) {
+  std::unique_ptr<TracedValue> value = FillLocation(url, text_position);
+
+  if (cache_result.produce_result) {
+    value->SetString(
+        "cacheProduceOptions",
+        CompileOptionsString(cache_result.produce_result->produce_options));
+    value->SetInteger("producedCacheSize",
+                      cache_result.produce_result->cache_size);
+  }
+
+  if (cache_result.consume_result) {
+    value->SetString(
+        "cacheConsumeOptions",
+        CompileOptionsString(cache_result.consume_result->consume_options));
+    value->SetInteger("consumedCacheSize",
+                      cache_result.consume_result->cache_size);
+    value->SetBoolean("cacheRejected", cache_result.consume_result->rejected);
+  }
+  value->SetBoolean("streamed", streamed);
+  return value;
 }
 
 std::unique_ptr<TracedValue> InspectorFunctionCallEvent::Data(
@@ -1052,15 +1121,26 @@ std::unique_ptr<TracedValue> InspectorFunctionCallEvent::Data(
   value->SetString("scriptId", String::Number(location->ScriptId()));
   value->SetString("url", location->Url());
   value->SetInteger("lineNumber", location->LineNumber());
+  value->SetInteger("columnNumber", location->ColumnNumber());
   return value;
 }
 
 std::unique_ptr<TracedValue> InspectorPaintImageEvent::Data(
-    const LayoutImage& layout_image) {
+    const LayoutImage& layout_image,
+    const FloatRect& src_rect,
+    const FloatRect& dest_rect) {
   std::unique_ptr<TracedValue> value = TracedValue::Create();
   SetGeneratingNodeInfo(value.get(), &layout_image, "nodeId");
   if (const ImageResourceContent* resource = layout_image.CachedImage())
     value->SetString("url", resource->Url().GetString());
+
+  value->SetInteger("x", dest_rect.X());
+  value->SetInteger("y", dest_rect.Y());
+  value->SetInteger("width", dest_rect.Width());
+  value->SetInteger("height", dest_rect.Height());
+  value->SetInteger("srcWidth", src_rect.Width());
+  value->SetInteger("srcHeight", src_rect.Height());
+
   return value;
 }
 
@@ -1076,12 +1156,22 @@ std::unique_ptr<TracedValue> InspectorPaintImageEvent::Data(
 
 std::unique_ptr<TracedValue> InspectorPaintImageEvent::Data(
     Node* node,
-    const StyleImage& style_image) {
+    const StyleImage& style_image,
+    const FloatRect& src_rect,
+    const FloatRect& dest_rect) {
   std::unique_ptr<TracedValue> value = TracedValue::Create();
   if (node)
     SetNodeInfo(value.get(), node, "nodeId", nullptr);
   if (const ImageResourceContent* resource = style_image.CachedImage())
     value->SetString("url", resource->Url().GetString());
+
+  value->SetInteger("x", dest_rect.X());
+  value->SetInteger("y", dest_rect.Y());
+  value->SetInteger("width", dest_rect.Width());
+  value->SetInteger("height", dest_rect.Height());
+  value->SetInteger("srcWidth", src_rect.Width());
+  value->SetInteger("srcHeight", src_rect.Height());
+
   return value;
 }
 
@@ -1151,11 +1241,11 @@ std::unique_ptr<TracedValue> InspectorTimeStampEvent::Data(
 
 std::unique_ptr<TracedValue> InspectorTracingSessionIdForWorkerEvent::Data(
     const String& session_id,
-    const String& worker_id,
     WorkerThread* worker_thread) {
   std::unique_ptr<TracedValue> value = TracedValue::Create();
   value->SetString("sessionId", session_id);
-  value->SetString("workerId", worker_id);
+  value->SetString("workerId", IdentifiersFactory::IdFromToken(
+                                   worker_thread->GetDevToolsWorkerToken()));
   value->SetDouble("workerThreadId", worker_thread->GetPlatformThreadId());
   return value;
 }
@@ -1195,7 +1285,7 @@ std::unique_ptr<TracedValue> InspectorAnimationEvent::Data(
   if (const AnimationEffectReadOnly* effect = animation.effect()) {
     value->SetString("name", animation.id());
     if (effect->IsKeyframeEffectReadOnly()) {
-      if (Element* target = ToKeyframeEffectReadOnly(effect)->Target())
+      if (Element* target = ToKeyframeEffectReadOnly(effect)->target())
         SetNodeInfo(value.get(), target, "nodeId", "nodeName");
     }
   }
@@ -1231,9 +1321,9 @@ std::unique_ptr<TracedValue> InspectorHitTestEvent::EndData(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorAsyncTask::Data(const String& name) {
+std::unique_ptr<TracedValue> InspectorAsyncTask::Data(const StringView& name) {
   std::unique_ptr<TracedValue> value = TracedValue::Create();
-  value->SetString("name", name);
+  value->SetString("name", name.ToString());
   return value;
 }
 

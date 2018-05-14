@@ -6,28 +6,31 @@
 
 #include <stddef.h>
 #include <utility>
+#include "base/location.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "bindings/core/v8/ScriptRegexp.h"
 #include "bindings/core/v8/V8StringResource.h"
 #include "bindings/modules/v8/V8AndroidPayMethodData.h"
 #include "bindings/modules/v8/V8BasicCardRequest.h"
 #include "bindings/modules/v8/V8PaymentDetailsUpdate.h"
-#include "core/EventTypeNames.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/dom/TaskRunnerHelper.h"
-#include "core/events/Event.h"
-#include "core/events/EventQueue.h"
+#include "core/dom/events/Event.h"
+#include "core/dom/events/EventQueue.h"
+#include "core/event_type_names.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/FrameOwner.h"
 #include "core/frame/Settings.h"
+#include "core/frame/WebFeature.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/ConsoleTypes.h"
-#include "modules/EventTargetModulesNames.h"
+#include "modules/event_target_modules_names.h"
 #include "modules/payments/AndroidPayMethodData.h"
 #include "modules/payments/AndroidPayTokenization.h"
+#include "modules/payments/BasicCardHelper.h"
 #include "modules/payments/BasicCardRequest.h"
 #include "modules/payments/HTMLIFrameElementPayments.h"
 #include "modules/payments/PaymentAddress.h"
@@ -39,19 +42,22 @@
 #include "modules/payments/PaymentShippingOption.h"
 #include "modules/payments/PaymentsValidators.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/UUID.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/feature_policy/FeaturePolicy.h"
 #include "platform/mojo/MojoHelper.h"
+#include "platform/runtime_enabled_features.h"
+#include "platform/weborigin/KURL.h"
 #include "platform/wtf/HashSet.h"
+#include "platform/wtf/text/StringBuilder.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebTraceLocation.h"
+#include "public/platform/TaskType.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace {
 
 using ::payments::mojom::blink::CanMakePaymentQueryResult;
+using ::payments::mojom::blink::PaymentAddress;
 using ::payments::mojom::blink::PaymentAddressPtr;
 using ::payments::mojom::blink::PaymentCurrencyAmount;
 using ::payments::mojom::blink::PaymentCurrencyAmountPtr;
@@ -74,7 +80,7 @@ struct TypeConverter<PaymentCurrencyAmountPtr, blink::PaymentCurrencyAmount> {
   static PaymentCurrencyAmountPtr Convert(
       const blink::PaymentCurrencyAmount& input) {
     PaymentCurrencyAmountPtr output = PaymentCurrencyAmount::New();
-    output->currency = input.currency();
+    output->currency = input.currency().UpperASCII();
     output->value = input.value();
     output->currency_system = input.currencySystem();
     return output;
@@ -131,27 +137,9 @@ struct TypeConverter<PaymentOptionsPtr, blink::PaymentOptions> {
 namespace blink {
 namespace {
 
-using ::payments::mojom::blink::BasicCardNetwork;
-
-const struct {
-  const BasicCardNetwork code;
-  const char* const name;
-} kBasicCardNetworks[] = {{BasicCardNetwork::AMEX, "amex"},
-                          {BasicCardNetwork::DINERS, "diners"},
-                          {BasicCardNetwork::DISCOVER, "discover"},
-                          {BasicCardNetwork::JCB, "jcb"},
-                          {BasicCardNetwork::MASTERCARD, "mastercard"},
-                          {BasicCardNetwork::MIR, "mir"},
-                          {BasicCardNetwork::UNIONPAY, "unionpay"},
-                          {BasicCardNetwork::VISA, "visa"}};
-
 // If the website does not call complete() 60 seconds after show() has been
 // resolved, then behave as if the website called complete("fail").
 static const int kCompleteTimeoutSeconds = 60;
-
-static const size_t kMaxStringLength = 1024;
-static const size_t kMaxJSONStringLength = 1048576;
-static const size_t kMaxListSize = 1024;
 
 // Validates ShippingOption or PaymentItem, which happen to have identical
 // fields, except for "id", which is present only in ShippingOption.
@@ -165,25 +153,26 @@ void ValidateShippingOptionOrPaymentItem(const T& item,
   DCHECK(item.amount().hasValue());
   DCHECK(item.amount().hasCurrency());
 
-  if (item.label().length() > kMaxStringLength) {
+  if (item.label().length() > PaymentRequest::kMaxStringLength) {
     exception_state.ThrowTypeError("The label for " + item_name +
                                    " cannot be longer than 1024 characters");
     return;
   }
 
-  if (item.amount().currency().length() > kMaxStringLength) {
+  if (item.amount().currency().length() > PaymentRequest::kMaxStringLength) {
     exception_state.ThrowTypeError("The currency code for " + item_name +
                                    " cannot be longer than 1024 characters");
     return;
   }
 
-  if (item.amount().currencySystem().length() > kMaxStringLength) {
+  if (item.amount().currencySystem().length() >
+      PaymentRequest::kMaxStringLength) {
     exception_state.ThrowTypeError("The currency system for " + item_name +
                                    " cannot be longer than 1024 characters");
     return;
   }
 
-  if (item.amount().value().length() > kMaxStringLength) {
+  if (item.amount().value().length() > PaymentRequest::kMaxStringLength) {
     exception_state.ThrowTypeError("The amount value for " + item_name +
                                    " cannot be longer than 1024 characters");
     return;
@@ -206,7 +195,7 @@ void ValidateShippingOptionOrPaymentItem(const T& item,
   if (!PaymentsValidators::IsValidCurrencyCodeFormat(
           item.amount().currency(), item.amount().currencySystem(),
           &error_message)) {
-    exception_state.ThrowTypeError(error_message);
+    exception_state.ThrowRangeError(error_message);
     return;
   }
 }
@@ -216,7 +205,7 @@ void ValidateAndConvertDisplayItems(const HeapVector<PaymentItem>& input,
                                     Vector<PaymentItemPtr>& output,
                                     ExecutionContext& execution_context,
                                     ExceptionState& exception_state) {
-  if (input.size() > kMaxListSize) {
+  if (input.size() > PaymentRequest::kMaxListSize) {
     exception_state.ThrowTypeError("At most 1024 " + item_names + " allowed");
     return;
   }
@@ -241,7 +230,7 @@ void ValidateAndConvertShippingOptions(
     String& shipping_option_output,
     ExecutionContext& execution_context,
     ExceptionState& exception_state) {
-  if (input.size() > kMaxListSize) {
+  if (input.size() > PaymentRequest::kMaxListSize) {
     exception_state.ThrowTypeError("At most 1024 shipping options allowed");
     return;
   }
@@ -254,7 +243,7 @@ void ValidateAndConvertShippingOptions(
       return;
 
     DCHECK(option.hasId());
-    if (option.id().length() > kMaxStringLength) {
+    if (option.id().length() > PaymentRequest::kMaxStringLength) {
       exception_state.ThrowTypeError(
           "Shipping option ID cannot be longer than 1024 characters");
       return;
@@ -268,13 +257,8 @@ void ValidateAndConvertShippingOptions(
     }
 
     if (unique_ids.Contains(option.id())) {
-      execution_context.AddConsoleMessage(ConsoleMessage::Create(
-          kJSMessageSource, kWarningMessageLevel,
-          "Duplicate shipping option identifier '" + option.id() +
-              "' is treated as an invalid address indicator."));
-      // Clear |output| instead of throwing an exception.
-      output.clear();
-      shipping_option_output = String();
+      exception_state.ThrowTypeError(
+          "Cannot have duplicate shipping option identifiers");
       return;
     }
 
@@ -311,7 +295,7 @@ void SetAndroidPayMethodData(const ScriptValue& input,
                              PaymentMethodDataPtr& output,
                              ExceptionState& exception_state) {
   AndroidPayMethodData android_pay;
-  V8AndroidPayMethodData::toImpl(input.GetIsolate(), input.V8Value(),
+  V8AndroidPayMethodData::ToImpl(input.GetIsolate(), input.V8Value(),
                                  android_pay, exception_state);
   if (exception_state.HadException())
     return;
@@ -320,7 +304,7 @@ void SetAndroidPayMethodData(const ScriptValue& input,
     output->environment = payments::mojom::blink::AndroidPayEnvironment::TEST;
 
   if (android_pay.hasMerchantName() &&
-      android_pay.merchantName().length() > kMaxStringLength) {
+      android_pay.merchantName().length() > PaymentRequest::kMaxStringLength) {
     exception_state.ThrowTypeError(
         "Android Pay merchant name cannot be longer than 1024 characters");
     return;
@@ -328,7 +312,7 @@ void SetAndroidPayMethodData(const ScriptValue& input,
   output->merchant_name = android_pay.merchantName();
 
   if (android_pay.hasMerchantId() &&
-      android_pay.merchantId().length() > kMaxStringLength) {
+      android_pay.merchantId().length() > PaymentRequest::kMaxStringLength) {
     exception_state.ThrowTypeError(
         "Android Pay merchant id cannot be longer than 1024 characters");
     return;
@@ -403,7 +387,7 @@ void SetAndroidPayMethodData(const ScriptValue& input,
           tokenization.parameters().GetPropertyNames(exception_state);
       if (exception_state.HadException())
         return;
-      if (keys.size() > kMaxListSize) {
+      if (keys.size() > PaymentRequest::kMaxListSize) {
         exception_state.ThrowTypeError(
             "At most 1024 tokenization parameters allowed for Android Pay");
         return;
@@ -412,13 +396,13 @@ void SetAndroidPayMethodData(const ScriptValue& input,
       for (const String& key : keys) {
         if (!DictionaryHelper::Get(tokenization.parameters(), key, value))
           continue;
-        if (key.length() > kMaxStringLength) {
+        if (key.length() > PaymentRequest::kMaxStringLength) {
           exception_state.ThrowTypeError(
               "Android Pay tokenization parameter key cannot be longer than "
               "1024 characters");
           return;
         }
-        if (value.length() > kMaxStringLength) {
+        if (value.length() > PaymentRequest::kMaxStringLength) {
           exception_state.ThrowTypeError(
               "Android Pay tokenization parameter value cannot be longer than "
               "1024 characters");
@@ -437,54 +421,8 @@ void SetAndroidPayMethodData(const ScriptValue& input,
 void SetBasicCardMethodData(const ScriptValue& input,
                             PaymentMethodDataPtr& output,
                             ExceptionState& exception_state) {
-  BasicCardRequest basic_card;
-  V8BasicCardRequest::toImpl(input.GetIsolate(), input.V8Value(), basic_card,
-                             exception_state);
-  if (exception_state.HadException())
-    return;
-
-  if (basic_card.hasSupportedNetworks()) {
-    if (basic_card.supportedNetworks().size() > kMaxListSize) {
-      exception_state.ThrowTypeError(
-          "basic-card supportedNetworks cannot be longer than 1024 elements");
-      return;
-    }
-
-    for (const String& network : basic_card.supportedNetworks()) {
-      for (size_t i = 0; i < arraysize(kBasicCardNetworks); ++i) {
-        if (network == kBasicCardNetworks[i].name) {
-          output->supported_networks.push_back(kBasicCardNetworks[i].code);
-          break;
-        }
-      }
-    }
-  }
-
-  if (basic_card.hasSupportedTypes()) {
-    using ::payments::mojom::blink::BasicCardType;
-
-    if (basic_card.supportedTypes().size() > kMaxListSize) {
-      exception_state.ThrowTypeError(
-          "basic-card supportedTypes cannot be longer than 1024 elements");
-      return;
-    }
-
-    const struct {
-      const BasicCardType code;
-      const char* const name;
-    } kBasicCardTypes[] = {{BasicCardType::CREDIT, "credit"},
-                           {BasicCardType::DEBIT, "debit"},
-                           {BasicCardType::PREPAID, "prepaid"}};
-
-    for (const String& type : basic_card.supportedTypes()) {
-      for (size_t i = 0; i < arraysize(kBasicCardTypes); ++i) {
-        if (type == kBasicCardTypes[i].name) {
-          output->supported_types.push_back(kBasicCardTypes[i].code);
-          break;
-        }
-      }
-    }
-  }
+  BasicCardHelper::ParseBasiccardData(input, output->supported_networks,
+                                      output->supported_types, exception_state);
 }
 
 void StringifyAndParseMethodSpecificData(
@@ -505,7 +443,8 @@ void StringifyAndParseMethodSpecificData(
   output->stringified_data =
       V8StringToWebCoreString<String>(value, kDoNotExternalize);
 
-  if (output->stringified_data.length() > kMaxJSONStringLength) {
+  if (output->stringified_data.length() >
+      PaymentRequest::kMaxJSONStringLength) {
     exception_state.ThrowTypeError(
         "JSON serialization of payment method data should be no longer than "
         "1048576 characters");
@@ -532,13 +471,28 @@ void StringifyAndParseMethodSpecificData(
 void CountPaymentRequestNetworkNameInSupportedMethods(
     const Vector<String>& supported_methods,
     ExecutionContext& execution_context) {
-  for (size_t i = 0; i < arraysize(kBasicCardNetworks); ++i) {
-    if (supported_methods.Contains(kBasicCardNetworks[i].name)) {
-      Deprecation::CountDeprecation(
-          &execution_context,
-          WebFeature::kPaymentRequestNetworkNameInSupportedMethods);
-      break;
-    }
+  if (BasicCardHelper::ContainsNetworkNames(supported_methods)) {
+    Deprecation::CountDeprecation(
+        &execution_context,
+        WebFeature::kPaymentRequestNetworkNameInSupportedMethods);
+  }
+}
+
+// Implements the PMI validation algorithm from:
+// https://www.w3.org/TR/payment-method-id/#dfn-validate-a-payment-method-identifier
+bool IsValidMethodFormat(const String& identifier) {
+  KURL url(NullURL(), identifier);
+  if (url.IsValid()) {
+    // URL PMI validation rules:
+    // https://www.w3.org/TR/payment-method-id/#dfn-validate-a-url-based-payment-method-identifier
+    return url.Protocol() == "https" && url.User().IsEmpty() &&
+           url.Pass().IsEmpty();
+  } else {
+    // Syntax for a valid standardized PMI:
+    // https://www.w3.org/TR/payment-method-id/#dfn-syntax-of-a-standardized-payment-method-identifier
+    return ScriptRegexp("^[a-z]+[0-9a-z]*(-[a-z]+[0-9a-z]*)*$",
+                        kTextCaseSensitive)
+               .Match(identifier) == 0;
   }
 }
 
@@ -547,7 +501,7 @@ void ValidateAndConvertPaymentDetailsModifiers(
     Vector<PaymentDetailsModifierPtr>& output,
     ExecutionContext& execution_context,
     ExceptionState& exception_state) {
-  if (input.size() > kMaxListSize) {
+  if (input.size() > PaymentRequest::kMaxListSize) {
     exception_state.ThrowTypeError("At most 1024 modifiers allowed");
     return;
   }
@@ -571,37 +525,54 @@ void ValidateAndConvertPaymentDetailsModifiers(
         return;
     }
 
-    if (modifier.supportedMethods().IsEmpty()) {
+    Vector<String> supported_methods;
+    if (modifier.supportedMethods().IsString()) {
+      supported_methods.push_back(modifier.supportedMethods().GetAsString());
+    }
+    if (modifier.supportedMethods().IsStringSequence()) {
+      supported_methods = modifier.supportedMethods().GetAsStringSequence();
+      if (supported_methods.size() > 1) {
+        Deprecation::CountDeprecation(
+            &execution_context,
+            WebFeature::kPaymentRequestSupportedMethodsArray);
+      }
+    }
+    if (supported_methods.IsEmpty()) {
       exception_state.ThrowTypeError(
           "Must specify at least one payment method identifier");
       return;
     }
 
-    if (modifier.supportedMethods().size() > kMaxListSize) {
+    if (supported_methods.size() > PaymentRequest::kMaxListSize) {
       exception_state.ThrowTypeError(
           "At most 1024 supportedMethods allowed for modifier");
       return;
     }
 
-    for (const String& method : modifier.supportedMethods()) {
-      if (method.length() > kMaxStringLength) {
+    for (const String& method : supported_methods) {
+      if (method.length() > PaymentRequest::kMaxStringLength) {
         exception_state.ThrowTypeError(
             "Supported method name for identifier cannot be longer than 1024 "
             "characters");
         return;
       }
+      if (!IsValidMethodFormat(method)) {
+        exception_state.ThrowRangeError(
+            "Invalid payment method identifier format");
+        return;
+      }
     }
-    CountPaymentRequestNetworkNameInSupportedMethods(
-        modifier.supportedMethods(), execution_context);
+    CountPaymentRequestNetworkNameInSupportedMethods(supported_methods,
+                                                     execution_context);
 
     output.back()->method_data =
         payments::mojom::blink::PaymentMethodData::New();
-    output.back()->method_data->supported_methods = modifier.supportedMethods();
+    output.back()->method_data->supported_methods = supported_methods;
 
     if (modifier.hasData() && !modifier.data().IsEmpty()) {
-      StringifyAndParseMethodSpecificData(
-          modifier.supportedMethods(), modifier.data(),
-          output.back()->method_data, exception_state);
+      StringifyAndParseMethodSpecificData(supported_methods, modifier.data(),
+                                          output.back()->method_data,
+                                          exception_state);
     } else {
       output.back()->method_data->stringified_data = "";
     }
@@ -609,6 +580,7 @@ void ValidateAndConvertPaymentDetailsModifiers(
 }
 
 void ValidateAndConvertPaymentDetailsBase(const PaymentDetailsBase& input,
+                                          const PaymentOptions& options,
                                           PaymentDetailsPtr& output,
                                           String& shipping_option_output,
                                           ExecutionContext& execution_context,
@@ -621,7 +593,9 @@ void ValidateAndConvertPaymentDetailsBase(const PaymentDetailsBase& input,
       return;
   }
 
-  if (input.hasShippingOptions()) {
+  // If requestShipping is specified and there are shipping options to validate,
+  // proceed with validation.
+  if (options.requestShipping() && input.hasShippingOptions()) {
     ValidateAndConvertShippingOptions(
         input.shippingOptions(), output->shipping_options,
         shipping_option_output, execution_context, exception_state);
@@ -639,6 +613,7 @@ void ValidateAndConvertPaymentDetailsBase(const PaymentDetailsBase& input,
 }
 
 void ValidateAndConvertPaymentDetailsInit(const PaymentDetailsInit& input,
+                                          const PaymentOptions& options,
                                           PaymentDetailsPtr& output,
                                           String& shipping_option_output,
                                           ExecutionContext& execution_context,
@@ -649,16 +624,19 @@ void ValidateAndConvertPaymentDetailsInit(const PaymentDetailsInit& input,
   if (exception_state.HadException())
     return;
 
-  ValidateAndConvertPaymentDetailsBase(input, output, shipping_option_output,
+  ValidateAndConvertPaymentDetailsBase(input, options, output,
+                                       shipping_option_output,
                                        execution_context, exception_state);
 }
 
 void ValidateAndConvertPaymentDetailsUpdate(const PaymentDetailsUpdate& input,
+                                            const PaymentOptions& options,
                                             PaymentDetailsPtr& output,
                                             String& shipping_option_output,
                                             ExecutionContext& execution_context,
                                             ExceptionState& exception_state) {
-  ValidateAndConvertPaymentDetailsBase(input, output, shipping_option_output,
+  ValidateAndConvertPaymentDetailsBase(input, options, output,
+                                       shipping_option_output,
                                        execution_context, exception_state);
   if (exception_state.HadException())
     return;
@@ -686,6 +664,7 @@ void ValidateAndConvertPaymentDetailsUpdate(const PaymentDetailsUpdate& input,
 void ValidateAndConvertPaymentMethodData(
     const HeapVector<PaymentMethodData>& input,
     Vector<payments::mojom::blink::PaymentMethodDataPtr>& output,
+    HashSet<String>& method_names,
     ExecutionContext& execution_context,
     ExceptionState& exception_state) {
   if (input.IsEmpty()) {
@@ -693,46 +672,66 @@ void ValidateAndConvertPaymentMethodData(
     return;
   }
 
-  if (input.size() > kMaxListSize) {
+  if (input.size() > PaymentRequest::kMaxListSize) {
     exception_state.ThrowTypeError(
         "At most 1024 payment methods are supported");
     return;
   }
 
   for (const PaymentMethodData payment_method_data : input) {
-    if (payment_method_data.supportedMethods().IsEmpty()) {
+    Vector<String> supported_methods;
+    if (payment_method_data.supportedMethods().IsString()) {
+      supported_methods.push_back(
+          payment_method_data.supportedMethods().GetAsString());
+    }
+    if (payment_method_data.supportedMethods().IsStringSequence()) {
+      supported_methods =
+          payment_method_data.supportedMethods().GetAsStringSequence();
+      if (supported_methods.size() > 1) {
+        Deprecation::CountDeprecation(
+            &execution_context,
+            WebFeature::kPaymentRequestSupportedMethodsArray);
+      }
+    }
+    if (supported_methods.IsEmpty()) {
       exception_state.ThrowTypeError(
           "Each payment method needs to include at least one payment method "
           "identifier");
       return;
     }
 
-    if (payment_method_data.supportedMethods().size() > kMaxListSize) {
+    if (supported_methods.size() > PaymentRequest::kMaxListSize) {
       exception_state.ThrowTypeError(
           "At most 1024 payment method identifiers are supported");
       return;
     }
 
-    for (const String identifier : payment_method_data.supportedMethods()) {
-      if (identifier.length() > kMaxStringLength) {
+    for (const String identifier : supported_methods) {
+      if (identifier.length() > PaymentRequest::kMaxStringLength) {
         exception_state.ThrowTypeError(
             "A payment method identifier cannot be longer than 1024 "
             "characters");
         return;
       }
+      if (!IsValidMethodFormat(identifier)) {
+        exception_state.ThrowRangeError(
+            "Invalid payment method identifier format");
+        return;
+      }
+      method_names.insert(identifier);
     }
 
-    CountPaymentRequestNetworkNameInSupportedMethods(
-        payment_method_data.supportedMethods(), execution_context);
+    CountPaymentRequestNetworkNameInSupportedMethods(supported_methods,
+                                                     execution_context);
 
     output.push_back(payments::mojom::blink::PaymentMethodData::New());
-    output.back()->supported_methods = payment_method_data.supportedMethods();
+    output.back()->supported_methods = supported_methods;
 
     if (payment_method_data.hasData() &&
         !payment_method_data.data().IsEmpty()) {
-      StringifyAndParseMethodSpecificData(
-          payment_method_data.supportedMethods(), payment_method_data.data(),
-          output.back(), exception_state);
+      StringifyAndParseMethodSpecificData(supported_methods,
+                                          payment_method_data.data(),
+                                          output.back(), exception_state);
     } else {
       output.back()->stringified_data = "";
     }
@@ -747,7 +746,7 @@ bool AllowedToUsePaymentRequest(const Frame* frame) {
   if (!frame)
     return false;
 
-  if (!IsSupportedInFeaturePolicy(WebFeaturePolicyFeature::kPayment)) {
+  if (!IsSupportedInFeaturePolicy(mojom::FeaturePolicyFeature::kPayment)) {
     // 2. If |document|'s browsing context is a top-level browsing context, then
     // return true.
     if (frame->IsMainFrame())
@@ -765,7 +764,7 @@ bool AllowedToUsePaymentRequest(const Frame* frame) {
   }
 
   // 2. If Feature Policy is enabled, return the policy for "payment" feature.
-  return frame->IsFeatureEnabled(WebFeaturePolicyFeature::kPayment);
+  return frame->IsFeatureEnabled(mojom::FeaturePolicyFeature::kPayment);
 }
 
 void WarnIgnoringQueryQuotaForCanMakePayment(
@@ -798,7 +797,7 @@ PaymentRequest* PaymentRequest::Create(
                             exception_state);
 }
 
-PaymentRequest::~PaymentRequest() {}
+PaymentRequest::~PaymentRequest() = default;
 
 ScriptPromise PaymentRequest::show(ScriptState* script_state) {
   if (!payment_provider_.is_bound() || show_resolver_) {
@@ -814,9 +813,9 @@ ScriptPromise PaymentRequest::show(ScriptState* script_state) {
                                            "Cannot show the payment request"));
   }
 
-  // VR mode uses popup suppression setting to disable html select element,
-  // date pickers, etc.
-  if (GetFrame()->GetDocument()->GetSettings()->GetPagePopupsSuppressed()) {
+  // TODO(crbug.com/779126): add support for handling payment requests in
+  // immersive mode.
+  if (GetFrame()->GetDocument()->GetSettings()->GetImmersiveModeEnabled()) {
     return ScriptPromise::RejectWithDOMException(
         script_state,
         DOMException::Create(kInvalidStateError, "Page popups are suppressed"));
@@ -856,8 +855,8 @@ ScriptPromise PaymentRequest::abort(ScriptState* script_state) {
 }
 
 ScriptPromise PaymentRequest::canMakePayment(ScriptState* script_state) {
-  if (!payment_provider_.is_bound() || can_make_payment_resolver_ ||
-      !script_state->ContextIsValid()) {
+  if (!payment_provider_.is_bound() || show_resolver_ ||
+      can_make_payment_resolver_ || !script_state->ContextIsValid()) {
     return ScriptPromise::RejectWithDOMException(
         script_state, DOMException::Create(kInvalidStateError,
                                            "Cannot query payment request"));
@@ -927,12 +926,11 @@ void PaymentRequest::OnUpdatePaymentDetails(
   ExceptionState exception_state(v8::Isolate::GetCurrent(),
                                  ExceptionState::kConstructionContext,
                                  "PaymentDetailsUpdate");
-  V8PaymentDetailsUpdate::toImpl(details_script_value.GetIsolate(),
+  V8PaymentDetailsUpdate::ToImpl(details_script_value.GetIsolate(),
                                  details_script_value.V8Value(), details,
                                  exception_state);
   if (exception_state.HadException()) {
-    show_resolver_->Reject(
-        DOMException::Create(kSyntaxError, exception_state.Message()));
+    show_resolver_->Reject(exception_state.GetException());
     ClearResolversAndCloseMojoConnection();
     return;
   }
@@ -947,11 +945,10 @@ void PaymentRequest::OnUpdatePaymentDetails(
   PaymentDetailsPtr validated_details =
       payments::mojom::blink::PaymentDetails::New();
   ValidateAndConvertPaymentDetailsUpdate(
-      details, validated_details, shipping_option_, *GetExecutionContext(),
-      exception_state);
+      details, options_, validated_details, shipping_option_,
+      *GetExecutionContext(), exception_state);
   if (exception_state.HadException()) {
-    show_resolver_->Reject(
-        DOMException::Create(kSyntaxError, exception_state.Message()));
+    show_resolver_->Reject(exception_state.GetException());
     ClearResolversAndCloseMojoConnection();
     return;
   }
@@ -970,7 +967,7 @@ void PaymentRequest::OnUpdatePaymentDetailsFailure(const String& error) {
   ClearResolversAndCloseMojoConnection();
 }
 
-DEFINE_TRACE(PaymentRequest) {
+void PaymentRequest::Trace(blink::Visitor* visitor) {
   visitor->Trace(options_);
   visitor->Trace(shipping_address_);
   visitor->Trace(show_resolver_);
@@ -983,7 +980,7 @@ DEFINE_TRACE(PaymentRequest) {
 
 void PaymentRequest::OnCompleteTimeoutForTesting() {
   complete_timer_.Stop();
-  OnCompleteTimeout(0);
+  OnCompleteTimeout(nullptr);
 }
 
 PaymentRequest::PaymentRequest(ExecutionContext* execution_context,
@@ -995,7 +992,7 @@ PaymentRequest::PaymentRequest(ExecutionContext* execution_context,
       options_(options),
       client_binding_(this),
       complete_timer_(
-          TaskRunnerHelper::Get(TaskType::kMiscPlatformAPI, GetFrame()),
+          execution_context->GetTaskRunner(TaskType::kMiscPlatformAPI),
           this,
           &PaymentRequest::OnCompleteTimeout) {
   if (!GetExecutionContext()->IsSecureContext()) {
@@ -1010,7 +1007,8 @@ PaymentRequest::PaymentRequest(ExecutionContext* execution_context,
     return;
   }
 
-  if (details.hasId() && details.id().length() > kMaxStringLength) {
+  if (details.hasId() &&
+      details.id().length() > PaymentRequest::kMaxStringLength) {
     exception_state.ThrowTypeError("ID cannot be longer than 1024 characters");
     return;
   }
@@ -1022,11 +1020,12 @@ PaymentRequest::PaymentRequest(ExecutionContext* execution_context,
 
   Vector<payments::mojom::blink::PaymentMethodDataPtr> validated_method_data;
   ValidateAndConvertPaymentMethodData(method_data, validated_method_data,
-                                      *GetExecutionContext(), exception_state);
+                                      method_names_, *GetExecutionContext(),
+                                      exception_state);
   if (exception_state.HadException())
     return;
 
-  ValidateAndConvertPaymentDetailsInit(details, validated_details,
+  ValidateAndConvertPaymentDetailsInit(details, options_, validated_details,
                                        shipping_option_, *GetExecutionContext(),
                                        exception_state);
   if (exception_state.HadException())
@@ -1042,9 +1041,9 @@ PaymentRequest::PaymentRequest(ExecutionContext* execution_context,
 
   GetFrame()->GetInterfaceProvider().GetInterface(
       mojo::MakeRequest(&payment_provider_));
-  payment_provider_.set_connection_error_handler(ConvertToBaseCallback(
+  payment_provider_.set_connection_error_handler(
       WTF::Bind(&PaymentRequest::OnError, WrapWeakPersistent(this),
-                PaymentErrorReason::UNKNOWN)));
+                PaymentErrorReason::UNKNOWN));
 
   payments::mojom::blink::PaymentRequestClientPtr client;
   client_binding_.Bind(mojo::MakeRequest(&client));
@@ -1070,28 +1069,38 @@ void PaymentRequest::OnShippingAddressChange(PaymentAddressPtr address) {
   }
 
   shipping_address_ = new PaymentAddress(std::move(address));
+
   PaymentRequestUpdateEvent* event = PaymentRequestUpdateEvent::Create(
       GetExecutionContext(), EventTypeNames::shippingaddresschange);
   event->SetTarget(this);
   event->SetPaymentDetailsUpdater(this);
-  bool success = GetExecutionContext()->GetEventQueue()->EnqueueEvent(
-      BLINK_FROM_HERE, event);
-  DCHECK(success);
-  ALLOW_UNUSED_LOCAL(success);
+  DispatchEvent(event);
+  if (!event->is_waiting_for_update()) {
+    GetExecutionContext()->AddConsoleMessage(ConsoleMessage::Create(
+        kJSMessageSource, kWarningMessageLevel,
+        "No updateWith() call in 'shippingaddresschange' event handler. User "
+        "may see outdated line items and total."));
+    payment_provider_->NoUpdatedPaymentDetails();
+  }
 }
 
 void PaymentRequest::OnShippingOptionChange(const String& shipping_option_id) {
   DCHECK(show_resolver_);
   DCHECK(!complete_resolver_);
   shipping_option_ = shipping_option_id;
+
   PaymentRequestUpdateEvent* event = PaymentRequestUpdateEvent::Create(
       GetExecutionContext(), EventTypeNames::shippingoptionchange);
   event->SetTarget(this);
   event->SetPaymentDetailsUpdater(this);
-  bool success = GetExecutionContext()->GetEventQueue()->EnqueueEvent(
-      BLINK_FROM_HERE, event);
-  DCHECK(success);
-  ALLOW_UNUSED_LOCAL(success);
+  DispatchEvent(event);
+  if (!event->is_waiting_for_update()) {
+    GetExecutionContext()->AddConsoleMessage(ConsoleMessage::Create(
+        kJSMessageSource, kWarningMessageLevel,
+        "No updateWith() call in 'shippingoptionchange' event handler. User "
+        "may see outdated line items and total."));
+    payment_provider_->NoUpdatedPaymentDetails();
+  }
 }
 
 void PaymentRequest::OnPaymentResponse(PaymentResponsePtr response) {
@@ -1114,7 +1123,8 @@ void PaymentRequest::OnPaymentResponse(PaymentResponsePtr response) {
       return;
     }
 
-    shipping_address_ = new PaymentAddress(response->shipping_address.Clone());
+    shipping_address_ =
+        new PaymentAddress(std::move(response->shipping_address));
     shipping_option_ = response->shipping_option;
   } else {
     if (response->shipping_address || !response->shipping_option.IsNull()) {
@@ -1135,9 +1145,10 @@ void PaymentRequest::OnPaymentResponse(PaymentResponsePtr response) {
     return;
   }
 
-  complete_timer_.StartOneShot(kCompleteTimeoutSeconds, BLINK_FROM_HERE);
+  complete_timer_.StartOneShot(kCompleteTimeoutSeconds, FROM_HERE);
 
-  show_resolver_->Resolve(new PaymentResponse(std::move(response), this, id_));
+  show_resolver_->Resolve(new PaymentResponse(
+      std::move(response), shipping_address_.Get(), this, id_));
 
   // Do not close the mojo connection here. The merchant website should call
   // PaymentResponse::complete(String), which will be forwarded over the mojo
@@ -1150,24 +1161,51 @@ void PaymentRequest::OnError(PaymentErrorReason error) {
   String message;
 
   switch (error) {
-    case PaymentErrorReason::USER_CANCEL:
+    case PaymentErrorReason::USER_CANCEL: {
       ec = kAbortError;
       message = "Request cancelled";
       break;
-    case PaymentErrorReason::NOT_SUPPORTED:
+    }
+
+    case PaymentErrorReason::NOT_SUPPORTED: {
       ec = kNotSupportedError;
-      message = "The payment method is not supported";
+      DCHECK_LE(1U, method_names_.size());
+      auto it = method_names_.begin();
+      if (method_names_.size() == 1U) {
+        message = "The payment method \"" + *it + "\" is not supported";
+      } else {
+        StringBuilder sb;
+        sb.Append("The payment methods \"");
+        sb.Append(*it);
+        sb.Append("\"");
+        while (++it != method_names_.end()) {
+          sb.Append(", \"");
+          sb.Append(*it);
+          sb.Append("\"");
+        }
+        sb.Append(" are not supported");
+        message = sb.ToString();
+      }
       break;
-    case PaymentErrorReason::UNKNOWN:
+    }
+
+    case PaymentErrorReason::UNKNOWN: {
       ec = kUnknownError;
       message = "Request failed";
       break;
+    }
   }
 
   DCHECK(!message.IsEmpty());
 
-  if (complete_resolver_)
-    complete_resolver_->Reject(DOMException::Create(ec, message));
+  // If the user closes PaymentRequest UI after PaymentResponse.complete() has
+  // been called, the PaymentResponse.complete() promise should be resolved with
+  // undefined instead of rejecting.
+  if (complete_resolver_) {
+    DCHECK(error == PaymentErrorReason::USER_CANCEL ||
+           error == PaymentErrorReason::UNKNOWN);
+    complete_resolver_->Resolve();
+  }
 
   if (show_resolver_)
     show_resolver_->Reject(DOMException::Create(ec, message));
@@ -1210,13 +1248,13 @@ void PaymentRequest::OnCanMakePayment(CanMakePaymentQueryResult result) {
   switch (result) {
     case CanMakePaymentQueryResult::WARNING_CAN_MAKE_PAYMENT:
       WarnIgnoringQueryQuotaForCanMakePayment(*GetExecutionContext());
-    // Intentionally fall through.
+      FALLTHROUGH;
     case CanMakePaymentQueryResult::CAN_MAKE_PAYMENT:
       can_make_payment_resolver_->Resolve(true);
       break;
     case CanMakePaymentQueryResult::WARNING_CANNOT_MAKE_PAYMENT:
       WarnIgnoringQueryQuotaForCanMakePayment(*GetExecutionContext());
-    // Intentionally fall through.
+      FALLTHROUGH;
     case CanMakePaymentQueryResult::CANNOT_MAKE_PAYMENT:
       can_make_payment_resolver_->Resolve(false);
       break;

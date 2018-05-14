@@ -14,7 +14,6 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@class RTCAVFoundationVideoSource;
 @class RTCAudioSource;
 @class RTCAudioTrack;
 @class RTCConfiguration;
@@ -23,12 +22,20 @@ NS_ASSUME_NONNULL_BEGIN
 @class RTCPeerConnection;
 @class RTCVideoSource;
 @class RTCVideoTrack;
+@class RTCPeerConnectionFactoryOptions;
 @protocol RTCPeerConnectionDelegate;
+@protocol RTCVideoDecoderFactory;
+@protocol RTCVideoEncoderFactory;
 
 RTC_EXPORT
 @interface RTCPeerConnectionFactory : NSObject
 
-- (instancetype)init NS_DESIGNATED_INITIALIZER;
+/* Initialize object with default H264 video encoder/decoder factories */
+- (instancetype)init;
+
+/* Initialize object with injectable video encoder/decoder factories */
+- (instancetype)initWithEncoderFactory:(nullable id<RTCVideoEncoderFactory>)encoderFactory
+                        decoderFactory:(nullable id<RTCVideoDecoderFactory>)decoderFactory;
 
 /** Initialize an RTCAudioSource with constraints. */
 - (RTCAudioSource *)audioSourceWithConstraints:(nullable RTCMediaConstraints *)constraints;
@@ -41,10 +48,6 @@ RTC_EXPORT
 /** Initialize an RTCAudioTrack with a source and an id. */
 - (RTCAudioTrack *)audioTrackWithSource:(RTCAudioSource *)source
                                 trackId:(NSString *)trackId;
-
-/** Initialize an RTCAVFoundationVideoSource with constraints. */
-- (RTCAVFoundationVideoSource *)avFoundationVideoSourceWithConstraints:
-    (nullable RTCMediaConstraints *)constraints;
 
 /** Initialize a generic RTCVideoSource. The RTCVideoSource should be passed to a RTCVideoCapturer
  *  implementation, e.g. RTCCameraVideoCapturer, in order to produce frames.
@@ -67,6 +70,9 @@ RTC_EXPORT
     (RTCMediaConstraints *)constraints
                                               delegate:
     (nullable id<RTCPeerConnectionDelegate>)delegate;
+
+/** Set the options to be used for subsequently created RTCPeerConnections */
+- (void)setOptions:(nonnull RTCPeerConnectionFactoryOptions *)options;
 
 /** Start an AecDump recording. This API call will likely change in the future. */
 - (BOOL)startAecDumpWithFilePath:(NSString *)filePath

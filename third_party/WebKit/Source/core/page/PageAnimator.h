@@ -17,7 +17,7 @@ class Page;
 class CORE_EXPORT PageAnimator final : public GarbageCollected<PageAnimator> {
  public:
   static PageAnimator* Create(Page&);
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
   void ScheduleVisualUpdate(LocalFrame*);
   void ServiceScriptedAnimations(double monotonic_animation_start_time);
 
@@ -31,6 +31,7 @@ class CORE_EXPORT PageAnimator final : public GarbageCollected<PageAnimator> {
 
   // See documents of methods with the same names in LocalFrameView class.
   void UpdateAllLifecyclePhases(LocalFrame& root_frame);
+  void UpdateLifecycleToPrePaintClean(LocalFrame& root_frame);
   AnimationClock& Clock() { return animation_clock_; }
 
  private:

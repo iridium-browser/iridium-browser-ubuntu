@@ -10,6 +10,7 @@
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -58,7 +59,7 @@ class BatteryImageSource : public gfx::CanvasImageSource {
         bg_color_(bg_color),
         fg_color_(fg_color) {}
 
-  ~BatteryImageSource() override {}
+  ~BatteryImageSource() override = default;
 
   // gfx::ImageSkiaSource implementation.
   void Draw(gfx::Canvas* canvas) override {
@@ -409,7 +410,7 @@ gfx::ImageSkia PowerStatus::GetBatteryImage(const BatteryImageInfo& info,
                                             SkColor bg_color,
                                             SkColor fg_color) {
   auto* source = new BatteryImageSource(info, height, bg_color, fg_color);
-  return gfx::ImageSkia(source, source->size());
+  return gfx::ImageSkia(base::WrapUnique(source), source->size());
 }
 
 base::string16 PowerStatus::GetAccessibleNameString(
@@ -452,7 +453,7 @@ base::string16 PowerStatus::GetAccessibleNameString(
   }
   return battery_time_accessible.empty()
              ? battery_percentage_accessible
-             : battery_percentage_accessible + base::ASCIIToUTF16(". ") +
+             : battery_percentage_accessible + base::ASCIIToUTF16(" ") +
                    battery_time_accessible;
 }
 

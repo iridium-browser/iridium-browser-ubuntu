@@ -6,12 +6,12 @@
 #define COMPONENTS_NTP_SNIPPETS_REMOTE_REMOTE_SUGGESTIONS_FETCHER_IMPL_H_
 
 #include <memory>
-#include <queue>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/queue.h"
 #include "base/optional.h"
 #include "base/time/clock.h"
 #include "components/ntp_snippets/remote/json_request.h"
@@ -19,15 +19,18 @@
 #include "components/ntp_snippets/remote/remote_suggestions_fetcher.h"
 #include "components/ntp_snippets/remote/request_params.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/identity/public/cpp/primary_account_access_token_fetcher.h"
 
-class AccessTokenFetcher;
-class OAuth2TokenService;
 class PrefService;
-class SigninManagerBase;
 
 namespace base {
 class Value;
 }  // namespace base
+
+namespace identity {
+class IdentityManager;
+class PrimaryAccountAccessTokenFetcher;
+}
 
 namespace language {
 class UrlLanguageHistogram;
@@ -40,8 +43,7 @@ class UserClassifier;
 class RemoteSuggestionsFetcherImpl : public RemoteSuggestionsFetcher {
  public:
   RemoteSuggestionsFetcherImpl(
-      SigninManagerBase* signin_manager,
-      OAuth2TokenService* token_service,
+      identity::IdentityManager* identity_manager,
       scoped_refptr<net::URLRequestContextGetter> url_request_context_getter,
       PrefService* pref_service,
       language::UrlLanguageHistogram* language_histogram,
@@ -56,37 +58,21 @@ class RemoteSuggestionsFetcherImpl : public RemoteSuggestionsFetcher {
 
   const std::string& GetLastStatusForDebugging() const override;
   const std::string& GetLastJsonForDebugging() const override;
+  bool WasLastFetchAuthenticatedForDebugging() const override;
   const GURL& GetFetchUrlForDebugging() const override;
 
   // Overrides internal clock for testing purposes.
-  void SetClockForTesting(std::unique_ptr<base::Clock> clock) {
-    clock_ = std::move(clock);
-  }
+  void SetClockForTesting(base::Clock* clock) { clock_ = clock; }
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(ChromeReaderSnippetsFetcherTest,
-                           BuildRequestAuthenticated);
-  FRIEND_TEST_ALL_PREFIXES(ChromeReaderSnippetsFetcherTest,
-                           BuildRequestUnauthenticated);
-  FRIEND_TEST_ALL_PREFIXES(ChromeReaderSnippetsFetcherTest,
-                           BuildRequestExcludedIds);
-  FRIEND_TEST_ALL_PREFIXES(ChromeReaderSnippetsFetcherTest,
-                           BuildRequestNoUserClass);
-  FRIEND_TEST_ALL_PREFIXES(ChromeReaderSnippetsFetcherTest,
-                           BuildRequestWithTwoLanguages);
-  FRIEND_TEST_ALL_PREFIXES(ChromeReaderSnippetsFetcherTest,
-                           BuildRequestWithUILanguageOnly);
-  FRIEND_TEST_ALL_PREFIXES(ChromeReaderSnippetsFetcherTest,
-                           BuildRequestWithOtherLanguageOnly);
-  friend class ChromeReaderSnippetsFetcherTest;
-
   void FetchSnippetsNonAuthenticated(internal::JsonRequest::Builder builder,
                                      SnippetsAvailableCallback callback);
   void FetchSnippetsAuthenticated(internal::JsonRequest::Builder builder,
                                   SnippetsAvailableCallback callback,
                                   const std::string& oauth_access_token);
   void StartRequest(internal::JsonRequest::Builder builder,
-                    SnippetsAvailableCallback callback);
+                    SnippetsAvailableCallback callback,
+                    bool is_authenticated);
 
   void StartTokenRequest();
 
@@ -96,25 +82,26 @@ class RemoteSuggestionsFetcherImpl : public RemoteSuggestionsFetcher {
 
   void JsonRequestDone(std::unique_ptr<internal::JsonRequest> request,
                        SnippetsAvailableCallback callback,
+                       bool is_authenticated,
                        std::unique_ptr<base::Value> result,
                        internal::FetchResult status_code,
                        const std::string& error_details);
   void FetchFinished(OptionalFetchedCategories categories,
                      SnippetsAvailableCallback callback,
                      internal::FetchResult status_code,
-                     const std::string& error_details);
+                     const std::string& error_details,
+                     bool is_authenticated);
 
   // Authentication for signed-in users.
-  SigninManagerBase* signin_manager_;
-  OAuth2TokenService* token_service_;
+  identity::IdentityManager* identity_manager_;
 
-  std::unique_ptr<AccessTokenFetcher> token_fetcher_;
+  std::unique_ptr<identity::PrimaryAccountAccessTokenFetcher> token_fetcher_;
 
   // Holds the URL request context.
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
 
   // Stores requests that wait for an access token.
-  std::queue<
+  base::queue<
       std::pair<internal::JsonRequest::Builder, SnippetsAvailableCallback>>
       pending_requests_;
 
@@ -130,7 +117,7 @@ class RemoteSuggestionsFetcherImpl : public RemoteSuggestionsFetcher {
   const std::string api_key_;
 
   // Allow for an injectable clock for testing.
-  std::unique_ptr<base::Clock> clock_;
+  base::Clock* clock_;
 
   // Classifier that tells us how active the user is. Not owned.
   const UserClassifier* user_classifier_;
@@ -138,6 +125,7 @@ class RemoteSuggestionsFetcherImpl : public RemoteSuggestionsFetcher {
   // Info on the last finished fetch.
   std::string last_status_;
   std::string last_fetch_json_;
+  bool last_fetch_authenticated_;
 
   DISALLOW_COPY_AND_ASSIGN(RemoteSuggestionsFetcherImpl);
 };

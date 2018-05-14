@@ -5,6 +5,7 @@
 #include "ash/display/display_util.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "ash/display/extended_mouse_warp_controller.h"
@@ -15,8 +16,6 @@
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/system/system_notifier.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
@@ -31,21 +30,16 @@
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/notification.h"
-#include "ui/message_center/notification_delegate.h"
 #include "ui/message_center/notification_list.h"
+#include "ui/message_center/public/cpp/notification.h"
+#include "ui/message_center/public/cpp/notification_delegate.h"
 #include "ui/wm/core/coordinate_conversion.h"
 
 namespace ash {
 namespace {
 
 const char kDisplayErrorNotificationId[] = "chrome://settings/display/error";
-
-// TODO(glevin): These are for new MD vector icons, but are using pre-MD color
-// scheme. When we switch to all MD icons for notifications, these should be
-// updated to use MD color scheme.
-const SkColor kDisplayIconColor = SkColorSetRGB(0xBD, 0xBD, 0xBD);
-const SkColor kFeedbackIconColor = SkColorSetRGB(0x96, 0x96, 0x98);
+const char kNotifierDisplayError[] = "ash.display.error";
 
 // A notification delegate that will start the feedback app when the notication
 // is clicked.
@@ -80,12 +74,12 @@ std::unique_ptr<MouseWarpController> CreateMouseWarpController(
     display::DisplayManager* manager,
     aura::Window* drag_source) {
   if (manager->IsInUnifiedMode() && manager->num_connected_displays() >= 2)
-    return base::MakeUnique<UnifiedMouseWarpController>();
+    return std::make_unique<UnifiedMouseWarpController>();
   // Extra check for |num_connected_displays()| is for SystemDisplayApiTest
   // that injects MockScreen.
   if (manager->GetNumDisplays() < 2 || manager->num_connected_displays() < 2)
-    return base::MakeUnique<NullMouseWarpController>();
-  return base::MakeUnique<ExtendedMouseWarpController>(drag_source);
+    return std::make_unique<NullMouseWarpController>();
+  return std::make_unique<ExtendedMouseWarpController>(drag_source);
 }
 
 gfx::Rect GetNativeEdgeBounds(AshWindowTreeHost* ash_host,
@@ -148,23 +142,21 @@ void MoveCursorTo(AshWindowTreeHost* ash_host,
   host->MoveCursorToLocationInPixels(point_in_host);
 
   if (update_last_location_now) {
-    gfx::Point new_point_in_screen;
+    gfx::Point new_point_in_screen = point_in_native;
+    host->ConvertScreenInPixelsToDIP(&new_point_in_screen);
+    ::wm::ConvertPointToScreen(host->window(), &new_point_in_screen);
+
     if (Shell::Get()->display_manager()->IsInUnifiedMode()) {
-      new_point_in_screen = point_in_host;
-      // First convert to the unified host.
-      host->ConvertPixelsToDIP(&new_point_in_screen);
-      // Then convert to the unified screen.
-      Shell::GetPrimaryRootWindow()->GetHost()->ConvertPixelsToDIP(
+      // In unified desktop mode, the mirroring host converts the point to the
+      // unified host's pixel coordinates, so we also need to apply the unified
+      // host transform to get a point in the unified screen coordinates to take
+      // into account any device scale factors or ui scaling.
+      Shell::GetPrimaryRootWindow()->GetHost()->ConvertScreenInPixelsToDIP(
           &new_point_in_screen);
-    } else {
-      new_point_in_screen = point_in_native;
-      host->ConvertScreenInPixelsToDIP(&new_point_in_screen);
-      ::wm::ConvertPointToScreen(host->window(), &new_point_in_screen);
     }
     aura::Env::GetInstance()->set_last_mouse_location(new_point_in_screen);
   }
 }
-
 
 void ShowDisplayErrorNotification(const base::string16& message,
                                   bool allow_feedback) {
@@ -177,22 +169,23 @@ void ShowDisplayErrorNotification(const base::string16& message,
   if (allow_feedback) {
     message_center::ButtonInfo send_button(
         l10n_util::GetStringUTF16(IDS_ASH_DISPLAY_FAILURE_SEND_FEEDBACK));
-    send_button.icon = gfx::Image(
-        CreateVectorIcon(kNotificationFeedbackButtonIcon, kFeedbackIconColor));
     data.buttons.push_back(send_button);
   }
 
-  std::unique_ptr<message_center::Notification> notification(
-      new message_center::Notification(
+  std::unique_ptr<message_center::Notification> notification =
+      message_center::Notification::CreateSystemNotification(
           message_center::NOTIFICATION_TYPE_SIMPLE, kDisplayErrorNotificationId,
           base::string16(),  // title
-          message, gfx::Image(CreateVectorIcon(kNotificationDisplayErrorIcon,
-                                               kDisplayIconColor)),
+          message, gfx::Image(),
           base::string16(),  // display_source
-          GURL(), message_center::NotifierId(
-                      message_center::NotifierId::SYSTEM_COMPONENT,
-                      system_notifier::kNotifierDisplayError),
-          data, new DisplayErrorNotificationDelegate));
+          GURL(),
+          message_center::NotifierId(
+              message_center::NotifierId::SYSTEM_COMPONENT,
+              kNotifierDisplayError),
+          data, new DisplayErrorNotificationDelegate,
+          kNotificationMonitorWarningIcon,
+          message_center::SystemNotificationWarningLevel::WARNING);
+  notification->set_priority(message_center::SYSTEM_PRIORITY);
   message_center::MessageCenter::Get()->AddNotification(
       std::move(notification));
 }

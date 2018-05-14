@@ -153,15 +153,33 @@
     margin-left: 16px;
 }
 
-.console-group-title {
+.console-group-title.console-from-api {
     font-weight: bold;
+}
+
+.console-group-title .console-message {
+    margin-left: 12px;
 }
 
 .expand-group-icon {
     -webkit-user-select: none;
-    position: absolute;
+    flex: none;
     background-color: rgb(110, 110, 110);
-    left: -14px;
+    position: relative;
+    left: 10px;
+    top: 5px;
+    margin-right: 2px;
+}
+
+.console-group-title .message-level-icon {
+    display: none;
+}
+
+.console-message-repeat-count .expand-group-icon {
+    left: 2px;
+    top: 2px;
+    background-color: #fff;
+    margin-right: 4px;
 }
 
 .console-group {
@@ -306,8 +324,11 @@
     flex-shrink: 0;
 }
 
-.console-message-text .object-value-string {
+.console-message-text .object-value-string,
+.console-message-text .object-value-regexp,
+.console-message-text .object-value-symbol {
     white-space: pre-wrap;
+    word-break: break-all;
 }
 
 .console-message-formatted-table {
@@ -362,6 +383,17 @@
 
 .console-view-object-properties-section {
     padding: 0px;
+    position: relative;
+    vertical-align: baseline;
+    color: inherit;
+    display: inline-block;
+    overflow-wrap: break-word;
+    max-width: 100%;
+}
+
+.console-object {
+    white-space: pre-wrap;
+    word-break: break-all;
 }
 
 .console-message-stack-trace-toggle {
@@ -383,4 +415,29 @@
 
 .console-message-expand-icon {
     margin-bottom: -2px;
+}
+
+.console-inline-button {
+    background-color: #dedede;
+    padding: 2px 4px;
+    margin: 0 2px;
+    color: #333;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 12px;
+    font-family: sans-serif;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+.console-inline-button::after {
+    content: attr(data-text);
+}
+
+.console-inline-button:hover {
+    background-color: #d5d5d5;
+}
+
+.console-searchable-view {
+    max-height: 100%;
 }

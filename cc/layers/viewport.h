@@ -50,6 +50,8 @@ class CC_EXPORT Viewport {
                         bool affect_browser_controls,
                         bool scroll_outer_viewport);
 
+  bool CanScroll(const ScrollState& scroll_state) const;
+
   // Scrolls the viewport. Unlike the above method, scrolls the inner before
   // the outer viewport. Doesn't affect browser controls or return a result
   // since callers don't need it.
@@ -61,7 +63,7 @@ class CC_EXPORT Viewport {
                                 base::TimeDelta delayed_by);
 
   void PinchUpdate(float magnify_delta, const gfx::Point& anchor);
-  void PinchEnd();
+  void PinchEnd(const gfx::Point& anchor, bool snap_to_min);
 
   // Returns the "representative" viewport layer. That is, the one that's set
   // as the currently scrolling layer when the viewport scrolls and the one used

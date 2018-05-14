@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_BROWSER_SYNC_PROFILE_SYNC_SERVICE_MOCK_H_
 #define COMPONENTS_BROWSER_SYNC_PROFILE_SYNC_SERVICE_MOCK_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -43,9 +44,12 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_METHOD1(OnSyncCycleCompleted, void(const syncer::SyncCycleSnapshot&));
   MOCK_METHOD2(OnUserChoseDatatypes,
                void(bool sync_everything, syncer::ModelTypeSet chosen_types));
+  MOCK_METHOD0(SetFirstSetupComplete, void());
+  MOCK_METHOD0(GetSetupInProgressHandle,
+               std::unique_ptr<syncer::SyncSetupInProgressHandle>());
 
   MOCK_METHOD2(OnUnrecoverableError,
-               void(const tracked_objects::Location& location,
+               void(const base::Location& location,
                     const std::string& message));
   MOCK_CONST_METHOD0(GetUserShare, syncer::UserShare*());
   MOCK_METHOD0(RequestStart, void());
@@ -71,7 +75,7 @@ class ProfileSyncServiceMock : public ProfileSyncService {
                bool(syncer::SyncEngine::Status* result));
   MOCK_CONST_METHOD0(GetAuthError, const GoogleServiceAuthError&());
   MOCK_CONST_METHOD0(IsFirstSetupInProgress, bool());
-  MOCK_CONST_METHOD0(GetLastSyncedTimeString, base::string16());
+  MOCK_CONST_METHOD0(GetLastSyncedTime, base::Time());
   MOCK_CONST_METHOD0(HasUnrecoverableError, bool());
   MOCK_CONST_METHOD0(IsSyncActive, bool());
   MOCK_CONST_METHOD0(IsEngineInitialized, bool());
@@ -103,6 +107,10 @@ class ProfileSyncServiceMock : public ProfileSyncService {
                void(const std::string& passphrase, PassphraseType type));
 
   MOCK_METHOD0(OnSetupInProgressHandleDestroyed, void());
+
+  // Gives access to the real implementation of ProfileSyncService methods:
+  std::unique_ptr<syncer::SyncSetupInProgressHandle>
+  GetSetupInProgressHandleConcrete();
 };
 
 }  // namespace browser_sync

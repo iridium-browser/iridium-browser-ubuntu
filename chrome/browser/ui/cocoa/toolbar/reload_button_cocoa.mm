@@ -14,6 +14,7 @@
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/vector_icons/vector_icons.h"
 #include "ui/base/accelerators/platform_accelerator_cocoa.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -77,6 +78,10 @@ const int kReloadMenuCommands[]  = {
   menu_.reset([[NSMenu alloc] initWithTitle:@""]);
   [self populateMenu];
   [self setAttachedMenu:menu_];
+}
+
+- (BOOL)shouldMirrorInRTL {
+  return NO;
 }
 
 - (void)invalidatePendingReloadTimer {
@@ -197,7 +202,7 @@ const int kReloadMenuCommands[]  = {
 
 - (const gfx::VectorIcon*)vectorIcon {
   if ([self tag] == IDC_RELOAD) {
-    return &kNavigateReloadIcon;
+    return &vector_icons::kReloadIcon;
   } else if ([self tag] == IDC_STOP) {
     return &kNavigateStopIcon;
   } else {

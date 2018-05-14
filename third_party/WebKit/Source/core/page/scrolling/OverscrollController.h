@@ -7,6 +7,7 @@
 
 #include "platform/geometry/FloatSize.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebOverscrollBehavior.h"
 
 namespace blink {
 
@@ -38,7 +39,9 @@ class OverscrollController : public GarbageCollected<OverscrollController> {
                         const FloatPoint& position_in_root_frame,
                         const FloatSize& velocity_in_root_frame);
 
-  DECLARE_TRACE();
+  void SetOverscrollBehavior(const WebOverscrollBehavior&);
+
+  void Trace(blink::Visitor*);
 
  private:
   OverscrollController(const VisualViewport&, ChromeClient&);
@@ -47,6 +50,8 @@ class OverscrollController : public GarbageCollected<OverscrollController> {
   WeakMember<ChromeClient> chrome_client_;
 
   FloatSize accumulated_root_overscroll_;
+
+  WebOverscrollBehavior overscroll_behavior_;
 };
 
 }  // namespace blink

@@ -155,6 +155,7 @@ class NET_EXPORT_PRIVATE WebSocketTransportClientSocketPool
   int RequestSocket(const std::string& group_name,
                     const void* resolve_info,
                     RequestPriority priority,
+                    const SocketTag& socket_tag,
                     RespectLimits respect_limits,
                     ClientSocketHandle* handle,
                     const CompletionCallback& callback,
@@ -162,7 +163,8 @@ class NET_EXPORT_PRIVATE WebSocketTransportClientSocketPool
   void RequestSockets(const std::string& group_name,
                       const void* params,
                       int num_sockets,
-                      const NetLogWithSource& net_log) override;
+                      const NetLogWithSource& net_log,
+                      HttpRequestInfo::RequestMotivation motivation) override;
   void SetPriority(const std::string& group_name,
                    ClientSocketHandle* handle,
                    RequestPriority priority) override;

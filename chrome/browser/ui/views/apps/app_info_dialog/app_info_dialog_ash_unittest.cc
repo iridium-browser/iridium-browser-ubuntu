@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ash_test_helper.h"
 #include "ash/test/ash_test_views_delegate.h"
@@ -31,11 +33,11 @@ class AppInfoDialogAshTest : public ash::AshTestBase {
   void SetUp() override {
     ash::AshTestBase::SetUp();
     ash_test_helper()->test_views_delegate()->set_layout_provider(
-        base::MakeUnique<ChromeLayoutProvider>());
+        std::make_unique<ChromeLayoutProvider>());
     widget_ = views::DialogDelegate::CreateDialogWidget(
         new views::DialogDelegateView(), CurrentContext(), NULL);
     dialog_ = new AppInfoDialog(
-        widget_->GetNativeWindow(), extension_environment_.profile(),
+        extension_environment_.profile(),
         extension_environment_.MakePackagedApp(kTestExtensionId, true).get());
     widget_->GetContentsView()->AddChildView(dialog_);
     widget_->Show();

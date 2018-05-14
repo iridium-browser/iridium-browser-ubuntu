@@ -13,7 +13,7 @@
 #include "base/strings/stringprintf.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_uuid.h"
-#include "device/bluetooth/public/interfaces/test/fake_bluetooth.mojom.h"
+#include "device/bluetooth/public/mojom/test/fake_bluetooth.mojom.h"
 #include "device/bluetooth/test/fake_remote_gatt_characteristic.h"
 
 namespace bluetooth {
@@ -29,7 +29,13 @@ FakeRemoteGattService::FakeRemoteGattService(
       device_(device),
       last_characteristic_id_(0) {}
 
-FakeRemoteGattService::~FakeRemoteGattService() {}
+FakeRemoteGattService::~FakeRemoteGattService() = default;
+
+bool FakeRemoteGattService::AllResponsesConsumed() {
+  return std::all_of(
+      fake_characteristics_.begin(), fake_characteristics_.end(),
+      [](const auto& e) { return e.second->AllResponsesConsumed(); });
+}
 
 std::string FakeRemoteGattService::AddFakeCharacteristic(
     const device::BluetoothUUID& characteristic_uuid,
@@ -42,12 +48,24 @@ std::string FakeRemoteGattService::AddFakeCharacteristic(
       "%s_%zu", GetIdentifier().c_str(), ++last_characteristic_id_);
 
   std::tie(it, inserted) = fake_characteristics_.emplace(
-      new_characteristic_id, base::MakeUnique<FakeRemoteGattCharacteristic>(
+      new_characteristic_id, std::make_unique<FakeRemoteGattCharacteristic>(
                                  new_characteristic_id, characteristic_uuid,
                                  std::move(properties), this));
 
   DCHECK(inserted);
   return it->second->GetIdentifier();
+}
+
+bool FakeRemoteGattService::RemoveFakeCharacteristic(
+    const std::string& identifier) {
+  GetCharacteristic(identifier);
+  const auto& it = fake_characteristics_.find(identifier);
+  if (it == fake_characteristics_.end()) {
+    return false;
+  }
+
+  fake_characteristics_.erase(it);
+  return true;
 }
 
 std::string FakeRemoteGattService::GetIdentifier() const {

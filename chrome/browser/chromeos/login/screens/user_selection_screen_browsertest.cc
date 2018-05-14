@@ -6,7 +6,6 @@
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
@@ -25,11 +24,16 @@ namespace {
 // Consumer user according to BrowserPolicyConnector::IsNonEnterpriseUser
 // (@gmail.com).
 constexpr char kTestUser1[] = "test-user1@gmail.com";
+constexpr char kTestUser1GaiaId[] = "1111111111";
+
 // Consumer user according to BrowserPolicyConnector::IsNonEnterpriseUser
 // (@gmail.com).
 constexpr char kTestUser2[] = "test-user2@gmail.com";
+constexpr char kTestUser2GaiaId[] = "2222222222";
+
 // No consumer user according to BrowserPolicyConnector::IsNonEnterpriseUser.
 constexpr char kManagedTestUser[] = "manager@example.com";
+constexpr char kManagedTestUserGaiaId[] = "3333333333";
 
 }  // namespace
 
@@ -41,7 +45,7 @@ class UserSelectionScreenTest : public LoginManagerTest {
 
   // LoginManagerTest:
   void SetUpInProcessBrowserTestFixture() override {
-    auto cryptohome_client = base::MakeUnique<chromeos::FakeCryptohomeClient>();
+    auto cryptohome_client = std::make_unique<chromeos::FakeCryptohomeClient>();
     fake_cryptohome_client_ = cryptohome_client.get();
     DBusThreadManager::GetSetterForTesting()->SetCryptohomeClient(
         std::move(cryptohome_client));
@@ -73,9 +77,10 @@ class UserSelectionScreenTest : public LoginManagerTest {
 
 IN_PROC_BROWSER_TEST_F(UserSelectionScreenTest,
                        PRE_ShowDircryptoMigrationBanner) {
-  RegisterUser(kTestUser1);
-  RegisterUser(kTestUser2);
-  RegisterUser(kManagedTestUser);
+  RegisterUser(AccountId::FromUserEmailGaiaId(kTestUser1, kTestUser1GaiaId));
+  RegisterUser(AccountId::FromUserEmailGaiaId(kTestUser2, kTestUser2GaiaId));
+  RegisterUser(
+      AccountId::FromUserEmailGaiaId(kManagedTestUser, kManagedTestUserGaiaId));
   StartupUtils::MarkOobeCompleted();
 }
 

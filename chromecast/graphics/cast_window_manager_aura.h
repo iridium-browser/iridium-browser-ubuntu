@@ -14,12 +14,14 @@
 namespace aura {
 namespace client {
 class DefaultCaptureClient;
+class ScreenPositionClient;
 }  // namespace client
 }  // namespace aura
 
 namespace chromecast {
 
 class CastFocusClientAura;
+class CastSystemGestureEventHandler;
 class CastWindowTreeHost;
 
 class CastWindowManagerAura : public CastWindowManager,
@@ -32,10 +34,19 @@ class CastWindowManagerAura : public CastWindowManager,
   void AddWindow(gfx::NativeView window) override;
   gfx::NativeView GetRootWindow() override;
   void SetWindowId(gfx::NativeView window, WindowId window_id) override;
+  void InjectEvent(ui::Event* event) override;
 
   // aura::client::WindowParentingClient implementation:
   aura::Window* GetDefaultParent(aura::Window* window,
                                  const gfx::Rect& bounds) override;
+
+  void AddSideSwipeGestureHandler(
+      CastSideSwipeGestureHandlerInterface* handler) override;
+
+  void RemoveSideSwipeGestureHandler(
+      CastSideSwipeGestureHandlerInterface* handler) override;
+
+  void SetColorInversion(bool enable) override;
 
  private:
   friend class CastWindowManager;
@@ -49,6 +60,8 @@ class CastWindowManagerAura : public CastWindowManager,
   std::unique_ptr<CastWindowTreeHost> window_tree_host_;
   std::unique_ptr<aura::client::DefaultCaptureClient> capture_client_;
   std::unique_ptr<CastFocusClientAura> focus_client_;
+  std::unique_ptr<aura::client::ScreenPositionClient> screen_position_client_;
+  std::unique_ptr<CastSystemGestureEventHandler> system_gesture_event_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(CastWindowManagerAura);
 };

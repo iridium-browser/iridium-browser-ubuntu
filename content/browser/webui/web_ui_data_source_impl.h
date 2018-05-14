@@ -9,6 +9,7 @@
 
 #include <map>
 #include <string>
+#include <unordered_set>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
@@ -25,9 +26,8 @@ namespace content {
 
 // A data source that can help with implementing the common operations
 // needed by the chrome WEBUI settings/history/downloads pages.
-class CONTENT_EXPORT WebUIDataSourceImpl
-    : public NON_EXPORTED_BASE(URLDataSourceImpl),
-      public NON_EXPORTED_BASE(WebUIDataSource) {
+class CONTENT_EXPORT WebUIDataSourceImpl : public URLDataSourceImpl,
+                                           public WebUIDataSource {
  public:
   // WebUIDataSource implementation:
   void AddString(const std::string& name, const base::string16& value) override;
@@ -48,7 +48,7 @@ class CONTENT_EXPORT WebUIDataSourceImpl
   void OverrideContentSecurityPolicyObjectSrc(const std::string& data) override;
   void OverrideContentSecurityPolicyChildSrc(const std::string& data) override;
   void DisableDenyXFrameOptions() override;
-  void UseGzip(const std::unordered_set<std::string>& excluded_paths) override;
+  void UseGzip(const std::vector<std::string>& excluded_paths) override;
   const ui::TemplateReplacements* GetReplacements() const override;
 
   // Add the locale to the load time data defaults. May be called repeatedly.

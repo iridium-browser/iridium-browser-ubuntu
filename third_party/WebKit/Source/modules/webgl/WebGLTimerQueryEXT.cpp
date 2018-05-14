@@ -4,10 +4,10 @@
 
 #include "modules/webgl/WebGLTimerQueryEXT.h"
 
-#include "core/dom/TaskRunnerHelper.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "modules/webgl/WebGLRenderingContextBase.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -22,8 +22,8 @@ WebGLTimerQueryEXT::WebGLTimerQueryEXT(WebGLRenderingContextBase* ctx)
       can_update_availability_(false),
       query_result_available_(false),
       query_result_(0),
-      task_runner_(TaskRunnerHelper::Get(TaskType::kUnthrottled,
-                                         &ctx->canvas()->GetDocument())) {
+      task_runner_(
+          ctx->canvas()->GetDocument().GetTaskRunner(TaskType::kUnthrottled)) {
   Context()->ContextGL()->GenQueriesEXT(1, &query_id_);
 }
 
@@ -91,9 +91,10 @@ void WebGLTimerQueryEXT::DeleteObjectImpl(gpu::gles2::GLES2Interface* gl) {
 void WebGLTimerQueryEXT::ScheduleAllowAvailabilityUpdate() {
   if (task_handle_.IsActive())
     return;
-  task_handle_ = task_runner_->PostCancellableTask(
-      BLINK_FROM_HERE, WTF::Bind(&WebGLTimerQueryEXT::AllowAvailabilityUpdate,
-                                 WrapWeakPersistent(this)));
+  task_handle_ = PostCancellableTask(
+      *task_runner_, FROM_HERE,
+      WTF::Bind(&WebGLTimerQueryEXT::AllowAvailabilityUpdate,
+                WrapWeakPersistent(this)));
 }
 
 void WebGLTimerQueryEXT::AllowAvailabilityUpdate() {

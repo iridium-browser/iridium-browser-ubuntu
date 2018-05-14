@@ -17,24 +17,18 @@ namespace blink {
 
 class ScriptState;
 
-class IDBObserverChanges final : public GarbageCollected<IDBObserverChanges>,
-                                 public ScriptWrappable {
+class IDBObserverChanges final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static IDBObserverChanges* Create(
       IDBDatabase*,
-      const WebVector<WebIDBObservation>&,
-      const WebVector<int32_t>& observation_indices,
-      v8::Isolate*);
-  static IDBObserverChanges* Create(
-      IDBDatabase*,
       IDBTransaction*,
-      const WebVector<WebIDBObservation>&,
-      const WebVector<int32_t>& observation_indices,
-      v8::Isolate*);
+      const WebVector<WebIDBObservation>& web_observations,
+      const HeapVector<Member<IDBObservation>>& observations,
+      const WebVector<int32_t>& observation_indices);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   // Implement IDL
   IDBTransaction* transaction() const { return transaction_.Get(); }
@@ -44,13 +38,14 @@ class IDBObserverChanges final : public GarbageCollected<IDBObserverChanges>,
  private:
   IDBObserverChanges(IDBDatabase*,
                      IDBTransaction*,
-                     const WebVector<WebIDBObservation>&,
-                     const WebVector<int32_t>& observation_indices,
-                     v8::Isolate*);
 
-  void ExtractChanges(const WebVector<WebIDBObservation>&,
-                      const WebVector<int32_t>& observation_indices,
-                      v8::Isolate*);
+                     const WebVector<WebIDBObservation>& web_observations,
+                     const HeapVector<Member<IDBObservation>>& observations,
+                     const WebVector<int32_t>& observation_indices);
+
+  void ExtractChanges(const WebVector<WebIDBObservation>& web_observations,
+                      const HeapVector<Member<IDBObservation>>& observations,
+                      const WebVector<int32_t>& observation_indices);
 
   Member<IDBDatabase> database_;
   Member<IDBTransaction> transaction_;

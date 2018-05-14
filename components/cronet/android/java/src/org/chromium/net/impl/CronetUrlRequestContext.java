@@ -32,6 +32,7 @@ import java.net.URLStreamHandlerFactory;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -141,6 +142,13 @@ public class CronetUrlRequestContext extends CronetEngineBase {
 
     private volatile ConditionVariable mStopNetLogCompleted;
 
+    /** Set of storage paths currently in use. */
+    @GuardedBy("sInUseStoragePaths")
+    private static final HashSet<String> sInUseStoragePaths = new HashSet<String>();
+
+    /** Storage path used by this context. */
+    private final String mInUseStoragePath;
+
     /**
      * True if a NetLog observer is active.
      */
@@ -153,6 +161,16 @@ public class CronetUrlRequestContext extends CronetEngineBase {
         mNetworkThreadPriority = builder.threadPriority(Process.THREAD_PRIORITY_BACKGROUND);
         CronetLibraryLoader.ensureInitialized(builder.getContext(), builder);
         nativeSetMinLogLevel(getLoggingLevel());
+        if (builder.httpCacheMode() == HttpCacheType.DISK) {
+            mInUseStoragePath = builder.storagePath();
+            synchronized (sInUseStoragePaths) {
+                if (!sInUseStoragePaths.add(mInUseStoragePath)) {
+                    throw new IllegalStateException("Disk cache storage path already in use");
+                }
+            }
+        } else {
+            mInUseStoragePath = null;
+        }
         synchronized (mLock) {
             mUrlRequestContextAdapter =
                     nativeCreateRequestContextAdapter(createNativeUrlRequestContextConfig(builder));
@@ -180,7 +198,7 @@ public class CronetUrlRequestContext extends CronetEngineBase {
     public static long createNativeUrlRequestContextConfig(CronetEngineBuilderImpl builder) {
         final long urlRequestContextConfig = nativeCreateRequestContextConfig(
                 builder.getUserAgent(), builder.storagePath(), builder.quicEnabled(),
-                builder.getDefaultQuicUserAgentId(), builder.http2Enabled(), builder.sdchEnabled(),
+                builder.getDefaultQuicUserAgentId(), builder.http2Enabled(),
                 builder.brotliEnabled(), builder.cacheDisabled(), builder.httpCacheMode(),
                 builder.httpCacheMaxSize(), builder.experimentalOptions(),
                 builder.mockCertVerifier(), builder.networkQualityEstimatorEnabled(),
@@ -206,11 +224,14 @@ public class CronetUrlRequestContext extends CronetEngineBase {
     @Override
     public UrlRequestBase createRequest(String url, UrlRequest.Callback callback, Executor executor,
             int priority, Collection<Object> requestAnnotations, boolean disableCache,
-            boolean disableConnectionMigration, boolean allowDirectExecutor) {
+            boolean disableConnectionMigration, boolean allowDirectExecutor,
+            boolean trafficStatsTagSet, int trafficStatsTag, boolean trafficStatsUidSet,
+            int trafficStatsUid) {
         synchronized (mLock) {
             checkHaveAdapter();
             return new CronetUrlRequest(this, url, priority, callback, executor, requestAnnotations,
-                    disableCache, disableConnectionMigration, allowDirectExecutor);
+                    disableCache, disableConnectionMigration, allowDirectExecutor,
+                    trafficStatsTagSet, trafficStatsTag, trafficStatsUidSet, trafficStatsUid);
         }
     }
 
@@ -218,12 +239,15 @@ public class CronetUrlRequestContext extends CronetEngineBase {
     protected ExperimentalBidirectionalStream createBidirectionalStream(String url,
             BidirectionalStream.Callback callback, Executor executor, String httpMethod,
             List<Map.Entry<String, String>> requestHeaders, @StreamPriority int priority,
-            boolean delayRequestHeadersUntilFirstFlush, Collection<Object> requestAnnotations) {
+            boolean delayRequestHeadersUntilFirstFlush, Collection<Object> requestAnnotations,
+            boolean trafficStatsTagSet, int trafficStatsTag, boolean trafficStatsUidSet,
+            int trafficStatsUid) {
         synchronized (mLock) {
             checkHaveAdapter();
             return new CronetBidirectionalStream(this, url, priority, callback, executor,
                     httpMethod, requestHeaders, delayRequestHeadersUntilFirstFlush,
-                    requestAnnotations);
+                    requestAnnotations, trafficStatsTagSet, trafficStatsTag, trafficStatsUidSet,
+                    trafficStatsUid);
         }
     }
 
@@ -234,6 +258,11 @@ public class CronetUrlRequestContext extends CronetEngineBase {
 
     @Override
     public void shutdown() {
+        if (mInUseStoragePath != null) {
+            synchronized (sInUseStoragePaths) {
+                sInUseStoragePaths.remove(mInUseStoragePath);
+            }
+        }
         synchronized (mLock) {
             checkHaveAdapter();
             if (mActiveRequestCount.get() != 0) {
@@ -671,8 +700,8 @@ public class CronetUrlRequestContext extends CronetEngineBase {
     // Native methods are implemented in cronet_url_request_context_adapter.cc.
     private static native long nativeCreateRequestContextConfig(String userAgent,
             String storagePath, boolean quicEnabled, String quicUserAgentId, boolean http2Enabled,
-            boolean sdchEnabled, boolean brotliEnabled, boolean disableCache, int httpCacheMode,
-            long httpCacheMaxSize, String experimentalOptions, long mockCertVerifier,
+            boolean brotliEnabled, boolean disableCache, int httpCacheMode, long httpCacheMaxSize,
+            String experimentalOptions, long mockCertVerifier,
             boolean enableNetworkQualityEstimator,
             boolean bypassPublicKeyPinningForLocalTrustAnchors, String certVerifierData);
 

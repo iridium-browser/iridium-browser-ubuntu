@@ -7,7 +7,7 @@
 #include "base/test/mock_callback.h"
 #include "chrome/browser/media/android/router/media_router_android.h"
 #include "chrome/browser/media/android/router/media_router_android_bridge.h"
-#include "chrome/browser/media/router/test_helper.h"
+#include "chrome/browser/media/router/test/test_helper.h"
 #include "content/public/browser/presentation_service_delegate.h"
 #include "content/public/common/presentation_info.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -24,7 +24,7 @@ namespace media_router {
 class MockMediaRouterAndroidBridge : public MediaRouterAndroidBridge {
  public:
   MockMediaRouterAndroidBridge() : MediaRouterAndroidBridge(nullptr) {}
-  ~MockMediaRouterAndroidBridge() = default;
+  ~MockMediaRouterAndroidBridge() override = default;
 
   MOCK_METHOD7(CreateRoute,
                void(const MediaSource::Id&,
@@ -107,9 +107,6 @@ TEST_F(MediaRouterAndroidTest, OnRouteClosed) {
   Expectation createRouteExpectation =
       EXPECT_CALL(*mock_bridge_, CreateRoute(_, _, _, _, _, _, 1))
           .WillOnce(Return());
-  EXPECT_CALL(*mock_bridge_, DetachRoute("route"))
-      .After(createRouteExpectation)
-      .WillOnce(Return());
 
   router_->CreateRoute("source", "sink", url::Origin(), nullptr,
                        std::vector<MediaRouteResponseCallback>(),

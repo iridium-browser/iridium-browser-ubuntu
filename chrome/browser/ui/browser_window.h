@@ -5,6 +5,9 @@
 #ifndef CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 #define CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 
+#include <string>
+#include <vector>
+
 #include "base/callback_forward.h"
 #include "build/build_config.h"
 #include "chrome/browser/lifetime/browser_close_manager.h"
@@ -12,9 +15,10 @@
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_bubble_type.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/translate/core/common/translate_errors.h"
@@ -22,13 +26,16 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/arc/intent_helper/arc_navigation_throttle.h"
+#endif  // defined(OS_CHROMEOS)
+
 class Browser;
 class DownloadShelf;
 class ExclusiveAccessContext;
 class FindBar;
 class GURL;
 class LocationBar;
-class Profile;
 class StatusBubble;
 class ToolbarActionsBar;
 
@@ -52,10 +59,6 @@ namespace gfx {
 class Rect;
 class Size;
 }
-
-namespace security_state {
-struct SecurityInfo;
-}  // namespace security_state
 
 namespace signin_metrics {
 enum class AccessPoint;
@@ -157,14 +160,6 @@ class BrowserWindow : public ui::BaseWindow {
   // Returns true if the fullscreen bubble is visible.
   virtual bool IsFullscreenBubbleVisible() const = 0;
 
-  // Shows a notice teaching the user the new shortcut for going back or forward
-  // if the user has pressed the old shortcut more than once in three seconds
-  // and the bubble has been shown less than five times.
-  virtual void MaybeShowNewBackShortcutBubble(bool forward) = 0;
-
-  // Hides the new back shortcut bubble, if showing, by fading it out.
-  virtual void HideNewBackShortcutBubble() = 0;
-
   // Returns the size of WebContents in the browser. This may be called before
   // the TabStripModel has an active tab.
   virtual gfx::Size GetContentsSize() const = 0;
@@ -203,8 +198,8 @@ class BrowserWindow : public ui::BaseWindow {
   // Focuses the bookmarks toolbar (for accessibility).
   virtual void FocusBookmarksToolbar() = 0;
 
-  // Focuses an infobar, if shown (for accessibility).
-  virtual void FocusInfobars() = 0;
+  // Focuses a visible but inactive popup for accessibility.
+  virtual void FocusInactivePopupForAccessibility() = 0;
 
   // Moves keyboard focus to the next pane.
   virtual void RotatePaneFocus(bool forwards) = 0;
@@ -233,6 +228,16 @@ class BrowserWindow : public ui::BaseWindow {
 
   // Shows the Update Recommended dialog box.
   virtual void ShowUpdateChromeDialog() = 0;
+
+#if defined(OS_CHROMEOS)
+  // Shows the intent picker bubble. |app_info| contains the app candidates to
+  // display and |callback| gives access so we can redirect the user (if needed)
+  // and store UMA metrics.
+  virtual void ShowIntentPickerBubble(
+      std::vector<arc::ArcNavigationThrottle::AppInfo> app_info,
+      IntentPickerResponse callback) = 0;
+  virtual void SetIntentPickerViewVisibility(bool visible) = 0;
+#endif  // defined(OS_CHROMEOS)
 
   // Shows the Bookmark bubble. |url| is the URL being bookmarked,
   // |already_bookmarked| is true if the url is already bookmarked.
@@ -286,15 +291,6 @@ class BrowserWindow : public ui::BaseWindow {
   // ThemeService calls this when a user has changed their theme, indicating
   // that it's time to redraw everything.
   virtual void UserChangedTheme() = 0;
-
-  // Shows Page Info using the specified information. |virtual_url| is the
-  // virtual url of the page/frame the info applies to, and |security_info|
-  // contains the security state for that page/frame.
-  virtual void ShowPageInfo(
-      Profile* profile,
-      content::WebContents* web_contents,
-      const GURL& virtual_url,
-      const security_state::SecurityInfo& security_info) = 0;
 
   // Shows the app menu (for accessibility).
   virtual void ShowAppMenu() = 0;
@@ -375,6 +371,13 @@ class BrowserWindow : public ui::BaseWindow {
   friend class BrowserCloseManager;
   friend class BrowserView;
   virtual void DestroyBrowser() = 0;
+
+#if defined(OS_MACOSX)
+  // Creates a Cocoa browser window, in browser builds where both Views and
+  // Cocoa browsers windows are present.
+  static BrowserWindow* CreateBrowserWindowCocoa(Browser* browser,
+                                                 bool user_gesture);
+#endif
 };
 
 #endif  // CHROME_BROWSER_UI_BROWSER_WINDOW_H_

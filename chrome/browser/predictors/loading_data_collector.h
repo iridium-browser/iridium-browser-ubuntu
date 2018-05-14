@@ -8,7 +8,6 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/predictors/loading_predictor_config.h"
@@ -63,6 +62,11 @@ struct URLRequestSummary {
   bool is_no_store;
   bool network_accessed;
 
+  // The time spent looking up the host's DNS address and establishing the
+  // connection. This can be zero if the request was cached or if the existing
+  // connection was reused.
+  base::TimeDelta connect_duration;
+
   // Initializes a |URLRequestSummary| from a |URLRequest| response.
   // Returns true for success. Note: NavigationID is NOT initialized
   // by this function.
@@ -81,9 +85,6 @@ struct PageRequestSummary {
   GURL initial_url;
   base::TimeTicks first_contentful_paint;
 
-  // Stores all subresource requests within a single navigation, from initial
-  // main frame request to navigation completion.
-  std::vector<URLRequestSummary> subresource_requests;
   // Map of origin -> OriginRequestSummary. Only one instance of each origin
   // is kept per navigation, but the summary is updated several times.
   std::map<GURL, OriginRequestSummary> origins;
@@ -106,17 +107,15 @@ class LoadingDataCollector {
       content::ResourceType resource_type,
       const std::string& mime_type);
 
-  // Determines the ResourceType from the mime type, defaulting to the
-  // |fallback| if the ResourceType could not be determined.
-  static content::ResourceType GetResourceTypeFromMimeType(
-      const std::string& mime_type,
-      content::ResourceType fallback);
-
   // Thread safe.
   static bool ShouldRecordRequest(net::URLRequest* request,
                                   content::ResourceType resource_type);
   static bool ShouldRecordResponse(net::URLRequest* response);
   static bool ShouldRecordRedirect(net::URLRequest* response);
+  static bool ShouldRecordResourceFromMemoryCache(
+      const GURL& url,
+      content::ResourceType resource_type,
+      const std::string& mime_type);
 
   // 'LoadingPredictorObserver' and 'ResourcePrefetchPredictorTabHelper' call
   // the below functions to inform the collector of main frame and resource
@@ -152,6 +151,12 @@ class LoadingDataCollector {
   FRIEND_TEST_ALL_PREFIXES(LoadingDataCollectorTest,
                            TestRecordFirstContentfulPaint);
 
+  // Determines the ResourceType from the mime type, defaulting to the
+  // |fallback| if the ResourceType could not be determined.
+  static content::ResourceType GetResourceTypeFromMimeType(
+      const std::string& mime_type,
+      content::ResourceType fallback);
+
   // Returns true if the main page request is supported for prediction.
   static bool IsHandledMainPage(net::URLRequest* request);
 
@@ -162,6 +167,9 @@ class LoadingDataCollector {
   // Returns true if the subresource has a supported type.
   static bool IsHandledResourceType(content::ResourceType resource_type,
                                     const std::string& mime_type);
+
+  // Returns true if the url could be written into the database.
+  static bool IsHandledUrl(const GURL& url);
 
   static void SetAllowPortInUrlsForTesting(bool state);
 

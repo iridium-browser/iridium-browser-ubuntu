@@ -40,17 +40,11 @@ class NodeIteratorBase : public GarbageCollectedMixin {
   unsigned whatToShow() const { return what_to_show_; }
   V8NodeFilterCondition* filter() const { return filter_.Get(); }
 
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void Trace(blink::Visitor*);
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  protected:
-  // In order to properly trace wrappers it is necessary for TraceWrapperMember
-  // to find the object header from within the mixin. |childThis| is safe to
-  // find the header so we pass it instead of |this|.
-  NodeIteratorBase(void* child_this,
-                   Node*,
-                   unsigned what_to_show,
-                   V8NodeFilterCondition*);
+  NodeIteratorBase(Node*, unsigned what_to_show, V8NodeFilterCondition*);
   unsigned AcceptNode(Node*, ExceptionState&) const;
 
  private:

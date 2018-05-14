@@ -12,15 +12,12 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "content/shell/test_runner/layout_and_paint_async_then.h"
 #include "content/shell/test_runner/layout_dump.h"
 #include "content/shell/test_runner/mock_content_settings_client.h"
-#include "content/shell/test_runner/mock_credential_manager_client.h"
 #include "content/shell/test_runner/mock_screen_orientation_client.h"
 #include "content/shell/test_runner/mock_web_speech_recognizer.h"
-#include "content/shell/test_runner/mock_web_user_media_client.h"
 #include "content/shell/test_runner/pixel_dump.h"
 #include "content/shell/test_runner/spell_check_client.h"
 #include "content/shell/test_runner/test_common.h"
@@ -36,15 +33,14 @@
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
+#include "third_party/WebKit/public/mojom/page/page_visibility_state.mojom.h"
 #include "third_party/WebKit/public/platform/WebCanvas.h"
 #include "third_party/WebKit/public/platform/WebData.h"
-#include "third_party/WebKit/public/platform/WebPasswordCredential.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerRegistration.h"
 #include "third_party/WebKit/public/web/WebArrayBuffer.h"
 #include "third_party/WebKit/public/web/WebArrayBufferConverter.h"
-#include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFindOptions.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
@@ -52,7 +48,6 @@
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
-#include "third_party/WebKit/public/web/WebPageImportanceSignals.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "third_party/WebKit/public/web/WebSerializedScriptValue.h"
@@ -66,10 +61,6 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/switches.h"
-
-#if defined(__linux__) || defined(ANDROID)
-#include "third_party/WebKit/public/web/linux/WebFontRendering.h"
-#endif
 
 using namespace blink;
 
@@ -102,9 +93,10 @@ void TestRunnerForSpecificView::Reset() {
     web_view()->SetSelectionColors(0xff1e90ff, 0xff000000, 0xffc8c8c8,
                                    0xff323232);
 #endif
-    web_view()->SetVisibilityState(kWebPageVisibilityStateVisible, true);
+    web_view()->SetVisibilityState(blink::mojom::PageVisibilityState::kVisible,
+                                   true);
     if (web_view()->MainFrame()->IsWebLocalFrame()) {
-      web_view()->MainFrame()->EnableViewSourceMode(false);
+      web_view()->MainFrame()->ToWebLocalFrame()->EnableViewSourceMode(false);
       web_view()->SetTextZoomFactor(1);
       web_view()->SetZoomLevel(0);
     }
@@ -241,9 +233,9 @@ void TestRunnerForSpecificView::CapturePixelsAsyncThen(
       ->GetTestRunner()
       ->DumpPixelsAsync(
           web_view()->MainFrame()->ToWebLocalFrame(),
-          base::Bind(&TestRunnerForSpecificView::CapturePixelsCallback,
-                     weak_factory_.GetWeakPtr(),
-                     base::Passed(std::move(persistent_callback))));
+          base::BindOnce(&TestRunnerForSpecificView::CapturePixelsCallback,
+                         weak_factory_.GetWeakPtr(),
+                         std::move(persistent_callback)));
 }
 
 void TestRunnerForSpecificView::CapturePixelsCallback(
@@ -273,8 +265,8 @@ void TestRunnerForSpecificView::CapturePixelsCallback(
   const SkImageInfo bufferInfo =
       snapshot.info().makeColorType(kRGBA_8888_SkColorType);
   const size_t bufferRowBytes = bufferInfo.minRowBytes();
-  blink::WebArrayBuffer buffer =
-      blink::WebArrayBuffer::Create(bufferInfo.getSafeSize(bufferRowBytes), 1);
+  blink::WebArrayBuffer buffer = blink::WebArrayBuffer::Create(
+      bufferInfo.computeByteSize(bufferRowBytes), 1);
   if (!snapshot.readPixels(bufferInfo, buffer.Data(), bufferRowBytes, 0, 0)) {
     // We only expect readPixels to fail for null bitmaps.
     DCHECK(snapshot.isNull());
@@ -301,9 +293,9 @@ void TestRunnerForSpecificView::CopyImageAtAndCapturePixelsAsyncThen(
 
   CopyImageAtAndCapturePixels(
       web_view()->MainFrame()->ToWebLocalFrame(), x, y,
-      base::Bind(&TestRunnerForSpecificView::CapturePixelsCallback,
-                 weak_factory_.GetWeakPtr(),
-                 base::Passed(std::move(persistent_callback))));
+      base::BindOnce(&TestRunnerForSpecificView::CapturePixelsCallback,
+                     weak_factory_.GetWeakPtr(),
+                     std::move(persistent_callback)));
 }
 
 void TestRunnerForSpecificView::GetManifestThen(
@@ -318,16 +310,15 @@ void TestRunnerForSpecificView::GetManifestThen(
 
   delegate()->FetchManifest(
       web_view(),
-      web_view()->MainFrame()->ToWebLocalFrame()->GetDocument().ManifestURL(),
-      base::Bind(&TestRunnerForSpecificView::GetManifestCallback,
-                 weak_factory_.GetWeakPtr(),
-                 base::Passed(std::move(persistent_callback))));
+      base::BindOnce(&TestRunnerForSpecificView::GetManifestCallback,
+                     weak_factory_.GetWeakPtr(),
+                     std::move(persistent_callback)));
 }
 
 void TestRunnerForSpecificView::GetManifestCallback(
     v8::UniquePersistent<v8::Function> callback,
-    const blink::WebURLResponse& response,
-    const std::string& data) {
+    const GURL& manifest_url,
+    const content::Manifest& manifest) {
   PostV8CallbackWithArgs(std::move(callback), 0, nullptr);
 }
 
@@ -483,11 +474,14 @@ void TestRunnerForSpecificView::ForceRedSelectionColors() {
 void TestRunnerForSpecificView::SetPageVisibility(
     const std::string& new_visibility) {
   if (new_visibility == "visible")
-    web_view()->SetVisibilityState(kWebPageVisibilityStateVisible, false);
+    web_view()->SetVisibilityState(blink::mojom::PageVisibilityState::kVisible,
+                                   false);
   else if (new_visibility == "hidden")
-    web_view()->SetVisibilityState(kWebPageVisibilityStateHidden, false);
+    web_view()->SetVisibilityState(blink::mojom::PageVisibilityState::kHidden,
+                                   false);
   else if (new_visibility == "prerender")
-    web_view()->SetVisibilityState(kWebPageVisibilityStatePrerender, false);
+    web_view()->SetVisibilityState(
+        blink::mojom::PageVisibilityState::kPrerender, false);
 }
 
 void TestRunnerForSpecificView::SetTextDirection(
@@ -503,23 +497,7 @@ void TestRunnerForSpecificView::SetTextDirection(
   else
     return;
 
-  web_view()->SetTextDirection(direction);
-}
-
-void TestRunnerForSpecificView::DumpPageImportanceSignals() {
-  blink::WebPageImportanceSignals* signals =
-      web_view()->PageImportanceSignals();
-  if (!signals)
-    return;
-
-  std::string message = base::StringPrintf(
-      "WebPageImportanceSignals:\n"
-      "  hadFormInteraction: %s\n"
-      "  issuedNonGetFetchFromScript: %s\n",
-      signals->HadFormInteraction() ? "true" : "false",
-      signals->IssuedNonGetFetchFromScript() ? "true" : "false");
-  if (delegate())
-    delegate()->PrintMessage(message);
+  web_view()->FocusedFrame()->SetTextDirection(direction);
 }
 
 void TestRunnerForSpecificView::AddWebPageOverlay() {
@@ -674,7 +652,7 @@ bool TestRunnerForSpecificView::FindString(
 
   WebLocalFrame* frame = GetLocalMainFrame();
   const bool find_result = frame->Find(0, WebString::FromUTF8(search_text),
-                                       find_options, wrap_around, 0);
+                                       find_options, wrap_around, nullptr);
   frame->StopFinding(WebLocalFrame::kStopFindActionKeepSelection);
   return find_result;
 }
@@ -687,8 +665,11 @@ void TestRunnerForSpecificView::SetViewSourceForFrame(const std::string& name,
                                                       bool enabled) {
   WebFrame* target_frame =
       GetLocalMainFrame()->FindFrameByName(WebString::FromUTF8(name));
-  if (target_frame)
-    target_frame->EnableViewSourceMode(enabled);
+  if (target_frame) {
+    CHECK(target_frame->IsWebLocalFrame())
+        << "This function requires that the target frame is a local frame.";
+    target_frame->ToWebLocalFrame()->EnableViewSourceMode(enabled);
+  }
 }
 
 blink::WebLocalFrame* TestRunnerForSpecificView::GetLocalMainFrame() {

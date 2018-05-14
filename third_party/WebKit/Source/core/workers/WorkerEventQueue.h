@@ -27,32 +27,34 @@
 #ifndef WorkerEventQueue_h
 #define WorkerEventQueue_h
 
-#include "core/events/EventQueue.h"
+#include "core/dom/events/EventQueue.h"
 #include "platform/wtf/HashSet.h"
 
 namespace blink {
 
 class Event;
-class WorkerGlobalScope;
+class WorkerOrWorkletGlobalScope;
 
+// TODO(nhiroki): Rename this class to WorkerOrWorkletEventQueue and add
+// class-level comments.
 class WorkerEventQueue final : public EventQueue {
  public:
-  static WorkerEventQueue* Create(WorkerGlobalScope*);
+  static WorkerEventQueue* Create(WorkerOrWorkletGlobalScope*);
   ~WorkerEventQueue() override;
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*) override;
 
   // EventQueue
-  bool EnqueueEvent(const WebTraceLocation&, Event*) override;
+  bool EnqueueEvent(const base::Location&, Event*) override;
   bool CancelEvent(Event*) override;
   void Close() override;
 
  private:
-  explicit WorkerEventQueue(WorkerGlobalScope*);
+  explicit WorkerEventQueue(WorkerOrWorkletGlobalScope*);
   bool RemoveEvent(Event*);
   void DispatchEvent(Event*);
 
-  Member<WorkerGlobalScope> worker_global_scope_;
-  bool is_closed_;
+  Member<WorkerOrWorkletGlobalScope> global_scope_;
+  bool is_closed_ = false;
 
   HeapHashSet<Member<Event>> pending_events_;
 };

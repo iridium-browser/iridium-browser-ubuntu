@@ -59,11 +59,11 @@ void ErrorConsole::Observer::OnErrorConsoleDestroyed() {
 }
 
 ErrorConsole::ErrorConsole(Profile* profile)
-     : enabled_(false),
-       default_mask_(kDefaultMask),
-       profile_(profile),
-       prefs_(NULL),
-       registry_observer_(this) {
+    : enabled_(false),
+      default_mask_(kDefaultMask),
+      profile_(profile),
+      prefs_(nullptr),
+      registry_observer_(this) {
   pref_registrar_.Init(profile_->GetPrefs());
   pref_registrar_.Add(prefs::kExtensionsUIDeveloperMode,
                       base::Bind(&ErrorConsole::OnPrefChanged,
@@ -102,7 +102,7 @@ void ErrorConsole::SetReportingForExtension(const std::string& extension_id,
     mask &= ~(1 << type);
 
   prefs_->UpdateExtensionPref(extension_id, kStoreExtensionErrorsPref,
-                              base::MakeUnique<base::Value>(mask));
+                              std::make_unique<base::Value>(mask));
 }
 
 void ErrorConsole::SetReportingAllForExtension(
@@ -114,7 +114,7 @@ void ErrorConsole::SetReportingAllForExtension(
   int mask = enabled ? (1 << ExtensionError::NUM_ERROR_TYPES) - 1 : 0;
 
   prefs_->UpdateExtensionPref(extension_id, kStoreExtensionErrorsPref,
-                              base::MakeUnique<base::Value>(mask));
+                              std::make_unique<base::Value>(mask));
 }
 
 bool ErrorConsole::IsReportingEnabledForExtension(
@@ -172,13 +172,15 @@ void ErrorConsole::RemoveObserver(Observer* observer) {
 }
 
 bool ErrorConsole::IsEnabledForChromeExtensionsPage() const {
-  if (!profile_->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode))
+  if (!profile_->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode)) {
     return false;  // Only enabled in developer mode.
-  if (GetCurrentChannel() > version_info::Channel::DEV &&
-      !FeatureSwitch::error_console()->IsEnabled())
-    return false;  // Restricted to dev channel or opt-in.
-
-  return true;
+  }
+  // If there is a command line switch or override, respect that.
+  if (FeatureSwitch::error_console()->HasValue()) {
+    return FeatureSwitch::error_console()->IsEnabled();
+  }
+  // Enable by default on dev channel, disabled on other channels.
+  return GetCurrentChannel() <= version_info::Channel::DEV;
 }
 
 bool ErrorConsole::IsEnabledForAppsDeveloperTools() const {
@@ -199,7 +201,7 @@ void ErrorConsole::Enable() {
   enabled_ = true;
 
   // We postpone the initialization of |prefs_| until now because they can be
-  // NULL in unit_tests. Any unit tests that enable the error console should
+  // nullptr in unit_tests. Any unit tests that enable the error console should
   // also create an ExtensionPrefs object.
   prefs_ = ExtensionPrefs::Get(profile_);
 

@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/json/json_parser.h"
-#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_management_internal.h"
@@ -172,8 +171,7 @@ class ExtensionManagementServiceTest : public testing::Test {
     std::unique_ptr<base::Value> parsed = base::JSONReader::ReadAndReturnError(
         example_dict_preference,
         base::JSONParserOptions::JSON_ALLOW_TRAILING_COMMAS, NULL, &error_msg);
-    ASSERT_TRUE(parsed && parsed->IsType(base::Value::Type::DICTIONARY))
-        << error_msg;
+    ASSERT_TRUE(parsed && parsed->is_dict()) << error_msg;
     SetPref(true, pref_names::kExtensionManagement, std::move(parsed));
   }
 
@@ -267,7 +265,7 @@ class ExtensionAdminPolicyTest : public ExtensionManagementServiceTest {
   void CreateHostedApp(Manifest::Location location) {
     base::DictionaryValue values;
     values.Set(extensions::manifest_keys::kWebURLs,
-               base::MakeUnique<base::ListValue>());
+               std::make_unique<base::ListValue>());
     values.SetString(extensions::manifest_keys::kLaunchWebURL,
                      "http://www.example.com");
     CreateExtensionFromValues(location, &values);

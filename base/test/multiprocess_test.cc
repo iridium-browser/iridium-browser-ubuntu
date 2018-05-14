@@ -14,10 +14,9 @@
 namespace base {
 
 #if !defined(OS_ANDROID)
-SpawnChildResult SpawnMultiProcessTestChild(
-    const std::string& procname,
-    const CommandLine& base_command_line,
-    const LaunchOptions& options) {
+Process SpawnMultiProcessTestChild(const std::string& procname,
+                                   const CommandLine& base_command_line,
+                                   const LaunchOptions& options) {
   CommandLine command_line(base_command_line);
   // TODO(viettrungluu): See comment above |MakeCmdLine()| in the header file.
   // This is a temporary hack, since |MakeCmdLine()| has to provide a full
@@ -25,9 +24,7 @@ SpawnChildResult SpawnMultiProcessTestChild(
   if (!command_line.HasSwitch(switches::kTestChildProcess))
     command_line.AppendSwitchASCII(switches::kTestChildProcess, procname);
 
-  SpawnChildResult result;
-  result.process = LaunchProcess(command_line, options);
-  return result;
+  return LaunchProcess(command_line, options);
 }
 
 bool WaitForMultiprocessTestChildExit(const Process& process,
@@ -45,7 +42,7 @@ bool TerminateMultiProcessTestChild(const Process& process,
 #endif  // !defined(OS_ANDROID)
 
 CommandLine GetMultiProcessTestChildBaseCommandLine() {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   CommandLine cmd_line = *CommandLine::ForCurrentProcess();
   cmd_line.SetProgram(MakeAbsoluteFilePath(cmd_line.GetProgram()));
   return cmd_line;
@@ -53,10 +50,9 @@ CommandLine GetMultiProcessTestChildBaseCommandLine() {
 
 // MultiProcessTest ------------------------------------------------------------
 
-MultiProcessTest::MultiProcessTest() {
-}
+MultiProcessTest::MultiProcessTest() = default;
 
-SpawnChildResult MultiProcessTest::SpawnChild(const std::string& procname) {
+Process MultiProcessTest::SpawnChild(const std::string& procname) {
   LaunchOptions options;
 #if defined(OS_WIN)
   options.start_hidden = true;
@@ -64,9 +60,8 @@ SpawnChildResult MultiProcessTest::SpawnChild(const std::string& procname) {
   return SpawnChildWithOptions(procname, options);
 }
 
-SpawnChildResult MultiProcessTest::SpawnChildWithOptions(
-    const std::string& procname,
-    const LaunchOptions& options) {
+Process MultiProcessTest::SpawnChildWithOptions(const std::string& procname,
+                                                const LaunchOptions& options) {
   return SpawnMultiProcessTestChild(procname, MakeCmdLine(procname), options);
 }
 

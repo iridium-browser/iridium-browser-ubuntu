@@ -18,6 +18,18 @@ namespace chromeos {
 
 namespace tether {
 
+// static
+std::string ActiveHost::StatusToString(const ActiveHostStatus& status) {
+  switch (status) {
+    case ActiveHostStatus::DISCONNECTED:
+      return "DISCONNECTED";
+    case ActiveHostStatus::CONNECTING:
+      return "CONNECTING";
+    case ActiveHostStatus::CONNECTED:
+      return "CONNECTED";
+  }
+}
+
 bool operator==(const ActiveHost::ActiveHostChangeInfo& first,
                 const ActiveHost::ActiveHostChangeInfo& second) {
   bool new_devices_equal;
@@ -60,17 +72,9 @@ ActiveHost::ActiveHostChangeInfo::ActiveHostChangeInfo(
       old_wifi_network_guid(old_wifi_network_guid) {}
 
 ActiveHost::ActiveHostChangeInfo::ActiveHostChangeInfo(
-    const ActiveHostChangeInfo& other)
-    : new_status(other.new_status),
-      old_status(other.old_status),
-      new_active_host(other.new_active_host),
-      old_active_host_id(other.old_active_host_id),
-      new_tether_network_guid(other.new_tether_network_guid),
-      old_tether_network_guid(other.old_tether_network_guid),
-      new_wifi_network_guid(other.new_wifi_network_guid),
-      old_wifi_network_guid(other.old_wifi_network_guid) {}
+    const ActiveHostChangeInfo& other) = default;
 
-ActiveHost::ActiveHostChangeInfo::~ActiveHostChangeInfo() {}
+ActiveHost::ActiveHostChangeInfo::~ActiveHostChangeInfo() = default;
 
 ActiveHost::ActiveHost(TetherHostFetcher* tether_host_fetcher,
                        PrefService* pref_service)
@@ -78,7 +82,7 @@ ActiveHost::ActiveHost(TetherHostFetcher* tether_host_fetcher,
       pref_service_(pref_service),
       weak_ptr_factory_(this) {}
 
-ActiveHost::~ActiveHost() {}
+ActiveHost::~ActiveHost() = default;
 
 // static
 void ActiveHost::RegisterPrefs(PrefRegistrySimple* registry) {

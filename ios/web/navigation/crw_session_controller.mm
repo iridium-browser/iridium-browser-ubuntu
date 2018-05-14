@@ -7,13 +7,12 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/format_macros.h"
 #include "base/logging.h"
 #import "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/web/history_state_util.h"
 #import "ios/web/navigation/crw_session_controller+private_constructors.h"
@@ -60,11 +59,6 @@
 // Redefine as readwrite.
 @property(nonatomic, readwrite, assign) NSInteger lastCommittedItemIndex;
 
-// Expose setters for serialization properties.  These are exposed in a category
-// in SessionStorageBuilder, and will be removed as ownership of
-// their backing ivars moves to NavigationManagerImpl.
-@property(nonatomic, readwrite, assign) NSInteger previousItemIndex;
-
 // Removes all items after lastCommittedItemIndex.
 - (void)clearForwardItems;
 // Discards the transient item, if any.
@@ -80,14 +74,14 @@ initiationType:(web::NavigationInitiationType)initiationType;
 - (BOOL)isRedirectTransitionForItemAtIndex:(size_t)index;
 
 // Should create a new pending item if the new pending item is not a duplicate
-// of the last added or commited item. Returns YES if one of the following rules
-// apply:
+// of the last added or committed item. Returns YES if one of the following
+// rules apply:
 // 1. There is no last added or committed item.
-// 2. The new item has different url from the last added or commited item.
+// 2. The new item has different url from the last added or committed item.
 // 3. Url is the same, but the new item is a form submission resulted from the
 //    last added or committed item.
 // 4. Url is the same, but new item is a reload with different user agent type
-//    resulted from last added or commited item.
+//    resulted from last added or committed item.
 - (BOOL)shouldCreatePendingItemWithURL:(const GURL&)URL
                             transition:(ui::PageTransition)transition
                userAgentOverrideOption:
@@ -156,11 +150,7 @@ initiationType:(web::NavigationInitiationType)initiationType;
 }
 
 - (web::NavigationItemImpl*)currentItem {
-  if (self.transientItem)
-    return self.transientItem;
-  if (self.pendingItem)
-    return self.pendingItem;
-  return self.lastCommittedItem;
+  return _navigationManager->GetCurrentItemImpl();
 }
 
 - (web::NavigationItemImpl*)visibleItem {
@@ -354,7 +344,7 @@ initiationType:(web::NavigationInitiationType)initiationType;
       currentItem->GetTransitionType(), ui::PAGE_TRANSITION_FORM_SUBMIT);
   if (isPendingTransitionFormSubmit && !isCurrentTransitionFormSubmit) {
     // |isPendingTransitionFormSubmit| indicates that the new item is a form
-    // submission resulted from the last added or commited item, and
+    // submission resulted from the last added or committed item, and
     // |!isCurrentTransitionFormSubmit| shows that the form submission is not
     // counted multiple times.
     return YES;
@@ -372,28 +362,6 @@ initiationType:(web::NavigationInitiationType)initiationType;
   }
 
   return NO;
-}
-
-- (void)updatePendingItem:(const GURL&)url {
-  // If there is no pending item, navigation is probably happening within the
-  // session history. Don't modify the item list.
-  web::NavigationItemImpl* item = self.pendingItem;
-  if (!item)
-    return;
-
-  if (url != item->GetURL()) {
-    // Assume a redirection, and discard any transient item.
-    // TODO(stuartmorgan): Once the current safe browsing code is gone,
-    // consider making this a DCHECK that there's no transient item.
-    [self discardTransientItem];
-
-    item->SetURL(url);
-    item->SetVirtualURL(url);
-    // Redirects (3xx response code), or client side navigation must change
-    // POST requests to GETs.
-    item->SetPostData(nil);
-    item->ResetHttpRequestHeaders();
-  }
 }
 
 - (void)clearForwardItems {
@@ -490,19 +458,6 @@ initiationType:(web::NavigationInitiationType)initiationType;
     _navigationManager->OnNavigationItemCommitted();
 }
 
-- (void)updateCurrentItemWithURL:(const GURL&)url
-                     stateObject:(NSString*)stateObject {
-  DCHECK(!self.transientItem);
-  web::NavigationItemImpl* currentItem = self.currentItem;
-  currentItem->SetURL(url);
-  currentItem->SetSerializedStateObject(stateObject);
-  currentItem->SetHasStateBeenReplaced(true);
-  currentItem->SetPostData(nil);
-  // If the change is to a committed item, notify interested parties.
-  if (currentItem != self.pendingItem && _navigationManager)
-    _navigationManager->OnNavigationItemChanged();
-}
-
 - (void)discardNonCommittedItems {
   [self discardTransientItem];
   _pendingItem.reset();
@@ -539,7 +494,7 @@ initiationType:(web::NavigationInitiationType)initiationType;
                                                 2);
   for (size_t index = 0; index <= sourceLastCommittedItemIndex; ++index) {
     mergedItems[index] =
-        base::MakeUnique<web::NavigationItemImpl>(*sourceItems[index]);
+        std::make_unique<web::NavigationItemImpl>(*sourceItems[index]);
   }
   mergedItems.back() = std::move(_items[self.lastCommittedItemIndex]);
 
@@ -644,44 +599,9 @@ initiationType:(web::NavigationInitiationType)initiationType;
       referrer:(const web::Referrer&)referrer
     transition:(ui::PageTransition)transition
 initiationType:(web::NavigationInitiationType)initiationType {
-  GURL loaded_url(url);
-  BOOL urlWasRewritten = NO;
-  if (_navigationManager) {
-    std::unique_ptr<std::vector<web::BrowserURLRewriter::URLRewriter>>
-        transientRewriters = _navigationManager->GetTransientURLRewriters();
-    if (transientRewriters) {
-      urlWasRewritten = web::BrowserURLRewriter::RewriteURLWithWriters(
-          &loaded_url, _browserState, *transientRewriters.get());
-    }
-  }
-  if (!urlWasRewritten) {
-    web::BrowserURLRewriter::GetInstance()->RewriteURLIfNecessary(
-        &loaded_url, _browserState);
-  }
-
-  if (initiationType == web::NavigationInitiationType::RENDERER_INITIATED &&
-      loaded_url != url && web::GetWebClient()->IsAppSpecificURL(loaded_url)) {
-    bool lastCommittedURLIsAppSpecific =
-        self.lastCommittedItem &&
-        web::GetWebClient()->IsAppSpecificURL(self.lastCommittedItem->GetURL());
-    if (!lastCommittedURLIsAppSpecific) {
-      // The URL should not be changed to app-specific URL if the load was
-      // renderer-initiated requested by non app-specific URL. Pages with
-      // app-specific urls have elevated previledges and should not be allowed
-      // to open app-specific URLs.
-      loaded_url = url;
-    }
-  }
-
-  std::unique_ptr<web::NavigationItemImpl> item(new web::NavigationItemImpl());
-  item->SetOriginalRequestURL(loaded_url);
-  item->SetURL(loaded_url);
-  item->SetReferrer(referrer);
-  item->SetTransitionType(transition);
-  item->SetNavigationInitiationType(initiationType);
-  if (web::GetWebClient()->IsAppSpecificURL(loaded_url))
-    item->SetUserAgentType(web::UserAgentType::NONE);
-  return item;
+  DCHECK(_navigationManager);
+  return _navigationManager->CreateNavigationItem(url, referrer, transition,
+                                                  initiationType);
 }
 
 - (BOOL)isRedirectTransitionForItemAtIndex:(size_t)index {

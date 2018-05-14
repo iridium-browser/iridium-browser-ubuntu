@@ -15,10 +15,12 @@
 namespace extensions {
 
 DocumentCustomBindings::DocumentCustomBindings(ScriptContext* context)
-    : ObjectBackedNativeHandler(context) {
-  RouteFunction("RegisterElement",
-                base::Bind(&DocumentCustomBindings::RegisterElement,
-                           base::Unretained(this)));
+    : ObjectBackedNativeHandler(context) {}
+
+void DocumentCustomBindings::AddRoutes() {
+  RouteHandlerFunction("RegisterElement",
+                       base::Bind(&DocumentCustomBindings::RegisterElement,
+                                  base::Unretained(this)));
 }
 
 // Attach an event name to an object.
@@ -29,13 +31,12 @@ void DocumentCustomBindings::RegisterElement(
     return;
   }
 
-  std::string element_name(*v8::String::Utf8Value(args[0]));
+  std::string element_name(*v8::String::Utf8Value(args.GetIsolate(), args[0]));
   v8::Local<v8::Object> options = v8::Local<v8::Object>::Cast(args[1]);
 
-  blink::WebExceptionCode ec = 0;
   blink::WebDocument document = context()->web_frame()->GetDocument();
   v8::Local<v8::Value> constructor = document.RegisterEmbedderCustomElement(
-      blink::WebString::FromUTF8(element_name), options, ec);
+      blink::WebString::FromUTF8(element_name), options);
   args.GetReturnValue().Set(constructor);
 }
 

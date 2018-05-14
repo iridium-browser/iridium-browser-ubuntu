@@ -4,10 +4,10 @@
 
 #include "chrome/browser/ui/webui/signin/md_user_manager_ui.h"
 
+#include <memory>
 #include <string>
 
 #include "base/feature_list.h"
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
@@ -17,8 +17,8 @@
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/browser/ui/webui/signin/user_manager_screen_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_features.h"
-#include "chrome/common/features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "content/public/browser/web_ui.h"
@@ -33,16 +33,16 @@
 MDUserManagerUI::MDUserManagerUI(content::WebUI* web_ui)
     : WebUIController(web_ui) {
   auto signin_create_profile_handler =
-      base::MakeUnique<SigninCreateProfileHandler>();
+      std::make_unique<SigninCreateProfileHandler>();
   signin_create_profile_handler_ = signin_create_profile_handler.get();
   web_ui->AddMessageHandler(std::move(signin_create_profile_handler));
   auto user_manager_screen_handler =
-      base::MakeUnique<UserManagerScreenHandler>();
+      std::make_unique<UserManagerScreenHandler>();
   user_manager_screen_handler_ = user_manager_screen_handler.get();
   web_ui->AddMessageHandler(std::move(user_manager_screen_handler));
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   auto signin_supervised_user_import_handler =
-      base::MakeUnique<SigninSupervisedUserImportHandler>();
+      std::make_unique<SigninSupervisedUserImportHandler>();
   signin_supervised_user_import_handler_ =
       signin_supervised_user_import_handler.get();
   web_ui->AddMessageHandler(std::move(signin_supervised_user_import_handler));
@@ -83,7 +83,6 @@ content::WebUIDataSource* MDUserManagerUI::CreateUIDataSource(
   source->AddResourcePath("create_profile.js", IDR_MD_CREATE_PROFILE_JS);
   source->AddResourcePath("error_dialog.html", IDR_MD_ERROR_DIALOG_HTML);
   source->AddResourcePath("error_dialog.js", IDR_MD_ERROR_DIALOG_JS);
-  source->AddResourcePath("icons.html", IDR_MD_USER_MANAGER_ICONS_HTML);
   source->AddResourcePath("import_supervised_user.html",
                           IDR_MD_IMPORT_SUPERVISED_USER_HTML);
   source->AddResourcePath("import_supervised_user.js",

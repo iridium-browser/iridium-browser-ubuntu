@@ -8,16 +8,21 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "ui/aura/window.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/views/view.h"
 
 namespace ui_devtools {
 
 class UIElementDelegate;
 
+namespace protocol {
+template <typename T>
+class Array;
+}
+
 // UIElement type.
-enum UIElementType { WINDOW, WIDGET, VIEW };
+enum UIElementType { WINDOW, WIDGET, VIEW, ROOT };
 
 class UIElement {
  public:
@@ -40,6 +45,12 @@ class UIElement {
   // Move |child| to position new_index in |children_|.
   void ReorderChild(UIElement* child, int new_index);
 
+  template <class T>
+  int FindUIElementIdForBackendElement(T* element) const;
+
+  // Return a vector of pairs of properties' names and values.
+  virtual std::vector<std::pair<std::string, std::string>> GetCustomProperties()
+      const = 0;
   virtual void GetBounds(gfx::Rect* bounds) const = 0;
   virtual void SetBounds(const gfx::Rect& bounds) = 0;
   virtual void GetVisible(bool* visible) const = 0;
@@ -47,11 +58,15 @@ class UIElement {
 
   // If element exists, return its associated native window and its bounds.
   // Otherwise, return null and empty bounds.
-  virtual std::pair<aura::Window*, gfx::Rect> GetNodeWindowAndBounds()
+  virtual std::pair<gfx::NativeWindow, gfx::Rect> GetNodeWindowAndBounds()
+      const = 0;
+  // Get a list of interleaved keys and values of attributes to be displayed
+  // on the element in the dev tools hierarchy view.
+  virtual std::unique_ptr<protocol::Array<std::string>> GetAttributes()
       const = 0;
 
   template <typename BackingT, typename T>
-  static BackingT* GetBackingElement(UIElement* element) {
+  static BackingT* GetBackingElement(const UIElement* element) {
     return T::From(element);
   };
 

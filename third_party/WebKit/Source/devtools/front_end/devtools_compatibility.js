@@ -9,7 +9,7 @@
   /**
    * @unrestricted
    */
-  var DevToolsAPIImpl = class {
+  const DevToolsAPIImpl = class {
     constructor() {
       /**
        * @type {number}
@@ -27,7 +27,7 @@
      * @param {?Object} arg
      */
     embedderMessageAck(id, arg) {
-      var callback = this._callbacks[id];
+      const callback = this._callbacks[id];
       delete this._callbacks[id];
       if (callback)
         callback(arg);
@@ -39,10 +39,10 @@
      * @param {?function(?Object)} callback
      */
     sendMessageToEmbedder(method, args, callback) {
-      var callId = ++this._lastCallId;
+      const callId = ++this._lastCallId;
       if (callback)
         this._callbacks[callId] = callback;
-      var message = {'id': callId, 'method': method};
+      const message = {'id': callId, 'method': method};
       if (args.length)
         message.params = args;
       DevToolsHost.sendMessageToEmbedder(JSON.stringify(message));
@@ -147,14 +147,6 @@
     }
 
     /**
-     * @param {number} callId
-     * @param {string} script
-     */
-    evaluateForTestInFrontend(callId, script) {
-      this._dispatchOnInspectorFrontendAPI('evaluateForTestInFrontend', [callId, script]);
-    }
-
-    /**
      * @param {!{r: number, g: number, b: number, a: number}} color
      */
     eyeDropperPickedColor(color) {
@@ -176,10 +168,11 @@
     }
 
     /**
-     * @param {!{fileSystemName: string, rootURL: string, fileSystemPath: string}} fileSystem
+     * @param {?string} error
+     * @param {?{type: string, fileSystemName: string, rootURL: string, fileSystemPath: string}} fileSystem
      */
-    fileSystemAdded(fileSystem) {
-      this._dispatchOnInspectorFrontendAPI('fileSystemAdded', ['', fileSystem]);
+    fileSystemAdded(error, fileSystem) {
+      this._dispatchOnInspectorFrontendAPI('fileSystemAdded', [error, fileSystem]);
     }
 
     /**
@@ -250,9 +243,10 @@
 
     /**
      * @param {string} url
+     * @param {string=} fileSystemPath
      */
-    savedURL(url) {
-      this._dispatchOnInspectorFrontendAPI('savedURL', [url]);
+    savedURL(url, fileSystemPath) {
+      this._dispatchOnInspectorFrontendAPI('savedURL', [url, fileSystemPath]);
     }
 
     /**
@@ -303,7 +297,7 @@
      * @return {string}
      */
     _decodeBase64(chunk) {
-      var request = new XMLHttpRequest();
+      const request = new XMLHttpRequest();
       request.open('GET', 'data:text/plain;base64,' + chunk, false);
       request.send(null);
       if (request.status === 200) {
@@ -315,7 +309,7 @@
     }
   };
 
-  var DevToolsAPI = new DevToolsAPIImpl();
+  const DevToolsAPI = new DevToolsAPIImpl();
   window.DevToolsAPI = DevToolsAPI;
 
   // InspectorFrontendHostImpl --------------------------------------------------
@@ -324,7 +318,7 @@
    * @implements {InspectorFrontendHostAPI}
    * @unrestricted
    */
-  var InspectorFrontendHostImpl = class {
+  const InspectorFrontendHostImpl = class {
     /**
      * @override
      * @return {string}
@@ -345,6 +339,22 @@
      * @override
      * @return {string}
      */
+    getInactiveSelectionBackgroundColor() {
+      return DevToolsHost.getInactiveSelectionBackgroundColor();
+    }
+
+    /**
+     * @override
+     * @return {string}
+     */
+    getInactiveSelectionForegroundColor() {
+      return DevToolsHost.getInactiveSelectionForegroundColor();
+    }
+
+    /**
+     * @override
+     * @return {string}
+     */
     platform() {
       return DevToolsHost.platform();
     }
@@ -356,7 +366,7 @@
       DevToolsAPI.sendMessageToEmbedder('loadCompleted', [], null);
       // Support for legacy (<57) frontends.
       if (window.Runtime && window.Runtime.queryParam) {
-        var panelToOpen = window.Runtime.queryParam('panel');
+        const panelToOpen = window.Runtime.queryParam('panel');
         if (panelToOpen)
           window.DevToolsAPI.showPanel(panelToOpen);
       }
@@ -480,6 +490,14 @@
 
     /**
      * @override
+     * @param {string} fileSystemPath
+     */
+    showItemInFolder(fileSystemPath) {
+      DevToolsAPI.sendMessageToEmbedder('showItemInFolder', [fileSystemPath], null);
+    }
+
+    /**
+     * @override
      * @param {string} url
      * @param {string} content
      * @param {boolean} forceSaveAs
@@ -527,10 +545,10 @@
 
     /**
      * @override
-     * @param {string=} fileSystemPath
+     * @param {string=} type
      */
-    addFileSystem(fileSystemPath) {
-      DevToolsAPI.sendMessageToEmbedder('addFileSystem', [fileSystemPath || ''], null);
+    addFileSystem(type) {
+      DevToolsAPI.sendMessageToEmbedder('addFileSystem', [type || ''], null);
     }
 
     /**
@@ -641,14 +659,6 @@
 
     /**
      * @override
-     * @return {boolean}
-     */
-    isUnderTest() {
-      return DevToolsHost.isUnderTest();
-    }
-
-    /**
-     * @override
      * @param {function()} callback
      */
     reattach(callback) {
@@ -660,6 +670,21 @@
      */
     readyForTest() {
       DevToolsAPI.sendMessageToEmbedder('readyForTest', [], null);
+    }
+
+    /**
+     * @override
+     */
+    connectionReady() {
+      DevToolsAPI.sendMessageToEmbedder('connectionReady', [], null);
+    }
+
+    /**
+     * @override
+     * @param {boolean} value
+     */
+    setOpenNewWindowForPopups(value) {
+      DevToolsAPI.sendMessageToEmbedder('setOpenNewWindowForPopups', [value], null);
     }
 
     /**
@@ -729,6 +754,14 @@
     }
 
     // Backward-compatible methods below this line --------------------------------------------
+
+    /**
+     * Support for legacy front-ends (<M65).
+     * @return {boolean}
+     */
+    isUnderTest() {
+      return false;
+    }
 
     /**
      * Support for legacy front-ends (<M50).
@@ -850,7 +883,7 @@
 
   function installObjectObserve() {
     /** @type {!Array<string>} */
-    var properties = [
+    const properties = [
       'advancedSearchConfig',
       'auditsPanelSplitViewState',
       'auditsSidebarWidth',
@@ -1035,13 +1068,13 @@
      */
     function objectObserve(object, observer) {
       if (window['WebInspector']) {
-        var settingPrototype = /** @type {!Object} */ (window['WebInspector']['Setting']['prototype']);
+        const settingPrototype = /** @type {!Object} */ (window['WebInspector']['Setting']['prototype']);
         if (typeof settingPrototype['remove'] === 'function')
           settingPrototype['remove'] = settingRemove;
       }
       /** @type {!Set<string>} */
-      var changedProperties = new Set();
-      var scheduled = false;
+      const changedProperties = new Set();
+      let scheduled = false;
 
       function scheduleObserver() {
         if (scheduled)
@@ -1052,7 +1085,7 @@
 
       function callObserver() {
         scheduled = false;
-        var changes = /** @type {!Array<!{name: string}>} */ ([]);
+        const changes = /** @type {!Array<!{name: string}>} */ ([]);
         changedProperties.forEach(function(name) {
           changes.push({name: name});
         });
@@ -1061,7 +1094,7 @@
       }
 
       /** @type {!Map<string, *>} */
-      var storage = new Map();
+      const storage = new Map();
 
       /**
        * @param {string} property
@@ -1091,7 +1124,7 @@
         });
       }
 
-      for (var i = 0; i < properties.length; ++i)
+      for (let i = 0; i < properties.length; ++i)
         defineProperty(properties[i]);
     }
 
@@ -1099,7 +1132,7 @@
   }
 
   /** @type {!Map<number, string>} */
-  var staticKeyIdentifiers = new Map([
+  const staticKeyIdentifiers = new Map([
     [0x12, 'Alt'],
     [0x11, 'Control'],
     [0x10, 'Shift'],
@@ -1163,20 +1196,39 @@
    * @return {string}
    */
   function keyCodeToKeyIdentifier(keyCode) {
-    var result = staticKeyIdentifiers.get(keyCode);
+    let result = staticKeyIdentifiers.get(keyCode);
     if (result !== undefined)
       return result;
     result = 'U+';
-    var hexString = keyCode.toString(16).toUpperCase();
-    for (var i = hexString.length; i < 4; ++i)
+    const hexString = keyCode.toString(16).toUpperCase();
+    for (let i = hexString.length; i < 4; ++i)
       result += '0';
     result += hexString;
     return result;
   }
 
   function installBackwardsCompatibility() {
-    if (window.location.search.indexOf('remoteFrontend') === -1)
+    if (window.location.href.indexOf('/remote/') === -1)
       return;
+
+    // Support for legacy (<M65) frontends.
+    /** @type {(!function(number, number):Element|undefined)} */
+    ShadowRoot.prototype.__originalShadowRootElementFromPoint;
+
+    if (!ShadowRoot.prototype.__originalShadowRootElementFromPoint) {
+      ShadowRoot.prototype.__originalShadowRootElementFromPoint = ShadowRoot.prototype.elementFromPoint;
+      /**
+       *  @param {number} x
+       *  @param {number} y
+       *  @return {Element}
+       */
+      ShadowRoot.prototype.elementFromPoint = function(x, y) {
+        const originalResult = ShadowRoot.prototype.__originalShadowRootElementFromPoint.apply(this, arguments);
+        if (this.host && originalResult === this.host)
+          return null;
+        return originalResult;
+      };
+    }
 
     // Support for legacy (<M53) frontends.
     if (!window.KeyboardEvent.prototype.hasOwnProperty('keyIdentifier')) {
@@ -1226,7 +1278,7 @@
     window.CSSPrimitiveValue = CSSPrimitiveValue;
 
     // Support for legacy (<M44) frontends.
-    var styleElement = window.document.createElement('style');
+    const styleElement = window.document.createElement('style');
     styleElement.type = 'text/css';
     styleElement.textContent = 'html /deep/ * { min-width: 0; min-height: 0; }';
 

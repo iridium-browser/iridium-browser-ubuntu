@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ash/login/ui/lock_screen.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/public/interfaces/constants.mojom.h"
 #include "ash/public/interfaces/session_controller.mojom.h"
 #include "base/bind.h"
@@ -25,6 +26,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
+#include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/views_screen_locker.h"
 #include "chrome/browser/chromeos/login/lock/webui_screen_locker.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_factory.h"
@@ -34,11 +36,12 @@
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/ash/ash_util.h"
-#include "chrome/browser/ui/ash/lock_screen_client.h"
+#include "chrome/browser/ui/ash/login_screen_client.h"
 #include "chrome/browser/ui/ash/session_controller_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/screenlock_icon_provider.h"
 #include "chrome/browser/ui/webui/chromeos/login/screenlock_icon_source.h"
@@ -46,7 +49,6 @@
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/audio/chromeos_sounds.h"
-#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/biod/constants.pb.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
@@ -54,6 +56,7 @@
 #include "chromeos/login/auth/authpolicy_login_helper.h"
 #include "chromeos/login/auth/extended_authenticator.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
+#include "components/password_manager/core/browser/hash_password_manager.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/user_manager/user_manager.h"
@@ -65,7 +68,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/service_manager_connection.h"
 #include "media/audio/sounds/sounds_manager.h"
-#include "services/device/public/interfaces/constants.mojom.h"
+#include "services/device/public/mojom/constants.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/display/display.h"
@@ -84,12 +87,6 @@ namespace {
 // on successful authentication before unlocking, but we want to be sure that
 // unlock happens even if animations are broken.
 const int kUnlockGuardTimeoutMs = 400;
-
-// Returns true if we are using md-based login/lock.
-bool IsUsingMdLogin() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      chromeos::switches::kShowMdLogin);
-}
 
 // Returns true if fingerprint authentication is available for one of the
 // |users|.
@@ -112,8 +109,7 @@ class ScreenLockObserver : public SessionManagerClient::StubDelegate,
                            public UserAddingScreen::Observer {
  public:
   ScreenLockObserver() : session_started_(false) {
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_SESSION_STARTED,
+    registrar_.Add(this, chrome::NOTIFICATION_SESSION_STARTED,
                    content::NotificationService::AllSources());
     DBusThreadManager::Get()->GetSessionManagerClient()->SetStubDelegate(this);
   }
@@ -208,13 +204,24 @@ void ScreenLocker::Init() {
 
   authenticator_ = UserSessionManager::GetInstance()->CreateAuthenticator(this);
   extended_authenticator_ = ExtendedAuthenticator::Create(this);
-  if (IsUsingMdLogin()) {
+  if (!ash::switches::IsUsingViewsLock()) {
+    web_ui_.reset(new WebUIScreenLocker(this));
+    delegate_ = web_ui_.get();
+    web_ui_->LockScreen();
+
+    // Ownership of |icon_image_source| is passed.
+    screenlock_icon_provider_ = std::make_unique<ScreenlockIconProvider>();
+    ScreenlockIconSource* screenlock_icon_source =
+        new ScreenlockIconSource(screenlock_icon_provider_->AsWeakPtr());
+    content::URLDataSource::Add(web_ui_->web_contents()->GetBrowserContext(),
+                                screenlock_icon_source);
+  } else {
     // Create delegate that calls into the views-based lock screen via mojo.
-    views_screen_locker_ = base::MakeUnique<ViewsScreenLocker>(this);
+    views_screen_locker_ = std::make_unique<ViewsScreenLocker>(this);
     delegate_ = views_screen_locker_.get();
 
     // Create and display lock screen.
-    LockScreenClient::Get()->ShowLockScreen(base::BindOnce(
+    LoginScreenClient::Get()->ShowLockScreen(base::BindOnce(
         [](ViewsScreenLocker* screen_locker, bool did_show) {
           CHECK(did_show);
           screen_locker->OnLockScreenReady();
@@ -222,17 +229,6 @@ void ScreenLocker::Init() {
         views_screen_locker_.get()));
 
     views_screen_locker_->Init();
-  } else {
-    web_ui_.reset(new WebUIScreenLocker(this));
-    delegate_ = web_ui_.get();
-    web_ui_->LockScreen();
-
-    // Ownership of |icon_image_source| is passed.
-    screenlock_icon_provider_ = base::MakeUnique<ScreenlockIconProvider>();
-    ScreenlockIconSource* screenlock_icon_source =
-        new ScreenlockIconSource(screenlock_icon_provider_->AsWeakPtr());
-    content::URLDataSource::Add(web_ui_->web_contents()->GetBrowserContext(),
-                                screenlock_icon_source);
   }
 
   // Start locking on ash side.
@@ -334,13 +330,14 @@ void ScreenLocker::OnPasswordAuthSuccess(const UserContext& user_context) {
           user_context.GetAccountId());
   if (quick_unlock_storage)
     quick_unlock_storage->MarkStrongAuth();
+  SaveSyncPasswordHash(user_context);
 }
 
 void ScreenLocker::UnlockOnLoginSuccess() {
   DCHECK(base::MessageLoopForUI::IsCurrent());
   if (!authentication_capture_.get()) {
-    LOG(WARNING) << "Call to UnlockOnLoginSuccess without previous " <<
-      "authentication success.";
+    LOG(WARNING) << "Call to UnlockOnLoginSuccess without previous "
+                 << "authentication success.";
     return;
   }
 
@@ -361,6 +358,7 @@ void ScreenLocker::Authenticate(const UserContext& user_context,
 
   DCHECK(!on_auth_complete_);
   on_auth_complete_ = std::move(callback);
+  unlock_attempt_type_ = AUTH_PASSWORD;
 
   authentication_start_time_ = base::Time::Now();
   delegate_->SetPasswordInputEnabled(false);
@@ -371,17 +369,13 @@ void ScreenLocker::Authenticate(const UserContext& user_context,
   if (user) {
     // Check to see if the user submitted a PIN and it is valid.
     const std::string pin = user_context.GetKey()->GetSecret();
+    Key::KeyType key_type = user_context.GetKey()->GetKeyType();
 
-    // We only want to try authenticating the pin if it is a number,
-    // otherwise we will timeout PIN if the user enters their account password
-    // incorrectly more than a few times.
-    int dummy_value;
-    if (unlock_attempt_type_ == AUTH_PIN &&
-        base::StringToInt(pin, &dummy_value)) {
+    if (unlock_attempt_type_ == AUTH_PIN) {
       quick_unlock::QuickUnlockStorage* quick_unlock_storage =
           quick_unlock::QuickUnlockFactory::GetForUser(user);
       if (quick_unlock_storage &&
-          quick_unlock_storage->TryAuthenticatePin(pin)) {
+          quick_unlock_storage->TryAuthenticatePin(pin, key_type)) {
         OnAuthSuccess(user_context);
         return;
       }
@@ -407,12 +401,6 @@ void ScreenLocker::Authenticate(const UserContext& user_context,
   if (user_context.GetAccountId().GetAccountType() ==
           AccountType::ACTIVE_DIRECTORY &&
       user_context.GetKey()->GetKeyType() == Key::KEY_TYPE_PASSWORD_PLAIN) {
-    // TODO(rsorokin): This won't work in the new views-based lock screen.
-    // The password sent back via mojo is hashed before sending back. If we need
-    // raw password here, we might need to do similar tricks as current AD
-    // daemon does, i.e. use a one time pipe FD to pass it back. (see
-    // https://crbug.com/676337)
-    //
     // Try to get kerberos TGT while we have user's password typed on the lock
     // screen. Failure to get TGT here is OK - that could mean e.g. Active
     // Directory server is not reachable. AuthPolicyCredentialsManager regularly
@@ -450,7 +438,7 @@ void ScreenLocker::OnStartLockCallback(bool locked) {
   delegate_->OnAshLockAnimationFinished();
 
   AccessibilityManager::Get()->PlayEarcon(
-      chromeos::SOUND_LOCK, PlaySoundOption::SPOKEN_FEEDBACK_ENABLED);
+      SOUND_LOCK, PlaySoundOption::ONLY_IF_SPOKEN_FEEDBACK_ENABLED);
 }
 
 void ScreenLocker::ClearErrors() {
@@ -495,6 +483,9 @@ void ScreenLocker::ShutDownClass() {
   DCHECK(g_screen_lock_observer);
   delete g_screen_lock_observer;
   g_screen_lock_observer = nullptr;
+
+  // Delete |screen_locker_| if it is being shown.
+  ScheduleDeletion();
 }
 
 // static
@@ -545,8 +536,9 @@ void ScreenLocker::Show() {
   } else {
     VLOG(1) << "ScreenLocker " << screen_locker_ << " already exists; "
             << " calling session manager's HandleLockScreenShown D-Bus method";
-    DBusThreadManager::Get()->GetSessionManagerClient()->
-        NotifyLockScreenShown();
+    DBusThreadManager::Get()
+        ->GetSessionManagerClient()
+        ->NotifyLockScreenShown();
   }
 }
 
@@ -572,12 +564,24 @@ void ScreenLocker::ScheduleDeletion() {
   VLOG(1) << "Deleting ScreenLocker " << screen_locker_;
 
   AccessibilityManager::Get()->PlayEarcon(
-      SOUND_UNLOCK, PlaySoundOption::SPOKEN_FEEDBACK_ENABLED);
+      SOUND_UNLOCK, PlaySoundOption::ONLY_IF_SPOKEN_FEEDBACK_ENABLED);
 
   delete screen_locker_;
   screen_locker_ = nullptr;
 }
 
+void ScreenLocker::SaveSyncPasswordHash(const UserContext& user_context) {
+  if (!user_context.GetSyncPasswordData().has_value())
+    return;
+
+  const user_manager::User* user =
+      user_manager::UserManager::Get()->FindUser(user_context.GetAccountId());
+  if (!user || !user->is_active())
+    return;
+  Profile* profile = chromeos::ProfileHelper::Get()->GetProfileByUser(user);
+  if (profile)
+    login::SaveSyncPasswordDataToProfile(user_context, profile);
+}
 ////////////////////////////////////////////////////////////////////////////////
 // ScreenLocker, private:
 
@@ -585,8 +589,11 @@ ScreenLocker::~ScreenLocker() {
   VLOG(1) << "Destroying ScreenLocker " << this;
   DCHECK(base::MessageLoopForUI::IsCurrent());
 
-  if (authenticator_.get())
+  if (authenticator_)
     authenticator_->SetConsumer(nullptr);
+  if (extended_authenticator_)
+    extended_authenticator_->SetConsumer(nullptr);
+
   ClearErrors();
 
   screen_locker_ = nullptr;
@@ -594,12 +601,12 @@ ScreenLocker::~ScreenLocker() {
   VLOG(1) << "Emitting SCREEN_LOCK_STATE_CHANGED with state=" << state;
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
-      content::Source<ScreenLocker>(this),
-      content::Details<bool>(&state));
+      content::Source<ScreenLocker>(this), content::Details<bool>(&state));
 
   VLOG(1) << "Calling session manager's HandleLockScreenDismissed D-Bus method";
-  DBusThreadManager::Get()->GetSessionManagerClient()->
-      NotifyLockScreenDismissed();
+  DBusThreadManager::Get()
+      ->GetSessionManagerClient()
+      ->NotifyLockScreenDismissed();
 
   session_manager::SessionManager::Get()->SetSessionState(
       session_manager::SessionState::ACTIVE);
@@ -616,16 +623,15 @@ void ScreenLocker::SetAuthenticator(Authenticator* authenticator) {
 void ScreenLocker::ScreenLockReady() {
   locked_ = true;
   base::TimeDelta delta = base::Time::Now() - start_time_;
-  VLOG(1) << "ScreenLocker " << this << " is ready after "
-          << delta.InSecondsF() << " second(s)";
+  VLOG(1) << "ScreenLocker " << this << " is ready after " << delta.InSecondsF()
+          << " second(s)";
   UMA_HISTOGRAM_TIMES("ScreenLocker.ScreenLockTime", delta);
 
   bool state = true;
   VLOG(1) << "Emitting SCREEN_LOCK_STATE_CHANGED with state=" << state;
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
-      content::Source<ScreenLocker>(this),
-      content::Details<bool>(&state));
+      content::Source<ScreenLocker>(this), content::Details<bool>(&state));
   VLOG(1) << "Calling session manager's HandleLockScreenShown D-Bus method";
   DBusThreadManager::Get()->GetSessionManagerClient()->NotifyLockScreenShown();
 

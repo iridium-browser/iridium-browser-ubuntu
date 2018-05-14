@@ -14,7 +14,7 @@
 #include "core/fpdfapi/page/cpdf_page.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfdoc/cpdf_occontext.h"
-#include "core/fxcrt/cfx_observable.h"
+#include "core/fxcrt/observable.h"
 #include "fpdfsdk/cfx_systemhandler.h"
 #include "fpdfsdk/cpdfsdk_annot.h"
 #include "fpdfsdk/fsdk_define.h"
@@ -41,11 +41,21 @@ class IJS_Runtime;
 // lingering lifetime issues via the memory tools.
 
 class CPDFSDK_FormFillEnvironment
-    : public CFX_Observable<CPDFSDK_FormFillEnvironment> {
+    : public Observable<CPDFSDK_FormFillEnvironment> {
  public:
   CPDFSDK_FormFillEnvironment(UnderlyingDocumentType* pDoc,
                               FPDF_FORMFILLINFO* pFFinfo);
   ~CPDFSDK_FormFillEnvironment();
+
+  static bool IsSHIFTKeyDown(uint32_t nFlag) {
+    return !!(nFlag & FWL_EVENTFLAG_ShiftKey);
+  }
+  static bool IsCTRLKeyDown(uint32_t nFlag) {
+    return !!(nFlag & FWL_EVENTFLAG_ControlKey);
+  }
+  static bool IsALTKeyDown(uint32_t nFlag) {
+    return !!(nFlag & FWL_EVENTFLAG_AltKey);
+  }
 
   CPDFSDK_PageView* GetPageView(UnderlyingPageType* pPage, bool renew);
   CPDFSDK_PageView* GetPageView(int nIndex);
@@ -74,8 +84,6 @@ class CPDFSDK_FormFillEnvironment
   void SetChangeMark() { m_bChangeMask = true; }
   void ClearChangeMark() { m_bChangeMask = false; }
 
-  UnderlyingPageType* GetPage(int nIndex);
-
   void ProcJavascriptFun();
   bool ProcOpenAction();
 
@@ -88,11 +96,7 @@ class CPDFSDK_FormFillEnvironment
   FX_SYSTEMTIME GetLocalTime() const;
 
   void OnChange();
-  bool IsSHIFTKeyDown(uint32_t nFlag) const;
-  bool IsCTRLKeyDown(uint32_t nFlag) const;
-  bool IsALTKeyDown(uint32_t nFlag) const;
 
-  FPDF_PAGE GetPage(UnderlyingDocumentType* document, int nPageIndex);
   FPDF_PAGE GetCurrentPage(UnderlyingDocumentType* document);
 
   void ExecuteNamedAction(const char* namedAction);
@@ -129,10 +133,10 @@ class CPDFSDK_FormFillEnvironment
   void SetCurrentPage(CPDFXFA_Context* document, int iCurPage);
 
   // TODO(dsinclair): This should probably change to PDFium?
-  CFX_WideString FFI_GetAppName() const { return CFX_WideString(L"Acrobat"); }
+  WideString FFI_GetAppName() const { return WideString(L"Acrobat"); }
 
-  CFX_WideString GetPlatform();
-  void GotoURL(CPDFXFA_Context* document, const CFX_WideStringC& wsURL);
+  WideString GetPlatform();
+  void GotoURL(CPDFXFA_Context* document, const WideStringView& wsURL);
   void GetPageViewRect(CPDFXFA_Page* page, FS_RECTF& dstRect);
   bool PopupMenu(CPDFXFA_Page* page,
                  FPDF_WIDGET hWidget,
@@ -152,16 +156,16 @@ class CPDFSDK_FormFillEnvironment
   FPDF_FILEHANDLER* OpenFile(int fileType,
                              FPDF_WIDESTRING wsURL,
                              const char* mode);
-  CFX_RetainPtr<IFX_SeekableReadStream> DownloadFromURL(const wchar_t* url);
-  CFX_WideString PostRequestURL(const wchar_t* wsURL,
-                                const wchar_t* wsData,
-                                const wchar_t* wsContentType,
-                                const wchar_t* wsEncode,
-                                const wchar_t* wsHeader);
+  RetainPtr<IFX_SeekableReadStream> DownloadFromURL(const wchar_t* url);
+  WideString PostRequestURL(const wchar_t* wsURL,
+                            const wchar_t* wsData,
+                            const wchar_t* wsContentType,
+                            const wchar_t* wsEncode,
+                            const wchar_t* wsHeader);
   FPDF_BOOL PutRequestURL(const wchar_t* wsURL,
                           const wchar_t* wsData,
                           const wchar_t* wsEncode);
-  CFX_WideString GetLanguage();
+  WideString GetLanguage();
 
   void PageEvent(int iPageCount, uint32_t dwEventType) const;
 #else   // PDF_ENABLE_XFA
@@ -180,8 +184,8 @@ class CPDFSDK_FormFillEnvironment
                      void* response,
                      int length);
   void JS_appBeep(int nType);
-  CFX_WideString JS_fieldBrowse();
-  CFX_WideString JS_docGetFilePath();
+  WideString JS_fieldBrowse();
+  WideString JS_docGetFilePath();
   void JS_docSubmitForm(void* formData, int length, const wchar_t* URL);
   void JS_docmailForm(void* mailData,
                       int length,
@@ -201,27 +205,29 @@ class CPDFSDK_FormFillEnvironment
                    FPDF_BOOL bAnnotations);
   void JS_docgotoPage(int nPageNum);
 
-  bool IsJSInitiated() const { return m_pInfo && m_pInfo->m_pJsPlatform; }
-  CFX_ByteString GetAppName() const { return ""; }
+  bool IsJSPlatformPresent() const { return m_pInfo && m_pInfo->m_pJsPlatform; }
+  ByteString GetAppName() const { return ""; }
   CFX_SystemHandler* GetSysHandler() const { return m_pSysHandler.get(); }
   FPDF_FORMFILLINFO* GetFormFillInfo() const { return m_pInfo; }
 
   // Creates if not present.
   CFFL_InteractiveFormFiller* GetInteractiveFormFiller();
   CPDFSDK_AnnotHandlerMgr* GetAnnotHandlerMgr();  // Creates if not present.
-  IJS_Runtime* GetJSRuntime();                    // Creates if not present.
+  IJS_Runtime* GetIJSRuntime();                   // Creates if not present.
   CPDFSDK_ActionHandler* GetActionHandler();      // Creates if not present.
   CPDFSDK_InterForm* GetInterForm();              // Creates if not present.
 
  private:
+  UnderlyingPageType* GetPage(int nIndex);
+
   FPDF_FORMFILLINFO* const m_pInfo;
   std::unique_ptr<CPDFSDK_AnnotHandlerMgr> m_pAnnotHandlerMgr;
   std::unique_ptr<CPDFSDK_ActionHandler> m_pActionHandler;
-  std::unique_ptr<IJS_Runtime> m_pJSRuntime;
+  std::unique_ptr<IJS_Runtime> m_pIJSRuntime;
   std::map<UnderlyingPageType*, std::unique_ptr<CPDFSDK_PageView>> m_PageMap;
   std::unique_ptr<CPDFSDK_InterForm> m_pInterForm;
   CPDFSDK_Annot::ObservedPtr m_pFocusAnnot;
-  CFX_UnownedPtr<UnderlyingDocumentType> m_pUnderlyingDoc;
+  UnownedPtr<UnderlyingDocumentType> m_pUnderlyingDoc;
   std::unique_ptr<CFFL_InteractiveFormFiller> m_pFormFiller;
   std::unique_ptr<CFX_SystemHandler> m_pSysHandler;
   bool m_bChangeMask;

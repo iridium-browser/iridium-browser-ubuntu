@@ -7,6 +7,7 @@ import page_sets
 
 from benchmarks import loading_metrics_category
 from telemetry import benchmark
+from telemetry import story
 from telemetry.page import cache_temperature
 from telemetry.page import traffic_setting
 from telemetry.web_perf import timeline_based_measurement
@@ -23,54 +24,32 @@ class _LoadingBase(perf_benchmark.PerfBenchmark):
     return tbm_options
 
 
-@benchmark.Disabled('android')
-@benchmark.Owner(emails=['kouhei@chormium.org', 'ksakamoto@chromium.org'])
+@benchmark.Owner(emails=['kouhei@chromium.org', 'ksakamoto@chromium.org'])
 class LoadingDesktop(_LoadingBase):
   """ A benchmark measuring loading performance of desktop sites. """
-
-  @classmethod
-  def ShouldDisable(cls, possible_browser):
-    return possible_browser.browser_type == 'reference'
+  SUPPORTED_PLATFORMS = [story.expectations.ALL_DESKTOP]
 
   def CreateStorySet(self, options):
     return page_sets.LoadingDesktopStorySet(
-        cache_temperatures=[cache_temperature.PCV1_COLD,
-                            cache_temperature.PCV1_WARM,])
-
-  def GetExpectations(self):
-    return page_sets.LoadingDesktopExpectations()
+        cache_temperatures=[cache_temperature.COLD, cache_temperature.WARM])
 
   @classmethod
   def Name(cls):
     return 'loading.desktop'
 
 
-@benchmark.Enabled('android')
 @benchmark.Owner(emails=['kouhei@chromium.org', 'ksakamoto@chromium.org'])
 class LoadingMobile(_LoadingBase):
   """ A benchmark measuring loading performance of mobile sites. """
-
-  @classmethod
-  def ShouldDisable(cls, possible_browser):
-    # crbug.com/619254
-    if possible_browser.browser_type == 'reference':
-      return True
-
-    # crbug.com/676612
-    if ((possible_browser.platform.GetDeviceTypeName() == 'Nexus 6' or
-         possible_browser.platform.GetDeviceTypeName() == 'AOSP on Shamu') and
-        possible_browser.browser_type == 'android-webview'):
-      return True
-
-    return False
+  SUPPORTED_PLATFORMS = [story.expectations.ALL_MOBILE]
 
   def CreateStorySet(self, options):
     return page_sets.LoadingMobileStorySet(
         cache_temperatures=[cache_temperature.ANY],
+        cache_temperatures_for_pwa=[cache_temperature.COLD,
+                                    cache_temperature.WARM,
+                                    cache_temperature.HOT],
         traffic_settings=[traffic_setting.NONE, traffic_setting.REGULAR_3G])
-
-  def GetExpectations(self):
-    return page_sets.LoadingMobileExpectations()
 
   @classmethod
   def Name(cls):

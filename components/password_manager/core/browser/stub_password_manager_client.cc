@@ -12,9 +12,7 @@
 namespace password_manager {
 
 StubPasswordManagerClient::StubPasswordManagerClient()
-    : ukm_source_id_(ukm::UkmRecorder::Get()
-                         ? ukm::UkmRecorder::Get()->GetNewSourceID()
-                         : 0) {}
+    : ukm_source_id_(ukm::UkmRecorder::GetNewSourceID()) {}
 
 StubPasswordManagerClient::~StubPasswordManagerClient() {}
 
@@ -23,6 +21,13 @@ bool StubPasswordManagerClient::PromptUserToSaveOrUpdatePassword(
     bool update_password) {
   return false;
 }
+
+void StubPasswordManagerClient::ShowManualFallbackForSaving(
+    std::unique_ptr<PasswordFormManager> form_to_save,
+    bool has_generated_password,
+    bool update_password) {}
+
+void StubPasswordManagerClient::HideManualFallbackForSaving() {}
 
 bool StubPasswordManagerClient::PromptUserToChooseCredentials(
     std::vector<std::unique_ptr<autofill::PasswordForm>> local_forms,
@@ -78,13 +83,12 @@ void StubPasswordManagerClient::CheckSafeBrowsingReputation(
     const GURL& frame_url) {}
 
 void StubPasswordManagerClient::CheckProtectedPasswordEntry(
-    const std::string& password_saved_domain,
+    bool matches_sync_password,
+    const std::vector<std::string>& matching_domains,
     bool password_field_exists) {}
-#endif
 
-ukm::UkmRecorder* StubPasswordManagerClient::GetUkmRecorder() {
-  return ukm::UkmRecorder::Get();
-}
+void StubPasswordManagerClient::LogPasswordReuseDetectedEvent() {}
+#endif
 
 ukm::SourceId StubPasswordManagerClient::GetUkmSourceId() {
   return ukm_source_id_;
@@ -93,8 +97,7 @@ ukm::SourceId StubPasswordManagerClient::GetUkmSourceId() {
 PasswordManagerMetricsRecorder&
 StubPasswordManagerClient::GetMetricsRecorder() {
   if (!metrics_recorder_) {
-    metrics_recorder_.emplace(GetUkmRecorder(), GetUkmSourceId(),
-                              GetMainFrameURL());
+    metrics_recorder_.emplace(GetUkmSourceId(), GetMainFrameURL());
   }
   return metrics_recorder_.value();
 }

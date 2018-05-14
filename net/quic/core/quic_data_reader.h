@@ -36,7 +36,6 @@ class QUIC_EXPORT_PRIVATE QuicDataReader {
   // Caller must provide an underlying buffer to work on.
   QuicDataReader(const char* data,
                  const size_t len,
-                 Perspective perspective,
                  Endianness endianness);
 
   // Empty destructor.
@@ -50,8 +49,8 @@ class QUIC_EXPORT_PRIVATE QuicDataReader {
   bool ReadUInt32(uint32_t* result);
   bool ReadUInt64(uint64_t* result);
 
-  // Reads |num_bytes| bytes in the correct byte order into least significant
-  // bytes of |result|.
+  // Set |result| to 0, then read |num_bytes| bytes in the correct byte order
+  // into least significant bytes of |result|.
   bool ReadBytesToUInt64(size_t num_bytes, uint64_t* result);
 
   // Reads a 16-bit unsigned float into the given output parameter.
@@ -127,6 +126,15 @@ class QUIC_EXPORT_PRIVATE QuicDataReader {
 
   void set_endianness(Endianness endianness) { endianness_ = endianness; }
 
+  // Read an IETF-encoded Variable Length Integer and place the result
+  // in |*result|.
+  // Returns true if it works, false if not. The only error is that
+  // there is not enough in the buffer to read the number.
+  // If there is an error, |*result| is not altered.
+  // Numbers are encoded per the rules in draft-ietf-quic-transport-08.txt
+  // and that the integers in the range 0 ... (2^62)-1.
+  bool ReadVarInt62(uint64_t* result);
+
  private:
   // Returns true if the underlying buffer has enough room to read the given
   // amount of bytes.
@@ -135,7 +143,8 @@ class QUIC_EXPORT_PRIVATE QuicDataReader {
   // To be called when a read fails for any reason.
   void OnFailure();
 
-  // The data buffer that we're reading from.
+  // TODO(fkastenholz, b/73004262) change buffer_, et al, to be uint8_t, not
+  // char. The data buffer that we're reading from.
   const char* data_;
 
   // The length of the data buffer that we're reading from.
@@ -143,12 +152,6 @@ class QUIC_EXPORT_PRIVATE QuicDataReader {
 
   // The location of the next read from our data buffer.
   size_t pos_;
-
-  // TODO(zhongyi): remove this field as it is no longer used.
-  // Perspective of this data reader. Please note, although client and server
-  // may have different in-memory representation of the same field, the on wire
-  // representation must be consistent.
-  Perspective perspective_;
 
   // The endianness to read integers and floating numbers.
   Endianness endianness_;

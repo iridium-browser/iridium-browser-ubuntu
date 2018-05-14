@@ -42,10 +42,10 @@ class AudioSourceProviderClient : public GarbageCollectedMixin {
   // changed.
   virtual void OnCurrentSrcChanged(const KURL& current_src) {}
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  void Trace(blink::Visitor* visitor) override {}
 
  protected:
-  virtual ~AudioSourceProviderClient() {}
+  virtual ~AudioSourceProviderClient() = default;
 };
 
 }  // namespace blink

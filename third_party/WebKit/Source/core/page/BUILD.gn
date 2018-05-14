@@ -10,8 +10,8 @@ blink_core_sources("page") {
     "AutoscrollController.h",
     "ChromeClient.cpp",
     "ChromeClient.h",
-    "ContextMenuClient.cpp",
-    "ContextMenuClient.h",
+    "ChromeClientImpl.cpp",
+    "ChromeClientImpl.h",
     "ContextMenuController.cpp",
     "ContextMenuController.h",
     "ContextMenuProvider.h",
@@ -24,8 +24,6 @@ blink_core_sources("page") {
     "DragData.h",
     "DragSession.h",
     "DragState.h",
-    "EditorClient.cpp",
-    "EditorClient.h",
     "EventWithHitTestResults.h",
     "FocusChangedObserver.cpp",
     "FocusChangedObserver.h",
@@ -37,6 +35,7 @@ blink_core_sources("page") {
     "Page.h",
     "PageAnimator.cpp",
     "PageAnimator.h",
+    "PageLifecycleState.h",
     "PageOverlay.cpp",
     "PageOverlay.h",
     "PagePopup.h",
@@ -60,8 +59,8 @@ blink_core_sources("page") {
     "PopupOpeningObserver.h",
     "PrintContext.cpp",
     "PrintContext.h",
-    "ScopedPageSuspender.cpp",
-    "ScopedPageSuspender.h",
+    "ScopedPagePauser.cpp",
+    "ScopedPagePauser.h",
     "SlotScopedTraversal.cpp",
     "SlotScopedTraversal.h",
     "SpatialNavigation.cpp",
@@ -89,6 +88,8 @@ blink_core_sources("page") {
     "scrolling/ScrollStateCallback.h",
     "scrolling/ScrollingCoordinator.cpp",
     "scrolling/ScrollingCoordinator.h",
+    "scrolling/ScrollingCoordinatorContext.cpp",
+    "scrolling/ScrollingCoordinatorContext.h",
     "scrolling/SnapCoordinator.cpp",
     "scrolling/SnapCoordinator.h",
     "scrolling/StickyPositionScrollingConstraints.cpp",
@@ -97,10 +98,5 @@ blink_core_sources("page") {
     "scrolling/TopDocumentRootScrollerController.h",
     "scrolling/ViewportScrollCallback.cpp",
     "scrolling/ViewportScrollCallback.h",
-  ]
-
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
   ]
 }

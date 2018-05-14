@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -37,12 +38,26 @@ class ChromeBrowserPolicyConnector : public BrowserPolicyConnector {
 
   ~ChromeBrowserPolicyConnector() override;
 
+  // Called once the resource bundle has been created. Calls through to super
+  // class to notify observers.
+  void OnResourceBundleCreated();
+
   void Init(
       PrefService* local_state,
       scoped_refptr<net::URLRequestContextGetter> request_context) override;
 
+  ConfigurationPolicyProvider* GetPlatformProvider();
+
+ protected:
+  // BrowserPolicyConnector:
+  std::vector<std::unique_ptr<policy::ConfigurationPolicyProvider>>
+  CreatePolicyProviders() override;
+
  private:
   std::unique_ptr<ConfigurationPolicyProvider> CreatePlatformProvider();
+
+  // Owned by base class.
+  ConfigurationPolicyProvider* platform_provider_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserPolicyConnector);
 };

@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/app_list/arc/arc_app_test.h"
 #include "chrome/browser/ui/app_list/chrome_app_list_item.h"
 #include "chrome/browser/ui/app_list/extension_app_context_menu.h"
+#include "chrome/browser/ui/app_list/test/fake_app_list_model_updater.h"
 #include "chrome/browser/ui/app_list/test/test_app_list_controller_delegate.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/arc/test/fake_app_instance.h"
@@ -103,8 +104,9 @@ class AppContextMenuTest : public AppListTestBase {
 
     extensions::MenuManagerFactory::GetInstance()->SetTestingFactory(
         profile(), MenuManagerFactory);
-    controller_.reset(new FakeAppListControllerDelegate());
-    menu_delegate_.reset(new FakeAppContextMenuDelegate());
+    controller_ = std::make_unique<FakeAppListControllerDelegate>();
+    menu_delegate_ = std::make_unique<FakeAppContextMenuDelegate>();
+    model_updater_ = std::make_unique<FakeAppListModelUpdater>();
     ChromeAppListItem::OverrideAppListControllerDelegateForTesting(
         controller());
   }
@@ -273,6 +275,7 @@ class AppContextMenuTest : public AppListTestBase {
   std::unique_ptr<KeyedService> menu_manager_;
   std::unique_ptr<FakeAppListControllerDelegate> controller_;
   std::unique_ptr<FakeAppContextMenuDelegate> menu_delegate_;
+  std::unique_ptr<FakeAppListModelUpdater> model_updater_;
 
   DISALLOW_COPY_AND_ASSIGN(AppContextMenuTest);
 };
@@ -338,7 +341,7 @@ TEST_F(AppContextMenuTest, ArcMenu) {
   arc_test.app_instance()->RefreshAppList();
   arc_test.app_instance()->SendRefreshAppList(arc_test.fake_apps());
 
-  ArcAppItem item(profile(), nullptr, app_id, std::string());
+  ArcAppItem item(profile(), nullptr, nullptr, app_id, std::string());
 
   ui::MenuModel* menu = item.GetContextMenuModel();
   ASSERT_NE(nullptr, menu);
@@ -375,9 +378,9 @@ TEST_F(AppContextMenuTest, ArcMenu) {
 
   // This makes all apps non-ready.
   controller()->SetAppOpen(app_id, false);
-  arc::InstanceHolder<arc::mojom::AppInstance>::Observer* instance_observer =
+  arc::ConnectionObserver<arc::mojom::AppInstance>* connection_observer =
       arc_test.arc_app_list_prefs();
-  instance_observer->OnInstanceClosed();
+  connection_observer->OnConnectionClosed();
 
   menu = item.GetContextMenuModel();
   ASSERT_EQ(6, menu->GetItemCount());
@@ -413,7 +416,7 @@ TEST_F(AppContextMenuTest, ArcMenuShortcut) {
 
   arc_test.app_instance()->SendInstallShortcuts(arc_test.fake_shortcuts());
 
-  ArcAppItem item(profile(), nullptr, app_id, std::string());
+  ArcAppItem item(profile(), nullptr, nullptr, app_id, std::string());
 
   ui::MenuModel* menu = item.GetContextMenuModel();
   ASSERT_NE(nullptr, menu);
@@ -428,9 +431,9 @@ TEST_F(AppContextMenuTest, ArcMenuShortcut) {
       menu, 5, MenuState(app_list::AppContextMenu::SHOW_APP_INFO));
 
   // This makes all apps non-ready. Shortcut is still uninstall-able.
-  arc::InstanceHolder<arc::mojom::AppInstance>::Observer* instance_observer =
+  arc::ConnectionObserver<arc::mojom::AppInstance>* connection_observer =
       arc_test.arc_app_list_prefs();
-  instance_observer->OnInstanceClosed();
+  connection_observer->OnConnectionClosed();
 
   menu = item.GetContextMenuModel();
   ASSERT_EQ(6, menu->GetItemCount());
@@ -457,10 +460,14 @@ TEST_F(AppContextMenuTest, ArcMenuStickyItem) {
     const std::string store_id = ArcAppTest::GetAppId(store_info);
     controller()->SetAppPinnable(store_id,
                                  AppListControllerDelegate::PIN_EDITABLE);
-    ArcAppItem item(profile(), nullptr, store_id, std::string());
+    ArcAppItem item(profile(), nullptr, nullptr, store_id, std::string());
     ui::MenuModel* menu = item.GetContextMenuModel();
     ASSERT_NE(nullptr, menu);
 
+    // There should be 5 items in the context menu. If you're adding a
+    // context menu option ensure that you have added the enum to
+    // tools/metrics/enums.xml and that you haven't modified the order of the
+    // existing enums.
     ASSERT_EQ(5, menu->GetItemCount());
     ValidateItemState(menu, 0, MenuState(app_list::AppContextMenu::LAUNCH_NEW));
     ValidateItemState(menu, 1, MenuState());  // separator
@@ -469,4 +476,23 @@ TEST_F(AppContextMenuTest, ArcMenuStickyItem) {
     ValidateItemState(
         menu, 4, MenuState(app_list::AppContextMenu::SHOW_APP_INFO));
   }
+}
+
+TEST_F(AppContextMenuTest, CommandIdsMatchEnumsForHistograms) {
+  // Tests that CommandId enums are not changed as the values are used in
+  // histograms.
+  EXPECT_EQ(100, app_list::AppContextMenu::LAUNCH_NEW);
+  EXPECT_EQ(101, app_list::AppContextMenu::TOGGLE_PIN);
+  EXPECT_EQ(102, app_list::AppContextMenu::SHOW_APP_INFO);
+  EXPECT_EQ(103, app_list::AppContextMenu::OPTIONS);
+  EXPECT_EQ(104, app_list::AppContextMenu::UNINSTALL);
+  EXPECT_EQ(105, app_list::AppContextMenu::REMOVE_FROM_FOLDER);
+  EXPECT_EQ(106, app_list::AppContextMenu::MENU_NEW_WINDOW);
+  EXPECT_EQ(107, app_list::AppContextMenu::MENU_NEW_INCOGNITO_WINDOW);
+  EXPECT_EQ(108, app_list::AppContextMenu::INSTALL);
+  EXPECT_EQ(200, app_list::AppContextMenu::USE_LAUNCH_TYPE_COMMAND_START);
+  EXPECT_EQ(200, app_list::AppContextMenu::USE_LAUNCH_TYPE_PINNED);
+  EXPECT_EQ(201, app_list::AppContextMenu::USE_LAUNCH_TYPE_REGULAR);
+  EXPECT_EQ(202, app_list::AppContextMenu::USE_LAUNCH_TYPE_FULLSCREEN);
+  EXPECT_EQ(203, app_list::AppContextMenu::USE_LAUNCH_TYPE_WINDOW);
 }

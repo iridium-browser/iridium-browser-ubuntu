@@ -5,29 +5,9 @@
 #include "services/shape_detection/face_detection_impl_mac.h"
 
 #include "base/mac/scoped_cftyperef.h"
-#include "media/capture/video/scoped_result_callback.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/shape_detection/detection_utils_mac.h"
-#include "services/shape_detection/face_detection_provider_impl.h"
 
 namespace shape_detection {
-
-namespace {
-
-void RunCallbackWithNoFaces(
-    shape_detection::mojom::FaceDetection::DetectCallback callback) {
-  std::move(callback).Run({});
-}
-
-}  // anonymous namespace
-
-void FaceDetectionProviderImpl::CreateFaceDetection(
-    shape_detection::mojom::FaceDetectionRequest request,
-    shape_detection::mojom::FaceDetectorOptionsPtr options) {
-  mojo::MakeStrongBinding(
-      base::MakeUnique<FaceDetectionImplMac>(std::move(options)),
-      std::move(request));
-}
 
 FaceDetectionImplMac::FaceDetectionImplMac(
     shape_detection::mojom::FaceDetectorOptionsPtr options) {
@@ -43,12 +23,11 @@ FaceDetectionImplMac::~FaceDetectionImplMac() {}
 
 void FaceDetectionImplMac::Detect(const SkBitmap& bitmap,
                                   DetectCallback callback) {
-  media::ScopedResultCallback<DetectCallback> scoped_callback(
-      std::move(callback), base::Bind(&RunCallbackWithNoFaces));
-
   base::scoped_nsobject<CIImage> ci_image = CreateCIImageFromSkBitmap(bitmap);
-  if (!ci_image)
+  if (!ci_image) {
+    std::move(callback).Run({});
     return;
+  }
 
   NSArray* const features = [detector_ featuresInImage:ci_image];
   const int height = bitmap.height();
@@ -89,7 +68,7 @@ void FaceDetectionImplMac::Detect(const SkBitmap& bitmap,
 
     results.push_back(std::move(face));
   }
-  scoped_callback.Run(std::move(results));
+  std::move(callback).Run(std::move(results));
 }
 
 }  // namespace shape_detection

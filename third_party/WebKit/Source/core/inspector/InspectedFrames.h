@@ -5,19 +5,18 @@
 #ifndef InspectedFrames_h
 #define InspectedFrames_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
 class LocalFrame;
 
 class CORE_EXPORT InspectedFrames final
-    : public GarbageCollected<InspectedFrames> {
-  WTF_MAKE_NONCOPYABLE(InspectedFrames);
-
+    : public GarbageCollectedFinalized<InspectedFrames> {
  public:
   class CORE_EXPORT Iterator {
     STACK_ALLOCATED();
@@ -37,9 +36,7 @@ class CORE_EXPORT InspectedFrames final
     Member<LocalFrame> current_;
   };
 
-  static InspectedFrames* Create(LocalFrame* root) {
-    return new InspectedFrames(root);
-  }
+  explicit InspectedFrames(LocalFrame*);
 
   LocalFrame* Root() { return root_; }
   bool Contains(LocalFrame*) const;
@@ -47,12 +44,11 @@ class CORE_EXPORT InspectedFrames final
   Iterator begin();
   Iterator end();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
-  explicit InspectedFrames(LocalFrame*);
-
   Member<LocalFrame> root_;
+  DISALLOW_COPY_AND_ASSIGN(InspectedFrames);
 };
 
 }  // namespace blink

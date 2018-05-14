@@ -11,7 +11,7 @@
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "ui/display/screen_base.h"
 #include "ui/display/types/display_constants.h"
-#include "ui/display/types/display_snapshot_mojo.h"
+#include "ui/display/types/display_snapshot.h"
 #include "ui/display/types/fake_display_controller.h"
 #include "ui/display/types/native_display_delegate.h"
 #include "ui/ozone/public/ozone_platform.h"
@@ -40,9 +40,9 @@ const DisplayMode* GetCorrespondingMode(const DisplaySnapshot& snapshot,
 
 ScreenManagerForwarding::ScreenManagerForwarding(Mode mode)
     : is_in_process_(mode == Mode::IN_WM_PROCESS),
-      screen_(base::MakeUnique<display::ScreenBase>()),
+      screen_(std::make_unique<display::ScreenBase>()),
       binding_(this),
-      test_controller_binding_(this) {
+      dev_controller_binding_(this) {
   if (!is_in_process_)
     Screen::SetScreenInstance(screen_.get());
 }
@@ -60,8 +60,8 @@ void ScreenManagerForwarding::AddInterfaces(
   registry->AddInterface<mojom::NativeDisplayDelegate>(
       base::Bind(&ScreenManagerForwarding::BindNativeDisplayDelegateRequest,
                  base::Unretained(this)));
-  registry->AddInterface<mojom::TestDisplayController>(
-      base::Bind(&ScreenManagerForwarding::BindTestDisplayControllerRequest,
+  registry->AddInterface<mojom::DevDisplayController>(
+      base::Bind(&ScreenManagerForwarding::BindDevDisplayControllerRequest,
                  base::Unretained(this)));
 }
 
@@ -235,11 +235,11 @@ void ScreenManagerForwarding::BindNativeDisplayDelegateRequest(
   binding_.Bind(std::move(request));
 }
 
-void ScreenManagerForwarding::BindTestDisplayControllerRequest(
-    mojom::TestDisplayControllerRequest request,
+void ScreenManagerForwarding::BindDevDisplayControllerRequest(
+    mojom::DevDisplayControllerRequest request,
     const service_manager::BindSourceInfo& source_info) {
-  DCHECK(!test_controller_binding_.is_bound());
-  test_controller_binding_.Bind(std::move(request));
+  DCHECK(!dev_controller_binding_.is_bound());
+  dev_controller_binding_.Bind(std::move(request));
 }
 
 void ScreenManagerForwarding::ForwardGetDisplays(
@@ -247,15 +247,15 @@ void ScreenManagerForwarding::ForwardGetDisplays(
     const std::vector<DisplaySnapshot*>& snapshots) {
   snapshot_map_.clear();
 
-  // Convert the DisplaySnapshots to MojoDisplaySnapshots to allow sending
-  // over Mojo. Also caches the snapshots for lookup later.
-  std::vector<std::unique_ptr<DisplaySnapshotMojo>> mojo_snapshots;
+  std::vector<std::unique_ptr<DisplaySnapshot>> snapshot_clones;
   for (auto* snapshot : snapshots) {
     snapshot_map_[snapshot->display_id()] = snapshot;
-    mojo_snapshots.push_back(DisplaySnapshotMojo::CreateFrom(*snapshot));
+
+    // Clone display snapshots to send over IPC.
+    snapshot_clones.push_back(snapshot->Clone());
   }
 
-  callback.Run(std::move(mojo_snapshots));
+  callback.Run(std::move(snapshot_clones));
 }
 
 void ScreenManagerForwarding::ForwardConfigure(

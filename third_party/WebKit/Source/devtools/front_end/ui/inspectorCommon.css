@@ -47,7 +47,7 @@
 }
 
 :focus {
-    outline: none;
+    outline-width: 0;
 }
 
 img {
@@ -298,6 +298,11 @@ input {
     border-radius: 2px;
     background-color: #333;
     -webkit-box-shadow: inset 0 0 1px rgba(255,255,255,0.5);
+}
+
+:not(.platform-mac).-theme-with-dark-background ::-webkit-scrollbar-corner,
+:host-context(:not(.platform-mac).-theme-with-dark-background) ::-webkit-scrollbar-corner {
+    background-color: #242424;
 }
 
 .gray-info-message {

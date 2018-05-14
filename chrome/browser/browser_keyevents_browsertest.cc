@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -56,7 +57,7 @@ const char kSetTextBoxValueJS[] =
 const char kStartTestJS[] =
     "window.domAutomationController.send(startTest(%d));";
 
-// Maximum lenght of the result array in KeyEventTestData structure.
+// Maximum length of the result array in KeyEventTestData structure.
 const size_t kMaxResultLength = 10;
 
 // A structure holding test data of a keyboard event.
@@ -119,7 +120,7 @@ class TestFinishObserver : public content::NotificationObserver {
     if (*dom_op_result.ptr() == "\"FINISHED\"") {
       finished_ = true;
       if (waiting_)
-        base::MessageLoopForUI::current()->QuitWhenIdle();
+        base::RunLoop::QuitCurrentWhenIdleDeprecated();
     }
   }
 
@@ -294,8 +295,16 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
   }
 };
 
-// Flaky: http://crbug.com/129235, http://crbug.com/81451.
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_NormalKeyEvents) {
+#if defined(OS_MACOSX)
+// http://crbug.com/81451
+#define MAYBE_NormalKeyEvents DISABLED_NormalKeyEvents
+#elif defined(OS_LINUX)
+// http://crbug.com/129235
+#define MAYBE_NormalKeyEvents DISABLED_NormalKeyEvents
+#else
+#define MAYBE_NormalKeyEvents NormalKeyEvents
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_NormalKeyEvents) {
   static const KeyEventTestData kTestNoInput[] = {
     // a
     { ui::VKEY_A, false, false, false, false,
@@ -520,9 +529,16 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_CommandKeyEvents) {
 }
 #endif
 
-// Flaky: http://crbug.com/81451 , http://crbug.com/129235 ,
-// also fails on Windows.
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
+#if defined(OS_MACOSX)
+// http://crbug.com/81451 for mac
+#define MAYBE_AccessKeys DISABLED_AccessKeys
+#elif defined(OS_LINUX)
+// http://crbug.com/129235
+#define MAYBE_AccessKeys DISABLED_AccessKeys
+#else
+#define MAYBE_AccessKeys AccessKeys
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_AccessKeys) {
 #if defined(OS_MACOSX)
   // On Mac, access keys use ctrl+alt modifiers.
   static const KeyEventTestData kTestAccessA = {
@@ -583,7 +599,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
       "U 18 0 false false true false" }
   };
 
-#if !defined(USE_ASH)
+#if !defined(OS_CHROMEOS)
   static const KeyEventTestData kTestAccess1 = {
     ui::VKEY_1, false, false, true, false,
     false, false, false, false, 4,
@@ -648,16 +664,16 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
   EXPECT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L""));
   // Make sure no element is focused.
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
-#if !defined(USE_ASH)
-  // On Ash, alt-1..9 are assigned as window selection global accelerators, so
-  // they can not be used as accesskeys.
+#if !defined(OS_CHROMEOS)
+  // On Chrome OS, alt-1..9 are assigned as window selection global
+  // accelerators, so they cannot be used as accesskeys.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestAccess1));
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L"1"));
 #endif
 }
 
 // Flaky, http://crbug.com/69475.
-#if defined(OS_LINUX) || defined(OS_WIN)
+#if defined(OS_LINUX)
 #define MAYBE_ReservedAccelerators DISABLED_ReservedAccelerators
 #else
 #define MAYBE_ReservedAccelerators ReservedAccelerators
@@ -785,7 +801,12 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, EditorKeyBindings) {
 #endif
 
 // See http://crbug.com/147579
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_PageUpDownKeys) {
+#if defined(OS_WIN)
+#define MAYBE_PageUpDownKeys PageUpDownKeys
+#else
+#define MAYBE_PageUpDownKeys DISABLED_PageUpDownKeys
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_PageUpDownKeys) {
   static const KeyEventTestData kTestPageUp = {
     ui::VKEY_PRIOR, false, false, false, false,
     false, false, false, false, 2,

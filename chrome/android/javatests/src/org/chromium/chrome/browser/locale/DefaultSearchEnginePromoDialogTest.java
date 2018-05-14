@@ -21,12 +21,14 @@ import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
+import org.chromium.chrome.browser.search_engines.TemplateUrlService.TemplateUrl;
 import org.chromium.chrome.browser.searchwidget.SearchActivity;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ActivityUtils;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 
@@ -37,16 +39,21 @@ import java.util.concurrent.ExecutionException;
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class DefaultSearchEnginePromoDialogTest {
     @Before
-    public void setUp() throws Exception {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+    public void setUp() throws ExecutionException, ProcessInitException {
+        ThreadUtils.runOnUiThreadBlocking(new Callable<Void>() {
             @Override
-            public void run() {
-                try {
-                    ChromeBrowserInitializer.getInstance(InstrumentationRegistry.getTargetContext())
-                            .handleSynchronousStartup();
-                } catch (ProcessInitException e) {
-                    Assert.fail("Failed to initialize Chrome process");
-                }
+            public Void call() throws ProcessInitException {
+                ChromeBrowserInitializer.getInstance(InstrumentationRegistry.getTargetContext())
+                        .handleSynchronousStartup();
+
+                LocaleManager mockManager = new LocaleManager() {
+                    @Override
+                    public List<TemplateUrl> getSearchEnginesForPromoDialog(int promoType) {
+                        return TemplateUrlService.getInstance().getSearchEngines();
+                    }
+                };
+                LocaleManager.setInstanceForTest(mockManager);
+                return null;
             }
         });
     }

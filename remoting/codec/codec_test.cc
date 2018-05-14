@@ -8,14 +8,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include <deque>
 #include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "media/base/video_frame.h"
 #include "remoting/base/util.h"
 #include "remoting/codec/video_decoder.h"
 #include "remoting/codec/video_encoder.h"

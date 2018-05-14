@@ -4,8 +4,8 @@
 
 #include "platform/graphics/paint/GeometryMapper.h"
 
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/geometry/LayoutRect.h"
+#include "platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -131,10 +131,11 @@ void GeometryMapper::SourceToDestinationRect(
 void GeometryMapper::LocalToAncestorVisualRect(
     const PropertyTreeState& local_state,
     const PropertyTreeState& ancestor_state,
-    FloatClipRect& mapping_rect) {
+    FloatClipRect& mapping_rect,
+    OverlayScrollbarClipBehavior clip_behavior) {
   bool success = false;
   LocalToAncestorVisualRectInternal(local_state, ancestor_state, mapping_rect,
-                                    success);
+                                    clip_behavior, success);
   DCHECK(success);
 }
 
@@ -142,6 +143,7 @@ void GeometryMapper::LocalToAncestorVisualRectInternal(
     const PropertyTreeState& local_state,
     const PropertyTreeState& ancestor_state,
     FloatClipRect& rect_to_map,
+    OverlayScrollbarClipBehavior clip_behavior,
     bool& success) {
   if (local_state == ancestor_state) {
     success = true;
@@ -149,8 +151,8 @@ void GeometryMapper::LocalToAncestorVisualRectInternal(
   }
 
   if (local_state.Effect() != ancestor_state.Effect()) {
-    SlowLocalToAncestorVisualRectWithEffects(local_state, ancestor_state,
-                                             rect_to_map, success);
+    SlowLocalToAncestorVisualRectWithEffects(
+        local_state, ancestor_state, rect_to_map, clip_behavior, success);
     return;
   }
 
@@ -172,25 +174,27 @@ void GeometryMapper::LocalToAncestorVisualRectInternal(
     rect_to_map = FloatClipRect(FloatRect());
     return;
   }
-  FloatRect mapped_rect = transform_matrix.MapRect(rect_to_map.Rect());
+  rect_to_map.Map(transform_matrix);
 
-  const FloatClipRect& clip_rect =
-      LocalToAncestorClipRectInternal(local_state.Clip(), ancestor_state.Clip(),
-                                      ancestor_state.Transform(), success);
+  FloatClipRect clip_rect = LocalToAncestorClipRectInternal(
+      local_state.Clip(), ancestor_state.Clip(), ancestor_state.Transform(),
+      clip_behavior, success);
   if (success) {
-    // This is where we propagate the rounded-ness of |clipRect| to
-    // |rectToMap|.
-    rect_to_map = clip_rect;
-    rect_to_map.Intersect(mapped_rect);
-  } else if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
-    // On SPv1 we may fail when the paint invalidation container creates an
-    // overflow clip (in ancestorState) which is not in localState of an
+    // This is where we propagate the roundedness and tightness of |clip_rect|
+    // to |rect_to_map|.
+    rect_to_map.Intersect(clip_rect);
+    return;
+  }
+
+  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+    // On SPv1* we may fail when the paint invalidation container creates an
+    // overflow clip (in ancestor_state) which is not in localState of an
     // out-of-flow positioned descendant. See crbug.com/513108 and layout test
     // compositing/overflow/handle-non-ancestor-clip-parent.html (run with
     // --enable-prefer-compositing-to-lcd-text) for details.
-    // Ignore it for SPv1 for now.
+    // Ignore it for SPv1* for now.
     success = true;
-    rect_to_map.SetRect(mapped_rect);
+    rect_to_map.ClearIsTight();
   }
 }
 
@@ -198,6 +202,7 @@ void GeometryMapper::SlowLocalToAncestorVisualRectWithEffects(
     const PropertyTreeState& local_state,
     const PropertyTreeState& ancestor_state,
     FloatClipRect& mapping_rect,
+    OverlayScrollbarClipBehavior clip_behavior,
     bool& success) {
   PropertyTreeState last_transform_and_clip_state(local_state.Transform(),
                                                   local_state.Clip(), nullptr);
@@ -207,18 +212,19 @@ void GeometryMapper::SlowLocalToAncestorVisualRectWithEffects(
     if (!effect->HasFilterThatMovesPixels())
       continue;
 
+    DCHECK(effect->OutputClip());
     PropertyTreeState transform_and_clip_state(effect->LocalTransformSpace(),
                                                effect->OutputClip(), nullptr);
     LocalToAncestorVisualRectInternal(last_transform_and_clip_state,
                                       transform_and_clip_state, mapping_rect,
-                                      success);
+                                      clip_behavior, success);
     if (!success) {
       success = true;
       mapping_rect = FloatClipRect(FloatRect());
       return;
     }
 
-    mapping_rect.SetRect(effect->MapRect(mapping_rect.Rect()));
+    mapping_rect = FloatClipRect(effect->MapRect(mapping_rect.Rect()));
     last_transform_and_clip_state = transform_and_clip_state;
   }
 
@@ -226,42 +232,45 @@ void GeometryMapper::SlowLocalToAncestorVisualRectWithEffects(
       ancestor_state.Transform(), ancestor_state.Clip(), nullptr);
   LocalToAncestorVisualRectInternal(last_transform_and_clip_state,
                                     final_transform_and_clip_state,
-                                    mapping_rect, success);
+                                    mapping_rect, clip_behavior, success);
+
+  // Many effects (e.g. filters, clip-paths) can make a clip rect not tight.
+  mapping_rect.ClearIsTight();
 }
 
-const FloatClipRect& GeometryMapper::LocalToAncestorClipRect(
+FloatClipRect GeometryMapper::LocalToAncestorClipRect(
     const PropertyTreeState& local_state,
-    const PropertyTreeState& ancestor_state) {
+    const PropertyTreeState& ancestor_state,
+    OverlayScrollbarClipBehavior clip_behavior) {
+  if (local_state.Clip() == ancestor_state.Clip())
+    return FloatClipRect();
+
   bool success = false;
-  const FloatClipRect& result =
-      LocalToAncestorClipRectInternal(local_state.Clip(), ancestor_state.Clip(),
-                                      ancestor_state.Transform(), success);
-
+  auto result = LocalToAncestorClipRectInternal(
+      local_state.Clip(), ancestor_state.Clip(), ancestor_state.Transform(),
+      clip_behavior, success);
   DCHECK(success);
-
   return result;
 }
 
-const FloatClipRect& GeometryMapper::LocalToAncestorClipRectInternal(
+FloatClipRect GeometryMapper::LocalToAncestorClipRectInternal(
     const ClipPaintPropertyNode* descendant,
     const ClipPaintPropertyNode* ancestor_clip,
     const TransformPaintPropertyNode* ancestor_transform,
+    OverlayScrollbarClipBehavior clip_behavior,
     bool& success) {
-  DEFINE_STATIC_LOCAL(FloatClipRect, infinite, (FloatClipRect()));
-  DEFINE_STATIC_LOCAL(FloatClipRect, empty, (FloatRect()));
-
   FloatClipRect clip;
   if (descendant == ancestor_clip) {
     success = true;
-    return infinite;
+    return FloatClipRect();
   }
 
   const ClipPaintPropertyNode* clip_node = descendant;
   Vector<const ClipPaintPropertyNode*> intermediate_nodes;
 
   GeometryMapperClipCache::ClipAndTransform clip_and_transform(
-      ancestor_clip, ancestor_transform);
-  // Iterate over the path from localState.clip to ancestorState.clip. Stop if
+      ancestor_clip, ancestor_transform, clip_behavior);
+  // Iterate over the path from localState.clip to ancestor_state.clip. Stop if
   // we've found a memoized (precomputed) clip for any particular node.
   while (clip_node && clip_node != ancestor_clip) {
     if (const FloatClipRect* cached_clip =
@@ -277,14 +286,16 @@ const FloatClipRect& GeometryMapper::LocalToAncestorClipRectInternal(
     success = false;
     if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
       // On SPv1 we may fail when the paint invalidation container creates an
-      // overflow clip (in ancestorState) which is not in localState of an
+      // overflow clip (in ancestor_state) which is not in localState of an
       // out-of-flow positioned descendant. See crbug.com/513108 and layout
       // test compositing/overflow/handle-non-ancestor-clip-parent.html (run
       // with --enable-prefer-compositing-to-lcd-text) for details.
       // Ignore it for SPv1 for now.
       success = true;
     }
-    return infinite;
+    FloatClipRect loose_infinite;
+    loose_infinite.ClearIsTight();
+    return loose_infinite;
   }
 
   // Iterate down from the top intermediate node found in the previous loop,
@@ -296,23 +307,24 @@ const FloatClipRect& GeometryMapper::LocalToAncestorClipRectInternal(
                                               ancestor_transform, success);
     if (!success) {
       success = true;
-      return empty;
+      return FloatClipRect(FloatRect());
     }
-    FloatRect mapped_rect = transform_matrix.MapRect((*it)->ClipRect().Rect());
+
+    // This is where we generate the roundedness and tightness of clip rect
+    // from clip and transform properties, and propagate them to |clip|.
+    FloatClipRect mapped_rect(clip_behavior ==
+                                      kExcludeOverlayScrollbarSizeForHitTesting
+                                  ? (*it)->ClipRectExcludingOverlayScrollbars()
+                                  : (*it)->ClipRect());
+    mapped_rect.Map(transform_matrix);
     clip.Intersect(mapped_rect);
-    if ((*it)->ClipRect().IsRounded())
-      clip.SetHasRadius();
 
     (*it)->GetClipCache().SetCachedClip(clip_and_transform, clip);
   }
 
-  const FloatClipRect* cached_clip =
-      descendant->GetClipCache().GetCachedClip(clip_and_transform);
-  DCHECK(cached_clip);
-  CHECK(clip.HasRadius() == cached_clip->HasRadius());
-
+  DCHECK(*descendant->GetClipCache().GetCachedClip(clip_and_transform) == clip);
   success = true;
-  return *cached_clip;
+  return clip;
 }
 
 void GeometryMapper::ClearCache() {

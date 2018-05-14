@@ -16,18 +16,16 @@
 <translation id="1589122976691792535">wilayah</translation>
 <translation id="1591562245178063882">Bulan ini</translation>
 <translation id="1637811476055996098">Pilih Fail</translation>
-<translation id="167575180612809735">penunjuk sibuk</translation>
 <translation id="1729654308190250600">Sila masukkan alamat e-mel bukan kosong.</translation>
 <translation id="1758486001363313524">Lain-lain...</translation>
 <translation id="1806710327868736751">dialog_makluman</translation>
 <translation id="1821985195704844674">grid pohon</translation>
 <translation id="1822429046913737220">PG / P/M</translation>
 <translation id="1832974991323546415">main pada peranti jauh</translation>
-<translation id="1854180393107901205">Berhenti menghantar</translation>
-<translation id="1880518467580572141">garis bentuk</translation>
 <translation id="1921819250265091946">dd</translation>
 <translation id="1930711995431081526">status</translation>
 <translation id="1938124657309484470">Nilai mestilah <ph name="MAXIMUM_DATE_OR_TIME" /> atau lebih awal.</translation>
+<translation id="1993104285338243655">Beralih kepada pencerminan</translation>
 <translation id="2060505056492490888">'<ph name="DOT" />' digunakan pada kedudukan yang salah dalam '<ph name="INVALIDDOMAIN" />'.</translation>
 <translation id="2148716181193084225">Hari ini</translation>
 <translation id="2226276347425096477">Sila pendekkan teks ini menjadi <ph name="MAX_CHARACTERS" /> aksara atau kurang (anda kini menggunakan <ph name="CURRENT_LENGTH" /> aksara).</translation>
@@ -53,6 +51,7 @@
 <translation id="2940813599313844715">objek</translation>
 <translation id="2942448076852699108">kandungan yang diserlahkan</translation>
 <translation id="3040011195152428237">pautan</translation>
+<translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
 <translation id="3075154866155599887">Sila masukkan nilai yang sah. Medan tidak lengkap atau mengandungi tarikh yang tidak sah.</translation>
 <translation id="3078740164268491126">jadual</translation>
 <translation id="3086746722712840547">nota</translation>
@@ -65,6 +64,7 @@
 <translation id="3639613635497528239">bilangan saat baki filem</translation>
 <translation id="3706100364254443312">tukar</translation>
 <translation id="3732799496749320381">mm</translation>
+<translation id="3757388668994797779"><ph name="QUANTITY" /> GB</translation>
 <translation id="3785482301506746191">pembersih masa filem</translation>
 <translation id="3808586225841795776">istilah</translation>
 <translation id="3822383571486410024">Sila panjangkan teks ini kepada <ph name="MIN_CHARACTERS" /> aksara atau lebih (anda sedang menggunakan <ph name="CURRENT_LENGTH" /> aksara).</translation>
@@ -95,8 +95,8 @@
 <translation id="5117590920725113268">Tunjukkan bulan seterusnya</translation>
 <translation id="512758898067543763">pengepala baris</translation>
 <translation id="5164977714490026579">Nilai mesti lebih besar daripada atau sama dengan <ph name="MINIMUM" />.</translation>
+<translation id="520299402983819650"><ph name="QUANTITY" /> PB</translation>
 <translation id="5307600278924710095">Sila masukkan bahagian diikuti oleh '<ph name="ATSIGN" />'. '<ph name="INVALIDADDRESS" />' tidak lengkap.</translation>
-<translation id="5317780077021120954">Simpan</translation>
 <translation id="5406322316791861025">angka</translation>
 <translation id="5453733299334684579">item pohon</translation>
 <translation id="5466621249238537318">Sila pilih satu fail atau lebih.</translation>
@@ -105,12 +105,14 @@
 <translation id="5537725057119320332">Cast</translation>
 <translation id="5546461542133609677">nyahredam</translation>
 <translation id="561939826962581046">masa</translation>
+<translation id="5630795885300617244">Ketik dua kali ke kiri atau kanan untuk melangkau 10s</translation>
 <translation id="5641012560118721995">jeda main balik</translation>
 <translation id="5643186887447432888">butang</translation>
 <translation id="5677946354068040947">lagi pilihan</translation>
 <translation id="57838592816432529">Redam</translation>
 <translation id="5860033963881614850">Dimatikan</translation>
 <translation id="588258955323874662">Skrin penuh</translation>
+<translation id="5888666972993069672">Sekarang menghantar ke <ph name="DEVICE_FRIENDLY_NAME" /></translation>
 <translation id="5939518447894949180">Tetapkan semula</translation>
 <translation id="5966707198760109579">Minggu</translation>
 <translation id="5987525920412732405">butang putar</translation>
@@ -121,13 +123,15 @@
 <translation id="6398862346408813489">Tunjukkan panel pilihan bulan</translation>
 <translation id="6404546809543547843">pembersih masa audio</translation>
 <translation id="648732519525291180">pemilih masa</translation>
+<translation id="6550675742724504774">Pilihan</translation>
+<translation id="6564313821541007458">Sekarang dalam mod Gambar dalam Gambar</translation>
 <translation id="658823671542763450">memasuki skrin penuh</translation>
 <translation id="663493177488814956">suapan</translation>
 <translation id="6637586476836377253">log</translation>
 <translation id="6643016212128521049">Kosongkan</translation>
 <translation id="668171684555832681">Lain-lain...</translation>
 <translation id="6692633176391053278">pelangkah</translation>
-<translation id="6739588121953935928">pembaris</translation>
+<translation id="6709570249143506788">Mutu main balik teruk</translation>
 <translation id="6755330956360078551">tip alat</translation>
 <translation id="6790428901817661496">Mainkan</translation>
 <translation id="6820355525329141109">Tidak dapat memuatkan pemalam.</translation>
@@ -143,6 +147,7 @@
 <translation id="727747134524199931">pengepala lajur</translation>
 <translation id="7364796246159120393">Pilih Fail</translation>
 <translation id="739024184232394898">Lain-lain...</translation>
+<translation id="7460907917090416791"><ph name="QUANTITY" /> TB</translation>
 <translation id="7491962110804786152">tab</translation>
 <translation id="7514365320538308">Muat Turun</translation>
 <translation id="7673697353781729403">Jam</translation>
@@ -165,17 +170,18 @@
 <translation id="8444882422881193423"><ph name="NUMBER_OF_FILES" /> fail</translation>
 <translation id="8451268428117625855">Sila pilih fail.</translation>
 <translation id="8461852803063341183">butang radio</translation>
-<translation id="8511325616783751178">butang lungsur</translation>
-<translation id="8519420564908284378">Main pada kedua-dua skrin</translation>
 <translation id="8534579021159131403">Minit</translation>
 <translation id="8541249477527128034">kawalan media</translation>
 <translation id="8583702881314752957">senarai takrif</translation>
 <translation id="8597182159515967513">tajuk</translation>
 <translation id="8613126697340063924">kawal main balik jauh</translation>
+<translation id="8741316211671074806">Gambar dalam Gambar</translation>
 <translation id="8750798805984357768">Sila pilih salah satu pilihan ini.</translation>
 <translation id="8785498733064193001">mulakan main balik</translation>
 <translation id="8845239796550121995">Menghantar ke TV anda sekarang</translation>
 <translation id="8851136666856101339">utama</translation>
+<translation id="8875657656876809964">Ralat main balik video</translation>
+<translation id="8901569739625249689"><ph name="QUANTITY" /> KB</translation>
 <translation id="8987927404178983737">Bulan</translation>
 <translation id="901493112792887934">masa semasa dalam saat</translation>
 <translation id="9048119486235211610">navigasi</translation>

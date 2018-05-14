@@ -15,12 +15,13 @@ using ::testing::_;
 
 namespace blink {
 namespace scheduler {
+// To avoid symbol collisions in jumbo builds.
+namespace render_widget_signals_unittest {
 
-namespace {
 class MockObserver : public RenderWidgetSignals::Observer {
  public:
-  MockObserver() {}
-  virtual ~MockObserver() {}
+  MockObserver() = default;
+  virtual ~MockObserver() = default;
 
   MOCK_METHOD1(SetAllRenderWidgetsHidden, void(bool hidden));
   MOCK_METHOD1(SetHasVisibleRenderWidgetWithTouchHandler,
@@ -29,12 +30,11 @@ class MockObserver : public RenderWidgetSignals::Observer {
  private:
   DISALLOW_COPY_AND_ASSIGN(MockObserver);
 };
-}
 
 class RenderWidgetSignalsTest : public ::testing::Test {
  public:
-  RenderWidgetSignalsTest() {}
-  ~RenderWidgetSignalsTest() override {}
+  RenderWidgetSignalsTest() = default;
+  ~RenderWidgetSignalsTest() override = default;
 
   void SetUp() override {
     mock_observer_.reset(new MockObserver());
@@ -264,5 +264,6 @@ TEST_F(RenderWidgetSignalsTest,
   IgnoreWidgetDestructionCallbacks();
 }
 
+}  // namespace render_widget_signals_unittest
 }  // namespace scheduler
 }  // namespace blink

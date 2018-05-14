@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/event_router_forwarder.h"
 
 #include <stddef.h>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -84,7 +85,7 @@ void EventRouterForwarder::HandleEvent(
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::BindOnce(&EventRouterForwarder::HandleEvent, this, extension_id,
-                       histogram_value, event_name, base::Passed(&event_args),
+                       histogram_value, event_name, std::move(event_args),
                        profile_ptr, use_profile_to_restrict_events, event_url));
     return;
   }
@@ -132,7 +133,7 @@ void EventRouterForwarder::CallEventRouter(
     return;
 #endif
 
-  auto event = base::MakeUnique<Event>(
+  auto event = std::make_unique<Event>(
       histogram_value, event_name, std::move(event_args), restrict_to_profile);
   event->event_url = event_url;
   if (extension_id.empty()) {

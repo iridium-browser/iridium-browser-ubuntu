@@ -10,7 +10,6 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -197,7 +196,7 @@ void TranslateInternalsHandler::SendPrefsToJs() {
   base::DictionaryValue dict;
 
   static const char* keys[] = {
-      prefs::kEnableTranslate,
+      prefs::kOfferTranslateEnabled,
       translate::TranslatePrefs::kPrefTranslateBlockedLanguages,
       translate::TranslatePrefs::kPrefTranslateSiteBlacklist,
       translate::TranslatePrefs::kPrefTranslateWhitelists,
@@ -210,27 +209,36 @@ void TranslateInternalsHandler::SendPrefsToJs() {
   for (const char* key : keys) {
     const PrefService::Preference* pref = prefs->FindPreference(key);
     if (pref)
-      dict.Set(key, base::MakeUnique<base::Value>(*pref->GetValue()));
+      dict.SetKey(key, pref->GetValue()->Clone());
   }
 
   SendMessageToJs("prefsUpdated", dict);
 }
 
 void TranslateInternalsHandler::SendSupportedLanguagesToJs() {
-  base::DictionaryValue dict;
+  // Create translate prefs.
+  content::WebContents* web_contents = web_ui()->GetWebContents();
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  PrefService* prefs = profile->GetOriginalProfile()->GetPrefs();
+  std::unique_ptr<translate::TranslatePrefs> translate_prefs(
+      ChromeTranslateClient::CreateTranslatePrefs(prefs));
 
+  // Fetch supported language information.
   std::vector<std::string> languages;
-  translate::TranslateDownloadManager::GetSupportedLanguages(&languages);
+  translate::TranslateDownloadManager::GetSupportedLanguages(
+      translate_prefs->IsTranslateAllowedByPolicy(), &languages);
   base::Time last_updated =
       translate::TranslateDownloadManager::GetSupportedLanguagesLastUpdated();
 
-  auto languages_list = base::MakeUnique<base::ListValue>();
+  auto languages_list = std::make_unique<base::ListValue>();
   for (std::vector<std::string>::iterator it = languages.begin();
        it != languages.end(); ++it) {
     const std::string& lang = *it;
     languages_list->AppendString(lang);
   }
 
+  base::DictionaryValue dict;
   dict.Set("languages", std::move(languages_list));
   dict.SetDouble("last_updated", last_updated.ToJsTime());
   SendMessageToJs("supportedLanguagesUpdated", dict);

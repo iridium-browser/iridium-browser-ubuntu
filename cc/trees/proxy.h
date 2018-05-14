@@ -15,8 +15,10 @@
 #include "base/values.h"
 #include "cc/cc_export.h"
 #include "cc/input/browser_controls_state.h"
-#include "cc/scheduler/begin_frame_source.h"
 #include "cc/trees/task_runner_provider.h"
+#include "components/viz/common/frame_sinks/begin_frame_source.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
+#include "url/gurl.h"
 
 namespace gfx {
 class Rect;
@@ -25,6 +27,7 @@ class Rect;
 namespace cc {
 class LayerTreeFrameSink;
 class LayerTreeMutator;
+class RenderFrameMetadataObserver;
 
 // Abstract interface responsible for proxying commands from the main-thread
 // side of the compositor over to the compositor implementation.
@@ -74,6 +77,13 @@ class CC_EXPORT Proxy {
 
   // Testing hooks
   virtual bool MainFrameWillHappenForTesting() = 0;
+
+  virtual void SetURLForUkm(const GURL& url) = 0;
+
+  virtual void ClearHistoryOnNavigation() = 0;
+
+  virtual void SetRenderFrameObserver(
+      std::unique_ptr<RenderFrameMetadataObserver> observer) = 0;
 };
 
 }  // namespace cc

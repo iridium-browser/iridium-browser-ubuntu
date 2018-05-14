@@ -10,11 +10,12 @@
 
 #include <stdio.h>
 
-#include "webrtc/rtc_base/flags.h"
-#include "webrtc/test/field_trial.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/run_test.h"
-#include "webrtc/video/video_quality_test.h"
+#include "rtc_base/flags.h"
+#include "system_wrappers/include/field_trial_default.h"
+#include "test/field_trial.h"
+#include "test/gtest.h"
+#include "test/run_test.h"
+#include "video/video_quality_test.h"
 
 namespace webrtc {
 namespace flags {
@@ -133,7 +134,10 @@ int AvgPropagationDelayMs() {
   return static_cast<int>(FLAG_avg_propagation_delay_ms);
 }
 
-DEFINE_string(rtc_event_log_name, "", "Filename for rtc event log.");
+DEFINE_string(rtc_event_log_name,
+              "",
+              "Filename for rtc event log. Two files "
+              "with \"_send\" and \"_recv\" suffixes will be created.");
 std::string RtcEventLogName() {
   return static_cast<std::string>(FLAG_rtc_event_log_name);
 }
@@ -260,41 +264,41 @@ void Loopback() {
   pipe_config.delay_standard_deviation_ms = flags::StdPropagationDelayMs();
   pipe_config.allow_reordering = flags::FLAG_allow_reordering;
 
-  Call::Config::BitrateConfig call_bitrate_config;
+  BitrateConstraints call_bitrate_config;
   call_bitrate_config.min_bitrate_bps = flags::MinBitrateKbps() * 1000;
   call_bitrate_config.start_bitrate_bps = flags::StartBitrateKbps() * 1000;
   call_bitrate_config.max_bitrate_bps = flags::MaxBitrateKbps() * 1000;
 
   VideoQualityTest::Params params;
   params.call = {flags::FLAG_send_side_bwe, call_bitrate_config, 0};
-  params.video = {flags::FLAG_video,
-                  flags::Width(),
-                  flags::Height(),
-                  flags::Fps(),
-                  flags::MinBitrateKbps() * 1000,
-                  flags::TargetBitrateKbps() * 1000,
-                  flags::MaxBitrateKbps() * 1000,
-                  flags::FLAG_suspend_below_min_bitrate,
-                  flags::Codec(),
-                  flags::NumTemporalLayers(),
-                  flags::SelectedTL(),
-                  0,  // No min transmit bitrate.
-                  flags::FLAG_use_ulpfec,
-                  flags::FLAG_use_flexfec,
-                  flags::Clip(),
-                  flags::GetCaptureDevice()};
+  params.video[0] = {flags::FLAG_video,
+                     flags::Width(),
+                     flags::Height(),
+                     flags::Fps(),
+                     flags::MinBitrateKbps() * 1000,
+                     flags::TargetBitrateKbps() * 1000,
+                     flags::MaxBitrateKbps() * 1000,
+                     flags::FLAG_suspend_below_min_bitrate,
+                     flags::Codec(),
+                     flags::NumTemporalLayers(),
+                     flags::SelectedTL(),
+                     0,  // No min transmit bitrate.
+                     flags::FLAG_use_ulpfec,
+                     flags::FLAG_use_flexfec,
+                     flags::Clip(),
+                     flags::GetCaptureDevice()};
   params.audio = {flags::FLAG_audio, flags::FLAG_audio_video_sync,
                   flags::FLAG_audio_dtx};
   params.logging = {flags::FLAG_logs, flags::FLAG_rtc_event_log_name,
                     flags::FLAG_rtp_dump_name, flags::FLAG_encoded_frame_path};
-  params.screenshare.enabled = false;
+  params.screenshare[0].enabled = false;
   params.analyzer = {"video", 0.0, 0.0, flags::DurationSecs(),
       flags::OutputFilename(), flags::GraphTitle()};
   params.pipe = pipe_config;
 
   if (flags::NumStreams() > 1 && flags::Stream0().empty() &&
       flags::Stream1().empty()) {
-    params.ss.infer_streams = true;
+    params.ss[0].infer_streams = true;
   }
 
   std::vector<std::string> stream_descriptors;
@@ -304,8 +308,9 @@ void Loopback() {
   SL_descriptors.push_back(flags::SL0());
   SL_descriptors.push_back(flags::SL1());
   VideoQualityTest::FillScalabilitySettings(
-      &params, stream_descriptors, flags::NumStreams(), flags::SelectedStream(),
-      flags::NumSpatialLayers(), flags::SelectedSL(), SL_descriptors);
+      &params, 0, stream_descriptors, flags::NumStreams(),
+      flags::SelectedStream(), flags::NumSpatialLayers(), flags::SelectedSL(),
+      SL_descriptors);
 
   VideoQualityTest test;
   if (flags::DurationSecs()) {
@@ -324,10 +329,12 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  // InitFieldTrialsFromString needs a reference to an std::string instance,
-  // with a scope that outlives the test.
-  std::string field_trials = webrtc::flags::FLAG_force_fieldtrials;
-  webrtc::test::InitFieldTrialsFromString(field_trials);
+  webrtc::test::ValidateFieldTrialsStringOrDie(
+      webrtc::flags::FLAG_force_fieldtrials);
+  // InitFieldTrialsFromString stores the char*, so the char array must outlive
+  // the application.
+  webrtc::field_trial::InitFieldTrialsFromString(
+      webrtc::flags::FLAG_force_fieldtrials);
 
   webrtc::test::RunTest(webrtc::Loopback);
   return 0;

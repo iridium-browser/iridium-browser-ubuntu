@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 DEPS = [
+  'gerrit',
   'git',
   'git_cl',
   'recipe_engine/context',
@@ -13,5 +14,4 @@ DEPS = [
   'recipe_engine/python',
   'recipe_engine/raw_io',
   'recipe_engine/step',
-  'rietveld',
 ]

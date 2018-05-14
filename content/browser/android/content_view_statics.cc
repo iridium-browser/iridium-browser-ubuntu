@@ -10,7 +10,6 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "content/browser/android/content_view_statics.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/render_process_host.h"
@@ -91,20 +90,13 @@ base::LazyInstance<SuspendedProcessWatcher>::DestructorAtExit
 
 }  // namespace
 
-static void SetWebKitSharedTimersSuspended(JNIEnv* env,
-                                           const JavaParamRef<jclass>& obj,
-                                           jboolean suspend) {
+static void JNI_ContentViewStatics_SetWebKitSharedTimersSuspended(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& obj,
+    jboolean suspend) {
   if (suspend) {
     g_suspended_processes_watcher.Pointer()->SuspendWebKitSharedTimers();
   } else {
     g_suspended_processes_watcher.Pointer()->ResumeWebkitSharedTimers();
   }
 }
-
-namespace content {
-
-bool RegisterWebViewStatics(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
-
-}  // namespace content

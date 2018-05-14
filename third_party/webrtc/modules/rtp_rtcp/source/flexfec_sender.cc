@@ -8,14 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/rtp_rtcp/include/flexfec_sender.h"
+#include "modules/rtp_rtcp/include/flexfec_sender.h"
 
 #include <utility>
 
-#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
-#include "webrtc/modules/rtp_rtcp/source/forward_error_correction.h"
-#include "webrtc/modules/rtp_rtcp/source/rtp_header_extensions.h"
-#include "webrtc/rtc_base/logging.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/forward_error_correction.h"
+#include "modules/rtp_rtcp/source/rtp_header_extensions.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
 
@@ -49,9 +49,10 @@ RtpHeaderExtensionMap RegisterBweExtensions(
     } else if (extension.uri == TransmissionOffset::kUri) {
       map.Register<TransmissionOffset>(extension.id);
     } else {
-      LOG(LS_INFO) << "FlexfecSender only supports RTP header extensions for "
-                   << "BWE, so the extension " << extension.ToString()
-                   << " will not be used.";
+      RTC_LOG(LS_INFO)
+          << "FlexfecSender only supports RTP header extensions for "
+          << "BWE, so the extension " << extension.ToString()
+          << " will not be used.";
     }
   }
   return map;
@@ -113,7 +114,7 @@ bool FlexfecSender::FecAvailable() const {
 std::vector<std::unique_ptr<RtpPacketToSend>> FlexfecSender::GetFecPackets() {
   std::vector<std::unique_ptr<RtpPacketToSend>> fec_packets_to_send;
   fec_packets_to_send.reserve(ulpfec_generator_.generated_fec_packets_.size());
-  for (const auto& fec_packet : ulpfec_generator_.generated_fec_packets_) {
+  for (const auto* fec_packet : ulpfec_generator_.generated_fec_packets_) {
     std::unique_ptr<RtpPacketToSend> fec_packet_to_send(
         new RtpPacketToSend(&rtp_header_extension_map_));
 
@@ -145,9 +146,9 @@ std::vector<std::unique_ptr<RtpPacketToSend>> FlexfecSender::GetFecPackets() {
   int64_t now_ms = clock_->TimeInMilliseconds();
   if (!fec_packets_to_send.empty() &&
       now_ms - last_generated_packet_ms_ > kPacketLogIntervalMs) {
-    LOG(LS_VERBOSE) << "Generated " << fec_packets_to_send.size()
-                    << " FlexFEC packets with payload type: " << payload_type_
-                    << " and SSRC: " << ssrc_ << ".";
+    RTC_LOG(LS_VERBOSE) << "Generated " << fec_packets_to_send.size()
+                        << " FlexFEC packets with payload type: "
+                        << payload_type_ << " and SSRC: " << ssrc_ << ".";
     last_generated_packet_ms_ = now_ms;
   }
 

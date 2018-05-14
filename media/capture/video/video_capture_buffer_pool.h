@@ -41,9 +41,11 @@ class CAPTURE_EXPORT VideoCaptureBufferPool
  public:
   static constexpr int kInvalidId = -1;
 
-  // One-time (per client/per-buffer) call to allow sharing |buffer_id|.
+  // Provides a duplicate handle to the buffer. Destruction of this scoped Mojo
+  // handle does not result in releasing the shared memory held by the pool.
   virtual mojo::ScopedSharedBufferHandle GetHandleForInterProcessTransit(
-      int buffer_id) = 0;
+      int buffer_id,
+      bool read_only) = 0;
 
   virtual base::SharedMemoryHandle GetNonOwnedSharedMemoryHandleForLegacyIPC(
       int buffer_id) = 0;
@@ -66,8 +68,8 @@ class CAPTURE_EXPORT VideoCaptureBufferPool
   // new allocation at a larger size. If so, the ID of the destroyed buffer is
   // returned via |buffer_id_to_drop|.
   virtual int ReserveForProducer(const gfx::Size& dimensions,
-                                 media::VideoPixelFormat format,
-                                 media::VideoPixelStorage storage,
+                                 VideoPixelFormat format,
+                                 VideoPixelStorage storage,
                                  int frame_feedback_id,
                                  int* buffer_id_to_drop) = 0;
 
@@ -85,8 +87,8 @@ class CAPTURE_EXPORT VideoCaptureBufferPool
   // A producer may assume the content of the buffer has been preserved and may
   // also make modifications.
   virtual int ResurrectLastForProducer(const gfx::Size& dimensions,
-                                       media::VideoPixelFormat format,
-                                       media::VideoPixelStorage storage) = 0;
+                                       VideoPixelFormat format,
+                                       VideoPixelStorage storage) = 0;
 
   // Returns a snapshot of the current number of buffers in-use divided by the
   // maximum |count_|.

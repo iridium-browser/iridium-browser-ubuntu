@@ -9,7 +9,7 @@
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/browser_view_layout.h"
-#include "chrome/grit/theme_resources.h"
+#include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
@@ -19,7 +19,7 @@ namespace {
 // How far to inset the tabstrip from the sides of the window.
 const int kTabstripTopInset = 8;
 const int kTabstripLeftInset = 70;  // Make room for window control buttons.
-const int kTabstripRightInset = 0;
+constexpr int kTabstripRightInset = 4;  // Margin for profile switcher.
 
 }  // namespace
 
@@ -27,9 +27,9 @@ const int kTabstripRightInset = 0;
 // BrowserNonClientFrameViewMac, public:
 
 BrowserNonClientFrameViewMac::BrowserNonClientFrameViewMac(
-    BrowserFrame* frame, BrowserView* browser_view)
-    : BrowserNonClientFrameView(frame, browser_view) {
-}
+    BrowserFrame* frame,
+    BrowserView* browser_view)
+    : BrowserNonClientFrameView(frame, browser_view) {}
 
 BrowserNonClientFrameViewMac::~BrowserNonClientFrameViewMac() {
 }
@@ -40,14 +40,25 @@ BrowserNonClientFrameViewMac::~BrowserNonClientFrameViewMac() {
 gfx::Rect BrowserNonClientFrameViewMac::GetBoundsForTabStrip(
     views::View* tabstrip) const {
   DCHECK(tabstrip);
-  gfx::Rect bounds = gfx::Rect(0, kTabstripTopInset,
-                               width(), tabstrip->GetPreferredSize().height());
-  bounds.Inset(kTabstripLeftInset, 0, kTabstripRightInset, 0);
+  gfx::Rect bounds = gfx::Rect(0, kTabstripTopInset, width(),
+                               tabstrip->GetPreferredSize().height());
+  bounds.Inset(kTabstripLeftInset, 0, GetTabStripRightInset(), 0);
   return bounds;
 }
 
 int BrowserNonClientFrameViewMac::GetTopInset(bool restored) const {
   return browser_view()->IsTabStripVisible() ? kTabstripTopInset : 0;
+}
+
+int BrowserNonClientFrameViewMac::GetTabStripRightInset() const {
+  int inset = kTabstripRightInset;
+  views::View* profile_switcher_view = GetProfileSwitcherView();
+  if (profile_switcher_view) {
+    inset += profile_switcher_view->GetPreferredSize().width();
+  } else if (profile_indicator_icon()) {
+    inset += profile_indicator_icon()->bounds().width() + kAvatarIconPadding;
+  }
+  return inset;
 }
 
 int BrowserNonClientFrameViewMac::GetThemeBackgroundXInset() const {
@@ -70,6 +81,15 @@ gfx::Rect BrowserNonClientFrameViewMac::GetWindowBoundsForClientBounds(
 }
 
 int BrowserNonClientFrameViewMac::NonClientHitTest(const gfx::Point& point) {
+  views::View* profile_switcher_view = GetProfileSwitcherView();
+  if (profile_switcher_view) {
+    gfx::Point point_in_switcher(point);
+    views::View::ConvertPointToTarget(this, profile_switcher_view,
+                                      &point_in_switcher);
+    if (profile_switcher_view->HitTestPoint(point_in_switcher)) {
+      return HTCLIENT;
+    }
+  }
   int component = frame()->client_view()->NonClientHitTest(point);
 
   // BrowserView::NonClientHitTest will return HTNOWHERE for points that hit
@@ -121,9 +141,34 @@ void BrowserNonClientFrameViewMac::OnPaint(gfx::Canvas* canvas) {
     PaintToolbarBackground(canvas);
 }
 
+void BrowserNonClientFrameViewMac::Layout() {
+  DCHECK(browser_view());
+  views::View* profile_switcher_view = GetProfileSwitcherView();
+  if (profile_indicator_icon() && browser_view()->IsTabStripVisible()) {
+    LayoutIncognitoButton();
+    // Mac lays out the incognito icon on the right, as the stoplight
+    // buttons live in its Windows/Linux location.
+    profile_indicator_icon()->SetX(width() - GetTabStripRightInset());
+  } else if (profile_switcher_view != nullptr) {
+    gfx::Size button_size = profile_switcher_view->GetPreferredSize();
+    int button_x = width() - GetTabStripRightInset();
+    int button_y = 0;
+    TabStrip* tabstrip = browser_view()->tabstrip();
+    if (tabstrip && browser_view()->IsTabStripVisible()) {
+      int new_tab_button_bottom =
+          tabstrip->bounds().y() + tabstrip->GetNewTabButtonBounds().height();
+      // Align the switcher's bottom to bottom of the new tab button;
+      button_y = new_tab_button_bottom - button_size.height();
+    }
+    profile_switcher_view->SetBounds(button_x, button_y, button_size.width(),
+                                     button_size.height());
+  }
+  BrowserNonClientFrameView::Layout();
+}
+
 // BrowserNonClientFrameView:
-void BrowserNonClientFrameViewMac::UpdateProfileIcons() {
-  NOTIMPLEMENTED();
+AvatarButtonStyle BrowserNonClientFrameViewMac::GetAvatarButtonStyle() const {
+  return AvatarButtonStyle::NATIVE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -134,39 +179,4 @@ void BrowserNonClientFrameViewMac::PaintThemedFrame(gfx::Canvas* canvas) {
   canvas->TileImageInt(image, 0, 0, width(), image.height());
   gfx::ImageSkia overlay = GetFrameOverlayImage();
   canvas->TileImageInt(overlay, 0, 0, width(), overlay.height());
-}
-
-void BrowserNonClientFrameViewMac::PaintToolbarBackground(gfx::Canvas* canvas) {
-  gfx::Rect bounds(browser_view()->GetToolbarBounds());
-  if (bounds.IsEmpty())
-    return;
-
-  const ui::ThemeProvider* tp = GetThemeProvider();
-  gfx::ImageSkia* border = tp->GetImageSkiaNamed(IDR_TOOLBAR_SHADE_TOP);
-
-  const int x = bounds.x();
-  const int y = bounds.y() - border->height();
-  const int w = bounds.width();
-  const int h = bounds.height() + border->height();
-
-  // The tabstrip border image height is 2*scale pixels, but only the bottom 2
-  // pixels contain the actual border (the rest is transparent). We can't draw
-  // the toolbar image below this transparent upper area when scale > 1.
-  const int fill_y = y + canvas->image_scale() - 1;
-  const int fill_height = bounds.bottom() - fill_y;
-
-  // Draw the toolbar fill.
-  canvas->TileImageInt(*tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR),
-                       x + GetThemeBackgroundXInset(),
-                       fill_y - GetTopInset(false), x, fill_y, w, fill_height);
-
-  // Draw the tabstrip/toolbar separator.
-  canvas->TileImageInt(*border, 0, 0, x, y, w, border->height());
-
-  // Draw the content/toolbar separator.
-  canvas->FillRect(
-      gfx::Rect(x, y + h - kClientEdgeThickness, w, kClientEdgeThickness),
-      ThemeProperties::GetDefaultColor(
-          ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR,
-          browser_view()->IsIncognito()));
 }

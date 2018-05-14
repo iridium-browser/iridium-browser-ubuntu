@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/json/json_string_value_serializer.h"
@@ -72,7 +73,7 @@ std::unique_ptr<base::Value> BookmarkCodec::Encode(
     int64_t sync_transaction_version) {
   ids_reassigned_ = false;
   InitializeChecksum();
-  auto roots = base::MakeUnique<base::DictionaryValue>();
+  auto roots = std::make_unique<base::DictionaryValue>();
   roots->Set(kRootFolderNameKey, EncodeNode(bookmark_bar_node));
   roots->Set(kOtherBookmarkFolderNameKey, EncodeNode(other_folder_node));
   roots->Set(kMobileBookmarkFolderNameKey, EncodeNode(mobile_folder_node));
@@ -83,7 +84,7 @@ std::unique_ptr<base::Value> BookmarkCodec::Encode(
     roots->SetString(kSyncTransactionVersion,
                      base::Int64ToString(sync_transaction_version));
   }
-  auto main = base::MakeUnique<base::DictionaryValue>();
+  auto main = std::make_unique<base::DictionaryValue>();
   main->SetInteger(kVersionKey, kCurrentVersion);
   FinalizeChecksum();
   // We are going to store the computed checksum. So set stored checksum to be
@@ -137,7 +138,7 @@ std::unique_ptr<base::Value> BookmarkCodec::EncodeNode(
         base::Int64ToString(node->date_folder_modified().ToInternalValue()));
     UpdateChecksumWithFolderNode(id, title);
 
-    auto child_values = base::MakeUnique<base::ListValue>();
+    auto child_values = std::make_unique<base::ListValue>();
     for (int i = 0; i < node->child_count(); ++i)
       child_values->Append(EncodeNode(node->GetChild(i)));
     value->Set(kChildrenKey, std::move(child_values));
@@ -155,10 +156,10 @@ std::unique_ptr<base::Value> BookmarkCodec::EncodeNode(
 
 std::unique_ptr<base::Value> BookmarkCodec::EncodeMetaInfo(
     const BookmarkNode::MetaInfoMap& meta_info_map) {
-  auto meta_info = base::MakeUnique<base::DictionaryValue>();
+  auto meta_info = std::make_unique<base::DictionaryValue>();
   for (BookmarkNode::MetaInfoMap::const_iterator it = meta_info_map.begin();
       it != meta_info_map.end(); ++it) {
-    meta_info->SetStringWithoutPathExpansion(it->first, it->second);
+    meta_info->SetKey(it->first, base::Value(it->second));
   }
   return std::move(meta_info);
 }
@@ -177,7 +178,7 @@ bool BookmarkCodec::DecodeHelper(BookmarkNode* bb_node,
 
   const base::Value* checksum_value;
   if (d_value->Get(kChecksumKey, &checksum_value)) {
-    if (checksum_value->GetType() != base::Value::Type::STRING)
+    if (!checksum_value->is_string())
       return false;
     if (!checksum_value->GetAsString(&stored_checksum_))
       return false;
@@ -333,7 +334,7 @@ bool BookmarkCodec::DecodeNode(const base::DictionaryValue& value,
     if (!value.Get(kChildrenKey, &child_values))
       return false;
 
-    if (child_values->GetType() != base::Value::Type::LIST)
+    if (child_values->type() != base::Value::Type::LIST)
       return false;
 
     if (!node) {
@@ -395,7 +396,7 @@ bool BookmarkCodec::DecodeMetaInfo(const base::DictionaryValue& value,
 
   // Meta info used to be stored as a serialized dictionary, so attempt to
   // parse the value as one.
-  if (meta_info->IsType(base::Value::Type::STRING)) {
+  if (meta_info->is_string()) {
     std::string meta_info_str;
     meta_info->GetAsString(&meta_info_str);
     JSONStringValueDeserializer deserializer(meta_info_str);
@@ -438,11 +439,11 @@ void BookmarkCodec::DecodeMetaInfoHelper(
     if (base::StartsWith(it.key(), "stars.", base::CompareCase::SENSITIVE))
       continue;
 
-    if (it.value().IsType(base::Value::Type::DICTIONARY)) {
+    if (it.value().is_dict()) {
       const base::DictionaryValue* subdict;
       it.value().GetAsDictionary(&subdict);
       DecodeMetaInfoHelper(*subdict, prefix + it.key() + ".", meta_info_map);
-    } else if (it.value().IsType(base::Value::Type::STRING)) {
+    } else if (it.value().is_string()) {
       it.value().GetAsString(&(*meta_info_map)[prefix + it.key()]);
     }
   }

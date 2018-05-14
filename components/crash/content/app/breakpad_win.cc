@@ -4,12 +4,13 @@
 
 #include "components/crash/content/app/breakpad_win.h"
 
-#include <windows.h>
+#include <crtdbg.h>
 #include <intrin.h>
 #include <shellapi.h>
 #include <stddef.h>
 #include <tchar.h>
 #include <userenv.h>
+#include <windows.h>
 #include <winnt.h>
 
 #include <algorithm>
@@ -32,8 +33,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/pe_image.h"
 #include "base/win/win_util.h"
-#include "breakpad/src/client/windows/common/ipc_protocol.h"
-#include "breakpad/src/client/windows/handler/exception_handler.h"
 #include "components/crash/content/app/crash_keys_win.h"
 #include "components/crash/content/app/crash_reporter_client.h"
 #include "components/crash/content/app/hard_error_handler_win.h"
@@ -41,6 +40,8 @@
 #include "content/public/common/result_codes.h"
 #include "sandbox/win/src/nt_internals.h"
 #include "sandbox/win/src/sidestep/preamble_patcher.h"
+#include "third_party/breakpad/breakpad/src/client/windows/common/ipc_protocol.h"
+#include "third_party/breakpad/breakpad/src/client/windows/handler/exception_handler.h"
 
 #pragma intrinsic(_AddressOfReturnAddress)
 #pragma intrinsic(_ReturnAddress)
@@ -129,21 +130,11 @@ DWORD WINAPI DumpProcessWithoutCrashThread(void*) {
 }  // namespace
 
 extern "C" HANDLE __declspec(dllexport) __cdecl InjectDumpForHungInput(
-    HANDLE process,
-    void* serialized_crash_keys) {
+    HANDLE process) {
   // |serialized_crash_keys| is not propagated in breakpad but is in crashpad
   // since breakpad is deprecated.
   return CreateRemoteThread(process, NULL, 0, DumpProcessWithoutCrashThread,
                             0, 0, NULL);
-}
-
-extern "C" HANDLE __declspec(
-    dllexport) __cdecl InjectDumpForHungInputNoCrashKeys(HANDLE process,
-                                                         int reason) {
-  // |reason| is not propagated in breakpad but is in crashpad since breakpad
-  // is deprecated.
-  return CreateRemoteThread(process, NULL, 0, DumpProcessWithoutCrashThread, 0,
-                            0, NULL);
 }
 
 // Returns a string containing a list of all modifiers for the loaded profile.
@@ -263,22 +254,6 @@ long WINAPI CloudPrintServiceExceptionFilter(EXCEPTION_POINTERS* info) {
   DumpDoneCallback(NULL, NULL, NULL, info, NULL, false);
   return EXCEPTION_EXECUTE_HANDLER;
 }
-
-#if !defined(COMPONENT_BUILD)
-// Installed via base::debug::SetCrashKeyReportingFunctions.
-void SetCrashKeyValueForBaseDebug(const base::StringPiece& key,
-                                  const base::StringPiece& value) {
-  DCHECK(CrashKeysWin::keeper());
-  CrashKeysWin::keeper()->SetCrashKeyValue(base::UTF8ToUTF16(key),
-                                           base::UTF8ToUTF16(value));
-}
-
-// Installed via base::debug::SetCrashKeyReportingFunctions.
-void ClearCrashKeyForBaseDebug(const base::StringPiece& key) {
-  DCHECK(CrashKeysWin::keeper());
-  CrashKeysWin::keeper()->ClearCrashKeyValue(base::UTF8ToUTF16(key));
-}
-#endif  // !defined(COMPONENT_BUILD)
 
 }  // namespace
 
@@ -500,12 +475,6 @@ void InitDefaultCrashCallback(LPTOP_LEVEL_EXCEPTION_FILTER filter) {
 }
 
 void InitCrashReporter(const std::string& process_type_switch) {
-  // The maximum lengths specified by breakpad include the trailing NULL, so the
-  // actual length of the chunk is one less.
-  static_assert(google_breakpad::CustomInfoEntry::kValueMaxLength - 1 ==
-                crash_keys::kChunkMaxLength, "kChunkMaxLength mismatch");
-  static_assert(crash_keys::kSmallSize <= crash_keys::kChunkMaxLength,
-                "crash key chunk size too small");
   const base::CommandLine& command = *base::CommandLine::ForCurrentProcess();
   if (command.HasSwitch(switches::kDisableBreakpad))
     return;
@@ -528,17 +497,6 @@ void InitCrashReporter(const std::string& process_type_switch) {
       keeper->GetCustomInfo(exe_path, process_type, GetProfileType(),
                             base::CommandLine::ForCurrentProcess(),
                             GetCrashReporterClient());
-
-#if !defined(COMPONENT_BUILD)
-  // chrome/common/child_process_logging_win.cc registers crash keys for
-  // chrome.dll. In a component build, that is sufficient as chrome.dll and
-  // chrome.exe share a copy of base (in base.dll).
-  // In a static build, the EXE must separately initialize the crash keys
-  // configuration as it has its own statically linked copy of base.
-  base::debug::SetCrashKeyReportingFunctions(&SetCrashKeyValueForBaseDebug,
-                                             &ClearCrashKeyForBaseDebug);
-  GetCrashReporterClient()->RegisterCrashKeys();
-#endif
 
   google_breakpad::ExceptionHandler::MinidumpCallback callback = NULL;
   LPTOP_LEVEL_EXCEPTION_FILTER default_filter = NULL;

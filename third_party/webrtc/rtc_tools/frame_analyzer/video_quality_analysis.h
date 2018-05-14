@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_TOOLS_FRAME_ANALYZER_VIDEO_QUALITY_ANALYSIS_H_
-#define WEBRTC_RTC_TOOLS_FRAME_ANALYZER_VIDEO_QUALITY_ANALYSIS_H_
+#ifndef RTC_TOOLS_FRAME_ANALYZER_VIDEO_QUALITY_ANALYSIS_H_
+#define RTC_TOOLS_FRAME_ANALYZER_VIDEO_QUALITY_ANALYSIS_H_
 
 #include <string>
 #include <vector>
 #include <utility>
 
-#include "libyuv/compare.h"  // NOLINT
-#include "libyuv/convert.h"  // NOLINT
+#include "third_party/libyuv/include/libyuv/compare.h"
+#include "third_party/libyuv/include/libyuv/convert.h"
 
 namespace webrtc {
 namespace test {
@@ -37,6 +37,11 @@ struct ResultsContainer {
   ~ResultsContainer();
 
   std::vector<AnalysisResult> frames;
+  int max_repeated_frames;
+  int max_skipped_frames;
+  int total_skipped_frames;
+  int decode_errors_ref;
+  int decode_errors_test;
 };
 
 enum VideoAnalysisMetricsType {kPSNR, kSSIM};
@@ -102,15 +107,9 @@ std::vector<std::pair<int, int> > CalculateFrameClusters(
 
 // Calculates max repeated and skipped frames and prints them to stdout in a
 // format that is compatible with Chromium performance numbers.
-void PrintMaxRepeatedAndSkippedFrames(const std::string& label,
-                                      const std::string& stats_file_ref_name,
-                                      const std::string& stats_file_test_name);
-
-// Similar to the above, but will print to the specified file handle.
-void PrintMaxRepeatedAndSkippedFrames(FILE* output,
-                                      const std::string& label,
-                                      const std::string& stats_file_ref_name,
-                                      const std::string& stats_file_test_name);
+void GetMaxRepeatedAndSkippedFrames(const std::string& stats_file_ref_name,
+                                    const std::string& stats_file_test_name,
+                                    ResultsContainer* results);
 
 // Gets the next line from an open stats file.
 bool GetNextStatsLine(FILE* stats_file, char* line);
@@ -147,4 +146,4 @@ bool ExtractFrameFromY4mFile(const char* i420_file_name,
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_RTC_TOOLS_FRAME_ANALYZER_VIDEO_QUALITY_ANALYSIS_H_
+#endif  // RTC_TOOLS_FRAME_ANALYZER_VIDEO_QUALITY_ANALYSIS_H_

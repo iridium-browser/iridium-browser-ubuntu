@@ -7,18 +7,16 @@
 
 #import <UIKit/UIKit.h>
 
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-
 // Command sent to open a new tab, optionally including a point (in UIWindow
 // coordinates).
-@interface OpenNewTabCommand : GenericChromeCommand
+@interface OpenNewTabCommand : NSObject
 
 - (instancetype)initWithIncognito:(BOOL)incognito
                       originPoint:(CGPoint)originPoint
     NS_DESIGNATED_INITIALIZER;
 
 // Mark inherited initializer as unavailable to prevent calling it by mistake.
-- (instancetype)initWithTag:(NSInteger)tag NS_UNAVAILABLE;
+- (instancetype)init NS_UNAVAILABLE;
 
 // Convenience initializers
 
@@ -37,6 +35,14 @@
 @property(nonatomic, readonly) BOOL incognito;
 
 @property(nonatomic, readonly) CGPoint originPoint;
+
+// Whether the new tab command was initiated by the user (e.g. by tapping the
+// new tab button in the tools menu) or not (e.g. opening a new tab via a
+// Javascript action). Defaults to |YES|.
+@property(nonatomic, assign, getter=isUserInitiated) BOOL userInitiated;
+
+// Whether the new tab command should also trigger the omnibox to be focused.
+@property(nonatomic, assign) BOOL shouldFocusOmnibox;
 
 @end
 

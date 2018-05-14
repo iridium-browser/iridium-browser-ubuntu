@@ -11,9 +11,9 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/safe_browsing_db/v4_local_database_manager.h"
+#include "components/safe_browsing/db/v4_local_database_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "services/preferences/public/interfaces/tracked_preference_validation_delegate.mojom.h"
+#include "services/preferences/public/mojom/tracked_preference_validation_delegate.mojom.h"
 
 namespace safe_browsing {
 
@@ -188,7 +188,7 @@ void ServicesDelegateImpl::CreatePasswordProtectionService(Profile* profile) {
   auto it = password_protection_service_map_.find(profile);
   DCHECK(it == password_protection_service_map_.end());
   std::unique_ptr<ChromePasswordProtectionService> service =
-      base::MakeUnique<ChromePasswordProtectionService>(safe_browsing_service_,
+      std::make_unique<ChromePasswordProtectionService>(safe_browsing_service_,
                                                         profile);
   password_protection_service_map_[profile] = std::move(service);
 }
@@ -205,8 +205,8 @@ PasswordProtectionService* ServicesDelegateImpl::GetPasswordProtectionService(
     Profile* profile) const {
   DCHECK(profile);
   auto it = password_protection_service_map_.find(profile);
-  DCHECK(it != password_protection_service_map_.end());
-  return it->second.get();
+  return it != password_protection_service_map_.end() ? it->second.get()
+                                                      : nullptr;
 }
 
 }  // namespace safe_browsing

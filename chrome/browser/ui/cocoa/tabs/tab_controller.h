@@ -24,11 +24,7 @@ enum TabLoadingState {
 };
 
 @class AlertIndicatorButton;
-@class MenuController;
-namespace TabControllerInternal {
-class MenuDelegate;
-}
-@class SpriteView;
+@class MenuControllerCocoa;
 @class TabView;
 @protocol TabControllerTarget;
 
@@ -43,30 +39,18 @@ class MenuDelegate;
 // progress. The default in the nib is an image view so nothing special is
 // required if that's all you need.
 
-@interface TabController : NSViewController<TabDraggingEventTarget> {
- @private
-  base::scoped_nsobject<SpriteView> iconView_;
-  base::scoped_nsobject<AlertIndicatorButton> alertIndicatorButton_;
-  base::scoped_nsobject<HoverCloseButton> closeButton_;
+@interface TabController : NSViewController<TabDraggingEventTarget>
 
-  BOOL isIconShowing_;  // last state of iconView_ in updateVisibility
-
-  BOOL pinned_;
-  BOOL active_;
-  BOOL selected_;
-  GURL url_;
-  TabLoadingState loadingState_;
-  id<TabControllerTarget> target_;  // weak, where actions are sent
-  SEL action_;  // selector sent when tab is selected by clicking
-  std::unique_ptr<ui::SimpleMenuModel> contextMenuModel_;
-  std::unique_ptr<TabControllerInternal::MenuDelegate> contextMenuDelegate_;
-  base::scoped_nsobject<MenuController> contextMenuController_;
-}
-
-@property(assign, nonatomic) TabLoadingState loadingState;
+@property(readonly, nonatomic) TabLoadingState loadingState;
 
 @property(assign, nonatomic) SEL action;
+// showIcon is YES when the tab should display a favicon (e.g. has an icon, is
+// not the NTP, etc.), and is equivalent to the data.show_icon flag in Views.
+// Actual favicon visibility depends on other factors such as available space,
+// and is reflected in the iconView's isHidden state.
+@property(readonly, nonatomic) BOOL showIcon;
 @property(assign, nonatomic) BOOL pinned;
+@property(assign, nonatomic) BOOL blocked;
 @property(assign, nonatomic) NSString* toolTip;
 // Note that |-selected| will return YES if the controller is |-active|, too.
 // |-setSelected:| affects the selection, while |-setActive:| affects the key
@@ -75,7 +59,6 @@ class MenuDelegate;
 @property(assign, nonatomic) BOOL selected;
 @property(assign, nonatomic) id target;
 @property(assign, nonatomic) GURL url;
-@property(readonly, nonatomic) NSView* iconView;
 @property(readonly, nonatomic) AlertIndicatorButton* alertIndicatorButton;
 @property(readonly, nonatomic) HoverCloseButton* closeButton;
 
@@ -95,14 +78,19 @@ class MenuDelegate;
 
 // Sets the tab's icon image.
 // |image| must be 16x16 in size.
-// |image| can be a horizontal strip of image sprites which will be animated.
-// Setting |animate| to YES will animate away the old image before animating
-// the new image back to position.
-- (void)setIconImage:(NSImage*)image;
-- (void)setIconImage:(NSImage*)image withToastAnimation:(BOOL)animate;
+// |showIcon| is YES when the tab should show its favicon.
+- (void)setIconImage:(NSImage*)image
+     forLoadingState:(TabLoadingState)loadingState
+            showIcon:(BOOL)showIcon;
 
 // Sets the current tab alert state and updates the views.
 - (void)setAlertState:(TabAlertState)alertState;
+
+// Notifies the tab that its title changed outside of loading.
+- (void)titleChangedNotLoading;
+
+// Sets the tab to display that it needs attention from the user.
+- (void)setNeedsAttention:(bool)attention;
 
 // Closes the associated TabView by relaying the message to |target_| to
 // perform the close.
@@ -123,9 +111,16 @@ class MenuDelegate;
 
 // Update the title color to match the tabs current state.
 - (void)updateTitleColor;
+
+// Returns the accessibility title that should be used for this tab.
+- (NSString*)accessibilityTitle;
+
+// Called by AppKit when this tab is "clicked" using the keyboard.
+- (void)performClick:(id)sender;
 @end
 
 @interface TabController(TestingAPI)
+- (NSView*)iconView;
 - (int)iconCapacity;
 - (BOOL)shouldShowIcon;
 - (BOOL)shouldShowAlertIndicator;

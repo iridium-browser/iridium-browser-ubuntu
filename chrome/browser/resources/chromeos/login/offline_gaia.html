@@ -2,6 +2,8 @@
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file. -->
 
+<link rel="import" href="chrome://resources/html/polymer.html">
+
 <link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_dialog/cr_dialog.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/neon-animation/animations/slide-from-left-animation.html">
@@ -10,8 +12,8 @@
 <link rel="import" href="chrome://resources/polymer/v1_0/neon-animation/animations/slide-right-animation.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/neon-animation/neon-animatable.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/neon-animation/neon-animated-pages.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/neon-animation/web-animations.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/polymer/polymer.html">
 
 <!--
   Offline UI for the New Gaia flow.
@@ -52,60 +54,50 @@
     <link rel="stylesheet" href="oobe_dialog_host.css">
     <link rel="stylesheet" href="oobe_dialog_parameters.css">
     <template is="dom-if" if="[[glifMode]]" restamp>
-      <oobe-dialog role="dialog" has-buttons no-footer-padding>
+      <oobe-dialog role="dialog" has-buttons selected$="[[activeSection]]"
+          animation-in-progress$="[[animationInProgress]]">
         <img src="chrome://theme/IDR_LOGO_GOOGLE_COLOR_90"
             class="oobe-icon" alt="">
-        <div class="header">
-          <neon-animated-pages id="animatedHeaders" attr-for-selected="id"
-              entry-animation="slide-from-right-animation"
-              exit-animation="slide-to-left-animation"
-              on-neon-animation-finish="onAnimationFinish_"
-              selected="emailSection">
-            <neon-animatable id="emailSection">
-              <h1 class="title">
-                [[i18nDynamic(locale, 'loginWelcomeMessage')]]
-              </h1>
-              <p id="managedBy" class="enterprise-info"
-                  hidden$="[[!showEnterpriseMessage]]">
-              </p>
-            </neon-animatable>
-            <neon-animatable id="passwordSection">
-              <gaia-header class="title" id="passwordHeader"></gaia-header>
-            </neon-animatable>
-          </neon-animated-pages>
+        <div id="headerContainer" class="header layout horizontal"
+            on-animationend="onSlideAnimationEnd_">
+          <div id="emailSectionHeader" class="section email-section">
+            <h1 class="title">
+              [[i18nDynamic(locale, 'loginWelcomeMessage')]]
+            </h1>
+            <p id="managedBy" class="enterprise-info"
+                hidden$="[[!showEnterpriseMessage]]">
+            </p>
+          </div>
+          <div id="passwordSectionHeader" class="section password-section">
+            <gaia-header class="title" id="passwordHeader"></gaia-header>
+          </div>
         </div>
-        <div class="footer layout vertical">
-          <neon-animated-pages id="animatedPages" attr-for-selected="id"
-              entry-animation="slide-from-right-animation"
-              exit-animation="slide-to-left-animation"
-              on-neon-animation-finish="onAnimationFinish_"
-              selected="emailSection">
-            <neon-animatable id="emailSection">
-              <gaia-input-form on-submit="onEmailSubmitted_"
-                  disabled="[[disabled]]"
-                  button-text="[[i18nDynamic(locale, 'offlineLoginNextBtn')]]">
-                <gaia-input id="emailInput" type="email" required
-                    domain="[[emailDomain]]"
-                    error="[[i18nDynamic(locale, 'offlineLoginInvalidEmail')]]"
-                    label="[[i18nDynamic(locale, 'offlineLoginEmail')]]">
-                </gaia-input>
-              </gaia-input-form>
-            </neon-animatable>
-            <neon-animatable id="passwordSection">
-              <gaia-input-form class="footer" disabled="[[disabled]]"
-                  on-submit="onPasswordSubmitted_"
-                  button-text="[[i18nDynamic(locale, 'offlineLoginNextBtn')]]">
-                <gaia-input id="passwordInput" type="password" required
-                    error="[[i18nDynamic(locale,
-                                         'offlineLoginInvalidPassword')]]"
-                    label="[[i18nDynamic(locale, 'offlineLoginPassword')]]">
-                </gaia-input>
-                <gaia-button type="link" on-tap="onForgotPasswordClicked_">
-                  [[i18nDynamic(locale, 'offlineLoginForgotPasswordBtn')]]
-                </gaia-button>
-              </gaia-input-form>
-            </neon-animatable>
-          </neon-animated-pages>
+        <div id="footerContainer" class="footer layout horizontal">
+          <div id="emailSectionFooter" class="section email-section">
+            <gaia-input-form on-submit="onEmailSubmitted_"
+                disabled="[[disabled]]"
+                button-text="[[i18nDynamic(locale, 'offlineLoginNextBtn')]]">
+              <gaia-input id="emailInput" type="email" required
+                  domain="[[emailDomain]]"
+                  error="[[i18nDynamic(locale, 'offlineLoginInvalidEmail')]]"
+                  label="[[i18nDynamic(locale, 'offlineLoginEmail')]]">
+              </gaia-input>
+            </gaia-input-form>
+          </div>
+          <div id="passwordSectionFooter" class="section password-section">
+            <gaia-input-form class="footer" disabled="[[disabled]]"
+                on-submit="onPasswordSubmitted_"
+                button-text="[[i18nDynamic(locale, 'offlineLoginNextBtn')]]">
+              <gaia-input id="passwordInput" type="password" required
+                  error="[[i18nDynamic(locale,
+                                       'offlineLoginInvalidPassword')]]"
+                  label="[[i18nDynamic(locale, 'offlineLoginPassword')]]">
+              </gaia-input>
+              <gaia-button type="link" on-tap="onForgotPasswordClicked_">
+                [[i18nDynamic(locale, 'offlineLoginForgotPasswordBtn')]]
+              </gaia-button>
+            </gaia-input-form>
+          </div>
         </div>
         <div class="bottom-buttons flex layout horizontal">
           <oobe-back-button id="offline-gaia-back-button"
@@ -113,8 +105,6 @@
           </oobe-back-button>
           <div class="flex">
           </div>
-          <oobe-next-button inverse disabled>
-          </oobe-next-button>
         </div>
       </oobe-dialog>
     </template>
@@ -172,9 +162,9 @@
 
     <dialog is="cr-dialog" id="forgotPasswordDlg"
         on-close="onDialogOverlayClosed_">
-      <div class="body" slot="body"
+      <div slot="body"
           i18n-content="offlineLoginForgotPasswordDlg"></div>
-      <div class="button-container" slot="button-container">
+      <div slot="button-container">
         <paper-button autofocus on-tap="onForgotPasswordCloseTap_"
             i18n-content="offlineLoginCloseBtn" class="action-button">
         </paper-button>

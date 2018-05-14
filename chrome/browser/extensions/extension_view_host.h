@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/notification_observer.h"
@@ -79,7 +80,8 @@ class ExtensionViewHost
   content::ColorChooser* OpenColorChooser(
       content::WebContents* web_contents,
       SkColor color,
-      const std::vector<content::ColorSuggestion>& suggestions) override;
+      const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions)
+      override;
   void RunFileChooser(content::RenderFrameHost* render_frame_host,
                       const content::FileChooserParams& params) override;
   void ResizeDueToAutoResize(content::WebContents* source,
@@ -115,7 +117,13 @@ class ExtensionViewHost
   static std::unique_ptr<ExtensionView> CreateExtensionView(
       ExtensionViewHost* host,
       Browser* browser);
-
+#if defined(OS_MACOSX)
+  // Temporary shim for Polychrome. See bottom of first comment in
+  // https://crbug.com/80495 for details.
+  static std::unique_ptr<ExtensionView> CreateExtensionViewCocoa(
+      ExtensionViewHost* host,
+      Browser* browser);
+#endif
   // Optional view that shows the rendered content in the UI.
   std::unique_ptr<ExtensionView> view_;
 

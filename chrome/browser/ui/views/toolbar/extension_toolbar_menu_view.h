@@ -62,7 +62,7 @@ class ExtensionToolbarMenuView : public views::ScrollView,
   int start_padding() const;
 
   // The associated browser.
-  Browser* browser_;
+  Browser* const browser_;
 
   // The app menu, which may need to be closed after a drag-and-drop.
   AppMenu* app_menu_;
@@ -71,10 +71,10 @@ class ExtensionToolbarMenuView : public views::ScrollView,
   views::MenuItemView* menu_item_;
 
   // The overflow BrowserActionsContainer which is nested in this view.
-  BrowserActionsContainer* container_;
+  BrowserActionsContainer* container_ = nullptr;
 
   // The maximum allowed height for the view.
-  int max_height_;
+  int max_height_ = 0;
 
   ScopedObserver<ToolbarActionsBar, ToolbarActionsBarObserver>
       toolbar_actions_bar_observer_;

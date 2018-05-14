@@ -2,13 +2,14 @@
 <!DOCTYPE translationbundle>
 <translationbundle lang="sw">
 <translation id="1326317727527857210">Ili upate vichupo kutoka kwenye vifaa vyako vingine, ingia katika Chrome.</translation>
-<translation id="1685087038067318291">Gundua kurasa za wavuti zinazotumwa na vifaa vilivyo karibu. Bluetooth inapowashwa, Chrome inaweza kukusanya kurasa za wavuti zinazohusishwa na vifaa vilivyo karibu nawe na kuzituma bila maelezo yanayoweza kukutambulisha kwenye Google ili kupata kurasa muhimu zaidi. <ph name="BEGIN_LINK" />Pata maelezo zaidi<ph name="END_LINK" /></translation>
 <translation id="1759842336958782510">Chrome</translation>
+<translation id="1816764564654397850">Ilani ya Faragha ya Google Chrome</translation>
+<translation id="1863312987075920112">Kwa kutumia programu hii, unakubali <ph name="BEGIN_LINK_TOS" />Sheria na Masharti<ph name="END_LINK_TOS" /> na <ph name="BEGIN_LINK_PRIVACY" />Ilani ya Faragha<ph name="END_LINK_PRIVACY" /> ya Chrome.</translation>
 <translation id="2147651015520127414">Chrome imethibitisha kuwa <ph name="ISSUER" /> ndiye mtoa cheti cha tovuti hii.</translation>
 <translation id="2334084861041072223">Hakimiliki <ph name="YEAR" /> Google Inc. Haki zote zimehifadhiwa.</translation>
 <translation id="2342981853652716282">Ingia katika Chrome ili upate alamisho, manenosiri yako na mengine mengi kwenye vifaa vyako vyote.</translation>
 <translation id="2347208864470321755">Kipengee hiki kikiwashwa, Chrome itatafsiri kurasa zilizoandikwa kwa lugha zingine kwa kutumia Google Tafsiri. <ph name="BEGIN_LINK" />Pata maelezo zaidi<ph name="END_LINK" /></translation>
-<translation id="2441696206556358796">Ili kuhifadhi picha, gonga Mipangilio ili uruhusu Chrome itumie picha zako</translation>
+<translation id="2441696206556358796">Ili kuhifadhi picha, gusa Mipangilio ili uruhusu Chrome itumie picha zako</translation>
 <translation id="2576431527583832481">Chrome imekuwa bora! Toleo jipya linapatikana.</translation>
 <translation id="257708665678654955">Ungependa Google Chrome ijitolee kutafsiri kurasa za <ph name="LANGUAGE_NAME" /> kutoka tovuti hii wakati ujao?</translation>
 <translation id="3148434565183091099">Ingia katika Chrome ili upate alamisho zako kwenye vifaa vyako vyote.</translation>
@@ -24,12 +25,10 @@
 <translation id="3988789688219830639">Google Chrome haina uwezo wa kufikia picha au video zako. Washa ufikiaji katika Mipangilio ya iOS &gt; Faragha &gt; Picha.</translation>
 <translation id="4099578267706723511">Saidia kuboresha Chrome kwa kutumia Google takwimu za matumizi na ripoti wakati wowote kivinjari hiki kinapoacha kufanya kazi.</translation>
 <translation id="415767770115540173">Pata hali bora ya Google katika Chrome kulingana na mahali ulipo.</translation>
-<translation id="4248297594476034182">Ingia katika Chrome ili upate vichupo vyako kwenye vifaa vyako vyote.</translation>
 <translation id="424864128008805179">Ungependa kuondoka kwenye Chrome?</translation>
 <translation id="4523886039239821078">Baadhi ya programu jalizi husababisha Chrome iache kufanya kazi. Tafadhali sanidua:</translation>
 <translation id="4615174829807303908">Unaondoka kwenye akaunti inayodhibitiwa na <ph name="SIGNOUT_MANAGED_DOMAIN" />. Hatua hii itafuta data yako ya Chrome kwenye kifaa hiki, lakini data yako itasalia katika akaunti yako ya Google.</translation>
 <translation id="5389212809648216794">Google Chrome imeshindwa kutumia kamera yako kwa sababu inatumiwa na programu nyingine</translation>
-<translation id="5566557026214762153">Kwa kutumia programu hii, unakubaliana na <ph name="BEGIN_LINK" />Sheria na Masharti<ph name="END_LINK" /> ya Chrome.</translation>
 <translation id="5639704535586432836">Fungua Mipangilio &gt; Faragha &gt; Kamera &gt; Google Chrome na uwashe kamera.</translation>
 <translation id="5642200033778930880">Google Chrome imeshindwa kutumia kamera yako katika hali ya Mwonekano wa Madirisha Mawili</translation>
 <translation id="5703130498371792817">Je, unafurahia Chrome? <ph name="BEGIN_LINK" />Kadiria programu hii<ph name="END_LINK" /></translation>

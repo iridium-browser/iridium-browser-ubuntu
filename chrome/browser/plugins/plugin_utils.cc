@@ -25,7 +25,7 @@ void GetPluginContentSettingInternal(
     const GURL& plugin_url,
     const std::string& resource,
     ContentSetting* setting,
-    bool* uses_default_content_setting,
+    bool* is_default,
     bool* is_managed) {
   GURL main_frame_url = main_frame_origin.GetURL();
   std::unique_ptr<base::Value> value;
@@ -60,21 +60,31 @@ void GetPluginContentSettingInternal(
     }
   }
   *setting = content_settings::ValueToContentSetting(value.get());
-  if (uses_default_content_setting) {
-    *uses_default_content_setting =
-        !uses_plugin_specific_setting &&
-        info.primary_pattern == ContentSettingsPattern::Wildcard() &&
-        info.secondary_pattern == ContentSettingsPattern::Wildcard();
-  }
+
+  bool uses_default_content_setting =
+      !uses_plugin_specific_setting &&
+      info.primary_pattern == ContentSettingsPattern::Wildcard() &&
+      info.secondary_pattern == ContentSettingsPattern::Wildcard();
+
+  if (is_default)
+    *is_default = uses_default_content_setting;
   if (is_managed)
     *is_managed = info.source == content_settings::SETTING_SOURCE_POLICY;
 
-  // For non-JavaScript treated plugins (Flash): unless the user has explicitly
-  // ALLOWed plugins, return BLOCK for any non-HTTP and non-FILE origin.
-  if (!use_javascript_setting && *setting != CONTENT_SETTING_ALLOW &&
-      PluginUtils::ShouldPreferHtmlOverPlugins(host_content_settings_map) &&
-      !main_frame_url.SchemeIsHTTPOrHTTPS() && !main_frame_url.SchemeIsFile()) {
-    *setting = CONTENT_SETTING_BLOCK;
+  // Special behavior for non-JavaScript treated plugins (Flash):
+  if (!use_javascript_setting) {
+    // ALLOW-by-default is obsolete and should be treated as DETECT.
+    if (*setting == CONTENT_SETTING_ALLOW && uses_default_content_setting)
+      *setting = CONTENT_SETTING_DETECT_IMPORTANT_CONTENT;
+
+    // Unless the setting is explicitly ALLOW, return BLOCK for any scheme that
+    // is not HTTP, HTTPS, or FILE.
+    if (*setting != CONTENT_SETTING_ALLOW &&
+        PluginUtils::ShouldPreferHtmlOverPlugins(host_content_settings_map) &&
+        !main_frame_url.SchemeIsHTTPOrHTTPS() &&
+        !main_frame_url.SchemeIsFile()) {
+      *setting = CONTENT_SETTING_BLOCK;
+    }
   }
 }
 
@@ -108,6 +118,20 @@ ContentSetting PluginUtils::GetFlashPluginContentSetting(
                                   main_frame_origin, plugin_url, kFlashPluginID,
                                   &plugin_setting, nullptr, is_managed);
   return plugin_setting;
+}
+
+// static
+void PluginUtils::RememberFlashChangedForSite(
+    HostContentSettingsMap* host_content_settings_map,
+    const GURL& top_level_url) {
+  // A |base::DictionaryValue| is set here but for now, clients only check this
+  // is a non-nullptr value.
+  auto dict = std::make_unique<base::DictionaryValue>();
+  constexpr char kFlagKey[] = "flashPreviouslyChanged";
+  dict->SetKey(kFlagKey, base::Value(true));
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      top_level_url, top_level_url, CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+      std::string(), std::move(dict));
 }
 
 // static

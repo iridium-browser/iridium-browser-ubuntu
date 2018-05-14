@@ -10,9 +10,8 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/path_service.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "components/favicon/core/large_icon_service.h"
 #include "components/favicon/core/test/mock_favicon_service.h"
 #include "components/favicon_base/fallback_icon_style.h"
@@ -72,7 +71,7 @@ favicon_base::FaviconRawBitmapResult CreateTestBitmap() {
   CGFloat scaled_size = [UIScreen mainScreen].scale * kTestFaviconSize;
   result.pixel_size = gfx::Size(scaled_size, scaled_size);
   result.icon_url = GURL(kTestFaviconIconURL);
-  result.icon_type = favicon_base::TOUCH_ICON;
+  result.icon_type = favicon_base::IconType::kTouchIcon;
   CHECK(result.is_valid());
   return result;
 }
@@ -83,8 +82,7 @@ class FaviconViewProviderTest : public PlatformTest {
     DCHECK_CURRENTLY_ON(web::WebThread::UI);
     PlatformTest::SetUp();
     large_icon_service_.reset(new favicon::LargeIconService(
-        &mock_favicon_service_, base::ThreadTaskRunnerHandle::Get(),
-        /*image_fetcher=*/nullptr));
+        &mock_favicon_service_, /*image_fetcher=*/nullptr));
 
     EXPECT_CALL(mock_favicon_service_, GetLargestRawFaviconForPageURL(
                                            GURL(kTestFaviconURL), _, _, _, _))

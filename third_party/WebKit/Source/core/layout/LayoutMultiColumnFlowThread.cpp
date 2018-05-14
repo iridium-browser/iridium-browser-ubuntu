@@ -48,7 +48,7 @@ LayoutMultiColumnFlowThread::LayoutMultiColumnFlowThread()
   SetIsInsideFlowThread(true);
 }
 
-LayoutMultiColumnFlowThread::~LayoutMultiColumnFlowThread() {}
+LayoutMultiColumnFlowThread::~LayoutMultiColumnFlowThread() = default;
 
 LayoutMultiColumnFlowThread* LayoutMultiColumnFlowThread::CreateAnonymous(
     Document& document,
@@ -428,17 +428,18 @@ LayoutPoint LayoutMultiColumnFlowThread::VisualPointToFlowThreadPoint(
                     : visual_point;
 }
 
-int LayoutMultiColumnFlowThread::InlineBlockBaseline(
+LayoutUnit LayoutMultiColumnFlowThread::InlineBlockBaseline(
     LineDirectionMode line_direction) const {
   LayoutUnit baseline_in_flow_thread =
-      LayoutUnit(LayoutFlowThread::InlineBlockBaseline(line_direction));
+      LayoutFlowThread::InlineBlockBaseline(line_direction);
   LayoutMultiColumnSet* column_set =
       ColumnSetAtBlockOffset(baseline_in_flow_thread, kAssociateWithLatterPage);
   if (!column_set)
-    return baseline_in_flow_thread.ToInt();
-  return (baseline_in_flow_thread -
-          column_set->PageLogicalTopForOffset(baseline_in_flow_thread))
-      .Ceil();
+    return baseline_in_flow_thread;
+  return LayoutUnit(
+      (baseline_in_flow_thread -
+       column_set->PageLogicalTopForOffset(baseline_in_flow_thread))
+          .Ceil());
 }
 
 LayoutMultiColumnSet* LayoutMultiColumnFlowThread::ColumnSetAtBlockOffset(
@@ -518,7 +519,7 @@ void LayoutMultiColumnFlowThread::LayoutColumns(
   CalculateColumnHeightAvailable();
 
   if (FragmentationContext* enclosing_fragmentation_context =
-          this->EnclosingFragmentationContext()) {
+          EnclosingFragmentationContext()) {
     block_offset_in_enclosing_fragmentation_context_ =
         MultiColumnBlockFlow()->OffsetFromLogicalTopOfFirstPage();
     block_offset_in_enclosing_fragmentation_context_ +=
@@ -635,7 +636,7 @@ LayoutMultiColumnFlowThread::EnclosingFragmentationContext(
   if (constraint == kIsolateUnbreakableContainers &&
       MultiColumnBlockFlow()->GetPaginationBreakability() == kForbidBreaks)
     return nullptr;
-  if (auto* enclosing_flow_thread = this->EnclosingFlowThread(constraint))
+  if (auto* enclosing_flow_thread = EnclosingFlowThread(constraint))
     return enclosing_flow_thread;
   return View()->FragmentationContext();
 }
@@ -686,6 +687,17 @@ void LayoutMultiColumnFlowThread::AppendNewFragmentainerGroupIfNeeded(
   }
 }
 
+void LayoutMultiColumnFlowThread::UpdateFromNG() {
+  all_columns_have_known_height_ = true;
+  for (LayoutBox* column_box = FirstMultiColumnBox(); column_box;
+       column_box = column_box->NextSiblingMultiColumnBox()) {
+    if (column_box->IsLayoutMultiColumnSet())
+      ToLayoutMultiColumnSet(column_box)->UpdateFromNG();
+    column_box->ClearNeedsLayout();
+    column_box->UpdateAfterLayout();
+  }
+}
+
 bool LayoutMultiColumnFlowThread::IsFragmentainerLogicalHeightKnown() {
   return IsPageLogicalHeightKnown();
 }
@@ -733,7 +745,7 @@ void LayoutMultiColumnFlowThread::CalculateColumnCountAndWidth(
   LayoutBlock* column_block = MultiColumnBlockFlow();
   const ComputedStyle* column_style = column_block->Style();
   LayoutUnit available_width = column_block->ContentLogicalWidth();
-  LayoutUnit column_gap = LayoutUnit(column_block->ColumnGap());
+  LayoutUnit column_gap = ColumnGap(*column_style, available_width);
   LayoutUnit computed_column_width =
       max(LayoutUnit(1), LayoutUnit(column_style->ColumnWidth()));
   unsigned computed_column_count = max<int>(1, column_style->ColumnCount());
@@ -759,6 +771,15 @@ void LayoutMultiColumnFlowThread::CalculateColumnCountAndWidth(
                 .ToUnsigned();
     width = ((available_width + column_gap) / count) - column_gap;
   }
+}
+
+LayoutUnit LayoutMultiColumnFlowThread::ColumnGap(const ComputedStyle& style,
+                                                  LayoutUnit available_width) {
+  if (style.ColumnGap().IsNormal()) {
+    // "1em" is recommended as the normal gap setting. Matches <p> margins.
+    return LayoutUnit(style.GetFontDescription().ComputedSize());
+  }
+  return ValueForLength(style.ColumnGap().GetLength(), available_width);
 }
 
 void LayoutMultiColumnFlowThread::CreateAndInsertMultiColumnSet(
@@ -1291,13 +1312,12 @@ void LayoutMultiColumnFlowThread::ComputePreferredLogicalWidths() {
   // need when laid out inside the columns. In order to eventually end up with
   // the desired column width, we need to convert them to values pertaining to
   // the multicol container.
-  const LayoutBlockFlow* multicol_container = MultiColumnBlockFlow();
-  const ComputedStyle* multicol_style = multicol_container->Style();
-  int column_count =
-      multicol_style->HasAutoColumnCount() ? 1 : multicol_style->ColumnCount();
+  const ComputedStyle* multicol_style = MultiColumnBlockFlow()->Style();
+  LayoutUnit column_count(
+      multicol_style->HasAutoColumnCount() ? 1 : multicol_style->ColumnCount());
   LayoutUnit column_width;
-  LayoutUnit gap_extra =
-      LayoutUnit((column_count - 1) * multicol_container->ColumnGap());
+  LayoutUnit gap_extra((column_count - 1) *
+                       ColumnGap(*multicol_style, LayoutUnit()));
   if (multicol_style->HasAutoColumnWidth()) {
     min_preferred_logical_width_ =
         min_preferred_logical_width_ * column_count + gap_extra;

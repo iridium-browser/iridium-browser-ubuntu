@@ -14,7 +14,9 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
-#import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
+#import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/browser_window_views_mac.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
@@ -57,13 +59,21 @@ void UpdateToggleStateWithTag(NSInteger tag, id item, NSWindow* window) {
     return;
   }
 
-  if (tag == IDC_WINDOW_MUTE_TAB) {
+  if (tag == IDC_TOGGLE_JAVASCRIPT_APPLE_EVENTS) {
+    PrefService* prefs = browser->profile()->GetPrefs();
+    SetToggleState(prefs->GetBoolean(prefs::kAllowJavascriptAppleEvents), item);
+    return;
+  }
+
+  if (tag == IDC_WINDOW_MUTE_SITE) {
     TabStripModel* model = browser->tab_strip_model();
+    bool will_mute =
+        base::FeatureList::IsEnabled(features::kSoundContentSetting)
+            ? model->WillContextMenuMuteSites(model->active_index())
+            : model->WillContextMenuMute(model->active_index());
     // Menu items may be validated during browser startup, before the
     // TabStripModel has been populated.
-    SetToggleState(
-        !model->empty() && !model->WillContextMenuMute(model->active_index()),
-        item);
+    SetToggleState(!model->empty() && !will_mute, item);
     return;
   }
 
@@ -86,7 +96,9 @@ NSString* GetTitleForViewsFullscreenMenuItem(Browser* browser) {
 // TODO(jackhou): Remove the dependency on BrowserWindowController(Private).
 NSString* GetTitleForFullscreenMenuItem(Browser* browser) {
   NSWindow* ns_window = browser->window()->GetNativeWindow();
-  if (BrowserWindowController* controller = [ns_window windowController]) {
+  BrowserWindowController* controller =
+      BrowserWindowControllerForWindow(ns_window);
+  if (controller) {
     return l10n_util::GetNSString([controller isInAppKitFullscreen]
                                       ? IDS_EXIT_FULLSCREEN_MAC
                                       : IDS_ENTER_FULLSCREEN_MAC);

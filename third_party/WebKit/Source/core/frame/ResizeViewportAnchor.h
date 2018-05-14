@@ -5,6 +5,7 @@
 #ifndef ResizeViewportAnchor_h
 #define ResizeViewportAnchor_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/page/Page.h"
 #include "platform/heap/Handle.h"
@@ -22,8 +23,6 @@ class LocalFrameView;
 // position to be clamped).
 class CORE_EXPORT ResizeViewportAnchor final
     : public GarbageCollected<ResizeViewportAnchor> {
-  WTF_MAKE_NONCOPYABLE(ResizeViewportAnchor);
-
  public:
   ResizeViewportAnchor(Page& page) : page_(page), scope_count_(0) {}
 
@@ -42,7 +41,7 @@ class CORE_EXPORT ResizeViewportAnchor final
 
   void ResizeFrameView(const IntSize&);
 
-  DEFINE_INLINE_TRACE() { visitor->Trace(page_); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(page_); }
 
  private:
   void BeginScope() { scope_count_++; }
@@ -55,6 +54,8 @@ class CORE_EXPORT ResizeViewportAnchor final
   ScrollOffset drift_;
   Member<Page> page_;
   int scope_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(ResizeViewportAnchor);
 };
 
 }  // namespace blink

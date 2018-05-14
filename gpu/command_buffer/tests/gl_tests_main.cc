@@ -13,15 +13,12 @@
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
+#include "gpu/command_buffer/tests/gl_manager.h"
+#include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "gpu/config/gpu_info_collector.h"
 #include "gpu/config/gpu_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/gl/init/gl_factory.h"
-
-#if defined(OS_ANDROID)
-#include "base/android/jni_android.h"
-#include "ui/gl/android/gl_jni_registrar.h"
-#endif
 
 namespace {
 
@@ -32,11 +29,18 @@ int RunHelper(base::TestSuite* testSuite) {
   base::MessageLoopForIO message_loop;
 #endif
   base::FeatureList::InitializeInstance(std::string(), std::string());
+  gl::init::InitializeGLNoExtensionsOneOff();
   gpu::GPUInfo gpu_info;
-  gpu::CollectBasicGraphicsInfo(&gpu_info);
-  gpu::ApplyGpuDriverBugWorkarounds(gpu_info,
-                                    base::CommandLine::ForCurrentProcess());
-  gl::init::InitializeGLOneOff();
+  gpu::CollectGraphicsInfoForTesting(&gpu_info);
+  gpu::GLManager::g_gpu_feature_info = gpu::ComputeGpuFeatureInfo(
+      gpu_info,
+      false,  // ignore_gpu_blacklist
+      false,  // disable_gpu_driver_bug_workarounds
+      false,  // log_gpu_control_list_decisions
+      base::CommandLine::ForCurrentProcess(), nullptr);
+  gl::init::SetDisabledExtensionsPlatform(
+      gpu::GLManager::g_gpu_feature_info.disabled_extensions);
+  gl::init::InitializeExtensionSettingsOneOffPlatform();
   ::gles2::Initialize();
   return testSuite->Run();
 }
@@ -44,9 +48,6 @@ int RunHelper(base::TestSuite* testSuite) {
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(OS_ANDROID)
-  ui::gl::android::RegisterJni(base::android::AttachCurrentThread());
-#endif
   base::TestSuite test_suite(argc, argv);
   base::CommandLine::Init(argc, argv);
 #if defined(OS_MACOSX)

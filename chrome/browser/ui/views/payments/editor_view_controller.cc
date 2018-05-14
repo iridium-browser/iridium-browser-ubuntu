@@ -9,7 +9,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/views/harmony/chrome_typography.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view.h"
@@ -48,20 +47,20 @@ enum class EditorViewControllerTags : int {
 std::unique_ptr<views::View> CreateErrorLabelView(
     const base::string16& error,
     autofill::ServerFieldType type) {
-  std::unique_ptr<views::View> view = base::MakeUnique<views::View>();
+  std::unique_ptr<views::View> view = std::make_unique<views::View>();
 
   std::unique_ptr<views::BoxLayout> layout =
-      base::MakeUnique<views::BoxLayout>(views::BoxLayout::kVertical);
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical);
   layout->set_main_axis_alignment(views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
   layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_STRETCH);
   // This is the space between the input field and the error label.
   constexpr int kErrorLabelTopPadding = 6;
   layout->set_inside_border_insets(gfx::Insets(kErrorLabelTopPadding, 0, 0, 0));
-  view->SetLayoutManager(layout.release());
+  view->SetLayoutManager(std::move(layout));
 
   std::unique_ptr<views::Label> error_label =
-      base::MakeUnique<views::Label>(error, CONTEXT_DEPRECATED_SMALL);
+      std::make_unique<views::Label>(error, CONTEXT_DEPRECATED_SMALL);
   error_label->set_id(static_cast<int>(DialogViewID::ERROR_LABEL_OFFSET) +
                       type);
   error_label->SetEnabledColor(error_label->GetNativeTheme()->GetSystemColor(
@@ -79,10 +78,12 @@ EditorViewController::EditorViewController(
     PaymentRequestSpec* spec,
     PaymentRequestState* state,
     PaymentRequestDialogView* dialog,
-    BackNavigationType back_navigation_type)
+    BackNavigationType back_navigation_type,
+    bool is_incognito)
     : PaymentRequestSheetController(spec, state, dialog),
       initial_focus_field_view_(nullptr),
-      back_navigation_type_(back_navigation_type) {}
+      back_navigation_type_(back_navigation_type),
+      is_incognito_(is_incognito) {}
 
 EditorViewController::~EditorViewController() {}
 
@@ -138,11 +139,11 @@ std::unique_ptr<views::Button> EditorViewController::CreatePrimaryButton() {
 }
 
 void EditorViewController::FillContentView(views::View* content_view) {
-  views::BoxLayout* layout = new views::BoxLayout(views::BoxLayout::kVertical);
+  auto layout = std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical);
   layout->set_main_axis_alignment(views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
   layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_STRETCH);
-  content_view->SetLayoutManager(layout);
+  content_view->SetLayoutManager(std::move(layout));
   // No insets. Child views below are responsible for their padding.
 
   // An editor can optionally have a header view specific to it.
@@ -194,7 +195,7 @@ EditorViewController::CreateComboboxForField(const EditorField& field,
       CreateValidationDelegate(field);
   ValidationDelegate* delegate_ptr = delegate.get();
   std::unique_ptr<ValidatingCombobox> combobox =
-      base::MakeUnique<ValidatingCombobox>(GetComboboxModelForType(field.type),
+      std::make_unique<ValidatingCombobox>(GetComboboxModelForType(field.type),
                                            std::move(delegate));
   combobox->SetAccessibleName(field.label);
 
@@ -227,7 +228,7 @@ void EditorViewController::OnPerformAction(views::Combobox* sender) {
 }
 
 std::unique_ptr<views::View> EditorViewController::CreateEditorView() {
-  std::unique_ptr<views::View> editor_view = base::MakeUnique<views::View>();
+  std::unique_ptr<views::View> editor_view = std::make_unique<views::View>();
   text_fields_.clear();
   comboboxes_.clear();
   initial_focus_field_view_ = nullptr;
@@ -251,8 +252,8 @@ std::unique_ptr<views::View> EditorViewController::CreateEditorView() {
   constexpr int kShortFieldMinimumWidth = 176;
   constexpr int kLongFieldMinimumWidth = 272;
 
-  std::unique_ptr<views::GridLayout> editor_layout =
-      base::MakeUnique<views::GridLayout>(editor_view.get());
+  views::GridLayout* editor_layout = editor_view->SetLayoutManager(
+      std::make_unique<views::GridLayout>(editor_view.get()));
   // Column set for short fields.
   views::ColumnSet* columns_short = editor_layout->AddColumnSet(0);
   columns_short->AddColumn(views::GridLayout::LEADING,
@@ -307,7 +308,7 @@ std::unique_ptr<views::View> EditorViewController::CreateEditorView() {
   for (const auto& field : GetFieldDefinitions()) {
     bool valid = false;
     views::View* focusable_field =
-        CreateInputField(editor_layout.get(), field, &valid);
+        CreateInputField(editor_layout, field, &valid);
     if (!first_field)
       first_field = focusable_field;
     if (!initial_focus_field_view_ && !valid)
@@ -331,8 +332,6 @@ std::unique_ptr<views::View> EditorViewController::CreateEditorView() {
           l10n_util::GetStringUTF16(IDS_PAYMENTS_REQUIRED_FIELD_MESSAGE))
           .release());
 
-  editor_view->SetLayoutManager(editor_layout.release());
-
   return editor_view;
 }
 
@@ -352,7 +351,7 @@ views::View* EditorViewController::CreateInputField(views::GridLayout* layout,
   constexpr int kInputRowSpacing = 6;
   layout->StartRowWithPadding(0, column_set, 0, kInputRowSpacing);
 
-  std::unique_ptr<views::Label> label = base::MakeUnique<views::Label>(
+  std::unique_ptr<views::Label> label = std::make_unique<views::Label>(
       field.required ? field.label + base::ASCIIToUTF16("*") : field.label);
 
   label->SetMultiLine(true);
@@ -419,7 +418,7 @@ views::View* EditorViewController::CreateInputField(views::GridLayout* layout,
     }
     case EditorField::ControlType::READONLY_LABEL: {
       std::unique_ptr<views::Label> label =
-          base::MakeUnique<views::Label>(GetInitialValueForType(field.type));
+          std::make_unique<views::Label>(GetInitialValueForType(field.type));
       label->set_id(GetInputFieldViewId(field.type));
       label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
       layout->AddView(label.release(), 1, 1, views::GridLayout::FILL,
@@ -437,8 +436,8 @@ views::View* EditorViewController::CreateInputField(views::GridLayout* layout,
   layout->StartRow(0, column_set);
   layout->SkipColumns(1);
   std::unique_ptr<views::View> error_label_view =
-      base::MakeUnique<views::View>();
-  error_label_view->SetLayoutManager(new views::FillLayout);
+      std::make_unique<views::View>();
+  error_label_view->SetLayoutManager(std::make_unique<views::FillLayout>());
   error_labels_[field.type] = error_label_view.get();
   if (IsEditingExistingItem() && !error_message.empty())
     AddOrUpdateErrorMessageForField(field.type, error_message);

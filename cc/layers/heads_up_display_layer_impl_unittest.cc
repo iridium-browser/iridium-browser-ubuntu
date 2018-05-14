@@ -17,20 +17,23 @@ namespace cc {
 namespace {
 
 void CheckDrawLayer(HeadsUpDisplayLayerImpl* layer,
-                    ResourceProvider* resource_provider,
+                    LayerTreeResourceProvider* resource_provider,
                     viz::ContextProvider* context_provider,
                     DrawMode draw_mode) {
-  std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
+  std::unique_ptr<viz::RenderPass> render_pass = viz::RenderPass::Create();
   AppendQuadsData data;
   bool will_draw = layer->WillDraw(draw_mode, resource_provider);
   if (will_draw)
     layer->AppendQuads(render_pass.get(), &data);
-  layer->UpdateHudTexture(draw_mode, resource_provider, context_provider);
+  viz::RenderPassList pass_list;
+  pass_list.push_back(std::move(render_pass));
+  layer->UpdateHudTexture(draw_mode, resource_provider, context_provider,
+                          pass_list);
   if (will_draw)
     layer->DidDraw(resource_provider);
 
   size_t expected_quad_list_size = will_draw ? 1 : 0;
-  EXPECT_EQ(expected_quad_list_size, render_pass->quad_list.size());
+  EXPECT_EQ(expected_quad_list_size, pass_list.back()->quad_list.size());
   EXPECT_EQ(0u, data.num_missing_tiles);
   EXPECT_EQ(0u, data.num_incomplete_tiles);
 }
@@ -88,8 +91,12 @@ TEST(HeadsUpDisplayLayerImplTest, CPUAndGPURasterCanvas) {
   CheckDrawLayer(layer, host_impl.resource_provider(),
                  layer_tree_frame_sink->context_provider(), DRAW_MODE_HARDWARE);
 
+  host_impl.ReleaseLayerTreeFrameSink();
+  layer_tree_frame_sink = FakeLayerTreeFrameSink::CreateSoftware();
+  host_impl.InitializeRenderer(layer_tree_frame_sink.get());
+
   // Check SW canvas drawing is ok.
-  CheckDrawLayer(layer, host_impl.resource_provider(), NULL,
+  CheckDrawLayer(layer, host_impl.resource_provider(), nullptr,
                  DRAW_MODE_SOFTWARE);
 }
 

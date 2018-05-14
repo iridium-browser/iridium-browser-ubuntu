@@ -4,7 +4,9 @@
 
 #include "components/omnibox/browser/autocomplete_controller.h"
 
-#include <stddef.h>
+#include <cstddef>
+#include <memory>
+#include <numeric>
 #include <set>
 #include <string>
 #include <utility>
@@ -12,12 +14,13 @@
 #include "base/feature_list.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/memory_usage_estimator.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "components/omnibox/browser/autocomplete_controller_delegate.h"
@@ -245,7 +248,7 @@ AutocompleteController::AutocompleteController(
     // that would come with it.
     if (!ClipboardRecentContent::GetInstance()) {
       ClipboardRecentContent::SetInstance(
-          base::MakeUnique<ClipboardRecentContentGeneric>());
+          std::make_unique<ClipboardRecentContentGeneric>());
     }
 #endif
     // ClipboardRecentContent can be null in iOS tests.  For non-iOS, we
@@ -262,9 +265,15 @@ AutocompleteController::AutocompleteController(
     if (physical_web_provider)
       providers_.push_back(physical_web_provider);
   }
+
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      this, "AutocompleteController", base::ThreadTaskRunnerHandle::Get());
 }
 
 AutocompleteController::~AutocompleteController() {
+  base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
+      this);
+
   // The providers may have tasks outstanding that hold refs to them.  We need
   // to ensure they won't call us back if they outlive us.  (Practically,
   // calling Stop() should also cancel those tasks and make it so that we hold
@@ -321,7 +330,7 @@ void AutocompleteController::Start(const AutocompleteInput& input) {
   if (input.want_asynchronous_matches() && (input.text().length() < 6)) {
     base::TimeTicks end_time = base::TimeTicks::Now();
     std::string name =
-        "Omnibox.QueryTime2." + base::SizeTToString(input.text().length());
+        "Omnibox.QueryTime2." + base::NumberToString(input.text().length());
     base::HistogramBase* counter = base::Histogram::FactoryGet(
         name, 1, 1000, 50, base::Histogram::kUmaTargetedHistogramFlag);
     counter->Add(static_cast<int>((end_time - start_time).InMilliseconds()));
@@ -343,17 +352,16 @@ void AutocompleteController::Start(const AutocompleteInput& input) {
   // need the edit model to update the display.
   UpdateResult(false, true);
 
-  // If the input looks like a query and we're not in incognito mode, send a
-  // signal predicting that the user is going to issue a search (either to the
-  // default search engine or to a keyword search engine, as indicated by the
-  // destination_url). This allows any associated service worker to start up
-  // early and reduce the latency of a resulting search. However, to avoid a
-  // potentially expensive operation, we only do this once per session.
-  // Additionally, a default match is expected to be available at this point but
-  // we check anyway to guard against an invalid dereference.
+  // If the input looks like a query, send a signal predicting that the user is
+  // going to issue a search (either to the default search engine or to a
+  // keyword search engine, as indicated by the destination_url). This allows
+  // any associated service worker to start up early and reduce the latency of a
+  // resulting search. However, to avoid a potentially expensive operation, we
+  // only do this once per session. Additionally, a default match is expected to
+  // be available at this point but we check anyway to guard against an invalid
+  // dereference.
   if (base::FeatureList::IsEnabled(
           omnibox::kSpeculativeServiceWorkerStartOnQueryInput) &&
-      !provider_client_->IsOffTheRecord() &&
       (input.type() == metrics::OmniboxInputType::QUERY) &&
       !search_service_worker_signal_sent_ &&
       (result_.default_match() != result_.end())) {
@@ -462,6 +470,10 @@ void AutocompleteController::UpdateMatchDestinationURL(
       search_terms_args, template_url_service_->search_terms_data()));
 }
 
+void AutocompleteController::InlineTailPrefixes() {
+  result_.InlineTailPrefixes();
+}
+
 void AutocompleteController::UpdateResult(
     bool regenerate_result,
     bool force_notify_default_match_changed) {
@@ -502,7 +514,7 @@ void AutocompleteController::UpdateResult(
   if (!done_) {
     // This conditional needs to match the conditional in Start that invokes
     // StartExpireTimer.
-    result_.CopyOldMatches(input_, last_result, template_url_service_);
+    result_.CopyOldMatches(input_, &last_result, template_url_service_);
   }
 
   UpdateKeywordDescriptions(&result_);
@@ -728,4 +740,29 @@ void AutocompleteController::StopHelper(bool clear_result,
     // touch the edit... this is all a mess and should be cleaned up :(
     NotifyChanged(false);
   }
+}
+
+bool AutocompleteController::OnMemoryDump(
+    const base::trace_event::MemoryDumpArgs& args,
+    base::trace_event::ProcessMemoryDump* process_memory_dump) {
+  size_t res = 0;
+
+  // provider_client_ seems to be small enough to ignore it.
+
+  // TODO(dyaroshev): implement memory estimation for scoped_refptr in
+  // base::trace_event.
+  res += std::accumulate(providers_.begin(), providers_.end(), 0u,
+                         [](size_t sum, const auto& provider) {
+                           return sum + sizeof(AutocompleteProvider) +
+                                  provider->EstimateMemoryUsage();
+                         });
+
+  res += input_.EstimateMemoryUsage();
+  res += result_.EstimateMemoryUsage();
+
+  auto* dump = process_memory_dump->GetOrCreateAllocatorDump(
+      "omnibox/autocomplete_controller");
+  dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes, res);
+  return true;
 }

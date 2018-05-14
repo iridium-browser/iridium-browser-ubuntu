@@ -6,11 +6,10 @@
 
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_receiver.h"
 #include "chrome/browser/safe_browsing/incident_reporting/resource_request_incident.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -107,7 +106,7 @@ class ResourceRequestDetectorClient
       incident_data->set_digest(threat_hash);
       content::BrowserThread::PostTask(
           content::BrowserThread::UI, FROM_HERE,
-          base::BindOnce(callback_, base::Passed(&incident_data)));
+          base::BindOnce(callback_, std::move(incident_data)));
     }
     Release();  // Balanced in StartCheck.
   }
@@ -182,7 +181,7 @@ void ResourceRequestDetector::ReportIncidentOnUIThread(
 
     incident_receiver_->AddIncidentForProfile(
         profile,
-        base::MakeUnique<ResourceRequestIncident>(std::move(incident_data)));
+        std::make_unique<ResourceRequestIncident>(std::move(incident_data)));
   }
 }
 

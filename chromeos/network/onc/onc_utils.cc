@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/base64.h"
@@ -46,11 +48,12 @@
 #include "crypto/hmac.h"
 #include "crypto/symmetric_key.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/proxy_server.h"
 #include "net/cert/pem_tokenizer.h"
 #include "net/cert/x509_certificate.h"
-#include "net/proxy/proxy_bypass_rules.h"
-#include "net/proxy/proxy_config.h"
-#include "net/proxy/proxy_server.h"
+#include "net/cert/x509_util_nss.h"
+#include "net/proxy_resolution/proxy_bypass_rules.h"
+#include "net/proxy_resolution/proxy_config.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
@@ -71,7 +74,7 @@ class UserStringSubstitution : public chromeos::onc::StringSubstitution {
  public:
   explicit UserStringSubstitution(const user_manager::User* user)
       : user_(user) {}
-  ~UserStringSubstitution() override {}
+  ~UserStringSubstitution() override = default;
 
   bool GetSubstitute(const std::string& placeholder,
                      std::string* substitute) const override {
@@ -250,7 +253,7 @@ void ExpandField(const std::string& fieldname,
                                        email);
   }
 
-  onc_object->SetStringWithoutPathExpansion(fieldname, user_string);
+  onc_object->SetKey(fieldname, base::Value(user_string));
 }
 
 void ExpandStringsInOncObject(
@@ -326,9 +329,9 @@ void FillInHexSSIDField(base::DictionaryValue* wifi_fields) {
     NET_LOG(ERROR) << "Found empty SSID field.";
     return;
   }
-  wifi_fields->SetStringWithoutPathExpansion(
+  wifi_fields->SetKey(
       ::onc::wifi::kHexSSID,
-      base::HexEncode(ssid_string.c_str(), ssid_string.size()));
+      base::Value(base::HexEncode(ssid_string.c_str(), ssid_string.size())));
 }
 
 namespace {
@@ -356,6 +359,13 @@ class OncMaskValues : public Mapper {
       bool* found_unknown_field,
       bool* error) override {
     if (FieldIsCredential(object_signature, field_name)) {
+      // If it's the password field and the substitution string is used, don't
+      // mask it.
+      if (&object_signature == &kEAPSignature && field_name == eap::kPassword &&
+          onc_value.GetString() == substitutes::kPasswordField) {
+        return Mapper::MapField(field_name, object_signature, onc_value,
+                                found_unknown_field, error);
+      }
       return std::unique_ptr<base::Value>(new base::Value(mask_));
     } else {
       return Mapper::MapField(field_name, object_signature, onc_value,
@@ -375,8 +385,6 @@ std::unique_ptr<base::DictionaryValue> MaskCredentialsInOncObject(
     const std::string& mask) {
   return OncMaskValues::Mask(signature, onc_object, mask);
 }
-
-namespace {
 
 std::string DecodePEM(const std::string& pem_encoded) {
   // The PEM block header used for DER certificates
@@ -404,6 +412,8 @@ std::string DecodePEM(const std::string& pem_encoded) {
   }
   return decoded;
 }
+
+namespace {
 
 CertPEMsByGUIDMap GetServerAndCACertsByGUID(
     const base::ListValue& certificates) {
@@ -454,9 +464,12 @@ bool ParseAndValidateOncForImport(const std::string& onc_blob,
                                   base::ListValue* network_configs,
                                   base::DictionaryValue* global_network_config,
                                   base::ListValue* certificates) {
-  network_configs->Clear();
-  global_network_config->Clear();
-  certificates->Clear();
+  if (network_configs)
+    network_configs->Clear();
+  if (global_network_config)
+    global_network_config->Clear();
+  if (certificates)
+    certificates->Clear();
   if (onc_blob.empty())
     return true;
 
@@ -515,12 +528,16 @@ bool ParseAndValidateOncForImport(const std::string& onc_blob,
   }
 
   base::ListValue* validated_certs = nullptr;
-  if (toplevel_onc->GetListWithoutPathExpansion(toplevel_config::kCertificates,
-                                                &validated_certs)) {
+  if (certificates && toplevel_onc->GetListWithoutPathExpansion(
+                          toplevel_config::kCertificates, &validated_certs)) {
     certificates->Swap(validated_certs);
   }
 
   base::ListValue* validated_networks = nullptr;
+  // Note that this processing is performed even if |network_configs| is
+  // nullptr, because ResolveServerCertRefsInNetworks could affect the return
+  // value of the function (which is supposed to aggregate validation issues in
+  // all segments of the ONC blob).
   if (toplevel_onc->GetListWithoutPathExpansion(
           toplevel_config::kNetworkConfigurations, &validated_networks)) {
     FillInHexSSIDFieldsInNetworks(validated_networks);
@@ -535,24 +552,26 @@ bool ParseAndValidateOncForImport(const std::string& onc_blob,
       success = false;
     }
 
-    network_configs->Swap(validated_networks);
+    if (network_configs)
+      network_configs->Swap(validated_networks);
   }
 
   base::DictionaryValue* validated_global_config = nullptr;
-  if (toplevel_onc->GetDictionaryWithoutPathExpansion(
-          toplevel_config::kGlobalNetworkConfiguration,
-          &validated_global_config)) {
+  if (global_network_config && toplevel_onc->GetDictionaryWithoutPathExpansion(
+                                   toplevel_config::kGlobalNetworkConfiguration,
+                                   &validated_global_config)) {
     global_network_config->Swap(validated_global_config);
   }
 
   return success;
 }
 
-scoped_refptr<net::X509Certificate> DecodePEMCertificate(
+net::ScopedCERTCertificate DecodePEMCertificate(
     const std::string& pem_encoded) {
   std::string decoded = DecodePEM(pem_encoded);
-  scoped_refptr<net::X509Certificate> cert =
-      net::X509Certificate::CreateFromBytes(decoded.data(), decoded.size());
+  net::ScopedCERTCertificate cert =
+      net::x509_util::CreateCERTCertificateFromBytes(
+          reinterpret_cast<const uint8_t*>(decoded.data()), decoded.size());
   LOG_IF(ERROR, !cert.get()) << "Couldn't create certificate from X509 data: "
                              << decoded;
   return cert;
@@ -589,7 +608,7 @@ bool ResolveSingleCertRef(const CertPEMsByGUIDMap& certs_by_guid,
     return false;
 
   onc_object->RemoveWithoutPathExpansion(key_guid_ref, nullptr);
-  onc_object->SetStringWithoutPathExpansion(key_pem, pem_encoded);
+  onc_object->SetKey(key_pem, base::Value(pem_encoded));
   return true;
 }
 
@@ -894,10 +913,10 @@ void SetProxyForScheme(const net::ProxyConfig::ProxyRules& proxy_rules,
                        const std::string& onc_scheme,
                        base::DictionaryValue* dict) {
   const net::ProxyList* proxy_list = nullptr;
-  if (proxy_rules.type == net::ProxyConfig::ProxyRules::TYPE_SINGLE_PROXY) {
+  if (proxy_rules.type == net::ProxyConfig::ProxyRules::Type::PROXY_LIST) {
     proxy_list = &proxy_rules.single_proxies;
   } else if (proxy_rules.type ==
-             net::ProxyConfig::ProxyRules::TYPE_PROXY_PER_SCHEME) {
+             net::ProxyConfig::ProxyRules::Type::PROXY_LIST_PER_SCHEME) {
     proxy_list = proxy_rules.MapUrlSchemeToProxyList(scheme);
   }
   if (!proxy_list || proxy_list->IsEmpty())
@@ -914,9 +933,9 @@ void SetProxyForScheme(const net::ProxyConfig::ProxyRules& proxy_rules,
   // Only prefix the host with a non-default scheme.
   if (server.scheme() != default_scheme)
     host = SchemeToString(server.scheme()) + "://" + host;
-  url_dict->SetStringWithoutPathExpansion(::onc::proxy::kHost, host);
-  url_dict->SetIntegerWithoutPathExpansion(::onc::proxy::kPort,
-                                           server.host_port_pair().port());
+  url_dict->SetKey(::onc::proxy::kHost, base::Value(host));
+  url_dict->SetKey(::onc::proxy::kPort,
+                   base::Value(server.host_port_pair().port()));
   dict->SetWithoutPathExpansion(onc_scheme, std::move(url_dict));
 }
 
@@ -970,7 +989,7 @@ std::unique_ptr<base::DictionaryValue> ConvertProxyConfigToOncProxySettings(
     std::unique_ptr<base::DictionaryValue> proxy_config_value) {
   // Create a ProxyConfigDictionary from the DictionaryValue.
   auto proxy_config =
-      base::MakeUnique<ProxyConfigDictionary>(std::move(proxy_config_value));
+      std::make_unique<ProxyConfigDictionary>(std::move(proxy_config_value));
 
   // Create the result DictionaryValue and populate it.
   std::unique_ptr<base::DictionaryValue> proxy_settings(
@@ -980,22 +999,21 @@ std::unique_ptr<base::DictionaryValue> ConvertProxyConfigToOncProxySettings(
     return nullptr;
   switch (mode) {
     case ProxyPrefs::MODE_DIRECT: {
-      proxy_settings->SetStringWithoutPathExpansion(::onc::proxy::kType,
-                                                    ::onc::proxy::kDirect);
+      proxy_settings->SetKey(::onc::proxy::kType,
+                             base::Value(::onc::proxy::kDirect));
       break;
     }
     case ProxyPrefs::MODE_AUTO_DETECT: {
-      proxy_settings->SetStringWithoutPathExpansion(::onc::proxy::kType,
-                                                    ::onc::proxy::kWPAD);
+      proxy_settings->SetKey(::onc::proxy::kType,
+                             base::Value(::onc::proxy::kWPAD));
       break;
     }
     case ProxyPrefs::MODE_PAC_SCRIPT: {
-      proxy_settings->SetStringWithoutPathExpansion(::onc::proxy::kType,
-                                                    ::onc::proxy::kPAC);
+      proxy_settings->SetKey(::onc::proxy::kType,
+                             base::Value(::onc::proxy::kPAC));
       std::string pac_url;
       proxy_config->GetPacUrl(&pac_url);
-      proxy_settings->SetStringWithoutPathExpansion(::onc::proxy::kPAC,
-                                                    pac_url);
+      proxy_settings->SetKey(::onc::proxy::kPAC, base::Value(pac_url));
       break;
     }
     case ProxyPrefs::MODE_FIXED_SERVERS: {
@@ -1213,11 +1231,9 @@ void ImportNetworksForUser(const user_manager::User* user,
     ui_data->FillDictionary(&ui_data_dict);
     std::string ui_data_json;
     base::JSONWriter::Write(ui_data_dict, &ui_data_json);
-    shill_dict->SetStringWithoutPathExpansion(shill::kUIDataProperty,
-                                              ui_data_json);
+    shill_dict->SetKey(shill::kUIDataProperty, base::Value(ui_data_json));
 
-    shill_dict->SetStringWithoutPathExpansion(shill::kProfileProperty,
-                                              profile->path);
+    shill_dict->SetKey(shill::kProfileProperty, base::Value(profile->path));
 
     std::string type;
     shill_dict->GetStringWithoutPathExpansion(shill::kTypeProperty, &type);
@@ -1327,6 +1343,57 @@ bool HasPolicyForNetwork(const PrefService* profile_prefs,
   const base::DictionaryValue* policy = onc::GetPolicyForNetwork(
       profile_prefs, local_state_prefs, network, &ignored_onc_source);
   return policy != NULL;
+}
+
+bool HasUserPasswordSubsitutionVariable(const OncValueSignature& signature,
+                                        base::DictionaryValue* onc_object) {
+  if (&signature == &kEAPSignature) {
+    std::string password_field;
+    if (!onc_object->GetStringWithoutPathExpansion(::onc::eap::kPassword,
+                                                   &password_field)) {
+      return false;
+    }
+
+    if (password_field == ::onc::substitutes::kPasswordField) {
+      return true;
+    }
+  }
+
+  // Recurse into nested objects.
+  for (base::DictionaryValue::Iterator it(*onc_object); !it.IsAtEnd();
+       it.Advance()) {
+    base::DictionaryValue* inner_object = nullptr;
+    if (!onc_object->GetDictionaryWithoutPathExpansion(it.key(), &inner_object))
+      continue;
+
+    const OncFieldSignature* field_signature =
+        GetFieldSignature(signature, it.key());
+    if (!field_signature)
+      continue;
+
+    bool result = HasUserPasswordSubsitutionVariable(
+        *field_signature->value_signature, inner_object);
+    if (result) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool HasUserPasswordSubsitutionVariable(base::ListValue* network_configs) {
+  for (auto& entry : *network_configs) {
+    base::DictionaryValue* network = nullptr;
+    entry.GetAsDictionary(&network);
+    DCHECK(network);
+
+    bool result = HasUserPasswordSubsitutionVariable(
+        kNetworkConfigurationSignature, network);
+    if (result) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace onc

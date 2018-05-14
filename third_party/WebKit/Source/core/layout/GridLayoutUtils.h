@@ -5,10 +5,14 @@
 #ifndef GridLayoutUtils_h
 #define GridLayoutUtils_h
 
-#include "core/layout/LayoutGrid.h"
+#include "core/layout/LayoutBox.h"
 #include "platform/LayoutUnit.h"
 
 namespace blink {
+
+enum GridAxis { kGridRowAxis, kGridColumnAxis };
+
+class LayoutGrid;
 
 class GridLayoutUtils {
  public:
@@ -21,7 +25,14 @@ class GridLayoutUtils {
       const LayoutGrid&,
       const LayoutBox&,
       GridTrackSizingDirection);
+  static bool HasOverrideContainingBlockContentSizeForChild(
+      const LayoutBox&,
+      GridTrackSizingDirection);
+  static LayoutUnit OverrideContainingBlockContentSizeForChild(
+      const LayoutBox&,
+      GridTrackSizingDirection);
 };
+
 }  // namespace blink
 
 #endif  // GridLayoutUtils_h

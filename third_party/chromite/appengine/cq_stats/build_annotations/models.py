@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -219,6 +220,27 @@ class AnnotationsTable(BaseModel):
       choices=FAILURE_CATEGORY_CHOICES,
       default='mystery')
   failure_message = models.CharField(max_length=1024, blank=True, null=True)
-  blame_url = models.CharField(max_length=80, blank=True, null=True)
+  blame_url = models.CharField(max_length=512, blank=True, null=True)
   notes = models.CharField(max_length=1024, blank=True, null=True)
   deleted = models.BooleanField(default=False, null=False)
+
+
+class BuildMessageTable(BaseModel):
+  """Model for cidb.buildMessageTable."""
+  # Must be the same constant as CL-exonerator uses.
+
+  class MESSAGE_TYPES(object):
+    """The annotation message_types that we use."""
+    ANNOTATIONS_FINALIZED = 'annotations_finalized'
+
+  class Meta(object):
+    """Set the table."""
+    db_table = 'buildMessageTable'
+
+  id = models.AutoField(primary_key=True)
+  build_id = models.ForeignKey('BuildTable', db_column='build_id')
+  message_type = models.CharField(max_length=240)
+  message_subtype = models.CharField(max_length=240)
+  message_value = models.CharField(max_length=480)
+  timestamp = ba_fields.ReadOnlyDateTimeField()
+  board = models.CharField(max_length=240)

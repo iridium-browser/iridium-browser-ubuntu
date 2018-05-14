@@ -31,7 +31,6 @@ class TextureImage : public gl::GLImage {
                        const gfx::Rect& rect) override {
     return false;
   }
-
   bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
                             int z_order,
                             gfx::OverlayTransform transform,
@@ -39,15 +38,14 @@ class TextureImage : public gl::GLImage {
                             const gfx::RectF& crop_rect) override {
     return false;
   }
-
+  void SetColorSpace(const gfx::ColorSpace& color_space) override {}
   void Flush() override {}
-
   void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                     uint64_t process_tracing_id,
                     const std::string& dump_name) override {}
 
  private:
-  ~TextureImage() override {}
+  ~TextureImage() override = default;
   gfx::Size size_;
 };
 
@@ -64,7 +62,10 @@ scoped_refptr<gl::GLImage> TextureImageFactory::CreateImageForGpuMemoryBuffer(
 scoped_refptr<gl::GLImage> TextureImageFactory::CreateAnonymousImage(
     const gfx::Size& size,
     gfx::BufferFormat format,
-    unsigned internalformat) {
+    gfx::BufferUsage usage,
+    unsigned internalformat,
+    bool* is_cleared) {
+  *is_cleared = true;
   return new TextureImage(size);
 }
 

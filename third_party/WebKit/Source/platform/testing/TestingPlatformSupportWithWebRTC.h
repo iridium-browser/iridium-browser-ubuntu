@@ -33,12 +33,8 @@ class MockWebRTCPeerConnectionHandler : public WebRTCPeerConnectionHandler {
   WebRTCSessionDescription LocalDescription() override;
   WebRTCSessionDescription RemoteDescription() override;
   WebRTCErrorType SetConfiguration(const WebRTCConfiguration&) override;
-  bool AddStream(const WebMediaStream&, const WebMediaConstraints&) override;
-  void RemoveStream(const WebMediaStream&) override;
   void GetStats(const WebRTCStatsRequest&) override;
   void GetStats(std::unique_ptr<WebRTCStatsReportCallback>) override;
-  WebVector<std::unique_ptr<WebRTCRtpSender>> GetSenders() override;
-  WebVector<std::unique_ptr<WebRTCRtpReceiver>> GetReceivers() override;
   std::unique_ptr<WebRTCRtpSender> AddTrack(
       const WebMediaStreamTrack&,
       const WebVector<WebMediaStream>&) override;
@@ -46,15 +42,14 @@ class MockWebRTCPeerConnectionHandler : public WebRTCPeerConnectionHandler {
   WebRTCDataChannelHandler* CreateDataChannel(
       const WebString& label,
       const WebRTCDataChannelInit&) override;
-  WebRTCDTMFSenderHandler* CreateDTMFSender(
-      const WebMediaStreamTrack&) override;
   void Stop() override;
 };
 
 class TestingPlatformSupportWithWebRTC : public TestingPlatformSupport {
  public:
   std::unique_ptr<WebRTCPeerConnectionHandler> CreateRTCPeerConnectionHandler(
-      WebRTCPeerConnectionHandlerClient*) override;
+      WebRTCPeerConnectionHandlerClient*,
+      scoped_refptr<base::SingleThreadTaskRunner>) override;
 };
 
 }  // namespace blink

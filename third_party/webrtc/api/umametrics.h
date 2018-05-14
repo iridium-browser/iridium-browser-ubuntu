@@ -10,10 +10,10 @@
 
 // This file contains enums related to IPv4/IPv6 metrics.
 
-#ifndef WEBRTC_API_UMAMETRICS_H_
-#define WEBRTC_API_UMAMETRICS_H_
+#ifndef API_UMAMETRICS_H_
+#define API_UMAMETRICS_H_
 
-#include "webrtc/rtc_base/refcount.h"
+#include "rtc_base/refcount.h"
 
 namespace webrtc {
 
@@ -37,6 +37,9 @@ enum PeerConnectionEnumCounterType {
   kEnumCounterDtlsHandshakeError,
   kEnumCounterIceRegathering,
   kEnumCounterIceRestart,
+  kEnumCounterKeyProtocol,
+  kEnumCounterSdpSemanticRequested,
+  kEnumCounterSdpSemanticNegotiated,
   kPeerConnectionEnumCounterMax
 };
 
@@ -111,6 +114,27 @@ enum IceCandidatePairType {
   kIceCandidatePairMax
 };
 
+enum KeyExchangeProtocolType {
+  kEnumCounterKeyProtocolDtls,
+  kEnumCounterKeyProtocolSdes,
+  kEnumCounterKeyProtocolMax
+};
+
+enum SdpSemanticRequested {
+  kSdpSemanticRequestDefault,
+  kSdpSemanticRequestPlanB,
+  kSdpSemanticRequestUnifiedPlan,
+  kSdpSemanticRequestMax
+};
+
+enum SdpSemanticNegotiated {
+  kSdpSemanticNegotiatedNone,
+  kSdpSemanticNegotiatedPlanB,
+  kSdpSemanticNegotiatedUnifiedPlan,
+  kSdpSemanticNegotiatedMixed,
+  kSdpSemanticNegotiatedMax
+};
+
 class MetricsObserverInterface : public rtc::RefCountInterface {
  public:
   // |type| is the type of the enum counter to be incremented. |counter|
@@ -124,19 +148,14 @@ class MetricsObserverInterface : public rtc::RefCountInterface {
   // TODO(guoweis): Remove the implementation once the dependency's interface
   // definition is updated.
   virtual void IncrementSparseEnumCounter(PeerConnectionEnumCounterType type,
-                                          int counter) {
-    IncrementEnumCounter(type, counter, 0 /* Ignored */);
-  }
+                                          int counter);
 
   virtual void AddHistogramSample(PeerConnectionMetricsName type,
                                   int value) = 0;
-
- protected:
-  virtual ~MetricsObserverInterface() {}
 };
 
 typedef MetricsObserverInterface UMAObserver;
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_UMAMETRICS_H_
+#endif  // API_UMAMETRICS_H_

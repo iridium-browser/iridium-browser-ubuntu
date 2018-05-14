@@ -9,10 +9,8 @@
 #include <memory>
 
 #include "base/compiler_specific.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
-#import "base/test/ios/wait_util.h"
 #include "components/browser_sync/profile_sync_service_mock.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
@@ -23,7 +21,8 @@
 #import "ios/chrome/browser/ui/settings/cells/byo_textfield_item.h"
 #import "ios/chrome/browser/ui/settings/cells/card_multiline_item.h"
 #import "ios/chrome/browser/ui/settings/passphrase_collection_view_controller_test.h"
-#import "ios/chrome/browser/ui/sync/sync_util.h"
+#import "ios/chrome/browser/ui/settings/sync_utils/sync_util.h"
+#import "ios/testing/wait_util.h"
 #import "testing/gtest_mac.h"
 #include "testing/platform_test.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -52,7 +51,7 @@ class SyncEncryptionPassphraseCollectionViewControllerTest
     syncer::SyncService* sync_service =
         IOSChromeProfileSyncServiceFactory::GetForBrowserState(
             chrome_browser_state);
-    return base::MakeUnique<SyncSetupServiceMock>(
+    return std::make_unique<SyncSetupServiceMock>(
         sync_service, chrome_browser_state->GetPrefs());
   }
 
@@ -200,10 +199,10 @@ TEST_F(SyncEncryptionPassphraseCollectionViewControllerTest,
   [sync_controller onSyncStateChanged];
   // Calling -onStateChanged with an accepted secondary passphrase should
   // cause the controller to be popped off the navigation stack.
-  base::test::ios::WaitUntilCondition(^bool() {
-    return [nav_controller_ topViewController] != sync_controller;
-  });
-  EXPECT_NE([nav_controller_ topViewController], sync_controller);
+  EXPECT_TRUE(testing::WaitUntilConditionOrTimeout(
+      testing::kWaitForUIElementTimeout, ^bool() {
+        return [nav_controller_ topViewController] != sync_controller;
+      }));
 }
 
 TEST_F(SyncEncryptionPassphraseCollectionViewControllerTest, TestMessage) {
@@ -231,8 +230,7 @@ TEST_F(SyncEncryptionPassphraseCollectionViewControllerTest, TestMessage) {
   TurnSyncPassphraseErrorOn();
   EXPECT_FALSE([sync_controller syncErrorMessage]);
   TurnSyncOtherErrorOn(otherState);
-  EXPECT_NSEQ(ios_internal::sync::GetSyncErrorMessageForBrowserState(
-                  chrome_browser_state_.get()),
+  EXPECT_NSEQ(GetSyncErrorMessageForBrowserState(chrome_browser_state_.get()),
               [sync_controller syncErrorMessage]);
   TurnSyncErrorOff();
   EXPECT_FALSE([sync_controller syncErrorMessage]);

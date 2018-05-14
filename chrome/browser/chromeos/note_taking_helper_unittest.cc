@@ -6,12 +6,11 @@
 
 #include <utility>
 
-#include "ash/ash_switches.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -19,6 +18,7 @@
 #include "base/test/histogram_tester.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
+#include "chrome/browser/chromeos/note_taking_controller_client.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -31,9 +31,12 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
 #include "components/arc/arc_bridge_service.h"
+#include "components/arc/arc_prefs.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/arc_util.h"
 #include "components/arc/common/intent_helper.mojom.h"
+#include "components/arc/intent_helper/arc_intent_helper_bridge.h"
+#include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_intent_helper_instance.h"
 #include "components/crx_file/id_util.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
@@ -44,6 +47,8 @@
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/value_builder.h"
+#include "services/service_manager/public/cpp/service.h"
+#include "services/service_manager/public/cpp/test/test_connector_factory.h"
 #include "url/gurl.h"
 
 namespace app_runtime = extensions::api::app_runtime;
@@ -142,6 +147,50 @@ class TestObserver : public NoteTakingHelper::Observer {
   DISALLOW_COPY_AND_ASSIGN(TestObserver);
 };
 
+class TestNoteTakingController : public ash::mojom::NoteTakingController,
+                                 public service_manager::Service {
+ public:
+  TestNoteTakingController() : binding_(this) {}
+
+  ~TestNoteTakingController() override = default;
+
+  void CallCreateNote() {
+    client_->CreateNote();
+    client_.FlushForTesting();
+  }
+
+  bool client_attached() const { return static_cast<bool>(client_); }
+
+  // ash::mojom::NoteTakingController:
+  void SetClient(ash::mojom::NoteTakingControllerClientPtr client) override {
+    DCHECK(!client_);
+    client_ = std::move(client);
+    client_.set_connection_error_handler(
+        base::Bind(&TestNoteTakingController::OnClientConnectionLost,
+                   base::Unretained(this)));
+  }
+
+  // service_manager::Service:
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override {
+    DCHECK(interface_name == ash::mojom::NoteTakingController::Name_);
+    binding_.Bind(
+        ash::mojom::NoteTakingControllerRequest(std::move(interface_pipe)));
+  }
+
+ private:
+  void OnClientConnectionLost() {
+    client_.reset();
+    binding_.Close();
+  }
+
+  mojo::Binding<ash::mojom::NoteTakingController> binding_;
+  ash::mojom::NoteTakingControllerClientPtr client_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestNoteTakingController);
+};
+
 }  // namespace
 
 class NoteTakingHelperTest : public BrowserWithTestWindowTest,
@@ -163,16 +212,18 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest,
     DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
         std::unique_ptr<SessionManagerClient>(session_manager_client_));
 
-    profile_manager_.reset(
-        new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
-    ASSERT_TRUE(profile_manager_->SetUp());
     BrowserWithTestWindowTest::SetUp();
     InitExtensionService(profile());
   }
 
   void TearDown() override {
     if (initialized_) {
+      arc::ArcServiceManager::Get()
+          ->arc_bridge_service()
+          ->intent_helper()
+          ->CloseInstance(&intent_helper_);
       NoteTakingHelper::Shutdown();
+      intent_helper_bridge_.reset();
       arc_test_.TearDown();
     }
     extensions::ExtensionSystem::Get(profile())->Shutdown();
@@ -196,19 +247,44 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest,
 
   static NoteTakingHelper* helper() { return NoteTakingHelper::Get(); }
 
+  TestNoteTakingController* test_note_taking_controller() {
+    return test_note_taking_controller_;
+  }
+
+  NoteTakingControllerClient* note_taking_client() {
+    return helper()->GetNoteTakingControllerClientForTesting();
+  }
+
+  void SetNoteTakingClientProfile(Profile* profile) {
+    if (note_taking_client())
+      note_taking_client()->SetProfileForTesting(profile);
+    FlushNoteTakingClientMojo();
+  }
+
+  void FlushNoteTakingClientMojo() {
+    if (note_taking_client())
+      note_taking_client()->FlushMojoForTesting();
+  }
+
   // Initializes ARC and NoteTakingHelper. |flags| contains OR-ed together
   // InitFlags values.
   void Init(uint32_t flags) {
     ASSERT_FALSE(initialized_);
     initialized_ = true;
 
-    profile()->GetPrefs()->SetBoolean(prefs::kArcEnabled,
+    profile()->GetPrefs()->SetBoolean(arc::prefs::kArcEnabled,
                                       flags & ENABLE_PLAY_STORE);
     arc_test_.SetUp(profile());
+    // Set up ArcIntentHelperBridge to emulate full-duplex IntentHelper
+    // connection.
+    intent_helper_bridge_ = std::make_unique<arc::ArcIntentHelperBridge>(
+        profile(), arc::ArcServiceManager::Get()->arc_bridge_service());
     arc::ArcServiceManager::Get()
         ->arc_bridge_service()
         ->intent_helper()
         ->SetInstance(&intent_helper_);
+    WaitForInstanceReady(
+        arc::ArcServiceManager::Get()->arc_bridge_service()->intent_helper());
 
     if (flags & ENABLE_PALETTE) {
       base::CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -221,12 +297,22 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest,
     }
 
     // TODO(derat): Sigh, something in ArcAppTest appears to be re-enabling ARC.
-    profile()->GetPrefs()->SetBoolean(prefs::kArcEnabled,
+    profile()->GetPrefs()->SetBoolean(arc::prefs::kArcEnabled,
                                       flags & ENABLE_PLAY_STORE);
     NoteTakingHelper::Initialize();
     NoteTakingHelper::Get()->SetProfileWithEnabledLockScreenApps(profile());
     NoteTakingHelper::Get()->set_launch_chrome_app_callback_for_test(base::Bind(
         &NoteTakingHelperTest::LaunchChromeApp, base::Unretained(this)));
+
+    auto test_note_taking_controller_ptr =
+        std::make_unique<TestNoteTakingController>();
+    test_note_taking_controller_ = test_note_taking_controller_ptr.get();
+    connector_factory_ =
+        service_manager::TestConnectorFactory::CreateForUniqueService(
+            std::move(test_note_taking_controller_ptr));
+    connector_ = connector_factory_->CreateConnector();
+
+    note_taking_client()->SetConnectorForTesting(connector_.get());
   }
 
   // Creates an extension.
@@ -286,6 +372,7 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest,
     extensions::ExtensionSystem::Get(profile)
         ->extension_service()
         ->AddExtension(extension);
+    FlushNoteTakingClientMojo();
   }
   void UninstallExtension(const extensions::Extension* extension,
                           Profile* profile) {
@@ -294,8 +381,8 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest,
         ->extension_service()
         ->UninstallExtension(
             extension->id(),
-            extensions::UninstallReason::UNINSTALL_REASON_FOR_TESTING,
-            base::Closure(), &error);
+            extensions::UninstallReason::UNINSTALL_REASON_FOR_TESTING, &error);
+    FlushNoteTakingClientMojo();
   }
 
   scoped_refptr<const extensions::Extension> CreateAndInstallLockScreenApp(
@@ -332,21 +419,14 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest,
 
   // BrowserWithTestWindowTest:
   TestingProfile* CreateProfile() override {
-    // Ensure that the profile created by BrowserWithTestWindowTest is
-    // registered with |profile_manager_|.
     auto prefs =
-        base::MakeUnique<sync_preferences::TestingPrefServiceSyncable>();
-    chrome::RegisterUserProfilePrefs(prefs->registry());
+        std::make_unique<sync_preferences::TestingPrefServiceSyncable>();
+    RegisterUserProfilePrefs(prefs->registry());
     profile_prefs_ = prefs.get();
-    return profile_manager_->CreateTestingProfile(
+    return profile_manager()->CreateTestingProfile(
         kTestProfileName, std::move(prefs), base::ASCIIToUTF16("Test profile"),
         1 /*avatar_id*/, std::string() /*supervised_user_id*/,
         TestingProfile::TestingFactories());
-  }
-
-  void DestroyProfile(TestingProfile* profile) override {
-    profile_prefs_ = nullptr;
-    return profile_manager_->DeleteTestingProfile(kTestProfileName);
   }
 
   testing::AssertionResult PreferredAppMatches(Profile* profile,
@@ -391,7 +471,7 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest,
       std::string actual = GetAppString(actual_apps[i]);
       if (expected != actual) {
         if (!failure) {
-          failure = base::MakeUnique<::testing::AssertionResult>(
+          failure = std::make_unique<::testing::AssertionResult>(
               ::testing::AssertionFailure());
         }
         *failure << "Error at index " << i << ": "
@@ -409,7 +489,6 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest,
   std::vector<ChromeAppLaunchInfo> launched_chrome_apps_;
 
   arc::FakeIntentHelperInstance intent_helper_;
-  std::unique_ptr<TestingProfileManager> profile_manager_;
 
   // Pointer to the primary profile (returned by |profile()|) prefs - owned by
   // the profile.
@@ -432,6 +511,11 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest,
 
   FakeSessionManagerClient* session_manager_client_ = nullptr;  // Not owned.
   ArcAppTest arc_test_;
+  std::unique_ptr<arc::ArcIntentHelperBridge> intent_helper_bridge_;
+  std::unique_ptr<service_manager::TestConnectorFactory> connector_factory_;
+  // |test_note_taking_controller_| is owned by |connector_factory_|.
+  TestNoteTakingController* test_note_taking_controller_;
+  std::unique_ptr<service_manager::Connector> connector_;
 
   DISALLOW_COPY_AND_ASSIGN(NoteTakingHelperTest);
 };
@@ -475,7 +559,7 @@ TEST_P(NoteTakingHelperTest, ListChromeApps) {
         false /*preferred*/, NoteTakingLockScreenSupport::kNotSupported},
        {kProdKeepAppName, NoteTakingHelper::kProdKeepExtensionId,
         false /*preferred*/, NoteTakingLockScreenSupport::kNotSupported}}));
-  EXPECT_FALSE(helper()->GetPreferredChromeAppInfo(profile()));
+  EXPECT_TRUE(helper()->GetPreferredChromeAppInfo(profile()));
 
   // Now install a random extension and check that it's ignored.
   const extensions::ExtensionId kOtherId = crx_file::id_util::GenerateId("a");
@@ -489,7 +573,7 @@ TEST_P(NoteTakingHelperTest, ListChromeApps) {
         false /*preferred*/, NoteTakingLockScreenSupport::kNotSupported},
        {kProdKeepAppName, NoteTakingHelper::kProdKeepExtensionId,
         false /*preferred*/, NoteTakingLockScreenSupport::kNotSupported}}));
-  EXPECT_FALSE(helper()->GetPreferredChromeAppInfo(profile()));
+  EXPECT_TRUE(helper()->GetPreferredChromeAppInfo(profile()));
 
   // Mark the prod version as preferred.
   helper()->SetPreferredApp(profile(), NoteTakingHelper::kProdKeepExtensionId);
@@ -528,7 +612,7 @@ TEST_P(NoteTakingHelperTest, ListChromeAppsWithLockScreenNotesSupported) {
       profile(),
       {{kProdKeepAppName, NoteTakingHelper::kProdKeepExtensionId,
         false /*preferred*/, NoteTakingLockScreenSupport::kNotSupported}}));
-  EXPECT_FALSE(helper()->GetPreferredChromeAppInfo(profile()));
+  EXPECT_TRUE(helper()->GetPreferredChromeAppInfo(profile()));
 
   // Install additional Keep app - one that supports lock screen note taking.
   // This app should be reported to support note taking (given that
@@ -539,10 +623,10 @@ TEST_P(NoteTakingHelperTest, ListChromeAppsWithLockScreenNotesSupported) {
   EXPECT_TRUE(AvailableAppsMatch(
       profile(),
       {{kDevKeepAppName, NoteTakingHelper::kDevKeepExtensionId,
-        false /*preferred*/, NoteTakingLockScreenSupport::kSupported},
+        false /*preferred*/, NoteTakingLockScreenSupport::kEnabled},
        {kProdKeepAppName, NoteTakingHelper::kProdKeepExtensionId,
         false /*preferred*/, NoteTakingLockScreenSupport::kNotSupported}}));
-  EXPECT_FALSE(helper()->GetPreferredChromeAppInfo(profile()));
+  EXPECT_TRUE(helper()->GetPreferredChromeAppInfo(profile()));
 }
 
 TEST_P(NoteTakingHelperTest, PreferredAppEnabledOnLockScreen) {
@@ -560,7 +644,7 @@ TEST_P(NoteTakingHelperTest, PreferredAppEnabledOnLockScreen) {
   EXPECT_TRUE(AvailableAppsMatch(
       profile(),
       {{kDevKeepAppName, NoteTakingHelper::kDevKeepExtensionId,
-        false /*preferred*/, NoteTakingLockScreenSupport::kSupported}}));
+        false /*preferred*/, NoteTakingLockScreenSupport::kEnabled}}));
   EXPECT_FALSE(helper()->GetPreferredChromeAppInfo(profile()));
 
   // When the lock screen note taking pref is set and the Keep app is set as the
@@ -634,11 +718,10 @@ TEST_P(NoteTakingHelperTest,
 
   // Verify that only Keep app is reported to support lock screen note taking.
   EXPECT_TRUE(AvailableAppsMatch(
-      profile(),
-      {{kDevKeepAppName, NoteTakingHelper::kDevKeepExtensionId,
-        false /*preferred*/, NoteTakingLockScreenSupport::kSupported},
-       {kName, kNewNoteId, false /*preferred*/,
-        NoteTakingLockScreenSupport::kNotSupported}}));
+      profile(), {{kDevKeepAppName, NoteTakingHelper::kDevKeepExtensionId,
+                   false /*preferred*/, NoteTakingLockScreenSupport::kEnabled},
+                  {kName, kNewNoteId, false /*preferred*/,
+                   NoteTakingLockScreenSupport::kNotSupported}}));
 
   // When the Keep app is set as preferred app, and note taking on lock screen
   // is enabled, the keep app should be reported to be selected as the lock
@@ -839,7 +922,7 @@ TEST_P(NoteTakingHelperTest, PlayStoreInitiallyDisabled) {
     return;
   // When Play Store is enabled, the helper's members should be updated
   // accordingly.
-  profile()->GetPrefs()->SetBoolean(prefs::kArcEnabled, true);
+  profile()->GetPrefs()->SetBoolean(arc::prefs::kArcEnabled, true);
   EXPECT_TRUE(helper()->play_store_enabled());
   EXPECT_FALSE(helper()->android_apps_received());
 
@@ -864,10 +947,10 @@ TEST_P(NoteTakingHelperTest, AddProfileWithPlayStoreEnabled) {
   // notified, since OnArcPlayStoreEnabledChanged() apparently isn't called in
   // this case: http://crbug.com/700554
   const char kSecondProfileName[] = "second-profile";
-  auto prefs = base::MakeUnique<sync_preferences::TestingPrefServiceSyncable>();
-  chrome::RegisterUserProfilePrefs(prefs->registry());
-  prefs->SetBoolean(prefs::kArcEnabled, true);
-  profile_manager_->CreateTestingProfile(
+  auto prefs = std::make_unique<sync_preferences::TestingPrefServiceSyncable>();
+  RegisterUserProfilePrefs(prefs->registry());
+  prefs->SetBoolean(arc::prefs::kArcEnabled, true);
+  profile_manager()->CreateTestingProfile(
       kSecondProfileName, std::move(prefs), base::ASCIIToUTF16("Second User"),
       1 /* avatar_id */, std::string() /* supervised_user_id */,
       TestingProfile::TestingFactories());
@@ -887,7 +970,7 @@ TEST_P(NoteTakingHelperTest, AddProfileWithPlayStoreEnabled) {
   EXPECT_TRUE(helper()->android_apps_received());
   EXPECT_EQ(2, observer.num_updates());
 
-  profile_manager_->DeleteTestingProfile(kSecondProfileName);
+  profile_manager()->DeleteTestingProfile(kSecondProfileName);
 }
 
 TEST_P(NoteTakingHelperTest, ListAndroidApps) {
@@ -934,7 +1017,7 @@ TEST_P(NoteTakingHelperTest, ListAndroidApps) {
   if (arc::ShouldArcAlwaysStart())
     return;
   // Disable Play Store and check that the apps are no longer returned.
-  profile()->GetPrefs()->SetBoolean(prefs::kArcEnabled, false);
+  profile()->GetPrefs()->SetBoolean(arc::prefs::kArcEnabled, false);
   EXPECT_FALSE(helper()->play_store_enabled());
   EXPECT_FALSE(helper()->android_apps_received());
   EXPECT_FALSE(helper()->IsAppAvailable(profile()));
@@ -1064,9 +1147,9 @@ TEST_P(NoteTakingHelperTest, NotifyObserverAboutAndroidApps) {
 
   // Disabling and enabling Play Store should also notify the observer (and
   // enabling should request apps again).
-  profile()->GetPrefs()->SetBoolean(prefs::kArcEnabled, false);
+  profile()->GetPrefs()->SetBoolean(arc::prefs::kArcEnabled, false);
   EXPECT_EQ(2, observer.num_updates());
-  profile()->GetPrefs()->SetBoolean(prefs::kArcEnabled, true);
+  profile()->GetPrefs()->SetBoolean(arc::prefs::kArcEnabled, true);
   EXPECT_EQ(3, observer.num_updates());
   // Run ARC data removing operation.
   base::RunLoop().RunUntilIdle();
@@ -1108,14 +1191,14 @@ TEST_P(NoteTakingHelperTest, NotifyObserverAboutChromeApps) {
   observer.reset_num_updates();
   const std::string kSecondProfileName = "second-profile";
   TestingProfile* second_profile =
-      profile_manager_->CreateTestingProfile(kSecondProfileName);
+      profile_manager()->CreateTestingProfile(kSecondProfileName);
   InitExtensionService(second_profile);
   EXPECT_EQ(0, observer.num_updates());
   InstallExtension(keep_extension.get(), second_profile);
   EXPECT_EQ(1, observer.num_updates());
   UninstallExtension(keep_extension.get(), second_profile);
   EXPECT_EQ(2, observer.num_updates());
-  profile_manager_->DeleteTestingProfile(kSecondProfileName);
+  profile_manager()->DeleteTestingProfile(kSecondProfileName);
 }
 
 TEST_P(NoteTakingHelperTest, NotifyObserverAboutPreferredAppChanges) {
@@ -1158,7 +1241,7 @@ TEST_P(NoteTakingHelperTest, NotifyObserverAboutPreferredAppChanges) {
   // Initialize secondary profile with a test app.
   const std::string kSecondProfileName = "second-profile";
   TestingProfile* second_profile =
-      profile_manager_->CreateTestingProfile(kSecondProfileName);
+      profile_manager()->CreateTestingProfile(kSecondProfileName);
   InitExtensionService(second_profile);
   scoped_refptr<const extensions::Extension>
       second_profile_prod_keep_extension =
@@ -1180,7 +1263,7 @@ TEST_P(NoteTakingHelperTest, NotifyObserverAboutPreferredAppChanges) {
             observer.preferred_app_updates());
   observer.clear_preferred_app_updates();
 
-  profile_manager_->DeleteTestingProfile(kSecondProfileName);
+  profile_manager()->DeleteTestingProfile(kSecondProfileName);
 }
 
 TEST_P(NoteTakingHelperTest,
@@ -1203,23 +1286,23 @@ TEST_P(NoteTakingHelperTest,
   EXPECT_EQ(std::vector<Profile*>{profile()}, observer.preferred_app_updates());
   observer.clear_preferred_app_updates();
 
-  // Enable the preferred app on the lock screen.
-  EXPECT_TRUE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), true));
-  EXPECT_EQ(std::vector<Profile*>{profile()}, observer.preferred_app_updates());
-  observer.clear_preferred_app_updates();
-
-  // Enabling lock screen support for already enabled app should be no-op.
-  EXPECT_FALSE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), true));
-  EXPECT_TRUE(observer.preferred_app_updates().empty());
-
-  // Change the state of the preferred app - it should succeed, and a
-  // notification should be fired.
+  // Disable the preferred app on the lock screen.
   EXPECT_TRUE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), false));
   EXPECT_EQ(std::vector<Profile*>{profile()}, observer.preferred_app_updates());
   observer.clear_preferred_app_updates();
 
-  // No-op, becuase the preferred app state is not changing.
+  // Disabling lock screen support for already enabled app should be no-op.
   EXPECT_FALSE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), false));
+  EXPECT_TRUE(observer.preferred_app_updates().empty());
+
+  // Change the state of the preferred app - it should succeed, and a
+  // notification should be fired.
+  EXPECT_TRUE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), true));
+  EXPECT_EQ(std::vector<Profile*>{profile()}, observer.preferred_app_updates());
+  observer.clear_preferred_app_updates();
+
+  // No-op, becuase the preferred app state is not changing.
+  EXPECT_FALSE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), true));
   EXPECT_TRUE(observer.preferred_app_updates().empty());
 
   // Set an app that does not support lock screen as primary.
@@ -1229,7 +1312,7 @@ TEST_P(NoteTakingHelperTest,
 
   // Chaning state for an app that does not support lock screen note taking
   // should be no-op.
-  EXPECT_FALSE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), true));
+  EXPECT_FALSE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), false));
   EXPECT_TRUE(observer.preferred_app_updates().empty());
 }
 
@@ -1251,31 +1334,13 @@ TEST_P(NoteTakingHelperTest, SetAppEnabledOnLockScreen) {
       CreateAndInstallLockScreenAppWithPermissions(
           kUnsupportedAppId, kUnsupportedAppName, nullptr, profile());
 
-  // Enabling preffered app on lock screen should fail if there is no preferred
+  // Disabling preffered app on lock screen should fail if there is no preferred
   // app.
   EXPECT_FALSE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), true));
 
   helper()->SetPreferredApp(profile(), prod_app->id());
 
   // Setting preferred app should fire observers.
-  EXPECT_EQ(std::vector<Profile*>{profile()}, observer.preferred_app_updates());
-  observer.clear_preferred_app_updates();
-
-  // Verify that no app is enabled on lock screen.
-  EXPECT_TRUE(AvailableAppsMatch(
-      profile(),
-      {{kDevKeepAppName, NoteTakingHelper::kDevKeepExtensionId,
-        false /*preferred*/, NoteTakingLockScreenSupport::kSupported},
-       {kProdKeepAppName, NoteTakingHelper::kProdKeepExtensionId,
-        true /*preferred*/, NoteTakingLockScreenSupport::kSupported},
-       {kUnsupportedAppName, kUnsupportedAppId, false /*preferred*/,
-        NoteTakingLockScreenSupport::kNotSupported}}));
-
-  // Enabling preferred app on lock screen should succeed when the app supports
-  // lock screen..
-  EXPECT_TRUE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), true));
-
-  // Preferred app pref changed, observers should be notified.
   EXPECT_EQ(std::vector<Profile*>{profile()}, observer.preferred_app_updates());
   observer.clear_preferred_app_updates();
 
@@ -1338,7 +1403,7 @@ TEST_P(NoteTakingHelperTest, SetAppEnabledOnLockScreen) {
   // Policy with an empty whitelist - this should disallow all apps from the
   // lock screen.
   profile_prefs_->SetManagedPref(prefs::kNoteTakingAppsLockScreenWhitelist,
-                                 base::MakeUnique<base::ListValue>());
+                                 std::make_unique<base::ListValue>());
 
   // Preferred app changed notification is not expected if the preferred app is
   // not supported on lock screen.
@@ -1372,7 +1437,6 @@ TEST_P(NoteTakingHelperTest,
       CreateAndInstallLockScreenApp(NoteTakingHelper::kDevKeepExtensionId,
                                     kDevKeepAppName, profile());
   helper()->SetPreferredApp(profile(), app->id());
-  EXPECT_TRUE(helper()->SetPreferredAppEnabledOnLockScreen(profile(), true));
   observer.clear_preferred_app_updates();
   EXPECT_TRUE(AvailableAppsMatch(
       profile(),
@@ -1382,7 +1446,7 @@ TEST_P(NoteTakingHelperTest,
   // Policy with an empty whitelist - this should disallow test app from running
   // on lock screen.
   profile_prefs_->SetManagedPref(prefs::kNoteTakingAppsLockScreenWhitelist,
-                                 base::MakeUnique<base::ListValue>());
+                                 std::make_unique<base::ListValue>());
 
   // Preferred app settings changed - observers should be notified.
   EXPECT_EQ(std::vector<Profile*>{profile()}, observer.preferred_app_updates());
@@ -1417,7 +1481,7 @@ TEST_P(NoteTakingHelperTest,
                                     kDevKeepAppName, profile());
 
   profile_prefs_->SetManagedPref(prefs::kNoteTakingAppsLockScreenWhitelist,
-                                 base::MakeUnique<base::ListValue>());
+                                 std::make_unique<base::ListValue>());
   // Verify that observers are not notified of preferred app change if preferred
   // app is not set when whitelist policy changes.
   EXPECT_TRUE(observer.preferred_app_updates().empty());
@@ -1437,7 +1501,7 @@ TEST_P(NoteTakingHelperTest,
   EXPECT_TRUE(AvailableAppsMatch(
       profile(),
       {{kDevKeepAppName, NoteTakingHelper::kDevKeepExtensionId,
-        true /*preferred*/, NoteTakingLockScreenSupport::kSupported}}));
+        true /*preferred*/, NoteTakingLockScreenSupport::kEnabled}}));
 }
 
 TEST_P(NoteTakingHelperTest, LockScreenSupportInSecondaryProfile) {
@@ -1445,11 +1509,11 @@ TEST_P(NoteTakingHelperTest, LockScreenSupportInSecondaryProfile) {
   TestObserver observer;
 
   // Initialize secondary profile.
-  auto prefs = base::MakeUnique<sync_preferences::TestingPrefServiceSyncable>();
-  chrome::RegisterUserProfilePrefs(prefs->registry());
+  auto prefs = std::make_unique<sync_preferences::TestingPrefServiceSyncable>();
+  RegisterUserProfilePrefs(prefs->registry());
   sync_preferences::TestingPrefServiceSyncable* profile_prefs = prefs.get();
   const std::string kSecondProfileName = "second-profile";
-  TestingProfile* second_profile = profile_manager_->CreateTestingProfile(
+  TestingProfile* second_profile = profile_manager()->CreateTestingProfile(
       kSecondProfileName, std::move(prefs), base::ASCIIToUTF16("Test profile"),
       1 /*avatar_id*/, std::string() /*supervised_user_id*/,
       TestingProfile::TestingFactories());
@@ -1486,7 +1550,7 @@ TEST_P(NoteTakingHelperTest, LockScreenSupportInSecondaryProfile) {
 
   // Policy with an empty whitelist.
   profile_prefs->SetManagedPref(prefs::kNoteTakingAppsLockScreenWhitelist,
-                                base::MakeUnique<base::ListValue>());
+                                std::make_unique<base::ListValue>());
 
   // Changing policy should not notify observers in secondary profile.
   EXPECT_TRUE(observer.preferred_app_updates().empty());
@@ -1501,6 +1565,63 @@ TEST_P(NoteTakingHelperTest, LockScreenSupportInSecondaryProfile) {
       second_profile,
       {kProdKeepAppName, NoteTakingHelper::kProdKeepExtensionId,
        true /*preferred*/, NoteTakingLockScreenSupport::kNotSupported}));
+}
+
+TEST_P(NoteTakingHelperTest, NoteTakingControllerClient) {
+  Init(ENABLE_PALETTE);
+
+  auto has_note_taking_apps = [&]() {
+    return test_note_taking_controller()->client_attached();
+  };
+
+  EXPECT_FALSE(has_note_taking_apps());
+
+  SetNoteTakingClientProfile(profile());
+  EXPECT_FALSE(has_note_taking_apps());
+
+  scoped_refptr<const extensions::Extension> extension1 =
+      CreateExtension(NoteTakingHelper::kProdKeepExtensionId, kProdKeepAppName);
+  scoped_refptr<const extensions::Extension> extension2 =
+      CreateExtension(NoteTakingHelper::kDevKeepExtensionId, kDevKeepAppName);
+
+  InstallExtension(extension1.get(), profile());
+  EXPECT_TRUE(has_note_taking_apps());
+
+  InstallExtension(extension2.get(), profile());
+  EXPECT_TRUE(has_note_taking_apps());
+
+  UninstallExtension(extension1.get(), profile());
+  EXPECT_TRUE(has_note_taking_apps());
+
+  UninstallExtension(extension2.get(), profile());
+  EXPECT_FALSE(has_note_taking_apps());
+
+  InstallExtension(extension1.get(), profile());
+  EXPECT_TRUE(has_note_taking_apps());
+
+  const std::string kSecondProfileName = "second-profile";
+  TestingProfile* second_profile =
+      profile_manager()->CreateTestingProfile(kSecondProfileName);
+  InitExtensionService(second_profile);
+
+  SetNoteTakingClientProfile(second_profile);
+  EXPECT_FALSE(has_note_taking_apps());
+
+  InstallExtension(extension2.get(), second_profile);
+  EXPECT_TRUE(has_note_taking_apps());
+
+  SetNoteTakingClientProfile(profile());
+  EXPECT_TRUE(has_note_taking_apps());
+
+  test_note_taking_controller()->CallCreateNote();
+  ASSERT_EQ(1u, launched_chrome_apps_.size());
+  ASSERT_EQ(NoteTakingHelper::kProdKeepExtensionId,
+            launched_chrome_apps_[0].id);
+
+  UninstallExtension(extension2.get(), second_profile);
+  EXPECT_TRUE(has_note_taking_apps());
+
+  profile_manager()->DeleteTestingProfile(kSecondProfileName);
 }
 
 }  // namespace chromeos

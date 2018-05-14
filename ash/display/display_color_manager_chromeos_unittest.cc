@@ -4,21 +4,22 @@
 
 #include "ash/display/display_color_manager_chromeos.h"
 
+#include <memory>
+
 #include "base/files/file_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/pattern.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/test/scoped_path_override.h"
 #include "base/test/scoped_task_environment.h"
-#include "base/test/sequenced_worker_pool_owner.h"
 #include "chromeos/chromeos_paths.h"
 #include "components/quirks/quirks_manager.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/display/fake_display_snapshot.h"
 #include "ui/display/manager/chromeos/test/action_logger_util.h"
 #include "ui/display/manager/chromeos/test/test_native_display_delegate.h"
+#include "ui/display/manager/fake_display_snapshot.h"
 
 namespace ash {
 
@@ -103,8 +104,6 @@ class QuirksManagerDelegateTestImpl : public quirks::QuirksManager::Delegate {
 class DisplayColorManagerTest : public testing::Test {
  public:
   void SetUp() override {
-    pool_owner_.reset(
-        new base::SequencedWorkerPoolOwner(3, "DisplayColorManagerTest"));
     log_.reset(new display::test::ActionLogger());
 
     native_display_delegate_ =
@@ -114,7 +113,7 @@ class DisplayColorManagerTest : public testing::Test {
             native_display_delegate_));
 
     color_manager_ =
-        base::MakeUnique<DisplayColorManagerForTest>(&configurator_);
+        std::make_unique<DisplayColorManagerForTest>(&configurator_);
 
     EXPECT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &color_path_));
 
@@ -127,12 +126,11 @@ class DisplayColorManagerTest : public testing::Test {
     quirks::QuirksManager::Initialize(
         std::unique_ptr<quirks::QuirksManager::Delegate>(
             new QuirksManagerDelegateTestImpl(color_path_)),
-        pool_owner_->pool().get(), nullptr, nullptr);
+        nullptr, nullptr);
   }
 
   void TearDown() override {
     quirks::QuirksManager::Shutdown();
-    pool_owner_->pool()->Shutdown();
   }
 
   void WaitOnColorCalibration() {
@@ -142,11 +140,10 @@ class DisplayColorManagerTest : public testing::Test {
   }
 
   DisplayColorManagerTest() : test_api_(&configurator_) {}
-  ~DisplayColorManagerTest() override {}
+  ~DisplayColorManagerTest() override = default;
 
  protected:
   base::test::ScopedTaskEnvironment scoped_task_environment_;
-  std::unique_ptr<base::SequencedWorkerPoolOwner> pool_owner_;
   std::unique_ptr<base::ScopedPathOverride> path_override_;
   base::FilePath color_path_;
   std::unique_ptr<display::test::ActionLogger> log_;

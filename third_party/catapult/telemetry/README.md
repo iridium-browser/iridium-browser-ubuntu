@@ -13,7 +13,7 @@ and report metrics about it.  The framework abstracts:
 *   Opening a tab and navigating to the page under test.
 *   Launching an Android application with intents through ADB.
 *   Fetching data via the Inspector timeline and traces.
-*   Using [Web Page Replay](https://github.com/chromium/web-page-replay) to
+*   Using [Web Page Replay](../web_page_replay_go/README.md) to
     cache real-world websites so they don’t change when used in benchmarks.
 
 ## Design Principles
@@ -112,11 +112,9 @@ sets.
 *   [Run Telemetry benchmarks locally](/telemetry/docs/run_benchmarks_locally.md)
 *   [Record a story set](https://sites.google.com/a/chromium.org/dev/developers/telemetry/record_a_page_set)
     with Web Page Replay
-*   [Add a measurement](https://sites.google.com/a/chromium.org/dev/developers/telemetry/add_a_measurement)
 *   [Feature guidelines](https://sites.google.com/a/chromium.org/dev/developers/telemetry/telemetry-feature-guidelines)
-*   [Profiling with Telemetry](https://sites.google.com/a/chromium.org/dev/developers/telemetry/profiling)
 *   [Profile generation](https://sites.google.com/a/chromium.org/dev/developers/telemetry/telemetry-profile-generation)
-*   [Telemetry unittests](https://sites.google.com/a/chromium.org/dev/developers/telemetry/telemetry-unittests)
+*   [Telemetry unittests](/telemetry/docs/run_telemetry_tests.md)
 
 ## Contact Us or Follow Along
 

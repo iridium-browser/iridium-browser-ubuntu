@@ -27,9 +27,7 @@ CrasInputStream::CrasInputStream(const AudioParameters& params,
       stream_id_(0),
       stream_direction_(CRAS_STREAM_INPUT),
       pin_device_(NO_DEVICE),
-      is_loopback_(
-          device_id == AudioDeviceDescription::kLoopbackInputDeviceId ||
-          device_id == AudioDeviceDescription::kLoopbackWithMuteDeviceId),
+      is_loopback_(AudioDeviceDescription::IsLoopbackDevice(device_id)),
       mute_system_audio_(device_id ==
                          AudioDeviceDescription::kLoopbackWithMuteDeviceId),
       mute_done_(false) {
@@ -168,7 +166,7 @@ void CrasInputStream::Start(AudioInputCallback* callback) {
       params_.channels());
   if (!audio_format) {
     DLOG(WARNING) << "Error setting up audio parameters.";
-    callback_->OnError(this);
+    callback_->OnError();
     callback_ = NULL;
     return;
   }
@@ -187,7 +185,7 @@ void CrasInputStream::Start(AudioInputCallback* callback) {
   }
   if (cras_audio_format_set_channel_layout(audio_format, layout) != 0) {
     DLOG(WARNING) << "Error setting channel layout.";
-    callback->OnError(this);
+    callback->OnError();
     return;
   }
 
@@ -209,7 +207,7 @@ void CrasInputStream::Start(AudioInputCallback* callback) {
       audio_format);
   if (!stream_params) {
     DLOG(WARNING) << "Error setting up stream parameters.";
-    callback_->OnError(this);
+    callback_->OnError();
     callback_ = NULL;
     cras_audio_format_destroy(audio_format);
     return;
@@ -223,7 +221,7 @@ void CrasInputStream::Start(AudioInputCallback* callback) {
   if (cras_client_add_pinned_stream(client_, pin_device_, &stream_id_,
                                     stream_params)) {
     DLOG(WARNING) << "Failed to add the stream.";
-    callback_->OnError(this);
+    callback_->OnError();
     callback_ = NULL;
   }
 
@@ -288,34 +286,28 @@ void CrasInputStream::ReadAudio(size_t frames,
                                 const timespec* sample_ts) {
   DCHECK(callback_);
 
-  timespec latency_ts = {0, 0};
-
-  // Determine latency and pass that on to the sink.  sample_ts is the wall time
-  // indicating when the first sample in the buffer was captured.  Convert that
-  // to latency in bytes.
-  cras_client_calc_capture_latency(sample_ts, &latency_ts);
-  double latency_usec =
-      latency_ts.tv_sec * base::Time::kMicrosecondsPerSecond +
-      latency_ts.tv_nsec / base::Time::kNanosecondsPerMicrosecond;
-  double frames_latency =
-      latency_usec * params_.sample_rate() / base::Time::kMicrosecondsPerSecond;
-  unsigned int bytes_latency =
-      static_cast<unsigned int>(frames_latency * bytes_per_frame_);
-
   // Update the AGC volume level once every second. Note that, |volume| is
   // also updated each time SetVolume() is called through IPC by the
   // render-side AGC.
   double normalized_volume = 0.0;
   GetAgcVolume(&normalized_volume);
 
-  audio_bus_->FromInterleaved(
-      buffer, audio_bus_->frames(), params_.bits_per_sample() / 8);
-  callback_->OnData(this, audio_bus_.get(), bytes_latency, normalized_volume);
+  // Warning: It is generally unsafe to manufacture TimeTicks values; but
+  // here it is required for interfacing with cras. Assumption: cras
+  // is providing the timestamp from the CLOCK_MONOTONIC POSIX clock.
+  const base::TimeTicks capture_time =
+      base::TimeTicks() + base::TimeDelta::FromTimeSpec(*sample_ts);
+  DCHECK_EQ(base::TimeTicks::GetClock(),
+            base::TimeTicks::Clock::LINUX_CLOCK_MONOTONIC);
+
+  audio_bus_->FromInterleaved(buffer, audio_bus_->frames(),
+                              params_.bits_per_sample() / 8);
+  callback_->OnData(audio_bus_.get(), capture_time, normalized_volume);
 }
 
 void CrasInputStream::NotifyStreamError(int err) {
   if (callback_)
-    callback_->OnError(this);
+    callback_->OnError();
 }
 
 double CrasInputStream::GetMaxVolume() {

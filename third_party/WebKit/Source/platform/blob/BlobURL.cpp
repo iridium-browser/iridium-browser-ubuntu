@@ -39,7 +39,7 @@ namespace blink {
 
 const char BlobURL::kBlobProtocol[] = "blob";
 
-KURL BlobURL::CreatePublicURL(SecurityOrigin* security_origin) {
+KURL BlobURL::CreatePublicURL(const SecurityOrigin* security_origin) {
   DCHECK(security_origin);
   return CreateBlobURL(security_origin->ToString());
 }
@@ -52,15 +52,11 @@ String BlobURL::GetOrigin(const KURL& url) {
   return url.GetString().Substring(start_index, end_index - start_index - 1);
 }
 
-KURL BlobURL::CreateInternalStreamURL() {
-  return CreateBlobURL("blobinternal://");
-}
-
 KURL BlobURL::CreateBlobURL(const String& origin_string) {
   DCHECK(!origin_string.IsEmpty());
   String url_string =
       "blob:" + origin_string + '/' + CreateCanonicalUUIDString();
-  return KURL::CreateIsolated(kParsedURLString, url_string);
+  return KURL::CreateIsolated(url_string);
 }
 
 }  // namespace blink

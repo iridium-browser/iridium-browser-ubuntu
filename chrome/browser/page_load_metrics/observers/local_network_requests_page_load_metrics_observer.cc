@@ -5,7 +5,6 @@
 #include "chrome/browser/page_load_metrics/observers/local_network_requests_page_load_metrics_observer.h"
 
 #include "base/lazy_instance.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
@@ -22,11 +21,11 @@ namespace {
 // request metrics. If the enums for |DomainType|, |ResourceType|, or |PortType|
 // change, the bitwise arithmetic below must also change.
 static const int kNumNonlocalhostHistograms =
-    internal::DOMAIN_TYPE_LOCALHOST << 6 |
-    internal::RESOURCE_TYPE_LOCALHOST << 1 | true + 1;
+    ((internal::DOMAIN_TYPE_LOCALHOST << 6) |
+     (internal::RESOURCE_TYPE_LOCALHOST << 1) | 1) + 1;
 static const int kNumLocalhostHistograms =
-    internal::DOMAIN_TYPE_LOCALHOST << 5 | internal::PORT_TYPE_DEV << 1 |
-    true + 1;
+    ((internal::DOMAIN_TYPE_LOCALHOST << 5) | (internal::PORT_TYPE_DEV << 1) |
+     1) + 1;
 
 // Generates a histogram for a non-localhost resource using the values stored in
 // |counts| given a combination of domain type, resource type, and status for
@@ -45,7 +44,7 @@ void CreateHistogram(std::map<const std::string, int> counts,
   // enums for |DomainType| or |ResourceType| change, the bitwise arithmetic
   // below must also change.
   const int histogram_index =
-      domain_type << 6 | resource_type << 1 | (status ? 1 : 0);
+      (domain_type << 6) | (resource_type << 1) | (status ? 1 : 0);
   STATIC_HISTOGRAM_POINTER_GROUP(
       histogram_name, histogram_index, kNumNonlocalhostHistograms,
       Add(counts[histogram_name]),
@@ -74,7 +73,7 @@ void CreateHistogram(std::map<const std::string, int> counts,
   // enums for |DomainType| or |PortType| change, the bitwise arithmetic
   // below must also change.
   const int histogram_index =
-      domain_type << 5 | port_type << 1 | (status ? 1 : 0);
+      (domain_type << 5) | (port_type << 1) | (status ? 1 : 0);
   STATIC_HISTOGRAM_POINTER_GROUP(
       histogram_name, histogram_index, kNumLocalhostHistograms,
       Add(counts[histogram_name]),
@@ -127,7 +126,7 @@ bool GetIPAndPort(
   // itself as it might be an IP address if it is a local network request, which
   // is what we care about.
   if (!ip_exists && extra_request_info.url.is_valid()) {
-    if (net::IsLocalhost(extra_request_info.url.HostNoBrackets())) {
+    if (net::IsLocalhost(extra_request_info.url)) {
       *resource_ip = net::IPAddress::IPv4Localhost();
       ip_exists = true;
     } else {
@@ -137,7 +136,7 @@ bool GetIPAndPort(
     *resource_port = extra_request_info.url.EffectiveIntPort();
   }
 
-  if (net::IsLocalhost(resource_ip->ToString())) {
+  if (net::HostStringIsLocalhost(resource_ip->ToString())) {
     *resource_ip = net::IPAddress::IPv4Localhost();
     ip_exists = true;
   }
@@ -329,11 +328,11 @@ LocalNetworkRequestsPageLoadMetricsObserver::OnCommit(
     return STOP_OBSERVING;
   }
 
-  // |IsLocalhost| assumes (and doesn't verify) that any IPv6 address passed
-  // to it does not have square brackets around it, but |HostPortPair::host|
-  // retains the brackets, so we need to separately check for IPv6 localhost
-  // here.
-  if (net::IsLocalhost(address.host()) ||
+  // |HostStringIsLocalhost| assumes (and doesn't verify) that any IPv6 host
+  // passed to it does not have square brackets around it, but
+  // |HostPortPair::host| retains the brackets, so we need to separately check
+  // for IPv6 localhost here.
+  if (net::HostStringIsLocalhost(address.host()) ||
       page_ip_address_ == net::IPAddress::IPv6Localhost()) {
     page_domain_type_ = internal::DOMAIN_TYPE_LOCALHOST;
   } else if (page_ip_address_.IsReserved()) {
@@ -520,7 +519,7 @@ void LocalNetworkRequestsPageLoadMetricsObserver::ResolveResourceTypes() {
   }
 
   requested_resource_types_ =
-      base::MakeUnique<std::map<net::IPAddress, internal::ResourceType>>();
+      std::make_unique<std::map<net::IPAddress, internal::ResourceType>>();
   for (const auto& entry : resource_request_counts_) {
     requested_resource_types_->insert(
         {entry.first, DetermineResourceType(entry.first)});
@@ -530,7 +529,7 @@ void LocalNetworkRequestsPageLoadMetricsObserver::ResolveResourceTypes() {
 void LocalNetworkRequestsPageLoadMetricsObserver::RecordUkmMetrics(
     ukm::SourceId source_id) {
   if (page_domain_type_ == internal::DOMAIN_TYPE_LOCALHOST ||
-      g_browser_process->ukm_recorder() == nullptr) {
+      ukm::UkmRecorder::Get() == nullptr) {
     return;
   }
 
@@ -538,7 +537,7 @@ void LocalNetworkRequestsPageLoadMetricsObserver::RecordUkmMetrics(
 
   // Log an entry for each non-localhost resource (one per IP address).
   for (const auto& entry : resource_request_counts_) {
-    ukm::UkmRecorder* ukm_recorder = g_browser_process->ukm_recorder();
+    ukm::UkmRecorder* ukm_recorder = ukm::UkmRecorder::Get();
     std::unique_ptr<ukm::UkmEntryBuilder> builder =
         ukm_recorder->GetEntryBuilder(
             source_id, internal::kUkmLocalNetworkRequestsEventName);
@@ -551,7 +550,7 @@ void LocalNetworkRequestsPageLoadMetricsObserver::RecordUkmMetrics(
 
   // Log an entry for each localhost resource (one per port).
   for (const auto& entry : localhost_request_counts_) {
-    ukm::UkmRecorder* ukm_recorder = g_browser_process->ukm_recorder();
+    ukm::UkmRecorder* ukm_recorder = ukm::UkmRecorder::Get();
     std::unique_ptr<ukm::UkmEntryBuilder> builder =
         ukm_recorder->GetEntryBuilder(
             source_id, internal::kUkmLocalNetworkRequestsEventName);
@@ -566,7 +565,7 @@ void LocalNetworkRequestsPageLoadMetricsObserver::RecordUkmMetrics(
 
 void LocalNetworkRequestsPageLoadMetricsObserver::RecordUkmDomainType(
     ukm::SourceId source_id) {
-  ukm::UkmRecorder* ukm_recorder = g_browser_process->ukm_recorder();
+  ukm::UkmRecorder* ukm_recorder = ukm::UkmRecorder::Get();
   if (!ukm_recorder) {
     return;
   }

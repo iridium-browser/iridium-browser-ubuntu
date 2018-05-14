@@ -85,7 +85,7 @@ endif
 VP8_CX_SRCS-$(HAVE_SSE2) += encoder/x86/dct_sse2.asm
 VP8_CX_SRCS-$(HAVE_SSE2) += encoder/x86/fwalsh_sse2.asm
 VP8_CX_SRCS-$(HAVE_SSE2) += encoder/x86/vp8_quantize_sse2.c
-VP8_CX_SRCS-$(HAVE_SSSE3) += encoder/x86/quantize_ssse3.c
+VP8_CX_SRCS-$(HAVE_SSSE3) += encoder/x86/vp8_quantize_ssse3.c
 VP8_CX_SRCS-$(HAVE_SSE4_1) += encoder/x86/quantize_sse4.c
 
 ifeq ($(CONFIG_TEMPORAL_DENOISING),yes)
@@ -109,6 +109,9 @@ VP8_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/dct_msa.c
 VP8_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/encodeopt_msa.c
 VP8_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/quantize_msa.c
 VP8_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/temporal_filter_msa.c
+
+VP8_CX_SRCS-$(HAVE_MMI) += encoder/mips/mmi/vp8_quantize_mmi.c
+VP8_CX_SRCS-$(HAVE_MMI) += encoder/mips/mmi/dct_mmi.c
 
 ifeq ($(CONFIG_TEMPORAL_DENOISING),yes)
 VP8_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/denoising_msa.c

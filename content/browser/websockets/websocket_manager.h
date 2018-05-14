@@ -24,14 +24,20 @@ class StoragePartition;
 // WebSocketImpl objects for each WebSocketRequest and throttling the number of
 // WebSocketImpl objects in use.
 class CONTENT_EXPORT WebSocketManager
-    : NON_EXPORTED_BASE(public WebSocketImpl::Delegate),
-      NON_EXPORTED_BASE(public net::URLRequestContextGetterObserver) {
+    : public WebSocketImpl::Delegate,
+      public net::URLRequestContextGetterObserver {
  public:
-  // Called on the UI thread:
-  static void CreateWebSocket(
-      int process_id,
-      int frame_id,
-      blink::mojom::WebSocketRequest request);
+  // Called on the UI thread: create a websocket for a frame.
+  static void CreateWebSocketForFrame(int process_id,
+                                      int frame_id,
+                                      blink::mojom::WebSocketRequest request);
+
+  // Called on the UI thread: create a websocket for a worker. Web workers of
+  // any type (dedicated, shared, service worker) do not have a frame.
+  static void CreateWebSocketWithOrigin(int process_id,
+                                        url::Origin origin,
+                                        blink::mojom::WebSocketRequest request,
+                                        int frame_id = MSG_ROUTING_NONE);
 
   // net::URLRequestContextGetterObserver implementation.
   void OnContextShuttingDown() override;
@@ -46,7 +52,9 @@ class CONTENT_EXPORT WebSocketManager
   // All other methods must run on the IO thread.
 
   ~WebSocketManager() override;
-  void DoCreateWebSocket(int frame_id, blink::mojom::WebSocketRequest request);
+  void DoCreateWebSocket(int frame_id,
+                         url::Origin origin,
+                         blink::mojom::WebSocketRequest request);
   base::TimeDelta CalculateDelay() const;
   void ThrottlingPeriodTimerCallback();
 
@@ -56,18 +64,18 @@ class CONTENT_EXPORT WebSocketManager
       blink::mojom::WebSocketRequest request,
       int child_id,
       int frame_id,
+      url::Origin origin,
       base::TimeDelta delay);
 
   // WebSocketImpl::Delegate methods:
   int GetClientProcessId() override;
-  StoragePartition* GetStoragePartition() override;
+  net::URLRequestContext* GetURLRequestContext() override;
   void OnReceivedResponseFromServer(WebSocketImpl* impl) override;
   void OnLostConnectionToClient(WebSocketImpl* impl) override;
 
   void ObserveURLRequestContextGetter();
 
   int process_id_;
-  StoragePartition* storage_partition_;
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
 
   std::set<WebSocketImpl*> impls_;

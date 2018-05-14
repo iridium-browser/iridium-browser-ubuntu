@@ -12,8 +12,13 @@ import android.os.Process;
 import android.support.customtabs.CustomTabsIntent;
 import android.support.customtabs.CustomTabsSession;
 
+import org.junit.Assert;
+
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
+
+import java.util.concurrent.TimeoutException;
 
 /**
  * Utility class that contains convenience calls related with custom tabs testing.
@@ -27,7 +32,7 @@ public class CustomTabsTestUtils {
     public static Intent createMinimalCustomTabIntent(
             Context context, String url) {
         CustomTabsIntent.Builder builder = new CustomTabsIntent.Builder(
-                CustomTabsSession.createDummySessionForTesting(
+                CustomTabsSession.createMockSessionForTesting(
                         new ComponentName(context, ChromeLauncherActivity.class)));
         CustomTabsIntent customTabsIntent = builder.build();
         Intent intent = customTabsIntent.intent;
@@ -50,5 +55,25 @@ public class CustomTabsTestUtils {
                 connection.cleanupAll();
             }
         });
+    }
+
+    /** Calls warmup() and waits for all the tasks to complete. Fails the test otherwise. */
+    public static CustomTabsConnection warmUpAndWait()
+            throws InterruptedException, TimeoutException {
+        CustomTabsConnection connection = setUpConnection();
+        try {
+            final CallbackHelper startupCallbackHelper = new CallbackHelper();
+            connection.setWarmupCompletedCallbackForTesting(new Runnable() {
+                @Override
+                public void run() {
+                    startupCallbackHelper.notifyCalled();
+                }
+            });
+            Assert.assertTrue(connection.warmup(0));
+            startupCallbackHelper.waitForCallback(0);
+        } finally {
+            connection.setWarmupCompletedCallbackForTesting(null);
+        }
+        return connection;
     }
 }

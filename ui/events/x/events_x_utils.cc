@@ -6,11 +6,6 @@
 
 #include <stddef.h>
 #include <string.h>
-#include <X11/extensions/XInput.h>
-#include <X11/extensions/XInput2.h>
-#include <X11/XKBlib.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
 #include <cmath>
 
 #include "base/logging.h"
@@ -27,6 +22,7 @@
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/x/x11.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 
 namespace {
@@ -639,6 +635,7 @@ int GetChangedMouseButtonFlagsFromXEvent(const XEvent& xev) {
         default:
           break;
       }
+      break;
     }
     default:
       break;
@@ -743,6 +740,13 @@ float GetTouchForceFromXEvent(const XEvent& xev) {
   return force;
 }
 
+EventPointerType GetTouchPointerTypeFromXEvent(const XEvent& xev) {
+  XIDeviceEvent* event = static_cast<XIDeviceEvent*>(xev.xcookie.data);
+  DCHECK(ui::TouchFactory::GetInstance()->IsTouchDevice(event->sourceid));
+  return ui::TouchFactory::GetInstance()->GetTouchDevicePointerType(
+      event->sourceid);
+}
+
 bool GetScrollOffsetsFromXEvent(const XEvent& xev,
                                 float* x_offset,
                                 float* y_offset,
@@ -811,11 +815,13 @@ bool GetFlingDataFromXEvent(const XEvent& xev,
   return true;
 }
 
-void ResetTimestampRolloverCountersForTesting(
-    std::unique_ptr<base::TickClock> tick_clock) {
+bool IsAltPressed() {
+  return XModifierStateWatcher::GetInstance()->state() & Mod1Mask;
+}
+
+void ResetTimestampRolloverCountersForTesting() {
   g_last_seen_timestamp_ms = 0;
   g_rollover_ms = 0;
-  SetEventTickClockForTesting(std::move(tick_clock));
 }
 
 }  // namespace ui

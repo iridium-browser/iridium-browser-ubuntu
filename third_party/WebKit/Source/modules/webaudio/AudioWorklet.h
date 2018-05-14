@@ -11,23 +11,64 @@
 
 namespace blink {
 
-class LocalFrame;
+class AudioWorkletHandler;
+class AudioWorkletMessagingProxy;
+class BaseAudioContext;
+class CrossThreadAudioParamInfo;
+class MessagePortChannel;
+class SerializedScriptValue;
 
 class MODULES_EXPORT AudioWorklet final : public Worklet {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(AudioWorklet);
   WTF_MAKE_NONCOPYABLE(AudioWorklet);
 
  public:
-  static AudioWorklet* Create(LocalFrame*);
-  ~AudioWorklet() override;
+  // When the AudioWorklet runtime flag is not enabled, this constructor returns
+  // |nullptr|.
+  static AudioWorklet* Create(BaseAudioContext*);
 
-  DECLARE_VIRTUAL_TRACE();
+  ~AudioWorklet() = default;
+
+  void CreateProcessor(AudioWorkletHandler*,
+                       MessagePortChannel,
+                       scoped_refptr<SerializedScriptValue> node_options);
+
+  // Invoked by AudioWorkletMessagingProxy. Notifies |context_| when
+  // AudioWorkletGlobalScope finishes the first script evaluation and is ready
+  // for the worklet operation. Can be used for other post-evaluation tasks
+  // in AudioWorklet or BaseAudioContext.
+  void NotifyGlobalScopeIsUpdated();
+
+  WebThread* GetBackingThread();
+
+  BaseAudioContext* GetBaseAudioContext() const;
+
+  // Returns |nullptr| if there is no active WorkletGlobalScope().
+  AudioWorkletMessagingProxy* GetMessagingProxy();
+
+  const Vector<CrossThreadAudioParamInfo> GetParamInfoListForProcessor(
+      const String& name);
+
+  bool IsProcessorRegistered(const String& name);
+
+  // Returns |true| when a AudioWorkletMessagingProxy and a WorkletBackingThread
+  // are ready.
+  bool IsReady();
+
+  void Trace(blink::Visitor*) override;
 
  private:
-  explicit AudioWorklet(LocalFrame*);
+  explicit AudioWorklet(BaseAudioContext*);
 
-  // Implements Worklet.
+  // Implements Worklet
   bool NeedsToCreateGlobalScope() final;
   WorkletGlobalScopeProxy* CreateGlobalScope() final;
+
+  // To catch the first global scope update and notify the context.
+  bool worklet_started_ = false;
+
+  Member<BaseAudioContext> context_;
 };
 
 }  // namespace blink

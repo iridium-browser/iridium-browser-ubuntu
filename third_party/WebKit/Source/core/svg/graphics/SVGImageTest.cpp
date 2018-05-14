@@ -15,6 +15,7 @@
 #include "platform/graphics/paint/PaintFlags.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/wtf/PtrUtil.h"
+#include "public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/utils/SkNullCanvas.h"
@@ -31,14 +32,14 @@ class SVGImageTest : public ::testing::Test {
   }
 
   void PumpFrame() {
-    Image* image = image_.Get();
+    Image* image = image_.get();
     std::unique_ptr<SkCanvas> null_canvas = SkMakeNullCanvas();
     SkiaPaintCanvas canvas(null_canvas.get());
     PaintFlags flags;
     FloatRect dummy_rect(0, 0, 100, 100);
     image->Draw(&canvas, flags, dummy_rect, dummy_rect,
                 kDoNotRespectImageOrientation,
-                Image::kDoNotClampImageToSourceRect);
+                Image::kDoNotClampImageToSourceRect, Image::kSyncDecode);
   }
 
  private:
@@ -60,13 +61,15 @@ class SVGImageTest : public ::testing::Test {
 
     void AsyncLoadCompleted(const blink::Image*) override {}
 
-    DEFINE_INLINE_VIRTUAL_TRACE() { ImageObserver::Trace(visitor); }
+    virtual void Trace(blink::Visitor* visitor) {
+      ImageObserver::Trace(visitor);
+    }
 
    private:
     bool should_pause_;
   };
   Persistent<PauseControlImageObserver> observer_;
-  RefPtr<SVGImage> image_;
+  scoped_refptr<SVGImage> image_;
 };
 
 const char kAnimatedDocument[] =
@@ -91,8 +94,10 @@ TEST_F(SVGImageTest, TimelineSuspendAndResume) {
   const bool kShouldPause = true;
   Load(kAnimatedDocument, kShouldPause);
   SVGImageChromeClient& chrome_client = GetImage().ChromeClientForTesting();
-  Timer<SVGImageChromeClient>* timer = new Timer<SVGImageChromeClient>(
-      &chrome_client, &SVGImageChromeClient::AnimationTimerFired);
+  TaskRunnerTimer<SVGImageChromeClient>* timer =
+      new TaskRunnerTimer<SVGImageChromeClient>(
+          scheduler::GetSingleThreadTaskRunnerForTesting(), &chrome_client,
+          &SVGImageChromeClient::AnimationTimerFired);
   chrome_client.SetTimer(WTF::WrapUnique(timer));
 
   // Simulate a draw. Cause a frame (timer) to be scheduled.
@@ -118,8 +123,10 @@ TEST_F(SVGImageTest, ResetAnimation) {
   const bool kShouldPause = false;
   Load(kAnimatedDocument, kShouldPause);
   SVGImageChromeClient& chrome_client = GetImage().ChromeClientForTesting();
-  Timer<SVGImageChromeClient>* timer = new Timer<SVGImageChromeClient>(
-      &chrome_client, &SVGImageChromeClient::AnimationTimerFired);
+  TaskRunnerTimer<SVGImageChromeClient>* timer =
+      new TaskRunnerTimer<SVGImageChromeClient>(
+          scheduler::GetSingleThreadTaskRunnerForTesting(), &chrome_client,
+          &SVGImageChromeClient::AnimationTimerFired);
   chrome_client.SetTimer(WTF::WrapUnique(timer));
 
   // Simulate a draw. Cause a frame (timer) to be scheduled.

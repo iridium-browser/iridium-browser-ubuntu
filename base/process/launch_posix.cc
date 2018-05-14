@@ -38,8 +38,6 @@
 #include "base/process/process_metrics.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/third_party/dynamic_annotations/dynamic_annotations.h"
-#include "base/third_party/valgrind/valgrind.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -67,6 +65,13 @@ extern char** environ;
 #endif
 
 namespace base {
+
+// Friend and derived class of ScopedAllowBaseSyncPrimitives which allows
+// GetAppOutputInternal() to join a process. GetAppOutputInternal() can't itself
+// be a friend of ScopedAllowBaseSyncPrimitives because it is in the anonymous
+// namespace.
+class GetAppOutputScopedAllowBaseSyncPrimitives
+    : public base::ScopedAllowBaseSyncPrimitives {};
 
 #if !defined(OS_NACL_NONSFI)
 
@@ -163,7 +168,7 @@ int sys_rt_sigaction(int sig, const struct kernel_sigaction* act,
 // See crbug.com/177956.
 void ResetChildSignalHandlersToDefaults(void) {
   for (int signum = 1; ; ++signum) {
-    struct kernel_sigaction act = {0};
+    struct kernel_sigaction act = {nullptr};
     int sigaction_get_ret = sys_rt_sigaction(signum, nullptr, &act);
     if (sigaction_get_ret && errno == EINVAL) {
 #if !defined(NDEBUG)
@@ -280,14 +285,8 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
     if (fd == dir_fd)
       continue;
 
-    // When running under Valgrind, Valgrind opens several FDs for its
-    // own use and will complain if we try to close them.  All of
-    // these FDs are >= |max_fds|, so we can check against that here
-    // before closing.  See https://bugs.kde.org/show_bug.cgi?id=191758
-    if (fd < static_cast<int>(max_fds)) {
-      int ret = IGNORE_EINTR(close(fd));
-      DPCHECK(ret == 0);
-    }
+    int ret = IGNORE_EINTR(close(fd));
+    DPCHECK(ret == 0);
   }
 }
 
@@ -307,15 +306,10 @@ Process LaunchProcess(const std::vector<std::string>& argv,
   }
 #endif
 
-  size_t fd_shuffle_size = 0;
-  if (options.fds_to_remap) {
-    fd_shuffle_size = options.fds_to_remap->size();
-  }
-
   InjectiveMultimap fd_shuffle1;
   InjectiveMultimap fd_shuffle2;
-  fd_shuffle1.reserve(fd_shuffle_size);
-  fd_shuffle2.reserve(fd_shuffle_size);
+  fd_shuffle1.reserve(options.fds_to_remap.size());
+  fd_shuffle2.reserve(options.fds_to_remap.size());
 
   std::vector<char*> argv_cstr;
   argv_cstr.reserve(argv.size() + 1);
@@ -455,14 +449,12 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     }
 #endif  // defined(OS_CHROMEOS)
 
-    if (options.fds_to_remap) {
-      // Cannot use STL iterators here, since debug iterators use locks.
-      for (size_t i = 0; i < options.fds_to_remap->size(); ++i) {
-        const FileHandleMappingVector::value_type& value =
-            (*options.fds_to_remap)[i];
-        fd_shuffle1.push_back(InjectionArc(value.first, value.second, false));
-        fd_shuffle2.push_back(InjectionArc(value.first, value.second, false));
-      }
+    // Cannot use STL iterators here, since debug iterators use locks.
+    for (size_t i = 0; i < options.fds_to_remap.size(); ++i) {
+      const FileHandleMappingVector::value_type& value =
+          options.fds_to_remap[i];
+      fd_shuffle1.push_back(InjectionArc(value.first, value.second, false));
+      fd_shuffle2.push_back(InjectionArc(value.first, value.second, false));
     }
 
     if (!options.environ.empty() || options.clear_environ)
@@ -516,8 +508,8 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     if (options.wait) {
       // While this isn't strictly disk IO, waiting for another process to
       // finish is the sort of thing ThreadRestrictions is trying to prevent.
-      base::ThreadRestrictions::AssertIOAllowed();
-      pid_t ret = HANDLE_EINTR(waitpid(pid, 0, 0));
+      base::AssertBlockingAllowed();
+      pid_t ret = HANDLE_EINTR(waitpid(pid, nullptr, 0));
       DPCHECK(ret > 0);
     }
   }
@@ -547,8 +539,7 @@ static bool GetAppOutputInternal(
     std::string* output,
     bool do_search_path,
     int* exit_code) {
-  // Doing a blocking wait for another command to finish counts as IO.
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   // exit_code must be supplied so calling function can determine success.
   DCHECK(exit_code);
   *exit_code = EXIT_FAILURE;
@@ -645,6 +636,9 @@ static bool GetAppOutputInternal(
       // Always wait for exit code (even if we know we'll declare
       // GOT_MAX_OUTPUT).
       Process process(pid);
+      // A process launched with GetAppOutput*() usually doesn't wait on the
+      // process that launched it and thus chances of deadlock are low.
+      GetAppOutputScopedAllowBaseSyncPrimitives allow_base_sync_primitives;
       return process.WaitForExit(exit_code);
     }
   }
@@ -691,10 +685,6 @@ bool GetAppOutputWithExitCode(const CommandLine& cl,
 #if defined(OS_LINUX) || defined(OS_NACL_NONSFI) || defined(OS_AIX)
 namespace {
 
-bool IsRunningOnValgrind() {
-  return RUNNING_ON_VALGRIND;
-}
-
 // This function runs on the stack specified on the clone call. It uses longjmp
 // to switch back to the original stack so the child can return from sys_clone.
 int CloneHelper(void* arg) {
@@ -727,8 +717,9 @@ NOINLINE pid_t CloneAndLongjmpInChild(unsigned long flags,
   // specifying a new stack, so we use setjmp/longjmp to emulate
   // fork-like behavior.
   alignas(16) char stack_buf[PTHREAD_STACK_MIN];
-#if defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARM_FAMILY) || \
-    defined(ARCH_CPU_MIPS_FAMILY)
+#if defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARM_FAMILY) ||   \
+    defined(ARCH_CPU_MIPS_FAMILY) || defined(ARCH_CPU_S390_FAMILY) || \
+    defined(ARCH_CPU_PPC64_FAMILY)
   // The stack grows downward.
   void* stack = stack_buf + sizeof(stack_buf);
 #else
@@ -750,24 +741,6 @@ pid_t ForkWithFlags(unsigned long flags, pid_t* ptid, pid_t* ctid) {
 
   if (clone_tls_used || invalid_ctid || invalid_ptid || clone_vm_used) {
     RAW_LOG(FATAL, "Invalid usage of ForkWithFlags");
-  }
-
-  // Valgrind's clone implementation does not support specifiying a child_stack
-  // without CLONE_VM, so we cannot use libc's clone wrapper when running under
-  // Valgrind. As a result, the libc pid cache may be incorrect under Valgrind.
-  // See crbug.com/442817 for more details.
-  if (IsRunningOnValgrind()) {
-    // See kernel/fork.c in Linux. There is different ordering of sys_clone
-    // parameters depending on CONFIG_CLONE_BACKWARDS* configuration options.
-#if defined(ARCH_CPU_X86_64)
-    return syscall(__NR_clone, flags, nullptr, ptid, ctid, nullptr);
-#elif defined(ARCH_CPU_X86) || defined(ARCH_CPU_ARM_FAMILY) || \
-    defined(ARCH_CPU_MIPS_FAMILY)
-    // CONFIG_CLONE_BACKWARDS defined.
-    return syscall(__NR_clone, flags, nullptr, ptid, nullptr, ctid);
-#else
-#error "Unsupported architecture"
-#endif
   }
 
   jmp_buf env;

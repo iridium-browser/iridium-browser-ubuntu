@@ -6,7 +6,7 @@
 #define VRFrameData_h
 
 #include "core/typed_arrays/DOMTypedArray.h"
-#include "device/vr/vr_service.mojom-blink.h"
+#include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
@@ -16,8 +16,7 @@ namespace blink {
 class VREyeParameters;
 class VRPose;
 
-class VRFrameData final : public GarbageCollected<VRFrameData>,
-                          public ScriptWrappable {
+class VRFrameData final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -44,7 +43,7 @@ class VRFrameData final : public GarbageCollected<VRFrameData>,
               float depth_near,
               float depth_far);
 
-  DECLARE_VIRTUAL_TRACE()
+  void Trace(blink::Visitor*) override;
 
  private:
   Member<DOMFloat32Array> left_projection_matrix_;

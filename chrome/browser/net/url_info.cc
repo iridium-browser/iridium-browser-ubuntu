@@ -20,7 +20,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 
-using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
 
@@ -130,27 +129,12 @@ void UrlInfo::SetAssignedState() {
   state_ = ASSIGNED;
   queue_duration_ = GetDuration();
   DLogResultsStats("DNS Prefetch assigned");
-  UMA_HISTOGRAM_TIMES("DNS.PrefetchQueue", queue_duration_);
 }
 
 void UrlInfo::RemoveFromQueue() {
   DCHECK(ASSIGNED == state_);
   state_ = old_prequeue_state_;
   DLogResultsStats("DNS Prefetch reset to prequeue");
-  const TimeDelta kBoundary = TimeDelta::FromSeconds(2);
-  if (queue_duration_ > kBoundary) {
-    UMA_HISTOGRAM_MEDIUM_TIMES("DNS.QueueRecycledDeltaOver2",
-                               queue_duration_ - kBoundary);
-    return;
-  }
-  // Make a custom linear histogram for the region from 0 to boundary.
-  static const size_t kBucketCount = 52;
-  static base::HistogramBase* histogram(NULL);
-  if (!histogram)
-    histogram = base::LinearHistogram::FactoryTimeGet(
-        "DNS.QueueRecycledUnder2", TimeDelta(), kBoundary, kBucketCount,
-        base::HistogramBase::kUmaTargetedHistogramFlag);
-  histogram->AddTime(queue_duration_);
 }
 
 void UrlInfo::SetPendingDeleteState() {
@@ -159,7 +143,7 @@ void UrlInfo::SetPendingDeleteState() {
 }
 
 void UrlInfo::SetFoundState() {
-  DCHECK(ASSIGNED == state_);
+  DCHECK(ASSIGNED == state_ || ASSIGNED_BUT_MARKED == state_);
   state_ = FOUND;
   resolve_duration_ = GetDuration();
   const TimeDelta max_duration = MaxNonNetworkDnsLookupDuration();
@@ -172,7 +156,7 @@ void UrlInfo::SetFoundState() {
 }
 
 void UrlInfo::SetNoSuchNameState() {
-  DCHECK(ASSIGNED == state_);
+  DCHECK(ASSIGNED == state_ || ASSIGNED_BUT_MARKED == state_);
   state_ = NO_SUCH_NAME;
   resolve_duration_ = GetDuration();
 #ifndef NDEBUG
@@ -368,10 +352,10 @@ std::string UrlInfo::GetAsciiMotivation() const {
       return "n/a";
 
     case STATIC_REFERAL_MOTIVATED:
-      return RemoveJs(referring_url_.spec()) + "*";
+      return "[static referal]";
 
     case LEARNED_REFERAL_MOTIVATED:
-      return RemoveJs(referring_url_.spec());
+      return "[learned referal]";
 
     default:
       return std::string();

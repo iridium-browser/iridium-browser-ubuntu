@@ -8,7 +8,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Screen.h"
 #include "core/page/PageVisibilityState.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace blink {
@@ -30,19 +30,17 @@ void ScreenWakeLock::setKeepAwake(Screen& screen, bool keep_awake) {
 }
 
 // static
-const char* ScreenWakeLock::SupplementName() {
-  return "ScreenWakeLock";
-}
+const char ScreenWakeLock::kSupplementName[] = "ScreenWakeLock";
 
 // static
 ScreenWakeLock* ScreenWakeLock::From(LocalFrame* frame) {
   if (!RuntimeEnabledFeatures::WakeLockEnabled())
     return nullptr;
-  ScreenWakeLock* supplement = static_cast<ScreenWakeLock*>(
-      Supplement<LocalFrame>::From(frame, SupplementName()));
+  ScreenWakeLock* supplement =
+      Supplement<LocalFrame>::From<ScreenWakeLock>(frame);
   if (!supplement) {
     supplement = new ScreenWakeLock(*frame);
-    Supplement<LocalFrame>::ProvideTo(*frame, SupplementName(), supplement);
+    ProvideTo(*frame, supplement);
   }
   return supplement;
 }
@@ -55,7 +53,7 @@ void ScreenWakeLock::ContextDestroyed(ExecutionContext*) {
   setKeepAwake(false);
 }
 
-DEFINE_TRACE(ScreenWakeLock) {
+void ScreenWakeLock::Trace(blink::Visitor* visitor) {
   Supplement<LocalFrame>::Trace(visitor);
   PageVisibilityObserver::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);

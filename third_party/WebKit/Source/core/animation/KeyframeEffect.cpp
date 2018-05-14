@@ -30,9 +30,8 @@
 
 #include "core/animation/KeyframeEffect.h"
 
-#include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/UnrestrictedDoubleOrKeyframeEffectOptions.h"
+#include "bindings/core/v8/unrestricted_double_or_keyframe_effect_options.h"
 #include "core/animation/AnimationEffectTiming.h"
 #include "core/animation/EffectInput.h"
 #include "core/animation/KeyframeEffectOptions.h"
@@ -40,12 +39,13 @@
 #include "core/animation/TimingInput.h"
 #include "core/dom/Element.h"
 #include "core/frame/UseCounter.h"
+#include "platform/runtime_enabled_features.h"
 
 namespace blink {
 
 KeyframeEffect* KeyframeEffect::Create(
     Element* target,
-    EffectModel* model,
+    KeyframeEffectModelBase* model,
     const Timing& timing,
     KeyframeEffectReadOnly::Priority priority,
     EventDelegate* event_delegate) {
@@ -53,9 +53,9 @@ KeyframeEffect* KeyframeEffect::Create(
 }
 
 KeyframeEffect* KeyframeEffect::Create(
-    ExecutionContext* execution_context,
+    ScriptState* script_state,
     Element* element,
-    const DictionarySequenceOrDictionary& effect_input,
+    const ScriptValue& keyframes,
     const UnrestrictedDoubleOrKeyframeEffectOptions& options,
     ExceptionState& exception_state) {
   DCHECK(RuntimeEnabledFeatures::WebAnimationsAPIEnabled());
@@ -68,37 +68,84 @@ KeyframeEffect* KeyframeEffect::Create(
   Document* document = element ? &element->GetDocument() : nullptr;
   if (!TimingInput::Convert(options, timing, document, exception_state))
     return nullptr;
-  return Create(element,
-                EffectInput::Convert(element, effect_input, execution_context,
-                                     exception_state),
-                timing);
+
+  EffectModel::CompositeOperation composite = EffectModel::kCompositeReplace;
+  if (options.IsKeyframeEffectOptions()) {
+    composite = EffectModel::StringToCompositeOperation(
+        options.GetAsKeyframeEffectOptions().composite());
+  }
+
+  KeyframeEffectModelBase* model = EffectInput::Convert(
+      element, keyframes, composite, script_state, exception_state);
+  if (exception_state.HadException())
+    return nullptr;
+  return Create(element, model, timing);
 }
 
-KeyframeEffect* KeyframeEffect::Create(
-    ExecutionContext* execution_context,
-    Element* element,
-    const DictionarySequenceOrDictionary& effect_input,
-    ExceptionState& exception_state) {
+KeyframeEffect* KeyframeEffect::Create(ScriptState* script_state,
+                                       Element* element,
+                                       const ScriptValue& keyframes,
+                                       ExceptionState& exception_state) {
   DCHECK(RuntimeEnabledFeatures::WebAnimationsAPIEnabled());
   if (element) {
     UseCounter::Count(
         element->GetDocument(),
         WebFeature::kAnimationConstructorKeyframeListEffectNoTiming);
   }
-  return Create(element,
-                EffectInput::Convert(element, effect_input, execution_context,
-                                     exception_state),
-                Timing());
+  KeyframeEffectModelBase* model =
+      EffectInput::Convert(element, keyframes, EffectModel::kCompositeReplace,
+                           script_state, exception_state);
+  if (exception_state.HadException())
+    return nullptr;
+  return Create(element, model, Timing());
+}
+
+KeyframeEffect* KeyframeEffect::Create(ScriptState* script_state,
+                                       KeyframeEffectReadOnly* source,
+                                       ExceptionState& exception_state) {
+  Timing new_timing = source->SpecifiedTiming();
+  KeyframeEffectModelBase* model = source->Model()->Clone();
+  return new KeyframeEffect(source->target(), model, new_timing,
+                            source->GetPriority(), source->GetEventDelegate());
 }
 
 KeyframeEffect::KeyframeEffect(Element* target,
-                               EffectModel* model,
+                               KeyframeEffectModelBase* model,
                                const Timing& timing,
                                KeyframeEffectReadOnly::Priority priority,
                                EventDelegate* event_delegate)
     : KeyframeEffectReadOnly(target, model, timing, priority, event_delegate) {}
 
-KeyframeEffect::~KeyframeEffect() {}
+KeyframeEffect::~KeyframeEffect() = default;
+
+void KeyframeEffect::setComposite(String composite_string) {
+  Model()->SetComposite(
+      EffectModel::StringToCompositeOperation(composite_string));
+}
+
+void KeyframeEffect::setKeyframes(ScriptState* script_state,
+                                  const ScriptValue& keyframes,
+                                  ExceptionState& exception_state) {
+  // TODO(crbug.com/799061): Support TransitionKeyframeEffectModel. This will
+  // require a lot of work as the setKeyframes API can mutate a transition
+  // Animation into a 'normal' one with multiple properties.
+  if (!Model()->IsStringKeyframeEffectModel()) {
+    exception_state.ThrowDOMException(
+        kNotSupportedError,
+        "Calling setKeyframes on CSS Transitions is not yet supported");
+    return;
+  }
+
+  StringKeyframeVector new_keyframes = EffectInput::ParseKeyframesArgument(
+      target(), keyframes, script_state, exception_state);
+  if (exception_state.HadException())
+    return;
+
+  Model()->SetComposite(EffectInput::ResolveCompositeOperation(
+      Model()->Composite(), new_keyframes));
+
+  ToStringKeyframeEffectModel(Model())->SetFrames(new_keyframes);
+}
 
 AnimationEffectTiming* KeyframeEffect::timing() {
   return AnimationEffectTiming::Create(this);

@@ -10,9 +10,8 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -20,7 +19,7 @@
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "chrome/common/env_vars.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
-#include "components/safe_browsing_db/util.h"
+#include "components/safe_browsing/db/util.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/google_api_keys.h"
@@ -95,7 +94,7 @@ constexpr net::NetworkTrafficAnnotationTag
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: true
+          cookies_allowed: YES
           cookies_store: "Safe Browsing cookie store"
           setting:
             "Users can disable Safe Browsing by unchecking 'Protect you and "
@@ -217,7 +216,7 @@ void SafeBrowsingProtocolManager::RecordHttpResponseOrErrorCode(
     const char* metric_name,
     const net::URLRequestStatus& status,
     int response_code) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY(
+  base::UmaHistogramSparse(
       metric_name, status.is_success() ? response_code : status.error());
 }
 
@@ -270,7 +269,7 @@ void SafeBrowsingProtocolManager::GetFullHash(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: true
+          cookies_allowed: YES
           cookies_store: "Safe Browsing cookie store"
           setting:
             "Users can disable Safe Browsing by unchecking 'Protect you and "
@@ -670,7 +669,7 @@ bool SafeBrowsingProtocolManager::IssueBackupUpdateRequest(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: true
+          cookies_allowed: YES
           cookies_store: "Safe Browsing cookie store"
           setting:
             "Users can disable Safe Browsing by unchecking 'Protect you and "

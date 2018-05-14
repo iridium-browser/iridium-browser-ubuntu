@@ -6,7 +6,7 @@
 
 #include "core/frame/Settings.h"
 #include "core/loader/EmptyClients.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/testing/PageTestBase.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,23 +26,16 @@ class ProgressClient : public EmptyLocalFrameClient {
   double last_progress_;
 };
 
-class ProgressTrackerTest : public ::testing::Test {
+class ProgressTrackerTest : public PageTestBase {
  public:
   ProgressTrackerTest()
-      : response_(KURL(kParsedURLString, "http://example.com"),
-                  "text/html",
-                  1024,
-                  g_null_atom) {}
+      : response_(KURL("http://example.com"), "text/html", 1024) {}
 
   void SetUp() override {
     client_ = new ProgressClient;
-    dummy_page_holder_ =
-        DummyPageHolder::Create(IntSize(800, 600), nullptr, client_.Get());
-    GetFrame().GetSettings()->SetProgressBarCompletion(
-        ProgressBarCompletion::kResourcesBeforeDCL);
+    PageTestBase::SetupPageWithClients(nullptr, client_.Get());
   }
 
-  LocalFrame& GetFrame() const { return dummy_page_holder_->GetFrame(); }
   ProgressTracker& Progress() const { return GetFrame().Loader().Progress(); }
   double LastProgress() const { return client_->LastProgress(); }
   const ResourceResponse& ResponseHeaders() const { return response_; }
@@ -52,7 +45,7 @@ class ProgressTrackerTest : public ::testing::Test {
   // emulating payload and load completion.
   void EmulateMainResourceRequestAndResponse() const {
     Progress().ProgressStarted(kFrameLoadTypeStandard);
-    Progress().WillStartLoading(1ul, kResourceLoadPriorityVeryHigh);
+    Progress().WillStartLoading(1ul, ResourceLoadPriority::kVeryHigh);
     EXPECT_EQ(0.0, LastProgress());
     Progress().IncrementProgress(1ul, ResponseHeaders());
     EXPECT_EQ(0.0, LastProgress());
@@ -60,7 +53,6 @@ class ProgressTrackerTest : public ::testing::Test {
 
  private:
   Persistent<ProgressClient> client_;
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
   ResourceResponse response_;
 };
 
@@ -90,7 +82,7 @@ TEST_F(ProgressTrackerTest, MainResourceOnly) {
 TEST_F(ProgressTrackerTest, WithHighPriorirySubresource) {
   EmulateMainResourceRequestAndResponse();
 
-  Progress().WillStartLoading(2ul, kResourceLoadPriorityHigh);
+  Progress().WillStartLoading(2ul, ResourceLoadPriority::kHigh);
   Progress().IncrementProgress(2ul, ResponseHeaders());
   EXPECT_EQ(0.0, LastProgress());
 
@@ -112,7 +104,7 @@ TEST_F(ProgressTrackerTest, WithHighPriorirySubresource) {
 TEST_F(ProgressTrackerTest, WithMediumPrioritySubresource) {
   EmulateMainResourceRequestAndResponse();
 
-  Progress().WillStartLoading(2ul, kResourceLoadPriorityMedium);
+  Progress().WillStartLoading(2ul, ResourceLoadPriority::kMedium);
   Progress().IncrementProgress(2ul, ResponseHeaders());
   EXPECT_EQ(0.0, LastProgress());
 

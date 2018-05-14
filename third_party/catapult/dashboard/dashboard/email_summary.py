@@ -5,6 +5,7 @@
 """Send alert summary emails to sheriffs on duty."""
 
 import datetime
+import logging
 import sys
 
 from google.appengine.api import mail
@@ -17,8 +18,9 @@ from dashboard.models import sheriff
 
 # The string to use as the header in an alert summary email.
 _EMAIL_HTML_TOTAL_ANOMALIES = """
-<br><b><u>%d Total Anomalies</b></u><br>
-<b>+++++++++++++++++++++++++++++++</b><br>
+<br><b>%d total performance regressions were found.</b><br>
+<br>
+To triage:
 """
 
 _EMAIL_SUBJECT = '%s: %d anomalies found at %d:%d.'
@@ -65,10 +67,14 @@ def _SendSummaryEmail(sheriff_entity, start_time):
   """
   receivers = email_template.GetSheriffEmails(sheriff_entity)
   anomalies = _RecentUntriagedAnomalies(sheriff_entity, start_time)
+  logging.info('_SendSummaryEmail: %s', str(sheriff_entity.key))
+  logging.info(' - receivers: %s', str(receivers))
+  logging.info(' - anomalies: %d', len(anomalies))
   if not anomalies:
     return
   subject = _EmailSubject(sheriff_entity, anomalies)
-  html, text = _EmailBody(anomalies)
+  html, text = _EmailBody(anomalies, sheriff_entity.key.string_id())
+  logging.info(' - body: %s', text)
   mail.send_mail(
       sender='gasper-alerts@google.com', to=receivers,
       subject=subject, body=text, html=html)
@@ -102,22 +108,14 @@ def _MaximalRevisionRange(anomalies):
   return lowest_revision, highest_revision
 
 
-def _EmailBody(anomalies):
+def _EmailBody(anomalies, sheriff_name):
   """Returns the html and text versions of the email body."""
   assert anomalies
   html_body = []
   text_body = []
   html_body.append(_EMAIL_HTML_TOTAL_ANOMALIES % len(anomalies))
 
-  anomaly_info = {}
-  for anomaly_entity in anomalies:
-    test = anomaly_entity.GetTestMetadataKey().get()
-    anomaly_info = email_template.GetAlertInfo(anomaly_entity, test)
-    html_body.append(anomaly_info['email_html'])
-    text_body.append(anomaly_info['email_text'])
-
-  assert anomaly_info
-  html_body.append(anomaly_info['alerts_link'])
+  html_body.append(email_template.GetAlertsLink(sheriff_name))
 
   # Join details for all anomalies to generate e-mail body.
   html = ''.join(html_body)

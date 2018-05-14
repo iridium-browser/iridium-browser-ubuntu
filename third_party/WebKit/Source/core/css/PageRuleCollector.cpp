@@ -31,7 +31,7 @@
 #include "core/css/PageRuleCollector.h"
 
 #include <algorithm>
-#include "core/css/StylePropertySet.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/StyleRule.h"
 #include "core/style/ComputedStyle.h"
 
@@ -95,7 +95,8 @@ static bool CheckPageSelectorComponents(const CSSSelector* selector,
        component = component->TagHistory()) {
     if (component->Match() == CSSSelector::kTag) {
       const AtomicString& local_name = component->TagQName().LocalName();
-      if (local_name != g_star_atom && local_name != page_name)
+      DCHECK_NE(local_name, CSSSelector::UniversalSelectorAtom());
+      if (local_name != page_name)
         return false;
     }
 
@@ -123,7 +124,7 @@ void PageRuleCollector::MatchPageRulesForList(
       continue;
 
     // If the rule has no properties to apply, then ignore it.
-    const StylePropertySet& properties = rule->Properties();
+    const CSSPropertyValueSet& properties = rule->Properties();
     if (properties.IsEmpty())
       continue;
 

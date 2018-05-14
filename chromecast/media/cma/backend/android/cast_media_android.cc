@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+
 #include "base/at_exit.h"
 #include "base/logging.h"
+#include "chromecast/chromecast_buildflags.h"
 #include "chromecast/media/cma/backend/android/media_pipeline_backend_android.h"
 #include "chromecast/public/cast_media_shlib.h"
 #include "chromecast/public/graphics_types.h"
@@ -89,19 +91,6 @@ bool CastMediaShlib::SupportsMediaClockRateChange() {
   LOG(INFO) << __func__ << ":";
   return false;
 }
-
-#if 0  // disable for now, since libassistant doesn't handle a stub well.
-void CastMediaShlib::AddLoopbackAudioObserver(LoopbackAudioObserver* observer) {
-  LOG(INFO) << __func__ << ":";
-  // TODO(ckuiper): Hook-up if applicable.
-}
-
-void CastMediaShlib::RemoveLoopbackAudioObserver(
-    LoopbackAudioObserver* observer) {
-  LOG(INFO) << __func__ << ":";
-  // TODO(ckuiper): Hook-up if applicable.
-}
-#endif
 
 }  // namespace media
 }  // namespace chromecast

@@ -3,10 +3,8 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/media/webrtc/media_stream_device_permission_context.h"
-#include "base/feature_list.h"
 #include "chrome/browser/media/webrtc/media_stream_device_permissions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
@@ -16,13 +14,13 @@
 
 namespace {
 
-blink::WebFeaturePolicyFeature GetFeaturePolicyFeature(
+blink::mojom::FeaturePolicyFeature GetFeaturePolicyFeature(
     ContentSettingsType type) {
   if (type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC)
-    return blink::WebFeaturePolicyFeature::kMicrophone;
+    return blink::mojom::FeaturePolicyFeature::kMicrophone;
 
   DCHECK_EQ(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, type);
-  return blink::WebFeaturePolicyFeature::kCamera;
+  return blink::mojom::FeaturePolicyFeature::kCamera;
 }
 
 }  // namespace
@@ -47,8 +45,6 @@ void MediaStreamDevicePermissionContext::DecidePermission(
     const GURL& embedding_origin,
     bool user_gesture,
     const BrowserPermissionCallback& callback) {
-  DCHECK(base::FeatureList::IsEnabled(
-      features::kUsePermissionManagerForMediaRequests));
   PermissionContextBase::DecidePermission(web_contents, id, requesting_origin,
                                           embedding_origin, user_gesture,
                                           callback);
@@ -101,6 +97,5 @@ void MediaStreamDevicePermissionContext::ResetPermission(
 }
 
 bool MediaStreamDevicePermissionContext::IsRestrictedToSecureOrigins() const {
-  return base::FeatureList::IsEnabled(
-      features::kRequireSecureOriginsForPepperMediaRequests);
+  return true;
 }

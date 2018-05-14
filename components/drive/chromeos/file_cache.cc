@@ -755,9 +755,10 @@ bool FileCache::RecoverFilesFromCacheDirectory(
     if (it != recovered_cache_info.end() && !it->second.title.empty()) {
       // We can use a file name recovered from the trashed DB.
       dest_base_name = base::FilePath::FromUTF8Unsafe(it->second.title);
-    } else if (net::SniffMimeType(&content[0], read_result,
-                                  net::FilePathToFileURL(current),
-                                  std::string(), &mime_type) ||
+    } else if (net::SniffMimeType(
+                   &content[0], read_result, net::FilePathToFileURL(current),
+                   std::string(), net::ForceSniffFileUrlsForHtml::kDisabled,
+                   &mime_type) ||
                net::SniffMimeTypeFromLocalData(&content[0], read_result,
                                                &mime_type)) {
       // Change base name for common mime types.
@@ -921,8 +922,9 @@ void FileCache::CloseForWrite(const std::string& id) {
                << FileErrorToString(error);
     return;
   }
-  entry.mutable_file_info()->set_last_modified(
-      base::Time::Now().ToInternalValue());
+  int64_t now = base::Time::Now().ToInternalValue();
+  entry.mutable_file_info()->set_last_modified(now);
+  entry.set_last_modified_by_me(now);
   error = storage_->PutEntry(entry);
   if (error != FILE_ERROR_OK) {
     LOG(ERROR) << "Failed to put entry: " << id << ", "

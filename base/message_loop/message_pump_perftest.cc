@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/format_macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
@@ -94,7 +95,7 @@ class ScheduleWorkTest : public testing::Test {
     max_batch_times_.reset(new base::TimeDelta[num_scheduling_threads]);
 
     for (int i = 0; i < num_scheduling_threads; ++i) {
-      scheduling_threads.push_back(MakeUnique<Thread>("posting thread"));
+      scheduling_threads.push_back(std::make_unique<Thread>("posting thread"));
       scheduling_threads[i]->Start();
     }
 
@@ -240,8 +241,8 @@ TEST_F(ScheduleWorkTest, ThreadTimeToJavaFromFourThreads) {
 
 class FakeMessagePump : public MessagePump {
  public:
-  FakeMessagePump() {}
-  ~FakeMessagePump() override {}
+  FakeMessagePump() = default;
+  ~FakeMessagePump() override = default;
 
   void Run(Delegate* delegate) override {}
 
@@ -262,8 +263,8 @@ class PostTaskTest : public testing::Test {
     do {
       for (int i = 0; i < batch_size; ++i) {
         for (int j = 0; j < tasks_per_reload; ++j) {
-          queue->AddToIncomingQueue(FROM_HERE, base::BindOnce(&DoNothing),
-                                    base::TimeDelta(), false);
+          queue->AddToIncomingQueue(FROM_HERE, DoNothing(), base::TimeDelta(),
+                                    Nestable::kNonNestable);
           num_posted++;
         }
         TaskQueue loop_local_queue;
@@ -285,6 +286,7 @@ class PostTaskTest : public testing::Test {
         (now - start).InMicroseconds() / static_cast<double>(num_posted),
         "us/task",
         true);
+    queue->WillDestroyCurrentMessageLoop();
   }
 };
 

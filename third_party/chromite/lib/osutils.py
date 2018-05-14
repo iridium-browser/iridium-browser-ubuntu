@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -282,6 +283,63 @@ def SafeMakedirsNonRoot(path, mode=0o775, user=None):
                                   redirect_stdout=True)
   return created
 
+class BadPathsException(Exception):
+  """Raised by various osutils path manipulation functions on bad input."""
+
+
+def CopyDirContents(from_dir, to_dir, symlink=False):
+  """Copy contents of from_dir to to_dir. Both should exist.
+
+  shutil.copytree allows one to copy a rooted directory tree along with the
+  containing directory. OTOH, this function copies the contents of from_dir to
+  an existing directory. The target directory must be empty. For example, for
+  the given paths:
+
+  from/
+    inside/x.py
+    y.py
+  to/
+
+  shutil.copytree('from', 'to')
+  # Raises because 'to' already exists.
+
+  shutil.copytree('from', 'to/non_existent_dir')
+  to/non_existent_dir/
+    inside/x.py
+    y.py
+
+  CopyDirContents('from', 'to')
+  to/
+    inside/x.py
+    y.py
+
+  Args:
+    from_dir: The directory whose contents should be copied. Must exist.
+    to_dir: The directory to which contents should be copied. Must exist.
+    symlink: Whether symlinks should be copied.
+
+  Raises:
+    BadPathsException: if the source / target directories don't exist, or if
+        target directory is non-empty.
+    OSError: on esoteric permission errors.
+  """
+  if not os.path.isdir(from_dir):
+    raise BadPathsException('Source directory %s does not exist.' % from_dir)
+  if not os.path.isdir(to_dir):
+    raise BadPathsException('Destination directory %s does not exist.' % to_dir)
+  if os.listdir(to_dir):
+    raise BadPathsException('Destination directory %s is not empty.' % to_dir)
+
+  for name in os.listdir(from_dir):
+    from_path = os.path.join(from_dir, name)
+    to_path = os.path.join(to_dir, name)
+    if os.path.isdir(from_path):
+      shutil.copytree(from_path, to_path)
+    elif symlink and os.path.islink(from_path):
+      os.symlink(os.readlink(from_path), to_path)
+    elif os.path.isfile(from_path):
+      shutil.copy2(from_path, to_path)
+
 
 def RmDir(path, ignore_missing=False, sudo=False):
   """Recursively remove a directory.
@@ -310,7 +368,7 @@ def RmDir(path, ignore_missing=False, sudo=False):
         raise
 
 
-class EmptyDirNonExistentException(Exception):
+class EmptyDirNonExistentException(BadPathsException):
   """EmptyDir was called on a non-existent directory without ignore_missing."""
 
 
@@ -349,13 +407,14 @@ def EmptyDir(path, ignore_missing=False, sudo=False, exclude=()):
         SafeUnlink(subpath, sudo)
 
 
-def Which(binary, path=None, mode=os.X_OK):
+def Which(binary, path=None, mode=os.X_OK, root=None):
   """Return the absolute path to the specified binary.
 
   Args:
     binary: The binary to look for.
     path: Search path. Defaults to os.environ['PATH'].
     mode: File mode to check on the binary.
+    root: Path to automatically prefix to every element of |path|.
 
   Returns:
     The full path to |binary| if found (with the right mode). Otherwise, None.
@@ -363,6 +422,10 @@ def Which(binary, path=None, mode=os.X_OK):
   if path is None:
     path = os.environ.get('PATH', '')
   for p in path.split(os.pathsep):
+    if root and p.startswith('/'):
+      # Don't prefix relative paths.  We might want to support this at some
+      # point, but it's not worth the coding hassle currently.
+      p = os.path.join(root, p.lstrip('/'))
     p = os.path.join(p, binary)
     if os.path.isfile(p) and os.access(p, mode):
       return p
@@ -762,7 +825,7 @@ def UmountDir(path, lazy=True, sudo=True, cleanup=True):
   cmd = ['umount', '-d', path]
   if lazy:
     cmd += ['-l']
-  runcmd(cmd)
+  runcmd(cmd, print_cmd=False)
 
   if cleanup:
     # We will randomly get EBUSY here even when the umount worked.  Suspect
@@ -784,6 +847,23 @@ def UmountDir(path, lazy=True, sudo=True, cleanup=True):
         # Something else, we don't know so do not retry.
         return False
     retry_util.GenericRetry(_retry, 60, RmDir, path, sudo=sudo, sleep=1)
+
+
+def UmountTree(path):
+  """Unmounts |path| and any submounts under it."""
+  # Scrape it from /proc/mounts since it's easily accessible;
+  # additionally, unmount in reverse order of what's listed there
+  # rather than trying a reverse sorting; it's possible for
+  # mount /z /foon
+  # mount /foon/blah -o loop /a
+  # which reverse sorting cannot handle.
+  path = os.path.realpath(path).rstrip('/') + '/'
+  mounts = [mtab.destination for mtab in IterateMountPoints() if
+            mtab.destination.startswith(path) or
+            mtab.destination == path.rstrip('/')]
+
+  for mount_pt in reversed(mounts):
+    UmountDir(mount_pt, lazy=False, cleanup=False)
 
 
 def SetEnvironment(env):

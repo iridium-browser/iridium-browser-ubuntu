@@ -5,7 +5,6 @@
 #include "components/reading_list/core/reading_list_model.h"
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/test/simple_test_clock.h"
 #include "components/reading_list/core/reading_list_model_impl.h"
 #include "components/reading_list/core/reading_list_model_storage.h"
@@ -158,9 +157,9 @@ class ReadingListModelTest : public ReadingListModelObserver,
                              public testing::Test {
  public:
   ReadingListModelTest() : callback_called_(false) {
-    auto clock = base::MakeUnique<base::SimpleTestClock>();
+    auto clock = std::make_unique<base::SimpleTestClock>();
     clock_ = clock.get();
-    model_ = base::MakeUnique<ReadingListModelImpl>(nullptr, nullptr,
+    model_ = std::make_unique<ReadingListModelImpl>(nullptr, nullptr,
                                                     std::move(clock));
     ClearCounts();
     model_->AddObserver(this);
@@ -170,7 +169,7 @@ class ReadingListModelTest : public ReadingListModelObserver,
   void SetStorage(std::unique_ptr<TestReadingListStorage> storage,
                   std::unique_ptr<base::SimpleTestClock> clock) {
     clock_ = clock.get();
-    model_ = base::MakeUnique<ReadingListModelImpl>(std::move(storage), nullptr,
+    model_ = std::make_unique<ReadingListModelImpl>(std::move(storage), nullptr,
                                                     std::move(clock));
     ClearCounts();
     model_->AddObserver(this);
@@ -323,8 +322,8 @@ TEST_F(ReadingListModelTest, EmptyLoaded) {
 // Tests load model.
 TEST_F(ReadingListModelTest, ModelLoaded) {
   ClearCounts();
-  auto clock = base::MakeUnique<base::SimpleTestClock>();
-  auto storage = base::MakeUnique<TestReadingListStorage>(this, clock.get());
+  auto clock = std::make_unique<base::SimpleTestClock>();
+  auto storage = std::make_unique<TestReadingListStorage>(this, clock.get());
   storage->AddSampleEntries();
   SetStorage(std::move(storage), std::move(clock));
 
@@ -348,8 +347,8 @@ TEST_F(ReadingListModelTest, ModelLoaded) {
 
 // Tests adding entry.
 TEST_F(ReadingListModelTest, AddEntry) {
-  auto clock = base::MakeUnique<base::SimpleTestClock>();
-  auto storage = base::MakeUnique<TestReadingListStorage>(this, clock.get());
+  auto clock = std::make_unique<base::SimpleTestClock>();
+  auto storage = std::make_unique<TestReadingListStorage>(this, clock.get());
   SetStorage(std::move(storage), std::move(clock));
   ClearCounts();
 
@@ -373,12 +372,41 @@ TEST_F(ReadingListModelTest, AddEntry) {
   EXPECT_EQ("sample Test", other_entry->Title());
 }
 
+// Tests adding an entry that already exists.
+TEST_F(ReadingListModelTest, AddExistingEntry) {
+  auto clock = std::make_unique<base::SimpleTestClock>();
+  auto storage = std::make_unique<TestReadingListStorage>(this, clock.get());
+  SetStorage(std::move(storage), std::move(clock));
+  GURL url = GURL("http://example.com");
+  std::string title = "\n  \tsample Test ";
+  model_->AddEntry(url, title, reading_list::ADDED_VIA_CURRENT_APP);
+  ClearCounts();
+
+  const ReadingListEntry& entry =
+      model_->AddEntry(url, title, reading_list::ADDED_VIA_CURRENT_APP);
+  EXPECT_EQ(GURL("http://example.com"), entry.URL());
+  EXPECT_EQ("sample Test", entry.Title());
+
+  AssertObserverCount(0, 1, 1, 0, 1, 0, 1, 0, 2);
+  AssertStorageCount(1, 1);
+  EXPECT_EQ(1ul, UnreadSize());
+  EXPECT_EQ(0ul, ReadSize());
+  EXPECT_TRUE(model_->GetLocalUnseenFlag());
+
+  const ReadingListEntry* other_entry =
+      model_->GetEntryByURL(GURL("http://example.com"));
+  EXPECT_NE(other_entry, nullptr);
+  EXPECT_FALSE(other_entry->IsRead());
+  EXPECT_EQ(GURL("http://example.com"), other_entry->URL());
+  EXPECT_EQ("sample Test", other_entry->Title());
+}
+
 // Tests addin entry from sync.
 TEST_F(ReadingListModelTest, SyncAddEntry) {
-  auto clock = base::MakeUnique<base::SimpleTestClock>();
-  auto storage = base::MakeUnique<TestReadingListStorage>(this, clock.get());
+  auto clock = std::make_unique<base::SimpleTestClock>();
+  auto storage = std::make_unique<TestReadingListStorage>(this, clock.get());
   SetStorage(std::move(storage), std::move(clock));
-  auto entry = base::MakeUnique<ReadingListEntry>(
+  auto entry = std::make_unique<ReadingListEntry>(
       GURL("http://example.com"), "sample", AdvanceAndGetTime(clock_));
   entry->SetRead(true, AdvanceAndGetTime(clock_));
   ClearCounts();
@@ -393,8 +421,8 @@ TEST_F(ReadingListModelTest, SyncAddEntry) {
 
 // Tests updating entry from sync.
 TEST_F(ReadingListModelTest, SyncMergeEntry) {
-  auto clock = base::MakeUnique<base::SimpleTestClock>();
-  auto storage = base::MakeUnique<TestReadingListStorage>(this, clock.get());
+  auto clock = std::make_unique<base::SimpleTestClock>();
+  auto storage = std::make_unique<TestReadingListStorage>(this, clock.get());
   SetStorage(std::move(storage), std::move(clock));
   model_->AddEntry(GURL("http://example.com"), "sample",
                    reading_list::ADDED_VIA_CURRENT_APP);
@@ -409,7 +437,7 @@ TEST_F(ReadingListModelTest, SyncMergeEntry) {
       model_->GetEntryByURL(GURL("http://example.com"));
   int64_t local_update_time = local_entry->UpdateTime();
 
-  auto sync_entry = base::MakeUnique<ReadingListEntry>(
+  auto sync_entry = std::make_unique<ReadingListEntry>(
       GURL("http://example.com"), "sample", AdvanceAndGetTime(clock_));
   sync_entry->SetRead(true, AdvanceAndGetTime(clock_));
   ASSERT_GT(sync_entry->UpdateTime(), local_update_time);
@@ -433,8 +461,8 @@ TEST_F(ReadingListModelTest, SyncMergeEntry) {
 
 // Tests deleting entry.
 TEST_F(ReadingListModelTest, RemoveEntryByUrl) {
-  auto clock = base::MakeUnique<base::SimpleTestClock>();
-  auto storage = base::MakeUnique<TestReadingListStorage>(this, clock.get());
+  auto clock = std::make_unique<base::SimpleTestClock>();
+  auto storage = std::make_unique<TestReadingListStorage>(this, clock.get());
   SetStorage(std::move(storage), std::move(clock));
   model_->AddEntry(GURL("http://example.com"), "sample",
                    reading_list::ADDED_VIA_CURRENT_APP);
@@ -466,8 +494,8 @@ TEST_F(ReadingListModelTest, RemoveEntryByUrl) {
 
 // Tests deleting entry from sync.
 TEST_F(ReadingListModelTest, RemoveSyncEntryByUrl) {
-  auto clock = base::MakeUnique<base::SimpleTestClock>();
-  auto storage = base::MakeUnique<TestReadingListStorage>(this, clock.get());
+  auto clock = std::make_unique<base::SimpleTestClock>();
+  auto storage = std::make_unique<TestReadingListStorage>(this, clock.get());
   SetStorage(std::move(storage), std::move(clock));
   model_->AddEntry(GURL("http://example.com"), "sample",
                    reading_list::ADDED_VIA_CURRENT_APP);

@@ -105,7 +105,7 @@ void String::append(const StringView& string) {
     LChar* data;
     CHECK_LE(string.length(),
              std::numeric_limits<unsigned>::max() - impl_->length());
-    RefPtr<StringImpl> new_impl = StringImpl::CreateUninitialized(
+    scoped_refptr<StringImpl> new_impl = StringImpl::CreateUninitialized(
         impl_->length() + string.length(), data);
     memcpy(data, impl_->Characters8(), impl_->length() * sizeof(LChar));
     memcpy(data + impl_->length(), string.Characters8(),
@@ -117,7 +117,7 @@ void String::append(const StringView& string) {
   UChar* data;
   CHECK_LE(string.length(),
            std::numeric_limits<unsigned>::max() - impl_->length());
-  RefPtr<StringImpl> new_impl =
+  scoped_refptr<StringImpl> new_impl =
       StringImpl::CreateUninitialized(impl_->length() + string.length(), data);
 
   if (impl_->Is8Bit())
@@ -149,7 +149,7 @@ inline void String::AppendInternal(CharacterType c) {
   // FIXME: We should be able to create an 8 bit string via this code path.
   UChar* data;
   CHECK_LT(impl_->length(), std::numeric_limits<unsigned>::max());
-  RefPtr<StringImpl> new_impl =
+  scoped_refptr<StringImpl> new_impl =
       StringImpl::CreateUninitialized(impl_->length() + 1, data);
   if (impl_->Is8Bit())
     StringImpl::CopyChars(data, impl_->Characters8(), impl_->length());
@@ -177,10 +177,10 @@ int CodePointCompareIgnoringASCIICase(const String& a, const char* b) {
 }
 
 template <typename CharType>
-RefPtr<StringImpl> InsertInternal(RefPtr<StringImpl> impl,
-                                  const CharType* characters_to_insert,
-                                  unsigned length_to_insert,
-                                  unsigned position) {
+scoped_refptr<StringImpl> InsertInternal(scoped_refptr<StringImpl> impl,
+                                         const CharType* characters_to_insert,
+                                         unsigned length_to_insert,
+                                         unsigned position) {
   if (!length_to_insert)
     return impl;
 
@@ -188,7 +188,7 @@ RefPtr<StringImpl> InsertInternal(RefPtr<StringImpl> impl,
   UChar* data;  // FIXME: We should be able to create an 8 bit string here.
   CHECK_LE(length_to_insert,
            std::numeric_limits<unsigned>::max() - impl->length());
-  RefPtr<StringImpl> new_impl =
+  scoped_refptr<StringImpl> new_impl =
       StringImpl::CreateUninitialized(impl->length() + length_to_insert, data);
 
   if (impl->Is8Bit())
@@ -374,6 +374,52 @@ String String::Format(const char* format, ...) {
   return String(reinterpret_cast<const LChar*>(buffer.data()), length);
 }
 
+String String::EncodeForDebugging() const {
+  if (IsNull())
+    return "<null>";
+
+  String str;
+  str.append('"');
+  for (unsigned index = 0; index < length(); ++index) {
+    // Print shorthands for select cases.
+    UChar character = (*impl_)[index];
+    switch (character) {
+      case '\t':
+        str.append("\\t");
+        break;
+      case '\n':
+        str.append("\\n");
+        break;
+      case '\r':
+        str.append("\\r");
+        break;
+      case '"':
+        str.append("\\\"");
+        break;
+      case '\\':
+        str.append("\\\\");
+        break;
+      default:
+        if (IsASCIIPrintable(character)) {
+          str.append(static_cast<char>(character));
+        } else {
+          // Print "\uXXXX" for control or non-ASCII characters.
+          str.append("\\u");
+          std::stringstream out;
+          out.width(4);
+          out.fill('0');
+          out.setf(std::ios_base::hex, std::ios_base::basefield);
+          out.setf(std::ios::uppercase);
+          out << character;
+          str.append(out.str().c_str());
+        }
+        break;
+    }
+  }
+  str.append('"');
+  return str;
+}
+
 template <typename IntegerType>
 static String IntegerToString(IntegerType input) {
   IntegerToStringConverter<IntegerType> converter(input);
@@ -426,7 +472,7 @@ int String::ToIntStrict(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToIntStrict(ok);
+  return impl_->ToInt(NumberParsingOptions::kStrict, ok);
 }
 
 unsigned String::ToUIntStrict(bool* ok) const {
@@ -435,7 +481,7 @@ unsigned String::ToUIntStrict(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToUIntStrict(ok);
+  return impl_->ToUInt(NumberParsingOptions::kStrict, ok);
 }
 
 unsigned String::HexToUIntStrict(bool* ok) const {
@@ -453,7 +499,7 @@ int64_t String::ToInt64Strict(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToInt64Strict(ok);
+  return impl_->ToInt64(NumberParsingOptions::kStrict, ok);
 }
 
 uint64_t String::ToUInt64Strict(bool* ok) const {
@@ -462,7 +508,7 @@ uint64_t String::ToUInt64Strict(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToUInt64Strict(ok);
+  return impl_->ToUInt64(NumberParsingOptions::kStrict, ok);
 }
 
 int String::ToInt(bool* ok) const {
@@ -471,7 +517,7 @@ int String::ToInt(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToInt(ok);
+  return impl_->ToInt(NumberParsingOptions::kLoose, ok);
 }
 
 unsigned String::ToUInt(bool* ok) const {
@@ -480,25 +526,7 @@ unsigned String::ToUInt(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToUInt(ok);
-}
-
-int64_t String::ToInt64(bool* ok) const {
-  if (!impl_) {
-    if (ok)
-      *ok = false;
-    return 0;
-  }
-  return impl_->ToInt64(ok);
-}
-
-uint64_t String::ToUInt64(bool* ok) const {
-  if (!impl_) {
-    if (ok)
-      *ok = false;
-    return 0;
-  }
-  return impl_->ToUInt64(ok);
+  return impl_->ToUInt(NumberParsingOptions::kLoose, ok);
 }
 
 double String::ToDouble(bool* ok) const {
@@ -792,45 +820,7 @@ String String::FromUTF8WithLatin1Fallback(const LChar* string, size_t size) {
 }
 
 std::ostream& operator<<(std::ostream& out, const String& string) {
-  if (string.IsNull())
-    return out << "<null>";
-
-  out << '"';
-  for (unsigned index = 0; index < string.length(); ++index) {
-    // Print shorthands for select cases.
-    UChar character = string[index];
-    switch (character) {
-      case '\t':
-        out << "\\t";
-        break;
-      case '\n':
-        out << "\\n";
-        break;
-      case '\r':
-        out << "\\r";
-        break;
-      case '"':
-        out << "\\\"";
-        break;
-      case '\\':
-        out << "\\\\";
-        break;
-      default:
-        if (IsASCIIPrintable(character)) {
-          out << static_cast<char>(character);
-        } else {
-          // Print "\uXXXX" for control or non-ASCII characters.
-          out << "\\u";
-          out.width(4);
-          out.fill('0');
-          out.setf(std::ios_base::hex, std::ios_base::basefield);
-          out.setf(std::ios::uppercase);
-          out << character;
-        }
-        break;
-    }
-  }
-  return out << '"';
+  return out << string.EncodeForDebugging().Utf8().data();
 }
 
 #ifndef NDEBUG

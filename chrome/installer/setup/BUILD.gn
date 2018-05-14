@@ -2,13 +2,21 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/buildflag_header.gni")
+import("//chrome/installer/setup/buildflags.gni")
 import("//chrome/process_version_rc_template.gni")
 import("//testing/test.gni")
+
+buildflag_header("buildflags") {
+  header = "buildflags.h"
+
+  # Use ZUCCHINI since ZUCCHINI_ENABLED is too long a name for setup.rc.
+  flags = [ "ZUCCHINI=$use_zucchini" ]
+}
 
 if (is_win) {
   executable("setup") {
     sources = [
-      "setup.ico",
       "setup.rc",
       "setup_exe_version.rc.version",
       "setup_main.cc",
@@ -22,12 +30,14 @@ if (is_win) {
     configs += [ "//build/config/win:windowed" ]
 
     deps = [
+      ":buildflags",
       ":lib",
       ":setup_exe_version",
       "//build/config:exe_and_shlib_deps",
       "//build/win:default_exe_manifest",
       "//chrome/install_static:install_static_util",
       "//components/crash/content/app:app",
+      "//components/crash/content/app:crash_export_thunks",
       "//components/crash/content/app:run_as_crashpad_handler",
     ]
 
@@ -69,15 +79,17 @@ if (is_win) {
     ]
 
     public_deps = [
+      ":buildflags",
       "//base",
       "//chrome/common:constants",
       "//chrome/common:version_header",
       "//chrome/install_static:install_static_util",
       "//chrome/installer/util:with_rc_strings",
+      "//chrome/installer/zucchini:zucchini_io",
+      "//chrome/installer/zucchini:zucchini_lib",
       "//chrome_elf:constants",
       "//components/base32",
-      "//components/crash/content/app:app",
-      "//components/crash/content/app:lib",
+      "//components/crash/content/app",
       "//components/crash/core/common",
       "//content/public/common:static_switches",
       "//courgette:courgette_lib",
@@ -116,12 +128,13 @@ if (is_win) {
       ":lib",
       "//base",
       "//base:i18n",
-      "//base/allocator:features",
+      "//base/allocator:buildflags",
       "//base/test:test_support",
       "//chrome/install_static:install_static_util",
       "//chrome/install_static/test:test_support",
       "//chrome/installer/mini_installer:unit_tests",
       "//chrome/installer/util:test_support",
+      "//components/crash/content/app:test_support",
       "//testing/gmock",
       "//testing/gtest",
     ]

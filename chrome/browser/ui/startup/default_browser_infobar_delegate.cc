@@ -54,11 +54,6 @@ void DefaultBrowserInfoBarDelegate::AllowExpiry() {
   should_expire_ = true;
 }
 
-infobars::InfoBarDelegate::Type DefaultBrowserInfoBarDelegate::GetInfoBarType()
-    const {
-  return PAGE_ACTION_TYPE;
-}
-
 infobars::InfoBarDelegate::InfoBarIdentifier
 DefaultBrowserInfoBarDelegate::GetIdentifier() const {
   return DEFAULT_BROWSER_INFOBAR_DELEGATE;
@@ -77,7 +72,7 @@ void DefaultBrowserInfoBarDelegate::InfoBarDismissed() {
   action_taken_ = true;
   // |profile_| may be null in tests.
   if (profile_)
-    chrome::DefaultBrowserPromptDeclined(profile_);
+    DefaultBrowserPromptDeclined(profile_);
   base::RecordAction(base::UserMetricsAction("DefaultBrowserInfoBar_Dismiss"));
   UMA_HISTOGRAM_ENUMERATION("DefaultBrowser.InfoBar.UserInteraction",
                             DISMISS_INFO_BAR,
@@ -85,7 +80,7 @@ void DefaultBrowserInfoBarDelegate::InfoBarDismissed() {
 }
 
 base::string16 DefaultBrowserInfoBarDelegate::GetMessageText() const {
-  return l10n_util::GetStringUTF16(IDS_DEFAULT_BROWSER_INFOBAR_SHORT_TEXT);
+  return l10n_util::GetStringUTF16(IDS_DEFAULT_BROWSER_INFOBAR_TEXT);
 }
 
 int DefaultBrowserInfoBarDelegate::GetButtons() const {
@@ -115,8 +110,8 @@ bool DefaultBrowserInfoBarDelegate::Accept() {
   // The worker pointer is reference counted. While it is running, the
   // message loops of the FILE and UI thread will hold references to it
   // and it will be automatically freed once all its tasks have finished.
-  make_scoped_refptr(new shell_integration::DefaultBrowserWorker(
-                         shell_integration::DefaultWebClientWorkerCallback()))
+  base::MakeRefCounted<shell_integration::DefaultBrowserWorker>(
+      shell_integration::DefaultWebClientWorkerCallback())
       ->StartSetAsDefault();
   return true;
 }

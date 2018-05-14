@@ -30,7 +30,7 @@ template <typename T, typename IdentifierType>
 class WeakIdentifierMapBase<T, IdentifierType, true>
     : public GarbageCollected<WeakIdentifierMapBase<T, IdentifierType, true>> {
  public:
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(object_to_identifier_);
     visitor->Trace(identifier_to_object_);
   }
@@ -70,7 +70,7 @@ class WeakIdentifierMap final
  private:
   static WeakIdentifierMap<T, IdentifierType>& Instance();
 
-  WeakIdentifierMap() {}
+  WeakIdentifierMap() = default;
 
   static IdentifierType Next() {
     static IdentifierType last_id = 0;

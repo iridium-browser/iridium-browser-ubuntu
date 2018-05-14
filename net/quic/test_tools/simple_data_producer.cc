@@ -4,7 +4,9 @@
 
 #include "net/quic/test_tools/simple_data_producer.h"
 
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_map_util.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 
 namespace net {
 
@@ -14,14 +16,18 @@ SimpleDataProducer::SimpleDataProducer() {}
 SimpleDataProducer::~SimpleDataProducer() {}
 
 void SimpleDataProducer::SaveStreamData(QuicStreamId id,
-                                        QuicIOVector iov,
+                                        const struct iovec* iov,
+                                        int iov_count,
                                         size_t iov_offset,
                                         QuicStreamOffset offset,
                                         QuicByteCount data_length) {
-  if (!QuicContainsKey(send_buffer_map_, id)) {
-    send_buffer_map_[id].reset(new QuicStreamSendBuffer(&allocator_));
+  if (data_length == 0) {
+    return;
   }
-  send_buffer_map_[id]->SaveStreamData(iov, iov_offset, offset, data_length);
+  if (!QuicContainsKey(send_buffer_map_, id)) {
+    send_buffer_map_[id] = QuicMakeUnique<QuicStreamSendBuffer>(&allocator_);
+  }
+  send_buffer_map_[id]->SaveStreamData(iov, iov_count, iov_offset, data_length);
 }
 
 bool SimpleDataProducer::WriteStreamData(QuicStreamId id,

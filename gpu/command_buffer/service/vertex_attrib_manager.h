@@ -15,7 +15,7 @@
 #include "build/build_config.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
 #include "gpu/command_buffer/service/gl_utils.h"
-#include "gpu/gpu_export.h"
+#include "gpu/gpu_gles2_export.h"
 
 namespace gpu {
 namespace gles2 {
@@ -29,7 +29,7 @@ class VertexArrayManager;
 // Info about a Vertex Attribute. This is used to track what the user currently
 // has bound on each Vertex Attribute so that checking can be done at
 // glDrawXXX time.
-class GPU_EXPORT VertexAttrib {
+class GPU_GLES2_EXPORT VertexAttrib {
  public:
   typedef std::list<VertexAttrib*> VertexAttribList;
 
@@ -77,6 +77,8 @@ class GPU_EXPORT VertexAttrib {
   bool enabled() const {
     return enabled_;
   }
+
+  bool enabled_in_driver() const { return enabled_in_driver_; }
 
   // Find the maximum vertex accessed, accounting for instancing.
   GLuint MaxVertexAccessed(GLsizei primcount,
@@ -136,6 +138,9 @@ class GPU_EXPORT VertexAttrib {
   // Whether or not this attribute is enabled.
   bool enabled_;
 
+  // Whether or not this attribute is actually enabled in the driver.
+  bool enabled_in_driver_;
+
   // number of components (1, 2, 3, 4)
   GLint size_;
 
@@ -175,8 +180,8 @@ class GPU_EXPORT VertexAttrib {
 // Manages vertex attributes.
 // This class also acts as the service-side representation of a
 // vertex array object and it's contained state.
-class GPU_EXPORT VertexAttribManager :
-    public base::RefCounted<VertexAttribManager> {
+class GPU_GLES2_EXPORT VertexAttribManager
+    : public base::RefCounted<VertexAttribManager> {
  public:
   typedef std::list<VertexAttrib*> VertexAttribList;
 
@@ -207,6 +212,23 @@ class GPU_EXPORT VertexAttribManager :
     attrib_enabled_mask_[loc / 16] |= (0x3 << shift_bits);
     attrib_base_type_mask_[loc / 16] &= ~(0x3 << shift_bits);
     attrib_base_type_mask_[loc / 16] |= base_type << shift_bits;
+  }
+
+  // Sets the Enable/DisableVertexAttribArray state in the driver. This state
+  // is tracked for the current virtual context. Because of this, virtual
+  // context restore code should not call this function.
+  void SetDriverVertexAttribEnabled(GLuint index, bool enable) {
+    DCHECK_LT(index, vertex_attribs_.size());
+    VertexAttrib& attrib = vertex_attribs_[index];
+
+    if (enable != attrib.enabled_in_driver_) {
+      attrib.enabled_in_driver_ = enable;
+      if (enable) {
+        glEnableVertexAttribArray(index);
+      } else {
+        glDisableVertexAttribArray(index);
+      }
+    }
   }
 
   const std::vector<uint32_t>& attrib_base_type_mask() const {

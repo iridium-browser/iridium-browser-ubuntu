@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "core/fxcrt/fx_system.h"
-#include "xfa/fwl/ifwl_widgetmgrdelegate.h"
 #include "xfa/fxgraphics/cxfa_graphics.h"
 
 #define FWL_WGTMGR_DisableForm 0x00000002
@@ -24,17 +23,15 @@ class CXFA_Graphics;
 class CFX_Matrix;
 class CFWL_Widget;
 
-class CFWL_WidgetMgr : public CFWL_WidgetMgrDelegate {
+class CFWL_WidgetMgr {
  public:
   explicit CFWL_WidgetMgr(CXFA_FFApp* pAdapterNative);
   ~CFWL_WidgetMgr();
 
-  // CFWL_WidgetMgrDelegate
-  void OnSetCapability(uint32_t dwCapability) override;
-  void OnProcessMessageToForm(CFWL_Message* pMessage) override;
+  void OnProcessMessageToForm(CFWL_Message* pMessage);
   void OnDrawWidget(CFWL_Widget* pWidget,
                     CXFA_Graphics* pGraphics,
-                    const CFX_Matrix* pMatrix) override;
+                    const CFX_Matrix& matrix);
 
   CFWL_Widget* GetParentWidget(CFWL_Widget* pWidget) const;
   CFWL_Widget* GetOwnerWidget(CFWL_Widget* pWidget) const;
@@ -84,9 +81,9 @@ class CFWL_WidgetMgr : public CFWL_WidgetMgrDelegate {
     CFWL_Widget* const pWidget;
     std::unique_ptr<CXFA_Graphics> pOffscreen;
     int32_t iRedrawCounter;
-#if (_FX_OS_ == _FX_WIN32_DESKTOP_) || (_FX_OS_ == _FX_WIN64_)
+#if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
     bool bOutsideChanged;
-#endif
+#endif  // _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
   };
 
   CFWL_Widget* GetFirstSiblingWidget(CFWL_Widget* pWidget) const;
@@ -116,10 +113,10 @@ class CFWL_WidgetMgr : public CFWL_WidgetMgrDelegate {
 
   uint32_t m_dwCapability;
   std::map<CFWL_Widget*, std::unique_ptr<Item>> m_mapWidgetItem;
-  CFX_UnownedPtr<CXFA_FWLAdapterWidgetMgr> const m_pAdapter;
-#if (_FX_OS_ == _FX_WIN32_DESKTOP_) || (_FX_OS_ == _FX_WIN64_)
+  UnownedPtr<CXFA_FWLAdapterWidgetMgr> const m_pAdapter;
+#if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
   CFX_RectF m_rtScreen;
-#endif
+#endif  // _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
 };
 
 #endif  // XFA_FWL_CFWL_WIDGETMGR_H_

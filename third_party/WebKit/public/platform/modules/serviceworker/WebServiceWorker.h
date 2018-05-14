@@ -31,17 +31,17 @@
 #ifndef WebServiceWorker_h
 #define WebServiceWorker_h
 
+#include "public/platform/WebCallbacks.h"
 #include "public/platform/WebCommon.h"
-#include "public/platform/WebMessagePortChannel.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebVector.h"
-#include "public/platform/modules/serviceworker/WebServiceWorkerState.h"
+#include "third_party/WebKit/public/common/message_port/transferable_message.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_state.mojom-shared.h"
 
 namespace blink {
 
 class WebSecurityOrigin;
-class WebServiceWorkerProvider;
 class WebServiceWorkerProxy;
 
 class WebServiceWorker {
@@ -52,11 +52,11 @@ class WebServiceWorker {
   // Blink is owning this handle.
   class Handle {
    public:
-    virtual ~Handle() {}
+    virtual ~Handle() = default;
     virtual WebServiceWorker* ServiceWorker() { return nullptr; }
   };
 
-  virtual ~WebServiceWorker() {}
+  virtual ~WebServiceWorker() = default;
 
   // Sets ServiceWorkerProxy, with which callee can start making upcalls
   // to the ServiceWorker object via the client. This doesn't pass the
@@ -66,18 +66,16 @@ class WebServiceWorker {
   virtual WebServiceWorkerProxy* Proxy() { return nullptr; }
 
   virtual WebURL Url() const { return WebURL(); }
-  virtual WebServiceWorkerState GetState() const {
-    return kWebServiceWorkerStateUnknown;
+  virtual mojom::ServiceWorkerState GetState() const {
+    return mojom::ServiceWorkerState::kUnknown;
   }
 
-  // Callee receives ownership of the passed vector.
-  // FIXME: Blob refs should be passed to maintain ref counts. crbug.com/351753
-  virtual void PostMessage(WebServiceWorkerProvider*,
-                           const WebString&,
-                           const WebSecurityOrigin&,
-                           WebMessagePortChannelArray) = 0;
+  virtual void PostMessageToServiceWorker(TransferableMessage,
+                                          const WebSecurityOrigin&) = 0;
 
-  virtual void Terminate() {}
+  using TerminateForTestingCallback = WebCallbacks<void, void>;
+  virtual void TerminateForTesting(
+      std::unique_ptr<TerminateForTestingCallback>) {}
 };
 }
 

@@ -9,8 +9,8 @@
 #include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "sql/connection.h"
@@ -36,7 +36,8 @@ enum RecoveryEventType {
   RECOVERY_FAILED_VIRTUAL_TABLE_INIT,
 
   // System SQLite doesn't support vtable.
-  RECOVERY_FAILED_VIRTUAL_TABLE_SYSTEM_SQLITE,
+  // This is deprecated. Chrome doesn't support using the system SQLite anymore.
+  DEPRECATED_RECOVERY_FAILED_VIRTUAL_TABLE_SYSTEM_SQLITE,
 
   // Failed attempting to enable writable_schema.
   RECOVERY_FAILED_WRITABLE_SCHEMA,
@@ -141,12 +142,6 @@ void RecordRecoveryEvent(RecoveryEventType recovery_event) {
 }  // namespace
 
 // static
-bool Recovery::FullRecoverySupported() {
-  // TODO(shess): See comment in Init().
-  return true;
-}
-
-// static
 std::unique_ptr<Recovery> Recovery::Begin(Connection* connection,
                                           const base::FilePath& db_path) {
   // Recovery is likely to be used in error handling.  Since recovery changes
@@ -244,7 +239,7 @@ bool Recovery::Init(const base::FilePath& db_path) {
   }
 
   // Enable the recover virtual table for this connection.
-  int rc = recoverVtableInit(recover_db_.db_);
+  int rc = chrome_sqlite3_recoverVtableInit(recover_db_.db_);
   if (rc != SQLITE_OK) {
     RecordRecoveryEvent(RECOVERY_FAILED_VIRTUAL_TABLE_INIT);
     LOG(ERROR) << "Failed to initialize recover module: "
@@ -261,8 +256,8 @@ bool Recovery::Init(const base::FilePath& db_path) {
 
   if (!recover_db_.AttachDatabase(db_path, "corrupt")) {
     RecordRecoveryEvent(RECOVERY_FAILED_ATTACH);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Sqlite.RecoveryAttachError",
-                                recover_db_.GetErrorCode());
+    base::UmaHistogramSparse("Sqlite.RecoveryAttachError",
+                             recover_db_.GetErrorCode());
     return false;
   }
 
@@ -313,7 +308,7 @@ bool Recovery::Backup() {
 
     // Error code is in the destination database handle.
     int err = sqlite3_extended_errcode(db_->db_);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Sqlite.RecoveryHandle", err);
+    base::UmaHistogramSparse("Sqlite.RecoveryHandle", err);
     LOG(ERROR) << "sqlite3_backup_init() failed: "
                << sqlite3_errmsg(db_->db_);
 
@@ -332,7 +327,7 @@ bool Recovery::Backup() {
 
   if (rc != SQLITE_DONE) {
     RecordRecoveryEvent(RECOVERY_FAILED_BACKUP_STEP);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Sqlite.RecoveryStep", rc);
+    base::UmaHistogramSparse("Sqlite.RecoveryStep", rc);
     LOG(ERROR) << "sqlite3_backup_step() failed: "
                << sqlite3_errmsg(db_->db_);
   }

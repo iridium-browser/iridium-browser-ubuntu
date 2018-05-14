@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -21,7 +22,7 @@ from chromite.lib import triage_lib
 
 # Limit (hours) for looking back cl actions in the history for history-aware
 # submission.
-CLACTION_LOOKBACK_LIMIT_HOUR = 48
+CQ_HISTORY_LOOKBACK_LIMIT_HOUR = 48
 
 
 site_config = config_lib.GetConfig()
@@ -148,7 +149,7 @@ class RelevantChanges(object):
   @classmethod
   def GetPreviouslyPassedSlavesForChanges(
       cls, master_build_id, db, changes, change_relevant_slaves_dict,
-      history_lookback_limit=CLACTION_LOOKBACK_LIMIT_HOUR):
+      history_lookback_limit=CQ_HISTORY_LOOKBACK_LIMIT_HOUR):
     """Get slaves passed in history (not from current run) for changes.
 
     If a previous slave build:
@@ -165,7 +166,7 @@ class RelevantChanges(object):
         slaves in current run.
       history_lookback_limit: Limit (hours) for looking back cl actions in the
         histor. If it's None, do not force the limit.
-        Default to CLACTION_LOOKBACK_LIMIT_HOUR.
+        Default to CQ_HISTORY_LOOKBACK_LIMIT_HOUR.
 
     Returns:
       A dict mapping changes (cros_patch.GerritPatch instances) to sets of

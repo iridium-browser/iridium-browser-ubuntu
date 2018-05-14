@@ -235,7 +235,7 @@ Executing target definitions and templates
       ... target parameter definitions ...
     }
 
-  There is also a generic "target" function for programatically defined types
+  There is also a generic "target" function for programmatically defined types
   (see "gn help target"). You can define new types using templates (see "gn
   help template"). A template defines some custom code that expands to one or
   more other targets.
@@ -275,8 +275,8 @@ Dependencies
 
 Target::Target(const Settings* settings,
                const Label& label,
-               const InputFileSet& input_files)
-    : Item(settings, label, input_files),
+               const std::set<SourceFile>& build_dependency_files)
+    : Item(settings, label, build_dependency_files),
       output_type_(UNKNOWN),
       output_prefix_override_(false),
       output_extension_set_(false),
@@ -286,8 +286,7 @@ Target::Target(const Settings* settings,
       testonly_(false),
       toolchain_(nullptr) {}
 
-Target::~Target() {
-}
+Target::~Target() = default;
 
 // static
 const char* Target::GetStringForOutputType(OutputType type) {
@@ -828,8 +827,10 @@ void Target::CheckSourcesGenerated() const {
   // See Scheduler::AddUnknownGeneratedInput's declaration for more.
   for (const SourceFile& file : sources_)
     CheckSourceGenerated(file);
-  for (const SourceFile& file : inputs_)
-    CheckSourceGenerated(file);
+  for (ConfigValuesIterator iter(this); !iter.done(); iter.Next()) {
+    for (const SourceFile& file : iter.cur().inputs())
+      CheckSourceGenerated(file);
+  }
   // TODO(agrieve): Check all_libs_ here as well (those that are source files).
   // http://crbug.com/571731
 }

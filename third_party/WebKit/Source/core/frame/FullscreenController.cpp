@@ -31,13 +31,13 @@
 #include "core/frame/FullscreenController.h"
 
 #include "core/dom/Document.h"
-#include "core/exported/WebViewBase.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/PageScaleConstraintsSet.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "core/fullscreen/Fullscreen.h"
-#include "core/html/HTMLVideoElement.h"
+#include "core/html/media/HTMLVideoElement.h"
 #include "core/layout/LayoutFullScreen.h"
 #include "core/page/Page.h"
 #include "public/platform/WebLayerTreeView.h"
@@ -48,7 +48,7 @@ namespace blink {
 namespace {
 
 WebFrameClient& GetWebFrameClient(LocalFrame& frame) {
-  WebLocalFrameBase* web_frame = WebLocalFrameBase::FromFrame(frame);
+  WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
   DCHECK(web_frame);
   DCHECK(web_frame->Client());
   return *web_frame->Client();
@@ -57,11 +57,11 @@ WebFrameClient& GetWebFrameClient(LocalFrame& frame) {
 }  // anonymous namespace
 
 std::unique_ptr<FullscreenController> FullscreenController::Create(
-    WebViewBase* web_view_base) {
+    WebViewImpl* web_view_base) {
   return WTF::WrapUnique(new FullscreenController(web_view_base));
 }
 
-FullscreenController::FullscreenController(WebViewBase* web_view_base)
+FullscreenController::FullscreenController(WebViewImpl* web_view_base)
     : web_view_base_(web_view_base) {}
 
 void FullscreenController::DidEnterFullscreen() {
@@ -197,13 +197,12 @@ void FullscreenController::FullscreenElementChanged(Element* old_element,
   if (new_element) {
     DCHECK(Fullscreen::IsFullscreenElement(*new_element));
 
-    if (isHTMLVideoElement(*new_element)) {
-      HTMLVideoElement& video_element = toHTMLVideoElement(*new_element);
-      video_element.DidEnterFullscreen();
+    if (auto* video_element = ToHTMLVideoElementOrNull(*new_element)) {
+      video_element->DidEnterFullscreen();
 
       // If the video uses overlay fullscreen mode, make the background
       // transparent.
-      if (video_element.UsesOverlayFullscreenVideo())
+      if (video_element->UsesOverlayFullscreenVideo())
         web_view_base_->SetBackgroundColorOverride(Color::kTransparent);
     }
   }
@@ -211,10 +210,8 @@ void FullscreenController::FullscreenElementChanged(Element* old_element,
   if (old_element) {
     DCHECK(!Fullscreen::IsFullscreenElement(*old_element));
 
-    if (isHTMLVideoElement(*old_element)) {
-      HTMLVideoElement& video_element = toHTMLVideoElement(*old_element);
-      video_element.DidExitFullscreen();
-    }
+    if (auto* video_element = ToHTMLVideoElementOrNull(*old_element))
+      video_element->DidExitFullscreen();
   }
 }
 

@@ -39,6 +39,7 @@ class OfflinePageTestArchiver : public OfflinePageArchiver {
       ArchiverResult result,
       const base::string16& result_title,
       int64_t size_to_report,
+      const std::string& digest_to_report,
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
   ~OfflinePageTestArchiver() override;
 
@@ -46,6 +47,13 @@ class OfflinePageTestArchiver : public OfflinePageArchiver {
   void CreateArchive(const base::FilePath& archives_dir,
                      const CreateArchiveParams& create_archive_params,
                      const CreateArchiveCallback& callback) override;
+
+  void PublishArchive(
+      const OfflinePageItem& offline_page,
+      const scoped_refptr<base::SequencedTaskRunner>& background_task_runner,
+      const base::FilePath& publish_directory,
+      SystemDownloadManager* download_manager,
+      PublishArchiveDoneCallback publish_done_callback) override;
 
   // Completes the creation of archive. Should be used with |set_delayed| set to
   // true.
@@ -78,6 +86,8 @@ class OfflinePageTestArchiver : public OfflinePageArchiver {
   bool create_archive_called_;
   bool delayed_;
   base::string16 result_title_;
+  std::string digest_to_report_;
+  PublishArchiveResult publish_archive_result_;
   CreateArchiveCallback callback_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 

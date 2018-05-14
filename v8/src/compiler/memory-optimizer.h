@@ -31,7 +31,7 @@ typedef uint32_t NodeId;
 // implicitly.
 class MemoryOptimizer final {
  public:
-  MemoryOptimizer(JSGraph* jsgraph, Zone* zone);
+  MemoryOptimizer(JSGraph* jsgraph, Zone* zone, LoadPoisoning load_poisoning);
   ~MemoryOptimizer() {}
 
   void Optimize();
@@ -106,8 +106,9 @@ class MemoryOptimizer final {
   };
 
   void VisitNode(Node*, AllocationState const*);
-  void VisitAllocate(Node*, AllocationState const*);
+  void VisitAllocateRaw(Node*, AllocationState const*);
   void VisitCall(Node*, AllocationState const*);
+  void VisitCallWithCallerSavedRegisters(Node*, AllocationState const*);
   void VisitLoadElement(Node*, AllocationState const*);
   void VisitLoadField(Node*, AllocationState const*);
   void VisitStoreElement(Node*, AllocationState const*);
@@ -141,6 +142,7 @@ class MemoryOptimizer final {
   ZoneQueue<Token> tokens_;
   Zone* const zone_;
   GraphAssembler graph_assembler_;
+  LoadPoisoning load_poisoning_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(MemoryOptimizer);
 };

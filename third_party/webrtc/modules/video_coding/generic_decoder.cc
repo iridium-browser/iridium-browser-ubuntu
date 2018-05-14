@@ -8,17 +8,17 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/video_coding/generic_decoder.h"
+#include "modules/video_coding/generic_decoder.h"
 
 #include <algorithm>
 
-#include "webrtc/modules/video_coding/include/video_coding.h"
-#include "webrtc/modules/video_coding/internal_defines.h"
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/timeutils.h"
-#include "webrtc/rtc_base/trace_event.h"
-#include "webrtc/system_wrappers/include/clock.h"
+#include "modules/video_coding/include/video_coding.h"
+#include "modules/video_coding/internal_defines.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/timeutils.h"
+#include "rtc_base/trace_event.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 
@@ -58,8 +58,8 @@ int32_t VCMDecodedFrameCallback::Decoded(VideoFrame& decodedImage,
                                          int64_t decode_time_ms) {
   Decoded(decodedImage,
           decode_time_ms >= 0 ? rtc::Optional<int32_t>(decode_time_ms)
-                              : rtc::Optional<int32_t>(),
-          rtc::Optional<uint8_t>());
+                              : rtc::nullopt,
+          rtc::nullopt);
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
@@ -78,21 +78,20 @@ void VCMDecodedFrameCallback::Decoded(VideoFrame& decodedImage,
   }
 
   if (frameInfo == NULL) {
-    LOG(LS_WARNING) << "Too many frames backed up in the decoder, dropping "
-                       "this one.";
+    RTC_LOG(LS_WARNING) << "Too many frames backed up in the decoder, dropping "
+                           "this one.";
     return;
   }
 
   const int64_t now_ms = _clock->TimeInMilliseconds();
   if (!decode_time_ms) {
-    decode_time_ms =
-        rtc::Optional<int32_t>(now_ms - frameInfo->decodeStartTimeMs);
+    decode_time_ms = now_ms - frameInfo->decodeStartTimeMs;
   }
   _timing->StopDecodeTimer(decodedImage.timestamp(), *decode_time_ms, now_ms,
                            frameInfo->renderTimeMs);
 
   // Report timing information.
-  if (frameInfo->timing.is_timing_frame) {
+  if (frameInfo->timing.flags != TimingFrameFlags::kInvalid) {
     int64_t capture_time_ms = decodedImage.ntp_time_ms() - ntp_offset_;
     // Convert remote timestamps to local time from ntp timestamps.
     frameInfo->timing.encode_start_ms -= ntp_offset_;
@@ -137,6 +136,7 @@ void VCMDecodedFrameCallback::Decoded(VideoFrame& decodedImage,
     timing_frame_info.decode_finish_ms = now_ms;
     timing_frame_info.render_time_ms = frameInfo->renderTimeMs;
     timing_frame_info.rtp_timestamp = decodedImage.timestamp();
+    timing_frame_info.flags = frameInfo->timing.flags;
 
     _timing->SetTimingFrameInfo(timing_frame_info);
   }
@@ -180,6 +180,9 @@ int32_t VCMDecodedFrameCallback::Pop(uint32_t timestamp) {
   }
   return VCM_OK;
 }
+
+VCMGenericDecoder::VCMGenericDecoder(std::unique_ptr<VideoDecoder> decoder)
+    : VCMGenericDecoder(decoder.release(), false /* isExternal */) {}
 
 VCMGenericDecoder::VCMGenericDecoder(VideoDecoder* decoder, bool isExternal)
     : _callback(NULL),
@@ -233,10 +236,10 @@ int32_t VCMGenericDecoder::Decode(const VCMEncodedFrame& frame, int64_t nowMs) {
 
     _callback->OnDecoderImplementationName(decoder_->ImplementationName());
     if (ret < WEBRTC_VIDEO_CODEC_OK) {
-        LOG(LS_WARNING) << "Failed to decode frame with timestamp "
-                        << frame.TimeStamp() << ", error code: " << ret;
-        _callback->Pop(frame.TimeStamp());
-        return ret;
+      RTC_LOG(LS_WARNING) << "Failed to decode frame with timestamp "
+                          << frame.TimeStamp() << ", error code: " << ret;
+      _callback->Pop(frame.TimeStamp());
+      return ret;
     } else if (ret == WEBRTC_VIDEO_CODEC_NO_OUTPUT ||
                ret == WEBRTC_VIDEO_CODEC_REQUEST_SLI) {
         // No output

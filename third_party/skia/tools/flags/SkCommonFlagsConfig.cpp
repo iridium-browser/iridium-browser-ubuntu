@@ -5,7 +5,6 @@
  * found in the LICENSE file.
  */
 
-#include "SkColorSpace_Base.h"
 #include "SkCommonFlagsConfig.h"
 #include "SkImageInfo.h"
 
@@ -43,18 +42,7 @@ static const struct {
     { "glesmsaa4",             "gpu", "api=gles,samples=4" },
     { "glnvpr4",               "gpu", "api=gl,nvpr=true,samples=4" },
     { "glnvpr8" ,              "gpu", "api=gl,nvpr=true,samples=8" },
-    { "glnvprdit4",            "gpu", "api=gl,nvpr=true,samples=4,dit=true" },
-    { "glnvprdit8" ,           "gpu", "api=gl,nvpr=true,samples=8,dit=true" },
     { "glesnvpr4",             "gpu", "api=gles,nvpr=true,samples=4" },
-    { "glesnvprdit4",          "gpu", "api=gles,nvpr=true,samples=4,dit=true" },
-    { "glinst",                "gpu", "api=gl,inst=true" },
-    { "glinst4",               "gpu", "api=gl,inst=true,samples=4" },
-    { "glinstdit4",            "gpu", "api=gl,inst=true,samples=4,dit=true" },
-    { "glinst8" ,              "gpu", "api=gl,inst=true,samples=8" },
-    { "glinstdit8" ,           "gpu", "api=gl,inst=true,samples=8,dit=true" },
-    { "glesinst",              "gpu", "api=gles,inst=true" },
-    { "glesinst4",             "gpu", "api=gles,inst=true,samples=4" },
-    { "glesinstdit4",          "gpu", "api=gles,inst=true,samples=4,dit=true" },
     { "gl4444",                "gpu", "api=gl,color=4444" },
     { "gl565",                 "gpu", "api=gl,color=565" },
     { "glf16",                 "gpu", "api=gl,color=f16" },
@@ -67,11 +55,13 @@ static const struct {
     { "glwide",                "gpu", "api=gl,color=f16_wide" },
     { "glnarrow",              "gpu", "api=gl,color=f16_narrow" },
     { "glnostencils",          "gpu", "api=gl,stencils=false" },
+    { "gles4444",              "gpu", "api=gles,color=4444" },
     { "glessrgb",              "gpu", "api=gles,color=srgb" },
     { "gleswide",              "gpu", "api=gles,color=f16_wide" },
     { "glesnarrow",            "gpu", "api=gles,color=f16_narrow" },
     { "gldft",                 "gpu", "api=gl,dit=true" },
     { "glesdft",               "gpu", "api=gles,dit=true" },
+    { "gltestthreading",       "gpu", "api=gl,testThreading=true" },
     { "debuggl",               "gpu", "api=debuggl" },
     { "nullgl",                "gpu", "api=nullgl" },
     { "angle_d3d11_es2",       "gpu", "api=angle_d3d11_es2" },
@@ -85,9 +75,6 @@ static const struct {
     { "angle_gl_es3",          "gpu", "api=angle_gl_es3" },
     { "commandbuffer",         "gpu", "api=commandbuffer" },
     { "mock",                  "gpu", "api=mock" }
-#if SK_MESA
-    ,{ "mesa",                 "gpu", "api=mesa" }
-#endif
 #ifdef SK_VULKAN
     ,{ "vk",                   "gpu", "api=vulkan" }
     ,{ "vksrgb",               "gpu", "api=vulkan,color=srgb" }
@@ -140,9 +127,6 @@ static const char configExtendedHelp[] =
     "\t\tangle_gl_es3\t\t\tUse OpenGL ES3 on the ANGLE OpenGL backend.\n"
     "\t\tcommandbuffer\t\tUse command buffer.\n"
     "\t\tmock\t\tUse mock context.\n"
-#if SK_MESA
-    "\t\tmesa\t\t\tUse MESA.\n"
-#endif
 #ifdef SK_VULKAN
     "\t\tvulkan\t\t\tUse Vulkan.\n"
 #endif
@@ -170,6 +154,8 @@ static const char configExtendedHelp[] =
     "\t    Use multisampling with N samples.\n"
     "\tstencils\ttype: bool\tdefault: true.\n"
     "\t    Allow the use of stencil buffers.\n"
+    "\ttestThreading\ttype: bool\tdefault: false.\n"
+    "\t    Run config with and without worker threads, check that results match.\n"
     "\n"
     "Predefined configs:\n\n"
     // Help text for pre-defined configs is auto-generated from gPredefinedConfigs
@@ -199,8 +185,8 @@ SkCommandLineConfig::~SkCommandLineConfig() {
 #if SK_SUPPORT_GPU
 SkCommandLineConfigGpu::SkCommandLineConfigGpu(
     const SkString& tag, const SkTArray<SkString>& viaParts, ContextType contextType, bool useNVPR,
-    bool useInstanced, bool useDIText, int samples, SkColorType colorType, SkAlphaType alphaType,
-    sk_sp<SkColorSpace> colorSpace, bool useStencilBuffers)
+    bool useDIText, int samples, SkColorType colorType, SkAlphaType alphaType,
+    sk_sp<SkColorSpace> colorSpace, bool useStencilBuffers, bool testThreading)
         : SkCommandLineConfig(tag, SkString("gpu"), viaParts)
         , fContextType(contextType)
         , fContextOverrides(ContextOverrides::kNone)
@@ -208,16 +194,14 @@ SkCommandLineConfigGpu::SkCommandLineConfigGpu(
         , fSamples(samples)
         , fColorType(colorType)
         , fAlphaType(alphaType)
-        , fColorSpace(std::move(colorSpace)) {
+        , fColorSpace(std::move(colorSpace))
+        , fTestThreading(testThreading) {
     if (useNVPR) {
         fContextOverrides |= ContextOverrides::kRequireNVPRSupport;
-    } else if (!useInstanced) {
+    } else {
         // We don't disable NVPR for instanced configs. Otherwise the caps wouldn't use mixed
         // samples and we couldn't test the mixed samples backend for simple shapes.
         fContextOverrides |= ContextOverrides::kDisableNVPR;
-    }
-    if (useInstanced) {
-        fContextOverrides |= ContextOverrides::kUseInstanced;
     }
     // Subtle logic: If the config has a color space attached, we're going to be rendering to sRGB,
     // so we need that capability. In addition, to get the widest test coverage, we DO NOT require
@@ -303,12 +287,6 @@ static bool parse_option_gpu_api(const SkString& value,
         *outContextType = GrContextFactory::kMock_ContextType;
         return true;
     }
-#if SK_MESA
-    if (value.equals("mesa")) {
-        *outContextType = GrContextFactory::kMESA_ContextType;
-        return true;
-    }
-#endif
 #ifdef SK_VULKAN
     if (value.equals("vulkan")) {
         *outContextType = GrContextFactory::kVulkan_ContextType;
@@ -407,18 +385,18 @@ SkCommandLineConfigGpu* parse_command_line_config_gpu(const SkString& tag,
     SkCommandLineConfigGpu::ContextType contextType = GrContextFactory::kGL_ContextType;
     bool seenUseNVPR = false;
     bool useNVPR = false;
-    bool seenUseInstanced = false;
-    bool useInstanced = false;
     bool seenUseDIText =false;
     bool useDIText = false;
     bool seenSamples = false;
-    int samples = 0;
+    int samples = 1;
     bool seenColor = false;
     SkColorType colorType = kRGBA_8888_SkColorType;
     SkAlphaType alphaType = kPremul_SkAlphaType;
     sk_sp<SkColorSpace> colorSpace = nullptr;
     bool seenUseStencils = false;
     bool useStencils = true;
+    bool seenTestThreading = false;
+    bool testThreading = false;
 
     SkTArray<SkString> optionParts;
     SkStrSplit(options.c_str(), ",", kStrict_SkStrSplitMode, &optionParts);
@@ -437,9 +415,6 @@ SkCommandLineConfigGpu* parse_command_line_config_gpu(const SkString& tag,
         } else if (key.equals("nvpr") && !seenUseNVPR) {
             valueOk = parse_option_bool(value, &useNVPR);
             seenUseNVPR = true;
-        } else if (key.equals("inst") && !seenUseInstanced) {
-            valueOk = parse_option_bool(value, &useInstanced);
-            seenUseInstanced = true;
         } else if (key.equals("dit") && !seenUseDIText) {
             valueOk = parse_option_bool(value, &useDIText);
             seenUseDIText = true;
@@ -452,6 +427,9 @@ SkCommandLineConfigGpu* parse_command_line_config_gpu(const SkString& tag,
         } else if (key.equals("stencils") && !seenUseStencils) {
             valueOk = parse_option_bool(value, &useStencils);
             seenUseStencils = true;
+        } else if (key.equals("testThreading") && !seenTestThreading) {
+            valueOk = parse_option_bool(value, &testThreading);
+            seenTestThreading = true;
         }
         if (!valueOk) {
             return nullptr;
@@ -460,8 +438,9 @@ SkCommandLineConfigGpu* parse_command_line_config_gpu(const SkString& tag,
     if (!seenAPI) {
         return nullptr;
     }
-    return new SkCommandLineConfigGpu(tag, vias, contextType, useNVPR, useInstanced, useDIText,
-                                      samples, colorType, alphaType, colorSpace, useStencils);
+    return new SkCommandLineConfigGpu(tag, vias, contextType, useNVPR, useDIText,
+                                      samples, colorType, alphaType, colorSpace, useStencils,
+                                      testThreading);
 }
 #endif
 

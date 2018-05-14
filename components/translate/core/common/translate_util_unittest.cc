@@ -19,9 +19,19 @@ TEST_F(TranslateUtilTest, ToTranslateLanguageSynonym) {
   translate::ToTranslateLanguageSynonym(&language);
   EXPECT_EQ("no", language);
 
+  // Test all known Chinese cases.
   language = std::string("zh-HK");
   translate::ToTranslateLanguageSynonym(&language);
   EXPECT_EQ("zh-TW", language);
+  language = std::string("zh-MO");
+  translate::ToTranslateLanguageSynonym(&language);
+  EXPECT_EQ("zh-TW", language);
+  language = std::string("zh-SG");
+  translate::ToTranslateLanguageSynonym(&language);
+  EXPECT_EQ("zh-CN", language);
+  language = std::string("zh");
+  translate::ToTranslateLanguageSynonym(&language);
+  EXPECT_EQ("zh", language);
 
   // A sub code is not preserved (except for Chinese).
   language = std::string("he-IL");
@@ -68,3 +78,4 @@ TEST_F(TranslateUtilTest, SecurityOrigin) {
   GURL modified_origin = translate::GetTranslateSecurityOrigin();
   EXPECT_EQ(running_origin, modified_origin.spec());
 }
+

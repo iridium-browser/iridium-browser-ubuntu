@@ -11,10 +11,9 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/policy/configuration_policy_handler_list_factory.h"
 #include "chrome/browser/policy/device_management_service_configuration.h"
@@ -27,7 +26,6 @@
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/policy_constants.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -42,8 +40,6 @@
 #elif defined(OS_ANDROID)
 #include "components/policy/core/browser/android/android_combined_policy_provider.h"
 #endif
-
-using content::BrowserThread;
 
 namespace policy {
 
@@ -67,21 +63,17 @@ base::FilePath GetManagedPolicyPath() {
 
 ChromeBrowserPolicyConnector::ChromeBrowserPolicyConnector()
     : BrowserPolicyConnector(base::Bind(&BuildHandlerList)) {
-  std::unique_ptr<ConfigurationPolicyProvider> platform_provider =
-      CreatePlatformProvider();
-  if (platform_provider)
-    SetPlatformPolicyProvider(std::move(platform_provider));
 }
 
 ChromeBrowserPolicyConnector::~ChromeBrowserPolicyConnector() {}
 
+void ChromeBrowserPolicyConnector::OnResourceBundleCreated() {
+  BrowserPolicyConnectorBase::OnResourceBundleCreated();
+}
+
 void ChromeBrowserPolicyConnector::Init(
     PrefService* local_state,
     scoped_refptr<net::URLRequestContextGetter> request_context) {
-  // Initialization of some of the providers requires the FILE thread; make
-  // sure that threading is ready at this point.
-  DCHECK(BrowserThread::IsThreadInitialized(BrowserThread::FILE));
-
   std::unique_ptr<DeviceManagementService::Configuration> configuration(
       new DeviceManagementServiceConfiguration(
           BrowserPolicyConnector::GetDeviceManagementUrl()));
@@ -93,33 +85,56 @@ void ChromeBrowserPolicyConnector::Init(
   InitInternal(local_state, std::move(device_management_service));
 }
 
+ConfigurationPolicyProvider*
+ChromeBrowserPolicyConnector::GetPlatformProvider() {
+  ConfigurationPolicyProvider* provider =
+      BrowserPolicyConnectorBase::GetPolicyProviderForTesting();
+  return provider ? provider : platform_provider_;
+}
+
+std::vector<std::unique_ptr<policy::ConfigurationPolicyProvider>>
+ChromeBrowserPolicyConnector::CreatePolicyProviders() {
+  auto providers = BrowserPolicyConnector::CreatePolicyProviders();
+  std::unique_ptr<ConfigurationPolicyProvider> platform_provider =
+      CreatePlatformProvider();
+  if (platform_provider) {
+    platform_provider_ = platform_provider.get();
+    // PlatformProvider should be before all other providers (highest priority).
+    providers.insert(providers.begin(), std::move(platform_provider));
+  }
+  return providers;
+}
+
 std::unique_ptr<ConfigurationPolicyProvider>
 ChromeBrowserPolicyConnector::CreatePlatformProvider() {
 #if defined(OS_WIN)
   std::unique_ptr<AsyncPolicyLoader> loader(PolicyLoaderWin::Create(
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND}),
       kRegistryChromePolicyKey));
-  return base::MakeUnique<AsyncPolicyProvider>(GetSchemaRegistry(),
+  return std::make_unique<AsyncPolicyProvider>(GetSchemaRegistry(),
                                                std::move(loader));
 #elif defined(OS_MACOSX)
   std::unique_ptr<AsyncPolicyLoader> loader(new PolicyLoaderMac(
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND}),
       GetManagedPolicyPath(), new MacPreferences()));
-  return base::MakeUnique<AsyncPolicyProvider>(GetSchemaRegistry(),
+  return std::make_unique<AsyncPolicyProvider>(GetSchemaRegistry(),
                                                std::move(loader));
 #elif defined(OS_POSIX) && !defined(OS_ANDROID)
   base::FilePath config_dir_path;
   if (PathService::Get(chrome::DIR_POLICY_FILES, &config_dir_path)) {
     std::unique_ptr<AsyncPolicyLoader> loader(new ConfigDirPolicyLoader(
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
+        base::CreateSequencedTaskRunnerWithTraits(
+            {base::MayBlock(), base::TaskPriority::BACKGROUND}),
         config_dir_path, POLICY_SCOPE_MACHINE));
-    return base::MakeUnique<AsyncPolicyProvider>(GetSchemaRegistry(),
+    return std::make_unique<AsyncPolicyProvider>(GetSchemaRegistry(),
                                                  std::move(loader));
   } else {
     return nullptr;
   }
 #elif defined(OS_ANDROID)
-  return base::MakeUnique<policy::android::AndroidCombinedPolicyProvider>(
+  return std::make_unique<policy::android::AndroidCombinedPolicyProvider>(
       GetSchemaRegistry());
 #else
   return nullptr;

@@ -26,6 +26,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/referrer.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "ui/gfx/geometry/rect.h"
 
 class Profile;
@@ -113,9 +114,6 @@ class PrerenderContents : public content::NotificationObserver,
   void SetPrerenderMode(PrerenderMode mode);
   PrerenderMode prerender_mode() const { return prerender_mode_; }
 
-  // Returns true iff the method given is valid for prerendering.
-  bool IsValidHttpMethod(const std::string& method);
-
   static Factory* CreateFactory();
 
   // Returns a PrerenderContents from the given web_contents, if it's used for
@@ -176,14 +174,18 @@ class PrerenderContents : public content::NotificationObserver,
       content::RenderFrameHost* render_frame_host) override;
   void DidStartNavigation(
       content::NavigationHandle* navigation_handle) override;
+  void DidRedirectNavigation(
+      content::NavigationHandle* navigation_handle) override;
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
-  void DidGetRedirectForResourceRequest(
-      const content::ResourceRedirectDetails& details) override;
 
   void RenderProcessGone(base::TerminationStatus status) override;
+  void OnInterfaceRequestFromFrame(
+      content::RenderFrameHost* render_frame_host,
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle* interface_pipe) override;
 
   // content::NotificationObserver
   void Observe(int type,
@@ -220,11 +222,6 @@ class PrerenderContents : public content::NotificationObserver,
   void CommitHistory(content::WebContents* tab);
 
   std::unique_ptr<base::DictionaryValue> GetAsValue() const;
-
-  // Returns whether a pending cross-site navigation is happening.
-  // This could happen with renderer-issued navigations, such as a
-  // MouseEvent being dispatched by a link to a website installed as an app.
-  bool IsCrossSiteNavigationPending() const;
 
   // Marks prerender as used and releases any throttled resource requests.
   void PrepareForUse();
@@ -296,7 +293,7 @@ class PrerenderContents : public content::NotificationObserver,
   // The session storage namespace id for use in matching. We must save it
   // rather than get it from the RenderViewHost since in the control group
   // we won't have a RenderViewHost.
-  int64_t session_storage_namespace_id_;
+  std::string session_storage_namespace_id_;
 
  private:
   class WebContentsDelegateImpl;
@@ -309,6 +306,9 @@ class PrerenderContents : public content::NotificationObserver,
 
   // chrome::mojom::PrerenderCanceler:
   void CancelPrerenderForPrinting() override;
+  void CancelPrerenderForUnsupportedMethod() override;
+  void CancelPrerenderForUnsupportedScheme(const GURL& url) override;
+  void CancelPrerenderForSyncDeferredRedirect() override;
 
   void OnPrerenderCancelerRequest(
       chrome::mojom::PrerenderCancelerRequest request);
@@ -384,6 +384,8 @@ class PrerenderContents : public content::NotificationObserver,
   // A running tally of the number of bytes this prerender has caused to be
   // transferred over the network for resources.  Updated with AddNetworkBytes.
   int64_t network_bytes_;
+
+  service_manager::BinderRegistry registry_;
 
   base::WeakPtrFactory<PrerenderContents> weak_factory_;
 

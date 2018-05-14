@@ -5,8 +5,9 @@
 #include "core/html/parser/PreloadRequest.h"
 
 #include "core/dom/Document.h"
-#include "core/dom/DocumentWriteIntervention.h"
 #include "core/loader/DocumentLoader.h"
+#include "core/script/DocumentWriteIntervention.h"
+#include "core/script/ScriptLoader.h"
 #include "platform/CrossOriginAttributeValue.h"
 #include "platform/loader/fetch/FetchInitiatorInfo.h"
 #include "platform/loader/fetch/FetchParameters.h"
@@ -29,7 +30,8 @@ KURL PreloadRequest::CompleteURL(Document* document) {
   return document->CompleteURL(resource_url_);
 }
 
-Resource* PreloadRequest::Start(Document* document) {
+Resource* PreloadRequest::Start(Document* document,
+                                CSSPreloaderResourceClient* client) {
   DCHECK(IsMainThread());
 
   FetchInitiatorInfo initiator_info;
@@ -49,21 +51,23 @@ Resource* PreloadRequest::Start(Document* document) {
   resource_request.SetRequestContext(ResourceFetcher::DetermineRequestContext(
       resource_type_, is_image_set_, false));
 
-  if (resource_type_ == Resource::kScript)
-    MaybeDisallowFetchForDocWrittenScript(resource_request, defer_, *document);
-
   ResourceLoaderOptions options;
   options.initiator_info = initiator_info;
   FetchParameters params(resource_request, options);
 
   if (resource_type_ == Resource::kImportResource) {
-    SecurityOrigin* security_origin =
+    const SecurityOrigin* security_origin =
         document->ContextDocument()->GetSecurityOrigin();
     params.SetCrossOriginAccessControl(security_origin,
                                        kCrossOriginAttributeAnonymous);
   }
 
-  if (cross_origin_ != kCrossOriginAttributeNotSet) {
+  if (script_type_ == ScriptType::kModule) {
+    DCHECK_EQ(resource_type_, Resource::kScript);
+    params.SetCrossOriginAccessControl(
+        document->GetSecurityOrigin(),
+        ScriptLoader::ModuleScriptCredentialsMode(cross_origin_));
+  } else if (cross_origin_ != kCrossOriginAttributeNotSet) {
     params.SetCrossOriginAccessControl(document->GetSecurityOrigin(),
                                        cross_origin_);
   }
@@ -78,9 +82,13 @@ Resource* PreloadRequest::Start(Document* document) {
   if (request_type_ == kRequestTypeLinkRelPreload)
     params.SetLinkPreload(true);
 
-  if (resource_type_ == Resource::kScript ||
-      resource_type_ == Resource::kCSSStyleSheet ||
-      resource_type_ == Resource::kImportResource) {
+  if (script_type_ == ScriptType::kModule) {
+    DCHECK_EQ(resource_type_, Resource::kScript);
+    params.SetDecoderOptions(
+        TextResourceDecoderOptions::CreateAlwaysUseUTF8ForText());
+  } else if (resource_type_ == Resource::kScript ||
+             resource_type_ == Resource::kCSSStyleSheet ||
+             resource_type_ == Resource::kImportResource) {
     params.SetCharset(charset_.IsEmpty() ? document->Encoding()
                                          : WTF::TextEncoding(charset_));
   }
@@ -92,7 +100,13 @@ Resource* PreloadRequest::Start(Document* document) {
   }
   params.SetSpeculativePreloadType(speculative_preload_type, discovery_time_);
 
-  return document->Loader()->StartPreload(resource_type_, params);
+  if (resource_type_ == Resource::kScript) {
+    MaybeDisallowFetchForDocWrittenScript(params, *document);
+    // We intentionally ignore the returned value, because we don't resend
+    // the async request to the blocked script here.
+  }
+
+  return document->Loader()->StartPreload(resource_type_, params, client);
 }
 
 }  // namespace blink

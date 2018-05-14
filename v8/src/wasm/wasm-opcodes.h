@@ -2,30 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef V8_WASM_OPCODES_H_
-#define V8_WASM_OPCODES_H_
+#ifndef V8_WASM_WASM_OPCODES_H_
+#define V8_WASM_WASM_OPCODES_H_
 
 #include "src/globals.h"
 #include "src/machine-type.h"
 #include "src/runtime/runtime.h"
 #include "src/signature.h"
+#include "src/wasm/wasm-constants.h"
 
 namespace v8 {
 namespace internal {
 namespace wasm {
-
-// Binary encoding of local types.
-enum ValueTypeCode {
-  kLocalVoid = 0x40,
-  kLocalI32 = 0x7f,
-  kLocalI64 = 0x7e,
-  kLocalF32 = 0x7d,
-  kLocalF64 = 0x7c,
-  kLocalS128 = 0x7b
-};
-
-// Type code for multi-value block types.
-static const uint8_t kMultivalBlock = 0x41;
 
 // We reuse the internal machine type to represent WebAssembly types.
 // A typedef improves readability without adding a whole new type system.
@@ -43,9 +31,6 @@ std::ostream& operator<<(std::ostream& os, const FunctionSig& function);
 bool IsJSCompatibleSignature(const FunctionSig* sig);
 
 using WasmName = Vector<const char>;
-
-using WasmCodePosition = int;
-constexpr WasmCodePosition kNoCodePosition = -1;
 
 // Control expressions and blocks.
 #define FOREACH_CONTROL_OPCODE(V)         \
@@ -101,15 +86,15 @@ constexpr WasmCodePosition kNoCodePosition = -1;
 
 // Store memory expressions.
 #define FOREACH_STORE_MEM_OPCODE(V) \
-  V(I32StoreMem, 0x36, i_ii)        \
-  V(I64StoreMem, 0x37, l_il)        \
-  V(F32StoreMem, 0x38, f_if)        \
-  V(F64StoreMem, 0x39, d_id)        \
-  V(I32StoreMem8, 0x3a, i_ii)       \
-  V(I32StoreMem16, 0x3b, i_ii)      \
-  V(I64StoreMem8, 0x3c, l_il)       \
-  V(I64StoreMem16, 0x3d, l_il)      \
-  V(I64StoreMem32, 0x3e, l_il)
+  V(I32StoreMem, 0x36, v_ii)        \
+  V(I64StoreMem, 0x37, v_il)        \
+  V(F32StoreMem, 0x38, v_if)        \
+  V(F64StoreMem, 0x39, v_id)        \
+  V(I32StoreMem8, 0x3a, v_ii)       \
+  V(I32StoreMem16, 0x3b, v_ii)      \
+  V(I64StoreMem8, 0x3c, v_il)       \
+  V(I64StoreMem16, 0x3d, v_il)      \
+  V(I64StoreMem32, 0x3e, v_il)
 
 // Miscellaneous memory expressions
 #define FOREACH_MISC_MEM_OPCODE(V) \
@@ -240,21 +225,26 @@ constexpr WasmCodePosition kNoCodePosition = -1;
   V(I32ReinterpretF32, 0xbc, i_f) \
   V(I64ReinterpretF64, 0xbd, l_d) \
   V(F32ReinterpretI32, 0xbe, f_i) \
-  V(F64ReinterpretI64, 0xbf, d_l)
+  V(F64ReinterpretI64, 0xbf, d_l) \
+  V(I32SExtendI8, 0xc0, i_i)      \
+  V(I32SExtendI16, 0xc1, i_i)     \
+  V(I64SExtendI8, 0xc2, l_l)      \
+  V(I64SExtendI16, 0xc3, l_l)     \
+  V(I64SExtendI32, 0xc4, l_l)
 
 // For compatibility with Asm.js.
 #define FOREACH_ASMJS_COMPAT_OPCODE(V) \
-  V(F64Acos, 0xc2, d_d)                \
-  V(F64Asin, 0xc3, d_d)                \
-  V(F64Atan, 0xc4, d_d)                \
-  V(F64Cos, 0xc5, d_d)                 \
-  V(F64Sin, 0xc6, d_d)                 \
-  V(F64Tan, 0xc7, d_d)                 \
-  V(F64Exp, 0xc8, d_d)                 \
-  V(F64Log, 0xc9, d_d)                 \
-  V(F64Atan2, 0xca, d_dd)              \
-  V(F64Pow, 0xcb, d_dd)                \
-  V(F64Mod, 0xcc, d_dd)                \
+  V(F64Acos, 0xc5, d_d)                \
+  V(F64Asin, 0xc6, d_d)                \
+  V(F64Atan, 0xc7, d_d)                \
+  V(F64Cos, 0xc8, d_d)                 \
+  V(F64Sin, 0xc9, d_d)                 \
+  V(F64Tan, 0xca, d_d)                 \
+  V(F64Exp, 0xcb, d_d)                 \
+  V(F64Log, 0xcc, d_d)                 \
+  V(F64Atan2, 0xcd, d_dd)              \
+  V(F64Pow, 0xce, d_dd)                \
+  V(F64Mod, 0xcf, d_dd)                \
   V(I32AsmjsDivS, 0xd0, i_ii)          \
   V(I32AsmjsDivU, 0xd1, i_ii)          \
   V(I32AsmjsRemS, 0xd2, i_ii)          \
@@ -412,30 +402,46 @@ constexpr WasmCodePosition kNoCodePosition = -1;
 
 #define FOREACH_SIMD_MEM_OPCODE(V) \
   V(S128LoadMem, 0xfd80, s_i)      \
-  V(S128StoreMem, 0xfd81, s_is)
+  V(S128StoreMem, 0xfd81, v_is)
 
-#define FOREACH_ATOMIC_OPCODE(V)              \
-  V(I32AtomicAdd, 0xfe1e, i_ii)               \
-  V(I32AtomicAdd8U, 0xfe20, i_ii)             \
-  V(I32AtomicAdd16U, 0xfe21, i_ii)            \
-  V(I32AtomicSub, 0xfe25, i_ii)               \
-  V(I32AtomicSub8U, 0xfe27, i_ii)             \
-  V(I32AtomicSub16U, 0xfe28, i_ii)            \
-  V(I32AtomicAnd, 0xfe2c, i_ii)               \
-  V(I32AtomicAnd8U, 0xfe2e, i_ii)             \
-  V(I32AtomicAnd16U, 0xfe2f, i_ii)            \
-  V(I32AtomicOr, 0xfe33, i_ii)                \
-  V(I32AtomicOr8U, 0xfe35, i_ii)              \
-  V(I32AtomicOr16U, 0xfe36, i_ii)             \
-  V(I32AtomicXor, 0xfe3a, i_ii)               \
-  V(I32AtomicXor8U, 0xfe3c, i_ii)             \
-  V(I32AtomicXor16U, 0xfe3d, i_ii)            \
-  V(I32AtomicExchange, 0xfe41, i_ii)          \
-  V(I32AtomicExchange8U, 0xfe43, i_ii)        \
-  V(I32AtomicExchange16U, 0xfe44, i_ii)       \
-  V(I32AtomicCompareExchange, 0xfe48, i_ii)   \
-  V(I32AtomicCompareExchange8U, 0xfe4a, i_ii) \
-  V(I32AtomicCompareExchange16U, 0xfe4b, i_ii)
+#define FOREACH_NUMERIC_OPCODE(V)   \
+  V(I32SConvertSatF32, 0xfc00, i_f) \
+  V(I32UConvertSatF32, 0xfc01, i_f) \
+  V(I32SConvertSatF64, 0xfc02, i_d) \
+  V(I32UConvertSatF64, 0xfc03, i_d) \
+  V(I64SConvertSatF32, 0xfc04, l_f) \
+  V(I64UConvertSatF32, 0xfc05, l_f) \
+  V(I64SConvertSatF64, 0xfc06, l_d) \
+  V(I64UConvertSatF64, 0xfc07, l_d)
+
+#define FOREACH_ATOMIC_OPCODE(V)               \
+  V(I32AtomicLoad, 0xfe10, i_i)                \
+  V(I32AtomicLoad8U, 0xfe12, i_i)              \
+  V(I32AtomicLoad16U, 0xfe13, i_i)             \
+  V(I32AtomicStore, 0xfe17, v_ii)              \
+  V(I32AtomicStore8U, 0xfe19, v_ii)            \
+  V(I32AtomicStore16U, 0xfe1a, v_ii)           \
+  V(I32AtomicAdd, 0xfe1e, i_ii)                \
+  V(I32AtomicAdd8U, 0xfe20, i_ii)              \
+  V(I32AtomicAdd16U, 0xfe21, i_ii)             \
+  V(I32AtomicSub, 0xfe25, i_ii)                \
+  V(I32AtomicSub8U, 0xfe27, i_ii)              \
+  V(I32AtomicSub16U, 0xfe28, i_ii)             \
+  V(I32AtomicAnd, 0xfe2c, i_ii)                \
+  V(I32AtomicAnd8U, 0xfe2e, i_ii)              \
+  V(I32AtomicAnd16U, 0xfe2f, i_ii)             \
+  V(I32AtomicOr, 0xfe33, i_ii)                 \
+  V(I32AtomicOr8U, 0xfe35, i_ii)               \
+  V(I32AtomicOr16U, 0xfe36, i_ii)              \
+  V(I32AtomicXor, 0xfe3a, i_ii)                \
+  V(I32AtomicXor8U, 0xfe3c, i_ii)              \
+  V(I32AtomicXor16U, 0xfe3d, i_ii)             \
+  V(I32AtomicExchange, 0xfe41, i_ii)           \
+  V(I32AtomicExchange8U, 0xfe43, i_ii)         \
+  V(I32AtomicExchange16U, 0xfe44, i_ii)        \
+  V(I32AtomicCompareExchange, 0xfe48, i_iii)   \
+  V(I32AtomicCompareExchange8U, 0xfe4a, i_iii) \
+  V(I32AtomicCompareExchange16U, 0xfe4b, i_iii)
 
 // All opcodes.
 #define FOREACH_OPCODE(V)             \
@@ -450,38 +456,43 @@ constexpr WasmCodePosition kNoCodePosition = -1;
   FOREACH_SIMD_1_OPERAND_OPCODE(V)    \
   FOREACH_SIMD_MASK_OPERAND_OPCODE(V) \
   FOREACH_SIMD_MEM_OPCODE(V)          \
-  FOREACH_ATOMIC_OPCODE(V)
+  FOREACH_ATOMIC_OPCODE(V)            \
+  FOREACH_NUMERIC_OPCODE(V)
 
 // All signatures.
-#define FOREACH_SIGNATURE(V)            \
-  FOREACH_SIMD_SIGNATURE(V)             \
-  V(i_ii, kWasmI32, kWasmI32, kWasmI32) \
-  V(i_i, kWasmI32, kWasmI32)            \
-  V(i_v, kWasmI32)                      \
-  V(i_ff, kWasmI32, kWasmF32, kWasmF32) \
-  V(i_f, kWasmI32, kWasmF32)            \
-  V(i_dd, kWasmI32, kWasmF64, kWasmF64) \
-  V(i_d, kWasmI32, kWasmF64)            \
-  V(i_l, kWasmI32, kWasmI64)            \
-  V(l_ll, kWasmI64, kWasmI64, kWasmI64) \
-  V(i_ll, kWasmI32, kWasmI64, kWasmI64) \
-  V(l_l, kWasmI64, kWasmI64)            \
-  V(l_i, kWasmI64, kWasmI32)            \
-  V(l_f, kWasmI64, kWasmF32)            \
-  V(l_d, kWasmI64, kWasmF64)            \
-  V(f_ff, kWasmF32, kWasmF32, kWasmF32) \
-  V(f_f, kWasmF32, kWasmF32)            \
-  V(f_d, kWasmF32, kWasmF64)            \
-  V(f_i, kWasmF32, kWasmI32)            \
-  V(f_l, kWasmF32, kWasmI64)            \
-  V(d_dd, kWasmF64, kWasmF64, kWasmF64) \
-  V(d_d, kWasmF64, kWasmF64)            \
-  V(d_f, kWasmF64, kWasmF32)            \
-  V(d_i, kWasmF64, kWasmI32)            \
-  V(d_l, kWasmF64, kWasmI64)            \
-  V(d_id, kWasmF64, kWasmI32, kWasmF64) \
-  V(f_if, kWasmF32, kWasmI32, kWasmF32) \
-  V(l_il, kWasmI64, kWasmI32, kWasmI64)
+#define FOREACH_SIGNATURE(V)             \
+  FOREACH_SIMD_SIGNATURE(V)              \
+  V(i_ii, kWasmI32, kWasmI32, kWasmI32)  \
+  V(i_i, kWasmI32, kWasmI32)             \
+  V(i_v, kWasmI32)                       \
+  V(i_ff, kWasmI32, kWasmF32, kWasmF32)  \
+  V(i_f, kWasmI32, kWasmF32)             \
+  V(i_dd, kWasmI32, kWasmF64, kWasmF64)  \
+  V(i_d, kWasmI32, kWasmF64)             \
+  V(i_l, kWasmI32, kWasmI64)             \
+  V(l_ll, kWasmI64, kWasmI64, kWasmI64)  \
+  V(i_ll, kWasmI32, kWasmI64, kWasmI64)  \
+  V(l_l, kWasmI64, kWasmI64)             \
+  V(l_i, kWasmI64, kWasmI32)             \
+  V(l_f, kWasmI64, kWasmF32)             \
+  V(l_d, kWasmI64, kWasmF64)             \
+  V(f_ff, kWasmF32, kWasmF32, kWasmF32)  \
+  V(f_f, kWasmF32, kWasmF32)             \
+  V(f_d, kWasmF32, kWasmF64)             \
+  V(f_i, kWasmF32, kWasmI32)             \
+  V(f_l, kWasmF32, kWasmI64)             \
+  V(d_dd, kWasmF64, kWasmF64, kWasmF64)  \
+  V(d_d, kWasmF64, kWasmF64)             \
+  V(d_f, kWasmF64, kWasmF32)             \
+  V(d_i, kWasmF64, kWasmI32)             \
+  V(d_l, kWasmF64, kWasmI64)             \
+  V(v_ii, kWasmStmt, kWasmI32, kWasmI32) \
+  V(v_id, kWasmStmt, kWasmI32, kWasmF64) \
+  V(d_id, kWasmF64, kWasmI32, kWasmF64)  \
+  V(v_if, kWasmStmt, kWasmI32, kWasmF32) \
+  V(f_if, kWasmF32, kWasmI32, kWasmF32)  \
+  V(v_il, kWasmI64, kWasmI32, kWasmI64)  \
+  V(i_iii, kWasmI32, kWasmI32, kWasmI32, kWasmI32)
 
 #define FOREACH_SIMD_SIGNATURE(V)          \
   V(s_s, kWasmS128, kWasmS128)             \
@@ -493,6 +504,7 @@ constexpr WasmCodePosition kNoCodePosition = -1;
   V(s_sss, kWasmS128, kWasmS128, kWasmS128, kWasmS128)
 
 #define FOREACH_PREFIX(V) \
+  V(Numeric, 0xfc)        \
   V(Simd, 0xfd)           \
   V(Atomic, 0xfe)
 
@@ -524,15 +536,126 @@ enum TrapReason {
 #undef DECLARE_ENUM
 };
 
+// TODO(clemensh): Compute memtype and size from ValueType once we have c++14
+// constexpr support.
+#define FOREACH_LOAD_TYPE(V) \
+  V(I32, , Int32, 2)         \
+  V(I32, 8S, Int8, 0)        \
+  V(I32, 8U, Uint8, 0)       \
+  V(I32, 16S, Int16, 1)      \
+  V(I32, 16U, Uint16, 1)     \
+  V(I64, , Int64, 3)         \
+  V(I64, 8S, Int8, 0)        \
+  V(I64, 8U, Uint8, 0)       \
+  V(I64, 16S, Int16, 1)      \
+  V(I64, 16U, Uint16, 1)     \
+  V(I64, 32S, Int32, 2)      \
+  V(I64, 32U, Uint32, 2)     \
+  V(F32, , Float32, 2)       \
+  V(F64, , Float64, 3)       \
+  V(S128, , Simd128, 4)
+
+class LoadType {
+ public:
+  enum LoadTypeValue : uint8_t {
+#define DEF_ENUM(type, suffix, ...) k##type##Load##suffix,
+    FOREACH_LOAD_TYPE(DEF_ENUM)
+#undef DEF_ENUM
+  };
+
+  // Allow implicit convertion of the enum value to this wrapper.
+  constexpr LoadType(LoadTypeValue val)  // NOLINT(runtime/explicit)
+      : val_(val) {}
+
+  constexpr LoadTypeValue value() const { return val_; }
+  constexpr unsigned size_log_2() const { return kLoadSizeLog2[val_]; }
+  constexpr unsigned size() const { return 1 << size_log_2(); }
+  constexpr ValueType value_type() const { return kValueType[val_]; }
+  constexpr MachineType mem_type() const { return kMemType[val_]; }
+
+ private:
+  const LoadTypeValue val_;
+
+  static constexpr uint8_t kLoadSizeLog2[] = {
+#define LOAD_SIZE(_, __, ___, size) size,
+      FOREACH_LOAD_TYPE(LOAD_SIZE)
+#undef LOAD_SIZE
+  };
+
+  static constexpr ValueType kValueType[] = {
+#define VALUE_TYPE(type, ...) kWasm##type,
+      FOREACH_LOAD_TYPE(VALUE_TYPE)
+#undef VALUE_TYPE
+  };
+
+  static constexpr MachineType kMemType[] = {
+#define MEMTYPE(_, __, memtype, ___) MachineType::memtype(),
+      FOREACH_LOAD_TYPE(MEMTYPE)
+#undef MEMTYPE
+  };
+};
+
+#define FOREACH_STORE_TYPE(V) \
+  V(I32, , Word32, 2)         \
+  V(I32, 8, Word8, 0)         \
+  V(I32, 16, Word16, 1)       \
+  V(I64, , Word64, 3)         \
+  V(I64, 8, Word8, 0)         \
+  V(I64, 16, Word16, 1)       \
+  V(I64, 32, Word32, 2)       \
+  V(F32, , Float32, 2)        \
+  V(F64, , Float64, 3)        \
+  V(S128, , Simd128, 4)
+
+class StoreType {
+ public:
+  enum StoreTypeValue : uint8_t {
+#define DEF_ENUM(type, suffix, ...) k##type##Store##suffix,
+    FOREACH_STORE_TYPE(DEF_ENUM)
+#undef DEF_ENUM
+  };
+
+  // Allow implicit convertion of the enum value to this wrapper.
+  constexpr StoreType(StoreTypeValue val)  // NOLINT(runtime/explicit)
+      : val_(val) {}
+
+  constexpr StoreTypeValue value() const { return val_; }
+  constexpr unsigned size_log_2() const { return kStoreSizeLog2[val_]; }
+  constexpr unsigned size() const { return 1 << size_log_2(); }
+  constexpr ValueType value_type() const { return kValueType[val_]; }
+  constexpr ValueType mem_rep() const { return kMemRep[val_]; }
+
+ private:
+  const StoreTypeValue val_;
+
+  static constexpr uint8_t kStoreSizeLog2[] = {
+#define STORE_SIZE(_, __, ___, size) size,
+      FOREACH_STORE_TYPE(STORE_SIZE)
+#undef STORE_SIZE
+  };
+
+  static constexpr ValueType kValueType[] = {
+#define VALUE_TYPE(type, ...) kWasm##type,
+      FOREACH_STORE_TYPE(VALUE_TYPE)
+#undef VALUE_TYPE
+  };
+
+  static constexpr MachineRepresentation kMemRep[] = {
+#define MEMREP(_, __, memrep, ___) MachineRepresentation::k##memrep,
+      FOREACH_STORE_TYPE(MEMREP)
+#undef MEMREP
+  };
+};
+
 // A collection of opcode-related static methods.
 class V8_EXPORT_PRIVATE WasmOpcodes {
  public:
   static const char* OpcodeName(WasmOpcode opcode);
   static FunctionSig* Signature(WasmOpcode opcode);
   static FunctionSig* AsmjsSignature(WasmOpcode opcode);
-  static FunctionSig* AtomicSignature(WasmOpcode opcode);
   static bool IsPrefixOpcode(WasmOpcode opcode);
   static bool IsControlOpcode(WasmOpcode opcode);
+  static bool IsSignExtensionOpcode(WasmOpcode opcode);
   // Check whether the given opcode always jumps, i.e. all instructions after
   // this one in the current block are dead. Returns false for |end|.
   static bool IsUnconditionalJump(WasmOpcode opcode);
@@ -541,7 +664,7 @@ class V8_EXPORT_PRIVATE WasmOpcodes {
   static const char* TrapReasonMessage(TrapReason reason);
 
   static byte MemSize(MachineType type) {
-    return 1 << ElementSizeLog2Of(type.representation());
+    return MemSize(type.representation());
   }
 
   static byte MemSize(ValueType type) { return 1 << ElementSizeLog2Of(type); }
@@ -645,8 +768,38 @@ class V8_EXPORT_PRIVATE WasmOpcodes {
     }
   }
 };
+
+// Representation of an initializer expression.
+struct WasmInitExpr {
+  enum WasmInitKind {
+    kNone,
+    kGlobalIndex,
+    kI32Const,
+    kI64Const,
+    kF32Const,
+    kF64Const
+  } kind;
+
+  union {
+    int32_t i32_const;
+    int64_t i64_const;
+    float f32_const;
+    double f64_const;
+    uint32_t global_index;
+  } val;
+
+  WasmInitExpr() : kind(kNone) {}
+  explicit WasmInitExpr(int32_t v) : kind(kI32Const) { val.i32_const = v; }
+  explicit WasmInitExpr(int64_t v) : kind(kI64Const) { val.i64_const = v; }
+  explicit WasmInitExpr(float v) : kind(kF32Const) { val.f32_const = v; }
+  explicit WasmInitExpr(double v) : kind(kF64Const) { val.f64_const = v; }
+  WasmInitExpr(WasmInitKind kind, uint32_t global_index) : kind(kGlobalIndex) {
+    val.global_index = global_index;
+  }
+};
+
 }  // namespace wasm
 }  // namespace internal
 }  // namespace v8
 
-#endif  // V8_WASM_OPCODES_H_
+#endif  // V8_WASM_WASM_OPCODES_H_

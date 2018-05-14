@@ -44,12 +44,7 @@ void NetworkDelegateImpl::OnBeforeRedirect(URLRequest* request,
                                            const GURL& new_location) {}
 
 void NetworkDelegateImpl::OnResponseStarted(URLRequest* request,
-                                            int net_error) {
-  OnResponseStarted(request);
-}
-
-// Deprecated.
-void NetworkDelegateImpl::OnResponseStarted(URLRequest* request) {}
+                                            int net_error) {}
 
 void NetworkDelegateImpl::OnNetworkBytesReceived(URLRequest* request,
                                                  int64_t bytes_received) {}
@@ -87,7 +82,7 @@ bool NetworkDelegateImpl::OnCanGetCookies(const URLRequest& request,
 }
 
 bool NetworkDelegateImpl::OnCanSetCookie(const URLRequest& request,
-                                         const std::string& cookie_line,
+                                         const net::CanonicalCookie& cookie,
                                          CookieOptions* options) {
   return true;
 }
@@ -101,7 +96,7 @@ bool NetworkDelegateImpl::OnCanAccessFile(
 
 bool NetworkDelegateImpl::OnCanEnablePrivacyMode(
     const GURL& url,
-    const GURL& first_party_for_cookies) const {
+    const GURL& site_for_cookies) const {
   return false;
 }
 
@@ -121,9 +116,10 @@ bool NetworkDelegateImpl::OnCanQueueReportingReport(
   return true;
 }
 
-bool NetworkDelegateImpl::OnCanSendReportingReport(
-    const url::Origin& origin) const {
-  return true;
+void NetworkDelegateImpl::OnCanSendReportingReports(
+    std::set<url::Origin> origins,
+    base::OnceCallback<void(std::set<url::Origin>)> result_callback) const {
+  std::move(result_callback).Run(std::move(origins));
 }
 
 bool NetworkDelegateImpl::OnCanSetReportingClient(const url::Origin& origin,

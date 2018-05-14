@@ -64,14 +64,17 @@ class ChooserController {
   // Returns the text to be displayed in the chooser title.
   base::string16 GetTitle() const;
 
-  // Returns if the chooser needs to show an icon before the text.
+  // Returns whether the chooser needs to show an icon before the text.
   // For WebBluetooth, it is a signal strength icon.
   virtual bool ShouldShowIconBeforeText() const;
 
-  // Returns if the chooser needs to show a footnote view.
-  virtual bool ShouldShowFootnoteView() const;
+  // Returns whether the chooser needs to show a help button.
+  virtual bool ShouldShowHelpButton() const;
 
-  // Returns if the chooser allows multiple items to be selected.
+  // Returns whether the chooser needs to show a button to re-scan for devices.
+  virtual bool ShouldShowReScanButton() const;
+
+  // Returns whether the chooser allows multiple items to be selected.
   virtual bool AllowMultipleSelection() const;
 
   // Returns the text to be displayed in the chooser when there are no options.
@@ -102,10 +105,10 @@ class ChooserController {
   virtual bool IsPaired(size_t index) const;
 
   // Refresh the list of options.
-  virtual void RefreshOptions() = 0;
+  virtual void RefreshOptions();
 
   // Returns the status text to be shown in the chooser.
-  virtual base::string16 GetStatus() const = 0;
+  virtual base::string16 GetStatus() const;
 
   // These three functions are called just before this object is destroyed:
 

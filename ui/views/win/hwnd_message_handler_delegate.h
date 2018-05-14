@@ -5,12 +5,16 @@
 #ifndef UI_VIEWS_WIN_HWND_MESSAGE_HANDLER_DELEGATE_H_
 #define UI_VIEWS_WIN_HWND_MESSAGE_HANDLER_DELEGATE_H_
 
+#include "base/win/windows_types.h"
+#include "ui/base/ui_base_types.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/views/views_export.h"
 
 namespace gfx {
 class Insets;
 class Path;
 class Point;
+class Rect;
 class Size;
 }
 
@@ -19,6 +23,8 @@ class Accelerator;
 class InputMethod;
 class KeyEvent;
 class MouseEvent;
+class PointerEvent;
+class ScrollEvent;
 class TouchEvent;
 }
 
@@ -97,12 +103,6 @@ class VIEWS_EXPORT HWNDMessageHandlerDelegate {
   virtual void ResetWindowControls() = 0;
 
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() = 0;
-
-  // Returns true if the window should handle standard system commands, such as
-  // close, minimize, maximize.
-  // TODO(benwells): Remove this once bubbles don't have two widgets
-  // implementing them on non-aura windows. http://crbug.com/189112.
-  virtual bool ShouldHandleSystemCommands() const = 0;
 
   // TODO(beng): Investigate migrating these methods to On* prefixes once
   // HWNDMessageHandler is the WindowImpl.
@@ -187,6 +187,10 @@ class VIEWS_EXPORT HWNDMessageHandlerDelegate {
   // Called when a mouse event is received. Returns true if the event was
   // handled by the delegate.
   virtual bool HandleMouseEvent(const ui::MouseEvent& event) = 0;
+
+  // Called when a pointer event is received. Returns true if the event was
+  // handled by the delegate.
+  virtual bool HandlePointerEvent(ui::PointerEvent* event) = 0;
 
   // Called when an untranslated key event is received (i.e. pre-IME
   // translation).

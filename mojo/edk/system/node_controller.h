@@ -7,7 +7,6 @@
 
 #include <map>
 #include <memory>
-#include <queue>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -16,10 +15,11 @@
 
 #include "base/callback.h"
 #include "base/containers/hash_tables.h"
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/task_runner.h"
-#include "mojo/edk/embedder/platform_handle_vector.h"
+#include "build/build_config.h"
 #include "mojo/edk/embedder/platform_shared_buffer.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "mojo/edk/system/atomic_flag.h"
@@ -106,8 +106,10 @@ class NodeController : public ports::NodeDelegate,
   int SendUserMessage(const ports::PortRef& port_ref,
                       std::unique_ptr<ports::UserMessageEvent> message);
 
-  // Merges a local port |port| into a port reserved by |name| in the parent.
-  void MergePortIntoParent(const std::string& name, const ports::PortRef& port);
+  // Merges a local port |port| into a port reserved by |name| in the node which
+  // invited this node.
+  void MergePortIntoInviter(const std::string& name,
+                            const ports::PortRef& port);
 
   // Merges two local ports together.
   int MergeLocalPorts(const ports::PortRef& port0, const ports::PortRef& port1);
@@ -134,7 +136,7 @@ class NodeController : public ports::NodeDelegate,
 
   using NodeMap = std::unordered_map<ports::NodeName,
                                      scoped_refptr<NodeChannel>>;
-  using OutgoingMessageQueue = std::queue<Channel::MessagePtr>;
+  using OutgoingMessageQueue = base::queue<Channel::MessagePtr>;
   using PortMap = std::map<std::string, ports::PortRef>;
 
   struct PeerConnection {
@@ -169,7 +171,7 @@ class NodeController : public ports::NodeDelegate,
   void ClosePeerConnectionOnIOThread(uint64_t peer_connection_id);
 
   scoped_refptr<NodeChannel> GetPeerChannel(const ports::NodeName& name);
-  scoped_refptr<NodeChannel> GetParentChannel();
+  scoped_refptr<NodeChannel> GetInviterChannel();
   scoped_refptr<NodeChannel> GetBrokerChannel();
 
   void AddPeer(const ports::NodeName& name,
@@ -186,12 +188,12 @@ class NodeController : public ports::NodeDelegate,
   void PortStatusChanged(const ports::PortRef& port) override;
 
   // NodeChannel::Delegate:
-  void OnAcceptChild(const ports::NodeName& from_node,
-                     const ports::NodeName& parent_name,
-                     const ports::NodeName& token) override;
-  void OnAcceptParent(const ports::NodeName& from_node,
-                      const ports::NodeName& token,
-                      const ports::NodeName& child_name) override;
+  void OnAcceptInvitee(const ports::NodeName& from_node,
+                       const ports::NodeName& inviter_name,
+                       const ports::NodeName& token) override;
+  void OnAcceptInvitation(const ports::NodeName& from_node,
+                          const ports::NodeName& token,
+                          const ports::NodeName& invitee_name) override;
   void OnAddBrokerClient(const ports::NodeName& from_node,
                          const ports::NodeName& client_name,
                          base::ProcessHandle process_handle) override;
@@ -233,8 +235,8 @@ class NodeController : public ports::NodeDelegate,
 #endif
 
   // Cancels all pending port merges. These are merges which are supposed to
-  // be requested from the parent ASAP, and they may be cancelled if the
-  // connection to the parent is broken or never established.
+  // be requested from the inviter ASAP, and they may be cancelled if the
+  // connection to the inviter is broken or never established.
   void CancelPendingPortMerges();
 
   // Marks this NodeController for destruction when the IO thread shuts down.
@@ -256,7 +258,7 @@ class NodeController : public ports::NodeDelegate,
   // Guards |peers_|, |pending_peer_messages_|, and |next_peer_connection_id_|.
   base::Lock peers_lock_;
 
-  // Channels to known peers, including parent and children, if any.
+  // Channels to known peers, including inviter and invitees, if any.
   NodeMap peers_;
 
   // A unique ID generator for peer connections.
@@ -275,21 +277,21 @@ class NodeController : public ports::NodeDelegate,
   // Guards |pending_port_merges_| and |reject_pending_merges_|.
   base::Lock pending_port_merges_lock_;
 
-  // A set of port merge requests awaiting parent connection.
+  // A set of port merge requests awaiting inviter connection.
   std::vector<std::pair<std::string, ports::PortRef>> pending_port_merges_;
 
-  // Indicates that new merge requests should be rejected because the parent has
-  // disconnected.
+  // Indicates that new merge requests should be rejected because the inviter
+  // has disconnected.
   bool reject_pending_merges_ = false;
 
-  // Guards |parent_name_| and |bootstrap_parent_channel_|.
-  base::Lock parent_lock_;
+  // Guards |inviter_name_| and |bootstrap_inviter_channel_|.
+  base::Lock inviter_lock_;
 
-  // The name of our parent node, if any.
-  ports::NodeName parent_name_;
+  // The name of the node which invited us to join its network, if any.
+  ports::NodeName inviter_name_;
 
-  // A temporary reference to the parent channel before we know their name.
-  scoped_refptr<NodeChannel> bootstrap_parent_channel_;
+  // A temporary reference to the inviter channel before we know their name.
+  scoped_refptr<NodeChannel> bootstrap_inviter_channel_;
 
   // Guards |broker_name_|, |pending_broker_clients_|, and
   // |pending_relay_messages_|.
@@ -299,7 +301,7 @@ class NodeController : public ports::NodeDelegate,
   ports::NodeName broker_name_;
 
   // A queue of remote broker clients waiting to be connected to the broker.
-  std::queue<ports::NodeName> pending_broker_clients_;
+  base::queue<ports::NodeName> pending_broker_clients_;
 
   // Messages waiting to be relayed by the broker once it's known.
   std::unordered_map<ports::NodeName, OutgoingMessageQueue>
@@ -330,7 +332,7 @@ class NodeController : public ports::NodeDelegate,
   // Must only be accessed from the IO thread.
   bool destroy_on_io_thread_shutdown_ = false;
 
-#if !defined(OS_MACOSX) && !defined(OS_NACL_SFI)
+#if !defined(OS_MACOSX) && !defined(OS_NACL_SFI) && !defined(OS_FUCHSIA)
   // Broker for sync shared buffer creation on behalf of broker clients.
   std::unique_ptr<Broker> broker_;
 #endif

@@ -9,18 +9,16 @@
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/display/types/display_mode.h"
-#include "ui/ozone/common/display_snapshot_proxy.h"
+#include "ui/display/types/display_snapshot.h"
 #include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/host/gpu_thread_adapter.h"
 
 namespace ui {
 
 DrmDisplayHost::DrmDisplayHost(GpuThreadAdapter* sender,
-                               const DisplaySnapshot_Params& params,
+                               std::unique_ptr<display::DisplaySnapshot> params,
                                bool is_dummy)
-    : sender_(sender),
-      snapshot_(new DisplaySnapshotProxy(params)),
-      is_dummy_(is_dummy) {
+    : sender_(sender), snapshot_(std::move(params)), is_dummy_(is_dummy) {
   sender_->AddGpuThreadObserver(this);
 }
 
@@ -30,8 +28,8 @@ DrmDisplayHost::~DrmDisplayHost() {
 }
 
 void DrmDisplayHost::UpdateDisplaySnapshot(
-    const DisplaySnapshot_Params& params) {
-  snapshot_ = base::MakeUnique<DisplaySnapshotProxy>(params);
+    std::unique_ptr<display::DisplaySnapshot> params) {
+  snapshot_ = std::move(params);
 }
 
 void DrmDisplayHost::Configure(const display::DisplayMode* mode,

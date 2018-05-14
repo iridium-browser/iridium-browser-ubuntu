@@ -5,18 +5,18 @@
 #ifndef NGBlockLayoutAlgorithm_h
 #define NGBlockLayoutAlgorithm_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/layout/ng/geometry/ng_margin_strut.h"
 #include "core/layout/ng/ng_block_break_token.h"
 #include "core/layout/ng/ng_block_node.h"
-#include "core/layout/ng/ng_box_fragment.h"
-#include "core/layout/ng/ng_constraint_space_builder.h"
+#include "core/layout/ng/ng_fragment_builder.h"
 #include "core/layout/ng/ng_layout_algorithm.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
 class NGConstraintSpace;
+class NGFragment;
 class NGLayoutResult;
 
 // This struct is used for communicating to a child the position of the
@@ -25,33 +25,23 @@ struct NGPreviousInflowPosition {
   LayoutUnit bfc_block_offset;
   LayoutUnit logical_block_offset;
   NGMarginStrut margin_strut;
+  bool empty_block_affected_by_clearance;
 };
 
 // This strut holds information for the current inflow child. The data is not
 // useful outside of handling this single inflow child.
 struct NGInflowChildData {
-  NGLogicalOffset bfc_offset_estimate;
+  NGBfcOffset bfc_offset_estimate;
   NGMarginStrut margin_strut;
   NGBoxStrut margins;
 };
 
-// Updates the fragment's BFC offset if it's not already set.
-bool MaybeUpdateFragmentBfcOffset(const NGConstraintSpace&,
-                                  LayoutUnit bfc_block_offset,
-                                  NGFragmentBuilder* builder);
-
-// Positions pending floats starting from {@origin_block_offset} and relative
-// to container's BFC offset.
-void PositionPendingFloats(
-    LayoutUnit origin_block_offset,
-    NGFragmentBuilder* container_builder,
-    Vector<RefPtr<NGUnpositionedFloat>>* unpositioned_floats,
-    NGConstraintSpace* space);
-
 // A class for general block layout (e.g. a <div> with no special style).
 // Lays out the children in sequence.
 class CORE_EXPORT NGBlockLayoutAlgorithm
-    : public NGLayoutAlgorithm<NGBlockNode, NGBlockBreakToken> {
+    : public NGLayoutAlgorithm<NGBlockNode,
+                               NGFragmentBuilder,
+                               NGBlockBreakToken> {
  public:
   // Default constructor.
   // @param node The input node to perform layout upon.
@@ -59,44 +49,66 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
   //              fragment within.
   // @param break_token The break token from which the layout should start.
   NGBlockLayoutAlgorithm(NGBlockNode node,
-                         NGConstraintSpace* space,
+                         const NGConstraintSpace& space,
                          NGBlockBreakToken* break_token = nullptr);
 
-  Optional<MinMaxContentSize> ComputeMinMaxContentSize() const override;
-  virtual RefPtr<NGLayoutResult> Layout() override;
+  Optional<MinMaxSize> ComputeMinMaxSize(const MinMaxSizeInput&) const override;
+  scoped_refptr<NGLayoutResult> Layout() override;
 
  private:
-  NGBoxStrut CalculateMargins(NGLayoutInputNode child);
+  NGBoxStrut CalculateMargins(NGLayoutInputNode child,
+                              const NGBreakToken* child_break_token);
 
   // Creates a new constraint space for the current child.
-  RefPtr<NGConstraintSpace> CreateConstraintSpaceForChild(
+  scoped_refptr<NGConstraintSpace> CreateConstraintSpaceForChild(
       const NGLayoutInputNode child,
       const NGInflowChildData& child_data,
-      const WTF::Optional<NGLogicalOffset> floats_bfc_offset = WTF::nullopt);
+      const NGLogicalSize child_available_size,
+      const WTF::Optional<NGBfcOffset> floats_bfc_offset = WTF::nullopt);
 
   // @return Estimated BFC offset for the "to be layout" child.
   NGInflowChildData ComputeChildData(const NGPreviousInflowPosition&,
-                                     NGLayoutInputNode);
+                                     NGLayoutInputNode,
+                                     const NGBreakToken* child_break_token);
 
   NGPreviousInflowPosition ComputeInflowPosition(
       const NGPreviousInflowPosition& previous_inflow_position,
       const NGLayoutInputNode child,
       const NGInflowChildData& child_data,
-      const WTF::Optional<NGLogicalOffset>& child_bfc_offset,
+      const WTF::Optional<NGBfcOffset>& child_bfc_offset,
       const NGLogicalOffset& logical_offset,
       const NGLayoutResult& layout_result,
       const NGFragment& fragment,
       bool empty_block_affected_by_clearance);
 
-  // Positions the fragment that establishes a new formatting context.
+  // Positions the fragment that knows its BFC offset.
+  WTF::Optional<NGBfcOffset> PositionWithBfcOffset(
+      const NGBfcOffset& bfc_offset);
+  bool PositionWithBfcOffset(const NGBfcOffset& bfc_offset,
+                             WTF::Optional<NGBfcOffset>* child_bfc_offset);
+
+  // Positions using the parent BFC offset.
+  // Fragment doesn't know its offset but we can still calculate its BFC
+  // position because the parent fragment's BFC is known.
+  // Example:
+  //   BFC Offset is known here because of the padding.
+  //   <div style="padding: 1px">
+  //     <div id="empty-div" style="margins: 1px"></div>
+  NGBfcOffset PositionWithParentBfc(const NGLayoutInputNode& child,
+                                    const NGConstraintSpace&,
+                                    const NGInflowChildData& child_data,
+                                    const NGLayoutResult&,
+                                    bool* empty_block_affected_by_clearance);
+
+  void HandleOutOfFlowPositioned(const NGPreviousInflowPosition&, NGBlockNode);
+  void HandleFloat(const NGPreviousInflowPosition&,
+                   NGBlockNode,
+                   NGBlockBreakToken*);
+
+  // This uses the NGLayoutOpporunityIterator to position the fragment.
   //
-  // This uses Layout Opportunity iterator to position the fragment.
-  // That's because an element that establishes a new block formatting context
-  // must not overlap the margin box of any floats in the same block formatting
-  // context as the element itself.
-  //
-  // So if necessary, we clear the new BFC by placing it below any preceding
-  // floats or place it adjacent to such floats if there is sufficient space.
+  // An element that establishes a new formatting context must not overlap the
+  // margin box of any floats within the current BFC.
   //
   // Example:
   // <div id="container">
@@ -107,44 +119,55 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
   //    then it will be placed there and we collapse its margin.
   // 2) If #new-fc is too big then we need to clear its position and place it
   //    below #float ignoring its vertical margin.
-  bool PositionNewFc(const NGLayoutInputNode& child,
-                     const NGPreviousInflowPosition&,
-                     const NGLayoutResult&,
-                     const NGInflowChildData& child_data,
-                     const NGConstraintSpace& child_space,
-                     WTF::Optional<NGLogicalOffset>* child_bfc_offset);
-
-  // Positions the fragment that knows its BFC offset.
-  WTF::Optional<NGLogicalOffset> PositionWithBfcOffset(
-      const NGLogicalOffset& bfc_offset);
-  bool PositionWithBfcOffset(const NGLogicalOffset& bfc_offset,
-                             WTF::Optional<NGLogicalOffset>* child_bfc_offset);
-
-  // Positions using the parent BFC offset.
-  // Fragment doesn't know its offset but we can still calculate its BFC
-  // position because the parent fragment's BFC is known.
-  // Example:
-  //   BFC Offset is known here because of the padding.
-  //   <div style="padding: 1px">
-  //     <div id="empty-div" style="margins: 1px"></div>
-  NGLogicalOffset PositionWithParentBfc(
-      const NGLayoutInputNode& child,
-      const NGConstraintSpace&,
-      const NGInflowChildData& child_data,
-      const NGLayoutResult&,
-      bool* empty_block_affected_by_clearance);
-
-  NGLogicalOffset PositionLegacy(const NGConstraintSpace& child_space,
-                                 const NGInflowChildData& child_data);
-
-  void HandleOutOfFlowPositioned(const NGPreviousInflowPosition&, NGBlockNode);
-  void HandleFloat(const NGPreviousInflowPosition&,
-                   NGBlockNode,
-                   NGBlockBreakToken*);
-  WTF::Optional<NGPreviousInflowPosition> HandleInflow(
-      const NGPreviousInflowPosition&,
+  //
+  // Returns false if we need to abort layout, because a previously unknown BFC
+  // offset has now been resolved.
+  bool HandleNewFormattingContext(
       NGLayoutInputNode child,
-      NGBreakToken* child_break_token);
+      NGBreakToken* child_break_token,
+      NGPreviousInflowPosition*,
+      scoped_refptr<NGBreakToken>* previous_inline_break_token);
+
+  // Performs the actual layout of a new formatting context. This may be called
+  // multiple times from HandleNewFormattingContext.
+  std::pair<scoped_refptr<NGLayoutResult>, NGLayoutOpportunity>
+  LayoutNewFormattingContext(NGLayoutInputNode child,
+                             NGBreakToken* child_break_token,
+                             const NGInflowChildData&,
+                             LayoutUnit child_origin_block_offset,
+                             bool abort_if_cleared);
+
+  // Handle an in-flow child.
+  // Returns false if we need to abort layout, because a previously unknown BFC
+  // offset has now been resolved. (Same as HandleNewFormattingContext).
+  bool HandleInflow(NGLayoutInputNode child,
+                    NGBreakToken* child_break_token,
+                    NGPreviousInflowPosition*,
+                    scoped_refptr<NGBreakToken>* previous_inline_break_token);
+
+  // Return the amount of block space available in the current fragmentainer
+  // for the node being laid out by this algorithm.
+  LayoutUnit FragmentainerSpaceAvailable() const;
+
+  // Return true if the node being laid out by this fragmentainer has used all
+  // the available space in the current fragmentainer.
+  bool IsFragmentainerOutOfSpace() const;
+
+  // Insert a fragmentainer break before the child if necessary.
+  // Return true if a break was inserted, false otherwise.
+  bool BreakBeforeChild(NGLayoutInputNode child,
+                        const NGLayoutResult&,
+                        LayoutUnit block_offset,
+                        bool is_pushed_by_floats);
+
+  enum BreakType { NoBreak, SoftBreak, ForcedBreak };
+
+  // Given a child fragment and the corresponding node's style, determine the
+  // type of break we should insert in front of it, if any.
+  BreakType BreakTypeBeforeChild(NGLayoutInputNode child,
+                                 const NGLayoutResult&,
+                                 LayoutUnit block_offset,
+                                 bool is_pushed_by_floats) const;
 
   // Final adjustments before fragment creation. We need to prevent the
   // fragment from crossing fragmentainer boundaries, and rather create a break
@@ -156,24 +179,61 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
                    const NGPhysicalFragment*,
                    LayoutUnit child_offset);
 
-  // Calculates logical offset for the current fragment using either
-  // {@code content_size_} when the fragment doesn't know it's offset
-  // or {@code known_fragment_offset} if the fragment knows it's offset
+  // Updates the fragment's BFC offset if it's not already set.
+  bool MaybeUpdateFragmentBfcOffset(LayoutUnit bfc_block_offset);
+
+  // Positions pending floats starting from {@origin_block_offset}.
+  void PositionPendingFloats(LayoutUnit origin_block_offset);
+
+  // Adds a set of positioned floats as children to the current fragment.
+  void AddPositionedFloats(const Vector<NGPositionedFloat>& positioned_floats);
+
+  // Positions a list marker for the specified block content.
+  void PositionListMarker(const NGLayoutResult&, const NGLogicalOffset&);
+
+  // Calculates logical offset for the current fragment using either {@code
+  // intrinsic_block_size_} when the fragment doesn't know it's offset or
+  // {@code known_fragment_offset} if the fragment knows it's offset
   // @return Fragment's offset relative to the fragment's parent.
   NGLogicalOffset CalculateLogicalOffset(
+      NGLayoutInputNode child,
+      const NGFragment&,
       const NGBoxStrut& child_margins,
-      const WTF::Optional<NGLogicalOffset>& known_fragment_offset);
+      const WTF::Optional<NGBfcOffset>& known_fragment_offset);
+
+  // Computes default content size for HTML and BODY elements in quirks mode.
+  // Returns NGSizeIndefinite in all other cases.
+  LayoutUnit CalculateDefaultBlockSize();
+
+  // Computes minimum size for HTML and BODY elements in quirks mode.
+  // Returns NGSizeIndefinite in all other cases.
+  LayoutUnit CalculateMinimumBlockSize(const NGMarginStrut& end_margin_strut);
 
   NGLogicalSize child_available_size_;
   NGLogicalSize child_percentage_size_;
 
   NGBoxStrut border_scrollbar_padding_;
-  LayoutUnit content_size_;
-  LayoutUnit max_inline_size_;
+  LayoutUnit intrinsic_block_size_;
+
+  // The line box index at which we ran out of space. This where we'll actually
+  // end up breaking, unless we determine that we should break earlier in order
+  // to satisfy the widows request.
+  int first_overflowing_line_ = 0;
+
+  // Set if we should fit as many lines as there's room for, i.e. no early
+  // break. In that case we'll break before first_overflowing_line_. In this
+  // case there'll either be enough widows for the next fragment, or we have
+  // determined that we're unable to fulfill the widows request.
+  bool fit_all_lines_ = false;
+
+  // Set if we're resuming layout of a node that has already produced fragments.
+  bool is_resuming_;
 
   bool abort_when_bfc_resolved_;
+  bool has_processed_first_child_ = false;
 
-  Vector<RefPtr<NGUnpositionedFloat>> unpositioned_floats_;
+  std::unique_ptr<NGExclusionSpace> exclusion_space_;
+  Vector<scoped_refptr<NGUnpositionedFloat>> unpositioned_floats_;
 };
 
 }  // namespace blink

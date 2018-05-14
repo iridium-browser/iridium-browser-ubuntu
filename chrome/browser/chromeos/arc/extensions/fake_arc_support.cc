@@ -58,19 +58,16 @@ void FakeArcSupport::Close() {
   UnsetMessageHost();
 }
 
-void FakeArcSupport::EmulateAuthSuccess(const std::string& auth_code) {
-  DCHECK(ui_page_ == ArcSupportHost::UIPage::LSO ||
-         ui_page_ == ArcSupportHost::UIPage::ACTIVE_DIRECTORY_AUTH);
+void FakeArcSupport::EmulateAuthSuccess() {
+  DCHECK_EQ(ArcSupportHost::UIPage::ACTIVE_DIRECTORY_AUTH, ui_page_);
   base::DictionaryValue message;
   message.SetString("event", "onAuthSucceeded");
-  message.SetString("code", auth_code);
   SerializeAndSend(native_message_host_.get(), message);
 }
 
 void FakeArcSupport::EmulateAuthFailure(const std::string& error_msg) {
   DCHECK(native_message_host_);
-  DCHECK(ui_page_ == ArcSupportHost::UIPage::LSO ||
-         ui_page_ == ArcSupportHost::UIPage::ACTIVE_DIRECTORY_AUTH);
+  DCHECK_EQ(ArcSupportHost::UIPage::ACTIVE_DIRECTORY_AUTH, ui_page_);
   base::DictionaryValue message;
   message.SetString("event", "onAuthFailed");
   message.SetString("errorMessage", error_msg);
@@ -81,9 +78,13 @@ void FakeArcSupport::ClickAgreeButton() {
   DCHECK_EQ(ui_page_, ArcSupportHost::UIPage::TERMS);
   base::DictionaryValue message;
   message.SetString("event", "onAgreed");
+  message.SetString("tosContent", tos_content_);
+  message.SetBoolean("tosShown", tos_shown_);
   message.SetBoolean("isMetricsEnabled", metrics_mode_);
   message.SetBoolean("isBackupRestoreEnabled", backup_and_restore_mode_);
+  message.SetBoolean("isBackupRestoreManaged", backup_and_restore_managed_);
   message.SetBoolean("isLocationServiceEnabled", location_service_mode_);
+  message.SetBoolean("isLocationServiceManaged", location_service_managed_);
   SerializeAndSend(native_message_host_.get(), message);
 }
 
@@ -146,20 +147,21 @@ void FakeArcSupport::PostMessageFromNativeHost(
     }
     if (page == "terms") {
       ui_page_ = ArcSupportHost::UIPage::TERMS;
-    } else if (page == "lso-loading") {
-      ui_page_ = ArcSupportHost::UIPage::LSO;
     } else if (page == "arc-loading") {
       ui_page_ = ArcSupportHost::UIPage::ARC_LOADING;
     } else if (page == "active-directory-auth") {
       ui_page_ = ArcSupportHost::UIPage::ACTIVE_DIRECTORY_AUTH;
-      if (!message->GetString("options.federationUrl",
-                              &active_directory_auth_federation_url_) ||
-          !message->GetString(
-              "options.deviceManagementUrlPrefix",
-              &active_directory_auth_device_management_url_prefix_)) {
+      const base::Value* federation_url = message->FindPathOfType(
+          {"options", "federationUrl"}, base::Value::Type::STRING);
+      const base::Value* device_management_url_prefix = message->FindPathOfType(
+          {"options", "deviceManagementUrlPrefix"}, base::Value::Type::STRING);
+      if (!federation_url || !device_management_url_prefix) {
         NOTREACHED() << message_string;
         return;
       }
+      active_directory_auth_federation_url_ = federation_url->GetString();
+      active_directory_auth_device_management_url_prefix_ =
+          device_management_url_prefix->GetString();
     } else {
       NOTREACHED() << message_string;
     }

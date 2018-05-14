@@ -13,6 +13,7 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
+#include "net/nqe/effective_connection_type.h"
 #include "ui/base/touch/touch_device.h"
 #include "url/gurl.h"
 
@@ -38,7 +39,6 @@ enum EditingBehavior {
 enum V8CacheOptions {
   V8_CACHE_OPTIONS_DEFAULT,
   V8_CACHE_OPTIONS_NONE,
-  V8_CACHE_OPTIONS_PARSE,
   V8_CACHE_OPTIONS_CODE,
   V8_CACHE_OPTIONS_LAST = V8_CACHE_OPTIONS_CODE
 };
@@ -55,15 +55,11 @@ enum ImageAnimationPolicy {
 
 enum class ViewportStyle { DEFAULT, MOBILE, TELEVISION, LAST = TELEVISION };
 
-// Controls when the progress bar reports itself as complete. See
-// third_party/WebKit/Source/core/loader/ProgressTracker.cpp for most of its
-// effects.
-enum class ProgressBarCompletion {
-  LOAD_EVENT,
-  RESOURCES_BEFORE_DCL,
-  DOM_CONTENT_LOADED,
-  RESOURCES_BEFORE_DCL_AND_SAME_ORIGIN_IFRAMES,
-  LAST = RESOURCES_BEFORE_DCL_AND_SAME_ORIGIN_IFRAMES
+enum class SavePreviousDocumentResources {
+  NEVER,
+  UNTIL_ON_DOM_CONTENT_LOADED,
+  UNTIL_ON_LOAD,
+  LAST = UNTIL_ON_LOAD
 };
 
 // Defines the autoplay policy to be used. Should match the class in
@@ -105,7 +101,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool loads_images_automatically;
   bool images_enabled;
   bool plugins_enabled;
-  bool encrypted_media_enabled;
   bool dom_paste_enabled;
   bool shrinks_standalone_images_to_fit;
   bool text_areas_are_resizable;
@@ -129,7 +124,8 @@ struct CONTENT_EXPORT WebPreferences {
   bool hyperlink_auditing_enabled;
   bool allow_universal_access_from_file_urls;
   bool allow_file_access_from_file_urls;
-  bool experimental_webgl_enabled;
+  bool webgl1_enabled;
+  bool webgl2_enabled;
   bool pepper_3d_enabled;
   bool flash_3d_enabled;
   bool flash_stage3d_enabled;
@@ -140,7 +136,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool hide_scrollbars;
   bool accelerated_2d_canvas_enabled;
   int minimum_accelerated_2d_canvas_size;
-  bool disable_2d_canvas_copy_on_write;
   bool antialiased_2d_canvas_disabled;
   bool antialiased_clips_2d_canvas_enabled;
   int accelerated_2d_canvas_msaa_sample_count;
@@ -174,8 +169,8 @@ struct CONTENT_EXPORT WebPreferences {
   ui::PointerType primary_pointer_type;
   int available_hover_types;
   ui::HoverType primary_hover_type;
+  bool barrel_button_for_drag_enabled = false;
   bool sync_xhr_in_documents_enabled;
-  bool color_correct_rendering_enabled = false;
   bool should_respect_image_orientation;
   int number_of_cpu_cores;
   EditingBehavior editing_behavior;
@@ -193,6 +188,7 @@ struct CONTENT_EXPORT WebPreferences {
   bool navigate_on_drag_drop;
   V8CacheOptions v8_cache_options;
   bool record_whole_document;
+  SavePreviousDocumentResources save_previous_document_resources;
 
   // This flags corresponds to a Page's Settings' setCookieEnabled state. It
   // only controls whether or not the "document.cookie" field is properly
@@ -201,9 +197,9 @@ struct CONTENT_EXPORT WebPreferences {
   // without raising a DOM security exception.
   bool cookie_enabled;
 
-  // This flag indicates whether H/W accelerated video decode is enabled for
-  // pepper plugins. Defaults to false.
-  bool pepper_accelerated_video_decode_enabled;
+  // This flag indicates whether H/W accelerated video decode is enabled.
+  // Defaults to false.
+  bool accelerated_video_decode_enabled;
 
   ImageAnimationPolicy animation_policy;
 
@@ -214,7 +210,7 @@ struct CONTENT_EXPORT WebPreferences {
   // Cues will not be placed in this margin area.
   float text_track_margin_percentage;
 
-  bool page_popups_suppressed;
+  bool immersive_mode_enabled;
 
 #if defined(OS_ANDROID)
   bool text_autosizing_enabled;
@@ -223,6 +219,7 @@ struct CONTENT_EXPORT WebPreferences {
   bool force_enable_zoom;
   bool fullscreen_supported;
   bool double_tap_to_zoom_enabled;
+  bool picture_in_picture_enabled;
   std::string media_playback_gesture_whitelist_scope;
   GURL default_video_poster_url;
   bool support_deprecated_target_density_dpi;
@@ -240,7 +237,6 @@ struct CONTENT_EXPORT WebPreferences {
   // Used by Android_WebView only to support legacy apps that inject script into
   // a top-level initial empty document and expect it to persist on navigation.
   bool resue_global_for_unowned_main_frame;
-  ProgressBarCompletion progress_bar_completion;
   // Specifies default setting for spellcheck when the spellcheck attribute is
   // not explicitly specified.
   bool spellcheck_enabled_by_default;
@@ -252,6 +248,10 @@ struct CONTENT_EXPORT WebPreferences {
   // If enabled, video fullscreen detection will be enabled.
   bool video_fullscreen_detection_enabled;
   bool embedded_media_experience_enabled;
+  // Enable 8 (#RRGGBBAA) and 4 (#RGBA) value hex colors in CSS Android
+  // WebView quirk (http://crbug.com/618472).
+  bool css_hex_alpha_color_enabled;
+  bool enable_media_download_in_product_help;
   // Enable support for document.scrollingElement
   // WebView sets this to false to retain old documentElement behaviour
   // (http://crbug.com/761016).
@@ -285,6 +285,10 @@ struct CONTENT_EXPORT WebPreferences {
 
   // Defines the current autoplay policy.
   AutoplayPolicy autoplay_policy;
+
+  // Network quality threshold below which resources from iframes are assigned
+  // lowest priority.
+  net::EffectiveConnectionType low_priority_iframes_threshold;
 
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for

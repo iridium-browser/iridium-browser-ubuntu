@@ -39,7 +39,7 @@ class StatusAreaWidgetDelegateAnimationSettings
     SetTweenType(gfx::Tween::EASE_IN_OUT);
   }
 
-  ~StatusAreaWidgetDelegateAnimationSettings() override {}
+  ~StatusAreaWidgetDelegateAnimationSettings() override = default;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StatusAreaWidgetDelegateAnimationSettings);
@@ -49,18 +49,10 @@ class StatusAreaWidgetDelegateAnimationSettings
 
 namespace ash {
 
-// static
-StatusAreaWidgetDelegate* StatusAreaWidgetDelegate::GetPrimaryInstance() {
-  SystemTray* tray = Shell::Get()->GetPrimarySystemTray();
-  return tray ? tray->shelf()
-                    ->GetStatusAreaWidget()
-                    ->status_area_widget_delegate()
-              : nullptr;
-}
-
 StatusAreaWidgetDelegate::StatusAreaWidgetDelegate(Shelf* shelf)
     : shelf_(shelf), focus_cycler_for_testing_(nullptr) {
   DCHECK(shelf_);
+  set_owned_by_client();  // Deleted by DeleteDelegate().
 
   // Allow the launcher to surrender the focus to another window upon
   // navigation completion by the user.
@@ -69,7 +61,7 @@ StatusAreaWidgetDelegate::StatusAreaWidgetDelegate(Shelf* shelf)
   layer()->SetFillsBoundsOpaquely(false);
 }
 
-StatusAreaWidgetDelegate::~StatusAreaWidgetDelegate() {}
+StatusAreaWidgetDelegate::~StatusAreaWidgetDelegate() = default;
 
 void StatusAreaWidgetDelegate::SetFocusCyclerForTesting(
     const FocusCycler* focus_cycler) {
@@ -127,20 +119,15 @@ bool StatusAreaWidgetDelegate::CanActivate() const {
   return focus_cycler->widget_activating() == GetWidget();
 }
 
-void StatusAreaWidgetDelegate::DeleteDelegate() {}
-
-void StatusAreaWidgetDelegate::AddTray(views::View* tray) {
-  SetLayoutManager(NULL);  // Reset layout manager before adding a child.
-  AddChildView(tray);
-  // Set the layout manager with the new list of children.
-  UpdateLayout();
+void StatusAreaWidgetDelegate::DeleteDelegate() {
+  delete this;
 }
 
 void StatusAreaWidgetDelegate::UpdateLayout() {
   // Use a grid layout so that the trays can be centered in each cell, and
   // so that the widget gets laid out correctly when tray sizes change.
-  views::GridLayout* layout = new views::GridLayout(this);
-  SetLayoutManager(layout);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   // Update tray border based on layout.
   bool is_child_on_edge = true;

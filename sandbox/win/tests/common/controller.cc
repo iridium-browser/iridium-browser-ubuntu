@@ -13,6 +13,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/unguessable_token.h"
 #include "base/win/windows_version.h"
+#include "sandbox/win/src/app_container_profile.h"
 #include "sandbox/win/src/sandbox_factory.h"
 
 namespace {
@@ -99,21 +100,6 @@ TestRunner::TestRunner(JobLevel job_level,
       no_sandbox_(false),
       disable_csrss_(true),
       target_process_id_(0) {
-  Init(job_level, startup_token, main_token);
-}
-
-TestRunner::TestRunner()
-    : is_init_(false),
-      is_async_(false),
-      no_sandbox_(false),
-      disable_csrss_(true),
-      target_process_id_(0) {
-  Init(JOB_LOCKDOWN, USER_RESTRICTED_SAME_ACCESS, USER_LOCKDOWN);
-}
-
-void TestRunner::Init(JobLevel job_level,
-                      TokenLevel startup_token,
-                      TokenLevel main_token) {
   broker_ = NULL;
   policy_ = NULL;
   timeout_ = kDefaultTimeout;
@@ -135,6 +121,9 @@ void TestRunner::Init(JobLevel job_level,
 
   is_init_ = true;
 }
+
+TestRunner::TestRunner()
+    : TestRunner(JOB_LOCKDOWN, USER_RESTRICTED_SAME_ACCESS, USER_LOCKDOWN) {}
 
 TargetPolicy* TestRunner::GetPolicy() {
   return policy_.get();

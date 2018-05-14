@@ -27,9 +27,9 @@
 #ifndef LayoutImageResourceStyleImage_h
 #define LayoutImageResourceStyleImage_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/layout/LayoutImageResource.h"
 #include "core/style/StyleImage.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -46,16 +46,16 @@ class LayoutImageResourceStyleImage final : public LayoutImageResource {
   void Shutdown() override;
 
   bool HasImage() const override { return true; }
-  PassRefPtr<Image> GetImage(const IntSize&) const override;
+  scoped_refptr<Image> GetImage(const LayoutSize&) const override;
   bool ErrorOccurred() const override { return style_image_->ErrorOccurred(); }
 
   bool ImageHasRelativeSize() const override {
     return style_image_->ImageHasRelativeSize();
   }
-  LayoutSize ImageSize(float multiplier) const override;
+  FloatSize ImageSize(float multiplier) const override;
   WrappedImagePtr ImagePtr() const override { return style_image_->Data(); }
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit LayoutImageResourceStyleImage(StyleImage*);

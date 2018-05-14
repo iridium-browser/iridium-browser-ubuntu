@@ -8,7 +8,6 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/UserGestureIndicator.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Navigator.h"
 #include "modules/webshare/ShareData.h"
@@ -48,7 +47,7 @@ class NavigatorShare::ShareClientImpl final
 
   void OnConnectionError();
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(navigator_);
     visitor->Trace(resolver_);
   }
@@ -83,25 +82,23 @@ void NavigatorShare::ShareClientImpl::OnConnectionError() {
 NavigatorShare::~NavigatorShare() = default;
 
 NavigatorShare& NavigatorShare::From(Navigator& navigator) {
-  NavigatorShare* supplement = static_cast<NavigatorShare*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  NavigatorShare* supplement =
+      Supplement<Navigator>::From<NavigatorShare>(navigator);
   if (!supplement) {
     supplement = new NavigatorShare();
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
 }
 
-DEFINE_TRACE(NavigatorShare) {
+void NavigatorShare::Trace(blink::Visitor* visitor) {
   visitor->Trace(clients_);
   Supplement<Navigator>::Trace(visitor);
 }
 
-NavigatorShare::NavigatorShare() {}
+NavigatorShare::NavigatorShare() = default;
 
-const char* NavigatorShare::SupplementName() {
-  return "NavigatorShare";
-}
+const char NavigatorShare::kSupplementName[] = "NavigatorShare";
 
 ScriptPromise NavigatorShare::share(ScriptState* script_state,
                                     const ShareData& share_data) {
@@ -123,7 +120,7 @@ ScriptPromise NavigatorShare::share(ScriptState* script_state,
     return ScriptPromise::Reject(script_state, error);
   }
 
-  if (!UserGestureIndicator::ProcessingUserGesture()) {
+  if (!Frame::HasTransientUserActivation(doc ? doc->GetFrame() : nullptr)) {
     DOMException* error = DOMException::Create(
         kNotAllowedError,
         "Must be handling a user gesture to perform a share request.");
@@ -141,8 +138,8 @@ ScriptPromise NavigatorShare::share(ScriptState* script_state,
     }
 
     frame->GetInterfaceProvider().GetInterface(mojo::MakeRequest(&service_));
-    service_.set_connection_error_handler(ConvertToBaseCallback(WTF::Bind(
-        &NavigatorShare::OnConnectionError, WrapWeakPersistent(this))));
+    service_.set_connection_error_handler(WTF::Bind(
+        &NavigatorShare::OnConnectionError, WrapWeakPersistent(this)));
     DCHECK(service_);
   }
 
@@ -151,11 +148,10 @@ ScriptPromise NavigatorShare::share(ScriptState* script_state,
   clients_.insert(client);
   ScriptPromise promise = resolver->Promise();
 
-  service_->Share(share_data.hasTitle() ? share_data.title() : g_empty_string,
-                  share_data.hasText() ? share_data.text() : g_empty_string,
-                  full_url,
-                  ConvertToBaseCallback(WTF::Bind(&ShareClientImpl::Callback,
-                                                  WrapPersistent(client))));
+  service_->Share(
+      share_data.hasTitle() ? share_data.title() : g_empty_string,
+      share_data.hasText() ? share_data.text() : g_empty_string, full_url,
+      WTF::Bind(&ShareClientImpl::Callback, WrapPersistent(client)));
 
   return promise;
 }

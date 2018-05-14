@@ -19,9 +19,9 @@
 
 #include "core/svg/graphics/SVGImageForContainer.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/FloatSize.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkImage.h"
 
@@ -38,7 +38,8 @@ void SVGImageForContainer::Draw(PaintCanvas* canvas,
                                 const FloatRect& dst_rect,
                                 const FloatRect& src_rect,
                                 RespectImageOrientationEnum,
-                                ImageClampingMode) {
+                                ImageClampingMode,
+                                ImageDecodingMode) {
   image_->DrawForContainer(canvas, flags, container_size_, zoom_, dst_rect,
                            src_rect, url_);
 }
@@ -61,8 +62,11 @@ bool SVGImageForContainer::ApplyShader(PaintFlags& flags,
                                          local_matrix);
 }
 
-sk_sp<SkImage> SVGImageForContainer::ImageForCurrentFrame() {
-  return image_->ImageForCurrentFrameForContainer(url_, Size());
+PaintImage SVGImageForContainer::PaintImageForCurrentFrame() {
+  auto builder = CreatePaintImageBuilder().set_completion_state(
+      image_->completion_state());
+  image_->PopulatePaintRecordForCurrentFrameForContainer(builder, url_, Size());
+  return builder.TakePaintImage();
 }
 
 }  // namespace blink

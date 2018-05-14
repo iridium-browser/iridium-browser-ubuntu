@@ -7,8 +7,6 @@
 
 #import <UIKit/UIKit.h>
 
-#import "ios/web/net/crw_request_tracker_delegate.h"
-#import "ios/web/public/navigation_manager.h"
 #import "ios/web/public/web_state/js/crw_js_injection_evaluator.h"
 #import "ios/web/public/web_state/ui/crw_web_delegate.h"
 #include "ios/web/public/web_state/url_verification_constants.h"
@@ -16,6 +14,8 @@
 #import "ios/web/web_state/ui/crw_web_view_navigation_proxy.h"
 
 namespace web {
+
+enum class NavigationInitiationType;
 
 // Page load phases.
 enum LoadPhase {
@@ -36,7 +36,6 @@ enum LoadPhase {
 @protocol CRWNativeContent;
 @protocol CRWNativeContentProvider;
 @protocol CRWSwipeRecognizerProvider;
-@protocol CRWWebControllerObserver;
 @class CRWWebViewContentView;
 @protocol CRWWebViewProxy;
 class GURL;
@@ -61,31 +60,27 @@ class WebStateImpl;
 // Defaults to NO; this should be enabled before attempting to access the view.
 @property(nonatomic, assign) BOOL webUsageEnabled;
 
-@property(nonatomic, assign) id<CRWWebDelegate> delegate;
-@property(nonatomic, assign) id<CRWNativeContentProvider> nativeProvider;
-@property(nonatomic, assign)
-    id<CRWSwipeRecognizerProvider> swipeRecognizerProvider;
+@property(nonatomic, weak) id<CRWWebDelegate> delegate;
+@property(nonatomic, weak) id<CRWNativeContentProvider> nativeProvider;
+@property(nonatomic, weak) id<CRWSwipeRecognizerProvider>
+    swipeRecognizerProvider;
 @property(nonatomic, readonly) web::WebState* webState;
 @property(nonatomic, readonly) web::WebStateImpl* webStateImpl;
 
 // The container view used to display content.  If the view has been purged due
 // to low memory, this will recreate it.
-@property(nonatomic, readonly) UIView* view;
+@property(weak, nonatomic, readonly) UIView* view;
 
 // The web view proxy associated with this controller.
-@property(nonatomic, readonly) id<CRWWebViewProxy> webViewProxy;
+@property(strong, nonatomic, readonly) id<CRWWebViewProxy> webViewProxy;
 
 // The web view navigation proxy associated with this controller.
-@property(nonatomic, readonly) id<CRWWebViewNavigationProxy>
+@property(weak, nonatomic, readonly) id<CRWWebViewNavigationProxy>
     webViewNavigationProxy;
 
 // The view that generates print data when printing. It is nil if printing
 // is not supported.
-@property(nonatomic, readonly) UIView* viewForPrinting;
-
-// Content view was reset due to low memory.  Use placeholder overlay view on
-// next creation.
-@property(nonatomic, readwrite, assign) BOOL usePlaceholderOverlay;
+@property(weak, nonatomic, readonly) UIView* viewForPrinting;
 
 // Returns the current page loading phase.
 @property(nonatomic, readonly) web::LoadPhase loadPhase;
@@ -97,27 +92,35 @@ class WebStateImpl;
 // Returns the x, y offset the content has been scrolled.
 @property(nonatomic, readonly) CGPoint scrollPosition;
 
-// Returns whether the top of the content is visible.
-@property(nonatomic, readonly) BOOL atTop;
-
 // YES if JavaScript dialogs and window open requests should be suppressed.
 // Default is NO. When dialog is suppressed
 // |WebStateObserver::DidSuppressDialog| will be called.
 @property(nonatomic, assign) BOOL shouldSuppressDialogs;
 
+// YES if the web process backing WebView is believed to currently be crashed.
+@property(nonatomic, assign, getter=isWebProcessCrashed) BOOL webProcessCrashed;
+
+// Whether the WebController is visible. Returns YES after wasShown call and
+// NO after wasHidden() call.
+@property(nonatomic, assign, getter=isVisible) BOOL visible;
+
 // Designated initializer. Initializes web controller with |webState|. The
 // calling code must retain the ownership of |webState|.
 - (instancetype)initWithWebState:(web::WebStateImpl*)webState;
-
-// Return an image to use as replacement of a missing snapshot.
-+ (UIImage*)defaultSnapshotImage;
 
 // Replaces the currently displayed content with |contentView|.  The content
 // view will be dismissed for the next navigation.
 - (void)showTransientContentView:(CRWContentView*)contentView;
 
-// Clear the transient content view, if one is shown.
+// Clear the transient content view, if one is shown. This is a delegate
+// method for WebStateImpl::ClearTransientContent(). Callers should use the
+// WebStateImpl API instead of calling this method directly.
 - (void)clearTransientContentView;
+
+// Removes the back WebView. DANGER: this method is exposed for the sole purpose
+// of allowing WKBasedNavigationManagerImpl to reset the back-forward history.
+// Please reconsider before using this method.
+- (void)removeWebView;
 
 // Call to stop the CRWWebController from doing stuff, in particular to
 // stop all network requests. Called as part of the close sequence if it hasn't
@@ -131,9 +134,6 @@ class WebStateImpl;
 // Call when the CRWWebController needs go away. Caller must reset the delegate
 // before calling.
 - (void)close;
-
-// Call when there is a need to free up memory.
-- (void)handleLowMemory;
 
 // Returns YES if there is currently a live view in the tab (e.g., the view
 // hasn't been discarded due to low memory).
@@ -153,40 +153,20 @@ class WebStateImpl;
 // Methods for navigation and properties to interrogate state.
 - (void)reload;
 - (void)stopLoading;
-// YES if the CRWWebController's view is deemed appropriate for saving in order
-// to generate an overlay placeholder view.
-- (BOOL)canUseViewForGeneratingOverlayPlaceholderView;
-
-// Start loading the URL specified in |params|, with the specified
-// settings.  Always resets the openedByScript property to NO.
-// NOTE: |params.transition_type| should never be PAGE_TRANSITION_RELOAD except
-// for transient items, if one needs to reload, call |-reload| explicitly.
-- (void)loadWithParams:(const web::NavigationManager::WebLoadParams&)params;
 
 // Loads the URL indicated by current session state.
 - (void)loadCurrentURL;
+
+// Loads the URL indicated by current session state if the current page has not
+// loaded yet.
+- (void)loadCurrentURLIfNecessary;
 
 // Loads HTML in the page and presents it as if it was originating from an
 // application specific URL. |HTML| must not be empty.
 - (void)loadHTML:(NSString*)HTML forAppSpecificURL:(const GURL&)URL;
 
-// Loads HTML in the page and presents it as if it was originating from the
-// URL itself. Should be used only in specific cases, where the injected html
-// is guaranteed to be some derived representation of the original content.
-- (void)loadHTMLForCurrentURL:(NSString*)HTML;
-
 // Stops loading the page.
 - (void)stopLoading;
-
-// Causes the page to start loading immediately if there is a pending load;
-// normally if the web view has been paged out for memory reasons, loads are
-// started lazily the next time the view is displayed. This can be called to
-// bypass the lazy behavior. This is equivalent to calling -view, but should be
-// used when deliberately pre-triggering a load without displaying.
-- (void)triggerPendingLoad;
-
-// Navigates to the item at the given |index|.
-- (void)goToItemAtIndex:(int)index;
 
 // Executes |script| in the web view, registering user interaction.
 - (void)executeUserJavaScript:(NSString*)script
@@ -198,22 +178,7 @@ class WebStateImpl;
 // Requires that the next load rebuild the web view. This is expensive, and
 // should be used only in the case where something has changed that the web view
 // only checks on creation, such that the whole object needs to be rebuilt.
-// TODO(crbug.com/736102): Merge this and reinitializeWebViewAndReload:. They
-// are currently subtly different in terms of implementation, but are for
-// fundamentally the same purpose.
 - (void)requirePageReconstruction;
-
-- (void)reinitializeWebViewAndReload:(BOOL)reload;
-
-// Requires that the next display reload the page, using a placeholder while
-// loading. This could be used, e.g., to handle a crash in a WebController that
-// is not currently visible.
-// TODO(stuartmorgan): When revisiting the methods above, revisit this as well.
-- (void)requirePageReload;
-
-// Show overlay, don't reload web page. Used when the view will be
-// visible only briefly (e.g., tablet side swipe).
-- (void)setOverlayPreviewMode:(BOOL)overlayPreviewMode;
 
 // Records the state (scroll position, form values, whatever can be harvested)
 // from the current page into the current session entry.
@@ -225,14 +190,6 @@ class WebStateImpl;
 
 // Notifies the CRWWebController that it has been shown.
 - (void)wasShown;
-
-// Notifies the CRWWebController that the current page is an HTTP page
-// containing a password field.
-- (void)didShowPasswordInputOnHTTP;
-
-// Notifies the CRWWebController that the current page is an HTTP page
-// containing a credit card field.
-- (void)didShowCreditCardInputOnHTTP;
 
 // Notifies the CRWWebController that it has been hidden.
 - (void)wasHidden;
@@ -253,13 +210,6 @@ class WebStateImpl;
 // Removes |toolbar| from the web view.
 - (void)removeToolbarViewFromWebView:(UIView*)toolbarView;
 
-// Adds a CRWWebControllerObserver to subscribe to page events. |observer|
-// cannot be nil.
-- (void)addObserver:(id<CRWWebControllerObserver>)observer;
-
-// Removes an attached CRWWebControllerObserver.
-- (void)removeObserver:(id<CRWWebControllerObserver>)observer;
-
 // Returns the always-visible frame, not including the part that could be
 // covered by the toolbar.
 - (CGRect)visibleFrame;
@@ -268,6 +218,13 @@ class WebStateImpl;
 
 // Returns the native controller (if any) current mananging the content.
 - (id<CRWNativeContent>)nativeController;
+
+// Called when NavigationManager has completed go to index same-document
+// navigation. Updates HTML5 history state, current document URL and sends
+// approprivate navigation and loading WebStateObserver callbacks.
+- (void)didFinishGoToIndexSameDocumentNavigationWithType:
+    (web::NavigationInitiationType)type;
+
 @end
 
 #pragma mark Testing
@@ -282,8 +239,8 @@ class WebStateImpl;
 - (void)injectWebViewContentView:(CRWWebViewContentView*)webViewContentView;
 - (void)resetInjectedWebViewContentView;
 
-// Returns the number of observers registered for this CRWWebController.
-- (NSUInteger)observerCount;
+// Returns whether any observers are registered with the CRWWebController.
+- (BOOL)hasObservers;
 
 // Loads the HTML into the page at the given URL.
 - (void)loadHTML:(NSString*)HTML forURL:(const GURL&)URL;

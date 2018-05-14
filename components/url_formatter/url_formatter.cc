@@ -68,7 +68,7 @@ class HostComponentTransform : public AppendComponentTransform {
     std::string domain_and_registry =
         net::registry_controlled_domains::GetDomainAndRegistry(
             component_text,
-            net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
+            net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
 
     base::OffsetAdjuster::Adjustments trivial_subdomains_adjustments;
     base::StringTokenizer tokenizer(
@@ -336,7 +336,7 @@ struct UIDNAWrapper {
     // registrars, search engines) converge toward a consensus.
     value = uidna_openUTS46(UIDNA_CHECK_BIDI, &err);
     if (U_FAILURE(err))
-      value = NULL;
+      value = nullptr;
   }
 
   UIDNA* value;
@@ -362,7 +362,7 @@ bool IDNToUnicodeOneComponent(const base::char16* comp,
   if ((comp_len > arraysize(kIdnPrefix)) &&
       !memcmp(comp, kIdnPrefix, sizeof(kIdnPrefix))) {
     UIDNA* uidna = g_uidna.Get().value;
-    DCHECK(uidna != NULL);
+    DCHECK(uidna != nullptr);
     size_t original_length = out->length();
     int32_t output_length = 64;
     UIDNAInfo info = UIDNA_INFO_INITIALIZER;
@@ -405,12 +405,13 @@ const FormatUrlType kFormatUrlOmitNothing = 0;
 const FormatUrlType kFormatUrlOmitUsernamePassword = 1 << 0;
 const FormatUrlType kFormatUrlOmitHTTP = 1 << 1;
 const FormatUrlType kFormatUrlOmitTrailingSlashOnBareHostname = 1 << 2;
-const FormatUrlType kFormatUrlOmitAll =
+const FormatUrlType kFormatUrlOmitHTTPS = 1 << 3;
+const FormatUrlType kFormatUrlExperimentalElideAfterHost = 1 << 4;
+const FormatUrlType kFormatUrlOmitTrivialSubdomains = 1 << 5;
+
+const FormatUrlType kFormatUrlOmitDefaults =
     kFormatUrlOmitUsernamePassword | kFormatUrlOmitHTTP |
     kFormatUrlOmitTrailingSlashOnBareHostname;
-const FormatUrlType kFormatUrlExperimentalElideAfterHost = 1 << 3;
-const FormatUrlType kFormatUrlExperimentalOmitHTTPS = 1 << 4;
-const FormatUrlType kFormatUrlExperimentalOmitTrivialSubdomains = 1 << 5;
 
 base::string16 FormatUrl(const GURL& url,
                          FormatUrlTypes format_types,
@@ -525,7 +526,7 @@ base::string16 FormatUrlWithAdjustments(
 
   // Host.
   bool trim_trivial_subdomains =
-      (format_types & kFormatUrlExperimentalOmitTrivialSubdomains) != 0;
+      (format_types & kFormatUrlOmitTrivialSubdomains) != 0;
   AppendFormattedComponent(spec, parsed.host,
                            HostComponentTransform(trim_trivial_subdomains),
                            &url_string, &new_parsed->host, adjustments);
@@ -585,11 +586,10 @@ base::string16 FormatUrlWithAdjustments(
                              NonHostComponentTransform(unescape_rules),
                              &url_string, &new_parsed->query, adjustments);
 
-    // Ref.  This is valid, unescaped UTF-8, so we can just convert.
     if (parsed.ref.is_valid())
       url_string.push_back('#');
     AppendFormattedComponent(spec, parsed.ref,
-                             NonHostComponentTransform(net::UnescapeRule::NONE),
+                             NonHostComponentTransform(unescape_rules),
                              &url_string, &new_parsed->ref, adjustments);
   }
 
@@ -604,7 +604,7 @@ base::string16 FormatUrlWithAdjustments(
       !base::StartsWith(url.host(), kFTP, base::CompareCase::SENSITIVE) &&
       (((format_types & kFormatUrlOmitHTTP) &&
         url.SchemeIs(url::kHttpScheme)) ||
-       ((format_types & kFormatUrlExperimentalOmitHTTPS) &&
+       ((format_types & kFormatUrlOmitHTTPS) &&
         url.SchemeIs(url::kHttpsScheme)));
 
   // If we need to strip out schemes do it after the fact.

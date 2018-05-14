@@ -3,14 +3,14 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/extensions/browser_action_test_util.h"
-#include "chrome/browser/media/router/media_router_ui_service.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/extensions/browser_action_test_util.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
 #include "chrome/browser/ui/toolbar/media_router_action.h"
@@ -23,6 +23,7 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/browser/ui/webui/media_router/media_router_dialog_controller_impl.h"
+#include "chrome/browser/ui/webui/media_router/media_router_ui_service.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -60,7 +61,7 @@ class MediaRouterUIBrowserTest : public InProcessBrowserTest {
         MediaRouterUIService::Get(browser()->profile())->action_controller();
 
     routes_ = {MediaRoute("routeId1", MediaSource("sourceId"), "sinkId1",
-                          "description", true, std::string(), true)};
+                          "description", true, true)};
   }
 
   void OpenMediaRouterDialogAndWaitForNewWebContents() {
@@ -129,7 +130,7 @@ class MediaRouterUIBrowserTest : public InProcessBrowserTest {
       update->SetBoolean(ComponentToolbarActionsFactory::kMediaRouterActionId,
                          always_show);
     }
-    chrome::MigrateObsoleteProfilePrefs(browser()->profile());
+    MigrateObsoleteProfilePrefs(browser()->profile());
   }
 
  protected:

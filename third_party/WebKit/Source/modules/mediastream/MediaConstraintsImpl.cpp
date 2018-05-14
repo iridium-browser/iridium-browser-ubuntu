@@ -37,7 +37,7 @@
 #include "core/frame/UseCounter.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "modules/mediastream/MediaTrackConstraints.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/Vector.h"
@@ -54,7 +54,7 @@ enum class NakedValueDisposition { kTreatAsIdeal, kTreatAsExact };
 
 // Old type/value form of constraint. Used in parsing old-style constraints.
 struct NameValueStringConstraint {
-  NameValueStringConstraint() {}
+  NameValueStringConstraint() = default;
 
   NameValueStringConstraint(WebString name, WebString value)
       : name_(name), value_(value) {}
@@ -69,7 +69,7 @@ struct NameValueStringConstraint {
 // be deleted from the files mentioned.
 // TODO(hta): remove comments before https://crbug.com/543997 is closed.
 
-// From content/renderer/media/media_stream_video_source.cc
+// From content/renderer/media/stream/media_stream_video_source.cc
 const char kMinAspectRatio[] = "minAspectRatio";
 const char kMaxAspectRatio[] = "maxAspectRatio";
 const char kMaxWidth[] = "maxWidth";
@@ -88,7 +88,7 @@ const char kMediaStreamRenderToAssociatedSink[] =
 // RenderToAssociatedSink will be going away in M50-M60 some time.
 const char kMediaStreamAudioHotword[] = "googHotword";
 // TODO(hta): googHotword should go away. https://crbug.com/577627
-// From content/renderer/media/media_stream_audio_processor_options.cc
+// From content/renderer/media/stream/media_stream_audio_processor_options.cc
 const char kEchoCancellation[] = "echoCancellation";
 const char kDisableLocalEcho[] = "disableLocalEcho";
 const char kGoogEchoCancellation[] = "googEchoCancellation";
@@ -381,6 +381,14 @@ static void ParseOldStyleNames(
     } else if (constraint.name_.Equals(kUseRtpMux)) {
       result.goog_use_rtp_mux.SetExact(ToBoolean(constraint.value_));
     } else if (constraint.name_.Equals(kEnableDtlsSrtp)) {
+      bool value = ToBoolean(constraint.value_);
+      if (value) {
+        UseCounter::Count(context,
+                          WebFeature::kRTCConstraintEnableDtlsSrtpTrue);
+      } else {
+        UseCounter::Count(context,
+                          WebFeature::kRTCConstraintEnableDtlsSrtpFalse);
+      }
       result.enable_dtls_srtp.SetExact(ToBoolean(constraint.value_));
     } else if (constraint.name_.Equals(kEnableRtpDataChannels)) {
       result.enable_rtp_data_channels.SetExact(ToBoolean(constraint.value_));
@@ -506,18 +514,18 @@ WebMediaConstraints Create(ExecutionContext* context,
 void CopyLongConstraint(const LongOrConstrainLongRange& blink_union_form,
                         NakedValueDisposition naked_treatment,
                         LongConstraint& web_form) {
-  if (blink_union_form.isLong()) {
+  if (blink_union_form.IsLong()) {
     switch (naked_treatment) {
       case NakedValueDisposition::kTreatAsIdeal:
-        web_form.SetIdeal(blink_union_form.getAsLong());
+        web_form.SetIdeal(blink_union_form.GetAsLong());
         break;
       case NakedValueDisposition::kTreatAsExact:
-        web_form.SetExact(blink_union_form.getAsLong());
+        web_form.SetExact(blink_union_form.GetAsLong());
         break;
     }
     return;
   }
-  const auto& blink_form = blink_union_form.getAsConstrainLongRange();
+  const auto& blink_form = blink_union_form.GetAsConstrainLongRange();
   if (blink_form.hasMin()) {
     web_form.SetMin(blink_form.min());
   }
@@ -535,18 +543,18 @@ void CopyLongConstraint(const LongOrConstrainLongRange& blink_union_form,
 void CopyDoubleConstraint(const DoubleOrConstrainDoubleRange& blink_union_form,
                           NakedValueDisposition naked_treatment,
                           DoubleConstraint& web_form) {
-  if (blink_union_form.isDouble()) {
+  if (blink_union_form.IsDouble()) {
     switch (naked_treatment) {
       case NakedValueDisposition::kTreatAsIdeal:
-        web_form.SetIdeal(blink_union_form.getAsDouble());
+        web_form.SetIdeal(blink_union_form.GetAsDouble());
         break;
       case NakedValueDisposition::kTreatAsExact:
-        web_form.SetExact(blink_union_form.getAsDouble());
+        web_form.SetExact(blink_union_form.GetAsDouble());
         break;
     }
     return;
   }
-  const auto& blink_form = blink_union_form.getAsConstrainDoubleRange();
+  const auto& blink_form = blink_union_form.GetAsConstrainDoubleRange();
   if (blink_form.hasMin()) {
     web_form.SetMin(blink_form.min());
   }
@@ -566,42 +574,42 @@ void CopyStringConstraint(
         blink_union_form,
     NakedValueDisposition naked_treatment,
     StringConstraint& web_form) {
-  if (blink_union_form.isString()) {
+  if (blink_union_form.IsString()) {
     switch (naked_treatment) {
       case NakedValueDisposition::kTreatAsIdeal:
-        web_form.SetIdeal(Vector<String>(1, blink_union_form.getAsString()));
+        web_form.SetIdeal(Vector<String>(1, blink_union_form.GetAsString()));
         break;
       case NakedValueDisposition::kTreatAsExact:
-        web_form.SetExact(Vector<String>(1, blink_union_form.getAsString()));
+        web_form.SetExact(Vector<String>(1, blink_union_form.GetAsString()));
 
         break;
     }
     return;
   }
-  if (blink_union_form.isStringSequence()) {
+  if (blink_union_form.IsStringSequence()) {
     switch (naked_treatment) {
       case NakedValueDisposition::kTreatAsIdeal:
-        web_form.SetIdeal(blink_union_form.getAsStringSequence());
+        web_form.SetIdeal(blink_union_form.GetAsStringSequence());
         break;
       case NakedValueDisposition::kTreatAsExact:
-        web_form.SetExact(blink_union_form.getAsStringSequence());
+        web_form.SetExact(blink_union_form.GetAsStringSequence());
         break;
     }
     return;
   }
-  const auto& blink_form = blink_union_form.getAsConstrainDOMStringParameters();
+  const auto& blink_form = blink_union_form.GetAsConstrainDOMStringParameters();
   if (blink_form.hasIdeal()) {
-    if (blink_form.ideal().isStringSequence()) {
-      web_form.SetIdeal(blink_form.ideal().getAsStringSequence());
-    } else if (blink_form.ideal().isString()) {
-      web_form.SetIdeal(Vector<String>(1, blink_form.ideal().getAsString()));
+    if (blink_form.ideal().IsStringSequence()) {
+      web_form.SetIdeal(blink_form.ideal().GetAsStringSequence());
+    } else if (blink_form.ideal().IsString()) {
+      web_form.SetIdeal(Vector<String>(1, blink_form.ideal().GetAsString()));
     }
   }
   if (blink_form.hasExact()) {
-    if (blink_form.exact().isStringSequence()) {
-      web_form.SetExact(blink_form.exact().getAsStringSequence());
-    } else if (blink_form.exact().isString()) {
-      web_form.SetExact(Vector<String>(1, blink_form.exact().getAsString()));
+    if (blink_form.exact().IsStringSequence()) {
+      web_form.SetExact(blink_form.exact().GetAsStringSequence());
+    } else if (blink_form.exact().IsString()) {
+      web_form.SetExact(Vector<String>(1, blink_form.exact().GetAsString()));
     }
   }
 }
@@ -610,18 +618,18 @@ void CopyBooleanConstraint(
     const BooleanOrConstrainBooleanParameters& blink_union_form,
     NakedValueDisposition naked_treatment,
     BooleanConstraint& web_form) {
-  if (blink_union_form.isBoolean()) {
+  if (blink_union_form.IsBoolean()) {
     switch (naked_treatment) {
       case NakedValueDisposition::kTreatAsIdeal:
-        web_form.SetIdeal(blink_union_form.getAsBoolean());
+        web_form.SetIdeal(blink_union_form.GetAsBoolean());
         break;
       case NakedValueDisposition::kTreatAsExact:
-        web_form.SetExact(blink_union_form.getAsBoolean());
+        web_form.SetExact(blink_union_form.GetAsBoolean());
         break;
     }
     return;
   }
-  const auto& blink_form = blink_union_form.getAsConstrainBooleanParameters();
+  const auto& blink_form = blink_union_form.GetAsConstrainBooleanParameters();
   if (blink_form.hasIdeal()) {
     web_form.SetIdeal(blink_form.ideal());
   }
@@ -806,7 +814,7 @@ LongOrConstrainLongRange ConvertLong(const LongConstraint& input,
                                      NakedValueDisposition naked_treatment) {
   LongOrConstrainLongRange output_union;
   if (UseNakedNumeric(input, naked_treatment)) {
-    output_union.setLong(GetNakedValue<long>(input, naked_treatment));
+    output_union.SetLong(GetNakedValue<long>(input, naked_treatment));
   } else if (!input.IsEmpty()) {
     ConstrainLongRange output;
     if (input.HasExact())
@@ -817,7 +825,7 @@ LongOrConstrainLongRange ConvertLong(const LongConstraint& input,
       output.setMax(input.Max());
     if (input.HasIdeal())
       output.setIdeal(input.Ideal());
-    output_union.setConstrainLongRange(output);
+    output_union.SetConstrainLongRange(output);
   }
   return output_union;
 }
@@ -827,7 +835,7 @@ DoubleOrConstrainDoubleRange ConvertDouble(
     NakedValueDisposition naked_treatment) {
   DoubleOrConstrainDoubleRange output_union;
   if (UseNakedNumeric(input, naked_treatment)) {
-    output_union.setDouble(GetNakedValue<double>(input, naked_treatment));
+    output_union.SetDouble(GetNakedValue<double>(input, naked_treatment));
   } else if (!input.IsEmpty()) {
     ConstrainDoubleRange output;
     if (input.HasExact())
@@ -838,7 +846,7 @@ DoubleOrConstrainDoubleRange ConvertDouble(
       output.setMin(input.Min());
     if (input.HasMax())
       output.setMax(input.Max());
-    output_union.setConstrainDoubleRange(output);
+    output_union.SetConstrainDoubleRange(output);
   }
   return output_union;
 }
@@ -850,9 +858,9 @@ StringOrStringSequence ConvertStringSequence(
     Vector<String> buffer;
     for (const auto& scanner : input)
       buffer.push_back(scanner);
-    the_strings.setStringSequence(buffer);
+    the_strings.SetStringSequence(buffer);
   } else if (input.size() > 0) {
-    the_strings.setString(input[0]);
+    the_strings.SetString(input[0]);
   }
   return the_strings;
 }
@@ -868,9 +876,9 @@ StringOrStringSequenceOrConstrainDOMStringParameters ConvertString(
       Vector<String> buffer;
       for (const auto& scanner : input_buffer)
         buffer.push_back(scanner);
-      output_union.setStringSequence(buffer);
+      output_union.SetStringSequence(buffer);
     } else if (input_buffer.size() > 0) {
-      output_union.setString(input_buffer[0]);
+      output_union.SetString(input_buffer[0]);
     }
   } else if (!input.IsEmpty()) {
     ConstrainDOMStringParameters output;
@@ -878,7 +886,7 @@ StringOrStringSequenceOrConstrainDOMStringParameters ConvertString(
       output.setExact(ConvertStringSequence(input.Exact()));
     if (input.HasIdeal())
       output.setIdeal(ConvertStringSequence(input.Ideal()));
-    output_union.setConstrainDOMStringParameters(output);
+    output_union.SetConstrainDOMStringParameters(output);
   }
   return output_union;
 }
@@ -888,14 +896,14 @@ BooleanOrConstrainBooleanParameters ConvertBoolean(
     NakedValueDisposition naked_treatment) {
   BooleanOrConstrainBooleanParameters output_union;
   if (UseNakedNonNumeric(input, naked_treatment)) {
-    output_union.setBoolean(GetNakedValue<bool>(input, naked_treatment));
+    output_union.SetBoolean(GetNakedValue<bool>(input, naked_treatment));
   } else if (!input.IsEmpty()) {
     ConstrainBooleanParameters output;
     if (input.HasExact())
       output.setExact(input.Exact());
     if (input.HasIdeal())
       output.setIdeal(input.Ideal());
-    output_union.setConstrainBooleanParameters(output);
+    output_union.SetConstrainBooleanParameters(output);
   }
   return output_union;
 }

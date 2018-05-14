@@ -17,7 +17,7 @@ namespace {
 TEST(PaymentRequestTest, SecureContextRequired) {
   V8TestingScope scope;
   scope.GetDocument().SetSecurityOrigin(
-      SecurityOrigin::Create(KURL(NullURL(), "http://www.example.com/")));
+      SecurityOrigin::Create(KURL("http://www.example.com/")));
 
   PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
@@ -343,7 +343,7 @@ TEST(PaymentRequestTest, RejectShowPromiseOnErrorPaymentMethodNotSupported) {
       payments::mojom::blink::PaymentErrorReason::NOT_SUPPORTED);
 
   v8::MicrotasksScope::PerformCheckpoint(scope.GetScriptState()->GetIsolate());
-  EXPECT_EQ("NotSupportedError: The payment method is not supported",
+  EXPECT_EQ("NotSupportedError: The payment method \"foo\" is not supported",
             error_message);
 }
 
@@ -433,7 +433,8 @@ TEST(PaymentRequestTest, RejectShowPromiseOnInvalidPaymentDetailsUpdate) {
 
   request->OnUpdatePaymentDetails(ScriptValue::From(
       scope.GetScriptState(),
-      FromJSONString(scope.GetScriptState()->GetIsolate(), "{\"total\": {}}",
+      FromJSONString(scope.GetScriptState()->GetIsolate(),
+                     scope.GetScriptState()->GetContext(), "{\"total\": {}}",
                      scope.GetExceptionState())));
   EXPECT_FALSE(scope.GetExceptionState().HadException());
 }
@@ -463,6 +464,7 @@ TEST(PaymentRequestTest,
   request->OnUpdatePaymentDetails(ScriptValue::From(
       scope.GetScriptState(),
       FromJSONString(scope.GetScriptState()->GetIsolate(),
+                     scope.GetScriptState()->GetContext(),
                      detail_with_shipping_options, scope.GetExceptionState())));
   EXPECT_FALSE(scope.GetExceptionState().HadException());
   EXPECT_EQ("standardShippingOption", request->shippingOption());
@@ -473,6 +475,7 @@ TEST(PaymentRequestTest,
   request->OnUpdatePaymentDetails(
       ScriptValue::From(scope.GetScriptState(),
                         FromJSONString(scope.GetScriptState()->GetIsolate(),
+                                       scope.GetScriptState()->GetContext(),
                                        detail_without_shipping_options,
                                        scope.GetExceptionState())));
 
@@ -505,6 +508,7 @@ TEST(
   request->OnUpdatePaymentDetails(
       ScriptValue::From(scope.GetScriptState(),
                         FromJSONString(scope.GetScriptState()->GetIsolate(),
+                                       scope.GetScriptState()->GetContext(),
                                        detail, scope.GetExceptionState())));
   EXPECT_FALSE(scope.GetExceptionState().HadException());
 
@@ -534,6 +538,7 @@ TEST(PaymentRequestTest, UseTheSelectedShippingOptionFromPaymentDetailsUpdate) {
   request->OnUpdatePaymentDetails(
       ScriptValue::From(scope.GetScriptState(),
                         FromJSONString(scope.GetScriptState()->GetIsolate(),
+                                       scope.GetScriptState()->GetContext(),
                                        detail, scope.GetExceptionState())));
   EXPECT_FALSE(scope.GetExceptionState().HadException());
 
@@ -559,12 +564,13 @@ TEST(PaymentRequestTest, NoExceptionWithErrorMessageInUpdate) {
   request->OnUpdatePaymentDetails(ScriptValue::From(
       scope.GetScriptState(),
       FromJSONString(scope.GetScriptState()->GetIsolate(),
+                     scope.GetScriptState()->GetContext(),
                      detail_with_error_msg, scope.GetExceptionState())));
   EXPECT_FALSE(scope.GetExceptionState().HadException());
 }
 
 TEST(PaymentRequestTest,
-     ShouldResolveWithEmptyShippingOptionsIfIDsOfShippingOptionsAreDuplicated) {
+     ShouldResolveWithExceptionIfIDsOfShippingOptionsAreDuplicated) {
   V8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
   MakePaymentRequestOriginSecure(scope.GetDocument());
@@ -579,29 +585,10 @@ TEST(PaymentRequestTest,
   details.setShippingOptions(shipping_options);
   PaymentOptions options;
   options.setRequestShipping(true);
-  PaymentRequest* request = PaymentRequest::Create(
-      scope.GetExecutionContext(), BuildPaymentMethodDataForTest(), details,
-      options, scope.GetExceptionState());
-  EXPECT_FALSE(scope.GetExceptionState().HadException());
-  EXPECT_TRUE(request->shippingOption().IsNull());
-  request->show(scope.GetScriptState())
-      .Then(funcs.ExpectNoCall(), funcs.ExpectNoCall());
-  String detail_with_shipping_options =
-      "{\"total\": {\"label\": \"Total\", \"amount\": {\"currency\": \"USD\", "
-      "\"value\": \"5.00\"}},"
-      "\"shippingOptions\": [{\"id\": \"standardShippingOption\", \"label\": "
-      "\"Standard shipping\", \"amount\": {\"currency\": \"USD\", \"value\": "
-      "\"5.00\"}, \"selected\": true}, {\"id\": \"standardShippingOption\", "
-      "\"label\": \"Standard shipping\", \"amount\": {\"currency\": \"USD\", "
-      "\"value\": \"5.00\"}, \"selected\": true}]}";
-
-  request->OnUpdatePaymentDetails(ScriptValue::From(
-      scope.GetScriptState(),
-      FromJSONString(scope.GetScriptState()->GetIsolate(),
-                     detail_with_shipping_options, scope.GetExceptionState())));
-
-  EXPECT_FALSE(scope.GetExceptionState().HadException());
-  EXPECT_TRUE(request->shippingOption().IsNull());
+  PaymentRequest::Create(scope.GetExecutionContext(),
+                         BuildPaymentMethodDataForTest(), details, options,
+                         scope.GetExceptionState());
+  EXPECT_TRUE(scope.GetExceptionState().HadException());
 }
 
 TEST(PaymentRequestTest, DetailsIdIsSet) {

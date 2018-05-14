@@ -74,12 +74,17 @@ class ContentAutofillDriver : public AutofillDriver,
   // mojom::AutofillDriver:
   void FormsSeen(const std::vector<FormData>& forms,
                  base::TimeTicks timestamp) override;
-  void WillSubmitForm(const FormData& form, base::TimeTicks timestamp) override;
-  void FormSubmitted(const FormData& form) override;
+  void FormSubmitted(const FormData& form,
+                     bool known_success,
+                     SubmissionSource source,
+                     base::TimeTicks timestamp) override;
   void TextFieldDidChange(const FormData& form,
                           const FormFieldData& field,
                           const gfx::RectF& bounding_box,
                           base::TimeTicks timestamp) override;
+  void TextFieldDidScroll(const FormData& form,
+                          const FormFieldData& field,
+                          const gfx::RectF& bounding_box) override;
   void QueryFormFieldAutofill(int32_t id,
                               const FormData& form,
                               const FormFieldData& field,
@@ -96,8 +101,9 @@ class ContentAutofillDriver : public AutofillDriver,
   void SetDataList(const std::vector<base::string16>& values,
                    const std::vector<base::string16>& labels) override;
 
-  // Called when the frame has navigated.
-  void DidNavigateFrame(content::NavigationHandle* navigation_handle);
+  // Called when the main frame has navigated. Explicitely will not trigger for
+  // subframe navigations. See navigation_handle.h for details.
+  void DidNavigateMainFrame(content::NavigationHandle* navigation_handle);
 
   AutofillExternalDelegate* autofill_external_delegate() {
     return autofill_external_delegate_.get();
@@ -113,6 +119,8 @@ class ContentAutofillDriver : public AutofillDriver,
       const content::RenderWidgetHost::KeyPressEventCallback& handler);
   void RemoveKeyPressHandler();
 
+  void SetAutofillProviderForTesting(AutofillProvider* provider);
+
  protected:
   // Sets the manager to |manager| and sets |manager|'s external delegate
   // to |autofill_external_delegate_|. Takes ownership of |manager|.
@@ -124,6 +132,8 @@ class ContentAutofillDriver : public AutofillDriver,
       const content::RenderWidgetHost::KeyPressEventCallback& handler) override;
   void RemoveHandler(
       const content::RenderWidgetHost::KeyPressEventCallback& handler) override;
+
+  void SetAutofillProvider(AutofillProvider* provider);
 
   // Weak ref to the RenderFrameHost the driver is associated with. Should
   // always be non-NULL and valid for lifetime of |this|.

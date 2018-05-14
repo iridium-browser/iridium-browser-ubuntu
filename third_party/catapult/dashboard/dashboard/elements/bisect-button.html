@@ -8,6 +8,8 @@ found in the LICENSE file.
 <link rel="import" href="/components/paper-button/paper-button.html">
 
 <link rel="import" href="/dashboard/elements/bisect-form.html">
+<link rel="import" href="/dashboard/elements/pinpoint-job-dialog.html">
+<link rel="import" href="/dashboard/static/pinpoint.html">
 <link rel="import" href="/dashboard/static/simple_xhr.html">
 
 <dom-module id="bisect-button">
@@ -46,7 +48,18 @@ found in the LICENSE file.
         earlier-revision="{{bisectInfo.goodRev}}"
         later-revision="{{bisectInfo.badRev}}"
         test-path="{{bisectInfo.testPath}}"
-        bug-id="{{bugId}}"></bisect-form>
+        bug-id="{{bugId}}"
+        alerts="[[alerts]]"></bisect-form>
+    <pinpoint-job-dialog id="pinpoint" alerts="[[alerts]]"></pinpoint-job-dialog>
+
+    <div id="toasts" hidden>
+      <div id="jobsubmitted">
+        <b>Pinpoint Job submitted!</b>
+        <a href="{{lastSubmittedJobUrl}}"
+           target="_blank">View job {{lastSubmittedJobId}}.</a>
+      </div>
+    </div>
+
   </template>
   <script>
     'use strict';
@@ -56,11 +69,18 @@ found in the LICENSE file.
 
         is: 'bisect-button',
         properties: {
+          alerts: {},
           bisectInfo: {
             notify: true
           },
           bugId: { notify: true },
           xsrfToken: { notify: true }
+        },
+
+        ready() {
+          this.$.pinpoint.addEventListener(
+              'pinpoint-new-response',
+              this.onPinpointJobSubmitted.bind(this));
         },
 
         /**
@@ -83,11 +103,31 @@ found in the LICENSE file.
           return (bisectInfo.badRev > bisectInfo.goodRev + 1);
         },
 
+        onPinpointJobSubmitted(e) {
+          this.lastSubmittedJobId = e.detail.jobId;
+          this.lastSubmittedJobUrl = e.detail.jobUrl;
+
+          this.fire('display-toast', {'content': this.$.jobsubmitted});
+        },
+
         /**
          * Displays the bisect-form when the bisect button is clicked.
          */
         onBisect() {
-          this.$.bisect.show();
+          const testPathParts = this.bisectInfo.testPath.split('/');
+          const botName = testPathParts[1];
+
+          if (d.PINPOINT_BOTS.indexOf(botName) != -1) {
+            this.$.pinpoint.test_path = this.bisectInfo.testPath;
+            this.$.pinpoint.start_commit = this.bisectInfo.goodRev;
+            this.$.pinpoint.start_repository = this.bisectInfo.goodRevRepo;
+            this.$.pinpoint.end_commit = this.bisectInfo.badRev;
+            this.$.pinpoint.end_repository = this.bisectInfo.badRevRepo;
+            this.$.pinpoint.bug_id = this.bugId;
+            this.$.pinpoint.show();
+          } else {
+            this.$.bisect.show();
+          }
         }
       });
     })();

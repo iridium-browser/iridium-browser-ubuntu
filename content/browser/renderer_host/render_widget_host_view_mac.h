@@ -37,7 +37,7 @@
 #import "ui/base/cocoa/command_dispatcher.h"
 #include "ui/base/cocoa/remote_layer_api.h"
 #import "ui/base/cocoa/tool_tip_base_view.h"
-#include "ui/base/ime/composition_underline.h"
+#include "ui/base/ime/ime_text_span.h"
 #include "ui/display/display_observer.h"
 
 namespace content {
@@ -72,7 +72,6 @@ struct TextInputState;
       responderDelegate_;
   BOOL canBeKeyView_;
   BOOL closeOnDeactivate_;
-  BOOL opaque_;
   std::unique_ptr<content::RenderWidgetHostViewMacEditCommandHelper>
       editCommand_helper_;
 
@@ -81,6 +80,9 @@ struct TextInputState;
 
   // The cursor for the page. This is passed up from the renderer.
   base::scoped_nsobject<NSCursor> currentCursor_;
+
+  // Is YES if the cursor is hidden by key events.
+  BOOL cursorHidden_;
 
   // Variables used by our implementaion of the NSTextInput protocol.
   // An input method of Mac calls the methods of this protocol not only to
@@ -125,7 +127,7 @@ struct TextInputState;
   NSRange markedTextSelectedRange_;
 
   // Underline information of the |markedText_|.
-  std::vector<ui::CompositionUnderline> underlines_;
+  std::vector<ui::ImeTextSpan> ime_text_spans_;
 
   // Replacement range information received from |setMarkedText:|.
   gfx::Range setMarkedTextReplacementRange_;
@@ -208,7 +210,6 @@ struct TextInputState;
 
 - (void)setCanBeKeyView:(BOOL)can;
 - (void)setCloseOnDeactivate:(BOOL)b;
-- (void)setOpaque:(BOOL)opaque;
 // True for always-on-top special windows (e.g. Balloons and Panels).
 - (BOOL)acceptsMouseEventsWhenInactive;
 // Cancel ongoing composition (abandon the marked text).
@@ -274,7 +275,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // RenderWidgetHostView implementation.
   bool OnMessageReceived(const IPC::Message& msg) override;
   void InitAsChild(gfx::NativeView parent_view) override;
-  RenderWidgetHost* GetRenderWidgetHost() const override;
   void SetSize(const gfx::Size& size) override;
   void SetBounds(const gfx::Rect& rect) override;
   gfx::Vector2dF GetLastScrollOffset() const override;
@@ -296,6 +296,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void SetBackgroundColor(SkColor color) override;
   SkColor background_color() const override;
   void SetNeedsBeginFrames(bool needs_begin_frames) override;
+  void GetScreenInfo(ScreenInfo* screen_info) const override;
+  void SetWantsAnimateOnlyBeginFrames() override;
 
   // Implementation of RenderWidgetHostViewBase.
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -310,65 +312,67 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
                          int error_code) override;
   void Destroy() override;
   void SetTooltipText(const base::string16& tooltip_text) override;
+  gfx::Size GetRequestedRendererSize() const override;
   bool IsSurfaceAvailableForCopy() const override;
-  void CopyFromSurface(const gfx::Rect& src_rect,
-                       const gfx::Size& output_size,
-                       const ReadbackRequestCallback& callback,
-                       const SkColorType color_type) override;
-  void CopyFromSurfaceToVideoFrame(
+  void CopyFromSurface(
       const gfx::Rect& src_rect,
-      scoped_refptr<media::VideoFrame> target,
-      const base::Callback<void(const gfx::Rect&, bool)>& callback) override;
-  void BeginFrameSubscription(
-      std::unique_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) override;
-  void EndFrameSubscription() override;
-  ui::AcceleratedWidgetMac* GetAcceleratedWidgetMac() const override;
+      const gfx::Size& output_size,
+      base::OnceCallback<void(const SkBitmap&)> callback) override;
   void FocusedNodeChanged(bool is_editable_node,
                           const gfx::Rect& node_bounds_in_screen) override;
   void DidCreateNewRendererCompositorFrameSink(
-      cc::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink)
+      viz::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink)
       override;
-  void SubmitCompositorFrame(const viz::LocalSurfaceId& local_surface_id,
-                             cc::CompositorFrame frame) override;
-  void OnDidNotProduceFrame(const cc::BeginFrameAck& ack) override;
+  void SubmitCompositorFrame(
+      const viz::LocalSurfaceId& local_surface_id,
+      viz::CompositorFrame frame,
+      viz::mojom::HitTestRegionListPtr hit_test_region_list) override;
+  void OnDidNotProduceFrame(const viz::BeginFrameAck& ack) override;
   void ClearCompositorFrame() override;
   BrowserAccessibilityManager* CreateBrowserAccessibilityManager(
       BrowserAccessibilityDelegate* delegate, bool for_root_frame) override;
   gfx::Point AccessibilityOriginInScreen(const gfx::Rect& bounds) override;
   gfx::AcceleratedWidget AccessibilityGetAcceleratedWidget() override;
 
-  bool HasAcceleratedSurface(const gfx::Size& desired_size) override;
+  bool ShouldContinueToPauseForFrame() override;
+  gfx::Vector2d GetOffsetFromRootSurface() override;
   gfx::Rect GetBoundsInRootWindow() override;
+  void ResizeDueToAutoResize(const gfx::Size& new_size,
+                             uint64_t sequence_number) override;
+  void DidNavigate() override;
 
   bool LockMouse() override;
   void UnlockMouse() override;
   void GestureEventAck(const blink::WebGestureEvent& event,
                        InputEventAckState ack_result) override;
 
+  void DidOverscroll(const ui::DidOverscrollParams& params) override;
+
   std::unique_ptr<SyntheticGestureTarget> CreateSyntheticGestureTarget()
       override;
 
+  RenderWidgetHostImpl* GetRenderWidgetHostImpl() const override;
   viz::FrameSinkId GetFrameSinkId() override;
-  viz::FrameSinkId FrameSinkIdAtPoint(cc::SurfaceHittestDelegate* delegate,
-                                      const gfx::Point& point,
-                                      gfx::Point* transformed_point) override;
+  viz::LocalSurfaceId GetLocalSurfaceId() const override;
   // Returns true when we can do SurfaceHitTesting for the event type.
   bool ShouldRouteEvent(const blink::WebInputEvent& event) const;
-  void ProcessMouseEvent(const blink::WebMouseEvent& event,
-                         const ui::LatencyInfo& latency) override;
-  void ProcessMouseWheelEvent(const blink::WebMouseWheelEvent& event,
-                              const ui::LatencyInfo& latency) override;
-  void ProcessTouchEvent(const blink::WebTouchEvent& event,
-                         const ui::LatencyInfo& latency) override;
-  void ProcessGestureEvent(const blink::WebGestureEvent& event,
-                           const ui::LatencyInfo& latency) override;
-  bool TransformPointToLocalCoordSpace(const gfx::Point& point,
+  // This method checks |event| to see if a GesturePinch event can be routed
+  // according to ShouldRouteEvent, and if not, sends it directly to the view's
+  // RenderWidgetHost.
+  // By not just defaulting to sending the GesturePinch events to the mainframe,
+  // we allow the events to be targeted to an oopif subframe, in case some
+  // consumer, such as PDF or maps, wants to intercept them and implement a
+  // custom behavior.
+  void SendGesturePinchEvent(blink::WebGestureEvent* event);
+  bool TransformPointToLocalCoordSpace(const gfx::PointF& point,
                                        const viz::SurfaceId& original_surface,
-                                       gfx::Point* transformed_point) override;
+                                       gfx::PointF* transformed_point) override;
   bool TransformPointToCoordSpaceForView(
-      const gfx::Point& point,
+      const gfx::PointF& point,
       RenderWidgetHostViewBase* target_view,
-      gfx::Point* transformed_point) override;
+      gfx::PointF* transformed_point) override;
+  viz::FrameSinkId GetRootFrameSinkId() override;
+  viz::SurfaceId GetCurrentSurfaceId() const override;
 
   // TextInputManager::Observer implementation.
   void OnUpdateTextInputStateCalled(TextInputManager* text_input_manager,
@@ -426,9 +430,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   WebContents* GetWebContents();
 
-  // Applies background color without notifying the RenderWidget about
-  // opaqueness changes.
-  void UpdateBackgroundColorFromRenderer(SkColor color);
+  // Set the color of the background CALayer shown when no content is ready to
+  // see.
+  void SetBackgroundLayerColor(SkColor color);
 
   bool HasPendingWheelEndEventForTesting() {
     return mouse_wheel_phase_handler_.HasPendingWheelEndEvent();
@@ -446,12 +450,20 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   // Delegated frame management and compositor interface.
   std::unique_ptr<BrowserCompositorMac> browser_compositor_;
+  BrowserCompositorMac* BrowserCompositorForTesting() const {
+    return browser_compositor_.get();
+  }
 
   // Set when the currently-displayed frame is the minimum scale. Used to
   // determine if pinch gestures need to be thresholded.
   bool page_at_minimum_scale_;
 
   MouseWheelPhaseHandler mouse_wheel_phase_handler_;
+
+  // Used to set the mouse_wheel_phase_handler_ timer timeout for testing.
+  void set_mouse_wheel_wheel_phase_handler_timeout(base::TimeDelta timeout) {
+    mouse_wheel_phase_handler_.set_mouse_wheel_end_dispatch_timeout(timeout);
+  }
 
   NSWindow* pepper_fullscreen_window() const {
     return pepper_fullscreen_window_;
@@ -465,9 +477,10 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   int window_number() const;
 
-  // Update properties, such as the scale factor for the backing store
-  // and for any CALayers, and the screen color profile.
-  void UpdateBackingStoreProperties();
+  // Update the size, scale factor, color profile, and any other properties
+  // of the NSView or its NSScreen. Propagate these to the RenderWidgetHostImpl
+  // as well.
+  void UpdateNSViewAndDisplayProperties();
 
   // Ensure that the display link is associated with the correct display.
   void UpdateDisplayLink();
@@ -475,18 +488,17 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void PauseForPendingResizeOrRepaintsAndDraw();
 
   // BrowserCompositorMacClient implementation.
-  NSView* BrowserCompositorMacGetNSView() const override;
-  SkColor BrowserCompositorMacGetGutterColor(SkColor color) const override;
+  SkColor BrowserCompositorMacGetGutterColor() const override;
   void BrowserCompositorMacOnBeginFrame() override;
+  void OnFrameTokenChanged(uint32_t frame_token) override;
+  void DidReceiveFirstFrameAfterNavigation() override;
+  void DestroyCompositorForShutdown() override;
 
   // AcceleratedWidgetMacNSView implementation.
   NSView* AcceleratedWidgetGetNSView() const override;
   void AcceleratedWidgetGetVSyncParameters(
       base::TimeTicks* timebase, base::TimeDelta* interval) const override;
   void AcceleratedWidgetSwapCompleted() override;
-
-  // Exposed for testing.
-  viz::SurfaceId SurfaceIdForTesting() const override;
 
   void SetShowingContextMenu(bool showing) override;
 
@@ -521,6 +533,13 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
  private:
   friend class RenderWidgetHostViewMacTest;
+
+  // Allocate a new FrameSinkId if this object is the platform view of a
+  // RenderWidgetHostViewGuest. This FrameSinkId will not be actually used in
+  // any useful way. It's only created because BrowserCompositorMac always
+  // expects to have a FrameSinkId. FrameSinkIds generated by this method do not
+  // collide with FrameSinkIds used by RenderWidgetHostImpls.
+  static viz::FrameSinkId AllocateFrameSinkIdForGuestViewHack();
 
   // Returns whether this render view is a popup (autocomplete window).
   bool IsPopup() const;
@@ -586,10 +605,21 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // Whether a request for begin frames has been issued.
   bool needs_begin_frames_;
 
-  // The background color of the web content. This color will be drawn when the
-  // web content is not able to draw in time.
-  SkColor background_color_ = SK_ColorTRANSPARENT;
+  // Whether or not the background is opaque as determined by calls to
+  // SetBackgroundColor. The default value is opaque.
+  bool background_is_opaque_ = true;
+
+  // The color of the background CALayer, stored as a SkColor for efficient
+  // comparison. Initially transparent so that the embedding NSView shows
+  // through.
+  SkColor background_layer_color_ = SK_ColorTRANSPARENT;
+
+  // The background color of the last frame that was swapped. This is not
+  // applied until the swap completes (see comments in
+  // AcceleratedWidgetSwapCompleted).
   SkColor last_frame_root_background_color_ = SK_ColorTRANSPARENT;
+
+  int tab_show_sequence_ = 0;
 
   std::unique_ptr<CursorManager> cursor_manager_;
 
@@ -598,6 +628,11 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewMac);
 };
+
+// RenderWidgetHostViewCocoa is not exported outside of content. This helper
+// method provides the tests with the class object so that they can override the
+// methods according to the tests' requirements.
+CONTENT_EXPORT Class GetRenderWidgetHostViewCocoaClassForTesting();
 
 }  // namespace content
 

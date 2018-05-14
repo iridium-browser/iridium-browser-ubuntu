@@ -16,6 +16,9 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/views/view.h"
 
+class Profile;
+class UserContext;
+
 namespace gfx {
 class Rect;
 class Size;
@@ -96,8 +99,8 @@ class NetworkStateHelper {
 // Webview based login helpers.
 //
 
-// Returns the storage partition for the sign-in webview. Note the function gets
-// the partition via the sign-in WebContents thus returns nullptr if the sign-in
+// Returns the storage partition for the sign-in webview. Note the function
+// returns nullptr if the sign-in partition is not available yet, or if sign-in
 // webui is torn down.
 content::StoragePartition* GetSigninPartition();
 
@@ -105,6 +108,11 @@ content::StoragePartition* GetSigninPartition();
 // based flow, the context of the sign-in profile is returned. For webview based
 // flow, the context of the sign-in webview storage partition is returned.
 net::URLRequestContextGetter* GetSigninContext();
+
+// Saves sync password hash and salt to profile prefs. These will be used to
+// detect Gaia password reuses.
+void SaveSyncPasswordDataToProfile(const UserContext& user_context,
+                                   Profile* profile);
 
 }  // namespace login
 

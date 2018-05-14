@@ -14,15 +14,12 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_thread_delegate.h"
 #include "content/public/browser/content_browser_client.h"
-#include "net/disk_cache/simple/simple_backend_impl.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_android.h"
@@ -35,11 +32,7 @@ namespace {
 // Friendly names for the well-known threads.
 static const char* const g_browser_thread_names[BrowserThread::ID_COUNT] = {
   "",  // UI (name assembled in browser_main.cc).
-  "Chrome_DBThread",  // DB
-  "Chrome_FileThread",  // FILE
-  "Chrome_FileUserBlockingThread",  // FILE_USER_BLOCKING
   "Chrome_ProcessLauncherThread",  // PROCESS_LAUNCHER
-  "Chrome_CacheThread",  // CACHE
   "Chrome_IOThread",  // IO
 };
 
@@ -61,14 +54,14 @@ class BrowserThreadTaskRunner : public base::SingleThreadTaskRunner {
       : id_(identifier) {}
 
   // SingleThreadTaskRunner implementation.
-  bool PostDelayedTask(const tracked_objects::Location& from_here,
+  bool PostDelayedTask(const base::Location& from_here,
                        base::OnceClosure task,
                        base::TimeDelta delay) override {
     return BrowserThread::PostDelayedTask(id_, from_here, std::move(task),
                                           delay);
   }
 
-  bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
+  bool PostNonNestableDelayedTask(const base::Location& from_here,
                                   base::OnceClosure task,
                                   base::TimeDelta delay) override {
     return BrowserThread::PostNonNestableDelayedTask(id_, from_here,
@@ -120,12 +113,6 @@ enum BrowserThreadState {
 using BrowserThreadDelegateAtomicPtr = base::subtle::AtomicWord;
 
 struct BrowserThreadGlobals {
-  BrowserThreadGlobals()
-      : blocking_pool(
-            new base::SequencedWorkerPool(3,
-                                          "BrowserBlocking",
-                                          base::TaskPriority::USER_VISIBLE)) {}
-
   // This lock protects |task_runners| and |states|. Do not read or modify those
   // arrays without holding this lock. Do not block while holding this lock.
   base::Lock lock;
@@ -145,11 +132,36 @@ struct BrowserThreadGlobals {
   // BrowserThread::SetIOThreadDelegate.
   BrowserThreadDelegateAtomicPtr io_thread_delegate = 0;
 
-  const scoped_refptr<base::SequencedWorkerPool> blocking_pool;
+  // This locks protects |is_io_thread_initialized|. Do not read or modify this
+  // variable without holding this lock.
+  base::Lock io_thread_lock;
+
+  // A flag indicates whether the BrowserThreadDelegate of the BrowserThread::IO
+  // thread has been initialized.
+  bool is_io_thread_initialized = false;
 };
 
 base::LazyInstance<BrowserThreadGlobals>::Leaky
     g_globals = LAZY_INSTANCE_INITIALIZER;
+
+void InitIOThreadDelegateOnIOThread() {
+  BrowserThreadDelegateAtomicPtr delegate =
+      base::subtle::NoBarrier_Load(&g_globals.Get().io_thread_delegate);
+  if (delegate)
+    reinterpret_cast<BrowserThreadDelegate*>(delegate)->Init();
+}
+
+bool IsIOThreadInitialized() {
+  BrowserThreadGlobals& globals = g_globals.Get();
+  base::AutoLock lock(globals.io_thread_lock);
+  return globals.is_io_thread_initialized;
+}
+
+void SetIsIOThreadInitialized(bool is_io_thread_initialized) {
+  BrowserThreadGlobals& globals = g_globals.Get();
+  base::AutoLock lock(globals.io_thread_lock);
+  globals.is_io_thread_initialized = is_io_thread_initialized;
+}
 
 }  // namespace
 
@@ -176,31 +188,10 @@ BrowserThreadImpl::BrowserThreadImpl(ID identifier,
   globals.states[identifier_] = BrowserThreadState::RUNNING;
 }
 
-// static
-void BrowserThreadImpl::ShutdownThreadPool() {
-  // The goal is to make it impossible for chrome to 'infinite loop' during
-  // shutdown, but to reasonably expect that all BLOCKING_SHUTDOWN tasks queued
-  // during shutdown get run. There's nothing particularly scientific about the
-  // number chosen.
-  const int kMaxNewShutdownBlockingTasks = 1000;
-  BrowserThreadGlobals& globals = g_globals.Get();
-  globals.blocking_pool->Shutdown(kMaxNewShutdownBlockingTasks);
-}
-
-// static
-void BrowserThreadImpl::FlushThreadPoolHelperForTesting() {
-  // We don't want to create a pool if none exists.
-  if (g_globals == nullptr)
-    return;
-  g_globals.Get().blocking_pool->FlushForTesting();
-  disk_cache::SimpleBackendImpl::FlushWorkerPoolForTesting();
-}
-
 void BrowserThreadImpl::Init() {
-  BrowserThreadGlobals& globals = g_globals.Get();
-
 #if DCHECK_IS_ON()
   {
+    BrowserThreadGlobals& globals = g_globals.Get();
     base::AutoLock lock(globals.lock);
     // |globals| should already have been initialized for |identifier_| in
     // BrowserThreadImpl::StartWithOptions(). If this isn't the case it's likely
@@ -212,21 +203,10 @@ void BrowserThreadImpl::Init() {
   }
 #endif  // DCHECK_IS_ON()
 
-  if (identifier_ == BrowserThread::DB ||
-      identifier_ == BrowserThread::FILE ||
-      identifier_ == BrowserThread::FILE_USER_BLOCKING ||
-      identifier_ == BrowserThread::PROCESS_LAUNCHER ||
-      identifier_ == BrowserThread::CACHE) {
+  if (identifier_ == BrowserThread::PROCESS_LAUNCHER) {
     // Nesting and task observers are not allowed on redirected threads.
     base::RunLoop::DisallowNestingOnCurrentThread();
     message_loop()->DisallowTaskObservers();
-  }
-
-  if (identifier_ == BrowserThread::IO) {
-    BrowserThreadDelegateAtomicPtr delegate =
-        base::subtle::NoBarrier_Load(&globals.io_thread_delegate);
-    if (delegate)
-      reinterpret_cast<BrowserThreadDelegate*>(delegate)->Init();
   }
 }
 
@@ -241,33 +221,8 @@ NOINLINE void BrowserThreadImpl::UIThreadRun(base::RunLoop* run_loop) {
   CHECK_GT(line_number, 0);
 }
 
-NOINLINE void BrowserThreadImpl::DBThreadRun(base::RunLoop* run_loop) {
-  volatile int line_number = __LINE__;
-  Thread::Run(run_loop);
-  CHECK_GT(line_number, 0);
-}
-
-NOINLINE void BrowserThreadImpl::FileThreadRun(base::RunLoop* run_loop) {
-  volatile int line_number = __LINE__;
-  Thread::Run(run_loop);
-  CHECK_GT(line_number, 0);
-}
-
-NOINLINE void BrowserThreadImpl::FileUserBlockingThreadRun(
-    base::RunLoop* run_loop) {
-  volatile int line_number = __LINE__;
-  Thread::Run(run_loop);
-  CHECK_GT(line_number, 0);
-}
-
 NOINLINE void BrowserThreadImpl::ProcessLauncherThreadRun(
     base::RunLoop* run_loop) {
-  volatile int line_number = __LINE__;
-  Thread::Run(run_loop);
-  CHECK_GT(line_number, 0);
-}
-
-NOINLINE void BrowserThreadImpl::CacheThreadRun(base::RunLoop* run_loop) {
   volatile int line_number = __LINE__;
   Thread::Run(run_loop);
   CHECK_GT(line_number, 0);
@@ -299,16 +254,8 @@ void BrowserThreadImpl::Run(base::RunLoop* run_loop) {
   switch (identifier_) {
     case BrowserThread::UI:
       return UIThreadRun(run_loop);
-    case BrowserThread::DB:
-      return DBThreadRun(run_loop);
-    case BrowserThread::FILE:
-      return FileThreadRun(run_loop);
-    case BrowserThread::FILE_USER_BLOCKING:
-      return FileUserBlockingThreadRun(run_loop);
     case BrowserThread::PROCESS_LAUNCHER:
       return ProcessLauncherThreadRun(run_loop);
-    case BrowserThread::CACHE:
-      return CacheThreadRun(run_loop);
     case BrowserThread::IO:
       return IOThreadRun(run_loop);
     case BrowserThread::ID_COUNT:
@@ -324,11 +271,12 @@ void BrowserThreadImpl::Run(base::RunLoop* run_loop) {
 void BrowserThreadImpl::CleanUp() {
   BrowserThreadGlobals& globals = g_globals.Get();
 
-  if (identifier_ == BrowserThread::IO) {
+  if (identifier_ == BrowserThread::IO && IsIOThreadInitialized()) {
     BrowserThreadDelegateAtomicPtr delegate =
         base::subtle::NoBarrier_Load(&globals.io_thread_delegate);
     if (delegate)
       reinterpret_cast<BrowserThreadDelegate*>(delegate)->CleanUp();
+    SetIsIOThreadInitialized(false);
   }
 
   // Change the state to SHUTDOWN so that PostTaskHelper stops accepting tasks
@@ -360,6 +308,14 @@ void BrowserThreadImpl::ResetGlobalsForTesting(BrowserThread::ID identifier) {
   globals.task_runners[identifier] = nullptr;
   if (identifier == BrowserThread::IO)
     SetIOThreadDelegate(nullptr);
+}
+
+void BrowserThreadImpl::InitIOThreadDelegate() {
+  DCHECK(!IsIOThreadInitialized());
+
+  SetIsIOThreadInitialized(true);
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::BindOnce(&InitIOThreadDelegateOnIOThread));
 }
 
 BrowserThreadImpl::~BrowserThreadImpl() {
@@ -464,9 +420,9 @@ void BrowserThreadImpl::StopRedirectionOfThreadID(
                               base::WaitableEvent::InitialState::NOT_SIGNALED);
   globals.task_runners[identifier]->PostTask(
       FROM_HERE,
-      base::Bind(&base::WaitableEvent::Signal, base::Unretained(&flushed)));
+      base::BindOnce(&base::WaitableEvent::Signal, base::Unretained(&flushed)));
   {
-    base::AutoUnlock auto_lock(globals.lock);
+    base::AutoUnlock auto_unlock(globals.lock);
     flushed.Wait();
   }
 
@@ -487,12 +443,11 @@ void BrowserThreadImpl::StopRedirectionOfThreadID(
 }
 
 // static
-bool BrowserThreadImpl::PostTaskHelper(
-    BrowserThread::ID identifier,
-    const tracked_objects::Location& from_here,
-    base::OnceClosure task,
-    base::TimeDelta delay,
-    bool nestable) {
+bool BrowserThreadImpl::PostTaskHelper(BrowserThread::ID identifier,
+                                       const base::Location& from_here,
+                                       base::OnceClosure task,
+                                       base::TimeDelta delay,
+                                       bool nestable) {
   DCHECK_GE(identifier, 0);
   DCHECK_LT(identifier, ID_COUNT);
   // Optimization: to avoid unnecessary locks, we listed the ID enumeration in
@@ -532,17 +487,8 @@ bool BrowserThreadImpl::PostTaskHelper(
 }
 
 // static
-bool BrowserThread::PostBlockingPoolSequencedTask(
-    const std::string& sequence_token_name,
-    const tracked_objects::Location& from_here,
-    base::OnceClosure task) {
-  return g_globals.Get().blocking_pool->PostNamedSequencedWorkerTask(
-      sequence_token_name, from_here, std::move(task));
-}
-
-// static
 void BrowserThread::PostAfterStartupTask(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const scoped_refptr<base::TaskRunner>& task_runner,
     base::OnceClosure task) {
   GetContentClient()->browser()->PostAfterStartupTask(from_here, task_runner,
@@ -550,21 +496,21 @@ void BrowserThread::PostAfterStartupTask(
 }
 
 // static
-base::SequencedWorkerPool* BrowserThread::GetBlockingPool() {
-  return g_globals.Get().blocking_pool.get();
-}
-
-// static
 bool BrowserThread::IsThreadInitialized(ID identifier) {
-  if (g_globals == nullptr)
+  if (!g_globals.IsCreated())
     return false;
 
   BrowserThreadGlobals& globals = g_globals.Get();
   base::AutoLock lock(globals.lock);
   DCHECK_GE(identifier, 0);
   DCHECK_LT(identifier, ID_COUNT);
-  return globals.states[identifier] == BrowserThreadState::INITIALIZED ||
-         globals.states[identifier] == BrowserThreadState::RUNNING;
+  bool running =
+      globals.states[identifier] == BrowserThreadState::INITIALIZED ||
+      globals.states[identifier] == BrowserThreadState::RUNNING;
+  if (identifier != BrowserThread::IO)
+    return running;
+
+  return running && IsIOThreadInitialized();
 }
 
 // static
@@ -593,7 +539,7 @@ std::string BrowserThread::GetDCheckCurrentlyOnErrorMessage(ID expected) {
 
 // static
 bool BrowserThread::IsMessageLoopValid(ID identifier) {
-  if (g_globals == nullptr)
+  if (!g_globals.IsCreated())
     return false;
 
   BrowserThreadGlobals& globals = g_globals.Get();
@@ -605,7 +551,7 @@ bool BrowserThread::IsMessageLoopValid(ID identifier) {
 
 // static
 bool BrowserThread::PostTask(ID identifier,
-                             const tracked_objects::Location& from_here,
+                             const base::Location& from_here,
                              base::OnceClosure task) {
   return BrowserThreadImpl::PostTaskHelper(
       identifier, from_here, std::move(task), base::TimeDelta(), true);
@@ -613,7 +559,7 @@ bool BrowserThread::PostTask(ID identifier,
 
 // static
 bool BrowserThread::PostDelayedTask(ID identifier,
-                                    const tracked_objects::Location& from_here,
+                                    const base::Location& from_here,
                                     base::OnceClosure task,
                                     base::TimeDelta delay) {
   return BrowserThreadImpl::PostTaskHelper(identifier, from_here,
@@ -621,27 +567,25 @@ bool BrowserThread::PostDelayedTask(ID identifier,
 }
 
 // static
-bool BrowserThread::PostNonNestableTask(
-    ID identifier,
-    const tracked_objects::Location& from_here,
-    base::OnceClosure task) {
+bool BrowserThread::PostNonNestableTask(ID identifier,
+                                        const base::Location& from_here,
+                                        base::OnceClosure task) {
   return BrowserThreadImpl::PostTaskHelper(
       identifier, from_here, std::move(task), base::TimeDelta(), false);
 }
 
 // static
-bool BrowserThread::PostNonNestableDelayedTask(
-    ID identifier,
-    const tracked_objects::Location& from_here,
-    base::OnceClosure task,
-    base::TimeDelta delay) {
+bool BrowserThread::PostNonNestableDelayedTask(ID identifier,
+                                               const base::Location& from_here,
+                                               base::OnceClosure task,
+                                               base::TimeDelta delay) {
   return BrowserThreadImpl::PostTaskHelper(identifier, from_here,
                                            std::move(task), delay, false);
 }
 
 // static
 bool BrowserThread::PostTaskAndReply(ID identifier,
-                                     const tracked_objects::Location& from_here,
+                                     const base::Location& from_here,
                                      base::OnceClosure task,
                                      base::OnceClosure reply) {
   return GetTaskRunnerForThread(identifier)
@@ -650,14 +594,13 @@ bool BrowserThread::PostTaskAndReply(ID identifier,
 
 // static
 bool BrowserThread::GetCurrentThreadIdentifier(ID* identifier) {
-  if (g_globals == nullptr)
+  if (!g_globals.IsCreated())
     return false;
 
   BrowserThreadGlobals& globals = g_globals.Get();
   // Profiler to track potential contention on |globals.lock|. This only does
   // real work on canary and local dev builds, so the cost of having this here
   // should be minimal.
-  tracked_objects::ScopedTracker tracking_profile(FROM_HERE);
   base::AutoLock lock(globals.lock);
   for (int i = 0; i < ID_COUNT; ++i) {
     if (globals.task_runners[i] &&

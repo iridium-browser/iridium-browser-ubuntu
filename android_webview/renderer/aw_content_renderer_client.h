@@ -15,6 +15,7 @@
 #include "components/spellcheck/spellcheck_build_features.h"
 #include "components/web_restrictions/interfaces/web_restrictions.mojom.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "services/service_manager/public/cpp/local_interface_provider.h"
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
 class SpellCheck;
@@ -26,7 +27,8 @@ class VisitedLinkSlave;
 
 namespace android_webview {
 
-class AwContentRendererClient : public content::ContentRendererClient {
+class AwContentRendererClient : public content::ContentRendererClient,
+                                public service_manager::LocalInterfaceProvider {
  public:
   AwContentRendererClient();
   ~AwContentRendererClient() override;
@@ -35,12 +37,12 @@ class AwContentRendererClient : public content::ContentRendererClient {
   void RenderThreadStarted() override;
   void RenderFrameCreated(content::RenderFrame* render_frame) override;
   void RenderViewCreated(content::RenderView* render_view) override;
-  bool HasErrorPage(int http_status_code, std::string* error_domain) override;
-  void GetNavigationErrorStrings(content::RenderFrame* render_frame,
-                                 const blink::WebURLRequest& failed_request,
-                                 const blink::WebURLError& error,
-                                 std::string* error_html,
-                                 base::string16* error_description) override;
+  bool HasErrorPage(int http_status_code) override;
+  void PrepareErrorPage(content::RenderFrame* render_frame,
+                        const blink::WebURLRequest& failed_request,
+                        const blink::WebURLError& error,
+                        std::string* error_html,
+                        base::string16* error_description) override;
   unsigned long long VisitedLinkHash(const char* canonical_url,
                                      size_t length) override;
   bool IsLinkVisited(unsigned long long link_hash) override;
@@ -49,7 +51,6 @@ class AwContentRendererClient : public content::ContentRendererClient {
       override;
   std::unique_ptr<blink::WebSocketHandshakeThrottle>
   CreateWebSocketHandshakeThrottle() override;
-
   bool HandleNavigation(content::RenderFrame* render_frame,
                         bool is_content_initiated,
                         bool render_view_was_created_by_renderer,
@@ -59,8 +60,15 @@ class AwContentRendererClient : public content::ContentRendererClient {
                         blink::WebNavigationPolicy default_policy,
                         bool is_redirect) override;
   bool ShouldUseMediaPlayerForURL(const GURL& url) override;
+  std::unique_ptr<content::URLLoaderThrottleProvider>
+  CreateURLLoaderThrottleProvider(
+      content::URLLoaderThrottleProviderType provider_type) override;
 
  private:
+  // service_manager::LocalInterfaceProvider:
+  void GetInterface(const std::string& name,
+                    mojo::ScopedMessagePipeHandle request_handle) override;
+
   // Returns |true| if we should use the SafeBrowsing mojo service. Initialises
   // |safe_browsing_| on the first call as a side-effect.
   bool UsingSafeBrowsingMojoService();

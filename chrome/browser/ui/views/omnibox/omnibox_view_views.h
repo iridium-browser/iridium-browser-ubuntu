@@ -13,10 +13,13 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/scoped_observer.h"
 #include "build/build_config.h"
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/security_state/core/security_state.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/compositor/compositor.h"
+#include "ui/compositor/compositor_observer.h"
 #include "ui/gfx/range/range.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
@@ -25,10 +28,9 @@
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #endif
 
-class CommandUpdater;
 class LocationBarView;
 class OmniboxClient;
-class OmniboxPopupView;
+class OmniboxPopupContentsView;
 
 namespace content {
 class WebContents;
@@ -43,21 +45,20 @@ class OSExchangeData;
 }  // namespace ui
 
 // Views-implementation of OmniboxView.
-class OmniboxViewViews
-    : public OmniboxView,
-      public views::Textfield,
+class OmniboxViewViews : public OmniboxView,
+                         public views::Textfield,
 #if defined(OS_CHROMEOS)
-      public
-          chromeos::input_method::InputMethodManager::CandidateWindowObserver,
+                         public chromeos::input_method::InputMethodManager::
+                             CandidateWindowObserver,
 #endif
-      public views::TextfieldController {
+                         public views::TextfieldController,
+                         public ui::CompositorObserver {
  public:
   // The internal view class name.
   static const char kViewClassName[];
 
   OmniboxViewViews(OmniboxEditController* controller,
                    std::unique_ptr<OmniboxClient> client,
-                   CommandUpdater* command_updater,
                    bool popup_window_mode,
                    LocationBarView* location_bar,
                    const gfx::FontList& font_list);
@@ -104,11 +105,22 @@ class OmniboxViewViews
   void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
   void ExecuteCommand(int command_id, int event_flags) override;
   ui::TextInputType GetTextInputType() const override;
+  void AddedToWidget() override;
+  void RemovedFromWidget() override;
+
+ protected:
+  // For testing only.
+  OmniboxPopupContentsView* GetPopupContentsView() const {
+    return popup_view_.get();
+  }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, CloseOmniboxPopupOnTextDrag);
+  FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, FriendlyAccessibleLabel);
+  FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, AccessiblePopup);
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, MaintainCursorAfterFocusCycle);
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, OnBlur);
+  FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, DoNotNavigateOnDrop);
 
   // Update the field with |text| and set the selection.
   void SetTextAndSelectedRange(const base::string16& text,
@@ -130,6 +142,12 @@ class OmniboxViewViews
   // Updates |security_level_| based on the toolbar model's current value.
   void UpdateSecurityLevel();
 
+  void ClearAccessibilityLabel();
+
+  // Returns true if the user text was updated with the full URL (without
+  // steady-state elisions).
+  bool UnapplySteadyStateElisions();
+
   // OmniboxView:
   void SetWindowTextAndCaretPos(const base::string16& text,
                                 size_t caret_pos,
@@ -141,6 +159,7 @@ class OmniboxViewViews
   void UpdatePopup() override;
   void ApplyCaretVisibility() override;
   void OnTemporaryTextMaybeChanged(const base::string16& display_text,
+                                   const AutocompleteMatch& match,
                                    bool save_original_selection,
                                    bool notify_text_changed) override;
   bool OnInlineAutocompleteTextMaybeChanged(const base::string16& display_text,
@@ -154,7 +173,6 @@ class OmniboxViewViews
   int GetWidth() const override;
   bool IsImeShowingPopup() const override;
   void ShowImeIfNeeded() override;
-  void OnMatchOpened(AutocompleteMatch::Type match_type) override;
   int GetOmniboxTextLength() const override;
   void EmphasizeURLComponents() override;
   void SetEmphasis(bool emphasize, const gfx::Range& range) override;
@@ -204,11 +222,20 @@ class OmniboxViewViews
   int OnDrop(const ui::OSExchangeData& data) override;
   void UpdateContextMenu(ui::SimpleMenuModel* menu_contents) override;
 
+  // ui::CompositorObserver:
+  void OnCompositingDidCommit(ui::Compositor* compositor) override;
+  void OnCompositingStarted(ui::Compositor* compositor,
+                            base::TimeTicks start_time) override;
+  void OnCompositingEnded(ui::Compositor* compositor) override;
+  void OnCompositingLockStateChanged(ui::Compositor* compositor) override;
+  void OnCompositingChildResizing(ui::Compositor* compositor) override;
+  void OnCompositingShuttingDown(ui::Compositor* compositor) override;
+
   // When true, the location bar view is read only and also is has a slightly
   // different presentation (smaller font size). This is used for popups.
   bool popup_window_mode_;
 
-  std::unique_ptr<OmniboxPopupView> popup_view_;
+  std::unique_ptr<OmniboxPopupContentsView> popup_view_;
 
   security_state::SecurityLevel security_level_;
 
@@ -234,6 +261,9 @@ class OmniboxViewViews
   // on Chrome OS.
   bool ime_candidate_window_open_;
 
+  // True if any mouse button is currently depressed.
+  bool is_mouse_pressed_;
+
   // Should we select all the text when we see the mouse button get released?
   // We select in response to a click that focuses the omnibox, but we defer
   // until release, setting this variable back to false if we saw a drag, to
@@ -248,6 +278,29 @@ class OmniboxViewViews
   // The time of the first character insert operation that has not yet been
   // painted. Used to measure omnibox responsiveness with a histogram.
   base::TimeTicks insert_char_time_;
+
+  // The state machine for logging the Omnibox.CharTypedToRepaintLatency
+  // histogram.
+  enum {
+    NOT_ACTIVE,           // Not currently tracking a char typed event.
+    CHAR_TYPED,           // Character was typed.
+    ON_PAINT_CALLED,      // Character was typed and OnPaint() called.
+    COMPOSITING_COMMIT,   // Compositing was committed after OnPaint().
+    COMPOSITING_STARTED,  // Compositing was started.
+  } latency_histogram_state_;
+
+  // The currently selected match, if any, with additional labelling text
+  // such as the document title and the type of search, for example:
+  // "Google https://google.com location from bookmark", or
+  // "cats are liquid search suggestion".
+  base::string16 friendly_suggestion_text_;
+
+  // The number of added labelling characters before editable text begins.
+  // For example,  "Google https://google.com location from history",
+  // this is set to 7 (the length of "Google ").
+  int friendly_suggestion_text_prefix_length_;
+
+  ScopedObserver<ui::Compositor, ui::CompositorObserver> scoped_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewViews);
 };

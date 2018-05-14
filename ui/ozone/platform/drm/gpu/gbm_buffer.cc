@@ -5,13 +5,16 @@
 #include "ui/ozone/platform/drm/gpu/gbm_buffer.h"
 
 #include <drm.h>
+#include <drm_fourcc.h>
 #include <fcntl.h>
 #include <gbm.h>
 #include <xf86drm.h>
 #include <utility>
 
+#include "base/files/platform_file.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -31,7 +34,6 @@ GbmBuffer::GbmBuffer(const scoped_refptr<GbmDevice>& gbm,
                      uint32_t format,
                      uint32_t flags,
                      uint64_t modifier,
-                     uint32_t addfb_flags,
                      std::vector<base::ScopedFD>&& fds,
                      const gfx::Size& size,
 
@@ -59,17 +61,34 @@ GbmBuffer::GbmBuffer(const scoped_refptr<GbmDevice>& gbm,
       handles[i] = gbm_bo_get_plane_handle(bo, i).u32;
       strides[i] = gbm_bo_get_plane_stride(bo, i);
       offsets[i] = gbm_bo_get_plane_offset(bo, i);
-      modifiers[i] = modifier;
+      if (modifier != DRM_FORMAT_MOD_INVALID)
+        modifiers[i] = modifier;
     }
 
     // AddFramebuffer2 only considers the modifiers if addfb_flags has
     // DRM_MODE_FB_MODIFIERS set. We only set that when we've created
     // a bo with modifiers, otherwise, we rely on the "no modifiers"
     // behavior doing the right thing.
+    const uint32_t addfb_flags =
+        gbm->allow_addfb2_modifiers() &&
+        modifier != DRM_FORMAT_MOD_INVALID ? DRM_MODE_FB_MODIFIERS : 0;
     bool ret = drm_->AddFramebuffer2(
         gbm_bo_get_width(bo), gbm_bo_get_height(bo), framebuffer_pixel_format_,
         handles, strides, offsets, modifiers, &framebuffer_, addfb_flags);
-    PLOG_IF(ERROR, !ret) << "AddFramebuffer2 failed";
+    // TODO(dcastagna): remove debugging info once we figure out why
+    // AddFramebuffer2 is failing. crbug.com/789292
+    if (!ret) {
+      PLOG(ERROR) << "AddFramebuffer2 failed: ";
+      LOG(ERROR) << base::StringPrintf(
+          "planes: %zu, width: %u, height: %u, addfb_flags: %u",
+          gbm_bo_get_num_planes(bo), gbm_bo_get_width(bo),
+          gbm_bo_get_height(bo), addfb_flags);
+      for (size_t i = 0; i < gbm_bo_get_num_planes(bo); ++i) {
+        LOG(ERROR) << "handles: " << handles[i] << ", stride: " << strides[i]
+                   << ", offset: " << offsets[i]
+                   << ", modifier: " << modifiers[i];
+      }
+    }
     DCHECK(ret);
     if (opaque_framebuffer_pixel_format_ != framebuffer_pixel_format_) {
       ret = drm_->AddFramebuffer2(gbm_bo_get_width(bo), gbm_bo_get_height(bo),
@@ -135,7 +154,7 @@ uint32_t GbmBuffer::GetOpaqueFramebufferId() const {
 }
 
 uint32_t GbmBuffer::GetHandle() const {
-  return gbm_bo_get_handle(bo_).u32;
+  return bo() ? gbm_bo_get_handle(bo()).u32 : 0;
 }
 
 // TODO(reveman): This should not be needed once crbug.com/597932 is fixed,
@@ -171,13 +190,12 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBufferForBO(
     gbm_bo* bo,
     uint32_t format,
     const gfx::Size& size,
-    uint32_t flags,
-    uint64_t modifier,
-    uint32_t addfb_flags) {
+    uint32_t flags) {
   DCHECK(bo);
   std::vector<base::ScopedFD> fds;
   std::vector<gfx::NativePixmapPlane> planes;
 
+  const uint64_t modifier = gbm_bo_get_format_modifier(bo);
   for (size_t i = 0; i < gbm_bo_get_num_planes(bo); ++i) {
     // The fd returned by gbm_bo_get_fd is not ref-counted and need to be
     // kept open for the lifetime of the buffer.
@@ -194,13 +212,13 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBufferForBO(
       fds.emplace_back(std::move(fd));
     }
 
-    planes.emplace_back(
-        gbm_bo_get_plane_stride(bo, i), gbm_bo_get_plane_offset(bo, i),
-        gbm_bo_get_plane_size(bo, i), gbm_bo_get_plane_format_modifier(bo, i));
+    planes.emplace_back(gbm_bo_get_plane_stride(bo, i),
+                        gbm_bo_get_plane_offset(bo, i),
+                        gbm_bo_get_plane_size(bo, i), modifier);
   }
-  scoped_refptr<GbmBuffer> buffer(
-      new GbmBuffer(gbm, bo, format, flags, modifier, addfb_flags,
-                    std::move(fds), size, std::move(planes)));
+  scoped_refptr<GbmBuffer> buffer(new GbmBuffer(gbm, bo, format, flags,
+                                                modifier, std::move(fds), size,
+                                                std::move(planes)));
   if (flags & GBM_BO_USE_SCANOUT && !buffer->GetFramebufferId())
     return nullptr;
 
@@ -223,9 +241,7 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBufferWithModifiers(
   if (!bo)
     return nullptr;
 
-  return CreateBufferForBO(gbm, bo, format, size, flags,
-                           gbm_bo_get_format_modifier(bo),
-                           DRM_MODE_FB_MODIFIERS);
+  return CreateBufferForBO(gbm, bo, format, size, flags);
 }
 
 // static
@@ -242,8 +258,7 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBuffer(
   if (!bo)
     return nullptr;
 
-  return CreateBufferForBO(gbm, bo, format, size, flags,
-                           gbm_bo_get_format_modifier(bo), 0);
+  return CreateBufferForBO(gbm, bo, format, size, flags);
 }
 
 // static
@@ -259,11 +274,12 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBufferFromFds(
   DCHECK_EQ(planes[0].offset, 0);
 
   // Try to use scanout if supported.
-  bool try_scanout = gbm_device_is_format_supported(
-      gbm->device(), format, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+  int gbm_flags = GBM_BO_USE_SCANOUT | GBM_BO_USE_TEXTURING;
+  if (!gbm_device_is_format_supported(gbm->device(), format, gbm_flags))
+    gbm_flags &= ~GBM_BO_USE_SCANOUT;
 
   gbm_bo* bo = nullptr;
-  if (try_scanout) {
+  if (gbm_device_is_format_supported(gbm->device(), format, gbm_flags)) {
     struct gbm_import_fd_planar_data fd_data;
     fd_data.width = size.width();
     fd_data.height = size.height();
@@ -280,18 +296,16 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBufferFromFds(
     // The fd passed to gbm_bo_import is not ref-counted and need to be
     // kept open for the lifetime of the buffer.
     bo = gbm_bo_import(gbm->device(), GBM_BO_IMPORT_FD_PLANAR, &fd_data,
-                       GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+                       gbm_flags);
     if (!bo) {
       LOG(ERROR) << "nullptr returned from gbm_bo_import";
       return nullptr;
     }
   }
 
-  uint32_t flags = GBM_BO_USE_RENDERING;
-  if (try_scanout)
-    flags |= GBM_BO_USE_SCANOUT;
-  scoped_refptr<GbmBuffer> buffer(new GbmBuffer(
-      gbm, bo, format, flags, 0, 0, std::move(fds), size, std::move(planes)));
+  scoped_refptr<GbmBuffer> buffer(
+      new GbmBuffer(gbm, bo, format, gbm_flags, planes[0].modifier,
+                    std::move(fds), size, std::move(planes)));
 
   return buffer;
 }
@@ -363,14 +377,19 @@ gfx::Size GbmPixmap::GetBufferSize() const {
   return buffer_->GetSize();
 }
 
+uint32_t GbmPixmap::GetUniqueId() const {
+  return buffer_->GetHandle();
+}
+
 bool GbmPixmap::ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
                                      int plane_z_order,
                                      gfx::OverlayTransform plane_transform,
                                      const gfx::Rect& display_bounds,
                                      const gfx::RectF& crop_rect) {
   DCHECK(buffer_->GetFlags() & GBM_BO_USE_SCANOUT);
-  surface_manager_->GetSurface(widget)->QueueOverlayPlane(OverlayPlane(
-      buffer_, plane_z_order, plane_transform, display_bounds, crop_rect));
+  surface_manager_->GetSurface(widget)->QueueOverlayPlane(
+      OverlayPlane(buffer_, plane_z_order, plane_transform, display_bounds,
+                   crop_rect, base::kInvalidPlatformFile));
 
   return true;
 }

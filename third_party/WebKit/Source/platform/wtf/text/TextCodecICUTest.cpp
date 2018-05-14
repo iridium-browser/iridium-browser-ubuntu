@@ -19,40 +19,18 @@ TEST(TextCodecICUTest, IgnorableCodePoint) {
   CString encoded =
       codec->Encode(source.data(), source.size(), kEntitiesForUnencodables);
   EXPECT_STREQ("a&#8205;", encoded.data());
-}
-
-TEST(TextCodecICUTest, UTF32AndQuestionMarks) {
-  Vector<String> aliases;
-  Vector<CString> results;
-
-  const UChar kPoo[] = {0xd83d, 0xdca9};  // U+1F4A9 PILE OF POO
-
-  aliases.push_back("UTF-32");
-  results.push_back("\xFF\xFE\x00\x00\xA9\xF4\x01\x00");
-
-  aliases.push_back("UTF-32LE");
-  results.push_back("\xA9\xF4\x01\x00");
-
-  aliases.push_back("UTF-32BE");
-  results.push_back("\x00\x01\xF4\xA9");
-
-  ASSERT_EQ(aliases.size(), results.size());
-  for (unsigned i = 0; i < aliases.size(); ++i) {
-    const String& alias = aliases[i];
-    const CString& expected = results[i];
-
-    TextEncoding encoding(alias);
-    std::unique_ptr<TextCodec> codec = TextCodecICU::Create(encoding, nullptr);
-    {
-      const UChar* data = nullptr;
-      CString encoded = codec->Encode(data, 0, kQuestionMarksForUnencodables);
-      EXPECT_STREQ("", encoded.data());
-    }
-    {
-      CString encoded = codec->Encode(kPoo, WTF_ARRAY_LENGTH(kPoo),
-                                      kQuestionMarksForUnencodables);
-      EXPECT_STREQ(expected.data(), encoded.data());
-    }
-  }
+  const String source2(u"ABC~¤•★星🌟星★•¤~XYZ");
+  const CString encoded2(codec->Encode(source2.GetCharacters<UChar>(),
+                                       source2.length(),
+                                       kEntitiesForUnencodables));
+  const String source3(u"ABC~&#164;&#8226;★星&#127775;星★&#8226;&#164;~XYZ");
+  const CString encoded3(codec->Encode(source3.GetCharacters<UChar>(),
+                                       source3.length(),
+                                       kEntitiesForUnencodables));
+  EXPECT_STREQ(encoded3.data(), encoded2.data());
+  EXPECT_STREQ(
+      "ABC~&#164;&#8226;\x1B$B!z@1\x1B(B&#127775;\x1B$B@1!z\x1B(B&#8226;&#164;~"
+      "XYZ",
+      encoded2.data());
 }
 }

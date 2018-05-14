@@ -8,9 +8,9 @@
 
 namespace media {
 
-RendererFactorySelector::RendererFactorySelector() {}
+RendererFactorySelector::RendererFactorySelector() = default;
 
-RendererFactorySelector::~RendererFactorySelector() {}
+RendererFactorySelector::~RendererFactorySelector() = default;
 
 void RendererFactorySelector::AddFactory(
     FactoryType type,
@@ -26,9 +26,6 @@ void RendererFactorySelector::SetBaseFactoryType(FactoryType type) {
 }
 
 RendererFactory* RendererFactorySelector::GetCurrentFactory() {
-  // We cannot use the MEDIA_PLAYER and the COURIER factory at the same time.
-  DCHECK(!use_media_player_ || !query_is_remoting_active_cb_);
-
   DCHECK(base_factory_type_);
   FactoryType next_factory_type = base_factory_type_.value();
 

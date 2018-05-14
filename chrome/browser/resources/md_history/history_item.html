@@ -1,6 +1,7 @@
+<link rel="import" href="chrome://resources/html/polymer.html">
+
 <link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/html/cr/ui/focus_row.html">
-<link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/shadow.html">
 <link rel="import" href="chrome://resources/html/icon.html">
@@ -19,14 +20,6 @@
         display: block;
         outline: none;
         pointer-events: none;
-      }
-
-      /** Unresolved paper-icon-button-light styles. */
-      button {
-        background: none;
-        border: none;
-        outline: none;
-        padding: 0;
       }
 
       #main-container {
@@ -75,6 +68,8 @@
 
       #checkbox {
         height: 40px;
+        margin: 0;
+        padding: 0;
         width: 40px;
       }
 
@@ -174,7 +169,7 @@
       }
 
       #background {
-        @apply(--shadow-elevation-2dp);
+        @apply --shadow-elevation-2dp;
         background: #fff;
         bottom: 0;
         left: 0;

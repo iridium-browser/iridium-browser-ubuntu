@@ -4,18 +4,18 @@
 
 #include "chrome/browser/signin/easy_unlock_notification_controller_chromeos.h"
 
-#include "ash/system/devicetype_utils.h"
 #include "base/guid.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/proximity_auth/screenlock_bridge.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/message_center/message_center_types.h"
-#include "ui/message_center/notification_types.h"
+#include "ui/chromeos/devicetype_utils.h"
+#include "ui/message_center/public/cpp/notification_types.h"
 
 namespace {
 
@@ -41,7 +41,7 @@ std::unique_ptr<message_center::Notification> CreateNotification(
     const gfx::Image& icon,
     const message_center::RichNotificationData& rich_notification_data,
     message_center::NotificationDelegate* delegate) {
-  return base::MakeUnique<message_center::Notification>(
+  return std::make_unique<message_center::Notification>(
       message_center::NotificationType::NOTIFICATION_TYPE_SIMPLE, id, title,
       message, icon, base::string16() /* display_source */,
       GURL() /* origin_url */,
@@ -53,12 +53,8 @@ std::unique_ptr<message_center::Notification> CreateNotification(
 }  // namespace
 
 EasyUnlockNotificationControllerChromeOS::
-    EasyUnlockNotificationControllerChromeOS(
-        Profile* profile,
-        message_center::MessageCenter* message_center)
-    : profile_(profile),
-      message_center_(message_center),
-      weak_ptr_factory_(this) {}
+    EasyUnlockNotificationControllerChromeOS(Profile* profile)
+    : profile_(profile), weak_ptr_factory_(this) {}
 
 EasyUnlockNotificationControllerChromeOS::
     ~EasyUnlockNotificationControllerChromeOS() {}
@@ -76,7 +72,7 @@ void EasyUnlockNotificationControllerChromeOS::
           IDS_EASY_UNLOCK_CHROMEBOOK_ADDED_NOTIFICATION_TITLE),
       l10n_util::GetStringFUTF16(
           IDS_EASY_UNLOCK_CHROMEBOOK_ADDED_NOTIFICATION_MESSAGE,
-          ash::GetChromeOSDeviceName()),
+          ui::GetChromeOSDeviceName()),
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_NOTIFICATION_EASYUNLOCK_ENABLED),
       rich_notification_data,
@@ -99,7 +95,7 @@ void EasyUnlockNotificationControllerChromeOS::ShowPairingChangeNotification() {
           IDS_EASY_UNLOCK_PAIRING_CHANGED_NOTIFICATION_TITLE),
       l10n_util::GetStringFUTF16(
           IDS_EASY_UNLOCK_PAIRING_CHANGED_NOTIFICATION_MESSAGE,
-          ash::GetChromeOSDeviceName()),
+          ui::GetChromeOSDeviceName()),
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_NOTIFICATION_EASYUNLOCK_ENABLED),
       rich_notification_data,
@@ -110,8 +106,8 @@ void EasyUnlockNotificationControllerChromeOS::ShowPairingChangeNotification() {
 void EasyUnlockNotificationControllerChromeOS::
     ShowPairingChangeAppliedNotification(const std::string& phone_name) {
   // Remove the pairing change notification if it is still being shown.
-  message_center_->RemoveNotification(kEasyUnlockPairingChangeNotifierId,
-                                      false /* by_user */);
+  NotificationDisplayService::GetForProfile(profile_)->Close(
+      NotificationHandler::Type::TRANSIENT, kEasyUnlockPairingChangeNotifierId);
 
   message_center::RichNotificationData rich_notification_data;
   rich_notification_data.buttons.push_back(
@@ -124,7 +120,7 @@ void EasyUnlockNotificationControllerChromeOS::
           IDS_EASY_UNLOCK_PAIRING_CHANGE_APPLIED_NOTIFICATION_TITLE),
       l10n_util::GetStringFUTF16(
           IDS_EASY_UNLOCK_PAIRING_CHANGE_APPLIED_NOTIFICATION_MESSAGE,
-          base::UTF8ToUTF16(phone_name), ash::GetChromeOSDeviceName()),
+          base::UTF8ToUTF16(phone_name), ui::GetChromeOSDeviceName()),
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_NOTIFICATION_EASYUNLOCK_ENABLED),
       rich_notification_data,
@@ -141,9 +137,9 @@ void EasyUnlockNotificationControllerChromeOS::ShowPromotionNotification() {
   ShowNotification(CreateNotification(
       kEasyUnlockPromotionNotifierId,
       l10n_util::GetStringFUTF16(IDS_EASY_UNLOCK_SETUP_NOTIFICATION_TITLE,
-                                 ash::GetChromeOSDeviceName()),
+                                 ui::GetChromeOSDeviceName()),
       l10n_util::GetStringFUTF16(IDS_EASY_UNLOCK_SETUP_NOTIFICATION_MESSAGE,
-                                 ash::GetChromeOSDeviceName()),
+                                 ui::GetChromeOSDeviceName()),
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_NOTIFICATION_EASYUNLOCK_PROMO),
       rich_notification_data,
@@ -154,13 +150,8 @@ void EasyUnlockNotificationControllerChromeOS::ShowPromotionNotification() {
 void EasyUnlockNotificationControllerChromeOS::ShowNotification(
     std::unique_ptr<message_center::Notification> notification) {
   notification->SetSystemPriority();
-  std::string notification_id = notification->id();
-  if (message_center_->FindVisibleNotificationById(notification_id)) {
-    message_center_->UpdateNotification(notification_id,
-                                        std::move(notification));
-  } else {
-    message_center_->AddNotification(std::move(notification));
-  }
+  NotificationDisplayService::GetForProfile(profile_)->Display(
+      NotificationHandler::Type::TRANSIENT, *notification);
 }
 
 void EasyUnlockNotificationControllerChromeOS::LaunchEasyUnlockSettings() {

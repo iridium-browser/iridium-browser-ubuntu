@@ -12,6 +12,10 @@
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/touch_selection/selection_event_type.h"
 
+namespace gfx {
+class PointF;
+}
+
 namespace content {
 
 class RenderWidgetHostViewAndroid;
@@ -31,19 +35,26 @@ class SelectionPopupController : public RenderWidgetHostConnector {
   // Called from native -> java
   void OnSelectionEvent(ui::SelectionEventType event,
                         const gfx::RectF& selection_rect);
+  void OnDragUpdate(const gfx::PointF& position);
   void OnSelectionChanged(const std::string& text);
   bool ShowSelectionMenu(const ContextMenuParams& params, int handle_height);
-  void OnShowUnhandledTapUIIfNeeded(int x_dip, int y_dip, float dip_scale);
+  // |x| and |y| are in physical pixel scale.
+  void OnShowUnhandledTapUIIfNeeded(int x_px, int y_px);
   void OnSelectWordAroundCaretAck(bool did_select,
                                   int start_adjust,
                                   int end_adjust);
+  std::unique_ptr<ui::TouchHandleDrawable> CreateTouchHandleDrawable();
+  void MoveRangeSelectionExtent(const gfx::PointF& extent);
+
+  void SelectBetweenCoordinates(const gfx::PointF& base,
+                                const gfx::PointF& extent);
 
  private:
   ~SelectionPopupController() override {}
+  base::android::ScopedJavaLocalRef<jobject> GetContext() const;
+
   JavaObjectWeakGlobalRef java_obj_;
 };
-
-bool RegisterSelectionPopupController(JNIEnv* env);
 
 }  // namespace content
 

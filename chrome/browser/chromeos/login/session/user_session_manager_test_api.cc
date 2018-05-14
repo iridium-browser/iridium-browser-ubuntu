@@ -9,8 +9,7 @@ namespace test {
 
 UserSessionManagerTestApi::UserSessionManagerTestApi(
     UserSessionManager* session_manager)
-    : session_manager_(session_manager) {
-}
+    : session_manager_(session_manager) {}
 
 void UserSessionManagerTestApi::InjectStubUserContext(
     const UserContext& user_context) {
@@ -25,6 +24,11 @@ void UserSessionManagerTestApi::SetShouldLaunchBrowserInTests(
 void UserSessionManagerTestApi::SetShouldObtainTokenHandleInTests(
     bool should_obtain_handle) {
   session_manager_->SetShouldObtainHandleInTests(should_obtain_handle);
+}
+
+void UserSessionManagerTestApi::SetAttemptRestartClosureInTests(
+    const base::RepeatingClosure& attempt_restart_closure) {
+  session_manager_->SetAttemptRestartClosureInTests(attempt_restart_closure);
 }
 
 }  // namespace test

@@ -22,7 +22,6 @@ import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.concurrent.ExecutionException;
@@ -32,10 +31,7 @@ import java.util.concurrent.TimeoutException;
  * A payment integration test for a merchant that requests payer name.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestNameTest implements MainActivityStartCallback {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
@@ -152,12 +148,12 @@ public class PaymentRequestNameTest implements MainActivityStartCallback {
 
     /**
      * Test that ending a payment request that requires only the user's payer name results in
-     * the appropriate metric being logged in the PaymentRequest.RequestedInformation histogram.
+     * the appropriate metric being logged in PaymentRequest.Events.
      */
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testRequestedInformationMetric()
+    public void testPaymentRequestEventsMetric()
             throws InterruptedException, ExecutionException, TimeoutException {
         // Start and complete the Payment Request.
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
@@ -169,11 +165,12 @@ public class PaymentRequestNameTest implements MainActivityStartCallback {
                 DialogInterface.BUTTON_POSITIVE, mPaymentRequestTestRule.getDismissed());
         mPaymentRequestTestRule.expectResultContains(new String[] {"Jon Doe"});
 
-        // Make sure that only the appropriate enum value was logged.
-        for (int i = 0; i < RequestedInformation.MAX; ++i) {
-            Assert.assertEquals((i == RequestedInformation.NAME ? 1 : 0),
-                    RecordHistogram.getHistogramValueCountForTesting(
-                            "PaymentRequest.RequestedInformation", i));
-        }
+        int expectedSample = Event.SHOWN | Event.PAY_CLICKED | Event.RECEIVED_INSTRUMENT_DETAILS
+                | Event.COMPLETED | Event.HAD_INITIAL_FORM_OF_PAYMENT
+                | Event.HAD_NECESSARY_COMPLETE_SUGGESTIONS | Event.REQUEST_PAYER_NAME
+                | Event.REQUEST_METHOD_BASIC_CARD | Event.SELECTED_CREDIT_CARD;
+        Assert.assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.Events", expectedSample));
     }
 }

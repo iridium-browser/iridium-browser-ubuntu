@@ -109,7 +109,8 @@ void MockPrinter::GetDefaultPrintSettings(PrintMsg_Print_Params* params) {
 }
 
 void MockPrinter::SetDefaultPrintSettings(const PrintMsg_Print_Params& params) {
-  dpi_ = params.dpi;
+  // Use the same logic as in printing/print_settings.h
+  dpi_ = std::max(params.dpi.width(), params.dpi.height());
   selection_only_ = params.selection_only;
   should_print_backgrounds_ = params.should_print_backgrounds;
   page_size_ = params.page_size;
@@ -145,7 +146,7 @@ void MockPrinter::ScriptedPrint(int cookie,
 
   settings->Reset();
 
-  settings->params.dpi = dpi_;
+  settings->params.dpi = gfx::Size(dpi_, dpi_);
   settings->params.selection_only = selection_only_;
   settings->params.should_print_backgrounds = should_print_backgrounds_;
   settings->params.document_cookie = document_cookie_;
@@ -194,30 +195,30 @@ void MockPrinter::SetPrintedPagesCount(int cookie, int number_pages) {
   pages_.clear();
 }
 
-void MockPrinter::PrintPage(const PrintHostMsg_DidPrintPage_Params& params) {
+void MockPrinter::PrintPage(
+    const PrintHostMsg_DidPrintDocument_Params& params) {
   // Verify the input parameter and update the printer status so that the
   // RenderViewTest class can verify the this function finishes without errors.
   EXPECT_EQ(PRINTER_PRINTING, printer_status_);
   EXPECT_EQ(document_cookie_, params.document_cookie);
-  EXPECT_EQ(page_number_, params.page_number);
-  EXPECT_LE(params.page_number, number_pages_);
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
   // Load the data sent from a RenderView object and create a PageData object.
   // We duplicate the given file handle when creating a base::SharedMemory
   // instance so that its destructor closes the copy.
-  EXPECT_GT(params.data_size, 0U);
-  base::SharedMemory metafile_data(params.metafile_data_handle, true);
-  metafile_data.Map(params.data_size);
+  auto& content = params.content;
+  EXPECT_GT(content.data_size, 0U);
+  base::SharedMemory metafile_data(content.metafile_data_handle, true);
+  metafile_data.Map(content.data_size);
 #if defined(OS_MACOSX)
   printing::PdfMetafileCg metafile;
 #else
-  printing::PdfMetafileSkia metafile(printing::PDF_SKIA_DOCUMENT_TYPE);
+  printing::PdfMetafileSkia metafile;
 #endif
-  metafile.InitFromData(metafile_data.memory(), params.data_size);
+  metafile.InitFromData(metafile_data.memory(), content.data_size);
   printing::Image image(metafile);
   MockPrinterPage* page_data =
-      new MockPrinterPage(metafile_data.memory(), params.data_size, image);
+      new MockPrinterPage(metafile_data.memory(), content.data_size, image);
   scoped_refptr<MockPrinterPage> page(page_data);
   pages_.push_back(page);
 #endif
@@ -286,7 +287,7 @@ int MockPrinter::CreateDocumentCookie() {
 }
 
 void MockPrinter::SetPrintParams(PrintMsg_Print_Params* params) {
-  params->dpi = dpi_;
+  params->dpi = gfx::Size(dpi_, dpi_);
   params->selection_only = selection_only_;
   params->should_print_backgrounds = should_print_backgrounds_;
   params->document_cookie = document_cookie_;

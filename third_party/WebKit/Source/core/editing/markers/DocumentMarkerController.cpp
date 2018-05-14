@@ -29,20 +29,24 @@
 #include "core/editing/markers/DocumentMarkerController.h"
 
 #include <algorithm>
+#include "core/dom/AXObjectCache.h"
 #include "core/dom/Node.h"
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/Text.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/editing/iterators/TextIterator.h"
 #include "core/editing/markers/ActiveSuggestionMarker.h"
 #include "core/editing/markers/ActiveSuggestionMarkerListImpl.h"
 #include "core/editing/markers/CompositionMarker.h"
 #include "core/editing/markers/CompositionMarkerListImpl.h"
-#include "core/editing/markers/DocumentMarkerListEditor.h"
 #include "core/editing/markers/GrammarMarker.h"
 #include "core/editing/markers/GrammarMarkerListImpl.h"
+#include "core/editing/markers/SortedDocumentMarkerListEditor.h"
 #include "core/editing/markers/SpellingMarker.h"
 #include "core/editing/markers/SpellingMarkerListImpl.h"
+#include "core/editing/markers/SuggestionMarker.h"
+#include "core/editing/markers/SuggestionMarkerListImpl.h"
 #include "core/editing/markers/TextMatchMarker.h"
 #include "core/editing/markers/TextMatchMarkerListImpl.h"
 #include "core/frame/LocalFrameView.h"
@@ -69,6 +73,8 @@ DocumentMarker::MarkerTypeIndex MarkerTypeToMarkerIndex(
       return DocumentMarker::kCompositionMarkerIndex;
     case DocumentMarker::kActiveSuggestion:
       return DocumentMarker::kActiveSuggestionMarkerIndex;
+    case DocumentMarker::kSuggestion:
+      return DocumentMarker::kSuggestionMarkerIndex;
   }
 
   NOTREACHED();
@@ -85,12 +91,31 @@ DocumentMarkerList* CreateListForType(DocumentMarker::MarkerType type) {
       return new SpellingMarkerListImpl();
     case DocumentMarker::kGrammar:
       return new GrammarMarkerListImpl();
+    case DocumentMarker::kSuggestion:
+      return new SuggestionMarkerListImpl();
     case DocumentMarker::kTextMatch:
       return new TextMatchMarkerListImpl();
   }
 
   NOTREACHED();
   return nullptr;
+}
+
+void InvalidatePaintForNode(const Node& node) {
+  if (!node.GetLayoutObject())
+    return;
+
+  node.GetLayoutObject()->SetShouldDoFullPaintInvalidation(
+      PaintInvalidationReason::kDocumentMarker);
+
+  // Tell accessibility about the new marker.
+  AXObjectCache* ax_object_cache = node.GetDocument().ExistingAXObjectCache();
+  if (!ax_object_cache)
+    return;
+  // TODO(nektar): Do major refactoring of all AX classes to comply with const
+  // correctness.
+  Node* non_const_node = &const_cast<Node&>(node);
+  ax_object_cache->HandleTextMarkerDataAdded(non_const_node, non_const_node);
 }
 
 }  // namespace
@@ -115,6 +140,7 @@ inline bool DocumentMarkerController::PossiblyHasMarkers(
     // but that operation is more performance-sensitive than anywhere
     // PossiblyHasMarkers() is used.
     possibly_existing_marker_types_ = 0;
+    SetContext(nullptr);
     return false;
   }
 
@@ -123,12 +149,12 @@ inline bool DocumentMarkerController::PossiblyHasMarkers(
 
 DocumentMarkerController::DocumentMarkerController(Document& document)
     : possibly_existing_marker_types_(0), document_(&document) {
-  SetContext(&document);
 }
 
 void DocumentMarkerController::Clear() {
   markers_.clear();
   possibly_existing_marker_types_ = 0;
+  SetContext(nullptr);
 }
 
 void DocumentMarkerController::AddSpellingMarker(const EphemeralRange& range,
@@ -182,6 +208,16 @@ void DocumentMarkerController::AddActiveSuggestionMarker(
   });
 }
 
+void DocumentMarkerController::AddSuggestionMarker(
+    const EphemeralRange& range,
+    const SuggestionMarkerProperties& properties) {
+  DCHECK(!document_->NeedsLayoutTreeUpdate());
+  AddMarkerInternal(
+      range, [this, &properties](int start_offset, int end_offset) {
+        return new SuggestionMarker(start_offset, end_offset, properties);
+      });
+}
+
 void DocumentMarkerController::PrepareForDestruction() {
   Clear();
 }
@@ -231,7 +267,7 @@ void DocumentMarkerController::AddMarkerInternal(
 
     // Ignore text emitted by TextIterator for non-text nodes (e.g. implicit
     // newlines)
-    Node* const node = marked_text.CurrentContainer();
+    const Node* const node = marked_text.CurrentContainer();
     if (!node->IsTextNode())
       continue;
 
@@ -241,11 +277,10 @@ void DocumentMarkerController::AddMarkerInternal(
   }
 }
 
-// Markers are stored in order sorted by their start offset.
-// Markers of the same type do not overlap each other.
-void DocumentMarkerController::AddMarkerToNode(Node* node,
+void DocumentMarkerController::AddMarkerToNode(const Node* node,
                                                DocumentMarker* new_marker) {
   possibly_existing_marker_types_.Add(new_marker->GetType());
+  SetContext(document_);
 
   Member<MarkerLists>& markers =
       markers_.insert(node, nullptr).stored_value->value;
@@ -261,18 +296,14 @@ void DocumentMarkerController::AddMarkerToNode(Node* node,
   DocumentMarkerList* const list = ListForType(markers, new_marker_type);
   list->Add(new_marker);
 
-  // repaint the affected node
-  if (node->GetLayoutObject()) {
-    node->GetLayoutObject()->SetShouldDoFullPaintInvalidation(
-        PaintInvalidationReason::kDocumentMarker);
-  }
+  InvalidatePaintForNode(*node);
 }
 
 // Moves markers from src_node to dst_node. Markers are moved if their start
 // offset is less than length. Markers that run past that point are truncated.
-void DocumentMarkerController::MoveMarkers(Node* src_node,
+void DocumentMarkerController::MoveMarkers(const Node* src_node,
                                            int length,
-                                           Node* dst_node) {
+                                           const Node* dst_node) {
   if (length <= 0)
     return;
 
@@ -304,15 +335,14 @@ void DocumentMarkerController::MoveMarkers(Node* src_node,
       doc_dirty = true;
   }
 
-  // repaint the affected node
-  if (doc_dirty && dst_node->GetLayoutObject()) {
-    dst_node->GetLayoutObject()->SetShouldDoFullPaintInvalidation(
-        PaintInvalidationReason::kDocumentMarker);
-  }
+  if (!doc_dirty)
+    return;
+
+  InvalidatePaintForNode(*dst_node);
 }
 
 void DocumentMarkerController::RemoveMarkersInternal(
-    Node* node,
+    const Node* node,
     unsigned start_offset,
     int length,
     DocumentMarker::MarkerTypes marker_types) {
@@ -351,55 +381,104 @@ void DocumentMarkerController::RemoveMarkersInternal(
 
   if (empty_lists_count == DocumentMarker::kMarkerTypeIndexesCount) {
     markers_.erase(node);
-    if (markers_.IsEmpty())
+    if (markers_.IsEmpty()) {
       possibly_existing_marker_types_ = 0;
+      SetContext(nullptr);
+    }
   }
 
-  // repaint the affected node
-  if (doc_dirty && node->GetLayoutObject()) {
-    node->GetLayoutObject()->SetShouldDoFullPaintInvalidation(
-        PaintInvalidationReason::kDocumentMarker);
-  }
+  if (!doc_dirty)
+    return;
+
+  InvalidatePaintForNode(*node);
 }
 
-DocumentMarker* DocumentMarkerController::MarkerAtPosition(
-    const Position& position,
-    DocumentMarker::MarkerTypes marker_types) {
-  if (!PossiblyHasMarkers(marker_types))
+DocumentMarker* DocumentMarkerController::FirstMarkerIntersectingOffsetRange(
+    const Text& node,
+    unsigned start_offset,
+    unsigned end_offset,
+    DocumentMarker::MarkerTypes types) {
+  if (!PossiblyHasMarkers(types))
     return nullptr;
 
-  Node* const node = position.ComputeContainerNode();
-  MarkerLists* const markers = markers_.at(node);
+  // Minor optimization: if we have an empty range at a node boundary, it
+  // doesn't fall in the interior of any marker.
+  if (start_offset == 0 && end_offset == 0)
+    return nullptr;
+  const unsigned node_length = node.length();
+  if (start_offset == node_length && end_offset == node_length)
+    return nullptr;
+
+  MarkerLists* const markers = markers_.at(&node);
   if (!markers)
     return nullptr;
 
-  const unsigned offset =
-      static_cast<unsigned>(position.ComputeOffsetInContainerNode());
-
-  // This position can't be in the interior of a marker if it occurs at an
-  // endpoint of the node
-  if (offset == 0 ||
-      offset == static_cast<unsigned>(node->MaxCharacterOffset()))
-    return nullptr;
-
-  // Query each of the DocumentMarkerLists until we find a marker at the
-  // specified position (or have gone through all the MarkerTypes)
-  for (DocumentMarker::MarkerType type : marker_types) {
+  for (DocumentMarker::MarkerType type : types) {
     const DocumentMarkerList* const list = ListForType(markers, type);
     if (!list)
       continue;
 
-    const HeapVector<Member<DocumentMarker>>& results =
-        list->MarkersIntersectingRange(offset, offset);
-    if (!results.IsEmpty())
-      return results.front();
+    DocumentMarker* found_marker =
+        list->FirstMarkerIntersectingRange(start_offset, end_offset);
+    if (found_marker)
+      return found_marker;
   }
 
   return nullptr;
 }
 
+HeapVector<std::pair<Member<Node>, Member<DocumentMarker>>>
+DocumentMarkerController::MarkersIntersectingRange(
+    const EphemeralRangeInFlatTree& range,
+    DocumentMarker::MarkerTypes types) {
+  HeapVector<std::pair<Member<Node>, Member<DocumentMarker>>> node_marker_pairs;
+  if (!PossiblyHasMarkers(types))
+    return node_marker_pairs;
+
+  const Node* const range_start_container =
+      range.StartPosition().ComputeContainerNode();
+  const unsigned range_start_offset =
+      range.StartPosition().ComputeOffsetInContainerNode();
+  const Node* const range_end_container =
+      range.EndPosition().ComputeContainerNode();
+  const unsigned range_end_offset =
+      range.EndPosition().ComputeOffsetInContainerNode();
+
+  for (Node& node : range.Nodes()) {
+    MarkerLists* const markers = markers_.at(&node);
+    if (!markers)
+      continue;
+
+    for (DocumentMarker::MarkerType type : types) {
+      const DocumentMarkerList* const list = ListForType(markers, type);
+      if (!list)
+        continue;
+
+      const unsigned start_offset =
+          node == range_start_container ? range_start_offset : 0;
+      const unsigned max_character_offset = node.MaxCharacterOffset();
+      const unsigned end_offset =
+          node == range_end_container ? range_end_offset : max_character_offset;
+
+      // Minor optimization: if we have an empty offset range at the boundary
+      // of a text node, it doesn't fall into the interior of any marker.
+      if (start_offset == 0 && end_offset == 0)
+        continue;
+      if (start_offset == max_character_offset && end_offset == 0)
+        continue;
+
+      const DocumentMarkerVector& markers_from_this_list =
+          list->MarkersIntersectingRange(start_offset, end_offset);
+      for (DocumentMarker* marker : markers_from_this_list)
+        node_marker_pairs.push_back(std::make_pair(&node, marker));
+    }
+  }
+
+  return node_marker_pairs;
+}
+
 DocumentMarkerVector DocumentMarkerController::MarkersFor(
-    Node* node,
+    const Node* node,
     DocumentMarker::MarkerTypes marker_types) {
   DocumentMarkerVector result;
   if (!PossiblyHasMarkers(marker_types))
@@ -502,14 +581,14 @@ void DocumentMarkerController::InvalidateRectsForAllTextMatchMarkers() {
   }
 }
 
-DEFINE_TRACE(DocumentMarkerController) {
+void DocumentMarkerController::Trace(blink::Visitor* visitor) {
   visitor->Trace(markers_);
   visitor->Trace(document_);
   SynchronousMutationObserver::Trace(visitor);
 }
 
 void DocumentMarkerController::RemoveMarkersForNode(
-    Node* node,
+    const Node* node,
     DocumentMarker::MarkerTypes marker_types) {
   if (!PossiblyHasMarkers(marker_types))
     return;
@@ -538,6 +617,16 @@ void DocumentMarkerController::RemoveSpellingMarkersUnderWords(
   }
 }
 
+void DocumentMarkerController::RemoveSuggestionMarkerByTag(const Node* node,
+                                                           int32_t marker_tag) {
+  MarkerLists* markers = markers_.at(node);
+  SuggestionMarkerListImpl* const list = ToSuggestionMarkerListImpl(
+      ListForType(markers, DocumentMarker::kSuggestion));
+  if (!list->RemoveMarkerByTag(marker_tag))
+    return;
+  InvalidatePaintForNode(*node);
+}
+
 void DocumentMarkerController::RemoveMarkersOfTypes(
     DocumentMarker::MarkerTypes marker_types) {
   if (!PossiblyHasMarkers(marker_types))
@@ -554,6 +643,9 @@ void DocumentMarkerController::RemoveMarkersOfTypes(
   }
 
   possibly_existing_marker_types_.Remove(marker_types);
+  if (PossiblyHasMarkers(DocumentMarker::AllMarkers()))
+    return;
+  SetContext(nullptr);
 }
 
 void DocumentMarkerController::RemoveMarkersFromList(
@@ -591,17 +683,16 @@ void DocumentMarkerController::RemoveMarkersFromList(
 
   if (needs_repainting) {
     const Node& node = *iterator->key;
-    if (LayoutObject* layout_object = node.GetLayoutObject()) {
-      layout_object->SetShouldDoFullPaintInvalidation(
-          PaintInvalidationReason::kDocumentMarker);
-    }
+    InvalidatePaintForNode(node);
     InvalidatePaintForTickmarks(node);
   }
 
   if (node_can_be_removed) {
     markers_.erase(iterator);
-    if (markers_.IsEmpty())
+    if (markers_.IsEmpty()) {
       possibly_existing_marker_types_ = 0;
+      SetContext(nullptr);
+    }
   }
 }
 
@@ -623,12 +714,7 @@ void DocumentMarkerController::RepaintMarkers(
       if (!list || list->IsEmpty() || !marker_types.Contains(type))
         continue;
 
-      // cause the node to be redrawn
-      if (LayoutObject* layout_object = node->GetLayoutObject()) {
-        layout_object->SetShouldDoFullPaintInvalidation(
-            PaintInvalidationReason::kDocumentMarker);
-        break;
-      }
+      InvalidatePaintForNode(*node);
     }
   }
 }
@@ -641,9 +727,10 @@ bool DocumentMarkerController::SetTextMatchMarkersActive(
 
   DCHECK(!markers_.IsEmpty());
 
-  Node* const start_container = range.StartPosition().ComputeContainerNode();
+  const Node* const start_container =
+      range.StartPosition().ComputeContainerNode();
   DCHECK(start_container);
-  Node* const end_container = range.EndPosition().ComputeContainerNode();
+  const Node* const end_container = range.EndPosition().ComputeContainerNode();
   DCHECK(end_container);
 
   const unsigned container_start_offset =
@@ -661,7 +748,7 @@ bool DocumentMarkerController::SetTextMatchMarkersActive(
   return marker_found;
 }
 
-bool DocumentMarkerController::SetTextMatchMarkersActive(Node* node,
+bool DocumentMarkerController::SetTextMatchMarkersActive(const Node* node,
                                                          unsigned start_offset,
                                                          unsigned end_offset,
                                                          bool active) {
@@ -677,12 +764,10 @@ bool DocumentMarkerController::SetTextMatchMarkersActive(Node* node,
   bool doc_dirty = ToTextMatchMarkerListImpl(list)->SetTextMatchMarkersActive(
       start_offset, end_offset, active);
 
-  // repaint the affected node
-  if (doc_dirty && node->GetLayoutObject()) {
-    node->GetLayoutObject()->SetShouldDoFullPaintInvalidation(
-        PaintInvalidationReason::kDocumentMarker);
-  }
-  return doc_dirty;
+  if (!doc_dirty)
+    return false;
+  InvalidatePaintForNode(*node);
+  return true;
 }
 
 #ifndef NDEBUG
@@ -740,7 +825,7 @@ void DocumentMarkerController::DidUpdateCharacterData(CharacterData* node,
     if (!list)
       continue;
 
-    if (list->ShiftMarkers(offset, old_length, new_length))
+    if (list->ShiftMarkers(node->data(), offset, old_length, new_length))
       did_shift_marker = true;
   }
 
@@ -749,8 +834,7 @@ void DocumentMarkerController::DidUpdateCharacterData(CharacterData* node,
   if (!node->GetLayoutObject())
     return;
   InvalidateRectsForTextMatchMarkersInNode(*node);
-  // repaint the affected node
-  node->GetLayoutObject()->SetShouldDoFullPaintInvalidation();
+  InvalidatePaintForNode(*node);
 }
 
 }  // namespace blink

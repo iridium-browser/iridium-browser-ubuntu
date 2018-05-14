@@ -14,9 +14,9 @@
 #include "net/quic/platform/api/quic_flag_utils.h"
 #include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_string_piece.h"
 
-using std::string;
 
 namespace net {
 
@@ -28,7 +28,7 @@ QuicErrorCode ReadUint32(const CryptoHandshakeMessage& msg,
                          QuicConfigPresence presence,
                          uint32_t default_value,
                          uint32_t* out,
-                         string* error_details) {
+                         QuicString* error_details) {
   DCHECK(error_details != nullptr);
   QuicErrorCode error = msg.GetUint32(tag, out);
   switch (error) {
@@ -96,7 +96,7 @@ void QuicNegotiableUint32::ToHandshakeMessage(
 QuicErrorCode QuicNegotiableUint32::ProcessPeerHello(
     const CryptoHandshakeMessage& peer_hello,
     HelloType hello_type,
-    string* error_details) {
+    QuicString* error_details) {
   DCHECK(!negotiated());
   DCHECK(error_details != nullptr);
   uint32_t value;
@@ -126,8 +126,8 @@ bool QuicFixedUint32::HasSendValue() const {
 }
 
 uint32_t QuicFixedUint32::GetSendValue() const {
-  QUIC_BUG_IF(!has_send_value_) << "No send value to get for tag:"
-                                << QuicTagToString(tag_);
+  QUIC_BUG_IF(!has_send_value_)
+      << "No send value to get for tag:" << QuicTagToString(tag_);
   return send_value_;
 }
 
@@ -141,8 +141,8 @@ bool QuicFixedUint32::HasReceivedValue() const {
 }
 
 uint32_t QuicFixedUint32::GetReceivedValue() const {
-  QUIC_BUG_IF(!has_receive_value_) << "No receive value to get for tag:"
-                                   << QuicTagToString(tag_);
+  QUIC_BUG_IF(!has_receive_value_)
+      << "No receive value to get for tag:" << QuicTagToString(tag_);
   return receive_value_;
 }
 
@@ -160,9 +160,74 @@ void QuicFixedUint32::ToHandshakeMessage(CryptoHandshakeMessage* out) const {
 QuicErrorCode QuicFixedUint32::ProcessPeerHello(
     const CryptoHandshakeMessage& peer_hello,
     HelloType hello_type,
-    string* error_details) {
+    QuicString* error_details) {
   DCHECK(error_details != nullptr);
   QuicErrorCode error = peer_hello.GetUint32(tag_, &receive_value_);
+  switch (error) {
+    case QUIC_CRYPTO_MESSAGE_PARAMETER_NOT_FOUND:
+      if (presence_ == PRESENCE_OPTIONAL) {
+        return QUIC_NO_ERROR;
+      }
+      *error_details = "Missing " + QuicTagToString(tag_);
+      break;
+    case QUIC_NO_ERROR:
+      has_receive_value_ = true;
+      break;
+    default:
+      *error_details = "Bad " + QuicTagToString(tag_);
+      break;
+  }
+  return error;
+}
+
+QuicFixedUint128::QuicFixedUint128(QuicTag tag, QuicConfigPresence presence)
+    : QuicConfigValue(tag, presence),
+      has_send_value_(false),
+      has_receive_value_(false) {}
+QuicFixedUint128::~QuicFixedUint128() {}
+
+bool QuicFixedUint128::HasSendValue() const {
+  return has_send_value_;
+}
+
+uint128 QuicFixedUint128::GetSendValue() const {
+  QUIC_BUG_IF(!has_send_value_)
+      << "No send value to get for tag:" << QuicTagToString(tag_);
+  return send_value_;
+}
+
+void QuicFixedUint128::SetSendValue(uint128 value) {
+  has_send_value_ = true;
+  send_value_ = value;
+}
+
+bool QuicFixedUint128::HasReceivedValue() const {
+  return has_receive_value_;
+}
+
+uint128 QuicFixedUint128::GetReceivedValue() const {
+  QUIC_BUG_IF(!has_receive_value_)
+      << "No receive value to get for tag:" << QuicTagToString(tag_);
+  return receive_value_;
+}
+
+void QuicFixedUint128::SetReceivedValue(uint128 value) {
+  has_receive_value_ = true;
+  receive_value_ = value;
+}
+
+void QuicFixedUint128::ToHandshakeMessage(CryptoHandshakeMessage* out) const {
+  if (has_send_value_) {
+    out->SetValue(tag_, send_value_);
+  }
+}
+
+QuicErrorCode QuicFixedUint128::ProcessPeerHello(
+    const CryptoHandshakeMessage& peer_hello,
+    HelloType hello_type,
+    QuicString* error_details) {
+  DCHECK(error_details != nullptr);
+  QuicErrorCode error = peer_hello.GetUint128(tag_, &receive_value_);
   switch (error) {
     case QUIC_CRYPTO_MESSAGE_PARAMETER_NOT_FOUND:
       if (presence_ == PRESENCE_OPTIONAL) {
@@ -196,8 +261,8 @@ bool QuicFixedTagVector::HasSendValues() const {
 }
 
 QuicTagVector QuicFixedTagVector::GetSendValues() const {
-  QUIC_BUG_IF(!has_send_values_) << "No send values to get for tag:"
-                                 << QuicTagToString(tag_);
+  QUIC_BUG_IF(!has_send_values_)
+      << "No send values to get for tag:" << QuicTagToString(tag_);
   return send_values_;
 }
 
@@ -211,8 +276,8 @@ bool QuicFixedTagVector::HasReceivedValues() const {
 }
 
 QuicTagVector QuicFixedTagVector::GetReceivedValues() const {
-  QUIC_BUG_IF(!has_receive_values_) << "No receive value to get for tag:"
-                                    << QuicTagToString(tag_);
+  QUIC_BUG_IF(!has_receive_values_)
+      << "No receive value to get for tag:" << QuicTagToString(tag_);
   return receive_values_;
 }
 
@@ -230,7 +295,7 @@ void QuicFixedTagVector::ToHandshakeMessage(CryptoHandshakeMessage* out) const {
 QuicErrorCode QuicFixedTagVector::ProcessPeerHello(
     const CryptoHandshakeMessage& peer_hello,
     HelloType hello_type,
-    string* error_details) {
+    QuicString* error_details) {
   DCHECK(error_details != nullptr);
   QuicTagVector values;
   QuicErrorCode error = peer_hello.GetTaglist(tag_, &values);
@@ -267,8 +332,8 @@ bool QuicFixedSocketAddress::HasSendValue() const {
 }
 
 const QuicSocketAddress& QuicFixedSocketAddress::GetSendValue() const {
-  QUIC_BUG_IF(!has_send_value_) << "No send value to get for tag:"
-                                << QuicTagToString(tag_);
+  QUIC_BUG_IF(!has_send_value_)
+      << "No send value to get for tag:" << QuicTagToString(tag_);
   return send_value_;
 }
 
@@ -282,8 +347,8 @@ bool QuicFixedSocketAddress::HasReceivedValue() const {
 }
 
 const QuicSocketAddress& QuicFixedSocketAddress::GetReceivedValue() const {
-  QUIC_BUG_IF(!has_receive_value_) << "No receive value to get for tag:"
-                                   << QuicTagToString(tag_);
+  QUIC_BUG_IF(!has_receive_value_)
+      << "No receive value to get for tag:" << QuicTagToString(tag_);
   return receive_value_;
 }
 
@@ -303,7 +368,7 @@ void QuicFixedSocketAddress::ToHandshakeMessage(
 QuicErrorCode QuicFixedSocketAddress::ProcessPeerHello(
     const CryptoHandshakeMessage& peer_hello,
     HelloType hello_type,
-    string* error_details) {
+    QuicString* error_details) {
   QuicStringPiece address;
   if (!peer_hello.GetStringPiece(tag_, &address)) {
     if (presence_ == PRESENCE_REQUIRED) {
@@ -337,8 +402,8 @@ QuicConfig::QuicConfig()
       socket_receive_buffer_(kSRBF, PRESENCE_OPTIONAL),
       connection_migration_disabled_(kNCMR, PRESENCE_OPTIONAL),
       alternate_server_address_(kASAD, PRESENCE_OPTIONAL),
-      force_hol_blocking_(kFHL2, PRESENCE_OPTIONAL),
-      support_max_header_list_size_(kSMHL, PRESENCE_OPTIONAL) {
+      support_max_header_list_size_(kSMHL, PRESENCE_OPTIONAL),
+      stateless_reset_token_(kSRST, PRESENCE_OPTIONAL) {
   SetDefaults();
 }
 
@@ -560,18 +625,6 @@ const QuicSocketAddress& QuicConfig::ReceivedAlternateServerAddress() const {
   return alternate_server_address_.GetReceivedValue();
 }
 
-void QuicConfig::SetForceHolBlocking() {
-  force_hol_blocking_.SetSendValue(1);
-}
-
-bool QuicConfig::ForceHolBlocking(Perspective perspective) const {
-  if (perspective == Perspective::IS_SERVER) {
-    return force_hol_blocking_.HasReceivedValue();
-  } else {
-    return force_hol_blocking_.HasSendValue();
-  }
-}
-
 void QuicConfig::SetSupportMaxHeaderListSize() {
   support_max_header_list_size_.SetSendValue(1);
 }
@@ -580,12 +633,32 @@ bool QuicConfig::SupportMaxHeaderListSize() const {
   return support_max_header_list_size_.HasReceivedValue();
 }
 
+void QuicConfig::SetStatelessResetTokenToSend(uint128 stateless_reset_token) {
+  stateless_reset_token_.SetSendValue(stateless_reset_token);
+}
+
+bool QuicConfig::HasReceivedStatelessResetToken() const {
+  return stateless_reset_token_.HasReceivedValue();
+}
+
+uint128 QuicConfig::ReceivedStatelessResetToken() const {
+  return stateless_reset_token_.GetReceivedValue();
+}
+
 bool QuicConfig::negotiated() const {
   // TODO(ianswett): Add the negotiated parameters once and iterate over all
   // of them in negotiated, ToHandshakeMessage, ProcessClientHello, and
   // ProcessServerHello.
   return idle_network_timeout_seconds_.negotiated() &&
          max_streams_per_connection_.negotiated();
+}
+
+void QuicConfig::SetCreateSessionTagIndicators(QuicTagVector tags) {
+  create_session_tag_indicators_ = std::move(tags);
+}
+
+const QuicTagVector& QuicConfig::create_session_tag_indicators() const {
+  return create_session_tag_indicators_;
 }
 
 void QuicConfig::SetDefaults() {
@@ -603,7 +676,7 @@ void QuicConfig::SetDefaults() {
 
   SetInitialStreamFlowControlWindowToSend(kMinimumFlowControlSendWindow);
   SetInitialSessionFlowControlWindowToSend(kMinimumFlowControlSendWindow);
-  if (FLAGS_quic_reloadable_flag_quic_send_max_header_list_size) {
+  if (GetQuicReloadableFlag(quic_send_max_header_list_size)) {
     SetSupportMaxHeaderListSize();
   }
 }
@@ -620,14 +693,14 @@ void QuicConfig::ToHandshakeMessage(CryptoHandshakeMessage* out) const {
   connection_migration_disabled_.ToHandshakeMessage(out);
   connection_options_.ToHandshakeMessage(out);
   alternate_server_address_.ToHandshakeMessage(out);
-  force_hol_blocking_.ToHandshakeMessage(out);
   support_max_header_list_size_.ToHandshakeMessage(out);
+  stateless_reset_token_.ToHandshakeMessage(out);
 }
 
 QuicErrorCode QuicConfig::ProcessPeerHello(
     const CryptoHandshakeMessage& peer_hello,
     HelloType hello_type,
-    string* error_details) {
+    QuicString* error_details) {
   DCHECK(error_details != nullptr);
 
   QuicErrorCode error = QUIC_NO_ERROR;
@@ -676,12 +749,12 @@ QuicErrorCode QuicConfig::ProcessPeerHello(
                                                        error_details);
   }
   if (error == QUIC_NO_ERROR) {
-    error = force_hol_blocking_.ProcessPeerHello(peer_hello, hello_type,
-                                                 error_details);
-  }
-  if (error == QUIC_NO_ERROR) {
     error = support_max_header_list_size_.ProcessPeerHello(
         peer_hello, hello_type, error_details);
+  }
+  if (error == QUIC_NO_ERROR) {
+    error = stateless_reset_token_.ProcessPeerHello(peer_hello, hello_type,
+                                                    error_details);
   }
   return error;
 }

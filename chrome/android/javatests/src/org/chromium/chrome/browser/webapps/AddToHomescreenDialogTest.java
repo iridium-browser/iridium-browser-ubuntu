@@ -48,9 +48,7 @@ public class AddToHomescreenDialogTest {
         }
 
         @Override
-        public void addShortcut(String userRequestedTitle) {}
-        @Override
-        public void onFinished() {}
+        public void addToHomescreen(String userRequestedTitle) {}
     }
 
     @Before
@@ -66,10 +64,11 @@ public class AddToHomescreenDialogTest {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                AddToHomescreenDialog dialog = new AddToHomescreenDialog(
-                        new MockAddToHomescreenManager(mActivityTestRule.getActivity(),
-                                mActivityTestRule.getActivity().getActivityTab()));
-                dialog.show(mActivityTestRule.getActivity());
+                AddToHomescreenDialog dialog =
+                        new AddToHomescreenDialog(mActivityTestRule.getActivity(),
+                                new MockAddToHomescreenManager(mActivityTestRule.getActivity(),
+                                        mActivityTestRule.getActivity().getActivityTab()));
+                dialog.show();
 
                 AlertDialog alertDialog = dialog.getAlertDialogForTesting();
                 Assert.assertNotNull(alertDialog);

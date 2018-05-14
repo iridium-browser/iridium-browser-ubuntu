@@ -6,10 +6,14 @@
 
 // libGLESv2.cpp: Implements the exported OpenGL ES 2.0 functions.
 
+#include "angle_gl.h"
+
+#include "libGLESv2/entry_points_gles_1_0_autogen.h"
 #include "libGLESv2/entry_points_gles_2_0_autogen.h"
 #include "libGLESv2/entry_points_gles_2_0_ext.h"
-#include "libGLESv2/entry_points_gles_3_0.h"
-#include "libGLESv2/entry_points_gles_3_1.h"
+#include "libGLESv2/entry_points_gles_3_0_autogen.h"
+#include "libGLESv2/entry_points_gles_3_1_autogen.h"
+#include "libGLESv2/entry_points_gles_ext_autogen.h"
 
 #include "common/event_tracer.h"
 
@@ -1321,7 +1325,7 @@ void GL_APIENTRY glDrawElementsInstanced(GLenum mode,
 
 GLsync GL_APIENTRY glFenceSync(GLenum condition, GLbitfield flags)
 {
-    return gl::FenceSync_(condition, flags);
+    return gl::FenceSync(condition, flags);
 }
 
 GLboolean GL_APIENTRY glIsSync(GLsync sync)
@@ -1938,12 +1942,12 @@ void GL_APIENTRY glPathParameteriCHROMIUM(GLuint path, GLenum pname, GLint value
 
 void GL_APIENTRY glGetPathParameterfvCHROMIUM(GLuint path, GLenum pname, GLfloat *value)
 {
-    gl::GetPathParameterfCHROMIUM(path, pname, value);
+    gl::GetPathParameterfvCHROMIUM(path, pname, value);
 }
 
 void GL_APIENTRY glGetPathParameterivCHROMIUM(GLuint path, GLenum pname, GLint *value)
 {
-    gl::GetPathParameteriCHROMIUM(path, pname, value);
+    gl::GetPathParameterivCHROMIUM(path, pname, value);
 }
 
 void GL_APIENTRY glPathStencilFuncCHROMIUM(GLenum func, GLint ref, GLuint mask)
@@ -2565,6 +2569,11 @@ void GL_APIENTRY glFramebufferTextureMultiviewSideBySideANGLE(GLenum target,
 {
     gl::FramebufferTextureMultiviewSideBySideANGLE(target, attachment, texture, level, numViews,
                                                    viewportOffsets);
+}
+
+void GL_APIENTRY glRequestExtensionANGLE(const GLchar *name)
+{
+    gl::RequestExtensionANGLE(name);
 }
 
 }  // extern "C"

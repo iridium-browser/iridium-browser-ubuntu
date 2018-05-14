@@ -45,7 +45,8 @@ MATCHER_P(IsPolicies, dict, "") {
 
 class MockPolicyCallback {
  public:
-  MockPolicyCallback(){};
+  MockPolicyCallback() = default;
+  ;
 
   // TODO(lukasza): gmock cannot mock a method taking std::unique_ptr<T>...
   MOCK_METHOD1(OnPolicyUpdatePtr, void(const base::DictionaryValue* policies));
@@ -94,7 +95,7 @@ class PolicyWatcherTest : public testing::Test {
     nat_one_domain_full_.Set(key::kRemoteAccessHostDomainList,
                              host_domain.CreateDeepCopy());
     domain_empty_.Set(key::kRemoteAccessHostDomainList,
-                      base::MakeUnique<base::ListValue>());
+                      std::make_unique<base::ListValue>());
     domain_full_.Set(key::kRemoteAccessHostDomainList,
                      host_domain.CreateDeepCopy());
     SetDefaults(nat_true_others_default_);
@@ -105,14 +106,14 @@ class PolicyWatcherTest : public testing::Test {
         key::kRemoteAccessHostFirewallTraversal, false);
     SetDefaults(domain_empty_others_default_);
     domain_empty_others_default_.Set(key::kRemoteAccessHostDomainList,
-                                     base::MakeUnique<base::ListValue>());
+                                     std::make_unique<base::ListValue>());
     SetDefaults(domain_full_others_default_);
     domain_full_others_default_.Set(key::kRemoteAccessHostDomainList,
                                     host_domain.CreateDeepCopy());
     nat_true_domain_empty_.SetBoolean(key::kRemoteAccessHostFirewallTraversal,
                                       true);
     nat_true_domain_empty_.Set(key::kRemoteAccessHostDomainList,
-                               base::MakeUnique<base::ListValue>());
+                               std::make_unique<base::ListValue>());
     nat_true_domain_full_.SetBoolean(key::kRemoteAccessHostFirewallTraversal,
                                      true);
     nat_true_domain_full_.Set(key::kRemoteAccessHostDomainList,
@@ -120,7 +121,7 @@ class PolicyWatcherTest : public testing::Test {
     nat_false_domain_empty_.SetBoolean(key::kRemoteAccessHostFirewallTraversal,
                                        false);
     nat_false_domain_empty_.Set(key::kRemoteAccessHostDomainList,
-                                base::MakeUnique<base::ListValue>());
+                                std::make_unique<base::ListValue>());
     nat_false_domain_full_.SetBoolean(key::kRemoteAccessHostFirewallTraversal,
                                       false);
     nat_false_domain_full_.Set(key::kRemoteAccessHostDomainList,
@@ -129,7 +130,7 @@ class PolicyWatcherTest : public testing::Test {
     nat_true_domain_empty_others_default_.SetBoolean(
         key::kRemoteAccessHostFirewallTraversal, true);
     nat_true_domain_empty_others_default_.Set(
-        key::kRemoteAccessHostDomainList, base::MakeUnique<base::ListValue>());
+        key::kRemoteAccessHostDomainList, std::make_unique<base::ListValue>());
     unknown_policies_.SetString("UnknownPolicyOne", std::string());
     unknown_policies_.SetString("UnknownPolicyTwo", std::string());
     unknown_policies_.SetBoolean("RemoteAccessHostUnknownPolicyThree", true);
@@ -307,9 +308,9 @@ class PolicyWatcherTest : public testing::Test {
     dict.SetBoolean(key::kRemoteAccessHostAllowRelayedConnection, true);
     dict.SetString(key::kRemoteAccessHostUdpPortRange, "");
     dict.Set(key::kRemoteAccessHostClientDomainList,
-             base::MakeUnique<base::ListValue>());
+             std::make_unique<base::ListValue>());
     dict.Set(key::kRemoteAccessHostDomainList,
-             base::MakeUnique<base::ListValue>());
+             std::make_unique<base::ListValue>());
     dict.SetBoolean(key::kRemoteAccessHostMatchUsername, false);
     dict.SetString(key::kRemoteAccessHostTalkGadgetPrefix,
                    kDefaultHostTalkGadgetPrefix);
@@ -697,7 +698,7 @@ TEST_F(PolicyWatcherTest, PolicySchemaAndPolicyWatcherShouldBeInSync) {
   std::map<std::string, base::Value::Type> expected_schema;
   for (base::DictionaryValue::Iterator i(GetDefaultValues()); !i.IsAtEnd();
        i.Advance()) {
-    expected_schema[i.key()] = i.value().GetType();
+    expected_schema[i.key()] = i.value().type();
   }
 #if defined(OS_WIN)
   // RemoteAccessHostMatchUsername is marked in policy_templates.json as not

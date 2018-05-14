@@ -9,8 +9,8 @@
 
 #include <map>
 #include <memory>
-#include <queue>
 
+#include "base/containers/circular_deque.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/time/time.h"
@@ -18,8 +18,8 @@
 #include "content/browser/renderer_host/input/gesture_event_queue.h"
 #include "content/browser/renderer_host/input/input_router.h"
 #include "content/browser/renderer_host/input/mouse_wheel_event_queue.h"
+#include "content/browser/renderer_host/input/passthrough_touch_event_queue.h"
 #include "content/browser/renderer_host/input/touch_action_filter.h"
-#include "content/browser/renderer_host/input/touch_event_queue.h"
 #include "content/browser/renderer_host/input/touchpad_tap_suppression_controller.h"
 #include "content/common/input/input_event_dispatch_type.h"
 #include "content/common/input/input_event_stream_validator.h"
@@ -36,7 +36,7 @@ struct DidOverscrollParams;
 
 namespace content {
 
-class InputAckHandler;
+class InputDispositionHandler;
 class InputRouterClient;
 struct InputEventAck;
 
@@ -45,15 +45,16 @@ struct InputEventAck;
 // Chrome IPC which is deprecated. This class will be replaced with a Mojo
 // backed transport. See crbug.com/722928.
 class CONTENT_EXPORT LegacyInputRouterImpl
-    : public NON_EXPORTED_BASE(InputRouter),
-      public NON_EXPORTED_BASE(GestureEventQueueClient),
-      public NON_EXPORTED_BASE(MouseWheelEventQueueClient),
-      public NON_EXPORTED_BASE(TouchEventQueueClient),
-      public NON_EXPORTED_BASE(TouchpadTapSuppressionControllerClient) {
+    : public InputRouter,
+      public GestureEventQueueClient,
+      public FlingControllerClient,
+      public MouseWheelEventQueueClient,
+      public PassthroughTouchEventQueueClient,
+      public TouchpadTapSuppressionControllerClient {
  public:
   LegacyInputRouterImpl(IPC::Sender* sender,
                         InputRouterClient* client,
-                        InputAckHandler* ack_handler,
+                        InputDispositionHandler* disposition_handler,
                         int routing_id,
                         const Config& config);
   ~LegacyInputRouterImpl() override;
@@ -69,10 +70,13 @@ class CONTENT_EXPORT LegacyInputRouterImpl
   void SendGestureEvent(
       const GestureEventWithLatencyInfo& gesture_event) override;
   void SendTouchEvent(const TouchEventWithLatencyInfo& touch_event) override;
-  const NativeWebKeyboardEvent* GetLastKeyboardEvent() const override;
   void NotifySiteIsMobileOptimized(bool is_mobile_optimized) override;
   bool HasPendingEvents() const override;
   void SetDeviceScaleFactor(float device_scale_factor) override;
+  void BindHost(mojom::WidgetInputHandlerHostRequest request,
+                bool frame_handler) override;
+  void ProgressFling(base::TimeTicks current_time) override;
+  void StopFling() override;
 
   // IPC::Listener
   bool OnMessageReceived(const IPC::Message& message) override;
@@ -81,13 +85,15 @@ class CONTENT_EXPORT LegacyInputRouterImpl
 
   cc::TouchAction AllowedTouchAction() override;
 
+  void SetForceEnableZoom(bool enabled) override;
+
   int routing_id() const { return routing_id_; }
 
  private:
   friend class LegacyInputRouterImplTest;
-  FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest,
+  FRIEND_TEST_ALL_PREFIXES(SitePerProcessHitTestBrowserTest,
                            SubframeTouchEventRouting);
-  FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest,
+  FRIEND_TEST_ALL_PREFIXES(SitePerProcessHitTestBrowserTest,
                            MainframeTouchEventRouting);
 
   // Keeps track of last position of touch points and sets MovementXY for them.
@@ -97,10 +103,11 @@ class CONTENT_EXPORT LegacyInputRouterImpl
   void SendMouseEventImmediately(
       const MouseEventWithLatencyInfo& mouse_event) override;
 
-  // TouchEventQueueClient
+  // PassthroughTouchEventQueueClient
   void SendTouchEventImmediately(
       const TouchEventWithLatencyInfo& touch_event) override;
   void OnTouchEventAck(const TouchEventWithLatencyInfo& event,
+                       InputEventAckSource ack_source,
                        InputEventAckState ack_result) override;
   void OnFilteringTouchEvent(const blink::WebTouchEvent& touch_event) override;
 
@@ -108,12 +115,19 @@ class CONTENT_EXPORT LegacyInputRouterImpl
   void SendGestureEventImmediately(
       const GestureEventWithLatencyInfo& gesture_event) override;
   void OnGestureEventAck(const GestureEventWithLatencyInfo& event,
+                         InputEventAckSource ack_source,
                          InputEventAckState ack_result) override;
+
+  // FlingControllerClient
+  void SendGeneratedWheelEvent(
+      const MouseWheelEventWithLatencyInfo& wheel_event) override;
+  void SetNeedsBeginFrameForFlingProgress() override;
 
   // MouseWheelEventQueueClient
   void SendMouseWheelEventImmediately(
       const MouseWheelEventWithLatencyInfo& touch_event) override;
   void OnMouseWheelEventAck(const MouseWheelEventWithLatencyInfo& event,
+                            InputEventAckSource ack_source,
                             InputEventAckState ack_result) override;
   void ForwardGestureEventWithLatencyInfo(
       const blink::WebGestureEvent& gesture_event,
@@ -150,44 +164,48 @@ class CONTENT_EXPORT LegacyInputRouterImpl
   void OnSelectMessageAck();
   void OnHasTouchEventHandlers(bool has_handlers);
   void OnSetTouchAction(cc::TouchAction touch_action);
-  void OnSetWhiteListedTouchAction(cc::TouchAction white_listed_touch_action);
+  void OnSetWhiteListedTouchAction(cc::TouchAction white_listed_touch_action,
+                                   uint32_t unique_touch_event_id,
+                                   InputEventAckState ack_result);
   void OnDidStopFlinging();
 
-  // Indicates the source of an ack provided to |ProcessInputEventAck()|.
-  // The source is tracked by |current_ack_source_|, which aids in ack routing.
-  enum AckSource { RENDERER, CLIENT, IGNORING_DISPOSITION, ACK_SOURCE_NONE };
   // Note: This function may result in |this| being deleted, and as such
   // should be the last method called in any internal chain of event handling.
   void ProcessInputEventAck(blink::WebInputEvent::Type event_type,
+                            InputEventAckSource ack_source,
                             InputEventAckState ack_result,
                             const ui::LatencyInfo& latency_info,
-                            uint32_t unique_touch_event_id,
-                            AckSource ack_source);
+                            uint32_t unique_touch_event_id);
 
   // Dispatches the ack'ed event to |ack_handler_|.
   void ProcessKeyboardAck(blink::WebInputEvent::Type type,
+                          InputEventAckSource ack_source,
                           InputEventAckState ack_result,
                           const ui::LatencyInfo& latency);
 
   // Forwards a valid |next_mouse_move_| if |type| is MouseMove.
   void ProcessMouseAck(blink::WebInputEvent::Type type,
+                       InputEventAckSource ack_source,
                        InputEventAckState ack_result,
                        const ui::LatencyInfo& latency);
 
   // Dispatches the ack'ed event to |ack_handler_|, forwarding queued events
   // from |coalesced_mouse_wheel_events_|.
-  void ProcessWheelAck(InputEventAckState ack_result,
+  void ProcessWheelAck(InputEventAckSource ack_source,
+                       InputEventAckState ack_result,
                        const ui::LatencyInfo& latency);
 
   // Forwards the event ack to |gesture_event_queue|, potentially triggering
   // dispatch of queued gesture events.
   void ProcessGestureAck(blink::WebInputEvent::Type type,
+                         InputEventAckSource ack_source,
                          InputEventAckState ack_result,
                          const ui::LatencyInfo& latency);
 
   // Forwards the event ack to |touch_event_queue_|, potentially triggering
   // dispatch of queued touch events, or the creation of gesture events.
-  void ProcessTouchAck(InputEventAckState ack_result,
+  void ProcessTouchAck(InputEventAckSource ack_source,
+                       InputEventAckState ack_result,
                        const ui::LatencyInfo& latency,
                        uint32_t unique_touch_event_id);
 
@@ -200,7 +218,7 @@ class CONTENT_EXPORT LegacyInputRouterImpl
 
   IPC::Sender* sender_;
   InputRouterClient* client_;
-  InputAckHandler* ack_handler_;
+  InputDispositionHandler* disposition_handler_;
   int routing_id_;
   int frame_tree_node_id_;
 
@@ -210,7 +228,7 @@ class CONTENT_EXPORT LegacyInputRouterImpl
 
   // Queue of pending select messages to send after receiving the next select
   // message ack.
-  std::deque<std::unique_ptr<IPC::Message>> pending_select_messages_;
+  base::circular_deque<std::unique_ptr<IPC::Message>> pending_select_messages_;
 
   // True while waiting for MoveCaret_ACK.
   bool move_caret_pending_;
@@ -220,18 +238,14 @@ class CONTENT_EXPORT LegacyInputRouterImpl
 
   // A queue of the mouse move events sent to the renderer. Similar
   // to |key_queue_|.
-  typedef std::deque<MouseEventWithLatencyInfo> MouseEventQueue;
+  using MouseEventQueue = base::circular_deque<MouseEventWithLatencyInfo>;
   MouseEventQueue mouse_event_queue_;
 
   // A queue of keyboard events. We can't trust data from the renderer so we
   // stuff key events into a queue and pop them out on ACK, feeding our copy
   // back to whatever unhandled handler instead of the returned version.
-  typedef std::deque<NativeWebKeyboardEventWithLatencyInfo> KeyQueue;
+  using KeyQueue = base::circular_deque<NativeWebKeyboardEventWithLatencyInfo>;
   KeyQueue key_queue_;
-
-  // The source of the ack within the scope of |ProcessInputEventAck()|.
-  // Defaults to ACK_SOURCE_NONE.
-  AckSource current_ack_source_;
 
   // Whether there are any active flings in the renderer. As the fling
   // end notification is asynchronous, we use a count rather than a boolean
@@ -245,14 +259,13 @@ class CONTENT_EXPORT LegacyInputRouterImpl
   bool wheel_scroll_latching_enabled_;
 
   MouseWheelEventQueue wheel_event_queue_;
-  std::unique_ptr<TouchEventQueue> touch_event_queue_;
+  std::unique_ptr<PassthroughTouchEventQueue> touch_event_queue_;
   GestureEventQueue gesture_event_queue_;
   TouchActionFilter touch_action_filter_;
   InputEventStreamValidator input_stream_validator_;
   InputEventStreamValidator output_stream_validator_;
 
   float device_scale_factor_;
-  bool raf_aligned_touch_enabled_;
 
   // Last touch position relative to screen. Used to compute movementX/Y.
   std::map<int, gfx::Point> global_touch_position_;

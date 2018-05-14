@@ -7,7 +7,17 @@
 
 #import <UIKit/UIKit.h>
 
-class ToolbarModelIOS;
+// Names identifying the errors used in Payment Request API:
+// https://www.w3.org/TR/payment-request/
+// A complete list of DOMException error names and descriptions can be found at:
+// https://developer.mozilla.org/en-US/docs/Web/API/DOMException#Error_names
+extern NSString* const kAbortError;
+extern NSString* const kInvalidStateError;
+extern NSString* const kNotAllowedError;
+extern NSString* const kNotSupportedError;
+
+@protocol ApplicationCommands;
+class ToolbarModel;
 
 namespace ios {
 class ChromeBrowserState;
@@ -18,15 +28,13 @@ class WebState;
 }  // namespace web
 
 // Manager for handling invocations of the Payment Request API.
-//
 // Implements the app-side of the Payment Request JavaScript API. Injects and
 // listens to the injected JavaScript and invokes the creation of the user
 // interface.
 @interface PaymentRequestManager : NSObject
 
-// IOS specific version of ToolbarModel that is used for grabbing security
-// info.
-@property(nonatomic, assign) ToolbarModelIOS* toolbarModel;
+// ToolbarModel that is used for grabbing security info.
+@property(nonatomic, assign) ToolbarModel* toolbarModel;
 
 // The WebState being observed for invocations of the Payment Request API.
 // Should outlive this instance. May be nullptr.
@@ -36,6 +44,7 @@ class WebState;
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
                               browserState:
                                   (ios::ChromeBrowserState*)browserState
+                                dispatcher:(id<ApplicationCommands>)dispatcher
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
@@ -44,10 +53,7 @@ class WebState;
 // called before the tab |webState| is associated with is removed.
 - (void)stopTrackingWebState:(web::WebState*)webState;
 
-// Enables or disables the Payment Request API for the active webState. If
-// |enabled| is YES, the API may still not be enabled if the flag is not set;
-// the -enabled property will indicate the current status. This method functions
-// asynchronously.
+// Enables or disables the Payment Request API for the active webState.
 - (void)enablePaymentRequest:(BOOL)enabled;
 
 // If there is a pending request, cancels it and dismisses the UI. This must be

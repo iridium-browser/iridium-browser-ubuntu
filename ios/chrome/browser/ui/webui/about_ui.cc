@@ -33,7 +33,7 @@ const char kStringsJsPath[] = "strings.js";
 class AboutUIHTMLSource : public web::URLDataSourceIOS {
  public:
   // Construct a data source for the specified |source_name|.
-  AboutUIHTMLSource(const std::string& source_name);
+  explicit AboutUIHTMLSource(const std::string& source_name);
 
   // web::URLDataSourceIOS implementation.
   std::string GetSource() const override;
@@ -88,12 +88,6 @@ std::string ChromeURLs() {
   html += "<h2>List of Chrome URLs</h2>\n<ul>\n";
   std::vector<std::string> hosts(kChromeHostURLs,
                                  kChromeHostURLs + kNumberOfChromeHostURLs);
-  // Remove chrome://bookmarks from list of hosts for iPhone because it is not
-  // possible to open bookmarks via URL on the iPhone form factor.
-  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE) {
-    hosts.erase(
-        std::remove(hosts.begin(), hosts.end(), kChromeUIBookmarksHost));
-  }
   std::sort(hosts.begin(), hosts.end());
   for (std::vector<std::string>::const_iterator i = hosts.begin();
        i != hosts.end(); ++i)
@@ -129,7 +123,7 @@ void AboutUIHTMLSource::StartDataRequest(
     if (path == kCreditsJsPath)
       idr = IDR_ABOUT_UI_CREDITS_JS;
     base::StringPiece raw_response =
-        ResourceBundle::GetSharedInstance().GetRawDataResource(idr);
+        ui::ResourceBundle::GetSharedInstance().GetRawDataResource(idr);
     if (idr == IDR_ABOUT_UI_CREDITS_HTML) {
       const uint8_t* next_encoded_byte =
           reinterpret_cast<const uint8_t*>(raw_response.data());

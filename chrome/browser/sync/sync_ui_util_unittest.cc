@@ -27,7 +27,6 @@
 #include "testing/gmock/include/gmock/gmock-actions.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/l10n/l10n_util.h"
 
 using ::testing::AtMost;
 using ::testing::NiceMock;
@@ -79,7 +78,8 @@ class FakeSigninManagerForSyncUIUtilTest : public FakeSigninManagerBase {
   explicit FakeSigninManagerForSyncUIUtilTest(Profile* profile)
       : FakeSigninManagerBase(
             ChromeSigninClientFactory::GetForProfile(profile),
-            AccountTrackerServiceFactory::GetForProfile(profile)),
+            AccountTrackerServiceFactory::GetForProfile(profile),
+            SigninErrorControllerFactory::GetForProfile(profile)),
         auth_in_progress_(false) {
     Initialize(nullptr);
   }
@@ -267,7 +267,7 @@ sync_ui_util::ActionType GetActionTypeforDistinctCase(int case_number) {
 TEST_F(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
   std::set<base::string16> messages;
   for (int idx = 0; idx != NUMBER_OF_STATUS_CASES; idx++) {
-    std::unique_ptr<Profile> profile(new TestingProfile());
+    std::unique_ptr<Profile> profile = std::make_unique<TestingProfile>();
     ProfileSyncService::InitParams init_params =
         CreateProfileSyncServiceParamsForTest(profile.get());
     NiceMock<ProfileSyncServiceMock> service(&init_params);
@@ -308,7 +308,7 @@ TEST_F(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
 // honored.
 TEST_F(SyncUIUtilTest, HtmlNotIncludedInStatusIfNotRequested) {
   for (int idx = 0; idx != NUMBER_OF_STATUS_CASES; idx++) {
-    std::unique_ptr<Profile> profile(MakeSignedInTestingProfile());
+    std::unique_ptr<Profile> profile = std::make_unique<TestingProfile>();
     ProfileSyncService::InitParams init_params =
         CreateProfileSyncServiceParamsForTest(profile.get());
     NiceMock<ProfileSyncServiceMock> service(&init_params);

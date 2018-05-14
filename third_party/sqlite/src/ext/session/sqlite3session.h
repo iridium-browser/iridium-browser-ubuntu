@@ -147,6 +147,35 @@ int sqlite3session_indirect(sqlite3_session *pSession, int bIndirect);
 **
 ** SQLITE_OK is returned if the call completes without error. Or, if an error
 ** occurs, an SQLite error code (e.g. SQLITE_NOMEM) is returned.
+**
+** <h3>Special sqlite_stat1 Handling</h3>
+**
+** As of SQLite version 3.22.0, the "sqlite_stat1" table is an exception to
+** some of the rules above. In SQLite, the schema of sqlite_stat1 is:
+**  <pre>
+**  &nbsp;     CREATE TABLE sqlite_stat1(tbl,idx,stat)
+**  </pre>
+**
+** Even though sqlite_stat1 does not have a PRIMARY KEY, changes are
+** recorded for it as if the PRIMARY KEY is (tbl,idx). Additionally, changes
+** are recorded for rows for which (idx IS NULL) is true. However, for such
+** rows a zero-length blob (SQL value X'') is stored in the changeset or
+** patchset instead of a NULL value. This allows such changesets to be
+** manipulated by legacy implementations of sqlite3changeset_invert(),
+** concat() and similar.
+**
+** The sqlite3changeset_apply() function automatically converts the
+** zero-length blob back to a NULL value when updating the sqlite_stat1
+** table. However, if the application calls sqlite3changeset_new(),
+** sqlite3changeset_old() or sqlite3changeset_conflict on a changeset
+** iterator directly (including on a changeset iterator passed to a
+** conflict-handler callback) then the X'' value is returned. The application
+** must translate X'' to NULL itself if required.
+**
+** Legacy (older than 3.22.0) versions of the sessions module cannot capture
+** changes made to the sqlite_stat1 table. Legacy versions of the
+** sqlite3changeset_apply() function silently ignore any modifications to the
+** sqlite_stat1 table that are part of a changeset or patchset.
 */
 int sqlite3session_attach(
   sqlite3_session *pSession,      /* Session object */
@@ -375,8 +404,8 @@ int sqlite3session_diff(
 */
 int sqlite3session_patchset(
   sqlite3_session *pSession,      /* Session object */
-  int *pnPatchset,                /* OUT: Size of buffer at *ppChangeset */
-  void **ppPatchset               /* OUT: Buffer containing changeset */
+  int *pnPatchset,                /* OUT: Size of buffer at *ppPatchset */
+  void **ppPatchset               /* OUT: Buffer containing patchset */
 );
 
 /*
@@ -1143,12 +1172,12 @@ int sqlite3changeset_apply(
 **
 ** <table border=1 style="margin-left:8ex;margin-right:8ex">
 **   <tr><th>Streaming function<th>Non-streaming equivalent</th>
-**   <tr><td>sqlite3changeset_apply_str<td>[sqlite3changeset_apply]
-**   <tr><td>sqlite3changeset_concat_str<td>[sqlite3changeset_concat]
-**   <tr><td>sqlite3changeset_invert_str<td>[sqlite3changeset_invert]
-**   <tr><td>sqlite3changeset_start_str<td>[sqlite3changeset_start]
-**   <tr><td>sqlite3session_changeset_str<td>[sqlite3session_changeset]
-**   <tr><td>sqlite3session_patchset_str<td>[sqlite3session_patchset]
+**   <tr><td>sqlite3changeset_apply_strm<td>[sqlite3changeset_apply]
+**   <tr><td>sqlite3changeset_concat_strm<td>[sqlite3changeset_concat]
+**   <tr><td>sqlite3changeset_invert_strm<td>[sqlite3changeset_invert]
+**   <tr><td>sqlite3changeset_start_strm<td>[sqlite3changeset_start]
+**   <tr><td>sqlite3session_changeset_strm<td>[sqlite3session_changeset]
+**   <tr><td>sqlite3session_patchset_strm<td>[sqlite3session_patchset]
 ** </table>
 **
 ** Non-streaming functions that accept changesets (or patchsets) as input

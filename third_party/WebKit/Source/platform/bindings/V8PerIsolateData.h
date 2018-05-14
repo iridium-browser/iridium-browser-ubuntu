@@ -28,13 +28,14 @@
 
 #include <memory>
 
+#include "base/time/default_tick_clock.h"
 #include "gin/public/isolate_holder.h"
 #include "gin/public/v8_idle_task_runner.h"
 #include "platform/PlatformExport.h"
 #include "platform/bindings/RuntimeCallStats.h"
 #include "platform/bindings/ScopedPersistent.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/bindings/ScriptWrappableVisitor.h"
+#include "platform/bindings/ScriptWrappableMarkingVisitor.h"
 #include "platform/bindings/WrapperTypeInfo.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/HashMap.h"
@@ -48,7 +49,6 @@ class ActiveScriptWrappableBase;
 class DOMDataStore;
 class StringCache;
 class V8PrivateProperty;
-class WebTaskRunner;
 struct WrapperTypeInfo;
 
 typedef WTF::Vector<DOMDataStore*> DOMDataStoreList;
@@ -60,12 +60,10 @@ class PLATFORM_EXPORT V8PerIsolateData {
   WTF_MAKE_NONCOPYABLE(V8PerIsolateData);
 
  public:
-  class EndOfScopeTask {
-    USING_FAST_MALLOC(EndOfScopeTask);
-
-   public:
-    virtual ~EndOfScopeTask() {}
-    virtual void Run() = 0;
+  enum class V8ContextSnapshotMode {
+    kTakeSnapshot,
+    kDontUseSnapshot,
+    kUseSnapshot,
   };
 
   // Disables the UseCounter.
@@ -101,7 +99,8 @@ class PLATFORM_EXPORT V8PerIsolateData {
     virtual ~Data() = default;
   };
 
-  static v8::Isolate* Initialize(WebTaskRunner*);
+  static v8::Isolate* Initialize(scoped_refptr<base::SingleThreadTaskRunner>,
+                                 V8ContextSnapshotMode);
 
   static V8PerIsolateData* From(v8::Isolate* isolate) {
     DCHECK(isolate);
@@ -144,6 +143,17 @@ class PLATFORM_EXPORT V8PerIsolateData {
                             const void* key,
                             v8::Local<v8::FunctionTemplate>);
 
+  // When v8::SnapshotCreator::CreateBlob() is called, we must not have
+  // persistent handles in Blink. This method clears them.
+  void ClearPersistentsForV8ContextSnapshot();
+
+  v8::SnapshotCreator* GetSnapshotCreator() const {
+    return isolate_holder_.snapshot_creator();
+  }
+  V8ContextSnapshotMode GetV8ContextSnapshotMode() const {
+    return v8_context_snapshot_mode_;
+  }
+
   // Accessor to the cache of cross-origin accessible operation's templates.
   // Created templates get automatically cached.
   v8::Local<v8::FunctionTemplate> FindOrCreateOperationTemplate(
@@ -174,7 +184,7 @@ class PLATFORM_EXPORT V8PerIsolateData {
   // to C++ from script, after executing a script task (e.g. callback,
   // event) or microtasks (e.g. promise). This is explicitly needed for
   // Indexed DB transactions per spec, but should in general be avoided.
-  void AddEndOfScopeTask(std::unique_ptr<EndOfScopeTask>);
+  void AddEndOfScopeTask(base::OnceClosure);
   void RunEndOfScopeTasks();
   void ClearEndOfScopeTasks();
 
@@ -195,7 +205,7 @@ class PLATFORM_EXPORT V8PerIsolateData {
    public:
     TemporaryScriptWrappableVisitorScope(
         v8::Isolate* isolate,
-        std::unique_ptr<ScriptWrappableVisitor> visitor)
+        std::unique_ptr<ScriptWrappableMarkingVisitor> visitor)
         : isolate_(isolate), saved_visitor_(std::move(visitor)) {
       SwapWithV8PerIsolateDataVisitor(saved_visitor_);
     }
@@ -203,32 +213,44 @@ class PLATFORM_EXPORT V8PerIsolateData {
       SwapWithV8PerIsolateDataVisitor(saved_visitor_);
     }
 
-    inline ScriptWrappableVisitor* CurrentVisitor() {
-      return V8PerIsolateData::From(isolate_)->GetScriptWrappableVisitor();
+    inline ScriptWrappableMarkingVisitor* CurrentVisitor() {
+      return V8PerIsolateData::From(isolate_)
+          ->GetScriptWrappableMarkingVisitor();
     }
 
    private:
     void SwapWithV8PerIsolateDataVisitor(
-        std::unique_ptr<ScriptWrappableVisitor>&);
+        std::unique_ptr<ScriptWrappableMarkingVisitor>&);
 
     v8::Isolate* isolate_;
-    std::unique_ptr<ScriptWrappableVisitor> saved_visitor_;
+    std::unique_ptr<ScriptWrappableMarkingVisitor> saved_visitor_;
   };
 
-  void SetScriptWrappableVisitor(
-      std::unique_ptr<ScriptWrappableVisitor> visitor) {
+  void SetScriptWrappableMarkingVisitor(
+      std::unique_ptr<ScriptWrappableMarkingVisitor> visitor) {
     script_wrappable_visitor_ = std::move(visitor);
   }
-  ScriptWrappableVisitor* GetScriptWrappableVisitor() {
+  ScriptWrappableMarkingVisitor* GetScriptWrappableMarkingVisitor() {
     return script_wrappable_visitor_.get();
   }
 
  private:
-  explicit V8PerIsolateData(WebTaskRunner*);
+  V8PerIsolateData(scoped_refptr<base::SingleThreadTaskRunner>,
+                   V8ContextSnapshotMode);
+  V8PerIsolateData();
   ~V8PerIsolateData();
 
-  typedef HashMap<const void*, v8::Eternal<v8::FunctionTemplate>>
-      V8FunctionTemplateMap;
+  // A really simple hash function, which makes lookups faster. The set of
+  // possible keys for this is relatively small and fixed at compile time, so
+  // collisions are less of a worry than they would otherwise be.
+  struct SimplePtrHash : WTF::PtrHash<const void> {
+    static unsigned GetHash(const void* key) {
+      uintptr_t k = reinterpret_cast<uintptr_t>(key);
+      return static_cast<unsigned>(k ^ (k >> 8));
+    }
+  };
+  using V8FunctionTemplateMap =
+      HashMap<const void*, v8::Eternal<v8::FunctionTemplate>, SimplePtrHash>;
   V8FunctionTemplateMap& SelectInterfaceTemplateMap(const DOMWrapperWorld&);
   V8FunctionTemplateMap& SelectOperationTemplateMap(const DOMWrapperWorld&);
   bool HasInstance(const WrapperTypeInfo* untrusted,
@@ -238,12 +260,16 @@ class PLATFORM_EXPORT V8PerIsolateData {
                                                      v8::Local<v8::Value>,
                                                      V8FunctionTemplateMap&);
 
+  V8ContextSnapshotMode v8_context_snapshot_mode_;
+  // This isolate_holder_ must be initialized before initializing some other
+  // members below.
   gin::IsolateHolder isolate_holder_;
 
-  // m_interfaceTemplateMapFor{,Non}MainWorld holds function templates for
+  // interface_template_map_for_{,non_}main_world holds function templates for
   // the inerface objects.
   V8FunctionTemplateMap interface_template_map_for_main_world_;
   V8FunctionTemplateMap interface_template_map_for_non_main_world_;
+
   // m_operationTemplateMapFor{,Non}MainWorld holds function templates for
   // the cross-origin accessible DOM operations.
   V8FunctionTemplateMap operation_template_map_for_main_world_;
@@ -252,9 +278,15 @@ class PLATFORM_EXPORT V8PerIsolateData {
   // Contains lists of eternal names, such as dictionary keys.
   HashMap<const void*, Vector<v8::Eternal<v8::Name>>> eternal_name_cache_;
 
+  // When taking a V8 context snapshot, we can't keep V8 objects with eternal
+  // handles. So we use a special interface map that doesn't use eternal handles
+  // instead of the default V8FunctionTemplateMap.
+  V8GlobalValueMap<const WrapperTypeInfo*, v8::FunctionTemplate, v8::kNotWeak>
+      interface_template_map_for_v8_context_snapshot_;
+
   std::unique_ptr<StringCache> string_cache_;
   std::unique_ptr<V8PrivateProperty> private_property_;
-  RefPtr<ScriptState> script_regexp_script_state_;
+  scoped_refptr<ScriptState> script_regexp_script_state_;
 
   bool constructor_mode_;
   friend class ConstructorMode;
@@ -265,11 +297,11 @@ class PLATFORM_EXPORT V8PerIsolateData {
   bool is_handling_recursion_level_error_;
   bool is_reporting_exception_;
 
-  Vector<std::unique_ptr<EndOfScopeTask>> end_of_scope_tasks_;
+  Vector<base::OnceClosure> end_of_scope_tasks_;
   std::unique_ptr<Data> thread_debugger_;
 
   Persistent<ActiveScriptWrappableSet> active_script_wrappables_;
-  std::unique_ptr<ScriptWrappableVisitor> script_wrappable_visitor_;
+  std::unique_ptr<ScriptWrappableMarkingVisitor> script_wrappable_visitor_;
 
   RuntimeCallStats runtime_call_stats_;
 };

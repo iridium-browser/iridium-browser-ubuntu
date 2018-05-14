@@ -19,13 +19,11 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.metrics.WebappUma;
 import org.chromium.chrome.browser.tab.TabTestUtils;
 import org.chromium.chrome.browser.util.ColorUtils;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -36,17 +34,16 @@ import java.util.concurrent.Callable;
  * Tests for splash screens with EXTRA_THEME_COLOR specified in the Intent.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class WebappSplashScreenThemeColorTest {
     @Rule
     public final WebappActivityTestRule mActivityTestRule = new WebappActivityTestRule();
 
     @Before
     public void setUp() throws Exception {
-        mActivityTestRule.startWebappActivity(
-                mActivityTestRule.createIntent()
-                        .putExtra(ShortcutHelper.EXTRA_URL, "http://localhost")
+        mActivityTestRule.startWebappActivityAndWaitForSplashScreen(
+                mActivityTestRule
+                        .createIntent()
                         // This is setting Color.Magenta with 50% opacity.
                         .putExtra(ShortcutHelper.EXTRA_THEME_COLOR, 0x80FF00FFL));
     }
@@ -66,7 +63,6 @@ public class WebappSplashScreenThemeColorTest {
     @SmallTest
     @Feature({"Webapps"})
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-    @RetryOnFailure
     public void testThemeColorNotUsedIfPagesHasOne() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return;
 

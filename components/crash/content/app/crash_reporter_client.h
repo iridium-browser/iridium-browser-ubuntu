@@ -5,8 +5,6 @@
 #ifndef COMPONENTS_CRASH_CONTENT_APP_CRASH_REPORTER_CLIENT_H_
 #define COMPONENTS_CRASH_CONTENT_APP_CRASH_REPORTER_CLIENT_H_
 
-#include <stddef.h>
-
 #include <string>
 
 #include "base/strings/string16.h"
@@ -16,17 +14,6 @@
 namespace base {
 class FilePath;
 }
-#endif
-
-#if defined(OS_MACOSX)
-// We don't want to directly include
-// breakpad/src/client/mac/Framework/Breakpad.h here, so we repeat the
-// definition of BreakpadRef.
-//
-// On Mac, when compiling without breakpad support, a stub implementation is
-// compiled in. Not having any includes of the breakpad library allows for
-// reusing this header for the stub.
-typedef void* BreakpadRef;
 #endif
 
 namespace crash_reporter {
@@ -139,10 +126,6 @@ class CrashReporterClient {
 #else
   virtual bool GetCrashMetricsLocation(base::FilePath* metrics_dir);
 #endif
-
-  // Register all of the potential crash keys that can be sent to the crash
-  // reporting server. Returns the size of the union of all keys.
-  virtual size_t RegisterCrashKeys();
 
   virtual bool UseCrashKeysWhiteList();
 

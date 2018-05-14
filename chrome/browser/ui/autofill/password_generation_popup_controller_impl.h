@@ -56,7 +56,7 @@ class PasswordGenerationPopupControllerImpl
       const PasswordForm& form,
       int max_length,
       password_manager::PasswordManager* password_manager,
-      password_manager::PasswordManagerDriver* driver,
+      const base::WeakPtr<password_manager::PasswordManagerDriver>& driver,
       PasswordGenerationPopupObserver* observer,
       content::WebContents* web_contents,
       gfx::NativeView container_view);
@@ -76,7 +76,7 @@ class PasswordGenerationPopupControllerImpl
       const gfx::RectF& bounds,
       const PasswordForm& form,
       int max_length,
-      password_manager::PasswordManagerDriver* driver,
+      const base::WeakPtr<password_manager::PasswordManagerDriver>& driver,
       PasswordGenerationPopupObserver* observer,
       content::WebContents* web_contents,
       gfx::NativeView container_view);
@@ -100,6 +100,7 @@ class PasswordGenerationPopupControllerImpl
   bool IsRTL() const override;
   const std::vector<autofill::Suggestion> GetSuggestions() override;
 #if !defined(OS_ANDROID)
+  void SetTypesetter(gfx::Typesetter typesetter) override;
   int GetElidedValueWidthForRow(int row) override;
   int GetElidedLabelWidthForRow(int row) override;
 #endif
@@ -126,7 +127,7 @@ class PasswordGenerationPopupControllerImpl
   void CalculateBounds();
 
   PasswordForm form_;
-  password_manager::PasswordManagerDriver* driver_;
+  base::WeakPtr<password_manager::PasswordManagerDriver> driver_;
 
   // May be NULL.
   PasswordGenerationPopupObserver* observer_;

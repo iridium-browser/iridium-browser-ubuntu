@@ -47,9 +47,9 @@ inline bool EnumHasFlags(Enum v, Enum mask) {
 
 // Sides used when drawing borders and outlines. The values should run clockwise
 // from top.
-enum BoxSide { kBSTop, kBSRight, kBSBottom, kBSLeft };
+enum class BoxSide : unsigned { kTop, kRight, kBottom, kLeft };
 
-// See core/dom/stylerecalc.md for an explanation on what each state means
+// See core/style/stylerecalc.md for an explanation on what each state means
 enum StyleRecalcChange {
   kNoChange,
   kNoInherit,
@@ -91,7 +91,7 @@ enum PseudoId {
                          (1 << (kPseudoIdBackdrop - kFirstPublicPseudoId))
 };
 
-enum OutlineIsAuto { kOutlineIsAutoOff = 0, kOutlineIsAutoOn };
+enum class OutlineIsAuto : bool { kOff = false, kOn = true };
 
 // Random visual rendering model attributes. Not inherited.
 
@@ -108,76 +108,49 @@ enum class EVerticalAlign : unsigned {
   kLength
 };
 
-enum EFillAttachment {
-  kScrollBackgroundAttachment,
-  kLocalBackgroundAttachment,
-  kFixedBackgroundAttachment
-};
+enum class EFillAttachment : unsigned { kScroll, kLocal, kFixed };
 
-enum EFillBox {
-  kBorderFillBox,
-  kPaddingFillBox,
-  kContentFillBox,
-  kTextFillBox
-};
+enum class EFillBox : unsigned { kBorder, kPadding, kContent, kText };
 
 inline EFillBox EnclosingFillBox(EFillBox box_a, EFillBox box_b) {
-  if (box_a == kBorderFillBox || box_b == kBorderFillBox)
-    return kBorderFillBox;
-  if (box_a == kPaddingFillBox || box_b == kPaddingFillBox)
-    return kPaddingFillBox;
-  if (box_a == kContentFillBox || box_b == kContentFillBox)
-    return kContentFillBox;
-  return kTextFillBox;
+  if (box_a == EFillBox::kBorder || box_b == EFillBox::kBorder)
+    return EFillBox::kBorder;
+  if (box_a == EFillBox::kPadding || box_b == EFillBox::kPadding)
+    return EFillBox::kPadding;
+  if (box_a == EFillBox::kContent || box_b == EFillBox::kContent)
+    return EFillBox::kContent;
+  return EFillBox::kText;
 }
 
-enum EFillRepeat { kRepeatFill, kNoRepeatFill, kRoundFill, kSpaceFill };
+enum class EFillRepeat : unsigned {
+  kRepeatFill,
+  kNoRepeatFill,
+  kRoundFill,
+  kSpaceFill
+};
 
-enum EFillLayerType { kBackgroundFillLayer, kMaskFillLayer };
+enum class EFillLayerType : unsigned { kBackground, kMask };
 
 // CSS3 Background Values
-enum EFillSizeType { kContain, kCover, kSizeLength, kSizeNone };
+enum class EFillSizeType : unsigned {
+  kContain,
+  kCover,
+  kSizeLength,
+  kSizeNone
+};
 
 // CSS3 Background Position
-enum BackgroundEdgeOrigin { kTopEdge, kRightEdge, kBottomEdge, kLeftEdge };
+enum class BackgroundEdgeOrigin : unsigned { kTop, kRight, kBottom, kLeft };
 
 // CSS Mask Source Types
-enum EMaskSourceType { kMaskAlpha, kMaskLuminance };
+enum class EMaskSourceType : unsigned { kAlpha, kLuminance };
 
 // CSS3 Image Values
-enum QuoteType { OPEN_QUOTE, CLOSE_QUOTE, NO_OPEN_QUOTE, NO_CLOSE_QUOTE };
+enum class QuoteType : unsigned { kOpen, kClose, kNoOpen, kNoClose };
 
-enum EAnimPlayState { kAnimPlayStatePlaying, kAnimPlayStatePaused };
+enum class EAnimPlayState : unsigned { kPlaying, kPaused };
 
-static const size_t kTextDecorationSkipBits = 3;
-enum class TextDecorationSkip { kNone = 0x0, kObjects = 0x1, kInk = 0x2 };
-inline TextDecorationSkip operator&(TextDecorationSkip a,
-                                    TextDecorationSkip b) {
-  return TextDecorationSkip(static_cast<unsigned>(a) &
-                            static_cast<unsigned>(b));
-}
-inline TextDecorationSkip operator|(TextDecorationSkip a,
-                                    TextDecorationSkip b) {
-  return TextDecorationSkip(static_cast<unsigned>(a) |
-                            static_cast<unsigned>(b));
-}
-inline TextDecorationSkip& operator|=(TextDecorationSkip& a,
-                                      TextDecorationSkip b) {
-  return a = a | b;
-}
-
-enum OffsetRotationType { kOffsetRotationAuto, kOffsetRotationFixed };
-
-enum class TextEmphasisMark {
-  kNone,
-  kAuto,
-  kDot,
-  kCircle,
-  kDoubleCircle,
-  kTriangle,
-  kSesame,
-  kCustom
-};
+enum class OffsetRotationType : unsigned { kAuto, kFixed };
 
 static const size_t kGridAutoFlowBits = 4;
 enum InternalGridAutoFlowAlgorithm {
@@ -219,79 +192,71 @@ inline Containment& operator|=(Containment& a, Containment b) {
   return a = a | b;
 }
 
-enum ItemPosition {
-  kItemPositionAuto,
-  kItemPositionNormal,
-  kItemPositionStretch,
-  kItemPositionBaseline,
-  kItemPositionLastBaseline,
-  kItemPositionCenter,
-  kItemPositionStart,
-  kItemPositionEnd,
-  kItemPositionSelfStart,
-  kItemPositionSelfEnd,
-  kItemPositionFlexStart,
-  kItemPositionFlexEnd,
-  kItemPositionLeft,
-  kItemPositionRight
+enum class ItemPosition : unsigned {
+  kLegacy,
+  kAuto,
+  kNormal,
+  kStretch,
+  kBaseline,
+  kLastBaseline,
+  kCenter,
+  kStart,
+  kEnd,
+  kSelfStart,
+  kSelfEnd,
+  kFlexStart,
+  kFlexEnd,
+  kLeft,
+  kRight
 };
 
-enum OverflowAlignment {
-  kOverflowAlignmentDefault,
-  kOverflowAlignmentUnsafe,
-  kOverflowAlignmentSafe
+enum class OverflowAlignment : unsigned { kDefault, kUnsafe, kSafe };
+
+enum class ItemPositionType : unsigned { kNonLegacy, kLegacy };
+
+enum class ContentPosition : unsigned {
+  kNormal,
+  kBaseline,
+  kLastBaseline,
+  kCenter,
+  kStart,
+  kEnd,
+  kFlexStart,
+  kFlexEnd,
+  kLeft,
+  kRight
 };
 
-enum ItemPositionType { kNonLegacyPosition, kLegacyPosition };
-
-enum ContentPosition {
-  kContentPositionNormal,
-  kContentPositionBaseline,
-  kContentPositionLastBaseline,
-  kContentPositionCenter,
-  kContentPositionStart,
-  kContentPositionEnd,
-  kContentPositionFlexStart,
-  kContentPositionFlexEnd,
-  kContentPositionLeft,
-  kContentPositionRight
-};
-
-enum ContentDistributionType {
-  kContentDistributionDefault,
-  kContentDistributionSpaceBetween,
-  kContentDistributionSpaceAround,
-  kContentDistributionSpaceEvenly,
-  kContentDistributionStretch
+enum class ContentDistributionType : unsigned {
+  kDefault,
+  kSpaceBetween,
+  kSpaceAround,
+  kSpaceEvenly,
+  kStretch
 };
 
 // Reasonable maximum to prevent insane font sizes from causing crashes on some
 // platforms (such as Windows).
 static const float kMaximumAllowedFontSize = 10000.0f;
 
-enum CSSBoxType {
-  kBoxMissing = 0,
-  kMarginBox,
-  kBorderBox,
-  kPaddingBox,
-  kContentBox
+enum class CSSBoxType : unsigned {
+  kMissing,
+  kMargin,
+  kBorder,
+  kPadding,
+  kContent
 };
 
-enum SnapAxis {
-  kSnapAxisBoth,
-  kSnapAxisX,
-  kSnapAxisY,
-  kSnapAxisBlock,
-  kSnapAxisInline,
+enum class TextEmphasisPosition : unsigned {
+  kOverRight,
+  kOverLeft,
+  kUnderRight,
+  kUnderLeft,
 };
 
-enum SnapStrictness { kSnapStrictnessProximity, kSnapStrictnessMandatory };
-
-enum SnapAlignment {
-  kSnapAlignmentNone,
-  kSnapAlignmentStart,
-  kSnapAlignmentEnd,
-  kSnapAlignmentCenter
+enum class LineLogicalSide {
+  kOver,
+  kUnder,
 };
 
 }  // namespace blink

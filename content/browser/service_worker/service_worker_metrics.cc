@@ -7,14 +7,15 @@
 #include <limits>
 #include <string>
 
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
+#include "net/url_request/url_request.h"
 
 namespace content {
 
@@ -89,6 +90,10 @@ std::string EventTypeToSuffix(ServiceWorkerMetrics::EventType event_type) {
       return "_BACKGROUND_FETCHED";
     case ServiceWorkerMetrics::EventType::NAVIGATION_HINT:
       return "_NAVIGATION_HINT";
+    case ServiceWorkerMetrics::EventType::CAN_MAKE_PAYMENT:
+      return "_CAN_MAKE_PAYMENT";
+    case ServiceWorkerMetrics::EventType::ABORT_PAYMENT:
+      return "_ABORT_PAYMENT";
     case ServiceWorkerMetrics::EventType::NUM_TYPES:
       NOTREACHED() << static_cast<int>(event_type);
   }
@@ -332,6 +337,10 @@ const char* ServiceWorkerMetrics::EventTypeToString(EventType event_type) {
       return "Background Fetched";
     case EventType::NAVIGATION_HINT:
       return "Navigation Hint";
+    case EventType::CAN_MAKE_PAYMENT:
+      return "Can Make Payment";
+    case ServiceWorkerMetrics::EventType::ABORT_PAYMENT:
+      return "Abort Payment";
     case EventType::NUM_TYPES:
       break;
   }
@@ -434,8 +443,8 @@ void ServiceWorkerMetrics::RecordDestroyDatabaseResult(
 }
 
 void ServiceWorkerMetrics::RecordPurgeResourceResult(int net_error) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("ServiceWorker.Storage.PurgeResourceResult",
-                              std::abs(net_error));
+  base::UmaHistogramSparse("ServiceWorker.Storage.PurgeResourceResult",
+                           std::abs(net_error));
 }
 
 void ServiceWorkerMetrics::RecordDeleteAndStartOverResult(
@@ -444,12 +453,9 @@ void ServiceWorkerMetrics::RecordDeleteAndStartOverResult(
                             result, NUM_DELETE_AND_START_OVER_RESULT_TYPES);
 }
 
-void ServiceWorkerMetrics::CountControlledPageLoad(
-    Site site,
-    const GURL& url,
-    bool is_main_frame_load,
-    ui::PageTransition page_transition,
-    size_t redirect_chain_length) {
+void ServiceWorkerMetrics::CountControlledPageLoad(Site site,
+                                                   const GURL& url,
+                                                   bool is_main_frame_load) {
   DCHECK_NE(site, Site::OTHER);
   UMA_HISTOGRAM_ENUMERATION("ServiceWorker.PageLoad", static_cast<int>(site),
                             static_cast<int>(Site::NUM_TYPES));
@@ -461,21 +467,10 @@ void ServiceWorkerMetrics::CountControlledPageLoad(
   if (ShouldExcludeSiteFromHistogram(site))
     return;
 
-  if (is_main_frame_load) {
-    UMA_HISTOGRAM_ENUMERATION(
-        "ServiceWorker.MainFramePageLoad.CoreTransition",
-        static_cast<int>(ui::PageTransitionStripQualifier(page_transition)),
-        static_cast<int>(ui::PAGE_TRANSITION_LAST_CORE) + 1);
-    // Currently the max number of HTTP redirects is 20 which is defined as
-    // kMaxRedirects in net/url_request/url_request.cc. So the max number of the
-    // chain length is 21.
-    UMA_HISTOGRAM_EXACT_LINEAR(
-        "ServiceWorker.MainFramePageLoad.RedirectChainLength",
-        redirect_chain_length, 21);
-  }
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&RecordURLMetricOnUI, "ServiceWorker.ControlledPageUrl", url));
+      base::BindOnce(&RecordURLMetricOnUI, "ServiceWorker.ControlledPageUrl",
+                     url));
 }
 
 void ServiceWorkerMetrics::RecordStartWorkerStatus(
@@ -493,14 +488,19 @@ void ServiceWorkerMetrics::RecordStartWorkerStatus(
   RecordHistogramEnum(std::string("ServiceWorker.StartWorker.StatusByPurpose") +
                           EventTypeToSuffix(purpose),
                       status, SERVICE_WORKER_ERROR_MAX_VALUE);
-  UMA_HISTOGRAM_ENUMERATION("ServiceWorker.StartWorker.Purpose",
-                            static_cast<int>(purpose),
-                            static_cast<int>(EventType::NUM_TYPES));
+  UMA_HISTOGRAM_ENUMERATION("ServiceWorker.StartWorker.Purpose", purpose,
+                            EventType::NUM_TYPES);
   if (status == SERVICE_WORKER_ERROR_TIMEOUT) {
     UMA_HISTOGRAM_ENUMERATION("ServiceWorker.StartWorker.Timeout.StartPurpose",
-                              static_cast<int>(purpose),
-                              static_cast<int>(EventType::NUM_TYPES));
+                              purpose, EventType::NUM_TYPES);
   }
+}
+
+void ServiceWorkerMetrics::RecordInstalledScriptsSenderStatus(
+    ServiceWorkerInstalledScriptReader::FinishedReason reason) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "ServiceWorker.StartWorker.InstalledScriptsSender.FinishedReason", reason,
+      ServiceWorkerInstalledScriptReader::FinishedReason::kMaxValue);
 }
 
 void ServiceWorkerMetrics::RecordStartWorkerTime(base::TimeDelta time,
@@ -723,6 +723,13 @@ void ServiceWorkerMetrics::RecordEventDuration(EventType event,
       UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.BackgroundFetchedEvent.Time",
                                  time);
       break;
+    case EventType::CAN_MAKE_PAYMENT:
+      UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.CanMakePaymentEvent.Time",
+                                 time);
+      break;
+    case EventType::ABORT_PAYMENT:
+      UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.AbortPaymentEvent.Time", time);
+      break;
 
     case EventType::NAVIGATION_HINT:
     // The navigation hint should not be sent as an event.
@@ -759,21 +766,23 @@ void ServiceWorkerMetrics::RecordURLRequestJobResult(
 
 void ServiceWorkerMetrics::RecordStatusZeroResponseError(
     bool is_main_resource,
-    blink::WebServiceWorkerResponseError error) {
+    blink::mojom::ServiceWorkerResponseError error) {
   if (is_main_resource) {
     UMA_HISTOGRAM_ENUMERATION(
         "ServiceWorker.URLRequestJob.MainResource.StatusZeroError", error,
-        blink::kWebServiceWorkerResponseErrorLast + 1);
+        static_cast<int>(blink::mojom::ServiceWorkerResponseError::kLast) + 1);
   } else {
     UMA_HISTOGRAM_ENUMERATION(
         "ServiceWorker.URLRequestJob.Subresource.StatusZeroError", error,
-        blink::kWebServiceWorkerResponseErrorLast + 1);
+        static_cast<int>(blink::mojom::ServiceWorkerResponseError::kLast) + 1);
   }
 }
 
-void ServiceWorkerMetrics::RecordFallbackedRequestMode(FetchRequestMode mode) {
-  UMA_HISTOGRAM_ENUMERATION("ServiceWorker.URLRequestJob.FallbackedRequestMode",
-                            mode, FETCH_REQUEST_MODE_LAST + 1);
+void ServiceWorkerMetrics::RecordFallbackedRequestMode(
+    network::mojom::FetchRequestMode mode) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "ServiceWorker.URLRequestJob.FallbackedRequestMode", mode,
+      static_cast<int>(network::mojom::FetchRequestMode::kLast) + 1);
 }
 
 void ServiceWorkerMetrics::RecordProcessCreated(bool is_new_process) {
@@ -1047,10 +1056,10 @@ void ServiceWorkerMetrics::RecordRuntime(base::TimeDelta time) {
 void ServiceWorkerMetrics::RecordUninstalledScriptImport(const GURL& url) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&RecordURLMetricOnUI,
-                 "ServiceWorker.ContextRequestHandlerStatus."
-                 "UninstalledScriptImport",
-                 url));
+      base::BindOnce(&RecordURLMetricOnUI,
+                     "ServiceWorker.ContextRequestHandlerStatus."
+                     "UninstalledScriptImport",
+                     url));
 }
 
 void ServiceWorkerMetrics::RecordStartServiceWorkerForNavigationHintResult(
@@ -1058,6 +1067,10 @@ void ServiceWorkerMetrics::RecordStartServiceWorkerForNavigationHintResult(
   UMA_HISTOGRAM_ENUMERATION(
       "ServiceWorker.StartForNavigationHint.Result", result,
       StartServiceWorkerForNavigationHintResult::NUM_TYPES);
+}
+
+void ServiceWorkerMetrics::RecordRegisteredOriginCount(size_t origin_count) {
+  UMA_HISTOGRAM_COUNTS_1M("ServiceWorker.RegisteredOriginCount", origin_count);
 }
 
 }  // namespace content

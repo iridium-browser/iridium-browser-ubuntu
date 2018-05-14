@@ -4,39 +4,38 @@
 
 #include "modules/storage/DOMWindowStorage.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/frame/UseCounter.h"
 #include "core/page/Page.h"
 #include "modules/storage/Storage.h"
 #include "modules/storage/StorageNamespace.h"
 #include "modules/storage/StorageNamespaceController.h"
-#include "platform/wtf/PassRefPtr.h"
 
 namespace blink {
 
 DOMWindowStorage::DOMWindowStorage(LocalDOMWindow& window)
     : Supplement<LocalDOMWindow>(window) {}
 
-DEFINE_TRACE(DOMWindowStorage) {
+void DOMWindowStorage::Trace(blink::Visitor* visitor) {
   visitor->Trace(session_storage_);
   visitor->Trace(local_storage_);
   Supplement<LocalDOMWindow>::Trace(visitor);
 }
 
 // static
-const char* DOMWindowStorage::SupplementName() {
-  return "DOMWindowStorage";
-}
+const char DOMWindowStorage::kSupplementName[] = "DOMWindowStorage";
 
 // static
 DOMWindowStorage& DOMWindowStorage::From(LocalDOMWindow& window) {
-  DOMWindowStorage* supplement = static_cast<DOMWindowStorage*>(
-      Supplement<LocalDOMWindow>::From(window, SupplementName()));
+  DOMWindowStorage* supplement =
+      Supplement<LocalDOMWindow>::From<DOMWindowStorage>(window);
   if (!supplement) {
     supplement = new DOMWindowStorage(window);
-    ProvideTo(window, SupplementName(), supplement);
+    ProvideTo(window, supplement);
   }
   return *supplement;
 }
@@ -61,7 +60,7 @@ Storage* DOMWindowStorage::sessionStorage(
   Document* document = GetSupplementable()->GetFrame()->GetDocument();
   DCHECK(document);
   String access_denied_message = "Access is denied for this document.";
-  if (!document->GetSecurityOrigin()->CanAccessLocalStorage()) {
+  if (!document->GetSecurityOrigin()->CanAccessSessionStorage()) {
     if (document->IsSandboxed(kSandboxOrigin))
       exception_state.ThrowSecurityError(
           "The document is sandboxed and lacks the 'allow-same-origin' flag.");
@@ -71,6 +70,10 @@ Storage* DOMWindowStorage::sessionStorage(
     else
       exception_state.ThrowSecurityError(access_denied_message);
     return nullptr;
+  }
+
+  if (document->GetSecurityOrigin()->IsLocal()) {
+    UseCounter::Count(document, WebFeature::kFileAccessedSessionStorage);
   }
 
   if (session_storage_) {
@@ -115,6 +118,11 @@ Storage* DOMWindowStorage::localStorage(ExceptionState& exception_state) const {
       exception_state.ThrowSecurityError(access_denied_message);
     return nullptr;
   }
+
+  if (document->GetSecurityOrigin()->IsLocal()) {
+    UseCounter::Count(document, WebFeature::kFileAccessedLocalStorage);
+  }
+
   if (local_storage_) {
     if (!local_storage_->Area()->CanAccessStorage(document->GetFrame())) {
       exception_state.ThrowSecurityError(access_denied_message);

@@ -27,14 +27,17 @@
 #include "core/editing/commands/ApplyBlockElementCommand.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/Text.h"
 #include "core/editing/EditingUtilities.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/VisiblePosition.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/editing/VisibleUnits.h"
+#include "core/editing/commands/EditingCommandsUtilities.h"
 #include "core/html/HTMLBRElement.h"
 #include "core/html/HTMLElement.h"
+#include "core/html_names.h"
 #include "core/style/ComputedStyle.h"
 
 namespace blink {
@@ -55,15 +58,15 @@ ApplyBlockElementCommand::ApplyBlockElementCommand(
     : CompositeEditCommand(document), tag_name_(tag_name) {}
 
 void ApplyBlockElementCommand::DoApply(EditingState* editing_state) {
-  if (!EndingSelection().RootEditableElement())
-    return;
-
   // ApplyBlockElementCommands are only created directly by editor commands'
   // execution, which updates layout before entering doApply().
   DCHECK(!GetDocument().NeedsLayoutTreeUpdate());
 
-  VisiblePosition visible_end = EndingSelection().VisibleEnd();
-  VisiblePosition visible_start = EndingSelection().VisibleStart();
+  if (!RootEditableElementOf(EndingSelection().Base()))
+    return;
+
+  VisiblePosition visible_end = EndingVisibleSelection().VisibleEnd();
+  VisiblePosition visible_start = EndingVisibleSelection().VisibleStart();
   if (visible_start.IsNull() || visible_start.IsOrphan() ||
       visible_end.IsNull() || visible_end.IsOrphan())
     return;
@@ -85,15 +88,14 @@ void ApplyBlockElementCommand::DoApply(EditingState* editing_state) {
     builder.Collapse(visible_start.ToPositionWithAffinity());
     if (new_end.IsNotNull())
       builder.Extend(new_end);
-    builder.SetIsDirectional(EndingSelection().IsDirectional());
     const SelectionInDOMTree& new_selection = builder.Build();
     if (new_selection.IsNone())
       return;
-    SetEndingSelection(new_selection);
+    SetEndingSelection(SelectionForUndoStep::From(new_selection));
   }
 
   VisibleSelection selection =
-      SelectionForParagraphIteration(EndingSelection());
+      SelectionForParagraphIteration(EndingVisibleSelection());
   VisiblePosition start_of_selection = selection.VisibleStart();
   VisiblePosition end_of_selection = selection.VisibleEnd();
   DCHECK(!start_of_selection.IsNull());
@@ -117,12 +119,11 @@ void ApplyBlockElementCommand::DoApply(EditingState* editing_state) {
     VisiblePosition start(VisiblePositionForIndex(start_index, start_scope));
     VisiblePosition end(VisiblePositionForIndex(end_index, end_scope));
     if (start.IsNotNull() && end.IsNotNull()) {
-      SetEndingSelection(
+      SetEndingSelection(SelectionForUndoStep::From(
           SelectionInDOMTree::Builder()
               .Collapse(start.ToPositionWithAffinity())
               .Extend(end.DeepEquivalent())
-              .SetIsDirectional(EndingSelection().IsDirectional())
-              .Build());
+              .Build()));
     }
   }
 }
@@ -150,10 +151,10 @@ void ApplyBlockElementCommand::FormatSelection(
     AppendNode(placeholder, blockquote, editing_state);
     if (editing_state->IsAborted())
       return;
-    SetEndingSelection(SelectionInDOMTree::Builder()
-                           .Collapse(Position::BeforeNode(*placeholder))
-                           .SetIsDirectional(EndingSelection().IsDirectional())
-                           .Build());
+    SetEndingSelection(SelectionForUndoStep::From(
+        SelectionInDOMTree::Builder()
+            .Collapse(Position::BeforeNode(*placeholder))
+            .Build()));
     return;
   }
 
@@ -237,7 +238,7 @@ static const ComputedStyle* ComputedStyleOfEnclosingTextNode(
     const Position& position) {
   if (!position.IsOffsetInAnchor() || !position.ComputeContainerNode() ||
       !position.ComputeContainerNode()->IsTextNode())
-    return 0;
+    return nullptr;
   return position.ComputeContainerNode()->GetComputedStyle();
 }
 
@@ -323,19 +324,24 @@ void ApplyBlockElementCommand::RangeForParagraphSplittingTextNodesIfNeeded(
       SplitTextNode(end_container, end.OffsetInContainerNode());
       GetDocument().UpdateStyleAndLayoutTree();
 
-      if (is_start_and_end_on_same_node)
-        start = FirstPositionInOrBeforeNode(end_container->previousSibling());
+      const Node* const previous_sibling_of_end =
+          end_container->previousSibling();
+      DCHECK(previous_sibling_of_end);
+      if (is_start_and_end_on_same_node) {
+        start = FirstPositionInOrBeforeNode(*previous_sibling_of_end);
+      }
       if (is_end_and_end_of_last_paragraph_on_same_node) {
         if (end_of_last_paragraph.OffsetInContainerNode() ==
-            end.OffsetInContainerNode())
+            end.OffsetInContainerNode()) {
           end_of_last_paragraph =
-              LastPositionInOrAfterNode(end_container->previousSibling());
-        else
+              LastPositionInOrAfterNode(*previous_sibling_of_end);
+        } else {
           end_of_last_paragraph = Position(
               end_container, end_of_last_paragraph.OffsetInContainerNode() -
                                  end.OffsetInContainerNode());
+        }
       }
-      end = Position::LastPositionInNode(*end_container->previousSibling());
+      end = Position::LastPositionInNode(*previous_sibling_of_end);
     }
   }
 }

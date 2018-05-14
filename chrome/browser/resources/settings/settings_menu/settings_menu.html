@@ -33,7 +33,6 @@
         min-height: 20px;
         padding-bottom: 10px;
         padding-top: 10px;
-        word-break: break-word;
       }
 
       a[href].iron-selected {
@@ -74,15 +73,15 @@
         -webkit-margin-end: 22px;  /* 24px - 2px from margin for outline. */
       }
 
-      .separator {
-        /* Per Alan@, this line is different from the other separator lines. */
+      #menuSeparator {
+        /* Per bettes@, this is different from the other separator lines. */
         border-bottom: 1px solid rgba(0, 0, 0, 0.08);
         margin-bottom: 8px;
         margin-top: 8px;
       }
     </style>
     <iron-selector id="topMenu" selectable="a" attr-for-selected="href"
-        on-iron-activate="onSelectorActivate_">
+        on-iron-activate="onSelectorActivate_" role="navigation">
 <if expr="chromeos">
       <a href="/internet">
         <iron-icon icon="settings:network-wifi"></iron-icon>
@@ -97,7 +96,8 @@
         <iron-icon icon="cr:person"></iron-icon>
         $i18n{peoplePageTitle}
       </a>
-      <a href="/appearance" hidden="[[!pageVisibility.appearance]]">
+      <a id="appearance" href="/appearance"
+        hidden="[[!pageVisibility.appearance]]">
         <iron-icon icon="settings:palette"></iron-icon>
         $i18n{appearancePageTitle}
       </a>
@@ -113,17 +113,19 @@
       </a>
 <if expr="chromeos">
       <a href="/androidApps" hidden="[[!showAndroidApps]]">
-        <iron-icon icon="settings:android"></iron-icon>
+        <iron-icon icon="settings:play-prism"></iron-icon>
         $i18n{androidAppsPageTitle}
       </a>
 </if>
 <if expr="not chromeos">
-      <a href="/defaultBrowser" hidden="[[!pageVisibility.defaultBrowser]]">
+      <a id="defaultBrowser" href="/defaultBrowser"
+        hidden="[[!pageVisibility.defaultBrowser]]">
         <iron-icon icon="settings:web"></iron-icon>
         $i18n{defaultBrowser}
       </a>
 </if>
-      <a href="/onStartup" hidden="[[!pageVisibility.onStartup]]">
+      <a id="onStartup" href="/onStartup"
+        hidden="[[!pageVisibility.onStartup]]">
         <iron-icon icon="settings:power-settings-new"></iron-icon>
         $i18n{onStartup}
       </a>
@@ -135,7 +137,8 @@
         </iron-icon></paper-button>
       <iron-collapse id="advancedSubmenu" opened="[[advancedOpened]]"
           hidden="[[!pageVisibility.advancedSettings]]">
-        <iron-selector id="subMenu" selectable="a" attr-for-selected="href">
+        <iron-selector id="subMenu" selectable="a" attr-for-selected="href"
+            role="navigation">
 <if expr="chromeos">
           <a href="/dateTime">
             <iron-icon icon="settings:access-time"></iron-icon>
@@ -146,7 +149,7 @@
             <iron-icon icon="settings:security"></iron-icon>
             $i18n{privacyPageTitle}
           </a>
-          <a href="/passwordsAndForms"
+          <a id= "passwordsAndForms" href="/passwordsAndForms"
               hidden="[[!pageVisibility.passwordsAndForms]]">
             <iron-icon icon="settings:assignment"></iron-icon>
             $i18n{passwordsAndAutofillPageTitle}
@@ -165,7 +168,7 @@
           </a>
 <if expr="chromeos">
           <a href="/multidevice" hidden="[[!showMultidevice]]">
-            <iron-icon icon="settings:sync"></iron-icon>
+            <iron-icon icon="settings:devices-other"></iron-icon>
             $i18n{multidevicePageTitle}
           </a>
 </if>
@@ -179,13 +182,13 @@
             $i18n{systemPageTitle}
           </a>
 </if>
-          <a href="/reset" hidden="[[!pageVisibility.reset]]">
+          <a id="reset" href="/reset" hidden="[[!pageVisibility.reset]]">
             <iron-icon icon="settings:restore"></iron-icon>
             $i18n{resetPageTitle}
           </a>
         </iron-selector>
       </iron-collapse>
-      <div class="separator"></div>
+      <div id="menuSeparator"></div>
       <a id="about-menu" href="/help">$i18n{aboutPageTitle}</a>
     </iron-selector>
   </template>

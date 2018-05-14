@@ -51,8 +51,6 @@ class TestChannelIDKey : public ChannelIDKey {
 
   std::string SerializeKey() const override;
 
-  const EVP_PKEY* get_evp_pkey() const { return ecdsa_key_.get(); }
-
  private:
   bssl::UniquePtr<EVP_PKEY> ecdsa_key_;
 };
@@ -114,6 +112,10 @@ struct FakeClientOptions {
 
   // The Token Binding params that the client supports and will negotiate.
   QuicTagVector token_binding_params;
+
+  // If only_tls_versions is set, then the client will only use TLS for the
+  // crypto handshake.
+  bool only_tls_versions = false;
 };
 
 // returns: the number of client hellos that the client sent.
@@ -240,7 +242,7 @@ void MovePackets(PacketSavingConnection* source_conn,
 // Return an inchoate CHLO with some basic tag value pairs.
 CryptoHandshakeMessage GenerateDefaultInchoateCHLO(
     const QuicClock* clock,
-    QuicVersion version,
+    QuicTransportVersion version,
     QuicCryptoServerConfig* crypto_config);
 
 // Takes a inchoate CHLO, returns a full CHLO in |out| which can pass
@@ -250,7 +252,7 @@ void GenerateFullCHLO(
     QuicCryptoServerConfig* crypto_config,
     QuicSocketAddress server_addr,
     QuicSocketAddress client_addr,
-    QuicVersion version,
+    QuicTransportVersion version,
     const QuicClock* clock,
     QuicReferenceCountedPointer<QuicSignedServerConfig> signed_config,
     QuicCompressedCertsCache* compressed_certs_cache,

@@ -18,14 +18,17 @@
 #include "base/observer_list.h"
 #include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
+#include "chrome/browser/chromeos/file_system_provider/icon_set.h"
 #include "chrome/browser/chromeos/file_system_provider/observer.h"
+#include "chrome/browser/chromeos/file_system_provider/provided_file_system_info.h"
 #include "chrome/browser/chromeos/file_system_provider/service.h"
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/storage_monitor/removable_storage_observer.h"
-#include "device/media_transfer_protocol/mtp_storage_info.pb.h"
+#include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
+#include "device/media_transfer_protocol/public/mojom/mtp_storage_info.mojom.h"
 
 class Profile;
 
@@ -106,7 +109,9 @@ class Volume : public base::SupportsWeakPtr<Volume> {
   // Getters for all members. See below for details.
   const std::string& volume_id() const { return volume_id_; }
   const std::string& file_system_id() const { return file_system_id_; }
-  const std::string& extension_id() const { return extension_id_; }
+  const chromeos::file_system_provider::ProviderId& provider_id() const {
+    return provider_id_;
+  }
   Source source() const { return source_; }
   VolumeType type() const { return type_; }
   chromeos::DeviceType device_type() const { return device_type_; }
@@ -136,6 +141,10 @@ class Volume : public base::SupportsWeakPtr<Volume> {
   bool has_media() const { return has_media_; }
   bool configurable() const { return configurable_; }
   bool watchable() const { return watchable_; }
+  const std::string& file_system_type() const { return file_system_type_; }
+  const chromeos::file_system_provider::IconSet& icon_set() const {
+    return icon_set_;
+  }
 
  private:
   Volume();
@@ -144,12 +153,12 @@ class Volume : public base::SupportsWeakPtr<Volume> {
   std::string volume_id_;
 
   // The ID for provided file systems. If other type, then empty string. Unique
-  // per providing extension.
+  // per providing extension or native provider.
   std::string file_system_id_;
 
-  // The ID of an extension providing the file system. If other type, then equal
-  // to an empty string.
-  std::string extension_id_;
+  // The ID of an extension or native provider providing the file system. If
+  // other type, then equal to a ProviderId of the type INVALID.
+  chromeos::file_system_provider::ProviderId provider_id_;
 
   // The source of the volume's data.
   Source source_;
@@ -207,6 +216,12 @@ class Volume : public base::SupportsWeakPtr<Volume> {
   // True if the volume notifies about changes via file/directory watchers.
   bool watchable_;
 
+  // Identifier for the file system type
+  std::string file_system_type_;
+
+  // Volume icon set.
+  chromeos::file_system_provider::IconSet icon_set_;
+
   DISALLOW_COPY_AND_ASSIGN(Volume);
 };
 
@@ -223,10 +238,11 @@ class VolumeManager : public KeyedService,
                       public chromeos::file_system_provider::Observer,
                       public storage_monitor::RemovableStorageObserver {
  public:
-  // Returns MediaTransferProtocolManager. Used for injecting
-  // FakeMediaTransferProtocolManager for testing.
-  typedef base::Callback<const MtpStorageInfo*(const std::string&)>
-      GetMtpStorageInfoCallback;
+  // An alternate to MediaTransferProtocolManager::GetMtpStorage.
+  // Used for injecting fake MTP manager for testing in VolumeManagerTest.
+  using GetMtpStorageInfoCallback = base::RepeatingCallback<void(
+      const std::string&,
+      device::MediaTransferProtocolManager::GetStorageInfoCallback)>;
 
   VolumeManager(
       Profile* profile,
@@ -234,7 +250,7 @@ class VolumeManager : public KeyedService,
       chromeos::PowerManagerClient* power_manager_client,
       chromeos::disks::DiskMountManager* disk_mount_manager,
       chromeos::file_system_provider::Service* file_system_provider_service,
-      GetMtpStorageInfoCallback get_mtp_storage_info_callback);
+      const GetMtpStorageInfoCallback& get_mtp_storage_info_callback);
   ~VolumeManager() override;
 
   // Returns the instance corresponding to the |context|.
@@ -280,9 +296,12 @@ class VolumeManager : public KeyedService,
   void OnFileSystemBeingUnmounted() override;
 
   // chromeos::disks::DiskMountManager::Observer overrides.
-  void OnDiskEvent(
+  void OnAutoMountableDiskEvent(
       chromeos::disks::DiskMountManager::DiskEvent event,
-      const chromeos::disks::DiskMountManager::Disk* disk) override;
+      const chromeos::disks::DiskMountManager::Disk& disk) override;
+  void OnBootDeviceDiskEvent(
+      chromeos::disks::DiskMountManager::DiskEvent event,
+      const chromeos::disks::DiskMountManager::Disk& disk) override;
   void OnDeviceEvent(chromeos::disks::DiskMountManager::DeviceEvent event,
                      const std::string& device_path) override;
   void OnMountEvent(chromeos::disks::DiskMountManager::MountEvent event,
@@ -291,6 +310,9 @@ class VolumeManager : public KeyedService,
                         mount_info) override;
   void OnFormatEvent(chromeos::disks::DiskMountManager::FormatEvent event,
                      chromeos::FormatError error_code,
+                     const std::string& device_path) override;
+  void OnRenameEvent(chromeos::disks::DiskMountManager::RenameEvent event,
+                     chromeos::RenameError error_code,
                      const std::string& device_path) override;
 
   // chromeos::file_system_provider::Observer overrides.
@@ -324,6 +346,9 @@ class VolumeManager : public KeyedService,
  private:
   void OnDiskMountManagerRefreshed(bool success);
   void OnStorageMonitorInitialized();
+  void DoAttachMtpStorage(
+      const storage_monitor::StorageInfo& info,
+      const device::mojom::MtpStorageInfo* mtp_storage_info);
   void DoMountEvent(chromeos::MountError error_code,
                     std::unique_ptr<Volume> volume);
   void DoUnmountEvent(chromeos::MountError error_code, const Volume& volume);

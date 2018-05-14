@@ -7,10 +7,10 @@
 #include <memory>
 #include <utility>
 
+#include "ash/public/cpp/ash_pref_names.h"
 #include "base/callback.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
 #include "chrome/common/pref_names.h"
@@ -58,44 +58,33 @@ void LoginScreenPowerManagementPolicyHandlerTest::SetUp() {
 TEST_F(ScreenMagnifierPolicyHandlerTest, Default) {
   handler_.ApplyPolicySettings(policy_, &prefs_);
   EXPECT_FALSE(
-      prefs_.GetValue(prefs::kAccessibilityScreenMagnifierEnabled, NULL));
-  EXPECT_FALSE(prefs_.GetValue(prefs::kAccessibilityScreenMagnifierType, NULL));
+      prefs_.GetValue(ash::prefs::kAccessibilityScreenMagnifierEnabled, NULL));
 }
 
 TEST_F(ScreenMagnifierPolicyHandlerTest, Disabled) {
   policy_.Set(key::kScreenMagnifierType, POLICY_LEVEL_MANDATORY,
               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-              base::MakeUnique<base::Value>(0), nullptr);
+              std::make_unique<base::Value>(0), nullptr);
   handler_.ApplyPolicySettings(policy_, &prefs_);
 
   const base::Value* enabled = NULL;
-  EXPECT_TRUE(
-      prefs_.GetValue(prefs::kAccessibilityScreenMagnifierEnabled, &enabled));
+  EXPECT_TRUE(prefs_.GetValue(ash::prefs::kAccessibilityScreenMagnifierEnabled,
+                              &enabled));
   ASSERT_TRUE(enabled);
   EXPECT_TRUE(base::Value(false).Equals(enabled));
-
-  const base::Value* type = NULL;
-  EXPECT_TRUE(prefs_.GetValue(prefs::kAccessibilityScreenMagnifierType, &type));
-  ASSERT_TRUE(type);
-  EXPECT_TRUE(base::Value(0).Equals(type));
 }
 
 TEST_F(ScreenMagnifierPolicyHandlerTest, Enabled) {
   policy_.Set(key::kScreenMagnifierType, POLICY_LEVEL_MANDATORY,
               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-              base::MakeUnique<base::Value>(1), nullptr);
+              std::make_unique<base::Value>(1), nullptr);
   handler_.ApplyPolicySettings(policy_, &prefs_);
 
   const base::Value* enabled = NULL;
-  EXPECT_TRUE(
-      prefs_.GetValue(prefs::kAccessibilityScreenMagnifierEnabled, &enabled));
+  EXPECT_TRUE(prefs_.GetValue(ash::prefs::kAccessibilityScreenMagnifierEnabled,
+                              &enabled));
   ASSERT_TRUE(enabled);
   EXPECT_TRUE(base::Value(true).Equals(enabled));
-
-  const base::Value* type = NULL;
-  EXPECT_TRUE(prefs_.GetValue(prefs::kAccessibilityScreenMagnifierType, &type));
-  ASSERT_TRUE(type);
-  EXPECT_TRUE(base::Value(1).Equals(type));
 }
 
 TEST(ExternalDataPolicyHandlerTest, Empty) {
@@ -109,7 +98,7 @@ TEST(ExternalDataPolicyHandlerTest, WrongType) {
   PolicyMap policy_map;
   policy_map.Set(key::kUserAvatarImage, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                 base::MakeUnique<base::Value>(false), nullptr);
+                 std::make_unique<base::Value>(false), nullptr);
   PolicyErrorMap errors;
   EXPECT_FALSE(ExternalDataPolicyHandler(key::kUserAvatarImage)
                    .CheckPolicySettings(policy_map, &errors));
@@ -237,7 +226,7 @@ TEST(NetworkConfigurationPolicyHandlerTest, ValidONC) {
   PolicyMap policy_map;
   policy_map.Set(key::kOpenNetworkConfiguration, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                 base::MakeUnique<base::Value>(kTestONC), nullptr);
+                 std::make_unique<base::Value>(kTestONC), nullptr);
   std::unique_ptr<NetworkConfigurationPolicyHandler> handler(
       NetworkConfigurationPolicyHandler::CreateForUserPolicy());
   PolicyErrorMap errors;
@@ -249,7 +238,7 @@ TEST(NetworkConfigurationPolicyHandlerTest, WrongType) {
   PolicyMap policy_map;
   policy_map.Set(key::kOpenNetworkConfiguration, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                 base::MakeUnique<base::Value>(false), nullptr);
+                 std::make_unique<base::Value>(false), nullptr);
   std::unique_ptr<NetworkConfigurationPolicyHandler> handler(
       NetworkConfigurationPolicyHandler::CreateForUserPolicy());
   PolicyErrorMap errors;
@@ -262,7 +251,7 @@ TEST(NetworkConfigurationPolicyHandlerTest, JSONParseError) {
   PolicyMap policy_map;
   policy_map.Set(key::kOpenNetworkConfiguration, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                 base::MakeUnique<base::Value>(kTestONC), nullptr);
+                 std::make_unique<base::Value>(kTestONC), nullptr);
   std::unique_ptr<NetworkConfigurationPolicyHandler> handler(
       NetworkConfigurationPolicyHandler::CreateForUserPolicy());
   PolicyErrorMap errors;
@@ -288,7 +277,7 @@ TEST(NetworkConfigurationPolicyHandlerTest, Sanitization) {
   PolicyMap policy_map;
   policy_map.Set(key::kOpenNetworkConfiguration, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                 base::MakeUnique<base::Value>(kTestONC), nullptr);
+                 std::make_unique<base::Value>(kTestONC), nullptr);
   std::unique_ptr<NetworkConfigurationPolicyHandler> handler(
       NetworkConfigurationPolicyHandler::CreateForUserPolicy());
   PolicyErrorMap errors;
@@ -315,20 +304,33 @@ TEST(PinnedLauncherAppsPolicyHandler, PrefTranslation) {
                  nullptr);
   handler.ApplyPolicySettings(policy_map, &prefs);
   EXPECT_TRUE(prefs.GetValue(prefs::kPolicyPinnedLauncherApps, &value));
-  EXPECT_TRUE(base::Value::Equals(&expected_pinned_apps, value));
+  EXPECT_EQ(expected_pinned_apps, *value);
 
+  // Extension IDs are OK.
   base::Value entry1("abcdefghijklmnopabcdefghijklmnop");
-  auto entry1_dict = base::MakeUnique<base::DictionaryValue>();
+  auto entry1_dict = std::make_unique<base::DictionaryValue>();
   entry1_dict->Set(kPinnedAppsPrefAppIDPath, entry1.CreateDeepCopy());
   expected_pinned_apps.Append(std::move(entry1_dict));
   list.Append(entry1.CreateDeepCopy());
+
+  // Android appds are OK.
+  base::Value entry2("com.google.android.gm");
+  auto entry2_dict = std::make_unique<base::DictionaryValue>();
+  entry2_dict->Set(kPinnedAppsPrefAppIDPath, entry2.CreateDeepCopy());
+  expected_pinned_apps.Append(std::move(entry2_dict));
+  list.Append(entry2.CreateDeepCopy());
+
+  // Anything else is not OK.
+  base::Value entry3("invalid");
+  list.Append(entry3.CreateDeepCopy());
+
   policy_map.Set(key::kPinnedLauncherApps, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, list.CreateDeepCopy(),
                  nullptr);
   prefs.Clear();
   handler.ApplyPolicySettings(policy_map, &prefs);
   EXPECT_TRUE(prefs.GetValue(prefs::kPolicyPinnedLauncherApps, &value));
-  EXPECT_TRUE(base::Value::Equals(&expected_pinned_apps, value));
+  EXPECT_EQ(expected_pinned_apps, *value);
 }
 
 TEST_F(LoginScreenPowerManagementPolicyHandlerTest, Empty) {
@@ -355,7 +357,7 @@ TEST_F(LoginScreenPowerManagementPolicyHandlerTest, WrongType) {
   PolicyMap policy_map;
   policy_map.Set(key::kDeviceLoginScreenPowerManagement, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                 base::MakeUnique<base::Value>(false), nullptr);
+                 std::make_unique<base::Value>(false), nullptr);
   LoginScreenPowerManagementPolicyHandler handler(chrome_schema_);
   PolicyErrorMap errors;
   EXPECT_FALSE(handler.CheckPolicySettings(policy_map, &errors));

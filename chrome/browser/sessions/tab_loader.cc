@@ -26,6 +26,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
+#include "services/resource_coordinator/public/cpp/resource_coordinator_features.h"
 
 using content::NavigationController;
 using content::RenderWidgetHost;
@@ -47,6 +48,7 @@ void TabLoader::Observe(int type,
       break;
     }
     case content::NOTIFICATION_LOAD_STOP: {
+      DCHECK(!resource_coordinator::IsPageAlmostIdleSignalEnabled());
       NavigationController* controller =
           content::Source<NavigationController>(source).ptr();
       HandleTabClosedOrLoaded(controller);
@@ -58,6 +60,16 @@ void TabLoader::Observe(int type,
   // Delete ourselves when we are done.
   if (tabs_loading_.empty() && tabs_to_load_.empty())
     this_retainer_ = nullptr;
+}
+
+void TabLoader::OnPageAlmostIdle(content::WebContents* web_contents) {
+  auto* controller = &web_contents->GetController();
+  // The |web_contents| is not managed by TabLoader.
+  if (tabs_loading_.find(controller) == tabs_loading_.end() &&
+      !base::ContainsValue(tabs_to_load_, controller)) {
+    return;
+  }
+  HandleTabClosedOrLoaded(controller);
 }
 
 void TabLoader::SetTabLoadingEnabled(bool enable_tab_loading) {
@@ -98,17 +110,25 @@ TabLoader::TabLoader(base::TimeTicks restore_started)
       restore_started_(restore_started) {
   stats_collector_ = new SessionRestoreStatsCollector(
       restore_started,
-      base::MakeUnique<
+      std::make_unique<
           SessionRestoreStatsCollector::UmaStatsReportingDelegate>());
   shared_tab_loader_ = this;
   this_retainer_ = this;
   base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
+  if (auto* page_signal_receiver =
+          resource_coordinator::PageSignalReceiver::GetInstance()) {
+    page_signal_receiver->AddObserver(this);
+  }
 }
 
 TabLoader::~TabLoader() {
   DCHECK(tabs_loading_.empty() && tabs_to_load_.empty());
   DCHECK(shared_tab_loader_ == this);
   shared_tab_loader_ = nullptr;
+  if (auto* page_signal_receiver =
+          resource_coordinator::PageSignalReceiver::GetInstance()) {
+    page_signal_receiver->RemoveObserver(this);
+  }
   base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
   SessionRestore::OnTabLoaderFinishedLoadingTabs();
 }
@@ -128,8 +148,10 @@ void TabLoader::StartLoading(const std::vector<RestoredTab>& tabs) {
           favicon::ContentFaviconDriver::FromWebContents(
               restored_tab.contents());
       // |favicon_driver| might be null when testing.
-      if (favicon_driver)
-        favicon_driver->FetchFavicon(favicon_driver->GetActiveURL());
+      if (favicon_driver) {
+        favicon_driver->FetchFavicon(favicon_driver->GetActiveURL(),
+                                     /*is_same_document=*/false);
+      }
     } else {
       ++started_to_load_count_;
       tabs_loading_.insert(&restored_tab.contents()->GetController());
@@ -180,6 +202,7 @@ void TabLoader::LoadNextTab() {
       return;
     }
 
+    stats_collector_->OnWillLoadNextTab(!force_load_timer_.IsRunning());
     NavigationController* controller = tabs_to_load_.front();
     DCHECK(controller);
     ++started_to_load_count_;
@@ -225,8 +248,10 @@ void TabLoader::StartTimer() {
 void TabLoader::RemoveTab(NavigationController* controller) {
   registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                     content::Source<WebContents>(controller->GetWebContents()));
-  registrar_.Remove(this, content::NOTIFICATION_LOAD_STOP,
-                    content::Source<NavigationController>(controller));
+  if (!resource_coordinator::IsPageAlmostIdleSignalEnabled()) {
+    registrar_.Remove(this, content::NOTIFICATION_LOAD_STOP,
+                      content::Source<NavigationController>(controller));
+  }
 
   TabsLoading::iterator i = tabs_loading_.find(controller);
   if (i != tabs_loading_.end())
@@ -246,6 +271,10 @@ void TabLoader::ForceLoadTimerFired() {
 void TabLoader::RegisterForNotifications(NavigationController* controller) {
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                  content::Source<WebContents>(controller->GetWebContents()));
+  // When page almost idle signal is enabled, we don't use onload to help start
+  // loading next tab, we use page almost idle signal instead.
+  if (resource_coordinator::IsPageAlmostIdleSignalEnabled())
+    return;
   registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
                  content::Source<NavigationController>(controller));
 }

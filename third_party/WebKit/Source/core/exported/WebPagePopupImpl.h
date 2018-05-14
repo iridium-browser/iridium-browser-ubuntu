@@ -31,14 +31,12 @@
 #ifndef WebPagePopupImpl_h
 #define WebPagePopupImpl_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/page/PagePopup.h"
 #include "core/page/PageWidgetDelegate.h"
 #include "platform/wtf/RefCounted.h"
 #include "public/web/WebPagePopup.h"
-
-// To avoid conflicts with the CreateWindow macro from the Windows SDK...
-#undef PostMessage
 
 namespace blink {
 
@@ -49,20 +47,18 @@ class PagePopupChromeClient;
 class PagePopupClient;
 class WebLayerTreeView;
 class WebLayer;
-class WebViewBase;
+class WebViewImpl;
 class LocalDOMWindow;
 
-class CORE_EXPORT WebPagePopupImpl final
-    : public NON_EXPORTED_BASE(WebPagePopup),
-      public NON_EXPORTED_BASE(PageWidgetEventHandler),
-      public NON_EXPORTED_BASE(PagePopup),
-      public NON_EXPORTED_BASE(RefCounted<WebPagePopupImpl>) {
-  WTF_MAKE_NONCOPYABLE(WebPagePopupImpl);
+class CORE_EXPORT WebPagePopupImpl final : public WebPagePopup,
+                                           public PageWidgetEventHandler,
+                                           public PagePopup,
+                                           public RefCounted<WebPagePopupImpl> {
   USING_FAST_MALLOC(WebPagePopupImpl);
 
  public:
   ~WebPagePopupImpl() override;
-  bool Initialize(WebViewBase*, PagePopupClient*);
+  bool Initialize(WebViewImpl*, PagePopupClient*);
   void ClosePopup();
   WebWidgetClient* WidgetClient() const { return widget_client_; }
   bool HasSamePopupClient(WebPagePopupImpl* other) {
@@ -73,17 +69,20 @@ class CORE_EXPORT WebPagePopupImpl final
   void CompositeAndReadbackAsync(
       WebCompositeAndReadbackAsyncCallback*) override;
   WebPoint PositionRelativeToOwner() override;
-  void PostMessage(const String& message) override;
+  void PostMessageToPopup(const String& message) override;
   void Cancel();
 
   // PageWidgetEventHandler functions.
   WebInputEventResult HandleKeyEvent(const WebKeyboardEvent&) override;
 
+  WebInputEventResult DispatchBufferedTouchEvents() override;
+
  private:
   // WebWidget functions
   void SetSuppressFrameRequestsWorkaroundFor704763Only(bool) final;
   void BeginFrame(double last_frame_time_monotonic) override;
-  void UpdateAllLifecyclePhases() override;
+  void UpdateLifecycle(LifecycleUpdate requested_update) override;
+  void UpdateAllLifecyclePhasesAndCompositeForTesting() override;
   void WillCloseLayerTreeView() override;
   void Paint(WebCanvas*, const WebRect&) override;
   void Resize(const WebSize&) override;
@@ -117,7 +116,7 @@ class CORE_EXPORT WebPagePopupImpl final
   WebRect WindowRectInScreen() const;
 
   WebWidgetClient* widget_client_;
-  WebViewBase* web_view_;
+  WebViewImpl* web_view_;
   Persistent<Page> page_;
   Persistent<PagePopupChromeClient> chrome_client_;
   PagePopupClient* popup_client_;
@@ -131,6 +130,8 @@ class CORE_EXPORT WebPagePopupImpl final
 
   friend class WebPagePopup;
   friend class PagePopupChromeClient;
+
+  DISALLOW_COPY_AND_ASSIGN(WebPagePopupImpl);
 };
 
 DEFINE_TYPE_CASTS(WebPagePopupImpl,

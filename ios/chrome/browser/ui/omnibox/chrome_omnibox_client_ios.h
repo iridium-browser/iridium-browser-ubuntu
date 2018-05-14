@@ -36,8 +36,8 @@ class ChromeOmniboxClientIOS : public OmniboxClient {
   bool IsPasteAndGoEnabled() const override;
   bool IsInstantNTP() const override;
   bool IsSearchResultsPage() const override;
-  bool IsNewTabPage(const std::string& url) const override;
-  bool IsHomePage(const std::string& url) const override;
+  bool IsNewTabPage(const GURL& url) const override;
+  bool IsHomePage(const GURL& url) const override;
   const SessionID& GetSessionID() const override;
   bookmarks::BookmarkModel* GetBookmarkModel() override;
   TemplateURLService* GetTemplateURLService() override;
@@ -64,7 +64,7 @@ class ChromeOmniboxClientIOS : public OmniboxClient {
   gfx::Image GetFavicon() const override;
   void OnTextChanged(const AutocompleteMatch& current_match,
                      bool user_input_in_progress,
-                     base::string16& user_text,
+                     const base::string16& user_text,
                      const AutocompleteResult& result,
                      bool is_popup_open,
                      bool has_focus) override;

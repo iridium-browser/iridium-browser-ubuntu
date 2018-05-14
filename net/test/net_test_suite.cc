@@ -5,8 +5,6 @@
 #include "net/test/net_test_suite.h"
 
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
-#include "base/test/scoped_task_environment.h"
 #include "net/base/network_change_notifier.h"
 #include "net/http/http_stream_factory.h"
 #include "net/spdy/chromium/spdy_session.h"
@@ -17,6 +15,9 @@
 #endif
 
 namespace {
+base::test::ScopedTaskEnvironment::MainThreadType kDefaultMainThreadType =
+    base::test::ScopedTaskEnvironment::MainThreadType::IO;
+
 NetTestSuite* g_current_net_test_suite = nullptr;
 }  // namespace
 
@@ -48,9 +49,23 @@ void NetTestSuite::Shutdown() {
   TestSuite::Shutdown();
 }
 
+// static
 base::test::ScopedTaskEnvironment* NetTestSuite::GetScopedTaskEnvironment() {
   DCHECK(g_current_net_test_suite);
   return g_current_net_test_suite->scoped_task_environment_.get();
+}
+
+// static
+void NetTestSuite::SetScopedTaskEnvironment(
+    base::test::ScopedTaskEnvironment::MainThreadType type) {
+  g_current_net_test_suite->scoped_task_environment_ = nullptr;
+  g_current_net_test_suite->scoped_task_environment_ =
+      std::make_unique<base::test::ScopedTaskEnvironment>(type);
+}
+
+// static
+void NetTestSuite::ResetScopedTaskEnvironment() {
+  SetScopedTaskEnvironment(kDefaultMainThreadType);
 }
 
 void NetTestSuite::InitializeTestThread() {
@@ -68,6 +83,6 @@ void NetTestSuite::InitializeTestThreadNoNetworkChangeNotifier() {
   host_resolver_proc_->AddRule("*", "127.0.0.1");
 
   scoped_task_environment_ =
-      base::MakeUnique<base::test::ScopedTaskEnvironment>(
-          base::test::ScopedTaskEnvironment::MainThreadType::IO);
+      std::make_unique<base::test::ScopedTaskEnvironment>(
+          kDefaultMainThreadType);
 }

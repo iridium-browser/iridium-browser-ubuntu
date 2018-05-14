@@ -14,7 +14,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "components/bookmarks/browser/bookmark_model.h"
-#include "ui/base/ui_base_switches.h"
 
 namespace {
 
@@ -23,7 +22,6 @@ namespace {
 class TestSigninDialogDelegate : public ui::ProfileSigninConfirmationDelegate {
  public:
   TestSigninDialogDelegate() {}
-  virtual ~TestSigninDialogDelegate() {}
 
   void OnCancelSignin() override {}
   void OnContinueSignin() override {}
@@ -39,13 +37,13 @@ class ProfileSigninConfirmationDialogTest : public DialogBrowserTest {
  public:
   ProfileSigninConfirmationDialogTest() {}
 
-  // content::BrowserTestBase:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kExtendMdToSecondaryUi);
+  // DialogBrowserTest:
+  void SetUp() override {
+    UseMdOnly();
+    DialogBrowserTest::SetUp();
   }
 
-  // DialogBrowserTest:
-  void ShowDialog(const std::string& name) override {
+  void ShowUi(const std::string& name) override {
     Profile* profile = browser()->profile();
 
     // Add a bookmark to ensure CheckShouldPromptForNewProfile() returns true.
@@ -60,17 +58,14 @@ class ProfileSigninConfirmationDialogTest : public DialogBrowserTest {
     TabDialogs::FromWebContents(web_contents)
         ->ShowProfileSigninConfirmation(
             browser(), profile, "username@example.com",
-            base::MakeUnique<TestSigninDialogDelegate>());
+            std::make_unique<TestSigninDialogDelegate>());
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ProfileSigninConfirmationDialogTest);
 };
 
-// Test that calls ShowDialog("default"). Interactive when run via
-// browser_tests --gtest_filter=BrowserDialogTest.Invoke --interactive
-// --dialog=ProfileSigninConfirmationDialogTest.InvokeDialog_default
-IN_PROC_BROWSER_TEST_F(ProfileSigninConfirmationDialogTest,
-                       InvokeDialog_default) {
-  RunDialog();
+// Test that calls ShowUi("default").
+IN_PROC_BROWSER_TEST_F(ProfileSigninConfirmationDialogTest, InvokeUi_default) {
+  ShowAndVerifyUi();
 }

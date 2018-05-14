@@ -16,17 +16,17 @@
 @class DownloadItemButton;
 class DownloadItemMac;
 class DownloadItemModel;
+@protocol DownloadItemView;
 class DownloadShelfContextMenuMac;
 @class DownloadShelfController;
 @class GTMWidthBasedTweaker;
 
 namespace content {
-class DownloadItem;
 class PageNavigator;
 }
 
-namespace extensions {
-class ExperienceSamplingEvent;
+namespace download {
+class DownloadItem;
 }
 
 namespace gfx {
@@ -46,9 +46,7 @@ class MenuModel;
 //  |  A container that is showing one of its child views (progressView_ or
 //  |  dangerousDownloadView_) depending on whether the download is safe or not.
 //  |
-//  +-- progressView_ (instance of DownloadItemButton)
-//  |   |
-//  |   +-- cell_ (instance of DownloadItemCell)
+//  +-- progressView_ (conforms to DownloadItemView)
 //  |
 //  +-- dangerousDownloadView_
 //      |
@@ -76,8 +74,7 @@ class MenuModel;
 //
 @interface DownloadItemController : NSViewController {
  @private
-  IBOutlet DownloadItemButton* progressView_;
-  IBOutlet DownloadItemCell* cell_;
+  IBOutlet NSView<DownloadItemView>* progressView_;
 
   // This is shown instead of progressView_ for dangerous downloads.
   IBOutlet NSView* dangerousDownloadView_;
@@ -100,9 +97,6 @@ class MenuModel;
   std::unique_ptr<DownloadItemMac> bridge_;
   std::unique_ptr<DownloadShelfContextMenuMac> menuBridge_;
 
-  // Weak pointer to the shelf that owns us.
-  DownloadShelfController* shelf_;
-
   // The time at which this view was created.
   base::Time creationTime_;
 
@@ -114,15 +108,14 @@ class MenuModel;
     kNormal,
     kDangerous
   } state_;
-
-  // ExperienceSampling: This tracks dangerous/malicious downloads warning UI
-  // and the user's decisions about it.
-  std::unique_ptr<extensions::ExperienceSamplingEvent> sampling_event_;
 };
 
+// Weak pointer to the containing shelf. Must be set to nil when the shelf is
+// no longer valid.
+@property(nonatomic, assign) DownloadShelfController* shelf;
+
 // Initialize controller for |downloadItem|.
-- (id)initWithDownload:(content::DownloadItem*)downloadItem
-                 shelf:(DownloadShelfController*)shelf
+- (id)initWithDownload:(download::DownloadItem*)downloadItem
              navigator:(content::PageNavigator*)navigator;
 
 // Updates the UI and menu state from |downloadModel|.
@@ -148,7 +141,7 @@ class MenuModel;
 - (NSSize)preferredSize;
 
 // Returns the DownloadItem model object belonging to this item.
-- (content::DownloadItem*)download;
+- (download::DownloadItem*)download;
 
 // Returns the MenuModel for the download item context menu. The returned
 // MenuModel is owned by the DownloadItemController and will be valid until the

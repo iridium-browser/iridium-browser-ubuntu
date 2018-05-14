@@ -16,18 +16,16 @@
 <translation id="1589122976691792535">Region</translation>
 <translation id="1591562245178063882">Aktueller Monat</translation>
 <translation id="1637811476055996098">Dateien auswählen</translation>
-<translation id="167575180612809735">Anzeige für fehlende Verfügbarkeit</translation>
 <translation id="1729654308190250600">Geben Sie eine E-Mail-Adresse ein.</translation>
 <translation id="1758486001363313524">Andere...</translation>
 <translation id="1806710327868736751">alert_dialog</translation>
 <translation id="1821985195704844674">Baumraster</translation>
 <translation id="1822429046913737220">AM/PM</translation>
 <translation id="1832974991323546415">auf Remote-Gerät wiedergeben</translation>
-<translation id="1854180393107901205">Übertragung beenden</translation>
-<translation id="1880518467580572141">Übersicht</translation>
 <translation id="1921819250265091946">tt</translation>
 <translation id="1930711995431081526">Status</translation>
 <translation id="1938124657309484470">Verwenden Sie <ph name="MAXIMUM_DATE_OR_TIME" /> oder einen früheren Wert.</translation>
+<translation id="1993104285338243655">Zu 1:1-Wiedergabe gewechselt</translation>
 <translation id="2060505056492490888">Das Punktzeichen "<ph name="DOT" />" steht in "<ph name="INVALIDDOMAIN" />" an einer falschen Stelle.</translation>
 <translation id="2148716181193084225">Heute</translation>
 <translation id="2226276347425096477">Kürzen Sie diesen Text auf max. <ph name="MAX_CHARACTERS" /> Zeichen. Zurzeit verwenden Sie <ph name="CURRENT_LENGTH" /> Zeichen.</translation>
@@ -47,12 +45,13 @@
 <translation id="2723001399770238859">Audio</translation>
 <translation id="2746543609216772311">Verwenden Sie <ph name="MINIMUM_DATE_OR_TIME" /> oder einen späteren Wert.</translation>
 <translation id="2759744352195237655">Pop-up-Schaltfläche</translation>
-<translation id="2761667185364618470">Aktivieren Sie dieses Kästchen, wenn Sie fortfahren möchten.</translation>
+<translation id="2761667185364618470">Klicken Sie dieses Kästchen an, wenn Sie fortfahren möchten.</translation>
 <translation id="2896972712917208084">Optionsfeldgruppe</translation>
 <translation id="2908441821576996758">Geben Sie eine durch Kommas getrennte Liste der E-Mail-Adressen ein.</translation>
 <translation id="2940813599313844715">Objekt</translation>
 <translation id="2942448076852699108">markierte Inhalte</translation>
 <translation id="3040011195152428237">Link</translation>
+<translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
 <translation id="3075154866155599887">Geben Sie einen gültigen Wert ein. Das Feld ist nicht vollständig oder enthält ein ungültiges Datum.</translation>
 <translation id="3078740164268491126">Tabelle</translation>
 <translation id="3086746722712840547">note</translation>
@@ -65,6 +64,7 @@
 <translation id="3639613635497528239">verbleibende Dauer des Films in Sekunden</translation>
 <translation id="3706100364254443312">wechseln</translation>
 <translation id="3732799496749320381">mm</translation>
+<translation id="3757388668994797779"><ph name="QUANTITY" /> GB</translation>
 <translation id="3785482301506746191">Video-Zeitachse</translation>
 <translation id="3808586225841795776">Begriff</translation>
 <translation id="3822383571486410024">Verlängern Sie diesen Text auf mindestens <ph name="MIN_CHARACTERS" /> Zeichen. Derzeit verwenden Sie <ph name="CURRENT_LENGTH" /> Zeichen.</translation>
@@ -95,8 +95,8 @@
 <translation id="5117590920725113268">Nächsten Monat anzeigen</translation>
 <translation id="512758898067543763">Zeilenüberschrift</translation>
 <translation id="5164977714490026579">Wert muss größer als oder gleich <ph name="MINIMUM" /> sein.</translation>
+<translation id="520299402983819650"><ph name="QUANTITY" /> PB</translation>
 <translation id="5307600278924710095">Geben Sie etwas vor dem <ph name="ATSIGN" />-Zeichen ein. Die Angabe "<ph name="INVALIDADDRESS" />" ist unvollständig.</translation>
-<translation id="5317780077021120954">Speichern</translation>
 <translation id="5406322316791861025">Zahl</translation>
 <translation id="5453733299334684579">Baumelement</translation>
 <translation id="5466621249238537318">Wählen Sie eine oder mehrere Dateien aus.</translation>
@@ -105,12 +105,14 @@
 <translation id="5537725057119320332">Übertragen</translation>
 <translation id="5546461542133609677">Ton an</translation>
 <translation id="561939826962581046">time</translation>
+<translation id="5630795885300617244">Tippen Sie links oder rechts doppelt, um 10 s zu überspringen</translation>
 <translation id="5641012560118721995">Wiedergabe anhalten</translation>
 <translation id="5643186887447432888">Schaltfläche</translation>
 <translation id="5677946354068040947">weitere Optionen</translation>
 <translation id="57838592816432529">Stummschalten</translation>
 <translation id="5860033963881614850">Aus</translation>
 <translation id="588258955323874662">Vollbild</translation>
+<translation id="5888666972993069672">Wird gerade auf <ph name="DEVICE_FRIENDLY_NAME" /> gestreamt</translation>
 <translation id="5939518447894949180">Zurücksetzen</translation>
 <translation id="5966707198760109579">Woche</translation>
 <translation id="5987525920412732405">Drehfeld</translation>
@@ -121,13 +123,15 @@
 <translation id="6398862346408813489">Auswahlbereich für Monatsanzeige</translation>
 <translation id="6404546809543547843">Audio-Zeitachse</translation>
 <translation id="648732519525291180">Uhrzeitauswahl</translation>
+<translation id="6550675742724504774">Optionen</translation>
+<translation id="6564313821541007458">Jetzt im Bild-in-Bild-Modus</translation>
 <translation id="658823671542763450">Vollbildmodus aktivieren</translation>
 <translation id="663493177488814956">Feed</translation>
 <translation id="6637586476836377253">log</translation>
 <translation id="6643016212128521049">Löschen</translation>
 <translation id="668171684555832681">Andere...</translation>
 <translation id="6692633176391053278">Stepper</translation>
-<translation id="6739588121953935928">Lineal</translation>
+<translation id="6709570249143506788">Schlechte Wiedergabequalität</translation>
 <translation id="6755330956360078551">Kurzinfo</translation>
 <translation id="6790428901817661496">Wiedergabe</translation>
 <translation id="6820355525329141109">Plug-in konnte nicht geladen werden.</translation>
@@ -143,6 +147,7 @@
 <translation id="727747134524199931">Spaltenüberschrift</translation>
 <translation id="7364796246159120393">Datei auswählen</translation>
 <translation id="739024184232394898">Andere...</translation>
+<translation id="7460907917090416791"><ph name="QUANTITY" /> TB</translation>
 <translation id="7491962110804786152">tab</translation>
 <translation id="7514365320538308">Herunterladen</translation>
 <translation id="7673697353781729403">Stunden</translation>
@@ -165,17 +170,18 @@
 <translation id="8444882422881193423"><ph name="NUMBER_OF_FILES" /> Dateien</translation>
 <translation id="8451268428117625855">Wählen Sie eine Datei aus.</translation>
 <translation id="8461852803063341183">Optionsfeld</translation>
-<translation id="8511325616783751178">Drop-down-Schaltfläche</translation>
-<translation id="8519420564908284378">Auf beiden Bildschirmen wiedergeben</translation>
 <translation id="8534579021159131403">Minuten</translation>
 <translation id="8541249477527128034">Mediensteuerung</translation>
 <translation id="8583702881314752957">Definitionsliste</translation>
 <translation id="8597182159515967513">Kopfzeile</translation>
 <translation id="8613126697340063924">Remote-Wiedergabe steuern</translation>
+<translation id="8741316211671074806">Bild im Bild</translation>
 <translation id="8750798805984357768">Wählen Sie eine dieser Optionen aus.</translation>
 <translation id="8785498733064193001">Wiedergabe starten</translation>
 <translation id="8845239796550121995">Wird gerade auf Ihren Fernseher gestreamt</translation>
 <translation id="8851136666856101339">main</translation>
+<translation id="8875657656876809964">Videowiedergabefehler</translation>
+<translation id="8901569739625249689"><ph name="QUANTITY" /> KB</translation>
 <translation id="8987927404178983737">Monat</translation>
 <translation id="901493112792887934">Aktuelle Dauer in Sekunden</translation>
 <translation id="9048119486235211610">Navigation</translation>

@@ -12,6 +12,8 @@ import android.view.View;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.util.ColorUtils;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 
 /**
  * A phone specific version of the {@link FindToolbar}.
@@ -43,7 +45,8 @@ public class FindToolbarPhone extends FindToolbar {
     protected void updateVisualsForTabModel(boolean isIncognito) {
         int queryTextColorId;
         if (isIncognito) {
-            setBackgroundResource(R.color.incognito_primary_color);
+            setBackgroundColor(ColorUtils.getDefaultThemeColor(
+                    getResources(), FeatureUtilities.isChromeModernDesignEnabled(), true));
             ColorStateList white = ApiCompatibilityUtils.getColorStateList(getResources(),
                     R.color.light_mode_tint);
             mFindNextButton.setTint(white);
@@ -57,7 +60,7 @@ public class FindToolbarPhone extends FindToolbar {
             mFindNextButton.setTint(dark);
             mFindPrevButton.setTint(dark);
             mCloseFindButton.setTint(dark);
-            queryTextColorId = R.color.find_in_page_query_color;
+            queryTextColorId = R.color.black_alpha_87;
         }
         mFindQuery.setTextColor(
                 ApiCompatibilityUtils.getColor(getContext().getResources(), queryTextColorId));
@@ -66,8 +69,8 @@ public class FindToolbarPhone extends FindToolbar {
     @Override
     protected int getStatusColor(boolean failed, boolean incognito) {
         if (!failed && incognito) {
-            return ApiCompatibilityUtils.getColor(getContext().getResources(),
-                    R.color.find_in_page_results_status_white_color);
+            return ApiCompatibilityUtils.getColor(
+                    getContext().getResources(), R.color.white_alpha_50);
         }
 
         return super.getStatusColor(failed, incognito);

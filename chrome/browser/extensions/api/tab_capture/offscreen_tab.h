@@ -7,18 +7,22 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/media/router/presentation/independent_otr_profile_manager.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "ui/gfx/geometry/size.h"
 
-class Profile;
+namespace media_router {
+class NavigationPolicy;
+}  // namespace media_router
 
 namespace extensions {
 
@@ -52,10 +56,9 @@ class OffscreenTabsOwner
   // If |optional_presentation_id| is non-empty, the offscreen tab is registered
   // for use by the Media Router (chrome/browser/media/router/...) as the
   // receiving browsing context for the W3C Presentation API.
-  OffscreenTab* OpenNewTab(
-      const GURL& start_url,
-      const gfx::Size& initial_size,
-      const std::string& optional_presentation_id);
+  OffscreenTab* OpenNewTab(const GURL& start_url,
+                           const gfx::Size& initial_size,
+                           const std::string& optional_presentation_id);
 
  protected:
   friend class OffscreenTab;
@@ -87,10 +90,10 @@ class OffscreenTabsOwner
 // OffscreenTab is instantiated by OffscreenTabsOwner.  An instance is shut down
 // one of three ways:
 //
-//   1. When its WebContents::GetCapturerCount() returns to zero, indicating
-//      there are no more consumers of its captured content (e.g., when all
-//      MediaStreams have been closed).  OffscreenTab will auto-detect this case
-//      and self-destruct.
+//   1. When WebContents::IsBeingCaptured() returns false, indicating there are
+//      no more consumers of its captured content (e.g., when all MediaStreams
+//      have been closed).  OffscreenTab will auto-detect this case and
+//      self-destruct.
 //   2. By the renderer, where the WebContents implementation will invoke the
 //      WebContentsDelegate::CloseContents() override.  This occurs, for
 //      example, when a page calls window.close().
@@ -176,27 +179,15 @@ class OffscreenTab : protected content::WebContentsDelegate,
   void DidStartNavigation(content::NavigationHandle* navigation_handle) final;
 
  private:
-  bool in_fullscreen_mode() const {
-    return !non_fullscreen_size_.IsEmpty();
-  }
-
-  // Selected calls to the navigation methods in WebContentsObserver are
-  // delegated to this object to determine a navigation is allowed.  If any
-  // call returns false, the offscreen tab is destroyed.  The default policy
-  // allows all navigations.
-  class NavigationPolicy {
-   public:
-    NavigationPolicy();
-    ~NavigationPolicy();
-    virtual bool DidStartNavigation(
-        content::NavigationHandle* navigation_handle);
-  };
-
-  class PresentationNavigationPolicy;  // Forward declaration
+  bool in_fullscreen_mode() const { return !non_fullscreen_size_.IsEmpty(); }
 
   // Called by |capture_poll_timer_| to automatically destroy this OffscreenTab
   // when the capturer count returns to zero.
   void DieIfContentCaptureEnded();
+
+  // Called if the profile that our OTR profile is based on is being destroyed
+  // and |this| therefore needs to be destroyed also.
+  void DieIfOriginalProfileDestroyed(Profile* profile);
 
   OffscreenTabsOwner* const owner_;
 
@@ -206,7 +197,8 @@ class OffscreenTab : protected content::WebContentsDelegate,
 
   // A non-shared off-the-record profile based on the profile of the extension
   // background page.
-  const std::unique_ptr<Profile> profile_;
+  const std::unique_ptr<IndependentOTRProfileManager::OTRProfileRegistration>
+      otr_profile_registration_;
 
   // The WebContents containing the off-screen tab's page.
   std::unique_ptr<content::WebContents> offscreen_tab_web_contents_;
@@ -232,7 +224,7 @@ class OffscreenTab : protected content::WebContentsDelegate,
   bool content_capture_was_detected_;
 
   // Object consulted to determine which offscreen tab navigations are allowed.
-  std::unique_ptr<NavigationPolicy> navigation_policy_;
+  std::unique_ptr<media_router::NavigationPolicy> navigation_policy_;
 
   DISALLOW_COPY_AND_ASSIGN(OffscreenTab);
 };

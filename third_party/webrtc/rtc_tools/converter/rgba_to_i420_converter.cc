@@ -15,8 +15,8 @@
 #include <string>
 #include <vector>
 
-#include "webrtc/rtc_tools/converter/converter.h"
-#include "webrtc/rtc_tools/simple_command_line_parser.h"
+#include "rtc_tools/converter/converter.h"
+#include "rtc_tools/simple_command_line_parser.h"
 
 /*
  * A command-line tool based on libyuv to convert a set of RGBA files to a YUV
@@ -26,7 +26,7 @@
  * --output_file=<output_yuv_file> --width=<width_of_input_frames>
  * --height=<height_of_input_frames>
  */
-int main(int argc, char** argv) {
+int main(int argc, char* argv[]) {
   std::string program_name = argv[0];
   std::string usage = "Converts RGBA raw image files to I420 frames for YUV.\n"
     "Example usage:\n" + program_name +

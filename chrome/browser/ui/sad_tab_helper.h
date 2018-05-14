@@ -12,9 +12,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
-namespace chrome {
 class SadTab;
-}
 
 // Per-tab class to manage sad tab views.
 class SadTabHelper : public content::WebContentsObserver,
@@ -22,7 +20,12 @@ class SadTabHelper : public content::WebContentsObserver,
  public:
   ~SadTabHelper() override;
 
-  chrome::SadTab* sad_tab() { return sad_tab_.get(); }
+  SadTab* sad_tab() { return sad_tab_.get(); }
+
+  // Called when the sad tab needs to be reinstalled in the WebView,
+  // for example because a tab was activated, or because a tab was
+  // dragged to a new browser window.
+  void ReinstallInWebView();
 
  private:
   friend class content::WebContentsUserData<SadTabHelper>;
@@ -35,7 +38,7 @@ class SadTabHelper : public content::WebContentsObserver,
   void RenderViewReady() override;
   void RenderProcessGone(base::TerminationStatus status) override;
 
-  std::unique_ptr<chrome::SadTab> sad_tab_;
+  std::unique_ptr<SadTab> sad_tab_;
 
   DISALLOW_COPY_AND_ASSIGN(SadTabHelper);
 };

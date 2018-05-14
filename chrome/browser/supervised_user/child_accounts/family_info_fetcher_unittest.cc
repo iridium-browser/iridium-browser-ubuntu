@@ -48,11 +48,11 @@ namespace {
 std::string BuildGetFamilyProfileResponse(
     const FamilyInfoFetcher::FamilyProfile& family) {
   base::DictionaryValue dict;
-  auto family_dict = base::MakeUnique<base::DictionaryValue>();
-  family_dict->SetStringWithoutPathExpansion("familyId", family.id);
+  auto family_dict = std::make_unique<base::DictionaryValue>();
+  family_dict->SetKey("familyId", base::Value(family.id));
   std::unique_ptr<base::DictionaryValue> profile_dict =
-      base::MakeUnique<base::DictionaryValue>();
-  profile_dict->SetStringWithoutPathExpansion("name", family.name);
+      std::make_unique<base::DictionaryValue>();
+  profile_dict->SetKey("name", base::Value(family.name));
   family_dict->SetWithoutPathExpansion("profile", std::move(profile_dict));
   dict.SetWithoutPathExpansion("family", std::move(family_dict));
   std::string result;
@@ -63,7 +63,7 @@ std::string BuildGetFamilyProfileResponse(
 std::string BuildEmptyGetFamilyProfileResponse() {
   base::DictionaryValue dict;
   dict.SetWithoutPathExpansion("family",
-                               base::MakeUnique<base::DictionaryValue>());
+                               std::make_unique<base::DictionaryValue>());
   std::string result;
   base::JSONWriter::Write(dict, &result);
   return result;
@@ -72,32 +72,28 @@ std::string BuildEmptyGetFamilyProfileResponse() {
 std::string BuildGetFamilyMembersResponse(
     const std::vector<FamilyInfoFetcher::FamilyMember>& members) {
   base::DictionaryValue dict;
-  auto list = base::MakeUnique<base::ListValue>();
+  auto list = std::make_unique<base::ListValue>();
   for (size_t i = 0; i < members.size(); i++) {
     const FamilyInfoFetcher::FamilyMember& member = members[i];
     std::unique_ptr<base::DictionaryValue> member_dict(
         new base::DictionaryValue);
-    member_dict->SetStringWithoutPathExpansion("userId",
-                                               member.obfuscated_gaia_id);
-    member_dict->SetStringWithoutPathExpansion(
-        "role", FamilyInfoFetcher::RoleToString(member.role));
+    member_dict->SetKey("userId", base::Value(member.obfuscated_gaia_id));
+    member_dict->SetKey(
+        "role", base::Value(FamilyInfoFetcher::RoleToString(member.role)));
     if (!member.display_name.empty() ||
         !member.email.empty() ||
         !member.profile_url.empty() ||
         !member.profile_image_url.empty()) {
-      auto profile_dict = base::MakeUnique<base::DictionaryValue>();
+      auto profile_dict = std::make_unique<base::DictionaryValue>();
       if (!member.display_name.empty())
-        profile_dict->SetStringWithoutPathExpansion("displayName",
-                                                    member.display_name);
+        profile_dict->SetKey("displayName", base::Value(member.display_name));
       if (!member.email.empty())
-        profile_dict->SetStringWithoutPathExpansion("email",
-                                                    member.email);
+        profile_dict->SetKey("email", base::Value(member.email));
       if (!member.profile_url.empty())
-        profile_dict->SetStringWithoutPathExpansion("profileUrl",
-                                                    member.profile_url);
+        profile_dict->SetKey("profileUrl", base::Value(member.profile_url));
       if (!member.profile_image_url.empty())
-        profile_dict->SetStringWithoutPathExpansion("profileImageUrl",
-                                                    member.profile_image_url);
+        profile_dict->SetKey("profileImageUrl",
+                             base::Value(member.profile_image_url));
 
       member_dict->SetWithoutPathExpansion("profile", std::move(profile_dict));
     }

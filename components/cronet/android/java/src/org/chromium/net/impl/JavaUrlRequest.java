@@ -8,15 +8,18 @@ import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.net.TrafficStats;
 import android.os.Build;
+import android.support.annotation.Nullable;
 import android.util.Log;
 
 import org.chromium.net.CronetException;
 import org.chromium.net.InlineExecutionProhibitedException;
+import org.chromium.net.ThreadStatsUid;
 import org.chromium.net.UploadDataProvider;
 import org.chromium.net.UploadDataSink;
 import org.chromium.net.UrlResponseInfo;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
@@ -68,12 +71,6 @@ final class JavaUrlRequest extends UrlRequestBase {
     private final AtomicReference<State> mState = new AtomicReference<>(State.NOT_STARTED);
     private final AtomicBoolean mUploadProviderClosed = new AtomicBoolean(false);
 
-    /**
-     * Traffic stats tag to associate this requests' data use with. It's captured when the request
-     * is created, so that applications doing work on behalf of another app can correctly attribute
-     * that data use.
-     */
-    private final int mTrafficStatsTag;
     private final boolean mAllowDirectExecutor;
 
     /* These don't change with redirects */
@@ -96,6 +93,7 @@ final class JavaUrlRequest extends UrlRequestBase {
 
     /* These change with redirects. */
     private String mCurrentUrl;
+    @Nullable
     private ReadableByteChannel mResponseChannel; // Only accessed on mExecutor.
     private UrlResponseInfoImpl mUrlResponseInfo;
     private String mPendingRedirectUrl;
@@ -193,7 +191,8 @@ final class JavaUrlRequest extends UrlRequestBase {
      * @param userExecutor The executor used to dispatch to {@code callback}
      */
     JavaUrlRequest(Callback callback, final Executor executor, Executor userExecutor, String url,
-            String userAgent, boolean allowDirectExecutor) {
+            String userAgent, boolean allowDirectExecutor, boolean trafficStatsTagSet,
+            int trafficStatsTag, final boolean trafficStatsUidSet, final int trafficStatsUid) {
         if (url == null) {
             throw new NullPointerException("URL is required");
         }
@@ -209,7 +208,8 @@ final class JavaUrlRequest extends UrlRequestBase {
 
         this.mAllowDirectExecutor = allowDirectExecutor;
         this.mCallbackAsync = new AsyncUrlRequestCallback(callback, userExecutor);
-        this.mTrafficStatsTag = TrafficStats.getThreadStatsTag();
+        final int trafficStatsTagToUse =
+                trafficStatsTagSet ? trafficStatsTag : TrafficStats.getThreadStatsTag();
         this.mExecutor = new SerializingExecutor(new Executor() {
             @Override
             public void execute(final Runnable command) {
@@ -217,10 +217,16 @@ final class JavaUrlRequest extends UrlRequestBase {
                     @Override
                     public void run() {
                         int oldTag = TrafficStats.getThreadStatsTag();
-                        TrafficStats.setThreadStatsTag(mTrafficStatsTag);
+                        TrafficStats.setThreadStatsTag(trafficStatsTagToUse);
+                        if (trafficStatsUidSet) {
+                            ThreadStatsUid.set(trafficStatsUid);
+                        }
                         try {
                             command.run();
                         } finally {
+                            if (trafficStatsUidSet) {
+                                ThreadStatsUid.clear();
+                            }
                             TrafficStats.setThreadStatsTag(oldTag);
                         }
                     }
@@ -630,8 +636,9 @@ final class JavaUrlRequest extends UrlRequestBase {
                 }
                 fireCloseUploadDataProvider();
                 if (responseCode >= 400) {
+                    InputStream inputStream = mCurrentUrlConnection.getErrorStream();
                     mResponseChannel =
-                            InputStreamChannel.wrap(mCurrentUrlConnection.getErrorStream());
+                            inputStream == null ? null : InputStreamChannel.wrap(inputStream);
                     mCallbackAsync.onResponseStarted(mUrlResponseInfo);
                 } else {
                     mResponseChannel =
@@ -768,7 +775,7 @@ final class JavaUrlRequest extends UrlRequestBase {
                 mExecutor.execute(errorSetting(new CheckedRunnable() {
                     @Override
                     public void run() throws Exception {
-                        int read = mResponseChannel.read(buffer);
+                        int read = mResponseChannel == null ? -1 : mResponseChannel.read(buffer);
                         processReadResult(read, buffer);
                     }
                 }));
@@ -780,7 +787,9 @@ final class JavaUrlRequest extends UrlRequestBase {
         if (read != -1) {
             mCallbackAsync.onReadCompleted(mUrlResponseInfo, buffer);
         } else {
-            mResponseChannel.close();
+            if (mResponseChannel != null) {
+                mResponseChannel.close();
+            }
             if (mState.compareAndSet(State.READING, State.COMPLETE)) {
                 fireDisconnect();
                 mCallbackAsync.onSucceeded(mUrlResponseInfo);
@@ -831,13 +840,15 @@ final class JavaUrlRequest extends UrlRequestBase {
             case COMPLETE:
             case CANCELLED:
                 break;
+            default:
+                break;
         }
     }
 
     @Override
     public boolean isDone() {
         State state = mState.get();
-        return state == State.COMPLETE | state == State.ERROR | state == State.CANCELLED;
+        return state == State.COMPLETE || state == State.ERROR || state == State.CANCELLED;
     }
 
     @Override

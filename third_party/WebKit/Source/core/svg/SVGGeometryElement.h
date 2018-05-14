@@ -47,24 +47,34 @@ class SVGGeometryElement : public SVGGraphicsElement {
   bool isPointInFill(SVGPointTearOff*) const;
   bool isPointInStroke(SVGPointTearOff*) const;
 
-  void ToClipPath(Path&) const;
+  Path ToClipPath() const;
 
   SVGAnimatedNumber* pathLength() const { return path_length_.Get(); }
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+
   virtual float getTotalLength();
   virtual SVGPointTearOff* getPointAtLength(float distance);
-  float PathLengthScaleFactor() const;
-  virtual float ComputePathLength() const;
 
-  DECLARE_VIRTUAL_TRACE();
+  float AuthorPathLength() const;
+  float PathLengthScaleFactor() const;
+  static float PathLengthScaleFactor(float computed_path_length,
+                                     float author_path_length);
+
+  void Trace(blink::Visitor*) override;
 
  protected:
   SVGGeometryElement(const QualifiedName&,
                      Document&,
                      ConstructionType = kCreateSVGElement);
 
+  void SvgAttributeChanged(const QualifiedName&) override;
+
+  void GeometryAttributeChanged();
+  void GeometryPresentationAttributeChanged(const QualifiedName&);
+
  private:
   bool IsSVGGeometryElement() const final { return true; }
+  virtual float ComputePathLength() const;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
 
   Member<SVGAnimatedNumber> path_length_;
 };

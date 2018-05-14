@@ -9,7 +9,7 @@
 
 #include "base/macros.h"
 #include "components/bubble/bubble_reference.h"
-#include "device/usb/public/interfaces/chooser_service.mojom.h"
+#include "device/usb/public/mojom/chooser_service.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 
@@ -29,7 +29,7 @@ class WebUsbChooserService : public device::mojom::UsbChooserService {
   // device::usb::ChooserService:
   void GetPermission(
       std::vector<device::mojom::UsbDeviceFilterPtr> device_filters,
-      const GetPermissionCallback& callback) override;
+      GetPermissionCallback callback) override;
 
   void Bind(device::mojom::UsbChooserServiceRequest request);
 

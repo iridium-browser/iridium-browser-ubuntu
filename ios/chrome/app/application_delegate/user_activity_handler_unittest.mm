@@ -10,6 +10,7 @@
 
 #include "base/ios/ios_util.h"
 #include "base/mac/scoped_block.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/test/scoped_command_line.h"
 #include "components/handoff/handoff_utility.h"
@@ -24,11 +25,17 @@
 #include "ios/chrome/browser/app_startup_parameters.h"
 #include "ios/chrome/browser/chrome_switches.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/tabs/legacy_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/tabs/tab_model_observer.h"
 #import "ios/chrome/browser/u2f/u2f_controller.h"
+#import "ios/chrome/browser/web/tab_id_tab_helper.h"
+#import "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/web_state_list/web_state_opener.h"
 #import "ios/chrome/test/base/scoped_block_swizzler.h"
+#import "ios/web/public/test/fakes/test_web_state.h"
 #import "net/base/mac/url_conversions.h"
 #include "net/test/gtest_util.h"
 #include "testing/platform_test.h"
@@ -47,16 +54,36 @@
 @interface UserActivityHandlerTabMock : NSObject
 
 @property(nonatomic, readonly) GURL url;
-@property(nonatomic, copy, readonly) NSString* tabId;
+@property(nonatomic, readonly) NSString* tabId;
+
+- (instancetype)initWithWebState:(web::WebState*)webState
+    NS_DESIGNATED_INITIALIZER;
+
+- (instancetype)init NS_UNAVAILABLE;
 
 @end
 
-@implementation UserActivityHandlerTabMock
+@implementation UserActivityHandlerTabMock {
+  web::WebState* _webState;
+}
+
 @synthesize url = _url;
-@synthesize tabId = _tabId;
+
+- (instancetype)initWithWebState:(web::WebState*)webState {
+  if ((self = [super init])) {
+    DCHECK(webState);
+    _webState = webState;
+  }
+  return self;
+}
 
 - (void)evaluateU2FResultFromURL:(const GURL&)url {
   _url = url;
+}
+
+- (NSString*)tabId {
+  DCHECK(_webState);
+  return TabIdTabHelper::FromWebState(_webState)->tab_id();
 }
 
 @end
@@ -64,43 +91,40 @@
 #pragma mark - TabModel Mock
 
 // TabModel mock for using in UserActivity tests.
-@interface UserActivityHandlerTabModelMock : NSObject<NSFastEnumeration> {
- @private
-  NSMutableArray* _tabs;
-}
-
-- (void)addTab:(Tab*)tab;
-- (void)addObserver:(id<TabModelObserver>)observer;
-- (void)removeObserver:(id<TabModelObserver>)observer;
+@interface UserActivityHandlerTabModelMock : NSObject
 
 @end
 
-@implementation UserActivityHandlerTabModelMock
+@implementation UserActivityHandlerTabModelMock {
+  FakeWebStateListDelegate _webStateListDelegate;
+  std::unique_ptr<WebStateList> _webStateList;
+}
 
 - (instancetype)init {
   if ((self = [super init])) {
-    _tabs = [[NSMutableArray alloc] init];
+    _webStateList = std::make_unique<WebStateList>(&_webStateListDelegate);
   }
   return self;
 }
 
-- (NSUInteger)countByEnumeratingWithState:(NSFastEnumerationState*)state
-                                  objects:
-                                      (__unsafe_unretained id _Nonnull*)stackbuf
-                                    count:(NSUInteger)len {
-  return [_tabs countByEnumeratingWithState:state objects:stackbuf count:len];
+- (UserActivityHandlerTabMock*)addMockTab {
+  auto testWebState = std::make_unique<web::TestWebState>();
+  TabIdTabHelper::CreateForWebState(testWebState.get());
+
+  UserActivityHandlerTabMock* tab =
+      [[UserActivityHandlerTabMock alloc] initWithWebState:testWebState.get()];
+  LegacyTabHelper::CreateForWebStateForTesting(testWebState.get(),
+                                               static_cast<Tab*>(tab));
+
+  _webStateList->InsertWebState(0, std::move(testWebState),
+                                WebStateList::INSERT_NO_FLAGS,
+                                WebStateOpener());
+
+  return tab;
 }
 
-- (void)addTab:(Tab*)tab {
-  [_tabs addObject:tab];
-}
-
-- (void)addObserver:(id<TabModelObserver>)observer {
-  // Empty.
-}
-
-- (void)removeObserver:(id<TabModelObserver>)observer {
-  // Empty.
+- (WebStateList*)webStateList {
+  return _webStateList.get();
 }
 
 @end
@@ -166,10 +190,12 @@ class UserActivityHandlerTest : public PlatformTest {
 
 #pragma mark - Tests.
 
+using UserActivityHandlerNoFixtureTest = PlatformTest;
+
 // Tests that Chrome notifies the user if we are passing a correct
 // userActivityType.
-TEST(UserActivityHandlerNoFixtureTest,
-     willContinueUserActivityCorrectActivity) {
+TEST_F(UserActivityHandlerNoFixtureTest,
+       willContinueUserActivityCorrectActivity) {
   EXPECT_TRUE([UserActivityHandler
       willContinueUserActivityWithType:handoff::kChromeHandoffActivityType]);
 
@@ -181,8 +207,8 @@ TEST(UserActivityHandlerNoFixtureTest,
 
 // Tests that Chrome does not notifies the user if we are passing an incorrect
 // userActivityType.
-TEST(UserActivityHandlerNoFixtureTest,
-     willContinueUserActivityIncorrectActivity) {
+TEST_F(UserActivityHandlerNoFixtureTest,
+       willContinueUserActivityIncorrectActivity) {
   EXPECT_FALSE([UserActivityHandler
       willContinueUserActivityWithType:[handoff::kChromeHandoffActivityType
                                            stringByAppendingString:@"test"]]);
@@ -195,9 +221,11 @@ TEST(UserActivityHandlerNoFixtureTest,
   EXPECT_FALSE([UserActivityHandler willContinueUserActivityWithType:nil]);
 }
 
+using UserActivityHandlerNoFixtureTest = PlatformTest;
+
 // Tests that Chrome does not continue the activity is the activity type is
 // random.
-TEST(UserActivityHandlerNoFixtureTest, continueUserActivityFromGarbage) {
+TEST_F(UserActivityHandlerNoFixtureTest, continueUserActivityFromGarbage) {
   // Setup.
   NSString* handoffWithSuffix =
       [handoff::kChromeHandoffActivityType stringByAppendingString:@"test"];
@@ -230,7 +258,7 @@ TEST(UserActivityHandlerNoFixtureTest, continueUserActivityFromGarbage) {
 
 // Tests that Chrome does not continue the activity if the webpage url is not
 // set.
-TEST(UserActivityHandlerNoFixtureTest, continueUserActivityNoWebpage) {
+TEST_F(UserActivityHandlerNoFixtureTest, continueUserActivityNoWebpage) {
   // Setup.
   NSUserActivity* userActivity = [[NSUserActivity alloc]
       initWithActivityType:handoff::kChromeHandoffActivityType];
@@ -253,8 +281,8 @@ TEST(UserActivityHandlerNoFixtureTest, continueUserActivityNoWebpage) {
 
 // Tests that Chrome does not continue the activity if the activity is a
 // Spotlight action of an unknown type.
-TEST(UserActivityHandlerNoFixtureTest,
-     continueUserActivitySpotlightActionFromGarbage) {
+TEST_F(UserActivityHandlerNoFixtureTest,
+       continueUserActivitySpotlightActionFromGarbage) {
   // Only test Spotlight if it is enabled and available on the device.
   if (!spotlight::IsSpotlightAvailable()) {
     return;
@@ -292,7 +320,7 @@ TEST(UserActivityHandlerNoFixtureTest,
 
 // Tests that Chrome continues the activity if the application is in background
 // by saving the url to startupParameters.
-TEST(UserActivityHandlerNoFixtureTest, continueUserActivityBackground) {
+TEST_F(UserActivityHandlerNoFixtureTest, continueUserActivityBackground) {
   // Setup.
   NSUserActivity* userActivity = [[NSUserActivity alloc]
       initWithActivityType:handoff::kChromeHandoffActivityType];
@@ -327,7 +355,7 @@ TEST(UserActivityHandlerNoFixtureTest, continueUserActivityBackground) {
 
 // Tests that Chrome continues the activity if the application is in foreground
 // by opening a new tab.
-TEST(UserActivityHandlerNoFixtureTest, continueUserActivityForeground) {
+TEST_F(UserActivityHandlerNoFixtureTest, continueUserActivityForeground) {
   // Setup.
   NSUserActivity* userActivity = [[NSUserActivity alloc]
       initWithActivityType:handoff::kChromeHandoffActivityType];
@@ -453,7 +481,7 @@ TEST_F(UserActivityHandlerTest, continueUserActivityShortcutActions) {
 }
 
 // Tests that handleStartupParameters with a non-U2F url opens a new tab.
-TEST(UserActivityHandlerNoFixtureTest, handleStartupParamsNonU2F) {
+TEST_F(UserActivityHandlerNoFixtureTest, handleStartupParamsNonU2F) {
   // Setup.
   GURL gurl("http://www.google.com");
 
@@ -487,23 +515,20 @@ TEST(UserActivityHandlerNoFixtureTest, handleStartupParamsNonU2F) {
 }
 
 // Tests that handleStartupParameters with a U2F url opens in the correct tab.
-TEST(UserActivityHandlerNoFixtureTest, handleStartupParamsU2F) {
+TEST_F(UserActivityHandlerNoFixtureTest, handleStartupParamsU2F) {
   // Setup.
-  GURL gurl("chromium://u2f-callback?isU2F=1&tabID=B05B1860");
-  NSString* tabID = [U2FController tabIDFromResponseURL:gurl];
+  UserActivityHandlerTabModelMock* tabModel =
+      [[UserActivityHandlerTabModelMock alloc] init];
+  UserActivityHandlerTabMock* tabMock = [tabModel addMockTab];
 
+  std::string urlRepresentation =
+      base::StringPrintf("chromium://u2f-callback?isU2F=1&tabID=%s",
+                         base::SysNSStringToUTF8(tabMock.tabId).c_str());
+
+  GURL gurl(urlRepresentation);
   AppStartupParameters* startupParams =
       [[AppStartupParameters alloc] initWithExternalURL:gurl];
   [startupParams setLaunchInIncognito:YES];
-
-  UserActivityHandlerTabMock* tabMock =
-      [[UserActivityHandlerTabMock alloc] init];
-  id tabOCMock = [OCMockObject partialMockForObject:tabMock];
-  [[[tabOCMock stub] andReturn:tabID] tabId];
-
-  UserActivityHandlerTabModelMock* tabModel =
-      [[UserActivityHandlerTabModelMock alloc] init];
-  [tabModel addTab:(Tab*)tabMock];
 
   id startupInformationMock =
       [OCMockObject mockForProtocol:@protocol(StartupInformation)];

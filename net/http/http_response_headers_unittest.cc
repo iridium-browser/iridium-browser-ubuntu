@@ -671,6 +671,7 @@ TEST_P(ContentTypeTest, GetMimeType) {
   EXPECT_EQ(test.all_content_type, value);
 }
 
+// clang-format off
 const ContentTypeTestData mimetype_tests[] = {
   { "HTTP/1.1 200 OK\n"
     "Content-type: text/html\n",
@@ -714,12 +715,13 @@ const ContentTypeTestData mimetype_tests[] = {
     "text/html", true,
     "utf-8", true,
     "text/html;charset=utf-8, text/html" },
-  // Test single quotes.
+  // Regression test for https://crbug.com/772350:
+  // Single quotes are not delimiters but must be treated as part of charset.
   { "HTTP/1.1 200 OK\n"
     "Content-type: text/html;charset='utf-8'\n"
     "Content-type: text/html\n",
     "text/html", true,
-    "utf-8", true,
+    "'utf-8'", true,
     "text/html;charset='utf-8', text/html" },
   // Last charset wins if matching content-type.
   { "HTTP/1.1 200 OK\n"
@@ -766,16 +768,16 @@ const ContentTypeTestData mimetype_tests[] = {
     "text/html ; charset=utf-8 ; bar=iso-8859-1" },
   // Comma embeded in quotes.
   { "HTTP/1.1 200 OK\n"
-    "Content-type: text/html ; charset='utf-8,text/plain' ;\n",
+    "Content-type: text/html ; charset=\"utf-8,text/plain\" ;\n",
     "text/html", true,
     "utf-8,text/plain", true,
-    "text/html ; charset='utf-8,text/plain' ;" },
+    "text/html ; charset=\"utf-8,text/plain\" ;" },
   // Charset with leading spaces.
   { "HTTP/1.1 200 OK\n"
-    "Content-type: text/html ; charset= 'utf-8' ;\n",
+    "Content-type: text/html ; charset= \"utf-8\" ;\n",
     "text/html", true,
     "utf-8", true,
-    "text/html ; charset= 'utf-8' ;" },
+    "text/html ; charset= \"utf-8\" ;" },
   // Media type comments in mime-type.
   { "HTTP/1.1 200 OK\n"
     "Content-type: text/html (html)\n",
@@ -801,6 +803,7 @@ const ContentTypeTestData mimetype_tests[] = {
     "", false,
     "*/*" },
 };
+// clang-format on
 
 INSTANTIATE_TEST_CASE_P(HttpResponseHeaders,
                         ContentTypeTest,
@@ -2043,28 +2046,6 @@ const UpdateWithNewRangeTestData update_range_tests[] = {
 INSTANTIATE_TEST_CASE_P(HttpResponseHeaders,
                         UpdateWithNewRangeTest,
                         testing::ValuesIn(update_range_tests));
-
-TEST(HttpResponseHeadersTest, ToNetLogParamAndBackAgain) {
-  std::string headers("HTTP/1.1 404\n"
-                      "Content-Length: 450\n"
-                      "Connection: keep-alive\n");
-  HeadersToRaw(&headers);
-  scoped_refptr<HttpResponseHeaders> parsed(new HttpResponseHeaders(headers));
-
-  std::unique_ptr<base::Value> event_param(parsed->NetLogCallback(
-      NetLogCaptureMode::IncludeCookiesAndCredentials()));
-  scoped_refptr<HttpResponseHeaders> recreated;
-
-  ASSERT_TRUE(
-      HttpResponseHeaders::FromNetLogParam(event_param.get(), &recreated));
-  ASSERT_TRUE(recreated.get());
-  EXPECT_EQ(parsed->GetHttpVersion(), recreated->GetHttpVersion());
-  EXPECT_EQ(parsed->response_code(), recreated->response_code());
-  EXPECT_EQ(parsed->GetContentLength(), recreated->GetContentLength());
-  EXPECT_EQ(parsed->IsKeepAlive(), recreated->IsKeepAlive());
-
-  EXPECT_EQ(ToSimpleString(parsed), ToSimpleString(parsed));
-}
 
 TEST_F(HttpResponseHeadersCacheControlTest, AbsentMaxAgeReturnsFalse) {
   InitializeHeadersWithCacheControl("nocache");

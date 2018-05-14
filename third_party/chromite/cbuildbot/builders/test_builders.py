@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -6,22 +7,48 @@
 
 from __future__ import print_function
 
+import functools
+
 from chromite.lib import cros_logging as logging
+from chromite.lib import parallel
 
 from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot.builders import generic_builders
+from chromite.cbuildbot.builders import simple_builders
 from chromite.cbuildbot.stages import build_stages
 from chromite.cbuildbot.stages import android_stages
+from chromite.cbuildbot.stages import artifact_stages
 from chromite.cbuildbot.stages import chrome_stages
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import sync_stages
 from chromite.cbuildbot.stages import test_stages
+from chromite.cbuildbot.stages import vm_test_stages
 
 
 class SuccessStage(generic_stages.BuilderStage):
   """Build stage declares success!"""
-  def Run(self):
+  def PerformStage(self):
     logging.info('!!!SuccessStage, FTW!!!')
+
+
+class FailStage(generic_stages.BuilderStage):
+  """Build stage always fails."""
+  def PerformStage(self):
+    raise Exception('!!!Oh, no! A Fail Stage!!!')
+
+
+class SucessBuilder(generic_builders.PreCqBuilder):
+  """Very minimal builder that always passes."""
+  def RunTestStages(self):
+    """Run a success stage!"""
+    self._RunStage(SuccessStage)
+
+
+class FailBuilder(generic_builders.PreCqBuilder):
+  """Very minimal builder that always fails."""
+  def RunTestStages(self):
+    """Run fail stage!"""
+    self._RunStage(FailStage)
 
 
 class ManifestVersionedSyncBuilder(generic_builders.Builder):
@@ -63,7 +90,6 @@ class UnittestStressBuilder(generic_builders.Builder):
     self._RunStage(build_stages.RegenPortageCacheStage)
     self._RunStage(build_stages.SetupBoardStage, board)
     self._RunStage(chrome_stages.SyncChromeStage)
-    self._RunStage(chrome_stages.PatchChromeStage)
     self._RunStage(android_stages.UprevAndroidStage)
     self._RunStage(android_stages.AndroidMetadataStage)
     self._RunStage(build_stages.BuildPackagesStage, board)
@@ -80,9 +106,51 @@ class SignerTestsBuilder(generic_builders.PreCqBuilder):
     self._RunStage(test_stages.CrosSigningTestStage)
 
 
+class AutotestTestsBuilder(generic_builders.PreCqBuilder):
+  """Builder that runs autotest unit tests."""
+  def RunTestStages(self):
+    """Run after sync/reexec."""
+    self._RunStage(test_stages.AutotestTestStage)
+
+
 class ChromiteTestsBuilder(generic_builders.PreCqBuilder):
   """Builder that runs chromite unit tests, including network."""
   def RunTestStages(self):
     """Run something after sync/reexec."""
     self._RunStage(build_stages.InitSDKStage)
     self._RunStage(test_stages.ChromiteTestStage)
+    self._RunStage(test_stages.CidbIntegrationTestStage)
+
+
+class VMInformationalBuilder(simple_builders.SimpleBuilder):
+  """Builder that runs vm test for informational purpose."""
+  def _RunDebugSymbolStages(self, builder_run, board):
+    self._RunStage(android_stages.DownloadAndroidDebugSymbolsStage,
+                   board, builder_run=builder_run)
+    self._RunStage(artifact_stages.DebugSymbolsStage, board,
+                   builder_run=builder_run)
+
+  def RunStages(self):
+    assert len(self._run.config.boards) == 1
+    board = self._run.config.boards[0]
+
+    self._RunStage(build_stages.UprevStage)
+    self._RunStage(build_stages.InitSDKStage)
+    self._RunStage(build_stages.RegenPortageCacheStage)
+    self._RunStage(build_stages.SetupBoardStage, board)
+    self._RunStage(chrome_stages.SyncChromeStage)
+    self._RunStage(android_stages.UprevAndroidStage)
+    self._RunStage(android_stages.AndroidMetadataStage)
+    self._RunStage(build_stages.BuildPackagesStage, board)
+    self._RunStage(build_stages.BuildImageStage, board)
+
+    parallel_stages = [
+        lambda: self._RunDebugSymbolStages(self._run, board),
+    ] + [
+        functools.partial(
+            functools.partial(self._RunStage, vm_test_stages.VMTestStage,
+                              board, ssh_port=9228+index, vm_tests=[config],
+                              test_basename=config.test_suite)
+        ) for index, config in enumerate(self._run.config.vm_tests)
+    ]
+    parallel.RunParallelSteps(parallel_stages)

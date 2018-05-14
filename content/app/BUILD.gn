@@ -16,6 +16,7 @@ template("implement_content_app") {
   extra_configs = [
     "//build/config/compiler:wexit_time_destructors",
     "//content:content_implementation",
+    "//tools/v8_context_snapshot:use_v8_context_snapshot",
     "//v8:external_startup_data",
   ]
 
@@ -29,7 +30,7 @@ template("implement_content_app") {
     "//content/public/common:service_names",
     "//crypto",
     "//services/service_manager/embedder",
-    "//services/service_manager/public/interfaces",
+    "//services/service_manager/public/mojom",
     "//services/service_manager/runner/common",
     "//mojo/edk/system",
     "//ppapi/features",
@@ -118,17 +119,16 @@ template("implement_content_app") {
 
     if (is_android) {
       sources += [
-        "android/app_jni_registrar.cc",
-        "android/app_jni_registrar.h",
         "android/content_child_process_service_delegate.cc",
-        "android/content_child_process_service_delegate.h",
         "android/content_jni_onload.cc",
         "android/content_main.cc",
-        "android/content_main.h",
         "android/library_loader_hooks.cc",
         "android/library_loader_hooks.h",
       ]
-      deps += [ "//mojo/android:libsystem_java" ]
+      deps += [
+        "//mojo/android:libsystem_java",
+        "//ui/gl",
+      ]
     } else {
       sources += [ "content_main.cc" ]
     }

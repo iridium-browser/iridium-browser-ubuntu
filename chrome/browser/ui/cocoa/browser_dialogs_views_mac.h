@@ -5,13 +5,16 @@
 #ifndef CHROME_BROWSER_UI_COCOA_BROWSER_DIALOGS_VIEWS_MAC_H_
 #define CHROME_BROWSER_UI_COCOA_BROWSER_DIALOGS_VIEWS_MAC_H_
 
+#include "chrome/browser/safe_browsing/chrome_password_protection_service.h"
+#include "chrome/browser/ui/bubble_anchor_util.h"
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
+class BubbleUi;
 class ContentSettingBubbleModel;
+class ExtensionInstalledBubble;
 class GURL;
 class LocationBarDecoration;
-class Profile;
 
 namespace bookmarks {
 class BookmarkBubbleObserver;
@@ -31,12 +34,21 @@ struct SecurityInfo;
 
 namespace chrome {
 
-// Shows a Views page info bubble on the given |browser_window|.
-void ShowPageInfoBubbleViews(gfx::NativeWindow browser_window,
-                             Profile* profile,
+// Whether to use toolkit-views rather than Cocoa for dialogs ready to "pilot".
+bool ShowPilotDialogsWithViewsToolkit();
+
+// Whether to show all dialogs with toolkit-views on Mac, rather than Cocoa.
+bool ShowAllDialogsWithViewsToolkit();
+
+// Whether to show the ExtensionPopup using toolkit-views.
+bool ShowExtensionPopupWithViewsToolkit();
+
+// Shows a Views page info bubble on the given |browser|.
+void ShowPageInfoBubbleViews(Browser* browser,
                              content::WebContents* web_contents,
                              const GURL& virtual_url,
-                             const security_state::SecurityInfo& security_info);
+                             const security_state::SecurityInfo& security_info,
+                             bubble_anchor_util::Anchor anchor);
 
 // Show a Views bookmark bubble at the given point. This occurs when the
 // bookmark star is clicked or "Bookmark This Page..." is selected from a menu
@@ -48,6 +60,10 @@ void ShowBookmarkBubbleViewsAtPoint(const gfx::Point& anchor_point,
                                     const GURL& url,
                                     bool newly_bookmarked,
                                     LocationBarDecoration* decoration);
+
+// Builds the Views version of an Extension installed bubble.
+std::unique_ptr<BubbleUi> BuildViewsExtensionInstalledBubbleUi(
+    ExtensionInstalledBubble* bubble);
 
 // Shows a views zoom bubble at the |anchor_point|. This occurs when the zoom
 // icon is clicked or when a shortcut key is pressed or whenever |web_contents|
@@ -71,11 +87,11 @@ bool IsZoomBubbleViewsShown();
 // which allows it to call SetAnchorRect().
 class ContentSettingBubbleViewsBridge {
  public:
-  static void Show(gfx::NativeView parent_view,
-                   ContentSettingBubbleModel* model,
-                   content::WebContents* web_contents,
-                   const gfx::Point& anchor,
-                   LocationBarDecoration* decoration);
+  static gfx::NativeWindow Show(gfx::NativeView parent_view,
+                                ContentSettingBubbleModel* model,
+                                content::WebContents* web_contents,
+                                const gfx::Point& anchor,
+                                LocationBarDecoration* decoration);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(ContentSettingBubbleViewsBridge);
@@ -84,6 +100,14 @@ class ContentSettingBubbleViewsBridge {
 // Shows the import lock dialog.
 void ShowImportLockDialogViews(gfx::NativeWindow parent,
                                const base::Callback<void(bool)>& callback);
+
+// Shows the first run bubble.
+void ShowFirstRunBubbleViews(Browser* browser);
+
+void ShowPasswordReuseWarningDialog(
+    content::WebContents* web_contents,
+    safe_browsing::ChromePasswordProtectionService* service,
+    safe_browsing::OnWarningDone done_callback);
 
 }  // namespace chrome
 

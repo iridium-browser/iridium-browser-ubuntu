@@ -7,6 +7,7 @@
 #include <math.h>
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 #include "base/logging.h"
@@ -17,6 +18,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/history_url_provider.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/url_prefix.h"
@@ -102,25 +104,12 @@ void InitDaysAgoToRecencyScoreArray() {
   }
 }
 
-size_t GetAdjustedOffsetForComponent(
-    const GURL& url,
-    const base::OffsetAdjuster::Adjustments& adjustments,
-    const url::Parsed::ComponentType& component) {
-  const url::Parsed& parsed = url.parsed_for_possibly_invalid_spec();
-
-  size_t result = parsed.CountCharactersBefore(component, true);
-  base::OffsetAdjuster::AdjustOffset(adjustments, &result);
-  return result;
-}
-
 }  // namespace
 
 // static
 bool ScoredHistoryMatch::also_do_hup_like_scoring_;
 float ScoredHistoryMatch::bookmark_value_;
 float ScoredHistoryMatch::typed_value_;
-bool ScoredHistoryMatch::fix_few_visits_bug_;
-bool ScoredHistoryMatch::frequency_uses_sum_;
 size_t ScoredHistoryMatch::max_visits_to_score_;
 bool ScoredHistoryMatch::allow_tld_matches_;
 bool ScoredHistoryMatch::allow_scheme_matches_;
@@ -156,6 +145,9 @@ ScoredHistoryMatch::ScoredHistoryMatch(
   // Initialize HistoryMatch fields. TODO(tommycli): Merge these two classes.
   url_info = row;
   input_location = 0;
+  match_in_scheme = false;
+  match_in_subdomain = false;
+  match_after_host = false;
   innermost_match = false;
 
   // NOTE: Call Init() before doing any validity checking to ensure that the
@@ -168,12 +160,13 @@ ScoredHistoryMatch::ScoredHistoryMatch(
   // so that we can score as well as provide autocomplete highlighting.
   base::OffsetAdjuster::Adjustments adjustments;
   GURL gurl = row.url();
-  base::string16 url =
+  base::string16 cleaned_up_url_for_matching =
       bookmarks::CleanUpUrlForMatching(gurl, &adjustments);
   base::string16 title = bookmarks::CleanUpTitleForMatching(row.title());
   int term_num = 0;
   for (const auto& term : terms_vector) {
-    TermMatches url_term_matches = MatchTermInString(term, url, term_num);
+    TermMatches url_term_matches =
+        MatchTermInString(term, cleaned_up_url_for_matching, term_num);
     TermMatches title_term_matches = MatchTermInString(term, title, term_num);
     if (url_term_matches.empty() && title_term_matches.empty()) {
       // A term was not found in either URL or title - reject.
@@ -333,6 +326,16 @@ ScoredHistoryMatch::ScoredHistoryMatch(
   std::vector<size_t> offsets = OffsetsFromTermMatches(url_matches);
   base::OffsetAdjuster::UnadjustOffsets(adjustments, &offsets);
   url_matches = ReplaceOffsetsInTermMatches(url_matches, offsets);
+
+  // Now that url_matches contains the unadjusted offsets referring to the
+  // original URL, we can calculate which components the matches are for.
+  std::vector<AutocompleteMatch::MatchPosition> match_positions;
+  for (auto& url_match : url_matches) {
+    match_positions.push_back(
+        std::make_pair(url_match.offset, url_match.offset + url_match.length));
+  }
+  AutocompleteMatch::GetMatchComponents(gurl, match_positions, &match_in_scheme,
+                                        &match_in_subdomain, &match_after_host);
 }
 
 ScoredHistoryMatch::ScoredHistoryMatch(const ScoredHistoryMatch& other) =
@@ -428,8 +431,6 @@ void ScoredHistoryMatch::Init() {
   bookmark_value_ = OmniboxFieldTrial::HQPBookmarkValue();
   typed_value_ = OmniboxFieldTrial::HQPTypedValue();
   max_visits_to_score_ = OmniboxFieldTrial::HQPMaxVisitsToScore();
-  frequency_uses_sum_ = OmniboxFieldTrial::HQPFreqencyUsesSum();
-  fix_few_visits_bug_ = OmniboxFieldTrial::HQPFixFewVisitsBug();
   allow_tld_matches_ = OmniboxFieldTrial::HQPAllowMatchInTLDValue();
   allow_scheme_matches_ = OmniboxFieldTrial::HQPAllowMatchInSchemeValue();
   num_title_words_to_allow_ = OmniboxFieldTrial::HQPNumTitleWordsToAllow();
@@ -458,27 +459,19 @@ float ScoredHistoryMatch::GetTopicalityScore(
   WordStarts::const_iterator end_word_starts =
       word_starts.url_word_starts_.end();
 
-  const size_t query_pos =
-      GetAdjustedOffsetForComponent(url, adjustments, url::Parsed::QUERY);
-  const size_t host_pos =
-      GetAdjustedOffsetForComponent(url, adjustments, url::Parsed::HOST);
-  const size_t path_pos =
-      GetAdjustedOffsetForComponent(url, adjustments, url::Parsed::PATH);
-
-  // Get the position of the last period in the hostname.
   const url::Parsed& parsed = url.parsed_for_possibly_invalid_spec();
-  size_t last_part_of_host_pos = url.possibly_invalid_spec().rfind(
-      '.', parsed.CountCharactersBefore(url::Parsed::PATH, true));
-  base::OffsetAdjuster::AdjustOffset(adjustments, &last_part_of_host_pos);
+  size_t host_pos = parsed.CountCharactersBefore(url::Parsed::HOST, true);
+  size_t path_pos = parsed.CountCharactersBefore(url::Parsed::PATH, true);
+  size_t query_pos = parsed.CountCharactersBefore(url::Parsed::QUERY, true);
+  size_t last_part_of_host_pos =
+      url.possibly_invalid_spec().rfind('.', path_pos);
 
-  // Get the position of the domain and registry portion of the hostname.
-  size_t domain_and_registry_pos =
-      parsed.CountCharactersBefore(url::Parsed::PATH, true) -
-      net::registry_controlled_domains::GetDomainAndRegistry(
-          url.host_piece(),
-          net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES)
-          .size();
-  base::OffsetAdjuster::AdjustOffset(adjustments, &domain_and_registry_pos);
+  // |word_starts| and |url_matches| both contain offsets for the cleaned up
+  // URL used for matching, so we have to follow those adjustments.
+  base::OffsetAdjuster::AdjustOffset(adjustments, &host_pos);
+  base::OffsetAdjuster::AdjustOffset(adjustments, &path_pos);
+  base::OffsetAdjuster::AdjustOffset(adjustments, &query_pos);
+  base::OffsetAdjuster::AdjustOffset(adjustments, &last_part_of_host_pos);
 
   // Loop through all URL matches and score them appropriately.
   // First, filter all matches not at a word boundary and in the path (or
@@ -510,16 +503,11 @@ float ScoredHistoryMatch::GetTopicalityScore(
       // The match is in the query or ref component.
       DCHECK(at_word_boundary);
       term_scores[url_match.term_num] += 5;
-      match_after_host = true;
     } else if (term_word_offset >= path_pos) {
       // The match is in the path component.
       DCHECK(at_word_boundary);
       term_scores[url_match.term_num] += 8;
-      match_after_host = true;
     } else if (term_word_offset >= host_pos) {
-      if (term_word_offset < domain_and_registry_pos)
-        match_in_subdomain = true;
-
       if (term_word_offset < last_part_of_host_pos) {
         // Either there are no dots in the hostname or this match isn't
         // the last dotted component.
@@ -534,7 +522,6 @@ float ScoredHistoryMatch::GetTopicalityScore(
       // The match is in the protocol (a.k.a. scheme).
       // Matches not at a word boundary should have been filtered already.
       DCHECK(at_word_boundary);
-      match_in_scheme = true;
       if (allow_scheme_matches_)
         term_scores[url_match.term_num] += 10;
     }
@@ -613,6 +600,24 @@ float ScoredHistoryMatch::GetFrequency(const base::Time& now,
   // Compute the weighted sum of |value_of_transition| over the last at most
   // |max_visits_to_score_| visits, where each visit is weighted using
   // GetRecencyScore() based on how many days ago it happened.
+  //
+  // Here are example frequency scores, assuming |max_visits_to_score_| is 10.
+  // - a single typed visit more than three months ago, no other visits -> 0.45
+  //   ( = 1.5 typed visit score * 0.3 recency score)
+  // - a single visit recently -> 1.0
+  //   ( = 1.0 visit score * 1.0 recency score)
+  // - a single typed visit recently -> 1.5
+  //   ( = 1.5 typed visit score * 1.0 recency score)
+  // - 10+ visits, once every three days, no typed visits -> about 7.5
+  //   ( 10+ visits, averaging about 0.75 recency score each)
+  // - 10+ typed visits, once a week -> about 7.5
+  //   ( 10+ visits, average of 1.5 typed visit score * 0.5 recency score)
+  // - 10+ visit, once every day, no typed visits -> about 9.0
+  //   ( 10+ visits, average about 0.9 recency score each)
+  // - 10+ typed visit, once every three days -> about 11
+  //   ( 10+ visits, averaging about 1.5 typed visit *  0.75 recency score each)
+  // - 10+ typed visits today -> 15
+  //   ( 10+ visits, each worth 1.5 typed visit score)
   float summed_visit_points = 0;
   auto visits_end =
       visits.begin() + std::min(visits.size(), max_visits_to_score_);
@@ -631,17 +636,7 @@ float ScoredHistoryMatch::GetFrequency(const base::Time& now,
     const float bucket_weight = GetRecencyScore((now - i->first).InDays());
     summed_visit_points += (value_of_transition * bucket_weight);
   }
-  if (frequency_uses_sum_)
-    return summed_visit_points;
-
-  // Compute the average weighted value_of_transition and return it.
-  // Use |max_visits_to_score_| as the denominator for the average regardless of
-  // how many visits there were in order to penalize a match that has
-  // fewer visits than kMaxVisitsToScore.
-  if (fix_few_visits_bug_)
-    return summed_visit_points / ScoredHistoryMatch::max_visits_to_score_;
-  return visits.size() * summed_visit_points /
-         ScoredHistoryMatch::max_visits_to_score_;
+  return summed_visit_points;
 }
 
 float ScoredHistoryMatch::GetDocumentSpecificityScore(
@@ -661,7 +656,7 @@ float ScoredHistoryMatch::GetDocumentSpecificityScore(
       matches_to_specificity->begin(), matches_to_specificity->end(),
       std::pair<size_t, double>{num_matching_pages, -1});
   return (it != matches_to_specificity->end()) ? it->second : 1.0;
-};
+}
 
 // static
 float ScoredHistoryMatch::GetFinalRelevancyScore(float topicality_score,
@@ -679,29 +674,26 @@ float ScoredHistoryMatch::GetFinalRelevancyScore(float topicality_score,
 
   if (topicality_score == 0)
     return 0;
-  // Here's how to interpret intermediate_score: Suppose the omnibox has one
-  // input term.  Suppose the input matches many documents.  (This implies
-  // specificity_score == 1.0.)  Suppose we have a URL for which the omnibox
-  // input term has a single URL hostname hit at a word boundary.  (This
-  // implies topicality_score = 1.0.).  Then the intermediate_score for
-  // this URL will depend entirely on the frequency_score with
-  // this interpretation:
-  // - a single typed visit more than three months ago, no other visits -> 0.2
-  // - a visit every three days, no typed visits -> 0.706
-  // - a visit every day, no typed visits -> 0.916
-  // - a single typed visit yesterday, no other visits -> 2.0
-  // - a typed visit once a week -> 11.77
-  // - a typed visit every three days -> 14.12
-  // - at least ten typed visits today -> 20.0 (maximum score)
+
+  // Compute an intermediate score by multiplying the topicality, specificity,
+  // and frequency scores, then map it to the range [0, 1399].  For typical
+  // ranges, remember:
+  // * topicality score is usually around 1.0; typical range is [0.5, 2.5].
+  //   1.0 is the value assigned when a single-term input matches in the
+  //   hostname.  For more details, see GetTopicalityScore().
+  // * specificity score is usually 1.0; typical range is [1.0, 3.0].
+  //   1.0 is the default value when the user's input matches many documents.
+  //   For more details, see GetDocumentSpecificityScore().
+  // * frequency score has a much wider range depending on the number of
+  //   visits; typical range is [0.3, 15.0].  For more details, see
+  //   GetFrequency().
   //
-  // The below code maps intermediate_score to the range [0, 1399].
-  // For example:
-  // The default scoring buckets: "0.0:400,1.5:600,12.0:1300,20.0:1399"
-  // We will linearly interpolate the scores between:
-  //      0 to 1.5    --> 400 to 600
-  //    1.5 to 12.0   --> 600 to 1300
-  //    12.0 to 20.0  --> 1300 to 1399
-  //       >= 20.0    --> 1399
+  // The default scoring buckets: "0.0:550,1:625,9.0:1300,90.0:1399"
+  // will linearly interpolate the scores between:
+  //      0.0 to 1.0  --> 550 to 625
+  //      1.0 to 9.0  --> 625 to 1300
+  //      9.0 to 90.0 --> 1300 to 1399
+  //      >= 90.0     --> 1399
   //
   // The score maxes out at 1399 (i.e., cannot beat a good inlineable result
   // from HistoryURL provider).
@@ -729,13 +721,12 @@ float ScoredHistoryMatch::GetFinalRelevancyScore(float topicality_score,
 // static
 std::vector<ScoredHistoryMatch::ScoreMaxRelevance>
 ScoredHistoryMatch::GetHQPBuckets() {
-  // Start with the default buckets and override them if appropriate.
   std::string relevance_buckets_str =
-      "0.0:400,1.5:600,5.0:900,10.5:1203,15.0:1300,20.0:1399";
-  std::string experimental_scoring_buckets =
       OmniboxFieldTrial::HQPExperimentalScoringBuckets();
-  if (!experimental_scoring_buckets.empty())
-    relevance_buckets_str = experimental_scoring_buckets;
+  static constexpr char kDefaultHQPBuckets[] =
+      "0.0:550,1:625,9.0:1300,90.0:1399";
+  if (relevance_buckets_str.empty())
+    relevance_buckets_str = kDefaultHQPBuckets;
   return GetHQPBucketsFromString(relevance_buckets_str);
 }
 

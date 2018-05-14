@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "RecordTest.h"
+#include "core/testing/RecordTest.h"
 
 namespace blink {
 
-RecordTest::RecordTest() {}
+RecordTest::RecordTest() = default;
 
-RecordTest::~RecordTest() {}
+RecordTest::~RecordTest() = default;
 
 void RecordTest::setStringLongRecord(
     const Vector<std::pair<String, int32_t>>& arg) {
@@ -20,11 +20,11 @@ Vector<std::pair<String, int32_t>> RecordTest::getStringLongRecord() {
 }
 
 void RecordTest::setNullableStringLongRecord(
-    const Nullable<Vector<std::pair<String, int32_t>>>& arg) {
+    const Optional<Vector<std::pair<String, int32_t>>>& arg) {
   nullable_string_long_record_ = arg;
 }
 
-Nullable<Vector<std::pair<String, int32_t>>>
+Optional<Vector<std::pair<String, int32_t>>>
 RecordTest::getNullableStringLongRecord() {
   return nullable_string_long_record_;
 }
@@ -73,11 +73,12 @@ RecordTest::returnStringByteStringSequenceRecord() {
 
 bool RecordTest::unionReceivedARecord(
     const BooleanOrByteStringByteStringRecord& arg) {
-  return arg.isByteStringByteStringRecord();
+  return arg.IsByteStringByteStringRecord();
 }
 
-DEFINE_TRACE(RecordTest) {
+void RecordTest::Trace(blink::Visitor* visitor) {
   visitor->Trace(string_element_record_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

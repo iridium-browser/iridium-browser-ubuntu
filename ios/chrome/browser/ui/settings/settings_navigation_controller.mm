@@ -8,12 +8,9 @@
 #include "base/mac/foundation_util.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#include "ios/chrome/browser/experimental_flags.h"
 #include "ios/chrome/browser/sync/sync_setup_service.h"
 #include "ios/chrome/browser/sync/sync_setup_service_factory.h"
-#import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
-#import "ios/chrome/browser/ui/commands/clear_browsing_data_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
-#import "ios/chrome/browser/ui/commands/show_signin_command.h"
 #import "ios/chrome/browser/ui/icons/chrome_icon.h"
 #import "ios/chrome/browser/ui/keyboard/UIKeyCommand+Chrome.h"
 #import "ios/chrome/browser/ui/material_components/app_bar_presenting.h"
@@ -29,6 +26,7 @@
 #import "ios/chrome/browser/ui/settings/sync_settings_collection_view_controller.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/browser/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/user_feedback/user_feedback_provider.h"
@@ -40,33 +38,33 @@
 #error "This file requires ARC support."
 #endif
 
-// TODO(crbug.com/620361): Remove the entire class when iOS 9 is dropped.
+// TODO(crbug.com/785484): Implements workaround for iPhone X safe area bug in
+// MDC.
 @interface SettingsAppBarContainerViewController
     : MDCAppBarContainerViewController
 @end
 
 @implementation SettingsAppBarContainerViewController
 
-#pragma mark - Status bar
+// TODO(crbug.com/785484): Remove once fixed in MDC:
+// https://github.com/material-components/material-components-ios/pull/2890
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
 
-- (UIViewController*)childViewControllerForStatusBarHidden {
-  if (!base::ios::IsRunningOnIOS10OrLater()) {
-    // TODO(crbug.com/620361): Remove the entire method override when iOS 9 is
-    // dropped.
-    return self.contentViewController;
-  } else {
-    return [super childViewControllerForStatusBarHidden];
-  }
-}
-
-- (UIViewController*)childViewControllerForStatusBarStyle {
-  if (!base::ios::IsRunningOnIOS10OrLater()) {
-    // TODO(crbug.com/620361): Remove the entire method override when iOS 9 is
-    // dropped.
-    return self.contentViewController;
-  } else {
-    return [super childViewControllerForStatusBarStyle];
-  }
+  id<LayoutGuideProvider> safeAreaLayoutGuide =
+      SafeAreaLayoutGuideForView(self.view);
+  UIView* contentView = self.contentViewController.view;
+  UIView* headerView = self.appBar.headerViewController.headerView;
+  contentView.translatesAutoresizingMaskIntoConstraints = NO;
+  [NSLayoutConstraint activateConstraints:@[
+    [contentView.topAnchor constraintEqualToAnchor:headerView.bottomAnchor],
+    [contentView.leadingAnchor
+        constraintEqualToAnchor:safeAreaLayoutGuide.leadingAnchor],
+    [contentView.trailingAnchor
+        constraintEqualToAnchor:safeAreaLayoutGuide.trailingAnchor],
+    [contentView.bottomAnchor
+        constraintEqualToAnchor:safeAreaLayoutGuide.bottomAnchor],
+  ]];
 }
 
 @end
@@ -89,12 +87,6 @@
 
 // Creates an autoreleased "CANCEL" button that closes the settings when tapped.
 - (UIBarButtonItem*)cancelButton;
-
-// Intercepts the chrome command |sender|. If |sender| is an
-// |IDC_CLOSE_SETTINGS_AND_OPEN_URL| and |delegate_| is not nil, then it
-// calls [delegate closeSettingsAndOpenUrl:sender], otherwise it forwards the
-// command up the responder chain.
-- (void)chromeExecuteCommand:(id)sender;
 
 @end
 
@@ -131,10 +123,10 @@ newSettingsMainControllerWithBrowserState:(ios::ChromeBrowserState*)browserState
 + (SettingsNavigationController*)
 newAccountsController:(ios::ChromeBrowserState*)browserState
              delegate:(id<SettingsNavigationControllerDelegate>)delegate {
-  UIViewController* controller = [[AccountsCollectionViewController alloc]
-           initWithBrowserState:browserState
-      closeSettingsOnAddAccount:YES
-                     dispatcher:[delegate dispatcherForSettings]];
+  AccountsCollectionViewController* controller = [
+      [AccountsCollectionViewController alloc] initWithBrowserState:browserState
+                                          closeSettingsOnAddAccount:YES];
+  controller.dispatcher = [delegate dispatcherForSettings];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -147,9 +139,11 @@ newAccountsController:(ios::ChromeBrowserState*)browserState
      newSyncController:(ios::ChromeBrowserState*)browserState
 allowSwitchSyncAccount:(BOOL)allowSwitchSyncAccount
               delegate:(id<SettingsNavigationControllerDelegate>)delegate {
-  UIViewController* controller = [[SyncSettingsCollectionViewController alloc]
-        initWithBrowserState:browserState
-      allowSwitchSyncAccount:allowSwitchSyncAccount];
+  SyncSettingsCollectionViewController* controller =
+      [[SyncSettingsCollectionViewController alloc]
+            initWithBrowserState:browserState
+          allowSwitchSyncAccount:allowSwitchSyncAccount];
+  controller.dispatcher = [delegate dispatcherForSettings];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -165,15 +159,18 @@ newUserFeedbackController:(ios::ChromeBrowserState*)browserState
   DCHECK(ios::GetChromeBrowserProvider()
              ->GetUserFeedbackProvider()
              ->IsUserFeedbackEnabled());
-  UIViewController* controller = ios::GetChromeBrowserProvider()
-                                     ->GetUserFeedbackProvider()
-                                     ->CreateViewController(dataSource);
+  UIViewController* controller =
+      ios::GetChromeBrowserProvider()
+          ->GetUserFeedbackProvider()
+          ->CreateViewController(dataSource, [delegate dispatcherForSettings]);
   DCHECK(controller);
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
                         delegate:delegate];
-  [controller navigationItem].rightBarButtonItem = [nc cancelButton];
+  if (!experimental_flags::IsNewFeedbackKitEnabled()) {
+    [controller navigationItem].rightBarButtonItem = [nc cancelButton];
+  }
   return nc;
 }
 
@@ -181,9 +178,10 @@ newUserFeedbackController:(ios::ChromeBrowserState*)browserState
 newClearBrowsingDataController:(ios::ChromeBrowserState*)browserState
                       delegate:
                           (id<SettingsNavigationControllerDelegate>)delegate {
-  UIViewController* controller =
+  ClearBrowsingDataCollectionViewController* controller =
       [[ClearBrowsingDataCollectionViewController alloc]
           initWithBrowserState:browserState];
+  controller.dispatcher = [delegate dispatcherForSettings];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -196,9 +194,10 @@ newClearBrowsingDataController:(ios::ChromeBrowserState*)browserState
 newSyncEncryptionPassphraseController:(ios::ChromeBrowserState*)browserState
                              delegate:(id<SettingsNavigationControllerDelegate>)
                                           delegate {
-  UIViewController* controller =
+  SyncEncryptionPassphraseCollectionViewController* controller =
       [[SyncEncryptionPassphraseCollectionViewController alloc]
           initWithBrowserState:browserState];
+  controller.dispatcher = [delegate dispatcherForSettings];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -210,8 +209,10 @@ newSyncEncryptionPassphraseController:(ios::ChromeBrowserState*)browserState
 + (SettingsNavigationController*)
 newSavePasswordsController:(ios::ChromeBrowserState*)browserState
                   delegate:(id<SettingsNavigationControllerDelegate>)delegate {
-  UIViewController* controller = [[SavePasswordsCollectionViewController alloc]
-      initWithBrowserState:browserState];
+  SavePasswordsCollectionViewController* controller =
+      [[SavePasswordsCollectionViewController alloc]
+          initWithBrowserState:browserState];
+  controller.dispatcher = [delegate dispatcherForSettings];
 
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
@@ -252,14 +253,15 @@ newImportDataController:(ios::ChromeBrowserState*)browserState
 + (SettingsNavigationController*)
 newAutofillController:(ios::ChromeBrowserState*)browserState
              delegate:(id<SettingsNavigationControllerDelegate>)delegate {
-  UIViewController* controller = [[AutofillCollectionViewController alloc]
-      initWithBrowserState:browserState];
+  AutofillCollectionViewController* controller =
+      [[AutofillCollectionViewController alloc]
+          initWithBrowserState:browserState];
+  controller.dispatcher = [delegate dispatcherForSettings];
 
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
                         delegate:delegate];
-  [controller navigationItem].rightBarButtonItem = [nc doneButton];
 
   // Make sure the close button is always present, as the Autofill screen
   // isn't just shown from Settings.
@@ -295,7 +297,7 @@ initWithRootViewController:(UIViewController*)rootViewController
     }
   }
 
-  // Sync changes cannot be cancelled and they must always be commited when
+  // Sync changes cannot be cancelled and they must always be committed when
   // existing settings.
   if (shouldCommitSyncChangesOnDismissal_) {
     SyncSetupServiceFactory::GetForBrowserState([self mainBrowserState])
@@ -455,61 +457,6 @@ initWithRootViewController:(UIViewController*)rootViewController
   return NO;
 }
 
-#pragma mark - UIResponder (ChromeExecuteCommand)
-
-- (void)chromeExecuteCommand:(id)sender {
-  switch ([sender tag]) {
-    case IDC_CLOSE_SETTINGS: {
-      [delegate_ closeSettings];
-      return;
-    }
-    case IDC_OPEN_URL:
-      NOTREACHED() << "You should probably use the command "
-                   << "IDC_CLOSE_SETTINGS_AND_OPEN_URL instead of IDC_OPEN_URL";
-    case IDC_CLOSE_SETTINGS_AND_OPEN_URL: {
-      [delegate_ closeSettingsAndOpenUrl:sender];
-      return;
-    }
-    case IDC_SHOW_SIGNIN_IOS:
-      // Sign-in actions can only happen on the main browser state (not on
-      // incognito browser state), which is unique. The command can just be
-      // forwarded up the responder chain.
-      break;
-    case IDC_CLEAR_BROWSING_DATA_IOS: {
-      // Check that the data for the right browser state is being cleared before
-      // forwarding it up the responder chain.
-      ios::ChromeBrowserState* commandBrowserState =
-          [base::mac::ObjCCast<ClearBrowsingDataCommand>(sender) browserState];
-
-      // Clearing browsing data for the wrong profile is a destructive action.
-      // Executing it on the wrong profile is a privacy issue. Kill the
-      // app if this ever happens.
-      CHECK_EQ(commandBrowserState, [self mainBrowserState]);
-      break;
-    }
-    case IDC_SHOW_SYNC_SETTINGS: {
-      UIViewController* controller =
-          [[SyncSettingsCollectionViewController alloc]
-                initWithBrowserState:mainBrowserState_
-              allowSwitchSyncAccount:YES];
-      [self pushViewController:controller animated:YES];
-      return;
-    }
-    case IDC_SHOW_SYNC_PASSPHRASE_SETTINGS: {
-      UIViewController* controller =
-          [[SyncEncryptionPassphraseCollectionViewController alloc]
-              initWithBrowserState:mainBrowserState_];
-      [self pushViewController:controller animated:YES];
-      return;
-    }
-    default:
-      NOTREACHED()
-          << "Unexpected command " << [sender tag]
-          << " Settings commands must execute on the main browser state.";
-  }
-  [[self nextResponder] chromeExecuteCommand:sender];
-}
-
 #pragma mark - UIResponder
 
 - (NSArray*)keyCommands {
@@ -529,11 +476,45 @@ initWithRootViewController:(UIViewController*)rootViewController
 
 #pragma mark - ApplicationSettingsCommands
 
-- (void)showAccountsSettings {
-  UIViewController* controller = [[AccountsCollectionViewController alloc]
-           initWithBrowserState:mainBrowserState_
-      closeSettingsOnAddAccount:NO
-                     dispatcher:[delegate_ dispatcherForSettings]];
+// TODO(crbug.com/779791) : Do not pass |baseViewController| through dispatcher.
+- (void)showAccountsSettingsFromViewController:
+    (UIViewController*)baseViewController {
+  AccountsCollectionViewController* controller =
+      [[AccountsCollectionViewController alloc]
+               initWithBrowserState:mainBrowserState_
+          closeSettingsOnAddAccount:NO];
+  controller.dispatcher = [delegate_ dispatcherForSettings];
+  [self pushViewController:controller animated:YES];
+}
+
+// TODO(crbug.com/779791) : Do not pass |baseViewController| through dispatcher.
+- (void)showSyncSettingsFromViewController:
+    (UIViewController*)baseViewController {
+  SyncSettingsCollectionViewController* controller =
+      [[SyncSettingsCollectionViewController alloc]
+            initWithBrowserState:mainBrowserState_
+          allowSwitchSyncAccount:YES];
+  controller.dispatcher = [delegate_ dispatcherForSettings];
+  [self pushViewController:controller animated:YES];
+}
+
+// TODO(crbug.com/779791) : Do not pass |baseViewController| through dispatcher.
+- (void)showSyncPassphraseSettingsFromViewController:
+    (UIViewController*)baseViewController {
+  SyncEncryptionPassphraseCollectionViewController* controller =
+      [[SyncEncryptionPassphraseCollectionViewController alloc]
+          initWithBrowserState:mainBrowserState_];
+  controller.dispatcher = [delegate_ dispatcherForSettings];
+  [self pushViewController:controller animated:YES];
+}
+
+// TODO(crbug.com/779791) : Do not pass |baseViewController| through dispatcher.
+- (void)showSavedPasswordsSettingsFromViewController:
+    (UIViewController*)baseViewController {
+  SavePasswordsCollectionViewController* controller =
+      [[SavePasswordsCollectionViewController alloc]
+          initWithBrowserState:mainBrowserState_];
+  controller.dispatcher = [delegate_ dispatcherForSettings];
   [self pushViewController:controller animated:YES];
 }
 
@@ -578,16 +559,8 @@ initWithRootViewController:(UIViewController*)rootViewController
             initWithContentViewController:controller];
 
     // Configure the style.
+    appBarContainer.view.backgroundColor = [UIColor whiteColor];
     ConfigureAppBarWithCardStyle(appBarContainer.appBar);
-
-    // Adjust the frame of the contained view controller's view to be below the
-    // app bar.
-    CGRect contentFrame = controller.view.frame;
-    CGSize headerSize = [appBarContainer.appBar.headerViewController.headerView
-        sizeThatFits:contentFrame.size];
-    contentFrame = UIEdgeInsetsInsetRect(
-        contentFrame, UIEdgeInsetsMake(headerSize.height, 0, 0, 0));
-    controller.view.frame = contentFrame;
 
     // Register the app bar container and return it.
     [self registerAppBarContainer:appBarContainer];

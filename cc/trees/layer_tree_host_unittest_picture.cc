@@ -190,7 +190,8 @@ class LayerTreeHostPictureTestResizeViewportWithGpuRaster
         // Change the picture layer's size along with the viewport, so it will
         // consider picking a new tile size.
         picture_->SetBounds(gfx::Size(768, 1056));
-        layer_tree_host()->SetViewportSize(gfx::Size(768, 1056));
+        layer_tree_host()->SetViewportSizeAndScale(gfx::Size(768, 1056), 1.f,
+                                                   viz::LocalSurfaceId());
         break;
       case 2:
         EndTest();
@@ -342,7 +343,7 @@ class LayerTreeHostPictureTestRSLLMembership : public LayerTreeHostPictureTest {
     LayerImpl* gchild = impl->sync_tree()->LayerById(picture_->id());
     FakePictureLayerImpl* picture = static_cast<FakePictureLayerImpl*>(gchild);
 
-    switch (impl->sync_tree()->source_frame_number()) {
+    switch (impl->active_tree()->source_frame_number()) {
       case 0:
         // On 1st commit the layer has tilings.
         EXPECT_GT(picture->tilings()->num_tilings(), 0u);
@@ -359,7 +360,7 @@ class LayerTreeHostPictureTestRSLLMembership : public LayerTreeHostPictureTest {
   }
 
   void DidActivateTreeOnThread(LayerTreeHostImpl* impl) override {
-    LayerImpl* gchild = impl->sync_tree()->LayerById(picture_->id());
+    LayerImpl* gchild = impl->active_tree()->LayerById(picture_->id());
     FakePictureLayerImpl* picture = static_cast<FakePictureLayerImpl*>(gchild);
 
     switch (impl->active_tree()->source_frame_number()) {
@@ -400,7 +401,7 @@ class LayerTreeHostPictureTestRSLLMembership : public LayerTreeHostPictureTest {
   scoped_refptr<FakePictureLayer> picture_;
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostPictureTestRSLLMembership);
+SINGLE_THREAD_TEST_F(LayerTreeHostPictureTestRSLLMembership);
 
 class LayerTreeHostPictureTestRSLLMembershipWithScale
     : public LayerTreeHostPictureTest {
@@ -494,7 +495,7 @@ class LayerTreeHostPictureTestRSLLMembershipWithScale
           // Pinch zoom in to change the scale on the active tree.
           impl->PinchGestureBegin();
           impl->PinchGestureUpdate(2.f, gfx::Point(1, 1));
-          impl->PinchGestureEnd();
+          impl->PinchGestureEnd(gfx::Point(1, 1), true);
         } else if (picture->tilings()->num_tilings() == 1) {
           // If the pinch gesture caused a commit we could get here with a
           // pending tree.
@@ -595,7 +596,8 @@ class LayerTreeHostPictureTestForceRecalculateScales
     root->AddChild(normal_layer_);
 
     layer_tree_host()->SetRootLayer(root);
-    layer_tree_host()->SetViewportSize(size);
+    layer_tree_host()->SetViewportSizeAndScale(size, 1.f,
+                                               viz::LocalSurfaceId());
 
     client_.set_fill_with_nonsolid_color(true);
     client_.set_bounds(size);
@@ -614,7 +616,7 @@ class LayerTreeHostPictureTestForceRecalculateScales
     FakePictureLayerImpl* normal_layer = static_cast<FakePictureLayerImpl*>(
         impl->active_tree()->LayerById(normal_layer_->id()));
 
-    switch (impl->sync_tree()->source_frame_number()) {
+    switch (impl->active_tree()->source_frame_number()) {
       case 0:
         // On first commit, both layers are at the default scale.
         ASSERT_EQ(1u, will_change_layer->tilings()->num_tilings());
@@ -682,7 +684,7 @@ class LayerTreeHostPictureTestForceRecalculateScales
   scoped_refptr<FakePictureLayer> normal_layer_;
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostPictureTestForceRecalculateScales);
+SINGLE_THREAD_TEST_F(LayerTreeHostPictureTestForceRecalculateScales);
 
 }  // namespace
 }  // namespace cc

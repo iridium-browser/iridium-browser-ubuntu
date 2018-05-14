@@ -42,7 +42,7 @@ namespace chromeos {
 namespace {
 
 // Used to check if a network config dialog is already showing.
-NetworkConfigView* g_instance = nullptr;
+NetworkConfigView* g_network_config_view_instance = nullptr;
 
 }  // namespace
 
@@ -54,8 +54,8 @@ NetworkConfigView::NetworkConfigView()
     : child_config_view_(nullptr),
       delegate_(nullptr),
       advanced_button_(nullptr) {
-  DCHECK(!g_instance);
-  g_instance = this;
+  DCHECK(!g_network_config_view_instance);
+  g_network_config_view_instance = this;
   chrome::RecordDialogCreation(chrome::DialogIdentifier::NETWORK_CONFIG);
 }
 
@@ -89,15 +89,20 @@ bool NetworkConfigView::InitWithType(const std::string& type) {
 }
 
 NetworkConfigView::~NetworkConfigView() {
-  DCHECK_EQ(g_instance, this);
-  g_instance = nullptr;
+  DCHECK_EQ(g_network_config_view_instance, this);
+  g_network_config_view_instance = nullptr;
+}
+
+// static
+bool NetworkConfigView::HasInstance() {
+  return !!g_network_config_view_instance;
 }
 
 // static
 NetworkConfigView* NetworkConfigView::ShowForNetworkId(
     const std::string& network_id) {
-  if (g_instance)
-    return g_instance;
+  if (g_network_config_view_instance)
+    return g_network_config_view_instance;
   const NetworkState* network =
       NetworkHandler::Get()->network_state_handler()->GetNetworkStateFromGuid(
           network_id);
@@ -121,8 +126,8 @@ NetworkConfigView* NetworkConfigView::ShowForNetworkId(
 
 // static
 NetworkConfigView* NetworkConfigView::ShowForType(const std::string& type) {
-  if (g_instance)
-    return g_instance;
+  if (g_network_config_view_instance)
+    return g_network_config_view_instance;
   NetworkConfigView* view = new NetworkConfigView();
   if (!view->InitWithType(type)) {
     LOG(ERROR) << "NetworkConfigView::ShowForType called with invalid type: "
@@ -143,8 +148,8 @@ base::string16 NetworkConfigView::GetDialogButtonLabel(
     ui::DialogButton button) const {
   if (button == ui::DIALOG_BUTTON_OK) {
     if (child_config_view_->IsConfigureDialog())
-      return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_CONFIGURE);
-    return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_CONNECT);
+      return l10n_util::GetStringUTF16(IDS_SETTINGS_INTERNET_BUTTON_CONFIGURE);
+    return l10n_util::GetStringUTF16(IDS_SETTINGS_INTERNET_BUTTON_CONNECT);
   }
   return views::DialogDelegateView::GetDialogButtonLabel(button);
 }
@@ -299,9 +304,9 @@ ControlledSettingIndicatorView::ControlledSettingIndicatorView(
   image_view_->SetImage(gfx::CreateVectorIcon(vector_icons::kBusinessIcon, 16,
                                               gfx::kChromeIconGrey));
   image_view_->SetTooltipText(
-      l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTING_POLICY));
+      l10n_util::GetStringUTF16(IDS_CONTROLLED_SETTING_POLICY));
   AddChildView(image_view_);
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 }
 
 ControlledSettingIndicatorView::~ControlledSettingIndicatorView() {}

@@ -28,9 +28,6 @@ class BrandedImageProvider {
   // the clear browsing data settings screen.
   virtual UIImage* GetClearBrowsingDataSiteDataImage();
 
-  // Returns the 24pt x 24pt image to use in the contextual search header.
-  virtual UIImage* GetContextualSearchHeaderImage();
-
   // Returns the 16pt x 16pt image to use for the "sync settings" item on the
   // signin confirmation screen.
   virtual UIImage* GetSigninConfirmationSyncSettingsImage();
@@ -47,6 +44,9 @@ class BrandedImageProvider {
 
   // Returns the 24pt x 24pt image corresponding to the given icon |type|.
   virtual UIImage* GetWhatsNewIconImage(WhatsNewIcon type);
+
+  // Returns the image to use for the "search the web" button.
+  virtual UIImage* GetToolbarSearchButtonImage();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrandedImageProvider);

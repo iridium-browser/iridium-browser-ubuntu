@@ -28,6 +28,12 @@ void MockInputMethodManager::State::ChangeInputMethod(
     const std::string& input_method_id,
     bool show_message) {}
 
+void MockInputMethodManager::State::ChangeInputMethodToJpKeyboard() {}
+
+void MockInputMethodManager::State::ChangeInputMethodToJpIme() {}
+
+void MockInputMethodManager::State::ToggleInputMethodForJpIme() {}
+
 bool MockInputMethodManager::State::EnableInputMethod(
     const std::string& new_active_input_method_id) {
   return true;
@@ -187,10 +193,6 @@ void MockInputMethodManager::MaybeNotifyImeMenuActivationChanged() {}
 void MockInputMethodManager::OverrideKeyboardUrlRef(const std::string& keyset) {
 }
 
-bool MockInputMethodManager::IsEmojiHandwritingVoiceOnImeMenuEnabled() {
-  return true;
-}
-
 void MockInputMethodManager::SetImeMenuFeatureEnabled(ImeMenuFeature feature,
                                                       bool enabled) {
   if (enabled)
@@ -203,6 +205,8 @@ bool MockInputMethodManager::GetImeMenuFeatureEnabled(
     ImeMenuFeature feature) const {
   return features_enabled_state_ & feature;
 }
+
+void MockInputMethodManager::NotifyObserversImeExtraInputStateChange() {}
 
 }  // namespace input_method
 }  // namespace chromeos

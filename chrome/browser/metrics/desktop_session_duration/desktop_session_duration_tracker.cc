@@ -13,27 +13,27 @@ namespace metrics {
 
 namespace {
 
-DesktopSessionDurationTracker* g_instance = nullptr;
-
-const base::TimeDelta kZeroTime = base::TimeDelta::FromSeconds(0);
+DesktopSessionDurationTracker* g_desktop_session_duration_tracker_instance =
+    nullptr;
 
 }  // namespace
 
 // static
 void DesktopSessionDurationTracker::Initialize() {
-  DCHECK(!g_instance);
-  g_instance = new DesktopSessionDurationTracker;
+  DCHECK(!g_desktop_session_duration_tracker_instance);
+  g_desktop_session_duration_tracker_instance =
+      new DesktopSessionDurationTracker;
 }
 
 // static
 bool DesktopSessionDurationTracker::IsInitialized() {
-  return g_instance != nullptr;
+  return g_desktop_session_duration_tracker_instance != nullptr;
 }
 
 // static
 DesktopSessionDurationTracker* DesktopSessionDurationTracker::Get() {
-  DCHECK(g_instance);
-  return g_instance;
+  DCHECK(g_desktop_session_duration_tracker_instance);
+  return g_desktop_session_duration_tracker_instance;
 }
 
 void DesktopSessionDurationTracker::StartTimer(base::TimeDelta duration) {
@@ -78,9 +78,9 @@ void DesktopSessionDurationTracker::OnUserEvent() {
 
 // static
 void DesktopSessionDurationTracker::CleanupForTesting() {
-  DCHECK(g_instance);
-  delete g_instance;
-  g_instance = nullptr;
+  DCHECK(g_desktop_session_duration_tracker_instance);
+  delete g_desktop_session_duration_tracker_instance;
+  g_desktop_session_duration_tracker_instance = nullptr;
 }
 
 void DesktopSessionDurationTracker::OnAudioStart() {
@@ -99,7 +99,7 @@ void DesktopSessionDurationTracker::OnAudioEnd() {
   // last 5 minutes so the session can be terminated.
   if (!timer_.IsRunning()) {
     DVLOG(4) << "Ending session due to audio ending";
-    EndSession(kZeroTime);
+    EndSession(base::TimeDelta());
   }
 }
 
@@ -147,8 +147,8 @@ void DesktopSessionDurationTracker::EndSession(
   // Trim any timeouts from the session length and lower bound to a session of
   // length 0.
   delta -= time_to_discount;
-  if (delta < kZeroTime)
-    delta = kZeroTime;
+  if (delta < base::TimeDelta())
+    delta = base::TimeDelta();
 
   for (Observer& observer : observer_list_)
     observer.OnSessionEnded(delta);

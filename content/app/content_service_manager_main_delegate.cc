@@ -74,7 +74,7 @@ void ContentServiceManagerMainDelegate::OverrideMojoConfiguration(
 
 std::unique_ptr<base::Value>
 ContentServiceManagerMainDelegate::CreateServiceCatalog() {
-  return content_main_params_.delegate->CreateServiceCatalog();
+  return nullptr;
 }
 
 bool ContentServiceManagerMainDelegate::ShouldLaunchAsServiceProcess(
@@ -85,7 +85,11 @@ bool ContentServiceManagerMainDelegate::ShouldLaunchAsServiceProcess(
 void ContentServiceManagerMainDelegate::AdjustServiceProcessCommandLine(
     const service_manager::Identity& identity,
     base::CommandLine* command_line) {
+  base::CommandLine::StringVector args_without_switches;
   if (identity.name() == mojom::kPackagedServicesServiceName) {
+    // Ensure other arguments like URL are not lost.
+    args_without_switches = command_line->GetArgs();
+
     // When launching the browser process, ensure that we don't inherit any
     // process type flag. When content embeds Service Manager, a process with no
     // type is launched as a browser process.
@@ -98,14 +102,11 @@ void ContentServiceManagerMainDelegate::AdjustServiceProcessCommandLine(
 
   content_main_params_.delegate->AdjustServiceProcessCommandLine(identity,
                                                                  command_line);
-}
 
-bool ContentServiceManagerMainDelegate::
-    ShouldTerminateServiceManagerOnInstanceQuit(
-        const service_manager::Identity& identity,
-        int* exit_code) {
-  return content_main_params_.delegate
-      ->ShouldTerminateServiceManagerOnInstanceQuit(identity, exit_code);
+  // Append other arguments back to |command_line| after the second call to
+  // delegate as long as it can still remove all the arguments without switches.
+  for (const auto& arg : args_without_switches)
+    command_line->AppendArgNative(arg);
 }
 
 void ContentServiceManagerMainDelegate::OnServiceManagerInitialized(
@@ -120,7 +121,7 @@ ContentServiceManagerMainDelegate::CreateEmbeddedService(
     const std::string& service_name) {
   // TODO
 
-  return content_main_params_.delegate->CreateEmbeddedService(service_name);
+  return nullptr;
 }
 
 }  // namespace content

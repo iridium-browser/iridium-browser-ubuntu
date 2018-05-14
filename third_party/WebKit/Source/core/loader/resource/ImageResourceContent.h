@@ -7,12 +7,12 @@
 
 #include <memory>
 #include "core/CoreExport.h"
+#include "core/loader/resource/ImageResourceObserver.h"
 #include "platform/geometry/IntRect.h"
-#include "platform/geometry/IntSizeHash.h"
-#include "platform/geometry/LayoutSize.h"
 #include "platform/graphics/Image.h"
 #include "platform/graphics/ImageObserver.h"
 #include "platform/graphics/ImageOrientation.h"
+#include "platform/loader/fetch/ResourceError.h"
 #include "platform/loader/fetch/ResourceLoadPriority.h"
 #include "platform/loader/fetch/ResourceStatus.h"
 #include "platform/weborigin/KURL.h"
@@ -53,39 +53,26 @@ class CORE_EXPORT ImageResourceContent final
   }
 
   // Creates ImageResourceContent from an already loaded image.
-  static ImageResourceContent* CreateLoaded(PassRefPtr<blink::Image>);
+  static ImageResourceContent* CreateLoaded(scoped_refptr<blink::Image>);
 
   static ImageResourceContent* Fetch(FetchParameters&, ResourceFetcher*);
 
-  // Returns the nullImage() if the image is not available yet.
-  blink::Image* GetImage();
-  bool HasImage() const { return image_.Get(); }
+  // Returns the NullImage() if the image is not available yet.
+  blink::Image* GetImage() const;
+  bool HasImage() const { return image_.get(); }
 
-  static std::pair<blink::Image*, float> BrokenImage(
-      float
-          device_scale_factor);  // Returns an image and the image's resolution
-                                 // scale factor.
-
-  bool UsesImageContainerSize() const;
-  bool ImageHasRelativeSize() const;
   // The device pixel ratio we got from the server for this image, or 1.0.
   float DevicePixelRatioHeaderValue() const;
   bool HasDevicePixelRatioHeaderValue() const;
 
-  enum SizeType {
-    // Report the intrinsic size.
-    kIntrinsicSize,
-
-    // Report the intrinsic size corrected to account for image density.
-    kIntrinsicCorrectedToDPR,
-  };
-
-  // This method takes a zoom multiplier that can be used to increase the
-  // natural size of the image by the zoom.
-  LayoutSize ImageSize(
-      RespectImageOrientationEnum should_respect_image_orientation,
-      float multiplier,
-      SizeType = kIntrinsicSize);
+  // Returns the intrinsic width and height of the image, or 0x0 if no image
+  // exists. If the image is a BitmapImage, then this corresponds to the
+  // physical pixel dimensions of the image. If the image is an SVGImage, this
+  // does not quite return the intrinsic width/height, but rather a concrete
+  // object size resolved using a default object size of 300x150.
+  // TODO(fs): Make SVGImages return proper intrinsic width/height.
+  IntSize IntrinsicSize(
+      RespectImageOrientationEnum should_respect_image_orientation);
 
   void UpdateImageAnimationPolicy();
 
@@ -96,7 +83,7 @@ class CORE_EXPORT ImageResourceContent final
     return size_available_ != Image::kSizeUnavailable;
   }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*) override;
 
   // Content status and deriving predicates.
   // https://docs.google.com/document/d/1O-fB83mrE0B_V8gzXNqHgmRLCvstTB4MMi3RnVLr8bE/edit#heading=h.6cyqmir0f30h
@@ -119,9 +106,12 @@ class CORE_EXPORT ImageResourceContent final
 
   // Redirecting methods to Resource.
   const KURL& Url() const;
-  bool IsAccessAllowed(SecurityOrigin*);
+  bool IsAccessAllowed(const SecurityOrigin*);
   const ResourceResponse& GetResponse() const;
-  const ResourceError& GetResourceError() const;
+  Optional<ResourceError> GetResourceError() const;
+  // DEPRECATED: ImageResourceContents consumers shouldn't need to worry about
+  // whether the underlying Resource is being revalidated.
+  bool IsCacheValidator() const;
 
   // For FrameSerializer.
   bool HasCacheControlNoStoreHeader() const;
@@ -136,12 +126,12 @@ class CORE_EXPORT ImageResourceContent final
 
   // The following public methods should be called from ImageResource only.
 
-  // updateImage() is the single control point of image content modification
+  // UpdateImage() is the single control point of image content modification
   // from ImageResource that all image updates should call.
   // We clear and/or update images in this single method
   // (controlled by UpdateImageOption) rather than providing separate methods,
   // in order to centralize state changes and
-  // not to expose the state inbetween to ImageResource.
+  // not to expose the state in between to ImageResource.
   enum UpdateImageOption {
     // Updates the image (including placeholder and decode error handling
     // and notifying observers) if needed.
@@ -160,7 +150,7 @@ class CORE_EXPORT ImageResourceContent final
     // Only occurs when UpdateImage or ClearAndUpdateImage is specified.
     kShouldDecodeError,
   };
-  WARN_UNUSED_RESULT UpdateImageResult UpdateImage(PassRefPtr<SharedBuffer>,
+  WARN_UNUSED_RESULT UpdateImageResult UpdateImage(scoped_refptr<SharedBuffer>,
                                                    ResourceStatus,
                                                    UpdateImageOption,
                                                    bool all_data_received,
@@ -173,7 +163,7 @@ class CORE_EXPORT ImageResourceContent final
   void SetImageResourceInfo(ImageResourceInfo*);
 
   ResourcePriority PriorityFromObservers() const;
-  PassRefPtr<const SharedBuffer> ResourceBuffer() const;
+  scoped_refptr<const SharedBuffer> ResourceBuffer() const;
   bool ShouldUpdateImageImmediately() const;
   bool HasObservers() const {
     return !observers_.IsEmpty() || !finished_observers_.IsEmpty();
@@ -183,7 +173,9 @@ class CORE_EXPORT ImageResourceContent final
   }
 
  private:
-  explicit ImageResourceContent(PassRefPtr<blink::Image> = nullptr);
+  using CanDeferInvalidation = ImageResourceObserver::CanDeferInvalidation;
+
+  explicit ImageResourceContent(scoped_refptr<blink::Image> = nullptr);
 
   // ImageObserver
   void DecodedSizeChangedTo(const blink::Image*, size_t new_size) override;
@@ -192,13 +184,14 @@ class CORE_EXPORT ImageResourceContent final
   void ChangedInRect(const blink::Image*, const IntRect&) override;
   void AsyncLoadCompleted(const blink::Image*) override;
 
-  PassRefPtr<Image> CreateImage(bool is_multipart);
+  scoped_refptr<Image> CreateImage(bool is_multipart);
   void ClearImage();
 
   enum NotifyFinishOption { kShouldNotifyFinish, kDoNotNotifyFinish };
 
   // If not null, changeRect is the changed part of the image.
   void NotifyObservers(NotifyFinishOption,
+                       CanDeferInvalidation,
                        const IntRect* change_rect = nullptr);
   void MarkObserverFinished(ImageResourceObserver*);
   void UpdateToLoadedContentStatus(ResourceStatus);
@@ -221,7 +214,10 @@ class CORE_EXPORT ImageResourceContent final
 
   Member<ImageResourceInfo> info_;
 
-  RefPtr<blink::Image> image_;
+  float device_pixel_ratio_header_value_;
+  bool has_device_pixel_ratio_header_value_;
+
+  scoped_refptr<blink::Image> image_;
 
   HashCountedSet<ImageResourceObserver*> observers_;
   HashCountedSet<ImageResourceObserver*> finished_observers_;

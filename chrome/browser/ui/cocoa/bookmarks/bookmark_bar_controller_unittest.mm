@@ -10,7 +10,6 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -556,16 +555,6 @@ TEST_F(BookmarkBarControllerTest, ApplyLayoutImportBookmarksButton) {
   VerifyViewLayout(button, layout, 30, 40, true);
 }
 
-TEST_F(BookmarkBarControllerTest, ApplyLayoutSupervisedButton) {
-  NSButton* button = [bar_ supervisedBookmarksButton];
-
-  bookmarks::BookmarkBarLayout layout = {};
-  layout.visible_elements |=
-      bookmarks::kVisibleElementsMaskSupervisedBookmarksButton;
-  layout.supervised_bookmarks_button_offset = 40;
-
-  VerifyViewLayout(button, layout, 40, CGFLOAT_MAX, false);
-}
 TEST_F(BookmarkBarControllerTest, ApplyLayoutManagedButton) {
   NSButton* button = [bar_ managedBookmarksButton];
 
@@ -654,7 +643,7 @@ TEST_F(BookmarkBarControllerTest, ApplyLayoutBookmarkButtons) {
 // crbug.com/648554
 
 TEST_F(BookmarkBarControllerTest, LayoutNoBookmarks) {
-  // With no apps button, or managed/supervised buttons:
+  // With no apps button or managed button:
   profile()->GetPrefs()->SetBoolean(
       bookmarks::prefs::kShowAppsShortcutInBookmarkBar, false);
   bookmarks::BookmarkBarLayout layout = [bar_ layoutFromCurrentState];
@@ -733,29 +722,6 @@ TEST_F(BookmarkBarControllerTest, LayoutManagedBookmarksButton) {
   EXPECT_TRUE(layout.IsManagedBookmarksButtonVisible());
 }
 
-TEST_F(BookmarkBarControllerTest, LayoutSupervisedBookmarksButton) {
-  PrefService* prefs = profile()->GetPrefs();
-  // Doesn't show by default.
-  bookmarks::ManagedBookmarkService* managedBookmarkService =
-      ManagedBookmarkServiceFactory::GetForProfile(profile());
-  EXPECT_TRUE(managedBookmarkService->supervised_node()->empty());
-
-  bookmarks::BookmarkBarLayout layout = [bar_ layoutFromCurrentState];
-  EXPECT_FALSE(layout.IsSupervisedBookmarksButtonVisible());
-
-  // Add a managed bookmark.
-  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
-  dict->SetString("name", "Google");
-  dict->SetString("url", "http://google.com");
-  base::ListValue list;
-  list.Append(std::move(dict));
-  prefs->Set(bookmarks::prefs::kSupervisedBookmarks, list);
-  EXPECT_FALSE(managedBookmarkService->supervised_node()->empty());
-
-  layout = [bar_ layoutFromCurrentState];
-  EXPECT_TRUE(layout.IsSupervisedBookmarksButtonVisible());
-}
-
 TEST_F(BookmarkBarControllerTest, LayoutManagedAppsButton) {
   // By default the pref is not managed and the apps shortcut is shown.
   sync_preferences::TestingPrefServiceSyncable* prefs =
@@ -767,13 +733,13 @@ TEST_F(BookmarkBarControllerTest, LayoutManagedAppsButton) {
 
   // Hide the apps shortcut by policy, via the managed pref.
   prefs->SetManagedPref(bookmarks::prefs::kShowAppsShortcutInBookmarkBar,
-                        base::MakeUnique<base::Value>(false));
+                        std::make_unique<base::Value>(false));
   layout = [bar_ layoutFromCurrentState];
   EXPECT_FALSE(layout.IsAppsButtonVisible());
 
   // And try showing it via policy too.
   prefs->SetManagedPref(bookmarks::prefs::kShowAppsShortcutInBookmarkBar,
-                        base::MakeUnique<base::Value>(true));
+                        std::make_unique<base::Value>(true));
   layout = [bar_ layoutFromCurrentState];
   EXPECT_TRUE(layout.IsAppsButtonVisible());
 }
@@ -1495,9 +1461,7 @@ TEST_F(BookmarkBarControllerTest, TestClearOnDealloc) {
     EXPECT_TRUE([button action]);
   }
 
-  // This should dealloc. In production code, this is typically achieved more
-  // reliably by using -[HasWeakBrowserPointer browserWillBeDestroyed].
-  bar_.reset();
+  [bar_ browserWillBeDestroyed];
 
   // Make sure that everything is cleared.
   for (BookmarkButton* button in buttons.get()) {

@@ -12,8 +12,6 @@
 // OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 
-//go:generate peg delocate.peg
-
 // delocate performs several transformations of textual assembly code. See
 // crypto/fipsmodule/FIPS.md for an overview.
 package main
@@ -792,6 +790,9 @@ type instructionType int
 const (
 	instrPush instructionType = iota
 	instrMove
+	// instrTransformingMove is essentially a move, but it performs some
+	// transformation of the data during the process.
+	instrTransformingMove
 	instrJump
 	instrConditionalMove
 	instrOther
@@ -804,7 +805,7 @@ func classifyInstruction(instr string, args []*node32) instructionType {
 			return instrPush
 		}
 
-	case "mov", "movq", "vmovq":
+	case "mov", "movq", "vmovq", "movsd", "vmovsd":
 		if len(args) == 2 {
 			return instrMove
 		}
@@ -817,6 +818,11 @@ func classifyInstruction(instr string, args []*node32) instructionType {
 	case "call", "callq", "jmp", "jo", "jno", "js", "jns", "je", "jz", "jne", "jnz", "jb", "jnae", "jc", "jnb", "jae", "jnc", "jbe", "jna", "ja", "jnbe", "jl", "jnge", "jge", "jnl", "jle", "jng", "jg", "jnle", "jp", "jpe", "jnp", "jpo":
 		if len(args) == 1 {
 			return instrJump
+		}
+
+	case "vpbroadcastq":
+		if len(args) == 2 {
+			return instrTransformingMove
 		}
 	}
 
@@ -859,10 +865,21 @@ func saveRegister(w stringWriter) wrapperFunc {
 	}
 }
 
-func moveTo(w stringWriter, target string) wrapperFunc {
+func moveTo(w stringWriter, target string, isAVX bool) wrapperFunc {
 	return func(k func()) {
 		k()
-		w.WriteString("\tmovq %rax, " + target + "\n")
+		prefix := ""
+		if isAVX {
+			prefix = "v"
+		}
+		w.WriteString("\t" + prefix + "movq %rax, " + target + "\n")
+	}
+}
+
+func finalTransform(w stringWriter, transformInstruction, reg string) wrapperFunc {
+	return func(k func()) {
+		k()
+		w.WriteString("\t" + transformInstruction + " " + reg + ", " + reg + "\n")
 	}
 }
 
@@ -1014,6 +1031,13 @@ Args:
 				case instrMove:
 					assertNodeType(argNodes[1], ruleRegisterOrConstant)
 					targetReg = d.contents(argNodes[1])
+				case instrTransformingMove:
+					assertNodeType(argNodes[1], ruleRegisterOrConstant)
+					targetReg = d.contents(argNodes[1])
+					wrappers = append(wrappers, finalTransform(d.output, instructionName, targetReg))
+					if isValidLEATarget(targetReg) {
+						return nil, errors.New("Currently transforming moves are assumed to target XMM registers. Otherwise we'll pop %rax before reading it to do the transform.")
+					}
 				default:
 					return nil, fmt.Errorf("Cannot rewrite GOTPCREL reference for instruction %q", instructionName)
 				}
@@ -1024,7 +1048,8 @@ Args:
 					// XMM register, which is not a valid target of an LEA
 					// instruction.
 					wrappers = append(wrappers, saveRegister(d.output))
-					wrappers = append(wrappers, moveTo(d.output, targetReg))
+					isAVX := strings.HasPrefix(instructionName, "v")
+					wrappers = append(wrappers, moveTo(d.output, targetReg, isAVX))
 					targetReg = "%rax"
 					redzoneCleared = true
 				}

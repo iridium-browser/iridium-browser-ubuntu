@@ -14,7 +14,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/string_util.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #include "chrome/common/chrome_constants.h"
@@ -283,8 +282,7 @@ SyncMergeResult SupervisedUserSettingsService::MergeDataAndStartSyncing(
         dict->HasKey(key_suffix) ? SyncChange::ACTION_UPDATE
                                  : SyncChange::ACTION_ADD;
     change_list.push_back(SyncChange(FROM_HERE, change_type, data));
-    dict->SetWithoutPathExpansion(key_suffix,
-                                  base::MakeUnique<base::Value>(it.value()));
+    dict->SetKey(key_suffix, it.value().Clone());
     if (added_sync_keys.find(name_key) != added_sync_keys.end()) {
       num_added--;
     }
@@ -352,7 +350,7 @@ SyncDataList SupervisedUserSettingsService::GetAllSyncData(
 }
 
 SyncError SupervisedUserSettingsService::ProcessSyncChanges(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const SyncChangeList& change_list) {
   for (const SyncChange& sync_change : change_list) {
     SyncData data = sync_change.sync_data();
@@ -456,7 +454,7 @@ base::DictionaryValue* SupervisedUserSettingsService::GetDictionaryAndSplitKey(
   if (!split_settings->GetDictionary(prefix, &dict)) {
     DCHECK(!split_settings->HasKey(prefix));
     dict = split_settings->SetDictionary(
-        prefix, base::MakeUnique<base::DictionaryValue>());
+        prefix, std::make_unique<base::DictionaryValue>());
   }
   key->erase(0, pos + 1);
   return dict;
@@ -476,7 +474,7 @@ SupervisedUserSettingsService::GetSettings() {
     if (!SettingShouldApplyToPrefs(it.key()))
       continue;
 
-    settings->Set(it.key(), base::MakeUnique<base::Value>(it.value()));
+    settings->Set(it.key(), std::make_unique<base::Value>(it.value().Clone()));
   }
 
   base::DictionaryValue* split_settings = GetSplitSettings();
@@ -485,7 +483,7 @@ SupervisedUserSettingsService::GetSettings() {
     if (!SettingShouldApplyToPrefs(it.key()))
       continue;
 
-    settings->Set(it.key(), base::MakeUnique<base::Value>(it.value()));
+    settings->Set(it.key(), std::make_unique<base::Value>(it.value().Clone()));
   }
 
   return settings;

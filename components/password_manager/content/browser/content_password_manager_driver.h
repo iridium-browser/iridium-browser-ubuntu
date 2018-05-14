@@ -63,6 +63,7 @@ class ContentPasswordManagerDriver
                      autofill::PasswordFormFieldPredictionMap>& predictions)
       override;
   void GeneratedPasswordAccepted(const base::string16& password) override;
+  void UserSelectedManualGenerationOption() override;
   void FillSuggestion(const base::string16& username,
                       const base::string16& password) override;
   void PreviewSuggestion(const base::string16& username,
@@ -71,11 +72,14 @@ class ContentPasswordManagerDriver
       const autofill::PasswordFormFillData& form_data) override;
   void ClearPreviewedForm() override;
   void ForceSavePassword() override;
+  void ShowManualFallbackForSaving(const autofill::PasswordForm& form) override;
+  void HideManualFallbackForSaving() override;
   void GeneratePassword() override;
   void SendLoggingAvailability() override;
   void AllowToRunFormClassifier() override;
   autofill::AutofillDriver* GetAutofillDriver() override;
   bool IsMainFrame() const override;
+  void MatchingBlacklistedFormFound() override;
 
   PasswordGenerationManager* GetPasswordGenerationManager() override;
   PasswordManager* GetPasswordManager() override;
@@ -91,7 +95,8 @@ class ContentPasswordManagerDriver
       bool did_stop_loading) override;
   void PasswordFormSubmitted(
       const autofill::PasswordForm& password_form) override;
-  void InPageNavigation(const autofill::PasswordForm& password_form) override;
+  void SameDocumentNavigation(
+      const autofill::PasswordForm& password_form) override;
   void PresaveGeneratedPassword(
       const autofill::PasswordForm& password_form) override;
   void PasswordNoLongerGenerated(
@@ -103,6 +108,8 @@ class ContentPasswordManagerDriver
                                const gfx::RectF& bounds) override;
   void ShowNotSecureWarning(base::i18n::TextDirection text_direction,
                             const gfx::RectF& bounds) override;
+  void ShowManualFallbackSuggestion(base::i18n::TextDirection text_direction,
+                                    const gfx::RectF& bounds) override;
   void RecordSavePasswordProgress(const std::string& log) override;
   void UserModifiedPasswordField() override;
   void SaveGenerationFieldDetectedByClassifier(

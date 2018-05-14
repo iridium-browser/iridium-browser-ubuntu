@@ -6,7 +6,7 @@
 #include "base/message_loop/message_loop.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "url/mojo/url_test.mojom-blink.h"
+#include "url/mojom/url_test.mojom-blink.h"
 #include "url/url_constants.h"
 
 namespace blink {
@@ -22,7 +22,7 @@ class UrlTestImpl : public url::mojom::blink::UrlTest {
     std::move(callback).Run(in);
   }
 
-  void BounceOrigin(const RefPtr<SecurityOrigin>& in,
+  void BounceOrigin(const scoped_refptr<const SecurityOrigin>& in,
                     BounceOriginCallback callback) override {
     std::move(callback).Run(in);
   }
@@ -74,26 +74,16 @@ TEST(KURLSecurityOriginStructTraitsTest, Basic) {
   }
 
   // Test basic Origin serialization.
-  RefPtr<SecurityOrigin> non_unique =
+  scoped_refptr<const SecurityOrigin> non_unique =
       SecurityOrigin::Create("http", "www.google.com", 80);
-  RefPtr<SecurityOrigin> output;
+  scoped_refptr<const SecurityOrigin> output;
   EXPECT_TRUE(proxy->BounceOrigin(non_unique, &output));
-  EXPECT_TRUE(non_unique->IsSameSchemeHostPortAndSuborigin(output.Get()));
-  EXPECT_TRUE(non_unique->IsSameSchemeHostPort(output.Get()));
-  EXPECT_FALSE(output->HasSuborigin());
+  EXPECT_TRUE(non_unique->IsSameSchemeHostPort(output.get()));
   EXPECT_FALSE(output->IsUnique());
 
-  RefPtr<SecurityOrigin> unique = SecurityOrigin::CreateUnique();
+  scoped_refptr<const SecurityOrigin> unique = SecurityOrigin::CreateUnique();
   EXPECT_TRUE(proxy->BounceOrigin(unique, &output));
   EXPECT_TRUE(output->IsUnique());
-
-  RefPtr<SecurityOrigin> with_sub_origin =
-      SecurityOrigin::Create("http", "www.google.com", 80, "suborigin");
-  EXPECT_TRUE(proxy->BounceOrigin(with_sub_origin, &output));
-  EXPECT_TRUE(with_sub_origin->IsSameSchemeHostPortAndSuborigin(output.Get()));
-  EXPECT_TRUE(with_sub_origin->IsSameSchemeHostPort(output.Get()));
-  EXPECT_TRUE(output->HasSuborigin());
-  EXPECT_FALSE(output->IsUnique());
 }
 
 }  // namespace url

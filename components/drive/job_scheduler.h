@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
@@ -20,7 +20,7 @@
 #include "components/drive/job_queue.h"
 #include "components/drive/service/drive_service_interface.h"
 #include "net/base/network_change_notifier.h"
-#include "services/device/public/interfaces/wake_lock_provider.mojom.h"
+#include "services/device/public/mojom/wake_lock_provider.mojom.h"
 
 class PrefService;
 
@@ -60,9 +60,8 @@ struct ClientContext {
 // in the queue until the network type changes.
 // On offline case, no jobs run. USER_INITIATED jobs fail immediately.
 // BACKGROUND jobs stay in the queue and wait for network connection.
-class JobScheduler
-    : public net::NetworkChangeNotifier::ConnectionTypeObserver,
-      public JobListInterface {
+class JobScheduler : public net::NetworkChangeNotifier::NetworkChangeObserver,
+                     public JobListInterface {
  public:
   JobScheduler(PrefService* pref_service,
                EventLogger* logger,
@@ -362,8 +361,8 @@ class JobScheduler
   // Updates the progress status of the specified job.
   void UpdateProgress(JobID job_id, int64_t progress, int64_t total);
 
-  // net::NetworkChangeNotifier::ConnectionTypeObserver override.
-  void OnConnectionTypeChanged(
+  // net::NetworkChangeNotifier::NetworkChangeObserver override.
+  void OnNetworkChanged(
       net::NetworkChangeNotifier::ConnectionType type) override;
 
   // Get the type of queue the specified job should be put in.
@@ -402,7 +401,7 @@ class JobScheduler
   std::unique_ptr<JobQueue> queue_[NUM_QUEUES];
 
   // The list of queued job info indexed by job IDs.
-  using JobIDMap = IDMap<std::unique_ptr<JobEntry>>;
+  using JobIDMap = base::IDMap<std::unique_ptr<JobEntry>>;
   JobIDMap job_map_;
 
   // The list of observers for the scheduler.

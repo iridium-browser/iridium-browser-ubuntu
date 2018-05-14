@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/file_manager/snapshot_manager.h"
 
 #include "base/bind.h"
+#include "base/containers/circular_deque.h"
 #include "base/sys_info.h"
 #include "base/task_scheduler/post_task.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
@@ -93,7 +94,8 @@ void CreateSnapshotFileOnIOThread(
 // to be used together with base::Bind. After this function finishes, the
 // Bind callback should destruct the bound argument.
 void FreeReferenceOnIOThread(
-    const std::deque<SnapshotManager::FileReferenceWithSizeInfo>& file_refs) {
+    const base::circular_deque<SnapshotManager::FileReferenceWithSizeInfo>&
+        file_refs) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 }
 
@@ -159,7 +161,7 @@ void SnapshotManager::CreateManagedSnapshotAfterSpaceComputed(
   }
 
   // Free up to the required size.
-  std::deque<FileReferenceWithSizeInfo> to_free;
+  base::circular_deque<FileReferenceWithSizeInfo> to_free;
   while (needed_space > 0 && !file_refs_.empty()) {
     needed_space -= file_refs_.front().file_size;
     to_free.push_back(file_refs_.front());
@@ -192,7 +194,7 @@ void SnapshotManager::OnCreateSnapshotFile(
     base::File::Error result,
     const base::File::Info& file_info,
     const base::FilePath& platform_path,
-    const scoped_refptr<storage::ShareableFileReference>& file_ref) {
+    scoped_refptr<storage::ShareableFileReference> file_ref) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   if (result != base::File::FILE_OK) {
@@ -200,7 +202,8 @@ void SnapshotManager::OnCreateSnapshotFile(
     return;
   }
 
-  file_refs_.push_back(FileReferenceWithSizeInfo(file_ref, file_info.size));
+  file_refs_.push_back(
+      FileReferenceWithSizeInfo(std::move(file_ref), file_info.size));
   callback.Run(platform_path);
 }
 

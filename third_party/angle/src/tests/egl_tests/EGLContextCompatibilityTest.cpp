@@ -283,6 +283,11 @@ TEST_P(EGLContextCompatibilityTest, PbufferSameConfig)
 // config works or errors according to the EGL compatibility rules
 TEST_P(EGLContextCompatibilityTest, WindowDifferentConfig)
 {
+    // anglebug.com/2183
+    // Actually failed only on (IsIntel() && IsWindows() && IsD3D11()),
+    // but it's impossible to do other tests since GL_RENDERER is NULL
+    ANGLE_SKIP_TEST_IF(IsWindows());
+
     for (size_t i = 0; i < mConfigs.size(); i++)
     {
         EGLConfig config1 = mConfigs[i];
@@ -352,4 +357,9 @@ TEST_P(EGLContextCompatibilityTest, PbufferDifferentConfig)
     }
 }
 
+// Only run the EGLContextCompatibilityTest on release builds.  The execution time of this test
+// scales with the square of the number of configs exposed and can time out in some debug builds.
+// http://anglebug.com/2121
+#if defined(NDEBUG)
 ANGLE_INSTANTIATE_TEST(EGLContextCompatibilityTest, ES2_D3D9(), ES2_D3D11(), ES2_OPENGL());
+#endif

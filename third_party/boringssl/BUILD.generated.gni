@@ -60,6 +60,7 @@ crypto_sources = [
   "src/crypto/chacha/chacha.c",
   "src/crypto/cipher_extra/cipher_extra.c",
   "src/crypto/cipher_extra/derive_key.c",
+  "src/crypto/cipher_extra/e_aesccm.c",
   "src/crypto/cipher_extra/e_aesctrhmac.c",
   "src/crypto/cipher_extra/e_aesgcmsiv.c",
   "src/crypto/cipher_extra/e_chacha20poly1305.c",
@@ -74,22 +75,19 @@ crypto_sources = [
   "src/crypto/conf/conf.c",
   "src/crypto/conf/conf_def.h",
   "src/crypto/conf/internal.h",
+  "src/crypto/cpu-aarch64-fuchsia.c",
   "src/crypto/cpu-aarch64-linux.c",
   "src/crypto/cpu-arm-linux.c",
   "src/crypto/cpu-arm.c",
   "src/crypto/cpu-intel.c",
   "src/crypto/cpu-ppc64le.c",
   "src/crypto/crypto.c",
-  "src/crypto/curve25519/curve25519.c",
-  "src/crypto/curve25519/internal.h",
   "src/crypto/curve25519/spake25519.c",
-  "src/crypto/curve25519/x25519-x86_64.c",
   "src/crypto/dh/check.c",
   "src/crypto/dh/dh.c",
   "src/crypto/dh/dh_asn1.c",
   "src/crypto/dh/params.c",
   "src/crypto/digest_extra/digest_extra.c",
-  "src/crypto/digest_extra/internal.h",
   "src/crypto/dsa/dsa.c",
   "src/crypto/dsa/dsa_asn1.c",
   "src/crypto/ec_extra/ec_asn1.c",
@@ -97,6 +95,7 @@ crypto_sources = [
   "src/crypto/ecdsa_extra/ecdsa_asn1.c",
   "src/crypto/engine/engine.c",
   "src/crypto/err/err.c",
+  "src/crypto/err/internal.h",
   "src/crypto/evp/digestsign.c",
   "src/crypto/evp/evp.c",
   "src/crypto/evp/evp_asn1.c",
@@ -130,6 +129,7 @@ crypto_sources = [
   "src/crypto/fipsmodule/modes/internal.h",
   "src/crypto/fipsmodule/rand/internal.h",
   "src/crypto/fipsmodule/rsa/internal.h",
+  "src/crypto/fipsmodule/tls/internal.h",
   "src/crypto/hkdf/hkdf.c",
   "src/crypto/internal.h",
   "src/crypto/lhash/lhash.c",
@@ -319,6 +319,7 @@ crypto_sources = [
   "src/include/openssl/rsa.h",
   "src/include/openssl/safestack.h",
   "src/include/openssl/sha.h",
+  "src/include/openssl/span.h",
   "src/include/openssl/srtp.h",
   "src/include/openssl/stack.h",
   "src/include/openssl/thread.h",
@@ -326,6 +327,9 @@ crypto_sources = [
   "src/include/openssl/x509.h",
   "src/include/openssl/x509_vfy.h",
   "src/include/openssl/x509v3.h",
+  "src/third_party/fiat/curve25519.c",
+  "src/third_party/fiat/curve25519_tables.h",
+  "src/third_party/fiat/internal.h",
 ]
 
 ssl_sources = [
@@ -341,6 +345,8 @@ ssl_sources = [
   "src/ssl/d1_srtp.cc",
   "src/ssl/dtls_method.cc",
   "src/ssl/dtls_record.cc",
+  "src/ssl/handoff.cc",
+  "src/ssl/handshake.cc",
   "src/ssl/handshake_client.cc",
   "src/ssl/handshake_server.cc",
   "src/ssl/internal.h",
@@ -352,8 +358,8 @@ ssl_sources = [
   "src/ssl/ssl_buffer.cc",
   "src/ssl/ssl_cert.cc",
   "src/ssl/ssl_cipher.cc",
-  "src/ssl/ssl_ecdh.cc",
   "src/ssl/ssl_file.cc",
+  "src/ssl/ssl_key_share.cc",
   "src/ssl/ssl_lib.cc",
   "src/ssl/ssl_privkey.cc",
   "src/ssl/ssl_session.cc",
@@ -458,7 +464,6 @@ crypto_sources_linux_x86_64 = [
   "linux-x86_64/crypto/fipsmodule/vpaes-x86_64.S",
   "linux-x86_64/crypto/fipsmodule/x86_64-mont.S",
   "linux-x86_64/crypto/fipsmodule/x86_64-mont5.S",
-  "src/crypto/curve25519/asm/x25519-asm-x86_64.S",
 ]
 
 crypto_sources_mac_x86 = [
@@ -495,7 +500,6 @@ crypto_sources_mac_x86_64 = [
   "mac-x86_64/crypto/fipsmodule/vpaes-x86_64.S",
   "mac-x86_64/crypto/fipsmodule/x86_64-mont.S",
   "mac-x86_64/crypto/fipsmodule/x86_64-mont5.S",
-  "src/crypto/curve25519/asm/x25519-asm-x86_64.S",
 ]
 
 crypto_sources_win_x86 = [
@@ -535,8 +539,12 @@ crypto_sources_win_x86_64 = [
 ]
 
 fuzzers = [
+  "bn_div",
+  "bn_mod_exp",
   "cert",
   "client",
+  "dtls_client",
+  "dtls_server",
   "pkcs8",
   "privkey",
   "read_pem",

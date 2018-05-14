@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/json/json_reader.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/time/tick_clock.h"
@@ -52,7 +51,7 @@ MATCHER_P(EqualsJSON, json, "equals JSON") {
                      << "parse error: " << err_msg;
     return false;
   }
-  return base::Value::Equals(actual.get(), expected.get());
+  return *expected == *actual;
 }
 
 }  // namespace
@@ -64,7 +63,7 @@ class JsonRequestTest : public testing::Test {
             ntp_snippets::kArticleSuggestionsFeature.name,
             {{"send_top_languages", "true"}, {"send_user_class", "true"}},
             {ntp_snippets::kArticleSuggestionsFeature.name}),
-        pref_service_(base::MakeUnique<TestingPrefServiceSimple>()),
+        pref_service_(std::make_unique<TestingPrefServiceSimple>()),
         mock_task_runner_(new base::TestMockTimeTaskRunner()),
         clock_(mock_task_runner_->GetMockClock()),
         request_context_getter_(
@@ -76,7 +75,7 @@ class JsonRequestTest : public testing::Test {
   std::unique_ptr<language::UrlLanguageHistogram> MakeLanguageHistogram(
       const std::set<std::string>& codes) {
     std::unique_ptr<language::UrlLanguageHistogram> language_histogram =
-        base::MakeUnique<language::UrlLanguageHistogram>(pref_service_.get());
+        std::make_unique<language::UrlLanguageHistogram>(pref_service_.get());
     // There must be at least 10 visits before the top languages are defined.
     for (int i = 0; i < 10; i++) {
       for (const std::string& code : codes) {
@@ -266,6 +265,50 @@ TEST_F(JsonRequestTest, BuildRequestWithUILanguageOnly) {
                          "    \"frequency\" : 1.0"
                          "  }]"
                          "}"));
+}
+
+TEST_F(JsonRequestTest,
+       ShouldPropagateCountToFetchWhenExclusiveCategoryPresent) {
+  JsonRequest::Builder builder;
+  RequestParams params;
+  params.interactive_request = true;
+  params.language_code = "en";
+  params.exclusive_category =
+      Category::FromKnownCategory(KnownCategories::ARTICLES);
+  params.count_to_fetch = 25;
+  builder.SetParams(params);
+
+  EXPECT_THAT(builder.PreviewRequestBodyForTesting(), EqualsJSON(R"(
+                              {
+                                "priority": "USER_ACTION",
+                                "uiLanguage": "en",
+                                "excludedSuggestionIds": [],
+                                "categoryParameters": [{
+                                  "id": 1,
+                                  "numSuggestions": 25
+                                }]
+                              }
+                            )"));
+}
+
+// TODO(vitaliii): Propagate count to fetch in this case as well and delete this
+// test. Currently the server does not support this.
+TEST_F(JsonRequestTest,
+       ShouldNotPropagateCountToFetchWhenExclusiveCategoryNotPresent) {
+  JsonRequest::Builder builder;
+  RequestParams params;
+  params.interactive_request = true;
+  params.language_code = "en";
+  params.count_to_fetch = 10;
+  builder.SetParams(params);
+
+  EXPECT_THAT(builder.PreviewRequestBodyForTesting(), EqualsJSON(R"(
+                              {
+                                "priority": "USER_ACTION",
+                                "uiLanguage": "en",
+                                "excludedSuggestionIds": []
+                              }
+                            )"));
 }
 
 }  // namespace internal

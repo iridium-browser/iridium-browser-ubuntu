@@ -58,7 +58,8 @@ std::unique_ptr<base::Value> NetLogPingEndCallback(
 }
 
 net::NetworkTrafficAnnotationTag kTrafficAnnotation =
-    net::DefineNetworkTrafficAnnotation("safe_browsing_extended_reporting", R"(
+    net::DefineNetworkTrafficAnnotation("safe_browsing_extended_reporting",
+                                        R"(
       semantics {
         sender: "Safe Browsing Extended Reporting"
         description:
@@ -79,7 +80,7 @@ net::NetworkTrafficAnnotationTag kTrafficAnnotation =
         destination: GOOGLE_OWNED_SERVICE
       }
       policy {
-        cookies_allowed: true
+        cookies_allowed: YES
         cookies_store: "Safe Browsing Cookie Store"
         setting:
           "Users can control this feature via the 'Automatically report "
@@ -201,9 +202,7 @@ GURL BasePingManager::SafeBrowsingHitUrl(
          hit_report.threat_type == SB_THREAT_TYPE_URL_UNWANTED ||
          hit_report.threat_type == SB_THREAT_TYPE_URL_BINARY_MALWARE ||
          hit_report.threat_type == SB_THREAT_TYPE_URL_CLIENT_SIDE_PHISHING ||
-         hit_report.threat_type == SB_THREAT_TYPE_URL_CLIENT_SIDE_MALWARE ||
-         hit_report.threat_type ==
-             SB_THREAT_TYPE_URL_PASSWORD_PROTECTION_PHISHING);
+         hit_report.threat_type == SB_THREAT_TYPE_URL_CLIENT_SIDE_MALWARE);
   std::string url = ProtocolManagerHelper::ComposeUrl(
       url_prefix_, "report", client_name_, version_, std::string(),
       hit_report.extended_reporting_level);
@@ -227,9 +226,6 @@ GURL BasePingManager::SafeBrowsingHitUrl(
       break;
     case SB_THREAT_TYPE_URL_CLIENT_SIDE_MALWARE:
       threat_list = "malcsdhit";
-      break;
-    case SB_THREAT_TYPE_URL_PASSWORD_PROTECTION_PHISHING:
-      threat_list = "phishpphit";
       break;
     default:
       NOTREACHED();

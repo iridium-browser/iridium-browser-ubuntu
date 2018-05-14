@@ -17,9 +17,7 @@ namespace payments {
 class PaymentRequestShippingOptionViewControllerTest
     : public PaymentRequestBrowserTestBase {
  protected:
-  PaymentRequestShippingOptionViewControllerTest()
-      : PaymentRequestBrowserTestBase(
-            "/payment_request_dynamic_shipping_test.html") {}
+  PaymentRequestShippingOptionViewControllerTest() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PaymentRequestShippingOptionViewControllerTest);
@@ -27,6 +25,7 @@ class PaymentRequestShippingOptionViewControllerTest
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestShippingOptionViewControllerTest,
                        SelectingVariousShippingOptions) {
+  NavigateTo("/payment_request_dynamic_shipping_test.html");
   // In MI state, shipping is $5.00.
   autofill::AutofillProfile michigan = autofill::test::GetFullProfile2();
   michigan.set_use_count(100U);
@@ -55,8 +54,10 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestShippingOptionViewControllerTest,
                 "To see shipping methods and requirements, select an address"),
             GetLabelText(DialogViewID::SHIPPING_ADDRESS_SECTION_HEADER_LABEL));
 
-  ResetEventObserverForSequence(std::list<DialogEvent>{
-      DialogEvent::SPEC_DONE_UPDATING, DialogEvent::BACK_NAVIGATION});
+  ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::SPEC_DONE_UPDATING,
+                               DialogEvent::BACK_NAVIGATION});
   ClickOnChildInListViewAndWait(
       /* child_index=*/0, /*total_num_children=*/2,
       DialogViewID::SHIPPING_ADDRESS_SHEET_LIST_VIEW,
@@ -86,7 +87,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestShippingOptionViewControllerTest,
 
   // Go to the shipping address screen and select the second address (Canada).
   OpenShippingAddressSectionScreen();
-  ResetEventObserver(DialogEvent::SPEC_DONE_UPDATING);
+  ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::SPEC_DONE_UPDATING});
   ClickOnChildInListViewAndWait(
       /* child_index=*/1, /*total_num_children=*/2,
       DialogViewID::SHIPPING_ADDRESS_SHEET_LIST_VIEW, false);

@@ -133,7 +133,7 @@ class DisplayOzone final : public DisplayEGL
 
     bool isValidNativeWindow(EGLNativeWindowType window) const override;
 
-    egl::Error getDevice(DeviceImpl **device) override;
+    DeviceImpl *createDevice() override;
 
     egl::Error waitClient(const gl::Context *context) const override;
     egl::Error waitNative(const gl::Context *context, EGLint engine) const override;
@@ -145,6 +145,8 @@ class DisplayOzone final : public DisplayEGL
     void setSwapInterval(EGLSurface drawable, SwapControlData *data);
 
   private:
+    egl::Error makeCurrentSurfaceless(gl::Context *context) override;
+
     GLuint makeShader(GLuint type, const char *src);
     void drawBuffer(Buffer *buffer);
     void drawWithBlit(Buffer *buffer);

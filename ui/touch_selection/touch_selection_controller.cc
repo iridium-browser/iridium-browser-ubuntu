@@ -88,12 +88,31 @@ void TouchSelectionController::OnSelectionBoundsChanged(
 
   // Swap the Handles when the start and end selection points cross each other.
   if (active_status_ == SELECTION_ACTIVE) {
-    if ((start_selection_handle_->IsActive() &&
-         end_.edge_bottom() == start.edge_bottom()) ||
-        (end_selection_handle_->IsActive() &&
-         end.edge_bottom() == start_.edge_bottom())) {
+    // Bounds have the same orientation.
+    bool need_swap = (start_selection_handle_->IsActive() &&
+                      end_.edge_bottom() == start.edge_bottom()) ||
+                     (end_selection_handle_->IsActive() &&
+                      end.edge_bottom() == start_.edge_bottom());
+
+    // Bounds have different orientation.
+    // Specifically, for writing-mode: vertical-*, selection bounds are
+    // horizontal.
+    // When vertical-lr:
+    //   - start bound is from right to left,
+    //   - end bound is from left to right.
+    // When vertical-rl:
+    //   - start bound is from left to right,
+    //   - end bound is from right to left.
+    // So when previous start/end bound become current end/start bound,
+    // edge_top() and edge_bottom() are swapped. Therefore, we are comparing
+    // edge_bottom() with edge_top() here.
+    need_swap |= (start_selection_handle_->IsActive() &&
+                  end_.edge_bottom() == start.edge_top()) ||
+                 (end_selection_handle_->IsActive() &&
+                  end.edge_bottom() == start_.edge_top());
+
+    if (need_swap)
       start_selection_handle_.swap(end_selection_handle_);
-    }
   }
 
   start_ = start;
@@ -109,23 +128,10 @@ void TouchSelectionController::OnSelectionBoundsChanged(
   base::AutoReset<InputEventType> auto_reset_response_pending_input_event(
       &response_pending_input_event_, causal_input_event);
 
-  const bool is_selection_dragging = active_status_ == SELECTION_ACTIVE &&
-                                     (start_selection_handle_->IsActive() ||
-                                      end_selection_handle_->IsActive());
-
-  // It's possible that the bounds temporarily overlap while a selection handle
-  // is being dragged, incorrectly reporting a CENTER orientation.
-  if (is_selection_dragging) {
-    if (start_orientation_ == TouchHandleOrientation::CENTER)
-      start_orientation_ = start_selection_handle_->orientation();
-    if (end_orientation_ == TouchHandleOrientation::CENTER)
-      end_orientation_ = end_selection_handle_->orientation();
-  }
-
-  if (GetStartPosition() != GetEndPosition() ||
-      (is_selection_dragging &&
-       start_orientation_ != TouchHandleOrientation::UNDEFINED &&
-       end_orientation_ != TouchHandleOrientation::UNDEFINED)) {
+  if ((start_orientation_ == TouchHandleOrientation::LEFT ||
+       start_orientation_ == TouchHandleOrientation::RIGHT) &&
+      (end_orientation_ == TouchHandleOrientation::RIGHT ||
+       end_orientation_ == TouchHandleOrientation::LEFT)) {
     OnSelectionChanged();
     return;
   }
@@ -166,13 +172,13 @@ void TouchSelectionController::OnViewportChanged(
 
 bool TouchSelectionController::WillHandleTouchEvent(const MotionEvent& event) {
   bool handled = WillHandleTouchEventImpl(event);
-  // If ACTION_DOWN is consumed, the rest of touch sequence should be consumed,
+  // If Action::DOWN is consumed, the rest of touch sequence should be consumed,
   // too, regardless of value of |handled|.
-  // TODO(mohsen): This will consume touch events until the next ACTION_DOWN.
-  // Ideally we should consume until the final ACTION_UP/ACTION_CANCEL.
-  // But, apparently, we can't reliably determine the final ACTION_CANCEL in a
+  // TODO(mohsen): This will consume touch events until the next Action::DOWN.
+  // Ideally we should consume until the final Action::UP/Action::CANCEL.
+  // But, apparently, we can't reliably determine the final Action::CANCEL in a
   // multi-touch scenario. See https://crbug.com/653212.
-  if (event.GetAction() == MotionEvent::ACTION_DOWN)
+  if (event.GetAction() == MotionEvent::Action::DOWN)
     consume_touch_sequence_ = handled;
   return handled || consume_touch_sequence_;
 }
@@ -273,6 +279,22 @@ gfx::RectF TouchSelectionController::GetEndHandleRect() const {
   return gfx::RectF();
 }
 
+float TouchSelectionController::GetActiveHandleMiddleY() const {
+  const gfx::SelectionBound* bound = nullptr;
+  if (active_status_ == INSERTION_ACTIVE && insertion_handle_->IsActive())
+    bound = &start_;
+  if (active_status_ == SELECTION_ACTIVE) {
+    if (start_selection_handle_->IsActive())
+      bound = &start_;
+    else if (end_selection_handle_->IsActive())
+      bound = &end_;
+  }
+
+  if (!bound)
+    return 0.f;
+  return (bound->edge_top().y() + bound->edge_bottom().y()) / 2.f;
+}
+
 const gfx::PointF& TouchSelectionController::GetStartPosition() const {
   return start_.edge_bottom();
 }
@@ -366,6 +388,13 @@ void TouchSelectionController::OnDragUpdate(
     client_->MoveCaret(line_position);
   else
     client_->MoveRangeSelectionExtent(line_position);
+
+  // We use the bound middle point to restrict the ability to move up and down,
+  // but let user move it more freely in horizontal direction.
+  if (&draggable != &longpress_drag_selector_) {
+    float y = GetActiveHandleMiddleY();
+    client_->OnDragUpdate(gfx::PointF(drag_position.x(), y));
+  }
 }
 
 void TouchSelectionController::OnDragEnd(

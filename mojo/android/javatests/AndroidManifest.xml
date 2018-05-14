@@ -22,8 +22,9 @@
         <uses-library android:name="android.test.runner" />
     </application>
 
-    <instrumentation android:name="android.test.InstrumentationTestRunner"
+    <instrumentation android:name="android.support.test.runner.AndroidJUnitRunner"
         android:targetPackage="org.chromium.mojo.tests"
-        android:label="Tests for org.chromium.mojo"/>
+        android:label="Tests for org.chromium.mojo"
+        chromium-junit4="true"/>
 
 </manifest>

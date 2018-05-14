@@ -4,9 +4,10 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -44,7 +45,7 @@ class TestTextInputClient : public ui::mojom::TextInputClient {
 
   CompositionEvent WaitUntilCompositionEvent() {
     if (!receieved_event_.has_value()) {
-      run_loop_ = base::MakeUnique<base::RunLoop>();
+      run_loop_ = std::make_unique<base::RunLoop>();
       run_loop_->Run();
       run_loop_.reset();
     }
@@ -72,9 +73,8 @@ class TestTextInputClient : public ui::mojom::TextInputClient {
     if (run_loop_)
       run_loop_->Quit();
   }
-  void InsertText(const std::string& text) override {
-    CompositionEvent ev = {CompositionEventType::INSERT_TEXT,
-                           base::UTF8ToUTF16(text), 0};
+  void InsertText(const base::string16& text) override {
+    CompositionEvent ev = {CompositionEventType::INSERT_TEXT, text, 0};
     receieved_event_ = ev;
     if (run_loop_)
       run_loop_->Quit();
@@ -86,6 +86,11 @@ class TestTextInputClient : public ui::mojom::TextInputClient {
     receieved_event_ = ev;
     if (run_loop_)
       run_loop_->Quit();
+  }
+  void DispatchKeyEventPostIME(
+      std::unique_ptr<ui::Event> event,
+      DispatchKeyEventPostIMECallback callback) override {
+    std::move(callback).Run(false);
   }
 
   mojo::Binding<ui::mojom::TextInputClient> binding_;
@@ -105,9 +110,9 @@ class InputMethodBridgeChromeOSTest : public testing::Test {
     ui::IMEBridge::Initialize();
 
     ui::mojom::TextInputClientPtr client_ptr;
-    client_ = base::MakeUnique<TestTextInputClient>(MakeRequest(&client_ptr));
-    input_method_ = base::MakeUnique<InputMethodBridge>(
-        base::MakeUnique<RemoteTextInputClient>(
+    client_ = std::make_unique<TestTextInputClient>(MakeRequest(&client_ptr));
+    input_method_ = std::make_unique<InputMethodBridge>(
+        std::make_unique<RemoteTextInputClient>(
             std::move(client_ptr), ui::TEXT_INPUT_TYPE_TEXT,
             ui::TEXT_INPUT_MODE_DEFAULT, base::i18n::LEFT_TO_RIGHT, 0,
             gfx::Rect()));
@@ -122,7 +127,7 @@ class InputMethodBridgeChromeOSTest : public testing::Test {
                    base::Unretained(this)));
 
     if (!handled_.has_value()) {
-      run_loop_ = base::MakeUnique<base::RunLoop>();
+      run_loop_ = std::make_unique<base::RunLoop>();
       run_loop_->Run();
       run_loop_.reset();
     }
@@ -134,7 +139,7 @@ class InputMethodBridgeChromeOSTest : public testing::Test {
                                              ui::DomCode code,
                                              int flags,
                                              base::char16 character) const {
-    return base::MakeUnique<ui::KeyEvent>(ui::ET_KEY_PRESSED, vkey, code, flags,
+    return std::make_unique<ui::KeyEvent>(ui::ET_KEY_PRESSED, vkey, code, flags,
                                           ui::DomKey::FromCharacter(character),
                                           ui::EventTimeForNow());
   }

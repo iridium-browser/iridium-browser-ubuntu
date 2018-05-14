@@ -53,8 +53,7 @@ bool IsScanLine8bpp(uint8_t* pBuf, int width) {
   return false;
 }
 
-int DetectFirstLastScan(const CFX_RetainPtr<CFX_DIBitmap>& pBitmap,
-                        bool bFirst) {
+int DetectFirstLastScan(const RetainPtr<CFX_DIBitmap>& pBitmap, bool bFirst) {
   int height = pBitmap->GetHeight();
   int pitch = pBitmap->GetPitch();
   int width = pBitmap->GetWidth();
@@ -92,7 +91,7 @@ CFX_GlyphBitmap* CPDF_Type3Cache::LoadGlyph(uint32_t charcode,
   keygen.Generate(
       4, FXSYS_round(pMatrix->a * 10000), FXSYS_round(pMatrix->b * 10000),
       FXSYS_round(pMatrix->c * 10000), FXSYS_round(pMatrix->d * 10000));
-  CFX_ByteString FaceGlyphsKey(keygen.m_Key, keygen.m_KeyLen);
+  ByteString FaceGlyphsKey(keygen.m_Key, keygen.m_KeyLen);
   CPDF_Type3Glyphs* pSizeCache;
   auto it = m_SizeMap.find(FaceGlyphsKey);
   if (it == m_SizeMap.end()) {
@@ -120,15 +119,15 @@ std::unique_ptr<CFX_GlyphBitmap> CPDF_Type3Cache::RenderGlyph(
     float retinaScaleX,
     float retinaScaleY) {
   const CPDF_Type3Char* pChar = m_pFont->LoadChar(charcode);
-  if (!pChar || !pChar->m_pBitmap)
+  if (!pChar || !pChar->GetBitmap())
     return nullptr;
 
-  CFX_RetainPtr<CFX_DIBitmap> pBitmap = pChar->m_pBitmap;
-  CFX_Matrix image_matrix = pChar->m_ImageMatrix;
   CFX_Matrix text_matrix(pMatrix->a, pMatrix->b, pMatrix->c, pMatrix->d, 0, 0);
+  CFX_Matrix image_matrix = pChar->matrix();
   image_matrix.Concat(text_matrix);
 
-  CFX_RetainPtr<CFX_DIBitmap> pResBitmap;
+  RetainPtr<CFX_DIBitmap> pBitmap = pChar->GetBitmap();
+  RetainPtr<CFX_DIBitmap> pResBitmap;
   int left = 0;
   int top = 0;
   if (fabs(image_matrix.b) < fabs(image_matrix.a) / 100 &&

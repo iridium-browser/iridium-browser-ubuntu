@@ -29,6 +29,8 @@
 
 namespace {
 
+constexpr size_t kBytesPerCharacter = sizeof(unsigned short);
+
 CPDF_TextPage* CPDFTextPageFromFPDFTextPage(FPDF_TEXTPAGE text_page) {
   return static_cast<CPDF_TextPage*>(text_page);
 }
@@ -43,7 +45,7 @@ CPDF_LinkExtract* CPDFLinkExtractFromFPDFPageLink(FPDF_PAGELINK link) {
 
 }  // namespace
 
-DLLEXPORT FPDF_TEXTPAGE STDCALL FPDFText_LoadPage(FPDF_PAGE page) {
+FPDF_EXPORT FPDF_TEXTPAGE FPDF_CALLCONV FPDFText_LoadPage(FPDF_PAGE page) {
   CPDF_Page* pPDFPage = CPDFPageFromFPDFPage(page);
   if (!pPDFPage)
     return nullptr;
@@ -63,11 +65,11 @@ DLLEXPORT FPDF_TEXTPAGE STDCALL FPDFText_LoadPage(FPDF_PAGE page) {
   return textpage;
 }
 
-DLLEXPORT void STDCALL FPDFText_ClosePage(FPDF_TEXTPAGE text_page) {
+FPDF_EXPORT void FPDF_CALLCONV FPDFText_ClosePage(FPDF_TEXTPAGE text_page) {
   delete CPDFTextPageFromFPDFTextPage(text_page);
 }
 
-DLLEXPORT int STDCALL FPDFText_CountChars(FPDF_TEXTPAGE text_page) {
+FPDF_EXPORT int FPDF_CALLCONV FPDFText_CountChars(FPDF_TEXTPAGE text_page) {
   if (!text_page)
     return -1;
 
@@ -75,8 +77,8 @@ DLLEXPORT int STDCALL FPDFText_CountChars(FPDF_TEXTPAGE text_page) {
   return textpage->CountChars();
 }
 
-DLLEXPORT unsigned int STDCALL FPDFText_GetUnicode(FPDF_TEXTPAGE text_page,
-                                                   int index) {
+FPDF_EXPORT unsigned int FPDF_CALLCONV
+FPDFText_GetUnicode(FPDF_TEXTPAGE text_page, int index) {
   if (!text_page)
     return 0;
 
@@ -89,8 +91,8 @@ DLLEXPORT unsigned int STDCALL FPDFText_GetUnicode(FPDF_TEXTPAGE text_page,
   return charinfo.m_Unicode;
 }
 
-DLLEXPORT double STDCALL FPDFText_GetFontSize(FPDF_TEXTPAGE text_page,
-                                              int index) {
+FPDF_EXPORT double FPDF_CALLCONV FPDFText_GetFontSize(FPDF_TEXTPAGE text_page,
+                                                      int index) {
   if (!text_page)
     return 0;
   CPDF_TextPage* textpage = CPDFTextPageFromFPDFTextPage(text_page);
@@ -103,32 +105,53 @@ DLLEXPORT double STDCALL FPDFText_GetFontSize(FPDF_TEXTPAGE text_page,
   return charinfo.m_FontSize;
 }
 
-DLLEXPORT void STDCALL FPDFText_GetCharBox(FPDF_TEXTPAGE text_page,
-                                           int index,
-                                           double* left,
-                                           double* right,
-                                           double* bottom,
-                                           double* top) {
-  if (!text_page)
-    return;
-  CPDF_TextPage* textpage = CPDFTextPageFromFPDFTextPage(text_page);
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFText_GetCharBox(FPDF_TEXTPAGE text_page,
+                                                        int index,
+                                                        double* left,
+                                                        double* right,
+                                                        double* bottom,
+                                                        double* top) {
+  if (!text_page || index < 0)
+    return false;
 
-  if (index < 0 || index >= textpage->CountChars())
-    return;
+  CPDF_TextPage* textpage = CPDFTextPageFromFPDFTextPage(text_page);
+  if (index >= textpage->CountChars())
+    return false;
+
   FPDF_CHAR_INFO charinfo;
   textpage->GetCharInfo(index, &charinfo);
   *left = charinfo.m_CharBox.left;
   *right = charinfo.m_CharBox.right;
   *bottom = charinfo.m_CharBox.bottom;
   *top = charinfo.m_CharBox.top;
+  return true;
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
+FPDFText_GetCharOrigin(FPDF_TEXTPAGE text_page,
+                       int index,
+                       double* x,
+                       double* y) {
+  if (!text_page)
+    return false;
+  CPDF_TextPage* textpage = CPDFTextPageFromFPDFTextPage(text_page);
+
+  if (index < 0 || index >= textpage->CountChars())
+    return false;
+  FPDF_CHAR_INFO charinfo;
+  textpage->GetCharInfo(index, &charinfo);
+  *x = charinfo.m_Origin.x;
+  *y = charinfo.m_Origin.y;
+  return true;
 }
 
 // select
-DLLEXPORT int STDCALL FPDFText_GetCharIndexAtPos(FPDF_TEXTPAGE text_page,
-                                                 double x,
-                                                 double y,
-                                                 double xTolerance,
-                                                 double yTolerance) {
+FPDF_EXPORT int FPDF_CALLCONV
+FPDFText_GetCharIndexAtPos(FPDF_TEXTPAGE text_page,
+                           double x,
+                           double y,
+                           double xTolerance,
+                           double yTolerance) {
   if (!text_page)
     return -3;
 
@@ -139,32 +162,44 @@ DLLEXPORT int STDCALL FPDFText_GetCharIndexAtPos(FPDF_TEXTPAGE text_page,
                 static_cast<float>(yTolerance)));
 }
 
-DLLEXPORT int STDCALL FPDFText_GetText(FPDF_TEXTPAGE text_page,
-                                       int start,
-                                       int count,
-                                       unsigned short* result) {
-  if (!text_page)
+FPDF_EXPORT int FPDF_CALLCONV FPDFText_GetText(FPDF_TEXTPAGE page,
+                                               int char_start,
+                                               int char_count,
+                                               unsigned short* result) {
+  if (!page || char_start < 0 || char_count < 0 || !result)
     return 0;
 
-  CPDF_TextPage* textpage = CPDFTextPageFromFPDFTextPage(text_page);
-  if (start >= textpage->CountChars())
+  CPDF_TextPage* textpage = CPDFTextPageFromFPDFTextPage(page);
+  int char_available = textpage->CountChars() - char_start;
+  if (char_available <= 0)
     return 0;
 
-  CFX_WideString str = textpage->GetPageText(start, count);
-  if (str.GetLength() > count)
-    str = str.Left(count);
+  char_count = std::min(char_count, char_available);
+  if (char_count == 0) {
+    // Writing out "", which has a character count of 1 due to the NUL.
+    *result = '\0';
+    return 1;
+  }
 
-  CFX_ByteString cbUTF16str = str.UTF16LE_Encode();
-  memcpy(result, cbUTF16str.GetBuffer(cbUTF16str.GetLength()),
-         cbUTF16str.GetLength());
-  cbUTF16str.ReleaseBuffer(cbUTF16str.GetLength());
+  WideString str = textpage->GetPageText(char_start, char_count);
 
-  return cbUTF16str.GetLength() / sizeof(unsigned short);
+  if (str.GetLength() > static_cast<size_t>(char_count))
+    str = str.Left(static_cast<size_t>(char_count));
+
+  // UFT16LE_Encode doesn't handle surrogate pairs properly, so it is expected
+  // the number of items to stay the same.
+  ByteString byte_str = str.UTF16LE_Encode();
+  size_t byte_str_len = byte_str.GetLength();
+  int ret_count = byte_str_len / kBytesPerCharacter;
+
+  ASSERT(ret_count <= char_count + 1);  // +1 to account for the NUL terminator.
+  memcpy(result, byte_str.GetBuffer(byte_str_len), byte_str_len);
+  return ret_count;
 }
 
-DLLEXPORT int STDCALL FPDFText_CountRects(FPDF_TEXTPAGE text_page,
-                                          int start,
-                                          int count) {
+FPDF_EXPORT int FPDF_CALLCONV FPDFText_CountRects(FPDF_TEXTPAGE text_page,
+                                                  int start,
+                                                  int count) {
   if (!text_page)
     return 0;
 
@@ -172,42 +207,44 @@ DLLEXPORT int STDCALL FPDFText_CountRects(FPDF_TEXTPAGE text_page,
   return textpage->CountRects(start, count);
 }
 
-DLLEXPORT void STDCALL FPDFText_GetRect(FPDF_TEXTPAGE text_page,
-                                        int rect_index,
-                                        double* left,
-                                        double* top,
-                                        double* right,
-                                        double* bottom) {
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFText_GetRect(FPDF_TEXTPAGE text_page,
+                                                     int rect_index,
+                                                     double* left,
+                                                     double* top,
+                                                     double* right,
+                                                     double* bottom) {
   if (!text_page)
-    return;
+    return false;
 
   CPDF_TextPage* textpage = CPDFTextPageFromFPDFTextPage(text_page);
   CFX_FloatRect rect;
-  textpage->GetRect(rect_index, rect.left, rect.top, rect.right, rect.bottom);
+  bool result = textpage->GetRect(rect_index, &rect);
+
   *left = rect.left;
   *top = rect.top;
   *right = rect.right;
   *bottom = rect.bottom;
+  return result;
 }
 
-DLLEXPORT int STDCALL FPDFText_GetBoundedText(FPDF_TEXTPAGE text_page,
-                                              double left,
-                                              double top,
-                                              double right,
-                                              double bottom,
-                                              unsigned short* buffer,
-                                              int buflen) {
+FPDF_EXPORT int FPDF_CALLCONV FPDFText_GetBoundedText(FPDF_TEXTPAGE text_page,
+                                                      double left,
+                                                      double top,
+                                                      double right,
+                                                      double bottom,
+                                                      unsigned short* buffer,
+                                                      int buflen) {
   if (!text_page)
     return 0;
 
   CPDF_TextPage* textpage = CPDFTextPageFromFPDFTextPage(text_page);
   CFX_FloatRect rect((float)left, (float)bottom, (float)right, (float)top);
-  CFX_WideString str = textpage->GetTextByRect(rect);
+  WideString str = textpage->GetTextByRect(rect);
 
   if (buflen <= 0 || !buffer)
     return str.GetLength();
 
-  CFX_ByteString cbUTF16Str = str.UTF16LE_Encode();
+  ByteString cbUTF16Str = str.UTF16LE_Encode();
   int len = cbUTF16Str.GetLength() / sizeof(unsigned short);
   int size = buflen > len ? len : buflen;
   memcpy(buffer, cbUTF16Str.GetBuffer(size * sizeof(unsigned short)),
@@ -219,22 +256,24 @@ DLLEXPORT int STDCALL FPDFText_GetBoundedText(FPDF_TEXTPAGE text_page,
 
 // Search
 // -1 for end
-DLLEXPORT FPDF_SCHHANDLE STDCALL FPDFText_FindStart(FPDF_TEXTPAGE text_page,
-                                                    FPDF_WIDESTRING findwhat,
-                                                    unsigned long flags,
-                                                    int start_index) {
+FPDF_EXPORT FPDF_SCHHANDLE FPDF_CALLCONV
+FPDFText_FindStart(FPDF_TEXTPAGE text_page,
+                   FPDF_WIDESTRING findwhat,
+                   unsigned long flags,
+                   int start_index) {
   if (!text_page)
     return nullptr;
 
   CPDF_TextPageFind* textpageFind =
       new CPDF_TextPageFind(CPDFTextPageFromFPDFTextPage(text_page));
-  FX_STRSIZE len = CFX_WideString::WStringLength(findwhat);
-  textpageFind->FindFirst(CFX_WideString::FromUTF16LE(findwhat, len), flags,
-                          start_index);
+  size_t len = WideString::WStringLength(findwhat);
+  textpageFind->FindFirst(
+      WideString::FromUTF16LE(findwhat, len), flags,
+      start_index >= 0 ? Optional<size_t>(start_index) : Optional<size_t>());
   return textpageFind;
 }
 
-DLLEXPORT FPDF_BOOL STDCALL FPDFText_FindNext(FPDF_SCHHANDLE handle) {
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFText_FindNext(FPDF_SCHHANDLE handle) {
   if (!handle)
     return false;
 
@@ -242,7 +281,7 @@ DLLEXPORT FPDF_BOOL STDCALL FPDFText_FindNext(FPDF_SCHHANDLE handle) {
   return textpageFind->FindNext();
 }
 
-DLLEXPORT FPDF_BOOL STDCALL FPDFText_FindPrev(FPDF_SCHHANDLE handle) {
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFText_FindPrev(FPDF_SCHHANDLE handle) {
   if (!handle)
     return false;
 
@@ -250,7 +289,8 @@ DLLEXPORT FPDF_BOOL STDCALL FPDFText_FindPrev(FPDF_SCHHANDLE handle) {
   return textpageFind->FindPrev();
 }
 
-DLLEXPORT int STDCALL FPDFText_GetSchResultIndex(FPDF_SCHHANDLE handle) {
+FPDF_EXPORT int FPDF_CALLCONV
+FPDFText_GetSchResultIndex(FPDF_SCHHANDLE handle) {
   if (!handle)
     return 0;
 
@@ -258,7 +298,7 @@ DLLEXPORT int STDCALL FPDFText_GetSchResultIndex(FPDF_SCHHANDLE handle) {
   return textpageFind->GetCurOrder();
 }
 
-DLLEXPORT int STDCALL FPDFText_GetSchCount(FPDF_SCHHANDLE handle) {
+FPDF_EXPORT int FPDF_CALLCONV FPDFText_GetSchCount(FPDF_SCHHANDLE handle) {
   if (!handle)
     return 0;
 
@@ -266,7 +306,7 @@ DLLEXPORT int STDCALL FPDFText_GetSchCount(FPDF_SCHHANDLE handle) {
   return textpageFind->GetMatchedCount();
 }
 
-DLLEXPORT void STDCALL FPDFText_FindClose(FPDF_SCHHANDLE handle) {
+FPDF_EXPORT void FPDF_CALLCONV FPDFText_FindClose(FPDF_SCHHANDLE handle) {
   if (!handle)
     return;
 
@@ -276,7 +316,8 @@ DLLEXPORT void STDCALL FPDFText_FindClose(FPDF_SCHHANDLE handle) {
 }
 
 // web link
-DLLEXPORT FPDF_PAGELINK STDCALL FPDFLink_LoadWebLinks(FPDF_TEXTPAGE text_page) {
+FPDF_EXPORT FPDF_PAGELINK FPDF_CALLCONV
+FPDFLink_LoadWebLinks(FPDF_TEXTPAGE text_page) {
   if (!text_page)
     return nullptr;
 
@@ -286,7 +327,7 @@ DLLEXPORT FPDF_PAGELINK STDCALL FPDFLink_LoadWebLinks(FPDF_TEXTPAGE text_page) {
   return pageLink;
 }
 
-DLLEXPORT int STDCALL FPDFLink_CountWebLinks(FPDF_PAGELINK link_page) {
+FPDF_EXPORT int FPDF_CALLCONV FPDFLink_CountWebLinks(FPDF_PAGELINK link_page) {
   if (!link_page)
     return 0;
 
@@ -294,16 +335,16 @@ DLLEXPORT int STDCALL FPDFLink_CountWebLinks(FPDF_PAGELINK link_page) {
   return pdfium::base::checked_cast<int>(pageLink->CountLinks());
 }
 
-DLLEXPORT int STDCALL FPDFLink_GetURL(FPDF_PAGELINK link_page,
-                                      int link_index,
-                                      unsigned short* buffer,
-                                      int buflen) {
-  CFX_WideString wsUrl(L"");
+FPDF_EXPORT int FPDF_CALLCONV FPDFLink_GetURL(FPDF_PAGELINK link_page,
+                                              int link_index,
+                                              unsigned short* buffer,
+                                              int buflen) {
+  WideString wsUrl(L"");
   if (link_page && link_index >= 0) {
     CPDF_LinkExtract* pageLink = CPDFLinkExtractFromFPDFPageLink(link_page);
     wsUrl = pageLink->GetURL(link_index);
   }
-  CFX_ByteString cbUTF16URL = wsUrl.UTF16LE_Encode();
+  ByteString cbUTF16URL = wsUrl.UTF16LE_Encode();
   int required = cbUTF16URL.GetLength() / sizeof(unsigned short);
   if (!buffer || buflen <= 0)
     return required;
@@ -316,8 +357,8 @@ DLLEXPORT int STDCALL FPDFLink_GetURL(FPDF_PAGELINK link_page,
   return size;
 }
 
-DLLEXPORT int STDCALL FPDFLink_CountRects(FPDF_PAGELINK link_page,
-                                          int link_index) {
+FPDF_EXPORT int FPDF_CALLCONV FPDFLink_CountRects(FPDF_PAGELINK link_page,
+                                                  int link_index) {
   if (!link_page || link_index < 0)
     return 0;
 
@@ -325,27 +366,28 @@ DLLEXPORT int STDCALL FPDFLink_CountRects(FPDF_PAGELINK link_page,
   return pdfium::CollectionSize<int>(pageLink->GetRects(link_index));
 }
 
-DLLEXPORT void STDCALL FPDFLink_GetRect(FPDF_PAGELINK link_page,
-                                        int link_index,
-                                        int rect_index,
-                                        double* left,
-                                        double* top,
-                                        double* right,
-                                        double* bottom) {
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFLink_GetRect(FPDF_PAGELINK link_page,
+                                                     int link_index,
+                                                     int rect_index,
+                                                     double* left,
+                                                     double* top,
+                                                     double* right,
+                                                     double* bottom) {
   if (!link_page || link_index < 0 || rect_index < 0)
-    return;
+    return false;
 
   CPDF_LinkExtract* pageLink = CPDFLinkExtractFromFPDFPageLink(link_page);
   std::vector<CFX_FloatRect> rectArray = pageLink->GetRects(link_index);
   if (rect_index >= pdfium::CollectionSize<int>(rectArray))
-    return;
+    return false;
 
   *left = rectArray[rect_index].left;
   *right = rectArray[rect_index].right;
   *top = rectArray[rect_index].top;
   *bottom = rectArray[rect_index].bottom;
+  return true;
 }
 
-DLLEXPORT void STDCALL FPDFLink_CloseWebLinks(FPDF_PAGELINK link_page) {
+FPDF_EXPORT void FPDF_CALLCONV FPDFLink_CloseWebLinks(FPDF_PAGELINK link_page) {
   delete CPDFLinkExtractFromFPDFPageLink(link_page);
 }

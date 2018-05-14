@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/containers/circular_deque.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
@@ -28,8 +29,8 @@ namespace test {
 
 const size_t kMaxPacketSize = 65536;
 
-PacketPipe::PacketPipe() {}
-PacketPipe::~PacketPipe() {}
+PacketPipe::PacketPipe() = default;
+PacketPipe::~PacketPipe() = default;
 void PacketPipe::InitOnIOThread(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
     base::TickClock* clock) {
@@ -104,7 +105,7 @@ class Buffer : public PacketPipe {
     }
   }
 
-  std::deque<linked_ptr<Packet> > buffer_;
+  base::circular_deque<linked_ptr<Packet>> buffer_;
   base::TimeTicks last_schedule_;
   size_t buffer_size_;
   size_t max_buffer_size_;
@@ -138,7 +139,7 @@ std::unique_ptr<PacketPipe> NewRandomDrop(double drop_fraction) {
 class SimpleDelayBase : public PacketPipe {
  public:
   SimpleDelayBase() : weak_factory_(this) {}
-  ~SimpleDelayBase() override {}
+  ~SimpleDelayBase() override = default;
 
   void Send(std::unique_ptr<Packet> packet) override {
     double seconds = GetDelay();
@@ -282,7 +283,7 @@ class RandomSortedDelay : public PacketPipe {
   }
 
   base::TimeTicks block_until_;
-  std::deque<linked_ptr<Packet> > buffer_;
+  base::circular_deque<linked_ptr<Packet>> buffer_;
   double random_delay_;
   double extra_delay_;
   double seconds_between_extra_delay_;
@@ -402,8 +403,8 @@ class InterruptedPoissonProcess::InternalBuffer : public PacketPipe {
   const base::WeakPtr<InterruptedPoissonProcess> ipp_;
   size_t stored_size_;
   const size_t stored_limit_;
-  std::deque<linked_ptr<Packet> > buffer_;
-  std::deque<base::TimeTicks> buffer_time_;
+  base::circular_deque<linked_ptr<Packet>> buffer_;
+  base::circular_deque<base::TimeTicks> buffer_time_;
   base::TickClock* clock_;
   base::WeakPtrFactory<InternalBuffer> weak_factory_;
 
@@ -421,14 +422,13 @@ InterruptedPoissonProcess::InterruptedPoissonProcess(
       coef_variance_(coef_variance),
       rate_index_(0),
       on_state_(true),
+      mt_rand_(rand_seed),
       weak_factory_(this) {
-  mt_rand_.init_genrand(rand_seed);
   DCHECK(!average_rates.empty());
   ComputeRates();
 }
 
-InterruptedPoissonProcess::~InterruptedPoissonProcess() {
-}
+InterruptedPoissonProcess::~InterruptedPoissonProcess() = default;
 
 void InterruptedPoissonProcess::InitOnIOThread(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
@@ -461,9 +461,9 @@ base::TimeDelta InterruptedPoissonProcess::NextEvent(double rate) {
 double InterruptedPoissonProcess::RandDouble() {
   // Generate a 64-bits random number from MT19937 and then convert
   // it to double.
-  uint64_t rand = mt_rand_.genrand_int32();
+  uint64_t rand = mt_rand_();
   rand <<= 32;
-  rand |= mt_rand_.genrand_int32();
+  rand |= mt_rand_();
   return base::BitsToOpenEndedUnitInterval(rand);
 }
 
@@ -761,9 +761,9 @@ class UDPProxyImpl : public UDPProxy {
     BuildPipe(&to_dest_pipe_, new PacketSender(this, &destination_));
     BuildPipe(&from_dest_pipe_, new PacketSender(this, &return_address_));
     to_dest_pipe_->InitOnIOThread(base::ThreadTaskRunnerHandle::Get(),
-                                  &tick_clock_);
+                                  base::DefaultTickClock::GetInstance());
     from_dest_pipe_->InitOnIOThread(base::ThreadTaskRunnerHandle::Get(),
-                                    &tick_clock_);
+                                    base::DefaultTickClock::GetInstance());
 
     VLOG(0) << "From:" << local_port_.ToString();
     if (!destination_is_mutable_)
@@ -844,7 +844,6 @@ class UDPProxyImpl : public UDPProxy {
   net::IPEndPoint return_address_;
   bool set_destination_next_;
 
-  base::DefaultTickClock tick_clock_;
   base::Thread proxy_thread_;
   std::unique_ptr<net::UDPServerSocket> socket_;
   std::unique_ptr<PacketPipe> to_dest_pipe_;

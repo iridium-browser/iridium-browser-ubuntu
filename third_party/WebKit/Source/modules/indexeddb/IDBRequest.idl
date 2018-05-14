@@ -38,12 +38,11 @@ enum IDBRequestReadyState {
 
 [
     ActiveScriptWrappable,
-    DependentLifetime,
     Exposed=(Window,Worker)
 ] interface IDBRequest : EventTarget {
     [CallWith=ScriptState, RaisesException=Getter, CachedAttribute=isResultDirty] readonly attribute any result;
     [RaisesException=Getter] readonly attribute DOMException error;
-    [CallWith=ScriptState] readonly attribute any source;
+    [CallWith=ScriptState] readonly attribute (IDBObjectStore or IDBIndex or IDBCursor) source;
     readonly attribute IDBTransaction transaction;
     readonly attribute IDBRequestReadyState readyState;
 

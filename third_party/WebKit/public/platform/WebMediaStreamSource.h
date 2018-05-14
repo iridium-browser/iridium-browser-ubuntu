@@ -33,10 +33,9 @@
 
 #include "WebCommon.h"
 #include "WebMediaStreamTrack.h"
-
-#include "WebNonCopyable.h"
-#include "WebPrivatePtr.h"
 #include "WebVector.h"
+
+#include "WebPrivatePtr.h"
 #if INSIDE_BLINK
 #include "platform/heap/Handle.h"
 #endif
@@ -53,7 +52,7 @@ class WebMediaStreamSource {
   class ExtraData {
    public:
     ExtraData() : owner_(0) {}
-    virtual ~ExtraData() {}
+    virtual ~ExtraData() = default;
 
     BLINK_PLATFORM_EXPORT WebMediaStreamSource Owner();
 #if INSIDE_BLINK
@@ -75,7 +74,21 @@ class WebMediaStreamSource {
     kReadyStateEnded = 2
   };
 
-  WebMediaStreamSource() {}
+  struct Capabilities {
+    // WebVector is used to store an optional range for the below numeric
+    // fields. All of them should have 0 or 2 values representing min/max.
+    WebVector<long> width;
+    WebVector<long> height;
+    WebVector<double> aspect_ratio;
+    WebVector<double> frame_rate;
+    WebVector<bool> echo_cancellation;
+
+    WebMediaStreamTrack::FacingMode facing_mode =
+        WebMediaStreamTrack::FacingMode::kNone;
+    WebString device_id;
+  };
+
+  WebMediaStreamSource() = default;
   WebMediaStreamSource(const WebMediaStreamSource& other) { Assign(other); }
   ~WebMediaStreamSource() { Reset(); }
 
@@ -115,6 +128,8 @@ class WebMediaStreamSource {
 
   BLINK_PLATFORM_EXPORT WebMediaConstraints Constraints();
 
+  BLINK_PLATFORM_EXPORT void SetCapabilities(const Capabilities&);
+
   // Only used if if this is a WebAudio source.
   // The WebAudioDestinationConsumer is not owned, and has to be disposed of
   // separately after calling removeAudioConsumer.
@@ -125,7 +140,7 @@ class WebMediaStreamSource {
 #if INSIDE_BLINK
   BLINK_PLATFORM_EXPORT WebMediaStreamSource(MediaStreamSource*);
   BLINK_PLATFORM_EXPORT WebMediaStreamSource& operator=(MediaStreamSource*);
-  BLINK_PLATFORM_EXPORT operator WTF::PassRefPtr<MediaStreamSource>() const;
+  BLINK_PLATFORM_EXPORT operator scoped_refptr<MediaStreamSource>() const;
   BLINK_PLATFORM_EXPORT operator MediaStreamSource*() const;
 #endif
 

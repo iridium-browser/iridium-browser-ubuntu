@@ -25,7 +25,7 @@
             "className": "Console.ConsolePanel.ConsoleRevealer"
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "actionId": "console.show",
             "className": "Console.ConsoleView.ActionDelegate",
             "bindings": [
@@ -35,7 +35,7 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "category": "Console",
             "actionId": "console.clear",
             "title": "Clear console",
@@ -53,7 +53,7 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "category": "Console",
             "actionId": "console.clear.history",
             "title": "Clear console history",
@@ -93,25 +93,6 @@
                 {
                     "value": false,
                     "title": "Show messages from all contexts"
-                }
-            ]
-        },
-        {
-            "type": "setting",
-            "category": "Console",
-            "title": "User messages only",
-            "settingName": "consoleAPIFilterEnabled",
-            "settingType": "boolean",
-            "storageType": "session",
-            "defaultValue": false,
-            "options": [
-                {
-                    "value": true,
-                    "title": "Only show messages from console API methods"
-                },
-                {
-                    "value": false,
-                    "title": "Show messages from all sources"
                 }
             ]
         },
@@ -158,17 +139,38 @@
                     "title": "Do not autocomplete from history"
                 }
             ]
+        },
+        {
+            "type": "setting",
+            "category": "Console",
+            "title": "Group similar",
+            "settingName": "consoleGroupSimilar",
+            "settingType": "boolean",
+            "defaultValue": true,
+            "options": [
+                {
+                    "value": true,
+                    "title": "Group similar messages in console"
+                },
+                {
+                    "value": false,
+                    "title": "Do not group similar messages in console"
+                }
+            ]
         }
     ],
     "dependencies": [
         "components",
         "data_grid",
         "object_ui",
-        "console_model",
-        "product_registry"
+        "sdk",
+        "product_registry",
+        "formatter"
     ],
     "scripts": [
         "ConsoleContextSelector.js",
+        "ConsoleFilter.js",
+        "ConsoleSidebar.js",
         "ConsoleViewport.js",
         "ConsoleViewMessage.js",
         "ConsolePrompt.js",
@@ -177,6 +179,7 @@
     ],
     "resources": [
         "consoleContextSelector.css",
+        "consoleSidebar.css",
         "consoleView.css"
     ]
 }

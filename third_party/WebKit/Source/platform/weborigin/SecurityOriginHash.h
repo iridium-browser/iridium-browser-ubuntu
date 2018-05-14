@@ -29,37 +29,34 @@
 #ifndef SecurityOriginHash_h
 #define SecurityOriginHash_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
 struct SecurityOriginHash {
   STATIC_ONLY(SecurityOriginHash);
-  static unsigned GetHash(SecurityOrigin* origin) {
-    unsigned hash_codes[4] = {
+  static unsigned GetHash(const SecurityOrigin* origin) {
+    unsigned hash_codes[3] = {
         origin->Protocol().Impl() ? origin->Protocol().Impl()->GetHash() : 0,
         origin->Host().Impl() ? origin->Host().Impl()->GetHash() : 0,
-        origin->Port(),
-        (origin->GetSuborigin()->GetName().Impl())
-            ? origin->GetSuborigin()->GetName().Impl()->GetHash()
-            : 0};
+        origin->Port()};
     return StringHasher::HashMemory<sizeof(hash_codes)>(hash_codes);
   }
-  static unsigned GetHash(const RefPtr<SecurityOrigin>& origin) {
-    return GetHash(origin.Get());
+  static unsigned GetHash(const scoped_refptr<const SecurityOrigin>& origin) {
+    return GetHash(origin.get());
   }
 
-  static bool Equal(SecurityOrigin* a, SecurityOrigin* b) {
+  static bool Equal(const SecurityOrigin* a, const SecurityOrigin* b) {
     if (!a || !b)
       return a == b;
 
     if (a == b)
       return true;
 
-    if (!a->IsSameSchemeHostPortAndSuborigin(b))
+    if (!a->IsSameSchemeHostPort(b))
       return false;
 
     if (a->DomainWasSetInDOM() != b->DomainWasSetInDOM())
@@ -70,15 +67,17 @@ struct SecurityOriginHash {
 
     return true;
   }
-  static bool Equal(SecurityOrigin* a, const RefPtr<SecurityOrigin>& b) {
-    return Equal(a, b.Get());
+  static bool Equal(const SecurityOrigin* a,
+                    const scoped_refptr<const SecurityOrigin>& b) {
+    return Equal(a, b.get());
   }
-  static bool Equal(const RefPtr<SecurityOrigin>& a, SecurityOrigin* b) {
-    return Equal(a.Get(), b);
+  static bool Equal(const scoped_refptr<const SecurityOrigin>& a,
+                    const SecurityOrigin* b) {
+    return Equal(a.get(), b);
   }
-  static bool Equal(const RefPtr<SecurityOrigin>& a,
-                    const RefPtr<SecurityOrigin>& b) {
-    return Equal(a.Get(), b.Get());
+  static bool Equal(const scoped_refptr<const SecurityOrigin>& a,
+                    const scoped_refptr<const SecurityOrigin>& b) {
+    return Equal(a.get(), b.get());
   }
 
   static const bool safe_to_compare_to_empty_or_deleted = false;
@@ -89,7 +88,7 @@ struct SecurityOriginHash {
 namespace WTF {
 
 template <>
-struct DefaultHash<RefPtr<blink::SecurityOrigin>> {
+struct DefaultHash<scoped_refptr<const blink::SecurityOrigin>> {
   typedef blink::SecurityOriginHash Hash;
 };
 

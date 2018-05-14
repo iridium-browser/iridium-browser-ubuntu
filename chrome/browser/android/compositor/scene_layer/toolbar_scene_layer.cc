@@ -14,10 +14,11 @@
 #include "ui/gfx/android/java_bitmap.h"
 
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 
 namespace android {
 
-ToolbarSceneLayer::ToolbarSceneLayer(JNIEnv* env, jobject jobj)
+ToolbarSceneLayer::ToolbarSceneLayer(JNIEnv* env, const JavaRef<jobject>& jobj)
     : SceneLayer(env, jobj),
       should_show_background_(false),
       background_color_(SK_ColorWHITE),
@@ -37,11 +38,12 @@ void ToolbarSceneLayer::UpdateToolbarLayer(
     jint toolbar_background_color,
     jint url_bar_resource_id,
     jfloat url_bar_alpha,
+    jint url_bar_color,
     jfloat y_offset,
     jfloat view_height,
     bool visible,
     bool show_shadow,
-    bool browser_controls_at_bottom) {
+    bool modern_design_enabled) {
   // If the toolbar layer has not been created yet, create it.
   if (!toolbar_layer_) {
     ui::ResourceManager* resource_manager =
@@ -54,9 +56,9 @@ void ToolbarSceneLayer::UpdateToolbarLayer(
   toolbar_layer_->layer()->SetHideLayerAndSubtree(!visible);
   if (visible) {
     toolbar_layer_->PushResource(toolbar_resource_id, toolbar_background_color,
-                                 false, SK_ColorWHITE, url_bar_resource_id,
+                                 false, url_bar_color, url_bar_resource_id,
                                  url_bar_alpha, view_height, y_offset, false,
-                                 !show_shadow, browser_controls_at_bottom);
+                                 !show_shadow, modern_design_enabled);
   }
 }
 
@@ -113,7 +115,8 @@ bool ToolbarSceneLayer::ShouldShowBackground() {
   return should_show_background_;
 }
 
-static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
+static jlong JNI_ToolbarSceneLayer_Init(JNIEnv* env,
+                                        const JavaParamRef<jobject>& jobj) {
   // This will automatically bind to the Java object and pass ownership there.
   ToolbarSceneLayer* toolbar_scene_layer =
       new ToolbarSceneLayer(env, jobj);

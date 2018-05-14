@@ -9,21 +9,15 @@ if (is_component_build) {
 }
 target(link_target_type, "service") {
   visibility = [
-    "//media/*",
+    "//components/viz/service/*",
     "//content/gpu/*",
     "//content/public/gpu/*",
-    "//services/ui/gpu/*",
+    "//media/*",
   ]
 
   sources = [
-    "gpu_jpeg_decode_accelerator.cc",
-    "gpu_jpeg_decode_accelerator.h",
-    "gpu_jpeg_decode_accelerator_factory_provider.cc",
-    "gpu_jpeg_decode_accelerator_factory_provider.h",
     "gpu_video_decode_accelerator.cc",
     "gpu_video_decode_accelerator.h",
-    "gpu_video_encode_accelerator.cc",
-    "gpu_video_encode_accelerator.h",
     "media_gpu_channel.cc",
     "media_gpu_channel.h",
     "media_gpu_channel_manager.cc",
@@ -40,19 +34,14 @@ target(link_target_type, "service") {
     "//media/gpu",
   ]
   deps = [
+    "//gpu/command_buffer/service:gles2",
     "//gpu/ipc/service",
     "//media:media_features",
+    "//media/gpu:features",
     "//media/gpu/ipc/common",
-    "//media/gpu/mojo:jpeg_decoder",
     "//third_party/mesa:mesa_headers",
     "//ui/gfx/ipc/color",
   ]
-
-  configs += [ "//media/gpu:gpu_config" ]
-
-  if (is_chromeos && current_cpu != "arm") {
-    configs += [ "//third_party/libva:libva_config" ]
-  }
 
   if (is_win) {
     configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]

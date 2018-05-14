@@ -6,7 +6,7 @@
 
 // Dumps out the decryptable contents of a QUIC packet in a human-readable way.
 // If the packet is null encrypted, this will dump full packet contents.
-// Otherwise it will dump the public header, and fail with an error that the
+// Otherwise it will dump the header, and fail with an error that the
 // packet is undecryptable.
 //
 // Usage: quic_packet_printer server|client <hex dump of packet>
@@ -67,10 +67,10 @@ class QuicPacketPrinter : public QuicFramerVisitorInterface {
     std::cerr << "OnError: " << QuicErrorCodeToString(framer->error())
               << " detail: " << framer->detailed_error() << "\n";
   }
-  bool OnProtocolVersionMismatch(QuicVersion received_version) override {
+  bool OnProtocolVersionMismatch(ParsedQuicVersion received_version) override {
     framer_->set_version(received_version);
     std::cerr << "OnProtocolVersionMismatch: "
-              << QuicVersionToString(received_version) << "\n";
+              << ParsedQuicVersionToString(received_version) << "\n";
     return true;
   }
   void OnPacket() override { std::cerr << "OnPacket\n"; }
@@ -81,8 +81,7 @@ class QuicPacketPrinter : public QuicFramerVisitorInterface {
       const QuicVersionNegotiationPacket& packet) override {
     std::cerr << "OnVersionNegotiationPacket\n";
   }
-  bool OnUnauthenticatedPublicHeader(
-      const QuicPacketPublicHeader& header) override {
+  bool OnUnauthenticatedPublicHeader(const QuicPacketHeader& header) override {
     std::cerr << "OnUnauthenticatedPublicHeader\n";
     return true;
   }
@@ -108,6 +107,18 @@ class QuicPacketPrinter : public QuicFramerVisitorInterface {
   }
   bool OnAckFrame(const QuicAckFrame& frame) override {
     std::cerr << "OnAckFrame: " << frame;
+    return true;
+  }
+  bool OnAckFrameStart(QuicPacketNumber largest_acked,
+                       QuicTime::Delta /*ack_delay_time*/) override {
+    std::cerr << "OnAckFrameStart, largest_acked: " << largest_acked;
+    return true;
+  }
+  bool OnAckRange(QuicPacketNumber start,
+                  QuicPacketNumber end,
+                  bool last_range) override {
+    std::cerr << "OnAckRange: [" << start << ", " << end
+              << "),  last_range: " << last_range;
     return true;
   }
   bool OnStopWaitingFrame(const QuicStopWaitingFrame& frame) override {
@@ -177,13 +188,14 @@ int main(int argc, char* argv[]) {
     return 1;
   }
   string hex = net::QuicTextUtils::HexDecode(argv[2]);
-  net::QuicVersionVector versions = net::AllSupportedVersions();
+  net::ParsedQuicVersionVector versions = net::AllSupportedVersions();
   // Fake a time since we're not actually generating acks.
   net::QuicTime start(net::QuicTime::Zero());
   net::QuicFramer framer(versions, start, perspective);
   if (!FLAGS_quic_version.empty()) {
-    for (net::QuicVersion version : versions) {
-      if (net::QuicVersionToString(version) == FLAGS_quic_version) {
+    for (net::ParsedQuicVersion version : versions) {
+      if (net::QuicVersionToString(version.transport_version) ==
+          FLAGS_quic_version) {
         framer.set_version(version);
       }
     }

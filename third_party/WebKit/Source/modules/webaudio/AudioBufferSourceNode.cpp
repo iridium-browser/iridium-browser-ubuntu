@@ -34,7 +34,6 @@
 #include "modules/webaudio/BaseAudioContext.h"
 #include "platform/audio/AudioUtilities.h"
 #include "platform/wtf/MathExtras.h"
-#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -62,8 +61,8 @@ AudioBufferSourceHandler::AudioBufferSourceHandler(
                                   node,
                                   sample_rate),
       buffer_(nullptr),
-      playback_rate_(playback_rate),
-      detune_(detune),
+      playback_rate_(&playback_rate),
+      detune_(&detune),
       is_looping_(false),
       did_set_looping_(false),
       loop_start_(0),
@@ -72,7 +71,8 @@ AudioBufferSourceHandler::AudioBufferSourceHandler(
       is_grain_(false),
       grain_offset_(0.0),
       grain_duration_(kDefaultGrainDuration),
-      min_playback_rate_(1.0) {
+      min_playback_rate_(1.0),
+      buffer_has_been_set_(false) {
   // Default to mono. A call to setBuffer() will set the number of output
   // channels to that of the buffer.
   AddOutput(1);
@@ -80,12 +80,12 @@ AudioBufferSourceHandler::AudioBufferSourceHandler(
   Initialize();
 }
 
-PassRefPtr<AudioBufferSourceHandler> AudioBufferSourceHandler::Create(
+scoped_refptr<AudioBufferSourceHandler> AudioBufferSourceHandler::Create(
     AudioNode& node,
     float sample_rate,
     AudioParamHandler& playback_rate,
     AudioParamHandler& detune) {
-  return AdoptRef(
+  return base::AdoptRef(
       new AudioBufferSourceHandler(node, sample_rate, playback_rate, detune));
 }
 
@@ -388,21 +388,24 @@ void AudioBufferSourceHandler::SetBuffer(AudioBuffer* buffer,
                                          ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  if (buffer_) {
-    exception_state.ThrowDOMException(
-        kInvalidStateError,
-        "Cannot set buffer after it has been already been set");
+  if (buffer && buffer_has_been_set_) {
+    exception_state.ThrowDOMException(kInvalidStateError,
+                                      "Cannot set buffer to non-null after it "
+                                      "has been already been set to a non-null "
+                                      "buffer");
     return;
   }
 
   // The context must be locked since changing the buffer can re-configure the
   // number of channels that are output.
-  BaseAudioContext::AutoLocker context_locker(Context());
+  BaseAudioContext::GraphAutoLocker context_locker(Context());
 
   // This synchronizes with process().
   MutexLocker process_locker(process_lock_);
 
   if (buffer) {
+    buffer_has_been_set_ = true;
+
     // Do any necesssary re-configuration to the buffer's number of channels.
     unsigned number_of_channels = buffer->numberOfChannels();
 
@@ -421,8 +424,8 @@ void AudioBufferSourceHandler::SetBuffer(AudioBuffer* buffer,
 
     Output(0).SetNumberOfChannels(number_of_channels);
 
-    source_channels_ = WrapArrayUnique(new const float*[number_of_channels]);
-    destination_channels_ = WrapArrayUnique(new float*[number_of_channels]);
+    source_channels_ = std::make_unique<const float* []>(number_of_channels);
+    destination_channels_ = std::make_unique<float* []>(number_of_channels);
 
     for (unsigned i = 0; i < number_of_channels; ++i)
       source_channels_[i] = buffer->getChannelData(i).View()->Data();
@@ -651,9 +654,12 @@ AudioBufferSourceNode::AudioBufferSourceNode(BaseAudioContext& context)
     : AudioScheduledSourceNode(context),
       playback_rate_(AudioParam::Create(context,
                                         kParamTypeAudioBufferSourcePlaybackRate,
+                                        "AudioBufferSource.playbackRate",
                                         1.0)),
-      detune_(
-          AudioParam::Create(context, kParamTypeAudioBufferSourceDetune, 0.0)) {
+      detune_(AudioParam::Create(context,
+                                 kParamTypeAudioBufferSourceDetune,
+                                 "AudioBufferSource.detune",
+                                 0.0)) {
   SetHandler(AudioBufferSourceHandler::Create(*this, context.sampleRate(),
                                               playback_rate_->Handler(),
                                               detune_->Handler()));
@@ -694,7 +700,7 @@ AudioBufferSourceNode* AudioBufferSourceNode::Create(
   return node;
 }
 
-DEFINE_TRACE(AudioBufferSourceNode) {
+void AudioBufferSourceNode::Trace(blink::Visitor* visitor) {
   visitor->Trace(playback_rate_);
   visitor->Trace(detune_);
   AudioScheduledSourceNode::Trace(visitor);

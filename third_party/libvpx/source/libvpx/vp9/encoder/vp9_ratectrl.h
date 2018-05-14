@@ -32,6 +32,16 @@ extern "C" {
 #define FIXED_GF_INTERVAL 8  // Used in some testing modes only
 #define ONEHALFONLY_RESIZE 0
 
+#define FRAME_OVERHEAD_BITS 200
+
+// Threshold used to define a KF group as static (e.g. a slide show).
+// Essentially this means that no frame in the group has more than 1% of MBs
+// that are not marked as coded with 0,0 motion in the first pass.
+#define STATIC_KF_GROUP_THRESH 99
+
+// The maximum duration of a GF group that is static (for example a slide show).
+#define MAX_STATIC_GF_GROUP_LENGTH 250
+
 typedef enum {
   INTER_NORMAL = 0,
   INTER_HIGH = 1,
@@ -150,6 +160,8 @@ typedef struct {
   int rc_2_frame;
   int q_1_frame;
   int q_2_frame;
+  // Keep track of the last target average frame bandwidth.
+  int last_avg_frame_bandwidth;
 
   // Auto frame-scaling variables.
   FRAME_SCALE_LEVEL frame_size_selector;
@@ -164,12 +176,14 @@ typedef struct {
   uint64_t prev_avg_source_sad_lag;
   int high_source_sad_lagindex;
   int alt_ref_gf_group;
+  int last_frame_is_src_altref;
   int high_source_sad;
   int count_last_scene_change;
   int avg_frame_low_motion;
   int af_ratio_onepass_vbr;
   int force_qpmin;
   int reset_high_source_sad;
+  double perc_arf_usage;
 } RATE_CONTROL;
 
 struct VP9_COMP;

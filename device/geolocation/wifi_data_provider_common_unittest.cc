@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -74,7 +75,7 @@ class WifiDataProviderCommonWithMock : public WifiDataProviderCommon {
   std::unique_ptr<MockPollingPolicy> polling_policy_;
 
  private:
-  ~WifiDataProviderCommonWithMock() override {}
+  ~WifiDataProviderCommonWithMock() override = default;
 
   DISALLOW_COPY_AND_ASSIGN(WifiDataProviderCommonWithMock);
 };
@@ -85,7 +86,7 @@ class GeolocationWifiDataProviderCommonTest : public testing::Test {
   GeolocationWifiDataProviderCommonTest()
       : scoped_task_environment_(
             base::test::ScopedTaskEnvironment::MainThreadType::UI),
-        wifi_data_callback_(base::Bind(&base::DoNothing)),
+        wifi_data_callback_(base::DoNothing()),
         provider_(new WifiDataProviderCommonWithMock),
         wlan_api_(provider_->wlan_api_.get()),
         polling_policy_(provider_->polling_policy_.get()) {}

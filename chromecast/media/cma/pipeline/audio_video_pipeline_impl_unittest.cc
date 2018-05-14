@@ -128,7 +128,7 @@ class PipelineHelper {
         .WillByDefault(PushBuffer(&video_decoder_delegate_,
                                   &last_push_pts_[STREAM_VIDEO]));
 
-    media_pipeline_ = base::MakeUnique<MediaPipelineImpl>();
+    media_pipeline_ = std::make_unique<MediaPipelineImpl>();
     media_pipeline_->Initialize(kLoadTypeURL,
                                 base::WrapUnique(pipeline_backend_));
 
@@ -155,7 +155,8 @@ class PipelineHelper {
       video_configs.push_back(::media::VideoDecoderConfig(
           ::media::kCodecH264, ::media::H264PROFILE_MAIN,
           ::media::PIXEL_FORMAT_I420, ::media::COLOR_SPACE_UNSPECIFIED,
-          gfx::Size(640, 480), gfx::Rect(0, 0, 640, 480), gfx::Size(640, 480),
+          ::media::VIDEO_ROTATION_0, gfx::Size(640, 480),
+          gfx::Rect(0, 0, 640, 480), gfx::Size(640, 480),
           ::media::EmptyExtraData(), ::media::EncryptionScheme()));
       VideoPipelineClient client;
       client.av_pipeline_client.eos_cb = base::Bind(
@@ -198,7 +199,7 @@ class PipelineHelper {
   }
   void Stop() {
     media_pipeline_.reset();
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
   void SetCdmLicenseInstalled() { cdm_context_->SetLicenseInstalled(); }
 

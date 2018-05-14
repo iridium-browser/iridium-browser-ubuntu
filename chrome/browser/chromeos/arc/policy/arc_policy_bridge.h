@@ -5,20 +5,26 @@
 #ifndef CHROME_BROWSER_CHROMEOS_ARC_POLICY_ARC_POLICY_BRIDGE_H_
 #define CHROME_BROWSER_CHROMEOS_ARC_POLICY_ARC_POLICY_BRIDGE_H_
 
+#include <stdint.h>
+
 #include <memory>
+#include <set>
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
 #include "base/time/time.h"
-#include "components/arc/arc_service.h"
 #include "components/arc/common/policy.mojom.h"
-#include "components/arc/instance_holder.h"
+#include "components/arc/connection_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/core/common/policy_service.h"
-#include "components/pref_registry/pref_registry_syncable.h"
-#include "mojo/public/cpp/bindings/binding.h"
+
+namespace base {
+class Value;
+}
 
 namespace content {
 class BrowserContext;
@@ -42,10 +48,44 @@ enum ArcCertsSyncMode : int32_t {
 };
 
 class ArcPolicyBridge : public KeyedService,
-                        public InstanceHolder<mojom::PolicyInstance>::Observer,
+                        public ConnectionObserver<mojom::PolicyInstance>,
                         public mojom::PolicyHost,
                         public policy::PolicyService::Observer {
  public:
+  class Observer {
+   public:
+    // Called when policy is sent to CloudDPC.
+    virtual void OnPolicySent(const std::string& policy) {}
+
+    // Called when a compliance report is received from CloudDPC.
+    virtual void OnComplianceReportReceived(
+        const base::Value* compliance_report) {}
+
+    // Called when a request to install set of packages was sent to CloudDPS.
+    virtual void OnCloudDpsRequested(
+        base::Time time,
+        const std::set<std::string>& package_names) {}
+
+    // Called when CloudDPS successfully processed request for install for a
+    // set of packages. Note |package_names| may not match to what was
+    // requested.
+    virtual void OnCloudDpsSucceeded(
+        base::Time time,
+        const std::set<std::string>& package_names) {}
+
+    // Called when CloudDPS returned an error for the package installation
+    // request. |reason| defines the failure reason.
+    virtual void OnCloudDpsFailed(base::Time time,
+                                  const std::string& package_name,
+                                  mojom::InstallErrorReason reason) {}
+
+   protected:
+    Observer() = default;
+    virtual ~Observer() = default;
+
+    DISALLOW_COPY_AND_ASSIGN(Observer);
+  };
+
   // Returns singleton instance for the given BrowserContext,
   // or nullptr if the browser |context| is not allowed to use ARC.
   static ArcPolicyBridge* GetForBrowserContext(
@@ -58,18 +98,30 @@ class ArcPolicyBridge : public KeyedService,
                   policy::PolicyService* policy_service);
   ~ArcPolicyBridge() override;
 
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+  const std::string& GetInstanceGuidForTesting();
+
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
 
   void OverrideIsManagedForTesting(bool is_managed);
 
-  // InstanceHolder<mojom::PolicyInstance>::Observer overrides.
-  void OnInstanceReady() override;
-  void OnInstanceClosed() override;
+  // ConnectionObserver<mojom::PolicyInstance> overrides.
+  void OnConnectionReady() override;
+  void OnConnectionClosed() override;
 
   // PolicyHost overrides.
-  void GetPolicies(const GetPoliciesCallback& callback) override;
+  void GetPolicies(GetPoliciesCallback callback) override;
   void ReportCompliance(const std::string& request,
-                        const ReportComplianceCallback& callback) override;
+                        ReportComplianceCallback callback) override;
+  void ReportCloudDpsRequested(
+      base::Time time,
+      const std::vector<std::string>& package_names) override;
+  void ReportCloudDpsSucceeded(
+      base::Time time,
+      const std::vector<std::string>& package_names) override;
+  void ReportCloudDpsFailed(base::Time time,
+                            const std::string& package_name,
+                            mojom::InstallErrorReason reason) override;
 
   // PolicyService::Observer overrides.
   void OnPolicyUpdated(const policy::PolicyNamespace& ns,
@@ -84,7 +136,7 @@ class ArcPolicyBridge : public KeyedService,
 
   // Called when the compliance report from ARC is parsed.
   void OnReportComplianceParseSuccess(
-      const ArcPolicyBridge::ReportComplianceCallback& callback,
+      base::OnceCallback<void(const std::string&)> callback,
       std::unique_ptr<base::Value> parsed_json);
 
   void UpdateComplianceReportMetrics(const base::DictionaryValue* report);
@@ -92,10 +144,13 @@ class ArcPolicyBridge : public KeyedService,
   content::BrowserContext* const context_;
   ArcBridgeService* const arc_bridge_service_;  // Owned by ArcServiceManager.
 
-  mojo::Binding<PolicyHost> binding_;
   policy::PolicyService* policy_service_ = nullptr;
   bool is_managed_ = false;
 
+  // HACK(b/73762796): A GUID that is regenerated whenever |this| is created,
+  // ensuring that the first policy sent to CloudDPC is considered different
+  // from previous policy and a compliance report is sent.
+  const std::string instance_guid_;
   // Hash of the policies that were up to date when ARC started.
   std::string initial_policies_hash_;
   // Whether the UMA metric for the first successfully obtained compliance
@@ -110,6 +165,8 @@ class ArcPolicyBridge : public KeyedService,
   // Whether the UMA metric for the successfully obtained compliance report
   // since the most recent policy update notificaton was already reported.
   bool compliance_since_update_timing_reported_ = false;
+
+  base::ObserverList<Observer, true /* check_empty */> observers_;
 
   // Must be the last member.
   base::WeakPtrFactory<ArcPolicyBridge> weak_ptr_factory_;

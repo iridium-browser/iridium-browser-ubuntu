@@ -15,7 +15,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
@@ -24,17 +23,21 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_map.h"
+#include "extensions/common/manifest_handlers/web_accessible_resources_info.h"
 #include "extensions/common/switches.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 using content::NavigationController;
 using content::WebContents;
+
+namespace extensions {
 
 namespace {
 
@@ -57,7 +60,6 @@ class ChromeWebStoreProcessTest : public ExtensionBrowserTest {
  public:
   const GURL& gallery_url() { return gallery_url_; }
 
- private:
   // Overrides location of Chrome Web Store gallery to a test controlled URL.
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
@@ -65,15 +67,32 @@ class ChromeWebStoreProcessTest : public ExtensionBrowserTest {
     ASSERT_TRUE(embedded_test_server()->Start());
     gallery_url_ =
         embedded_test_server()->GetURL("chrome.webstore.test.com", "/");
-    command_line->AppendSwitchASCII(switches::kAppsGalleryURL,
+    command_line->AppendSwitchASCII(::switches::kAppsGalleryURL,
                                     gallery_url_.spec());
   }
 
+ private:
   void SetUpOnMainThread() override {
     host_resolver()->AddRule("*", "127.0.0.1");
   }
 
   GURL gallery_url_;
+};
+
+class ChromeWebStoreInIsolatedOriginTest : public ChromeWebStoreProcessTest {
+ public:
+  ChromeWebStoreInIsolatedOriginTest() {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ChromeWebStoreProcessTest::SetUpCommandLine(command_line);
+
+    // Mark the Chrome Web Store URL as an isolated origin.
+    command_line->AppendSwitchASCII(::switches::kIsolateOrigins,
+                                    gallery_url().spec());
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ChromeWebStoreInIsolatedOriginTest);
 };
 
 }  // namespace
@@ -162,26 +181,53 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest, MAYBE_ProcessOverflow) {
 
   // Get tab processes.
   ASSERT_EQ(9, browser()->tab_strip_model()->count());
-  content::RenderProcessHost* isolated1_host =
-      browser()->tab_strip_model()->GetWebContentsAt(0)->GetRenderProcessHost();
-  content::RenderProcessHost* ntp1_host =
-      browser()->tab_strip_model()->GetWebContentsAt(1)->GetRenderProcessHost();
-  content::RenderProcessHost* hosted1_host =
-      browser()->tab_strip_model()->GetWebContentsAt(2)->GetRenderProcessHost();
-  content::RenderProcessHost* web1_host =
-      browser()->tab_strip_model()->GetWebContentsAt(3)->GetRenderProcessHost();
+  content::RenderProcessHost* isolated1_host = browser()
+                                                   ->tab_strip_model()
+                                                   ->GetWebContentsAt(0)
+                                                   ->GetMainFrame()
+                                                   ->GetProcess();
+  content::RenderProcessHost* ntp1_host = browser()
+                                              ->tab_strip_model()
+                                              ->GetWebContentsAt(1)
+                                              ->GetMainFrame()
+                                              ->GetProcess();
+  content::RenderProcessHost* hosted1_host = browser()
+                                                 ->tab_strip_model()
+                                                 ->GetWebContentsAt(2)
+                                                 ->GetMainFrame()
+                                                 ->GetProcess();
+  content::RenderProcessHost* web1_host = browser()
+                                              ->tab_strip_model()
+                                              ->GetWebContentsAt(3)
+                                              ->GetMainFrame()
+                                              ->GetProcess();
 
-  content::RenderProcessHost* isolated2_host =
-      browser()->tab_strip_model()->GetWebContentsAt(4)->GetRenderProcessHost();
-  content::RenderProcessHost* ntp2_host =
-      browser()->tab_strip_model()->GetWebContentsAt(5)->GetRenderProcessHost();
-  content::RenderProcessHost* hosted2_host =
-      browser()->tab_strip_model()->GetWebContentsAt(6)->GetRenderProcessHost();
-  content::RenderProcessHost* web2_host =
-      browser()->tab_strip_model()->GetWebContentsAt(7)->GetRenderProcessHost();
+  content::RenderProcessHost* isolated2_host = browser()
+                                                   ->tab_strip_model()
+                                                   ->GetWebContentsAt(4)
+                                                   ->GetMainFrame()
+                                                   ->GetProcess();
+  content::RenderProcessHost* ntp2_host = browser()
+                                              ->tab_strip_model()
+                                              ->GetWebContentsAt(5)
+                                              ->GetMainFrame()
+                                              ->GetProcess();
+  content::RenderProcessHost* hosted2_host = browser()
+                                                 ->tab_strip_model()
+                                                 ->GetWebContentsAt(6)
+                                                 ->GetMainFrame()
+                                                 ->GetProcess();
+  content::RenderProcessHost* web2_host = browser()
+                                              ->tab_strip_model()
+                                              ->GetWebContentsAt(7)
+                                              ->GetMainFrame()
+                                              ->GetProcess();
 
-  content::RenderProcessHost* second_isolated1_host =
-      browser()->tab_strip_model()->GetWebContentsAt(8)->GetRenderProcessHost();
+  content::RenderProcessHost* second_isolated1_host = browser()
+                                                          ->tab_strip_model()
+                                                          ->GetWebContentsAt(8)
+                                                          ->GetMainFrame()
+                                                          ->GetProcess();
 
   // Get extension processes.
   extensions::ProcessManager* process_manager =
@@ -385,6 +431,31 @@ IN_PROC_BROWSER_TEST_F(ChromeWebStoreProcessTest,
   EXPECT_NE(old_process_host, new_process_host);
 }
 
+// Check that navigations to the Chrome Web Store succeed when the Chrome Web
+// Store URL's origin is set as an isolated origin via the
+// --isolate-origins flag.  See https://crbug.com/788837.
+IN_PROC_BROWSER_TEST_F(ChromeWebStoreInIsolatedOriginTest,
+                       NavigationLoadsChromeWebStore) {
+  // Sanity check that a SiteInstance for a Chrome Web Store URL requires a
+  // dedicated process.
+  content::BrowserContext* context = browser()->profile();
+  scoped_refptr<content::SiteInstance> cws_site_instance =
+      content::SiteInstance::CreateForURL(context, gallery_url());
+  EXPECT_TRUE(cws_site_instance->RequiresDedicatedProcess());
+
+  // Navigate to Chrome Web Store and check that it's loaded successfully.
+  ui_test_utils::NavigateToURL(browser(), gallery_url());
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_EQ(gallery_url(), web_contents->GetLastCommittedURL());
+
+  // Verify that the Chrome Web Store hosted app is really loaded.
+  content::RenderProcessHost* render_process_host =
+      web_contents->GetMainFrame()->GetProcess();
+  EXPECT_TRUE(extensions::ProcessMap::Get(profile())->Contains(
+      extensions::kWebStoreAppId, render_process_host->GetID()));
+}
+
 // This test verifies that blocked navigations to extensions pages do not
 // overwrite process-per-site map inside content/.
 IN_PROC_BROWSER_TEST_F(ProcessManagementTest,
@@ -448,3 +519,66 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest,
   EXPECT_EQ(new_site_instance->GetProcess(),
             web_contents->GetSiteInstance()->GetProcess());
 }
+
+// Check that whether we can access the window object of a window.open()'d url
+// to an extension is the same regardless of whether the extension is installed.
+// https://crbug.com/598265.
+IN_PROC_BROWSER_TEST_F(
+    ProcessManagementTest,
+    TestForkingBehaviorForUninstalledAndNonAccessibleExtensions) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const Extension* extension =
+      LoadExtension(test_data_dir_.AppendASCII("simple_with_icon"));
+  ASSERT_TRUE(extension);
+  ASSERT_FALSE(
+      WebAccessibleResourcesInfo::HasWebAccessibleResources(extension));
+
+  const GURL installed_extension = extension->url();
+  const GURL nonexistent_extension("chrome-extension://" +
+                                   std::string(32, 'a') + "/");
+  EXPECT_NE(installed_extension, nonexistent_extension);
+
+  ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("example.com", "/empty.html"));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  auto can_access_window = [this, web_contents](const GURL& url) {
+    bool can_access = false;
+    const char kOpenNewWindow[] = "window.newWin = window.open('%s');";
+    const char kGetAccess[] =
+        R"(
+          {
+            let canAccess = false;
+            try {
+              window.newWin.document;
+              canAccess = true;
+            } catch (e) {
+              canAccess = false;
+            }
+            window.newWin.close();
+            window.domAutomationController.send(canAccess);
+         }
+       )";
+    EXPECT_TRUE(content::ExecuteScript(
+        web_contents, base::StringPrintf(kOpenNewWindow, url.spec().c_str())));
+
+    // WaitForLoadStop() will return false on a 404, but that can happen if we
+    // navigate to a blocked or nonexistent extension page.
+    ignore_result(content::WaitForLoadStop(
+        browser()->tab_strip_model()->GetActiveWebContents()));
+
+    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(web_contents, kGetAccess,
+                                                     &can_access));
+
+    return can_access;
+  };
+
+  bool can_access_installed = can_access_window(installed_extension);
+  bool can_access_nonexistent = can_access_window(nonexistent_extension);
+  // Behavior for installed and nonexistent extensions should be equivalent.
+  // We don't care much about what the result is (since if it can access it,
+  // it's about:blank); only that the result is safe.
+  EXPECT_EQ(can_access_installed, can_access_nonexistent);
+}
+
+}  // namespace extensions

@@ -4,10 +4,9 @@
 """Parses the command line, discovers the appropriate benchmarks, and runs them.
 
 Handles benchmark configuration, but all the logic for
-actually running the benchmark is in Benchmark and PageRunner."""
+actually running the benchmark is in Benchmark and StoryRunner."""
 
 import argparse
-import json
 import logging
 import os
 import sys
@@ -20,33 +19,35 @@ from telemetry.internal.util import binary_manager
 from telemetry.internal.util import command_line
 from telemetry.internal.util import ps_util
 from telemetry.util import matching
-from telemetry.util import bot_utils
 
 from py_utils import discover
 
-# Right now, we only have one of each of our power perf bots. This means that
-# all eligible Telemetry benchmarks are run unsharded, which results in very
-# long (12h) cycle times. We'd like to reduce the number of tests that we run
-# on each bot drastically until we get more of the same hardware to shard tests
-# with, but we can't do so until we've verified that the hardware configuration
-# is a viable one for Chrome Telemetry tests. This is done by seeing at least
-# one all-green test run. As this happens for each bot, we'll add it to this
-# whitelist, making it eligible to run only BattOr power tests.
-GOOD_POWER_PERF_BOT_WHITELIST = [
-    'Mac Power Dual-GPU Perf', 'Mac Power Low-End Perf'
-]
 
 DEFAULT_LOG_FORMAT = (
     '(%(levelname)s) %(asctime)s %(module)s.%(funcName)s:%(lineno)d  '
     '%(message)s')
 
+def _SetExpectations(bench, path):
+  if path and os.path.exists(path):
+    with open(path) as fp:
+      bench.AugmentExpectationsWithParser(fp.read())
+  return bench.expectations
 
-def _IsBenchmarkEnabled(benchmark_class, possible_browser):
-  return (issubclass(benchmark_class, benchmark.Benchmark) and
-          decorators.IsBenchmarkEnabled(benchmark_class, possible_browser))
+
+def _IsBenchmarkEnabled(bench, possible_browser, expectations_file):
+  b = bench()
+  expectations = _SetExpectations(b, expectations_file)
+  return (
+      # Test that the current platform is supported.
+      any(t.ShouldDisable(possible_browser.platform, possible_browser)
+          for t in b.SUPPORTED_PLATFORMS) and
+      # Test that expectations say it is enabled.
+      not expectations.IsBenchmarkDisabled(possible_browser.platform,
+                                           possible_browser))
 
 
-def PrintBenchmarkList(benchmarks, possible_browser, output_pipe=sys.stdout):
+def PrintBenchmarkList(
+    benchmarks, possible_browser, expectations_file, output_pipe=sys.stdout):
   """ Print benchmarks that are not filtered in the same order of benchmarks in
   the |benchmarks| list.
 
@@ -76,7 +77,8 @@ def PrintBenchmarkList(benchmarks, possible_browser, output_pipe=sys.stdout):
   # Sort the benchmarks by benchmark name.
   benchmarks = sorted(benchmarks, key=lambda b: b.Name())
   for b in benchmarks:
-    if not possible_browser or _IsBenchmarkEnabled(b, possible_browser):
+    if not possible_browser or _IsBenchmarkEnabled(b, possible_browser,
+                                                   expectations_file):
       print >> output_pipe, format_string % (b.Name(), b.Description())
     else:
       disabled_benchmarks.append(b)
@@ -131,11 +133,6 @@ class List(command_line.OptparseCommand):
     return parser
 
   @classmethod
-  def AddCommandLineArgs(cls, parser, _):
-    parser.add_option('-j', '--json-output-file', type='string')
-    parser.add_option('-n', '--num-shards', type='int', default=1)
-
-  @classmethod
   def ProcessCommandLineArgs(cls, parser, args, environment):
     if not args.positional_args:
       args.benchmarks = _Benchmarks(environment)
@@ -144,6 +141,7 @@ class List(command_line.OptparseCommand):
           args.positional_args[0], environment, exact_matches=False)
     else:
       parser.error('Must provide at most one benchmark name.')
+    cls._expectations_file = environment.expectations_file
 
   def Run(self, args):
     # Set at least log info level for List command.
@@ -151,26 +149,15 @@ class List(command_line.OptparseCommand):
     # should be change to use verbose logging instead.
     logging.getLogger().setLevel(logging.INFO)
     possible_browser = browser_finder.FindBrowser(args)
-    if args.browser_type in ('release', 'release_x64', 'debug', 'debug_x64',
-                             'canary', 'android-chromium', 'android-chrome'):
-      args.browser_type = 'reference'
-      possible_reference_browser = browser_finder.FindBrowser(args)
-    else:
-      possible_reference_browser = None
-    if args.json_output_file:
-      with open(args.json_output_file, 'w') as f:
-        f.write(
-            _GetJsonBenchmarkList(possible_browser, possible_reference_browser,
-                                  args.benchmarks, args.num_shards))
-    else:
-      PrintBenchmarkList(args.benchmarks, possible_browser)
+    PrintBenchmarkList(
+        args.benchmarks, possible_browser, self._expectations_file)
     return 0
 
 
 class Run(command_line.OptparseCommand):
   """Run one or more benchmarks (default)"""
 
-  usage = 'benchmark_name [page_set] [<options>]'
+  usage = 'benchmark_name [<options>]'
 
   @classmethod
   def CreateParser(cls):
@@ -202,7 +189,8 @@ class Run(command_line.OptparseCommand):
     if not args.positional_args:
       possible_browser = (browser_finder.FindBrowser(args)
                           if args.browser_type else None)
-      PrintBenchmarkList(all_benchmarks, possible_browser)
+      PrintBenchmarkList(
+          all_benchmarks, possible_browser, environment.expectations_file)
       sys.exit(-1)
 
     input_benchmark_name = args.positional_args[0]
@@ -214,7 +202,8 @@ class Run(command_line.OptparseCommand):
           all_benchmarks, input_benchmark_name, lambda x: x.Name())
       if most_likely_matched_benchmarks:
         print >> sys.stderr, 'Do you mean any of those benchmarks below?'
-        PrintBenchmarkList(most_likely_matched_benchmarks, None, sys.stderr)
+        PrintBenchmarkList(most_likely_matched_benchmarks, None,
+                           environment.expectations_file, sys.stderr)
       sys.exit(-1)
 
     if len(matching_benchmarks) > 1:
@@ -222,7 +211,8 @@ class Run(command_line.OptparseCommand):
           'Multiple benchmarks named "%s".' % input_benchmark_name)
       print >> sys.stderr, 'Did you mean one of these?'
       print >> sys.stderr
-      PrintBenchmarkList(matching_benchmarks, None, sys.stderr)
+      PrintBenchmarkList(matching_benchmarks, None,
+                         environment.expectations_file, sys.stderr)
       sys.exit(-1)
 
     benchmark_class = matching_benchmarks.pop()
@@ -236,9 +226,12 @@ class Run(command_line.OptparseCommand):
     benchmark_class.ProcessCommandLineArgs(parser, args)
 
     cls._benchmark = benchmark_class
+    cls._expectations_path = environment.expectations_file
 
   def Run(self, args):
-    return min(255, self._benchmark().Run(args))
+    b = self._benchmark()
+    _SetExpectations(b, self._expectations_path)
+    return min(255, b.Run(args))
 
 
 def _ScriptName():
@@ -297,82 +290,6 @@ def GetBenchmarkByName(name, environment):
   if len(matched) == 0:
     return None
   return matched[0]
-
-
-def _GetJsonBenchmarkList(possible_browser, possible_reference_browser,
-                          benchmark_classes, num_shards):
-  """Returns a list of all enabled benchmarks in a JSON format expected by
-  buildbots.
-
-  JSON format:
-  { "version": <int>,
-    "steps": {
-      <string>: {
-        "device_affinity": <int>,
-        "cmd": <string>,
-        "perf_dashboard_id": <string>,
-      },
-      ...
-    }
-  }
-  """
-  # TODO(charliea): Remove this once we have more power perf bots.
-  only_run_battor_benchmarks = False
-  print 'Environment variables: ', os.environ
-  if os.environ.get('BUILDBOT_BUILDERNAME') in GOOD_POWER_PERF_BOT_WHITELIST:
-    only_run_battor_benchmarks = True
-
-  output = {'version': 1, 'steps': {}}
-  for benchmark_class in benchmark_classes:
-    # Filter out benchmarks in tools/perf/contrib/ directory
-    # This is a terrible hack but we should no longer need this
-    # _GetJsonBenchmarkList once all the perf bots are moved to swarming
-    # (crbug.com/715565)
-    if ('contrib' in os.path.abspath(
-        sys.modules[benchmark_class.__module__].__file__)):
-      continue
-
-    if not _IsBenchmarkEnabled(benchmark_class, possible_browser):
-      continue
-
-    base_name = benchmark_class.Name()
-    # TODO(charliea): Remove this once we have more power perf bots.
-    # Only run battor power benchmarks to reduce the cycle time of this bot.
-    # TODO(rnephew): Enable media.* and power.* tests when Mac BattOr issue
-    # is solved.
-    if only_run_battor_benchmarks and not base_name.startswith('battor'):
-      continue
-    base_cmd = [
-        sys.executable,
-        os.path.realpath(sys.argv[0]), '-v', '--output-format=chartjson',
-        '--upload-results', base_name
-    ]
-    perf_dashboard_id = base_name
-
-    device_affinity = bot_utils.GetDeviceAffinity(num_shards, base_name)
-
-    output['steps'][base_name] = {
-        'cmd':
-            ' '
-            .join(base_cmd + ['--browser=%s' % possible_browser.browser_type]),
-        'device_affinity':
-            device_affinity,
-        'perf_dashboard_id':
-            perf_dashboard_id,
-    }
-    if (possible_reference_browser and
-        _IsBenchmarkEnabled(benchmark_class, possible_reference_browser)):
-      output['steps'][base_name + '.reference'] = {
-          'cmd':
-              ' '.join(base_cmd +
-                       ['--browser=reference', '--output-trace-tag=_ref']),
-          'device_affinity':
-              device_affinity,
-          'perf_dashboard_id':
-              perf_dashboard_id,
-      }
-
-  return json.dumps(output, indent=2, sort_keys=True)
 
 
 def main(environment, extra_commands=None, **log_config_kwargs):

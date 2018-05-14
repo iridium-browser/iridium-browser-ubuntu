@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
-#include "components/offline_pages/core/downloads/download_ui_item.h"
 #include "components/offline_pages/core/offline_page_model.h"
 #include "components/offline_pages/core/snapshot_controller.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -39,8 +38,7 @@ class RecentTabHelper
   void DocumentAvailableInMainFrame() override;
   void DocumentOnLoadCompletedInMainFrame() override;
   void WebContentsDestroyed() override;
-  void WasHidden() override;
-  void WasShown() override;
+  void OnVisibilityChanged(content::Visibility visibility) override;
 
   // Notifies that the tab of the associated WebContents will (most probably) be
   // closed. This call is expected to always happen before the one to WasHidden.
@@ -48,6 +46,7 @@ class RecentTabHelper
 
   // SnapshotController::Client
   void StartSnapshot() override;
+  void RunRenovations() override;
 
   // Delegate that is used by RecentTabHelper to get external dependencies.
   // Default implementation lives in .cc file, while tests provide an override.
@@ -86,13 +85,17 @@ class RecentTabHelper
   // Note #2: Currently this method only accepts download requests from the
   // downloads namespace.
   void ObserveAndDownloadCurrentPage(const ClientId& client_id,
-                                     int64_t request_id);
+                                     int64_t request_id,
+                                     const std::string& origin);
 
  private:
   struct SnapshotProgressInfo;
 
   explicit RecentTabHelper(content::WebContents* web_contents);
   friend class content::WebContentsUserData<RecentTabHelper>;
+
+  void WebContentsWasHidden();
+  void WebContentsWasShown();
 
   bool EnsureInitialized();
   void ContinueSnapshotWithIdsToPurge(SnapshotProgressInfo* snapshot_info,

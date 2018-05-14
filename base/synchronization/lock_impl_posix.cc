@@ -8,6 +8,8 @@
 
 #include "base/debug/activity_tracker.h"
 #include "base/synchronization/lock.h"
+#include "base/synchronization/synchronization_buildflags.h"
+#include "build/build_config.h"
 
 namespace base {
 namespace internal {
@@ -19,7 +21,7 @@ namespace internal {
 // Lock::PriorityInheritanceAvailable still must be checked as the code may
 // compile but the underlying platform still may not correctly support priority
 // inheritance locks.
-#if defined(OS_NACL) || defined(OS_ANDROID)
+#if defined(OS_NACL) || defined(OS_ANDROID) || defined(OS_FUCHSIA)
 #define PRIORITY_INHERITANCE_LOCKS_POSSIBLE() 0
 #else
 #define PRIORITY_INHERITANCE_LOCKS_POSSIBLE() 1
@@ -58,6 +60,17 @@ bool LockImpl::Try() {
 }
 
 void LockImpl::Lock() {
+  // The ScopedLockAcquireActivity below is relatively expensive and so its
+  // actions can become significant due to the very large number of locks
+  // that tend to be used throughout the build. To avoid this cost in the
+  // vast majority of the calls, simply "try" the lock first and only do the
+  // (tracked) blocking call if that fails. Since "try" itself is a system
+  // call, and thus also somewhat expensive, don't bother with it unless
+  // tracking is actually enabled.
+  if (base::debug::GlobalActivityTracker::IsEnabled())
+    if (Try())
+      return;
+
   base::debug::ScopedLockAcquireActivity lock_activity(this);
   int rv = pthread_mutex_lock(&native_handle_);
   DCHECK_EQ(rv, 0) << ". " << strerror(rv);
@@ -65,11 +78,13 @@ void LockImpl::Lock() {
 
 // static
 bool LockImpl::PriorityInheritanceAvailable() {
-#if PRIORITY_INHERITANCE_LOCKS_POSSIBLE() && defined(OS_MACOSX)
+#if BUILDFLAG(ENABLE_MUTEX_PRIORITY_INHERITANCE)
+  return true;
+#elif PRIORITY_INHERITANCE_LOCKS_POSSIBLE() && defined(OS_MACOSX)
   return true;
 #else
   // Security concerns prevent the use of priority inheritance mutexes on Linux.
-  //   * CVE-2010-0622 - wake_futex_pi unlocks incorrect, possible DoS.
+  //   * CVE-2010-0622 - Linux < 2.6.33-rc7, wake_futex_pi possible DoS.
   //     https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2010-0622
   //   * CVE-2012-6647 - Linux < 3.5.1, futex_wait_requeue_pi possible DoS.
   //     https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2012-6647
@@ -81,7 +96,7 @@ bool LockImpl::PriorityInheritanceAvailable() {
   //   * glibc Bug 14652: https://sourceware.org/bugzilla/show_bug.cgi?id=14652
   //     Fixed in glibc 2.17.
   //     Priority inheritance mutexes may deadlock with condition variables
-  //     during recacquisition of the mutex after the condition variable is
+  //     during reacquisition of the mutex after the condition variable is
   //     signalled.
   return false;
 #endif

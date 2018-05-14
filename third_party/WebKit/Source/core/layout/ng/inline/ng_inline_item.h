@@ -5,6 +5,7 @@
 #ifndef NGInlineItem_h
 #define NGInlineItem_h
 
+#include "core/CoreExport.h"
 #include "platform/LayoutUnit.h"
 #include "platform/fonts/FontFallbackPriority.h"
 #include "platform/fonts/SimpleFontData.h"
@@ -24,7 +25,7 @@ class LayoutObject;
 // priority (text, symbol, emoji, etc), and script (but not by font).
 // In this representation TextNodes are merged up into their parent inline
 // element where possible.
-class NGInlineItem {
+class CORE_EXPORT NGInlineItem {
  public:
   enum NGInlineItemType {
     kText,
@@ -34,6 +35,7 @@ class NGInlineItem {
     kCloseTag,
     kFloating,
     kOutOfFlowPositioned,
+    kListMarker,
     kBidiControl
     // When adding new values, make sure the bit size of |type_| is large
     // enough to store.
@@ -46,46 +48,47 @@ class NGInlineItem {
     kPostContext = 2
   };
 
+  // The constructor and destructor can't be implicit or inlined, because they
+  // require full definition of ComputedStyle.
   NGInlineItem(NGInlineItemType type,
                unsigned start,
                unsigned end,
                const ComputedStyle* style = nullptr,
-               LayoutObject* layout_object = nullptr)
-      : start_offset_(start),
-        end_offset_(end),
-        script_(USCRIPT_INVALID_CODE),
-        style_(style),
-        layout_object_(layout_object),
-        type_(type),
-        bidi_level_(UBIDI_LTR),
-        shape_options_(kPreContext | kPostContext),
-        rotate_sideways_(false),
-        fallback_priority_(FontFallbackPriority::kInvalid) {
-    DCHECK_GE(end, start);
-  }
+               LayoutObject* layout_object = nullptr);
+  ~NGInlineItem();
 
   NGInlineItemType Type() const { return static_cast<NGInlineItemType>(type_); }
   const char* NGInlineItemTypeToString(int val) const;
 
-  const ShapeResult* TextShapeResult() const { return shape_result_.Get(); }
+  const ShapeResult* TextShapeResult() const { return shape_result_.get(); }
   NGLayoutInlineShapeOptions ShapeOptions() const {
     return static_cast<NGLayoutInlineShapeOptions>(shape_options_);
   }
 
+  // If this item is "empty" for the purpose of empty block calculation.
+  bool IsEmptyItem() const { return is_empty_item_; }
+
+  // If this item should create a box fragment. Box fragments can be omitted for
+  // optimization if this is false.
+  bool ShouldCreateBoxFragment() const { return should_create_box_fragment_; }
+
   unsigned StartOffset() const { return start_offset_; }
   unsigned EndOffset() const { return end_offset_; }
   unsigned Length() const { return end_offset_ - start_offset_; }
+
   TextDirection Direction() const { return DirectionFromLevel(BidiLevel()); }
   UBiDiLevel BidiLevel() const { return static_cast<UBiDiLevel>(bidi_level_); }
+  // Resolved bidi level for the reordering algorithm. Certain items have
+  // artificial bidi level for the reordering algorithm without affecting its
+  // direction.
+  UBiDiLevel BidiLevelForReorder() const;
+
   UScriptCode GetScript() const { return script_; }
-  const ComputedStyle* Style() const { return style_.Get(); }
+  const ComputedStyle* Style() const { return style_.get(); }
   LayoutObject* GetLayoutObject() const { return layout_object_; }
 
   void SetOffset(unsigned start, unsigned end);
   void SetEndOffset(unsigned);
-
-  LayoutUnit InlineSize() const;
-  LayoutUnit InlineSize(unsigned start, unsigned end) const;
 
   bool HasStartEdge() const;
   bool HasEndEdge() const;
@@ -102,21 +105,20 @@ class NGInlineItem {
   String ToString() const;
 
  private:
+  void ComputeBoxProperties();
+
   unsigned start_offset_;
   unsigned end_offset_;
   UScriptCode script_;
-  RefPtr<const ShapeResult> shape_result_;
-  RefPtr<const ComputedStyle> style_;
+  scoped_refptr<const ShapeResult> shape_result_;
+  scoped_refptr<const ComputedStyle> style_;
   LayoutObject* layout_object_;
 
-  unsigned type_ : 3;
+  unsigned type_ : 4;
   unsigned bidi_level_ : 8;  // UBiDiLevel is defined as uint8_t.
   unsigned shape_options_ : 2;
-  unsigned rotate_sideways_ : 1;
-
-  // TODO(layout-ng): Do we need fallback_priority_ here? If so we should pack
-  // it with the bit field above.
-  FontFallbackPriority fallback_priority_;
+  unsigned is_empty_item_ : 1;
+  unsigned should_create_box_fragment_ : 1;
 
   friend class NGInlineNode;
 };

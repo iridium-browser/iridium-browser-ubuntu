@@ -6,7 +6,7 @@
 
 #include <type_traits>
 
-#include "ash/accessibility_types.h"
+#include "ash/public/cpp/accessibility_types.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
@@ -15,6 +15,7 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/events/keyboard_driven_event_rewriter.h"
+#include "chrome/browser/chromeos/login/enrollment/auto_enrollment_controller.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/lock/webui_screen_locker.h"
@@ -23,8 +24,11 @@
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
+#include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
+#include "chrome/browser/chromeos/tpm_firmware_update.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/ash/ash_util.h"
+#include "chrome/browser/ui/ash/tablet_mode_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/common/channel_info.h"
@@ -33,6 +37,7 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_constants.h"
+#include "chromeos/chromeos_switches.h"
 #include "components/login/base_screen_handler_utils.h"
 #include "components/login/localized_values_builder.h"
 #include "components/prefs/pref_service.h"
@@ -41,10 +46,13 @@
 #include "google_apis/google_api_keys.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/display/display.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/events/event_sink.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/keyboard/keyboard_controller.h"
+
+namespace chromeos {
 
 namespace {
 
@@ -58,9 +66,20 @@ bool IsRemoraRequisition() {
   return policy_manager && policy_manager->IsRemoraRequisition();
 }
 
-}  // namespace
+void LaunchResetScreen() {
+  // Don't recreate WizardController if it already exists.
+  WizardController* const wizard_controller =
+      WizardController::default_controller();
+  if (wizard_controller && !wizard_controller->login_screen_started()) {
+    wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_RESET);
+  } else {
+    DCHECK(LoginDisplayHost::default_host());
+    LoginDisplayHost::default_host()->StartWizard(
+        OobeScreen::SCREEN_OOBE_RESET);
+  }
+}
 
-namespace chromeos {
+}  // namespace
 
 // Note that show_oobe_ui_ defaults to false because WizardController assumes
 // OOBE UI is not visible by default.
@@ -80,9 +99,13 @@ CoreOobeHandler::CoreOobeHandler(OobeUI* oobe_ui,
   } else {
     NOTIMPLEMENTED();
   }
+
+  TabletModeClient* tablet_mode_client = TabletModeClient::Get();
+  tablet_mode_client->AddObserver(this);
 }
 
 CoreOobeHandler::~CoreOobeHandler() {
+  TabletModeClient::Get()->RemoveObserver(this);
 }
 
 void CoreOobeHandler::DeclareLocalizedValues(
@@ -136,17 +159,19 @@ void CoreOobeHandler::Initialize() {
   UpdateClientAreaSize();
 }
 
+void CoreOobeHandler::GetAdditionalParameters(base::DictionaryValue* dict) {
+  dict->SetKey("isInTabletMode",
+               base::Value(TabletModeClient::Get()->tablet_mode_enabled()));
+}
+
 void CoreOobeHandler::RegisterMessages() {
-  AddCallback("screenStateInitialize",
-              &CoreOobeHandler::HandleInitialized);
+  AddCallback("screenStateInitialize", &CoreOobeHandler::HandleInitialized);
   AddCallback("skipUpdateEnrollAfterEula",
               &CoreOobeHandler::HandleSkipUpdateEnrollAfterEula);
   AddCallback("updateCurrentScreen",
               &CoreOobeHandler::HandleUpdateCurrentScreen);
-  AddCallback("enableHighContrast",
-              &CoreOobeHandler::HandleEnableHighContrast);
-  AddCallback("enableLargeCursor",
-              &CoreOobeHandler::HandleEnableLargeCursor);
+  AddCallback("enableHighContrast", &CoreOobeHandler::HandleEnableHighContrast);
+  AddCallback("enableLargeCursor", &CoreOobeHandler::HandleEnableLargeCursor);
   AddCallback("enableVirtualKeyboard",
               &CoreOobeHandler::HandleEnableVirtualKeyboard);
   AddCallback("enableScreenMagnifier",
@@ -155,20 +180,22 @@ void CoreOobeHandler::RegisterMessages() {
               &CoreOobeHandler::HandleEnableSpokenFeedback);
   AddCallback("setDeviceRequisition",
               &CoreOobeHandler::HandleSetDeviceRequisition);
-  AddCallback("screenAssetsLoaded",
-              &CoreOobeHandler::HandleScreenAssetsLoaded);
+  AddCallback("screenAssetsLoaded", &CoreOobeHandler::HandleScreenAssetsLoaded);
   AddRawCallback("skipToLoginForTesting",
                  &CoreOobeHandler::HandleSkipToLoginForTesting);
-  AddCallback("launchHelpApp",
-              &CoreOobeHandler::HandleLaunchHelpApp);
+  AddCallback("skipToUpdateForTesting",
+              &CoreOobeHandler::HandleSkipToUpdateForTesting);
+  AddCallback("launchHelpApp", &CoreOobeHandler::HandleLaunchHelpApp);
   AddCallback("toggleResetScreen", &CoreOobeHandler::HandleToggleResetScreen);
   AddCallback("toggleEnableDebuggingScreen",
               &CoreOobeHandler::HandleEnableDebuggingScreen);
-  AddCallback("headerBarVisible",
-              &CoreOobeHandler::HandleHeaderBarVisible);
+  AddCallback("headerBarVisible", &CoreOobeHandler::HandleHeaderBarVisible);
   AddCallback("raiseTabKeyEvent", &CoreOobeHandler::HandleRaiseTabKeyEvent);
   AddCallback("setOobeBootstrappingSlave",
               &CoreOobeHandler::HandleSetOobeBootstrappingSlave);
+  AddRawCallback("getPrimaryDisplayNameForTesting",
+                 &CoreOobeHandler::HandleGetPrimaryDisplayNameForTesting);
+  AddCallback("setupDemoMode", &CoreOobeHandler::HandleSetupDemoMode);
 }
 
 void CoreOobeHandler::ShowSignInError(
@@ -177,8 +204,8 @@ void CoreOobeHandler::ShowSignInError(
     const std::string& help_link_text,
     HelpAppLauncher::HelpTopic help_topic_id) {
   LOG(ERROR) << "CoreOobeHandler::ShowSignInError: error_text=" << error_text;
-  CallJSOrDefer("showSignInError", login_attempts, error_text,
-         help_link_text, static_cast<int>(help_topic_id));
+  CallJSOrDefer("showSignInError", login_attempts, error_text, help_link_text,
+                static_cast<int>(help_topic_id));
 }
 
 void CoreOobeHandler::ShowTpmError() {
@@ -186,26 +213,12 @@ void CoreOobeHandler::ShowTpmError() {
 }
 
 void CoreOobeHandler::ShowDeviceResetScreen() {
-  policy::BrowserPolicyConnectorChromeOS* connector =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  if (!connector->IsEnterpriseManaged()) {
-    // Don't recreate WizardController if it already exists.
-    WizardController* wizard_controller =
-        WizardController::default_controller();
-    if (wizard_controller && !wizard_controller->login_screen_started()) {
-      wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_RESET);
-    } else {
-      DCHECK(LoginDisplayHost::default_host());
-      LoginDisplayHost::default_host()->StartWizard(
-          OobeScreen::SCREEN_OOBE_RESET);
-    }
-  }
+  LaunchResetScreen();
 }
 
 void CoreOobeHandler::ShowEnableDebuggingScreen() {
   // Don't recreate WizardController if it already exists.
-  WizardController* wizard_controller =
-      WizardController::default_controller();
+  WizardController* wizard_controller = WizardController::default_controller();
   if (wizard_controller && !wizard_controller->login_screen_started()) {
     wizard_controller->AdvanceToScreen(
         OobeScreen::SCREEN_OOBE_ENABLE_DEBUGGING);
@@ -319,8 +332,9 @@ void CoreOobeHandler::HandleEnableScreenMagnifier(bool enabled) {
 void CoreOobeHandler::HandleEnableSpokenFeedback(bool /* enabled */) {
   // Checkbox is initialized on page init and updates when spoken feedback
   // setting is changed so just toggle spoken feedback here.
-  AccessibilityManager::Get()->ToggleSpokenFeedback(
-      ash::A11Y_NOTIFICATION_NONE);
+  AccessibilityManager* manager = AccessibilityManager::Get();
+  manager->EnableSpokenFeedback(!manager->IsSpokenFeedbackEnabled(),
+                                ash::A11Y_NOTIFICATION_NONE);
 }
 
 void CoreOobeHandler::HandleSetDeviceRequisition(
@@ -333,13 +347,15 @@ void CoreOobeHandler::HandleSetDeviceRequisition(
 
   if (IsRemoraRequisition()) {
     // CfM devices default to static timezone.
-    g_browser_process->local_state()->SetBoolean(
-        prefs::kResolveDeviceTimezoneByGeolocation, false);
+    g_browser_process->local_state()->SetInteger(
+        prefs::kResolveDeviceTimezoneByGeolocationMethod,
+        static_cast<int>(chromeos::system::TimeZoneResolverManager::
+                             TimeZoneResolveMethod::DISABLED));
   }
 
   // Exit Chrome to force the restart as soon as a new requisition is set.
   if (initial_requisition !=
-          connector->GetDeviceCloudPolicyManager()->GetDeviceRequisition()) {
+      connector->GetDeviceCloudPolicyManager()->GetDeviceRequisition()) {
     chrome::AttemptRestart();
   }
 }
@@ -349,15 +365,47 @@ void CoreOobeHandler::HandleScreenAssetsLoaded(
   oobe_ui_->OnScreenAssetsLoaded(screen_async_load_id);
 }
 
-void CoreOobeHandler::HandleSkipToLoginForTesting(
-    const base::ListValue* args) {
+void CoreOobeHandler::HandleSkipToLoginForTesting(const base::ListValue* args) {
   LoginScreenContext context(args);
   if (WizardController::default_controller())
-      WizardController::default_controller()->SkipToLoginForTesting(context);
+    WizardController::default_controller()->SkipToLoginForTesting(context);
+}
+
+void CoreOobeHandler::HandleSkipToUpdateForTesting() {
+  if (WizardController::default_controller())
+    WizardController::default_controller()->SkipToUpdateForTesting();
 }
 
 void CoreOobeHandler::HandleToggleResetScreen() {
-  ShowDeviceResetScreen();
+  // Powerwash is generally not available on enterprise devices. First, check
+  // the common case of a correctly enrolled device.
+  if (g_browser_process->platform_part()
+          ->browser_policy_connector_chromeos()
+          ->IsEnterpriseManaged()) {
+    // Powerwash is only available if allowed by the admin specifically for the
+    // purpose of installing a TPM firmware update.
+    tpm_firmware_update::ShouldOfferUpdateViaPowerwash(
+        base::BindOnce([](bool offer_update) {
+          if (offer_update) {
+            // Force the TPM firmware update option to be enabled.
+            g_browser_process->local_state()->SetBoolean(
+                prefs::kFactoryResetTPMFirmwareUpdateRequested, true);
+            LaunchResetScreen();
+          }
+        }),
+        base::TimeDelta());
+    return;
+  }
+
+  // Devices that are still in OOBE may be subject to forced re-enrollment (FRE)
+  // and thus pending for enterprise management. These should not be allowed to
+  // powerwash either. Note that taking consumer device ownership has the side
+  // effect of dropping the FRE requirement if it was previously in effect.
+  const AutoEnrollmentController::FRERequirement requirement =
+      AutoEnrollmentController::GetFRERequirement();
+  if (requirement != AutoEnrollmentController::EXPLICITLY_REQUIRED) {
+    LaunchResetScreen();
+  }
 }
 
 void CoreOobeHandler::HandleEnableDebuggingScreen() {
@@ -403,8 +451,8 @@ void CoreOobeHandler::UpdateA11yState() {
 void CoreOobeHandler::UpdateOobeUIVisibility() {
   const std::string& display = oobe_ui_->display_type();
   CallJSOrDefer("showAPIKeysNotice", !google_apis::HasKeysConfigured() &&
-                                  (display == OobeUI::kOobeDisplay ||
-                                   display == OobeUI::kLoginDisplay));
+                                         (display == OobeUI::kOobeDisplay ||
+                                          display == OobeUI::kLoginDisplay));
 
   // Don't show version label on the stable channel by default.
   bool should_show_version = true;
@@ -424,8 +472,8 @@ void CoreOobeHandler::OnOSVersionLabelTextUpdated(
   UpdateLabel("version", os_version_label_text);
 }
 
-void CoreOobeHandler::OnEnterpriseInfoUpdated(
-    const std::string& message_text, const std::string& asset_id) {
+void CoreOobeHandler::OnEnterpriseInfoUpdated(const std::string& message_text,
+                                              const std::string& asset_id) {
   CallJSOrDefer("setEnterpriseInfo", message_text, asset_id);
 }
 
@@ -457,10 +505,14 @@ void CoreOobeHandler::UpdateKeyboardState() {
   keyboard::KeyboardController* keyboard_controller =
       keyboard::KeyboardController::GetInstance();
   if (keyboard_controller) {
-    gfx::Rect bounds = keyboard_controller->current_keyboard_bounds();
-    ShowControlBar(bounds.IsEmpty());
-    SetVirtualKeyboardShown(!bounds.IsEmpty());
+    const bool is_keyboard_shown = keyboard_controller->keyboard_visible();
+    ShowControlBar(!is_keyboard_shown);
+    SetVirtualKeyboardShown(is_keyboard_shown);
   }
+}
+
+void CoreOobeHandler::OnTabletModeToggled(bool enabled) {
+  CallJSOrDefer("setTabletModeState", enabled);
 }
 
 void CoreOobeHandler::UpdateClientAreaSize() {
@@ -507,6 +559,32 @@ void CoreOobeHandler::HandleSetOobeBootstrappingSlave() {
   g_browser_process->local_state()->SetBoolean(prefs::kIsBootstrappingSlave,
                                                true);
   chrome::AttemptRestart();
+}
+
+void CoreOobeHandler::HandleGetPrimaryDisplayNameForTesting(
+    const base::ListValue* args) {
+  CHECK_EQ(1U, args->GetSize());
+  const base::Value* callback_id;
+  CHECK(args->Get(0, &callback_id));
+
+  const auto primary_display_id =
+      display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  const display::DisplayManager* display_manager =
+      ash::Shell::Get()->display_manager();
+  const std::string display_name =
+      display_manager->GetDisplayNameForId(primary_display_id);
+
+  AllowJavascript();
+  ResolveJavascriptCallback(*callback_id, base::Value(display_name));
+}
+
+void CoreOobeHandler::HandleSetupDemoMode() {
+  const bool is_demo_mode_enabled =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kEnableDemoMode);
+  if (is_demo_mode_enabled) {
+    NOTIMPLEMENTED();
+  }
 }
 
 void CoreOobeHandler::InitDemoModeDetection() {

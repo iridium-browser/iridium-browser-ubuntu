@@ -42,7 +42,7 @@ AnimationEvent::AnimationEvent(const AtomicString& type,
       animation_name_(animation_name),
       elapsed_time_(elapsed_time) {}
 
-AnimationEvent::~AnimationEvent() {}
+AnimationEvent::~AnimationEvent() = default;
 
 const String& AnimationEvent::animationName() const {
   return animation_name_;
@@ -56,7 +56,7 @@ const AtomicString& AnimationEvent::InterfaceName() const {
   return EventNames::AnimationEvent;
 }
 
-DEFINE_TRACE(AnimationEvent) {
+void AnimationEvent::Trace(blink::Visitor* visitor) {
   Event::Trace(visitor);
 }
 

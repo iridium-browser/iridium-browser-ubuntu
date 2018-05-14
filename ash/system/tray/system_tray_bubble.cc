@@ -7,23 +7,21 @@
 #include <utility>
 #include <vector>
 
+#include "ash/public/cpp/ash_features.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_port.h"
 #include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/system/tray/tray_bubble_wrapper.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/border.h"
-#include "ui/views/layout/box_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
@@ -46,7 +44,7 @@ int GetDetailedBubbleMaxHeight() {
 // detailed view or vice versa.
 const int kSwipeDelayMS = 150;
 
-// Extra bottom padding when showing the BUBBLE_TYPE_DEFAULT view.
+// Extra bottom padding when showing the SYSTEM_TRAY_TYPE_DEFAULT view.
 const int kDefaultViewBottomPadding = 4;
 
 // Implicit animation observer that deletes itself and the layer at the end of
@@ -55,7 +53,7 @@ class AnimationObserverDeleteLayer : public ui::ImplicitAnimationObserver {
  public:
   explicit AnimationObserverDeleteLayer(ui::Layer* layer) : layer_(layer) {}
 
-  ~AnimationObserverDeleteLayer() override {}
+  ~AnimationObserverDeleteLayer() override = default;
 
   void OnImplicitAnimationsCompleted() override {
     base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
@@ -71,18 +69,10 @@ class AnimationObserverDeleteLayer : public ui::ImplicitAnimationObserver {
 
 // SystemTrayBubble
 
-SystemTrayBubble::SystemTrayBubble(
-    ash::SystemTray* tray,
-    const std::vector<ash::SystemTrayItem*>& items,
-    BubbleType bubble_type)
-    : tray_(tray),
-      bubble_view_(nullptr),
-      items_(items),
-      bubble_type_(bubble_type),
-      autoclose_delay_(0) {}
+SystemTrayBubble::SystemTrayBubble(SystemTray* tray)
+    : tray_(tray), autoclose_delay_(0) {}
 
 SystemTrayBubble::~SystemTrayBubble() {
-  DestroyItemViews();
   // Reset the host pointer in bubble_view_ in case its destruction is deferred.
   if (bubble_view_)
     bubble_view_->ResetDelegate();
@@ -90,9 +80,9 @@ SystemTrayBubble::~SystemTrayBubble() {
 
 void SystemTrayBubble::UpdateView(
     const std::vector<ash::SystemTrayItem*>& items,
-    BubbleType bubble_type) {
+    SystemTrayView::SystemTrayType system_tray_type) {
   std::unique_ptr<ui::Layer> scoped_layer;
-  if (bubble_type != bubble_type_) {
+  if (system_tray_type != system_tray_view_->system_tray_type()) {
     base::TimeDelta swipe_duration =
         base::TimeDelta::FromMilliseconds(kSwipeDelayMS);
     scoped_layer = bubble_view_->RecreateLayer();
@@ -103,7 +93,7 @@ void SystemTrayBubble::UpdateView(
 
     // When transitioning from detailed view to default view, animate the
     // existing view (slide out towards the right).
-    if (bubble_type == BUBBLE_TYPE_DEFAULT) {
+    if (system_tray_type == SystemTrayView::SYSTEM_TRAY_TYPE_DEFAULT) {
       ui::ScopedLayerAnimationSettings settings(layer->GetAnimator());
       settings.AddObserver(
           new AnimationObserverDeleteLayer(scoped_layer.release()));
@@ -139,11 +129,11 @@ void SystemTrayBubble::UpdateView(
     }
   }
 
-  DestroyItemViews();
-  bubble_view_->RemoveAllChildViews(true);
+  system_tray_view_->DestroyItemViews();
+  system_tray_view_->RemoveAllChildViews(true);
+  system_tray_view_->set_items(items);
+  system_tray_view_->set_system_tray_type(system_tray_type);
 
-  items_ = items;
-  bubble_type_ = bubble_type;
   CreateItemViews(Shell::Get()->session_controller()->login_status());
 
   // Close bubble view if we failed to create the item view.
@@ -153,16 +143,23 @@ void SystemTrayBubble::UpdateView(
   }
 
   UpdateBottomPadding();
+
+  // Enfore relayout of |bubble_view_|. The view code will skip the relayout of
+  // |bubble_view_| if its bounds does not change. However, we need to
+  // force |bubble_view_| relayout in order to set the bounds of its newly
+  // created children view to preferred sizes.
+  bubble_view_->InvalidateLayout();
   bubble_view_->GetWidget()->GetContentsView()->Layout();
+
   // Make sure that the bubble is large enough for the default view.
-  if (bubble_type_ == BUBBLE_TYPE_DEFAULT) {
+  if (system_tray_type == SystemTrayView::SYSTEM_TRAY_TYPE_DEFAULT) {
     bubble_view_->SetMaxHeight(0);  // Clear max height limit.
   }
 
   if (scoped_layer) {
     // When transitioning from default view to detailed view, animate the new
     // view (slide in from the right).
-    if (bubble_type == BUBBLE_TYPE_DETAILED) {
+    if (system_tray_type == SystemTrayView::SYSTEM_TRAY_TYPE_DETAILED) {
       ui::Layer* new_layer = bubble_view_->layer();
 
       // Make sure the new layer is stacked above the old layer during the
@@ -190,46 +187,40 @@ void SystemTrayBubble::UpdateView(
 }
 
 void SystemTrayBubble::InitView(views::View* anchor,
+                                const std::vector<SystemTrayItem*>& items,
+                                SystemTrayView::SystemTrayType system_tray_type,
                                 LoginStatus login_status,
                                 TrayBubbleView::InitParams* init_params) {
   DCHECK(anchor);
   DCHECK(!bubble_view_);
 
-  if (bubble_type_ == BUBBLE_TYPE_DETAILED &&
+  if (system_tray_type == SystemTrayView::SYSTEM_TRAY_TYPE_DETAILED &&
       init_params->max_height < GetDetailedBubbleMaxHeight()) {
     init_params->max_height = GetDetailedBubbleMaxHeight();
   }
+
+  system_tray_view_ = new SystemTrayView(system_tray_type, items);
 
   init_params->delegate = tray_;
   // Place the bubble on same display as this system tray.
   init_params->parent_window = tray_->GetBubbleWindowContainer();
   init_params->anchor_view = anchor;
   bubble_view_ = new TrayBubbleView(*init_params);
+  if (features::IsSystemTrayUnifiedEnabled())
+    bubble_view_->set_color(kUnifiedMenuBackgroundColor);
+  bubble_view_->AddChildView(system_tray_view_);
   UpdateBottomPadding();
   bubble_view_->set_adjust_if_offscreen(false);
   CreateItemViews(login_status);
 
   if (bubble_view_->CanActivate()) {
-    bubble_view_->NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, true);
-  }
-}
-
-void SystemTrayBubble::DestroyItemViews() {
-  for (std::vector<ash::SystemTrayItem*>::iterator it = items_.begin();
-       it != items_.end(); ++it) {
-    switch (bubble_type_) {
-      case BUBBLE_TYPE_DEFAULT:
-        (*it)->OnDefaultViewDestroyed();
-        break;
-      case BUBBLE_TYPE_DETAILED:
-        (*it)->OnDetailedViewDestroyed();
-        break;
-    }
+    bubble_view_->NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
   }
 }
 
 void SystemTrayBubble::BubbleViewDestroyed() {
   bubble_view_ = nullptr;
+  system_tray_view_ = nullptr;
 }
 
 void SystemTrayBubble::StartAutoCloseTimer(int seconds) {
@@ -269,68 +260,26 @@ bool SystemTrayBubble::IsVisible() {
 }
 
 bool SystemTrayBubble::ShouldShowShelf() const {
-  for (std::vector<ash::SystemTrayItem*>::const_iterator it = items_.begin();
-       it != items_.end(); ++it) {
-    if ((*it)->ShouldShowShelf())
+  const std::vector<ash::SystemTrayItem*>& items = system_tray_view_->items();
+  for (ash::SystemTrayItem* const it : items) {
+    if (it->ShouldShowShelf())
       return true;
   }
   return false;
 }
 
-void SystemTrayBubble::RecordVisibleRowMetrics() {
-  if (bubble_type_ != BUBBLE_TYPE_DEFAULT)
-    return;
-
-  for (const std::pair<SystemTrayItem::UmaType, views::View*>& pair :
-       tray_item_view_map_) {
-    if (pair.second->visible() &&
-        pair.first != SystemTrayItem::UMA_NOT_RECORDED) {
-      UMA_HISTOGRAM_ENUMERATION("Ash.SystemMenu.DefaultView.VisibleRows",
-                                pair.first, SystemTrayItem::UMA_COUNT);
-    }
-  }
-}
-
 void SystemTrayBubble::UpdateBottomPadding() {
-  if (bubble_type_ == BUBBLE_TYPE_DEFAULT)
+  if (system_tray_view_->system_tray_type() ==
+      SystemTrayView::SYSTEM_TRAY_TYPE_DEFAULT)
     bubble_view_->SetBottomPadding(kDefaultViewBottomPadding);
   else
     bubble_view_->SetBottomPadding(0);
 }
 
 void SystemTrayBubble::CreateItemViews(LoginStatus login_status) {
-  tray_item_view_map_.clear();
-
-  // If a system modal dialog is present, create the same tray as
-  // in locked state.
-  if (ShellPort::Get()->IsSystemModalWindowOpen() &&
-      login_status != LoginStatus::NOT_LOGGED_IN) {
-    login_status = LoginStatus::LOCKED;
-  }
-
-  views::View* focus_view = nullptr;
-  for (size_t i = 0; i < items_.size(); ++i) {
-    views::View* item_view = nullptr;
-    switch (bubble_type_) {
-      case BUBBLE_TYPE_DEFAULT:
-        item_view = items_[i]->CreateDefaultView(login_status);
-        if (items_[i]->restore_focus())
-          focus_view = item_view;
-        break;
-      case BUBBLE_TYPE_DETAILED:
-        item_view = items_[i]->CreateDetailedView(login_status);
-        break;
-    }
-    if (item_view) {
-      bubble_view_->AddChildView(item_view);
-      tray_item_view_map_[items_[i]->uma_type()] = item_view;
-    }
-  }
-
-  if (focus_view) {
+  bool focused = system_tray_view_->CreateItemViews(login_status);
+  if (focused)
     tray_->ActivateBubble();
-    focus_view->RequestFocus();
-  }
 }
 
 }  // namespace ash

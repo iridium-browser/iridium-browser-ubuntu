@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PersistableBundle;
+import android.os.SystemClock;
 
 import org.chromium.base.ThreadUtils;
 
@@ -31,8 +32,6 @@ public class NotificationJobService extends JobService {
         bundle.putBoolean(NotificationConstants.EXTRA_NOTIFICATION_INFO_PROFILE_INCOGNITO,
                 intent.getBooleanExtra(
                         NotificationConstants.EXTRA_NOTIFICATION_INFO_PROFILE_INCOGNITO, false));
-        bundle.putString(NotificationConstants.EXTRA_NOTIFICATION_INFO_TAG,
-                intent.getStringExtra(NotificationConstants.EXTRA_NOTIFICATION_INFO_TAG));
         bundle.putInt(NotificationConstants.EXTRA_NOTIFICATION_INFO_ACTION_INDEX,
                 intent.getIntExtra(NotificationConstants.EXTRA_NOTIFICATION_INFO_ACTION_INDEX, -1));
         bundle.putString(NotificationConstants.EXTRA_NOTIFICATION_INFO_WEBAPK_PACKAGE,
@@ -58,9 +57,9 @@ public class NotificationJobService extends JobService {
     @Override
     public boolean onStartJob(final JobParameters params) {
         PersistableBundle extras = params.getExtras();
+        putJobStartedTimeInExtras(extras);
         if (!extras.containsKey(NotificationConstants.EXTRA_NOTIFICATION_ID)
-                || !extras.containsKey(NotificationConstants.EXTRA_NOTIFICATION_INFO_ORIGIN)
-                || !extras.containsKey(NotificationConstants.EXTRA_NOTIFICATION_INFO_TAG)) {
+                || !extras.containsKey(NotificationConstants.EXTRA_NOTIFICATION_INFO_ORIGIN)) {
             return false;
         }
 
@@ -74,6 +73,11 @@ public class NotificationJobService extends JobService {
         // TODO(crbug.com/685197): Return true here and call jobFinished to release the wake
         // lock only after the event has been completely handled by the service worker.
         return false;
+    }
+
+    private static void putJobStartedTimeInExtras(PersistableBundle extras) {
+        extras.putLong(
+                NotificationConstants.EXTRA_JOB_STARTED_TIME_MS, SystemClock.elapsedRealtime());
     }
 
     @Override

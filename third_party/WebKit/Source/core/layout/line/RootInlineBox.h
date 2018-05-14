@@ -132,7 +132,7 @@ class RootInlineBox : public InlineFlowBox {
 
   void ClearTruncation() final;
 
-  int BaselinePosition(FontBaseline baseline_type) const final;
+  LayoutUnit BaselinePosition(FontBaseline baseline_type) const final;
   LayoutUnit LineHeight() const final;
 
   void Paint(const PaintInfo&,
@@ -145,9 +145,6 @@ class RootInlineBox : public InlineFlowBox {
                    LayoutUnit line_top,
                    LayoutUnit line_bottom) override;
 
-  using InlineBox::HasSelectedChildren;
-  using InlineBox::SetHasSelectedChildren;
-
   SelectionState GetSelectionState() const final;
   InlineBox* FirstSelectedBox() const;
   InlineBox* LastSelectedBox() const;
@@ -155,10 +152,10 @@ class RootInlineBox : public InlineFlowBox {
   LineLayoutBlockFlow Block() const;
 
   InlineBox* ClosestLeafChildForPoint(const LayoutPoint&,
-                                      bool only_editable_leaves);
+                                      bool only_editable_leaves) const;
   InlineBox* ClosestLeafChildForLogicalLeftPosition(
       LayoutUnit,
-      bool only_editable_leaves = false);
+      bool only_editable_leaves = false) const;
 
   void AppendFloat(LayoutBox* floating_box) {
     DCHECK(!IsDirty());
@@ -188,8 +185,8 @@ class RootInlineBox : public InlineFlowBox {
 
   void AscentAndDescentForBox(InlineBox*,
                               GlyphOverflowAndFallbackFontsMap&,
-                              int& ascent,
-                              int& descent,
+                              LayoutUnit& ascent,
+                              LayoutUnit& descent,
                               bool& affects_ascent,
                               bool& affects_descent) const;
   LayoutUnit VerticalPositionForBox(InlineBox*, VerticalPositionCache&);
@@ -223,7 +220,7 @@ class RootInlineBox : public InlineFlowBox {
   // object are stored so that we can create an InlineIterator beginning just
   // after the end of this line.
   LineLayoutItem line_break_obj_;
-  RefPtr<BidiContext> line_break_context_;
+  scoped_refptr<BidiContext> line_break_context_;
 
   // Floats hanging off the line are pushed into this vector during layout. It
   // is only good for as long as the line has not been marked dirty.

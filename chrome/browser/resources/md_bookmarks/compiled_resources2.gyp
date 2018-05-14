@@ -19,6 +19,7 @@
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
         '<(EXTERNS_GYP):chrome_extensions',
         'actions',
+        'debouncer',
         'store',
         'util',
       ],
@@ -49,6 +50,7 @@
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:load_time_data',
         '<(DEPTH)/ui/webui/resources/js/cr/ui/compiled_resources2.gyp:command',
         '<(EXTERNS_GYP):bookmark_manager_private',
+        'api_listener',
         'dialog_focus_manager',
         'edit_dialog',
         'store_client',
@@ -59,6 +61,13 @@
     {
       'target_name': 'constants',
       'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi']
+    },
+    {
+      'target_name': 'debouncer',
+      'dependencies': [
+        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
+      ],
+      'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
     },
     {
       'target_name': 'dialog_focus_manager',
@@ -82,9 +91,11 @@
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
         '<(EXTERNS_GYP):bookmark_manager_private',
         '<(EXTERNS_GYP):metrics_private',
+        'api_listener',
+        'debouncer',
         'dnd_chip',
+        'folder_node',
         'store',
-        'timer_proxy',
         'types',
         'util',
       ],
@@ -98,6 +109,7 @@
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:load_time_data',
         '<(EXTERNS_GYP):chrome_extensions',
+        'api_listener',
         'dialog_focus_manager',
         'types',
       ],
@@ -107,6 +119,7 @@
       'target_name': 'folder_node',
       'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
       'dependencies': [
+        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:load_time_data',
         '<(EXTERNS_GYP):chrome_extensions',
         'actions',
         'command_manager',
@@ -180,20 +193,10 @@
       'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi']
     },
     {
-      'target_name': 'timer_proxy',
-      'dependencies': [
-        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
-      ],
-      'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
-    },
-    {
       'target_name': 'toast_manager',
       'dependencies': [
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
-        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:load_time_data',
         '<(DEPTH)/third_party/polymer/v1_0/components-chromium/iron-a11y-announcer/compiled_resources2.gyp:iron-a11y-announcer-extracted',
-        '<(DEPTH)/third_party/polymer/v1_0/components-chromium/paper-button/compiled_resources2.gyp:paper-button-extracted',
-        'timer_proxy',
       ],
       'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
     },

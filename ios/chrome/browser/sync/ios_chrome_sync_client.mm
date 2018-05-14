@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "components/autofill/core/browser/webdata/autocomplete_sync_bridge.h"
 #include "components/autofill/core/browser/webdata/autocomplete_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
@@ -24,7 +23,6 @@
 #include "components/history/core/browser/history_model_worker.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/typed_url_sync_bridge.h"
-#include "components/history/core/browser/typed_url_syncable_service.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/password_manager/core/browser/password_store.h"
@@ -83,9 +81,9 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
   explicit SyncSessionsClientImpl(ios::ChromeBrowserState* browser_state)
       : browser_state_(browser_state),
         window_delegates_getter_(
-            base::MakeUnique<TabModelSyncedWindowDelegatesGetter>()),
+            std::make_unique<TabModelSyncedWindowDelegatesGetter>()),
         local_session_event_router_(
-            base::MakeUnique<IOSChromeLocalSessionEventRouter>(
+            std::make_unique<IOSChromeLocalSessionEventRouter>(
                 browser_state_,
                 this,
                 ios::sync_start_util::GetFlareForSyncableService(
@@ -112,7 +110,7 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
   }
 
   bool ShouldSyncURL(const GURL& url) const override {
-    if (url == GURL(kChromeUIHistoryURL)) {
+    if (url == kChromeUIHistoryURL) {
       // The history page is treated specially as we want it to trigger syncable
       // events for UI purposes.
       return true;
@@ -146,7 +144,7 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
 IOSChromeSyncClient::IOSChromeSyncClient(ios::ChromeBrowserState* browser_state)
     : browser_state_(browser_state),
       sync_sessions_client_(
-          base::MakeUnique<SyncSessionsClientImpl>(browser_state)),
+          std::make_unique<SyncSessionsClientImpl>(browser_state)),
       weak_ptr_factory_(this) {}
 
 IOSChromeSyncClient::~IOSChromeSyncClient() {}
@@ -157,6 +155,8 @@ void IOSChromeSyncClient::Initialize() {
   web_data_service_ =
       ios::WebDataServiceFactory::GetAutofillWebDataForBrowserState(
           browser_state_, ServiceAccessType::IMPLICIT_ACCESS);
+  db_thread_ =
+      web_data_service_ ? web_data_service_->GetDBTaskRunner() : nullptr;
   password_store_ = IOSChromePasswordStoreFactory::GetForBrowserState(
       browser_state_, ServiceAccessType::IMPLICIT_ACCESS);
 
@@ -175,8 +175,7 @@ void IOSChromeSyncClient::Initialize() {
         ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET,
         *base::CommandLine::ForCurrentProcess(),
         prefs::kSavingBrowserHistoryDisabled, sync_service_url,
-        web::WebThread::GetTaskRunnerForThread(web::WebThread::UI),
-        web::WebThread::GetTaskRunnerForThread(web::WebThread::DB),
+        web::WebThread::GetTaskRunnerForThread(web::WebThread::UI), db_thread_,
         token_service, url_request_context_getter, web_data_service_,
         password_store_));
   }
@@ -264,11 +263,6 @@ IOSChromeSyncClient::GetSyncSessionsClient() {
 base::WeakPtr<syncer::SyncableService>
 IOSChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
   switch (type) {
-    case syncer::DEVICE_INFO:
-      return IOSChromeProfileSyncServiceFactory::GetForBrowserState(
-                 browser_state_)
-          ->GetDeviceInfoSyncableService()
-          ->AsWeakPtr();
     case syncer::PREFERENCES:
       return browser_state_->GetSyncablePrefs()
           ->GetSyncableService(syncer::PREFERENCES)
@@ -306,13 +300,6 @@ IOSChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
               browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
       return history ? history->AsWeakPtr()
                      : base::WeakPtr<history::HistoryService>();
-    }
-    case syncer::TYPED_URLS: {
-      history::HistoryService* history =
-          ios::HistoryServiceFactory::GetForBrowserState(
-              browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
-      return history ? history->GetTypedUrlSyncableService()->AsWeakPtr()
-                     : base::WeakPtr<syncer::SyncableService>();
     }
     case syncer::FAVICON_IMAGES:
     case syncer::FAVICON_TRACKING: {
@@ -362,10 +349,13 @@ IOSChromeSyncClient::GetSyncBridgeForModelType(syncer::ModelType type) {
       return autofill::AutocompleteSyncBridge::FromWebDataService(
                  web_data_service_.get())
           ->AsWeakPtr();
-    case syncer::TYPED_URLS:
-      // TODO(gangwu):implement TypedURLSyncBridge and return real
-      // TypedURLSyncBridge here.
-      return base::WeakPtr<syncer::ModelTypeSyncBridge>();
+    case syncer::TYPED_URLS: {
+      history::HistoryService* history =
+          ios::HistoryServiceFactory::GetForBrowserState(
+              browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
+      return history ? history->GetTypedURLSyncBridge()->AsWeakPtr()
+                     : base::WeakPtr<syncer::ModelTypeSyncBridge>();
+    }
     case syncer::USER_EVENTS:
       return IOSUserEventServiceFactory::GetForBrowserState(browser_state_)
           ->GetSyncBridge()
@@ -381,9 +371,7 @@ IOSChromeSyncClient::CreateModelWorkerForGroup(syncer::ModelSafeGroup group) {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
   switch (group) {
     case syncer::GROUP_DB:
-      return new syncer::SequencedModelWorker(
-          web::WebThread::GetTaskRunnerForThread(web::WebThread::DB),
-          syncer::GROUP_DB);
+      return new syncer::SequencedModelWorker(db_thread_, syncer::GROUP_DB);
     case syncer::GROUP_FILE:
       // Not supported on iOS.
       return nullptr;

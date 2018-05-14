@@ -7,11 +7,11 @@
 
 #include <stddef.h>
 
-#import "base/mac/scoped_nsobject.h"
 #include "ios/web/public/browser_url_rewriter.h"
 #include "ios/web/public/navigation_item_list.h"
 #include "ios/web/public/referrer.h"
 #include "ios/web/public/reload_type.h"
+#include "ios/web/public/user_agent.h"
 #include "ui/base/page_transition_types.h"
 
 @class NSDictionary;
@@ -65,11 +65,11 @@ class NavigationManager {
     bool is_renderer_initiated;
 
     // Any extra HTTP headers to add to the load.
-    base::scoped_nsobject<NSDictionary> extra_headers;
+    NSDictionary* extra_headers;
 
     // Any post data to send with the load. When setting this, you should
     // generally set a Content-Type header as well.
-    base::scoped_nsobject<NSData> post_data;
+    NSData* post_data;
 
     // Create a new WebLoadParams with the given URL and defaults for all other
     // parameters.
@@ -114,6 +114,13 @@ class NavigationManager {
   // Loads the URL with specified |params|.
   virtual void LoadURLWithParams(
       const NavigationManager::WebLoadParams& params) = 0;
+
+  // Loads the current page in the following cases:
+  //  - NavigationManager was restored from history and the current page has not
+  //    loaded yet.
+  //  - Renderer process has crashed.
+  //  - Web usage was disabled and re-enabled.
+  virtual void LoadIfNecessary() = 0;
 
   // Adds |rewriter| to a transient list of URL rewriters.  Transient URL
   // rewriters will be executed before the rewriters already added to the
@@ -168,10 +175,21 @@ class NavigationManager {
   // TODO(crbug.com/700958): implement the logic for |check_for_repost|.
   virtual void Reload(ReloadType reload_type, bool check_for_repost) = 0;
 
+  // Reloads the visible item under the specified UserAgentType.
+  // TODO(crbug.com/738020): combine both Reload() implementations.
+  virtual void ReloadWithUserAgentType(UserAgentType user_agent_type) = 0;
+
   // Returns a list of all non-redirected NavigationItems whose index precedes
   // or follows the current index.
   virtual NavigationItemList GetBackwardItems() const = 0;
   virtual NavigationItemList GetForwardItems() const = 0;
+
+  // Initializes this NavigationManager with the given saved navigations, using
+  // |last_committed_item_index| as the currently loaded item. Before this call
+  // the NavigationManager should be unused (there should be no current item).
+  // This takes ownership of |items| (must be moved).
+  virtual void Restore(int last_committed_item_index,
+                       std::vector<std::unique_ptr<NavigationItem>> items) = 0;
 
   // Removes all items from this except the last committed item, and inserts
   // copies of all items from |source| at the beginning of the session history.

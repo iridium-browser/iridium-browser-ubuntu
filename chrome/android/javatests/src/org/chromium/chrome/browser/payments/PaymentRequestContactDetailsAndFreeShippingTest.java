@@ -22,7 +22,6 @@ import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.concurrent.ExecutionException;
@@ -33,10 +32,7 @@ import java.util.concurrent.TimeoutException;
  * a phone number and provides free shipping regardless of address.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestContactDetailsAndFreeShippingTest implements MainActivityStartCallback {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule = new PaymentRequestTestRule(
@@ -78,14 +74,14 @@ public class PaymentRequestContactDetailsAndFreeShippingTest implements MainActi
     }
 
     /**
-     * Test that ending a payment request that requires an email address, a phone number a name
-     * and a shipping address results in the appropriate metric being logged in the
-     * PaymentRequest.RequestedInformation histogram.
+     * Test that ending a payment request that requires an email address, a phone number, a name
+     * and a shipping address results in the appropriate metric being logged in
+     * PaymentRequest.Events.
      */
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testRequestedInformationMetric()
+    public void testPaymentRequestEventsMetric()
             throws InterruptedException, ExecutionException, TimeoutException {
         // Start and complete the Payment Request.
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
@@ -100,17 +96,14 @@ public class PaymentRequestContactDetailsAndFreeShippingTest implements MainActi
                         "4111111111111111", "12", "2050", "visa", "123", "Google", "340 Main St",
                         "CA", "Los Angeles", "90291", "US", "en", "freeShippingOption"});
 
-        // Make sure that only the appropriate enum value was logged.
-        for (int i = 0; i < RequestedInformation.MAX; ++i) {
-            Assert.assertEquals((i
-                                                        == (RequestedInformation.EMAIL
-                                                                   | RequestedInformation.PHONE
-                                                                   | RequestedInformation.SHIPPING
-                                                                   | RequestedInformation.NAME)
-                                                ? 1
-                                                : 0),
-                    RecordHistogram.getHistogramValueCountForTesting(
-                            "PaymentRequest.RequestedInformation", i));
-        }
+        int expectedSample = Event.SHOWN | Event.PAY_CLICKED | Event.RECEIVED_INSTRUMENT_DETAILS
+                | Event.COMPLETED | Event.HAD_INITIAL_FORM_OF_PAYMENT
+                | Event.HAD_NECESSARY_COMPLETE_SUGGESTIONS | Event.REQUEST_PAYER_PHONE
+                | Event.REQUEST_PAYER_EMAIL | Event.REQUEST_PAYER_NAME | Event.REQUEST_SHIPPING
+                | Event.REQUEST_METHOD_BASIC_CARD | Event.REQUEST_METHOD_OTHER
+                | Event.SELECTED_CREDIT_CARD;
+        Assert.assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.Events", expectedSample));
     }
 }

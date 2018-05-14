@@ -43,27 +43,23 @@ class _RasterizeAndRecordMicro(perf_benchmark.PerfBenchmark):
         options.record_repeat, options.timeout, options.report_detailed_results)
 
 
-# RasterizeAndRecord disabled on mac because of crbug.com/350684.
-# RasterizeAndRecord disabled on windows because of crbug.com/338057.
-@benchmark.Disabled('mac', 'win',
-                    'android')  # http://crbug.com/610018
+@benchmark.Owner(
+    emails=['vmpstr@chromium.org', 'wkorman@chromium.org'],
+    component='Internals>Compositing>Rasterization')
 class RasterizeAndRecordMicroTop25(_RasterizeAndRecordMicro):
   """Measures rasterize and record performance on the top 25 web pages.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-  page_set = page_sets.Top25PageSet
+  page_set = page_sets.StaticTop25PageSet
 
   @classmethod
   def Name(cls):
     return 'rasterize_and_record_micro.top_25'
 
-  def GetExpectations(self):
-    return page_sets.Top25StoryExpectations()
 
-
-# New benchmark only enabled on Linux until we've observed behavior for a
-# reasonable period of time.
-@benchmark.Disabled('mac', 'win', 'android')
+@benchmark.Owner(
+    emails=['vmpstr@chromium.org', 'wkorman@chromium.org'],
+    component='Internals>Compositing>Rasterization')
 class RasterizeAndRecordMicroPartialInvalidation(_RasterizeAndRecordMicro):
   """Measures rasterize and record performance for partial inval. on big pages.
 
@@ -73,6 +69,3 @@ class RasterizeAndRecordMicroPartialInvalidation(_RasterizeAndRecordMicro):
   @classmethod
   def Name(cls):
     return 'rasterize_and_record_micro.partial_invalidation'
-
-  def GetExpectations(self):
-    return page_sets.PartialInvalidationCasesStoryExpectations()

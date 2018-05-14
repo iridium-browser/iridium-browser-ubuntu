@@ -32,7 +32,6 @@
 #define WebRTCSessionDescription_h
 
 #include "WebCommon.h"
-#include "WebNonCopyable.h"
 #include "WebPrivatePtr.h"
 #include "WebString.h"
 
@@ -54,7 +53,7 @@ class WebRTCSessionDescriptionPrivate;
 
 class WebRTCSessionDescription {
  public:
-  WebRTCSessionDescription() {}
+  WebRTCSessionDescription() = default;
   WebRTCSessionDescription(const WebRTCSessionDescription& other) {
     Assign(other);
   }
@@ -77,7 +76,7 @@ class WebRTCSessionDescription {
   BLINK_PLATFORM_EXPORT WebString Sdp() const;
   BLINK_PLATFORM_EXPORT void SetSDP(const WebString&);
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebRTCSessionDescription(WebString type, WebString sdp) {
     this->Initialize(type, sdp);
   }

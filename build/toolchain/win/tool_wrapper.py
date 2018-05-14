@@ -16,15 +16,33 @@ import stat
 import string
 import sys
 
+# tool_wrapper.py doesn't get invoked through python.bat so the Python bin
+# directory doesn't get added to the path. The Python module search logic
+# handles this fine and finds win32file.pyd. However the Windows module
+# search logic then looks for pywintypes27.dll and other DLLs in the path and
+# if it finds versions with a different bitness first then win32file.pyd will
+# fail to load with a cryptic error:
+#     ImportError: DLL load failed: %1 is not a valid Win32 application.
+if sys.platform == 'win32':
+  os.environ['PATH'] = os.path.dirname(sys.executable) + \
+                       os.pathsep + os.environ['PATH']
+  import win32file    # pylint: disable=import-error
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # A regex matching an argument corresponding to the output filename passed to
 # link.exe.
 _LINK_EXE_OUT_ARG = re.compile('/OUT:(?P<out>.+)$', re.IGNORECASE)
+_LINK_PDB_OUT_ARG = re.compile('/PDB:(?P<out>.+)$', re.IGNORECASE)
+_LINK_ERROR = re.compile('.* error LNK(\d+):')
+
+# Retry links when this error is hit, to try to deal with crbug.com/782660
+_LINKER_RETRY_ERRORS = 1201
+# Maximum number of linker retries.
+_LINKER_RETRIES = 3
 
 def main(args):
-  executor = WinTool()
-  exit_code = executor.Dispatch(args)
+  exit_code = WinTool().Dispatch(args)
   if exit_code is not None:
     sys.exit(exit_code)
 
@@ -111,6 +129,9 @@ class WinTool(object):
       shutil.copytree(source, dest)
     else:
       shutil.copy2(source, dest)
+      # Try to diagnose crbug.com/741603
+      if not os.path.exists(dest):
+        raise Exception("Copying of %s to %s failed" % (source, dest))
 
   def ExecLinkWrapper(self, arch, use_separate_mspdbsrv, *args):
     """Filter diagnostic output from link that looks like:
@@ -131,145 +152,45 @@ class WinTool(object):
     #   Popen(['/bin/sh', '-c', args[0], args[1], ...])"
     # For that reason, since going through the shell doesn't seem necessary on
     # non-Windows don't do that there.
-    link = subprocess.Popen(args, shell=sys.platform == 'win32', env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    # Read output one line at a time as it shows up to avoid OOM failures when
-    # GBs of output is produced.
-    for line in link.stdout:
-      if (not line.startswith('   Creating library ') and
-          not line.startswith('Generating code') and
-          not line.startswith('Finished generating code')):
-        print line,
-    return link.wait()
-
-  def ExecLinkWithManifests(self, arch, embed_manifest, out, ldcmd, resname,
-                            mt, rc, intermediate_manifest, *manifests):
-    """A wrapper for handling creating a manifest resource and then executing
-    a link command."""
-    # The 'normal' way to do manifests is to have link generate a manifest
-    # based on gathering dependencies from the object files, then merge that
-    # manifest with other manifests supplied as sources, convert the merged
-    # manifest to a resource, and then *relink*, including the compiled
-    # version of the manifest resource. This breaks incremental linking, and
-    # is generally overly complicated. Instead, we merge all the manifests
-    # provided (along with one that includes what would normally be in the
-    # linker-generated one, see msvs_emulation.py), and include that into the
-    # first and only link. We still tell link to generate a manifest, but we
-    # only use that to assert that our simpler process did not miss anything.
-    variables = {
-      'python': sys.executable,
-      'arch': arch,
-      'out': out,
-      'ldcmd': ldcmd,
-      'resname': resname,
-      'mt': mt,
-      'rc': rc,
-      'intermediate_manifest': intermediate_manifest,
-      'manifests': ' '.join(manifests),
-    }
-    add_to_ld = ''
-    if manifests:
-      subprocess.check_call(
-          '%(python)s tool_wrapper.py manifest-wrapper %(arch)s %(mt)s -nologo '
-          '-manifest %(manifests)s -out:%(out)s.manifest' % variables)
-      if embed_manifest == 'True':
-        subprocess.check_call(
-            '%(python)s tool_wrapper.py manifest-to-rc %(arch)s'
-                '%(out)s.manifest %(out)s.manifest.rc %(resname)s' % variables)
-        subprocess.check_call(
-            '%(python)s tool_wrapper.py rc-wrapper %(arch)s %(rc)s '
-            '%(out)s.manifest.rc' % variables)
-        add_to_ld = ' %(out)s.manifest.res' % variables
-    subprocess.check_call(ldcmd + add_to_ld)
-
-    # Run mt.exe on the theoretically complete manifest we generated, merging
-    # it with the one the linker generated to confirm that the linker
-    # generated one does not add anything. This is strictly unnecessary for
-    # correctness, it's only to verify that e.g. /MANIFESTDEPENDENCY was not
-    # used in a #pragma comment.
-    if manifests:
-      # Merge the intermediate one with ours to .assert.manifest, then check
-      # that .assert.manifest is identical to ours.
-      subprocess.check_call(
-          '%(python)s tool_wrapper.py manifest-wrapper %(arch)s %(mt)s -nologo '
-          '-manifest %(out)s.manifest %(intermediate_manifest)s '
-          '-out:%(out)s.assert.manifest' % variables)
-      assert_manifest = '%(out)s.assert.manifest' % variables
-      our_manifest = '%(out)s.manifest' % variables
-      # Load and normalize the manifests. mt.exe sometimes removes whitespace,
-      # and sometimes doesn't unfortunately.
-      with open(our_manifest, 'rb') as our_f:
-        with open(assert_manifest, 'rb') as assert_f:
-          our_data = our_f.read().translate(None, string.whitespace)
-          assert_data = assert_f.read().translate(None, string.whitespace)
-      if our_data != assert_data:
-        os.unlink(out)
-        def dump(filename):
-          sys.stderr.write('%s\n-----\n' % filename)
-          with open(filename, 'rb') as f:
-            sys.stderr.write(f.read() + '\n-----\n')
-        dump(intermediate_manifest)
-        dump(our_manifest)
-        dump(assert_manifest)
-        sys.stderr.write(
-            'Linker generated manifest "%s" added to final manifest "%s" '
-            '(result in "%s"). '
-            'Were /MANIFEST switches used in #pragma statements? ' % (
-              intermediate_manifest, our_manifest, assert_manifest))
-        return 1
-
-  def ExecManifestWrapper(self, arch, *args):
-    """Run manifest tool with environment set. Strip out undesirable warning
-    (some XML blocks are recognized by the OS loader, but not the manifest
-    tool)."""
-    env = self._GetEnv(arch)
-    popen = subprocess.Popen(args, shell=True, env=env,
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    out, _ = popen.communicate()
-    for line in out.splitlines():
-      if line and 'manifest authoring warning 81010002' not in line:
-        print line
-    return popen.returncode
-
-  def ExecManifestToRc(self, dummy_arch, *args):
-    """Creates a resource file pointing a SxS assembly manifest.
-    |args| is tuple containing path to resource file, path to manifest file
-    and resource name which can be "1" (for executables) or "2" (for DLLs)."""
-    manifest_path, resource_path, resource_name = args
-    with open(resource_path, 'wb') as output:
-      output.write('#include <windows.h>\n%s RT_MANIFEST "%s"' % (
-        resource_name,
-        os.path.abspath(manifest_path).replace('\\', '/')))
-
-  def ExecMidlWrapper(self, arch, outdir, tlb, h, dlldata, iid, proxy, idl,
-                      *flags):
-    """Filter noisy filenames output from MIDL compile step that isn't
-    quietable via command line flags.
-    """
-    args = ['midl', '/nologo'] + list(flags) + [
-        '/out', outdir,
-        '/tlb', tlb,
-        '/h', h,
-        '/dlldata', dlldata,
-        '/iid', iid,
-        '/proxy', proxy,
-        idl]
-    env = self._GetEnv(arch)
-    popen = subprocess.Popen(args, shell=True, env=env,
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    out, _ = popen.communicate()
-    # Filter junk out of stdout, and write filtered versions. Output we want
-    # to filter is pairs of lines that look like this:
-    # Processing C:\Program Files (x86)\Microsoft SDKs\...\include\objidl.idl
-    # objidl.idl
-    lines = out.splitlines()
-    prefixes = ('Processing ', '64 bit Processing ')
-    processing = set(os.path.basename(x)
-                     for x in lines if x.startswith(prefixes))
-    for line in lines:
-      if not line.startswith(prefixes) and line not in processing:
-        print line
-    return popen.returncode
+    pdb_name = None
+    pe_name = None
+    for arg in args:
+      m = _LINK_PDB_OUT_ARG.match(arg)
+      if m:
+        pdb_name = m.group('out')
+      m = _LINK_EXE_OUT_ARG.match(arg)
+      if m:
+        pe_name = m.group('out')
+    for retry_count in range(_LINKER_RETRIES):
+      retry = False
+      link = subprocess.Popen(args, shell=sys.platform == 'win32', env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+      # Read output one line at a time as it shows up to avoid OOM failures when
+      # GBs of output is produced.
+      for line in link.stdout:
+        if (not line.startswith('   Creating library ') and
+            not line.startswith('Generating code') and
+            not line.startswith('Finished generating code')):
+          m = _LINK_ERROR.match(line)
+          if m:
+            error_code = int(m.groups()[0])
+            if error_code == _LINKER_RETRY_ERRORS:
+              print 'Retrying link due to error %d' % error_code
+              if pdb_name:
+                shutil.copyfile(pdb_name, pdb_name + 'failure_backup')
+              retry = True
+          print line,
+      result = link.wait()
+      if not retry:
+        break
+    if result == 0 and sys.platform == 'win32':
+      # Flush the file buffers to try to work around a Windows 10 kernel bug,
+      # https://crbug.com/644525
+      output_handle = win32file.CreateFile(pe_name, win32file.GENERIC_WRITE,
+                                      0, None, win32file.OPEN_EXISTING, 0, 0)
+      win32file.FlushFileBuffers(output_handle)
+      output_handle.Close()
+    return result
 
   def ExecAsmWrapper(self, arch, *args):
     """Filter logo banner from invocations of asm.exe."""
@@ -288,19 +209,57 @@ class WinTool(object):
     return popen.returncode
 
   def ExecRcWrapper(self, arch, *args):
-    """Filter logo banner from invocations of rc.exe. Older versions of RC
-    don't support the /nologo flag."""
+    """Converts .rc files to .res files."""
     env = self._GetEnv(arch)
-    popen = subprocess.Popen(args, shell=True, env=env,
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    out, _ = popen.communicate()
-    for line in out.splitlines():
-      if (not line.startswith('Microsoft (R) Windows (R) Resource Compiler') and
-          not line.startswith('Copy' + 'right (C' +
-                              ') Microsoft Corporation') and
-          line):
-        print line
-    return popen.returncode
+
+    # We run two resource compilers:
+    # 1. A custom one at build/toolchain/win/rc/rc.py which can run on
+    #    non-Windows, and which has /showIncludes support so we can track
+    #    dependencies (e.g. on .ico files) of .rc files.
+    # 2. On Windows, regular Microsoft rc.exe, to make sure rc.py produces
+    #    bitwise identical output.
+
+    # 1. Run our rc.py.
+    # Also pass /showIncludes to track dependencies of .rc files.
+    args = list(args)
+    rcpy_args = args[:]
+    rcpy_args[0:1] = [sys.executable, os.path.join(BASE_DIR, 'rc', 'rc.py')]
+    rcpy_res_output = rcpy_args[-2]
+    assert rcpy_res_output.startswith('/fo')
+    assert rcpy_res_output.endswith('.res')
+    rc_res_output = rcpy_res_output + '_ms_rc'
+    args[-2] = rc_res_output
+    rcpy_args.append('/showIncludes')
+    rc_exe_exit_code = subprocess.call(rcpy_args, env=env)
+    if rc_exe_exit_code == 0:
+      # Since tool("rc") can't have deps, add deps on this script and on rc.py
+      # and its deps here, so that rc edges become dirty if rc.py changes.
+      print 'Note: including file: ../../build/toolchain/win/tool_wrapper.py'
+      print 'Note: including file: ../../build/toolchain/win/rc/rc.py'
+      print 'Note: including file: ../../build/toolchain/win/rc/linux64/rc.sha1'
+      print 'Note: including file: ../../build/toolchain/win/rc/mac/rc.sha1'
+      print 'Note: including file: ../../build/toolchain/win/rc/win/rc.exe.sha1'
+
+    # 2. Run Microsoft rc.exe.
+    if sys.platform == 'win32' and rc_exe_exit_code == 0:
+      popen = subprocess.Popen(args, shell=True, env=env,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+      out, _ = popen.communicate()
+      # Filter logo banner from invocations of rc.exe. Older versions of RC
+      # don't support the /nologo flag.
+      for line in out.splitlines():
+        if (not line.startswith('Microsoft (R) Windows (R) Resource Compiler')
+            and not line.startswith('Copy' + 'right (C' +
+                                ') Microsoft Corporation')
+            and line):
+          print line
+      rc_exe_exit_code = popen.returncode
+      # Assert Microsoft rc.exe and rc.py produced identical .res files.
+      if rc_exe_exit_code == 0:
+        import filecmp
+        # Strip "/fo" prefix.
+        assert filecmp.cmp(rc_res_output[3:], rcpy_res_output[3:])
+    return rc_exe_exit_code
 
   def ExecActionWrapper(self, arch, rspfile, *dirname):
     """Runs an action command line from a response file using the environment

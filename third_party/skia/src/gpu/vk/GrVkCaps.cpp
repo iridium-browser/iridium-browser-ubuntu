@@ -6,7 +6,9 @@
  */
 
 #include "GrVkCaps.h"
+#include "GrBackendSurface.h"
 #include "GrRenderTargetProxy.h"
+#include "GrRenderTarget.h"
 #include "GrShaderCaps.h"
 #include "GrVkUtil.h"
 #include "vk/GrVkBackendContext.h"
@@ -17,16 +19,18 @@ GrVkCaps::GrVkCaps(const GrContextOptions& contextOptions, const GrVkInterface* 
     : INHERITED(contextOptions) {
     fCanUseGLSLForShaderModule = false;
     fMustDoCopiesFromOrigin = false;
-    fSupportsCopiesAsDraws = false;
+    fSupportsCopiesAsDraws = true;
     fMustSubmitCommandsBeforeCopyOp = false;
     fMustSleepOnTearDown  = false;
     fNewCBOnPipelineChange = false;
+    fCanUseWholeSizeOnFlushMappedMemory = true;
 
     /**************************************************************************
     * GrDrawTargetCaps fields
     **************************************************************************/
     fMipMapSupport = true;   // always available in Vulkan
     fSRGBSupport = true;   // always available in Vulkan
+    fSRGBDecodeDisableSupport = true;  // always available in Vulkan
     fNPOTTextureTileSupport = true;  // always available in Vulkan
     fDiscardRenderTargetSupport = true;
     fReuseScratchTextures = true; //TODO: figure this out
@@ -34,17 +38,15 @@ GrVkCaps::GrVkCaps(const GrContextOptions& contextOptions, const GrVkInterface* 
     fOversizedStencilSupport = false; //TODO: figure this out
     fInstanceAttribSupport = true;
 
-    fUseDrawInsteadOfClear = false;
+    fBlacklistCoverageCounting = true; // blacklisting ccpr until we work through a few issues.
     fFenceSyncSupport = true;   // always available in Vulkan
-    fCrossContextTextureSupport = false;
+    fCrossContextTextureSupport = true;
 
     fMapBufferFlags = kNone_MapFlags; //TODO: figure this out
     fBufferMapThreshold = SK_MaxS32;  //TODO: figure this out
 
     fMaxRenderTargetSize = 4096; // minimum required by spec
     fMaxTextureSize = 4096; // minimum required by spec
-    fMaxColorSampleCount = 4; // minimum required by spec
-    fMaxStencilSampleCount = 4; // minimum required by spec
 
     fShaderCaps.reset(new GrShaderCaps(contextOptions));
 
@@ -86,12 +88,15 @@ void GrVkCaps::init(const GrContextOptions& contextOptions, const GrVkInterface*
     this->initConfigTable(vkInterface, physDev, properties);
     this->initStencilFormat(vkInterface, physDev);
 
-    if (SkToBool(extensionFlags & kNV_glsl_shader_GrVkExtensionFlag)) {
-        // Currently disabling this feature since it does not play well with validation layers which
-        // expect a SPIR-V shader
-        // fCanUseGLSLForShaderModule = true;
+    if (!contextOptions.fDisableDriverCorrectnessWorkarounds) {
+        this->applyDriverCorrectnessWorkarounds(properties);
     }
 
+    this->applyOptionsOverrides(contextOptions);
+    fShaderCaps->applyOptionsOverrides(contextOptions);
+}
+
+void GrVkCaps::applyDriverCorrectnessWorkarounds(const VkPhysicalDeviceProperties& properties) {
     if (kQualcomm_VkVendor == properties.vendorID) {
         fMustDoCopiesFromOrigin = true;
     }
@@ -100,12 +105,15 @@ void GrVkCaps::init(const GrContextOptions& contextOptions, const GrVkInterface*
         fMustSubmitCommandsBeforeCopyOp = true;
     }
 
-    if (kQualcomm_VkVendor != properties.vendorID) {
-        fSupportsCopiesAsDraws = true;
+    if (kQualcomm_VkVendor == properties.vendorID ||
+        kARM_VkVendor == properties.vendorID) {
+        fSupportsCopiesAsDraws = false;
+        // We require copies as draws to support cross context textures.
+        fCrossContextTextureSupport = false;
     }
 
-    if (fSupportsCopiesAsDraws) {
-        fCrossContextTextureSupport = true;
+    if (kARM_VkVendor == properties.vendorID) {
+        fInstanceAttribSupport = false;
     }
 
 #if defined(SK_BUILD_FOR_WIN)
@@ -117,9 +125,6 @@ void GrVkCaps::init(const GrContextOptions& contextOptions, const GrVkInterface*
         fMustSleepOnTearDown = true;
     }
 #endif
-
-    this->applyOptionsOverrides(contextOptions);
-    fShaderCaps->applyOptionsOverrides(contextOptions);
 }
 
 int get_max_sample_count(VkSampleCountFlags flags) {
@@ -145,17 +150,6 @@ int get_max_sample_count(VkSampleCountFlags flags) {
     return 64;
 }
 
-void GrVkCaps::initSampleCount(const VkPhysicalDeviceProperties& properties) {
-    VkSampleCountFlags colorSamples = properties.limits.framebufferColorSampleCounts;
-    VkSampleCountFlags stencilSamples = properties.limits.framebufferStencilSampleCounts;
-
-    fMaxColorSampleCount = get_max_sample_count(colorSamples);
-    if (kImagination_VkVendor == properties.vendorID) {
-        fMaxColorSampleCount = 0;
-    }
-    fMaxStencilSampleCount = get_max_sample_count(stencilSamples);
-}
-
 void GrVkCaps::initGrCaps(const VkPhysicalDeviceProperties& properties,
                           const VkPhysicalDeviceMemoryProperties& memoryProperties,
                           uint32_t featureFlags) {
@@ -175,7 +169,8 @@ void GrVkCaps::initGrCaps(const VkPhysicalDeviceProperties& properties,
     fMaxRenderTargetSize = SkTMin(properties.limits.maxImageDimension2D, (uint32_t)INT_MAX);
     fMaxTextureSize = SkTMin(properties.limits.maxImageDimension2D, (uint32_t)INT_MAX);
 
-    this->initSampleCount(properties);
+    // TODO: check if RT's larger than 4k incur a performance cost on ARM.
+    fMaxPreferredRenderTargetSize = fMaxRenderTargetSize;
 
     // Assuming since we will always map in the end to upload the data we might as well just map
     // from the get go. There is no hard data to suggest this is faster or slower.
@@ -190,6 +185,10 @@ void GrVkCaps::initGrCaps(const VkPhysicalDeviceProperties& properties,
     // Current workaround is to use a different secondary command buffer for each new VkPipeline.
     if (kAMD_VkVendor == properties.vendorID) {
         fNewCBOnPipelineChange = true;
+    }
+
+    if (kIntel_VkVendor == properties.vendorID) {
+        fCanUseWholeSizeOnFlushMappedMemory = false;
     }
 
 #if defined(SK_CPU_X86)
@@ -207,11 +206,14 @@ void GrVkCaps::initShaderCaps(const VkPhysicalDeviceProperties& properties, uint
     // fConfigOutputSwizzle will default to RGBA so we only need to set it for alpha only config.
     for (int i = 0; i < kGrPixelConfigCnt; ++i) {
         GrPixelConfig config = static_cast<GrPixelConfig>(i);
-        if (GrPixelConfigIsAlphaOnly(config)) {
+        // Vulkan doesn't support a single channel format stored in alpha.
+        if (GrPixelConfigIsAlphaOnly(config) &&
+            kAlpha_8_as_Alpha_GrPixelConfig != config) {
             shaderCaps->fConfigTextureSwizzle[i] = GrSwizzle::RRRR();
             shaderCaps->fConfigOutputSwizzle[i] = GrSwizzle::AAAA();
         } else {
-            if (kGray_8_GrPixelConfig == config) {
+            if (kGray_8_GrPixelConfig == config ||
+                kGray_8_as_Red_GrPixelConfig == config) {
                 shaderCaps->fConfigTextureSwizzle[i] = GrSwizzle::RRRA();
             } else if (kRGBA_4444_GrPixelConfig == config) {
                 // The vulkan spec does not require R4G4B4A4 to be supported for texturing so we
@@ -233,11 +235,16 @@ void GrVkCaps::initShaderCaps(const VkPhysicalDeviceProperties& properties, uint
     // Vulkan is based off ES 3.0 so the following should all be supported
     shaderCaps->fUsesPrecisionModifiers = true;
     shaderCaps->fFlatInterpolationSupport = true;
+    // Flat interpolation appears to be slow on Qualcomm GPUs. This was tested in GL and is assumed
+    // to be true with Vulkan as well.
+    shaderCaps->fPreferFlatInterpolation = kQualcomm_VkVendor != properties.vendorID;
 
     // GrShaderCaps
 
     shaderCaps->fShaderDerivativeSupport = true;
+
     shaderCaps->fGeometryShaderSupport = SkToBool(featureFlags & kGeometryShader_GrVkFeatureFlag);
+    shaderCaps->fGSInvocationsSupport = shaderCaps->fGeometryShaderSupport;
 
     shaderCaps->fDualSourceBlendingSupport = SkToBool(featureFlags & kDualSrcBlend_GrVkFeatureFlag);
     if (kAMD_VkVendor == properties.vendorID) {
@@ -253,19 +260,8 @@ void GrVkCaps::initShaderCaps(const VkPhysicalDeviceProperties& properties, uint
     shaderCaps->fVertexIDSupport = true;
 
     // Assume the minimum precisions mandated by the SPIR-V spec.
-    shaderCaps->fShaderPrecisionVaries = true;
-    for (int s = 0; s < kGrShaderTypeCount; ++s) {
-        auto& highp = shaderCaps->fFloatPrecisions[s][kHigh_GrSLPrecision];
-        highp.fLogRangeLow = highp.fLogRangeHigh = 127;
-        highp.fBits = 23;
-
-        auto& mediump = shaderCaps->fFloatPrecisions[s][kMedium_GrSLPrecision];
-        mediump.fLogRangeLow = mediump.fLogRangeHigh = 14;
-        mediump.fBits = 10;
-
-        shaderCaps->fFloatPrecisions[s][kLow_GrSLPrecision] = mediump;
-    }
-    shaderCaps->initSamplerPrecisionTable();
+    shaderCaps->fFloatIs32Bits = true;
+    shaderCaps->fHalfIs32Bits = false;
 
     shaderCaps->fMaxVertexSamplers =
     shaderCaps->fMaxGeometrySamplers =
@@ -361,7 +357,7 @@ void GrVkCaps::ConfigInfo::initSampleCounts(const GrVkInterface* interface,
                                                                  &properties));
     VkSampleCountFlags flags = properties.sampleCounts;
     if (flags & VK_SAMPLE_COUNT_1_BIT) {
-        fColorSampleCounts.push(0);
+        fColorSampleCounts.push(1);
     }
     if (kImagination_VkVendor == physProps.vendorID) {
         // MSAA does not work on imagination
@@ -401,10 +397,18 @@ void GrVkCaps::ConfigInfo::init(const GrVkInterface* interface,
     }
 }
 
-int GrVkCaps::getSampleCount(int requestedCount, GrPixelConfig config) const {
+int GrVkCaps::getRenderTargetSampleCount(int requestedCount, GrPixelConfig config) const {
+    requestedCount = SkTMax(1, requestedCount);
     int count = fConfigTable[config].fColorSampleCounts.count();
-    if (!count || !this->isConfigRenderable(config, true)) {
+
+    if (!count) {
         return 0;
+    }
+
+    if (1 == requestedCount) {
+        SkASSERT(fConfigTable[config].fColorSampleCounts.count() &&
+                 fConfigTable[config].fColorSampleCounts[0] == 1);
+        return 1;
     }
 
     for (int i = 0; i < count; ++i) {
@@ -412,6 +416,106 @@ int GrVkCaps::getSampleCount(int requestedCount, GrPixelConfig config) const {
             return fConfigTable[config].fColorSampleCounts[i];
         }
     }
-    return fConfigTable[config].fColorSampleCounts[count-1];
+    return 0;
+}
+
+int GrVkCaps::maxRenderTargetSampleCount(GrPixelConfig config) const {
+    const auto& table = fConfigTable[config].fColorSampleCounts;
+    if (!table.count()) {
+        return 0;
+    }
+    return table[table.count() - 1];
+}
+
+bool GrVkCaps::surfaceSupportsWritePixels(const GrSurface* surface) const {
+    if (auto rt = surface->asRenderTarget()) {
+        return rt->numColorSamples() <= 1 && SkToBool(surface->asTexture());
+    }
+    return true;
+}
+
+bool validate_image_info(VkFormat format, SkColorType ct, GrPixelConfig* config) {
+    *config = kUnknown_GrPixelConfig;
+
+    switch (ct) {
+        case kUnknown_SkColorType:
+            return false;
+        case kAlpha_8_SkColorType:
+            if (VK_FORMAT_R8_UNORM == format) {
+                *config = kAlpha_8_as_Red_GrPixelConfig;
+            }
+            break;
+        case kRGB_565_SkColorType:
+            if (VK_FORMAT_R5G6B5_UNORM_PACK16 == format) {
+                *config = kRGB_565_GrPixelConfig;
+            }
+            break;
+        case kARGB_4444_SkColorType:
+            if (VK_FORMAT_B4G4R4A4_UNORM_PACK16 == format) {
+                *config = kRGBA_4444_GrPixelConfig;
+            }
+            break;
+        case kRGBA_8888_SkColorType:
+            if (VK_FORMAT_R8G8B8A8_UNORM == format) {
+                *config = kRGBA_8888_GrPixelConfig;
+            } else if (VK_FORMAT_R8G8B8A8_SRGB == format) {
+                *config = kSRGBA_8888_GrPixelConfig;
+            }
+            break;
+        case kRGB_888x_SkColorType:
+            return false;
+        case kBGRA_8888_SkColorType:
+            if (VK_FORMAT_B8G8R8A8_UNORM == format) {
+                *config = kBGRA_8888_GrPixelConfig;
+            } else if (VK_FORMAT_B8G8R8A8_SRGB == format) {
+                *config = kSBGRA_8888_GrPixelConfig;
+            }
+            break;
+        case kRGBA_1010102_SkColorType:
+            return false;
+        case kRGB_101010x_SkColorType:
+            return false;
+        case kGray_8_SkColorType:
+            if (VK_FORMAT_R8_UNORM == format) {
+                *config = kGray_8_as_Red_GrPixelConfig;
+            }
+            break;
+        case kRGBA_F16_SkColorType:
+            if (VK_FORMAT_R16G16B16A16_SFLOAT == format) {
+                *config = kRGBA_half_GrPixelConfig;
+            }
+            break;
+    }
+
+    return kUnknown_GrPixelConfig != *config;
+}
+
+bool GrVkCaps::validateBackendTexture(const GrBackendTexture& tex, SkColorType ct,
+                                      GrPixelConfig* config) const {
+    const GrVkImageInfo* imageInfo = tex.getVkImageInfo();
+    if (!imageInfo) {
+        return false;
+    }
+
+    return validate_image_info(imageInfo->fFormat, ct, config);
+}
+
+bool GrVkCaps::validateBackendRenderTarget(const GrBackendRenderTarget& rt, SkColorType ct,
+                                           GrPixelConfig* config) const {
+    const GrVkImageInfo* imageInfo = rt.getVkImageInfo();
+    if (!imageInfo) {
+        return false;
+    }
+
+    return validate_image_info(imageInfo->fFormat, ct, config);
+}
+
+bool GrVkCaps::getConfigFromBackendFormat(const GrBackendFormat& format, SkColorType ct,
+                                          GrPixelConfig* config) const {
+    const VkFormat* vkFormat = format.getVkFormat();
+    if (!vkFormat) {
+        return false;
+    }
+    return validate_image_info(*vkFormat, ct, config);
 }
 

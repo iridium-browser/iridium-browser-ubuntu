@@ -30,47 +30,14 @@
 #include "media/base/surface_manager.h"
 #include "media/base/video_decoder_config.h"
 #include "media/media_features.h"
-#include "media/renderers/gpu_video_accelerator_factories.h"
+#include "media/video/gpu_video_accelerator_factories.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
-#include "media/formats/mp4/box_definitions.h"
+#if defined(OS_ANDROID) && BUILDFLAG(USE_PROPRIETARY_CODECS)
+#include "media/base/android/extract_sps_and_pps.h"
 #endif
 
 namespace media {
-namespace {
-
-#if defined(OS_ANDROID) && BUILDFLAG(USE_PROPRIETARY_CODECS)
-// Extract the SPS and PPS lists from |extra_data|. Each SPS and PPS is prefixed
-// with 0x0001, the Annex B framing bytes. The out parameters are not modified
-// on failure.
-void ExtractSpsAndPps(const std::vector<uint8_t>& extra_data,
-                      std::vector<uint8_t>* sps_out,
-                      std::vector<uint8_t>* pps_out) {
-  if (extra_data.empty())
-    return;
-
-  mp4::AVCDecoderConfigurationRecord record;
-  if (!record.Parse(extra_data.data(), extra_data.size())) {
-    DVLOG(1) << "Failed to extract the SPS and PPS from extra_data";
-    return;
-  }
-
-  constexpr std::array<uint8_t, 4> prefix = {{0, 0, 0, 1}};
-  for (const std::vector<uint8_t>& sps : record.sps_list) {
-    sps_out->insert(sps_out->end(), prefix.begin(), prefix.end());
-    sps_out->insert(sps_out->end(), sps.begin(), sps.end());
-  }
-
-  for (const std::vector<uint8_t>& pps : record.pps_list) {
-    pps_out->insert(pps_out->end(), prefix.begin(), prefix.end());
-    pps_out->insert(pps_out->end(), pps.begin(), pps.end());
-  }
-}
-#endif
-
-}  // namespace
-
 const char GpuVideoDecoder::kDecoderName[] = "GpuVideoDecoder";
 
 // Maximum number of concurrent VDA::Decode() operations GVD will maintain.
@@ -101,15 +68,18 @@ GpuVideoDecoder::BufferData::BufferData(int32_t bbid,
       visible_rect(vr),
       natural_size(ns) {}
 
-GpuVideoDecoder::BufferData::~BufferData() {}
+GpuVideoDecoder::BufferData::~BufferData() = default;
 
 GpuVideoDecoder::GpuVideoDecoder(
     GpuVideoAcceleratorFactories* factories,
     const RequestOverlayInfoCB& request_overlay_info_cb,
+    const gfx::ColorSpace& target_color_space,
     MediaLog* media_log)
     : needs_bitstream_conversion_(false),
       factories_(factories),
       request_overlay_info_cb_(request_overlay_info_cb),
+      overlay_info_requested_(false),
+      target_color_space_(target_color_space),
       media_log_(media_log),
       vda_initialized_(false),
       state_(kNormal),
@@ -207,7 +177,7 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
   // TODO(sandersd): This should be moved to capabilities if we ever have a
   // hardware decoder which supports alpha formats.
-  if (config.format() == PIXEL_FORMAT_YV12A) {
+  if (config.format() == PIXEL_FORMAT_I420A) {
     DVLOG(1) << "Alpha transparency formats are not supported.";
     bound_init_cb.Run(false);
     return;
@@ -237,7 +207,8 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
   needs_all_picture_buffers_to_decode_ =
       capabilities.flags &
       VideoDecodeAccelerator::Capabilities::NEEDS_ALL_PICTURE_BUFFERS_TO_DECODE;
-  needs_bitstream_conversion_ = (config.codec() == kCodecH264);
+  needs_bitstream_conversion_ =
+      (config.codec() == kCodecH264) || (config.codec() == kCodecHEVC);
   requires_texture_copy_ =
       !!(capabilities.flags &
          VideoDecodeAccelerator::Capabilities::REQUIRES_TEXTURE_COPY);
@@ -315,6 +286,7 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
         requires_restart_for_external_output_surface,
         BindToCurrentLoop(base::Bind(&GpuVideoDecoder::OnOverlayInfoAvailable,
                                      weak_factory_.GetWeakPtr())));
+    overlay_info_requested_ = true;
     return;
   }
 
@@ -360,7 +332,9 @@ void GpuVideoDecoder::CompleteInitialization(const OverlayInfo& overlay_info) {
   vda_config.encryption_scheme = config_.encryption_scheme();
   vda_config.is_deferred_initialization_allowed = true;
   vda_config.initial_expected_coded_size = config_.coded_size();
-  vda_config.color_space = config_.color_space_info();
+  vda_config.container_color_space = config_.color_space_info();
+  vda_config.target_color_space = target_color_space_;
+  vda_config.hdr_metadata = config_.hdr_metadata();
 
 #if defined(OS_ANDROID) && BUILDFLAG(USE_PROPRIETARY_CODECS)
   // We pass the SPS and PPS on Android because it lets us initialize
@@ -433,7 +407,7 @@ void GpuVideoDecoder::Decode(const scoped_refptr<DecoderBuffer>& buffer,
   switch (state_) {
     case kDecoderDrained:
       state_ = kNormal;
-      // Fall-through.
+      FALLTHROUGH;
     case kNormal:
       break;
     case kDrainingDecoder:
@@ -711,6 +685,8 @@ void GpuVideoDecoder::DeliverFrame(
   if (!pending_reset_cb_.is_null())
     return;
 
+  frame->metadata()->SetBoolean(VideoFrameMetadata::POWER_EFFICIENT, true);
+
   output_cb_.Run(frame);
 }
 
@@ -829,9 +805,10 @@ GpuVideoDecoder::~GpuVideoDecoder() {
 
   if (!init_cb_.is_null())
     base::ResetAndReturn(&init_cb_).Run(false);
-  if (!request_overlay_info_cb_.is_null())
+  if (request_overlay_info_cb_ && overlay_info_requested_) {
     base::ResetAndReturn(&request_overlay_info_cb_)
         .Run(false, ProvideOverlayInfoCB());
+  }
 
   for (std::map<int32_t, PendingDecoderBuffer>::iterator it =
            bitstream_buffers_in_decoder_.begin();

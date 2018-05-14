@@ -10,7 +10,6 @@
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_contents_client_bridge.h"
 #include "android_webview/browser/aw_contents_io_thread_client.h"
-#include "android_webview/browser/aw_login_delegate.h"
 #include "android_webview/browser/aw_resource_context.h"
 #include "android_webview/browser/aw_safe_browsing_config_helper.h"
 #include "android_webview/browser/aw_safe_browsing_resource_throttle.h"
@@ -18,18 +17,20 @@
 #include "android_webview/browser/renderer_host/auto_login_parser.h"
 #include "android_webview/common/url_constants.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
-#include "components/safe_browsing_db/safe_browsing_api_handler.h"
+#include "components/safe_browsing/android/safe_browsing_api_handler.h"
+#include "components/safe_browsing/features.h"
 #include "components/web_restrictions/browser/web_restrictions_resource_throttle.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_dispatcher_host.h"
-#include "content/public/browser/resource_dispatcher_host_login_delegate.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/browser_side_navigation_policy.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_status.h"
+#include "services/network/public/cpp/features.h"
 #include "url/url_constants.h"
 
 using android_webview::AwContentsIoThreadClient;
@@ -292,22 +293,31 @@ void AwResourceDispatcherHostDelegate::RequestBeginning(
       content::ResourceRequestInfo::ForRequest(request);
 
   std::unique_ptr<IoThreadClientThrottle> ioThreadThrottle =
-      base::MakeUnique<IoThreadClientThrottle>(request_info->GetChildID(),
+      std::make_unique<IoThreadClientThrottle>(request_info->GetChildID(),
                                                request_info->GetRenderFrameID(),
                                                request);
 
   if (ioThreadThrottle->GetSafeBrowsingEnabled()) {
-    content::ResourceThrottle* throttle =
-        AwSafeBrowsingResourceThrottle::MaybeCreate(
-            request, resource_type,
-            AwBrowserContext::GetDefault()->GetSafeBrowsingDBManager(),
-            AwBrowserContext::GetDefault()->GetSafeBrowsingUIManager(),
-            AwBrowserContext::GetDefault()->GetSafeBrowsingWhitelistManager());
-    if (throttle == nullptr) {
-      // Should not happen
-      DLOG(WARNING) << "Failed creating safebrowsing throttle";
-    } else {
-      throttles->push_back(base::WrapUnique(throttle));
+    DCHECK(!base::FeatureList::IsEnabled(network::features::kNetworkService));
+    bool safe_browsing_url_loader_throttle_used =
+        base::FeatureList::IsEnabled(
+            safe_browsing::kCheckByURLLoaderThrottle) &&
+        (!content::IsResourceTypeFrame(resource_type) ||
+         content::IsNavigationMojoResponseEnabled());
+    if (!safe_browsing_url_loader_throttle_used) {
+      content::ResourceThrottle* throttle =
+          MaybeCreateAwSafeBrowsingResourceThrottle(
+              request, resource_type,
+              AwBrowserContext::GetDefault()->GetSafeBrowsingDBManager(),
+              AwBrowserContext::GetDefault()->GetSafeBrowsingUIManager(),
+              AwBrowserContext::GetDefault()
+                  ->GetSafeBrowsingWhitelistManager());
+      if (throttle == nullptr) {
+        // Should not happen
+        DLOG(WARNING) << "Failed creating safebrowsing throttle";
+      } else {
+        throttles->push_back(base::WrapUnique(throttle));
+      }
     }
   }
 
@@ -322,7 +332,7 @@ void AwResourceDispatcherHostDelegate::RequestBeginning(
   if (!is_main_frame)
     InterceptNavigationDelegate::UpdateUserGestureCarryoverInfo(request);
   throttles->push_back(
-      base::MakeUnique<web_restrictions::WebRestrictionsResourceThrottle>(
+      std::make_unique<web_restrictions::WebRestrictionsResourceThrottle>(
           AwBrowserContext::GetDefault()->GetWebRestrictionProvider(),
           request->url(), is_main_frame));
 }
@@ -331,7 +341,7 @@ void AwResourceDispatcherHostDelegate::OnRequestRedirected(
     const GURL& redirect_url,
     net::URLRequest* request,
     content::ResourceContext* resource_context,
-    content::ResourceResponse* response) {
+    network::ResourceResponse* response) {
   AddExtraHeadersIfNeeded(request, resource_context);
 }
 
@@ -342,7 +352,7 @@ void AwResourceDispatcherHostDelegate::RequestComplete(
         content::ResourceRequestInfo::ForRequest(request);
 
     bool safebrowsing_hit = false;
-    if (request->GetUserData(AwSafeBrowsingResourceThrottle::kUserDataKey)) {
+    if (IsCancelledBySafeBrowsing(request)) {
       safebrowsing_hit = true;
     }
     BrowserThread::PostTask(
@@ -394,13 +404,6 @@ void AwResourceDispatcherHostDelegate::DownloadStarting(
                  user_agent, content_disposition, mime_type, content_length));
 }
 
-content::ResourceDispatcherHostLoginDelegate*
-    AwResourceDispatcherHostDelegate::CreateLoginDelegate(
-        net::AuthChallengeInfo* auth_info,
-        net::URLRequest* request) {
-  return new AwLoginDelegate(auth_info, request);
-}
-
 bool AwResourceDispatcherHostDelegate::HandleExternalProtocol(
     const GURL& url,
     content::ResourceRequestInfo* info) {
@@ -413,7 +416,7 @@ bool AwResourceDispatcherHostDelegate::HandleExternalProtocol(
 void AwResourceDispatcherHostDelegate::OnResponseStarted(
     net::URLRequest* request,
     content::ResourceContext* resource_context,
-    content::ResourceResponse* response) {
+    network::ResourceResponse* response) {
   const content::ResourceRequestInfo* request_info =
       content::ResourceRequestInfo::ForRequest(request);
   if (!request_info) {

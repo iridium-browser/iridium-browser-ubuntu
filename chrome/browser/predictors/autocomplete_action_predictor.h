@@ -7,7 +7,10 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <tuple>
+#include <utility>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -184,7 +187,7 @@ class AutocompleteActionPredictor
   // if the history service is available, or registers for the notification of
   // it becoming available.
   void CreateCaches(
-      std::vector<AutocompleteActionPredictorTable::Row>* row_buffer);
+      std::unique_ptr<std::vector<AutocompleteActionPredictorTable::Row>> rows);
 
   // Attempts to call DeleteOldEntries if the in-memory database has been loaded
   // by |service|.

@@ -6,7 +6,6 @@
 
 #include "base/files/file_path.h"
 #include "base/strings/string_util.h"
-#include "components/mime_util/mime_util.h"
 #include "media/base/mime_util.h"
 #include "media/filters/stream_parser_factory.h"
 #include "net/base/mime_util.h"
@@ -16,6 +15,7 @@
 #include "public/platform/InterfaceProvider.h"
 #include "public/platform/Platform.h"
 #include "public/platform/mime_registry.mojom-blink.h"
+#include "third_party/WebKit/public/common/mime_util/mime_util.h"
 
 namespace blink {
 
@@ -27,7 +27,7 @@ struct MimeRegistryPtrHolder {
     Platform::Current()->GetInterfaceProvider()->GetInterface(
         mojo::MakeRequest(&mime_registry));
   }
-  ~MimeRegistryPtrHolder() {}
+  ~MimeRegistryPtrHolder() = default;
 
   mojom::blink::MimeRegistryPtr mime_registry;
 };
@@ -65,8 +65,10 @@ String MIMETypeRegistry::GetMIMETypeForExtension(const String& ext) {
   // these calls over to the browser process.
   DEFINE_STATIC_LOCAL(MimeRegistryPtrHolder, registry_holder, ());
   String mime_type;
-  if (!registry_holder.mime_registry->GetMimeTypeFromExtension(ext, &mime_type))
+  if (!registry_holder.mime_registry->GetMimeTypeFromExtension(
+          ext.IsNull() ? "" : ext, &mime_type)) {
     return String();
+  }
   return mime_type;
 }
 
@@ -78,21 +80,12 @@ String MIMETypeRegistry::GetWellKnownMIMETypeForExtension(const String& ext) {
   return String::FromUTF8(mime_type.data(), mime_type.length());
 }
 
-String MIMETypeRegistry::GetMIMETypeForPath(const String& path) {
-  int pos = path.ReverseFind('.');
-  if (pos < 0)
-    return "application/octet-stream";
-  String extension = path.Substring(pos + 1);
-  String mime_type = GetMIMETypeForExtension(extension);
-  return mime_type.IsEmpty() ? "application/octet-stream" : mime_type;
-}
-
 bool MIMETypeRegistry::IsSupportedMIMEType(const String& mime_type) {
-  return mime_util::IsSupportedMimeType(ToLowerASCIIOrEmpty(mime_type));
+  return blink::IsSupportedMimeType(ToLowerASCIIOrEmpty(mime_type));
 }
 
 bool MIMETypeRegistry::IsSupportedImageMIMEType(const String& mime_type) {
-  return mime_util::IsSupportedImageMimeType(ToLowerASCIIOrEmpty(mime_type));
+  return blink::IsSupportedImageMimeType(ToLowerASCIIOrEmpty(mime_type));
 }
 
 bool MIMETypeRegistry::IsSupportedImageResourceMIMEType(
@@ -103,10 +96,10 @@ bool MIMETypeRegistry::IsSupportedImageResourceMIMEType(
 bool MIMETypeRegistry::IsSupportedImagePrefixedMIMEType(
     const String& mime_type) {
   std::string ascii_mime_type = ToLowerASCIIOrEmpty(mime_type);
-  return (mime_util::IsSupportedImageMimeType(ascii_mime_type) ||
+  return (blink::IsSupportedImageMimeType(ascii_mime_type) ||
           (base::StartsWith(ascii_mime_type, "image/",
                             base::CompareCase::SENSITIVE) &&
-           mime_util::IsSupportedNonImageMimeType(ascii_mime_type)));
+           blink::IsSupportedNonImageMimeType(ascii_mime_type)));
 }
 
 bool MIMETypeRegistry::IsSupportedImageMIMETypeForEncoding(
@@ -120,8 +113,7 @@ bool MIMETypeRegistry::IsSupportedImageMIMETypeForEncoding(
 }
 
 bool MIMETypeRegistry::IsSupportedJavaScriptMIMEType(const String& mime_type) {
-  return mime_util::IsSupportedJavascriptMimeType(
-      ToLowerASCIIOrEmpty(mime_type));
+  return blink::IsSupportedJavascriptMimeType(ToLowerASCIIOrEmpty(mime_type));
 }
 
 bool MIMETypeRegistry::IsLegacySupportedJavaScriptLanguage(
@@ -151,7 +143,7 @@ bool MIMETypeRegistry::IsLegacySupportedJavaScriptLanguage(
 }
 
 bool MIMETypeRegistry::IsSupportedNonImageMIMEType(const String& mime_type) {
-  return mime_util::IsSupportedNonImageMimeType(ToLowerASCIIOrEmpty(mime_type));
+  return blink::IsSupportedNonImageMimeType(ToLowerASCIIOrEmpty(mime_type));
 }
 
 bool MIMETypeRegistry::IsSupportedMediaMIMEType(const String& mime_type,

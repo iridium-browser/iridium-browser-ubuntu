@@ -12,11 +12,22 @@
 #import "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_controller.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/views/exclusive_access_bubble_views.h"
-#include "chrome/browser/ui/views/new_back_shortcut_bubble.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
+
+namespace {
+
+// If |callback| was never passed to |ExclusiveAccessBubbleViews|, calls it
+// with |kNotShown|, otherwise does nothing.
+void CallHideCallbackAsNotShownIfNecessary(
+    ExclusiveAccessBubbleHideCallback callback) {
+  if (callback)
+    std::move(callback).Run(ExclusiveAccessBubbleHideReason::kNotShown);
+}
+
+}  // anonymous namespace
 
 ExclusiveAccessController::ExclusiveAccessController(
     BrowserWindowController* controller,
@@ -31,54 +42,20 @@ ExclusiveAccessController::ExclusiveAccessController(
                  base::Unretained(this)));
 }
 
-ExclusiveAccessController::~ExclusiveAccessController() {}
+ExclusiveAccessController::~ExclusiveAccessController() {
+  CallHideCallbackAsNotShownIfNecessary(std::move(bubble_first_hide_callback_));
+}
 
 void ExclusiveAccessController::Show() {
-  // Hide the backspace shortcut bubble, to avoid overlapping.
-  new_back_shortcut_bubble_.reset();
-
-  views_bubble_.reset(new ExclusiveAccessBubbleViews(this, url_, bubble_type_));
-}
-
-void ExclusiveAccessController::MaybeShowNewBackShortcutBubble(bool forward) {
-  if (!new_back_shortcut_bubble_ || !new_back_shortcut_bubble_->IsVisible()) {
-      // Show the bubble at most five times.
-      PrefService* prefs = GetProfile()->GetPrefs();
-      int shown_count = prefs->GetInteger(prefs::kBackShortcutBubbleShownCount);
-      constexpr int kMaxShownCount = 5;
-      if (shown_count >= kMaxShownCount)
-        return;
-
-      // Only show the bubble when the user presses a shortcut twice within
-      // three seconds.
-      const base::TimeTicks now = base::TimeTicks::Now();
-      constexpr base::TimeDelta kRepeatWindow = base::TimeDelta::FromSeconds(3);
-      if (last_back_shortcut_press_time_.is_null() ||
-          ((now - last_back_shortcut_press_time_) > kRepeatWindow)) {
-        last_back_shortcut_press_time_ = now;
-        return;
-      }
-
-      // Hide the exclusive access bubble, to avoid overlapping.
-      views_bubble_.reset();
-
-      new_back_shortcut_bubble_.reset(new NewBackShortcutBubble(this));
-      prefs->SetInteger(prefs::kBackShortcutBubbleShownCount, shown_count + 1);
-      last_back_shortcut_press_time_ = base::TimeTicks();
-  }
-
-  new_back_shortcut_bubble_->UpdateContent(forward);
-}
-
-void ExclusiveAccessController::HideNewBackShortcutBubble() {
-  if (new_back_shortcut_bubble_)
-    new_back_shortcut_bubble_->Hide();
+  views_bubble_.reset(new ExclusiveAccessBubbleViews(
+      this, url_, bubble_type_, std::move(bubble_first_hide_callback_)));
 }
 
 void ExclusiveAccessController::Destroy() {
   views_bubble_.reset();
   url_ = GURL();
   bubble_type_ = EXCLUSIVE_ACCESS_BUBBLE_TYPE_NONE;
+  CallHideCallbackAsNotShownIfNecessary(std::move(bubble_first_hide_callback_));
 }
 
 Profile* ExclusiveAccessController::GetProfile() {
@@ -96,7 +73,7 @@ void ExclusiveAccessController::UpdateUIForTabFullscreen(
 
 void ExclusiveAccessController::UpdateFullscreenToolbar() {
   [[controller_ fullscreenToolbarController]
-      updateToolbarStyleExitingTabFullscreen:NO];
+      layoutToolbarStyleIsExitingTabFullscreen:NO];
 }
 
 // See the Fullscreen terminology section and the (Fullscreen) interface
@@ -107,6 +84,7 @@ void ExclusiveAccessController::EnterFullscreen(
     ExclusiveAccessBubbleType bubble_type) {
   url_ = url;
   bubble_type_ = bubble_type;
+  CallHideCallbackAsNotShownIfNecessary(std::move(bubble_first_hide_callback_));
   if (browser_->exclusive_access_manager()
           ->fullscreen_controller()
           ->IsWindowFullscreenForTabOrPending())
@@ -121,9 +99,12 @@ void ExclusiveAccessController::ExitFullscreen() {
 
 void ExclusiveAccessController::UpdateExclusiveAccessExitBubbleContent(
     const GURL& url,
-    ExclusiveAccessBubbleType bubble_type) {
+    ExclusiveAccessBubbleType bubble_type,
+    ExclusiveAccessBubbleHideCallback bubble_first_hide_callback) {
   url_ = url;
   bubble_type_ = bubble_type;
+  CallHideCallbackAsNotShownIfNecessary(std::move(bubble_first_hide_callback_));
+  bubble_first_hide_callback_ = std::move(bubble_first_hide_callback);
   [controller_ updateFullscreenExitBubble];
 }
 
@@ -184,7 +165,7 @@ gfx::Rect ExclusiveAccessController::GetClientAreaBoundsInScreen() const {
   return gfx::ScreenRectFromNSRect([[controller_ window] frame]);
 }
 
-bool ExclusiveAccessController::IsImmersiveModeEnabled() {
+bool ExclusiveAccessController::IsImmersiveModeEnabled() const {
   return false;
 }
 
@@ -195,7 +176,10 @@ gfx::Rect ExclusiveAccessController::GetTopContainerBoundsInScreen() {
 
 void ExclusiveAccessController::DestroyAnyExclusiveAccessBubble() {
   Destroy();
-  new_back_shortcut_bubble_.reset();
+}
+
+bool ExclusiveAccessController::CanTriggerOnMouse() const {
+  return true;
 }
 
 BrowserWindow* ExclusiveAccessController::GetBrowserWindow() const {

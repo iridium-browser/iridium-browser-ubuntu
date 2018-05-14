@@ -30,13 +30,6 @@
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(USE_X11)
-#include <X11/extensions/XInput2.h>
-#include <X11/Xlib.h>
-
-#include "ui/events/devices/x11/device_data_manager_x11.h"  // nogncheck
-#endif
-
 namespace ash {
 
 const int kPointRadius = 20;
@@ -77,17 +70,6 @@ const char* GetTouchEventLabel(ui::EventType type) {
 }
 
 int GetTrackingId(const ui::TouchEvent& event) {
-  if (!event.HasNativeEvent())
-    return 0;
-#if defined(USE_X11)
-  ui::DeviceDataManagerX11* manager = ui::DeviceDataManagerX11::GetInstance();
-  double tracking_id;
-  if (manager->GetEventData(*event.native_event(),
-                            ui::DeviceDataManagerX11::DT_TOUCH_TRACKING_ID,
-                            &tracking_id)) {
-    return static_cast<int>(tracking_id);
-  }
-#endif
   return 0;
 }
 
@@ -144,7 +126,7 @@ class TouchTrace {
   typedef std::vector<TouchPointLog>::const_reverse_iterator
       const_reverse_iterator;
 
-  TouchTrace() {}
+  TouchTrace() = default;
 
   void AddTouchPoint(const ui::TouchEvent& touch) {
     log_.push_back(TouchPointLog(touch));
@@ -246,7 +228,7 @@ class TouchHudCanvas : public views::View {
     flags_.setStyle(cc::PaintFlags::kFill_Style);
   }
 
-  ~TouchHudCanvas() override {}
+  ~TouchHudCanvas() override = default;
 
   void SetScale(int scale) {
     if (scale_ == scale)
@@ -318,7 +300,7 @@ class TouchHudCanvas : public views::View {
 };
 
 TouchHudDebug::TouchHudDebug(aura::Window* initial_root)
-    : TouchObserverHUD(initial_root),
+    : TouchObserverHUD(initial_root, "TouchHudDebug"),
       mode_(FULLSCREEN),
       touch_log_(new TouchLog()),
       canvas_(NULL),
@@ -336,7 +318,7 @@ TouchHudDebug::TouchHudDebug(aura::Window* initial_root)
 
   label_container_ = new views::View;
   label_container_->SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kVertical));
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
 
   for (int i = 0; i < kMaxTouchPoints; ++i) {
     touch_labels_[i] = new views::Label;
@@ -352,7 +334,7 @@ TouchHudDebug::TouchHudDebug(aura::Window* initial_root)
   content->AddChildView(label_container_);
 }
 
-TouchHudDebug::~TouchHudDebug() {}
+TouchHudDebug::~TouchHudDebug() = default;
 
 // static
 std::unique_ptr<base::DictionaryValue> TouchHudDebug::GetAllAsDictionary() {

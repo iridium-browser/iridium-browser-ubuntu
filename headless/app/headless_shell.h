@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/files/file_proxy.h"
 #include "base/memory/weak_ptr.h"
@@ -22,13 +23,16 @@
 #include "headless/public/util/deterministic_dispatcher.h"
 #include "net/base/file_stream.h"
 
+class GURL;
+
 namespace headless {
 
 // An application which implements a simple headless browser.
 class HeadlessShell : public HeadlessWebContents::Observer,
                       public emulation::ExperimentalObserver,
                       public inspector::ExperimentalObserver,
-                      public page::ExperimentalObserver {
+                      public page::ExperimentalObserver,
+                      public network::ExperimentalObserver {
  public:
   HeadlessShell();
   ~HeadlessShell() override;
@@ -50,12 +54,16 @@ class HeadlessShell : public HeadlessWebContents::Observer,
 
   // page::Observer implementation:
   void OnLoadEventFired(const page::LoadEventFiredParams& params) override;
-  void OnNavigationRequested(
-      const headless::page::NavigationRequestedParams& params) override;
+
+  // network::Observer implementation:
+  void OnRequestIntercepted(
+      const network::RequestInterceptedParams& params) override;
 
   virtual void Shutdown();
 
   void FetchTimeout();
+
+  void OnGotURLs(const std::vector<GURL>& urls);
 
   void PollReadyState();
 
@@ -82,8 +90,8 @@ class HeadlessShell : public HeadlessWebContents::Observer,
 
   void WriteFile(const std::string& switch_string,
                  const std::string& default_file_name,
-                 const std::string& data);
-  void OnFileOpened(const std::string& data,
+                 const std::string& base64_data);
+  void OnFileOpened(const std::string& decoded_data,
                     const base::FilePath file_name,
                     base::File::Error error_code);
   void OnFileWritten(const base::FilePath file_name,

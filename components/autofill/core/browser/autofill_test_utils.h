@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
 
@@ -20,9 +21,9 @@ class PrefRegistrySyncable;
 
 namespace autofill {
 
+class AutofillExternalDelegate;
 class AutofillProfile;
 class AutofillTable;
-class CreditCard;
 struct FormData;
 struct FormFieldData;
 
@@ -65,11 +66,20 @@ void CreateTestAddressFormData(FormData* form);
 void CreateTestAddressFormData(FormData* form,
                                std::vector<ServerFieldTypeSet>* types);
 
+// Returns a full profile with valid info according to rules for Canada.
+AutofillProfile GetFullValidProfileForCanada();
+
+// Returns a full profile with valid info according to rules for China.
+AutofillProfile GetFullValidProfileForChina();
+
 // Returns a profile full of dummy info.
 AutofillProfile GetFullProfile();
 
 // Returns a profile full of dummy info, different to the above.
 AutofillProfile GetFullProfile2();
+
+// Returns a profile full of dummy info, different to the above.
+AutofillProfile GetFullCanadianProfile();
 
 // Returns an incomplete profile of dummy info.
 AutofillProfile GetIncompleteProfile1();
@@ -99,15 +109,42 @@ CreditCard GetVerifiedCreditCard2();
 CreditCard GetMaskedServerCard();
 CreditCard GetMaskedServerCardAmex();
 
+// Returns a randomly generated credit card of |record_type|. Note that the
+// card is not guaranteed to be valid/sane from a card validation standpoint.
+CreditCard GetRandomCreditCard(CreditCard::RecordType record_Type);
+
 // A unit testing utility that is common to a number of the Autofill unit
 // tests.  |SetProfileInfo| provides a quick way to populate a profile with
 // c-strings.
 void SetProfileInfo(AutofillProfile* profile,
-    const char* first_name, const char* middle_name,
-    const char* last_name, const char* email, const char* company,
-    const char* address1, const char* address2, const char* city,
-    const char* state, const char* zipcode, const char* country,
-    const char* phone);
+                    const char* first_name,
+                    const char* middle_name,
+                    const char* last_name,
+                    const char* email,
+                    const char* company,
+                    const char* address1,
+                    const char* address2,
+                    const char* dependent_locality,
+                    const char* city,
+                    const char* state,
+                    const char* zipcode,
+                    const char* country,
+                    const char* phone);
+
+// This one doesn't require the |dependent_locality|.
+void SetProfileInfo(AutofillProfile* profile,
+                    const char* first_name,
+                    const char* middle_name,
+                    const char* last_name,
+                    const char* email,
+                    const char* company,
+                    const char* address1,
+                    const char* address2,
+                    const char* city,
+                    const char* state,
+                    const char* zipcode,
+                    const char* country,
+                    const char* phone);
 
 void SetProfileInfoWithGuid(AutofillProfile* profile,
     const char* guid, const char* first_name, const char* middle_name,
@@ -157,6 +194,11 @@ void FillQueryField(AutofillQueryContents::Form::Field* field,
                     unsigned signature,
                     const char* name,
                     const char* control_type);
+
+// Calls the required functions on the given external delegate to cause the
+// delegate to display a popup.
+void GenerateTestAutofillPopup(
+    AutofillExternalDelegate* autofill_external_delegate);
 
 }  // namespace test
 }  // namespace autofill

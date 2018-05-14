@@ -27,13 +27,12 @@
 #define InspectorStyleSheet_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "core/css/CSSPropertySourceData.h"
 #include "core/css/CSSStyleDeclaration.h"
 #include "core/inspector/protocol/CSS.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -65,7 +64,7 @@ class InspectorStyle final : public GarbageCollectedFinalized<InspectorStyle> {
   bool StyleText(String* result);
   bool TextForRange(const SourceRange&, String* result);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   InspectorStyle(CSSStyleDeclaration*,
@@ -86,12 +85,12 @@ class InspectorStyleSheetBase
  public:
   class CORE_EXPORT Listener {
    public:
-    Listener() {}
-    virtual ~Listener() {}
+    Listener() = default;
+    virtual ~Listener() = default;
     virtual void StyleSheetChanged(InspectorStyleSheetBase*) = 0;
   };
-  virtual ~InspectorStyleSheetBase() {}
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual ~InspectorStyleSheetBase() = default;
+  virtual void Trace(blink::Visitor* visitor) {}
 
   String Id() { return id_; }
 
@@ -135,7 +134,7 @@ class InspectorStyleSheet : public InspectorStyleSheetBase {
                                      InspectorResourceContainer*);
 
   ~InspectorStyleSheet() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   String FinalURL();
   bool SetText(const String&, ExceptionState&) override;
@@ -262,7 +261,7 @@ class InspectorStyleSheetForInlineStyle final : public InspectorStyleSheetBase {
   CSSStyleDeclaration* InlineStyle();
   CSSRuleSourceData* RuleSourceData();
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  protected:
   InspectorStyle* GetInspectorStyle(CSSStyleDeclaration*) override;

@@ -30,18 +30,18 @@
 
 #include "public/web/WebFrameSerializer.h"
 
-#include "core/exported/WebViewBase.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/FrameTestHelpers.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebCString.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
+#include "public/platform/WebVector.h"
 #include "public/web/WebFrameSerializerClient.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -54,9 +54,9 @@ class SimpleWebFrameSerializerClient final : public WebFrameSerializerClient {
   String ToString() { return builder_.ToString(); }
 
  private:
-  void DidSerializeDataForFrame(const WebCString& data,
+  void DidSerializeDataForFrame(const WebVector<char>& data,
                                 FrameSerializationStatus) final {
-    builder_.Append(data.Data(), data.length());
+    builder_.Append(data.Data(), data.size());
   }
 
   StringBuilder builder_;
@@ -113,7 +113,7 @@ class WebFrameSerializerTest : public ::testing::Test {
   };
 
   String SerializeFile(const String& url, const String& file_name) {
-    KURL parsed_url(kParsedURLString, url);
+    KURL parsed_url(url);
     String file_path("frameserialization/" + file_name);
     RegisterMockedFileURLLoad(parsed_url, file_path, "text/html");
     FrameTestHelpers::LoadFrame(MainFrameImpl(), url.Utf8().data());
@@ -124,7 +124,7 @@ class WebFrameSerializerTest : public ::testing::Test {
     return serializer_client.ToString();
   }
 
-  WebLocalFrameBase* MainFrameImpl() { return helper_.LocalMainFrame(); }
+  WebLocalFrameImpl* MainFrameImpl() { return helper_.LocalMainFrame(); }
 
  private:
   FrameTestHelpers::WebViewHelper helper_;
@@ -138,10 +138,10 @@ TEST_F(WebFrameSerializerTest, URLAttributeValues) {
       "<html><head><meta http-equiv=\"Content-Type\" content=\"text/html; "
       "charset=UTF-8\">\n"
       "</head><body><img src=\"javascript:&quot;\">\n"
-      "<a href=\"http://www.test.com/local#&quot;\">local</a>\n"
+      "<a href=\"http://www.test.com/local#%22\">local</a>\n"
       "<a "
-      "href=\"http://www.example.com/#&quot;&gt;&lt;script&gt;alert(0)&lt;/"
-      "script&gt;\">external</a>\n"
+      "href=\"http://www.example.com/#%22%3E%3Cscript%3Ealert(0)%3C/"
+      "script%3E\">external</a>\n"
       "</body></html>";
   String actual_html =
       SerializeFile("http://www.test.com", "url_attribute_values.html");

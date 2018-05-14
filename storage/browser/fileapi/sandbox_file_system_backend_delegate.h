@@ -106,12 +106,11 @@ class STORAGE_EXPORT SandboxFileSystemBackendDelegate
       bool create);
 
   // FileSystemBackend helpers.
-  void OpenFileSystem(
-      const GURL& origin_url,
-      FileSystemType type,
-      OpenFileSystemMode mode,
-      const OpenFileSystemCallback& callback,
-      const GURL& root_url);
+  void OpenFileSystem(const GURL& origin_url,
+                      FileSystemType type,
+                      OpenFileSystemMode mode,
+                      OpenFileSystemCallback callback,
+                      const GURL& root_url);
   std::unique_ptr<FileSystemOperationContext> CreateFileSystemOperationContext(
       const FileSystemURL& url,
       FileSystemContext* context,
@@ -232,6 +231,7 @@ class STORAGE_EXPORT SandboxFileSystemBackendDelegate
   ObfuscatedFileUtil* obfuscated_file_util();
 
   scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
+  scoped_refptr<storage::QuotaManagerProxy> quota_manager_proxy_;
 
   std::unique_ptr<AsyncFileUtil> sandbox_file_util_;
   std::unique_ptr<FileSystemUsageCache> file_system_usage_cache_;

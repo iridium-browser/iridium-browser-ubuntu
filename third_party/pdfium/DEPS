@@ -1,32 +1,41 @@
 use_relative_paths = True
 
 vars = {
+  # By default, we should check out everything needed to run on the main
+  # chromium waterfalls. This var can be also be set to "small", in order
+  # to skip things are not strictly needed to build chromium for development
+  # purposes.
+  'checkout_configuration': 'default',
+
+  # TODO(dpranke): change to != "small" once != is supported.
+  'checkout_instrumented_libraries': 'checkout_linux and checkout_configuration == "default"',
+
   'chromium_git': 'https://chromium.googlesource.com',
   'pdfium_git': 'https://pdfium.googlesource.com',
 
-  'android_ndk_revision': '26d93ec07f3ce2ec2cdfeae1b21ee6f12ff868d8',
-  'build_revision': 'f671d3baeb64d9dba628ad582e867cf1aebc0207',
-  'buildtools_revision': 'e6b510a9daf822bbe9f922c200c58150803d2fd8',
-  'catapult_revision': '86352b966b0245d6883e5f7df27687856978b6d7',
-  'clang_revision': 'ae881aab392c247eca831e079d1d45e1c200cce7',
+  'android_ndk_revision': 'e951c37287c7d8cd915bf8d4149fd4a06d808b55',
+  'binutils_revision': 'e146228c20af6af922887d0be2d3641cbffb33c5',
+  'build_revision': '7bee8be1e0ed713aa9ddeb422a459fced9412c9f',
+  'buildtools_revision': 'f115f4786771afdfacb18a2299541b23e21f4792',
+  'catapult_revision': 'd624b3ced2c81d4fb4ea98a8dbb4532272cc1e0a',
+  'clang_revision': '7e6931239f20219e3c993b7f8d864217bdbe925e',
   'cygwin_revision': 'c89e446b273697fadf3a10ff1007a97c0b7de6df',
-  'freetype_revision': '38bdf22bfe68432aebdd33c198a0bd11b4ebb96f',
-  'gen_library_loader_revision': '916d4acd8b2cde67a390737dfba90b3c37de23a1',
+  'depot_tools_revision': '2e8d8348b8574f06c26dbf3ef959b5df11ba5148',
+  'freetype_revision': '713d68ee9f47cc8df56e47fa2f54b191bb8c3186',
   'gmock_revision': '29763965ab52f24565299976b936d1265cb6a271',
   'gtest_revision': '8245545b6dc9c4703e6496d1efd19e975ad2b038',
-  'icu_revision': '73e24736676b4b438270fda44e5b2c83b49fdd80',
-  'instrumented_lib_revision': '45f5814b1543e41ea0be54c771e3840ea52cca4a',
+  'icu_revision': 'e3b480d3be4446ea17011c0cdc9c4cd380a5c58f',
+  'instrumented_lib_revision': '28417458ac4dc79f68915079d0f283f682504cc0',
   'jinja2_revision': 'd34383206fa42d52faa10bb9931d6d538f3a57e0',
   'jpeg_turbo_revision': '7260e4d8b8e1e40b17f03fafdf1cd83296900f76',
   'markupsafe_revision': '8f45f5cfa0009d2a70589bcda0349b8cb2b72783',
-  'pdfium_tests_revision': 'ab561f0075518d699636b884b0db46293cd76261',
-  'skia_revision': 'bb581ce30f55360fd3a12e7f5aa1fe324b16d085',
+  'pdfium_tests_revision': 'adcc738d124799800ab2f3eb7cf0dfbd301cd759',
+  'skia_revision': '40ca2087ef0752d78fd2e0995471102fe96fe9fe',
   'tools_memory_revision': '427f10475e1a8d72424c29d00bf689122b738e5d',
-  'trace_event_revision': '06294c8a4a6f744ef284cd63cfe54dbf61eea290',
-  'v8_revision': '539f7ab310f8865090c494b0251c45e7c52ae5f5',
-  'yasm_binary_revision': '52f9b3f4b0aa06da24ef8b123058bb61ee468881',
-  'yasm_source_revision': '7da28c6c7c6a1387217352ce02b31754deb54d2a',
-  'zlib_revision': 'eed2732a73838fd581cb25819ab1c4f478d6b38f',
+  'trace_event_revision': '0e9a47d74970bee1bbfc063c47215406f8918699',
+  'v8_revision': '6353d168d0010be3933c39f122ecae26e0568e44',
+  'yasm_source_revision': 'b98114e18d8b9b84586b10d24353ab8616d4c5fc',
+  'zlib_revision': '91155b5d0737713fc7f0499cf0ba2c4f2af24014',
 }
 
 deps = {
@@ -49,6 +58,14 @@ deps = {
 
   "testing/gtest":
     Var('chromium_git') + "/external/googletest.git@" + Var('gtest_revision'),
+
+  "third_party/binutils":
+    Var('chromium_git') + "/chromium/src/third_party/binutils.git@" +
+        Var('binutils_revision'),
+
+  'third_party/depot_tools':
+    Var('chromium_git') + '/chromium/tools/depot_tools.git' + '@' +
+        Var('depot_tools_revision'),
 
   "third_party/freetype/src":
     Var('chromium_git') + '/chromium/src/third_party/freetype2.git@' +
@@ -88,10 +105,6 @@ deps = {
   "tools/clang":
     Var('chromium_git') + "/chromium/src/tools/clang@" +  Var('clang_revision'),
 
-  "tools/generate_library_loader":
-    Var('chromium_git') + "/chromium/src/tools/generate_library_loader@" +
-        Var('gen_library_loader_revision'),
-
   # TODO(GYP): Remove this when no tools rely on GYP anymore.
   "tools/gyp":
     Var('chromium_git') + '/external/gyp.git@' +
@@ -115,10 +128,6 @@ deps_os = {
           Var('catapult_revision'),
   },
   "win": {
-    'third_party/yasm/binaries':
-      Var('chromium_git') + '/chromium/deps/yasm/binaries.git' + '@' +
-          Var('yasm_binary_revision'),
-
     "v8/third_party/cygwin":
       Var('chromium_git') + "/chromium/deps/cygwin@" + Var('cygwin_revision'),
   },
@@ -219,19 +228,68 @@ hooks = [
     ],
   },
   {
-    # Downloads the current stable linux sysroot to build/linux/ if needed.
-    # This sysroot updates at about the same rate that the chrome build deps
-    # change.
-    'name': 'sysroot',
+    'name': 'binutils',
+    'pattern': 'src/third_party/binutils',
+    'condition': 'host_os == "linux"',
+    'action': [
+        'python',
+        'pdfium/third_party/binutils/download.py',
+    ],
+  },
+  {
+    'name': 'sysroot_arm',
     'pattern': '.',
+    'condition': 'checkout_linux and checkout_arm',
     'action': ['python', 'pdfium/build/linux/sysroot_scripts/install-sysroot.py',
-               '--running-as-hook'],
+               '--arch=arm'],
+  },
+  {
+    'name': 'sysroot_arm64',
+    'pattern': '.',
+    'condition': 'checkout_linux and checkout_arm64',
+    'action': ['python', 'pdfium/build/linux/sysroot_scripts/install-sysroot.py',
+               '--arch=arm64'],
+  },
+  {
+    'name': 'sysroot_x86',
+    'pattern': '.',
+    'condition': 'checkout_linux and (checkout_x86 or checkout_x64)',
+    'action': ['python', 'pdfium/build/linux/sysroot_scripts/install-sysroot.py',
+               '--arch=x86'],
+  },
+  {
+    'name': 'sysroot_mips',
+    'pattern': '.',
+    'condition': 'checkout_linux and checkout_mips',
+    'action': ['python', 'pdfium/build/linux/sysroot_scripts/install-sysroot.py',
+               '--arch=mips'],
+  },
+  {
+    'name': 'sysroot_x64',
+    'pattern': '.',
+    'condition': 'checkout_linux and checkout_x64',
+    'action': ['python', 'pdfium/build/linux/sysroot_scripts/install-sysroot.py',
+               '--arch=x64'],
+  },
+  {
+    # Case-insensitivity for the Win SDK. Must run before win_toolchain below.
+    'name': 'ciopfs_linux',
+    'pattern': '.',
+    'condition': 'checkout_win and host_os == "linux"',
+    'action': [ 'python',
+                'pdfium/third_party/depot_tools/download_from_google_storage.py',
+                '--no_resume',
+                '--no_auth',
+                '--bucket', 'chromium-browser-clang/ciopfs',
+                '-s', 'pdfium/build/ciopfs.sha1',
+    ]
   },
   {
     # Update the Windows toolchain if necessary.
     'name': 'win_toolchain',
     'pattern': '.',
-    'action': ['python', 'pdfium/build/vs_toolchain.py', 'update'],
+    'condition': 'checkout_win',
+    'action': ['python', 'pdfium/build/vs_toolchain.py', 'update', '--force'],
   },
   {
     # Update the Mac toolchain if necessary.
@@ -240,11 +298,27 @@ hooks = [
     'action': ['python', 'pdfium/build/mac_toolchain.py'],
   },
   {
-    # Pull sanitizer-instrumented third-party libraries if requested via
-    # GYP_DEFINES.
-    'name': 'instrumented_libraries',
-    'pattern': '\\.sha1',
-    'action': ['python', 'pdfium/third_party/instrumented_libraries/scripts/download_binaries.py'],
+    'name': 'msan_chained_origins',
+    'pattern': '.',
+    'condition': 'checkout_instrumented_libraries',
+    'action': [ 'python',
+                'pdfium/third_party/depot_tools/download_from_google_storage.py',
+                "--no_resume",
+                "--no_auth",
+                "--bucket", "chromium-instrumented-libraries",
+                "-s", "pdfium/third_party/instrumented_libraries/binaries/msan-chained-origins-trusty.tgz.sha1",
+              ],
   },
-
+  {
+    'name': 'msan_no_origins',
+    'pattern': '.',
+    'condition': 'checkout_instrumented_libraries',
+    'action': [ 'python',
+                'pdfium/third_party/depot_tools/download_from_google_storage.py',
+                "--no_resume",
+                "--no_auth",
+                "--bucket", "chromium-instrumented-libraries",
+                "-s", "pdfium/third_party/instrumented_libraries/binaries/msan-no-origins-trusty.tgz.sha1",
+              ],
+  },
 ]

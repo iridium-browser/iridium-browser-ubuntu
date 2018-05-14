@@ -51,7 +51,7 @@ struct GlobalMenuBarCommand;
 // interface directly with the lower level libdbusmenu-glib, which we
 // opportunistically dlopen() since not everyone is running Ubuntu.
 class GlobalMenuBarX11 : public AvatarMenuObserver,
-                         public chrome::BrowserListObserver,
+                         public BrowserListObserver,
                          public CommandObserver,
                          public history::TopSitesObserver,
                          public sessions::TabRestoreServiceObserver,
@@ -125,7 +125,7 @@ class GlobalMenuBarX11 : public AvatarMenuObserver,
   // Overridden from AvatarMenuObserver:
   void OnAvatarMenuChanged(AvatarMenu* avatar_menu) override;
 
-  // Overridden from chrome::BrowserListObserver:
+  // Overridden from BrowserListObserver:
   void OnBrowserSetLastActive(Browser* browser) override;
 
   // Overridden from CommandObserver:
@@ -158,7 +158,7 @@ class GlobalMenuBarX11 : public AvatarMenuObserver,
   CHROMEG_CALLBACK_1(GlobalMenuBarX11, void, OnCreateProfileItemActivated,
                      DbusmenuMenuitem*, unsigned int);
 
-  Browser* browser_;
+  Browser* const browser_;
   Profile* profile_;
   BrowserView* browser_view_;
   BrowserDesktopWindowTreeHostX11* host_;

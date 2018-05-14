@@ -5,10 +5,15 @@
 #ifndef InspectorLogAgent_h
 #define InspectorLogAgent_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/frame/PerformanceMonitor.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/protocol/Log.h"
+
+namespace v8_inspector {
+class V8InspectorSession;
+}
 
 namespace blink {
 
@@ -19,12 +24,13 @@ class CORE_EXPORT InspectorLogAgent
     : public InspectorBaseAgent<protocol::Log::Metainfo>,
       public PerformanceMonitor::Client {
   USING_GARBAGE_COLLECTED_MIXIN(InspectorLogAgent);
-  WTF_MAKE_NONCOPYABLE(InspectorLogAgent);
 
  public:
-  InspectorLogAgent(ConsoleMessageStorage*, PerformanceMonitor*);
+  InspectorLogAgent(ConsoleMessageStorage*,
+                    PerformanceMonitor*,
+                    v8_inspector::V8InspectorSession*);
   ~InspectorLogAgent() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   void Restore() override;
 
@@ -51,6 +57,8 @@ class CORE_EXPORT InspectorLogAgent
   bool enabled_;
   Member<ConsoleMessageStorage> storage_;
   Member<PerformanceMonitor> performance_monitor_;
+  v8_inspector::V8InspectorSession* v8_session_;
+  DISALLOW_COPY_AND_ASSIGN(InspectorLogAgent);
 };
 
 }  // namespace blink

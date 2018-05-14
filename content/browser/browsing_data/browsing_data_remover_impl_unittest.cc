@@ -27,7 +27,6 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "build/build_config.h"
 #include "content/browser/browsing_data/browsing_data_remover_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browsing_data_filter_builder.h"
@@ -41,7 +40,9 @@
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_storage_partition.h"
 #include "content/public/test/test_utils.h"
+#include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_store.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_transaction_factory.h"
@@ -118,7 +119,7 @@ struct StoragePartitionRemovalData {
 
 net::CanonicalCookie CreateCookieWithHost(const GURL& source) {
   std::unique_ptr<net::CanonicalCookie> cookie(
-      base::MakeUnique<net::CanonicalCookie>(
+      std::make_unique<net::CanonicalCookie>(
           "A", "1", source.host(), "/", base::Time::Now(), base::Time::Now(),
           base::Time(), false, false, net::CookieSameSite::DEFAULT_MODE,
           net::COOKIE_PRIORITY_MEDIUM));
@@ -126,48 +127,15 @@ net::CanonicalCookie CreateCookieWithHost(const GURL& source) {
   return *cookie;
 }
 
-class TestStoragePartition : public StoragePartition {
+class StoragePartitionRemovalTestStoragePartition
+    : public TestStoragePartition {
  public:
-  TestStoragePartition() {}
-  ~TestStoragePartition() override {}
-
-  // StoragePartition implementation.
-  base::FilePath GetPath() override { return base::FilePath(); }
-  net::URLRequestContextGetter* GetURLRequestContext() override {
-    return nullptr;
-  }
-  net::URLRequestContextGetter* GetMediaURLRequestContext() override {
-    return nullptr;
-  }
-  storage::QuotaManager* GetQuotaManager() override { return nullptr; }
-  AppCacheService* GetAppCacheService() override { return nullptr; }
-  storage::FileSystemContext* GetFileSystemContext() override {
-    return nullptr;
-  }
-  storage::DatabaseTracker* GetDatabaseTracker() override { return nullptr; }
-  DOMStorageContext* GetDOMStorageContext() override { return nullptr; }
-  IndexedDBContext* GetIndexedDBContext() override { return nullptr; }
-  ServiceWorkerContext* GetServiceWorkerContext() override { return nullptr; }
-  CacheStorageContext* GetCacheStorageContext() override { return nullptr; }
-  PlatformNotificationContext* GetPlatformNotificationContext() override {
-    return nullptr;
-  }
-#if !defined(OS_ANDROID)
-  HostZoomMap* GetHostZoomMap() override { return nullptr; }
-  HostZoomLevelContext* GetHostZoomLevelContext() override { return nullptr; }
-  ZoomLevelDelegate* GetZoomLevelDelegate() override { return nullptr; }
-#endif  // !defined(OS_ANDROID)
+  StoragePartitionRemovalTestStoragePartition() {}
+  ~StoragePartitionRemovalTestStoragePartition() override {}
 
   void ClearDataForOrigin(uint32_t remove_mask,
                           uint32_t quota_storage_remove_mask,
-                          const GURL& storage_origin,
-                          net::URLRequestContextGetter* rq_context,
-                          const base::Closure& callback) override {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::BindOnce(&TestStoragePartition::AsyncRunCallback,
-                       base::Unretained(this), callback));
-  }
+                          const GURL& storage_origin) override {}
 
   void ClearData(uint32_t remove_mask,
                  uint32_t quota_storage_remove_mask,
@@ -175,7 +143,7 @@ class TestStoragePartition : public StoragePartition {
                  const OriginMatcherFunction& origin_matcher,
                  const base::Time begin,
                  const base::Time end,
-                 const base::Closure& callback) override {
+                 base::OnceClosure callback) override {
     // Store stuff to verify parameters' correctness later.
     storage_partition_removal_data_.remove_mask = remove_mask;
     storage_partition_removal_data_.quota_storage_remove_mask =
@@ -186,8 +154,9 @@ class TestStoragePartition : public StoragePartition {
 
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::BindOnce(&TestStoragePartition::AsyncRunCallback,
-                       base::Unretained(this), callback));
+        base::BindOnce(
+            &StoragePartitionRemovalTestStoragePartition::AsyncRunCallback,
+            base::Unretained(this), std::move(callback)));
   }
 
   void ClearData(uint32_t remove_mask,
@@ -196,7 +165,7 @@ class TestStoragePartition : public StoragePartition {
                  const CookieMatcherFunction& cookie_matcher,
                  const base::Time begin,
                  const base::Time end,
-                 const base::Closure& callback) override {
+                 base::OnceClosure callback) override {
     // Store stuff to verify parameters' correctness later.
     storage_partition_removal_data_.remove_mask = remove_mask;
     storage_partition_removal_data_.quota_storage_remove_mask =
@@ -208,32 +177,23 @@ class TestStoragePartition : public StoragePartition {
 
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::BindOnce(&TestStoragePartition::AsyncRunCallback,
-                       base::Unretained(this), callback));
+        base::BindOnce(
+            &StoragePartitionRemovalTestStoragePartition::AsyncRunCallback,
+            base::Unretained(this), std::move(callback)));
   }
-
-  void ClearHttpAndMediaCaches(
-      const base::Time begin,
-      const base::Time end,
-      const base::Callback<bool(const GURL&)>& url_matcher,
-      const base::Closure& callback) override {
-    // Not needed in this test.
-  }
-
-  void Flush() override {}
-
-  void ClearBluetoothAllowedDevicesMapForTesting() override {}
 
   StoragePartitionRemovalData GetStoragePartitionRemovalData() {
     return storage_partition_removal_data_;
   }
 
  private:
-  void AsyncRunCallback(const base::Closure& callback) { callback.Run(); }
+  void AsyncRunCallback(base::OnceClosure callback) {
+    std::move(callback).Run();
+  }
 
   StoragePartitionRemovalData storage_partition_removal_data_;
 
-  DISALLOW_COPY_AND_ASSIGN(TestStoragePartition);
+  DISALLOW_COPY_AND_ASSIGN(StoragePartitionRemovalTestStoragePartition);
 };
 
 // Custom matcher to test the equivalence of two URL filters. Since those are
@@ -308,10 +268,10 @@ class RemoveCookieTester {
         new MessageLoopRunner();
     quit_closure_ = message_loop_runner->QuitClosure();
     get_cookie_success_ = false;
-    cookie_store_->GetCookiesWithOptionsAsync(
+    cookie_store_->GetCookieListWithOptionsAsync(
         kOrigin1, net::CookieOptions(),
-        base::Bind(&RemoveCookieTester::GetCookieCallback,
-                   base::Unretained(this)));
+        base::BindOnce(&RemoveCookieTester::GetCookieListCallback,
+                       base::Unretained(this)));
     message_loop_runner->Run();
     return get_cookie_success_;
   }
@@ -322,8 +282,8 @@ class RemoveCookieTester {
     quit_closure_ = message_loop_runner->QuitClosure();
     cookie_store_->SetCookieWithOptionsAsync(
         kOrigin1, "A=1", net::CookieOptions(),
-        base::Bind(&RemoveCookieTester::SetCookieCallback,
-                   base::Unretained(this)));
+        base::BindOnce(&RemoveCookieTester::SetCookieCallback,
+                       base::Unretained(this)));
     message_loop_runner->Run();
   }
 
@@ -333,11 +293,13 @@ class RemoveCookieTester {
   }
 
  private:
-  void GetCookieCallback(const std::string& cookies) {
-    if (cookies == "A=1") {
+  void GetCookieListCallback(const net::CookieList& cookie_list) {
+    std::string cookie_line =
+        net::CanonicalCookie::BuildCookieLine(cookie_list);
+    if (cookie_line == std::string("A=1")) {
       get_cookie_success_ = true;
     } else {
-      EXPECT_EQ("", cookies);
+      EXPECT_EQ("", cookie_line);
       get_cookie_success_ = false;
     }
     quit_closure_.Run();
@@ -380,7 +342,7 @@ class RemoveChannelIDTester : public net::SSLConfigService::Observer {
   void AddChannelIDWithTimes(const std::string& server_identifier,
                              base::Time creation_time) {
     GetChannelIDStore()->SetChannelID(
-        base::MakeUnique<net::ChannelIDStore::ChannelID>(
+        std::make_unique<net::ChannelIDStore::ChannelID>(
             server_identifier, creation_time, crypto::ECPrivateKey::Create()));
   }
 
@@ -532,14 +494,14 @@ class BrowsingDataRemoverImplTest : public testing::Test {
     // destroyed, and that the message loop is cleared out, before destroying
     // the threads and loop. Otherwise we leak memory.
     browser_context_.reset();
-    base::RunLoop().RunUntilIdle();
+    RunAllTasksUntilIdle();
   }
 
   void BlockUntilBrowsingDataRemoved(const base::Time& delete_begin,
                                      const base::Time& delete_end,
                                      int remove_mask,
                                      bool include_protected_origins) {
-    TestStoragePartition storage_partition;
+    StoragePartitionRemovalTestStoragePartition storage_partition;
     remover_->OverrideStoragePartitionForTesting(&storage_partition);
 
     int origin_type_mask = BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB;
@@ -561,7 +523,7 @@ class BrowsingDataRemoverImplTest : public testing::Test {
       const base::Time& delete_end,
       int remove_mask,
       std::unique_ptr<BrowsingDataFilterBuilder> filter_builder) {
-    TestStoragePartition storage_partition;
+    StoragePartitionRemovalTestStoragePartition storage_partition;
     remover_->OverrideStoragePartitionForTesting(&storage_partition);
 
     BrowsingDataRemoverCompletionObserver completion_observer(remover_);
@@ -699,7 +661,7 @@ TEST_F(BrowsingDataRemoverImplTest, ClearHttpAuthCache_RemoveCookies) {
           ->GetURLRequestContext()
           ->http_transaction_factory()
           ->GetSession();
-  DCHECK(http_session);
+  ASSERT_TRUE(http_session);
 
   net::HttpAuthCache* http_auth_cache = http_session->http_auth_cache();
   http_auth_cache->Add(kOrigin1, kTestRealm, net::HttpAuth::AUTH_SCHEME_BASIC,
@@ -707,14 +669,46 @@ TEST_F(BrowsingDataRemoverImplTest, ClearHttpAuthCache_RemoveCookies) {
                        net::AuthCredentials(base::ASCIIToUTF16("foo"),
                                             base::ASCIIToUTF16("bar")),
                        "/");
-  CHECK(http_auth_cache->Lookup(kOrigin1, kTestRealm,
-                                net::HttpAuth::AUTH_SCHEME_BASIC));
+  ASSERT_TRUE(http_auth_cache->Lookup(kOrigin1, kTestRealm,
+                                      net::HttpAuth::AUTH_SCHEME_BASIC));
 
   BlockUntilBrowsingDataRemoved(base::Time(), base::Time::Max(),
                                 BrowsingDataRemover::DATA_TYPE_COOKIES, false);
 
   EXPECT_EQ(nullptr, http_auth_cache->Lookup(kOrigin1, kTestRealm,
                                              net::HttpAuth::AUTH_SCHEME_BASIC));
+}
+
+// Test that removing cookies does not clear HTTP auth data if we're avoiding
+// closing connections.
+TEST_F(BrowsingDataRemoverImplTest,
+       ClearHttpAuthCache_AvoidClosingConnections) {
+  net::HttpNetworkSession* http_session =
+      BrowserContext::GetDefaultStoragePartition(GetBrowserContext())
+          ->GetURLRequestContext()
+          ->GetURLRequestContext()
+          ->http_transaction_factory()
+          ->GetSession();
+  ASSERT_TRUE(http_session);
+
+  net::HttpAuthCache* http_auth_cache = http_session->http_auth_cache();
+  net::HttpAuthCache::Entry* entry = http_auth_cache->Add(
+      kOrigin1, kTestRealm, net::HttpAuth::AUTH_SCHEME_BASIC, "test challenge",
+      net::AuthCredentials(base::ASCIIToUTF16("foo"),
+                           base::ASCIIToUTF16("bar")),
+      "/");
+  ASSERT_TRUE(http_auth_cache->Lookup(kOrigin1, kTestRealm,
+                                      net::HttpAuth::AUTH_SCHEME_BASIC));
+
+  BlockUntilBrowsingDataRemoved(
+      base::Time(), base::Time::Max(),
+      BrowsingDataRemover::DATA_TYPE_COOKIES |
+          BrowsingDataRemover::DATA_TYPE_AVOID_CLOSING_CONNECTIONS,
+      false);
+
+  // The entry stays unchanged.
+  EXPECT_EQ(entry, http_auth_cache->Lookup(kOrigin1, kTestRealm,
+                                           net::HttpAuth::AUTH_SCHEME_BASIC));
 }
 
 TEST_F(BrowsingDataRemoverImplTest, RemoveChannelIDForever) {
@@ -779,6 +773,29 @@ TEST_F(BrowsingDataRemoverImplTest, RemoveChannelIDsForServerIdentifiers) {
   net::ChannelIDStore::ChannelIDList channel_ids;
   tester.GetChannelIDList(&channel_ids);
   EXPECT_EQ(kTestRegisterableDomain3, channel_ids.front().server_identifier());
+}
+
+TEST_F(BrowsingDataRemoverImplTest, RemoveChannelIDsAvoidClosingConnections) {
+  RemoveChannelIDTester tester(GetBrowserContext());
+
+  tester.AddChannelID(kTestOrigin1);
+  EXPECT_EQ(0, tester.ssl_config_changed_count());
+  EXPECT_EQ(1, tester.ChannelIDCount());
+
+  int remove_mask = BrowsingDataRemover::DATA_TYPE_CHANNEL_IDS |
+                    BrowsingDataRemover::DATA_TYPE_AVOID_CLOSING_CONNECTIONS;
+
+  BlockUntilBrowsingDataRemoved(base::Time(), base::Time::Max(), remove_mask,
+                                false);
+
+  EXPECT_EQ(remove_mask, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB,
+            GetOriginTypeMask());
+
+  // No deletion took place because the AVOID_CLOSING_CONNECTIONS flag
+  // was specified.
+  EXPECT_EQ(0, tester.ssl_config_changed_count());
+  EXPECT_EQ(1, tester.ChannelIDCount());
 }
 
 TEST_F(BrowsingDataRemoverImplTest, RemoveUnprotectedLocalStorageForever) {
@@ -1403,7 +1420,7 @@ TEST_F(BrowsingDataRemoverImplTest, CompletionInhibition) {
   // sure we do not complete asynchronously before ContinueToCompletion() is
   // called.
   completion_inhibitor.BlockUntilNearCompletion();
-  base::RunLoop().RunUntilIdle();
+  RunAllTasksUntilIdle();
 
   // Verify that the removal has not yet been completed and the observer has
   // not been called.
@@ -1610,6 +1627,9 @@ TEST_F(BrowsingDataRemoverImplTest, MultipleTasks) {
   }
 
   EXPECT_FALSE(remover->is_removing());
+
+  // Run clean up tasks.
+  RunAllTasksUntilIdle();
 }
 
 // The previous test, BrowsingDataRemoverTest.MultipleTasks, tests that the

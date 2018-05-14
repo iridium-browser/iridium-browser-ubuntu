@@ -38,6 +38,7 @@ class ExtensionAppItem : public ChromeAppListItem,
   static const char kItemType[];
 
   ExtensionAppItem(Profile* profile,
+                   AppListModelUpdater* model_updater,
                    const app_list::AppListSyncableService::SyncItem* sync_item,
                    const std::string& extension_id,
                    const std::string& extension_name,
@@ -73,10 +74,12 @@ class ExtensionAppItem : public ChromeAppListItem,
   void ExtensionEnableFlowFinished() override;
   void ExtensionEnableFlowAborted(bool user_initiated) override;
 
-  // Overridden from AppListItem:
+  // Overridden from ChromeAppListItem:
   void Activate(int event_flags) override;
   ui::MenuModel* GetContextMenuModel() override;
   const char* GetItemType() const override;
+  bool IsBadged() const override;
+  app_list::AppContextMenu* GetAppContextMenu() override;
 
   // Overridden from app_list::AppContextMenuDelegate:
   void ExecuteLaunchCommand(int event_flags) override;

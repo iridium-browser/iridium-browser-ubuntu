@@ -4,10 +4,14 @@
 
 #include "chrome/browser/notifications/notification_permission_context.h"
 
+#include <memory>
+#include <string>
+
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/test/scoped_mock_time_message_loop_task_runner.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/permissions/permission_manager.h"
@@ -18,6 +22,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/permission_manager.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -25,15 +30,22 @@
 #include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 #include "url/gurl.h"
 
+#if defined(OS_ANDROID)
+#include "base/android/build_info.h"
+#endif  // defined(OS_ANDROID)
+
 namespace {
 
-void DoNothing(ContentSetting content_setting) {}
+void StoreContentSetting(ContentSetting* out_content_setting,
+                         ContentSetting content_setting) {
+  DCHECK(out_content_setting);
+  *out_content_setting = content_setting;
+}
 
 class TestNotificationPermissionContext : public NotificationPermissionContext {
  public:
   explicit TestNotificationPermissionContext(Profile* profile)
-      : NotificationPermissionContext(profile,
-                                      CONTENT_SETTINGS_TYPE_NOTIFICATIONS),
+      : NotificationPermissionContext(profile),
         permission_set_count_(0),
         last_permission_set_persisted_(false),
         last_permission_set_setting_(CONTENT_SETTING_DEFAULT) {}
@@ -88,7 +100,7 @@ class NotificationPermissionContextTest
   base::TestMockTimeTaskRunner* SwitchToMockTime() {
     EXPECT_FALSE(mock_time_task_runner_);
     mock_time_task_runner_ =
-        base::MakeUnique<base::ScopedMockTimeMessageLoopTaskRunner>();
+        std::make_unique<base::ScopedMockTimeMessageLoopTaskRunner>();
     return mock_time_task_runner_->task_runner();
   }
 
@@ -104,55 +116,21 @@ class NotificationPermissionContextTest
       mock_time_task_runner_;
 };
 
-// Web Notification permission requests will completely ignore the embedder
-// origin. See https://crbug.com/416894.
-TEST_F(NotificationPermissionContextTest, IgnoresEmbedderOrigin) {
-  GURL requesting_origin("https://example.com");
-  GURL embedding_origin("https://chrome.com");
-  GURL different_origin("https://foobar.com");
-
-  NotificationPermissionContext context(profile(),
-                                        CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
-  UpdateContentSetting(&context, requesting_origin, embedding_origin,
-                       CONTENT_SETTING_ALLOW);
-
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            context
-                .GetPermissionStatus(nullptr /* render_frame_host */,
-                                     requesting_origin, embedding_origin)
-                .content_setting);
-
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            context
-                .GetPermissionStatus(nullptr /* render_frame_host */,
-                                     requesting_origin, different_origin)
-                .content_setting);
-
-  context.ResetPermission(requesting_origin, embedding_origin);
-
-  EXPECT_EQ(CONTENT_SETTING_ASK,
-            context
-                .GetPermissionStatus(nullptr /* render_frame_host */,
-                                     requesting_origin, embedding_origin)
-                .content_setting);
-
-  EXPECT_EQ(CONTENT_SETTING_ASK,
-            context
-                .GetPermissionStatus(nullptr /* render_frame_host */,
-                                     requesting_origin, different_origin)
-                .content_setting);
-}
-
-// Push messaging permission requests should only succeed for top level origins
-// (embedding origin == requesting origin).
-TEST_F(NotificationPermissionContextTest, PushTopLevelOriginOnly) {
+// Web Notification permission checks will never return ASK for cross-origin
+// requests, as permission cannot be requested in that situation.
+TEST_F(NotificationPermissionContextTest, CrossOriginPermissionChecks) {
   GURL requesting_origin("https://example.com");
   GURL embedding_origin("https://chrome.com");
 
-  NotificationPermissionContext context(profile(),
-                                        CONTENT_SETTINGS_TYPE_PUSH_MESSAGING);
-  UpdateContentSetting(&context, requesting_origin, embedding_origin,
-                       CONTENT_SETTING_ALLOW);
+  NotificationPermissionContext context(profile());
+
+  // Both same-origin and cross-origin requests for |requesting_origin| should
+  // have their default values.
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, requesting_origin)
+                .content_setting);
 
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             context
@@ -160,82 +138,143 @@ TEST_F(NotificationPermissionContextTest, PushTopLevelOriginOnly) {
                                      requesting_origin, embedding_origin)
                 .content_setting);
 
+  // Now grant permission for the |requesting_origin|. This should be granted
+  // in both contexts.
+  UpdateContentSetting(&context, requesting_origin, requesting_origin,
+                       CONTENT_SETTING_ALLOW);
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, requesting_origin)
+                .content_setting);
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, embedding_origin)
+                .content_setting);
+
+// Now block permission for |requesting_origin|.
+
+#if defined(OS_ANDROID)
+  // On Android O+, permission must be reset before it can be blocked. This is
+  // because granting a permission on O+ creates a system-managed notification
+  // channel which determines the value of the content setting, so it is not
+  // allowed to then toggle the value from ALLOW->BLOCK directly. However,
+  // Chrome may reset the permission (which deletes the channel), and *then*
+  // grant/block it (creating a new channel).
+  if (base::android::BuildInfo::GetInstance()->sdk_int() >=
+      base::android::SDK_VERSION_OREO) {
+    context.ResetPermission(requesting_origin, requesting_origin);
+  }
+#endif  // defined(OS_ANDROID)
+
+  UpdateContentSetting(&context, requesting_origin, requesting_origin,
+                       CONTENT_SETTING_BLOCK);
+
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, requesting_origin)
+                .content_setting);
+
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, embedding_origin)
+                .content_setting);
+
+  // Resetting the permission should demonstrate the default behaviour again.
+  context.ResetPermission(requesting_origin, requesting_origin);
+
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, requesting_origin)
+                .content_setting);
+
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, embedding_origin)
+                .content_setting);
+}
+
+// Web Notifications permission requests should only succeed for top level
+// origins (embedding origin == requesting origin). Retrieving previously
+// granted permissions should continue to be possible regardless of being top
+// level.
+TEST_F(NotificationPermissionContextTest, WebNotificationsTopLevelOriginOnly) {
+  GURL requesting_origin("https://example.com");
+  GURL embedding_origin("https://chrome.com");
+
+  NotificationPermissionContext context(profile());
+
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, requesting_origin)
+                .content_setting);
+
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, embedding_origin)
+                .content_setting);
+
+  // Requesting permission for different origins should fail.
+  PermissionRequestID fake_id(0 /* render_process_id */,
+                              0 /* render_frame_id */, 0 /* request_id */);
+
+  ContentSetting result = CONTENT_SETTING_DEFAULT;
+  context.DecidePermission(web_contents(), fake_id, requesting_origin,
+                           embedding_origin, true /* user_gesture */,
+                           base::Bind(&StoreContentSetting, &result));
+
+  ASSERT_EQ(result, CONTENT_SETTING_BLOCK);
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, requesting_origin)
+                .content_setting);
+
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, embedding_origin)
+                .content_setting);
+
+  // Reading previously set permissions should continue to work.
+  UpdateContentSetting(&context, requesting_origin, embedding_origin,
+                       CONTENT_SETTING_ALLOW);
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            context
+                .GetPermissionStatus(nullptr /* render_frame_host */,
+                                     requesting_origin, embedding_origin)
+                .content_setting);
+
   context.ResetPermission(requesting_origin, embedding_origin);
-
-  UpdateContentSetting(&context, embedding_origin, embedding_origin,
-                       CONTENT_SETTING_ALLOW);
-
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            context
-                .GetPermissionStatus(nullptr /* render_frame_host */,
-                                     embedding_origin, embedding_origin)
-                .content_setting);
-
-  context.ResetPermission(embedding_origin, embedding_origin);
-
-  EXPECT_EQ(CONTENT_SETTING_ASK,
-            context
-                .GetPermissionStatus(nullptr /* render_frame_host */,
-                                     embedding_origin, embedding_origin)
-                .content_setting);
 }
 
-// Web Notifications do not require a secure origin when requesting permission.
-// See https://crbug.com/404095.
-TEST_F(NotificationPermissionContextTest, NoSecureOriginRequirement) {
-  GURL origin("http://example.com");
+// Web Notifications require secure origins.
+TEST_F(NotificationPermissionContextTest, SecureOriginRequirement) {
+  GURL insecure_origin("http://example.com");
+  GURL secure_origin("https://chrome.com");
 
-  NotificationPermissionContext context(profile(),
-                                        CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
-  EXPECT_EQ(
-      CONTENT_SETTING_ASK,
-      context
-          .GetPermissionStatus(nullptr /* render_frame_host */, origin, origin)
-          .content_setting);
+  NotificationPermissionContext web_notification_context(profile());
 
-  UpdateContentSetting(&context, origin, origin, CONTENT_SETTING_ALLOW);
-
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
-      context
-          .GetPermissionStatus(nullptr /* render_frame_host */, origin, origin)
-          .content_setting);
-}
-
-// Push notifications requires a secure origin to acquire permission.
-TEST_F(NotificationPermissionContextTest, PushSecureOriginRequirement) {
-  GURL origin("http://example.com");
-  GURL secure_origin("https://example.com");
-
-  NotificationPermissionContext context(
-      profile(), CONTENT_SETTINGS_TYPE_PUSH_MESSAGING);
-  EXPECT_EQ(
-      CONTENT_SETTING_BLOCK,
-      context
-          .GetPermissionStatus(nullptr /* render_frame_host */, origin, origin)
-          .content_setting);
-
-  UpdateContentSetting(&context, origin, origin, CONTENT_SETTING_ALLOW);
-
-  EXPECT_EQ(
-      CONTENT_SETTING_BLOCK,
-      context
-          .GetPermissionStatus(nullptr /* render_frame_host */, origin, origin)
-          .content_setting);
-
-  EXPECT_EQ(CONTENT_SETTING_ASK,
-            context
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            web_notification_context
                 .GetPermissionStatus(nullptr /* render_frame_host */,
-                                     secure_origin, secure_origin)
+                                     insecure_origin, insecure_origin)
                 .content_setting);
 
-  UpdateContentSetting(&context, secure_origin, secure_origin,
-                       CONTENT_SETTING_ALLOW);
-
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            context
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            web_notification_context
                 .GetPermissionStatus(nullptr /* render_frame_host */,
-                                     secure_origin, secure_origin)
+                                     insecure_origin, secure_origin)
                 .content_setting);
 }
 
@@ -246,9 +285,9 @@ TEST_F(NotificationPermissionContextTest, TestDenyInIncognitoAfterDelay) {
   GURL url("https://www.example.com");
   NavigateAndCommit(url);
 
-  const PermissionRequestID id(web_contents()->GetRenderProcessHost()->GetID(),
-                               web_contents()->GetMainFrame()->GetRoutingID(),
-                               -1);
+  const PermissionRequestID id(
+      web_contents()->GetMainFrame()->GetProcess()->GetID(),
+      web_contents()->GetMainFrame()->GetRoutingID(), -1);
 
   base::TestMockTimeTaskRunner* task_runner = SwitchToMockTime();
 
@@ -258,7 +297,7 @@ TEST_F(NotificationPermissionContextTest, TestDenyInIncognitoAfterDelay) {
             permission_context.last_permission_set_setting());
 
   permission_context.RequestPermission(
-      web_contents(), id, url, true /* user_gesture */, base::Bind(&DoNothing));
+      web_contents(), id, url, true /* user_gesture */, base::DoNothing());
 
   // Should be blocked after 1-2 seconds, but the timer is reset whenever the
   // tab is not visible, so these 500ms never add up to >= 1 second.
@@ -305,39 +344,6 @@ TEST_F(NotificationPermissionContextTest, TestDenyInIncognitoAfterDelay) {
             permission_context.GetContentSettingFromMap(url, url));
 }
 
-// Tests that navigating cancels incognito permission requests without crashing.
-TEST_F(NotificationPermissionContextTest, TestCancelledIncognitoRequest) {
-  TestNotificationPermissionContext permission_context(
-      profile()->GetOffTheRecordProfile());
-  GURL url("https://www.example.com");
-  NavigateAndCommit(url);
-
-  const PermissionRequestID id(web_contents()->GetRenderProcessHost()->GetID(),
-                               web_contents()->GetMainFrame()->GetRoutingID(),
-                               -1);
-
-  base::TestMockTimeTaskRunner* task_runner = SwitchToMockTime();
-
-  PermissionManager* permission_manager =
-      PermissionManagerFactory::GetForProfile(
-          profile()->GetOffTheRecordProfile());
-
-  // Request and cancel the permission via PermissionManager. That way if
-  // https://crbug.com/586944 regresses, then as well as the EXPECT_EQs below
-  // failing, PermissionManager::OnPermissionsRequestResponseStatus will crash.
-  int request_id = permission_manager->RequestPermission(
-      CONTENT_SETTINGS_TYPE_NOTIFICATIONS, web_contents()->GetMainFrame(),
-      url.GetOrigin(), true /* user_gesture */, base::Bind(&DoNothing));
-
-  permission_manager->CancelPermissionRequest(request_id);
-
-  task_runner->FastForwardBy(base::TimeDelta::FromDays(1));
-
-  EXPECT_EQ(0, permission_context.permission_set_count());
-  EXPECT_EQ(CONTENT_SETTING_ASK,
-            permission_context.GetContentSettingFromMap(url, url));
-}
-
 // Tests how multiple parallel permission requests get auto-denied in incognito.
 TEST_F(NotificationPermissionContextTest, TestParallelDenyInIncognito) {
   TestNotificationPermissionContext permission_context(
@@ -346,12 +352,12 @@ TEST_F(NotificationPermissionContextTest, TestParallelDenyInIncognito) {
   NavigateAndCommit(url);
   web_contents()->WasShown();
 
-  const PermissionRequestID id0(web_contents()->GetRenderProcessHost()->GetID(),
-                                web_contents()->GetMainFrame()->GetRoutingID(),
-                                0);
-  const PermissionRequestID id1(web_contents()->GetRenderProcessHost()->GetID(),
-                                web_contents()->GetMainFrame()->GetRoutingID(),
-                                1);
+  const PermissionRequestID id0(
+      web_contents()->GetMainFrame()->GetProcess()->GetID(),
+      web_contents()->GetMainFrame()->GetRoutingID(), 0);
+  const PermissionRequestID id1(
+      web_contents()->GetMainFrame()->GetProcess()->GetID(),
+      web_contents()->GetMainFrame()->GetRoutingID(), 1);
 
   base::TestMockTimeTaskRunner* task_runner = SwitchToMockTime();
 
@@ -360,12 +366,10 @@ TEST_F(NotificationPermissionContextTest, TestParallelDenyInIncognito) {
   ASSERT_EQ(CONTENT_SETTING_DEFAULT,
             permission_context.last_permission_set_setting());
 
-  permission_context.RequestPermission(web_contents(), id0, url,
-                                       true /* user_gesture */,
-                                       base::Bind(&DoNothing));
-  permission_context.RequestPermission(web_contents(), id1, url,
-                                       true /* user_gesture */,
-                                       base::Bind(&DoNothing));
+  permission_context.RequestPermission(
+      web_contents(), id0, url, true /* user_gesture */, base::DoNothing());
+  permission_context.RequestPermission(
+      web_contents(), id1, url, true /* user_gesture */, base::DoNothing());
 
   EXPECT_EQ(0, permission_context.permission_set_count());
   EXPECT_EQ(CONTENT_SETTING_ASK,

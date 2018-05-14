@@ -2,16 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/chromeos/touch_exploration_controller.h"
+#include "ash/accessibility/touch_exploration_controller.h"
 
-#include "ash/accessibility_delegate.h"
-#include "ash/accessibility_types.h"
+#include "ash/accessibility/accessibility_delegate.h"
+#include "ash/public/cpp/accessibility_types.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/macros.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -56,10 +57,8 @@ class TouchExplorationTest : public InProcessBrowserTest {
   }
 
   void SwitchTouchExplorationMode(bool on) {
-    ash::AccessibilityDelegate* delegate =
-        ash::Shell::Get()->accessibility_delegate();
-    if (on != delegate->IsSpokenFeedbackEnabled())
-      delegate->ToggleSpokenFeedback(ash::A11Y_NOTIFICATION_NONE);
+    chromeos::AccessibilityManager::Get()->EnableSpokenFeedback(
+        on, ash::A11Y_NOTIFICATION_NONE);
   }
 
   base::TimeTicks Now() { return simulated_clock_->NowTicks(); }

@@ -6,6 +6,7 @@
 #define COMPONENTS_SUBRESOURCE_FILTER_CORE_BROWSER_SUBRESOURCE_FILTER_FEATURES_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/feature_list.h"
@@ -62,6 +63,11 @@ struct Configuration {
     // otherwise satisfied. A greater value indicates higher priority.
     int priority = 0;
 
+    // This boolean is set to true for a navigation which has forced activation,
+    // despite other conditions not matching. It should never be possible to set
+    // this via variation params.
+    bool forced_activation = false;
+
     std::unique_ptr<base::trace_event::TracedValue> ToTracedValue() const;
   };
 
@@ -85,13 +91,6 @@ struct Configuration {
     // Whether to whitelist a site when a page loaded from that site is
     // reloaded.
     bool should_whitelist_site_on_reload = false;
-
-    // Whether to apply a more powerful popup blocker on pages with activation.
-    bool should_strengthen_popup_blocker = false;
-
-    // Whether to disable rules from the ruleset. In practice this might be used
-    // if e.g. only popup blocking behavior is desired.
-    bool should_disable_ruleset_rules = false;
   };
 
   // General settings that apply outside of the scope of a navigation.
@@ -128,11 +127,18 @@ struct Configuration {
   //  4.) Update unittests to cover the new preset.
   static Configuration MakePresetForLiveRunOnPhishingSites();
   static Configuration MakePresetForPerformanceTestingDryRunOnAllSites();
+  static Configuration MakePresetForLiveRunForBetterAds();
+
+  // Not really a preset, but used as the configuration for forcing activation
+  // (e.g. via devtools).
+  static Configuration MakeForForcedActivation();
 
   ActivationConditions activation_conditions;
   ActivationOptions activation_options;
   GeneralSettings general_settings;
 };
+
+std::ostream& operator<<(std::ostream& os, const Configuration& config);
 
 // Thread-safe, ref-counted wrapper around an immutable list of configurations.
 class ConfigurationList : public base::RefCountedThreadSafe<ConfigurationList> {
@@ -169,6 +175,8 @@ class ConfigurationList : public base::RefCountedThreadSafe<ConfigurationList> {
 // callers should not hold on to the result for long.
 scoped_refptr<ConfigurationList> GetEnabledConfigurations();
 
+bool HasEnabledConfiguration(const Configuration& config);
+
 namespace testing {
 
 // Returns the currently cached enabled ConfigurationList, if any, and replaces
@@ -186,6 +194,10 @@ extern const base::Feature kSafeBrowsingSubresourceFilter;
 // Enables the new experimental UI for the Subresource Filter.
 extern const base::Feature kSafeBrowsingSubresourceFilterExperimentalUI;
 
+// Enables the tagging of ad frames and resource requests by using the
+// subresource_filter component in dry-run mode.
+extern const base::Feature kAdTagging;
+
 // Name/values of the variation parameter controlling maximum activation level.
 extern const char kActivationLevelParameterName[];
 extern const char kActivationLevelDryRun[];
@@ -201,6 +213,7 @@ extern const char kActivationListsParameterName[];
 extern const char kActivationListSocialEngineeringAdsInterstitial[];
 extern const char kActivationListPhishingInterstitial[];
 extern const char kActivationListSubresourceFilter[];
+extern const char kActivationListBetterAds[];
 
 extern const char kActivationPriorityParameterName[];
 
@@ -210,16 +223,13 @@ extern const char kSuppressNotificationsParameterName[];
 
 extern const char kWhitelistSiteOnReloadParameterName[];
 
-extern const char kStrengthenPopupBlockerParameterName[];
-
-extern const char kDisableRulesetRules[];
-
 extern const char kRulesetFlavorParameterName[];
 
 extern const char kEnablePresetsParameterName[];
 extern const char kDisablePresetsParameterName[];
 extern const char kPresetLiveRunOnPhishingSites[];
 extern const char kPresetPerformanceTestingDryRunOnAllSites[];
+extern const char kPresetLiveRunForBetterAds[];
 
 }  // namespace subresource_filter
 

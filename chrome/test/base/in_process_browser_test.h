@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
+#include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "content/public/browser/web_contents.h"
@@ -55,8 +56,8 @@ class ScopedBundleSwizzlerMac;
 //   state changes you'll need to run the message loop from your test method.
 //   For example, if you need to wait till a find bar has completely been shown
 //   you'll need to invoke content::RunMessageLoop(). When the message bar is
-//   shown, invoke MessageLoop::current()->QuitWhenIdle() to return control back
-//   to your test method.
+//   shown, invoke RunLoop::QuitCurrentWhenIdleDeprecated() to return control
+//   back to your test method.
 // . If you subclass and override SetUp(), be sure and invoke
 //   InProcessBrowserTest::SetUp(). (But see also BrowserTestBase's
 //   SetUpOnMainThread(), SetUpInProcessBrowserTestFixture(), and other related
@@ -187,8 +188,9 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // finish loading and shows the browser.
   Browser* CreateBrowser(Profile* profile);
 
-  // Similar to |CreateBrowser|, but creates an incognito browser.
-  Browser* CreateIncognitoBrowser();
+  // Similar to |CreateBrowser|, but creates an incognito browser. If |profile|
+  // is omitted, the currently active profile will be used.
+  Browser* CreateIncognitoBrowser(Profile* profile = nullptr);
 
   // Creates a browser for a popup window with a single tab (about:blank), waits
   // for the tab to finish loading, and shows the browser.
@@ -201,13 +203,6 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // Called from the various CreateBrowser methods to add a blank tab, wait for
   // the navigation to complete, and show the browser's window.
   void AddBlankTabAndShow(Browser* browser);
-
-  // Enables running of accessibility audit for a particular test case.
-  //  - Call in test body to enable/disable for one test case.
-  //  - Call in SetUpOnMainThread() to enable for all test cases.
-  void EnableAccessibilityChecksForTestCase(bool enabled) {
-    run_accessibility_checks_for_test_case_ = enabled;
-  }
 
 #if !defined OS_MACOSX
   // Return a CommandLine object that is used to relaunch the browser_test
@@ -234,9 +229,6 @@ class InProcessBrowserTest : public content::BrowserTestBase {
     open_about_blank_on_browser_launch_ = value;
   }
 
-  // Runs accessibility checks and sets |error_message| if it fails.
-  bool RunAccessibilityChecks(std::string* error_message);
-
  private:
   // Creates a user data directory for the test if one is needed. Returns true
   // if successful.
@@ -259,10 +251,6 @@ class InProcessBrowserTest : public content::BrowserTestBase {
 
   // True if the about:blank tab should be opened when the browser is launched.
   bool open_about_blank_on_browser_launch_;
-
-  // True if the accessibility test should run for a particular test case.
-  // This is reset for every test case.
-  bool run_accessibility_checks_for_test_case_;
 
   // We use hardcoded quota settings to have a consistent testing environment.
   storage::QuotaSettings quota_settings_;

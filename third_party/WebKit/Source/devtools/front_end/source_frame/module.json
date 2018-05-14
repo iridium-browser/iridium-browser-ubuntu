@@ -46,7 +46,6 @@
         "ImageView.js",
         "SourceFrame.js",
         "ResourceSourceFrame.js",
-        "UISourceCodeFrame.js",
         "JSONView.js",
         "XMLView.js",
         "PreviewFactory.js",
@@ -55,8 +54,10 @@
     "resources": [
         "fontView.css",
         "imageView.css",
+        "jsonView.css",
         "messagesPopover.css",
         "xmlTree.css",
-        "xmlView.css"
+        "xmlView.css",
+        "resourceSourceFrame.css"
     ]
 }

@@ -6,32 +6,20 @@
 #define CHROME_BROWSER_UI_APP_LIST_SEARCH_SEARCH_RESOURCE_MANAGER_H_
 
 #include "base/macros.h"
-#include "ui/app_list/speech_ui_model_observer.h"
 
+class AppListModelUpdater;
 class Profile;
 
 namespace app_list {
 
-class SearchBoxModel;
-class SpeechUIModel;
-
 // Manages the strings and assets of the app-list search box.
-class SearchResourceManager : public SpeechUIModelObserver {
+class SearchResourceManager {
  public:
-  SearchResourceManager(Profile* profile,
-                        SearchBoxModel* search_box,
-                        SpeechUIModel* speech_ui);
-  ~SearchResourceManager() override;
+  SearchResourceManager(Profile* profile, AppListModelUpdater* model_updater);
+  ~SearchResourceManager();
 
  private:
-  // SpeechUIModelObserver overrides:
-  void OnSpeechRecognitionStateChanged(
-      SpeechRecognitionState new_state) override;
-
-  SearchBoxModel* search_box_;
-  SpeechUIModel* speech_ui_;
-
-  const bool is_fullscreen_app_list_enabled_;
+  AppListModelUpdater* model_updater_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchResourceManager);
 };

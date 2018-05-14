@@ -60,8 +60,7 @@ public abstract class StatusItem extends OptionalLeaf implements StatusCardViewH
 
     @Override
     protected void onBindViewHolder(NewTabPageViewHolder holder) {
-        assert holder instanceof StatusCardViewHolder;
-        ((StatusCardViewHolder) holder).onBindViewHolder(this);
+        ((StatusCardViewHolder) holder).onBindViewHolder(this, null);
     }
 
     public void setVisible(boolean visible) {

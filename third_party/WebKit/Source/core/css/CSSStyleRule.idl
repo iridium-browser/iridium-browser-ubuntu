@@ -18,11 +18,12 @@
  * Boston, MA 02110-1301, USA.
  */
 
-// https://dev.w3.org/csswg/cssom/#the-cssstylerule-interface
+// https://drafts.csswg.org/cssom/#the-cssstylerule-interface
 
 [
-    DependentLifetime
+    Exposed=Window
 ] interface CSSStyleRule : CSSRule {
-    attribute DOMString selectorText;
+    [SetterCallWith=ExecutionContext] attribute DOMString selectorText;
     [SameObject, PutForwards=cssText] readonly attribute CSSStyleDeclaration style;
+    [SameObject, RuntimeEnabled=CSSTypedOM, MeasureAs=CSSTypedOMStylePropertyMap] readonly attribute StylePropertyMap styleMap;
 };

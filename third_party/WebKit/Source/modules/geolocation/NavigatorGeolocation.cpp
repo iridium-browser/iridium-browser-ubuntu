@@ -33,16 +33,15 @@ namespace blink {
 NavigatorGeolocation::NavigatorGeolocation(Navigator& navigator)
     : Supplement<Navigator>(navigator) {}
 
-const char* NavigatorGeolocation::SupplementName() {
-  return "NavigatorGeolocation";
-}
+// static
+const char NavigatorGeolocation::kSupplementName[] = "NavigatorGeolocation";
 
 NavigatorGeolocation& NavigatorGeolocation::From(Navigator& navigator) {
-  NavigatorGeolocation* supplement = static_cast<NavigatorGeolocation*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  NavigatorGeolocation* supplement =
+      Supplement<Navigator>::From<NavigatorGeolocation>(navigator);
   if (!supplement) {
     supplement = new NavigatorGeolocation(navigator);
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
 }
@@ -58,9 +57,15 @@ Geolocation* NavigatorGeolocation::geolocation() {
   return geolocation_;
 }
 
-DEFINE_TRACE(NavigatorGeolocation) {
+void NavigatorGeolocation::Trace(blink::Visitor* visitor) {
   visitor->Trace(geolocation_);
   Supplement<Navigator>::Trace(visitor);
+}
+
+void NavigatorGeolocation::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
+  visitor->TraceWrappers(geolocation_);
+  Supplement<Navigator>::TraceWrappers(visitor);
 }
 
 }  // namespace blink

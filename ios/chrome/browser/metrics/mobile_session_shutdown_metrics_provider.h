@@ -33,13 +33,13 @@ class MobileSessionShutdownMetricsProvider : public metrics::MetricsProvider {
   ~MobileSessionShutdownMetricsProvider() override;
 
   // metrics::MetricsProvider
-  bool HasInitialStabilityMetrics() override;
-  void ProvideInitialStabilityMetrics(
-      metrics::SystemProfileProto* system_profile_proto) override;
+  bool HasPreviousSessionData() override;
+  void ProvidePreviousSessionData(
+      metrics::ChromeUserMetricsExtension* uma_proto) override;
 
  protected:
   // Provides information on the last session environment, used to decide what
-  // stability metrics to provide in ProvideInitialStabilityMetrics.
+  // stability metrics to provide in ProvidePreviousSessionData.
   // These methods are virtual to be overridden in the tests.
   // The default implementations return the real values.
 
@@ -51,6 +51,8 @@ class MobileSessionShutdownMetricsProvider : public metrics::MetricsProvider {
 
   // Whether there were crash reports that have been uploaded in background
   // since the last full start.
+  // TODO(crbug.com/795802): This method should be removed now that
+  // Crash Reports are no longer being uploaded in the background.
   virtual bool HasUploadedCrashReportsInBackground();
 
   // Whether there was a memory warning shortly before last shutdown.

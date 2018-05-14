@@ -16,16 +16,16 @@
 
 #include <memory>
 
-#include "webrtc/rtc_base/arraysize.h"
-#include "webrtc/rtc_base/fakeclock.h"
-#include "webrtc/rtc_base/gunit.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/ptr_util.h"
-#include "webrtc/rtc_base/testclient.h"
-#include "webrtc/rtc_base/testutils.h"
-#include "webrtc/rtc_base/thread.h"
-#include "webrtc/rtc_base/timeutils.h"
-#include "webrtc/rtc_base/virtualsocketserver.h"
+#include "rtc_base/arraysize.h"
+#include "rtc_base/fakeclock.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/ptr_util.h"
+#include "rtc_base/testclient.h"
+#include "rtc_base/testutils.h"
+#include "rtc_base/thread.h"
+#include "rtc_base/timeutils.h"
+#include "rtc_base/virtualsocketserver.h"
 
 using namespace rtc;
 
@@ -53,7 +53,7 @@ struct Sender : public MessageHandler {
     return 1000 * size / rate;
   }
 
-  void OnMessage(Message* pmsg) {
+  void OnMessage(Message* pmsg) override {
     ASSERT_EQ(1u, pmsg->message_id);
 
     if (done)
@@ -98,9 +98,7 @@ struct Receiver : public MessageHandler, public sigslot::has_slots<> {
     thread->PostDelayed(RTC_FROM_HERE, 1000, this, 1);
   }
 
-  ~Receiver() {
-    thread->Clear(this);
-  }
+  ~Receiver() override { thread->Clear(this); }
 
   void OnReadPacket(AsyncPacketSocket* s, const char* data, size_t size,
                     const SocketAddress& remote_addr,
@@ -119,7 +117,7 @@ struct Receiver : public MessageHandler, public sigslot::has_slots<> {
     samples += 1;
   }
 
-  void OnMessage(Message* pmsg) {
+  void OnMessage(Message* pmsg) override {
     ASSERT_EQ(1u, pmsg->message_id);
 
     if (done)
@@ -709,7 +707,7 @@ class VirtualSocketServerTest : public testing::Test {
   // address.
   void DelayTest(const SocketAddress& initial_addr) {
     time_t seed = ::time(nullptr);
-    LOG(LS_VERBOSE) << "seed = " << seed;
+    RTC_LOG(LS_VERBOSE) << "seed = " << seed;
     srand(static_cast<unsigned int>(seed));
 
     const uint32_t mean = 2000;
@@ -746,7 +744,8 @@ class VirtualSocketServerTest : public testing::Test {
         receiver.samples * receiver.sum_sq - receiver.sum * receiver.sum;
     double den = receiver.samples * (receiver.samples - 1);
     const double sample_stddev = sqrt(num / den);
-    LOG(LS_VERBOSE) << "mean=" << sample_mean << " stddev=" << sample_stddev;
+    RTC_LOG(LS_VERBOSE) << "mean=" << sample_mean
+                        << " stddev=" << sample_stddev;
 
     EXPECT_LE(500u, receiver.samples);
     // We initially used a 0.1 fudge factor, but on the build machine, we

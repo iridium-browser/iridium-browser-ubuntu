@@ -18,7 +18,7 @@
 #include "content/shell/browser/layout_test/layout_test_browser_main_parts.h"
 #include "content/shell/browser/layout_test/layout_test_message_filter.h"
 #include "content/shell/browser/layout_test/layout_test_notification_manager.h"
-#include "content/shell/browser/layout_test/layout_test_resource_dispatcher_host_delegate.h"
+#include "content/shell/browser/layout_test/mojo_layout_test_helper.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/common/layout_test/layout_test_switches.h"
 #include "content/shell/common/shell_messages.h"
@@ -30,6 +30,11 @@ namespace content {
 namespace {
 
 LayoutTestContentBrowserClient* g_layout_test_browser_client;
+
+void BindLayoutTestHelper(mojom::MojoLayoutTestHelperRequest request,
+                          RenderFrameHost* render_frame_host) {
+  MojoLayoutTestHelper::Create(std::move(request));
+}
 
 }  // namespace
 
@@ -65,8 +70,9 @@ LayoutTestContentBrowserClient::GetLayoutTestNotificationManager() {
 }
 
 void LayoutTestContentBrowserClient::RenderProcessWillLaunch(
-    RenderProcessHost* host) {
-  ShellContentBrowserClient::RenderProcessWillLaunch(host);
+    RenderProcessHost* host,
+    service_manager::mojom::ServiceRequest* service_request) {
+  ShellContentBrowserClient::RenderProcessWillLaunch(host, service_request);
 
   StoragePartition* partition =
       BrowserContext::GetDefaultStoragePartition(browser_context());
@@ -81,7 +87,7 @@ void LayoutTestContentBrowserClient::RenderProcessWillLaunch(
 
 void LayoutTestContentBrowserClient::ExposeInterfacesToRenderer(
     service_manager::BinderRegistry* registry,
-    AssociatedInterfaceRegistry* associated_registry,
+    blink::AssociatedInterfaceRegistry* associated_registry,
     RenderProcessHost* render_process_host) {
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner =
       content::BrowserThread::GetTaskRunnerForThread(
@@ -92,19 +98,14 @@ void LayoutTestContentBrowserClient::ExposeInterfacesToRenderer(
 
   registry->AddInterface(base::Bind(&bluetooth::FakeBluetooth::Create),
                          ui_task_runner);
+  registry->AddInterface(base::Bind(&MojoLayoutTestHelper::Create));
 }
 
 void LayoutTestContentBrowserClient::OverrideWebkitPrefs(
     RenderViewHost* render_view_host,
     WebPreferences* prefs) {
-  BlinkTestController::Get()->OverrideWebkitPrefs(prefs);
-}
-
-void LayoutTestContentBrowserClient::ResourceDispatcherHostCreated() {
-  set_resource_dispatcher_host_delegate(
-      base::WrapUnique(new LayoutTestResourceDispatcherHostDelegate));
-  ResourceDispatcherHost::Get()->SetDelegate(
-      resource_dispatcher_host_delegate());
+  if (BlinkTestController::Get())
+    BlinkTestController::Get()->OverrideWebkitPrefs(prefs);
 }
 
 void LayoutTestContentBrowserClient::AppendExtraCommandLineSwitches(
@@ -155,7 +156,7 @@ bool LayoutTestContentBrowserClient::DoesSiteRequireDedicatedProcess(
   if (ShellContentBrowserClient::DoesSiteRequireDedicatedProcess(
           browser_context, effective_site_url))
     return true;
-  url::Origin origin(effective_site_url);
+  url::Origin origin = url::Origin::Create(effective_site_url);
   return base::MatchPattern(origin.Serialize(), "*oopif.test");
 }
 
@@ -180,6 +181,24 @@ bool LayoutTestContentBrowserClient::CanCreateWindow(
     bool* no_javascript_access) {
   *no_javascript_access = false;
   return !block_popups_ || user_gesture;
+}
+
+void LayoutTestContentBrowserClient::ExposeInterfacesToFrame(
+    service_manager::BinderRegistryWithArgs<content::RenderFrameHost*>*
+        registry) {
+  registry->AddInterface(base::Bind(&BindLayoutTestHelper));
+}
+
+ResourceDispatcherHostLoginDelegate*
+LayoutTestContentBrowserClient::CreateLoginDelegate(
+    net::AuthChallengeInfo* auth_info,
+    content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    bool is_main_frame,
+    const GURL& url,
+    bool first_auth_attempt,
+    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
+        auth_required_callback) {
+  return nullptr;
 }
 
 }  // namespace content

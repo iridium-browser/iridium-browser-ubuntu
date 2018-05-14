@@ -7,11 +7,16 @@ package org.chromium.content.browser.input;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
-import android.content.res.Configuration;
+import android.graphics.Color;
 import android.support.test.filters.MediumTest;
 import android.support.test.filters.SmallTest;
 import android.text.InputType;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.BackgroundColorSpan;
+import android.text.style.UnderlineSpan;
 import android.view.KeyEvent;
+import android.view.ViewConfiguration;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 
@@ -22,6 +27,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.ContentJUnit4ClassRunner;
@@ -29,21 +35,25 @@ import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content.browser.test.util.JavaScriptUtils;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.ime.TextInputType;
 
+import java.util.ArrayList;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeoutException;
 
 /**
  * IME (input method editor) and text input tests.
  */
 @RunWith(ContentJUnit4ClassRunner.class)
+@CommandLineFlags.Add({"expose-internals-for-testing"})
 public class ImeTest {
     @Rule
     public ImeActivityTestRule mRule = new ImeActivityTestRule();
 
     @Before
     public void setUp() throws Exception {
-        mRule.setUp();
+        mRule.setUpForUrl(ImeActivityTestRule.INPUT_FORM_HTML);
     }
 
     @Test
@@ -171,6 +181,9 @@ public class ImeTest {
         mRule.waitAndVerifyUpdateSelection(2, 3, 3, 2, 3);
 
         // Unexpected selection change occurs, e.g., the user clicks on an area.
+        // There was already one click during test setup; we have to wait out the double-tap
+        // timeout or the test will be flaky.
+        Thread.sleep(ViewConfiguration.getDoubleTapTimeout());
         DOMUtils.clickNode(mRule.getContentViewCore(), "textarea2");
         mRule.waitAndVerifyUpdateSelection(3, 5, 5, 2, 3);
         // Keyboard app finishes composition. We emulate this in TestInputMethodManagerWrapper.
@@ -421,6 +434,69 @@ public class ImeTest {
         Assert.assertEquals(5, mRule.getConnectionFactory().getOutAttrs().initialSelEnd);
     }
 
+    private static int getImeAction(EditorInfo editorInfo) {
+        return editorInfo.imeOptions & EditorInfo.IME_MASK_ACTION;
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"TextInput", "Main"})
+    public void testAdvanceFocusNextAndPrevious() throws Exception {
+        mRule.focusElement("textarea");
+        // Forward direction focus. Excessive focus advance should be ignored.
+        for (int i = 0; i < 10; ++i) {
+            // Forward direction focus.
+            mRule.performEditorAction(EditorInfo.IME_ACTION_NEXT);
+        }
+        mRule.waitForKeyboardStates(7, 0, 7,
+                new Integer[] {TextInputType.TEXT_AREA, TextInputType.TEXT_AREA,
+                        TextInputType.NUMBER, TextInputType.NUMBER, TextInputType.CONTENT_EDITABLE,
+                        TextInputType.SEARCH, TextInputType.TEXT});
+        ArrayList<EditorInfo> editorInfoList =
+                mRule.getInputMethodManagerWrapper().getEditorInfoList();
+        Assert.assertEquals(7, editorInfoList.size());
+        // textarea.
+        Assert.assertEquals(EditorInfo.IME_ACTION_NONE, getImeAction(editorInfoList.get(0)));
+        // textarea2.
+        Assert.assertEquals(EditorInfo.IME_ACTION_NONE, getImeAction(editorInfoList.get(1)));
+        // input_number1.
+        Assert.assertEquals(EditorInfo.IME_ACTION_NEXT, getImeAction(editorInfoList.get(2)));
+        // input_number2.
+        Assert.assertEquals(EditorInfo.IME_ACTION_NEXT, getImeAction(editorInfoList.get(3)));
+        // content_editable1.
+        Assert.assertEquals(EditorInfo.IME_ACTION_NONE, getImeAction(editorInfoList.get(4)));
+        // search1.
+        Assert.assertEquals(EditorInfo.IME_ACTION_SEARCH, getImeAction(editorInfoList.get(5)));
+        // input_text1.
+        Assert.assertEquals(EditorInfo.IME_ACTION_GO, getImeAction(editorInfoList.get(6)));
+
+        mRule.resetAllStates();
+
+        // Backward direction focus. Excessive focus advance should be ignored.
+        for (int i = 0; i < 10; ++i) {
+            // Backward direction focus.
+            mRule.performEditorAction(EditorInfo.IME_ACTION_PREVIOUS);
+        }
+        mRule.waitForKeyboardStates(6, 0, 6,
+                new Integer[] {TextInputType.SEARCH, TextInputType.CONTENT_EDITABLE,
+                        TextInputType.NUMBER, TextInputType.NUMBER, TextInputType.TEXT_AREA,
+                        TextInputType.TEXT_AREA});
+        editorInfoList = mRule.getInputMethodManagerWrapper().getEditorInfoList();
+        Assert.assertEquals(6, editorInfoList.size());
+        // search1.
+        Assert.assertEquals(EditorInfo.IME_ACTION_SEARCH, getImeAction(editorInfoList.get(0)));
+        // content_editable1.
+        Assert.assertEquals(EditorInfo.IME_ACTION_NONE, getImeAction(editorInfoList.get(1)));
+        // input_number2.
+        Assert.assertEquals(EditorInfo.IME_ACTION_NEXT, getImeAction(editorInfoList.get(2)));
+        // input_number1.
+        Assert.assertEquals(EditorInfo.IME_ACTION_NEXT, getImeAction(editorInfoList.get(3)));
+        // textarea2.
+        Assert.assertEquals(EditorInfo.IME_ACTION_NONE, getImeAction(editorInfoList.get(4)));
+        // textarea.
+        Assert.assertEquals(EditorInfo.IME_ACTION_NONE, getImeAction(editorInfoList.get(5)));
+    }
+
     @Test
     @SmallTest
     @Feature({"TextInput"})
@@ -601,33 +677,6 @@ public class ImeTest {
         }));
     }
 
-    private void attachPhysicalKeyboard() {
-        Configuration hardKeyboardConfig = new Configuration(
-                mRule.getContentViewCore().getContext().getResources().getConfiguration());
-        hardKeyboardConfig.keyboard = Configuration.KEYBOARD_QWERTY;
-        hardKeyboardConfig.keyboardHidden = Configuration.KEYBOARDHIDDEN_YES;
-        hardKeyboardConfig.hardKeyboardHidden = Configuration.HARDKEYBOARDHIDDEN_NO;
-        onConfigurationChanged(hardKeyboardConfig);
-    }
-
-    private void detachPhysicalKeyboard() {
-        Configuration softKeyboardConfig = new Configuration(
-                mRule.getContentViewCore().getContext().getResources().getConfiguration());
-        softKeyboardConfig.keyboard = Configuration.KEYBOARD_NOKEYS;
-        softKeyboardConfig.keyboardHidden = Configuration.KEYBOARDHIDDEN_NO;
-        softKeyboardConfig.hardKeyboardHidden = Configuration.HARDKEYBOARDHIDDEN_YES;
-        onConfigurationChanged(softKeyboardConfig);
-    }
-
-    private void onConfigurationChanged(final Configuration config) {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mRule.getContentViewCore().onConfigurationChanged(config);
-            }
-        });
-    }
-
     private void reloadPage() throws Throwable {
         // Reload the page, then focus will be lost and keyboard should be hidden.
         mRule.fullyLoadUrl(mRule.getContentViewCore().getWebContents().getLastCommittedUrl());
@@ -636,13 +685,14 @@ public class ImeTest {
     @Test
     @SmallTest
     @Feature({"TextInput"})
+    @SuppressWarnings("TryFailThrowable") // TODO(tedchoc): Remove after fixing timeout.
     public void testPhysicalKeyboard_AttachDetach() throws Throwable {
-        attachPhysicalKeyboard();
+        mRule.attachPhysicalKeyboard();
         // We still call showSoftKeyboard, which will be ignored by physical keyboard.
         mRule.waitForKeyboardStates(1, 0, 1, new Integer[] {TextInputType.TEXT});
         mRule.setComposingText("a", 1);
         mRule.waitForKeyboardStates(1, 0, 1, new Integer[] {TextInputType.TEXT});
-        detachPhysicalKeyboard();
+        mRule.detachPhysicalKeyboard();
         mRule.assertWaitForKeyboardStatus(true);
         // Now we really show soft keyboard. We also call mRule.restartInput when configuration
         // changes.
@@ -655,7 +705,7 @@ public class ImeTest {
         // because render widget gets restarted. But the end result should be the same.
         mRule.assertWaitForKeyboardStatus(false);
 
-        detachPhysicalKeyboard();
+        mRule.detachPhysicalKeyboard();
 
         try {
             // We should not show soft keyboard here because focus has been lost.
@@ -1017,66 +1067,111 @@ public class ImeTest {
     @Feature({"TextInput", "Main"})
     public void testPhysicalKeyboard_AccentKeyCodes() throws Throwable {
         mRule.focusElementAndWaitForStateUpdate("textarea");
+        int index = 0;
 
         // h
         mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_H));
         mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_H));
         Assert.assertEquals("h", mRule.getTextBeforeCursor(9, 0));
-        mRule.waitAndVerifyUpdateSelection(0, 1, 1, -1, -1);
+        mRule.waitAndVerifyUpdateSelection(index++, 1, 1, -1, -1);
 
-        // ALT-i  (circumflex accent key on virtual keyboard)
+        // ALT-i  (circumflex accent key on virtual keyboard). Accent should not appear until the
+        // next letter is entered.
         mRule.dispatchKeyEvent(new KeyEvent(
                 0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
-        Assert.assertEquals("hˆ", mRule.getTextBeforeCursor(9, 0));
+        Assert.assertEquals("h", mRule.getTextBeforeCursor(9, 0));
         mRule.dispatchKeyEvent(new KeyEvent(
                 0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
-        Assert.assertEquals("hˆ", mRule.getTextBeforeCursor(9, 0));
-        mRule.waitAndVerifyUpdateSelection(1, 2, 2, 1, 2);
+        Assert.assertEquals("h", mRule.getTextBeforeCursor(9, 0));
+
+        // finishComposingText() should not prevent the accent from being joined.
+        mRule.finishComposingText();
 
         // o
         mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_O));
         Assert.assertEquals("hô", mRule.getTextBeforeCursor(9, 0));
         mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_O));
         Assert.assertEquals("hô", mRule.getTextBeforeCursor(9, 0));
-        mRule.waitAndVerifyUpdateSelection(2, 2, 2, -1, -1);
+        mRule.waitAndVerifyUpdateSelection(index++, 2, 2, -1, -1);
 
-        // ALT-i
+        // o again. Should not have accent mark this time.
+        mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_O));
+        Assert.assertEquals("hôo", mRule.getTextBeforeCursor(9, 0));
+        mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_O));
+        Assert.assertEquals("hôo", mRule.getTextBeforeCursor(9, 0));
+        mRule.waitAndVerifyUpdateSelection(index++, 3, 3, -1, -1);
+
+        // ALT-i. Should not display anything until the next key is pressed.
         mRule.dispatchKeyEvent(new KeyEvent(
                 0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
         mRule.dispatchKeyEvent(new KeyEvent(
                 0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
-        Assert.assertEquals("hôˆ", mRule.getTextBeforeCursor(9, 0));
-        mRule.waitAndVerifyUpdateSelection(3, 3, 3, 2, 3);
+        Assert.assertEquals("hôo", mRule.getTextBeforeCursor(9, 0));
 
-        // ALT-i again should have no effect
+        // ALT-i again should commit the caret this time.
         mRule.dispatchKeyEvent(new KeyEvent(
                 0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
         mRule.dispatchKeyEvent(new KeyEvent(
                 0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
-        Assert.assertEquals("hôˆ", mRule.getTextBeforeCursor(9, 0));
+        Assert.assertEquals("hôoˆ", mRule.getTextBeforeCursor(9, 0));
+        mRule.waitAndVerifyUpdateSelection(index++, 4, 4, -1, -1);
 
         // b (cannot be accented, should just appear after)
         mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_B));
-        Assert.assertEquals("hôˆb", mRule.getTextBeforeCursor(9, 0));
+        Assert.assertEquals("hôoˆb", mRule.getTextBeforeCursor(9, 0));
         mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_B));
-        Assert.assertEquals("hôˆb", mRule.getTextBeforeCursor(9, 0));
-        int index = 4;
-        mRule.waitAndVerifyUpdateSelection(index++, 4, 4, -1, -1);
+        Assert.assertEquals("hôoˆb", mRule.getTextBeforeCursor(9, 0));
+        mRule.waitAndVerifyUpdateSelection(index++, 5, 5, -1, -1);
 
-        // ALT-i
+        // ALT-i. Should not display anything.
         mRule.dispatchKeyEvent(new KeyEvent(
                 0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
         mRule.dispatchKeyEvent(new KeyEvent(
                 0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
-        Assert.assertEquals("hôˆbˆ", mRule.getTextBeforeCursor(9, 0));
-        mRule.waitAndVerifyUpdateSelection(index++, 5, 5, 4, 5);
+        Assert.assertEquals("hôoˆb", mRule.getTextBeforeCursor(9, 0));
 
-        // Backspace
+        // Backspace. Should delete the b even though we have a pending accent.
         mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
-        Assert.assertEquals("hôˆb", mRule.getTextBeforeCursor(9, 0));
+        Assert.assertEquals("hôoˆ", mRule.getTextBeforeCursor(9, 0));
         mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL));
-        Assert.assertEquals("hôˆb", mRule.getTextBeforeCursor(9, 0));
+        Assert.assertEquals("hôoˆ", mRule.getTextBeforeCursor(9, 0));
         mRule.waitAndVerifyUpdateSelection(index++, 4, 4, -1, -1);
+
+        // Alt-i. Should not display anything (the pending accent should have been cleared by the
+        // backspace).
+        mRule.dispatchKeyEvent(new KeyEvent(
+                0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
+        mRule.dispatchKeyEvent(new KeyEvent(
+                0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
+        Assert.assertEquals("hôoˆ", mRule.getTextBeforeCursor(9, 0));
+
+        // Space. Should display the pending accent.
+        mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_SPACE));
+        Assert.assertEquals("hôoˆˆ", mRule.getTextBeforeCursor(9, 0));
+        mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_SPACE));
+        Assert.assertEquals("hôoˆˆ", mRule.getTextBeforeCursor(9, 0));
+        mRule.waitAndVerifyUpdateSelection(index++, 5, 5, -1, -1);
+
+        // Alt-i. Should not display anything but should set a circumflex as the pending accent.
+        mRule.dispatchKeyEvent(new KeyEvent(
+                0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
+        mRule.dispatchKeyEvent(new KeyEvent(
+                0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_I, 0, KeyEvent.META_ALT_ON));
+        Assert.assertEquals("hôoˆˆ", mRule.getTextBeforeCursor(9, 0));
+
+        // Alt-e. Should output the circumflex and set an acute accent as the pending accent.
+        mRule.dispatchKeyEvent(new KeyEvent(
+                0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_E, 0, KeyEvent.META_ALT_ON));
+        mRule.dispatchKeyEvent(new KeyEvent(
+                0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_E, 0, KeyEvent.META_ALT_ON));
+        Assert.assertEquals("hôoˆˆˆ", mRule.getTextBeforeCursor(9, 0));
+        mRule.waitAndVerifyUpdateSelection(index++, 6, 6, -1, -1);
+
+        // e. Should output an e with an acute accent.
+        mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_E));
+        mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_E));
+        Assert.assertEquals("hôoˆˆˆé", mRule.getTextBeforeCursor(9, 0));
+        mRule.waitAndVerifyUpdateSelection(index++, 7, 7, -1, -1);
     }
 
     @Test
@@ -1143,12 +1238,37 @@ public class ImeTest {
     @SmallTest
     @Feature({"TextInput", "Main"})
     public void testDpadKeyCodesWhileSwipingText() throws Throwable {
+        int showCount = mRule.getInputMethodManagerWrapper().getShowSoftInputCounter();
         mRule.focusElement("textarea");
 
-        // DPAD_CENTER should cause keyboard to appear
+        // focusElement() calls showSoftInput().
+        CriteriaHelper.pollUiThread(Criteria.equals(showCount + 1, new Callable<Integer>() {
+            @Override
+            public Integer call() {
+                return mRule.getInputMethodManagerWrapper().getShowSoftInputCounter();
+            }
+        }));
+
+        // DPAD_CENTER should cause keyboard to appear on keyup.
         mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER));
 
-        // TODO(changwan): should really check this.
+        // Should not have called showSoftInput() on keydown.
+        CriteriaHelper.pollUiThread(Criteria.equals(showCount + 1, new Callable<Integer>() {
+            @Override
+            public Integer call() {
+                return mRule.getInputMethodManagerWrapper().getShowSoftInputCounter();
+            }
+        }));
+
+        mRule.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_CENTER));
+
+        // Should have called showSoftInput() on keyup.
+        CriteriaHelper.pollUiThread(Criteria.equals(showCount + 2, new Callable<Integer>() {
+            @Override
+            public Integer call() {
+                return mRule.getInputMethodManagerWrapper().getShowSoftInputCounter();
+            }
+        }));
     }
 
     @Test
@@ -1262,10 +1382,9 @@ public class ImeTest {
 
         mRule.setComposingText("a", 1);
         mRule.waitAndVerifyUpdateSelection(0, 1, 1, 0, 1);
-        // TODO(changwan): reduce the number of selection changes.
         mRule.waitForEventLogs(
                 "keydown(229),compositionstart(),compositionupdate(a),input(a),keyup(229),"
-                + "selectionchange,selectionchange");
+                + "selectionchange");
         mRule.clearEventLogs();
 
         mRule.finishComposingText();
@@ -1279,9 +1398,8 @@ public class ImeTest {
     public void testInputTextEvents_ComposingText() throws Throwable {
         mRule.setComposingText("a", 1);
         mRule.waitAndVerifyUpdateSelection(0, 1, 1, 0, 1);
-        // TODO(changwan): reduce the number of selection changes.
         mRule.waitForEventLogs("keydown(229),compositionstart(),compositionupdate(a),"
-                + "input(a),keyup(229),selectionchange,selectionchange");
+                + "input(a),keyup(229),selectionchange");
         mRule.clearEventLogs();
 
         mRule.finishComposingText();
@@ -1506,4 +1624,117 @@ public class ImeTest {
         }));
     }
 
+    @Test
+    @MediumTest
+    @Feature({"TextInput"})
+    public void testBackgroundAndUnderlineSpans() throws Throwable {
+        mRule.fullyLoadUrl("data:text/html, <div contenteditable id=\"div\" />");
+
+        WebContents webContents = mRule.getContentViewCore().getWebContents();
+        DOMUtils.focusNode(webContents, "div");
+
+        SpannableString textToCommit = new SpannableString("hello world");
+        BackgroundColorSpan backgroundColorSpan = new BackgroundColorSpan(Color.MAGENTA);
+        UnderlineSpan underlineSpan = new UnderlineSpan();
+        textToCommit.setSpan(backgroundColorSpan, 0, 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        textToCommit.setSpan(underlineSpan, 6, 11, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        mRule.commitText(textToCommit, 1);
+
+        // Wait for renderer to acknowledge commitText(). ImeActivityTestRule.commitText() blocks
+        // and waits for the IME thread to finish, but the communication between the IME thread and
+        // the renderer is asynchronous, so if we try to run JavaScript right away, the text won't
+        // necessarily have been committed yet.
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                try {
+                    return DOMUtils.getNodeContents(webContents, "div").equals("hello world");
+                } catch (InterruptedException | TimeoutException e) {
+                    return false;
+                }
+            }
+        });
+
+        Assert.assertEquals("2",
+                JavaScriptUtils.executeJavaScriptAndWaitForResult(webContents,
+                        "internals.markerCountForNode("
+                                + "  document.getElementById('div').firstChild, "
+                                + "  'composition')"));
+
+        // Colors come back as ARGB.
+        Assert.assertEquals(0xFFFF00FFL,
+                (long) Double.parseDouble(
+                        JavaScriptUtils.executeJavaScriptAndWaitForResult(webContents,
+                                "internals.markerBackgroundColorForNode("
+                                        + "  document.getElementById('div').firstChild, "
+                                        + "  'composition', 0)")));
+
+        Assert.assertEquals(0x0000000L,
+                (long) Double.parseDouble(
+                        JavaScriptUtils.executeJavaScriptAndWaitForResult(webContents,
+                                "internals.markerBackgroundColorForNode("
+                                        + "  document.getElementById('div').firstChild, "
+                                        + "  'composition', 1)")));
+
+        Assert.assertEquals(0x0000000L,
+                (long) Double.parseDouble(
+                        JavaScriptUtils.executeJavaScriptAndWaitForResult(webContents,
+                                "internals.markerUnderlineColorForNode("
+                                        + "  document.getElementById('div').firstChild, "
+                                        + "  'composition', 0)")));
+
+        Assert.assertEquals(0xFF000000L,
+                (long) Double.parseDouble(
+                        JavaScriptUtils.executeJavaScriptAndWaitForResult(webContents,
+                                "internals.markerUnderlineColorForNode("
+                                        + "  document.getElementById('div').firstChild, "
+                                        + "  'composition', 1)")));
+
+        Assert.assertEquals("0",
+                JavaScriptUtils.executeJavaScriptAndWaitForResult(webContents,
+                        "internals.markerRangeForNode("
+                                + "  document.getElementById('div').firstChild, "
+                                + "  'composition', 0).startOffset"));
+
+        Assert.assertEquals("5",
+                JavaScriptUtils.executeJavaScriptAndWaitForResult(webContents,
+                        "internals.markerRangeForNode("
+                                + "  document.getElementById('div').firstChild, "
+                                + "  'composition', 0).endOffset"));
+
+        Assert.assertEquals("6",
+                JavaScriptUtils.executeJavaScriptAndWaitForResult(webContents,
+                        "internals.markerRangeForNode("
+                                + "  document.getElementById('div').firstChild, "
+                                + "  'composition', 1).startOffset"));
+
+        Assert.assertEquals("11",
+                JavaScriptUtils.executeJavaScriptAndWaitForResult(webContents,
+                        "internals.markerRangeForNode("
+                                + "  document.getElementById('div').firstChild, "
+                                + "  'composition', 1).endOffset"));
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testAutocorrectAttribute() throws Exception {
+        // Autocorrect should be on for a text field that doesn't have an autocorrect attribute.
+        mRule.focusElement("input_text");
+        Assert.assertEquals(EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT,
+                mRule.getConnectionFactory().getOutAttrs().inputType
+                        & EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT);
+
+        // Autocorrect should be on for a text field that has autocorrect="on" set.
+        mRule.focusElement("autocorrect_on");
+        Assert.assertEquals(EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT,
+                mRule.getConnectionFactory().getOutAttrs().inputType
+                        & EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT);
+
+        // Autocorrect should be off for a text field that has autocorrect="off" set.
+        mRule.focusElement("autocorrect_off");
+        Assert.assertEquals(0,
+                mRule.getConnectionFactory().getOutAttrs().inputType
+                        & EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT);
+    }
 }

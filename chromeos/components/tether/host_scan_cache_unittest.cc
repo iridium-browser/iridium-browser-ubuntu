@@ -4,9 +4,9 @@
 
 #include "chromeos/components/tether/host_scan_cache.h"
 
+#include <memory>
 #include <unordered_map>
 
-#include "base/memory/ptr_util.h"
 #include "chromeos/components/tether/fake_host_scan_cache.h"
 #include "chromeos/components/tether/host_scan_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -17,7 +17,7 @@ namespace tether {
 
 namespace {
 
-class TestObserver : public HostScanCache::Observer {
+class TestObserver final : public HostScanCache::Observer {
  public:
   TestObserver() : empty_cache_count_(0) {}
 
@@ -28,6 +28,8 @@ class TestObserver : public HostScanCache::Observer {
 
  private:
   uint32_t empty_cache_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestObserver);
 };
 
 }  // namespace
@@ -38,8 +40,8 @@ class HostScanCacheTest : public testing::Test {
       : test_entries_(host_scan_test_util::CreateTestEntries()) {}
 
   void SetUp() override {
-    host_scan_cache_ = base::MakeUnique<FakeHostScanCache>();
-    observer_ = base::MakeUnique<TestObserver>();
+    host_scan_cache_ = std::make_unique<FakeHostScanCache>();
+    observer_ = std::make_unique<TestObserver>();
 
     host_scan_cache_->AddObserver(observer_.get());
   }
@@ -52,6 +54,9 @@ class HostScanCacheTest : public testing::Test {
 
   std::unique_ptr<FakeHostScanCache> host_scan_cache_;
   std::unique_ptr<TestObserver> observer_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(HostScanCacheTest);
 };
 
 TEST_F(HostScanCacheTest, TestSetAndRemove) {

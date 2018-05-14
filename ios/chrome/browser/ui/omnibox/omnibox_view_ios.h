@@ -8,9 +8,10 @@
 #import <UIKit/UIKit.h>
 
 #include <memory>
-#include "base/mac/scoped_nsobject.h"
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/toolbar/toolbar_model.h"
+#include "ios/chrome/browser/ui/omnibox/omnibox_popup_provider.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_popup_view_suggestions_delegate.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_text_field_ios.h"
 
 struct AutocompleteMatch;
@@ -18,26 +19,36 @@ class AutocompleteResult;
 @class AutocompleteTextFieldDelegate;
 class GURL;
 @class OmniboxTextFieldIOS;
-@protocol OmniboxPopupPositioner;
+@class OmniboxTextFieldPasteDelegate;
 class WebOmniboxEditController;
-class OmniboxPopupViewIOS;
-@protocol PreloadProvider;
+@class OmniboxClearButtonBridge;
 
 namespace ios {
 class ChromeBrowserState;
 }
 
+// Allows setting left images.
+class LeftImageProvider {
+ public:
+  // Sets the left image.
+  virtual void SetLeftImage(int imageId) = 0;
+};
+
 // iOS implementation of OmniBoxView.  Wraps a UITextField and
 // interfaces with the rest of the autocomplete system.
-class OmniboxViewIOS : public OmniboxView {
+class OmniboxViewIOS : public OmniboxView,
+                       public OmniboxPopupViewSuggestionsDelegate {
  public:
   // Retains |field|.
   OmniboxViewIOS(OmniboxTextFieldIOS* field,
                  WebOmniboxEditController* controller,
-                 ios::ChromeBrowserState* browser_state,
-                 id<PreloadProvider> prerender,
-                 id<OmniboxPopupPositioner> positioner);
+                 LeftImageProvider* left_image_provider,
+                 ios::ChromeBrowserState* browser_state);
   ~OmniboxViewIOS() override;
+
+  void SetPopupProvider(OmniboxPopupProvider* provider) {
+    popup_provider_ = provider;
+  };
 
   // Returns a color representing |security_level|, adjusted based on whether
   // the browser is in Incognito mode.
@@ -60,6 +71,7 @@ class OmniboxViewIOS : public OmniboxView {
   void RevertAll() override;
   void UpdatePopup() override;
   void OnTemporaryTextMaybeChanged(const base::string16& display_text,
+                                   const AutocompleteMatch& match,
                                    bool save_original_selection,
                                    bool notify_text_changed) override;
   bool OnInlineAutocompleteTextMaybeChanged(const base::string16& display_text,
@@ -97,6 +109,18 @@ class OmniboxViewIOS : public OmniboxView {
   void WillPaste();
   void OnDeleteBackward();
 
+  // OmniboxPopupViewSuggestionsDelegate methods
+
+  void OnTopmostSuggestionImageChanged(int imageId) override;
+  void OnResultsChanged(const AutocompleteResult& result) override;
+  void OnPopupDidScroll() override;
+  void OnSelectedMatchForAppending(const base::string16& str) override;
+  void OnSelectedMatchForOpening(AutocompleteMatch match,
+                                 WindowOpenDisposition disposition,
+                                 const GURL& alternate_nav_url,
+                                 const base::string16& pasted_text,
+                                 size_t index) override;
+
   ios::ChromeBrowserState* browser_state() { return browser_state_; }
 
   // Updates this edit view to show the proper text, highlight and images.
@@ -122,9 +146,6 @@ class OmniboxViewIOS : public OmniboxView {
   // already focused.
   void FocusOmnibox();
 
-  // Called when the popup results change.  Used to update prerendering.
-  void OnPopupResultsChanged(const AutocompleteResult& result);
-
   // Returns |true| if AutocompletePopupView is currently open.
   BOOL IsPopupOpen();
 
@@ -137,6 +158,13 @@ class OmniboxViewIOS : public OmniboxView {
   void EmphasizeURLComponents() override;
 
  private:
+  // Creates the clear text UIButton to be used as a right view of |field_|.
+  void CreateClearTextIcon(bool is_incognito);
+
+  // Updates the view to show the appropriate button (e.g. clear text or voice
+  // search) on the right side of |field_|.
+  void UpdateRightDecorations();
+
   // Calculates text attributes according to |display_text| and
   // returns them in an autoreleased object.
   NSAttributedString* ApplyTextAttributes(const base::string16& text);
@@ -157,14 +185,17 @@ class OmniboxViewIOS : public OmniboxView {
 
   ios::ChromeBrowserState* browser_state_;
 
-  base::scoped_nsobject<OmniboxTextFieldIOS> field_;
+  OmniboxTextFieldIOS* field_;
+  __strong UIButton* clear_text_button_;
+
+  __strong OmniboxClearButtonBridge* clear_button_bridge_;
+
+  OmniboxTextFieldPasteDelegate* paste_delegate_;
   WebOmniboxEditController* controller_;  // weak, owns us
-  std::unique_ptr<OmniboxPopupViewIOS> popup_view_;
-  // |preloader_| should be __weak but is included from non-ARC code.
-  __unsafe_unretained id<PreloadProvider> preloader_;
+  LeftImageProvider* left_image_provider_;  // weak
 
   State state_before_change_;
-  base::scoped_nsobject<NSString> marked_text_before_change_;
+  NSString* marked_text_before_change_;
   NSRange current_selection_;
   NSRange old_selection_;
 
@@ -179,11 +210,13 @@ class OmniboxViewIOS : public OmniboxView {
   BOOL use_strikethrough_workaround_;
 
   // Bridges delegate method calls from |field_| to C++ land.
-  base::scoped_nsobject<AutocompleteTextFieldDelegate> field_delegate_;
+  AutocompleteTextFieldDelegate* field_delegate_;
 
   // Temporary pointer to the attributed display string, stored as color and
   // other emphasis attributes are applied by the superclass.
-  NSMutableAttributedString* attributing_display_string_;  // weak
+  NSMutableAttributedString* attributing_display_string_;
+
+  OmniboxPopupProvider* popup_provider_;  // weak
 };
 
 #endif  // IOS_CHROME_BROWSER_UI_OMNIBOX_OMNIBOX_VIEW_IOS_H_

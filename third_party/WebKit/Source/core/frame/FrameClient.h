@@ -5,6 +5,7 @@
 #ifndef FrameClient_h
 #define FrameClient_h
 
+#include "base/unguessable_token.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/BlameContext.h"
@@ -18,9 +19,6 @@ class CORE_EXPORT FrameClient : public GarbageCollectedFinalized<FrameClient> {
  public:
   virtual bool InShadowTree() const = 0;
 
-  // TODO(dcheng): Move this into LocalFrameClient, since remote frames don't
-  // need this.
-  virtual void WillBeDetached() = 0;
   virtual void Detached(FrameDetachType) = 0;
 
   virtual Frame* Opener() const = 0;
@@ -35,9 +33,11 @@ class CORE_EXPORT FrameClient : public GarbageCollectedFinalized<FrameClient> {
 
   virtual void FrameFocused() const = 0;
 
-  virtual ~FrameClient() {}
+  virtual base::UnguessableToken GetDevToolsFrameToken() const = 0;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual ~FrameClient() = default;
+
+  virtual void Trace(blink::Visitor* visitor) {}
 };
 
 }  // namespace blink

@@ -18,6 +18,8 @@ namespace bluetooth {
 
 // Implements device::BluetoothDevice. Meant to be used by FakeCentral
 // to keep track of the peripheral's state and attributes.
+//
+// Not intended for direct use by clients.  See README.md.
 class FakePeripheral : public device::BluetoothDevice {
  public:
   FakePeripheral(FakeCentral* fake_central, const std::string& address);
@@ -46,9 +48,19 @@ class FakePeripheral : public device::BluetoothDevice {
   // after IsGattDiscoveryComplete is called.
   void SetNextGATTDiscoveryResponse(uint16_t code);
 
+  // Returns true if there are no pending responses for this peripheral or any
+  // of its GATT services.
+  bool AllResponsesConsumed();
+
+  // Simulates a GATT disconnection from the peripheral.
+  void SimulateGATTDisconnection();
+
   // Adds a fake primary service with |service_uuid| to this peripheral.
   // Returns the service's Id.
   std::string AddFakeService(const device::BluetoothUUID& service_uuid);
+
+  // Remove a fake service with |identifier| from this peripheral.
+  bool RemoveFakeService(const std::string& identifier);
 
   // BluetoothDevice overrides:
   uint32_t GetBluetoothClass() const override;

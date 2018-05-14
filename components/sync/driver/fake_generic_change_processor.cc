@@ -19,8 +19,7 @@ FakeGenericChangeProcessor::FakeGenericChangeProcessor(ModelType type,
                              base::WeakPtr<SyncableService>(),
                              base::WeakPtr<SyncMergeResult>(),
                              nullptr,
-                             sync_client,
-                             nullptr),
+                             sync_client),
       sync_model_has_user_created_nodes_(true),
       sync_model_has_user_created_nodes_success_(true) {}
 
@@ -36,7 +35,7 @@ void FakeGenericChangeProcessor::set_sync_model_has_user_created_nodes_success(
 }
 
 SyncError FakeGenericChangeProcessor::ProcessSyncChanges(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const SyncChangeList& change_list) {
   return SyncError();
 }

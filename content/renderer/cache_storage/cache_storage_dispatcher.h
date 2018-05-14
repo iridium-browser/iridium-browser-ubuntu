@@ -10,15 +10,15 @@
 #include <memory>
 #include <vector>
 
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
-#include "content/public/child/worker_thread.h"
+#include "content/public/renderer/worker_thread.h"
 #include "ipc/ipc_message.h"
+#include "third_party/WebKit/public/platform/modules/cache_storage/cache_storage.mojom.h"
 #include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerCache.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerCacheError.h"
 #include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerCacheStorage.h"
 
 namespace url {
@@ -64,16 +64,16 @@ class CacheStorageDispatcher : public WorkerThread::Observer {
 
   void OnCacheStorageHasError(int thread_id,
                               int request_id,
-                              blink::WebServiceWorkerCacheError reason);
+                              blink::mojom::CacheStorageError reason);
   void OnCacheStorageOpenError(int thread_id,
                                int request_id,
-                               blink::WebServiceWorkerCacheError reason);
+                               blink::mojom::CacheStorageError reason);
   void OnCacheStorageDeleteError(int thread_id,
                                  int request_id,
-                                 blink::WebServiceWorkerCacheError reason);
+                                 blink::mojom::CacheStorageError reason);
   void OnCacheStorageMatchError(int thread_id,
                                 int request_id,
-                                blink::WebServiceWorkerCacheError reason);
+                                blink::mojom::CacheStorageError reason);
 
   // Message handlers for Cache messages from the browser process.
   void OnCacheMatchSuccess(int thread_id,
@@ -92,16 +92,16 @@ class CacheStorageDispatcher : public WorkerThread::Observer {
 
   void OnCacheMatchError(int thread_id,
                          int request_id,
-                         blink::WebServiceWorkerCacheError reason);
+                         blink::mojom::CacheStorageError reason);
   void OnCacheMatchAllError(int thread_id,
                             int request_id,
-                            blink::WebServiceWorkerCacheError reason);
+                            blink::mojom::CacheStorageError reason);
   void OnCacheKeysError(int thread_id,
                         int request_id,
-                        blink::WebServiceWorkerCacheError reason);
+                        blink::mojom::CacheStorageError reason);
   void OnCacheBatchError(int thread_id,
                          int request_id,
-                         blink::WebServiceWorkerCacheError reason);
+                         blink::mojom::CacheStorageError reason);
 
   // TODO(jsbell): These are only called by WebServiceWorkerCacheStorageImpl
   // and should be renamed to match Chromium conventions. crbug.com/439389
@@ -166,25 +166,25 @@ class CacheStorageDispatcher : public WorkerThread::Observer {
  private:
   class WebCache;
 
-  using CallbacksMap = IDMap<std::unique_ptr<
+  using CallbacksMap = base::IDMap<std::unique_ptr<
       blink::WebServiceWorkerCacheStorage::CacheStorageCallbacks>>;
-  using WithCacheCallbacksMap = IDMap<std::unique_ptr<
+  using WithCacheCallbacksMap = base::IDMap<std::unique_ptr<
       blink::WebServiceWorkerCacheStorage::CacheStorageWithCacheCallbacks>>;
-  using KeysCallbacksMap = IDMap<std::unique_ptr<
+  using KeysCallbacksMap = base::IDMap<std::unique_ptr<
       blink::WebServiceWorkerCacheStorage::CacheStorageKeysCallbacks>>;
-  using StorageMatchCallbacksMap = IDMap<std::unique_ptr<
+  using StorageMatchCallbacksMap = base::IDMap<std::unique_ptr<
       blink::WebServiceWorkerCacheStorage::CacheStorageMatchCallbacks>>;
 
   using TimeMap = base::hash_map<int32_t, base::TimeTicks>;
 
-  using MatchCallbacksMap =
-      IDMap<std::unique_ptr<blink::WebServiceWorkerCache::CacheMatchCallbacks>>;
-  using WithResponsesCallbacksMap = IDMap<std::unique_ptr<
+  using MatchCallbacksMap = base::IDMap<
+      std::unique_ptr<blink::WebServiceWorkerCache::CacheMatchCallbacks>>;
+  using WithResponsesCallbacksMap = base::IDMap<std::unique_ptr<
       blink::WebServiceWorkerCache::CacheWithResponsesCallbacks>>;
-  using WithRequestsCallbacksMap = IDMap<std::unique_ptr<
+  using WithRequestsCallbacksMap = base::IDMap<std::unique_ptr<
       blink::WebServiceWorkerCache::CacheWithRequestsCallbacks>>;
-  using BatchCallbacksMap =
-      IDMap<std::unique_ptr<blink::WebServiceWorkerCache::CacheBatchCallbacks>>;
+  using BatchCallbacksMap = base::IDMap<
+      std::unique_ptr<blink::WebServiceWorkerCache::CacheBatchCallbacks>>;
 
   static int32_t CurrentWorkerId() { return WorkerThread::GetCurrentId(); }
 
@@ -210,7 +210,7 @@ class CacheStorageDispatcher : public WorkerThread::Observer {
   TimeMap match_times_;
 
   // The individual caches created under this CacheStorage object.
-  IDMap<WebCache*> web_caches_;
+  base::IDMap<WebCache*> web_caches_;
 
   // These ID maps are held in the CacheStorage object rather than the Cache
   // object to ensure that the IDs are unique.

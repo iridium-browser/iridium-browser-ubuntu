@@ -33,7 +33,7 @@ class CORE_EXPORT SpaceSplitString {
   USING_FAST_MALLOC(SpaceSplitString);
 
  public:
-  SpaceSplitString() {}
+  SpaceSplitString() = default;
   explicit SpaceSplitString(const AtomicString& string) { Set(string); }
 
   bool operator!=(const SpaceSplitString& other) const {
@@ -41,7 +41,7 @@ class CORE_EXPORT SpaceSplitString {
   }
 
   void Set(const AtomicString&);
-  void Clear() { data_.Clear(); }
+  void Clear() { data_ = nullptr; }
 
   bool Contains(const AtomicString& string) const {
     return data_ && data_->Contains(string);
@@ -61,8 +61,8 @@ class CORE_EXPORT SpaceSplitString {
  private:
   class Data : public RefCounted<Data> {
    public:
-    static PassRefPtr<Data> Create(const AtomicString&);
-    static PassRefPtr<Data> CreateUnique(const Data&);
+    static scoped_refptr<Data> Create(const AtomicString&);
+    static scoped_refptr<Data> CreateUnique(const Data&);
 
     ~Data();
 
@@ -106,7 +106,7 @@ class CORE_EXPORT SpaceSplitString {
       data_ = Data::CreateUnique(*data_);
   }
 
-  RefPtr<Data> data_;
+  scoped_refptr<Data> data_;
 };
 
 }  // namespace blink

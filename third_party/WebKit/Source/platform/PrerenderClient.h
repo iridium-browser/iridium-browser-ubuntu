@@ -39,14 +39,14 @@ namespace blink {
 
 class PLATFORM_EXPORT PrerenderClient : public GarbageCollectedMixin {
  public:
-  virtual ~PrerenderClient() {}
+  virtual ~PrerenderClient() = default;
 
   virtual void DidStartPrerender() = 0;
   virtual void DidStopPrerender() = 0;
   virtual void DidSendLoadForPrerender() = 0;
   virtual void DidSendDOMContentLoadedForPrerender() = 0;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
 };
 
 }  // namespace blink

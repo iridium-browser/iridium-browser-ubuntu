@@ -8,7 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/platform_file.h"
+#include "rtc_base/platform_file.h"
+
+#include "rtc_base/stringutils.h"
 
 #if defined(WEBRTC_WIN)
 #include <io.h>
@@ -61,7 +63,7 @@ FILE* FdopenPlatformFileForWriting(PlatformFile file) {
 }
 
 bool ClosePlatformFile(PlatformFile file) {
-  return close(file);
+  return close(file) == 0;
 }
 
 bool RemoveFile(const std::string& path) {

@@ -9,15 +9,15 @@
 #include "base/memory/shared_memory.h"
 #include "base/threading/thread_checker.h"
 #include "device/sensors/device_sensors_consts.h"
-#include "device/sensors/public/interfaces/motion.mojom.h"
-#include "device/sensors/public/interfaces/orientation.mojom.h"
+#include "device/sensors/public/mojom/motion.mojom.h"
+#include "device/sensors/public/mojom/orientation.mojom.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 
 namespace device {
 
 // A base class for device sensor related mojo interface implementations.
 template <typename MojoInterface, ConsumerType consumer_type>
-class DeviceSensorHost : NON_EXPORTED_BASE(public MojoInterface) {
+class DeviceSensorHost : public MojoInterface {
  public:
   static void Create(mojo::InterfaceRequest<MojoInterface> request);
 

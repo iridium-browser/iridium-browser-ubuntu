@@ -18,6 +18,7 @@
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_registration.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -25,17 +26,22 @@ namespace content {
 class ServiceWorkerVersion;
 struct ServiceWorkerRegistrationInfo;
 
+namespace service_worker_registration_unittest {
+class ServiceWorkerActivationTest;
+}  // namespace service_worker_registration_unittest
+
 // Represents the core of a service worker registration object. Other
 // registration derivatives (WebServiceWorkerRegistration etc) ultimately refer
-// to this class. This is refcounted via ServiceWorkerRegistrationHandle to
+// to this class. This is refcounted via ServiceWorkerRegistrationObjectHost to
 // facilitate multiple controllees being associated with the same registration.
 class CONTENT_EXPORT ServiceWorkerRegistration
-    : public NON_EXPORTED_BASE(base::RefCounted<ServiceWorkerRegistration>),
-      public NON_EXPORTED_BASE(ServiceWorkerVersion::Listener) {
+    : public base::RefCounted<ServiceWorkerRegistration>,
+      public ServiceWorkerVersion::Listener {
  public:
-  typedef base::Callback<void(ServiceWorkerStatusCode status)> StatusCallback;
+  using StatusCallback =
+      base::OnceCallback<void(ServiceWorkerStatusCode status)>;
 
-  class Listener {
+  class CONTENT_EXPORT Listener {
    public:
     virtual void OnVersionAttributesChanged(
         ServiceWorkerRegistration* registration,
@@ -45,17 +51,27 @@ class CONTENT_EXPORT ServiceWorkerRegistration
         ServiceWorkerRegistration* registration) {}
     virtual void OnRegistrationFinishedUninstalling(
         ServiceWorkerRegistration* registration) {}
+    virtual void OnRegistrationDeleted(
+        ServiceWorkerRegistration* registration) {}
     virtual void OnUpdateFound(
         ServiceWorkerRegistration* registration) {}
     virtual void OnSkippedWaiting(ServiceWorkerRegistration* registation) {}
   };
 
-  ServiceWorkerRegistration(const ServiceWorkerRegistrationOptions& options,
-                            int64_t registration_id,
-                            base::WeakPtr<ServiceWorkerContextCore> context);
+  ServiceWorkerRegistration(
+      const blink::mojom::ServiceWorkerRegistrationOptions& options,
+      int64_t registration_id,
+      base::WeakPtr<ServiceWorkerContextCore> context);
 
   int64_t id() const { return registration_id_; }
   const GURL& pattern() const { return pattern_; }
+  blink::mojom::ServiceWorkerUpdateViaCache update_via_cache() const {
+    return update_via_cache_;
+  }
+  void set_update_via_cache(
+      blink::mojom::ServiceWorkerUpdateViaCache update_via_cache) {
+    update_via_cache_ = update_via_cache;
+  }
 
   bool is_deleted() const { return is_deleted_; }
   void set_is_deleted(bool deleted) { is_deleted_ = deleted; }
@@ -95,7 +111,7 @@ class CONTENT_EXPORT ServiceWorkerRegistration
     return active_version() || waiting_version();
   }
 
-  const NavigationPreloadState& navigation_preload_state() const {
+  const blink::mojom::NavigationPreloadState navigation_preload_state() const {
     return navigation_preload_state_;
   }
 
@@ -137,7 +153,7 @@ class CONTENT_EXPORT ServiceWorkerRegistration
 
   // Restores this registration in storage and cancels the pending
   // [[ClearRegistration]] algorithm.
-  void AbortPendingClear(const StatusCallback& callback);
+  void AbortPendingClear(StatusCallback callback);
 
   // The time of the most recent update check.
   base::Time last_update_check() const { return last_update_check_; }
@@ -161,7 +177,8 @@ class CONTENT_EXPORT ServiceWorkerRegistration
 
  private:
   friend class base::RefCounted<ServiceWorkerRegistration>;
-  friend class ServiceWorkerActivationTest;
+  friend class service_worker_registration_unittest::
+      ServiceWorkerActivationTest;
 
   void UnsetVersionInternal(
       ServiceWorkerVersion* version,
@@ -173,7 +190,7 @@ class CONTENT_EXPORT ServiceWorkerRegistration
 
   bool IsReadyToActivate() const;
   bool IsLameDuckActiveVersion() const;
-  void StartLameDuckTimerIfNeeded();
+  void StartLameDuckTimer();
   void RemoveLameDuckIfNeeded();
 
   // Promotes the waiting version to active version. If |delay| is true, waits
@@ -183,7 +200,8 @@ class CONTENT_EXPORT ServiceWorkerRegistration
   void ContinueActivation(
       scoped_refptr<ServiceWorkerVersion> activating_version);
   void DispatchActivateEvent(
-      scoped_refptr<ServiceWorkerVersion> activating_version);
+      scoped_refptr<ServiceWorkerVersion> activating_version,
+      ServiceWorkerStatusCode start_worker_status);
   void OnActivateEventFinished(
       scoped_refptr<ServiceWorkerVersion> activating_version,
       ServiceWorkerStatusCode status);
@@ -193,17 +211,18 @@ class CONTENT_EXPORT ServiceWorkerRegistration
   // This method corresponds to the [[ClearRegistration]] algorithm.
   void Clear();
 
-  void OnRestoreFinished(const StatusCallback& callback,
+  void OnRestoreFinished(StatusCallback callback,
                          scoped_refptr<ServiceWorkerVersion> version,
                          ServiceWorkerStatusCode status);
 
   const GURL pattern_;
+  blink::mojom::ServiceWorkerUpdateViaCache update_via_cache_;
   const int64_t registration_id_;
   bool is_deleted_;
   bool is_uninstalling_;
   bool is_uninstalled_;
   bool should_activate_when_ready_;
-  NavigationPreloadState navigation_preload_state_;
+  blink::mojom::NavigationPreloadState navigation_preload_state_;
   base::Time last_update_check_;
   int64_t resources_total_size_bytes_;
 

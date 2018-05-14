@@ -8,12 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/common_audio/real_fourier.h"
+#include "common_audio/real_fourier.h"
 
-#include "webrtc/common_audio/real_fourier_ooura.h"
-#include "webrtc/common_audio/real_fourier_openmax.h"
-#include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
-#include "webrtc/rtc_base/checks.h"
+#include "common_audio/real_fourier_ooura.h"
+#include "common_audio/signal_processing/include/signal_processing_library.h"
+#include "rtc_base/checks.h"
+
+#ifdef RTC_USE_OPENMAX_DL
+#include "common_audio/real_fourier_openmax.h"
+#endif
 
 namespace webrtc {
 
@@ -54,4 +57,3 @@ RealFourier::fft_cplx_scoper RealFourier::AllocCplxBuffer(int count) {
 }
 
 }  // namespace webrtc
-

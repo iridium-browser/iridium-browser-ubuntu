@@ -17,6 +17,7 @@ namespace content {
 // TODO(jam): some of these don't below in the content layer, but are accessed
 // from there.
 CONTENT_EXPORT extern const char kChromeDevToolsScheme[];
+CONTENT_EXPORT extern const char kChromeErrorScheme[];
 CONTENT_EXPORT extern const char kChromeUIScheme[];  // Used for WebUIs.
 CONTENT_EXPORT extern const char kGuestScheme[];
 CONTENT_EXPORT extern const char kViewSourceScheme[];
@@ -39,7 +40,6 @@ CONTENT_EXPORT extern const char kChromeUIMediaInternalsHost[];
 CONTENT_EXPORT extern const char kChromeUIMemoryExhaustHost[];
 CONTENT_EXPORT extern const char kChromeUINetworkErrorHost[];
 CONTENT_EXPORT extern const char kChromeUINetworkErrorsListingHost[];
-CONTENT_EXPORT extern const char kChromeUINetworkViewCacheHost[];
 CONTENT_EXPORT extern const char kChromeUIResourcesHost[];
 CONTENT_EXPORT extern const char kChromeUIServiceWorkerInternalsHost[];
 CONTENT_EXPORT extern const char kChromeUITracingHost[];
@@ -65,6 +65,16 @@ CONTENT_EXPORT extern const char kChromeUIPpapiFlashCrashURL[];
 CONTENT_EXPORT extern const char kChromeUIPpapiFlashHangURL[];
 #if defined(OS_ANDROID)
 CONTENT_EXPORT extern const char kChromeUIGpuJavaCrashURL[];
+#endif
+#if defined(ADDRESS_SANITIZER) || defined(SYZYASAN)
+CONTENT_EXPORT extern const char kChromeUICrashHeapOverflowURL[];
+CONTENT_EXPORT extern const char kChromeUICrashHeapUnderflowURL[];
+CONTENT_EXPORT extern const char kChromeUICrashUseAfterFreeURL[];
+#endif
+#if defined(SYZYASAN)
+CONTENT_EXPORT extern const char kChromeUICrashCorruptHeapBlockURL[];
+CONTENT_EXPORT extern const char kChromeUICrashCorruptHeapURL[];
+CONTENT_EXPORT extern const char kChromeUICrashDcheckURL[];
 #endif
 
 // Special URL used to start a navigation to an error page.

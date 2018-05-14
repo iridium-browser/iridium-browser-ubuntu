@@ -21,7 +21,6 @@
 #ifndef SVGPathElement_h
 #define SVGPathElement_h
 
-#include "core/SVGNames.h"
 #include "core/svg/SVGAnimatedPath.h"
 #include "core/svg/SVGGeometryElement.h"
 #include "platform/heap/Handle.h"
@@ -41,7 +40,6 @@ class SVGPathElement final : public SVGGeometryElement {
 
   float getTotalLength() override;
   SVGPointTearOff* getPointAtLength(float distance) override;
-  unsigned getPathSegAtLength(float distance);
 
   SVGAnimatedPath* GetPath() const { return path_.Get(); }
   float ComputePathLength() const override;
@@ -51,7 +49,7 @@ class SVGPathElement final : public SVGGeometryElement {
 
   FloatRect GetBBox() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit SVGPathElement(Document&);
@@ -60,9 +58,10 @@ class SVGPathElement final : public SVGGeometryElement {
 
   void SvgAttributeChanged(const QualifiedName&) override;
 
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 
   Node::InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;

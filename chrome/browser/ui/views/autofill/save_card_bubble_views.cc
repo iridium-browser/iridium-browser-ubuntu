@@ -9,16 +9,24 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/views/autofill/dialog_view_ids.h"
 #include "chrome/browser/ui/views/autofill/view_util.h"
 #include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "components/autofill/core/browser/autofill_experiments.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/legal_message_line.h"
 #include "components/autofill/core/browser/ui/save_card_bubble_controller.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/image/image_skia_operations.h"
+#include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/button/blue_button.h"
@@ -37,6 +45,10 @@ namespace {
 // Fixed width of the bubble, in dip.
 const int kBubbleWidth = 395;
 
+// Dimensions of the Google Pay logo.
+const int kGooglePayLogoWidth = 57;
+const int kGooglePayLogoHeight = 16;
+
 std::unique_ptr<views::StyledLabel> CreateLegalMessageLineLabel(
     const LegalMessageLine& line,
     views::StyledLabelListener* listener) {
@@ -52,31 +64,39 @@ std::unique_ptr<views::StyledLabel> CreateLegalMessageLineLabel(
 }  // namespace
 
 SaveCardBubbleViews::SaveCardBubbleViews(views::View* anchor_view,
+                                         const gfx::Point& anchor_point,
                                          content::WebContents* web_contents,
                                          SaveCardBubbleController* controller)
-    : LocationBarBubbleDelegateView(anchor_view, web_contents),
+    : LocationBarBubbleDelegateView(anchor_view, anchor_point, web_contents),
       controller_(controller) {
   DCHECK(controller);
-  views::BubbleDialogDelegateView::CreateBubble(this);
+  if (IsAutofillAutoDismissableUpstreamBubbleExperimentEnabled()) {
+    mouse_handler_ =
+        std::make_unique<WebContentMouseHandler>(this, web_contents);
+  }
   chrome::RecordDialogCreation(chrome::DialogIdentifier::SAVE_CARD);
 }
 
-SaveCardBubbleViews::~SaveCardBubbleViews() {}
-
 void SaveCardBubbleViews::Show(DisplayReason reason) {
   ShowForReason(reason);
+  AssignIdsToDialogClientView();
 }
 
 void SaveCardBubbleViews::Hide() {
   controller_ = nullptr;
+  mouse_handler_ = nullptr;
   CloseBubble();
 }
 
 views::View* SaveCardBubbleViews::CreateExtraView() {
+  if (GetCurrentFlowStep() != LOCAL_SAVE_ONLY_STEP)
+    return nullptr;
+  // Learn More link is only shown on local save bubble.
   DCHECK(!learn_more_link_);
   learn_more_link_ = new views::Link(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   learn_more_link_->SetUnderline(false);
   learn_more_link_->set_listener(this);
+  learn_more_link_->set_id(DialogViewId::LEARN_MORE_LINK);
   return learn_more_link_;
 }
 
@@ -85,29 +105,42 @@ views::View* SaveCardBubbleViews::CreateFootnoteView() {
     return nullptr;
 
   // Use BoxLayout to provide insets around the label.
-  View* view = new View();
-  view->SetLayoutManager(new views::BoxLayout(views::BoxLayout::kVertical));
+  footnote_view_ = new View();
+  footnote_view_->SetLayoutManager(
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
+  footnote_view_->set_id(DialogViewId::FOOTNOTE_VIEW);
 
   // Add a StyledLabel for each line of the legal message.
-  for (const LegalMessageLine& line : controller_->GetLegalMessageLines())
-    view->AddChildView(CreateLegalMessageLineLabel(line, this).release());
+  for (const LegalMessageLine& line : controller_->GetLegalMessageLines()) {
+    footnote_view_->AddChildView(
+        CreateLegalMessageLineLabel(line, this).release());
+  }
 
-  return view;
+  // If on the first step of the 2-step upload flow, hide the footer area until
+  // it's time to actually accept the dialog and ToS.
+  if (GetCurrentFlowStep() == UPLOAD_SAVE_CVC_FIX_FLOW_STEP_1_OFFER_UPLOAD)
+    footnote_view_->SetVisible(false);
+
+  return footnote_view_;
 }
 
 bool SaveCardBubbleViews::Accept() {
-  // The main content ViewStack for local save and happy-path upload save should
-  // only ever have 1 View on it. Upload save can have a second View if CVC
-  // needs to be requested. Assert that the ViewStack has no more than 2 Views
-  // and that if it *does* have 2, it's because CVC is being requested.
-  DCHECK_LE(view_stack_->size(), 2U);
-  DCHECK(view_stack_->size() == 1 || controller_->ShouldRequestCvcFromUser());
-  if (controller_->ShouldRequestCvcFromUser() && view_stack_->size() == 1) {
-    // If user accepted upload but more info is needed, push the next view onto
-    // the stack.
-    view_stack_->Push(CreateRequestCvcView(), /*animate=*/true);
+  DCHECK(initial_step_ || controller_->ShouldRequestCvcFromUser());
+  if (GetCurrentFlowStep() == UPLOAD_SAVE_CVC_FIX_FLOW_STEP_1_OFFER_UPLOAD) {
+    // If user accepted upload but more info is needed, swap the content view
+    // and adjust the layout.
+    initial_step_ = false;
+    DCHECK(controller_);
+    controller_->ContinueToRequestCvcStage();
+    RemoveAllChildViews(/*delete_children=*/true);
+    AddChildView(CreateRequestCvcView().release());
+    GetWidget()->UpdateWindowTitle();
+    GetWidget()->UpdateWindowIcon();
     // Disable the Save button until a valid CVC is entered:
-    GetDialogClientView()->UpdateDialogButtons();
+    DialogModelChanged();
+    // Make the legal messaging footer appear:
+    DCHECK(footnote_view_);
+    footnote_view_->SetVisible(true);
     // Resize the bubble if it's grown larger:
     SizeToContents();
     return false;
@@ -126,30 +159,105 @@ bool SaveCardBubbleViews::Cancel() {
 }
 
 bool SaveCardBubbleViews::Close() {
-  // Cancel is logged as a different user action than closing, so override
-  // Close() to prevent the superclass' implementation from calling Cancel().
-  // Return true to indicate that the bubble can be closed.
+  // If there is a cancel button (non-Material UI), Cancel is logged as a
+  // different user action than closing, so override Close() to prevent the
+  // superclass' implementation from calling Cancel().
+  //
+  // Clicking the top-right [X] close button and/or focusing then unfocusing the
+  // bubble count as a close action only (without calling Cancel), which means
+  // we can't tell the controller to permanently hide the bubble on close,
+  // because the user simply dismissed/ignored the bubble; they might want to
+  // access the bubble again from the location bar icon. Return true to indicate
+  // that the bubble can be closed.
   return true;
+}
+
+int SaveCardBubbleViews::GetDialogButtons() const {
+  // Material UI has no "No thanks" button in favor of an [X].
+  return ui::MaterialDesignController::IsSecondaryUiMaterial()
+             ? ui::DIALOG_BUTTON_OK
+             : ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
 }
 
 base::string16 SaveCardBubbleViews::GetDialogButtonLabel(
     ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16(button == ui::DIALOG_BUTTON_OK
-                                       ? IDS_AUTOFILL_SAVE_CARD_PROMPT_ACCEPT
-                                       : IDS_NO_THANKS);
+  switch (GetCurrentFlowStep()) {
+    // Local save has two buttons:
+    case LOCAL_SAVE_ONLY_STEP:
+      return l10n_util::GetStringUTF16(
+          button == ui::DIALOG_BUTTON_OK ? IDS_AUTOFILL_SAVE_CARD_PROMPT_ACCEPT
+                                         : IDS_NO_THANKS);
+    // Upload save has one button but it can say three different things:
+    case UPLOAD_SAVE_ONLY_STEP:
+      return l10n_util::GetStringUTF16(
+          button == ui::DIALOG_BUTTON_OK ? IDS_AUTOFILL_SAVE_CARD_PROMPT_ACCEPT
+                                         : IDS_NO_THANKS);
+    case UPLOAD_SAVE_CVC_FIX_FLOW_STEP_1_OFFER_UPLOAD:
+      return l10n_util::GetStringUTF16(button == ui::DIALOG_BUTTON_OK
+                                           ? IDS_AUTOFILL_SAVE_CARD_PROMPT_NEXT
+                                           : IDS_NO_THANKS);
+    case UPLOAD_SAVE_CVC_FIX_FLOW_STEP_2_REQUEST_CVC:
+      return l10n_util::GetStringUTF16(
+          button == ui::DIALOG_BUTTON_OK ? IDS_AUTOFILL_SAVE_CARD_PROMPT_CONFIRM
+                                         : IDS_NO_THANKS);
+    default:
+      NOTREACHED();
+      return base::string16();
+  }
+}
+
+bool SaveCardBubbleViews::IsDialogButtonEnabled(ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_CANCEL)
+    return true;
+
+  DCHECK_EQ(ui::DIALOG_BUTTON_OK, button);
+  return !cvc_textfield_ ||
+         controller_->InputCvcIsValid(cvc_textfield_->text());
 }
 
 gfx::Size SaveCardBubbleViews::CalculatePreferredSize() const {
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillUpstreamUseGooglePayBranding)) {
+    const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
+                          DISTANCE_BUBBLE_PREFERRED_WIDTH) -
+                      margins().width();
+    return gfx::Size(width, GetHeightForWidth(width));
+  }
   return gfx::Size(kBubbleWidth, GetHeightForWidth(kBubbleWidth));
+}
+
+bool SaveCardBubbleViews::ShouldShowCloseButton() const {
+  // The [X] is shown for Material UI.
+  return ui::MaterialDesignController::IsSecondaryUiMaterial();
 }
 
 base::string16 SaveCardBubbleViews::GetWindowTitle() const {
   return controller_ ? controller_->GetWindowTitle() : base::string16();
 }
 
+gfx::ImageSkia SaveCardBubbleViews::GetWindowIcon() {
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillUpstreamUseGooglePayBranding)) {
+    return gfx::ImageSkiaOperations::CreateTiledImage(
+        gfx::CreateVectorIcon(kGooglePayLogoWithVerticalSeparatorIcon,
+                              gfx::kPlaceholderColor),
+        /*x=*/0, /*y=*/0, kGooglePayLogoWidth, kGooglePayLogoHeight);
+  }
+  return gfx::CreateVectorIcon(kGoogleGLogoIcon, 16, gfx::kPlaceholderColor);
+}
+
+bool SaveCardBubbleViews::ShouldShowWindowIcon() const {
+  // We show the window icon (Google "G" or Google Pay logo) in non-local save
+  // scenarios.
+  return GetCurrentFlowStep() != LOCAL_SAVE_ONLY_STEP;
+}
+
 void SaveCardBubbleViews::WindowClosing() {
-  if (controller_)
+  if (controller_) {
     controller_->OnBubbleClosed();
+    controller_ = nullptr;
+    mouse_handler_ = nullptr;
+  }
 }
 
 void SaveCardBubbleViews::LinkClicked(views::Link* source, int event_flags) {
@@ -184,26 +292,65 @@ void SaveCardBubbleViews::StyledLabelLinkClicked(views::StyledLabel* label,
   NOTREACHED();
 }
 
-// Create view containing everything except for the footnote.
+void SaveCardBubbleViews::ContentsChanged(views::Textfield* sender,
+                                          const base::string16& new_contents) {
+  DCHECK_EQ(cvc_textfield_, sender);
+  DialogModelChanged();
+}
+
+views::View* SaveCardBubbleViews::GetFootnoteViewForTesting() {
+  return footnote_view_;
+}
+
+SaveCardBubbleViews::~SaveCardBubbleViews() {}
+
+SaveCardBubbleViews::CurrentFlowStep SaveCardBubbleViews::GetCurrentFlowStep()
+    const {
+  // No legal messages means this is not upload save.
+  if (controller_->GetLegalMessageLines().empty())
+    return LOCAL_SAVE_ONLY_STEP;
+  // If we're not requesting CVC, this is the only step on the upload path.
+  if (!controller_->ShouldRequestCvcFromUser())
+    return UPLOAD_SAVE_ONLY_STEP;
+  // Must be on the CVC fix flow on the upload path.
+  if (initial_step_)
+    return UPLOAD_SAVE_CVC_FIX_FLOW_STEP_1_OFFER_UPLOAD;
+
+  return UPLOAD_SAVE_CVC_FIX_FLOW_STEP_2_REQUEST_CVC;
+}
+
 std::unique_ptr<views::View> SaveCardBubbleViews::CreateMainContentView() {
-  auto view = base::MakeUnique<views::View>();
+  std::unique_ptr<views::View> view = std::make_unique<views::View>();
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
 
-  view->SetLayoutManager(new views::BoxLayout(
+  view->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kVertical, gfx::Insets(),
       provider->GetDistanceMetric(views::DISTANCE_UNRELATED_CONTROL_VERTICAL)));
+  view->set_id(GetCurrentFlowStep() == LOCAL_SAVE_ONLY_STEP
+                   ? DialogViewId::MAIN_CONTENT_VIEW_LOCAL
+                   : DialogViewId::MAIN_CONTENT_VIEW_UPLOAD);
+
+  // If applicable, add the upload explanation label.  Appears above the card
+  // info.
+  base::string16 explanation = controller_->GetExplanatoryMessage();
+  if (!explanation.empty()) {
+    auto* explanation_label = new views::Label(explanation);
+    explanation_label->SetMultiLine(true);
+    explanation_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    view->AddChildView(explanation_label);
+  }
 
   // Add the card type icon, last four digits and expiration date.
-  views::View* description_view = new views::View();
-  description_view->SetLayoutManager(new views::BoxLayout(
+  auto* description_view = new views::View();
+  description_view->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kHorizontal, gfx::Insets(),
       provider->GetDistanceMetric(views::DISTANCE_RELATED_BUTTON_HORIZONTAL)));
   view->AddChildView(description_view);
 
   const CreditCard& card = controller_->GetCard();
-  views::ImageView* card_type_icon = new views::ImageView();
+  auto* card_type_icon = new views::ImageView();
   card_type_icon->SetImage(
-      ResourceBundle::GetSharedInstance()
+      ui::ResourceBundle::GetSharedInstance()
           .GetImageNamed(CreditCard::IconResourceId(card.network()))
           .AsImageSkia());
   card_type_icon->SetTooltipText(card.NetworkForDisplay());
@@ -211,74 +358,70 @@ std::unique_ptr<views::View> SaveCardBubbleViews::CreateMainContentView() {
       views::CreateSolidBorder(1, SkColorSetA(SK_ColorBLACK, 10)));
   description_view->AddChildView(card_type_icon);
 
-  description_view->AddChildView(new views::Label(
-      base::string16(kMidlineEllipsis) + card.LastFourDigits()));
+  description_view->AddChildView(
+      new views::Label(card.NetworkAndLastFourDigits()));
   description_view->AddChildView(
       new views::Label(card.AbbreviatedExpirationDateForDisplay()));
-
-  // Optionally add label that will contain an explanation for upload.
-  base::string16 explanation = controller_->GetExplanatoryMessage();
-  if (!explanation.empty()) {
-    views::Label* explanation_label = new views::Label(explanation);
-    explanation_label->SetMultiLine(true);
-    explanation_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    view->AddChildView(explanation_label);
-  }
 
   return view;
 }
 
 std::unique_ptr<views::View> SaveCardBubbleViews::CreateRequestCvcView() {
-  auto request_cvc_view = base::MakeUnique<views::View>();
+  auto request_cvc_view = std::make_unique<views::View>();
+  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
+
+  request_cvc_view->SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kVertical, gfx::Insets(),
+      provider->GetDistanceMetric(views::DISTANCE_UNRELATED_CONTROL_VERTICAL)));
   request_cvc_view->SetBackground(views::CreateThemedSolidBackground(
       request_cvc_view.get(), ui::NativeTheme::kColorId_BubbleBackground));
-  views::BoxLayout* layout =
-      new views::BoxLayout(views::BoxLayout::kHorizontal, gfx::Insets(),
-                           ChromeLayoutProvider::Get()->GetDistanceMetric(
-                               views::DISTANCE_RELATED_BUTTON_HORIZONTAL));
+  request_cvc_view->set_id(DialogViewId::REQUEST_CVC_VIEW);
+
+  const CreditCard& card = controller_->GetCard();
+  auto* explanation_label = new views::Label(l10n_util::GetStringFUTF16(
+      IDS_AUTOFILL_SAVE_CARD_PROMPT_ENTER_CVC_EXPLANATION,
+      card.NetworkAndLastFourDigits()));
+  explanation_label->SetMultiLine(true);
+  explanation_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  request_cvc_view->AddChildView(explanation_label);
+
+  auto* cvc_entry_view = new views::View();
+  auto layout = std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kHorizontal, gfx::Insets(),
+      provider->GetDistanceMetric(views::DISTANCE_RELATED_BUTTON_HORIZONTAL));
   layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
-  request_cvc_view->SetLayoutManager(layout);
+  cvc_entry_view->SetLayoutManager(std::move(layout));
 
   DCHECK(!cvc_textfield_);
   cvc_textfield_ = CreateCvcTextfield();
   cvc_textfield_->set_controller(this);
-  request_cvc_view->AddChildView(cvc_textfield_);
+  cvc_textfield_->set_id(DialogViewId::CVC_TEXTFIELD);
+  cvc_entry_view->AddChildView(cvc_textfield_);
 
-  views::ImageView* cvc_image = new views::ImageView();
+  auto* cvc_image = new views::ImageView();
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   cvc_image->SetImage(
       rb.GetImageSkiaNamed(controller_->GetCvcImageResourceId()));
-  request_cvc_view->AddChildView(cvc_image);
+  cvc_entry_view->AddChildView(cvc_image);
 
-  request_cvc_view->AddChildView(new views::Label(
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_SAVE_CARD_PROMPT_ENTER_CVC)));
-
+  request_cvc_view->AddChildView(cvc_entry_view);
   return request_cvc_view;
 }
 
-bool SaveCardBubbleViews::IsDialogButtonEnabled(ui::DialogButton button) const {
-  if (button == ui::DIALOG_BUTTON_CANCEL)
-    return true;
-
-  DCHECK_EQ(ui::DIALOG_BUTTON_OK, button);
-  return !cvc_textfield_ ||
-         controller_->InputCvcIsValid(cvc_textfield_->text());
-}
-
-void SaveCardBubbleViews::ContentsChanged(views::Textfield* sender,
-                                          const base::string16& new_contents) {
-  DCHECK_EQ(cvc_textfield_, sender);
-  GetDialogClientView()->UpdateDialogButtons();
+void SaveCardBubbleViews::AssignIdsToDialogClientView() {
+  auto* ok_button = GetDialogClientView()->ok_button();
+  if (ok_button)
+    ok_button->set_id(DialogViewId::OK_BUTTON);
+  auto* cancel_button = GetDialogClientView()->cancel_button();
+  if (cancel_button)
+    cancel_button->set_id(DialogViewId::CANCEL_BUTTON);
 }
 
 void SaveCardBubbleViews::Init() {
-  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kVertical));
-  view_stack_ = new ViewStack();
-  view_stack_->SetBackground(views::CreateThemedSolidBackground(
-      view_stack_, ui::NativeTheme::kColorId_BubbleBackground));
-  view_stack_->Push(CreateMainContentView(), /*animate=*/false);
-  AddChildView(view_stack_);
+  SetLayoutManager(
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
+  AddChildView(CreateMainContentView().release());
 }
 
 }  // namespace autofill

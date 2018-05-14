@@ -7,8 +7,6 @@
 #import <UIKit/UIKit.h>
 #include <vector>
 
-#import "ios/chrome/browser/autofill/form_suggestion_provider.h"
-
 @class AutofillAgent;
 @protocol FormSuggestionProvider;
 
@@ -64,6 +62,9 @@ passwordGenerationManager:
 // method is a no-op if the appropriate experiment is not set.
 - (void)sendAutofillTypePredictionsToRenderer:
     (const std::vector<autofill::FormStructure*>&)forms;
+
+// Sets a weak reference to the view controller used to present UI.
+- (void)setBaseViewController:(UIViewController*)baseViewController;
 
 @end
 

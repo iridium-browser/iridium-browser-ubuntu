@@ -53,6 +53,12 @@ class NoAlertOpen(ChromeDriverException):
   pass
 class NoSuchCookie(ChromeDriverException):
   pass
+class InvalidArgument(ChromeDriverException):
+  pass
+class ElementNotInteractable(ChromeDriverException):
+  pass
+class UnsupportedOperation(ChromeDriverException):
+  pass
 
 def _ExceptionForLegacyResponse(response):
   exception_class_map = {
@@ -64,6 +70,9 @@ def _ExceptionForLegacyResponse(response):
     11: ElementNotVisible,
     12: InvalidElementState,
     13: UnknownError,
+    14: InvalidArgument,
+    15: ElementNotInteractable,
+    16: UnsupportedOperation,
     17: JavaScriptError,
     19: XPathLookupError,
     21: Timeout,
@@ -100,11 +109,14 @@ def _ExceptionForStandardResponse(response):
     'asynchronous script timeout': ScriptTimeout,
     'invalid selector': InvalidSelector,
     'session not created exception': SessionNotCreatedException,
-    'no such cookie': NoSuchCookie
+    'no such cookie': NoSuchCookie,
+    'invalid argument': InvalidArgument,
+    'element not interactable': ElementNotInteractable,
+    'unsupported operation': UnsupportedOperation,
   }
 
-  error = response['error']
-  msg = response['message']
+  error = response['value']['error']
+  msg = response['value']['message']
   return exception_map.get(error, ChromeDriverException)(msg)
 
 class ChromeDriver(object):
@@ -119,8 +131,10 @@ class ChromeDriver(object):
                download_dir=None, network_connection=None,
                send_w3c_capability=None, send_w3c_request=None,
                page_load_strategy=None, unexpected_alert_behaviour=None,
-               devtools_events_to_log=None):
+               devtools_events_to_log=None, accept_insecure_certs=None,
+               test_name=None):
     self._executor = command_executor.CommandExecutor(server_url)
+    self.w3c_compliant = False
 
     options = {}
 
@@ -139,7 +153,7 @@ class ChromeDriver(object):
     elif chrome_binary:
       options['binary'] = chrome_binary
 
-    if sys.platform.startswith('linux') and not util.Is64Bit():
+    if sys.platform.startswith('linux') and android_package is None:
       if chrome_switches is None:
         chrome_switches = []
       # Workaround for crbug.com/611886.
@@ -209,22 +223,28 @@ class ChromeDriver(object):
     if network_connection:
       params['networkConnectionEnabled'] = network_connection
 
+    if accept_insecure_certs is not None:
+      params['acceptInsecureCerts'] = accept_insecure_certs
+
+    if test_name is not None:
+      params['goog:testName'] = test_name
+
     if send_w3c_request:
       params = {'capabilities': {'alwaysMatch': params}}
     else:
       params = {'desiredCapabilities': params}
 
     response = self._ExecuteCommand(Command.NEW_SESSION, params)
-    if isinstance(response['status'], basestring):
+    if len(response.keys()) == 1 and 'value' in response.keys():
       self.w3c_compliant = True
+      self._session_id = response['value']['sessionId']
+      self.capabilities = self._UnwrapValue(response['value']['capabilities'])
     elif isinstance(response['status'], int):
       self.w3c_compliant = False
+      self._session_id = response['sessionId']
+      self.capabilities = self._UnwrapValue(response['value'])
     else:
       raise UnknownError("unexpected response")
-
-    self._session_id = response['sessionId']
-    self.capabilities = self._UnwrapValue(response['value'])
-
 
   def _WrapValue(self, value):
     """Wrap value from client side for chromedriver side."""
@@ -266,10 +286,10 @@ class ChromeDriver(object):
   def _ExecuteCommand(self, command, params={}):
     params = self._WrapValue(params)
     response = self._executor.Execute(command, params)
-    if ('status' in response and isinstance(response['status'], int) and
-        response['status'] != 0):
+    if (not self.w3c_compliant and 'status' in response
+        and response['status'] != 0):
       raise _ExceptionForLegacyResponse(response)
-    elif 'error' in response:
+    elif self.w3c_compliant and 'error' in response['value']:
       raise _ExceptionForStandardResponse(response)
     return response
 
@@ -447,13 +467,25 @@ class ChromeDriver(object):
                                {'windowHandle': 'current'})
     return [size['width'], size['height']]
 
+  def GetWindowRect(self):
+    rect = self.ExecuteCommand(Command.GET_WINDOW_RECT)
+    return [rect['width'], rect['height'], rect['x'], rect['y']]
+
   def SetWindowSize(self, width, height):
     self.ExecuteCommand(
         Command.SET_WINDOW_SIZE,
         {'windowHandle': 'current', 'width': width, 'height': height})
 
+  def SetWindowRect(self, width, height, x, y):
+    self.ExecuteCommand(
+        Command.SET_WINDOW_SIZE,
+        {'width': width, 'height': height, 'x': x, 'y': y})
+
   def MaximizeWindow(self):
     self.ExecuteCommand(Command.MAXIMIZE_WINDOW, {'windowHandle': 'current'})
+
+  def FullScreenWindow(self):
+    self.ExecuteCommand(Command.FULLSCREEN_WINDOW)
 
   def Quit(self):
     """Quits the browser and ends the session."""

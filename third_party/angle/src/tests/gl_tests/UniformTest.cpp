@@ -43,6 +43,9 @@ class UniformTest : public ANGLETest
             "  gl_FragColor = vec4(uniF + float(uniI));\n"
             "  gl_FragColor += vec4(uniB ? 1.0 : 0.0);\n"
             "  gl_FragColor += vec4(uniBArr[0] ? 1.0 : 0.0);\n"
+            "  gl_FragColor += vec4(uniBArr[1] ? 1.0 : 0.0);\n"
+            "  gl_FragColor += vec4(uniBArr[2] ? 1.0 : 0.0);\n"
+            "  gl_FragColor += vec4(uniBArr[3] ? 1.0 : 0.0);\n"
             "}";
 
         mProgram = CompileProgram(vertexShader, fragShader);
@@ -100,32 +103,21 @@ TEST_P(UniformTest, GetUniformNoCurrentProgram)
 
 TEST_P(UniformTest, UniformArrayLocations)
 {
-    // TODO(geofflang): Figure out why this is broken on Intel OpenGL
-    if (IsIntel() && getPlatformRenderer() == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
-    {
-        std::cout << "Test skipped on Intel OpenGL." << std::endl;
-        return;
-    }
-
-    const std::string vertexShader = SHADER_SOURCE
-    (
-        precision mediump float;
+    const std::string vertexShader =
+        R"(precision mediump float;
         uniform float uPosition[4];
         void main(void)
         {
             gl_Position = vec4(uPosition[0], uPosition[1], uPosition[2], uPosition[3]);
-        }
-    );
+        })";
 
-    const std::string fragShader = SHADER_SOURCE
-    (
-        precision mediump float;
+    const std::string fragShader =
+        R"(precision mediump float;
         uniform float uColor[4];
         void main(void)
         {
             gl_FragColor = vec4(uColor[0], uColor[1], uColor[2], uColor[3]);
-        }
-    );
+        })";
 
     GLuint program = CompileProgram(vertexShader, fragShader);
     ASSERT_NE(program, 0u);
@@ -235,6 +227,11 @@ TEST_P(UniformTest, FloatUniformStateQuery)
 // Test that integer to float GetUniform rounds values correctly.
 TEST_P(UniformTest, IntUniformStateQuery)
 {
+    // Qualcomm seems to have a bug where integer uniforms are internally stored as float, and
+    // large values are rounded to the nearest float representation of an integer.
+    // TODO(jmadill): Lift this suppression when/if the bug is fixed.
+    ANGLE_SKIP_TEST_IF(IsAndroid() && IsOpenGLES());
+
     std::vector<GLint> inValues;
     std::vector<GLint> expectedIValues;
     std::vector<GLfloat> expectedFValues;
@@ -266,10 +263,10 @@ TEST_P(UniformTest, IntUniformStateQuery)
         GLint expectedValue = expectedIValues[index];
 
         glUniform1i(mUniformILocation, inValue);
-        GLint testValue;
+        GLint testValue = 1234567;
         glGetUniformiv(mProgram, mUniformILocation, &testValue);
         ASSERT_GL_NO_ERROR();
-        EXPECT_EQ(expectedValue, testValue);
+        EXPECT_EQ(expectedValue, testValue) << " with glGetUniformiv";
     }
 
     for (size_t index = 0; index < inValues.size(); ++index)
@@ -278,10 +275,10 @@ TEST_P(UniformTest, IntUniformStateQuery)
         GLfloat expectedValue = expectedFValues[index];
 
         glUniform1i(mUniformILocation, inValue);
-        GLfloat testValue;
+        GLfloat testValue = 124567.0;
         glGetUniformfv(mProgram, mUniformILocation, &testValue);
         ASSERT_GL_NO_ERROR();
-        EXPECT_EQ(expectedValue, testValue);
+        EXPECT_EQ(expectedValue, testValue) << " with glGetUniformfv";
     }
 }
 
@@ -343,6 +340,11 @@ TEST_P(UniformTest, BooleanArrayUniformStateQuery)
         glGetUniformLocation(mProgram, "uniBArr[3]"),
     };
 
+    for (int i = 0; i < 4; ++i)
+    {
+        ASSERT_NE(-1, locations[i]) << " with i=" << i;
+    }
+
     // Calling Uniform1iv
     glUniform1iv(locations[0], 4, boolValuesi);
 
@@ -350,14 +352,14 @@ TEST_P(UniformTest, BooleanArrayUniformStateQuery)
     {
         int value = -1;
         glGetUniformiv(mProgram, locations[idx], &value);
-        EXPECT_EQ(boolValuesi[idx], value);
+        EXPECT_EQ(boolValuesi[idx], value) << " with Uniform1iv/GetUniformiv at " << idx;
     }
 
     for (unsigned int idx = 0; idx < 4; ++idx)
     {
         float value = -1.0f;
         glGetUniformfv(mProgram, locations[idx], &value);
-        EXPECT_EQ(boolValuesf[idx], value);
+        EXPECT_EQ(boolValuesf[idx], value) << " with Uniform1iv/GetUniformfv at " << idx;
     }
 
     // Calling Uniform1fv
@@ -367,14 +369,14 @@ TEST_P(UniformTest, BooleanArrayUniformStateQuery)
     {
         int value = -1;
         glGetUniformiv(mProgram, locations[idx], &value);
-        EXPECT_EQ(boolValuesi[idx], value);
+        EXPECT_EQ(boolValuesi[idx], value) << " with Uniform1fv/GetUniformiv at " << idx;
     }
 
     for (unsigned int idx = 0; idx < 4; ++idx)
     {
         float value = -1.0f;
         glGetUniformfv(mProgram, locations[idx], &value);
-        EXPECT_EQ(boolValuesf[idx], value);
+        EXPECT_EQ(boolValuesf[idx], value) << " with Uniform1fv/GetUniformfv at " << idx;
     }
 
     ASSERT_GL_NO_ERROR();
@@ -403,7 +405,7 @@ class UniformTestES3 : public ANGLETest
 };
 
 // Test queries for transposed arrays of non-square matrix uniforms.
-TEST_P(UniformTestES3, TranposedMatrixArrayUniformStateQuery)
+TEST_P(UniformTestES3, TransposedMatrixArrayUniformStateQuery)
 {
     const std::string &vertexShader =
         "#version 300 es\n"
@@ -415,6 +417,10 @@ TEST_P(UniformTestES3, TranposedMatrixArrayUniformStateQuery)
         "out vec4 color;\n"
         "void main() {\n"
         "  color = vec4(uniMat3x2[0][0][0]);\n"
+        "  color += vec4(uniMat3x2[1][0][0]);\n"
+        "  color += vec4(uniMat3x2[2][0][0]);\n"
+        "  color += vec4(uniMat3x2[3][0][0]);\n"
+        "  color += vec4(uniMat3x2[4][0][0]);\n"
         "}";
 
     mProgram = CompileProgram(vertexShader, fragShader);
@@ -474,6 +480,10 @@ TEST_P(UniformTestES3, OverflowArray)
         "out vec4 color;\n"
         "void main() {\n"
         "  color = vec4(uniMat3x2[0][0][0] + uniF[0]);\n"
+        "  color = vec4(uniMat3x2[1][0][0] + uniF[1]);\n"
+        "  color = vec4(uniMat3x2[2][0][0] + uniF[2]);\n"
+        "  color = vec4(uniMat3x2[3][0][0] + uniF[3]);\n"
+        "  color = vec4(uniMat3x2[4][0][0] + uniF[4]);\n"
         "}";
 
     mProgram = CompileProgram(vertexShader, fragShader);
@@ -595,11 +605,8 @@ TEST_P(UniformTest, SamplerUniformsAppearOnce)
     int maxVertexTextureImageUnits = 0;
     glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &maxVertexTextureImageUnits);
 
-    if (maxVertexTextureImageUnits == 0)
-    {
-        std::cout << "Renderer doesn't support vertex texture fetch, skipping test" << std::endl;
-        return;
-    }
+    // Renderer doesn't support vertex texture fetch, skipping test.
+    ANGLE_SKIP_TEST_IF(!maxVertexTextureImageUnits);
 
     const std::string &vertShader =
         "attribute vec2 position;\n"
@@ -920,6 +927,37 @@ TEST_P(UniformTestES3, StructWithNonSquareMatrixAndBool)
     glUniform1i(location, 1);
 
     drawQuad(program.get(), "a_position", 0.0f);
+
+    ASSERT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
+}
+
+// Test that uniforms with reserved OpenGL names that aren't reserved in GL ES 2 work correctly.
+TEST_P(UniformTest, UniformWithReservedOpenGLName)
+{
+    const char *vertexShader =
+        "attribute highp vec4 a_position;\n"
+        "void main()\n"
+        "{\n"
+        "    gl_Position = a_position;\n"
+        "}\n";
+    const char *fragShader =
+        "precision mediump float;\n"
+        "uniform float buffer;"
+        "void main() {\n"
+        "    gl_FragColor = vec4(buffer);\n"
+        "}";
+
+    mProgram = CompileProgram(vertexShader, fragShader);
+    ASSERT_NE(mProgram, 0u);
+
+    GLint location = glGetUniformLocation(mProgram, "buffer");
+    ASSERT_NE(-1, location);
+
+    glUseProgram(mProgram);
+    glUniform1f(location, 1.0f);
+
+    drawQuad(mProgram, "a_position", 0.0f);
 
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);

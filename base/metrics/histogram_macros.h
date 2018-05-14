@@ -36,14 +36,23 @@
 // All of these macros must be called with |name| as a runtime constant.
 
 // Sample usage:
-//   UMA_HISTOGRAM_ENUMERATION("My.Enumeration", VALUE, EVENT_MAX_VALUE);
-// New Enum values can be added, but existing enums must never be renumbered or
-// delete and reused. The value in |sample| must be strictly less than
-// |enum_max|.
+//   // These values are persisted to logs. Entries should not be renumbered and
+//   // numeric values should never be reused.
+//   enum class MyEnum {
+//     FIRST_VALUE = 0,
+//     SECOND_VALUE = 1,
+//     ...
+//     FINAL_VALUE = N,
+//     COUNT
+//   };
+//   UMA_HISTOGRAM_ENUMERATION("My.Enumeration",
+//                             MyEnum::SOME_VALUE, MyEnum::COUNT);
+//
+// Note: The value in |sample| must be strictly less than |enum_size|.
 
-#define UMA_HISTOGRAM_ENUMERATION(name, sample, enum_max) \
-  INTERNAL_HISTOGRAM_ENUMERATION_WITH_FLAG(               \
-      name, sample, enum_max, base::HistogramBase::kUmaTargetedHistogramFlag)
+#define UMA_HISTOGRAM_ENUMERATION(name, sample, enum_size) \
+  INTERNAL_HISTOGRAM_ENUMERATION_WITH_FLAG(                \
+      name, sample, enum_size, base::HistogramBase::kUmaTargetedHistogramFlag)
 
 // Histogram for boolean values.
 
@@ -167,7 +176,7 @@
 // as the number of buckets recorded.
 
 // Sample usage:
-//   UMA_HISTOGRAM_CUSTOM_TIMES("Very.Long.Timing.Histogram", duration_in_ms,
+//   UMA_HISTOGRAM_CUSTOM_TIMES("Very.Long.Timing.Histogram", time_delta,
 //       base::TimeDelta::FromSeconds(1), base::TimeDelta::FromDays(1), 100);
 #define UMA_HISTOGRAM_CUSTOM_TIMES(name, sample, min, max, bucket_count)       \
     STATIC_HISTOGRAM_POINTER_BLOCK(name, AddTime(sample),                      \
@@ -238,32 +247,6 @@
     INTERNAL_HISTOGRAM_ENUMERATION_WITH_FLAG(                                  \
         name, sample, enum_max,                                                \
         base::HistogramBase::kUmaStabilityHistogramFlag)
-
-//------------------------------------------------------------------------------
-// Sparse histograms.
-
-// Sparse histograms are well suited for recording counts of exact sample values
-// that are sparsely distributed over a large range.
-//
-// UMA_HISTOGRAM_SPARSE_SLOWLY is good for sparsely distributed and/or
-// infrequently recorded values since the implementation is slower
-// and takes more memory. For sparse data, sparse histograms have the advantage
-// of using less memory client-side, because they allocate buckets on demand
-// rather than preallocating. However, server-side, we still need to load all
-// buckets, across all users, at once.
-
-// Thus, please avoid exploding such histograms, i.e. uploading many many
-// distinct values to the server (across all users). Concretely, keep the number
-// of distinct values <= 100 at best, definitely <= 1000. If you have no
-// guarantees on the range of your data, use capping, e.g.:
-//   UMA_HISTOGRAM_SPARSE_SLOWLY("MyHistogram",
-//                               std::max(0, std::min(200, value)));
-//
-// For instance, Sqlite.Version.* are sparse because for any given database,
-// there's going to be exactly one version logged.
-// The |sample| can be a negative or non-negative number.
-#define UMA_HISTOGRAM_SPARSE_SLOWLY(name, sample)                              \
-    INTERNAL_HISTOGRAM_SPARSE_SLOWLY(name, sample)
 
 //------------------------------------------------------------------------------
 // Histogram instantiation helpers.

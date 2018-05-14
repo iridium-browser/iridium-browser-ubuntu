@@ -5,17 +5,20 @@
 #ifndef COMPONENTS_UPDATE_CLIENT_UTILS_H_
 #define COMPONENTS_UPDATE_CLIENT_UTILS_H_
 
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/memory/ref_counted.h"
 #include "components/update_client/update_client.h"
 
 class GURL;
 
 namespace base {
+class DictionaryValue;
 class FilePath;
 }
 
@@ -40,9 +43,10 @@ using InstallerAttribute = std::pair<std::string, std::string>;
 // expected to contain XML data. The caller owns the returned object.
 std::unique_ptr<net::URLFetcher> SendProtocolRequest(
     const GURL& url,
+    const std::map<std::string, std::string>& protocol_request_extra_headers,
     const std::string& protocol_request,
     net::URLFetcherDelegate* url_fetcher_delegate,
-    net::URLRequestContextGetter* url_request_context_getter);
+    scoped_refptr<net::URLRequestContextGetter> url_request_context_getter);
 
 // Returns true if the url request of |fetcher| was succesful.
 bool FetchSuccess(const net::URLFetcher& fetcher);
@@ -86,7 +90,12 @@ void RemoveUnsecureUrls(std::vector<GURL>* urls);
 
 // Adapter function for the old definitions of CrxInstaller::Install until the
 // component installer code is migrated to use a Result instead of bool.
-CrxInstaller::Result InstallFunctionWrapper(base::Callback<bool()> callback);
+CrxInstaller::Result InstallFunctionWrapper(
+    base::OnceCallback<bool()> callback);
+
+// Deserializes the CRX manifest. The top level must be a dictionary.
+std::unique_ptr<base::DictionaryValue> ReadManifest(
+    const base::FilePath& unpack_path);
 
 }  // namespace update_client
 

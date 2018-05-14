@@ -12,14 +12,13 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_authentication.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_test_base.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_test_impl.h"
@@ -30,7 +29,6 @@
 #include "chrome/common/chrome_features.h"
 #include "chromeos/cryptohome/mock_async_method_caller.h"
 #include "chromeos/cryptohome/mock_homedir_methods.h"
-#include "components/sync/model/attachments/attachment_service_proxy_for_test.h"
 #include "components/sync/model/fake_sync_change_processor.h"
 #include "components/sync/model/sync_change.h"
 #include "components/sync/model/sync_error_factory_mock.h"
@@ -137,7 +135,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest,
 
 IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest,
                        PRE_CreateAndRemoveSupervisedUser) {
-  SigninAsSupervisedUser(true, 0, kTestSupervisedUserDisplayName);
+  SigninAsSupervisedUser(0, kTestSupervisedUserDisplayName);
 }
 
 IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest,
@@ -181,7 +179,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserOwnerCreationTest,
 
 IN_PROC_BROWSER_TEST_F(SupervisedUserOwnerCreationTest,
                        PRE_CreateAndRemoveSupervisedUser) {
-  SigninAsSupervisedUser(true, 0, kTestSupervisedUserDisplayName);
+  SigninAsSupervisedUser(0, kTestSupervisedUserDisplayName);
 }
 
 IN_PROC_BROWSER_TEST_F(SupervisedUserOwnerCreationTest,
@@ -199,18 +197,14 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserTransactionCleanupTest,
   StartFlowLoginAsManager();
   FillNewUserData(kTestSupervisedUserDisplayName);
 
-  base::RunLoop mount_wait_loop, add_key_wait_loop;
-  mock_homedir_methods_->set_mount_callback(mount_wait_loop.QuitClosure());
+  base::RunLoop add_key_wait_loop;
   mock_homedir_methods_->set_add_key_callback(add_key_wait_loop.QuitClosure());
-  EXPECT_CALL(*mock_homedir_methods_, MountEx(_, _, _, _)).Times(1);
-  EXPECT_CALL(*mock_homedir_methods_, AddKeyEx(_, _, _, _, _)).Times(1);
+  EXPECT_CALL(*mock_homedir_methods_, AddKeyEx(_, _, _, _)).Times(1);
 
   JSEval("$('supervised-user-creation-next-button').click()");
 
-  mount_wait_loop.Run();
   add_key_wait_loop.Run();
   testing::Mock::VerifyAndClearExpectations(mock_homedir_methods_);
-  mock_homedir_methods_->set_mount_callback(base::Closure());
   mock_homedir_methods_->set_add_key_callback(base::Closure());
 
   EXPECT_TRUE(registration_utility_stub_->register_was_called());
@@ -251,7 +245,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest,
 
 IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest,
                        PRE_CheckNoNotificationTray) {
-  SigninAsSupervisedUser(true, 0, kTestSupervisedUserDisplayName);
+  SigninAsSupervisedUser(0, kTestSupervisedUserDisplayName);
 
   // After sign-in, the tray should be visible.
   EXPECT_TRUE(GetWebNotificationTrayVisibility());

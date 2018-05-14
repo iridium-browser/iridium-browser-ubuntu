@@ -8,7 +8,7 @@
 
 #include "third_party/base/ptr_util.h"
 
-CFX_XMLText::CFX_XMLText(const CFX_WideString& wsText)
+CFX_XMLText::CFX_XMLText(const WideString& wsText)
     : CFX_XMLNode(), m_wsText(wsText) {}
 
 CFX_XMLText::~CFX_XMLText() {}
@@ -19,4 +19,8 @@ FX_XMLNODETYPE CFX_XMLText::GetType() const {
 
 std::unique_ptr<CFX_XMLNode> CFX_XMLText::Clone() {
   return pdfium::MakeUnique<CFX_XMLText>(m_wsText);
+}
+
+void CFX_XMLText::Save(const RetainPtr<CFX_SeekableStreamProxy>& pXMLStream) {
+  pXMLStream->WriteString(EncodeEntities(GetText()).AsStringView());
 }

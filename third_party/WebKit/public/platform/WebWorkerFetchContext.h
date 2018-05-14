@@ -7,17 +7,14 @@
 
 #include <memory>
 
+#include "base/memory/scoped_refptr.h"
 #include "public/platform/WebApplicationCacheHost.h"
 #include "public/platform/WebDocumentSubresourceFilter.h"
 #include "public/platform/WebURL.h"
 
-namespace base {
-class SingleThreadTaskRunner;
-}  // namespace base
-
 namespace blink {
 
-class WebURLLoader;
+class WebURLLoaderFactory;
 class WebURLRequest;
 class WebDocumentSubresourceFilter;
 
@@ -28,15 +25,18 @@ class WebDocumentSubresourceFilter;
 // used to create a new WebURLLoader instance in the worker thread.
 class WebWorkerFetchContext {
  public:
-  virtual ~WebWorkerFetchContext() {}
+  virtual ~WebWorkerFetchContext() = default;
 
-  virtual void InitializeOnWorkerThread(base::SingleThreadTaskRunner*) = 0;
+  virtual void InitializeOnWorkerThread() = 0;
 
-  // Returns a new WebURLLoader instance which is associated with the worker
-  // thread.
-  virtual std::unique_ptr<WebURLLoader> CreateURLLoader(
-      const WebURLRequest&,
-      base::SingleThreadTaskRunner*) = 0;
+  // Returns a new WebURLLoaderFactory which is associated with the worker
+  // context. It can be called only once.
+  virtual std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() = 0;
+
+  // Returns a new WebURLLoaderFactory that wraps the given
+  // network::mojom::URLLoaderFactory.
+  virtual std::unique_ptr<WebURLLoaderFactory> WrapURLLoaderFactory(
+      mojo::ScopedMessagePipeHandle url_loader_factory_handle) = 0;
 
   // Called when a request is about to be sent out to modify the request to
   // handle the request correctly in the loading stack later. (Example: service
@@ -46,19 +46,24 @@ class WebWorkerFetchContext {
   // Whether the fetch context is controlled by a service worker.
   virtual bool IsControlledByServiceWorker() const = 0;
 
-  // The flag for Data Saver.
-  virtual void SetDataSaverEnabled(bool) = 0;
-  virtual bool IsDataSaverEnabled() const = 0;
+  // This flag is used to block all mixed content in subframes.
+  virtual void SetIsOnSubframe(bool) {}
+  virtual bool IsOnSubframe() const { return false; }
 
   // The URL that should be consulted for the third-party cookie blocking
   // policy, as defined in Section 2.1.1 and 2.1.2 of
-  // https://tools.ietf.org/html/draft-west-first-party-cookies.
-  // See content::URLRequest::first_party_for_cookies() for details.
-  virtual WebURL FirstPartyForCookies() const = 0;
+  // https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site.
+  // See content::URLRequest::site_for_cookies() for details.
+  virtual WebURL SiteForCookies() const = 0;
 
   // Reports the certificate error to the browser process.
-  virtual void DidRunContentWithCertificateErrors(const WebURL& url) {}
-  virtual void DidDisplayContentWithCertificateErrors(const WebURL& url) {}
+  virtual void DidRunContentWithCertificateErrors() {}
+  virtual void DidDisplayContentWithCertificateErrors() {}
+
+  // Reports that the security origin has run active content from an insecure
+  // source.
+  virtual void DidRunInsecureContent(const WebSecurityOrigin&,
+                                     const WebURL& insecure_url) {}
 
   virtual void SetApplicationCacheHostID(int id) {}
   virtual int ApplicationCacheHostID() const {

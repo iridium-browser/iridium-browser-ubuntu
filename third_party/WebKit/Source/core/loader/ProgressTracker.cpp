@@ -36,9 +36,11 @@
 #include "platform/loader/fetch/Resource.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceResponse.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Assertions.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/CString.h"
+#include "public/web/WebSettings.h"
 
 namespace blink {
 
@@ -52,7 +54,6 @@ static const double kProgressNotificationInterval = 0.02;
 static const double kProgressNotificationTimeInterval = 0.1;
 
 struct ProgressItem {
-  WTF_MAKE_NONCOPYABLE(ProgressItem);
   USING_FAST_MALLOC(ProgressItem);
 
  public:
@@ -61,6 +62,8 @@ struct ProgressItem {
 
   long long bytes_received;
   long long estimated_length;
+
+  DISALLOW_COPY_AND_ASSIGN(ProgressItem);
 };
 
 ProgressTracker* ProgressTracker::Create(LocalFrame* frame) {
@@ -75,9 +78,9 @@ ProgressTracker::ProgressTracker(LocalFrame* frame)
       did_first_contentful_paint_(false),
       progress_value_(0) {}
 
-ProgressTracker::~ProgressTracker() {}
+ProgressTracker::~ProgressTracker() = default;
 
-DEFINE_TRACE(ProgressTracker) {
+void ProgressTracker::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
 }
 
@@ -144,15 +147,9 @@ void ProgressTracker::WillStartLoading(unsigned long identifier,
                                        ResourceLoadPriority priority) {
   if (!frame_->IsLoading())
     return;
-  // All of the progress bar completion policies besides LoadEvent instead block
-  // on parsing completion, which corresponds to finishing parsing. For those
-  // policies, don't consider resource load that start after DOMContentLoaded
-  // finishes.
-  if (frame_->GetSettings()->GetProgressBarCompletion() !=
-          ProgressBarCompletion::kLoadEvent &&
-      (HaveParsedAndPainted() || priority < kResourceLoadPriorityHigh))
+  if (HaveParsedAndPainted() || priority < ResourceLoadPriority::kHigh)
     return;
-  progress_items_.Set(identifier, WTF::MakeUnique<ProgressItem>(
+  progress_items_.Set(identifier, std::make_unique<ProgressItem>(
                                       kProgressItemDefaultEstimatedLength));
 }
 
@@ -204,18 +201,10 @@ void ProgressTracker::MaybeSendProgress() {
   DCHECK_GE(estimated_bytes_for_pending_requests, 0);
   DCHECK_GE(estimated_bytes_for_pending_requests, bytes_received);
 
-  if (HaveParsedAndPainted()) {
-    if (frame_->GetSettings()->GetProgressBarCompletion() ==
-        ProgressBarCompletion::kDOMContentLoaded) {
-      SendFinalProgress();
-      return;
-    }
-    if (frame_->GetSettings()->GetProgressBarCompletion() !=
-            ProgressBarCompletion::kLoadEvent &&
-        estimated_bytes_for_pending_requests == bytes_received) {
-      SendFinalProgress();
-      return;
-    }
+  if (HaveParsedAndPainted() &&
+      estimated_bytes_for_pending_requests == bytes_received) {
+    SendFinalProgress();
+    return;
   }
 
   double percent_of_bytes_received =

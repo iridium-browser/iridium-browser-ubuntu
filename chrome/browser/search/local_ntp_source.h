@@ -14,15 +14,29 @@
 #include "base/optional.h"
 #include "base/scoped_observer.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/search/one_google_bar/one_google_bar_service_observer.h"
 #include "content/public/browser/url_data_source.h"
+
+#if defined(OS_ANDROID)
+#error "Instant is only used on desktop";
+#endif
 
 struct OneGoogleBarData;
 class OneGoogleBarService;
 class Profile;
 
-// Serves HTML and resources for the local new tab page i.e.
-// chrome-search://local-ntp/local-ntp.html
+namespace search_provider_logos {
+class LogoService;
+}  // namespace search_provider_logos
+
+// Serves HTML and resources for the local New Tab page, i.e.
+// chrome-search://local-ntp/local-ntp.html.
+// WARNING: Due to the threading model of URLDataSource, some methods of this
+// class are called on the UI thread, others on the IO thread. All data members
+// live on the UI thread, so make sure not to access them from the IO thread!
+// To prevent accidental access, all methods that get called on the IO thread
+// are implemented as non-member functions.
 class LocalNtpSource : public content::URLDataSource,
                        public OneGoogleBarServiceObserver {
  public:
@@ -30,6 +44,7 @@ class LocalNtpSource : public content::URLDataSource,
 
  private:
   class GoogleSearchProviderTracker;
+  class DesktopLogoObserver;
 
   struct OneGoogleBarRequest {
     OneGoogleBarRequest(
@@ -59,15 +74,10 @@ class LocalNtpSource : public content::URLDataSource,
   std::string GetContentSecurityPolicyChildSrc() const override;
 
   // Overridden from OneGoogleBarServiceObserver:
-  void OnOneGoogleBarDataChanged() override;
-  void OnOneGoogleBarFetchFailed() override;
+  void OnOneGoogleBarDataUpdated() override;
   void OnOneGoogleBarServiceShuttingDown() override;
 
   void ServeOneGoogleBar(const base::Optional<OneGoogleBarData>& data);
-
-  void DefaultSearchProviderIsGoogleChanged(bool is_google);
-
-  void SetDefaultSearchProviderIsGoogleOnIOThread(bool is_google);
 
   Profile* const profile_;
 
@@ -76,12 +86,12 @@ class LocalNtpSource : public content::URLDataSource,
   ScopedObserver<OneGoogleBarService, OneGoogleBarServiceObserver>
       one_google_bar_service_observer_;
 
+  search_provider_logos::LogoService* logo_service_;
+  std::unique_ptr<DesktopLogoObserver> logo_observer_;
+
   std::vector<OneGoogleBarRequest> one_google_bar_requests_;
 
   std::unique_ptr<GoogleSearchProviderTracker> google_tracker_;
-  bool default_search_provider_is_google_;
-  // A copy of |default_search_provider_is_google_| for use on the IO thread.
-  bool default_search_provider_is_google_io_thread_;
 
   base::WeakPtrFactory<LocalNtpSource> weak_ptr_factory_;
 

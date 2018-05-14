@@ -33,7 +33,6 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/scoped_ignore_content_verifier_for_test.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/common/extension.h"
 #include "extensions/test/extension_test_message_listener.h"
@@ -102,7 +101,7 @@ class ExtensionDisabledGlobalErrorTest : public ExtensionBrowserTest {
     size_t size_before = registry_->enabled_extensions().size();
     if (UpdateExtension(extension->id(), crx_path, expected_change))
       return NULL;
-    content::RunAllBlockingPoolTasksUntilIdle();
+    content::RunAllTasksUntilIdle();
     EXPECT_EQ(size_before + expected_change,
               registry_->enabled_extensions().size());
     if (registry_->disabled_extensions().size() != 1u)
@@ -125,7 +124,6 @@ class ExtensionDisabledGlobalErrorTest : public ExtensionBrowserTest {
   base::FilePath path_v1_;
   base::FilePath path_v2_;
   base::FilePath path_v3_;
-  extensions::ScopedIgnoreContentVerifierForTest ignore_content_verification_;
 };
 
 // Tests the process of updating an extension to one that requires higher
@@ -255,13 +253,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest,
           1, sync_data.GetSyncChange(syncer::SyncChange::ACTION_ADD)));
 
   install_observer.WaitForExtensionWillBeInstalled();
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
 
   extension = service_->GetExtensionById(extension_id, true);
   ASSERT_TRUE(extension);
   EXPECT_EQ("2", extension->VersionString());
   EXPECT_EQ(1u, registry_->disabled_extensions().size());
-  EXPECT_EQ(Extension::DISABLE_PERMISSIONS_INCREASE,
+  EXPECT_EQ(extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE,
             ExtensionPrefs::Get(service_->profile())
                 ->GetDisableReasons(extension_id));
   EXPECT_TRUE(GetExtensionDisabledGlobalError());
@@ -290,16 +288,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, RemoteInstall) {
   specifics.mutable_extension()->set_enabled(false);
   specifics.mutable_extension()->set_remote_install(true);
   specifics.mutable_extension()->set_disable_reasons(
-      Extension::DISABLE_REMOTE_INSTALL);
+      extensions::disable_reason::DISABLE_REMOTE_INSTALL);
   specifics.mutable_extension()->set_update_url(
       "http://localhost/autoupdate/updates.xml");
   specifics.mutable_extension()->set_version("2");
   syncer::SyncData sync_data =
-      syncer::SyncData::CreateRemoteData(1234567,
-                                         specifics,
-                                         base::Time::Now(),
-                                         syncer::AttachmentIdList(),
-                                         syncer::AttachmentServiceProxy());
+      syncer::SyncData::CreateRemoteData(1234567, specifics, base::Time::Now());
 
   ExtensionSyncService* sync_service = ExtensionSyncService::Get(profile());
   sync_service->MergeDataAndStartSyncing(
@@ -314,13 +308,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, RemoteInstall) {
                                 sync_data)));
 
   install_observer.WaitForExtensionWillBeInstalled();
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
 
   const Extension* extension = service_->GetExtensionById(extension_id, true);
   ASSERT_TRUE(extension);
   EXPECT_EQ("2", extension->VersionString());
   EXPECT_EQ(1u, registry_->disabled_extensions().size());
-  EXPECT_EQ(Extension::DISABLE_REMOTE_INSTALL,
+  EXPECT_EQ(extensions::disable_reason::DISABLE_REMOTE_INSTALL,
             ExtensionPrefs::Get(service_->profile())
                 ->GetDisableReasons(extension_id));
   EXPECT_TRUE(GetExtensionDisabledGlobalError());

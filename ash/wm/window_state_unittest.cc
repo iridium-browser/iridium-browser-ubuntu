@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "ash/public/cpp/window_properties.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_state_util.h"
@@ -15,7 +16,11 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
+#include "ui/base/hit_test.h"
 #include "ui/display/screen.h"
+#include "ui/events/test/event_generator.h"
+
+using ash::mojom::WindowStateType;
 
 namespace ash {
 namespace wm {
@@ -25,7 +30,7 @@ class AlwaysMaximizeTestState : public WindowState::State {
  public:
   explicit AlwaysMaximizeTestState(WindowStateType initial_state_type)
       : state_type_(initial_state_type) {}
-  ~AlwaysMaximizeTestState() override {}
+  ~AlwaysMaximizeTestState() override = default;
 
   // WindowState::State overrides:
   void OnWMEvent(WindowState* window_state, const WMEvent* event) override {
@@ -35,9 +40,9 @@ class AlwaysMaximizeTestState : public WindowState::State {
   void AttachState(WindowState* window_state,
                    WindowState::State* previous_state) override {
     // We always maximize.
-    if (state_type_ != WINDOW_STATE_TYPE_MAXIMIZED) {
+    if (state_type_ != mojom::WindowStateType::MAXIMIZED) {
       window_state->Maximize();
-      state_type_ = WINDOW_STATE_TYPE_MAXIMIZED;
+      state_type_ = mojom::WindowStateType::MAXIMIZED;
     }
   }
   void DetachState(WindowState* window_state) override {}
@@ -182,28 +187,50 @@ TEST_F(WindowStateTest, TestIgnoreTooBigMinimumSize) {
   EXPECT_EQ(work_area_size.ToString(), window->bounds().size().ToString());
 }
 
-// Test that setting the bounds of a snapped window keeps its snapped.
-TEST_F(WindowStateTest, SnapWindowSetBounds) {
+// Tests UpdateSnappedWidthRatio. (1) It should have ratio reset when window
+// enters snapped state; (2) it should update ratio on bounds event when
+// snapped.
+TEST_F(WindowStateTest, UpdateSnapWidthRatioTest) {
   UpdateDisplay("0+0-900x600");
   const gfx::Rect kWorkAreaBounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
-
-  std::unique_ptr<aura::Window> window(
-      CreateTestWindowInShellWithBounds(gfx::Rect(100, 100, 100, 100)));
+  aura::test::TestWindowDelegate delegate;
+  std::unique_ptr<aura::Window> window(CreateTestWindowInShellWithDelegate(
+      &delegate, -1, gfx::Rect(100, 100, 100, 100)));
+  delegate.set_window_component(HTRIGHT);
   WindowState* window_state = GetWindowState(window.get());
-  const WMEvent snap_left(WM_EVENT_SNAP_LEFT);
-  window_state->OnWMEvent(&snap_left);
-  EXPECT_EQ(WINDOW_STATE_TYPE_LEFT_SNAPPED, window_state->GetStateType());
+  const WMEvent cycle_snap_left(WM_EVENT_CYCLE_SNAP_LEFT);
+  window_state->OnWMEvent(&cycle_snap_left);
+  EXPECT_EQ(mojom::WindowStateType::LEFT_SNAPPED, window_state->GetStateType());
   gfx::Rect expected =
       gfx::Rect(kWorkAreaBounds.x(), kWorkAreaBounds.y(),
                 kWorkAreaBounds.width() / 2, kWorkAreaBounds.height());
-  EXPECT_EQ(expected.ToString(), window->GetBoundsInScreen().ToString());
+  EXPECT_EQ(expected, window->GetBoundsInScreen());
+  EXPECT_EQ(0.5f, *window_state->snapped_width_ratio());
 
-  // Snapped windows can have any width.
-  expected.set_width(500);
-  window->SetBounds(gfx::Rect(10, 10, 500, 300));
-  EXPECT_EQ(expected.ToString(), window->GetBoundsInScreen().ToString());
-  EXPECT_EQ(WINDOW_STATE_TYPE_LEFT_SNAPPED, window_state->GetStateType());
+  // Drag to change snapped window width.
+  const int kIncreasedWidth = 225;
+  ui::test::EventGenerator& generator = GetEventGenerator();
+  generator.MoveMouseTo(window->bounds().right(), window->bounds().y());
+  generator.PressLeftButton();
+  generator.MoveMouseTo(window->bounds().right() + kIncreasedWidth,
+                        window->bounds().y());
+  generator.ReleaseLeftButton();
+  expected.set_width(expected.width() + kIncreasedWidth);
+  EXPECT_EQ(expected, window->GetBoundsInScreen());
+  EXPECT_EQ(mojom::WindowStateType::LEFT_SNAPPED, window_state->GetStateType());
+  EXPECT_EQ(0.75f, *window_state->snapped_width_ratio());
+
+  // Another cycle snap left event will restore window state to normal.
+  window_state->OnWMEvent(&cycle_snap_left);
+  EXPECT_EQ(mojom::WindowStateType::NORMAL, window_state->GetStateType());
+  EXPECT_FALSE(window_state->snapped_width_ratio());
+
+  // Another cycle snap left event will snap window and reset snapped width
+  // ratio.
+  window_state->OnWMEvent(&cycle_snap_left);
+  EXPECT_EQ(mojom::WindowStateType::LEFT_SNAPPED, window_state->GetStateType());
+  EXPECT_EQ(0.5f, *window_state->snapped_width_ratio());
 }
 
 // Test that snapping left/right preserves the restore bounds.
@@ -251,7 +278,7 @@ TEST_F(WindowStateTest, RestoreBounds) {
 TEST_F(WindowStateTest, AutoManaged) {
   std::unique_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
   WindowState* window_state = GetWindowState(window.get());
-  window_state->set_window_position_managed(true);
+  window_state->SetWindowPositionManaged(true);
   window->Hide();
   window->SetBounds(gfx::Rect(100, 100, 100, 100));
   window->Show();
@@ -269,7 +296,7 @@ TEST_F(WindowStateTest, AutoManaged) {
             window->GetBoundsInScreen().ToString());
 
   // The window should still be auto managed despite being right maximized.
-  EXPECT_TRUE(window_state->window_position_managed());
+  EXPECT_TRUE(window_state->GetWindowPositionManaged());
 }
 
 // Test that the replacement of a State object works as expected.
@@ -454,6 +481,17 @@ TEST_F(WindowStateTest, FullscreenMinimizedSwitching) {
   // return to the state before minimizing and fullscreen.
   ash::wm::ToggleFullScreen(window_state, nullptr);
   ASSERT_TRUE(window_state->IsMaximized());
+}
+
+TEST_F(WindowStateTest, CanConsumeSystemKeys) {
+  std::unique_ptr<aura::Window> window(
+      CreateTestWindowInShellWithBounds(gfx::Rect(100, 100, 100, 100)));
+  WindowState* window_state = GetWindowState(window.get());
+
+  EXPECT_FALSE(window_state->CanConsumeSystemKeys());
+
+  window->SetProperty(kCanConsumeSystemKeysKey, true);
+  EXPECT_TRUE(window_state->CanConsumeSystemKeys());
 }
 
 // TODO(skuhne): Add more unit test to verify the correctness for the restore

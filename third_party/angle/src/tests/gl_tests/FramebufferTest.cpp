@@ -7,6 +7,7 @@
 //   Various tests related for Frambuffers.
 //
 
+#include "platform/WorkaroundsD3D.h"
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 
@@ -96,13 +97,6 @@ class FramebufferFormatsTest : public ANGLETest
                                            GLenum attachmentType,
                                            GLenum internalFormat)
     {
-        // TODO(geofflang): Figure out why this is broken on Intel OpenGL
-        if (IsIntel() && getPlatformRenderer() == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
-        {
-            std::cout << "Test skipped on Intel OpenGL." << std::endl;
-            return;
-        }
-
         int clientVersion = getClientMajorVersion();
         if (clientVersion < minESVersion)
         {
@@ -199,64 +193,41 @@ class FramebufferFormatsTest : public ANGLETest
 
 TEST_P(FramebufferFormatsTest, RGBA4)
 {
-    if (getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_texture_storage"))
-    {
-        std::cout << "Test skipped due to missing ES3 or GL_EXT_texture_storage." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_texture_storage"));
 
     testTextureFormat(GL_RGBA4, 4, 4, 4, 4);
 }
 
 TEST_P(FramebufferFormatsTest, RGB565)
 {
-    if (getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_texture_storage"))
-    {
-        std::cout << "Test skipped due to missing ES3 or GL_EXT_texture_storage." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_texture_storage"));
 
     testTextureFormat(GL_RGB565, 5, 6, 5, 0);
 }
 
 TEST_P(FramebufferFormatsTest, RGB8)
 {
-    if (getClientMajorVersion() < 3 &&
-        (!extensionEnabled("GL_OES_rgb8_rgba8") || !extensionEnabled("GL_EXT_texture_storage")))
-    {
-        std::cout
-            << "Test skipped due to missing ES3 or GL_OES_rgb8_rgba8 and GL_EXT_texture_storage."
-            << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(
+        getClientMajorVersion() < 3 &&
+        (!extensionEnabled("GL_OES_rgb8_rgba8") || !extensionEnabled("GL_EXT_texture_storage")));
 
     testTextureFormat(GL_RGB8_OES, 8, 8, 8, 0);
 }
 
 TEST_P(FramebufferFormatsTest, BGRA8)
 {
-    if (!extensionEnabled("GL_EXT_texture_format_BGRA8888") ||
-        (getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_texture_storage")))
-    {
-        std::cout << "Test skipped due to missing GL_EXT_texture_format_BGRA8888 or "
-                     "GL_EXT_texture_storage."
-                  << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(
+        !extensionEnabled("GL_EXT_texture_format_BGRA8888") ||
+        (getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_texture_storage")));
 
     testTextureFormat(GL_BGRA8_EXT, 8, 8, 8, 8);
 }
 
 TEST_P(FramebufferFormatsTest, RGBA8)
 {
-    if (getClientMajorVersion() < 3 &&
-        (!extensionEnabled("GL_OES_rgb8_rgba8") || !extensionEnabled("GL_EXT_texture_storage")))
-    {
-        std::cout
-            << "Test skipped due to missing ES3 or GL_OES_rgb8_rgba8 and GL_EXT_texture_storage."
-            << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(
+        getClientMajorVersion() < 3 &&
+        (!extensionEnabled("GL_OES_rgb8_rgba8") || !extensionEnabled("GL_EXT_texture_storage")));
 
     testTextureFormat(GL_RGBA8_OES, 8, 8, 8, 8);
 }
@@ -273,11 +244,7 @@ TEST_P(FramebufferFormatsTest, RenderbufferMultisample_DEPTH24)
 
 TEST_P(FramebufferFormatsTest, RenderbufferMultisample_DEPTH32F)
 {
-    if (getClientMajorVersion() < 3)
-    {
-        std::cout << "Test skipped due to missing ES3." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3);
 
     testRenderbufferMultisampleFormat(3, GL_DEPTH_ATTACHMENT, GL_DEPTH_COMPONENT32F);
 }
@@ -289,11 +256,7 @@ TEST_P(FramebufferFormatsTest, RenderbufferMultisample_DEPTH24_STENCIL8)
 
 TEST_P(FramebufferFormatsTest, RenderbufferMultisample_DEPTH32F_STENCIL8)
 {
-    if (getClientMajorVersion() < 3)
-    {
-        std::cout << "Test skipped due to missing ES3." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3);
 
     testRenderbufferMultisampleFormat(3, GL_DEPTH_STENCIL_ATTACHMENT, GL_DEPTH32F_STENCIL8);
 }
@@ -301,11 +264,7 @@ TEST_P(FramebufferFormatsTest, RenderbufferMultisample_DEPTH32F_STENCIL8)
 TEST_P(FramebufferFormatsTest, RenderbufferMultisample_STENCIL_INDEX8)
 {
     // TODO(geofflang): Figure out how to support GLSTENCIL_INDEX8 on desktop GL
-    if (GetParam().getRenderer() == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
-    {
-        std::cout << "Test skipped on Desktop OpenGL." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsDesktopOpenGL());
 
     testRenderbufferMultisampleFormat(2, GL_STENCIL_ATTACHMENT, GL_STENCIL_INDEX8);
 }
@@ -357,11 +316,7 @@ TEST_P(FramebufferFormatsTest, IncompleteCubeMap)
 // Test that a renderbuffer with zero height but nonzero width is handled without crashes/asserts.
 TEST_P(FramebufferFormatsTest, ZeroHeightRenderbuffer)
 {
-    if (getClientMajorVersion() < 3)
-    {
-        std::cout << "Test skipped due to missing ES3" << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3);
 
     testZeroHeightRenderbuffer();
 }
@@ -517,10 +472,53 @@ TEST_P(FramebufferTest_ES3, MultisampleDepthOnly)
     EXPECT_GE(samples, 2);
 }
 
+// Check that we only compare width and height of attachments, not depth.
+TEST_P(FramebufferTest_ES3, AttachmentWith3DLayers)
+{
+    GLTexture texA;
+    glBindTexture(GL_TEXTURE_2D, texA);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+    GLTexture texB;
+    glBindTexture(GL_TEXTURE_3D, texB);
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, 4, 4, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+    GLFramebuffer framebuffer;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texA, 0);
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, texB, 0, 0);
+    ASSERT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
+    EXPECT_GL_NO_ERROR();
+}
+
 ANGLE_INSTANTIATE_TEST(FramebufferTest_ES3, ES3_D3D11(), ES3_OPENGL(), ES3_OPENGLES());
 
 class FramebufferTest_ES31 : public ANGLETest
 {
+  protected:
+    void validateSamplePass(GLuint &query, GLuint &passedCount, GLint width, GLint height)
+    {
+        glUniform2i(0, width - 1, height - 1);
+        glBeginQuery(GL_ANY_SAMPLES_PASSED, query);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glEndQuery(GL_ANY_SAMPLES_PASSED);
+        glGetQueryObjectuiv(query, GL_QUERY_RESULT, &passedCount);
+        EXPECT_GT(static_cast<GLint>(passedCount), 0);
+
+        glUniform2i(0, width - 1, height);
+        glBeginQuery(GL_ANY_SAMPLES_PASSED, query);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glEndQuery(GL_ANY_SAMPLES_PASSED);
+        glGetQueryObjectuiv(query, GL_QUERY_RESULT, &passedCount);
+        EXPECT_EQ(static_cast<GLint>(passedCount), 0);
+
+        glUniform2i(0, width, height - 1);
+        glBeginQuery(GL_ANY_SAMPLES_PASSED, query);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glEndQuery(GL_ANY_SAMPLES_PASSED);
+        glGetQueryObjectuiv(query, GL_QUERY_RESULT, &passedCount);
+        EXPECT_EQ(static_cast<GLint>(passedCount), 0);
+    }
 };
 
 // Test that without attachment, if either the value of FRAMEBUFFER_DEFAULT_WIDTH or
@@ -641,4 +639,160 @@ TEST_P(FramebufferTest_ES31, IncompleteMultisampleFixedSampleLocationsTex)
     ASSERT_GL_NO_ERROR();
 }
 
-ANGLE_INSTANTIATE_TEST(FramebufferTest_ES31, ES31_OPENGL(), ES31_OPENGLES());
+// If there are no attachments, rendering will be limited to a rectangle having a lower left of
+// (0, 0) and an upper right of(width, height), where width and height are the framebuffer
+// object's default width and height.
+TEST_P(FramebufferTest_ES31, RenderingLimitToDefaultFBOSizeWithNoAttachments)
+{
+    // anglebug.com/2253
+    ANGLE_SKIP_TEST_IF(IsLinux() && IsAMD() && IsDesktopOpenGL());
+
+    const std::string &vertexShader1 =
+        R"(#version 310 es
+        in layout(location = 0) highp vec2 a_position;
+        void main()
+        {
+           gl_Position = vec4(a_position, 0.0, 1.0);
+        })";
+
+    const std::string &fragShader1 =
+        R"(#version 310 es
+        uniform layout(location = 0) highp ivec2 u_expectedSize;
+        out layout(location = 5) mediump vec4 f_color;
+        void main()
+        {
+           if (ivec2(gl_FragCoord.xy) != u_expectedSize) discard;
+           f_color = vec4(1.0, 0.5, 0.25, 1.0);
+        })";
+
+    const std::string &vertexShader2 =
+        R"(#version 310 es
+        in layout(location = 0) highp vec2 a_position;
+        void main()
+        {
+           gl_Position = vec4(a_position, 0.0, 1.0);
+        })";
+
+    const std::string &fragShader2 =
+        R"(#version 310 es
+        uniform layout(location = 0) highp ivec2 u_expectedSize;
+        out layout(location = 2) mediump vec4 f_color;
+        void main()
+        {
+           if (ivec2(gl_FragCoord.xy) != u_expectedSize) discard;
+           f_color = vec4(1.0, 0.5, 0.25, 1.0);
+        })";
+
+    GLuint program1 = CompileProgram(vertexShader1, fragShader1);
+    ASSERT_NE(program1, 0u);
+
+    GLuint program2 = CompileProgram(vertexShader2, fragShader2);
+    ASSERT_NE(program2, 0u);
+
+    glUseProgram(program1);
+
+    GLFramebuffer mFramebuffer;
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mFramebuffer);
+    GLuint defaultWidth  = 1;
+    GLuint defaultHeight = 1;
+
+    glFramebufferParameteri(GL_FRAMEBUFFER, GL_FRAMEBUFFER_DEFAULT_WIDTH, defaultWidth);
+    glFramebufferParameteri(GL_FRAMEBUFFER, GL_FRAMEBUFFER_DEFAULT_HEIGHT, defaultHeight);
+    EXPECT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
+
+    const float data[] = {
+        1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f, -1.0f, 1.0f, 1.0f, -1.0f, -1.0f, -1.0f,
+    };
+
+    GLuint vertexArray  = 0;
+    GLuint vertexBuffer = 0;
+    GLuint query        = 0;
+    GLuint passedCount  = 0;
+
+    glGenQueries(1, &query);
+    glGenVertexArrays(1, &vertexArray);
+    glBindVertexArray(vertexArray);
+
+    glGenBuffers(1, &vertexBuffer);
+    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(data), data, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, false, 0, 0);
+    EXPECT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
+
+    validateSamplePass(query, passedCount, defaultWidth, defaultHeight);
+
+    glUseProgram(program2);
+    validateSamplePass(query, passedCount, defaultWidth, defaultHeight);
+
+    glUseProgram(program1);
+    // If fbo has attachments, the rendering size should be the same as its attachment.
+    GLTexture mTexture;
+    GLuint width  = 2;
+    GLuint height = 2;
+    glBindTexture(GL_TEXTURE_2D, mTexture.get());
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
+
+    const GLenum bufs[] = {GL_NONE, GL_NONE, GL_NONE, GL_NONE, GL_NONE, GL_COLOR_ATTACHMENT5};
+
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT5, GL_TEXTURE_2D, mTexture.get(),
+                           0);
+    EXPECT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
+    glDrawBuffers(6, bufs);
+
+    validateSamplePass(query, passedCount, width, height);
+
+    // If fbo's attachment has been removed, the rendering size should be the same as framebuffer
+    // default size.
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT5, 0, 0, 0);
+    EXPECT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
+
+    validateSamplePass(query, passedCount, defaultWidth, defaultHeight);
+
+    glDisableVertexAttribArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+    glDeleteBuffers(1, &vertexBuffer);
+    glDeleteVertexArrays(1, &vertexArray);
+
+    ASSERT_GL_NO_ERROR();
+}
+
+ANGLE_INSTANTIATE_TEST(FramebufferTest_ES31, ES31_D3D11(), ES31_OPENGL(), ES31_OPENGLES());
+
+class AddDummyTextureNoRenderTargetTest : public ANGLETest
+{
+  public:
+    AddDummyTextureNoRenderTargetTest()
+    {
+        setWindowWidth(512);
+        setWindowHeight(512);
+        setConfigRedBits(8);
+        setConfigGreenBits(8);
+        setConfigBlueBits(8);
+        setConfigAlphaBits(8);
+    }
+
+    void overrideWorkaroundsD3D(WorkaroundsD3D *workarounds) override
+    {
+        workarounds->addDummyTextureNoRenderTarget = true;
+    }
+};
+
+// Test to verify workaround succeeds when no program outputs exist http://anglebug.com/2283
+TEST_P(AddDummyTextureNoRenderTargetTest, NoProgramOutputWorkaround)
+{
+    const std::string &vShader = "void main() {}";
+    const std::string &fShader = "void main() {}";
+
+    ANGLE_GL_PROGRAM(drawProgram, vShader, fShader);
+
+    glUseProgram(drawProgram);
+
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    ASSERT_GL_NO_ERROR();
+}
+
+ANGLE_INSTANTIATE_TEST(AddDummyTextureNoRenderTargetTest, ES2_D3D11());

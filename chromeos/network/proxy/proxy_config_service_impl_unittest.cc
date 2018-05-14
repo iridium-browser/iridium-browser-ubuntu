@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -73,23 +72,23 @@ TEST_F(ProxyConfigServiceImplTest, IgnoresNestedProxyConfigServiceByDefault) {
   net::ProxyConfig fixed_config;
   fixed_config.set_pac_url(GURL(kFixedPacUrl));
   std::unique_ptr<TestProxyConfigService> nested_service =
-      base::MakeUnique<TestProxyConfigService>(
+      std::make_unique<TestProxyConfigService>(
           fixed_config, net::ProxyConfigService::CONFIG_VALID);
 
   ProxyConfigServiceImpl proxy_tracker(&profile_prefs, &local_state_prefs,
                                        base::ThreadTaskRunnerHandle::Get());
 
-  std::unique_ptr<net::ProxyConfigService> proxy_service =
+  std::unique_ptr<net::ProxyConfigService> proxy_resolution_service =
       proxy_tracker.CreateTrackingProxyConfigService(std::move(nested_service));
 
   net::ProxyConfig config;
   EXPECT_EQ(net::ProxyConfigService::CONFIG_VALID,
-            proxy_service->GetLatestProxyConfig(&config));
+            proxy_resolution_service->GetLatestProxyConfig(&config));
   EXPECT_TRUE(config.Equals(net::ProxyConfig::CreateDirect()));
 
   environment_.RunUntilIdle();
   EXPECT_EQ(net::ProxyConfigService::CONFIG_VALID,
-            proxy_service->GetLatestProxyConfig(&config));
+            proxy_resolution_service->GetLatestProxyConfig(&config));
   EXPECT_TRUE(config.Equals(net::ProxyConfig::CreateDirect()));
 
   proxy_tracker.DetachFromPrefService();
@@ -102,28 +101,28 @@ TEST_F(ProxyConfigServiceImplTest, UsesNestedProxyConfigService) {
   PrefProxyConfigTrackerImpl::RegisterProfilePrefs(profile_prefs.registry());
   TestingPrefServiceSimple local_state_prefs;
   profile_prefs.SetUserPref(proxy_config::prefs::kUseSharedProxies,
-                            base::MakeUnique<base::Value>(true));
+                            std::make_unique<base::Value>(true));
 
   net::ProxyConfig fixed_config;
   fixed_config.set_pac_url(GURL(kFixedPacUrl));
   std::unique_ptr<TestProxyConfigService> nested_service =
-      base::MakeUnique<TestProxyConfigService>(
+      std::make_unique<TestProxyConfigService>(
           fixed_config, net::ProxyConfigService::CONFIG_VALID);
 
   ProxyConfigServiceImpl proxy_tracker(&profile_prefs, &local_state_prefs,
                                        base::ThreadTaskRunnerHandle::Get());
 
-  std::unique_ptr<net::ProxyConfigService> proxy_service =
+  std::unique_ptr<net::ProxyConfigService> proxy_resolution_service =
       proxy_tracker.CreateTrackingProxyConfigService(std::move(nested_service));
 
   net::ProxyConfig config;
   EXPECT_EQ(net::ProxyConfigService::CONFIG_VALID,
-            proxy_service->GetLatestProxyConfig(&config));
+            proxy_resolution_service->GetLatestProxyConfig(&config));
   EXPECT_TRUE(config.Equals(fixed_config));
 
   environment_.RunUntilIdle();
   EXPECT_EQ(net::ProxyConfigService::CONFIG_VALID,
-            proxy_service->GetLatestProxyConfig(&config));
+            proxy_resolution_service->GetLatestProxyConfig(&config));
   EXPECT_TRUE(config.Equals(fixed_config));
 
   proxy_tracker.DetachFromPrefService();

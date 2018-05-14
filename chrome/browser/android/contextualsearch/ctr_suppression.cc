@@ -28,7 +28,7 @@ CtrSuppression::CtrSuppression(JNIEnv* env, jobject obj)
 
 CtrSuppression::~CtrSuppression() {
   JNIEnv* env = AttachCurrentThread();
-  Java_CtrSuppression_clearNativePointer(env, java_object_.obj());
+  Java_CtrSuppression_clearNativePointer(env, java_object_);
 }
 
 // Java conduit
@@ -99,7 +99,7 @@ void CtrSuppression::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   delete this;
 }
 
-jlong Init(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+jlong JNI_CtrSuppression_Init(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   CtrSuppression* suppression = new CtrSuppression(env, obj);
   return reinterpret_cast<intptr_t>(suppression);
 }

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/payments/shipping_option_view_controller.h"
 
+#include <memory>
+
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view.h"
 #include "chrome/browser/ui/views/payments/payment_request_views_util.h"
 #include "components/payments/content/payment_request_spec.h"
@@ -82,10 +84,11 @@ ShippingOptionViewController::ShippingOptionViewController(
     PaymentRequestSpec* spec,
     PaymentRequestState* state,
     PaymentRequestDialogView* dialog)
-    : PaymentRequestSheetController(spec, state, dialog) {
+    : PaymentRequestSheetController(spec, state, dialog),
+      shipping_option_list_(dialog) {
   spec->AddObserver(this);
   for (const auto& option : spec->GetShippingOptions()) {
-    shipping_option_list_.AddItem(base::MakeUnique<ShippingOptionItem>(
+    shipping_option_list_.AddItem(std::make_unique<ShippingOptionItem>(
         option.get(), spec, state, &shipping_option_list_, dialog,
         option.get() == spec->selected_shipping_option()));
   }
@@ -109,7 +112,7 @@ base::string16 ShippingOptionViewController::GetSheetTitle() {
 }
 
 void ShippingOptionViewController::FillContentView(views::View* content_view) {
-  content_view->SetLayoutManager(new views::FillLayout);
+  content_view->SetLayoutManager(std::make_unique<views::FillLayout>());
   content_view->AddChildView(shipping_option_list_.CreateListView().release());
 }
 

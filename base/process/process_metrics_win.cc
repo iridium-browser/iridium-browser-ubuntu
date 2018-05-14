@@ -4,7 +4,8 @@
 
 #include "base/process/process_metrics.h"
 
-#include <windows.h>
+#include <windows.h>  // Must be in front of other Windows header files.
+
 #include <psapi.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -15,11 +16,8 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/process/memory.h"
+#include "base/process/process_metrics_iocounters.h"
 #include "base/sys_info.h"
-
-#if defined(OS_WIN)
-#include <windows.h>
-#endif
 
 namespace base {
 namespace {
@@ -36,6 +34,11 @@ typedef NTSTATUS(WINAPI* NTQUERYSYSTEMINFORMATION)(
 }  // namespace
 
 ProcessMetrics::~ProcessMetrics() { }
+
+size_t GetMaxFds() {
+  // Windows is only limited by the amount of physical memory.
+  return std::numeric_limits<size_t>::max();
+}
 
 // static
 std::unique_ptr<ProcessMetrics> ProcessMetrics::CreateProcessMetrics(
@@ -279,7 +282,7 @@ static uint64_t FileTimeToUTC(const FILETIME& ftime) {
   return li.QuadPart;
 }
 
-double ProcessMetrics::GetCPUUsage() {
+double ProcessMetrics::GetPlatformIndependentCPUUsage() {
   FILETIME creation_time;
   FILETIME exit_time;
   FILETIME kernel_time;
@@ -292,9 +295,7 @@ double ProcessMetrics::GetCPUUsage() {
     // not yet received the notification.
     return 0;
   }
-  int64_t system_time =
-      (FileTimeToUTC(kernel_time) + FileTimeToUTC(user_time)) /
-      processor_count_;
+  int64_t system_time = FileTimeToUTC(kernel_time) + FileTimeToUTC(user_time);
   TimeTicks time = TimeTicks::Now();
 
   if (last_system_time_ == 0) {
@@ -315,15 +316,14 @@ double ProcessMetrics::GetCPUUsage() {
   last_system_time_ = system_time;
   last_cpu_time_ = time;
 
-  return static_cast<double>(system_time_delta * 100.0) / time_delta;
+  return static_cast<double>(system_time_delta * 100) / time_delta;
 }
 
 bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) const {
   return GetProcessIoCounters(process_.Get(), io_counters) != FALSE;
 }
 
-ProcessMetrics::ProcessMetrics(ProcessHandle process)
-    : processor_count_(SysInfo::NumberOfProcessors()), last_system_time_(0) {
+ProcessMetrics::ProcessMetrics(ProcessHandle process) : last_system_time_(0) {
   if (process) {
     HANDLE duplicate_handle;
     BOOL result = ::DuplicateHandle(::GetCurrentProcess(), process,
@@ -372,21 +372,9 @@ bool GetSystemMemoryInfo(SystemMemoryInfoKB* meminfo) {
 }
 
 size_t ProcessMetrics::GetMallocUsage() {
-  // Iterate through whichever heap the CRT is using.
-  HANDLE crt_heap = reinterpret_cast<HANDLE>(_get_heap_handle());
-  if (crt_heap == NULL)
-    return 0;
-  if (!::HeapLock(crt_heap))
-    return 0;
-  size_t malloc_usage = 0;
-  PROCESS_HEAP_ENTRY heap_entry;
-  heap_entry.lpData = NULL;
-  while (::HeapWalk(crt_heap, &heap_entry) != 0) {
-    if ((heap_entry.wFlags & PROCESS_HEAP_ENTRY_BUSY) != 0)
-      malloc_usage += heap_entry.cbData;
-  }
-  ::HeapUnlock(crt_heap);
-  return malloc_usage;
+  // Unsupported as getting malloc usage on Windows requires iterating through
+  // the heap which is slow and crashes.
+  return 0;
 }
 
 }  // namespace base

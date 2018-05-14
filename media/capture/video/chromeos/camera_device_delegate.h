@@ -9,7 +9,8 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "media/capture/video/chromeos/mojo/arc_camera3.mojom.h"
+#include "media/capture/video/chromeos/mojo/camera3.mojom.h"
+#include "media/capture/video/chromeos/mojo/camera_common.mojom.h"
 #include "media/capture/video/video_capture_device.h"
 #include "media/capture/video_capture_types.h"
 
@@ -64,8 +65,8 @@ class CAPTURE_EXPORT CameraDeviceDelegate final {
 
   // Delegation methods for the VideoCaptureDevice interface.
   void AllocateAndStart(const VideoCaptureParams& params,
-                        std::unique_ptr<VideoCaptureDevice::Client> client);
-  void StopAndDeAllocate(base::Closure device_close_callback);
+                        CameraDeviceContext* device_context);
+  void StopAndDeAllocate(base::OnceClosure device_close_callback);
   void TakePhoto(VideoCaptureDevice::TakePhotoCallback callback);
   void GetPhotoState(VideoCaptureDevice::GetPhotoStateCallback callback);
   void SetPhotoOptions(mojom::PhotoSettingsPtr settings,
@@ -147,7 +148,7 @@ class CAPTURE_EXPORT CameraDeviceDelegate final {
 
   VideoCaptureParams chrome_capture_params_;
 
-  std::unique_ptr<CameraDeviceContext> device_context_;
+  CameraDeviceContext* device_context_;
 
   std::unique_ptr<StreamBufferManager> stream_buffer_manager_;
 
@@ -161,7 +162,7 @@ class CAPTURE_EXPORT CameraDeviceDelegate final {
   // Where all the Mojo IPC calls takes place.
   const scoped_refptr<base::SingleThreadTaskRunner> ipc_task_runner_;
 
-  base::Closure device_close_callback_;
+  base::OnceClosure device_close_callback_;
 
   base::WeakPtrFactory<CameraDeviceDelegate> weak_ptr_factory_;
 

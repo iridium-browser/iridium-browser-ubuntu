@@ -13,12 +13,13 @@
         --scroll-border: 1px solid var(--paper-grey-300);
         border: 0;
         border-radius: 2px;
-        bottom: 0;
+        bottom: 50%;
         box-shadow: 0 0 16px rgba(0, 0, 0, 0.12),
                     0 16px 16px rgba(0, 0, 0, 0.24);
         color: inherit;
+        overflow-y: hidden;
         padding: 0;
-        top: 0;
+        top: 50%;
         width: 512px;
       }
 
@@ -28,6 +29,7 @@
         flex-direction: column;
         max-height: 100vh;
         overflow: auto;
+        @apply --cr-dialog-wrapper;
       }
 
       /* When needing to flex, force .body-container alone to shrink. */
@@ -48,6 +50,7 @@
 
       :host ::slotted([slot=body]) {
         padding: 12px 16px;
+        @apply --cr-dialog-body;
       }
 
       :host ::slotted([slot=title]) {
@@ -55,6 +58,7 @@
         font-size: calc(15 / 13 * 100%);
         line-height: 1;
         padding: 16px 16px;
+        @apply --cr-dialog-title;
       }
 
       :host ::slotted([slot=button-container]) {
@@ -81,7 +85,7 @@
         min-height: 60px; /* Minimum reasonably usable height. */
         overflow: auto;
 
-        @apply(--cr-dialog-body-container);
+        @apply --cr-dialog-body-container;
       }
 
       .body-container.bottom-scrollable {
@@ -95,7 +99,7 @@
       .top-container {
         align-items: flex-start;
         display: flex;
-        min-height: 47px;
+        min-height: var(--cr-dialog-top-container-min-height, 47px);
       }
 
       .title-container {
@@ -113,6 +117,16 @@
         align-self: flex-start;
         margin-top: 4px;
         padding: 10px;  /* Makes the actual icon 16x16. */
+
+        @apply --cr-dialog-close-image;
+      }
+
+      #close:hover {
+        @apply --cr-dialog-close-image-hover;
+      }
+
+      #close:active {
+        @apply --cr-dialog-close-image-active;
       }
     </style>
     <!-- This wrapper is necessary, such that the "pulse" animation is not
@@ -127,6 +141,7 @@
             on-keypress="onCloseKeypress_">
         </button>
       </div>
+      <slot name="header"></slot>
       <div class="body-container">
         <span id="bodyTopMarker"></span>
         <slot name="body"></slot>

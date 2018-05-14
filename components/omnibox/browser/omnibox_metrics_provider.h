@@ -5,10 +5,12 @@
 #ifndef COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_METRICS_PROVIDER_H_
 #define COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_METRICS_PROVIDER_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "components/metrics/metrics_provider.h"
-#include "components/metrics/proto/chrome_user_metrics_extension.pb.h"
 #include "components/omnibox/browser/omnibox_event_global_tracker.h"
+#include "third_party/metrics_proto/chrome_user_metrics_extension.pb.h"
 
 struct OmniboxLog;
 
@@ -23,7 +25,7 @@ class OmniboxMetricsProvider : public metrics::MetricsProvider {
   // metrics::MetricsDataProvider:
   void OnRecordingEnabled() override;
   void OnRecordingDisabled() override;
-  void ProvideGeneralMetrics(
+  void ProvideCurrentSessionData(
       metrics::ChromeUserMetricsExtension* uma_proto) override;
 
  private:
@@ -39,7 +41,7 @@ class OmniboxMetricsProvider : public metrics::MetricsProvider {
       subscription_;
 
   // Saved cache of generated Omnibox event protos, to be copied into the UMA
-  // proto when ProvideGeneralMetrics() is called.
+  // proto when ProvideCurrentSessionData() is called.
   metrics::ChromeUserMetricsExtension omnibox_events_cache;
 
   // Callback passed in from the embedder that returns whether the user is

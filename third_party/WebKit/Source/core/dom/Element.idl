@@ -22,6 +22,7 @@
 // https://docs.google.com/document/d/1VnvAqeWFG9JFZfgG5evBqrLGDZYRE5w6G5jEDORekPY
 // for details.
 enum NativeScrollBehavior { "disable-native-scroll", "perform-before-native-scroll", "perform-after-native-scroll" };
+callback ScrollStateCallback = void (ScrollState scrollState);
 
 // https://dom.spec.whatwg.org/#interface-element
 
@@ -65,7 +66,7 @@ interface Element : Node {
     [RaisesException, ImplementedAs=matches, MeasureAs=ElementPrefixedMatchesSelector] boolean webkitMatchesSelector(DOMString selectors); // historical alias of .matches
 
     [RaisesException, CallWith=ScriptState, MeasureAs=ElementAttachShadow] ShadowRoot attachShadow(ShadowRootInit shadowRootInitDict);
-    [PerWorldBindings, ImplementedAs=openShadowRoot] readonly attribute ShadowRoot? shadowRoot;
+    [PerWorldBindings, ImplementedAs=OpenShadowRoot] readonly attribute ShadowRoot? shadowRoot;
 
     HTMLCollection getElementsByTagName(DOMString localName);
     HTMLCollection getElementsByTagNameNS(DOMString? namespaceURI, DOMString localName);
@@ -80,18 +81,20 @@ interface Element : Node {
 
     // DOM Parsing and Serialization
     // https://w3c.github.io/DOM-Parsing/#extensions-to-the-element-interface
-    [TreatNullAs=NullString, CEReactions, CustomElementCallbacks, RaisesException=Setter, RuntimeCallStatsCounter=ElementInnerHTML] attribute DOMString innerHTML;
-    [TreatNullAs=NullString, CEReactions, CustomElementCallbacks, RaisesException=Setter] attribute DOMString outerHTML;
-    [CEReactions, CustomElementCallbacks, RaisesException] void insertAdjacentHTML(DOMString position, DOMString text);
+    //
+    // TODO(mkwst): Write a spec for the `TrustedHTML` variants.
+    [CEReactions, CustomElementCallbacks, Custom=Setter, RuntimeCallStatsCounter=ElementInnerHTML] attribute HTMLString innerHTML;
+    [CEReactions, CustomElementCallbacks, Custom=Setter] attribute HTMLString outerHTML;
+    [CEReactions, CustomElementCallbacks, RaisesException] void insertAdjacentHTML(DOMString position, HTMLString text);
 
     // Pointer Lock
     // https://w3c.github.io/pointerlock/#extensions-to-the-element-interface
     [MeasureAs=ElementRequestPointerLock] void requestPointerLock();
 
     // CSSOM View Module
-    // https://dev.w3.org/csswg/cssom-view/#extension-to-the-element-interface
-    DOMRectList getClientRects();
-    [RuntimeCallStatsCounter=ElementGetBoundingClientRect] DOMRect getBoundingClientRect();
+    // https://drafts.csswg.org/cssom-view/#extension-to-the-element-interface
+    [Measure] DOMRectList getClientRects();
+    [Measure, RuntimeCallStatsCounter=ElementGetBoundingClientRect] DOMRect getBoundingClientRect();
 
     // TODO(sunyunjia): Add default value for scrollIntoView() once
     // crbug.com/734599 is fixed.
@@ -117,12 +120,12 @@ interface Element : Node {
 
     // Typed OM
     // https://drafts.css-houdini.org/css-typed-om/#inline-stylepropertymap-objects
-    [RuntimeEnabled=CSSTypedOM, SameObject] readonly attribute StylePropertyMap styleMap;
+    [RuntimeEnabled=CSSTypedOM, SameObject, MeasureAs=CSSTypedOMStylePropertyMap] readonly attribute StylePropertyMap attributeStyleMap;
 
     // Non-standard API
     [MeasureAs=ElementScrollIntoViewIfNeeded] void scrollIntoViewIfNeeded(optional boolean centerIfNeeded);
-    [RaisesException, CallWith=ScriptState, MeasureAs=ElementCreateShadowRoot] ShadowRoot createShadowRoot();
-    NodeList getDestinationInsertionPoints();
+    [RuntimeEnabled=ShadowDOMV0, RaisesException, CallWith=ScriptState, MeasureAs=ElementCreateShadowRoot] ShadowRoot createShadowRoot();
+    [RuntimeEnabled=ShadowDOMV0] NodeList getDestinationInsertionPoints();
 
     // Experimental accessibility API
     [RuntimeEnabled=ComputedAccessibilityInfo] readonly attribute DOMString? computedRole;

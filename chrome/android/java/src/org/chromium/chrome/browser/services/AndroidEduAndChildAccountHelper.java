@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.browser.services;
 
-import android.content.Context;
-
 import org.chromium.base.Callback;
 import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.childaccounts.ChildAccountService;
@@ -15,8 +13,8 @@ import org.chromium.chrome.browser.childaccounts.ChildAccountService;
  * Usage:
  * new AndroidEduAndChildAccountHelper() { override onParametersReady() }.start(appContext).
  */
-public abstract class AndroidEduAndChildAccountHelper extends Callback<Boolean>
-        implements AndroidEduOwnerCheckCallback {
+public abstract class AndroidEduAndChildAccountHelper
+        implements Callback<Boolean>, AndroidEduOwnerCheckCallback {
     private Boolean mIsAndroidEduDevice;
     private Boolean mHasChildAccount;
     // Abbreviated to < 20 chars.
@@ -38,10 +36,9 @@ public abstract class AndroidEduAndChildAccountHelper extends Callback<Boolean>
     /**
      * Starts fetching the Android EDU and child accounts information.
      * Calls onParametersReady() once the information is fetched.
-     * @param appContext The application context.
      */
-    public void start(Context appContext) {
-        ChildAccountService.checkHasChildAccount(appContext, this);
+    public void start() {
+        ChildAccountService.checkHasChildAccount(this);
         AppHooks.get().checkIsAndroidEduDevice(this);
         // TODO(aruslan): Should we start a watchdog to kill if Child/Edu stuff takes too long?
     }

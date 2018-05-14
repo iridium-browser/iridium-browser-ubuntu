@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 
+#include "base/bind_helpers.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -58,10 +59,9 @@ void ReadFromReader(LocalFileStreamReader* reader,
 }
 
 void NeverCalled(int) { ADD_FAILURE(); }
-void EmptyCallback() {}
 
 void QuitLoop() {
-  base::MessageLoop::current()->QuitWhenIdle();
+  base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 }  // namespace
@@ -120,8 +120,8 @@ class LocalFileStreamReaderTest : public testing::Test {
   }
 
   void EnsureFileTaskFinished() {
-    file_task_runner()->PostTaskAndReply(
-        FROM_HERE, base::Bind(&EmptyCallback), base::Bind(&QuitLoop));
+    file_task_runner()->PostTaskAndReply(FROM_HERE, base::DoNothing(),
+                                         base::BindOnce(&QuitLoop));
     base::RunLoop().Run();
   }
 

@@ -6,6 +6,8 @@
 
 #include <memory>
 #include "bindings/core/v8/V8CacheOptions.h"
+#include "core/frame/Settings.h"
+#include "core/inspector/InspectorTaskRunner.h"
 #include "core/workers/GlobalScopeCreationParams.h"
 #include "core/workers/WorkerReportingProxy.h"
 #include "core/workers/WorkerThreadTestHelper.h"
@@ -56,9 +58,9 @@ void WaitForSignalTask(WorkerThread* worker_thread,
   EXPECT_TRUE(worker_thread->IsCurrentThread());
 
   // Notify the main thread that the debugger task is waiting for the signal.
-  worker_thread->GetParentFrameTaskRunners()
-      ->Get(TaskType::kUnspecedTimer)
-      ->PostTask(BLINK_FROM_HERE, CrossThreadBind(&testing::ExitRunLoop));
+  PostCrossThreadTask(
+      *worker_thread->GetParentFrameTaskRunners()->Get(TaskType::kInternalTest),
+      FROM_HERE, CrossThreadBind(&testing::ExitRunLoop));
   waitable_event->Wait();
 }
 
@@ -66,12 +68,11 @@ void WaitForSignalTask(WorkerThread* worker_thread,
 
 class WorkerThreadTest : public ::testing::Test {
  public:
-  WorkerThreadTest() {}
+  WorkerThreadTest() = default;
 
   void SetUp() override {
-    reporting_proxy_ = WTF::MakeUnique<MockWorkerReportingProxy>();
-    security_origin_ =
-        SecurityOrigin::Create(KURL(kParsedURLString, "http://fake.url/"));
+    reporting_proxy_ = std::make_unique<MockWorkerReportingProxy>();
+    security_origin_ = SecurityOrigin::Create(KURL("http://fake.url/"));
     worker_thread_ =
         WTF::WrapUnique(new WorkerThreadForTest(nullptr, *reporting_proxy_));
     lifecycle_observer_ = new MockWorkerThreadLifecycleObserver(
@@ -81,7 +82,7 @@ class WorkerThreadTest : public ::testing::Test {
   void TearDown() override {}
 
   void Start() {
-    worker_thread_->StartWithSourceCode(security_origin_.Get(),
+    worker_thread_->StartWithSourceCode(security_origin_.get(),
                                         "//fake source code",
                                         ParentFrameTaskRunners::Create());
   }
@@ -89,7 +90,7 @@ class WorkerThreadTest : public ::testing::Test {
   void StartWithSourceCodeNotToFinish() {
     // Use a JavaScript source code that makes an infinite loop so that we
     // can catch some kind of issues as a timeout.
-    worker_thread_->StartWithSourceCode(security_origin_.Get(),
+    worker_thread_->StartWithSourceCode(security_origin_.get(),
                                         "while(true) {}",
                                         ParentFrameTaskRunners::Create());
   }
@@ -138,7 +139,7 @@ class WorkerThreadTest : public ::testing::Test {
 
   ExitCode GetExitCode() { return worker_thread_->GetExitCodeForTesting(); }
 
-  RefPtr<SecurityOrigin> security_origin_;
+  scoped_refptr<const SecurityOrigin> security_origin_;
   std::unique_ptr<MockWorkerReportingProxy> reporting_proxy_;
   std::unique_ptr<WorkerThreadForTest> worker_thread_;
   Persistent<MockWorkerThreadLifecycleObserver> lifecycle_observer_;
@@ -146,23 +147,23 @@ class WorkerThreadTest : public ::testing::Test {
 
 TEST_F(WorkerThreadTest, ShouldTerminateScriptExecution) {
   using ThreadState = WorkerThread::ThreadState;
-  MutexLocker dummy_lock(worker_thread_->thread_state_mutex_);
+
+  worker_thread_->inspector_task_runner_ = InspectorTaskRunner::Create(nullptr);
+
+  // SetExitCode() and ShouldTerminateScriptExecution() require the lock.
+  MutexLocker dummy_lock(worker_thread_->mutex_);
 
   EXPECT_EQ(ThreadState::kNotStarted, worker_thread_->thread_state_);
-  EXPECT_FALSE(worker_thread_->ShouldTerminateScriptExecution(dummy_lock));
+  EXPECT_FALSE(worker_thread_->ShouldTerminateScriptExecution());
 
-  worker_thread_->SetThreadState(dummy_lock, ThreadState::kRunning);
-  EXPECT_FALSE(worker_thread_->running_debugger_task_);
-  EXPECT_TRUE(worker_thread_->ShouldTerminateScriptExecution(dummy_lock));
+  worker_thread_->SetThreadState(ThreadState::kRunning);
+  EXPECT_TRUE(worker_thread_->ShouldTerminateScriptExecution());
 
-  worker_thread_->running_debugger_task_ = true;
-  EXPECT_FALSE(worker_thread_->ShouldTerminateScriptExecution(dummy_lock));
-
-  worker_thread_->SetThreadState(dummy_lock, ThreadState::kReadyToShutdown);
-  EXPECT_FALSE(worker_thread_->ShouldTerminateScriptExecution(dummy_lock));
+  worker_thread_->SetThreadState(ThreadState::kReadyToShutdown);
+  EXPECT_FALSE(worker_thread_->ShouldTerminateScriptExecution());
 
   // This is necessary to satisfy DCHECK in the dtor of WorkerThread.
-  worker_thread_->SetExitCode(dummy_lock, ExitCode::kGracefullyTerminated);
+  worker_thread_->SetExitCode(ExitCode::kGracefullyTerminated);
 }
 
 TEST_F(WorkerThreadTest, AsyncTerminate_OnIdle) {
@@ -291,24 +292,26 @@ TEST_F(WorkerThreadTest, Terminate_WhileDebuggerTaskIsRunningOnInitialization) {
   EXPECT_CALL(*reporting_proxy_, DidTerminateWorkerThread()).Times(1);
   EXPECT_CALL(*lifecycle_observer_, ContextDestroyed(_)).Times(1);
 
-  std::unique_ptr<Vector<CSPHeaderAndType>> headers =
-      WTF::MakeUnique<Vector<CSPHeaderAndType>>();
+  auto headers = std::make_unique<Vector<CSPHeaderAndType>>();
   CSPHeaderAndType header_and_type("contentSecurityPolicy",
                                    kContentSecurityPolicyHeaderTypeReport);
   headers->push_back(header_and_type);
 
-  // Specify kPauseWorkerGlobalScopeOnStart so that the worker thread can pause
-  // on initialization to run debugger tasks.
   auto global_scope_creation_params =
-      WTF::MakeUnique<GlobalScopeCreationParams>(
-          KURL(kParsedURLString, "http://fake.url/"), "fake user agent",
-          "//fake source code", nullptr, /* cachedMetaData */
-          kPauseWorkerGlobalScopeOnStart, headers.get(), "",
-          security_origin_.Get(), nullptr, /* workerClients */
-          kWebAddressSpaceLocal, nullptr /* originTrialToken */,
-          nullptr /* WorkerSettings */, kV8CacheOptionsDefault);
+      std::make_unique<GlobalScopeCreationParams>(
+          KURL("http://fake.url/"), "fake user agent", headers.get(),
+          kReferrerPolicyDefault, security_origin_.get(),
+          false /* starter_secure_context */, nullptr /* workerClients */,
+          mojom::IPAddressSpace::kLocal, nullptr /* originTrialToken */,
+          base::UnguessableToken::Create(),
+          std::make_unique<WorkerSettings>(Settings::Create().get()),
+          kV8CacheOptionsDefault);
+
+  // Specify PauseOnWorkerStart::kPause so that the worker thread can pause
+  // on initialization to run debugger tasks.
   worker_thread_->Start(std::move(global_scope_creation_params),
                         WorkerBackingThreadStartupData::CreateDefault(),
+                        WorkerInspectorProxy::PauseOnWorkerStart::kPause,
                         ParentFrameTaskRunners::Create());
 
   // Used to wait for worker thread termination in a debugger task on the
@@ -320,7 +323,7 @@ TEST_F(WorkerThreadTest, Terminate_WhileDebuggerTaskIsRunningOnInitialization) {
 
   // Wait for the debugger task.
   testing::EnterRunLoop();
-  EXPECT_TRUE(worker_thread_->running_debugger_task_);
+  EXPECT_TRUE(worker_thread_->inspector_task_runner_->IsRunningTask());
 
   // Terminate() schedules a forcible termination task.
   worker_thread_->Terminate();
@@ -362,7 +365,7 @@ TEST_F(WorkerThreadTest, Terminate_WhileDebuggerTaskIsRunning) {
 
   // Wait for the debugger task.
   testing::EnterRunLoop();
-  EXPECT_TRUE(worker_thread_->running_debugger_task_);
+  EXPECT_TRUE(worker_thread_->inspector_task_runner_->IsRunningTask());
 
   // Terminate() schedules a forcible termination task.
   worker_thread_->Terminate();

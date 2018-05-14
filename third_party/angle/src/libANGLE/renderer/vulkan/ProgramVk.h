@@ -10,8 +10,11 @@
 #ifndef LIBANGLE_RENDERER_VULKAN_PROGRAMVK_H_
 #define LIBANGLE_RENDERER_VULKAN_PROGRAMVK_H_
 
+#include "libANGLE/Constants.h"
 #include "libANGLE/renderer/ProgramImpl.h"
-#include "libANGLE/renderer/vulkan/renderervk_utils.h"
+#include "libANGLE/renderer/vulkan/vk_utils.h"
+
+#include <array>
 
 namespace rx
 {
@@ -31,7 +34,7 @@ class ProgramVk : public ProgramImpl
     void setSeparable(bool separable) override;
 
     gl::LinkResult link(const gl::Context *context,
-                        const gl::VaryingPacking &packing,
+                        const gl::ProgramLinkedResources &resources,
                         gl::InfoLog &infoLog) override;
     GLboolean validate(const gl::Caps &caps, gl::InfoLog *infoLog) override;
 
@@ -84,17 +87,12 @@ class ProgramVk : public ProgramImpl
                                GLboolean transpose,
                                const GLfloat *value) override;
 
+    void getUniformfv(const gl::Context *context, GLint location, GLfloat *params) const override;
+    void getUniformiv(const gl::Context *context, GLint location, GLint *params) const override;
+    void getUniformuiv(const gl::Context *context, GLint location, GLuint *params) const override;
+
     // TODO: synchronize in syncState when dirty bits exist.
     void setUniformBlockBinding(GLuint uniformBlockIndex, GLuint uniformBlockBinding) override;
-
-    // May only be called after a successful link operation.
-    // Return false for inactive blocks.
-    bool getUniformBlockSize(const std::string &blockName, size_t *sizeOut) const override;
-
-    // May only be called after a successful link operation.
-    // Returns false for inactive members.
-    bool getUniformBlockMemberInfo(const std::string &memberUniformName,
-                                   sh::BlockMemberInfo *memberInfoOut) const override;
 
     void setPathFragmentInputGen(const std::string &inputName,
                                  GLenum genMode,
@@ -102,13 +100,70 @@ class ProgramVk : public ProgramImpl
                                  const GLfloat *coeffs) override;
 
     const vk::ShaderModule &getLinkedVertexModule() const;
+    Serial getVertexModuleSerial() const;
     const vk::ShaderModule &getLinkedFragmentModule() const;
-    gl::ErrorOrResult<vk::PipelineLayout *> getPipelineLayout(VkDevice device);
+    Serial getFragmentModuleSerial() const;
+
+    vk::Error updateUniforms(ContextVk *contextVk);
+
+    const std::vector<VkDescriptorSet> &getDescriptorSets() const;
+
+    // In Vulkan, it is invalid to pass in a NULL descriptor set to vkCmdBindDescriptorSets.
+    // However, it's valid to leave them in an undefined, unbound state, if they are never used.
+    // This means when we want to ignore a descriptor set index, we need to pass in an offset
+    // parameter to BindDescriptorSets, which is an offset into the getDescriptorSets array.
+    // This allows us to skip binding blank descriptor sets when the Program doesn't use Uniforms
+    // or Textures.
+    const gl::RangeUI &getUsedDescriptorSetRange() const;
+
+    void updateTexturesDescriptorSet(ContextVk *contextVk);
+    void invalidateTextures();
 
   private:
+    void reset(VkDevice device);
+    vk::Error initDescriptorSets(ContextVk *contextVk);
+    gl::Error initDefaultUniformBlocks(const gl::Context *glContext);
+    vk::Error updateDefaultUniformsDescriptorSet(ContextVk *contextVk);
+
+    template <typename T>
+    void setUniformImpl(GLint location, GLsizei count, const T *v, GLenum entryPointType);
+
     vk::ShaderModule mLinkedVertexModule;
+    Serial mVertexModuleSerial;
     vk::ShaderModule mLinkedFragmentModule;
-    vk::PipelineLayout mPipelineLayout;
+    Serial mFragmentModuleSerial;
+
+    // State for the default uniform blocks.
+    struct DefaultUniformBlock final : private angle::NonCopyable
+    {
+        DefaultUniformBlock();
+        ~DefaultUniformBlock();
+
+        vk::BufferAndMemory storage;
+
+        // Shadow copies of the shader uniform data.
+        angle::MemoryBuffer uniformData;
+        bool uniformsDirty;
+
+        // Since the default blocks are laid out in std140, this tells us where to write on a call
+        // to a setUniform method. They are arranged in uniform location order.
+        std::vector<sh::BlockMemberInfo> uniformLayout;
+    };
+
+    std::array<DefaultUniformBlock, 2> mDefaultUniformBlocks;
+
+    // This is a special "empty" placeholder buffer for when a shader has no uniforms.
+    // It is necessary because we want to keep a compatible pipeline layout in all cases,
+    // and Vulkan does not tolerate having null handles in a descriptor set.
+    vk::BufferAndMemory mEmptyUniformBlockStorage;
+
+    // Descriptor sets for uniform blocks and textures for this program.
+    std::vector<VkDescriptorSet> mDescriptorSets;
+    gl::RangeUI mUsedDescriptorSetRange;
+    bool mDirtyTextures;
+
+    template <typename T>
+    using ShaderTextureArray = std::array<T, gl::IMPLEMENTATION_MAX_SHADER_TEXTURES>;
 };
 
 }  // namespace rx

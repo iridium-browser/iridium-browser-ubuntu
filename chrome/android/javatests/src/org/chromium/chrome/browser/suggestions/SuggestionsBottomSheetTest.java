@@ -4,11 +4,8 @@
 
 package org.chromium.chrome.browser.suggestions;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-
-import static org.chromium.chrome.test.util.ChromeRestriction.RESTRICTION_TYPE_PHONE;
 
 import android.os.SystemClock;
 import android.support.test.InstrumentationRegistry;
@@ -22,25 +19,26 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ntp.NtpUiCaptureTestData;
 import org.chromium.chrome.browser.ntp.cards.ItemViewType;
-import org.chromium.chrome.test.BottomSheetTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.browser.RecyclerViewTestUtils;
 import org.chromium.chrome.test.util.browser.suggestions.SuggestionsDependenciesRule;
 import org.chromium.content.browser.test.util.TestTouchUtils;
+import org.chromium.ui.test.util.UiRestriction;
 
 /**
  * Instrumentation tests for {@link SuggestionsBottomSheetContent}.
  */
+@DisabledTest(message = "https://crbug.com/805160")
 @RunWith(ChromeJUnit4ClassRunner.class)
-@Restriction(RESTRICTION_TYPE_PHONE) // ChromeHome is only enabled on phones
+@Restriction(UiRestriction.RESTRICTION_TYPE_PHONE) // ChromeHome is only enabled on phones
 public class SuggestionsBottomSheetTest {
     @Rule
-    public BottomSheetTestRule mActivityRule = new BottomSheetTestRule();
+    public SuggestionsBottomSheetTestRule mActivityRule = new SuggestionsBottomSheetTestRule();
+
     @Rule
     public SuggestionsDependenciesRule createSuggestions() {
         return new SuggestionsDependenciesRule(NtpUiCaptureTestData.createFactory());
@@ -55,27 +53,15 @@ public class SuggestionsBottomSheetTest {
     @RetryOnFailure
     @MediumTest
     public void testContextMenu() throws InterruptedException {
-        SuggestionsRecyclerView recyclerView =
-                (SuggestionsRecyclerView) mActivityRule.getBottomSheetContent()
-                        .getContentView()
-                        .findViewById(R.id.recycler_view);
-
-        ViewHolder firstCardViewHolder = RecyclerViewTestUtils.waitForView(recyclerView, 2);
-        assertEquals(firstCardViewHolder.getItemViewType(), ItemViewType.SNIPPET);
-
+        ViewHolder suggestionViewHolder =
+                mActivityRule.scrollToFirstItemOfType(ItemViewType.SNIPPET);
         assertFalse(mActivityRule.getBottomSheet().onInterceptTouchEvent(createTapEvent()));
 
         TestTouchUtils.longClickView(
-                InstrumentationRegistry.getInstrumentation(), firstCardViewHolder.itemView);
+                InstrumentationRegistry.getInstrumentation(), suggestionViewHolder.itemView);
         assertTrue(mActivityRule.getBottomSheet().onInterceptTouchEvent(createTapEvent()));
 
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mActivityRule.getActivity().closeContextMenu();
-            }
-        });
-
+        ThreadUtils.runOnUiThreadBlocking(mActivityRule.getActivity()::closeContextMenu);
         assertFalse(mActivityRule.getBottomSheet().onInterceptTouchEvent(createTapEvent()));
     }
 

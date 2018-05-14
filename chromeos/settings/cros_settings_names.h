@@ -119,6 +119,28 @@ CHROMEOS_EXPORT extern const char kDeviceWallpaperImage[];
 CHROMEOS_EXPORT extern const char kDeviceLoginScreenLocales[];
 CHROMEOS_EXPORT extern const char kDeviceLoginScreenInputMethods[];
 
+CHROMEOS_EXPORT extern const char kPerUserTimezoneEnabled[];
+CHROMEOS_EXPORT extern const char kFineGrainedTimeZoneResolveEnabled[];
+
+CHROMEOS_EXPORT extern const char kDeviceOffHours[];
+
+CHROMEOS_EXPORT extern const char kDevicePrintersConfigurations[];
+CHROMEOS_EXPORT extern const char kDevicePrintersAccessMode[];
+CHROMEOS_EXPORT extern const char kDevicePrintersBlacklist[];
+CHROMEOS_EXPORT extern const char kDevicePrintersWhitelist[];
+
+CHROMEOS_EXPORT extern const char kTPMFirmwareUpdateSettings[];
+
+CHROMEOS_EXPORT extern const char kMinimumRequiredChromeVersion[];
+
+CHROMEOS_EXPORT extern const char kCastReceiverName[];
+
+CHROMEOS_EXPORT extern const char kUnaffiliatedArcAllowed[];
+
+CHROMEOS_EXPORT extern const char kDeviceHostnameTemplate[];
+
+CHROMEOS_EXPORT extern const char kVirtualMachinesAllowed[];
+
 }  // namespace chromeos
 
 #endif  // CHROMEOS_SETTINGS_CROS_SETTINGS_NAMES_H_

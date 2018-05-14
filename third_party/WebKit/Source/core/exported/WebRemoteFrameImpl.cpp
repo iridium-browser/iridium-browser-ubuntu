@@ -7,30 +7,36 @@
 #include "bindings/core/v8/WindowProxy.h"
 #include "core/dom/RemoteSecurityContext.h"
 #include "core/dom/SecurityContext.h"
-#include "core/exported/WebFactory.h"
-#include "core/exported/WebViewBase.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/RemoteFrameClientImpl.h"
 #include "core/frame/RemoteFrameOwner.h"
 #include "core/frame/Settings.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/fullscreen/Fullscreen.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/layout/LayoutObject.h"
+#include "core/layout/LayoutView.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
+#include "core/timing/DOMWindowPerformance.h"
+#include "core/timing/WindowPerformance.h"
 #include "platform/bindings/DOMWrapperWorld.h"
 #include "platform/feature_policy/FeaturePolicy.h"
+#include "platform/geometry/FloatQuad.h"
+#include "platform/geometry/LayoutRect.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/WebFeaturePolicy.h"
 #include "public/platform/WebFloatRect.h"
+#include "public/platform/WebIntrinsicSizingInfo.h"
 #include "public/platform/WebRect.h"
+#include "public/platform/WebScrollIntoViewParams.h"
 #include "public/web/WebDocument.h"
 #include "public/web/WebFrameOwnerProperties.h"
 #include "public/web/WebPerformance.h"
 #include "public/web/WebRange.h"
 #include "public/web/WebTreeScopeType.h"
+#include "third_party/WebKit/public/common/feature_policy/feature_policy.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -59,7 +65,7 @@ WebRemoteFrameImpl* WebRemoteFrameImpl::CreateMainFrame(
   WebRemoteFrameImpl* frame =
       new WebRemoteFrameImpl(WebTreeScopeType::kDocument, client);
   frame->SetOpener(opener);
-  Page& page = *static_cast<WebViewBase*>(web_view)->GetPage();
+  Page& page = *static_cast<WebViewImpl*>(web_view)->GetPage();
   // It would be nice to DCHECK that the main frame is not set yet here.
   // Unfortunately, there is an edge case with a pending RenderFrameHost that
   // violates this: the embedder may create a pending RenderFrameHost for
@@ -72,12 +78,11 @@ WebRemoteFrameImpl* WebRemoteFrameImpl::CreateMainFrame(
   return frame;
 }
 
-WebRemoteFrameImpl::~WebRemoteFrameImpl() {}
+WebRemoteFrameImpl::~WebRemoteFrameImpl() = default;
 
-DEFINE_TRACE(WebRemoteFrameImpl) {
+void WebRemoteFrameImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_client_);
   visitor->Trace(frame_);
-  WebRemoteFrameBase::Trace(visitor);
   WebFrame::TraceFrames(visitor, this);
 }
 
@@ -104,15 +109,6 @@ void WebRemoteFrameImpl::Close() {
   self_keep_alive_.Clear();
 }
 
-WebString WebRemoteFrameImpl::AssignedName() const {
-  NOTREACHED();
-  return WebString();
-}
-
-void WebRemoteFrameImpl::SetName(const WebString&) {
-  NOTREACHED();
-}
-
 WebRect WebRemoteFrameImpl::VisibleContentRect() const {
   NOTREACHED();
   return WebRect();
@@ -126,23 +122,9 @@ WebView* WebRemoteFrameImpl::View() const {
   return GetFrame()->GetPage()->GetChromeClient().GetWebView();
 }
 
-WebPerformance WebRemoteFrameImpl::Performance() const {
-  NOTREACHED();
-  return WebPerformance();
-}
-
 void WebRemoteFrameImpl::StopLoading() {
   // TODO(dcheng,japhet): Calling this method should stop loads
   // in all subframes, both remote and local.
-}
-
-void WebRemoteFrameImpl::EnableViewSourceMode(bool enable) {
-  NOTREACHED();
-}
-
-bool WebRemoteFrameImpl::IsViewSourceModeEnabled() const {
-  NOTREACHED();
-  return false;
 }
 
 WebLocalFrame* WebRemoteFrameImpl::CreateLocalChild(
@@ -152,11 +134,11 @@ WebLocalFrame* WebRemoteFrameImpl::CreateLocalChild(
     WebFrameClient* client,
     blink::InterfaceRegistry* interface_registry,
     WebFrame* previous_sibling,
-    const WebParsedFeaturePolicy& container_policy,
+    const ParsedFeaturePolicy& container_policy,
     const WebFrameOwnerProperties& frame_owner_properties,
     WebFrame* opener) {
-  WebLocalFrameBase* child = WebFactory::GetInstance().CreateWebLocalFrameBase(
-      scope, client, interface_registry, opener);
+  WebLocalFrameImpl* child =
+      WebLocalFrameImpl::Create(scope, client, interface_registry, opener);
   InsertAfter(child, previous_sibling);
   RemoteFrameOwner* owner =
       RemoteFrameOwner::Create(static_cast<SandboxFlags>(sandbox_flags),
@@ -178,7 +160,7 @@ WebRemoteFrame* WebRemoteFrameImpl::CreateRemoteChild(
     WebTreeScopeType scope,
     const WebString& name,
     WebSandboxFlags sandbox_flags,
-    const WebParsedFeaturePolicy& container_policy,
+    const ParsedFeaturePolicy& container_policy,
     WebRemoteFrameClient* client,
     WebFrame* opener) {
   WebRemoteFrameImpl* child = WebRemoteFrameImpl::Create(scope, client);
@@ -207,12 +189,17 @@ WebRemoteFrameImpl* WebRemoteFrameImpl::FromFrame(RemoteFrame& frame) {
     return nullptr;
   RemoteFrameClientImpl* client =
       static_cast<RemoteFrameClientImpl*>(frame.Client());
-  return ToWebRemoteFrameImpl(client->GetWebFrame());
+  return client->GetWebFrame();
 }
 
-void WebRemoteFrameImpl::SetReplicatedOrigin(const WebSecurityOrigin& origin) {
+void WebRemoteFrameImpl::SetReplicatedOrigin(
+    const WebSecurityOrigin& origin,
+    bool is_potentially_trustworthy_unique_origin) {
   DCHECK(GetFrame());
-  GetFrame()->GetSecurityContext()->SetReplicatedOrigin(origin);
+  scoped_refptr<SecurityOrigin> security_origin = origin.Get()->IsolatedCopy();
+  security_origin->SetUniqueOriginIsPotentiallyTrustworthy(
+      is_potentially_trustworthy_unique_origin);
+  GetFrame()->GetSecurityContext()->SetReplicatedOrigin(security_origin);
 
   // If the origin of a remote frame changed, the accessibility object for the
   // owner element now points to a different child.
@@ -231,6 +218,7 @@ void WebRemoteFrameImpl::SetReplicatedOrigin(const WebSecurityOrigin& origin) {
 
 void WebRemoteFrameImpl::SetReplicatedSandboxFlags(WebSandboxFlags flags) {
   DCHECK(GetFrame());
+  GetFrame()->GetSecurityContext()->ResetSandboxFlags();
   GetFrame()->GetSecurityContext()->EnforceSandboxFlags(
       static_cast<SandboxFlags>(flags));
 }
@@ -241,20 +229,18 @@ void WebRemoteFrameImpl::SetReplicatedName(const WebString& name) {
 }
 
 void WebRemoteFrameImpl::SetReplicatedFeaturePolicyHeader(
-    const WebParsedFeaturePolicy& parsed_header) {
-  if (RuntimeEnabledFeatures::FeaturePolicyEnabled()) {
-    WebFeaturePolicy* parent_feature_policy = nullptr;
-    if (Parent()) {
-      Frame* parent_frame = GetFrame()->Client()->Parent();
-      parent_feature_policy =
-          parent_frame->GetSecurityContext()->GetFeaturePolicy();
-    }
-    WebParsedFeaturePolicy container_policy;
-    if (GetFrame()->Owner())
-      container_policy = GetFrame()->Owner()->ContainerPolicy();
-    GetFrame()->GetSecurityContext()->InitializeFeaturePolicy(
-        parsed_header, container_policy, parent_feature_policy);
+    const ParsedFeaturePolicy& parsed_header) {
+  FeaturePolicy* parent_feature_policy = nullptr;
+  if (Parent()) {
+    Frame* parent_frame = GetFrame()->Client()->Parent();
+    parent_feature_policy =
+        parent_frame->GetSecurityContext()->GetFeaturePolicy();
   }
+  ParsedFeaturePolicy container_policy;
+  if (GetFrame()->Owner())
+    container_policy = GetFrame()->Owner()->ContainerPolicy();
+  GetFrame()->GetSecurityContext()->InitializeFeaturePolicy(
+      parsed_header, container_policy, parent_feature_policy);
 }
 
 void WebRemoteFrameImpl::AddReplicatedContentSecurityPolicyHeader(
@@ -279,21 +265,24 @@ void WebRemoteFrameImpl::SetReplicatedInsecureRequestPolicy(
   GetFrame()->GetSecurityContext()->SetInsecureRequestPolicy(policy);
 }
 
-void WebRemoteFrameImpl::SetReplicatedPotentiallyTrustworthyUniqueOrigin(
-    bool is_unique_origin_potentially_trustworthy) {
+void WebRemoteFrameImpl::SetReplicatedInsecureNavigationsSet(
+    const std::vector<unsigned>& set) {
   DCHECK(GetFrame());
-  // If |isUniqueOriginPotentiallyTrustworthy| is true, then the origin must be
-  // unique.
-  DCHECK(!is_unique_origin_potentially_trustworthy ||
-         GetFrame()->GetSecurityContext()->GetSecurityOrigin()->IsUnique());
-  GetFrame()
-      ->GetSecurityContext()
-      ->GetSecurityOrigin()
-      ->SetUniqueOriginIsPotentiallyTrustworthy(
-          is_unique_origin_potentially_trustworthy);
+  GetFrame()->GetSecurityContext()->SetInsecureNavigationsSet(set);
 }
 
-void WebRemoteFrameImpl::DispatchLoadEventOnFrameOwner() {
+void WebRemoteFrameImpl::ForwardResourceTimingToParent(
+    const WebResourceTimingInfo& info) {
+  DCHECK(Parent()->IsWebLocalFrame());
+  WebLocalFrameImpl* parent_frame =
+      ToWebLocalFrameImpl(Parent()->ToWebLocalFrame());
+  HTMLFrameOwnerElement* owner_element =
+      ToHTMLFrameOwnerElement(frame_->Owner());
+  DOMWindowPerformance::performance(*parent_frame->GetFrame()->DomWindow())
+      ->AddResourceTiming(info, owner_element->localName());
+}
+
+void WebRemoteFrameImpl::DispatchLoadEventForFrameOwner() {
   DCHECK(GetFrame()->Owner()->IsLocal());
   GetFrame()->Owner()->DispatchLoad();
 }
@@ -304,11 +293,6 @@ void WebRemoteFrameImpl::DidStartLoading() {
 
 void WebRemoteFrameImpl::DidStopLoading() {
   GetFrame()->SetIsLoading(false);
-  if (Parent() && Parent()->IsWebLocalFrame()) {
-    WebLocalFrameBase* parent_frame =
-        ToWebLocalFrameBase(Parent()->ToWebLocalFrame());
-    parent_frame->GetFrame()->GetDocument()->CheckCompleted();
-  }
 }
 
 bool WebRemoteFrameImpl::IsIgnoredForHitTest() const {
@@ -342,7 +326,50 @@ void WebRemoteFrameImpl::WillEnterFullscreen() {
 }
 
 void WebRemoteFrameImpl::SetHasReceivedUserGesture() {
-  GetFrame()->SetDocumentHasReceivedUserGesture();
+  Frame::NotifyUserActivation(GetFrame(), UserGestureToken::kNewGesture);
+}
+
+void WebRemoteFrameImpl::ScrollRectToVisible(
+    const WebRect& rect_to_scroll,
+    const WebScrollIntoViewParams& params) {
+  Element* owner_element = frame_->DeprecatedLocalOwner();
+  LayoutObject* owner_object = owner_element->GetLayoutObject();
+  if (!owner_object) {
+    // The LayoutObject could be nullptr by the time we get here. For instance
+    // <iframe>'s style might have been set to 'display: none' right after
+    // scrolling starts in the OOPIF's process (see https://crbug.com/777811).
+    return;
+  }
+
+  // Schedule the scroll.
+  LayoutRect new_rect_to_scroll = EnclosingLayoutRect(
+      owner_object
+          ->LocalToAncestorQuad(FloatRect(rect_to_scroll), owner_object->View(),
+                                kUseTransforms | kTraverseDocumentBoundaries)
+          .BoundingBox());
+  owner_object->ScrollRectToVisible(new_rect_to_scroll, params);
+}
+
+void WebRemoteFrameImpl::IntrinsicSizingInfoChanged(
+    const WebIntrinsicSizingInfo& web_sizing_info) {
+  FrameOwner* owner = GetFrame()->Owner();
+  // Only communication from HTMLPluginElement-owned subframes is allowed
+  // at present. This includes <embed> and <object> tags.
+  if (!owner || !owner->IsPlugin())
+    return;
+
+  IntrinsicSizingInfo sizing_info;
+  sizing_info.size = web_sizing_info.size;
+  sizing_info.aspect_ratio = web_sizing_info.aspect_ratio;
+  sizing_info.has_width = web_sizing_info.has_width;
+  sizing_info.has_height = web_sizing_info.has_height;
+  frame_->View()->SetIntrinsicSizeInfo(sizing_info);
+
+  owner->IntrinsicSizingInfoChanged();
+}
+
+void WebRemoteFrameImpl::SetHasReceivedUserGestureBeforeNavigation(bool value) {
+  GetFrame()->SetDocumentHasReceivedUserGestureBeforeNavigation(value);
 }
 
 v8::Local<v8::Object> WebRemoteFrameImpl::GlobalProxy() const {
@@ -353,7 +380,7 @@ v8::Local<v8::Object> WebRemoteFrameImpl::GlobalProxy() const {
 
 WebRemoteFrameImpl::WebRemoteFrameImpl(WebTreeScopeType scope,
                                        WebRemoteFrameClient* client)
-    : WebRemoteFrameBase(scope),
+    : WebRemoteFrame(scope),
       frame_client_(RemoteFrameClientImpl::Create(this)),
       client_(client),
       self_keep_alive_(this) {

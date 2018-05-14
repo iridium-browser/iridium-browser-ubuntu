@@ -14,10 +14,10 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
-#include "ui/app_list/search_result_observer.h"
+#include "ui/app_list/app_list_export.h"
 #include "ui/app_list/views/search_result_actions_view_delegate.h"
+#include "ui/app_list/views/search_result_base_view.h"
 #include "ui/views/context_menu_controller.h"
-#include "ui/views/controls/button/custom_button.h"
 
 namespace gfx {
 class RenderText;
@@ -40,11 +40,9 @@ class SearchResultActionsView;
 
 // SearchResultView displays a SearchResult.
 class APP_LIST_EXPORT SearchResultView
-    : public views::CustomButton,
-      public views::ButtonListener,
+    : public SearchResultBaseView,
       public views::ContextMenuController,
-      public SearchResultObserver,
-      NON_EXPORTED_BASE(public SearchResultActionsViewDelegate) {
+      public SearchResultActionsViewDelegate {
  public:
   // Internal class name.
   static const char kViewClassName[];
@@ -85,6 +83,8 @@ class APP_LIST_EXPORT SearchResultView
   bool OnKeyPressed(const ui::KeyEvent& event) override;
   void ChildPreferredSizeChanged(views::View* child) override;
   void PaintButtonContents(gfx::Canvas* canvas) override;
+  void OnFocus() override;
+  void OnBlur() override;
 
   // views::ButtonListener overrides:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
@@ -109,7 +109,7 @@ class APP_LIST_EXPORT SearchResultView
   // SearchResultActionsViewDelegate overrides:
   void OnSearchResultActionActivated(size_t index, int event_flags) override;
 
-  SearchResult* result_ = nullptr;  // Owned by AppListModel::SearchResults.
+  SearchResult* result_ = nullptr;  // Owned by SearchModel::SearchResults.
 
   bool is_last_result_ = false;
 
@@ -125,7 +125,8 @@ class APP_LIST_EXPORT SearchResultView
 
   std::unique_ptr<views::MenuRunner> context_menu_runner_;
 
-  const bool is_fullscreen_app_list_enabled_;
+  // Whether this view is selected.
+  bool selected_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(SearchResultView);
 };

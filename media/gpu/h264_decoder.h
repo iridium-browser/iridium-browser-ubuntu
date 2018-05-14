@@ -14,10 +14,10 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "media/base/limits.h"
-#include "media/filters/h264_parser.h"
 #include "media/gpu/accelerated_video_decoder.h"
 #include "media/gpu/h264_dpb.h"
 #include "media/gpu/media_gpu_export.h"
+#include "media/video/h264_parser.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -101,7 +101,7 @@ class MEDIA_GPU_EXPORT H264Decoder : public AcceleratedVideoDecoder {
     DISALLOW_COPY_AND_ASSIGN(H264Accelerator);
   };
 
-  H264Decoder(H264Accelerator* accelerator);
+  explicit H264Decoder(std::unique_ptr<H264Accelerator> accelerator);
   ~H264Decoder() override;
 
   // AcceleratedVideoDecoder implementation.
@@ -273,7 +273,7 @@ class MEDIA_GPU_EXPORT H264Decoder : public AcceleratedVideoDecoder {
   // PicOrderCount of the previously outputted frame.
   int last_output_poc_;
 
-  H264Accelerator* accelerator_;
+  const std::unique_ptr<H264Accelerator> accelerator_;
 
   DISALLOW_COPY_AND_ASSIGN(H264Decoder);
 };

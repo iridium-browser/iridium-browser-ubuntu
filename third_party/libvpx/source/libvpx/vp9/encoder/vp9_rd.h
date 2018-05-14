@@ -191,13 +191,18 @@ void vp9_setup_pred_block(const MACROBLOCKD *xd,
                           const struct scale_factors *scale,
                           const struct scale_factors *scale_uv);
 
-int vp9_get_intra_cost_penalty(int qindex, int qdelta,
-                               vpx_bit_depth_t bit_depth);
+int vp9_get_intra_cost_penalty(const struct VP9_COMP *const cpi,
+                               BLOCK_SIZE bsize, int qindex, int qdelta);
 
+unsigned int vp9_get_sby_variance(struct VP9_COMP *cpi,
+                                  const struct buf_2d *ref, BLOCK_SIZE bs);
 unsigned int vp9_get_sby_perpixel_variance(struct VP9_COMP *cpi,
                                            const struct buf_2d *ref,
                                            BLOCK_SIZE bs);
 #if CONFIG_VP9_HIGHBITDEPTH
+unsigned int vp9_high_get_sby_variance(struct VP9_COMP *cpi,
+                                       const struct buf_2d *ref, BLOCK_SIZE bs,
+                                       int bd);
 unsigned int vp9_high_get_sby_perpixel_variance(struct VP9_COMP *cpi,
                                                 const struct buf_2d *ref,
                                                 BLOCK_SIZE bs, int bd);

@@ -10,19 +10,28 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "cc/output/compositor_frame_metadata.h"
+#include "components/viz/common/quads/compositor_frame_metadata.h"
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
+#include "content/browser/devtools/protocol/devtools_download_manager_delegate.h"
 #include "content/browser/devtools/protocol/page.h"
+#include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/readback_types.h"
+#include "content/public/common/javascript_dialog_type.h"
+#include "third_party/WebKit/public/platform/modules/manifest/manifest_manager.mojom.h"
+#include "url/gurl.h"
 
 class SkBitmap;
+
+namespace base {
+class UnguessableToken;
+}
 
 namespace gfx {
 class Image;
@@ -35,8 +44,7 @@ struct WebDeviceEmulationParams;
 namespace content {
 
 class DevToolsAgentHostImpl;
-class NavigationHandle;
-class PageNavigationThrottle;
+class NavigationRequest;
 class RenderFrameHostImpl;
 class WebContentsImpl;
 
@@ -51,26 +59,42 @@ class PageHandler : public DevToolsDomainHandler,
   explicit PageHandler(EmulationHandler* handler);
   ~PageHandler() override;
 
+  static std::vector<PageHandler*> EnabledForWebContents(
+      WebContentsImpl* contents);
   static std::vector<PageHandler*> ForAgentHost(DevToolsAgentHostImpl* host);
 
   void Wire(UberDispatcher* dispatcher) override;
-  void SetRenderFrameHost(RenderFrameHostImpl* host) override;
-  void OnSwapCompositorFrame(cc::CompositorFrameMetadata frame_metadata);
+  void SetRenderer(int process_host_id,
+                   RenderFrameHostImpl* frame_host) override;
+  void OnSwapCompositorFrame(viz::CompositorFrameMetadata frame_metadata);
   void OnSynchronousSwapCompositorFrame(
-      cc::CompositorFrameMetadata frame_metadata);
+      viz::CompositorFrameMetadata frame_metadata);
   void DidAttachInterstitialPage();
   void DidDetachInterstitialPage();
   bool screencast_enabled() const { return enabled_ && screencast_enabled_; }
+  using JavaScriptDialogCallback =
+      content::JavaScriptDialogManager::DialogClosedCallback;
+  void DidRunJavaScriptDialog(const GURL& url,
+                              const base::string16& message,
+                              const base::string16& default_prompt,
+                              JavaScriptDialogType dialog_type,
+                              JavaScriptDialogCallback callback);
+  void DidRunBeforeUnloadConfirm(const GURL& url,
+                                 JavaScriptDialogCallback callback);
+  void DidCloseJavaScriptDialog(bool success, const base::string16& user_input);
+  void NavigationReset(NavigationRequest* navigation_request);
 
   Response Enable() override;
   Response Disable() override;
 
+  Response Crash() override;
   Response Reload(Maybe<bool> bypassCache,
                   Maybe<std::string> script_to_evaluate_on_load) override;
-  Response Navigate(const std::string& url,
-                    Maybe<std::string> referrer,
-                    Maybe<std::string> transition_type,
-                    Page::FrameId* frame_id) override;
+  void Navigate(const std::string& url,
+                Maybe<std::string> referrer,
+                Maybe<std::string> transition_type,
+                Maybe<std::string> frame_id,
+                std::unique_ptr<NavigateCallback> callback) override;
   Response StopLoading() override;
 
   using NavigationEntries = protocol::Array<Page::NavigationEntry>;
@@ -97,6 +121,9 @@ class PageHandler : public DevToolsDomainHandler,
                   Maybe<double> margin_right,
                   Maybe<String> page_ranges,
                   Maybe<bool> ignore_invalid_page_ranges,
+                  Maybe<String> header_template,
+                  Maybe<String> footer_template,
+                  Maybe<bool> prefer_css_page_size,
                   std::unique_ptr<PrintToPDFCallback> callback) override;
   Response StartScreencast(Maybe<std::string> format,
                            Maybe<int> quality,
@@ -111,15 +138,13 @@ class PageHandler : public DevToolsDomainHandler,
 
   Response RequestAppBanner() override;
 
-  Response SetControlNavigations(bool enabled) override;
-  Response ProcessNavigation(const std::string& response,
-                             int navigation_id) override;
+  Response BringToFront() override;
 
-  std::unique_ptr<PageNavigationThrottle> CreateThrottleForNavigation(
-      NavigationHandle* navigation_handle);
+  Response SetDownloadBehavior(const std::string& behavior,
+                               Maybe<std::string> download_path) override;
 
-  void OnPageNavigationThrottleDisposed(int navigation_id);
-  void NavigationRequested(const PageNavigationThrottle* throttle);
+  void GetAppManifest(
+      std::unique_ptr<GetAppManifestCallback> callback) override;
 
  private:
   enum EncodingFormat { PNG, JPEG };
@@ -127,20 +152,25 @@ class PageHandler : public DevToolsDomainHandler,
   WebContentsImpl* GetWebContents();
   void NotifyScreencastVisibility(bool visible);
   void InnerSwapCompositorFrame();
-  void ScreencastFrameCaptured(cc::CompositorFrameMetadata metadata,
-                               const SkBitmap& bitmap,
-                               ReadbackResponse response);
-  void ScreencastFrameEncoded(cc::CompositorFrameMetadata metadata,
-                              const base::Time& timestamp,
-                              const std::string& data);
+  void ScreencastFrameCaptured(
+      std::unique_ptr<Page::ScreencastFrameMetadata> metadata,
+      const SkBitmap& bitmap);
+  void ScreencastFrameEncoded(
+      std::unique_ptr<Page::ScreencastFrameMetadata> metadata,
+      const std::string& data);
 
   void ScreenshotCaptured(
       std::unique_ptr<CaptureScreenshotCallback> callback,
       const std::string& format,
       int quality,
       const gfx::Size& original_view_size,
+      const gfx::Size& requested_image_size,
       const blink::WebDeviceEmulationParams& original_params,
       const gfx::Image& image);
+
+  void GotManifest(std::unique_ptr<GetAppManifestCallback> callback,
+                   const GURL& manifest_url,
+                   blink::mojom::ManifestDebugInfoPtr debug_info);
 
   // NotificationObserver overrides.
   void Observe(int type,
@@ -157,20 +187,20 @@ class PageHandler : public DevToolsDomainHandler,
   int capture_every_nth_frame_;
   int capture_retry_count_;
   bool has_compositor_frame_metadata_;
-  cc::CompositorFrameMetadata next_compositor_frame_metadata_;
-  cc::CompositorFrameMetadata last_compositor_frame_metadata_;
+  viz::CompositorFrameMetadata next_compositor_frame_metadata_;
+  viz::CompositorFrameMetadata last_compositor_frame_metadata_;
   int session_id_;
   int frame_counter_;
   int frames_in_flight_;
-
-  bool navigation_throttle_enabled_;
-  int next_navigation_id_;
-  std::map<int, PageNavigationThrottle*> navigation_throttles_;
 
   RenderFrameHostImpl* host_;
   EmulationHandler* emulation_handler_;
   std::unique_ptr<Page::Frontend> frontend_;
   NotificationRegistrar registrar_;
+  JavaScriptDialogCallback pending_dialog_;
+  scoped_refptr<DevToolsDownloadManagerDelegate> download_manager_delegate_;
+  base::flat_map<base::UnguessableToken, std::unique_ptr<NavigateCallback>>
+      navigate_callbacks_;
   base::WeakPtrFactory<PageHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PageHandler);

@@ -11,7 +11,8 @@
 #include "modules/notifications/Notification.h"
 #include "modules/notifications/NotificationOptions.h"
 #include "modules/vibration/VibrationController.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
+#include "platform/wtf/text/StringView.h"
 #include "public/platform/WebURL.h"
 
 namespace blink {
@@ -88,16 +89,13 @@ WebNotificationData CreateWebNotificationData(
     DCHECK(isolate->InContext());
     SerializedScriptValue::SerializeOptions options;
     options.for_storage = SerializedScriptValue::kForStorage;
-    RefPtr<SerializedScriptValue> serialized_script_value =
+    scoped_refptr<SerializedScriptValue> serialized_script_value =
         SerializedScriptValue::Serialize(isolate, data.V8Value(), options,
                                          exception_state);
     if (exception_state.HadException())
       return WebNotificationData();
 
-    Vector<char> serialized_data;
-    serialized_script_value->ToWireBytes(serialized_data);
-
-    web_data.data = serialized_data;
+    web_data.data = WebVector<char>(serialized_script_value->GetWireData());
   }
 
   Vector<WebNotificationAction> actions;

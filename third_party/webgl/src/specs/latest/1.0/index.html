@@ -1240,8 +1240,7 @@ typedef (ImageBitmap or
 typedef ([AllowShared] Float32Array or sequence&lt;GLfloat&gt;) Float32List;
 typedef ([AllowShared] Int32Array or sequence&lt;GLint&gt;) Int32List;
 
-[NoInterfaceObject]
-interface <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</dfn>
+interface mixin <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</dfn>
 {
 
     /* ClearBufferMask */
@@ -1873,7 +1872,7 @@ interface <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</dfn>
 interface <dfn id="WebGLRenderingContext">WebGLRenderingContext</dfn>
 {
 };
-WebGLRenderingContext implements WebGLRenderingContextBase;
+WebGLRenderingContext includes WebGLRenderingContextBase;
 </pre>
 
 <!-- ======================================================================================================= -->
@@ -2996,6 +2995,12 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
             If the array passed to any of the vector forms (those ending in <code>v</code>) has an
             invalid length, an <code>INVALID_VALUE</code> error will be generated. The length is
             invalid if it is too short for or is not an integer multiple of the assigned type.
+
+            <div class="note">Performance problems have been observed on some implementations when
+            using <code>uniform1i</code> to update sampler uniforms. To change the texture
+            referenced by a sampler uniform, binding a new texture to the texture unit referenced
+            by the uniform should be preferred over using <code>uniform1i</code> to update the
+            uniform itself.</div>
         <dt><p class="idl-code">void vertexAttrib[1234]f(GLuint index, ...)</p>
             <p class="idl-code">void vertexAttrib[1234]fv(GLuint index, ...)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.7">OpenGL ES 2.0 &sect;2.7</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glVertexAttrib.xml">man page</a>)</span></p>
@@ -4101,6 +4106,33 @@ extensions.
     local and global variables as undefined unless they are initialized by the
     shader. WebGL guarantees that such variables are initialized to zero:
     <code>0.0</code>, <code>vec4(0.0)</code>, <code>0</code>, <code>false</code>, etc.
+</p>
+
+<h3>Vertex attribute conversions from normalized signed integers to floating point</h3>
+
+<p>
+    The OpenGL ES 2.0 spec <a href="#refsGLES20">[GLES20]</a> section 2.1.2 "Data Conversions",
+    subsection "Conversion from Integer to Floating-Point" defines conversion from a normalized
+    signed integer <em>c</em>, where the bit width of the type is <em>b</em>, to floating-point
+    value <em>f</em> as:
+
+    <dl>
+    <dd><em>f</em> = (2*<em>c</em> + 1) / (2^<em>b</em> - 1)</dd>
+    </dl>
+
+    During conversions of signed normalized vertex attributes to floating point, WebGL 1.0
+    implementations may optionally use this conversion rule, which preserves zeros:
+
+    <dl>
+    <dd><em>f</em> = max(<em>c</em> / (2^(<em>b</em> - 1) - 1), -1.0)
+    </dl>
+
+    <div class="note rationale">
+    Some APIs on which WebGL 1.0 is built on use the second rule, and since this conversion is done
+    in fixed-function hardware, it is not possible to emulate one behavior or the other. This
+    difference in behavior does not affect most applications, so a query to determine which behavior
+    is being used has not been added to the WebGL rendering context.
+    </div>
 </p>
 
 <!-- ======================================================================================================= -->

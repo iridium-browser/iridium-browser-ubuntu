@@ -8,6 +8,7 @@
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/policy/cloud/test_request_interceptor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -134,6 +135,7 @@ class CloudPolicyManagerTest : public InProcessBrowserTest {
 #endif
     policy_manager()->core()->client()->Register(
         registration_type, em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
+        em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
         em::LicenseType::UNDEFINED, "bogus", std::string(), std::string(),
         std::string());
     run_loop.Run();

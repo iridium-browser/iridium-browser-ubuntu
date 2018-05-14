@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
  # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -25,7 +26,6 @@ import functools
 import glob
 import multiprocessing
 import os
-import sys
 import tempfile
 
 from chromite.lib import constants
@@ -170,6 +170,11 @@ def RevGitFile(filename, data, retries=5, dryrun=False):
     git.RunGit(cwd, ['commit', '-m', description])
     git.PushWithRetry(prebuilt_branch, cwd, dryrun=dryrun, retries=retries)
   finally:
+    # We reset the index and the working tree state in case there are any
+    # uncommitted or pending changes, but we don't change any existing commits.
+    git.RunGit(cwd, ['reset', '--hard'])
+
+    # Check out the last good commit as a sanity fallback.
     git.RunGit(cwd, ['checkout', commit])
 
 
@@ -321,7 +326,7 @@ def UpdateBinhostConfFile(path, key, value):
     git.AddPath(path)
     git.Commit(cwd, desc)
 
-def GenerateHtmlIndex(files, index, board, version):
+def GenerateHtmlIndex(files, index, board, version, remote_location):
   """Given the list of |files|, generate an index.html at |index|.
 
   Args:
@@ -329,6 +334,7 @@ def GenerateHtmlIndex(files, index, board, version):
     index: The path to the html index.
     board: Name of the board this index is for.
     version: Build version this index is for.
+    remote_location: Remote gs location prebuilts are uploaded to.
   """
   title = 'Package Prebuilt Index: %s / %s' % (board, version)
 
@@ -336,7 +342,8 @@ def GenerateHtmlIndex(files, index, board, version):
       '.|Google Storage Index',
       '..|',
   ]
-  commands.GenerateHtmlIndex(index, files, title=title)
+  commands.GenerateHtmlIndex(index, files, title=title,
+                             url_base=gs.GsUrlToHttp(remote_location))
 
 
 def _GrabAllRemotePackageIndexes(binhost_urls):
@@ -410,14 +417,10 @@ class PrebuiltUploader(object):
   def _ShouldFilterPackage(self, pkg):
     if not self._packages:
       return False
-    pym_path = os.path.abspath(os.path.join(self._build_path, _PYM_PATH))
-    sys.path.insert(0, pym_path)
-    # pylint: disable=F0401
-    import portage.versions
-    cat, pkgname = portage.versions.catpkgsplit(pkg['CPV'])[0:2]
-    cp = '%s/%s' % (cat, pkgname)
+    cpv = portage_util.SplitCPV(pkg['CPV'])
+    cp = '%s/%s' % (cpv.category, cpv.package)
     self._found_packages.add(cp)
-    return pkgname not in self._packages and cp not in self._packages
+    return cpv.package not in self._packages and cp not in self._packages
 
   def _UploadPrebuilt(self, package_path, url_suffix):
     """Upload host or board prebuilt files to Google Storage space.
@@ -458,7 +461,7 @@ class PrebuiltUploader(object):
         prefix='chromite.upload_prebuilts.index.') as index:
       GenerateHtmlIndex(
           [x[len(remote_location) + 1:] for x in upload_files.values()],
-          index.name, self._target, self._version)
+          index.name, self._target, self._version, remote_location)
       self._Upload(index.name, '%s/index.html' % remote_location.rstrip('/'))
 
       link_name = 'Prebuilts[%s]: %s' % (self._target, self._version)
@@ -634,15 +637,6 @@ class PrebuiltUploader(object):
         if upload_board_tarball:
           tar_process.join()
           assert tar_process.exitcode == 0
-          # TODO(zbehan): This should be done cleaner.
-          if target.board == constants.CHROOT_BUILDER_BOARD:
-            sdk_conf = os.path.join(self._binhost_conf_dir,
-                                    'host/sdk_version.conf')
-            sdk_settings = {
-                'SDK_LATEST_VERSION': version_str,
-                'TC_PATH': toolchain_upload_path,
-            }
-            RevGitFile(sdk_conf, sdk_settings, dryrun=self._dryrun)
 
       # Record URL where prebuilts were uploaded.
       url_value = '%s/%s/' % (self._binhost_base_url.rstrip('/'),

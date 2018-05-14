@@ -47,7 +47,7 @@ PaintingControlToWeb(
 
 WebContentLayerImpl::WebContentLayerImpl(blink::WebContentLayerClient* client)
     : client_(client) {
-  layer_ = base::MakeUnique<WebLayerImpl>(PictureLayer::Create(this));
+  layer_ = std::make_unique<WebLayerImpl>(PictureLayer::Create(this));
   layer_->layer()->SetIsDrawable(true);
 }
 
@@ -76,7 +76,7 @@ gfx::Rect WebContentLayerImpl::PaintableRegion() {
 scoped_refptr<cc::DisplayItemList>
 WebContentLayerImpl::PaintContentsToDisplayList(
     cc::ContentLayerClient::PaintingControlSetting painting_control) {
-  auto display_list = make_scoped_refptr(new cc::DisplayItemList);
+  auto display_list = base::MakeRefCounted<cc::DisplayItemList>();
   if (client_) {
     WebDisplayItemListImpl list(display_list.get());
     client_->PaintContents(&list, PaintingControlToWeb(painting_control));

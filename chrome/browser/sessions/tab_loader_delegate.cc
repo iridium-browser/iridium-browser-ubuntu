@@ -6,6 +6,7 @@
 
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/browser/resource_coordinator/tab_manager_features.h"
 #include "components/variations/variations_associated_data.h"
 #include "net/base/network_change_notifier.h"
 
@@ -25,23 +26,23 @@ static const int kFirstTabLoadTimeoutMS = 60000;
 
 class TabLoaderDelegateImpl
     : public TabLoaderDelegate,
-      public net::NetworkChangeNotifier::ConnectionTypeObserver {
+      public net::NetworkChangeNotifier::NetworkChangeObserver {
  public:
   explicit TabLoaderDelegateImpl(TabLoaderCallback* callback);
   ~TabLoaderDelegateImpl() override;
 
   // TabLoaderDelegate:
   base::TimeDelta GetFirstTabLoadingTimeout() const override {
-    return first_timeout_;
+    return resource_coordinator::GetTabLoadTimeout(first_timeout_);
   }
 
   // TabLoaderDelegate:
   base::TimeDelta GetTimeoutBeforeLoadingNextTab() const override {
-    return timeout_;
+    return resource_coordinator::GetTabLoadTimeout(timeout_);
   }
 
-  // net::NetworkChangeNotifier::ConnectionTypeObserver:
-  void OnConnectionTypeChanged(
+  // net::NetworkChangeNotifier::NetworkChangeObserver implementation:
+  void OnNetworkChanged(
       net::NetworkChangeNotifier::ConnectionType type) override;
 
  private:
@@ -57,7 +58,7 @@ class TabLoaderDelegateImpl
 
 TabLoaderDelegateImpl::TabLoaderDelegateImpl(TabLoaderCallback* callback)
     : callback_(callback) {
-  net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
+  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
   if (net::NetworkChangeNotifier::IsOffline()) {
     // When we are off-line we do not allow loading of tabs, since each of
     // these tabs would start loading simultaneously when going online.
@@ -71,14 +72,15 @@ TabLoaderDelegateImpl::TabLoaderDelegateImpl(TabLoaderCallback* callback)
 }
 
 TabLoaderDelegateImpl::~TabLoaderDelegateImpl() {
-  net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
+  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
 }
 
-void TabLoaderDelegateImpl::OnConnectionTypeChanged(
+void TabLoaderDelegateImpl::OnNetworkChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
   callback_->SetTabLoadingEnabled(
       type != net::NetworkChangeNotifier::CONNECTION_NONE);
 }
+
 }  // namespace
 
 // static

@@ -15,7 +15,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.StrictMode;
 import android.os.SystemClock;
+import android.support.annotation.IntDef;
 import android.support.annotation.Nullable;
+import android.support.v4.text.BidiFormatter;
 import android.text.Editable;
 import android.text.Layout;
 import android.text.Selection;
@@ -35,14 +37,11 @@ import android.widget.TextView;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Log;
 import org.chromium.base.SysUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.WindowDelegate;
 import org.chromium.chrome.browser.metrics.StartupMetrics;
-import org.chromium.chrome.browser.omnibox.LocationBarLayout.OmniboxLivenessListener;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.UrlUtilities;
-import org.chromium.content.browser.ContentViewCore;
 import org.chromium.ui.UiUtils;
 
 import java.net.MalformedURLException;
@@ -67,9 +66,6 @@ public class UrlBar extends AutocompleteEditText {
     // of what is displayed to the user, see limitDisplayableLength().
     private static final int MAX_DISPLAYABLE_LENGTH = 4000;
     private static final int MAX_DISPLAYABLE_LENGTH_LOW_END = 1000;
-
-    // Unicode "Left-To-Right Mark" (LRM) character.
-    private static final char LRM = '\u200E';
 
     /** The contents of the URL that precede the path/query after being formatted. */
     private String mFormattedUrlLocation;
@@ -98,7 +94,15 @@ public class UrlBar extends AutocompleteEditText {
     private final KeyboardHideHelper mKeyboardHideHelper;
 
     private boolean mFocused;
+    private boolean mSuppressingTouchMoveEventsForThisTouch;
+    private MotionEvent mSuppressedTouchDownEvent;
     private boolean mAllowFocus = true;
+
+    private boolean mPendingScroll;
+    private int mPreviousWidth;
+    private String mPreviousTldScrollText;
+    private int mPreviousTldScrollViewWidth;
+    private int mPreviousTldScrollResultXPosition;
 
     private final int mDarkHintColor;
     private final int mDarkDefaultTextColor;
@@ -109,8 +113,6 @@ public class UrlBar extends AutocompleteEditText {
     private final int mLightHighlightColor;
 
     private Boolean mUseDarkColors;
-
-    private OmniboxLivenessListener mOmniboxLivenessListener;
 
     private long mFirstFocusTimeMs;
 
@@ -125,6 +127,14 @@ public class UrlBar extends AutocompleteEditText {
 
     /** The location of this view on the last ACTION_DOWN event. */
     private float mDownEventViewTop;
+
+    /** What scrolling action should be taken after the URL bar text changes. **/
+    @IntDef({NO_SCROLL, SCROLL_TO_TLD, SCROLL_TO_BEGINNING})
+    public @interface ScrollType {}
+
+    public static final int NO_SCROLL = 0;
+    public static final int SCROLL_TO_TLD = 1;
+    public static final int SCROLL_TO_BEGINNING = 2;
 
     /**
      * Implement this to get updates when the direction of the text in the URL bar changes.
@@ -170,6 +180,17 @@ public class UrlBar extends AutocompleteEditText {
          * Called to notify that back key has been pressed while the URL bar has focus.
          */
         void backKeyPressed();
+
+        /**
+         * @return Whether or not we should force LTR text on the URL bar when unfocused.
+         */
+        boolean shouldForceLTR();
+
+        /**
+         * @return What scrolling action should be performed after the URL text is modified.
+         */
+        @ScrollType
+        int getScrollType();
     }
 
     public UrlBar(Context context, AttributeSet attrs) {
@@ -203,8 +224,6 @@ public class UrlBar extends AutocompleteEditText {
         setFocusable(false);
         setFocusableInTouchMode(false);
 
-        setHint(OmniboxPlaceholderFieldTrial.getOmniboxPlaceholder());
-
         mGestureDetector = new GestureDetector(
                 getContext(), new GestureDetector.SimpleOnGestureListener() {
                     @Override
@@ -225,6 +244,8 @@ public class UrlBar extends AutocompleteEditText {
                 if (mUrlBarDelegate != null) mUrlBarDelegate.backKeyPressed();
             }
         });
+
+        ApiCompatibilityUtils.disableSmartSelectionTextClassifier(this);
     }
 
     /**
@@ -273,7 +294,6 @@ public class UrlBar extends AutocompleteEditText {
         }
 
         if (!hasFocus()) {
-            deEmphasizeUrl();
             emphasizeUrl();
         }
     }
@@ -305,10 +325,12 @@ public class UrlBar extends AutocompleteEditText {
 
         if (focused && mFirstFocusTimeMs == 0) {
             mFirstFocusTimeMs = SystemClock.elapsedRealtime();
-            if (mOmniboxLivenessListener != null) mOmniboxLivenessListener.onOmniboxFocused();
         }
 
-        if (focused) StartupMetrics.getInstance().recordFocusedOmnibox();
+        if (focused) {
+            StartupMetrics.getInstance().recordFocusedOmnibox();
+            mPendingScroll = false;
+        }
 
         fixupTextDirection();
     }
@@ -344,7 +366,7 @@ public class UrlBar extends AutocompleteEditText {
         // normally (to allow users to make non-URL searches and to avoid showing Android's split
         // insertion point when an RTL user enters RTL text). Also render text normally when the
         // text field is empty (because then it displays an instruction that is not a URL).
-        if (mFocused || length() == 0) {
+        if (mFocused || length() == 0 || !mUrlBarDelegate.shouldForceLTR()) {
             ApiCompatibilityUtils.setTextDirection(this, TEXT_DIRECTION_INHERIT);
         } else {
             ApiCompatibilityUtils.setTextDirection(this, TEXT_DIRECTION_LTR);
@@ -384,34 +406,74 @@ public class UrlBar extends AutocompleteEditText {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        // This method contains special logic to enable long presses to be handled correctly.
+
+        // One piece of the logic is to suppress all ACTION_DOWN events received while the UrlBar is
+        // not focused, and only pass them to super.onTouchEvent() if it turns out we're about to
+        // perform a long press. Long pressing will not behave properly without sending this event,
+        // but if we always send it immediately, it will cause the keyboard to show immediately,
+        // whereas we want to wait to show it until after the URL focus animation finishes, to avoid
+        // performance issues on slow devices.
+
+        // The other piece of the logic is to suppress ACTION_MOVE events received after an
+        // ACTION_DOWN received while the UrlBar is not focused. This is because the UrlBar moves to
+        // the side as it's focusing, and a finger held still on the screen would therefore be
+        // interpreted as a drag selection.
+
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
             getLocationInWindow(mCachedLocation);
             mDownEventViewTop = mCachedLocation[1];
+            mSuppressingTouchMoveEventsForThisTouch = !mFocused;
         }
 
         if (!mFocused) {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                mSuppressedTouchDownEvent = MotionEvent.obtain(event);
+            }
             mGestureDetector.onTouchEvent(event);
             return true;
         }
 
-        Tab currentTab = mUrlBarDelegate.getCurrentTab();
-        if (event.getAction() == MotionEvent.ACTION_DOWN && currentTab != null) {
-            // Make sure to hide the current ContentView ActionBar.
-            ContentViewCore viewCore = currentTab.getContentViewCore();
-            if (viewCore != null) viewCore.destroySelectActionMode();
+        if (event.getActionMasked() == MotionEvent.ACTION_UP
+                || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+            // Minor optimization to avoid unnecessarily holding onto a MotionEvent after the touch
+            // finishes.
+            mSuppressedTouchDownEvent = null;
         }
 
-        return super.onTouchEvent(event);
+        if (mSuppressingTouchMoveEventsForThisTouch
+                && event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+            return true;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return super.onTouchEvent(event);
+        }
+        try {
+            return super.onTouchEvent(event);
+        } catch (NullPointerException e) {
+            // Working around a platform bug (b/25562038) that was fixed in N that can throw an
+            // exception during text selection. We just swallow the exception. The outcome is that
+            // the text selection handle doesn't show.
+            Log.w(TAG, "Ignoring NPE in UrlBar#onTouchEvent.", e);
+            return true;
+        }
     }
 
     @Override
     public boolean performLongClick(float x, float y) {
-        return shouldPerformLongClick() ? super.performLongClick(x, y) : true;
+        if (!shouldPerformLongClick()) return false;
+
+        releaseSuppressedTouchDownEvent();
+        return super.performLongClick(x, y);
     }
 
     @Override
     public boolean performLongClick() {
-        return shouldPerformLongClick() ? super.performLongClick() : true;
+        if (!shouldPerformLongClick()) return false;
+
+        releaseSuppressedTouchDownEvent();
+        return super.performLongClick();
     }
 
     /**
@@ -422,6 +484,13 @@ public class UrlBar extends AutocompleteEditText {
 
         // If the view moved between the last down event, block the long-press.
         return mDownEventViewTop == mCachedLocation[1];
+    }
+
+    private void releaseSuppressedTouchDownEvent() {
+        if (mSuppressedTouchDownEvent != null) {
+            super.onTouchEvent(mSuppressedTouchDownEvent);
+            mSuppressedTouchDownEvent = null;
+        }
     }
 
     @Override
@@ -436,11 +505,6 @@ public class UrlBar extends AutocompleteEditText {
             // touches etc. activate it.
             setFocusable(mAllowFocus);
             setFocusableInTouchMode(mAllowFocus);
-
-            // The URL bar will now react correctly to a focus change event
-            if (mOmniboxLivenessListener != null) {
-                mOmniboxLivenessListener.onOmniboxInteractive();
-            }
         }
 
         // Notify listeners if the URL's direction has changed.
@@ -501,20 +565,6 @@ public class UrlBar extends AutocompleteEditText {
         mUrlBarDelegate = delegate;
     }
 
-    /**
-     * Set {@link OmniboxLivenessListener} to be used for receiving interaction related messages
-     * during startup.
-     * @param listener The listener to use for sending the messages.
-     */
-    @VisibleForTesting
-    public void setOmniboxLivenessListener(OmniboxLivenessListener listener) {
-        mOmniboxLivenessListener = listener;
-    }
-
-    public void onNativeLibraryReady() {
-        if (mOmniboxLivenessListener != null) mOmniboxLivenessListener.onOmniboxFullyFunctional();
-    }
-
     @Override
     public boolean onTextContextMenuItem(int id) {
         if (id == android.R.id.paste) {
@@ -555,6 +605,20 @@ public class UrlBar extends AutocompleteEditText {
 
         // If we are copying/cutting the full previously formatted URL, reset the URL
         // text before initiating the TextViews handling of the context menu.
+        //
+        // Example:
+        //    Original display text: www.example.com
+        //    Original URL:          http://www.example.com
+        //
+        // Editing State:
+        //    www.example.com/blah/foo
+        //    |<--- Selection --->|
+        //
+        // Resulting clipboard text should be:
+        //    http://www.example.com/blah/
+        //
+        // As long as the full original text was selected, it will replace that with the original
+        // URL and keep any further modifications by the user.
         String currentText = getText().toString();
         if (selectedStartIndex == 0
                 && (id == android.R.id.cut || id == android.R.id.copy)
@@ -585,25 +649,16 @@ public class UrlBar extends AutocompleteEditText {
     /**
      * Sets the text content of the URL bar.
      *
-     * @param url The original URL (or generic text) that can be used for copy/cut/paste.
-     * @param formattedUrl Formatted URL for user display. Null if there isn't one.
+     * @param pageUrl The original URL (or generic text) that can be used for copy/cut/paste.
+     * @param displayText Formatted URL or alternate text for user display. Null if there isn't one.
      * @return Whether the visible text has changed.
      */
-    public boolean setUrl(String url, String formattedUrl) {
-        if (!TextUtils.isEmpty(formattedUrl)) {
-            // Because Android versions 4.2 and before lack proper RTL support,
-            // force the formatted URL to render as LTR using an LRM character.
-            // See: https://www.ietf.org/rfc/rfc3987.txt and crbug.com/709417
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-                formattedUrl = LRM + formattedUrl;
-            }
-
+    public boolean setUrl(String pageUrl, String displayText) {
+        if (!TextUtils.isEmpty(displayText)) {
             try {
-                URL javaUrl = new URL(url);
-                mFormattedUrlLocation =
-                        getUrlContentsPrePath(formattedUrl, javaUrl.getHost());
-                mOriginalUrlLocation =
-                        getUrlContentsPrePath(url, javaUrl.getHost());
+                URL javaUrl = new URL(pageUrl);
+                mFormattedUrlLocation = getUrlContentsPrePath(displayText, javaUrl.getHost());
+                mOriginalUrlLocation = getUrlContentsPrePath(pageUrl, javaUrl.getHost());
             } catch (MalformedURLException mue) {
                 mOriginalUrlLocation = null;
                 mFormattedUrlLocation = null;
@@ -611,29 +666,83 @@ public class UrlBar extends AutocompleteEditText {
         } else {
             mOriginalUrlLocation = null;
             mFormattedUrlLocation = null;
-            formattedUrl = url;
+            displayText = pageUrl;
         }
 
         Editable previousText = getEditableText();
-        setText(formattedUrl);
+        setText(displayText);
 
-        if (!isFocused()) scrollToTLD();
-
-        return !TextUtils.equals(previousText, getEditableText());
+        boolean textChanged = !TextUtils.equals(previousText, getEditableText());
+        if (textChanged && !isFocused()) scrollDisplayText();
+        return textChanged;
     }
 
-    /**
-     * Scroll to ensure the TLD is visible.
-     * @return Whether the TLD was discovered and successfully scrolled to.
-     */
-    public boolean scrollToTLD() {
+    public void scrollDisplayText() {
+        if (isLayoutRequested()) {
+            if (mUrlBarDelegate.getScrollType() == NO_SCROLL) return;
+            mPendingScroll = true;
+        } else {
+            scrollDisplayTextInternal();
+        }
+    }
+
+    public void scrollDisplayTextInternal() {
+        switch (mUrlBarDelegate.getScrollType()) {
+            case SCROLL_TO_TLD:
+                scrollToTLD();
+                break;
+            case SCROLL_TO_BEGINNING:
+                scrollToBeginning();
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void scrollToBeginning() {
+        int scrollX = 0;
+        if (BidiFormatter.getInstance().isRtl(getTextWithAutocomplete())) {
+            int textWidth = (int) getLayout().getPaint().measureText(getTextWithAutocomplete());
+            scrollX = textWidth - getMeasuredWidth();
+        }
+        scrollTo(scrollX, getScrollY());
+    }
+
+    public void scrollToTLD() {
+        if (mFocused) return;
+
+        // Ensure any selection from the focus state is cleared.
+        setSelection(0);
+
+        String previousTldScrollText = mPreviousTldScrollText;
+        int previousTldScrollViewWidth = mPreviousTldScrollViewWidth;
+        int previousTldScrollResultXPosition = mPreviousTldScrollResultXPosition;
+
+        mPreviousTldScrollText = null;
+        mPreviousTldScrollViewWidth = 0;
+        mPreviousTldScrollResultXPosition = 0;
+
         Editable url = getText();
-        if (url == null || url.length() < 1) return false;
+        if (url == null || url.length() < 1) {
+            int scrollX = 0;
+            if (ApiCompatibilityUtils.isLayoutRtl(this)
+                    && BidiFormatter.getInstance().isRtl(getHint())) {
+                // Compared to below that uses getPrimaryHorizontal(1) due to 0 returning an
+                // invalid value, if the text is empty, getPrimaryHorizontal(0) returns the actual
+                // max scroll amount.
+                scrollX = (int) getLayout().getPrimaryHorizontal(0) - getMeasuredWidth();
+            }
+            scrollTo(scrollX, getScrollY());
+            return;
+        }
         String urlString = url.toString();
         Pair<String, String> urlComponents =
                 LocationBarLayout.splitPathFromUrlDisplayText(urlString);
 
-        if (TextUtils.isEmpty(urlComponents.first)) return false;
+        if (TextUtils.isEmpty(urlComponents.first)) {
+            scrollTo(0, getScrollY());
+            return;
+        }
 
         // Do not scroll to the end of the host for URLs such as data:, javascript:, etc...
         if (urlComponents.second == null) {
@@ -641,21 +750,65 @@ public class UrlBar extends AutocompleteEditText {
             String scheme = uri.getScheme();
             if (!TextUtils.isEmpty(scheme)
                     && LocationBarLayout.UNSUPPORTED_SCHEMES_TO_SPLIT.contains(scheme)) {
-                return false;
+                scrollTo(0, getScrollY());
+                return;
             }
         }
 
-        // We want to bring the end of the domain into view. But since we want
-        // to bias towards displaying the beginning of the URL as well, first
-        // we bring the beginning into view. We can't use offset 0, because
-        // this TextView is in force-LTR mode, and for RTL domains, offset 0 is
-        // outside the RTL-extent that contains the domain. crbug.com/723100
-        if (urlComponents.first.length() > 1) {
-            bringPointIntoView(1);
+        int measuredWidth = getMeasuredWidth();
+        if (TextUtils.equals(url, previousTldScrollText)
+                && measuredWidth == previousTldScrollViewWidth) {
+            scrollTo(previousTldScrollResultXPosition, getScrollY());
+            return;
         }
-        setSelection(urlComponents.first.length());
 
-        return true;
+        assert getLayout().getLineCount() == 1;
+        float endPointX = getLayout().getPrimaryHorizontal(urlComponents.first.length());
+        // Using 1 instead of 0 as zero does not return a valid value in RTL (always returns 0
+        // instead of the valid scroll position).
+        float startPointX = url.length() == 1 ? 0 : getLayout().getPrimaryHorizontal(1);
+
+        float scrollPos;
+        if (startPointX < endPointX) {
+            // LTR
+            scrollPos = Math.max(0, endPointX - measuredWidth);
+        } else {
+            float width = getLayout().getPaint().measureText(urlComponents.first);
+            // RTL
+            if (width < measuredWidth) {
+                scrollPos = Math.max(0, endPointX + width - measuredWidth);
+            } else {
+                scrollPos = endPointX + measuredWidth;
+            }
+        }
+        scrollTo((int) scrollPos, getScrollY());
+
+        mPreviousTldScrollText = url.toString();
+        mPreviousTldScrollViewWidth = measuredWidth;
+        mPreviousTldScrollResultXPosition = (int) scrollPos;
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+
+        if (mPendingScroll) {
+            scrollDisplayTextInternal();
+            mPendingScroll = false;
+        } else if (mPreviousWidth != (right - left)) {
+            scrollDisplayTextInternal();
+            mPreviousWidth = right - left;
+        }
+    }
+
+    @Override
+    public boolean bringPointIntoView(int offset) {
+        // TextView internally attempts to keep the selection visible, but in the unfocused state
+        // this class ensures that the TLD is visible.
+        if (!mFocused) return false;
+        assert !mPendingScroll;
+
+        return super.bringPointIntoView(offset);
     }
 
     @Override
@@ -746,7 +899,7 @@ public class UrlBar extends AutocompleteEditText {
      */
     public void emphasizeUrl() {
         Editable url = getText();
-        if (OmniboxUrlEmphasizer.hasEmphasisSpans(url) || hasFocus()) {
+        if (hasFocus()) {
             return;
         }
 
@@ -765,6 +918,9 @@ public class UrlBar extends AutocompleteEditText {
             // Ignore as this only is for applying color
         }
 
+        // Since we emphasize the scheme of the URL based on the security type, we need to
+        // deEmphasize first to refresh.
+        deEmphasizeUrl();
         OmniboxUrlEmphasizer.emphasizeUrl(url, getResources(), currentTab.getProfile(),
                 currentTab.getSecurityLevel(), isInternalPage,
                 mUseDarkColors, mUrlBarDelegate.shouldEmphasizeHttpsScheme());

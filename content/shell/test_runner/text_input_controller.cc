@@ -14,8 +14,8 @@
 #include "third_party/WebKit/public/platform/WebCoalescedInputEvent.h"
 #include "third_party/WebKit/public/platform/WebInputEventResult.h"
 #include "third_party/WebKit/public/platform/WebKeyboardEvent.h"
-#include "third_party/WebKit/public/web/WebCompositionUnderline.h"
 #include "third_party/WebKit/public/web/WebFrameWidget.h"
+#include "third_party/WebKit/public/web/WebImeTextSpan.h"
 #include "third_party/WebKit/public/web/WebInputMethodController.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -46,8 +46,12 @@ class TextInputControllerBindings
 
   void InsertText(const std::string& text);
   void UnmarkText();
+  void UnmarkAndUnselectText();
   void DoCommand(const std::string& text);
+  void ExtendSelectionAndDelete(int before, int after);
+  void DeleteSurroundingText(int before, int after);
   void SetMarkedText(const std::string& text, int start, int length);
+  void SetMarkedTextFromExistingText(int start, int length);
   bool HasMarkedText();
   std::vector<int> MarkedRange();
   std::vector<int> SelectedRange();
@@ -96,8 +100,16 @@ TextInputControllerBindings::GetObjectTemplateBuilder(v8::Isolate* isolate) {
              isolate)
       .SetMethod("insertText", &TextInputControllerBindings::InsertText)
       .SetMethod("unmarkText", &TextInputControllerBindings::UnmarkText)
+      .SetMethod("unmarkAndUnselectText",
+                 &TextInputControllerBindings::UnmarkAndUnselectText)
       .SetMethod("doCommand", &TextInputControllerBindings::DoCommand)
+      .SetMethod("extendSelectionAndDelete",
+                 &TextInputControllerBindings::ExtendSelectionAndDelete)
+      .SetMethod("deleteSurroundingText",
+                 &TextInputControllerBindings::DeleteSurroundingText)
       .SetMethod("setMarkedText", &TextInputControllerBindings::SetMarkedText)
+      .SetMethod("setMarkedTextFromExistingText",
+                 &TextInputControllerBindings::SetMarkedTextFromExistingText)
       .SetMethod("hasMarkedText", &TextInputControllerBindings::HasMarkedText)
       .SetMethod("markedRange", &TextInputControllerBindings::MarkedRange)
       .SetMethod("selectedRange", &TextInputControllerBindings::SelectedRange)
@@ -118,9 +130,25 @@ void TextInputControllerBindings::UnmarkText() {
     controller_->UnmarkText();
 }
 
+void TextInputControllerBindings::UnmarkAndUnselectText() {
+  if (controller_)
+    controller_->UnmarkAndUnselectText();
+}
+
 void TextInputControllerBindings::DoCommand(const std::string& text) {
   if (controller_)
     controller_->DoCommand(text);
+}
+
+void TextInputControllerBindings::ExtendSelectionAndDelete(int before,
+                                                           int after) {
+  if (controller_)
+    controller_->ExtendSelectionAndDelete(before, after);
+}
+
+void TextInputControllerBindings::DeleteSurroundingText(int before, int after) {
+  if (controller_)
+    controller_->DeleteSurroundingText(before, after);
 }
 
 void TextInputControllerBindings::SetMarkedText(const std::string& text,
@@ -128,6 +156,12 @@ void TextInputControllerBindings::SetMarkedText(const std::string& text,
                                                 int length) {
   if (controller_)
     controller_->SetMarkedText(text, start, length);
+}
+
+void TextInputControllerBindings::SetMarkedTextFromExistingText(int start,
+                                                                int end) {
+  if (controller_)
+    controller_->SetMarkedTextFromExistingText(start, end);
 }
 
 bool TextInputControllerBindings::HasMarkedText() {
@@ -173,7 +207,7 @@ void TextInputController::Install(blink::WebLocalFrame* frame) {
 void TextInputController::InsertText(const std::string& text) {
   if (auto* controller = GetInputMethodController()) {
     controller->CommitText(blink::WebString::FromUTF8(text),
-                           std::vector<blink::WebCompositionUnderline>(),
+                           std::vector<blink::WebImeTextSpan>(),
                            blink::WebRange(), 0);
   }
 }
@@ -185,14 +219,40 @@ void TextInputController::UnmarkText() {
   }
 }
 
+void TextInputController::UnmarkAndUnselectText() {
+  if (auto* controller = GetInputMethodController()) {
+    controller->FinishComposingText(
+        blink::WebInputMethodController::kDoNotKeepSelection);
+  }
+}
+
 void TextInputController::DoCommand(const std::string& text) {
   if (view()->MainFrame()) {
-    if (!view()->MainFrame()->ToWebLocalFrame()) {
-      CHECK(false) << "This function cannot be called if the main frame is not"
-                      "a local frame.";
-    }
+    CHECK(view()->MainFrame()->ToWebLocalFrame()) << "This function cannot be "
+                                                     "called if the main frame "
+                                                     "is not a local frame.";
     view()->MainFrame()->ToWebLocalFrame()->ExecuteCommand(
         blink::WebString::FromUTF8(text));
+  }
+}
+
+void TextInputController::ExtendSelectionAndDelete(int before, int after) {
+  if (view()->MainFrame()) {
+    CHECK(view()->MainFrame()->ToWebLocalFrame()) << "This function cannot be "
+                                                     "called if the main frame "
+                                                     "is not a local frame.";
+    view()->MainFrame()->ToWebLocalFrame()->ExtendSelectionAndDelete(before,
+                                                                     after);
+  }
+}
+
+void TextInputController::DeleteSurroundingText(int before, int after) {
+  if (view()->MainFrame()) {
+    CHECK(view()->MainFrame()->ToWebLocalFrame()) << "This function cannot be "
+                                                     "called if the main frame "
+                                                     "is not a local frame.";
+    view()->MainFrame()->ToWebLocalFrame()->DeleteSurroundingText(before,
+                                                                  after);
   }
 }
 
@@ -202,39 +262,50 @@ void TextInputController::SetMarkedText(const std::string& text,
   blink::WebString web_text(blink::WebString::FromUTF8(text));
 
   // Split underline into up to 3 elements (before, selection, and after).
-  std::vector<blink::WebCompositionUnderline> underlines;
-  blink::WebCompositionUnderline underline;
+  std::vector<blink::WebImeTextSpan> ime_text_spans;
+  blink::WebImeTextSpan ime_text_span;
   if (!start) {
-    underline.end_offset = length;
+    ime_text_span.end_offset = length;
   } else {
-    underline.end_offset = start;
-    underlines.push_back(underline);
-    underline.start_offset = start;
-    underline.end_offset = start + length;
+    ime_text_span.end_offset = start;
+    ime_text_spans.push_back(ime_text_span);
+    ime_text_span.start_offset = start;
+    ime_text_span.end_offset = start + length;
   }
-  underline.thick = true;
-  underlines.push_back(underline);
+  ime_text_span.thick = true;
+  ime_text_spans.push_back(ime_text_span);
   if (start + length < static_cast<int>(web_text.length())) {
-    underline.start_offset = underline.end_offset;
-    underline.end_offset = web_text.length();
-    underline.thick = false;
-    underlines.push_back(underline);
+    ime_text_span.start_offset = ime_text_span.end_offset;
+    ime_text_span.end_offset = web_text.length();
+    ime_text_span.thick = false;
+    ime_text_spans.push_back(ime_text_span);
   }
 
   if (auto* controller = GetInputMethodController()) {
-    controller->SetComposition(web_text, underlines, blink::WebRange(), start,
-                               start + length);
+    controller->SetComposition(web_text, ime_text_spans, blink::WebRange(),
+                               start, start + length);
   }
+}
+
+void TextInputController::SetMarkedTextFromExistingText(int start, int end) {
+  if (!view()->MainFrame())
+    return;
+
+  CHECK(view()->MainFrame()->ToWebLocalFrame()) << "This function cannot be "
+                                                   "called if the main frame "
+                                                   "is not a local frame.";
+
+  view()->MainFrame()->ToWebLocalFrame()->SetCompositionFromExistingText(
+      start, end, std::vector<blink::WebImeTextSpan>());
 }
 
 bool TextInputController::HasMarkedText() {
   if (!view()->MainFrame())
     return false;
 
-  if (!view()->MainFrame()->ToWebLocalFrame()) {
-    CHECK(false) << "This function cannot be called if the main frame is not"
-                    "a local frame.";
-  }
+  CHECK(view()->MainFrame()->ToWebLocalFrame()) << "This function cannot be "
+                                                   "called if the main frame "
+                                                   "is not a local frame.";
 
   return view()->MainFrame()->ToWebLocalFrame()->HasMarkedText();
 }
@@ -243,10 +314,9 @@ std::vector<int> TextInputController::MarkedRange() {
   if (!view()->MainFrame())
     return std::vector<int>();
 
-  if (!view()->MainFrame()->ToWebLocalFrame()) {
-    CHECK(false) << "This function cannot be called if the main frame is not"
-                    "a local frame.";
-  }
+  CHECK(view()->MainFrame()->ToWebLocalFrame()) << "This function cannot be "
+                                                   "called if the main frame "
+                                                   "is not a local frame.";
 
   blink::WebRange range = view()->MainFrame()->ToWebLocalFrame()->MarkedRange();
   std::vector<int> int_array(2);
@@ -260,10 +330,9 @@ std::vector<int> TextInputController::SelectedRange() {
   if (!view()->MainFrame())
     return std::vector<int>();
 
-  if (!view()->MainFrame()->ToWebLocalFrame()) {
-    CHECK(false) << "This function cannot be called if the main frame is not"
-                    "a local frame.";
-  }
+  CHECK(view()->MainFrame()->ToWebLocalFrame()) << "This function cannot be "
+                                                   "called if the main frame "
+                                                   "is not a local frame.";
 
   blink::WebRange range =
       view()->MainFrame()->ToWebLocalFrame()->SelectionRange();
@@ -311,12 +380,13 @@ void TextInputController::SetComposition(const std::string& text) {
   blink::WebString newText = blink::WebString::FromUTF8(text);
   size_t textLength = newText.length();
 
-  std::vector<blink::WebCompositionUnderline> underlines;
-  underlines.push_back(blink::WebCompositionUnderline(
-      0, textLength, SK_ColorBLACK, false, SK_ColorTRANSPARENT));
+  std::vector<blink::WebImeTextSpan> ime_text_spans;
+  ime_text_spans.push_back(blink::WebImeTextSpan(
+      blink::WebImeTextSpan::Type::kComposition, 0, textLength, SK_ColorBLACK,
+      false, SK_ColorTRANSPARENT));
   if (auto* controller = GetInputMethodController()) {
     controller->SetComposition(
-        newText, blink::WebVector<blink::WebCompositionUnderline>(underlines),
+        newText, blink::WebVector<blink::WebImeTextSpan>(ime_text_spans),
         blink::WebRange(), textLength, textLength);
   }
 }

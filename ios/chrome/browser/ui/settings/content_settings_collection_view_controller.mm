@@ -4,6 +4,7 @@
 
 #import "ios/chrome/browser/ui/settings/content_settings_collection_view_controller.h"
 
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
@@ -14,6 +15,7 @@
 #include "components/translate/core/browser/translate_pref_names.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "ios/chrome/browser/mailto/features.h"
 #import "ios/chrome/browser/prefs/pref_observer_bridge.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_detail_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
@@ -22,7 +24,10 @@
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
 #import "ios/chrome/browser/ui/settings/translate_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/utils/content_setting_backed_boolean.h"
+#import "ios/chrome/browser/web/mailto_handler_manager.h"
 #include "ios/chrome/grit/ios_strings.h"
+#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
+#include "ios/public/provider/chrome/browser/mailto/mailto_handler_provider.h"
 #import "ios/third_party/material_components_ios/src/components/CollectionCells/src/MaterialCollectionCells.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -58,7 +63,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
   // This object contains the list of available Mail client apps that can
   // handle mailto: URLs.
-  MailtoURLRewriter* _mailtoURLRewriter;
+  MailtoHandlerManager* _mailtoHandlerManager;
 
   // Updatable Items
   CollectionViewDetailItem* _blockPopupsDetailItem;
@@ -93,8 +98,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
     _prefObserverBridge.reset(new PrefObserverBridge(self));
     // Register to observe any changes on Perf backed values displayed by the
     // screen.
-    _prefObserverBridge->ObserveChangesForPreference(prefs::kEnableTranslate,
-                                                     &_prefChangeRegistrar);
+    _prefObserverBridge->ObserveChangesForPreference(
+        prefs::kOfferTranslateEnabled, &_prefChangeRegistrar);
 
     HostContentSettingsMap* settingsMap =
         ios::HostContentSettingsMapFactory::GetForBrowserState(browserState);
@@ -104,9 +109,14 @@ typedef NS_ENUM(NSInteger, ItemType) {
                               inverted:YES];
     [_disablePopupsSetting setObserver:self];
 
-    _mailtoURLRewriter = [[MailtoURLRewriter alloc] initWithStandardHandlers];
-    [_mailtoURLRewriter setObserver:self];
+    if (!base::FeatureList::IsEnabled(kMailtoHandledWithGoogleUI)) {
+      _mailtoHandlerManager =
+          [MailtoHandlerManager mailtoHandlerManagerWithStandardHandlers];
+      [_mailtoHandlerManager setObserver:self];
+    }
 
+    // TODO(crbug.com/764578): -loadModel should not be called from
+    // initializer. A possible fix is to move this call to -viewDidLoad.
     [self loadModel];
   }
   return self;
@@ -114,11 +124,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
 - (void)dealloc {
   [_disablePopupsSetting setObserver:nil];
-}
-
-- (instancetype)init {
-  NOTREACHED();
-  return nil;
 }
 
 - (void)loadModel {
@@ -130,8 +135,20 @@ typedef NS_ENUM(NSInteger, ItemType) {
       toSectionWithIdentifier:SectionIdentifierSettings];
   [model addItem:[self translateItem]
       toSectionWithIdentifier:SectionIdentifierSettings];
-  [model addItem:[self composeEmailItem]
-      toSectionWithIdentifier:SectionIdentifierSettings];
+  // If Google mailto handling UI is available, display the relevant settings.
+  if (base::FeatureList::IsEnabled(kMailtoHandledWithGoogleUI)) {
+    MailtoHandlerProvider* provider =
+        ios::GetChromeBrowserProvider()->GetMailtoHandlerProvider();
+    UIViewController* settingsController =
+        provider->MailtoHandlerSettingsController();
+    if (settingsController) {
+      [model addItem:[self composeEmailItem]
+          toSectionWithIdentifier:SectionIdentifierSettings];
+    }
+  } else {
+    [model addItem:[self composeEmailItem]
+        toSectionWithIdentifier:SectionIdentifierSettings];
+  }
 }
 
 - (CollectionViewItem*)blockPopupsItem {
@@ -151,7 +168,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
 - (CollectionViewItem*)translateItem {
   _translateDetailItem =
       [[CollectionViewDetailItem alloc] initWithType:ItemTypeSettingsTranslate];
-  BOOL enabled = browserState_->GetPrefs()->GetBoolean(prefs::kEnableTranslate);
+  BOOL enabled =
+      browserState_->GetPrefs()->GetBoolean(prefs::kOfferTranslateEnabled);
   NSString* subtitle = enabled ? l10n_util::GetNSString(IDS_IOS_SETTING_ON)
                                : l10n_util::GetNSString(IDS_IOS_SETTING_OFF);
   _translateDetailItem.text = l10n_util::GetNSString(IDS_IOS_TRANSLATE_SETTING);
@@ -167,7 +185,14 @@ typedef NS_ENUM(NSInteger, ItemType) {
       initWithType:ItemTypeSettingsComposeEmail];
   _composeEmailDetailItem.text =
       l10n_util::GetNSString(IDS_IOS_COMPOSE_EMAIL_SETTING);
-  _composeEmailDetailItem.detailText = [_mailtoURLRewriter defaultHandlerName];
+  if (!base::FeatureList::IsEnabled(kMailtoHandledWithGoogleUI)) {
+    // Displaying the selected app name is only supported in the Chrome
+    // implementation of mailto content settings.
+    // The Google UI version of mailto handling does not expose the name of the
+    // user's preferred app.
+    _composeEmailDetailItem.detailText =
+        [_mailtoHandlerManager defaultHandlerName];
+  }
   _composeEmailDetailItem.accessoryType =
       MDCCollectionViewCellAccessoryDisclosureIndicator;
   _composeEmailDetailItem.accessibilityTraits |= UIAccessibilityTraitButton;
@@ -196,16 +221,29 @@ typedef NS_ENUM(NSInteger, ItemType) {
       break;
     }
     case ItemTypeSettingsTranslate: {
-      UIViewController* controller = [[TranslateCollectionViewController alloc]
-          initWithPrefs:browserState_->GetPrefs()];
+      TranslateCollectionViewController* controller =
+          [[TranslateCollectionViewController alloc]
+              initWithPrefs:browserState_->GetPrefs()];
+      controller.dispatcher = self.dispatcher;
       [self.navigationController pushViewController:controller animated:YES];
       break;
     }
     case ItemTypeSettingsComposeEmail: {
-      UIViewController* controller =
-          [[ComposeEmailHandlerCollectionViewController alloc]
-              initWithRewriter:_mailtoURLRewriter];
-      [self.navigationController pushViewController:controller animated:YES];
+      if (base::FeatureList::IsEnabled(kMailtoHandledWithGoogleUI)) {
+        MailtoHandlerProvider* provider =
+            ios::GetChromeBrowserProvider()->GetMailtoHandlerProvider();
+        UIViewController* controller =
+            provider->MailtoHandlerSettingsController();
+        if (controller) {
+          [self.navigationController pushViewController:controller
+                                               animated:YES];
+        }
+      } else {
+        UIViewController* controller =
+            [[ComposeEmailHandlerCollectionViewController alloc]
+                initWithManager:_mailtoHandlerManager];
+        [self.navigationController pushViewController:controller animated:YES];
+      }
       break;
     }
   }
@@ -214,7 +252,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 #pragma mark - PrefObserverDelegate
 
 - (void)onPreferenceChanged:(const std::string&)preferenceName {
-  if (preferenceName == prefs::kEnableTranslate) {
+  if (preferenceName == prefs::kOfferTranslateEnabled) {
     BOOL enabled = browserState_->GetPrefs()->GetBoolean(preferenceName);
     NSString* subtitle = enabled ? l10n_util::GetNSString(IDS_IOS_SETTING_ON)
                                  : l10n_util::GetNSString(IDS_IOS_SETTING_OFF);
@@ -238,12 +276,12 @@ typedef NS_ENUM(NSInteger, ItemType) {
   [self reconfigureCellsForItems:@[ _blockPopupsDetailItem ]];
 }
 
-#pragma mark - MailtoURLRewriterObserver
+#pragma mark - MailtoHandlerManagerObserver
 
-- (void)rewriterDidChange:(MailtoURLRewriter*)rewriter {
-  if (rewriter != _mailtoURLRewriter)
+- (void)handlerDidChangeForMailtoHandlerManager:(MailtoHandlerManager*)manager {
+  if (manager != _mailtoHandlerManager)
     return;
-  _composeEmailDetailItem.detailText = [rewriter defaultHandlerName];
+  _composeEmailDetailItem.detailText = [manager defaultHandlerName];
   [self reconfigureCellsForItems:@[ _composeEmailDetailItem ]];
 }
 

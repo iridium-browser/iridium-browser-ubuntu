@@ -66,6 +66,7 @@ var AutomationNode = chrome.automation.AutomationNode;
 var Dir = constants.Dir;
 var Movement = cursors.Movement;
 var RoleType = chrome.automation.RoleType;
+var StateType = chrome.automation.StateType;
 var Unit = cursors.Unit;
 
 /**
@@ -197,8 +198,9 @@ cursors.Cursor.prototype = {
     if (!adjustedNode)
       return null;
 
-    // Make no adjustments if we're within editable content.
-    if (adjustedNode.state.editable)
+    // Make no adjustments if we're within non-rich editable content.
+    if (adjustedNode.state[StateType.EDITABLE] &&
+        !adjustedNode.state[StateType.RICHLY_EDITABLE])
       return adjustedNode;
 
     // Selections over line break nodes are broken.
@@ -236,8 +238,12 @@ cursors.Cursor.prototype = {
     if (!this.node)
       return -1;
 
-    if (this.node.state.editable) {
-      return this.index_ == cursors.NODE_INDEX ? 0 : this.index_;
+    if (this.node.state[StateType.EDITABLE]) {
+      if (!this.node.state[StateType.RICHLY_EDITABLE])
+        return this.index_;
+      return this.index_ == cursors.NODE_INDEX ?
+          (this.node.indexInParent || 0) :
+          this.index_;
     } else if (
         this.node.role == RoleType.INLINE_TEXT_BOX &&
         // Selections under a line break are broken.
@@ -292,11 +298,10 @@ cursors.Cursor.prototype = {
     var newNode = originalNode;
     var newIndex = this.index_;
 
-    if (unit != Unit.NODE && newIndex === cursors.NODE_INDEX)
-      newIndex = 0;
-
     switch (unit) {
       case Unit.CHARACTER:
+        if (newIndex === cursors.NODE_INDEX)
+          newIndex = 0;
         // BOUND and DIRECTIONAL are the same for characters.
         var text = this.getText();
         newIndex = dir == Dir.FORWARD ?
@@ -317,12 +322,22 @@ cursors.Cursor.prototype = {
         }
         break;
       case Unit.WORD:
-        if (newNode.role != RoleType.INLINE_TEXT_BOX) {
-          newNode = AutomationUtil.findNextNode(
-                        newNode, Dir.FORWARD, AutomationPredicate.inlineTextBox,
-                        {skipInitialSubtree: false}) ||
+        // If we're not already on a node with word stops, find the next one.
+        if (!AutomationPredicate.leafWithWordStop(newNode)) {
+          newNode =
+              AutomationUtil.findNextNode(
+                  newNode, Dir.FORWARD, AutomationPredicate.leafWithWordStop,
+                  {skipInitialSubtree: false}) ||
               newNode;
         }
+
+        // Ensure start position is on or after first word.
+        var firstWordStart = (newNode.wordStarts && newNode.wordStarts.length) ?
+            newNode.wordStarts[0] :
+            0;
+        if (newIndex < firstWordStart)  // Also catches cursors.NODE_INDEX case.
+          newIndex = firstWordStart;
+
         switch (movement) {
           case Movement.BOUND:
             if (newNode.role == RoleType.INLINE_TEXT_BOX) {
@@ -338,44 +353,47 @@ cursors.Cursor.prototype = {
               if (goog.isDef(start) && goog.isDef(end))
                 newIndex = dir == Dir.FORWARD ? end : start;
             } else {
-              // TODO(dtseng): Figure out what to do in this case.
+              newIndex = cursors.NODE_INDEX;
             }
             break;
           case Movement.DIRECTIONAL:
+            var start;
             if (newNode.role == RoleType.INLINE_TEXT_BOX) {
-              var start, end;
+              // Go to the next word stop in the same piece of text.
               for (var i = 0; i < newNode.wordStarts.length; i++) {
                 if (newIndex >= newNode.wordStarts[i] &&
                     newIndex <= newNode.wordEnds[i]) {
                   var nextIndex = dir == Dir.FORWARD ? i + 1 : i - 1;
                   start = newNode.wordStarts[nextIndex];
-                  end = newNode.wordEnds[nextIndex];
                   break;
                 }
               }
-              if (goog.isDef(start)) {
-                newIndex = start;
-              } else {
+            }
+            if (goog.isDef(start)) {
+              // Succesfully found the next word stop within the same text node.
+              newIndex = start;
+            } else {
+              // Use adjacent word in adjacent next node in direction |dir|.
+              if (dir == Dir.BACKWARD && newIndex > firstWordStart) {
                 // The backward case is special at the beginning of nodes.
-                if (dir == Dir.BACKWARD && newIndex != 0) {
-                  newIndex = 0;
-                } else {
-                  newNode = AutomationUtil.findNextNode(
-                      newNode, dir, AutomationPredicate.leaf);
-                  if (newNode) {
-                    newIndex = 0;
-                    if (dir == Dir.BACKWARD &&
-                        newNode.role == RoleType.INLINE_TEXT_BOX) {
-                      var starts = newNode.wordStarts;
-                      newIndex = starts[starts.length - 1] || 0;
-                    } else {
-                      // TODO(dtseng): Figure out what to do for general nodes.
+                newIndex = firstWordStart;
+              } else {
+                newNode = AutomationUtil.findNextNode(
+                    newNode, dir, AutomationPredicate.leafWithWordStop);
+                if (newNode) {
+                  if (newNode.role == RoleType.INLINE_TEXT_BOX) {
+                    var starts = newNode.wordStarts;
+                    if (starts.length) {
+                      newIndex = dir == Dir.BACKWARD ?
+                          starts[starts.length - 1] :
+                          starts[0];
                     }
+                  } else {
+                    // For non-text nodes, move by word = by object.
+                    newIndex = cursors.NODE_INDEX;
                   }
                 }
               }
-            } else {
-              // TODO(dtseng): Figure out what to do in this case.
             }
         }
         break;
@@ -395,10 +413,7 @@ cursors.Cursor.prototype = {
         }
         break;
       case Unit.LINE:
-        var deepEquivalent = this.deepEquivalent;
-        newNode = deepEquivalent.node || newNode;
-        newIndex = deepEquivalent.index || 0;
-
+        newIndex = 0;
         switch (movement) {
           case Movement.BOUND:
             newNode = AutomationUtil.findNodeUntil(
@@ -451,13 +466,36 @@ cursors.Cursor.prototype = {
         }
         break;
       } else if (
+          newNode.role != RoleType.TEXT_FIELD &&
           newNode.role != RoleType.INLINE_TEXT_BOX &&
           newNode.children[newIndex]) {
         // Valid node offset.
         newNode = newNode.children[newIndex];
         newIndex = 0;
       } else {
-        // Invalid offset.
+        // This offset is a text offset into the descendant visible
+        // text. Approximate this by indexing into the inline text boxes.
+        var lines = newNode.findAll({role: RoleType.INLINE_TEXT_BOX});
+        if (!lines.length)
+          break;
+
+        var targetLine, targetIndex = 0;
+        for (var i = 0, line, cur = 0; line = lines[i]; i++) {
+          cur += line.name.length;
+          if (cur >= newIndex) {
+            targetLine = line;
+            targetIndex = cur - newIndex;
+            break;
+          }
+        }
+        if (!targetLine) {
+          // If we got here, that means the index is actually beyond the total
+          // length of text. Just get the last line.
+          targetLine = lines[lines.length - 1];
+          targetIndex = 0;
+        }
+        newNode = targetLine;
+        newIndex = targetIndex;
         break;
       }
     }
@@ -529,9 +567,30 @@ cursors.WrappingCursor.prototype = {
       if (!endpoint)
         return this;
 
+      // Finds any explicitly provided focus.
+      var getDirectedFocus = function(node) {
+        return dir == Dir.FORWARD ? node.nextFocus : node.previousFocus;
+      };
+
       // Case 1: forwards (find the root-like node).
-      while (!AutomationPredicate.root(endpoint) && endpoint.parent)
+      var directedFocus;
+      while (!AutomationPredicate.root(endpoint) && endpoint.parent) {
+        if (directedFocus = getDirectedFocus(endpoint)) {
+          window.last = directedFocus;
+          break;
+        }
         endpoint = endpoint.parent;
+      }
+
+      if (directedFocus) {
+        directedFocus =
+            (dir == Dir.FORWARD ?
+                 AutomationUtil.findNodePre(
+                     directedFocus, dir, AutomationPredicate.object) :
+                 AutomationUtil.findLastNode(directedFocus, pred)) ||
+            directedFocus;
+        return new cursors.WrappingCursor(directedFocus, cursors.NODE_INDEX);
+      }
 
       // Always play a wrap earcon when moving forward.
       var playEarcon = dir == Dir.FORWARD;
@@ -539,9 +598,7 @@ cursors.WrappingCursor.prototype = {
       // Case 2: backward (sync downwards to a leaf), if already on the root.
       if (dir == Dir.BACKWARD && endpoint == this.node) {
         playEarcon = true;
-        endpoint = AutomationUtil.findNodePre(endpoint, dir, function(n) {
-          return pred(n) && !AutomationPredicate.shouldIgnoreNode(n);
-        }) || endpoint;
+        endpoint = AutomationUtil.findLastNode(endpoint, pred) || endpoint;
       }
 
       if (playEarcon)
@@ -659,12 +716,15 @@ cursors.Range.prototype = {
   },
 
   /**
-   * Returns true if this range covers a single node's text content or less.
+   * Returns true if this range covers less than a node.
    * @return {boolean}
    */
   isSubNode: function() {
-    return this.start.node === this.end.node && this.start.index > -1 &&
-        this.end.index > -1;
+    var startIndex = this.start.index;
+    var endIndex = this.end.index;
+    return this.start.node === this.end.node && startIndex != -1 &&
+        endIndex != -1 && startIndex != endIndex &&
+        (startIndex != 0 || endIndex != this.start.getText().length);
   },
 
   /**
@@ -734,6 +794,13 @@ cursors.Range.prototype = {
       var endIndex = this.end.index_ == cursors.NODE_INDEX ?
           this.end.selectionIndex_ + 1 :
           this.end.selectionIndex_;
+
+      // Richly editables should always set a caret, but not select. This makes
+      // it possible to navigate through content editables using ChromeVox keys
+      // and not hear selections as you go.
+      if (startNode.state[StateType.RICHLY_EDITABLE] ||
+          endNode.state[StateType.RICHLY_EDITABLE])
+        endIndex = startIndex;
 
       chrome.automation.setDocumentSelection({
         anchorObject: startNode,

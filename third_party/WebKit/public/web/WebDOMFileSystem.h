@@ -37,10 +37,6 @@
 #include "public/platform/WebURL.h"
 #include "WebFrame.h"
 
-#if BLINK_IMPLEMENTATION
-#include "platform/heap/Handle.h"
-#endif
-
 namespace v8 {
 class Isolate;
 class Object;
@@ -66,7 +62,7 @@ class WebDOMFileSystem {
 
   ~WebDOMFileSystem() { Reset(); }
 
-  WebDOMFileSystem() {}
+  WebDOMFileSystem() = default;
   WebDOMFileSystem(const WebDOMFileSystem& d) { Assign(d); }
   WebDOMFileSystem& operator=(const WebDOMFileSystem& d) {
     Assign(d);
@@ -104,7 +100,7 @@ class WebDOMFileSystem {
 
   bool IsNull() const { return private_.IsNull(); }
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebDOMFileSystem(DOMFileSystem*);
   WebDOMFileSystem& operator=(DOMFileSystem*);
 #endif

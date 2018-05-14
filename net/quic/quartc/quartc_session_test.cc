@@ -7,6 +7,9 @@
 #include "net/quic/core/crypto/crypto_server_config_protobuf.h"
 #include "net/quic/core/quic_simple_buffer_allocator.h"
 #include "net/quic/core/quic_types.h"
+#include "net/quic/core/tls_client_handshaker.h"
+#include "net/quic/core/tls_server_handshaker.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/quartc/quartc_factory.h"
 #include "net/quic/quartc/quartc_factory_interface.h"
 #include "net/quic/quartc/quartc_packet_writer.h"
@@ -155,9 +158,8 @@ class FakeProofSource : public ProofSource {
   void GetProof(const QuicSocketAddress& server_ip,
                 const string& hostname,
                 const string& server_config,
-                QuicVersion quic_version,
+                QuicTransportVersion transport_version,
                 QuicStringPiece chlo_hash,
-                const QuicTagVector& connection_options,
                 std::unique_ptr<Callback> callback) override {
     QuicReferenceCountedPointer<ProofSource::Chain> chain;
     QuicCryptoProof proof;
@@ -169,6 +171,21 @@ class FakeProofSource : public ProofSource {
       proof.leaf_cert_scts = "Time";
     }
     callback->Run(success_, chain, proof, nullptr /* details */);
+  }
+
+  QuicReferenceCountedPointer<Chain> GetCertChain(
+      const QuicSocketAddress& server_address,
+      const string& hostname) override {
+    return QuicReferenceCountedPointer<Chain>();
+  }
+
+  void ComputeTlsSignature(
+      const QuicSocketAddress& server_address,
+      const string& hostname,
+      uint16_t signature_algorithm,
+      QuicStringPiece in,
+      std::unique_ptr<SignatureCallback> callback) override {
+    callback->Run(true, "Signature");
   }
 
  private:
@@ -187,7 +204,7 @@ class FakeProofVerifier : public ProofVerifier {
       const string& hostname,
       const uint16_t port,
       const string& server_config,
-      QuicVersion quic_version,
+      QuicTransportVersion transport_version,
       QuicStringPiece chlo_hash,
       const std::vector<string>& certs,
       const string& cert_sct,
@@ -286,8 +303,6 @@ class FakeTransport : public QuartcSessionInterface::PacketTransport {
  public:
   explicit FakeTransport(FakeTransportChannel* channel) : channel_(channel) {}
 
-  bool CanWrite() override { return true; }
-
   int Write(const char* buffer, size_t buf_len) override {
     DCHECK(channel_);
     return channel_->SendPacket(buffer, buf_len);
@@ -336,7 +351,7 @@ class FakeQuartcStreamDelegate : public QuartcStreamInterface::Delegate {
 
   void OnClose(QuartcStreamInterface* stream) override {}
 
-  void OnBufferedAmountDecrease(QuartcStreamInterface* stream) override {}
+  void OnCanWrite(QuartcStreamInterface* stream) override {}
 
   string data() { return last_received_data_; }
 
@@ -359,9 +374,9 @@ class QuartcSessionForTest : public QuartcSession,
                       perspective,
                       helper,
                       clock) {
-    stream_delegate_.reset(new FakeQuartcStreamDelegate);
-    session_delegate_.reset(
-        new FakeQuartcSessionDelegate(stream_delegate_.get()));
+    stream_delegate_ = QuicMakeUnique<FakeQuartcStreamDelegate>();
+    session_delegate_ =
+        QuicMakeUnique<FakeQuartcSessionDelegate>((stream_delegate_.get()));
 
     SetDelegate(session_delegate_.get());
   }
@@ -394,20 +409,25 @@ class QuartcSessionTest : public ::testing::Test,
   void Init() {
     // Quic crashes if packets are sent at time 0, and the clock defaults to 0.
     clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(1000));
-    client_channel_.reset(new FakeTransportChannel(&task_runner_, &clock_));
-    server_channel_.reset(new FakeTransportChannel(&task_runner_, &clock_));
+    client_channel_ =
+        QuicMakeUnique<FakeTransportChannel>(&task_runner_, &clock_);
+    server_channel_ =
+        QuicMakeUnique<FakeTransportChannel>(&task_runner_, &clock_);
     // Make the channel asynchronous so that two peer will not keep calling each
     // other when they exchange information.
     client_channel_->SetAsync(true);
     client_channel_->SetDestination(server_channel_.get());
 
-    client_transport_.reset(new FakeTransport(client_channel_.get()));
-    server_transport_.reset(new FakeTransport(server_channel_.get()));
+    client_transport_ = QuicMakeUnique<FakeTransport>(client_channel_.get());
+    server_transport_ = QuicMakeUnique<FakeTransport>(server_channel_.get());
 
-    client_writer_.reset(
-        new QuartcPacketWriter(client_transport_.get(), kDefaultMaxPacketSize));
-    server_writer_.reset(
-        new QuartcPacketWriter(server_transport_.get(), kDefaultMaxPacketSize));
+    client_writer_ = QuicMakeUnique<QuartcPacketWriter>(client_transport_.get(),
+                                                        kDefaultMaxPacketSize);
+    server_writer_ = QuicMakeUnique<QuartcPacketWriter>(server_transport_.get(),
+                                                        kDefaultMaxPacketSize);
+
+    client_writer_->SetWritable();
+    server_writer_->SetWritable();
   }
 
   // The parameters are used to control whether the handshake will success or
@@ -421,14 +441,16 @@ class QuartcSessionTest : public ::testing::Test,
     client_channel_->SetObserver(client_peer_.get());
     server_channel_->SetObserver(server_peer_.get());
 
-    client_peer_->SetClientCryptoConfig(
-        new QuicCryptoClientConfig(std::unique_ptr<ProofVerifier>(
-            new FakeProofVerifier(client_handshake_success))));
+    client_peer_->SetClientCryptoConfig(new QuicCryptoClientConfig(
+        std::unique_ptr<ProofVerifier>(
+            new FakeProofVerifier(client_handshake_success)),
+        TlsClientHandshaker::CreateSslCtx()));
 
     QuicCryptoServerConfig* server_config = new QuicCryptoServerConfig(
         "TESTING", QuicRandom::GetInstance(),
         std::unique_ptr<FakeProofSource>(
-            new FakeProofSource(server_handshake_success)));
+            new FakeProofSource(server_handshake_success)),
+        TlsServerHandshaker::CreateSslCtx());
     // Provide server with serialized config string to prove ownership.
     QuicCryptoServerConfig::ConfigOptions options;
     std::unique_ptr<QuicServerConfigProtobuf> primary_config(
@@ -462,7 +484,7 @@ class QuartcSessionTest : public ::testing::Test,
       QuartcFactoryConfig config;
       config.clock = &quartc_clock_;
       config.task_runner = &task_runner_;
-      alarm_factory_.reset(new QuartcFactory(config));
+      alarm_factory_ = QuicMakeUnique<QuartcFactory>(config);
     }
     return std::unique_ptr<QuicConnection>(new QuicConnection(
         0, QuicSocketAddress(ip, 0), this /*QuicConnectionHelperInterface*/,
@@ -551,7 +573,7 @@ class QuartcSessionTest : public ::testing::Test,
     return QuicRandom::GetInstance();
   }
 
-  QuicBufferAllocator* GetBufferAllocator() override {
+  QuicBufferAllocator* GetStreamSendBufferAllocator() override {
     return &buffer_allocator_;
   }
 
@@ -634,6 +656,29 @@ TEST_F(QuartcSessionTest, CancelQuartcStream) {
   EXPECT_EQ(stream->stream_error(),
             QuicRstStreamErrorCode::QUIC_STREAM_CANCELLED);
   EXPECT_TRUE(client_peer_->IsClosedStream(id));
+}
+
+TEST_F(QuartcSessionTest, GetStats) {
+  CreateClientAndServerSessions();
+  StartHandshake();
+  ASSERT_TRUE(client_peer_->IsCryptoHandshakeConfirmed());
+  ASSERT_TRUE(server_peer_->IsCryptoHandshakeConfirmed());
+
+  QuartcSessionStats stats = server_peer_->GetStats();
+  EXPECT_GT(stats.bandwidth_estimate, QuicBandwidth::Zero());
+  EXPECT_GT(stats.smoothed_rtt, QuicTime::Delta::Zero());
+}
+
+TEST_F(QuartcSessionTest, CloseConnection) {
+  CreateClientAndServerSessions();
+  StartHandshake();
+  ASSERT_TRUE(client_peer_->IsCryptoHandshakeConfirmed());
+  ASSERT_TRUE(server_peer_->IsCryptoHandshakeConfirmed());
+
+  client_peer_->CloseConnection("Connection closed by client");
+  EXPECT_FALSE(client_peer_->session_delegate()->connected());
+  RunTasks();
+  EXPECT_FALSE(server_peer_->session_delegate()->connected());
 }
 
 }  // namespace

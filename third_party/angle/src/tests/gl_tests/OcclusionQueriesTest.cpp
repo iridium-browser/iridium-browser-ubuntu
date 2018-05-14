@@ -28,23 +28,19 @@ class OcclusionQueriesTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        const std::string passthroughVS = SHADER_SOURCE
-        (
-            attribute highp vec4 position;
+        const std::string passthroughVS =
+            R"(attribute highp vec4 position;
             void main(void)
             {
                 gl_Position = position;
-            }
-        );
+            })";
 
-        const std::string passthroughPS = SHADER_SOURCE
-        (
-            precision highp float;
+        const std::string passthroughPS =
+            R"(precision highp float;
             void main(void)
             {
                gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
-            }
-        );
+            })";
 
         mProgram = CompileProgram(passthroughVS, passthroughPS);
         ASSERT_NE(0u, mProgram);
@@ -63,12 +59,8 @@ class OcclusionQueriesTest : public ANGLETest
 
 TEST_P(OcclusionQueriesTest, IsOccluded)
 {
-    if (getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_occlusion_query_boolean"))
-    {
-        std::cout << "Test skipped because ES3 or GL_EXT_occlusion_query_boolean are not available."
-                  << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3 &&
+                       !extensionEnabled("GL_EXT_occlusion_query_boolean"));
 
     glDepthMask(GL_TRUE);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -105,17 +97,13 @@ TEST_P(OcclusionQueriesTest, IsOccluded)
 
     glDeleteQueriesEXT(1, &query);
 
-    EXPECT_GLENUM_EQ(GL_FALSE, result);
+    EXPECT_GL_FALSE(result);
 }
 
 TEST_P(OcclusionQueriesTest, IsNotOccluded)
 {
-    if (getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_occlusion_query_boolean"))
-    {
-        std::cout << "Test skipped because ES3 or GL_EXT_occlusion_query_boolean are not available."
-                  << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3 &&
+                       !extensionEnabled("GL_EXT_occlusion_query_boolean"));
 
     glDepthMask(GL_TRUE);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -139,17 +127,13 @@ TEST_P(OcclusionQueriesTest, IsNotOccluded)
 
     glDeleteQueriesEXT(1, &query);
 
-    EXPECT_GLENUM_EQ(GL_TRUE, result);
+    EXPECT_GL_TRUE(result);
 }
 
 TEST_P(OcclusionQueriesTest, Errors)
 {
-    if (getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_occlusion_query_boolean"))
-    {
-        std::cout << "Test skipped because ES3 or GL_EXT_occlusion_query_boolean are not available."
-                  << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3 &&
+                       !extensionEnabled("GL_EXT_occlusion_query_boolean"));
 
     glDepthMask(GL_TRUE);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -160,8 +144,8 @@ TEST_P(OcclusionQueriesTest, Errors)
     GLuint query2 = 0;
     glGenQueriesEXT(1, &query);
 
-    EXPECT_EQ(glIsQueryEXT(query), GL_FALSE);
-    EXPECT_EQ(glIsQueryEXT(query2), GL_FALSE);
+    EXPECT_GL_FALSE(glIsQueryEXT(query));
+    EXPECT_GL_FALSE(glIsQueryEXT(query2));
 
     glBeginQueryEXT(GL_ANY_SAMPLES_PASSED_EXT, 0); // can't pass 0 as query id
     EXPECT_GL_ERROR(GL_INVALID_OPERATION);
@@ -170,8 +154,8 @@ TEST_P(OcclusionQueriesTest, Errors)
     glBeginQueryEXT(GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT, query2); // can't initiate a query while one's already active
     EXPECT_GL_ERROR(GL_INVALID_OPERATION);
 
-    EXPECT_EQ(glIsQueryEXT(query), GL_TRUE);
-    EXPECT_EQ(glIsQueryEXT(query2), GL_FALSE); // have not called begin
+    EXPECT_GL_TRUE(glIsQueryEXT(query));
+    EXPECT_GL_FALSE(glIsQueryEXT(query2));  // have not called begin
 
     drawQuad(mProgram, "position", 0.8f); // this quad should not be occluded
     glEndQueryEXT(GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT); // no active query for this target
@@ -186,7 +170,7 @@ TEST_P(OcclusionQueriesTest, Errors)
 
     glGenQueriesEXT(1, &query2);
     glBeginQueryEXT(GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT, query2); // should be ok now
-    EXPECT_EQ(glIsQueryEXT(query2), GL_TRUE);
+    EXPECT_GL_TRUE(glIsQueryEXT(query2));
 
     drawQuad(mProgram, "position", 0.3f); // this should draw in front of other quad
     glDeleteQueriesEXT(1, &query2); // should delete when query becomes inactive
@@ -208,20 +192,13 @@ TEST_P(OcclusionQueriesTest, Errors)
 // result for each query.  Helps expose bugs in ANGLE's virtual contexts.
 TEST_P(OcclusionQueriesTest, MultiContext)
 {
-    if (getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_occlusion_query_boolean"))
-    {
-        std::cout << "Test skipped because ES3 or GL_EXT_occlusion_query_boolean are not available."
-                  << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3 &&
+                       !extensionEnabled("GL_EXT_occlusion_query_boolean"));
 
-    if (GetParam() == ES2_D3D9() || GetParam() == ES2_D3D11() || GetParam() == ES3_D3D11())
-    {
-        std::cout << "Test skipped because the D3D backends cannot support simultaneous queries on "
-                     "multiple contexts yet."
-                  << std::endl;
-        return;
-    }
+    // Test skipped because the D3D backends cannot support simultaneous queries on multiple
+    // contexts yet.
+    ANGLE_SKIP_TEST_IF(GetParam() == ES2_D3D9() || GetParam() == ES2_D3D11() ||
+                       GetParam() == ES3_D3D11());
 
     glDepthMask(GL_TRUE);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -288,23 +265,19 @@ TEST_P(OcclusionQueriesTest, MultiContext)
 
         eglMakeCurrent(display, surface, surface, context.context);
 
-        const std::string passthroughVS = SHADER_SOURCE
-        (
-            attribute highp vec4 position;
+        const std::string passthroughVS =
+            R"(attribute highp vec4 position;
             void main(void)
             {
                 gl_Position = position;
-            }
-        );
+            })";
 
-        const std::string passthroughPS = SHADER_SOURCE
-        (
-            precision highp float;
+        const std::string passthroughPS =
+            R"(precision highp float;
             void main(void)
             {
                gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
-            }
-        );
+            })";
 
         context.program = CompileProgram(passthroughVS, passthroughPS);
         ASSERT_NE(context.program, 0u);

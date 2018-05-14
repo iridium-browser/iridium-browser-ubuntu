@@ -43,17 +43,18 @@ SDK.ScreenCaptureModel = class extends SDK.SDKModel {
   /**
    * @param {string} format
    * @param {number} quality
+   * @param {!Protocol.Page.Viewport=} clip
    * @return {!Promise<?string>}
    */
-  captureScreenshot(format, quality) {
-    return this._agent.captureScreenshot(format, quality, undefined, true);
+  captureScreenshot(format, quality, clip) {
+    return this._agent.captureScreenshot(format, quality, clip, true);
   }
 
   /**
    * @return {!Promise<?{viewportX: number, viewportY: number, viewportScale: number, contentWidth: number, contentHeight: number}>}
    */
   async fetchLayoutMetrics() {
-    var response = await this._agent.invoke_getLayoutMetrics({});
+    const response = await this._agent.invoke_getLayoutMetrics({});
     if (response[Protocol.Error])
       return null;
     return {
@@ -98,6 +99,16 @@ SDK.ScreenCaptureModel = class extends SDK.SDKModel {
    * @param {number} time
    */
   loadEventFired(time) {
+  }
+
+  /**
+   * @override
+   * @param {!Protocol.Page.FrameId} frameId
+   * @param {!Protocol.Network.LoaderId} loaderId
+   * @param {string} name
+   * @param {number} time
+   */
+  lifecycleEvent(frameId, loaderId, name, time) {
   }
 
   /**
@@ -159,17 +170,20 @@ SDK.ScreenCaptureModel = class extends SDK.SDKModel {
 
   /**
    * @override
+   * @param {string} url
    * @param {string} message
    * @param {string} dialogType
+   * @param {string=} prompt
    */
-  javascriptDialogOpening(message, dialogType) {
+  javascriptDialogOpening(url, message, dialogType, prompt) {
   }
 
   /**
    * @override
    * @param {boolean} result
+   * @param {string} userInput
    */
-  javascriptDialogClosed(result) {
+  javascriptDialogClosed(result, userInput) {
   }
 
   /**
@@ -186,8 +200,12 @@ SDK.ScreenCaptureModel = class extends SDK.SDKModel {
 
   /**
    * @override
+   * @param {string} url
+   * @param {string} windowName
+   * @param {!Array<string>} windowFeatures
+   * @param {boolean} userGesture
    */
-  navigationRequested() {
+  windowOpen(url, windowName, windowFeatures, userGesture) {
   }
 };
 

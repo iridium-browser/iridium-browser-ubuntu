@@ -35,8 +35,7 @@ gpu::gles2::GLES2Interface* WebGLContextGroup::GetAGLInterface() {
 }
 
 void WebGLContextGroup::AddContext(WebGLRenderingContextBase* context) {
-  contexts_.insert(
-      TraceWrapperMember<WebGLRenderingContextBase>(this, context));
+  contexts_.insert(context);
 }
 
 void WebGLContextGroup::LoseContextGroup(
@@ -51,7 +50,8 @@ uint32_t WebGLContextGroup::NumberOfContextLosses() const {
   return number_of_context_losses_;
 }
 
-DEFINE_TRACE_WRAPPERS(WebGLContextGroup) {
+void WebGLContextGroup::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   for (auto context : contexts_) {
     visitor->TraceWrappers(context);
   }

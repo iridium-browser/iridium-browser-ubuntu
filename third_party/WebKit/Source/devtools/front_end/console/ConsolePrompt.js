@@ -101,19 +101,19 @@ Console.ConsolePrompt = class extends UI.Widget {
    * @param {!Event} event
    */
   _editorKeyDown(event) {
-    var keyboardEvent = /** @type {!KeyboardEvent} */ (event);
-    var newText;
-    var isPrevious;
+    const keyboardEvent = /** @type {!KeyboardEvent} */ (event);
+    let newText;
+    let isPrevious;
 
     switch (keyboardEvent.keyCode) {
       case UI.KeyboardShortcut.Keys.Up.code:
-        if (this._editor.selection().endLine > 0)
+        if (keyboardEvent.shiftKey || this._editor.selection().endLine > 0)
           break;
         newText = this._history.previous(this.text());
         isPrevious = true;
         break;
       case UI.KeyboardShortcut.Keys.Down.code:
-        if (this._editor.selection().endLine < this._editor.fullRange().endLine)
+        if (keyboardEvent.shiftKey || this._editor.selection().endLine < this._editor.fullRange().endLine)
           break;
         newText = this._history.next();
         break;
@@ -152,7 +152,7 @@ Console.ConsolePrompt = class extends UI.Widget {
   /**
    * @param {!KeyboardEvent} event
    */
-  _enterKeyPressed(event) {
+  async _enterKeyPressed(event) {
     if (event.altKey || event.ctrlKey || event.shiftKey)
       return;
 
@@ -160,47 +160,49 @@ Console.ConsolePrompt = class extends UI.Widget {
 
     this.clearAutocomplete();
 
-    var str = this.text();
+    const str = this.text();
     if (!str.length)
       return;
 
-    var currentExecutionContext = UI.context.flavor(SDK.ExecutionContext);
+    const currentExecutionContext = UI.context.flavor(SDK.ExecutionContext);
     if (!this._isCaretAtEndOfPrompt() || !currentExecutionContext) {
       this._appendCommand(str, true);
       return;
     }
-    currentExecutionContext.runtimeModel.compileScript(
-        str, '', false, currentExecutionContext.id, compileCallback.bind(this));
-
-    /**
-     * @param {!Protocol.Runtime.ScriptId=} scriptId
-     * @param {?Protocol.Runtime.ExceptionDetails=} exceptionDetails
-     * @this {Console.ConsolePrompt}
-     */
-    function compileCallback(scriptId, exceptionDetails) {
-      if (str !== this.text())
-        return;
-      if (exceptionDetails &&
-          (exceptionDetails.exception.description.startsWith('SyntaxError: Unexpected end of input') ||
-           exceptionDetails.exception.description.startsWith('SyntaxError: Unterminated template literal'))) {
-        this._editor.newlineAndIndent();
-        this._enterProcessedForTest();
-        return;
-      }
-      this._appendCommand(str, true);
+    const result = await currentExecutionContext.runtimeModel.compileScript(str, '', false, currentExecutionContext.id);
+    if (str !== this.text())
+      return;
+    const exceptionDetails = result.exceptionDetails;
+    if (exceptionDetails &&
+        (exceptionDetails.exception.description.startsWith('SyntaxError: Unexpected end of input') ||
+         exceptionDetails.exception.description.startsWith('SyntaxError: Unterminated template literal'))) {
+      this._editor.newlineAndIndent();
       this._enterProcessedForTest();
+      return;
     }
+    await this._appendCommand(str, true);
+    this._enterProcessedForTest();
   }
 
   /**
    * @param {string} text
    * @param {boolean} useCommandLineAPI
    */
-  _appendCommand(text, useCommandLineAPI) {
+  async _appendCommand(text, useCommandLineAPI) {
     this.setText('');
-    var currentExecutionContext = UI.context.flavor(SDK.ExecutionContext);
+    const currentExecutionContext = UI.context.flavor(SDK.ExecutionContext);
     if (currentExecutionContext) {
-      ConsoleModel.consoleModel.evaluateCommandInConsole(currentExecutionContext, text, useCommandLineAPI);
+      const executionContext = currentExecutionContext;
+      const message = SDK.consoleModel.addCommandMessage(executionContext, text);
+      text = SDK.RuntimeModel.wrapObjectLiteralExpressionIfNeeded(text);
+      let preprocessed = false;
+      if (text.indexOf('await') !== -1) {
+        const preprocessedText = await Formatter.formatterWorkerPool().preprocessTopLevelAwaitExpressions(text);
+        preprocessed = !!preprocessedText;
+        text = preprocessedText || text;
+      }
+      SDK.consoleModel.evaluateCommandInConsole(
+          executionContext, message, text, useCommandLineAPI, /* awaitPromise */ preprocessed);
       if (Console.ConsolePanel.instance().isShowing())
         Host.userMetrics.actionTaken(Host.UserMetrics.Action.CommandEvaluatedInConsolePanel);
     }
@@ -217,12 +219,12 @@ Console.ConsolePrompt = class extends UI.Widget {
   _historyCompletions(prefix, force) {
     if (!this._addCompletionsFromHistory || !this._isCaretAtEndOfPrompt() || (!prefix && !force))
       return [];
-    var result = [];
-    var text = this.text();
-    var set = new Set();
-    var data = this._history.historyData();
-    for (var i = data.length - 1; i >= 0 && result.length < 50; --i) {
-      var item = data[i];
+    const result = [];
+    const text = this.text();
+    const set = new Set();
+    const data = this._history.historyData();
+    for (let i = data.length - 1; i >= 0 && result.length < 50; --i) {
+      const item = data[i];
       if (!item.startsWith(text))
         continue;
       if (set.has(item))
@@ -250,12 +252,12 @@ Console.ConsolePrompt = class extends UI.Widget {
    * @return {?TextUtils.TextRange}
    */
   _substituteRange(lineNumber, columnNumber) {
-    var token = this._editor.tokenAtTextPosition(lineNumber, columnNumber);
+    const token = this._editor.tokenAtTextPosition(lineNumber, columnNumber);
     if (token && token.type === 'js-string')
       return new TextUtils.TextRange(lineNumber, token.startColumn, lineNumber, columnNumber);
 
-    var lineText = this._editor.line(lineNumber);
-    var index;
+    const lineText = this._editor.line(lineNumber);
+    let index;
     for (index = columnNumber - 1; index >= 0; index--) {
       if (' =:[({;,!+-*/&|^<>.\t\r\n'.indexOf(lineText.charAt(index)) !== -1)
         break;
@@ -270,13 +272,13 @@ Console.ConsolePrompt = class extends UI.Widget {
    * @return {!Promise<!UI.SuggestBox.Suggestions>}
    */
   _wordsWithQuery(queryRange, substituteRange, force) {
-    var query = this._editor.text(queryRange);
-    var before = this._editor.text(new TextUtils.TextRange(0, 0, queryRange.startLine, queryRange.startColumn));
-    var historyWords = this._historyCompletions(query, force);
-    var token = this._editor.tokenAtTextPosition(substituteRange.startLine, substituteRange.startColumn);
+    const query = this._editor.text(queryRange);
+    const before = this._editor.text(new TextUtils.TextRange(0, 0, queryRange.startLine, queryRange.startColumn));
+    const historyWords = this._historyCompletions(query, force);
+    const token = this._editor.tokenAtTextPosition(substituteRange.startLine, substituteRange.startColumn);
     if (token) {
-      var excludedTokens = new Set(['js-comment', 'js-string-2', 'js-def']);
-      var trimmedBefore = before.trim();
+      const excludedTokens = new Set(['js-comment', 'js-string-2', 'js-def']);
+      const trimmedBefore = before.trim();
       if (!trimmedBefore.endsWith('[') && !trimmedBefore.match(/\.\s*(get|set|delete)\s*\(\s*$/))
         excludedTokens.add('js-string');
       if (!trimmedBefore.endsWith('.'))
@@ -284,7 +286,7 @@ Console.ConsolePrompt = class extends UI.Widget {
       if (excludedTokens.has(token.type))
         return Promise.resolve(historyWords);
     }
-    return ObjectUI.JavaScriptAutocomplete.completionsForTextInCurrentContext(before, query, force)
+    return ObjectUI.javaScriptAutocomplete.completionsForTextInCurrentContext(before, query, force)
         .then(words => words.concat(historyWords));
   }
 

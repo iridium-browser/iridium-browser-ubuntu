@@ -95,13 +95,13 @@ class Iterable {
 
   class IterationSource : public GarbageCollectedFinalized<IterationSource> {
    public:
-    virtual ~IterationSource() {}
+    virtual ~IterationSource() = default;
 
     // If end of iteration has been reached or an exception thrown: return
     // false.  Otherwise: set |key| and |value| and return true.
     virtual bool Next(ScriptState*, KeyType&, ValueType&, ExceptionState&) = 0;
 
-    DEFINE_INLINE_VIRTUAL_TRACE() {}
+    virtual void Trace(blink::Visitor* visitor) {}
   };
 
  private:
@@ -164,7 +164,7 @@ class Iterable {
       return next(script_state, exception_state);
     }
 
-    DEFINE_INLINE_VIRTUAL_TRACE() {
+    virtual void Trace(blink::Visitor* visitor) {
       visitor->Trace(source_);
       Iterator::Trace(visitor);
     }

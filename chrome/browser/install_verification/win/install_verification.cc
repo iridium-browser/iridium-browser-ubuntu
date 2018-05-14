@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_util.h"
@@ -20,12 +20,12 @@
 #include "chrome/browser/install_verification/win/module_ids.h"
 #include "chrome/browser/install_verification/win/module_info.h"
 #include "chrome/browser/install_verification/win/module_verification_common.h"
-#include "components/variations/metrics_util.h"
+#include "components/variations/hashing.h"
 
 namespace {
 
 void ReportModuleMatch(size_t module_id) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("InstallVerifier.ModuleMatch", module_id);
+  base::UmaHistogramSparse("InstallVerifier.ModuleMatch", module_id);
 }
 
 base::FilePath GetExeFilePathForProcess(const base::Process& process) {
@@ -64,11 +64,11 @@ void ReportParentProcessName() {
     if (!path.empty()) {
       std::string ascii_path(base::SysWideToUTF8(path.BaseName().value()));
       DCHECK(base::IsStringASCII(ascii_path));
-      hash = metrics::HashName(base::ToLowerASCII(ascii_path));
+      hash = variations::HashName(base::ToLowerASCII(ascii_path));
     }
   }
 
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Windows.ParentProcessNameHash", hash);
+  base::UmaHistogramSparse("Windows.ParentProcessNameHash", hash);
 }
 
 }  // namespace

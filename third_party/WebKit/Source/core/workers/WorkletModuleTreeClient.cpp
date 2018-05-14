@@ -4,15 +4,17 @@
 
 #include "core/workers/WorkletModuleTreeClient.h"
 
-#include "core/dom/ModuleScript.h"
-#include "core/dom/TaskRunnerHelper.h"
+#include "core/script/ModuleScript.h"
+#include "core/workers/WorkerReportingProxy.h"
+#include "core/workers/WorkletGlobalScope.h"
 #include "platform/CrossThreadFunctional.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
 WorkletModuleTreeClient::WorkletModuleTreeClient(
     Modulator* modulator,
-    RefPtr<WebTaskRunner> outside_settings_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
     WorkletPendingTasks* pending_tasks)
     : modulator_(modulator),
       outside_settings_task_runner_(std::move(outside_settings_task_runner)),
@@ -27,26 +29,52 @@ void WorkletModuleTreeClient::NotifyModuleTreeLoadFinished(
     // Step 3: "If script is null, then queue a task on outsideSettings's
     // responsible event loop to run these steps:"
     // The steps are implemented in WorkletPendingTasks::Abort().
-    outside_settings_task_runner_->PostTask(
-        BLINK_FROM_HERE,
+    PostCrossThreadTask(
+        *outside_settings_task_runner_, FROM_HERE,
         CrossThreadBind(&WorkletPendingTasks::Abort,
                         WrapCrossThreadPersistent(pending_tasks_.Get())));
     return;
   }
 
+  // "Note: Specifically, if a script fails to parse or fails to load over the
+  // network, it will reject the promise. If the script throws an error while
+  // first evaluating the promise it will resolve as classes may have been
+  // registered correctly."
+  // https://drafts.css-houdini.org/worklets/#fetch-a-worklet-script
+  //
+  // When a network failure happens, |module_script| should be nullptr and the
+  // case should already be handled above.
+  //
+  // Check whether a syntax error happens.
+  if (module_script->HasErrorToRethrow()) {
+    PostCrossThreadTask(
+        *outside_settings_task_runner_, FROM_HERE,
+        CrossThreadBind(&WorkletPendingTasks::Abort,
+                        WrapCrossThreadPersistent(pending_tasks_.Get())));
+    return;
+  }
+
+  // TODO(nhiroki): Call WorkerReportingProxy::WillEvaluateWorkerScript() or
+  // something like that (e.g., WillEvaluateModuleScript()).
   // Step 4: "Run a module script given script."
-  modulator_->ExecuteModule(module_script);
+  ScriptValue error = modulator_->ExecuteModule(
+      module_script, Modulator::CaptureEvalErrorFlag::kReport);
+
+  WorkletGlobalScope* global_scope = ToWorkletGlobalScope(
+      ExecutionContext::From(modulator_->GetScriptState()));
+
+  global_scope->ReportingProxy().DidEvaluateModuleScript(error.IsEmpty());
 
   // Step 5: "Queue a task on outsideSettings's responsible event loop to run
   // these steps:"
   // The steps are implemented in WorkletPendingTasks::DecrementCounter().
-  outside_settings_task_runner_->PostTask(
-      BLINK_FROM_HERE,
+  PostCrossThreadTask(
+      *outside_settings_task_runner_, FROM_HERE,
       CrossThreadBind(&WorkletPendingTasks::DecrementCounter,
                       WrapCrossThreadPersistent(pending_tasks_.Get())));
 };
 
-DEFINE_TRACE(WorkletModuleTreeClient) {
+void WorkletModuleTreeClient::Trace(blink::Visitor* visitor) {
   visitor->Trace(modulator_);
   ModuleTreeClient::Trace(visitor);
 }

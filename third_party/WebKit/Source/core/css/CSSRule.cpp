@@ -38,25 +38,26 @@ struct SameSizeAsCSSRule : public GarbageCollectedFinalized<SameSizeAsCSSRule>,
 static_assert(sizeof(CSSRule) == sizeof(SameSizeAsCSSRule),
               "CSSRule should stay small");
 
-const CSSParserContext* CSSRule::ParserContext() const {
+const CSSParserContext* CSSRule::ParserContext(
+    SecureContextMode secure_context_mode) const {
   CSSStyleSheet* style_sheet = parentStyleSheet();
   return style_sheet ? style_sheet->Contents()->ParserContext()
-                     : StrictCSSParserContext();
+                     : StrictCSSParserContext(secure_context_mode);
 }
 
 void CSSRule::SetParentStyleSheet(CSSStyleSheet* style_sheet) {
   parent_is_rule_ = false;
   parent_style_sheet_ = style_sheet;
-  ScriptWrappableVisitor::WriteBarrier(this, parent_style_sheet_);
+  ScriptWrappableMarkingVisitor::WriteBarrier(parent_style_sheet_);
 }
 
 void CSSRule::SetParentRule(CSSRule* rule) {
   parent_is_rule_ = true;
   parent_rule_ = rule;
-  ScriptWrappableVisitor::WriteBarrier(this, parent_rule_);
+  ScriptWrappableMarkingVisitor::WriteBarrier(parent_rule_);
 }
 
-DEFINE_TRACE(CSSRule) {
+void CSSRule::Trace(blink::Visitor* visitor) {
   // This makes the parent link strong, which is different from the
   // pre-oilpan world, where the parent link is mysteriously zeroed under
   // some circumstances.
@@ -64,13 +65,15 @@ DEFINE_TRACE(CSSRule) {
     visitor->Trace(parent_rule_);
   else
     visitor->Trace(parent_style_sheet_);
+  ScriptWrappable::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(CSSRule) {
+void CSSRule::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
   if (parent_is_rule_)
     visitor->TraceWrappersWithManualWriteBarrier(parent_rule_);
   else
     visitor->TraceWrappersWithManualWriteBarrier(parent_style_sheet_);
+  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

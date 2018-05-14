@@ -26,7 +26,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing_db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/db/v4_protocol_manager_util.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -35,6 +35,7 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/test/ppapi_test_utils.h"
 #include "net/base/load_flags.h"
+#include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
 #include "net/url_request/url_request_filter.h"
 #include "ppapi/shared_impl/ppapi_switches.h"
@@ -106,16 +107,19 @@ class CountingInterceptor : public net::URLRequestInterceptor {
 class CountingInterceptorWithCallback : public net::URLRequestInterceptor {
  public:
   // Inserts the interceptor object to intercept requests to |url|.  Can be
-  // called on any thread. Assumes that |counter| lives on the UI thread.  The
-  // |callback_io| will be called on IO thread with the net::URLrequest
-  // provided.
+  // called on any thread. Assumes that |counter| (if non-null) lives on the UI
+  // thread.  The |callback_io| will be called on IO thread with the
+  // net::URLrequest provided.
   static void Initialize(const GURL& url,
                          RequestCounter* counter,
                          base::Callback<void(net::URLRequest*)> callback_io) {
+    base::WeakPtr<RequestCounter> weakptr;
+    if (counter)
+      weakptr = counter->AsWeakPtr();
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
         base::BindOnce(&CountingInterceptorWithCallback::CreateAndAddOnIO, url,
-                       counter->AsWeakPtr(), callback_io));
+                       weakptr, callback_io));
   }
 
   // net::URLRequestInterceptor:
@@ -428,7 +432,7 @@ DestructionWaiter::DestructionWaiter(TestPrerenderContents* prerender_contents,
     // The contents was already destroyed by the time this was called.
     MarkDestruction(prerender_contents->final_status());
   } else {
-    marker_ = base::MakeUnique<DestructionMarker>(this);
+    marker_ = std::make_unique<DestructionMarker>(this);
     prerender_contents->AddObserver(marker_.get());
   }
 }
@@ -561,7 +565,7 @@ void FirstContentfulPaintManagerWaiter::OnFirstContentfulPaint() {
 void FirstContentfulPaintManagerWaiter::Wait() {
   if (saw_fcp_)
     return;
-  waiter_ = base::MakeUnique<base::RunLoop>();
+  waiter_ = std::make_unique<base::RunLoop>();
   waiter_->Run();
   waiter_.reset();
 }
@@ -614,9 +618,9 @@ TestPrerenderContentsFactory::ExpectedContents::~ExpectedContents() {}
 
 PrerenderInProcessBrowserTest::PrerenderInProcessBrowserTest()
     : external_protocol_handler_delegate_(
-          base::MakeUnique<NeverRunsExternalProtocolHandlerDelegate>()),
+          std::make_unique<NeverRunsExternalProtocolHandlerDelegate>()),
       safe_browsing_factory_(
-          base::MakeUnique<safe_browsing::TestSafeBrowsingServiceFactory>()),
+          std::make_unique<safe_browsing::TestSafeBrowsingServiceFactory>()),
       prerender_contents_factory_(nullptr),
       explicitly_set_browser_(nullptr),
       autostart_test_server_(true) {}
@@ -701,28 +705,37 @@ void PrerenderInProcessBrowserTest::SetUpInProcessBrowserTestFixture() {
 }
 
 void PrerenderInProcessBrowserTest::SetUpOnMainThread() {
-  // Increase the memory allowed in a prerendered page above normal settings.
-  // Debug build bots occasionally run against the default limit, and tests
-  // were failing because the prerender was canceled due to memory exhaustion.
-  // http://crbug.com/93076
-  GetPrerenderManager()->mutable_config().max_bytes = 2000 * 1024 * 1024;
-
   current_browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kPromptForDownload, false);
+  embedded_test_server()->RegisterRequestMonitor(
+      base::Bind(&PrerenderInProcessBrowserTest::MonitorResourceRequest,
+                 base::Unretained(this)));
   if (autostart_test_server_)
-    ASSERT_TRUE(embedded_test_server()->Start());
+    CHECK(embedded_test_server()->Start());
   ChromeResourceDispatcherHostDelegate::
       SetExternalProtocolHandlerDelegateForTesting(
           external_protocol_handler_delegate_.get());
 
+  // Check that PrerenderManager exists, which is necessary to make sure
+  // NoStatePrefetch can be enabled and perceived FCP metrics can be recorded.
   PrerenderManager* prerender_manager = GetPrerenderManager();
-  ASSERT_TRUE(prerender_manager);
+  // Use CHECK to fail fast. The ASSERT_* macros in this context are not useful
+  // because they only silently exit and make the tests crash later with more
+  // complicated symptoms.
+  CHECK(prerender_manager);
+
+  // Increase the memory allowed in a prerendered page above normal settings.
+  // Debug build bots occasionally run against the default limit, and tests
+  // were failing because the prerender was canceled due to memory exhaustion.
+  // http://crbug.com/93076
+  prerender_manager->mutable_config().max_bytes = 2000 * 1024 * 1024;
+
   prerender_manager->mutable_config().rate_limit_enabled = false;
-  ASSERT_FALSE(prerender_contents_factory_);
+  CHECK(!prerender_contents_factory_);
   prerender_contents_factory_ = new TestPrerenderContentsFactory;
   prerender_manager->SetPrerenderContentsFactoryForTest(
       prerender_contents_factory_);
-  ASSERT_TRUE(safe_browsing_factory_->test_safe_browsing_service());
+  CHECK(safe_browsing_factory_->test_safe_browsing_service());
 }
 
 void PrerenderInProcessBrowserTest::UseHttpsSrcServer() {
@@ -731,6 +744,9 @@ void PrerenderInProcessBrowserTest::UseHttpsSrcServer() {
   https_src_server_.reset(
       new net::EmbeddedTestServer(net::EmbeddedTestServer::TYPE_HTTPS));
   https_src_server_->ServeFilesFromSourceDirectory("chrome/test/data");
+  https_src_server_->RegisterRequestMonitor(
+      base::Bind(&PrerenderInProcessBrowserTest::MonitorResourceRequest,
+                 base::Unretained(this)));
   CHECK(https_src_server_->Start());
 }
 
@@ -791,13 +807,58 @@ GURL PrerenderInProcessBrowserTest::ServeLoaderURL(
   return src_server()->GetURL(replacement_path + loader_query);
 }
 
+void PrerenderInProcessBrowserTest::MonitorResourceRequest(
+    const net::test_server::HttpRequest& request) {
+  base::AutoLock auto_lock(lock_);
+  requests_[request.GetURL()]++;
+  if (waiting_url_ == request.GetURL() &&
+      requests_[request.GetURL()] == waiting_count_) {
+    waiting_closure_.Run();
+  }
+}
+
+uint32_t PrerenderInProcessBrowserTest::GetRequestCount(const GURL& url) {
+  base::AutoLock auto_lock(lock_);
+  auto i = requests_.find(url);
+  if (i == requests_.end())
+    return 0;
+  return i->second;
+}
+
+void PrerenderInProcessBrowserTest::WaitForRequestCount(
+    const GURL& url,
+    uint32_t expected_count) {
+  if (GetRequestCount(url) == expected_count)
+    return;
+
+  base::RunLoop run_loop;
+  {
+    base::AutoLock auto_lock(lock_);
+    waiting_closure_ = run_loop.QuitClosure();
+    waiting_url_ = url;
+    waiting_count_ = expected_count;
+  }
+  run_loop.Run();
+  {
+    base::AutoLock auto_lock(lock_);
+    waiting_url_ = GURL();
+    waiting_count_ = 0;
+    waiting_closure_.Reset();
+  }
+}
+
 void CreateCountingInterceptorOnIO(
     const GURL& url,
     const base::FilePath& file,
     const base::WeakPtr<RequestCounter>& counter) {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
   net::URLRequestFilter::GetInstance()->AddUrlInterceptor(
-      url, base::MakeUnique<CountingInterceptor>(file, counter));
+      url, std::make_unique<CountingInterceptor>(file, counter));
+}
+
+void InterceptRequest(const GURL& url,
+                      base::Callback<void(net::URLRequest*)> callback_io) {
+  CountingInterceptorWithCallback::Initialize(url, nullptr, callback_io);
 }
 
 void InterceptRequestAndCount(

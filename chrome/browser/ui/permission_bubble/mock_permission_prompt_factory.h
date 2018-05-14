@@ -11,6 +11,7 @@
 #include "chrome/browser/permissions/permission_request.h"
 #include "chrome/browser/permissions/permission_request_manager.h"
 #include "chrome/browser/ui/permission_bubble/permission_prompt.h"
+#include "url/gurl.h"
 
 class MockPermissionPrompt;
 
@@ -32,8 +33,6 @@ class MockPermissionPromptFactory {
   std::unique_ptr<PermissionPrompt> Create(
       content::WebContents* web_contents,
       PermissionPrompt::Delegate* delegate);
-
-  void SetCanUpdateUi(bool can_update_ui);
 
   void ResetCounts();
 
@@ -57,6 +56,8 @@ class MockPermissionPromptFactory {
   int TotalRequestCount();
   // Whether the specified permission was shown in a prompt.
   bool RequestTypeSeen(PermissionRequestType type);
+  // Whether a prompt with the given origin was shown.
+  bool RequestOriginSeen(const GURL& origin);
 
   void WaitForPermissionBubble();
 
@@ -71,10 +72,10 @@ class MockPermissionPromptFactory {
 
   void HideView(MockPermissionPrompt* view);
 
-  bool can_update_ui_;
   int show_count_;
   int requests_count_;
   std::vector<PermissionRequestType> request_types_seen_;
+  std::vector<GURL> request_origins_seen_;
 
   std::vector<MockPermissionPrompt*> prompts_;
   PermissionRequestManager::AutoResponseType response_type_;

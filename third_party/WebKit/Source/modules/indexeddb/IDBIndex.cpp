@@ -30,6 +30,7 @@
 #include "bindings/core/v8/ToV8ForCore.h"
 #include "bindings/modules/v8/ToV8ForModules.h"
 #include "bindings/modules/v8/V8BindingForModules.h"
+#include "bindings/modules/v8/idb_object_store_or_idb_index_or_idb_cursor.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "modules/indexeddb/IDBDatabase.h"
@@ -45,7 +46,7 @@ using blink::WebIDBDatabase;
 
 namespace blink {
 
-IDBIndex::IDBIndex(RefPtr<IDBIndexMetadata> metadata,
+IDBIndex::IDBIndex(scoped_refptr<IDBIndexMetadata> metadata,
                    IDBObjectStore* object_store,
                    IDBTransaction* transaction)
     : metadata_(std::move(metadata)),
@@ -53,15 +54,16 @@ IDBIndex::IDBIndex(RefPtr<IDBIndexMetadata> metadata,
       transaction_(transaction) {
   DCHECK(object_store_);
   DCHECK(transaction_);
-  DCHECK(metadata_.Get());
+  DCHECK(metadata_.get());
   DCHECK_NE(Id(), IDBIndexMetadata::kInvalidId);
 }
 
-IDBIndex::~IDBIndex() {}
+IDBIndex::~IDBIndex() = default;
 
-DEFINE_TRACE(IDBIndex) {
+void IDBIndex::Trace(blink::Visitor* visitor) {
   visitor->Trace(object_store_);
   visitor->Trace(transaction_);
+  ScriptWrappable::Trace(visitor);
 }
 
 void IDBIndex::setName(const String& name, ExceptionState& exception_state) {
@@ -103,7 +105,7 @@ ScriptValue IDBIndex::keyPath(ScriptState* script_state) const {
   return ScriptValue::From(script_state, Metadata().key_path);
 }
 
-void IDBIndex::RevertMetadata(RefPtr<IDBIndexMetadata> old_metadata) {
+void IDBIndex::RevertMetadata(scoped_refptr<IDBIndexMetadata> old_metadata) {
   metadata_ = std::move(old_metadata);
 
   // An index's metadata will only get reverted if the index was in the
@@ -148,9 +150,8 @@ IDBRequest* IDBIndex::openCursor(ScriptState* script_state,
                                  IDBKeyRange* key_range,
                                  WebIDBCursorDirection direction,
                                  IDBRequest::AsyncTraceState metrics) {
-  IDBRequest* request =
-      IDBRequest::Create(script_state, IDBAny::Create(this), transaction_.Get(),
-                         std::move(metrics));
+  IDBRequest* request = IDBRequest::Create(
+      script_state, this, transaction_.Get(), std::move(metrics));
   request->SetCursorDetails(IndexedDB::kCursorKeyAndValue, direction);
   BackendDB()->OpenCursor(transaction_->Id(), object_store_->Id(), Id(),
                           key_range, direction, false, kWebIDBTaskTypeNormal,
@@ -186,9 +187,8 @@ IDBRequest* IDBIndex::count(ScriptState* script_state,
     return nullptr;
   }
 
-  IDBRequest* request =
-      IDBRequest::Create(script_state, IDBAny::Create(this), transaction_.Get(),
-                         std::move(metrics));
+  IDBRequest* request = IDBRequest::Create(
+      script_state, this, transaction_.Get(), std::move(metrics));
   BackendDB()->Count(transaction_->Id(), object_store_->Id(), Id(), key_range,
                      request->CreateWebCallbacks().release());
   return request;
@@ -223,9 +223,8 @@ IDBRequest* IDBIndex::openKeyCursor(ScriptState* script_state,
     return nullptr;
   }
 
-  IDBRequest* request =
-      IDBRequest::Create(script_state, IDBAny::Create(this), transaction_.Get(),
-                         std::move(metrics));
+  IDBRequest* request = IDBRequest::Create(
+      script_state, this, transaction_.Get(), std::move(metrics));
   request->SetCursorDetails(IndexedDB::kCursorKeyOnly, direction);
   BackendDB()->OpenCursor(transaction_->Id(), object_store_->Id(), Id(),
                           key_range, direction, true, kWebIDBTaskTypeNormal,
@@ -318,10 +317,8 @@ IDBRequest* IDBIndex::GetInternal(ScriptState* script_state,
                                       IDBDatabase::kDatabaseClosedErrorMessage);
     return nullptr;
   }
-
-  IDBRequest* request =
-      IDBRequest::Create(script_state, IDBAny::Create(this), transaction_.Get(),
-                         std::move(metrics));
+  IDBRequest* request = IDBRequest::Create(
+      script_state, this, transaction_.Get(), std::move(metrics));
   BackendDB()->Get(transaction_->Id(), object_store_->Id(), Id(), key_range,
                    key_only, request->CreateWebCallbacks().release());
   return request;
@@ -357,9 +354,8 @@ IDBRequest* IDBIndex::GetAllInternal(ScriptState* script_state,
     return nullptr;
   }
 
-  IDBRequest* request =
-      IDBRequest::Create(script_state, IDBAny::Create(this), transaction_.Get(),
-                         std::move(metrics));
+  IDBRequest* request = IDBRequest::Create(
+      script_state, this, transaction_.Get(), std::move(metrics));
   BackendDB()->GetAll(transaction_->Id(), object_store_->Id(), Id(), key_range,
                       max_count, key_only,
                       request->CreateWebCallbacks().release());

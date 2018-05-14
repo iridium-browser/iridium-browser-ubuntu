@@ -5,8 +5,11 @@
 #include "chrome/browser/ui/views/permission_bubble/permission_prompt_impl.h"
 
 #include <stddef.h>
+#include <memory>
+#include <utility>
 
 #include "base/strings/string16.h"
+#include "build/build_config.h"
 #include "chrome/browser/permissions/permission_request.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -19,7 +22,6 @@
 #include "chrome/browser/ui/views/page_info/permission_selector_row_observer.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/url_formatter/elide_url.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_palette.h"
@@ -28,9 +30,13 @@
 #include "ui/gfx/text_constants.h"
 #include "ui/views/bubble/bubble_dialog_delegate.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/controls/button/checkbox.h"
+#include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
+
+#if defined(OS_MACOSX)
+#include "chrome/common/chrome_features.h"
+#endif
 
 namespace {
 
@@ -61,20 +67,22 @@ class PermissionsBubbleDialogDelegateView
  public:
   PermissionsBubbleDialogDelegateView(
       PermissionPromptImpl* owner,
-      const std::vector<PermissionRequest*>& requests);
+      const std::vector<PermissionRequest*>& requests,
+      const PermissionPrompt::DisplayNameOrOrigin& name_or_origin);
   ~PermissionsBubbleDialogDelegateView() override;
 
   void CloseBubble();
 
   // BubbleDialogDelegateView:
-  ui::AXRole GetAccessibleWindowRole() const override;
+  ax::mojom::Role GetAccessibleWindowRole() const override;
+  base::string16 GetAccessibleWindowTitle() const override;
   bool ShouldShowCloseButton() const override;
   base::string16 GetWindowTitle() const override;
-  void AddedToWidget() override;
   void OnWidgetDestroying(views::Widget* widget) override;
   bool Cancel() override;
   bool Accept() override;
   bool Close() override;
+  void AddedToWidget() override;
   int GetDefaultDialogButton() const override;
   int GetDialogButtons() const override;
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
@@ -86,38 +94,41 @@ class PermissionsBubbleDialogDelegateView
 
  private:
   PermissionPromptImpl* owner_;
-  base::string16 display_origin_;
-  views::Checkbox* persist_checkbox_;
+  PermissionPrompt::DisplayNameOrOrigin name_or_origin_;
 
   DISALLOW_COPY_AND_ASSIGN(PermissionsBubbleDialogDelegateView);
 };
 
 PermissionsBubbleDialogDelegateView::PermissionsBubbleDialogDelegateView(
     PermissionPromptImpl* owner,
-    const std::vector<PermissionRequest*>& requests)
-    : owner_(owner), persist_checkbox_(nullptr) {
+    const std::vector<PermissionRequest*>& requests,
+    const PermissionPrompt::DisplayNameOrOrigin& name_or_origin)
+    : owner_(owner), name_or_origin_(name_or_origin) {
   DCHECK(!requests.empty());
 
   set_close_on_deactivate(false);
   set_arrow(kPermissionAnchorArrow);
 
+#if defined(OS_MACOSX)
+  // On Mac, the browser UI flips depending on a runtime feature. TODO(tapted):
+  // Change the default in views::PlatformStyle when features::kMacRTL launches,
+  // and remove the following.
+  if (base::FeatureList::IsEnabled(features::kMacRTL))
+    set_mirror_arrow_in_rtl(true);
+#endif
+
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
-  SetLayoutManager(new views::BoxLayout(
+  SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kVertical, gfx::Insets(),
       provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL)));
 
-  display_origin_ = url_formatter::FormatUrlForSecurityDisplay(
-      requests[0]->GetOrigin(),
-      url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC);
-
-  bool show_persistence_toggle = true;
   for (size_t index = 0; index < requests.size(); index++) {
     views::View* label_container = new views::View();
     int indent =
         provider->GetDistanceMetric(DISTANCE_SUBSECTION_HORIZONTAL_INDENT);
-    label_container->SetLayoutManager(new views::BoxLayout(
+    label_container->SetLayoutManager(std::make_unique<views::BoxLayout>(
         views::BoxLayout::kHorizontal, gfx::Insets(0, indent),
-        provider->GetDistanceMetric(DISTANCE_RELATED_LABEL_HORIZONTAL)));
+        provider->GetDistanceMetric(views::DISTANCE_RELATED_LABEL_HORIZONTAL)));
     views::ImageView* icon = new views::ImageView();
     const gfx::VectorIcon& vector_id = requests[index]->GetIconId();
     icon->SetImage(
@@ -129,19 +140,8 @@ PermissionsBubbleDialogDelegateView::PermissionsBubbleDialogDelegateView(
     label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     label_container->AddChildView(label);
     AddChildView(label_container);
-
-    // Only show the toggle if every request wants to show it.
-    show_persistence_toggle = show_persistence_toggle &&
-                              requests[index]->ShouldShowPersistenceToggle();
   }
 
-  if (show_persistence_toggle) {
-    persist_checkbox_ = new views::Checkbox(
-        l10n_util::GetStringUTF16(IDS_PERMISSIONS_BUBBLE_PERSIST_TEXT));
-    persist_checkbox_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    persist_checkbox_->SetChecked(true);
-    AddChildView(persist_checkbox_);
-  }
   chrome::RecordDialogCreation(chrome::DialogIdentifier::PERMISSIONS);
 }
 
@@ -155,9 +155,38 @@ void PermissionsBubbleDialogDelegateView::CloseBubble() {
   GetWidget()->Close();
 }
 
-ui::AXRole PermissionsBubbleDialogDelegateView::GetAccessibleWindowRole()
+void PermissionsBubbleDialogDelegateView::AddedToWidget() {
+  // There is no URL spoofing risk from non-origins.
+  if (!name_or_origin_.is_origin)
+    return;
+
+  std::unique_ptr<views::Label> title =
+      views::BubbleFrameView::CreateDefaultTitleLabel(GetWindowTitle());
+
+  // Elide from head in order to keep the most significant part of the origin
+  // and avoid spoofing. Note that in English, GetWindowTitle() returns a string
+  // "$ORIGIN wants to", so the "wants to" will not be elided. In other
+  // languages, the non-origin part may appear fully or partly before the origin
+  // (e.g., in Filipino, "Gusto ng $ORIGIN na"), which means it may be elided.
+  // This is not optimal, but it is necessary to avoid origin spoofing. See
+  // crbug.com/774438.
+  title->SetElideBehavior(gfx::ELIDE_HEAD);
+
+  // Multiline breaks elision, which would mean a very long origin gets
+  // truncated from the least significant side. Explicitly disable multiline.
+  title->SetMultiLine(false);
+  GetBubbleFrameView()->SetTitleView(std::move(title));
+}
+
+ax::mojom::Role PermissionsBubbleDialogDelegateView::GetAccessibleWindowRole()
     const {
-  return ui::AX_ROLE_ALERT_DIALOG;
+  return ax::mojom::Role::kAlertDialog;
+}
+
+base::string16 PermissionsBubbleDialogDelegateView::GetAccessibleWindowTitle()
+    const {
+  return l10n_util::GetStringFUTF16(IDS_PERMISSIONS_BUBBLE_ACCESSIBLE_TITLE,
+                                    name_or_origin_.name_or_origin);
 }
 
 bool PermissionsBubbleDialogDelegateView::ShouldShowCloseButton() const {
@@ -166,15 +195,7 @@ bool PermissionsBubbleDialogDelegateView::ShouldShowCloseButton() const {
 
 base::string16 PermissionsBubbleDialogDelegateView::GetWindowTitle() const {
   return l10n_util::GetStringFUTF16(IDS_PERMISSIONS_BUBBLE_PROMPT,
-                                    display_origin_);
-}
-
-void PermissionsBubbleDialogDelegateView::AddedToWidget() {
-  std::unique_ptr<views::Label> title =
-      views::BubbleFrameView::CreateDefaultTitleLabel(GetWindowTitle());
-  title->SetFontList(ui::ResourceBundle::GetSharedInstance().GetFontList(
-      ui::ResourceBundle::BaseFont));
-  GetBubbleFrameView()->SetTitleView(std::move(title));
+                                    name_or_origin_.name_or_origin);
 }
 
 void PermissionsBubbleDialogDelegateView::SizeToContents() {
@@ -213,18 +234,14 @@ base::string16 PermissionsBubbleDialogDelegateView::GetDialogButtonLabel(
 }
 
 bool PermissionsBubbleDialogDelegateView::Cancel() {
-  if (owner_) {
-    owner_->TogglePersist(!persist_checkbox_ || persist_checkbox_->checked());
+  if (owner_)
     owner_->Deny();
-  }
   return true;
 }
 
 bool PermissionsBubbleDialogDelegateView::Accept() {
-  if (owner_) {
-    owner_->TogglePersist(!persist_checkbox_ || persist_checkbox_->checked());
+  if (owner_)
     owner_->Accept();
-  }
   return true;
 }
 
@@ -253,10 +270,6 @@ PermissionPromptImpl::~PermissionPromptImpl() {
     bubble_delegate_->CloseBubble();
 }
 
-bool PermissionPromptImpl::CanAcceptRequestUpdate() {
-  return !(bubble_delegate_ && bubble_delegate_->IsMouseHovered());
-}
-
 void PermissionPromptImpl::UpdateAnchorPosition() {
   DCHECK(browser_);
   DCHECK(browser_->window());
@@ -281,11 +294,6 @@ void PermissionPromptImpl::Closing() {
     delegate_->Closing();
 }
 
-void PermissionPromptImpl::TogglePersist(bool value) {
-  if (delegate_)
-    delegate_->TogglePersist(value);
-}
-
 void PermissionPromptImpl::Accept() {
   if (delegate_)
     delegate_->Accept();
@@ -300,8 +308,8 @@ void PermissionPromptImpl::Show() {
   DCHECK(browser_);
   DCHECK(browser_->window());
 
-  bubble_delegate_ =
-      new PermissionsBubbleDialogDelegateView(this, delegate_->Requests());
+  bubble_delegate_ = new PermissionsBubbleDialogDelegateView(
+      this, delegate_->Requests(), delegate_->GetDisplayNameOrOrigin());
 
   // Set |parent_window| because some valid anchors can become hidden.
   bubble_delegate_->set_parent_window(

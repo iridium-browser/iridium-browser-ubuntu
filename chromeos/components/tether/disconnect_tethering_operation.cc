@@ -4,6 +4,8 @@
 
 #include "chromeos/components/tether/disconnect_tethering_operation.h"
 
+#include <memory>
+
 #include "base/metrics/histogram_macros.h"
 #include "base/time/default_clock.h"
 #include "chromeos/components/tether/message_wrapper.h"
@@ -40,8 +42,8 @@ std::unique_ptr<DisconnectTetheringOperation>
 DisconnectTetheringOperation::Factory::BuildInstance(
     const cryptauth::RemoteDevice& device_to_connect,
     BleConnectionManager* connection_manager) {
-  return base::MakeUnique<DisconnectTetheringOperation>(device_to_connect,
-                                                        connection_manager);
+  return base::WrapUnique(
+      new DisconnectTetheringOperation(device_to_connect, connection_manager));
 }
 
 DisconnectTetheringOperation::DisconnectTetheringOperation(
@@ -52,9 +54,9 @@ DisconnectTetheringOperation::DisconnectTetheringOperation(
           connection_manager),
       remote_device_(device_to_connect),
       has_sent_message_(false),
-      clock_(base::MakeUnique<base::DefaultClock>()) {}
+      clock_(base::DefaultClock::GetInstance()) {}
 
-DisconnectTetheringOperation::~DisconnectTetheringOperation() {}
+DisconnectTetheringOperation::~DisconnectTetheringOperation() = default;
 
 void DisconnectTetheringOperation::AddObserver(Observer* observer) {
   observer_list_.AddObserver(observer);
@@ -77,7 +79,7 @@ void DisconnectTetheringOperation::OnDeviceAuthenticated(
 
   disconnect_message_sequence_number_ = SendMessageToDevice(
       remote_device,
-      base::MakeUnique<MessageWrapper>(DisconnectTetheringRequest()));
+      std::make_unique<MessageWrapper>(DisconnectTetheringRequest()));
   disconnect_start_time_ = clock_->Now();
 }
 
@@ -105,8 +107,8 @@ void DisconnectTetheringOperation::OnMessageSent(int sequence_number) {
 }
 
 void DisconnectTetheringOperation::SetClockForTest(
-    std::unique_ptr<base::Clock> clock_for_test) {
-  clock_ = std::move(clock_for_test);
+    base::Clock* clock_for_test) {
+  clock_ = clock_for_test;
 }
 
 }  // namespace tether

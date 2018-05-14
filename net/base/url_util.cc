@@ -102,8 +102,7 @@ QueryIterator::QueryIterator(const GURL& url)
   }
 }
 
-QueryIterator::~QueryIterator() {
-}
+QueryIterator::~QueryIterator() = default;
 
 std::string QueryIterator::GetKey() const {
   DCHECK(!at_end_);
@@ -347,7 +346,11 @@ bool IsHostnameNonUnique(const std::string& hostname) {
       registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
 }
 
-bool IsLocalhost(base::StringPiece host) {
+bool IsLocalhost(const GURL& url) {
+  return HostStringIsLocalhost(url.HostNoBracketsPiece());
+}
+
+bool HostStringIsLocalhost(base::StringPiece host) {
   if (IsLocalHostname(host, nullptr))
     return true;
 
@@ -417,6 +420,11 @@ bool HasGoogleHost(const GURL& url) {
       return true;
   }
   return false;
+}
+
+bool IsTLS13ExperimentHost(base::StringPiece host) {
+  return host == "inbox.google.com" || host == "mail.google.com" ||
+         host == "gmail.com";
 }
 
 bool IsLocalHostname(base::StringPiece host, bool* is_local6) {

@@ -21,35 +21,29 @@ SelectToSpeakUnitTest.prototype = {
   ]
 };
 
-TEST_F('SelectToSpeakUnitTest', 'Overlaps', function() {
-  var rect1 = {left: 0, top: 0, width: 100, height: 100};
-  var rect2 = {left: 80, top: 0, width: 100, height: 20};
-  var rect3 = {left: 0, top: 80, width: 20, height: 100};
+TEST_F('SelectToSpeakUnitTest', 'getDriveAppRoot', function() {
+  let root = {url: 'https://docs.google.com/presentation/p/cats_r_awesome'};
+  let div1 = {root: root};
+  let frame1 = {url: 'about:blank', parent: div1};
+  let div2 = {root: frame1};
+  let frame2 = {url: 'about:blank', parent: div2};
+  let focus = {root: frame2};
+  assertEquals(getDriveAppRoot(focus), root);
+  assertEquals(getDriveAppRoot(div2), root);
 
-  assertTrue(overlaps(rect1, rect1));
-  assertTrue(overlaps(rect2, rect2));
-  assertTrue(overlaps(rect3, rect3));
-  assertTrue(overlaps(rect1, rect2));
-  assertTrue(overlaps(rect1, rect3));
-  assertFalse(overlaps(rect2, rect3));
-});
+  // Sandbox URLs should still work.
+  root.url = 'https://docs.sandbox.google.com/spreadsheets/s/spreadsheet';
+  assertEquals(getDriveAppRoot(focus), root);
 
-TEST_F('SelectToSpeakUnitTest', 'RectFromPoints', function() {
-  var rect = {left: 10, top: 20, width: 50, height: 60};
+  // Drive app embedded in something else
+  let parent = {url: 'https://www.has_embedded_doc.com'};
+  let div3 = {root: parent};
+  root.parent = div3;
+  assertEquals(getDriveAppRoot(focus), root);
+  assertEquals(getDriveAppRoot(div2), root);
 
-  assertNotEquals(
-      JSON.stringify(rect),
-      JSON.stringify(rectFromPoints(0, 0, 10, 10)));
-  assertEquals(
-      JSON.stringify(rect),
-      JSON.stringify(rectFromPoints(10, 20, 60, 80)));
-  assertEquals(
-      JSON.stringify(rect),
-      JSON.stringify(rectFromPoints(60, 20, 10, 80)));
-  assertEquals(
-      JSON.stringify(rect),
-      JSON.stringify(rectFromPoints(10, 80, 60, 20)));
-  assertEquals(
-      JSON.stringify(rect),
-      JSON.stringify(rectFromPoints(60, 80, 10, 20)));
+  // Not in drive app
+  root.url = 'https://www.not_a_doc.com'
+  assertEquals(getDriveAppRoot(focus), null);
+  assertEquals(getDriveAppRoot(div2), null);
 });

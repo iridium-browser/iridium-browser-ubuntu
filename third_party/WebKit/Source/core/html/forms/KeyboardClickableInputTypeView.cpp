@@ -32,7 +32,7 @@
 #include "core/html/forms/KeyboardClickableInputTypeView.h"
 
 #include "core/events/KeyboardEvent.h"
-#include "core/html/HTMLInputElement.h"
+#include "core/html/forms/HTMLInputElement.h"
 
 namespace blink {
 
@@ -49,13 +49,13 @@ void KeyboardClickableInputTypeView::HandleKeydownEvent(KeyboardEvent* event) {
 }
 
 void KeyboardClickableInputTypeView::HandleKeypressEvent(KeyboardEvent* event) {
-  int char_code = event->charCode();
-  if (char_code == '\r') {
+  const String& key = event->key();
+  if (key == "Enter") {
     GetElement().DispatchSimulatedClick(event);
     event->SetDefaultHandled();
     return;
   }
-  if (char_code == ' ') {
+  if (key == " ") {
     // Prevent scrolling down the page.
     event->SetDefaultHandled();
   }
@@ -74,7 +74,7 @@ void KeyboardClickableInputTypeView::HandleKeyupEvent(KeyboardEvent* event) {
 void KeyboardClickableInputTypeView::AccessKeyAction(bool send_mouse_events) {
   InputTypeView::AccessKeyAction(send_mouse_events);
   GetElement().DispatchSimulatedClick(
-      0, send_mouse_events ? kSendMouseUpDownEvents : kSendNoEvents);
+      nullptr, send_mouse_events ? kSendMouseUpDownEvents : kSendNoEvents);
 }
 
 }  // namespace blink

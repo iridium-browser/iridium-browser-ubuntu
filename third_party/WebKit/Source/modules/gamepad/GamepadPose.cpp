@@ -33,7 +33,7 @@ DOMFloat32Array* QuatToFloat32Array(const device::GamepadQuaternion& quat) {
 
 }  // namespace
 
-GamepadPose::GamepadPose() {}
+GamepadPose::GamepadPose() = default;
 
 void GamepadPose::SetPose(const device::GamepadPose& state) {
   if (state.not_null) {
@@ -49,13 +49,14 @@ void GamepadPose::SetPose(const device::GamepadPose& state) {
   }
 }
 
-DEFINE_TRACE(GamepadPose) {
+void GamepadPose::Trace(blink::Visitor* visitor) {
   visitor->Trace(orientation_);
   visitor->Trace(position_);
   visitor->Trace(angular_velocity_);
   visitor->Trace(linear_velocity_);
   visitor->Trace(angular_acceleration_);
   visitor->Trace(linear_acceleration_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

@@ -22,10 +22,10 @@
 #define SVGURIReference_h
 
 #include <memory>
+#include "base/callback.h"
 #include "core/CoreExport.h"
 #include "core/svg/SVGAnimatedHref.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Functional.h"
 
 namespace blink {
 
@@ -35,7 +35,7 @@ class IdTargetObserver;
 
 class CORE_EXPORT SVGURIReference : public GarbageCollectedMixin {
  public:
-  virtual ~SVGURIReference() {}
+  virtual ~SVGURIReference() = default;
 
   bool IsKnownAttribute(const QualifiedName&);
 
@@ -71,14 +71,14 @@ class CORE_EXPORT SVGURIReference : public GarbageCollectedMixin {
   static Element* ObserveTarget(Member<IdTargetObserver>&,
                                 TreeScope&,
                                 const AtomicString& id,
-                                std::unique_ptr<WTF::Closure>);
+                                base::RepeatingClosure);
   // Unregister and destroy the observer.
   static void UnobserveTarget(Member<IdTargetObserver>&);
 
   // JS API
   SVGAnimatedHref* href() const { return href_.Get(); }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   explicit SVGURIReference(SVGElement*);

@@ -9,8 +9,6 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/lifetime/keep_alive_types.h"
-#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
@@ -22,10 +20,13 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/user_manager.h"
+#include "chrome/browser/ui/views_mode_controller.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/guest_view/browser/guest_view_manager.h"
+#include "components/keep_alive_registry/keep_alive_types.h"
+#include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -63,7 +64,7 @@ UserManagerProfileDialogDelegate::UserManagerProfileDialogDelegate(
     const GURL& url)
     : parent_(parent), web_view_(web_view), email_address_(email_address) {
   AddChildView(web_view_);
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 
   web_view_->GetWebContents()->SetDelegate(this);
   web_view_->LoadInitialURL(url);
@@ -136,6 +137,12 @@ void UserManagerProfileDialogDelegate::OnDialogDestroyed() {
 void UserManager::Show(
     const base::FilePath& profile_path_to_focus,
     profiles::UserManagerAction user_manager_action) {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManager::ShowCocoa(profile_path_to_focus, user_manager_action);
+  }
+#endif
+
   DCHECK(profile_path_to_focus != ProfileManager::GetGuestProfilePath());
 
   ProfileMetrics::LogProfileOpenMethod(ProfileMetrics::OPEN_USER_MANAGER);
@@ -173,17 +180,34 @@ void UserManager::Show(
 
 // static
 void UserManager::Hide() {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManager::HideCocoa();
+  }
+#endif
   if (instance_)
     instance_->GetWidget()->Close();
 }
 
 // static
 bool UserManager::IsShowing() {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManager::IsShowingCocoa();
+  }
+#endif
+
   return instance_ ? instance_->GetWidget()->IsActive() : false;
 }
 
 // static
 void UserManager::OnUserManagerShown() {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManager::OnUserManagerShownCocoa();
+  }
+#endif
+
   if (instance_) {
     instance_->LogTimeToOpen();
     if (user_manager_shown_callback_for_testing_) {
@@ -199,12 +223,23 @@ void UserManager::OnUserManagerShown() {
 // static
 void UserManager::AddOnUserManagerShownCallbackForTesting(
     const base::Closure& callback) {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManager::AddOnUserManagerShownCallbackForTestingCocoa(callback);
+  }
+#endif
   DCHECK(!user_manager_shown_callback_for_testing_);
   user_manager_shown_callback_for_testing_ = new base::Closure(callback);
 }
 
 // static
 base::FilePath UserManager::GetSigninProfilePath() {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManager::GetSigninProfilePath();
+  }
+#endif
+
   return instance_->GetSigninProfilePath();
 }
 
@@ -216,40 +251,84 @@ void UserManagerProfileDialog::ShowReauthDialog(
     content::BrowserContext* browser_context,
     const std::string& email,
     signin_metrics::Reason reason) {
+  ShowReauthDialogWithProfilePath(browser_context, email, base::FilePath(),
+                                  reason);
+}
+
+// static
+void UserManagerProfileDialog::ShowReauthDialogWithProfilePath(
+    content::BrowserContext* browser_context,
+    const std::string& email,
+    const base::FilePath& profile_path,
+    signin_metrics::Reason reason) {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManagerProfileDialog::ShowReauthDialogWithProfilePathCocoa(
+        browser_context, email, profile_path, reason);
+  }
+#endif
   // This method should only be called if the user manager is already showing.
   if (!UserManager::IsShowing())
     return;
   // Load the re-auth URL, prepopulated with the user's email address.
   // Add the index of the profile to the URL so that the inline login page
   // knows which profile to load and update the credentials.
-  GURL url = signin::GetReauthURLWithEmail(
+  GURL url = signin::GetReauthURLWithEmailForDialog(
       signin_metrics::AccessPoint::ACCESS_POINT_USER_MANAGER, reason, email);
+  instance_->SetSigninProfilePath(profile_path);
   instance_->ShowDialog(browser_context, email, url);
 }
 
 // static
 void UserManagerProfileDialog::ShowSigninDialog(
     content::BrowserContext* browser_context,
-    const base::FilePath& profile_path) {
+    const base::FilePath& profile_path,
+    signin_metrics::Reason reason) {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManagerProfileDialog::ShowSigninDialogCocoa(
+        browser_context, profile_path, reason);
+  }
+#endif
+
   if (!UserManager::IsShowing())
     return;
+  DCHECK(reason ==
+             signin_metrics::Reason::REASON_FORCED_SIGNIN_PRIMARY_ACCOUNT ||
+         reason == signin_metrics::Reason::REASON_SIGNIN_PRIMARY_ACCOUNT);
   instance_->SetSigninProfilePath(profile_path);
-  GURL url = signin::GetPromoURL(
-      signin_metrics::AccessPoint::ACCESS_POINT_USER_MANAGER,
-      signin_metrics::Reason::REASON_SIGNIN_PRIMARY_ACCOUNT, true, true);
+  GURL url = signin::GetPromoURLForDialog(
+      signin_metrics::AccessPoint::ACCESS_POINT_USER_MANAGER, reason, true);
   instance_->ShowDialog(browser_context, std::string(), url);
 }
 
 void UserManagerProfileDialog::ShowDialogAndDisplayErrorMessage(
     content::BrowserContext* browser_context) {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManagerProfileDialog::ShowDialogAndDisplayErrorMessageCocoa(
+        browser_context);
+  }
+#endif
+
   if (!UserManager::IsShowing())
     return;
+  // The error occurred before sign in happened, reset |signin_profile_path_|
+  // so that the error page will show the error message that is assoicated with
+  // the system profile.
+  instance_->SetSigninProfilePath(base::FilePath());
   instance_->ShowDialog(browser_context, std::string(),
                         GURL(chrome::kChromeUISigninErrorURL));
 }
 
 // static
 void UserManagerProfileDialog::DisplayErrorMessage() {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManagerProfileDialog::DisplayErrorMessage();
+  }
+#endif
+
   // This method should only be called if the user manager is already showing.
   DCHECK(instance_);
   instance_->DisplayErrorMessage();
@@ -257,6 +336,12 @@ void UserManagerProfileDialog::DisplayErrorMessage() {
 
 // static
 void UserManagerProfileDialog::HideDialog() {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return UserManagerProfileDialog::HideDialogCocoa();
+  }
+#endif
+
   if (instance_ && instance_->GetWidget()->IsVisible())
     instance_->HideDialog();
 }
@@ -319,7 +404,7 @@ void UserManagerView::Init(Profile* system_profile, const GURL& url) {
   web_view_ = new views::WebView(system_profile);
   web_view_->set_allow_accelerators(true);
   AddChildView(web_view_);
-  SetLayoutManager(new views::FillLayout);
+  SetLayoutManager(std::make_unique<views::FillLayout>());
   AddAccelerator(ui::Accelerator(ui::VKEY_W, ui::EF_CONTROL_DOWN));
   AddAccelerator(ui::Accelerator(ui::VKEY_F4, ui::EF_ALT_DOWN));
 

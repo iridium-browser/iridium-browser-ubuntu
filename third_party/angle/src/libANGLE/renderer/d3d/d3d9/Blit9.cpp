@@ -217,8 +217,8 @@ gl::Error Blit9::boxFilter(IDirect3DSurface9 *source, IDirect3DSurface9 *dest)
     device->SetTexture(0, texture);
     device->SetRenderTarget(0, dest);
 
-    setVertexShader(SHADER_VS_STANDARD);
-    setPixelShader(SHADER_PS_PASSTHROUGH);
+    ANGLE_TRY(setVertexShader(SHADER_VS_STANDARD));
+    ANGLE_TRY(setPixelShader(SHADER_PS_PASSTHROUGH));
 
     setCommonBlitState();
     device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
@@ -547,7 +547,6 @@ gl::Error Blit9::setFormatConvertShaders(GLenum destFormat,
 
     switch (destFormat)
     {
-      default: UNREACHABLE();
       case GL_RGBA:
       case GL_BGRA_EXT:
         multConst[X] = 1;
@@ -625,6 +624,8 @@ gl::Error Blit9::setFormatConvertShaders(GLenum destFormat,
         addConst[Z] = 0;
         addConst[W] = 0;
         break;
+
+      default: UNREACHABLE();
     }
 
     mRenderer->getDevice()->SetPixelShaderConstantF(0, psConst, 2);

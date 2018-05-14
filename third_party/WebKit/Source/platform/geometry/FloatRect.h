@@ -35,8 +35,6 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/Vector.h"
-#include "third_party/skia/include/core/SkRect.h"
 
 #if defined(OS_MACOSX)
 typedef struct CGRect CGRect;
@@ -45,6 +43,8 @@ typedef struct CGRect CGRect;
 #import <Foundation/Foundation.h>
 #endif
 #endif
+
+struct SkRect;
 
 namespace gfx {
 class RectF;
@@ -61,7 +61,7 @@ class PLATFORM_EXPORT FloatRect {
  public:
   enum ContainsMode { kInsideOrOnStroke, kInsideButNotOnStroke };
 
-  FloatRect() {}
+  FloatRect() = default;
   FloatRect(const FloatPoint& location, const FloatSize& size)
       : location_(location), size_(size) {}
   FloatRect(float x, float y, float width, float height)
@@ -118,24 +118,10 @@ class PLATFORM_EXPORT FloatRect {
   void Contract(const FloatSize& size) { size_ -= size; }
   void Contract(float dw, float dh) { size_.Expand(-dw, -dh); }
 
-  void ShiftXEdgeTo(float edge) {
-    float delta = edge - X();
-    SetX(edge);
-    SetWidth(std::max(0.0f, Width() - delta));
-  }
-  void ShiftMaxXEdgeTo(float edge) {
-    float delta = edge - MaxX();
-    SetWidth(std::max(0.0f, Width() + delta));
-  }
-  void ShiftYEdgeTo(float edge) {
-    float delta = edge - Y();
-    SetY(edge);
-    SetHeight(std::max(0.0f, Height() - delta));
-  }
-  void ShiftMaxYEdgeTo(float edge) {
-    float delta = edge - MaxY();
-    SetHeight(std::max(0.0f, Height() + delta));
-  }
+  void ShiftXEdgeTo(float);
+  void ShiftMaxXEdgeTo(float);
+  void ShiftYEdgeTo(float);
+  void ShiftMaxYEdgeTo(float);
 
   FloatPoint MinXMinYCorner() const { return location_; }  // typically topLeft
   FloatPoint MaxXMinYCorner() const {
@@ -192,13 +178,12 @@ class PLATFORM_EXPORT FloatRect {
   operator CGRect() const;
 #endif
 
-  operator SkRect() const {
-    return SkRect::MakeXYWH(X(), Y(), Width(), Height());
-  }
+  operator SkRect() const;
   operator gfx::RectF() const;
 
 #if DCHECK_IS_ON()
   bool MayNotHaveExactIntRectRepresentation() const;
+  bool EqualWithinEpsilon(const FloatRect& other, float epsilon) const;
 #endif
 
   String ToString() const;
@@ -252,12 +237,8 @@ inline bool operator!=(const FloatRect& a, const FloatRect& b) {
   return a.Location() != b.Location() || a.Size() != b.Size();
 }
 
-inline IntRect EnclosingIntRect(const FloatRect& rect) {
-  IntPoint location = FlooredIntPoint(rect.MinXMinYCorner());
-  IntPoint max_point = CeiledIntPoint(rect.MaxXMaxYCorner());
-
-  return IntRect(location, max_point - location);
-}
+// Returns a IntRect containing the given FloatRect.
+PLATFORM_EXPORT IntRect EnclosingIntRect(const FloatRect&);
 
 // Returns a valid IntRect contained within the given FloatRect.
 PLATFORM_EXPORT IntRect EnclosedIntRect(const FloatRect&);
@@ -268,6 +249,8 @@ PLATFORM_EXPORT IntRect RoundedIntRect(const FloatRect&);
 PLATFORM_EXPORT FloatRect MapRect(const FloatRect&,
                                   const FloatRect& src_rect,
                                   const FloatRect& dest_rect);
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, const FloatRect&);
 
 // Redeclared here to avoid ODR issues.
 // See platform/testing/GeometryPrinters.h.

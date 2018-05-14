@@ -8,10 +8,11 @@
 #include "base/test/ios/wait_util.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
+#include "components/payments/core/payment_shipping_option.h"
 #include "ios/chrome/browser/payments/payment_request_test_util.h"
+#import "ios/chrome/browser/payments/payment_request_unittest_base.h"
 #include "ios/chrome/browser/payments/test_payment_request.h"
 #import "ios/chrome/browser/ui/payments/payment_request_selector_view_controller.h"
-#import "ios/chrome/browser/ui/payments/payment_request_unittest_base.h"
 #include "testing/platform_test.h"
 #include "third_party/ocmock/OCMock/OCMock.h"
 #include "third_party/ocmock/gtest_support.h"
@@ -82,7 +83,8 @@ TEST_F(PaymentRequestShippingOptionSelectionCoordinatorTest,
   // Mock the coordinator delegate.
   id delegate = [OCMockObject
       mockForProtocol:@protocol(ShippingOptionSelectionCoordinatorDelegate)];
-  web::PaymentShippingOption* option = payment_request()->shipping_options()[1];
+  payments::PaymentShippingOption* option =
+      payment_request()->shipping_options()[1];
   [[delegate expect] shippingOptionSelectionCoordinator:coordinator
                                 didSelectShippingOption:option];
   [coordinator setDelegate:delegate];

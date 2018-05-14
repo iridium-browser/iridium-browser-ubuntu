@@ -31,15 +31,17 @@
 #define InspectorDOMAgent_h
 
 #include <memory>
+#include "base/callback.h"
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
-#include "core/events/EventListenerMap.h"
+#include "core/dom/events/EventListenerMap.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/protocol/DOM.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "platform/geometry/FloatQuad.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/AtomicString.h"
 #include "v8/include/v8-inspector.h"
@@ -54,6 +56,7 @@ class DocumentLoader;
 class Element;
 class ExceptionState;
 class FloatQuad;
+class HTMLFrameOwnerElement;
 class HTMLSlotElement;
 class V0InsertionPoint;
 class InspectedFrames;
@@ -66,11 +69,9 @@ class ShadowRoot;
 
 class CORE_EXPORT InspectorDOMAgent final
     : public InspectorBaseAgent<protocol::DOM::Metainfo> {
-  WTF_MAKE_NONCOPYABLE(InspectorDOMAgent);
-
  public:
   struct CORE_EXPORT DOMListener : public GarbageCollectedMixin {
-    virtual ~DOMListener() {}
+    virtual ~DOMListener() = default;
     virtual void DidAddDocument(Document*) = 0;
     virtual void DidRemoveDocument(Document*) = 0;
     virtual void DidRemoveDOMNode(Node*) = 0;
@@ -79,6 +80,7 @@ class CORE_EXPORT InspectorDOMAgent final
 
   static protocol::Response ToResponse(ExceptionState&);
   static bool GetPseudoElementType(PseudoId, String*);
+  static protocol::DOM::ShadowRootType GetShadowRootType(ShadowRoot*);
   static ShadowRoot* UserAgentShadowRoot(Node*);
   static Color ParseColor(protocol::DOM::RGBA*);
 
@@ -86,7 +88,7 @@ class CORE_EXPORT InspectorDOMAgent final
                     InspectedFrames*,
                     v8_inspector::V8InspectorSession*);
   ~InspectorDOMAgent() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   void Restore() override;
 
@@ -130,7 +132,10 @@ class CORE_EXPORT InspectorDOMAgent final
                                          const String& text,
                                          protocol::Maybe<String> name) override;
   protocol::Response removeAttribute(int node_id, const String& name) override;
-  protocol::Response getOuterHTML(int node_id, String* outer_html) override;
+  protocol::Response getOuterHTML(protocol::Maybe<int> node_id,
+                                  protocol::Maybe<int> backend_node_id,
+                                  protocol::Maybe<String> object_id,
+                                  String* outer_html) override;
   protocol::Response setOuterHTML(int node_id,
                                   const String& outer_html) override;
   protocol::Response performSearch(
@@ -192,6 +197,16 @@ class CORE_EXPORT InspectorDOMAgent final
       int* out_node_id) override;
   protocol::Response getRelayoutBoundary(int node_id,
                                          int* out_node_id) override;
+  protocol::Response describeNode(
+      protocol::Maybe<int> node_id,
+      protocol::Maybe<int> backend_node_id,
+      protocol::Maybe<String> object_id,
+      protocol::Maybe<int> depth,
+      protocol::Maybe<bool> pierce,
+      std::unique_ptr<protocol::DOM::Node>*) override;
+
+  protocol::Response getFrameOwner(const String& frame_id,
+                                   int* node_id) override;
 
   bool Enabled() const;
   void ReleaseDanglingNodes();
@@ -216,6 +231,7 @@ class CORE_EXPORT InspectorDOMAgent final
   void DidPerformElementShadowDistribution(Element*);
   void DidPerformSlotDistribution(HTMLSlotElement*);
   void FrameDocumentUpdated(LocalFrame*);
+  void FrameOwnerContentUpdated(LocalFrame*, HTMLFrameOwnerElement*);
   void PseudoElementCreated(PseudoElement*);
   void PseudoElementDestroyed(PseudoElement*);
 
@@ -230,9 +246,6 @@ class CORE_EXPORT InspectorDOMAgent final
   static String DocumentURLString(Document*);
   static String DocumentBaseURLString(Document*);
 
-  std::unique_ptr<v8_inspector::protocol::Runtime::API::RemoteObject>
-  ResolveNode(Node*, const String& object_group);
-
   InspectorHistory* History() { return history_.Get(); }
 
   // We represent embedded doms as a part of the same hierarchy. Hence we treat
@@ -244,11 +257,10 @@ class CORE_EXPORT InspectorDOMAgent final
   static unsigned InnerChildNodeCount(Node*);
   static Node* InnerParentNode(Node*);
   static bool IsWhitespace(Node*);
-  static v8::Local<v8::Value> NodeV8Value(v8::Local<v8::Context>, Node*);
   static void CollectNodes(Node* root,
                            int depth,
                            bool pierce,
-                           Function<bool(Node*)>*,
+                           base::RepeatingCallback<bool(Node*)>,
                            HeapVector<Member<Node>>* result);
 
   protocol::Response AssertNode(int node_id, Node*&);
@@ -279,7 +291,7 @@ class CORE_EXPORT InspectorDOMAgent final
                                 int depth = 1,
                                 bool traverse_frames = false);
 
-  void InvalidateFrameOwnerElement(LocalFrame*);
+  void InvalidateFrameOwnerElement(HTMLFrameOwnerElement*);
 
   std::unique_ptr<protocol::DOM::Node> BuildObjectForNode(
       Node*,
@@ -329,6 +341,7 @@ class CORE_EXPORT InspectorDOMAgent final
   Member<InspectorHistory> history_;
   Member<DOMEditor> dom_editor_;
   bool suppress_attribute_modified_event_;
+  DISALLOW_COPY_AND_ASSIGN(InspectorDOMAgent);
 };
 
 }  // namespace blink

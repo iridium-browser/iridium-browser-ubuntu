@@ -12,10 +12,13 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_initializer.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_validator.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
 #include "chrome/browser/chromeos/settings/install_attributes.h"
+#include "chromeos/attestation/attestation_constants.h"
+#include "chromeos/dbus/auth_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
@@ -143,7 +146,7 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
 
   // Handles the response to a request for a registration certificate.
   void HandleRegistrationCertificateResult(
-      bool success,
+      chromeos::attestation::AttestationStatus status,
       const std::string& pem_certificate_chain);
 
   // Starts registration if the store is initialized.
@@ -167,9 +170,7 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
 
   // Invoked after the firmware management partition in TPM is updated.
   void OnFirmwareManagementParametersDataSet(
-      chromeos::DBusMethodCallStatus call_status,
-      bool result,
-      const cryptohome::BaseReply& reply);
+      base::Optional<cryptohome::BaseReply> reply);
 
   // Calls InstallAttributes::LockDevice() for enterprise enrollment and
   // DeviceSettingsService::SetManagementSettings() for consumer
@@ -198,7 +199,7 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
   void HandleStoreRobotAuthTokenResult(bool result);
 
   // Handles result from device policy refresh via authpolicyd.
-  void HandleActiveDirectoryPolicyRefreshed(bool success);
+  void HandleActiveDirectoryPolicyRefreshed(authpolicy::ErrorType error);
 
   // Drops any ongoing actions.
   void Stop();

@@ -4,72 +4,159 @@
 
 #include "content/test/test_render_frame.h"
 
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "base/debug/stack_trace.h"
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "content/child/web_url_loader_impl.h"
 #include "content/common/frame_messages.h"
 #include "content/common/navigation_params.h"
-#include "content/public/common/associated_interface_provider.h"
+#include "content/common/navigation_params.mojom.h"
 #include "content/public/common/browser_side_navigation_policy.h"
-#include "content/public/common/resource_response.h"
 #include "content/public/test/mock_render_thread.h"
+#include "content/renderer/loader/web_url_loader_impl.h"
+#include "services/network/public/cpp/resource_response.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 
 namespace content {
 
 class MockFrameHost : public mojom::FrameHost {
  public:
-  MockFrameHost() : binding_(this) {}
+  MockFrameHost() {}
   ~MockFrameHost() override = default;
 
-  void CreateNewWindow(mojom::CreateNewWindowParamsPtr params,
-                       CreateNewWindowCallback callback) override {
-    mojom::CreateNewWindowReplyPtr reply = mojom::CreateNewWindowReply::New();
+  std::unique_ptr<FrameHostMsg_DidCommitProvisionalLoad_Params>
+  TakeLastCommitParams() {
+    return std::move(last_commit_params_);
+  }
+
+  service_manager::mojom::InterfaceProviderRequest
+  TakeLastInterfaceProviderRequest() {
+    return std::move(last_interface_provider_request_);
+  }
+
+  // Holds on to the request end of the InterfaceProvider interface whose client
+  // end is bound to the corresponding RenderFrame's |remote_interfaces_| to
+  // facilitate retrieving the most recent |interface_provider_request| in
+  // tests.
+  void PassLastInterfaceProviderRequest(
+      service_manager::mojom::InterfaceProviderRequest
+          interface_provider_request) {
+    last_interface_provider_request_ = std::move(interface_provider_request);
+  }
+
+ protected:
+  // mojom::FrameHost:
+  void CreateNewWindow(mojom::CreateNewWindowParamsPtr,
+                       CreateNewWindowCallback) override {
+    NOTREACHED() << "We should never dispatch to the service side signature.";
+  }
+
+  bool CreateNewWindow(mojom::CreateNewWindowParamsPtr params,
+                       mojom::CreateNewWindowStatus* status,
+                       mojom::CreateNewWindowReplyPtr* reply) override {
+    *status = mojom::CreateNewWindowStatus::kSuccess;
+    *reply = mojom::CreateNewWindowReply::New();
     MockRenderThread* mock_render_thread =
         static_cast<MockRenderThread*>(RenderThread::Get());
-    mock_render_thread->OnCreateWindow(*params, reply.get());
-    std::move(callback).Run(std::move(reply));
+    mock_render_thread->OnCreateWindow(*params, reply->get());
+    return true;
   }
 
-  void Bind(mojo::ScopedInterfaceEndpointHandle handle) {
-    binding_.Bind(mojom::FrameHostAssociatedRequest(std::move(handle)));
+  void IssueKeepAliveHandle(mojom::KeepAliveHandleRequest request) override {}
+
+  void DidCommitProvisionalLoad(
+      std::unique_ptr<FrameHostMsg_DidCommitProvisionalLoad_Params> params,
+      service_manager::mojom::InterfaceProviderRequest request) override {
+    last_commit_params_ = std::move(params);
+    last_interface_provider_request_ = std::move(request);
   }
+
+  void DidCommitSameDocumentNavigation(
+      std::unique_ptr<FrameHostMsg_DidCommitProvisionalLoad_Params> params)
+      override {
+    last_commit_params_ = std::move(params);
+  }
+
+  void BeginNavigation(const CommonNavigationParams& common_params,
+                       mojom::BeginNavigationParamsPtr begin_params) override {}
+
+  void SubresourceResponseStarted(const GURL& url,
+                                  const GURL& referrer,
+                                  const std::string& method,
+                                  ResourceType resource_type,
+                                  const std::string& ip,
+                                  uint32_t cert_status) override {}
+
+  void DidChangeName(const std::string& name,
+                     const std::string& unique_name) override {}
+
+  void EnforceInsecureRequestPolicy(
+      blink::WebInsecureRequestPolicy policy) override {}
+  void EnforceInsecureNavigationsSet(
+      const std::vector<uint32_t>& set) override {}
+
+  void DidSetFramePolicyHeaders(
+      blink::WebSandboxFlags sandbox_flags,
+      const blink::ParsedFeaturePolicy& parsed_header) override {}
+
+  void CancelInitialHistoryLoad() override {}
+
+  void UpdateEncoding(const std::string& encoding_name) override {}
+
+  void FrameSizeChanged(const gfx::Size& frame_size) override {}
+
+  void OnUpdatePictureInPictureSurfaceId(
+      const viz::SurfaceId& surface_id) override {}
 
  private:
-  mojo::AssociatedBinding<mojom::FrameHost> binding_;
+  std::unique_ptr<FrameHostMsg_DidCommitProvisionalLoad_Params>
+      last_commit_params_;
+  service_manager::mojom::InterfaceProviderRequest
+      last_interface_provider_request_;
 
   DISALLOW_COPY_AND_ASSIGN(MockFrameHost);
 };
 
 // static
 RenderFrameImpl* TestRenderFrame::CreateTestRenderFrame(
-    const RenderFrameImpl::CreateParams& params) {
-  return new TestRenderFrame(params);
+    RenderFrameImpl::CreateParams params) {
+  return new TestRenderFrame(std::move(params));
 }
 
-TestRenderFrame::TestRenderFrame(const RenderFrameImpl::CreateParams& params)
-    : RenderFrameImpl(params),
-      mock_frame_host_(base::MakeUnique<MockFrameHost>()) {
-  GetRemoteAssociatedInterfaces()->OverrideBinderForTesting(
-      mojom::FrameHost::Name_,
-      base::Bind(&MockFrameHost::Bind,
-                 base::Unretained(mock_frame_host_.get())));
+TestRenderFrame::TestRenderFrame(RenderFrameImpl::CreateParams params)
+    : RenderFrameImpl(std::move(params)),
+      mock_frame_host_(std::make_unique<MockFrameHost>()) {
+  MockRenderThread* mock_render_thread =
+      static_cast<MockRenderThread*>(RenderThread::Get());
+  mock_frame_host_->PassLastInterfaceProviderRequest(
+      mock_render_thread->TakeInitialInterfaceProviderRequestForFrame(
+          params.routing_id));
 }
 
-TestRenderFrame::~TestRenderFrame() {
+TestRenderFrame::~TestRenderFrame() {}
+
+void TestRenderFrame::SetURLOverrideForNextWebURLRequest(const GURL& url) {
+  next_request_url_override_ = url;
+}
+
+void TestRenderFrame::WillSendRequest(blink::WebURLRequest& request) {
+  if (next_request_url_override_.has_value())
+    request.SetURL(std::move(next_request_url_override_).value());
+  RenderFrameImpl::WillSendRequest(request);
 }
 
 void TestRenderFrame::Navigate(const CommonNavigationParams& common_params,
-                               const StartNavigationParams& start_params,
                                const RequestNavigationParams& request_params) {
-  // PlzNavigate
-  if (IsBrowserSideNavigationEnabled()) {
-    OnCommitNavigation(ResourceResponseHead(), GURL(),
-                       FrameMsg_CommitDataNetworkService_Params(),
-                       common_params, request_params);
-  } else {
-    OnNavigate(common_params, start_params, request_params);
-  }
+  CommitNavigation(network::ResourceResponseHead(), GURL(), common_params,
+                   request_params,
+                   network::mojom::URLLoaderClientEndpointsPtr(),
+                   std::make_unique<URLLoaderFactoryBundleInfo>(),
+                   mojom::ControllerServiceWorkerInfoPtr(),
+                   base::UnguessableToken::Create());
 }
 
 void TestRenderFrame::SwapOut(
@@ -99,22 +186,23 @@ void TestRenderFrame::CollapseSelection() {
   OnCollapseSelection();
 }
 
-void TestRenderFrame::SetAccessibilityMode(AccessibilityMode new_mode) {
+void TestRenderFrame::SetAccessibilityMode(ui::AXMode new_mode) {
   OnSetAccessibilityMode(new_mode);
 }
 
 void TestRenderFrame::SetCompositionFromExistingText(
     int start,
     int end,
-    const std::vector<blink::WebCompositionUnderline>& underlines) {
-  OnSetCompositionFromExistingText(start, end, underlines);
+    const std::vector<blink::WebImeTextSpan>& ime_text_spans) {
+  OnSetCompositionFromExistingText(start, end, ime_text_spans);
 }
 
 blink::WebNavigationPolicy TestRenderFrame::DecidePolicyForNavigation(
     const blink::WebFrameClient::NavigationPolicyInfo& info) {
   if (IsBrowserSideNavigationEnabled() &&
       info.url_request.CheckForBrowserSideNavigation() &&
-      GetWebFrame()->Parent() && info.form.IsNull()) {
+      ((GetWebFrame()->Parent() && info.form.IsNull()) ||
+       next_request_url_override_.has_value())) {
     // RenderViewTest::LoadHTML already disables PlzNavigate for the main frame
     // requests. However if the loaded html has a subframe, the WebURLRequest
     // will be created inside Blink and it won't have this flag set.
@@ -123,19 +211,40 @@ blink::WebNavigationPolicy TestRenderFrame::DecidePolicyForNavigation(
   return RenderFrameImpl::DecidePolicyForNavigation(info);
 }
 
-std::unique_ptr<blink::WebURLLoader> TestRenderFrame::CreateURLLoader(
-    const blink::WebURLRequest& request,
-    base::SingleThreadTaskRunner* task_runner) {
-  return base::MakeUnique<WebURLLoaderImpl>(
-      nullptr, base::ThreadTaskRunnerHandle::Get(), nullptr);
+std::unique_ptr<FrameHostMsg_DidCommitProvisionalLoad_Params>
+TestRenderFrame::TakeLastCommitParams() {
+  return mock_frame_host_->TakeLastCommitParams();
 }
 
-mojom::FrameHostAssociatedPtr TestRenderFrame::GetFrameHost() {
-  mojom::FrameHostAssociatedPtr ptr = RenderFrameImpl::GetFrameHost();
+service_manager::mojom::InterfaceProviderRequest
+TestRenderFrame::TakeLastInterfaceProviderRequest() {
+  return mock_frame_host_->TakeLastInterfaceProviderRequest();
+}
 
-  // Needed to ensure no deadlocks when waiting for sync IPC.
-  ptr.FlushForTesting();
-  return ptr;
+mojom::FrameHost* TestRenderFrame::GetFrameHost() {
+  // Need to mock this interface directly without going through a binding,
+  // otherwise calling its sync methods could lead to a deadlock.
+  //
+  // Imagine the following sequence of events take place:
+  //
+  //   1.) GetFrameHost() called for the first time
+  //   1.1.) GetRemoteAssociatedInterfaces()->GetInterface(&frame_host_ptr_)
+  //   1.1.1) ... plumbing ...
+  //   1.1.2) Task posted to bind the request end to the Mock implementation
+  //   1.2) The interface pointer end is returned to the caller
+  //   2.) GetFrameHost()->CreateNewWindow(...) sync method invoked
+  //   2.1.) Mojo sync request sent
+  //   2.2.) Waiting for sync response while dispatching incoming sync requests
+  //
+  // Normally the sync Mojo request would be processed in 2.2. However, the
+  // implementation is not yet bound at that point, and will never be, because
+  // only sync IPCs are dispatched by 2.2, not posted tasks. So the sync request
+  // is never dispatched, the response never arrives.
+  //
+  // Because the first invocation to GetFrameHost() may come while we are inside
+  // a message loop already, pumping messags before 1.2 would constitute a
+  // nested message loop and is therefore undesired.
+  return mock_frame_host_.get();
 }
 
 }  // namespace content

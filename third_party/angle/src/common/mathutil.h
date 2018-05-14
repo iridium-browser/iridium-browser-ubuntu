@@ -60,37 +60,52 @@ inline unsigned int ceilPow2(unsigned int x)
     return x;
 }
 
-inline int clampToInt(unsigned int x)
-{
-    return static_cast<int>(std::min(x, static_cast<unsigned int>(std::numeric_limits<int>::max())));
-}
-
 template <typename DestT, typename SrcT>
 inline DestT clampCast(SrcT value)
 {
-    static const DestT destLo = std::numeric_limits<DestT>::min();
-    static const DestT destHi = std::numeric_limits<DestT>::max();
-    static const SrcT srcLo = static_cast<SrcT>(destLo);
-    static const SrcT srcHi = static_cast<SrcT>(destHi);
+    // For floating-point types with denormalization, min returns the minimum positive normalized
+    // value. To find the value that has no values less than it, use numeric_limits::lowest.
+    constexpr const long double destLo =
+        static_cast<long double>(std::numeric_limits<DestT>::lowest());
+    constexpr const long double destHi =
+        static_cast<long double>(std::numeric_limits<DestT>::max());
+    constexpr const long double srcLo =
+        static_cast<long double>(std::numeric_limits<SrcT>::lowest());
+    constexpr long double srcHi = static_cast<long double>(std::numeric_limits<SrcT>::max());
 
-    // When value is outside of or equal to the limits for DestT we use the DestT limit directly.
-    // This avoids undefined behaviors due to loss of precision when converting from floats to
-    // integers:
-    //    destHi for ints is 2147483647 but the closest float number is around 2147483648, so when
-    //  doing a conversion from float to int we run into an UB because the float is outside of the
-    //  range representable by the int.
-    if (value <= srcLo)
+    if (destHi < srcHi)
     {
-        return destLo;
+        DestT destMax = std::numeric_limits<DestT>::max();
+        if (value >= static_cast<SrcT>(destMax))
+        {
+            return destMax;
+        }
     }
-    else if (value >= srcHi)
+
+    if (destLo > srcLo)
     {
-        return destHi;
+        DestT destLow = std::numeric_limits<DestT>::lowest();
+        if (value <= static_cast<SrcT>(destLow))
+        {
+            return destLow;
+        }
     }
-    else
-    {
-        return static_cast<DestT>(value);
-    }
+
+    return static_cast<DestT>(value);
+}
+
+// Specialize clampCast for bool->int conversion to avoid MSVS 2015 performance warning when the max
+// value is casted to the source type.
+template <>
+inline unsigned int clampCast(bool value)
+{
+    return static_cast<unsigned int>(value);
+}
+
+template <>
+inline int clampCast(bool value)
+{
+    return static_cast<int>(value);
 }
 
 template<typename T, typename MIN, typename MAX>
@@ -613,6 +628,12 @@ class Range
     T low() const { return mLow; }
     T high() const { return mHigh; }
 
+    void invalidate()
+    {
+        mLow  = std::numeric_limits<T>::max();
+        mHigh = std::numeric_limits<T>::min();
+    }
+
   private:
     T mLow;
     T mHigh;
@@ -873,12 +894,12 @@ inline int BitCount(uint32_t bits)
 {
     return static_cast<int>(__popcnt(bits));
 }
-#if defined(ANGLE_X64_CPU)
+#if defined(ANGLE_IS_64_BIT_CPU)
 inline int BitCount(uint64_t bits)
 {
     return static_cast<int>(__popcnt64(bits));
 }
-#endif  // defined(ANGLE_X64_CPU)
+#endif  // defined(ANGLE_IS_64_BIT_CPU)
 #endif  // defined(ANGLE_PLATFORM_WINDOWS)
 
 #if defined(ANGLE_PLATFORM_POSIX)
@@ -887,12 +908,12 @@ inline int BitCount(uint32_t bits)
     return __builtin_popcount(bits);
 }
 
-#if defined(ANGLE_X64_CPU)
+#if defined(ANGLE_IS_64_BIT_CPU)
 inline int BitCount(uint64_t bits)
 {
     return __builtin_popcountll(bits);
 }
-#endif  // defined(ANGLE_X64_CPU)
+#endif  // defined(ANGLE_IS_64_BIT_CPU)
 #endif  // defined(ANGLE_PLATFORM_POSIX)
 
 #if defined(ANGLE_PLATFORM_WINDOWS)
@@ -907,7 +928,7 @@ inline unsigned long ScanForward(uint32_t bits)
     return firstBitIndex;
 }
 
-#if defined(ANGLE_X64_CPU)
+#if defined(ANGLE_IS_64_BIT_CPU)
 inline unsigned long ScanForward(uint64_t bits)
 {
     ASSERT(bits != 0u);
@@ -916,7 +937,7 @@ inline unsigned long ScanForward(uint64_t bits)
     ASSERT(ret != 0u);
     return firstBitIndex;
 }
-#endif  // defined(ANGLE_X64_CPU)
+#endif  // defined(ANGLE_IS_64_BIT_CPU)
 #endif  // defined(ANGLE_PLATFORM_WINDOWS)
 
 #if defined(ANGLE_PLATFORM_POSIX)
@@ -926,13 +947,13 @@ inline unsigned long ScanForward(uint32_t bits)
     return static_cast<unsigned long>(__builtin_ctz(bits));
 }
 
-#if defined(ANGLE_X64_CPU)
+#if defined(ANGLE_IS_64_BIT_CPU)
 inline unsigned long ScanForward(uint64_t bits)
 {
     ASSERT(bits != 0u);
     return static_cast<unsigned long>(__builtin_ctzll(bits));
 }
-#endif  // defined(ANGLE_X64_CPU)
+#endif  // defined(ANGLE_IS_64_BIT_CPU)
 #endif  // defined(ANGLE_PLATFORM_POSIX)
 
 // Return the index of the most significant bit set. Indexing is such that bit 0 is the least

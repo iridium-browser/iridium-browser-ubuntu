@@ -11,10 +11,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "webrtc/rtc_tools/frame_analyzer/reference_less_video_analysis_lib.h"
-#include "webrtc/rtc_tools/simple_command_line_parser.h"
+#include "rtc_tools/frame_analyzer/reference_less_video_analysis_lib.h"
+#include "rtc_tools/simple_command_line_parser.h"
 
-int main(int argc, char** argv) {
+int main(int argc, char* argv[]) {
   // This captures the freezing metrics for reference less video analysis.
   std::string program_name = argv[0];
   std::string usage = "Outputs the freezing score by comparing current frame "

@@ -35,18 +35,13 @@ class Layer;
 
 namespace cc_blink {
 
-class CC_BLINK_EXPORT WebLayerImpl : public NON_EXPORTED_BASE(blink::WebLayer) {
+class CC_BLINK_EXPORT WebLayerImpl : public blink::WebLayer {
  public:
   WebLayerImpl();
   explicit WebLayerImpl(scoped_refptr<cc::Layer>);
   ~WebLayerImpl() override;
 
   cc::Layer* layer() const;
-
-  // If set to true, content opaqueness cannot be changed using setOpaque.
-  // However, it can still be modified using SetContentsOpaque on the
-  // cc::Layer.
-  void SetContentsOpaqueIsFixed(bool fixed);
 
   // WebLayer implementation.
   int Id() const override;
@@ -65,12 +60,13 @@ class CC_BLINK_EXPORT WebLayerImpl : public NON_EXPORTED_BASE(blink::WebLayer) {
   void SetMaskLayer(blink::WebLayer* mask) override;
   void SetOpacity(float opacity) override;
   float Opacity() const override;
+  void SetContentsOpaqueIsFixed(bool fixed) override;
+
   void SetBlendMode(blink::WebBlendMode blend_mode) override;
   blink::WebBlendMode BlendMode() const override;
   void SetIsRootForIsolatedGroup(bool root) override;
   bool IsRootForIsolatedGroup() override;
-  void SetShouldHitTest(bool should_hit_test) override;
-  bool ShouldHitTest() override;
+  void SetHitTestableWithoutDrawsContent(bool should_hit_test) override;
   void SetOpaque(bool opaque) override;
   bool Opaque() const override;
   void SetPosition(const blink::WebFloatPoint& position) override;
@@ -92,6 +88,7 @@ class CC_BLINK_EXPORT WebLayerImpl : public NON_EXPORTED_BASE(blink::WebLayer) {
   void SetBackgroundFilters(const cc::FilterOperations& filters) override;
   bool HasTickingAnimationForTesting() override;
   void SetScrollable(const blink::WebSize&) override;
+  blink::WebSize ScrollContainerBoundsForTesting() const override;
   void SetScrollPosition(blink::WebFloatPoint position) override;
   blink::WebFloatPoint ScrollPosition() const override;
   bool Scrollable() const override;
@@ -110,8 +107,12 @@ class CC_BLINK_EXPORT WebLayerImpl : public NON_EXPORTED_BASE(blink::WebLayer) {
   void SetTouchEventHandlerRegion(
       const blink::WebVector<blink::WebTouchInfo>& touch_info) override;
   blink::WebVector<blink::WebRect> TouchEventHandlerRegion() const override;
+  blink::WebVector<blink::WebRect>
+      TouchEventHandlerRegionForTouchActionForTesting(
+          cc::TouchAction) const override;
   void SetIsContainerForFixedPositionLayers(bool is_container) override;
   bool IsContainerForFixedPositionLayers() const override;
+  void SetIsResizedByBrowserControls(bool) override;
   void SetPositionConstraint(
       const blink::WebLayerPositionConstraint& constraint) override;
   blink::WebLayerPositionConstraint PositionConstraint() const override;
@@ -120,17 +121,16 @@ class CC_BLINK_EXPORT WebLayerImpl : public NON_EXPORTED_BASE(blink::WebLayer) {
   blink::WebLayerStickyPositionConstraint StickyPositionConstraint()
       const override;
   void SetScrollClient(blink::WebLayerScrollClient* client) override;
+  void SetScrollOffsetFromImplSideForTesting(const gfx::ScrollOffset&) override;
   void SetLayerClient(cc::LayerClient* client) override;
   const cc::Layer* CcLayer() const override;
   cc::Layer* CcLayer() override;
   void SetElementId(const cc::ElementId&) override;
   cc::ElementId GetElementId() const override;
-  void SetCompositorMutableProperties(uint32_t properties) override;
-  uint32_t CompositorMutableProperties() const override;
   void SetHasWillChangeTransformHint(bool has_will_change) override;
   void ShowScrollbars() override;
-  void SetScrollBoundaryBehavior(
-      const blink::WebScrollBoundaryBehavior&) override;
+  void SetOverscrollBehavior(const blink::WebOverscrollBehavior&) override;
+  void SetSnapContainerData(base::Optional<cc::SnapContainerData>) override;
 
   void SetScrollParent(blink::WebLayer* parent) override;
   void SetClipParent(blink::WebLayer* parent) override;

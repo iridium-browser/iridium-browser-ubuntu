@@ -27,15 +27,16 @@ WebInputEvent::Type PointerEventTypeForTouchPointState(
       return WebInputEvent::Type::kUndefined;
   }
 }
+
 }  // namespace
 
 WebPointerEvent::WebPointerEvent(const WebTouchEvent& touch_event,
                                  const WebTouchPoint& touch_point)
     : WebInputEvent(sizeof(WebPointerEvent)),
       WebPointerProperties(touch_point),
-      // TODO(crbug.com/731725): This mapping needs a times by 2.
-      width(touch_point.radius_x),
-      height(touch_point.radius_y) {
+      hovering(touch_event.hovering),
+      width(touch_point.radius_x * 2.f),
+      height(touch_point.radius_y * 2.f) {
   // WebInutEvent attributes
   SetFrameScale(touch_event.FrameScale());
   SetFrameTranslate(touch_event.FrameTranslate());
@@ -46,8 +47,35 @@ WebPointerEvent::WebPointerEvent(const WebTouchEvent& touch_event,
   dispatch_type = touch_event.dispatch_type;
   moved_beyond_slop_region = touch_event.moved_beyond_slop_region;
   touch_start_or_first_touch_move = touch_event.touch_start_or_first_touch_move;
+  unique_touch_event_id = touch_event.unique_touch_event_id;
   // WebTouchPoint attributes
   rotation_angle = touch_point.rotation_angle;
+}
+
+WebPointerEvent::WebPointerEvent(WebInputEvent::Type type,
+                                 const WebMouseEvent& mouse_event)
+    : WebInputEvent(sizeof(WebPointerEvent)),
+      WebPointerProperties(mouse_event),
+      hovering(true),
+      width(1),
+      height(1) {
+  DCHECK_GE(type, WebInputEvent::kPointerTypeFirst);
+  DCHECK_LE(type, WebInputEvent::kPointerTypeLast);
+  SetFrameScale(mouse_event.FrameScale());
+  SetFrameTranslate(mouse_event.FrameTranslate());
+  SetTimeStampSeconds(mouse_event.TimeStampSeconds());
+  SetType(type);
+  SetModifiers(mouse_event.GetModifiers());
+}
+
+WebPointerEvent WebPointerEvent::CreatePointerCausesUaActionEvent(
+    WebPointerProperties::PointerType type,
+    double time_stamp_seconds) {
+  WebPointerEvent event;
+  event.pointer_type = type;
+  event.SetTimeStampSeconds(time_stamp_seconds);
+  event.SetType(WebInputEvent::Type::kPointerCausedUaAction);
+  return event;
 }
 
 WebPointerEvent WebPointerEvent::WebPointerEventInRootFrame() const {

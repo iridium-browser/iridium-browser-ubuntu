@@ -25,8 +25,8 @@
 
 #include "core/layout/LayoutTableCol.h"
 
-#include "core/HTMLNames.h"
 #include "core/html/HTMLTableColElement.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutTable.h"
 #include "core/layout/LayoutTableCell.h"
 
@@ -51,7 +51,7 @@ void LayoutTableCol::StyleDidChange(StyleDifference diff,
   if (!old_style)
     return;
 
-  LayoutTable* table = this->Table();
+  LayoutTable* table = Table();
   if (!table)
     return;
 
@@ -108,19 +108,25 @@ bool LayoutTableCol::CanHaveChildren() const {
   return IsTableColumnGroup();
 }
 
-LayoutRect LayoutTableCol::LocalVisualRect() const {
+LayoutRect LayoutTableCol::LocalVisualRectIgnoringVisibility() const {
+  // On SPv175, raster invalidation is based on paint result. LayoutTableCol
+  // paints nothing (its background is painted by LayoutTableSection) so should
+  // not issue any raster invalidation.
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
+    return LayoutRect();
+
   // Entire table gets invalidated, instead of invalidating
   // every cell in the column. This is simpler, but suboptimal.
 
-  LayoutTable* table = this->Table();
+  LayoutTable* table = Table();
   if (!table)
     return LayoutRect();
 
   // The correctness of this method depends on the fact that LayoutTableCol's
   // location is always zero.
-  DCHECK(this->Location() == LayoutPoint());
+  DCHECK(Location() == LayoutPoint());
 
-  return table->LocalVisualRect();
+  return table->LocalVisualRectIgnoringVisibility();
 }
 
 void LayoutTableCol::ClearPreferredLogicalWidthsDirtyBits() {
@@ -150,7 +156,7 @@ LayoutTableCol* LayoutTableCol::EnclosingColumnGroup() const {
 LayoutTableCol* LayoutTableCol::NextColumn() const {
   // If |this| is a column-group, the next column is the colgroup's first child
   // column.
-  if (LayoutObject* first_child = this->FirstChild())
+  if (LayoutObject* first_child = FirstChild())
     return ToLayoutTableCol(first_child);
 
   // Otherwise it's the next column along.

@@ -16,10 +16,10 @@
  *
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_FILTERBANK_TABLES_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_FILTERBANK_TABLES_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_FILTERBANK_TABLES_H_
+#define MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_FILTERBANK_TABLES_H_
 
-#include "structs.h"
+#include "modules/audio_coding/codecs/isac/main/source/structs.h"
 
 /********************* Coefficient Tables ************************/
 /* The number of composite all-pass filter factors */
@@ -43,4 +43,4 @@ extern const float WebRtcIsac_kTransform1Float[8];
 /* The matrix for transforming the backward composite state to lower channel state */
 extern const float WebRtcIsac_kTransform2Float[8];
 
-#endif /* WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_FILTERBANK_TABLES_H_ */
+#endif /* MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_FILTERBANK_TABLES_H_ */

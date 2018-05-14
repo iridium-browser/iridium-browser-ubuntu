@@ -8,12 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/proxyserver.h"
+#include "rtc_base/proxyserver.h"
 
 #include <algorithm>
 
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/socketfactory.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/socketfactory.h"
 
 namespace rtc {
 
@@ -43,7 +43,8 @@ SocketAddress ProxyServer::GetServerAddress() {
 }
 
 void ProxyServer::OnAcceptEvent(AsyncSocket* socket) {
-  RTC_DCHECK(socket != nullptr && socket == server_socket_.get());
+  RTC_DCHECK(socket);
+  RTC_DCHECK_EQ(socket, server_socket_.get());
   AsyncSocket* int_socket = socket->Accept(nullptr);
   AsyncProxyServerSocket* wrapped_socket = WrapSocket(int_socket);
   AsyncSocket* ext_socket = ext_factory_->CreateAsyncSocket(ext_ip_.family(),
@@ -52,7 +53,8 @@ void ProxyServer::OnAcceptEvent(AsyncSocket* socket) {
     ext_socket->Bind(ext_ip_);
     bindings_.push_back(new ProxyBinding(wrapped_socket, ext_socket));
   } else {
-    LOG(LS_ERROR) << "Unable to create external socket on proxy accept event";
+    RTC_LOG(LS_ERROR)
+        << "Unable to create external socket on proxy accept event";
   }
 }
 
@@ -84,7 +86,8 @@ ProxyBinding::~ProxyBinding() = default;
 
 void ProxyBinding::OnConnectRequest(AsyncProxyServerSocket* socket,
                                    const SocketAddress& addr) {
-  RTC_DCHECK(!connected_ && ext_socket_.get() != nullptr);
+  RTC_DCHECK(!connected_);
+  RTC_DCHECK(ext_socket_);
   ext_socket_->Connect(addr);
   // TODO: handle errors here
 }

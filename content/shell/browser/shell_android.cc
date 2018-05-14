@@ -68,6 +68,12 @@ void Shell::PlatformResizeSubViews() {
   // Not needed; subviews are bound.
 }
 
+void Shell::SizeTo(const gfx::Size& content_size) {
+  JNIEnv* env = AttachCurrentThread();
+  Java_Shell_sizeTo(env, java_object_, content_size.width(),
+                    content_size.height());
+}
+
 void Shell::PlatformSetTitle(const base::string16& title) {
   NOTIMPLEMENTED() << ": " << title;
 }
@@ -80,6 +86,11 @@ void Shell::LoadProgressChanged(WebContents* source, double progress) {
 ScopedJavaLocalRef<jobject> Shell::GetContentVideoViewEmbedder() {
   JNIEnv* env = base::android::AttachCurrentThread();
   return Java_Shell_getContentVideoViewEmbedder(env, java_object_);
+}
+
+void Shell::SetOverlayMode(bool use_overlay_mode) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  return Java_Shell_setOverlayMode(env, java_object_, use_overlay_mode);
 }
 
 void Shell::PlatformToggleFullscreenModeForTab(WebContents* web_contents,
@@ -100,14 +111,9 @@ void Shell::Close() {
 }
 
 // static
-bool Shell::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
-
-// static
-void CloseShell(JNIEnv* env,
-                const JavaParamRef<jclass>& clazz,
-                jlong shellPtr) {
+void JNI_Shell_CloseShell(JNIEnv* env,
+                          const JavaParamRef<jclass>& clazz,
+                          jlong shellPtr) {
   Shell* shell = reinterpret_cast<Shell*>(shellPtr);
   shell->Close();
 }

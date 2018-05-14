@@ -30,8 +30,12 @@
 
 #include "public/platform/WebHTTPBody.h"
 
+#include "mojo/public/cpp/system/data_pipe.h"
 #include "platform/FileMetadata.h"
+#include "platform/SharedBuffer.h"
 #include "platform/network/EncodedFormData.h"
+#include "platform/network/FormDataEncoder.h"
+#include "services/network/public/mojom/data_pipe_getter.mojom-blink.h"
 
 namespace blink {
 
@@ -83,16 +87,13 @@ bool WebHTTPBody::ElementAt(size_t index, Element& result) const {
       result.type = Element::kTypeBlob;
       result.blob_uuid = element.blob_uuid_;
       break;
-    case FormDataElement::kEncodedFileSystemURL:
-      result.type = Element::kTypeFileSystemURL;
-      result.file_system_url = element.file_system_url_;
-      result.file_start = element.file_start_;
-      result.file_length = element.file_length_;
-      result.modification_time = element.expected_file_modification_time_;
+    case FormDataElement::kDataPipe:
+      result.type = Element::kTypeDataPipe;
+      network::mojom::blink::DataPipeGetterPtr data_pipe_getter;
+      (*element.data_pipe_getter_->GetPtr())
+          ->Clone(mojo::MakeRequest(&data_pipe_getter));
+      result.data_pipe_getter = data_pipe_getter.PassInterface().PassHandle();
       break;
-    default:
-      NOTREACHED();
-      return false;
   }
 
   return true;
@@ -102,7 +103,11 @@ void WebHTTPBody::AppendData(const WebData& data) {
   EnsureMutable();
   // FIXME: FormDataElement::m_data should be a SharedBuffer<char>.  Then we
   // could avoid this buffer copy.
-  private_->AppendData(data.Data(), data.size());
+  data.ForEachSegment(
+      [this](const char* segment, size_t segment_size, size_t segment_offset) {
+        private_->AppendData(segment, segment_size);
+        return true;
+      });
 }
 
 void WebHTTPBody::AppendFile(const WebString& file_path) {
@@ -119,19 +124,22 @@ void WebHTTPBody::AppendFileRange(const WebString& file_path,
                             modification_time);
 }
 
-void WebHTTPBody::AppendFileSystemURLRange(const WebURL& url,
-                                           long long start,
-                                           long long length,
-                                           double modification_time) {
-  // Currently we only support filesystem URL.
-  DCHECK(KURL(url).ProtocolIs("filesystem"));
-  EnsureMutable();
-  private_->AppendFileSystemURLRange(url, start, length, modification_time);
-}
-
 void WebHTTPBody::AppendBlob(const WebString& uuid) {
   EnsureMutable();
   private_->AppendBlob(uuid, nullptr);
+}
+
+void WebHTTPBody::AppendDataPipe(mojo::ScopedMessagePipeHandle message_pipe) {
+  EnsureMutable();
+
+  // Convert the raw message pipe to network::mojom::blink::DataPipeGetter.
+  network::mojom::blink::DataPipeGetterPtr data_pipe_getter;
+  data_pipe_getter.Bind(network::mojom::blink::DataPipeGetterPtrInfo(
+      std::move(message_pipe), 0u));
+
+  auto wrapped =
+      base::MakeRefCounted<WrappedDataPipeGetter>(std::move(data_pipe_getter));
+  private_->AppendDataPipe(std::move(wrapped));
 }
 
 long long WebHTTPBody::Identifier() const {
@@ -144,6 +152,11 @@ void WebHTTPBody::SetIdentifier(long long identifier) {
   return private_->SetIdentifier(identifier);
 }
 
+void WebHTTPBody::SetUniqueBoundary() {
+  EnsureMutable();
+  private_->SetBoundary(FormDataEncoder::GenerateUniqueBoundaryString());
+}
+
 bool WebHTTPBody::ContainsPasswordData() const {
   return private_->ContainsPasswordData();
 }
@@ -152,15 +165,15 @@ void WebHTTPBody::SetContainsPasswordData(bool contains_password_data) {
   private_->SetContainsPasswordData(contains_password_data);
 }
 
-WebHTTPBody::WebHTTPBody(RefPtr<EncodedFormData> data)
+WebHTTPBody::WebHTTPBody(scoped_refptr<EncodedFormData> data)
     : private_(std::move(data)) {}
 
-WebHTTPBody& WebHTTPBody::operator=(RefPtr<EncodedFormData> data) {
+WebHTTPBody& WebHTTPBody::operator=(scoped_refptr<EncodedFormData> data) {
   private_ = std::move(data);
   return *this;
 }
 
-WebHTTPBody::operator RefPtr<EncodedFormData>() const {
+WebHTTPBody::operator scoped_refptr<EncodedFormData>() const {
   return private_.Get();
 }
 

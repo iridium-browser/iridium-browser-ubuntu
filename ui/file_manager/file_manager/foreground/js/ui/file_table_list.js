@@ -23,7 +23,7 @@ function FileTableList() {
  */
 FileTableList.decorate = function(self) {
   self.__proto__ = FileTableList.prototype;
-}
+};
 
 FileTableList.prototype.__proto__ = cr.ui.table.TableList.prototype;
 
@@ -271,10 +271,12 @@ filelist.handleTap = function(e, index, eventType) {
   }
   var isTap = eventType == FileTapHandler.TapEvent.TAP ||
       eventType == FileTapHandler.TapEvent.LONG_TAP;
-  if (eventType == FileTapHandler.TapEvent.TAP &&
-      e.target.classList.contains('detail-checkmark')) {
-    // Single tap on the checkbox in the list view mode should toggle select,
-    // just like a mouse click on it.
+  // Revert to click handling for single tap on checkbox or tap during rename.
+  // Single tap on the checkbox in the list view mode should toggle select.
+  // Single tap on input for rename should focus on input.
+  var isCheckbox = e.target.classList.contains('detail-checkmark');
+  var isRename = e.target.localName == 'input';
+  if (eventType == FileTapHandler.TapEvent.TAP && (isCheckbox || isRename)) {
     return false;
   }
   if (sm.multiple && sm.getCheckSelectMode() && isTap && !e.shiftKey) {
@@ -356,14 +358,15 @@ filelist.handlePointerDownUp = function(e, index) {
         // 1) When checkmark area is clicked, toggle item selection and enable
         //    the check-select mode.
         if (isClickOnCheckmark) {
-          // If a selected item's checkmark is clicked when the selection mode
-          // is not check-select, we should avoid toggling(unselecting) the
-          // item. It is done here by toggling the selection twice.
-          if (!sm.getCheckSelectMode() && sm.getIndexSelected(index))
-            sm.setIndexSelected(index, !sm.getIndexSelected(index));
-          // Always enables check-select mode on clicks on checkmark.
-          sm.setCheckSelectMode(true);
+          // If Files app enters check-select mode by clicking an item's icon,
+          // existing selection should be cleared.
+          if (!sm.getCheckSelectMode())
+            sm.unselectAll();
         }
+        // Always enables check-select mode when the selection is updated by
+        // Ctrl+Click or Click on an item's icon.
+        sm.setCheckSelectMode(true);
+
         // Toggle the current one and make it anchor index.
         sm.setIndexSelected(index, !sm.getIndexSelected(index));
         sm.leadIndex = index;

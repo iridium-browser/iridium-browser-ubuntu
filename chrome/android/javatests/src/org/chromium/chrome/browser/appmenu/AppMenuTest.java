@@ -20,7 +20,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
@@ -35,15 +34,12 @@ import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 
-import java.util.concurrent.Callable;
-
 /**
  * Tests AppMenu popup
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class AppMenuTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -57,7 +53,6 @@ public class AppMenuTest {
     /**
      * AppMenuHandler that will be used to intercept item selections for testing.
      */
-    @SuppressFBWarnings("URF_UNREAD_FIELD")
     public static class AppMenuHandlerForTest extends AppMenuHandler {
         int mLastSelectedItemId = -1;
 
@@ -81,32 +76,18 @@ public class AppMenuTest {
         InstrumentationRegistry.getInstrumentation().setInTouchMode(false);
 
         ChromeActivity.setAppMenuHandlerFactoryForTesting(
-                new ChromeActivity.AppMenuHandlerFactory() {
-                    @Override
-                    public AppMenuHandler get(Activity activity, AppMenuPropertiesDelegate delegate,
-                            int menuResourceId) {
-                        mAppMenuHandler =
-                                new AppMenuHandlerForTest(activity, delegate, menuResourceId);
-                        return mAppMenuHandler;
-                    }
+                (activity, delegate, menuResourceId) -> {
+                    mAppMenuHandler =
+                            new AppMenuHandlerForTest(activity, delegate, menuResourceId);
+                    return mAppMenuHandler;
                 });
 
         mActivityTestRule.startMainActivityWithURL(TEST_URL);
 
         showAppMenuAndAssertMenuShown();
         mAppMenu = mActivityTestRule.getActivity().getAppMenuHandler().getAppMenu();
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                mAppMenu.getListView().setSelection(0);
-            }
-        });
-        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
-            @Override
-            public Integer call() {
-                return getCurrentFocusedRow();
-            }
-        }));
+        ThreadUtils.runOnUiThread(() -> mAppMenu.getListView().setSelection(0));
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, () -> getCurrentFocusedRow()));
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
@@ -231,12 +212,7 @@ public class AppMenuTest {
     }
 
     private void showAppMenuAndAssertMenuShown() {
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                mAppMenuHandler.showAppMenu(null, false);
-            }
-        });
+        ThreadUtils.runOnUiThread((Runnable) () -> mAppMenuHandler.showAppMenu(null, false));
         CriteriaHelper.pollInstrumentationThread(new Criteria("AppMenu did not show") {
             @Override
             public boolean isSatisfied() {
@@ -264,23 +240,14 @@ public class AppMenuTest {
             pressKey(towardsTop ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN);
             final int expectedPosition = index + increment;
             CriteriaHelper.pollInstrumentationThread(
-                    Criteria.equals(expectedPosition, new Callable<Integer>() {
-                        @Override
-                        public Integer call() {
-                            return getCurrentFocusedRow();
-                        }
-                    }));
+                    Criteria.equals(expectedPosition, () -> getCurrentFocusedRow()));
         }
 
         // Try moving past it by one.
         if (movePast) {
             pressKey(towardsTop ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN);
-            CriteriaHelper.pollInstrumentationThread(Criteria.equals(end, new Callable<Integer>() {
-                @Override
-                public Integer call() {
-                    return getCurrentFocusedRow();
-                }
-            }));
+            CriteriaHelper.pollInstrumentationThread(Criteria.equals(end,
+                    () -> getCurrentFocusedRow()));
         }
 
         // The menu should stay open.
@@ -289,12 +256,9 @@ public class AppMenuTest {
 
     private void pressKey(final int keycode) {
         final View view = mAppMenu.getListView();
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                view.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, keycode));
-                view.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, keycode));
-            }
+        ThreadUtils.runOnUiThread(() -> {
+            view.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, keycode));
+            view.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, keycode));
         });
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }

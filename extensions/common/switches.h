@@ -33,10 +33,8 @@ extern const char kPromptForExternalExtensions[];
 #endif
 extern const char kShowComponentExtensionOptions[];
 extern const char kTraceAppSource[];
-extern const char kNativeCrxBindings[];
 extern const char kWhitelistedExtensionID[];
 extern const char kEnableCrxHashCheck[];
-extern const char kYieldBetweenContentScriptRuns[];
 
 }  // namespace switches
 

@@ -6,17 +6,17 @@ package org.chromium.base.test.util;
 
 import junit.framework.TestCase;
 
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 
+import org.chromium.base.test.BaseRobolectricTestRunner;
+
 /** Unit tests for MinAndroidSdkLevelSkipCheck. */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE, sdk = 18)
 public class MinAndroidSdkLevelSkipCheckTest {
-
     private static class UnannotatedBaseClass extends TestCase {
         public UnannotatedBaseClass(String name) {
             super(name);
@@ -45,6 +45,7 @@ public class MinAndroidSdkLevelSkipCheckTest {
         public ExtendsMin17Class(String name) {
             super(name);
         }
+        @Override
         public void unannotatedMethod() {}
     }
 
@@ -52,6 +53,7 @@ public class MinAndroidSdkLevelSkipCheckTest {
         public ExtendsMin20Class(String name) {
             super(name);
         }
+        @Override
         public void unannotatedMethod() {}
     }
 

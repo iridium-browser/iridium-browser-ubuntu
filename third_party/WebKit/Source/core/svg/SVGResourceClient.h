@@ -13,9 +13,9 @@ namespace blink {
 
 class TreeScope;
 
-class CORE_EXPORT SVGResourceClient : public DocumentResourceClient {
+class CORE_EXPORT SVGResourceClient : public ResourceClient {
  public:
-  virtual ~SVGResourceClient() {}
+  virtual ~SVGResourceClient() = default;
 
   virtual TreeScope* GetTreeScope() = 0;
 
@@ -23,7 +23,7 @@ class CORE_EXPORT SVGResourceClient : public DocumentResourceClient {
   virtual void ResourceElementChanged() = 0;
 
  protected:
-  SVGResourceClient() {}
+  SVGResourceClient() = default;
 
   String DebugName() const override { return "SVGResourceClient"; }
   void NotifyFinished(Resource*) override { ResourceElementChanged(); }

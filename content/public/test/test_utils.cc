@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
@@ -15,14 +16,15 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_scheduler/task_scheduler.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/variations/variations_params_manager.h"
-#include "content/common/site_isolation_policy.h"
+#include "content/browser/frame_host/render_frame_host_delegate.h"
+#include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/common/url_schemes.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
+#include "content/public/browser/browser_plugin_guest_delegate.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -33,11 +35,6 @@
 #include "content/public/test/test_service_manager_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/url_util.h"
-
-#if defined(OS_ANDROID)
-#include "content/browser/android/browser_jni_registrar.h"
-#include "mojo/android/system/mojo_jni_registrar.h"
-#endif
 
 namespace content {
 
@@ -60,8 +57,8 @@ void DeferredQuitRunLoop(const base::Closure& quit_task,
     quit_task.Run();
   } else {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&DeferredQuitRunLoop, quit_task, num_quit_deferrals - 1));
+        FROM_HERE, base::BindOnce(&DeferredQuitRunLoop, quit_task,
+                                  num_quit_deferrals - 1));
   }
 }
 
@@ -83,7 +80,7 @@ class ScriptCallback {
 void ScriptCallback::ResultCallback(const base::Value* result) {
   if (result)
     result_.reset(result->DeepCopy());
-  base::MessageLoop::current()->QuitWhenIdle();
+  base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 // Monitors if any task is processed by the message loop.
@@ -154,26 +151,24 @@ void RunAllPendingInMessageLoop(BrowserThread::ID thread_id) {
       base::ThreadTaskRunnerHandle::Get(), FROM_HERE, run_loop.QuitClosure());
   BrowserThread::PostTask(
       thread_id, FROM_HERE,
-      base::Bind(&DeferredQuitRunLoop, post_quit_run_loop_to_ui_thread,
-                 kNumQuitDeferrals));
+      base::BindOnce(&DeferredQuitRunLoop, post_quit_run_loop_to_ui_thread,
+                     kNumQuitDeferrals));
   RunThisRunLoop(&run_loop);
 }
 
-void RunAllBlockingPoolTasksUntilIdle() {
+void RunAllTasksUntilIdle() {
   while (true) {
-    content::BrowserThread::GetBlockingPool()->FlushForTesting();
-
     // Setup a task observer to determine if MessageLoop tasks run in the
-    // current loop iteration. This must be done before
-    // TaskScheduler::FlushForTesting() since this may spin the MessageLoop.
+    // current loop iteration and loop in case the MessageLoop posts tasks to
+    // the Task Scheduler after the initial flush.
     TaskObserver task_observer;
     base::MessageLoop::current()->AddTaskObserver(&task_observer);
 
-    // Since all blocking pool call sites are being migrated to TaskScheduler,
-    // flush TaskScheduler in addition to the blocking pool.
-    base::TaskScheduler::GetInstance()->FlushForTesting();
+    base::RunLoop run_loop;
+    base::TaskScheduler::GetInstance()->FlushAsyncForTesting(
+        run_loop.QuitWhenIdleClosure());
+    run_loop.Run();
 
-    base::RunLoop().RunUntilIdle();
     base::MessageLoop::current()->RemoveTaskObserver(&task_observer);
 
     if (!task_observer.processed())
@@ -213,10 +208,10 @@ void ResetSchemesAndOriginsWhitelist() {
   url::Initialize();
 }
 
-void EnableFeatureWithParam(const base::Feature& feature,
-                            const std::string& param_name,
-                            const std::string& param_value,
-                            base::CommandLine* command_line) {
+void DeprecatedEnableFeatureWithParam(const base::Feature& feature,
+                                      const std::string& param_name,
+                                      const std::string& param_value,
+                                      base::CommandLine* command_line) {
   static const char kFakeTrialName[] = "TrialNameForTesting";
   static const char kFakeTrialGroupName[] = "TrialGroupForTesting";
 
@@ -230,14 +225,59 @@ void EnableFeatureWithParam(const base::Feature& feature,
       kFakeTrialName, kFakeTrialGroupName, param_values, command_line);
 }
 
-#if defined(OS_ANDROID)
-// Registers content/browser and mojo JNI bindings necessary for some types of
-// tests.
-bool RegisterJniForTesting(JNIEnv* env) {
-  return mojo::android::RegisterSystemJni(env) &&
-         content::android::RegisterBrowserJni(env);
+namespace {
+
+// Helper class for CreateAndAttachInnerContents.
+//
+// TODO(lfg): https://crbug.com/821187 Inner webcontentses currently require
+// supplying a BrowserPluginGuestDelegate; however, the oopif architecture
+// doesn't really require it. Refactor this so that we can create an inner
+// contents without any of the guest machinery.
+class InnerWebContentsHelper : public WebContentsObserver,
+                               public BrowserPluginGuestDelegate {
+ public:
+  explicit InnerWebContentsHelper(WebContents* outer_contents)
+      : WebContentsObserver(), outer_contents_(outer_contents) {}
+  ~InnerWebContentsHelper() override = default;
+
+  // BrowserPluginGuestDelegate:
+  WebContents* GetOwnerWebContents() const override { return outer_contents_; }
+
+  // WebContentsObserver:
+  void WebContentsDestroyed() override { delete this; }
+
+  void SetInnerWebContents(WebContents* inner_web_contents) {
+    Observe(inner_web_contents);
+  }
+
+ private:
+  WebContents* outer_contents_;
+  DISALLOW_COPY_AND_ASSIGN(InnerWebContentsHelper);
+};
+
+}  // namespace
+
+WebContents* CreateAndAttachInnerContents(RenderFrameHost* rfh) {
+  WebContents* outer_contents =
+      static_cast<RenderFrameHostImpl*>(rfh)->delegate()->GetAsWebContents();
+  if (!outer_contents)
+    return nullptr;
+
+  auto guest_delegate =
+      std::make_unique<InnerWebContentsHelper>(outer_contents);
+
+  WebContents::CreateParams inner_params(outer_contents->GetBrowserContext());
+  inner_params.guest_delegate = guest_delegate.get();
+  WebContents* inner_contents = WebContents::Create(inner_params);
+
+  // Attach. |inner_contents| becomes owned by |outer_contents|.
+  inner_contents->AttachToOuterWebContentsFrame(outer_contents, rfh);
+
+  // |guest_delegate| becomes owned by |inner_contents|.
+  guest_delegate.release()->SetInnerWebContents(inner_contents);
+
+  return inner_contents;
 }
-#endif
 
 MessageLoopRunner::MessageLoopRunner(QuitMode quit_mode)
     : quit_mode_(quit_mode), loop_running_(false), quit_closure_called_(false) {
@@ -411,7 +451,7 @@ void RenderFrameDeletedObserver::WaitUntilDeleted() {
 WebContentsDestroyedWatcher::WebContentsDestroyedWatcher(
     WebContents* web_contents)
     : WebContentsObserver(web_contents) {
-  EXPECT_TRUE(web_contents != NULL);
+  EXPECT_TRUE(web_contents != nullptr);
 }
 
 WebContentsDestroyedWatcher::~WebContentsDestroyedWatcher() {
@@ -423,6 +463,14 @@ void WebContentsDestroyedWatcher::Wait() {
 
 void WebContentsDestroyedWatcher::WebContentsDestroyed() {
   run_loop_.Quit();
+}
+
+GURL EffectiveURLContentBrowserClient::GetEffectiveURL(
+    BrowserContext* browser_context,
+    const GURL& url) {
+  if (url == url_to_modify_)
+    return url_to_return_;
+  return url;
 }
 
 }  // namespace content

@@ -15,7 +15,6 @@ from dashboard import associate_alerts
 from dashboard import auto_triage
 from dashboard import bad_bisect
 from dashboard import bisect_stats
-from dashboard import bisect_fyi
 from dashboard import bug_details
 from dashboard import buildbucket_job_status
 from dashboard import change_internal_only
@@ -32,6 +31,7 @@ from dashboard import edit_site_config
 from dashboard import email_summary
 from dashboard import file_bug
 from dashboard import get_logs
+from dashboard import get_diagnostics
 from dashboard import get_histogram
 from dashboard import graph_csv
 from dashboard import graph_json
@@ -47,6 +47,7 @@ from dashboard import migrate_test_names
 from dashboard import navbar
 from dashboard import new_points
 from dashboard import oauth2_decorator
+from dashboard import pinpoint_request
 from dashboard import post_bisect_results
 from dashboard import put_entities_task
 from dashboard import report
@@ -76,7 +77,6 @@ _URL_MAPPING = [
     ('/associate_alerts', associate_alerts.AssociateAlertsHandler),
     ('/auto_triage', auto_triage.AutoTriageHandler),
     ('/bad_bisect', bad_bisect.BadBisectHandler),
-    ('/bisect_fyi', bisect_fyi.BisectFYIHandler),
     ('/bisect_stats', bisect_stats.BisectStatsHandler),
     ('/bug_details', bug_details.BugDetailsHandler),
     (r'/buildbucket_job_status/(\d+)',
@@ -94,6 +94,7 @@ _URL_MAPPING = [
     ('/edit_site_config', edit_site_config.EditSiteConfigHandler),
     ('/email_summary', email_summary.EmailSummaryHandler),
     ('/file_bug', file_bug.FileBugHandler),
+    ('/get_diagnostics', get_diagnostics.GetDiagnosticsHandler),
     ('/get_histogram', get_histogram.GetHistogramHandler),
     ('/get_logs', get_logs.GetLogsHandler),
     ('/graph_csv', graph_csv.GraphCsvHandler),
@@ -109,6 +110,12 @@ _URL_MAPPING = [
     ('/deprecate_tests', deprecate_tests.DeprecateTestsHandler),
     ('/navbar', navbar.NavbarHandler),
     ('/new_points', new_points.NewPointsHandler),
+    ('/pinpoint/new/bisect',
+     pinpoint_request.PinpointNewBisectRequestHandler),
+    ('/pinpoint/new/perf_try',
+     pinpoint_request.PinpointNewPerfTryRequestHandler),
+    ('/pinpoint/new/prefill',
+     pinpoint_request.PinpointNewPrefillRequestHandler),
     ('/post_bisect_results', post_bisect_results.PostBisectResultsHandler),
     ('/put_entities_task', put_entities_task.PutEntitiesTaskHandler),
     ('/report', report.ReportHandler),

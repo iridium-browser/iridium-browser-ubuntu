@@ -34,7 +34,6 @@
 #include "platform/audio/AudioBus.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/build_config.h"
 
 namespace blink {
 
@@ -56,7 +55,8 @@ class PLATFORM_EXPORT Panner {
                                         float sample_rate,
                                         HRTFDatabaseLoader*);
 
-  virtual ~Panner(){};
+  virtual ~Panner() = default;
+  ;
 
   virtual void Pan(double azimuth,
                    double elevation,

@@ -6,19 +6,19 @@
 #define CHROME_BROWSER_MEDIA_ROUTER_DISCOVERY_DIAL_DEVICE_DESCRIPTION_SERVICE_H_
 
 #include <memory>
-#include <set>
 #include <string>
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
-#include "base/threading/thread_checker.h"
+#include "base/macros.h"
+#include "base/sequence_checker.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/media/router/discovery/dial/dial_device_data.h"
 #include "chrome/browser/media/router/discovery/dial/parsed_dial_device_description.h"
-#include "chrome/common/media_router/mojo/dial_device_description_parser.mojom.h"
+#include "chrome/browser/media/router/discovery/dial/safe_dial_device_description_parser.h"
 
-namespace net {
-class URLRequestContextGetter;
+namespace service_manager {
+class Connector;
 }
 
 namespace media_router {
@@ -28,7 +28,8 @@ class SafeDialDeviceDescriptionParser;
 
 // This class fetches and parses device description XML for DIAL devices. Actual
 // parsing happens in a separate utility process via SafeDeviceDescriptionParser
-// (instead of in this class). This class lives on IO thread.
+// (instead of in this class).
+// This class is not sequence safe.
 class DeviceDescriptionService {
  public:
   // Represents cached device description data parsed from device description
@@ -52,17 +53,18 @@ class DeviceDescriptionService {
   // all fields are valid.
   // |device_data|: The device to look up.
   // |description_data|: Device description data from device description XML.
-  using DeviceDescriptionParseSuccessCallback =
-      base::Callback<void(const DialDeviceData& device_data,
-                          const ParsedDialDeviceDescription& description_data)>;
+  using DeviceDescriptionParseSuccessCallback = base::RepeatingCallback<void(
+      const DialDeviceData& device_data,
+      const ParsedDialDeviceDescription& description_data)>;
 
   // Called if parsing device description XML in utility process fails, or some
   // parsed fields are missing or invalid.
   using DeviceDescriptionParseErrorCallback =
-      base::Callback<void(const DialDeviceData& device_data,
-                          const std::string& error_message)>;
+      base::RepeatingCallback<void(const DialDeviceData& device_data,
+                                   const std::string& error_message)>;
 
   DeviceDescriptionService(
+      service_manager::Connector* connector,
       const DeviceDescriptionParseSuccessCallback& success_cb,
       const DeviceDescriptionParseErrorCallback& error_cb);
   virtual ~DeviceDescriptionService();
@@ -72,16 +74,24 @@ class DeviceDescriptionService {
   // device description XML and parsing XML in utility process. Call
   // |success_cb_| if both fetching and parsing succeeds; otherwise call
   // |error_cb_|.
-  // |request_context|: Used by the background URLFetchers.
   virtual void GetDeviceDescriptions(
-      const std::vector<DialDeviceData>& devices,
-      net::URLRequestContextGetter* request_context);
+      const std::vector<DialDeviceData>& devices);
+
+ protected:
+  // Parses the device description data in |description_data| and invokes
+  // OnParsedDeviceDescription() when done, passing |device_data| along.
+  // Made visible so it can be overwritten in tests.
+  virtual void ParseDeviceDescription(
+      const DialDeviceData& device_data,
+      const DialDeviceDescriptionData& description_data);
 
  private:
   friend class DeviceDescriptionServiceTest;
   friend class TestDeviceDescriptionService;
   FRIEND_TEST_ALL_PREFIXES(DeviceDescriptionServiceTest,
                            TestGetDeviceDescriptionRemoveOutDatedFetchers);
+  FRIEND_TEST_ALL_PREFIXES(DeviceDescriptionServiceTest,
+                           TestGetDeviceDescriptionFetchURL);
   FRIEND_TEST_ALL_PREFIXES(DeviceDescriptionServiceTest,
                            TestGetDeviceDescriptionFetchURLError);
   FRIEND_TEST_ALL_PREFIXES(DeviceDescriptionServiceTest,
@@ -99,9 +109,7 @@ class DeviceDescriptionService {
   // Issues a HTTP GET request for the device description. No-op if there is
   // already a pending request.
   // |device_data|: The device to look up.
-  // |request_context|: Used by the background URLFetchers.
-  void FetchDeviceDescription(const DialDeviceData& device_data,
-                              net::URLRequestContextGetter* request_context);
+  void FetchDeviceDescription(const DialDeviceData& device_data);
 
   // Invoked when HTTP GET request finishes.
   // |device_data|: Device data initiating the HTTP request.
@@ -119,13 +127,13 @@ class DeviceDescriptionService {
   // Invoked when SafeDialDeviceDescriptionParser finishes parsing device
   // description XML.
   // |device_data|: Device data initiating XML parsing in utility process.
-  // |app_url|: The app Url.
-  // |device_description_ptr|: Parsed device description from utility process,
-  // or nullptr if parsing failed.
+  // |device_description|: Parsed device description from utility process,
+  // empty if parsing failed.
+  // |parsing_error|: error encountered while parsing DIAL device description.
   void OnParsedDeviceDescription(
       const DialDeviceData& device_data,
-      const GURL& app_url,
-      chrome::mojom::DialDeviceDescriptionPtr device_description_ptr);
+      const ParsedDialDeviceDescription& device_description,
+      SafeDialDeviceDescriptionParser::ParsingError parsing_error);
 
   // Remove expired cache entries from |description_map_|.
   void CleanUpCacheEntries();
@@ -138,8 +146,8 @@ class DeviceDescriptionService {
   std::map<std::string, std::unique_ptr<DeviceDescriptionFetcher>>
       device_description_fetcher_map_;
 
-  // Set of device labels to be parsed in current utility process.
-  std::set<std::string> pending_device_labels_;
+  // The number of device description still pending to be parsed.
+  uint32_t pending_device_count_ = 0U;
 
   // Map of current cached device descriptions, keyed by device label.
   std::map<std::string, CacheEntry> description_cache_;
@@ -153,14 +161,12 @@ class DeviceDescriptionService {
   // Timer for clean up expired cache entries.
   std::unique_ptr<base::RepeatingTimer> clean_up_timer_;
 
-  // Safe DIAL parser associated with utility process. When this object is
-  // destroyed, associating utility process will shutdown. Keep |parser_| alive
-  // until finish parsing all device descriptions of devices passed in
-  // |GetDeviceDescriptions()|. If second |GetDeviceDescriptions()| arrives and
-  // |parser_| is still alive, reuse |parser_| instead of creating a new object.
-  std::unique_ptr<SafeDialDeviceDescriptionParser> parser_;
+  // Safe DIAL parser. Does the parsing in a utility process.
+  SafeDialDeviceDescriptionParser device_description_parser_;
 
-  base::ThreadChecker thread_checker_;
+  SEQUENCE_CHECKER(sequence_checker_);
+
+  DISALLOW_COPY_AND_ASSIGN(DeviceDescriptionService);
 };
 
 }  // namespace media_router

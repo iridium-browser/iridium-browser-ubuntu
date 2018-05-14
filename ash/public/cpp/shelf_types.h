@@ -61,6 +61,9 @@ enum ShelfBackgroundType {
 
   // The background when fullscreen app list is visible.
   SHELF_BACKGROUND_APP_LIST,
+
+  // The background when split view mode is active.
+  SHELF_BACKGROUND_SPLIT_VIEW,
 };
 
 // Source of the launch or activation request, for tracking.
@@ -116,6 +119,9 @@ enum ShelfItemType {
   // Represents an open dialog.
   TYPE_DIALOG,
 
+  // Represents the back button, which is shown in tablet mode.
+  TYPE_BACK_BUTTON,
+
   // Default value.
   TYPE_UNDEFINED,
 };
@@ -129,8 +135,6 @@ enum ShelfItemStatus {
   STATUS_CLOSED,
   // A shelf item that has live instance.
   STATUS_RUNNING,
-  // An active shelf item that has focus.
-  STATUS_ACTIVE,
   // A shelf item that needs user's attention.
   STATUS_ATTENTION,
 };

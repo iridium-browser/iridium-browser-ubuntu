@@ -35,7 +35,8 @@ void RemotingCdmController::OnStarted(bool success) {
 void RemotingCdmController::OnSessionStateChanged() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (is_remoting_ && session_->state() == SharedSession::SESSION_STOPPING) {
+  if (is_remoting_ && session_->state() != SharedSession::SESSION_STARTING &&
+      session_->state() != SharedSession::SESSION_STARTED) {
     session_->Shutdown();
     is_remoting_ = false;
   }
@@ -51,7 +52,7 @@ void RemotingCdmController::ShouldCreateRemotingCdm(
     return;
   }
 
-  if (!session_->is_remote_decryption_available()) {
+  if (!session_->IsRemoteDecryptionAvailable()) {
     cb.Run(false);
     return;
   }

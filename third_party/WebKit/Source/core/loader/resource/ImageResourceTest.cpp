@@ -31,8 +31,10 @@
 #include "core/loader/resource/ImageResource.h"
 
 #include <memory>
+#include "core/loader/EmptyClients.h"
 #include "core/loader/resource/MockImageResourceObserver.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "core/testing/DummyPageHolder.h"
+#include "platform/InstanceCounters.h"
 #include "platform/SharedBuffer.h"
 #include "platform/exported/WrappedResourceResponse.h"
 #include "platform/graphics/BitmapImage.h"
@@ -44,20 +46,22 @@
 #include "platform/loader/fetch/ResourceFinishObserver.h"
 #include "platform/loader/fetch/ResourceLoader.h"
 #include "platform/loader/fetch/UniqueIdentifier.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/loader/testing/MockFetchContext.h"
 #include "platform/loader/testing/MockResourceClient.h"
-#include "platform/scheduler/test/fake_web_task_runner.h"
+#include "platform/network/http_names.h"
+#include "platform/scheduler/test/fake_task_runner.h"
 #include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
 #include "platform/testing/ScopedMockedURL.h"
-#include "platform/testing/TestingPlatformSupport.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/Base64.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebCachePolicy.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
 #include "public/platform/WebURLResponse.h"
+#include "public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -107,7 +111,7 @@ constexpr size_t kJpegImageSubrangeWithoutDimensionsLength = 3;
 // just the first kJpegImageSubrangeWithDimensionsLength bytes. If this test
 // fails, then the test data here probably needs to be updated.
 TEST(ImageResourceTest, DimensionsDecodableFromPartialTestImage) {
-  RefPtr<Image> image = BitmapImage::Create();
+  scoped_refptr<Image> image = BitmapImage::Create();
   EXPECT_EQ(
       Image::kSizeAvailable,
       image->SetData(SharedBuffer::Create(
@@ -179,23 +183,22 @@ void ReceiveResponse(ImageResource* image_resource,
                      const AtomicString& mime_type,
                      const char* data,
                      size_t data_size) {
-  ResourceResponse response;
-  response.SetURL(url);
+  ResourceResponse response(url, mime_type);
   response.SetHTTPStatusCode(200);
-  response.SetMimeType(mime_type);
   image_resource->SetStatus(ResourceStatus::kPending);
   image_resource->NotifyStartLoad();
   image_resource->ResponseReceived(response, nullptr);
   image_resource->AppendData(data, data_size);
-  image_resource->Finish();
+  image_resource->FinishForTest();
 }
 
-void TestThatReloadIsStartedThenServeReload(const KURL& test_url,
-                                            ImageResource* image_resource,
-                                            ImageResourceContent* content,
-                                            MockImageResourceObserver* observer,
-                                            WebCachePolicy policy_for_reload,
-                                            bool placeholder_before_reload) {
+void TestThatReloadIsStartedThenServeReload(
+    const KURL& test_url,
+    ImageResource* image_resource,
+    ImageResourceContent* content,
+    MockImageResourceObserver* observer,
+    mojom::FetchCacheMode cache_mode_for_reload,
+    bool placeholder_before_reload) {
   const char* data = reinterpret_cast<const char*>(kJpegImage2);
   constexpr size_t kDataLength = sizeof(kJpegImage2);
   constexpr int kImageWidth = 50;
@@ -208,8 +211,8 @@ void TestThatReloadIsStartedThenServeReload(const KURL& test_url,
   EXPECT_EQ(placeholder_before_reload, image_resource->ShouldShowPlaceholder());
   EXPECT_EQ(g_null_atom,
             image_resource->GetResourceRequest().HttpHeaderField("range"));
-  EXPECT_EQ(policy_for_reload,
-            image_resource->GetResourceRequest().GetCachePolicy());
+  EXPECT_EQ(cache_mode_for_reload,
+            image_resource->GetResourceRequest().GetCacheMode());
   EXPECT_EQ(content, image_resource->GetContent());
   EXPECT_FALSE(content->HasImage());
 
@@ -222,10 +225,10 @@ void TestThatReloadIsStartedThenServeReload(const KURL& test_url,
 
   // Does Reload.
   image_resource->Loader()->DidReceiveResponse(WrappedResourceResponse(
-      ResourceResponse(test_url, "image/jpeg", kDataLength, g_null_atom)));
+      ResourceResponse(test_url, "image/jpeg", kDataLength)));
   image_resource->Loader()->DidReceiveData(data, kDataLength);
   image_resource->Loader()->DidFinishLoading(0.0, kDataLength, kDataLength,
-                                             kDataLength);
+                                             kDataLength, false);
 
   // Checks |imageResource|'s status after reloading.
   EXPECT_EQ(ResourceStatus::kCached, image_resource->GetStatus());
@@ -267,8 +270,8 @@ void TestThatIsPlaceholderRequestAndServeResponse(
   EXPECT_EQ(0, observer->ImageChangedCount());
 
   // Serves partial response that is sufficient for creating a placeholder.
-  ResourceResponse response(
-      url, "image/jpeg", kJpegImageSubrangeWithDimensionsLength, g_null_atom);
+  ResourceResponse response(url, "image/jpeg",
+                            kJpegImageSubrangeWithDimensionsLength);
   response.SetHTTPStatusCode(206);
   response.SetHTTPHeaderField(
       "content-range", BuildContentRange(kJpegImageSubrangeWithDimensionsLength,
@@ -281,7 +284,7 @@ void TestThatIsPlaceholderRequestAndServeResponse(
   image_resource->Loader()->DidFinishLoading(
       0.0, kJpegImageSubrangeWithDimensionsLength,
       kJpegImageSubrangeWithDimensionsLength,
-      kJpegImageSubrangeWithDimensionsLength);
+      kJpegImageSubrangeWithDimensionsLength, false);
 
   // Checks that |imageResource| is successfully loaded, showing a placeholder.
   EXPECT_EQ(ResourceStatus::kCached, image_resource->GetStatus());
@@ -315,11 +318,11 @@ void TestThatIsNotPlaceholderRequestAndServeResponse(
 
   // Serves full response.
   image_resource->Loader()->DidReceiveResponse(WrappedResourceResponse(
-      ResourceResponse(url, "image/jpeg", sizeof(kJpegImage), g_null_atom)));
+      ResourceResponse(url, "image/jpeg", sizeof(kJpegImage))));
   image_resource->Loader()->DidReceiveData(
       reinterpret_cast<const char*>(kJpegImage), sizeof(kJpegImage));
   image_resource->Loader()->DidFinishLoading(
-      0.0, sizeof(kJpegImage), sizeof(kJpegImage), sizeof(kJpegImage));
+      0.0, sizeof(kJpegImage), sizeof(kJpegImage), sizeof(kJpegImage), false);
 
   // Checks that |imageResource| is successfully loaded,
   // showing a non-placeholder image.
@@ -346,14 +349,9 @@ ResourceFetcher* CreateFetcher() {
       MockFetchContext::Create(MockFetchContext::kShouldLoadNewResource));
 }
 
-using ScopedClientPlaceholderForServerLoFiForTest =
-    ScopedRuntimeEnabledFeatureForTest<
-        RuntimeEnabledFeatures::ClientPlaceholdersForServerLoFiEnabled,
-        RuntimeEnabledFeatures::SetClientPlaceholdersForServerLoFiEnabled>;
-
 TEST(ImageResourceTest, MultipartImage) {
   ResourceFetcher* fetcher = CreateFetcher();
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   // Emulate starting a real load, but don't expect any "real"
@@ -369,8 +367,7 @@ TEST(ImageResourceTest, MultipartImage) {
   // Send the multipart response. No image or data buffer is created. Note that
   // the response must be routed through ResourceLoader to ensure the load is
   // flagged as multipart.
-  ResourceResponse multipart_response(NullURL(), "multipart/x-mixed-replace", 0,
-                                      g_null_atom);
+  ResourceResponse multipart_response(NullURL(), "multipart/x-mixed-replace");
   multipart_response.SetMultipartBoundary("boundary", strlen("boundary"));
   image_resource->Loader()->DidReceiveResponse(
       WrappedResourceResponse(multipart_response), nullptr);
@@ -418,7 +415,7 @@ TEST(ImageResourceTest, MultipartImage) {
 
   // This part finishes. The image is created, callbacks are sent, and the data
   // buffer is cleared.
-  image_resource->Loader()->DidFinishLoading(0.0, 0, 0, 0);
+  image_resource->Loader()->DidFinishLoading(0.0, 0, 0, 0, false);
   EXPECT_TRUE(image_resource->ResourceBuffer());
   EXPECT_FALSE(image_resource->ErrorOccurred());
   ASSERT_TRUE(image_resource->GetContent()->HasImage());
@@ -440,15 +437,14 @@ TEST(ImageResourceTest, MultipartImage) {
 
 TEST(ImageResourceTest, BitmapMultipartImage) {
   ResourceFetcher* fetcher = CreateFetcher();
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
   ImageResource* image_resource =
       ImageResource::Create(ResourceRequest(test_url));
   image_resource->SetIdentifier(CreateUniqueIdentifier());
   fetcher->StartLoad(image_resource);
 
-  ResourceResponse multipart_response(NullURL(), "multipart/x-mixed-replace", 0,
-                                      g_null_atom);
+  ResourceResponse multipart_response(NullURL(), "multipart/x-mixed-replace");
   multipart_response.SetMultipartBoundary("boundary", strlen("boundary"));
   image_resource->Loader()->DidReceiveResponse(
       WrappedResourceResponse(multipart_response), nullptr);
@@ -461,7 +457,7 @@ TEST(ImageResourceTest, BitmapMultipartImage) {
   image_resource->AppendData(reinterpret_cast<const char*>(kJpegImage),
                              sizeof(kJpegImage));
   image_resource->AppendData(kBoundary, strlen(kBoundary));
-  image_resource->Loader()->DidFinishLoading(0.0, 0, 0, 0);
+  image_resource->Loader()->DidFinishLoading(0.0, 0, 0, 0, false);
   EXPECT_TRUE(image_resource->GetContent()->HasImage());
   EXPECT_TRUE(image_resource->GetContent()->GetImage()->IsBitmapImage());
   EXPECT_TRUE(image_resource->GetContent()
@@ -471,10 +467,14 @@ TEST(ImageResourceTest, BitmapMultipartImage) {
 }
 
 TEST(ImageResourceTest, CancelOnRemoveObserver) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceFetcher* fetcher = CreateFetcher();
+  scheduler::FakeTaskRunner* task_runner =
+      static_cast<scheduler::FakeTaskRunner*>(
+          fetcher->Context().GetLoadingTaskRunner().get());
+  task_runner->SetTime(1);
 
   // Emulate starting a real load.
   ImageResource* image_resource = ImageResource::CreateForTest(test_url);
@@ -495,7 +495,7 @@ TEST(ImageResourceTest, CancelOnRemoveObserver) {
 
   // Trigger the cancel timer, ensure the load was cancelled and the resource
   // was evicted from the cache.
-  blink::testing::RunPendingTasks();
+  task_runner->RunUntilIdle();
   EXPECT_EQ(ResourceStatus::kLoadError, image_resource->GetStatus());
   EXPECT_FALSE(GetMemoryCache()->ResourceForURL(test_url));
 }
@@ -513,16 +513,16 @@ class MockFinishObserver : public GarbageCollectedFinalized<MockFinishObserver>,
   MOCK_METHOD0(NotifyFinished, void());
   String DebugName() const override { return "MockFinishObserver"; }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     blink::ResourceFinishObserver::Trace(visitor);
   }
 
  protected:
-  MockFinishObserver() {}
+  MockFinishObserver() = default;
 };
 
 TEST(ImageResourceTest, CancelWithImageAndFinishObserver) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceFetcher* fetcher = CreateFetcher();
@@ -535,13 +535,12 @@ TEST(ImageResourceTest, CancelWithImageAndFinishObserver) {
   GetMemoryCache()->Add(image_resource);
 
   Persistent<MockFinishObserver> finish_observer = MockFinishObserver::Create();
-  image_resource->AddFinishObserver(finish_observer);
+  image_resource->AddFinishObserver(
+      finish_observer, fetcher->Context().GetLoadingTaskRunner().get());
 
   // Send the image response.
   image_resource->ResponseReceived(
-      ResourceResponse(NullURL(), "image/jpeg", sizeof(kJpegImage),
-                       g_null_atom),
-      nullptr);
+      ResourceResponse(NullURL(), "image/jpeg", sizeof(kJpegImage)), nullptr);
   image_resource->AppendData(reinterpret_cast<const char*>(kJpegImage),
                              sizeof(kJpegImage));
   ASSERT_TRUE(image_resource->GetContent()->HasImage());
@@ -568,17 +567,14 @@ TEST(ImageResourceTest, DecodedDataRemainsWhileHasClients) {
 
   // Send the image response.
   image_resource->ResponseReceived(
-      ResourceResponse(NullURL(), "multipart/x-mixed-replace", 0, g_null_atom),
-      nullptr);
+      ResourceResponse(NullURL(), "multipart/x-mixed-replace"), nullptr);
 
   image_resource->ResponseReceived(
-      ResourceResponse(NullURL(), "image/jpeg", sizeof(kJpegImage),
-                       g_null_atom),
-      nullptr);
+      ResourceResponse(NullURL(), "image/jpeg", sizeof(kJpegImage)), nullptr);
   image_resource->AppendData(reinterpret_cast<const char*>(kJpegImage),
                              sizeof(kJpegImage));
   EXPECT_NE(0u, image_resource->EncodedSizeMemoryUsageForTesting());
-  image_resource->Finish();
+  image_resource->FinishForTest();
   EXPECT_EQ(0u, image_resource->EncodedSizeMemoryUsageForTesting());
   EXPECT_FALSE(image_resource->ErrorOccurred());
   ASSERT_TRUE(image_resource->GetContent()->HasImage());
@@ -612,12 +608,10 @@ TEST(ImageResourceTest, UpdateBitmapImages) {
 
   // Send the image response.
   image_resource->ResponseReceived(
-      ResourceResponse(NullURL(), "image/jpeg", sizeof(kJpegImage),
-                       g_null_atom),
-      nullptr);
+      ResourceResponse(NullURL(), "image/jpeg", sizeof(kJpegImage)), nullptr);
   image_resource->AppendData(reinterpret_cast<const char*>(kJpegImage),
                              sizeof(kJpegImage));
-  image_resource->Finish();
+  image_resource->FinishForTest();
   EXPECT_FALSE(image_resource->ErrorOccurred());
   ASSERT_TRUE(image_resource->GetContent()->HasImage());
   EXPECT_FALSE(image_resource->GetContent()->GetImage()->IsNull());
@@ -626,24 +620,22 @@ TEST(ImageResourceTest, UpdateBitmapImages) {
   EXPECT_TRUE(image_resource->GetContent()->GetImage()->IsBitmapImage());
 }
 
-class ImageResourceReloadTest : public ::testing::TestWithParam<bool> {
+class ImageResourceReloadTest
+    : public ::testing::TestWithParam<bool>,
+      private ScopedClientPlaceholdersForServerLoFiForTest {
  public:
-  ~ImageResourceReloadTest() override {}
+  ImageResourceReloadTest()
+      : ScopedClientPlaceholdersForServerLoFiForTest(GetParam()) {}
+  ~ImageResourceReloadTest() override = default;
 
   bool IsClientPlaceholderForServerLoFiEnabled() const { return GetParam(); }
 
   void SetUp() override {
-    scoped_show_placeholder_.reset(
-        new ScopedClientPlaceholderForServerLoFiForTest(GetParam()));
   }
-
- private:
-  std::unique_ptr<ScopedClientPlaceholderForServerLoFiForTest>
-      scoped_show_placeholder_;
 };
 
 TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderAfterFinished) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
   ImageResource* image_resource = ImageResource::CreateForTest(test_url);
   image_resource->SetStatus(ResourceStatus::kPending);
@@ -655,14 +647,14 @@ TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderAfterFinished) {
 
   // Send the image response.
   ResourceResponse resource_response(NullURL(), "image/jpeg",
-                                     sizeof(kJpegImage), g_null_atom);
+                                     sizeof(kJpegImage));
   resource_response.AddHTTPHeaderField("chrome-proxy-content-transform",
                                        "empty-image");
 
   image_resource->ResponseReceived(resource_response, nullptr);
   image_resource->AppendData(reinterpret_cast<const char*>(kJpegImage),
                              sizeof(kJpegImage));
-  image_resource->Finish();
+  image_resource->FinishForTest();
   EXPECT_FALSE(image_resource->ErrorOccurred());
   ASSERT_TRUE(image_resource->GetContent()->HasImage());
   EXPECT_FALSE(image_resource->GetContent()->GetImage()->IsNull());
@@ -686,12 +678,12 @@ TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderAfterFinished) {
   EXPECT_EQ(3, observer->ImageChangedCount());
   TestThatReloadIsStartedThenServeReload(
       test_url, image_resource, image_resource->GetContent(), observer.get(),
-      WebCachePolicy::kBypassingCache, false);
+      mojom::FetchCacheMode::kBypassCache, false);
 }
 
 TEST_P(ImageResourceReloadTest,
        ReloadIfLoFiOrPlaceholderAfterFinishedWithOldHeaders) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
   ImageResource* image_resource = ImageResource::CreateForTest(test_url);
   image_resource->SetStatus(ResourceStatus::kPending);
@@ -703,13 +695,13 @@ TEST_P(ImageResourceReloadTest,
 
   // Send the image response.
   ResourceResponse resource_response(NullURL(), "image/jpeg",
-                                     sizeof(kJpegImage), g_null_atom);
+                                     sizeof(kJpegImage));
   resource_response.AddHTTPHeaderField("chrome-proxy", "q=low");
 
   image_resource->ResponseReceived(resource_response, nullptr);
   image_resource->AppendData(reinterpret_cast<const char*>(kJpegImage),
                              sizeof(kJpegImage));
-  image_resource->Finish();
+  image_resource->FinishForTest();
   EXPECT_FALSE(image_resource->ErrorOccurred());
   ASSERT_TRUE(image_resource->GetContent()->HasImage());
   EXPECT_FALSE(image_resource->GetContent()->GetImage()->IsNull());
@@ -733,16 +725,16 @@ TEST_P(ImageResourceReloadTest,
   EXPECT_EQ(3, observer->ImageChangedCount());
   TestThatReloadIsStartedThenServeReload(
       test_url, image_resource, image_resource->GetContent(), observer.get(),
-      WebCachePolicy::kBypassingCache, false);
+      mojom::FetchCacheMode::kBypassCache, false);
 }
 
 TEST_P(ImageResourceReloadTest,
        ReloadIfLoFiOrPlaceholderAfterFinishedWithoutLoFiHeaders) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
   ResourceRequest request(test_url);
   request.SetPreviewsState(WebURLRequest::kServerLoFiOn);
-  request.SetFetchCredentialsMode(WebURLRequest::kFetchCredentialsModeOmit);
+  request.SetFetchCredentialsMode(network::mojom::FetchCredentialsMode::kOmit);
   ImageResource* image_resource = ImageResource::Create(request);
   image_resource->SetStatus(ResourceStatus::kPending);
   image_resource->NotifyStartLoad();
@@ -753,12 +745,10 @@ TEST_P(ImageResourceReloadTest,
 
   // Send the image response, without any LoFi image response headers.
   image_resource->ResponseReceived(
-      ResourceResponse(NullURL(), "image/jpeg", sizeof(kJpegImage),
-                       g_null_atom),
-      nullptr);
+      ResourceResponse(NullURL(), "image/jpeg", sizeof(kJpegImage)), nullptr);
   image_resource->AppendData(reinterpret_cast<const char*>(kJpegImage),
                              sizeof(kJpegImage));
-  image_resource->Finish();
+  image_resource->FinishForTest();
   EXPECT_FALSE(image_resource->ErrorOccurred());
   ASSERT_TRUE(image_resource->GetContent()->HasImage());
   EXPECT_FALSE(image_resource->GetContent()->GetImage()->IsNull());
@@ -785,7 +775,7 @@ TEST_P(ImageResourceReloadTest,
 TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderViaResourceFetcher) {
   ResourceFetcher* fetcher = CreateFetcher();
 
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceRequest request = ResourceRequest(test_url);
@@ -799,7 +789,7 @@ TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderViaResourceFetcher) {
 
   // Send the image response.
   ResourceResponse resource_response(NullURL(), "image/jpeg",
-                                     sizeof(kJpegImage), g_null_atom);
+                                     sizeof(kJpegImage));
   resource_response.AddHTTPHeaderField("chrome-proxy-content-transform",
                                        "empty-image");
 
@@ -808,7 +798,7 @@ TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderViaResourceFetcher) {
   image_resource->Loader()->DidReceiveData(
       reinterpret_cast<const char*>(kJpegImage), sizeof(kJpegImage));
   image_resource->Loader()->DidFinishLoading(
-      0.0, sizeof(kJpegImage), sizeof(kJpegImage), sizeof(kJpegImage));
+      0.0, sizeof(kJpegImage), sizeof(kJpegImage), sizeof(kJpegImage), false);
 
   EXPECT_TRUE(observer->ImageNotifyFinishedCalled());
   EXPECT_EQ(image_resource, fetcher->CachedResource(test_url));
@@ -819,13 +809,13 @@ TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderViaResourceFetcher) {
 
   TestThatReloadIsStartedThenServeReload(
       test_url, image_resource, content, observer.get(),
-      WebCachePolicy::kBypassingCache, false);
+      mojom::FetchCacheMode::kBypassCache, false);
 
   GetMemoryCache()->Remove(image_resource);
 }
 
 TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderBeforeResponse) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceRequest request(test_url);
@@ -853,11 +843,11 @@ TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderBeforeResponse) {
 
   TestThatReloadIsStartedThenServeReload(
       test_url, image_resource, image_resource->GetContent(), observer.get(),
-      WebCachePolicy::kBypassingCache, false);
+      mojom::FetchCacheMode::kBypassCache, false);
 }
 
 TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderDuringResponse) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceRequest request(test_url);
@@ -870,8 +860,8 @@ TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderDuringResponse) {
       MockImageResourceObserver::Create(image_resource->GetContent());
 
   // Send the image response.
-  ResourceResponse resource_response(test_url, "image/jpeg", sizeof(kJpegImage),
-                                     g_null_atom);
+  ResourceResponse resource_response(test_url, "image/jpeg",
+                                     sizeof(kJpegImage));
   resource_response.AddHTTPHeaderField("chrome-proxy-content-transform",
                                        "empty-image");
 
@@ -904,11 +894,11 @@ TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderDuringResponse) {
 
   TestThatReloadIsStartedThenServeReload(
       test_url, image_resource, image_resource->GetContent(), observer.get(),
-      WebCachePolicy::kBypassingCache, false);
+      mojom::FetchCacheMode::kBypassCache, false);
 }
 
 TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderForPlaceholder) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceFetcher* fetcher = CreateFetcher();
@@ -928,7 +918,37 @@ TEST_P(ImageResourceReloadTest, ReloadIfLoFiOrPlaceholderForPlaceholder) {
 
   TestThatReloadIsStartedThenServeReload(
       test_url, image_resource, image_resource->GetContent(), observer.get(),
-      WebCachePolicy::kBypassingCache, false);
+      mojom::FetchCacheMode::kBypassCache, false);
+}
+
+TEST_P(ImageResourceReloadTest, ReloadLoFiImagesWithDuplicateURLs) {
+  KURL test_url(kTestURL);
+  ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
+  ResourceFetcher* fetcher = CreateFetcher();
+
+  FetchParameters placeholder_params{ResourceRequest(test_url)};
+  placeholder_params.SetAllowImagePlaceholder();
+  ImageResource* placeholder_resource =
+      ImageResource::Fetch(placeholder_params, fetcher);
+  EXPECT_EQ(FetchParameters::kAllowPlaceholder,
+            placeholder_params.GetPlaceholderImageRequestType());
+  EXPECT_TRUE(placeholder_resource->ShouldShowPlaceholder());
+
+  FetchParameters full_image_params{ResourceRequest(test_url)};
+  ImageResource* full_image_resource =
+      ImageResource::Fetch(full_image_params, fetcher);
+  EXPECT_EQ(FetchParameters::kDisallowPlaceholder,
+            full_image_params.GetPlaceholderImageRequestType());
+  EXPECT_FALSE(full_image_resource->ShouldShowPlaceholder());
+
+  // The |placeholder_resource| should not be reused for the
+  // |full_image_resource|.
+  EXPECT_NE(placeholder_resource, full_image_resource);
+
+  fetcher->ReloadLoFiImages();
+
+  EXPECT_FALSE(placeholder_resource->ShouldShowPlaceholder());
+  EXPECT_FALSE(full_image_resource->ShouldShowPlaceholder());
 }
 
 INSTANTIATE_TEST_CASE_P(/* no prefix */,
@@ -936,7 +956,7 @@ INSTANTIATE_TEST_CASE_P(/* no prefix */,
                         ::testing::Bool());
 
 TEST(ImageResourceTest, SVGImage) {
-  KURL url(kParsedURLString, "http://127.0.0.1:8000/foo");
+  KURL url("http://127.0.0.1:8000/foo");
   ImageResource* image_resource = ImageResource::CreateForTest(url);
   std::unique_ptr<MockImageResourceObserver> observer =
       MockImageResourceObserver::Create(image_resource->GetContent());
@@ -953,7 +973,7 @@ TEST(ImageResourceTest, SVGImage) {
 }
 
 TEST(ImageResourceTest, SVGImageWithSubresource) {
-  KURL url(kParsedURLString, "http://127.0.0.1:8000/foo");
+  KURL url("http://127.0.0.1:8000/foo");
   ImageResource* image_resource = ImageResource::CreateForTest(url);
   std::unique_ptr<MockImageResourceObserver> observer =
       MockImageResourceObserver::Create(image_resource->GetContent());
@@ -998,7 +1018,7 @@ TEST(ImageResourceTest, SVGImageWithSubresource) {
 }
 
 TEST(ImageResourceTest, SuccessfulRevalidationJpeg) {
-  KURL url(kParsedURLString, "http://127.0.0.1:8000/foo");
+  KURL url("http://127.0.0.1:8000/foo");
   ImageResource* image_resource = ImageResource::CreateForTest(url);
   std::unique_ptr<MockImageResourceObserver> observer =
       MockImageResourceObserver::Create(image_resource->GetContent());
@@ -1018,8 +1038,7 @@ TEST(ImageResourceTest, SuccessfulRevalidationJpeg) {
             image_resource->GetContent()->GetImage()->height());
 
   image_resource->SetRevalidatingRequest(ResourceRequest(url));
-  ResourceResponse response;
-  response.SetURL(url);
+  ResourceResponse response(url);
   response.SetHTTPStatusCode(304);
 
   image_resource->ResponseReceived(response, nullptr);
@@ -1036,7 +1055,7 @@ TEST(ImageResourceTest, SuccessfulRevalidationJpeg) {
 }
 
 TEST(ImageResourceTest, SuccessfulRevalidationSvg) {
-  KURL url(kParsedURLString, "http://127.0.0.1:8000/foo");
+  KURL url("http://127.0.0.1:8000/foo");
   ImageResource* image_resource = ImageResource::CreateForTest(url);
   std::unique_ptr<MockImageResourceObserver> observer =
       MockImageResourceObserver::Create(image_resource->GetContent());
@@ -1054,8 +1073,7 @@ TEST(ImageResourceTest, SuccessfulRevalidationSvg) {
   EXPECT_EQ(200, image_resource->GetContent()->GetImage()->height());
 
   image_resource->SetRevalidatingRequest(ResourceRequest(url));
-  ResourceResponse response;
-  response.SetURL(url);
+  ResourceResponse response(url);
   response.SetHTTPStatusCode(304);
   image_resource->ResponseReceived(response, nullptr);
 
@@ -1070,7 +1088,7 @@ TEST(ImageResourceTest, SuccessfulRevalidationSvg) {
 }
 
 TEST(ImageResourceTest, FailedRevalidationJpegToJpeg) {
-  KURL url(kParsedURLString, "http://127.0.0.1:8000/foo");
+  KURL url("http://127.0.0.1:8000/foo");
   ImageResource* image_resource = ImageResource::CreateForTest(url);
   std::unique_ptr<MockImageResourceObserver> observer =
       MockImageResourceObserver::Create(image_resource->GetContent());
@@ -1105,7 +1123,7 @@ TEST(ImageResourceTest, FailedRevalidationJpegToJpeg) {
 }
 
 TEST(ImageResourceTest, FailedRevalidationJpegToSvg) {
-  KURL url(kParsedURLString, "http://127.0.0.1:8000/foo");
+  KURL url("http://127.0.0.1:8000/foo");
   ImageResource* image_resource = ImageResource::CreateForTest(url);
   std::unique_ptr<MockImageResourceObserver> observer =
       MockImageResourceObserver::Create(image_resource->GetContent());
@@ -1139,7 +1157,7 @@ TEST(ImageResourceTest, FailedRevalidationJpegToSvg) {
 }
 
 TEST(ImageResourceTest, FailedRevalidationSvgToJpeg) {
-  KURL url(kParsedURLString, "http://127.0.0.1:8000/foo");
+  KURL url("http://127.0.0.1:8000/foo");
   ImageResource* image_resource = ImageResource::CreateForTest(url);
   std::unique_ptr<MockImageResourceObserver> observer =
       MockImageResourceObserver::Create(image_resource->GetContent());
@@ -1173,7 +1191,7 @@ TEST(ImageResourceTest, FailedRevalidationSvgToJpeg) {
 }
 
 TEST(ImageResourceTest, FailedRevalidationSvgToSvg) {
-  KURL url(kParsedURLString, "http://127.0.0.1:8000/foo");
+  KURL url("http://127.0.0.1:8000/foo");
   ImageResource* image_resource = ImageResource::CreateForTest(url);
   std::unique_ptr<MockImageResourceObserver> observer =
       MockImageResourceObserver::Create(image_resource->GetContent());
@@ -1206,13 +1224,9 @@ TEST(ImageResourceTest, FailedRevalidationSvgToSvg) {
 
 // Tests for pruning.
 
-TEST(ImageResourceTest, AddClientAfterPrune) {
-  KURL url(kParsedURLString, "http://127.0.0.1:8000/foo");
+TEST(ImageResourceTest, Prune) {
+  KURL url("http://127.0.0.1:8000/foo");
   ImageResource* image_resource = ImageResource::CreateForTest(url);
-
-  // Adds a ResourceClient but not ImageResourceObserver.
-  Persistent<MockResourceClient> client1 =
-      new MockResourceClient(image_resource);
 
   ReceiveResponse(image_resource, url, "image/jpeg",
                   reinterpret_cast<const char*>(kJpegImage),
@@ -1224,9 +1238,6 @@ TEST(ImageResourceTest, AddClientAfterPrune) {
   EXPECT_EQ(kJpegImageWidth, image_resource->GetContent()->GetImage()->width());
   EXPECT_EQ(kJpegImageHeight,
             image_resource->GetContent()->GetImage()->height());
-  EXPECT_TRUE(client1->NotifyFinishedCalled());
-
-  client1->RemoveAsClient();
 
   EXPECT_FALSE(image_resource->IsAlive());
 
@@ -1234,20 +1245,16 @@ TEST(ImageResourceTest, AddClientAfterPrune) {
 
   EXPECT_TRUE(image_resource->GetContent()->HasImage());
 
-  // Re-adds a ResourceClient but not ImageResourceObserver.
-  Persistent<MockResourceClient> client2 =
-      new MockResourceClient(image_resource);
-
+  blink::testing::RunPendingTasks();
   ASSERT_TRUE(image_resource->GetContent()->HasImage());
   EXPECT_FALSE(image_resource->GetContent()->GetImage()->IsNull());
   EXPECT_EQ(kJpegImageWidth, image_resource->GetContent()->GetImage()->width());
   EXPECT_EQ(kJpegImageHeight,
             image_resource->GetContent()->GetImage()->height());
-  EXPECT_TRUE(client2->NotifyFinishedCalled());
 }
 
 TEST(ImageResourceTest, CancelOnDecodeError) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceFetcher* fetcher = CreateFetcher();
@@ -1257,8 +1264,7 @@ TEST(ImageResourceTest, CancelOnDecodeError) {
       MockImageResourceObserver::Create(image_resource->GetContent());
 
   image_resource->Loader()->DidReceiveResponse(
-      WrappedResourceResponse(
-          ResourceResponse(test_url, "image/jpeg", 18, g_null_atom)),
+      WrappedResourceResponse(ResourceResponse(test_url, "image/jpeg", 18)),
       nullptr);
 
   EXPECT_EQ(0, observer->ImageChangedCount());
@@ -1274,7 +1280,7 @@ TEST(ImageResourceTest, CancelOnDecodeError) {
 }
 
 TEST(ImageResourceTest, DecodeErrorWithEmptyBody) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceFetcher* fetcher = CreateFetcher();
@@ -1284,15 +1290,14 @@ TEST(ImageResourceTest, DecodeErrorWithEmptyBody) {
       MockImageResourceObserver::Create(image_resource->GetContent());
 
   image_resource->Loader()->DidReceiveResponse(
-      WrappedResourceResponse(
-          ResourceResponse(test_url, "image/jpeg", 0, g_null_atom)),
+      WrappedResourceResponse(ResourceResponse(test_url, "image/jpeg")),
       nullptr);
 
   EXPECT_EQ(ResourceStatus::kPending, image_resource->GetStatus());
   EXPECT_FALSE(observer->ImageNotifyFinishedCalled());
   EXPECT_EQ(0, observer->ImageChangedCount());
 
-  image_resource->Loader()->DidFinishLoading(0.0, 0, 0, 0);
+  image_resource->Loader()->DidFinishLoading(0.0, 0, 0, 0, false);
 
   EXPECT_EQ(ResourceStatus::kDecodeError, image_resource->GetStatus());
   EXPECT_TRUE(observer->ImageNotifyFinishedCalled());
@@ -1305,7 +1310,7 @@ TEST(ImageResourceTest, DecodeErrorWithEmptyBody) {
 // Testing DecodeError that occurs in didFinishLoading().
 // This is similar to DecodeErrorWithEmptyBody, but with non-empty body.
 TEST(ImageResourceTest, PartialContentWithoutDimensions) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceRequest resource_request(test_url);
@@ -1317,8 +1322,7 @@ TEST(ImageResourceTest, PartialContentWithoutDimensions) {
       MockImageResourceObserver::Create(image_resource->GetContent());
 
   ResourceResponse partial_response(test_url, "image/jpeg",
-                                    kJpegImageSubrangeWithoutDimensionsLength,
-                                    g_null_atom);
+                                    kJpegImageSubrangeWithoutDimensionsLength);
   partial_response.SetHTTPStatusCode(206);
   partial_response.SetHTTPHeaderField(
       "content-range",
@@ -1338,7 +1342,7 @@ TEST(ImageResourceTest, PartialContentWithoutDimensions) {
   image_resource->Loader()->DidFinishLoading(
       0.0, kJpegImageSubrangeWithoutDimensionsLength,
       kJpegImageSubrangeWithoutDimensionsLength,
-      kJpegImageSubrangeWithoutDimensionsLength);
+      kJpegImageSubrangeWithoutDimensionsLength, false);
 
   EXPECT_EQ(ResourceStatus::kDecodeError, image_resource->GetStatus());
   EXPECT_TRUE(observer->ImageNotifyFinishedCalled());
@@ -1349,7 +1353,7 @@ TEST(ImageResourceTest, PartialContentWithoutDimensions) {
 }
 
 TEST(ImageResourceTest, FetchDisallowPlaceholder) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   FetchParameters params{ResourceRequest(test_url)};
@@ -1364,10 +1368,9 @@ TEST(ImageResourceTest, FetchDisallowPlaceholder) {
 }
 
 TEST(ImageResourceTest, FetchAllowPlaceholderDataURL) {
-  KURL test_url(kParsedURLString,
-                "data:image/jpeg;base64," +
-                    Base64Encode(reinterpret_cast<const char*>(kJpegImage),
-                                 sizeof(kJpegImage)));
+  KURL test_url("data:image/jpeg;base64," +
+                Base64Encode(reinterpret_cast<const char*>(kJpegImage),
+                             sizeof(kJpegImage)));
   FetchParameters params{ResourceRequest(test_url)};
   params.SetAllowImagePlaceholder();
   ImageResource* image_resource = ImageResource::Fetch(params, CreateFetcher());
@@ -1379,10 +1382,10 @@ TEST(ImageResourceTest, FetchAllowPlaceholderDataURL) {
 }
 
 TEST(ImageResourceTest, FetchAllowPlaceholderPostRequest) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
   ResourceRequest resource_request(test_url);
-  resource_request.SetHTTPMethod("POST");
+  resource_request.SetHTTPMethod(HTTPNames::POST);
   FetchParameters params(resource_request);
   params.SetAllowImagePlaceholder();
   ImageResource* image_resource = ImageResource::Fetch(params, CreateFetcher());
@@ -1396,7 +1399,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderPostRequest) {
 }
 
 TEST(ImageResourceTest, FetchAllowPlaceholderExistingRangeHeader) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
   ResourceRequest resource_request(test_url);
   resource_request.SetHTTPHeaderField("range", "bytes=128-255");
@@ -1413,7 +1416,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderExistingRangeHeader) {
 }
 
 TEST(ImageResourceTest, FetchAllowPlaceholderSuccessful) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   FetchParameters params{ResourceRequest(test_url)};
@@ -1429,7 +1432,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderSuccessful) {
 }
 
 TEST(ImageResourceTest, FetchAllowPlaceholderUnsuccessful) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   FetchParameters params{ResourceRequest(test_url)};
@@ -1445,8 +1448,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderUnsuccessful) {
 
   const char kBadData[] = "notanimageresponse";
 
-  ResourceResponse bad_response(test_url, "image/jpeg", sizeof(kBadData),
-                                g_null_atom);
+  ResourceResponse bad_response(test_url, "image/jpeg", sizeof(kBadData));
   bad_response.SetHTTPStatusCode(206);
   bad_response.SetHTTPHeaderField(
       "content-range", BuildContentRange(sizeof(kBadData), sizeof(kJpegImage)));
@@ -1466,11 +1468,11 @@ TEST(ImageResourceTest, FetchAllowPlaceholderUnsuccessful) {
 
   TestThatReloadIsStartedThenServeReload(
       test_url, image_resource, image_resource->GetContent(), observer.get(),
-      WebCachePolicy::kBypassingCache, false);
+      mojom::FetchCacheMode::kBypassCache, false);
 }
 
 TEST(ImageResourceTest, FetchAllowPlaceholderUnsuccessfulClientLoFi) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceRequest request = ResourceRequest(test_url);
@@ -1488,8 +1490,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderUnsuccessfulClientLoFi) {
 
   const char kBadData[] = "notanimageresponse";
 
-  ResourceResponse bad_response(test_url, "image/jpeg", sizeof(kBadData),
-                                g_null_atom);
+  ResourceResponse bad_response(test_url, "image/jpeg", sizeof(kBadData));
   bad_response.SetHTTPStatusCode(206);
   bad_response.SetHTTPHeaderField(
       "content-range", BuildContentRange(sizeof(kBadData), sizeof(kJpegImage)));
@@ -1508,7 +1509,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderUnsuccessfulClientLoFi) {
 
   TestThatReloadIsStartedThenServeReload(
       test_url, image_resource, image_resource->GetContent(), observer.get(),
-      WebCachePolicy::kBypassingCache, true);
+      mojom::FetchCacheMode::kBypassCache, true);
 
   EXPECT_FALSE(image_resource->GetContent()->GetImage()->IsBitmapImage());
   EXPECT_TRUE(image_resource->ShouldShowPlaceholder());
@@ -1530,7 +1531,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderPartialContentWithoutDimensions) {
   };
 
   for (const auto& test : tests) {
-    KURL test_url(kParsedURLString, kTestURL);
+    KURL test_url(kTestURL);
     ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
     ResourceRequest resource_request(test_url);
@@ -1550,9 +1551,8 @@ TEST(ImageResourceTest, FetchAllowPlaceholderPartialContentWithoutDimensions) {
 
     // TODO(hiroshige): Make the range request header and partial content length
     // consistent. https://crbug.com/689760.
-    ResourceResponse partial_response(test_url, "image/jpeg",
-                                      kJpegImageSubrangeWithoutDimensionsLength,
-                                      g_null_atom);
+    ResourceResponse partial_response(
+        test_url, "image/jpeg", kJpegImageSubrangeWithoutDimensionsLength);
     partial_response.SetHTTPStatusCode(206);
     partial_response.SetHTTPHeaderField(
         "content-range",
@@ -1570,14 +1570,14 @@ TEST(ImageResourceTest, FetchAllowPlaceholderPartialContentWithoutDimensions) {
     image_resource->Loader()->DidFinishLoading(
         0.0, kJpegImageSubrangeWithoutDimensionsLength,
         kJpegImageSubrangeWithoutDimensionsLength,
-        kJpegImageSubrangeWithoutDimensionsLength);
+        kJpegImageSubrangeWithoutDimensionsLength, false);
 
     EXPECT_FALSE(observer->ImageNotifyFinishedCalled());
     EXPECT_EQ(2, observer->ImageChangedCount());
 
     TestThatReloadIsStartedThenServeReload(
         test_url, image_resource, image_resource->GetContent(), observer.get(),
-        WebCachePolicy::kBypassingCache, test.placeholder_before_reload);
+        mojom::FetchCacheMode::kBypassCache, test.placeholder_before_reload);
 
     EXPECT_EQ(test.expected_reload_previews_state,
               image_resource->GetResourceRequest().GetPreviewsState());
@@ -1585,7 +1585,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderPartialContentWithoutDimensions) {
 }
 
 TEST(ImageResourceTest, FetchAllowPlaceholderThenDisallowPlaceholder) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceFetcher* fetcher = CreateFetcher();
@@ -1636,7 +1636,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderThenDisallowPlaceholder) {
 
 TEST(ImageResourceTest,
      FetchAllowPlaceholderThenDisallowPlaceholderAfterLoaded) {
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   ResourceFetcher* fetcher = CreateFetcher();
@@ -1684,7 +1684,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderFullResponseDecodeSuccess) {
       {206, BuildContentRange(sizeof(kJpegImage), sizeof(kJpegImage))},
   };
   for (const auto& test : tests) {
-    KURL test_url(kParsedURLString, kTestURL);
+    KURL test_url(kTestURL);
     ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
     FetchParameters params{ResourceRequest(test_url)};
@@ -1699,8 +1699,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderFullResponseDecodeSuccess) {
     std::unique_ptr<MockImageResourceObserver> observer =
         MockImageResourceObserver::Create(image_resource->GetContent());
 
-    ResourceResponse response(test_url, "image/jpeg", sizeof(kJpegImage),
-                              g_null_atom);
+    ResourceResponse response(test_url, "image/jpeg", sizeof(kJpegImage));
     response.SetHTTPStatusCode(test.status_code);
     if (test.content_range != g_null_atom)
       response.SetHTTPHeaderField("content-range", test.content_range);
@@ -1709,7 +1708,7 @@ TEST(ImageResourceTest, FetchAllowPlaceholderFullResponseDecodeSuccess) {
     image_resource->Loader()->DidReceiveData(
         reinterpret_cast<const char*>(kJpegImage), sizeof(kJpegImage));
     image_resource->Loader()->DidFinishLoading(
-        0.0, sizeof(kJpegImage), sizeof(kJpegImage), sizeof(kJpegImage));
+        0.0, sizeof(kJpegImage), sizeof(kJpegImage), sizeof(kJpegImage), false);
 
     EXPECT_EQ(ResourceStatus::kCached, image_resource->GetStatus());
     EXPECT_EQ(sizeof(kJpegImage), image_resource->EncodedSize());
@@ -1743,7 +1742,7 @@ TEST(ImageResourceTest,
       {204, g_null_atom, 0},
   };
   for (const auto& test : tests) {
-    KURL test_url(kParsedURLString, kTestURL);
+    KURL test_url(kTestURL);
     ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
     FetchParameters params{ResourceRequest(test_url)};
@@ -1758,8 +1757,7 @@ TEST(ImageResourceTest,
     std::unique_ptr<MockImageResourceObserver> observer =
         MockImageResourceObserver::Create(image_resource->GetContent());
 
-    ResourceResponse response(test_url, "image/jpeg", test.data_size,
-                              g_null_atom);
+    ResourceResponse response(test_url, "image/jpeg", test.data_size);
     response.SetHTTPStatusCode(test.status_code);
     if (test.content_range != g_null_atom)
       response.SetHTTPHeaderField("content-range", test.content_range);
@@ -1776,7 +1774,7 @@ TEST(ImageResourceTest,
      FetchAllowPlaceholderFullResponseDecodeFailureWithReload) {
   const int kStatusCodes[] = {404, 500};
   for (int status_code : kStatusCodes) {
-    KURL test_url(kParsedURLString, kTestURL);
+    KURL test_url(kTestURL);
     ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
     FetchParameters params{ResourceRequest(test_url)};
@@ -1793,8 +1791,7 @@ TEST(ImageResourceTest,
 
     static const char kBadImageData[] = "bad image data";
 
-    ResourceResponse response(test_url, "image/jpeg", sizeof(kBadImageData),
-                              g_null_atom);
+    ResourceResponse response(test_url, "image/jpeg", sizeof(kBadImageData));
     response.SetHTTPStatusCode(status_code);
     image_resource->Loader()->DidReceiveResponse(
         WrappedResourceResponse(response));
@@ -1807,16 +1804,35 @@ TEST(ImageResourceTest,
     // error, so the full original image should be loading.
     TestThatReloadIsStartedThenServeReload(
         test_url, image_resource, image_resource->GetContent(), observer.get(),
-        WebCachePolicy::kBypassingCache, false);
+        mojom::FetchCacheMode::kBypassCache, false);
   }
 }
 
 TEST(ImageResourceTest, PeriodicFlushTest) {
+  EmptyChromeClient* chrome_client = new EmptyChromeClient();
+  Page::PageClients clients;
+  FillWithEmptyClients(clients);
+  clients.chrome_client = chrome_client;
+  std::unique_ptr<DummyPageHolder> page_holder = DummyPageHolder::Create(
+      IntSize(800, 600), &clients, EmptyLocalFrameClient::Create(), nullptr);
+
   ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
       platform;
-  KURL test_url(kParsedURLString, kTestURL);
+  KURL test_url(kTestURL);
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
+
+  MockFetchContext* context = MockFetchContext::Create(
+      MockFetchContext::LoadPolicy::kShouldLoadNewResource,
+      page_holder->GetFrame().GetTaskRunner(TaskType::kInternalTest));
+  ResourceFetcher* fetcher = ResourceFetcher::Create(context);
+  ResourceLoadScheduler* scheduler = ResourceLoadScheduler::Create();
   ImageResource* image_resource = ImageResource::CreateForTest(test_url);
+
+  // Ensure that |image_resource| has a loader.
+  ResourceLoader* loader =
+      ResourceLoader::Create(fetcher, scheduler, image_resource);
+  ALLOW_UNUSED_LOCAL(loader);
+
   image_resource->SetStatus(ResourceStatus::kPending);
   image_resource->NotifyStartLoad();
 
@@ -1825,7 +1841,7 @@ TEST(ImageResourceTest, PeriodicFlushTest) {
 
   // Send the image response.
   ResourceResponse resource_response(NullURL(), "image/jpeg",
-                                     sizeof(kJpegImage2), g_null_atom);
+                                     sizeof(kJpegImage2));
 
   image_resource->ResponseReceived(resource_response, nullptr);
 
@@ -1882,7 +1898,7 @@ TEST(ImageResourceTest, PeriodicFlushTest) {
   image_resource->AppendData(
       reinterpret_cast<const char*>(kJpegImage2) + bytes_sent,
       sizeof(kJpegImage2) - bytes_sent);
-  image_resource->Finish();
+  image_resource->FinishForTest();
 
   EXPECT_FALSE(image_resource->ErrorOccurred());
   ASSERT_TRUE(image_resource->GetContent()->HasImage());
@@ -1896,5 +1912,106 @@ TEST(ImageResourceTest, PeriodicFlushTest) {
   WTF::SetTimeFunctionsForTesting(nullptr);
 }
 
+TEST(ImageResourceTest, DeferredInvalidation) {
+  ImageResource* image_resource = ImageResource::CreateForTest(NullURL());
+  std::unique_ptr<MockImageResourceObserver> obs =
+      MockImageResourceObserver::Create(image_resource->GetContent());
+
+  // Image loaded.
+  ReceiveResponse(image_resource, NullURL(), "image/jpeg",
+                  reinterpret_cast<const char*>(kJpegImage),
+                  sizeof(kJpegImage));
+  EXPECT_EQ(obs->ImageChangedCount(), 2);
+  EXPECT_EQ(obs->Defer(), ImageResourceObserver::CanDeferInvalidation::kNo);
+
+  // Image animated.
+  static_cast<ImageObserver*>(image_resource->GetContent())
+      ->AnimationAdvanced(image_resource->GetContent()->GetImage());
+  EXPECT_EQ(obs->ImageChangedCount(), 3);
+  EXPECT_EQ(obs->Defer(), ImageResourceObserver::CanDeferInvalidation::kYes);
+}
+
 }  // namespace
+
+class ImageResourceCounterTest : public ::testing::Test {
+ public:
+  ImageResourceCounterTest() = default;
+  ~ImageResourceCounterTest() = default;
+
+  void CreateImageResource(const char* url_part, bool ua_resource) {
+    // Create a unique fake data url.
+    String url("data:image/png;base64,");
+    url.append(url_part);
+
+    // Setup the fetcher and request.
+    ResourceFetcher* fetcher = CreateFetcher();
+    KURL test_url(url);
+    ResourceRequest request = ResourceRequest(test_url);
+    FetchParameters fetch_params(request);
+    scheduler::FakeTaskRunner* task_runner =
+        static_cast<scheduler::FakeTaskRunner*>(
+            fetcher->Context().GetLoadingTaskRunner().get());
+    task_runner->SetTime(1);
+
+    // Mark it as coming from a UA stylesheet (if needed).
+    if (ua_resource) {
+      fetch_params.MutableOptions().initiator_info.name =
+          FetchInitiatorTypeNames::uacss;
+    }
+
+    // Fetch the ImageResource.
+    ImageResource::Fetch(fetch_params, fetcher);
+    task_runner->RunUntilIdle();
+  }
+
+  int GetResourceCount() const {
+    return InstanceCounters::CounterValue(InstanceCounters::kResourceCounter);
+  }
+
+  int GetUACSSResourceCount() const {
+    return InstanceCounters::CounterValue(
+        InstanceCounters::kUACSSResourceCounter);
+  }
+};
+
+TEST_F(ImageResourceCounterTest, InstanceCounters) {
+  // Get the current resource count.
+  int current_count = GetResourceCount();
+  int current_ua_count = GetUACSSResourceCount();
+
+  // Create a non-UA sourced image.
+  CreateImageResource("a", false);
+
+  // Check the instance counters have been updated.
+  EXPECT_EQ(++current_count, GetResourceCount());
+  EXPECT_EQ(current_ua_count, GetUACSSResourceCount());
+
+  // Create another non-UA sourced image.
+  CreateImageResource("b", false);
+
+  // Check the instance counters have been updated.
+  EXPECT_EQ(++current_count, GetResourceCount());
+  EXPECT_EQ(current_ua_count, GetUACSSResourceCount());
+}
+
+TEST_F(ImageResourceCounterTest, InstanceCounters_UserAgent) {
+  // Get the current resource count.
+  int current_count = GetResourceCount();
+  int current_ua_count = GetUACSSResourceCount();
+
+  // Create a non-UA sourced image.
+  CreateImageResource("c", false);
+
+  // Check the instance counters have been updated.
+  EXPECT_EQ(++current_count, GetResourceCount());
+  EXPECT_EQ(current_ua_count, GetUACSSResourceCount());
+
+  // Create a UA sourced image.
+  CreateImageResource("d", true);
+
+  // Check the instance counters have been updated.
+  EXPECT_EQ(++current_count, GetResourceCount());
+  EXPECT_EQ(++current_ua_count, GetUACSSResourceCount());
+}
+
 }  // namespace blink

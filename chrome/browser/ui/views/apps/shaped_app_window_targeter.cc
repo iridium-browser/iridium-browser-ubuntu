@@ -4,23 +4,23 @@
 
 #include "chrome/browser/ui/views/apps/shaped_app_window_targeter.h"
 
+#include <memory>
+
 #include "chrome/browser/ui/views/apps/chrome_native_app_window_views.h"
 #include "ui/gfx/path.h"
 
 ShapedAppWindowTargeter::ShapedAppWindowTargeter(
-    aura::Window* window,
     ChromeNativeAppWindowViews* app_window)
-    : wm::MaskedWindowTargeter(window), app_window_(app_window) {}
+    : app_window_(app_window) {}
 
-ShapedAppWindowTargeter::~ShapedAppWindowTargeter() {
-}
+ShapedAppWindowTargeter::~ShapedAppWindowTargeter() {}
 
-bool ShapedAppWindowTargeter::GetHitTestMask(aura::Window* window,
-                                             gfx::Path* mask) const {
-  SkRegion* shape = app_window_->shape();
-  if (!shape)
-    return false;
+std::unique_ptr<aura::WindowTargeter::HitTestRects>
+ShapedAppWindowTargeter::GetExtraHitTestShapeRects(aura::Window* target) const {
+  if (!app_window_->shape_rects())
+    return nullptr;
 
-  shape->getBoundaryPath(mask);
-  return true;
+  auto shape_rects = std::make_unique<aura::WindowTargeter::HitTestRects>(
+      *app_window_->shape_rects());
+  return shape_rects;
 }

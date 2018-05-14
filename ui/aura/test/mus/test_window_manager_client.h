@@ -18,6 +18,7 @@ namespace aura {
 enum class WindowManagerClientChangeType {
   ADD_ACTIVATION_PARENT,
   SET_DISPLAY_CONFIGURATION,
+  SET_FRAME_DECORATIONS,
 };
 
 // WindowManagerClient implementation for tests.
@@ -28,14 +29,14 @@ class TestWindowManagerClient : public ui::mojom::WindowManagerClient {
 
   size_t GetChangeCountForType(WindowManagerClientChangeType type);
   int64_t last_internal_display_id() const { return last_internal_display_id_; }
+  size_t IndexOfFirstChangeOfType(WindowManagerClientChangeType type) const;
 
  private:
   // ui::mojom::WindowManagerClient:
-  void AddActivationParent(Id transport_window_id) override;
-  void RemoveActivationParent(Id transport_window_id) override;
-  void ActivateNextWindow() override;
+  void AddActivationParent(ui::Id transport_window_id) override;
+  void RemoveActivationParent(ui::Id transport_window_id) override;
   void SetExtendedHitRegionForChildren(
-      Id window_id,
+      ui::Id window_id,
       const gfx::Insets& mouse_insets,
       const gfx::Insets& touch_insets) override;
   void AddAccelerators(std::vector<ui::mojom::WmAcceleratorPtr> accelerators,
@@ -46,23 +47,28 @@ class TestWindowManagerClient : public ui::mojom::WindowManagerClient {
   void SetDisplayRoot(const display::Display& display,
                       ui::mojom::WmViewportMetricsPtr viewport_metrics,
                       bool is_primary_display,
-                      Id window_id,
+                      ui::Id window_id,
+                      const std::vector<display::Display>& mirrors,
                       const SetDisplayRootCallback& callback) override;
   void SetDisplayConfiguration(
       const std::vector<display::Display>& displays,
       std::vector<::ui::mojom::WmViewportMetricsPtr> viewport_metrics,
       int64_t primary_display_id,
       int64_t internal_display_id,
+      const std::vector<display::Display>& mirrors,
       const SetDisplayConfigurationCallback& callback) override;
   void SwapDisplayRoots(int64_t display_id1,
                         int64_t display_id2,
                         const SwapDisplayRootsCallback& callback) override;
+  void SetBlockingContainers(
+      std::vector<ui::mojom::BlockingContainersPtr> blocking_containers,
+      const SetBlockingContainersCallback& callback) override;
   void WmResponse(uint32_t change_id, bool response) override;
   void WmSetBoundsResponse(uint32_t change_id) override;
-  void WmRequestClose(Id transport_window_id) override;
+  void WmRequestClose(ui::Id transport_window_id) override;
   void WmSetFrameDecorationValues(
       ui::mojom::FrameDecorationValuesPtr values) override;
-  void WmSetNonClientCursor(uint32_t window_id,
+  void WmSetNonClientCursor(ui::Id window_id,
                             ui::CursorData cursor_data) override;
   void WmLockCursor() override;
   void WmUnlockCursor() override;
@@ -72,8 +78,11 @@ class TestWindowManagerClient : public ui::mojom::WindowManagerClient {
       base::Optional<ui::CursorData> cursor) override;
   void WmMoveCursorToDisplayLocation(const gfx::Point& display_pixels,
                                      int64_t display_id) override;
+  void WmConfineCursorToBounds(const gfx::Rect& bounds_in_pixles,
+                               int64_t display_id) override;
+  void WmSetCursorTouchVisible(bool enabled) override;
   void OnWmCreatedTopLevelWindow(uint32_t change_id,
-                                 Id transport_window_id) override;
+                                 ui::Id transport_window_id) override;
   void OnAcceleratorAck(
       uint32_t event_id,
       ui::mojom::EventResult result,

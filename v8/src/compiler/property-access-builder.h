@@ -41,6 +41,8 @@ class PropertyAccessBuilder {
   Node* BuildCheckHeapObject(Node* receiver, Node** effect, Node* control);
   void BuildCheckMaps(Node* receiver, Node** effect, Node* control,
                       std::vector<Handle<Map>> const& receiver_maps);
+  Node* BuildCheckValue(Node* receiver, Node** effect, Node* control,
+                        Handle<HeapObject> value);
 
   // Adds stability dependencies on all prototypes of every class in
   // {receiver_type} up to (and including) the {holder}.
@@ -72,6 +74,8 @@ class PropertyAccessBuilder {
   JSGraph* jsgraph_;
   CompilationDependencies* dependencies_;
 };
+
+bool HasOnlyStringMaps(MapHandles const& maps);
 
 }  // namespace compiler
 }  // namespace internal

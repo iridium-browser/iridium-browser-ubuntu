@@ -8,6 +8,7 @@
 
 #include "net/quic/core/quic_data_reader.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_arraysize.h"
 #include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/quic_test_utils.h"
@@ -21,20 +22,15 @@ char* AsChars(unsigned char* data) {
 }
 
 struct TestParams {
-  TestParams(Perspective perspective, Endianness endianness)
-      : perspective(perspective), endianness(endianness) {}
+  explicit TestParams(Endianness endianness) : endianness(endianness) {}
 
-  Perspective perspective;
   Endianness endianness;
 };
 
 std::vector<TestParams> GetTestParams() {
   std::vector<TestParams> params;
-  for (Perspective perspective :
-       {Perspective::IS_CLIENT, Perspective::IS_SERVER}) {
-    for (Endianness endianness : {NETWORK_BYTE_ORDER, HOST_BYTE_ORDER}) {
-      params.push_back(TestParams(perspective, endianness));
-    }
+  for (Endianness endianness : {NETWORK_BYTE_ORDER, HOST_BYTE_ORDER}) {
+    params.push_back(TestParams(endianness));
   }
   return params;
 }
@@ -126,8 +122,7 @@ TEST_P(QuicDataWriterTest, WriteUFloat16) {
 
   for (int i = 0; i < num_test_cases; ++i) {
     char buffer[2];
-    QuicDataWriter writer(2, buffer, GetParam().perspective,
-                          GetParam().endianness);
+    QuicDataWriter writer(2, buffer, GetParam().endianness);
     EXPECT_TRUE(writer.WriteUFloat16(test_cases[i].decoded));
     uint16_t result = *reinterpret_cast<uint16_t*>(writer.data());
     if (GetParam().endianness == NETWORK_BYTE_ORDER) {
@@ -195,7 +190,7 @@ TEST_P(QuicDataWriterTest, ReadUFloat16) {
       encoded_ufloat = QuicEndian::HostToNet16(encoded_ufloat);
     }
     QuicDataReader reader(reinterpret_cast<char*>(&encoded_ufloat), 2,
-                          GetParam().perspective, GetParam().endianness);
+                          GetParam().endianness);
     uint64_t value;
     EXPECT_TRUE(reader.ReadUFloat16(&value));
     EXPECT_EQ(test_cases[i].decoded, value);
@@ -212,7 +207,7 @@ TEST_P(QuicDataWriterTest, RoundTripUFloat16) {
       read_number = QuicEndian::HostToNet16(read_number);
     }
     QuicDataReader reader(reinterpret_cast<char*>(&read_number), 2,
-                          GetParam().perspective, GetParam().endianness);
+                          GetParam().endianness);
     uint64_t value;
     // All values must be decodable.
     EXPECT_TRUE(reader.ReadUFloat16(&value));
@@ -230,8 +225,7 @@ TEST_P(QuicDataWriterTest, RoundTripUFloat16) {
     EXPECT_LT(value, UINT64_C(0x3FFC0000000));
     previous_value = value;
     char buffer[6];
-    QuicDataWriter writer(6, buffer, GetParam().perspective,
-                          GetParam().endianness);
+    QuicDataWriter writer(6, buffer, GetParam().endianness);
     EXPECT_TRUE(writer.WriteUFloat16(value - 1));
     EXPECT_TRUE(writer.WriteUFloat16(value));
     EXPECT_TRUE(writer.WriteUFloat16(value + 1));
@@ -259,15 +253,13 @@ TEST_P(QuicDataWriterTest, WriteConnectionId) {
   };
   const int kBufferLength = sizeof(connection_id);
   char buffer[kBufferLength];
-  QuicDataWriter writer(kBufferLength, buffer, GetParam().perspective,
-                        GetParam().endianness);
+  QuicDataWriter writer(kBufferLength, buffer, GetParam().endianness);
   writer.WriteConnectionId(connection_id);
   test::CompareCharArraysWithHexError("connection_id", buffer, kBufferLength,
                                       big_endian, kBufferLength);
 
   uint64_t read_connection_id;
-  QuicDataReader reader(buffer, kBufferLength, GetParam().perspective,
-                        GetParam().endianness);
+  QuicDataReader reader(buffer, kBufferLength, GetParam().endianness);
   reader.ReadConnectionId(&read_connection_id);
   EXPECT_EQ(connection_id, read_connection_id);
 }
@@ -278,15 +270,13 @@ TEST_P(QuicDataWriterTest, WriteTag) {
   };
   const int kBufferLength = sizeof(QuicTag);
   char buffer[kBufferLength];
-  QuicDataWriter writer(kBufferLength, buffer, GetParam().perspective,
-                        GetParam().endianness);
+  QuicDataWriter writer(kBufferLength, buffer, GetParam().endianness);
   writer.WriteTag(kCHLO);
   test::CompareCharArraysWithHexError("CHLO", buffer, kBufferLength, CHLO,
                                       kBufferLength);
 
   QuicTag read_chlo;
-  QuicDataReader reader(buffer, kBufferLength, GetParam().perspective,
-                        GetParam().endianness);
+  QuicDataReader reader(buffer, kBufferLength, GetParam().endianness);
   reader.ReadTag(&read_chlo);
   EXPECT_EQ(kCHLO, read_chlo);
 }
@@ -297,8 +287,7 @@ TEST_P(QuicDataWriterTest, Write16BitUnsignedIntegers) {
   char buffer16[2];
   {
     uint16_t in_memory16 = 0x1122;
-    QuicDataWriter writer(2, buffer16, GetParam().perspective,
-                          GetParam().endianness);
+    QuicDataWriter writer(2, buffer16, GetParam().endianness);
     writer.WriteUInt16(in_memory16);
     test::CompareCharArraysWithHexError(
         "uint16_t", buffer16, 2,
@@ -307,16 +296,14 @@ TEST_P(QuicDataWriterTest, Write16BitUnsignedIntegers) {
         2);
 
     uint16_t read_number16;
-    QuicDataReader reader(buffer16, 2, GetParam().perspective,
-                          GetParam().endianness);
+    QuicDataReader reader(buffer16, 2, GetParam().endianness);
     reader.ReadUInt16(&read_number16);
     EXPECT_EQ(in_memory16, read_number16);
   }
 
   {
     uint64_t in_memory16 = 0x0000000000001122;
-    QuicDataWriter writer(2, buffer16, GetParam().perspective,
-                          GetParam().endianness);
+    QuicDataWriter writer(2, buffer16, GetParam().endianness);
     writer.WriteBytesToUInt64(2, in_memory16);
     test::CompareCharArraysWithHexError(
         "uint16_t", buffer16, 2,
@@ -324,9 +311,8 @@ TEST_P(QuicDataWriterTest, Write16BitUnsignedIntegers) {
                                                     : little_endian16,
         2);
 
-    uint64_t read_number16 = 0u;
-    QuicDataReader reader(buffer16, 2, GetParam().perspective,
-                          GetParam().endianness);
+    uint64_t read_number16;
+    QuicDataReader reader(buffer16, 2, GetParam().endianness);
     reader.ReadBytesToUInt64(2, &read_number16);
     EXPECT_EQ(in_memory16, read_number16);
   }
@@ -337,8 +323,7 @@ TEST_P(QuicDataWriterTest, Write24BitUnsignedIntegers) {
   char big_endian24[] = {0x11, 0x22, 0x33};
   char buffer24[3];
   uint64_t in_memory24 = 0x0000000000112233;
-  QuicDataWriter writer(3, buffer24, GetParam().perspective,
-                        GetParam().endianness);
+  QuicDataWriter writer(3, buffer24, GetParam().endianness);
   writer.WriteBytesToUInt64(3, in_memory24);
   test::CompareCharArraysWithHexError(
       "uint24", buffer24, 3,
@@ -346,9 +331,8 @@ TEST_P(QuicDataWriterTest, Write24BitUnsignedIntegers) {
                                                   : little_endian24,
       3);
 
-  uint64_t read_number24 = 0u;
-  QuicDataReader reader(buffer24, 3, GetParam().perspective,
-                        GetParam().endianness);
+  uint64_t read_number24;
+  QuicDataReader reader(buffer24, 3, GetParam().endianness);
   reader.ReadBytesToUInt64(3, &read_number24);
   EXPECT_EQ(in_memory24, read_number24);
 }
@@ -359,8 +343,7 @@ TEST_P(QuicDataWriterTest, Write32BitUnsignedIntegers) {
   char buffer32[4];
   {
     uint32_t in_memory32 = 0x11223344;
-    QuicDataWriter writer(4, buffer32, GetParam().perspective,
-                          GetParam().endianness);
+    QuicDataWriter writer(4, buffer32, GetParam().endianness);
     writer.WriteUInt32(in_memory32);
     test::CompareCharArraysWithHexError(
         "uint32_t", buffer32, 4,
@@ -369,16 +352,14 @@ TEST_P(QuicDataWriterTest, Write32BitUnsignedIntegers) {
         4);
 
     uint32_t read_number32;
-    QuicDataReader reader(buffer32, 4, GetParam().perspective,
-                          GetParam().endianness);
+    QuicDataReader reader(buffer32, 4, GetParam().endianness);
     reader.ReadUInt32(&read_number32);
     EXPECT_EQ(in_memory32, read_number32);
   }
 
   {
     uint64_t in_memory32 = 0x11223344;
-    QuicDataWriter writer(4, buffer32, GetParam().perspective,
-                          GetParam().endianness);
+    QuicDataWriter writer(4, buffer32, GetParam().endianness);
     writer.WriteBytesToUInt64(4, in_memory32);
     test::CompareCharArraysWithHexError(
         "uint32_t", buffer32, 4,
@@ -386,9 +367,8 @@ TEST_P(QuicDataWriterTest, Write32BitUnsignedIntegers) {
                                                     : little_endian32,
         4);
 
-    uint64_t read_number32 = 0u;
-    QuicDataReader reader(buffer32, 4, GetParam().perspective,
-                          GetParam().endianness);
+    uint64_t read_number32;
+    QuicDataReader reader(buffer32, 4, GetParam().endianness);
     reader.ReadBytesToUInt64(4, &read_number32);
     EXPECT_EQ(in_memory32, read_number32);
   }
@@ -399,8 +379,7 @@ TEST_P(QuicDataWriterTest, Write40BitUnsignedIntegers) {
   char little_endian40[] = {0x55, 0x44, 0x33, 0x22, 0x11};
   char big_endian40[] = {0x11, 0x22, 0x33, 0x44, 0x55};
   char buffer40[5];
-  QuicDataWriter writer(5, buffer40, GetParam().perspective,
-                        GetParam().endianness);
+  QuicDataWriter writer(5, buffer40, GetParam().endianness);
   writer.WriteBytesToUInt64(5, in_memory40);
   test::CompareCharArraysWithHexError(
       "uint40", buffer40, 5,
@@ -408,9 +387,8 @@ TEST_P(QuicDataWriterTest, Write40BitUnsignedIntegers) {
                                                   : little_endian40,
       5);
 
-  uint64_t read_number40 = 0u;
-  QuicDataReader reader(buffer40, 5, GetParam().perspective,
-                        GetParam().endianness);
+  uint64_t read_number40;
+  QuicDataReader reader(buffer40, 5, GetParam().endianness);
   reader.ReadBytesToUInt64(5, &read_number40);
   EXPECT_EQ(in_memory40, read_number40);
 }
@@ -420,8 +398,7 @@ TEST_P(QuicDataWriterTest, Write48BitUnsignedIntegers) {
   char little_endian48[] = {0x66, 0x55, 0x44, 0x33, 0x22, 0x11};
   char big_endian48[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
   char buffer48[6];
-  QuicDataWriter writer(6, buffer48, GetParam().perspective,
-                        GetParam().endianness);
+  QuicDataWriter writer(6, buffer48, GetParam().endianness);
   writer.WriteBytesToUInt64(6, in_memory48);
   test::CompareCharArraysWithHexError(
       "uint48", buffer48, 6,
@@ -429,9 +406,8 @@ TEST_P(QuicDataWriterTest, Write48BitUnsignedIntegers) {
                                                   : little_endian48,
       6);
 
-  uint64_t read_number48 = 0u;
-  QuicDataReader reader(buffer48, 6, GetParam().perspective,
-                        GetParam().endianness);
+  uint64_t read_number48;
+  QuicDataReader reader(buffer48, 6, GetParam().endianness);
   reader.ReadBytesToUInt64(6., &read_number48);
   EXPECT_EQ(in_memory48, read_number48);
 }
@@ -441,8 +417,7 @@ TEST_P(QuicDataWriterTest, Write56BitUnsignedIntegers) {
   char little_endian56[] = {0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11};
   char big_endian56[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
   char buffer56[7];
-  QuicDataWriter writer(7, buffer56, GetParam().perspective,
-                        GetParam().endianness);
+  QuicDataWriter writer(7, buffer56, GetParam().endianness);
   writer.WriteBytesToUInt64(7, in_memory56);
   test::CompareCharArraysWithHexError(
       "uint56", buffer56, 7,
@@ -450,9 +425,8 @@ TEST_P(QuicDataWriterTest, Write56BitUnsignedIntegers) {
                                                   : little_endian56,
       7);
 
-  uint64_t read_number56 = 0u;
-  QuicDataReader reader(buffer56, 7, GetParam().perspective,
-                        GetParam().endianness);
+  uint64_t read_number56;
+  QuicDataReader reader(buffer56, 7, GetParam().endianness);
   reader.ReadBytesToUInt64(7, &read_number56);
   EXPECT_EQ(in_memory56, read_number56);
 }
@@ -464,8 +438,7 @@ TEST_P(QuicDataWriterTest, Write64BitUnsignedIntegers) {
   unsigned char big_endian64[] = {0x11, 0x22, 0x33, 0x44,
                                   0x55, 0x66, 0x77, 0x88};
   char buffer64[8];
-  QuicDataWriter writer(8, buffer64, GetParam().perspective,
-                        GetParam().endianness);
+  QuicDataWriter writer(8, buffer64, GetParam().endianness);
   writer.WriteBytesToUInt64(8, in_memory64);
   test::CompareCharArraysWithHexError(
       "uint64_t", buffer64, 8,
@@ -473,14 +446,12 @@ TEST_P(QuicDataWriterTest, Write64BitUnsignedIntegers) {
                                                   : AsChars(little_endian64),
       8);
 
-  uint64_t read_number64 = 0u;
-  QuicDataReader reader(buffer64, 8, GetParam().perspective,
-                        GetParam().endianness);
+  uint64_t read_number64;
+  QuicDataReader reader(buffer64, 8, GetParam().endianness);
   reader.ReadBytesToUInt64(8, &read_number64);
   EXPECT_EQ(in_memory64, read_number64);
 
-  QuicDataWriter writer2(8, buffer64, GetParam().perspective,
-                         GetParam().endianness);
+  QuicDataWriter writer2(8, buffer64, GetParam().endianness);
   writer2.WriteUInt64(in_memory64);
   test::CompareCharArraysWithHexError(
       "uint64_t", buffer64, 8,
@@ -488,8 +459,7 @@ TEST_P(QuicDataWriterTest, Write64BitUnsignedIntegers) {
                                                   : AsChars(little_endian64),
       8);
   read_number64 = 0u;
-  QuicDataReader reader2(buffer64, 8, GetParam().perspective,
-                         GetParam().endianness);
+  QuicDataReader reader2(buffer64, 8, GetParam().endianness);
   reader2.ReadUInt64(&read_number64);
   EXPECT_EQ(in_memory64, read_number64);
 }
@@ -500,7 +470,7 @@ TEST_P(QuicDataWriterTest, WriteIntegers) {
   uint16_t i16 = 0x0123;
   uint32_t i32 = 0x01234567;
   uint64_t i64 = 0x0123456789ABCDEF;
-  QuicDataWriter writer(46, buf, GetParam().perspective, GetParam().endianness);
+  QuicDataWriter writer(46, buf, GetParam().endianness);
   for (size_t i = 0; i < 10; ++i) {
     switch (i) {
       case 0u:
@@ -532,12 +502,12 @@ TEST_P(QuicDataWriterTest, WriteIntegers) {
     }
   }
 
-  QuicDataReader reader(buf, 46, GetParam().perspective, GetParam().endianness);
+  QuicDataReader reader(buf, 46, GetParam().endianness);
   for (size_t i = 0; i < 10; ++i) {
     uint8_t read8;
     uint16_t read16;
     uint32_t read32;
-    uint64_t read64 = 0u;
+    uint64_t read64;
     switch (i) {
       case 0u:
         EXPECT_TRUE(reader.ReadBytesToUInt64(i, &read64));
@@ -585,6 +555,365 @@ TEST_P(QuicDataWriterTest, WriteIntegers) {
         EXPECT_FALSE(reader.ReadBytesToUInt64(i, &read64));
     }
   }
+}
+
+TEST_P(QuicDataWriterTest, WriteBytes) {
+  char bytes[] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+  char buf[QUIC_ARRAYSIZE(bytes)];
+  QuicDataWriter writer(QUIC_ARRAYSIZE(buf), buf, GetParam().endianness);
+  EXPECT_TRUE(writer.WriteBytes(bytes, QUIC_ARRAYSIZE(bytes)));
+  for (unsigned int i = 0; i < QUIC_ARRAYSIZE(bytes); ++i) {
+    EXPECT_EQ(bytes[i], buf[i]);
+  }
+}
+
+TEST_P(QuicDataWriterTest, WriteUInt8AtOffset) {
+  char bytes[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'};
+  char buf[QUIC_ARRAYSIZE(bytes)];
+  for (unsigned int i = 0; i < QUIC_ARRAYSIZE(bytes); ++i) {
+    QuicDataWriter writer(QUIC_ARRAYSIZE(buf), buf, GetParam().endianness);
+    EXPECT_TRUE(writer.WriteBytes(bytes, QUIC_ARRAYSIZE(bytes)));
+    EXPECT_TRUE(writer.WriteUInt8AtOffset('I', i));
+    for (unsigned int j = 0; j < QUIC_ARRAYSIZE(bytes); ++j) {
+      if (j == i) {
+        EXPECT_EQ('I', buf[j]);
+      } else {
+        EXPECT_EQ(bytes[j], buf[j]);
+      }
+    }
+  }
+}
+
+const int kVarIntBufferLength = 1024;
+
+// Encodes and then decodes a specified value, checks that the
+// value that was encoded is the same as the decoded value, the length
+// is correct, and that after decoding, all data in the buffer has
+// been consumed..
+// Returns true if everything works, false if not.
+bool EncodeDecodeValue(uint64_t value_in, char* buffer, size_t size_of_buffer) {
+  // Init the buffer to all 0, just for cleanliness. Makes for better
+  // output if, in debugging, we need to dump out the buffer.
+  memset(buffer, 0, size_of_buffer);
+  // make a writer. Note that for IETF encoding
+  // we do not care about endianness... It's always big-endian,
+  // but the c'tor expects to be told what endianness is in force...
+  QuicDataWriter writer(size_of_buffer, buffer, Endianness::NETWORK_BYTE_ORDER);
+
+  // Try to write the value.
+  if (writer.WriteVarInt62(value_in) != true) {
+    return false;
+  }
+  // Look at the value we encoded. Determine how much should have been
+  // used based on the value, and then check the state of the writer
+  // to see that it matches.
+  size_t expected_length = 0;
+  if (value_in <= 0x3f) {
+    expected_length = 1;
+  } else if (value_in <= 0x3fff) {
+    expected_length = 2;
+  } else if (value_in <= 0x3fffffff) {
+    expected_length = 4;
+  } else {
+    expected_length = 8;
+  }
+  if (writer.length() != expected_length) {
+    return false;
+  }
+
+  // set up a reader, just the length we've used, no more, no less.
+  QuicDataReader reader(buffer, expected_length,
+                        Endianness::NETWORK_BYTE_ORDER);
+  uint64_t value_out;
+
+  if (reader.ReadVarInt62(&value_out) == false) {
+    return false;
+  }
+  if (value_in != value_out) {
+    return false;
+  }
+  // We only write one value so there had better be nothing left to read
+  return reader.IsDoneReading();
+}
+
+// Test that 8-byte-encoded Variable Length Integers are properly laid
+// out in the buffer.
+TEST_P(QuicDataWriterTest, VarInt8Layout) {
+  char buffer[1024];
+
+  // Check that the layout of bytes in the buffer is correct. Bytes
+  // are always encoded big endian...
+  memset(buffer, 0, sizeof(buffer));
+  QuicDataWriter writer(sizeof(buffer), static_cast<char*>(buffer),
+                        Endianness::NETWORK_BYTE_ORDER);
+  EXPECT_TRUE(writer.WriteVarInt62(UINT64_C(0x3142f3e4d5c6b7a8)));
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 0)),
+            (0x31 + 0xc0));  // 0xc0 for encoding
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 1)), 0x42);
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 2)), 0xf3);
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 3)), 0xe4);
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 4)), 0xd5);
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 5)), 0xc6);
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 6)), 0xb7);
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 7)), 0xa8);
+}
+
+// Test that 4-byte-encoded Variable Length Integers are properly laid
+// out in the buffer.
+TEST_P(QuicDataWriterTest, VarInt4Layout) {
+  char buffer[1024];
+
+  // Check that the layout of bytes in the buffer is correct. Bytes
+  // are always encoded big endian...
+  memset(buffer, 0, sizeof(buffer));
+  QuicDataWriter writer(sizeof(buffer), static_cast<char*>(buffer),
+                        Endianness::NETWORK_BYTE_ORDER);
+  EXPECT_TRUE(writer.WriteVarInt62(0x3243f4e5));
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 0)),
+            (0x32 + 0x80));  // 0x80 for encoding
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 1)), 0x43);
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 2)), 0xf4);
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 3)), 0xe5);
+}
+
+// Test that 2-byte-encoded Variable Length Integers are properly laid
+// out in the buffer.
+TEST_P(QuicDataWriterTest, VarInt2Layout) {
+  char buffer[1024];
+
+  // Check that the layout of bytes in the buffer is correct. Bytes
+  // are always encoded big endian...
+  memset(buffer, 0, sizeof(buffer));
+  QuicDataWriter writer(sizeof(buffer), static_cast<char*>(buffer),
+                        Endianness::NETWORK_BYTE_ORDER);
+  EXPECT_TRUE(writer.WriteVarInt62(0x3647));
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 0)),
+            (0x36 + 0x40));  // 0x40 for encoding
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 1)), 0x47);
+}
+
+// Test that 1-byte-encoded Variable Length Integers are properly laid
+// out in the buffer.
+TEST_P(QuicDataWriterTest, VarInt1Layout) {
+  char buffer[1024];
+
+  // Check that the layout of bytes in the buffer
+  // is correct. Bytes are always encoded big endian...
+  memset(buffer, 0, sizeof(buffer));
+  QuicDataWriter writer(sizeof(buffer), static_cast<char*>(buffer),
+                        Endianness::NETWORK_BYTE_ORDER);
+  EXPECT_TRUE(writer.WriteVarInt62(0x3f));
+  EXPECT_EQ(static_cast<unsigned char>(*(writer.data() + 0)), 0x3f);
+}
+
+// Test certain, targeted, values that are expected to succeed:
+// 0, 1,
+// 0x3e, 0x3f, 0x40, 0x41 (around the 1-2 byte transitions)
+// 0x3ffe, 0x3fff, 0x4000, 0x4001 (the 2-4 byte transition)
+// 0x3ffffffe, 0x3fffffff, 0x40000000, 0x40000001 (the 4-8 byte
+//                          transition)
+// 0x3ffffffffffffffe, 0x3fffffffffffffff,  (the highest valid values)
+// 0xfe, 0xff, 0x100, 0x101,
+// 0xfffe, 0xffff, 0x10000, 0x10001,
+// 0xfffffe, 0xffffff, 0x1000000, 0x1000001,
+// 0xfffffffe, 0xffffffff, 0x100000000, 0x100000001,
+// 0xfffffffffe, 0xffffffffff, 0x10000000000, 0x10000000001,
+// 0xfffffffffffe, 0xffffffffffff, 0x1000000000000, 0x1000000000001,
+// 0xfffffffffffffe, 0xffffffffffffff, 0x100000000000000, 0x100000000000001,
+TEST_P(QuicDataWriterTest, VarIntGoodTargetedValues) {
+  char buffer[kVarIntBufferLength];
+  uint64_t passing_values[] = {
+      0,
+      1,
+      0x3e,
+      0x3f,
+      0x40,
+      0x41,
+      0x3ffe,
+      0x3fff,
+      0x4000,
+      0x4001,
+      0x3ffffffe,
+      0x3fffffff,
+      0x40000000,
+      0x40000001,
+      0x3ffffffffffffffe,
+      0x3fffffffffffffff,
+      0xfe,
+      0xff,
+      0x100,
+      0x101,
+      0xfffe,
+      0xffff,
+      0x10000,
+      0x10001,
+      0xfffffe,
+      0xffffff,
+      0x1000000,
+      0x1000001,
+      0xfffffffe,
+      0xffffffff,
+      0x100000000,
+      0x100000001,
+      0xfffffffffe,
+      0xffffffffff,
+      0x10000000000,
+      0x10000000001,
+      0xfffffffffffe,
+      0xffffffffffff,
+      0x1000000000000,
+      0x1000000000001,
+      0xfffffffffffffe,
+      0xffffffffffffff,
+      0x100000000000000,
+      0x100000000000001,
+  };
+  for (uint64_t test_val : passing_values) {
+    EXPECT_TRUE(
+        EncodeDecodeValue(test_val, static_cast<char*>(buffer), sizeof(buffer)))
+        << " encode/decode of " << test_val << " failed";
+  }
+}
+//
+// Test certain, targeted, values where failure is expected (the
+// values are invalid w.r.t. IETF VarInt encoding):
+// 0x4000000000000000, 0x4000000000000001,  ( Just above max allowed value)
+// 0xfffffffffffffffe, 0xffffffffffffffff,  (should fail)
+TEST_P(QuicDataWriterTest, VarIntBadTargetedValues) {
+  char buffer[kVarIntBufferLength];
+  uint64_t failing_values[] = {
+      0x4000000000000000, 0x4000000000000001, 0xfffffffffffffffe,
+      0xffffffffffffffff,
+  };
+  for (uint64_t test_val : failing_values) {
+    EXPECT_FALSE(
+        EncodeDecodeValue(test_val, static_cast<char*>(buffer), sizeof(buffer)))
+        << " encode/decode of " << test_val << " succeeded, but was an "
+        << "invalid value";
+  }
+}
+
+// Following tests all try to fill the buffer with multiple values,
+// go one value more than the buffer can accommodate, then read
+// the successfully encoded values, and try to read the unsuccessfully
+// encoded value. The following is the number of values to encode.
+const int kMultiVarCount = 1000;
+
+// Test writing & reading multiple 8-byte-encoded varints
+TEST_P(QuicDataWriterTest, MultiVarInt8) {
+  uint64_t test_val;
+  char buffer[8 * kMultiVarCount];
+  memset(buffer, 0, sizeof(buffer));
+  QuicDataWriter writer(sizeof(buffer), static_cast<char*>(buffer),
+                        Endianness::NETWORK_BYTE_ORDER);
+  // Put N values into the buffer. Adding i to the value ensures that
+  // each value is different so we can detect if we overwrite values,
+  // or read the same value over and over.
+  for (int i = 0; i < kMultiVarCount; i++) {
+    EXPECT_TRUE(writer.WriteVarInt62(UINT64_C(0x3142f3e4d5c6b7a8) + i));
+  }
+  EXPECT_EQ(writer.length(), 8u * kMultiVarCount);
+
+  // N+1st should fail, the buffer is full.
+  EXPECT_FALSE(writer.WriteVarInt62(UINT64_C(0x3142f3e4d5c6b7a8)));
+
+  // Now we should be able to read out the N values that were
+  // successfully encoded.
+  QuicDataReader reader(buffer, sizeof(buffer), Endianness::NETWORK_BYTE_ORDER);
+  for (int i = 0; i < kMultiVarCount; i++) {
+    EXPECT_TRUE(reader.ReadVarInt62(&test_val));
+    EXPECT_EQ(test_val, (UINT64_C(0x3142f3e4d5c6b7a8) + i));
+  }
+  // And the N+1st should fail.
+  EXPECT_FALSE(reader.ReadVarInt62(&test_val));
+}
+
+// Test writing & reading multiple 4-byte-encoded varints
+TEST_P(QuicDataWriterTest, MultiVarInt4) {
+  uint64_t test_val;
+  char buffer[4 * kMultiVarCount];
+  memset(buffer, 0, sizeof(buffer));
+  QuicDataWriter writer(sizeof(buffer), static_cast<char*>(buffer),
+                        Endianness::NETWORK_BYTE_ORDER);
+  // Put N values into the buffer. Adding i to the value ensures that
+  // each value is different so we can detect if we overwrite values,
+  // or read the same value over and over.
+  for (int i = 0; i < kMultiVarCount; i++) {
+    EXPECT_TRUE(writer.WriteVarInt62(UINT64_C(0x3142f3e4) + i));
+  }
+  EXPECT_EQ(writer.length(), 4u * kMultiVarCount);
+
+  // N+1st should fail, the buffer is full.
+  EXPECT_FALSE(writer.WriteVarInt62(UINT64_C(0x3142f3e4)));
+
+  // Now we should be able to read out the N values that were
+  // successfully encoded.
+  QuicDataReader reader(buffer, sizeof(buffer), Endianness::NETWORK_BYTE_ORDER);
+  for (int i = 0; i < kMultiVarCount; i++) {
+    EXPECT_TRUE(reader.ReadVarInt62(&test_val));
+    EXPECT_EQ(test_val, (UINT64_C(0x3142f3e4) + i));
+  }
+  // And the N+1st should fail.
+  EXPECT_FALSE(reader.ReadVarInt62(&test_val));
+}
+
+// Test writing & reading multiple 2-byte-encoded varints
+TEST_P(QuicDataWriterTest, MultiVarInt2) {
+  uint64_t test_val;
+  char buffer[2 * kMultiVarCount];
+  memset(buffer, 0, sizeof(buffer));
+  QuicDataWriter writer(sizeof(buffer), static_cast<char*>(buffer),
+                        Endianness::NETWORK_BYTE_ORDER);
+  // Put N values into the buffer. Adding i to the value ensures that
+  // each value is different so we can detect if we overwrite values,
+  // or read the same value over and over.
+  for (int i = 0; i < kMultiVarCount; i++) {
+    EXPECT_TRUE(writer.WriteVarInt62(UINT64_C(0x3142) + i));
+  }
+  EXPECT_EQ(writer.length(), 2u * kMultiVarCount);
+
+  // N+1st should fail, the buffer is full.
+  EXPECT_FALSE(writer.WriteVarInt62(UINT64_C(0x3142)));
+
+  // Now we should be able to read out the N values that were
+  // successfully encoded.
+  QuicDataReader reader(buffer, sizeof(buffer), Endianness::NETWORK_BYTE_ORDER);
+  for (int i = 0; i < kMultiVarCount; i++) {
+    EXPECT_TRUE(reader.ReadVarInt62(&test_val));
+    EXPECT_EQ(test_val, (UINT64_C(0x3142) + i));
+  }
+  // And the N+1st should fail.
+  EXPECT_FALSE(reader.ReadVarInt62(&test_val));
+}
+
+// Test writing & reading multiple 1-byte-encoded varints
+TEST_P(QuicDataWriterTest, MultiVarInt1) {
+  uint64_t test_val;
+  char buffer[1 * kMultiVarCount];
+  memset(buffer, 0, sizeof(buffer));
+  QuicDataWriter writer(sizeof(buffer), static_cast<char*>(buffer),
+                        Endianness::NETWORK_BYTE_ORDER);
+  // Put N values into the buffer. Adding i to the value ensures that
+  // each value is different so we can detect if we overwrite values,
+  // or read the same value over and over. &0xf ensures we do not
+  // overflow the max value for single-byte encoding.
+  for (int i = 0; i < kMultiVarCount; i++) {
+    EXPECT_TRUE(writer.WriteVarInt62(UINT64_C(0x30) + (i & 0xf)));
+  }
+  EXPECT_EQ(writer.length(), 1u * kMultiVarCount);
+
+  // N+1st should fail, the buffer is full.
+  EXPECT_FALSE(writer.WriteVarInt62(UINT64_C(0x31)));
+
+  // Now we should be able to read out the N values that were
+  // successfully encoded.
+  QuicDataReader reader(buffer, sizeof(buffer), Endianness::NETWORK_BYTE_ORDER);
+  for (int i = 0; i < kMultiVarCount; i++) {
+    EXPECT_TRUE(reader.ReadVarInt62(&test_val));
+    EXPECT_EQ(test_val, (UINT64_C(0x30) + (i & 0xf)));
+  }
+  // And the N+1st should fail.
+  EXPECT_FALSE(reader.ReadVarInt62(&test_val));
 }
 
 }  // namespace

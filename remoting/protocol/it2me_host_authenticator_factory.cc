@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/protocol/negotiating_host_authenticator.h"
 #include "remoting/protocol/validating_authenticator.h"
@@ -27,7 +26,7 @@ It2MeHostAuthenticatorFactory::It2MeHostAuthenticatorFactory(
       access_code_hash_(access_code_hash),
       validation_callback_(callback) {}
 
-It2MeHostAuthenticatorFactory::~It2MeHostAuthenticatorFactory() {}
+It2MeHostAuthenticatorFactory::~It2MeHostAuthenticatorFactory() = default;
 
 std::unique_ptr<Authenticator>
 It2MeHostAuthenticatorFactory::CreateAuthenticator(
@@ -38,7 +37,7 @@ It2MeHostAuthenticatorFactory::CreateAuthenticator(
           local_jid, remote_jid, local_cert_, key_pair_, access_code_hash_,
           nullptr));
 
-  return base::MakeUnique<ValidatingAuthenticator>(
+  return std::make_unique<ValidatingAuthenticator>(
       remote_jid, validation_callback_, std::move(authenticator));
 }
 

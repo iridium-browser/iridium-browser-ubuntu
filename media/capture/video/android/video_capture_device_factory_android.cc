@@ -104,30 +104,30 @@ void VideoCaptureDeviceFactoryAndroid::GetSupportedFormats(
     base::android::ScopedJavaLocalRef<jobject> format(
         env, env->GetObjectArrayElement(collected_formats.obj(), i));
 
-    VideoPixelFormat pixel_format = media::PIXEL_FORMAT_UNKNOWN;
-    switch (media::Java_VideoCaptureFactory_getCaptureFormatPixelFormat(
-        env, format)) {
+    VideoPixelFormat pixel_format = PIXEL_FORMAT_UNKNOWN;
+    switch (Java_VideoCaptureFactory_getCaptureFormatPixelFormat(env, format)) {
       case VideoCaptureDeviceAndroid::ANDROID_IMAGE_FORMAT_YV12:
-        pixel_format = media::PIXEL_FORMAT_YV12;
+        pixel_format = PIXEL_FORMAT_YV12;
         break;
       case VideoCaptureDeviceAndroid::ANDROID_IMAGE_FORMAT_NV21:
-        pixel_format = media::PIXEL_FORMAT_NV21;
+        pixel_format = PIXEL_FORMAT_NV21;
+        break;
+      case VideoCaptureDeviceAndroid::ANDROID_IMAGE_FORMAT_YUV_420_888:
+        pixel_format = PIXEL_FORMAT_I420;
         break;
       default:
-        // TODO(mcasas): break here and let the enumeration continue with
-        // UNKNOWN pixel format because the platform doesn't know until capture,
-        // but some unrelated tests timeout https://crbug.com/644910.
+        // TODO(crbug.com/792260): break here and let the enumeration continue
+        // with UNKNOWN pixel format because the platform doesn't know until
+        // capture, but some unrelated tests timeout https://crbug.com/644910.
         continue;
     }
     VideoCaptureFormat capture_format(
-        gfx::Size(
-            media::Java_VideoCaptureFactory_getCaptureFormatWidth(env, format),
-            media::Java_VideoCaptureFactory_getCaptureFormatHeight(env,
-                                                                   format)),
-        media::Java_VideoCaptureFactory_getCaptureFormatFramerate(env, format),
+        gfx::Size(Java_VideoCaptureFactory_getCaptureFormatWidth(env, format),
+                  Java_VideoCaptureFactory_getCaptureFormatHeight(env, format)),
+        Java_VideoCaptureFactory_getCaptureFormatFramerate(env, format),
         pixel_format);
     capture_formats->push_back(capture_format);
-    DVLOG(1) << device.display_name << " "
+    DVLOG(1) << device.display_name() << " "
              << VideoCaptureFormat::ToString(capture_format);
   }
 }
@@ -144,7 +144,9 @@ bool VideoCaptureDeviceFactoryAndroid::IsLegacyOrDeprecatedDevice(
 // static
 VideoCaptureDeviceFactory*
 VideoCaptureDeviceFactory::CreateVideoCaptureDeviceFactory(
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+    MojoJpegDecodeAcceleratorFactoryCB jda_factory) {
   return new VideoCaptureDeviceFactoryAndroid();
 }
 

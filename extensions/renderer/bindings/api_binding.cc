@@ -62,17 +62,10 @@ std::string GetJSEnumEntryName(const std::string& original) {
   return result;
 }
 
-bool IsContextValid(v8::Local<v8::Context> context) {
-  // If the given context has been disposed, the per-context data has been
-  // deleted, and the context is no longer valid. The APIBinding (which owns
-  // various necessary pieces) should outlive all contexts, so if the context
-  // is valid, associated callbacks should be safe.
-  return gin::PerContextData::From(context) != nullptr;
-}
-
-void CallbackHelper(const v8::FunctionCallbackInfo<v8::Value>& info) {
+void RunAPIBindingHandlerCallback(
+    const v8::FunctionCallbackInfo<v8::Value>& info) {
   gin::Arguments args(info);
-  if (!IsContextValid(args.isolate()->GetCurrentContext()))
+  if (!binding::IsContextValidOrThrowError(args.isolate()->GetCurrentContext()))
     return;
 
   v8::Local<v8::External> external;
@@ -219,10 +212,10 @@ APIBinding::APIBinding(const std::string& api_name,
       bool for_io_thread = false;
       func_dict->GetBoolean("forIOThread", &for_io_thread);
 
-      auto signature = base::MakeUnique<APISignature>(*params);
+      auto signature = std::make_unique<APISignature>(*params);
       std::string full_name =
           base::StringPrintf("%s.%s", api_name_.c_str(), name.c_str());
-      methods_[name] = base::MakeUnique<MethodData>(
+      methods_[name] = std::make_unique<MethodData>(
           full_name, signature.get(),
           for_io_thread ? binding::RequestThread::IO
                         : binding::RequestThread::UI);
@@ -236,7 +229,7 @@ APIBinding::APIBinding(const std::string& api_name,
       CHECK(type.GetAsDictionary(&type_dict));
       std::string id;
       CHECK(type_dict->GetString("id", &id));
-      auto argument_spec = base::MakeUnique<ArgumentSpec>(*type_dict);
+      auto argument_spec = std::make_unique<ArgumentSpec>(*type_dict);
       const std::set<std::string>& enum_values = argument_spec->enum_values();
       if (!enum_values.empty()) {
         // Type names may be prefixed by the api name. If so, remove the prefix.
@@ -266,7 +259,7 @@ APIBinding::APIBinding(const std::string& api_name,
           CHECK(func_dict->GetList("parameters", &params));
           type_refs->AddTypeMethodSignature(
               base::StringPrintf("%s.%s", id.c_str(), function_name.c_str()),
-              base::MakeUnique<APISignature>(*params));
+              std::make_unique<APISignature>(*params));
         }
       }
     }
@@ -330,7 +323,7 @@ APIBinding::APIBinding(const std::string& api_name,
         }
       }
 
-      events_.push_back(base::MakeUnique<EventData>(
+      events_.push_back(std::make_unique<EventData>(
           std::move(name), std::move(full_name), supports_filters,
           supports_rules, supports_lazy_listeners, max_listeners,
           notify_on_change, std::move(rule_actions), std::move(rule_conditions),
@@ -343,7 +336,7 @@ APIBinding::~APIBinding() {}
 
 v8::Local<v8::Object> APIBinding::CreateInstance(
     v8::Local<v8::Context> context) {
-  DCHECK(IsContextValid(context));
+  DCHECK(binding::IsContextValid(context));
   v8::Isolate* isolate = context->GetIsolate();
   if (object_template_.IsEmpty())
     InitializeTemplate(isolate);
@@ -375,6 +368,8 @@ v8::Local<v8::Object> APIBinding::CreateInstance(
     }
   }
 
+  binding_hooks_->InitializeInstance(context, object);
+
   return object;
 }
 
@@ -392,7 +387,7 @@ void APIBinding::InitializeTemplate(v8::Isolate* isolate) {
 
     object_template->Set(
         gin::StringToSymbol(isolate, key_value.first),
-        v8::FunctionTemplate::New(isolate, &CallbackHelper,
+        v8::FunctionTemplate::New(isolate, &RunAPIBindingHandlerCallback,
                                   v8::External::New(isolate, &method.callback),
                                   v8::Local<v8::Signature>(), 0,
                                   v8::ConstructorBehavior::kThrow));
@@ -465,7 +460,7 @@ void APIBinding::DecorateTemplateWithProperties(
     if (dict->GetString("$ref", &ref)) {
       const base::ListValue* property_values = nullptr;
       CHECK(dict->GetList("value", &property_values));
-      auto property_data = base::MakeUnique<CustomPropertyData>(
+      auto property_data = std::make_unique<CustomPropertyData>(
           ref, iter.key(), property_values, create_custom_type_);
       object_template->SetLazyDataProperty(
           v8_key, &APIBinding::GetCustomPropertyObject,
@@ -513,7 +508,7 @@ void APIBinding::GetEventObject(
   v8::Isolate* isolate = info.GetIsolate();
   v8::HandleScope handle_scope(isolate);
   v8::Local<v8::Context> context = info.Holder()->CreationContext();
-  if (!IsContextValid(context))
+  if (!binding::IsContextValidOrThrowError(context))
     return;
 
   CHECK(info.Data()->IsExternal());
@@ -545,7 +540,7 @@ void APIBinding::GetCustomPropertyObject(
   v8::Isolate* isolate = info.GetIsolate();
   v8::HandleScope handle_scope(isolate);
   v8::Local<v8::Context> context = info.Holder()->CreationContext();
-  if (!IsContextValid(context))
+  if (!binding::IsContextValid(context))
     return;
 
   v8::Context::Scope context_scope(context);
@@ -614,7 +609,8 @@ void APIBinding::HandleCall(const std::string& name,
 
         return;  // Our work here is done.
       case APIBindingHooks::RequestResult::ARGUMENTS_UPDATED:
-        updated_args = true;  // Intentional fall-through.
+        updated_args = true;
+        FALLTHROUGH;
       case APIBindingHooks::RequestResult::NOT_HANDLED:
         break;  // Handle in the default manner.
     }

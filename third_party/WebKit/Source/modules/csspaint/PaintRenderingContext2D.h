@@ -7,33 +7,37 @@
 
 #include <memory>
 #include "modules/ModulesExport.h"
-#include "modules/canvas2d/BaseRenderingContext2D.h"
+#include "modules/canvas/canvas2d/BaseRenderingContext2D.h"
+#include "modules/csspaint/PaintRenderingContext2DSettings.h"
 #include "platform/bindings/ScriptWrappable.h"
-#include "platform/graphics/ImageBuffer.h"
+#include "platform/graphics/paint/PaintRecord.h"
+#include "platform/graphics/paint/PaintRecorder.h"
 
 namespace blink {
 
 class CanvasImageSource;
 class Color;
 
-class MODULES_EXPORT PaintRenderingContext2D
-    : public BaseRenderingContext2D,
-      public GarbageCollectedFinalized<PaintRenderingContext2D>,
-      public ScriptWrappable {
+class MODULES_EXPORT PaintRenderingContext2D : public ScriptWrappable,
+                                               public BaseRenderingContext2D {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(PaintRenderingContext2D);
   WTF_MAKE_NONCOPYABLE(PaintRenderingContext2D);
 
  public:
   static PaintRenderingContext2D* Create(
-      std::unique_ptr<ImageBuffer> image_buffer,
-      bool has_alpha,
+      const IntSize& container_size,
+      const CanvasColorParams& color_params,
+      const PaintRenderingContext2DSettings& context_settings,
       float zoom) {
-    return new PaintRenderingContext2D(std::move(image_buffer), has_alpha,
-                                       zoom);
+    return new PaintRenderingContext2D(container_size, color_params,
+                                       context_settings, zoom);
   }
 
-  // BaseRenderingContext2D
+  void Trace(blink::Visitor* visitor) override {
+    ScriptWrappable::Trace(visitor);
+    BaseRenderingContext2D::Trace(visitor);
+  }
 
   // PaintRenderingContext2D doesn't have any pixel readback so the origin
   // is always clean, and unable to taint it.
@@ -46,37 +50,54 @@ class MODULES_EXPORT PaintRenderingContext2D
   int Width() const final;
   int Height() const final;
 
-  bool HasImageBuffer() const final { return image_buffer_.get(); }
-  ImageBuffer* GetImageBuffer() const final { return image_buffer_.get(); }
-
   bool ParseColorOrCurrentColor(Color&, const String& color_string) const final;
 
   PaintCanvas* DrawingCanvas() const final;
   PaintCanvas* ExistingDrawingCanvas() const final;
   void DisableDeferral(DisableDeferralReason) final {}
 
-  AffineTransform BaseTransform() const final;
+  void DidDraw(const SkIRect&) final;
 
-  void DidDraw(const SkIRect& dirty_rect) final;
+  void setShadowBlur(double) final;
 
   bool StateHasFilter() final;
-  sk_sp<SkImageFilter> StateGetFilter() final;
+  sk_sp<PaintFilter> StateGetFilter() final;
   void SnapshotStateForFilter() final {}
 
   void ValidateStateStack() const final;
 
-  bool HasAlpha() const final { return has_alpha_; }
+  bool HasAlpha() const final { return context_settings_.alpha(); }
 
   // PaintRenderingContext2D cannot lose it's context.
   bool isContextLost() const final { return false; }
 
+  // PaintRenderingContext2D uses a recording canvas, so it should never
+  // allocate a pixel buffer and is not accelerated.
+  bool CanCreateCanvas2DBuffer() const final { return false; }
+  bool IsAccelerated() const final { return false; }
+
+  sk_sp<PaintRecord> GetRecord();
+
+ protected:
+  bool IsPaint2D() const override { return true; }
+  void WillOverwriteCanvas() override;
+
  private:
-  PaintRenderingContext2D(std::unique_ptr<ImageBuffer>,
-                          bool has_alpha,
+  PaintRenderingContext2D(const IntSize& container_size,
+                          const CanvasColorParams&,
+                          const PaintRenderingContext2DSettings&,
                           float zoom);
 
-  std::unique_ptr<ImageBuffer> image_buffer_;
-  bool has_alpha_;
+  void InitializePaintRecorder();
+  PaintCanvas* Canvas() const;
+
+  std::unique_ptr<PaintRecorder> paint_recorder_;
+  sk_sp<PaintRecord> previous_frame_;
+  IntSize container_size_;
+  const CanvasColorParams& color_params_;
+  PaintRenderingContext2DSettings context_settings_;
+  bool did_record_draw_commands_in_paint_recorder_;
+  float effective_zoom_;
 };
 
 }  // namespace blink

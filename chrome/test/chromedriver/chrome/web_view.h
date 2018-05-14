@@ -19,6 +19,7 @@ class TimeDelta;
 class Value;
 }
 
+class FrameTracker;
 struct Geoposition;
 class JavaScriptDialogManager;
 struct KeyEvent;
@@ -137,7 +138,9 @@ class WebView {
 
   // Delete the cookie with the given name.
   virtual Status DeleteCookie(const std::string& name,
-                              const std::string& url) = 0;
+                              const std::string& url,
+                              const std::string& domain,
+                              const std::string& path) = 0;
 
   virtual Status AddCookie(const std::string& name,
                            const std::string& url,
@@ -215,6 +218,10 @@ class WebView {
   virtual Status SetScreenOrientation(std::string orientation) = 0;
 
   virtual Status DeleteScreenOrientation() = 0;
+
+  virtual bool IsOOPIF(const std::string& frame_id) = 0;
+
+  virtual FrameTracker* GetFrameTracker() const = 0;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CHROME_WEB_VIEW_H_

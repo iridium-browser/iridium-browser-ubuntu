@@ -15,6 +15,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include <windows.h>
+
 namespace registry_util {
 
 namespace {
@@ -107,7 +109,7 @@ void RegistryOverrideManager::OverrideRegistry(HKEY override,
   ASSERT_EQ(ERROR_SUCCESS, ::RegOverridePredefKey(override, temp_key.Handle()));
 
   overrides_.push_back(
-      base::MakeUnique<ScopedRegistryKeyOverride>(override, key_path));
+      std::make_unique<ScopedRegistryKeyOverride>(override, key_path));
   if (override_path)
     override_path->assign(key_path);
 }

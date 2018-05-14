@@ -21,7 +21,7 @@
 #error "This file requires ARC support."
 #endif
 
-using namespace ios_internal::sync_encryption_passphrase;
+using namespace sync_encryption_passphrase;
 
 @interface SyncCreatePassphraseCollectionViewController () {
   UITextField* confirmPassphrase_;
@@ -43,6 +43,8 @@ using namespace ios_internal::sync_encryption_passphrase;
     self.processingMessage =
         l10n_util::GetNSString(IDS_IOS_SYNC_PASSPHRASE_ENCRYPTING);
 
+    // TODO(crbug.com/764578): -loadModel should not be called from
+    // initializer. A possible fix is to move this call to -viewDidLoad.
     [self loadModel];
   }
   return self;

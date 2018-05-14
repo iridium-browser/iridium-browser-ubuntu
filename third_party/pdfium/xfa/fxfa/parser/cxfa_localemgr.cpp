@@ -12,11 +12,17 @@
 #include <utility>
 
 #include "core/fpdfapi/cpdf_modulemgr.h"
+#include "core/fxcodec/codec/ccodec_flatemodule.h"
 #include "core/fxcodec/fx_codec.h"
 #include "core/fxcrt/xml/cxml_element.h"
+#include "fxjs/xfa/cjx_object.h"
 #include "third_party/base/ptr_util.h"
+#include "xfa/fxfa/parser/cxfa_acrobat.h"
+#include "xfa/fxfa/parser/cxfa_common.h"
+#include "xfa/fxfa/parser/cxfa_locale.h"
 #include "xfa/fxfa/parser/cxfa_node.h"
 #include "xfa/fxfa/parser/cxfa_nodelocale.h"
+#include "xfa/fxfa/parser/cxfa_present.h"
 #include "xfa/fxfa/parser/cxfa_xmllocale.h"
 #include "xfa/fxfa/parser/xfa_utils.h"
 
@@ -1078,15 +1084,14 @@ static std::unique_ptr<IFX_Locale> XFA_GetLocaleFromBuffer(const uint8_t* pBuf,
                  : nullptr;
 }
 
-static uint16_t XFA_GetLanguage(CFX_WideString wsLanguage) {
+static uint16_t XFA_GetLanguage(WideString wsLanguage) {
   if (wsLanguage.GetLength() < 2)
     return FX_LANG_en_US;
 
   wsLanguage.MakeLower();
-  uint32_t dwIDFirst = wsLanguage.GetAt(0) << 8 | wsLanguage.GetAt(1);
-  uint32_t dwIDSecond = wsLanguage.GetLength() >= 5
-                            ? wsLanguage.GetAt(3) << 8 | wsLanguage.GetAt(4)
-                            : 0;
+  uint32_t dwIDFirst = wsLanguage[0] << 8 | wsLanguage[1];
+  uint32_t dwIDSecond =
+      wsLanguage.GetLength() >= 5 ? wsLanguage[3] << 8 | wsLanguage[4] : 0;
   switch (dwIDFirst) {
     case FXBSTR_ID(0, 0, 'z', 'h'):
       if (dwIDSecond == FXBSTR_ID(0, 0, 'c', 'n'))
@@ -1122,14 +1127,14 @@ static uint16_t XFA_GetLanguage(CFX_WideString wsLanguage) {
   return FX_LANG_en_US;
 }
 
-CXFA_LocaleMgr::CXFA_LocaleMgr(CXFA_Node* pLocaleSet, CFX_WideString wsDeflcid)
+CXFA_LocaleMgr::CXFA_LocaleMgr(CXFA_Node* pLocaleSet, WideString wsDeflcid)
     : m_dwLocaleFlags(0x00) {
   m_dwDeflcid = XFA_GetLanguage(wsDeflcid);
   if (pLocaleSet) {
-    CXFA_Node* pNodeLocale = pLocaleSet->GetNodeItem(XFA_NODEITEM_FirstChild);
+    CXFA_Node* pNodeLocale = pLocaleSet->GetFirstChild();
     while (pNodeLocale) {
       m_LocaleArray.push_back(pdfium::MakeUnique<CXFA_NodeLocale>(pNodeLocale));
-      pNodeLocale = pNodeLocale->GetNodeItem(XFA_NODEITEM_NextSibling);
+      pNodeLocale = pNodeLocale->GetNextSibling();
     }
   }
   m_pDefLocale = GetLocaleByName(wsDeflcid);
@@ -1195,8 +1200,7 @@ std::unique_ptr<IFX_Locale> CXFA_LocaleMgr::GetLocale(uint16_t lcid) {
   }
 }
 
-IFX_Locale* CXFA_LocaleMgr::GetLocaleByName(
-    const CFX_WideString& wsLocaleName) {
+IFX_Locale* CXFA_LocaleMgr::GetLocaleByName(const WideString& wsLocaleName) {
   for (size_t i = 0; i < m_LocaleArray.size(); i++) {
     IFX_Locale* pLocale = m_LocaleArray[i].get();
     if (pLocale->GetName() == wsLocaleName)
@@ -1221,27 +1225,31 @@ void CXFA_LocaleMgr::SetDefLocale(IFX_Locale* pLocale) {
   m_pDefLocale = pLocale;
 }
 
-CFX_WideStringC CXFA_LocaleMgr::GetConfigLocaleName(CXFA_Node* pConfig) {
+WideStringView CXFA_LocaleMgr::GetConfigLocaleName(CXFA_Node* pConfig) {
   if (!(m_dwLocaleFlags & 0x01)) {
     m_wsConfigLocale.clear();
     if (pConfig) {
       CXFA_Node* pChildfConfig =
-          pConfig->GetFirstChildByClass(XFA_Element::Acrobat);
+          pConfig->GetFirstChildByClass<CXFA_Acrobat>(XFA_Element::Acrobat);
       if (!pChildfConfig) {
-        pChildfConfig = pConfig->GetFirstChildByClass(XFA_Element::Present);
+        pChildfConfig =
+            pConfig->GetFirstChildByClass<CXFA_Present>(XFA_Element::Present);
       }
-      CXFA_Node* pCommon =
-          pChildfConfig
-              ? pChildfConfig->GetFirstChildByClass(XFA_Element::Common)
+      CXFA_Common* pCommon =
+          pChildfConfig ? pChildfConfig->GetFirstChildByClass<CXFA_Common>(
+                              XFA_Element::Common)
+                        : nullptr;
+      CXFA_Locale* pLocale =
+          pCommon
+              ? pCommon->GetFirstChildByClass<CXFA_Locale>(XFA_Element::Locale)
               : nullptr;
-      CXFA_Node* pLocale =
-          pCommon ? pCommon->GetFirstChildByClass(XFA_Element::Locale)
-                  : nullptr;
       if (pLocale) {
-        pLocale->TryCData(XFA_ATTRIBUTE_Value, m_wsConfigLocale, false);
+        m_wsConfigLocale = pLocale->JSObject()
+                               ->TryCData(XFA_Attribute::Value, false)
+                               .value_or(WideString());
       }
     }
     m_dwLocaleFlags |= 0x01;
   }
-  return m_wsConfigLocale.AsStringC();
+  return m_wsConfigLocale.AsStringView();
 }

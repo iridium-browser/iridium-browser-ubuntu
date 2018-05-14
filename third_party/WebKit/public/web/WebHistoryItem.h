@@ -35,6 +35,7 @@
 #include "public/platform/WebHistoryScrollRestorationType.h"
 #include "public/platform/WebPrivatePtr.h"
 #include "public/platform/WebReferrerPolicy.h"
+#include "public/platform/WebScrollAnchorData.h"
 #include "public/platform/WebString.h"
 
 namespace blink {
@@ -62,7 +63,7 @@ class WebHistoryItem {
  public:
   ~WebHistoryItem() { Reset(); }
 
-  WebHistoryItem() {}
+  WebHistoryItem() = default;
   WebHistoryItem(const WebHistoryItem& h) { Assign(h); }
   WebHistoryItem& operator=(const WebHistoryItem& h) {
     Assign(h);
@@ -119,7 +120,10 @@ class WebHistoryItem {
 
   BLINK_EXPORT bool DidSaveScrollOrScaleState() const;
 
-#if BLINK_IMPLEMENTATION
+  BLINK_EXPORT ScrollAnchorData GetScrollAnchorData() const;
+  BLINK_EXPORT void SetScrollAnchorData(const ScrollAnchorData&);
+
+#if INSIDE_BLINK
   BLINK_EXPORT WebHistoryItem(HistoryItem*);
   BLINK_EXPORT WebHistoryItem& operator=(HistoryItem*);
   BLINK_EXPORT operator HistoryItem*() const;

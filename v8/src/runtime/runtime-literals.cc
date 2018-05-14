@@ -16,8 +16,8 @@ namespace internal {
 
 namespace {
 
-bool IsUninitializedLiteralSite(Handle<Object> literal_site) {
-  return *literal_site == Smi::kZero;
+bool IsUninitializedLiteralSite(Object* literal_site) {
+  return literal_site == Smi::kZero;
 }
 
 bool HasBoilerplate(Isolate* isolate, Handle<Object> literal_site) {
@@ -165,8 +165,7 @@ MaybeHandle<JSObject> JSObjectWalkVisitor<ContextObject>::StructureWalk(
       break;
     }
     case DICTIONARY_ELEMENTS: {
-      Handle<SeededNumberDictionary> element_dictionary(
-          copy->element_dictionary());
+      Handle<NumberDictionary> element_dictionary(copy->element_dictionary());
       int capacity = element_dictionary->Capacity();
       for (int i = 0; i < capacity; i++) {
         Object* raw = element_dictionary->ValueAt(i);
@@ -373,7 +372,7 @@ struct ObjectBoilerplate {
       // TODO(cbruni): avoid making the boilerplate fast again, the clone stub
       // supports dict-mode objects directly.
       JSObject::MigrateSlowToFast(boilerplate,
-                                  boilerplate->map()->unused_property_fields(),
+                                  boilerplate->map()->UnusedPropertyFields(),
                                   "FastLiteral");
     }
     return boilerplate;
@@ -451,12 +450,11 @@ Handle<Object> InnerCreateBoilerplate(Isolate* isolate,
 
 template <typename Boilerplate>
 MaybeHandle<JSObject> CreateLiteral(Isolate* isolate,
-                                    Handle<JSFunction> closure,
+                                    Handle<FeedbackVector> vector,
                                     int literals_index,
                                     Handle<HeapObject> description, int flags) {
-  Handle<FeedbackVector> vector(closure->feedback_vector(), isolate);
   FeedbackSlot literals_slot(FeedbackVector::ToSlot(literals_index));
-  CHECK(literals_slot.ToInt() < vector->slot_count());
+  CHECK(literals_slot.ToInt() < vector->length());
   Handle<Object> literal_site(vector->Get(literals_slot), isolate);
   DeepCopyHints copy_hints =
       (flags & AggregateLiteral::kIsShallow) ? kObjectIsShallow : kNoHints;
@@ -478,7 +476,7 @@ MaybeHandle<JSObject> CreateLiteral(Isolate* isolate,
     // TODO(cbruni): Even in the case where we need an initial allocation site
     // we could still create the boilerplate lazily to save memory.
     if (!needs_initial_allocation_site &&
-        IsUninitializedLiteralSite(literal_site)) {
+        IsUninitializedLiteralSite(*literal_site)) {
       PreInitializeLiteralSite(vector, literals_slot);
       boilerplate =
           Boilerplate::Create(isolate, description, flags, NOT_TENURED);
@@ -521,36 +519,35 @@ MaybeHandle<JSObject> CreateLiteral(Isolate* isolate,
 RUNTIME_FUNCTION(Runtime_CreateObjectLiteral) {
   HandleScope scope(isolate);
   DCHECK_EQ(4, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, closure, 0);
+  CONVERT_ARG_HANDLE_CHECKED(FeedbackVector, vector, 0);
   CONVERT_SMI_ARG_CHECKED(literals_index, 1);
   CONVERT_ARG_HANDLE_CHECKED(BoilerplateDescription, description, 2);
   CONVERT_SMI_ARG_CHECKED(flags, 3);
   RETURN_RESULT_OR_FAILURE(
-      isolate, CreateLiteral<ObjectBoilerplate>(
-                   isolate, closure, literals_index, description, flags));
+      isolate, CreateLiteral<ObjectBoilerplate>(isolate, vector, literals_index,
+                                                description, flags));
 }
 
 RUNTIME_FUNCTION(Runtime_CreateArrayLiteral) {
   HandleScope scope(isolate);
   DCHECK_EQ(4, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, closure, 0);
+  CONVERT_ARG_HANDLE_CHECKED(FeedbackVector, vector, 0);
   CONVERT_SMI_ARG_CHECKED(literals_index, 1);
   CONVERT_ARG_HANDLE_CHECKED(ConstantElementsPair, elements, 2);
   CONVERT_SMI_ARG_CHECKED(flags, 3);
   RETURN_RESULT_OR_FAILURE(
-      isolate, CreateLiteral<ArrayBoilerplate>(isolate, closure, literals_index,
+      isolate, CreateLiteral<ArrayBoilerplate>(isolate, vector, literals_index,
                                                elements, flags));
 }
 
 RUNTIME_FUNCTION(Runtime_CreateRegExpLiteral) {
   HandleScope scope(isolate);
   DCHECK_EQ(4, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, closure, 0);
+  CONVERT_ARG_HANDLE_CHECKED(FeedbackVector, vector, 0);
   CONVERT_SMI_ARG_CHECKED(index, 1);
   CONVERT_ARG_HANDLE_CHECKED(String, pattern, 2);
   CONVERT_SMI_ARG_CHECKED(flags, 3);
 
-  Handle<FeedbackVector> vector(closure->feedback_vector(), isolate);
   FeedbackSlot literal_slot(FeedbackVector::ToSlot(index));
 
   // Check if boilerplate exists. If not, create it first.
@@ -559,7 +556,7 @@ RUNTIME_FUNCTION(Runtime_CreateRegExpLiteral) {
   if (!HasBoilerplate(isolate, literal_site)) {
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
         isolate, boilerplate, JSRegExp::New(pattern, JSRegExp::Flags(flags)));
-    if (IsUninitializedLiteralSite(literal_site)) {
+    if (IsUninitializedLiteralSite(*literal_site)) {
       PreInitializeLiteralSite(vector, literal_slot);
       return *boilerplate;
     }

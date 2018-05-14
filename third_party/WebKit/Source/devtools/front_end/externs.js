@@ -212,7 +212,7 @@ DOMFileSystem.prototype.root = null;
  */
 window.domAutomationController;
 
-var DevToolsHost = function() {};
+const DevToolsHost = function() {};
 
 /** @typedef {{type:string, id:(number|undefined),
               label:(string|undefined), enabled:(boolean|undefined), checked:(boolean|undefined),
@@ -258,9 +258,14 @@ DevToolsHost.getSelectionBackgroundColor = function() {};
 DevToolsHost.getSelectionForegroundColor = function() {};
 
 /**
- * @return {boolean}
+ * @return {string}
  */
-DevToolsHost.isUnderTest = function() {};
+DevToolsHost.getInactiveSelectionBackgroundColor = function() {};
+
+/**
+ * @return {string}
+ */
+DevToolsHost.getInactiveSelectionForegroundColor = function() {};
 
 /**
  * @return {boolean}
@@ -282,12 +287,6 @@ DevToolsHost.upgradeDraggedFileSystemPermissions = function(fileSystem) {};
 /** Extensions API */
 
 /** @constructor */
-function AuditCategory() {
-}
-/** @constructor */
-function AuditResult() {
-}
-/** @constructor */
 function EventSink() {
 }
 /** @constructor */
@@ -303,7 +302,7 @@ function PanelWithSidebar() {
 function Resource() {
 }
 
-var extensionServer;
+let extensionServer;
 
 /**
  * @constructor
@@ -323,7 +322,7 @@ function ExtensionReloadOptions() {
   this.userAgent = '';
 }
 
-var Adb = {};
+const Adb = {};
 /** @typedef {{id: string, name: string, url: string, attached: boolean}} */
 Adb.Page;
 /** @typedef {{id: string, adbBrowserChromeVersion: string, compatibleVersion: boolean, adbBrowserName: string, source: string, adbBrowserVersion: string, pages: !Array<!Adb.Page>}} */
@@ -352,7 +351,7 @@ Adb.NetworkDiscoveryConfig;
 Adb.Config;
 
 /** @const */
-var module = {};
+const module = {};
 
 /**
  * @constructor
@@ -375,7 +374,7 @@ diff_match_patch.prototype = {
 };
 
 /** @constructor */
-var Doc = function() {};
+const Doc = function() {};
 Doc.prototype = {
   /** @type {number} */
   scrollLeft: 0,
@@ -384,7 +383,7 @@ Doc.prototype = {
 };
 
 /** @constructor */
-var CodeMirror = function(element, config) {};
+const CodeMirror = function(element, config) {};
 CodeMirror.on = function(obj, type, handler) {};
 CodeMirror.prototype = {
   /** @type {!Doc} */
@@ -531,7 +530,7 @@ CodeMirror.prototype = {
   undo: function() {},
   unlinkDoc: function(other) {}
 };
-/** @type {!{cursorDiv: Element}} */
+/** @type {!{cursorDiv: Element, lineSpace: Element}} */
 CodeMirror.prototype.display;
 /** @type {!{mode: string}} */
 CodeMirror.prototype.options;
@@ -639,7 +638,16 @@ Element.prototype.animate = function(keyframes, timing) {};
  */
 Element.prototype.addEventListener = function(type, listener, options) {};
 
-var acorn = {
+/**
+ * @override
+ * @param {string} type
+ * @param {(!EventListener|!function (!Event): (boolean|undefined)|null)} listener
+ * @param {(boolean|!{capture: (boolean|undefined), once: (boolean|undefined), passive: (boolean|undefined)})=} options
+ * @this {EventTarget}
+ */
+Element.prototype.removeEventListener = function(type, listener, options) {};
+
+const acorn = {
   /**
    * @param {string} text
    * @param {Object.<string, boolean>} options
@@ -673,7 +681,7 @@ var acorn = {
   }
 };
 
-var Acorn = {};
+const Acorn = {};
 /**
  * @constructor
  */
@@ -707,7 +715,7 @@ Acorn.Comment;
  */
 Acorn.TokenOrComment;
 
-var ESTree = {};
+const ESTree = {};
 
 /**
  * @constructor
@@ -765,42 +773,6 @@ ESTree.TemplateLiteralNode = function() {
   /** @type {!Array.<!ESTree.Node>} */
   this.expressions;
 };
-/** @type {!Object} */
-var Gonzales = {};
-var gonzales = {
-  /**
-   * @param {string} text
-   * @param {!Object=} options
-   * @return {!Gonzales.Node}
-   */
-  parse: function(text, options) {},
-};
-
-/**
- * @constructor
- */
-Gonzales.Location = function() {
-  /** @type {number} */
-  this.line;
-  /** @type {number} */
-  this.column;
-};
-
-/**
- * @constructor
- */
-Gonzales.Node = function() {
-  /** @type {string} */
-  this.type;
-  /** @type {string} */
-  this.syntax;
-  /** @type {!Gonzales.Location} */
-  this.start;
-  /** @type {!Gonzales.Location} */
-  this.end;
-  /** @type {(string|!Array<!Gonzales.Node>)} */
-  this.content;
-};
 
 /**
  * @type {string}
@@ -815,7 +787,7 @@ DOMException.ABORT_ERR;
  * @constructor
  * @param {!Object} params
  */
-var Terminal = function(params) {};
+const Terminal = function(params) {};
 
 Terminal.prototype = {
   fit: function() {},
@@ -825,3 +797,23 @@ Terminal.prototype = {
   /** @param {string} eventName * @param {!Function} handler */
   on: function(eventName, handler) {}
 };
+
+/**
+ * @param {string} context
+ * @return {!Console}
+ */
+Console.prototype.context = function(context) {};
+
+
+/**
+ * @param {!Array<string>|string} strings
+ * @param {...*} vararg
+ * @return {string}
+ */
+const ls = function(strings, vararg) {};
+
+/**
+ * @constructor
+ * @param {function(!Array<*>)} callback
+ */
+const ResizeObserver = function(callback) {};

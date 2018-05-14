@@ -8,8 +8,22 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#import "webrtc/sdk/objc/Framework/Headers/WebRTC/RTCVideoFrame.h"
-#import "webrtc/sdk/objc/Framework/Headers/WebRTC/RTCVideoFrameBuffer.h"
+#import "RTCVideoFrame+Private.h"
+
+#import "WebRTC/RTCVideoFrame.h"
+#import "WebRTC/RTCVideoFrameBuffer.h"
+
+#include "api/video/video_frame.h"
+#include "rtc_base/timeutils.h"
+#include "sdk/objc/Framework/Native/api/video_frame_buffer.h"
+#include "sdk/objc/Framework/Native/src/objc_frame_buffer.h"
+
+id<RTCVideoFrameBuffer> nativeToRtcFrameBuffer(
+    const rtc::scoped_refptr<webrtc::VideoFrameBuffer> &buffer) {
+  return buffer->type() == webrtc::VideoFrameBuffer::Type::kNative ?
+      static_cast<webrtc::ObjCFrameBuffer *>(buffer.get())->wrapped_frame_buffer() :
+      [[RTCI420Buffer alloc] initWithFrameBuffer:buffer->ToI420()];
+}
 
 @implementation RTCVideoFrame {
   RTCVideoRotation _rotation;
@@ -17,6 +31,7 @@
 }
 
 @synthesize buffer = _buffer;
+@synthesize timeStamp;
 
 - (int)width {
   return _buffer.width;
@@ -30,64 +45,8 @@
   return _rotation;
 }
 
-- (const uint8_t *)dataY {
-  if ([_buffer conformsToProtocol:@protocol(RTCI420Buffer)]) {
-    return ((id<RTCI420Buffer>)_buffer).dataY;
-  } else {
-    return nullptr;
-  }
-}
-
-- (const uint8_t *)dataU {
-  if ([_buffer conformsToProtocol:@protocol(RTCI420Buffer)]) {
-    return ((id<RTCI420Buffer>)_buffer).dataU;
-  } else {
-    return nullptr;
-  }
-}
-
-- (const uint8_t *)dataV {
-  if ([_buffer conformsToProtocol:@protocol(RTCI420Buffer)]) {
-    return ((id<RTCI420Buffer>)_buffer).dataV;
-  } else {
-    return nullptr;
-  }
-}
-
-- (int)strideY {
-  if ([_buffer conformsToProtocol:@protocol(RTCI420Buffer)]) {
-    return ((id<RTCI420Buffer>)_buffer).strideY;
-  } else {
-    return 0;
-  }
-}
-
-- (int)strideU {
-  if ([_buffer conformsToProtocol:@protocol(RTCI420Buffer)]) {
-    return ((id<RTCI420Buffer>)_buffer).strideU;
-  } else {
-    return 0;
-  }
-}
-
-- (int)strideV {
-  if ([_buffer conformsToProtocol:@protocol(RTCI420Buffer)]) {
-    return ((id<RTCI420Buffer>)_buffer).strideV;
-  } else {
-    return 0;
-  }
-}
-
 - (int64_t)timeStampNs {
   return _timeStampNs;
-}
-
-- (CVPixelBufferRef)nativeHandle {
-  if ([_buffer isKindOfClass:[RTCCVPixelBuffer class]]) {
-    return ((RTCCVPixelBuffer *)_buffer).pixelBuffer;
-  } else {
-    return nullptr;
-  }
 }
 
 - (RTCVideoFrame *)newI420VideoFrame {
@@ -133,6 +92,26 @@
   }
 
   return self;
+}
+
+- (instancetype)initWithNativeVideoFrame:(const webrtc::VideoFrame &)frame {
+  if (self = [self initWithBuffer:nativeToRtcFrameBuffer(frame.video_frame_buffer())
+                         rotation:RTCVideoRotation(frame.rotation())
+                      timeStampNs:frame.timestamp_us() * rtc::kNumNanosecsPerMicrosec]) {
+    self.timeStamp = frame.timestamp();
+  }
+
+  return self;
+}
+
+- (webrtc::VideoFrame)nativeVideoFrame {
+  rtc::scoped_refptr<webrtc::VideoFrameBuffer> frameBuffer =
+      webrtc::ObjCToNativeVideoFrameBuffer(self.buffer);
+  webrtc::VideoFrame videoFrame(frameBuffer,
+                                (webrtc::VideoRotation)self.rotation,
+                                self.timeStampNs / rtc::kNumNanosecsPerMicrosec);
+  videoFrame.set_timestamp(self.timeStamp);
+  return videoFrame;
 }
 
 @end

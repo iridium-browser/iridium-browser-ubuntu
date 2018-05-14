@@ -24,17 +24,17 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.support.annotation.NonNull;
+import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
-import android.support.v7.app.NotificationCompat;
 import android.support.v7.media.MediaRouter;
 import android.text.TextUtils;
 import android.util.SparseArray;
 import android.view.KeyEvent;
 
-import org.chromium.base.BuildInfo;
+import org.chromium.base.CollectionUtil;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.SysUtils;
@@ -80,13 +80,13 @@ public class MediaNotificationManager {
     private static final int COMPACT_VIEW_ACTIONS_COUNT = 3;
 
     // The maximum number of actions in BigView media notification.
-    private static final int BIG_VIEW_ACTIONS_COUNT = isRunningN() ? 5 : 3;
+    private static final int BIG_VIEW_ACTIONS_COUNT = 5;
 
     // Maps the notification ids to their corresponding notification managers.
     private static SparseArray<MediaNotificationManager> sManagers;
 
     // Overrides N detection. The production code will use |null|, which uses the Android version
-    // code. Otherwise, |isRunningN()| will return whatever value is set.
+    // code. Otherwise, |isRunningAtLeastN()| will return whatever value is set.
     @VisibleForTesting
     static Boolean sOverrideIsRunningNForTesting;
 
@@ -285,7 +285,7 @@ public class MediaNotificationManager {
     // created service no matter what or it will crash. Show the minimal notification. The caller is
     // responsible for hiding it afterwards.
     private static void finishStartingForegroundService(ListenerService s) {
-        if (!BuildInfo.isAtLeastO()) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
 
         ChromeNotificationBuilder builder =
                 NotificationBuilderFactory.createChromeNotificationBuilder(
@@ -708,7 +708,7 @@ public class MediaNotificationManager {
         sManagers.put(notificationId, manager);
     }
 
-    private static boolean isRunningN() {
+    private static boolean isRunningAtLeastN() {
         return (sOverrideIsRunningNForTesting != null)
                 ? sOverrideIsRunningNForTesting
                 : Build.VERSION.SDK_INT >= Build.VERSION_CODES.N;
@@ -795,13 +795,21 @@ public class MediaNotificationManager {
 
     @VisibleForTesting
     void onPlay(int actionSource) {
-        if (!mMediaNotificationInfo.isPaused) return;
+        // MediaSessionCompat calls this sometimes when `mMediaNotificationInfo`
+        // is no longer available. It's unclear if it is a Support Library issue
+        // or something that isn't properly cleaned up but given that the
+        // crashes are rare and the fix is simple, null check was enough.
+        if (mMediaNotificationInfo == null || !mMediaNotificationInfo.isPaused) return;
         mMediaNotificationInfo.listener.onPlay(actionSource);
     }
 
     @VisibleForTesting
     void onPause(int actionSource) {
-        if (mMediaNotificationInfo.isPaused) return;
+        // MediaSessionCompat calls this sometimes when `mMediaNotificationInfo`
+        // is no longer available. It's unclear if it is a Support Library issue
+        // or something that isn't properly cleaned up but given that the
+        // crashes are rare and the fix is simple, null check was enough.
+        if (mMediaNotificationInfo == null || mMediaNotificationInfo.isPaused) return;
         mMediaNotificationInfo.listener.onPause(actionSource);
     }
 
@@ -918,7 +926,7 @@ public class MediaNotificationManager {
         // On O, finish starting the foreground service nevertheless, or Android will
         // crash Chrome.
         boolean foregroundedService = false;
-        if (BuildInfo.isAtLeastO() && serviceStarting) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && serviceStarting) {
             mService.startForeground(mMediaNotificationInfo.id, notification);
             foregroundedService = true;
         }
@@ -1067,7 +1075,7 @@ public class MediaNotificationManager {
             builder.setLargeIcon(null);
         } else if (mMediaNotificationInfo.notificationLargeIcon != null) {
             builder.setLargeIcon(mMediaNotificationInfo.notificationLargeIcon);
-        } else if (!isRunningN()) {
+        } else if (!isRunningAtLeastN()) {
             if (mDefaultNotificationLargeIcon == null) {
                 int resourceId = (mMediaNotificationInfo.defaultNotificationLargeIcon != 0)
                         ? mMediaNotificationInfo.defaultNotificationLargeIcon
@@ -1127,7 +1135,7 @@ public class MediaNotificationManager {
     private void setMediaStyleNotificationText(ChromeNotificationBuilder builder) {
         builder.setContentTitle(mMediaNotificationInfo.metadata.getTitle());
         String artistAndAlbumText = getArtistAndAlbumText(mMediaNotificationInfo.metadata);
-        if (isRunningN() || !artistAndAlbumText.isEmpty()) {
+        if (isRunningAtLeastN() || !artistAndAlbumText.isEmpty()) {
             builder.setContentText(artistAndAlbumText);
             builder.setSubText(mMediaNotificationInfo.origin);
         } else {
@@ -1150,9 +1158,6 @@ public class MediaNotificationManager {
      *
      * The method assumes STOP cannot coexist with switch track actions and seeking actions. It also
      * assumes PLAY and PAUSE cannot coexist.
-     *
-     * TODO(zqzhang): get UX feedback to decide which actions to select when the number of actions
-     * is greater than that can be displayed. See https://crbug.com/667500
      */
     private List<Integer> computeBigViewActions(Set<Integer> actions) {
         // STOP cannot coexist with switch track actions and seeking actions.
@@ -1164,6 +1169,8 @@ public class MediaNotificationManager {
         // PLAY and PAUSE cannot coexist.
         assert !actions.contains(MediaSessionAction.PLAY)
                 || !actions.contains(MediaSessionAction.PAUSE);
+        // There can't be move actions than BIG_VIEW_ACTIONS_COUNT.
+        assert actions.size() <= BIG_VIEW_ACTIONS_COUNT;
 
         int[] actionByOrder = {
                 MediaSessionAction.PREVIOUS_TRACK,
@@ -1175,35 +1182,10 @@ public class MediaNotificationManager {
                 CUSTOM_MEDIA_SESSION_ACTION_STOP,
         };
 
-        // First, select at most |BIG_VIEW_ACTIONS_COUNT| actions by priority.
-        Set<Integer> selectedActions;
-        if (actions.size() <= BIG_VIEW_ACTIONS_COUNT) {
-            selectedActions = actions;
-        } else {
-            selectedActions = new HashSet<>();
-            if (actions.contains(CUSTOM_MEDIA_SESSION_ACTION_STOP)) {
-                selectedActions.add(CUSTOM_MEDIA_SESSION_ACTION_STOP);
-            } else {
-                if (actions.contains(MediaSessionAction.PLAY)) {
-                    selectedActions.add(MediaSessionAction.PLAY);
-                } else {
-                    selectedActions.add(MediaSessionAction.PAUSE);
-                }
-                if (actions.contains(MediaSessionAction.PREVIOUS_TRACK)
-                        && actions.contains(MediaSessionAction.NEXT_TRACK)) {
-                    selectedActions.add(MediaSessionAction.PREVIOUS_TRACK);
-                    selectedActions.add(MediaSessionAction.NEXT_TRACK);
-                } else {
-                    selectedActions.add(MediaSessionAction.SEEK_BACKWARD);
-                    selectedActions.add(MediaSessionAction.SEEK_FORWARD);
-                }
-            }
-        }
-
-        // Second, sort the selected actions.
+        // Sort the actions based on the expected ordering in the UI.
         List<Integer> sortedActions = new ArrayList<>();
         for (int action : actionByOrder) {
-            if (selectedActions.contains(action)) sortedActions.add(action);
+            if (actions.contains(action)) sortedActions.add(action);
         }
 
         return sortedActions;
@@ -1243,7 +1225,7 @@ public class MediaNotificationManager {
                 compactActions.add(actions.indexOf(MediaSessionAction.PLAY));
             }
             compactActions.add(actions.indexOf(CUSTOM_MEDIA_SESSION_ACTION_STOP));
-            return convertIntegerListToIntArray(compactActions);
+            return CollectionUtil.integerListToIntArray(compactActions);
         }
 
         int[] actionsArray = new int[COMPACT_VIEW_ACTIONS_COUNT];
@@ -1270,12 +1252,6 @@ public class MediaNotificationManager {
         actionsArray[2] = actions.indexOf(MediaSessionAction.SEEK_FORWARD);
 
         return actionsArray;
-    }
-
-    static int[] convertIntegerListToIntArray(List<Integer> intList) {
-        int[] intArray = new int[intList.size()];
-        for (int i = 0; i < intList.size(); ++i) intArray[i] = i;
-        return intArray;
     }
 
     private static Context getContext() {

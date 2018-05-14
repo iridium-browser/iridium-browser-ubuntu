@@ -22,6 +22,7 @@
 #ifndef NodeListsNodeData_h
 #define NodeListsNodeData_h
 
+#include "base/macros.h"
 #include "core/dom/ChildNodeList.h"
 #include "core/dom/EmptyNodeList.h"
 #include "core/dom/QualifiedName.h"
@@ -34,8 +35,6 @@
 namespace blink {
 
 class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
-  WTF_MAKE_NONCOPYABLE(NodeListsNodeData);
-
  public:
   ChildNodeList* GetChildNodeList(ContainerNode& node) {
     DCHECK(!child_node_list_ || node == child_node_list_->VirtualOwnerNode());
@@ -48,7 +47,6 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
       return ToChildNodeList(child_node_list_);
     ChildNodeList* list = ChildNodeList::Create(node);
     child_node_list_ = list;
-    ScriptWrappableVisitor::WriteBarrier(this, list);
     return list;
   }
 
@@ -58,7 +56,6 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
       return ToEmptyNodeList(child_node_list_);
     EmptyNodeList* list = EmptyNodeList::Create(node);
     child_node_list_ = list;
-    ScriptWrappableVisitor::WriteBarrier(this, list);
     return list;
   }
 
@@ -66,7 +63,10 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
   struct NodeListAtomicCacheMapEntryHash {
     STATIC_ONLY(NodeListAtomicCacheMapEntryHash);
     static unsigned GetHash(const NamedNodeListKey& entry) {
-      return DefaultHash<AtomicString>::Hash::GetHash(entry.second) +
+      return DefaultHash<AtomicString>::Hash::GetHash(
+                 entry.second == CSSSelector::UniversalSelectorAtom()
+                     ? g_star_atom
+                     : entry.second) +
              entry.first;
     }
     static bool Equal(const NamedNodeListKey& a, const NamedNodeListKey& b) {
@@ -76,13 +76,11 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
         DefaultHash<AtomicString>::Hash::safe_to_compare_to_empty_or_deleted;
   };
 
-  // Oilpan: keep a weak reference to the collection objects.
-  // Object unregistration is handled by GC's weak processing.
   typedef HeapHashMap<NamedNodeListKey,
-                      WeakMember<LiveNodeListBase>,
+                      TraceWrapperMember<LiveNodeListBase>,
                       NodeListAtomicCacheMapEntryHash>
       NodeListAtomicNameCacheMap;
-  typedef HeapHashMap<QualifiedName, WeakMember<TagCollectionNS>>
+  typedef HeapHashMap<QualifiedName, TraceWrapperMember<TagCollectionNS>>
       TagCollectionNSCache;
 
   template <typename T>
@@ -98,7 +96,6 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
 
     T* list = T::Create(node, collection_type, name);
     result.stored_value->value = list;
-    ScriptWrappableVisitor::WriteBarrier(this, list);
     return list;
   }
 
@@ -106,21 +103,21 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
   T* AddCache(ContainerNode& node, CollectionType collection_type) {
     DCHECK(ThreadState::Current()->IsGCForbidden());
     NodeListAtomicNameCacheMap::AddResult result = atomic_name_caches_.insert(
-        NamedNodeListKey(collection_type, g_star_atom), nullptr);
+        NamedNodeListKey(collection_type, CSSSelector::UniversalSelectorAtom()),
+        nullptr);
     if (!result.is_new_entry) {
       return static_cast<T*>(result.stored_value->value.Get());
     }
 
     T* list = T::Create(node, collection_type);
     result.stored_value->value = list;
-    ScriptWrappableVisitor::WriteBarrier(this, list);
     return list;
   }
 
   template <typename T>
   T* Cached(CollectionType collection_type) {
-    return static_cast<T*>(
-        atomic_name_caches_.at(NamedNodeListKey(collection_type, g_star_atom)));
+    return static_cast<T*>(atomic_name_caches_.at(NamedNodeListKey(
+        collection_type, CSSSelector::UniversalSelectorAtom())));
   }
 
   TagCollectionNS* AddCache(ContainerNode& node,
@@ -136,13 +133,12 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
     TagCollectionNS* list =
         TagCollectionNS::Create(node, namespace_uri, local_name);
     result.stored_value->value = list;
-    ScriptWrappableVisitor::WriteBarrier(this, list);
     return list;
   }
 
   static NodeListsNodeData* Create() { return new NodeListsNodeData; }
 
-  void InvalidateCaches(const QualifiedName* attr_name = 0);
+  void InvalidateCaches(const QualifiedName* attr_name = nullptr);
 
   bool IsEmpty() const {
     return !child_node_list_ && atomic_name_caches_.IsEmpty() &&
@@ -173,17 +169,18 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
       list->DidMoveToDocument(old_document, new_document);
     }
   }
-  DECLARE_TRACE();
 
-  DECLARE_TRACE_WRAPPERS();
+  void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   NodeListsNodeData() : child_node_list_(nullptr) {}
 
   // Can be a ChildNodeList or an EmptyNodeList.
-  WeakMember<NodeList> child_node_list_;
+  TraceWrapperMember<NodeList> child_node_list_;
   NodeListAtomicNameCacheMap atomic_name_caches_;
   TagCollectionNSCache tag_collection_ns_caches_;
+  DISALLOW_COPY_AND_ASSIGN(NodeListsNodeData);
 };
 
 DEFINE_TRAIT_FOR_TRACE_WRAPPERS(NodeListsNodeData);
@@ -214,7 +211,7 @@ inline Collection* ContainerNode::EnsureCachedCollection(
 
 template <typename Collection>
 inline Collection* ContainerNode::CachedCollection(CollectionType type) {
-  NodeListsNodeData* node_lists = this->NodeLists();
+  NodeListsNodeData* node_lists = NodeLists();
   return node_lists ? node_lists->Cached<Collection>(type) : nullptr;
 }
 

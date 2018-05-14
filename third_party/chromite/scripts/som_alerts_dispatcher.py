@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,8 +10,10 @@ from __future__ import print_function
 import collections
 import datetime
 import json
+import re
 
 from chromite.cbuildbot import topology
+from chromite.lib.const import waterfall
 from chromite.lib import cidb
 from chromite.lib import classifier
 from chromite.lib import commandline
@@ -32,6 +35,9 @@ MAX_HISTORY_DAYS = 30
 MAX_CONSECUTIVE_BUILDS = 50
 # Last N builds to show as history.
 MAX_LAST_N_BUILDS = 10
+
+CROSLAND_VERSION_RE = re.compile(r'^\d+\.\d+\.\d+$')
+SANITY_BUILD_CONFIG_RE = re.compile(r'.*-tot-paladin$')
 
 def GetParser():
   """Creates the argparse parser."""
@@ -105,19 +111,19 @@ def MapCIDBToSOMStatus(status, message_type=None, message_subtype=None):
 
 
 def AddLogsLink(logdog_client, name,
-                waterfall, logdog_prefix, annotation_stream, logs_links):
+                wfall, logdog_prefix, annotation_stream, logs_links):
   """Helper to add a Logdog link.
 
   Args:
     logdog_client: logdog.LogdogClient object.
     name: A name for the the link.
-    waterfall: Waterfall for the Logdog stream
+    wfall: Waterfall for the Logdog stream
     logdog_prefix: Logdog prefix of the stream.
     annotation_stream: Logdog annotation for the stream.
     logs_links: List to add to if the stream is valid.
   """
   if annotation_stream and annotation_stream['name']:
-    url = logdog_client.ConstructViewerURL(waterfall,
+    url = logdog_client.ConstructViewerURL(wfall,
                                            logdog_prefix,
                                            annotation_stream['name'])
     logs_links.append(som.Link(name, url))
@@ -146,6 +152,11 @@ def GenerateAlertStage(build, stage, exceptions, aborted,
                                        constants.BUILDER_STATUS_WAITING])
   NO_LOG_RETRY_STATUSES = frozenset([constants.BUILDER_STATUS_INFLIGHT,
                                      constants.BUILDER_STATUS_ABORTED])
+  # IGNORE_EXCEPTIONS should be ignored if they're the only exception.
+  IGNORE_EXCEPTIONS = frozenset(['ImportantBuilderFailedException'])
+  # ABORTED_DISREGARD_EXCEPTIONS should cause any failures of aborted stages
+  # to be entirely disregarded.
+  ABORTED_DISREGARD_EXCEPTIONS = frozenset(['_ShutDownException'])
   if (stage['build_id'] != build['id'] or
       stage['status'] in STAGE_IGNORE_STATUSES):
     return None
@@ -219,18 +230,63 @@ def GenerateAlertStage(build, stage, exceptions, aborted,
     del stage_links[MAX_STAGE_LINKS:]
 
   # Add all exceptions recording in CIDB as notes.
+  has_other_exceptions = False
+  has_ignore_exception = False
   for e in exceptions:
     if e.build_stage_id == stage['id']:
       notes.append('%s: %s' % (e.exception_type, e.exception_message))
-      # If the build was aborted and a stage failed because of a shutdown
-      # exception, don't generate an alert.
-      if aborted and e.exception_type == '_ShutDownException':
+      if aborted and e.exception_type in ABORTED_DISREGARD_EXCEPTIONS:
+        # Don't generate alert if the exception indicates it should be
+        # entirely disregarded.
         return None
+      elif e.exception_type in IGNORE_EXCEPTIONS:
+        # Ignore this exception (and stage if there aren't other exceptions).
+        has_ignore_exception = True
+        continue
+      has_other_exceptions = True
+
+  # If there is an ignored exception and no other exceptions, treat this
+  # stage as non-failed.
+  if has_ignore_exception and not has_other_exceptions:
+    return None
 
   # Add the stage to the alert.
   return som.CrosStageFailure(stage['name'],
                               MapCIDBToSOMStatus(stage['status']),
                               logs_links, stage_links, notes)
+
+
+def GenerateBlameLink(old_version, new_version):
+  """Generates a link to show diffs between two versions.
+
+  Args:
+    old_version: version string.
+    new_version: version string.
+
+  Returns:
+    string of URL to generate blame list, or None if it cannot be generated.
+  """
+  if (CROSLAND_VERSION_RE.match(old_version) and
+      CROSLAND_VERSION_RE.match(new_version)):
+    return 'http://go/crosland/log/%s..%s' % (old_version, new_version)
+  else:
+    return None
+
+
+def GenerateCompareBuildsLink(build_ids, siblings):
+  """Return the URL to compare siblings for this build.
+
+  Args:
+    build_ids: list of CIDB id for the builds.
+    siblings: boolean indicating whether sibling builds should be included.
+
+  Returns:
+    The fully formed URL.
+  """
+  params = ['buildIds=%s' % ','.join([str(b) for b in build_ids])]
+  if siblings:
+    params.append('includeSiblings=true')
+  return 'http://go/buildCompare?%s' % '&'.join(params)
 
 
 def SummarizeHistory(build, db):
@@ -241,33 +297,60 @@ def SummarizeHistory(build, db):
     db: cidb.CIDBConnection object.
 
   Returns:
-    string describing recent history.
+    list of string describing recent history and diff links.
   """
   # Get all the recent builds of the same type.
   now = datetime.datetime.utcnow()
   start_date = now - datetime.timedelta(days=MAX_HISTORY_DAYS)
   history = db.GetBuildHistory(
       build['build_config'], MAX_CONSECUTIVE_BUILDS, start_date=start_date,
-      ending_build_number=build['build_number'], waterfall=build['waterfall'],
+      ending_build_id=build['id'], waterfall=build['waterfall'],
       buildbot_generation=build['buildbot_generation'])
   history = sorted(history, key=lambda s: s['build_number'], reverse=True)
 
   # Count how many times the current status happened consecutively.
-  consecutive = 0
+  ids = []
   for h in history:
     if h['status'] != build['status']:
       break
-    consecutive += 1
+    ids.append(h['id'])
 
   # Determine histogram of last N builds.
   last_n, frequencies = SummarizeStatuses(history[:MAX_LAST_N_BUILDS])
 
   # Generate string.
-  note = 'History of %s: %d %s build(s) in a row' % (
-      build['builder_name'], consecutive, MapCIDBToSOMStatus(build['status']))
+  notes = []
+  compare_link = ''
+  if build['status'] != constants.BUILDER_STATUS_PASSED and len(ids) > 1:
+    compare_link = ' \\[[compare](%s)\\]' % GenerateCompareBuildsLink(ids,
+                                                                      False)
+  note = 'History of %s: %d %s build(s) in a row%s' % (
+      build['builder_name'], len(ids),
+      MapCIDBToSOMStatus(build['status']), compare_link)
   if len(frequencies) > 1:
-    note += '; Last %d builds: %s' % (MAX_LAST_N_BUILDS, last_n)
-  return note
+    ids = [h['id'] for h in history[:MAX_LAST_N_BUILDS]]
+    note += '; Last %d builds: %s \\[[compare](%s)\\]' % (
+        MAX_LAST_N_BUILDS, last_n,
+        GenerateCompareBuildsLink(ids, False))
+  notes.append(note)
+
+  # Look for transition from most recent passing build.
+  if build['status'] != constants.BUILDER_STATUS_PASSED:
+    failure = None
+    for h in history:
+      if h['status'] == constants.BUILDER_STATUS_PASSED:
+        # Generate diff link from h .. failure
+        blame_link = GenerateBlameLink(h['platform_version'],
+                                       failure['platform_version'])
+        if blame_link:
+          note = ('[Diff](%s) from last passed (%s:%d) to first failure (%s:%d)'
+                  % (blame_link, h['builder_name'], h['build_number'],
+                     failure['builder_name'], failure['build_number']))
+          notes.append(note)
+        break
+      failure = h
+
+  return notes
 
 
 def SummarizeStatuses(statuses):
@@ -284,14 +367,15 @@ def SummarizeStatuses(statuses):
   return ', '.join('%d %s' % (frequencies[h], MapCIDBToSOMStatus(h))
                    for h in frequencies), frequencies
 
-def GenerateBuildAlert(build, slave_stages, exceptions, messages, annotations,
+
+def GenerateBuildAlert(build, stages, exceptions, messages, annotations,
                        siblings, severity, now, db,
                        logdog_client, milo_client, allow_experimental=False):
   """Generate an alert for a single build.
 
   Args:
     build: Dictionary of build details from CIDB.
-    slave_stages: A list of dictionaries of stage details from CIDB.
+    stages: A list of dictionaries of stage details from CIDB.
     exceptions: A list of instances of failure_message_lib.StageFailure.
     messages: A list of build message dictionaries from CIDB.
     annotations: A list of dictionaries of build annotations from CIDB.
@@ -311,6 +395,9 @@ def GenerateBuildAlert(build, slave_stages, exceptions, messages, annotations,
                                            constants.BUILDER_STATUS_ABORTED])
   if ((not allow_experimental and not build['important']) or
       build['status'] in BUILD_IGNORE_STATUSES):
+    logging.debug('  %s:%d (id %d) skipped important %s status %s',
+                  build['builder_name'], build['build_number'], build['id'],
+                  build['important'], build['status'])
     return None
 
   # Record any relevant build messages, keeping track if it was aborted.
@@ -333,23 +420,30 @@ def GenerateBuildAlert(build, slave_stages, exceptions, messages, annotations,
   dashboard_url = tree_status.ConstructDashboardURL(build['waterfall'],
                                                     build['builder_name'],
                                                     build['build_number'])
+  annotator_url = tree_status.ConstructAnnotatorURL(build.get('master_build_id',
+                                                              build['id']))
   links = [
-      som.Link('build details', dashboard_url),
+      som.Link('build_details', dashboard_url),
+      som.Link('goldeneye',
+               tree_status.ConstructGoldenEyeBuildDetailsURL(build['id'])),
       som.Link('viceroy',
                tree_status.ConstructViceroyBuildDetailsURL(build['id'])),
       som.Link('buildbot',
                tree_status.ConstructBuildStageURL(
-                   constants.WATERFALL_TO_DASHBOARD[build['waterfall']],
+                   waterfall.WATERFALL_TO_DASHBOARD[build['waterfall']],
                    build['builder_name'], build['build_number'])),
+      som.Link('annotator', annotator_url),
   ]
 
-  notes = [SummarizeHistory(build, db)]
+  notes = SummarizeHistory(build, db)
   if len(siblings) > 1:
-    notes.append('Siblings: %s' % SummarizeStatuses(siblings)[0])
-  notes.extend([
-      ('Annotation: %(failure_category)s(%(failure_message)s) '
-       '%(blame_url)s %(notes)s') % a for a in annotations
-  ])
+    notes.append('Siblings: %s \\[[compare](%s)\\]' %
+                 (SummarizeStatuses(siblings)[0],
+                  GenerateCompareBuildsLink([build['id']], True)))
+  # Link to any existing annotations, along with a link back to the annotator.
+  notes.extend([('[Annotation](%(link)s): %(failure_category)s'
+                 '(%(failure_message)s) %(blame_url)s %(notes)s') %
+                dict(a, **{'link': annotator_url}) for a in annotations])
 
   # If the CIDB status was indeterminate (inflight/aborted), provide link
   # for sheriffs.
@@ -357,8 +451,13 @@ def GenerateBuildAlert(build, slave_stages, exceptions, messages, annotations,
     notes.append('Indeterminate CIDB status: '
                  'https://yaqs.googleplex.com/eng/q/5238815784697856')
 
+  # Annotate sanity builders as such.
+  if SANITY_BUILD_CONFIG_RE.match(build['build_config']):
+    notes.append('%s is a sanity builder: '
+                 'https://yaqs.googleplex.com/eng/q/5913965810155520' %
+                 build['build_config'])
+
   # TODO: Gather similar failures.
-  # TODO: Report of how many builds failed in a row.
   builders = [som.AlertedBuilder(build['builder_name'], dashboard_url,
                                  ToEpoch(build['finish_time'] or now),
                                  build['build_number'], build['build_number'])]
@@ -373,14 +472,16 @@ def GenerateBuildAlert(build, slave_stages, exceptions, messages, annotations,
     buildinfo = None
 
   # Highlight the problematic stages.
-  stages = []
-  for stage in slave_stages:
+  alert_stages = []
+  for stage in stages:
     alert_stage = GenerateAlertStage(build, stage, exceptions, aborted,
                                      buildinfo, logdog_client)
     if alert_stage:
-      stages.append(alert_stage)
+      alert_stages.append(alert_stage)
 
-  if aborted and len(stages) == 0:
+  if (aborted or build['master_build_id'] is None) and len(alert_stages) == 0:
+    logging.debug('  %s:%d (id %d) skipped aborted and no stages',
+                  build['builder_name'], build['build_number'], build['id'])
     return None
 
   # Add the alert to the summary.
@@ -392,7 +493,7 @@ def GenerateBuildAlert(build, slave_stages, exceptions, messages, annotations,
   return som.Alert(key, alert_name, alert_name, int(severity),
                    ToEpoch(now), ToEpoch(build['finish_time'] or now),
                    links, [], 'cros-failure',
-                   som.CrosBuildFailure(notes, stages, builders))
+                   som.CrosBuildFailure(notes, alert_stages, builders))
 
 
 def GenerateAlertsSummary(db, builds=None,
@@ -431,37 +532,41 @@ def GenerateAlertsSummary(db, builds=None,
       build_id, severity = build_tuple
       # pylint: enable=unbalanced-tuple-unpacking
       master = db.GetBuildStatus(build_id)
-      waterfall = master['waterfall']
+      if master is None:
+        logging.warn('Could not locate build id %s', build_id)
+        continue
+      wfall = master['waterfall']
       build_config = master['build_config']
     elif len(build_tuple) == 3:
-      waterfall, build_config, severity = build_tuple
-      master = db.GetMostRecentBuild(waterfall, build_config)
+      wfall, build_config, severity = build_tuple
+      master = db.GetMostRecentBuild(wfall, build_config)
+      if master is None:
+        logging.warn('Could not locate build %s %s', wfall, build_config)
+        continue
     else:
       logging.error('Invalid build tuple: %s' % str(build_tuple))
       continue
 
-    # Find any slave builds, and the individual slave stages.
-    statuses = db.GetSlaveStatuses(master['id'])
+    statuses = [master]
+    stages = db.GetBuildStages(master['id'])
+    exceptions = db.GetBuildsFailures([master['id']])
     messages = db.GetBuildMessages(master['id'])
-    if len(statuses):
-      stages = db.GetSlaveStages(master['id'])
-      exceptions = db.GetSlaveFailures(master['id'])
-      annotations = db.GetAnnotationsForBuilds(
-          [master['id']]).get(master['id'], [])
-      logging.info(('%s %s (id %d): %d slaves, %d slave stages, '
-                    '%d messages, %d annotations'),
-                   waterfall, build_config, master['id'],
-                   len(statuses), len(stages), len(messages),
-                   len(annotations))
-    else:
-      # Didn't find any slaves, so treat as a singular build.
-      statuses = [master]
-      stages = db.GetBuildStages(master['id'])
-      exceptions = db.GetBuildsFailures([master['id']])
-      annotations = []
-      logging.info('%s %s (id %d): single build, %d stages, %d messages',
-                   waterfall, build_config, master['id'],
-                   len(stages), len(messages))
+    annotations = []
+    logging.info('%s %s (id %d): single/master build, %d stages, %d messages',
+                 wfall, build_config, master['id'],
+                 len(stages), len(messages))
+
+    # Find any slave builds, and the individual slave stages.
+    slave_statuses = db.GetSlaveStatuses(master['id'])
+    if len(slave_statuses):
+      statuses.extend(slave_statuses)
+      slave_stages = db.GetSlaveStages(master['id'])
+      stages.extend(slave_stages)
+      exceptions.extend(db.GetSlaveFailures(master['id']))
+      annotations.extend(db.GetAnnotationsForBuilds(
+          [master['id']]).get(master['id'], []))
+      logging.info('- %d slaves, %d slave stages, %d annotations',
+                   len(slave_statuses), len(slave_stages), len(annotations))
 
     # Look for failing and inflight (signifying timeouts) slave builds.
     for build in sorted(statuses, key=lambda s: s['builder_name']):

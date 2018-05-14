@@ -27,12 +27,11 @@ namespace content {
 
 FakeSpeechRecognitionManager::FakeSpeechRecognitionManager()
     : session_id_(0),
-      listener_(NULL),
+      listener_(nullptr),
       fake_result_(kTestResult),
       did_cancel_all_(false),
       should_send_fake_response_(true),
-      delegate_(NULL) {
-}
+      delegate_(nullptr) {}
 
 void FakeSpeechRecognitionManager::SetDelegate(
     SpeechRecognitionManagerDelegate* delegate) {
@@ -61,7 +60,7 @@ int FakeSpeechRecognitionManager::CreateSession(
     const SpeechRecognitionSessionConfig& config) {
   VLOG(1) << "FAKE CreateSession invoked.";
   EXPECT_EQ(0, session_id_);
-  EXPECT_EQ(NULL, listener_);
+  EXPECT_EQ(nullptr, listener_);
   listener_ = config.event_listener.get();
   if (config.grammars.size() > 0)
     grammar_ = config.grammars[0].url;
@@ -74,7 +73,7 @@ int FakeSpeechRecognitionManager::CreateSession(
 void FakeSpeechRecognitionManager::StartSession(int session_id) {
   VLOG(1) << "FAKE StartSession invoked.";
   EXPECT_EQ(session_id, session_id_);
-  EXPECT_TRUE(listener_ != NULL);
+  EXPECT_TRUE(listener_ != nullptr);
 
   if (delegate_)
     delegate_->GetEventListener()->OnRecognitionStart(session_id_);
@@ -83,7 +82,7 @@ void FakeSpeechRecognitionManager::StartSession(int session_id) {
     // Give the fake result in a short while.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(
+        base::BindOnce(
             &FakeSpeechRecognitionManager::SetFakeRecognitionResult,
             // This class does not need to be refcounted (typically done by
             // PostTask) since it will outlive the test and gets released only
@@ -94,9 +93,8 @@ void FakeSpeechRecognitionManager::StartSession(int session_id) {
   }
   if (!recognition_started_closure_.is_null()) {
     BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&RunCallback, recognition_started_closure_));
+        BrowserThread::UI, FROM_HERE,
+        base::BindOnce(&RunCallback, recognition_started_closure_));
   }
 }
 
@@ -104,7 +102,7 @@ void FakeSpeechRecognitionManager::AbortSession(int session_id) {
   VLOG(1) << "FAKE AbortSession invoked.";
   EXPECT_EQ(session_id_, session_id);
   session_id_ = 0;
-  listener_ = NULL;
+  listener_ = nullptr;
 }
 
 void FakeSpeechRecognitionManager::StopAudioCaptureForSession(int session_id) {
@@ -160,7 +158,7 @@ void FakeSpeechRecognitionManager::SetFakeRecognitionResult() {
   listener_->OnRecognitionResults(session_id_, results);
   listener_->OnRecognitionEnd(session_id_);
   session_id_ = 0;
-  listener_ = NULL;
+  listener_ = nullptr;
   VLOG(1) << "Finished setting fake recognition result.";
 }
 

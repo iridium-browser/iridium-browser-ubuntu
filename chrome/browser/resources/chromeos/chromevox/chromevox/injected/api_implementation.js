@@ -10,12 +10,21 @@
 goog.provide('cvox.ApiImplementation');
 
 goog.require('cvox.ChromeVox');
+goog.require('cvox.ExtensionBridge');
 goog.require('cvox.ScriptInstaller');
 
 /**
  * @constructor
  */
 cvox.ApiImplementation = function() {};
+
+/**
+ * The message between content script and the page that indicates the
+ * connection to the background page has been lost.
+ * @type {string}
+ * @const
+ */
+cvox.ApiImplementation.DISCONNECT_MSG = 'cvox.Disconnect';
 
 /**
  * Inject the API into the page and set up communication with it.
@@ -28,9 +37,14 @@ cvox.ApiImplementation.init = function(opt_onload) {
   var didInstall =
       cvox.ScriptInstaller.installScript(scripts, 'cvoxapi', opt_onload);
   if (!didInstall) {
-    // If the API script is already installed, just re-enable it.
-    window.location.href = 'javascript:cvox.Api.internalEnable();';
+    console.error('Unable to install api scripts');
   }
+
+  cvox.ExtensionBridge.addDisconnectListener(function() {
+    cvox.ApiImplementation.port.postMessage(
+        cvox.ApiImplementation.DISCONNECT_MSG);
+    cvox.ScriptInstaller.uninstallScript('cvoxapi');
+  });
 };
 
 /**

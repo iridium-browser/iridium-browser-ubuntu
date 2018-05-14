@@ -152,6 +152,7 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       return [
         'ANGLE_instanced_arrays',
         'EXT_blend_minmax',
+        'EXT_color_buffer_half_float',
         'EXT_disjoint_timer_query',
         'EXT_frag_depth',
         'EXT_shader_texture_lod',
@@ -164,6 +165,7 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
         'OES_texture_half_float',
         'OES_texture_half_float_linear',
         'OES_vertex_array_object',
+        'WEBGL_color_buffer_float',
         'WEBGL_compressed_texture_astc',
         'WEBGL_compressed_texture_atc',
         'WEBGL_compressed_texture_etc1',
@@ -206,7 +208,7 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
 
   def _CheckTestCompletion(self):
     self.tab.action_runner.WaitForJavaScriptCondition(
-        'webglTestHarness._finished', timeout=300)
+        'webglTestHarness._finished', timeout=self._GetTestTimeout())
     if not self._DidWebGLTestSucceed(self.tab):
       self.fail(self._WebGLTestMessages(self.tab))
 
@@ -221,7 +223,7 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
   def _RunExtensionCoverageTest(self, test_path, *args):
     self._NavigateTo(test_path, self._GetExtensionHarnessScript())
     self.tab.action_runner.WaitForJavaScriptCondition(
-        'window._loaded', timeout=300)
+        'window._loaded', timeout=self._GetTestTimeout())
     extension_list = args[0]
     webgl_version = args[1]
     context_type = "webgl2" if webgl_version == 2 else "webgl"
@@ -237,7 +239,7 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
   def _RunExtensionTest(self, test_path, *args):
     self._NavigateTo(test_path, self._GetExtensionHarnessScript())
     self.tab.action_runner.WaitForJavaScriptCondition(
-        'window._loaded', timeout=300)
+        'window._loaded', timeout=self._GetTestTimeout())
     extension = args[0]
     webgl_version = args[1]
     context_type = "webgl2" if webgl_version == 2 else "webgl"
@@ -246,12 +248,19 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       extension=extension, context_type=context_type)
     self._CheckTestCompletion()
 
+  def _GetTestTimeout(self):
+    timeout = 300
+    if self._is_asan:
+      # Asan runs much slower and needs a longer timeout
+      timeout *= 2
+    return timeout
+
   @classmethod
   def SetupWebGLBrowserArgs(cls, browser_args):
     # --test-type=gpu is used only to suppress the "Google API Keys are missing"
     # infobar, which causes flakiness in tests.
     browser_args += [
-      '--ignore-autoplay-restrictions',
+      '--autoplay-policy=no-user-gesture-required',
       '--disable-domain-blocking-for-3d-apis',
       '--disable-gpu-process-crash-limit',
       '--test-type=gpu',

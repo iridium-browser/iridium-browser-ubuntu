@@ -14,8 +14,11 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.support.v4.app.ActivityOptionsCompat;
 
-import junit.framework.Assert;
+import org.junit.Assert;
 
+import org.chromium.base.ApplicationStatus;
+import org.chromium.base.Log;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.ScalableTimeout;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.preferences.Preferences;
@@ -23,10 +26,17 @@ import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 
+import java.lang.ref.WeakReference;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.Callable;
+
 /**
  * Collection of activity utilities.
  */
 public class ActivityUtils {
+    private static final String TAG = "cr_ActivityUtils";
+
     private static final long ACTIVITY_START_TIMEOUT_MS = ScalableTimeout.scaleTimeout(3000);
     private static final long CONDITION_POLL_INTERVAL_MS = 100;
 
@@ -96,6 +106,33 @@ public class ActivityUtils {
      */
     public static <T> T waitForActivity(Instrumentation instrumentation, Class<T> activityType,
             Runnable activityTrigger) {
+        Callable<Void> callableWrapper = new Callable<Void>() {
+            @Override
+            public Void call() {
+                activityTrigger.run();
+                return null;
+            }
+        };
+
+        try {
+            return waitForActivityWithTimeout(
+                    instrumentation, activityType, callableWrapper, ACTIVITY_START_TIMEOUT_MS);
+        } catch (Exception e) {
+            // We just ignore checked exceptions here since Runnables can't throw them.
+        }
+        return null;
+    }
+
+    /**
+     * Captures an activity of a particular type that is triggered from some action.
+     *
+     * @param <T> The type of activity to wait for.
+     * @param activityType The class type of the activity.
+     * @param activityTrigger The action that will trigger the new activity (run in this thread).
+     * @return The spawned activity.
+     */
+    public static <T> T waitForActivity(Instrumentation instrumentation, Class<T> activityType,
+            Callable<Void> activityTrigger) throws Exception {
         return waitForActivityWithTimeout(instrumentation, activityType, activityTrigger,
                 ACTIVITY_START_TIMEOUT_MS);
     }
@@ -109,19 +146,35 @@ public class ActivityUtils {
      * @return The spawned activity.
      */
     public static <T> T waitForActivityWithTimeout(Instrumentation instrumentation,
-            Class<T> activityType, Runnable activityTrigger, long timeOut) {
+            Class<T> activityType, Callable<Void> activityTrigger, long timeOut) throws Exception {
         ActivityMonitor monitor =
                 instrumentation.addMonitor(activityType.getCanonicalName(), null, false);
 
-        activityTrigger.run();
+        activityTrigger.call();
         instrumentation.waitForIdleSync();
         Activity activity = monitor.getLastActivity();
         if (activity == null) {
             activity = monitor.waitForActivityWithTimeout(timeOut);
+            if (activity == null) logRunningChromeActivities();
         }
         Assert.assertNotNull(activityType.getName() + " did not start in: " + timeOut, activity);
 
         return activityType.cast(activity);
+    }
+
+    private static void logRunningChromeActivities() {
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            List<WeakReference<Activity>> activities = ApplicationStatus.getRunningActivities();
+            StringBuilder builder = new StringBuilder("Running Chrome Activities: ");
+            for (WeakReference<Activity> activityRef : activities) {
+                Activity activity = activityRef.get();
+                if (activity == null) continue;
+                builder.append(String.format(Locale.US, "\n   %s : %d",
+                        activity.getClass().getSimpleName(),
+                        ApplicationStatus.getStateForActivity(activity)));
+            }
+            Log.i(TAG, builder.toString());
+        });
     }
 
     /**

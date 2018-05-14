@@ -82,19 +82,25 @@ class SuggestionView extends ViewGroup {
 
     private final int mDarkTitleColorStandardFont;
     private final int mLightTitleColorStandardFont;
-    private final int mUrlColor;
+    private final int mDarkUrlStandardModernColor;
+    private final int mLightUrlStandardModernColor;
+    private final int mLightUrlStandardColor;
 
     private OmniboxResultItem mSuggestionItem;
     private OmniboxSuggestion mSuggestion;
     private OmniboxSuggestionDelegate mSuggestionDelegate;
     private Boolean mUseDarkColors;
     private int mPosition;
+    private int mRefineViewOffsetPx;
+    private int mSuggestionViewStartOffset;
 
     private final SuggestionContentsContainer mContentsView;
 
     private final int mRefineWidth;
     private final View mRefineView;
     private TintedDrawable mRefineIcon;
+    private final int mRefineViewModernEndPadding;
+    private final int mSuggestionListModernOffset;
 
     private final int[] mViewPositionHolder = new int[2];
 
@@ -123,7 +129,12 @@ class SuggestionView extends ViewGroup {
                 ApiCompatibilityUtils.getColor(resources, R.color.url_emphasis_default_text);
         mLightTitleColorStandardFont =
                 ApiCompatibilityUtils.getColor(resources, R.color.url_emphasis_light_default_text);
-        mUrlColor = ApiCompatibilityUtils.getColor(resources, R.color.suggestion_url);
+        mDarkUrlStandardModernColor =
+                ApiCompatibilityUtils.getColor(resources, R.color.suggestion_url_dark_modern);
+        mLightUrlStandardModernColor =
+                ApiCompatibilityUtils.getColor(resources, R.color.suggestion_url_light_modern);
+        mLightUrlStandardColor =
+                ApiCompatibilityUtils.getColor(resources, R.color.suggestion_url_light);
 
         TypedArray a = getContext().obtainStyledAttributes(
                 new int [] {R.attr.selectableItemBackground});
@@ -185,6 +196,12 @@ class SuggestionView extends ViewGroup {
         mRefineWidth = getResources()
                 .getDimensionPixelSize(R.dimen.omnibox_suggestion_refine_width);
 
+        mRefineViewModernEndPadding = getResources().getDimensionPixelSize(
+                R.dimen.omnibox_suggestion_refine_view_modern_end_padding);
+
+        mSuggestionListModernOffset =
+                getResources().getDimensionPixelSize(R.dimen.omnibox_suggestion_list_modern_offset);
+
         mUrlBar = (UrlBar) locationBar.getContainerView().findViewById(R.id.url_bar);
 
         mPhoneUrlBarLeftOffsetPx = getResources().getDimensionPixelOffset(
@@ -204,12 +221,12 @@ class SuggestionView extends ViewGroup {
         boolean refineVisible = mRefineView.getVisibility() == VISIBLE;
         boolean isRtl = ApiCompatibilityUtils.isLayoutRtl(this);
         int contentsViewOffsetX = isRtl && refineVisible ? mRefineWidth : 0;
-        mContentsView.layout(
-                contentsViewOffsetX,
-                0,
+        mContentsView.layout(contentsViewOffsetX, 0,
                 contentsViewOffsetX + mContentsView.getMeasuredWidth(),
                 mContentsView.getMeasuredHeight());
-        int refineViewOffsetX = isRtl ? 0 : getMeasuredWidth() - mRefineWidth;
+
+        int refineViewOffsetX = isRtl ? mRefineViewOffsetPx
+                                      : (getMeasuredWidth() - mRefineWidth) - mRefineViewOffsetPx;
         mRefineView.layout(
                 refineViewOffsetX,
                 0,
@@ -273,10 +290,10 @@ class SuggestionView extends ViewGroup {
      * @param suggestionDelegate The suggestion delegate.
      * @param position Position of the suggestion in the dropdown list.
      * @param useDarkColors Whether dark colors should be used for fonts and icons.
+     * @param useModernDesign Whether modern design should be used.
      */
-    public void init(OmniboxResultItem suggestionItem,
-            OmniboxSuggestionDelegate suggestionDelegate,
-            int position, boolean useDarkColors) {
+    public void init(OmniboxResultItem suggestionItem, OmniboxSuggestionDelegate suggestionDelegate,
+            int position, boolean useDarkColors, boolean useModernDesign) {
         ViewCompat.setLayoutDirection(this, ViewCompat.getLayoutDirection(mUrlBar));
 
         // Update the position unconditionally.
@@ -304,6 +321,9 @@ class SuggestionView extends ViewGroup {
                 .getDimension(R.dimen.omnibox_suggestion_first_line_text_size));
         mContentsView.mTextLine2.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources()
                 .getDimension(R.dimen.omnibox_suggestion_second_line_text_size));
+
+        mRefineViewOffsetPx = useModernDesign ? mRefineViewModernEndPadding : 0;
+        mSuggestionViewStartOffset = useModernDesign ? mSuggestionListModernOffset : 0;
 
         // Suggestions with attached answers are rendered with rich results regardless of which
         // suggestion type they are.
@@ -333,7 +353,7 @@ class SuggestionView extends ViewGroup {
             boolean urlShown = !TextUtils.isEmpty(mSuggestion.getUrl());
             boolean urlHighlighted = false;
             if (urlShown) {
-                urlHighlighted = setUrlText(suggestionItem);
+                urlHighlighted = setUrlText(suggestionItem, useModernDesign);
             } else {
                 mContentsView.mTextLine2.setVisibility(INVISIBLE);
             }
@@ -354,7 +374,8 @@ class SuggestionView extends ViewGroup {
             setSuggestedQuery(suggestionItem, false, false, false);
             if ((suggestionType == OmniboxSuggestionType.SEARCH_SUGGEST_ENTITY)
                     || (suggestionType == OmniboxSuggestionType.SEARCH_SUGGEST_PROFILE)) {
-                showDescriptionLine(SpannableString.valueOf(mSuggestion.getDescription()), false);
+                showDescriptionLine(SpannableString.valueOf(mSuggestion.getDescription()), false,
+                        useModernDesign);
             } else {
                 mContentsView.mTextLine2.setVisibility(INVISIBLE);
             }
@@ -384,6 +405,12 @@ class SuggestionView extends ViewGroup {
                                                           : mLightTitleColorStandardFont;
     }
 
+    private int getStandardUrlColor(boolean useModernDesign) {
+        if (!useModernDesign) return mLightUrlStandardColor;
+        return (mUseDarkColors == null || mUseDarkColors) ? mDarkUrlStandardModernColor
+                                                          : mLightUrlStandardModernColor;
+    }
+
     @Override
     public void setSelected(boolean selected) {
         super.setSelected(selected);
@@ -411,14 +438,15 @@ class SuggestionView extends ViewGroup {
      * Sets (and highlights) the URL text of the second line of the omnibox suggestion.
      *
      * @param result The suggestion containing the URL.
+     * @param useModernDesign Whether modern design should be used.
      * @return Whether the URL was highlighted based on the user query.
      */
-    private boolean setUrlText(OmniboxResultItem result) {
+    private boolean setUrlText(OmniboxResultItem result, boolean useModernDesign) {
         OmniboxSuggestion suggestion = result.getSuggestion();
         Spannable str = SpannableString.valueOf(suggestion.getDisplayText());
         boolean hasMatch = applyHighlightToMatchRegions(
                 str, suggestion.getDisplayTextClassifications());
-        showDescriptionLine(str, true);
+        showDescriptionLine(str, true, useModernDesign);
         return hasMatch;
     }
 
@@ -453,8 +481,9 @@ class SuggestionView extends ViewGroup {
      *
      * @param str The description text.
      * @param isUrl Whether this text is a URL (as opposed to a normal string).
+     * @param useModernDesign Whether modern design should be used.
      */
-    private void showDescriptionLine(Spannable str, boolean isUrl) {
+    private void showDescriptionLine(Spannable str, boolean isUrl, boolean useModernDesign) {
         TextView textLine = mContentsView.mTextLine2;
         if (textLine.getVisibility() != VISIBLE) {
             textLine.setVisibility(VISIBLE);
@@ -463,7 +492,7 @@ class SuggestionView extends ViewGroup {
 
         // Force left-to-right rendering for URLs. See UrlBar constructor for details.
         if (isUrl) {
-            textLine.setTextColor(mUrlColor);
+            textLine.setTextColor(getStandardUrlColor(useModernDesign));
             ApiCompatibilityUtils.setTextDirection(textLine, TEXT_DIRECTION_LTR);
         } else {
             textLine.setTextColor(getStandardFontColor());
@@ -847,14 +876,20 @@ class SuggestionView extends ViewGroup {
                 imageSpacing = getResources().getDimensionPixelOffset(
                         R.dimen.omnibox_suggestion_answer_image_horizontal_spacing);
             }
+
             if (isRTL) {
-                mTextLine1.layout(0, t, mTextRight, b);
-                mAnswerImage.layout(mTextRight - imageWidth , t, mTextRight, b);
-                mTextLine2.layout(0, t, mTextRight - (imageWidth + imageSpacing), b);
+                mTextLine1.layout(0, t, mTextRight - mSuggestionViewStartOffset, b);
+                mAnswerImage.layout(
+                        mTextRight - imageWidth, t, mTextRight - mSuggestionViewStartOffset, b);
+                mTextLine2.layout(0, t,
+                        mTextRight - (imageWidth + imageSpacing) - mSuggestionViewStartOffset, b);
             } else {
-                mTextLine1.layout(mTextLeft, t, r - l, b);
-                mAnswerImage.layout(mTextLeft, t, mTextLeft + imageWidth, b);
-                mTextLine2.layout(mTextLeft + imageWidth + imageSpacing, t, r - l, b);
+                mTextLine1.layout(mTextLeft + mSuggestionViewStartOffset, t, r - l, b);
+                mAnswerImage.layout(
+                        mTextLeft + mSuggestionViewStartOffset, t, mTextLeft + imageWidth, b);
+                mTextLine2.layout(
+                        mTextLeft + imageWidth + imageSpacing + mSuggestionViewStartOffset, t,
+                        r - l, b);
             }
 
             int suggestionIconPosition = getSuggestionIconLeftPosition();

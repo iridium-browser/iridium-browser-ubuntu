@@ -10,11 +10,16 @@
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
+#include "base/scoped_observer.h"
 #include "base/synchronization/waitable_event_watcher.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "chrome/common/features.h"
+#include "build/build_config.h"
+#include "chrome/common/buildflags.h"
 #include "components/browsing_data/core/browsing_data_utils.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/nacl/common/buildflags.h"
 #include "components/offline_pages/core/offline_page_model.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browsing_data_remover.h"
@@ -25,10 +30,6 @@
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 #include "chrome/browser/pepper_flash_settings_manager.h"
-#endif
-
-#if defined(OS_CHROMEOS)
-#include "chromeos/dbus/dbus_method_call_status.h"
 #endif
 
 class BrowsingDataFlashLSOHelper;
@@ -44,9 +45,10 @@ class PluginDataRemover;
 // as the embedder.
 class ChromeBrowsingDataRemoverDelegate
     : public content::BrowsingDataRemoverDelegate,
+      public history::HistoryServiceObserver,
       public KeyedService
 #if BUILDFLAG(ENABLE_PLUGINS)
-      ,
+    ,
       public PepperFlashSettingsManager::Client
 #endif
 {
@@ -95,9 +97,10 @@ class ChromeBrowsingDataRemoverDelegate
 
     // Datatypes that can be deleted partially per URL / origin / domain,
     // whichever makes sense.
-    FILTERABLE_DATA_TYPES = DATA_TYPE_SITE_DATA |
-                            content::BrowsingDataRemover::DATA_TYPE_CACHE |
-                            content::BrowsingDataRemover::DATA_TYPE_DOWNLOADS,
+    FILTERABLE_DATA_TYPES =
+        DATA_TYPE_SITE_DATA |
+        content::BrowsingDataRemover::DATA_TYPE_CACHE |
+        content::BrowsingDataRemover::DATA_TYPE_DOWNLOADS,
 
     // Includes all the available remove options. Meant to be used by clients
     // that wish to wipe as much data as possible from a Profile, to make it
@@ -147,33 +150,8 @@ class ChromeBrowsingDataRemoverDelegate
   static_assert((IMPORTANT_SITES_DATA_TYPES & ~FILTERABLE_DATA_TYPES) == 0,
                 "All important sites datatypes must be filterable.");
 
-  // Used to track the deletion of a single data storage backend.
-  class SubTask {
-   public:
-    // Creates a SubTask that calls |forward_callback| when completed.
-    // |forward_callback| is only kept as a reference and must outlive SubTask.
-    explicit SubTask(const base::Closure& forward_callback);
-    ~SubTask();
-
-    // Indicate that the task is in progress and we're waiting.
-    void Start();
-
-    // Returns a callback that should be called to indicate that the task
-    // has been finished.
-    base::Closure GetCompletionCallback();
-
-    // Whether the task is still in progress.
-    bool is_pending() const { return is_pending_; }
-
-   private:
-    void CompletionCallback();
-
-    bool is_pending_;
-    const base::Closure& forward_callback_;
-    base::WeakPtrFactory<SubTask> weak_ptr_factory_;
-  };
-
-  ChromeBrowsingDataRemoverDelegate(content::BrowserContext* browser_context);
+  ChromeBrowsingDataRemoverDelegate(content::BrowserContext* browser_context,
+                                    history::HistoryService* history_service);
   ~ChromeBrowsingDataRemoverDelegate() override;
 
   // KeyedService:
@@ -189,7 +167,14 @@ class ChromeBrowsingDataRemoverDelegate
       int remove_mask,
       const content::BrowsingDataFilterBuilder& filter_builder,
       int origin_type_mask,
-      const base::Closure& callback) override;
+      base::OnceClosure callback) override;
+
+  // history::HistoryServiceObserver:
+  void OnURLsDeleted(history::HistoryService* history_service,
+                     const history::DeletionTimeRange& time_range,
+                     bool expired,
+                     const history::URLRows& deleted_rows,
+                     const std::set<GURL>& favicon_urls) override;
 
 #if defined(OS_ANDROID)
   void OverrideWebappRegistryForTesting(
@@ -203,31 +188,36 @@ class ChromeBrowsingDataRemoverDelegate
 #endif
 
  private:
-  // If AllDone(), calls the callback provided in RemoveEmbedderData().
-  void NotifyIfDone();
+  // Called by the closures returned by CreatePendingTaskCompletionClosure().
+  // Checks if all tasks have completed, and if so, calls callback_.
+  void OnTaskComplete();
 
-  // Whether there are no running deletion tasks.
-  bool AllDone();
+  // Increments the number of pending tasks by one, and returns a OnceClosure
+  // that calls OnTaskComplete(). The Remover is complete once all the closures
+  // created by this method have been invoked.
+  base::OnceClosure CreatePendingTaskCompletionClosure();
 
   // Callback for when TemplateURLService has finished loading. Clears the data,
   // clears the respective waiting flag, and invokes NotifyIfDone.
-  void OnKeywordsLoaded(base::Callback<bool(const GURL&)> url_filter);
+  void OnKeywordsLoaded(base::RepeatingCallback<bool(const GURL&)> url_filter,
+                        base::OnceClosure done);
 
 #if defined (OS_CHROMEOS)
-  void OnClearPlatformKeys(chromeos::DBusMethodCallStatus call_status,
-                           bool result);
+  void OnClearPlatformKeys(base::OnceClosure done, base::Optional<bool> result);
 #endif
 
   // Callback for when cookies have been deleted. Invokes NotifyIfDone.
-  void OnClearedCookies();
+  void OnClearedCookies(base::OnceClosure done);
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   // Called when plugin data has been cleared. Invokes NotifyIfDone.
-  void OnWaitableEventSignaled(base::WaitableEvent* waitable_event);
+  void OnWaitableEventSignaled(base::OnceClosure done,
+                               base::WaitableEvent* waitable_event);
 
   // Called when the list of |sites| storing Flash LSO cookies is fetched.
   void OnSitesWithFlashDataFetched(
-      base::Callback<bool(const std::string&)> plugin_filter,
+      base::RepeatingCallback<bool(const std::string&)> plugin_filter,
+      base::OnceClosure done,
       const std::vector<std::string>& sites);
 
   // Indicates that LSO cookies for one website have been deleted.
@@ -248,44 +238,10 @@ class ChromeBrowsingDataRemoverDelegate
   base::Time delete_end_;
 
   // Completion callback to call when all data are deleted.
-  base::Closure callback_;
+  base::OnceClosure callback_;
 
-  // A callback to NotifyIfDone() used by SubTasks instances.
-  const base::Closure sub_task_forward_callback_;
-
-  // Keeping track of various subtasks to be completed.
-  // Non-zero if waiting for SafeBrowsing cookies to be cleared.
-  int clear_cookies_count_ = 0;
-  SubTask synchronous_clear_operations_;
-  SubTask clear_autofill_origin_urls_;
-  SubTask clear_flash_content_licenses_;
-  SubTask clear_domain_reliability_monitor_;
-  SubTask clear_form_;
-  SubTask clear_history_;
-  SubTask clear_keyword_data_;
-#if !defined(DISABLE_NACL)
-  SubTask clear_nacl_cache_;
-  SubTask clear_pnacl_cache_;
-#endif
-  SubTask clear_hostname_resolution_cache_;
-  SubTask clear_network_predictor_;
-  SubTask clear_networking_history_;
-  SubTask clear_passwords_;
-  SubTask clear_passwords_stats_;
-  SubTask clear_http_auth_cache_;
-  SubTask clear_platform_keys_;
-#if defined(OS_ANDROID)
-  SubTask clear_precache_history_;
-  SubTask clear_offline_page_data_;
-#endif
-#if BUILDFLAG(ENABLE_WEBRTC)
-  SubTask clear_webrtc_logs_;
-#endif
-  SubTask clear_auto_sign_in_;
-  SubTask clear_reporting_cache_;
-  // Counts the number of plugin data tasks. Should be the number of LSO cookies
-  // to be deleted, or 1 while we're fetching LSO cookies or deleting in bulk.
-  int clear_plugin_data_count_ = 0;
+  // Keeps track of number of tasks to be completed.
+  int num_pending_tasks_ = 0;
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   // Used to delete plugin data.
@@ -311,6 +267,9 @@ class ChromeBrowsingDataRemoverDelegate
   // not initialised, so the registry must be mocked out.
   std::unique_ptr<WebappRegistry> webapp_registry_;
 #endif
+
+  ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
+      history_observer_;
 
   base::WeakPtrFactory<ChromeBrowsingDataRemoverDelegate> weak_ptr_factory_;
 

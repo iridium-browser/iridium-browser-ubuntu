@@ -6,26 +6,27 @@
 #define WorkletGlobalScope_h
 
 #include <memory>
+#include "base/single_thread_task_runner.h"
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/SecurityContext.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/workers/WorkerOrWorkletGlobalScope.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
+#include "core/workers/WorkletModuleResponsesMapProxy.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
-class EventQueue;
-class Modulator;
+class WorkletModuleResponsesMap;
+class WorkletPendingTasks;
+class WorkerReportingProxy;
+struct GlobalScopeCreationParams;
 
 class CORE_EXPORT WorkletGlobalScope
-    : public GarbageCollectedFinalized<WorkletGlobalScope>,
-      public SecurityContext,
-      public WorkerOrWorkletGlobalScope,
-      public ScriptWrappable,
+    : public WorkerOrWorkletGlobalScope,
       public ActiveScriptWrappable<WorkletGlobalScope> {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(WorkletGlobalScope);
@@ -35,69 +36,81 @@ class CORE_EXPORT WorkletGlobalScope
 
   bool IsWorkletGlobalScope() const final { return true; }
 
-  // WorkerOrWorkletGlobalScope
-  ScriptWrappable* GetScriptWrappable() const final {
-    return const_cast<WorkletGlobalScope*>(this);
-  }
-
-  // Always returns false here as worklets don't have a #close() method on
-  // the global.
-  bool IsClosing() const final { return false; }
-
-  // ScriptWrappable
-  v8::Local<v8::Object> Wrap(v8::Isolate*,
-                             v8::Local<v8::Object> creation_context) final;
-  v8::Local<v8::Object> AssociateWithWrapper(
-      v8::Isolate*,
-      const WrapperTypeInfo*,
-      v8::Local<v8::Object> wrapper) final;
-  bool HasPendingActivity() const override;
+  // Always returns false here as PaintWorkletGlobalScope and
+  // AnimationWorkletGlobalScope don't have a #close() method on the global.
+  // Note that AudioWorkletGlobal overrides this behavior.
+  bool IsClosing() const { return false; }
 
   ExecutionContext* GetExecutionContext() const;
 
   // ExecutionContext
+  const KURL& Url() const final { return url_; }
+  const KURL& BaseURL() const final { return url_; }
+  KURL CompleteURL(const String&) const final;
   String UserAgent() const final { return user_agent_; }
   SecurityContext& GetSecurityContext() final { return *this; }
-  EventQueue* GetEventQueue() const final {
-    NOTREACHED();
-    return nullptr;
-  }  // WorkletGlobalScopes don't have an event queue.
   bool IsSecureContext(String& error_message) const final;
 
-  using SecurityContext::GetSecurityOrigin;
-  using SecurityContext::GetContentSecurityPolicy;
-
   DOMTimerCoordinator* Timers() final {
+    // WorkletGlobalScopes don't have timers.
     NOTREACHED();
     return nullptr;
-  }  // WorkletGlobalScopes don't have timers.
+  }
 
-  void SetModulator(Modulator*);
+  // Implementation of the "fetch and invoke a worklet script" algorithm:
+  // https://drafts.css-houdini.org/worklets/#fetch-and-invoke-a-worklet-script
+  // When script evaluation is done or any exception happens, it's notified to
+  // the given WorkletPendingTasks via |outside_settings_task_runner| (i.e., the
+  // parent frame's task runner).
+  void FetchAndInvokeScript(
+      const KURL& module_url_record,
+      WorkletModuleResponsesMap*,
+      network::mojom::FetchCredentialsMode,
+      scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
+      WorkletPendingTasks*);
 
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  WorkletModuleResponsesMapProxy* ModuleResponsesMapProxy() const;
+  void SetModuleResponsesMapProxyForTesting(WorkletModuleResponsesMapProxy*);
+
+  const SecurityOrigin* DocumentSecurityOrigin() const {
+    return document_security_origin_.get();
+  }
+
+  // Customize the security context used for origin trials.
+  // Origin trials are only enabled in secure contexts, but WorkletGlobalScopes
+  // are defined to have a unique, opaque origin, so are not secure:
+  // https://drafts.css-houdini.org/worklets/#script-settings-for-worklets
+  // For origin trials, instead consider the context of the document which
+  // created the worklet, since the origin trial tokens are inherited from the
+  // document.
+  bool DocumentSecureContext() const { return document_secure_context_; }
+
+  void Trace(blink::Visitor*) override;
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  protected:
-  // The url, userAgent and securityOrigin arguments are inherited from the
-  // parent ExecutionContext for Worklets.
-  WorkletGlobalScope(const KURL&,
-                     const String& user_agent,
-                     PassRefPtr<SecurityOrigin>,
+  // Partial implementation of the "set up a worklet environment settings
+  // object" algorithm:
+  // https://drafts.css-houdini.org/worklets/#script-settings-for-worklets
+  WorkletGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
                      v8::Isolate*,
-                     WorkerClients*);
+                     WorkerReportingProxy&);
 
  private:
-  const KURL& VirtualURL() const final { return url_; }
-  KURL VirtualCompleteURL(const String&) const final;
-
   EventTarget* ErrorEventTarget() final { return nullptr; }
-  void DidUpdateSecurityOrigin() final {}
 
-  KURL url_;
-  String user_agent_;
-  // LocalDOMWindow::modulator_ workaround equivalent.
-  // TODO(kouhei): Remove this.
-  TraceWrapperMember<Modulator> modulator_;
+  // The |url_| and |user_agent_| are inherited from the parent Document.
+  const KURL url_;
+  const String user_agent_;
+
+  // Used for module fetch and origin trials, inherited from the parent
+  // Document.
+  const scoped_refptr<const SecurityOrigin> document_security_origin_;
+
+  // Used for origin trials, inherited from the parent Document.
+  const bool document_secure_context_;
+
+  Member<WorkletModuleResponsesMapProxy> module_responses_map_proxy_;
 };
 
 DEFINE_TYPE_CASTS(WorkletGlobalScope,

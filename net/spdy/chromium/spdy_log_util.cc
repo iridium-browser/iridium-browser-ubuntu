@@ -4,7 +4,6 @@
 
 #include "net/spdy/chromium/spdy_log_util.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "net/http/http_log_util.h"
@@ -19,14 +18,14 @@ SpdyString ElideGoAwayDebugDataForNetLog(NetLogCaptureMode capture_mode,
     return debug_data.as_string();
   }
 
-  return SpdyString("[") + base::SizeTToString(debug_data.size()) +
+  return SpdyString("[") + base::NumberToString(debug_data.size()) +
          SpdyString(" bytes were stripped]");
 }
 
 std::unique_ptr<base::ListValue> ElideSpdyHeaderBlockForNetLog(
     const SpdyHeaderBlock& headers,
     NetLogCaptureMode capture_mode) {
-  auto headers_list = base::MakeUnique<base::ListValue>();
+  auto headers_list = std::make_unique<base::ListValue>();
   for (SpdyHeaderBlock::const_iterator it = headers.begin();
        it != headers.end(); ++it) {
     headers_list->AppendString(

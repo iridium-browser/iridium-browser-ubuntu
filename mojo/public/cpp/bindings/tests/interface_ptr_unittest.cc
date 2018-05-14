@@ -7,9 +7,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/test/scoped_task_environment.h"
@@ -243,8 +245,8 @@ class EndToEndInterfacePtrTest : public InterfacePtrTest {
  private:
   void RunTestImpl() {
     math::CalculatorPtr calc;
-    calc_impl_ = base::MakeUnique<MathCalculatorImpl>(MakeRequest(&calc));
-    calculator_ui_ = base::MakeUnique<MathCalculatorUI>(std::move(calc));
+    calc_impl_ = std::make_unique<MathCalculatorImpl>(MakeRequest(&calc));
+    calculator_ui_ = std::make_unique<MathCalculatorUI>(std::move(calc));
     calculator_ui_->Add(2.0, base::Bind(&EndToEndInterfacePtrTest::AddDone,
                                         base::Unretained(this)));
     calculator_ui_->Multiply(5.0,
@@ -523,7 +525,7 @@ TEST(StrongConnectorTest, Math) {
   base::RunLoop run_loop;
 
   auto binding =
-      MakeStrongBinding(base::MakeUnique<StrongMathCalculatorImpl>(&destroyed),
+      MakeStrongBinding(std::make_unique<StrongMathCalculatorImpl>(&destroyed),
                         MakeRequest(&calc));
   binding->set_connection_error_handler(base::Bind(
       &SetFlagAndRunClosure, &error_received, run_loop.QuitClosure()));
@@ -650,7 +652,7 @@ class BImpl : public B {
 
  private:
   void GetC(InterfaceRequest<C> c) override {
-    MakeStrongBinding(base::MakeUnique<CImpl>(d_called_, closure_),
+    MakeStrongBinding(std::make_unique<CImpl>(d_called_, closure_),
                       std::move(c));
   }
 
@@ -669,7 +671,7 @@ class AImpl : public A {
 
  private:
   void GetB(InterfaceRequest<B> b) override {
-    MakeStrongBinding(base::MakeUnique<BImpl>(&d_called_, closure_),
+    MakeStrongBinding(std::make_unique<BImpl>(&d_called_, closure_),
                       std::move(b));
   }
 
@@ -741,11 +743,11 @@ TEST_P(InterfacePtrTest, FlushForTesting) {
 
   MathCalculatorUI calculator_ui(std::move(calc));
 
-  calculator_ui.Add(2.0, base::Bind(&base::DoNothing));
+  calculator_ui.Add(2.0, base::DoNothing());
   calculator_ui.GetInterfacePtr().FlushForTesting();
   EXPECT_EQ(2.0, calculator_ui.GetOutput());
 
-  calculator_ui.Multiply(5.0, base::Bind(&base::DoNothing));
+  calculator_ui.Multiply(5.0, base::DoNothing());
   calculator_ui.GetInterfacePtr().FlushForTesting();
 
   EXPECT_EQ(10.0, calculator_ui.GetOutput());
@@ -812,8 +814,8 @@ TEST_P(InterfacePtrTest, CallbackIsPassedInterfacePtr) {
   // Make a call with the proxy's lifetime bound to the response callback.
   sample::PingTest* raw_proxy = ptr.get();
   ptr.set_connection_error_handler(run_loop.QuitClosure());
-  raw_proxy->Ping(
-      base::Bind([](sample::PingTestPtr ptr) {}, base::Passed(&ptr)));
+  raw_proxy->Ping(base::Bind(base::DoNothing::Repeatedly<sample::PingTestPtr>(),
+                             base::Passed(&ptr)));
 
   // Trigger an error on |ptr|. This will ultimately lead to the proxy's
   // response callbacks being destroyed, which will in turn lead to the proxy
@@ -859,17 +861,19 @@ TEST_P(InterfacePtrTest, ThreadSafeInterfacePointer) {
         auto calc_callback = base::Bind(
             [](const scoped_refptr<base::TaskRunner>& main_task_runner,
                const base::Closure& quit_closure,
-               base::PlatformThreadId thread_id,
+               scoped_refptr<base::SequencedTaskRunner> sender_sequence_runner,
                double result) {
               EXPECT_EQ(123, result);
-              // Validate the callback is invoked on the calling thread.
-              EXPECT_EQ(thread_id, base::PlatformThread::CurrentId());
+              // Validate the callback is invoked on the calling sequence.
+              EXPECT_TRUE(sender_sequence_runner->RunsTasksInCurrentSequence());
               // Notify the run_loop to quit.
               main_task_runner->PostTask(FROM_HERE, quit_closure);
             });
-        (*thread_safe_ptr)->Add(
-            123, base::Bind(calc_callback, main_task_runner, quit_closure,
-                            base::PlatformThread::CurrentId()));
+        scoped_refptr<base::SequencedTaskRunner> current_sequence_runner =
+            base::SequencedTaskRunnerHandle::Get();
+        (*thread_safe_ptr)
+            ->Add(123, base::Bind(calc_callback, main_task_runner, quit_closure,
+                                  current_sequence_runner));
       },
       base::SequencedTaskRunnerHandle::Get(), run_loop.QuitClosure(),
       thread_safe_ptr);

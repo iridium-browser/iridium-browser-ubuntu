@@ -42,14 +42,6 @@ class ShadowRootRareDataV0 : public GarbageCollected<ShadowRootRareDataV0> {
       : descendant_shadow_element_count_(0),
         descendant_content_element_count_(0) {}
 
-  HTMLShadowElement* ShadowInsertionPointOfYoungerShadowRoot() const {
-    return shadow_insertion_point_of_younger_shadow_root_.Get();
-  }
-  void SetShadowInsertionPointOfYoungerShadowRoot(
-      HTMLShadowElement* shadow_insertion_point) {
-    shadow_insertion_point_of_younger_shadow_root_ = shadow_insertion_point;
-  }
-
   void DidAddInsertionPoint(V0InsertionPoint*);
   void DidRemoveInsertionPoint(V0InsertionPoint*);
 
@@ -75,27 +67,11 @@ class ShadowRootRareDataV0 : public GarbageCollected<ShadowRootRareDataV0> {
     descendant_insertion_points_.clear();
   }
 
-  void SetYoungerShadowRoot(ShadowRoot& younger_shadow_root) {
-    younger_shadow_root_ = &younger_shadow_root;
-  }
-  void SetOlderShadowRoot(ShadowRoot& older_shadow_root) {
-    older_shadow_root_ = &older_shadow_root;
-  }
-
-  ShadowRoot* YoungerShadowRoot() const { return younger_shadow_root_; }
-  ShadowRoot* OlderShadowRoot() const { return older_shadow_root_; }
-
-  DEFINE_INLINE_TRACE() {
-    visitor->Trace(younger_shadow_root_);
-    visitor->Trace(older_shadow_root_);
-    visitor->Trace(shadow_insertion_point_of_younger_shadow_root_);
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(descendant_insertion_points_);
   }
 
  private:
-  Member<ShadowRoot> younger_shadow_root_;
-  Member<ShadowRoot> older_shadow_root_;
-  Member<HTMLShadowElement> shadow_insertion_point_of_younger_shadow_root_;
   unsigned descendant_shadow_element_count_;
   unsigned descendant_content_element_count_;
   HeapVector<Member<V0InsertionPoint>> descendant_insertion_points_;
@@ -104,9 +80,9 @@ class ShadowRootRareDataV0 : public GarbageCollected<ShadowRootRareDataV0> {
 inline void ShadowRootRareDataV0::DidAddInsertionPoint(
     V0InsertionPoint* point) {
   DCHECK(point);
-  if (isHTMLShadowElement(*point))
+  if (IsHTMLShadowElement(*point))
     ++descendant_shadow_element_count_;
-  else if (isHTMLContentElement(*point))
+  else if (IsHTMLContentElement(*point))
     ++descendant_content_element_count_;
   else
     NOTREACHED();
@@ -115,10 +91,10 @@ inline void ShadowRootRareDataV0::DidAddInsertionPoint(
 inline void ShadowRootRareDataV0::DidRemoveInsertionPoint(
     V0InsertionPoint* point) {
   DCHECK(point);
-  if (isHTMLShadowElement(*point)) {
+  if (IsHTMLShadowElement(*point)) {
     DCHECK_GT(descendant_shadow_element_count_, 0u);
     --descendant_shadow_element_count_;
-  } else if (isHTMLContentElement(*point)) {
+  } else if (IsHTMLContentElement(*point)) {
     DCHECK_GT(descendant_content_element_count_, 0u);
     --descendant_content_element_count_;
   } else {

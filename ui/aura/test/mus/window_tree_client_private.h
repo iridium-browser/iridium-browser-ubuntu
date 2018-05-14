@@ -29,8 +29,11 @@ class WindowTree;
 namespace aura {
 
 class Window;
+class WindowMus;
 class WindowTreeClient;
 class WindowTreeHostMus;
+
+enum class ChangeType;
 
 struct WindowTreeHostMusInitParams;
 
@@ -49,9 +52,6 @@ class WindowTreeClientPrivate {
                                            ui::mojom::WindowDataPtr root_data,
                                            bool parent_drawn);
 
-  // Pretends that |event| has been received from the window server.
-  void CallOnWindowInputEvent(Window* window, std::unique_ptr<ui::Event> event);
-
   // Simulates |event| matching a pointer watcher on the window server.
   void CallOnPointerEventObserved(Window* window,
                                   std::unique_ptr<ui::Event> event);
@@ -62,15 +62,21 @@ class WindowTreeClientPrivate {
 
   WindowTreeHostMusInitParams CallCreateInitParamsForNewDisplay();
 
-  // Sets the WindowTree and client id.
-  void SetTreeAndClientId(ui::mojom::WindowTree* window_tree,
-                          ClientSpecificId client_id);
+  // Sets the WindowTree.
+  void SetTree(ui::mojom::WindowTree* window_tree);
 
   void SetWindowManagerClient(ui::mojom::WindowManagerClient* client);
 
   bool HasPointerWatcher();
 
-  Window* GetWindowByServerId(Id id);
+  Window* GetWindowByServerId(ui::Id id);
+
+  WindowMus* NewWindowFromWindowData(WindowMus* parent,
+                                     const ui::mojom::WindowData& window_data);
+
+  bool HasInFlightChanges();
+
+  bool HasChangeInFlightOfType(ChangeType type);
 
  private:
   WindowTreeClient* tree_client_impl_;
@@ -79,6 +85,6 @@ class WindowTreeClientPrivate {
   DISALLOW_COPY_AND_ASSIGN(WindowTreeClientPrivate);
 };
 
-}  // namespace ui
+}  // namespace aura
 
 #endif  // UI_AURA_TEST_MUS_WINDOW_TREE_CLIENT_PRIVATE_H_

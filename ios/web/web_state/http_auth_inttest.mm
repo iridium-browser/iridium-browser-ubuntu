@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/strings/sys_string_conversions.h"
 #include "base/test/ios/wait_util.h"
 #import "ios/web/public/navigation_manager.h"
@@ -12,6 +13,10 @@
 #import "ios/web/test/web_int_test.h"
 #import "testing/gtest_mac.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 
@@ -50,7 +55,7 @@ class HttpAuthTest : public WebIntTest {
 TEST_F(HttpAuthTest, SuccessfullBasicAuth) {
   // Load the page which requests basic HTTP authentication.
   GURL url = HttpServer::MakeUrl("http://good-auth");
-  test::SetUpHttpServer(base::MakeUnique<HttpAuthResponseProvider>(
+  test::SetUpHttpServer(std::make_unique<HttpAuthResponseProvider>(
       url, "GoodRealm", "gooduser", "goodpass"));
   LoadUrlWithAuthChallenge(url);
 
@@ -83,7 +88,7 @@ TEST_F(HttpAuthTest, SuccessfullBasicAuth) {
 TEST_F(HttpAuthTest, UnsucessfulBasicAuth) {
   // Load the page which requests basic HTTP authentication.
   GURL url = HttpServer::MakeUrl("http://bad-auth");
-  test::SetUpHttpServer(base::MakeUnique<HttpAuthResponseProvider>(
+  test::SetUpHttpServer(std::make_unique<HttpAuthResponseProvider>(
       url, "BadRealm", "baduser", "badpass"));
   LoadUrlWithAuthChallenge(url);
 

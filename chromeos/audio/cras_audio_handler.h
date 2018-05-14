@@ -7,44 +7,43 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <queue>
 
+#include <queue>
+#include <vector>
+
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/optional.h"
 #include "base/timer/timer.h"
 #include "chromeos/audio/audio_device.h"
 #include "chromeos/audio/audio_devices_pref_handler.h"
 #include "chromeos/audio/audio_pref_observer.h"
 #include "chromeos/dbus/audio_node.h"
 #include "chromeos/dbus/cras_audio_client.h"
-#include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/dbus/volume_state.h"
 #include "media/base/video_facing.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace chromeos {
 
 class AudioDevicesPrefHandler;
 
+// This class is not thread safe. The public functions should be called on
+// browser main thread.
 class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
                                          public AudioPrefObserver,
-                                         public SessionManagerClient::Observer,
                                          public media::VideoCaptureObserver {
  public:
   typedef std::
       priority_queue<AudioDevice, std::vector<AudioDevice>, AudioDeviceCompare>
           AudioDevicePriorityQueue;
   typedef std::vector<uint64_t> NodeIdList;
-
-  // Volume change reasons that are not user-initiated.
-  enum AutomatedVolumeChangeReason {
-    // Indicates it is from initializing audio state.
-    VOLUME_CHANGE_INITIALIZING_AUDIO_STATE,
-
-    // Indicates it is from restoring volume in maximimize mode screenshot.
-    VOLUME_CHANGE_MAXIMIZE_MODE_SCREENSHOT,
-  };
 
   class AudioObserver {
    public:
@@ -76,6 +75,9 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
 
     // Called when output channel remixing changed.
     virtual void OnOuputChannelRemixingChanged(bool mono_on);
+
+    // Called when hotword is detected.
+    virtual void OnHotwordTriggered(uint64_t tv_sec, uint64_t tv_nsec);
 
    protected:
     AudioObserver();
@@ -158,8 +160,6 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   uint64_t GetPrimaryActiveInputNode() const;
 
   // Gets the audio devices back in |device_list|.
-  // This call can be invoked from I/O thread or UI thread because
-  // it does not need to access CrasAudioClient on DBus.
   void GetAudioDevices(AudioDeviceList* device_list) const;
 
   bool GetPrimaryActiveOutputDevice(AudioDevice* device) const;
@@ -169,6 +169,9 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   // return the first one found.
   const AudioDevice* GetDeviceByType(AudioDeviceType type);
 
+  // Gets the default output buffer size in frames.
+  void GetDefaultOutputBufferSize(int32_t* buffer_size) const;
+
   // Whether there is alternative input/output audio device.
   bool has_alternative_input() const;
   bool has_alternative_output() const;
@@ -176,12 +179,6 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   // Sets all active output devices' volume levels to |volume_percent|, whose
   // range is from 0-100%.
   void SetOutputVolumePercent(int volume_percent);
-
-  // Sets all active output devices' volume levels to |volume_percent|, whose
-  // range is from 0-100%, without notifying observers.
-  void SetOutputVolumePercentWithoutNotifyingObservers(
-      int volume_percent,
-      AutomatedVolumeChangeReason reason);
 
   // Sets all active input devices' gain level to |gain_percent|, whose range is
   // from 0-100%.
@@ -248,14 +245,8 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   // If the feature is not supported on the device, nothing happens.
   void SwapInternalSpeakerLeftRightChannel(bool swap);
 
-  // Accessibility audio setting: sets the output mono or not.
-  void SetOutputMono(bool mono_on);
-
-  // Returns true if output mono is enabled.
-  bool IsOutputMonoEnabled() const;
-
-  // Enables error logging.
-  void LogErrors();
+  // Accessibility mono audio setting: sets the output mono or not.
+  void SetOutputMonoEnabled(bool enabled);
 
   // If necessary, sets the starting point for re-discovering the active HDMI
   // output device caused by device entering/exiting docking mode, HDMI display
@@ -291,12 +282,10 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   void ActiveOutputNodeChanged(uint64_t node_id) override;
   void ActiveInputNodeChanged(uint64_t node_id) override;
   void OutputNodeVolumeChanged(uint64_t node_id, int volume) override;
+  void HotwordTriggered(uint64_t tv_sec, uint64_t tv_nsec) override;
 
   // AudioPrefObserver overrides.
   void OnAudioPolicyPrefChanged() override;
-
-  // SessionManagerClient::Observer overrides.
-  void EmitLoginPromptVisibleCalled() override;
 
   // Sets the |active_device| to be active.
   // If |notify|, notifies Active*NodeChange.
@@ -384,11 +373,7 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
                        bool* active_device_removed);
 
   // Handles dbus callback for GetNodes.
-  void HandleGetNodes(const chromeos::AudioNodeList& node_list, bool success);
-
-  // Handles the dbus error callback.
-  void HandleGetNodesError(const std::string& error_name,
-                           const std::string& error_msg);
+  void HandleGetNodes(base::Optional<chromeos::AudioNodeList> node_list);
 
   // Adds an active node.
   // If there is no active node, |node_id| will be switched to become the
@@ -471,6 +456,15 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   // Returns true if there are any external devices.
   bool HasExternalDevice(bool is_input) const;
 
+  // Calling dbus to get default output buffer size.
+  void GetDefaultOutputBufferSizeInternal();
+
+  // Handle dbus callback for GetDefaultOutputBufferSize.
+  void HandleGetDefaultOutputBufferSize(base::Optional<int> buffer_size);
+
+  void OnVideoCaptureStartedOnMainThread(media::VideoFacingMode facing);
+  void OnVideoCaptureStoppedOnMainThread(media::VideoFacingMode facing);
+
   scoped_refptr<AudioDevicesPrefHandler> audio_pref_handler_;
   base::ObserverList<AudioObserver> observers_;
 
@@ -493,10 +487,7 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
 
   // Audio output channel counts.
   int32_t output_channels_;
-  bool output_mono_on_;
-
-  // Failures are not logged at startup, since CRAS may not be running yet.
-  bool log_errors_;
+  bool output_mono_enabled_;
 
   // Timer for HDMI re-discovering grace period.
   base::OneShotTimer hdmi_rediscover_timer_;
@@ -505,18 +496,21 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
 
   bool cras_service_available_ = false;
 
-  // FIFO list of reasons passed to
-  // SetOutputVolumePercentWithoutNotifyingObservers() for which we're still
-  // waiting for OutputNodeVolumeChanged() calls. These are used to suppress
-  // notifications for those changes.
-  std::deque<AutomatedVolumeChangeReason> automated_volume_change_reasons_;
 
   bool initializing_audio_state_ = false;
   int init_volume_;
   uint64_t init_node_id_;
+  int init_volume_count_ = 0;
 
   bool front_camera_on_ = false;
   bool rear_camera_on_ = false;
+
+  // Default output buffer size in frames.
+  int32_t default_output_buffer_size_;
+
+  // Task runner of browser main thread. All member variables should be accessed
+  // on this thread.
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
 
   base::WeakPtrFactory<CrasAudioHandler> weak_ptr_factory_;
 

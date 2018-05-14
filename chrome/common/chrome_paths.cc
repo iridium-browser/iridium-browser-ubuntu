@@ -13,11 +13,11 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/version.h"
 #include "build/build_config.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
-#include "chrome/common/features.h"
 #include "media/cdm/cdm_paths.h"
-#include "ppapi/features/features.h"
+#include "media/media_features.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/path_utils.h"
@@ -70,6 +70,8 @@ const base::FilePath::CharType kComponentUpdatedFlashHint[] =
 #if defined(OS_CHROMEOS)
 const base::FilePath::CharType kChromeOSComponentFlash[] = FILE_PATH_LITERAL(
     "/run/imageloader/PepperFlashPlayer/libpepflashplayer.so");
+const base::FilePath::CharType kChromeOSTPMFirmwareUpdateLocation[] =
+    FILE_PATH_LITERAL("/run/tpm_firmware_update_location");
 #endif  // defined(OS_CHROMEOS)
 
 static base::LazyInstance<base::FilePath>::DestructorAtExit
@@ -372,14 +374,7 @@ bool PathProvider(int key, base::FilePath* result) {
 #endif
       cur = cur.Append(FILE_PATH_LITERAL("pnacl"));
       break;
-#if defined(WIDEVINE_CDM_AVAILABLE) && BUILDFLAG(ENABLE_PEPPER_CDMS)
-#if defined(WIDEVINE_CDM_IS_COMPONENT)
-    case chrome::DIR_COMPONENT_WIDEVINE_CDM:
-      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
-        return false;
-      cur = cur.AppendASCII(kWidevineCdmBaseDirectory);
-      break;
-#endif  // defined(WIDEVINE_CDM_IS_COMPONENT)
+#if defined(WIDEVINE_CDM_AVAILABLE) && BUILDFLAG(ENABLE_LIBRARY_CDMS)
     // TODO(xhwang): FILE_WIDEVINE_CDM_ADAPTER has different meanings.
     // In the component case, this is the source adapter. Otherwise, it is the
     // actual Pepper module that gets loaded.
@@ -390,7 +385,7 @@ bool PathProvider(int key, base::FilePath* result) {
           media::GetPlatformSpecificDirectory(kWidevineCdmBaseDirectory));
       cur = cur.AppendASCII(kWidevineCdmAdapterFileName);
       break;
-#endif  // defined(WIDEVINE_CDM_AVAILABLE) && BUILDFLAG(ENABLE_PEPPER_CDMS)
+#endif  // defined(WIDEVINE_CDM_AVAILABLE) && BUILDFLAG(ENABLE_LIBRARY_CDMS)
     case chrome::FILE_RESOURCES_PACK:
 #if defined(OS_MACOSX)
       cur = base::mac::FrameworkBundlePath();
@@ -574,6 +569,15 @@ bool PathProvider(int key, base::FilePath* result) {
 #if defined(OS_CHROMEOS)
     case chrome::FILE_CHROME_OS_COMPONENT_FLASH:
       cur = base::FilePath(kChromeOSComponentFlash);
+      create_dir = false;
+      break;
+    case chrome::DIR_CHILD_USERS_DEFAULT_APPS:
+      if (!PathService::Get(chrome::DIR_STANDALONE_EXTERNAL_EXTENSIONS, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("child_users"));
+      break;
+    case chrome::FILE_CHROME_OS_TPM_FIRMWARE_UPDATE_LOCATION:
+      cur = base::FilePath(kChromeOSTPMFirmwareUpdateLocation);
       create_dir = false;
       break;
 #endif  // defined(OS_CHROMEOS)

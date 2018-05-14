@@ -11,6 +11,7 @@
 #include "remoting/codec/audio_encoder.h"
 #include "remoting/codec/video_encoder.h"
 #include "remoting/host/audio_capturer.h"
+#include "remoting/host/file_proxy_wrapper.h"
 #include "remoting/host/input_injector.h"
 #include "remoting/proto/event.pb.h"
 #include "remoting/proto/video.pb.h"
@@ -20,9 +21,9 @@
 
 namespace remoting {
 
-MockDesktopEnvironment::MockDesktopEnvironment() {}
+MockDesktopEnvironment::MockDesktopEnvironment() = default;
 
-MockDesktopEnvironment::~MockDesktopEnvironment() {}
+MockDesktopEnvironment::~MockDesktopEnvironment() = default;
 
 std::unique_ptr<AudioCapturer> MockDesktopEnvironment::CreateAudioCapturer() {
   return base::WrapUnique(CreateAudioCapturerPtr());
@@ -46,9 +47,14 @@ MockDesktopEnvironment::CreateMouseCursorMonitor() {
   return base::WrapUnique(CreateMouseCursorMonitorPtr());
 }
 
-MockDesktopEnvironmentFactory::MockDesktopEnvironmentFactory() {}
+std::unique_ptr<FileProxyWrapper>
+MockDesktopEnvironment::CreateFileProxyWrapper() {
+  return base::WrapUnique(CreateFileProxyWrapperPtr());
+}
 
-MockDesktopEnvironmentFactory::~MockDesktopEnvironmentFactory() {}
+MockDesktopEnvironmentFactory::MockDesktopEnvironmentFactory() = default;
+
+MockDesktopEnvironmentFactory::~MockDesktopEnvironmentFactory() = default;
 
 std::unique_ptr<DesktopEnvironment> MockDesktopEnvironmentFactory::Create(
     base::WeakPtr<ClientSessionControl> client_session_control,
@@ -56,34 +62,34 @@ std::unique_ptr<DesktopEnvironment> MockDesktopEnvironmentFactory::Create(
   return base::WrapUnique(CreatePtr());
 }
 
-MockInputInjector::MockInputInjector() {}
+MockInputInjector::MockInputInjector() = default;
 
-MockInputInjector::~MockInputInjector() {}
+MockInputInjector::~MockInputInjector() = default;
 
 void MockInputInjector::Start(
     std::unique_ptr<protocol::ClipboardStub> client_clipboard) {
   StartPtr(client_clipboard.get());
 }
 
-MockClientSessionControl::MockClientSessionControl() {}
+MockClientSessionControl::MockClientSessionControl() = default;
 
-MockClientSessionControl::~MockClientSessionControl() {}
+MockClientSessionControl::~MockClientSessionControl() = default;
 
-MockClientSessionDetails::MockClientSessionDetails() {}
+MockClientSessionDetails::MockClientSessionDetails() = default;
 
-MockClientSessionDetails::~MockClientSessionDetails() {}
+MockClientSessionDetails::~MockClientSessionDetails() = default;
 
-MockClientSessionEventHandler::MockClientSessionEventHandler() {}
+MockClientSessionEventHandler::MockClientSessionEventHandler() = default;
 
-MockClientSessionEventHandler::~MockClientSessionEventHandler() {}
+MockClientSessionEventHandler::~MockClientSessionEventHandler() = default;
 
-MockHostStatusObserver::MockHostStatusObserver() {}
+MockHostStatusObserver::MockHostStatusObserver() = default;
 
-MockHostStatusObserver::~MockHostStatusObserver() {}
+MockHostStatusObserver::~MockHostStatusObserver() = default;
 
-MockSecurityKeyAuthHandler::MockSecurityKeyAuthHandler() {}
+MockSecurityKeyAuthHandler::MockSecurityKeyAuthHandler() = default;
 
-MockSecurityKeyAuthHandler::~MockSecurityKeyAuthHandler() {}
+MockSecurityKeyAuthHandler::~MockSecurityKeyAuthHandler() = default;
 
 void MockSecurityKeyAuthHandler::SetSendMessageCallback(
     const SecurityKeyAuthHandler::SendMessageCallback& callback) {
@@ -95,8 +101,8 @@ MockSecurityKeyAuthHandler::GetSendMessageCallback() {
   return callback_;
 }
 
-MockMouseCursorMonitor::MockMouseCursorMonitor() {}
+MockMouseCursorMonitor::MockMouseCursorMonitor() = default;
 
-MockMouseCursorMonitor::~MockMouseCursorMonitor() {}
+MockMouseCursorMonitor::~MockMouseCursorMonitor() = default;
 
 }  // namespace remoting

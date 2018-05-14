@@ -86,11 +86,10 @@ void NetworkScreenHandler::Show() {
     return;
   }
 
-  // Make sure all our network technologies are turned on. On OOBE, the user
+  // Make sure all physical network technologies are enabled. On OOBE, the user
   // should be able to select any of the available networks on the device.
   NetworkStateHandler* handler = NetworkHandler::Get()->network_state_handler();
-  handler->SetTechnologyEnabled(NetworkTypePattern::NonVirtual(),
-                                true,
+  handler->SetTechnologyEnabled(NetworkTypePattern::Physical(), true,
                                 chromeos::network_handler::ErrorCallback());
 
   base::DictionaryValue network_screen_params;
@@ -148,8 +147,6 @@ void NetworkScreenHandler::DeclareLocalizedValues(
     builder->Add("networkScreenGreeting", IDS_WELCOME_SCREEN_GREETING);
 
   builder->Add("networkScreenTitle", IDS_WELCOME_SCREEN_TITLE);
-  builder->Add("networkScreenAccessibleTitle",
-               IDS_NETWORK_SCREEN_ACCESSIBLE_TITLE);
   builder->Add("selectLanguage", IDS_LANGUAGE_SELECTION_SELECT);
   builder->Add("selectKeyboard", IDS_KEYBOARD_SELECTION_SELECT);
   builder->Add("selectNetwork", IDS_NETWORK_SELECTION_SELECT);
@@ -169,6 +166,20 @@ void NetworkScreenHandler::DeclareLocalizedValues(
   builder->Add("timezoneSectionTitle", IDS_TIMEZONE_SECTION_TITLE);
   builder->Add("networkSectionTitle", IDS_NETWORK_SECTION_TITLE);
   builder->Add("networkSectionHint", IDS_NETWORK_SECTION_HINT);
+  builder->Add("advancedOptionsSectionTitle",
+               IDS_OOBE_ADVANCED_OPTIONS_SCREEN_TITLE);
+  builder->Add("advancedOptionsEEBootstrappingTitle",
+               IDS_OOBE_ADVANCED_OPTIONS_EE_BOOTSTRAPPING_TITLE);
+  builder->Add("advancedOptionsEEBootstrappingSubtitle",
+               IDS_OOBE_ADVANCED_OPTIONS_EE_BOOTSTRAPPING_SUBTITLE);
+  builder->Add("advancedOptionsCFMSetupTitle",
+               IDS_OOBE_ADVANCED_OPTIONS_CFM_SETUP_TITLE);
+  builder->Add("advancedOptionsCFMSetupSubtitle",
+               IDS_OOBE_ADVANCED_OPTIONS_CFM_SETUP_SUBTITLE);
+  builder->Add("advancedOptionsDeviceRequisitionTitle",
+               IDS_OOBE_ADVANCED_OPTIONS_DEVICE_REQUISITION_TITLE);
+  builder->Add("advancedOptionsDeviceRequisitionSubtitle",
+               IDS_OOBE_ADVANCED_OPTIONS_DEVICE_REQUISITION_SUBTITLE);
 
   builder->Add("languageDropdownTitle", IDS_LANGUAGE_DROPDOWN_TITLE);
   builder->Add("languageDropdownLabel", IDS_LANGUAGE_DROPDOWN_LABEL);
@@ -176,7 +187,6 @@ void NetworkScreenHandler::DeclareLocalizedValues(
   builder->Add("keyboardDropdownLabel", IDS_KEYBOARD_DROPDOWN_LABEL);
   builder->Add("proxySettingsMenuName", IDS_PROXY_SETTINGS_MENU_NAME);
   builder->Add("addWiFiNetworkMenuName", IDS_ADD_WI_FI_NETWORK_MENU_NAME);
-  builder->Add("addMobileNetworkMenuName", IDS_ADD_MOBILE_NETWORK_MENU_NAME);
 
   builder->Add("highContrastOptionOff", IDS_HIGH_CONTRAST_OPTION_OFF);
   builder->Add("highContrastOptionOn", IDS_HIGH_CONTRAST_OPTION_ON);

@@ -15,13 +15,13 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/attestation/attestation_policy_observer.h"
+#include "chrome/browser/chromeos/attestation/enrollment_policy_observer.h"
 #include "chrome/browser/chromeos/login/enrollment/auto_enrollment_controller.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
@@ -110,7 +110,6 @@ DeviceCloudPolicyManagerChromeOS::DeviceCloudPolicyManagerChromeOS(
           std::string(),
           store.get(),
           task_runner,
-          BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
           BrowserThread::GetTaskRunnerForThread(BrowserThread::IO)),
       device_store_(std::move(store)),
       state_keys_broker_(state_keys_broker),
@@ -265,6 +264,9 @@ void DeviceCloudPolicyManagerChromeOS::StartConnection(
   core()->TrackRefreshDelayPref(local_state_,
                                 prefs::kDevicePolicyRefreshRate);
 
+  enrollment_policy_observer_.reset(
+      new chromeos::attestation::EnrollmentPolicyObserver(client()));
+
   // Don't start the AttestationPolicyObserver if machine cert requests
   // are disabled.
   if (!(base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -368,7 +370,7 @@ void DeviceCloudPolicyManagerChromeOS::NotifyDisconnected() {
 void DeviceCloudPolicyManagerChromeOS::CreateStatusUploader() {
   status_uploader_.reset(new StatusUploader(
       client(),
-      base::MakeUnique<DeviceStatusCollector>(
+      std::make_unique<DeviceStatusCollector>(
           local_state_, chromeos::system::StatisticsProvider::GetInstance(),
           DeviceStatusCollector::VolumeInfoFetcher(),
           DeviceStatusCollector::CPUStatisticsFetcher(),

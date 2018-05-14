@@ -7,28 +7,65 @@
 
 #include "core/layout/LayoutTestHelper.h"
 
-#include "core/dom/Element.h"
+#include "core/layout/ng/geometry/ng_logical_size.h"
+#include "core/layout/ng/layout_ng_block_flow.h"
 #include "core/layout/ng/ng_constraint_space.h"
+#include "core/layout/ng/ng_layout_test.h"
 #include "core/layout/ng/ng_physical_box_fragment.h"
+#include "platform/text/TextDirection.h"
+#include "platform/text/WritingMode.h"
+#include "platform/wtf/Allocator.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
+
+class Element;
 
 // Base class for all LayoutNG Algorithms unit test classes.
 typedef bool TestParamLayoutNG;
 class NGBaseLayoutAlgorithmTest
     : public ::testing::WithParamInterface<TestParamLayoutNG>,
-      public RenderingTest {
- public:
-  NGBaseLayoutAlgorithmTest();
-  ~NGBaseLayoutAlgorithmTest();
-
+      public NGLayoutTest {
  protected:
   void SetUp() override;
 
-  std::pair<RefPtr<NGPhysicalBoxFragment>, RefPtr<NGConstraintSpace>>
+  std::pair<scoped_refptr<NGPhysicalBoxFragment>,
+            scoped_refptr<NGConstraintSpace>>
   RunBlockLayoutAlgorithmForElement(Element* element);
+
+  scoped_refptr<const NGPhysicalBoxFragment> GetBoxFragmentByElementId(
+      const char*);
+
+  static const NGPhysicalBoxFragment* CurrentFragmentFor(
+      const LayoutNGBlockFlow*);
 };
+
+class FragmentChildIterator {
+  STACK_ALLOCATED();
+
+ public:
+  explicit FragmentChildIterator(const NGPhysicalBoxFragment* parent) {
+    SetParent(parent);
+  }
+  void SetParent(const NGPhysicalBoxFragment* parent) {
+    parent_ = parent;
+    index_ = 0;
+  }
+
+  const NGPhysicalBoxFragment* NextChild();
+
+ private:
+  const NGPhysicalBoxFragment* parent_;
+  unsigned index_;
+};
+
+scoped_refptr<NGConstraintSpace> ConstructBlockLayoutTestConstraintSpace(
+    WritingMode writing_mode,
+    TextDirection direction,
+    NGLogicalSize size,
+    bool shrink_to_fit = false,
+    bool is_new_formatting_context = false,
+    LayoutUnit fragmentainer_space_available = LayoutUnit());
 
 }  // namespace blink
 

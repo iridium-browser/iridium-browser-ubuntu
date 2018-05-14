@@ -4,7 +4,8 @@
 
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_fetcher_factory.h"
@@ -72,8 +73,8 @@ base::string16 GenerateKeywordFromNavigationEntry(
 void AssociateURLFetcherWithWebContents(content::WebContents* web_contents,
                                         net::URLFetcher* url_fetcher) {
   content::AssociateURLFetcherWithRenderFrame(
-      url_fetcher, url::Origin(web_contents->GetURL()),
-      web_contents->GetRenderProcessHost()->GetID(),
+      url_fetcher, url::Origin::Create(web_contents->GetURL()),
+      web_contents->GetMainFrame()->GetProcess()->GetID(),
       web_contents->GetMainFrame()->GetRoutingID());
 }
 
@@ -211,5 +212,5 @@ void SearchEngineTabHelper::GenerateKeywordIfNecessary(
   }
   data.safe_for_autoreplace = true;
   data.input_encodings.push_back(handle->GetSearchableFormEncoding());
-  url_service->Add(base::MakeUnique<TemplateURL>(data));
+  url_service->Add(std::make_unique<TemplateURL>(data));
 }

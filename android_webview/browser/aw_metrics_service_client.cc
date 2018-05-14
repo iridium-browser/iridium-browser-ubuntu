@@ -6,18 +6,18 @@
 
 #include "android_webview/browser/aw_metrics_log_uploader.h"
 #include "android_webview/common/aw_switches.h"
-#include "android_webview/common/aw_version_info_values.h"
 #include "android_webview/jni/AwMetricsServiceClient_jni.h"
 #include "base/android/build_info.h"
 #include "base/android/jni_string.h"
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/guid.h"
+#include "base/hash.h"
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
 #include "components/metrics/enabled_state_provider.h"
 #include "components/metrics/gpu/gpu_metrics_provider.h"
@@ -25,12 +25,11 @@
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/metrics_state_manager.h"
-#include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/ui/screen_info_metrics_provider.h"
 #include "components/metrics/url_constants.h"
 #include "components/metrics/version_utils.h"
 #include "components/prefs/pref_service.h"
-#include "components/version_info/channel_android.h"
+#include "components/version_info/android/channel_getter.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -46,8 +45,7 @@ const int kUploadIntervalMinutes = 30;
 const size_t GUID_SIZE = 32 + 4;
 
 // Client ID of the app, read and cached synchronously at startup
-base::LazyInstance<std::string>::Leaky g_client_id_guid =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<std::string>::Leaky g_client_id = LAZY_INSTANCE_INITIALIZER;
 
 // Callbacks for metrics::MetricsStateManager::Create. Store/LoadClientInfo
 // allow Windows Chrome to back up ClientInfo. They're no-ops for WebView.
@@ -59,13 +57,18 @@ std::unique_ptr<metrics::ClientInfo> LoadClientInfo() {
   return client_info;
 }
 
-version_info::Channel GetChannelFromPackageName() {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  std::string package_name = base::android::ConvertJavaStringToUTF8(
-      env, Java_AwMetricsServiceClient_getWebViewPackageName(env));
-  // We can't determine the channel for stand-alone WebView, since it has the
-  // same package name across channels. It will always be "unknown".
-  return version_info::ChannelFromPackageName(package_name.c_str());
+// WebView Metrics are sampled based on GUID value.
+// TODO(paulmiller) Sample with Finch, once we have Finch.
+bool IsInSample(const std::string& client_id) {
+  // client_id comes from base::GenerateGUID(), so its value is random/uniform,
+  // except for a few bit positions with fixed values, and some hyphens. Rather
+  // than separating the random payload from the fixed bits, just hash the whole
+  // thing, to produce a new random/~uniform value.
+  uint32_t hash = base::PersistentHash(client_id);
+
+  // Since hashing is ~uniform, the chance that the value falls in the bottom
+  // 2% (1/50th) of possible values is 2%.
+  return hash < UINT32_MAX / 50u;
 }
 
 }  // namespace
@@ -76,10 +79,9 @@ AwMetricsServiceClient* AwMetricsServiceClient::GetInstance() {
   return g_lazy_instance_.Pointer();
 }
 
-void AwMetricsServiceClient::GetOrCreateGUID() {
-  // Check for cached GUID
-  if (g_client_id_guid.Get().length() == GUID_SIZE)
-    return;
+void AwMetricsServiceClient::LoadOrCreateClientId() {
+  // This function should only be called once at start up.
+  DCHECK_NE(g_client_id.Get().length(), GUID_SIZE);
 
   // UMA uses randomly-generated GUIDs (globally unique identifiers) to
   // anonymously identify logs. Every WebView-using app on every device
@@ -89,7 +91,7 @@ void AwMetricsServiceClient::GetOrCreateGUID() {
     LOG(ERROR) << "Failed to get app data directory for Android WebView";
 
     // Generate a 1-time GUID so metrics can still be collected
-    g_client_id_guid.Get() = base::GenerateGUID();
+    g_client_id.Get() = base::GenerateGUID();
     return;
   }
 
@@ -97,21 +99,29 @@ void AwMetricsServiceClient::GetOrCreateGUID() {
       user_data_dir.Append(FILE_PATH_LITERAL("metrics_guid"));
 
   // Try to read an existing GUID.
-  if (base::ReadFileToStringWithMaxSize(guid_file_path, &g_client_id_guid.Get(),
+  if (base::ReadFileToStringWithMaxSize(guid_file_path, &g_client_id.Get(),
                                         GUID_SIZE)) {
-    if (base::IsValidGUID(g_client_id_guid.Get()))
+    if (base::IsValidGUID(g_client_id.Get()))
       return;
     LOG(ERROR) << "Overwriting invalid GUID";
   }
 
   // We must write a new GUID.
-  g_client_id_guid.Get() = base::GenerateGUID();
-  if (!base::WriteFile(guid_file_path, g_client_id_guid.Get().c_str(),
-                       g_client_id_guid.Get().size())) {
+  g_client_id.Get() = base::GenerateGUID();
+  if (!base::WriteFile(guid_file_path, g_client_id.Get().c_str(),
+                       g_client_id.Get().size())) {
     // If writing fails, proceed anyway with the new GUID. It won't be persisted
     // to the next run, but we can still collect metrics with this 1-time GUID.
     LOG(ERROR) << "Failed to write new GUID";
   }
+}
+
+std::string AwMetricsServiceClient::GetClientId() {
+  // This function should only be called if LoadOrCreateClientId() was
+  // previously called.
+  DCHECK_EQ(g_client_id.Get().length(), GUID_SIZE);
+
+  return g_client_id.Get();
 }
 
 void AwMetricsServiceClient::Initialize(
@@ -123,28 +133,28 @@ void AwMetricsServiceClient::Initialize(
   DCHECK(request_context_ == nullptr);
   pref_service_ = pref_service;
   request_context_ = request_context;
-  channel_ = GetChannelFromPackageName();
 
-  // If Finch is enabled for WebView the GUID will already have been read at
-  // startup
+  // If variations are enabled for WebView the GUID will already have been read
+  // at startup
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableWebViewFinch)) {
-    InitializeWithGUID();
+          switches::kEnableWebViewVariations)) {
+    InitializeWithClientId();
   } else {
-    content::BrowserThread::PostTaskAndReply(
-        content::BrowserThread::FILE, FROM_HERE,
-        base::Bind(&AwMetricsServiceClient::GetOrCreateGUID),
-        base::Bind(&AwMetricsServiceClient::InitializeWithGUID,
+    base::PostTaskWithTraitsAndReply(
+        FROM_HERE, {base::MayBlock()},
+        base::Bind(&AwMetricsServiceClient::LoadOrCreateClientId),
+        base::Bind(&AwMetricsServiceClient::InitializeWithClientId,
                    base::Unretained(this)));
   }
 }
 
-void AwMetricsServiceClient::InitializeWithGUID() {
+void AwMetricsServiceClient::InitializeWithClientId() {
   // The guid must have already been initialized at this point, either
   // synchronously or asynchronously depending on the kEnableWebViewFinch flag
-  DCHECK_EQ(g_client_id_guid.Get().length(), GUID_SIZE);
-  pref_service_->SetString(metrics::prefs::kMetricsClientID,
-                           g_client_id_guid.Get());
+  DCHECK_EQ(g_client_id.Get().length(), GUID_SIZE);
+  pref_service_->SetString(metrics::prefs::kMetricsClientID, g_client_id.Get());
+
+  in_sample_ = IsInSample(g_client_id.Get());
 
   metrics_state_manager_ = metrics::MetricsStateManager::Create(
       pref_service_, this, base::string16(), base::Bind(&StoreClientInfo),
@@ -167,10 +177,6 @@ void AwMetricsServiceClient::InitializeWithGUID() {
 
   metrics_service_->RegisterMetricsProvider(
       std::unique_ptr<metrics::MetricsProvider>(
-          new metrics::ProfilerMetricsProvider()));
-
-  metrics_service_->RegisterMetricsProvider(
-      std::unique_ptr<metrics::MetricsProvider>(
           new metrics::CallStackProfileMetricsProvider));
 
   metrics_service_->InitializeMetricsRecordingState();
@@ -179,27 +185,24 @@ void AwMetricsServiceClient::InitializeWithGUID() {
   Java_AwMetricsServiceClient_nativeInitialized(env);
 }
 
-bool AwMetricsServiceClient::IsConsentGiven() {
+bool AwMetricsServiceClient::IsConsentGiven() const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  return is_enabled_;
+  return consent_;
 }
 
-void AwMetricsServiceClient::SetMetricsEnabled(bool enabled) {
+bool AwMetricsServiceClient::IsReportingEnabled() const {
+  return consent_ && in_sample_;
+}
+
+void AwMetricsServiceClient::SetHaveMetricsConsent(bool consent) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-  // For now, UMA is only enabled on Android N+.
-  if (base::android::BuildInfo::GetInstance()->sdk_int() <
-      base::android::SDK_VERSION_NOUGAT) {
-    return;
-  }
-
-  if (is_enabled_ != enabled) {
-    if (enabled) {
-      metrics_service_->Start();
-    } else {
-      metrics_service_->Stop();
-    }
-    is_enabled_ = enabled;
+  consent_ = consent;
+  // Receiving this call is the last step in determining whether metrics should
+  // be enabled; if so, start metrics. There's no need for a matching Stop()
+  // call, since SetHaveMetricsConsent(false) never happens, and WebView has no
+  // shutdown sequence.
+  if (IsReportingEnabled()) {
+    metrics_service_->Start();
   }
 }
 
@@ -227,16 +230,11 @@ bool AwMetricsServiceClient::GetBrand(std::string* brand_code) {
 }
 
 metrics::SystemProfileProto::Channel AwMetricsServiceClient::GetChannel() {
-  return metrics::AsProtobufChannel(channel_);
+  return metrics::AsProtobufChannel(version_info::GetChannel());
 }
 
 std::string AwMetricsServiceClient::GetVersionString() {
-  return PRODUCT_VERSION;
-}
-
-void AwMetricsServiceClient::InitializeSystemProfileMetrics(
-    const base::Closure& done_callback) {
-  done_callback.Run();
+  return version_info::GetVersionNumber();
 }
 
 void AwMetricsServiceClient::CollectFinalMetricsForLog(
@@ -247,11 +245,13 @@ void AwMetricsServiceClient::CollectFinalMetricsForLog(
 std::unique_ptr<metrics::MetricsLogUploader>
 AwMetricsServiceClient::CreateUploader(
     base::StringPiece server_url,
+    base::StringPiece insecure_server_url,
     base::StringPiece mime_type,
     metrics::MetricsLogUploader::MetricServiceType service_type,
     const metrics::MetricsLogUploader::UploadCallback& on_upload_complete) {
-  // |server_url| and |mime_type| are unused because WebView uses the platform
-  // logging mechanism instead of the normal UMA server.
+  // |server_url|, |insecure_server_url| and |mime_type| are unused because
+  // WebView uses the platform logging mechanism instead of the normal UMA
+  // server.
   return std::unique_ptr<::metrics::MetricsLogUploader>(
       new AwMetricsLogUploader(on_upload_complete));
 }
@@ -263,22 +263,19 @@ base::TimeDelta AwMetricsServiceClient::GetStandardUploadInterval() {
 }
 
 AwMetricsServiceClient::AwMetricsServiceClient()
-    : is_enabled_(false),
-      pref_service_(nullptr),
+    : pref_service_(nullptr),
       request_context_(nullptr),
-      channel_(version_info::Channel::UNKNOWN) {}
+      consent_(false),
+      in_sample_(false) {}
 
 AwMetricsServiceClient::~AwMetricsServiceClient() {}
 
 // static
-void SetMetricsEnabled(JNIEnv* env,
-                       const base::android::JavaParamRef<jclass>& jcaller,
-                       jboolean enabled) {
-  g_lazy_instance_.Pointer()->SetMetricsEnabled(enabled);
-}
-
-bool RegisterAwMetricsServiceClient(JNIEnv* env) {
-  return RegisterNativesImpl(env);
+void JNI_AwMetricsServiceClient_SetHaveMetricsConsent(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jclass>& jcaller,
+    jboolean consent) {
+  g_lazy_instance_.Pointer()->SetHaveMetricsConsent(consent);
 }
 
 }  // namespace android_webview

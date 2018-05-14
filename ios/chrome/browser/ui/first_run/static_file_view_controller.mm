@@ -20,7 +20,8 @@
 #error "This file requires ARC support."
 #endif
 
-@interface StaticFileViewController ()<UIScrollViewDelegate> {
+@interface StaticFileViewController ()<UIScrollViewDelegate,
+                                       WKNavigationDelegate> {
   ios::ChromeBrowserState* _browserState;  // weak
   NSURL* _URL;
   // YES if the header has been configured for RTL.
@@ -37,6 +38,8 @@
 @end
 
 @implementation StaticFileViewController
+
+@synthesize loadStatus = _loadStatus;
 
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
                                  URL:(NSURL*)URL {
@@ -66,8 +69,13 @@
                                 UIViewAutoresizingFlexibleHeight];
 
   // Loads terms of service into the web view.
-  [_webView loadRequest:[NSURLRequest requestWithURL:_URL]];
+  NSURLRequest* request =
+      [[NSURLRequest alloc] initWithURL:_URL
+                            cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                        timeoutInterval:60.0];
+  [_webView loadRequest:request];
   [_webView setBackgroundColor:[UIColor whiteColor]];
+  _webView.navigationDelegate = self;
   [self.view addSubview:_webView];
 
   ConfigureAppBarWithCardStyle(_appBar);
@@ -84,6 +92,7 @@
       [ChromeIcon templateBarButtonItemWithImage:[ChromeIcon backIcon]
                                           target:self
                                           action:@selector(back)];
+  self.loadStatus = DID_NOT_COMPLETE;
 }
 
 #pragma mark - Actions
@@ -92,4 +101,22 @@
   [self.navigationController popViewControllerAnimated:YES];
 }
 
+#pragma mark - WKNavigationDelegate
+
+- (void)webView:(WKWebView*)webView
+    didFailProvisionalNavigation:(WKNavigation*)navigation
+                       withError:(NSError*)error {
+  self.loadStatus = FAILED;
+}
+
+- (void)webView:(WKWebView*)webView
+    didFailNavigation:(WKNavigation*)navigation
+            withError:(NSError*)error {
+  self.loadStatus = FAILED;
+}
+
+- (void)webView:(WKWebView*)webView
+    didFinishNavigation:(WKNavigation*)navigation {
+  self.loadStatus = SUCCESS;
+}
 @end

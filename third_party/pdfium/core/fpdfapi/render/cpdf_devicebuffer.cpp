@@ -11,6 +11,7 @@
 #include "core/fpdfapi/render/cpdf_renderoptions.h"
 #include "core/fxge/cfx_defaultrenderdevice.h"
 #include "core/fxge/cfx_renderdevice.h"
+#include "core/fxge/dib/cfx_dibitmap.h"
 #include "core/fxge/fx_dib.h"
 #include "third_party/base/ptr_util.h"
 
@@ -28,7 +29,7 @@ bool CPDF_DeviceBuffer::Initialize(CPDF_RenderContext* pContext,
   m_Rect = *pRect;
   m_pObject = pObj;
   m_Matrix.Translate(-pRect->left, -pRect->top);
-#if _FXM_PLATFORM_ != _FXM_PLATFORM_APPLE_
+#if _FX_PLATFORM_ != _FX_PLATFORM_APPLE_
   int horz_size = pDevice->GetDeviceCaps(FXDC_HORZ_SIZE);
   int vert_size = pDevice->GetDeviceCaps(FXDC_VERT_SIZE);
   if (horz_size && vert_size && max_dpi) {
@@ -45,10 +46,8 @@ bool CPDF_DeviceBuffer::Initialize(CPDF_RenderContext* pContext,
   CFX_Matrix ctm = m_pDevice->GetCTM();
   m_Matrix.Concat(CFX_Matrix(fabs(ctm.a), 0, 0, fabs(ctm.d), 0, 0));
 
-  CFX_FloatRect rect(*pRect);
-  m_Matrix.TransformRect(rect);
-
-  FX_RECT bitmap_rect = rect.GetOuterRect();
+  FX_RECT bitmap_rect =
+      m_Matrix.TransformRect(CFX_FloatRect(*pRect)).GetOuterRect();
   m_pBitmap = pdfium::MakeRetain<CFX_DIBitmap>();
   m_pBitmap->Create(bitmap_rect.Width(), bitmap_rect.Height(), FXDIB_Argb);
   return true;

@@ -30,8 +30,8 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/frame/Settings.h"
 #include "core/page/Page.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/Supplementable.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/text/LocaleToScriptMapping.h"
 
 #define InternalSettingsGuardForSettingsReturn(returnValue)             \
@@ -60,8 +60,6 @@ namespace blink {
 InternalSettings::Backup::Backup(Settings* settings)
     : original_csp_(RuntimeEnabledFeatures::
                         ExperimentalContentSecurityPolicyFeaturesEnabled()),
-      original_css_sticky_position_enabled_(
-          RuntimeEnabledFeatures::CSSStickyPositionEnabled()),
       original_overlay_scrollbars_enabled_(
           RuntimeEnabledFeatures::OverlayScrollbarsEnabled()),
       original_editing_behavior_(settings->GetEditingBehaviorType()),
@@ -81,15 +79,11 @@ InternalSettings::Backup::Backup(Settings* settings)
       default_video_poster_url_(settings->GetDefaultVideoPosterURL()),
       original_image_animation_policy_(settings->GetImageAnimationPolicy()),
       original_scroll_top_left_interop_enabled_(
-          RuntimeEnabledFeatures::ScrollTopLeftInteropEnabled()),
-      original_compositor_worker_enabled_(
-          RuntimeEnabledFeatures::CompositorWorkerEnabled()) {}
+          RuntimeEnabledFeatures::ScrollTopLeftInteropEnabled()) {}
 
 void InternalSettings::Backup::RestoreTo(Settings* settings) {
   RuntimeEnabledFeatures::SetExperimentalContentSecurityPolicyFeaturesEnabled(
       original_csp_);
-  RuntimeEnabledFeatures::SetCSSStickyPositionEnabled(
-      original_css_sticky_position_enabled_);
   RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(
       original_overlay_scrollbars_enabled_);
   settings->SetEditingBehaviorType(original_editing_behavior_);
@@ -111,22 +105,19 @@ void InternalSettings::Backup::RestoreTo(Settings* settings) {
   settings->SetImageAnimationPolicy(original_image_animation_policy_);
   RuntimeEnabledFeatures::SetScrollTopLeftInteropEnabled(
       original_scroll_top_left_interop_enabled_);
-  RuntimeEnabledFeatures::SetCompositorWorkerEnabled(
-      original_compositor_worker_enabled_);
 }
 
 InternalSettings* InternalSettings::From(Page& page) {
-  if (!Supplement<Page>::From(page, SupplementName()))
-    Supplement<Page>::ProvideTo(page, SupplementName(),
-                                new InternalSettings(page));
-  return static_cast<InternalSettings*>(
-      Supplement<Page>::From(page, SupplementName()));
+  InternalSettings* supplement = Supplement<Page>::From<InternalSettings>(page);
+  if (!supplement) {
+    supplement = new InternalSettings(page);
+    ProvideTo(page, supplement);
+  }
+  return supplement;
 }
-const char* InternalSettings::SupplementName() {
-  return "InternalSettings";
-}
+const char InternalSettings::kSupplementName[] = "InternalSettings";
 
-InternalSettings::~InternalSettings() {}
+InternalSettings::~InternalSettings() = default;
 
 InternalSettings::InternalSettings(Page& page)
     : InternalSettingsGenerated(&page),
@@ -144,7 +135,7 @@ void InternalSettings::ResetToConsistentState() {
 
 Settings* InternalSettings::GetSettings() const {
   if (!GetPage())
-    return 0;
+    return nullptr;
   return &GetPage()->GetSettings();
 }
 
@@ -168,18 +159,10 @@ void InternalSettings::setMockGestureTapHighlightsEnabled(
   GetSettings()->SetMockGestureTapHighlightsEnabled(enabled);
 }
 
-void InternalSettings::setCSSStickyPositionEnabled(bool enabled) {
-  RuntimeEnabledFeatures::SetCSSStickyPositionEnabled(enabled);
-}
-
 void InternalSettings::setExperimentalContentSecurityPolicyFeaturesEnabled(
     bool enabled) {
   RuntimeEnabledFeatures::SetExperimentalContentSecurityPolicyFeaturesEnabled(
       enabled);
-}
-
-void InternalSettings::setOverlayScrollbarsEnabled(bool enabled) {
-  RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(enabled);
 }
 
 void InternalSettings::setViewportEnabled(bool enabled,
@@ -373,7 +356,7 @@ void InternalSettings::setDefaultVideoPosterURL(
   GetSettings()->SetDefaultVideoPosterURL(url);
 }
 
-DEFINE_TRACE(InternalSettings) {
+void InternalSettings::Trace(blink::Visitor* visitor) {
   InternalSettingsGenerated::Trace(visitor);
   Supplement<Page>::Trace(visitor);
 }
@@ -518,13 +501,6 @@ void InternalSettings::SetPreloadLogging(bool enabled,
                                          ExceptionState& exception_state) {
   InternalSettingsGuardForSettings();
   GetSettings()->SetLogPreload(enabled);
-}
-
-void InternalSettings::setCompositorWorkerEnabled(
-    bool enabled,
-    ExceptionState& exception_state) {
-  InternalSettingsGuardForSettings();
-  RuntimeEnabledFeatures::SetCompositorWorkerEnabled(enabled);
 }
 
 void InternalSettings::setPresentationReceiver(

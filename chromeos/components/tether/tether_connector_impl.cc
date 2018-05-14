@@ -5,6 +5,8 @@
 #include "chromeos/components/tether/tether_connector_impl.h"
 
 #include "base/bind.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/time/clock.h"
 #include "chromeos/components/tether/active_host.h"
 #include "chromeos/components/tether/device_id_tether_network_guid_map.h"
 #include "chromeos/components/tether/disconnect_tethering_request_sender.h"
@@ -46,7 +48,8 @@ TetherConnectorImpl::TetherConnectorImpl(
     NotificationPresenter* notification_presenter,
     HostConnectionMetricsLogger* host_connection_metrics_logger,
     DisconnectTetheringRequestSender* disconnect_tethering_request_sender,
-    WifiHotspotDisconnector* wifi_hotspot_disconnector)
+    WifiHotspotDisconnector* wifi_hotspot_disconnector,
+    base::Clock* clock)
     : network_state_handler_(network_state_handler),
       wifi_hotspot_connector_(wifi_hotspot_connector),
       active_host_(active_host),
@@ -59,6 +62,7 @@ TetherConnectorImpl::TetherConnectorImpl(
       host_connection_metrics_logger_(host_connection_metrics_logger),
       disconnect_tethering_request_sender_(disconnect_tethering_request_sender),
       wifi_hotspot_disconnector_(wifi_hotspot_disconnector),
+      clock_(clock),
       weak_ptr_factory_(this) {}
 
 TetherConnectorImpl::~TetherConnectorImpl() {
@@ -98,16 +102,10 @@ void TetherConnectorImpl::ConnectToNetwork(
             device_id_pending_connection_));
   }
 
-  if (host_scan_cache_->DoesHostRequireSetup(tether_network_guid)) {
-    const std::string& device_name =
-        network_state_handler_->GetNetworkStateFromGuid(tether_network_guid)
-            ->name();
-    notification_presenter_->NotifySetupRequired(device_name);
-  }
-
   device_id_pending_connection_ = device_id;
   success_callback_ = success_callback;
   error_callback_ = error_callback;
+  connect_to_host_start_time_ = clock_->Now();
   active_host_->SetActiveHostConnecting(device_id, tether_network_guid);
 
   tether_host_fetcher_->FetchTetherHost(
@@ -149,6 +147,26 @@ bool TetherConnectorImpl::CancelConnectionAttempt(
       HostConnectionMetricsLogger::ConnectionToHostResult::
           CONNECTION_RESULT_FAILURE_CLIENT_CONNECTION_CANCELED_BY_USER);
   return true;
+}
+
+void TetherConnectorImpl::OnConnectTetheringRequestSent(
+    const cryptauth::RemoteDevice& remote_device) {
+  // If setup is required for the phone, display a notification so that the
+  // user knows to follow instructions on the phone. Note that the notification
+  // is displayed only after a request has been sent successfully. If the
+  // notification is displayed before a the request has been sent, it could be
+  // misleading since the connection could fail. See crbug.com/767756.
+  const std::string tether_network_guid =
+      device_id_tether_network_guid_map_->GetTetherNetworkGuidForDeviceId(
+          remote_device.GetDeviceId());
+  if (!host_scan_cache_->DoesHostRequireSetup(tether_network_guid))
+    return;
+
+  const NetworkState* tether_network_state =
+      network_state_handler_->GetNetworkStateFromGuid(tether_network_guid);
+  DCHECK(tether_network_state);
+  notification_presenter_->NotifySetupRequired(
+      tether_network_state->name(), tether_network_state->signal_strength());
 }
 
 void TetherConnectorImpl::OnSuccessfulConnectTetheringResponse(
@@ -284,6 +302,9 @@ void TetherConnectorImpl::SetConnectionSucceeded(
   host_connection_metrics_logger_->RecordConnectionToHostResult(
       HostConnectionMetricsLogger::ConnectionToHostResult::
           CONNECTION_RESULT_SUCCESS);
+  UMA_HISTOGRAM_MEDIUM_TIMES(
+      "InstantTethering.Performance.ConnectToHostDuration",
+      clock_->Now() - connect_to_host_start_time_);
 
   notification_presenter_->RemoveSetupRequiredNotification();
 
@@ -323,7 +344,7 @@ void TetherConnectorImpl::OnWifiConnection(
     // connected to the Wi-Fi hotspot despite there being no active host. See
     // crbug.com/761171.
     wifi_hotspot_disconnector_->DisconnectFromWifiHotspot(
-        wifi_network_guid, base::Bind(&base::DoNothing),
+        wifi_network_guid, base::DoNothing(),
         base::Bind(&OnDisconnectFromWifiFailure, device_id));
     return;
   }
@@ -369,6 +390,33 @@ TetherConnectorImpl::GetConnectionToHostResultFromErrorCode(
 
     return HostConnectionMetricsLogger::ConnectionToHostResult::
         CONNECTION_RESULT_FAILURE_TETHERING_TIMED_OUT_FIRST_TIME_SETUP_WAS_NOT_REQUIRED;
+  }
+
+  if (error_code ==
+      ConnectTetheringResponse_ResponseCode::
+          ConnectTetheringResponse_ResponseCode_TETHERING_UNSUPPORTED) {
+    return HostConnectionMetricsLogger::ConnectionToHostResult::
+        CONNECTION_RESULT_FAILURE_TETHERING_UNSUPPORTED;
+  }
+
+  if (error_code == ConnectTetheringResponse_ResponseCode::
+                        ConnectTetheringResponse_ResponseCode_NO_CELL_DATA) {
+    return HostConnectionMetricsLogger::ConnectionToHostResult::
+        CONNECTION_RESULT_FAILURE_NO_CELL_DATA;
+  }
+
+  if (error_code ==
+      ConnectTetheringResponse_ResponseCode::
+          ConnectTetheringResponse_ResponseCode_ENABLING_HOTSPOT_FAILED) {
+    return HostConnectionMetricsLogger::ConnectionToHostResult::
+        CONNECTION_RESULT_FAILURE_ENABLING_HOTSPOT_FAILED;
+  }
+
+  if (error_code ==
+      ConnectTetheringResponse_ResponseCode::
+          ConnectTetheringResponse_ResponseCode_ENABLING_HOTSPOT_TIMEOUT) {
+    return HostConnectionMetricsLogger::ConnectionToHostResult::
+        CONNECTION_RESULT_FAILURE_ENABLING_HOTSPOT_TIMEOUT;
   }
 
   return HostConnectionMetricsLogger::ConnectionToHostResult::

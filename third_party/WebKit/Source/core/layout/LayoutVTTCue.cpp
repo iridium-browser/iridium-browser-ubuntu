@@ -26,7 +26,7 @@
 #include "core/layout/LayoutVTTCue.h"
 
 #include "core/frame/Settings.h"
-#include "core/html/HTMLMediaElement.h"
+#include "core/html/media/HTMLMediaElement.h"
 #include "core/html/media/MediaControls.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutState.h"
@@ -330,7 +330,6 @@ IntRect LayoutVTTCue::ComputeControlsRect() const {
   // LayoutVTTCue will walk the tree up to the HTMLMediaElement, then ask for
   // the MediaControls.
   DCHECK(Parent()->GetNode()->IsTextTrackContainer());
-  DCHECK(IsHTMLMediaElement(Parent()->Parent()->GetNode()));
 
   HTMLMediaElement* media_element =
       ToHTMLMediaElement(Parent()->Parent()->GetNode());

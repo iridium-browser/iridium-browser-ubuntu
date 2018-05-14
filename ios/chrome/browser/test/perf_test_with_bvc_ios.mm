@@ -7,7 +7,6 @@
 #import <UIKit/UIKit.h>
 
 #include "base/files/file_path.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "ios/chrome/browser/autocomplete/autocomplete_classifier_factory.h"
@@ -20,7 +19,6 @@
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
 #import "ios/chrome/browser/ui/browser_view_controller_dependency_factory.h"
-#import "ios/chrome/browser/ui/preload_controller.h"
 #import "ios/chrome/browser/web/chrome_web_client.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 
@@ -38,44 +36,13 @@ namespace {
 static GURL emptyGurl_ = GURL("foo", 3, url::Parsed(), false);
 }
 
-@interface TestPreloadController : PreloadController
-- (Tab*)releasePrerenderContents;
-@end
-
-@implementation TestPreloadController
-
-- (Tab*)releasePrerenderContents {
-  return nil;
-}
-
-- (id<PreloadControllerDelegate>)delegate {
-  return nil;
-}
-
-- (GURL)prerenderedURL {
-  return emptyGurl_;
-}
-@end
-
-// Subclass the factory that creates the PreloadController for BVC to return
-// the TestPrerenderController.
-@interface TestBVCDependencyFactory : BrowserViewControllerDependencyFactory
-- (PreloadController*)newPreloadController;
-@end
-
-@implementation TestBVCDependencyFactory
-- (PreloadController*)newPreloadController {
-  return [[TestPreloadController alloc] init];
-}
-@end
-
 PerfTestWithBVC::PerfTestWithBVC(std::string testGroup)
     : PerfTest(testGroup),
       slow_teardown_(false),
-      web_client_(base::MakeUnique<ChromeWebClient>()),
+      web_client_(std::make_unique<ChromeWebClient>()),
       provider_(ios::CreateChromeBrowserProvider()),
       browser_state_manager_(
-          base::MakeUnique<TestChromeBrowserStateManager>(base::FilePath())) {}
+          std::make_unique<TestChromeBrowserStateManager>(base::FilePath())) {}
 
 PerfTestWithBVC::PerfTestWithBVC(std::string testGroup,
                                  std::string firstLabel,
@@ -91,10 +58,10 @@ PerfTestWithBVC::PerfTestWithBVC(std::string testGroup,
                verbose,
                repeat),
       slow_teardown_(slowTeardown),
-      web_client_(base::MakeUnique<ChromeWebClient>()),
+      web_client_(std::make_unique<ChromeWebClient>()),
       provider_(ios::CreateChromeBrowserProvider()),
       browser_state_manager_(
-          base::MakeUnique<TestChromeBrowserStateManager>(base::FilePath())) {}
+          std::make_unique<TestChromeBrowserStateManager>(base::FilePath())) {}
 
 PerfTestWithBVC::~PerfTestWithBVC() {}
 
@@ -129,29 +96,29 @@ void PerfTestWithBVC::SetUp() {
 
   // Tab models. The off-the-record (OTR) tab model is required for the stack
   // view controller, which is created in OpenStackView().
-  tab_model_.reset([[TabModel alloc]
-      initWithSessionWindow:session.sessionWindows[0]
-             sessionService:[SessionServiceIOS sharedService]
-               browserState:chrome_browser_state_.get()]);
-  otr_tab_model_.reset([[TabModel alloc]
+  tab_model_ =
+      [[TabModel alloc] initWithSessionWindow:session.sessionWindows[0]
+                               sessionService:[SessionServiceIOS sharedService]
+                                 browserState:chrome_browser_state_.get()];
+  otr_tab_model_ = [[TabModel alloc]
       initWithSessionWindow:session.sessionWindows[0]
              sessionService:[SessionServiceIOS sharedService]
                browserState:chrome_browser_state_
-                                ->GetOffTheRecordChromeBrowserState()]);
+                                ->GetOffTheRecordChromeBrowserState()];
 
   // Create the browser view controller with its testing factory.
-  bvc_factory_.reset([[TestBVCDependencyFactory alloc]
-      initWithBrowserState:chrome_browser_state_.get()]);
-  bvc_.reset([[BrowserViewController alloc]
+  bvc_factory_ = [[BrowserViewControllerDependencyFactory alloc]
+      initWithBrowserState:chrome_browser_state_.get()
+              webStateList:[tab_model_ webStateList]];
+  bvc_ = [[BrowserViewController alloc]
                 initWithTabModel:tab_model_
                     browserState:chrome_browser_state_.get()
                dependencyFactory:bvc_factory_
-      applicationCommandEndpoint:nil]);
+      applicationCommandEndpoint:nil];
   [bvc_ setActive:YES];
 
   // Create a real window to give to the browser view controller.
-  window_.reset(
-      [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]]);
+  window_ = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
   [window_ makeKeyAndVisible];
   [window_ addSubview:[bvc_ view]];
   [[bvc_ view] setFrame:[[UIScreen mainScreen] bounds]];
@@ -163,14 +130,14 @@ void PerfTestWithBVC::TearDown() {
 
   // Documented example of how to clear out the browser view controller
   // and its associated data.
-  window_.reset();
+  window_ = nil;
   [bvc_ browserStateDestroyed];
   [bvc_ shutdown];
-  bvc_.reset();
-  bvc_factory_.reset();
-  tab_model_.reset();
+  bvc_ = nil;
+  bvc_factory_ = nil;
+  tab_model_ = nil;
   [otr_tab_model_ browserStateDestroyed];
-  otr_tab_model_.reset();
+  otr_tab_model_ = nil;
 
   // The base class |TearDown| method calls the run loop so the
   // NSAutoreleasePool can drain. This needs to be done before

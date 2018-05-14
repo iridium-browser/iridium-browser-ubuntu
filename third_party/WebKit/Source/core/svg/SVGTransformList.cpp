@@ -23,22 +23,22 @@
 
 #include "core/svg/SVGTransformList.h"
 
-#include "core/SVGNames.h"
 #include "core/css/CSSFunctionValue.h"
 #include "core/css/CSSIdentifierValue.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSValueList.h"
 #include "core/svg/SVGParserUtilities.h"
 #include "core/svg/SVGTransformDistance.h"
+#include "core/svg_names.h"
 #include "platform/wtf/text/ParsingUtilities.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
-SVGTransformList::SVGTransformList() {}
+SVGTransformList::SVGTransformList() = default;
 
-SVGTransformList::~SVGTransformList() {}
+SVGTransformList::~SVGTransformList() = default;
 
 SVGTransform* SVGTransformList::Consolidate() {
   AffineTransform matrix;
@@ -168,20 +168,20 @@ SVGTransformType ParseAndSkipTransformType(const CharType*& ptr,
     return kSvgTransformUnknown;
 
   if (*ptr == 's') {
-    if (skipToken(ptr, end, "skewX"))
+    if (SkipToken(ptr, end, "skewX"))
       return kSvgTransformSkewx;
-    if (skipToken(ptr, end, "skewY"))
+    if (SkipToken(ptr, end, "skewY"))
       return kSvgTransformSkewy;
-    if (skipToken(ptr, end, "scale"))
+    if (SkipToken(ptr, end, "scale"))
       return kSvgTransformScale;
 
     return kSvgTransformUnknown;
   }
-  if (skipToken(ptr, end, "translate"))
+  if (SkipToken(ptr, end, "translate"))
     return kSvgTransformTranslate;
-  if (skipToken(ptr, end, "rotate"))
+  if (SkipToken(ptr, end, "rotate"))
     return kSvgTransformRotate;
-  if (skipToken(ptr, end, "matrix"))
+  if (SkipToken(ptr, end, "matrix"))
     return kSvgTransformMatrix;
 
   return kSvgTransformUnknown;

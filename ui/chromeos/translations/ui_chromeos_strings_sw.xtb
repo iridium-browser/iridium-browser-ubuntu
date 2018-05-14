@@ -22,6 +22,7 @@
 <translation id="158809615184981282">Kibodi ya Kifaroe</translation>
 <translation id="1646136617204068573">Kibodi ya Kihangari</translation>
 <translation id="164729547906544836">Kibodi ya Kitamil (itrans)</translation>
+<translation id="164969095109328410">Kifaa cha Chrome</translation>
 <translation id="1829129547161959350">Ngwini</translation>
 <translation id="184633654410729720">Kibodi ya Kithai (Kedmanee)</translation>
 <translation id="1921986354447415460">Kibodi ya Kituruki-F</translation>
@@ -114,6 +115,7 @@
 <translation id="4694604912444486114">Tumbili</translation>
 <translation id="4711094779914110278">Kituruki</translation>
 <translation id="4725511304875193254">Mbwa mlinzi</translation>
+<translation id="4737050008115666127">Uwanja wa kutua</translation>
 <translation id="4747271164117300400">Kimasedonia</translation>
 <translation id="4749157430980974800">Kibodi ya Kijojia</translation>
 <translation id="4755240240651974342">Kibodi ya Kifini</translation>
@@ -125,6 +127,7 @@
 <translation id="4943368462779413526">Kandanda</translation>
 <translation id="497244430928947428">Kibodi ya Malayalam (Fonetiki)</translation>
 <translation id="498902553138568924">Kipepeo mwekundu</translation>
+<translation id="5011233892417813670">Chromebook</translation>
 <translation id="5068919226082848014">Piza</translation>
 <translation id="5098629044894065541">Kiyahudi</translation>
 <translation id="5123433949759960244">Mpira wa kikapu</translation>
@@ -146,6 +149,7 @@
 <translation id="5465122519792752163">Kibodi ya Kinepali (InScript)</translation>
 <translation id="5469868506864199649">Kiitaliano</translation>
 <translation id="5500122897333236901">Kiaislandi</translation>
+<translation id="5508696409934741614">Nukta</translation>
 <translation id="5533555070048896610">Unukuzi wa mfumo wa kuandika (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">Dvorak ya Marekani</translation>
 <translation id="5640179856859982418">Kibodi ya Kiswizi</translation>
@@ -157,7 +161,9 @@
 <translation id="5819442873484330149">Seti ya Hangul 3 (Ya mwisho)</translation>
 <translation id="5838825566232597749">Kibodi ya US Workman ya kimataifa</translation>
 <translation id="5892290200158927959">Kibodi ya BEPO ya Kifaransa</translation>
+<translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">Kibodi ya Amerika Kusini</translation>
+<translation id="6012987430370760224">Kibodi ya Kimarathi (Fonetiki)</translation>
 <translation id="60357267506638014">QWERTY ya Kicheki</translation>
 <translation id="6054173164583630569">Kibodi ya Kifaransa</translation>
 <translation id="6111770213269631447">Unukuzi wa mfumo wa kuandika (namaskar → নমস্কার)</translation>
@@ -183,17 +189,20 @@
 <translation id="6876155724392614295">Baiskeli</translation>
 <translation id="6878261347041253038">Kibodi ya Kidevanagari (Fonetiki)</translation>
 <translation id="6885780034956018177">Konokono</translation>
+<translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">Kibodi ya US Workman</translation>
 <translation id="6935521024859866267">Juu Chini</translation>
 <translation id="6937152069980083337">Kibodi ya Google ya Kijapani (ya kibodi ya Marekani)</translation>
 <translation id="6939777852457331078">Kibodi ya US Workman</translation>
 <translation id="6970230597523682626">Kibulgaria</translation>
+<translation id="714034171374937760">Chromebase</translation>
 <translation id="7170467426996704624">Unukuzi wa mfumo wa kuandika (salam → ሰላም)</translation>
 <translation id="7172053773111046550">Kibodi ya Kiestoni</translation>
 <translation id="719009910964971313">Kibodi ya Programmer Dvorak, Marekani</translation>
 <translation id="7222624196722476520">Kibodi ya Fonetiki ya Kibulgaria</translation>
 <translation id="7348749398828259943">Kibodi ya US Workman ya kimataifa</translation>
 <translation id="7389722738210761877">Kibodi ya Kithai (TIS 820-2531)</translation>
+<translation id="7396038720194014279">Kibodi ya Kihindi (Fonetiki)</translation>
 <translation id="7417453074306512035">Kibodi ya Kiethiopia</translation>
 <translation id="7419631653042041064">Kibodi ya Kikatalani</translation>
 <translation id="7434823369735508263">Kibodi ya Dvorak, Uingereza</translation>
@@ -201,12 +210,14 @@
 <translation id="7474889694310679759">Kibodi ya Kiingereza cha Kanada</translation>
 <translation id="751507702149411736">Kibelarusi</translation>
 <translation id="7547811415869834682">Kiholanzi</translation>
+<translation id="7603724359189955920">Gridi</translation>
 <translation id="770015031906360009">Kigiriki</translation>
 <translation id="7706319470528945664">Kibodi ya Kireno</translation>
 <translation id="7774365994322694683">Ndege</translation>
 <translation id="7825423931463735974">Kibodi ya Kitamil (Tamil99)</translation>
 <translation id="7853966320808728790">BÉPO ya Kifaransa</translation>
 <translation id="7896906914454843592">Kibodi Pana ya Marekani</translation>
+<translation id="7898607018410277265">Kibodi ya Kigujarati (Fonetiki Mpya)</translation>
 <translation id="7917972308273378936">Kibodi ya Kilithuania</translation>
 <translation id="7943385054491506837">Colemak ya Marekani</translation>
 <translation id="7969525169268594403">Kislovenia</translation>
@@ -230,6 +241,7 @@
 <translation id="8432745813735585631">Kibodi ya Colemak ya Marekani</translation>
 <translation id="8437209419043462667">Kimarekani</translation>
 <translation id="8467473010914675605">Mbinu ingizo ya Kikorea</translation>
+<translation id="8477649328507734757">Duara za kati moja</translation>
 <translation id="8521441079177373948">Kiingereza cha Uingereza</translation>
 <translation id="8551494947769799688">Kilatvia</translation>
 <translation id="8561206103590473338">Tembo</translation>
@@ -248,4 +260,5 @@
 <translation id="913758436357682283">Kibodi ya Myanmar Myansan</translation>
 <translation id="9153744823707037316">Mbinu ya kuingiza data ya Array</translation>
 <translation id="9206487995878691001">Mbinu ya kuingiza data ya Cangjie</translation>
+<translation id="9219908252191632183">Mandhari ya mwezi mwandamo</translation>
 </translationbundle>

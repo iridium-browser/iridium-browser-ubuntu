@@ -14,28 +14,6 @@
 
 namespace cc {
 
-void FakeDelayBasedTimeSourceClient::OnTimerTick() {
-  tick_called_ = true;
-}
-
-base::TimeTicks FakeDelayBasedTimeSource::Now() const { return now_; }
-
-TestDelayBasedTimeSource::TestDelayBasedTimeSource(
-    base::SimpleTestTickClock* now_src,
-    OrderedSimpleTaskRunner* task_runner)
-    : DelayBasedTimeSource(task_runner), now_src_(now_src) {}
-
-base::TimeTicks TestDelayBasedTimeSource::Now() const {
-  return now_src_->NowTicks();
-}
-
-std::string TestDelayBasedTimeSource::TypeString() const {
-  return "TestDelayBasedTimeSource";
-}
-
-TestDelayBasedTimeSource::~TestDelayBasedTimeSource() {
-}
-
 std::unique_ptr<FakeCompositorTimingHistory>
 FakeCompositorTimingHistory::Create(
     bool using_synchronous_renderer_compositor) {
@@ -56,13 +34,13 @@ FakeCompositorTimingHistory::FakeCompositorTimingHistory(
       rendering_stats_instrumentation_owned_(
           std::move(rendering_stats_instrumentation)) {}
 
-FakeCompositorTimingHistory::~FakeCompositorTimingHistory() {
-}
+FakeCompositorTimingHistory::~FakeCompositorTimingHistory() = default;
 
 void FakeCompositorTimingHistory::SetAllEstimatesTo(base::TimeDelta duration) {
   begin_main_frame_queue_duration_critical_ = duration;
   begin_main_frame_queue_duration_not_critical_ = duration;
-  begin_main_frame_start_to_commit_duration_ = duration;
+  begin_main_frame_start_to_ready_to_commit_duration_ = duration;
+  commit_duration_ = duration;
   commit_to_ready_to_activate_duration_ = duration;
   prepare_tiles_duration_ = duration;
   activate_duration_ = duration;
@@ -81,8 +59,14 @@ void FakeCompositorTimingHistory::
 }
 
 void FakeCompositorTimingHistory::
-    SetBeginMainFrameStartToCommitDurationEstimate(base::TimeDelta duration) {
-  begin_main_frame_start_to_commit_duration_ = duration;
+    SetBeginMainFrameStartToReadyToCommitDurationEstimate(
+        base::TimeDelta duration) {
+  begin_main_frame_start_to_ready_to_commit_duration_ = duration;
+}
+
+void FakeCompositorTimingHistory::SetCommitDurationEstimate(
+    base::TimeDelta duration) {
+  commit_duration_ = duration;
 }
 
 void FakeCompositorTimingHistory::SetCommitToReadyToActivateDurationEstimate(
@@ -117,10 +101,13 @@ FakeCompositorTimingHistory::BeginMainFrameQueueDurationNotCriticalEstimate()
   return begin_main_frame_queue_duration_not_critical_;
 }
 
-base::TimeDelta
-FakeCompositorTimingHistory::BeginMainFrameStartToCommitDurationEstimate()
-    const {
-  return begin_main_frame_start_to_commit_duration_;
+base::TimeDelta FakeCompositorTimingHistory::
+    BeginMainFrameStartToReadyToCommitDurationEstimate() const {
+  return begin_main_frame_start_to_ready_to_commit_duration_;
+}
+
+base::TimeDelta FakeCompositorTimingHistory::CommitDurationEstimate() const {
+  return commit_duration_;
 }
 
 base::TimeDelta
@@ -159,7 +146,6 @@ base::TimeTicks TestScheduler::Now() const {
   return now_src_->NowTicks();
 }
 
-TestScheduler::~TestScheduler() {
-}
+TestScheduler::~TestScheduler() = default;
 
 }  // namespace cc

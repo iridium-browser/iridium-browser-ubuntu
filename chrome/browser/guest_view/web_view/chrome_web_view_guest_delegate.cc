@@ -19,6 +19,7 @@
 #include "components/guest_view/browser/guest_view_event.h"
 #include "components/renderer_context_menu/context_menu_delegate.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
 #include "extensions/browser/guest_view/web_view/web_view_constants.h"
 
@@ -38,22 +39,24 @@ ChromeWebViewGuestDelegate::~ChromeWebViewGuestDelegate() {
 
 bool ChromeWebViewGuestDelegate::HandleContextMenu(
     const content::ContextMenuParams& params) {
+  if ((params.source_type == ui::MENU_SOURCE_LONG_PRESS ||
+       params.source_type == ui::MENU_SOURCE_TOUCH) &&
+      !params.selection_text.empty() &&
+      (guest_web_contents()->GetRenderWidgetHostView() &&
+       guest_web_contents()
+           ->GetRenderWidgetHostView()
+           ->GetTouchSelectionControllerClientManager())) {
+    // This context menu request should be handled by the
+    // TouchSelectionController. If the user selects the full context menu from
+    // the QuickMenu, the request will come back here (with different source
+    // parameters) to complete.
+    return true;
+  }
+
   ContextMenuDelegate* menu_delegate =
       ContextMenuDelegate::FromWebContents(guest_web_contents());
   DCHECK(menu_delegate);
-
-  content::ContextMenuParams new_params = params;
-  // The only case where |context_menu_position_| is not initialized is the case
-  // where the input event is directly sent to the guest WebContents without
-  // ever going throught the embedder and BrowserPlugin's
-  // RenderWidgetHostViewGuest. This only happens in some tests, e.g.,
-  // WebViewInteractiveTest.ContextMenuParamCoordinates.
-  if (context_menu_position_) {
-    new_params.x = context_menu_position_->x();
-    new_params.y = context_menu_position_->y();
-  }
-
-  pending_menu_ = menu_delegate->BuildMenu(guest_web_contents(), new_params);
+  pending_menu_ = menu_delegate->BuildMenu(guest_web_contents(), params);
   // It's possible for the returned menu to be null, so early out to avoid
   // a crash. TODO(wjmaclean): find out why it's possible for this to happen
   // in the first place, and if it's an error.
@@ -67,7 +70,7 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
       MenuModelToValue(pending_menu_->menu_model());
   args->Set(webview::kContextMenuItems, std::move(items));
   args->SetInteger(webview::kRequestId, request_id);
-  web_view_guest()->DispatchEventToView(base::MakeUnique<GuestViewEvent>(
+  web_view_guest()->DispatchEventToView(std::make_unique<GuestViewEvent>(
       webview::kEventContextMenuShow, std::move(args)));
   return true;
 }
@@ -109,14 +112,6 @@ bool ChromeWebViewGuestDelegate::ShouldHandleFindRequestsForEmbedder() const {
   return web_view_guest_->owner_web_contents()->GetWebUI() != nullptr &&
          web_view_guest_->GetOwnerSiteURL().GetOrigin().spec() ==
              chrome::kChromeUIChromeSigninURL;
-}
-
-void ChromeWebViewGuestDelegate::SetContextMenuPosition(
-    const gfx::Point& position) {
-  if (context_menu_position_ == nullptr)
-    context_menu_position_.reset(new gfx::Point());
-
-  *context_menu_position_ = position;
 }
 
 }  // namespace extensions

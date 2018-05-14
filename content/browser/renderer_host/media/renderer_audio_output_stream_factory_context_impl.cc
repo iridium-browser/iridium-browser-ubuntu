@@ -15,6 +15,7 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_features.h"
 #include "media/audio/audio_system.h"
+#include "media/mojo/interfaces/audio_logging.mojom.h"
 
 namespace content {
 
@@ -23,16 +24,13 @@ RendererAudioOutputStreamFactoryContextImpl::
         int render_process_id,
         media::AudioSystem* audio_system,
         media::AudioManager* audio_manager,
-        MediaStreamManager* media_stream_manager,
-        const std::string& salt)
-    : salt_(salt),
-      audio_system_(audio_system),
+        MediaStreamManager* media_stream_manager)
+    : audio_system_(audio_system),
       audio_manager_(audio_manager),
       media_stream_manager_(media_stream_manager),
       authorization_handler_(audio_system_,
                              media_stream_manager_,
-                             render_process_id,
-                             salt_),
+                             render_process_id),
       render_process_id_(render_process_id) {}
 
 RendererAudioOutputStreamFactoryContextImpl::
@@ -59,24 +57,25 @@ std::unique_ptr<media::AudioOutputDelegate>
 RendererAudioOutputStreamFactoryContextImpl::CreateDelegate(
     const std::string& unique_device_id,
     int render_frame_id,
+    int stream_id,
     const media::AudioParameters& params,
+    media::mojom::AudioOutputStreamObserverPtr stream_observer,
     media::AudioOutputDelegate::EventHandler* handler) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  int stream_id = next_stream_id_++;
   MediaObserver* const media_observer =
       GetContentClient()->browser()->GetMediaObserver();
 
-  MediaInternals* const media_internals = MediaInternals::GetInstance();
-  std::unique_ptr<media::AudioLog> audio_log = media_internals->CreateAudioLog(
-      media::AudioLogFactory::AUDIO_OUTPUT_CONTROLLER);
-  audio_log->OnCreated(stream_id, params, unique_device_id);
-  media_internals->SetWebContentsTitleForAudioLogEntry(
-      stream_id, render_process_id_, render_frame_id, audio_log.get());
+  media::mojom::AudioLogPtr audio_log_ptr =
+      MediaInternals::GetInstance()->CreateMojoAudioLog(
+          media::AudioLogFactory::AUDIO_OUTPUT_CONTROLLER, stream_id,
+          render_process_id_, render_frame_id);
+  audio_log_ptr->OnCreated(params, unique_device_id);
 
   return AudioOutputDelegateImpl::Create(
-      handler, audio_manager_, std::move(audio_log),
+      handler, audio_manager_, std::move(audio_log_ptr),
       AudioMirroringManager::GetInstance(), media_observer, stream_id,
-      render_frame_id, render_process_id_, params, unique_device_id);
+      render_frame_id, render_process_id_, params, std::move(stream_observer),
+      unique_device_id);
 }
 
 // static

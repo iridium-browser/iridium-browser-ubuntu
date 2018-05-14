@@ -12,6 +12,7 @@
 
 #import "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
+#include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #import "ui/accelerated_widget_mac/accelerated_widget_mac.h"
 #include "ui/base/ime/input_method_delegate.h"
 #include "ui/compositor/layer_owner.h"
@@ -20,8 +21,10 @@
 #import "ui/views/focus/focus_manager.h"
 #include "ui/views/views_export.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_observer.h"
 
 @class BridgedContentView;
+@class ModalShowAnimationWithLayer;
 @class ViewsNSWindowDelegate;
 
 namespace ui {
@@ -49,7 +52,8 @@ class VIEWS_EXPORT BridgedNativeWidget
       public CocoaMouseCaptureDelegate,
       public FocusChangeListener,
       public ui::AcceleratedWidgetMacNSView,
-      public BridgedNativeWidgetOwner {
+      public BridgedNativeWidgetOwner,
+      public DialogObserver {
  public:
   // Contains NativeViewHost->gfx::NativeView associations.
   using AssociatedViews = std::map<const views::View*, NSView*>;
@@ -78,6 +82,9 @@ class VIEWS_EXPORT BridgedNativeWidget
   // Initialize the bridge, "retains" ownership of |window|.
   void Init(base::scoped_nsobject<NSWindow> window,
             const Widget::InitParams& params);
+
+  // Invoked at the end of Widget::Init().
+  void OnWidgetInitDone();
 
   // Sets or clears the focus manager to use for tracking focused views.
   // This does NOT take ownership of |focus_manager|.
@@ -132,7 +139,7 @@ class VIEWS_EXPORT BridgedNativeWidget
 
   // Transition the window into or out of fullscreen. This will immediately
   // invert the value of target_fullscreen_state().
-  void ToggleDesiredFullscreenState();
+  void ToggleDesiredFullscreenState(bool async = false);
 
   // Called by the NSWindowDelegate when the size of the window changes.
   void OnSizeChanged();
@@ -169,6 +176,10 @@ class VIEWS_EXPORT BridgedNativeWidget
   // Called by NativeWidgetMac when the window size constraints change.
   void OnSizeConstraintsChanged();
 
+  // Called by the window show animation when it completes and wants to destroy
+  // itself.
+  void OnShowAnimationComplete();
+
   // See widget.h for documentation.
   ui::InputMethod* GetInputMethod();
 
@@ -201,9 +212,19 @@ class VIEWS_EXPORT BridgedNativeWidget
     return child_windows_;
   }
 
+  // Re-parent a |native_view| in this Widget to be a child of |new_parent|.
+  // |native_view| must either be |ns_view()| or a descendant of |ns_view()|.
+  // |native_view| is added as a subview of |new_parent| unless it is the
+  // contentView of a top-level Widget. If |native_view| is |ns_view()|, |this|
+  // also becomes a child window of |new_parent|'s NSWindow.
+  void ReparentNativeView(NSView* native_view, NSView* new_parent);
+
   bool target_fullscreen_state() const { return target_fullscreen_state_; }
   bool window_visible() const { return window_visible_; }
   bool wants_to_be_visible() const { return wants_to_be_visible_; }
+
+  bool animate() const { return animate_; }
+  void set_animate(bool animate) { animate_ = animate; }
 
   // Overridden from ui::internal::InputMethodDelegate:
   ui::EventDispatchDetails DispatchKeyEventPostIME(ui::KeyEvent* key) override;
@@ -247,6 +268,9 @@ class VIEWS_EXPORT BridgedNativeWidget
   // update its draggable region.
   void SetDraggable(bool draggable);
 
+  // Called by |mouse_down_monitor_| to close a bubble.
+  void OnRightMouseDownWithBubble(NSEvent* event);
+
   // Overridden from CocoaMouseCaptureDelegate:
   void PostCapturedEvent(NSEvent* event) override;
   void OnMouseCaptureLost() override;
@@ -264,8 +288,8 @@ class VIEWS_EXPORT BridgedNativeWidget
 
   // Overridden from ui::LayerDelegate:
   void OnPaintLayer(const ui::PaintContext& context) override;
-  void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override;
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override;
+  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                  float new_device_scale_factor) override;
 
   // Overridden from ui::AcceleratedWidgetMac:
   NSView* AcceleratedWidgetGetNSView() const override;
@@ -279,10 +303,14 @@ class VIEWS_EXPORT BridgedNativeWidget
   bool IsVisibleParent() const override;
   void RemoveChildWindow(BridgedNativeWidget* child) override;
 
+  // DialogObserver:
+  void OnDialogModelChanged() override;
+
   views::NativeWidgetMac* native_widget_mac_;  // Weak. Owns this.
   base::scoped_nsobject<NSWindow> window_;
   base::scoped_nsobject<ViewsNSWindowDelegate> window_delegate_;
   base::scoped_nsobject<BridgedContentView> bridged_view_;
+  base::scoped_nsobject<ModalShowAnimationWithLayer> show_animation_;
   std::unique_ptr<ui::InputMethod> input_method_;
   std::unique_ptr<CocoaMouseCapture> mouse_capture_;
   std::unique_ptr<CocoaWindowMoveLoop> window_move_loop_;
@@ -297,6 +325,7 @@ class VIEWS_EXPORT BridgedNativeWidget
   base::scoped_nsobject<NSView> compositor_superview_;
   std::unique_ptr<ui::AcceleratedWidgetMac> compositor_widget_;
   std::unique_ptr<ui::Compositor> compositor_;
+  viz::ParentLocalSurfaceIdAllocator parent_local_surface_id_allocator_;
 
   // Tracks the bounds when the window last started entering fullscreen. Used to
   // provide an answer for GetRestoredBounds(), but not ever sent to Cocoa (it
@@ -319,6 +348,9 @@ class VIEWS_EXPORT BridgedNativeWidget
   // currently hidden due to having a hidden parent.
   bool wants_to_be_visible_;
 
+  // Whether to animate the window (when it is appropriate to do so).
+  bool animate_ = true;
+
   // If true, the window has been made visible or changed shape and the window
   // shadow needs to be invalidated when a frame is received for the new shape.
   bool invalidate_shadow_on_frame_swap_ = false;
@@ -327,6 +359,9 @@ class VIEWS_EXPORT BridgedNativeWidget
   // modal windows, the window's alpha value is set to 0, till the frame from
   // the compositor arrives to avoid "blinking".
   bool initial_visibility_suppressed_ = false;
+
+  // Right mouse down monitor for bubble widget.
+  id mouse_down_monitor_;
 
   AssociatedViews associated_views_;
 

@@ -27,12 +27,9 @@ const char kConnectFunction[] = "Connect";
 const char kDisconnectFunction[] = "Disconnect";
 const char kRequestScanFunction[] = "RequestScan";
 const char kGetServiceFunction[] = "GetService";
-const char kGetWifiServiceFunction[] = "GetWifiService";
-const char kGetVPNServiceFunction[] = "GetVPNService";
 const char kRemoveServiceFunction[] = "Remove";
 const char kEnableTechnologyFunction[] = "EnableTechnology";
 const char kDisableTechnologyFunction[] = "DisableTechnology";
-const char kAddIPConfigFunction[] = "AddIPConfig";
 const char kRemoveConfigFunction[] = "Remove";
 const char kGetEntryFunction[] = "GetEntry";
 const char kDeleteEntryFunction[] = "DeleteEntry";
@@ -41,7 +38,6 @@ const char kRequirePinFunction[] = "RequirePin";
 const char kEnterPinFunction[] = "EnterPin";
 const char kUnblockPinFunction[] = "UnblockPin";
 const char kChangePinFunction[] = "ChangePin";
-const char kProposeScanFunction[] = "ProposeScan";
 const char kRegisterFunction[] = "Register";
 const char kConfigureServiceFunction[] = "ConfigureService";
 const char kConfigureWifiServiceFunction[] = "ConfigureWifiService";
@@ -110,6 +106,7 @@ const char kWifiRoamThresholdProperty[] = "WiFi.RoamThreshold";
 const char kEapIdentityProperty[] = "EAP.Identity";
 const char kEapMethodProperty[] = "EAP.EAP";
 const char kEapPhase2AuthProperty[] = "EAP.InnerEAP";
+const char kEapTLSVersionMaxProperty[] = "EAP.TLSVersionMax";
 const char kEapAnonymousIdentityProperty[] = "EAP.AnonymousIdentity";
 const char kEapClientCertProperty[] = "EAP.ClientCert";
 const char kEapCertIdProperty[] = "EAP.CertID";
@@ -125,6 +122,7 @@ const char kEapUseProactiveKeyCachingProperty[] = "EAP.UseProactiveKeyCaching";
 const char kEapPinProperty[] = "EAP.PIN";
 const char kEapPasswordProperty[] = "EAP.Password";
 const char kEapKeyMgmtProperty[] = "EAP.KeyMgmt";
+const char kEapUseLoginPasswordProperty[] = "EAP.UseLoginPassword";
 
 // Flimflam Cellular Service property names.
 const char kTechnologyFamilyProperty[] = "Cellular.Family";
@@ -178,7 +176,10 @@ const char kForceWakeToScanTimerProperty[] = "ForceWakeToScanTimer";
 const char kInterfaceProperty[] = "Interface";
 const char kSelectedServiceProperty[] = "SelectedService";
 const char kIPConfigsProperty[] = "IPConfigs";
-const char kMACAddressRandomizationProperty[] = "MACAddressRandomization";
+const char kMACAddressRandomizationSupportedProperty[] =
+    "MACAddressRandomizationSupported";
+const char kMACAddressRandomizationEnabledProperty[] =
+    "MACAddressRandomizationEnabled";
 
 // Flimflam Cellular Device property names.
 const char kCarrierProperty[] = "Cellular.Carrier";
@@ -191,10 +192,12 @@ const char kImsiProperty[] = "Cellular.IMSI";
 const char kEsnProperty[] = "Cellular.ESN";
 const char kMdnProperty[] = "Cellular.MDN";
 const char kMinProperty[] = "Cellular.MIN";
-const char kModelIDProperty[] = "Cellular.ModelID";
+const char kModelIdProperty[] = "Cellular.ModelID";
+const char kEquipmentIdProperty[] = "Cellular.EquipmentID";
 const char kManufacturerProperty[] = "Cellular.Manufacturer";
 const char kFirmwareRevisionProperty[] = "Cellular.FirmwareRevision";
 const char kHardwareRevisionProperty[] = "Cellular.HardwareRevision";
+const char kDeviceIdProperty[] = "Cellular.DeviceID";
 const char kPRLVersionProperty[] = "Cellular.PRLVersion";
 const char kSelectedNetworkProperty[] = "Cellular.SelectedNetwork";
 const char kSupportNetworkScanProperty[] = "Cellular.SupportNetworkScan";
@@ -258,6 +261,7 @@ const char kPaymentPortalPostData[] = "postdata";
 const char kOperatorNameKey[] = "name";
 const char kOperatorCodeKey[] = "code";
 const char kOperatorCountryKey[] = "country";
+const char kOperatorUuidKey[] = "uuid";
 
 // Flimflam network technology options.
 const char kNetworkTechnology1Xrtt[] = "1xRTT";
@@ -303,10 +307,16 @@ const char kEapPhase2AuthTTLSCHAP[] = "auth=CHAP";
 const char kEapPhase2AuthTTLSGTC[] = "auth=GTC";
 const char kEapPhase2AuthTTLSEAPGTC[] = "autheap=GTC";
 
+// Flimflam EAP TLS versions.
+const char kEapTLSVersion1p0[] = "1.0";
+const char kEapTLSVersion1p1[] = "1.1";
+const char kEapTLSVersion1p2[] = "1.2";
+
 // Flimflam VPN provider types.
 const char kProviderL2tpIpsec[] = "l2tpipsec";
 const char kProviderOpenVpn[] = "openvpn";
 const char kProviderThirdPartyVpn[] = "thirdpartyvpn";
+const char kProviderArcVpn[] = "arcvpn";
 
 // Flimflam VPN service properties
 const char kVPNDomainProperty[] = "VPN.Domain";
@@ -381,6 +391,9 @@ const char kOpenVPNTLSAuthContentsProperty[] = "OpenVPN.TLSAuthContents";
 const char kOpenVPNTLSRemoteProperty[] = "OpenVPN.TLSRemote";
 const char kOpenVPNUserProperty[] = "OpenVPN.User";
 
+// Flimflam ARCVPN property names.
+const char kArcVpnTunnelChromeProperty[] = "ArcVpn.TunnelChrome";
+
 // FlimFlam PPPoE property names.
 const char kPPPoEUsernameProperty[] = "PPPoE.Username";
 const char kPPPoEPasswordProperty[] = "PPPoE.Password";
@@ -403,9 +416,16 @@ const char kGatewayProperty[] = "Gateway";
 const char kDomainNameProperty[] = "DomainName";
 const char kAcceptedHostnameProperty[] = "AcceptedHostname";
 const char kNameServersProperty[] = "NameServers";
+const char kSearchDomainsProperty[] = "SearchDomains";
 const char kDhcpv6AddressesProperty[] = "Dhcpv6Addresses";
 const char kDhcpv6DelegatedPrefixesProperty[] = "Dhcpv6DelegatedPrefixes";
 const char kLeaseDurationSecondsProperty[] = "LeaseDurationSeconds";
+const char kVendorEncapsulatedOptionsProperty[] = "VendorEncapsulatedOptions";
+const char kWebProxyAutoDiscoveryUrlProperty[] = "WebProxyAutoDiscoveryUrl";
+// DHCP Option for iSNS (RFC 4174)
+const char kiSNSOptionDataProperty[] = "iSNSOptionData";
+const char kIncludedRoutesProperty[] = "IncludedRoutes";
+const char kExcludedRoutesProperty[] = "ExcludedRoutes";
 
 // These constants are deprecated in favor of kDhcpv6DelegatedPrefixesProperty.
 // TODO(tjennison): Remove when shill no longer uses them b/26778228
@@ -507,8 +527,10 @@ const char kConfigureServiceForProfileFunction[] = "ConfigureServiceForProfile";
 const char kConnectToBestServicesFunction[] = "ConnectToBestServices";
 const char kCreateConnectivityReportFunction[] = "CreateConnectivityReport";
 const char kAddWakeOnPacketConnectionFunction[] = "AddWakeOnPacketConnection";
+const char kAddWakeOnPacketOfTypesFunction[] = "AddWakeOnPacketOfTypes";
 const char kRemoveWakeOnPacketConnectionFunction[] =
     "RemoveWakeOnPacketConnection";
+const char kRemoveWakeOnPacketOfTypesFunction[] = "RemoveWakeOnPacketOfTypes";
 const char kRemoveAllWakeOnPacketConnectionsFunction[] =
     "RemoveAllWakeOnPacketConnections";
 const char kGetLoadableProfileEntriesFunction[] = "GetLoadableProfileEntries";
@@ -552,13 +574,6 @@ const char kErrorEapAuthenticationFailed[] = "eap-authentication-failed";
 const char kErrorEapLocalTlsFailed[] = "eap-local-tls-failed";
 const char kErrorEapRemoteTlsFailed[] = "eap-remote-tls-failed";
 
-// IPConfig property names.
-const char kSearchDomainsProperty[] = "SearchDomains";
-const char kVendorEncapsulatedOptionsProperty[] = "VendorEncapsulatedOptions";
-const char kWebProxyAutoDiscoveryUrlProperty[] = "WebProxyAutoDiscoveryUrl";
-// DHCP Option for iSNS (RFC 4174)
-const char kiSNSOptionDataProperty[] = "iSNSOptionData";
-
 // Manager property names.
 const char kDefaultServiceProperty[] = "DefaultService";
 const char kDisableWiFiVHTProperty[] = "DisableWiFiVHT";
@@ -595,11 +610,13 @@ const char kManagedCredentialsProperty[] = "ManagedCredentials";
 const char kOpenVPNCaCertPemProperty[] = "OpenVPN.CACertPEM";
 const char kOpenVPNCertProperty[] = "OpenVPN.Cert";
 const char kOpenVPNExtraCertPemProperty[] = "OpenVPN.ExtraCertPEM";
+const char kOpenVPNExtraHostsProperty[] = "OpenVPN.ExtraHosts";
 const char kOpenVPNKeyProperty[] = "OpenVPN.Key";
 const char kOpenVPNPingProperty[] = "OpenVPN.Ping";
 const char kOpenVPNPingExitProperty[] = "OpenVPN.PingExit";
 const char kOpenVPNPingRestartProperty[] = "OpenVPN.PingRestart";
 const char kOpenVPNTLSAuthProperty[] = "OpenVPN.TLSAuth";
+const char kOpenVPNTLSVersionMinProperty[] = "OpenVPN.TLSVersionMin";
 const char kOpenVPNTokenProperty[] = "OpenVPN.Token";
 const char kOpenVPNVerbProperty[] = "OpenVPN.Verb";
 const char kOpenVPNVerifyHashProperty[] = "OpenVPN.VerifyHash";
@@ -675,6 +692,15 @@ const char kWakeOnWiFiFeaturesEnabledPacketDarkConnect[] =
     "packet_and_darkconnect";
 const char kWakeOnWiFiFeaturesEnabledNone[] = "none";
 const char kWakeOnWiFiFeaturesEnabledNotSupported[] = "not_supported";
+
+// Wake on WiFi Packet Type Constants.
+const char kWakeOnTCP[] = "TCP";
+const char kWakeOnUDP[] = "UDP";
+const char kWakeOnIDP[] = "IDP";
+const char kWakeOnIPIP[] = "IPIP";
+const char kWakeOnIGMP[] = "IGMP";
+const char kWakeOnICMP[] = "ICMP";
+const char kWakeOnIP[] = "IP";
 
 // Cellular service carriers.
 const char kCarrierGenericUMTS[] = "Generic UMTS";

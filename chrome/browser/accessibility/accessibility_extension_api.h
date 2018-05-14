@@ -11,7 +11,7 @@
 #include "base/memory/singleton.h"
 #include "base/values.h"
 #include "extensions/browser/extension_function.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 
 // API function that enables or disables web content accessibility support.
 class AccessibilityPrivateSetNativeAccessibilityEnabledFunction
@@ -30,6 +30,15 @@ class AccessibilityPrivateSetFocusRingFunction
   ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("accessibilityPrivate.setFocusRing",
                              ACCESSIBILITY_PRIVATE_SETFOCUSRING)
+};
+
+// API function that sets the location of the accessibility highlights.
+class AccessibilityPrivateSetHighlightsFunction
+    : public UIThreadExtensionFunction {
+  ~AccessibilityPrivateSetHighlightsFunction() override {}
+  ResponseAction Run() override;
+  DECLARE_EXTENSION_FUNCTION("accessibilityPrivate.setHighlights",
+                             ACCESSIBILITY_PRIVATE_SETHIGHLIGHTS)
 };
 
 // API function that sets keyboard capture mode.
@@ -58,6 +67,26 @@ class AccessibilityPrivateSetSwitchAccessKeysFunction
   ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("accessibilityPrivate.setSwitchAccessKeys",
                              ACCESSIBILITY_PRIVATE_SETSWITCHACCESSKEYS)
+};
+
+// API function that sets native ChromeVox ARC support.
+class AccessibilityPrivateSetNativeChromeVoxArcSupportForCurrentAppFunction
+    : public UIThreadExtensionFunction {
+  ~AccessibilityPrivateSetNativeChromeVoxArcSupportForCurrentAppFunction()
+      override {}
+  ResponseAction Run() override;
+  DECLARE_EXTENSION_FUNCTION(
+      "accessibilityPrivate.setNativeChromeVoxArcSupportForCurrentApp",
+      ACCESSIBILITY_PRIVATE_SETNATIVECHROMEVOXARCSUPPORTFORCURRENTAPP)
+};
+
+// API function that injects key events.
+class AccessibilityPrivateSendSyntheticKeyEventFunction
+    : public UIThreadExtensionFunction {
+  ~AccessibilityPrivateSendSyntheticKeyEventFunction() override {}
+  ResponseAction Run() override;
+  DECLARE_EXTENSION_FUNCTION("accessibilityPrivate.sendSyntheticKeyEvent",
+                             ACCESSIBILITY_PRIVATE_SENDSYNTHETICKEYEVENT)
 };
 #endif  // defined (OS_CHROMEOS)
 

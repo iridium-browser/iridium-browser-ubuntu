@@ -4,7 +4,8 @@
 
 #include "core/inspector/InspectorDOMSnapshotAgent.h"
 
-#include "core/InputTypeNames.h"
+#include "bindings/core/v8/ScriptEventListener.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "core/css/CSSComputedStyleDeclaration.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/AttributeCollection.h"
@@ -15,16 +16,20 @@
 #include "core/dom/Node.h"
 #include "core/dom/PseudoElement.h"
 #include "core/dom/QualifiedName.h"
+#include "core/dom/ShadowRoot.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLFrameOwnerElement.h"
-#include "core/html/HTMLInputElement.h"
+#include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLLinkElement.h"
-#include "core/html/HTMLOptionElement.h"
 #include "core/html/HTMLTemplateElement.h"
-#include "core/html/HTMLTextAreaElement.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html/forms/HTMLOptionElement.h"
+#include "core/html/forms/HTMLTextAreaElement.h"
+#include "core/input_type_names.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectedFrames.h"
 #include "core/inspector/InspectorDOMAgent.h"
+#include "core/inspector/InspectorDOMDebuggerAgent.h"
 #include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutText.h"
 #include "core/layout/line/InlineTextBox.h"
@@ -70,12 +75,11 @@ struct InspectorDOMSnapshotAgent::VectorStringHashTraits
   }
 
   static void ConstructDeletedValue(Vector<String>& vec, bool) {
-    vec.clear();
-    vec.push_back(String(WTF::kHashTableDeletedValue));
+    new (NotNull, &vec) Vector<String>(WTF::kHashTableDeletedValue);
   }
 
   static bool IsDeletedValue(const Vector<String>& vec) {
-    return !vec.IsEmpty() && vec[0].IsHashTableDeletedValue();
+    return vec.IsHashTableDeletedValue();
   }
 
   static bool IsEmptyValue(const Vector<String>& vec) { return vec.IsEmpty(); }
@@ -86,13 +90,16 @@ struct InspectorDOMSnapshotAgent::VectorStringHashTraits
 };
 
 InspectorDOMSnapshotAgent::InspectorDOMSnapshotAgent(
-    InspectedFrames* inspected_frames)
-    : inspected_frames_(inspected_frames) {}
+    InspectedFrames* inspected_frames,
+    InspectorDOMDebuggerAgent* dom_debugger_agent)
+    : inspected_frames_(inspected_frames),
+      dom_debugger_agent_(dom_debugger_agent) {}
 
-InspectorDOMSnapshotAgent::~InspectorDOMSnapshotAgent() {}
+InspectorDOMSnapshotAgent::~InspectorDOMSnapshotAgent() = default;
 
 Response InspectorDOMSnapshotAgent::getSnapshot(
     std::unique_ptr<protocol::Array<String>> style_whitelist,
+    protocol::Maybe<bool> get_dom_listeners,
     std::unique_ptr<protocol::Array<protocol::DOMSnapshot::DOMNode>>* dom_nodes,
     std::unique_ptr<protocol::Array<protocol::DOMSnapshot::LayoutTreeNode>>*
         layout_tree_nodes,
@@ -110,8 +117,8 @@ Response InspectorDOMSnapshotAgent::getSnapshot(
       protocol::Array<protocol::DOMSnapshot::LayoutTreeNode>::create();
   computed_styles_ =
       protocol::Array<protocol::DOMSnapshot::ComputedStyle>::create();
-  computed_styles_map_ = WTF::MakeUnique<ComputedStylesMap>();
-  css_property_whitelist_ = WTF::MakeUnique<CSSPropertyWhitelist>();
+  computed_styles_map_ = std::make_unique<ComputedStylesMap>();
+  css_property_whitelist_ = std::make_unique<CSSPropertyWhitelist>();
 
   // Look up the CSSPropertyIDs for each entry in |style_whitelist|.
   for (size_t i = 0; i < style_whitelist->length(); i++) {
@@ -123,7 +130,7 @@ Response InspectorDOMSnapshotAgent::getSnapshot(
   }
 
   // Actual traversal.
-  VisitNode(document);
+  VisitNode(document, get_dom_listeners.fromMaybe(false));
 
   // Extract results from state and reset.
   *dom_nodes = std::move(dom_nodes_);
@@ -134,7 +141,8 @@ Response InspectorDOMSnapshotAgent::getSnapshot(
   return Response::OK();
 }
 
-int InspectorDOMSnapshotAgent::VisitNode(Node* node) {
+int InspectorDOMSnapshotAgent::VisitNode(Node* node,
+                                         bool include_event_listeners) {
   if (node->IsDocumentNode()) {
     // Update layout tree before traversal of document so that we inspect a
     // current and consistent state of all trees.
@@ -147,6 +155,7 @@ int InspectorDOMSnapshotAgent::VisitNode(Node* node) {
     case Node::kAttributeNode:
     case Node::kCommentNode:
     case Node::kCdataSectionNode:
+    case Node::kDocumentFragmentNode:
       node_value = node->nodeValue();
       break;
     default:
@@ -173,6 +182,24 @@ int InspectorDOMSnapshotAgent::VisitNode(Node* node) {
   if (node->WillRespondToMouseClickEvents())
     value->setIsClickable(true);
 
+  if (include_event_listeners && node->GetDocument().GetFrame()) {
+    ScriptState* script_state =
+        ToScriptStateForMainWorld(node->GetDocument().GetFrame());
+    if (script_state->ContextIsValid()) {
+      ScriptState::Scope scope(script_state);
+      v8::Local<v8::Context> context = script_state->GetContext();
+      V8EventListenerInfoList event_information;
+      InspectorDOMDebuggerAgent::CollectEventListeners(
+          script_state->GetIsolate(), node, v8::Local<v8::Value>(), node, true,
+          &event_information);
+      if (!event_information.IsEmpty()) {
+        value->setEventListeners(
+            dom_debugger_agent_->BuildObjectsForEventListeners(
+                event_information, context, v8_inspector::StringView()));
+      }
+    }
+  }
+
   if (node->IsElementNode()) {
     Element* element = ToElement(node);
     value->setAttributes(BuildArrayForElementAttributes(element));
@@ -187,7 +214,7 @@ int InspectorDOMSnapshotAgent::VisitNode(Node* node) {
         value->setFrameId(IdentifiersFactory::FrameId(frame));
       }
       if (Document* doc = frame_owner->contentDocument()) {
-        value->setContentDocumentIndex(VisitNode(doc));
+        value->setContentDocumentIndex(VisitNode(doc, include_event_listeners));
       }
     }
 
@@ -197,39 +224,33 @@ int InspectorDOMSnapshotAgent::VisitNode(Node* node) {
         value->setFrameId(IdentifiersFactory::FrameId(frame));
     }
 
-    if (isHTMLLinkElement(*element)) {
-      const HTMLLinkElement& link_element = toHTMLLinkElement(*element);
-      if (link_element.IsImport() && link_element.import() &&
-          InspectorDOMAgent::InnerParentNode(link_element.import()) ==
+    if (auto* link_element = ToHTMLLinkElementOrNull(*element)) {
+      if (link_element->IsImport() && link_element->import() &&
+          InspectorDOMAgent::InnerParentNode(link_element->import()) ==
               link_element) {
-        value->setImportedDocumentIndex(VisitNode(link_element.import()));
+        value->setImportedDocumentIndex(
+            VisitNode(link_element->import(), include_event_listeners));
       }
     }
 
-    if (isHTMLTemplateElement(*element)) {
+    if (auto* template_element = ToHTMLTemplateElementOrNull(*element)) {
       value->setTemplateContentIndex(
-          VisitNode(toHTMLTemplateElement(*element).content()));
+          VisitNode(template_element->content(), include_event_listeners));
     }
 
-    if (isHTMLTextAreaElement(*element)) {
-      const HTMLTextAreaElement& text_area_element =
-          toHTMLTextAreaElement(*element);
-      value->setTextValue(text_area_element.value());
-    }
+    if (auto* textarea_element = ToHTMLTextAreaElementOrNull(*element))
+      value->setTextValue(textarea_element->value());
 
-    if (isHTMLInputElement(*element)) {
-      const HTMLInputElement& input_element = toHTMLInputElement(*element);
-      value->setInputValue(input_element.value());
-      if ((input_element.type() == InputTypeNames::radio) ||
-          (input_element.type() == InputTypeNames::checkbox)) {
-        value->setInputChecked(input_element.checked());
+    if (auto* input_element = ToHTMLInputElementOrNull(*element)) {
+      value->setInputValue(input_element->value());
+      if ((input_element->type() == InputTypeNames::radio) ||
+          (input_element->type() == InputTypeNames::checkbox)) {
+        value->setInputChecked(input_element->checked());
       }
     }
 
-    if (isHTMLOptionElement(*element)) {
-      const HTMLOptionElement& option_element = toHTMLOptionElement(*element);
-      value->setOptionSelected(option_element.Selected());
-    }
+    if (auto* option_element = ToHTMLOptionElementOrNull(*element))
+      value->setOptionSelected(option_element->Selected());
 
     if (element->GetPseudoId()) {
       protocol::DOM::PseudoType pseudo_type;
@@ -238,28 +259,42 @@ int InspectorDOMSnapshotAgent::VisitNode(Node* node) {
         value->setPseudoType(pseudo_type);
       }
     } else {
-      value->setPseudoElementIndexes(VisitPseudoElements(element));
+      value->setPseudoElementIndexes(
+          VisitPseudoElements(element, include_event_listeners));
     }
+
+    HTMLImageElement* image_element = ToHTMLImageElementOrNull(node);
+    if (image_element)
+      value->setCurrentSourceURL(image_element->currentSrc());
   } else if (node->IsDocumentNode()) {
     Document* document = ToDocument(node);
     value->setDocumentURL(InspectorDOMAgent::DocumentURLString(document));
     value->setBaseURL(InspectorDOMAgent::DocumentBaseURLString(document));
     if (document->ContentLanguage())
       value->setContentLanguage(document->ContentLanguage().Utf8().data());
+    if (document->EncodingName())
+      value->setDocumentEncoding(document->EncodingName().Utf8().data());
+    value->setFrameId(IdentifiersFactory::FrameId(document->GetFrame()));
   } else if (node->IsDocumentTypeNode()) {
     DocumentType* doc_type = ToDocumentType(node);
     value->setPublicId(doc_type->publicId());
     value->setSystemId(doc_type->systemId());
+  } else if (node->IsInShadowTree()) {
+    value->setShadowRootType(
+        InspectorDOMAgent::GetShadowRootType(node->ContainingShadowRoot()));
   }
 
-  if (node->IsContainerNode())
-    value->setChildNodeIndexes(VisitContainerChildren(node));
-
+  if (node->IsContainerNode()) {
+    value->setChildNodeIndexes(
+        VisitContainerChildren(node, include_event_listeners));
+  }
   return index;
 }
 
 std::unique_ptr<protocol::Array<int>>
-InspectorDOMSnapshotAgent::VisitContainerChildren(Node* container) {
+InspectorDOMSnapshotAgent::VisitContainerChildren(
+    Node* container,
+    bool include_event_listeners) {
   auto children = protocol::Array<int>::create();
 
   if (!FlatTreeTraversal::HasChildren(*container))
@@ -267,7 +302,7 @@ InspectorDOMSnapshotAgent::VisitContainerChildren(Node* container) {
 
   Node* child = FlatTreeTraversal::FirstChild(*container);
   while (child) {
-    children->addItem(VisitNode(child));
+    children->addItem(VisitNode(child, include_event_listeners));
     child = FlatTreeTraversal::NextSibling(*child);
   }
 
@@ -275,7 +310,8 @@ InspectorDOMSnapshotAgent::VisitContainerChildren(Node* container) {
 }
 
 std::unique_ptr<protocol::Array<int>>
-InspectorDOMSnapshotAgent::VisitPseudoElements(Element* parent) {
+InspectorDOMSnapshotAgent::VisitPseudoElements(Element* parent,
+                                               bool include_event_listeners) {
   if (!parent->GetPseudoElement(kPseudoIdBefore) &&
       !parent->GetPseudoElement(kPseudoIdAfter)) {
     return nullptr;
@@ -284,12 +320,12 @@ InspectorDOMSnapshotAgent::VisitPseudoElements(Element* parent) {
   auto pseudo_elements = protocol::Array<int>::create();
 
   if (parent->GetPseudoElement(kPseudoIdBefore)) {
-    pseudo_elements->addItem(
-        VisitNode(parent->GetPseudoElement(kPseudoIdBefore)));
+    pseudo_elements->addItem(VisitNode(
+        parent->GetPseudoElement(kPseudoIdBefore), include_event_listeners));
   }
   if (parent->GetPseudoElement(kPseudoIdAfter)) {
-    pseudo_elements->addItem(
-        VisitNode(parent->GetPseudoElement(kPseudoIdAfter)));
+    pseudo_elements->addItem(VisitNode(parent->GetPseudoElement(kPseudoIdAfter),
+                                       include_event_listeners));
   }
 
   return pseudo_elements;
@@ -316,14 +352,11 @@ int InspectorDOMSnapshotAgent::VisitLayoutTreeNode(Node* node, int node_index) {
   if (!layout_object)
     return -1;
 
-  auto layout_tree_node =
-      protocol::DOMSnapshot::LayoutTreeNode::create()
-          .setDomNodeIndex(node_index)
-          .setBoundingBox(BuildRectForFloatRect(
-              node->IsElementNode()
-                  ? FloatRect(ToElement(node)->BoundsInViewport())
-                  : layout_object->AbsoluteBoundingBoxRect()))
-          .build();
+  auto layout_tree_node = protocol::DOMSnapshot::LayoutTreeNode::create()
+                              .setDomNodeIndex(node_index)
+                              .setBoundingBox(BuildRectForFloatRect(
+                                  layout_object->AbsoluteBoundingBoxRect()))
+                              .build();
 
   int style_index = GetStyleIndexForNode(node);
   if (style_index != -1)
@@ -333,9 +366,9 @@ int InspectorDOMSnapshotAgent::VisitLayoutTreeNode(Node* node, int node_index) {
     LayoutText* layout_text = ToLayoutText(layout_object);
     layout_tree_node->setLayoutText(layout_text->GetText());
     if (layout_text->HasTextBoxes()) {
-      std::unique_ptr<protocol::Array<protocol::CSS::InlineTextBox>>
+      std::unique_ptr<protocol::Array<protocol::DOMSnapshot::InlineTextBox>>
           inline_text_nodes =
-              protocol::Array<protocol::CSS::InlineTextBox>::create();
+              protocol::Array<protocol::DOMSnapshot::InlineTextBox>::create();
       for (const InlineTextBox* text_box = layout_text->FirstTextBox();
            text_box; text_box = text_box->NextTextBox()) {
         FloatRect local_coords_text_box_rect(text_box->FrameRect());
@@ -343,7 +376,7 @@ int InspectorDOMSnapshotAgent::VisitLayoutTreeNode(Node* node, int node_index) {
             layout_object->LocalToAbsoluteQuad(local_coords_text_box_rect)
                 .BoundingBox();
         inline_text_nodes->addItem(
-            protocol::CSS::InlineTextBox::create()
+            protocol::DOMSnapshot::InlineTextBox::create()
                 .setStartCharacterIndex(text_box->Start())
                 .setNumCharacters(text_box->Len())
                 .setBoundingBox(
@@ -401,8 +434,9 @@ int InspectorDOMSnapshotAgent::GetStyleIndexForNode(Node* node) {
   return index;
 }
 
-DEFINE_TRACE(InspectorDOMSnapshotAgent) {
+void InspectorDOMSnapshotAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(inspected_frames_);
+  visitor->Trace(dom_debugger_agent_);
   InspectorBaseAgent::Trace(visitor);
 }
 

@@ -7,15 +7,17 @@
 
 #include <stdint.h>
 #include <string>
+#include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/numerics/checked_math.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_latency.h"
 #include "media/base/audio_point.h"
 #include "media/base/channel_layout.h"
-#include "media/base/media_export.h"
+#include "media/base/media_shmem_export.h"
 
 namespace media {
 
@@ -32,17 +34,24 @@ namespace media {
 #define PARAMETERS_ALIGNMENT 16
 static_assert(AudioBus::kChannelAlignment == PARAMETERS_ALIGNMENT,
               "Audio buffer parameters struct alignment not same as AudioBus");
-struct MEDIA_EXPORT ALIGNAS(PARAMETERS_ALIGNMENT) AudioInputBufferParameters {
+// ****WARNING****: Do not change the field types or ordering of these fields
+// without checking that alignment is correct. The structs may be concurrently
+// accessed by both 32bit and 64bit process in shmem. http://crbug.com/781095.
+struct MEDIA_SHMEM_EXPORT ALIGNAS(PARAMETERS_ALIGNMENT)
+    AudioInputBufferParameters {
   double volume;
+  int64_t capture_time;  // base::TimeTicks in microseconds.
   uint32_t size;
-  uint32_t hardware_delay_bytes;
   uint32_t id;
   bool key_pressed;
 };
-struct MEDIA_EXPORT ALIGNAS(PARAMETERS_ALIGNMENT) AudioOutputBufferParameters {
+struct MEDIA_SHMEM_EXPORT ALIGNAS(PARAMETERS_ALIGNMENT)
+    AudioOutputBufferParameters {
+  int64_t delay;            // base::TimeDelta in microseconds.
+  int64_t delay_timestamp;  // base::TimeTicks in microseconds.
   uint32_t frames_skipped;
-  int64_t delay;
-  int64_t delay_timestamp;
+  uint32_t bitstream_data_size;
+  uint32_t bitstream_frames;
 };
 #undef PARAMETERS_ALIGNMENT
 #if defined(OS_WIN)
@@ -58,16 +67,44 @@ static_assert(sizeof(AudioOutputBufferParameters) %
                   0,
               "AudioOutputBufferParameters not aligned");
 
-struct MEDIA_EXPORT AudioInputBuffer {
+struct MEDIA_SHMEM_EXPORT AudioInputBuffer {
   AudioInputBufferParameters params;
   int8_t audio[1];
 };
-struct MEDIA_EXPORT AudioOutputBuffer {
+struct MEDIA_SHMEM_EXPORT AudioOutputBuffer {
   AudioOutputBufferParameters params;
   int8_t audio[1];
 };
 
-class MEDIA_EXPORT AudioParameters {
+// These convenience function safely computes the size required for
+// |shared_memory_count| AudioInputBuffers, with enough memory for AudioBus
+// data, using |paremeters| (or alternatively |channels| and |frames|). The
+// functions not returning a CheckedNumeric will CHECK on overflow.
+MEDIA_SHMEM_EXPORT base::CheckedNumeric<uint32_t>
+ComputeAudioInputBufferSizeChecked(const AudioParameters& parameters,
+                                   uint32_t audio_bus_count);
+
+MEDIA_SHMEM_EXPORT uint32_t
+ComputeAudioInputBufferSize(const AudioParameters& parameters,
+                            uint32_t audio_bus_count);
+
+MEDIA_SHMEM_EXPORT uint32_t
+ComputeAudioInputBufferSize(int channels, int frames, uint32_t audio_bus_count);
+
+// These convenience functions safely computes the size required for an
+// AudioOutputBuffer with enough memory for AudioBus data using |parameters| (or
+// alternatively |channels| and |frames|). The functions not returning a
+// CheckedNumeric will CHECK on overflow.
+MEDIA_SHMEM_EXPORT base::CheckedNumeric<uint32_t>
+ComputeAudioOutputBufferSizeChecked(const AudioParameters& parameters);
+
+MEDIA_SHMEM_EXPORT uint32_t
+ComputeAudioOutputBufferSize(const AudioParameters& parameters);
+
+MEDIA_SHMEM_EXPORT uint32_t ComputeAudioOutputBufferSize(int channels,
+                                                         int frames);
+
+class MEDIA_SHMEM_EXPORT AudioParameters {
  public:
   // TODO(miu): Rename this enum to something that correctly reflects its
   // semantics, such as "TransportScheme."
@@ -87,6 +124,12 @@ class MEDIA_EXPORT AudioParameters {
     kAudioCDSampleRate = 44100,
   };
 
+  enum {
+    // The maxmium number of PCM frames can be decoded out of a compressed
+    // audio frame, e.g. MP3, AAC, AC-3.
+    kMaxFramesPerCompressedAudioBuffer = 4096,
+  };
+
   // Bitmasks to determine whether certain platform (typically hardware) audio
   // effects should be enabled.
   enum PlatformEffectsMask {
@@ -95,6 +138,11 @@ class MEDIA_EXPORT AudioParameters {
     DUCKING = 0x2,  // Enables ducking if the OS supports it.
     KEYBOARD_MIC = 0x4,
     HOTWORD = 0x8,
+    NOISE_SUPPRESSION = 0x10,
+    AUTOMATIC_GAIN_CONTROL = 0x20,
+    EXPERIMENTAL_ECHO_CANCELLER = 0x40,  // Indicates an echo canceller is
+                                         // available that should only
+                                         // experimentally be enabled.
   };
 
   AudioParameters();

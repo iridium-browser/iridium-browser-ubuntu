@@ -56,20 +56,21 @@ static const int kMaxBookmarks = 5;
 // We need this to be a macro, as the histogram macros cache their pointers
 // after the first call, so when we change the uma name we check fail if we're
 // just a method.
-#define RECORD_UMA_FOR_IMPORTANT_REASON(uma_name, uma_count_name,    \
-                                        reason_bitfield)             \
-  do {                                                               \
-    int count = 0;                                                   \
-    int32_t bitfield = (reason_bitfield);                            \
-    for (int i = 0; i < ImportantReason::REASON_BOUNDARY; i++) {     \
-      if ((bitfield >> i) & 1) {                                     \
-        count++;                                                     \
-        UMA_HISTOGRAM_ENUMERATION((uma_name), i,                     \
-                                  ImportantReason::REASON_BOUNDARY); \
-      }                                                              \
-    }                                                                \
-    UMA_HISTOGRAM_ENUMERATION((uma_count_name), count,               \
-                              ImportantReason::REASON_BOUNDARY);     \
+#define RECORD_UMA_FOR_IMPORTANT_REASON(uma_name, uma_count_name,              \
+                                        reason_bitfield)                       \
+  do {                                                                         \
+    int count = 0;                                                             \
+    int32_t bitfield = (reason_bitfield);                                      \
+    for (int i = 0; i < ImportantReason::REASON_BOUNDARY; i++) {               \
+      if ((bitfield >> i) & 1) {                                               \
+        count++;                                                               \
+        UMA_HISTOGRAM_ENUMERATION((uma_name), static_cast<ImportantReason>(i), \
+                                  ImportantReason::REASON_BOUNDARY);           \
+      }                                                                        \
+    }                                                                          \
+    UMA_HISTOGRAM_EXACT_LINEAR(                                                \
+        (uma_count_name), count,                                               \
+        static_cast<int>(ImportantReason::REASON_BOUNDARY));                   \
   } while (0)
 
 // Do not change the values here, as they are used for UMA histograms and
@@ -223,28 +224,39 @@ base::hash_set<std::string> GetBlacklistedImportantDomains(Profile* profile) {
   return ignoring_domains;
 }
 
-void PopulateInfoMapWithSiteEngagement(
+// Inserts origins with some engagement measure into the map, including a site
+// engagement cutoff and recent launches from home screen.
+void PopulateInfoMapWithEngagement(
     Profile* profile,
     blink::mojom::EngagementLevel minimum_engagement,
     std::map<GURL, double>* engagement_map,
     std::map<std::string, ImportantDomainInfo>* output) {
   SiteEngagementService* service = SiteEngagementService::Get(profile);
-  *engagement_map = service->GetScoreMap();
+  std::vector<mojom::SiteEngagementDetails> engagement_details =
+      service->GetAllDetails();
+  std::set<GURL> content_origins;
+
   // We can have multiple origins for a single domain, so we record the one
   // with the highest engagement score.
-  for (const auto& url_engagement_pair : *engagement_map) {
-    if (!service->IsEngagementAtLeast(url_engagement_pair.first,
-                                      minimum_engagement)) {
-      continue;
+  for (const auto& detail : engagement_details) {
+    if (detail.installed_bonus > 0) {
+      // This origin was recently launched from the home screen.
+      MaybePopulateImportantInfoForReason(detail.origin, &content_origins,
+                                          ImportantReason::HOME_SCREEN, output);
     }
+
+    (*engagement_map)[detail.origin] = detail.total_score;
+
+    if (!service->IsEngagementAtLeast(detail.origin, minimum_engagement))
+      continue;
+
     std::string registerable_domain =
-        ImportantSitesUtil::GetRegisterableDomainOrIP(
-            url_engagement_pair.first);
+        ImportantSitesUtil::GetRegisterableDomainOrIP(detail.origin);
     ImportantDomainInfo& info = (*output)[registerable_domain];
-    if (url_engagement_pair.second > info.engagement_score) {
+    if (detail.total_score > info.engagement_score) {
       info.registerable_domain = registerable_domain;
-      info.engagement_score = url_engagement_pair.second;
-      info.example_origin = url_engagement_pair.first;
+      info.engagement_score = detail.total_score;
+      info.example_origin = detail.origin;
       info.reason_bitfield |= 1 << ImportantReason::ENGAGEMENT;
     }
   }
@@ -319,26 +331,6 @@ void PopulateInfoMapWithBookmarks(
   }
 }
 
-void PopulateInfoMapWithHomeScreen(
-    Profile* profile,
-    std::map<std::string, ImportantDomainInfo>* output) {
-  ContentSettingsForOneType content_settings_list;
-  HostContentSettingsMapFactory::GetForProfile(profile)->GetSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_APP_BANNER, content_settings::ResourceIdentifier(),
-      &content_settings_list);
-  // Extract a set of urls, using the primary pattern. We don't handle
-  // wildcard patterns.
-  std::set<GURL> content_origins;
-  base::Time now = base::Time::Now();
-  for (const ContentSettingPatternSource& site : content_settings_list) {
-    GURL origin(site.primary_pattern.ToString());
-    if (!AppBannerSettingsHelper::WasLaunchedRecently(profile, origin, now))
-      continue;
-    MaybePopulateImportantInfoForReason(origin, &content_origins,
-                                        ImportantReason::HOME_SCREEN, output);
-  }
-}
-
 }  // namespace
 
 std::string ImportantSitesUtil::GetRegisterableDomainOrIP(const GURL& url) {
@@ -373,9 +365,8 @@ ImportantSitesUtil::GetImportantRegisterableDomains(Profile* profile,
   std::map<std::string, ImportantDomainInfo> important_info;
   std::map<GURL, double> engagement_map;
 
-  PopulateInfoMapWithSiteEngagement(
-      profile, blink::mojom::EngagementLevel::MEDIUM, &engagement_map,
-      &important_info);
+  PopulateInfoMapWithEngagement(profile, blink::mojom::EngagementLevel::MEDIUM,
+                                &engagement_map, &important_info);
 
   PopulateInfoMapWithContentTypeAllowed(
       profile, CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
@@ -386,8 +377,6 @@ ImportantSitesUtil::GetImportantRegisterableDomains(Profile* profile,
       &important_info);
 
   PopulateInfoMapWithBookmarks(profile, engagement_map, &important_info);
-
-  PopulateInfoMapWithHomeScreen(profile, &important_info);
 
   base::hash_set<std::string> blacklisted_domains =
       GetBlacklistedImportantDomains(profile);
@@ -446,7 +435,7 @@ void ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
               nullptr));
 
       if (!dict)
-        dict = base::MakeUnique<base::DictionaryValue>();
+        dict = std::make_unique<base::DictionaryValue>();
 
       RecordIgnore(dict.get());
 

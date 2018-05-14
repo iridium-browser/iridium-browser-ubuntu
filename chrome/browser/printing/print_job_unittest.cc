@@ -17,17 +17,11 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/test/test_browser_thread_bundle.h"
-#include "printing/printed_pages_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace printing {
 
 namespace {
-
-class TestSource : public PrintedPagesSource {
- public:
-  base::string16 RenderSourceName() override { return base::string16(); }
-};
 
 class TestPrintJobWorker : public PrintJobWorker {
  public:
@@ -51,7 +45,7 @@ class TestOwner : public PrintJobWorkerOwner {
       PrintJobWorkerOwner* new_owner) override {
     // We're screwing up here since we're calling worker from the main thread.
     // That's fine for testing. It is actually simulating PrinterQuery behavior.
-    auto worker = base::MakeUnique<TestPrintJobWorker>(new_owner);
+    auto worker = std::make_unique<TestPrintJobWorker>(new_owner);
     EXPECT_TRUE(worker->Start());
     worker->printing_context()->UseDefaultSettings();
     settings_ = worker->printing_context()->settings();
@@ -105,8 +99,7 @@ TEST(PrintJobTest, SimplePrint) {
   scoped_refptr<PrintJob> job(new TestPrintJob(&check));
   EXPECT_TRUE(job->RunsTasksInCurrentSequence());
   scoped_refptr<TestOwner> owner(new TestOwner);
-  TestSource source;
-  job->Initialize(owner.get(), &source, 1);
+  job->Initialize(owner.get(), base::string16(), 1);
   job->Stop();
   while (job->document()) {
     base::RunLoop().RunUntilIdle();
@@ -139,7 +132,6 @@ TEST(PrintJobTest, SimplePrintLateInit) {
   job->Cancel();
   job->RequestMissingPages();
   job->FlushJob(timeout);
-  job->DisconnectSource();
   job->is_job_pending();
   job->document();
   // Private

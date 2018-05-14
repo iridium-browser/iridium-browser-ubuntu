@@ -4,12 +4,17 @@
 
 #include "ash/wm/window_state.h"
 
+#include <memory>
 #include <utility>
 
 #include "ash/public/cpp/window_properties.h"
+#include "ash/public/cpp/window_state_type.h"
 #include "ash/public/interfaces/window_pin_type.mojom.h"
+#include "ash/public/interfaces/window_state_type.mojom.h"
 #include "ash/screen_util.h"
+#include "ash/shell.h"
 #include "ash/wm/default_state.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_properties.h"
@@ -18,7 +23,6 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "base/auto_reset.h"
-#include "base/memory/ptr_util.h"
 #include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/layout_manager.h"
@@ -36,13 +40,19 @@ namespace ash {
 namespace wm {
 namespace {
 
+bool IsTabletModeEnabled() {
+  return Shell::Get()
+      ->tablet_mode_controller()
+      ->IsTabletModeWindowManagerEnabled();
+}
+
 // A tentative class to set the bounds on the window.
 // TODO(oshima): Once all logic is cleaned up, move this to the real layout
 // manager with proper friendship.
 class BoundsSetter : public aura::LayoutManager {
  public:
-  BoundsSetter() {}
-  ~BoundsSetter() override {}
+  BoundsSetter() = default;
+  ~BoundsSetter() override = default;
 
   // aura::LayoutManager overrides:
   void OnWindowResized() override {}
@@ -96,6 +106,40 @@ WMEventType WMEventTypeFromWindowPinType(ash::mojom::WindowPinType type) {
   return WM_EVENT_NORMAL;
 }
 
+float GetCurrentSnappedWidthRatio(aura::Window* window) {
+  gfx::Rect maximized_bounds =
+      screen_util::GetMaximizedWindowBoundsInParent(window);
+  return static_cast<float>(window->bounds().width()) /
+         static_cast<float>(maximized_bounds.width());
+}
+
+// Move all transient children to |dst_root|, including the ones in the child
+// windows and transient children of the transient children.
+void MoveAllTransientChildrenToNewRoot(aura::Window* window) {
+  aura::Window* dst_root = window->GetRootWindow();
+  for (aura::Window* transient_child : ::wm::GetTransientChildren(window)) {
+    if (!transient_child->parent())
+      continue;
+    const int container_id = transient_child->parent()->id();
+    DCHECK_GE(container_id, 0);
+    aura::Window* container = dst_root->GetChildById(container_id);
+    if (container->Contains(transient_child))
+      continue;
+    gfx::Rect child_bounds = transient_child->bounds();
+    ::wm::ConvertRectToScreen(dst_root, &child_bounds);
+    container->AddChild(transient_child);
+    transient_child->SetBoundsInScreen(
+        child_bounds,
+        display::Screen::GetScreen()->GetDisplayNearestWindow(window));
+
+    // Transient children may have transient children.
+    MoveAllTransientChildrenToNewRoot(transient_child);
+  }
+  // Move transient children of the child windows if any.
+  for (aura::Window* child : window->children())
+    MoveAllTransientChildrenToNewRoot(child);
+}
+
 }  // namespace
 
 WindowState::~WindowState() {
@@ -114,44 +158,44 @@ void WindowState::SetDelegate(std::unique_ptr<WindowStateDelegate> delegate) {
   delegate_ = std::move(delegate);
 }
 
-WindowStateType WindowState::GetStateType() const {
+mojom::WindowStateType WindowState::GetStateType() const {
   return current_state_->GetType();
 }
 
 bool WindowState::IsMinimized() const {
-  return GetStateType() == WINDOW_STATE_TYPE_MINIMIZED;
+  return GetStateType() == mojom::WindowStateType::MINIMIZED;
 }
 
 bool WindowState::IsMaximized() const {
-  return GetStateType() == WINDOW_STATE_TYPE_MAXIMIZED;
+  return GetStateType() == mojom::WindowStateType::MAXIMIZED;
 }
 
 bool WindowState::IsFullscreen() const {
-  return GetStateType() == WINDOW_STATE_TYPE_FULLSCREEN;
+  return GetStateType() == mojom::WindowStateType::FULLSCREEN;
 }
 
 bool WindowState::IsMaximizedOrFullscreenOrPinned() const {
-  return GetStateType() == WINDOW_STATE_TYPE_MAXIMIZED ||
-         GetStateType() == WINDOW_STATE_TYPE_FULLSCREEN || IsPinned();
+  return GetStateType() == mojom::WindowStateType::MAXIMIZED ||
+         GetStateType() == mojom::WindowStateType::FULLSCREEN || IsPinned();
 }
 
 bool WindowState::IsSnapped() const {
-  return GetStateType() == WINDOW_STATE_TYPE_LEFT_SNAPPED ||
-         GetStateType() == WINDOW_STATE_TYPE_RIGHT_SNAPPED;
+  return GetStateType() == mojom::WindowStateType::LEFT_SNAPPED ||
+         GetStateType() == mojom::WindowStateType::RIGHT_SNAPPED;
 }
 
 bool WindowState::IsPinned() const {
-  return GetStateType() == WINDOW_STATE_TYPE_PINNED ||
-         GetStateType() == WINDOW_STATE_TYPE_TRUSTED_PINNED;
+  return GetStateType() == mojom::WindowStateType::PINNED ||
+         GetStateType() == mojom::WindowStateType::TRUSTED_PINNED;
 }
 
 bool WindowState::IsTrustedPinned() const {
-  return GetStateType() == WINDOW_STATE_TYPE_TRUSTED_PINNED;
+  return GetStateType() == mojom::WindowStateType::TRUSTED_PINNED;
 }
 
 bool WindowState::IsNormalStateType() const {
-  return GetStateType() == WINDOW_STATE_TYPE_NORMAL ||
-         GetStateType() == WINDOW_STATE_TYPE_DEFAULT;
+  return GetStateType() == mojom::WindowStateType::NORMAL ||
+         GetStateType() == mojom::WindowStateType::DEFAULT;
 }
 
 bool WindowState::IsNormalOrSnapped() const {
@@ -211,18 +255,15 @@ bool WindowState::HasRestoreBounds() const {
 }
 
 void WindowState::Maximize() {
-  window_->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  ::wm::SetWindowState(window_, ui::SHOW_STATE_MAXIMIZED);
 }
 
 void WindowState::Minimize() {
-  window_->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MINIMIZED);
+  ::wm::SetWindowState(window_, ui::SHOW_STATE_MINIMIZED);
 }
 
 void WindowState::Unminimize() {
-  window_->SetProperty(
-      aura::client::kShowStateKey,
-      window_->GetProperty(aura::client::kPreMinimizedShowStateKey));
-  window_->ClearProperty(aura::client::kPreMinimizedShowStateKey);
+  ::wm::Unminimize(window_);
 }
 
 void WindowState::Activate() {
@@ -273,6 +314,8 @@ void WindowState::RestoreAlwaysOnTop() {
 
 void WindowState::OnWMEvent(const WMEvent* event) {
   current_state_->OnWMEvent(this, event);
+
+  UpdateSnappedWidthRatio(event);
 }
 
 void WindowState::SaveCurrentBoundsForRestore() {
@@ -317,8 +360,45 @@ std::unique_ptr<WindowState::State> WindowState::SetStateObject(
   return old_object;
 }
 
+void WindowState::UpdateSnappedWidthRatio(const WMEvent* event) {
+  if (!IsSnapped()) {
+    snapped_width_ratio_.reset();
+    return;
+  }
+
+  const WMEventType type = event->type();
+  // Initializes |snapped_width_ratio_| whenever |event| is snapping event.
+  if (type == WM_EVENT_SNAP_LEFT || type == WM_EVENT_SNAP_RIGHT ||
+      type == WM_EVENT_CYCLE_SNAP_LEFT || type == WM_EVENT_CYCLE_SNAP_RIGHT) {
+    // Since |UpdateSnappedWidthRatio()| is called post WMEvent taking effect,
+    // |window_|'s bounds is in a correct state for ratio update.
+    snapped_width_ratio_ =
+        base::make_optional(GetCurrentSnappedWidthRatio(window_));
+    return;
+  }
+
+  // |snapped_width_ratio_| under snapped state may change due to bounds event.
+  if (event->IsBoundsEvent()) {
+    snapped_width_ratio_ =
+        base::make_optional(GetCurrentSnappedWidthRatio(window_));
+  }
+}
+
 void WindowState::SetPreAutoManageWindowBounds(const gfx::Rect& bounds) {
-  pre_auto_manage_window_bounds_.reset(new gfx::Rect(bounds));
+  pre_auto_manage_window_bounds_ = base::make_optional(bounds);
+}
+
+void WindowState::SetPreAddedToWorkspaceWindowBounds(const gfx::Rect& bounds) {
+  pre_added_to_workspace_window_bounds_ = base::make_optional(bounds);
+}
+
+void WindowState::SetPersistentWindowInfo(
+    const PersistentWindowInfo& persistent_window_info) {
+  persistent_window_info_ = base::make_optional(persistent_window_info);
+}
+
+void WindowState::ResetPersistentWindowInfo() {
+  persistent_window_info_.reset();
 }
 
 void WindowState::AddObserver(WindowStateObserver* observer) {
@@ -329,16 +409,71 @@ void WindowState::RemoveObserver(WindowStateObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
+bool WindowState::GetHideShelfWhenFullscreen() const {
+  return window_->GetProperty(kHideShelfWhenFullscreenKey);
+}
+
+void WindowState::SetHideShelfWhenFullscreen(bool value) {
+  base::AutoReset<bool> resetter(&ignore_property_change_, true);
+  window_->SetProperty(kHideShelfWhenFullscreenKey, value);
+}
+
+bool WindowState::GetWindowPositionManaged() const {
+  return window_->GetProperty(kWindowPositionManagedTypeKey);
+}
+
+void WindowState::SetWindowPositionManaged(bool managed) {
+  window_->SetProperty(kWindowPositionManagedTypeKey, managed);
+}
+
+bool WindowState::CanConsumeSystemKeys() const {
+  return window_->GetProperty(kCanConsumeSystemKeysKey);
+}
+
+void WindowState::SetCanConsumeSystemKeys(bool can_consume_system_keys) {
+  window_->SetProperty(kCanConsumeSystemKeysKey, can_consume_system_keys);
+}
+
+bool WindowState::IsInImmersiveFullscreen() const {
+  return window_->GetProperty(aura::client::kImmersiveFullscreenKey);
+}
+
+void WindowState::SetInImmersiveFullscreen(bool enabled) {
+  base::AutoReset<bool> resetter(&ignore_property_change_, true);
+  window_->SetProperty(aura::client::kImmersiveFullscreenKey, enabled);
+}
+
 void WindowState::set_bounds_changed_by_user(bool bounds_changed_by_user) {
   bounds_changed_by_user_ = bounds_changed_by_user;
-  if (bounds_changed_by_user)
+  if (bounds_changed_by_user) {
     pre_auto_manage_window_bounds_.reset();
+    pre_added_to_workspace_window_bounds_.reset();
+    persistent_window_info_.reset();
+  }
+}
+
+void WindowState::OnDragStarted(int window_component) {
+  DCHECK(drag_details_);
+  if (delegate_)
+    delegate_->OnDragStarted(window_component);
+}
+
+void WindowState::OnCompleteDrag(const gfx::Point& location) {
+  DCHECK(drag_details_);
+  if (delegate_)
+    delegate_->OnDragFinished(/*canceled=*/false, location);
+}
+
+void WindowState::OnRevertDrag(const gfx::Point& location) {
+  DCHECK(drag_details_);
+  if (delegate_)
+    delegate_->OnDragFinished(/*canceled=*/true, location);
 }
 
 void WindowState::CreateDragDetails(const gfx::Point& point_in_parent,
                                     int window_component,
                                     ::wm::WindowMoveSource source) {
-  drag_details_ = base::MakeUnique<DragDetails>(window_, point_in_parent,
+  drag_details_ = std::make_unique<DragDetails>(window_, point_in_parent,
                                                 window_component, source);
 }
 
@@ -354,16 +489,13 @@ void WindowState::SetAndClearRestoreBounds() {
 
 WindowState::WindowState(aura::Window* window)
     : window_(window),
-      window_position_managed_(false),
       bounds_changed_by_user_(false),
       ignored_by_shelf_(false),
       can_consume_system_keys_(false),
       unminimize_to_restore_bounds_(false),
-      in_immersive_fullscreen_(false),
       hide_shelf_when_fullscreen_(true),
       autohide_shelf_when_maximized_or_fullscreen_(false),
       minimum_visibility_(false),
-      can_be_dragged_(true),
       cached_always_on_top_(false),
       ignore_property_change_(false),
       current_state_(new DefaultState(ToWindowStateType(GetShowState()))) {
@@ -392,10 +524,14 @@ void WindowState::AdjustSnappedBounds(gfx::Rect* bounds) {
   if (is_dragged() || !IsSnapped())
     return;
   gfx::Rect maximized_bounds =
-      ScreenUtil::GetMaximizedWindowBoundsInParent(window_);
-  if (GetStateType() == WINDOW_STATE_TYPE_LEFT_SNAPPED)
+      screen_util::GetMaximizedWindowBoundsInParent(window_);
+  if (snapped_width_ratio_) {
+    bounds->set_width(
+        static_cast<int>(*snapped_width_ratio_ * maximized_bounds.width()));
+  }
+  if (GetStateType() == mojom::WindowStateType::LEFT_SNAPPED)
     bounds->set_x(maximized_bounds.x());
-  else if (GetStateType() == WINDOW_STATE_TYPE_RIGHT_SNAPPED)
+  else if (GetStateType() == mojom::WindowStateType::RIGHT_SNAPPED)
     bounds->set_x(maximized_bounds.right() - bounds->width());
   bounds->set_y(maximized_bounds.y());
   bounds->set_height(maximized_bounds.height());
@@ -404,16 +540,27 @@ void WindowState::AdjustSnappedBounds(gfx::Rect* bounds) {
 void WindowState::UpdateWindowPropertiesFromStateType() {
   ui::WindowShowState new_window_state =
       ToWindowShowState(current_state_->GetType());
+  // Clear |kPreMinimizedShowStateKey| property only when the window is actually
+  // Unminimized and not in tablet mode.
+  if (new_window_state != ui::SHOW_STATE_MINIMIZED && IsMinimized() &&
+      !IsTabletModeEnabled()) {
+    window()->ClearProperty(aura::client::kPreMinimizedShowStateKey);
+  }
   if (new_window_state != GetShowState()) {
     base::AutoReset<bool> resetter(&ignore_property_change_, true);
     window_->SetProperty(aura::client::kShowStateKey, new_window_state);
   }
 
+  if (GetStateType() != window_->GetProperty(kWindowStateTypeKey)) {
+    base::AutoReset<bool> resetter(&ignore_property_change_, true);
+    window_->SetProperty(kWindowStateTypeKey, GetStateType());
+  }
+
   // sync up current window show state with PinType property.
   ash::mojom::WindowPinType pin_type = ash::mojom::WindowPinType::NONE;
-  if (GetStateType() == WINDOW_STATE_TYPE_PINNED)
+  if (GetStateType() == mojom::WindowStateType::PINNED)
     pin_type = ash::mojom::WindowPinType::PINNED;
-  else if (GetStateType() == WINDOW_STATE_TYPE_TRUSTED_PINNED)
+  else if (GetStateType() == mojom::WindowStateType::TRUSTED_PINNED)
     pin_type = ash::mojom::WindowPinType::TRUSTED_PINNED;
   if (pin_type != GetPinType()) {
     base::AutoReset<bool> resetter(&ignore_property_change_, true);
@@ -422,13 +569,13 @@ void WindowState::UpdateWindowPropertiesFromStateType() {
 }
 
 void WindowState::NotifyPreStateTypeChange(
-    WindowStateType old_window_state_type) {
+    mojom::WindowStateType old_window_state_type) {
   for (auto& observer : observer_list_)
     observer.OnPreWindowStateTypeChange(this, old_window_state_type);
 }
 
 void WindowState::NotifyPostStateTypeChange(
-    WindowStateType old_window_state_type) {
+    mojom::WindowStateType old_window_state_type) {
   for (auto& observer : observer_list_)
     observer.OnPostWindowStateTypeChange(this, old_window_state_type);
 }
@@ -458,7 +605,7 @@ void WindowState::SetBoundsDirect(const gfx::Rect& bounds) {
 
 void WindowState::SetBoundsConstrained(const gfx::Rect& bounds) {
   gfx::Rect work_area_in_parent =
-      ScreenUtil::GetDisplayWorkAreaBoundsInParent(window_);
+      screen_util::GetDisplayWorkAreaBoundsInParent(window_);
   gfx::Rect child_bounds(bounds);
   AdjustBoundsSmallerThan(work_area_in_parent.size(), &child_bounds);
   SetBoundsDirect(child_bounds);
@@ -485,7 +632,12 @@ void WindowState::SetBoundsDirectCrossFade(const gfx::Rect& new_bounds) {
     return;
   }
 
-  const gfx::Rect old_bounds = window_->bounds();
+  // If the window already has a transform in place, do not use the cross fade
+  // animation, set the bounds directly instead.
+  if (!window_->layer()->GetTargetTransform().IsIdentity()) {
+    SetBoundsDirect(new_bounds);
+    return;
+  }
 
   // Create fresh layers for the window and all its children to paint into.
   // Takes ownership of the old layer and all its children, which will be
@@ -494,19 +646,9 @@ void WindowState::SetBoundsDirectCrossFade(const gfx::Rect& new_bounds) {
   // windows of |window|.
   std::unique_ptr<ui::LayerTreeOwner> old_layer_owner =
       ::wm::RecreateLayers(window_);
-  ui::Layer* old_layer = old_layer_owner->root();
-  DCHECK(old_layer);
-  ui::Layer* new_layer = window_->layer();
 
   // Resize the window to the new size, which will force a layout and paint.
   SetBoundsDirect(new_bounds);
-
-  // Ensure the higher-resolution layer is on top.
-  bool old_on_top = (old_bounds.width() > new_bounds.width());
-  if (old_on_top)
-    old_layer->parent()->StackBelow(new_layer, old_layer);
-  else
-    old_layer->parent()->StackAbove(new_layer, old_layer);
 
   CrossFadeAnimation(window_, std::move(old_layer_owner), gfx::Tween::EASE_OUT);
 }
@@ -541,11 +683,6 @@ void WindowState::OnWindowPropertyChanged(aura::Window* window,
     }
     return;
   }
-  if (key == aura::client::kImmersiveFullscreenKey) {
-    in_immersive_fullscreen_ =
-        window_->GetProperty(aura::client::kImmersiveFullscreenKey);
-    return;
-  }
   if (key == kWindowPinTypeKey) {
     if (!ignore_property_change_) {
       WMEvent event(WMEventTypeFromWindowPinType(GetPinType()));
@@ -553,6 +690,35 @@ void WindowState::OnWindowPropertyChanged(aura::Window* window,
     }
     return;
   }
+  if (key == kWindowStateTypeKey) {
+    if (!ignore_property_change_) {
+      // This change came from somewhere else. Revert it.
+      window->SetProperty(kWindowStateTypeKey, GetStateType());
+    }
+    return;
+  }
+  if (key == kHideShelfWhenFullscreenKey ||
+      key == aura::client::kImmersiveFullscreenKey) {
+    if (!ignore_property_change_) {
+      // This change came from outside ash. Update our shelf visibility based
+      // on our changed state.
+      ash::Shell::Get()->UpdateShelfVisibility();
+    }
+    return;
+  }
+}
+
+void WindowState::OnWindowAddedToRootWindow(aura::Window* window) {
+  DCHECK_EQ(window_, window);
+  if (::wm::GetTransientParent(window))
+    return;
+  MoveAllTransientChildrenToNewRoot(window);
+}
+
+void WindowState::OnWindowDestroying(aura::Window* window) {
+  DCHECK_EQ(window_, window);
+  current_state_->OnWindowDestroying(this);
+  delegate_.reset();
 }
 
 }  // namespace wm

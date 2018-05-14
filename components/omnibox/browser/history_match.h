@@ -7,8 +7,7 @@
 
 #include <stddef.h>
 
-#include <deque>
-
+#include "base/containers/circular_deque.h"
 #include "components/history/core/browser/url_row.h"
 
 namespace history {
@@ -24,6 +23,10 @@ struct HistoryMatch {
   // (e.g. "http://www.google.com/") and not some other subpage
   // (e.g. "http://www.google.com/foo.html").
   bool IsHostOnly() const;
+
+  // Estimates dynamic memory usage.
+  // See base/trace_event/memory_usage_estimator.h for more info.
+  size_t EstimateMemoryUsage() const;
 
   URLRow url_info;
 
@@ -49,7 +52,8 @@ struct HistoryMatch {
   // matches are, vacuously, "innermost matches".
   bool innermost_match;
 };
-typedef std::deque<HistoryMatch> HistoryMatches;
+
+typedef base::circular_deque<HistoryMatch> HistoryMatches;
 
 }  // namespace history
 

@@ -56,12 +56,9 @@ bool IsUnready(const syncer::DataTypeStatusTable& data_type_status_table,
 // simply omit types that may be USS from these cases.
 ModelTypeSet UnifiedSyncServiceTypes() {
   ModelTypeSet set;
-  if (FeatureList::IsEnabled(switches::kSyncUSSAutocomplete)) {
-    set.Put(syncer::AUTOFILL);
-  }
-  if (FeatureList::IsEnabled(switches::kSyncUSSDeviceInfo)) {
-    set.Put(syncer::DEVICE_INFO);
-  }
+  set.Put(syncer::AUTOFILL);
+  set.Put(syncer::DEVICE_INFO);
+  set.Put(syncer::TYPED_URLS);
   // PRINTERS was the first USS type, and should precede all other USS types.
   // All new types should be USS. This logic is fragile to reordering ModelType.
   for (int typeInt = syncer::PRINTERS; typeInt < syncer::FIRST_PROXY_TYPE;
@@ -110,7 +107,7 @@ class EnableDisableSingleClientTest : public SyncTest {
  protected:
   void SetupTest(bool all_types_enabled) {
     ASSERT_TRUE(SetupClients());
-    sync_prefs_ = base::MakeUnique<SyncPrefs>(GetProfile(0)->GetPrefs());
+    sync_prefs_ = std::make_unique<SyncPrefs>(GetProfile(0)->GetPrefs());
     if (all_types_enabled) {
       ASSERT_TRUE(GetClient(0)->SetupSync());
     } else {

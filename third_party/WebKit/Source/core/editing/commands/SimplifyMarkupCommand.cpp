@@ -78,12 +78,12 @@ void SimplifyMarkupCommand::DoApply(EditingState* editing_state) {
         continue;
 
       if (current_node->firstChild() != current_node->lastChild()) {
-        top_node_with_starting_style = 0;
+        top_node_with_starting_style = nullptr;
         break;
       }
 
       if (!current_node->GetComputedStyle()
-               ->VisualInvalidationDiff(*starting_style)
+               ->VisualInvalidationDiff(GetDocument(), *starting_style)
                .HasDifference())
         top_node_with_starting_style = current_node;
     }
@@ -154,7 +154,7 @@ int SimplifyMarkupCommand::PruneSubsequentAncestorsToRemove(
   return past_last_node_to_remove - start_node_index - 1;
 }
 
-DEFINE_TRACE(SimplifyMarkupCommand) {
+void SimplifyMarkupCommand::Trace(blink::Visitor* visitor) {
   visitor->Trace(first_node_);
   visitor->Trace(node_after_last_);
   CompositeEditCommand::Trace(visitor);

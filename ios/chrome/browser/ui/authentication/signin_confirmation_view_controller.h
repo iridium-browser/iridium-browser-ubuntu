@@ -7,7 +7,11 @@
 
 #import <UIKit/UIKit.h>
 
+#include <vector>
+
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller.h"
+
+extern NSString* const kSigninConfirmationCollectionViewId;
 
 @class ChromeIdentity;
 @class SigninConfirmationViewController;
@@ -28,6 +32,12 @@
 // Controller of the sign-in confirmation collection view.
 @interface SigninConfirmationViewController : CollectionViewController
 
+@property(nonatomic, weak) id<SigninConfirmationViewControllerDelegate>
+    delegate;
+
+// String id for text to open the settings.
+@property(nonatomic, readonly) int openSettingsStringId;
+
 - (instancetype)initWithIdentity:(ChromeIdentity*)identity
     NS_DESIGNATED_INITIALIZER;
 
@@ -38,8 +48,9 @@
 // Scrolls the confirmation view to the bottom of its content.
 - (void)scrollToBottom;
 
-@property(nonatomic, weak) id<SigninConfirmationViewControllerDelegate>
-    delegate;
+// List of string ids used for the user consent. The string ids order matches
+// the way they appear on the screen.
+- (const std::vector<int>&)consentStringIds;
 
 @end
 

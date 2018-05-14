@@ -385,7 +385,7 @@ ScopedIppPtr GetPrinterAttributes(http_t* http,
                                   int num_attributes,
                                   const char* const* attributes,
                                   ipp_status_t* status) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(http);
 
   // CUPS expects a leading slash for resource names.  Add one if it's missing.
@@ -439,7 +439,7 @@ bool GetPrinterInfo(const std::string& address,
                     const std::string& resource,
                     bool encrypted,
                     PrinterInfo* printer_info) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   ScopedHttpPtr http = ScopedHttpPtr(httpConnect2(
       address.c_str(), port, nullptr, AF_INET,
@@ -450,9 +450,15 @@ bool GetPrinterInfo(const std::string& address,
     return false;
   }
 
+  // TODO(crbug.com/821497): Use a library to canonicalize the URL.
+  size_t first_non_slash = resource.find_first_not_of('/');
+  const std::string path = (first_non_slash == std::string::npos)
+                               ? ""
+                               : resource.substr(first_non_slash);
+
   std::string printer_uri =
       base::StringPrintf("%s://%s:%d/%s", encrypted ? kIppsScheme : kIppScheme,
-                         address.c_str(), port, resource.c_str());
+                         address.c_str(), port, path.c_str());
 
   ipp_status_t status;
   ScopedIppPtr response =
@@ -469,7 +475,7 @@ bool GetPrinterInfo(const std::string& address,
 bool GetPrinterStatus(http_t* http,
                       const std::string& printer_id,
                       PrinterStatus* printer_status) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   ipp_status_t status;
   const std::string printer_uri = PrinterUriFromName(printer_id);
@@ -491,7 +497,7 @@ bool GetCupsJobs(http_t* http,
                  int limit,
                  JobCompletionState which,
                  std::vector<CupsJob>* jobs) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(http);
 
   auto request = WrapIpp(ippNewRequest(IPP_OP_GET_JOBS));

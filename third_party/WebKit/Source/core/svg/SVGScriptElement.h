@@ -21,10 +21,11 @@
 #ifndef SVGScriptElement_h
 #define SVGScriptElement_h
 
-#include "core/SVGNames.h"
-#include "core/dom/ScriptElementBase.h"
+#include "core/dom/CreateElementFlags.h"
+#include "core/script/ScriptElementBase.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/SVGURIReference.h"
+#include "core/svg_names.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -38,7 +39,7 @@ class SVGScriptElement final : public SVGElement,
   USING_GARBAGE_COLLECTED_MIXIN(SVGScriptElement);
 
  public:
-  static SVGScriptElement* Create(Document&, bool was_inserted_by_parser);
+  static SVGScriptElement* Create(Document&, const CreateElementFlags);
 
   ScriptLoader* Loader() const final { return loader_.Get(); }
 
@@ -48,13 +49,11 @@ class SVGScriptElement final : public SVGElement,
 
   bool IsScriptElement() const override { return true; }
 
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_TRACE_WRAPPERS();
+  virtual void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
-  SVGScriptElement(Document&,
-                   bool was_inserted_by_parser,
-                   bool already_started);
+  SVGScriptElement(Document&, const CreateElementFlags);
 
   void ParseAttribute(const AttributeModificationParams&) override;
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
@@ -86,18 +85,20 @@ class SVGScriptElement final : public SVGElement,
   bool IsConnected() const override;
   bool HasChildren() const override;
   const AtomicString& GetNonceForElement() const override;
+  bool ElementHasDuplicateAttributes() const override {
+    return HasDuplicateAttribute();
+  }
   bool AllowInlineScriptForCSP(const AtomicString& nonce,
                                const WTF::OrdinalNumber&,
                                const String& script_content,
                                ContentSecurityPolicy::InlineType) override;
-  AtomicString InitiatorName() const override;
   Document& GetDocument() const override;
   void DispatchLoadEvent() override;
   void DispatchErrorEvent() override;
   void SetScriptElementForBinding(
       HTMLScriptElementOrSVGScriptElement&) override;
 
-  Element* CloneElementWithoutAttributesAndChildren() override;
+  Element* CloneWithoutAttributesAndChildren(Document&) const override;
   bool LayoutObjectIsNeeded(const ComputedStyle&) override { return false; }
 
   TraceWrapperMember<ScriptLoader> loader_;

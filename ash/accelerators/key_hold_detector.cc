@@ -44,7 +44,7 @@ void PostPressedEvent(ui::KeyEvent* event) {
 KeyHoldDetector::KeyHoldDetector(std::unique_ptr<Delegate> delegate)
     : state_(INITIAL), delegate_(std::move(delegate)) {}
 
-KeyHoldDetector::~KeyHoldDetector() {}
+KeyHoldDetector::~KeyHoldDetector() = default;
 
 void KeyHoldDetector::OnKeyEvent(ui::KeyEvent* event) {
   if (!delegate_->ShouldProcessEvent(event))
@@ -67,7 +67,7 @@ void KeyHoldDetector::OnKeyEvent(ui::KeyEvent* event) {
         break;
       case PRESSED:
         state_ = HOLD;
-      // pass through
+        FALLTHROUGH;
       case HOLD:
         delegate_->OnKeyHold(event);
         if (delegate_->ShouldStopEventPropagation())

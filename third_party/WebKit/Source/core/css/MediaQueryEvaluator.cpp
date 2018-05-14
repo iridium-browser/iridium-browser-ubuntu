@@ -30,23 +30,22 @@
 #include "core/css/MediaQueryEvaluator.h"
 
 #include "core/CSSValueKeywords.h"
-#include "core/MediaFeatureNames.h"
-#include "core/MediaFeatures.h"
-#include "core/MediaTypeNames.h"
-#include "core/css/CSSHelper.h"
 #include "core/css/CSSPrimitiveValue.h"
+#include "core/css/CSSResolutionUnits.h"
 #include "core/css/CSSToLengthConversionData.h"
+#include "core/css/MediaFeatures.h"
 #include "core/css/MediaList.h"
 #include "core/css/MediaQuery.h"
 #include "core/css/MediaValuesDynamic.h"
 #include "core/css/MediaValuesInitialViewport.h"
+#include "core/css/media_feature_names.h"
 #include "core/css/resolver/MediaQueryResult.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
+#include "core/media_type_names.h"
 #include "core/probe/CoreProbes.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/graphics/ColorSpaceGamut.h"
 #include "platform/wtf/HashMap.h"
@@ -81,9 +80,9 @@ MediaQueryEvaluator::MediaQueryEvaluator(
   DCHECK(media_values);
 }
 
-MediaQueryEvaluator::~MediaQueryEvaluator() {}
+MediaQueryEvaluator::~MediaQueryEvaluator() = default;
 
-DEFINE_TRACE(MediaQueryEvaluator) {
+void MediaQueryEvaluator::Trace(blink::Visitor* visitor) {
   visitor->Trace(media_values_);
 }
 
@@ -171,7 +170,7 @@ bool CompareValue(T a, T b, MediaFeaturePrefix op) {
 }
 
 bool CompareDoubleValue(double a, double b, MediaFeaturePrefix op) {
-  const double precision = std::numeric_limits<double>::epsilon();
+  const double precision = LayoutUnit::Epsilon();
   switch (op) {
     case kMinPrefix:
       return a >= (b - precision);
@@ -625,6 +624,26 @@ static bool Transform3dMediaFeatureEval(const MediaQueryExpValue& value,
     float number;
     return NumberValue(value, number) &&
            CompareValue(have3d_rendering, static_cast<int>(number), op);
+  }
+  return return_value_if_no_parameter;
+}
+
+static bool ImmersiveMediaFeatureEval(const MediaQueryExpValue& value,
+                                      MediaFeaturePrefix op,
+                                      const MediaValues& media_values) {
+  bool return_value_if_no_parameter;
+  int is_immersive_numeric_value;
+
+  bool immersive = media_values.InImmersiveMode();
+
+  return_value_if_no_parameter = immersive;
+  is_immersive_numeric_value = immersive ? 1 : 0;
+
+  if (value.IsValid()) {
+    float number;
+    return NumberValue(value, number) &&
+           CompareValue(is_immersive_numeric_value, static_cast<int>(number),
+                        op);
   }
   return return_value_if_no_parameter;
 }

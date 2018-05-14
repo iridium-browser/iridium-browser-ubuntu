@@ -14,6 +14,8 @@
 #include "GrSimpleMeshDrawOpHelper.h"
 #include "SkBitmap.h"
 #include "SkLatticeIter.h"
+#include "SkMatrixPriv.h"
+#include "SkPointPriv.h"
 #include "SkRect.h"
 
 static sk_sp<GrGeometryProcessor> create_gp() {
@@ -60,6 +62,10 @@ public:
 
     const char* name() const override { return "NonAALatticeOp"; }
 
+    void visitProxies(const VisitProxyFunc& func) const override {
+        fHelper.visitProxies(func);
+    }
+
     SkString dumpInfo() const override {
         SkString str;
 
@@ -76,13 +82,15 @@ public:
 
     FixedFunctionFlags fixedFunctionFlags() const override { return fHelper.fixedFunctionFlags(); }
 
-    RequiresDstTexture finalize(const GrCaps& caps, const GrAppliedClip* clip) override {
-        return fHelper.xpRequiresDstTexture(caps, clip, GrProcessorAnalysisCoverage::kNone,
+    RequiresDstTexture finalize(const GrCaps& caps, const GrAppliedClip* clip,
+                                GrPixelConfigIsClamped dstIsClamped) override {
+        return fHelper.xpRequiresDstTexture(caps, clip, dstIsClamped,
+                                            GrProcessorAnalysisCoverage::kNone,
                                             &fPatches.front().fColor);
     }
 
 private:
-    void onPrepareDraws(Target* target) const override {
+    void onPrepareDraws(Target* target) override {
         sk_sp<GrGeometryProcessor> gp(create_gp());
         if (!gp) {
             SkDebugf("Couldn't create GrGeometryProcessor\n");
@@ -100,7 +108,7 @@ private:
             return;
         }
 
-        sk_sp<const GrBuffer> indexBuffer(target->resourceProvider()->refQuadIndexBuffer());
+        sk_sp<const GrBuffer> indexBuffer = target->resourceProvider()->refQuadIndexBuffer();
         PatternHelper helper(GrPrimitiveType::kTriangles);
         void* vertices = helper.init(target, vertexStride, indexBuffer.get(), kVertsPerRect,
                                      kIndicesPerRect, numRects);
@@ -124,13 +132,14 @@ private:
             intptr_t patchVerts = verts;
             while (patch.fIter->next(&srcR, &dstR)) {
                 SkPoint* positions = reinterpret_cast<SkPoint*>(verts);
-                positions->setRectFan(dstR.fLeft, dstR.fTop, dstR.fRight, dstR.fBottom,
-                                      vertexStride);
+                SkPointPriv::SetRectTriStrip(positions, dstR.fLeft, dstR.fTop, dstR.fRight,
+                                             dstR.fBottom, vertexStride);
 
                 // Setup local coords
                 static const int kLocalOffset = sizeof(SkPoint) + sizeof(GrColor);
                 SkPoint* coords = reinterpret_cast<SkPoint*>(verts + kLocalOffset);
-                coords->setRectFan(srcR.fLeft, srcR.fTop, srcR.fRight, srcR.fBottom, vertexStride);
+                SkPointPriv::SetRectTriStrip(coords, srcR.fLeft, srcR.fTop, srcR.fRight,
+                                             srcR.fBottom, vertexStride);
 
                 static const int kColorOffset = sizeof(SkPoint);
                 GrColor* vertColor = reinterpret_cast<GrColor*>(verts + kColorOffset);
@@ -144,8 +153,8 @@ private:
             // If we didn't handle it above, apply the matrix here.
             if (!isScaleTranslate) {
                 SkPoint* positions = reinterpret_cast<SkPoint*>(patchVerts);
-                patch.fViewMatrix.mapPointsWithStride(
-                        positions, vertexStride, kVertsPerRect * patch.fIter->numRectsToDraw());
+                SkMatrixPriv::MapPointsWithStride(patch.fViewMatrix, positions, vertexStride,
+                                                  kVertsPerRect * patch.fIter->numRectsToDraw());
             }
         }
         helper.recordDraw(target, gp.get(), fHelper.makePipeline(target));
@@ -236,7 +245,8 @@ GR_DRAW_OP_TEST_DEFINE(NonAALatticeOp) {
     // edge of the image subset, respectively.
     std::unique_ptr<int[]> xdivs;
     std::unique_ptr<int[]> ydivs;
-    std::unique_ptr<SkCanvas::Lattice::Flags[]> flags;
+    std::unique_ptr<SkCanvas::Lattice::RectType[]> flags;
+    std::unique_ptr<SkColor[]> colors;
     SkIRect subset;
     do {
         imgW = random->nextRangeU(1, 1000);
@@ -263,14 +273,17 @@ GR_DRAW_OP_TEST_DEFINE(NonAALatticeOp) {
         bool hasFlags = random->nextBool();
         if (hasFlags) {
             int n = (lattice.fXCount + 1) * (lattice.fYCount + 1);
-            flags.reset(new SkCanvas::Lattice::Flags[n]);
+            flags.reset(new SkCanvas::Lattice::RectType[n]);
+            colors.reset(new SkColor[n]);
             for (int i = 0; i < n; ++i) {
-                flags[i] = random->nextBool() ? SkCanvas::Lattice::kTransparent_Flags
-                                              : (SkCanvas::Lattice::Flags)0;
+                flags[i] = random->nextBool() ? SkCanvas::Lattice::kTransparent
+                                              : SkCanvas::Lattice::kDefault;
             }
-            lattice.fFlags = flags.get();
+            lattice.fRectTypes = flags.get();
+            lattice.fColors = colors.get();
         } else {
-            lattice.fFlags = nullptr;
+            lattice.fRectTypes = nullptr;
+            lattice.fColors = nullptr;
         }
     } while (!SkLatticeIter::Valid(imgW, imgH, lattice));
 

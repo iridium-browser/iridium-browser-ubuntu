@@ -14,6 +14,8 @@ TEST_P (EncodeDecodeTestAPI, SetOptionECFlag_ERROR_CON_DISABLE) {
   SLTRMarkingFeedback m_LTR_Marking_Feedback;
   SLTRRecoverRequest m_LTR_Recover_Request;
   m_LTR_Recover_Request.uiIDRPicId = 0;
+  m_LTR_Recover_Request.iLayerId = 0;
+  m_LTR_Marking_Feedback.iLayerId = 0;
   EncodeDecodeFileParamBase p = GetParam();
   prepareParamDefault (1, p.slicenum,  p.width, p.height, p.frameRate, &param_);
   param_.bEnableLongTermReference = true;
@@ -33,12 +35,12 @@ TEST_P (EncodeDecodeTestAPI, SetOptionECFlag_ERROR_CON_DISABLE) {
   ASSERT_EQ (0, rv);
   m_LTR_Recover_Request.uiFeedbackType = NO_RECOVERY_REQUSET;
 
-  InitialEncDec (p.width, p.height);
+  ASSERT_TRUE (InitialEncDec (p.width, p.height));
   int32_t iTraceLevel = WELS_LOG_QUIET;
   encoder_->SetOption (ENCODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   decoder_->SetOption (DECODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   int32_t iSpsPpsIdAddition = 1;
-  encoder_->SetOption (ENCODER_OPTION_ENABLE_SPS_PPS_ID_ADDITION, &iSpsPpsIdAddition);
+  encoder_->SetOption (ENCODER_OPTION_SPS_PPS_ID_STRATEGY, &iSpsPpsIdAddition);
   int32_t iIDRPeriod = 60;
   encoder_->SetOption (ENCODER_OPTION_IDR_INTERVAL, &iIDRPeriod);
   SLTRConfig sLtrConfigVal;
@@ -80,6 +82,8 @@ TEST_P (EncodeDecodeTestAPI, SetOptionECFlag_ERROR_CON_SLICE_COPY) {
   SLTRMarkingFeedback m_LTR_Marking_Feedback;
   SLTRRecoverRequest m_LTR_Recover_Request;
   m_LTR_Recover_Request.uiIDRPicId = 0;
+  m_LTR_Recover_Request.iLayerId = 0;
+  m_LTR_Marking_Feedback.iLayerId = 0;
   EncodeDecodeFileParamBase p = GetParam();
   prepareParamDefault (1, p.slicenum,  p.width, p.height, p.frameRate, &param_);
   encoder_->Uninitialize();
@@ -87,12 +91,12 @@ TEST_P (EncodeDecodeTestAPI, SetOptionECFlag_ERROR_CON_SLICE_COPY) {
   ASSERT_TRUE (rv == cmResultSuccess);
   m_LTR_Recover_Request.uiFeedbackType = NO_RECOVERY_REQUSET;
 
-  InitialEncDec (p.width, p.height);
+  ASSERT_TRUE (InitialEncDec (p.width, p.height));
   int32_t iTraceLevel = WELS_LOG_QUIET;
   encoder_->SetOption (ENCODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   decoder_->SetOption (DECODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   int32_t iSpsPpsIdAddition = 1;
-  encoder_->SetOption (ENCODER_OPTION_ENABLE_SPS_PPS_ID_ADDITION, &iSpsPpsIdAddition);
+  encoder_->SetOption (ENCODER_OPTION_SPS_PPS_ID_STRATEGY, &iSpsPpsIdAddition);
   int32_t iIDRPeriod = 60;
   encoder_->SetOption (ENCODER_OPTION_IDR_INTERVAL, &iIDRPeriod);
   SLTRConfig sLtrConfigVal;
@@ -158,7 +162,7 @@ TEST_P (EncodeDecodeTestAPI, SetOptionECIDC_GeneralSliceChange) {
 
   //Start for enc/dec
 
-  InitialEncDec (p.width, p.height);
+  ASSERT_TRUE (InitialEncDec (p.width, p.height));
   int32_t iTraceLevel = WELS_LOG_QUIET;
   encoder_->SetOption (ENCODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   decoder_->SetOption (DECODER_OPTION_TRACE_LEVEL, &iTraceLevel);
@@ -245,7 +249,7 @@ TEST_F (EncodeDecodeTestAPI, SetOptionECIDC_SpecificFrameChange) {
   int iIdx = 0;
   int len = 0;
   unsigned char* pData[3] = { NULL };
-  InitialEncDec (p.width, p.height);
+  ASSERT_TRUE (InitialEncDec (p.width, p.height));
   //Frame 0: IDR, EC_IDC=DISABLE, loss = 0
   EncodeOneFrame (1);
   encToDecData (info, len);
@@ -379,7 +383,7 @@ TEST_F (EncodeDecodeTestAPI, SetOptionECIDC_SpecificSliceChange_IDRLoss) {
   unsigned char* pData[3] = { NULL };
   int iTotalSliceSize = 0;
 
-  InitialEncDec (p.width, p.height);
+  ASSERT_TRUE (InitialEncDec (p.width, p.height));
 
   //Frame 0: IDR, EC_IDC=2, loss = 2
   EncodeOneFrame (1);
@@ -511,7 +515,7 @@ TEST_F (EncodeDecodeTestAPI, SetOptionECIDC_SpecificSliceChange_IDRNoLoss) {
   unsigned char* pData[3] = { NULL };
   int iTotalSliceSize = 0;
 
-  InitialEncDec (p.width, p.height);
+  ASSERT_TRUE (InitialEncDec (p.width, p.height));
 
   //set EC=DISABLE
   uiEcIdc = (uint32_t) (ERROR_CON_DISABLE);
@@ -660,6 +664,8 @@ TEST_F (EncodeDecodeTestAPI, Engine_SVC_Switch_I) {
   SLTRMarkingFeedback m_LTR_Marking_Feedback;
   SLTRRecoverRequest m_LTR_Recover_Request;
   m_LTR_Recover_Request.uiIDRPicId = 0;
+  m_LTR_Recover_Request.iLayerId = 0;
+  m_LTR_Marking_Feedback.iLayerId = 0;
   EncodeDecodeFileParamBase p = kSVCSwitch[0];
   p.width = p.width << 2;
   p.height = p.height << 2;
@@ -671,12 +677,12 @@ TEST_F (EncodeDecodeTestAPI, Engine_SVC_Switch_I) {
   ASSERT_TRUE (rv == cmResultSuccess);
   m_LTR_Recover_Request.uiFeedbackType = NO_RECOVERY_REQUSET;
 
-  InitialEncDec (p.width, p.height);
+  ASSERT_TRUE (InitialEncDec (p.width, p.height));
   int32_t iTraceLevel = WELS_LOG_QUIET;
   encoder_->SetOption (ENCODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   decoder_->SetOption (DECODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   int32_t iSpsPpsIdAddition = 1;
-  encoder_->SetOption (ENCODER_OPTION_ENABLE_SPS_PPS_ID_ADDITION, &iSpsPpsIdAddition);
+  encoder_->SetOption (ENCODER_OPTION_SPS_PPS_ID_STRATEGY, &iSpsPpsIdAddition);
   int32_t iIDRPeriod = (int32_t) pow (2.0f, (param_.iTemporalLayerNum - 1)) * ((rand() % 5) + 1);
   encoder_->SetOption (ENCODER_OPTION_IDR_INTERVAL, &iIDRPeriod);
   SLTRConfig sLtrConfigVal;
@@ -723,6 +729,8 @@ TEST_F (EncodeDecodeTestAPI, Engine_SVC_Switch_P) {
   SLTRMarkingFeedback m_LTR_Marking_Feedback;
   SLTRRecoverRequest m_LTR_Recover_Request;
   m_LTR_Recover_Request.uiIDRPicId = 0;
+  m_LTR_Recover_Request.iLayerId = 0;
+  m_LTR_Marking_Feedback.iLayerId = 0;
   EncodeDecodeFileParamBase p = kSVCSwitch[0];
   int iTarDid = 0;
   int iLastDid = 0;
@@ -736,12 +744,12 @@ TEST_F (EncodeDecodeTestAPI, Engine_SVC_Switch_P) {
   ASSERT_TRUE (rv == cmResultSuccess);
   m_LTR_Recover_Request.uiFeedbackType = NO_RECOVERY_REQUSET;
 
-  InitialEncDec (p.width, p.height);
+  ASSERT_TRUE (InitialEncDec (p.width, p.height));
   int32_t iTraceLevel = WELS_LOG_QUIET;
   encoder_->SetOption (ENCODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   decoder_->SetOption (DECODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   int32_t iSpsPpsIdAddition = 1;
-  encoder_->SetOption (ENCODER_OPTION_ENABLE_SPS_PPS_ID_ADDITION, &iSpsPpsIdAddition);
+  encoder_->SetOption (ENCODER_OPTION_SPS_PPS_ID_STRATEGY, &iSpsPpsIdAddition);
   int32_t iIDRPeriod = 60;
   encoder_->SetOption (ENCODER_OPTION_IDR_INTERVAL, &iIDRPeriod);
   SLTRConfig sLtrConfigVal;

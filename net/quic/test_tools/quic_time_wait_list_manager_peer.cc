@@ -18,10 +18,12 @@ QuicTime::Delta QuicTimeWaitListManagerPeer::time_wait_period(
   return manager->time_wait_period_;
 }
 
-QuicVersion QuicTimeWaitListManagerPeer::GetQuicVersionFromConnectionId(
+QuicTransportVersion
+QuicTimeWaitListManagerPeer::GetQuicVersionFromConnectionId(
     QuicTimeWaitListManager* manager,
     QuicConnectionId connection_id) {
-  return manager->GetQuicVersionFromConnectionId(connection_id);
+  return manager->GetQuicVersionFromConnectionId(connection_id)
+      .transport_version;
 }
 
 QuicAlarm* QuicTimeWaitListManagerPeer::expiration_alarm(

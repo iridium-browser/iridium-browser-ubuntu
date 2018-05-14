@@ -4,6 +4,8 @@
 
 #include "chromecast/browser/cast_browser_context.h"
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
@@ -22,6 +24,10 @@
 
 namespace chromecast {
 namespace shell {
+
+namespace {
+const void* const kDownloadManagerDelegateKey = &kDownloadManagerDelegateKey;
+}
 
 class CastBrowserContext::CastResourceContext :
     public content::ResourceContext {
@@ -51,8 +57,7 @@ class CastBrowserContext::CastResourceContext :
 CastBrowserContext::CastBrowserContext(
     URLRequestContextFactory* url_request_context_factory)
     : url_request_context_factory_(url_request_context_factory),
-      resource_context_(new CastResourceContext(url_request_context_factory)),
-      download_manager_delegate_(new CastDownloadManagerDelegate()) {
+      resource_context_(new CastResourceContext(url_request_context_factory)) {
   InitWhileIOAllowed();
 }
 
@@ -107,7 +112,12 @@ content::ResourceContext* CastBrowserContext::GetResourceContext() {
 
 content::DownloadManagerDelegate*
 CastBrowserContext::GetDownloadManagerDelegate() {
-  return download_manager_delegate_.get();
+  if (!GetUserData(kDownloadManagerDelegateKey)) {
+    SetUserData(kDownloadManagerDelegateKey,
+                std::make_unique<CastDownloadManagerDelegate>());
+  }
+  return static_cast<CastDownloadManagerDelegate*>(
+      GetUserData(kDownloadManagerDelegateKey));
 }
 
 content::BrowserPluginGuestManager* CastBrowserContext::GetGuestManager() {
@@ -130,6 +140,11 @@ content::PermissionManager* CastBrowserContext::GetPermissionManager() {
   if (!permission_manager_.get())
     permission_manager_.reset(new CastPermissionManager());
   return permission_manager_.get();
+}
+
+content::BackgroundFetchDelegate*
+CastBrowserContext::GetBackgroundFetchDelegate() {
+  return nullptr;
 }
 
 content::BackgroundSyncController*

@@ -6,11 +6,12 @@
 
 #include "base/at_exit.h"
 #include "base/debug/crash_logging.h"
+#include "base/strings/sys_string_conversions.h"
 #include "components/crash/core/common/crash_keys.h"
 #include "ios/chrome/app/startup/ios_chrome_main.h"
 #include "ios/chrome/browser/crash_report/breakpad_helper.h"
-#include "ios/chrome/browser/crash_report/crash_keys.h"
 #include "ios/chrome/common/channel_info.h"
+#include "ios/testing/perf/startupLoggers.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -23,9 +24,8 @@ NSString* const kUIApplicationDelegateInfoKey = @"UIApplicationDelegate";
 void StartCrashController() {
   @autoreleasepool {
     std::string channel_string = GetChannelString();
-
-    RegisterChromeIOSCrashKeys();
-    base::debug::SetCrashKeyValue(crash_keys::kChannel, channel_string);
+    breakpad_helper::AddReportParameter(
+        @"channel", base::SysUTF8ToNSString(channel_string), false);
     breakpad_helper::Start(channel_string);
   }
 }
@@ -34,7 +34,10 @@ void SetTextDirectionIfPseudoRTLEnabled() {
   @autoreleasepool {
     NSUserDefaults* standard_defaults = [NSUserDefaults standardUserDefaults];
     if ([standard_defaults boolForKey:@"EnablePseudoRTL"]) {
-      NSDictionary* pseudoDict = @{@"YES" : @"AppleTextDirection"};
+      NSDictionary* pseudoDict = @{
+        @"AppleTextDirection" : @"YES",
+        @"NSForceRightToLeftWritingDirection" : @"YES"
+      };
       [standard_defaults registerDefaults:pseudoDict];
     }
   }
@@ -56,6 +59,7 @@ int RunUIApplicationMain(int argc, char* argv[]) {
 
 int main(int argc, char* argv[]) {
   IOSChromeMain::InitStartTime();
+  startup_loggers::RegisterAppStartTime();
 
   // Set NSUserDefaults keys to force pseudo-RTL if needed.
   SetTextDirectionIfPseudoRTLEnabled();

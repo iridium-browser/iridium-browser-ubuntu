@@ -6,10 +6,11 @@
 
 #include <string>
 
+#include "apps/browser_context_keyed_service_factories.h"
 #include "base/command_line.h"
-#include "base/run_loop.h"
 #include "build/build_config.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/nacl/common/buildflags.h"
 #include "components/prefs/pref_service.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "components/update_client/update_query_params.h"
@@ -18,7 +19,6 @@
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/common/result_codes.h"
 #include "content/shell/browser/shell_devtools_manager_delegate.h"
-#include "extensions/browser/app_window/app_window_client.h"
 #include "extensions/browser/browser_context_keyed_service_factories.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/updater/update_service.h"
@@ -52,7 +52,7 @@
 #include "extensions/shell/browser/shell_network_controller_chromeos.h"
 #endif
 
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+#if defined(OS_LINUX)
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #endif
@@ -67,7 +67,7 @@
 #include "extensions/shell/browser/shell_browser_main_parts_mac.h"
 #endif
 
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/browser/nacl_process_host.h"
 #include "content/public/browser/browser_thread.h"
@@ -81,7 +81,7 @@
 using base::CommandLine;
 using content::BrowserContext;
 
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
 using content::BrowserThread;
 #endif
 
@@ -144,7 +144,8 @@ void ShellBrowserMainParts::PostMainMessageLoopStart() {
 #endif
 }
 
-void ShellBrowserMainParts::PreEarlyInitialization() {
+int ShellBrowserMainParts::PreEarlyInitialization() {
+  return content::RESULT_CODE_NORMAL_EXIT;
 }
 
 int ShellBrowserMainParts::PreCreateThreads() {
@@ -158,20 +159,38 @@ int ShellBrowserMainParts::PreCreateThreads() {
 }
 
 void ShellBrowserMainParts::PreMainMessageLoopRun() {
+  extensions_client_ = std::make_unique<ShellExtensionsClient>();
+  ExtensionsClient::Set(extensions_client_.get());
+
+  // BrowserContextKeyedAPIServiceFactories require an ExtensionsBrowserClient.
+  extensions_browser_client_ = std::make_unique<ShellExtensionsBrowserClient>();
+  ExtensionsBrowserClient::Set(extensions_browser_client_.get());
+
+  apps::EnsureBrowserContextKeyedServiceFactoriesBuilt();
+  EnsureBrowserContextKeyedServiceFactoriesBuilt();
+  shell::EnsureBrowserContextKeyedServiceFactoriesBuilt();
+
   // Initialize our "profile" equivalent.
-  browser_context_.reset(new ShellBrowserContext(this));
+  browser_context_ = std::make_unique<ShellBrowserContext>(this);
 
   // app_shell only supports a single user, so all preferences live in the user
   // data directory, including the device-wide local state.
   local_state_ = shell_prefs::CreateLocalState(browser_context_->GetPath());
   user_pref_service_ =
       shell_prefs::CreateUserPrefService(browser_context_.get());
+  extensions_browser_client_->InitWithBrowserContext(browser_context_.get(),
+                                                     user_pref_service_.get());
 
 #if defined(OS_CHROMEOS)
   chromeos::CrasAudioHandler::Initialize(
       new chromeos::AudioDevicesPrefHandlerImpl(local_state_.get()));
   audio_controller_.reset(new ShellAudioController());
 #endif
+
+  // Create BrowserContextKeyedServices now that we have an
+  // ExtensionsBrowserClient that BrowserContextKeyedAPIServices can query.
+  BrowserContextDependencyManager::GetInstance()->CreateBrowserContextServices(
+      browser_context_.get());
 
 #if defined(USE_AURA)
   aura::Env::GetInstance()->set_context_factory(content::GetContextFactory());
@@ -181,35 +200,18 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
 
   storage_monitor::StorageMonitor::Create();
 
-  desktop_controller_.reset(browser_main_delegate_->CreateDesktopController());
+  desktop_controller_.reset(
+      browser_main_delegate_->CreateDesktopController(browser_context_.get()));
 
   // TODO(jamescook): Initialize user_manager::UserManager.
 
   device_client_.reset(new ShellDeviceClient);
 
-  extensions_client_.reset(CreateExtensionsClient());
-  ExtensionsClient::Set(extensions_client_.get());
-
-  extensions_browser_client_.reset(CreateExtensionsBrowserClient(
-      browser_context_.get(), user_pref_service_.get()));
-  ExtensionsBrowserClient::Set(extensions_browser_client_.get());
-
   update_query_params_delegate_.reset(new ShellUpdateQueryParamsDelegate);
   update_client::UpdateQueryParams::SetDelegate(
       update_query_params_delegate_.get());
 
-  // Create our custom ExtensionSystem first because other
-  // KeyedServices depend on it.
-  // TODO(yoz): Move this after EnsureBrowserContextKeyedServiceFactoriesBuilt.
-  CreateExtensionSystem();
-
-  // Register additional KeyedService factories here. See
-  // ChromeBrowserMainExtraPartsProfiles for details.
-  EnsureBrowserContextKeyedServiceFactoriesBuilt();
-  ShellExtensionSystemFactory::GetInstance();
-
-  BrowserContextDependencyManager::GetInstance()->CreateBrowserContextServices(
-      browser_context_.get());
+  InitExtensionSystem();
 
   // Initialize OAuth2 support from command line.
   base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
@@ -218,9 +220,9 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
       cmd->GetSwitchValueASCII(switches::kAppShellUser),
       cmd->GetSwitchValueASCII(switches::kAppShellRefreshToken)));
 
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
   nacl::NaClBrowser::SetDelegate(
-      base::MakeUnique<ShellNaClBrowserDelegate>(browser_context_.get()));
+      std::make_unique<ShellNaClBrowserDelegate>(browser_context_.get()));
   // Track the task so it can be canceled if app_shell shuts down very quickly,
   // such as in browser tests.
   task_tracker_.PostTask(
@@ -243,19 +245,20 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
 bool ShellBrowserMainParts::MainMessageLoopRun(int* result_code) {
   if (!run_message_loop_)
     return true;
-  // TODO(yoz): just return false here?
-  base::RunLoop run_loop;
-  run_loop.Run();
+  desktop_controller_->Run();
   *result_code = content::RESULT_CODE_NORMAL_EXIT;
   return true;
 }
 
 void ShellBrowserMainParts::PostMainMessageLoopRun() {
+  // Close apps before shutting down browser context and extensions system.
+  desktop_controller_->CloseAppWindows();
+
   // NOTE: Please destroy objects in the reverse order of their creation.
   browser_main_delegate_->Shutdown();
   content::ShellDevToolsManagerDelegate::StopHttpHandler();
 
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
   task_tracker_.TryCancelAll();
 #endif
 
@@ -298,21 +301,11 @@ void ShellBrowserMainParts::PostDestroyThreads() {
 #endif
 }
 
-ExtensionsClient* ShellBrowserMainParts::CreateExtensionsClient() {
-  return new ShellExtensionsClient();
-}
-
-ExtensionsBrowserClient* ShellBrowserMainParts::CreateExtensionsBrowserClient(
-    content::BrowserContext* context,
-    PrefService* service) {
-  return new ShellExtensionsBrowserClient(context, service);
-}
-
-void ShellBrowserMainParts::CreateExtensionSystem() {
+void ShellBrowserMainParts::InitExtensionSystem() {
   DCHECK(browser_context_);
   extension_system_ = static_cast<ShellExtensionSystem*>(
       ExtensionSystem::Get(browser_context_.get()));
-  extension_system_->InitForRegularProfile(true);
+  extension_system_->InitForRegularProfile(true /* extensions_enabled */);
 }
 
 }  // namespace extensions

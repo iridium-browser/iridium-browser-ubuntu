@@ -27,15 +27,15 @@ CC_BASE_EXPORT extern const char kBrowserControlsShowThreshold[];
 CC_BASE_EXPORT extern const char kSlowDownRasterScaleFactor[];
 CC_BASE_EXPORT extern const char kStrictLayerPropertyChangeChecking[];
 CC_BASE_EXPORT extern const char kEnableTileCompression[];
+CC_BASE_EXPORT extern const char kCheckDamageEarly[];
 
 // Switches for both the renderer and ui compositors.
 CC_BASE_EXPORT extern const char kEnableGpuBenchmarking[];
-CC_BASE_EXPORT extern const char kEnableSurfaceSynchronization[];
+CC_BASE_EXPORT extern const char kAlwaysRequestPresentationTime[];
 
 // Debug visualizations.
 CC_BASE_EXPORT extern const char kShowCompositedLayerBorders[];
 CC_BASE_EXPORT extern const char kUIShowCompositedLayerBorders[];
-CC_BASE_EXPORT extern const char kGlCompositedOverlayCandidateQuadBorder[];
 CC_BASE_EXPORT extern const char kShowFPSCounter[];
 CC_BASE_EXPORT extern const char kUIShowFPSCounter[];
 CC_BASE_EXPORT extern const char kShowLayerAnimationBounds[];
@@ -48,7 +48,6 @@ CC_BASE_EXPORT extern const char kShowScreenSpaceRects[];
 CC_BASE_EXPORT extern const char kUIShowScreenSpaceRects[];
 CC_BASE_EXPORT extern const char kEnableLayerLists[];
 CC_BASE_EXPORT extern const char kUIEnableLayerLists[];
-CC_BASE_EXPORT extern const char kShowOverdrawFeedback[];
 CC_BASE_EXPORT extern const char kCompositedRenderPassBorders[];
 CC_BASE_EXPORT extern const char kCompositedSurfaceBorders[];
 CC_BASE_EXPORT extern const char kCompositedLayerBorders[];
@@ -57,7 +56,6 @@ CC_BASE_EXPORT extern const char kCompositedLayerBorders[];
 CC_BASE_EXPORT extern const char kCCLayerTreeTestNoTimeout[];
 CC_BASE_EXPORT extern const char kCCLayerTreeTestLongTimeout[];
 CC_BASE_EXPORT extern const char kCCRebaselinePixeltests[];
-CC_BASE_EXPORT extern const char kDisallowNonExactResourceReuse[];
 
 }  // namespace switches
 }  // namespace cc

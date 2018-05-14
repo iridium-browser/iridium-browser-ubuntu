@@ -1,3 +1,4 @@
+
 // Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -8,9 +9,11 @@
 #include "core/css/CSSSelectorList.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/parser/CSSParserContext.h"
+#include "core/css/parser/CSSParserObserver.h"
+#include "core/css/parser/CSSParserTokenStream.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/UseCounter.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
@@ -27,6 +30,25 @@ CSSSelectorList CSSSelectorParser::ParseSelector(
     return CSSSelectorList();
 
   parser.RecordUsageAndDeprecations(result);
+
+  if (result.HasPseudoMatches())
+    return result.TransformForPseudoMatches();
+  return result;
+}
+
+// static
+CSSSelectorList CSSSelectorParser::ConsumeSelector(
+    CSSParserTokenStream& stream,
+    const CSSParserContext* context,
+    StyleSheetContents* style_sheet,
+    CSSParserObserver* observer) {
+  CSSSelectorParser parser(context, style_sheet);
+  stream.ConsumeWhitespace();
+  CSSSelectorList result = parser.ConsumeComplexSelectorList(stream, observer);
+  parser.RecordUsageAndDeprecations(result);
+
+  if (result.HasPseudoMatches())
+    return result.TransformForPseudoMatches();
   return result;
 }
 
@@ -51,6 +73,39 @@ CSSSelectorList CSSSelectorParser::ConsumeComplexSelectorList(
 
   if (failed_parsing_)
     return CSSSelectorList();
+
+  return CSSSelectorList::AdoptSelectorVector(selector_list);
+}
+
+CSSSelectorList CSSSelectorParser::ConsumeComplexSelectorList(
+    CSSParserTokenStream& stream,
+    CSSParserObserver* observer) {
+  Vector<std::unique_ptr<CSSParserSelector>> selector_list;
+
+  while (true) {
+    const size_t selector_offset_start = stream.LookAheadOffset();
+    CSSParserTokenRange complex_selector =
+        stream.ConsumeUntilPeekedTypeIs<kLeftBraceToken, kCommaToken>();
+    const size_t selector_offset_end = stream.LookAheadOffset();
+
+    if (stream.UncheckedAtEnd())
+      return CSSSelectorList();
+
+    std::unique_ptr<CSSParserSelector> selector =
+        ConsumeComplexSelector(complex_selector);
+    if (!selector || failed_parsing_ || !complex_selector.AtEnd())
+      return CSSSelectorList();
+
+    if (observer)
+      observer->ObserveSelector(selector_offset_start, selector_offset_end);
+
+    selector_list.push_back(std::move(selector));
+    if (stream.Peek().GetType() == kLeftBraceToken)
+      break;
+
+    DCHECK_EQ(stream.Peek().GetType(), kCommaToken);
+    stream.ConsumeIncludingWhitespace();
+  }
 
   return CSSSelectorList::AdoptSelectorVector(selector_list);
 }
@@ -93,7 +148,7 @@ unsigned ExtractCompoundFlags(const CSSParserSelector& simple_selector,
     return kHasContentPseudoElement;
   if (simple_selector.GetPseudoType() == CSSSelector::kPseudoShadow)
     return 0;
-  // TODO(rune@opera.com): crbug.com/578131
+  // TODO(futhark@chromium.org): crbug.com/578131
   // The UASheetMode check is a work-around to allow this selector in
   // mediaControls(New).css:
   // input[type="range" i]::-webkit-media-slider-container > div {
@@ -210,6 +265,12 @@ bool IsSimpleSelectorValidAfterPseudoElement(
     return true;
   if (compound_pseudo_element == CSSSelector::kPseudoContent)
     return simple_selector.Match() != CSSSelector::kPseudoElement;
+  if (compound_pseudo_element == CSSSelector::kPseudoSlotted) {
+    return simple_selector.Match() == CSSSelector::kPseudoElement &&
+           (simple_selector.GetPseudoType() == CSSSelector::kPseudoBefore ||
+            simple_selector.GetPseudoType() == CSSSelector::kPseudoAfter);
+  }
+
   if (simple_selector.Match() != CSSSelector::kPseudoClass)
     return false;
   CSSSelector::PseudoType pseudo = simple_selector.GetPseudoType();
@@ -227,11 +288,11 @@ bool IsSimpleSelectorValidAfterPseudoElement(
 std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeCompoundSelector(
     CSSParserTokenRange& range) {
   std::unique_ptr<CSSParserSelector> compound_selector;
-
   AtomicString namespace_prefix;
   AtomicString element_name;
   CSSSelector::PseudoType compound_pseudo_element = CSSSelector::kPseudoUnknown;
-  if (!ConsumeName(range, element_name, namespace_prefix)) {
+  const bool has_q_name = ConsumeName(range, element_name, namespace_prefix);
+  if (!has_q_name) {
     compound_selector = ConsumeSimpleSelector(range);
     if (!compound_selector)
       return nullptr;
@@ -243,7 +304,7 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeCompoundSelector(
 
   while (std::unique_ptr<CSSParserSelector> simple_selector =
              ConsumeSimpleSelector(range)) {
-    // TODO(rune@opera.com): crbug.com/578131
+    // TODO(futhark@chromium.org): crbug.com/578131
     // The UASheetMode check is a work-around to allow this selector in
     // mediaControls(New).css:
     // video::-webkit-media-text-track-region-container.scrolling
@@ -271,15 +332,16 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeCompoundSelector(
     }
     if (namespace_uri == DefaultNamespace())
       namespace_prefix = g_null_atom;
+    context_->Count(WebFeature::kHasIDClassTagAttribute);
     return CSSParserSelector::Create(
         QualifiedName(namespace_prefix, element_name, namespace_uri));
   }
-  // TODO(rune@opera.com): Prepending a type selector to the compound is
+  // TODO(futhark@chromium.org): Prepending a type selector to the compound is
   // unnecessary if this compound is an argument to a pseudo selector like
   // :not(), since a type selector will be prepended at the top level of the
   // selector if necessary. We need to propagate that context information here
   // to tell if we are at the top level.
-  PrependTypeSelectorIfNeeded(namespace_prefix, element_name,
+  PrependTypeSelectorIfNeeded(namespace_prefix, has_q_name, element_name,
                               compound_selector.get());
   return SplitCompoundAtImplicitShadowCrossingCombinator(
       std::move(compound_selector));
@@ -316,7 +378,7 @@ bool CSSSelectorParser::ConsumeName(CSSParserTokenRange& range,
     range.Consume();
   } else if (first_token.GetType() == kDelimiterToken &&
              first_token.Delimiter() == '*') {
-    name = g_star_atom;
+    name = CSSSelector::UniversalSelectorAtom();
     range.Consume();
   } else if (first_token.GetType() == kDelimiterToken &&
              first_token.Delimiter() == '|') {
@@ -331,13 +393,14 @@ bool CSSSelectorParser::ConsumeName(CSSParserTokenRange& range,
     return true;
   range.Consume();
 
-  namespace_prefix = name;
+  namespace_prefix =
+      name == CSSSelector::UniversalSelectorAtom() ? g_star_atom : name;
   const CSSParserToken& name_token = range.Consume();
   if (name_token.GetType() == kIdentToken) {
     name = name_token.Value().ToAtomicString();
   } else if (name_token.GetType() == kDelimiterToken &&
              name_token.Delimiter() == '*') {
-    name = g_star_atom;
+    name = CSSSelector::UniversalSelectorAtom();
   } else {
     name = g_null_atom;
     namespace_prefix = g_null_atom;
@@ -356,6 +419,7 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeId(
   selector->SetMatch(CSSSelector::kId);
   AtomicString value = range.Consume().Value().ToAtomicString();
   selector->SetValue(value, IsQuirksModeBehavior(context_->MatchMode()));
+  context_->Count(WebFeature::kHasIDClassTagAttribute);
   return selector;
 }
 
@@ -370,6 +434,7 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeClass(
   selector->SetMatch(CSSSelector::kClass);
   AtomicString value = range.Consume().Value().ToAtomicString();
   selector->SetValue(value, IsQuirksModeBehavior(context_->MatchMode()));
+  context_->Count(WebFeature::kHasIDClassTagAttribute);
   return selector;
 }
 
@@ -383,7 +448,7 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeAttribute(
   AtomicString attribute_name;
   if (!ConsumeName(block, attribute_name, namespace_prefix))
     return nullptr;
-  if (attribute_name == g_star_atom)
+  if (attribute_name == CSSSelector::UniversalSelectorAtom())
     return nullptr;
   block.ConsumeWhitespace();
 
@@ -404,6 +469,7 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeAttribute(
   if (block.AtEnd()) {
     selector->SetAttribute(qualified_name, CSSSelector::kCaseSensitive);
     selector->SetMatch(CSSSelector::kAttributeSet);
+    context_->Count(WebFeature::kHasIDClassTagAttribute);
     return selector;
   }
 
@@ -418,6 +484,7 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeAttribute(
 
   if (!block.AtEnd())
     return nullptr;
+  context_->Count(WebFeature::kHasIDClassTagAttribute);
   return selector;
 }
 
@@ -442,11 +509,13 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumePseudo(
 
   AtomicString value = token.Value().ToAtomicString().LowerASCII();
   bool has_arguments = token.GetType() == kFunctionToken;
-  selector->UpdatePseudoType(value, has_arguments, context_->Mode());
+  selector->UpdatePseudoType(value, *context_, has_arguments, context_->Mode());
 
-  if (!RuntimeEnabledFeatures::CSSSelectorsFocusWithinEnabled() &&
-      selector->GetPseudoType() == CSSSelector::kPseudoFocusWithin)
-    return nullptr;
+  if (selector->Match() == CSSSelector::kPseudoElement &&
+      (selector->GetPseudoType() == CSSSelector::kPseudoBefore ||
+       selector->GetPseudoType() == CSSSelector::kPseudoAfter)) {
+    context_->Count(WebFeature::kHasBeforeOrAfterPseudoElement);
+  }
 
   if (selector->Match() == CSSSelector::kPseudoElement &&
       disallow_pseudo_elements_)
@@ -465,6 +534,20 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumePseudo(
     return nullptr;
 
   switch (selector->GetPseudoType()) {
+    case CSSSelector::kPseudoMatches: {
+      if (!RuntimeEnabledFeatures::CSSMatchesEnabled())
+        break;
+
+      DisallowPseudoElementsScope scope(this);
+
+      std::unique_ptr<CSSSelectorList> selector_list =
+          std::make_unique<CSSSelectorList>();
+      *selector_list = ConsumeComplexSelectorList(block);
+      if (!selector_list->IsValid() || !block.AtEnd())
+        return nullptr;
+      selector->SetSelectorList(std::move(selector_list));
+      return selector;
+    }
     case CSSSelector::kPseudoHost:
     case CSSSelector::kPseudoHostContext:
     case CSSSelector::kPseudoAny:
@@ -472,9 +555,10 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumePseudo(
       DisallowPseudoElementsScope scope(this);
 
       std::unique_ptr<CSSSelectorList> selector_list =
-          WTF::MakeUnique<CSSSelectorList>();
+          std::make_unique<CSSSelectorList>();
       *selector_list = ConsumeCompoundSelectorList(block);
-      if (!selector_list->IsValid() || !block.AtEnd())
+      if (!selector_list->IsValid() || !block.AtEnd() ||
+          selector_list->HasPseudoMatches())
         return nullptr;
       selector->SetSelectorList(std::move(selector_list));
       return selector;
@@ -496,7 +580,8 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumePseudo(
       std::unique_ptr<CSSParserSelector> inner_selector =
           ConsumeCompoundSelector(block);
       block.ConsumeWhitespace();
-      if (!inner_selector || !block.AtEnd())
+      if (!inner_selector || !block.AtEnd() ||
+          inner_selector->GetPseudoType() == CSSSelector::kPseudoMatches)
         return nullptr;
       Vector<std::unique_ptr<CSSParserSelector>> selector_vector;
       selector_vector.push_back(std::move(inner_selector));
@@ -582,7 +667,8 @@ CSSSelector::RelationType CSSSelectorParser::ConsumeCombinator(
       const CSSParserToken& slash = range.ConsumeIncludingWhitespace();
       if (slash.GetType() != kDelimiterToken || slash.Delimiter() != '/')
         failed_parsing_ = true;
-      return CSSSelector::kShadowDeep;
+      return context_->IsDynamicProfile() ? CSSSelector::kShadowDeepAsDescendant
+                                          : CSSSelector::kShadowDeep;
     }
 
     default:
@@ -608,6 +694,7 @@ CSSSelector::MatchType CSSSelectorParser::ConsumeAttributeMatch(
     case kDelimiterToken:
       if (token.Delimiter() == '=')
         return CSSSelector::kAttributeExact;
+      FALLTHROUGH;
     default:
       failed_parsing_ = true;
       return CSSSelector::kAttributeExact;
@@ -735,14 +822,15 @@ const AtomicString& CSSSelectorParser::DetermineNamespace(
 
 void CSSSelectorParser::PrependTypeSelectorIfNeeded(
     const AtomicString& namespace_prefix,
+    bool has_q_name,
     const AtomicString& element_name,
     CSSParserSelector* compound_selector) {
-  if (element_name.IsNull() && DefaultNamespace() == g_star_atom &&
+  if (!has_q_name && DefaultNamespace() == g_star_atom &&
       !compound_selector->NeedsImplicitShadowCombinatorForMatching())
     return;
 
   AtomicString determined_element_name =
-      element_name.IsNull() ? g_star_atom : element_name;
+      !has_q_name ? CSSSelector::UniversalSelectorAtom() : element_name;
   AtomicString namespace_uri = DetermineNamespace(namespace_prefix);
   if (namespace_uri.IsNull()) {
     failed_parsing_ = true;
@@ -763,13 +851,15 @@ void CSSSelectorParser::PrependTypeSelectorIfNeeded(
   // (relation) on in the cases where there are no simple selectors preceding
   // the pseudo element.
   bool is_host_pseudo = compound_selector->IsHostPseudoSelector();
-  if (is_host_pseudo && element_name.IsNull() && namespace_prefix.IsNull())
+  if (is_host_pseudo && !has_q_name && namespace_prefix.IsNull())
     return;
   if (tag != AnyQName() || is_host_pseudo ||
       compound_selector->NeedsImplicitShadowCombinatorForMatching()) {
     compound_selector->PrependTagSelector(
-        tag, determined_prefix == g_null_atom &&
-                 determined_element_name == g_star_atom && !is_host_pseudo);
+        tag,
+        determined_prefix == g_null_atom &&
+            determined_element_name == CSSSelector::UniversalSelectorAtom() &&
+            !is_host_pseudo);
   }
 }
 
@@ -831,7 +921,7 @@ void CSSSelectorParser::RecordUsageAndDeprecations(
   if (!context_->IsUseCounterRecordingEnabled())
     return;
 
-  for (const CSSSelector* selector = selector_list.First(); selector;
+  for (const CSSSelector* selector = selector_list.FirstForCSSOM(); selector;
        selector = CSSSelectorList::Next(*selector)) {
     for (const CSSSelector* current = selector; current;
          current = current->TagHistory()) {
@@ -839,6 +929,16 @@ void CSSSelectorParser::RecordUsageAndDeprecations(
       switch (current->GetPseudoType()) {
         case CSSSelector::kPseudoAny:
           feature = WebFeature::kCSSSelectorPseudoAny;
+          break;
+        case CSSSelector::kPseudoMatches:
+          DCHECK(RuntimeEnabledFeatures::CSSMatchesEnabled());
+          feature = WebFeature::kCSSSelectorPseudoMatches;
+          break;
+        case CSSSelector::kPseudoAnyLink:
+          feature = WebFeature::kCSSSelectorPseudoAnyLink;
+          break;
+        case CSSSelector::kPseudoWebkitAnyLink:
+          feature = WebFeature::kCSSSelectorPseudoWebkitAnyLink;
           break;
         case CSSSelector::kPseudoUnresolved:
           feature = WebFeature::kCSSSelectorPseudoUnresolved;
@@ -870,12 +970,76 @@ void CSSSelectorParser::RecordUsageAndDeprecations(
           break;
         case CSSSelector::kPseudoWebKitCustomElement:
           if (context_->Mode() != kUASheetMode) {
-            if (current->Value() ==
-                "-internal-media-controls-overlay-cast-button") {
+            if (current->Value() == "cue") {
+              feature = WebFeature::kCSSSelectorCue;
+            } else if (current->Value() ==
+                       "-internal-media-controls-overlay-cast-button") {
               feature = WebFeature::
                   kCSSSelectorInternalMediaControlsOverlayCastButton;
+            } else if (current->Value() ==
+                       "-webkit-calendar-picker-indicator") {
+              feature = WebFeature::kCSSSelectorWebkitCalendarPickerIndicator;
+            } else if (current->Value() == "-webkit-clear-button") {
+              feature = WebFeature::kCSSSelectorWebkitClearButton;
+            } else if (current->Value() == "-webkit-color-swatch") {
+              feature = WebFeature::kCSSSelectorWebkitColorSwatch;
+            } else if (current->Value() == "-webkit-color-swatch-wrapper") {
+              feature = WebFeature::kCSSSelectorWebkitColorSwatchWrapper;
+            } else if (current->Value() == "-webkit-date-and-time-value") {
+              feature = WebFeature::kCSSSelectorWebkitDateAndTimeValue;
+            } else if (current->Value() == "-webkit-datetime-edit") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEdit;
+            } else if (current->Value() == "-webkit-datetime-edit-ampm-field") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEditAmpmField;
+            } else if (current->Value() == "-webkit-datetime-edit-day-field") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEditDayField;
+            } else if (current->Value() ==
+                       "-webkit-datetime-edit-fields-wrapper") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEditFieldsWrapper;
+            } else if (current->Value() == "-webkit-datetime-edit-hour-field") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEditHourField;
+            } else if (current->Value() ==
+                       "-webkit-datetime-edit-millisecond-field") {
+              feature =
+                  WebFeature::kCSSSelectorWebkitDatetimeEditMillisecondField;
+            } else if (current->Value() ==
+                       "-webkit-datetime-edit-minute-field") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEditMinuteField;
+            } else if (current->Value() ==
+                       "-webkit-datetime-edit-month-field") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEditMonthField;
+            } else if (current->Value() ==
+                       "-webkit-datetime-edit-second-field") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEditSecondField;
+            } else if (current->Value() == "-webkit-datetime-edit-text") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEditText;
+            } else if (current->Value() == "-webkit-datetime-edit-week-field") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEditWeekField;
+            } else if (current->Value() == "-webkit-datetime-edit-year-field") {
+              feature = WebFeature::kCSSSelectorWebkitDatetimeEditYearField;
+            } else if (current->Value() == "-webkit-details-marker") {
+              feature = WebFeature::kCSSSelectorWebkitDetailsMarker;
+            } else if (current->Value() == "-webkit-file-upload-button") {
+              feature = WebFeature::kCSSSelectorWebkitFileUploadButton;
+            } else if (current->Value() == "-webkit-inner-spin-button") {
+              feature = WebFeature::kCSSSelectorWebkitInnerSpinButton;
+            } else if (current->Value() == "-webkit-input-placeholder") {
+              feature = WebFeature::kCSSSelectorWebkitInputPlaceholder;
             } else if (current->Value() == "-webkit-media-controls") {
               feature = WebFeature::kCSSSelectorWebkitMediaControls;
+            } else if (current->Value() ==
+                       "-webkit-media-controls-current-time-display") {
+              feature =
+                  WebFeature::kCSSSelectorWebkitMediaControlsCurrentTimeDisplay;
+            } else if (current->Value() == "-webkit-media-controls-enclosure") {
+              feature = WebFeature::kCSSSelectorWebkitMediaControlsEnclosure;
+            } else if (current->Value() ==
+                       "-webkit-media-controls-fullscreen-button") {
+              feature =
+                  WebFeature::kCSSSelectorWebkitMediaControlsFullscreenButton;
+            } else if (current->Value() ==
+                       "-webkit-media-controls-mute-button") {
+              feature = WebFeature::kCSSSelectorWebkitMediaControlsMuteButton;
             } else if (current->Value() ==
                        "-webkit-media-controls-overlay-enclosure") {
               feature =
@@ -884,41 +1048,75 @@ void CSSSelectorParser::RecordUsageAndDeprecations(
                        "-webkit-media-controls-overlay-play-button") {
               feature =
                   WebFeature::kCSSSelectorWebkitMediaControlsOverlayPlayButton;
-            } else if (current->Value() == "-webkit-media-controls-enclosure") {
-              feature = WebFeature::kCSSSelectorWebkitMediaControlsEnclosure;
             } else if (current->Value() == "-webkit-media-controls-panel") {
               feature = WebFeature::kCSSSelectorWebkitMediaControlsPanel;
             } else if (current->Value() ==
                        "-webkit-media-controls-play-button") {
               feature = WebFeature::kCSSSelectorWebkitMediaControlsPlayButton;
-            } else if (current->Value() ==
-                       "-webkit-media-controls-current-time-display") {
-              feature =
-                  WebFeature::kCSSSelectorWebkitMediaControlsCurrentTimeDisplay;
-            } else if (current->Value() ==
-                       "-webkit-media-controls-time-remaining-display") {
-              feature = WebFeature::
-                  kCSSSelectorWebkitMediaControlsTimeRemainingDisplay;
             } else if (current->Value() == "-webkit-media-controls-timeline") {
               feature = WebFeature::kCSSSelectorWebkitMediaControlsTimeline;
             } else if (current->Value() ==
                        "-webkit-media-controls-timeline-container") {
+              // Note: This feature is no longer implemented in Blink.
               feature =
                   WebFeature::kCSSSelectorWebkitMediaControlsTimelineContainer;
             } else if (current->Value() ==
-                       "-webkit-media-controls-mute-button") {
-              feature = WebFeature::kCSSSelectorWebkitMediaControlsMuteButton;
-            } else if (current->Value() ==
-                       "-webkit-media-controls-volume-slider") {
-              feature = WebFeature::kCSSSelectorWebkitMediaControlsVolumeSlider;
-            } else if (current->Value() ==
-                       "-webkit-media-controls-fullscreen-button") {
-              feature =
-                  WebFeature::kCSSSelectorWebkitMediaControlsFullscreenButton;
+                       "-webkit-media-controls-time-remaining-display") {
+              feature = WebFeature::
+                  kCSSSelectorWebkitMediaControlsTimeRemainingDisplay;
             } else if (current->Value() ==
                        "-webkit-media-controls-toggle-closed-captions-button") {
               feature = WebFeature::
                   kCSSSelectorWebkitMediaControlsToggleClosedCaptionsButton;
+            } else if (current->Value() ==
+                       "-webkit-media-controls-volume-slider") {
+              feature = WebFeature::kCSSSelectorWebkitMediaControlsVolumeSlider;
+            } else if (current->Value() == "-webkit-media-slider-container") {
+              feature = WebFeature::kCSSSelectorWebkitMediaSliderContainer;
+            } else if (current->Value() == "-webkit-media-slider-thumb") {
+              feature = WebFeature::kCSSSelectorWebkitMediaSliderThumb;
+            } else if (current->Value() ==
+                       "-webkit-media-text-track-container") {
+              feature = WebFeature::kCSSSelectorWebkitMediaTextTrackContainer;
+            } else if (current->Value() == "-webkit-media-text-track-display") {
+              feature = WebFeature::kCSSSelectorWebkitMediaTextTrackDisplay;
+            } else if (current->Value() == "-webkit-media-text-track-region") {
+              feature = WebFeature::kCSSSelectorWebkitMediaTextTrackRegion;
+            } else if (current->Value() ==
+                       "-webkit-media-text-track-region-container") {
+              feature =
+                  WebFeature::kCSSSelectorWebkitMediaTextTrackRegionContainer;
+            } else if (current->Value() == "-webkit-meter-bar") {
+              feature = WebFeature::kCSSSelectorWebkitMeterBar;
+            } else if (current->Value() ==
+                       "-webkit-meter-even-less-good-value") {
+              feature = WebFeature::kCSSSelectorWebkitMeterEvenLessGoodValue;
+            } else if (current->Value() == "-webkit-meter-inner-element") {
+              feature = WebFeature::kCSSSelectorWebkitMeterInnerElement;
+            } else if (current->Value() == "-webkit-meter-optimum-value") {
+              feature = WebFeature::kCSSSelectorWebkitMeterOptimumValue;
+            } else if (current->Value() == "-webkit-meter-suboptimum-value") {
+              feature = WebFeature::kCSSSelectorWebkitMeterSuboptimumValue;
+            } else if (current->Value() == "-webkit-progress-bar") {
+              feature = WebFeature::kCSSSelectorWebkitProgressBar;
+            } else if (current->Value() == "-webkit-progress-inner-element") {
+              feature = WebFeature::kCSSSelectorWebkitProgressInnerElement;
+            } else if (current->Value() == "-webkit-progress-value") {
+              feature = WebFeature::kCSSSelectorWebkitProgressValue;
+            } else if (current->Value() == "-webkit-search-cancel-button") {
+              feature = WebFeature::kCSSSelectorWebkitSearchCancelButton;
+            } else if (current->Value() == "-webkit-slider-container") {
+              feature = WebFeature::kCSSSelectorWebkitSliderContainer;
+            } else if (current->Value() == "-webkit-slider-runnable-track") {
+              feature = WebFeature::kCSSSelectorWebkitSliderRunnableTrack;
+            } else if (current->Value() == "-webkit-slider-thumb") {
+              feature = WebFeature::kCSSSelectorWebkitSliderThumb;
+            } else if (current->Value() ==
+                       "-webkit-textfield-decoration-container") {
+              feature =
+                  WebFeature::kCSSSelectorWebkitTextfieldDecorationContainer;
+            } else {
+              feature = WebFeature::kCSSSelectorWebkitUnknownPseudo;
             }
           }
           break;
@@ -941,7 +1139,7 @@ void CSSSelectorParser::RecordUsageAndDeprecations(
       }
       if (feature != WebFeature::kNumberOfFeatures) {
         if (!Deprecation::DeprecationMessage(feature).IsEmpty() &&
-            style_sheet_->AnyOwnerDocument()) {
+            style_sheet_ && style_sheet_->AnyOwnerDocument()) {
           Deprecation::CountDeprecation(*style_sheet_->AnyOwnerDocument(),
                                         feature);
         } else {

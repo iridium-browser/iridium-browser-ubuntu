@@ -10,14 +10,13 @@
 #include "android_webview/browser/aw_cookie_access_policy.h"
 #include "android_webview/browser/net/aw_web_resource_request.h"
 #include "base/android/build_info.h"
-#include "components/policy/core/browser/url_blacklist_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_request_info.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
+#include "net/base/proxy_server.h"
 #include "net/http/http_response_headers.h"
-#include "net/proxy/proxy_info.h"
-#include "net/proxy/proxy_server.h"
+#include "net/proxy_resolution/proxy_info.h"
 #include "net/url_request/url_request.h"
 
 using content::BrowserThread;
@@ -42,23 +41,9 @@ void OnReceivedHttpErrorOnUiThread(
 
 }  // namespace
 
-AwNetworkDelegate::AwNetworkDelegate() : url_blacklist_manager_(nullptr) {
-}
+AwNetworkDelegate::AwNetworkDelegate() {}
 
 AwNetworkDelegate::~AwNetworkDelegate() {
-}
-
-int AwNetworkDelegate::OnBeforeURLRequest(
-    net::URLRequest* request,
-    const net::CompletionCallback& callback,
-    GURL* new_url) {
-  if (!url_blacklist_manager_) {
-    url_blacklist_manager_ =
-        AwBrowserContext::GetDefault()->GetURLBlacklistManager();
-  }
-  if (url_blacklist_manager_->IsURLBlocked(request->url()))
-    return net::ERR_BLOCKED_BY_ADMINISTRATOR;
-  return net::OK;
 }
 
 int AwNetworkDelegate::OnBeforeStartTransaction(
@@ -134,10 +119,9 @@ bool AwNetworkDelegate::OnCanGetCookies(const net::URLRequest& request,
 }
 
 bool AwNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
-                                       const std::string& cookie_line,
+                                       const net::CanonicalCookie& cookie,
                                        net::CookieOptions* options) {
-  return AwCookieAccessPolicy::GetInstance()->OnCanSetCookie(request,
-                                                             cookie_line,
+  return AwCookieAccessPolicy::GetInstance()->OnCanSetCookie(request, cookie,
                                                              options);
 }
 

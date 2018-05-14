@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
+#include "base/containers/circular_deque.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
@@ -20,6 +21,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "remoting/protocol/p2p_datagram_socket.h"
 #include "remoting/protocol/p2p_stream_socket.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -36,7 +38,8 @@ const int kTestDataSize = kMessages * kMessageSize;
 
 class RateLimiter {
  public:
-  virtual ~RateLimiter() { };
+  virtual ~RateLimiter() = default;
+  ;
   // Returns true if the new packet needs to be dropped, false otherwise.
   virtual bool DropNextPacket() = 0;
 };
@@ -51,7 +54,7 @@ class LeakyBucket : public RateLimiter {
         last_update_(base::TimeTicks::Now()) {
   }
 
-  ~LeakyBucket() override {}
+  ~LeakyBucket() override = default;
 
   bool DropNextPacket() override {
     base::TimeTicks now = base::TimeTicks::Now();
@@ -80,7 +83,7 @@ class FakeSocket : public P2PDatagramSocket {
       : rate_limiter_(NULL),
         latency_ms_(0) {
   }
-  ~FakeSocket() override {}
+  ~FakeSocket() override = default;
 
   void AppendInputPacket(const std::vector<char>& data) {
     if (rate_limiter_ && rate_limiter_->DropNextPacket())
@@ -149,7 +152,7 @@ class FakeSocket : public P2PDatagramSocket {
   int read_buffer_size_;
   net::CompletionCallback read_callback_;
 
-  std::deque<std::vector<char> > incoming_packets_;
+  base::circular_deque<std::vector<char>> incoming_packets_;
 
   FakeSocket* peer_socket_;
   RateLimiter* rate_limiter_;
@@ -187,7 +190,7 @@ class TCPChannelTester : public base::RefCountedThreadSafe<TCPChannelTester> {
   }
 
  protected:
-  virtual ~TCPChannelTester() {}
+  virtual ~TCPChannelTester() = default;
 
   void Done() {
     done_ = true;
@@ -219,9 +222,9 @@ class TCPChannelTester : public base::RefCountedThreadSafe<TCPChannelTester> {
       int bytes_to_write = std::min(output_buffer_->BytesRemaining(),
                                     kMessageSize);
       result = client_socket_->Write(
-          output_buffer_.get(),
-          bytes_to_write,
-          base::Bind(&TCPChannelTester::OnWritten, base::Unretained(this)));
+          output_buffer_.get(), bytes_to_write,
+          base::Bind(&TCPChannelTester::OnWritten, base::Unretained(this)),
+          TRAFFIC_ANNOTATION_FOR_TESTS);
       HandleWriteResult(result);
     }
   }

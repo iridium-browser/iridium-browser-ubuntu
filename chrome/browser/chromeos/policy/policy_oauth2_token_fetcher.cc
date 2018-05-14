@@ -179,7 +179,7 @@ void PolicyOAuth2TokenFetcherImpl::StartFetchingRefreshToken() {
   if (auth_code_.empty()) {
     refresh_token_fetcher_.reset(new GaiaAuthFetcher(
         this, GaiaConstants::kChromeSource, auth_context_getter_.get()));
-    refresh_token_fetcher_->StartCookieForOAuthLoginTokenExchange(
+    refresh_token_fetcher_->DeprecatedStartCookieForOAuthLoginTokenExchange(
         std::string());
   } else {
     refresh_token_fetcher_.reset(new GaiaAuthFetcher(
@@ -248,7 +248,8 @@ void PolicyOAuth2TokenFetcherImpl::RetryOnError(
         base::TimeDelta::FromMilliseconds(kRequestRestartDelay));
     return;
   }
-  LOG(ERROR) << "Unrecoverable error or retry count max reached.";
+  LOG(ERROR) << "Unrecoverable error or retry count max reached: "
+             << error.state();
   failed_ = true;
   // Invoking the |callback_| signals to the owner of this object that it has
   // completed, and the owner may delete this object on the callback method.

@@ -128,6 +128,11 @@ class Encoder {
     ASSERT_EQ(VPX_CODEC_OK, res) << EncoderError();
   }
 
+  void Control(int ctrl_id, struct vpx_svc_ref_frame_config *arg) {
+    const vpx_codec_err_t res = vpx_codec_control_(&encoder_, ctrl_id, arg);
+    ASSERT_EQ(VPX_CODEC_OK, res) << EncoderError();
+  }
+
   void Control(int ctrl_id, struct vpx_svc_parameters *arg) {
     const vpx_codec_err_t res = vpx_codec_control_(&encoder_, ctrl_id, arg);
     ASSERT_EQ(VPX_CODEC_OK, res) << EncoderError();
@@ -137,8 +142,12 @@ class Encoder {
     const vpx_codec_err_t res = vpx_codec_control_(&encoder_, ctrl_id, arg);
     ASSERT_EQ(VPX_CODEC_OK, res) << EncoderError();
   }
-#endif
 
+  void Control(int ctrl_id, vpx_roi_map_t *arg) {
+    const vpx_codec_err_t res = vpx_codec_control_(&encoder_, ctrl_id, arg);
+    ASSERT_EQ(VPX_CODEC_OK, res) << EncoderError();
+  }
+#endif
   void Config(const vpx_codec_enc_cfg_t *cfg) {
     const vpx_codec_err_t res = vpx_codec_enc_config_set(&encoder_, cfg);
     ASSERT_EQ(VPX_CODEC_OK, res) << EncoderError();
@@ -211,6 +220,8 @@ class EncoderTest {
   virtual void PreEncodeFrameHook(VideoSource * /*video*/) {}
   virtual void PreEncodeFrameHook(VideoSource * /*video*/,
                                   Encoder * /*encoder*/) {}
+
+  virtual void PostEncodeFrameHook(Encoder * /*encoder*/) {}
 
   // Hook to be called on every compressed data packet.
   virtual void FramePktHook(const vpx_codec_cx_pkt_t * /*pkt*/) {}

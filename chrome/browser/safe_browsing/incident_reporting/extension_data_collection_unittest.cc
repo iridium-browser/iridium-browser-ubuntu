@@ -4,10 +4,10 @@
 
 #include "chrome/browser/safe_browsing/incident_reporting/extension_data_collection.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -21,7 +21,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
@@ -100,10 +100,10 @@ void ExtensionTestingProfile::AddExtension(std::string extension_id,
 
   extension_prefs_->UpdateExtensionPref(
       extension_id, "install_time",
-      base::MakeUnique<base::Value>(
+      std::make_unique<base::Value>(
           base::Int64ToString(install_time.ToInternalValue())));
   extension_prefs_->UpdateExtensionPref(
-      extension_id, "state", base::MakeUnique<base::Value>(state_value));
+      extension_id, "state", std::make_unique<base::Value>(state_value));
 }
 
 void ExtensionTestingProfile::SetInstallSignature(
@@ -135,9 +135,17 @@ class ExtensionDataCollectionTest : public testing::Test {
     profile_manager_.reset(
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
     ASSERT_TRUE(profile_manager_->SetUp());
+#if defined OS_CHROMEOS
+    test_user_manager_.reset(new chromeos::ScopedTestUserManager());
+#endif
   }
 
   void TearDown() override {
+#if defined OS_CHROMEOS
+    // UserManager should be destroyed before TestingBrowserProcess as it
+    // uses it in destructor.
+    test_user_manager_.reset();
+#endif
     profile_manager_.reset();
     TestingBrowserProcess::DeleteInstance();
     testing::Test::TearDown();
@@ -151,7 +159,7 @@ class ExtensionDataCollectionTest : public testing::Test {
     // Create prefs for the profile and safe browsing preferences accordingly.
     std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> prefs(
         new sync_preferences::TestingPrefServiceSyncable);
-    chrome::RegisterUserProfilePrefs(prefs->registry());
+    RegisterUserProfilePrefs(prefs->registry());
     prefs->SetBoolean(
         prefs::kSafeBrowsingEnabled,
         safe_browsing_opt_in == SAFE_BROWSING_ONLY ||
@@ -167,7 +175,7 @@ class ExtensionDataCollectionTest : public testing::Test {
         std::string(),                    // supervised_user_id
         TestingProfile::TestingFactories());
 
-    return base::MakeUnique<ExtensionTestingProfile>(profile);
+    return std::make_unique<ExtensionTestingProfile>(profile);
   }
 
   content::TestBrowserThreadBundle browser_thread_bundle_;
@@ -179,7 +187,7 @@ class ExtensionDataCollectionTest : public testing::Test {
 #if defined OS_CHROMEOS
   chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
   chromeos::ScopedTestCrosSettings test_cros_settings_;
-  chromeos::ScopedTestUserManager test_user_manager_;
+  std::unique_ptr<chromeos::ScopedTestUserManager> test_user_manager_;
 #endif
 };
 

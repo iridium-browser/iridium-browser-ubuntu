@@ -31,7 +31,7 @@ class DefaultTracingView : public ActionableView {
  public:
   explicit DefaultTracingView(SystemTrayItem* owner)
       : ActionableView(owner, TrayPopupInkDropStyle::FILL_BOUNDS) {
-    SetLayoutManager(new views::FillLayout);
+    SetLayoutManager(std::make_unique<views::FillLayout>());
     TriView* tri_view = TrayPopupUtils::CreateDefaultRowView();
     AddChildView(tri_view);
 
@@ -51,7 +51,7 @@ class DefaultTracingView : public ActionableView {
     SetInkDropMode(InkDropHostView::InkDropMode::ON);
   }
 
-  ~DefaultTracingView() override {}
+  ~DefaultTracingView() override = default;
 
  private:
   bool PerformAction(const ui::Event& event) override {

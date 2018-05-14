@@ -8,14 +8,13 @@
 
 namespace blink {
 
-void PaintWorkletPendingGeneratorRegistry::SetDefinition(
-    const String& name,
-    CSSPaintDefinition* definition) {
+void PaintWorkletPendingGeneratorRegistry::NotifyGeneratorReady(
+    const String& name) {
   GeneratorHashSet* set = pending_generators_.at(name);
   if (set) {
     for (const auto& generator : *set) {
       if (generator)
-        generator->SetDefinition(definition);
+        generator->NotifyGeneratorReady();
     }
   }
   pending_generators_.erase(name);
@@ -31,7 +30,7 @@ void PaintWorkletPendingGeneratorRegistry::AddPendingGenerator(
   set->insert(generator);
 }
 
-DEFINE_TRACE(PaintWorkletPendingGeneratorRegistry) {
+void PaintWorkletPendingGeneratorRegistry::Trace(blink::Visitor* visitor) {
   visitor->Trace(pending_generators_);
 }
 

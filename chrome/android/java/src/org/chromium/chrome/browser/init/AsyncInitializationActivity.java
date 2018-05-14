@@ -13,6 +13,7 @@ import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Process;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.provider.Settings.SettingNotFoundException;
@@ -28,6 +29,7 @@ import android.view.ViewTreeObserver.OnPreDrawListener;
 import android.view.WindowManager;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.LibraryLoader;
@@ -36,6 +38,7 @@ import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.LaunchIntentDispatcher;
 import org.chromium.chrome.browser.WarmupManager;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
 import org.chromium.chrome.browser.metrics.MemoryUma;
@@ -135,19 +138,18 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
 
     @Override
     public final void setContentViewAndLoadLibrary() {
-        // Unless it was called before, {@link #setContentView} inflates the decorView and the basic
-        // UI hierarchy as stubs. This is done here before kicking long running I/O because
-        // inflation accesses resource files (XML, etc) even if we are inflating views defined by
-        // the framework. If this operation gets blocked because other long running I/O are running,
-        // we delay onCreate(), onStart() and first draw consequently.
-
-        setContentView();
-        if (mLaunchBehindWorkaround != null) mLaunchBehindWorkaround.onSetContentView();
+        // Start loading libraries before setContentView(). This "hides" library loading behind
+        // UI inflation and prevents stalling UI thread. See crbug.com/796957 for details.
+        // Note that for optimal performance AsyncInitTaskRunner.startBackgroundTasks() needs
+        // to start warmup renderer only after library is loaded.
 
         if (!mStartupDelayed) {
             // Kick off long running IO tasks that can be done in parallel.
             mNativeInitializationController.startBackgroundTasks(shouldAllocateChildConnection());
         }
+
+        setContentView();
+        if (mLaunchBehindWorkaround != null) mLaunchBehindWorkaround.onSetContentView();
     }
 
     /** Controls the parameter of {@link NativeInitializationController#startBackgroundTasks()}.*/
@@ -244,10 +246,32 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
         TraceEvent.end("AsyncInitializationActivity.onCreate()");
     }
 
+    /**
+     * Called from onCreate() to give derived classes a chance to dispatch the intent using
+     * {@link LaunchIntentDispatcher}. If the method returns anything other than Action.CONTINUE,
+     * the activity is aborted. Default implementation returns Action.CONTINUE.
+     * @param intent intent to dispatch
+     * @return {@link LaunchIntentDispatcher.Action} to take
+     */
+    protected @LaunchIntentDispatcher.Action int maybeDispatchLaunchIntent(Intent intent) {
+        return LaunchIntentDispatcher.Action.CONTINUE;
+    }
+
     private final void onCreateInternal(Bundle savedInstanceState) {
-        Intent intent = getIntent();
+        setIntent(validateIntent(getIntent()));
+
+        @LaunchIntentDispatcher.Action
+        int dispatchAction = maybeDispatchLaunchIntent(getIntent());
+        if (dispatchAction != LaunchIntentDispatcher.Action.CONTINUE) {
+            abortLaunch();
+            return;
+        }
+
         if (DocumentModeAssassin.getInstance().isMigrationNecessary()) {
-            super.onCreate(null);
+            // Some Samsung devices load fonts from disk, crbug.com/691706.
+            try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+                super.onCreate(null);
+            }
 
             // Kick the user to the MigrationActivity.
             UpgradeActivity.launchInstance(this, getIntent());
@@ -257,6 +281,7 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
             return;
         }
 
+        Intent intent = getIntent();
         if (!isStartedUpCorrectly(intent)) {
             abortLaunch();
             return;
@@ -269,7 +294,10 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
             return;
         }
 
-        super.onCreate(transformSavedInstanceStateForOnCreate(savedInstanceState));
+        // Some Samsung devices load fonts from disk, crbug.com/691706.
+        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+            super.onCreate(transformSavedInstanceStateForOnCreate(savedInstanceState));
+        }
         mOnCreateTimestampMs = SystemClock.elapsedRealtime();
         mOnCreateTimestampUptimeMs = SystemClock.uptimeMillis();
         mSavedInstanceState = savedInstanceState;
@@ -286,6 +314,19 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     private void abortLaunch() {
         super.onCreate(null);
         ApiCompatibilityUtils.finishAndRemoveTask(this);
+        overridePendingTransition(0, R.anim.no_anim);
+
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.LOLLIPOP
+                || Build.VERSION.SDK_INT == Build.VERSION_CODES.LOLLIPOP_MR1) {
+            // On L ApiCompatibilityUtils.finishAndRemoveTask() sometimes fails, which causes
+            // NPE in onStart() later, see crbug.com/781396. We can't let this activity to
+            // start, and we don't want to crash either. So try finishing one more time and
+            // suicide if that fails.
+            if (!isFinishing()) {
+                finish();
+                if (!isFinishing()) Process.killProcess(Process.myPid());
+            }
+        }
     }
 
     /**
@@ -300,6 +341,13 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
         mNativeInitializationController.startBackgroundTasks(shouldAllocateChildConnection());
 
         if (mFirstDrawComplete) onFirstDrawComplete();
+    }
+
+    /**
+     * @return Whether the native library initialization is delayed at this point.
+     */
+    protected boolean isStartupDelayed() {
+        return mStartupDelayed;
     }
 
     /**
@@ -350,6 +398,14 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     }
 
     /**
+     * Validates the intent that started this activity.
+     * @return The validated intent.
+     */
+    protected Intent validateIntent(final Intent intent) {
+        return intent;
+    }
+
+    /**
      * @return The elapsed real time for the activity creation in ms.
      */
     protected long getOnCreateTimestampUptimeMs() {
@@ -388,10 +444,13 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     @Override
     public void onResume() {
         super.onResume();
-        mNativeInitializationController.onResume();
-        if (mLaunchBehindWorkaround != null) mLaunchBehindWorkaround.onResume();
+
+        // Start by setting the launch as cold or warm. It will be used in some resume handlers.
         mIsWarmOnResume = !mFirstResumePending || hadWarmStart();
         mFirstResumePending = false;
+
+        mNativeInitializationController.onResume();
+        if (mLaunchBehindWorkaround != null) mLaunchBehindWorkaround.onResume();
     }
 
     @CallSuper

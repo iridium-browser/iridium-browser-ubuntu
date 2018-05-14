@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/scoped_observer.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
@@ -63,6 +62,7 @@ content::WebUIDataSource* CreateNetExportHTMLSource() {
   source->SetJsonPath("strings.js");
   source->AddResourcePath(net_log::kNetExportUIJS, IDR_NET_LOG_NET_EXPORT_JS);
   source->SetDefaultResource(IDR_NET_LOG_NET_EXPORT_HTML);
+  source->UseGzip();
   return source;
 }
 
@@ -168,7 +168,6 @@ NetExportMessageHandler::NetExportMessageHandler()
       state_observer_manager_(this),
       weak_ptr_factory_(this) {
   file_writer_->Initialize(
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE_USER_BLOCKING),
       BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
 }
 
@@ -375,7 +374,7 @@ void NetExportMessageHandler::ShowSelectFileDialog(
   WebContents* webcontents = web_ui()->GetWebContents();
 
   select_file_dialog_ = ui::SelectFileDialog::Create(
-      this, new ChromeSelectFilePolicy(webcontents));
+      this, std::make_unique<ChromeSelectFilePolicy>(webcontents));
   ui::SelectFileDialog::FileTypeInfo file_type_info;
   file_type_info.extensions = {{FILE_PATH_LITERAL("json")}};
   gfx::NativeWindow owning_window = webcontents->GetTopLevelNativeWindow();
@@ -405,7 +404,7 @@ NetExportMessageHandler::GetURLRequestContexts() const {
 }  // namespace
 
 NetExportUI::NetExportUI(content::WebUI* web_ui) : WebUIController(web_ui) {
-  web_ui->AddMessageHandler(base::MakeUnique<NetExportMessageHandler>());
+  web_ui->AddMessageHandler(std::make_unique<NetExportMessageHandler>());
 
   // Set up the chrome://net-export/ source.
   Profile* profile = Profile::FromWebUI(web_ui);

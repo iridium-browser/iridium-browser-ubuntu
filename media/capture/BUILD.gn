@@ -9,12 +9,14 @@ import("//testing/test.gni")
 group("capture") {
   public_deps = [
     ":capture_lib",
-    "//media/capture/mojo:capture_types",
+    "//media/capture/mojo:image_capture",
+    "//media/capture/mojo:image_capture_types",
+    "//media/capture/mojo:video_capture",
     "//services/service_manager/public/cpp",
   ]
 }
 
-# Things needed by //media/capture/mojo:capture_types.
+# Things needed by //media/capture/mojo/video_capture_types.mojom.
 component("capture_base") {
   defines = [ "CAPTURE_IMPLEMENTATION" ]
   sources = [
@@ -34,7 +36,17 @@ component("capture_base") {
   ]
 }
 
-component("capture_lib") {
+# Target which allows breakout of Android BUILD.gn files.
+source_set("capture_device_specific") {
+  visibility = [
+    ":capture_lib",
+    "//media/capture/content/android",
+    "//media/capture/video/android",
+  ]
+  if (is_win) {
+    # TODO(jschuh): https://crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+  }
   defines = [ "CAPTURE_IMPLEMENTATION" ]
   sources = [
     "content/animated_content_sampler.cc",
@@ -49,6 +61,8 @@ component("capture_lib") {
     "content/thread_safe_capture_oracle.h",
     "content/video_capture_oracle.cc",
     "content/video_capture_oracle.h",
+    "video/blob_utils.cc",
+    "video/blob_utils.h",
     "video/fake_video_capture_device.cc",
     "video/fake_video_capture_device.h",
     "video/fake_video_capture_device_factory.cc",
@@ -57,6 +71,32 @@ component("capture_lib") {
     "video/file_video_capture_device.h",
     "video/file_video_capture_device_factory.cc",
     "video/file_video_capture_device_factory.h",
+    "video/video_capture_buffer_handle.h",
+    "video/video_capture_device.cc",
+    "video/video_capture_device.h",
+    "video/video_capture_device_factory.cc",
+    "video/video_capture_device_factory.h",
+  ]
+
+  public_deps = [
+    ":capture_base",
+  ]
+  deps = [
+    "//base",
+    "//base:i18n",
+    "//gpu/command_buffer/client",
+    "//media",
+    "//media/capture/mojo:image_capture",
+    "//media/capture/mojo:image_capture_types",
+    "//media/mojo/interfaces:interfaces",
+    "//third_party/libyuv",
+    "//ui/gfx",
+  ]
+}
+
+component("capture_lib") {
+  defines = [ "CAPTURE_IMPLEMENTATION" ]
+  sources = [
     "video/linux/camera_config_chromeos.cc",
     "video/linux/camera_config_chromeos.h",
     "video/linux/v4l2_capture_delegate.cc",
@@ -75,12 +115,11 @@ component("capture_lib") {
     "video/mac/video_capture_device_factory_mac.mm",
     "video/mac/video_capture_device_mac.h",
     "video/mac/video_capture_device_mac.mm",
-    "video/scoped_result_callback.h",
-    "video/shared_memory_buffer_handle.cc",
-    "video/shared_memory_buffer_handle.h",
+    "video/scoped_buffer_pool_reservation.h",
     "video/shared_memory_buffer_tracker.cc",
     "video/shared_memory_buffer_tracker.h",
-    "video/video_capture_buffer_handle.h",
+    "video/shared_memory_handle_provider.cc",
+    "video/shared_memory_handle_provider.h",
     "video/video_capture_buffer_pool.h",
     "video/video_capture_buffer_pool_impl.cc",
     "video/video_capture_buffer_pool_impl.h",
@@ -88,12 +127,8 @@ component("capture_lib") {
     "video/video_capture_buffer_tracker_factory.h",
     "video/video_capture_buffer_tracker_factory_impl.cc",
     "video/video_capture_buffer_tracker_factory_impl.h",
-    "video/video_capture_device.cc",
-    "video/video_capture_device.h",
     "video/video_capture_device_client.cc",
     "video/video_capture_device_client.h",
-    "video/video_capture_device_factory.cc",
-    "video/video_capture_device_factory.h",
     "video/video_capture_jpeg_decoder.h",
     "video/video_capture_system.h",
     "video/video_capture_system_impl.cc",
@@ -105,6 +140,8 @@ component("capture_lib") {
     "video/win/capability_list_win.h",
     "video/win/filter_base_win.cc",
     "video/win/filter_base_win.h",
+    "video/win/metrics.cc",
+    "video/win/metrics.h",
     "video/win/pin_base_win.cc",
     "video/win/pin_base_win.h",
     "video/win/sink_filter_observer_win.h",
@@ -116,6 +153,8 @@ component("capture_lib") {
     "video/win/video_capture_device_factory_win.h",
     "video/win/video_capture_device_mf_win.cc",
     "video/win/video_capture_device_mf_win.h",
+    "video/win/video_capture_device_utils_win.cc",
+    "video/win/video_capture_device_utils_win.h",
     "video/win/video_capture_device_win.cc",
     "video/win/video_capture_device_win.h",
     "video_capturer_source.cc",
@@ -124,14 +163,16 @@ component("capture_lib") {
 
   public_deps = [
     ":capture_base",
+    ":capture_device_specific",
   ]
 
   deps = [
     "//base",
     "//base:i18n",
     "//media",
-    "//media/capture/mojo:capture_types",
     "//media/capture/mojo:image_capture",
+    "//media/capture/mojo:image_capture_types",
+    "//media/capture/mojo:video_capture",
     "//media/mojo/interfaces:interfaces",
     "//services/service_manager/public/cpp",
     "//third_party/libyuv",
@@ -180,15 +221,9 @@ component("capture_lib") {
     configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
   }
 
-  if (is_linux || is_chromeos || is_win) {
-    sources += [
-      "video/blob_utils.cc",
-      "video/blob_utils.h",
-    ]
-  }
-
   if (is_chromeos) {
     sources += [
+      "video/chromeos/camera_buffer_factory.cc",
       "video/chromeos/camera_device_context.cc",
       "video/chromeos/camera_device_delegate.cc",
       "video/chromeos/camera_hal_delegate.cc",
@@ -201,11 +236,31 @@ component("capture_lib") {
       "video/chromeos/video_capture_device_factory_chromeos.cc",
     ]
     deps += [
+      "//chromeos:chromeos",
       "//media/capture/video/chromeos/mojo:arc_camera3",
       "//mojo/edk/system",
       "//third_party/libsync",
     ]
   }
+}
+
+source_set("test_support") {
+  sources = [
+    "video/mock_video_frame_receiver.cc",
+    "video/mock_video_frame_receiver.h",
+  ]
+
+  deps = [
+    ":capture_lib",
+    "//base/test:test_support",
+    "//media:test_support",
+    "//media/capture/mojo:image_capture",
+    "//media/capture/mojo:image_capture_types",
+    "//testing/gmock",
+    "//ui/gfx:test_support",
+  ]
+
+  testonly = true
 }
 
 test("capture_unittests") {
@@ -214,21 +269,30 @@ test("capture_unittests") {
     "content/capture_resolution_chooser_unittest.cc",
     "content/smooth_event_sampler_unittest.cc",
     "content/video_capture_oracle_unittest.cc",
+    "run_all_unittests.cc",
     "video/fake_video_capture_device_unittest.cc",
+    "video/file_video_capture_device_unittest.cc",
     "video/linux/camera_config_chromeos_unittest.cc",
     "video/linux/v4l2_capture_delegate_unittest.cc",
     "video/mac/video_capture_device_factory_mac_unittest.mm",
+    "video/shared_memory_handle_provider_unittest.cc",
     "video/video_capture_device_client_unittest.cc",
     "video/video_capture_device_unittest.cc",
+    "video_capture_types_unittest.cc",
+  ]
+
+  data = [
+    "//media/test/data/bear.mjpeg",
   ]
 
   deps = [
     ":capture",
-    "//base/test:run_all_unittests",
+    ":test_support",
     "//base/test:test_support",
-    "//media",
-    "//media/base:test_support",
+    "//media:test_support",
     "//media/capture/mojo:image_capture",
+    "//media/capture/mojo:image_capture_types",
+    "//mojo/edk/system",
     "//testing/gmock",
     "//testing/gtest",
     "//ui/gfx:test_support",
@@ -242,6 +306,19 @@ test("capture_unittests") {
   }
 
   if (is_win) {
+    sources += [ "video/win/video_capture_device_mf_win_unittest.cc" ]
+    libs = [
+      "mf.lib",
+      "mfplat.lib",
+      "mfreadwrite.lib",
+      "mfuuid.lib",
+    ]
+    ldflags = [
+      "/DELAYLOAD:mf.dll",
+      "/DELAYLOAD:mfplat.dll",
+      "/DELAYLOAD:mfreadwrite.dll",
+    ]
+
     # TODO(jschuh): https://crbug.com/167187 fix size_t to int truncations.
     configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
   }
@@ -251,14 +328,19 @@ test("capture_unittests") {
       "video/chromeos/camera_device_delegate_unittest.cc",
       "video/chromeos/camera_hal_delegate_unittest.cc",
       "video/chromeos/camera_hal_dispatcher_impl_unittest.cc",
+      "video/chromeos/local_gpu_memory_buffer_manager.cc",
       "video/chromeos/mock_camera_module.cc",
+      "video/chromeos/mock_gpu_memory_buffer_manager.cc",
       "video/chromeos/mock_video_capture_client.cc",
       "video/chromeos/stream_buffer_manager_unittest.cc",
     ]
     deps += [
+      "//chromeos:chromeos",
       "//media/capture/video/chromeos/mojo:arc_camera3",
       "//mojo/edk/system",
+      "//third_party/libdrm",
       "//third_party/libsync",
+      "//third_party/minigbm",
     ]
   }
 }

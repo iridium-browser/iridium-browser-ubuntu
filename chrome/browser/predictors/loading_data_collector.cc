@@ -13,12 +13,12 @@
 #include "chrome/browser/predictors/resource_prefetch_predictor_tables.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/mime_util/mime_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/common/resource_type.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
+#include "third_party/WebKit/public/common/mime_util/mime_util.h"
 
 using content::BrowserThread;
 
@@ -29,18 +29,18 @@ namespace {
 bool g_allow_port_in_urls = false;
 
 // Sorted by decreasing likelihood according to HTTP archive.
-const char* kFontMimeTypes[] = {"font/woff2",
-                                "application/x-font-woff",
-                                "application/font-woff",
-                                "application/font-woff2",
-                                "font/x-woff",
-                                "application/x-font-ttf",
-                                "font/woff",
-                                "font/ttf",
-                                "application/x-font-otf",
-                                "x-font/woff",
-                                "application/font-sfnt",
-                                "application/font-ttf"};
+const char* const kFontMimeTypes[] = {"font/woff2",
+                                      "application/x-font-woff",
+                                      "application/font-woff",
+                                      "application/font-woff2",
+                                      "font/x-woff",
+                                      "application/x-font-ttf",
+                                      "font/woff",
+                                      "font/ttf",
+                                      "application/x-font-otf",
+                                      "x-font/woff",
+                                      "application/font-sfnt",
+                                      "application/font-ttf"};
 
 bool IsNoStore(const net::URLRequest& response) {
   if (response.was_cached())
@@ -117,6 +117,14 @@ bool URLRequestSummary::SummarizeResponse(const net::URLRequest& request,
     summary->is_no_store = IsNoStore(request);
   }
   summary->network_accessed = request.response_info().network_accessed;
+
+  net::LoadTimingInfo timing_info;
+  request.GetLoadTimingInfo(&timing_info);
+  const auto& connect_timing = timing_info.connect_timing;
+  summary->connect_duration =
+      (connect_timing.dns_end - connect_timing.dns_start) +
+      (connect_timing.connect_end - connect_timing.connect_start);
+
   return true;
 }
 
@@ -130,12 +138,11 @@ PageRequestSummary::PageRequestSummary(const PageRequestSummary& other) =
 
 void PageRequestSummary::UpdateOrAddToOrigins(
     const URLRequestSummary& request_summary) {
-  const GURL& request_url = request_summary.request_url;
-  DCHECK(request_url.is_valid());
-  if (!request_url.is_valid())
+  GURL origin = request_summary.request_url.GetOrigin();
+  DCHECK(origin.is_valid());
+  if (!origin.is_valid())
     return;
 
-  GURL origin = request_url.GetOrigin();
   auto it = origins.find(origin);
   if (it == origins.end()) {
     OriginRequestSummary summary;
@@ -151,14 +158,15 @@ void PageRequestSummary::UpdateOrAddToOrigins(
 
 PageRequestSummary::~PageRequestSummary() {}
 
+// static
 content::ResourceType LoadingDataCollector::GetResourceTypeFromMimeType(
     const std::string& mime_type,
     content::ResourceType fallback) {
   if (mime_type.empty()) {
     return fallback;
-  } else if (mime_util::IsSupportedImageMimeType(mime_type)) {
+  } else if (blink::IsSupportedImageMimeType(mime_type)) {
     return content::RESOURCE_TYPE_IMAGE;
-  } else if (mime_util::IsSupportedJavascriptMimeType(mime_type)) {
+  } else if (blink::IsSupportedJavascriptMimeType(mime_type)) {
     return content::RESOURCE_TYPE_SCRIPT;
   } else if (net::MatchesMimeType("text/css", mime_type)) {
     return content::RESOURCE_TYPE_STYLESHEET;
@@ -174,6 +182,7 @@ content::ResourceType LoadingDataCollector::GetResourceTypeFromMimeType(
   return fallback;
 }
 
+// static
 content::ResourceType LoadingDataCollector::GetResourceType(
     content::ResourceType resource_type,
     const std::string& mime_type) {
@@ -227,6 +236,14 @@ bool LoadingDataCollector::ShouldRecordRedirect(net::URLRequest* response) {
 }
 
 // static
+bool LoadingDataCollector::ShouldRecordResourceFromMemoryCache(
+    const GURL& url,
+    content::ResourceType resource_type,
+    const std::string& mime_type) {
+  return IsHandledUrl(url) && IsHandledResourceType(resource_type, mime_type);
+}
+
+// static
 bool LoadingDataCollector::IsHandledMainPage(net::URLRequest* request) {
   const GURL& url = request->url();
   bool bad_port = !g_allow_port_in_urls && url.has_port();
@@ -237,12 +254,8 @@ bool LoadingDataCollector::IsHandledMainPage(net::URLRequest* request) {
 bool LoadingDataCollector::IsHandledSubresource(
     net::URLRequest* response,
     content::ResourceType resource_type) {
-  const GURL& url = response->url();
-  bool bad_port = !g_allow_port_in_urls && url.has_port();
-  if (!response->first_party_for_cookies().SchemeIsHTTPOrHTTPS() ||
-      !url.SchemeIsHTTPOrHTTPS() || bad_port) {
+  if (!response->site_for_cookies().SchemeIsHTTPOrHTTPS())
     return false;
-  }
 
   std::string mime_type;
   response->GetMimeType(&mime_type);
@@ -252,8 +265,8 @@ bool LoadingDataCollector::IsHandledSubresource(
   if (response->method() != "GET")
     return false;
 
-  if (response->original_url().spec().length() >
-      ResourcePrefetchPredictorTables::kMaxStringLength) {
+  if (!IsHandledUrl(response->url()) ||
+      !IsHandledUrl(response->original_url())) {
     return false;
   }
 
@@ -273,6 +286,18 @@ bool LoadingDataCollector::IsHandledResourceType(
          actual_resource_type == content::RESOURCE_TYPE_SCRIPT ||
          actual_resource_type == content::RESOURCE_TYPE_IMAGE ||
          actual_resource_type == content::RESOURCE_TYPE_FONT_RESOURCE;
+}
+
+// static
+bool LoadingDataCollector::IsHandledUrl(const GURL& url) {
+  bool bad_port = !g_allow_port_in_urls && url.has_port();
+  if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS() || bad_port)
+    return false;
+
+  if (url.spec().length() > ResourcePrefetchPredictorTables::kMaxStringLength)
+    return false;
+
+  return true;
 }
 
 // static
@@ -300,24 +325,18 @@ void LoadingDataCollector::RecordURLRequest(const URLRequestSummary& request) {
   const GURL& main_frame_url = request.navigation_id.main_frame_url;
   inflight_navigations_.emplace(
       request.navigation_id,
-      base::MakeUnique<PageRequestSummary>(main_frame_url));
+      std::make_unique<PageRequestSummary>(main_frame_url));
 }
 
 void LoadingDataCollector::RecordURLResponse(
     const URLRequestSummary& response) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  if (response.resource_type == content::RESOURCE_TYPE_MAIN_FRAME)
-    return;
-
   NavigationMap::const_iterator nav_it =
       inflight_navigations_.find(response.navigation_id);
   if (nav_it == inflight_navigations_.end())
     return;
   auto& page_request_summary = *nav_it->second;
-
-  if (!response.is_no_store)
-    page_request_summary.subresource_requests.push_back(response);
 
   if (config_.is_origin_learning_enabled)
     page_request_summary.UpdateOrAddToOrigins(response);
@@ -356,12 +375,6 @@ void LoadingDataCollector::RecordMainFrameLoadComplete(
   std::unique_ptr<PageRequestSummary> summary = std::move(nav_it->second);
   inflight_navigations_.erase(nav_it);
 
-  // Set before_first_contentful paint for each resource.
-  for (auto& request_summary : summary->subresource_requests) {
-    request_summary.before_first_contentful_paint =
-        request_summary.response_time < summary->first_contentful_paint;
-  }
-
   if (stats_collector_)
     stats_collector_->RecordPageRequestSummary(*summary);
 
@@ -398,7 +411,7 @@ void LoadingDataCollector::OnMainFrameRedirect(
 
   // If we lost the information about the first hop for some reason.
   if (!summary) {
-    summary = base::MakeUnique<PageRequestSummary>(main_frame_url);
+    summary = std::make_unique<PageRequestSummary>(main_frame_url);
   }
 
   // A redirect will not lead to another OnMainFrameRequest call, so record the

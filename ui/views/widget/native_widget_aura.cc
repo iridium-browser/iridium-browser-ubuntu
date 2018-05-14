@@ -13,7 +13,7 @@
 #include "build/build_config.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "services/ui/public/interfaces/window_manager_constants.mojom.h"
-#include "third_party/skia/include/core/SkRegion.h"
+#include "services/ui/public/interfaces/window_tree_constants.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
@@ -57,12 +57,12 @@
 
 #if defined(OS_WIN)
 #include "base/win/scoped_gdi_object.h"
-#include "base/win/win_util.h"
+#include "base/win/win_client_metrics.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_win.h"
 #endif
 
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#if defined(USE_X11)
 #include "ui/views/linux_ui/linux_ui.h"
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h"
 #endif
@@ -72,7 +72,7 @@
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host.h"
 #endif
 
-DECLARE_UI_CLASS_PROPERTY_TYPE(views::internal::NativeWidgetPrivate*)
+DEFINE_UI_CLASS_PROPERTY_TYPE(views::internal::NativeWidgetPrivate*)
 
 namespace views {
 
@@ -136,10 +136,10 @@ void NativeWidgetAura::SetShadowElevationFromInitParams(
     aura::Window* window,
     const Widget::InitParams& params) {
   if (params.shadow_type == Widget::InitParams::SHADOW_TYPE_NONE) {
-    SetShadowElevation(window, wm::ShadowElevation::NONE);
+    wm::SetShadowElevation(window, wm::kShadowElevationNone);
   } else if (params.shadow_type == Widget::InitParams::SHADOW_TYPE_DROP &&
              params.shadow_elevation) {
-    SetShadowElevation(window, *params.shadow_elevation);
+    wm::SetShadowElevation(window, *params.shadow_elevation);
   }
 }
 
@@ -157,15 +157,23 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   // MusClient has assertions that ui::mojom::WindowType matches
   // views::Widget::InitParams::Type.
   aura::SetWindowType(window_, static_cast<ui::mojom::WindowType>(params.type));
+  if (params.corner_radius) {
+    window_->SetProperty(aura::client::kWindowCornerRadiusKey,
+                         *params.corner_radius);
+  }
   window_->SetProperty(aura::client::kShowStateKey, params.show_state);
   if (params.type == Widget::InitParams::TYPE_BUBBLE)
     wm::SetHideOnDeactivate(window_, true);
   window_->SetTransparent(
       params.opacity == Widget::InitParams::TRANSLUCENT_WINDOW);
+
+  // Check for SHADOW_TYPE_NONE before aura::Window::Init() to ensure observers
+  // do not add useless shadow layers by deriving one from the window type.
+  SetShadowElevationFromInitParams(window_, params);
+
   window_->Init(params.layer_type);
   // Set name after layer init so it propagates to layer.
   window_->SetName(params.name);
-  SetShadowElevationFromInitParams(window_, params);
   if (params.type == Widget::InitParams::TYPE_CONTROL)
     window_->Show();
 
@@ -187,7 +195,7 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
       // window. Make sure the transient bubble is only visible if the parent is
       // visible, otherwise the bubble may not make sense by itself.
       if (params.type == Widget::InitParams::TYPE_BUBBLE) {
-        wm::TransientWindowManager::Get(window_)
+        wm::TransientWindowManager::GetOrCreate(window_)
             ->set_parent_controls_visibility(true);
       }
     }
@@ -226,7 +234,10 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
     SetRestoreBounds(window_, window_bounds);
   else
     SetBounds(window_bounds);
-  window_->set_ignore_events(!params.accept_events);
+  window_->SetEventTargetingPolicy(
+      params.accept_events
+          ? ui::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS
+          : ui::mojom::EventTargetingPolicy::NONE);
   DCHECK(GetWidget()->GetRootView());
   if (params.type != Widget::InitParams::TYPE_TOOLTIP)
     tooltip_manager_.reset(new views::TooltipManagerAura(GetWidget()));
@@ -239,7 +250,7 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
 
   if (params.type == Widget::InitParams::TYPE_WINDOW) {
     focus_manager_event_handler_ =
-        base::MakeUnique<FocusManagerEventHandler>(GetWidget(), window_);
+        std::make_unique<FocusManagerEventHandler>(GetWidget(), window_);
   }
 
   wm::SetActivationDelegate(window_, this);
@@ -490,9 +501,9 @@ void NativeWidgetAura::StackAtTop() {
     window_->parent()->StackChildAtTop(window_);
 }
 
-void NativeWidgetAura::SetShape(std::unique_ptr<SkRegion> region) {
+void NativeWidgetAura::SetShape(std::unique_ptr<Widget::ShapeRects> shape) {
   if (window_)
-    window_->layer()->SetAlphaShape(std::move(region));
+    window_->layer()->SetAlphaShape(std::move(shape));
 }
 
 void NativeWidgetAura::Close() {
@@ -833,8 +844,11 @@ void NativeWidgetAura::OnPaint(const ui::PaintContext& context) {
   delegate_->OnNativeWidgetPaint(context);
 }
 
-void NativeWidgetAura::OnDeviceScaleFactorChanged(float device_scale_factor) {
-  GetWidget()->DeviceScaleFactorChanged(device_scale_factor);
+void NativeWidgetAura::OnDeviceScaleFactorChanged(
+    float old_device_scale_factor,
+    float new_device_scale_factor) {
+  GetWidget()->DeviceScaleFactorChanged(old_device_scale_factor,
+                                        new_device_scale_factor);
 }
 
 void NativeWidgetAura::OnWindowDestroying(aura::Window* window) {
@@ -1000,7 +1014,7 @@ void NativeWidgetAura::SetInitialFocus(ui::WindowShowState show_state) {
 // Widget, public:
 
 namespace {
-#if defined(OS_WIN) || (defined(USE_X11) && !defined(OS_CHROMEOS))
+#if defined(OS_WIN) || defined(USE_X11)
 void CloseWindow(aura::Window* window) {
   if (window) {
     Widget* widget = Widget::GetWidgetForNativeView(window);
@@ -1030,7 +1044,7 @@ void Widget::CloseAllSecondaryWidgets() {
   EnumThreadWindows(GetCurrentThreadId(), WindowCallbackProc, 0);
 #endif
 
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#if defined(USE_X11)
   DesktopWindowTreeHostX11::CleanUpWindowList(CloseWindow);
 #endif
 }
@@ -1042,7 +1056,7 @@ bool Widget::ConvertRect(const Widget* source,
 }
 
 const ui::NativeTheme* Widget::GetNativeTheme() const {
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#if defined(USE_X11)
   const LinuxUI* linux_ui = LinuxUI::instance();
   if (linux_ui) {
     ui::NativeTheme* native_theme =

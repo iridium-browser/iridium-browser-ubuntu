@@ -96,9 +96,9 @@ class ASH_EXPORT FrameCaptionButtonContainerView
   void SetButtonSize(const gfx::Size& size);
 
   // views::View:
-  gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   const char* GetClassName() const override;
+  void ChildPreferredSizeChanged(View* child) override;
 
   // gfx::AnimationDelegate:
   void AnimationEnded(const gfx::Animation* animation) override;
@@ -138,16 +138,17 @@ class ASH_EXPORT FrameCaptionButtonContainerView
 
   // The buttons. In the normal button style, at most one of |minimize_button_|
   // and |size_button_| is visible.
-  FrameCaptionButton* minimize_button_;
-  FrameCaptionButton* size_button_;
-  FrameCaptionButton* close_button_;
+  FrameCaptionButton* minimize_button_ = nullptr;
+  FrameCaptionButton* size_button_ = nullptr;
+  FrameCaptionButton* close_button_ = nullptr;
 
   // Mapping of the image needed to paint a button for each of the values of
   // CaptionButtonIcon.
   std::map<CaptionButtonIcon, const gfx::VectorIcon*> button_icon_map_;
 
-  // Animation that affects the position of |minimize_button_| and the
-  // visibility of |size_button_|.
+  // Animation that affects the visibility of |size_button_| and the position of
+  // buttons to the left of it. Usually this is just the minimize button but it
+  // can also include a PWA menu button.
   std::unique_ptr<gfx::SlideAnimation> tablet_mode_animation_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameCaptionButtonContainerView);

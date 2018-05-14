@@ -9,8 +9,12 @@
 namespace viz {
 
 std::string LocalSurfaceId::ToString() const {
-  return base::StringPrintf("LocalSurfaceId(%d, %s" PRIu64 ")", local_id_,
-                            nonce_.ToString().c_str());
+  std::string nonce = VLOG_IS_ON(1) ? nonce_.ToString()
+                                    : nonce_.ToString().substr(0, 4) + "...";
+
+  return base::StringPrintf("LocalSurfaceId(%d, %d, %s)",
+                            parent_sequence_number_, child_sequence_number_,
+                            nonce.c_str());
 }
 
 std::ostream& operator<<(std::ostream& out,

@@ -38,6 +38,12 @@ enum class SavePageResult {
   ERROR_PAGE,
   // Returned when we detect trying to save a chrome interstitial page.
   INTERSTITIAL_PAGE,
+  // Failed to compute digest for the archive file.
+  DIGEST_CALCULATION_FAILED,
+  // Unable to move the file into a public directory.
+  FILE_MOVE_FAILED,
+  // Unable to add the file to the system download manager.
+  ADD_TO_DOWNLOAD_MANAGER_FAILED,
   // NOTE: always keep this entry at the end. Add new result types only
   // immediately above this line. Make sure to update the corresponding
   // histogram enum accordingly.
@@ -72,15 +78,22 @@ enum class DeletePageResult {
   RESULT_COUNT,
 };
 
-typedef std::set<GURL> CheckPagesExistOfflineResult;
+// Controls how to search on differnt URLs for pages.
+enum class URLSearchMode {
+  // Match against the last committed URL only.
+  SEARCH_BY_FINAL_URL_ONLY,
+  // Match against all stored URLs, including the last committed URL and
+  // the original request URL.
+  SEARCH_BY_ALL_URLS,
+};
+
 typedef std::vector<int64_t> MultipleOfflineIdResult;
 typedef std::vector<OfflinePageItem> MultipleOfflinePageItemResult;
 
+// TODO(carlosk): All or most of these should use base::OnceCallback.
 typedef base::Callback<void(SavePageResult, int64_t)> SavePageCallback;
 typedef base::Callback<void(AddPageResult, int64_t)> AddPageCallback;
 typedef base::Callback<void(DeletePageResult)> DeletePageCallback;
-typedef base::Callback<void(const CheckPagesExistOfflineResult&)>
-    CheckPagesExistOfflineCallback;
 typedef base::Callback<void(bool)> HasPagesCallback;
 typedef base::Callback<void(const MultipleOfflineIdResult&)>
     MultipleOfflineIdCallback;

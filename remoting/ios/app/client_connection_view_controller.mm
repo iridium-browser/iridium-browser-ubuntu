@@ -13,10 +13,12 @@
 #import "ios/third_party/material_components_ios/src/components/Buttons/src/MaterialButtons.h"
 #import "ios/third_party/material_components_ios/src/components/NavigationBar/src/MaterialNavigationBar.h"
 #import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
+#import "remoting/ios/app/help_and_feedback.h"
 #import "remoting/ios/app/host_view_controller.h"
 #import "remoting/ios/app/pin_entry_view.h"
 #import "remoting/ios/app/remoting_theme.h"
 #import "remoting/ios/app/session_reconnect_view.h"
+#import "remoting/ios/app/view_utils.h"
 #import "remoting/ios/domain/client_session_details.h"
 #import "remoting/ios/domain/host_info.h"
 #import "remoting/ios/facade/remoting_authentication.h"
@@ -35,15 +37,16 @@ static const CGFloat kActivityIndicatorRadius = 33.f;
 static const CGFloat kPinEntryViewWidth = 240.f;
 static const CGFloat kPinEntryViewHeight = 90.f;
 
-static const CGFloat kReconnectViewWidth = 120.f;
+static const CGFloat kReconnectViewWidth = 240.f;
 static const CGFloat kReconnectViewHeight = 90.f;
 
 static const CGFloat kPadding = 20.f;
 static const CGFloat kMargin = 20.f;
 
-static const CGFloat kBarHeight = 58.f;
-
 static const CGFloat kKeyboardAnimationTime = 0.3;
+
+static NSString* const kConnectionErrorFeedbackContext =
+    @"ConnectionErrorFeedbackContext";
 
 @interface ClientConnectionViewController ()<PinEntryDelegate,
                                              SessionReconnectViewDelegate> {
@@ -103,13 +106,13 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
     _navBar.translatesAutoresizingMaskIntoConstraints = NO;
 
     // Attach navBar to the top of the view.
+    UILayoutGuide* layoutGuide =
+        remoting::SafeAreaLayoutGuideForView(self.view);
     [NSLayoutConstraint activateConstraints:@[
-      [[_navBar topAnchor] constraintEqualToAnchor:[self.view topAnchor]],
-      [[_navBar leadingAnchor]
-          constraintEqualToAnchor:[self.view leadingAnchor]],
-      [[_navBar trailingAnchor]
-          constraintEqualToAnchor:[self.view trailingAnchor]],
-      [[_navBar heightAnchor] constraintEqualToConstant:kBarHeight],
+      [_navBar.topAnchor constraintEqualToAnchor:layoutGuide.topAnchor],
+      [_navBar.leadingAnchor constraintEqualToAnchor:layoutGuide.leadingAnchor],
+      [_navBar.trailingAnchor
+          constraintEqualToAnchor:layoutGuide.trailingAnchor],
     ]];
   }
   return self;
@@ -129,14 +132,15 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
   _activityIndicator.radius = kActivityIndicatorRadius;
   _activityIndicator.trackEnabled = YES;
   _activityIndicator.strokeWidth = kActivityIndicatorStrokeWidth;
-  _activityIndicator.cycleColors = @[ UIColor.whiteColor ];
+  _activityIndicator.cycleColors =
+      @[ RemotingTheme.connectionViewForegroundColor ];
   _activityIndicator.translatesAutoresizingMaskIntoConstraints = NO;
   [self.view addSubview:_activityIndicator];
 
   _statusLabel = [[UILabel alloc] initWithFrame:CGRectZero];
   _statusLabel.numberOfLines = 1;
   _statusLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-  _statusLabel.textColor = [UIColor whiteColor];
+  _statusLabel.textColor = RemotingTheme.connectionViewForegroundColor;
   _statusLabel.textAlignment = NSTextAlignmentCenter;
   _statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [self.view addSubview:_statusLabel];
@@ -144,7 +148,7 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
   _iconView = [[UIImageView alloc] initWithFrame:CGRectZero];
   _iconView.contentMode = UIViewContentModeCenter;
   _iconView.alpha = 0.87f;
-  _iconView.backgroundColor = RemotingTheme.onlineHostColor;
+  _iconView.backgroundColor = RemotingTheme.hostOnlineColor;
   _iconView.layer.cornerRadius = kIconRadius;
   _iconView.layer.masksToBounds = YES;
   _iconView.image = RemotingTheme.desktopIcon;
@@ -162,8 +166,6 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
   _pinEntryView.translatesAutoresizingMaskIntoConstraints = NO;
   [self.view addSubview:_pinEntryView];
   _pinEntryView.delegate = self;
-
-  _reconnectView.hidden = YES;
 
   [self
       initializeLayoutConstraintsWithViews:NSDictionaryOfVariableBindings(
@@ -384,6 +386,15 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
   [self attemptConnectionToHost];
 }
 
+- (void)didTapReport {
+  [_client createFeedbackDataWithCallback:^(
+               const remoting::FeedbackData& feedbackData) {
+    [HelpAndFeedback.instance
+        presentFeedbackFlowWithContext:kConnectionErrorFeedbackContext
+                          feedbackData:feedbackData];
+  }];
+}
+
 #pragma mark - Private
 
 - (void)attemptConnectionToHost {
@@ -412,13 +423,17 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
   [_pinEntryView endEditing:YES];
   _statusLabel.text =
       [self stringWithHostNameForId:IDS_CONNECTING_TO_HOST_MESSAGE];
+  [self focusOnStatusLabel];
 
   _pinEntryView.hidden = YES;
 
   _reconnectView.hidden = YES;
 
+  _iconView.backgroundColor = RemotingTheme.hostOnlineColor;
+
   [_activityIndicator stopAnimating];
-  _activityIndicator.cycleColors = @[ [UIColor whiteColor] ];
+  _activityIndicator.cycleColors =
+      @[ RemotingTheme.connectionViewForegroundColor ];
   _activityIndicator.indicatorMode = MDCActivityIndicatorModeIndeterminate;
   _activityIndicator.hidden = NO;
   [_activityIndicator startAnimating];
@@ -426,10 +441,14 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
 
 - (void)showPinPromptState {
   _statusLabel.text = [NSString stringWithFormat:@"%@", _remoteHostName];
+
+  _iconView.backgroundColor = RemotingTheme.hostOnlineColor;
+
   [_activityIndicator stopAnimating];
   _activityIndicator.hidden = YES;
 
   _pinEntryView.hidden = NO;
+
   _reconnectView.hidden = YES;
 
   _reconnectView.hidden = YES;
@@ -443,16 +462,20 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
   [_pinEntryView endEditing:YES];
   _statusLabel.text =
       [self stringWithHostNameForId:IDS_CONNECTED_TO_HOST_MESSAGE];
+  [self focusOnStatusLabel];
 
   _pinEntryView.hidden = YES;
   [_pinEntryView clearPinEntry];
 
+  _iconView.backgroundColor = RemotingTheme.hostOnlineColor;
+
   _activityIndicator.progress = 0.0;
   _activityIndicator.hidden = NO;
   _activityIndicator.indicatorMode = MDCActivityIndicatorModeDeterminate;
-  _activityIndicator.cycleColors = @[ [UIColor greenColor] ];
+  _activityIndicator.cycleColors = @[ RemotingTheme.hostOnlineColor ];
   [_activityIndicator startAnimating];
   _activityIndicator.progress = 1.0;
+
   _reconnectView.hidden = YES;
 
   _reconnectView.hidden = YES;
@@ -464,113 +487,106 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
   [self.navigationController pushViewController:hostViewController animated:NO];
 }
 
+// TODO(yuweih): Unused. Remove this method and the ClientViewReconnect enum.
 - (void)showReconnect {
   _statusLabel.text =
       [self stringWithHostNameForId:IDS_CONNECTION_CLOSED_FOR_HOST_MESSAGE];
+  [self focusOnStatusLabel];
+
+  _iconView.backgroundColor = RemotingTheme.hostErrorColor;
+
   [_activityIndicator stopAnimating];
   _activityIndicator.hidden = YES;
 
   _pinEntryView.hidden = YES;
 
   _reconnectView.hidden = NO;
+  _reconnectView.errorText =
+      l10n_util::GetNSString(IDS_MESSAGE_SESSION_FINISHED);
 
   [self.navigationController popToViewController:self animated:YES];
-  [MDCSnackbarManager
-      showMessage:[MDCSnackbarMessage
-                      messageWithText:l10n_util::GetNSString(
-                                          IDS_MESSAGE_SESSION_FINISHED)]];
 }
 
 - (void)showError {
+  // Error may happen after the session is connected. In this case we should
+  // pop back to the client connection VC.
+  if (self.navigationController.topViewController != self) {
+    [self.navigationController popToViewController:self animated:YES];
+  }
+
   _statusLabel.text =
       [self stringWithHostNameForId:IDS_ERROR_CONNECTING_TO_HOST_MESSAGE];
 
   _pinEntryView.hidden = YES;
 
-  _activityIndicator.indicatorMode = MDCActivityIndicatorModeDeterminate;
-  _activityIndicator.cycleColors = @[ [UIColor redColor] ];
-  _activityIndicator.progress = 1.0;
-  _activityIndicator.hidden = NO;
-  [_activityIndicator startAnimating];
+  _iconView.backgroundColor = RemotingTheme.hostErrorColor;
 
-  _reconnectView.hidden = NO;
+  _activityIndicator.hidden = YES;
 
-  // TODO(yuweih): I18N
-  MDCSnackbarMessage* message = nil;
+  NSString* message = nil;
   switch (_lastError) {
     case SessionErrorOk:
       // Do nothing.
       break;
     case SessionErrorPeerIsOffline:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorPeerIsOffline."];
+      message = l10n_util::GetNSString(IDS_ERROR_HOST_IS_OFFLINE);
       break;
     case SessionErrorSessionRejected:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorSessionRejected."];
+      message = l10n_util::GetNSString(IDS_ERROR_INVALID_ACCOUNT);
       break;
     case SessionErrorIncompatibleProtocol:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorIncompatibleProtocol."];
+      message = l10n_util::GetNSString(IDS_ERROR_INCOMPATIBLE_PROTOCOL);
       break;
     case SessionErrorAuthenticationFailed:
-      message = [MDCSnackbarMessage messageWithText:@"Error: Invalid Pin."];
+      message = l10n_util::GetNSString(IDS_ERROR_INVALID_ACCESS_CODE);
       [_pinEntryView clearPinEntry];
       break;
     case SessionErrorInvalidAccount:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorInvalidAccount."];
+      message = l10n_util::GetNSString(IDS_ERROR_INVALID_ACCOUNT);
       break;
     case SessionErrorChannelConnectionError:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorChannelConnectionError."];
+      message = l10n_util::GetNSString(IDS_ERROR_NETWORK_FAILURE);
       break;
     case SessionErrorSignalingError:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorSignalingError."];
+      message = l10n_util::GetNSString(IDS_ERROR_P2P_FAILURE);
       break;
     case SessionErrorSignalingTimeout:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorSignalingTimeout."];
+      message = l10n_util::GetNSString(IDS_ERROR_SERVICE_UNAVAILABLE);
       break;
     case SessionErrorHostOverload:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorHostOverload."];
+      message = l10n_util::GetNSString(IDS_ERROR_HOST_OVERLOAD);
       break;
     case SessionErrorMaxSessionLength:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorMaxSessionLength."];
+      message = l10n_util::GetNSString(IDS_ERROR_MAX_SESSION_LENGTH);
       break;
     case SessionErrorHostConfigurationError:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorHostConfigurationError."];
+      message = l10n_util::GetNSString(IDS_ERROR_HOST_CONFIGURATION_ERROR);
       break;
     case SessionErrorUnknownError:
-      message = [MDCSnackbarMessage
-          messageWithText:@"Error: SessionErrorUnknownError."];
+      message = l10n_util::GetNSString(IDS_ERROR_UNEXPECTED);
       break;
     case SessionErrorOAuthTokenInvalid:
-      message = [MDCSnackbarMessage
-          messageWithText:
-              @"Error: SessionErrorOAuthTokenInvalid. Please login again."];
+      message = l10n_util::GetNSString(IDS_ERROR_OAUTH_TOKEN_INVALID);
+      break;
+    case SessionErrorThirdPartyAuthNotSupported:
+      message = l10n_util::GetNSString(IDS_THIRD_PARTY_AUTH_NOT_SUPPORTED);
       break;
   }
-  if (message.text) {
-    [MDCSnackbarManager showMessage:message];
+  if (message) {
+    _reconnectView.errorText = message;
   }
+  _reconnectView.hidden = NO;
+  remoting::SetAccessibilityFocusElement(_reconnectView);
 }
 
 - (void)didProvidePin:(NSString*)pin createPairing:(BOOL)createPairing {
-  // TODO(nicholss): There is an open question if createPairing is supported on
-  // iOS. Need to fingure this out.
   [[NSNotificationCenter defaultCenter]
       postNotificationName:kHostSessionPinProvided
                     object:self
                   userInfo:@{
                     kHostSessionHostName : _remoteHostName,
                     kHostSessionPin : pin,
-                    kHostSessionCreatePairing :
-                        [NSNumber numberWithBool:createPairing]
+                    kHostSessionCreatePairing : @(createPairing)
                   }];
 }
 
@@ -604,11 +620,13 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
       state = ClientViewError;
       break;
     case SessionClosed:
-      // If the session closes, offer the user to reconnect.
-      state = ClientViewReconnect;
-      break;
-    case SessionCancelled:
+      // If the session is closed by the host, just go back to the host list and
+      // show a toast.
       state = ClientViewClosed;
+      [MDCSnackbarManager
+          showMessage:[MDCSnackbarMessage
+                          messageWithText:l10n_util::GetNSString(
+                                              IDS_MESSAGE_SESSION_FINISHED)]];
       break;
     default:
       LOG(ERROR) << "Unknown State for Session, " << sessionDetails.state;
@@ -623,6 +641,10 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
 - (NSString*)stringWithHostNameForId:(int)messageId {
   return l10n_util::GetNSStringF(messageId,
                                  base::SysNSStringToUTF16(_remoteHostName));
+}
+
+- (void)focusOnStatusLabel {
+  remoting::SetAccessibilityFocusElement(_statusLabel);
 }
 
 @end

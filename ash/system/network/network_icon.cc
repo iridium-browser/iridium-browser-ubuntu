@@ -10,6 +10,7 @@
 #include "ash/system/network/network_icon_animation_observer.h"
 #include "ash/system/tray/tray_constants.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chromeos/network/device_state.h"
 #include "chromeos/network/network_connection_handler.h"
@@ -44,6 +45,16 @@ namespace ash {
 namespace network_icon {
 
 namespace {
+
+SkPath CreateArcPath(gfx::RectF oval, float start_angle, float sweep_angle) {
+  SkPath path;
+  path.setIsVolatile(true);
+  path.setFillType(SkPath::kWinding_FillType);
+  path.moveTo(oval.CenterPoint().x(), oval.CenterPoint().y());
+  path.arcTo(gfx::RectFToSkRect(oval), start_angle, sweep_angle, false);
+  path.close();
+  return path;
+}
 
 // Constants for offseting the badge displayed on top of the signal strength
 // icon. The badge will extend outside of the base icon bounds by these amounts.
@@ -218,8 +229,10 @@ class NetworkIconImageSource : public gfx::CanvasImageSource {
   static gfx::ImageSkia CreateImage(const gfx::ImageSkia& icon,
                                     const Badges& badges) {
     auto* source = new NetworkIconImageSource(icon, badges);
-    return gfx::ImageSkia(source, source->size());
+    return gfx::ImageSkia(base::WrapUnique(source), source->size());
   }
+
+  ~NetworkIconImageSource() override = default;
 
   // gfx::CanvasImageSource:
   void Draw(gfx::Canvas* canvas) override {
@@ -270,7 +283,6 @@ class NetworkIconImageSource : public gfx::CanvasImageSource {
       : CanvasImageSource(GetSizeForBaseIconSize(icon.size()), false),
         icon_(icon),
         badges_(badges) {}
-  ~NetworkIconImageSource() override {}
 
   static gfx::Size GetSizeForBaseIconSize(const gfx::Size& base_icon_size) {
     gfx::Size size = base_icon_size;
@@ -321,7 +333,7 @@ gfx::ImageSkia GetImageForIndex(ImageType image_type,
                                 int index) {
   gfx::CanvasImageSource* source =
       new SignalStrengthImageSource(image_type, icon_type, index);
-  return gfx::ImageSkia(source, source->size());
+  return gfx::ImageSkia(base::WrapUnique(source), source->size());
 }
 
 // Returns an image to represent either a fully connected network or a
@@ -377,9 +389,12 @@ Badge ConnectingVpnBadge(double animation, IconType icon_type) {
 }
 
 int StrengthIndex(int strength) {
+  if (strength == 0)
+    return 0;
   // Return an index in the range [1, kNumNetworkImages - 1].
-  const float findex = (static_cast<float>(strength) / 100.0f) *
-                       nextafter(static_cast<float>(kNumNetworkImages - 1), 0);
+  // This logic is equivalent to cr_network_icon.js:strengthToIndex_().
+  const float findex = (static_cast<float>(strength - 1) / 100.0f) *
+                       static_cast<float>(kNumNetworkImages - 1);
   int index = 1 + static_cast<int>(findex);
   index = std::max(std::min(index, kNumNetworkImages - 1), 1);
   return index;
@@ -422,7 +437,6 @@ gfx::ImageSkia GetIcon(const NetworkState* network,
     return gfx::CreateVectorIcon(kNetworkEthernetIcon,
                                  GetDefaultColorForIconType(ICON_TYPE_LIST));
   } else if (network->Matches(NetworkTypePattern::Wireless())) {
-    DCHECK(strength_index > 0);
     return GetImageForIndex(ImageTypeForNetwork(network, icon_type), icon_type,
                             strength_index);
   } else if (network->Matches(NetworkTypePattern::VPN())) {
@@ -528,7 +542,7 @@ bool NetworkIconImpl::UpdateWirelessStrengthIndex(const NetworkState* network) {
 bool NetworkIconImpl::UpdateCellularState(const NetworkState* network) {
   bool dirty = false;
   const Badge technology_badge = BadgeForNetworkTechnology(network, icon_type_);
-  if (technology_badge == technology_badge_) {
+  if (technology_badge != technology_badge_) {
     technology_badge_ = technology_badge;
     dirty = true;
   }
@@ -583,7 +597,9 @@ void NetworkIconImpl::GetBadges(const NetworkState* network, Badges* badges) {
   } else if (type == shill::kTypeWimax) {
     technology_badge_ = {&kNetworkBadgeTechnology4gIcon, icon_color};
   } else if (type == shill::kTypeCellular) {
-    if (network->roaming() == shill::kRoamingStateRoaming) {
+    // technology_badge_ is set in UpdateCellularState.
+    if (network->IsConnectedState() &&
+        network->roaming() == shill::kRoamingStateRoaming) {
       // For networks that are always in roaming don't show roaming badge.
       const DeviceState* device =
           NetworkHandler::Get()->network_state_handler()->GetDeviceState(
@@ -595,13 +611,12 @@ void NetworkIconImpl::GetBadges(const NetworkState* network, Badges* badges) {
       }
     }
   }
-  if (!network->IsConnectingState()) {
+  // Only show technology, VPN, and captive portal badges when connected.
+  if (network->IsConnectedState()) {
     badges->top_left = technology_badge_;
     badges->bottom_left = vpn_badge_;
-  }
-
-  if (behind_captive_portal_) {
-    badges->bottom_right = {&kNetworkBadgeCaptivePortalIcon, icon_color};
+    if (behind_captive_portal_)
+      badges->bottom_right = {&kNetworkBadgeCaptivePortalIcon, icon_color};
   }
 }
 
@@ -662,7 +677,7 @@ SignalStrengthImageSource::SignalStrengthImageSource(ImageType image_type,
                                 GetSizeForIconType(icon_type),
                                 signal_strength) {}
 
-SignalStrengthImageSource::~SignalStrengthImageSource() {}
+SignalStrengthImageSource::~SignalStrengthImageSource() = default;
 
 void SignalStrengthImageSource::set_color(SkColor color) {
   color_ = color;
@@ -703,8 +718,8 @@ void SignalStrengthImageSource::DrawArcs(gfx::Canvas* canvas) {
   // Background. Skip drawing for full signal.
   if (signal_strength_ != kNumNetworkImages - 1) {
     flags.setColor(SkColorSetA(color_, kSignalStrengthImageBgAlpha));
-    canvas->sk_canvas()->drawArc(gfx::RectFToSkRect(oval_bounds), kStartAngle,
-                                 kSweepAngle, true, flags);
+    canvas->sk_canvas()->drawPath(
+        CreateArcPath(oval_bounds, kStartAngle, kSweepAngle), flags);
   }
   // Foreground (signal strength).
   if (signal_strength_ != 0) {
@@ -716,8 +731,8 @@ void SignalStrengthImageSource::DrawArcs(gfx::Canvas* canvas) {
     const float wedge_percent = kWedgeHeightPercentages[signal_strength_];
     oval_bounds.Inset(
         gfx::InsetsF((oval_bounds.height() / 2) * (1.f - wedge_percent)));
-    canvas->sk_canvas()->drawArc(gfx::RectFToSkRect(oval_bounds), kStartAngle,
-                                 kSweepAngle, true, flags);
+    canvas->sk_canvas()->drawPath(
+        CreateArcPath(oval_bounds, kStartAngle, kSweepAngle), flags);
   }
 }
 
@@ -756,8 +771,8 @@ void SignalStrengthImageSource::DrawBars(gfx::Canvas* canvas) {
     flags.setColor(color_);
     // As a percentage of the bg triangle, the length of one of the short
     // sides of the fg triangle, indexed by signal strength.
-    static constexpr float kTriangleSidePercents[] = {0.f, 0.5f, 0.625f, 0.75f,
-                                                      1.f};
+    static constexpr float kTriangleSidePercents[] = {0.f, 0.375f, 0.5833f,
+                                                      0.75f, 1.f};
     canvas->DrawPath(make_triangle(kTriangleSidePercents[signal_strength_] *
                                    kFullTriangleSide),
                      flags);
@@ -804,7 +819,8 @@ gfx::ImageSkia GetImageForNewWifiNetwork(SkColor icon_color,
       new SignalStrengthImageSource(ImageTypeForNetworkType(shill::kTypeWifi),
                                     ICON_TYPE_LIST, kNumNetworkImages - 1);
   source->set_color(icon_color);
-  gfx::ImageSkia icon = gfx::ImageSkia(source, source->size());
+  gfx::ImageSkia icon =
+      gfx::ImageSkia(base::WrapUnique(source), source->size());
   Badges badges;
   badges.bottom_right = {&kNetworkBadgeAddOtherIcon, badge_color};
   return NetworkIconImageSource::CreateImage(icon, badges);
@@ -876,13 +892,6 @@ int GetCellularUninitializedMsg() {
   static int s_uninitialized_msg(0);
 
   NetworkStateHandler* handler = NetworkHandler::Get()->network_state_handler();
-
-  // Never show messages if the list of Cellular networks is non-empty.
-  NetworkStateHandler::NetworkStateList cellular_networks;
-  handler->GetVisibleNetworkListByType(chromeos::NetworkTypePattern::Cellular(),
-                                       &cellular_networks);
-  if (!cellular_networks.empty())
-    return 0;
 
   if (handler->GetTechnologyState(NetworkTypePattern::Cellular()) ==
       NetworkStateHandler::TECHNOLOGY_UNINITIALIZED) {
@@ -1001,6 +1010,32 @@ void PurgeNetworkIconCache() {
   PurgeIconMap(ICON_TYPE_DEFAULT_VIEW, network_paths);
   PurgeIconMap(ICON_TYPE_LIST, network_paths);
   PurgeIconMap(ICON_TYPE_MENU_LIST, network_paths);
+}
+
+SignalStrength GetSignalStrengthForNetwork(
+    const chromeos::NetworkState* network) {
+  if (!network->Matches(NetworkTypePattern::Wireless()))
+    return SignalStrength::NOT_WIRELESS;
+
+  // Decide whether the signal is considered weak, medium or strong based on the
+  // strength index. Each signal strength corresponds to a bucket which
+  // attempted to be split evenly from |kNumNetworkImages| - 1. Remainders go
+  // first to the lowest bucket and then the second lowest bucket.
+  const int index = StrengthIndex(network->signal_strength());
+  if (index == 0)
+    return SignalStrength::NONE;
+  const int seperations = kNumNetworkImages - 1;
+  const int bucket_size = seperations / 3;
+
+  const int weak_max = bucket_size + static_cast<int>(seperations % 3 != 0);
+  const int medium_max =
+      weak_max + bucket_size + static_cast<int>(seperations % 3 == 2);
+  if (index <= weak_max)
+    return SignalStrength::WEAK;
+  else if (index <= medium_max)
+    return SignalStrength::MEDIUM;
+
+  return SignalStrength::STRONG;
 }
 
 }  // namespace network_icon

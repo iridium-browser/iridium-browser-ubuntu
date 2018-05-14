@@ -2,10 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <memory>
 #include <string>
 
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/run_loop.h"
 #include "base/test/fuzzed_data_provider.h"
@@ -32,7 +30,7 @@ class URLRequestDataJobFuzzerHarness : public net::URLRequest::Delegate {
   URLRequestDataJobFuzzerHarness()
       : task_runner_(base::ThreadTaskRunnerHandle::Get()), context_(true) {
     job_factory_.SetProtocolHandler(
-        "data", base::MakeUnique<net::DataProtocolHandler>());
+        "data", std::make_unique<net::DataProtocolHandler>());
     context_.set_job_factory(&job_factory_);
     context_.Init();
   }

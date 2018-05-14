@@ -6,12 +6,14 @@
 
 #include <stddef.h>
 
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/optional.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -41,9 +43,6 @@ const char kFirmwarePrefix[] = "version";
 // File to look for firmware number in.
 const char kPathFirmware[] = "/var/log/bios_info.txt";
 
-// Used as separator when combining OS and TPM version strings.
-const char kVersionSeparator[] = "\n";
-
 }  // namespace
 
 std::string GetVersion(VersionFormat format) {
@@ -67,15 +66,16 @@ std::string GetVersion(VersionFormat format) {
   return version;
 }
 
-void GetFullOSAndTpmVersion(StringCallback callback) {
+void GetTpmVersion(GetTpmVersionCallback callback) {
   chromeos::DBusThreadManager::Get()->GetCryptohomeClient()->TpmGetVersion(
-      base::Bind([](StringCallback callback,
-                    chromeos::DBusMethodCallStatus call_status,
-                    const std::string& tpm_version) {
-        const std::string version = GetVersion(VERSION_FULL);
-        callback.Run(version + kVersionSeparator + tpm_version);
-      },
-      callback));
+      base::BindOnce(
+          [](GetTpmVersionCallback callback,
+             base::Optional<CryptohomeClient::TpmVersionInfo>
+                 tpm_version_info) {
+            std::move(callback).Run(
+                tpm_version_info.value_or(CryptohomeClient::TpmVersionInfo()));
+          },
+          std::move(callback)));
 }
 
 std::string GetARCVersion() {

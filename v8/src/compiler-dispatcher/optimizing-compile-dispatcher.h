@@ -7,13 +7,13 @@
 
 #include <queue>
 
+#include "src/allocation.h"
 #include "src/base/atomicops.h"
 #include "src/base/platform/condition-variable.h"
 #include "src/base/platform/mutex.h"
 #include "src/base/platform/platform.h"
 #include "src/flags.h"
 #include "src/globals.h"
-#include "src/list.h"
 
 namespace v8 {
 namespace internal {
@@ -23,8 +23,6 @@ class SharedFunctionInfo;
 
 class V8_EXPORT_PRIVATE OptimizingCompileDispatcher {
  public:
-  enum class BlockingBehavior { kBlock, kDontBlock };
-
   explicit OptimizingCompileDispatcher(Isolate* isolate)
       : isolate_(isolate),
         input_queue_capacity_(FLAG_concurrent_recompilation_queue_length),

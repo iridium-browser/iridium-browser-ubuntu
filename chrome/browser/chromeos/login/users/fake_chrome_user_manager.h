@@ -30,6 +30,7 @@ class FakeChromeUserManager : public ChromeUserManager {
   ~FakeChromeUserManager() override;
 
   // Create and add various types of users.
+  user_manager::User* AddGuestUser();
   user_manager::User* AddKioskAppUser(const AccountId& account_id);
   user_manager::User* AddArcKioskAppUser(const AccountId& account_id);
   user_manager::User* AddSupervisedUser(const AccountId& account_id);
@@ -59,7 +60,8 @@ class FakeChromeUserManager : public ChromeUserManager {
   const AccountId& GetOwnerAccountId() const override;
   void UserLoggedIn(const AccountId& account_id,
                     const std::string& user_id_hash,
-                    bool browser_restart) override;
+                    bool browser_restart,
+                    bool is_child) override;
   void SwitchActiveUser(const AccountId& account_id) override;
   void SwitchToLastActiveUser() override;
   void OnSessionStarted() override;
@@ -85,12 +87,12 @@ class FakeChromeUserManager : public ChromeUserManager {
   void SaveUserDisplayEmail(const AccountId& account_id,
                             const std::string& display_email) override;
   std::string GetUserDisplayEmail(const AccountId& account_id) const override;
-  void SaveUserType(const AccountId& account_id,
-                    const user_manager::UserType& user_type) override;
+  void SaveUserType(const user_manager::User* user) override;
   void UpdateUserAccountData(const AccountId& account_id,
                              const UserAccountData& account_data) override;
   bool IsCurrentUserOwner() const override;
   bool IsCurrentUserNew() const override;
+  bool IsCurrentUserCryptohomeDataEphemeral() const override;
   bool IsCurrentUserNonCryptohomeDataEphemeral() const override;
   bool CanCurrentUserLock() const override;
   bool IsUserLoggedIn() const override;
@@ -104,8 +106,10 @@ class FakeChromeUserManager : public ChromeUserManager {
   bool IsLoggedInAsStub() const override;
   bool IsUserNonCryptohomeDataEphemeral(
       const AccountId& account_id) const override;
-  void ChangeUserChildStatus(user_manager::User* user, bool is_child) override;
   bool AreSupervisedUsersAllowed() const override;
+  bool IsGuestSessionAllowed() const override;
+  bool IsGaiaUserAllowed(const user_manager::User& user) const override;
+  bool IsUserAllowed(const user_manager::User& user) const override;
   PrefService* GetLocalState() const override;
   bool GetPlatformKnownUserId(const std::string& user_email,
                               const std::string& gaia_id,
@@ -120,7 +124,7 @@ class FakeChromeUserManager : public ChromeUserManager {
   const gfx::ImageSkia& GetResourceImagekiaNamed(int id) const override;
   base::string16 GetResourceStringUTF16(int string_id) const override;
   void ScheduleResolveLocale(const std::string& locale,
-                             const base::Closure& on_resolved_callback,
+                             base::OnceClosure on_resolved_callback,
                              std::string* out_resolved_locale) const override;
   bool IsValidDefaultUserImageId(int image_index) const override;
   bool AreEphemeralUsersEnabled() const override;
@@ -151,7 +155,6 @@ class FakeChromeUserManager : public ChromeUserManager {
                         bool is_current_user_owner) const override;
 
   // UserManagerInterface override.
-  BootstrapManager* GetBootstrapManager() override;
   MultiProfileUserController* GetMultiProfileUserController() override;
   UserImageManager* GetUserImageManager(const AccountId& account_id) override;
   SupervisedUserManager* GetSupervisedUserManager() override;
@@ -176,16 +179,19 @@ class FakeChromeUserManager : public ChromeUserManager {
     owner_account_id_ = owner_account_id;
   }
 
-  void set_bootstrap_manager(BootstrapManager* bootstrap_manager) {
-    bootstrap_manager_ = bootstrap_manager;
-  }
-
   void set_multi_profile_user_controller(
       MultiProfileUserController* controller) {
     multi_profile_user_controller_ = controller;
   }
 
   void set_current_user_new(bool new_user) { current_user_new_ = new_user; }
+  void set_current_user_ephemeral(bool user_ephemeral) {
+    current_user_ephemeral_ = user_ephemeral;
+  }
+
+  void set_is_enterprise_managed(bool is_enterprise_managed) {
+    is_enterprise_managed_ = is_enterprise_managed;
+  }
 
  private:
   // Lazily creates default user flow.
@@ -198,8 +204,8 @@ class FakeChromeUserManager : public ChromeUserManager {
   AccountId owner_account_id_ = EmptyAccountId();
   bool fake_ephemeral_users_enabled_ = false;
   bool current_user_new_ = false;
+  bool current_user_ephemeral_ = false;
 
-  BootstrapManager* bootstrap_manager_ = nullptr;
   MultiProfileUserController* multi_profile_user_controller_ = nullptr;
 
   // If set this is the active user. If empty, the first created user is the
@@ -216,6 +222,9 @@ class FakeChromeUserManager : public ChromeUserManager {
   // Specific flows by user e-mail.
   // Keys should be canonicalized before access.
   FlowMap specific_flows_;
+
+  // Whether the device is enterprise managed.
+  bool is_enterprise_managed_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(FakeChromeUserManager);
 };

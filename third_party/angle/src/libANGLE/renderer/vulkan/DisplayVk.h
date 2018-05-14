@@ -29,14 +29,12 @@ class DisplayVk : public DisplayImpl
                            egl::Surface *readSurface,
                            gl::Context *context) override;
 
-    egl::ConfigSet generateConfigs() override;
-
     bool testDeviceLost() override;
     egl::Error restoreLostDevice(const egl::Display *display) override;
 
     std::string getVendorString() const override;
 
-    egl::Error getDevice(DeviceImpl **device) override;
+    DeviceImpl *createDevice() override;
 
     egl::Error waitClient(const gl::Context *context) const override;
     egl::Error waitNative(const gl::Context *context, EGLint engine) const override;
@@ -60,9 +58,8 @@ class DisplayVk : public DisplayImpl
 
     ContextImpl *createContext(const gl::ContextState &state) override;
 
-    StreamProducerImpl *createStreamProducerD3DTextureNV12(
-        egl::Stream::ConsumerType consumerType,
-        const egl::AttributeMap &attribs) override;
+    StreamProducerImpl *createStreamProducerD3DTexture(egl::Stream::ConsumerType consumerType,
+                                                       const egl::AttributeMap &attribs) override;
     gl::Version getMaxSupportedESVersion() const override;
 
     RendererVk *getRenderer() const { return mRenderer.get(); }

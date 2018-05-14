@@ -5,33 +5,54 @@
 #ifndef CSSUnsupportedStyleValue_h
 #define CSSUnsupportedStyleValue_h
 
+#include "base/macros.h"
 #include "core/css/cssom/CSSStyleValue.h"
 
 namespace blink {
 
 // CSSUnsupportedStyleValue is the internal representation of a base
 // CSSStyleValue that is returned when we do not yet support a CSS Typed OM type
-// for a given CSS Value.
+// for a given CSS Value. It is tied to a specific CSS property and is only
+// considered valid for that property.
 class CORE_EXPORT CSSUnsupportedStyleValue final : public CSSStyleValue {
-  WTF_MAKE_NONCOPYABLE(CSSUnsupportedStyleValue);
-
  public:
-  static CSSUnsupportedStyleValue* Create(const String& css_text) {
-    return new CSSUnsupportedStyleValue(css_text);
+  static CSSUnsupportedStyleValue* Create(CSSPropertyID property,
+                                          const String& css_text) {
+    return new CSSUnsupportedStyleValue(property, css_text);
+  }
+  static CSSUnsupportedStyleValue* Create(CSSPropertyID property,
+                                          const CSSValue& value) {
+    return new CSSUnsupportedStyleValue(property, value.CssText());
   }
 
   StyleValueType GetType() const override {
     return StyleValueType::kUnknownType;
   }
-  const CSSValue* ToCSSValue() const override;
-  const CSSValue* ToCSSValueWithProperty(CSSPropertyID) const override;
-  String toString() const override { return css_text_; }
+  CSSPropertyID GetProperty() const { return property_; }
+  const CSSValue* ToCSSValue() const {
+    NOTREACHED();
+    return nullptr;
+  }
+
+  String toString() const final { return CSSText(); }
 
  private:
-  CSSUnsupportedStyleValue(const String& css_text) : css_text_(css_text) {}
+  CSSUnsupportedStyleValue(CSSPropertyID property, const String& css_text)
+      : property_(property) {
+    SetCSSText(css_text);
+  }
 
-  String css_text_;
+  const CSSPropertyID property_;
+  DISALLOW_COPY_AND_ASSIGN(CSSUnsupportedStyleValue);
 };
+
+DEFINE_TYPE_CASTS(CSSUnsupportedStyleValue,
+                  CSSStyleValue,
+                  value,
+                  value->GetType() ==
+                      CSSStyleValue::StyleValueType::kUnknownType,
+                  value.GetType() ==
+                      CSSStyleValue::StyleValueType::kUnknownType);
 
 }  // namespace blink
 

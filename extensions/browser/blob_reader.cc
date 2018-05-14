@@ -25,14 +25,7 @@ BlobReader::BlobReader(content::BrowserContext* browser_context,
                        BlobReadCallback callback)
     : callback_(callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  GURL blob_url;
-  if (base::StartsWith(blob_uuid, "blob:blobinternal",
-                       base::CompareCase::SENSITIVE)) {
-    // TODO(michaeln): remove support for deprecated blob urls
-    blob_url = GURL(blob_uuid);
-  } else {
-    blob_url = GURL(std::string("blob:uuid/") + blob_uuid);
-  }
+  GURL blob_url = GURL(std::string("blob:uuid/") + blob_uuid);
   DCHECK(blob_url.is_valid());
 
   net::NetworkTrafficAnnotationTag traffic_annotation =
@@ -54,7 +47,7 @@ BlobReader::BlobReader(content::BrowserContext* browser_context,
           destination: LOCAL
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting: "This feature cannot be disabled by settings."
           policy_exception_justification:
             "Not implemented. This is a local data fetch request and has no "
@@ -94,7 +87,8 @@ void BlobReader::OnURLFetchComplete(const net::URLFetcher* source) {
   std::unique_ptr<std::string> response(new std::string);
   int64_t first = 0, last = 0, length = 0;
   source->GetResponseAsString(response.get());
-  source->GetResponseHeaders()->GetContentRangeFor206(&first, &last, &length);
+  if (source->GetResponseHeaders())
+    source->GetResponseHeaders()->GetContentRangeFor206(&first, &last, &length);
   callback_.Run(std::move(response), length);
 
   delete this;

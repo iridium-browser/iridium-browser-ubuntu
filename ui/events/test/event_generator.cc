@@ -25,9 +25,9 @@
 #include "ui/gfx/geometry/vector2d_conversions.h"
 
 #if defined(USE_X11)
-#include <X11/Xlib.h>
 #include "ui/events/test/events_test_utils_x11.h"
 #include "ui/events/x/events_x_utils.h"
+#include "ui/gfx/x/x11.h"
 #endif
 
 #if defined(OS_WIN)
@@ -36,10 +36,6 @@
 
 namespace ui {
 namespace test {
-namespace {
-
-void DummyCallback(EventType, const gfx::Vector2dF&) {
-}
 
 class TestTickClock : public base::TickClock {
  public:
@@ -47,7 +43,8 @@ class TestTickClock : public base::TickClock {
   TestTickClock() {}
 
   base::TimeTicks NowTicks() override {
-    return base::TimeTicks::FromInternalValue(ticks_++ * 1000);
+    return base::TimeTicks() +
+           base::TimeDelta::FromMicroseconds(ticks_++ * 1000);
   }
 
  private:
@@ -55,6 +52,10 @@ class TestTickClock : public base::TickClock {
 
   DISALLOW_COPY_AND_ASSIGN(TestTickClock);
 };
+
+namespace {
+
+void DummyCallback(EventType, const gfx::Vector2dF&) {}
 
 class TestTouchEvent : public ui::TouchEvent {
  public:
@@ -305,14 +306,18 @@ void EventGenerator::PressMoveAndReleaseTouchToCenterOf(EventTarget* window) {
 }
 
 void EventGenerator::GestureTapAt(const gfx::Point& location) {
+  UpdateCurrentDispatcher(location);
+  gfx::Point converted_location = location;
+  delegate()->ConvertPointToTarget(current_target_, &converted_location);
+
   const int kTouchId = 2;
   ui::TouchEvent press(
-      ui::ET_TOUCH_PRESSED, location, ui::EventTimeForNow(),
+      ui::ET_TOUCH_PRESSED, converted_location, ui::EventTimeForNow(),
       ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, kTouchId));
   Dispatch(&press);
 
   ui::TouchEvent release(
-      ui::ET_TOUCH_RELEASED, location,
+      ui::ET_TOUCH_RELEASED, converted_location,
       press.time_stamp() + base::TimeDelta::FromMilliseconds(50),
       ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, kTouchId));
   Dispatch(&release);
@@ -624,7 +629,8 @@ void EventGenerator::Dispatch(ui::Event* event) {
 
 void EventGenerator::Init(gfx::NativeWindow root_window,
                           gfx::NativeWindow window_context) {
-  ui::SetEventTickClockForTesting(base::MakeUnique<TestTickClock>());
+  tick_clock_ = std::make_unique<TestTickClock>();
+  ui::SetEventTickClockForTesting(tick_clock_.get());
   delegate()->SetContext(this, root_window, window_context);
   if (window_context)
     current_location_ = delegate()->CenterOfWindow(window_context);
@@ -713,7 +719,7 @@ void EventGenerator::DoDispatchEvent(ui::Event* event, bool async) {
   if (event->IsTouchEvent()) {
     ui::TouchEvent* touch_event = static_cast<ui::TouchEvent*>(event);
     touch_pointer_details_.id = touch_event->pointer_details().id;
-    touch_event->set_pointer_details(touch_pointer_details_);
+    touch_event->SetPointerDetailsForTest(touch_pointer_details_);
   }
 
   if (async) {

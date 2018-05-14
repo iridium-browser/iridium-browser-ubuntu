@@ -32,12 +32,13 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
       'removeUserPodFingerprintIcon',
       'setPinEnabledForUser',
       'setAuthType',
-      'setTouchViewState',
+      'setTabletModeState',
       'setPublicSessionDisplayName',
       'setPublicSessionLocales',
       'setPublicSessionKeyboardLayouts',
       'setLockScreenAppsState',
       'setOverlayColors',
+      'togglePodBackground',
     ],
 
     preferredWidth_: 0,
@@ -76,14 +77,23 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
     },
 
     /**
-      * Sets login screen overlay colors based on colors extracted from the
-      * wallpaper.
-      * @param {string} maskColor Color for the gradient mask.
-      * @param {string} scrollColor Color for the small pods container.
-      */
-     setOverlayColors: function(maskColor, scrollColor) {
+     * Sets login screen overlay colors based on colors extracted from the
+     * wallpaper.
+     * @param {string} maskColor Color for the gradient mask.
+     * @param {string} scrollColor Color for the small pods container.
+     */
+    setOverlayColors: function(maskColor, scrollColor) {
       $('pod-row').setOverlayColors(maskColor, scrollColor);
-     },
+    },
+
+    /**
+     * Toggles the background behind user pods.
+     * @param {boolean} showPodBackground Whether to add background behind user
+     *     pods.
+     */
+    togglePodBackground: function(showPodBackground) {
+      $('pod-row').togglePodBackground(showPodBackground);
+    },
 
     /**
      * When the account picker is being used to lock the screen, pressing the
@@ -146,8 +156,9 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
         // again already. If that happens, ignore the onShow() call.
         return;
       }
-      chrome.send('getTouchViewState');
-      if (!this.firstShown_) return;
+      chrome.send('getTabletModeState');
+      if (!this.firstShown_)
+        return;
       this.firstShown_ = false;
 
       // Ensure that login is actually visible.
@@ -198,7 +209,7 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
       }
     },
 
-   /**
+    /**
      * Loads given users in pod row.
      * @param {array} users Array of user.
      * @param {boolean} showGuest Whether to show guest session button.
@@ -348,11 +359,11 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
     },
 
     /**
-     * Sets the state of touch view mode.
-     * @param {boolean} isTouchViewEnabled true if the mode is on.
+     * Sets the state of tablet mode.
+     * @param {boolean} isTabletModeEnabled true if the mode is on.
      */
-    setTouchViewState: function(isTouchViewEnabled) {
-      $('pod-row').setTouchViewState(isTouchViewEnabled);
+    setTabletModeState: function(isTabletModeEnabled) {
+      $('pod-row').setTabletModeState(isTabletModeEnabled);
     },
 
     /**
@@ -382,10 +393,8 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
      * @param {boolean} multipleRecommendedLocales Whether |locales| contains
      *     two or more recommended locales
      */
-    setPublicSessionLocales: function(userID,
-                                      locales,
-                                      defaultLocale,
-                                      multipleRecommendedLocales) {
+    setPublicSessionLocales: function(
+        userID, locales, defaultLocale, multipleRecommendedLocales) {
       $('pod-row').setPublicSessionLocales(userID,
                                            locales,
                                            defaultLocale,
@@ -418,7 +427,6 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
           this.lockScreenAppsState_ === LOCK_SCREEN_APPS_STATE.FOREGROUND;
       this.lockScreenAppsState_ = state;
 
-      $('login-header-bar').lockScreenAppsState = state;
       $('top-header-bar').lockScreenAppsState = state;
 
       // Reset the focused pod if app window is being shown on top of the user

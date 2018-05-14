@@ -9,10 +9,6 @@ import hashlib
 from recipe_engine import recipe_api
 
 
-PATCH_STORAGE_RIETVELD = 'rietveld'
-PATCH_STORAGE_GIT = 'git'
-
-
 class TryserverApi(recipe_api.RecipeApi):
   def __init__(self, *args, **kwargs):
     super(TryserverApi, self).__init__(*args, **kwargs)
@@ -20,16 +16,8 @@ class TryserverApi(recipe_api.RecipeApi):
 
   @property
   def is_tryserver(self):
-    """Returns true iff we can apply_issue or patch."""
-    return (
-        self.can_apply_issue or self.is_patch_in_git or self.is_gerrit_issue)
-
-  @property
-  def can_apply_issue(self):
-    """Returns true iff the properties exist to apply_issue from rietveld."""
-    return (self.m.properties.get('rietveld')
-            and 'issue' in self.m.properties
-            and 'patchset' in self.m.properties)
+    """Returns true iff we have a change to check out."""
+    return (self.is_patch_in_git or self.is_gerrit_issue)
 
   @property
   def is_gerrit_issue(self):
@@ -43,85 +31,11 @@ class TryserverApi(recipe_api.RecipeApi):
 
   @property
   def is_patch_in_git(self):
-    return (self.m.properties.get('patch_storage') == PATCH_STORAGE_GIT and
+    return (self.m.properties.get('patch_storage') == 'git' and
             self.m.properties.get('patch_repo_url') and
             self.m.properties.get('patch_ref'))
 
-  def _apply_patch_step(self, patch_file=None, patch_content=None, root=None):
-    assert not (patch_file and patch_content), (
-        'Please only specify either patch_file or patch_content, not both!')
-    patch_cmd = [
-        'patch',
-        '--dir', root or self.m.path['checkout'],
-        '--force',
-        '--forward',
-        '--remove-empty-files',
-        '--strip', '0',
-    ]
-    if patch_file:
-      patch_cmd.extend(['--input', patch_file])
-
-    self.m.step('apply patch', patch_cmd,
-                      stdin=patch_content)
-
-  def apply_from_git(self, cwd):
-    """Downloads patch from given git repo and ref and applies it"""
-    # TODO(nodir): accept these properties as parameters
-    patch_repo_url = self.m.properties['patch_repo_url']
-    patch_ref = self.m.properties['patch_ref']
-
-    patch_dir = self.m.path.mkdtemp('patch')
-    try:
-      build_path = self.m.path['build']
-    except KeyError:
-      raise self.m.step.StepFailure(
-          'path["build"] is not defined. '
-          'Possibly this is a LUCI build. '
-          'tryserver.apply_from_git is not supported in LUCI builds.')
-
-    git_setup_py = build_path.join('scripts', 'slave', 'git_setup.py')
-    git_setup_args = ['--path', patch_dir, '--url', patch_repo_url]
-    patch_path = patch_dir.join('patch.diff')
-
-    self.m.python('patch git setup', git_setup_py, git_setup_args)
-    with self.m.context(cwd=patch_dir):
-      self.m.git('fetch', 'origin', patch_ref, name='patch fetch')
-      self.m.git('clean', '-f', '-d', '-x', name='patch clean')
-      self.m.git('checkout', '-f', 'FETCH_HEAD', name='patch git checkout')
-    self._apply_patch_step(patch_file=patch_path, root=cwd)
-    self.m.step('remove patch', ['rm', '-rf', patch_dir])
-
-  def determine_patch_storage(self):
-    """Determines patch_storage automatically based on properties."""
-    storage = self.m.properties.get('patch_storage')
-    if storage:
-      return storage
-
-    if self.can_apply_issue:
-      return PATCH_STORAGE_RIETVELD
-
-  def maybe_apply_issue(self, cwd=None, authentication=None):
-    """If we're a trybot, apply a codereview issue.
-
-    Args:
-      cwd: If specified, apply the patch from the specified directory.
-      authentication: authentication scheme whenever apply_issue.py is called.
-        This is only used if the patch comes from Rietveld. Possible values:
-        None, 'oauth2' (see also api.rietveld.apply_issue.)
-    """
-    storage = self.determine_patch_storage()
-
-    if storage == PATCH_STORAGE_RIETVELD:
-      return self.m.rietveld.apply_issue(
-          self.m.rietveld.calculate_issue_root(),
-          authentication=authentication)
-    elif storage == PATCH_STORAGE_GIT:
-      return self.apply_from_git(cwd)
-    else:
-      # Since this method is "maybe", we don't raise an Exception.
-      pass
-
-  def get_files_affected_by_patch(self, patch_root=None, **kwargs):
+  def get_files_affected_by_patch(self, patch_root, **kwargs):
     """Returns list of paths to files affected by the patch.
 
     Argument:
@@ -129,52 +43,22 @@ class TryserverApi(recipe_api.RecipeApi):
         api.gclient.calculate_patch_root(patch_project)
 
     Returned paths will be relative to to patch_root.
-
-    TODO(tandrii): remove this doc.
-    Unless you use patch_root=None, in which case old behavior is used
-    which returns paths relative to checkout aka solution[0].name.
     """
-    # patch_root must be set! None is for backwards compataibility and will be
-    # removed.
-    if patch_root is None:
-      return self._old_get_files_affected_by_patch()
-
     cwd = self.m.context.cwd or self.m.path['start_dir'].join(patch_root)
     with self.m.context(cwd=cwd):
-      step_result = self.m.git('diff', '--cached', '--name-only',
-                               name='git diff to analyze patch',
-                               stdout=self.m.raw_io.output(),
-                               step_test_data=lambda:
-                                 self.m.raw_io.test_api.stream_output('foo.cc'),
-                               **kwargs)
+      step_result = self.m.git(
+          '-c', 'core.quotePath=false', 'diff', '--cached', '--name-only',
+          name='git diff to analyze patch',
+          stdout=self.m.raw_io.output(),
+          step_test_data=lambda:
+            self.m.raw_io.test_api.stream_output('foo.cc'),
+          **kwargs)
     paths = [self.m.path.join(patch_root, p) for p in
              step_result.stdout.split()]
     if self.m.platform.is_win:
       # Looks like "analyze" wants POSIX slashes even on Windows (since git
       # uses that format even on Windows).
       paths = [path.replace('\\', '/') for path in paths]
-    step_result.presentation.logs['files'] = paths
-    return paths
-
-
-  def _old_get_files_affected_by_patch(self):
-    issue_root = self.m.rietveld.calculate_issue_root()
-    cwd = self.m.path['checkout'].join(issue_root) if issue_root else None
-
-    with self.m.context(cwd=cwd):
-      step_result = self.m.git('diff', '--cached', '--name-only',
-                               name='git diff to analyze patch',
-                               stdout=self.m.raw_io.output(),
-                               step_test_data=lambda:
-                                 self.m.raw_io.test_api.stream_output('foo.cc'))
-    paths = step_result.stdout.split()
-    if issue_root:
-      paths = [self.m.path.join(issue_root, path) for path in paths]
-    if self.m.platform.is_win:
-      # Looks like "analyze" wants POSIX slashes even on Windows (since git
-      # uses that format even on Windows).
-      paths = [path.replace('\\', '/') for path in paths]
-
     step_result.presentation.logs['files'] = paths
     return paths
 
@@ -264,17 +148,10 @@ class TryserverApi(recipe_api.RecipeApi):
     git-footers documentation for more information.
     """
     if patch_text is None:
-      codereview = None
-      if not self.can_apply_issue: #pragma: no cover
-        raise recipe_api.StepFailure("Cannot get tags from gerrit yet.")
-      else:
-        codereview = 'rietveld'
-        patch = (
-            self.m.properties['rietveld'].strip('/') + '/' +
-            str(self.m.properties['issue']))
-
-      patch_text = self.m.git_cl.get_description(
-          patch=patch, codereview=codereview).stdout
+      patch_text = self.m.gerrit.get_change_description(
+          self.m.properties['patch_gerrit_url'],
+          self.m.properties['patch_issue'],
+          self.m.properties['patch_set'])
 
     result = self.m.python(
         'parse description', self.package_repo_resource('git_footers.py'),
@@ -286,3 +163,5 @@ class TryserverApi(recipe_api.RecipeApi):
     """Gets a specific tag from a CL description"""
     return self.get_footers(patch_text).get(tag, [])
 
+  def normalize_footer_name(self, footer):
+    return '-'.join([ word.title() for word in footer.strip().split('-') ])

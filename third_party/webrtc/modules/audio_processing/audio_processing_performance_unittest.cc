@@ -7,7 +7,7 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#include "webrtc/modules/audio_processing/audio_processing_impl.h"
+#include "modules/audio_processing/audio_processing_impl.h"
 
 #include <math.h>
 
@@ -15,18 +15,17 @@
 #include <memory>
 #include <vector>
 
-#include "webrtc/config.h"
-#include "webrtc/modules/audio_processing/test/test_utils.h"
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/rtc_base/array_view.h"
-#include "webrtc/rtc_base/atomicops.h"
-#include "webrtc/rtc_base/platform_thread.h"
-#include "webrtc/rtc_base/random.h"
-#include "webrtc/rtc_base/safe_conversions.h"
-#include "webrtc/system_wrappers/include/clock.h"
-#include "webrtc/system_wrappers/include/event_wrapper.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/testsupport/perf_test.h"
+#include "api/array_view.h"
+#include "modules/audio_processing/test/test_utils.h"
+#include "modules/include/module_common_types.h"
+#include "rtc_base/atomicops.h"
+#include "rtc_base/numerics/safe_conversions.h"
+#include "rtc_base/platform_thread.h"
+#include "rtc_base/random.h"
+#include "system_wrappers/include/clock.h"
+#include "system_wrappers/include/event_wrapper.h"
+#include "test/gtest.h"
+#include "test/testsupport/perf_test.h"
 
 // Check to verify that the define for the intelligibility enhancer is properly
 // set.
@@ -258,34 +257,21 @@ class TimedThreadApiProcessor {
   bool Process();
 
   // Method for printing out the simulation statistics.
-  void print_processor_statistics(std::string processor_name) const {
+  void print_processor_statistics(const std::string& processor_name) const {
     const std::string modifier = "_api_call_duration";
-
-    // Lambda function for creating a test printout string.
-    auto create_mean_and_std_string = [](int64_t average,
-                                         int64_t standard_dev) {
-      std::string s = std::to_string(average);
-      s += ", ";
-      s += std::to_string(standard_dev);
-      return s;
-    };
 
     const std::string sample_rate_name =
         "_" + std::to_string(simulation_config_->sample_rate_hz) + "Hz";
 
     webrtc::test::PrintResultMeanAndError(
         "apm_timing", sample_rate_name, processor_name,
-        create_mean_and_std_string(GetDurationAverage(),
-                                   GetDurationStandardDeviation()),
+        GetDurationAverage(), GetDurationStandardDeviation(),
         "us", false);
 
     if (kPrintAllDurations) {
-      std::string value_string = "";
-      for (int64_t duration : api_call_durations_) {
-        value_string += std::to_string(duration) + ",";
-      }
       webrtc::test::PrintResultList("apm_call_durations", sample_rate_name,
-                                    processor_name, value_string, "us", false);
+                                    processor_name, api_call_durations_, "us",
+                                    false);
     }
   }
 
@@ -443,7 +429,7 @@ class TimedThreadApiProcessor {
   AudioFrameData frame_data_;
   webrtc::Clock* clock_;
   const size_t num_durations_to_store_;
-  std::vector<int64_t> api_call_durations_;
+  std::vector<double> api_call_durations_;
   const float input_level_;
   bool first_process_call_ = true;
   const ProcessorType processor_type_;
@@ -573,7 +559,7 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
     int num_capture_channels = 1;
     switch (simulation_config_.simulation_settings) {
       case SettingsType::kDefaultApmMobile: {
-        apm_.reset(AudioProcessingImpl::Create());
+        apm_.reset(AudioProcessingBuilder().Create());
         ASSERT_TRUE(!!apm_);
         set_default_mobile_apm_runtime_settings(apm_.get());
         break;
@@ -581,7 +567,7 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
       case SettingsType::kDefaultApmDesktop: {
         Config config;
         add_default_desktop_config(&config);
-        apm_.reset(AudioProcessingImpl::Create(config));
+        apm_.reset(AudioProcessingBuilder().Create(config));
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         apm_->SetExtraOptions(config);
@@ -591,7 +577,7 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
         Config config;
         add_beamformer_config(&config);
         add_default_desktop_config(&config);
-        apm_.reset(AudioProcessingImpl::Create(config));
+        apm_.reset(AudioProcessingBuilder().Create(config));
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         apm_->SetExtraOptions(config);
@@ -602,14 +588,14 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
         Config config;
         config.Set<Intelligibility>(new Intelligibility(true));
         add_default_desktop_config(&config);
-        apm_.reset(AudioProcessingImpl::Create(config));
+        apm_.reset(AudioProcessingBuilder().Create(config));
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         apm_->SetExtraOptions(config);
         break;
       }
       case SettingsType::kAllSubmodulesTurnedOff: {
-        apm_.reset(AudioProcessingImpl::Create());
+        apm_.reset(AudioProcessingBuilder().Create());
         ASSERT_TRUE(!!apm_);
         turn_off_default_apm_runtime_settings(apm_.get());
         break;
@@ -618,7 +604,7 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
         Config config;
         config.Set<ExtendedFilter>(new ExtendedFilter(true));
         config.Set<DelayAgnostic>(new DelayAgnostic(false));
-        apm_.reset(AudioProcessingImpl::Create(config));
+        apm_.reset(AudioProcessingBuilder().Create(config));
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         apm_->SetExtraOptions(config);
@@ -628,7 +614,7 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
         Config config;
         config.Set<ExtendedFilter>(new ExtendedFilter(false));
         config.Set<DelayAgnostic>(new DelayAgnostic(true));
-        apm_.reset(AudioProcessingImpl::Create(config));
+        apm_.reset(AudioProcessingBuilder().Create(config));
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         apm_->SetExtraOptions(config);

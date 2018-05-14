@@ -15,7 +15,7 @@ namespace views {
 class NativeViewHost;
 
 // Mac implementation of NativeViewHostWrapper.
-class VIEWS_EXPORT NativeViewHostMac : public NativeViewHostWrapper {
+class NativeViewHostMac : public NativeViewHostWrapper {
  public:
   explicit NativeViewHostMac(NativeViewHost* host);
   ~NativeViewHostMac() override;
@@ -25,10 +25,12 @@ class VIEWS_EXPORT NativeViewHostMac : public NativeViewHostWrapper {
   void NativeViewDetaching(bool destroyed) override;
   void AddedToWidget() override;
   void RemovedFromWidget() override;
+  bool SetCornerRadius(int corner_radius) override;
   void InstallClip(int x, int y, int w, int h) override;
   bool HasInstalledClip() override;
   void UninstallClip() override;
-  void ShowWidget(int x, int y, int w, int h) override;
+  void ShowWidget(int x, int y, int w, int h, int native_w, int native_h)
+      override;
   void HideWidget() override;
   void SetFocus() override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
@@ -46,4 +48,4 @@ class VIEWS_EXPORT NativeViewHostMac : public NativeViewHostWrapper {
 
 }  // namespace views
 
-#endif  // UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_AURA_H_
+#endif  // UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_MAC_H_

@@ -8,6 +8,7 @@
 #include <map>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/time/clock.h"
@@ -50,6 +51,8 @@ class ConnectTetheringOperation : public MessageTransferOperation {
 
   class Observer {
    public:
+    virtual void OnConnectTetheringRequestSent(
+        const cryptauth::RemoteDevice& remote_device) = 0;
     virtual void OnSuccessfulConnectTetheringResponse(
         const cryptauth::RemoteDevice& remote_device,
         const std::string& ssid,
@@ -59,17 +62,18 @@ class ConnectTetheringOperation : public MessageTransferOperation {
         ConnectTetheringResponse_ResponseCode error_code) = 0;
   };
 
-  ConnectTetheringOperation(
-      const cryptauth::RemoteDevice& device_to_connect,
-      BleConnectionManager* connection_manager,
-      TetherHostResponseRecorder* tether_host_response_recorder,
-      bool setup_required);
   ~ConnectTetheringOperation() override;
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
  protected:
+  ConnectTetheringOperation(
+      const cryptauth::RemoteDevice& device_to_connect,
+      BleConnectionManager* connection_manager,
+      TetherHostResponseRecorder* tether_host_response_recorder,
+      bool setup_required);
+
   // MessageTransferOperation:
   void OnDeviceAuthenticated(
       const cryptauth::RemoteDevice& remote_device) override;
@@ -77,25 +81,31 @@ class ConnectTetheringOperation : public MessageTransferOperation {
                          const cryptauth::RemoteDevice& remote_device) override;
   void OnOperationFinished() override;
   MessageType GetMessageTypeForConnection() override;
+  void OnMessageSent(int sequence_number) override;
+  uint32_t GetTimeoutSeconds() override;
+
+  void NotifyConnectTetheringRequestSent();
   void NotifyObserversOfSuccessfulResponse(const std::string& ssid,
                                            const std::string& password);
   void NotifyObserversOfConnectionFailure(
       ConnectTetheringResponse_ResponseCode error_code);
 
-  uint32_t GetTimeoutSeconds() override;
-
  private:
   friend class ConnectTetheringOperationTest;
+  FRIEND_TEST_ALL_PREFIXES(ConnectTetheringOperationTest,
+                           TestOperation_SetupRequired);
 
-  void SetClockForTest(std::unique_ptr<base::Clock> clock_for_test);
+  void SetClockForTest(base::Clock* clock_for_test);
 
-  // The amount of time this operation will wait for if first time setup is
-  // required on the host device.
-  static uint32_t kSetupRequiredResponseTimeoutSeconds;
+  // The amount of time this operation will wait for a response. The timeout
+  // values are different depending on whether setup is needed on the host.
+  static const uint32_t kSetupNotRequiredResponseTimeoutSeconds;
+  static const uint32_t kSetupRequiredResponseTimeoutSeconds;
 
   cryptauth::RemoteDevice remote_device_;
   TetherHostResponseRecorder* tether_host_response_recorder_;
-  std::unique_ptr<base::Clock> clock_;
+  base::Clock* clock_;
+  int connect_message_sequence_number_ = -1;
   bool setup_required_;
 
   // These values are saved in OnMessageReceived() and returned in

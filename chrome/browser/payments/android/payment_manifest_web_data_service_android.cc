@@ -52,37 +52,35 @@ void PaymentManifestWebDataServiceAndroid::OnWebAppManifestRequestDone(
     JNIEnv* env,
     WebDataServiceBase::Handle h,
     WDTypedResult* result) {
-  const WDResult<std::vector<mojom::WebAppManifestSectionPtr>>* typed_result =
-      static_cast<
-          const WDResult<std::vector<mojom::WebAppManifestSectionPtr>>*>(
-          result);
-  const std::vector<mojom::WebAppManifestSectionPtr>* manifest =
+  const WDResult<std::vector<WebAppManifestSection>>* typed_result =
+      static_cast<const WDResult<std::vector<WebAppManifestSection>>*>(result);
+  const std::vector<WebAppManifestSection>* manifest =
       &(typed_result->GetValue());
 
   base::android::ScopedJavaLocalRef<jobjectArray> jmanifest =
       Java_PaymentManifestWebDataService_createManifest(env, manifest->size());
 
   for (size_t i = 0; i < manifest->size(); ++i) {
-    const mojom::WebAppManifestSectionPtr& section = manifest->at(i);
-    DCHECK_GE(100U, section->fingerprints.size());
+    const WebAppManifestSection& section = manifest->at(i);
+    DCHECK_GE(100U, section.fingerprints.size());
 
     Java_PaymentManifestWebDataService_addSectionToManifest(
-        env, jmanifest.obj(), base::checked_cast<int>(i),
-        base::android::ConvertUTF8ToJavaString(env, section->id),
-        section->min_version,
-        base::checked_cast<int>(section->fingerprints.size()));
+        env, jmanifest, base::checked_cast<int>(i),
+        base::android::ConvertUTF8ToJavaString(env, section.id),
+        section.min_version,
+        base::checked_cast<int>(section.fingerprints.size()));
 
-    for (size_t j = 0; j < section->fingerprints.size(); ++j) {
-      const std::vector<uint8_t>& fingerprint = section->fingerprints[j];
+    for (size_t j = 0; j < section.fingerprints.size(); ++j) {
+      const std::vector<uint8_t>& fingerprint = section.fingerprints[j];
       Java_PaymentManifestWebDataService_addFingerprintToSection(
-          env, jmanifest.obj(), base::checked_cast<int>(i),
+          env, jmanifest, base::checked_cast<int>(i),
           base::checked_cast<int>(j),
           base::android::ToJavaByteArray(env, fingerprint));
     }
   }
 
   Java_PaymentManifestWebDataServiceCallback_onPaymentWebAppManifestFetched(
-      env, web_data_service_requests_[h]->obj(), jmanifest.obj());
+      env, *web_data_service_requests_[h], jmanifest);
   web_data_service_requests_.erase(h);
 }
 
@@ -95,7 +93,7 @@ void PaymentManifestWebDataServiceAndroid::OnPaymentMethodManifestRequestDone(
   const std::vector<std::string>* web_apps_ids = &(typed_result->GetValue());
 
   Java_PaymentManifestWebDataServiceCallback_onPaymentMethodManifestFetched(
-      env, web_data_service_requests_[h]->obj(),
+      env, *web_data_service_requests_[h],
       base::android::ToJavaArrayOfStrings(env, *web_apps_ids));
   web_data_service_requests_.erase(h);
 }
@@ -138,25 +136,23 @@ void PaymentManifestWebDataServiceAndroid::AddPaymentWebAppManifest(
   if (web_data_service == nullptr)
     return;
 
-  std::vector<mojom::WebAppManifestSectionPtr> manifest;
+  std::vector<WebAppManifestSection> manifest;
 
   jsize jcount_of_sections = env->GetArrayLength(jmanifest_sections.obj());
   for (jsize i = 0; i < jcount_of_sections; i++) {
-    mojom::WebAppManifestSectionPtr section =
-        mojom::WebAppManifestSection::New();
+    WebAppManifestSection section;
 
     base::android::ScopedJavaLocalRef<jobject> jsection(
         env, env->GetObjectArrayElement(jmanifest_sections.obj(), i));
-    section->id = base::android::ConvertJavaStringToUTF8(
-        Java_PaymentManifestWebDataService_getIdFromSection(env,
-                                                            jsection.obj()));
-    section->min_version = static_cast<int64_t>(
-        Java_PaymentManifestWebDataService_getMinVersionFromSection(
-            env, jsection.obj()));
+    section.id = base::android::ConvertJavaStringToUTF8(
+        Java_PaymentManifestWebDataService_getIdFromSection(env, jsection));
+    section.min_version = static_cast<int64_t>(
+        Java_PaymentManifestWebDataService_getMinVersionFromSection(env,
+                                                                    jsection));
 
     base::android::ScopedJavaLocalRef<jobjectArray> jsection_fingerprints(
         Java_PaymentManifestWebDataService_getFingerprintsFromSection(
-            env, jsection.obj()));
+            env, jsection));
     jsize jcount_of_fingerprints =
         env->GetArrayLength(jsection_fingerprints.obj());
     for (jsize j = 0; j < jcount_of_fingerprints; j++) {
@@ -166,7 +162,7 @@ void PaymentManifestWebDataServiceAndroid::AddPaymentWebAppManifest(
                    jsection_fingerprints.obj(), j));
       base::android::JavaByteArrayToByteVector(env, jfingerprint.obj(),
                                                &fingerprint);
-      section->fingerprints.emplace_back(fingerprint);
+      section.fingerprints.emplace_back(fingerprint);
     }
 
     manifest.emplace_back(std::move(section));
@@ -191,7 +187,7 @@ bool PaymentManifestWebDataServiceAndroid::GetPaymentMethodManifest(
       web_data_service->GetPaymentMethodManifest(
           base::android::ConvertJavaStringToUTF8(env, jmethod_name), this);
   web_data_service_requests_[handle] =
-      base::MakeUnique<base::android::ScopedJavaGlobalRef<jobject>>(jcallback);
+      std::make_unique<base::android::ScopedJavaGlobalRef<jobject>>(jcallback);
 
   return true;
 }
@@ -212,13 +208,14 @@ bool PaymentManifestWebDataServiceAndroid::GetPaymentWebAppManifest(
       web_data_service->GetPaymentWebAppManifest(
           base::android::ConvertJavaStringToUTF8(env, japp_package_name), this);
   web_data_service_requests_[handle] =
-      base::MakeUnique<base::android::ScopedJavaGlobalRef<jobject>>(jcallback);
+      std::make_unique<base::android::ScopedJavaGlobalRef<jobject>>(jcallback);
 
   return true;
 }
 
-static jlong Init(JNIEnv* env,
-                  const base::android::JavaParamRef<jobject>& obj) {
+static jlong JNI_PaymentManifestWebDataService_Init(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
   PaymentManifestWebDataServiceAndroid* manifest_web_data_service_android =
       new PaymentManifestWebDataServiceAndroid(env, obj);
   return reinterpret_cast<intptr_t>(manifest_web_data_service_android);

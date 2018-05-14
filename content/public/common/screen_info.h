@@ -5,10 +5,12 @@
 #ifndef CONTENT_PUBLIC_COMMON_SCREEN_INFO_H_
 #define CONTENT_PUBLIC_COMMON_SCREEN_INFO_H_
 
+#include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/public/common/screen_orientation_values.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/icc_profile.h"
 
 namespace content {
 
@@ -25,6 +27,15 @@ struct CONTENT_EXPORT ScreenInfo {
 
     // The color space of the output display.
     gfx::ColorSpace color_space = gfx::ColorSpace::CreateSRGB();
+
+#if defined(OS_MACOSX)
+    // The ICC profile from which |color_space| was derived, if any. This is
+    // used only on macOS, to ensure that the color profile set on an IOSurface
+    // exactly match that of the display, when possible (because that has
+    // significant power implications).
+    // https://crbug.com/766736#c1
+    gfx::ICCProfile icc_profile;
+#endif
 
     // The screen depth in bits per pixel
     uint32_t depth = 0;

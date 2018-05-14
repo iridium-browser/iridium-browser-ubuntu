@@ -4,8 +4,9 @@
 
 #include "chrome/browser/ui/ash/launcher/arc_app_deferred_launcher_controller.h"
 
+#include <memory>
+
 #include "ash/public/cpp/shelf_model.h"
-#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -90,7 +91,7 @@ void ArcAppDeferredLauncherController::MaybeApplySpinningEffect(
 
   const color_utils::HSL shift = {-1, 0, 0.25};
   *image = gfx::ImageSkia(
-      new SpinningEffectSource(
+      std::make_unique<SpinningEffectSource>(
           weak_ptr_factory_.GetWeakPtr(), app_id,
           gfx::ImageSkiaOperations::CreateTransparentImage(
               gfx::ImageSkiaOperations::CreateHSLShiftedImage(*image, shift),
@@ -129,11 +130,12 @@ void ArcAppDeferredLauncherController::OnAppReadyChanged(
   if (it == app_controller_map_.end())
     return;
 
-  // Preserve the event flags before |it| is invalidated in Close().
-  int event_flags = it->second->event_flags();
+  // Preserve state before Close() invalidates |it|.
+  const int event_flags = it->second->event_flags();
+  const int64_t display_id = it->second->display_id();
   Close(app_id);
 
-  arc::LaunchApp(observed_profile_, app_id, event_flags);
+  arc::LaunchApp(observed_profile_, app_id, event_flags, display_id);
 }
 
 void ArcAppDeferredLauncherController::OnAppRemoved(const std::string& app_id) {
@@ -187,7 +189,8 @@ void ArcAppDeferredLauncherController::RegisterNextUpdate() {
 
 void ArcAppDeferredLauncherController::RegisterDeferredLaunch(
     const std::string& app_id,
-    int event_flags) {
+    int event_flags,
+    int64_t display_id) {
   const arc::ArcSessionManager* arc_session_manager =
       arc::ArcSessionManager::Get();
   DCHECK(arc_session_manager);
@@ -204,8 +207,8 @@ void ArcAppDeferredLauncherController::RegisterDeferredLaunch(
     return;
 
   std::unique_ptr<ArcAppDeferredLauncherItemController> controller =
-      base::MakeUnique<ArcAppDeferredLauncherItemController>(
-          app_id, event_flags, weak_ptr_factory_.GetWeakPtr());
+      std::make_unique<ArcAppDeferredLauncherItemController>(
+          app_id, event_flags, display_id, weak_ptr_factory_.GetWeakPtr());
   ArcAppDeferredLauncherItemController* item_controller = controller.get();
   if (!item) {
     owner_->CreateAppLauncherItem(std::move(controller), ash::STATUS_RUNNING);

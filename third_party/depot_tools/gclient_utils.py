@@ -5,10 +5,12 @@
 """Generic utils."""
 
 import codecs
+import collections
 import contextlib
 import cStringIO
 import datetime
 import logging
+import operator
 import os
 import pipes
 import platform
@@ -88,6 +90,11 @@ def SplitUrlRevision(url):
 def IsGitSha(revision):
   """Returns true if the given string is a valid hex-encoded sha"""
   return re.match('^[a-fA-F0-9]{6,40}$', revision) is not None
+
+
+def IsFullGitSha(revision):
+  """Returns true if the given string is a valid hex-encoded full sha"""
+  return re.match('^[a-fA-F0-9]{40}$', revision) is not None
 
 
 def IsDateRevision(revision):
@@ -284,7 +291,11 @@ def CheckCallAndFilterAndHeader(args, always=False, header=None, **kwargs):
   """
   stdout = kwargs.setdefault('stdout', sys.stdout)
   if header is None:
-    header = "\n________ running '%s' in '%s'\n" % (
+    # The automatically generated header only prepends newline if always is
+    # false: always is usually set to false if there's an external progress
+    # display, and it's better not to clobber it in that case.
+    header = "%s________ running '%s' in '%s'\n" % (
+                 '' if always else '\n',
                  ' '.join(args), kwargs.get('cwd', '.'))
 
   if always:
@@ -312,6 +323,22 @@ class Wrapper(object):
 
   def __getattr__(self, name):
     return getattr(self._wrapped, name)
+
+
+class WriteToStdout(Wrapper):
+  """Creates a file object clone to also print to sys.stdout."""
+  def __init__(self, wrapped):
+    super(WriteToStdout, self).__init__(wrapped)
+    if not hasattr(self, 'lock'):
+      self.lock = threading.Lock()
+
+  def write(self, out, *args, **kwargs):
+    self._wrapped.write(out, *args, **kwargs)
+    self.lock.acquire()
+    try:
+      sys.stdout.write(out, *args, **kwargs)
+    finally:
+      self.lock.release()
 
 
 class AutoFlush(Wrapper):
@@ -611,8 +638,9 @@ def FindGclientRoot(from_dir, filename='.gclient'):
       # might have failed. In that case, we cannot verify that the .gclient
       # is the one we want to use. In order to not to cause too much trouble,
       # just issue a warning and return the path anyway.
-      print >> sys.stderr, ("%s file in parent directory %s might not be the "
-          "file you want to use" % (filename, path))
+      print >> sys.stderr, ("%s missing, %s file in parent directory %s might "
+          "not be the file you want to use." %
+          (entries_filename, filename, path))
       return path
     scope = {}
     try:
@@ -1236,3 +1264,67 @@ def FindExecutable(executable):
         if os.path.isfile(alt_target) and os.access(alt_target, os.X_OK):
           return alt_target
   return None
+
+
+def freeze(obj):
+  """Takes a generic object ``obj``, and returns an immutable version of it.
+
+  Supported types:
+    * dict / OrderedDict -> FrozenDict
+    * list -> tuple
+    * set -> frozenset
+    * any object with a working __hash__ implementation (assumes that hashable
+      means immutable)
+
+  Will raise TypeError if you pass an object which is not hashable.
+  """
+  if isinstance(obj, dict):
+    return FrozenDict((freeze(k), freeze(v)) for k, v in obj.iteritems())
+  elif isinstance(obj, (list, tuple)):
+    return tuple(freeze(i) for i in obj)
+  elif isinstance(obj, set):
+    return frozenset(freeze(i) for i in obj)
+  else:
+    hash(obj)
+    return obj
+
+
+class FrozenDict(collections.Mapping):
+  """An immutable OrderedDict.
+
+  Modified From: http://stackoverflow.com/a/2704866
+  """
+  def __init__(self, *args, **kwargs):
+    self._d = collections.OrderedDict(*args, **kwargs)
+
+    # Calculate the hash immediately so that we know all the items are
+    # hashable too.
+    self._hash = reduce(operator.xor,
+                        (hash(i) for i in enumerate(self._d.iteritems())), 0)
+
+  def __eq__(self, other):
+    if not isinstance(other, collections.Mapping):
+      return NotImplemented
+    if self is other:
+      return True
+    if len(self) != len(other):
+      return False
+    for k, v in self.iteritems():
+      if k not in other or other[k] != v:
+        return False
+    return True
+
+  def __iter__(self):
+    return iter(self._d)
+
+  def __len__(self):
+    return len(self._d)
+
+  def __getitem__(self, key):
+    return self._d[key]
+
+  def __hash__(self):
+    return self._hash
+
+  def __repr__(self):
+    return 'FrozenDict(%r)' % (self._d.items(),)

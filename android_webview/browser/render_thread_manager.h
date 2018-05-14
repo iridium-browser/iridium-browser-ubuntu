@@ -65,7 +65,7 @@ class RenderThreadManager : public CompositorFrameConsumer {
   void PostExternalDrawConstraintsToChildCompositorOnRT(
       const ParentCompositorDrawConstraints& parent_draw_constraints);
   void InsertReturnedResourcesOnRT(
-      const std::vector<cc::ReturnedResource>& resources,
+      const std::vector<viz::ReturnedResource>& resources,
       const CompositorID& compositor_id,
       uint32_t layer_tree_frame_sink_id);
 
@@ -115,7 +115,6 @@ class RenderThreadManager : public CompositorFrameConsumer {
   mutable base::Lock lock_;
   gfx::Vector2d scroll_offset_;
   ChildFrameQueue child_frames_;
-  const bool sync_on_draw_hardware_;
   bool inside_hardware_release_;
   ParentCompositorDrawConstraints parent_draw_constraints_;
   ReturnedResourcesMap returned_resources_map_;

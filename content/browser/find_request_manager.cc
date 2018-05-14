@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/containers/queue.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/frame_messages.h"
@@ -32,10 +33,10 @@ std::vector<FrameTreeNode*> GetChildren(FrameTreeNode* node) {
   for (size_t i = 0; i != node->child_count(); ++i)
     children[i] = node->child_at(i);
 
-  if (auto* inner_contents = WebContentsImpl::FromOuterFrameTreeNode(node)) {
-    children.push_back(inner_contents->GetMainFrame()->frame_tree_node());
+  if (auto* contents = WebContentsImpl::FromOuterFrameTreeNode(node)) {
+    children.push_back(contents->GetMainFrame()->frame_tree_node());
   } else {
-    auto* contents = WebContentsImpl::FromFrameTreeNode(node);
+    contents = WebContentsImpl::FromFrameTreeNode(node);
     if (node->IsMainFrame() && contents->GetBrowserPluginEmbedder()) {
       for (auto* inner_contents : contents->GetInnerWebContents()) {
         children.push_back(inner_contents->GetMainFrame()->frame_tree_node());
@@ -261,7 +262,7 @@ void FindRequestManager::Find(int request_id,
 
   // If this is a new find session, clear any queued requests from last session.
   if (!options.find_next)
-    find_request_queue_ = std::queue<FindRequest>();
+    find_request_queue_ = base::queue<FindRequest>();
 
   find_request_queue_.emplace(request_id, search_text, options);
   if (find_request_queue_.size() == 1)
@@ -562,7 +563,7 @@ void FindRequestManager::FindInternal(const FindRequest& request) {
   // This is an initial find operation.
   Reset(request);
   for (WebContentsImpl* contents : contents_->GetWebContentsAndAllInner()) {
-    frame_observers_.push_back(base::MakeUnique<FrameObserver>(contents, this));
+    frame_observers_.push_back(std::make_unique<FrameObserver>(contents, this));
     for (FrameTreeNode* node : contents->GetFrameTree()->Nodes()) {
       AddFrame(node->current_frame_host(), false /* force */);
     }
@@ -775,11 +776,11 @@ void FindRequestManager::RemoveFindMatchRectsPendingReply(
                             true /* forward */,
                             true /* matches_only */,
                             false /* wrap */)) {
-        auto it = match_rects_.frame_rects.find(frame);
-        if (it == match_rects_.frame_rects.end())
+        auto frame_it = match_rects_.frame_rects.find(frame);
+        if (frame_it == match_rects_.frame_rects.end())
           continue;
 
-        std::vector<gfx::RectF>& frame_rects = it->second.rects;
+        std::vector<gfx::RectF>& frame_rects = frame_it->second.rects;
         aggregate_rects.insert(
             aggregate_rects.end(), frame_rects.begin(), frame_rects.end());
       }

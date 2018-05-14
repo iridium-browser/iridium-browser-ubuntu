@@ -6,6 +6,7 @@
 #define UI_ARC_NOTIFICATION_ARC_NOTIFICATION_VIEW_H_
 
 #include "base/macros.h"
+#include "ui/arc/notification/arc_notification_item.h"
 #include "ui/message_center/views/message_view.h"
 
 namespace views {
@@ -18,16 +19,17 @@ class ArcNotificationContentViewDelegate;
 
 // View for custom notification with NOTIFICATION_TYPE_CUSTOM which hosts the
 // ArcNotificationContentView which shows content of the notification.
-class ArcNotificationView : public message_center::MessageView {
+class ArcNotificationView : public message_center::MessageView,
+                            public ArcNotificationItem::Observer {
  public:
   static const char kViewClassName[];
 
   // |content_view| is a view to be hosted in this view.
-  ArcNotificationView(
-      std::unique_ptr<views::View> content_view,
-      std::unique_ptr<ArcNotificationContentViewDelegate> delegate,
-      message_center::MessageCenterController* controller,
-      const message_center::Notification& notification);
+  ArcNotificationView(ArcNotificationItem* item,
+                      std::unique_ptr<views::View> content_view,
+                      std::unique_ptr<ArcNotificationContentViewDelegate>
+                          contents_view_delegate,
+                      const message_center::Notification& notification);
   ~ArcNotificationView() override;
 
   // These method are called by the content view when focus handling is defered
@@ -36,6 +38,8 @@ class ArcNotificationView : public message_center::MessageView {
   void OnContentBlured();
 
   // Overridden from MessageView:
+  void UpdateWithNotification(
+      const message_center::Notification& notification) override;
   void SetDrawBackgroundAsActive(bool active) override;
   bool IsCloseButtonFocused() const override;
   void RequestFocusOnCloseButton() override;
@@ -43,6 +47,11 @@ class ArcNotificationView : public message_center::MessageView {
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   message_center::NotificationControlButtonsView* GetControlButtonsView()
       const override;
+  bool IsExpanded() const override;
+  void SetExpanded(bool expanded) override;
+  bool IsManuallyExpandedOrCollapsed() const override;
+  void OnContainerAnimationStarted() override;
+  void OnContainerAnimationEnded() override;
 
   // views::SlideOutController::Delegate:
   void OnSlideChanged() override;
@@ -58,9 +67,19 @@ class ArcNotificationView : public message_center::MessageView {
   void ChildPreferredSizeChanged(View* child) override;
   bool HandleAccessibleAction(const ui::AXActionData& action) override;
 
+  // ArcNotificationItem::Observer
+  void OnItemDestroying() override;
+  void OnItemUpdated() override;
+
  private:
   friend class ArcNotificationContentViewTest;
   friend class ArcNotificationViewTest;
+
+  // TODO(yoshiki): Mmove this to message_center::MessageView.
+  void UpdateControlButtonsVisibilityWithNotification(
+      const message_center::Notification& notification);
+
+  ArcNotificationItem* item_;
 
   // The view for the custom content. Owned by view hierarchy.
   views::View* contents_view_ = nullptr;

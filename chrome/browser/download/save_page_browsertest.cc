@@ -20,6 +20,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "base/test/test_file_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -30,7 +31,6 @@
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/save_package_file_picker.h"
-#include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -42,11 +42,12 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/download/public/common/download_item.h"
 #include "components/history/core/browser/download_constants.h"
 #include "components/history/core/browser/download_row.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/download_item.h"
+#include "components/security_state/core/security_state.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -61,18 +62,16 @@
 #include "net/base/filename_util.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "net/test/url_request/url_request_mock_http_job.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
-using content::DownloadItem;
+using download::DownloadItem;
 using content::DownloadManager;
 using content::RenderFrameHost;
 using content::RenderProcessHost;
 using content::WebContents;
-using net::URLRequestMockHTTPJob;
 using testing::ContainsRegex;
 using testing::HasSubstr;
 
@@ -88,6 +87,15 @@ std::string ReadFileAndCollapseWhitespace(const base::FilePath& file_path) {
   }
 
   return base::CollapseWhitespaceASCII(file_contents, false);
+}
+
+// Takes a string with "url=(%04d)%s", and replaces that with the length and
+// contents of the path the response was saved from, |url|, to match output by
+// the SavePageAs logic.
+std::string WriteSavedFromPath(const std::string& file_contents,
+                               const GURL& url) {
+  return base::StringPrintf(file_contents.c_str(), url.spec().length(),
+                            url.spec().c_str());
 }
 
 // Waits for an item record in the downloads database to match |filter|. See
@@ -280,6 +288,10 @@ class SavePageBrowserTest : public InProcessBrowserTest {
 
  protected:
   void SetUp() override {
+    ASSERT_TRUE(embedded_test_server()->InitializeAndListen());
+    content::SetupCrossSiteRedirector(embedded_test_server());
+    embedded_test_server()->StartAcceptingConnections();
+
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir_));
     ASSERT_TRUE(save_dir_.CreateUniqueTempDir());
     InProcessBrowserTest::SetUp();
@@ -290,14 +302,10 @@ class SavePageBrowserTest : public InProcessBrowserTest {
         prefs::kDownloadDefaultDirectory, save_dir_.GetPath());
     browser()->profile()->GetPrefs()->SetFilePath(
         prefs::kSaveFileDefaultDirectory, save_dir_.GetPath());
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::BindOnce(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
   }
 
   GURL NavigateToMockURL(const std::string& prefix) {
-    GURL url = URLRequestMockHTTPJob::GetMockUrl(
-        "save_page/" + prefix + ".htm");
+    GURL url = embedded_test_server()->GetURL("/save_page/" + prefix + ".htm");
     ui_test_utils::NavigateToURL(browser(), url);
     return url;
   }
@@ -411,7 +419,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnly) {
                  &full_file_name);
   ASSERT_FALSE(HasFailure());
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_FALSE(base::PathExists(dir));
   EXPECT_TRUE(base::ContentsEqual(GetTestDirFile("a.htm"), full_file_name));
@@ -458,7 +466,7 @@ class DelayingDownloadManagerDelegate : public ChromeDownloadManagerDelegate {
   ~DelayingDownloadManagerDelegate() override {}
 
   bool ShouldCompleteDownload(
-      content::DownloadItem* item,
+      download::DownloadItem* item,
       const base::Closure& user_complete_callback) override {
     return false;
   }
@@ -478,7 +486,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnlyTabDestroy) {
   std::unique_ptr<DelayingDownloadManagerDelegate> delaying_delegate(
       new DelayingDownloadManagerDelegate(browser()->profile()));
   delaying_delegate->GetDownloadIdReceiverCallback().Run(
-      content::DownloadItem::kInvalidId + 1);
+      download::DownloadItem::kInvalidId + 1);
   DownloadCoreServiceFactory::GetForBrowserContext(browser()->profile())
       ->SetDownloadManagerDelegateForTesting(std::move(delaying_delegate));
   DownloadManager* manager = GetDownloadManager();
@@ -499,17 +507,16 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnlyTabDestroy) {
   GetCurrentTab(browser())->Close();
   EXPECT_EQ(DownloadItem::CANCELLED, items[0]->GetState());
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_FALSE(base::PathExists(full_file_name));
   EXPECT_FALSE(base::PathExists(dir));
 }
 
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveViewSourceHTMLOnly) {
-  GURL mock_url = URLRequestMockHTTPJob::GetMockUrl("save_page/a.htm");
+  GURL mock_url = embedded_test_server()->GetURL("/save_page/a.htm");
   GURL view_source_url =
       GURL(content::kViewSourceScheme + std::string(":") + mock_url.spec());
-  GURL actual_page_url = URLRequestMockHTTPJob::GetMockUrl(
-      "save_page/a.htm");
+  GURL actual_page_url = embedded_test_server()->GetURL("/save_page/a.htm");
   ui_test_utils::NavigateToURL(browser(), view_source_url);
 
   base::FilePath full_file_name, dir;
@@ -517,7 +524,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveViewSourceHTMLOnly) {
                  &dir, &full_file_name);
   ASSERT_FALSE(HasFailure());
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_FALSE(base::PathExists(dir));
   EXPECT_TRUE(base::ContentsEqual(GetTestDirFile("a.htm"), full_file_name));
@@ -531,12 +538,14 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveCompleteHTML) {
                  &full_file_name);
   ASSERT_FALSE(HasFailure());
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_TRUE(base::PathExists(dir));
 
-  EXPECT_EQ(ReadFileAndCollapseWhitespace(full_file_name),
-            ReadFileAndCollapseWhitespace(GetTestDirFile("b.saved1.htm")));
+  EXPECT_EQ(
+      ReadFileAndCollapseWhitespace(full_file_name),
+      WriteSavedFromPath(
+          ReadFileAndCollapseWhitespace(GetTestDirFile("b.saved1.htm")), url));
   EXPECT_TRUE(
       base::ContentsEqual(GetTestDirFile("1.png"), dir.AppendASCII("1.png")));
   EXPECT_EQ(ReadFileAndCollapseWhitespace(dir.AppendASCII("1.css")),
@@ -554,7 +563,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest,
       BrowserContext::GetDownloadManager(incognito->profile()));
 
   // Navigate, unblocking with new tab.
-  GURL url = URLRequestMockHTTPJob::GetMockUrl("save_page/b.htm");
+  GURL url = embedded_test_server()->GetURL("/save_page/b.htm");
   NavigateToURLWithDisposition(incognito, url,
                                WindowOpenDisposition::NEW_FOREGROUND_TAB,
                                ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
@@ -607,12 +616,14 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, FileNameFromPageTitle) {
   ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_TRUE(base::PathExists(dir));
 
-  EXPECT_EQ(ReadFileAndCollapseWhitespace(full_file_name),
-            ReadFileAndCollapseWhitespace(GetTestDirFile("b.saved2.htm")));
+  EXPECT_EQ(
+      ReadFileAndCollapseWhitespace(full_file_name),
+      WriteSavedFromPath(
+          ReadFileAndCollapseWhitespace(GetTestDirFile("b.saved2.htm")), url));
   EXPECT_TRUE(
       base::ContentsEqual(GetTestDirFile("1.png"), dir.AppendASCII("1.png")));
   EXPECT_EQ(ReadFileAndCollapseWhitespace(dir.AppendASCII("1.css")),
@@ -636,7 +647,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, RemoveFromList) {
   downloads[0]->Remove();
   removed.WaitForRemoved();
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_FALSE(base::PathExists(dir));
   EXPECT_TRUE(base::ContentsEqual(GetTestDirFile("a.htm"), full_file_name));
@@ -654,9 +665,9 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, CleanFilenameFromPageTitle) {
       download_dir.AppendASCII(std::string("test.exe") + kAppendedExtension);
   base::FilePath dir = download_dir.AppendASCII("test.exe_files");
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_FALSE(base::PathExists(full_file_name));
-  GURL url = URLRequestMockHTTPJob::GetMockUrl("save_page/c.htm");
+  GURL url = embedded_test_server()->GetURL("/save_page/c.htm");
   ui_test_utils::NavigateToURL(browser(), url);
 
   SavePackageFilePicker::SetShouldPromptUser(false);
@@ -674,6 +685,17 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, CleanFilenameFromPageTitle) {
   EXPECT_TRUE(base::DieFileDie(dir, true));
 }
 #endif
+
+// Tests that the SecurityLevel histograms are logged for save page downloads.
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SecurityLevelHistogram) {
+  base::HistogramTester histogram_tester;
+  GURL url = NavigateToMockURL("a");
+  base::FilePath full_file_name, dir;
+  SaveCurrentTab(url, content::SAVE_PAGE_TYPE_AS_ONLY_HTML, "a", 1, &dir,
+                 &full_file_name);
+  histogram_tester.ExpectUniqueSample("Security.SecurityLevel.DownloadStarted",
+                                      security_state::NONE, 1);
+}
 
 class SavePageAsMHTMLBrowserTest : public SavePageBrowserTest {
  public:
@@ -711,7 +733,7 @@ IN_PROC_BROWSER_TEST_F(SavePageAsMHTMLBrowserTest, SavePageAsMHTML) {
   ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   ASSERT_TRUE(base::PathExists(full_file_name));
   int64_t actual_file_size = -1;
   EXPECT_TRUE(base::GetFileSize(full_file_name, &actual_file_size));
@@ -737,7 +759,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SavePageBrowserTest_NonMHTML) {
   base::FilePath download_dir = DownloadPrefs::FromDownloadManager(
       GetDownloadManager())->DownloadPath();
   base::FilePath filename = download_dir.AppendASCII("dataurl.txt");
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   ASSERT_TRUE(base::PathExists(filename));
   std::string contents;
   EXPECT_TRUE(base::ReadFileToString(filename, &contents));
@@ -749,7 +771,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SavePageBrowserTest_NonMHTML) {
 // extension appended so that they won't be accidentally executed by the user.
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DangerousSubresources) {
   GURL url =
-      URLRequestMockHTTPJob::GetMockUrl("/save_page/dubious-subresources.html");
+      embedded_test_server()->GetURL("/save_page/dubious-subresources.html");
 
   ui_test_utils::NavigateToURL(browser(), url);
   base::FilePath full_file_name, dir;
@@ -757,7 +779,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DangerousSubresources) {
                  "dubious-subresources", 2, &dir, &full_file_name);
   ASSERT_FALSE(HasFailure());
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_TRUE(base::PathExists(dir.AppendASCII("not-a-crx.crx.download")));
 }
@@ -765,13 +787,14 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DangerousSubresources) {
 // Test that we don't crash when the page contains an iframe that
 // was handled as a download (http://crbug.com/42212).
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveDownloadableIFrame) {
-  GURL url = URLRequestMockHTTPJob::GetMockUrl(
-      "downloads/iframe-src-is-a-download.htm");
+  GURL url =
+      embedded_test_server()->GetURL("/downloads/iframe-src-is-a-download.htm");
 
   // Wait for and then dismiss the non-save-page-as-related download item
   // (the one associated with downloading of "thisdayinhistory.xls" file).
   {
-    GURL download_url("http://mock.http/downloads/thisdayinhistory.xls");
+    GURL download_url =
+        embedded_test_server()->GetURL("/downloads/thisdayinhistory.xls");
     DownloadPersistedObserver persisted(
         browser()->profile(),
         base::Bind(&DownloadStoredProperly, download_url, base::FilePath(), -1,
@@ -781,7 +804,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveDownloadableIFrame) {
 
     ASSERT_TRUE(VerifySavePackageExpectations(browser(), download_url));
     persisted.WaitForPersisted();
-    std::vector<content::DownloadItem*> downloads;
+    std::vector<download::DownloadItem*> downloads;
     GetDownloadManager()->GetAllDownloads(&downloads);
     for (auto* download : downloads)
       download->Remove();
@@ -792,7 +815,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveDownloadableIFrame) {
                  "iframe-src-is-a-download", 3, &dir, &full_file_name);
   ASSERT_FALSE(HasFailure());
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_TRUE(base::PathExists(dir.AppendASCII("thisdayinhistory.html")));
   EXPECT_TRUE(base::PathExists(dir.AppendASCII("no-such-file.html")));
@@ -804,7 +827,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveUnauthorizedResource) {
   GURL url = NavigateToMockURL("unauthorized-access");
 
   // Create a test file (that the web page should not have access to).
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir temp_dir2;
   ASSERT_TRUE(temp_dir2.CreateUniqueTempDir());
   base::FilePath file_path =
@@ -855,9 +878,6 @@ class SavePageSitePerProcessBrowserTest : public SavePageBrowserTest {
     // resolving to 127.0.0.1
     host_resolver()->AddRule("no.such.host", "128.0.0.1");
     host_resolver()->AddRule("*", "127.0.0.1");
-    ASSERT_TRUE(embedded_test_server()->InitializeAndListen());
-    content::SetupCrossSiteRedirector(embedded_test_server());
-    embedded_test_server()->StartAcceptingConnections();
   }
 
  private:
@@ -875,7 +895,7 @@ IN_PROC_BROWSER_TEST_F(SavePageSitePerProcessBrowserTest, SaveAsCompleteHtml) {
                  "frames-xsite-complete-html", 5, &dir, &full_file_name);
   ASSERT_FALSE(HasFailure());
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::DirectoryExists(dir));
   base::FilePath expected_files[] = {
       full_file_name,
@@ -937,7 +957,7 @@ IN_PROC_BROWSER_TEST_F(SavePageSitePerProcessBrowserTest, SaveAsMHTML) {
 
   std::string mhtml;
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(base::ReadFileToString(full_file_name, &mhtml));
   }
 
@@ -1005,7 +1025,7 @@ IN_PROC_BROWSER_TEST_F(SavePageSitePerProcessBrowserTest,
   SaveCurrentTab(url, content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML,
                  "frames-xsite-complete-html", 5, &dir, &full_file_name);
   ASSERT_FALSE(HasFailure());
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::DirectoryExists(dir));
   EXPECT_TRUE(base::PathExists(full_file_name));
 }
@@ -1098,7 +1118,7 @@ class SavePageOriginalVsSavedComparisonTest
       int expected_number_of_frames,
       const std::vector<std::string>& expected_substrings) {
     int actual_number_of_frames = 0;
-    GetCurrentTab(browser())->ForEachFrame(base::Bind(
+    GetCurrentTab(browser())->ForEachFrame(base::BindRepeating(
         &IncrementInteger, base::Unretained(&actual_number_of_frames)));
     EXPECT_EQ(expected_number_of_frames, actual_number_of_frames);
 
@@ -1247,26 +1267,23 @@ IN_PROC_BROWSER_TEST_P(SavePageOriginalVsSavedComparisonTest, RuntimeChanges) {
 // Test for saving frames with various encodings:
 // - iso-8859-2: encoding declared via <meta> element
 // - utf16-le-bom.htm, utf16-be-bom.htm: encoding detected via BOM
-// - utf16-le-nobom.htm, utf16-le-nobom.htm, utf32.htm - encoding declared via
-//                                                       mocked http headers
+// - utf16-le-nobom.htm, utf16-le-nobom.htm - encoding declared via
+//                                            mocked http headers
 IN_PROC_BROWSER_TEST_P(SavePageOriginalVsSavedComparisonTest, Encoding) {
   content::SavePageType save_page_type = GetParam();
 
   std::string arr[] = {
       "frames-encodings.htm: f53295dd-a95b-4b32-85f5-b6e15377fb20",
       "iso-8859-2.htm: Za\xc5\xbc\xc3\xb3\xc5\x82\xc4\x87 "
-          "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84",
+      "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84",
       "utf16-le-nobom.htm: Za\xc5\xbc\xc3\xb3\xc5\x82\xc4\x87 "
-          "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84",
+      "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84",
       "utf16-le-bom.htm: Za\xc5\xbc\xc3\xb3\xc5\x82\xc4\x87 "
-          "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84",
+      "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84",
       "utf16-be-nobom.htm: Za\xc5\xbc\xc3\xb3\xc5\x82\xc4\x87 "
-          "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84",
+      "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84",
       "utf16-be-bom.htm: Za\xc5\xbc\xc3\xb3\xc5\x82\xc4\x87 "
-          "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84",
-      "utf32.htm: Za\xc5\xbc\xc3\xb3\xc5\x82\xc4\x87 "
-          "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84",
-  };
+      "g\xc4\x99\xc5\x9bl\xc4\x85 ja\xc5\xba\xc5\x84"};
   std::vector<std::string> expected_substrings(std::begin(arr), std::end(arr));
 
   GURL url(embedded_test_server()->GetURL("a.com",
@@ -1281,7 +1298,7 @@ IN_PROC_BROWSER_TEST_P(SavePageOriginalVsSavedComparisonTest, Encoding) {
   if (save_page_type == content::SAVE_PAGE_TYPE_AS_MHTML)
     return;
 
-  TestOriginalVsSavedPage(save_page_type, url, 7, 7, expected_substrings);
+  TestOriginalVsSavedPage(save_page_type, url, 6, 6, expected_substrings);
 }
 
 // Test for saving style element and attribute (see also crbug.com/568293).

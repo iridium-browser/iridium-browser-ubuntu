@@ -7,12 +7,12 @@
 
 #include <memory>
 
-#include "cc/output/layer_tree_frame_sink.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/fake_picture_layer_impl.h"
 #include "cc/test/test_task_graph_runner.h"
 #include "cc/tiles/tile_priority.h"
+#include "cc/trees/layer_tree_frame_sink.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -42,9 +42,11 @@ class TestLayerTreeHostBase : public testing::Test {
   void SetupTrees(scoped_refptr<RasterSource> pending_raster_source,
                   scoped_refptr<RasterSource> active_raster_source);
   void SetupPendingTree(scoped_refptr<RasterSource> raster_source);
-  void SetupPendingTree(scoped_refptr<RasterSource> raster_source,
-                        const gfx::Size& tile_size,
-                        const Region& invalidation);
+  void SetupPendingTree(
+      scoped_refptr<RasterSource> raster_source,
+      const gfx::Size& tile_size,
+      const Region& invalidation,
+      Layer::LayerMaskType mask_type = Layer::LayerMaskType::NOT_MASK);
   void ActivateTree();
   void PerformImplSideInvalidation();
   void RebuildPropertyTreesOnPendingTree();

@@ -5,11 +5,11 @@
 #ifndef InstalledAppController_h
 #define InstalledAppController_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/frame/LocalFrame.h"
 #include "modules/ModulesExport.h"
 #include "platform/Supplementable.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "public/platform/WebVector.h"
 #include "public/platform/modules/installedapp/WebRelatedApplication.h"
@@ -29,6 +29,8 @@ class MODULES_EXPORT InstalledAppController final
   WTF_MAKE_NONCOPYABLE(InstalledAppController);
 
  public:
+  static const char kSupplementName[];
+
   virtual ~InstalledAppController();
 
   // Gets a list of related apps from the current page's manifest that belong
@@ -37,9 +39,8 @@ class MODULES_EXPORT InstalledAppController final
 
   static void ProvideTo(LocalFrame&, WebRelatedAppsFetcher*);
   static InstalledAppController* From(LocalFrame&);
-  static const char* SupplementName();
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   class GetRelatedAppsCallbacks;

@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 #import "ios/chrome/browser/tabs/legacy_tab_helper.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/tabs/tab_model_observers.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -14,7 +13,11 @@
 #endif
 
 @implementation TabModelObserversBridge {
+  // The TabModel owning self.
   __weak TabModel* _tabModel;
+
+  // The TabModelObservers that forward events to TabModelObserver instances
+  // registered with owning TabModel.
   __weak TabModelObservers* _tabModelObservers;
 }
 
@@ -33,12 +36,13 @@
 
 - (void)webStateList:(WebStateList*)webStateList
     didInsertWebState:(web::WebState*)webState
-              atIndex:(int)atIndex {
+              atIndex:(int)atIndex
+           activating:(BOOL)activating {
   DCHECK_GE(atIndex, 0);
   [_tabModelObservers tabModel:_tabModel
                   didInsertTab:LegacyTabHelper::GetTabForWebState(webState)
                        atIndex:static_cast<NSUInteger>(atIndex)
-                  inForeground:NO];
+                  inForeground:activating];
   [_tabModelObservers tabModelDidChangeTabCount:_tabModel];
 }
 
@@ -79,7 +83,7 @@
     didChangeActiveWebState:(web::WebState*)newWebState
                 oldWebState:(web::WebState*)oldWebState
                     atIndex:(int)atIndex
-                 userAction:(BOOL)userAction {
+                     reason:(int)reason {
   if (!newWebState)
     return;
 

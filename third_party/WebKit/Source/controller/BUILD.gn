@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
 import("//third_party/WebKit/Source/bindings/bindings.gni")
@@ -19,7 +20,6 @@ component("controller") {
     "//third_party/WebKit/Source/core",
     "//third_party/WebKit/Source/modules",
     "//third_party/WebKit/Source/platform",
-    "//third_party/WebKit/Source/web",
     "//v8",
   ]
 
@@ -35,7 +35,12 @@ component("controller") {
 
   sources = [
     "BlinkInitializer.cpp",
+    "BlinkInitializer.h",
     "ControllerExport.h",
+    "DevToolsFrontendImpl.cpp",
+    "DevToolsFrontendImpl.h",
+    "OomInterventionImpl.cpp",
+    "OomInterventionImpl.h",
   ]
 
   if (is_mac) {
@@ -45,8 +50,76 @@ component("controller") {
     ]
   }
 
-  if (remove_webcore_debug_symbols) {
-    configs -= [ "//build/config/compiler:default_symbols" ]
-    configs += remove_webcore_symbols_config
+  configs -= [ "//build/config/compiler:default_symbols" ]
+  configs += blink_symbols_config
+}
+
+group("webkit_unit_tests_data") {
+  data = [
+    "../core/testing/data/",
+    "../core/paint/test_data/",
+    "../core/animation/test_data/",
+  ]
+}
+
+test("webkit_unit_tests") {
+  deps = [
+    ":webkit_unit_tests_sources",
+  ]
+
+  data_deps = [
+    ":webkit_unit_tests_data",
+    "//content/shell:pak",
+  ]
+
+  if (is_android) {
+    enable_multidex = true
+    deps += [
+      "//base:base_java",
+      "//content/public/android:content_java",
+      "//content/shell/android:content_shell_assets",
+      "//net/android:net_java",
+    ]
   }
+}
+
+jumbo_source_set("webkit_unit_tests_sources") {
+  visibility = []  # Allow re-assignment of list.
+  visibility = [ "*" ]
+  testonly = true
+
+  sources = [
+    "OomInterventionImplTest.cpp",
+    "tests/RunAllTests.cpp",
+  ]
+  sources += bindings_unittest_files
+
+  deps = [
+    ":controller",
+    "//base",
+    "//base:i18n",
+    "//base/test:test_support",
+    "//components/payments/mojom:mojom_blink",
+    "//content/test:test_support",
+    "//gpu:test_support",
+    "//testing/gmock",
+    "//testing/gtest",
+    "//third_party/WebKit/Source/core:unit_tests",
+    "//third_party/WebKit/Source/modules:unit_tests",
+    "//third_party/WebKit/Source/modules/exported:test_support",
+    "//third_party/WebKit/Source/platform",
+    "//third_party/WebKit/Source/platform:test_support",
+    "//third_party/WebKit/Source/platform:unit_tests",
+    "//third_party/WebKit/Source/platform/wtf",
+    "//third_party/libwebp",
+    "//third_party/zlib",
+    "//url",
+    "//v8",
+  ]
+
+  configs += [
+    "//third_party/WebKit/Source:config",
+    "//third_party/WebKit/Source:inside_blink",
+    "//third_party/WebKit/Source/core:blink_core_pch",
+  ]
 }

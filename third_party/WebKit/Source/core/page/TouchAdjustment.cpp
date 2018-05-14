@@ -25,6 +25,7 @@
 #include "core/dom/Text.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
+#include "core/editing/FrameSelection.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/html/HTMLFrameOwnerElement.h"
@@ -43,6 +44,7 @@ namespace blink {
 namespace TouchAdjustment {
 
 const float kZeroTolerance = 1e-6f;
+constexpr float kMaxAdjustmentRadiusDips = 16.f;
 
 // Class for remembering absolute quads of a target node and what node they
 // represent.
@@ -52,7 +54,7 @@ class SubtargetGeometry {
  public:
   SubtargetGeometry(Node* node, const FloatQuad& quad)
       : node_(node), quad_(quad) {}
-  DEFINE_INLINE_TRACE() { visitor->Trace(node_); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(node_); }
 
   Node* GetNode() const { return node_; }
   FloatQuad Quad() const { return quad_; }
@@ -91,7 +93,7 @@ bool NodeRespondsToTapGesture(Node* node) {
     // Tapping on a text field or other focusable item should trigger
     // adjustment, except that iframe elements are hard-coded to support focus
     // but the effect is often invisible so they should be excluded.
-    if (element->IsMouseFocusable() && !isHTMLIFrameElement(element))
+    if (element->IsMouseFocusable() && !IsHTMLIFrameElement(element))
       return true;
     // Accept nodes that has a CSS effect when touched.
     if (element->ChildrenOrSiblingsAffectedByActive() ||
@@ -235,26 +237,6 @@ static inline void AppendContextSubtargetsForNode(
   }
 }
 
-static inline void AppendZoomableSubtargets(Node* node,
-                                            SubtargetGeometryList& subtargets) {
-  LayoutBox* layout_object = ToLayoutBox(node->GetLayoutObject());
-  DCHECK(layout_object);
-
-  Vector<FloatQuad> quads;
-  FloatRect border_box_rect(layout_object->BorderBoxRect());
-  FloatRect content_box_rect(layout_object->ContentBoxRect());
-  quads.push_back(layout_object->LocalToAbsoluteQuad(border_box_rect));
-  if (border_box_rect != content_box_rect)
-    quads.push_back(layout_object->LocalToAbsoluteQuad(content_box_rect));
-  // FIXME: For LayoutBlocks, add column boxes and content boxes cleared for
-  // floats.
-
-  Vector<FloatQuad>::const_iterator it = quads.begin();
-  const Vector<FloatQuad>::const_iterator end = quads.end();
-  for (; it != end; ++it)
-    subtargets.push_back(SubtargetGeometry(node, *it));
-}
-
 static inline Node* ParentShadowHostOrOwner(const Node* node) {
   if (Node* ancestor = node->ParentOrShadowHostNode())
     return ancestor;
@@ -346,17 +328,6 @@ void CompileSubtargetList(const HeapVector<Member<Node>>& intersected_nodes,
     }
     if (candidate)
       append_subtargets_for_node(candidate, subtargets);
-  }
-}
-
-// Compiles a list of zoomable subtargets.
-void CompileZoomableSubtargets(
-    const HeapVector<Member<Node>>& intersected_nodes,
-    SubtargetGeometryList& subtargets) {
-  for (unsigned i = 0; i < intersected_nodes.size(); ++i) {
-    Node* candidate = intersected_nodes[i].Get();
-    if (NodeIsZoomTarget(candidate))
-      AppendZoomableSubtargets(candidate, subtargets);
   }
 }
 
@@ -560,17 +531,10 @@ bool FindBestContextMenuCandidate(Node*& target_node,
       subtargets, TouchAdjustment::HybridDistanceFunction);
 }
 
-bool FindBestZoomableArea(Node*& target_node,
-                          IntRect& target_area,
-                          const IntPoint& touch_hotspot,
-                          const IntRect& touch_area,
-                          const HeapVector<Member<Node>>& nodes) {
-  IntPoint target_point;
-  TouchAdjustment::SubtargetGeometryList subtargets;
-  TouchAdjustment::CompileZoomableSubtargets(nodes, subtargets);
-  return TouchAdjustment::FindNodeWithLowestDistanceMetric(
-      target_node, target_point, target_area, touch_hotspot, touch_area,
-      subtargets, TouchAdjustment::ZoomableIntersectionQuotient);
+LayoutSize GetHitTestRectForAdjustment(const IntSize& touch_area) {
+  const LayoutSize max_size(TouchAdjustment::kMaxAdjustmentRadiusDips,
+                            TouchAdjustment::kMaxAdjustmentRadiusDips);
+  return LayoutSize(touch_area).ShrunkTo(max_size);
 }
 
 }  // namespace blink

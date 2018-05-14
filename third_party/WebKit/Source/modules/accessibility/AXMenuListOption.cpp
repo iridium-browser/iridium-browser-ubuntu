@@ -27,7 +27,7 @@
 
 #include "SkMatrix44.h"
 #include "core/dom/AccessibleNode.h"
-#include "core/html/HTMLSelectElement.h"
+#include "core/html/forms/HTMLSelectElement.h"
 #include "modules/accessibility/AXMenuList.h"
 #include "modules/accessibility/AXMenuListPopup.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
@@ -75,10 +75,10 @@ AXObject* AXMenuListOption::ComputeParent() const {
   Node* node = GetNode();
   if (!node)
     return nullptr;
-  HTMLSelectElement* select = toHTMLOptionElement(node)->OwnerSelectElement();
+  HTMLSelectElement* select = ToHTMLOptionElement(node)->OwnerSelectElement();
   if (!select)
     return nullptr;
-  AXObject* select_ax_object = AxObjectCache().GetOrCreate(select);
+  AXObject* select_ax_object = AXObjectCache().GetOrCreate(select);
 
   // This happens if the <select> is not rendered. Return it and move on.
   if (!select_ax_object->IsMenuList())
@@ -104,7 +104,8 @@ bool AXMenuListOption::IsVisible() const {
 
   // In a single-option select with the popup collapsed, only the selected
   // item is considered visible.
-  return !parent_->IsOffScreen() || IsSelected();
+  return !parent_->IsOffScreen() ||
+         ((IsSelected() == kSelectedStateTrue) ? true : false);
 }
 
 bool AXMenuListOption::IsOffScreen() const {
@@ -112,18 +113,25 @@ bool AXMenuListOption::IsOffScreen() const {
   return !IsVisible();
 }
 
-bool AXMenuListOption::IsSelected() const {
+AccessibilitySelectedState AXMenuListOption::IsSelected() const {
+  if (!GetNode() || !CanSetSelectedAttribute())
+    return kSelectedStateUndefined;
+
   AXMenuListPopup* parent = static_cast<AXMenuListPopup*>(ParentObject());
-  if (parent && !parent->IsOffScreen())
-    return parent->ActiveDescendant() == this;
-  return element_ && element_->Selected();
+  if (parent && !parent->IsOffScreen()) {
+    return ((parent->ActiveDescendant() == this) ? kSelectedStateTrue
+                                                 : kSelectedStateFalse);
+  }
+  return ((element_ && element_->Selected()) ? kSelectedStateTrue
+                                             : kSelectedStateFalse);
 }
 
-void AXMenuListOption::SetSelected(bool b) {
+bool AXMenuListOption::OnNativeSetSelectedAction(bool b) {
   if (!element_ || !CanSetSelectedAttribute())
-    return;
+    return false;
 
   element_->SetSelected(b);
+  return true;
 }
 
 bool AXMenuListOption::ComputeAccessibilityIsIgnored(
@@ -131,10 +139,10 @@ bool AXMenuListOption::ComputeAccessibilityIsIgnored(
   return AccessibilityIsIgnoredByDefault(ignored_reasons);
 }
 
-void AXMenuListOption::GetRelativeBounds(
-    AXObject** out_container,
-    FloatRect& out_bounds_in_container,
-    SkMatrix44& out_container_transform) const {
+void AXMenuListOption::GetRelativeBounds(AXObject** out_container,
+                                         FloatRect& out_bounds_in_container,
+                                         SkMatrix44& out_container_transform,
+                                         bool* clips_children) const {
   *out_container = nullptr;
   out_bounds_in_container = FloatRect();
   out_container_transform.setIdentity();
@@ -149,7 +157,7 @@ void AXMenuListOption::GetRelativeBounds(
     return;
   DCHECK(grandparent->IsMenuList());
   grandparent->GetRelativeBounds(out_container, out_bounds_in_container,
-                                 out_container_transform);
+                                 out_container_transform, clips_children);
 }
 
 String AXMenuListOption::TextAlternative(bool recursive,
@@ -187,15 +195,15 @@ String AXMenuListOption::TextAlternative(bool recursive,
 
 HTMLSelectElement* AXMenuListOption::ParentSelectNode() const {
   if (!GetNode())
-    return 0;
+    return nullptr;
 
-  if (isHTMLOptionElement(GetNode()))
-    return toHTMLOptionElement(GetNode())->OwnerSelectElement();
+  if (auto* option = ToHTMLOptionElementOrNull(GetNode()))
+    return option->OwnerSelectElement();
 
-  return 0;
+  return nullptr;
 }
 
-DEFINE_TRACE(AXMenuListOption) {
+void AXMenuListOption::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
   AXMockObject::Trace(visitor);
 }

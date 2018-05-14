@@ -40,7 +40,7 @@ namespace blink {
 // the WebLayerTreeView is destroyed.
 class WebExternalTextureLayer {
  public:
-  virtual ~WebExternalTextureLayer() {}
+  virtual ~WebExternalTextureLayer() = default;
 
   virtual WebLayer* Layer() = 0;
 
@@ -49,6 +49,10 @@ class WebExternalTextureLayer {
 
   // Sets whether every pixel in this layer is opaque. Defaults to false.
   virtual void SetOpaque(bool) = 0;
+
+  // Sets whether this texture should be Y-flipped at draw time. Defaults to
+  // true.
+  virtual void SetFlipped(bool flipped) = 0;
 
   // Sets whether this layer's texture has premultiplied alpha or not. Defaults
   // to true.

@@ -27,7 +27,7 @@ GlobalError::Severity GlobalError::GetSeverity() { return SEVERITY_MEDIUM; }
 
 gfx::Image GlobalError::MenuItemIcon() {
 #if defined(OS_ANDROID)
-  return ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+  return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       IDR_INPUT_ALERT_MENU);
 #else
   return gfx::Image(
@@ -65,11 +65,15 @@ bool GlobalErrorWithStandardBubble::ShouldCloseOnDeactivate() const {
 gfx::Image GlobalErrorWithStandardBubble::GetBubbleViewIcon() {
   // If you change this make sure to also change the menu icon and the app menu
   // icon color.
-  return ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+  return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       IDR_INPUT_ALERT);
 }
 
 bool GlobalErrorWithStandardBubble::ShouldShowCloseButton() const {
+  return false;
+}
+
+bool GlobalErrorWithStandardBubble::ShouldUseExtraView() const {
   return false;
 }
 

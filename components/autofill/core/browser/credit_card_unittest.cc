@@ -187,6 +187,50 @@ TEST(CreditCardTest, BankNameAndLastFourDigitsStrings) {
   EXPECT_EQ(UTF8ToUTF16(std::string("Chase")), obfuscated3);
 }
 
+// Tests function NetworkOrBankNameAndLastFourDigits.
+TEST(CreditCardTest, NetworkOrBankNameAndLastFourDigitsStrings) {
+  // Case 1: Experiment off -> show network name.
+  CreditCard credit_card1(base::GenerateGUID(), "https://www.example.com/");
+  test::SetCreditCardInfo(&credit_card1, "John Dillinger",
+                          "5105 1051 0510 5100" /* Mastercard */, "01", "2010",
+                          "1");
+  credit_card1.set_bank_name("Chase");
+  base::string16 obfuscated1 =
+      credit_card1.NetworkOrBankNameAndLastFourDigits();
+  EXPECT_FALSE(credit_card1.bank_name().empty());
+  EXPECT_EQ(
+      UTF8ToUTF16(std::string("Mastercard") + kUTF8MidlineEllipsis + "5100"),
+      obfuscated1);
+
+  // Turn on feature flag.
+  base::test::ScopedFeatureList scoped_feature_list_;
+  scoped_feature_list_.InitAndEnableFeature(kAutofillCreditCardBankNameDisplay);
+
+  // Case 2: Bank name is empty -> show network name.
+  CreditCard credit_card2(base::GenerateGUID(), "https://www.example.com/");
+  test::SetCreditCardInfo(&credit_card2, "John Dillinger",
+                          "5105 1051 0510 5100" /* Mastercard */, "01", "2010",
+                          "1");
+  EXPECT_TRUE(credit_card2.bank_name().empty());
+  base::string16 obfuscated2 =
+      credit_card2.NetworkOrBankNameAndLastFourDigits();
+  EXPECT_EQ(
+      UTF8ToUTF16(std::string("Mastercard") + kUTF8MidlineEllipsis + "5100"),
+      obfuscated2);
+
+  // Case 3: Experiment on && bank name not empty -> show bank name.
+  CreditCard credit_card3(base::GenerateGUID(), "https://www.example.com/");
+  test::SetCreditCardInfo(&credit_card3, "John Dillinger",
+                          "5105 1051 0510 5100" /* Mastercard */, "01", "2010",
+                          "1");
+  credit_card3.set_bank_name("Chase");
+  base::string16 obfuscated3 =
+      credit_card3.NetworkOrBankNameAndLastFourDigits();
+  EXPECT_FALSE(credit_card3.bank_name().empty());
+  EXPECT_EQ(UTF8ToUTF16(std::string("Chase") + kUTF8MidlineEllipsis + "5100"),
+            obfuscated3);
+}
+
 TEST(CreditCardTest, AssignmentOperator) {
   CreditCard a(base::GenerateGUID(), "some origin");
   test::SetCreditCardInfo(&a, "John Dillinger", "123456789012", "01", "2010",
@@ -436,8 +480,8 @@ TEST(CreditCardTest, Compare) {
   EXPECT_EQ(0, a.Compare(b));
 
   // Different values produce non-zero results.
-  test::SetCreditCardInfo(&a, "Jimmy", NULL, NULL, NULL, "");
-  test::SetCreditCardInfo(&b, "Ringo", NULL, NULL, NULL, "");
+  test::SetCreditCardInfo(&a, "Jimmy", nullptr, nullptr, nullptr, "");
+  test::SetCreditCardInfo(&b, "Ringo", nullptr, nullptr, nullptr, "");
   EXPECT_GT(0, a.Compare(b));
   EXPECT_LT(0, b.Compare(a));
 }
@@ -587,7 +631,7 @@ TEST(CreditCardTest, UpdateFromImportedCard) {
   EXPECT_EQ(original_card, a);
 }
 
-TEST(CreditCardTest, IsValid) {
+TEST(CreditCardTest, IsValidCardNumberAndExpiryDate) {
   CreditCard card;
   // Invalid because expired
   const base::Time now(base::Time::Now());
@@ -599,6 +643,8 @@ TEST(CreditCardTest, IsValid) {
                   base::IntToString16(now_exploded.year - 1));
   card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
   EXPECT_FALSE(card.IsValid());
+  EXPECT_FALSE(card.HasValidExpirationDate());
+  EXPECT_TRUE(card.HasValidCardNumber());
 
   // Invalid because card number is not complete
   card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
@@ -610,11 +656,15 @@ TEST(CreditCardTest, IsValid) {
     SCOPED_TRACE(valid_number);
     card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16(valid_number));
     EXPECT_TRUE(card.IsValid());
+    EXPECT_TRUE(card.HasValidCardNumber());
+    EXPECT_TRUE(card.HasValidExpirationDate());
   }
   for (const char* invalid_number : kInvalidNumbers) {
     SCOPED_TRACE(invalid_number);
     card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16(invalid_number));
     EXPECT_FALSE(card.IsValid());
+    EXPECT_TRUE(card.HasValidExpirationDate());
+    EXPECT_FALSE(card.HasValidCardNumber());
   }
 }
 
@@ -680,6 +730,172 @@ TEST(CreditCardTest, CreditCardVerificationCode) {
   card.SetRawInfo(CREDIT_CARD_VERIFICATION_CODE, ASCIIToUTF16("999"));
   EXPECT_EQ(base::string16(), card.GetRawInfo(CREDIT_CARD_VERIFICATION_CODE));
 }
+
+struct MatchingTypesCase {
+  MatchingTypesCase(const char* value,
+                    const char* card_exp_month,
+                    const char* card_exp_year,
+                    CreditCard::RecordType record_type,
+                    ServerFieldTypeSet expected_matched_types,
+                    const char* locale = "US")
+      : value(value),
+        card_exp_month(card_exp_month),
+        card_exp_year(card_exp_year),
+        record_type(record_type),
+        expected_matched_types(expected_matched_types),
+        locale(locale) {}
+
+  // The value entered by the user.
+  const std::string value;
+  // Some values for an already saved card. Card number will be fixed to
+  // 4012888888881881.
+  const char* card_exp_month;
+  const char* card_exp_year;
+  const CreditCard::RecordType record_type;
+  // The types that are expected to match.
+  const ServerFieldTypeSet expected_matched_types;
+
+  const std::string locale;
+};
+
+class GetMatchingTypesTest : public testing::TestWithParam<MatchingTypesCase> {
+};
+
+TEST_P(GetMatchingTypesTest, Cases) {
+  auto test_case = GetParam();
+  CreditCard card(base::GenerateGUID(), "https://www.example.com/");
+  card.set_record_type(test_case.record_type);
+  card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4012888888881881"));
+  card.SetRawInfo(CREDIT_CARD_EXP_MONTH,
+                  ASCIIToUTF16(test_case.card_exp_month));
+  card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR,
+                  ASCIIToUTF16(test_case.card_exp_year));
+
+  ServerFieldTypeSet matching_types;
+  card.GetMatchingTypes(UTF8ToUTF16(test_case.value), test_case.locale,
+                        &matching_types);
+  EXPECT_EQ(test_case.expected_matched_types, matching_types);
+}
+
+INSTANTIATE_TEST_CASE_P(
+    CreditCardTest,
+    GetMatchingTypesTest,
+    testing::Values(
+        // If comparing against a masked card, last four digits are checked.
+        MatchingTypesCase{"1881",
+                          "01",
+                          "2020",
+                          MASKED_SERVER_CARD,
+                          {CREDIT_CARD_NUMBER}},
+        MatchingTypesCase{"4012888888881881",
+                          "01",
+                          "2020",
+                          MASKED_SERVER_CARD,
+                          {CREDIT_CARD_NUMBER}},
+        MatchingTypesCase{"4111111111111111", "01", "2020",
+                          CreditCard::MASKED_SERVER_CARD, ServerFieldTypeSet()},
+        // Same value will not match a local card or full server card since we
+        // have the full number for those. However the full number will.
+        MatchingTypesCase{"1881", "01", "2020", LOCAL_CARD,
+                          ServerFieldTypeSet()},
+        MatchingTypesCase{"1881", "01", "2020", FULL_SERVER_CARD,
+                          ServerFieldTypeSet()},
+        MatchingTypesCase{"4012888888881881",
+                          "01",
+                          "2020",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_NUMBER}},
+        MatchingTypesCase{"4012888888881881",
+                          "01",
+                          "2020",
+                          FULL_SERVER_CARD,
+                          {CREDIT_CARD_NUMBER}},
+
+        // Wrong last four digits.
+        MatchingTypesCase{"1111", "01", "2020", MASKED_SERVER_CARD,
+                          ServerFieldTypeSet()},
+        MatchingTypesCase{"1111", "01", "2020", LOCAL_CARD,
+                          ServerFieldTypeSet()},
+        MatchingTypesCase{"1111", "01", "2020", FULL_SERVER_CARD,
+                          ServerFieldTypeSet()},
+        MatchingTypesCase{"4111111111111111", "01", "2020", MASKED_SERVER_CARD,
+                          ServerFieldTypeSet()},
+        MatchingTypesCase{"4111111111111111", "01", "2020", LOCAL_CARD,
+                          ServerFieldTypeSet()},
+        MatchingTypesCase{"4111111111111111", "01", "2020", FULL_SERVER_CARD,
+                          ServerFieldTypeSet()},
+
+        // Matching the expiration month.
+        MatchingTypesCase{"01",
+                          "01",
+                          "2020",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_MONTH}},
+        MatchingTypesCase{"1",
+                          "01",
+                          "2020",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_MONTH}},
+        MatchingTypesCase{"jan",
+                          "01",
+                          "2020",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_MONTH},
+                          "US"},
+        // Locale-specific interpretations.
+        MatchingTypesCase{"janv",
+                          "01",
+                          "2020",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_MONTH},
+                          "FR"},
+        MatchingTypesCase{"janv.",
+                          "01",
+                          "2020",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_MONTH},
+                          "FR"},
+        MatchingTypesCase{"janvier",
+                          "01",
+                          "2020",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_MONTH},
+                          "FR"},
+        MatchingTypesCase{"février",
+                          "02",
+                          "2020",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_MONTH},
+                          "FR"},
+        MatchingTypesCase{"mars", "01", "2020", LOCAL_CARD,
+                          ServerFieldTypeSet(), "FR"},
+
+        // Matching the expiration year.
+        MatchingTypesCase{"2019",
+                          "01",
+                          "2019",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_4_DIGIT_YEAR}},
+        MatchingTypesCase{"19",
+                          "01",
+                          "2019",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_2_DIGIT_YEAR}},
+        MatchingTypesCase{"01/2019",
+                          "01",
+                          "2019",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR}},
+        MatchingTypesCase{"01-2019",
+                          "01",
+                          "2019",
+                          LOCAL_CARD,
+                          {CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR}},
+        MatchingTypesCase{"01/2020", "01", "2019", LOCAL_CARD,
+                          ServerFieldTypeSet()},
+        MatchingTypesCase{"20", "01", "2019", LOCAL_CARD, ServerFieldTypeSet()},
+        MatchingTypesCase{"2021", "01", "2019", LOCAL_CARD,
+                          ServerFieldTypeSet()}));
 
 struct GetCardNetworkTestCase {
   std::string card_number;
@@ -1061,7 +1277,12 @@ INSTANTIATE_TEST_CASE_P(
 
 // Test that credit card last used date suggestion can be generated correctly
 // in different variations.
-TEST(CreditCardTest, GetLastUsedDateForDisplay) {
+
+
+// TODO(scottmg): Disabling as sheriff. On Android, LastUsedDateForDisplay is
+// returning "Last used over a year ago", rather than "last used Nov 30" as of
+// today, Dec 1. https://crbug.com/791067.
+TEST(CreditCardTest, DISABLED_GetLastUsedDateForDisplay) {
   const base::Time::Exploded kTestDateTimeExploded = {
       2016, 12, 6, 10,  // Sat, Dec 10, 2016
       15,   42, 7, 0    // 15:42:07.000

@@ -26,12 +26,12 @@
 #define WebThread_h
 
 #include "WebCommon.h"
+#include "WebThreadType.h"
+#include "base/callback_forward.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/single_thread_task_runner.h"
 
 #include <stdint.h>
-
-namespace base {
-class SingleThreadTaskRunner;
-}
 
 namespace blink {
 namespace scheduler {
@@ -39,10 +39,18 @@ class TaskTimeObserver;
 }
 
 class WebScheduler;
-class WebTaskRunner;
 
 // Always an integer value.
 typedef uintptr_t PlatformThreadId;
+
+struct BLINK_PLATFORM_EXPORT WebThreadCreationParams {
+  explicit WebThreadCreationParams(WebThreadType);
+
+  WebThreadCreationParams& SetThreadName(const char* name);
+
+  WebThreadType thread_type;
+  const char* name;
+};
 
 // Provides an interface to an embedder-defined thread implementation.
 //
@@ -52,15 +60,11 @@ class BLINK_PLATFORM_EXPORT WebThread {
  public:
   // An IdleTask is passed a deadline in CLOCK_MONOTONIC seconds and is
   // expected to complete before this deadline.
-  class IdleTask {
-   public:
-    virtual ~IdleTask() {}
-    virtual void Run(double deadline_seconds) = 0;
-  };
+  using IdleTask = base::OnceCallback<void(double deadline_seconds)>;
 
   class BLINK_PLATFORM_EXPORT TaskObserver {
    public:
-    virtual ~TaskObserver() {}
+    virtual ~TaskObserver() = default;
     virtual void WillProcessTask() = 0;
     virtual void DidProcessTask() = 0;
   };
@@ -70,9 +74,10 @@ class BLINK_PLATFORM_EXPORT WebThread {
   //
   // Default scheduler task queue does not give scheduler enough freedom to
   // manage task priorities and should not be used.
-  // Use TaskRunnerHelper::get instead (crbug.com/624696).
-  virtual WebTaskRunner* GetWebTaskRunner() { return nullptr; }
-  base::SingleThreadTaskRunner* GetSingleThreadTaskRunner();
+  // Use TaskRunnerHelper::Get instead (crbug.com/624696).
+  virtual scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() const {
+    return nullptr;
+  }
 
   virtual bool IsCurrentThread() const = 0;
   virtual PlatformThreadId ThreadId() const { return 0; }
@@ -96,7 +101,7 @@ class BLINK_PLATFORM_EXPORT WebThread {
   // Returns the scheduler associated with the thread.
   virtual WebScheduler* Scheduler() const = 0;
 
-  virtual ~WebThread() {}
+  virtual ~WebThread() = default;
 };
 
 }  // namespace blink

@@ -17,7 +17,7 @@
           android:layout_width="match_parent"
           android:layout_height="wrap_content" />
 
-      <org.chromium.chrome.browser.widget.FloatLabelLayout
+      <org.chromium.chrome.browser.widget.CompatibilityTextInputLayout
           android:id="@+id/username_label"
           android:layout_width="match_parent"
           android:layout_height="wrap_content" >
@@ -27,10 +27,11 @@
               android:layout_height="wrap_content"
               android:hint="@string/login_dialog_username_field"
               android:inputType="textNoSuggestions"
-              android:imeOptions="flagNoExtractUi" />
-      </org.chromium.chrome.browser.widget.FloatLabelLayout>
+              android:imeOptions="flagNoExtractUi"
+              android:importantForAutofill="no" />
+      </org.chromium.chrome.browser.widget.CompatibilityTextInputLayout>
 
-      <org.chromium.chrome.browser.widget.FloatLabelLayout
+      <org.chromium.chrome.browser.widget.CompatibilityTextInputLayout
           android:id="@+id/password_label"
           android:layout_width="match_parent"
           android:layout_height="wrap_content" >
@@ -40,8 +41,9 @@
               android:layout_height="wrap_content"
               android:hint="@string/login_dialog_password_field"
               android:inputType="textPassword"
-              android:imeOptions="flagNoExtractUi" />
-      </org.chromium.chrome.browser.widget.FloatLabelLayout>
+              android:imeOptions="flagNoExtractUi"
+              android:importantForAutofill="no" />
+      </org.chromium.chrome.browser.widget.CompatibilityTextInputLayout>
 
     </LinearLayout>
 

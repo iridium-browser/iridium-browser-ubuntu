@@ -6,14 +6,15 @@
 #define BaseFetchContext_h
 
 #include "core/CoreExport.h"
-#include "core/frame/UseCounter.h"
+#include "core/frame/WebFeatureForward.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/FetchContext.h"
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/weborigin/ReferrerPolicy.h"
 #include "platform/wtf/Optional.h"
-#include "public/platform/WebAddressSpace.h"
+#include "public/mojom/net/ip_address_space.mojom-blink.h"
+#include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
@@ -34,25 +35,29 @@ class CORE_EXPORT BaseFetchContext : public FetchContext {
       const KURL&,
       const ResourceLoaderOptions&,
       SecurityViolationReportingPolicy,
-      FetchParameters::OriginRestriction) const override;
-  ResourceRequestBlockedReason CanFollowRedirect(
-      Resource::Type,
-      const ResourceRequest&,
+      FetchParameters::OriginRestriction,
+      ResourceRequest::RedirectStatus) const override;
+  ResourceRequestBlockedReason CheckCSPForRequest(
+      WebURLRequest::RequestContext,
       const KURL&,
       const ResourceLoaderOptions&,
       SecurityViolationReportingPolicy,
-      FetchParameters::OriginRestriction) const override;
-  ResourceRequestBlockedReason AllowResponse(
-      Resource::Type,
-      const ResourceRequest&,
-      const KURL&,
-      const ResourceLoaderOptions&) const override;
+      ResourceRequest::RedirectStatus) const override;
+  ResourceRequestBlockedReason CheckResponseNosniff(
+      WebURLRequest::RequestContext,
+      const ResourceResponse&) const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
-  virtual KURL GetFirstPartyForCookies() const = 0;
+  virtual KURL GetSiteForCookies() const = 0;
   virtual void CountUsage(WebFeature) const = 0;
   virtual void CountDeprecation(WebFeature) const = 0;
+
+  void AddWarningConsoleMessage(const String&, LogSource) const override;
+  void AddErrorConsoleMessage(const String&, LogSource) const override;
+  bool IsAdResource(const KURL&,
+                    Resource::Type,
+                    WebURLRequest::RequestContext) const override;
 
  protected:
   // Used for security checks.
@@ -62,14 +67,17 @@ class CORE_EXPORT BaseFetchContext : public FetchContext {
   // Note: subclasses are expected to override following methods.
   // Used in the default implementation for CanRequest, CanFollowRedirect
   // and AllowResponse.
-  virtual bool ShouldBlockRequestByInspector(const ResourceRequest&) const = 0;
+  virtual bool ShouldBlockRequestByInspector(const KURL&) const = 0;
   virtual void DispatchDidBlockRequest(const ResourceRequest&,
                                        const FetchInitiatorInfo&,
-                                       ResourceRequestBlockedReason) const = 0;
+                                       ResourceRequestBlockedReason,
+                                       Resource::Type) const = 0;
   virtual bool ShouldBypassMainWorldCSP() const = 0;
   virtual bool IsSVGImageChromeClient() const = 0;
   virtual bool ShouldBlockFetchByMixedContentCheck(
-      const ResourceRequest&,
+      WebURLRequest::RequestContext,
+      network::mojom::RequestContextFrameType,
+      ResourceRequest::RedirectStatus,
       const KURL&,
       SecurityViolationReportingPolicy) const = 0;
   virtual bool ShouldBlockFetchAsCredentialedSubresource(const ResourceRequest&,
@@ -78,22 +86,16 @@ class CORE_EXPORT BaseFetchContext : public FetchContext {
   virtual String GetOutgoingReferrer() const = 0;
   virtual const KURL& Url() const = 0;
   virtual const SecurityOrigin* GetParentSecurityOrigin() const = 0;
-  virtual Optional<WebAddressSpace> GetAddressSpace() const = 0;
+  virtual Optional<mojom::IPAddressSpace> GetAddressSpace() const = 0;
   virtual const ContentSecurityPolicy* GetContentSecurityPolicy() const = 0;
+
   virtual void AddConsoleMessage(ConsoleMessage*) const = 0;
-  using FetchContext::AddConsoleMessage;
 
   // Utility method that can be used to implement other methods.
   void PrintAccessDeniedMessage(const KURL&) const;
   void AddCSPHeaderIfNecessary(Resource::Type, ResourceRequest&);
-  ResourceRequestBlockedReason CheckCSPForRequest(
-      const ResourceRequest&,
-      const KURL&,
-      const ResourceLoaderOptions&,
-      SecurityViolationReportingPolicy,
-      ResourceRequest::RedirectStatus,
-      ContentSecurityPolicy::CheckHeaderType) const;
 
+ private:
   // Utility methods that are used in default implement for CanRequest,
   // CanFollowRedirect and AllowResponse.
   ResourceRequestBlockedReason CanRequestInternal(
@@ -104,6 +106,14 @@ class CORE_EXPORT BaseFetchContext : public FetchContext {
       SecurityViolationReportingPolicy,
       FetchParameters::OriginRestriction,
       ResourceRequest::RedirectStatus) const;
+
+  ResourceRequestBlockedReason CheckCSPForRequestInternal(
+      WebURLRequest::RequestContext,
+      const KURL&,
+      const ResourceLoaderOptions&,
+      SecurityViolationReportingPolicy,
+      ResourceRequest::RedirectStatus,
+      ContentSecurityPolicy::CheckHeaderType) const;
 };
 
 }  // namespace blink

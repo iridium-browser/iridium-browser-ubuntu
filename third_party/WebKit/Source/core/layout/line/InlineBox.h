@@ -22,10 +22,12 @@
 #ifndef InlineBox_h
 #define InlineBox_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/layout/api/LineLayoutBoxModel.h"
 #include "core/layout/api/LineLayoutItem.h"
 #include "core/layout/api/SelectionState.h"
+#include "platform/fonts/FontVerticalPositionType.h"
 #include "platform/graphics/paint/DisplayItemClient.h"
 #include "platform/text/TextDirection.h"
 
@@ -39,32 +41,17 @@ class RootInlineBox;
 
 enum MarkLineBoxes { kMarkLineBoxesDirty, kDontMarkLineBoxes };
 
-enum class LineVerticalPositionType {
-  // TextTop and TextBottom are the top/bottom of the content area.
-  // This is where 'vertical-align: text-top/text-bottom' aligns to.
-  // This is explicitly undefined in CSS2.
-  // https://drafts.csswg.org/css2/visudet.html#inline-non-replaced
-  TextTop,
-  TextBottom,
-  // Em height as being discussed in Font Metrics API.
-  // https://drafts.css-houdini.org/font-metrics-api-1/#fontmetrics
-  TopOfEmHeight,
-  BottomOfEmHeight
-};
-
 // Returns whether the position type is CSS "line-over"; i.e., ascender side
 // or "top" side of a line box.
 // https://drafts.csswg.org/css-writing-modes-3/#line-over
-static inline bool IsLineOverSide(LineVerticalPositionType type) {
-  return type == LineVerticalPositionType::TextTop ||
-         type == LineVerticalPositionType::TopOfEmHeight;
+static inline bool IsLineOverSide(FontVerticalPositionType type) {
+  return type == FontVerticalPositionType::TextTop ||
+         type == FontVerticalPositionType::TopOfEmHeight;
 }
 
 // InlineBox represents a rectangle that occurs on a line.  It corresponds to
 // some LayoutObject (i.e., it represents a portion of that LayoutObject).
 class CORE_EXPORT InlineBox : public DisplayItemClient {
-  WTF_MAKE_NONCOPYABLE(InlineBox);
-
  public:
   InlineBox(LineLayoutItem obj)
       : next_(nullptr),
@@ -92,7 +79,7 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
         logical_width_(logical_width),
         bitfields_(first_line, constructed, dirty, extracted, is_horizontal) {}
 
-  virtual ~InlineBox();
+  ~InlineBox() override;
 
   virtual void Destroy();
 
@@ -137,8 +124,9 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
   void ShowTreeForThis() const;
   void ShowLineTreeForThis() const;
 
-  virtual void ShowBox(int = 0) const;
-  virtual void ShowLineTreeAndMark(const InlineBox* = nullptr,
+  virtual void DumpBox(StringBuilder&) const;
+  virtual void DumpLineTreeAndMark(StringBuilder&,
+                                   const InlineBox* = nullptr,
                                    const char* = nullptr,
                                    const InlineBox* = nullptr,
                                    const char* = nullptr,
@@ -151,6 +139,7 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
   // DisplayItemClient methods
   String DebugName() const override;
   LayoutRect VisualRect() const override;
+  LayoutRect PartialInvalidationRect() const override;
 
   bool IsText() const { return bitfields_.IsText(); }
   void SetIsText(bool is_text) { bitfields_.SetIsText(is_text); }
@@ -304,7 +293,7 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
                                        logical_width_, LogicalHeight());
   }
 
-  virtual int BaselinePosition(FontBaseline baseline_type) const;
+  virtual LayoutUnit BaselinePosition(FontBaseline baseline_type) const;
   virtual LayoutUnit LineHeight() const;
 
   virtual int CaretMinOffset() const;
@@ -364,10 +353,11 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
            GetLineLayoutItem().Parent().IsBox();
   }
   EVerticalAlign VerticalAlign() const {
-    return IsAnonymousInline() ? ComputedStyle::InitialVerticalAlign()
-                               : GetLineLayoutItem()
-                                     .Style(bitfields_.FirstLine())
-                                     ->VerticalAlign();
+    return IsAnonymousInline()
+               ? ComputedStyleInitialValues::InitialVerticalAlign()
+               : GetLineLayoutItem()
+                     .Style(bitfields_.FirstLine())
+                     ->VerticalAlign();
   }
 
   // Use with caution! The type is not checked!
@@ -380,11 +370,6 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
   // Physical location of the top-left corner of the box in the containing
   // block.
   LayoutPoint PhysicalLocation() const;
-
-  // Converts from a rect in the logical space of the InlineBox to one in the
-  // physical space of the containing block. The logical space of an InlineBox
-  // may be transposed for vertical text and flipped for right-to-left text.
-  void LogicalRectToPhysicalRect(LayoutRect&) const;
 
   // TODO(szager): The Rect versions should return a rect, not modify the
   // argument.
@@ -432,7 +417,7 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
           has_virtual_logical_height_(false),
           is_horizontal_(is_horizontal),
           ends_with_break_(false),
-          has_selected_children_or_can_have_leading_expansion_(false),
+          can_have_leading_expansion_(false),
           known_to_have_no_overflow_(true),
           has_ellipsis_box_or_hyphen_(false),
           dir_override_(false),
@@ -464,8 +449,7 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
     ADD_BOOLEAN_BITFIELD(ends_with_break_,
                          EndsWithBreak);  // Whether the line ends with a <br>.
     // shared between RootInlineBox and InlineTextBox
-    ADD_BOOLEAN_BITFIELD(has_selected_children_or_can_have_leading_expansion_,
-                         HasSelectedChildrenOrCanHaveLeadingExpansion);
+    ADD_BOOLEAN_BITFIELD(can_have_leading_expansion_, CanHaveLeadingExpansion);
 
     // This boolean will never be set if there is potential for overflow, but it
     // will be eagerly cleared in the opposite case. As such, it's a
@@ -506,13 +490,6 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
     bitfields_.SetEndsWithBreak(ends_with_break);
   }
   bool HasEllipsisBox() const { return bitfields_.HasEllipsisBoxOrHyphen(); }
-  bool HasSelectedChildren() const {
-    return bitfields_.HasSelectedChildrenOrCanHaveLeadingExpansion();
-  }
-  void SetHasSelectedChildren(bool has_selected_children) {
-    bitfields_.SetHasSelectedChildrenOrCanHaveLeadingExpansion(
-        has_selected_children);
-  }
   void SetHasEllipsisBox(bool has_ellipsis_box) {
     bitfields_.SetHasEllipsisBoxOrHyphen(has_ellipsis_box);
   }
@@ -523,11 +500,10 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
     bitfields_.SetHasEllipsisBoxOrHyphen(has_hyphen);
   }
   bool CanHaveLeadingExpansion() const {
-    return bitfields_.HasSelectedChildrenOrCanHaveLeadingExpansion();
+    return bitfields_.CanHaveLeadingExpansion();
   }
   void SetCanHaveLeadingExpansion(bool can_have_leading_expansion) {
-    bitfields_.SetHasSelectedChildrenOrCanHaveLeadingExpansion(
-        can_have_leading_expansion);
+    bitfields_.SetCanHaveLeadingExpansion(can_have_leading_expansion);
   }
   signed Expansion() { return bitfields_.Expansion(); }
   void SetExpansion(signed expansion) { bitfields_.SetExpansion(expansion); }
@@ -544,6 +520,8 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
 #if DCHECK_IS_ON()
   bool has_bad_parent_ = false;
 #endif
+
+  DISALLOW_COPY_AND_ASSIGN(InlineBox);
 };
 
 #if !DCHECK_IS_ON()
@@ -563,6 +541,10 @@ inline void InlineBox::SetHasBadParent() {
 // Allow equality comparisons of InlineBox's by reference or pointer,
 // interchangeably.
 DEFINE_COMPARISON_OPERATORS_WITH_REFERENCES(InlineBox)
+
+// TODO(layout-dev): Once LayoutNG supports inline layout, we should remove
+// |CanUseInlineBox()|.
+bool CanUseInlineBox(const LayoutObject&);
 
 }  // namespace blink
 

@@ -20,10 +20,10 @@
 
 #include "core/svg/SVGTextPositioningElement.h"
 
-#include "core/SVGNames.h"
 #include "core/layout/svg/LayoutSVGText.h"
 #include "core/svg/SVGLengthList.h"
 #include "core/svg/SVGNumberList.h"
+#include "core/svg_names.h"
 
 namespace blink {
 
@@ -55,7 +55,7 @@ SVGTextPositioningElement::SVGTextPositioningElement(
   AddToPropertyMap(rotate_);
 }
 
-DEFINE_TRACE(SVGTextPositioningElement) {
+void SVGTextPositioningElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(x_);
   visitor->Trace(y_);
   visitor->Trace(dx_);
@@ -76,14 +76,14 @@ void SVGTextPositioningElement::SvgAttributeChanged(
   if (update_relative_lengths || attr_name == SVGNames::rotateAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
 
-    LayoutObject* layout_object = this->GetLayoutObject();
+    LayoutObject* layout_object = GetLayoutObject();
     if (!layout_object)
       return;
 
     if (LayoutSVGText* text_layout_object =
             LayoutSVGText::LocateLayoutSVGTextAncestor(layout_object))
       text_layout_object->SetNeedsPositioningValuesUpdate();
-    MarkForLayoutAndParentResourceInvalidation(layout_object);
+    MarkForLayoutAndParentResourceInvalidation(*layout_object);
     return;
   }
 

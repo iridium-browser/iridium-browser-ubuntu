@@ -10,11 +10,11 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/native_window_tracker.h"
 #include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -87,11 +87,6 @@ class ArcAppDialogView : public views::DialogDelegateView,
 
   AppListControllerDelegate* controller_;
 
-  gfx::NativeWindow parent_;
-
-  // Tracks whether |parent_| got destroyed.
-  std::unique_ptr<NativeWindowTracker> parent_window_tracker_;
-
   const std::string app_id_;
   const base::string16 window_title_;
   const base::string16 confirm_button_text_;
@@ -121,15 +116,12 @@ ArcAppDialogView::ArcAppDialogView(Profile* profile,
       cancel_button_text_(cancel_button_text),
       confirm_callback_(confirm_callback) {
   DCHECK(controller);
-  parent_ = controller_->GetAppListWindow();
-  if (parent_)
-    parent_window_tracker_ = NativeWindowTracker::Create(parent_);
 
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
 
-  SetLayoutManager(new views::BoxLayout(
+  SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kHorizontal,
-      provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS),
+      provider->GetDialogInsetsForContentType(views::TEXT, views::TEXT),
       provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL)));
 
   icon_view_ = new views::ImageView();
@@ -137,13 +129,13 @@ ArcAppDialogView::ArcAppDialogView(Profile* profile,
   AddChildView(icon_view_);
 
   views::View* text_container = new views::View();
-  views::BoxLayout* text_container_layout =
-      new views::BoxLayout(views::BoxLayout::kVertical);
+  auto text_container_layout =
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical);
   text_container_layout->set_main_axis_alignment(
       views::BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
   text_container_layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_START);
-  text_container->SetLayoutManager(text_container_layout);
+  text_container->SetLayoutManager(std::move(text_container_layout));
 
   AddChildView(text_container);
   DCHECK(!heading_text.empty());
@@ -158,7 +150,6 @@ ArcAppDialogView::ArcAppDialogView(Profile* profile,
 }
 
 ArcAppDialogView::~ArcAppDialogView() {
-  DCHECK_EQ(this, g_current_arc_app_dialog_view);
   g_current_arc_app_dialog_view = nullptr;
 }
 
@@ -222,7 +213,8 @@ void ArcAppDialogView::Show() {
   initial_setup_ = false;
 
   // The parent window was killed before the icon was loaded.
-  if (parent_ && parent_window_tracker_->WasNativeWindowClosed()) {
+  if (!AppListService::Get()->IsAppListVisible()) {
+    g_current_arc_app_dialog_view = nullptr;
     Cancel();
     DialogDelegateView::DeleteDelegate();
     return;
@@ -232,7 +224,7 @@ void ArcAppDialogView::Show() {
     controller_->OnShowChildDialog();
 
   g_current_arc_app_dialog_view = this;
-  constrained_window::CreateBrowserModalDialogViews(this, parent_)->Show();
+  constrained_window::CreateBrowserModalDialogViews(this, nullptr)->Show();
 }
 
 }  // namespace

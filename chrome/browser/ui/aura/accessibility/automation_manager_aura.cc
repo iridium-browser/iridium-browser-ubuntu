@@ -6,9 +6,11 @@
 
 #include <stddef.h>
 
+#include "ash/public/cpp/config.h"
 #include "base/memory/singleton.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/ash_config.h"
 #include "chrome/browser/extensions/api/automation_internal/automation_event_router.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
@@ -18,11 +20,12 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_frame_host.h"
 #include "ui/accessibility/ax_action_data.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_tree_id_registry.h"
 #include "ui/accessibility/platform/aura_window_properties.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/views/accessibility/ax_aura_obj_wrapper.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -82,15 +85,17 @@ void AutomationManagerAura::Enable(BrowserContext* context) {
   enabled_ = true;
   Reset(false);
 
-  SendEvent(context, current_tree_->GetRoot(), ui::AX_EVENT_LOAD_COMPLETE);
+  SendEvent(context, current_tree_->GetRoot(), ax::mojom::Event::kLoadComplete);
   views::AXAuraObjCache::GetInstance()->SetDelegate(this);
 
 #if defined(OS_CHROMEOS)
-  aura::Window* active_window = ash::wm::GetActiveWindow();
-  if (active_window) {
-    views::AXAuraObjWrapper* focus =
-        views::AXAuraObjCache::GetInstance()->GetOrCreate(active_window);
-    SendEvent(context, focus, ui::AX_EVENT_CHILDREN_CHANGED);
+  if (chromeos::GetAshConfig() != ash::Config::MASH) {
+    aura::Window* active_window = ash::wm::GetActiveWindow();
+    if (active_window) {
+      views::AXAuraObjWrapper* focus =
+          views::AXAuraObjCache::GetInstance()->GetOrCreate(active_window);
+      SendEvent(context, focus, ax::mojom::Event::kChildrenChanged);
+    }
   }
 #endif
 }
@@ -102,7 +107,7 @@ void AutomationManagerAura::Disable() {
 
 void AutomationManagerAura::HandleEvent(BrowserContext* context,
                                         views::View* view,
-                                        ui::AXEvent event_type) {
+                                        ax::mojom::Event event_type) {
   if (!enabled_)
     return;
 
@@ -120,7 +125,7 @@ void AutomationManagerAura::HandleAlert(content::BrowserContext* context,
   views::AXAuraObjWrapper* obj =
       static_cast<AXRootObjWrapper*>(current_tree_->GetRoot())
           ->GetAlertForText(text);
-  SendEvent(context, obj, ui::AX_EVENT_ALERT);
+  SendEvent(context, obj, ax::mojom::Event::kAlert);
 }
 
 void AutomationManagerAura::PerformAction(const ui::AXActionData& data) {
@@ -128,7 +133,7 @@ void AutomationManagerAura::PerformAction(const ui::AXActionData& data) {
 
   // Unlike all of the other actions, a hit test requires determining the
   // node to perform the action on first.
-  if (data.action == ui::AX_ACTION_HIT_TEST) {
+  if (data.action == ax::mojom::Action::kHitTest) {
     PerformHitTest(data);
     return;
   }
@@ -144,11 +149,11 @@ void AutomationManagerAura::OnChildWindowRemoved(
   if (!parent)
     parent = current_tree_->GetRoot();
 
-  SendEvent(nullptr, parent, ui::AX_EVENT_CHILDREN_CHANGED);
+  SendEvent(nullptr, parent, ax::mojom::Event::kChildrenChanged);
 }
 
 void AutomationManagerAura::OnEvent(views::AXAuraObjWrapper* aura_obj,
-                                    ui::AXEvent event_type) {
+                                    ax::mojom::Event event_type) {
   SendEvent(nullptr, aura_obj, event_type);
 }
 
@@ -170,7 +175,7 @@ void AutomationManagerAura::Reset(bool reset_serializer) {
 
 void AutomationManagerAura::SendEvent(BrowserContext* context,
                                       views::AXAuraObjWrapper* aura_obj,
-                                      ui::AXEvent event_type) {
+                                      ax::mojom::Event event_type) {
   if (!current_tree_serializer_)
     return;
 
@@ -201,7 +206,7 @@ void AutomationManagerAura::SendEvent(BrowserContext* context,
     current_tree_serializer_->SerializeChanges(focus, &params.update);
 
   params.tree_id = 0;
-  params.id = aura_obj->GetID();
+  params.id = aura_obj->GetUniqueId().Get();
   params.event_type = event_type;
   params.mouse_location = aura::Env::GetInstance()->last_mouse_location();
   AutomationEventRouter* router = AutomationEventRouter::GetInstance();
@@ -248,8 +253,11 @@ void AutomationManagerAura::PerformHitTest(
 
     content::RenderFrameHost* rfh =
         content::RenderFrameHost::FromAXTreeID(child_ax_tree_id);
-    if (rfh)
+    if (rfh) {
+      // Convert to pixels for the RenderFrameHost HitTest.
+      window->GetHost()->ConvertDIPToPixels(&action.target_point);
       rfh->AccessibilityPerformAction(action);
+    }
     return;
   }
 

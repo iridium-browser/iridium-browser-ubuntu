@@ -12,29 +12,33 @@
 
 namespace blink {
 
-// crossThreadBind() is bind() for cross-thread task posting.
-// crossThreadBind() applies CrossThreadCopier to the arguments.
+// CrossThreadBind() is Bind() for cross-thread task posting.
+// CrossThreadBind() applies CrossThreadCopier to the arguments.
 //
 // Example:
-//     void func1(int, const String&);
-//     f = crossThreadBind(func1, 42, str);
-// func1(42, str2) will be called when |f()| is executed,
-// where |str2| is a deep copy of |str| (created by str.isolatedCopy()).
+//     void Func1(int, const String&);
+//     f = CrossThreadBind(&Func1, 42, str);
+// Func1(42, str2) will be called when |f()| is executed,
+// where |str2| is a deep copy of |str| (created by str.IsolatedCopy()).
 //
-// crossThreadBind(str) is similar to bind(str.isolatedCopy()), but the latter
+// CrossThreadBind(str) is similar to Bind(str.IsolatedCopy()), but the latter
 // is NOT thread-safe due to temporary objects (https://crbug.com/390851).
 //
 // Don't (if you pass the task across threads):
-//     bind(func1, 42, str);
-//     bind(func1, 42, str.isolatedCopy());
+//     Bind(&Func1, 42, str);
+//     Bind(&Func1, 42, str.IsolatedCopy());
 
 template <typename FunctionType, typename... Ps>
-std::unique_ptr<Function<base::MakeUnboundRunType<FunctionType, Ps...>,
-                         WTF::kCrossThreadAffinity>>
+WTF::CrossThreadFunction<base::MakeUnboundRunType<FunctionType, Ps...>>
 CrossThreadBind(FunctionType function, Ps&&... parameters) {
-  return WTF::BindInternal<WTF::kCrossThreadAffinity>(
-      function, CrossThreadCopier<typename std::decay<Ps>::type>::Copy(
-                    std::forward<Ps>(parameters))...);
+  static_assert(
+      WTF::internal::CheckGCedTypeRestrictions<std::index_sequence_for<Ps...>,
+                                               std::decay_t<Ps>...>::ok,
+      "A bound argument uses a bad pattern.");
+  using UnboundRunType = base::MakeUnboundRunType<FunctionType, Ps...>;
+  return WTF::CrossThreadFunction<UnboundRunType>(
+      base::Bind(function, CrossThreadCopier<std::decay_t<Ps>>::Copy(
+                               std::forward<Ps>(parameters))...));
 }
 
 }  // namespace blink

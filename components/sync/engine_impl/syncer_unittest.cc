@@ -19,7 +19,6 @@
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/histogram_tester.h"
@@ -193,7 +192,7 @@ class SyncerTest : public testing::Test,
   void OnTypesBackedOff(ModelTypeSet types) override {
     scheduler_->OnTypesBackedOff(types);
   }
-  bool IsCurrentlyThrottled() override { return false; }
+  bool IsAnyThrottleOrBackoff() override { return false; }
   void OnReceivedLongPollIntervalUpdate(
       const base::TimeDelta& new_interval) override {
     last_long_poll_interval_received_ = new_interval;
@@ -240,7 +239,7 @@ class SyncerTest : public testing::Test,
   void OnMigrationRequested(ModelTypeSet types) override {}
 
   void ResetCycle() {
-    cycle_ = base::MakeUnique<SyncCycle>(context_.get(), this);
+    cycle_ = std::make_unique<SyncCycle>(context_.get(), this);
   }
 
   bool SyncShareNudge() {
@@ -265,17 +264,17 @@ class SyncerTest : public testing::Test,
 
   void SetUp() override {
     test_user_share_.SetUp();
-    mock_server_ = base::MakeUnique<MockConnectionManager>(
+    mock_server_ = std::make_unique<MockConnectionManager>(
         directory(), &cancelation_signal_);
-    debug_info_getter_ = base::MakeUnique<MockDebugInfoGetter>();
+    debug_info_getter_ = std::make_unique<MockDebugInfoGetter>();
     workers_.push_back(
         scoped_refptr<ModelSafeWorker>(new FakeModelWorker(GROUP_PASSIVE)));
     std::vector<SyncEngineEventListener*> listeners;
     listeners.push_back(this);
 
-    model_type_registry_ = base::MakeUnique<ModelTypeRegistry>(
+    model_type_registry_ = std::make_unique<ModelTypeRegistry>(
         workers_, test_user_share_.user_share(), &mock_nudge_handler_,
-        UssMigrator());
+        UssMigrator(), &cancelation_signal_);
     model_type_registry_->RegisterDirectoryTypeDebugInfoObserver(
         &debug_info_cache_);
 
@@ -284,14 +283,14 @@ class SyncerTest : public testing::Test,
     EnableDatatype(NIGORI);
     EnableDatatype(PREFERENCES);
 
-    context_ = base::MakeUnique<SyncCycleContext>(
+    context_ = std::make_unique<SyncCycleContext>(
         mock_server_.get(), directory(), extensions_activity_.get(), listeners,
         debug_info_getter_.get(), model_type_registry_.get(),
         true,   // enable keystore encryption
         false,  // force enable pre-commit GU avoidance experiment
         "fake_invalidator_client_id");
     syncer_ = new Syncer(&cancelation_signal_);
-    scheduler_ = base::MakeUnique<SyncSchedulerImpl>(
+    scheduler_ = std::make_unique<SyncSchedulerImpl>(
         "TestSyncScheduler", BackoffDelayProvider::FromDefaults(),
         context_.get(),
         // scheduler_ owned syncer_ now and will manage the memory of syncer_
@@ -627,115 +626,6 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
     Entry entryA(&rtrans, GET_BY_ID, ids_.FromNumber(1));
     ASSERT_TRUE(entryA.good());
     EXPECT_FALSE(entryA.GetIsUnsynced());
-  }
-}
-
-// This test has three steps. In the first step, a BOOKMARK update is received.
-// In the next step, syncing BOOKMARKS is disabled, so no BOOKMARK is sent or
-// received. In the last step, a BOOKMARK update is committed.
-TEST_F(SyncerTest, DataUseHistogramsTest) {
-  base::HistogramTester histogram_tester;
-  sync_pb::EntitySpecifics bookmark_data;
-  AddDefaultFieldValue(BOOKMARKS, &bookmark_data);
-
-  mock_server_->AddUpdateDirectory(1, 0, "A", 10, 10, foreign_cache_guid(),
-                                   "-1");
-  int download_bytes_bookmark = 0;
-  vector<unsigned int> progress_bookmark(3, 0);
-  vector<unsigned int> progress_all(3, 0);
-  vector<base::Bucket> samples;
-  EXPECT_TRUE(SyncShareNudge());
-  {
-    histogram_tester.ExpectTotalCount("DataUse.Sync.Upload.Count", 0);
-    histogram_tester.ExpectTotalCount("DataUse.Sync.Upload.Bytes", 0);
-    histogram_tester.ExpectTotalCount("DataUse.Sync.Download.Count", 1);
-    histogram_tester.ExpectUniqueSample("DataUse.Sync.Download.Count",
-                                        BOOKMARKS, 1);
-    samples = histogram_tester.GetAllSamples("DataUse.Sync.Download.Bytes");
-    EXPECT_EQ(1u, samples.size());
-    EXPECT_EQ(BOOKMARKS, samples.at(0).min);
-    EXPECT_GE(samples.at(0).count, 0);
-    download_bytes_bookmark = samples.at(0).count;
-
-    samples =
-        histogram_tester.GetAllSamples("DataUse.Sync.ProgressMarker.Bytes");
-
-    for (const base::Bucket& bucket : samples) {
-      if (bucket.min == BOOKMARKS)
-        progress_bookmark.at(0) += bucket.count;
-      progress_all.at(0) += bucket.count;
-    }
-    EXPECT_GT(progress_bookmark.at(0), 0u);
-    EXPECT_GT(progress_all.at(0), 0u);
-
-    syncable::WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
-    MutableEntry A(&wtrans, GET_BY_ID, ids_.FromNumber(1));
-    A.PutIsUnsynced(true);
-    A.PutSpecifics(bookmark_data);
-    A.PutNonUniqueName("bookmark");
-  }
-
-  // Now sync without enabling bookmarks.
-  mock_server_->ExpectGetUpdatesRequestTypes(
-      Difference(context_->GetEnabledTypes(), ModelTypeSet(BOOKMARKS)));
-  ResetCycle();
-  syncer_->NormalSyncShare(
-      Difference(context_->GetEnabledTypes(), ModelTypeSet(BOOKMARKS)),
-      &nudge_tracker_, cycle_.get());
-
-  {
-    // Nothing should have been committed as bookmarks is throttled.
-    histogram_tester.ExpectTotalCount("DataUse.Sync.Upload.Count", 0);
-    histogram_tester.ExpectTotalCount("DataUse.Sync.Upload.Bytes", 0);
-    histogram_tester.ExpectTotalCount("DataUse.Sync.Download.Count", 1);
-    histogram_tester.ExpectUniqueSample("DataUse.Sync.Download.Count",
-                                        BOOKMARKS, 1);
-
-    samples = histogram_tester.GetAllSamples("DataUse.Sync.Download.Bytes");
-    EXPECT_EQ(1u, samples.size());
-    EXPECT_EQ(BOOKMARKS, samples.at(0).min);
-    EXPECT_EQ(download_bytes_bookmark, samples.at(0).count);
-
-    samples =
-        histogram_tester.GetAllSamples("DataUse.Sync.ProgressMarker.Bytes");
-    for (const base::Bucket& bucket : samples) {
-      if (bucket.min == BOOKMARKS)
-        progress_bookmark.at(1) += bucket.count;
-      progress_all.at(1) += bucket.count;
-    }
-    EXPECT_EQ(progress_bookmark.at(1), progress_bookmark.at(0));
-    EXPECT_GT(progress_all.at(1), progress_all.at(0));
-  }
-
-  // Sync again with bookmarks enabled.
-  mock_server_->ExpectGetUpdatesRequestTypes(context_->GetEnabledTypes());
-  EXPECT_TRUE(SyncShareNudge());
-  {
-    // It should have been committed.
-    histogram_tester.ExpectTotalCount("DataUse.Sync.Upload.Count", 1);
-    histogram_tester.ExpectUniqueSample("DataUse.Sync.Upload.Count", BOOKMARKS,
-                                        1);
-    samples = histogram_tester.GetAllSamples("DataUse.Sync.Upload.Bytes");
-    EXPECT_EQ(1u, samples.size());
-    EXPECT_EQ(BOOKMARKS, samples.at(0).min);
-    EXPECT_GE(samples.at(0).count, 0);
-
-    samples = histogram_tester.GetAllSamples("DataUse.Sync.Download.Bytes");
-    EXPECT_EQ(1u, samples.size());
-    EXPECT_EQ(BOOKMARKS, samples.at(0).min);
-    EXPECT_EQ(download_bytes_bookmark, samples.at(0).count);
-
-    histogram_tester.ExpectTotalCount("DataUse.Sync.Download.Count", 1);
-
-    samples =
-        histogram_tester.GetAllSamples("DataUse.Sync.ProgressMarker.Bytes");
-    for (const base::Bucket& bucket : samples) {
-      if (bucket.min == BOOKMARKS)
-        progress_bookmark.at(2) += bucket.count;
-      progress_all.at(2) += bucket.count;
-    }
-    EXPECT_GT(progress_bookmark.at(2), progress_bookmark.at(1));
-    EXPECT_GT(progress_all.at(2), progress_all.at(1));
   }
 }
 
@@ -4142,7 +4032,7 @@ TEST_F(SyncerTest, DirectoryCommitTest) {
 TEST_F(SyncerTest, TestClientCommandDuringUpdate) {
   using sync_pb::ClientCommand;
 
-  auto command = base::MakeUnique<ClientCommand>();
+  auto command = std::make_unique<ClientCommand>();
   command->set_set_sync_poll_interval(8);
   command->set_set_sync_long_poll_interval(800);
   command->set_sessions_commit_delay_seconds(3141);
@@ -4163,7 +4053,7 @@ TEST_F(SyncerTest, TestClientCommandDuringUpdate) {
   EXPECT_EQ(TimeDelta::FromMilliseconds(950), last_bookmarks_commit_delay_);
   EXPECT_EQ(11, last_client_invalidation_hint_buffer_size_);
 
-  command = base::MakeUnique<ClientCommand>();
+  command = std::make_unique<ClientCommand>();
   command->set_set_sync_poll_interval(180);
   command->set_set_sync_long_poll_interval(190);
   command->set_sessions_commit_delay_seconds(2718);
@@ -4187,7 +4077,7 @@ TEST_F(SyncerTest, TestClientCommandDuringUpdate) {
 TEST_F(SyncerTest, TestClientCommandDuringCommit) {
   using sync_pb::ClientCommand;
 
-  auto command = base::MakeUnique<ClientCommand>();
+  auto command = std::make_unique<ClientCommand>();
   command->set_set_sync_poll_interval(8);
   command->set_set_sync_long_poll_interval(800);
   command->set_sessions_commit_delay_seconds(3141);
@@ -4207,7 +4097,7 @@ TEST_F(SyncerTest, TestClientCommandDuringCommit) {
   EXPECT_EQ(TimeDelta::FromMilliseconds(950), last_bookmarks_commit_delay_);
   EXPECT_EQ(11, last_client_invalidation_hint_buffer_size_);
 
-  command = base::MakeUnique<ClientCommand>();
+  command = std::make_unique<ClientCommand>();
   command->set_set_sync_poll_interval(180);
   command->set_set_sync_long_poll_interval(190);
   command->set_sessions_commit_delay_seconds(2718);

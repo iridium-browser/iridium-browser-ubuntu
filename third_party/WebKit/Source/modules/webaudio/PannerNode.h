@@ -59,14 +59,14 @@ class PannerHandler final : public AudioHandler {
     kDistanceConeGainDirty = 0x2,
   };
 
-  static PassRefPtr<PannerHandler> Create(AudioNode&,
-                                          float sample_rate,
-                                          AudioParamHandler& position_x,
-                                          AudioParamHandler& position_y,
-                                          AudioParamHandler& position_z,
-                                          AudioParamHandler& orientation_x,
-                                          AudioParamHandler& orientation_y,
-                                          AudioParamHandler& orientation_z);
+  static scoped_refptr<PannerHandler> Create(AudioNode&,
+                                             float sample_rate,
+                                             AudioParamHandler& position_x,
+                                             AudioParamHandler& position_y,
+                                             AudioParamHandler& position_z,
+                                             AudioParamHandler& orientation_x,
+                                             AudioParamHandler& orientation_y,
+                                             AudioParamHandler& orientation_z);
 
   ~PannerHandler() override;
 
@@ -84,8 +84,8 @@ class PannerHandler final : public AudioHandler {
   void SetPanningModel(const String&);
 
   // Position and orientation
-  void SetPosition(float x, float y, float z);
-  void SetOrientation(float x, float y, float z);
+  void SetPosition(float x, float y, float z, ExceptionState&);
+  void SetOrientation(float x, float y, float z, ExceptionState&);
 
   // Distance parameters
   String DistanceModel() const;
@@ -168,7 +168,6 @@ class PannerHandler final : public AudioHandler {
   // Gain
   DistanceEffect distance_effect_;
   ConeEffect cone_effect_;
-  float last_gain_;
 
   // Cached values
   double cached_azimuth_;
@@ -188,13 +187,13 @@ class PannerHandler final : public AudioHandler {
   // True if any of this panner's AudioParams have automations.
   bool HasSampleAccurateValues() const;
 
-  RefPtr<AudioParamHandler> position_x_;
-  RefPtr<AudioParamHandler> position_y_;
-  RefPtr<AudioParamHandler> position_z_;
+  scoped_refptr<AudioParamHandler> position_x_;
+  scoped_refptr<AudioParamHandler> position_y_;
+  scoped_refptr<AudioParamHandler> position_z_;
 
-  RefPtr<AudioParamHandler> orientation_x_;
-  RefPtr<AudioParamHandler> orientation_y_;
-  RefPtr<AudioParamHandler> orientation_z_;
+  scoped_refptr<AudioParamHandler> orientation_x_;
+  scoped_refptr<AudioParamHandler> orientation_y_;
+  scoped_refptr<AudioParamHandler> orientation_z_;
 
   FloatPoint3D last_position_;
   FloatPoint3D last_orientation_;
@@ -214,7 +213,7 @@ class PannerNode final : public AudioNode {
                             ExceptionState&);
   PannerHandler& GetPannerHandler() const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   // Uses a 3D cartesian coordinate system
   AudioParam* positionX() const { return position_x_; };
@@ -227,8 +226,8 @@ class PannerNode final : public AudioNode {
 
   String panningModel() const;
   void setPanningModel(const String&);
-  void setPosition(float x, float y, float z);
-  void setOrientation(float x, float y, float z);
+  void setPosition(float x, float y, float z, ExceptionState&);
+  void setOrientation(float x, float y, float z, ExceptionState&);
   String distanceModel() const;
   void setDistanceModel(const String&);
   double refDistance() const;

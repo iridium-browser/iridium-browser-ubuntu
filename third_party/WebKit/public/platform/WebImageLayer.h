@@ -40,10 +40,12 @@ namespace blink {
 
 class WebImageLayer {
  public:
-  virtual ~WebImageLayer() {}
+  virtual ~WebImageLayer() = default;
 
   virtual WebLayer* Layer() = 0;
-  virtual void SetImage(PaintImage) = 0;
+  virtual void SetImage(PaintImage,
+                        const SkMatrix&,
+                        bool uses_width_as_height) = 0;
   virtual void SetNearestNeighbor(bool) = 0;
 };
 

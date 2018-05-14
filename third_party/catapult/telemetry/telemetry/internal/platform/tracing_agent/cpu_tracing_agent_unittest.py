@@ -50,11 +50,12 @@ class CpuTracingAgentTest(unittest.TestCase):
   @decorators.Enabled('linux', 'mac', 'win')
   def testIsSupported(self):
     self.assertTrue(cpu_tracing_agent.CpuTracingAgent.IsSupported(
-      self._desktop_backend))
+        self._desktop_backend))
     self.assertFalse(cpu_tracing_agent.CpuTracingAgent.IsSupported(
-      FakeAndroidPlatformBackend()))
+        FakeAndroidPlatformBackend()))
 
-  @decorators.Enabled('linux', 'mac', 'win')
+  # Flaky on Win (crbug.com/803210).
+  @decorators.Enabled('linux', 'mac')
   def testStartAgentTracing(self):
     self.assertFalse(self._agent._snapshot_ongoing)
     self.assertFalse(self._agent._snapshots)
@@ -64,7 +65,8 @@ class CpuTracingAgentTest(unittest.TestCase):
     self.assertTrue(self._agent._snapshots)
     self._agent.StopAgentTracing()
 
-  @decorators.Enabled('linux', 'mac', 'win')
+  # Flaky on Win (crbug.com/803210).
+  @decorators.Enabled('linux', 'mac')
   def testStartAgentTracingNotEnabled(self):
     self._config.enable_cpu_trace = False
     self.assertFalse(self._agent._snapshot_ongoing)
@@ -74,24 +76,28 @@ class CpuTracingAgentTest(unittest.TestCase):
     time.sleep(2)
     self.assertFalse(self._agent._snapshots)
 
-  @decorators.Enabled('linux', 'mac', 'win')
+  # Flaky on Win (crbug.com/803210).
+  @decorators.Enabled('linux', 'mac')
   def testStopAgentTracingBeforeStart(self):
     self.assertRaises(AssertionError, self._agent.StopAgentTracing)
 
-  @decorators.Enabled('linux', 'mac', 'win')
+  # Flaky on Win (crbug.com/803210).
+  @decorators.Enabled('linux', 'mac')
   def testStopAgentTracing(self):
     self._agent.StartAgentTracing(self._config, 0)
     self._agent.StopAgentTracing()
     self.assertFalse(self._agent._snapshot_ongoing)
 
-  @decorators.Enabled('linux', 'mac', 'win')
+  # Flaky on Win (crbug.com/803210).
+  @decorators.Enabled('linux', 'mac')
   def testCollectAgentTraceDataBeforeStop(self):
     self._agent.StartAgentTracing(self._config, 0)
     self.assertRaises(AssertionError, self._agent.CollectAgentTraceData,
-        trace_data.TraceDataBuilder())
+                      trace_data.TraceDataBuilder())
     self._agent.StopAgentTracing()
 
-  @decorators.Enabled('linux', 'mac', 'win')
+  # Flaky on Win (crbug.com/803210).
+  @decorators.Enabled('linux', 'mac')
   def testCollectAgentTraceData(self):
     builder = trace_data.TraceDataBuilder()
     self._agent.StartAgentTracing(self._config, 0)
@@ -101,7 +107,8 @@ class CpuTracingAgentTest(unittest.TestCase):
     builder = builder.AsData()
     self.assertTrue(builder.HasTracesFor(trace_data.CPU_TRACE_DATA))
 
-  @decorators.Enabled('linux', 'mac', 'win')
+  # Flaky on Win (crbug.com/803210).
+  @decorators.Enabled('linux', 'mac')
   def testCollectAgentTraceDataFormat(self):
     builder = trace_data.TraceDataBuilder()
     self._agent.StartAgentTracing(self._config, 0)
@@ -118,7 +125,8 @@ class CpuTracingAgentTest(unittest.TestCase):
     self.assertEquals(set(data[0]['args']['snapshot']['processes'][0].keys()),
                       set(SNAPSHOT_KEYS))
 
-  @decorators.Enabled('linux', 'mac', 'win')
+  # Flaky on Win (crbug.com/803210).
+  @decorators.Enabled('linux', 'mac')
   def testContainsRealProcesses(self):
     builder = trace_data.TraceDataBuilder()
     self._agent.StartAgentTracing(self._config, 0)
@@ -137,7 +145,8 @@ class CpuTracingAgentTest(unittest.TestCase):
 
       self.assertTrue(found_unittest_process)
 
-  @decorators.Enabled('linux', 'mac', 'win')
+  # Flaky on Win (crbug.com/803210).
+  @decorators.Enabled('linux', 'mac')
   def testTraceSpecifiesTelemetryClockDomain(self):
     builder = trace_data.TraceDataBuilder()
     self._agent.StartAgentTracing(self._config, 0)
@@ -147,12 +156,13 @@ class CpuTracingAgentTest(unittest.TestCase):
 
     self.assertEqual(cpu_trace['metadata']['clock-domain'], 'TELEMETRY')
 
-  @decorators.Enabled('win')
+  # Flaky on Win (crbug.com/803210).
+  @decorators.Disabled('all')
   def testWindowsCanHandleProcessesWithSpaces(self):
     proc_collector = cpu_tracing_agent.WindowsProcessCollector()
     proc_collector.Init()
     proc = proc_collector._ParseProcessString(
-      '0 1 Multi Word Process 50 75')
+        '0 1 Multi Word Process 50 75')
     self.assertEquals(proc['ppid'], 0)
     self.assertEquals(proc['pid'], 1)
     self.assertEquals(proc['name'], 'Multi Word Process')

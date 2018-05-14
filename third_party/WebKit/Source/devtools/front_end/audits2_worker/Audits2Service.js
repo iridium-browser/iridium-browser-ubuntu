@@ -27,7 +27,7 @@ class LighthousePort {
  * @implements {Service}
  * @unrestricted
  */
-var Audits2Service = class {
+var Audits2Service = class {  // eslint-disable-line
   /**
    * @override
    * @param {function(string)}
@@ -40,6 +40,9 @@ var Audits2Service = class {
    * @return {!Promise<!ReportRenderer.ReportJSON>}
    */
   start(params) {
+    if (Runtime.queryParam('isUnderTest'))
+      this._disableLoggingForTest();
+
     self.listenForStatus(message => {
       this.statusUpdate(message[1]);
     });
@@ -47,13 +50,8 @@ var Audits2Service = class {
     return Promise.resolve()
         .then(_ => self.runLighthouseInWorker(this, params.url, {}, params.categoryIDs))
         .then(/** @type {!ReportRenderer.ReportJSON} */ result => {
-          // Filter out artifacts except for screenshots in traces to minimize report size.
-          var traces = result.artifacts.traces;
-          for (var pass in traces) {
-            traces[pass]['traceEvents'] =
-                traces[pass]['traceEvents'].filter(e => e['cat'] === 'disabled-by-default-devtools.screenshot');
-          }
-          result.artifacts = {traces: traces};
+          // Delete artifacts to minimize report size.
+          delete result.artifacts;
           return result;
         })
         .catch(err => ({
@@ -114,6 +112,10 @@ var Audits2Service = class {
       this._onMessage = cb;
     if (eventName === 'close')
       this._onClose = cb;
+  }
+
+  _disableLoggingForTest() {
+    console.log = () => undefined;  // eslint-disable-line no-console
   }
 };
 

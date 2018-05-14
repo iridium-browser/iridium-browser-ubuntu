@@ -5,29 +5,37 @@
 #include "ash/system/night_light/night_light_controller.h"
 
 #include <cmath>
+#include <memory>
 
-#include "ash/ash_switches.h"
 #include "ash/public/cpp/ash_pref_names.h"
+#include "ash/public/cpp/ash_switches.h"
+#include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
-#include "base/command_line.h"
+#include "base/i18n/time_formatting.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/numerics/ranges.h"
 #include "base/time/time.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "third_party/icu/source/i18n/astro.h"
 #include "ui/compositor/layer.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/gfx/animation/animation_delegate.h"
+#include "ui/gfx/animation/linear_animation.h"
 
 namespace ash {
 
 namespace {
 
 // Default start time at 6:00 PM as an offset from 00:00.
-const int kDefaultStartTimeOffsetMinutes = 18 * 60;
+constexpr int kDefaultStartTimeOffsetMinutes = 18 * 60;
 
 // Default end time at 6:00 AM as an offset from 00:00.
-const int kDefaultEndTimeOffsetMinutes = 6 * 60;
+constexpr int kDefaultEndTimeOffsetMinutes = 6 * 60;
 
 constexpr float kDefaultColorTemperature = 0.5f;
 
@@ -40,6 +48,9 @@ constexpr base::TimeDelta kManualAnimationDuration =
 // AnimationDurationType::kLong.
 constexpr base::TimeDelta kAutomaticAnimationDuration =
     base::TimeDelta::FromSeconds(20);
+
+// The color temperature animation frames per second.
+constexpr int kNightLightAnimationFrameRate = 30;
 
 class NightLightControllerDelegateImpl : public NightLightController::Delegate {
  public:
@@ -57,6 +68,8 @@ class NightLightControllerDelegateImpl : public NightLightController::Delegate {
  private:
   base::Time GetSunRiseSet(bool sunrise) const {
     if (!ValidatePosition()) {
+      LOG(ERROR) << "Invalid geoposition. Using default time for "
+                 << (sunrise ? "sunrise." : "sunset.");
       return sunrise ? TimeOfDay(kDefaultEndTimeOffsetMinutes).ToTimeToday()
                      : TimeOfDay(kDefaultStartTimeOffsetMinutes).ToTimeToday();
     }
@@ -92,57 +105,146 @@ int GetTemperatureRange(float temperature) {
   return std::floor(5 * temperature);
 }
 
-// Applies the given |layer_temperature| to all the layers of the root windows
-// with the given |animation_duration|.
-// |layer_temperature| is the ui::Layer floating-point value in the range of
-// 0.0f (least warm) to 1.0f (most warm).
-void ApplyColorTemperatureToLayers(float layer_temperature,
-                                   base::TimeDelta animation_duration) {
-  for (aura::Window* root_window : Shell::GetAllRootWindows()) {
-    ui::Layer* layer = root_window->layer();
+// Applies the given |temperature| value by converting it to the corresponding
+// color matrix that will be set on the output display.
+void ApplyTemperatureToCompositors(float temperature) {
+  SkMatrix44 matrix(SkMatrix44::kIdentity_Constructor);
+  if (temperature != 0.0f) {
+    const float blue_scale =
+        NightLightController::BlueColorScaleFromTemperature(temperature);
+    const float green_scale =
+        NightLightController::GreenColorScaleFromTemperature(temperature);
 
-    ui::ScopedLayerAnimationSettings settings(layer->GetAnimator());
-    settings.SetTransitionDuration(animation_duration);
-    settings.SetPreemptionStrategy(
-        ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET);
-
-    layer->SetLayerTemperature(layer_temperature);
+    matrix.set(1, 1, green_scale);
+    matrix.set(2, 2, blue_scale);
   }
 
-  UMA_HISTOGRAM_EXACT_LINEAR(
-      "Ash.NightLight.Temperature", GetTemperatureRange(layer_temperature),
-      5 /* number of buckets defined in GetTemperatureRange() */);
+  for (auto* controller : RootWindowController::root_window_controllers()) {
+    if (controller->GetHost()->compositor())
+      controller->GetHost()->compositor()->SetDisplayColorMatrix(matrix);
+  }
 }
 
 }  // namespace
 
+// Defines a linear animation type to animate the color temperature between two
+// values in a given time duration. The color temperature is animated when
+// NightLight changes status from ON to OFF or vice versa, whether this change
+// is automatic (via the automatic schedule) or manual (user initiated).
+class ColorTemperatureAnimation : public gfx::LinearAnimation,
+                                  public gfx::AnimationDelegate {
+ public:
+  ColorTemperatureAnimation()
+      : gfx::LinearAnimation(kManualAnimationDuration,
+                             kNightLightAnimationFrameRate,
+                             this) {}
+  ~ColorTemperatureAnimation() override = default;
+
+  // Starts a new temperature animation from the |current_temperature_| to the
+  // given |new_target_temperature| in the given |duration|.
+  void AnimateToNewValue(float new_target_temperature,
+                         base::TimeDelta duration) {
+    start_temperature_ = current_temperature_;
+    target_temperature_ =
+        base::ClampToRange(new_target_temperature, 0.0f, 1.0f);
+
+    if (ui::ScopedAnimationDurationScaleMode::duration_scale_mode() ==
+        ui::ScopedAnimationDurationScaleMode::ZERO_DURATION) {
+      // Animations are disabled. Apply the target temperature directly to the
+      // compositors.
+      current_temperature_ = target_temperature_;
+      ApplyTemperatureToCompositors(target_temperature_);
+      Stop();
+      return;
+    }
+
+    SetDuration(duration);
+    Start();
+  }
+
+ private:
+  // gfx::Animation:
+  void AnimateToState(double state) override {
+    state = base::ClampToRange(state, 0.0, 1.0);
+    current_temperature_ =
+        start_temperature_ + (target_temperature_ - start_temperature_) * state;
+  }
+
+  // gfx::AnimationDelegate:
+  void AnimationProgressed(const Animation* animation) override {
+    DCHECK_EQ(animation, this);
+
+    if (std::abs(current_temperature_ - target_temperature_) <=
+        std::numeric_limits<float>::epsilon()) {
+      current_temperature_ = target_temperature_;
+      Stop();
+    }
+
+    ApplyTemperatureToCompositors(current_temperature_);
+  }
+
+  float start_temperature_ = 0.0f;
+  float current_temperature_ = 0.0f;
+  float target_temperature_ = 0.0f;
+
+  DISALLOW_COPY_AND_ASSIGN(ColorTemperatureAnimation);
+};
+
 NightLightController::NightLightController()
-    : delegate_(base::MakeUnique<NightLightControllerDelegateImpl>()),
+    : delegate_(std::make_unique<NightLightControllerDelegateImpl>()),
+      temperature_animation_(std::make_unique<ColorTemperatureAnimation>()),
       binding_(this) {
-  Shell::Get()->AddShellObserver(this);
+  Shell::Get()->session_controller()->AddObserver(this);
+  Shell::Get()->window_tree_host_manager()->AddObserver(this);
+  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(
+      this);
 }
 
 NightLightController::~NightLightController() {
-  Shell::Get()->RemoveShellObserver(this);
-}
-
-// static
-bool NightLightController::IsFeatureEnabled() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      ash::switches::kAshEnableNightLight);
+  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(
+      this);
+  Shell::Get()->window_tree_host_manager()->RemoveObserver(this);
+  Shell::Get()->session_controller()->RemoveObserver(this);
 }
 
 // static
 void NightLightController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
-  registry->RegisterBooleanPref(prefs::kNightLightEnabled, false);
+  registry->RegisterBooleanPref(prefs::kNightLightEnabled, false,
+                                PrefRegistry::PUBLIC);
   registry->RegisterDoublePref(prefs::kNightLightTemperature,
-                               kDefaultColorTemperature);
+                               kDefaultColorTemperature, PrefRegistry::PUBLIC);
   registry->RegisterIntegerPref(prefs::kNightLightScheduleType,
-                                static_cast<int>(ScheduleType::kNone));
+                                static_cast<int>(ScheduleType::kNone),
+                                PrefRegistry::PUBLIC);
   registry->RegisterIntegerPref(prefs::kNightLightCustomStartTime,
-                                kDefaultStartTimeOffsetMinutes);
+                                kDefaultStartTimeOffsetMinutes,
+                                PrefRegistry::PUBLIC);
   registry->RegisterIntegerPref(prefs::kNightLightCustomEndTime,
-                                kDefaultEndTimeOffsetMinutes);
+                                kDefaultEndTimeOffsetMinutes,
+                                PrefRegistry::PUBLIC);
+}
+
+// static
+float NightLightController::BlueColorScaleFromTemperature(float temperature) {
+  return 1.0f - temperature;
+}
+
+// static
+float NightLightController::GreenColorScaleFromTemperature(float temperature) {
+  // If we only tone down the blue scale, the screen will look very green so
+  // we also need to tone down the green, but with a less value compared to
+  // the blue scale to avoid making things look very red.
+  return 1.0f - 0.4f * temperature;
+}
+
+// static
+float NightLightController::TemperatureFromBlueColorScale(float blue_scale) {
+  return 1.0f - blue_scale;
+}
+
+// static
+float NightLightController::TemperatureFromGreenColorScale(float green_scale) {
+  return 2.5f * (1.0f - green_scale);
 }
 
 void NightLightController::BindRequest(
@@ -242,6 +344,14 @@ void NightLightController::Toggle() {
   SetEnabled(!GetEnabled(), AnimationDuration::kShort);
 }
 
+void NightLightController::OnDisplayConfigurationChanged() {
+  // Since the color temperature matrix is a per-display output surface
+  // property, then when displays are added, removed, mirrored, extended, or
+  // switched to Unified Mode, we need to apply the current temperature
+  // immediately without animation.
+  ApplyTemperatureToCompositors(GetEnabled() ? GetColorTemperature() : 0.0f);
+}
+
 void NightLightController::OnActiveUserPrefServiceChanged(
     PrefService* pref_service) {
   // Initial login and user switching in multi profiles.
@@ -251,6 +361,7 @@ void NightLightController::OnActiveUserPrefServiceChanged(
 
 void NightLightController::SetCurrentGeoposition(
     mojom::SimpleGeopositionPtr position) {
+  VLOG(1) << "Received new geoposition.";
   delegate_->SetGeoposition(std::move(position));
 
   // If the schedule type is sunset to sunrise, then a potential change in the
@@ -270,28 +381,39 @@ void NightLightController::SetClient(mojom::NightLightClientPtr client) {
   }
 }
 
+void NightLightController::SuspendDone(const base::TimeDelta& sleep_duration) {
+  // Time changes while the device is suspended. We need to refresh the schedule
+  // upon device resume to know what the status should be now.
+  Refresh(true /* did_schedule_change */);
+}
+
 void NightLightController::SetDelegateForTesting(
     std::unique_ptr<Delegate> delegate) {
   delegate_ = std::move(delegate);
 }
 
 void NightLightController::RefreshLayersTemperature() {
-  ApplyColorTemperatureToLayers(GetEnabled() ? GetColorTemperature() : 0.0f,
-                                animation_duration_ == AnimationDuration::kShort
-                                    ? kManualAnimationDuration
-                                    : kAutomaticAnimationDuration);
+  const float new_temperature = GetEnabled() ? GetColorTemperature() : 0.0f;
+  temperature_animation_->AnimateToNewValue(
+      new_temperature, animation_duration_ == AnimationDuration::kShort
+                           ? kManualAnimationDuration
+                           : kAutomaticAnimationDuration);
+
+  UMA_HISTOGRAM_EXACT_LINEAR(
+      "Ash.NightLight.Temperature", GetTemperatureRange(new_temperature),
+      5 /* number of buckets defined in GetTemperatureRange() */);
 
   // Reset the animation type back to manual to consume any automatically set
   // animations.
   last_animation_duration_ = animation_duration_;
   animation_duration_ = AnimationDuration::kShort;
-  Shell::Get()->SetCursorCompositingEnabled(GetEnabled());
+  Shell::Get()->UpdateCursorCompositingEnabled();
 }
 
 void NightLightController::StartWatchingPrefsChanges() {
   DCHECK(active_user_pref_service_);
 
-  pref_change_registrar_ = base::MakeUnique<PrefChangeRegistrar>();
+  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
   pref_change_registrar_->Init(active_user_pref_service_);
   pref_change_registrar_->Add(
       prefs::kNightLightEnabled,
@@ -316,12 +438,6 @@ void NightLightController::StartWatchingPrefsChanges() {
 }
 
 void NightLightController::InitFromUserPrefs() {
-  pref_change_registrar_.reset();
-
-  // Pref service can be null during multiprofile switch and in tests.
-  if (!active_user_pref_service_)
-    return;
-
   StartWatchingPrefsChanges();
   Refresh(true /* did_schedule_change */);
   NotifyStatusChanged();
@@ -396,6 +512,7 @@ void NightLightController::RefreshScheduleTimer(base::Time start_time,
   }
 
   // NOTE: Users can set any weird combinations.
+  const base::Time now = delegate_->GetNow();
   if (end_time <= start_time) {
     // Example:
     // Start: 9:00 PM, End: 6:00 AM.
@@ -405,8 +522,30 @@ void NightLightController::RefreshScheduleTimer(base::Time start_time,
     //        |                    |
     //       end                 start
     //
-    // From our perspective, the end time is always a day later.
-    end_time += base::TimeDelta::FromDays(1);
+    // Note that the above times are times of day (today). It is important to
+    // know where "now" is with respect to these times to decide how to adjust
+    // them.
+    if (end_time >= now) {
+      // If the end time (today) is greater than the time now, this means "now"
+      // is within the NightLight schedule, and the start time is actually
+      // yesterday. The above timeline is interpreted as:
+      //
+      //   21:00 (-1day)              6:00
+      // <----- + ----------- + ------ + ----->
+      //        |             |        |
+      //      start          now      end
+      //
+      start_time -= base::TimeDelta::FromDays(1);
+    } else {
+      // Two possibilities here:
+      // - Either "now" is greater than the end time, but less than start time.
+      //   This means NightLight is outside the schedule, waiting for the next
+      //   start time. The end time is actually a day later.
+      // - Or "now" is greater than both the start and end times. This means
+      //   NightLight is within the schedule, waiting to turn off at the next
+      //   end time, which is also a day later.
+      end_time += base::TimeDelta::FromDays(1);
+    }
   }
 
   DCHECK_GE(end_time, start_time);
@@ -416,7 +555,6 @@ void NightLightController::RefreshScheduleTimer(base::Time start_time,
   bool enable_now = false;
 
   // Where are we now with respect to the start and end times?
-  const base::Time now = delegate_->GetNow();
   if (now < start_time) {
     // Example:
     // Start: 6:00 PM today, End: 6:00 AM tomorrow, Now: 4:00 PM.
@@ -481,10 +619,14 @@ void NightLightController::RefreshScheduleTimer(base::Time start_time,
 }
 
 void NightLightController::ScheduleNextToggle(base::TimeDelta delay) {
+  const bool new_status = !GetEnabled();
+  VLOG(1) << "Setting Night Light to toggle to "
+          << (new_status ? "enabled" : "disabled") << " at "
+          << base::TimeFormatTimeOfDay(delegate_->GetNow() + delay);
   timer_.Start(
       FROM_HERE, delay,
       base::Bind(&NightLightController::SetEnabled, base::Unretained(this),
-                 !GetEnabled(), AnimationDuration::kLong));
+                 new_status, AnimationDuration::kLong));
 }
 
 }  // namespace ash

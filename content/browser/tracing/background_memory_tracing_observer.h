@@ -9,18 +9,25 @@
 
 namespace content {
 
-class BackgroundMemoryTracingObserver
+class CONTENT_EXPORT BackgroundMemoryTracingObserver
     : public BackgroundTracingManagerImpl::EnabledStateObserver {
  public:
   static BackgroundMemoryTracingObserver* GetInstance();
 
   void OnScenarioActivated(const BackgroundTracingConfigImpl* config) override;
+  void OnScenarioAborted() override;
   void OnTracingEnabled(
       BackgroundTracingConfigImpl::CategoryPreset preset) override;
+
+  bool heap_profiling_enabled_for_testing() const {
+    return heap_profiling_enabled_;
+  }
 
  private:
   BackgroundMemoryTracingObserver();
   ~BackgroundMemoryTracingObserver() override;
+
+  bool heap_profiling_enabled_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(BackgroundMemoryTracingObserver);
 };

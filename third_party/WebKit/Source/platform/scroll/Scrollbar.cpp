@@ -34,6 +34,7 @@
 #include "platform/scroll/ScrollbarTheme.h"
 #include "public/platform/WebGestureEvent.h"
 #include "public/platform/WebMouseEvent.h"
+#include "public/platform/WebScrollbar.h"
 
 namespace blink {
 
@@ -45,7 +46,7 @@ Scrollbar::Scrollbar(ScrollableArea* scrollable_area,
     : scrollable_area_(scrollable_area),
       orientation_(orientation),
       control_size_(control_size),
-      theme_(theme ? *theme : ScrollbarTheme::GetTheme()),
+      theme_(theme ? *theme : scrollable_area->GetPageScrollbarTheme()),
       chrome_client_(chrome_client),
       visible_size_(0),
       total_size_(0),
@@ -83,7 +84,7 @@ Scrollbar::~Scrollbar() {
   theme_.UnregisterScrollbar(*this);
 }
 
-DEFINE_TRACE(Scrollbar) {
+void Scrollbar::Trace(blink::Visitor* visitor) {
   visitor->Trace(scrollable_area_);
   visitor->Trace(chrome_client_);
 }
@@ -215,7 +216,7 @@ void Scrollbar::StartTimerIfNeeded(double delay) {
       return;
   }
 
-  scroll_timer_.StartOneShot(delay, BLINK_FROM_HERE);
+  scroll_timer_.StartOneShot(delay, FROM_HERE);
 }
 
 void Scrollbar::StopTimerIfNeeded() {
@@ -634,5 +635,37 @@ void Scrollbar::SetNeedsPaintInvalidation(ScrollbarPart invalid_parts) {
   if (scrollable_area_)
     scrollable_area_->SetScrollbarNeedsPaintInvalidation(Orientation());
 }
+
+STATIC_ASSERT_ENUM(WebScrollbar::ScrollingMode::kAuto, kScrollbarAuto);
+STATIC_ASSERT_ENUM(WebScrollbar::ScrollingMode::kAlwaysOff,
+                   kScrollbarAlwaysOff);
+STATIC_ASSERT_ENUM(WebScrollbar::ScrollingMode::kAlwaysOn, kScrollbarAlwaysOn);
+
+STATIC_ASSERT_ENUM(WebScrollbar::kHorizontal, kHorizontalScrollbar);
+STATIC_ASSERT_ENUM(WebScrollbar::kVertical, kVerticalScrollbar);
+
+STATIC_ASSERT_ENUM(WebScrollbar::kScrollByLine, kScrollByLine);
+STATIC_ASSERT_ENUM(WebScrollbar::kScrollByPage, kScrollByPage);
+STATIC_ASSERT_ENUM(WebScrollbar::kScrollByDocument, kScrollByDocument);
+STATIC_ASSERT_ENUM(WebScrollbar::kScrollByPixel, kScrollByPixel);
+
+STATIC_ASSERT_ENUM(WebScrollbar::kRegularScrollbar, kRegularScrollbar);
+STATIC_ASSERT_ENUM(WebScrollbar::kSmallScrollbar, kSmallScrollbar);
+STATIC_ASSERT_ENUM(WebScrollbar::kNoPart, kNoPart);
+STATIC_ASSERT_ENUM(WebScrollbar::kBackButtonStartPart, kBackButtonStartPart);
+STATIC_ASSERT_ENUM(WebScrollbar::kForwardButtonStartPart,
+                   kForwardButtonStartPart);
+STATIC_ASSERT_ENUM(WebScrollbar::kBackTrackPart, kBackTrackPart);
+STATIC_ASSERT_ENUM(WebScrollbar::kThumbPart, kThumbPart);
+STATIC_ASSERT_ENUM(WebScrollbar::kForwardTrackPart, kForwardTrackPart);
+STATIC_ASSERT_ENUM(WebScrollbar::kBackButtonEndPart, kBackButtonEndPart);
+STATIC_ASSERT_ENUM(WebScrollbar::kForwardButtonEndPart, kForwardButtonEndPart);
+STATIC_ASSERT_ENUM(WebScrollbar::kScrollbarBGPart, kScrollbarBGPart);
+STATIC_ASSERT_ENUM(WebScrollbar::kTrackBGPart, kTrackBGPart);
+STATIC_ASSERT_ENUM(WebScrollbar::kAllParts, kAllParts);
+STATIC_ASSERT_ENUM(kWebScrollbarOverlayColorThemeDark,
+                   kScrollbarOverlayColorThemeDark);
+STATIC_ASSERT_ENUM(kWebScrollbarOverlayColorThemeLight,
+                   kScrollbarOverlayColorThemeLight);
 
 }  // namespace blink

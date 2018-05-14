@@ -5,7 +5,7 @@
 #ifndef MediaControlInputElement_h
 #define MediaControlInputElement_h
 
-#include "core/html/HTMLInputElement.h"
+#include "core/html/forms/HTMLInputElement.h"
 #include "modules/ModulesExport.h"
 #include "modules/media_controls/elements/MediaControlElementBase.h"
 
@@ -29,7 +29,15 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
   void SetOverflowElementIsWanted(bool) final;
   void MaybeRecordDisplayed() final;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
+
+  MediaControlInputElement* OverflowElementForTests() const {
+    return overflow_element_;
+  }
+
+  // Get the size of the element in pixels or the default if we cannot get the
+  // size because the element has not been layed out yet.
+  WebSize GetSizeOrDefault() const override;
 
  protected:
   MediaControlInputElement(MediaControlsImpl&, MediaControlElementType);
@@ -47,7 +55,7 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
   void DefaultEventHandler(Event*) override;
 
   // Implements MediaControlElementBase.
-  void UpdateShownState() final;
+  void UpdateShownState() override;
 
   // Updates the value of the Text string shown in the overflow menu.
   void UpdateOverflowString();
@@ -59,10 +67,13 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
   // Returns whether this element is used for the overflow menu.
   bool IsOverflowElement() const;
 
- private:
-  friend class MediaControlInputElementTest;
+  // Sets/removes a CSS class from this element based on |should_have_class|.
+  void SetClass(const AtomicString& class_name, bool should_have_class);
 
   virtual void UpdateDisplayType();
+
+ private:
+  friend class MediaControlInputElementTest;
 
   bool IsMouseFocusable() const override;
   bool IsMediaControlElement() const final;
@@ -70,6 +81,17 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
   // Returns a string representation of the media control element. Used for
   // the overflow menu.
   String GetOverflowMenuString() const;
+
+  // Returns a subtitle for the overflow menu text, or a null String if there
+  // should not be a subtitle.
+  virtual String GetOverflowMenuSubtitleString() const;
+
+  // Create/update subtitle text on the overflow element. If a null String is
+  // given, the subtitle element is removed.
+  void UpdateOverflowSubtitleElement(String text);
+
+  // Remove the subtitle text from the overflow element.
+  void RemoveOverflowSubtitleElement();
 
   // Used for histograms, do not reorder.
   enum class CTREvent {
@@ -85,8 +107,14 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
   // Setting this pointer is optional so it may be null.
   Member<MediaControlInputElement> overflow_element_;
 
+  // Contains the overflow text and its subtitle (if exists).
+  Member<HTMLDivElement> overflow_menu_container_;
+
   // The text representation of the button within the overflow menu.
-  Member<Text> overflow_menu_text_;
+  Member<HTMLSpanElement> overflow_menu_text_;
+
+  // The subtitle of the text within the overflow menu.
+  Member<HTMLSpanElement> overflow_menu_subtitle_;
 
   // Keeps track if the button was created for the purpose of the overflow menu.
   bool is_overflow_element_ = false;

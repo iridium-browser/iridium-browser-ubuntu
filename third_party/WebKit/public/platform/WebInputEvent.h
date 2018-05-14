@@ -41,7 +41,7 @@
 namespace blink {
 
 // The classes defined in this file are intended to be used with
-// WebWidget's handleInputEvent method.  These event types are cross-
+// WebWidget's HandleInputEvent method.  These event types are cross-
 // platform and correspond closely to WebCore's Platform*Event classes.
 //
 // WARNING! These classes must remain PODs (plain old data).  They are
@@ -177,6 +177,8 @@ class WebInputEvent {
     kTouchMove,
     kTouchEnd,
     kTouchCancel,
+    // TODO(nzolghadr): This event should be replaced with
+    // kPointerCausedUaAction
     kTouchScrollStarted,
     kTouchTypeLast = kTouchScrollStarted,
 
@@ -186,7 +188,8 @@ class WebInputEvent {
     kPointerUp,
     kPointerMove,
     kPointerCancel,
-    kPointerTypeLast = kPointerCancel,
+    kPointerCausedUaAction,
+    kPointerTypeLast = kPointerCausedUaAction,
 
     kTypeLast = kTouchTypeLast
   };
@@ -246,6 +249,11 @@ class WebInputEvent {
     // not actual physical movement of the pointer
     kRelativeMotionEvent = 1 << 22,
 
+    // Indication this event was injected by the devtools.
+    // TODO(dtapuska): Remove this flag once we are able to bind callbacks
+    // in event sending.
+    kFromDebugger = 1 << 23,
+
     // The set of non-stateful modifiers that specifically change the
     // interpretation of the key being pressed. For example; IsLeft,
     // IsRight, IsComposing don't change the meaning of the key
@@ -291,7 +299,7 @@ class WebInputEvent {
   static const int kInputModifiers =
       kShiftKey | kControlKey | kAltKey | kMetaKey;
 
-  static constexpr double kTimeStampForTesting = 123.0;
+  static double GetStaticTimeStampForTests() { return 123.0; }
 
   // Returns true if the WebInputEvent |type| is a mouse event.
   static bool IsMouseEventType(WebInputEvent::Type type) {
@@ -380,6 +388,7 @@ class WebInputEvent {
       CASE_TYPE(PointerUp);
       CASE_TYPE(PointerMove);
       CASE_TYPE(PointerCancel);
+      CASE_TYPE(PointerCausedUaAction);
     }
 #undef CASE_TYPE
     NOTREACHED();

@@ -10,7 +10,7 @@
 
 #import "WebRTC/RTCMediaStreamTrack.h"
 
-#include "webrtc/api/mediastreaminterface.h"
+#include "api/mediastreaminterface.h"
 
 typedef NS_ENUM(NSInteger, RTCMediaStreamTrackType) {
   RTCMediaStreamTrackTypeAudio,
@@ -48,6 +48,9 @@ NS_ASSUME_NONNULL_BEGIN
     (webrtc::MediaStreamTrackInterface::TrackState)nativeState;
 
 + (NSString *)stringForState:(RTCMediaStreamTrackState)state;
+
++ (RTCMediaStreamTrack *)mediaTrackForNativeTrack:
+        (rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>)nativeTrack;
 
 @end
 

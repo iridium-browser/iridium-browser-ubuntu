@@ -16,7 +16,8 @@
 #endif  // _MSC_VER
 
 // TODO(rtenneti): Change the default 64 alignas value (used the default
-// value from CACHELINE_SIZE).
-#define QUIC_CACHELINE_ALIGNED_IMPL ALIGNAS(64)
+// value from ABSL_CACHELINE_SIZE).
+#define QUIC_CACHELINE_SIZE_IMPL (64)
+#define QUIC_CACHELINE_ALIGNED_IMPL ALIGNAS(QUIC_CACHELINE_SIZE)
 
 #endif  // NET_QUIC_PLATFORM_IMPL_QUIC_ALIGNED_IMPL_H_

@@ -4,7 +4,7 @@
 
 #include "ui/latency/mojo/latency_info_struct_traits.h"
 
-#include "ipc/ipc_message_utils.h"
+#include "mojo/common/time_struct_traits.h"
 
 namespace mojo {
 
@@ -19,6 +19,24 @@ ui::mojom::LatencyComponentType UILatencyComponentTypeToMojo(
     case ui::LATENCY_BEGIN_SCROLL_LISTENER_UPDATE_MAIN_COMPONENT:
       return ui::mojom::LatencyComponentType::
           LATENCY_BEGIN_SCROLL_LISTENER_UPDATE_MAIN_COMPONENT;
+    case ui::LATENCY_BEGIN_FRAME_RENDERER_MAIN_COMPONENT:
+      return ui::mojom::LatencyComponentType::
+          LATENCY_BEGIN_FRAME_RENDERER_MAIN_COMPONENT;
+    case ui::LATENCY_BEGIN_FRAME_RENDERER_INVALIDATE_COMPONENT:
+      return ui::mojom::LatencyComponentType::
+          LATENCY_BEGIN_FRAME_RENDERER_INVALIDATE_COMPONENT;
+    case ui::LATENCY_BEGIN_FRAME_RENDERER_COMPOSITOR_COMPONENT:
+      return ui::mojom::LatencyComponentType::
+          LATENCY_BEGIN_FRAME_RENDERER_COMPOSITOR_COMPONENT;
+    case ui::LATENCY_BEGIN_FRAME_UI_MAIN_COMPONENT:
+      return ui::mojom::LatencyComponentType::
+          LATENCY_BEGIN_FRAME_UI_MAIN_COMPONENT;
+    case ui::LATENCY_BEGIN_FRAME_UI_COMPOSITOR_COMPONENT:
+      return ui::mojom::LatencyComponentType::
+          LATENCY_BEGIN_FRAME_UI_COMPOSITOR_COMPONENT;
+    case ui::LATENCY_BEGIN_FRAME_DISPLAY_COMPOSITOR_COMPONENT:
+      return ui::mojom::LatencyComponentType::
+          LATENCY_BEGIN_FRAME_DISPLAY_COMPOSITOR_COMPONENT;
     case ui::INPUT_EVENT_LATENCY_SCROLL_UPDATE_ORIGINAL_COMPONENT:
       return ui::mojom::LatencyComponentType::
           INPUT_EVENT_LATENCY_SCROLL_UPDATE_ORIGINAL_COMPONENT;
@@ -92,6 +110,23 @@ ui::LatencyComponentType MojoLatencyComponentTypeToUI(
         LATENCY_BEGIN_SCROLL_LISTENER_UPDATE_MAIN_COMPONENT:
       return ui::LATENCY_BEGIN_SCROLL_LISTENER_UPDATE_MAIN_COMPONENT;
     case ui::mojom::LatencyComponentType::
+        LATENCY_BEGIN_FRAME_RENDERER_MAIN_COMPONENT:
+      return ui::LATENCY_BEGIN_FRAME_RENDERER_MAIN_COMPONENT;
+    case ui::mojom::LatencyComponentType::
+        LATENCY_BEGIN_FRAME_RENDERER_INVALIDATE_COMPONENT:
+      return ui::LATENCY_BEGIN_FRAME_RENDERER_INVALIDATE_COMPONENT;
+    case ui::mojom::LatencyComponentType::
+        LATENCY_BEGIN_FRAME_RENDERER_COMPOSITOR_COMPONENT:
+      return ui::LATENCY_BEGIN_FRAME_RENDERER_COMPOSITOR_COMPONENT;
+    case ui::mojom::LatencyComponentType::LATENCY_BEGIN_FRAME_UI_MAIN_COMPONENT:
+      return ui::LATENCY_BEGIN_FRAME_UI_MAIN_COMPONENT;
+    case ui::mojom::LatencyComponentType::
+        LATENCY_BEGIN_FRAME_UI_COMPOSITOR_COMPONENT:
+      return ui::LATENCY_BEGIN_FRAME_UI_COMPOSITOR_COMPONENT;
+    case ui::mojom::LatencyComponentType::
+        LATENCY_BEGIN_FRAME_DISPLAY_COMPOSITOR_COMPONENT:
+      return ui::LATENCY_BEGIN_FRAME_DISPLAY_COMPOSITOR_COMPONENT;
+    case ui::mojom::LatencyComponentType::
         INPUT_EVENT_LATENCY_SCROLL_UPDATE_ORIGINAL_COMPONENT:
       return ui::INPUT_EVENT_LATENCY_SCROLL_UPDATE_ORIGINAL_COMPONENT;
     case ui::mojom::LatencyComponentType::
@@ -158,10 +193,14 @@ ui::mojom::SourceEventType UISourceEventTypeToMojo(ui::SourceEventType type) {
       return ui::mojom::SourceEventType::UNKNOWN;
     case ui::WHEEL:
       return ui::mojom::SourceEventType::WHEEL;
+    case ui::MOUSE:
+      return ui::mojom::SourceEventType::MOUSE;
     case ui::TOUCH:
       return ui::mojom::SourceEventType::TOUCH;
     case ui::KEY_PRESS:
       return ui::mojom::SourceEventType::KEY_PRESS;
+    case ui::FRAME:
+      return ui::mojom::SourceEventType::FRAME;
     case ui::OTHER:
       return ui::mojom::SourceEventType::OTHER;
   }
@@ -175,10 +214,14 @@ ui::SourceEventType MojoSourceEventTypeToUI(ui::mojom::SourceEventType type) {
       return ui::UNKNOWN;
     case ui::mojom::SourceEventType::WHEEL:
       return ui::WHEEL;
+    case ui::mojom::SourceEventType::MOUSE:
+      return ui::MOUSE;
     case ui::mojom::SourceEventType::TOUCH:
       return ui::TOUCH;
     case ui::mojom::SourceEventType::KEY_PRESS:
       return ui::KEY_PRESS;
+    case ui::mojom::SourceEventType::FRAME:
+      return ui::FRAME;
     case ui::mojom::SourceEventType::OTHER:
       return ui::OTHER;
   }
@@ -285,6 +328,13 @@ int64_t StructTraits<ui::mojom::LatencyInfoDataView, ui::LatencyInfo>::trace_id(
 }
 
 // static
+ukm::SourceId
+StructTraits<ui::mojom::LatencyInfoDataView, ui::LatencyInfo>::ukm_source_id(
+    const ui::LatencyInfo& info) {
+  return info.ukm_source_id();
+}
+
+// static
 bool StructTraits<ui::mojom::LatencyInfoDataView, ui::LatencyInfo>::coalesced(
     const ui::LatencyInfo& info) {
   return info.coalesced();
@@ -336,6 +386,7 @@ bool StructTraits<ui::mojom::LatencyInfoDataView, ui::LatencyInfo>::Read(
   }
 
   out->trace_id_ = data.trace_id();
+  out->ukm_source_id_ = data.ukm_source_id();
   out->coalesced_ = data.coalesced();
   out->began_ = data.began();
   out->terminated_ = data.terminated();

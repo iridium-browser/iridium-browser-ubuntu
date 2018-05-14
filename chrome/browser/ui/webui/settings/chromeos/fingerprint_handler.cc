@@ -5,9 +5,9 @@
 #include "chrome/browser/ui/webui/settings/chromeos/fingerprint_handler.h"
 
 #include <algorithm>
+#include <memory>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,7 +19,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
 #include "content/public/common/service_manager_connection.h"
-#include "services/device/public/interfaces/constants.mojom.h"
+#include "services/device/public/mojom/constants.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -35,14 +35,14 @@ const int kMaxAllowedFingerprints = 5;
 
 std::unique_ptr<base::DictionaryValue> GetFingerprintsInfo(
     const std::vector<std::string>& fingerprints_list) {
-  auto response = base::MakeUnique<base::DictionaryValue>();
-  auto fingerprints = base::MakeUnique<base::ListValue>();
+  auto response = std::make_unique<base::DictionaryValue>();
+  auto fingerprints = std::make_unique<base::ListValue>();
 
   DCHECK_LE(static_cast<int>(fingerprints_list.size()),
             kMaxAllowedFingerprints);
   for (auto& fingerprint_name: fingerprints_list) {
     std::unique_ptr<base::Value> str =
-        base::MakeUnique<base::Value>(fingerprint_name);
+        std::make_unique<base::Value>(fingerprint_name);
     fingerprints->Append(std::move(str));
   }
 
@@ -63,17 +63,13 @@ FingerprintHandler::FingerprintHandler(Profile* profile)
   binding_.Bind(mojo::MakeRequest(&observer));
   fp_service_->AddFingerprintObserver(std::move(observer));
   user_id_ = ProfileHelper::Get()->GetUserIdHashFromProfile(profile);
-  // SessionManager may not exist in some tests.
-  if (SessionManager::Get())
-    SessionManager::Get()->AddObserver(this);
 }
 
 FingerprintHandler::~FingerprintHandler() {
-  if (SessionManager::Get())
-    SessionManager::Get()->RemoveObserver(this);
 }
 
 void FingerprintHandler::RegisterMessages() {
+  // Note: getFingerprintsList must be called before observers will be added.
   web_ui()->RegisterMessageCallback(
       "getFingerprintsList",
       base::Bind(&FingerprintHandler::HandleGetFingerprintsList,
@@ -112,17 +108,23 @@ void FingerprintHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-void FingerprintHandler::OnJavascriptAllowed() {}
+void FingerprintHandler::OnJavascriptAllowed() {
+  // SessionManager may not exist in some tests.
+  if (SessionManager::Get())
+    SessionManager::Get()->AddObserver(this);
+}
 
-void FingerprintHandler::OnJavascriptDisallowed() {}
+void FingerprintHandler::OnJavascriptDisallowed() {
+  if (SessionManager::Get())
+    SessionManager::Get()->RemoveObserver(this);
+}
 
 void FingerprintHandler::OnRestarted() {}
 
 void FingerprintHandler::OnEnrollScanDone(uint32_t scan_result,
                                           bool enroll_session_complete,
                                           int percent_complete) {
-  AllowJavascript();
-  auto scan_attempt = base::MakeUnique<base::DictionaryValue>();
+  auto scan_attempt = std::make_unique<base::DictionaryValue>();
   scan_attempt->SetInteger("result", scan_result);
   scan_attempt->SetBoolean("isComplete", enroll_session_complete);
   scan_attempt->SetInteger("percentComplete", percent_complete);
@@ -142,8 +144,7 @@ void FingerprintHandler::OnAuthScanDone(
   if (it == matches.end() || it->second.size() < 1)
     return;
 
-  AllowJavascript();
-  auto fingerprint_ids = base::MakeUnique<base::ListValue>();
+  auto fingerprint_ids = std::make_unique<base::ListValue>();
 
   for (const std::string& matched_path : it->second) {
     auto path_it = std::find(fingerprints_paths_.begin(),
@@ -153,7 +154,7 @@ void FingerprintHandler::OnAuthScanDone(
         static_cast<int>(path_it - fingerprints_paths_.begin()));
   }
 
-  auto fingerprint_attempt = base::MakeUnique<base::DictionaryValue>();
+  auto fingerprint_attempt = std::make_unique<base::DictionaryValue>();
   fingerprint_attempt->SetInteger("result", scan_result);
   fingerprint_attempt->Set("indexes", std::move(fingerprint_ids));
 
@@ -165,7 +166,6 @@ void FingerprintHandler::OnSessionFailed() {}
 void FingerprintHandler::OnSessionStateChanged() {
   SessionState state = SessionManager::Get()->session_state();
 
-  AllowJavascript();
   FireWebUIListener("on-screen-locked",
                     base::Value(state == SessionState::LOCKED));
 }
@@ -176,6 +176,7 @@ void FingerprintHandler::HandleGetFingerprintsList(
   std::string callback_id;
   CHECK(args->GetString(0, &callback_id));
 
+  AllowJavascript();
   fp_service_->GetRecordsForUser(
       user_id_, base::Bind(&FingerprintHandler::OnGetFingerprintsList,
                            weak_ptr_factory_.GetWeakPtr(), callback_id));
@@ -185,7 +186,6 @@ void FingerprintHandler::OnGetFingerprintsList(
     const std::string& callback_id,
     const std::unordered_map<std::string, std::string>&
         fingerprints_list_mapping) {
-  AllowJavascript();
   fingerprints_labels_.clear();
   fingerprints_paths_.clear();
   for (auto it = fingerprints_list_mapping.begin();
@@ -203,8 +203,6 @@ void FingerprintHandler::OnGetFingerprintsList(
 }
 
 void FingerprintHandler::HandleGetNumFingerprints(const base::ListValue* args) {
-  AllowJavascript();
-
   CHECK_EQ(1U, args->GetSize());
   std::string callback_id;
   CHECK(args->GetString(0, &callback_id));
@@ -212,6 +210,7 @@ void FingerprintHandler::HandleGetNumFingerprints(const base::ListValue* args) {
   int fingerprints_num =
       profile_->GetPrefs()->GetInteger(prefs::kQuickUnlockFingerprintRecord);
 
+  AllowJavascript();
   ResolveJavascriptCallback(base::Value(callback_id),
                             base::Value(fingerprints_num));
 }
@@ -247,8 +246,9 @@ void FingerprintHandler::HandleGetEnrollmentLabel(const base::ListValue* args) {
   int index;
   CHECK(args->GetString(0, &callback_id));
   CHECK(args->GetInteger(1, &index));
-
   DCHECK_LT(index, static_cast<int>(fingerprints_labels_.size()));
+
+  AllowJavascript();
   fp_service_->RequestRecordLabel(
       fingerprints_paths_[index],
       base::Bind(&FingerprintHandler::OnRequestRecordLabel,
@@ -257,7 +257,6 @@ void FingerprintHandler::HandleGetEnrollmentLabel(const base::ListValue* args) {
 
 void FingerprintHandler::OnRequestRecordLabel(const std::string& callback_id,
                                               const std::string& label) {
-  AllowJavascript();
   ResolveJavascriptCallback(base::Value(callback_id), base::Value(label));
 }
 
@@ -267,8 +266,9 @@ void FingerprintHandler::HandleRemoveEnrollment(const base::ListValue* args) {
   int index;
   CHECK(args->GetString(0, &callback_id));
   CHECK(args->GetInteger(1, &index));
-
   DCHECK_LT(index, static_cast<int>(fingerprints_paths_.size()));
+
+  AllowJavascript();
   fp_service_->RemoveRecord(
       fingerprints_paths_[index],
       base::Bind(&FingerprintHandler::OnRemoveRecord,
@@ -279,7 +279,6 @@ void FingerprintHandler::OnRemoveRecord(const std::string& callback_id,
                                         bool success) {
   if (!success)
     LOG(ERROR) << "Failed to remove fingerprint record.";
-  AllowJavascript();
   ResolveJavascriptCallback(base::Value(callback_id), base::Value(success));
 }
 
@@ -294,6 +293,7 @@ void FingerprintHandler::HandleChangeEnrollmentLabel(
   CHECK(args->GetInteger(1, &index));
   CHECK(args->GetString(2, &new_label));
 
+  AllowJavascript();
   fp_service_->SetRecordLabel(
       new_label, fingerprints_paths_[index],
       base::Bind(&FingerprintHandler::OnSetRecordLabel,
@@ -304,7 +304,6 @@ void FingerprintHandler::OnSetRecordLabel(const std::string& callback_id,
                                           bool success) {
   if (!success)
     LOG(ERROR) << "Failed to set fingerprint record label.";
-  AllowJavascript();
   ResolveJavascriptCallback(base::Value(callback_id), base::Value(success));
 }
 

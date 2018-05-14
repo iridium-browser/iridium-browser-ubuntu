@@ -34,13 +34,14 @@
 #include <memory>
 
 #include "base/time/time.h"
+#include "net/cert/ct_policy_status.h"
 #include "net/http/http_response_info.h"
-#include "public/platform/WebCString.h"
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebSecurityStyle.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebVector.h"
-#include "public/platform/modules/serviceworker/WebServiceWorkerResponseType.h"
+#include "public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 
 namespace blink {
 
@@ -61,7 +62,7 @@ class WebURLResponse {
   };
 
   struct SignedCertificateTimestamp {
-    SignedCertificateTimestamp() {}
+    SignedCertificateTimestamp() = default;
     SignedCertificateTimestamp(WebString status,
                                WebString origin,
                                WebString log_description,
@@ -139,7 +140,7 @@ class WebURLResponse {
 
   class ExtraData {
    public:
-    virtual ~ExtraData() {}
+    virtual ~ExtraData() = default;
   };
 
   BLINK_PLATFORM_EXPORT ~WebURLResponse();
@@ -196,10 +197,13 @@ class WebURLResponse {
   BLINK_PLATFORM_EXPORT void SetAppCacheManifestURL(const WebURL&);
 
   BLINK_PLATFORM_EXPORT void SetHasMajorCertificateErrors(bool);
+  BLINK_PLATFORM_EXPORT void SetCTPolicyCompliance(net::ct::CTPolicyCompliance);
+  BLINK_PLATFORM_EXPORT void SetIsLegacySymantecCert(bool);
 
   BLINK_PLATFORM_EXPORT void SetSecurityStyle(WebSecurityStyle);
 
   BLINK_PLATFORM_EXPORT void SetSecurityDetails(const WebSecurityDetails&);
+  BLINK_PLATFORM_EXPORT WebSecurityDetails SecurityDetailsForTesting();
 
 #if INSIDE_BLINK
   BLINK_PLATFORM_EXPORT const ResourceResponse& ToResourceResponse() const;
@@ -217,17 +221,17 @@ class WebURLResponse {
   BLINK_PLATFORM_EXPORT bool WasFetchedViaServiceWorker() const;
   BLINK_PLATFORM_EXPORT void SetWasFetchedViaServiceWorker(bool);
 
-  // Flag whether this request was loaded using a foreign fetch service worker.
-  BLINK_PLATFORM_EXPORT void SetWasFetchedViaForeignFetch(bool);
-
   // Flag whether the fallback request with skip service worker flag was
   // required. See ServiceWorkerResponseInfo::was_fallback_required() for
   // details.
   BLINK_PLATFORM_EXPORT void SetWasFallbackRequiredByServiceWorker(bool);
 
-  // The type of the response which was served by the ServiceWorker.
-  BLINK_PLATFORM_EXPORT void SetServiceWorkerResponseType(
-      WebServiceWorkerResponseType);
+  // The type of the response, if it was returned by a service worker. This is
+  // kDefault if the response was not returned by a service worker.
+  BLINK_PLATFORM_EXPORT void SetResponseTypeViaServiceWorker(
+      network::mojom::FetchResponseType);
+  BLINK_PLATFORM_EXPORT network::mojom::FetchResponseType
+  ResponseTypeViaServiceWorker() const;
 
   // The URL list of the Response object the ServiceWorker passed to
   // respondWith(). See ServiceWorkerResponseInfo::url_list_via_service_worker()
@@ -250,6 +254,7 @@ class WebURLResponse {
 
   // The headers that should be exposed according to CORS. Only guaranteed
   // to be set if the response was served by a ServiceWorker.
+  BLINK_PLATFORM_EXPORT WebVector<WebString> CorsExposedHeaderNames() const;
   BLINK_PLATFORM_EXPORT void SetCorsExposedHeaderNames(
       const WebVector<WebString>&);
 
@@ -299,15 +304,15 @@ class WebURLResponse {
 #if INSIDE_BLINK
  protected:
   // Permit subclasses to set arbitrary ResourceResponse pointer as
-  // |m_resourceResponse|. |m_ownedResourceResponse| is not set in this case.
+  // |resource_response_|. |owned_resource_response_| is not set in this case.
   BLINK_PLATFORM_EXPORT explicit WebURLResponse(ResourceResponse&);
 #endif
 
  private:
   struct ResourceResponseContainer;
 
-  // If this instance owns a ResourceResponse then |m_ownedResourceResponse|
-  // is non-null and |m_resourceResponse| points to the ResourceResponse
+  // If this instance owns a ResourceResponse then |owned_resource_response_|
+  // is non-null and |resource_response_| points to the ResourceResponse
   // instance it contains.
   std::unique_ptr<ResourceResponseContainer> owned_resource_response_;
 

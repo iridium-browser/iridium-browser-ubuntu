@@ -6,7 +6,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const inspectorManifest = require('../front_end/inspector.json');
+const FRONTEND_PATH = path.resolve(__dirname, '..', 'front_end');
+
+const manifestModules = [];
+for (var config of ['inspector.json', 'devtools_app.json', 'js_app.json', 'node_app.json', 'shell.json', 'worker_app.json'])
+  manifestModules.push(...require(path.resolve(FRONTEND_PATH, config)).modules);
+
 const utils = require('./utils');
 
 const gnPath = path.resolve(__dirname, '..', 'BUILD.gn');
@@ -16,6 +21,7 @@ const gnLines = gnFile.split('\n');
 function main() {
   let errors = [];
   errors = errors.concat(checkNonAutostartNonRemoteModules());
+  errors = errors.concat(checkAllDevToolsFiles());
   if (errors.length) {
     console.log('DevTools BUILD.gn checker detected errors!');
     console.log(`There's an issue with: ${gnPath}`);
@@ -27,6 +33,11 @@ function main() {
 
 main();
 
+/**
+ * Ensures that generated module files are in the right list in BUILD.gn.
+ * This is primarily to avoid remote modules from accidentally getting
+ * bundled with the main Chrome binary.
+ */
 function checkNonAutostartNonRemoteModules() {
   const errors = [];
   const gnVariable = 'generated_non_autostart_non_remote_modules';
@@ -38,7 +49,7 @@ function checkNonAutostartNonRemoteModules() {
     ];
   }
   const text = lines.join('\n');
-  const modules = inspectorManifest.modules.filter(m => m.type !== 'autostart' && m.type !== 'remote').map(m => m.name);
+  const modules = manifestModules.filter(m => m.type !== 'autostart' && m.type !== 'remote').map(m => m.name);
 
   const missingModules = modules.filter(m => !utils.includes(text, `${m}/${m}_module.js`));
   if (missingModules.length)
@@ -51,6 +62,47 @@ function checkNonAutostartNonRemoteModules() {
   if (extraneousModules.length)
     errors.push(`Found extraneous modules [${extraneousModules.join(', ')}] in: ` + gnVariable);
 
+  return errors;
+}
+
+/**
+ * Ensures that all source files (according to the various module.json files) are
+ * listed in BUILD.gn.
+ */
+function checkAllDevToolsFiles() {
+  const errors = [];
+  const excludedFiles = ['InspectorBackendCommands.js', 'SupportedCSSProperties.js'];
+  const gnVariable = 'all_devtools_files';
+  const lines = selectGNLines(`${gnVariable} = [`, ']');
+  if (!lines.length) {
+    return [
+      'Could not identify all_devtools_files list in gn file',
+      'Please look at: ' + __filename,
+    ];
+  }
+  const gnFiles = new Set(lines);
+  var moduleFiles = [];
+  fs.readdirSync(FRONTEND_PATH).forEach(function(moduleName) {
+    const moduleJSONPath = path.join(FRONTEND_PATH, moduleName, 'module.json');
+    if (utils.isFile(moduleJSONPath)) {
+      const moduleJSON = require(moduleJSONPath);
+      const scripts = moduleJSON.scripts || [];
+      const resources = moduleJSON.resources || [];
+      const files = scripts.concat(resources)
+                        .map(relativePathFromBuildGN)
+                        .filter(file => excludedFiles.every(excludedFile => !file.includes(excludedFile)));
+      moduleFiles = moduleFiles.concat(files);
+
+      function relativePathFromBuildGN(filename) {
+        const relativePath = path.normalize(`front_end/${moduleName}/${filename}`);
+        return `"${relativePath}",`;
+      }
+    }
+  });
+  for (const file of moduleFiles) {
+    if (!gnFiles.has(file))
+      errors.push(`Missing file in BUILD.gn for ${gnVariable}: ` + file);
+  }
   return errors;
 }
 

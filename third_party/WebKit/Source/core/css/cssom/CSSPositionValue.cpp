@@ -5,22 +5,83 @@
 #include "core/css/cssom/CSSPositionValue.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "core/css/CSSIdentifierValue.h"
 #include "core/css/CSSValuePair.h"
+#include "core/css/cssom/CSSMathSum.h"
 #include "core/css/cssom/CSSNumericValue.h"
+#include "core/css/cssom/CSSUnitValue.h"
 
 namespace blink {
+
+namespace {
+
+bool IsValidPositionCoord(CSSNumericValue* v) {
+  return v && v->Type().MatchesBaseTypePercentage(
+                  CSSNumericValueType::BaseType::kLength);
+}
+
+CSSNumericValue* FromSingleValue(const CSSValue& value) {
+  if (value.IsIdentifierValue()) {
+    const auto& ident = ToCSSIdentifierValue(value);
+    switch (ident.GetValueID()) {
+      case CSSValueLeft:
+      case CSSValueTop:
+        return CSSUnitValue::Create(0,
+                                    CSSPrimitiveValue::UnitType::kPercentage);
+      case CSSValueCenter:
+        return CSSUnitValue::Create(50,
+                                    CSSPrimitiveValue::UnitType::kPercentage);
+      case CSSValueRight:
+      case CSSValueBottom:
+        return CSSUnitValue::Create(100,
+                                    CSSPrimitiveValue::UnitType::kPercentage);
+      default:
+        NOTREACHED();
+        return nullptr;
+    }
+  }
+
+  if (value.IsPrimitiveValue())
+    return CSSNumericValue::FromCSSValue(ToCSSPrimitiveValue(value));
+
+  DCHECK(value.IsValuePair());
+  const auto& pair = ToCSSValuePair(value);
+  DCHECK(pair.First().IsIdentifierValue());
+  DCHECK(pair.Second().IsPrimitiveValue());
+
+  CSSNumericValue* offset =
+      CSSNumericValue::FromCSSValue(ToCSSPrimitiveValue(pair.Second()));
+  DCHECK(offset);
+
+  switch (ToCSSIdentifierValue(pair.First()).GetValueID()) {
+    case CSSValueLeft:
+    case CSSValueTop:
+      return offset;
+    case CSSValueRight:
+    case CSSValueBottom: {
+      CSSNumericValueVector args;
+      args.push_back(
+          CSSUnitValue::Create(100, CSSPrimitiveValue::UnitType::kPercentage));
+      args.push_back(offset->Negate());
+      return CSSMathSum::Create(std::move(args));
+    }
+    default:
+      NOTREACHED();
+      return nullptr;
+  }
+}
+
+}  // namespace
 
 CSSPositionValue* CSSPositionValue::Create(CSSNumericValue* x,
                                            CSSNumericValue* y,
                                            ExceptionState& exception_state) {
-  if (x->GetType() != CSSStyleValue::StyleValueType::kLengthType &&
-      x->GetType() != CSSStyleValue::StyleValueType::kPercentType) {
+  if (!IsValidPositionCoord(x)) {
     exception_state.ThrowTypeError(
         "Must pass length or percentage to x in CSSPositionValue");
     return nullptr;
   }
-  if (y->GetType() != CSSStyleValue::StyleValueType::kLengthType &&
-      y->GetType() != CSSStyleValue::StyleValueType::kPercentType) {
+  if (!IsValidPositionCoord(y)) {
     exception_state.ThrowTypeError(
         "Must pass length or percentage to y in CSSPositionValue");
     return nullptr;
@@ -28,10 +89,28 @@ CSSPositionValue* CSSPositionValue::Create(CSSNumericValue* x,
   return new CSSPositionValue(x, y);
 }
 
+CSSPositionValue* CSSPositionValue::Create(CSSNumericValue* x,
+                                           CSSNumericValue* y) {
+  if (!IsValidPositionCoord(x) || !IsValidPositionCoord(y))
+    return nullptr;
+  return new CSSPositionValue(x, y);
+}
+
+CSSPositionValue* CSSPositionValue::FromCSSValue(const CSSValue& value) {
+  DCHECK(value.IsValuePair());
+  const auto& pair = ToCSSValuePair(value);
+
+  CSSNumericValue* x = FromSingleValue(pair.First());
+  CSSNumericValue* y = FromSingleValue(pair.Second());
+  DCHECK(x);
+  DCHECK(y);
+
+  return CSSPositionValue::Create(x, y);
+}
+
 void CSSPositionValue::setX(CSSNumericValue* x,
                             ExceptionState& exception_state) {
-  if (x->GetType() != CSSStyleValue::StyleValueType::kLengthType &&
-      x->GetType() != CSSStyleValue::StyleValueType::kPercentType) {
+  if (!IsValidPositionCoord(x)) {
     exception_state.ThrowTypeError(
         "Must pass length or percentage to x in CSSPositionValue");
     return;
@@ -41,8 +120,7 @@ void CSSPositionValue::setX(CSSNumericValue* x,
 
 void CSSPositionValue::setY(CSSNumericValue* y,
                             ExceptionState& exception_state) {
-  if (y->GetType() != CSSStyleValue::StyleValueType::kLengthType &&
-      y->GetType() != CSSStyleValue::StyleValueType::kPercentType) {
+  if (!IsValidPositionCoord(y)) {
     exception_state.ThrowTypeError(
         "Must pass length or percentage to y in CSSPositionValue");
     return;
@@ -50,9 +128,12 @@ void CSSPositionValue::setY(CSSNumericValue* y,
   y_ = y;
 }
 
-CSSValue* CSSPositionValue::ToCSSValue() const {
-  return CSSValuePair::Create(x_->ToCSSValue(), y_->ToCSSValue(),
-                              CSSValuePair::kKeepIdenticalValues);
+const CSSValue* CSSPositionValue::ToCSSValue() const {
+  const CSSValue* x = x_->ToCSSValue();
+  const CSSValue* y = y_->ToCSSValue();
+  if (!x || !y)
+    return nullptr;
+  return CSSValuePair::Create(x, y, CSSValuePair::kKeepIdenticalValues);
 }
 
 }  // namespace blink

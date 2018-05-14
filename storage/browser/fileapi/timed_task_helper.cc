@@ -40,10 +40,9 @@ bool TimedTaskHelper::IsRunning() const {
   return tracker_ != NULL;
 }
 
-void TimedTaskHelper::Start(
-    const tracked_objects::Location& posted_from,
-    base::TimeDelta delay,
-    const base::Closure& user_task) {
+void TimedTaskHelper::Start(const base::Location& posted_from,
+                            base::TimeDelta delay,
+                            const base::Closure& user_task) {
   posted_from_ = posted_from;
   delay_ = delay;
   user_task_ = user_task;
@@ -88,8 +87,7 @@ void TimedTaskHelper::PostDelayedTask(std::unique_ptr<Tracker> tracker,
                                       base::TimeDelta delay) {
   task_runner_->PostDelayedTask(
       posted_from_,
-      base::Bind(&TimedTaskHelper::Fired, base::Passed(&tracker)),
-      delay);
+      base::BindOnce(&TimedTaskHelper::Fired, base::Passed(&tracker)), delay);
 }
 
 }  // namespace storage

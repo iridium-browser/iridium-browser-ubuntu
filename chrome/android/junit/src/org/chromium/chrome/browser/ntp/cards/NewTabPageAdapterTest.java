@@ -8,9 +8,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
@@ -20,12 +23,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-import static org.chromium.chrome.browser.ntp.cards.ContentSuggestionsUnitTestUtils.bindViewHolders;
 import static org.chromium.chrome.browser.ntp.cards.ContentSuggestionsUnitTestUtils.makeUiConfig;
 import static org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.createDummySuggestions;
 import static org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.registerCategory;
 import static org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.stringify;
 
+import android.accounts.Account;
 import android.content.res.Resources;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.RecyclerView.AdapterDataObserver;
@@ -33,8 +36,10 @@ import android.view.View;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -44,14 +49,13 @@ import org.mockito.exceptions.base.MockitoAssertionError;
 import org.mockito.internal.verification.Times;
 import org.mockito.internal.verification.api.VerificationDataInOrder;
 import org.mockito.verification.VerificationMode;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.shadows.ShadowResources;
 
 import org.chromium.base.Callback;
-import org.chromium.base.ContextUtils;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
@@ -65,6 +69,7 @@ import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.ntp.snippets.SuggestionsSource;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
+import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInAllowedObserver;
 import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
@@ -75,9 +80,15 @@ import org.chromium.chrome.browser.suggestions.SuggestionsRanker;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
+import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 import org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.CategoryInfoBuilder;
 import org.chromium.chrome.test.util.browser.suggestions.FakeSuggestionsSource;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
+import org.chromium.components.signin.AccountManagerFacade;
+import org.chromium.components.signin.test.util.AccountHolder;
+import org.chromium.components.signin.test.util.FakeAccountManagerDelegate;
+import org.chromium.net.NetworkChangeNotifier;
+import org.chromium.testing.local.CustomShadowAsyncTask;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -86,18 +97,20 @@ import java.util.HashMap;
 import java.util.List;
 
 /**
- * Unit tests for {@link NewTabPageAdapter}.
+ * Unit tests for {@link NewTabPageAdapter}. {@link AccountManagerFacade} uses AsyncTasks, thus
+ * the need for {@link CustomShadowAsyncTask}.
  */
-@RunWith(LocalRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
-@Features({@Features.Register(value = ChromeFeatureList.NTP_CONDENSED_LAYOUT, enabled = false),
-        @Features.Register(value = ChromeFeatureList.CHROME_HOME, enabled = false)})
+@RunWith(BaseRobolectricTestRunner.class)
+@Config(manifest = Config.NONE, shadows = {CustomShadowAsyncTask.class})
+@DisableFeatures({ChromeFeatureList.NTP_CONDENSED_LAYOUT, ChromeFeatureList.CHROME_HOME,
+        ChromeFeatureList.CONTENT_SUGGESTIONS_SCROLL_TO_LOAD,
+        ChromeFeatureList.NTP_ARTICLE_SUGGESTIONS_EXPANDABLE_HEADER})
 public class NewTabPageAdapterTest {
     @Rule
     public DisableHistogramsRule mDisableHistogramsRule = new DisableHistogramsRule();
 
     @Rule
-    public Features.Processor mFeatureProcessor = new Features.Processor();
+    public TestRule mFeatureProcessor = new Features.JUnitProcessor();
 
     @CategoryInt
     private static final int TEST_CATEGORY = 42;
@@ -110,21 +123,32 @@ public class NewTabPageAdapterTest {
     private OfflinePageBridge mOfflinePageBridge;
     @Mock
     private SuggestionsUiDelegate mUiDelegate;
+    @Mock
+    private PrefServiceBridge mPrefServiceBridge;
 
     /**
      * Stores information about a section that should be present in the adapter.
      */
     private static class SectionDescriptor {
+        // TODO(https://crbug.com/754763): Smells. To be cleaned up.
+        public boolean mIsSignInPromo;
+
         public boolean mHeader = true;
-        public final List<SnippetArticle> mSuggestions;
-        public final boolean mStatusCard;
+        public List<SnippetArticle> mSuggestions;
+        public boolean mStatusCard;
         public boolean mViewAllButton;
         public boolean mFetchButton;
         public boolean mProgressItem;
 
+        public SectionDescriptor() {}
+
         public SectionDescriptor(List<SnippetArticle> suggestions) {
+            withContentSuggestions(suggestions);
+        }
+
+        public SectionDescriptor withContentSuggestions(List<SnippetArticle> suggestions) {
             mSuggestions = suggestions;
-            mStatusCard = suggestions.isEmpty();
+            return this;
         }
 
         public SectionDescriptor withoutHeader() {
@@ -133,17 +157,31 @@ public class NewTabPageAdapterTest {
         }
 
         public SectionDescriptor withViewAllButton() {
+            assertFalse(mProgressItem);
             mViewAllButton = true;
             return this;
         }
 
         public SectionDescriptor withFetchButton() {
+            assertFalse(mProgressItem);
             mFetchButton = true;
             return this;
         }
 
         public SectionDescriptor withProgress() {
+            assertFalse(mViewAllButton);
+            assertFalse(mFetchButton);
             mProgressItem = true;
+            return this;
+        }
+
+        public SectionDescriptor isSigninPromo() {
+            mIsSignInPromo = true;
+            return this;
+        }
+
+        public SectionDescriptor withStatusCard() {
+            mStatusCard = true;
             return this;
         }
     }
@@ -179,6 +217,11 @@ public class NewTabPageAdapterTest {
         }
 
         public void expectSection(SectionDescriptor descriptor) {
+            if (descriptor.mIsSignInPromo) {
+                mInOrder.verify(mVisitor, mVerification).visitSignInPromo();
+                return;
+            }
+
             if (descriptor.mHeader) {
                 mInOrder.verify(mVisitor, mVerification).visitHeader();
             }
@@ -235,14 +278,28 @@ public class NewTabPageAdapterTest {
     public void setUp() {
         MockitoAnnotations.initMocks(this);
 
-        ContextUtils.initApplicationContextForTests(RuntimeEnvironment.application);
+
+        // Ensure that NetworkChangeNotifier is initialized.
+        if (!NetworkChangeNotifier.isInitialized()) {
+            NetworkChangeNotifier.init();
+        }
+        NetworkChangeNotifier.forceConnectivityState(true);
+
         // Make sure that isChromeHome() is current value set by the test, not the value saved in
         // the shared preference.
         // TODO(changwan): check if we can clear shared preferences for each test case.
         FeatureUtilities.resetChromeHomeEnabledForTests();
 
         // Set empty variation params for the test.
-        CardsVariationParameters.setTestVariationParams(new HashMap<String, String>());
+        CardsVariationParameters.setTestVariationParams(new HashMap<>());
+
+        // Initialise AccountManagerFacade and add one dummy account.
+        FakeAccountManagerDelegate fakeAccountManager = new FakeAccountManagerDelegate(
+                FakeAccountManagerDelegate.ENABLE_PROFILE_DATA_SOURCE);
+        AccountManagerFacade.overrideAccountManagerFacadeForTests(fakeAccountManager);
+        Account account = AccountManagerFacade.createAccountFromName("test@gmail.com");
+        fakeAccountManager.addAccountHolderExplicitly(new AccountHolder.Builder(account).build());
+        assertFalse(AccountManagerFacade.get().isUpdatePending());
 
         // Initialise the sign in state. We will be signed in by default in the tests.
         assertFalse(ChromePreferenceManager.getInstance().getNewTabPageSigninPromoDismissed());
@@ -255,6 +312,11 @@ public class NewTabPageAdapterTest {
         mSource.setInfoForCategory(
                 TEST_CATEGORY, new CategoryInfoBuilder(TEST_CATEGORY).showIfEmpty().build());
 
+        // Initialize a test instance for PrefServiceBridge.
+        when(mPrefServiceBridge.getBoolean(anyInt())).thenReturn(false);
+        doNothing().when(mPrefServiceBridge).setBoolean(anyInt(), anyBoolean());
+        PrefServiceBridge.setInstanceForTesting(mPrefServiceBridge);
+
         resetUiDelegate();
         reloadNtp();
     }
@@ -264,6 +326,8 @@ public class NewTabPageAdapterTest {
         CardsVariationParameters.setTestVariationParams(null);
         SigninManager.setInstanceForTesting(null);
         ChromePreferenceManager.getInstance().setNewTabPageSigninPromoDismissed(false);
+        ChromePreferenceManager.getInstance().clearNewTabPageSigninPromoSuppressionPeriodStart();
+        PrefServiceBridge.setInstanceForTesting(null);
     }
 
     /**
@@ -349,7 +413,7 @@ public class NewTabPageAdapterTest {
 
         // Add another suggestion.
         suggestions.add(new SnippetArticle(TEST_CATEGORY, "https://site.com/url3", "title3", "pub3",
-                "txt3", "https://site.com/url3", 0, 0, 0, false));
+                "https://site.com/url3", 0, 0, 0, false, /* thumbnailDominantColor = */ null));
 
         // When the provider is removed, we should not be able to load suggestions. The UI should
         // stay the same though.
@@ -379,23 +443,22 @@ public class NewTabPageAdapterTest {
     @Test
     @Feature({"Ntp"})
     public void testProgressIndicatorDisplay() {
-        SuggestionsSection section =
-                mAdapter.getSectionListForTesting().getSectionForTesting(TEST_CATEGORY);
-        ProgressItem progress = section.getProgressItemForTesting();
+        SuggestionsSection section = mAdapter.getSectionListForTesting().getSection(TEST_CATEGORY);
+        ActionItem item = section.getActionItemForTesting();
 
         mSource.setStatusForCategory(TEST_CATEGORY, CategoryStatus.INITIALIZING);
-        assertTrue(progress.isVisible());
+        assertEquals(ActionItem.State.LOADING, item.getState());
 
         mSource.setStatusForCategory(TEST_CATEGORY, CategoryStatus.AVAILABLE);
-        assertFalse(progress.isVisible());
+        assertEquals(ActionItem.State.HIDDEN, item.getState());
 
         mSource.setStatusForCategory(TEST_CATEGORY, CategoryStatus.AVAILABLE_LOADING);
-        assertTrue(progress.isVisible());
+        assertEquals(ActionItem.State.LOADING, item.getState());
 
         // After the section gets disabled, it should gone completely, so checking the progress
         // indicator doesn't make sense anymore.
         mSource.setStatusForCategory(TEST_CATEGORY, CategoryStatus.CATEGORY_EXPLICITLY_DISABLED);
-        assertEquals(mAdapter.getSectionListForTesting().getSectionForTesting(TEST_CATEGORY), null);
+        assertEquals(mAdapter.getSectionListForTesting().getSection(TEST_CATEGORY), null);
     }
 
     /**
@@ -471,8 +534,8 @@ public class NewTabPageAdapterTest {
         reloadNtp();
         assertItemsFor(section(suggestions), section(otherSuggestions));
 
-        // Bind the whole section - indicate that it is being viewed.
-        bindViewHolders(mAdapter.getSectionListForTesting().getSectionForTesting(otherCategory));
+        // Indicate that the whole section is being viewed.
+        for (SnippetArticle article : otherSuggestions) article.mExposed = true;
 
         List<SnippetArticle> newSuggestions = createDummySuggestions(3, TEST_CATEGORY, "new");
         mSource.setSuggestionsForCategory(TEST_CATEGORY, newSuggestions);
@@ -505,8 +568,7 @@ public class NewTabPageAdapterTest {
         assertItemsFor(section(suggestions));
 
         // 1.3 - When all suggestions are dismissed
-        SuggestionsSection section =
-                mAdapter.getSectionListForTesting().getSectionForTesting(TEST_CATEGORY);
+        SuggestionsSection section = mAdapter.getSectionListForTesting().getSection(TEST_CATEGORY);
         assertSectionMatches(section(suggestions), section);
         section.removeSuggestionById(suggestions.get(0).mIdWithinCategory);
         section.removeSuggestionById(suggestions.get(1).mIdWithinCategory);
@@ -515,7 +577,7 @@ public class NewTabPageAdapterTest {
 
         // Part 2: VisibleIfEmpty = false
         suggestionsSource = new FakeSuggestionsSource();
-        suggestionsSource.setStatusForCategory(TEST_CATEGORY, CategoryStatus.INITIALIZING);
+        suggestionsSource.setStatusForCategory(TEST_CATEGORY, CategoryStatus.AVAILABLE);
         suggestionsSource.setInfoForCategory(
                 TEST_CATEGORY, new CategoryInfoBuilder(TEST_CATEGORY).build());
 
@@ -550,7 +612,7 @@ public class NewTabPageAdapterTest {
         // 1.1 - Initial state.
         when(mUiDelegate.getSuggestionsSource()).thenReturn(suggestionsSource);
         reloadNtp();
-        assertItemsFor(sectionWithStatusCard().withViewAllButton().withProgress());
+        assertItemsFor(sectionWithStatusCard().withProgress());
 
         // 1.2 - With suggestions.
         List<SnippetArticle> suggestions =
@@ -560,8 +622,7 @@ public class NewTabPageAdapterTest {
         assertItemsFor(section(suggestions).withViewAllButton());
 
         // 1.3 - When all suggestions are dismissed.
-        SuggestionsSection section =
-                mAdapter.getSectionListForTesting().getSectionForTesting(TEST_CATEGORY);
+        SuggestionsSection section = mAdapter.getSectionListForTesting().getSection(TEST_CATEGORY);
         assertSectionMatches(section(suggestions).withViewAllButton(), section);
         section.removeSuggestionById(suggestions.get(0).mIdWithinCategory);
         section.removeSuggestionById(suggestions.get(1).mIdWithinCategory);
@@ -585,7 +646,7 @@ public class NewTabPageAdapterTest {
         assertItemsFor(section(suggestions));
 
         // 2.3 - When all suggestions are dismissed.
-        section = mAdapter.getSectionListForTesting().getSectionForTesting(TEST_CATEGORY);
+        section = mAdapter.getSectionListForTesting().getSection(TEST_CATEGORY);
         assertSectionMatches(section(suggestions), section);
         section.removeSuggestionById(suggestions.get(0).mIdWithinCategory);
         section.removeSuggestionById(suggestions.get(1).mIdWithinCategory);
@@ -614,7 +675,7 @@ public class NewTabPageAdapterTest {
         // 1.1 - Initial state.
         when(mUiDelegate.getSuggestionsSource()).thenReturn(suggestionsSource);
         reloadNtp();
-        assertItemsFor(sectionWithStatusCard().withFetchButton().withProgress());
+        assertItemsFor(sectionWithStatusCard().withProgress());
 
         // 1.2 - With suggestions.
         List<SnippetArticle> articles =
@@ -624,8 +685,7 @@ public class NewTabPageAdapterTest {
         assertItemsFor(section(articles).withFetchButton());
 
         // 1.3 - When all suggestions are dismissed.
-        SuggestionsSection section =
-                mAdapter.getSectionListForTesting().getSectionForTesting(category);
+        SuggestionsSection section = mAdapter.getSectionListForTesting().getSection(category);
         assertSectionMatches(section(articles).withFetchButton(), section);
         section.removeSuggestionById(articles.get(0).mIdWithinCategory);
         section.removeSuggestionById(articles.get(1).mIdWithinCategory);
@@ -649,7 +709,7 @@ public class NewTabPageAdapterTest {
         assertItemsFor(section(articles));
 
         // 2.3 - When all suggestions are dismissed.
-        section = mAdapter.getSectionListForTesting().getSectionForTesting(category);
+        section = mAdapter.getSectionListForTesting().getSection(category);
         assertSectionMatches(section(articles), section);
         section.removeSuggestionById(articles.get(0).mIdWithinCategory);
         section.removeSuggestionById(articles.get(1).mIdWithinCategory);
@@ -895,10 +955,10 @@ public class NewTabPageAdapterTest {
 
         when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
         when(mMockSigninManager.isSignedInOnNative()).thenReturn(false);
-        mSource.setRemoteSuggestionsEnabled(true);
         resetUiDelegate();
         reloadNtp();
 
+        assertItemsFor(sectionWithStatusCard().withProgress(), signinPromo());
         assertTrue(isSignInPromoVisible());
 
         // Note: As currently implemented, these variables should point to the same object, a
@@ -937,10 +997,59 @@ public class NewTabPageAdapterTest {
 
     @Test
     @Feature({"Ntp"})
+    public void testSigninPromoSuppressionActive() {
+        when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
+        when(mMockSigninManager.isSignedInOnNative()).thenReturn(false);
+
+        // Suppress promo.
+        ChromePreferenceManager.getInstance().setNewTabPageSigninPromoSuppressionPeriodStart(
+                System.currentTimeMillis());
+
+        resetUiDelegate();
+        reloadNtp();
+        assertFalse(isSignInPromoVisible());
+    }
+
+    @Test
+    @Feature({"Ntp"})
+    public void testSigninPromoSuppressionExpired() {
+        when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
+        when(mMockSigninManager.isSignedInOnNative()).thenReturn(false);
+
+        // Suppress promo.
+        ChromePreferenceManager preferenceManager = ChromePreferenceManager.getInstance();
+        preferenceManager.setNewTabPageSigninPromoSuppressionPeriodStart(
+                System.currentTimeMillis() - SignInPromo.SUPPRESSION_PERIOD_MS);
+
+        resetUiDelegate();
+        reloadNtp();
+        assertTrue(isSignInPromoVisible());
+
+        // SignInPromo should clear shared preference when suppression period ends.
+        assertEquals(0, preferenceManager.getNewTabPageSigninPromoSuppressionPeriodStart());
+    }
+
+    @Ignore // Disabled for new Chrome Home, see: https://crbug.com/805160
+    @Test
+    @Feature({"Ntp"})
+    @EnableFeatures(ChromeFeatureList.CHROME_HOME)
+    public void testSigninPromoModern() {
+        when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
+        when(mMockSigninManager.isSignedInOnNative()).thenReturn(false);
+        resetUiDelegate();
+        reloadNtp();
+
+        // Special case of the modern layout: the signin promo comes before the content suggestions.
+        assertItemsFor(signinPromo(), emptySection().withProgress());
+    }
+
+    @Test
+    @Feature({"Ntp"})
     @Config(shadows = MyShadowResources.class)
     public void testSigninPromoDismissal() {
         final String signInPromoText = "sign in";
-        when(MyShadowResources.sResources.getText(R.string.snippets_disabled_generic_prompt))
+        when(MyShadowResources.sResources.getText(
+                     R.string.signin_promo_description_ntp_content_suggestions))
                 .thenReturn(signInPromoText);
 
         when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
@@ -1088,6 +1197,35 @@ public class NewTabPageAdapterTest {
                 mAdapter.getFirstPositionForType(ItemViewType.ALL_DISMISSED));
     }
 
+    @Ignore // Disabled for new Chrome Home, see: https://crbug.com/805160
+    @Test
+    @Feature({"Ntp"})
+    @EnableFeatures(ChromeFeatureList.CHROME_HOME)
+    public void testAllDismissedModern() {
+        when(mUiDelegate.isVisible()).thenReturn(true);
+
+        @CategoryInt
+        int category = KnownCategories.ARTICLES;
+        mSource.setStatusForCategory(TEST_CATEGORY, CategoryStatus.NOT_PROVIDED);
+        mSource.setInfoForCategory(
+                category, new CategoryInfoBuilder(category).showIfEmpty().build());
+        mSource.setStatusForCategory(category, CategoryStatus.AVAILABLE);
+        final int numSuggestions = 3;
+        List<SnippetArticle> suggestions = createDummySuggestions(numSuggestions, category);
+        mSource.setSuggestionsForCategory(category, suggestions);
+        reloadNtp();
+        assertItemsForChromeHome(section(suggestions).withoutHeader());
+
+        for (int i = 0; i < numSuggestions; i++) {
+            @SuppressWarnings("unchecked")
+            Callback<String> itemRemovedCallback = mock(Callback.class);
+            mAdapter.dismissItem(1, itemRemovedCallback);
+            verify(itemRemovedCallback).onResult(anyString());
+        }
+
+        assertItemsForEmptyChromeHome(emptySection().withoutHeader());
+    }
+
     /**
      * Robolectric shadow to mock out calls to {@link Resources#getString}.
      */
@@ -1133,12 +1271,34 @@ public class NewTabPageAdapterTest {
         matcher.expectEnd();
     }
 
+    private void assertItemsForChromeHome(SectionDescriptor section) {
+        ItemsMatcher matcher = new ItemsMatcher(mAdapter.getRootForTesting());
+
+        // TODO(bauerb): Remove above-the-fold from test setup in Chrome Home.
+        matcher.expectAboveTheFoldItem();
+        matcher.expectSection(section);
+        matcher.expectFooter(); // TODO(dgn): Handle scroll to reload with removes the footer
+        matcher.expectSpacingItem();
+        matcher.expectEnd();
+    }
+
+    private void assertItemsForEmptyChromeHome(SectionDescriptor section) {
+        ItemsMatcher matcher = new ItemsMatcher(mAdapter.getRootForTesting());
+
+        // TODO(bauerb): Remove above-the-fold from test setup in Chrome Home.
+        matcher.expectAboveTheFoldItem();
+        matcher.expectAllDismissedItem();
+        matcher.expectSection(section);
+        matcher.expectSpacingItem();
+        matcher.expectEnd();
+    }
+
     /**
      * To be used with {@link #assertItemsFor(SectionDescriptor...)}, for a section with
      * {@code numSuggestions} cards in it.
      * @param suggestions The list of suggestions in the section. If the list is empty, use either
-     *                       no section at all (if it is not displayed) or
-     *                       {@link #sectionWithStatusCard()}.
+     *         no section at all (if it is not displayed) or {@link #sectionWithStatusCard()} /
+     *         {@link #emptySection()}.
      * @return A descriptor for the section.
      */
     private SectionDescriptor section(List<SnippetArticle> suggestions) {
@@ -1146,12 +1306,29 @@ public class NewTabPageAdapterTest {
         return new SectionDescriptor(suggestions);
     }
 
+    private SectionDescriptor signinPromo() {
+        return new SectionDescriptor().isSigninPromo();
+    }
+
     /**
      * To be used with {@link #assertItemsFor(SectionDescriptor...)}, for a section that has no
-     * suggestions, but a status card to be displayed.
+     * suggestions, but a status card to be displayed. Should not be used with the modern layout;
+     * use {@link #emptySection()} otherwise.
      * @return A descriptor for the section.
      */
     private SectionDescriptor sectionWithStatusCard() {
+        assertFalse(FeatureUtilities.isChromeHomeEnabled());
+        return new SectionDescriptor(Collections.<SnippetArticle>emptyList()).withStatusCard();
+    }
+
+    /**
+     * To be used with {@link #assertItemsFor(SectionDescriptor...)}, for a section that has no
+     * suggestions. Should only be used with the modern layout; use {@link #sectionWithStatusCard()}
+     * otherwise.
+     * @return A descriptor for the section.
+     */
+    private SectionDescriptor emptySection() {
+        assertTrue(FeatureUtilities.isChromeHomeEnabled());
         return new SectionDescriptor(Collections.<SnippetArticle>emptyList());
     }
 
@@ -1163,8 +1340,9 @@ public class NewTabPageAdapterTest {
     }
 
     private void reloadNtp() {
-        mAdapter = new NewTabPageAdapter(mUiDelegate, mock(View.class), makeUiConfig(),
-                mOfflinePageBridge, mock(ContextMenuManager.class),
+        mSource.removeObservers();
+        mAdapter = new NewTabPageAdapter(mUiDelegate, mock(View.class), /* logoView = */ null,
+                makeUiConfig(), mOfflinePageBridge, mock(ContextMenuManager.class),
                 /* tileGroupDelegate = */ null, /* suggestionsCarousel = */ null);
         mAdapter.refreshSuggestions();
     }
@@ -1186,7 +1364,7 @@ public class NewTabPageAdapterTest {
     private List<DestructionObserver> getDestructionObserver(SuggestionsUiDelegate delegate) {
         ArgumentCaptor<DestructionObserver> observers =
                 ArgumentCaptor.forClass(DestructionObserver.class);
-        verify(delegate, atLeastOnce()).addDestructionObserver(observers.capture());
+        verify(delegate, atLeast(0)).addDestructionObserver(observers.capture());
         return observers.getAllValues();
     }
 

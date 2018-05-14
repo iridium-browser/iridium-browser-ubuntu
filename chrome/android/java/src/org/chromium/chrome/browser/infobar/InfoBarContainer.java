@@ -4,7 +4,10 @@
 
 package org.chromium.chrome.browser.infobar;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
+import android.support.annotation.Nullable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -16,6 +19,7 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.banners.SwipableOverlayView;
+import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.infobar.InfoBarContainerLayout.Item;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
@@ -24,7 +28,6 @@ import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetObserver;
 import org.chromium.chrome.browser.widget.bottomsheet.EmptyBottomSheetObserver;
-import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.DeviceFormFactor;
@@ -95,6 +98,13 @@ public class InfoBarContainer extends SwipableOverlayView {
          * @param hasInfobars True if infobar container has infobars to show.
          */
         void onInfoBarContainerAttachedToWindow(boolean hasInfobars);
+
+        /**
+         * A notification that the shown ratio of the infobar container has changed.
+         * @param container The notifying {@link InfoBarContainer}
+         * @param shownRatio The shown ratio of the infobar container.
+         */
+        void onInfoBarContainerShownRatioChanged(InfoBarContainer container, float shownRatio);
     }
 
     /** Resets the state of the InfoBarContainer when the user navigates. */
@@ -105,7 +115,7 @@ public class InfoBarContainer extends SwipableOverlayView {
                 boolean isFragmentNavigation, Integer pageTransition, int errorCode,
                 int httpStatusCode) {
             if (hasCommitted && isInMainFrame) {
-                setIsObscuredByOtherView(false);
+                setHidden(false);
             }
         }
 
@@ -117,12 +127,13 @@ public class InfoBarContainer extends SwipableOverlayView {
         }
 
         @Override
-        public void onReparentingFinished(Tab tab) {
+        public void onActivityAttachmentChanged(Tab tab, boolean isAttached) {
+            if (!isAttached) return;
+
             setParentView((ViewGroup) tab.getActivity().findViewById(R.id.bottom_container));
             mTab = tab;
         }
     };
-
 
     /**
      * Adds/removes the {@link InfoBarContainer} when the tab's view is attached/detached. This is
@@ -161,8 +172,17 @@ public class InfoBarContainer extends SwipableOverlayView {
     /** The view that {@link Tab#getView()} returns. */
     private View mTabView;
 
-    /** Whether or not another View is occupying the same space as this one. */
-    private boolean mIsObscured;
+    /** Whether or not this View should be hidden. */
+    private boolean mIsHidden;
+
+    /** Animation used to snap the container to the nearest state if scroll direction changes. */
+    private Animator mScrollDirectionChangeAnimation;
+
+    /** Whether or not the current scroll is downward. */
+    private boolean mIsScrollingDownward;
+
+    /** Tracks the previous event's scroll offset to determine if a scroll is up or down. */
+    private int mLastScrollOffsetY;
 
     /** A {@link BottomSheetObserver} so this view knows when to show/hide. */
     private BottomSheetObserver mBottomSheetObserver;
@@ -194,7 +214,8 @@ public class InfoBarContainer extends SwipableOverlayView {
         addView(mLayout, new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT,
                 LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
-        mIPHSupport = new IPHInfoBarSupport(context);
+        mIPHSupport = new IPHInfoBarSupport(new IPHBubbleDelegateImpl(context));
+
         mLayout.addAnimationListener(mIPHSupport);
         addObserver(mIPHSupport);
 
@@ -228,11 +249,18 @@ public class InfoBarContainer extends SwipableOverlayView {
     }
 
     @Override
-    public void setContentViewCore(ContentViewCore contentViewCore) {
-        super.setContentViewCore(contentViewCore);
-        if (getContentViewCore() != null) {
-            nativeSetWebContents(mNativeInfoBarContainer, contentViewCore.getWebContents());
+    public void setTranslationY(float translationY) {
+        super.setTranslationY(translationY);
+        float shownFraction = getHeight() > 0 ? 1f - (translationY / getHeight()) : 0;
+        for (InfoBarContainerObserver observer : mObservers) {
+            observer.onInfoBarContainerShownRatioChanged(this, shownFraction);
         }
+    }
+
+    @Override
+    public void setWebContents(WebContents webContents) {
+        super.setWebContents(webContents);
+        if (webContents != null) nativeSetWebContents(mNativeInfoBarContainer, webContents);
     }
 
     /**
@@ -247,6 +275,13 @@ public class InfoBarContainer extends SwipableOverlayView {
     @VisibleForTesting
     public void addAnimationListener(InfoBarAnimationListener listener) {
         mLayout.addAnimationListener(listener);
+    }
+
+    /**
+     * Removes the passed in {@link InfoBarAnimationListener} from the {@link InfoBarContainer}.
+     */
+    public void removeAnimationListener(InfoBarAnimationListener listener) {
+        mLayout.removeAnimationListener(listener);
     }
 
     /**
@@ -290,6 +325,15 @@ public class InfoBarContainer extends SwipableOverlayView {
         infoBar.createView();
 
         mLayout.addInfoBar(infoBar);
+    }
+
+    /**
+     * Adds an InfoBar to the view hierarchy.
+     * @param infoBar InfoBar to add to the View hierarchy.
+     */
+    @VisibleForTesting
+    public void addInfoBarForTesting(InfoBar infoBar) {
+        addInfoBar(infoBar);
     }
 
     /**
@@ -370,15 +414,13 @@ public class InfoBarContainer extends SwipableOverlayView {
     }
 
     /**
-     * Tells this class that a View with higher priority is occupying the same space.
+     * Hides or stops hiding this View/
      *
-     * Causes this View to hide itself until the obscuring View goes away.
-     *
-     * @param isObscured Whether this View is obscured by another one.
+     * @param isHidden Whether this View is should be hidden.
      */
-    public void setIsObscuredByOtherView(boolean isObscured) {
-        mIsObscured = isObscured;
-        if (isObscured) {
+    public void setHidden(boolean isHidden) {
+        mIsHidden = isHidden;
+        if (isHidden) {
             setVisibility(View.GONE);
         } else {
             setVisibility(View.VISIBLE);
@@ -402,7 +444,7 @@ public class InfoBarContainer extends SwipableOverlayView {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        if (!mIsObscured) {
+        if (!mIsHidden) {
             setVisibility(VISIBLE);
             setAlpha(0f);
             animate().alpha(1f).setDuration(REATTACH_FADE_IN_MS);
@@ -438,12 +480,76 @@ public class InfoBarContainer extends SwipableOverlayView {
                 setVisibility(View.INVISIBLE);
             }
         } else {
-            if (!isShowing && !mIsObscured) {
+            if (!isShowing && !mIsHidden) {
                 setVisibility(View.VISIBLE);
             }
         }
 
         super.onLayout(changed, l, t, r, b);
+    }
+
+    @Override
+    protected boolean shouldConsumeScroll(int scrollOffsetY, int scrollExtentY) {
+        ChromeFullscreenManager manager = mTab.getActivity().getFullscreenManager();
+
+        if (manager.getBottomControlsHeight() <= 0) return true;
+
+        boolean isScrollingDownward = scrollOffsetY > mLastScrollOffsetY;
+        boolean didDirectionChange = isScrollingDownward != mIsScrollingDownward;
+        mLastScrollOffsetY = scrollOffsetY;
+        mIsScrollingDownward = isScrollingDownward;
+
+        // If the scroll changed directions, snap to a completely shown or hidden state.
+        if (didDirectionChange) {
+            runDirectionChangeAnimation(shouldSnapToVisibleState(scrollOffsetY));
+            return false;
+        }
+
+        boolean areControlsCompletelyShown = manager.getBottomControlOffset() > 0;
+        boolean areControlsCompletelyHidden = manager.areBrowserControlsOffScreen();
+
+        if ((!mIsScrollingDownward && areControlsCompletelyShown)
+                || (mIsScrollingDownward && !areControlsCompletelyHidden)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    @Override
+    protected void runUpEventAnimation(boolean visible) {
+        if (mScrollDirectionChangeAnimation != null) mScrollDirectionChangeAnimation.cancel();
+        super.runUpEventAnimation(visible);
+    }
+
+    @Override
+    protected boolean isIndependentlyAnimating() {
+        return mScrollDirectionChangeAnimation != null;
+    }
+
+    /**
+     * Run an animation when the scrolling direction of a gesture has changed (this does not mean
+     * the gesture has ended).
+     * @param visible Whether or not the view should be visible.
+     */
+    private void runDirectionChangeAnimation(boolean visible) {
+        mScrollDirectionChangeAnimation = createVerticalSnapAnimation(visible);
+        mScrollDirectionChangeAnimation.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                mScrollDirectionChangeAnimation = null;
+            }
+        });
+        mScrollDirectionChangeAnimation.start();
+    }
+
+    /**
+     * @return The infobar in front.
+     */
+    @Nullable
+    InfoBar getFrontInfoBar() {
+        if (mInfoBars.isEmpty()) return null;
+        return mInfoBars.get(0);
     }
 
     private native long nativeInit();

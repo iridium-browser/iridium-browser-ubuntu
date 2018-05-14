@@ -37,6 +37,16 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance,
   static scoped_refptr<SiteInstanceImpl> CreateForURL(
       BrowserContext* browser_context,
       const GURL& url);
+  static bool ShouldAssignSiteForURL(const GURL& url);
+
+  // See SiteInstance::IsSameWebSite.
+  // This version allows comparing URLs without converting them to effective
+  // URLs first, which is useful for avoiding OOPIFs when otherwise same-site
+  // URLs may look cross-site via their effective URLs.
+  static bool IsSameWebSite(content::BrowserContext* browser_context,
+                            const GURL& src_url,
+                            const GURL& dest_url,
+                            bool should_compare_effective_urls);
 
   // SiteInstance interface overrides.
   int32_t GetId() override;
@@ -95,6 +105,15 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance,
   // another SiteInstance from the same site.
   void set_is_for_service_worker() { is_for_service_worker_ = true; }
   bool is_for_service_worker() const { return is_for_service_worker_; }
+
+  // Returns the URL which was used to set the |site_| for this SiteInstance.
+  // May be empty if this SiteInstance does not have a |site_|.
+  const GURL& original_url() { return original_url_; }
+
+  // True if |url| resolves to an effective URL that is different from |url|.
+  // See GetEffectiveURL().  This will be true for hosted apps as well as NTP
+  // URLs.
+  static bool HasEffectiveURL(BrowserContext* browser_context, const GURL& url);
 
   // Returns the SiteInstance, related to this one, that should be used
   // for subframes when an oopif is required, but a dedicated process is not.
@@ -162,17 +181,18 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance,
   static bool DoesSiteRequireDedicatedProcess(BrowserContext* browser_context,
                                               const GURL& url);
 
-  // Returns true if a process for |site_url| should be locked to just that
-  // site.  Returning true here also implies that |site_url| requires a
-  // dedicated process.  However, the converse does not hold: this might still
-  // return false for certain special cases where an origin lock can't be
-  // applied even when |site_url| requires a dedicated process (e.g., with
+  // Returns true if a process |host| can be locked to a site |site_url|.
+  // Returning true here also implies that |site_url| requires a dedicated
+  // process.  However, the converse does not hold: this might still return
+  // false for certain special cases where an origin lock can't be applied even
+  // when |site_url| requires a dedicated process (e.g., with
   // --site-per-process).  Examples of those cases include <webview> guests,
-  // WebUI, or extensions where a process is currently allowed to be reused for
-  // different extensions.  Most of these special cases should eventually be
-  // removed, and this function should become equivalent to
-  // DoesSiteRequireDedicatedProcess().
+  // WebUI, single-process mode, or extensions where a process is currently
+  // allowed to be reused for different extensions.  Most of these special
+  // cases should eventually be removed, and this function should become
+  // equivalent to DoesSiteRequireDedicatedProcess().
   static bool ShouldLockToOrigin(BrowserContext* browser_context,
+                                 RenderProcessHost* host,
                                  GURL site_url);
 
  private:
@@ -226,6 +246,9 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance,
 
   // Whether SetSite has been called.
   bool has_site_;
+
+  // The URL which was used to set the |site_| for this SiteInstance.
+  GURL original_url_;
 
   // The ProcessReusePolicy to use when creating a RenderProcessHost for this
   // SiteInstance.

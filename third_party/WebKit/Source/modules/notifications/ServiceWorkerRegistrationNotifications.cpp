@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <utility>
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
@@ -19,9 +20,8 @@
 #include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "platform/Histogram.h"
 #include "platform/heap/Handle.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Assertions.h"
-#include "platform/wtf/PtrUtil.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/modules/notifications/WebNotificationData.h"
@@ -79,8 +79,7 @@ ScriptPromise ServiceWorkerRegistrationNotifications::showNotification(
 
   // If permission for notification's origin is not "granted", reject the
   // promise with a TypeError exception, and terminate these substeps.
-  if (NotificationManager::From(execution_context)
-          ->GetPermissionStatus(execution_context) !=
+  if (NotificationManager::From(execution_context)->GetPermissionStatus() !=
       mojom::blink::PermissionStatus::GRANTED)
     return ScriptPromise::Reject(
         script_state,
@@ -107,7 +106,7 @@ ScriptPromise ServiceWorkerRegistrationNotifications::showNotification(
   ScriptPromise promise = resolver->Promise();
 
   std::unique_ptr<WebNotificationShowCallbacks> callbacks =
-      WTF::WrapUnique(new CallbackPromiseAdapter<void, void>(resolver));
+      std::make_unique<CallbackPromiseAdapter<void, void>>(resolver);
   ServiceWorkerRegistrationNotifications::From(execution_context, registration)
       .PrepareShow(data, std::move(callbacks));
 
@@ -122,15 +121,19 @@ ScriptPromise ServiceWorkerRegistrationNotifications::getNotifications(
   ScriptPromise promise = resolver->Promise();
 
   auto callbacks =
-      WTF::MakeUnique<CallbackPromiseAdapter<NotificationArray, void>>(
+      std::make_unique<CallbackPromiseAdapter<NotificationArray, void>>(
           resolver);
 
-  WebNotificationManager* notification_manager =
-      Platform::Current()->GetNotificationManager();
-  DCHECK(notification_manager);
+  if (RuntimeEnabledFeatures::NotificationsWithMojoEnabled()) {
+    // TODO(https://crbug.com/796991): Implement this via mojo.
+  } else {
+    WebNotificationManager* notification_manager =
+        Platform::Current()->GetWebNotificationManager();
+    DCHECK(notification_manager);
 
-  notification_manager->GetNotifications(
-      options.tag(), registration.WebRegistration(), std::move(callbacks));
+    notification_manager->GetNotifications(
+        options.tag(), registration.WebRegistration(), std::move(callbacks));
+  }
   return promise;
 }
 
@@ -140,29 +143,27 @@ void ServiceWorkerRegistrationNotifications::ContextDestroyed(
     loader->Stop();
 }
 
-DEFINE_TRACE(ServiceWorkerRegistrationNotifications) {
+void ServiceWorkerRegistrationNotifications::Trace(blink::Visitor* visitor) {
   visitor->Trace(registration_);
   visitor->Trace(loaders_);
   Supplement<ServiceWorkerRegistration>::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);
 }
 
-const char* ServiceWorkerRegistrationNotifications::SupplementName() {
-  return "ServiceWorkerRegistrationNotifications";
-}
+const char ServiceWorkerRegistrationNotifications::kSupplementName[] =
+    "ServiceWorkerRegistrationNotifications";
 
 ServiceWorkerRegistrationNotifications&
 ServiceWorkerRegistrationNotifications::From(
     ExecutionContext* execution_context,
     ServiceWorkerRegistration& registration) {
   ServiceWorkerRegistrationNotifications* supplement =
-      static_cast<ServiceWorkerRegistrationNotifications*>(
-          Supplement<ServiceWorkerRegistration>::From(registration,
-                                                      SupplementName()));
+      Supplement<ServiceWorkerRegistration>::From<
+          ServiceWorkerRegistrationNotifications>(registration);
   if (!supplement) {
     supplement = new ServiceWorkerRegistrationNotifications(execution_context,
                                                             &registration);
-    ProvideTo(registration, SupplementName(), supplement);
+    ProvideTo(registration, supplement);
   }
   return *supplement;
 }
@@ -170,7 +171,8 @@ ServiceWorkerRegistrationNotifications::From(
 void ServiceWorkerRegistrationNotifications::PrepareShow(
     const WebNotificationData& data,
     std::unique_ptr<WebNotificationShowCallbacks> callbacks) {
-  RefPtr<SecurityOrigin> origin = GetExecutionContext()->GetSecurityOrigin();
+  scoped_refptr<const SecurityOrigin> origin =
+      GetExecutionContext()->GetSecurityOrigin();
   NotificationResourcesLoader* loader = new NotificationResourcesLoader(
       WTF::Bind(&ServiceWorkerRegistrationNotifications::DidLoadResources,
                 WrapWeakPersistent(this), std::move(origin), data,
@@ -180,19 +182,26 @@ void ServiceWorkerRegistrationNotifications::PrepareShow(
 }
 
 void ServiceWorkerRegistrationNotifications::DidLoadResources(
-    PassRefPtr<SecurityOrigin> origin,
+    scoped_refptr<const SecurityOrigin> origin,
     const WebNotificationData& data,
     std::unique_ptr<WebNotificationShowCallbacks> callbacks,
     NotificationResourcesLoader* loader) {
   DCHECK(loaders_.Contains(loader));
 
-  WebNotificationManager* notification_manager =
-      Platform::Current()->GetNotificationManager();
-  DCHECK(notification_manager);
+  if (RuntimeEnabledFeatures::NotificationsWithMojoEnabled()) {
+    NotificationManager::From(GetExecutionContext())
+        ->DisplayPersistentNotification(registration_->WebRegistration(), data,
+                                        loader->GetResources(),
+                                        std::move(callbacks));
+  } else {
+    WebNotificationManager* notification_manager =
+        Platform::Current()->GetWebNotificationManager();
+    DCHECK(notification_manager);
 
-  notification_manager->ShowPersistent(
-      WebSecurityOrigin(origin.Get()), data, loader->GetResources(),
-      registration_->WebRegistration(), std::move(callbacks));
+    notification_manager->ShowPersistent(
+        WebSecurityOrigin(origin.get()), data, loader->GetResources(),
+        registration_->WebRegistration(), std::move(callbacks));
+  }
   loaders_.erase(loader);
 }
 

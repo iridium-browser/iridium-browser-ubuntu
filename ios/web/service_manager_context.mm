@@ -14,7 +14,6 @@
 #include "base/json/json_reader.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
@@ -26,14 +25,18 @@
 #include "ios/web/service_manager_connection_impl.h"
 #include "services/catalog/manifest_provider.h"
 #include "services/catalog/public/cpp/manifest_parsing_util.h"
-#include "services/catalog/public/interfaces/constants.mojom.h"
+#include "services/catalog/public/mojom/constants.mojom.h"
 #include "services/service_manager/connect_params.h"
 #include "services/service_manager/embedder/manifest_utils.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/service.h"
-#include "services/service_manager/public/interfaces/service.mojom.h"
+#include "services/service_manager/public/mojom/service.mojom.h"
 #include "services/service_manager/runner/common/client_util.h"
 #include "services/service_manager/service_manager.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 
@@ -122,7 +125,7 @@ class ServiceManagerContext::InProcessServiceManagerContext
       std::unique_ptr<BuiltinManifestProvider> manifest_provider,
       service_manager::mojom::ServicePtrInfo packaged_services_service_info) {
     manifest_provider_ = std::move(manifest_provider);
-    service_manager_ = base::MakeUnique<service_manager::ServiceManager>(
+    service_manager_ = std::make_unique<service_manager::ServiceManager>(
         nullptr, nullptr, manifest_provider_.get());
 
     service_manager::mojom::ServicePtr packaged_services_service;
@@ -148,7 +151,7 @@ ServiceManagerContext::ServiceManagerContext() {
   service_manager::mojom::ServiceRequest packaged_services_request;
   DCHECK(!service_manager::ServiceManagerIsRemote());
   std::unique_ptr<BuiltinManifestProvider> manifest_provider =
-      base::MakeUnique<BuiltinManifestProvider>();
+      std::make_unique<BuiltinManifestProvider>();
 
   const std::array<ManifestInfo, 3> manifests = {{
       {mojom::kBrowserServiceName, IDR_MOJO_WEB_BROWSER_MANIFEST},

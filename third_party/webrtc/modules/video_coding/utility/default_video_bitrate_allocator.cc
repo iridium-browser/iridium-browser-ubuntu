@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/video_coding/utility/default_video_bitrate_allocator.h"
+#include "modules/video_coding/utility/default_video_bitrate_allocator.h"
 
 #include <stdint.h>
 
@@ -24,7 +24,7 @@ BitrateAllocation DefaultVideoBitrateAllocator::GetAllocation(
     uint32_t total_bitrate_bps,
     uint32_t framerate) {
   BitrateAllocation allocation;
-  if (total_bitrate_bps == 0)
+  if (total_bitrate_bps == 0 || !codec_.active)
     return allocation;
 
   if (total_bitrate_bps < codec_.minBitrate * 1000) {

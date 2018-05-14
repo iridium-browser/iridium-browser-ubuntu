@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/containers/circular_deque.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -24,6 +25,8 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/task_scheduler/post_task.h"
+#include "base/task_scheduler/task_traits.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/media_galleries/chromeos/mtp_device_task_helper_map_service.h"
 #include "chrome/browser/media_galleries/chromeos/snapshot_file_details.h"
 #include "net/base/io_buffer.h"
@@ -327,13 +330,14 @@ void CloseStorageAndDestroyTaskHelperOnUIThread(
 // - When |file_path| is a directory, base::File::FILE_ERROR_NOT_A_FILE is set.
 // - When |file_path| does not exist, base::File::FILE_ERROR_NOT_FOUND is set.
 // - For other error cases, base::File::FILE_ERROR_FAILED is set.
-std::pair<int, base::File::Error> OpenFileDescriptor(const char* file_path,
-                                                     const int flags) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
+std::pair<int, base::File::Error> OpenFileDescriptor(
+    const base::FilePath& file_path,
+    const int flags) {
+  base::AssertBlockingAllowed();
 
-  if (base::DirectoryExists(base::FilePath(file_path)))
+  if (base::DirectoryExists(file_path))
     return std::make_pair(-1, base::File::FILE_ERROR_NOT_A_FILE);
-  int file_descriptor = open(file_path, flags);
+  int file_descriptor = open(file_path.value().c_str(), flags);
   if (file_descriptor >= 0)
     return std::make_pair(file_descriptor, base::File::FILE_OK);
   if (errno == ENOENT)
@@ -341,9 +345,9 @@ std::pair<int, base::File::Error> OpenFileDescriptor(const char* file_path,
   return std::make_pair(file_descriptor, base::File::FILE_ERROR_FAILED);
 }
 
-// Closes |file_descriptor| on file thread.
+// Closes |file_descriptor| on a background task runner.
 void CloseFileDescriptor(const int file_descriptor) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
+  base::AssertBlockingAllowed();
 
   IGNORE_EINTR(close(file_descriptor));
 }
@@ -364,13 +368,9 @@ void FakeCopyFileProgressCallback(int64_t size) {}
 MTPDeviceDelegateImplLinux::PendingTaskInfo::PendingTaskInfo(
     const base::FilePath& path,
     content::BrowserThread::ID thread_id,
-    const tracked_objects::Location& location,
+    const base::Location& location,
     const base::Closure& task)
-    : path(path),
-      thread_id(thread_id),
-      location(location),
-      task(task) {
-}
+    : path(path), thread_id(thread_id), location(location), task(task) {}
 
 MTPDeviceDelegateImplLinux::PendingTaskInfo::PendingTaskInfo(
     const PendingTaskInfo& other) = default;
@@ -459,7 +459,7 @@ void MTPDeviceDelegateImplLinux::MTPFileNode::EnsureChildExists(
     return;
 
   children_[name] =
-      base::MakeUnique<MTPFileNode>(id, name, this, file_id_to_node_map_);
+      std::make_unique<MTPFileNode>(id, name, this, file_id_to_node_map_);
 }
 
 void MTPDeviceDelegateImplLinux::MTPFileNode::ClearNonexistentChildren(
@@ -656,8 +656,11 @@ void MTPDeviceDelegateImplLinux::CopyFileLocal(
   DCHECK(!device_file_path.empty());
 
   // Create a temporary file for creating a copy of source file on local.
-  content::BrowserThread::PostTaskAndReplyWithResult(
-      content::BrowserThread::FILE, FROM_HERE, create_temporary_file_callback,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+      create_temporary_file_callback,
       base::Bind(
           &MTPDeviceDelegateImplLinux::OnDidCreateTemporaryFileToCopyFileLocal,
           weak_ptr_factory_.GetWeakPtr(), source_file_path, device_file_path,
@@ -1220,7 +1223,7 @@ void MTPDeviceDelegateImplLinux::OnDidReadDirectoryToCreateDirectory(
     const bool exclusive,
     const CreateDirectorySuccessCallback& success_callback,
     const ErrorCallback& error_callback,
-    const storage::AsyncFileUtil::EntryList& /* entries */,
+    storage::AsyncFileUtil::EntryList /* entries */,
     const bool has_more) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
@@ -1512,10 +1515,9 @@ void MTPDeviceDelegateImplLinux::OnGetDestFileInfoErrorToCopyFileFromLocal(
     return;
   }
 
-  content::BrowserThread::PostTaskAndReplyWithResult(
-      content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&OpenFileDescriptor, source_file_path.value().c_str(),
-                 O_RDONLY),
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::Bind(&OpenFileDescriptor, source_file_path, O_RDONLY),
       base::Bind(&MTPDeviceDelegateImplLinux::OnDidOpenFDToCopyFileFromLocal,
                  weak_ptr_factory_.GetWeakPtr(), device_file_path,
                  success_callback, error_callback));
@@ -1575,7 +1577,7 @@ void MTPDeviceDelegateImplLinux::OnDidReadDirectory(
   MTPFileNode* dir_node = it->second;
 
   // Traverse the MTPFileNode tree to reconstuct the full path for |dir_id|.
-  std::deque<std::string> dir_path_parts;
+  base::circular_deque<std::string> dir_path_parts;
   MTPFileNode* parent_node = dir_node;
   while (parent_node->parent()) {
     dir_path_parts.push_front(parent_node->file_name());
@@ -1642,7 +1644,7 @@ void MTPDeviceDelegateImplLinux::OnDidReadBytes(
 
 void MTPDeviceDelegateImplLinux::OnDidFillFileCache(
     const base::FilePath& path,
-    const storage::AsyncFileUtil::EntryList& /* entries */,
+    storage::AsyncFileUtil::EntryList /* entries */,
     bool has_more) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   DCHECK(path.IsParent(pending_tasks_.front().path));
@@ -1742,8 +1744,8 @@ void MTPDeviceDelegateImplLinux::OnDidCopyFileFromLocal(
   const base::Closure closure = base::Bind(&CloseFileDescriptor,
                                            source_file_descriptor);
 
-  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-                                   closure);
+  base::PostTaskWithTraits(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND}, closure);
 
   success_callback.Run();
   NotifyFileChange(file_path.DirName(),
@@ -1770,8 +1772,8 @@ void MTPDeviceDelegateImplLinux::HandleCopyFileFromLocalError(
   const base::Closure closure = base::Bind(&CloseFileDescriptor,
                                            source_file_descriptor);
 
-  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-                                   closure);
+  base::PostTaskWithTraits(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND}, closure);
 
   error_callback.Run(error);
   PendingRequestDone();

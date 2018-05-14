@@ -10,19 +10,22 @@
 #include "libANGLE/renderer/vulkan/RendererVk.h"
 
 // Placing this first seems to solve an intellisense bug.
-#include "libANGLE/renderer/vulkan/renderervk_utils.h"
+#include "libANGLE/renderer/vulkan/vk_utils.h"
 
 #include <EGL/eglext.h>
 
 #include "common/debug.h"
 #include "common/system_utils.h"
 #include "libANGLE/renderer/driver_utils.h"
+#include "libANGLE/renderer/vulkan/CommandGraph.h"
 #include "libANGLE/renderer/vulkan/CompilerVk.h"
 #include "libANGLE/renderer/vulkan/FramebufferVk.h"
 #include "libANGLE/renderer/vulkan/GlslangWrapper.h"
+#include "libANGLE/renderer/vulkan/ProgramVk.h"
 #include "libANGLE/renderer/vulkan/TextureVk.h"
 #include "libANGLE/renderer/vulkan/VertexArrayVk.h"
-#include "libANGLE/renderer/vulkan/formatutilsvk.h"
+#include "libANGLE/renderer/vulkan/vk_caps_utils.h"
+#include "libANGLE/renderer/vulkan/vk_format_utils.h"
 #include "platform/Platform.h"
 
 namespace rx
@@ -41,7 +44,7 @@ VkResult VerifyExtensionsPresent(const std::vector<VkExtensionProperties> &exten
         extensionNames.insert(extensionProp.extensionName);
     }
 
-    for (const auto &extensionName : enabledExtensionNames)
+    for (const char *extensionName : enabledExtensionNames)
     {
         if (extensionNames.count(extensionName) == 0)
         {
@@ -52,14 +55,14 @@ VkResult VerifyExtensionsPresent(const std::vector<VkExtensionProperties> &exten
     return VK_SUCCESS;
 }
 
-VkBool32 VKAPI_CALL DebugReportCallback(VkDebugReportFlagsEXT flags,
-                                        VkDebugReportObjectTypeEXT objectType,
-                                        uint64_t object,
-                                        size_t location,
-                                        int32_t messageCode,
-                                        const char *layerPrefix,
-                                        const char *message,
-                                        void *userData)
+VKAPI_ATTR VkBool32 VKAPI_CALL DebugReportCallback(VkDebugReportFlagsEXT flags,
+                                                   VkDebugReportObjectTypeEXT objectType,
+                                                   uint64_t object,
+                                                   size_t location,
+                                                   int32_t messageCode,
+                                                   const char *layerPrefix,
+                                                   const char *message,
+                                                   void *userData)
 {
     if ((flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) != 0)
     {
@@ -82,8 +85,96 @@ VkBool32 VKAPI_CALL DebugReportCallback(VkDebugReportFlagsEXT flags,
     return VK_FALSE;
 }
 
+// If we're loading the validation layers, we could be running from any random directory.
+// Change to the executable directory so we can find the layers, then change back to the
+// previous directory to be safe we don't disrupt the application.
+class ScopedVkLoaderEnvironment : angle::NonCopyable
+{
+  public:
+    ScopedVkLoaderEnvironment(bool enableValidationLayers)
+        : mEnableValidationLayers(enableValidationLayers), mChangedCWD(false)
+    {
+// Changing CWD and setting environment variables makes no sense on Android,
+// since this code is a part of Java application there.
+// Android Vulkan loader doesn't need this either.
+#if !defined(ANGLE_PLATFORM_ANDROID)
+        if (mEnableValidationLayers)
+        {
+            const auto &cwd = angle::GetCWD();
+            if (!cwd.valid())
+            {
+                ERR() << "Error getting CWD for Vulkan layers init.";
+                mEnableValidationLayers = false;
+            }
+            else
+            {
+                mPreviousCWD       = cwd.value();
+                const char *exeDir = angle::GetExecutableDirectory();
+                mChangedCWD        = angle::SetCWD(exeDir);
+                if (!mChangedCWD)
+                {
+                    ERR() << "Error setting CWD for Vulkan layers init.";
+                    mEnableValidationLayers = false;
+                }
+            }
+        }
+
+        // Override environment variable to use the ANGLE layers.
+        if (mEnableValidationLayers)
+        {
+            if (!angle::PrependPathToEnvironmentVar(g_VkLoaderLayersPathEnv, ANGLE_VK_LAYERS_DIR))
+            {
+                ERR() << "Error setting environment for Vulkan layers init.";
+                mEnableValidationLayers = false;
+            }
+        }
+#endif  // !defined(ANGLE_PLATFORM_ANDROID)
+    }
+
+    ~ScopedVkLoaderEnvironment()
+    {
+        if (mChangedCWD)
+        {
+#if !defined(ANGLE_PLATFORM_ANDROID)
+            ASSERT(mPreviousCWD.valid());
+            angle::SetCWD(mPreviousCWD.value().c_str());
+#endif  // !defined(ANGLE_PLATFORM_ANDROID)
+        }
+    }
+
+    bool canEnableValidationLayers() { return mEnableValidationLayers; }
+
+  private:
+    bool mEnableValidationLayers;
+    bool mChangedCWD;
+    Optional<std::string> mPreviousCWD;
+};
+
 }  // anonymous namespace
 
+// CommandBatch implementation.
+RendererVk::CommandBatch::CommandBatch()
+{
+}
+
+RendererVk::CommandBatch::~CommandBatch()
+{
+}
+
+RendererVk::CommandBatch::CommandBatch(CommandBatch &&other)
+    : commandPool(std::move(other.commandPool)), fence(std::move(other.fence)), serial(other.serial)
+{
+}
+
+RendererVk::CommandBatch &RendererVk::CommandBatch::operator=(CommandBatch &&other)
+{
+    std::swap(commandPool, other.commandPool);
+    std::swap(fence, other.fence);
+    std::swap(serial, other.serial);
+    return *this;
+}
+
+// RendererVk implementation.
 RendererVk::RendererVk()
     : mCapsInitialized(false),
       mInstance(VK_NULL_HANDLE),
@@ -93,7 +184,6 @@ RendererVk::RendererVk()
       mQueue(VK_NULL_HANDLE),
       mCurrentQueueFamilyIndex(std::numeric_limits<uint32_t>::max()),
       mDevice(VK_NULL_HANDLE),
-      mHostVisibleMemoryIndex(std::numeric_limits<uint32_t>::max()),
       mGlslangWrapper(nullptr),
       mLastCompletedQueueSerial(mQueueSerialFactory.generate()),
       mCurrentQueueSerial(mQueueSerialFactory.generate()),
@@ -103,24 +193,30 @@ RendererVk::RendererVk()
 
 RendererVk::~RendererVk()
 {
-    if (!mInFlightCommands.empty() || !mInFlightFences.empty() || !mGarbage.empty())
+    if (!mInFlightCommands.empty() || !mGarbage.empty())
     {
-        vk::Error error = finish();
+        // TODO(jmadill): Not nice to pass nullptr here, but shouldn't be a problem.
+        vk::Error error = finish(nullptr);
         if (error.isError())
         {
             ERR() << "Error during VK shutdown: " << error;
         }
     }
 
+    for (auto &descriptorSetLayout : mGraphicsDescriptorSetLayouts)
+    {
+        descriptorSetLayout.destroy(mDevice);
+    }
+
+    mGraphicsPipelineLayout.destroy(mDevice);
+
+    mRenderPassCache.destroy(mDevice);
+    mPipelineCache.destroy(mDevice);
+
     if (mGlslangWrapper)
     {
         GlslangWrapper::ReleaseReference();
         mGlslangWrapper = nullptr;
-    }
-
-    if (mCommandBuffer.valid())
-    {
-        mCommandBuffer.destroy(mDevice);
     }
 
     if (mCommandPool.valid())
@@ -154,28 +250,8 @@ RendererVk::~RendererVk()
 
 vk::Error RendererVk::initialize(const egl::AttributeMap &attribs, const char *wsiName)
 {
-    mEnableValidationLayers = ShouldUseDebugLayers(attribs);
-
-    // If we're loading the validation layers, we could be running from any random directory.
-    // Change to the executable directory so we can find the layers, then change back to the
-    // previous directory to be safe we don't disrupt the application.
-    std::string previousCWD;
-
-    if (mEnableValidationLayers)
-    {
-        const auto &cwd = angle::GetCWD();
-        if (!cwd.valid())
-        {
-            ERR() << "Error getting CWD for Vulkan layers init.";
-            mEnableValidationLayers = false;
-        }
-        else
-        {
-            previousCWD = cwd.value();
-        }
-        const char *exeDir = angle::GetExecutableDirectory();
-        angle::SetCWD(exeDir);
-    }
+    ScopedVkLoaderEnvironment scopedEnvironment(ShouldUseDebugLayers(attribs));
+    mEnableValidationLayers = scopedEnvironment.canEnableValidationLayers();
 
     // Gather global layer properties.
     uint32_t instanceLayerCount = 0;
@@ -198,23 +274,14 @@ vk::Error RendererVk::initialize(const egl::AttributeMap &attribs, const char *w
                                                             instanceExtensionProps.data()));
     }
 
+    const char *const *enabledLayerNames = nullptr;
+    uint32_t enabledLayerCount           = 0;
     if (mEnableValidationLayers)
     {
-        // Verify the standard validation layers are available.
-        if (!HasStandardValidationLayer(instanceLayerProps))
-        {
-            // Generate an error if the attribute was requested, warning otherwise.
-            if (attribs.get(EGL_PLATFORM_ANGLE_DEBUG_LAYERS_ENABLED_ANGLE, EGL_DONT_CARE) ==
-                EGL_TRUE)
-            {
-                ERR() << "Vulkan standard validation layers are missing.";
-            }
-            else
-            {
-                WARN() << "Vulkan standard validation layers are missing.";
-            }
-            mEnableValidationLayers = false;
-        }
+        bool layersRequested =
+            (attribs.get(EGL_PLATFORM_ANGLE_DEBUG_LAYERS_ENABLED_ANGLE, EGL_DONT_CARE) == EGL_TRUE);
+        mEnableValidationLayers = GetAvailableValidationLayers(
+            instanceLayerProps, layersRequested, &enabledLayerNames, &enabledLayerCount);
     }
 
     std::vector<const char *> enabledInstanceExtensions;
@@ -249,18 +316,13 @@ vk::Error RendererVk::initialize(const egl::AttributeMap &attribs, const char *w
     instanceInfo.enabledExtensionCount = static_cast<uint32_t>(enabledInstanceExtensions.size());
     instanceInfo.ppEnabledExtensionNames =
         enabledInstanceExtensions.empty() ? nullptr : enabledInstanceExtensions.data();
-    instanceInfo.enabledLayerCount = mEnableValidationLayers ? 1u : 0u;
-    instanceInfo.ppEnabledLayerNames =
-        mEnableValidationLayers ? &g_VkStdValidationLayerName : nullptr;
+    instanceInfo.enabledLayerCount   = enabledLayerCount;
+    instanceInfo.ppEnabledLayerNames = enabledLayerNames;
 
     ANGLE_VK_TRY(vkCreateInstance(&instanceInfo, nullptr, &mInstance));
 
     if (mEnableValidationLayers)
     {
-        // Change back to the previous working directory now that we've loaded the instance -
-        // the validation layers should be loaded at this point.
-        angle::SetCWD(previousCWD.c_str());
-
         VkDebugReportCallbackCreateInfoEXT debugReportInfo;
 
         debugReportInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
@@ -324,23 +386,17 @@ vk::Error RendererVk::initialize(const egl::AttributeMap &attribs, const char *w
         ANGLE_TRY(initializeDevice(firstGraphicsQueueFamily));
     }
 
-    VkPhysicalDeviceMemoryProperties memoryProperties;
-    vkGetPhysicalDeviceMemoryProperties(mPhysicalDevice, &memoryProperties);
-
-    for (uint32_t memoryIndex = 0; memoryIndex < memoryProperties.memoryTypeCount; ++memoryIndex)
-    {
-        if ((memoryProperties.memoryTypes[memoryIndex].propertyFlags &
-             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0)
-        {
-            mHostVisibleMemoryIndex = memoryIndex;
-            break;
-        }
-    }
-
-    ANGLE_VK_CHECK(mHostVisibleMemoryIndex < std::numeric_limits<uint32_t>::max(),
-                   VK_ERROR_INITIALIZATION_FAILED);
+    // Store the physical device memory properties so we can find the right memory pools.
+    mMemoryProperties.init(mPhysicalDevice);
 
     mGlslangWrapper = GlslangWrapper::GetReference();
+
+    // Initialize the format table.
+    mFormatTable.initialize(mPhysicalDevice, &mNativeTextureCaps,
+                            &mNativeCaps.compressedTextureFormats);
+
+    // Initialize the pipeline layout for GL programs.
+    ANGLE_TRY(initGraphicsPipelineLayout());
 
     return vk::NoError();
 }
@@ -368,13 +424,12 @@ vk::Error RendererVk::initializeDevice(uint32_t queueFamilyIndex)
             mPhysicalDevice, nullptr, &deviceExtensionCount, deviceExtensionProps.data()));
     }
 
+    const char *const *enabledLayerNames = nullptr;
+    uint32_t enabledLayerCount           = 0;
     if (mEnableValidationLayers)
     {
-        if (!HasStandardValidationLayer(deviceLayerProps))
-        {
-            WARN() << "Vulkan standard validation layer is missing.";
-            mEnableValidationLayers = false;
-        }
+        mEnableValidationLayers = GetAvailableValidationLayers(
+            deviceLayerProps, false, &enabledLayerNames, &enabledLayerCount);
     }
 
     std::vector<const char *> enabledDeviceExtensions;
@@ -401,9 +456,8 @@ vk::Error RendererVk::initializeDevice(uint32_t queueFamilyIndex)
     createInfo.flags                = 0;
     createInfo.queueCreateInfoCount = 1;
     createInfo.pQueueCreateInfos    = &queueCreateInfo;
-    createInfo.enabledLayerCount    = mEnableValidationLayers ? 1u : 0u;
-    createInfo.ppEnabledLayerNames =
-        mEnableValidationLayers ? &g_VkStdValidationLayerName : nullptr;
+    createInfo.enabledLayerCount     = enabledLayerCount;
+    createInfo.ppEnabledLayerNames   = enabledLayerNames;
     createInfo.enabledExtensionCount = static_cast<uint32_t>(enabledDeviceExtensions.size());
     createInfo.ppEnabledExtensionNames =
         enabledDeviceExtensions.empty() ? nullptr : enabledDeviceExtensions.data();
@@ -417,15 +471,12 @@ vk::Error RendererVk::initializeDevice(uint32_t queueFamilyIndex)
 
     // Initialize the command pool now that we know the queue family index.
     VkCommandPoolCreateInfo commandPoolInfo;
-    commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    commandPoolInfo.pNext = nullptr;
-    // TODO(jmadill): Investigate transient command buffers.
-    commandPoolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    commandPoolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    commandPoolInfo.pNext            = nullptr;
+    commandPoolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     commandPoolInfo.queueFamilyIndex = mCurrentQueueFamilyIndex;
 
     ANGLE_TRY(mCommandPool.init(mDevice, commandPoolInfo));
-
-    mCommandBuffer.setCommandPool(&mCommandPool);
 
     return vk::NoError();
 }
@@ -512,25 +563,10 @@ void RendererVk::ensureCapsInitialized() const
 {
     if (!mCapsInitialized)
     {
-        generateCaps(&mNativeCaps, &mNativeTextureCaps, &mNativeExtensions, &mNativeLimitations);
+        vk::GenerateCaps(mPhysicalDeviceProperties, mNativeTextureCaps, &mNativeCaps,
+                         &mNativeExtensions, &mNativeLimitations);
         mCapsInitialized = true;
     }
-}
-
-void RendererVk::generateCaps(gl::Caps *outCaps,
-                              gl::TextureCapsMap * /*outTextureCaps*/,
-                              gl::Extensions *outExtensions,
-                              gl::Limitations * /* outLimitations */) const
-{
-    // TODO(jmadill): Caps.
-    outCaps->maxDrawBuffers      = 1;
-    outCaps->maxVertexAttributes     = gl::MAX_VERTEX_ATTRIBS;
-    outCaps->maxVertexAttribBindings = gl::MAX_VERTEX_ATTRIB_BINDINGS;
-
-    // Enable this for simple buffer readback testing, but some functionality is missing.
-    // TODO(jmadill): Support full mapBufferRange extension.
-    outExtensions->mapBuffer      = true;
-    outExtensions->mapBufferRange = true;
 }
 
 const gl::Caps &RendererVk::getNativeCaps() const
@@ -557,74 +593,32 @@ const gl::Limitations &RendererVk::getNativeLimitations() const
     return mNativeLimitations;
 }
 
-vk::Error RendererVk::getStartedCommandBuffer(vk::CommandBuffer **commandBufferOut)
+const vk::CommandPool &RendererVk::getCommandPool() const
 {
-    ANGLE_TRY(mCommandBuffer.begin(mDevice));
-    *commandBufferOut = &mCommandBuffer;
-    return vk::NoError();
+    return mCommandPool;
 }
 
-vk::Error RendererVk::submitCommandBuffer(vk::CommandBuffer *commandBuffer)
+vk::Error RendererVk::finish(const gl::Context *context)
 {
-    ANGLE_TRY(commandBuffer->end());
+    if (!mCommandGraph.empty())
+    {
+        vk::CommandBuffer commandBatch;
+        ANGLE_TRY(flushCommandGraph(context, &commandBatch));
 
-    VkFenceCreateInfo fenceInfo;
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.pNext = nullptr;
-    fenceInfo.flags = 0;
+        VkSubmitInfo submitInfo;
+        submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pNext                = nullptr;
+        submitInfo.waitSemaphoreCount   = 0;
+        submitInfo.pWaitSemaphores      = nullptr;
+        submitInfo.pWaitDstStageMask    = nullptr;
+        submitInfo.commandBufferCount   = 1;
+        submitInfo.pCommandBuffers      = commandBatch.ptr();
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.pSignalSemaphores    = nullptr;
 
-    VkSubmitInfo submitInfo;
-    submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext                = nullptr;
-    submitInfo.waitSemaphoreCount   = 0;
-    submitInfo.pWaitSemaphores      = nullptr;
-    submitInfo.pWaitDstStageMask    = nullptr;
-    submitInfo.commandBufferCount   = 1;
-    submitInfo.pCommandBuffers      = commandBuffer->ptr();
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores    = nullptr;
+        ANGLE_TRY(submitFrame(submitInfo, std::move(commandBatch)));
+    }
 
-    // TODO(jmadill): Investigate how to properly submit command buffers.
-    ANGLE_TRY(submit(submitInfo));
-
-    return vk::NoError();
-}
-
-vk::Error RendererVk::submitAndFinishCommandBuffer(vk::CommandBuffer *commandBuffer)
-{
-    ANGLE_TRY(submitCommandBuffer(commandBuffer));
-    ANGLE_TRY(finish());
-
-    return vk::NoError();
-}
-
-vk::Error RendererVk::submitCommandsWithSync(vk::CommandBuffer *commandBuffer,
-                                             const vk::Semaphore &waitSemaphore,
-                                             const vk::Semaphore &signalSemaphore)
-{
-    ANGLE_TRY(commandBuffer->end());
-
-    VkPipelineStageFlags waitStageMask  = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-
-    VkSubmitInfo submitInfo;
-    submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext                = nullptr;
-    submitInfo.waitSemaphoreCount   = 1;
-    submitInfo.pWaitSemaphores      = waitSemaphore.ptr();
-    submitInfo.pWaitDstStageMask    = &waitStageMask;
-    submitInfo.commandBufferCount   = 1;
-    submitInfo.pCommandBuffers      = commandBuffer->ptr();
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores    = signalSemaphore.ptr();
-
-    // TODO(jmadill): Investigate how to properly queue command buffer work.
-    ANGLE_TRY(submitFrame(submitInfo));
-
-    return vk::NoError();
-}
-
-vk::Error RendererVk::finish()
-{
     ASSERT(mQueue != VK_NULL_HANDLE);
     ANGLE_VK_TRY(vkQueueWaitIdle(mQueue));
     freeAllInFlightResources();
@@ -633,72 +627,45 @@ vk::Error RendererVk::finish()
 
 void RendererVk::freeAllInFlightResources()
 {
-    for (auto &fence : mInFlightFences)
+    for (CommandBatch &batch : mInFlightCommands)
     {
-        fence.destroy(mDevice);
-    }
-    mInFlightFences.clear();
-
-    for (auto &command : mInFlightCommands)
-    {
-        command.destroy(mDevice);
+        batch.fence.destroy(mDevice);
+        batch.commandPool.destroy(mDevice);
     }
     mInFlightCommands.clear();
 
     for (auto &garbage : mGarbage)
     {
-        garbage->destroy(mDevice);
+        garbage.destroy(mDevice);
     }
     mGarbage.clear();
 }
 
 vk::Error RendererVk::checkInFlightCommands()
 {
-    size_t finishedIndex = 0;
+    int finishedCount = 0;
 
-    // Check if any in-flight command buffers are finished.
-    for (size_t index = 0; index < mInFlightFences.size(); index++)
+    for (CommandBatch &batch : mInFlightCommands)
     {
-        auto *inFlightFence = &mInFlightFences[index];
-
-        VkResult result = inFlightFence->get().getStatus(mDevice);
+        VkResult result = batch.fence.getStatus(mDevice);
         if (result == VK_NOT_READY)
             break;
+
         ANGLE_VK_TRY(result);
-        finishedIndex = index + 1;
+        ASSERT(batch.serial > mLastCompletedQueueSerial);
+        mLastCompletedQueueSerial = batch.serial;
 
-        // Release the fence handle.
-        // TODO(jmadill): Re-use fences.
-        inFlightFence->destroy(mDevice);
+        batch.fence.destroy(mDevice);
+        batch.commandPool.destroy(mDevice);
+        ++finishedCount;
     }
 
-    if (finishedIndex == 0)
-        return vk::NoError();
-
-    Serial finishedSerial = mInFlightFences[finishedIndex - 1].queueSerial();
-    mInFlightFences.erase(mInFlightFences.begin(), mInFlightFences.begin() + finishedIndex);
-
-    size_t completedCBIndex = 0;
-    for (size_t cbIndex = 0; cbIndex < mInFlightCommands.size(); ++cbIndex)
-    {
-        auto *inFlightCB = &mInFlightCommands[cbIndex];
-        if (inFlightCB->queueSerial() > finishedSerial)
-            break;
-
-        completedCBIndex = cbIndex + 1;
-        inFlightCB->destroy(mDevice);
-    }
-
-    if (completedCBIndex == 0)
-        return vk::NoError();
-
-    mInFlightCommands.erase(mInFlightCommands.begin(),
-                            mInFlightCommands.begin() + completedCBIndex);
+    mInFlightCommands.erase(mInFlightCommands.begin(), mInFlightCommands.begin() + finishedCount);
 
     size_t freeIndex = 0;
     for (; freeIndex < mGarbage.size(); ++freeIndex)
     {
-        if (!mGarbage[freeIndex]->destroyIfComplete(mDevice, finishedSerial))
+        if (!mGarbage[freeIndex].destroyIfComplete(mDevice, mLastCompletedQueueSerial))
             break;
     }
 
@@ -711,38 +678,23 @@ vk::Error RendererVk::checkInFlightCommands()
     return vk::NoError();
 }
 
-vk::Error RendererVk::submit(const VkSubmitInfo &submitInfo)
+vk::Error RendererVk::submitFrame(const VkSubmitInfo &submitInfo, vk::CommandBuffer &&commandBuffer)
 {
-    ANGLE_VK_TRY(vkQueueSubmit(mQueue, 1, &submitInfo, VK_NULL_HANDLE));
+    VkFenceCreateInfo fenceInfo;
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.pNext = nullptr;
+    fenceInfo.flags = 0;
+
+    CommandBatch batch;
+    ANGLE_TRY(batch.fence.init(mDevice, fenceInfo));
+
+    ANGLE_VK_TRY(vkQueueSubmit(mQueue, 1, &submitInfo, batch.fence.getHandle()));
 
     // Store this command buffer in the in-flight list.
-    mInFlightCommands.emplace_back(std::move(mCommandBuffer), mCurrentQueueSerial);
+    batch.commandPool = std::move(mCommandPool);
+    batch.serial      = mCurrentQueueSerial;
 
-    // Sanity check.
-    ASSERT(mInFlightCommands.size() < 1000u);
-
-    // Increment the queue serial. If this fails, we should restart ANGLE.
-    // TODO(jmadill): Overflow check.
-    mCurrentQueueSerial = mQueueSerialFactory.generate();
-
-    return vk::NoError();
-}
-
-vk::Error RendererVk::submitFrame(const VkSubmitInfo &submitInfo)
-{
-    VkFenceCreateInfo createInfo;
-    createInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    createInfo.pNext = nullptr;
-    createInfo.flags = 0;
-
-    vk::Fence fence;
-    ANGLE_TRY(fence.init(mDevice, createInfo));
-
-    ANGLE_VK_TRY(vkQueueSubmit(mQueue, 1, &submitInfo, fence.getHandle()));
-
-    // Store this command buffer in the in-flight list.
-    mInFlightFences.emplace_back(std::move(fence), mCurrentQueueSerial);
-    mInFlightCommands.emplace_back(std::move(mCommandBuffer), mCurrentQueueSerial);
+    mInFlightCommands.emplace_back(std::move(batch));
 
     // Sanity check.
     ASSERT(mInFlightCommands.size() < 1000u);
@@ -753,18 +705,18 @@ vk::Error RendererVk::submitFrame(const VkSubmitInfo &submitInfo)
 
     ANGLE_TRY(checkInFlightCommands());
 
-    return vk::NoError();
-}
+    // Simply null out the command buffer here - it was allocated using the command pool.
+    commandBuffer.releaseHandle();
 
-vk::Error RendererVk::createStagingImage(TextureDimension dimension,
-                                         const vk::Format &format,
-                                         const gl::Extents &extent,
-                                         vk::StagingImage *imageOut)
-{
-    ASSERT(mHostVisibleMemoryIndex != std::numeric_limits<uint32_t>::max());
+    // Reallocate the command pool for next frame.
+    // TODO(jmadill): Consider reusing command pools.
+    VkCommandPoolCreateInfo poolInfo;
+    poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.pNext            = nullptr;
+    poolInfo.flags            = 0;
+    poolInfo.queueFamilyIndex = mCurrentQueueFamilyIndex;
 
-    ANGLE_TRY(imageOut->init(mDevice, mCurrentQueueFamilyIndex, mHostVisibleMemoryIndex, dimension,
-                             format.native, extent));
+    mCommandPool.init(mDevice, poolInfo);
 
     return vk::NoError();
 }
@@ -777,6 +729,188 @@ GlslangWrapper *RendererVk::getGlslangWrapper()
 Serial RendererVk::getCurrentQueueSerial() const
 {
     return mCurrentQueueSerial;
+}
+
+bool RendererVk::isResourceInUse(const ResourceVk &resource)
+{
+    return isSerialInUse(resource.getQueueSerial());
+}
+
+bool RendererVk::isSerialInUse(Serial serial)
+{
+    return serial > mLastCompletedQueueSerial;
+}
+
+vk::Error RendererVk::getCompatibleRenderPass(const vk::RenderPassDesc &desc,
+                                              vk::RenderPass **renderPassOut)
+{
+    return mRenderPassCache.getCompatibleRenderPass(mDevice, mCurrentQueueSerial, desc,
+                                                    renderPassOut);
+}
+
+vk::Error RendererVk::getRenderPassWithOps(const vk::RenderPassDesc &desc,
+                                           const vk::AttachmentOpsArray &ops,
+                                           vk::RenderPass **renderPassOut)
+{
+    return mRenderPassCache.getRenderPassWithOps(mDevice, mCurrentQueueSerial, desc, ops,
+                                                 renderPassOut);
+}
+
+vk::CommandGraphNode *RendererVk::allocateCommandNode()
+{
+    return mCommandGraph.allocateNode();
+}
+
+vk::Error RendererVk::flushCommandGraph(const gl::Context *context, vk::CommandBuffer *commandBatch)
+{
+    return mCommandGraph.submitCommands(mDevice, mCurrentQueueSerial, &mRenderPassCache,
+                                        &mCommandPool, commandBatch);
+}
+
+vk::Error RendererVk::flush(const gl::Context *context,
+                            const vk::Semaphore &waitSemaphore,
+                            const vk::Semaphore &signalSemaphore)
+{
+    vk::CommandBuffer commandBatch;
+    ANGLE_TRY(flushCommandGraph(context, &commandBatch));
+
+    VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext                = nullptr;
+    submitInfo.waitSemaphoreCount   = 1;
+    submitInfo.pWaitSemaphores      = waitSemaphore.ptr();
+    submitInfo.pWaitDstStageMask    = &waitStageMask;
+    submitInfo.commandBufferCount   = 1;
+    submitInfo.pCommandBuffers      = commandBatch.ptr();
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores    = signalSemaphore.ptr();
+
+    ANGLE_TRY(submitFrame(submitInfo, std::move(commandBatch)));
+    return vk::NoError();
+}
+
+const vk::PipelineLayout &RendererVk::getGraphicsPipelineLayout() const
+{
+    return mGraphicsPipelineLayout;
+}
+
+const std::vector<vk::DescriptorSetLayout> &RendererVk::getGraphicsDescriptorSetLayouts() const
+{
+    return mGraphicsDescriptorSetLayouts;
+}
+
+vk::Error RendererVk::initGraphicsPipelineLayout()
+{
+    ASSERT(!mGraphicsPipelineLayout.valid());
+
+    // Create two descriptor set layouts: one for default uniform info, and one for textures.
+    // Skip one or both if there are no uniforms.
+    VkDescriptorSetLayoutBinding uniformBindings[2];
+    uint32_t blockCount = 0;
+
+    {
+        auto &layoutBinding = uniformBindings[blockCount];
+
+        layoutBinding.binding            = blockCount;
+        layoutBinding.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        layoutBinding.descriptorCount    = 1;
+        layoutBinding.stageFlags         = VK_SHADER_STAGE_VERTEX_BIT;
+        layoutBinding.pImmutableSamplers = nullptr;
+
+        blockCount++;
+    }
+
+    {
+        auto &layoutBinding = uniformBindings[blockCount];
+
+        layoutBinding.binding            = blockCount;
+        layoutBinding.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        layoutBinding.descriptorCount    = 1;
+        layoutBinding.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
+        layoutBinding.pImmutableSamplers = nullptr;
+
+        blockCount++;
+    }
+
+    {
+        VkDescriptorSetLayoutCreateInfo uniformInfo;
+        uniformInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        uniformInfo.pNext        = nullptr;
+        uniformInfo.flags        = 0;
+        uniformInfo.bindingCount = blockCount;
+        uniformInfo.pBindings    = uniformBindings;
+
+        vk::DescriptorSetLayout uniformLayout;
+        ANGLE_TRY(uniformLayout.init(mDevice, uniformInfo));
+        mGraphicsDescriptorSetLayouts.push_back(std::move(uniformLayout));
+    }
+
+    // TODO(lucferron): expose this limitation to GL in Context Caps
+    std::vector<VkDescriptorSetLayoutBinding> textureBindings(
+        std::min<size_t>(mPhysicalDeviceProperties.limits.maxPerStageDescriptorSamplers,
+                         gl::IMPLEMENTATION_MAX_ACTIVE_TEXTURES));
+
+    // TODO(jmadill): This approach might not work well for texture arrays.
+    for (uint32_t textureIndex = 0; textureIndex < textureBindings.size(); ++textureIndex)
+    {
+        VkDescriptorSetLayoutBinding &layoutBinding = textureBindings[textureIndex];
+
+        layoutBinding.binding         = textureIndex;
+        layoutBinding.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        layoutBinding.descriptorCount = 1;
+        layoutBinding.stageFlags      = (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+        layoutBinding.pImmutableSamplers = nullptr;
+    }
+
+    {
+        VkDescriptorSetLayoutCreateInfo textureInfo;
+        textureInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        textureInfo.pNext        = nullptr;
+        textureInfo.flags        = 0;
+        textureInfo.bindingCount = static_cast<uint32_t>(textureBindings.size());
+        textureInfo.pBindings    = textureBindings.data();
+
+        vk::DescriptorSetLayout textureLayout;
+        ANGLE_TRY(textureLayout.init(mDevice, textureInfo));
+        mGraphicsDescriptorSetLayouts.push_back(std::move(textureLayout));
+    }
+
+    VkPipelineLayoutCreateInfo createInfo;
+    createInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    createInfo.pNext                  = nullptr;
+    createInfo.flags                  = 0;
+    createInfo.setLayoutCount         = static_cast<uint32_t>(mGraphicsDescriptorSetLayouts.size());
+    createInfo.pSetLayouts            = mGraphicsDescriptorSetLayouts[0].ptr();
+    createInfo.pushConstantRangeCount = 0;
+    createInfo.pPushConstantRanges    = nullptr;
+
+    ANGLE_TRY(mGraphicsPipelineLayout.init(mDevice, createInfo));
+
+    return vk::NoError();
+}
+
+Serial RendererVk::issueProgramSerial()
+{
+    return mProgramSerialFactory.generate();
+}
+
+vk::Error RendererVk::getPipeline(const ProgramVk *programVk,
+                                  const vk::PipelineDesc &desc,
+                                  const gl::AttributesMask &activeAttribLocationsMask,
+                                  vk::PipelineAndSerial **pipelineOut)
+{
+    ASSERT(programVk->getVertexModuleSerial() == desc.getShaderStageInfo()[0].moduleSerial);
+    ASSERT(programVk->getFragmentModuleSerial() == desc.getShaderStageInfo()[1].moduleSerial);
+
+    // Pull in a compatible RenderPass.
+    vk::RenderPass *compatibleRenderPass = nullptr;
+    ANGLE_TRY(getCompatibleRenderPass(desc.getRenderPassDesc(), &compatibleRenderPass));
+
+    return mPipelineCache.getPipeline(mDevice, *compatibleRenderPass, mGraphicsPipelineLayout,
+                                      activeAttribLocationsMask, programVk->getLinkedVertexModule(),
+                                      programVk->getLinkedFragmentModule(), desc, pipelineOut);
 }
 
 }  // namespace rx

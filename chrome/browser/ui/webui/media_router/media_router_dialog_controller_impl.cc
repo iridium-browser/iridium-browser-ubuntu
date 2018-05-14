@@ -12,17 +12,18 @@
 #include "base/macros.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "chrome/browser/media/router/media_router_ui_service.h"
-#include "chrome/browser/media/router/presentation_service_delegate_impl.h"
+#include "chrome/browser/media/router/presentation/presentation_service_delegate_impl.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/toolbar/media_router_action.h"
 #include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/browser/ui/webui/media_router/media_router_ui.h"
+#include "chrome/browser/ui/webui/media_router/media_router_ui_service.h"
 #include "chrome/common/url_constants.h"
 #include "components/guest_view/browser/guest_view_base.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -262,6 +263,12 @@ void MediaRouterDialogControllerImpl::CreateMediaRouterDialog() {
                                       "WebContents created",
                                       media_router_dialog);
 
+  // Clear the zoom level for the dialog so that it is not affected by the page
+  // zoom setting.
+  const GURL dialog_url = web_dialog_delegate->GetDialogContentURL();
+  content::HostZoomMap::Get(media_router_dialog->GetSiteInstance())
+      ->SetZoomLevelForHostAndScheme(dialog_url.scheme(), dialog_url.host(), 0);
+
   // |media_router_ui| is created when |constrained_delegate| is created.
   // For tests, GetWebUI() returns a nullptr.
   if (media_router_dialog->GetWebUI()) {
@@ -273,8 +280,8 @@ void MediaRouterDialogControllerImpl::CreateMediaRouterDialog() {
 
   media_router_dialog_pending_ = true;
 
-  dialog_observer_.reset(new DialogWebContentsObserver(
-      media_router_dialog, this));
+  dialog_observer_ =
+      std::make_unique<DialogWebContentsObserver>(media_router_dialog, this);
 
   // The |action_controller_| must be notified after |action_| to avoid a UI
   // bug in which the drop shadow is drawn in an incorrect position.
@@ -327,15 +334,14 @@ void MediaRouterDialogControllerImpl::PopulateDialog(
       media_router_dialog->GetWebUI()->GetController());
   DCHECK(media_router_ui);
 
-  std::unique_ptr<CreatePresentationConnectionRequest>
-      create_connection_request(TakeCreateConnectionRequest());
+  auto start_presentation_context = std::move(start_presentation_context_);
   PresentationServiceDelegateImpl* delegate =
       PresentationServiceDelegateImpl::FromWebContents(initiator());
-  if (!create_connection_request.get()) {
+  if (!start_presentation_context) {
     media_router_ui->InitWithDefaultMediaSource(initiator(), delegate);
   } else {
-    media_router_ui->InitWithPresentationSessionRequest(
-        initiator(), delegate, std::move(create_connection_request));
+    media_router_ui->InitWithStartPresentationContext(
+        initiator(), delegate, std::move(start_presentation_context));
   }
 }
 

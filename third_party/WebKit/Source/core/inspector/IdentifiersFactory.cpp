@@ -27,6 +27,7 @@
 
 #include "core/dom/WeakIdentifierMap.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/inspector/InspectedFrames.h"
 #include "core/loader/DocumentLoader.h"
 #include "platform/wtf/Assertions.h"
@@ -48,43 +49,52 @@ String IdentifiersFactory::CreateIdentifier() {
 }
 
 // static
-String IdentifiersFactory::RequestId(unsigned long identifier) {
-  return identifier ? AddProcessIdPrefixTo(identifier) : String();
+String IdentifiersFactory::RequestId(DocumentLoader* loader,
+                                     unsigned long identifier) {
+  if (!identifier)
+    return String();
+  if (loader && loader->MainResourceIdentifier() == identifier)
+    return LoaderId(loader);
+  return AddProcessIdPrefixTo(identifier);
 }
 
 // static
-String IdentifiersFactory::FrameId(LocalFrame* frame) {
-  return AddProcessIdPrefixTo(WeakIdentifierMap<LocalFrame>::Identifier(frame));
+String IdentifiersFactory::SubresourceRequestId(unsigned long identifier) {
+  return RequestId(nullptr, identifier);
+}
+
+// static
+String IdentifiersFactory::FrameId(Frame* frame) {
+  return frame ? IdFromToken(frame->GetDevToolsFrameToken()) : g_empty_string;
 }
 
 // static
 LocalFrame* IdentifiersFactory::FrameById(InspectedFrames* inspected_frames,
                                           const String& frame_id) {
-  bool ok;
-  int id = RemoveProcessIdPrefixFrom(frame_id, &ok);
-  if (!ok)
-    return nullptr;
-  LocalFrame* frame = WeakIdentifierMap<LocalFrame>::Lookup(id);
-  return frame && inspected_frames->Contains(frame) ? frame : nullptr;
+  for (auto* frame : *inspected_frames) {
+    if (frame->Client() &&
+        frame_id == IdFromToken(frame->GetDevToolsFrameToken())) {
+      return frame;
+    }
+  }
+  return nullptr;
 }
 
 // static
 String IdentifiersFactory::LoaderId(DocumentLoader* loader) {
-  return AddProcessIdPrefixTo(
-      WeakIdentifierMap<DocumentLoader>::Identifier(loader));
+  if (!loader)
+    return g_empty_string;
+  const base::UnguessableToken& token = loader->GetDevToolsNavigationToken();
+  // token.ToString() is latin1.
+  return String(token.ToString().c_str());
 }
 
 // static
-DocumentLoader* IdentifiersFactory::LoaderById(
-    InspectedFrames* inspected_frames,
-    const String& loader_id) {
-  bool ok;
-  int id = RemoveProcessIdPrefixFrom(loader_id, &ok);
-  if (!ok)
-    return nullptr;
-  DocumentLoader* loader = WeakIdentifierMap<DocumentLoader>::Lookup(id);
-  LocalFrame* frame = loader->GetFrame();
-  return frame && inspected_frames->Contains(frame) ? loader : nullptr;
+String IdentifiersFactory::IdFromToken(const base::UnguessableToken& token) {
+  if (token.is_empty())
+    return g_empty_string;
+  // token.ToString() is latin1.
+  return String(token.ToString().c_str());
 }
 
 // static

@@ -31,6 +31,7 @@
 #ifndef MIDIMessageEvent_h
 #define MIDIMessageEvent_h
 
+#include "base/time/time.h"
 #include "core/typed_arrays/DOMTypedArray.h"
 #include "modules/EventModules.h"
 
@@ -42,7 +43,8 @@ class MIDIMessageEvent final : public Event {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static MIDIMessageEvent* Create(double time_stamp, DOMUint8Array* data) {
+  static MIDIMessageEvent* Create(base::TimeTicks time_stamp,
+                                  DOMUint8Array* data) {
     return new MIDIMessageEvent(time_stamp, data);
   }
 
@@ -57,17 +59,14 @@ class MIDIMessageEvent final : public Event {
     return EventNames::MIDIMessageEvent;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(data_);
     Event::Trace(visitor);
   }
 
  private:
-  MIDIMessageEvent(double time_stamp, DOMUint8Array* data)
-      : Event(EventTypeNames::midimessage,
-              true,
-              false,
-              TimeTicks() + TimeDelta::FromSecondsD(time_stamp)),
+  MIDIMessageEvent(base::TimeTicks time_stamp, DOMUint8Array* data)
+      : Event(EventTypeNames::midimessage, true, false, time_stamp),
         data_(data) {}
 
   MIDIMessageEvent(const AtomicString& type,

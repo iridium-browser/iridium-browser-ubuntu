@@ -5,10 +5,10 @@
 #include "device/bluetooth/bluetooth_socket_net.h"
 
 #include <memory>
-#include <queue>
 #include <string>
 #include <utility>
 
+#include "base/containers/queue.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
@@ -20,6 +20,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/log/net_log_source.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace {
 
@@ -37,7 +38,7 @@ namespace device {
 BluetoothSocketNet::WriteRequest::WriteRequest()
     : buffer_size(0) {}
 
-BluetoothSocketNet::WriteRequest::~WriteRequest() {}
+BluetoothSocketNet::WriteRequest::~WriteRequest() = default;
 
 BluetoothSocketNet::BluetoothSocketNet(
     scoped_refptr<base::SequencedTaskRunner> ui_task_runner,
@@ -137,7 +138,7 @@ void BluetoothSocketNet::PostErrorCompletion(
 
 void BluetoothSocketNet::DoClose() {
   DCHECK(socket_thread_->task_runner()->RunsTasksInCurrentSequence());
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   if (tcp_socket_) {
     tcp_socket_->Close();
@@ -148,7 +149,7 @@ void BluetoothSocketNet::DoClose() {
   // Send/Receive operations, so we can no safely release the state associated
   // to those pending operations.
   read_buffer_ = NULL;
-  std::queue<linked_ptr<WriteRequest> > empty;
+  base::queue<linked_ptr<WriteRequest>> empty;
   std::swap(write_queue_, empty);
 
   ResetData();
@@ -156,7 +157,7 @@ void BluetoothSocketNet::DoClose() {
 
 void BluetoothSocketNet::DoDisconnect(const base::Closure& callback) {
   DCHECK(socket_thread_->task_runner()->RunsTasksInCurrentSequence());
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   DoClose();
   callback.Run();
@@ -167,7 +168,7 @@ void BluetoothSocketNet::DoReceive(
     const ReceiveCompletionCallback& success_callback,
     const ReceiveErrorCompletionCallback& error_callback) {
   DCHECK(socket_thread_->task_runner()->RunsTasksInCurrentSequence());
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   if (!tcp_socket_) {
     error_callback.Run(BluetoothSocket::kDisconnected, kSocketNotConnected);
@@ -201,7 +202,7 @@ void BluetoothSocketNet::OnSocketReadComplete(
     const ReceiveErrorCompletionCallback& error_callback,
     int read_result) {
   DCHECK(socket_thread_->task_runner()->RunsTasksInCurrentSequence());
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   scoped_refptr<net::IOBufferWithSize> buffer;
   buffer.swap(read_buffer_);
@@ -224,7 +225,7 @@ void BluetoothSocketNet::DoSend(
     const SendCompletionCallback& success_callback,
     const ErrorCompletionCallback& error_callback) {
   DCHECK(socket_thread_->task_runner()->RunsTasksInCurrentSequence());
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   if (!tcp_socket_) {
     error_callback.Run(kSocketNotConnected);
@@ -245,7 +246,7 @@ void BluetoothSocketNet::DoSend(
 
 void BluetoothSocketNet::SendFrontWriteRequest() {
   DCHECK(socket_thread_->task_runner()->RunsTasksInCurrentSequence());
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   if (!tcp_socket_)
     return;
@@ -259,8 +260,33 @@ void BluetoothSocketNet::SendFrontWriteRequest() {
                  this,
                  request->success_callback,
                  request->error_callback);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("bluetooth_socket", R"(
+        semantics {
+          sender: "Bluetooth Socket"
+          description:
+            "This socket connects to a bluetooth device for local data "
+            "transfer."
+          trigger:
+            "When user selects to connect to a bluetooth device or communicate "
+            "with it."
+          data:
+            "Any data that needs to be sent to a bluetooth device."
+          destination: OTHER
+          destination_other: "Data is sent to a bluetooth device."
+        }
+        policy {
+          cookies_allowed: NO
+          setting:
+            "This feature cannot be disabled in settings, but it will not be "
+            "used if bluetooth connections are not made."
+          policy_exception_justification:
+            "DeviceAllowBluetooth policy can disable Bluetooth for ChromeOS, "
+            "not implemented for other platforms."
+        })");
   int send_result =
-      tcp_socket_->Write(request->buffer.get(), request->buffer_size, callback);
+      tcp_socket_->Write(request->buffer.get(), request->buffer_size, callback,
+                         traffic_annotation);
   if (send_result != net::ERR_IO_PENDING) {
     callback.Run(send_result);
   }
@@ -271,7 +297,7 @@ void BluetoothSocketNet::OnSocketWriteComplete(
     const ErrorCompletionCallback& error_callback,
     int send_result) {
   DCHECK(socket_thread_->task_runner()->RunsTasksInCurrentSequence());
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   write_queue_.pop();
 

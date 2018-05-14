@@ -34,7 +34,6 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "components/drive/chromeos/file_system_interface.h"
-#include "components/drive/file_system_core_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "content/public/browser/browser_context.h"
@@ -209,8 +208,10 @@ std::unique_ptr<Volume> Volume::CreateForRemovable(
                         : SOURCE_DEVICE;
   volume->mount_path_ = base::FilePath(mount_point.mount_path);
   volume->mount_condition_ = mount_point.mount_condition;
-  volume->volume_label_ = volume->mount_path().BaseName().AsUTF8Unsafe();
+
   if (disk) {
+    volume->file_system_type_ = disk->file_system_type();
+    volume->volume_label_ = disk->device_label();
     volume->device_type_ = disk->device_type();
     volume->system_path_prefix_ = base::FilePath(disk->system_path_prefix());
     volume->is_parent_ = disk->is_parent();
@@ -218,6 +219,7 @@ std::unique_ptr<Volume> Volume::CreateForRemovable(
     volume->is_read_only_removable_device_ = disk->is_read_only_hardware();
     volume->has_media_ = disk->has_media();
   } else {
+    volume->volume_label_ = volume->mount_path().BaseName().AsUTF8Unsafe();
     volume->device_type_ = chromeos::DEVICE_TYPE_UNKNOWN;
     volume->is_read_only_ =
         (mount_point.mount_type == chromeos::MOUNT_TYPE_ARCHIVE);
@@ -234,7 +236,7 @@ std::unique_ptr<Volume> Volume::CreateForProvidedFileSystem(
     MountContext mount_context) {
   std::unique_ptr<Volume> volume(new Volume());
   volume->file_system_id_ = file_system_info.file_system_id();
-  volume->extension_id_ = file_system_info.extension_id();
+  volume->provider_id_ = file_system_info.provider_id();
   switch (file_system_info.source()) {
     case extensions::SOURCE_FILE:
       volume->source_ = SOURCE_FILE;
@@ -256,6 +258,7 @@ std::unique_ptr<Volume> Volume::CreateForProvidedFileSystem(
   volume->configurable_ = file_system_info.configurable();
   volume->watchable_ = file_system_info.watchable();
   volume->volume_id_ = GenerateVolumeId(*volume);
+  volume->icon_set_ = file_system_info.icon_set();
   return volume;
 }
 
@@ -328,7 +331,7 @@ VolumeManager::VolumeManager(
     chromeos::PowerManagerClient* power_manager_client,
     chromeos::disks::DiskMountManager* disk_mount_manager,
     chromeos::file_system_provider::Service* file_system_provider_service,
-    GetMtpStorageInfoCallback get_mtp_storage_info_callback)
+    const GetMtpStorageInfoCallback& get_mtp_storage_info_callback)
     : profile_(profile),
       drive_integration_service_(drive_integration_service),
       disk_mount_manager_(disk_mount_manager),
@@ -527,60 +530,68 @@ void VolumeManager::OnFileSystemBeingUnmounted() {
   DoUnmountEvent(chromeos::MOUNT_ERROR_NONE, *Volume::CreateForDrive(profile_));
 }
 
-void VolumeManager::OnDiskEvent(
+void VolumeManager::OnAutoMountableDiskEvent(
     chromeos::disks::DiskMountManager::DiskEvent event,
-    const chromeos::disks::DiskMountManager::Disk* disk) {
+    const chromeos::disks::DiskMountManager::Disk& disk) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // Disregard hidden devices.
-  if (disk->is_hidden())
+  if (disk.is_hidden())
     return;
 
   switch (event) {
     case chromeos::disks::DiskMountManager::DISK_ADDED:
     case chromeos::disks::DiskMountManager::DISK_CHANGED: {
-      if (disk->device_path().empty()) {
-        DVLOG(1) << "Empty system path for " << disk->device_path();
+      if (disk.device_path().empty()) {
+        DVLOG(1) << "Empty system path for " << disk.device_path();
         return;
       }
 
       bool mounting = false;
-      if (disk->mount_path().empty() && disk->has_media() &&
+      if (disk.mount_path().empty() && disk.has_media() &&
           !profile_->GetPrefs()->GetBoolean(prefs::kExternalStorageDisabled)) {
+        // TODO(crbug.com/774890): Remove |mount_label| when the issue gets
+        // resolved. Currently we suggest a mount point name, because in case
+        // when disk's name contains '#', content will not load in Files App.
+        std::string mount_label = disk.device_label();
+        std::replace(mount_label.begin(), mount_label.end(), '#', '_');
+
         // If disk is not mounted yet and it has media and there is no policy
         // forbidding external storage, give it a try.
         // Initiate disk mount operation. MountPath auto-detects the filesystem
         // format if the second argument is empty. The third argument (mount
         // label) is not used in a disk mount operation.
-        disk_mount_manager_->MountPath(disk->device_path(), std::string(),
-                                       std::string(),
-                                       chromeos::MOUNT_TYPE_DEVICE,
+        disk_mount_manager_->MountPath(disk.device_path(), std::string(),
+                                       mount_label, chromeos::MOUNT_TYPE_DEVICE,
                                        GetExternalStorageAccessMode(profile_));
         mounting = true;
       }
 
       // Notify to observers.
       for (auto& observer : observers_)
-        observer.OnDiskAdded(*disk, mounting);
+        observer.OnDiskAdded(disk, mounting);
       return;
     }
 
     case chromeos::disks::DiskMountManager::DISK_REMOVED:
       // If the disk is already mounted, unmount it.
-      if (!disk->mount_path().empty()) {
+      if (!disk.mount_path().empty()) {
         disk_mount_manager_->UnmountPath(
-            disk->mount_path(),
-            chromeos::UNMOUNT_OPTIONS_LAZY,
+            disk.mount_path(), chromeos::UNMOUNT_OPTIONS_LAZY,
             chromeos::disks::DiskMountManager::UnmountPathCallback());
       }
 
       // Notify to observers.
       for (auto& observer : observers_)
-        observer.OnDiskRemoved(*disk);
+        observer.OnDiskRemoved(disk);
       return;
   }
   NOTREACHED();
 }
+
+void VolumeManager::OnBootDeviceDiskEvent(
+    chromeos::disks::DiskMountManager::DiskEvent event,
+    const chromeos::disks::DiskMountManager::Disk& disk) {}
 
 void VolumeManager::OnDeviceEvent(
     chromeos::disks::DiskMountManager::DeviceEvent event,
@@ -625,8 +636,7 @@ void VolumeManager::OnMountEvent(
           drive::util::GetFileSystemByProfile(profile_);
       if (file_system) {
         file_system->MarkCacheFileAsUnmounted(
-            base::FilePath(mount_info.source_path),
-            base::Bind(&drive::util::EmptyFileOperationCallback));
+            base::FilePath(mount_info.source_path), base::DoNothing());
       }
     }
   }
@@ -678,6 +688,49 @@ void VolumeManager::OnFormatEvent(
         observer.OnFormatCompleted(device_path,
                                    error_code == chromeos::FORMAT_ERROR_NONE);
       }
+
+      return;
+  }
+  NOTREACHED();
+}
+
+void VolumeManager::OnRenameEvent(
+    chromeos::disks::DiskMountManager::RenameEvent event,
+    chromeos::RenameError error_code,
+    const std::string& device_path) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DVLOG(1) << "OnDeviceEvent: " << event << ", " << error_code << ", "
+           << device_path;
+
+  switch (event) {
+    case chromeos::disks::DiskMountManager::RENAME_STARTED:
+      for (auto& observer : observers_) {
+        observer.OnRenameStarted(device_path,
+                                 error_code == chromeos::RENAME_ERROR_NONE);
+      }
+      return;
+    case chromeos::disks::DiskMountManager::RENAME_COMPLETED:
+      // Find previous mount point label if it exists
+      std::string mount_label = "";
+      auto disk_map_iter = disk_mount_manager_->disks().find(device_path);
+      if (disk_map_iter != disk_mount_manager_->disks().end() &&
+          !disk_map_iter->second->base_mount_path().empty()) {
+        mount_label = base::FilePath(disk_map_iter->second->base_mount_path())
+                          .BaseName()
+                          .AsUTF8Unsafe();
+      }
+
+      // Try to mount the device. MountPath auto-detects filesystem format if
+      // second argument is empty. Third argument is a mount point name of the
+      // disk when it was first time mounted (to preserve mount point regardless
+      // of the volume name).
+      disk_mount_manager_->MountPath(device_path, std::string(), mount_label,
+                                     chromeos::MOUNT_TYPE_DEVICE,
+                                     GetExternalStorageAccessMode(profile_));
+
+      bool successfully_renamed = error_code == chromeos::RENAME_ERROR_NONE;
+      for (auto& observer : observers_)
+        observer.OnRenameCompleted(device_path, successfully_renamed);
 
       return;
   }
@@ -811,21 +864,27 @@ void VolumeManager::OnRemovableStorageAttached(
   std::string storage_name;
   base::RemoveChars(info.location(), kRootPath, &storage_name);
   DCHECK(!storage_name.empty());
-
-  const MtpStorageInfo* mtp_storage_info;
   if (get_mtp_storage_info_callback_.is_null()) {
-    mtp_storage_info = storage_monitor::StorageMonitor::GetInstance()
-                           ->media_transfer_protocol_manager()
-                           ->GetStorageInfo(storage_name);
+    storage_monitor::StorageMonitor::GetInstance()
+        ->media_transfer_protocol_manager()
+        ->GetStorageInfo(storage_name,
+                         base::BindOnce(&VolumeManager::DoAttachMtpStorage,
+                                        weak_ptr_factory_.GetWeakPtr(), info));
   } else {
-    mtp_storage_info = get_mtp_storage_info_callback_.Run(storage_name);
+    get_mtp_storage_info_callback_.Run(
+        storage_name, base::BindOnce(&VolumeManager::DoAttachMtpStorage,
+                                     weak_ptr_factory_.GetWeakPtr(), info));
   }
+}
 
+void VolumeManager::DoAttachMtpStorage(
+    const storage_monitor::StorageInfo& info,
+    const device::mojom::MtpStorageInfo* mtp_storage_info) {
   if (!mtp_storage_info) {
-    // mtp_storage_info can be null. e.g. As OnRemovableStorageAttached is
-    // called asynchronously, there can be a race condition where the storage
-    // has been already removed in MediaTransferProtocolManager at the time when
-    // this method is called.
+    // |mtp_storage_info| can be null. e.g. As OnRemovableStorageAttached and
+    // DoAttachMtpStorage are called asynchronously, there can be a race
+    // condition where the storage has been already removed in
+    // MediaTransferProtocolManager at the time when this method is called.
     return;
   }
 
@@ -835,8 +894,8 @@ void VolumeManager::OnRemovableStorageAttached(
   const bool read_only =
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kDisableMtpWriteSupport) ||
-      mtp_storage_info->access_capability() != kAccessCapabilityReadWrite ||
-      mtp_storage_info->filesystem_type() !=
+      mtp_storage_info->access_capability != kAccessCapabilityReadWrite ||
+      mtp_storage_info->filesystem_type !=
           kFilesystemTypeGenericHierarchical ||
       GetExternalStorageAccessMode(profile_) ==
           chromeos::MOUNT_ACCESS_MODE_READ_ONLY;

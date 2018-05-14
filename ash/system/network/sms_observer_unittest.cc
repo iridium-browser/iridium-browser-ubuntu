@@ -4,6 +4,8 @@
 
 #include "ash/system/network/sms_observer.h"
 
+#include <memory>
+
 #include "ash/public/interfaces/vpn_list.mojom.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -12,8 +14,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/notification.h"
 #include "ui/message_center/notification_list.h"
+#include "ui/message_center/public/cpp/notification.h"
 
 using message_center::MessageCenter;
 
@@ -22,11 +24,11 @@ namespace ash {
 namespace {
 
 std::unique_ptr<base::DictionaryValue> CreateMessage(
-    const char* kDefaultMessage = "FakeSMSClient: Test Message.",
+    const char* kDefaultMessage = "FakeSMSClient: \xF0\x9F\x98\x8A",
     const char* kDefaultNumber = "000-000-0000",
     const char* kDefaultTimestamp = "Fri Jun  8 13:26:04 EDT 2016") {
   std::unique_ptr<base::DictionaryValue> sms =
-      base::MakeUnique<base::DictionaryValue>();
+      std::make_unique<base::DictionaryValue>();
   if (kDefaultNumber)
     sms->SetString("number", kDefaultNumber);
   if (kDefaultMessage)
@@ -40,8 +42,8 @@ std::unique_ptr<base::DictionaryValue> CreateMessage(
 
 class SmsObserverTest : public AshTestBase {
  public:
-  SmsObserverTest() {}
-  ~SmsObserverTest() override {}
+  SmsObserverTest() = default;
+  ~SmsObserverTest() override = default;
 
   SmsObserver* GetSmsObserver() { return Shell::Get()->sms_observer_.get(); }
 
@@ -64,7 +66,7 @@ TEST_F(SmsObserverTest, SendTextMessage) {
 
   EXPECT_EQ(base::ASCIIToUTF16("000-000-0000"),
             (*notifications.begin())->title());
-  EXPECT_EQ(base::ASCIIToUTF16("FakeSMSClient: Test Message."),
+  EXPECT_EQ(base::UTF8ToUTF16("FakeSMSClient: \xF0\x9F\x98\x8A"),
             (*notifications.begin())->message());
   MessageCenter::Get()->RemoveAllNotifications(false /* by_user */,
                                                MessageCenter::RemoveType::ALL);

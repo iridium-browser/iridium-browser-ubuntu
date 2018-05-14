@@ -16,17 +16,13 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule;
 import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 /**
  * Tests that CustomTabActivity is hardware accelerated only high-end devices.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class CustomTabActivityHWATest {
     @Rule
     public CustomTabActivityTestRule mCustomTabActivityTestRule = new CustomTabActivityTestRule();
@@ -37,8 +33,7 @@ public class CustomTabActivityHWATest {
     public void testHardwareAcceleration() throws Exception {
         mCustomTabActivityTestRule.startCustomTabActivityWithIntent(
                 CustomTabsTestUtils.createMinimalCustomTabIntent(
-                        InstrumentationRegistry.getInstrumentation().getTargetContext(),
-                        "about:blank"));
+                        InstrumentationRegistry.getTargetContext(), "about:blank"));
         Utils.assertHardwareAcceleration(mCustomTabActivityTestRule.getActivity());
     }
 }

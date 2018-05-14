@@ -28,7 +28,7 @@ scoped_refptr<FakePaintedScrollbarLayer> FakePaintedScrollbarLayer::Create(
   FakeScrollbar* fake_scrollbar =
       new FakeScrollbar(paint_during_update, has_thumb, orientation,
                         is_left_side_vertical_scrollbar, is_overlay);
-  return make_scoped_refptr(
+  return base::WrapRefCounted(
       new FakePaintedScrollbarLayer(fake_scrollbar, scrolling_element_id));
 }
 
@@ -44,7 +44,7 @@ FakePaintedScrollbarLayer::FakePaintedScrollbarLayer(
   SetIsDrawable(true);
 }
 
-FakePaintedScrollbarLayer::~FakePaintedScrollbarLayer() {}
+FakePaintedScrollbarLayer::~FakePaintedScrollbarLayer() = default;
 
 bool FakePaintedScrollbarLayer::Update() {
   bool updated = PaintedScrollbarLayer::Update();
@@ -59,7 +59,7 @@ void FakePaintedScrollbarLayer::PushPropertiesTo(LayerImpl* layer) {
 
 std::unique_ptr<base::AutoReset<bool>>
 FakePaintedScrollbarLayer::IgnoreSetNeedsCommit() {
-  return base::MakeUnique<base::AutoReset<bool>>(&ignore_set_needs_commit_,
+  return std::make_unique<base::AutoReset<bool>>(&ignore_set_needs_commit_,
                                                  true);
 }
 

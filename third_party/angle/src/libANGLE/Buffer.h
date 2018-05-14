@@ -15,6 +15,7 @@
 #include "libANGLE/Debug.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/IndexRangeCache.h"
+#include "libANGLE/PackedGLEnums.h"
 #include "libANGLE/RefCountObject.h"
 
 namespace rx
@@ -36,7 +37,7 @@ class BufferState final : angle::NonCopyable
 
     const std::string &getLabel();
 
-    GLenum getUsage() const { return mUsage; }
+    BufferUsage getUsage() const { return mUsage; }
     GLbitfield getAccessFlags() const { return mAccessFlags; }
     GLenum getAccess() const { return mAccess; }
     GLboolean isMapped() const { return mMapped; }
@@ -50,7 +51,7 @@ class BufferState final : angle::NonCopyable
 
     std::string mLabel;
 
-    GLenum mUsage;
+    BufferUsage mUsage;
     GLint64 mSize;
     GLbitfield mAccessFlags;
     GLenum mAccess;
@@ -65,18 +66,18 @@ class Buffer final : public RefCountObject, public LabeledObject
   public:
     Buffer(rx::GLImplFactory *factory, GLuint id);
     ~Buffer() override;
-    void onDestroy(const Context *context) override;
+    Error onDestroy(const Context *context) override;
 
     void setLabel(const std::string &label) override;
     const std::string &getLabel() const override;
 
     Error bufferData(const Context *context,
-                     GLenum target,
+                     BufferBinding target,
                      const void *data,
                      GLsizeiptr size,
-                     GLenum usage);
+                     BufferUsage usage);
     Error bufferSubData(const Context *context,
-                        GLenum target,
+                        BufferBinding target,
                         const void *data,
                         GLsizeiptr size,
                         GLintptr offset);
@@ -92,13 +93,14 @@ class Buffer final : public RefCountObject, public LabeledObject
     void onTransformFeedback();
     void onPixelUnpack();
 
-    Error getIndexRange(GLenum type,
+    Error getIndexRange(const gl::Context *context,
+                        GLenum type,
                         size_t offset,
                         size_t count,
                         bool primitiveRestartEnabled,
                         IndexRange *outRange) const;
 
-    GLenum getUsage() const { return mState.mUsage; }
+    BufferUsage getUsage() const { return mState.mUsage; }
     GLbitfield getAccessFlags() const { return mState.mAccessFlags; }
     GLenum getAccess() const { return mState.mAccess; }
     GLboolean isMapped() const { return mState.mMapped; }

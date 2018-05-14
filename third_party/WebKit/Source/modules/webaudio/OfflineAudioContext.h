@@ -33,6 +33,7 @@
 namespace blink {
 
 class ExceptionState;
+class OfflineAudioContextOptions;
 class OfflineAudioDestinationHandler;
 
 class MODULES_EXPORT OfflineAudioContext final : public BaseAudioContext {
@@ -45,9 +46,13 @@ class MODULES_EXPORT OfflineAudioContext final : public BaseAudioContext {
                                      float sample_rate,
                                      ExceptionState&);
 
+  static OfflineAudioContext* Create(ExecutionContext*,
+                                     const OfflineAudioContextOptions&,
+                                     ExceptionState&);
+
   ~OfflineAudioContext() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   size_t length() const { return total_render_frames_; }
 
@@ -89,6 +94,9 @@ class MODULES_EXPORT OfflineAudioContext final : public BaseAudioContext {
 
   using OfflineGraphAutoLocker = DeferredTaskHandler::OfflineGraphAutoLocker;
 
+  // Document notification
+  bool HasPendingActivity() const final;
+
  private:
   OfflineAudioContext(Document*,
                       unsigned number_of_channels,
@@ -99,12 +107,8 @@ class MODULES_EXPORT OfflineAudioContext final : public BaseAudioContext {
   // Fetch directly the destination handler.
   OfflineAudioDestinationHandler& DestinationHandler();
 
-  AudioBuffer* RenderTarget() const { return render_target_.Get(); }
-
   // Check if the rendering needs to be suspended.
   bool ShouldSuspend();
-
-  Member<AudioBuffer> render_target_;
 
   // This map is to store the timing of scheduled suspends (frame) and the
   // associated promise resolver. This storage can only be modified by the
@@ -120,9 +124,10 @@ class MODULES_EXPORT OfflineAudioContext final : public BaseAudioContext {
 
   Member<ScriptPromiseResolver> complete_resolver_;
 
-  // This flag is necessary to indicate the rendering has actually started.
-  // Note that initial state of context is 'Suspended', which is the same
-  // state when the context is suspended.
+  // This flag is necessary to indicate the rendering has actually started or
+  // running. Note that initial state of context is 'Suspended', which is the
+  // same state when the context is suspended, so we cannot utilize it for this
+  // purpose.
   bool is_rendering_started_;
 
   // Total render sample length.

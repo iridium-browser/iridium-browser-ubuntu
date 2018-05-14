@@ -30,12 +30,16 @@
 
 #include "core/editing/iterators/TextIterator.h"
 
-#include "core/editing/EditingTestBase.h"
+#include "core/dom/Document.h"
+#include "core/editing/EphemeralRange.h"
+#include "core/editing/SelectionTemplate.h"
+#include "core/editing/testing/EditingTestBase.h"
 #include "core/frame/LocalFrameView.h"
+#include "core/html/forms/TextControlElement.h"
+#include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
 
 namespace blink {
-
-namespace {
+namespace text_iterator_test {
 
 TextIteratorBehavior CollapseTrailingSpaceBehavior() {
   return TextIteratorBehavior::Builder().SetCollapseTrailingSpace(true).Build();
@@ -59,7 +63,11 @@ TextIteratorBehavior EmitsObjectReplacementCharacterBehavior() {
       .Build();
 }
 
-}  // namespace
+TextIteratorBehavior EmitsSmallXForTextSecurityBehavior() {
+  return TextIteratorBehavior::Builder()
+      .SetEmitsSmallXForTextSecurity(true)
+      .Build();
+}
 
 struct DOMTree : NodeTraversal {
   using PositionType = Position;
@@ -128,6 +136,24 @@ Range* TextIteratorTest::GetBodyRange() const {
   return range;
 }
 
+class ParameterizedTextIteratorTest
+    : public ::testing::WithParamInterface<bool>,
+      private ScopedLayoutNGForTest,
+      public TextIteratorTest {
+ public:
+  ParameterizedTextIteratorTest() : ScopedLayoutNGForTest(GetParam()) {}
+
+ protected:
+  bool LayoutNGEnabled() const { return GetParam(); }
+
+  int TestRangeLength(const std::string& selection_text) {
+    return TextIterator::RangeLength(
+        SetSelectionTextToBody(selection_text).ComputeRange());
+  }
+};
+
+INSTANTIATE_TEST_CASE_P(All, ParameterizedTextIteratorTest, ::testing::Bool());
+
 TEST_F(TextIteratorTest, BitStackOverflow) {
   const unsigned kBitsInWord = sizeof(unsigned) * 8;
   BitStack bs;
@@ -145,6 +171,20 @@ TEST_F(TextIteratorTest, BasicIteration) {
   SetBodyContent(input);
   EXPECT_EQ("[Hello, ][text][\n][\n][iterator.]", Iterate<DOMTree>());
   EXPECT_EQ("[Hello, ][text][\n][\n][iterator.]", Iterate<FlatTree>());
+}
+
+TEST_F(TextIteratorTest, EmitsSmallXForTextSecurity) {
+  InsertStyleElement("s {-webkit-text-security:disc;}");
+  SetBodyContent("abc<s>foo</s>baz");
+  // E2 80 A2 is U+2022 BULLET
+  EXPECT_EQ("[abc][xxx][baz]",
+            Iterate<DOMTree>(EmitsSmallXForTextSecurityBehavior()));
+  EXPECT_EQ("[abc][\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2][baz]",
+            Iterate<DOMTree>(TextIteratorBehavior()));
+  EXPECT_EQ("[abc][xxx][baz]",
+            Iterate<FlatTree>(EmitsSmallXForTextSecurityBehavior()));
+  EXPECT_EQ("[abc][\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2][baz]",
+            Iterate<FlatTree>(TextIteratorBehavior()));
 }
 
 TEST_F(TextIteratorTest, IgnoreAltTextInTextControls) {
@@ -205,20 +245,6 @@ TEST_F(TextIteratorTest, NotEnteringShadowTree) {
   EXPECT_EQ("[Hello, ][shadow][ iterator.]", Iterate<FlatTree>());
 }
 
-TEST_F(TextIteratorTest, NotEnteringShadowTreeWithMultipleShadowTrees) {
-  static const char* body_content =
-      "<div>Hello, <span id='host'>text</span> iterator.</div>";
-  static const char* shadow_content1 = "<span>first shadow</span>";
-  static const char* shadow_content2 = "<span>second shadow</span>";
-  SetBodyContent(body_content);
-  CreateShadowRootForElementWithIDAndSetInnerHTML(GetDocument(), "host",
-                                                  shadow_content1);
-  CreateShadowRootForElementWithIDAndSetInnerHTML(GetDocument(), "host",
-                                                  shadow_content2);
-  EXPECT_EQ("[Hello, ][ iterator.]", Iterate<DOMTree>());
-  EXPECT_EQ("[Hello, ][second shadow][ iterator.]", Iterate<FlatTree>());
-}
-
 TEST_F(TextIteratorTest, NotEnteringShadowTreeWithNestedShadowTrees) {
   static const char* body_content =
       "<div>Hello, <span id='host-in-document'>text</span> iterator.</div>";
@@ -260,24 +286,6 @@ TEST_F(TextIteratorTest, EnteringShadowTreeWithOption) {
   EXPECT_EQ("[Hello, ][shadow][ iterator.]",
             Iterate<DOMTree>(EntersOpenShadowRootsBehavior()));
   EXPECT_EQ("[Hello, ][shadow][ iterator.]",
-            Iterate<FlatTree>(EntersOpenShadowRootsBehavior()));
-}
-
-TEST_F(TextIteratorTest, EnteringShadowTreeWithMultipleShadowTreesWithOption) {
-  static const char* body_content =
-      "<div>Hello, <span id='host'>text</span> iterator.</div>";
-  static const char* shadow_content1 = "<span>first shadow</span>";
-  static const char* shadow_content2 = "<span>second shadow</span>";
-  SetBodyContent(body_content);
-  CreateShadowRootForElementWithIDAndSetInnerHTML(GetDocument(), "host",
-                                                  shadow_content1);
-  CreateShadowRootForElementWithIDAndSetInnerHTML(GetDocument(), "host",
-                                                  shadow_content2);
-  // The first isn't emitted because a layoutObject for the first is not
-  // created.
-  EXPECT_EQ("[Hello, ][second shadow][ iterator.]",
-            Iterate<DOMTree>(EntersOpenShadowRootsBehavior()));
-  EXPECT_EQ("[Hello, ][second shadow][ iterator.]",
             Iterate<FlatTree>(EntersOpenShadowRootsBehavior()));
 }
 
@@ -486,6 +494,40 @@ TEST_F(TextIteratorTest, RangeLengthInMultilineSpan) {
                    TextIteratorBehavior::NoTrailingSpaceRangeLengthBehavior()));
 }
 
+TEST_P(ParameterizedTextIteratorTest, RangeLengthBasic) {
+  EXPECT_EQ(0, TestRangeLength("<p>^| (1) abc def</p>"));
+  EXPECT_EQ(0, TestRangeLength("<p>^ |(1) abc def</p>"));
+  EXPECT_EQ(1, TestRangeLength("<p>^ (|1) abc def</p>"));
+  EXPECT_EQ(2, TestRangeLength("<p>^ (1|) abc def</p>"));
+  EXPECT_EQ(3, TestRangeLength("<p>^ (1)| abc def</p>"));
+  EXPECT_EQ(4, TestRangeLength("<p>^ (1) |abc def</p>"));
+  EXPECT_EQ(5, TestRangeLength("<p>^ (1) a|bc def</p>"));
+  EXPECT_EQ(6, TestRangeLength("<p>^ (1) ab|c def</p>"));
+  EXPECT_EQ(7, TestRangeLength("<p>^ (1) abc| def</p>"));
+  EXPECT_EQ(8, TestRangeLength("<p>^ (1) abc |def</p>"));
+  EXPECT_EQ(9, TestRangeLength("<p>^ (1) abc d|ef</p>"));
+  EXPECT_EQ(10, TestRangeLength("<p>^ (1) abc de|f</p>"));
+  EXPECT_EQ(11, TestRangeLength("<p>^ (1) abc def|</p>"));
+}
+
+TEST_P(ParameterizedTextIteratorTest, RangeLengthWithFirstLetter) {
+  InsertStyleElement("p::first-letter {font-size:200%;}");
+  // Expectation should be as same as |RangeLengthBasic|
+  EXPECT_EQ(0, TestRangeLength("<p>^| (1) abc def</p>"));
+  EXPECT_EQ(0, TestRangeLength("<p>^ |(1) abc def</p>"));
+  EXPECT_EQ(1, TestRangeLength("<p>^ (|1) abc def</p>"));
+  EXPECT_EQ(2, TestRangeLength("<p>^ (1|) abc def</p>"));
+  EXPECT_EQ(3, TestRangeLength("<p>^ (1)| abc def</p>"));
+  EXPECT_EQ(4, TestRangeLength("<p>^ (1) |abc def</p>"));
+  EXPECT_EQ(5, TestRangeLength("<p>^ (1) a|bc def</p>"));
+  EXPECT_EQ(6, TestRangeLength("<p>^ (1) ab|c def</p>"));
+  EXPECT_EQ(7, TestRangeLength("<p>^ (1) abc| def</p>"));
+  EXPECT_EQ(8, TestRangeLength("<p>^ (1) abc |def</p>"));
+  EXPECT_EQ(9, TestRangeLength("<p>^ (1) abc d|ef</p>"));
+  EXPECT_EQ(10, TestRangeLength("<p>^ (1) abc de|f</p>"));
+  EXPECT_EQ(11, TestRangeLength("<p>^ (1) abc def|</p>"));
+}
+
 TEST_F(TextIteratorTest, WhitespaceCollapseForReplacedElements) {
   static const char* body_content =
       "<span>Some text </span> <input type='button' value='Button "
@@ -667,7 +709,7 @@ TEST_F(TextIteratorTest, EndingConditionWithDisplayNoneInShadowTree) {
   SetShadowContent(shadow_content, "host");
 
   ShadowRoot* shadow_root =
-      GetDocument().getElementById("host")->openShadowRoot();
+      GetDocument().getElementById("host")->OpenShadowRoot();
   Node* b_in_shadow_tree = shadow_root->getElementById("end");
 
   Position start(&GetDocument(), 0);
@@ -941,4 +983,94 @@ TEST_F(TextIteratorTest, VisitsDisplayContentsChildren) {
   EXPECT_EQ("[Hello, ][text][iterator.]", Iterate<FlatTree>());
 }
 
+TEST_F(TextIteratorTest, BasicIterationEmptyContent) {
+  SetBodyContent("");
+  EXPECT_EQ("", Iterate<DOMTree>());
+}
+
+TEST_F(TextIteratorTest, BasicIterationSingleCharacter) {
+  SetBodyContent("a");
+  EXPECT_EQ("[a]", Iterate<DOMTree>());
+}
+
+TEST_F(TextIteratorTest, BasicIterationSingleDiv) {
+  SetBodyContent("<div>a</div>");
+  EXPECT_EQ("[a]", Iterate<DOMTree>());
+}
+
+TEST_F(TextIteratorTest, BasicIterationMultipleDivs) {
+  SetBodyContent("<div>a</div><div>b</div>");
+  EXPECT_EQ("[a][\n][b]", Iterate<DOMTree>());
+}
+
+TEST_F(TextIteratorTest, BasicIterationMultipleDivsWithStyle) {
+  SetBodyContent(
+      "<div style='line-height: 18px; min-height: 436px; '>"
+        "debugging this note"
+      "</div>");
+  EXPECT_EQ("[debugging this note]", Iterate<DOMTree>());
+}
+
+TEST_F(TextIteratorTest, BasicIterationMultipleDivsWithChildren) {
+  SetBodyContent("<div>Hello<div><br><span></span></div></div>");
+  EXPECT_EQ("[Hello][\n][\n]", Iterate<DOMTree>());
+}
+
+TEST_F(TextIteratorTest, BasicIterationOnChildrenWithStyle) {
+  SetBodyContent(
+      "<div style='left:22px'>"
+      "</div>"
+      "\t\t\n"
+      "<div style='left:26px'>"
+      "</div>"
+      "\t\t\n\n"
+      "<div>"
+        "\t\t\t\n"
+        "<div>"
+          "\t\t\t\t\n"
+          "<div>"
+            "\t\t\t\t\t\n"
+            "<div contenteditable style='line-height: 20px; min-height: 580px; '>"
+              "hey"
+            "</div>"
+            "\t\t\t\t\n"
+          "</div>"
+          "\t\t\t\n"
+        "</div>"
+        "\t\t\n"
+      "</div>"
+      "\n\t\n");
+  EXPECT_EQ("[hey]", Iterate<DOMTree>());
+}
+
+TEST_F(TextIteratorTest, BasicIterationInput) {
+  SetBodyContent("<input id='a' value='b'>");
+  TextControlElement* input_element =
+      ToTextControlElement(GetDocument().getElementById("a"));
+  const ShadowRoot* shadow_root = input_element->UserAgentShadowRoot();
+  const Position start = Position::FirstPositionInNode(*shadow_root);
+  const Position end = Position::LastPositionInNode(*shadow_root);
+  EXPECT_EQ("[b]", IteratePartial<DOMTree>(start, end));
+}
+
+TEST_F(TextIteratorTest, BasicIterationInputiWithBr) {
+  SetBodyContent("<input id='a' value='b'>");
+  TextControlElement* input_element =
+      ToTextControlElement(GetDocument().getElementById("a"));
+  Element* inner_editor = input_element->InnerEditorElement();
+  Element* br = GetDocument().CreateRawElement(HTMLNames::brTag);
+  inner_editor->AppendChild(br);
+  const ShadowRoot* shadow_root = input_element->UserAgentShadowRoot();
+  const Position start = Position::FirstPositionInNode(*shadow_root);
+  const Position end = Position::LastPositionInNode(*shadow_root);
+  GetDocument().UpdateStyleAndLayout();
+  EXPECT_EQ("[b]", IteratePartial<DOMTree>(start, end));
+}
+
+TEST_P(ParameterizedTextIteratorTest, NoZWSForSpaceAfterNoWrapSpace) {
+  SetBodyContent("<span style='white-space: nowrap'>foo </span> bar");
+  EXPECT_EQ("[foo ][bar]", Iterate<DOMTree>());
+}
+
+}  // namespace text_iterator_test
 }  // namespace blink

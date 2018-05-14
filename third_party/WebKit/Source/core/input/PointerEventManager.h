@@ -5,11 +5,13 @@
 #ifndef PointerEventManager_h
 #define PointerEventManager_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/events/PointerEvent.h"
 #include "core/events/PointerEventFactory.h"
 #include "core/input/BoundaryEventDispatcher.h"
 #include "core/input/TouchEventManager.h"
+#include "core/page/TouchAdjustment.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/HashMap.h"
 #include "public/platform/WebInputEventResult.h"
@@ -24,11 +26,17 @@ class MouseEventManager;
 // properties of active pointer events.
 class CORE_EXPORT PointerEventManager
     : public GarbageCollectedFinalized<PointerEventManager> {
-  WTF_MAKE_NONCOPYABLE(PointerEventManager);
-
  public:
   PointerEventManager(LocalFrame&, MouseEventManager&);
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
+
+  // This is the unified path for handling all input device events. This may
+  // cause firing DOM pointerevents, mouseevent, and touch events accordingly.
+  // TODO(crbug.com/625841): We need to get all event handling path to go
+  // through this function.
+  WebInputEventResult HandlePointerEvent(
+      const WebPointerEvent&,
+      const Vector<WebPointerEvent>& coalesced_events);
 
   // Sends the mouse pointer events and the boundary events
   // that it may cause. It also sends the compat mouse events
@@ -40,10 +48,6 @@ class CORE_EXPORT PointerEventManager
       const AtomicString& type,
       const WebMouseEvent&,
       const Vector<WebMouseEvent>& coalesced_events);
-
-  WebInputEventResult HandleTouchEvents(
-      const WebTouchEvent&,
-      const Vector<WebTouchEvent>& coalesced_events);
 
   // Sends boundary events pointerout/leave/over/enter and
   // mouseout/leave/over/enter to the corresponding targets.
@@ -86,6 +90,13 @@ class CORE_EXPORT PointerEventManager
 
   void ProcessPendingPointerCaptureForPointerLock(const WebMouseEvent&);
 
+  // Sends any outstanding events. For example it notifies TouchEventManager
+  // to group any changes to touch since last FlushEvents and send the touch
+  // event out to js. Since after this function any outstanding event is sent,
+  // it also clears any state that might have kept since the last call to this
+  // function.
+  WebInputEventResult FlushEvents();
+
  private:
   typedef HeapHashMap<int,
                       Member<EventTarget>,
@@ -96,7 +107,7 @@ class CORE_EXPORT PointerEventManager
     DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
    public:
-    DEFINE_INLINE_TRACE() { visitor->Trace(target); }
+    void Trace(blink::Visitor* visitor) { visitor->Trace(target); }
     Member<EventTarget> target;
     bool has_recieved_over_event;
     EventTargetAttributes() : target(nullptr), has_recieved_over_event(false) {}
@@ -105,8 +116,6 @@ class CORE_EXPORT PointerEventManager
   };
 
   class PointerEventBoundaryEventDispatcher : public BoundaryEventDispatcher {
-    WTF_MAKE_NONCOPYABLE(PointerEventBoundaryEventDispatcher);
-
    public:
     PointerEventBoundaryEventDispatcher(PointerEventManager*, PointerEvent*);
 
@@ -129,34 +138,31 @@ class CORE_EXPORT PointerEventManager
                   bool check_for_listener);
     Member<PointerEventManager> pointer_event_manager_;
     Member<PointerEvent> pointer_event_;
+    DISALLOW_COPY_AND_ASSIGN(PointerEventBoundaryEventDispatcher);
   };
 
-  // Inhibits firing of touch-type PointerEvents until unblocked by
-  // unblockTouchPointers(). Also sends pointercancels for existing touch-type
-  // PointerEvents.  See:
-  // www.w3.org/TR/pointerevents/#declaring-candidate-regions-for-default-touch-behaviors
-  void BlockTouchPointers(TimeTicks platform_time_stamp);
-
-  // Enables firing of touch-type PointerEvents after they were inhibited by
-  // blockTouchPointers().
-  void UnblockTouchPointers();
+  // Sends pointercancels for existing PointerEvents that are interrupted.
+  // For example when browser starts dragging with mouse or when we start
+  // scrolling with scroll capable pointers pointercancel events should be
+  // dispatched for those. Also sets initial states accordingly so the
+  // following events in that stream don't generate pointerevents (e.g.
+  // in the scrolling case which scroll starts and pointerevents stop and
+  // touchevents continue to fire).
+  void HandlePointerInterruption(const WebPointerEvent&);
 
   // Returns PointerEventTarget for a WebTouchPoint, hit-testing as necessary.
   EventHandlingUtil::PointerEventTarget ComputePointerEventTarget(
-      const WebTouchPoint&);
+      const WebPointerEvent&);
 
-  // Sends touch pointer events and sets consumed bits in TouchInfo array
-  // based on the return value of pointer event handlers.
-  void DispatchTouchPointerEvent(
-      const WebTouchPoint&,
-      const EventHandlingUtil::PointerEventTarget&,
-      const Vector<std::pair<WebTouchPoint, TimeTicks>>& coalesced_events,
-      WebInputEvent::Modifiers,
-      double timestamp,
-      uint32_t unique_touch_event_id);
+  WebInputEventResult DispatchTouchPointerEvent(
+      const WebPointerEvent&,
+      const Vector<WebPointerEvent>& coalesced_events,
+      const EventHandlingUtil::PointerEventTarget&);
 
   // Returns whether the event is consumed or not.
-  WebInputEventResult SendTouchPointerEvent(EventTarget*, PointerEvent*);
+  WebInputEventResult SendTouchPointerEvent(EventTarget*,
+                                            PointerEvent*,
+                                            bool hovering);
 
   void SendBoundaryEvents(EventTarget* exited_target,
                           EventTarget* entered_target,
@@ -178,8 +184,7 @@ class CORE_EXPORT PointerEventManager
       PointerEvent*,
       EventTarget* hit_test_target,
       const String& canvas_region_id = String(),
-      const WebMouseEvent& = WebMouseEvent(),
-      bool send_mouse_event = false);
+      const WebMouseEvent* = nullptr);
 
   void RemoveTargetFromPointerCapturingMapping(PointerCapturingMap&,
                                                const EventTarget*);
@@ -195,6 +200,11 @@ class CORE_EXPORT PointerEventManager
                               EventTarget** pointer_capture_target,
                               EventTarget** pending_pointer_capture_target);
 
+  // Only adjust touch type primary pointer down.
+  bool ShouldAdjustPointerEvent(const WebPointerEvent&) const;
+  // Adjust coordinates so it can be used to find the best clickable target.
+  void AdjustTouchPointerEvent(WebPointerEvent&);
+
   // NOTE: If adding a new field to this class please ensure that it is
   // cleared in |PointerEventManager::clear()|.
 
@@ -207,9 +217,9 @@ class CORE_EXPORT PointerEventManager
   bool prevent_mouse_event_for_pointer_type_
       [static_cast<size_t>(WebPointerProperties::PointerType::kLastEntry) + 1];
 
-  // Set upon TouchScrollStarted when sending a pointercancel, prevents PE
-  // dispatches for touches until all touch-points become inactive.
-  bool in_canceled_state_for_pointer_type_touch_;
+  // Set upon scrolling starts when sending a pointercancel, prevents PE
+  // dispatches for non-hovering pointers until all of them become inactive.
+  bool non_hovering_pointers_canceled_;
 
   Deque<uint32_t> touch_ids_for_canceled_pointerdowns_;
 
@@ -231,9 +241,19 @@ class CORE_EXPORT PointerEventManager
   Member<TouchEventManager> touch_event_manager_;
   Member<MouseEventManager> mouse_event_manager_;
 
+  // TODO(crbug.com/789643): If we go with one token for pointerevent and one
+  // for touch events then we can remove this class field.
+  // It keeps the shared user gesture token between DOM touch events and
+  // pointerevents. It gets created at first when this class gets notified of
+  // the appropriate pointerevent and it must be cleared after the corresponding
+  // touch event is sent (i.e. after FlushEvents).
+  std::unique_ptr<UserGestureIndicator> user_gesture_holder_;
+
   // The pointerId of the PointerEvent currently being dispatched within this
   // frame or 0 if none.
   int dispatching_pointer_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(PointerEventManager);
 };
 
 }  // namespace blink

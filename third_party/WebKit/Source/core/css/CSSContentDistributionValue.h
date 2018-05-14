@@ -5,12 +5,13 @@
 #ifndef CSSContentDistributionValue_h
 #define CSSContentDistributionValue_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/css/CSSIdentifierValue.h"
 #include "core/css/CSSValue.h"
 #include "core/css/CSSValuePair.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
+namespace cssvalue {
 
 class CSSContentDistributionValue : public CSSValue {
  public:
@@ -21,24 +22,17 @@ class CSSContentDistributionValue : public CSSValue {
   }
   ~CSSContentDistributionValue();
 
-  // TODO(sashab): Make these return CSSValueIDs instead of CSSValues.
-  CSSIdentifierValue* Distribution() const {
-    return CSSIdentifierValue::Create(distribution_);
-  }
+  CSSValueID Distribution() const { return distribution_; }
 
-  CSSIdentifierValue* GetPosition() const {
-    return CSSIdentifierValue::Create(position_);
-  }
+  CSSValueID Position() const { return position_; }
 
-  CSSIdentifierValue* Overflow() const {
-    return CSSIdentifierValue::Create(overflow_);
-  }
+  CSSValueID Overflow() const { return overflow_; }
 
   String CustomCSSText() const;
 
   bool Equals(const CSSContentDistributionValue&) const;
 
-  DEFINE_INLINE_TRACE_AFTER_DISPATCH() {
+  void TraceAfterDispatch(blink::Visitor* visitor) {
     CSSValue::TraceAfterDispatch(visitor);
   }
 
@@ -55,6 +49,7 @@ class CSSContentDistributionValue : public CSSValue {
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSContentDistributionValue,
                             IsContentDistributionValue());
 
+}  // namespace cssvalue
 }  // namespace blink
 
 #endif  // CSSContentDistributionValue_h

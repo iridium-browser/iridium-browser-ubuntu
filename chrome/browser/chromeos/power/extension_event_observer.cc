@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -133,7 +134,7 @@ void ExtensionEventObserver::OnBackgroundHostCreated(
     return;
 
   auto result = keepalive_sources_.insert(
-      std::make_pair(host, base::MakeUnique<KeepaliveSources>()));
+      std::make_pair(host, std::make_unique<KeepaliveSources>()));
 
   if (result.second)
     host->AddObserver(this);
@@ -205,7 +206,8 @@ void ExtensionEventObserver::OnNetworkRequestDone(
   }
 }
 
-void ExtensionEventObserver::SuspendImminent() {
+void ExtensionEventObserver::SuspendImminent(
+    power_manager::SuspendImminent::Reason reason) {
   if (should_delay_suspend_)
     OnSuspendImminent(false);
 }
@@ -244,7 +246,7 @@ void ExtensionEventObserver::OnSuspendImminent(bool dark_suspend) {
   suspend_is_pending_ = true;
   power_manager_callback_ = DBusThreadManager::Get()
                                 ->GetPowerManagerClient()
-                                ->GetSuspendReadinessCallback();
+                                ->GetSuspendReadinessCallback(FROM_HERE);
 
   suspend_readiness_callback_.Reset(
       base::Bind(&ExtensionEventObserver::MaybeReportSuspendReadiness,

@@ -30,9 +30,6 @@
 #include "platform/wtf/text/CharacterNames.h"
 #include "platform/wtf/text/StringImpl.h"
 
-using namespace WTF;
-using namespace Unicode;
-
 namespace blink {
 
 int EndOfFirstWordBoundaryContext(const UChar* characters, int length) {
@@ -57,51 +54,45 @@ int StartOfLastWordBoundaryContext(const UChar* characters, int length) {
   return 0;
 }
 
-int FindNextWordFromIndex(const UChar* chars,
-                          int len,
-                          int position,
-                          bool forward) {
+int FindNextWordForward(const UChar* chars, int len, int position) {
   TextBreakIterator* it = WordBreakIterator(chars, len);
 
-  if (forward) {
     position = it->following(position);
     while (position != kTextBreakDone) {
       // We stop searching when the character preceeding the break
       // is alphanumeric or underscore.
-      if (position < len && (IsAlphanumeric(chars[position - 1]) ||
-                             chars[position - 1] == kLowLineCharacter))
+      if (position < len &&
+          (WTF::Unicode::IsAlphanumeric(chars[position - 1]) ||
+           chars[position - 1] == kLowLineCharacter))
         return position;
 
       position = it->following(position);
     }
 
     return len;
-  } else {
-    position = it->preceding(position);
-    while (position != kTextBreakDone) {
-      // We stop searching when the character following the break
-      // is alphanumeric or underscore.
-      if (position > 0 && (IsAlphanumeric(chars[position]) ||
-                           chars[position] == kLowLineCharacter))
-        return position;
-
-      position = it->preceding(position);
-    }
-
-    return 0;
-  }
 }
 
-void FindWordBoundary(const UChar* chars,
-                      int len,
-                      int position,
-                      int* start,
-                      int* end) {
+int FindNextWordBackward(const UChar* chars, int len, int position) {
   TextBreakIterator* it = WordBreakIterator(chars, len);
-  *end = it->following(position);
-  if (*end < 0)
-    *end = it->last();
-  *start = it->previous();
+
+  position = it->preceding(position);
+  while (position != kTextBreakDone) {
+    // We stop searching when the character following the break
+    // is alphanumeric or underscore.
+    if (position > 0 && (WTF::Unicode::IsAlphanumeric(chars[position]) ||
+                         chars[position] == kLowLineCharacter))
+      return position;
+
+    position = it->preceding(position);
+  }
+
+  return 0;
+}
+
+int FindWordStartBoundary(const UChar* chars, int len, int position) {
+  TextBreakIterator* it = WordBreakIterator(chars, len);
+  it->following(position);
+  return it->previous();
 }
 
 int FindWordEndBoundary(const UChar* chars, int len, int position) {

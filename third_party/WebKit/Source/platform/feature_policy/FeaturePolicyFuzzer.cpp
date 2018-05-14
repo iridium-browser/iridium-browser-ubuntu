@@ -18,8 +18,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       blink::BlinkFuzzerTestSupport();
   WTF::Vector<WTF::String> messages;
   // TODO(csharrison): Be smarter about parsing this origin for performance.
-  RefPtr<blink::SecurityOrigin> origin =
+  scoped_refptr<const blink::SecurityOrigin> origin =
       blink::SecurityOrigin::CreateFromString("https://example.com/");
-  blink::ParseFeaturePolicy(WTF::String(data, size), origin.Get(), &messages);
+  blink::ParseFeaturePolicyHeader(WTF::String(data, size), origin.get(),
+                                  &messages);
   return 0;
 }

@@ -22,6 +22,7 @@
 #include "core/layout/CounterNode.h"
 
 #include "core/layout/LayoutCounter.h"
+#include "platform/wtf/CheckedNumeric.h"
 
 #ifndef NDEBUG
 #include <stdio.h>
@@ -91,10 +92,10 @@ CounterNode::~CounterNode() {
   ResetLayoutObjects();
 }
 
-PassRefPtr<CounterNode> CounterNode::Create(LayoutObject& owner,
-                                            bool has_reset_type,
-                                            int value) {
-  return AdoptRef(new CounterNode(owner, has_reset_type, value));
+scoped_refptr<CounterNode> CounterNode::Create(LayoutObject& owner,
+                                               bool has_reset_type,
+                                               int value) {
+  return base::AdoptRef(new CounterNode(owner, has_reset_type, value));
 }
 
 CounterNode* CounterNode::NextInPreOrderAfterChildren(
@@ -142,11 +143,17 @@ CounterNode* CounterNode::PreviousInPreOrder() const {
 }
 
 int CounterNode::ComputeCountInParent() const {
+  // According to the spec, if an increment would overflow or underflow the
+  // counter, we are allowed to ignore the increment.
+  // https://drafts.csswg.org/css-lists-3/#valdef-counter-reset-custom-ident-integer
   int increment = ActsAsReset() ? 0 : value_;
-  if (previous_sibling_)
-    return previous_sibling_->count_in_parent_ + increment;
+  if (previous_sibling_) {
+    return WTF::CheckAdd(previous_sibling_->count_in_parent_, increment)
+        .ValueOrDefault(previous_sibling_->count_in_parent_);
+  }
   DCHECK_EQ(parent_->first_child_, this);
-  return parent_->value_ + increment;
+  return WTF::CheckAdd(parent_->value_, increment)
+      .ValueOrDefault(parent_->value_);
 }
 
 void CounterNode::AddLayoutObject(LayoutCounter* value) {
@@ -284,38 +291,37 @@ void CounterNode::InsertAfter(CounterNode* new_child,
   CounterNode* last = new_child->last_child_;
   CounterNode* first = new_child->first_child_;
 
-  if (first) {
-    DCHECK(last);
-    new_child->next_sibling_ = first;
-    if (last_child_ == new_child)
-      last_child_ = last;
+  DCHECK(last);
+  new_child->next_sibling_ = first;
+  if (last_child_ == new_child)
+    last_child_ = last;
 
-    first->previous_sibling_ = new_child;
+  first->previous_sibling_ = new_child;
 
-    // The case when the original next sibling of the inserted node becomes a
-    // child of one of the former children of the inserted node is not handled
-    // as it is believed to be impossible since:
-    // 1. if the increment counter node lost it's root position as a result of
-    //    another counter node being created, it will be inserted as the last
-    //    child so next is null.
-    // 2. if the increment counter node lost it's root position as a result of a
-    //    layoutObject being inserted into the document's layout tree, all its
-    //    former children counters are attached to children of the inserted
-    //    layoutObject and hence cannot be in scope for counter nodes attached
-    // to layoutObjects that were already in the document's layout tree.
-    last->next_sibling_ = next;
-    if (next) {
-      DCHECK_EQ(next->previous_sibling_, new_child);
-      next->previous_sibling_ = last;
-    } else {
-      last_child_ = last;
-    }
-    for (next = first;; next = next->next_sibling_) {
-      next->parent_ = this;
-      if (last == next)
-        break;
-    }
+  // The case when the original next sibling of the inserted node becomes a
+  // child of one of the former children of the inserted node is not handled
+  // as it is believed to be impossible since:
+  // 1. if the increment counter node lost it's root position as a result of
+  //    another counter node being created, it will be inserted as the last
+  //    child so next is null.
+  // 2. if the increment counter node lost it's root position as a result of a
+  //    layoutObject being inserted into the document's layout tree, all its
+  //    former children counters are attached to children of the inserted
+  //    layoutObject and hence cannot be in scope for counter nodes attached
+  // to layoutObjects that were already in the document's layout tree.
+  last->next_sibling_ = next;
+  if (next) {
+    DCHECK_EQ(next->previous_sibling_, new_child);
+    next->previous_sibling_ = last;
+  } else {
+    last_child_ = last;
   }
+  for (next = first;; next = next->next_sibling_) {
+    next->parent_ = this;
+    if (last == next)
+      break;
+  }
+
   new_child->first_child_ = nullptr;
   new_child->last_child_ = nullptr;
   new_child->count_in_parent_ = new_child->ComputeCountInParent();
@@ -351,6 +357,31 @@ void CounterNode::RemoveChild(CounterNode* old_child) {
 
   if (next)
     next->Recount();
+}
+
+void CounterNode::MoveNonResetSiblingsToChildOf(
+    CounterNode* first_node,
+    CounterNode& new_parent,
+    const AtomicString& identifier) {
+  if (!first_node)
+    return;
+
+  scoped_refptr<CounterNode> cur_node = first_node;
+  scoped_refptr<CounterNode> old_parent = first_node->Parent();
+  while (cur_node && !cur_node->ActsAsReset()) {
+    scoped_refptr<CounterNode> next = cur_node->NextSibling();
+    old_parent->RemoveChild(cur_node.get());
+    new_parent.InsertAfter(cur_node.get(), new_parent.LastChild(), identifier);
+    cur_node = next;
+  }
+
+  // We assume that a reset node cannot have a non-reset node as its next
+  // sibling, but we're not sure this is always true, so we add a DCHECK to be
+  // safe.
+  while (cur_node) {
+    DCHECK(cur_node->ActsAsReset());
+    cur_node = cur_node->NextSibling();
+  }
 }
 
 #ifndef NDEBUG

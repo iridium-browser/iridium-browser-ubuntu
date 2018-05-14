@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "content/child/image_decoder.h"
 #include "content/public/renderer/associated_resource_fetcher.h"
+#include "services/network/public/mojom/request_context_frame_type.mojom.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/web/WebAssociatedURLLoaderOptions.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -26,7 +27,7 @@ MultiResolutionImageResourceFetcher::MultiResolutionImageResourceFetcher(
     WebLocalFrame* frame,
     int id,
     WebURLRequest::RequestContext request_context,
-    blink::WebCachePolicy cache_policy,
+    blink::mojom::FetchCacheMode cache_mode,
     const Callback& callback)
     : callback_(callback),
       id_(id),
@@ -41,14 +42,14 @@ MultiResolutionImageResourceFetcher::MultiResolutionImageResourceFetcher(
   // workers. This should ideally not happen or at least not all the time.
   // See https://crbug.com/448427
   if (request_context == WebURLRequest::kRequestContextFavicon)
-    fetcher_->SetServiceWorkerMode(WebURLRequest::ServiceWorkerMode::kNone);
+    fetcher_->SetSkipServiceWorker(true);
 
-  fetcher_->SetCachePolicy(cache_policy);
+  fetcher_->SetCacheMode(cache_mode);
 
   fetcher_->Start(
-      frame, request_context, WebURLRequest::kFetchRequestModeNoCORS,
-      WebURLRequest::kFetchCredentialsModeInclude,
-      WebURLRequest::kFrameTypeNone,
+      frame, request_context, network::mojom::FetchRequestMode::kNoCORS,
+      network::mojom::FetchCredentialsMode::kInclude,
+      network::mojom::RequestContextFrameType::kNone,
       base::Bind(&MultiResolutionImageResourceFetcher::OnURLFetchComplete,
                  base::Unretained(this)));
 }

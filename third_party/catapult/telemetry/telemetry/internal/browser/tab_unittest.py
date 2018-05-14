@@ -8,6 +8,7 @@ import time
 
 from telemetry.core import exceptions
 from telemetry import decorators
+from telemetry.internal.browser.web_contents import ServiceWorkerState
 from telemetry.internal.image_processing import video
 from telemetry.testing import tab_test_case
 from telemetry.timeline import model
@@ -82,9 +83,9 @@ class TabTest(tab_test_case.TabTestCase):
       self._tab.WaitForJavaScriptCondition(
           'window.__one === 1', timeout=1)
       self.assertIn(
-        ("(error) :5: Uncaught TypeError: Cannot read property 'not_defined' "
-        'of undefined\n'),
-        context.exception.message)
+          ("(error) :5: Uncaught TypeError: Cannot read property 'not_defined' "
+           'of undefined\n'),
+          context.exception.message)
 
   @decorators.Enabled('has tabs')
   def testActivateTab(self):
@@ -127,7 +128,8 @@ class TabTest(tab_test_case.TabTestCase):
     self._browser.platform.tracing_controller.StartTracing(config)
     self._tab.Highlight(rgba_color.WEB_PAGE_TEST_ORANGE)
     self._tab.ClearHighlight(rgba_color.WEB_PAGE_TEST_ORANGE)
-    trace_data = self._browser.platform.tracing_controller.StopTracing()
+    trace_data, errors = self._browser.platform.tracing_controller.StopTracing()
+    self.assertEqual(errors, [])
     timeline_model = model.TimelineModel(trace_data)
     renderer_thread = timeline_model.GetRendererThreadFromTabId(
         self._tab.id)
@@ -160,7 +162,8 @@ class TabTest(tab_test_case.TabTestCase):
     first_tab.ExecuteJavaScript('console.timeEnd("first-tab-marker");')
     second_tab.ExecuteJavaScript('console.time("second-tab-marker");')
     second_tab.ExecuteJavaScript('console.timeEnd("second-tab-marker");')
-    trace_data = self._browser.platform.tracing_controller.StopTracing()
+    trace_data, errors = self._browser.platform.tracing_controller.StopTracing()
+    self.assertEqual(errors, [])
     timeline_model = model.TimelineModel(trace_data)
 
     # Assert that the renderer_thread of the first tab contains
@@ -192,7 +195,8 @@ class TabTest(tab_test_case.TabTestCase):
     self._tab.Navigate(self.UrlOfUnittestFile('blank.html'))
     self.assertTrue(self._tab.IsAlive())
 
-    self.assertRaises(exceptions.DevtoolsTargetCrashException,
+    self.assertRaises(
+        exceptions.DevtoolsTargetCrashException,
         lambda: self._tab.Navigate(self.UrlOfUnittestFile('chrome://crash')))
     self.assertFalse(self._tab.IsAlive())
 
@@ -246,3 +250,39 @@ class MediaRouterDialogTabTest(tab_test_case.TabTestCase):
       time.sleep(1)
     self.assertEquals(len(self.tabs), 2)
     self.assertEquals(self.tabs[1].url, 'chrome://media-router/')
+
+class ServiceWorkerTabTest(tab_test_case.TabTestCase):
+  def testIsServiceWorkerActivatedOrNotRegistered(self):
+    self._tab.Navigate(self.UrlOfUnittestFile('blank.html'))
+    py_utils.WaitFor(self._tab.IsServiceWorkerActivatedOrNotRegistered,
+                     timeout=10)
+    self.assertEquals(self._tab._GetServiceWorkerState(),
+                      ServiceWorkerState.NOT_REGISTERED)
+    self._tab.ExecuteJavaScript(
+        'navigator.serviceWorker.register("{{ @scriptURL }}");',
+        scriptURL=self.UrlOfUnittestFile('blank.js'))
+    py_utils.WaitFor(self._tab.IsServiceWorkerActivatedOrNotRegistered,
+                     timeout=10)
+    self.assertEquals(self._tab._GetServiceWorkerState(),
+                      ServiceWorkerState.ACTIVATED)
+
+  def testClearDataForOrigin(self):
+    self._tab.Navigate(self.UrlOfUnittestFile('blank.html'))
+    self._tab.ExecuteJavaScript(
+        'var isServiceWorkerRegisteredForThisOrigin = false; \
+         navigator.serviceWorker.register("{{ @scriptURL }}");',
+        scriptURL=self.UrlOfUnittestFile('blank.js'))
+    check_registration = 'isServiceWorkerRegisteredForThisOrigin = false; \
+        navigator.serviceWorker.getRegistration().then( \
+            (reg) => { \
+                isServiceWorkerRegisteredForThisOrigin = reg ? true : false;});'
+    self._tab.ExecuteJavaScript(check_registration)
+    self.assertTrue(self._tab.EvaluateJavaScript(
+        'isServiceWorkerRegisteredForThisOrigin;'))
+    py_utils.WaitFor(self._tab.IsServiceWorkerActivatedOrNotRegistered,
+                     timeout=10)
+    self._tab.ClearDataForOrigin(self.UrlOfUnittestFile(''))
+    time.sleep(1)
+    self._tab.ExecuteJavaScript(check_registration)
+    self.assertFalse(self._tab.EvaluateJavaScript(
+        'isServiceWorkerRegisteredForThisOrigin;'))

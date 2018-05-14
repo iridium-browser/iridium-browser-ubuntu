@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_FRAME_OPAQUE_BROWSER_FRAME_VIEW_LAYOUT_DELEGATE_H_
 
 namespace gfx {
+class ImageSkia;
 class Size;
 }
 
@@ -13,6 +14,9 @@ class Size;
 // Browser{,Frame,View}.
 class OpaqueBrowserFrameViewLayoutDelegate {
  public:
+  // Returns true if the browser is in incognito mode.
+  virtual bool IsIncognito() const = 0;
+
   // Controls the visual placement of the window icon/title in non-tabstrip
   // mode.
   virtual bool ShouldShowWindowIcon() const = 0;
@@ -50,6 +54,12 @@ class OpaqueBrowserFrameViewLayoutDelegate {
   // Returns the tabstrips preferred size so the frame layout can work around
   // it.
   virtual gfx::Size GetTabstripPreferredSize() const = 0;
+
+  // Computes the height of the top area of the frame.
+  virtual int GetTopAreaHeight() const = 0;
+
+  // Returns true if the window frame is rendered by Chrome.
+  virtual bool UseCustomFrame() const = 0;
 
  protected:
   virtual ~OpaqueBrowserFrameViewLayoutDelegate() {}

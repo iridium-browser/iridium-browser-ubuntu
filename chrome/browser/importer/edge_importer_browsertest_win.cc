@@ -9,7 +9,6 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
@@ -57,7 +56,7 @@ class TestObserver : public ProfileWriter,
   void ImportItemStarted(importer::ImportItem item) override {}
   void ImportItemEnded(importer::ImportItem item) override {}
   void ImportEnded() override {
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
     EXPECT_EQ(expected_bookmark_entries_.size(), bookmark_count_);
     EXPECT_EQ(expected_favicon_groups_.size(), favicon_count_);
   }
@@ -204,7 +203,7 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporter) {
 
   base::FilePath temp_path = temp_dir_.GetPath();
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(base::CopyDirectory(data_path, temp_path, true));
     ASSERT_TRUE(DecompressDatabase(temp_path.AppendASCII("edge_profile")));
   }
@@ -247,7 +246,7 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporterLegacyFallback) {
   data_path = data_path.AppendASCII("edge_profile");
 
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(base::CopyDirectory(data_path, temp_dir_.GetPath(), true));
     ASSERT_TRUE(importer::IsEdgeFavoritesLegacyMode());
   }
@@ -263,7 +262,7 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporterLegacyFallback) {
   source_profile.importer_type = importer::TYPE_EDGE;
   base::FilePath source_path = temp_dir_.GetPath().AppendASCII("edge_profile");
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_NE(
         -1, base::WriteFile(
                 source_path.AppendASCII("Favorites\\Google.url:favicon:$DATA"),

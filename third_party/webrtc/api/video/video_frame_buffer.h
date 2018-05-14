@@ -8,17 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_API_VIDEO_VIDEO_FRAME_BUFFER_H_
-#define WEBRTC_API_VIDEO_VIDEO_FRAME_BUFFER_H_
+#ifndef API_VIDEO_VIDEO_FRAME_BUFFER_H_
+#define API_VIDEO_VIDEO_FRAME_BUFFER_H_
 
 #include <stdint.h>
 
-#include "webrtc/rtc_base/refcount.h"
-#include "webrtc/rtc_base/scoped_ref_ptr.h"
+#include "rtc_base/refcount.h"
+#include "rtc_base/scoped_ref_ptr.h"
 
 namespace webrtc {
 
 class I420BufferInterface;
+class I420ABufferInterface;
 class I444BufferInterface;
 
 // Base class for frame buffers of different types of pixel format and storage.
@@ -44,6 +45,7 @@ class VideoFrameBuffer : public rtc::RefCountInterface {
   enum class Type {
     kNative,
     kI420,
+    kI420A,
     kI444,
   };
 
@@ -67,6 +69,8 @@ class VideoFrameBuffer : public rtc::RefCountInterface {
   // removed.
   rtc::scoped_refptr<I420BufferInterface> GetI420();
   rtc::scoped_refptr<const I420BufferInterface> GetI420() const;
+  I420ABufferInterface* GetI420A();
+  const I420ABufferInterface* GetI420A() const;
   I444BufferInterface* GetI444();
   const I444BufferInterface* GetI444() const;
 
@@ -97,7 +101,7 @@ class PlanarYuvBuffer : public VideoFrameBuffer {
 
 class I420BufferInterface : public PlanarYuvBuffer {
  public:
-  Type type() const final;
+  Type type() const override;
 
   int ChromaWidth() const final;
   int ChromaHeight() const final;
@@ -108,6 +112,16 @@ class I420BufferInterface : public PlanarYuvBuffer {
   ~I420BufferInterface() override {}
 };
 
+class I420ABufferInterface : public I420BufferInterface {
+ public:
+  Type type() const final;
+  virtual const uint8_t* DataA() const = 0;
+  virtual int StrideA() const = 0;
+
+ protected:
+  ~I420ABufferInterface() override {}
+};
+
 class I444BufferInterface : public PlanarYuvBuffer {
  public:
   Type type() const final;
@@ -115,12 +129,10 @@ class I444BufferInterface : public PlanarYuvBuffer {
   int ChromaWidth() const final;
   int ChromaHeight() const final;
 
-  rtc::scoped_refptr<I420BufferInterface> ToI420() final;
-
  protected:
   ~I444BufferInterface() override {}
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_VIDEO_VIDEO_FRAME_BUFFER_H_
+#endif  // API_VIDEO_VIDEO_FRAME_BUFFER_H_

@@ -37,12 +37,13 @@
 #include "WebPrivatePtr.h"
 #include "WebString.h"
 #include "WebVector.h"
+#include "base/single_thread_task_runner.h"
 
 #include <memory>
 
 #if INSIDE_BLINK
+#include "base/memory/scoped_refptr.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/PassRefPtr.h"
 #endif
 
 namespace blink {
@@ -96,7 +97,7 @@ class WebCryptoResult {
 
 #if INSIDE_BLINK
   BLINK_PLATFORM_EXPORT WebCryptoResult(CryptoResult*,
-                                        PassRefPtr<CryptoResultCancel>);
+                                        scoped_refptr<CryptoResultCancel>);
 #endif
 
  private:
@@ -110,27 +111,27 @@ class WebCryptoResult {
 
 class WebCryptoDigestor {
  public:
-  virtual ~WebCryptoDigestor() {}
+  virtual ~WebCryptoDigestor() = default;
 
-  // consume() will return |true| on the successful addition of data to the
+  // Consume() will return |true| on the successful addition of data to the
   // partially generated digest. It will return |false| when that fails. After
-  // a return of |false|, consume() should not be called again (nor should
-  // finish() be called).
+  // a return of |false|, Consume() should not be called again (nor should
+  // Finish() be called).
   virtual bool Consume(const unsigned char* data, unsigned data_size) {
     return false;
   }
 
-  // finish() will return |true| if the digest has been successfully computed
+  // Finish() will return |true| if the digest has been successfully computed
   // and put into the result buffer, otherwise it will return |false|. In
-  // either case, neither finish() nor consume() should be called again after
-  // a call to finish(). resultData is valid until the WebCrytpoDigestor
+  // either case, neither Finish() nor Consume() should be called again after
+  // a call to Finish(). |result_data| is valid until the WebCrytpoDigestor
   // object is destroyed.
   virtual bool Finish(unsigned char*& result_data, unsigned& result_data_size) {
     return false;
   }
 
  protected:
-  WebCryptoDigestor() {}
+  WebCryptoDigestor() = default;
 };
 
 class WebCrypto {
@@ -150,7 +151,7 @@ class WebCrypto {
   // The result can be set either synchronously while handling the request,
   // or asynchronously after the method has returned. When completing
   // asynchronously make a copy of the WebCryptoResult and call it from the
-  // same thread that started the request.
+  // |result_task_runner| TaskRunner.
   //
   // If the request was cancelled it is not necessary for implementations to
   // set the result.
@@ -160,13 +161,14 @@ class WebCrypto {
   // -----------------------
   //
   // The WebCrypto interface will be called from blink threads (main or
-  // web worker). All communication back to Blink must be on this same thread.
+  // web worker). All communication back to Blink must be on this same thread
+  // (|result_task_runner|).
   //
   // Notably:
   //
   //   * The WebCryptoResult can be copied between threads, however all
   //     methods other than the destructor must be called from the origin
-  //     Blink thread.
+  //     Blink thread (|result_task_runner|).
   //
   //   * WebCryptoKey and WebCryptoAlgorithm ARE threadsafe. They can be
   //     safely copied between threads and accessed. Copying is cheap because
@@ -179,9 +181,9 @@ class WebCrypto {
   //   * Data buffers are transfered as WebVectors. Implementations are free
   //     to re-use or transfer their storage.
   //
-  //   * All WebCryptoKeys are guaranteeed to be !isNull().
+  //   * All WebCryptoKeys are guaranteeed to be !IsNull().
   //
-  //   * All WebCryptoAlgorithms are guaranteed to be !isNull()
+  //   * All WebCryptoAlgorithms are guaranteed to be !IsNull()
   //
   //   * Look to the Web Crypto spec for an explanation of the parameter. The
   //     method names here have a 1:1 correspondence with those of
@@ -198,95 +200,117 @@ class WebCrypto {
   //
   // Only the following checks can be assumed as having already passed:
   //
-  //  * The key is extractable when calling into exportKey/wrapKey.
+  //  * The key is extractable when calling into ExportKey/WrapKey.
   //  * The key usages permit the operation being requested.
   //  * The key's algorithm matches that of the requested operation.
   //
-  virtual void Encrypt(const WebCryptoAlgorithm&,
-                       const WebCryptoKey&,
-                       WebVector<unsigned char> data,
-                       WebCryptoResult result) {
+  virtual void Encrypt(
+      const WebCryptoAlgorithm&,
+      const WebCryptoKey&,
+      WebVector<unsigned char> data,
+      WebCryptoResult result,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
-  virtual void Decrypt(const WebCryptoAlgorithm&,
-                       const WebCryptoKey&,
-                       WebVector<unsigned char> data,
-                       WebCryptoResult result) {
+  virtual void Decrypt(
+      const WebCryptoAlgorithm&,
+      const WebCryptoKey&,
+      WebVector<unsigned char> data,
+      WebCryptoResult result,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
   virtual void Sign(const WebCryptoAlgorithm&,
                     const WebCryptoKey&,
                     WebVector<unsigned char> data,
-                    WebCryptoResult result) {
+                    WebCryptoResult result,
+                    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
-  virtual void VerifySignature(const WebCryptoAlgorithm&,
-                               const WebCryptoKey&,
-                               WebVector<unsigned char> signature,
-                               WebVector<unsigned char> data,
-                               WebCryptoResult result) {
+  virtual void VerifySignature(
+      const WebCryptoAlgorithm&,
+      const WebCryptoKey&,
+      WebVector<unsigned char> signature,
+      WebVector<unsigned char> data,
+      WebCryptoResult result,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
   virtual void Digest(const WebCryptoAlgorithm&,
                       WebVector<unsigned char> data,
-                      WebCryptoResult result) {
+                      WebCryptoResult result,
+                      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
-  virtual void GenerateKey(const WebCryptoAlgorithm&,
-                           bool extractable,
-                           WebCryptoKeyUsageMask,
-                           WebCryptoResult result) {
+  virtual void GenerateKey(
+      const WebCryptoAlgorithm&,
+      bool extractable,
+      WebCryptoKeyUsageMask,
+      WebCryptoResult result,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
-  virtual void ImportKey(WebCryptoKeyFormat,
-                         WebVector<unsigned char> key_data,
-                         const WebCryptoAlgorithm&,
-                         bool extractable,
-                         WebCryptoKeyUsageMask,
-                         WebCryptoResult result) {
+  virtual void ImportKey(
+      WebCryptoKeyFormat,
+      WebVector<unsigned char> key_data,
+      const WebCryptoAlgorithm&,
+      bool extractable,
+      WebCryptoKeyUsageMask,
+      WebCryptoResult result,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
-  virtual void ExportKey(WebCryptoKeyFormat,
-                         const WebCryptoKey&,
-                         WebCryptoResult result) {
+  virtual void ExportKey(
+      WebCryptoKeyFormat,
+      const WebCryptoKey&,
+      WebCryptoResult result,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
-  virtual void WrapKey(WebCryptoKeyFormat,
-                       const WebCryptoKey& key,
-                       const WebCryptoKey& wrapping_key,
-                       const WebCryptoAlgorithm&,
-                       WebCryptoResult result) {
+  virtual void WrapKey(
+      WebCryptoKeyFormat,
+      const WebCryptoKey& key,
+      const WebCryptoKey& wrapping_key,
+      const WebCryptoAlgorithm&,
+      WebCryptoResult result,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
-  virtual void UnwrapKey(WebCryptoKeyFormat,
-                         WebVector<unsigned char> wrapped_key,
-                         const WebCryptoKey&,
-                         const WebCryptoAlgorithm& unwrap_algorithm,
-                         const WebCryptoAlgorithm& unwrapped_key_algorithm,
-                         bool extractable,
-                         WebCryptoKeyUsageMask,
-                         WebCryptoResult result) {
+  virtual void UnwrapKey(
+      WebCryptoKeyFormat,
+      WebVector<unsigned char> wrapped_key,
+      const WebCryptoKey&,
+      const WebCryptoAlgorithm& unwrap_algorithm,
+      const WebCryptoAlgorithm& unwrapped_key_algorithm,
+      bool extractable,
+      WebCryptoKeyUsageMask,
+      WebCryptoResult result,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
-  virtual void DeriveBits(const WebCryptoAlgorithm&,
-                          const WebCryptoKey&,
-                          unsigned length,
-                          WebCryptoResult result) {
+  virtual void DeriveBits(
+      const WebCryptoAlgorithm&,
+      const WebCryptoKey&,
+      unsigned length,
+      WebCryptoResult result,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
-  virtual void DeriveKey(const WebCryptoAlgorithm& algorithm,
-                         const WebCryptoKey& base_key,
-                         const WebCryptoAlgorithm& import_algorithm,
-                         const WebCryptoAlgorithm& key_length_algorithm,
-                         bool extractable,
-                         WebCryptoKeyUsageMask,
-                         WebCryptoResult result) {
+  virtual void DeriveKey(
+      const WebCryptoAlgorithm& algorithm,
+      const WebCryptoKey& base_key,
+      const WebCryptoAlgorithm& import_algorithm,
+      const WebCryptoAlgorithm& key_length_algorithm,
+      bool extractable,
+      WebCryptoKeyUsageMask,
+      WebCryptoResult result,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     result.CompleteWithError(kWebCryptoErrorTypeNotSupported, "");
   }
 
   // This is the exception to the "Completing the request" guarantees
   // outlined above. This is useful for Blink internal crypto and is not part
-  // of the WebCrypto standard. createDigestor must provide the result via
+  // of the WebCrypto standard. CreateDigestor must provide the result via
   // the WebCryptoDigestor object synchronously. This will never return null.
   virtual std::unique_ptr<WebCryptoDigestor> CreateDigestor(
       WebCryptoAlgorithmId algorithm_id) {
@@ -297,7 +321,7 @@ class WebCrypto {
   // Structured clone
   // -----------------------
   //
-  // deserializeKeyForClone() and serializeKeyForClone() are used for
+  // DeserializeKeyForClone() and SerializeKeyForClone() are used for
   // implementing structured cloning of WebCryptoKey.
   //
   // Blink is responsible for saving and restoring all of the attributes of
@@ -334,7 +358,7 @@ class WebCrypto {
   //   * The bytes to deserialize were corrupted
 
   // Creates a new key given key data which was written using
-  // serializeKeyForClone(). Returns true on success.
+  // SerializeKeyForClone(). Returns true on success.
   virtual bool DeserializeKeyForClone(const WebCryptoKeyAlgorithm&,
                                       WebCryptoKeyType,
                                       bool extractable,
@@ -353,7 +377,7 @@ class WebCrypto {
   }
 
  protected:
-  virtual ~WebCrypto() {}
+  virtual ~WebCrypto() = default;
 };
 
 }  // namespace blink

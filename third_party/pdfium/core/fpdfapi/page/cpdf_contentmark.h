@@ -10,9 +10,8 @@
 #include <vector>
 
 #include "core/fpdfapi/page/cpdf_contentmarkitem.h"
-#include "core/fxcrt/cfx_shared_copy_on_write.h"
-#include "core/fxcrt/fx_basic.h"
 #include "core/fxcrt/fx_system.h"
+#include "core/fxcrt/shared_copy_on_write.h"
 
 class CPDF_Dictionary;
 
@@ -22,34 +21,27 @@ class CPDF_ContentMark {
   CPDF_ContentMark(const CPDF_ContentMark& that);
   ~CPDF_ContentMark();
 
-  void SetNull();
+  int GetMarkedContentID() const;
+  size_t CountItems() const;
+  const CPDF_ContentMarkItem& GetItem(size_t i) const;
 
-  int GetMCID() const;
-  int CountItems() const;
-  const CPDF_ContentMarkItem& GetItem(int i) const;
-
-  bool HasMark(const CFX_ByteStringC& mark) const;
-  bool LookupMark(const CFX_ByteStringC& mark, CPDF_Dictionary*& pDict) const;
-  void AddMark(const CFX_ByteString& name,
-               CPDF_Dictionary* pDict,
-               bool bDirect);
+  void AddMark(const ByteString& name, CPDF_Dictionary* pDict, bool bDirect);
   void DeleteLastMark();
 
   bool HasRef() const { return !!m_Ref; }
 
  private:
-  class MarkData {
+  class MarkData : public Retainable {
    public:
     MarkData();
     MarkData(const MarkData& src);
-    ~MarkData();
+    ~MarkData() override;
 
-    int CountItems() const;
-    CPDF_ContentMarkItem& GetItem(int index);
-    const CPDF_ContentMarkItem& GetItem(int index) const;
+    size_t CountItems() const;
+    const CPDF_ContentMarkItem& GetItem(size_t index) const;
 
-    int GetMCID() const;
-    void AddMark(const CFX_ByteString& name,
+    int GetMarkedContentID() const;
+    void AddMark(const ByteString& name,
                  CPDF_Dictionary* pDict,
                  bool bDictNeedClone);
     void DeleteLastMark();
@@ -58,7 +50,7 @@ class CPDF_ContentMark {
     std::vector<CPDF_ContentMarkItem> m_Marks;
   };
 
-  CFX_SharedCopyOnWrite<MarkData> m_Ref;
+  SharedCopyOnWrite<MarkData> m_Ref;
 };
 
 #endif  // CORE_FPDFAPI_PAGE_CPDF_CONTENTMARK_H_

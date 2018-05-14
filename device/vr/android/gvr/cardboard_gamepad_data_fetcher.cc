@@ -37,7 +37,7 @@ CardboardGamepadDataFetcher::Factory::~Factory() {
 
 std::unique_ptr<GamepadDataFetcher>
 CardboardGamepadDataFetcher::Factory::CreateDataFetcher() {
-  return base::MakeUnique<CardboardGamepadDataFetcher>(data_provider_,
+  return std::make_unique<CardboardGamepadDataFetcher>(data_provider_,
                                                        display_id_);
 }
 
@@ -80,7 +80,8 @@ void CardboardGamepadDataFetcher::GetGamepadData(bool devices_changed_hint) {
   CardboardGamepadData provided_data = gamepad_data_;
 
   Gamepad& pad = state->data;
-  if (state->active_state == GAMEPAD_NEWLY_ACTIVE) {
+  if (!state->is_initialized) {
+    state->is_initialized = true;
     // This is the first time we've seen this device, so do some one-time
     // initialization
     pad.connected = true;

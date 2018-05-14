@@ -30,7 +30,6 @@
 
 #include "public/web/WebUserMediaRequest.h"
 
-#include "core/dom/Document.h"
 #include "modules/mediastream/UserMediaRequest.h"
 #include "platform/mediastream/MediaStreamDescriptor.h"
 #include "platform/mediastream/MediaStreamSource.h"
@@ -78,6 +77,17 @@ WebMediaConstraints WebUserMediaRequest::VideoConstraints() const {
   return private_->VideoConstraints();
 }
 
+bool WebUserMediaRequest::ShouldDisableHardwareNoiseSuppression() const {
+  DCHECK(!IsNull());
+  return private_->ShouldDisableHardwareNoiseSuppression();
+}
+
+bool WebUserMediaRequest::ShouldEnableExperimentalHardwareEchoCancellation()
+    const {
+  DCHECK(!IsNull());
+  return private_->ShouldEnableExperimentalHardwareEchoCancellation();
+}
+
 WebSecurityOrigin WebUserMediaRequest::GetSecurityOrigin() const {
   DCHECK(!IsNull());
   if (!private_->GetExecutionContext())
@@ -98,11 +108,6 @@ void WebUserMediaRequest::RequestSucceeded(
   private_->Succeed(stream_descriptor);
 }
 
-void WebUserMediaRequest::RequestDenied(const WebString& description) {
-  DCHECK(!IsNull());
-  private_->FailPermissionDenied(description);
-}
-
 void WebUserMediaRequest::RequestFailedConstraint(
     const WebString& constraint_name,
     const WebString& description) {
@@ -110,12 +115,10 @@ void WebUserMediaRequest::RequestFailedConstraint(
   private_->FailConstraint(constraint_name, description);
 }
 
-void WebUserMediaRequest::RequestFailedUASpecific(
-    const WebString& name,
-    const WebString& constraint_name,
-    const WebString& description) {
+void WebUserMediaRequest::RequestFailed(Error name,
+                                        const WebString& description) {
   DCHECK(!IsNull());
-  private_->FailUASpecific(name, constraint_name, description);
+  private_->Fail(name, description);
 }
 
 bool WebUserMediaRequest::Equals(const WebUserMediaRequest& other) const {

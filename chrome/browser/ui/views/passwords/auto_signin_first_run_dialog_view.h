@@ -31,8 +31,8 @@ class AutoSigninFirstRunDialogView : public views::DialogDelegateView,
   ui::ModalType GetModalType() const override;
   base::string16 GetWindowTitle() const override;
   bool ShouldShowCloseButton() const override;
+  gfx::Size CalculatePreferredSize() const override;
   void WindowClosing() override;
-  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
   bool Cancel() override;
   bool Accept() override;
   bool Close() override;
@@ -49,8 +49,6 @@ class AutoSigninFirstRunDialogView : public views::DialogDelegateView,
   // A weak pointer to the controller.
   PasswordDialogController* controller_;
   content::WebContents* const web_contents_;
-
-  views::StyledLabel* text_;
 
   DISALLOW_COPY_AND_ASSIGN(AutoSigninFirstRunDialogView);
 };

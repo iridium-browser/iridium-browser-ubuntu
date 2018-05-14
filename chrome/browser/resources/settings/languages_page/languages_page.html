@@ -9,10 +9,11 @@
 <link rel="import" href="chrome://resources/polymer/v1_0/neon-animation/neon-animatable.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-checkbox/paper-checkbox.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/paper-toggle-button/paper-toggle-button.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_action_menu/cr_action_menu.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_expand_button/cr_expand_button.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render.html">
+<link rel="import" href="chrome://resources/cr_elements/cr_toggle/cr_toggle.html">
+<link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_pref_indicator.html">
 <link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="add_languages_dialog.html">
 <link rel="import" href="languages.html">
@@ -28,7 +29,6 @@
 </if>
 
 <if expr="chromeos">
-<link rel="import" href="chrome://resources/html/chromeos/ui_account_tweaks.html">
 <link rel="import" href="manage_input_methods_page.html">
 </if>
 
@@ -63,7 +63,7 @@
       }
 
       paper-checkbox.dropdown-item {
-        --checkbox-margin-start: 0;
+        -webkit-margin-start: 0;
       }
 
       button[is='paper-icon-button-light'].icon-external {
@@ -84,7 +84,7 @@
         focus-config="[[focusConfig_]]">
       <neon-animatable route-path="default">
         <div class$="settings-box first [[getLanguageListTwoLine_()]]"
-            actionable on-tap="toggleExpandButton_">
+            actionable on-click="toggleExpandButton_">
           <div class="start">
             <div>$i18n{languagesListTitle}</div>
 <if expr="chromeos or is_win">
@@ -127,35 +127,33 @@
 <if expr="chromeos or is_win">
                 <template is="dom-if" if="[[isRestartRequired_(
                         item.language.code, languages.prospectiveUILanguage)]]">
-                  <paper-button on-tap="onRestartTap_">
+                  <paper-button on-click="onRestartTap_">
                     $i18n{restart}
                   </paper-button>
                 </template>
 </if>
                 <button is="paper-icon-button-light" title="$i18n{moreActions}"
-                    id="more-[[item.language.code]]" on-tap="onDotsTap_"
+                    id="more-[[item.language.code]]" on-click="onDotsTap_"
                     class="icon-more-vert">
                 </button>
               </div>
             </template>
             <div class="list-item">
               <a is="action-link" class="list-button" id="addLanguages"
-                  on-tap="onAddLanguagesTap_">
+                  on-click="onAddLanguagesTap_">
                 $i18n{addLanguages}
               </a>
             </div>
           </div>
-          <div class="settings-box first">
-            <settings-toggle-button id="offerTranslateOtherLangs" class="start"
-                pref="{{prefs.translate.enabled}}"
-                label="$i18n{offerToEnableTranslate}">
-            </settings-toggle-button>
-          </div>
+          <settings-toggle-button id="offerTranslateOtherLanguages"
+              class="first" pref="{{prefs.translate.enabled}}"
+              label="$i18n{offerToEnableTranslate}">
+          </settings-toggle-button>
         </iron-collapse>
 <if expr="chromeos">
         <div id="manageInputMethodsSubpageTrigger"
             class="settings-box two-line" actionable
-            on-tap="toggleExpandButton_">
+            on-click="toggleExpandButton_">
           <div class="start">
             <div>$i18n{inputMethodsListTitle}</div>
             <div class="secondary">
@@ -173,7 +171,7 @@
                 items="[[languages.inputMethods.enabled]]">
               <div class$="list-item [[getInputMethodItemClass_(
                       item.id, languages.inputMethods.currentId)]]"
-                  on-tap="onInputMethodTap_" on-keypress="onInputMethodTap_"
+                  on-click="onInputMethodTap_" on-keypress="onInputMethodTap_"
                   actionable tabindex="0">
                 <div class="start">
                   <div>[[item.displayName]]</div>
@@ -184,12 +182,13 @@
                   </div>
                 </div>
                 <button class="icon-external" is="paper-icon-button-light"
-                    on-tap="onInputMethodOptionsTap_"
+                    on-click="onInputMethodOptionsTap_"
                     hidden="[[!item.hasOptionsPage]]">
                 </button>
               </div>
             </template>
-            <div class="list-item" on-tap="onManageInputMethodsTap_" actionable>
+            <div class="list-item" on-click="onManageInputMethodsTap_"
+                actionable>
               <div class="start" id="manageInputMethods">
                 $i18n{manageInputMethods}
               </div>
@@ -198,43 +197,61 @@
                   aria-describedby="customSpelling"></button>
             </div>
           </div>
-          <div class="settings-box">
-            <settings-toggle-button class="start"
-                pref="{{prefs.settings.language.ime_menu_activated}}"
-                label="$i18n{showImeMenu}">
-            </settings-toggle-button>
-          </div>
+          <settings-toggle-button
+              pref="{{prefs.settings.language.ime_menu_activated}}"
+              label="$i18n{showImeMenu}">
+          </settings-toggle-button>
         </iron-collapse>
 </if>
 <if expr="not is_macosx">
         <div id="spellCheckSubpageTrigger"
             class$="settings-box [[getSpellCheckListTwoLine_(
                 spellCheckSecondaryText_)]]"
-            actionable on-tap="toggleExpandButton_">
+            actionable$="[[!spellCheckDisabled_]]"
+            on-click="toggleExpandButton_">
           <div class="start">
             <div>$i18n{spellCheckListTitle}</div>
             <div class="secondary">[[spellCheckSecondaryText_]]</div>
           </div>
-          <cr-expand-button expanded="{{spellCheckOpened_}}"
-              alt="$i18n{spellCheckExpandA11yLabel}">
-          </cr-expand-button>
+          <!-- |enable_spellchecking| may be set by policy, but if it's enabled,
+               we shouldn't display the policy indicator. -->
+          <template is="dom-if" if="[[spellCheckDisabled_]]" restamp>
+            <cr-policy-pref-indicator
+                pref="[[prefs.browser.enable_spellchecking]]">
+            </cr-policy-pref-indicator>
+          </template>
+          <template is="dom-if" if="[[!spellCheckDisabled_]]" restamp>
+            <cr-expand-button expanded="{{spellCheckOpened_}}"
+                alt="$i18n{spellCheckExpandA11yLabel}">
+            </cr-expand-button>
+          </template>
         </div>
         <iron-collapse id="spellCheckCollapse" opened="[[spellCheckOpened_]]">
           <div class="list-frame vertical-list">
-            <template is="dom-repeat" items="[[languages.enabled]]">
+            <template is="dom-repeat" items="[[spellCheckLanguages_]]">
               <div class="list-item">
-                <div class="start" on-tap="onSpellCheckChange_"
-                    actionable$="[[item.language.supportsSpellcheck]]">
-                  [[item.language.displayName]]
-                </div>
-                <paper-toggle-button on-change="onSpellCheckChange_"
-                    disabled="[[!item.language.supportsSpellcheck]]"
-                    checked="[[item.spellCheckEnabled]]"
-                    aria-label$="[[item.language.displayName]]">
-                </paper-toggle-button>
+                <template is="dom-if" if="[[!item.isManaged]]">
+                  <div class="start" on-click="onSpellCheckChange_"
+                      actionable$="[[item.language.supportsSpellcheck]]">
+                    [[item.language.displayName]]
+                  </div>
+                  <cr-toggle on-change="onSpellCheckChange_"
+                      disabled="[[!item.language.supportsSpellcheck]]"
+                      checked="[[item.spellCheckEnabled]]"
+                      aria-label$="[[item.language.displayName]]">
+                  </cr-toggle>
+                </template>
+                <template is="dom-if" if="[[item.isManaged]]">
+                  <div class="start">
+                    [[item.language.displayName]]
+                  </div>
+                  <cr-policy-pref-indicator
+                      pref="[[prefs.spellcheck.forced_dictionaries]]">
+                  </cr-policy-pref-indicator>
+                </template>
               </div>
             </template>
-            <div class="list-item" on-tap="onEditDictionaryTap_" actionable>
+            <div class="list-item" on-click="onEditDictionaryTap_" actionable>
               <div class="start" id="customSpelling">
                 $i18n{manageSpellCheck}
               </div>
@@ -249,7 +266,8 @@
           <dialog is="cr-action-menu"
               class$="[[getMenuClass_(prefs.translate.enabled.value)]]">
 <if expr="chromeos or is_win">
-            <paper-checkbox id="uiLanguageItem" class="dropdown-item"
+            <paper-checkbox id="uiLanguageItem" slot="item"
+                class="dropdown-item"
                 checked="[[isProspectiveUILanguage_(
                     detailLanguage_.language.code,
                     languages.prospectiveUILanguage)]]"
@@ -259,7 +277,8 @@
                 $i18n{displayInThisLanguage}
             </paper-checkbox>
 </if>
-            <paper-checkbox id="offerTranslations" class="dropdown-item"
+            <paper-checkbox id="offerTranslations" slot="item"
+                class="dropdown-item"
                 checked="[[detailLanguage_.translateEnabled]]"
                 on-change="onTranslateCheckboxChange_"
                 hidden="[[!prefs.translate.enabled.value]]"
@@ -267,26 +286,26 @@
                     detailLanguage_.language, languages.translateTarget)]]">
               $i18n{offerToTranslateInThisLanguage}
             </paper-checkbox>
-            <hr>
-            <button class="dropdown-item" role="menuitem"
-                on-tap="onMoveToTopTap_"
+            <hr slot="item">
+            <button slot="item" class="dropdown-item" role="menuitem"
+                on-click="onMoveToTopTap_"
                 hidden="[[isNthLanguage_(
                     0, detailLanguage_, languages.enabled.*)]]">
               $i18n{moveToTop}
             </button>
-            <button class="dropdown-item" role="menuitem"
-                on-tap="onMoveUpTap_"
+            <button slot="item" class="dropdown-item" role="menuitem"
+                on-click="onMoveUpTap_"
                 hidden="[[!showMoveUp_(detailLanguage_, languages.enabled.*)]]">
               $i18n{moveUp}
             </button>
-            <button class="dropdown-item" role="menuitem"
-                on-tap="onMoveDownTap_"
+            <button slot="item" class="dropdown-item" role="menuitem"
+                on-click="onMoveDownTap_"
                 hidden="[[!showMoveDown_(
                     detailLanguage_, languages.enabled.*)]]">
               $i18n{moveDown}
             </button>
-            <button class="dropdown-item" role="menuitem"
-                on-tap="onRemoveLanguageTap_"
+            <button slot="item" class="dropdown-item" role="menuitem"
+                on-click="onRemoveLanguageTap_"
                 hidden="[[!detailLanguage_.removable]]">
               $i18n{removeLanguage}
             </button>

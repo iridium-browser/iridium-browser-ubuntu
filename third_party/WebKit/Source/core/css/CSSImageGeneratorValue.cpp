@@ -28,36 +28,69 @@
 #include "core/css/CSSCrossfadeValue.h"
 #include "core/css/CSSGradientValue.h"
 #include "core/css/CSSPaintValue.h"
-#include "core/layout/LayoutObject.h"
 #include "platform/graphics/Image.h"
 
 namespace blink {
 
 using cssvalue::ToCSSCrossfadeValue;
+using cssvalue::ToCSSConicGradientValue;
+using cssvalue::ToCSSLinearGradientValue;
+using cssvalue::ToCSSRadialGradientValue;
+
+Image* GeneratedImageCache::GetImage(const FloatSize& size) const {
+  if (size.IsEmpty())
+    return nullptr;
+
+  DCHECK(sizes_.find(size) != sizes_.end());
+  GeneratedImageMap::const_iterator image_iter = images_.find(size);
+  if (image_iter == images_.end())
+    return nullptr;
+  return image_iter->second.get();
+}
+
+void GeneratedImageCache::PutImage(const FloatSize& size,
+                                   scoped_refptr<Image> image) {
+  DCHECK(!size.IsEmpty());
+  images_.insert(
+      std::pair<FloatSize, scoped_refptr<Image>>(size, std::move(image)));
+}
+
+void GeneratedImageCache::AddSize(const FloatSize& size) {
+  DCHECK(!size.IsEmpty());
+  ImageSizeCountMap::iterator size_entry = sizes_.find(size);
+  if (size_entry == sizes_.end())
+    sizes_.insert(std::pair<FloatSize, unsigned>(size, 1));
+  else
+    size_entry->second++;
+}
+
+void GeneratedImageCache::RemoveSize(const FloatSize& size) {
+  DCHECK(!size.IsEmpty());
+  SECURITY_DCHECK(sizes_.find(size) != sizes_.end());
+  unsigned& count = sizes_[size];
+  count--;
+  if (count == 0) {
+    DCHECK(images_.find(size) != images_.end());
+    sizes_.erase(sizes_.find(size));
+    images_.erase(images_.find(size));
+  }
+}
 
 CSSImageGeneratorValue::CSSImageGeneratorValue(ClassType class_type)
     : CSSValue(class_type) {}
 
-CSSImageGeneratorValue::~CSSImageGeneratorValue() {}
+CSSImageGeneratorValue::~CSSImageGeneratorValue() = default;
 
-void CSSImageGeneratorValue::AddClient(const ImageResourceObserver* client,
-                                       const IntSize& size) {
+void CSSImageGeneratorValue::AddClient(const ImageResourceObserver* client) {
   DCHECK(client);
   if (clients_.IsEmpty()) {
     DCHECK(!keep_alive_);
     keep_alive_ = this;
   }
 
-  if (!size.IsEmpty())
-    sizes_.insert(size);
-
-  ClientSizeCountMap::iterator it = clients_.find(client);
-  if (it == clients_.end()) {
-    clients_.insert(client, SizeAndCount(size, 1));
-  } else {
-    SizeAndCount& size_count = it->value;
-    ++size_count.count;
-  }
+  SizeAndCount& size_count =
+      clients_.insert(client, SizeAndCount()).stored_value->value;
+  size_count.count++;
 }
 
 CSSImageGeneratorValue* CSSImageGeneratorValue::ValueWithURLsMadeAbsolute() {
@@ -71,13 +104,10 @@ void CSSImageGeneratorValue::RemoveClient(const ImageResourceObserver* client) {
   ClientSizeCountMap::iterator it = clients_.find(client);
   SECURITY_DCHECK(it != clients_.end());
 
-  IntSize removed_image_size;
   SizeAndCount& size_count = it->value;
-  IntSize size = size_count.size;
-  if (!size.IsEmpty()) {
-    sizes_.erase(size);
-    if (!sizes_.Contains(size))
-      images_.erase(size);
+  if (!size_count.size.IsEmpty()) {
+    cached_images_.RemoveSize(size_count.size);
+    size_count.size = FloatSize();
   }
 
   if (!--size_count.count)
@@ -90,51 +120,52 @@ void CSSImageGeneratorValue::RemoveClient(const ImageResourceObserver* client) {
 }
 
 Image* CSSImageGeneratorValue::GetImage(const ImageResourceObserver* client,
-                                        const Document&,
-                                        const ComputedStyle&,
-                                        const IntSize& size) {
+                                        const FloatSize& size) const {
   ClientSizeCountMap::iterator it = clients_.find(client);
   if (it != clients_.end()) {
+    DCHECK(keep_alive_);
     SizeAndCount& size_count = it->value;
-    IntSize old_size = size_count.size;
-    if (old_size != size) {
-      RemoveClient(client);
-      AddClient(client, size);
+    if (size_count.size != size) {
+      if (!size_count.size.IsEmpty()) {
+        cached_images_.RemoveSize(size_count.size);
+        size_count.size = FloatSize();
+      }
+
+      if (!size.IsEmpty()) {
+        cached_images_.AddSize(size);
+        size_count.size = size;
+      }
     }
   }
-
-  // Don't generate an image for empty sizes.
-  if (size.IsEmpty())
-    return nullptr;
-
-  // Look up the image in our cache.
-  return images_.at(size);
+  return cached_images_.GetImage(size);
 }
 
-void CSSImageGeneratorValue::PutImage(const IntSize& size,
-                                      PassRefPtr<Image> image) {
-  images_.insert(size, std::move(image));
+void CSSImageGeneratorValue::PutImage(const FloatSize& size,
+                                      scoped_refptr<Image> image) const {
+  cached_images_.PutImage(size, std::move(image));
 }
 
-PassRefPtr<Image> CSSImageGeneratorValue::GetImage(
+scoped_refptr<Image> CSSImageGeneratorValue::GetImage(
     const ImageResourceObserver& client,
     const Document& document,
     const ComputedStyle& style,
-    const IntSize& size) {
+    const FloatSize& target_size) {
   switch (GetClassType()) {
     case kCrossfadeClass:
-      return ToCSSCrossfadeValue(this)->GetImage(client, document, style, size);
+      return ToCSSCrossfadeValue(this)->GetImage(client, document, style,
+                                                 target_size);
     case kLinearGradientClass:
       return ToCSSLinearGradientValue(this)->GetImage(client, document, style,
-                                                      size);
+                                                      target_size);
     case kPaintClass:
-      return ToCSSPaintValue(this)->GetImage(client, document, style, size);
+      return ToCSSPaintValue(this)->GetImage(client, document, style,
+                                             target_size);
     case kRadialGradientClass:
       return ToCSSRadialGradientValue(this)->GetImage(client, document, style,
-                                                      size);
+                                                      target_size);
     case kConicGradientClass:
       return ToCSSConicGradientValue(this)->GetImage(client, document, style,
-                                                     size);
+                                                     target_size);
     default:
       NOTREACHED();
   }
@@ -159,7 +190,7 @@ bool CSSImageGeneratorValue::IsFixedSize() const {
   return false;
 }
 
-IntSize CSSImageGeneratorValue::FixedSize(
+FloatSize CSSImageGeneratorValue::FixedSize(
     const Document& document,
     const FloatSize& default_object_size) {
   switch (GetClassType()) {
@@ -177,7 +208,7 @@ IntSize CSSImageGeneratorValue::FixedSize(
     default:
       NOTREACHED();
   }
-  return IntSize();
+  return FloatSize();
 }
 
 bool CSSImageGeneratorValue::IsPending() const {

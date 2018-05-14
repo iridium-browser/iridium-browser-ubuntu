@@ -12,6 +12,7 @@
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSValueList.h"
 #include "core/css/resolver/StyleResolverState.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
@@ -64,17 +65,17 @@ InterpolationValue CSSLengthListInterpolationType::MaybeConvertInitial(
 class InheritedLengthListChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
-  ~InheritedLengthListChecker() final {}
+  ~InheritedLengthListChecker() final = default;
 
   static std::unique_ptr<InheritedLengthListChecker> Create(
-      CSSPropertyID property,
+      const CSSProperty& property,
       const Vector<Length>& inherited_length_list) {
     return WTF::WrapUnique(
         new InheritedLengthListChecker(property, inherited_length_list));
   }
 
  private:
-  InheritedLengthListChecker(CSSPropertyID property,
+  InheritedLengthListChecker(const CSSProperty& property,
                              const Vector<Length>& inherited_length_list)
       : property_(property), inherited_length_list_(inherited_length_list) {}
 
@@ -86,7 +87,7 @@ class InheritedLengthListChecker
     return inherited_length_list_ == inherited_length_list;
   }
 
-  CSSPropertyID property_;
+  const CSSProperty& property_;
   Vector<Length> inherited_length_list_;
 };
 

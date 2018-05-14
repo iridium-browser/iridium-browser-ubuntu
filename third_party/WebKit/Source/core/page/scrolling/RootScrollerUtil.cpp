@@ -84,6 +84,13 @@ bool IsGlobal(const LayoutBox& box) {
                               .GlobalRootScroller();
 }
 
+bool IsEffective(const PaintLayer& layer) {
+  if (!layer.GetLayoutBox())
+    return false;
+
+  return IsEffective(*layer.GetLayoutBox());
+}
+
 bool IsGlobal(const PaintLayer& layer) {
   if (!layer.GetLayoutBox())
     return false;
@@ -96,6 +103,13 @@ bool IsGlobal(const PaintLayer& layer) {
                                     .GlobalRootScroller());
 
   return &layer == root_scroller_layer;
+}
+
+bool IsGlobal(const Element* element) {
+  return element->GetDocument()
+             .GetPage()
+             ->GlobalRootScrollerController()
+             .GlobalRootScroller() == element;
 }
 
 }  // namespace RootScrollerUtil

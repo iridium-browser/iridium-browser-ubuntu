@@ -6,7 +6,7 @@
 #define CompositorAnimationTimeline_h
 
 #include <memory>
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "cc/animation/animation_timeline.h"
 #include "platform/PlatformExport.h"
 #include "platform/wtf/Noncopyable.h"
@@ -14,7 +14,7 @@
 
 namespace blink {
 
-class CompositorAnimationPlayerClient;
+class CompositorAnimationClient;
 
 // A compositor representation for cc::AnimationTimeline.
 class PLATFORM_EXPORT CompositorAnimationTimeline {
@@ -29,8 +29,8 @@ class PLATFORM_EXPORT CompositorAnimationTimeline {
 
   cc::AnimationTimeline* GetAnimationTimeline() const;
 
-  void PlayerAttached(const CompositorAnimationPlayerClient&);
-  void PlayerDestroyed(const CompositorAnimationPlayerClient&);
+  void AnimationAttached(const CompositorAnimationClient&);
+  void AnimationDestroyed(const CompositorAnimationClient&);
 
  private:
   CompositorAnimationTimeline();

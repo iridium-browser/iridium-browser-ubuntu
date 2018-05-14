@@ -14,11 +14,12 @@
 #include "core/css/ComputedStyleCSSValueMapping.h"
 #include "core/css/PropertyRegistration.h"
 #include "core/css/parser/CSSTokenizer.h"
+#include "core/css/properties/CSSProperty.h"
 #include "core/css/resolver/CSSVariableResolver.h"
 #include "core/css/resolver/StyleBuilder.h"
 #include "core/css/resolver/StyleResolverState.h"
+#include "core/style/ComputedStyle.h"
 #include "core/style/DataEquivalency.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
@@ -102,7 +103,7 @@ class ResolvedRegisteredCustomPropertyChecker
  public:
   static std::unique_ptr<ResolvedRegisteredCustomPropertyChecker> Create(
       const CSSCustomPropertyDeclaration& declaration,
-      RefPtr<CSSVariableData> resolved_tokens) {
+      scoped_refptr<CSSVariableData> resolved_tokens) {
     return WTF::WrapUnique(new ResolvedRegisteredCustomPropertyChecker(
         declaration, std::move(resolved_tokens)));
   }
@@ -110,7 +111,7 @@ class ResolvedRegisteredCustomPropertyChecker
  private:
   ResolvedRegisteredCustomPropertyChecker(
       const CSSCustomPropertyDeclaration& declaration,
-      RefPtr<CSSVariableData> resolved_tokens)
+      scoped_refptr<CSSVariableData> resolved_tokens)
       : declaration_(declaration),
         resolved_tokens_(std::move(resolved_tokens)) {}
 
@@ -118,7 +119,7 @@ class ResolvedRegisteredCustomPropertyChecker
                const InterpolationValue&) const final {
     DCHECK(ToCSSInterpolationEnvironment(environment).HasVariableResolver());
     bool cycle_detected;
-    RefPtr<CSSVariableData> resolved_tokens =
+    scoped_refptr<CSSVariableData> resolved_tokens =
         ToCSSInterpolationEnvironment(environment)
             .VariableResolver()
             .ResolveCustomPropertyAnimationKeyframe(*declaration_,
@@ -128,7 +129,7 @@ class ResolvedRegisteredCustomPropertyChecker
   }
 
   Persistent<const CSSCustomPropertyDeclaration> declaration_;
-  RefPtr<CSSVariableData> resolved_tokens_;
+  scoped_refptr<CSSVariableData> resolved_tokens_;
 };
 
 CSSInterpolationType::CSSInterpolationType(
@@ -136,7 +137,7 @@ CSSInterpolationType::CSSInterpolationType(
     const PropertyRegistration* registration)
     : InterpolationType(property), registration_(registration) {
   DCHECK(!GetProperty().IsCSSCustomProperty() || registration);
-  DCHECK(!isShorthandProperty(CssProperty()));
+  DCHECK(!CssProperty().IsShorthand());
 }
 
 InterpolationValue CSSInterpolationType::MaybeConvertSingle(
@@ -178,21 +179,18 @@ InterpolationValue CSSInterpolationType::MaybeConvertSingleInternal(
     bool omit_animation_tainted = false;
     const CSSValue* resolved_value =
         CSSVariableResolver(state).ResolveVariableReferences(
-            CssProperty(), *value, omit_animation_tainted);
-    conversion_checkers.push_back(
-        ResolvedVariableChecker::Create(CssProperty(), value, resolved_value));
+            CssProperty().PropertyID(), *value, omit_animation_tainted);
+    conversion_checkers.push_back(ResolvedVariableChecker::Create(
+        CssProperty().PropertyID(), value, resolved_value));
     value = resolved_value;
   }
 
-  if (value->IsInitialValue() ||
-      (value->IsUnsetValue() &&
-       !CSSPropertyMetadata::IsInheritedProperty(CssProperty()))) {
+  bool is_inherited = CssProperty().IsInherited();
+  if (value->IsInitialValue() || (value->IsUnsetValue() && !is_inherited)) {
     return MaybeConvertInitial(state, conversion_checkers);
   }
 
-  if (value->IsInheritedValue() ||
-      (value->IsUnsetValue() &&
-       CSSPropertyMetadata::IsInheritedProperty(CssProperty()))) {
+  if (value->IsInheritedValue() || (value->IsUnsetValue() && is_inherited)) {
     return MaybeConvertInherit(state, conversion_checkers);
   }
 
@@ -231,7 +229,7 @@ InterpolationValue CSSInterpolationType::MaybeConvertCustomPropertyDeclaration(
     return MaybeConvertValue(*value, &state, conversion_checkers);
   }
 
-  RefPtr<CSSVariableData> resolved_tokens;
+  scoped_refptr<CSSVariableData> resolved_tokens;
   if (declaration.Value()->NeedsVariableResolution()) {
     bool cycle_detected;
     resolved_tokens = variable_resolver.ResolveCustomPropertyAnimationKeyframe(
@@ -244,7 +242,9 @@ InterpolationValue CSSInterpolationType::MaybeConvertCustomPropertyDeclaration(
     resolved_tokens = declaration.Value();
   }
   const CSSValue* resolved_value =
-      resolved_tokens ? resolved_tokens->ParseForSyntax(registration_->Syntax())
+      resolved_tokens ? resolved_tokens->ParseForSyntax(
+                            registration_->Syntax(),
+                            state.GetDocument().GetSecureContextMode())
                       : nullptr;
   if (!resolved_value) {
     return nullptr;
@@ -303,10 +303,12 @@ void CSSInterpolationType::ApplyCustomPropertyValue(
   // TODO(alancutter): Defer tokenization of the CSSValue until it is needed.
   String string_value = css_value->CssText();
   CSSTokenizer tokenizer(string_value);
+  const auto tokens = tokenizer.TokenizeToEOF();
   bool is_animation_tainted = true;
   bool needs_variable_resolution = false;
-  RefPtr<CSSVariableData> variable_data = CSSVariableData::Create(
-      tokenizer.TokenRange(), is_animation_tainted, needs_variable_resolution);
+  scoped_refptr<CSSVariableData> variable_data =
+      CSSVariableData::Create(CSSParserTokenRange(tokens), is_animation_tainted,
+                              needs_variable_resolution);
   ComputedStyle& style = *state.Style();
   const PropertyHandle property = GetProperty();
   const AtomicString& property_name = property.CustomPropertyName();

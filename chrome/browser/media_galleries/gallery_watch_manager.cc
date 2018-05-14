@@ -11,7 +11,11 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/sequence_checker.h"
 #include "base/stl_util.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/task_scheduler/task_traits.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/media_galleries/gallery_watch_manager_observer.h"
@@ -32,24 +36,25 @@ namespace {
 // Don't send a notification more than once per 3 seconds (chosen arbitrarily).
 const int kMinNotificationDelayInSeconds = 3;
 
-class ShutdownNotifierFactory
+class GalleryWatchManagerShutdownNotifierFactory
     : public BrowserContextKeyedServiceShutdownNotifierFactory {
  public:
-  static ShutdownNotifierFactory* GetInstance() {
-    return base::Singleton<ShutdownNotifierFactory>::get();
+  static GalleryWatchManagerShutdownNotifierFactory* GetInstance() {
+    return base::Singleton<GalleryWatchManagerShutdownNotifierFactory>::get();
   }
 
  private:
-  friend struct base::DefaultSingletonTraits<ShutdownNotifierFactory>;
+  friend struct base::DefaultSingletonTraits<
+      GalleryWatchManagerShutdownNotifierFactory>;
 
-  ShutdownNotifierFactory()
+  GalleryWatchManagerShutdownNotifierFactory()
       : BrowserContextKeyedServiceShutdownNotifierFactory(
             "GalleryWatchManager") {
     DependsOn(MediaGalleriesPreferencesFactory::GetInstance());
   }
-  ~ShutdownNotifierFactory() override {}
+  ~GalleryWatchManagerShutdownNotifierFactory() override {}
 
-  DISALLOW_COPY_AND_ASSIGN(ShutdownNotifierFactory);
+  DISALLOW_COPY_AND_ASSIGN(GalleryWatchManagerShutdownNotifierFactory);
 };
 
 }  // namespace.
@@ -60,11 +65,11 @@ const char GalleryWatchManager::kNoPermissionError[] =
 const char GalleryWatchManager::kCouldNotWatchGalleryError[] =
     "Could not watch gallery path.";
 
-// Manages a collection of file path watchers on the FILE thread and relays
-// the change events to |callback| on the UI thread. This file is constructed
-// on the UI thread, but operates and is destroyed on the FILE thread.
-// If |callback| is called with an error, all watches on that path have been
-// dropped.
+// Manages a collection of file path watchers on a sequenced task runner and
+// relays the change events to |callback| on the UI thread. This file is
+// constructed on the UI thread, but operates and is destroyed on a sequenced
+// task runner. If |callback| is called with an error, all watches on that path
+// have been dropped.
 class GalleryWatchManager::FileWatchManager {
  public:
   explicit FileWatchManager(const base::FilePathWatcher::Callback& callback);
@@ -79,14 +84,16 @@ class GalleryWatchManager::FileWatchManager {
   base::WeakPtr<FileWatchManager> GetWeakPtr();
 
  private:
-  typedef std::map<base::FilePath, linked_ptr<base::FilePathWatcher> >
-      WatcherMap;
+  using WatcherMap =
+      std::map<base::FilePath, std::unique_ptr<base::FilePathWatcher>>;
 
   void OnFilePathChanged(const base::FilePath& path, bool error);
 
   WatcherMap watchers_;
 
   base::FilePathWatcher::Callback callback_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<FileWatchManager> weak_factory_;
 
@@ -97,16 +104,20 @@ GalleryWatchManager::FileWatchManager::FileWatchManager(
     const base::FilePathWatcher::Callback& callback)
     : callback_(callback), weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  // Bind to the sequenced task runner, not the UI thread.
+  DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
 GalleryWatchManager::FileWatchManager::~FileWatchManager() {
-  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
 void GalleryWatchManager::FileWatchManager::AddFileWatch(
     const base::FilePath& path,
     const base::Callback<void(bool)>& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  base::AssertBlockingAllowed();
 
   // This can occur if the GalleryWatchManager attempts to watch the same path
   // again before recieving the callback. It's benign.
@@ -116,14 +127,14 @@ void GalleryWatchManager::FileWatchManager::AddFileWatch(
     return;
   }
 
-  linked_ptr<base::FilePathWatcher> watcher(new base::FilePathWatcher);
+  auto watcher = std::make_unique<base::FilePathWatcher>();
   bool success = watcher->Watch(path,
                                 true /*recursive*/,
                                 base::Bind(&FileWatchManager::OnFilePathChanged,
                                            weak_factory_.GetWeakPtr()));
 
   if (success)
-    watchers_[path] = watcher;
+    watchers_[path] = std::move(watcher);
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                           base::BindOnce(callback, success));
@@ -131,7 +142,9 @@ void GalleryWatchManager::FileWatchManager::AddFileWatch(
 
 void GalleryWatchManager::FileWatchManager::RemoveFileWatch(
     const base::FilePath& path) {
-  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  base::AssertBlockingAllowed();
+
   size_t erased = watchers_.erase(path);
   DCHECK_EQ(erased, 1u);
 }
@@ -144,7 +157,9 @@ GalleryWatchManager::FileWatchManager::GetWeakPtr() {
 void GalleryWatchManager::FileWatchManager::OnFilePathChanged(
     const base::FilePath& path,
     bool error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  base::AssertBlockingAllowed();
+
   if (error)
     RemoveFileWatch(path);
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
@@ -175,7 +190,10 @@ GalleryWatchManager::NotificationInfo::~NotificationInfo() {
 }
 
 GalleryWatchManager::GalleryWatchManager()
-    : storage_monitor_observed_(false), weak_factory_(this) {
+    : storage_monitor_observed_(false),
+      watch_manager_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND})),
+      weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   watch_manager_.reset(new FileWatchManager(base::Bind(
       &GalleryWatchManager::OnFilePathChanged, weak_factory_.GetWeakPtr())));
@@ -189,8 +207,7 @@ GalleryWatchManager::~GalleryWatchManager() {
     storage_monitor::StorageMonitor::GetInstance()->RemoveObserver(this);
   }
 
-  BrowserThread::DeleteSoon(
-      BrowserThread::FILE, FROM_HERE, watch_manager_.release());
+  watch_manager_task_runner_->DeleteSoon(FROM_HERE, watch_manager_.release());
 }
 
 void GalleryWatchManager::AddObserver(BrowserContext* browser_context,
@@ -290,8 +307,8 @@ void GalleryWatchManager::AddWatch(BrowserContext* browser_context,
                    owner,
                    path,
                    callback);
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
+    watch_manager_task_runner_->PostTask(
+        FROM_HERE,
         base::BindOnce(&FileWatchManager::AddFileWatch,
                        watch_manager_->GetWeakPtr(), path, on_watch_added));
   }
@@ -350,7 +367,7 @@ void GalleryWatchManager::EnsureBrowserContextSubscription(
   auto it = browser_context_subscription_map_.find(browser_context);
   if (it == browser_context_subscription_map_.end()) {
     browser_context_subscription_map_[browser_context] =
-        ShutdownNotifierFactory::GetInstance()
+        GalleryWatchManagerShutdownNotifierFactory::GetInstance()
             ->Get(browser_context)
             ->Subscribe(base::Bind(&GalleryWatchManager::ShutdownBrowserContext,
                                    base::Unretained(this), browser_context));
@@ -367,9 +384,9 @@ void GalleryWatchManager::DeactivateFileWatch(const WatchOwner& owner,
   it->second.owners.erase(owner);
   if (it->second.owners.empty()) {
     watched_paths_.erase(it);
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                            base::BindOnce(&FileWatchManager::RemoveFileWatch,
-                                           watch_manager_->GetWeakPtr(), path));
+    watch_manager_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&FileWatchManager::RemoveFileWatch,
+                                  watch_manager_->GetWeakPtr(), path));
   }
 }
 

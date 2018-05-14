@@ -12,7 +12,7 @@ import org.chromium.chrome.browser.tab.Tab;
  * Abstracts away the VrShell class, which may or may not be present at runtime depending on
  * compile flags.
  */
-public interface VrShell {
+public interface VrShell extends VrDialogManager {
     /**
      * Performs native VrShell initialization.
      */
@@ -37,7 +37,8 @@ public interface VrShell {
     /**
      * Sets whether we're presenting WebVR content or not.
      */
-    // TODO: Refactor needed. See crbug.com/735169.
+    // TODO(bshe): Refactor needed. See https://crbug.com/735169.
+    // TODO(mthiesse, https://crbug.com/803236): Remove this showToast parameter.
     void setWebVrModeEnabled(boolean enabled, boolean showToast);
 
     /**
@@ -61,13 +62,32 @@ public interface VrShell {
     Boolean isBackButtonEnabled();
 
     /**
+     * Returns whether the forward button is enabled.
+     */
+    Boolean isForwardButtonEnabled();
+
+    /**
      * Requests to exit VR.
      */
     void requestToExitVr(@UiUnsupportedMode int reason);
 
     /**
-     * Gives VrShell a chance to clean up any view-dependent state before removing
-     * VrShell from the view hierarchy.
+     *  Triggers VrShell to navigate forward.
      */
-    void onBeforeWindowDetached();
+    void navigateForward();
+
+    /**
+     *  Triggers VrShell to navigate backward.
+     */
+    void navigateBack();
+
+    /**
+     * Simulates a user accepting the currently visible DOFF prompt.
+     */
+    void acceptDoffPromptForTesting();
+
+    /**
+     * @param topContentOffset The content offset (usually applied by the omnibox).
+     */
+    void rawTopContentOffsetChanged(float topContentOffset);
 }

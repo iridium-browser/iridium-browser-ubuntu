@@ -18,8 +18,7 @@ namespace content {
 
 class PaymentAppContextImpl;
 
-class CONTENT_EXPORT PaymentManager
-    : public NON_EXPORTED_BASE(payments::mojom::PaymentManager) {
+class CONTENT_EXPORT PaymentManager : public payments::mojom::PaymentManager {
  public:
   PaymentManager(
       PaymentAppContextImpl* payment_app_context,
@@ -33,7 +32,7 @@ class CONTENT_EXPORT PaymentManager
   friend class PaymentManagerTest;
 
   // payments::mojom::PaymentManager methods:
-  void Init(const std::string& context, const std::string& scope) override;
+  void Init(const GURL& context_url, const std::string& scope) override;
   void DeletePaymentInstrument(
       const std::string& instrument_key,
       DeletePaymentInstrumentCallback callback) override;
@@ -48,6 +47,7 @@ class CONTENT_EXPORT PaymentManager
                             SetPaymentInstrumentCallback callback) override;
   void ClearPaymentInstruments(
       ClearPaymentInstrumentsCallback callback) override;
+  void SetUserHint(const std::string& user_hint) override;
 
   // Called when an error is detected on binding_.
   void OnConnectionError();
@@ -60,8 +60,9 @@ class CONTENT_EXPORT PaymentManager
   PaymentAppContextImpl* payment_app_context_;
 
   bool should_set_payment_app_info_;
-  GURL context_;
+  GURL context_url_;
   GURL scope_;
+  std::string user_hint_;
   mojo::Binding<payments::mojom::PaymentManager> binding_;
   base::WeakPtrFactory<PaymentManager> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(PaymentManager);

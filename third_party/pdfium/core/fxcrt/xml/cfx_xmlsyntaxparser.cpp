@@ -76,7 +76,7 @@ bool CFX_XMLSyntaxParser::IsXMLNameChar(wchar_t ch, bool bFirstChar) {
 }
 
 CFX_XMLSyntaxParser::CFX_XMLSyntaxParser(
-    const CFX_RetainPtr<CFX_SeekableStreamProxy>& pStream)
+    const RetainPtr<CFX_SeekableStreamProxy>& pStream)
     : m_pStream(pStream),
       m_iXMLPlaneSize(32 * 1024),
       m_iCurrentPos(0),
@@ -103,10 +103,10 @@ CFX_XMLSyntaxParser::CFX_XMLSyntaxParser(
 
   m_iXMLPlaneSize =
       std::min(m_iXMLPlaneSize,
-               pdfium::base::checked_cast<FX_STRSIZE>(m_pStream->GetLength()));
+               pdfium::base::checked_cast<size_t>(m_pStream->GetLength()));
   m_iCurrentPos = m_pStream->GetBOMLength();
 
-  FX_SAFE_STRSIZE alloc_size_safe = m_iXMLPlaneSize;
+  FX_SAFE_SIZE_T alloc_size_safe = m_iXMLPlaneSize;
   alloc_size_safe += 1;  // For NUL.
   if (!alloc_size_safe.IsValid() || alloc_size_safe.ValueOrDie() <= 0) {
     m_syntaxParserResult = FX_XmlSyntaxResult::Error;
@@ -128,8 +128,8 @@ FX_XmlSyntaxResult CFX_XMLSyntaxParser::DoSyntaxParse() {
     return m_syntaxParserResult;
   }
 
-  int32_t iStreamLength = m_pStream->GetLength();
-  int32_t iPos;
+  FX_FILESIZE iStreamLength = m_pStream->GetLength();
+  FX_FILESIZE iPos;
 
   FX_XmlSyntaxResult syntaxParserResult = FX_XmlSyntaxResult::None;
   while (true) {
@@ -141,7 +141,7 @@ FX_XmlSyntaxResult CFX_XMLSyntaxParser::DoSyntaxParse() {
       m_ParsedChars += m_End;
       m_iParsedBytes = m_iCurrentPos;
       if (m_pStream->GetPosition() != m_iCurrentPos)
-        m_pStream->Seek(CFX_SeekableStreamProxy::Pos::Begin, m_iCurrentPos);
+        m_pStream->Seek(CFX_SeekableStreamProxy::From::Begin, m_iCurrentPos);
 
       m_iBufferChars =
           m_pStream->ReadString(m_Buffer.data(), m_iXMLPlaneSize, &m_bEOS);
@@ -535,7 +535,8 @@ FX_XmlSyntaxResult CFX_XMLSyntaxParser::DoSyntaxParse() {
             if (m_BlockBuffer.IsEmpty()) {
               m_Start++;
               break;
-            } else if (m_wQuotationMark == 0) {
+            }
+            if (m_wQuotationMark == 0) {
               m_iTextDataLength = m_BlockBuffer.GetDataLength();
               m_wQuotationMark = 0;
               m_BlockBuffer.Reset(true);
@@ -623,7 +624,7 @@ void CFX_XMLSyntaxParser::ParseTextChar(wchar_t character) {
   m_pCurrentBlock[m_iIndexInBlock++] = character;
   m_BlockBuffer.IncrementDataLength();
   if (m_iEntityStart > -1 && character == L';') {
-    CFX_WideString csEntity = m_BlockBuffer.GetTextData(
+    WideString csEntity = m_BlockBuffer.GetTextData(
         m_iEntityStart + 1,
         m_BlockBuffer.GetDataLength() - 1 - m_iEntityStart - 1);
     int32_t iLen = csEntity.GetLength();

@@ -10,6 +10,7 @@
 #include <map>
 #include <utility>
 
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
@@ -22,7 +23,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/path_service.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string16.h"
@@ -80,7 +81,10 @@ class Latch : public base::RefCountedThreadSafe<
   // Wraps a reference to |this| in a Closure and returns it. Running the
   // Closure does nothing. The Closure just serves to keep a reference alive
   // until |this| is ready to be destroyed; invoking the |callback|.
-  base::Closure NoOpClosure() { return base::Bind(&Latch::NoOp, this); }
+  base::Closure NoOpClosure() {
+    return base::Bind(base::DoNothing::Repeatedly<Latch*>(),
+                      base::RetainedRef(this));
+  }
 
  private:
   friend class base::RefCountedThreadSafe<Latch>;
@@ -89,7 +93,6 @@ class Latch : public base::RefCountedThreadSafe<
       content::BrowserThread::UI>;
 
   ~Latch() { callback_.Run(); }
-  void NoOp() {}
 
   base::Closure callback_;
 
@@ -218,7 +221,7 @@ bool HasSameUserDataDir(const base::FilePath& bundle_path) {
 
 void LaunchShimOnFileThread(bool launched_after_rebuild,
                             const web_app::ShortcutInfo& shortcut_info) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   base::FilePath shim_path = web_app::GetAppInstallPath(shortcut_info);
 
   if (shim_path.empty() ||
@@ -255,7 +258,7 @@ void UpdatePlatformShortcutsInternal(
     const base::FilePath& app_data_path,
     const base::string16& old_app_title,
     const web_app::ShortcutInfo& shortcut_info) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   if (AppShimsDisabledForTest() &&
       !g_app_shims_allow_update_and_launch_in_tests) {
     return;
@@ -268,7 +271,7 @@ void UpdatePlatformShortcutsInternal(
 
 void UpdateAndLaunchShimOnFileThread(
     const web_app::ShortcutInfo& shortcut_info) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   base::FilePath shortcut_data_dir = web_app::GetWebAppDataDirectory(
       shortcut_info.profile_path, shortcut_info.extension_id, GURL());
   UpdatePlatformShortcutsInternal(shortcut_data_dir, base::string16(),
@@ -372,30 +375,35 @@ NSImageRep* OverlayImageRep(NSImage* background, NSImageRep* overlay) {
 
 // Helper function to extract the single NSImageRep held in a resource bundle
 // image.
-NSImageRep* ImageRepForGFXImage(const gfx::Image& image) {
+base::scoped_nsobject<NSImageRep> ImageRepForGFXImage(const gfx::Image& image) {
   NSArray* image_reps = [image.AsNSImage() representations];
   DCHECK_EQ(1u, [image_reps count]);
-  return [image_reps objectAtIndex:0];
+  return base::scoped_nsobject<NSImageRep>([image_reps objectAtIndex:0],
+                                           base::scoped_policy::RETAIN);
 }
 
-using ResourceIDToImage = std::map<int, gfx::Image>;
+using ResourceIDToImage = std::map<int, base::scoped_nsobject<NSImageRep>>;
 
-// Generates a map of gfx::Image used by SetWorkspaceIconOnFILEThread and
-// passes it to |io_task|. Since ui::ResourceBundle can be call only on UI
-// thread, this function also needs to run on UI thread.
+// Generates a map of NSImageReps used by SetWorkspaceIconOnFILEThread and
+// passes it to |io_task|. Since ui::ResourceBundle can only be used on UI
+// thread, this function also needs to run on UI thread, and the gfx::Images
+// need to be converted to NSImageReps on the UI thread due to non-thread-safety
+// of gfx::Image.
 void GetImageResourcesOnUIThread(
     base::OnceCallback<void(std::unique_ptr<ResourceIDToImage>)> io_task) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   ui::ResourceBundle& resource_bundle = ui::ResourceBundle::GetSharedInstance();
   std::unique_ptr<ResourceIDToImage> result =
-      base::MakeUnique<ResourceIDToImage>();
+      std::make_unique<ResourceIDToImage>();
 
   // These resource ID should match to the ones used by
   // SetWorkspaceIconOnFILEThread below.
   for (int id : {IDR_APPS_FOLDER_16, IDR_APPS_FOLDER_32,
-                 IDR_APPS_FOLDER_OVERLAY_128, IDR_APPS_FOLDER_OVERLAY_512})
-    (*result)[id] = resource_bundle.GetNativeImageNamed(id);
+                 IDR_APPS_FOLDER_OVERLAY_128, IDR_APPS_FOLDER_OVERLAY_512}) {
+    gfx::Image image = resource_bundle.GetNativeImageNamed(id);
+    (*result)[id] = ImageRepForGFXImage(image);
+  }
 
   base::PostTaskWithTraits(
       FROM_HERE,
@@ -404,9 +412,9 @@ void GetImageResourcesOnUIThread(
       base::BindOnce(std::move(io_task), std::move(result)));
 }
 
-void SetWorkspaceIconOnFILEThread(const base::FilePath& apps_directory,
-                                  std::unique_ptr<ResourceIDToImage> images) {
-  base::ThreadRestrictions::AssertIOAllowed();
+void SetWorkspaceIconOnWorkerThread(const base::FilePath& apps_directory,
+                                    std::unique_ptr<ResourceIDToImage> images) {
+  base::AssertBlockingAllowed();
 
   base::scoped_nsobject<NSImage> folder_icon_image([[NSImage alloc] init]);
   // Use complete assets for the small icon sizes. -[NSWorkspace setIcon:] has a
@@ -415,9 +423,9 @@ void SetWorkspaceIconOnFILEThread(const base::FilePath& apps_directory,
   // border is a much larger component of the small icons.
   // See http://crbug.com/305373 for details.
   for (int id : {IDR_APPS_FOLDER_16, IDR_APPS_FOLDER_32}) {
-    auto found = images->find(id);
+    const auto& found = images->find(id);
     DCHECK(found != images->end());
-    [folder_icon_image addRepresentation:ImageRepForGFXImage(found->second)];
+    [folder_icon_image addRepresentation:found->second];
   }
 
   // Brand larger folder assets with an embossed app launcher logo to
@@ -426,10 +434,9 @@ void SetWorkspaceIconOnFILEThread(const base::FilePath& apps_directory,
   // without this.
   NSImage* base_image = [NSImage imageNamed:NSImageNameFolder];
   for (int id : {IDR_APPS_FOLDER_OVERLAY_128, IDR_APPS_FOLDER_OVERLAY_512}) {
-    auto found = images->find(id);
+    const auto& found = images->find(id);
     DCHECK(found != images->end());
-    NSImageRep* with_overlay =
-        OverlayImageRep(base_image, ImageRepForGFXImage(found->second));
+    NSImageRep* with_overlay = OverlayImageRep(base_image, found->second);
     DCHECK(with_overlay);
     if (with_overlay)
       [folder_icon_image addRepresentation:with_overlay];
@@ -438,9 +445,6 @@ void SetWorkspaceIconOnFILEThread(const base::FilePath& apps_directory,
       setIcon:folder_icon_image
       forFile:base::mac::FilePathToNSString(apps_directory)
       options:0];
-
-  content::BrowserThread::DeleteSoon(content::BrowserThread::UI, FROM_HERE,
-                                     images.release());
 }
 
 // Adds a localized strings file for the Chrome Apps directory using the current
@@ -449,11 +453,11 @@ void SetWorkspaceIconOnFILEThread(const base::FilePath& apps_directory,
 // | + .localized
 // | | en.strings
 // | | de.strings
-void UpdateAppShortcutsSubdirLocalizedName(
+bool UpdateAppShortcutsSubdirLocalizedName(
     const base::FilePath& apps_directory) {
   base::FilePath localized = apps_directory.Append(".localized");
   if (!base::CreateDirectory(localized))
-    return;
+    return false;
 
   base::FilePath directory_name = apps_directory.BaseName().RemoveExtension();
   base::string16 localized_name =
@@ -475,7 +479,8 @@ void UpdateAppShortcutsSubdirLocalizedName(
       content::BrowserThread::UI, FROM_HERE,
       base::BindOnce(
           &GetImageResourcesOnUIThread,
-          base::BindOnce(&SetWorkspaceIconOnFILEThread, apps_directory)));
+          base::BindOnce(&SetWorkspaceIconOnWorkerThread, apps_directory)));
+  return true;
 }
 
 void DeletePathAndParentIfEmpty(const base::FilePath& app_path) {
@@ -561,7 +566,7 @@ std::unique_ptr<web_app::ShortcutInfo> RecordAppShimErrorAndBuildShortcutInfo(
   uint32_t major_version = 0;
   if (full_version.IsValid())
     major_version = full_version.components()[0];
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Apps.AppShimErrorVersion", major_version);
+  base::UmaHistogramSparse("Apps.AppShimErrorVersion", major_version);
 
   return BuildShortcutInfoFromBundle(bundle_path);
 }
@@ -687,7 +692,11 @@ bool WebAppShortcutCreator::CreateShortcuts(
     return false;
   }
 
-  UpdateAppShortcutsSubdirLocalizedName(applications_dir);
+  // Only set folder icons and a localized name once. This avoids concurrent
+  // calls to -[NSWorkspace setIcon:..], which is not reentrant.
+  static bool once = UpdateAppShortcutsSubdirLocalizedName(applications_dir);
+  if (!once)
+    LOG(ERROR) << "Failed to localize " << applications_dir.value();
 
   // If non-nil, this path is added to the OSX Dock after creating shortcuts.
   NSString* path_to_add_to_dock = nil;
@@ -1069,7 +1078,7 @@ bool CreatePlatformShortcuts(const base::FilePath& app_data_path,
                              const ShortcutLocations& creation_locations,
                              ShortcutCreationReason creation_reason,
                              const ShortcutInfo& shortcut_info) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   if (AppShimsDisabledForTest())
     return true;
 
@@ -1079,7 +1088,7 @@ bool CreatePlatformShortcuts(const base::FilePath& app_data_path,
 
 void DeletePlatformShortcuts(const base::FilePath& app_data_path,
                              const ShortcutInfo& shortcut_info) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   WebAppShortcutCreator shortcut_creator(app_data_path, &shortcut_info);
   shortcut_creator.DeleteShortcuts();
 }
@@ -1091,7 +1100,7 @@ void UpdatePlatformShortcuts(const base::FilePath& app_data_path,
 }
 
 void DeleteAllShortcutsForProfile(const base::FilePath& profile_path) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   const std::string profile_base_name = profile_path.BaseName().value();
   std::vector<base::FilePath> bundles = GetAllAppBundlesInPath(
       profile_path.Append(chrome::kWebAppDirname), profile_base_name);

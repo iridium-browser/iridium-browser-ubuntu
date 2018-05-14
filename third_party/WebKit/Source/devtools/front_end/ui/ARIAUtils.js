@@ -7,8 +7,22 @@ UI.ARIAUtils = {};
 /**
  * @param {!Element} element
  */
+UI.ARIAUtils.markAsButton = function(element) {
+  element.setAttribute('role', 'button');
+};
+
+/**
+ * @param {!Element} element
+ */
 UI.ARIAUtils.markAsGroup = function(element) {
   element.setAttribute('role', 'group');
+};
+
+/**
+ * @param {!Element} element
+ */
+UI.ARIAUtils.markAsLink = function(element) {
+  element.setAttribute('role', 'link');
 };
 
 /**
@@ -35,8 +49,38 @@ UI.ARIAUtils.markAsTreeitem = function(element) {
 /**
  * @param {!Element} element
  */
+UI.ARIAUtils.markAsTextBox = function(element) {
+  element.setAttribute('role', 'textbox');
+};
+
+/**
+ * @param {!Element} element
+ */
+UI.ARIAUtils.markAsHidden = function(element) {
+  element.setAttribute('aria-hidden', 'true');
+};
+
+/**
+ * @param {!Element} element
+ */
 UI.ARIAUtils.markAsPresentation = function(element) {
   element.setAttribute('role', 'presentation');
+};
+
+/**
+ * @param {!Element} element
+ * @param {?Element} controlledElement
+ */
+UI.ARIAUtils.setControls = function(element, controlledElement) {
+  if (!controlledElement) {
+    element.removeAttribute('aria-controls');
+    return;
+  }
+
+  if (controlledElement.id === '')
+    throw new Error('Controlled element must have ID');
+
+  element.setAttribute('aria-controls', controlledElement.id);
 };
 
 /**
@@ -83,3 +127,22 @@ UI.ARIAUtils.setPressed = function(element, value) {
 UI.ARIAUtils.setAccessibleName = function(element, name) {
   element.setAttribute('aria-label', name);
 };
+
+/**
+ * @param {string} message
+ * @param {!Element} element
+ */
+UI.ARIAUtils.alert = function(message, element) {
+  const document = element.ownerDocument;
+  if (!document[UI.ARIAUtils.AlertElementSymbol]) {
+    const alertElement = document.body.createChild('div');
+    alertElement.style.position = 'absolute';
+    alertElement.style.left = '-999em';
+    alertElement.setAttribute('role', 'alert');
+    alertElement.setAttribute('aria-atomic', 'true');
+    document[UI.ARIAUtils.AlertElementSymbol] = alertElement;
+  }
+  document[UI.ARIAUtils.AlertElementSymbol].textContent = message;
+};
+
+UI.ARIAUtils.AlertElementSymbol = Symbol('AlertElementSybmol');

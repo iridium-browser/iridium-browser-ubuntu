@@ -50,11 +50,8 @@ class BookmarkBubbleViewTest : public BrowserWithTestWindowTest {
   }
 
   // BrowserWithTestWindowTest:
-  TestingProfile* CreateProfile() override {
-    TestingProfile::Builder builder;
-    builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
-                              BuildFakeSigninManagerBase);
-    return builder.Build().release();
+  TestingProfile::TestingFactories GetTestingFactories() override {
+    return {{SigninManagerFactory::GetInstance(), BuildFakeSigninManagerBase}};
   }
 
  protected:
@@ -75,8 +72,8 @@ class BookmarkBubbleViewTest : public BrowserWithTestWindowTest {
     if (username.empty())
       return;
 
-    SigninManagerBase* signin_manager = static_cast<SigninManagerBase*>(
-        SigninManagerFactory::GetForProfile(profile()));
+    SigninManagerBase* signin_manager =
+        SigninManagerFactory::GetForProfile(profile());
     ASSERT_TRUE(signin_manager);
     signin_manager->SetAuthenticatedAccountInfo(username, username);
   }

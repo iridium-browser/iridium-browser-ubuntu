@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/pacing/interval_budget.h"
+#include "modules/pacing/interval_budget.h"
 
 #include <algorithm>
 
@@ -54,6 +54,8 @@ size_t IntervalBudget::bytes_remaining() const {
 }
 
 int IntervalBudget::budget_level_percent() const {
+  if (max_bytes_in_budget_ == 0)
+    return 0;
   return bytes_remaining_ * 100 / max_bytes_in_budget_;
 }
 

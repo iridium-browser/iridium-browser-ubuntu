@@ -6,237 +6,165 @@
 #define ScriptWrappableVisitor_h
 
 #include "platform/PlatformExport.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/bindings/TraceWrapperBase.h"
 #include "platform/heap/HeapPage.h"
-#include "platform/heap/VisitorImpl.h"
-#include "platform/heap/WrapperVisitor.h"
+#include "platform/heap/ThreadingTraits.h"
 #include "platform/wtf/Deque.h"
 #include "platform/wtf/Vector.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
-class HeapObjectHeader;
 template <typename T>
-class Member;
+class DOMWrapperMap;
+class HeapObjectHeader;
 class ScriptWrappable;
+class ScriptWrappableVisitor;
+template <typename T>
+class Supplement;
+class TraceWrapperBase;
+class TraceWrapperBaseForSupplement;
 template <typename T>
 class TraceWrapperV8Reference;
 
-class WrapperMarkingData {
- public:
-  WrapperMarkingData(
-      void (*trace_wrappers_callback)(const WrapperVisitor*, const void*),
-      HeapObjectHeader* (*heap_object_header_callback)(const void*),
-      const void* object)
-      : trace_wrappers_callback_(trace_wrappers_callback),
-        heap_object_header_callback_(heap_object_header_callback),
-        raw_object_pointer_(object) {
-    DCHECK(trace_wrappers_callback_);
-    DCHECK(heap_object_header_callback_);
-    DCHECK(raw_object_pointer_);
+using HeapObjectHeaderCallback = HeapObjectHeader* (*)(const void*);
+using MissedWriteBarrierCallback = void (*)();
+using TraceWrappersCallback = void (*)(const ScriptWrappableVisitor*,
+                                       const void* self);
+using NameCallback = const char* (*)(const void* self);
+
+#define DEFINE_TRAIT_FOR_TRACE_WRAPPERS(ClassName)                   \
+  template <>                                                        \
+  inline void TraceTrait<ClassName>::TraceMarkedWrapper(             \
+      const ScriptWrappableVisitor* visitor, const void* t) {        \
+    const ClassName* traceable = ToWrapperTracingType(t);            \
+    traceable->TraceWrappers(visitor);                               \
   }
 
-  inline void TraceWrappers(WrapperVisitor* visitor) {
-    if (raw_object_pointer_) {
-      trace_wrappers_callback_(visitor, raw_object_pointer_);
-    }
-  }
-
-  // Returns true when object was marked. Ignores (returns true) invalidated
-  // objects.
-  inline bool IsWrapperHeaderMarked() {
-    return !raw_object_pointer_ ||
-           GetHeapObjectHeader()->IsWrapperHeaderMarked();
-  }
-
-  inline const void* RawObjectPointer() { return raw_object_pointer_; }
-
- private:
-  inline bool ShouldBeInvalidated() {
-    return raw_object_pointer_ && !GetHeapObjectHeader()->IsMarked();
-  }
-
-  inline void Invalidate() { raw_object_pointer_ = nullptr; }
-
-  inline const HeapObjectHeader* GetHeapObjectHeader() {
-    DCHECK(raw_object_pointer_);
-    return heap_object_header_callback_(raw_object_pointer_);
-  }
-
-  void (*trace_wrappers_callback_)(const WrapperVisitor*, const void*);
-  HeapObjectHeader* (*heap_object_header_callback_)(const void*);
-  const void* raw_object_pointer_;
-
-  friend class ScriptWrappableVisitor;
+// WrapperDescriptor contains enough information to visit a
+// ScriptWrappable without knowing its type statically.
+// It is passed to ScriptWrappableVisitor::Visit method.
+struct WrapperDescriptor {
+  STACK_ALLOCATED();
+  const void* traceable;
+  TraceWrappersCallback trace_wrappers_callback;
+  HeapObjectHeaderCallback heap_object_header_callback;
+  MissedWriteBarrierCallback missed_write_barrier_callback;
+  NameCallback name_callback;
 };
 
-// ScriptWrappableVisitor is able to trace through the objects to get all
-// wrappers. It is used during V8 garbage collection.  When this visitor is
-// set to the v8::Isolate as its embedder heap tracer, V8 will call it during
-// its garbage collection. At the beginning, it will call TracePrologue, then
-// repeatedly it will call AdvanceTracing, and at the end it will call
-// TraceEpilogue. Everytime V8 finds new wrappers, it will let the tracer
-// know using RegisterV8References.
-class PLATFORM_EXPORT ScriptWrappableVisitor : public v8::EmbedderHeapTracer,
-                                               public WrapperVisitor {
-  DISALLOW_IMPLICIT_CONSTRUCTORS(ScriptWrappableVisitor);
-
+// Abstract visitor for wrapper references in a ScriptWrappable.
+// Usage:
+// - Define a derived class that overrides Visit(..) methods.
+// - Create an instance of the derived class: visitor.
+// - Call visitor.DispatchTraceWrappers(traceable).
+// DispatchTraceWrappers will invoke Visit() method for all
+// wrapper references in traceable.
+class PLATFORM_EXPORT ScriptWrappableVisitor {
  public:
-  ScriptWrappableVisitor(v8::Isolate* isolate) : isolate_(isolate){};
-  ~ScriptWrappableVisitor() override;
-
-  // Replace all dead objects in the marking deque with nullptr after oilpan
-  // gc.
-  static void InvalidateDeadObjectsInMarkingDeque(v8::Isolate*);
-
-  // Immediately clean up all wrappers.
-  static void PerformCleanup(v8::Isolate*);
-
-  void TracePrologue() override;
-
-  static WrapperVisitor* CurrentVisitor(v8::Isolate*);
-
-  static void WriteBarrier(v8::Isolate*,
-                           const void*,
-                           const TraceWrapperV8Reference<v8::Value>*);
-
-  // TODO(mlippautz): Remove once ScriptWrappable is converted to
-  // TraceWrapperV8Reference.
-  static void WriteBarrier(v8::Isolate*, const v8::Persistent<v8::Object>*);
-
+  // Trace all wrappers of |tracable|.
+  //
+  // If you cannot use TraceWrapperMember & the corresponding TraceWrappers()
+  // for some reason (e.g., unions using raw pointers), see
+  // |TraceWrappersWithManualWriteBarrier()| below.
   template <typename T>
-  static void WriteBarrier(const void* object, const Member<T>& value) {
-    WriteBarrier(object, value.Get());
+  void TraceWrappers(const TraceWrapperMember<T>& traceable) const {
+    static_assert(sizeof(T), "T must be fully defined");
+    Visit(traceable.Get());
   }
 
+  // Enable partial tracing of objects. This is used when tracing interior
+  // objects without their own header.
   template <typename T>
-  static void WriteBarrier(const void* src_object, const T* dst_object) {
-    static_assert(!NeedsAdjustAndMark<T>::value,
-                  "wrapper tracing is not supported within mixins");
-    if (!src_object || !dst_object) {
-      return;
-    }
-    // We only require a write barrier if |srcObject|  is already marked. Note
-    // that this implicitly disables the write barrier when the GC is not
-    // active as object will not be marked in this case.
-    if (!HeapObjectHeader::FromPayload(src_object)->IsWrapperHeaderMarked()) {
-      return;
-    }
-
-    const ThreadState* thread_state = ThreadState::Current();
-    DCHECK(thread_state);
-    // If the wrapper is already marked we can bail out here.
-    if (TraceTrait<T>::GetHeapObjectHeader(dst_object)->IsWrapperHeaderMarked())
-      return;
-    // Otherwise, eagerly mark the wrapper header and put the object on the
-    // marking deque for further processing.
-    WrapperVisitor* const visitor = CurrentVisitor(thread_state->GetIsolate());
-    visitor->MarkAndPushToMarkingDeque(dst_object);
+  void TraceWrappers(const T& traceable) const {
+    static_assert(sizeof(T), "T must be fully defined");
+    traceable.TraceWrappers(this);
   }
 
-  void RegisterV8References(const std::vector<std::pair<void*, void*>>&
-                                internal_fields_of_potential_wrappers) override;
-  void RegisterV8Reference(const std::pair<void*, void*>& internal_fields);
-  bool AdvanceTracing(double deadline_in_ms,
-                      v8::EmbedderHeapTracer::AdvanceTracingActions) override;
-  void TraceEpilogue() override;
-  void AbortTracing() override;
-  void EnterFinalPause() override;
-  size_t NumberOfWrappersToTrace() override;
-
-  void DispatchTraceWrappers(const TraceWrapperBase*) const override;
-
-  void TraceWrappers(const TraceWrapperV8Reference<v8::Value>&) const override;
-  void MarkWrapper(const v8::PersistentBase<v8::Value>*) const override;
-
-  void InvalidateDeadObjectsInMarkingDeque();
-
-  bool MarkWrapperHeader(HeapObjectHeader*) const;
-
-  // Mark wrappers in all worlds for the given script wrappable as alive in
-  // V8.
-  void MarkWrappersInAllWorlds(const ScriptWrappable*) const override;
-
-  WTF::Deque<WrapperMarkingData>* GetMarkingDeque() { return &marking_deque_; }
-  WTF::Deque<WrapperMarkingData>* GetVerifierDeque() {
-    return &verifier_deque_;
-  }
-  WTF::Vector<HeapObjectHeader*>* GetHeadersToUnmark() {
-    return &headers_to_unmark_;
+  // Only called from automatically generated bindings code.
+  template <typename T>
+  void TraceWrappersFromGeneratedCode(const T* traceable) const {
+    Visit(traceable);
   }
 
-  // Immediately cleans up all wrappers if necessary.
-  void PerformCleanup();
+  // Require all users of manual write barriers to make this explicit in their
+  // |TraceWrappers| definition. Be sure to add
+  // |ScriptWrappableMarkingVisitor::WriteBarrier(new_value)| after all
+  // assignments to the field. Otherwise, the objects may be collected
+  // prematurely.
+  template <typename T>
+  void TraceWrappersWithManualWriteBarrier(const T* traceable) const {
+    Visit(traceable);
+  }
+
+  template <typename V8Type>
+  void TraceWrappers(const TraceWrapperV8Reference<V8Type>& v8reference) const {
+    Visit(v8reference.template Cast<v8::Value>());
+  }
+
+  // Trace wrappers in non-main worlds.
+  void TraceWrappers(DOMWrapperMap<ScriptWrappable>*,
+                     const ScriptWrappable* key) const;
+
+  virtual void DispatchTraceWrappers(const TraceWrapperBase*) const;
+  template <typename T>
+  void DispatchTraceWrappers(const Supplement<T>* traceable) const {
+    const TraceWrapperBaseForSupplement* base = traceable;
+    DispatchTraceWrappersForSupplement(base);
+  }
+  // Catch all handlers needed because of mixins except for Supplement<T>.
+  void DispatchTraceWrappers(const void*) const { CHECK(false); }
 
  protected:
-  bool PushToMarkingDeque(
-      void (*trace_wrappers_callback)(const WrapperVisitor*, const void*),
-      HeapObjectHeader* (*heap_object_header_callback)(const void*),
-      void (*missed_write_barrier_callback)(void),
-      const void* object) const override {
-    if (!tracing_in_progress_)
-      return false;
+  // The visitor interface. Derived visitors should override this
+  // function to visit V8 references and ScriptWrappables.
+  virtual void Visit(const TraceWrapperV8Reference<v8::Value>&) const = 0;
+  virtual void Visit(const WrapperDescriptor&) const = 0;
+  virtual void Visit(DOMWrapperMap<ScriptWrappable>*,
+                     const ScriptWrappable* key) const = 0;
 
-    marking_deque_.push_back(WrapperMarkingData(
-        trace_wrappers_callback, heap_object_header_callback, object));
-#if DCHECK_IS_ON()
-    if (!advancing_tracing_) {
-      verifier_deque_.push_back(WrapperMarkingData(
-          trace_wrappers_callback, heap_object_header_callback, object));
-    }
-#endif
-    return true;
+  template <typename T>
+  static WrapperDescriptor WrapperDescriptorFor(const T* traceable) {
+    return {traceable, TraceTrait<T>::TraceMarkedWrapper,
+            TraceTrait<T>::GetHeapObjectHeader,
+            ScriptWrappableVisitor::MissedWriteBarrier<T>,
+            ScriptWrappableVisitor::NameCallback<T>};
   }
 
-  // Returns true if wrapper tracing is currently in progress, i.e.,
-  // TracePrologue has been called, and TraceEpilogue has not yet been called.
-  bool tracing_in_progress_ = false;
+ private:
+  template <typename T>
+  static NOINLINE void MissedWriteBarrier() {
+    NOTREACHED();
+  }
 
-  // Is AdvanceTracing currently running? If not, we know that all calls of
-  // pushToMarkingDeque are from V8 or new wrapper associations. And this
-  // information is used by the verifier feature.
-  bool advancing_tracing_ = false;
+  static const char* NameInHeapSnapshot(const TraceWrapperBase* traceable) {
+    return traceable->NameInHeapSnapshot();
+  }
 
-  // Indicates whether an idle task for a lazy cleanup has already been
-  // scheduled. The flag is used to avoid scheduling multiple idle tasks for
-  // cleaning up.
-  bool idle_cleanup_task_scheduled_ = false;
+  static const char* NameInHeapSnapshot(...) {
+    // Default case for all non-TraceWrapperBase classes.
+    return "InternalNode";
+  }
 
-  // Indicates whether cleanup should currently happen. The flag is used to
-  // avoid cleaning up in the next GC cycle.
-  bool should_cleanup_ = false;
+  template <typename T>
+  static const char* NameCallback(const void* traceable) {
+    return NameInHeapSnapshot(static_cast<const T*>(traceable));
+  }
 
-  // Schedule an idle task to perform a lazy (incremental) clean up of
-  // wrappers.
-  void ScheduleIdleLazyCleanup();
-  void PerformLazyCleanup(double deadline_seconds);
+  // Helper method to invoke the virtual Visit method with wrapper descriptor.
+  template <typename T>
+  void Visit(const T* traceable) const {
+    static_assert(sizeof(T), "T must be fully defined");
+    if (!traceable)
+      return;
+    Visit(WrapperDescriptorFor(traceable));
+  }
 
-  // Collection of objects we need to trace from. We assume it is safe to hold
-  // on to the raw pointers because:
-  // - oilpan object cannot move
-  // - oilpan gc will call invalidateDeadObjectsInMarkingDeque to delete all
-  //   obsolete objects
-  mutable WTF::Deque<WrapperMarkingData> marking_deque_;
-
-  // Collection of objects we started tracing from. We assume it is safe to
-  // hold on to the raw pointers because:
-  // - oilpan object cannot move
-  // - oilpan gc will call invalidateDeadObjectsInMarkingDeque to delete
-  //   all obsolete objects
-  //
-  // These objects are used when TraceWrappablesVerifier feature is enabled to
-  // verify that all objects reachable in the atomic pause were marked
-  // incrementally. If not, there is one or multiple write barriers missing.
-  mutable WTF::Deque<WrapperMarkingData> verifier_deque_;
-
-  // Collection of headers we need to unmark after the tracing finished. We
-  // assume it is safe to hold on to the headers because:
-  // - oilpan objects cannot move
-  // - objects this headers belong to are invalidated by the oilpan GC in
-  //   invalidateDeadObjectsInMarkingDeque.
-  mutable WTF::Vector<HeapObjectHeader*> headers_to_unmark_;
-  v8::Isolate* isolate_;
+  // Supplement-specific implementation of DispatchTraceWrappers.  The suffix of
+  // "ForSupplement" is necessary not to make this member function a candidate
+  // of overload resolutions.
+  void DispatchTraceWrappersForSupplement(
+      const TraceWrapperBaseForSupplement*) const;
 };
 
 }  // namespace blink

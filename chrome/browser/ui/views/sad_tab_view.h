@@ -19,6 +19,11 @@ class WebContents;
 namespace views {
 class Label;
 class LabelButton;
+class WebView;
+}  // namespace views
+
+namespace test {
+class SadTabViewTestApi;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -29,16 +34,22 @@ class LabelButton;
 //  "sad tab" in the browser window when a renderer is destroyed unnaturally.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class SadTabView : public chrome::SadTab,
+class SadTabView : public SadTab,
                    public views::View,
                    public views::LinkListener,
                    public views::ButtonListener {
  public:
-  SadTabView(content::WebContents* web_contents, chrome::SadTabKind kind);
+  static const char kViewClassName[];
+
+  SadTabView(content::WebContents* web_contents, SadTabKind kind);
   ~SadTabView() override;
+
+  // Overridden from SadTab:
+  void ReinstallInWebView() override;
 
   // Overridden from views::View:
   void Layout() override;
+  const char* GetClassName() const override;
 
   // Overridden from views::LinkListener:
   void LinkClicked(views::Link* source, int event_flags) override;
@@ -49,14 +60,22 @@ class SadTabView : public chrome::SadTab,
  protected:
   // Overridden from views::View:
   void OnPaint(gfx::Canvas* canvas) override;
+  void RemovedFromWidget() override;
 
  private:
+  friend class test::SadTabViewTestApi;
+
+  // Set this View as the crashed overlay view for the WebView associated
+  // with this object's WebContents.
+  void AttachToWebView();
+
   bool painted_ = false;
   views::Label* message_;
   std::vector<views::Label*> bullet_labels_;
   views::Link* help_link_;
   views::LabelButton* action_button_;
   views::Label* title_;
+  views::WebView* owner_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(SadTabView);
 };

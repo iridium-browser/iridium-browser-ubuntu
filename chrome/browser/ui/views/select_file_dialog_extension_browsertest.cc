@@ -30,6 +30,7 @@
 #include "content/public/test/test_utils.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
+#include "ui/shell_dialogs/select_file_policy.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 
 using content::BrowserContext;
@@ -363,11 +364,11 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
                                      base::FilePath(), owning_window, ""));
 
   // Open a singleton tab in background.
-  chrome::NavigateParams p(browser(), GURL("http://www.google.com"),
-                           ui::PAGE_TRANSITION_LINK);
-  p.window_action = chrome::NavigateParams::SHOW_WINDOW;
+  NavigateParams p(browser(), GURL("http://www.google.com"),
+                   ui::PAGE_TRANSITION_LINK);
+  p.window_action = NavigateParams::SHOW_WINDOW;
   p.disposition = WindowOpenDisposition::SINGLETON_TAB;
-  chrome::Navigate(&p);
+  Navigate(&p);
 
   // Press cancel button.
   CloseDialog(DIALOG_BTN_CANCEL, owning_window);

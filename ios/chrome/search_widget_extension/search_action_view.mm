@@ -4,6 +4,8 @@
 
 #import "ios/chrome/search_widget_extension/search_action_view.h"
 
+#import <NotificationCenter/NotificationCenter.h>
+
 #include "base/ios/ios_util.h"
 #import "ios/chrome/search_widget_extension/ui_util.h"
 
@@ -22,14 +24,17 @@ const CGFloat kIconSize = 35;
 
 - (instancetype)initWithActionTarget:(id)target
                       actionSelector:(SEL)actionSelector
-                       primaryEffect:(UIVisualEffect*)primaryEffect
-                     secondaryEffect:(UIVisualEffect*)secondaryEffect
                                title:(NSString*)title
                            imageName:(NSString*)imageName {
   DCHECK(target);
   self = [super initWithFrame:CGRectZero];
   if (self) {
     self.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UIVibrancyEffect* primaryEffect =
+        [UIVibrancyEffect widgetPrimaryVibrancyEffect];
+    UIVibrancyEffect* secondaryEffect =
+        [UIVibrancyEffect widgetSecondaryVibrancyEffect];
 
     UIVisualEffectView* primaryEffectView =
         [[UIVisualEffectView alloc] initWithEffect:primaryEffect];
@@ -39,21 +44,20 @@ const CGFloat kIconSize = 35;
          @[ primaryEffectView, secondaryEffectView ]) {
       [self addSubview:effectView];
       effectView.translatesAutoresizingMaskIntoConstraints = NO;
+      effectView.userInteractionEnabled = NO;
       [NSLayoutConstraint
           activateConstraints:ui_util::CreateSameConstraints(self, effectView)];
     }
 
     UIView* circleView = [[UIView alloc] initWithFrame:CGRectZero];
-    circleView.backgroundColor = base::ios::IsRunningOnIOS10OrLater()
-                                     ? [UIColor colorWithWhite:0 alpha:0.05]
-                                     : [UIColor whiteColor];
+    circleView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.05];
     circleView.layer.cornerRadius = kActionButtonSize / 2;
 
     UILabel* labelView = [[UILabel alloc] initWithFrame:CGRectZero];
     labelView.text = title;
     labelView.numberOfLines = 0;
     labelView.textAlignment = NSTextAlignmentCenter;
-    labelView.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    labelView.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption2];
     labelView.isAccessibilityElement = NO;
     [labelView
         setContentCompressionResistancePriority:UILayoutPriorityRequired
@@ -68,28 +72,13 @@ const CGFloat kIconSize = 35;
     [secondaryEffectView.contentView addSubview:stack];
     [NSLayoutConstraint activateConstraints:ui_util::CreateSameConstraints(
                                                 secondaryEffectView, stack)];
-
-    // A transparent button constrained to the same size as the stack is added
-    // to handle taps on the stack view.
-    UIButton* actionButton = [[UIButton alloc] initWithFrame:CGRectZero];
-    actionButton.backgroundColor = [UIColor clearColor];
-    [actionButton addTarget:target
-                     action:actionSelector
-           forControlEvents:UIControlEventTouchUpInside];
-    actionButton.translatesAutoresizingMaskIntoConstraints = NO;
-    actionButton.accessibilityLabel = title;
-    [self addSubview:actionButton];
-    [NSLayoutConstraint activateConstraints:ui_util::CreateSameConstraints(
-                                                actionButton, stack)];
-
     UIImage* iconImage = [UIImage imageNamed:imageName];
+    iconImage =
+        [iconImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+
     UIImageView* icon = [[UIImageView alloc] initWithImage:iconImage];
     icon.translatesAutoresizingMaskIntoConstraints = NO;
-    if (base::ios::IsRunningOnIOS10OrLater()) {
-      [primaryEffectView.contentView addSubview:icon];
-    } else {
-      [self addSubview:icon];
-    }
+    [primaryEffectView.contentView addSubview:icon];
 
     [NSLayoutConstraint activateConstraints:@[
       [circleView.widthAnchor constraintEqualToConstant:kActionButtonSize],
@@ -99,6 +88,12 @@ const CGFloat kIconSize = 35;
       [icon.centerXAnchor constraintEqualToAnchor:circleView.centerXAnchor],
       [icon.centerYAnchor constraintEqualToAnchor:circleView.centerYAnchor],
     ]];
+
+    self.userInteractionEnabled = YES;
+    [self addTarget:target
+                  action:actionSelector
+        forControlEvents:UIControlEventTouchUpInside];
+    self.accessibilityLabel = title;
   }
   return self;
 }

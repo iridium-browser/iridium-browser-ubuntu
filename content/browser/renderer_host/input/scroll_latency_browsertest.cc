@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -68,7 +70,7 @@ class ScrollLatencyBrowserTest : public ContentBrowserTest {
   void WaitAFrame() {
     while (!GetWidgetHost()->ScheduleComposite())
       GiveItSomeTime();
-    frame_watcher_.WaitFrames(1);
+    frame_observer_->Wait();
   }
 
  protected:
@@ -79,10 +81,12 @@ class ScrollLatencyBrowserTest : public ContentBrowserTest {
     RenderWidgetHostImpl* host = GetWidgetHost();
     host->GetView()->SetSize(gfx::Size(400, 400));
 
-    frame_watcher_.Observe(shell()->web_contents());
+    frame_observer_ = std::make_unique<MainThreadFrameObserver>(
+        shell()->web_contents()->GetRenderViewHost()->GetWidget());
 
     // Wait a frame to make sure the page has renderered.
     WaitAFrame();
+    frame_observer_.reset();
   }
 
   // Generate a single wheel tick, scrolling by |distance|. This will perform a
@@ -108,7 +112,7 @@ class ScrollLatencyBrowserTest : public ContentBrowserTest {
  private:
   base::MessageLoop loop_;
   base::RunLoop runner_;
-  FrameWatcher frame_watcher_;
+  std::unique_ptr<MainThreadFrameObserver> frame_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ScrollLatencyBrowserTest);
 };

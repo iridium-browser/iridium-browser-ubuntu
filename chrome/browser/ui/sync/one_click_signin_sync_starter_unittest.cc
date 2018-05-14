@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/memory/ptr_util.h"
+#include "base/macros.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
@@ -25,17 +25,16 @@
 
 namespace {
 
-const char* kTestingGaiaId = "gaia_id";
-const char* kTestingUsername = "fake_username";
+const char kTestingGaiaId[] = "gaia_id";
+const char kTestingRefreshToken[] = "refresh_token";
+const char kTestingUsername[] = "fake_username";
 
 }  // namespace
 
 class OneClickSigninSyncStarterTest : public ChromeRenderViewHostTestHarness {
  public:
   OneClickSigninSyncStarterTest()
-      : sync_starter_(NULL),
-        failed_count_(0),
-        succeeded_count_(0) {}
+      : sync_starter_(nullptr), failed_count_(0), succeeded_count_(0) {}
 
   // ChromeRenderViewHostTestHarness:
   void SetUp() override {
@@ -45,10 +44,10 @@ class OneClickSigninSyncStarterTest : public ChromeRenderViewHostTestHarness {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kDisableSync);
 
-    SigninManagerBase* signin_manager = static_cast<FakeSigninManager*>(
-        SigninManagerFactory::GetForProfile(profile()));
+    SigninManagerBase* signin_manager =
+        SigninManagerFactory::GetForProfile(profile());
 
-    signin_manager->Initialize(NULL);
+    signin_manager->Initialize(nullptr);
     signin_manager->SetAuthenticatedAccountInfo(kTestingGaiaId,
                                                 kTestingUsername);
   }
@@ -71,14 +70,14 @@ class OneClickSigninSyncStarterTest : public ChromeRenderViewHostTestHarness {
   }
 
  protected:
-  void CreateSyncStarter(OneClickSigninSyncStarter::Callback callback,
-                         const GURL& continue_url) {
+  void CreateSyncStarter(OneClickSigninSyncStarter::Callback callback) {
     sync_starter_ = new OneClickSigninSyncStarter(
-        profile(), NULL, kTestingGaiaId, kTestingUsername, std::string(),
-        "refresh_token", OneClickSigninSyncStarter::CURRENT_PROFILE,
-        OneClickSigninSyncStarter::SYNC_WITH_DEFAULT_SETTINGS, web_contents(),
-        OneClickSigninSyncStarter::NO_CONFIRMATION, GURL(), continue_url,
-        callback);
+        profile(), nullptr, kTestingGaiaId, kTestingUsername, std::string(),
+        kTestingRefreshToken, signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN,
+        signin_metrics::Reason::REASON_UNKNOWN_REASON,
+        OneClickSigninSyncStarter::CURRENT_PROFILE,
+        OneClickSigninSyncStarter::SYNC_WITH_DEFAULT_SETTINGS,
+        OneClickSigninSyncStarter::NO_CONFIRMATION, callback);
   }
 
   // Deletes itself when SigninFailed() or SigninSuccess() is called.
@@ -94,7 +93,7 @@ class OneClickSigninSyncStarterTest : public ChromeRenderViewHostTestHarness {
   static std::unique_ptr<KeyedService> BuildSigninManager(
       content::BrowserContext* context) {
     Profile* profile = static_cast<Profile*>(context);
-    return base::MakeUnique<FakeSigninManager>(
+    return std::make_unique<FakeSigninManager>(
         ChromeSigninClientFactory::GetForProfile(profile),
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
         AccountTrackerServiceFactory::GetForProfile(profile),
@@ -107,8 +106,7 @@ class OneClickSigninSyncStarterTest : public ChromeRenderViewHostTestHarness {
 // Verifies that the callback is invoked when sync setup fails.
 TEST_F(OneClickSigninSyncStarterTest, CallbackSigninFailed) {
   CreateSyncStarter(base::Bind(&OneClickSigninSyncStarterTest::Callback,
-                               base::Unretained(this)),
-                    GURL());
+                               base::Unretained(this)));
   sync_starter_->SigninFailed(GoogleServiceAuthError(
       GoogleServiceAuthError::REQUEST_CANCELED));
   EXPECT_EQ(1, failed_count_);
@@ -117,7 +115,7 @@ TEST_F(OneClickSigninSyncStarterTest, CallbackSigninFailed) {
 
 // Verifies that there is no crash when the callback is NULL.
 TEST_F(OneClickSigninSyncStarterTest, CallbackNull) {
-  CreateSyncStarter(OneClickSigninSyncStarter::Callback(), GURL());
+  CreateSyncStarter(OneClickSigninSyncStarter::Callback());
   sync_starter_->SigninFailed(GoogleServiceAuthError(
       GoogleServiceAuthError::REQUEST_CANCELED));
   EXPECT_EQ(0, failed_count_);

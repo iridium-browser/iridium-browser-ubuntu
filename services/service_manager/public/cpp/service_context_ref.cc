@@ -47,7 +47,7 @@ class ServiceContextRefImpl : public ServiceContextRef {
           FROM_HERE, base::Bind(&ServiceContextRefFactory::AddRef, factory_));
     }
 
-    return base::MakeUnique<ServiceContextRefImpl>(factory_,
+    return std::make_unique<ServiceContextRefImpl>(factory_,
                                                    service_task_runner_);
   }
 
@@ -59,8 +59,8 @@ class ServiceContextRefImpl : public ServiceContextRef {
 };
 
 ServiceContextRefFactory::ServiceContextRefFactory(
-    const base::Closure& quit_closure)
-    : quit_closure_(quit_closure), weak_factory_(this) {
+    base::RepeatingClosure quit_closure)
+    : quit_closure_(std::move(quit_closure)), weak_factory_(this) {
   DCHECK(!quit_closure_.is_null());
 }
 
@@ -68,7 +68,7 @@ ServiceContextRefFactory::~ServiceContextRefFactory() {}
 
 std::unique_ptr<ServiceContextRef> ServiceContextRefFactory::CreateRef() {
   AddRef();
-  return base::MakeUnique<ServiceContextRefImpl>(
+  return std::make_unique<ServiceContextRefImpl>(
       weak_factory_.GetWeakPtr(), base::SequencedTaskRunnerHandle::Get());
 }
 

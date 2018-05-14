@@ -28,7 +28,7 @@ namespace {
 
 // Checks if virtual keyboard is force-enabled by enable-virtual-keyboard flag.
 bool IsVirtualKeyboardEnabled() {
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
       keyboard::switches::kEnableVirtualKeyboard);
 }
 
@@ -54,8 +54,7 @@ void MoveKeyboardToDisplayInternal(const int64_t display_id) {
 void MoveKeyboardToFirstTouchableDisplay() {
   // Move the keyboard to the first display with touch capability.
   for (const auto& display : display::Screen::GetScreen()->GetAllDisplays()) {
-    if (display.touch_support() ==
-        display::Display::TouchSupport::TOUCH_SUPPORT_AVAILABLE) {
+    if (display.touch_support() == display::Display::TouchSupport::AVAILABLE) {
       MoveKeyboardToDisplayInternal(display.id());
       return;
     }
@@ -81,7 +80,7 @@ VirtualKeyboardController::~VirtualKeyboardController() {
 }
 
 void VirtualKeyboardController::OnTabletModeStarted() {
-  if (!IsVirtualKeyboardEnabled()) {
+  if (IsVirtualKeyboardEnabled()) {
     SetKeyboardEnabled(true);
   } else {
     UpdateKeyboardEnabled();
@@ -89,7 +88,7 @@ void VirtualKeyboardController::OnTabletModeStarted() {
 }
 
 void VirtualKeyboardController::OnTabletModeEnded() {
-  if (!IsVirtualKeyboardEnabled()) {
+  if (IsVirtualKeyboardEnabled()) {
     SetKeyboardEnabled(false);
   } else {
     UpdateKeyboardEnabled();
@@ -148,14 +147,14 @@ void VirtualKeyboardController::MoveKeyboardToTouchableDisplay() {
     if (current_display.id() != focused_display.id() &&
         focused_display.id() != display::kInvalidDisplayId &&
         focused_display.touch_support() ==
-            display::Display::TouchSupport::TOUCH_SUPPORT_AVAILABLE) {
+            display::Display::TouchSupport::AVAILABLE) {
       MoveKeyboardToDisplayInternal(focused_display.id());
       return;
     }
   }
 
   if (current_display.touch_support() !=
-      display::Display::TouchSupport::TOUCH_SUPPORT_AVAILABLE) {
+      display::Display::TouchSupport::AVAILABLE) {
     // The keyboard is currently on the display without touch capability.
     MoveKeyboardToFirstTouchableDisplay();
   }
@@ -186,7 +185,7 @@ void VirtualKeyboardController::UpdateDevices() {
 }
 
 void VirtualKeyboardController::UpdateKeyboardEnabled() {
-  if (!IsVirtualKeyboardEnabled()) {
+  if (IsVirtualKeyboardEnabled()) {
     SetKeyboardEnabled(Shell::Get()
                            ->tablet_mode_controller()
                            ->IsTabletModeWindowManagerEnabled());

@@ -17,6 +17,7 @@
 #include "chromeos/network/network_state_handler.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/session_manager/core/session_manager.h"
 
 // static
 TetherServiceFactory* TetherServiceFactory::GetInstance() {
@@ -49,10 +50,10 @@ KeyedService* TetherServiceFactory::BuildServiceInstanceFor(
     FakeTetherService* fake_tether_service = new FakeTetherService(
         Profile::FromBrowserContext(context),
         chromeos::DBusThreadManager::Get()->GetPowerManagerClient(),
-        chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
         ChromeCryptAuthServiceFactory::GetForBrowserContext(
             Profile::FromBrowserContext(context)),
-        chromeos::NetworkHandler::Get()->network_state_handler());
+        chromeos::NetworkHandler::Get()->network_state_handler(),
+        session_manager::SessionManager::Get());
 
     int num_tether_networks = 0;
     base::StringToInt(
@@ -66,10 +67,10 @@ KeyedService* TetherServiceFactory::BuildServiceInstanceFor(
   return new TetherService(
       Profile::FromBrowserContext(context),
       chromeos::DBusThreadManager::Get()->GetPowerManagerClient(),
-      chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
       ChromeCryptAuthServiceFactory::GetForBrowserContext(
           Profile::FromBrowserContext(context)),
-      chromeos::NetworkHandler::Get()->network_state_handler());
+      chromeos::NetworkHandler::Get()->network_state_handler(),
+      session_manager::SessionManager::Get());
 }
 
 void TetherServiceFactory::RegisterProfilePrefs(

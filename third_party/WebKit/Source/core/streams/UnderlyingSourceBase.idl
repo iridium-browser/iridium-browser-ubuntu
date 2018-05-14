@@ -9,13 +9,15 @@
 
 [
     ActiveScriptWrappable,
-    DependentLifetime,
     NoInterfaceObject
 ]
 interface UnderlyingSourceBase {
     [CallWith=ScriptState, ImplementedAs=startWrapper] Promise<void> start(any stream);
     [CallWith=ScriptState] Promise<void> pull();
     [CallWith=ScriptState, ImplementedAs=cancelWrapper] Promise<void> cancel([Default=Undefined] optional any reason);
+
+    // This only exists to prevent Object.prototype.type being accessed.
+    [CallWith=ScriptState] readonly attribute any type;
 
     void notifyLockAcquired();
     void notifyLockReleased();

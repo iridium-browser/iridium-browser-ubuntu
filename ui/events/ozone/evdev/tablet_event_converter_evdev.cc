@@ -31,7 +31,7 @@ EventPointerType GetToolType(int button_tool) {
 }  // namespace
 
 TabletEventConverterEvdev::TabletEventConverterEvdev(
-    ScopedInputDevice fd,
+    base::ScopedFD fd,
     base::FilePath path,
     int id,
     CursorDelegateEvdev* cursor,
@@ -172,17 +172,18 @@ void TabletEventConverterEvdev::DispatchMouseButton(const input_event& input) {
 
   unsigned int button;
   // These are the same as X11 behaviour
-  if (input.code == BTN_TOUCH)
+  if (input.code == BTN_TOUCH) {
     button = BTN_LEFT;
-  else if (input.code == BTN_STYLUS2)
+  } else if (input.code == BTN_STYLUS2) {
     button = BTN_RIGHT;
-  else if (input.code == BTN_STYLUS)
+  } else if (input.code == BTN_STYLUS) {
     if (one_side_btn_pen_)
       button = BTN_RIGHT;
     else
       button = BTN_MIDDLE;
-  else
+  } else {
     return;
+  }
 
   if (abs_value_dirty_) {
     UpdateCursor();
@@ -196,7 +197,7 @@ void TabletEventConverterEvdev::DispatchMouseButton(const input_event& input) {
       false /* allow_remap */,
       PointerDetails(GetToolType(stylus_), /* pointer_id*/ 0,
                      /* radius_x */ 0.0f, /* radius_y */ 0.0f, pressure_,
-                     tilt_x_, tilt_y_),
+                     /* twist */ 0.0f, tilt_x_, tilt_y_),
       TimeTicksFromInputEvent(input)));
 }
 
@@ -219,7 +220,7 @@ void TabletEventConverterEvdev::FlushEvents(const input_event& input) {
       input_device_.id, EF_NONE, cursor_->GetLocation(),
       PointerDetails(GetToolType(stylus_), /* pointer_id*/ 0,
                      /* radius_x */ 0.0f, /* radius_y */ 0.0f, pressure_,
-                     tilt_x_, tilt_y_),
+                     /* twist */ 0.0f, tilt_x_, tilt_y_),
       TimeTicksFromInputEvent(input)));
 
   abs_value_dirty_ = false;

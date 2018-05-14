@@ -5,15 +5,14 @@
 #ifndef ANDROID_WEBVIEW_BROWSER_AW_CONTENTS_CLIENT_BRIDGE_H_
 #define ANDROID_WEBVIEW_BROWSER_AW_CONTENTS_CLIENT_BRIDGE_H_
 
-#include <jni.h>
 #include <memory>
 
-#include "android_webview/browser/aw_safe_browsing_resource_throttle.h"
+#include "android_webview/browser/aw_url_checker_delegate_impl.h"
 #include "android_webview/browser/net/aw_web_resource_request.h"
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/supports_user_data.h"
 #include "components/security_interstitials/content/unsafe_resource.h"
 #include "content/public/browser/certificate_request_result_type.h"
@@ -74,10 +73,10 @@ class AwContentsClientBridge {
       const GURL& origin_url,
       const base::string16& message_text,
       const base::string16& default_prompt_text,
-      const content::JavaScriptDialogManager::DialogClosedCallback& callback);
+      content::JavaScriptDialogManager::DialogClosedCallback callback);
   void RunBeforeUnloadDialog(
       const GURL& origin_url,
-      const content::JavaScriptDialogManager::DialogClosedCallback& callback);
+      content::JavaScriptDialogManager::DialogClosedCallback callback);
   bool ShouldOverrideUrlLoading(const base::string16& url,
                                 bool has_user_gesture,
                                 bool is_redirect,
@@ -101,11 +100,11 @@ class AwContentsClientBridge {
                        int error_code,
                        bool safebrowsing_hit);
 
-  void OnSafeBrowsingHit(const AwWebResourceRequest& request,
-                         const safe_browsing::SBThreatType& threat_type,
-                         const base::Callback<void(
-                             AwSafeBrowsingResourceThrottle::SafeBrowsingAction,
-                             bool)>& callback);
+  void OnSafeBrowsingHit(
+      const AwWebResourceRequest& request,
+      const safe_browsing::SBThreatType& threat_type,
+      const base::Callback<void(AwUrlCheckerDelegateImpl::SafeBrowsingAction,
+                                bool)>& callback);
 
   // Called when a response from the server is received with status code >= 400.
   void OnReceivedHttpError(
@@ -141,17 +140,17 @@ class AwContentsClientBridge {
   typedef const base::Callback<void(content::CertificateRequestResultType)>
       CertErrorCallback;
   typedef const base::Callback<
-      void(AwSafeBrowsingResourceThrottle::SafeBrowsingAction, bool)>
+      void(AwUrlCheckerDelegateImpl::SafeBrowsingAction, bool)>
       SafeBrowsingActionCallback;
-  IDMap<std::unique_ptr<CertErrorCallback>> pending_cert_error_callbacks_;
-  IDMap<std::unique_ptr<SafeBrowsingActionCallback>> safe_browsing_callbacks_;
-  IDMap<std::unique_ptr<content::JavaScriptDialogManager::DialogClosedCallback>>
+  base::IDMap<std::unique_ptr<CertErrorCallback>> pending_cert_error_callbacks_;
+  base::IDMap<std::unique_ptr<SafeBrowsingActionCallback>>
+      safe_browsing_callbacks_;
+  base::IDMap<
+      std::unique_ptr<content::JavaScriptDialogManager::DialogClosedCallback>>
       pending_js_dialog_callbacks_;
-  IDMap<std::unique_ptr<content::ClientCertificateDelegate>>
+  base::IDMap<std::unique_ptr<content::ClientCertificateDelegate>>
       pending_client_cert_request_delegates_;
 };
-
-bool RegisterAwContentsClientBridge(JNIEnv* env);
 
 }  // namespace android_webview
 

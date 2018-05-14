@@ -22,11 +22,10 @@
 #ifndef ProcessingInstruction_h
 #define ProcessingInstruction_h
 
+#include "core/css/StyleEngineContext.h"
 #include "core/dom/CharacterData.h"
-#include "core/dom/StyleEngineContext.h"
-#include "core/loader/resource/StyleSheetResource.h"
-#include "core/loader/resource/StyleSheetResourceClient.h"
-#include "platform/loader/fetch/ResourceOwner.h"
+#include "core/loader/resource/TextResource.h"
+#include "platform/loader/fetch/ResourceClient.h"
 
 namespace blink {
 
@@ -34,7 +33,7 @@ class StyleSheet;
 class EventListener;
 
 class ProcessingInstruction final : public CharacterData,
-                                    private ResourceOwner<StyleSheetResource> {
+                                    private ResourceClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(ProcessingInstruction);
 
@@ -43,7 +42,7 @@ class ProcessingInstruction final : public CharacterData,
                                        const String& target,
                                        const String& data);
   ~ProcessingInstruction() override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   const String& target() const { return target_; }
   const String& LocalHref() const { return local_href_; }
@@ -58,12 +57,12 @@ class ProcessingInstruction final : public CharacterData,
   // For XSLT
   class DetachableEventListener : public GarbageCollectedMixin {
    public:
-    virtual ~DetachableEventListener() {}
+    virtual ~DetachableEventListener() = default;
     virtual EventListener* ToEventListener() = 0;
     // Detach event listener from its processing instruction.
     virtual void Detach() = 0;
 
-    DEFINE_INLINE_VIRTUAL_TRACE() {}
+    virtual void Trace(blink::Visitor* visitor) {}
   };
 
   void SetEventListenerForXSLT(DetachableEventListener* listener) {
@@ -77,7 +76,7 @@ class ProcessingInstruction final : public CharacterData,
 
   String nodeName() const override;
   NodeType getNodeType() const override;
-  Node* cloneNode(bool deep, ExceptionState&) override;
+  Node* Clone(Document&, CloneChildrenFlag) const override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;
@@ -85,14 +84,7 @@ class ProcessingInstruction final : public CharacterData,
   bool CheckStyleSheet(String& href, String& charset);
   void Process(const String& href, const String& charset);
 
-  void SetCSSStyleSheet(const String& href,
-                        const KURL& base_url,
-                        ReferrerPolicy,
-                        const WTF::TextEncoding&,
-                        const CSSStyleSheetResource*) override;
-  void SetXSLStyleSheet(const String& href,
-                        const KURL& base_url,
-                        const String& sheet) override;
+  void NotifyFinished(Resource*) override;
 
   bool SheetLoaded() override;
 

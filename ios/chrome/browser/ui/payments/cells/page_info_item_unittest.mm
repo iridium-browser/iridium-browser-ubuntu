@@ -7,6 +7,7 @@
 #import "ios/chrome/browser/ui/collection_view/cells/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
+#include "testing/platform_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -14,14 +15,16 @@
 
 namespace {
 
+using PaymentRequestPageInfoItemTest = PlatformTest;
+
 // Tests that the labels and image are set properly after a call to
 // |configureCell:|.
-TEST(PaymentRequestPageInfoItemTest, TextLabels) {
+TEST_F(PaymentRequestPageInfoItemTest, TextLabels) {
   PageInfoItem* item = [[PageInfoItem alloc] init];
 
-  UIImage* pageFavicon = ios_internal::CollectionViewTestImage();
+  UIImage* pageFavicon = CollectionViewTestImage();
   NSString* pageTitle = @"The Greatest Website Ever";
-  NSString* pageHost = @"www.greatest.example.com";
+  NSString* pageHost = @"http://localhost";
   NSString* pageHostSecure = @"https://www.greatest.example.com";
 
   item.pageFavicon = pageFavicon;
@@ -44,6 +47,7 @@ TEST(PaymentRequestPageInfoItemTest, TextLabels) {
   EXPECT_NSEQ(pageFavicon, pageInfoCell.pageFaviconView.image);
   EXPECT_FALSE(pageInfoCell.pageLockIndicatorView.image);
 
+  item.pageHost = pageHostSecure;
   item.connectionSecure = true;
 
   id cell2 = [[[item cellClass] alloc] init];

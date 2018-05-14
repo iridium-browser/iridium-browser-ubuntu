@@ -13,8 +13,6 @@
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
 #include "base/memory/memory_coordinator_client_registry.h"
-#include "base/memory/ptr_util.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -27,7 +25,7 @@
 #include "net/http/http_response_body_drainer.h"
 #include "net/http/http_stream_factory_impl.h"
 #include "net/http/url_security_manager.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/quic/chromium/quic_crypto_client_stream_factory.h"
 #include "net/quic/chromium/quic_stream_factory.h"
 #include "net/quic/core/crypto/quic_random.h"
@@ -45,15 +43,15 @@ namespace net {
 
 namespace {
 
-base::StaticAtomicSequenceNumber g_next_shard_id;
+base::AtomicSequenceNumber g_next_shard_id;
 
-ClientSocketPoolManager* CreateSocketPoolManager(
+std::unique_ptr<ClientSocketPoolManager> CreateSocketPoolManager(
     HttpNetworkSession::SocketPoolType pool_type,
     const HttpNetworkSession::Context& context,
     const std::string& ssl_session_cache_shard) {
   // TODO(yutak): Differentiate WebSocket pool manager and allow more
   // simultaneous connections for WebSockets.
-  return new ClientSocketPoolManagerImpl(
+  return std::make_unique<ClientSocketPoolManagerImpl>(
       context.net_log,
       context.client_socket_factory ? context.client_socket_factory
                                     : ClientSocketFactory::GetDefaultFactory(),
@@ -102,38 +100,53 @@ HttpNetworkSession::Params::Params()
       ignore_certificate_errors(false),
       testing_fixed_http_port(0),
       testing_fixed_https_port(0),
-      enable_tcp_fast_open_for_ssl(false),
+      tcp_fast_open_mode(TcpFastOpenMode::DISABLED),
       enable_user_alternate_protocol_ports(false),
       enable_spdy_ping_based_connection_checking(true),
       enable_http2(true),
       spdy_session_max_recv_window_size(kSpdySessionMaxRecvWindowSize),
       time_func(&base::TimeTicks::Now),
       enable_http2_alternative_service(false),
+      enable_websocket_over_http2(false),
       enable_quic(false),
       quic_max_packet_length(kDefaultMaxPacketSize),
       quic_max_server_configs_stored_in_properties(0u),
+      quic_enable_socket_recv_optimization(false),
       mark_quic_broken_when_network_blackholes(false),
       retry_without_alt_svc_on_quic_errors(false),
+      support_ietf_format_quic_altsvc(false),
       quic_close_sessions_on_ip_change(false),
       quic_idle_connection_timeout_seconds(kIdleConnectionTimeoutSeconds),
       quic_reduced_ping_timeout_seconds(kPingTimeoutSecs),
-      quic_packet_reader_yield_after_duration_milliseconds(
-          kQuicYieldAfterDurationMilliseconds),
+      quic_max_time_before_crypto_handshake_seconds(
+          kMaxTimeForCryptoHandshakeSecs),
+      quic_max_idle_time_before_crypto_handshake_seconds(
+          kInitialIdleTimeoutSecs),
+      quic_connect_using_default_network(false),
       quic_migrate_sessions_on_network_change(false),
       quic_migrate_sessions_early(false),
+      quic_migrate_sessions_on_network_change_v2(false),
+      quic_migrate_sessions_early_v2(false),
+      quic_max_time_on_non_default_network(
+          base::TimeDelta::FromSeconds(kMaxTimeOnNonDefaultNetworkSecs)),
+      quic_max_migrations_to_non_default_network_on_path_degrading(
+          kMaxMigrationsToNonDefaultNetworkOnPathDegrading),
       quic_allow_server_migration(false),
+      quic_allow_remote_alt_svc(true),
       quic_disable_bidirectional_streams(false),
       quic_force_hol_blocking(false),
       quic_race_cert_verification(false),
       quic_estimate_initial_rtt(false),
+      quic_headers_include_h2_stream_dependency(false),
       enable_token_binding(false),
-      http_09_on_non_default_ports_enabled(false) {
+      http_09_on_non_default_ports_enabled(false),
+      disable_idle_sockets_close_on_memory_pressure(false) {
   quic_supported_versions.push_back(QUIC_VERSION_39);
 }
 
 HttpNetworkSession::Params::Params(const Params& other) = default;
 
-HttpNetworkSession::Params::~Params() {}
+HttpNetworkSession::Params::~Params() = default;
 
 HttpNetworkSession::Context::Context()
     : client_socket_factory(nullptr),
@@ -143,7 +156,7 @@ HttpNetworkSession::Context::Context()
       transport_security_state(nullptr),
       cert_transparency_verifier(nullptr),
       ct_policy_enforcer(nullptr),
-      proxy_service(nullptr),
+      proxy_resolution_service(nullptr),
       ssl_config_service(nullptr),
       http_auth_handler_factory(nullptr),
       net_log(nullptr),
@@ -157,7 +170,7 @@ HttpNetworkSession::Context::Context()
 
 HttpNetworkSession::Context::Context(const Context& other) = default;
 
-HttpNetworkSession::Context::~Context() {}
+HttpNetworkSession::Context::~Context() = default;
 
 // TODO(mbelshe): Move the socket factories into HttpStreamFactory.
 HttpNetworkSession::HttpNetworkSession(const Params& params,
@@ -166,7 +179,7 @@ HttpNetworkSession::HttpNetworkSession(const Params& params,
       http_server_properties_(context.http_server_properties),
       cert_verifier_(context.cert_verifier),
       http_auth_handler_factory_(context.http_auth_handler_factory),
-      proxy_service_(context.proxy_service),
+      proxy_resolution_service_(context.proxy_resolution_service),
       ssl_config_service_(context.ssl_config_service),
       push_delegate_(nullptr),
       quic_stream_factory_(
@@ -194,40 +207,47 @@ HttpNetworkSession::HttpNetworkSession(const Params& params,
           params.mark_quic_broken_when_network_blackholes,
           params.quic_idle_connection_timeout_seconds,
           params.quic_reduced_ping_timeout_seconds,
-          params.quic_packet_reader_yield_after_duration_milliseconds,
+          params.quic_max_time_before_crypto_handshake_seconds,
+          params.quic_max_idle_time_before_crypto_handshake_seconds,
+          params.quic_connect_using_default_network,
           params.quic_migrate_sessions_on_network_change,
           params.quic_migrate_sessions_early,
+          params.quic_migrate_sessions_on_network_change_v2,
+          params.quic_migrate_sessions_early_v2,
+          params.quic_max_time_on_non_default_network,
+          params.quic_max_migrations_to_non_default_network_on_path_degrading,
           params.quic_allow_server_migration,
-          params.quic_force_hol_blocking,
           params.quic_race_cert_verification,
           params.quic_estimate_initial_rtt,
+          params.quic_headers_include_h2_stream_dependency,
           params.quic_connection_options,
-          params.enable_token_binding),
+          params.quic_client_connection_options,
+          params.enable_token_binding,
+          params.quic_enable_socket_recv_optimization),
       spdy_session_pool_(context.host_resolver,
                          context.ssl_config_service,
                          context.http_server_properties,
                          context.transport_security_state,
                          params.quic_supported_versions,
                          params.enable_spdy_ping_based_connection_checking,
+                         params.support_ietf_format_quic_altsvc,
                          params.spdy_session_max_recv_window_size,
                          AddDefaultHttp2Settings(params.http2_settings),
-                         params.time_func,
-                         context.proxy_delegate),
-      http_stream_factory_(new HttpStreamFactoryImpl(this, false)),
-      http_stream_factory_for_websocket_(new HttpStreamFactoryImpl(this, true)),
-      network_stream_throttler_(new NetworkThrottleManagerImpl()),
+                         params.time_func),
+      http_stream_factory_(std::make_unique<HttpStreamFactoryImpl>(this)),
+      network_stream_throttler_(std::make_unique<NetworkThrottleManagerImpl>()),
       params_(params),
       context_(context) {
-  DCHECK(proxy_service_);
+  DCHECK(proxy_resolution_service_);
   DCHECK(ssl_config_service_.get());
   CHECK(http_server_properties_);
 
   const std::string ssl_session_cache_shard =
       "http_network_session/" + base::IntToString(g_next_shard_id.GetNext());
-  normal_socket_pool_manager_.reset(CreateSocketPoolManager(
-      NORMAL_SOCKET_POOL, context, ssl_session_cache_shard));
-  websocket_socket_pool_manager_.reset(CreateSocketPoolManager(
-      WEBSOCKET_SOCKET_POOL, context, ssl_session_cache_shard));
+  normal_socket_pool_manager_ = CreateSocketPoolManager(
+      NORMAL_SOCKET_POOL, context, ssl_session_cache_shard);
+  websocket_socket_pool_manager_ = CreateSocketPoolManager(
+      WEBSOCKET_SOCKET_POOL, context, ssl_session_cache_shard);
 
   if (params_.enable_http2) {
     next_protos_.push_back(kProtoHTTP2);
@@ -238,14 +258,20 @@ HttpNetworkSession::HttpNetworkSession(const Params& params,
   http_server_properties_->SetMaxServerConfigsStoredInProperties(
       params.quic_max_server_configs_stored_in_properties);
 
-  memory_pressure_listener_.reset(new base::MemoryPressureListener(base::Bind(
-      &HttpNetworkSession::OnMemoryPressure, base::Unretained(this))));
+  if (!params_.disable_idle_sockets_close_on_memory_pressure) {
+    memory_pressure_listener_.reset(
+        new base::MemoryPressureListener(base::BindRepeating(
+            &HttpNetworkSession::OnMemoryPressure, base::Unretained(this))));
+  }
+
   base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
 }
 
 HttpNetworkSession::~HttpNetworkSession() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   response_drainers_.clear();
+  // TODO(bnc): CloseAllSessions() is also called in SpdySessionPool destructor,
+  // one of the two calls should be removed.
   spdy_session_pool_.CloseAllSessions();
   base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
 }
@@ -309,17 +335,17 @@ std::unique_ptr<base::Value> HttpNetworkSession::QuicInfoToValue() const {
   dict->Set("sessions", quic_stream_factory_.QuicStreamFactoryInfoToValue());
   dict->SetBoolean("quic_enabled", IsQuicEnabled());
 
-  auto connection_options(base::MakeUnique<base::ListValue>());
+  auto connection_options(std::make_unique<base::ListValue>());
   for (const auto& option : params_.quic_connection_options)
     connection_options->AppendString(QuicTagToString(option));
   dict->Set("connection_options", std::move(connection_options));
 
-  auto supported_versions(base::MakeUnique<base::ListValue>());
+  auto supported_versions(std::make_unique<base::ListValue>());
   for (const auto& version : params_.quic_supported_versions)
     supported_versions->AppendString(QuicVersionToString(version));
   dict->Set("supported_versions", std::move(supported_versions));
 
-  auto origins_to_force_quic_on(base::MakeUnique<base::ListValue>());
+  auto origins_to_force_quic_on(std::make_unique<base::ListValue>());
   for (const auto& origin : params_.origins_to_force_quic_on)
     origins_to_force_quic_on->AppendString(origin.ToString());
   dict->Set("origins_to_force_quic_on", std::move(origins_to_force_quic_on));
@@ -331,10 +357,6 @@ std::unique_ptr<base::Value> HttpNetworkSession::QuicInfoToValue() const {
                    params_.quic_idle_connection_timeout_seconds);
   dict->SetInteger("reduced_ping_timeout_seconds",
                    params_.quic_reduced_ping_timeout_seconds);
-  dict->SetInteger(
-      "packet_reader_yield_after_duration_milliseconds",
-      params_.quic_packet_reader_yield_after_duration_milliseconds);
-
   dict->SetBoolean("mark_quic_broken_when_network_blackholes",
                    params_.mark_quic_broken_when_network_blackholes);
   dict->SetBoolean("retry_without_alt_svc_on_quic_errors",
@@ -349,6 +371,15 @@ std::unique_ptr<base::Value> HttpNetworkSession::QuicInfoToValue() const {
                    params_.quic_migrate_sessions_on_network_change);
   dict->SetBoolean("migrate_sessions_early",
                    params_.quic_migrate_sessions_early);
+  dict->SetBoolean("migrate_sessions_on_network_change_v2",
+                   params_.quic_migrate_sessions_on_network_change_v2);
+  dict->SetBoolean("migrate_sessions_early_v2",
+                   params_.quic_migrate_sessions_early_v2);
+  dict->SetInteger("max_time_on_non_default_network_seconds",
+                   params_.quic_max_time_on_non_default_network.InSeconds());
+  dict->SetInteger(
+      "max_num_migrations_to_non_default_network_on_path_degrading",
+      params_.quic_max_migrations_to_non_default_network_on_path_degrading);
   dict->SetBoolean("allow_server_migration",
                    params_.quic_allow_server_migration);
   dict->SetBoolean("estimate_initial_rtt", params_.quic_estimate_initial_rtt);
@@ -470,9 +501,12 @@ ClientSocketPoolManager* HttpNetworkSession::GetSocketPoolManager(
 
 void HttpNetworkSession::OnMemoryPressure(
     base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+  DCHECK(!params_.disable_idle_sockets_close_on_memory_pressure);
+
   switch (memory_pressure_level) {
     case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
       break;
+
     case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
     case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL:
       CloseIdleConnections();

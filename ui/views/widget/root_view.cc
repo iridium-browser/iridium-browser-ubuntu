@@ -188,7 +188,7 @@ void RootView::SetContentsView(View* contents_view) {
       "Can't be called until after the native widget is created!";
   // The ContentsView must be set up _after_ the window is created so that its
   // Widget pointer is valid.
-  SetLayoutManager(new FillLayout);
+  SetLayoutManager(std::make_unique<FillLayout>());
   if (has_children())
     RemoveAllChildViews(true);
   AddChildView(contents_view);
@@ -219,12 +219,10 @@ void RootView::ThemeChanged() {
   View::PropagateThemeChanged();
 }
 
-void RootView::LocaleChanged() {
-  View::PropagateLocaleChanged();
-}
-
-void RootView::DeviceScaleFactorChanged(float device_scale_factor) {
-  View::PropagateDeviceScaleFactorChanged(device_scale_factor);
+void RootView::DeviceScaleFactorChanged(float old_device_scale_factor,
+                                        float new_device_scale_factor) {
+  View::PropagateDeviceScaleFactorChanged(old_device_scale_factor,
+                                          new_device_scale_factor);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -244,6 +242,11 @@ View* RootView::GetFocusTraversableParentView() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // RootView, ui::EventProcessor overrides:
+
+ui::EventTarget* RootView::GetInitialEventTarget(ui::Event* event) {
+  // Views has no special initial target.
+  return nullptr;
+}
 
 ui::EventTarget* RootView::GetRootForEvent(ui::Event* event) {
   return this;
@@ -644,12 +647,13 @@ void RootView::OnPaint(gfx::Canvas* canvas) {
   View::OnPaint(canvas);
 }
 
-gfx::Vector2d RootView::CalculateOffsetToAncestorWithLayer(
+View::LayerOffsetData RootView::CalculateOffsetToAncestorWithLayer(
     ui::Layer** layer_parent) {
-  gfx::Vector2d offset(View::CalculateOffsetToAncestorWithLayer(layer_parent));
-  if (!layer() && layer_parent)
+  if (layer() || !widget_->GetLayer())
+    return View::CalculateOffsetToAncestorWithLayer(layer_parent);
+  if (layer_parent)
     *layer_parent = widget_->GetLayer();
-  return offset;
+  return LayerOffsetData(widget_->GetLayer()->device_scale_factor());
 }
 
 View::DragInfo* RootView::GetDragInfo() {

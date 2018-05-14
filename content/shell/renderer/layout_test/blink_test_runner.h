@@ -5,13 +5,15 @@
 #ifndef CONTENT_SHELL_RENDERER_LAYOUT_TEST_BLINK_TEST_RUNNER_H_
 #define CONTENT_SHELL_RENDERER_LAYOUT_TEST_BLINK_TEST_RUNNER_H_
 
-#include <deque>
 #include <memory>
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/circular_deque.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/optional.h"
+#include "base/strings/string16.h"
 #include "content/public/common/page_state.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/renderer/render_view_observer_tracker.h"
@@ -88,18 +90,14 @@ class BlinkTestRunner : public RenderViewObserver,
   void EnableAutoResizeMode(const blink::WebSize& min_size,
                             const blink::WebSize& max_size) override;
   void DisableAutoResizeMode(const blink::WebSize& new_size) override;
-  void ClearDevToolsLocalStorage() override;
-  void ShowDevTools(const std::string& settings,
-                    const std::string& frontend_url) override;
-  void CloseDevTools() override;
-  void EvaluateInWebInspector(int call_id, const std::string& script) override;
-  std::string EvaluateInWebInspectorOverlay(const std::string& script) override;
+  void NavigateSecondaryWindow(const GURL& url) override;
+  void InspectSecondaryWindow() override;
   void ClearAllDatabases() override;
   void SetDatabaseQuota(int quota) override;
   void SimulateWebNotificationClick(
       const std::string& title,
-      int action_index,
-      const base::NullableString16& reply) override;
+      const base::Optional<int>& action_index,
+      const base::Optional<base::string16>& reply) override;
   void SimulateWebNotificationClose(const std::string& title,
                                     bool by_user) override;
   void SetDeviceScaleFactor(float factor) override;
@@ -137,9 +135,7 @@ class BlinkTestRunner : public RenderViewObserver,
   bool AllowExternalPages() override;
   void FetchManifest(
       blink::WebView* view,
-      const GURL& url,
-      const base::Callback<void(const blink::WebURLResponse& response,
-                                const std::string& data)>& callback) override;
+      base::OnceCallback<void(const GURL&, const Manifest&)> callback) override;
   void SetPermission(const std::string& name,
                      const std::string& value,
                      const GURL& origin,
@@ -179,10 +175,6 @@ class BlinkTestRunner : public RenderViewObserver,
 
  private:
   // Message handlers.
-  void OnSessionHistory(
-      const std::vector<int>& routing_ids,
-      const std::vector<std::vector<PageState> >& session_histories,
-      const std::vector<unsigned>& current_entry_indexes);
   void OnReset();
   void OnTestFinishedInSecondaryRenderer();
   void OnTryLeakDetection();
@@ -192,6 +184,15 @@ class BlinkTestRunner : public RenderViewObserver,
   // RenderViewObserver implementation.
   void OnDestruct() override;
 
+  // Helper reused by OnSetTestConfiguration and OnReplicateTestConfiguration.
+  //
+  // If |initial_application| is true, then the test configuration is being
+  // applied for the first time during a test;  otherwise the test configuration
+  // is merely being replicated to another renderer (and in this case global
+  // actions like showing a DevTools window should not be redone).
+  void ApplyTestConfiguration(mojom::ShellTestConfigurationPtr params,
+                              bool initial_application);
+
   // After finishing the test, retrieves the audio, text, and pixel dumps from
   // the TestRunner library and sends them to the browser process.
   void CaptureDump();
@@ -199,7 +200,6 @@ class BlinkTestRunner : public RenderViewObserver,
   void CaptureDumpContinued();
   void OnPixelsDumpCompleted(const SkBitmap& snapshot);
   void CaptureDumpComplete();
-  std::string DumpHistoryForWindow(blink::WebView* web_view);
 
   mojom::LayoutTestBluetoothFakeAdapterSetter&
   GetBluetoothFakeAdapterSetter();
@@ -209,11 +209,7 @@ class BlinkTestRunner : public RenderViewObserver,
 
   mojom::ShellTestConfigurationPtr test_config_;
 
-  std::vector<int> routing_ids_;
-  std::vector<std::vector<PageState> > session_histories_;
-  std::vector<unsigned> current_entry_indexes_;
-
-  std::deque<base::Callback<void(const std::vector<std::string>&)>>
+  base::circular_deque<base::Callback<void(const std::vector<std::string>&)>>
       get_bluetooth_events_callbacks_;
 
   bool is_main_window_;

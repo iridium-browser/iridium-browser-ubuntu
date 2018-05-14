@@ -55,8 +55,7 @@ OmniboxPopupViewMac::OmniboxPopupViewMac(OmniboxView* omnibox_view,
     : omnibox_view_(omnibox_view),
       model_(new OmniboxPopupModel(this, edit_model)),
       field_(field),
-      popup_(nil),
-      target_popup_frame_(NSZeroRect) {
+      popup_(nil) {
   DCHECK(omnibox_view);
   DCHECK(edit_model);
 }
@@ -87,6 +86,7 @@ bool OmniboxPopupViewMac::IsOpen() const {
 
 void OmniboxPopupViewMac::UpdatePopupAppearance() {
   DCHECK([NSThread isMainThread]);
+  model_->autocomplete_controller()->InlineTailPrefixes();
   const AutocompleteResult& result = GetResult();
   const size_t rows = result.size();
   if (rows == 0) {
@@ -99,9 +99,6 @@ void OmniboxPopupViewMac::UpdatePopupAppearance() {
     matrix_.reset();
 
     popup_.reset(nil);
-
-    target_popup_frame_ = NSZeroRect;
-
     return;
   }
 
@@ -131,13 +128,9 @@ void OmniboxPopupViewMac::UpdatePopupAppearance() {
   PositionPopup(NSHeight([matrix_ frame]));
 }
 
-gfx::Rect OmniboxPopupViewMac::GetTargetBounds() {
-  // Flip the coordinate system before returning.
-  NSScreen* screen = [[NSScreen screens] firstObject];
-  NSRect monitor_frame = [screen frame];
-  gfx::Rect bounds(NSRectToCGRect(target_popup_frame_));
-  bounds.set_y(monitor_frame.size.height - bounds.y() - bounds.height());
-  return bounds;
+void OmniboxPopupViewMac::OnMatchIconUpdated(size_t match_index) {
+  [matrix_ setMatchIcon:ImageForMatch(GetResult().match_at(match_index))
+                 forRow:match_index];
 }
 
 // This is only called by model in SetSelectedLine() after updating
@@ -287,7 +280,6 @@ void OmniboxPopupViewMac::PositionPopup(const CGFloat matrixHeight) {
   [[[matrix_ tableColumns] objectAtIndex:0] setWidth:table_width];
 
   // Don't play animation games on first display.
-  target_popup_frame_ = popup_frame;
   if (![popup_ parentWindow]) {
     DCHECK(![popup_ isVisible]);
     [popup_ setFrame:popup_frame display:NO];
@@ -341,20 +333,10 @@ void OmniboxPopupViewMac::PositionPopup(const CGFloat matrixHeight) {
 
 NSImage* OmniboxPopupViewMac::ImageForMatch(
     const AutocompleteMatch& match) const {
-  gfx::Image image = model_->GetIconIfExtensionMatch(match);
-  if (!image.IsEmpty())
-    return image.AsNSImage();
-
   bool is_dark_mode = [matrix_ hasDarkTheme];
-  const SkColor icon_color =
+  const SkColor vector_icon_color =
       is_dark_mode ? SkColorSetA(SK_ColorWHITE, 0xCC) : gfx::kChromeIconGrey;
-  const gfx::VectorIcon& vector_icon =
-      model_->IsStarredMatch(match)
-          ? toolbar::kStarIcon
-          : AutocompleteMatch::TypeToVectorIcon(match.type);
-  const int kIconSize = 16;
-  return NSImageFromImageSkia(
-      gfx::CreateVectorIcon(vector_icon, kIconSize, icon_color));
+  return model_->GetMatchIcon(match, vector_icon_color).ToNSImage();
 }
 
 void OmniboxPopupViewMac::OpenURLForRow(size_t row,

@@ -22,14 +22,15 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.UrlConstants;
+import org.chromium.chrome.browser.favicon.IconType;
 import org.chromium.chrome.browser.favicon.LargeIconBridge;
-import org.chromium.chrome.browser.suggestions.FakeMostVisitedSites;
+import org.chromium.chrome.browser.suggestions.Tile;
 import org.chromium.chrome.browser.suggestions.TileVisualType;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.NewTabPageTestUtils;
+import org.chromium.chrome.test.util.browser.suggestions.FakeMostVisitedSites;
 import org.chromium.chrome.test.util.browser.suggestions.SuggestionsDependenciesRule;
 import org.chromium.net.test.EmbeddedTestServer;
 
@@ -39,10 +40,7 @@ import java.io.IOException;
  * Tests for events around the loading of a New Tab Page.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class NewTabPageLoadTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
@@ -56,8 +54,7 @@ public class NewTabPageLoadTest {
 
     @Before
     public void setUp() throws Exception {
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
 
         mMostVisitedSites = new AutoVerifyingMostVisitedSites();
         mMostVisitedSites.setTileSuggestions(mTestServer.getURLs("/site1", "/site2"));
@@ -91,8 +88,8 @@ public class NewTabPageLoadTest {
         }
 
         @Override
-        public void recordTileImpression(int index, int type, int source, String url) {
-            assertNotEquals(TileVisualType.NONE, type);
+        public void recordTileImpression(Tile tile) {
+            assertNotEquals(TileVisualType.NONE, tile.getType());
         }
     }
 
@@ -104,7 +101,8 @@ public class NewTabPageLoadTest {
                 @Override
                 public void run() {
                     callback.onLargeIconAvailable(
-                            Bitmap.createBitmap(148, 148, Bitmap.Config.ALPHA_8), 0, false);
+                            Bitmap.createBitmap(148, 148, Bitmap.Config.ALPHA_8), 0, false,
+                            IconType.INVALID);
                 }
             }, 0);
 

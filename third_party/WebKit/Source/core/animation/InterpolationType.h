@@ -6,6 +6,8 @@
 #define InterpolationType_h
 
 #include <memory>
+
+#include "base/macros.h"
 #include "core/animation/InterpolationValue.h"
 #include "core/animation/Keyframe.h"
 #include "core/animation/PairwiseInterpolationValue.h"
@@ -28,10 +30,9 @@ class InterpolationEnvironment;
 // - Apply an InterpolationValue to a target Element's property: apply().
 class InterpolationType {
   USING_FAST_MALLOC(InterpolationType);
-  WTF_MAKE_NONCOPYABLE(InterpolationType);
 
  public:
-  virtual ~InterpolationType() {}
+  virtual ~InterpolationType() = default;
 
   PropertyHandle GetProperty() const { return property_; }
 
@@ -41,10 +42,9 @@ class InterpolationType {
   // InterpolationValue.
   class ConversionChecker {
     USING_FAST_MALLOC(ConversionChecker);
-    WTF_MAKE_NONCOPYABLE(ConversionChecker);
 
    public:
-    virtual ~ConversionChecker() {}
+    virtual ~ConversionChecker() = default;
     void SetType(const InterpolationType& type) { type_ = &type; }
     const InterpolationType& GetType() const { return *type_; }
     virtual bool IsValid(const InterpolationEnvironment&,
@@ -53,6 +53,7 @@ class InterpolationType {
    protected:
     ConversionChecker() : type_(nullptr) {}
     const InterpolationType* type_;
+    DISALLOW_COPY_AND_ASSIGN(ConversionChecker);
   };
   using ConversionCheckers = Vector<std::unique_ptr<ConversionChecker>>;
 
@@ -116,9 +117,10 @@ class InterpolationType {
   }
 
  protected:
-  InterpolationType(PropertyHandle property) : property_(property) {}
+  explicit InterpolationType(PropertyHandle property) : property_(property) {}
 
   const PropertyHandle property_;
+  DISALLOW_COPY_AND_ASSIGN(InterpolationType);
 };
 
 }  // namespace blink

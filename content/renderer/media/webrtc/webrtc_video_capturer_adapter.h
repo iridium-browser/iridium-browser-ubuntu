@@ -30,7 +30,7 @@ namespace content {
 // webrtc::VideoTrackSourceInterface guarantees that this object is not deleted
 // while it is still used in libJingle.
 class CONTENT_EXPORT WebRtcVideoCapturerAdapter
-    : NON_EXPORTED_BASE(public cricket::VideoCapturer) {
+    : public cricket::VideoCapturer {
  public:
   WebRtcVideoCapturerAdapter(
       bool is_screencast,
@@ -57,10 +57,6 @@ class CONTENT_EXPORT WebRtcVideoCapturerAdapter
   bool IsScreencast() const override;
 
   bool ShouldAdaptResolution() const;
-
-  // Helper class used for copying texture backed frames.
-  class TextureFrameCopier;
-  const scoped_refptr<TextureFrameCopier> texture_copier_;
 
   // |thread_checker_| is bound to the libjingle worker thread.
   base::ThreadChecker thread_checker_;

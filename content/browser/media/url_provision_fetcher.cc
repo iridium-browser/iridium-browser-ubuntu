@@ -57,7 +57,7 @@ void URLProvisionFetcher::Retrieve(
           destination: OTHER
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "On Android, users can disable this feature by disabling Protected "
             "Media Identifier permissions."
@@ -105,7 +105,7 @@ void URLProvisionFetcher::OnURLFetchComplete(const net::URLFetcher* source) {
 std::unique_ptr<media::ProvisionFetcher> CreateProvisionFetcher(
     net::URLRequestContextGetter* context_getter) {
   DCHECK(context_getter);
-  return base::MakeUnique<URLProvisionFetcher>(context_getter);
+  return std::make_unique<URLProvisionFetcher>(context_getter);
 }
 
 }  // namespace content

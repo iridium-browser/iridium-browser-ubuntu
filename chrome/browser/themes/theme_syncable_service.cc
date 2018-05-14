@@ -16,9 +16,9 @@
 #include "chrome/common/extensions/sync_helper.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/protocol/theme_specifics.pb.h"
+#include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/common/extension.h"
 #include "extensions/common/manifest_url_handlers.h"
 
 using std::string;
@@ -129,7 +129,7 @@ syncer::SyncDataList ThemeSyncableService::GetAllSyncData(
 }
 
 syncer::SyncError ThemeSyncableService::ProcessSyncChanges(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const syncer::SyncChangeList& change_list) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -223,7 +223,7 @@ void ThemeSyncableService::SetCurrentThemeFromThemeSpecifics(
       int disabled_reasons =
           extensions::ExtensionPrefs::Get(profile_)->GetDisableReasons(id);
       if (!extensions_service->IsExtensionEnabled(id) &&
-          disabled_reasons != extensions::Extension::DISABLE_USER_ACTION) {
+          disabled_reasons != extensions::disable_reason::DISABLE_USER_ACTION) {
         DVLOG(1) << "Theme " << id << " is disabled with reason "
                  << disabled_reasons << "; aborting";
         return;

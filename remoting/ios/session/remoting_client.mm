@@ -11,12 +11,13 @@
 #include <memory>
 
 #import "base/mac/bind_objc_block.h"
-#import "ios/third_party/material_components_ios/src/components/Dialogs/src/MaterialDialogs.h"
 #import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
+#import "remoting/ios/audio/audio_player_ios.h"
 #import "remoting/ios/display/gl_display_handler.h"
 #import "remoting/ios/domain/client_session_details.h"
 #import "remoting/ios/domain/host_info.h"
-#import "remoting/ios/keychain_wrapper.h"
+#import "remoting/ios/persistence/host_pairing_info.h"
+#import "remoting/ios/persistence/remoting_preferences.h"
 
 #include "base/strings/sys_string_conversions.h"
 #include "remoting/client/chromoting_client_runtime.h"
@@ -25,6 +26,8 @@
 #include "remoting/client/display/renderer_proxy.h"
 #include "remoting/client/gesture_interpreter.h"
 #include "remoting/client/input/keyboard_interpreter.h"
+#import "remoting/ios/facade/remoting_authentication.h"
+#import "remoting/ios/facade/remoting_service.h"
 #include "remoting/ios/session/remoting_client_session_delegate.h"
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/video_renderer.h"
@@ -40,9 +43,25 @@ NSString* const kHostSessionCreatePairing = @"kHostSessionCreatePairing";
 NSString* const kHostSessionHostName = @"kHostSessionHostName";
 NSString* const kHostSessionPin = @"kHostSessionPin";
 
+static std::string GetCurrentUserId() {
+  return base::SysNSStringToUTF8(
+      RemotingService.instance.authentication.user.userId);
+}
+
+// Block doesn't work with rvalue passing. This function helps exposing the data
+// to the block.
+static void ResolveFeedbackDataCallback(
+    void (^callback)(const remoting::FeedbackData&),
+    std::unique_ptr<remoting::FeedbackData> data) {
+  DCHECK(remoting::ChromotingClientRuntime::GetInstance()
+             ->ui_task_runner()
+             ->BelongsToCurrentThread());
+  remoting::FeedbackData* raw_data = data.get();
+  callback(*raw_data);
+}
+
 @interface RemotingClient () {
   remoting::ChromotingClientRuntime* _runtime;
-  std::unique_ptr<remoting::ChromotingSession> _session;
   std::unique_ptr<remoting::RemotingClientSessonDelegate> _sessonDelegate;
   ClientSessionDetails* _sessionDetails;
   // Call _secretFetchedCallback on the network thread.
@@ -50,6 +69,8 @@ NSString* const kHostSessionPin = @"kHostSessionPin";
   std::unique_ptr<remoting::RendererProxy> _renderer;
   std::unique_ptr<remoting::GestureInterpreter> _gestureInterpreter;
   std::unique_ptr<remoting::KeyboardInterpreter> _keyboardInterpreter;
+  std::unique_ptr<remoting::AudioPlayerIos> _audioPlayer;
+  std::unique_ptr<remoting::ChromotingSession> _session;
 }
 @end
 
@@ -98,21 +119,17 @@ NSString* const kHostSessionPin = @"kHostSessionPin";
   info.host_os_version = base::SysNSStringToUTF8(hostInfo.hostOsVersion);
   info.host_version = base::SysNSStringToUTF8(hostInfo.hostVersion);
 
-  NSDictionary* pairing =
-      [KeychainWrapper.instance pairingCredentialsForHost:hostInfo.hostId];
-  if (pairing) {
-    info.pairing_id =
-        base::SysNSStringToUTF8([pairing objectForKey:kKeychainPairingId]);
-    info.pairing_secret =
-        base::SysNSStringToUTF8([pairing objectForKey:kKeychainPairingSecret]);
-  } else {
-    info.pairing_id = "";
-    info.pairing_secret = "";
-  }
+  remoting::HostPairingInfo pairing = remoting::HostPairingInfo::GetPairingInfo(
+      GetCurrentUserId(), info.host_id);
+  info.pairing_id = pairing.pairing_id();
+  info.pairing_secret = pairing.pairing_secret();
 
-  // TODO(nicholss): I am not sure about the following fields yet.
-  // info.capabilities =
-  // info.flags =
+  info.capabilities = "";
+  if ([RemotingPreferences.instance boolForFlag:RemotingFlagUseWebRTC]) {
+    info.flags = "useWebrtc";
+    [MDCSnackbarManager
+        showMessage:[MDCSnackbarMessage messageWithText:@"Using WebRTC"]];
+  }
 
   remoting::protocol::ClientAuthenticationConfig client_auth_config;
   client_auth_config.host_id = info.host_id;
@@ -131,32 +148,39 @@ NSString* const kHostSessionPin = @"kHostSessionPin";
         }
         strongSelf->_secretFetchedCallback = secret_fetched_callback;
         strongSelf->_sessionDetails.state = SessionPinPrompt;
-        [[NSNotificationCenter defaultCenter]
-            postNotificationName:kHostSessionStatusChanged
-                          object:weakSelf
-                        userInfo:@{
-                          kSessionDetails : strongSelf->_sessionDetails,
-                          kSessionSupportsPairing :
-                              [NSNumber numberWithBool:pairing_supported],
-                        }];
+
+        // Notification will be received on the thread they are posted, so we
+        // need to post the notification on UI thread.
+        strongSelf->_runtime->ui_task_runner()->PostTask(
+            FROM_HERE, base::BindBlockArc(^() {
+              [NSNotificationCenter.defaultCenter
+                  postNotificationName:kHostSessionStatusChanged
+                                object:weakSelf
+                              userInfo:@{
+                                kSessionDetails : strongSelf->_sessionDetails,
+                                kSessionSupportsPairing :
+                                    [NSNumber numberWithBool:pairing_supported],
+                              }];
+            }));
       });
 
-  // TODO(nicholss): Add audio support to iOS.
-  base::WeakPtr<remoting::protocol::AudioStub> audioPlayer = nullptr;
+  _audioPlayer = remoting::AudioPlayerIos::CreateAudioPlayer(
+      _runtime->audio_task_runner());
 
   _displayHandler = [[GlDisplayHandler alloc] init];
   _displayHandler.delegate = self;
 
   _session.reset(new remoting::ChromotingSession(
       _sessonDelegate->GetWeakPtr(), [_displayHandler CreateCursorShapeStub],
-      [_displayHandler CreateVideoRenderer], audioPlayer, info,
-      client_auth_config));
+      [_displayHandler CreateVideoRenderer],
+      _audioPlayer->GetAudioStreamConsumer(), info, client_auth_config));
   _renderer = [_displayHandler CreateRendererProxy];
   _gestureInterpreter.reset(
       new remoting::GestureInterpreter(_renderer.get(), _session.get()));
   _keyboardInterpreter.reset(new remoting::KeyboardInterpreter(_session.get()));
 
   _session->Connect();
+  _audioPlayer->Start();
 }
 
 - (void)disconnectFromHost {
@@ -164,8 +188,14 @@ NSString* const kHostSessionPin = @"kHostSessionPin";
     _session->Disconnect();
     _runtime->network_task_runner()->DeleteSoon(FROM_HERE, _session.release());
   }
+
   _displayHandler = nil;
 
+  if (_audioPlayer) {
+    _audioPlayer->Invalidate();
+    _runtime->audio_task_runner()->DeleteSoon(FROM_HERE,
+                                              _audioPlayer.release());
+  }
   // This needs to be deleted on the display thread since GlDisplayHandler binds
   // its WeakPtrFactory to the display thread.
   // TODO(yuweih): Ideally this constraint can be removed once we allow
@@ -173,6 +203,9 @@ NSString* const kHostSessionPin = @"kHostSessionPin";
   if (_renderer) {
     _runtime->display_task_runner()->DeleteSoon(FROM_HERE, _renderer.release());
   }
+
+  _gestureInterpreter.reset();
+  _keyboardInterpreter.reset();
 }
 
 #pragma mark - Eventing
@@ -293,23 +326,23 @@ NSString* const kHostSessionPin = @"kHostSessionPin";
 }
 
 - (void)commitPairingCredentialsForHost:(NSString*)host
-                                     id:(NSString*)id
+                                     id:(NSString*)pairingId
                                  secret:(NSString*)secret {
-  [KeychainWrapper.instance commitPairingCredentialsForHost:host
-                                                         id:id
-                                                     secret:secret];
+  remoting::HostPairingInfo info = remoting::HostPairingInfo::GetPairingInfo(
+      GetCurrentUserId(), base::SysNSStringToUTF8(host));
+  info.set_pairing_id(base::SysNSStringToUTF8(pairingId));
+  info.set_pairing_secret(base::SysNSStringToUTF8(secret));
+  info.Save();
 }
 
 - (void)fetchThirdPartyTokenForUrl:(NSString*)tokenUrl
                           clientId:(NSString*)clientId
                              scope:(NSString*)scope {
   // Not supported for iOS yet.
-  _sessionDetails.state = SessionCancelled;
-  [self disconnectFromHost];
-  NSString* message = [NSString
-      stringWithFormat:@"[ThirdPartyAuth] Unable to authenticate with %@.",
-                       _sessionDetails.hostInfo.hostName];
-  [MDCSnackbarManager showMessage:[MDCSnackbarMessage messageWithText:message]];
+  _sessionDetails.state = SessionFailed;
+  _sessionDetails.error = SessionErrorThirdPartyAuthNotSupported;
+  _session->DisconnectForReason(
+      remoting::protocol::ErrorCode::AUTHENTICATION_FAILED);
   [[NSNotificationCenter defaultCenter]
       postNotificationName:kHostSessionStatusChanged
                     object:self
@@ -318,31 +351,45 @@ NSString* const kHostSessionPin = @"kHostSessionPin";
 }
 
 - (void)setCapabilities:(NSString*)capabilities {
-  NSLog(@"TODO(nicholss): implement this, setCapabilities. %@", capabilities);
+  DCHECK(capabilities.length == 0) << "No capability has been implemented on "
+                                   << "iOS yet";
 }
 
 - (void)handleExtensionMessageOfType:(NSString*)type
                              message:(NSString*)message {
-  NSLog(@"TODO(nicholss): implement this, handleExtensionMessageOfType %@:%@.",
-        type, message);
+  NOTREACHED() << "handleExtensionMessageOfType is unimplemented. " << type
+               << ":" << message;
 }
 
-- (void)surfaceChanged:(const CGRect&)frame {
-  // Note that GLKView automatically sets the OpenGL viewport size to the size
-  // of the surface.
-  [_displayHandler onSurfaceChanged:frame];
-  _gestureInterpreter->OnSurfaceSizeChanged(frame.size.width,
-                                            frame.size.height);
+- (void)setHostResolution:(CGSize)dipsResolution scale:(int)scale {
+  _session->SendClientResolution(dipsResolution.width, dipsResolution.height,
+                                 scale);
+}
+
+- (void)createFeedbackDataWithCallback:
+    (void (^)(const remoting::FeedbackData&))callback {
+  if (!_session) {
+    // Session has never been connected. Returns an empty data.
+    callback(remoting::FeedbackData());
+    return;
+  }
+
+  _session->GetFeedbackData(
+      base::BindOnce(&ResolveFeedbackDataCallback, callback));
 }
 
 #pragma mark - GlDisplayHandlerDelegate
 
 - (void)canvasSizeChanged:(CGSize)size {
-  _gestureInterpreter->OnDesktopSizeChanged(size.width, size.height);
+  if (_gestureInterpreter) {
+    _gestureInterpreter->OnDesktopSizeChanged(size.width, size.height);
+  }
 }
 
 - (void)rendererTicked {
-  _gestureInterpreter->ProcessAnimations();
+  if (_gestureInterpreter) {
+    _gestureInterpreter->ProcessAnimations();
+  }
 }
 
 @end

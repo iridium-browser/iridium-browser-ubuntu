@@ -5,21 +5,19 @@
 package org.chromium.webapk.lib.client;
 
 import static org.chromium.webapk.lib.common.WebApkConstants.WEBAPK_PACKAGE_PREFIX;
+import static org.chromium.webapk.lib.common.WebApkMetaDataKeys.SCOPE;
 import static org.chromium.webapk.lib.common.WebApkMetaDataKeys.START_URL;
 
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ResolveInfo;
 import android.content.pm.Signature;
 import android.os.StrictMode;
 import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.util.Log;
-
-import org.chromium.base.annotations.SuppressFBWarnings;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -39,10 +37,14 @@ import java.util.List;
 public class WebApkValidator {
     private static final String TAG = "WebApkValidator";
     private static final String KEY_FACTORY = "EC"; // aka "ECDSA"
+    private static final String MAPSLITE_PACKAGE_NAME = "com.google.android.apps.mapslite";
+    private static final String MAPSLITE_URL_PREFIX =
+            "https://www.google.com/maps"; // Matches scope.
 
     private static byte[] sExpectedSignature;
     private static byte[] sCommentSignedPublicKeyBytes;
     private static PublicKey sCommentSignedPublicKey;
+    private static boolean sOverrideValidationForTesting;
 
     /**
      * Queries the PackageManager to determine whether a WebAPK can handle the URL. Ignores whether
@@ -131,8 +133,17 @@ public class WebApkValidator {
             selector.addCategory(Intent.CATEGORY_BROWSABLE);
             selector.setComponent(null);
         }
-        return context.getPackageManager().queryIntentActivities(
-                intent, PackageManager.GET_RESOLVED_FILTER);
+        List<ResolveInfo> resolveInfoList;
+        try {
+            resolveInfoList = context.getPackageManager().queryIntentActivities(
+                    intent, PackageManager.GET_RESOLVED_FILTER);
+        } catch (Exception e) {
+            // We used to catch only java.util.MissingResourceException, but we need to catch more
+            // exceptions to handle "Package manager has died" exception.
+            // http://crbug.com/794363
+            resolveInfoList = new LinkedList<>();
+        }
+        return resolveInfoList;
     }
 
     /**
@@ -168,7 +179,7 @@ public class WebApkValidator {
         try {
             packageInfo = context.getPackageManager().getPackageInfo(webappPackageName,
                     PackageManager.GET_SIGNATURES | PackageManager.GET_META_DATA);
-        } catch (NameNotFoundException e) {
+        } catch (Exception e) {
             e.printStackTrace();
             Log.d(TAG, "WebApk not found");
             return false;
@@ -176,10 +187,17 @@ public class WebApkValidator {
         if (isNotWebApkQuick(packageInfo)) {
             return false;
         }
+        if (sOverrideValidationForTesting) {
+            Log.d(TAG, "Ok! Looks like a WebApk (has start url) and validation is disabled.");
+            return true;
+        }
         if (verifyV1WebApk(packageInfo, webappPackageName)) {
             return true;
         }
-
+        if (verifyMapsLite(packageInfo, webappPackageName)) {
+            Log.d(TAG, "Matches Maps Lite");
+            return true;
+        }
         return verifyCommentSignedWebApk(packageInfo, webappPackageName);
     }
 
@@ -206,6 +224,24 @@ public class WebApkValidator {
             }
         }
         return false;
+    }
+
+    private static boolean verifyMapsLite(PackageInfo packageInfo, String webappPackageName) {
+        if (packageInfo.signatures == null || webappPackageName == null
+                || !webappPackageName.equals(MAPSLITE_PACKAGE_NAME)) {
+            return false;
+        }
+        String startUrl = packageInfo.applicationInfo.metaData.getString(START_URL);
+        if (startUrl == null || !startUrl.startsWith(MAPSLITE_URL_PREFIX)) {
+            Log.d(TAG, "mapslite invalid startUrl prefix");
+            return false;
+        }
+        String scope = packageInfo.applicationInfo.metaData.getString(SCOPE);
+        if (scope == null || !scope.equals(MAPSLITE_URL_PREFIX)) {
+            Log.d(TAG, "mapslite invalid scope prefix");
+            return false;
+        }
+        return true;
     }
 
     /** Verify that the comment signed webapk matches the public key. */
@@ -276,7 +312,6 @@ public class WebApkValidator {
      * @param expectedSignature V1 WebAPK RSA signature.
      * @param v2PublicKeyBytes New comment signed public key bytes as x509 encoded public key.
      */
-    @SuppressFBWarnings("EI_EXPOSE_STATIC_REP2")
     public static void init(byte[] expectedSignature, byte[] v2PublicKeyBytes) {
         if (sExpectedSignature == null) {
             sExpectedSignature = expectedSignature;
@@ -284,6 +319,14 @@ public class WebApkValidator {
         if (sCommentSignedPublicKeyBytes == null) {
             sCommentSignedPublicKeyBytes = v2PublicKeyBytes;
         }
+    }
+
+    /**
+     * Disables all verification performed by this class. This is meant only for development with
+     * unsigned WebApks and should never be enabled in a real build.
+     */
+    public static void disableValidationForTesting() {
+        sOverrideValidationForTesting = true;
     }
 
     /**

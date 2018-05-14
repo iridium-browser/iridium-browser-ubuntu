@@ -1,18 +1,12 @@
 # Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-import unittest
-
 from telemetry import decorators
-from telemetry.page import page
 from telemetry.testing import options_for_unittests
 from telemetry.testing import page_test_test_case
 from telemetry.util import wpr_modes
-from telemetry.value import scalar
 
 from measurements import smoothness
-
-import mock
 
 
 class FakeTracingController(object):
@@ -51,23 +45,6 @@ class FakeTab(object):
     pass
 
 
-class CustomResultsWrapperUnitTest(unittest.TestCase):
-
-  def testOnlyOneInteractionRecordPerPage(self):
-    test_page = page.Page('http://dummy', None, name='http://dummy')
-
-    # pylint: disable=protected-access
-    results_wrapper = smoothness._CustomResultsWrapper()
-    results_wrapper.SetResults(mock.Mock())
-
-    results_wrapper.SetTirLabel('foo')
-    results_wrapper.AddValue(scalar.ScalarValue(test_page, 'num', 'ms', 44))
-
-    results_wrapper.SetTirLabel('bar')
-    with self.assertRaises(AssertionError):
-      results_wrapper.AddValue(scalar.ScalarValue(test_page, 'num', 'ms', 42))
-
-
 class SmoothnessUnitTest(page_test_test_case.PageTestTestCase):
   """Smoke test for smoothness measurement
 
@@ -80,13 +57,13 @@ class SmoothnessUnitTest(page_test_test_case.PageTestTestCase):
     self._options = options_for_unittests.GetCopy()
     self._options.browser_options.wpr_mode = wpr_modes.WPR_OFF
 
-  # crbug.com/483212
-  @decorators.Disabled('chromeos')
+  # crbug.com/483212 and crbug.com/713260
+  @decorators.Disabled('chromeos', 'linux')
   def testSmoothness(self):
     ps = self.CreateStorySetFromFileInUnittestDataDir('scrollable_page.html')
     measurement = smoothness.Smoothness()
     results = self.RunMeasurement(measurement, ps, options=self._options)
-    self.assertEquals(0, len(results.failures))
+    self.assertFalse(results.had_failures)
 
     frame_times = results.FindAllPageSpecificValuesNamed('frame_times')
     self.assertEquals(len(frame_times), 1)
@@ -118,7 +95,7 @@ class SmoothnessUnitTest(page_test_test_case.PageTestTestCase):
     ps = self.CreateStorySetFromFileInUnittestDataDir('scrollable_page.html')
     measurement = smoothness.Smoothness()
     results = self.RunMeasurement(measurement, ps, options=self._options)
-    self.assertEquals(0, len(results.failures))
+    self.assertFalse(results.had_failures)
 
     avg_surface_fps = results.FindAllPageSpecificValuesNamed('avg_surface_fps')
     self.assertEquals(1, len(avg_surface_fps))

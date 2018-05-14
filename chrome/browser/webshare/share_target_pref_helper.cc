@@ -24,6 +24,11 @@ void UpdateShareTargetInPrefs(const GURL& manifest_url,
     return;
   }
 
+  // TODO(mgiuca): This DCHECK is known to fail due to https://crbug.com/762388.
+  // Currently, this can only happen if flags are turned on. These cases should
+  // be fixed before this feature is rolled out.
+  DCHECK(manifest_url.is_valid());
+
   std::string url_template =
       base::UTF16ToUTF8(manifest.share_target.value().url_template.string());
 
@@ -33,11 +38,9 @@ void UpdateShareTargetInPrefs(const GURL& manifest_url,
   std::unique_ptr<base::DictionaryValue> origin_dict(new base::DictionaryValue);
 
   if (!manifest.name.is_null()) {
-    origin_dict->SetStringWithoutPathExpansion(kNameKey,
-                                               manifest.name.string());
+    origin_dict->SetKey(kNameKey, base::Value(manifest.name.string()));
   }
-  origin_dict->SetStringWithoutPathExpansion(kUrlTemplateKey,
-                                             url_template);
+  origin_dict->SetKey(kUrlTemplateKey, base::Value(url_template));
 
   share_target_dict->SetWithoutPathExpansion(manifest_url.spec(),
                                              std::move(origin_dict));

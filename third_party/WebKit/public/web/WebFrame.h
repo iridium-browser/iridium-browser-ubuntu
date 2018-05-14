@@ -36,10 +36,10 @@
 #include "WebNode.h"
 #include "public/platform/WebCanvas.h"
 #include "public/platform/WebCommon.h"
-#include "public/platform/WebFeaturePolicy.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "public/web/WebFrameLoadType.h"
 #include "public/web/WebTreeScopeType.h"
+#include "third_party/WebKit/public/common/feature_policy/feature_policy.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -47,12 +47,9 @@ namespace blink {
 class Frame;
 class OpenedFrameTracker;
 class Visitor;
-class WebElement;
 class WebLocalFrame;
-class WebPerformance;
 class WebRemoteFrame;
 class WebSecurityOrigin;
-class WebString;
 class WebView;
 enum class WebSandboxFlags;
 struct WebFrameOwnerProperties;
@@ -99,14 +96,6 @@ class BLINK_EXPORT WebFrame {
 
   // Basic properties ---------------------------------------------------
 
-  // The name of this frame. If no name is given, empty string is returned.
-  virtual WebString AssignedName() const = 0;
-
-  // Sets the name of this frame. For child frames (frames that are not a
-  // top-most frame) the actual name may have a suffix appended to make the
-  // frame name unique within the hierarchy.
-  virtual void SetName(const WebString&) = 0;
-
   // The security origin of this frame.
   WebSecurityOrigin GetSecurityOrigin() const;
 
@@ -115,11 +104,13 @@ class BLINK_EXPORT WebFrame {
   // parent is in another process and it dynamically updates this frame's
   // sandbox flags or container policy. The new policy won't take effect until
   // the next navigation.
-  void SetFrameOwnerPolicy(WebSandboxFlags,
-                           const blink::WebParsedFeaturePolicy&);
+  void SetFrameOwnerPolicy(WebSandboxFlags, const blink::ParsedFeaturePolicy&);
 
   // The frame's insecure request policy.
   WebInsecureRequestPolicy GetInsecureRequestPolicy() const;
+
+  // The frame's upgrade insecure navigations set.
+  std::vector<unsigned> GetInsecureRequestToUpgrade() const;
 
   // Updates this frame's FrameOwner properties, such as scrolling, margin,
   // or allowfullscreen.  This is used when this frame's parent is in
@@ -174,10 +165,6 @@ class BLINK_EXPORT WebFrame {
   // Returns the next frame in "frame traversal order".
   WebFrame* TraverseNext() const;
 
-  // Content ------------------------------------------------------------
-
-  virtual WebPerformance Performance() const = 0;
-
   // Scripting ----------------------------------------------------------
 
   // Returns the global proxy object.
@@ -194,11 +181,6 @@ class BLINK_EXPORT WebFrame {
   // Stops any pending loads on the frame and its children.
   virtual void StopLoading() = 0;
 
-  // View-source rendering mode.  Set this before loading an URL to cause
-  // it to be rendered in view-source mode.
-  virtual void EnableViewSourceMode(bool) = 0;
-  virtual bool IsViewSourceModeEnabled() const = 0;
-
   // Will return true if between didStartLoading and didStopLoading
   // notifications.
   virtual bool IsLoading() const;
@@ -206,10 +188,10 @@ class BLINK_EXPORT WebFrame {
   // Utility -------------------------------------------------------------
 
   // Returns the frame inside a given frame or iframe element. Returns 0 if
-  // the given element is not a frame, iframe or if the frame is empty.
-  static WebFrame* FromFrameOwnerElement(const WebElement&);
+  // the given node is not a frame, iframe or if the frame is empty.
+  static WebFrame* FromFrameOwnerElement(const WebNode&);
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   // TODO(mustaq): Should be named FromCoreFrame instead.
   static WebFrame* FromFrame(Frame*);
   static Frame* ToCoreFrame(const WebFrame&);
@@ -221,6 +203,9 @@ class BLINK_EXPORT WebFrame {
   // Detaches a frame from its parent frame if it has one.
   void DetachFromParent();
 #endif
+
+  // Mark this frame's document as having received a user gesture.
+  virtual void SetHasReceivedUserGesture() = 0;
 
  protected:
   explicit WebFrame(WebTreeScopeType);
@@ -240,7 +225,7 @@ class BLINK_EXPORT WebFrame {
   void AppendChild(WebFrame*);
 
  private:
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   friend class OpenedFrameTracker;
   friend class WebFrameTest;
 

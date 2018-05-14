@@ -36,6 +36,11 @@ enum class WindowEmbedType {
 AURA_EXPORT extern const WindowProperty<bool>* const
     kAccessibilityFocusFallsbackToWidgetKey;
 
+// A property key to store whether accessibility touch exploration gets handled
+// by the window and all touches pass through directly.
+AURA_EXPORT extern const WindowProperty<bool>* const
+    kAccessibilityTouchExplorationPassThrough;
+
 // A property key to store whether activation on pointer event is enabled or
 // not. The default value is true, which means windows are activated when a
 // pointer down event occurs on them.
@@ -93,6 +98,9 @@ AURA_EXPORT extern const WindowProperty<gfx::Size*>* const kMinimumSize;
 // should render regardless of its actual visibility state.
 AURA_EXPORT extern const WindowProperty<bool>* const kMirroringEnabledKey;
 
+// The modal parent of a child modal window.
+AURA_EXPORT extern const WindowProperty<Window*>* const kChildModalParentKey;
+
 // A property key to store the window modality.
 AURA_EXPORT extern const WindowProperty<ui::ModalType>* const kModalKey;
 
@@ -143,6 +151,10 @@ AURA_EXPORT extern const WindowProperty<gfx::ImageSkia*>* const kWindowIconKey;
 
 // Indicates the type of embedding within the given window.
 AURA_EXPORT extern const WindowProperty<WindowEmbedType>* const kEmbedType;
+
+// The corner radius of a window in DIPs. Currently only used for shadows.
+// Default is -1, meaning "unspecified". 0 Ensures corners are square.
+AURA_EXPORT extern const WindowProperty<int>* const kWindowCornerRadiusKey;
 
 AURA_EXPORT extern const WindowProperty<ui::mojom::WindowType>* const
     kWindowTypeKey;

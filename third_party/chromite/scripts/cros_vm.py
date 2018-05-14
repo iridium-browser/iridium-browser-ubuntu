@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -6,12 +7,20 @@
 
 from __future__ import print_function
 
+import argparse
+import distutils.version
+import multiprocessing
 import os
+import re
 
+from chromite.cli.cros import cros_chrome_sdk
+from chromite.lib import cache
 from chromite.lib import commandline
+from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
+from chromite.lib import path_util
 from chromite.lib import remote_access
 from chromite.lib import retry_util
 
@@ -28,30 +37,41 @@ class VM(object):
   """Class for managing a VM."""
 
   SSH_PORT = 9222
+  IMAGE_FORMAT = 'raw'
 
-  def __init__(self, image_path=None, qemu_path=None, enable_kvm=True,
-               display=True, ssh_port=SSH_PORT, dry_run=False):
+  def __init__(self, argv):
     """Initialize VM.
 
     Args:
-      image_path: path of vm image.
-      qemu_path: path to qemu binary.
-      enable_kvm: enable kvm (kernel support for virtualization).
-      display: display video output.
-      ssh_port: ssh port to use.
-      dry_run: disable VM commands.
+      argv: command line args.
     """
+    opts = self._ParseArgs(argv)
+    opts.Freeze()
 
-    self.qemu_path = qemu_path
-    self.enable_kvm = enable_kvm
-    # Software emulation doesn't need sudo access.
-    self.use_sudo = enable_kvm
-    self.display = display
-    self.image_path = image_path
-    self.ssh_port = ssh_port
-    self.dry_run = dry_run
+    self.qemu_path = opts.qemu_path
+    self.qemu_bios_path = opts.qemu_bios_path
+    self.qemu_m = opts.qemu_m
+    self.qemu_cpu = opts.qemu_cpu
+    self.qemu_smp = opts.qemu_smp
+    if self.qemu_smp == 0:
+      self.qemu_smp = min(8, multiprocessing.cpu_count)
+    self.enable_kvm = opts.enable_kvm
+    # We don't need sudo access for software emulation or if /dev/kvm is
+    # writeable.
+    self.use_sudo = self.enable_kvm and not os.access('/dev/kvm', os.W_OK)
+    self.display = opts.display
+    self.image_path = opts.image_path
+    self.image_format = opts.image_format
+    self.board = opts.board
+    self.ssh_port = opts.ssh_port
+    self.dry_run = opts.dry_run
 
-    self.vm_dir = os.path.join(osutils.GetGlobalTempDir(), 'cros_vm')
+    self.start = opts.start
+    self.stop = opts.stop
+    self.cmd = opts.args[1:] if opts.cmd else None
+
+    self.vm_dir = os.path.join(osutils.GetGlobalTempDir(),
+                               'cros_vm_%d' % self.ssh_port)
     if os.path.exists(self.vm_dir):
       # For security, ensure that vm_dir is not a symlink, and is owned by us or
       # by root.
@@ -68,11 +88,10 @@ class VM(object):
     self.kvm_serial = '%s.serial' % self.kvm_monitor
 
     self.remote = remote_access.RemoteDevice(remote_access.LOCALHOST,
-                                             port=ssh_port)
+                                             port=self.ssh_port)
 
     # TODO(achuith): support nographics, snapshot, mem_path, usb_passthrough,
     # moblab, etc.
-
 
   def _RunCommand(self, *args, **kwargs):
     """Use SudoRunCommand or RunCommand as necessary."""
@@ -87,31 +106,126 @@ class VM(object):
     Args:
       recreate: recreate vm_dir.
     """
-    self._RunCommand(['rm', '-rf', self.vm_dir])
+    osutils.RmDir(self.vm_dir, ignore_missing=True, sudo=self.use_sudo)
     if recreate:
-      self._RunCommand(['mkdir', self.vm_dir])
-      self._RunCommand(['chmod', '777', self.vm_dir])
+      osutils.SafeMakedirs(self.vm_dir)
 
-  def PerformAction(self, start=False, stop=False, cmd=None):
-    """Performs an action, one of start, stop, or run a command in the VM.
+  def _GetCachePath(self, key):
+    """Get cache path for key.
 
     Args:
-      start: start the VM.
-      stop: stop the VM.
-      cmd: list or scalar command to run in the VM.
+      key: cache key.
+    """
+    tarball_cache = cache.TarballCache(os.path.join(
+        path_util.GetCacheDir(),
+        cros_chrome_sdk.COMMAND_NAME,
+        cros_chrome_sdk.SDKFetcher.TARBALL_CACHE))
+    sdk_version = os.environ.get(cros_chrome_sdk.SDKFetcher.SDK_VERSION_ENV)
+    if sdk_version:
+      cache_key = (self.board, sdk_version, key)
+      with tarball_cache.Lookup(cache_key) as ref:
+        if ref.Exists():
+          return ref.path
+    return None
+
+  @cros_build_lib.MemoizedSingleCall
+  def QemuVersion(self):
+    """Determine QEMU version."""
+    version_str = self._RunCommand([self.qemu_path, '--version'],
+                                   capture_output=True).output
+    # version string looks like one of these:
+    # QEMU emulator version 2.0.0 (Debian 2.0.0+dfsg-2ubuntu1.36), Copyright (c)
+    # 2003-2008 Fabrice Bellard
+    #
+    # QEMU emulator version 2.6.0, Copyright (c) 2003-2008 Fabrice Bellard
+    #
+    # qemu-x86_64 version 2.10.1
+    # Copyright (c) 2003-2017 Fabrice Bellard and the QEMU Project developers
+    m = re.search(r"version ([0-9.]+)", version_str)
+    if not m:
+      raise VMError('Unable to determine QEMU version from:\n%s.' % version_str)
+    return m.group(1)
+
+  def _CheckQemuMinVersion(self):
+    """Ensure minimum QEMU version."""
+    min_qemu_version = '2.6.0'
+    logging.info('QEMU version %s', self.QemuVersion())
+    LooseVersion = distutils.version.LooseVersion
+    if LooseVersion(self.QemuVersion()) < LooseVersion(min_qemu_version):
+      raise VMError('QEMU %s is the minimum supported version. You have %s.'
+                    % (min_qemu_version, self.QemuVersion()))
+
+  def _SetQemuPath(self):
+    """Find a suitable Qemu executable."""
+    qemu_exe = 'qemu-system-x86_64'
+    qemu_exe_path = os.path.join('usr/bin', qemu_exe)
+
+    # Check SDK cache.
+    if not self.qemu_path:
+      qemu_dir = self._GetCachePath(cros_chrome_sdk.SDKFetcher.QEMU_BIN_KEY)
+      if qemu_dir:
+        qemu_path = os.path.join(qemu_dir, qemu_exe_path)
+        if os.path.isfile(qemu_path):
+          self.qemu_path = qemu_path
+
+    # Check chroot.
+    if not self.qemu_path:
+      qemu_path = os.path.join(
+          constants.SOURCE_ROOT, constants.DEFAULT_CHROOT_DIR, qemu_exe_path)
+      if os.path.isfile(qemu_path):
+        self.qemu_path = qemu_path
+
+    # Check system.
+    if not self.qemu_path:
+      self.qemu_path = osutils.Which(qemu_exe)
+
+    if not self.qemu_path or not os.path.isfile(self.qemu_path):
+      raise VMError('QEMU not found.')
+    logging.debug('QEMU path: %s', self.qemu_path)
+    self._CheckQemuMinVersion()
+
+  def _GetBuiltVMImagePath(self):
+    """Get path of a locally built VM image."""
+    vm_image_path = os.path.join(constants.SOURCE_ROOT, 'src/build/images',
+                                 cros_build_lib.GetBoard(self.board),
+                                 'latest', constants.VM_IMAGE_BIN)
+    return vm_image_path if os.path.isfile(vm_image_path) else None
+
+  def _GetCacheVMImagePath(self):
+    """Get path of a cached VM image."""
+    cache_path = self._GetCachePath(constants.VM_IMAGE_TAR)
+    if cache_path:
+      vm_image = os.path.join(cache_path, constants.VM_IMAGE_BIN)
+      if os.path.isfile(vm_image):
+        return vm_image
+    return None
+
+  def _SetVMImagePath(self):
+    """Detect VM image path in SDK and chroot."""
+    if not self.image_path:
+      self.image_path = (self._GetCacheVMImagePath() or
+                         self._GetBuiltVMImagePath())
+    if not self.image_path:
+      raise VMError('No VM image found. Use cros chrome-sdk --download-vm.')
+    if not os.path.isfile(self.image_path):
+      raise VMError('VM image does not exist: %s' % self.image_path)
+    logging.debug('VM image path: %s', self.image_path)
+
+  def Run(self):
+    """Performs an action, one of start, stop, or run a command in the VM.
 
     Returns:
       cmd output.
     """
 
-    if not start and not stop and not cmd:
+    if not self.start and not self.stop and not self.cmd:
       raise VMError('Must specify one of start, stop, or cmd.')
-    if start:
+    if self.start:
       self.Start()
-    if stop:
+    if self.cmd:
+      return self.RemoteCommand(self.cmd)
+    if self.stop:
       self.Stop()
-    if cmd:
-      return self.RemoteCommand(cmd.split())
 
   def Start(self):
     """Start the VM."""
@@ -119,41 +233,51 @@ class VM(object):
     self.Stop()
 
     logging.debug('Start VM')
-    if not self.qemu_path:
-      self.qemu_path = osutils.Which('qemu-system-x86_64')
-    if not self.qemu_path:
-      raise VMError('qemu not found.')
-    logging.debug('qemu path=%s', self.qemu_path)
-
-    if not self.image_path:
-      self.image_path = os.environ.get('VM_IMAGE_PATH', '')
-    logging.debug('vm image path=%s', self.image_path)
-    if not self.image_path or not os.path.exists(self.image_path):
-      raise VMError('VM image path %s does not exist.' % self.image_path)
+    self._SetQemuPath()
+    self._SetVMImagePath()
 
     self._CleanupFiles(recreate=True)
-    open(self.kvm_serial, 'w')
+    # Make sure we can read these files later on by creating them as ourselves.
+    osutils.Touch(self.kvm_serial)
     for pipe in [self.kvm_pipe_in, self.kvm_pipe_out]:
       os.mkfifo(pipe, 0600)
+    osutils.Touch(self.pidfile)
 
-    args = [self.qemu_path, '-m', '2G', '-smp', '4', '-vga', 'cirrus',
-            '-daemonize',
-            '-pidfile', self.pidfile,
-            '-chardev', 'pipe,id=control_pipe,path=%s' % self.kvm_monitor,
-            '-serial', 'file:%s' % self.kvm_serial,
-            '-mon', 'chardev=control_pipe',
-            '-net', 'nic,model=virtio',
-            '-net', 'user,hostfwd=tcp::%d-:22' % self.ssh_port,
-            '-drive', 'file=%s,index=0,media=disk,cache=unsafe'
-            % self.image_path]
+    qemu_args = [self.qemu_path]
+    if self.qemu_bios_path:
+      if not os.path.isdir(self.qemu_bios_path):
+        raise VMError('Invalid QEMU bios path: %s' % self.qemu_bios_path)
+      qemu_args += ['-L', self.qemu_bios_path]
+
+    qemu_args += [
+        '-m', self.qemu_m, '-smp', str(self.qemu_smp), '-vga', 'virtio',
+        '-daemonize', '-usbdevice', 'tablet',
+        '-pidfile', self.pidfile,
+        '-chardev', 'pipe,id=control_pipe,path=%s' % self.kvm_monitor,
+        '-serial', 'file:%s' % self.kvm_serial,
+        '-mon', 'chardev=control_pipe',
+        # Append 'check' to warn if the requested CPU is not fully supported.
+        '-cpu', self.qemu_cpu + ',check',
+        # Qemu-vlans are used by qemu to separate out network traffic on the
+        # slirp network bridge. qemu forwards traffic on a slirp vlan to all
+        # ports conected on that vlan. By default, slirp ports are on vlan
+        # 0. We explicitly set a vlan here so that another qemu VM using
+        # slirp doesn't conflict with our network traffic.
+        '-net', 'nic,model=virtio,vlan=%d' % self.ssh_port,
+        '-net', 'user,hostfwd=tcp:127.0.0.1:%d-:22,vlan=%d'
+        % (self.ssh_port, self.ssh_port),
+        '-drive', 'file=%s,index=0,media=disk,cache=unsafe,format=%s'
+        % (self.image_path, self.image_format),
+    ]
     if self.enable_kvm:
-      args.append('-enable-kvm')
+      qemu_args.append('-enable-kvm')
     if not self.display:
-      args.extend(['-display', 'none'])
-    logging.info(' '.join(args))
+      qemu_args.extend(['-display', 'none'])
     logging.info('Pid file: %s', self.pidfile)
     if not self.dry_run:
-      self._RunCommand(args)
+      self._RunCommand(qemu_args)
+    else:
+      logging.info(cros_build_lib.CmdToStr(qemu_args))
 
   def _GetVMPid(self):
     """Get the pid of the VM.
@@ -169,10 +293,11 @@ class VM(object):
       logging.info('%s does not exist.', self.pidfile)
       return 0
 
-    pid = self._RunCommand(['cat', self.pidfile],
-                           redirect_stdout=True).output.rstrip()
+    pid = osutils.ReadFile(self.pidfile).rstrip()
     if not pid.isdigit():
-      logging.error('%s in %s is not a pid.', pid, self.pidfile)
+      # Ignore blank/empty files.
+      if pid:
+        logging.error('%s in %s is not a pid.', pid, self.pidfile)
       return 0
 
     return int(pid)
@@ -188,8 +313,7 @@ class VM(object):
       return False
 
     # Make sure the process actually exists.
-    res = self._RunCommand(['kill', '-0', str(pid)], error_code_ok=True)
-    return res.returncode == 0
+    return os.path.isdir('/proc/%i' % pid)
 
   def Stop(self):
     """Stop the VM."""
@@ -251,58 +375,75 @@ class VM(object):
     if result.returncode != 0:
       raise VMError('WaitForBoot failed: %s.' % result.error)
 
-    self._WaitForProcs()
+    # Chrome can take a while to start with software emulation.
+    if not self.enable_kvm:
+      self._WaitForProcs()
 
-  def RemoteCommand(self, cmd):
+  def RemoteCommand(self, cmd, **kwargs):
     """Run a remote command in the VM.
 
     Args:
-      cmd: command to run, of list type.
+      cmd: command to run.
+      kwargs: additional args (see documentation for RemoteDevice.RunCommand).
     """
-    if not isinstance(cmd, list):
-      raise VMError('cmd must be a list.')
-
     if not self.dry_run:
       return self.remote.RunCommand(cmd, debug_level=logging.INFO,
                                     combine_stdout_stderr=True,
                                     log_output=True,
-                                    error_code_ok=True)
+                                    error_code_ok=True,
+                                    **kwargs)
 
-def ParseCommandLine(argv):
-  """Parse the command line.
+  @staticmethod
+  def _ParseArgs(argv):
+    """Parse a list of args.
 
-  Args:
-    argv: Command arguments.
+    Args:
+      argv: list of command line arguments.
 
-  Returns:
-    List of parsed args.
-  """
-  parser = commandline.ArgumentParser(description=__doc__)
-  parser.add_argument('--start', action='store_true', default=False,
-                      help='Start the VM.')
-  parser.add_argument('--stop', action='store_true', default=False,
-                      help='Stop the VM.')
-  parser.add_argument('--cmd', help='Run this command in the VM.')
-  parser.add_argument('--image-path', type='path',
-                      help='Path to VM image to launch with --start.')
-  parser.add_argument('--qemu-path', type='path',
-                      help='Path of qemu binary to launch with --start.')
-  parser.add_argument('--disable-kvm', dest='enable_kvm',
-                      action='store_false', default=True,
-                      help='Disable KVM, use software emulation.')
-  parser.add_argument('--no-display', dest='display',
-                      action='store_false', default=True,
-                      help='Do not display video output.')
-  parser.add_argument('--ssh-port', type=int, default=VM.SSH_PORT,
-                      help='ssh port to communicate with VM.')
-  parser.add_argument('--dry-run', action='store_true', default=False,
-                      help='dry run for debugging.')
-  return parser.parse_args(argv)
-
+    Returns:
+      List of parsed opts.
+    """
+    parser = commandline.ArgumentParser(description=__doc__)
+    parser.add_argument('--start', action='store_true', default=False,
+                        help='Start the VM.')
+    parser.add_argument('--stop', action='store_true', default=False,
+                        help='Stop the VM.')
+    parser.add_argument('--image-path', type='path',
+                        help='Path to VM image to launch with --start.')
+    parser.add_argument('--image-format', default=VM.IMAGE_FORMAT,
+                        help='Format of the VM image (raw, qcow2, ...).')
+    parser.add_argument('--qemu-path', type='path',
+                        help='Path of qemu binary to launch with --start.')
+    parser.add_argument('--qemu-m', type=str, default='8G',
+                        help='Memory argument that will be passed to qemu.')
+    parser.add_argument('--qemu-smp', type=int, default='0',
+                        help='SMP argument that will be passed to qemu. (0 '
+                             'means auto-detection.)')
+    # TODO(pwang): replace SandyBridge to Haswell-noTSX once lab machine
+    # running VMTest all migrate to GCE.
+    parser.add_argument('--qemu-cpu', type=str,
+                        default='SandyBridge,-invpcid,-tsc-deadline',
+                        help='CPU argument that will be passed to qemu.')
+    parser.add_argument('--qemu-bios-path', type='path',
+                        help='Path of directory with qemu bios files.')
+    parser.add_argument('--disable-kvm', dest='enable_kvm',
+                        action='store_false', default=True,
+                        help='Disable KVM, use software emulation.')
+    parser.add_argument('--no-display', dest='display',
+                        action='store_false', default=True,
+                        help='Do not display video output.')
+    parser.add_argument('--ssh-port', type=int, default=VM.SSH_PORT,
+                        help='ssh port to communicate with VM.')
+    sdk_board_env = os.environ.get(cros_chrome_sdk.SDKFetcher.SDK_BOARD_ENV)
+    parser.add_argument('--board', default=sdk_board_env, help='Board to use.')
+    parser.add_argument('--dry-run', action='store_true', default=False,
+                        help='dry run for debugging.')
+    parser.add_argument('--cmd', action='store_true', default=False,
+                        help='Run a command in the VM.')
+    parser.add_argument('args', nargs=argparse.REMAINDER,
+                        help='Command to run in the VM.')
+    return parser.parse_args(argv)
 
 def main(argv):
-  args = ParseCommandLine(argv)
-  vm = VM(image_path=args.image_path, qemu_path=args.qemu_path,
-          enable_kvm=args.enable_kvm, display=args.display,
-          ssh_port=args.ssh_port, dry_run=args.dry_run)
-  vm.PerformAction(start=args.start, stop=args.stop, cmd=args.cmd)
+  vm = VM(argv)
+  vm.Run()

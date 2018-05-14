@@ -47,12 +47,17 @@ class GraphDump(object):
     self.leak_stackframes = 0
     self.leak_objects = 0
 
+def OpenTraceFile(file_path, mode):
+  if file_path.endswith('.gz'):
+    return gzip.open(file_path, mode + 'b')
+  else:
+    return open(file_path, mode + 't')
 
 def FindMemoryDumps(filename):
   processes = {}
 
-  with gzip.open(filename, 'rb') as f:
-    data = json.loads(f.read().decode('ascii'))
+  with OpenTraceFile(filename, 'r') as f:
+    data = json.loads(f.read().decode('utf-8'))
 
     for event in data['traceEvents']:
       pid = event['pid']
@@ -63,9 +68,9 @@ def FindMemoryDumps(filename):
 
       # Retrieve process informations.
       if event['ph'] == 'M':
-        if event['name'] == 'process_name':
+        if event['name'] == 'process_name' and 'name' in event['args']:
           process.name = event['args']['name']
-        if event['name'] == 'process_labels':
+        if event['name'] == 'process_labels' and 'labels' in event['args']:
           process.labels = event['args']['labels']
 
       if event['name'] == 'typeNames':
@@ -141,7 +146,12 @@ def ResolveMemoryDumpFields(entries, stackframes, types):
     return types[type_id]
 
   for entry in entries:
-    entry.stackframe = ResolveStackTrace(entry.stackframe, stackframes)
+    # Stackframe may be -1 (18446744073709551615L) when not stackframe are
+    # available.
+    if entry.stackframe not in stackframes:
+      entry.stackframe = []
+    else:
+      entry.stackframe = ResolveStackTrace(entry.stackframe, stackframes)
     entry.type = ResolveType(entry.type, types)
 
 
@@ -193,8 +203,10 @@ def FindLeaks(root, stack, leaks, threshold, size_threshold):
               size_threshold)
 
   if root['count'] > threshold and root['size'] > size_threshold:
-    leaks.append((root['count'], root['size'], root['count_by_type'], stack))
-
+    leaks.append({'count': root['count'],
+                  'size': root['size'],
+                  'count_by_type': root['count_by_type'],
+                  'stackframes': stack})
 
 def DumpTree(root, frame, output, threshold, size_threshold):
   output.write('\n{ \"name\": \"%s\",' % frame)
@@ -362,14 +374,14 @@ def BuildGraphDumps(processes, threshold, size_threshold):
       # Find leaks
       leaks = []
       FindLeaks(root, [], leaks, threshold, size_threshold)
-      leaks.sort(reverse=True)
+      leaks.sort(reverse=True, key=lambda k: k['size'])
 
       if leaks:
         print '  %s: %d potential leaks found.' % (heap, len(leaks))
         graph.leaks = leaks
         graph.leak_stackframes = len(leaks)
         for leak in leaks:
-          graph.leak_objects += leak[0]
+          graph.leak_objects += leak['count']
 
   return graph_dumps
 

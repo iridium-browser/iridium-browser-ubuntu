@@ -4,7 +4,13 @@
 
 #include "content/browser/devtools/protocol/tracing_handler.h"
 
+#include <algorithm>
 #include <cmath>
+#include <memory>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/format_macros.h"
@@ -18,10 +24,16 @@
 #include "base/trace_event/trace_event_impl.h"
 #include "base/trace_event/tracing_agent.h"
 #include "components/tracing/common/trace_config_file.h"
+#include "components/viz/common/features.h"
+#include "content/browser/devtools/devtools_frame_trace_recorder_for_viz.h"
 #include "content/browser/devtools/devtools_io_context.h"
 #include "content/browser/devtools/devtools_session.h"
+#include "content/browser/frame_host/render_frame_host_impl.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/tracing/tracing_controller_impl.h"
+#include "content/public/browser/browser_thread.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
+#include "services/tracing/public/mojom/constants.mojom.h"
 
 namespace content {
 namespace protocol {
@@ -63,47 +75,63 @@ std::unique_ptr<base::Value> ConvertDictKeyStyle(const base::Value& value) {
   const base::ListValue* list = nullptr;
   if (value.GetAsList(&list)) {
     std::unique_ptr<base::ListValue> out_list(new base::ListValue());
-    for (const auto& value : *list)
-      out_list->Append(ConvertDictKeyStyle(value));
+    for (const auto& key : *list)
+      out_list->Append(ConvertDictKeyStyle(key));
     return std::move(out_list);
   }
 
   return value.CreateDeepCopy();
 }
 
-class DevToolsTraceSinkProxy : public TracingController::TraceDataSink {
+class DevToolsTraceEndpointProxy : public TracingController::TraceDataEndpoint {
  public:
-  explicit DevToolsTraceSinkProxy(base::WeakPtr<TracingHandler> handler)
+  explicit DevToolsTraceEndpointProxy(base::WeakPtr<TracingHandler> handler)
       : tracing_handler_(handler) {}
 
-  void AddTraceChunk(const std::string& chunk) override {
+  void ReceiveTraceChunk(std::unique_ptr<std::string> chunk) override {
     if (TracingHandler* h = tracing_handler_.get())
-      h->OnTraceDataCollected(chunk);
+      h->OnTraceDataCollected(std::move(chunk));
   }
-  void Close() override {
+  void ReceiveTraceFinalContents(
+      std::unique_ptr<const base::DictionaryValue> metadata) override {
     if (TracingHandler* h = tracing_handler_.get())
       h->OnTraceComplete();
   }
 
  private:
-  ~DevToolsTraceSinkProxy() override {}
+  ~DevToolsTraceEndpointProxy() override {}
 
   base::WeakPtr<TracingHandler> tracing_handler_;
 };
 
-class DevToolsStreamEndpoint : public TraceDataEndpoint {
+class DevToolsStreamEndpoint : public TracingController::TraceDataEndpoint {
  public:
   explicit DevToolsStreamEndpoint(
       base::WeakPtr<TracingHandler> handler,
-      const scoped_refptr<DevToolsIOContext::Stream>& stream)
+      const scoped_refptr<DevToolsIOContext::RWStream>& stream)
       : stream_(stream), tracing_handler_(handler) {}
 
   void ReceiveTraceChunk(std::unique_ptr<std::string> chunk) override {
+    if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          base::BindOnce(&DevToolsStreamEndpoint::ReceiveTraceChunk, this,
+                         std::move(chunk)));
+      return;
+    }
+
     stream_->Append(std::move(chunk));
   }
 
   void ReceiveTraceFinalContents(
       std::unique_ptr<const base::DictionaryValue> metadata) override {
+    if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          base::BindOnce(&DevToolsStreamEndpoint::ReceiveTraceFinalContents,
+                         this, std::move(metadata)));
+      return;
+    }
     if (TracingHandler* h = tracing_handler_.get())
       h->OnTraceToStreamComplete(stream_->handle());
   }
@@ -111,7 +139,7 @@ class DevToolsStreamEndpoint : public TraceDataEndpoint {
  private:
   ~DevToolsStreamEndpoint() override {}
 
-  scoped_refptr<DevToolsIOContext::Stream> stream_;
+  scoped_refptr<DevToolsIOContext::RWStream> stream_;
   base::WeakPtr<TracingHandler> tracing_handler_;
 };
 
@@ -126,7 +154,13 @@ TracingHandler::TracingHandler(TracingHandler::Target target,
       frame_tree_node_id_(frame_tree_node_id),
       did_initiate_recording_(false),
       return_as_stream_(false),
-      weak_factory_(this) {}
+      gzip_compression_(false),
+      weak_factory_(this) {
+  if (base::FeatureList::IsEnabled(features::kVizDisplayCompositor)) {
+    frame_trace_recorder_ =
+        std::make_unique<DevToolsFrameTraceRecorderForViz>();
+  }
+}
 
 TracingHandler::~TracingHandler() {
 }
@@ -138,6 +172,14 @@ std::vector<TracingHandler*> TracingHandler::ForAgentHost(
       host, Tracing::Metainfo::domainName);
 }
 
+void TracingHandler::SetRenderer(int process_host_id,
+                                 RenderFrameHostImpl* frame_host) {
+  if (!frame_trace_recorder_ || !frame_host)
+    return;
+  frame_trace_recorder_->SetFrameSinkId(
+      frame_host->GetRenderWidgetHost()->GetFrameSinkId());
+}
+
 void TracingHandler::Wire(UberDispatcher* dispatcher) {
   frontend_.reset(new Tracing::Frontend(dispatcher->channel()));
   Tracing::Dispatcher::wire(dispatcher, this);
@@ -145,44 +187,126 @@ void TracingHandler::Wire(UberDispatcher* dispatcher) {
 
 Response TracingHandler::Disable() {
   if (did_initiate_recording_)
-    StopTracing(scoped_refptr<TracingController::TraceDataSink>());
+    StopTracing(nullptr, "");
   return Response::OK();
 }
 
-void TracingHandler::OnTraceDataCollected(const std::string& trace_fragment) {
+void TracingHandler::OnTraceDataCollected(
+    std::unique_ptr<std::string> trace_fragment) {
+  const std::string valid_trace_fragment =
+      UpdateTraceDataBuffer(*trace_fragment);
+  if (valid_trace_fragment.empty())
+    return;
+
   // Hand-craft protocol notification message so we can substitute JSON
   // that we already got as string as a bare object, not a quoted string.
   std::string message(
       "{ \"method\": \"Tracing.dataCollected\", \"params\": { \"value\": [");
   const size_t messageSuffixSize = 10;
-  message.reserve(message.size() + trace_fragment.size() + messageSuffixSize);
-  message += trace_fragment;
+  message.reserve(message.size() + valid_trace_fragment.size() +
+                  messageSuffixSize - trace_data_buffer_state_.offset);
+  message.append(valid_trace_fragment.c_str() +
+                 trace_data_buffer_state_.offset);
   message += "] } }";
   frontend_->sendRawNotification(message);
 }
 
 void TracingHandler::OnTraceComplete() {
+  if (!trace_data_buffer_state_.data.empty())
+    OnTraceDataCollected(std::make_unique<std::string>(""));
+
+  DCHECK(trace_data_buffer_state_.data.empty());
+  DCHECK_EQ(0u, trace_data_buffer_state_.pos);
+  DCHECK_EQ(0, trace_data_buffer_state_.open_braces);
+  DCHECK(!trace_data_buffer_state_.in_string);
+  DCHECK(!trace_data_buffer_state_.slashed);
+
   frontend_->TracingComplete();
 }
 
+std::string TracingHandler::UpdateTraceDataBuffer(
+    const std::string& trace_fragment) {
+  size_t end = 0;
+  size_t last_open = 0;
+  TraceDataBufferState& state = trace_data_buffer_state_;
+  state.offset = 0;
+  bool update_offset = state.open_braces == 0;
+  for (; state.pos < trace_fragment.size(); ++state.pos) {
+    char c = trace_fragment[state.pos];
+    switch (c) {
+      case '{':
+        if (!state.in_string && !state.slashed) {
+          state.open_braces++;
+          if (state.open_braces == 1) {
+            last_open = state.data.size() + state.pos;
+            if (update_offset) {
+              state.offset = last_open;
+              update_offset = false;
+            }
+          }
+        }
+        break;
+      case '}':
+        if (!state.in_string && !state.slashed) {
+          DCHECK_GT(state.open_braces, 0);
+          state.open_braces--;
+          if (state.open_braces == 0)
+            end = state.data.size() + state.pos + 1;
+        }
+        break;
+      case '"':
+        if (!state.slashed)
+          state.in_string = !state.in_string;
+        break;
+      case 'u':
+        if (state.slashed)
+          state.pos += 4;
+        break;
+    }
+
+    if (state.in_string && c == '\\') {
+      state.slashed = !state.slashed;
+    } else {
+      state.slashed = false;
+    }
+  }
+
+  // Next starting position is usually 0 except when we are in the middle of
+  // processing a unicode character, i.e. \uxxxx.
+  state.pos -= trace_fragment.size();
+
+  std::string complete_str = state.data + trace_fragment;
+  state.data = complete_str.substr(std::max(end, last_open));
+
+  complete_str.resize(end);
+  return complete_str;
+}
+
 void TracingHandler::OnTraceToStreamComplete(const std::string& stream_handle) {
-  frontend_->TracingComplete(stream_handle);
+  std::string stream_compression =
+      (gzip_compression_ ? Tracing::StreamCompressionEnum::Gzip
+                         : Tracing::StreamCompressionEnum::None);
+  frontend_->TracingComplete(stream_handle, stream_compression);
 }
 
 void TracingHandler::Start(Maybe<std::string> categories,
                            Maybe<std::string> options,
                            Maybe<double> buffer_usage_reporting_interval,
                            Maybe<std::string> transfer_mode,
+                           Maybe<std::string> transfer_compression,
                            Maybe<Tracing::TraceConfig> config,
                            std::unique_ptr<StartCallback> callback) {
   bool return_as_stream = transfer_mode.fromMaybe("") ==
       Tracing::Start::TransferModeEnum::ReturnAsStream;
+  bool gzip_compression = transfer_compression.fromMaybe("") ==
+                          Tracing::StreamCompressionEnum::Gzip;
   if (IsTracing()) {
     if (!did_initiate_recording_ && IsStartupTracingActive()) {
       // If tracing is already running because it was initiated by startup
       // tracing, honor the transfer mode update, as that's the only way
       // for the client to communicate it.
       return_as_stream_ = return_as_stream;
+      gzip_compression_ = gzip_compression;
     }
     callback->sendFailure(Response::Error("Tracing is already started"));
     return;
@@ -197,6 +321,7 @@ void TracingHandler::Start(Maybe<std::string> categories,
 
   did_initiate_recording_ = true;
   return_as_stream_ = return_as_stream;
+  gzip_compression_ = gzip_compression;
   if (buffer_usage_reporting_interval.isJust())
     SetupTimer(buffer_usage_reporting_interval.fromJust());
 
@@ -204,7 +329,7 @@ void TracingHandler::Start(Maybe<std::string> categories,
   if (config.isJust()) {
     std::unique_ptr<base::Value> value =
         protocol::toBaseValue(config.fromJust()->toValue().get(), 1000);
-    if (value && value->IsType(base::Value::Type::DICTIONARY)) {
+    if (value && value->is_dict()) {
       trace_config = GetTraceConfigFromDevToolsConfig(
           *static_cast<base::DictionaryValue*>(value.get()));
     }
@@ -234,14 +359,22 @@ void TracingHandler::End(std::unique_ptr<EndCallback> callback) {
     return;
   }
 
-  scoped_refptr<TracingController::TraceDataSink> sink;
+  scoped_refptr<TracingController::TraceDataEndpoint> endpoint;
   if (return_as_stream_) {
-    sink = TracingControllerImpl::CreateJSONSink(new DevToolsStreamEndpoint(
-        weak_factory_.GetWeakPtr(), io_context_->CreateTempFileBackedStream()));
+    endpoint = new DevToolsStreamEndpoint(
+        weak_factory_.GetWeakPtr(), io_context_->CreateTempFileBackedStream(
+                                        gzip_compression_ /* binary */));
+    if (gzip_compression_) {
+      endpoint = TracingControllerImpl::CreateCompressedStringEndpoint(
+          endpoint, true /* compress_with_background_priority */);
+    }
+    StopTracing(endpoint, "");
   } else {
-    sink = new DevToolsTraceSinkProxy(weak_factory_.GetWeakPtr());
+    // Reset the trace data buffer state.
+    trace_data_buffer_state_ = TracingHandler::TraceDataBufferState();
+    endpoint = new DevToolsTraceEndpointProxy(weak_factory_.GetWeakPtr());
+    StopTracing(endpoint, tracing::mojom::kChromeTraceEventLabel);
   }
-  StopTracing(sink);
   // If inspected target is a render process Tracing.end will be handled by
   // tracing agent in the renderer.
   if (target_ == Renderer)
@@ -265,6 +398,12 @@ void TracingHandler::OnRecordingEnabled(
                        "frameTreeNodeId", frame_tree_node_id_);
   if (target_ != Renderer)
     callback->sendSuccess();
+
+  bool screenshot_enabled;
+  TRACE_EVENT_CATEGORY_GROUP_ENABLED(
+      TRACE_DISABLED_BY_DEFAULT("devtools.screenshot"), &screenshot_enabled);
+  if (frame_trace_recorder_ && screenshot_enabled)
+    frame_trace_recorder_->StartCapture();
 }
 
 void TracingHandler::OnBufferUsage(float percent_full,
@@ -311,11 +450,7 @@ void TracingHandler::OnMemoryDumpFinished(
 Response TracingHandler::RecordClockSyncMarker(const std::string& sync_id) {
   if (!IsTracing())
     return Response::Error("Tracing is not started");
-
-  TracingControllerImpl::GetInstance()->RecordClockSyncMarker(
-      sync_id,
-      base::trace_event::TracingAgent::RecordClockSyncMarkerCallback());
-
+  TRACE_EVENT_CLOCK_SYNC_RECEIVER(sync_id);
   return Response::OK();
 }
 
@@ -338,10 +473,13 @@ void TracingHandler::SetupTimer(double usage_reporting_interval) {
 }
 
 void TracingHandler::StopTracing(
-    const scoped_refptr<TracingController::TraceDataSink>& trace_data_sink) {
+    const scoped_refptr<TracingController::TraceDataEndpoint>& endpoint,
+    const std::string& agent_label) {
   buffer_usage_poll_timer_.reset();
-  TracingController::GetInstance()->StopTracing(trace_data_sink);
+  TracingController::GetInstance()->StopTracing(endpoint, agent_label);
   did_initiate_recording_ = false;
+  if (frame_trace_recorder_)
+    frame_trace_recorder_->StopCapture();
 }
 
 bool TracingHandler::IsTracing() const {
@@ -357,7 +495,7 @@ bool TracingHandler::IsStartupTracingActive() {
 base::trace_event::TraceConfig TracingHandler::GetTraceConfigFromDevToolsConfig(
     const base::DictionaryValue& devtools_config) {
   std::unique_ptr<base::Value> value = ConvertDictKeyStyle(devtools_config);
-  DCHECK(value && value->IsType(base::Value::Type::DICTIONARY));
+  DCHECK(value && value->is_dict());
   std::unique_ptr<base::DictionaryValue> tracing_dict(
       static_cast<base::DictionaryValue*>(value.release()));
 

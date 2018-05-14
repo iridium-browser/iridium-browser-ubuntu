@@ -4,11 +4,15 @@
 
 #include "ash/highlighter/highlighter_controller.h"
 
+#include <memory>
+#include <utility>
+
 #include "ash/highlighter/highlighter_gesture_util.h"
 #include "ash/highlighter/highlighter_result_view.h"
-#include "ash/highlighter/highlighter_selection_observer.h"
 #include "ash/highlighter/highlighter_view.h"
 #include "ash/public/cpp/scale_utility.h"
+#include "ash/public/cpp/shell_window_ids.h"
+#include "ash/shell.h"
 #include "base/metrics/histogram_macros.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
@@ -50,13 +54,15 @@ float GetScreenshotScale(aura::Window* window) {
 
 }  // namespace
 
-HighlighterController::HighlighterController() {}
+HighlighterController::HighlighterController()
+    : binding_(this), weak_factory_(this) {}
 
-HighlighterController::~HighlighterController() {}
+HighlighterController::~HighlighterController() = default;
 
-void HighlighterController::SetObserver(
-    HighlighterSelectionObserver* observer) {
-  observer_ = observer;
+void HighlighterController::SetExitCallback(base::OnceClosure exit_callback,
+                                            bool require_success) {
+  exit_callback_ = std::move(exit_callback);
+  require_success_ = require_success;
 }
 
 void HighlighterController::SetEnabled(bool enabled) {
@@ -78,6 +84,25 @@ void HighlighterController::SetEnabled(bool enabled) {
     if (highlighter_view_ && !highlighter_view_->animating())
       DestroyPointerView();
   }
+  if (client_)
+    client_->HandleEnabledStateChange(enabled);
+}
+
+void HighlighterController::BindRequest(
+    mojom::HighlighterControllerRequest request) {
+  binding_.Bind(std::move(request));
+}
+
+void HighlighterController::SetClient(
+    mojom::HighlighterControllerClientPtr client) {
+  client_ = std::move(client);
+  client_.set_connection_error_handler(
+      base::Bind(&HighlighterController::OnClientConnectionLost,
+                 weak_factory_.GetWeakPtr()));
+}
+
+void HighlighterController::ExitHighlighterMode() {
+  CallExitCallback();
 }
 
 views::View* HighlighterController::GetPointerView() const {
@@ -87,8 +112,9 @@ views::View* HighlighterController::GetPointerView() const {
 void HighlighterController::CreatePointerView(
     base::TimeDelta presentation_delay,
     aura::Window* root_window) {
-  highlighter_view_ =
-      base::MakeUnique<HighlighterView>(presentation_delay, root_window);
+  highlighter_view_ = std::make_unique<HighlighterView>(
+      presentation_delay,
+      Shell::GetContainer(root_window, kShellWindowId_OverlayContainer));
   result_view_.reset();
 }
 
@@ -119,7 +145,7 @@ void HighlighterController::UpdatePointerView(ui::TouchEvent* event) {
   // a little to give the pen a chance to re-enter the screen.
   highlighter_view_->AddGap();
 
-  interrupted_stroke_timer_ = base::MakeUnique<base::OneShotTimer>();
+  interrupted_stroke_timer_ = std::make_unique<base::OneShotTimer>();
   interrupted_stroke_timer_->Start(
       FROM_HERE, base::TimeDelta::FromMilliseconds(kInterruptedStrokeTimeoutMs),
       base::Bind(&HighlighterController::RecognizeGesture,
@@ -131,6 +157,7 @@ void HighlighterController::RecognizeGesture() {
 
   aura::Window* current_window =
       highlighter_view_->GetWidget()->GetNativeWindow()->GetRootWindow();
+  const gfx::Rect bounds = current_window->bounds();
 
   const FastInkPoints& points = highlighter_view_->points();
   gfx::RectF box = points.GetBoundingBoxF();
@@ -145,8 +172,7 @@ void HighlighterController::RecognizeGesture() {
     box = AdjustHorizontalStroke(box, HighlighterView::kPenTipSize);
   } else if (gesture_type == HighlighterGestureType::kClosedShape) {
     const float fraction =
-        box.width() * box.height() /
-        (current_window->bounds().width() * current_window->bounds().height());
+        box.width() * box.height() / (bounds.width() * bounds.height());
     UMA_HISTOGRAM_PERCENTAGE("Ash.Shelf.Palette.Assistant.CircledPercentage",
                              static_cast<int>(fraction * 100));
   }
@@ -156,18 +182,29 @@ void HighlighterController::RecognizeGesture() {
       base::Bind(&HighlighterController::DestroyHighlighterView,
                  base::Unretained(this)));
 
-  if (gesture_type != HighlighterGestureType::kNotRecognized) {
-    if (observer_) {
-      observer_->HandleSelection(gfx::ToEnclosingRect(
+  // |box| is not guaranteed to be inside the screen bounds, clip it.
+  // Not converting |box| to gfx::Rect here to avoid accumulating rounding
+  // errors, instead converting |bounds| to gfx::RectF.
+  box.Intersect(
+      gfx::RectF(bounds.x(), bounds.y(), bounds.width(), bounds.height()));
+
+  if (!box.IsEmpty() &&
+      gesture_type != HighlighterGestureType::kNotRecognized) {
+    if (client_) {
+      client_->HandleSelection(gfx::ToEnclosingRect(
           gfx::ScaleRect(box, GetScreenshotScale(current_window))));
     }
 
-    result_view_ = base::MakeUnique<HighlighterResultView>(current_window);
+    result_view_ = std::make_unique<HighlighterResultView>(current_window);
     result_view_->Animate(box, gesture_type,
                           base::Bind(&HighlighterController::DestroyResultView,
                                      base::Unretained(this)));
 
     recognized_gesture_counter_++;
+    CallExitCallback();
+  } else {
+    if (!require_success_)
+      CallExitCallback();
   }
 
   gesture_counter_++;
@@ -208,6 +245,23 @@ void HighlighterController::DestroyHighlighterView() {
 
 void HighlighterController::DestroyResultView() {
   result_view_.reset();
+}
+
+void HighlighterController::OnClientConnectionLost() {
+  client_.reset();
+  binding_.Close();
+  // The client has detached, force-exit the highlighter mode.
+  CallExitCallback();
+}
+
+void HighlighterController::CallExitCallback() {
+  if (!exit_callback_.is_null())
+    std::move(exit_callback_).Run();
+}
+
+void HighlighterController::FlushMojoForTesting() {
+  if (client_)
+    client_.FlushForTesting();
 }
 
 }  // namespace ash

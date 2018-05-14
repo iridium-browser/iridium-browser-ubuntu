@@ -24,9 +24,14 @@ namespace extensions {
 class Extension;
 }
 
-// Item controller for an app shortcut. Shortcuts track app and launcher ids,
-// but do not have any associated windows (opening a shortcut will replace the
-// item with the appropriate ash::ShelfItemDelegate type).
+// Item controller for an app shortcut.
+// If the associated app is a platform or ARC app, launching the app replaces
+// this instance with an AppWindowLauncherItemController to handle the app's
+// windows. Closing all associated AppWindows will replace that delegate with
+// a new instance of this class (if the app is pinned to the shelf).
+//
+// Non-platform app types do not use AppWindows. This delegate is not replaced
+// when browser windows are opened for those app types.
 class AppShortcutLauncherItemController : public ash::ShelfItemDelegate {
  public:
   ~AppShortcutLauncherItemController() override;
@@ -42,7 +47,11 @@ class AppShortcutLauncherItemController : public ash::ShelfItemDelegate {
                     ash::ShelfLaunchSource source,
                     ItemSelectedCallback callback) override;
   ash::MenuItemList GetAppMenuItems(int event_flags) override;
-  void ExecuteCommand(uint32_t command_id, int32_t event_flags) override;
+  std::unique_ptr<ui::MenuModel> GetContextMenu(int64_t display_id) override;
+  void ExecuteCommand(bool from_context_menu,
+                      int64_t command_id,
+                      int32_t event_flags,
+                      int64_t display_id) override;
   void Close() override;
 
   // Get the refocus url pattern, which can be used to identify this application

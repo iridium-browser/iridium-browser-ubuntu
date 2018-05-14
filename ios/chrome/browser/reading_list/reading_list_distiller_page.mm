@@ -21,6 +21,10 @@
 #include "net/cert/cert_status_flags.h"
 #include "url/url_constants.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 // The delay given to the web page to render after the PageLoaded callback.
 const int64_t kPageLoadDelayInSeconds = 2;
@@ -108,7 +112,7 @@ void ReadingListDistillerPage::FetchFavicon(const GURL& page_url) {
   favicon::WebFaviconDriver* favicon_driver =
       favicon::WebFaviconDriver::FromWebState(CurrentWebState());
   DCHECK(favicon_driver);
-  favicon_driver->FetchFavicon(page_url);
+  favicon_driver->FetchFavicon(page_url, /*is_same_document=*/false);
 }
 
 void ReadingListDistillerPage::OnDistillationDone(const GURL& page_url,
@@ -161,7 +165,7 @@ void ReadingListDistillerPage::OnLoadURLDone(
         original_url_, CurrentWebState()->GetContentsMimeType());
   }
   if (!CurrentWebState()->ContentIsHTML()) {
-    // If content is not HTML, distillation will fail immediatly.
+    // If content is not HTML, distillation will fail immediately.
     // Call the handler to make sure cleaning methods are called correctly.
     // There is no need to wait for rendering either.
     DistillerPageIOS::OnLoadURLDone(load_completion_status);

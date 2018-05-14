@@ -29,17 +29,24 @@
 #define BitmapImage_h
 
 #include <memory>
+#include "base/memory/weak_ptr.h"
 #include "platform/Timer.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/Color.h"
+#include "platform/graphics/DeferredImageDecoder.h"
 #include "platform/graphics/FrameData.h"
 #include "platform/graphics/Image.h"
 #include "platform/graphics/ImageAnimationPolicy.h"
 #include "platform/graphics/ImageOrientation.h"
-#include "platform/graphics/ImageSource.h"
 #include "platform/image-decoders/ImageAnimation.h"
 #include "platform/wtf/Forward.h"
+#include "platform/wtf/Optional.h"
+#include "platform/wtf/Time.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
+
+namespace base {
+class TickClock;
+}
 
 namespace blink {
 
@@ -51,9 +58,9 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   friend class GraphicsContext;
 
  public:
-  static PassRefPtr<BitmapImage> Create(ImageObserver* observer = 0,
-                                        bool is_multipart = false) {
-    return AdoptRef(new BitmapImage(observer, is_multipart));
+  static scoped_refptr<BitmapImage> Create(ImageObserver* observer = nullptr,
+                                           bool is_multipart = false) {
+    return base::AdoptRef(new BitmapImage(observer, is_multipart));
   }
 
   ~BitmapImage() override;
@@ -67,7 +74,7 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   bool GetHotSpot(IntPoint&) const override;
   String FilenameExtension() const override;
 
-  SizeAvailability SetData(RefPtr<SharedBuffer> data,
+  SizeAvailability SetData(scoped_refptr<SharedBuffer> data,
                            bool all_data_received) override;
   SizeAvailability DataChanged(bool all_data_received) override;
 
@@ -77,14 +84,11 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   void ResetAnimation() override;
   bool MaybeAnimated() override;
 
-  void SetAnimationPolicy(ImageAnimationPolicy policy) override {
-    animation_policy_ = policy;
-  }
+  void SetAnimationPolicy(ImageAnimationPolicy) override;
   ImageAnimationPolicy AnimationPolicy() override { return animation_policy_; }
-  void AdvanceTime(double delta_time_in_seconds) override;
+  void AdvanceTime(TimeDelta) override;
 
-  sk_sp<SkImage> ImageForCurrentFrame() override;
-  PassRefPtr<Image> ImageForDefaultFrame() override;
+  scoped_refptr<Image> ImageForDefaultFrame() override;
 
   bool CurrentFrameKnownToBeOpaque(MetadataMode = kUseCurrentMetadata) override;
   bool CurrentFrameIsComplete() override;
@@ -93,12 +97,27 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
 
   ImageOrientation CurrentFrameOrientation();
 
-  // Construct a BitmapImage with the given orientation.
-  static PassRefPtr<BitmapImage> CreateWithOrientationForTesting(
-      const SkBitmap&,
-      ImageOrientation);
   // Advance the image animation by one frame.
   void AdvanceAnimationForTesting() override { InternalAdvanceAnimation(); }
+
+  PaintImage PaintImageForCurrentFrame() override;
+
+  void SetDecoderForTesting(std::unique_ptr<DeferredImageDecoder> decoder) {
+    decoder_ = std::move(decoder);
+  }
+  void SetTaskRunnerForTesting(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+    task_runner_ = task_runner;
+  }
+
+  Optional<size_t> last_num_frames_skipped_for_testing() const {
+    return last_num_frames_skipped_;
+  }
+
+  void SetTickClockForTesting(base::TickClock* clock) { clock_ = clock; }
+
+ protected:
+  bool IsSizeAvailable() override;
 
  private:
   enum RepetitionCountStatus : uint8_t {
@@ -109,26 +128,25 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
     kCertain     // The repetition count is known to be correct.
   };
 
-  BitmapImage(const SkBitmap&, ImageObserver* = 0);
-  BitmapImage(ImageObserver* = 0, bool is_multi_part = false);
+  BitmapImage(const SkBitmap&, ImageObserver* = nullptr);
+  BitmapImage(ImageObserver* = nullptr, bool is_multi_part = false);
 
   void Draw(PaintCanvas*,
             const PaintFlags&,
             const FloatRect& dst_rect,
             const FloatRect& src_rect,
             RespectImageOrientationEnum,
-            ImageClampingMode) override;
+            ImageClampingMode,
+            ImageDecodingMode) override;
 
-  size_t CurrentFrame() const { return current_frame_; }
-
-  sk_sp<SkImage> FrameAtIndex(size_t);
+  PaintImage FrameAtIndex(size_t);
 
   bool FrameIsReceivedAtIndex(size_t) const;
-  float FrameDurationAtIndex(size_t) const;
+  TimeDelta FrameDurationAtIndex(size_t) const;
   bool FrameHasAlphaAtIndex(size_t);
   ImageOrientation FrameOrientationAtIndex(size_t);
 
-  sk_sp<SkImage> DecodeAndCacheFrame(size_t index);
+  PaintImage CreateAndCacheFrame(size_t index);
   void UpdateSize() const;
 
   // Returns the total number of bytes allocated for all framebuffers, i.e.
@@ -140,34 +158,26 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   // some room in the image cache.
   void DestroyDecodedData() override;
 
-  PassRefPtr<SharedBuffer> Data() override;
+  scoped_refptr<SharedBuffer> Data() override;
 
   // Notifies observers that the memory footprint has changed.
   void NotifyMemoryChanged();
-
-  // Whether or not size is available yet.
-  bool IsSizeAvailable();
 
   // Animation.
   // We start and stop animating lazily.  Animation starts when the image is
   // rendered, and automatically stops once no observer wants to render the
   // image.
 
-  // |imageKnownToBeComplete| should be set if the caller knows the entire image
-  // has been decoded.
-  int RepetitionCount(bool image_known_to_be_complete);
+  int RepetitionCount();
 
   bool ShouldAnimate();
-  void StartAnimation(CatchUpAnimation = kCatchUp) override;
+  void StartAnimation() override;
+  // Starts the animation by scheduling a task to advance to the next desired
+  // frame, if possible, and catching up any frames if the time to display them
+  // is in the past.
+  Optional<size_t> StartAnimationInternal(TimeTicks);
   void StopAnimation();
   void AdvanceAnimation(TimerBase*);
-
-  // Advance the animation and let the next frame get scheduled without
-  // catch-up logic. For large images with slow or heavily-loaded systems,
-  // throwing away data as we go (see destroyDecodedData()) means we can spend
-  // so much time re-decoding data that we are always behind. To prevent this,
-  // we force the next animation to skip the catch up logic.
-  void AdvanceAnimationWithoutCatchUp(TimerBase*);
 
   // This function does the real work of advancing the animation. When
   // skipping frames to catch up, we're in the middle of a loop trying to skip
@@ -179,17 +189,17 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
 
   void NotifyObserversOfAnimationAdvance(TimerBase*);
 
-  ImageSource source_;
+  std::unique_ptr<DeferredImageDecoder> decoder_;
   mutable IntSize size_;  // The size to use for the overall image (will just
                           // be the size of the first image).
   mutable IntSize size_respecting_orientation_;
 
-  size_t current_frame_;         // The index of the current frame of animation.
+  size_t current_frame_index_;   // The index of the current frame of animation.
   Vector<FrameData, 1> frames_;  // An array of the cached frames of the
                                  // animation. We have to ref frames to pin
                                  // them in the cache.
 
-  sk_sp<SkImage>
+  PaintImage
       cached_frame_;  // A cached copy of the most recently-accessed frame.
   size_t cached_frame_index_;  // Index of the frame that is cached.
 
@@ -206,7 +216,7 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
                                 // final overall image size yet.
   bool size_available_ : 1;     // Whether we can obtain the size of the first
                                 // image frame from ImageIO yet.
-  mutable bool have_frame_count_ : 1;
+  bool have_frame_count_ : 1;
 
   RepetitionCountStatus repetition_count_status_;
   int repetition_count_;  // How many total animation loops we should do.  This
@@ -214,12 +224,22 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
                           // incapable of animation.
   int repetitions_complete_;  // How many repetitions we've finished.
 
-  double desired_frame_start_time_;  // The system time at which we hope to see
-                                     // the next call to startAnimation().
+  TimeTicks desired_frame_start_time_;  // The system time at which we hope to
+                                        // see the next call to
+                                        // startAnimation().
 
   size_t frame_count_;
 
-  RefPtr<WebTaskRunner> task_runner_;
+  PaintImage::AnimationSequenceId reset_animation_sequence_id_ = 0;
+
+  base::TickClock* clock_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
+  // Value used in UMA tracking for the number of animation frames skipped
+  // during catch-up.
+  Optional<size_t> last_num_frames_skipped_ = 0u;
+
+  base::WeakPtrFactory<BitmapImage> weak_factory_;
 };
 
 DEFINE_IMAGE_TYPE_CASTS(BitmapImage);

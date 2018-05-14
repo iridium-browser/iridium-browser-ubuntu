@@ -19,7 +19,7 @@ using content::ServiceWorkerUsageInfo;
 
 namespace {
 
-void GetAllOriginsInfoCallback(
+void GetAllOriginsInfoForServiceWorkerCallback(
     const BrowsingDataServiceWorkerHelper::FetchCallback& callback,
     const std::vector<ServiceWorkerUsageInfo>& origins) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -35,8 +35,6 @@ void GetAllOriginsInfoCallback(
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                           base::BindOnce(callback, result));
 }
-
-void EmptySuccessCallback(bool success) {}
 
 }  // namespace
 
@@ -74,14 +72,13 @@ void BrowsingDataServiceWorkerHelper::FetchServiceWorkerUsageInfoOnIOThread(
   DCHECK(!callback.is_null());
 
   service_worker_context_->GetAllOriginsInfo(
-      base::Bind(&GetAllOriginsInfoCallback, callback));
+      base::BindOnce(&GetAllOriginsInfoForServiceWorkerCallback, callback));
 }
 
 void BrowsingDataServiceWorkerHelper::DeleteServiceWorkersOnIOThread(
     const GURL& origin) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  service_worker_context_->DeleteForOrigin(origin,
-                                           base::Bind(&EmptySuccessCallback));
+  service_worker_context_->DeleteForOrigin(origin, base::DoNothing());
 }
 
 CannedBrowsingDataServiceWorkerHelper::PendingServiceWorkerUsageInfo::

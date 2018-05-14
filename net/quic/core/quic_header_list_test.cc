@@ -5,10 +5,10 @@
 #include "net/quic/core/quic_header_list.h"
 
 #include "net/quic/platform/api/quic_flags.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 
-using std::string;
 
 namespace net {
 
@@ -26,10 +26,15 @@ TEST_F(QuicHeaderListTest, OnHeader) {
 
 TEST_F(QuicHeaderListTest, TooLarge) {
   QuicHeaderList headers;
-  string key = "key";
-  string value(1 << 18, '1');
+  QuicString key = "key";
+  QuicString value(1 << 18, '1');
+  // Send a header that exceeds max_header_list_size.
   headers.OnHeader(key, value);
-  size_t total_bytes = key.size() + value.size();
+  // Send a second header exceeding max_header_list_size.
+  headers.OnHeader(key + "2", value);
+  // We should not allocate more memory after exceeding max_header_list_size.
+  EXPECT_LT(headers.DebugString().size(), 2 * value.size());
+  size_t total_bytes = 2 * (key.size() + value.size()) + 1;
   headers.OnHeaderBlockEnd(total_bytes, total_bytes);
   EXPECT_TRUE(headers.empty());
 
@@ -38,9 +43,9 @@ TEST_F(QuicHeaderListTest, TooLarge) {
 
 TEST_F(QuicHeaderListTest, NotTooLarge) {
   QuicHeaderList headers;
-  headers.set_max_uncompressed_header_bytes(1 << 20);
-  string key = "key";
-  string value(1 << 18, '1');
+  headers.set_max_header_list_size(1 << 20);
+  QuicString key = "key";
+  QuicString value(1 << 18, '1');
   headers.OnHeader(key, value);
   size_t total_bytes = key.size() + value.size();
   headers.OnHeaderBlockEnd(total_bytes, total_bytes);

@@ -6,15 +6,17 @@
 
 #include <stdint.h>
 
-#include <functional>
-#include <iterator>
+#include <algorithm>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <set>
 #include <string>
-#include <vector>
+#include <utility>
 
+#include "base/containers/stack.h"
 #include "base/files/file_util.h"
+#include "base/feature_list.h"
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/case_conversion.h"
 #include "base/macros.h"
@@ -29,6 +31,8 @@
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/omnibox/browser/in_memory_url_index.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
+#include "components/omnibox/browser/tailored_word_break_iterator.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/url_formatter/url_formatter.h"
 #include "third_party/protobuf/src/google/protobuf/repeated_field.h"
@@ -326,6 +330,7 @@ void URLIndexPrivateData::ScheduleUpdateRecentVisits(
     history::URLID url_id,
     base::CancelableTaskTracker* tracker) {
   history_service->ScheduleDBTask(
+      FROM_HERE,
       std::unique_ptr<history::HistoryDBTask>(
           new UpdateRecentVisitsFromHistoryDBTask(this, url_id)),
       tracker);
@@ -419,6 +424,7 @@ scoped_refptr<URLIndexPrivateData> URLIndexPrivateData::RebuildFromHistory(
       OmniboxFieldTrial::MaxNumHQPUrlsIndexedAtStartup();
   int num_urls_indexed = 0;
   for (history::URLRow row; history_enum.GetNextURL(&row);) {
+    DCHECK(RowQualifiesAsSignificant(row, base::Time()));
     // Do not use >= to account for case of -1 for unlimited urls.
     if (num_urls_indexed++ == max_urls_indexed)
       break;
@@ -469,13 +475,29 @@ bool URLIndexPrivateData::Empty() const {
 void URLIndexPrivateData::Clear() {
   last_time_rebuilt_from_history_ = base::Time();
   word_list_.clear();
-  available_words_ = std::stack<WordID>();
+  available_words_ = base::stack<WordID>();
   word_map_.clear();
   char_word_map_.clear();
   word_id_history_map_.clear();
   history_id_word_map_.clear();
   history_info_map_.clear();
   word_starts_map_.clear();
+}
+
+size_t URLIndexPrivateData::EstimateMemoryUsage() const {
+  size_t res = 0;
+
+  res += base::trace_event::EstimateMemoryUsage(search_term_cache_);
+  res += base::trace_event::EstimateMemoryUsage(word_list_);
+  res += base::trace_event::EstimateMemoryUsage(available_words_);
+  res += base::trace_event::EstimateMemoryUsage(word_map_);
+  res += base::trace_event::EstimateMemoryUsage(char_word_map_);
+  res += base::trace_event::EstimateMemoryUsage(word_id_history_map_);
+  res += base::trace_event::EstimateMemoryUsage(history_id_word_map_);
+  res += base::trace_event::EstimateMemoryUsage(history_info_map_);
+  res += base::trace_event::EstimateMemoryUsage(word_starts_map_);
+
+  return res;
 }
 
 URLIndexPrivateData::~URLIndexPrivateData() {}
@@ -506,8 +528,8 @@ HistoryIDVector URLIndexPrivateData::HistoryIDsFromWords(
     if (iter == words.begin()) {
       history_ids = {term_history_set.begin(), term_history_set.end()};
     } else {
-      history_ids = base::STLSetIntersection<HistoryIDVector>(history_ids,
-                                                              term_history_set);
+      // set-intersection
+      base::EraseIf(history_ids, base::IsNotIn<HistoryIDSet>(term_history_set));
     }
   }
   return history_ids;
@@ -595,9 +617,12 @@ HistoryIDSet URLIndexPrivateData::HistoryIDsForTerm(
         return HistoryIDSet();
       }
       // Or there may not have been a prefix from which to start.
-      word_id_set = prefix_chars.empty() ? std::move(leftover_set)
-                                         : base::STLSetIntersection<WordIDSet>(
-                                               word_id_set, leftover_set);
+      if (prefix_chars.empty()) {
+        word_id_set = std::move(leftover_set);
+      } else {
+        // set-intersection
+        base::EraseIf(word_id_set, base::IsNotIn<WordIDSet>(leftover_set));
+      }
     }
 
     // We must filter the word list because the resulting word set surely
@@ -654,8 +679,8 @@ WordIDSet URLIndexPrivateData::WordIDSetForTermChars(
     if (c_iter == term_chars.begin()) {
       word_id_set = char_word_id_set;
     } else {
-      word_id_set =
-          base::STLSetIntersection<WordIDSet>(word_id_set, char_word_id_set);
+      // set-intersection
+      base::EraseIf(word_id_set, base::IsNotIn<WordIDSet>(char_word_id_set));
     }
   }
   return word_id_set;
@@ -724,22 +749,51 @@ void URLIndexPrivateData::HistoryIdsToScoredMatches(
 void URLIndexPrivateData::CalculateWordStartsOffsets(
     const String16Vector& lower_terms,
     WordStarts* lower_terms_to_word_starts_offsets) {
+  static const bool experiment_enabled =
+      base::FeatureList::IsEnabled(omnibox::kBreakWordsAtUnderscores);
+  CalculateWordStartsOffsets(lower_terms, experiment_enabled,
+                             lower_terms_to_word_starts_offsets);
+}
+
+// static
+void URLIndexPrivateData::CalculateWordStartsOffsets(
+    const String16Vector& lower_terms,
+    bool force_break_on_underscore,
+    WordStarts* lower_terms_to_word_starts_offsets) {
   // Calculate offsets for each term.  For instance, the offset for
   // ".net" should be 1, indicating that the actual word-part of the term
   // starts at offset 1.
   lower_terms_to_word_starts_offsets->resize(lower_terms.size(), 0u);
-  for (size_t i = 0; i < lower_terms.size(); ++i) {
-    base::i18n::BreakIterator iter(lower_terms[i],
-                                   base::i18n::BreakIterator::BREAK_WORD);
-    // If the iterator doesn't work, assume an offset of 0.
-    if (!iter.Init())
-      continue;
-    // Find the first word start. If the iterator didn't find a word break, set
-    // an offset of term size. For example, the offset for "://" should be 3,
-    // indicating that the word-part is missing.
-    while (iter.Advance() && !iter.IsWord()) {}
+  if (force_break_on_underscore) {
+    for (size_t i = 0; i < lower_terms.size(); ++i) {
+      TailoredWordBreakIterator iter(lower_terms[i],
+                                base::i18n::BreakIterator::BREAK_WORD);
+      // If the iterator doesn't work, assume an offset of 0.
+      if (!iter.Init())
+        continue;
+      // Find the first word start. If the iterator didn't find a word break,
+      // set an offset of term size. For example, the offset for "://" should be
+      // 3, indicating that the word-part is missing.
+      while (iter.Advance() && !iter.IsWord()) {
+      }
 
-    (*lower_terms_to_word_starts_offsets)[i] = iter.prev();
+      (*lower_terms_to_word_starts_offsets)[i] = iter.prev();
+    }
+  } else {
+    for (size_t i = 0; i < lower_terms.size(); ++i) {
+      base::i18n::BreakIterator iter(lower_terms[i],
+                                     base::i18n::BreakIterator::BREAK_WORD);
+      // If the iterator doesn't work, assume an offset of 0.
+      if (!iter.Init())
+        continue;
+      // Find the first word start. If the iterator didn't find a word break,
+      // set an offset of term size. For example, the offset for "://" should be
+      // 3, indicating that the word-part is missing.
+      while (iter.Advance() && !iter.IsWord()) {
+      }
+
+      (*lower_terms_to_word_starts_offsets)[i] = iter.prev();
+    }
   }
 }
 
@@ -1261,6 +1315,11 @@ URLIndexPrivateData::SearchTermCacheItem::SearchTermCacheItem() : used_(true) {
 
 URLIndexPrivateData::SearchTermCacheItem::SearchTermCacheItem(
     const SearchTermCacheItem& other) = default;
+
+size_t URLIndexPrivateData::SearchTermCacheItem::EstimateMemoryUsage() const {
+  return base::trace_event::EstimateMemoryUsage(word_id_set_) +
+         base::trace_event::EstimateMemoryUsage(history_id_set_);
+}
 
 URLIndexPrivateData::SearchTermCacheItem::~SearchTermCacheItem() {
 }

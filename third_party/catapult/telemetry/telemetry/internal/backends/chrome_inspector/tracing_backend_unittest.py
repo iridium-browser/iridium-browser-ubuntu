@@ -63,7 +63,8 @@ class TracingBackendTest(tab_test_case.TabTestCase):
       self.assertNotIn(dump_id, expected_dump_ids)
       expected_dump_ids.append(dump_id)
 
-    tracing_data = self._tracing_controller.StopTracing()
+    tracing_data, errors = self._tracing_controller.StopTracing()
+    self.assertEqual(errors, [])
 
     # Check that clock sync data is in tracing data.
     clock_sync_found = False
@@ -98,7 +99,8 @@ class TracingBackendTest(tab_test_case.TabTestCase):
     # Check that the method returns None if the dump was not successful.
     self.assertIsNone(self._browser.DumpMemory())
 
-    tracing_data = self._tracing_controller.StopTracing()
+    tracing_data, errors = self._tracing_controller.StopTracing()
+    self.assertEqual(errors, [])
 
     # Check that dumping memory after tracing stopped raises an exception.
     self.assertRaises(Exception, self._browser.DumpMemory)
@@ -251,26 +253,28 @@ class DevToolsStreamPerformanceTest(unittest.TestCase):
     payload = ','.join(['{}'] * 5000)
     self._inspector_socket.AddAsyncResponse('IO.read', {'data': '[' + payload},
                                             fake_time)
-    startClock = timeit.default_timer()
+    start_clock = timeit.default_timer()
 
     done = {'done': False}
-    def mark_done(data):
+    def MarkDone(data):
       del data  # unused
       done['done'] = True
 
     reader = _DevToolsStreamReader(self._inspector_socket, 'dummy')
-    reader.Read(mark_done)
+    reader.Read(MarkDone)
     while not done['done']:
       fake_time += 1
       if count > 0:
-        self._inspector_socket.AddAsyncResponse('IO.read', {'data': payload},
+        self._inspector_socket.AddAsyncResponse(
+            'IO.read', {'data': payload},
             fake_time)
       elif count == 0:
-        self._inspector_socket.AddAsyncResponse('IO.read',
+        self._inspector_socket.AddAsyncResponse(
+            'IO.read',
             {'data': payload + ']', 'eof': True}, fake_time)
       count -= 1
       self._inspector_socket.DispatchNotifications(10)
-    return timeit.default_timer() - startClock
+    return timeit.default_timer() - start_clock
 
   def testReadTime(self):
     n1 = 1000
@@ -281,5 +285,5 @@ class DevToolsStreamPerformanceTest(unittest.TestCase):
       n1 *= 5
     t2 = self._MeasureReadTime(n1 * 10)
     # Time is an illusion, CPU time is doubly so, allow great deal of tolerance.
-    toleranceFactor = 5
-    self.assertLess(t2, t1 * 10 * toleranceFactor)
+    tolerance_factor = 5
+    self.assertLess(t2, t1 * 10 * tolerance_factor)

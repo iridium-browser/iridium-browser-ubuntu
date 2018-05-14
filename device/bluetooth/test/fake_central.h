@@ -10,20 +10,23 @@
 
 #include "base/compiler_specific.h"
 #include "device/bluetooth/bluetooth_adapter.h"
-#include "device/bluetooth/public/interfaces/test/fake_bluetooth.mojom.h"
+#include "device/bluetooth/public/mojom/test/fake_bluetooth.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
 namespace bluetooth {
 
+class FakePeripheral;
 class FakeRemoteGattCharacteristic;
 class FakeRemoteGattDescriptor;
+class FakeRemoteGattService;
 
 // Implementation of FakeCentral in
-// src/device/bluetooth/public/interfaces/test/fake_bluetooth.mojom.
+// src/device/bluetooth/public/mojom/test/fake_bluetooth.mojom.
 // Implemented on top of the C++ device/bluetooth API, mainly
 // device/bluetooth/bluetooth_adapter.h.
-class FakeCentral : NON_EXPORTED_BASE(public mojom::FakeCentral),
-                    public device::BluetoothAdapter {
+//
+// Not intended for direct use by clients.  See README.md.
+class FakeCentral : public mojom::FakeCentral, public device::BluetoothAdapter {
  public:
   FakeCentral(mojom::CentralState state, mojom::FakeCentralRequest request);
 
@@ -33,6 +36,9 @@ class FakeCentral : NON_EXPORTED_BASE(public mojom::FakeCentral),
       const std::string& name,
       const std::vector<device::BluetoothUUID>& known_service_uuids,
       SimulatePreconnectedPeripheralCallback callback) override;
+  void SimulateAdvertisementReceived(
+      mojom::ScanResultPtr scan_result_ptr,
+      SimulateAdvertisementReceivedCallback callback) override;
   void SetNextGATTConnectionResponse(
       const std::string& address,
       uint16_t code,
@@ -41,14 +47,29 @@ class FakeCentral : NON_EXPORTED_BASE(public mojom::FakeCentral),
       const std::string& address,
       uint16_t code,
       SetNextGATTDiscoveryResponseCallback callback) override;
+  bool AllResponsesConsumed();
+  void SimulateGATTDisconnection(
+      const std::string& address,
+      SimulateGATTDisconnectionCallback callback) override;
+  void SimulateGATTServicesChanged(
+      const std::string& address,
+      SimulateGATTServicesChangedCallback callback) override;
   void AddFakeService(const std::string& peripheral_address,
                       const device::BluetoothUUID& service_uuid,
                       AddFakeServiceCallback callback) override;
+  void RemoveFakeService(const std::string& identifier,
+                         const std::string& peripheral_address,
+                         RemoveFakeServiceCallback callback) override;
   void AddFakeCharacteristic(const device::BluetoothUUID& characteristic_uuid,
                              mojom::CharacteristicPropertiesPtr properties,
                              const std::string& service_id,
                              const std::string& peripheral_address,
                              AddFakeCharacteristicCallback callback) override;
+  void RemoveFakeCharacteristic(
+      const std::string& identifier,
+      const std::string& service_id,
+      const std::string& peripheral_address,
+      RemoveFakeCharacteristicCallback callback) override;
   void AddFakeDescriptor(const device::BluetoothUUID& characteristic_uuid,
                          const std::string& characteristic_id,
                          const std::string& service_id,
@@ -62,6 +83,12 @@ class FakeCentral : NON_EXPORTED_BASE(public mojom::FakeCentral),
       const std::string& peripheral_address,
       SetNextReadCharacteristicResponseCallback callback) override;
   void SetNextWriteCharacteristicResponse(
+      uint16_t gatt_code,
+      const std::string& characteristic_id,
+      const std::string& service_id,
+      const std::string& peripheral_address,
+      SetNextWriteCharacteristicResponseCallback callback) override;
+  void SetNextSubscribeToNotificationsResponse(
       uint16_t gatt_code,
       const std::string& characteristic_id,
       const std::string& service_id,
@@ -124,6 +151,7 @@ class FakeCentral : NON_EXPORTED_BASE(public mojom::FakeCentral),
 #endif
   device::BluetoothLocalGattService* GetGattService(
       const std::string& identifier) const override;
+  bool SetPoweredImpl(bool powered) override;
   void AddDiscoverySession(
       device::BluetoothDiscoveryFilter* discovery_filter,
       const base::Closure& callback,
@@ -142,6 +170,11 @@ class FakeCentral : NON_EXPORTED_BASE(public mojom::FakeCentral),
  private:
   ~FakeCentral() override;
 
+  FakePeripheral* GetFakePeripheral(
+      const std::string& peripheral_address) const;
+  FakeRemoteGattService* GetFakeRemoteGattService(
+      const std::string& peripheral_address,
+      const std::string& service_id) const;
   FakeRemoteGattCharacteristic* GetFakeRemoteGattCharacteristic(
       const std::string& peripheral_address,
       const std::string& service_id,

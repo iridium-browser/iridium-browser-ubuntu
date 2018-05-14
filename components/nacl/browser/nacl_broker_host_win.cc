@@ -4,6 +4,8 @@
 
 #include "components/nacl/browser/nacl_broker_host_win.h"
 
+#include <memory>
+
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/macros.h"
@@ -29,10 +31,9 @@ class NaClBrokerSandboxedProcessLauncherDelegate
     : public content::SandboxedProcessLauncherDelegate {
  public:
   NaClBrokerSandboxedProcessLauncherDelegate() {}
-  ~NaClBrokerSandboxedProcessLauncherDelegate() override {}
 
-  bool ShouldSandbox() override {
-    return false;
+  service_manager::SandboxType GetSandboxType() override {
+    return service_manager::SANDBOX_TYPE_NO_SANDBOX;
   }
 
  private:
@@ -70,9 +71,8 @@ bool NaClBrokerHost::Init() {
     cmd_line->AppendSwitch(switches::kNoErrorDialogs);
 
   process_->Launch(
-      base::MakeUnique<NaClBrokerSandboxedProcessLauncherDelegate>(),
-      base::WrapUnique(cmd_line),
-      true);
+      std::make_unique<NaClBrokerSandboxedProcessLauncherDelegate>(),
+      base::WrapUnique(cmd_line), true);
   return true;
 }
 

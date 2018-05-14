@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 
 #include "base/json/json_reader.h"
 #include "base/json/string_escape.h"
@@ -55,10 +56,10 @@ bool SpellingServiceClient::RequestTextCheck(
     content::BrowserContext* context,
     ServiceType type,
     const base::string16& text,
-    const TextCheckCompleteCallback& callback) {
+    TextCheckCompleteCallback callback) {
   DCHECK(type == SUGGEST || type == SPELLCHECK);
   if (!context || !IsAvailable(context, type)) {
-    callback.Run(false, text, std::vector<SpellCheckResult>());
+    std::move(callback).Run(false, text, std::vector<SpellCheckResult>());
     return false;
   }
 
@@ -124,7 +125,7 @@ bool SpellingServiceClient::RequestTextCheck(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "Users can enable or disable this feature via 'Use a web service "
             "to help resolve spelling errors.' in Chromium's settings under "
@@ -147,8 +148,8 @@ bool SpellingServiceClient::RequestTextCheck(
   fetcher->SetUploadData("application/json", request);
   fetcher->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                         net::LOAD_DO_NOT_SAVE_COOKIES);
-  spellcheck_fetchers_[fetcher] = base::MakeUnique<TextCheckCallbackData>(
-      base::WrapUnique(fetcher), callback, text);
+  spellcheck_fetchers_[fetcher] = std::make_unique<TextCheckCallbackData>(
+      base::WrapUnique(fetcher), std::move(callback), text);
   fetcher->Start();
   return true;
 }
@@ -160,7 +161,7 @@ bool SpellingServiceClient::IsAvailable(content::BrowserContext* context,
   // If prefs don't allow spellchecking, if the context is off the record, or if
   // multilingual spellchecking is enabled the spelling service should be
   // unavailable.
-  if (!pref->GetBoolean(spellcheck::prefs::kEnableSpellcheck) ||
+  if (!pref->GetBoolean(spellcheck::prefs::kSpellCheckEnable) ||
       !pref->GetBoolean(spellcheck::prefs::kSpellCheckUseSpellingService) ||
       context->IsOffTheRecord())
     return false;
@@ -232,18 +233,18 @@ bool SpellingServiceClient::ParseResponse(
       static_cast<base::DictionaryValue*>(
           base::JSONReader::Read(data, base::JSON_ALLOW_TRAILING_COMMAS)
               .release()));
-  if (!value.get() || !value->IsType(base::Value::Type::DICTIONARY))
+  if (!value.get() || !value->is_dict())
     return false;
 
   // Check for errors from spelling service.
-  base::DictionaryValue* error = NULL;
+  base::DictionaryValue* error = nullptr;
   if (value->GetDictionary(kErrorPath, &error))
     return false;
 
   // Retrieve the array of Misspelling objects. When the input text does not
   // have misspelled words, it returns an empty JSON. (In this case, its HTTP
   // status is 200.) We just return true for this case.
-  base::ListValue* misspellings = NULL;
+  base::ListValue* misspellings = nullptr;
   if (!value->GetList(kMisspellingsPath, &misspellings))
     return true;
 
@@ -251,20 +252,20 @@ bool SpellingServiceClient::ParseResponse(
     // Retrieve the i-th misspelling region and put it to the given vector. When
     // the Spelling service sends two or more suggestions, we read only the
     // first one because SpellCheckResult can store only one suggestion.
-    base::DictionaryValue* misspelling = NULL;
+    base::DictionaryValue* misspelling = nullptr;
     if (!misspellings->GetDictionary(i, &misspelling))
       return false;
 
     int start = 0;
     int length = 0;
-    base::ListValue* suggestions = NULL;
+    base::ListValue* suggestions = nullptr;
     if (!misspelling->GetInteger("charStart", &start) ||
         !misspelling->GetInteger("charLength", &length) ||
         !misspelling->GetList("suggestions", &suggestions)) {
       return false;
     }
 
-    base::DictionaryValue* suggestion = NULL;
+    base::DictionaryValue* suggestion = nullptr;
     base::string16 replacement;
     if (!suggestions->GetDictionary(0, &suggestion) ||
         !suggestion->GetString("suggestion", &replacement)) {
@@ -281,7 +282,7 @@ SpellingServiceClient::TextCheckCallbackData::TextCheckCallbackData(
     std::unique_ptr<net::URLFetcher> fetcher,
     TextCheckCompleteCallback callback,
     base::string16 text)
-    : fetcher(std::move(fetcher)), callback(callback), text(text) {}
+    : fetcher(std::move(fetcher)), callback(std::move(callback)), text(text) {}
 
 SpellingServiceClient::TextCheckCallbackData::~TextCheckCallbackData() {}
 
@@ -301,7 +302,7 @@ void SpellingServiceClient::OnURLFetchComplete(const net::URLFetcher* source) {
 
   // The callback may release the last (transitive) dependency on |this|. It
   // MUST be the last function called.
-  callback_data->callback.Run(success, callback_data->text, results);
+  std::move(callback_data->callback).Run(success, callback_data->text, results);
 }
 
 std::unique_ptr<net::URLFetcher> SpellingServiceClient::CreateURLFetcher(

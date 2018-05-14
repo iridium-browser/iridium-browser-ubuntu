@@ -10,6 +10,7 @@
 #include <string>
 
 #include "base/android/jni_string.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/strings/string_piece.h"
 #include "base/values.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
@@ -23,13 +24,15 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/browser/data_usage_store.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
+#include "components/previews/core/previews_experiments.h"
 #include "jni/DataReductionProxySettings_jni.h"
-#include "net/proxy/proxy_server.h"
+#include "net/base/proxy_server.h"
+#include "net/base/url_util.h"
 #include "url/gurl.h"
-
 
 using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaParamRef;
@@ -57,7 +60,6 @@ DataReductionProxySettingsAndroid::DataReductionProxySettingsAndroid(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& obj)
     : weak_factory_(this) {
-  j_settings_obj_ = JavaObjectWeakGlobalRef(env, obj);
 }
 
 DataReductionProxySettingsAndroid::~DataReductionProxySettingsAndroid() {
@@ -160,12 +162,49 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyUnreachable(
   return Settings()->IsDataReductionProxyUnreachable();
 }
 
-jboolean DataReductionProxySettingsAndroid::AreLoFiPreviewsEnabled(
+ScopedJavaLocalRef<jstring>
+DataReductionProxySettingsAndroid::MaybeRewriteWebliteUrl(
     JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  return data_reduction_proxy::params::IsIncludedInLitePageFieldTrial() ||
-      (data_reduction_proxy::params::IsLoFiOnViaFlags() &&
-          data_reduction_proxy::params::AreLitePagesEnabledViaFlags());
+    const base::android::JavaRef<jobject>& obj,
+    const base::android::JavaRef<jstring>& url) {
+  if (url.is_null() || !Settings()->IsDataReductionProxyEnabled() ||
+      !previews::params::ArePreviewsAllowed() ||
+      !base::FeatureList::IsEnabled(data_reduction_proxy::features::
+                                        kDataReductionProxyDecidesTransform)) {
+    return ScopedJavaLocalRef<jstring>(url);
+  }
+
+  GURL gurl(base::android::ConvertJavaStringToUTF8(url));
+  if (!gurl.is_valid() || gurl.is_empty())
+    return ScopedJavaLocalRef<jstring>(url);
+
+  std::string weblite_host_and_path = base::GetFieldTrialParamValueByFeature(
+      data_reduction_proxy::features::kDataReductionProxyDecidesTransform,
+      "weblite_url_host_and_path");
+
+  if (weblite_host_and_path.empty())
+    weblite_host_and_path = "googleweblight.com/i";
+
+  if (gurl.host() + gurl.path() != weblite_host_and_path)
+    return ScopedJavaLocalRef<jstring>(url);
+
+  std::string weblite_query_param = base::GetFieldTrialParamValueByFeature(
+      data_reduction_proxy::features::kDataReductionProxyDecidesTransform,
+      "weblite_url_query_param");
+  if (weblite_query_param.empty())
+    weblite_query_param = "u";
+
+  std::string wrapped_url_str;
+  if (!net::GetValueForKeyInQuery(gurl, weblite_query_param, &wrapped_url_str))
+    return ScopedJavaLocalRef<jstring>(url);
+
+  GURL wrapped_gurl(wrapped_url_str);
+  if (!wrapped_gurl.is_valid() || wrapped_gurl.is_empty() ||
+      !wrapped_gurl.SchemeIs("http")) {
+    return ScopedJavaLocalRef<jstring>(url);
+  }
+
+  return base::android::ConvertUTF8ToJavaString(env, wrapped_gurl.spec());
 }
 
 ScopedJavaLocalRef<jlongArray>
@@ -179,7 +218,9 @@ DataReductionProxySettingsAndroid::GetDailyContentLengths(
 
   if (!lengths.empty()) {
     DCHECK_EQ(lengths.size(), data_reduction_proxy::kNumDaysInHistory);
-    env->SetLongArrayRegion(result, 0, lengths.size(), &lengths[0]);
+    std::vector<jlong> lengths_jlong(lengths.begin(), lengths.end());
+    env->SetLongArrayRegion(result, 0, lengths_jlong.size(),
+                            lengths_jlong.data());
     return ScopedJavaLocalRef<jlongArray>(env, result);
   }
 
@@ -223,20 +264,22 @@ void DataReductionProxySettingsAndroid::QueryDataUsage(
     const JavaParamRef<jobject>& j_result_obj,
     jint num_days) {
   DCHECK(num_days <= data_reduction_proxy::kDataUsageHistoryNumDays);
-  j_query_result_obj_.Reset(env, j_result_obj);
-  num_day_for_query_ = num_days;
   Settings()
       ->data_reduction_proxy_service()
       ->compression_stats()
       ->GetHistoricalDataUsage(base::Bind(
           &DataReductionProxySettingsAndroid::OnQueryDataUsageComplete,
-          weak_factory_.GetWeakPtr()));
+          weak_factory_.GetWeakPtr(), JavaObjectWeakGlobalRef(env, obj),
+          base::android::ScopedJavaGlobalRef<jobject>(j_result_obj), num_days));
 }
 
 void DataReductionProxySettingsAndroid::OnQueryDataUsageComplete(
+    JavaObjectWeakGlobalRef obj,
+    const base::android::ScopedJavaGlobalRef<jobject>& j_result_obj,
+    jint num_days,
     std::unique_ptr<std::vector<data_reduction_proxy::DataUsageBucket>>
         data_usage) {
-  if (j_query_result_obj_.is_null())
+  if (j_result_obj.is_null())
     return;
 
   JNIEnv* env = base::android::AttachCurrentThread();
@@ -245,7 +288,7 @@ void DataReductionProxySettingsAndroid::OnQueryDataUsageComplete(
 
   // Data usage is sorted chronologically with the last entry corresponding to
   // |base::Time::Now()|.
-  const size_t num_buckets_to_display = num_day_for_query_ * kBucketsPerDay;
+  const size_t num_buckets_to_display = num_days * kBucketsPerDay;
   for (auto data_usage_it = data_usage->size() > num_buckets_to_display
                                 ? data_usage->end() - num_buckets_to_display
                                 : data_usage->begin();
@@ -261,19 +304,18 @@ void DataReductionProxySettingsAndroid::OnQueryDataUsageComplete(
 
   for (const auto& site_bucket : per_site_usage_map) {
     Java_DataReductionProxySettings_createDataUseItemAndAddToList(
-        env, j_query_result_obj_.obj(),
-        ConvertUTF8ToJavaString(env, site_bucket.first),
+        env, j_result_obj, ConvertUTF8ToJavaString(env, site_bucket.first),
         site_bucket.second.data_used, site_bucket.second.original_size);
   }
 
-  Java_DataReductionProxySettings_onQueryDataUsageComplete(
-      env, j_settings_obj_.get(env), j_query_result_obj_.obj());
-
-  j_query_result_obj_.Release();
+  Java_DataReductionProxySettings_onQueryDataUsageComplete(env, obj.get(env),
+                                                           j_result_obj);
 }
 
 // Used by generated jni code.
-static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+static jlong JNI_DataReductionProxySettings_Init(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   return reinterpret_cast<intptr_t>(
       new DataReductionProxySettingsAndroid(env, obj));
 }

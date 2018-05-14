@@ -10,9 +10,13 @@
 namespace previews {
 namespace features {
 
+extern const base::Feature kPreviews;
 extern const base::Feature kOfflinePreviews;
 extern const base::Feature kClientLoFi;
+extern const base::Feature kNoScriptPreviews;
 extern const base::Feature kStalePreviewsTimestamp;
+extern const base::Feature kAMPRedirection;
+extern const base::Feature kOptimizationHints;
 
 }  // namespace features
 }  // namespace previews

@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_BASE_NETWORK_H_
-#define WEBRTC_RTC_BASE_NETWORK_H_
+#ifndef RTC_BASE_NETWORK_H_
+#define RTC_BASE_NETWORK_H_
 
 #include <stdint.h>
 
@@ -19,10 +19,10 @@
 #include <string>
 #include <vector>
 
-#include "webrtc/rtc_base/ipaddress.h"
-#include "webrtc/rtc_base/messagehandler.h"
-#include "webrtc/rtc_base/networkmonitor.h"
-#include "webrtc/rtc_base/sigslot.h"
+#include "rtc_base/ipaddress.h"
+#include "rtc_base/messagehandler.h"
+#include "rtc_base/networkmonitor.h"
+#include "rtc_base/sigslot.h"
 
 #if defined(WEBRTC_POSIX)
 struct ifaddrs;
@@ -38,12 +38,6 @@ class Network;
 class NetworkMonitorInterface;
 class Thread;
 
-static const uint16_t kNetworkCostMax = 999;
-static const uint16_t kNetworkCostHigh = 900;
-static const uint16_t kNetworkCostUnknown = 50;
-static const uint16_t kNetworkCostLow = 10;
-static const uint16_t kNetworkCostMin = 0;
-
 // By default, ignore loopback interfaces on the host.
 const int kDefaultNetworkIgnoreMask = ADAPTER_TYPE_LOOPBACK;
 
@@ -52,6 +46,11 @@ const int kDefaultNetworkIgnoreMask = ADAPTER_TYPE_LOOPBACK;
 // length of that prefix.
 std::string MakeNetworkKey(const std::string& name, const IPAddress& prefix,
                            int prefix_length);
+
+// Utility function that attempts to determine an adapter type by an interface
+// name (e.g., "wlan0"). Can be used by NetworkManager subclasses when other
+// mechanisms fail to determine the type.
+AdapterType GetAdapterTypeFromName(const char* network_name);
 
 class DefaultLocalAddressProvider {
  public:
@@ -147,12 +146,12 @@ class NetworkManagerBase : public NetworkManager {
 
   void GetNetworks(NetworkList* networks) const override;
   void GetAnyAddressNetworks(NetworkList* networks) override;
+
   // Defaults to true.
+  // TODO(deadbeef): Remove this. Nothing but tests use this; IPv6 is enabled
+  // by default everywhere else.
   bool ipv6_enabled() const { return ipv6_enabled_; }
   void set_ipv6_enabled(bool enabled) { ipv6_enabled_ = enabled; }
-
-  void set_max_ipv6_networks(int networks) { max_ipv6_networks_ = networks; }
-  int max_ipv6_networks() { return max_ipv6_networks_; }
 
   EnumerationPermission enumeration_permission() const override;
 
@@ -187,7 +186,6 @@ class NetworkManagerBase : public NetworkManager {
   EnumerationPermission enumeration_permission_;
 
   NetworkList networks_;
-  int max_ipv6_networks_;
 
   NetworkMap networks_map_;
   bool ipv6_enabled_;
@@ -272,8 +270,6 @@ class BasicNetworkManager : public NetworkManagerBase,
   // Only updates the networks; does not reschedule the next update.
   void UpdateNetworksOnce();
 
-  AdapterType GetAdapterTypeFromName(const char* network_name) const;
-
   Thread* thread_;
   bool sent_first_update_;
   int start_count_;
@@ -295,6 +291,7 @@ class Network {
           const IPAddress& prefix,
           int prefix_length,
           AdapterType type);
+  Network(const Network&);
   ~Network();
 
   sigslot::signal1<const Network*> SignalTypeChanged;
@@ -432,4 +429,4 @@ class Network {
 
 }  // namespace rtc
 
-#endif  // WEBRTC_RTC_BASE_NETWORK_H_
+#endif  // RTC_BASE_NETWORK_H_

@@ -18,8 +18,6 @@
 #include <string>
 #include <vector>
 
-#define SHADER_SOURCE(...) #__VA_ARGS__
-
 ANGLE_EXPORT GLuint CompileShader(GLenum type, const std::string &source);
 ANGLE_EXPORT GLuint CompileShaderFromFile(GLenum type, const std::string &sourcePath);
 
@@ -28,10 +26,20 @@ CompileProgramWithTransformFeedback(const std::string &vsSource,
                                     const std::string &fsSource,
                                     const std::vector<std::string> &transformFeedbackVaryings,
                                     GLenum bufferMode);
+ANGLE_EXPORT GLuint
+CompileProgramWithGSAndTransformFeedback(const std::string &vsSource,
+                                         const std::string &gsSource,
+                                         const std::string &fsSource,
+                                         const std::vector<std::string> &transformFeedbackVaryings,
+                                         GLenum bufferMode);
 ANGLE_EXPORT GLuint CompileProgram(const std::string &vsSource, const std::string &fsSource);
+ANGLE_EXPORT GLuint CompileProgramWithGS(const std::string &vsSource,
+                                         const std::string &gsSource,
+                                         const std::string &fsSource);
 ANGLE_EXPORT GLuint CompileProgramFromFiles(const std::string &vsPath, const std::string &fsPath);
 ANGLE_EXPORT GLuint CompileComputeProgram(const std::string &csSource,
                                           bool outputErrorMessages = true);
+ANGLE_EXPORT bool LinkAttachedProgram(GLuint program);
 
 ANGLE_EXPORT GLuint LoadBinaryProgramOES(const std::vector<uint8_t> &binary, GLenum binaryFormat);
 ANGLE_EXPORT GLuint LoadBinaryProgramES3(const std::vector<uint8_t> &binary, GLenum binaryFormat);

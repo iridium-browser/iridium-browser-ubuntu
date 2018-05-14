@@ -179,14 +179,6 @@ void LayoutSVGText::UpdateLayout() {
   DCHECK(!needs_reordering_);
   LayoutAnalyzer::Scope analyzer(*this);
 
-  bool update_parent_boundaries = false;
-  if (needs_transform_update_) {
-    local_transform_ = toSVGTextElement(GetNode())->CalculateTransform(
-        SVGElement::kIncludeMotionTransform);
-    needs_transform_update_ = false;
-    update_parent_boundaries = true;
-  }
-
   // When laying out initially, build the character data map and propagate
   // resulting layout attributes to all LayoutSVGInlineText children in the
   // subtree.
@@ -195,12 +187,31 @@ void LayoutSVGText::UpdateLayout() {
     needs_text_metrics_update_ = true;
   }
 
+  bool update_parent_boundaries = false;
+
   // If the root layout size changed (eg. window size changes), or the screen
   // scale factor has changed, then recompute the on-screen font size. Since
   // the computation of layout attributes uses the text metrics, we need to
   // update them before updating the layout attributes.
   if (needs_text_metrics_update_) {
+    // Recompute the transform before updating font and corresponding
+    // metrics. At this point our bounding box may be incorrect, so
+    // any box relative transforms will be incorrect. Since the scaled
+    // font size only needs the scaling components to be correct, this
+    // should be fine. We update the transform again after computing
+    // the bounding box below, and after that we clear the
+    // |needs_transform_update_| flag.
+    if (needs_transform_update_) {
+      local_transform_ = ToSVGTextElement(GetNode())->CalculateTransform(
+          SVGElement::kIncludeMotionTransform);
+    }
+
     UpdateFontAndMetrics(*this);
+    // Font changes may change the size of the "em" unit, so we need to
+    // update positions that might depend on the font size. This is a big
+    // hammer but we have no simple way to determine if the positions of
+    // children depend on the font size.
+    needs_positioning_values_update_ = true;
     needs_text_metrics_update_ = false;
     update_parent_boundaries = true;
   }
@@ -250,8 +261,17 @@ void LayoutSVGText::UpdateLayout() {
   needs_reordering_ = false;
 
   FloatRect new_boundaries = ObjectBoundingBox();
-  if (!update_parent_boundaries)
-    update_parent_boundaries = old_boundaries != new_boundaries;
+  bool bounds_changed = old_boundaries != new_boundaries;
+
+  // Update the transform after laying out. Update if the bounds
+  // changed too, since the transform could depend on the bounding
+  // box.
+  if (bounds_changed || needs_transform_update_) {
+    local_transform_ = ToSVGTextElement(GetNode())->CalculateTransform(
+        SVGElement::kIncludeMotionTransform);
+    needs_transform_update_ = false;
+    update_parent_boundaries = true;
+  }
 
   overflow_.reset();
   AddSelfVisualOverflow(LayoutRect(new_boundaries));
@@ -259,7 +279,7 @@ void LayoutSVGText::UpdateLayout() {
 
   // Invalidate all resources of this client if our layout changed.
   if (EverHadLayout() && SelfNeedsLayout())
-    SVGResourcesCache::ClientLayoutChanged(this);
+    SVGResourcesCache::ClientLayoutChanged(*this);
 
   // If our bounds changed, notify the parents.
   if (update_parent_boundaries)
@@ -321,7 +341,7 @@ bool LayoutSVGText::NodeAtFloatPoint(HitTestResult& result,
 }
 
 PositionWithAffinity LayoutSVGText::PositionForPoint(
-    const LayoutPoint& point_in_contents) {
+    const LayoutPoint& point_in_contents) const {
   RootInlineBox* root_box = FirstRootBox();
   if (!root_box)
     return CreatePositionWithAffinity(0);
@@ -376,7 +396,7 @@ FloatRect LayoutSVGText::StrokeBoundingBox() const {
 
 FloatRect LayoutSVGText::VisualRectInLocalSVGCoordinates() const {
   FloatRect visual_rect = StrokeBoundingBox();
-  SVGLayoutSupport::AdjustVisualRectWithResources(this, visual_rect);
+  SVGLayoutSupport::AdjustVisualRectWithResources(*this, visual_rect);
 
   if (const ShadowList* text_shadow = Style()->TextShadow())
     text_shadow->AdjustRectForShadow(visual_rect);
@@ -398,12 +418,12 @@ bool LayoutSVGText::IsObjectBoundingBoxValid() const {
 void LayoutSVGText::AddChild(LayoutObject* child, LayoutObject* before_child) {
   LayoutSVGBlock::AddChild(child, before_child);
 
-  SVGResourcesCache::ClientWasAddedToTree(child, child->StyleRef());
+  SVGResourcesCache::ClientWasAddedToTree(*child, child->StyleRef());
   SubtreeChildWasAdded();
 }
 
 void LayoutSVGText::RemoveChild(LayoutObject* child) {
-  SVGResourcesCache::ClientWillBeRemovedFromTree(child);
+  SVGResourcesCache::ClientWillBeRemovedFromTree(*child);
   SubtreeChildWillBeRemoved();
 
   LayoutSVGBlock::RemoveChild(child);

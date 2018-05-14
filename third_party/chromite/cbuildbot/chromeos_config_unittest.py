@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -13,6 +14,7 @@ import cPickle
 
 from chromite.cbuildbot import builders
 from chromite.cbuildbot import chromeos_config
+from chromite.lib.const import waterfall
 from chromite.lib import config_lib
 from chromite.lib import config_lib_unittest
 from chromite.lib import constants
@@ -45,7 +47,8 @@ class ConfigDumpTest(ChromeosConfigTestBase):
   """Tests related to config_dump.json & chromeos_config.py"""
 
   def testDump(self):
-    """Make sure the json & config are kept in sync"""
+    """Ensure generated files are up to date."""
+    # config_dump.json
     new_dump = self.site_config.SaveConfigToString()
     old_dump = osutils.ReadFile(constants.CHROMEOS_CONFIG_FILE).rstrip()
 
@@ -57,9 +60,9 @@ class ConfigDumpTest(ChromeosConfigTestBase):
                   'defined configs. Run '
                   'cbuildbot/chromeos_config_unittest --update')
 
-  def testWaterfallLayout(self):
-    """Make sure that watefall_layout_dump.txt is kept current."""
+    # watefall_layout_dump.txt
     with self.OutputCapturer() as output:
+      config_lib.ClearConfigCache()
       cros_show_waterfall_layout.main(['--format', 'text'])
 
     new_dump = output.GetStdout()
@@ -151,7 +154,7 @@ class FindConfigsForBoardTest(cros_test_lib.TestCase):
 
   def testExternalCanonicalResolution(self):
     """Test an external canonical config."""
-    self._CheckCanonicalConfig('x86-generic', 'full')
+    self._CheckCanonicalConfig('amd64-generic', 'full')
 
   def testInternalCanonicalResolution(self):
     """Test prefer internal over external when both exist."""
@@ -183,10 +186,6 @@ class FindConfigsForBoardTest(cros_test_lib.TestCase):
     self.assertTrue(boards)
 
     for b in boards:
-      # TODO(akeshet): Figure out why we have both panther_embedded-minimal
-      # release and panther_embedded-release, and eliminate one of them.
-      if b == 'panther_embedded':
-        continue
       external, internal = self.config.FindFullConfigsForBoard(b)
       AtMostOneConfig(b, 'external', external)
       AtMostOneConfig(b, 'internal', internal)
@@ -204,17 +203,21 @@ class UnifiedBuildConfigTestCase(object):
   "release_branch": true,
   "reference_board_unified_builds": [
     {
-      "name": "reef-uni",
-      "reference_board_name": "reef-uni",
+      "name": "coral",
+      "reference_board_name": "coral",
       "builder": "RELEASE",
       "experimental": true,
       "arch": "X86_INTERNAL",
       "models" : [
         {
-          "name": "reef"
+          "name": "coral",
+          "board_name": "coral"
         },
         {
-          "name": "pyro"
+          "name": "robo",
+          "board_name": "robo",
+          "test_suites": ["sanity"],
+          "cq_test_enabled": true
         }
       ]
     }
@@ -249,6 +252,8 @@ class UnifiedBuildConfigTestCase(object):
         self._site_config, self._fake_ge_build_config)
     chromeos_config.ReleaseBuilders(
         self._site_config, self._boards_dict, self._fake_ge_build_config)
+    chromeos_config.CqBuilders(
+        self._site_config, self._boards_dict, self._fake_ge_build_config)
 
 class UnifiedBuildReleaseBuilders(
     cros_test_lib.OutputTestCase, UnifiedBuildConfigTestCase):
@@ -258,14 +263,32 @@ class UnifiedBuildReleaseBuilders(
     UnifiedBuildConfigTestCase.setUp(self)
 
   def testUnifiedReleaseBuilders(self):
-    reef_uni_release = self._site_config['reef-uni-release']
-    self.assertIsNotNone(reef_uni_release)
-    models = reef_uni_release['models']
-    self.assertIn('reef', models)
-    self.assertIn('pyro', models)
+    coral_release = self._site_config['coral-release']
+    self.assertIsNotNone(coral_release)
+    models = coral_release['models']
+    self.assertIn(config_lib.ModelTestConfig('coral', 'coral', []), models)
+    self.assertIn(
+        config_lib.ModelTestConfig('robo', 'robo', ['sanity']), models)
 
     master_release = self._site_config['master-release']
-    self.assertIn('reef-uni-release', master_release['slave_configs'])
+    self.assertIn('coral-release', master_release['slave_configs'])
+
+class UnifiedBuildCqBuilders(
+    cros_test_lib.OutputTestCase, UnifiedBuildConfigTestCase):
+  """Tests that verify how unified builder CQ configs are generated"""
+
+  def setUp(self):
+    UnifiedBuildConfigTestCase.setUp(self)
+
+  def testUnifiedCqBuilders(self):
+    coral_paladin = self._site_config['coral-paladin']
+    self.assertIsNotNone(coral_paladin)
+    models = coral_paladin['models']
+    self.assertEquals(len(models), 1)
+    self.assertIn(config_lib.ModelTestConfig('robo', 'robo'), models)
+
+    master_paladin = self._site_config['master-paladin']
+    self.assertIn('coral-paladin', master_paladin['slave_configs'])
 
 
 class ConfigPickleTest(ChromeosConfigTestBase):
@@ -328,6 +351,13 @@ class CBuildBotTest(ChromeosConfigTestBase):
     for build_name, config in self.site_config.iteritems():
       self.assertTrue(build_name == config['name'])
 
+  def testConfigsHaveValidDisplayLabel(self):
+    """Configs must have names set."""
+    for build_name, config in self.site_config.iteritems():
+      self.assertIn(config.display_label, config_lib.ALL_DISPLAY_LABEL,
+                    'Invalid display_label "%s" on "%s"' %
+                    (config.display_label, build_name))
+
   def testMasterSlaveConfigsExist(self):
     """Configs listing slave configs, must list valid configs."""
     for config in self.site_config.itervalues():
@@ -341,9 +371,11 @@ class CBuildBotTest(ChromeosConfigTestBase):
         # have an assigned waterfall.
         for slave_name in config.slave_configs:
           self.assertIn(slave_name, self.site_config)
-          self.assertTrue(self.site_config[slave_name].active_waterfall)
+          self.assertTrue(
+              self.site_config[slave_name].active_waterfall,
+              '"%s" is not in an active waterfall' % slave_name)
           self.assertNotEqual(self.site_config[slave_name].active_waterfall,
-                              constants.WATERFALL_TRYBOT)
+                              waterfall.WATERFALL_TRYBOT)
       else:
         self.assertIsNone(config.slave_configs)
 
@@ -447,6 +479,10 @@ class CBuildBotTest(ChromeosConfigTestBase):
         self.assertTrue(
             vm_test.test_type in constants.VALID_VM_TEST_TYPES,
             'Config %s: has unexpected vm test type value.' % build_name)
+        if vm_test.test_type == constants.VM_SUITE_TEST_TYPE:
+          self.assertTrue(
+              vm_test.test_suite is not None,
+              'Config %s: has unexpected vm test suite value.' % build_name)
 
   def testValidGCETestType(self):
     """Verify gce_tests has an expected value"""
@@ -455,8 +491,11 @@ class CBuildBotTest(ChromeosConfigTestBase):
         continue
       for gce_test in config['gce_tests']:
         self.assertTrue(
-            gce_test.test_type in constants.VALID_GCE_TEST_TYPES,
+            gce_test.test_type == constants.GCE_SUITE_TEST_TYPE,
             'Config %s: has unexpected gce test type value.' % build_name)
+        self.assertTrue(
+            gce_test.test_suite in constants.VALID_GCE_TEST_SUITES,
+            'Config %s: has unexpected gce test suite value.' % build_name)
 
   def testImageTestMustHaveBaseImage(self):
     """Verify image_test build is only enabled with 'base' in images."""
@@ -518,14 +557,43 @@ class CBuildBotTest(ChromeosConfigTestBase):
               'Config %s: has %s VM test, not in override (%s, %s).' % \
               (build_name, test, config.vm_tests, config.vm_tests_override))
 
+  def testVmTestsOnlyOnVmTestBoards(self):
+    """Verify that only VM capable boards run VM tests."""
+    for _, config in self.site_config.iteritems():
+      if config['vm_tests'] or config['vm_tests_override']:
+        for board in config['boards']:
+          self.assertIn(board, chromeos_config._vmtest_boards,
+                        'Board %s not able to run VM tests.' % board)
+      for child_config in config.child_configs:
+        if child_config['vm_tests'] or child_config['vm_tests_override']:
+          for board in config['boards']:
+            self.assertIn(board, chromeos_config._vmtest_boards,
+                          'Board %s not able to run VM tests.' % board)
+
   def testHWTestsArchivingHWTestArtifacts(self):
     """Make sure all configs upload artifacts that need them for hw testing."""
     for build_name, config in self.site_config.iteritems():
-      if config.hw_tests:
+      if config.hw_tests or config.hw_tests_override:
         self.assertTrue(
             config.upload_hw_test_artifacts,
             "%s is trying to run hw tests without uploading payloads." %
             build_name)
+
+  def testTryjobConfigsDontDefineOverrides(self):
+    """Make sure that no tryjob safe configs define test overrides."""
+    for build_name, config in self.site_config.iteritems():
+      if config.display_label not in config_lib.TRYJOB_DISPLAY_LABEL:
+        continue
+
+      self.assertIsNone(
+          config.vm_tests_override,
+          'Config %s: is tryjob safe, but defines vm_tests_override.' % \
+          build_name)
+
+      self.assertIsNone(
+          config.hw_tests_override,
+          'Config %s: is tryjob safe, but defines hw_tests_override.' % \
+          build_name)
 
   def testHWTestsReleaseBuilderRequirement(self):
     """Make sure all release configs run hw tests."""
@@ -591,6 +659,9 @@ class CBuildBotTest(ChromeosConfigTestBase):
 
     found_types = set()
     for _, config in self.site_config.iteritems():
+      if config.display_label in config_lib.TRYJOB_DISPLAY_LABEL:
+        continue
+
       if config.master:
         self.assertTrue(config.build_type in BUILD_TYPE_WHITELIST,
                         'Config %s has build_type %s, which is not an allowed '
@@ -630,7 +701,6 @@ class CBuildBotTest(ChromeosConfigTestBase):
       paladin_boards.update(slave_config.boards)
 
     for pfq_master in (constants.PFQ_MASTER,
-                       constants.MNC_ANDROID_PFQ_MASTER,
                        constants.NYC_ANDROID_PFQ_MASTER):
       pfq_configs = self._getSlaveConfigsForMaster(pfq_master)
 
@@ -671,41 +741,33 @@ class CBuildBotTest(ChromeosConfigTestBase):
             'As this is the %s branch, all release configs that are being used '
             'must end in %s.' % (branch, tracking_branch, branch))
 
-  def testAFDOInBackground(self):
-    """Verify that we don't try to build or use AFDO data in the background."""
-    for build_name, config in self.site_config.iteritems():
-      if config.build_packages_in_background:
-        # It is unsupported to use the build_packages_in_background flags with
-        # the afdo_generate or afdo_generate_min config options.
-        msg = 'Config %s uses build_packages_in_background with afdo_%s'
-        self.assertFalse(config.afdo_generate, msg % (build_name, 'generate'))
-        self.assertFalse(config.afdo_generate_min, msg % (build_name,
-                                                          'generate_min'))
+  def testNeverUseBackgroundBuildFlag(self):
+    """build_packages_in_background is deprecated.
 
-  def testReleaseGroupInBackground(self):
-    """Verify build_packages_in_background settings for release groups.
-
-    For each release group, the first builder should be set to run in the
-    foreground (to build binary packages), and the remainder of the builders
-    should be set to run in parallel (to install the binary packages.)
+    Make sure nobody uses it, until we can remove it without breaking
+    builds.
     """
     for build_name, config in self.site_config.iteritems():
-      if build_name.endswith('-release-group'):
-        msg = 'Config %s should not build_packages_in_background'
-        self.assertFalse(config.build_packages_in_background, msg % build_name)
+      self.assertFalse(
+          config.build_packages_in_background,
+          'Deprecated flag build_packages_in_background used: %s' %
+          build_name)
 
-        self.assertTrue(
+  def testNoNewBuildersOnlyGroups(self):
+    """Grouped builders are deprecated.
+
+    Ensure now new users are created. See crbug.com/691810.
+    """
+    for build_name, config in self.site_config.iteritems():
+      # These group builders are whitelisted, for now.
+      if not (build_name in ('test-ap-group',
+                             'test-ap-group-tryjob',
+                             'mixed-wificell-pre-cq') or
+              build_name.endswith('release-afdo') or
+              build_name.endswith('release-afdo-tryjob')):
+        self.assertFalse(
             config.child_configs,
-            'Config %s should have child configs' % build_name)
-        first_config = config.child_configs[0]
-        msg = 'Primary config for %s should not build_packages_in_background'
-        self.assertFalse(first_config.build_packages_in_background,
-                         msg % build_name)
-
-        msg = 'Child config %s for %s should build_packages_in_background'
-        for child_config in config.child_configs[1:]:
-          self.assertTrue(child_config.build_packages_in_background,
-                          msg % (child_config.name, build_name))
+            'Unexpected group builder found: %s' % build_name)
 
   def testGroupBuildersHaveMaximumConfigs(self):
     """Verify that release group builders don't exceed a maximum board count.
@@ -807,22 +869,6 @@ class CBuildBotTest(ChromeosConfigTestBase):
 
     return False
 
-  def testNonOverlappingConfigTypes(self):
-    """Test that a config can only match one build suffix."""
-    # This test belongs in config_lib_unittest, except nobody else cares.
-    for config_type in config_lib.CONFIG_TYPE_DUMP_ORDER:
-      trimmed_configs = list(config_lib.CONFIG_TYPE_DUMP_ORDER)
-      trimmed_configs.remove(config_type)
-      self.assertFalse(self._HasValidSuffix(config_type, trimmed_configs))
-
-  def testConfigTypesComplete(self):
-    """Verify CONFIG_TYPE_DUMP_ORDER contains all valid config types."""
-    for config_name in self.site_config:
-      self.assertTrue(
-          self._HasValidSuffix(config_name, config_lib.CONFIG_TYPE_DUMP_ORDER),
-          '%s did not match any types in %s' %
-          (config_name, 'config_lib.CONFIG_TYPE_DUMP_ORDER'))
-
   def testCantBeBothTypesOfLKGM(self):
     """Using lkgm and chrome_lkgm doesn't make sense."""
     for config in self.site_config.values():
@@ -872,7 +918,8 @@ class CBuildBotTest(ChromeosConfigTestBase):
   def testInternalPrebuilts(self):
     for build_name, config in self.site_config.iteritems():
       if (config['internal'] and
-          config['build_type'] != constants.CHROME_PFQ_TYPE):
+          config['build_type'] not in [constants.CHROME_PFQ_TYPE,
+                                       constants.PALADIN_TYPE]):
         msg = 'Config %s is internal but has public prebuilts.' % build_name
         self.assertNotEqual(config['prebuilts'], constants.PUBLIC, msg)
 
@@ -880,9 +927,12 @@ class CBuildBotTest(ChromeosConfigTestBase):
     """Verify that hw test priority is valid."""
     for build_name, config in self.site_config.iteritems():
       for test_config in config['hw_tests']:
-        self.assertTrue(
-            test_config.priority in constants.HWTEST_VALID_PRIORITIES,
-            '%s has an invalid hwtest priority.' % build_name)
+        if isinstance(test_config.priority, (int, long)):
+          self.assertTrue(0 <= test_config.priority <= 100)
+        else:
+          self.assertTrue(
+              test_config.priority in constants.HWTEST_VALID_PRIORITIES,
+              '%s has an invalid hwtest priority.' % build_name)
 
   def testAllBoardsExist(self):
     """Verifies that all config boards are in _all_boards."""
@@ -972,15 +1022,6 @@ class CBuildBotTest(ChromeosConfigTestBase):
           self.assertFalse(child_config.important,
                            msg % (child_config.name, build_name, build_name))
 
-  def testFullCQBuilderDoNotRunHWTest(self):
-    """Full CQ configs should not run HWTest."""
-    msg = ('%s should not be a full builder and run HWTest for '
-           'performance reasons')
-    for build_name, config in self.site_config.iteritems():
-      if config.build_type == constants.PALADIN_TYPE:
-        self.assertFalse(config.chrome_binhost_only and config.hw_tests,
-                         msg % build_name)
-
   def testExternalConfigsDoNotUseInternalFeatures(self):
     """External configs should not use chrome_internal, or official.xml."""
     msg = ('%s is not internal, so should not use chrome_internal, or an '
@@ -1044,27 +1085,29 @@ class CBuildBotTest(ChromeosConfigTestBase):
         assert False, ('%s in distinct_board_sets but not in all_boards' %
                        board)
 
-  def testBuildTimeouts(self):
+  def testCanaryBuildTimeouts(self):
     """Verify we get the expected timeout values."""
     msg = ("%s doesn't have expected timout: (%s != %s)")
     for build_name, config in self.site_config.iteritems():
-      if config.build_type == constants.PFQ_TYPE:
-        expected = 20 * 60
-      elif config.build_type == constants.CHROME_PFQ_TYPE:
-        expected = 6 * 60 *  60
-      elif config.build_type == constants.CANARY_TYPE:
-        if self.isReleaseBranch():
-          expected = 12 * 60 * 60
-        else:
-          expected = (7 * 60 + 50) * 60
-      elif config.build_type == constants.TOOLCHAIN_TYPE:
-        expected = (15 * 60 + 50) * 60
+      if config.build_type != constants.CANARY_TYPE:
+        continue
+      if self.isReleaseBranch():
+        expected = 12 * 60 * 60
       else:
-        expected = (4 * 60 + 30) * 60
+        expected = (7 * 60 + 50) * 60
 
       self.assertEqual(
           config.build_timeout, expected,
           msg % (build_name, config.build_timeout, expected))
+
+  def testBuildTimeouts(self):
+    """Verify that timeout values are sane."""
+    for build_name, config in self.site_config.iteritems():
+      # Chrome infra has a hard limit of 24h.
+      self.assertLessEqual(
+          config.build_timeout, 24 * 60 * 60,
+          '%s timeout %s is greater than 24h'
+          % (build_name, config.build_timeout))
 
 class OverrideForTrybotTest(ChromeosConfigTestBase):
   """Test config override functionality."""
@@ -1072,10 +1115,11 @@ class OverrideForTrybotTest(ChromeosConfigTestBase):
   def testVmTestOverride(self):
     """Verify that vm_tests override for trybots pay heed to original config."""
     mock_options = mock.Mock()
-    old = self.site_config['x86-mario-paladin']
+    old = self.site_config['betty-paladin']
     new = config_lib.OverrideConfigForTrybot(old, mock_options)
     self.assertEquals(new['vm_tests'], [
-        config_lib.VMTestConfig(constants.SMOKE_SUITE_TEST_TYPE),
+        config_lib.VMTestConfig(constants.VM_SUITE_TEST_TYPE,
+                                test_suite='smoke', retry=True),
         config_lib.VMTestConfig(constants.SIMPLE_AU_TEST_TYPE),
         config_lib.VMTestConfig(constants.CROS_VM_TEST_TYPE)])
 
@@ -1099,7 +1143,7 @@ class OverrideForTrybotTest(ChromeosConfigTestBase):
     all_build_names = set(self.site_config.iterkeys())
     redundant = set()
     seen = set()
-    for waterfall, names in chromeos_config._waterfall_config_map.iteritems():
+    for wfall, names in chromeos_config._waterfall_config_map.iteritems():
       for build_name in names:
         # Every build in the configuration map must be valid.
         self.assertTrue(build_name in all_build_names,
@@ -1114,7 +1158,7 @@ class OverrideForTrybotTest(ChromeosConfigTestBase):
         # The manual configuration must be applied and override any default
         # configuration.
         config = self.site_config[build_name]
-        self.assertEqual(config['active_waterfall'], waterfall,
+        self.assertEqual(config['active_waterfall'], wfall,
                          "Manual waterfall membership is not in the "
                          "configuration for: %s" % (build_name,))
 
@@ -1132,18 +1176,18 @@ class OverrideForTrybotTest(ChromeosConfigTestBase):
   def testNoDuplicateCanaryBuildersOnWaterfall(self):
     seen = {}
     for config in self.site_config.itervalues():
-      waterfall = config['active_waterfall']
+      wfall = config['active_waterfall']
       btype = config['build_type']
-      if not (waterfall and config_lib.IsCanaryType(btype)):
+      if not (wfall and config_lib.IsCanaryType(btype)):
         continue
 
-      waterfall_seen = seen.setdefault(waterfall, set())
+      waterfall_seen = seen.setdefault(wfall, set())
       stack = [config]
       while stack:
         current_config = stack.pop()
         self.assertNotIn(current_config['name'], waterfall_seen,
                          "Multiple builders for '%s' on '%s' waterfall" % (
-                             current_config['name'], waterfall))
+                             current_config['name'], wfall))
         waterfall_seen.add(current_config['name'])
         stack += current_config['child_configs']
 
@@ -1160,6 +1204,10 @@ class TemplateTest(ChromeosConfigTestBase):
   def testConfigNamesMatchTemplate(self):
     """Test that all configs have names that match their templates."""
     for name, config in self.site_config.iteritems():
+      # Tryjob configs should be tested based on what they are mirrored from.
+      if name.endswith('-tryjob'):
+        name = name[:-len('-tryjob')]
+
       template = config._template
       if template:
         # We mix '-' and '_' in various name spaces.
@@ -1182,6 +1230,51 @@ class TemplateTest(ChromeosConfigTestBase):
           else:
             msg = '%s should have %s as template' % (name, other)
             self.assertFalse(name, msg)
+
+
+class BoardConfigsTest(ChromeosConfigTestBase):
+  """Tests for the per-board templates."""
+  def setUp(self):
+    ge_build_config = config_lib.LoadGEBuildConfigFromFile()
+    boards_dict = chromeos_config.GetBoardTypeToBoardsDict(ge_build_config)
+
+    self.external_board_configs = chromeos_config.CreateBoardConfigs(
+        self.site_config, boards_dict, ge_build_config)
+
+    self.internal_board_configs = chromeos_config.CreateInternalBoardConfigs(
+        self.site_config, boards_dict, ge_build_config)
+
+  def testBoardConfigsSuperset(self):
+    """Ensure all external boards are listed as internal, also."""
+    for board in self.external_board_configs.keys():
+      self.assertIn(board, self.internal_board_configs)
+
+  def verifyNoTests(self, board_configs_iter):
+    """Defining tests in board specific templates doesn't work as expected."""
+    for board, template in board_configs_iter:
+      self.assertFalse(
+          'vm_tests' in template and template.vm_tests,
+          'Per-board template for %s defining vm_tests' % board)
+      self.assertFalse(
+          'vm_tests_override' in template and template.vm_tests_override,
+          'Per-board template for %s defining vm_tests_override' % board)
+      self.assertFalse(
+          'gce_tests' in template and template.gce_tests,
+          'Per-board template for %s defining gce_tests' % board)
+      self.assertFalse(
+          'hw_tests' in template and template.hw_tests,
+          'Per-board template for %s defining hw_tests' % board)
+      self.assertFalse(
+          'hw_tests_override' in template and template.hw_tests_override,
+          'Per-board template for %s defining hw_tests_override' % board)
+
+  def testExternalsDontDefineTests(self):
+    """Verify no external boards define tests at the board level."""
+    self.verifyNoTests(self.external_board_configs.items())
+
+  def testInternalsDontDefineTests(self):
+    """Verify no internal boards define tests at the board level."""
+    self.verifyNoTests(self.internal_board_configs.items())
 
 
 class SiteInterfaceTest(ChromeosConfigTestBase):

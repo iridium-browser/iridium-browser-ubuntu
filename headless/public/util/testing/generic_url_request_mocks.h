@@ -9,9 +9,9 @@
 #include <string>
 
 #include "base/macros.h"
-#include "headless/public/headless_export.h"
 #include "headless/public/util/generic_url_request_job.h"
 #include "headless/public/util/testing/generic_url_request_mocks.h"
+#include "net/cookies/cookie_change_dispatcher.h"
 #include "net/cookies/cookie_store.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
@@ -19,14 +19,12 @@
 
 namespace headless {
 
-class HEADLESS_EXPORT MockGenericURLRequestJobDelegate
-    : public GenericURLRequestJob::Delegate {
+class MockGenericURLRequestJobDelegate : public GenericURLRequestJob::Delegate {
  public:
   MockGenericURLRequestJobDelegate();
   ~MockGenericURLRequestJobDelegate() override;
 
   // GenericURLRequestJob::Delegate methods:
-  void OnPendingRequest(PendingRequest* pending_request) override;
   void OnResourceLoadFailed(const Request* request, net::Error error) override;
   void OnResourceLoadComplete(
       const Request* request,
@@ -35,21 +33,31 @@ class HEADLESS_EXPORT MockGenericURLRequestJobDelegate
       const char* body,
       size_t body_size) override;
 
-  using Policy = base::Callback<void(PendingRequest* pending_request)>;
-
-  void SetPolicy(Policy policy);
-
  private:
-  void ApplyPolicy(PendingRequest* pending_request);
-
-  Policy policy_;
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(MockGenericURLRequestJobDelegate);
 };
 
+class MockCookieChangeDispatcher : public net::CookieChangeDispatcher {
+ public:
+  MockCookieChangeDispatcher();
+  ~MockCookieChangeDispatcher() override;
+
+  // net::CookieChangeDispatcher
+  std::unique_ptr<net::CookieChangeSubscription> AddCallbackForCookie(
+      const GURL& url,
+      const std::string& name,
+      net::CookieChangeCallback callback) override WARN_UNUSED_RESULT;
+  std::unique_ptr<net::CookieChangeSubscription> AddCallbackForAllChanges(
+      net::CookieChangeCallback callback) override WARN_UNUSED_RESULT;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockCookieChangeDispatcher);
+};
+
 // TODO(alexclarke): We may be able to replace this with the CookieMonster.
-class HEADLESS_EXPORT MockCookieStore : public net::CookieStore {
+class MockCookieStore : public net::CookieStore {
  public:
   MockCookieStore();
   ~MockCookieStore() override;
@@ -60,28 +68,10 @@ class HEADLESS_EXPORT MockCookieStore : public net::CookieStore {
                                  const net::CookieOptions& options,
                                  SetCookiesCallback callback) override;
 
-  void SetCookieWithDetailsAsync(const GURL& url,
-                                 const std::string& name,
-                                 const std::string& value,
-                                 const std::string& domain,
-                                 const std::string& path,
-                                 base::Time creation_time,
-                                 base::Time expiration_time,
-                                 base::Time last_access_time,
-                                 bool secure,
-                                 bool http_only,
-                                 net::CookieSameSite same_site,
-                                 net::CookiePriority priority,
-                                 SetCookiesCallback callback) override;
-
   void SetCanonicalCookieAsync(std::unique_ptr<net::CanonicalCookie> cookie,
                                bool secure_source,
                                bool modify_http_only,
                                SetCookiesCallback callback) override;
-
-  void GetCookiesWithOptionsAsync(const GURL& url,
-                                  const net::CookieOptions& options,
-                                  GetCookiesCallback callback) override;
 
   void GetCookieListWithOptionsAsync(const GURL& url,
                                      const net::CookieOptions& options,
@@ -112,10 +102,7 @@ class HEADLESS_EXPORT MockCookieStore : public net::CookieStore {
 
   void SetForceKeepSessionState() override;
 
-  std::unique_ptr<CookieChangedSubscription> AddCallbackForCookie(
-      const GURL& url,
-      const std::string& name,
-      const CookieChangedCallback& callback) override;
+  net::CookieChangeDispatcher& GetChangeDispatcher() override;
 
   bool IsEphemeral() override;
 
@@ -127,17 +114,17 @@ class HEADLESS_EXPORT MockCookieStore : public net::CookieStore {
                    GetCookieListCallback callback);
 
   net::CookieList cookies_;
+  MockCookieChangeDispatcher change_dispatcher_;
 
   DISALLOW_COPY_AND_ASSIGN(MockCookieStore);
 };
 
-class HEADLESS_EXPORT MockURLRequestDelegate
-    : public net::URLRequest::Delegate {
+class MockURLRequestDelegate : public net::URLRequest::Delegate {
  public:
   MockURLRequestDelegate();
   ~MockURLRequestDelegate() override;
 
-  void OnResponseStarted(net::URLRequest* request) override;
+  void OnResponseStarted(net::URLRequest* request, int net_error) override;
   void OnReadCompleted(net::URLRequest* request, int bytes_read) override;
   const std::string& response_data() const;
   const net::IOBufferWithSize* metadata() const;

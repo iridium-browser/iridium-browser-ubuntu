@@ -9,8 +9,7 @@ import android.content.Context;
 import android.os.Bundle;
 import android.support.test.filters.MediumTest;
 
-import junit.framework.Assert;
-
+import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -84,14 +83,6 @@ public class ChildProcessLauncherIntegrationTest {
         }
 
         @Override
-        public void dropOomBindings() {
-            super.dropOomBindings();
-            if (mRemovedBothInitialAndStrongBinding == null) {
-                mRemovedBothInitialAndStrongBinding = new RuntimeException("dropOomBindings");
-            }
-        }
-
-        @Override
         public void removeStrongBinding() {
             super.removeStrongBinding();
             if (mRemovedBothInitialAndStrongBinding == null && !isInitialBindingBound()) {
@@ -115,7 +106,7 @@ public class ChildProcessLauncherIntegrationTest {
                 10 /* arbitrary number, only realy need 2 */, null /* use default service name */);
 
         ContentShellActivity activity =
-                mActivityTestRule.launchContentShellWithUrlSync("about:blank");
+                mActivityTestRule.launchContentShellWithUrlSync("content/test/data/title1.html");
         NavigationController navigationController =
                 mActivityTestRule.getWebContents().getNavigationController();
         TestCallbackHelperContainer testCallbackHelperContainer =
@@ -133,7 +124,7 @@ public class ChildProcessLauncherIntegrationTest {
         });
 
         mActivityTestRule.loadUrl(
-                navigationController, testCallbackHelperContainer, new LoadUrlParams("data:foo"));
+                navigationController, testCallbackHelperContainer, new LoadUrlParams("data:,foo"));
         ChildProcessLauncherTestUtils.runOnLauncherThreadBlocking(new Runnable() {
             @Override
             public void run() {

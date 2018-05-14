@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "services/metrics/public/interfaces/ukm_interface.mojom.h"
+#include "services/metrics/public/mojom/ukm_interface.mojom.h"
 
 namespace ukm {
 
@@ -26,7 +26,10 @@ void UkmEntryBuilderBase::AddMetric(uint64_t metric_hash, int64_t value) {
 }
 
 void UkmEntryBuilderBase::Record(UkmRecorder* recorder) {
-  recorder->AddEntry(std::move(entry_));
+  if (recorder)
+    recorder->AddEntry(std::move(entry_));
+  else
+    entry_.reset();
 }
 
 }  // namespace internal

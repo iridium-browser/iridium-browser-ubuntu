@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
+#include "base/test/scoped_task_environment.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -40,8 +40,8 @@ class TestTransportEventHandler : public WebrtcTransport::EventHandler {
                               std::unique_ptr<MessagePipe> pipe)>
       IncomingChannelCallback;
 
-  TestTransportEventHandler() {}
-  ~TestTransportEventHandler() override {}
+  TestTransportEventHandler() = default;
+  ~TestTransportEventHandler() override = default;
 
   // All callbacks must be set before the test handler is passed to a Transport
   // object.
@@ -95,8 +95,8 @@ class TestTransportEventHandler : public WebrtcTransport::EventHandler {
 
 class TestMessagePipeEventHandler : public MessagePipe::EventHandler {
  public:
-  TestMessagePipeEventHandler() {}
-  ~TestMessagePipeEventHandler() override {}
+  TestMessagePipeEventHandler() = default;
+  ~TestMessagePipeEventHandler() override = default;
 
   void set_open_callback(const base::Closure& callback) {
     open_callback_ = callback;
@@ -147,7 +147,9 @@ class TestMessagePipeEventHandler : public MessagePipe::EventHandler {
 
 class WebrtcTransportTest : public testing::Test {
  public:
-  WebrtcTransportTest() {
+  WebrtcTransportTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::IO) {
     jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
     network_settings_ =
         NetworkSettings(NetworkSettings::NAT_TRAVERSAL_OUTGOING);
@@ -196,8 +198,8 @@ class WebrtcTransportTest : public testing::Test {
   }
 
   void StartConnection() {
-    host_event_handler_.set_connected_callback(base::Bind(&base::DoNothing));
-    client_event_handler_.set_connected_callback(base::Bind(&base::DoNothing));
+    host_event_handler_.set_connected_callback(base::DoNothing());
+    client_event_handler_.set_connected_callback(base::DoNothing());
 
     host_event_handler_.set_error_callback(
         base::Bind(&WebrtcTransportTest::OnSessionError, base::Unretained(this),
@@ -293,7 +295,7 @@ class WebrtcTransportTest : public testing::Test {
   }
 
  protected:
-  base::MessageLoopForIO message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<base::RunLoop> run_loop_;
 
   NetworkSettings network_settings_;

@@ -7,40 +7,54 @@
 #include <algorithm>
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/PerformanceObserverCallback.h"
 #include "bindings/core/v8/V8BindingForCore.h"
+#include "bindings/core/v8/v8_performance_observer_callback.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/LocalDOMWindow.h"
+#include "core/frame/UseCounter.h"
 #include "core/timing/DOMWindowPerformance.h"
-#include "core/timing/Performance.h"
 #include "core/timing/PerformanceEntry.h"
 #include "core/timing/PerformanceObserverEntryList.h"
 #include "core/timing/PerformanceObserverInit.h"
+#include "core/timing/WindowPerformance.h"
+#include "core/timing/WorkerGlobalScopePerformance.h"
+#include "core/workers/WorkerGlobalScope.h"
 #include "platform/Timer.h"
 
 namespace blink {
 
 PerformanceObserver* PerformanceObserver::Create(
     ScriptState* script_state,
-    PerformanceObserverCallback* callback) {
-  DCHECK(IsMainThread());
+    V8PerformanceObserverCallback* callback) {
   LocalDOMWindow* window = ToLocalDOMWindow(script_state->GetContext());
-  if (!window) {
-    V8ThrowException::ThrowTypeError(
-        script_state->GetIsolate(),
-        ExceptionMessages::FailedToConstruct(
-            "PerformanceObserver", "No 'window' in current context."));
-    return nullptr;
+  ExecutionContext* context = ExecutionContext::From(script_state);
+  if (window) {
+    UseCounter::Count(context, WebFeature::kPerformanceObserverForWindow);
+    return new PerformanceObserver(
+        context, DOMWindowPerformance::performance(*window), callback);
   }
-  return new PerformanceObserver(
-      script_state, DOMWindowPerformance::performance(*window), callback);
+  if (context->IsWorkerGlobalScope()) {
+    UseCounter::Count(context, WebFeature::kPerformanceObserverForWorker);
+    return new PerformanceObserver(context,
+                                   WorkerGlobalScopePerformance::performance(
+                                       *ToWorkerGlobalScope(context)),
+                                   callback);
+  }
+  V8ThrowException::ThrowTypeError(
+      script_state->GetIsolate(),
+      ExceptionMessages::FailedToConstruct(
+          "PerformanceObserver",
+          "No 'worker' or 'window' in current context."));
+  return nullptr;
 }
 
-PerformanceObserver::PerformanceObserver(ScriptState* script_state,
-                                         PerformanceBase* performance,
-                                         PerformanceObserverCallback* callback)
-    : execution_context_(ExecutionContext::From(script_state)),
-      callback_(this, callback),
+PerformanceObserver::PerformanceObserver(
+    ExecutionContext* execution_context,
+    Performance* performance,
+    V8PerformanceObserverCallback* callback)
+    : ContextClient(execution_context),
+      execution_context_(execution_context),
+      callback_(callback),
       performance_(performance),
       filter_options_(PerformanceEntry::kInvalid),
       is_registered_(false) {
@@ -51,7 +65,7 @@ void PerformanceObserver::observe(const PerformanceObserverInit& observer_init,
                                   ExceptionState& exception_state) {
   if (!performance_) {
     exception_state.ThrowTypeError(
-        "Window may be destroyed? Performance target is invalid.");
+        "Window/worker may be destroyed? Performance target is invalid.");
     return;
   }
 
@@ -76,26 +90,37 @@ void PerformanceObserver::observe(const PerformanceObserverInit& observer_init,
 }
 
 void PerformanceObserver::disconnect() {
-  if (performance_) {
-    performance_->UnregisterPerformanceObserver(*this);
-  }
   performance_entries_.clear();
+  if (performance_)
+    performance_->UnregisterPerformanceObserver(*this);
   is_registered_ = false;
 }
 
+PerformanceEntryVector PerformanceObserver::takeRecords() {
+  PerformanceEntryVector performance_entries;
+  performance_entries.swap(performance_entries_);
+  return performance_entries;
+}
+
 void PerformanceObserver::EnqueuePerformanceEntry(PerformanceEntry& entry) {
-  DCHECK(IsMainThread());
   performance_entries_.push_back(&entry);
   if (performance_)
     performance_->ActivateObserver(*this);
 }
 
+bool PerformanceObserver::HasPendingActivity() const {
+  return is_registered_;
+}
+
 bool PerformanceObserver::ShouldBeSuspended() const {
-  return execution_context_->IsContextSuspended();
+  return execution_context_->IsContextPaused();
 }
 
 void PerformanceObserver::Deliver() {
   DCHECK(!ShouldBeSuspended());
+
+  if (!GetExecutionContext())
+    return;
 
   if (performance_entries_.IsEmpty())
     return;
@@ -104,18 +129,22 @@ void PerformanceObserver::Deliver() {
   performance_entries.swap(performance_entries_);
   PerformanceObserverEntryList* entry_list =
       new PerformanceObserverEntryList(performance_entries);
-  callback_->call(this, entry_list, this);
+  callback_->InvokeAndReportException(this, entry_list, this);
 }
 
-DEFINE_TRACE(PerformanceObserver) {
+void PerformanceObserver::Trace(blink::Visitor* visitor) {
   visitor->Trace(execution_context_);
   visitor->Trace(callback_);
   visitor->Trace(performance_);
   visitor->Trace(performance_entries_);
+  ScriptWrappable::Trace(visitor);
+  ContextClient::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(PerformanceObserver) {
+void PerformanceObserver::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(callback_);
+  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

@@ -10,15 +10,11 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "chrome/common/features.h"
-#include "components/security_interstitials/content/security_interstitial_page.h"
+#include "chrome/browser/ssl/ssl_blocking_page_base.h"
+#include "chrome/common/buildflags.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "net/ssl/ssl_info.h"
 #include "url/gurl.h"
-
-#if !BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
-#error This file must be built with ENABLE_CAPTIVE_PORTAL_DETECTION flag.
-#endif
 
 namespace content {
 class NavigationEntry;
@@ -29,7 +25,6 @@ namespace net {
 class SSLInfo;
 }
 
-class CertReportHelper;
 class SSLCertReporter;
 
 // This class is responsible for showing/hiding the interstitial page that is
@@ -39,8 +34,7 @@ class SSLCertReporter;
 // This class should only be used on the UI thread because its implementation
 // uses captive_portal::CaptivePortalService, which can only be accessed on the
 // UI thread. Only used when ENABLE_CAPTIVE_PORTAL_DETECTION is true.
-class CaptivePortalBlockingPage
-    : public security_interstitials::SecurityInterstitialPage {
+class CaptivePortalBlockingPage : public SSLBlockingPageBase {
  public:
   // Interstitial type, for testing.
   static const void* const kTypeForTesting;
@@ -77,8 +71,9 @@ class CaptivePortalBlockingPage
 
  private:
   // URL of the login page, opened when the user clicks the "Connect" button.
+  // If empty, the default captive portal detection URL for the platform will be
+  // used.
   const GURL login_url_;
-  std::unique_ptr<CertReportHelper> cert_report_helper_;
   const net::SSLInfo ssl_info_;
   base::Callback<void(content::CertificateRequestResultType)> callback_;
 

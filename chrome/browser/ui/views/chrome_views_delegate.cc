@@ -7,19 +7,15 @@
 #include <memory>
 
 #include "base/logging.h"
-#include "base/single_thread_task_runner.h"
-#include "base/threading/sequenced_worker_pool.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/lifetime/keep_alive_types.h"
-#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window_state.h"
+#include "components/keep_alive_registry/keep_alive_types.h"
+#include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/version_info/version_info.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/context_factory.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
@@ -129,7 +125,8 @@ bool ChromeViewsDelegate::GetSavedWindowPlacement(
 }
 
 void ChromeViewsDelegate::NotifyAccessibilityEvent(
-    views::View* view, ui::AXEvent event_type) {
+    views::View* view,
+    ax::mojom::Event event_type) {
 #if defined(USE_AURA)
   AutomationManagerAura::GetInstance()->HandleEvent(
       GetProfileForWindow(view->GetWidget()), view, event_type);
@@ -184,11 +181,6 @@ ui::ContextFactoryPrivate* ChromeViewsDelegate::GetContextFactoryPrivate() {
 
 std::string ChromeViewsDelegate::GetApplicationName() {
   return version_info::GetProductName();
-}
-
-scoped_refptr<base::TaskRunner>
-ChromeViewsDelegate::GetBlockingPoolTaskRunner() {
-  return content::BrowserThread::GetBlockingPool();
 }
 
 #if !defined(OS_CHROMEOS)

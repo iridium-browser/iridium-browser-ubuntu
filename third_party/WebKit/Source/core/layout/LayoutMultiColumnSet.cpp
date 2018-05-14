@@ -29,7 +29,6 @@
 #include "core/layout/LayoutMultiColumnFlowThread.h"
 #include "core/layout/MultiColumnFragmentainerGroup.h"
 #include "core/paint/MultiColumnSetPainter.h"
-#include "platform/RuntimeEnabledFeatures.h"
 
 namespace blink {
 
@@ -37,7 +36,8 @@ LayoutMultiColumnSet::LayoutMultiColumnSet(LayoutFlowThread* flow_thread)
     : LayoutBlockFlow(nullptr),
       fragmentainer_groups_(*this),
       flow_thread_(flow_thread),
-      initial_height_calculated_(false) {}
+      initial_height_calculated_(false),
+      last_actual_column_count_(0) {}
 
 LayoutMultiColumnSet* LayoutMultiColumnSet::CreateAnonymous(
     LayoutFlowThread& flow_thread,
@@ -442,6 +442,14 @@ void LayoutMultiColumnSet::UpdateLayout() {
   if (RecalculateColumnHeight())
     MultiColumnFlowThread()->SetColumnHeightsChanged();
   LayoutBlockFlow::UpdateLayout();
+
+  auto actual_column_count = ActualColumnCount();
+  if (actual_column_count != last_actual_column_count_) {
+    // At least we need to paint column rules differently when actual column
+    // count changes.
+    SetShouldDoFullPaintInvalidation();
+    last_actual_column_count_ = actual_column_count;
+  }
 }
 
 void LayoutMultiColumnSet::ComputeIntrinsicLogicalWidths(
@@ -470,7 +478,7 @@ void LayoutMultiColumnSet::ComputeLogicalHeight(
 }
 
 PositionWithAffinity LayoutMultiColumnSet::PositionForPoint(
-    const LayoutPoint& point) {
+    const LayoutPoint& point) const {
   // Convert the visual point to a flow thread point.
   const MultiColumnFragmentainerGroup& row =
       FragmentainerGroupAtVisualPoint(point);
@@ -484,12 +492,13 @@ PositionWithAffinity LayoutMultiColumnSet::PositionForPoint(
 LayoutUnit LayoutMultiColumnSet::ColumnGap() const {
   LayoutBlockFlow* parent_block = MultiColumnBlockFlow();
 
-  if (parent_block->Style()->HasNormalColumnGap()) {
+  if (parent_block->Style()->ColumnGap().IsNormal()) {
     // "1em" is recommended as the normal gap setting. Matches <p> margins.
     return LayoutUnit(
         parent_block->Style()->GetFontDescription().ComputedPixelSize());
   }
-  return LayoutUnit(parent_block->Style()->ColumnGap());
+  return ValueForLength(parent_block->Style()->ColumnGap().GetLength(),
+                        AvailableLogicalWidth());
 }
 
 unsigned LayoutMultiColumnSet::ActualColumnCount() const {
@@ -549,7 +558,7 @@ void LayoutMultiColumnSet::AttachToFlowThread() {
 void LayoutMultiColumnSet::DetachFromFlowThread() {
   if (flow_thread_) {
     flow_thread_->RemoveColumnSetFromThread(this);
-    flow_thread_ = 0;
+    flow_thread_ = nullptr;
   }
 }
 
@@ -626,8 +635,9 @@ bool LayoutMultiColumnSet::ComputeColumnRuleBounds(
   return true;
 }
 
-LayoutRect LayoutMultiColumnSet::LocalVisualRect() const {
-  LayoutRect block_flow_bounds = LayoutBlockFlow::LocalVisualRect();
+LayoutRect LayoutMultiColumnSet::LocalVisualRectIgnoringVisibility() const {
+  LayoutRect block_flow_bounds =
+      LayoutBlockFlow::LocalVisualRectIgnoringVisibility();
 
   // Now add in column rule bounds, if present.
   Vector<LayoutRect> column_rule_bounds;
@@ -636,6 +646,13 @@ LayoutRect LayoutMultiColumnSet::LocalVisualRect() const {
       block_flow_bounds.Unite(bound);
   }
   return block_flow_bounds;
+}
+
+void LayoutMultiColumnSet::UpdateFromNG() {
+  DCHECK_EQ(fragmentainer_groups_.size(), 1U);
+  auto& group = fragmentainer_groups_[0];
+  group.UpdateFromNG(LogicalHeight());
+  ComputeOverflow(LogicalHeight());
 }
 
 }  // namespace blink

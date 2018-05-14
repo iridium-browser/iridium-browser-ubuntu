@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "components/guest_view/browser/guest_view_message_filter.h"
+#include "components/nacl/common/buildflags.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -42,7 +43,7 @@
 #include "storage/browser/quota/quota_settings.h"
 #include "url/gurl.h"
 
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/browser/nacl_host_message_filter.h"
 #include "components/nacl/browser/nacl_process_host.h"
@@ -92,7 +93,8 @@ content::BrowserMainParts* ShellContentBrowserClient::CreateBrowserMainParts(
 }
 
 void ShellContentBrowserClient::RenderProcessWillLaunch(
-    content::RenderProcessHost* host) {
+    content::RenderProcessHost* host,
+    service_manager::mojom::ServiceRequest* service_request) {
   int render_process_id = host->GetID();
   BrowserContext* browser_context = browser_main_parts_->browser_context();
   host->AddFilter(
@@ -104,7 +106,7 @@ void ShellContentBrowserClient::RenderProcessWillLaunch(
           render_process_id, browser_context));
   // PluginInfoMessageFilter is not required because app_shell does not have
   // the concept of disabled plugins.
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
   host->AddFilter(new nacl::NaClHostMessageFilter(
       render_process_id,
       browser_context->IsOffTheRecord(),
@@ -217,7 +219,7 @@ ShellContentBrowserClient::CreateSpeechRecognitionManagerDelegate() {
 
 content::BrowserPpapiHost*
 ShellContentBrowserClient::GetExternalBrowserPpapiHost(int plugin_process_id) {
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
   content::BrowserChildProcessHostIterator iter(PROCESS_TYPE_NACL_LOADER);
   while (!iter.Done()) {
     nacl::NaClProcessHost* host = static_cast<nacl::NaClProcessHost*>(
@@ -250,14 +252,14 @@ ShellContentBrowserClient::CreateThrottlesForNavigation(
     content::NavigationHandle* navigation_handle) {
   std::vector<std::unique_ptr<content::NavigationThrottle>> throttles;
   throttles.push_back(
-      base::MakeUnique<ExtensionNavigationThrottle>(navigation_handle));
+      std::make_unique<ExtensionNavigationThrottle>(navigation_handle));
   return throttles;
 }
 
 std::unique_ptr<content::NavigationUIData>
 ShellContentBrowserClient::GetNavigationUIData(
     content::NavigationHandle* navigation_handle) {
-  return base::MakeUnique<ShellNavigationUIData>(navigation_handle);
+  return std::make_unique<ShellNavigationUIData>(navigation_handle);
 }
 
 ShellBrowserMainParts* ShellContentBrowserClient::CreateShellBrowserMainParts(
@@ -278,7 +280,7 @@ void ShellContentBrowserClient::AppendRendererSwitches(
   command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
                                  kSwitchNames, arraysize(kSwitchNames));
 
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
   // NOTE: app_shell does not support non-SFI mode, so it does not pass through
   // SFI switches either here or for the zygote process.
   static const char* const kNaclSwitchNames[] = {
@@ -286,7 +288,7 @@ void ShellContentBrowserClient::AppendRendererSwitches(
   };
   command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
                                  kNaclSwitchNames, arraysize(kNaclSwitchNames));
-#endif  // !defined(DISABLE_NACL)
+#endif  // BUILDFLAG(ENABLE_NACL)
 }
 
 const Extension* ShellContentBrowserClient::GetExtension(

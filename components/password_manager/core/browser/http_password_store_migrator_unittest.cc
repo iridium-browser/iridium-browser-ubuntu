@@ -3,11 +3,10 @@
 // found in the LICENSE file.
 
 #include "components/password_manager/core/browser/http_password_store_migrator.h"
+#include <memory>
 
-#include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/password_manager/core/browser/mock_password_store.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -99,7 +98,9 @@ class HttpPasswordStoreMigratorTest : public testing::Test {
  public:
   HttpPasswordStoreMigratorTest()
       : mock_store_(new testing::StrictMock<MockPasswordStore>),
-        client_(mock_store_.get()) {}
+        client_(mock_store_.get()) {
+    mock_store_->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
+  }
 
   ~HttpPasswordStoreMigratorTest() override {
     mock_store_->ShutdownOnUIThread();
@@ -109,13 +110,15 @@ class HttpPasswordStoreMigratorTest : public testing::Test {
   MockPasswordStore& store() { return *mock_store_; }
   MockPasswordManagerClient& client() { return client_; }
 
+  void WaitForPasswordStore() { scoped_task_environment_.RunUntilIdle(); }
+
  protected:
   void TestEmptyStore(bool is_hsts);
   void TestFullStore(bool is_hsts);
   void TestMigratorDeletionByConsumer(bool is_hsts);
 
  private:
-  base::MessageLoop message_loop_;  // Used by mock_store_.
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   MockConsumer consumer_;
   scoped_refptr<MockPasswordStore> mock_store_;
   MockPasswordManagerClient client_;
@@ -137,7 +140,7 @@ void HttpPasswordStoreMigratorTest::TestEmptyStore(bool is_hsts) {
   // posted from |PasswordStore::RemoveSiteStats|. Hence the following lines are
   // necessary to ensure |RemoveSiteStatsImpl| gets called when expected.
   EXPECT_CALL(store(), RemoveSiteStatsImpl(GURL(kTestHttpURL))).Times(is_hsts);
-  base::RunLoop().RunUntilIdle();
+  WaitForPasswordStore();
 
   EXPECT_CALL(consumer(), ProcessForms(std::vector<autofill::PasswordForm*>()));
   migrator.OnGetPasswordStoreResults(
@@ -158,7 +161,7 @@ void HttpPasswordStoreMigratorTest::TestFullStore(bool is_hsts) {
   // posted from |PasswordStore::RemoveSiteStats|. Hence the following lines are
   // necessary to ensure |RemoveSiteStatsImpl| gets called when expected.
   EXPECT_CALL(store(), RemoveSiteStatsImpl(GURL(kTestHttpURL))).Times(is_hsts);
-  base::RunLoop().RunUntilIdle();
+  WaitForPasswordStore();
 
   PasswordForm form = CreateTestForm();
   PasswordForm psl_form = CreateTestPSLForm();
@@ -171,9 +174,9 @@ void HttpPasswordStoreMigratorTest::TestFullStore(bool is_hsts) {
   EXPECT_CALL(store(), RemoveLogin(form)).Times(is_hsts);
   EXPECT_CALL(consumer(), ProcessForms(ElementsAre(Pointee(expected_form))));
   std::vector<std::unique_ptr<autofill::PasswordForm>> results;
-  results.push_back(base::MakeUnique<PasswordForm>(psl_form));
-  results.push_back(base::MakeUnique<PasswordForm>(form));
-  results.push_back(base::MakeUnique<PasswordForm>(android_form));
+  results.push_back(std::make_unique<PasswordForm>(psl_form));
+  results.push_back(std::make_unique<PasswordForm>(form));
+  results.push_back(std::make_unique<PasswordForm>(android_form));
   migrator.OnGetPasswordStoreResults(std::move(results));
 }
 
@@ -190,7 +193,7 @@ void HttpPasswordStoreMigratorTest::TestMigratorDeletionByConsumer(
 
   // Construct the migrator, call |OnGetPasswordStoreResults| explicitly and
   // manually delete it.
-  auto migrator = base::MakeUnique<HttpPasswordStoreMigrator>(
+  auto migrator = std::make_unique<HttpPasswordStoreMigrator>(
       GURL(kTestHttpsURL), &client(), &consumer());
   migrator->OnGetPasswordStoreResults(
       std::vector<std::unique_ptr<autofill::PasswordForm>>());
@@ -203,7 +206,7 @@ void HttpPasswordStoreMigratorTest::TestMigratorDeletionByConsumer(
   // posted from |PasswordStore::RemoveSiteStats|. Hence the following lines are
   // necessary to ensure |RemoveSiteStatsImpl| gets called when expected.
   EXPECT_CALL(store(), RemoveSiteStatsImpl(GURL(kTestHttpURL))).Times(is_hsts);
-  base::RunLoop().RunUntilIdle();
+  WaitForPasswordStore();
 }
 
 TEST_F(HttpPasswordStoreMigratorTest, EmptyStoreWithHSTS) {

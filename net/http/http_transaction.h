@@ -13,6 +13,8 @@
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
 #include "net/base/upload_progress.h"
+#include "net/http/http_raw_request_headers.h"
+#include "net/http/http_response_headers.h"
 #include "net/socket/connection_attempts.h"
 #include "net/websockets/websocket_handshake_stream_base.h"
 
@@ -122,6 +124,8 @@ class NET_EXPORT_PRIVATE HttpTransaction {
                    const CompletionCallback& callback) = 0;
 
   // Stops further caching of this request by the HTTP cache, if there is any.
+  // Note that this is merely a hint to the transaction which it may choose to
+  // ignore.
   virtual void StopCaching() = 0;
 
   // Gets the full request headers sent to the server.  This is guaranteed to
@@ -191,6 +195,9 @@ class NET_EXPORT_PRIVATE HttpTransaction {
   // are to be sent.
   virtual void SetBeforeHeadersSentCallback(
       const BeforeHeadersSentCallback& callback) = 0;
+
+  virtual void SetRequestHeadersCallback(RequestHeadersCallback callback) = 0;
+  virtual void SetResponseHeadersCallback(ResponseHeadersCallback callback) = 0;
 
   // Resumes the transaction after being deferred.
   virtual int ResumeNetworkStart() = 0;

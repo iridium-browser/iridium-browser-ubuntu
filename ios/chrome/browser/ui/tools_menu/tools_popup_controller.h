@@ -7,6 +7,7 @@
 
 #import <UIKit/UIKit.h>
 
+#include "base/ios/block_types.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_controller.h"
 
 // The a11y ID of the tools menu table view (used by integration tests).
@@ -25,9 +26,14 @@ extern NSString* const kToolsMenuTableViewId;
 
 // Initializes the popup with the given |configuration|, a set of information
 // used to determine the appearance of the menu and the entries displayed.
-- (instancetype)initWithConfiguration:(ToolsMenuConfiguration*)configuration
-                           dispatcher:(id<ApplicationCommands, BrowserCommands>)
-                                          dispatcher;
+// The popup will be presented immediately with an animation, and the
+// |animationCompletion| block will be called when the presentation animation
+// is finished.
+- (instancetype)
+initAndPresentWithConfiguration:(ToolsMenuConfiguration*)configuration
+                     dispatcher:
+                         (id<ApplicationCommands, BrowserCommands>)dispatcher
+                     completion:(ProceduralBlock)animationCompletion;
 
 // Called when the current tab loading state changes.
 - (void)setIsTabLoading:(BOOL)isTabLoading;
@@ -41,9 +47,6 @@ extern NSString* const kToolsMenuTableViewId;
 
 // Informs tools popup menu whether "Share..." command should be enabled.
 - (void)setCanShowShareMenu:(BOOL)enabled;
-
-// Informs tools popup menu whether the switch to reader mode is possible.
-- (void)setCanUseReaderMode:(BOOL)enabled;
 
 @end
 

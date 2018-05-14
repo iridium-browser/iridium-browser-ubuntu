@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -8,7 +9,6 @@ from __future__ import print_function
 
 import json
 import os
-import socket
 
 from chromite.cbuildbot import commands
 from chromite.lib import failures_lib
@@ -21,8 +21,6 @@ from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import timeout_util
-from chromite.lib.paygen import dryrun_lib
-from chromite.lib.paygen import gslib
 from chromite.lib.paygen import gspaths
 from chromite.lib.paygen import paygen_build_lib
 
@@ -381,7 +379,7 @@ class PaygenStage(generic_stages.BoardSpecificBuilderStage):
     except  paygen_build_lib.BoardNotConfigured:
       raise PaygenNoPaygenConfigForBoard(
           'Golden Eye (%s) has no entry for board %s. Get a TPM to fix.' %
-          (paygen_build_lib.BOARDS_URI, board))
+          (paygen_build_lib.PAYGEN_URI, board))
 
     # Default to False, set to True if it's a canary type build
     skip_duts_check = False
@@ -451,86 +449,128 @@ class PaygenBuildStage(generic_stages.BoardSpecificBuilderStage):
         # Generate the payloads.
         self._PrintLoudly('Starting %s, %s, %s' % (self.channel, self.version,
                                                    self.board))
-        metadata = paygen_build_lib.CreatePayloads(
+        paygen = paygen_build_lib.PaygenBuild(
             build,
             work_dir=tempdir,
             site_config=self._run.site_config,
             dry_run=self.debug,
-            run_parallel=True,
             skip_delta_payloads=self.skip_delta_payloads,
-            disable_tests=self.skip_testing,
             skip_duts_check=self.skip_duts_check)
-        suite_name, archive_board, archive_build, finished_uri = metadata
+
+        testdata = paygen.CreatePayloads()
 
         # Now, schedule the payload tests if desired.
         if not self.skip_testing:
-          models = [archive_board]
-          # For unified builds, we need to use an explicit model since only
-          # those will actually exist in the hardware test farm.
+          suite_name, archive_board, archive_build = testdata
+
+          # For unified builds, only test against the specified models.
           if self._run.config.models:
-            models = self._run.config.models
+            models = []
+            for model in self._run.config.models:
+              # 'au' is a test suite generated in ge_build_config.json
+              if model.test_suites and 'au' in model.test_suites:
+                models.append(model)
 
-          # Paygen tests only need to be run on one model for a given
-          # reference board.
-          # If we add richer labels to Autotest platforms that differentiate
-          # models from boards, we can let Autotest choose for us in the
-          # future from all models for a given reference board.
-          PaygenTestStage(
-              self._run, suite_name, models[0], self.channel,
-              archive_build, finished_uri, self.skip_duts_check,
-              self.debug).Run()
+            if len(models) > 1:
+              stages = [PaygenTestStage(
+                  self._run,
+                  suite_name,
+                  archive_board,
+                  model.name,
+                  model.lab_board_name,
+                  self.channel,
+                  archive_build,
+                  self.skip_duts_check,
+                  self.debug) for model in models]
+              steps = [stage.Run for stage in stages]
+              parallel.RunParallelSteps(steps)
+            elif len(models) == 1:
+              PaygenTestStage(
+                  self._run,
+                  suite_name,
+                  archive_board,
+                  models[0].name,
+                  models[0].lab_board_name,
+                  self.channel,
+                  archive_build,
+                  self.skip_duts_check,
+                  self.debug).Run()
+          else:
+            PaygenTestStage(
+                self._run,
+                suite_name,
+                archive_board,
+                None,
+                archive_board,
+                self.channel,
+                archive_build,
+                self.skip_duts_check,
+                self.debug).Run()
 
-      except (paygen_build_lib.BuildFinished,
-              paygen_build_lib.BuildLocked) as e:
-        # These errors are normal if it's possible that another builder is, or
-        # has processed the same build. (perhaps by a trybot generating payloads
-        # on request).
-        #
-        # This means the build was finished by the other process, or is already
-        # being processed (so the build is locked).
+
+
+      except (paygen_build_lib.BuildLocked) as e:
+        # These errors are normal if it's possible that another builder is
+        # processing the same build. (perhaps by a trybot generating payloads on
+        # request).
         logging.info('PaygenBuild for %s skipped because: %s', self.channel, e)
 
 
 class PaygenTestStage(generic_stages.BoardSpecificBuilderStage):
   """Stage that schedules the payload tests."""
-  def __init__(self, builder_run, suite_name, board, channel, build,
-               finished_uri, skip_duts_check, debug, **kwargs):
+  def __init__(
+      self,
+      builder_run,
+      suite_name,
+      board,
+      model,
+      lab_board_name,
+      channel,
+      build,
+      skip_duts_check,
+      debug,
+      **kwargs):
     """Init that accepts the channels argument, if present.
 
     Args:
       builder_run: See builder_run on ArchiveStage
       suite_name: See builder_run on ArchiveStage
-      board: Board of payloads to generate ('x86-mario', 'x86-alex-he', etc)
+      board: Board overlay name.
+      model: Model that will be tested. ('reef', 'pyro', etc)
+      lab_board_name: The actual board label tested against in Autotest
       channel: Channel of payloads to generate ('stable', 'beta', etc)
       build: Version of payloads to generate.
-      finished_uri: GS URI of the finished flag to create on success.
       skip_duts_check: Do not check minimum available DUTs before tests.
       debug: Boolean indicating if this is a test run or a real run.
     """
     self.suite_name = suite_name
     self.board = board
+    self.model = model
+    self.lab_board_name = lab_board_name
+
     self.build = build
-    self.finished_uri = finished_uri
     self.skip_duts_check = skip_duts_check
     self.debug = debug
     # We don't need the '-channel'suffix.
     if channel.endswith('-channel'):
       channel = channel[0:-len('-channel')]
+    suffix = channel.capitalize()
+    if model:
+      suffix += ' [%s]' % model
+
     super(PaygenTestStage, self).__init__(
-        builder_run, board, suffix=channel.capitalize(), **kwargs)
-    self._drm = dryrun_lib.DryRunMgr(self.debug)
+        builder_run, board, suffix=suffix, **kwargs)
 
   def PerformStage(self):
     """Schedule the tests to run."""
     # Schedule the tests to run and wait for the results.
-    paygen_build_lib.ScheduleAutotestTests(self.suite_name, self.board,
-                                           self.build, self.skip_duts_check,
+    paygen_build_lib.ScheduleAutotestTests(self.suite_name,
+                                           self.lab_board_name,
+                                           self.model,
+                                           self.build,
+                                           self.skip_duts_check,
                                            self.debug,
                                            job_keyvals=self.GetJobKeyvals())
-
-    # Mark the build as finished since the payloads were generated, uploaded,
-    # and tested by this point.
-    self._drm(gslib.CreateWithContents, self.finished_uri, socket.gethostname())
 
   def _HandleStageException(self, exc_info):
     """Override and don't set status to FAIL but FORGIVEN instead."""

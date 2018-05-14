@@ -6,8 +6,8 @@
 
 #include <memory>
 #include <utility>
-#include "core/EventTypeNames.h"
 #include "core/dom/Document.h"
+#include "core/event_type_names.h"
 #include "core/frame/DOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "modules/app_banner/BeforeInstallPromptEvent.h"
@@ -15,7 +15,6 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/Referrer.h"
 #include "platform/weborigin/SecurityPolicy.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
@@ -27,7 +26,7 @@ void AppBannerController::BindMojoRequest(
     mojom::blink::AppBannerControllerRequest request) {
   DCHECK(frame);
 
-  mojo::MakeStrongBinding(WTF::WrapUnique(new AppBannerController(*frame)),
+  mojo::MakeStrongBinding(std::make_unique<AppBannerController>(*frame),
                           std::move(request));
 }
 

@@ -38,11 +38,11 @@ class CPDFSDK_BAAnnot : public CPDFSDK_Annot {
 
   CPDF_Dictionary* GetAPDict() const;
 
-  void SetContents(const CFX_WideString& sContents);
-  CFX_WideString GetContents() const;
+  void SetContents(const WideString& sContents);
+  WideString GetContents() const;
 
-  void SetAnnotName(const CFX_WideString& sName);
-  CFX_WideString GetAnnotName() const;
+  void SetAnnotName(const WideString& sName);
+  WideString GetAnnotName() const;
 
   void SetModifiedDate(const FX_SYSTEMTIME& st);
   FX_SYSTEMTIME GetModifiedDate() const;
@@ -50,8 +50,8 @@ class CPDFSDK_BAAnnot : public CPDFSDK_Annot {
   void SetFlags(uint32_t nFlags);
   uint32_t GetFlags() const;
 
-  void SetAppState(const CFX_ByteString& str);
-  CFX_ByteString GetAppState() const;
+  void SetAppState(const ByteString& str);
+  ByteString GetAppState() const;
 
   void SetStructParent(int key);
   int GetStructParent() const;
@@ -80,7 +80,7 @@ class CPDFSDK_BAAnnot : public CPDFSDK_Annot {
   virtual bool IsAppearanceValid();
   virtual bool IsAppearanceValid(CPDF_Annot::AppearanceMode mode);
   virtual void DrawAppearance(CFX_RenderDevice* pDevice,
-                              const CFX_Matrix* pUser2Device,
+                              const CFX_Matrix& mtUser2Device,
                               CPDF_Annot::AppearanceMode mode,
                               const CPDF_RenderOptions* pOptions);
 
@@ -92,8 +92,10 @@ class CPDFSDK_BAAnnot : public CPDFSDK_Annot {
 
   void SetOpenState(bool bState);
 
+  int GetLayoutOrder() const override;
+
  protected:
-  CFX_UnownedPtr<CPDF_Annot> const m_pAnnot;
+  UnownedPtr<CPDF_Annot> const m_pAnnot;
 };
 
 #endif  // FPDFSDK_CPDFSDK_BAANNOT_H_

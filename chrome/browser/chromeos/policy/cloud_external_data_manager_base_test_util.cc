@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
@@ -35,9 +34,9 @@ std::unique_ptr<base::DictionaryValue> ConstructExternalDataReference(
     const std::string& data) {
   const std::string hash = crypto::SHA256HashString(data);
   std::unique_ptr<base::DictionaryValue> metadata(new base::DictionaryValue);
-  metadata->SetStringWithoutPathExpansion("url", url);
-  metadata->SetStringWithoutPathExpansion("hash", base::HexEncode(hash.c_str(),
-                                                                  hash.size()));
+  metadata->SetKey("url", base::Value(url));
+  metadata->SetKey("hash",
+                   base::Value(base::HexEncode(hash.c_str(), hash.size())));
   return metadata;
 }
 
@@ -49,7 +48,7 @@ void SetExternalDataReference(CloudPolicyCore* core,
   PolicyMap policy_map;
   policy_map.Set(policy, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                  POLICY_SOURCE_CLOUD, std::move(metadata),
-                 base::MakeUnique<ExternalDataFetcher>(
+                 std::make_unique<ExternalDataFetcher>(
                      store->external_data_manager(), policy));
   store->SetPolicyMapForTesting(policy_map);
 }

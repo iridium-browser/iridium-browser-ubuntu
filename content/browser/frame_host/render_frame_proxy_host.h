@@ -9,6 +9,7 @@
 
 #include <memory>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "content/browser/site_instance_impl.h"
 #include "ipc/ipc_listener.h"
@@ -17,6 +18,14 @@
 
 struct FrameHostMsg_OpenURL_Params;
 struct FrameMsg_PostMessage_Params;
+
+namespace blink {
+struct WebScrollIntoViewParams;
+}
+
+namespace gfx {
+class Rect;
+}
 
 namespace content {
 
@@ -57,6 +66,8 @@ class RenderFrameProxyHost
     : public IPC::Listener,
       public IPC::Sender {
  public:
+  using DestructionCallback = base::OnceClosure;
+
   static RenderFrameProxyHost* FromID(int process_id, int routing_id);
 
   RenderFrameProxyHost(SiteInstance* site_instance,
@@ -82,7 +93,13 @@ class RenderFrameProxyHost
 
   FrameTreeNode* frame_tree_node() const { return frame_tree_node_; };
 
-  void SetChildRWHView(RenderWidgetHostView* view);
+  // Associates the RenderWidgetHostViewChildFrame |view| with this
+  // RenderFrameProxyHost. If |initial_frame_size| isn't specified at this time,
+  // the child frame will wait until the CrossProcessFrameConnector
+  // receives its size from the parent via FrameHostMsg_UpdateResizeParams
+  // before it begins parsing the content.
+  void SetChildRWHView(RenderWidgetHostView* view,
+                       const gfx::Size* initial_frame_size);
 
   RenderViewHostImpl* GetRenderViewHost();
   RenderWidgetHostView* GetRenderWidgetHostView();
@@ -107,6 +124,13 @@ class RenderFrameProxyHost
   // becomes focused.
   void SetFocusedFrame();
 
+  // Scroll |rect_to_scroll| into view, starting from this proxy's FrameOwner
+  // element in the frame's parent. Calling this continues a scroll started in
+  // the frame's current process. |rect_to_scroll| is with respect to the
+  // coordinates of the originating frame in OOPIF process.
+  void ScrollRectToVisible(const gfx::Rect& rect_to_scroll,
+                           const blink::WebScrollIntoViewParams& params);
+
   void set_render_frame_proxy_created(bool created) {
     render_frame_proxy_created_ = created;
   }
@@ -114,14 +138,19 @@ class RenderFrameProxyHost
   // Returns if the RenderFrameProxy for this host is alive.
   bool is_render_frame_proxy_live() { return render_frame_proxy_created_; }
 
+  // Sets a callback that is run when this is destroyed.
+  void SetDestructionCallback(DestructionCallback destruction_callback);
+
  private:
   // IPC Message handlers.
   void OnDetach();
   void OnOpenURL(const FrameHostMsg_OpenURL_Params& params);
+  void OnCheckCompleted();
   void OnRouteMessageEvent(const FrameMsg_PostMessage_Params& params);
   void OnDidChangeOpener(int32_t opener_routing_id);
   void OnAdvanceFocus(blink::WebFocusType type, int32_t source_routing_id);
   void OnFrameFocused();
+  void OnPrintCrossProcessSubframe(const gfx::Rect& rect, int document_cookie);
 
   // This RenderFrameProxyHost's routing id.
   int routing_id_;
@@ -151,6 +180,8 @@ class RenderFrameProxyHost
   // kept alive as long as any RenderFrameHosts or RenderFrameProxyHosts
   // are associated with it.
   RenderViewHostImpl* render_view_host_;
+
+  DestructionCallback destruction_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderFrameProxyHost);
 };

@@ -15,9 +15,9 @@ const float kDragFeedbackRadius = 55.f;
 
 }  // namespace
 
-DirectTouchInputStrategy::DirectTouchInputStrategy() {}
+DirectTouchInputStrategy::DirectTouchInputStrategy() = default;
 
-DirectTouchInputStrategy::~DirectTouchInputStrategy() {}
+DirectTouchInputStrategy::~DirectTouchInputStrategy() = default;
 
 void DirectTouchInputStrategy::HandleZoom(const ViewMatrix::Point& pivot,
                                           float scale,
@@ -57,6 +57,11 @@ bool DirectTouchInputStrategy::TrackTouchInput(
 
 ViewMatrix::Point DirectTouchInputStrategy::GetCursorPosition() const {
   return cursor_position_;
+}
+
+void DirectTouchInputStrategy::FocusViewportOnCursor(
+    DesktopViewport* viewport) const {
+  // No need to focus on the previous touch point.
 }
 
 ViewMatrix::Vector2D DirectTouchInputStrategy::MapScreenVectorToDesktop(

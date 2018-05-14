@@ -8,14 +8,32 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_CALL_RTP_TRANSPORT_CONTROLLER_SEND_INTERFACE_H_
-#define WEBRTC_CALL_RTP_TRANSPORT_CONTROLLER_SEND_INTERFACE_H_
+#ifndef CALL_RTP_TRANSPORT_CONTROLLER_SEND_INTERFACE_H_
+#define CALL_RTP_TRANSPORT_CONTROLLER_SEND_INTERFACE_H_
+#include <stddef.h>
+#include <stdint.h>
 
+#include <string>
+
+#include "api/optional.h"
+#include "call/bitrate_constraints.h"
+
+namespace rtc {
+struct SentPacket;
+struct NetworkRoute;
+}  // namespace rtc
 namespace webrtc {
 
+class CallStatsObserver;
+class NetworkChangedObserver;
+class Module;
+class PacedSender;
+class PacketFeedbackObserver;
 class PacketRouter;
+class RateLimiter;
+class RtcpBandwidthObserver;
 class RtpPacketSender;
-class SendSideCongestionController;
+struct RtpKeepAliveConfig;
 class TransportFeedbackObserver;
 
 // An RtpTransportController should own everything related to the RTP
@@ -45,13 +63,54 @@ class RtpTransportControllerSendInterface {
  public:
   virtual ~RtpTransportControllerSendInterface() {}
   virtual PacketRouter* packet_router() = 0;
-  // Currently returning the same pointer, but with different types.
-  virtual SendSideCongestionController* send_side_cc() = 0;
   virtual TransportFeedbackObserver* transport_feedback_observer() = 0;
 
   virtual RtpPacketSender* packet_sender() = 0;
+  virtual const RtpKeepAliveConfig& keepalive_config() const = 0;
+
+  // SetAllocatedSendBitrateLimits sets bitrates limits imposed by send codec
+  // settings.
+  // |min_send_bitrate_bps| is the total minimum send bitrate required by all
+  // sending streams.  This is the minimum bitrate the PacedSender will use.
+  // Note that SendSideCongestionController::OnNetworkChanged can still be
+  // called with a lower bitrate estimate. |max_padding_bitrate_bps| is the max
+  // bitrate the send streams request for padding. This can be higher than the
+  // current network estimate and tells the PacedSender how much it should max
+  // pad unless there is real packets to send.
+  virtual void SetAllocatedSendBitrateLimits(int min_send_bitrate_bps,
+                                             int max_padding_bitrate_bps) = 0;
+
+  virtual void SetPacingFactor(float pacing_factor) = 0;
+  virtual void SetQueueTimeLimit(int limit_ms) = 0;
+
+  virtual CallStatsObserver* GetCallStatsObserver() = 0;
+
+  virtual void RegisterPacketFeedbackObserver(
+      PacketFeedbackObserver* observer) = 0;
+  virtual void DeRegisterPacketFeedbackObserver(
+      PacketFeedbackObserver* observer) = 0;
+  virtual void RegisterNetworkObserver(NetworkChangedObserver* observer) = 0;
+  virtual void DeRegisterNetworkObserver(NetworkChangedObserver* observer) = 0;
+  virtual void OnNetworkRouteChanged(
+      const std::string& transport_name,
+      const rtc::NetworkRoute& network_route) = 0;
+  virtual void OnNetworkAvailability(bool network_available) = 0;
+  virtual void SetTransportOverhead(
+      size_t transport_overhead_bytes_per_packet) = 0;
+  virtual RtcpBandwidthObserver* GetBandwidthObserver() = 0;
+  virtual bool AvailableBandwidth(uint32_t* bandwidth) const = 0;
+  virtual int64_t GetPacerQueuingDelayMs() const = 0;
+  virtual int64_t GetFirstPacketTimeMs() const = 0;
+  virtual RateLimiter* GetRetransmissionRateLimiter() = 0;
+  virtual void EnablePeriodicAlrProbing(bool enable) = 0;
+  virtual void OnSentPacket(const rtc::SentPacket& sent_packet) = 0;
+
+  virtual void SetSdpBitrateParameters(
+      const BitrateConstraints& constraints) = 0;
+  virtual void SetClientBitratePreferences(
+      const BitrateConstraintsMask& preferences) = 0;
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_CALL_RTP_TRANSPORT_CONTROLLER_SEND_INTERFACE_H_
+#endif  // CALL_RTP_TRANSPORT_CONTROLLER_SEND_INTERFACE_H_

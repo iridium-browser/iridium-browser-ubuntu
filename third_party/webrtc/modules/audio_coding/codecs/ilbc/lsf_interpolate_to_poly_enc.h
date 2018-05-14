@@ -16,10 +16,10 @@
 
 ******************************************************************/
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_LSF_INTERPOLATE_TO_POLY_ENC_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_LSF_INTERPOLATE_TO_POLY_ENC_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_LSF_INTERPOLATE_TO_POLY_ENC_H_
+#define MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_LSF_INTERPOLATE_TO_POLY_ENC_H_
 
-#include "defines.h"
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  *  lsf interpolator and conversion from lsf to a coefficients

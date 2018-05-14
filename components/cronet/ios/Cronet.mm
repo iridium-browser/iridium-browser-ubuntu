@@ -11,16 +11,22 @@
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/scoped_block.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/synchronization/lock.h"
+#include "components/cronet/cronet_global_state.h"
 #include "components/cronet/ios/accept_languages_table.h"
 #include "components/cronet/ios/cronet_environment.h"
+#include "components/cronet/ios/cronet_metrics.h"
 #include "components/cronet/url_request_context_config.h"
 #include "ios/net/crn_http_protocol_handler.h"
 #include "ios/net/empty_nsurlcache.h"
+#include "net/base/url_util.h"
 #include "net/cert/cert_verifier.h"
 #include "net/url_request/url_request_context_getter.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 // Cronet NSError constants.
 NSString* const CRNCronetErrorDomain = @"CRNCronetErrorDomain";
@@ -38,28 +44,33 @@ using QuicHintVector =
 base::LazyInstance<std::unique_ptr<cronet::CronetEnvironment>>::Leaky
     gChromeNet = LAZY_INSTANCE_INITIALIZER;
 
-// TODO(lilyhoughton) make these independent across Cronet instances, i.e.:
-// refresh them on shutdown, and add tests to make sure the defaults are
-// sane.
-BOOL gHttp2Enabled = YES;
-BOOL gQuicEnabled = NO;
-BOOL gBrotliEnabled = NO;
-cronet::URLRequestContextConfig::HttpCacheType gHttpCache =
-    cronet::URLRequestContextConfig::HttpCacheType::DISK;
-QuicHintVector gQuicHints;
-NSString* gExperimentalOptions = @"{}";
-NSString* gUserAgent = nil;
-BOOL gUserAgentPartial = NO;
-NSString* gSslKeyLogFileName = nil;
-std::vector<std::unique_ptr<cronet::URLRequestContextConfig::Pkp>> gPkpList;
-RequestFilterBlock gRequestFilterBlock = nil;
 base::LazyInstance<std::unique_ptr<CronetHttpProtocolHandlerDelegate>>::Leaky
     gHttpProtocolHandlerDelegate = LAZY_INSTANCE_INITIALIZER;
-NSURLCache* gPreservedSharedURLCache = nil;
-BOOL gEnableTestCertVerifierForTesting = NO;
+
+base::LazyInstance<std::unique_ptr<cronet::CronetMetricsDelegate>>::Leaky
+    gMetricsDelegate = LAZY_INSTANCE_INITIALIZER;
+
+// See [Cronet initialize] method to set the default values of the global
+// variables.
+BOOL gHttp2Enabled;
+BOOL gQuicEnabled;
+BOOL gBrotliEnabled;
+BOOL gMetricsEnabled;
+cronet::URLRequestContextConfig::HttpCacheType gHttpCache;
+QuicHintVector gQuicHints;
+NSString* gExperimentalOptions;
+NSString* gUserAgent;
+BOOL gUserAgentPartial;
+double gNetworkThreadPriority;
+NSString* gSslKeyLogFileName;
+std::vector<std::unique_ptr<cronet::URLRequestContextConfig::Pkp>> gPkpList;
+RequestFilterBlock gRequestFilterBlock;
+NSURLCache* gPreservedSharedURLCache;
+BOOL gEnableTestCertVerifierForTesting;
 std::unique_ptr<net::CertVerifier> gMockCertVerifier;
-NSString* gAcceptLanguages = nil;
-BOOL gEnablePKPBypassForLocalTrustAnchors = YES;
+NSString* gAcceptLanguages;
+BOOL gEnablePKPBypassForLocalTrustAnchors;
+dispatch_once_t gSwizzleOnceToken;
 
 // CertVerifier, which allows any certificates for testing.
 class TestCertVerifier : public net::CertVerifier {
@@ -82,11 +93,11 @@ class CronetHttpProtocolHandlerDelegate
  public:
   CronetHttpProtocolHandlerDelegate(net::URLRequestContextGetter* getter,
                                     RequestFilterBlock filter)
-      : getter_(getter), filter_(filter, base::scoped_policy::RETAIN) {}
+      : getter_(getter), filter_(filter) {}
 
   void SetRequestFilterBlock(RequestFilterBlock filter) {
     base::AutoLock auto_lock(lock_);
-    filter_.reset(filter, base::scoped_policy::RETAIN);
+    filter_.reset(filter);
   }
 
  private:
@@ -127,7 +138,7 @@ class CronetHttpProtocolHandlerDelegate
     (cronet::CronetEnvironment*)cronetEnvironment {
   if (gEnableTestCertVerifierForTesting) {
     std::unique_ptr<TestCertVerifier> test_cert_verifier =
-        base::MakeUnique<TestCertVerifier>();
+        std::make_unique<TestCertVerifier>();
     cronetEnvironment->set_mock_cert_verifier(std::move(test_cert_verifier));
   }
   if (gMockCertVerifier) {
@@ -185,11 +196,29 @@ class CronetHttpProtocolHandlerDelegate
   gBrotliEnabled = brotliEnabled;
 }
 
-+ (void)addQuicHint:(NSString*)host port:(int)port altPort:(int)altPort {
++ (void)setMetricsEnabled:(BOOL)metricsEnabled {
   [self checkNotStarted];
+  gMetricsEnabled = metricsEnabled;
+}
+
++ (BOOL)addQuicHint:(NSString*)host port:(int)port altPort:(int)altPort {
+  [self checkNotStarted];
+
+  std::string quic_host = base::SysNSStringToUTF8(host);
+
+  url::CanonHostInfo host_info;
+  std::string canon_host(net::CanonicalizeHost(quic_host, &host_info));
+  if (!host_info.IsIPAddress() &&
+      !net::IsCanonicalizedHostCompliant(canon_host)) {
+    LOG(ERROR) << "Invalid QUIC hint host: " << quic_host;
+    return NO;
+  }
+
   gQuicHints.push_back(
-      base::MakeUnique<cronet::URLRequestContextConfig::QuicHint>(
-          base::SysNSStringToUTF8(host), port, altPort));
+      std::make_unique<cronet::URLRequestContextConfig::QuicHint>(
+          quic_host, port, altPort));
+
+  return YES;
 }
 
 + (void)setExperimentalOptions:(NSString*)experimentalOptions {
@@ -241,13 +270,15 @@ class CronetHttpProtocolHandlerDelegate
 
   // Pinning a key only makes sense if pin bypassing has been disabled
   if (gEnablePKPBypassForLocalTrustAnchors) {
-    *outError =
-        [self createUnsupportedConfigurationError:
-                  @"Cannot pin keys while public key pinning is bypassed"];
+    if (outError != nil) {
+      *outError =
+          [self createUnsupportedConfigurationError:
+                    @"Cannot pin keys while public key pinning is bypassed"];
+    }
     return NO;
   }
 
-  auto pkp = base::MakeUnique<cronet::URLRequestContextConfig::Pkp>(
+  auto pkp = std::make_unique<cronet::URLRequestContextConfig::Pkp>(
       base::SysNSStringToUTF8(host), includeSubdomains,
       base::Time::FromCFAbsoluteTime(
           [expirationDate timeIntervalSinceReferenceDate]));
@@ -276,6 +307,14 @@ class CronetHttpProtocolHandlerDelegate
   gEnablePKPBypassForLocalTrustAnchors = enable;
 }
 
++ (base::SingleThreadTaskRunner*)getFileThreadRunnerForTesting {
+  return gChromeNet.Get()->GetFileThreadRunnerForTesting();
+}
+
++ (base::SingleThreadTaskRunner*)getNetworkThreadRunnerForTesting {
+  return gChromeNet.Get()->GetNetworkThreadRunnerForTesting();
+}
+
 + (void)startInternal {
   std::string user_agent = base::SysNSStringToUTF8(gUserAgent);
 
@@ -297,6 +336,10 @@ class CronetHttpProtocolHandlerDelegate
   gChromeNet.Get()
       ->set_enable_public_key_pinning_bypass_for_local_trust_anchors(
           gEnablePKPBypassForLocalTrustAnchors);
+  if (gNetworkThreadPriority !=
+      cronet::CronetEnvironment::kKeepDefaultThreadPriority) {
+    gChromeNet.Get()->SetNetworkThreadPriority(gNetworkThreadPriority);
+  }
   for (const auto& quicHint : gQuicHints) {
     gChromeNet.Get()->AddQuicHint(quicHint->host, quicHint->port,
                                   quicHint->alternate_port);
@@ -309,26 +352,35 @@ class CronetHttpProtocolHandlerDelegate
           gChromeNet.Get()->GetURLRequestContextGetter(), gRequestFilterBlock));
   net::HTTPProtocolHandlerDelegate::SetInstance(
       gHttpProtocolHandlerDelegate.Get().get());
+
+  if (gMetricsEnabled) {
+    gMetricsDelegate.Get().reset(new cronet::CronetMetricsDelegate());
+    net::MetricsDelegate::SetInstance(gMetricsDelegate.Get().get());
+
+    dispatch_once(&gSwizzleOnceToken, ^{
+      cronet::SwizzleSessionWithConfiguration();
+    });
+  } else {
+    net::MetricsDelegate::SetInstance(nullptr);
+  }
+
   gRequestFilterBlock = nil;
 }
 
 + (void)start {
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    if (![NSThread isMainThread]) {
-      dispatch_sync(dispatch_get_main_queue(), ^(void) {
-        cronet::CronetEnvironment::Initialize();
-      });
-    } else {
-      cronet::CronetEnvironment::Initialize();
-    }
-  });
-
+  cronet::EnsureInitialized();
   [self startInternal];
 }
 
++ (void)unswizzleForTesting {
+  if (gSwizzleOnceToken)
+    cronet::SwizzleSessionWithConfiguration();
+  gSwizzleOnceToken = 0;
+}
+
 + (void)shutdownForTesting {
-  gChromeNet.Get().reset();
+  [Cronet unswizzleForTesting];
+  [Cronet initialize];
 }
 
 + (void)registerHttpProtocolHandler {
@@ -386,6 +438,13 @@ class CronetHttpProtocolHandlerDelegate
 
   return [NSString stringWithCString:gChromeNet.Get()->user_agent().c_str()
                             encoding:[NSString defaultCStringEncoding]];
+}
+
++ (void)setNetworkThreadPriority:(double)priority {
+  gNetworkThreadPriority = priority;
+  if (gChromeNet.Get()) {
+    gChromeNet.Get()->SetNetworkThreadPriority(priority);
+  };
 }
 
 + (stream_engine*)getGlobalEngine {
@@ -465,6 +524,32 @@ class CronetHttpProtocolHandlerDelegate
   return [NSError errorWithDomain:CRNCronetErrorDomain
                              code:errorCode
                          userInfo:userInfo];
+}
+
+// Static class initializer.
++ (void)initialize {
+  gChromeNet.Get().reset();
+  gHttp2Enabled = YES;
+  gQuicEnabled = NO;
+  gBrotliEnabled = NO;
+  gMetricsEnabled = NO;
+  gHttpCache = cronet::URLRequestContextConfig::HttpCacheType::DISK;
+  gQuicHints.clear();
+  gExperimentalOptions = @"{}";
+  gUserAgent = nil;
+  gUserAgentPartial = NO;
+  gNetworkThreadPriority =
+      cronet::CronetEnvironment::kKeepDefaultThreadPriority;
+  gSslKeyLogFileName = nil;
+  gPkpList.clear();
+  gRequestFilterBlock = nil;
+  gHttpProtocolHandlerDelegate.Get().reset(nullptr);
+  gMetricsDelegate.Get().reset(nullptr);
+  gPreservedSharedURLCache = nil;
+  gEnableTestCertVerifierForTesting = NO;
+  gMockCertVerifier.reset(nullptr);
+  gAcceptLanguages = nil;
+  gEnablePKPBypassForLocalTrustAnchors = YES;
 }
 
 @end

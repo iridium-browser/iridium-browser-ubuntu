@@ -8,11 +8,10 @@
 #include <memory>
 #include <utility>
 
-#include "core/HTMLNames.h"
-#include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLElement.h"
+#include "core/html_names.h"
 #include "platform/Histogram.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/json/JSONParser.h"
@@ -295,9 +294,9 @@ WebPagePtr CopylessPasteExtractor::extract(const Document& document) {
   WebPagePtr page = WebPage::New();
 
   // Traverse the DOM tree and extract the metadata.
-  double start_time = MonotonicallyIncreasingTime();
+  double start_time = CurrentTimeTicksInSeconds();
   ExtractionStatus status = extractMetadata(*html, page->entities);
-  double elapsed_time = MonotonicallyIncreasingTime() - start_time;
+  double elapsed_time = CurrentTimeTicksInSeconds() - start_time;
 
   DEFINE_STATIC_LOCAL(EnumerationHistogram, status_histogram,
                       ("CopylessPaste.ExtractionStatus", kCount));

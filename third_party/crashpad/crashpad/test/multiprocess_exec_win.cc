@@ -57,12 +57,16 @@ void Multiprocess::Run() {
   CloseHandle(info_->process_info.hProcess);
 }
 
-Multiprocess::~Multiprocess() {
-  delete info_;
+void Multiprocess::SetExpectedChildTermination(TerminationReason reason,
+                                               int code) {
+  EXPECT_EQ(info_, nullptr)
+      << "SetExpectedChildTermination() must be called before Run()";
+  reason_ = reason;
+  code_ = code;
 }
 
-void Multiprocess::PreFork() {
-  NOTREACHED();
+Multiprocess::~Multiprocess() {
+  delete info_;
 }
 
 FileHandle Multiprocess::ReadPipeHandle() const {
@@ -102,7 +106,7 @@ MultiprocessExec::MultiprocessExec()
 }
 
 void MultiprocessExec::SetChildCommand(
-    const std::string& command,
+    const base::FilePath& command,
     const std::vector<std::string>* arguments) {
   command_ = command;
   if (arguments) {
@@ -119,7 +123,7 @@ void MultiprocessExec::PreFork() {
   ASSERT_FALSE(command_.empty());
 
   command_line_.clear();
-  AppendCommandLineArgument(base::UTF8ToUTF16(command_), &command_line_);
+  AppendCommandLineArgument(command_.value(), &command_line_);
   for (size_t i = 0; i < arguments_.size(); ++i) {
     AppendCommandLineArgument(base::UTF8ToUTF16(arguments_[i]), &command_line_);
   }
@@ -154,7 +158,7 @@ void MultiprocessExec::MultiprocessChild() {
   startup_info.hStdOutput = info()->pipe_c2p_write.get();
   startup_info.hStdError = GetStdHandle(STD_ERROR_HANDLE);
   startup_info.dwFlags = STARTF_USESTDHANDLES;
-  PCHECK(CreateProcess(base::UTF8ToUTF16(command_).c_str(),
+  PCHECK(CreateProcess(command_.value().c_str(),
                        &command_line_[0],  // This cannot be constant, per MSDN.
                        nullptr,
                        nullptr,
@@ -164,6 +168,10 @@ void MultiprocessExec::MultiprocessChild() {
                        nullptr,
                        &startup_info,
                        &info()->process_info));
+}
+
+ProcessType MultiprocessExec::ChildProcess() {
+  return info()->process_info.hProcess;
 }
 
 }  // namespace test

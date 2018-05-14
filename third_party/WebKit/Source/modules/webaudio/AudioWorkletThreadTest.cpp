@@ -5,50 +5,62 @@
 #include "modules/webaudio/AudioWorkletThread.h"
 
 #include <memory>
+#include "bindings/core/v8/ScriptModule.h"
 #include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/SourceLocation.h"
 #include "bindings/core/v8/V8CacheOptions.h"
 #include "bindings/core/v8/V8GCController.h"
 #include "bindings/core/v8/WorkerOrWorkletScriptController.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "core/origin_trials/OriginTrialContext.h"
+#include "core/testing/PageTestBase.h"
 #include "core/workers/GlobalScopeCreationParams.h"
 #include "core/workers/WorkerBackingThread.h"
+#include "core/workers/WorkerInspectorProxy.h"
 #include "core/workers/WorkerOrWorkletGlobalScope.h"
 #include "core/workers/WorkerReportingProxy.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/WaitableEvent.h"
 #include "platform/WebThreadSupportingGC.h"
 #include "platform/heap/Handle.h"
+#include "platform/loader/fetch/AccessControlStatus.h"
+#include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/testing/TestingPlatformSupport.h"
 #include "platform/testing/UnitTestHelpers.h"
-#include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/text/TextPosition.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebAddressSpace.h"
+#include "public/platform/WebURLRequest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
-class AudioWorkletThreadTest : public ::testing::Test {
+class AudioWorkletThreadTest : public PageTestBase {
  public:
   void SetUp() override {
     AudioWorkletThread::CreateSharedBackingThreadForTest();
-    reporting_proxy_ = WTF::MakeUnique<WorkerReportingProxy>();
-    security_origin_ =
-        SecurityOrigin::Create(KURL(kParsedURLString, "http://fake.url/"));
+    PageTestBase::SetUp(IntSize());
+    Document* document = &GetDocument();
+    document->SetURL(KURL("https://example.com/"));
+    document->UpdateSecurityOrigin(SecurityOrigin::Create(document->Url()));
+    reporting_proxy_ = std::make_unique<WorkerReportingProxy>();
   }
-
-  void TearDown() override { AudioWorkletThread::ClearSharedBackingThread(); }
 
   std::unique_ptr<AudioWorkletThread> CreateAudioWorkletThread() {
     std::unique_ptr<AudioWorkletThread> thread =
         AudioWorkletThread::Create(nullptr, *reporting_proxy_);
+    Document* document = &GetDocument();
     thread->Start(
-        WTF::MakeUnique<GlobalScopeCreationParams>(
-            KURL(kParsedURLString, "http://fake.url/"), "fake user agent", "",
-            nullptr, kDontPauseWorkerGlobalScopeOnStart, nullptr, "",
-            security_origin_.Get(), nullptr, kWebAddressSpaceLocal, nullptr,
-            nullptr, kV8CacheOptionsDefault),
-        WTF::nullopt, ParentFrameTaskRunners::Create());
+        std::make_unique<GlobalScopeCreationParams>(
+            document->Url(), document->UserAgent(),
+            nullptr /* content_security_policy_parsed_headers */,
+            document->GetReferrerPolicy(), document->GetSecurityOrigin(),
+            document->IsSecureContext(), nullptr /* worker_clients */,
+            document->AddressSpace(),
+            OriginTrialContext::GetTokens(document).get(),
+            base::UnguessableToken::Create(), nullptr /* worker_settings */,
+            kV8CacheOptionsDefault),
+        WTF::nullopt, WorkerInspectorProxy::PauseOnWorkerStart::kDontPause,
+        ParentFrameTaskRunners::Create());
     return thread;
   }
 
@@ -56,7 +68,7 @@ class AudioWorkletThreadTest : public ::testing::Test {
   void CheckWorkletCanExecuteScript(WorkerThread* thread) {
     WaitableEvent wait_event;
     thread->GetWorkerBackingThread().BackingThread().PostTask(
-        BLINK_FROM_HERE,
+        FROM_HERE,
         CrossThreadBind(&AudioWorkletThreadTest::ExecuteScriptInWorklet,
                         CrossThreadUnretained(this),
                         CrossThreadUnretained(thread),
@@ -66,14 +78,23 @@ class AudioWorkletThreadTest : public ::testing::Test {
 
  private:
   void ExecuteScriptInWorklet(WorkerThread* thread, WaitableEvent* wait_event) {
-    WorkerOrWorkletScriptController* script_controller =
-        thread->GlobalScope()->ScriptController();
-    script_controller->Evaluate(
-        ScriptSourceCode("var counter = 0; ++counter;"));
+    ScriptState* script_state =
+        thread->GlobalScope()->ScriptController()->GetScriptState();
+    EXPECT_TRUE(script_state);
+    ScriptState::Scope scope(script_state);
+    KURL js_url("https://example.com/worklet.js");
+    ScriptModule module = ScriptModule::Compile(
+        script_state->GetIsolate(), "var counter = 0; ++counter;", js_url,
+        js_url, ScriptFetchOptions(), kSharableCrossOrigin,
+        TextPosition::MinimumPosition(), ASSERT_NO_EXCEPTION);
+    EXPECT_FALSE(module.IsNull());
+    ScriptValue exception = module.Instantiate(script_state);
+    EXPECT_TRUE(exception.IsEmpty());
+    ScriptValue value = module.Evaluate(script_state);
+    EXPECT_TRUE(value.IsEmpty());
     wait_event->Signal();
   }
 
-  RefPtr<SecurityOrigin> security_origin_;
   std::unique_ptr<WorkerReportingProxy> reporting_proxy_;
 };
 

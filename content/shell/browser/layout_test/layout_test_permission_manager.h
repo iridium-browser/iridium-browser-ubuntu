@@ -9,7 +9,7 @@
 
 #include "base/callback_forward.h"
 #include "base/containers/hash_tables.h"
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/macros.h"
 #include "base/synchronization/lock.h"
 #include "content/public/browser/permission_manager.h"
@@ -38,7 +38,6 @@ class LayoutTestPermissionManager : public PermissionManager {
       const base::Callback<
           void(const std::vector<blink::mojom::PermissionStatus>&)>& callback)
       override;
-  void CancelPermissionRequest(int request_id) override;
   void ResetPermission(PermissionType permission,
                        const GURL& requesting_origin,
                        const GURL& embedding_origin) override;
@@ -56,8 +55,8 @@ class LayoutTestPermissionManager : public PermissionManager {
 
   void SetPermission(PermissionType permission,
                      blink::mojom::PermissionStatus status,
-                     const GURL& origin,
-                     const GURL& embedding_origin);
+                     const GURL& url,
+                     const GURL& embedding_url);
   void ResetPermissions();
 
  private:
@@ -81,7 +80,7 @@ class LayoutTestPermissionManager : public PermissionManager {
   };
 
   struct Subscription;
-  using SubscriptionsMap = IDMap<std::unique_ptr<Subscription>>;
+  using SubscriptionsMap = base::IDMap<std::unique_ptr<Subscription>>;
   using PermissionsMap = base::hash_map<PermissionDescription,
                                         blink::mojom::PermissionStatus,
                                         PermissionDescription::Hash>;

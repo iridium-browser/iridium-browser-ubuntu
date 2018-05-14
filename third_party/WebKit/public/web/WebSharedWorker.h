@@ -31,14 +31,17 @@
 #ifndef WebSharedWorker_h
 #define WebSharedWorker_h
 
-#include "public/platform/WebAddressSpace.h"
+#include "base/unguessable_token.h"
+#include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebContentSecurityPolicy.h"
+#include "third_party/WebKit/public/mojom/net/ip_address_space.mojom-shared.h"
 
 namespace blink {
 
+class MessagePortChannel;
 class WebString;
-class WebMessagePortChannel;
 class WebSharedWorkerClient;
 class WebURL;
 
@@ -50,30 +53,26 @@ class BLINK_EXPORT WebSharedWorker {
   // lifetime as this instance.
   static WebSharedWorker* Create(WebSharedWorkerClient*);
 
-  virtual void StartWorkerContext(const WebURL& script_url,
-                                  const WebString& name,
-                                  const WebString& content_security_policy,
-                                  WebContentSecurityPolicyType,
-                                  WebAddressSpace,
-                                  bool data_saver_enabled) = 0;
+  virtual void StartWorkerContext(
+      const WebURL& script_url,
+      const WebString& name,
+      const WebString& content_security_policy,
+      WebContentSecurityPolicyType,
+      mojom::IPAddressSpace,
+      const base::UnguessableToken& devtools_worker_token,
+      mojo::ScopedMessagePipeHandle content_settings_handle,
+      mojo::ScopedMessagePipeHandle interface_provider) = 0;
 
   // Sends a connect event to the SharedWorker context.
-  virtual void Connect(std::unique_ptr<WebMessagePortChannel>) = 0;
+  virtual void Connect(MessagePortChannel) = 0;
 
   // Invoked to shutdown the worker when there are no more associated documents.
   // This eventually deletes this instance.
   virtual void TerminateWorkerContext() = 0;
 
   virtual void PauseWorkerContextOnStart() = 0;
-  virtual void AttachDevTools(const WebString& host_id, int session_id) = 0;
-  virtual void ReattachDevTools(const WebString& host_id,
-                                int session_id,
-                                const WebString& saved_state) = 0;
-  virtual void DetachDevTools(int session_id) = 0;
-  virtual void DispatchDevToolsMessage(int session_id,
-                                       int call_id,
-                                       const WebString& method,
-                                       const WebString& message) = 0;
+  virtual void BindDevToolsAgent(
+      mojo::ScopedInterfaceEndpointHandle devtools_agent_request) = 0;
 };
 
 }  // namespace blink

@@ -40,6 +40,8 @@
 namespace blink {
 
 class ExecutionContext;
+class KURL;
+class SecurityOrigin;
 class WebString;
 
 class CORE_EXPORT WorkerContentSettingsClient final
@@ -48,17 +50,23 @@ class CORE_EXPORT WorkerContentSettingsClient final
   USING_GARBAGE_COLLECTED_MIXIN(WorkerContentSettingsClient);
 
  public:
+  static const char kSupplementName[];
+
   static WorkerContentSettingsClient* Create(
       std::unique_ptr<WebContentSettingsClient>);
   virtual ~WorkerContentSettingsClient();
 
   bool RequestFileSystemAccessSync();
   bool AllowIndexedDB(const WebString& name);
+  bool AllowRunningInsecureContent(bool enabled_per_settings,
+                                   const SecurityOrigin*,
+                                   const KURL&);
 
-  static const char* SupplementName();
   static WorkerContentSettingsClient* From(ExecutionContext&);
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { Supplement<WorkerClients>::Trace(visitor); }
+  void Trace(blink::Visitor* visitor) override {
+    Supplement<WorkerClients>::Trace(visitor);
+  }
 
  private:
   explicit WorkerContentSettingsClient(

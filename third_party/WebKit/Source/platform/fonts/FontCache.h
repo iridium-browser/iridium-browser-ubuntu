@@ -34,6 +34,7 @@
 
 #include <memory>
 
+#include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "platform/PlatformExport.h"
 #include "platform/fonts/FallbackListCompositeKey.h"
@@ -48,7 +49,6 @@
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "platform/wtf/text/CString.h"
 #include "platform/wtf/text/Unicode.h"
@@ -71,7 +71,6 @@ namespace blink {
 class FontFaceCreationParams;
 class FontGlobalContext;
 class FontDescription;
-class OpenTypeVerticalData;
 class SimpleFontData;
 
 enum class AlternateFontName {
@@ -108,9 +107,7 @@ class PLATFORM_EXPORT FontCache {
 
   void ReleaseFontData(const SimpleFontData*);
 
-  // This method is implemented by the plaform and used by
-  // FontFastPath to lookup the font for a given character.
-  PassRefPtr<SimpleFontData> FallbackFontForCharacter(
+  scoped_refptr<SimpleFontData> FallbackFontForCharacter(
       const FontDescription&,
       UChar32,
       const SimpleFontData* font_data_to_substitute,
@@ -119,13 +116,13 @@ class PLATFORM_EXPORT FontCache {
   // Also implemented by the platform.
   void PlatformInit();
 
-  PassRefPtr<SimpleFontData> GetFontData(
+  scoped_refptr<SimpleFontData> GetFontData(
       const FontDescription&,
       const AtomicString&,
       AlternateFontName = AlternateFontName::kAllowAlternate,
       ShouldRetain = kRetain);
-  PassRefPtr<SimpleFontData> GetLastResortFallbackFont(const FontDescription&,
-                                                       ShouldRetain = kRetain);
+  scoped_refptr<SimpleFontData> GetLastResortFallbackFont(const FontDescription&,
+                                                   ShouldRetain = kRetain);
   SimpleFontData* GetNonRetainedLastResortFallbackFont(const FontDescription&);
 
   // Should be used in determining whether family names listed in font-family:
@@ -157,7 +154,7 @@ class PLATFORM_EXPORT FontCache {
   unsigned short Generation();
   void Invalidate();
 
-  SkFontMgr* FontManager() { return font_manager_.get(); }
+  sk_sp<SkFontMgr> FontManager() { return font_manager_; }
   static void SetFontManager(sk_sp<SkFontMgr>);
 
 #if !defined(OS_MACOSX)
@@ -165,11 +162,14 @@ class PLATFORM_EXPORT FontCache {
 #else
   static const AtomicString& LegacySystemFontFamily();
 #endif
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
   static void SetSystemFontFamily(const AtomicString&);
 #endif
 
 #if defined(OS_WIN)
+  // TODO(https://crbug.com/808221) System font style configuration is not
+  // related to FontCache. Move it somewhere else, e.g. to WebThemeEngine.
   static bool AntialiasedTextEnabled() { return antialiased_text_enabled_; }
   static bool LcdTextEnabled() { return lcd_text_enabled_; }
   static float DeviceScaleFactor() { return device_scale_factor_; }
@@ -180,7 +180,7 @@ class PLATFORM_EXPORT FontCache {
   static void SetDeviceScaleFactor(float device_scale_factor) {
     device_scale_factor_ = device_scale_factor;
   }
-  static void AddSideloadedFontForTesting(SkTypeface*);
+  static void AddSideloadedFontForTesting(sk_sp<SkTypeface>);
   // Functions to cache and retrieve the system font metrics.
   static void SetMenuFontMetrics(const wchar_t* family_name,
                                  int32_t font_height);
@@ -190,7 +190,7 @@ class PLATFORM_EXPORT FontCache {
                                    int32_t font_height);
   static int32_t MenuFontHeight() { return menu_font_height_; }
   static const AtomicString& MenuFontFamily() {
-    return *small_caption_font_family_name_;
+    return *menu_font_family_name_;
   }
   static int32_t SmallCaptionFontHeight() { return small_caption_font_height_; }
   static const AtomicString& SmallCaptionFontFamily() {
@@ -203,11 +203,7 @@ class PLATFORM_EXPORT FontCache {
   static void SetUseSkiaFontFallback(bool use_skia_font_fallback) {
     use_skia_font_fallback_ = use_skia_font_fallback;
   }
-#endif
-
-  typedef uint32_t FontFileKey;
-  PassRefPtr<OpenTypeVerticalData> GetVerticalData(const FontFileKey&,
-                                                   const FontPlatformData&);
+#endif  // defined(OS_WIN)
 
   static void AcceptLanguagesChanged(const String&);
 
@@ -215,7 +211,9 @@ class PLATFORM_EXPORT FontCache {
   static AtomicString GetGenericFamilyNameForScript(
       const AtomicString& family_name,
       const FontDescription&);
-#else
+#endif  // defined(OS_ANDROID)
+
+#if defined(OS_LINUX)
   struct PlatformFallbackFont {
     String name;
     CString filename;
@@ -227,11 +225,12 @@ class PLATFORM_EXPORT FontCache {
   static void GetFontForCharacter(UChar32,
                                   const char* preferred_locale,
                                   PlatformFallbackFont*);
-#endif
-  PassRefPtr<SimpleFontData> FontDataFromFontPlatformData(
+#endif  // defined(OS_LINUX)
+
+  scoped_refptr<SimpleFontData> FontDataFromFontPlatformData(
       const FontPlatformData*,
       ShouldRetain = kRetain,
-      bool = false);
+      bool subpixel_ascent_descent = false);
 
   void InvalidateShapeCache();
 
@@ -241,9 +240,15 @@ class PLATFORM_EXPORT FontCache {
   void DumpFontPlatformDataCache(base::trace_event::ProcessMemoryDump*);
   void DumpShapeResultCache(base::trace_event::ProcessMemoryDump*);
 
-  ~FontCache() {}
+  ~FontCache() = default;
 
  private:
+  scoped_refptr<SimpleFontData> PlatformFallbackFontForCharacter(
+      const FontDescription&,
+      UChar32,
+      const SimpleFontData* font_data_to_substitute,
+      FontFallbackPriority = FontFallbackPriority::kText);
+
   friend class FontGlobalContext;
   FontCache();
 
@@ -263,7 +268,7 @@ class PLATFORM_EXPORT FontCache {
       AlternateFontName = AlternateFontName::kAllowAlternate);
 #if !defined(OS_MACOSX)
   FontPlatformData* SystemFontPlatformData(const FontDescription&);
-#endif
+#endif  // !defined(OS_MACOSX)
 
   // These methods are implemented by each platform.
   std::unique_ptr<FontPlatformData> CreateFontPlatformData(
@@ -278,19 +283,19 @@ class PLATFORM_EXPORT FontCache {
       float font_size);
 
   // Implemented on skia platforms.
-  sk_sp<SkTypeface> CreateTypeface(const FontDescription&,
-                                   const FontFaceCreationParams&,
-                                   CString& name);
+  PaintTypeface CreateTypeface(const FontDescription&,
+                               const FontFaceCreationParams&,
+                               CString& name);
 
-#if defined(OS_ANDROID) || defined(OS_LINUX)
+#if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_FUCHSIA)
   static AtomicString GetFamilyNameForCharacter(SkFontMgr*,
                                                 UChar32,
                                                 const FontDescription&,
                                                 FontFallbackPriority);
-#endif
+#endif  // defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_FUCHSIA)
 
-  PassRefPtr<SimpleFontData> FallbackOnStandardFontStyle(const FontDescription&,
-                                                         UChar32);
+  scoped_refptr<SimpleFontData> FallbackOnStandardFontStyle(const FontDescription&,
+                                                     UChar32);
 
   // Don't purge if this count is > 0;
   int purge_prevent_count_;
@@ -313,7 +318,11 @@ class PLATFORM_EXPORT FontCache {
   static AtomicString* status_font_family_name_;
   static int32_t status_font_height_;
   static bool use_skia_font_fallback_;
-#endif
+
+  // Windows creates an SkFontMgr for unit testing automatically. This flag is
+  // to ensure it's not happening in the production from the crash log.
+  bool is_test_font_mgr_ = false;
+#endif  // defined(OS_WIN)
 
   unsigned short generation_ = 0;
   bool platform_init_ = false;
@@ -323,7 +332,6 @@ class PLATFORM_EXPORT FontCache {
   FontDataCache font_data_cache_;
 
   void PurgePlatformFontDataCache();
-  void PurgeFontVerticalDataCache();
   void PurgeFallbackListShaperCache();
 
   friend class SimpleFontData;  // For fontDataFromFontPlatformData

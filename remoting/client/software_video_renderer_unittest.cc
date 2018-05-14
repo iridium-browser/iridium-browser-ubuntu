@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
@@ -34,8 +33,8 @@ const int kFrameHeight = 200;
 
 class TestFrameConsumer : public protocol::FrameConsumer {
  public:
-  TestFrameConsumer() {}
-  ~TestFrameConsumer() override {}
+  TestFrameConsumer() = default;
+  ~TestFrameConsumer() override = default;
 
   std::unique_ptr<DesktopFrame> WaitForNextFrame(
       base::Closure* out_done_callback) {
@@ -52,7 +51,7 @@ class TestFrameConsumer : public protocol::FrameConsumer {
   std::unique_ptr<DesktopFrame> AllocateFrame(
       const webrtc::DesktopSize& size) override {
     EXPECT_TRUE(thread_checker_.CalledOnValidThread());
-    return base::MakeUnique<webrtc::BasicDesktopFrame>(size);
+    return std::make_unique<webrtc::BasicDesktopFrame>(size);
   }
 
   void DrawFrame(std::unique_ptr<DesktopFrame> frame,

@@ -79,10 +79,10 @@ class MockBufferD3D : public rx::BufferD3D
 
     // BufferImpl
     gl::Error setData(const gl::Context *context,
-                      GLenum target,
+                      gl::BufferBinding target,
                       const void *data,
                       size_t size,
-                      GLenum) override
+                      gl::BufferUsage) override
     {
         mData.resize(size);
         if (data && size > 0)
@@ -92,7 +92,8 @@ class MockBufferD3D : public rx::BufferD3D
         return gl::NoError();
     }
 
-    MOCK_METHOD5(setSubData, gl::Error(const gl::Context *, GLenum, const void *, size_t, size_t));
+    MOCK_METHOD5(setSubData,
+                 gl::Error(const gl::Context *, gl::BufferBinding, const void *, size_t, size_t));
     MOCK_METHOD5(copySubData,
                  gl::Error(const gl::Context *, BufferImpl *, GLintptr, GLintptr, GLsizeiptr));
     MOCK_METHOD3(map, gl::Error(const gl::Context *context, GLenum, void **));
@@ -100,13 +101,13 @@ class MockBufferD3D : public rx::BufferD3D
     MOCK_METHOD2(unmap, gl::Error(const gl::Context *context, GLboolean *));
 
     // BufferD3D
-    MOCK_METHOD0(markTransformFeedbackUsage, gl::Error());
+    MOCK_METHOD1(markTransformFeedbackUsage, gl::Error(const gl::Context *));
 
     // inlined for speed
     bool supportsDirectBinding() const override { return false; }
     size_t getSize() const override { return mData.size(); }
 
-    gl::Error getData(const uint8_t **outData) override
+    gl::Error getData(const gl::Context *context, const uint8_t **outData) override
     {
         *outData = &mData[0];
         return gl::NoError();
@@ -129,7 +130,7 @@ class MockGLFactoryD3D : public rx::MockGLFactory
         EXPECT_CALL(*mBufferFactory, createVertexBuffer())
             .WillOnce(Return(nullptr))
             .RetiresOnSaturation();
-        mockBufferD3D->initializeStaticData();
+        mockBufferD3D->initializeStaticData(nullptr);
 
         return mockBufferD3D;
     }
@@ -154,7 +155,7 @@ class IndexDataManagerPerfTest : public ANGLEPerfTest
 
 IndexDataManagerPerfTest::IndexDataManagerPerfTest()
     : ANGLEPerfTest("IndexDataManger", "_run"),
-      mIndexDataManager(&mMockBufferFactory, rx::RENDERER_D3D11),
+      mIndexDataManager(&mMockBufferFactory),
       mIndexCount(4000),
       mBufferSize(mIndexCount * sizeof(GLushort)),
       mMockBufferFactory(mBufferSize, GL_UNSIGNED_SHORT),
@@ -166,19 +167,23 @@ IndexDataManagerPerfTest::IndexDataManagerPerfTest()
     {
         indexData[index] = static_cast<GLushort>(index);
     }
-    mIndexBuffer.bufferData(nullptr, GL_ARRAY_BUFFER, &indexData[0],
-                            indexData.size() * sizeof(GLushort), GL_STATIC_DRAW);
+    EXPECT_FALSE(mIndexBuffer
+                     .bufferData(nullptr, gl::BufferBinding::Array, &indexData[0],
+                                 indexData.size() * sizeof(GLushort), gl::BufferUsage::StaticDraw)
+                     .isError());
 }
 
 void IndexDataManagerPerfTest::step()
 {
     rx::TranslatedIndexData translatedIndexData;
+    gl::IndexRange indexRange;
     for (unsigned int iteration = 0; iteration < 100; ++iteration)
     {
-        mIndexBuffer.getIndexRange(GL_UNSIGNED_SHORT, 0, mIndexCount, false,
-                                   &translatedIndexData.indexRange);
-        mIndexDataManager.prepareIndexData(GL_UNSIGNED_SHORT, mIndexCount, &mIndexBuffer, nullptr,
-                                           &translatedIndexData, false);
+        (void)mIndexBuffer.getIndexRange(nullptr, GL_UNSIGNED_SHORT, 0, mIndexCount, false,
+                                         &indexRange);
+        (void)mIndexDataManager.prepareIndexData(nullptr, GL_UNSIGNED_SHORT, GL_UNSIGNED_SHORT,
+                                                 mIndexCount, &mIndexBuffer, nullptr,
+                                                 &translatedIndexData);
     }
 }
 

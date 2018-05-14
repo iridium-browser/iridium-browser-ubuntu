@@ -77,9 +77,12 @@ class Toolchain : public Item {
   // Loader::GetToolchainSettings(). Many toolchain objects may be created in a
   // given build, but only a few might be used, and the Loader is in charge of
   // this process.
+  //
+  // We also track the set of build files that may affect this target, please
+  // refer to Scope for how this is determined.
   Toolchain(const Settings* settings,
             const Label& label,
-            const InputFileSet& input_files);
+            const std::set<SourceFile>& build_dependency_files = {});
   ~Toolchain() override;
 
   // Item overrides.

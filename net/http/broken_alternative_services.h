@@ -48,6 +48,10 @@ class NET_EXPORT_PRIVATE BrokenAlternativeServices {
 
   ~BrokenAlternativeServices();
 
+  // Clears all broken and recently-broken alternative services (i.e. mark all
+  // as not broken nor recently-broken).
+  void Clear();
+
   // Marks |alternative_service| as broken until after some expiration delay
   // (determined by how many times it's been marked broken before). Being broken
   // will cause IsAlternativeServiceBroken(alternative_service) to return true
@@ -69,6 +73,12 @@ class NET_EXPORT_PRIVATE BrokenAlternativeServices {
   bool IsAlternativeServiceBroken(
       const AlternativeService& alternative_service) const;
 
+  // Same as IsAlternativeServiceBroken() defined above, but will also set
+  // |brokenness_expiration| to when |alternative_service|'s brokenness will
+  // expire if this function returns true.
+  bool IsAlternativeServiceBroken(const AlternativeService& alternative_service,
+                                  base::TimeTicks* brokenness_expiration) const;
+
   // Returns true if MarkAlternativeServiceRecentlyBroken(alternative_service)
   // or MarkAlternativeServiceBroken(alternative_service) has been called and
   // ConfirmAlternativeService(alternative_service) has not been called
@@ -80,10 +90,8 @@ class NET_EXPORT_PRIVATE BrokenAlternativeServices {
   void ConfirmAlternativeService(const AlternativeService& alternative_service);
 
   // Sets broken and recently broken alternative services.
-  // |broken_alternative_service_list| must be sorted from earliest to latest
-  // expiration time.
-  // All AlternativeServices in |broken_alternative_service_list| must exist in
-  // |recently_broken_alternative_services|.
+  // |broken_alternative_service_list|, |recently_broken_alternative_services|
+  // must not be nullptr.
   //
   // If a broken/recently-broken alt svc that's being added is already stored,
   // the stored expiration/broken-count for that alt svc will be overwritten

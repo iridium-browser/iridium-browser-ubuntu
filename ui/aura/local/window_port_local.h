@@ -8,8 +8,11 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
+#include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
+#include "ui/aura/local/layer_tree_frame_sink_local.h"
 #include "ui/aura/window_port.h"
 #include "ui/base/property_data.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace gfx {
 class Size;
@@ -27,7 +30,8 @@ class AURA_EXPORT WindowPortLocal : public WindowPort {
 
   // WindowPort:
   void OnPreInit(Window* window) override;
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override;
+  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                  float new_device_scale_factor) override;
   void OnWillAddChild(Window* child) override;
   void OnWillRemoveChild(Window* child) override;
   void OnWillMoveChild(size_t current_index, size_t dest_index) override;
@@ -42,17 +46,20 @@ class AURA_EXPORT WindowPortLocal : public WindowPort {
                          int64_t old_value,
                          std::unique_ptr<ui::PropertyData> data) override;
   std::unique_ptr<cc::LayerTreeFrameSink> CreateLayerTreeFrameSink() override;
-  viz::SurfaceId GetSurfaceId() const override;
-  void OnWindowAddedToRootWindow() override;
-  void OnWillRemoveWindowFromRootWindow() override;
+  void AllocateLocalSurfaceId() override;
+  const viz::LocalSurfaceId& GetLocalSurfaceId() override;
+  void OnEventTargetingPolicyChanged() override;
+  bool ShouldRestackTransientChildren() override;
 
  private:
-  void OnSurfaceChanged(const viz::SurfaceId& surface_id,
-                        const gfx::Size& surface_size);
+  void OnSurfaceChanged(const viz::SurfaceInfo& surface_info);
 
   Window* const window_;
-  viz::FrameSinkId frame_sink_id_;
+  gfx::Size last_size_;
+  float last_device_scale_factor_ = 1.0f;
   viz::LocalSurfaceId local_surface_id_;
+  viz::ParentLocalSurfaceIdAllocator parent_local_surface_id_allocator_;
+  base::WeakPtr<cc::LayerTreeFrameSink> frame_sink_;
 
   base::WeakPtrFactory<WindowPortLocal> weak_factory_;
 

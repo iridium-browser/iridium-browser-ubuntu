@@ -41,9 +41,7 @@ class FrontendMenuProvider;
 class InspectorFrontendClient;
 class LocalFrame;
 
-class CORE_EXPORT DevToolsHost final
-    : public GarbageCollectedFinalized<DevToolsHost>,
-      public ScriptWrappable {
+class CORE_EXPORT DevToolsHost final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -53,7 +51,7 @@ class CORE_EXPORT DevToolsHost final
   }
 
   ~DevToolsHost();
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
   void DisconnectClient();
 
   float zoomFactor();
@@ -70,8 +68,9 @@ class CORE_EXPORT DevToolsHost final
 
   String getSelectionBackgroundColor();
   String getSelectionForegroundColor();
+  String getInactiveSelectionBackgroundColor();
+  String getInactiveSelectionForegroundColor();
 
-  bool isUnderTest();
   bool isHostedMode();
 
   LocalFrame* FrontendFrame() { return frontend_frame_; }
@@ -84,7 +83,7 @@ class CORE_EXPORT DevToolsHost final
   DevToolsHost(InspectorFrontendClient*, LocalFrame* frontend_frame);
   void EvaluateScript(const String&);
 
-  InspectorFrontendClient* client_;
+  Member<InspectorFrontendClient> client_;
   Member<LocalFrame> frontend_frame_;
   Member<FrontendMenuProvider> menu_provider_;
 };

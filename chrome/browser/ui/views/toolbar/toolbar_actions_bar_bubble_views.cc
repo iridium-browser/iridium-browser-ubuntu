@@ -7,10 +7,13 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/grit/locale_settings.h"
+#include "components/vector_icons/vector_icons.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
@@ -29,9 +32,6 @@ ToolbarActionsBarBubbleViews::ToolbarActionsBarBubbleViews(
     : views::BubbleDialogDelegateView(anchor_view,
                                       views::BubbleBorder::TOP_RIGHT),
       delegate_(std::move(delegate)),
-      delegate_notified_of_close_(false),
-      item_list_(nullptr),
-      link_(nullptr),
       anchored_to_action_(anchored_to_action) {
   set_close_on_deactivate(delegate_->ShouldCloseOnDeactivate());
   if (!anchor_view)
@@ -42,7 +42,14 @@ ToolbarActionsBarBubbleViews::ToolbarActionsBarBubbleViews(
 ToolbarActionsBarBubbleViews::~ToolbarActionsBarBubbleViews() {}
 
 void ToolbarActionsBarBubbleViews::Show() {
-  delegate_->OnBubbleShown();
+  // Passing the Widget pointer (via GetWidget()) below in the lambda is safe
+  // because the controller, which eventually invokes the callback passed to
+  // OnBubbleShown, will never outlive the bubble view. This is because the
+  // ToolbarActionsBarBubbleView owns the ToolbarActionsBarBubbleDelegate.
+  // The ToolbarActionsBarBubbleDelegate is an ExtensionMessageBubbleBridge,
+  // which owns the ExtensionMessageBubbleController.
+  delegate_->OnBubbleShown(
+      base::Bind([](views::Widget* widget) { widget->Close(); }, GetWidget()));
   GetWidget()->Show();
 }
 
@@ -55,40 +62,47 @@ views::View* ToolbarActionsBarBubbleViews::CreateExtraView() {
 
   std::unique_ptr<views::ImageView> icon;
   if (extra_view_info->resource) {
-    icon.reset(new views::ImageView);
+    icon = std::make_unique<views::ImageView>();
     icon->SetImage(gfx::CreateVectorIcon(*extra_view_info->resource, kIconSize,
                                          gfx::kChromeIconGrey));
   }
 
-  std::unique_ptr<views::Label> label;
+  std::unique_ptr<views::View> extra_view;
   const base::string16& text = extra_view_info->text;
   if (!text.empty()) {
-    if (extra_view_info->is_text_linked) {
-      link_ = new views::Link(text);
-      link_->set_listener(this);
-      label.reset(link_);
+    if (extra_view_info->is_learn_more) {
+      image_button_ = views::CreateVectorImageButton(this);
+      image_button_->SetFocusForPlatform();
+      image_button_->SetTooltipText(text);
+      views::SetImageFromVectorIcon(image_button_,
+                                    vector_icons::kHelpOutlineIcon);
+      extra_view.reset(image_button_);
     } else {
-      label.reset(new views::Label(text));
+      extra_view = std::make_unique<views::Label>(text);
     }
   }
 
-  if (icon && label) {
+  if (icon && extra_view) {
     views::View* parent = new views::View();
-    parent->SetLayoutManager(
-        new views::BoxLayout(views::BoxLayout::kHorizontal, gfx::Insets(),
-                             ChromeLayoutProvider::Get()->GetDistanceMetric(
-                                 views::DISTANCE_RELATED_CONTROL_VERTICAL)));
+    parent->SetLayoutManager(std::make_unique<views::BoxLayout>(
+        views::BoxLayout::kHorizontal, gfx::Insets(),
+        ChromeLayoutProvider::Get()->GetDistanceMetric(
+            views::DISTANCE_RELATED_CONTROL_VERTICAL)));
     parent->AddChildView(icon.release());
-    parent->AddChildView(label.release());
+    parent->AddChildView(extra_view.release());
     return parent;
   }
 
   return icon ? static_cast<views::View*>(icon.release())
-              : static_cast<views::View*>(label.release());
+              : static_cast<views::View*>(extra_view.release());
 }
 
 base::string16 ToolbarActionsBarBubbleViews::GetWindowTitle() const {
   return delegate_->GetHeadingText();
+}
+
+bool ToolbarActionsBarBubbleViews::ShouldShowCloseButton() const {
+  return true;
 }
 
 bool ToolbarActionsBarBubbleViews::Cancel() {
@@ -119,7 +133,7 @@ bool ToolbarActionsBarBubbleViews::Close() {
 
 void ToolbarActionsBarBubbleViews::Init() {
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
-  SetLayoutManager(new views::BoxLayout(
+  SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kVertical, gfx::Insets(),
       provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL)));
 
@@ -127,8 +141,9 @@ void ToolbarActionsBarBubbleViews::Init() {
   views::Label* content_label =
       new views::Label(delegate_->GetBodyText(anchored_to_action_));
   content_label->SetMultiLine(true);
-  int width = views::Widget::GetLocalizedContentsWidth(
-        IDS_EXTENSION_TOOLBAR_REDESIGN_NOTIFICATION_BUBBLE_WIDTH_CHARS);
+  int width = provider->GetDistanceMetric(
+                  ChromeDistanceMetric::DISTANCE_BUBBLE_PREFERRED_WIDTH) -
+              margins().width();
   content_label->SizeToFit(width);
   content_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   AddChildView(content_label);
@@ -158,8 +173,8 @@ int ToolbarActionsBarBubbleViews::GetDialogButtons() const {
 }
 
 int ToolbarActionsBarBubbleViews::GetDefaultDialogButton() const {
-  // TODO(estade): we should set a default where approprite. See
-  // http://crbug.com/621122
+  // TODO(estade): we should set a default where appropriate. See
+  // http://crbug.com/751279
   return ui::DIALOG_BUTTON_NONE;
 }
 
@@ -169,8 +184,8 @@ base::string16 ToolbarActionsBarBubbleViews::GetDialogButtonLabel(
                                         : delegate_->GetDismissButtonText();
 }
 
-void ToolbarActionsBarBubbleViews::LinkClicked(views::Link* link,
-                                               int event_flags) {
+void ToolbarActionsBarBubbleViews::ButtonPressed(views::Button* sender,
+                                                 const ui::Event& event) {
   DCHECK(!delegate_notified_of_close_);
   delegate_notified_of_close_ = true;
   delegate_->OnBubbleClosed(ToolbarActionsBarBubbleDelegate::CLOSE_LEARN_MORE);

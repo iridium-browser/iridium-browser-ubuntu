@@ -140,8 +140,20 @@ class QUIC_EXPORT_PRIVATE QuicWriteBlockedList {
         stream_id == batch_write_stream_id_[last_priority_popped_] &&
         bytes_left_for_batch_write_[last_priority_popped_] > 0;
     priority_write_scheduler_.MarkStreamReady(stream_id, push_front);
+  }
 
-    return;
+  // This function is used for debugging and test only. Returns true if stream
+  // with |stream_id| is write blocked.
+  bool IsStreamBlocked(QuicStreamId stream_id) const {
+    if (stream_id == kCryptoStreamId) {
+      return crypto_stream_blocked_;
+    }
+
+    if (stream_id == kHeadersStreamId) {
+      return headers_stream_blocked_;
+    }
+
+    return priority_write_scheduler_.IsStreamReady(stream_id);
   }
 
   bool crypto_stream_blocked() const { return crypto_stream_blocked_; }

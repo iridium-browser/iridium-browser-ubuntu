@@ -42,13 +42,6 @@ class IOBuffer;
 
 namespace chromeos {
 namespace file_system_provider {
-namespace {
-
-// Discards the result of Abort() when called from the destructor.
-void EmptyStatusCallback(base::File::Error /* result */) {
-}
-
-}  // namespace
 
 AutoUpdater::AutoUpdater(const base::Closure& update_callback)
     : update_callback_(update_callback),
@@ -142,11 +135,13 @@ ProvidedFileSystem::ProvidedFileSystem(
       file_system_info_(file_system_info),
       notification_manager_(
           new NotificationManager(profile_, file_system_info_)),
-      request_manager_(new RequestManager(profile,
-                                          file_system_info.extension_id(),
-                                          notification_manager_.get())),
+      request_manager_(
+          new RequestManager(profile,
+                             file_system_info.provider_id().GetExtensionId(),
+                             notification_manager_.get())),
       watcher_queue_(1),
       weak_ptr_factory_(this) {
+  DCHECK_EQ(ProviderId::EXTENSION, file_system_info.provider_id().GetType());
 }
 
 ProvidedFileSystem::~ProvidedFileSystem() {
@@ -165,7 +160,8 @@ void ProvidedFileSystem::SetNotificationManagerForTesting(
     std::unique_ptr<NotificationManagerInterface> notification_manager) {
   notification_manager_ = std::move(notification_manager);
   request_manager_.reset(new RequestManager(
-      profile_, file_system_info_.extension_id(), notification_manager_.get()));
+      profile_, file_system_info_.provider_id().GetExtensionId(),
+      notification_manager_.get()));
 }
 
 AbortCallback ProvidedFileSystem::RequestUnmount(
@@ -403,7 +399,7 @@ AbortCallback ProvidedFileSystem::WriteFile(
       WRITE_FILE,
       base::WrapUnique<RequestManager::HandlerInterface>(
           new operations::WriteFile(event_router_, file_system_info_,
-                                    file_handle, make_scoped_refptr(buffer),
+                                    file_handle, base::WrapRefCounted(buffer),
                                     offset, length, callback)));
   if (!request_id) {
     callback.Run(base::File::FILE_ERROR_SECURITY);
@@ -516,7 +512,7 @@ void ProvidedFileSystem::Notify(
   watcher_queue_.Enqueue(
       token, base::Bind(&ProvidedFileSystem::NotifyInQueue,
                         base::Unretained(this),  // Outlived by the queue.
-                        base::Passed(base::MakeUnique<NotifyInQueueArgs>(
+                        base::Passed(std::make_unique<NotifyInQueueArgs>(
                             token, entry_path, recursive, change_type,
                             std::move(changes), tag, callback))));
 }
@@ -556,7 +552,7 @@ void ProvidedFileSystem::OnAbortCompleted(int operation_request_id,
     return;
   }
   request_manager_->RejectRequest(operation_request_id,
-                                  base::MakeUnique<RequestValue>(),
+                                  std::make_unique<RequestValue>(),
                                   base::File::FILE_ERROR_ABORT);
 }
 
@@ -795,7 +791,7 @@ void ProvidedFileSystem::OnNotifyInQueueCompleted(
     Subscribers subscribers = it->second.subscribers;
     for (const auto& subscriber_it : subscribers) {
       RemoveWatcher(subscriber_it.second.origin, args->entry_path,
-                    args->recursive, base::Bind(&EmptyStatusCallback));
+                    args->recursive, base::DoNothing());
     }
   }
 

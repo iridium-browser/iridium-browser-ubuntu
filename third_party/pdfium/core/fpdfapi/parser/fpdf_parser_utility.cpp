@@ -16,6 +16,7 @@
 #include "core/fpdfapi/parser/cpdf_string.h"
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
 #include "core/fxcrt/fx_extension.h"
+#include "core/fxcrt/fx_stream.h"
 #include "third_party/base/logging.h"
 
 // Indexed by 8-bit character code, contains either:
@@ -70,30 +71,30 @@ const char PDF_CharType[256] = {
     'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R',
     'R', 'R', 'R', 'R', 'R', 'R', 'R', 'W'};
 
-int32_t GetHeaderOffset(const CFX_RetainPtr<IFX_SeekableReadStream>& pFile) {
+int32_t GetHeaderOffset(const RetainPtr<IFX_SeekableReadStream>& pFile) {
   const size_t kBufSize = 4;
   uint8_t buf[kBufSize];
   for (int32_t offset = 0; offset <= 1024; ++offset) {
     if (!pFile->ReadBlock(buf, offset, kBufSize))
-      return -1;
+      return kInvalidHeaderOffset;
 
     if (memcmp(buf, "%PDF", 4) == 0)
       return offset;
   }
-  return -1;
+  return kInvalidHeaderOffset;
 }
 
-int32_t GetDirectInteger(CPDF_Dictionary* pDict, const CFX_ByteString& key) {
+int32_t GetDirectInteger(CPDF_Dictionary* pDict, const ByteString& key) {
   CPDF_Number* pObj = ToNumber(pDict->GetObjectFor(key));
   return pObj ? pObj->GetInteger() : 0;
 }
 
-CFX_ByteString PDF_NameDecode(const CFX_ByteStringC& bstr) {
-  if (bstr.Find('#') == -1)
-    return CFX_ByteString(bstr);
+ByteString PDF_NameDecode(const ByteStringView& bstr) {
+  if (!bstr.Contains('#'))
+    return ByteString(bstr);
 
   int size = bstr.GetLength();
-  CFX_ByteString result;
+  ByteString result;
   char* pDestStart = result.GetBuffer(size);
   char* pDest = pDestStart;
   for (int i = 0; i < size; i++) {
@@ -105,17 +106,15 @@ CFX_ByteString PDF_NameDecode(const CFX_ByteStringC& bstr) {
       *pDest++ = bstr[i];
     }
   }
-  result.ReleaseBuffer((FX_STRSIZE)(pDest - pDestStart));
+  result.ReleaseBuffer(static_cast<size_t>(pDest - pDestStart));
   return result;
 }
 
-CFX_ByteString PDF_NameDecode(const CFX_ByteString& orig) {
-  if (orig.Find('#') == -1)
-    return orig;
-  return PDF_NameDecode(orig.AsStringC());
+ByteString PDF_NameDecode(const ByteString& orig) {
+  return orig.Contains("#") ? PDF_NameDecode(orig.AsStringView()) : orig;
 }
 
-CFX_ByteString PDF_NameEncode(const CFX_ByteString& orig) {
+ByteString PDF_NameEncode(const ByteString& orig) {
   uint8_t* src_buf = (uint8_t*)orig.c_str();
   int src_len = orig.GetLength();
   int dest_len = 0;
@@ -132,7 +131,7 @@ CFX_ByteString PDF_NameEncode(const CFX_ByteString& orig) {
   if (dest_len == src_len)
     return orig;
 
-  CFX_ByteString res;
+  ByteString res;
   char* dest_buf = res.GetBuffer(dest_len);
   dest_len = 0;
   for (i = 0; i < src_len; i++) {
@@ -147,11 +146,11 @@ CFX_ByteString PDF_NameEncode(const CFX_ByteString& orig) {
     }
   }
   dest_buf[dest_len] = 0;
-  res.ReleaseBuffer();
+  res.ReleaseBuffer(res.GetStringLength());
   return res;
 }
 
-CFX_ByteTextBuf& operator<<(CFX_ByteTextBuf& buf, const CPDF_Object* pObj) {
+std::ostream& operator<<(std::ostream& buf, const CPDF_Object* pObj) {
   if (!pObj) {
     buf << " null";
     return buf;
@@ -168,7 +167,7 @@ CFX_ByteTextBuf& operator<<(CFX_ByteTextBuf& buf, const CPDF_Object* pObj) {
       buf << PDF_EncodeString(pObj->GetString(), pObj->AsString()->IsHex());
       break;
     case CPDF_Object::NAME: {
-      CFX_ByteString str = pObj->GetString();
+      ByteString str = pObj->GetString();
       buf << "/" << PDF_NameEncode(str);
       break;
     }
@@ -194,7 +193,7 @@ CFX_ByteTextBuf& operator<<(CFX_ByteTextBuf& buf, const CPDF_Object* pObj) {
       const CPDF_Dictionary* p = pObj->AsDictionary();
       buf << "<<";
       for (const auto& it : *p) {
-        const CFX_ByteString& key = it.first;
+        const ByteString& key = it.first;
         CPDF_Object* pValue = it.second.get();
         buf << "/" << PDF_NameEncode(key);
         if (pValue && !pValue->IsInline()) {
@@ -210,8 +209,9 @@ CFX_ByteTextBuf& operator<<(CFX_ByteTextBuf& buf, const CPDF_Object* pObj) {
       const CPDF_Stream* p = pObj->AsStream();
       buf << p->GetDict() << "stream\r\n";
       auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(p);
-      pAcc->LoadAllData(true);
-      buf.AppendBlock(pAcc->GetData(), pAcc->GetSize());
+      pAcc->LoadAllDataRaw();
+      buf.write(reinterpret_cast<const char*>(pAcc->GetData()),
+                pAcc->GetSize());
       buf << "\r\nendstream";
       break;
     }

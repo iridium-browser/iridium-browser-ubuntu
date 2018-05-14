@@ -28,8 +28,7 @@ class CdmFactory;
 
 // A mojom::ContentDecryptionModule implementation backed by a
 // media::ContentDecryptionModule.
-class MEDIA_MOJO_EXPORT MojoCdmService
-    : NON_EXPORTED_BASE(public mojom::ContentDecryptionModule) {
+class MEDIA_MOJO_EXPORT MojoCdmService : public mojom::ContentDecryptionModule {
  public:
   // Get the CDM associated with |cdm_id|, which is unique per process.
   // Can be called on any thread. The returned CDM is not guaranteed to be
@@ -43,19 +42,24 @@ class MEDIA_MOJO_EXPORT MojoCdmService
       int cdm_id);
 
   // Constructs a MojoCdmService and strongly binds it to the |request|.
-  MojoCdmService(base::WeakPtr<MojoCdmServiceContext> context,
-                 CdmFactory* cdm_factory);
+  // - |cdm_factory| is used to create CDM instances. Must not be null.
+  // - |context| is used to keep track of all CDM instances such that we can
+  //   connect the CDM with a media player (e.g. decoder). Can be null if the
+  //   CDM does not need to be connected with any media player in this process.
+  MojoCdmService(CdmFactory* cdm_factory, MojoCdmServiceContext* context);
 
   ~MojoCdmService() final;
 
   // mojom::ContentDecryptionModule implementation.
   void SetClient(mojom::ContentDecryptionModuleClientPtr client) final;
   void Initialize(const std::string& key_system,
-                  const std::string& security_origin,
-                  mojom::CdmConfigPtr cdm_config,
+                  const url::Origin& security_origin,
+                  const CdmConfig& cdm_config,
                   InitializeCallback callback) final;
   void SetServerCertificate(const std::vector<uint8_t>& certificate_data,
                             SetServerCertificateCallback callback) final;
+  void GetStatusForPolicy(HdcpVersion min_hdcp_version,
+                          GetStatusForPolicyCallback callback) final;
   void CreateSessionAndGenerateRequest(
       CdmSessionType session_type,
       EmeInitDataType init_data_type,
@@ -95,14 +99,8 @@ class MEDIA_MOJO_EXPORT MojoCdmService
   // Callback for when |decryptor_| loses connectivity.
   void OnDecryptorConnectionError();
 
-  // CDM ID to be assigned to the next successfully initialized CDM. This ID is
-  // unique per process. It will be used to locate the CDM by the media players
-  // living in the same process.
-  static int next_cdm_id_;
-
-  base::WeakPtr<MojoCdmServiceContext> context_;
-
   CdmFactory* cdm_factory_;
+  MojoCdmServiceContext* const context_ = nullptr;
   scoped_refptr<::media::ContentDecryptionModule> cdm_;
 
   // MojoDecryptorService is passed the Decryptor from |cdm_|, so

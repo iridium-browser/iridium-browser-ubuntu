@@ -8,6 +8,8 @@
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
+#include "core/origin_trials/OriginTrialContext.h"
+#include "core/workers/GlobalScopeCreationParams.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/WTF.h"
 
@@ -20,24 +22,36 @@ PaintWorkletGlobalScopeProxy* PaintWorkletGlobalScopeProxy::From(
 
 PaintWorkletGlobalScopeProxy::PaintWorkletGlobalScopeProxy(
     LocalFrame* frame,
-    PaintWorkletPendingGeneratorRegistry* pending_generator_registry) {
+    PaintWorkletPendingGeneratorRegistry* pending_generator_registry,
+    size_t global_scope_number) {
   DCHECK(IsMainThread());
   Document* document = frame->GetDocument();
+  reporting_proxy_ =
+      std::make_unique<MainThreadWorkletReportingProxy>(document);
+
+  auto creation_params = std::make_unique<GlobalScopeCreationParams>(
+      document->Url(), document->UserAgent(),
+      document->GetContentSecurityPolicy()->Headers().get(),
+      document->GetReferrerPolicy(), document->GetSecurityOrigin(),
+      document->IsSecureContext(), nullptr /* worker_clients */,
+      document->AddressSpace(), OriginTrialContext::GetTokens(document).get(),
+      base::UnguessableToken::Create(), nullptr /* worker_settings */,
+      kV8CacheOptionsDefault);
   global_scope_ = PaintWorkletGlobalScope::Create(
-      frame, document->Url(), document->UserAgent(),
-      document->GetSecurityOrigin(), ToIsolate(document),
-      pending_generator_registry);
+      frame, std::move(creation_params), *reporting_proxy_,
+      pending_generator_registry, global_scope_number);
 }
 
 void PaintWorkletGlobalScopeProxy::FetchAndInvokeScript(
     const KURL& module_url_record,
-    WebURLRequest::FetchCredentialsMode credentials_mode,
-    RefPtr<WebTaskRunner> outside_settings_task_runner,
+    WorkletModuleResponsesMap* module_responses_map,
+    network::mojom::FetchCredentialsMode credentials_mode,
+    scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
     WorkletPendingTasks* pending_tasks) {
   DCHECK(IsMainThread());
-  global_scope_->FetchAndInvokeScript(module_url_record, credentials_mode,
-                                      std::move(outside_settings_task_runner),
-                                      pending_tasks);
+  global_scope_->FetchAndInvokeScript(
+      module_url_record, module_responses_map, credentials_mode,
+      std::move(outside_settings_task_runner), pending_tasks);
 }
 
 void PaintWorkletGlobalScopeProxy::WorkletObjectDestroyed() {
@@ -48,8 +62,9 @@ void PaintWorkletGlobalScopeProxy::WorkletObjectDestroyed() {
 void PaintWorkletGlobalScopeProxy::TerminateWorkletGlobalScope() {
   DCHECK(IsMainThread());
   global_scope_->Terminate();
-  // Nullify the global scope to cut a potential reference cycle.
+  // Nullify these fields to cut a potential reference cycle.
   global_scope_ = nullptr;
+  reporting_proxy_.reset();
 }
 
 CSSPaintDefinition* PaintWorkletGlobalScopeProxy::FindDefinition(
@@ -58,7 +73,7 @@ CSSPaintDefinition* PaintWorkletGlobalScopeProxy::FindDefinition(
   return global_scope_->FindDefinition(name);
 }
 
-DEFINE_TRACE(PaintWorkletGlobalScopeProxy) {
+void PaintWorkletGlobalScopeProxy::Trace(blink::Visitor* visitor) {
   visitor->Trace(global_scope_);
 }
 

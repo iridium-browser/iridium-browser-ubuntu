@@ -9,12 +9,12 @@
 #include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/time/time.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/socket/socket_performance_watcher.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
 
@@ -295,16 +295,18 @@ int TCPClientSocket::ReadIfReady(IOBuffer* buf,
   return ReadCommon(buf, buf_len, callback, /*read_if_ready=*/true);
 }
 
-int TCPClientSocket::Write(IOBuffer* buf,
-                           int buf_len,
-                           const CompletionCallback& callback) {
+int TCPClientSocket::Write(
+    IOBuffer* buf,
+    int buf_len,
+    const CompletionCallback& callback,
+    const NetworkTrafficAnnotationTag& traffic_annotation) {
   DCHECK(!callback.is_null());
 
   // |socket_| is owned by this class and the callback won't be run once
   // |socket_| is gone. Therefore, it is safe to use base::Unretained() here.
   CompletionCallback write_callback = base::Bind(
       &TCPClientSocket::DidCompleteWrite, base::Unretained(this), callback);
-  int result = socket_->Write(buf, buf_len, write_callback);
+  int result = socket_->Write(buf, buf_len, write_callback, traffic_annotation);
   if (result > 0)
     use_history_.set_was_used_to_convey_data();
 
@@ -345,6 +347,10 @@ int64_t TCPClientSocket::GetTotalReceivedBytes() const {
   return total_received_bytes_;
 }
 
+void TCPClientSocket::ApplySocketTag(const SocketTag& tag) {
+  socket_->ApplySocketTag(tag);
+}
+
 void TCPClientSocket::DidCompleteConnect(int result) {
   DCHECK_EQ(next_connect_state_, CONNECT_STATE_CONNECT_COMPLETE);
   DCHECK_NE(result, ERR_IO_PENDING);
@@ -374,11 +380,6 @@ void TCPClientSocket::DidCompleteReadWrite(const CompletionCallback& callback,
                                            int result) {
   if (result > 0)
     use_history_.set_was_used_to_convey_data();
-
-  // TODO(pkasting): Remove ScopedTracker below once crbug.com/462780 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "462780 TCPClientSocket::DidCompleteReadWrite"));
   callback.Run(result);
 }
 

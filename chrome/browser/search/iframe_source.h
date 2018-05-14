@@ -5,11 +5,17 @@
 #ifndef CHROME_BROWSER_SEARCH_IFRAME_SOURCE_H_
 #define CHROME_BROWSER_SEARCH_IFRAME_SOURCE_H_
 
-#include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "content/public/browser/url_data_source.h"
 
+#if defined(OS_ANDROID)
+#error "Instant is only used on desktop";
+#endif
+
 // Base class for URL data sources for chrome-search:// iframed content.
+// TODO(treib): This has only one subclass outside of tests,
+// MostVisitedIframeSource. Merge the two classes?
 class IframeSource : public content::URLDataSource {
  public:
   IframeSource();

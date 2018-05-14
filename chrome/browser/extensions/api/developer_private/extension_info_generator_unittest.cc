@@ -12,6 +12,7 @@
 #include "base/json/json_writer.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -81,7 +82,7 @@ class ExtensionInfoGeneratorUnitTest : public ExtensionServiceTestBase {
     EXPECT_EQ(1u, list.size());
     if (!list.empty())
       info_out->reset(new developer::ExtensionInfo(std::move(list[0])));
-    base::ResetAndReturn(&quit_closure_).Run();
+    std::move(quit_closure_).Run();
   }
 
   std::unique_ptr<developer::ExtensionInfo> GenerateExtensionInfo(
@@ -102,7 +103,7 @@ class ExtensionInfoGeneratorUnitTest : public ExtensionServiceTestBase {
   void OnInfosGenerated(ExtensionInfoGenerator::ExtensionInfoList* out,
                         ExtensionInfoGenerator::ExtensionInfoList list) {
     *out = std::move(list);
-    base::ResetAndReturn(&quit_closure_).Run();
+    std::move(quit_closure_).Run();
   }
 
   ExtensionInfoGenerator::ExtensionInfoList GenerateExtensionsInfo() {
@@ -203,7 +204,7 @@ class ExtensionInfoGeneratorUnitTest : public ExtensionServiceTestBase {
   }
 
  private:
-  base::Closure quit_closure_;
+  base::OnceClosure quit_closure_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionInfoGeneratorUnitTest);
 };
@@ -224,8 +225,14 @@ TEST_F(ExtensionInfoGeneratorUnitTest, BasicInfoTest) {
           .Set("version", kVersion)
           .Set("manifest_version", 2)
           .Set("description", "an extension")
-          .Set("permissions",
-               ListBuilder().Append("file://*/*").Append("tabs").Build())
+          .Set("permissions", ListBuilder()
+                                  .Append("file://*/*")
+                                  .Append("tabs")
+                                  .Append("*://*.google.com/*")
+                                  .Append("*://*.example.com/*")
+                                  .Append("*://*.foo.bar/*")
+                                  .Append("*://*.chromium.org/*")
+                                  .Build())
           .Build();
   std::unique_ptr<base::DictionaryValue> manifest_copy(manifest->DeepCopy());
   scoped_refptr<const Extension> extension =
@@ -237,12 +244,13 @@ TEST_F(ExtensionInfoGeneratorUnitTest, BasicInfoTest) {
           .Build();
   service()->AddExtension(extension.get());
   ErrorConsole* error_console = ErrorConsole::Get(profile());
+  const GURL kContextUrl("http://example.com");
   error_console->ReportError(base::WrapUnique(new RuntimeError(
       extension->id(), false, base::UTF8ToUTF16("source"),
       base::UTF8ToUTF16("message"),
       StackTrace(1, StackFrame(1, 1, base::UTF8ToUTF16("source"),
                                base::UTF8ToUTF16("function"))),
-      GURL("url"), logging::LOG_ERROR, 1, 1)));
+      kContextUrl, logging::LOG_ERROR, 1, 1)));
   error_console->ReportError(base::WrapUnique(
       new ManifestError(extension->id(), base::UTF8ToUTF16("message"),
                         base::UTF8ToUTF16("key"), base::string16())));
@@ -251,7 +259,7 @@ TEST_F(ExtensionInfoGeneratorUnitTest, BasicInfoTest) {
       base::UTF8ToUTF16("message"),
       StackTrace(1, StackFrame(1, 1, base::UTF8ToUTF16("source"),
                                base::UTF8ToUTF16("function"))),
-      GURL("url"), logging::LOG_VERBOSE, 1, 1)));
+      kContextUrl, logging::LOG_VERBOSE, 1, 1)));
 
   // It's not feasible to validate every field here, because that would be
   // a duplication of the logic in the method itself. Instead, test a handful
@@ -276,7 +284,15 @@ TEST_F(ExtensionInfoGeneratorUnitTest, BasicInfoTest) {
   ASSERT_EQ(messages.size(), info->permissions.size());
   size_t i = 0;
   for (const PermissionMessage& message : messages) {
-    EXPECT_EQ(message.message(), base::UTF8ToUTF16(info->permissions[i]));
+    const api::developer_private::Permission& info_permission =
+        info->permissions[i];
+    EXPECT_EQ(message.message(), base::UTF8ToUTF16(info_permission.message));
+    const std::vector<base::string16>& submessages = message.submessages();
+    ASSERT_EQ(submessages.size(), info_permission.submessages.size());
+    for (size_t j = 0; j < submessages.size(); ++j) {
+      EXPECT_EQ(submessages[j],
+                base::UTF8ToUTF16(info_permission.submessages[j]));
+    }
     ++i;
   }
   ASSERT_EQ(2u, info->runtime_errors.size());
@@ -286,6 +302,7 @@ TEST_F(ExtensionInfoGeneratorUnitTest, BasicInfoTest) {
   EXPECT_EQ(api::developer_private::ERROR_TYPE_RUNTIME, runtime_error.type);
   EXPECT_EQ(api::developer_private::ERROR_LEVEL_ERROR,
             runtime_error.severity);
+  EXPECT_EQ(kContextUrl, GURL(runtime_error.context_url));
   EXPECT_EQ(1u, runtime_error.stack_trace.size());
   ASSERT_EQ(1u, info->manifest_errors.size());
   const api::developer_private::RuntimeError& runtime_error_verbose =

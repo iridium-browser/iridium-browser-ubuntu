@@ -16,9 +16,9 @@
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "components/metrics/call_stack_profile_params.h"
-#include "components/metrics/proto/chrome_user_metrics_extension.pb.h"
 #include "components/variations/entropy_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/metrics_proto/chrome_user_metrics_extension.pb.h"
 
 using base::StackSamplingProfiler;
 using Frame = StackSamplingProfiler::Frame;
@@ -185,7 +185,7 @@ void CallStackProfileMetricsProviderTest::VerifyProfileProto(
     ASSERT_TRUE(proto_sample.has_count());
     EXPECT_EQ(expected.samples[s].entry_repeats, proto_sample.count());
     for (int e = 0; e < expected.samples[s].entry_count; ++e) {
-      SCOPED_TRACE("entry " + base::SizeTToString(e));
+      SCOPED_TRACE("entry " + base::NumberToString(e));
       const CallStackProfile::Entry& entry = proto_sample.entry().Get(e);
       if (expected.samples[s].entries[e].module_index >= 0) {
         ASSERT_TRUE(entry.has_module_id_index());
@@ -344,12 +344,12 @@ TEST_F(CallStackProfileMetricsProviderTest, MultipleProfiles) {
                                 CallStackProfileParams::MAY_SHUFFLE);
   AppendProfiles(&params, std::move(profiles));
   ChromeUserMetricsExtension uma_proto;
-  provider.ProvideGeneralMetrics(&uma_proto);
+  provider.ProvideCurrentSessionData(&uma_proto);
 
   ASSERT_EQ(static_cast<int>(arraysize(expected_proto_profiles)),
             uma_proto.sampled_profile().size());
   for (size_t p = 0; p < arraysize(expected_proto_profiles); ++p) {
-    SCOPED_TRACE("profile " + base::SizeTToString(p));
+    SCOPED_TRACE("profile " + base::NumberToString(p));
     VerifyProfileProto(expected_proto_profiles[p],
                        uma_proto.sampled_profile().Get(p));
   }
@@ -428,12 +428,12 @@ TEST_F(CallStackProfileMetricsProviderTest, RepeatedStacksUnordered) {
                                 CallStackProfileParams::MAY_SHUFFLE);
   AppendProfiles(&params, std::move(profiles));
   ChromeUserMetricsExtension uma_proto;
-  provider.ProvideGeneralMetrics(&uma_proto);
+  provider.ProvideCurrentSessionData(&uma_proto);
 
   ASSERT_EQ(static_cast<int>(arraysize(expected_proto_profiles)),
             uma_proto.sampled_profile().size());
   for (size_t p = 0; p < arraysize(expected_proto_profiles); ++p) {
-    SCOPED_TRACE("profile " + base::SizeTToString(p));
+    SCOPED_TRACE("profile " + base::NumberToString(p));
     VerifyProfileProto(expected_proto_profiles[p],
                        uma_proto.sampled_profile().Get(p));
   }
@@ -514,12 +514,12 @@ TEST_F(CallStackProfileMetricsProviderTest, RepeatedStacksOrdered) {
                                 CallStackProfileParams::PRESERVE_ORDER);
   AppendProfiles(&params, std::move(profiles));
   ChromeUserMetricsExtension uma_proto;
-  provider.ProvideGeneralMetrics(&uma_proto);
+  provider.ProvideCurrentSessionData(&uma_proto);
 
   ASSERT_EQ(static_cast<int>(arraysize(expected_proto_profiles)),
             uma_proto.sampled_profile().size());
   for (size_t p = 0; p < arraysize(expected_proto_profiles); ++p) {
-    SCOPED_TRACE("profile " + base::SizeTToString(p));
+    SCOPED_TRACE("profile " + base::NumberToString(p));
     VerifyProfileProto(expected_proto_profiles[p],
                        uma_proto.sampled_profile().Get(p));
   }
@@ -558,19 +558,19 @@ TEST_F(CallStackProfileMetricsProviderTest, UnknownModule) {
                                 CallStackProfileParams::MAY_SHUFFLE);
   AppendProfiles(&params, std::move(profiles));
   ChromeUserMetricsExtension uma_proto;
-  provider.ProvideGeneralMetrics(&uma_proto);
+  provider.ProvideCurrentSessionData(&uma_proto);
 
   ASSERT_EQ(static_cast<int>(arraysize(expected_proto_profiles)),
             uma_proto.sampled_profile().size());
   for (size_t p = 0; p < arraysize(expected_proto_profiles); ++p) {
-    SCOPED_TRACE("profile " + base::SizeTToString(p));
+    SCOPED_TRACE("profile " + base::NumberToString(p));
     VerifyProfileProto(expected_proto_profiles[p],
                        uma_proto.sampled_profile().Get(p));
   }
 }
 
-// Checks that pending profiles are only passed back to ProvideGeneralMetrics
-// once.
+// Checks that pending profiles are only passed back to
+// ProvideCurrentSessionData once.
 TEST_F(CallStackProfileMetricsProviderTest, ProfilesProvidedOnlyOnce) {
   CallStackProfileMetricsProvider provider;
   for (int r = 0; r < 2; ++r) {
@@ -591,7 +591,7 @@ TEST_F(CallStackProfileMetricsProviderTest, ProfilesProvidedOnlyOnce) {
                                   CallStackProfileParams::MAY_SHUFFLE);
     AppendProfiles(&params, std::move(profiles));
     ChromeUserMetricsExtension uma_proto;
-    provider.ProvideGeneralMetrics(&uma_proto);
+    provider.ProvideCurrentSessionData(&uma_proto);
 
     ASSERT_EQ(1, uma_proto.sampled_profile().size());
     const SampledProfile& sampled_profile = uma_proto.sampled_profile().Get(0);
@@ -603,7 +603,7 @@ TEST_F(CallStackProfileMetricsProviderTest, ProfilesProvidedOnlyOnce) {
   }
 }
 
-// Checks that pending profiles are provided to ProvideGeneralMetrics
+// Checks that pending profiles are provided to ProvideCurrentSessionData
 // when collected before CallStackProfileMetricsProvider is instantiated.
 TEST_F(CallStackProfileMetricsProviderTest,
        ProfilesProvidedWhenCollectedBeforeInstantiation) {
@@ -624,12 +624,12 @@ TEST_F(CallStackProfileMetricsProviderTest,
   CallStackProfileMetricsProvider provider;
   provider.OnRecordingEnabled();
   ChromeUserMetricsExtension uma_proto;
-  provider.ProvideGeneralMetrics(&uma_proto);
+  provider.ProvideCurrentSessionData(&uma_proto);
 
   EXPECT_EQ(1, uma_proto.sampled_profile_size());
 }
 
-// Checks that pending profiles are not provided to ProvideGeneralMetrics
+// Checks that pending profiles are not provided to ProvideCurrentSessionData
 // while recording is disabled.
 TEST_F(CallStackProfileMetricsProviderTest, ProfilesNotProvidedWhileDisabled) {
   Profiles profiles = ProfilesFactory()
@@ -648,12 +648,12 @@ TEST_F(CallStackProfileMetricsProviderTest, ProfilesNotProvidedWhileDisabled) {
                                 CallStackProfileParams::MAY_SHUFFLE);
   AppendProfiles(&params, std::move(profiles));
   ChromeUserMetricsExtension uma_proto;
-  provider.ProvideGeneralMetrics(&uma_proto);
+  provider.ProvideCurrentSessionData(&uma_proto);
 
   EXPECT_EQ(0, uma_proto.sampled_profile_size());
 }
 
-// Checks that pending profiles are not provided to ProvideGeneralMetrics
+// Checks that pending profiles are not provided to ProvideCurrentSessionData
 // if recording is disabled while profiling.
 TEST_F(CallStackProfileMetricsProviderTest,
        ProfilesNotProvidedAfterChangeToDisabled) {
@@ -674,12 +674,12 @@ TEST_F(CallStackProfileMetricsProviderTest,
       .Build();
   callback.Run(std::move(profiles));
   ChromeUserMetricsExtension uma_proto;
-  provider.ProvideGeneralMetrics(&uma_proto);
+  provider.ProvideCurrentSessionData(&uma_proto);
 
   EXPECT_EQ(0, uma_proto.sampled_profile_size());
 }
 
-// Checks that pending profiles are not provided to ProvideGeneralMetrics if
+// Checks that pending profiles are not provided to ProvideCurrentSessionData if
 // recording is enabled, but then disabled and reenabled while profiling.
 TEST_F(CallStackProfileMetricsProviderTest,
        ProfilesNotProvidedAfterChangeToDisabledThenEnabled) {
@@ -701,12 +701,12 @@ TEST_F(CallStackProfileMetricsProviderTest,
       .Build();
   callback.Run(std::move(profiles));
   ChromeUserMetricsExtension uma_proto;
-  provider.ProvideGeneralMetrics(&uma_proto);
+  provider.ProvideCurrentSessionData(&uma_proto);
 
   EXPECT_EQ(0, uma_proto.sampled_profile_size());
 }
 
-// Checks that pending profiles are not provided to ProvideGeneralMetrics
+// Checks that pending profiles are not provided to ProvideCurrentSessionData
 // if recording is disabled, but then enabled while profiling.
 TEST_F(CallStackProfileMetricsProviderTest,
        ProfilesNotProvidedAfterChangeFromDisabled) {
@@ -727,7 +727,7 @@ TEST_F(CallStackProfileMetricsProviderTest,
       .Build();
   callback.Run(std::move(profiles));
   ChromeUserMetricsExtension uma_proto;
-  provider.ProvideGeneralMetrics(&uma_proto);
+  provider.ProvideCurrentSessionData(&uma_proto);
 
   EXPECT_EQ(0, uma_proto.sampled_profile_size());
 }
@@ -815,7 +815,10 @@ TEST_F(CallStackProfileMetricsProviderTest, MAYBE_PeriodicProfiles) {
   const base::TimeDelta max_expected_uptime = internal::GetUptime();
 
   ChromeUserMetricsExtension uma_proto;
-  provider.ProvideGeneralMetrics(&uma_proto);
+  provider.ProvideCurrentSessionData(&uma_proto);
+
+  ASSERT_EQ(static_cast<int>(arraysize(expected_proto_profiles)),
+            uma_proto.sampled_profile().size());
 
   // We expect duration_ms to be the process uptime. Check that it's within the
   // min/max boundary values that were retrieved earlier. Then, set the value
@@ -826,14 +829,212 @@ TEST_F(CallStackProfileMetricsProviderTest, MAYBE_PeriodicProfiles) {
   EXPECT_LE(profile_duration_ms, max_expected_uptime.InMilliseconds());
   expected_proto_profiles[0].duration_ms = profile_duration_ms;
 
-  ASSERT_EQ(static_cast<int>(arraysize(expected_proto_profiles)),
-            uma_proto.sampled_profile().size());
   for (size_t p = 0; p < arraysize(expected_proto_profiles); ++p) {
-    SCOPED_TRACE("profile " + base::SizeTToString(p));
+    SCOPED_TRACE("profile " + base::NumberToString(p));
     VerifyProfileProto(expected_proto_profiles[p],
                        uma_proto.sampled_profile().Get(p));
     EXPECT_EQ(SampledProfile::PERIODIC_COLLECTION,
               uma_proto.sampled_profile(p).trigger_event());
+  }
+}
+
+// Only certain platforms support GetUptime() which is used by the code
+// being tested.
+#if (defined(OS_MACOSX) && !defined(OS_IOS)) || defined(OS_WIN) || \
+    defined(OS_LINUX)
+#define MAYBE_PeriodicProfileMerging PeriodicProfileMerging
+#else
+#define MAYBE_PeriodicProfileMerging DISABLED_PeriodicProfileMerging
+#endif
+TEST_F(CallStackProfileMetricsProviderTest, MAYBE_PeriodicProfileMerging) {
+  const char* moduleA_name = "ABCD";
+  const uintptr_t moduleA_base_address = 0x1000;
+  const char* moduleB_name = "BEEF";
+  const uintptr_t moduleB_base_address = 0x2000;
+
+#if defined(OS_WIN)
+  uint64_t moduleA_md5 = 0x46C3E4166659AC02ULL;
+  base::FilePath moduleA_path(L"c:\\some\\path\\to\\chrome.exe");
+  uint64_t moduleB_md5 = 0x7E2B8BFDDEAE1ABAULL;
+  base::FilePath moduleB_path(L"c:\\some\\path\\to\\third_party.dll");
+#else
+  uint64_t moduleA_md5 = 0x554838A8451AC36CULL;
+  base::FilePath moduleA_path("/some/path/to/chrome");
+  uint64_t moduleB_md5 = 0x843661148659C9F8ULL;
+  base::FilePath moduleB_path("/some/path/to/third_party.so");
+#endif
+
+  Profiles startup_profiles =
+      ProfilesFactory()
+          .NewProfile(100, 10)
+          .DefineModule(moduleA_name, moduleA_path, moduleA_base_address)
+          .DefineModule(moduleB_name, moduleB_path, moduleB_base_address)
+
+          .AddMilestone(0)
+          .NewSample()
+          .AddFrame(0, moduleA_base_address + 0x10)
+          .NewSample()
+          .AddFrame(0, moduleA_base_address + 0x20)
+          .NewSample()
+          .AddFrame(1, moduleB_base_address + 0x40)
+          .NewSample()
+          .AddFrame(0, moduleA_base_address + 0x20)
+
+          .Build();
+
+  // Provide periodic profiles in two separate sets, as expected by provider.
+  Profiles periodic1_profiles =
+      ProfilesFactory()
+          .NewProfile(100, 10)
+          .DefineModule(moduleA_name, moduleA_path, moduleA_base_address)
+
+          .AddMilestone(0)
+          .NewSample()
+          .AddFrame(0, moduleA_base_address + 0x10)
+          .NewSample()
+          .AddFrame(0, moduleA_base_address + 0x20)
+          .NewSample()
+          .AddFrame(0, moduleA_base_address + 0x30)
+
+          .Build();
+
+  Profiles periodic1_profiles2 =
+      ProfilesFactory()
+          .NewProfile(100, 10)
+          .DefineModule(moduleB_name, moduleB_path, moduleB_base_address)
+          .DefineModule(moduleA_name, moduleA_path, moduleA_base_address)
+
+          .AddMilestone(0)
+          .NewSample()
+          .AddFrame(1, moduleA_base_address + 0x10)
+          .NewSample()
+          .AddFrame(0, moduleB_base_address + 0x15)
+          .NewSample()
+          .AddFrame(1, moduleA_base_address + 0x20)
+
+          .Build();
+
+  // Periodic samples for a different thread that should not be merged.
+  Profiles periodic2_profiles =
+      ProfilesFactory()
+          .NewProfile(100, 10)
+          .DefineModule(moduleA_name, moduleA_path, moduleA_base_address)
+          .DefineModule(moduleB_name, moduleB_path, moduleB_base_address)
+
+          .AddMilestone(0)
+          .NewSample()
+          .AddFrame(0, moduleA_base_address + 0x10)
+          .NewSample()
+          .AddFrame(1, moduleB_base_address + 0x15)
+
+          .Build();
+
+  const ExpectedProtoModule expected_proto_modules[] = {
+      {moduleA_name, moduleA_md5, moduleA_base_address},
+      {moduleB_name, moduleB_md5, moduleB_base_address},
+  };
+
+  // Expected startup samples.
+  const ExpectedProtoEntry expected_startup_proto_entries[] = {
+      {0, 0x10}, {0, 0x20}, {1, 0x40},
+  };
+  const ExpectedProtoSample expected_startup_proto_samples[] = {
+      {1, &expected_startup_proto_entries[0], 1, 1},
+      {0, &expected_startup_proto_entries[1], 1, 2},
+      {0, &expected_startup_proto_entries[2], 1, 1},
+  };
+
+  // Expected periodic UI thread samples.
+  const ExpectedProtoEntry expected_periodic1_proto_entries[] = {
+      {0, 0x10}, {0, 0x20}, {0, 0x30}, {1, 0x15},
+  };
+  const ExpectedProtoSample expected_periodic1_proto_samples[] = {
+      {1, &expected_periodic1_proto_entries[0], 1, 2},
+      {0, &expected_periodic1_proto_entries[1], 1, 2},
+      {0, &expected_periodic1_proto_entries[2], 1, 1},
+      {0, &expected_periodic1_proto_entries[3], 1, 1},
+  };
+
+  // Expected periodic IO thread samples.
+  const ExpectedProtoEntry expected_periodic2_proto_entries[] = {
+      {0, 0x10}, {1, 0x15},
+  };
+  const ExpectedProtoSample expected_periodic2_proto_samples[] = {
+      {1, &expected_periodic2_proto_entries[0], 1, 1},
+      {0, &expected_periodic2_proto_entries[1], 1, 1},
+  };
+
+  ExpectedProtoProfile expected_proto_profiles[] = {
+      // Startup profile:
+      {
+          100, 10, expected_proto_modules, arraysize(expected_proto_modules),
+          expected_startup_proto_samples,
+          arraysize(expected_startup_proto_samples),
+      },
+      // Periodic profile, process1:
+      {
+          0,     // Will be updated below.
+          1000,  // Based on kPeriodicSamplingInterval in the .cc.
+          expected_proto_modules, arraysize(expected_proto_modules),
+          expected_periodic1_proto_samples,
+          arraysize(expected_periodic1_proto_samples),
+      },
+      // Periodic profile, process2:
+      {
+          0,     // Will be updated below.
+          1000,  // Based on kPeriodicSamplingInterval in the .cc.
+          expected_proto_modules, arraysize(expected_proto_modules),
+          expected_periodic2_proto_samples,
+          arraysize(expected_periodic2_proto_samples),
+      },
+  };
+
+  CallStackProfileMetricsProvider provider;
+  provider.OnRecordingEnabled();
+
+  CallStackProfileParams startup_params(CallStackProfileParams::BROWSER_PROCESS,
+                                        CallStackProfileParams::UI_THREAD,
+                                        CallStackProfileParams::PROCESS_STARTUP,
+                                        CallStackProfileParams::MAY_SHUFFLE);
+  AppendProfiles(&startup_params, std::move(startup_profiles));
+
+  CallStackProfileParams periodic1_params(
+      CallStackProfileParams::BROWSER_PROCESS,
+      CallStackProfileParams::UI_THREAD,
+      CallStackProfileParams::PERIODIC_COLLECTION,
+      CallStackProfileParams::MAY_SHUFFLE);
+  AppendProfiles(&periodic1_params, std::move(periodic1_profiles));
+  AppendProfiles(&periodic1_params, std::move(periodic1_profiles2));
+
+  CallStackProfileParams periodic2_params(
+      CallStackProfileParams::BROWSER_PROCESS,
+      CallStackProfileParams::IO_THREAD,
+      CallStackProfileParams::PERIODIC_COLLECTION,
+      CallStackProfileParams::MAY_SHUFFLE);
+  AppendProfiles(&periodic2_params, std::move(periodic2_profiles));
+
+  ChromeUserMetricsExtension uma_proto;
+  provider.ProvideCurrentSessionData(&uma_proto);
+
+  ASSERT_EQ(static_cast<int>(arraysize(expected_proto_profiles)),
+            uma_proto.sampled_profile().size());
+
+  expected_proto_profiles[1].duration_ms =
+      uma_proto.sampled_profile(1).call_stack_profile().profile_duration_ms();
+  expected_proto_profiles[2].duration_ms =
+      uma_proto.sampled_profile(2).call_stack_profile().profile_duration_ms();
+
+  for (size_t p = 0; p < arraysize(expected_proto_profiles); ++p) {
+    SCOPED_TRACE("profile " + base::NumberToString(p));
+    VerifyProfileProto(expected_proto_profiles[p],
+                       uma_proto.sampled_profile().Get(p));
+    if (p == 0) {
+      EXPECT_EQ(SampledProfile::PROCESS_STARTUP,
+                uma_proto.sampled_profile(p).trigger_event());
+    } else {
+      EXPECT_EQ(SampledProfile::PERIODIC_COLLECTION,
+                uma_proto.sampled_profile(p).trigger_event());
+    }
   }
 }
 

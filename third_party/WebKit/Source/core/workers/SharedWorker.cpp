@@ -33,11 +33,11 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/MessageChannel.h"
-#include "core/dom/MessagePort.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
 #include "core/frame/UseCounter.h"
+#include "core/messaging/MessageChannel.h"
+#include "core/messaging/MessagePort.h"
 #include "core/probe/CoreProbes.h"
 #include "core/workers/SharedWorkerRepositoryClient.h"
 #include "platform/weborigin/KURL.h"
@@ -61,9 +61,7 @@ SharedWorker* SharedWorker::Create(ExecutionContext* context,
 
   MessageChannel* channel = MessageChannel::Create(context);
   worker->port_ = channel->port1();
-  std::unique_ptr<WebMessagePortChannel> remote_port =
-      channel->port2()->Disentangle();
-  DCHECK(remote_port);
+  MessagePortChannel remote_port = channel->port2()->Disentangle();
 
   // We don't currently support nested workers, so workers can only be created
   // from documents.
@@ -73,10 +71,12 @@ SharedWorker* SharedWorker::Create(ExecutionContext* context,
         "Access to shared workers is denied to origin '" +
         document->GetSecurityOrigin()->ToString() + "'.");
     return nullptr;
+  } else if (document->GetSecurityOrigin()->IsLocal()) {
+    UseCounter::Count(document, WebFeature::kFileAccessedSharedWorker);
   }
 
-  KURL script_url = worker->ResolveURL(
-      url, exception_state, WebURLRequest::kRequestContextSharedWorker);
+  KURL script_url = ResolveURL(context, url, exception_state,
+                               WebURLRequest::kRequestContextSharedWorker);
   if (script_url.IsEmpty())
     return nullptr;
 
@@ -88,7 +88,7 @@ SharedWorker* SharedWorker::Create(ExecutionContext* context,
   return worker;
 }
 
-SharedWorker::~SharedWorker() {}
+SharedWorker::~SharedWorker() = default;
 
 const AtomicString& SharedWorker::InterfaceName() const {
   return EventTargetNames::SharedWorker;
@@ -98,7 +98,7 @@ bool SharedWorker::HasPendingActivity() const {
   return is_being_connected_;
 }
 
-DEFINE_TRACE(SharedWorker) {
+void SharedWorker::Trace(blink::Visitor* visitor) {
   visitor->Trace(port_);
   AbstractWorker::Trace(visitor);
   Supplementable<SharedWorker>::Trace(visitor);

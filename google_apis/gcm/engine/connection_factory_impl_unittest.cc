@@ -5,9 +5,9 @@
 #include "google_apis/gcm/engine/connection_factory_impl.h"
 
 #include <cmath>
+#include <memory>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/test/simple_test_tick_clock.h"
@@ -17,6 +17,7 @@
 #include "google_apis/gcm/monitoring/fake_gcm_stats_recorder.h"
 #include "net/base/backoff_entry.h"
 #include "net/http/http_network_session.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class Policy;
@@ -152,9 +153,9 @@ TestConnectionFactoryImpl::TestConnectionFactoryImpl(
       connections_fulfilled_(true),
       delay_login_(false),
       finished_callback_(finished_callback),
-      scoped_handler_(
-          new FakeConnectionHandler(base::Bind(&ReadContinuation),
-                                    base::Bind(&WriteContinuation))),
+      scoped_handler_(std::make_unique<FakeConnectionHandler>(
+          base::Bind(&ReadContinuation),
+          base::Bind(&WriteContinuation))),
       fake_handler_(scoped_handler_.get()) {
   // Set a non-null time.
   tick_clock_.Advance(base::TimeDelta::FromMilliseconds(1));
@@ -168,7 +169,7 @@ void TestConnectionFactoryImpl::StartConnection() {
   ASSERT_GT(num_expected_attempts_, 0);
   ASSERT_FALSE(GetConnectionHandler()->CanSendMessage());
   std::unique_ptr<mcs_proto::LoginRequest> request(BuildLoginRequest(0, 0, ""));
-  GetConnectionHandler()->Init(*request, NULL);
+  GetConnectionHandler()->Init(*request, TRAFFIC_ANNOTATION_FOR_TESTS, NULL);
   OnConnectDone(connect_result_);
   if (!NextRetryAttempt().is_null()) {
     // Advance the time to the next retry time.
@@ -193,7 +194,7 @@ void TestConnectionFactoryImpl::InitHandler() {
 std::unique_ptr<net::BackoffEntry>
 TestConnectionFactoryImpl::CreateBackoffEntry(
     const net::BackoffEntry::Policy* const policy) {
-  return base::MakeUnique<net::BackoffEntry>(&kTestBackoffPolicy, &tick_clock_);
+  return std::make_unique<net::BackoffEntry>(&kTestBackoffPolicy, &tick_clock_);
 }
 
 std::unique_ptr<ConnectionHandler>

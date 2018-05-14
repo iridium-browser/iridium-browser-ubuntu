@@ -10,7 +10,6 @@
 #include <climits>
 #include <cstdarg>
 #include <cstdio>
-#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -18,6 +17,7 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
+#include "base/containers/circular_deque.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
@@ -41,7 +41,6 @@
 #include "media/cast/cast_environment.h"
 #include "media/cast/cast_receiver.h"
 #include "media/cast/logging/logging_defines.h"
-#include "media/cast/net/udp_transport.h"
 #include "media/cast/test/utility/audio_utility.h"
 #include "media/cast/test/utility/barcode.h"
 #include "media/cast/test/utility/default_config.h"
@@ -527,7 +526,7 @@ class NaivePlayer : public InProcessReceiver,
   // Video playout queue.
   typedef std::pair<base::TimeTicks, scoped_refptr<VideoFrame> >
       VideoQueueEntry;
-  std::deque<VideoQueueEntry> video_playout_queue_;
+  base::circular_deque<VideoQueueEntry> video_playout_queue_;
   base::TimeTicks last_popped_video_playout_time_;
   int64_t num_video_frames_processed_;
 
@@ -536,7 +535,7 @@ class NaivePlayer : public InProcessReceiver,
   // Audio playout queue, synchronized by |audio_lock_|.
   base::Lock audio_lock_;
   typedef std::pair<base::TimeTicks, AudioBus*> AudioQueueEntry;
-  std::deque<AudioQueueEntry> audio_playout_queue_;
+  base::circular_deque<AudioQueueEntry> audio_playout_queue_;
   base::TimeTicks last_popped_audio_playout_time_;
   int64_t num_audio_frames_processed_;
 
@@ -563,7 +562,7 @@ int main(int argc, char** argv) {
 
   // Start up Chromium audio system.
   auto audio_manager = media::AudioManager::CreateForTesting(
-      base::MakeUnique<media::TestAudioThread>());
+      std::make_unique<media::TestAudioThread>());
   CHECK(media::AudioManager::Get());
 
   media::cast::FrameReceiverConfig audio_config =

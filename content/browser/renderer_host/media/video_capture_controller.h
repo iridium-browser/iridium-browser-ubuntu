@@ -17,6 +17,7 @@
 #include "content/browser/renderer_host/media/video_capture_provider.h"
 #include "content/common/content_export.h"
 #include "content/common/media/video_capture.h"
+#include "content/public/browser/video_capture_device_launcher.h"
 #include "content/public/common/media_stream_request.h"
 #include "media/capture/video/video_frame_receiver.h"
 #include "media/capture/video_capture_types.h"
@@ -44,7 +45,8 @@ class CONTENT_EXPORT VideoCaptureController
       const std::string& device_id,
       MediaStreamType stream_type,
       const media::VideoCaptureParams& params,
-      std::unique_ptr<VideoCaptureDeviceLauncher> device_launcher);
+      std::unique_ptr<VideoCaptureDeviceLauncher> device_launcher,
+      base::RepeatingCallback<void(const std::string&)> emit_log_message_cb);
 
   base::WeakPtr<VideoCaptureController> GetWeakPtrForIOThread();
 
@@ -220,11 +222,14 @@ class CONTENT_EXPORT VideoCaptureController
                           VideoCaptureControllerID id)>;
   void PerformForClientsWithOpenSession(EventHandlerAction action);
 
+  void EmitLogMessage(const std::string& message, int verbose_log_level);
+
   const int serial_id_;
   const std::string device_id_;
   const MediaStreamType stream_type_;
   const media::VideoCaptureParams parameters_;
   std::unique_ptr<VideoCaptureDeviceLauncher> device_launcher_;
+  base::RepeatingCallback<void(const std::string&)> emit_log_message_cb_;
   std::unique_ptr<LaunchedVideoCaptureDevice> launched_device_;
   VideoCaptureDeviceLaunchObserver* device_launch_observer_;
 

@@ -20,19 +20,36 @@
 
 #include "core/css/StyleSheetList.h"
 
-#include "core/HTMLNames.h"
+#include "core/css/StyleEngine.h"
 #include "core/dom/Document.h"
-#include "core/dom/StyleEngine.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLStyleElement.h"
+#include "core/html_names.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
 using namespace HTMLNames;
 
+StyleSheetList* StyleSheetList::Create(
+    const HeapVector<Member<CSSStyleSheet>>& style_sheet_vector,
+    ExceptionState& exception_state) {
+  if (!RuntimeEnabledFeatures::ConstructableStylesheetsEnabled()) {
+    exception_state.ThrowTypeError("Illegal constructor");
+    return nullptr;
+  }
+
+  return new StyleSheetList(style_sheet_vector);
+}
+
+StyleSheetList::StyleSheetList(
+    const HeapVector<Member<CSSStyleSheet>>& style_sheet_vector)
+    : style_sheet_vector_(style_sheet_vector) {}
+
 StyleSheetList::StyleSheetList(TreeScope* tree_scope)
-    : tree_scope_(tree_scope) {}
+    : tree_scope_(tree_scope) {
+  CHECK(tree_scope);
+}
 
 inline const HeapVector<TraceWrapperMember<StyleSheet>>&
 StyleSheetList::StyleSheets() const {
@@ -41,10 +58,16 @@ StyleSheetList::StyleSheets() const {
 }
 
 unsigned StyleSheetList::length() {
+  if (!tree_scope_)
+    return style_sheet_vector_.size();
   return StyleSheets().size();
 }
 
 StyleSheet* StyleSheetList::item(unsigned index) {
+  if (!tree_scope_) {
+    return index < style_sheet_vector_.size() ? style_sheet_vector_[index].Get()
+                                              : nullptr;
+  }
   const HeapVector<TraceWrapperMember<StyleSheet>>& sheets = StyleSheets();
   return index < sheets.size() ? sheets[index].Get() : nullptr;
 }
@@ -57,7 +80,7 @@ HTMLStyleElement* StyleSheetList::GetNamedItem(const AtomicString& name) const {
   // practice anyway ;)
   // FIXME: We should figure out if we should change this or fix the spec.
   Element* element = tree_scope_->getElementById(name);
-  return isHTMLStyleElement(element) ? toHTMLStyleElement(element) : nullptr;
+  return IsHTMLStyleElement(element) ? ToHTMLStyleElement(element) : nullptr;
 }
 
 CSSStyleSheet* StyleSheetList::AnonymousNamedGetter(const AtomicString& name) {
@@ -68,11 +91,18 @@ CSSStyleSheet* StyleSheetList::AnonymousNamedGetter(const AtomicString& name) {
   HTMLStyleElement* item = GetNamedItem(name);
   if (!item)
     return nullptr;
-  return item->sheet();
+  CSSStyleSheet* sheet = item->sheet();
+  if (sheet) {
+    UseCounter::Count(*GetDocument(),
+                      WebFeature::kStyleSheetListNonNullAnonymousNamedGetter);
+  }
+  return sheet;
 }
 
-DEFINE_TRACE(StyleSheetList) {
+void StyleSheetList::Trace(blink::Visitor* visitor) {
   visitor->Trace(tree_scope_);
+  visitor->Trace(style_sheet_vector_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

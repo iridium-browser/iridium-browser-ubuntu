@@ -6,13 +6,15 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_test_harness.h"
+#include "chrome/browser/page_load_metrics/page_load_tracker.h"
 #include "chrome/browser/predictors/loading_data_collector.h"
 #include "chrome/browser/predictors/resource_prefetch_common.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor.h"
+#include "chrome/common/page_load_metrics/test/page_load_metrics_test_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using predictors::LoadingDataCollector;
@@ -26,6 +28,7 @@ class MockResourcePrefetchPredictor : public ResourcePrefetchPredictor {
       : ResourcePrefetchPredictor(config, profile) {}
 
   MOCK_CONST_METHOD1(IsUrlPrefetchable, bool(const GURL& main_frame_url));
+  MOCK_CONST_METHOD1(IsUrlPreconnectable, bool(const GURL& main_frame_url));
 
   ~MockResourcePrefetchPredictor() override {}
 };
@@ -38,10 +41,14 @@ class LoadingPredictorPageLoadMetricsObserverTest
     predictors::LoadingPredictorConfig config;
     config.mode = predictors::LoadingPredictorConfig::LEARNING;
     predictor_ =
-        base::MakeUnique<testing::StrictMock<MockResourcePrefetchPredictor>>(
+        std::make_unique<testing::StrictMock<MockResourcePrefetchPredictor>>(
             config, profile());
+    // The base class of MockResourcePrefetchPredictor constructs the
+    // PredictorDatabase for the profile. The PredictorDatabase is initialized
+    // asynchronously and we have to wait for the initialization completion.
+    content::RunAllTasksUntilIdle();
     page_load_metrics::InitPageLoadTimingForTest(&timing_);
-    collector_ = base::MakeUnique<LoadingDataCollector>(predictor_.get(),
+    collector_ = std::make_unique<LoadingDataCollector>(predictor_.get(),
                                                         nullptr, config);
     timing_.navigation_start = base::Time::FromDoubleT(1);
     timing_.paint_timing->first_paint = base::TimeDelta::FromSeconds(2);
@@ -54,8 +61,24 @@ class LoadingPredictorPageLoadMetricsObserverTest
 
   void RegisterObservers(page_load_metrics::PageLoadTracker* tracker) override {
     tracker->AddObserver(
-        base::MakeUnique<LoadingPredictorPageLoadMetricsObserver>(
+        std::make_unique<LoadingPredictorPageLoadMetricsObserver>(
             predictor_.get(), collector_.get(), web_contents()));
+  }
+
+  void TestHistogramsRecorded(bool is_preconnectable) {
+    const GURL main_frame_url("https://www.google.com");
+    EXPECT_CALL(*predictor_.get(), IsUrlPreconnectable(main_frame_url))
+        .WillOnce(testing::Return(is_preconnectable));
+
+    NavigateAndCommit(main_frame_url);
+    SimulateTimingUpdate(timing_);
+
+    histogram_tester().ExpectTotalCount(
+        internal::kHistogramLoadingPredictorFirstContentfulPaintPreconnectable,
+        is_preconnectable ? 1 : 0);
+    histogram_tester().ExpectTotalCount(
+        internal::kHistogramLoadingPredictorFirstMeaningfulPaintPreconnectable,
+        is_preconnectable ? 1 : 0);
   }
 
   std::unique_ptr<testing::StrictMock<MockResourcePrefetchPredictor>>
@@ -64,31 +87,11 @@ class LoadingPredictorPageLoadMetricsObserverTest
   std::unique_ptr<LoadingDataCollector> collector_;
 };
 
-TEST_F(LoadingPredictorPageLoadMetricsObserverTest, PrefetchableIsRecorded) {
-  const GURL main_frame_url("https://www.google.com");
-  EXPECT_CALL(*predictor_.get(), IsUrlPrefetchable(main_frame_url))
-      .WillOnce(testing::Return(true));
-
-  NavigateAndCommit(main_frame_url);
-  SimulateTimingUpdate(timing_);
-
-  histogram_tester().ExpectTotalCount(
-      internal::kHistogramResourcePrefetchPredictorFirstContentfulPaint, 1);
-  histogram_tester().ExpectTotalCount(
-      internal::kHistogramResourcePrefetchPredictorFirstMeaningfulPaint, 1);
+TEST_F(LoadingPredictorPageLoadMetricsObserverTest, PreconnectableIsRecorded) {
+  TestHistogramsRecorded(true);
 }
 
 TEST_F(LoadingPredictorPageLoadMetricsObserverTest,
-       NotPrefetchableIsNotRecorded) {
-  const GURL main_frame_url("https://www.google.com");
-  EXPECT_CALL(*predictor_.get(), IsUrlPrefetchable(main_frame_url))
-      .WillOnce(testing::Return(false));
-
-  NavigateAndCommit(main_frame_url);
-  SimulateTimingUpdate(timing_);
-
-  histogram_tester().ExpectTotalCount(
-      internal::kHistogramResourcePrefetchPredictorFirstContentfulPaint, 0);
-  histogram_tester().ExpectTotalCount(
-      internal::kHistogramResourcePrefetchPredictorFirstMeaningfulPaint, 0);
+       NotPreconnectableIsNotRecorded) {
+  TestHistogramsRecorded(false);
 }

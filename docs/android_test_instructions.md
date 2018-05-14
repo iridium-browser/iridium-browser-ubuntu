@@ -8,6 +8,12 @@
 
 #### ADB Debugging
 
+The adb executable exists within the Android SDK:
+
+```shell
+third_party/android_tools/sdk/platform-tools/adb
+```
+
 In order to allow the ADB to connect to the device, you must enable USB
 debugging:
 
@@ -34,12 +40,6 @@ If this option is greyed out, stay awake is probably disabled by policy. In that
 case, get another device or log in with a normal, unmanaged account (because the
 tests will break in exciting ways if stay awake is off).
 
-#### Enable Asserts
-
-```
-adb shell setprop debug.assert 1
-```
-
 #### Disable Verify Apps
 
 You may see a dialog like [this
@@ -51,52 +51,70 @@ behavior._ This can interfere with the test runner. To disable this dialog, run:
 adb shell settings put global package_verifier_enable 0
 ```
 
-### Emulator Setup
+### Using Emulators
 
-#### Option 1
+#### Building for emulation
 
-Use an emulator (i.e. Android Virtual Device, AVD): Enabling Intel's
-Virtualizaton support provides the fastest, most reliable emulator configuration
-available (i.e. x86 emulator with GPU acceleration and KVM support). Remember to
-build with `target_cpu = "x86"` for x86. Otherwise installing the APKs will fail
-with `INSTALL_FAILED_NO_MATCHING_ABIS`.
+The fast Android emulators use the X86 instruction set, so anything run on such
+an emulator has to be built for X86. Add
+```
+target_cpu = "x86"
+```
+to your args.gn file. You may want use different out directories for your X86
+and ARM builds.
 
-1.  Enable Intel Virtualization support in the BIOS.
+#### Setting up your workstation
 
-2.  Set up your environment:
+The Android emulators support VM acceleration. This, however, needs to be
+enabled on your workstation, as described in
+https://developer.android.com/studio/run/emulator-acceleration.html#accel-vm.
 
-    ```shell
-    . build/android/envsetup.sh
-    ```
+#### Creating and running emulators from Android Studio
 
-3.  Install emulator deps:
+The easiest way to create and run an emulator is to use Android Studio's
+Virtual Device Manager. See
+https://developer.android.com/studio/run/managing-avds.html.
 
-    ```shell
-    build/android/install_emulator_deps.py --api-level=23
-    ```
+Creating emulators in Android Studio will modify the current SDK. If you are
+using the project's SDK then this can cause problems the next time you sync
+the project, so it is normally better to use a different SDK root when
+creating emulators. You can set this up either by creating the Android Studio
+project using generate_gradle.py's --sdk or --sdk-path options or by
+changing the SDK location within AndroidStudio's settings.
 
-    This script will download Android SDK and place it a directory called
-    android\_tools in the same parent directory as your chromium checkout. It
-    will also download the system-images for the emulators (i.e. arm and x86).
-    Note that this is a different SDK download than the Android SDK in the
-    chromium source checkout (i.e. `src/third_party/android_emulator_sdk`).
+#### Starting an emulator from the command line
 
-4.  Run the avd.py script. To start up _num_ emulators use -n. For non-x86 use
-    --abi.
+Once you have created an emulator (using Android Studio or otherwise) you can
+start it from the command line using the
+[emulator](https://developer.android.com/studio/run/emulator-commandline.html)
+command:
 
-    ```shell
-    build/android/avd.py --api-level=23
-    ```
+```
+{$ANDROID_SDK_ROOT}/tools/emulator @emulatorName
+```
 
-    This script will attempt to use GPU emulation, so you must be running the
-    emulators in an environment with hardware rendering available. See `avd.py
-    --help` for more details.
+where emulatorName is the name of the emulator you want to start (e.g.
+Nexus_5X_API_27). The command
 
-#### Option 2
+```
+{$ANDROID_SDK_ROOT}/tools/emulator -list-avds
+```
 
-Alternatively, you can create and run your own emulator using the tools provided
-by the Android SDK. When doing so, be sure to enable GPU emulation in hardware
-settings, since Chromium requires it to render.
+will list the available emulators.
+
+#### Creating an emulator from the command line
+
+New emulators can be created from the command line using the
+[avdmanager](https://developer.android.com/studio/command-line/avdmanager.html)
+command. This, however, does not provide any way of creating new device types,
+and provides far fewer options than the Android Studio UI for creating new
+emulators.
+
+The device types are configured through a devices.xml file. The devices.xml
+file for standard device types are within Android Studio's install, and that
+for any additional devices you define are in $ANDROID_EMULATOR_HOME (defaulting
+to ~/.android/). The contents of devices.xml is, however, undocumented (and
+presumably subject to change), so this is best modified using Android Studio.
 
 ## Building Tests
 
@@ -206,14 +224,22 @@ run the test.
 
 ```shell
 # Build the test suite.
-ninja -C out/my_build chrome_junit_tests
+ninja -C out/Default chrome_junit_tests
 
 # Run the test suite.
-BUILDTYPE=my_build build/android/test_runner.py junit -s chrome_junit_tests -vvv
+out/Default/run_chrome_junit_tests
 
 # Run a subset of tests. You might need to pass the package name for some tests.
-BUILDTYPE=my_build build/android/test_runner.py junit -s chrome_junit_tests -vvv
--f "org.chromium.chrome.browser.media.*"
+out/Default/run_chrome_junit_tests -f "org.chromium.chrome.browser.media.*"
+```
+
+### Debugging
+
+Similar to [debugging apk targets](android_debugging_instructions.md#debugging-java):
+
+```shell
+out/Default/bin/run_chrome_junit_tests --wait-for-java-debugger
+out/Default/bin/run_chrome_junit_tests --wait-for-java-debugger  # Specify custom port via --debug-socket=9999
 ```
 
 ## Gtests
@@ -301,6 +327,25 @@ out/Debug/bin/run_content_shell_test_apk -A Feature=Navigation
 
 You might want to add stars `*` to each as a regular expression, e.g.
 `*`AddressDetectionTest`*`
+
+### Debugging
+
+Similar to [debugging apk targets](android_debugging_instructions.md#debugging-java):
+
+```shell
+out/Debug/bin/run_content_shell_test_apk --wait-for-java-debugger
+```
+
+### Deobfuscating Java Stacktraces
+
+If running with `is_debug=false`, Java stacks from logcat need to be fixed up:
+
+```shell
+out/Release/bin/java_deobfuscate out/Release/apks/ChromePublicTest.apk.mapping < stacktrace.txt
+```
+
+Any stacks produced by test runner output will already be deobfuscated.
+
 
 ## Running Blink Layout Tests
 

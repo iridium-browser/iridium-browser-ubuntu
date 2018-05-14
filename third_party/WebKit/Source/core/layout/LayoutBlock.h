@@ -128,7 +128,7 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
       bool first_line,
       LineDirectionMode,
       LinePositionMode = kPositionOnContainingLine) const final;
-  int BaselinePosition(
+  LayoutUnit BaselinePosition(
       FontBaseline,
       bool first_line,
       LineDirectionMode,
@@ -211,12 +211,10 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
   LayoutUnit TextIndentOffset() const;
 
-  PositionWithAffinity PositionForPoint(const LayoutPoint&) override;
+  PositionWithAffinity PositionForPoint(const LayoutPoint&) const override;
 
   LayoutUnit BlockDirectionOffset(const LayoutSize& offset_from_block) const;
   LayoutUnit InlineDirectionOffset(const LayoutSize& offset_from_block) const;
-
-  void SetSelectionState(SelectionState) override;
 
   static LayoutBlock* CreateAnonymousWithParentAndDisplay(
       const LayoutObject*,
@@ -227,8 +225,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
   LayoutBox* CreateAnonymousBoxWithSameTypeAs(
       const LayoutObject* parent) const override;
-
-  int ColumnGap() const;
 
   // Accessors for logical width/height and margins in the containing block's
   // block-flow direction.
@@ -322,10 +318,11 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
  protected:
   bool RecalcNormalFlowChildOverflowIfNeeded(LayoutObject*);
   bool RecalcPositionedDescendantsOverflowAfterStyleChange();
+  bool RecalcSelfOverflowAfterStyleChange();
 
  public:
-  virtual bool RecalcChildOverflowAfterStyleChange();
-  bool RecalcOverflowAfterStyleChange();
+  bool RecalcChildOverflowAfterStyleChange();
+  bool RecalcOverflowAfterStyleChange() override;
 
   // An example explaining layout tree structure about first-line style:
   // <style>
@@ -370,13 +367,14 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
   LayoutUnit MarginIntrinsicLogicalWidthForChild(const LayoutBox& child) const;
 
-  int BeforeMarginInLineDirection(LineDirectionMode) const;
+  LayoutUnit BeforeMarginInLineDirection(LineDirectionMode) const;
 
   void Paint(const PaintInfo&, const LayoutPoint&) const override;
 
  public:
   virtual void PaintObject(const PaintInfo&, const LayoutPoint&) const;
   virtual void PaintChildren(const PaintInfo&, const LayoutPoint&) const;
+  void UpdateAfterLayout() override;
 
  protected:
   virtual void AdjustInlineDirectionLineBounds(
@@ -393,8 +391,8 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
       LayoutUnit& min_preferred_logical_width,
       LayoutUnit& max_preferred_logical_width) const;
 
-  int FirstLineBoxBaseline() const override;
-  int InlineBlockBaseline(LineDirectionMode) const override;
+  LayoutUnit FirstLineBoxBaseline() const override;
+  LayoutUnit InlineBlockBaseline(LineDirectionMode) const override;
 
   // This function disables the 'overflow' check in inlineBlockBaseline.
   // For 'inline-block', CSS says that the baseline is the bottom margin edge
@@ -411,9 +409,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
                        const HitTestLocation& location_in_container,
                        const LayoutPoint& accumulated_offset,
                        HitTestAction) override;
-  void UpdateHitTestResult(HitTestResult&, const LayoutPoint&) override;
-
-  void UpdateAfterLayout() override;
 
   void StyleWillChange(StyleDifference,
                        const ComputedStyle& new_style) override;
@@ -431,7 +426,8 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   virtual void SimplifiedNormalFlowLayout();
 
  public:
-  virtual void ComputeOverflow(LayoutUnit old_client_after_edge, bool = false);
+  virtual void ComputeOverflow(LayoutUnit old_client_after_edge,
+                               bool recompute_floats = false);
 
  protected:
   virtual void AddOverflowFromChildren();
@@ -499,9 +495,9 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
  private:
   LayoutRect LocalCaretRect(
-      InlineBox*,
+      const InlineBox*,
       int caret_offset,
-      LayoutUnit* extra_width_to_end_of_line = nullptr) final;
+      LayoutUnit* extra_width_to_end_of_line = nullptr) const final;
   bool IsInlineBoxWrapperActuallyChild() const;
 
   Position PositionForBox(InlineBox*, bool start = true) const;
@@ -523,9 +519,9 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
   PositionWithAffinity PositionForPointRespectingEditingBoundaries(
       LineLayoutBox child,
-      const LayoutPoint& point_in_parent_coordinates);
+      const LayoutPoint& point_in_parent_coordinates) const;
   PositionWithAffinity PositionForPointIfOutsideAtomicInlineLevel(
-      const LayoutPoint&);
+      const LayoutPoint&) const;
 
   virtual bool UpdateLogicalWidthAndColumnWidth();
 

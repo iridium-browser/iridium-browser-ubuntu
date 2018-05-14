@@ -35,7 +35,6 @@ namespace blink {
 class Page;
 class SpeechGrammarList;
 class SpeechRecognition;
-class MediaStreamTrack;
 
 class SpeechRecognitionClient {
  public:
@@ -44,12 +43,11 @@ class SpeechRecognitionClient {
                      const String& lang,
                      bool continuous,
                      bool interim_results,
-                     unsigned long max_alternatives,
-                     MediaStreamTrack* audio_track) = 0;
+                     unsigned long max_alternatives) = 0;
   virtual void Stop(SpeechRecognition*) = 0;
   virtual void Abort(SpeechRecognition*) = 0;
 
-  virtual ~SpeechRecognitionClient() {}
+  virtual ~SpeechRecognitionClient() = default;
 };
 
 MODULES_EXPORT void ProvideSpeechRecognitionTo(

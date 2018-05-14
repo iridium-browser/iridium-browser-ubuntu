@@ -4,23 +4,22 @@
 
 package org.chromium.chrome.browser.firstrun;
 
-import android.app.Fragment;
+import android.os.Bundle;
 
 /**
  * Defines the host interface for First Run Experience pages.
  */
 public interface FirstRunPageDelegate {
     /**
+     * Returns FRE properties bundle.
+     */
+    Bundle getProperties();
+
+    /**
      * Advances the First Run Experience to the next page.
      * Successfully finishes FRE if the current page is the last page.
      */
     void advanceToNextPage();
-
-    /**
-     * Asks to re-instantiate the current page.
-     * Useful to restore the "clean" state of the UI elements.
-     */
-    void recreateCurrentPage();
 
     /**
      * Unsuccessfully aborts the First Run Experience.
@@ -63,12 +62,6 @@ public interface FirstRunPageDelegate {
      * @param allowCrashUpload True if the user allows to upload crash dumps and collect stats.
      */
     void acceptTermsOfService(boolean allowCrashUpload);
-
-    /**
-     * Opens the Android account adder UI.
-     * @param fragment A fragment that needs the account adder UI.
-     */
-    void openAccountAdder(Fragment fragment);
 
     /**
      * Show an informational web page. The page doesn't show navigation control.

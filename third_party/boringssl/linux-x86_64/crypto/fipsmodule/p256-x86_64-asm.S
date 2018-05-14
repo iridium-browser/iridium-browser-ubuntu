@@ -24,8 +24,14 @@
 .type	ecp_nistz256_neg,@function
 .align	32
 ecp_nistz256_neg:
+.cfi_startproc	
 	pushq	%r12
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r12,-16
 	pushq	%r13
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r13,-24
+.Lneg_body:
 
 	xorq	%r8,%r8
 	xorq	%r9,%r9
@@ -59,9 +65,15 @@ ecp_nistz256_neg:
 	movq	%r10,16(%rdi)
 	movq	%r11,24(%rdi)
 
-	popq	%r13
-	popq	%r12
+	movq	0(%rsp),%r13
+.cfi_restore	%r13
+	movq	8(%rsp),%r12
+.cfi_restore	%r12
+	leaq	16(%rsp),%rsp
+.cfi_adjust_cfa_offset	-16
+.Lneg_epilogue:
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	ecp_nistz256_neg,.-ecp_nistz256_neg
 
 
@@ -74,13 +86,27 @@ ecp_nistz256_neg:
 .type	ecp_nistz256_mul_mont,@function
 .align	32
 ecp_nistz256_mul_mont:
+.cfi_startproc	
 .Lmul_mont:
 	pushq	%rbp
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%rbp,-16
 	pushq	%rbx
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%rbx,-24
 	pushq	%r12
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r12,-32
 	pushq	%r13
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r13,-40
 	pushq	%r14
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r14,-48
 	pushq	%r15
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r15,-56
+.Lmul_body:
 	movq	%rdx,%rbx
 	movq	0(%rdx),%rax
 	movq	0(%rsi),%r9
@@ -90,13 +116,23 @@ ecp_nistz256_mul_mont:
 
 	call	__ecp_nistz256_mul_montq
 .Lmul_mont_done:
-	popq	%r15
-	popq	%r14
-	popq	%r13
-	popq	%r12
-	popq	%rbx
-	popq	%rbp
+	movq	0(%rsp),%r15
+.cfi_restore	%r15
+	movq	8(%rsp),%r14
+.cfi_restore	%r14
+	movq	16(%rsp),%r13
+.cfi_restore	%r13
+	movq	24(%rsp),%r12
+.cfi_restore	%r12
+	movq	32(%rsp),%rbx
+.cfi_restore	%rbx
+	movq	40(%rsp),%rbp
+.cfi_restore	%rbp
+	leaq	48(%rsp),%rsp
+.cfi_adjust_cfa_offset	-48
+.Lmul_epilogue:
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	ecp_nistz256_mul_mont,.-ecp_nistz256_mul_mont
 
 .type	__ecp_nistz256_mul_montq,@function
@@ -327,12 +363,26 @@ __ecp_nistz256_mul_montq:
 .type	ecp_nistz256_sqr_mont,@function
 .align	32
 ecp_nistz256_sqr_mont:
+.cfi_startproc	
 	pushq	%rbp
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%rbp,-16
 	pushq	%rbx
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%rbx,-24
 	pushq	%r12
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r12,-32
 	pushq	%r13
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r13,-40
 	pushq	%r14
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r14,-48
 	pushq	%r15
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r15,-56
+.Lsqr_body:
 	movq	0(%rsi),%rax
 	movq	8(%rsi),%r14
 	movq	16(%rsi),%r15
@@ -340,13 +390,23 @@ ecp_nistz256_sqr_mont:
 
 	call	__ecp_nistz256_sqr_montq
 .Lsqr_mont_done:
-	popq	%r15
-	popq	%r14
-	popq	%r13
-	popq	%r12
-	popq	%rbx
-	popq	%rbp
+	movq	0(%rsp),%r15
+.cfi_restore	%r15
+	movq	8(%rsp),%r14
+.cfi_restore	%r14
+	movq	16(%rsp),%r13
+.cfi_restore	%r13
+	movq	24(%rsp),%r12
+.cfi_restore	%r12
+	movq	32(%rsp),%rbx
+.cfi_restore	%rbx
+	movq	40(%rsp),%rbp
+.cfi_restore	%rbp
+	leaq	48(%rsp),%rsp
+.cfi_adjust_cfa_offset	-48
+.Lsqr_epilogue:
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	ecp_nistz256_sqr_mont,.-ecp_nistz256_sqr_mont
 
 .type	__ecp_nistz256_sqr_montq,@function
@@ -517,6 +577,10 @@ __ecp_nistz256_sqr_montq:
 .type	ecp_nistz256_select_w5,@function
 .align	32
 ecp_nistz256_select_w5:
+	leaq	OPENSSL_ia32cap_P(%rip),%rax
+	movq	8(%rax),%rax
+	testl	$32,%eax
+	jnz	.Lavx2_select_w5
 	movdqa	.LOne(%rip),%xmm0
 	movd	%edx,%xmm1
 
@@ -568,6 +632,7 @@ ecp_nistz256_select_w5:
 	movdqu	%xmm6,64(%rdi)
 	movdqu	%xmm7,80(%rdi)
 	.byte	0xf3,0xc3
+.LSEH_end_ecp_nistz256_select_w5:
 .size	ecp_nistz256_select_w5,.-ecp_nistz256_select_w5
 
 
@@ -577,6 +642,10 @@ ecp_nistz256_select_w5:
 .type	ecp_nistz256_select_w7,@function
 .align	32
 ecp_nistz256_select_w7:
+	leaq	OPENSSL_ia32cap_P(%rip),%rax
+	movq	8(%rax),%rax
+	testl	$32,%eax
+	jnz	.Lavx2_select_w7
 	movdqa	.LOne(%rip),%xmm8
 	movd	%edx,%xmm1
 
@@ -617,14 +686,147 @@ ecp_nistz256_select_w7:
 	movdqu	%xmm4,32(%rdi)
 	movdqu	%xmm5,48(%rdi)
 	.byte	0xf3,0xc3
+.LSEH_end_ecp_nistz256_select_w7:
 .size	ecp_nistz256_select_w7,.-ecp_nistz256_select_w7
+
+
+.type	ecp_nistz256_avx2_select_w5,@function
+.align	32
+ecp_nistz256_avx2_select_w5:
+.Lavx2_select_w5:
+	vzeroupper
+	vmovdqa	.LTwo(%rip),%ymm0
+
+	vpxor	%ymm2,%ymm2,%ymm2
+	vpxor	%ymm3,%ymm3,%ymm3
+	vpxor	%ymm4,%ymm4,%ymm4
+
+	vmovdqa	.LOne(%rip),%ymm5
+	vmovdqa	.LTwo(%rip),%ymm10
+
+	vmovd	%edx,%xmm1
+	vpermd	%ymm1,%ymm2,%ymm1
+
+	movq	$8,%rax
+.Lselect_loop_avx2_w5:
+
+	vmovdqa	0(%rsi),%ymm6
+	vmovdqa	32(%rsi),%ymm7
+	vmovdqa	64(%rsi),%ymm8
+
+	vmovdqa	96(%rsi),%ymm11
+	vmovdqa	128(%rsi),%ymm12
+	vmovdqa	160(%rsi),%ymm13
+
+	vpcmpeqd	%ymm1,%ymm5,%ymm9
+	vpcmpeqd	%ymm1,%ymm10,%ymm14
+
+	vpaddd	%ymm0,%ymm5,%ymm5
+	vpaddd	%ymm0,%ymm10,%ymm10
+	leaq	192(%rsi),%rsi
+
+	vpand	%ymm9,%ymm6,%ymm6
+	vpand	%ymm9,%ymm7,%ymm7
+	vpand	%ymm9,%ymm8,%ymm8
+	vpand	%ymm14,%ymm11,%ymm11
+	vpand	%ymm14,%ymm12,%ymm12
+	vpand	%ymm14,%ymm13,%ymm13
+
+	vpxor	%ymm6,%ymm2,%ymm2
+	vpxor	%ymm7,%ymm3,%ymm3
+	vpxor	%ymm8,%ymm4,%ymm4
+	vpxor	%ymm11,%ymm2,%ymm2
+	vpxor	%ymm12,%ymm3,%ymm3
+	vpxor	%ymm13,%ymm4,%ymm4
+
+	decq	%rax
+	jnz	.Lselect_loop_avx2_w5
+
+	vmovdqu	%ymm2,0(%rdi)
+	vmovdqu	%ymm3,32(%rdi)
+	vmovdqu	%ymm4,64(%rdi)
+	vzeroupper
+	.byte	0xf3,0xc3
+.LSEH_end_ecp_nistz256_avx2_select_w5:
+.size	ecp_nistz256_avx2_select_w5,.-ecp_nistz256_avx2_select_w5
+
+
+
 .globl	ecp_nistz256_avx2_select_w7
 .hidden ecp_nistz256_avx2_select_w7
 .type	ecp_nistz256_avx2_select_w7,@function
 .align	32
 ecp_nistz256_avx2_select_w7:
-.byte	0x0f,0x0b
+.Lavx2_select_w7:
+	vzeroupper
+	vmovdqa	.LThree(%rip),%ymm0
+
+	vpxor	%ymm2,%ymm2,%ymm2
+	vpxor	%ymm3,%ymm3,%ymm3
+
+	vmovdqa	.LOne(%rip),%ymm4
+	vmovdqa	.LTwo(%rip),%ymm8
+	vmovdqa	.LThree(%rip),%ymm12
+
+	vmovd	%edx,%xmm1
+	vpermd	%ymm1,%ymm2,%ymm1
+
+
+	movq	$21,%rax
+.Lselect_loop_avx2_w7:
+
+	vmovdqa	0(%rsi),%ymm5
+	vmovdqa	32(%rsi),%ymm6
+
+	vmovdqa	64(%rsi),%ymm9
+	vmovdqa	96(%rsi),%ymm10
+
+	vmovdqa	128(%rsi),%ymm13
+	vmovdqa	160(%rsi),%ymm14
+
+	vpcmpeqd	%ymm1,%ymm4,%ymm7
+	vpcmpeqd	%ymm1,%ymm8,%ymm11
+	vpcmpeqd	%ymm1,%ymm12,%ymm15
+
+	vpaddd	%ymm0,%ymm4,%ymm4
+	vpaddd	%ymm0,%ymm8,%ymm8
+	vpaddd	%ymm0,%ymm12,%ymm12
+	leaq	192(%rsi),%rsi
+
+	vpand	%ymm7,%ymm5,%ymm5
+	vpand	%ymm7,%ymm6,%ymm6
+	vpand	%ymm11,%ymm9,%ymm9
+	vpand	%ymm11,%ymm10,%ymm10
+	vpand	%ymm15,%ymm13,%ymm13
+	vpand	%ymm15,%ymm14,%ymm14
+
+	vpxor	%ymm5,%ymm2,%ymm2
+	vpxor	%ymm6,%ymm3,%ymm3
+	vpxor	%ymm9,%ymm2,%ymm2
+	vpxor	%ymm10,%ymm3,%ymm3
+	vpxor	%ymm13,%ymm2,%ymm2
+	vpxor	%ymm14,%ymm3,%ymm3
+
+	decq	%rax
+	jnz	.Lselect_loop_avx2_w7
+
+
+	vmovdqa	0(%rsi),%ymm5
+	vmovdqa	32(%rsi),%ymm6
+
+	vpcmpeqd	%ymm1,%ymm4,%ymm7
+
+	vpand	%ymm7,%ymm5,%ymm5
+	vpand	%ymm7,%ymm6,%ymm6
+
+	vpxor	%ymm5,%ymm2,%ymm2
+	vpxor	%ymm6,%ymm3,%ymm3
+
+	vmovdqu	%ymm2,0(%rdi)
+	vmovdqu	%ymm3,32(%rdi)
+	vzeroupper
 	.byte	0xf3,0xc3
+.LSEH_end_ecp_nistz256_avx2_select_w7:
 .size	ecp_nistz256_avx2_select_w7,.-ecp_nistz256_avx2_select_w7
 .type	__ecp_nistz256_add_toq,@function
 .align	32
@@ -752,13 +954,28 @@ __ecp_nistz256_mul_by_2q:
 .type	ecp_nistz256_point_double,@function
 .align	32
 ecp_nistz256_point_double:
+.cfi_startproc	
 	pushq	%rbp
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%rbp,-16
 	pushq	%rbx
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%rbx,-24
 	pushq	%r12
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r12,-32
 	pushq	%r13
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r13,-40
 	pushq	%r14
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r14,-48
 	pushq	%r15
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r15,-56
 	subq	$160+8,%rsp
+.cfi_adjust_cfa_offset	32*5+8
+.Lpoint_doubleq_body:
 
 .Lpoint_double_shortcutq:
 	movdqu	0(%rsi),%xmm0
@@ -941,27 +1158,53 @@ ecp_nistz256_point_double:
 .byte	102,72,15,126,207
 	call	__ecp_nistz256_sub_fromq
 
-	addq	$160+8,%rsp
-	popq	%r15
-	popq	%r14
-	popq	%r13
-	popq	%r12
-	popq	%rbx
-	popq	%rbp
+	leaq	160+56(%rsp),%rsi
+.cfi_def_cfa	%rsi,8
+	movq	-48(%rsi),%r15
+.cfi_restore	%r15
+	movq	-40(%rsi),%r14
+.cfi_restore	%r14
+	movq	-32(%rsi),%r13
+.cfi_restore	%r13
+	movq	-24(%rsi),%r12
+.cfi_restore	%r12
+	movq	-16(%rsi),%rbx
+.cfi_restore	%rbx
+	movq	-8(%rsi),%rbp
+.cfi_restore	%rbp
+	leaq	(%rsi),%rsp
+.cfi_def_cfa_register	%rsp
+.Lpoint_doubleq_epilogue:
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	ecp_nistz256_point_double,.-ecp_nistz256_point_double
 .globl	ecp_nistz256_point_add
 .hidden ecp_nistz256_point_add
 .type	ecp_nistz256_point_add,@function
 .align	32
 ecp_nistz256_point_add:
+.cfi_startproc	
 	pushq	%rbp
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%rbp,-16
 	pushq	%rbx
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%rbx,-24
 	pushq	%r12
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r12,-32
 	pushq	%r13
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r13,-40
 	pushq	%r14
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r14,-48
 	pushq	%r15
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r15,-56
 	subq	$576+8,%rsp
+.cfi_adjust_cfa_offset	32*18+8
+.Lpoint_addq_body:
 
 	movdqu	0(%rsi),%xmm0
 	movdqu	16(%rsi),%xmm1
@@ -1338,27 +1581,53 @@ ecp_nistz256_point_add:
 	movdqu	%xmm3,48(%rdi)
 
 .Ladd_doneq:
-	addq	$576+8,%rsp
-	popq	%r15
-	popq	%r14
-	popq	%r13
-	popq	%r12
-	popq	%rbx
-	popq	%rbp
+	leaq	576+56(%rsp),%rsi
+.cfi_def_cfa	%rsi,8
+	movq	-48(%rsi),%r15
+.cfi_restore	%r15
+	movq	-40(%rsi),%r14
+.cfi_restore	%r14
+	movq	-32(%rsi),%r13
+.cfi_restore	%r13
+	movq	-24(%rsi),%r12
+.cfi_restore	%r12
+	movq	-16(%rsi),%rbx
+.cfi_restore	%rbx
+	movq	-8(%rsi),%rbp
+.cfi_restore	%rbp
+	leaq	(%rsi),%rsp
+.cfi_def_cfa_register	%rsp
+.Lpoint_addq_epilogue:
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	ecp_nistz256_point_add,.-ecp_nistz256_point_add
 .globl	ecp_nistz256_point_add_affine
 .hidden ecp_nistz256_point_add_affine
 .type	ecp_nistz256_point_add_affine,@function
 .align	32
 ecp_nistz256_point_add_affine:
+.cfi_startproc	
 	pushq	%rbp
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%rbp,-16
 	pushq	%rbx
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%rbx,-24
 	pushq	%r12
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r12,-32
 	pushq	%r13
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r13,-40
 	pushq	%r14
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r14,-48
 	pushq	%r15
+.cfi_adjust_cfa_offset	8
+.cfi_offset	%r15,-56
 	subq	$480+8,%rsp
+.cfi_adjust_cfa_offset	32*15+8
+.Ladd_affineq_body:
 
 	movdqu	0(%rsi),%xmm0
 	movq	%rdx,%rbx
@@ -1641,13 +1910,24 @@ ecp_nistz256_point_add_affine:
 	movdqu	%xmm2,32(%rdi)
 	movdqu	%xmm3,48(%rdi)
 
-	addq	$480+8,%rsp
-	popq	%r15
-	popq	%r14
-	popq	%r13
-	popq	%r12
-	popq	%rbx
-	popq	%rbp
+	leaq	480+56(%rsp),%rsi
+.cfi_def_cfa	%rsi,8
+	movq	-48(%rsi),%r15
+.cfi_restore	%r15
+	movq	-40(%rsi),%r14
+.cfi_restore	%r14
+	movq	-32(%rsi),%r13
+.cfi_restore	%r13
+	movq	-24(%rsi),%r12
+.cfi_restore	%r12
+	movq	-16(%rsi),%rbx
+.cfi_restore	%rbx
+	movq	-8(%rsi),%rbp
+.cfi_restore	%rbp
+	leaq	(%rsi),%rsp
+.cfi_def_cfa_register	%rsp
+.Ladd_affineq_epilogue:
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	ecp_nistz256_point_add_affine,.-ecp_nistz256_point_add_affine
 #endif

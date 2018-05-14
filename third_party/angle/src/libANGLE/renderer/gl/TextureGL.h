@@ -37,6 +37,9 @@ struct LevelInfoGL
     // Format of the data used in this mip level.
     GLenum sourceFormat;
 
+    // Internal format used for the native call to define this texture
+    GLenum nativeInternalFormat;
+
     // If this mip level requires sampler-state re-writing so that only a red channel is exposed.
     bool depthStencilWorkaround;
 
@@ -45,6 +48,7 @@ struct LevelInfoGL
 
     LevelInfoGL();
     LevelInfoGL(GLenum sourceFormat,
+                GLenum nativeInternalFormat,
                 bool depthStencilWorkaround,
                 const LUMAWorkaroundGL &lumaWorkaround);
 };
@@ -134,6 +138,7 @@ class TextureGL : public TextureImpl
                                    size_t sourceLevel,
                                    const gl::Rectangle &sourceArea,
                                    GLenum destFormat,
+                                   GLenum destType,
                                    bool unpackFlipY,
                                    bool unpackPremultiplyAlpha,
                                    bool unpackUnmultiplyAlpha,
@@ -150,7 +155,7 @@ class TextureGL : public TextureImpl
                                     GLsizei samples,
                                     GLint internalFormat,
                                     const gl::Extents &size,
-                                    GLboolean fixedSampleLocations) override;
+                                    bool fixedSampleLocations) override;
 
     gl::Error setImageExternal(const gl::Context *context,
                                GLenum target,
@@ -173,6 +178,9 @@ class TextureGL : public TextureImpl
     bool hasAnyDirtyBit() const;
 
     gl::Error setBaseLevel(const gl::Context *context, GLuint baseLevel) override;
+
+    gl::Error initializeContents(const gl::Context *context,
+                                 const gl::ImageIndex &imageIndex) override;
 
     void setMinFilter(GLenum filter);
     void setMagFilter(GLenum filter);
@@ -201,6 +209,7 @@ class TextureGL : public TextureImpl
                                             GLenum format,
                                             GLenum type,
                                             const gl::PixelUnpackState &unpack,
+                                            const gl::Buffer *unpackBuffer,
                                             const uint8_t *pixels);
 
     gl::Error setSubImagePaddingWorkaround(const gl::Context *context,
@@ -210,6 +219,7 @@ class TextureGL : public TextureImpl
                                            GLenum format,
                                            GLenum type,
                                            const gl::PixelUnpackState &unpack,
+                                           const gl::Buffer *unpackBuffer,
                                            const uint8_t *pixels);
 
     void syncTextureStateSwizzle(const FunctionsGL *functions,

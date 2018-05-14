@@ -13,8 +13,18 @@ cr.define('safe_browsing', function() {
   function initialize() {
     cr.sendWithPromise('getExperiments', []).then((experiments) =>
         addExperiments(experiments));
-    cr.sendWithPromise('getPrefs', []).then(
-        prefs=>addPrefs(prefs));
+    cr.sendWithPromise('getPrefs', []).then((prefs) => addPrefs(prefs));
+    cr.sendWithPromise('getDatabaseManagerInfo', []).then(
+      function(databaseState) {
+        var fullHashCacheState = databaseState.splice(-1,1);
+        addDatabaseManagerInfo(databaseState);
+        addFullHashCacheInfo(fullHashCacheState);
+    });
+    cr.sendWithPromise('getSentThreatDetails', []).then((threatDetails) =>
+        addThreatDetailsInfo(threatDetails));
+    cr.addWebUIListener('threat-details-update', function(result) {
+      addThreatDetailsInfo(result);
+    });
   }
 
   function addExperiments(result) {
@@ -25,8 +35,7 @@ cr.define('safe_browsing', function() {
       experimentsListFormatted += "<div><b>" + result[i + 1] +
           "</b>: " + result[i] + "</div>";
       }
-
-      $('experimentsList').innerHTML = experimentsListFormatted;
+      $('experiments-list').innerHTML = experimentsListFormatted;
   }
 
   function addPrefs(result) {
@@ -37,10 +46,35 @@ cr.define('safe_browsing', function() {
         preferencesListFormatted += "<div><b>" + result[i + 1] + "</b>: " +
             result[i] + "</div>";
       }
-      $('preferencesList').innerHTML = preferencesListFormatted;
+      $('preferences-list').innerHTML = preferencesListFormatted;
+  }
+
+  function addDatabaseManagerInfo(result) {
+      var resLength = result.length;
+      var preferencesListFormatted = "";
+
+      for (var i = 0; i < resLength; i += 2) {
+        preferencesListFormatted += "<div><b>" + result[i] + "</b>: " +
+            result[i+1] + "</div>";
+      }
+      $('database-info-list').innerHTML = preferencesListFormatted;
+  }
+
+  function addFullHashCacheInfo(result) {
+      $('full-hash-cache-info').innerHTML = result;
+  }
+
+  function addThreatDetailsInfo(result) {
+      var logDiv = $('threat-details-list');
+      if (!logDiv)
+        return;
+      var textDiv = document.createElement('div');
+      textDiv.innerText = result;
+      logDiv.appendChild(textDiv);
   }
 
   return {
+    addThreatDetailsInfo: addThreatDetailsInfo,
     initialize: initialize,
   };
 });

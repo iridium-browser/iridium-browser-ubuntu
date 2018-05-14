@@ -13,7 +13,7 @@ import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.util.AccessibilityUtil;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.content_public.browser.WebContents;
 
 /**
@@ -141,19 +141,19 @@ public class TabStateBrowserControlsVisibilityDelegate
         enableHidingBrowserControls &= !url.startsWith(UrlConstants.CHROME_NATIVE_URL_PREFIX);
 
         int securityState = mTab.getSecurityLevel();
-        enableHidingBrowserControls &= (securityState != ConnectionSecurityLevel.DANGEROUS
-                && securityState != ConnectionSecurityLevel.SECURITY_WARNING);
+        enableHidingBrowserControls &= (securityState != ConnectionSecurityLevel.DANGEROUS);
 
         enableHidingBrowserControls &= !AccessibilityUtil.isAccessibilityEnabled();
 
-        ContentViewCore cvc = mTab.getContentViewCore();
-        enableHidingBrowserControls &= cvc == null || !cvc.isFocusedNodeEditable();
+        enableHidingBrowserControls &=
+                !SelectionPopupController.fromWebContents(webContents).isFocusedNodeEditable();
         enableHidingBrowserControls &= !mTab.isShowingErrorPage();
         enableHidingBrowserControls &= !webContents.isShowingInterstitialPage();
         enableHidingBrowserControls &= !mTab.isRendererUnresponsive();
         enableHidingBrowserControls &= (mTab.getFullscreenManager() != null);
         enableHidingBrowserControls &= DeviceClassManager.enableFullscreen();
         enableHidingBrowserControls &= !mIsFullscreenWaitingForLoad;
+        enableHidingBrowserControls &= !mTab.isShowingTabModalDialog();
 
         return enableHidingBrowserControls;
     }

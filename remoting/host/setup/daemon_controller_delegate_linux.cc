@@ -106,11 +106,9 @@ bool RunHostScript(const std::vector<std::string>& args) {
 
 }  // namespace
 
-DaemonControllerDelegateLinux::DaemonControllerDelegateLinux() {
-}
+DaemonControllerDelegateLinux::DaemonControllerDelegateLinux() = default;
 
-DaemonControllerDelegateLinux::~DaemonControllerDelegateLinux() {
-}
+DaemonControllerDelegateLinux::~DaemonControllerDelegateLinux() = default;
 
 DaemonController::State DaemonControllerDelegateLinux::GetState() {
   base::FilePath script_path;
@@ -120,6 +118,7 @@ DaemonController::State DaemonControllerDelegateLinux::GetState() {
   }
   base::CommandLine command_line(script_path);
   command_line.AppendArg("--get-status");
+  command_line.AppendArg("--config=" + GetConfigPath().value());
 
   std::string status;
   int exit_code = 0;
@@ -220,8 +219,8 @@ void DaemonControllerDelegateLinux::UpdateConfig(
     return;
   }
 
-  std::vector<std::string> args;
-  args.push_back("--reload");
+  std::vector<std::string> args = {"--reload",
+                                   "--config=" + GetConfigPath().value()};
   DaemonController::AsyncResult result = DaemonController::RESULT_FAILED;
   if (RunHostScript(args))
     result = DaemonController::RESULT_OK;
@@ -231,8 +230,8 @@ void DaemonControllerDelegateLinux::UpdateConfig(
 
 void DaemonControllerDelegateLinux::Stop(
     const DaemonController::CompletionCallback& done) {
-  std::vector<std::string> args;
-  args.push_back("--stop");
+  std::vector<std::string> args = {"--stop",
+                                   "--config=" + GetConfigPath().value()};
   DaemonController::AsyncResult result = DaemonController::RESULT_FAILED;
   if (RunHostScript(args))
     result = DaemonController::RESULT_OK;

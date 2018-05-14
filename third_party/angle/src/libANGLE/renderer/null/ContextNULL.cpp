@@ -15,15 +15,16 @@
 #include "libANGLE/renderer/null/CompilerNULL.h"
 #include "libANGLE/renderer/null/DisplayNULL.h"
 #include "libANGLE/renderer/null/FenceNVNULL.h"
-#include "libANGLE/renderer/null/FenceSyncNULL.h"
 #include "libANGLE/renderer/null/FramebufferNULL.h"
 #include "libANGLE/renderer/null/ImageNULL.h"
 #include "libANGLE/renderer/null/PathNULL.h"
 #include "libANGLE/renderer/null/ProgramNULL.h"
+#include "libANGLE/renderer/null/ProgramPipelineNULL.h"
 #include "libANGLE/renderer/null/QueryNULL.h"
 #include "libANGLE/renderer/null/RenderbufferNULL.h"
 #include "libANGLE/renderer/null/SamplerNULL.h"
 #include "libANGLE/renderer/null/ShaderNULL.h"
+#include "libANGLE/renderer/null/SyncNULL.h"
 #include "libANGLE/renderer/null/TextureNULL.h"
 #include "libANGLE/renderer/null/TransformFeedbackNULL.h"
 #include "libANGLE/renderer/null/VertexArrayNULL.h"
@@ -63,14 +64,35 @@ ContextNULL::ContextNULL(const gl::ContextState &state, AllocationTrackerNULL *a
 {
     ASSERT(mAllocationTracker != nullptr);
 
-    const gl::Version maxClientVersion(3, 1);
-    mCaps = GenerateMinimumCaps(maxClientVersion);
-
     mExtensions                       = gl::Extensions();
+    mExtensions.fence                 = true;
+    mExtensions.instancedArrays       = true;
+    mExtensions.pixelBufferObject     = true;
+    mExtensions.mapBuffer             = true;
+    mExtensions.mapBufferRange        = true;
     mExtensions.copyTexture           = true;
     mExtensions.copyCompressedTexture = true;
+    mExtensions.textureRectangle      = true;
+    mExtensions.textureUsage           = true;
+    mExtensions.vertexArrayObject      = true;
+    mExtensions.debugMarker            = true;
+    mExtensions.translatedShaderSource = true;
 
-    mTextureCaps = GenerateMinimumTextureCapsMap(maxClientVersion, mExtensions);
+    mExtensions.rgb8rgba8 = true;
+    mExtensions.textureCompressionDXT1     = true;
+    mExtensions.textureCompressionDXT3     = true;
+    mExtensions.textureCompressionDXT5     = true;
+    mExtensions.textureCompressionS3TCsRGB = true;
+    mExtensions.textureCompressionASTCHDR  = true;
+    mExtensions.textureCompressionASTCLDR  = true;
+    mExtensions.compressedETC1RGB8Texture  = true;
+    mExtensions.lossyETCDecode             = true;
+    mExtensions.geometryShader             = true;
+
+    const gl::Version maxClientVersion(3, 1);
+    mCaps = GenerateMinimumCaps(maxClientVersion, mExtensions);
+
+    InitMinimumTextureCapsMap(maxClientVersion, mExtensions, &mTextureCaps);
 }
 
 ContextNULL::~ContextNULL()
@@ -82,12 +104,12 @@ gl::Error ContextNULL::initialize()
     return gl::NoError();
 }
 
-gl::Error ContextNULL::flush()
+gl::Error ContextNULL::flush(const gl::Context *context)
 {
     return gl::NoError();
 }
 
-gl::Error ContextNULL::finish()
+gl::Error ContextNULL::finish(const gl::Context *context)
 {
     return gl::NoError();
 }
@@ -113,8 +135,7 @@ gl::Error ContextNULL::drawElements(const gl::Context *context,
                                     GLenum mode,
                                     GLsizei count,
                                     GLenum type,
-                                    const void *indices,
-                                    const gl::IndexRange &indexRange)
+                                    const void *indices)
 {
     return gl::NoError();
 }
@@ -124,8 +145,7 @@ gl::Error ContextNULL::drawElementsInstanced(const gl::Context *context,
                                              GLsizei count,
                                              GLenum type,
                                              const void *indices,
-                                             GLsizei instances,
-                                             const gl::IndexRange &indexRange)
+                                             GLsizei instances)
 {
     return gl::NoError();
 }
@@ -136,8 +156,7 @@ gl::Error ContextNULL::drawRangeElements(const gl::Context *context,
                                          GLuint end,
                                          GLsizei count,
                                          GLenum type,
-                                         const void *indices,
-                                         const gl::IndexRange &indexRange)
+                                         const void *indices)
 {
     return gl::NoError();
 }
@@ -262,6 +281,14 @@ void ContextNULL::popGroupMarker()
 {
 }
 
+void ContextNULL::pushDebugGroup(GLenum source, GLuint id, GLsizei length, const char *message)
+{
+}
+
+void ContextNULL::popDebugGroup()
+{
+}
+
 void ContextNULL::syncState(const gl::Context *context, const gl::State::DirtyBits &dirtyBits)
 {
 }
@@ -325,9 +352,9 @@ TextureImpl *ContextNULL::createTexture(const gl::TextureState &state)
     return new TextureNULL(state);
 }
 
-RenderbufferImpl *ContextNULL::createRenderbuffer()
+RenderbufferImpl *ContextNULL::createRenderbuffer(const gl::RenderbufferState &state)
 {
-    return new RenderbufferNULL();
+    return new RenderbufferNULL(state);
 }
 
 BufferImpl *ContextNULL::createBuffer(const gl::BufferState &state)
@@ -350,9 +377,9 @@ FenceNVImpl *ContextNULL::createFenceNV()
     return new FenceNVNULL();
 }
 
-FenceSyncImpl *ContextNULL::createFenceSync()
+SyncImpl *ContextNULL::createSync()
 {
-    return new FenceSyncNULL();
+    return new SyncNULL();
 }
 
 TransformFeedbackImpl *ContextNULL::createTransformFeedback(const gl::TransformFeedbackState &state)
@@ -360,9 +387,14 @@ TransformFeedbackImpl *ContextNULL::createTransformFeedback(const gl::TransformF
     return new TransformFeedbackNULL(state);
 }
 
-SamplerImpl *ContextNULL::createSampler()
+SamplerImpl *ContextNULL::createSampler(const gl::SamplerState &state)
 {
-    return new SamplerNULL();
+    return new SamplerNULL(state);
+}
+
+ProgramPipelineImpl *ContextNULL::createProgramPipeline(const gl::ProgramPipelineState &state)
+{
+    return new ProgramPipelineNULL(state);
 }
 
 std::vector<PathImpl *> ContextNULL::createPaths(GLsizei range)
@@ -379,6 +411,21 @@ gl::Error ContextNULL::dispatchCompute(const gl::Context *context,
                                        GLuint numGroupsX,
                                        GLuint numGroupsY,
                                        GLuint numGroupsZ)
+{
+    return gl::NoError();
+}
+
+gl::Error ContextNULL::dispatchComputeIndirect(const gl::Context *context, GLintptr indirect)
+{
+    return gl::NoError();
+}
+
+gl::Error ContextNULL::memoryBarrier(const gl::Context *context, GLbitfield barriers)
+{
+    return gl::NoError();
+}
+
+gl::Error ContextNULL::memoryBarrierByRegion(const gl::Context *context, GLbitfield barriers)
 {
     return gl::NoError();
 }

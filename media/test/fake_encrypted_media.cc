@@ -23,7 +23,6 @@ int FakeEncryptedMedia::TestCdmContext::GetCdmId() const {
 
 FakeEncryptedMedia::FakeEncryptedMedia(AppBase* app)
     : decryptor_(new AesDecryptor(
-          GURL::EmptyGURL(),
           base::Bind(&FakeEncryptedMedia::OnSessionMessage,
                      base::Unretained(this)),
           base::Bind(&FakeEncryptedMedia::OnSessionClosed,
@@ -35,7 +34,7 @@ FakeEncryptedMedia::FakeEncryptedMedia(AppBase* app)
       cdm_context_(decryptor_.get()),
       app_(app) {}
 
-FakeEncryptedMedia::~FakeEncryptedMedia() {}
+FakeEncryptedMedia::~FakeEncryptedMedia() = default;
 
 CdmContext* FakeEncryptedMedia::GetCdmContext() {
   return &cdm_context_;

@@ -13,7 +13,6 @@
 #include "base/base64.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
@@ -61,6 +60,10 @@ std::string GetContentType(const base::FilePath& path) {
     return "audio/wav";
   if (path.MatchesExtension(FILE_PATH_LITERAL(".xml")))
     return "text/xml";
+  if (path.MatchesExtension(FILE_PATH_LITERAL(".mhtml")))
+    return "multipart/related";
+  if (path.MatchesExtension(FILE_PATH_LITERAL(".mht")))
+    return "message/rfc822";
   if (path.MatchesExtension(FILE_PATH_LITERAL(".html")) ||
       path.MatchesExtension(FILE_PATH_LITERAL(".htm"))) {
     return "text/html";
@@ -125,7 +128,7 @@ std::unique_ptr<HttpResponse> HandleFileRequest(
     const HttpRequest& request) {
   // This is a test-only server. Ignore I/O thread restrictions.
   // TODO(svaldez): Figure out why thread is I/O restricted in the first place.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
 
   // A proxy request will have an absolute path. Simulate the proxy by stripping
   // the scheme, host, and port.
@@ -200,7 +203,7 @@ std::unique_ptr<HttpResponse> HandleFileRequest(
     if (!base::ReadFileToString(headers_path, &headers_contents))
       return nullptr;
 
-    return base::MakeUnique<RawHttpResponse>(headers_contents, file_contents);
+    return std::make_unique<RawHttpResponse>(headers_contents, file_contents);
   }
 
   std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse);

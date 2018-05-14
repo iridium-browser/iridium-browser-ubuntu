@@ -57,10 +57,6 @@ class CORE_EXPORT FrameConsole final
 
   void AddMessage(ConsoleMessage*);
 
-  // Show the specified ConsoleMessage only if the frame haven't shown a message
-  // same as ConsoleMessage::messsage().
-  void AddSingletonMessage(ConsoleMessage*);
-
   bool AddMessageToStorage(ConsoleMessage*);
   void ReportMessageToClient(MessageSource,
                              MessageLevel,
@@ -71,15 +67,16 @@ class CORE_EXPORT FrameConsole final
                                       unsigned long request_identifier,
                                       const ResourceResponse&);
 
-  void DidFailLoading(unsigned long request_identifier, const ResourceError&);
+  void DidFailLoading(DocumentLoader*,
+                      unsigned long request_identifier,
+                      const ResourceError&);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   explicit FrameConsole(LocalFrame&);
 
   Member<LocalFrame> frame_;
-  HashSet<String> singleton_messages_;
 };
 
 }  // namespace blink

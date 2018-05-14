@@ -23,9 +23,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/lifetime/keep_alive_registry.h"
-#include "chrome/browser/lifetime/keep_alive_types.h"
-#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/status_icons/status_icon_menu_model.h"
@@ -34,6 +31,9 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/keep_alive_registry/keep_alive_registry.h"
+#include "components/keep_alive_registry/keep_alive_types.h"
+#include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/extension_prefs.h"
@@ -41,8 +41,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/image/image.h"
-#include "ui/message_center/message_center.h"
-#include "ui/message_center/notifier_settings.h"
+#include "ui/message_center/public/cpp/notifier_id.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
@@ -228,9 +227,6 @@ class BackgroundModeManagerWithExtensionsTest : public testing::Test {
     profile_manager_ = CreateTestingProfileManager();
     profile_ = profile_manager_->CreateTestingProfile("p1");
 
-    // Aura clears notifications from the message center at shutdown.
-    message_center::MessageCenter::Initialize();
-
     test_keep_alive_.reset(
         new ScopedKeepAlive(KeepAliveOrigin::BACKGROUND_MODE_MANAGER,
                             KeepAliveRestartOption::DISABLED));
@@ -275,10 +271,6 @@ class BackgroundModeManagerWithExtensionsTest : public testing::Test {
     // As a result, we have to clear the browser process state here
     // before tearing down the Message Center.
     profile_manager_.reset();
-
-    // Message Center shutdown must occur after the KeepAlive is released
-    // because clearing it will end up referencing the message center.
-    message_center::MessageCenter::Shutdown();
 
     // Clear the shutdown flag to isolate the remaining effect of this test.
     browser_shutdown::SetTryingToQuit(false);

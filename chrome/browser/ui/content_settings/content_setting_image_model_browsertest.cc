@@ -4,15 +4,21 @@
 
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
 
+#include <string>
+
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/subresource_filter/core/browser/subresource_filter_constants.h"
+#include "content/public/test/test_navigation_observer.h"
 
 using content::WebContents;
+using ImageType = ContentSettingImageModel::ImageType;
 
 typedef InProcessBrowserTest ContentSettingImageModelBrowserTest;
 
@@ -25,31 +31,34 @@ IN_PROC_BROWSER_TEST_F(ContentSettingImageModelBrowserTest, CreateBubbleModel) {
   content_settings->BlockAllContentForTesting();
 
   // Automatic downloads are handled by DownloadRequestLimiter.
-  g_browser_process->download_request_limiter()
-      ->GetDownloadState(web_contents, web_contents, true)
-      ->SetDownloadStatusAndNotify(
-          DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED);
+  DownloadRequestLimiter::TabDownloadState* tab_download_state =
+      g_browser_process->download_request_limiter()->GetDownloadState(
+          web_contents, web_contents, true);
+  tab_download_state->set_download_seen();
+  tab_download_state->SetDownloadStatusAndNotify(
+      DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED);
 
   // Test that image models tied to a single content setting create bubbles tied
   // to the same setting.
-  static const ContentSettingsType content_settings_to_test[] = {
-      CONTENT_SETTINGS_TYPE_COOKIES,
-      CONTENT_SETTINGS_TYPE_IMAGES,
-      CONTENT_SETTINGS_TYPE_JAVASCRIPT,
-      CONTENT_SETTINGS_TYPE_PLUGINS,
-      CONTENT_SETTINGS_TYPE_POPUPS,
-      CONTENT_SETTINGS_TYPE_MIXEDSCRIPT,
-      CONTENT_SETTINGS_TYPE_PPAPI_BROKER,
-      CONTENT_SETTINGS_TYPE_GEOLOCATION,
-      CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS,
-      CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
-  };
+  static constexpr ContentSettingImageModel::ImageType
+      content_settings_to_test[] = {
+          ImageType::COOKIES,
+          ImageType::IMAGES,
+          ImageType::JAVASCRIPT,
+          ImageType::PLUGINS,
+          ImageType::POPUPS,
+          ImageType::MIXEDSCRIPT,
+          ImageType::PPAPI_BROKER,
+          ImageType::GEOLOCATION,
+          ImageType::PROTOCOL_HANDLERS,
+          ImageType::MIDI_SYSEX,
+      };
 
   Profile* profile = browser()->profile();
-  for (ContentSettingsType type : content_settings_to_test) {
+  for (auto type : content_settings_to_test) {
+    auto model = ContentSettingImageModel::CreateForContentType(type);
     std::unique_ptr<ContentSettingBubbleModel> bubble(
-        ContentSettingSimpleImageModel::CreateForContentTypeForTesting(type)
-            ->CreateBubbleModel(nullptr, web_contents, profile));
+        model->CreateBubbleModel(nullptr, web_contents, profile));
 
     // All of the above content settings should create a
     // ContentSettingSimpleBubbleModel that is tied to a particular setting,
@@ -57,16 +66,22 @@ IN_PROC_BROWSER_TEST_F(ContentSettingImageModelBrowserTest, CreateBubbleModel) {
     ContentSettingSimpleBubbleModel* simple_bubble =
         bubble->AsSimpleBubbleModel();
     ASSERT_TRUE(simple_bubble);
-    EXPECT_EQ(type, simple_bubble->content_type());
+    EXPECT_EQ(static_cast<ContentSettingSimpleImageModel*>(model.get())
+                  ->content_type(),
+              simple_bubble->content_type());
+    EXPECT_EQ(type, model->image_type());
   }
 
-  // For other models, we can only test that they create a valid bubble.
+  // For other models, we can only test that they create a valid bubble, and
+  // that all the image types are unique.
+  std::set<ImageType> image_types;
   std::vector<std::unique_ptr<ContentSettingImageModel>> models =
       ContentSettingImageModel::GenerateContentSettingImageModels();
   for (auto& model : models) {
     EXPECT_TRUE(base::WrapUnique(
                     model->CreateBubbleModel(nullptr, web_contents, profile))
                     .get());
+    EXPECT_TRUE(image_types.insert(model->image_type()).second);
   }
 }
 
@@ -77,9 +92,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingImageModelBrowserTest,
   WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
-  std::unique_ptr<ContentSettingImageModel> model =
-      ContentSettingSimpleImageModel::CreateForContentTypeForTesting(
-          CONTENT_SETTINGS_TYPE_IMAGES);
+  auto model =
+      ContentSettingImageModel::CreateForContentType(ImageType::IMAGES);
 
   EXPECT_TRUE(model->ShouldRunAnimation(web_contents));
   model->SetAnimationHasRun(web_contents);
@@ -89,7 +103,28 @@ IN_PROC_BROWSER_TEST_F(ContentSettingImageModelBrowserTest,
   Profile* profile = browser()->profile();
   WebContents::CreateParams create_params(profile);
   WebContents* other_web_contents = WebContents::Create(create_params);
-  browser()->tab_strip_model()->TabStripModel::AppendWebContents(
-      other_web_contents, true);
+  browser()->tab_strip_model()->AppendWebContents(other_web_contents, true);
   EXPECT_TRUE(model->ShouldRunAnimation(other_web_contents));
+}
+
+// Tests that we go to the correct link when learn more is clicked in Ads
+// bubble.
+IN_PROC_BROWSER_TEST_F(ContentSettingImageModelBrowserTest,
+                       AdsLearnMoreLinkClicked) {
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  auto model = ContentSettingImageModel::CreateForContentType(ImageType::ADS);
+  Profile* profile = browser()->profile();
+  std::unique_ptr<ContentSettingBubbleModel> bubble(model->CreateBubbleModel(
+      browser()->content_setting_bubble_model_delegate(), web_contents,
+      profile));
+
+  content::TestNavigationObserver observer(nullptr);
+  observer.StartWatchingNewWebContents();
+  bubble->OnLearnMoreClicked();
+  observer.Wait();
+
+  std::string link_value(subresource_filter::kLearnMoreLink);
+  EXPECT_EQ(link_value, observer.last_navigation_url().spec());
 }

@@ -4,16 +4,21 @@
 
 #include "content/common/service_worker/service_worker_utils.h"
 
+#include <sstream>
 #include <string>
 
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
+#include "base/numerics/safe_math.h"
 #include "base/strings/string_util.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/origin_util.h"
+#include "net/http/http_byte_range.h"
+#include "net/http/http_util.h"
+#include "services/network/public/cpp/features.h"
 
 namespace content {
 
@@ -71,7 +76,7 @@ bool ServiceWorkerUtils::IsPathRestrictionSatisfied(
     }
     max_scope_string = max_scope.path();
   } else {
-    max_scope_string = script_url.Resolve(".").path();
+    max_scope_string = script_url.GetWithoutFilename().path();
   }
 
   std::string scope_string = scope.path();
@@ -138,13 +143,67 @@ bool ServiceWorkerUtils::AllOriginsMatchAndCanAccessServiceWorkers(
 
 // static
 bool ServiceWorkerUtils::IsServicificationEnabled() {
-  return IsBrowserSideNavigationEnabled() &&
-         base::FeatureList::IsEnabled(features::kNetworkService);
+  return base::FeatureList::IsEnabled(network::features::kNetworkService) ||
+         base::FeatureList::IsEnabled(features::kServiceWorkerServicification);
 }
 
 // static
-bool ServiceWorkerUtils::IsScriptStreamingEnabled() {
-  return base::FeatureList::IsEnabled(features::kServiceWorkerScriptStreaming);
+std::string ServiceWorkerUtils::ErrorTypeToString(
+    blink::mojom::ServiceWorkerErrorType error) {
+  std::ostringstream oss;
+  oss << error;
+  return oss.str();
+}
+
+// static
+std::string ServiceWorkerUtils::ClientTypeToString(
+    blink::mojom::ServiceWorkerClientType type) {
+  std::ostringstream oss;
+  oss << type;
+  return oss.str();
+}
+
+bool ServiceWorkerUtils::ExtractSinglePartHttpRange(
+    const net::HttpRequestHeaders& headers,
+    bool* has_range_out,
+    uint64_t* offset_out,
+    uint64_t* length_out) {
+  std::string range_header;
+  *has_range_out = false;
+  if (!headers.GetHeader(net::HttpRequestHeaders::kRange, &range_header))
+    return true;
+
+  std::vector<net::HttpByteRange> ranges;
+  if (!net::HttpUtil::ParseRangeHeader(range_header, &ranges))
+    return true;
+
+  // Multi-part (or invalid) ranges are not supported.
+  if (ranges.size() != 1)
+    return false;
+
+  // Safely parse the single range to our more-sane output format.
+  *has_range_out = true;
+  const net::HttpByteRange& byte_range = ranges[0];
+  if (byte_range.first_byte_position() < 0)
+    return false;
+  if (byte_range.last_byte_position() < 0)
+    return false;
+
+  uint64_t first_byte_position =
+      static_cast<uint64_t>(byte_range.first_byte_position());
+  uint64_t last_byte_position =
+      static_cast<uint64_t>(byte_range.last_byte_position());
+
+  base::CheckedNumeric<uint64_t> length = last_byte_position;
+  length -= first_byte_position;
+  length += 1;
+
+  if (!length.IsValid())
+    return false;
+
+  *offset_out = static_cast<uint64_t>(byte_range.first_byte_position());
+  *length_out = length.ValueOrDie();
+  return true;
 }
 
 bool LongestScopeMatcher::MatchLongest(const GURL& scope) {

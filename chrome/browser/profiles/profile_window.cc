@@ -35,7 +35,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/profile_chooser_constants.h"
-#include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -45,8 +44,8 @@
 #include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/signin_pref_names.h"
-#include "components/signin/core/common/signin_switches.h"
+#include "components/signin/core/browser/signin_pref_names.h"
+#include "components/signin/core/browser/signin_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/features/features.h"
 #include "net/base/escape.h"
@@ -66,6 +65,10 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #endif  // !defined (OS_ANDROID)
+
+#if !defined(OS_CHROMEOS)
+#include "chrome/browser/ui/user_manager.h"
+#endif  // !defined(OS_CHROMEOS)
 
 using base::UserMetricsAction;
 using content::BrowserThread;
@@ -88,7 +91,7 @@ void UnblockExtensions(Profile* profile) {
 
 // Handles running a callback when a new Browser for the given profile
 // has been completely created.
-class BrowserAddedForProfileObserver : public chrome::BrowserListObserver {
+class BrowserAddedForProfileObserver : public BrowserListObserver {
  public:
   BrowserAddedForProfileObserver(
       Profile* profile,
@@ -354,8 +357,10 @@ void CreateAndSwitchToNewProfile(ProfileManager::CreateCallback callback,
 }
 
 void ProfileBrowserCloseSuccess(const base::FilePath& profile_path) {
+#if !defined(OS_CHROMEOS)
   UserManager::Show(base::FilePath(),
                     profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
+#endif  // !defined(OS_CHROMEOS)
 }
 
 void CloseGuestProfileWindows() {
@@ -384,8 +389,10 @@ void LockBrowserCloseSuccess(const base::FilePath& profile_path) {
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
   chrome::HideTaskManager();
+#if !defined(OS_CHROMEOS)
   UserManager::Show(profile_path,
                     profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
+#endif  // !defined(OS_CHROMEOS)
 }
 
 void LockProfile(Profile* profile) {

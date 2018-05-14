@@ -36,8 +36,8 @@ namespace {
     RunTest(STRIP_PREFIXES(test_name)); \
   }
 
-// Doesn't work in GN CrOS ozone builds yet, http://crbug.com/619765
-#if defined(OS_CHROMEOS) && defined(USE_OZONE)
+// Doesn't work in CrOS builds, http://crbug.com/619765
+#if defined(OS_CHROMEOS)
 #define MAYBE_BrowserFont DISABLED_BrowserFont
 #else
 #define MAYBE_BrowserFont BrowserFont
@@ -109,13 +109,8 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest,
   RunTestAndReload("Instance_RecursiveObjects");
 }
 
-#if defined(OS_WIN) || defined(OS_LINUX)
-// Flaky on Linux and Windows (crbug.com/438729)
-#define MAYBE_MediaStreamAudioTrack DISABLED_MediaStreamAudioTrack
-#else
-#define MAYBE_MediaStreamAudioTrack MediaStreamAudioTrack
-#endif
-TEST_PPAPI_OUT_OF_PROCESS(MAYBE_MediaStreamAudioTrack)
+// Flaky on all platforms (crbug.com/438729, crbug.com/800376)
+TEST_PPAPI_OUT_OF_PROCESS(DISABLED_MediaStreamAudioTrack)
 
 TEST_PPAPI_OUT_OF_PROCESS(MediaStreamVideoTrack)
 
@@ -137,8 +132,8 @@ TEST_PPAPI_OUT_OF_PROCESS(DISABLED_Scrollbar)
 TEST_PPAPI_IN_PROCESS(TraceEvent)
 TEST_PPAPI_OUT_OF_PROCESS(TraceEvent)
 
-// Doesn't work in GN CrOS ozone builds yet, http://crbug.com/619765
-#if defined(OS_CHROMEOS) && defined(USE_OZONE)
+// Doesn't work in CrOS builds, http://crbug.com/619765
+#if defined(OS_CHROMEOS)
 #define MAYBE_TrueTypeFont DISABLED_TrueTypeFont
 #else
 #define MAYBE_TrueTypeFont TrueTypeFont

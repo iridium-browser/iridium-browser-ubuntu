@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 import collections
 import logging
+import os
 import time
 from collections import defaultdict
 
@@ -14,12 +15,6 @@ from telemetry.timeline import tracing_config
 from telemetry.value import trace
 from telemetry.value import common_value_helpers
 from telemetry.web_perf.metrics import timeline_based_metric
-from telemetry.web_perf.metrics import blob_timeline
-from telemetry.web_perf.metrics import webrtc_rendering_timeline
-from telemetry.web_perf.metrics import indexeddb_timeline
-from telemetry.web_perf.metrics import layout
-from telemetry.web_perf.metrics import smoothness
-from telemetry.web_perf import smooth_gesture_util
 from telemetry.web_perf import story_test
 from telemetry.web_perf import timeline_interaction_record as tir_module
 
@@ -32,21 +27,10 @@ DEFAULT_OVERHEAD_LEVEL = 'default-overhead'
 DEBUG_OVERHEAD_LEVEL = 'debug-overhead'
 
 ALL_OVERHEAD_LEVELS = [
-  LOW_OVERHEAD_LEVEL,
-  DEFAULT_OVERHEAD_LEVEL,
-  DEBUG_OVERHEAD_LEVEL,
+    LOW_OVERHEAD_LEVEL,
+    DEFAULT_OVERHEAD_LEVEL,
+    DEBUG_OVERHEAD_LEVEL,
 ]
-
-
-def _GetAllLegacyTimelineBasedMetrics():
-  # TODO(nednguyen): use discovery pattern to return all the instances of
-  # all TimelineBasedMetrics class in web_perf/metrics/ folder.
-  # This cannot be done until crbug.com/460208 is fixed.
-  return (smoothness.SmoothnessMetric(),
-          layout.LayoutMetric(),
-          blob_timeline.BlobTimelineMetric(),
-          indexeddb_timeline.IndexedDBTimelineMetric(),
-          webrtc_rendering_timeline.WebRtcRenderingTimelineMetric())
 
 
 class InvalidInteractions(Exception):
@@ -92,19 +76,14 @@ def _GetRendererThreadsToInteractionRecordsMap(model):
       # TODO(nduca): Add support for page-load interaction record.
       if tir_module.IsTimelineInteractionRecord(event.name):
         interaction = tir_module.TimelineInteractionRecord.FromAsyncEvent(event)
-        # Adjust the interaction record to match the synthetic gesture
-        # controller if needed.
-        interaction = (
-            smooth_gesture_util.GetAdjustedInteractionIfContainGesture(
-                model, interaction))
         threads_to_records_map[curr_thread].append(interaction)
         if interaction.label in interaction_labels_of_previous_threads:
           raise InvalidInteractions(
-            'Interaction record label %s is duplicated on different '
-            'threads' % interaction.label)
+              'Interaction record label %s is duplicated on different '
+              'threads' % interaction.label)
     if curr_thread in threads_to_records_map:
       interaction_labels_of_previous_threads.update(
-        r.label for r in threads_to_records_map[curr_thread])
+          r.label for r in threads_to_records_map[curr_thread])
 
   return threads_to_records_map
 
@@ -147,9 +126,6 @@ class Options(object):
   This is created and returned by
   Benchmark.CreateCoreTimelineBasedMeasurementOptions.
 
-  By default, all the timeline based metrics in telemetry/web_perf/metrics are
-  used (see _GetAllLegacyTimelineBasedMetrics above).
-  To customize your metric needs, use SetTimelineBasedMetrics().
   """
 
   def __init__(self, overhead_level=LOW_OVERHEAD_LEVEL):
@@ -282,8 +258,13 @@ class TimelineBasedMeasurement(story_test.StoryTest):
   def Measure(self, platform, results):
     """Collect all possible metrics and added them to results."""
     platform.tracing_controller.telemetry_info = results.telemetry_info
-    trace_result = platform.tracing_controller.StopTracing()
-    trace_value = trace.TraceValue(results.current_page, trace_result)
+    trace_result, _ = platform.tracing_controller.StopTracing()
+    trace_value = trace.TraceValue(
+        results.current_page, trace_result,
+        file_path=results.telemetry_info.trace_local_path,
+        remote_path=results.telemetry_info.trace_remote_path,
+        upload_bucket=results.telemetry_info.upload_bucket,
+        cloud_url=results.telemetry_info.trace_remote_url)
     results.AddValue(trace_value)
 
     try:
@@ -295,11 +276,9 @@ class TimelineBasedMeasurement(story_test.StoryTest):
         # Run all TBMv1 metrics if no other metric is specified
         # (legacy behavior)
         if not self._tbm_options.GetLegacyTimelineBasedMetrics():
-          logging.warn('Please specify the TBMv1 metrics you are interested in '
-                       'explicitly. This implicit functionality will be removed'
-                       ' on July 17, 2016.')
-          self._tbm_options.SetLegacyTimelineBasedMetrics(
-              _GetAllLegacyTimelineBasedMetrics())
+          raise Exception(
+              'Please specify the TBMv1 metrics you are interested in '
+              'explicitly.')
         self._ComputeLegacyTimelineBasedMetrics(results, trace_result)
     finally:
       trace_result.CleanUpAllTraces()
@@ -307,31 +286,41 @@ class TimelineBasedMeasurement(story_test.StoryTest):
   def DidRunStory(self, platform, results):
     """Clean up after running the story."""
     if platform.tracing_controller.is_tracing_running:
-      trace_result = platform.tracing_controller.StopTracing()
-      trace_value = trace.TraceValue(results.current_page, trace_result)
+      trace_result, _ = platform.tracing_controller.StopTracing()
+      trace_value = trace.TraceValue(
+          results.current_page, trace_result,
+          file_path=results.telemetry_info.trace_local_path,
+          remote_path=results.telemetry_info.trace_remote_path,
+          upload_bucket=results.telemetry_info.upload_bucket,
+          cloud_url=results.telemetry_info.trace_remote_url)
       results.AddValue(trace_value)
 
   def _ComputeTimelineBasedMetrics(self, results, trace_value):
     metrics = self._tbm_options.GetTimelineBasedMetrics()
     extra_import_options = {
-      'trackDetailedModelStats': True
+        'trackDetailedModelStats': True
     }
+    trace_size_in_mib = os.path.getsize(trace_value.filename) / (2 ** 20)
+    # Bails out on trace that are too big. See crbug.com/812631 for more
+    # details.
+    if trace_size_in_mib > 400:
+      results.Fail('Trace size is too big: %s MiB' % trace_size_in_mib)
+      return
 
+    logging.warning('Starting to compute metrics on trace')
     start = time.time()
     mre_result = metric_runner.RunMetric(
         trace_value.filename, metrics, extra_import_options,
-        report_progress=False)
+        report_progress=False, canonical_url=results.telemetry_info.trace_url)
     logging.warning('Processing resulting traces took %.3f seconds' % (
         time.time() - start))
     page = results.current_page
 
-    failure_dicts = mre_result.failures
-    for d in failure_dicts:
-      results.AddValue(
-          common_value_helpers.TranslateMreFailure(d, page))
+    for f in mre_result.failures:
+      results.Fail(f.stack)
 
-    results.histograms.ImportDicts(mre_result.pairs.get('histograms', []))
-    results.histograms.ResolveRelatedHistograms()
+    histogram_dicts = mre_result.pairs.get('histograms', [])
+    results.ImportHistogramDicts(histogram_dicts)
 
     for d in mre_result.pairs.get('scalars', []):
       results.AddValue(common_value_helpers.TranslateScalarValue(d, page))
@@ -358,3 +347,7 @@ class TimelineBasedMeasurement(story_test.StoryTest):
 
     for metric in all_metrics:
       metric.AddWholeTraceResults(model, results)
+
+  @property
+  def tbm_options(self):
+    return self._tbm_options

@@ -12,7 +12,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #import "testing/gtest_mac.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #import "ui/accessibility/platform/ax_platform_node_mac.h"
 #include "ui/base/ime/text_input_type.h"
@@ -23,19 +23,6 @@
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/widget/widget.h"
-
-// Expose some methods from AXPlatformNodeCocoa for testing purposes only.
-@interface AXPlatformNodeCocoa (Testing)
-- (NSString*)AXRole;
-- (id)AXValue;
-
-// Text attributes.
-- (NSString*)AXSelectedText;
-- (NSValue*)AXSelectedTextRange;
-- (NSNumber*)AXNumberOfCharacters;
-- (NSValue*)AXVisibleCharacterRange;
-- (NSNumber*)AXInsertionPointLineNumber;
-@end
 
 namespace views {
 
@@ -49,8 +36,8 @@ NSString* const kTestTitle = @"Test textfield";
 
 class FlexibleRoleTestView : public View {
  public:
-  explicit FlexibleRoleTestView(ui::AXRole role) : role_(role) {}
-  void set_role(ui::AXRole role) { role_ = role; }
+  explicit FlexibleRoleTestView(ax::mojom::Role role) : role_(role) {}
+  void set_role(ax::mojom::Role role) { role_ = role; }
 
   // Add a child view and resize to fit the child.
   void FitBoundsToNewChild(View* view) {
@@ -73,7 +60,7 @@ class FlexibleRoleTestView : public View {
   }
 
  private:
-  ui::AXRole role_;
+  ax::mojom::Role role_;
   bool mouse_was_pressed_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(FlexibleRoleTestView);
@@ -92,28 +79,44 @@ class TestLabelButton : public LabelButton {
   DISALLOW_COPY_AND_ASSIGN(TestLabelButton);
 };
 
+class TestWidgetDelegate : public test::TestDesktopWidgetDelegate {
+ public:
+  TestWidgetDelegate() = default;
+
+  static constexpr char kAccessibleWindowTitle[] = "My Accessible Window";
+
+  // WidgetDelegate:
+  base::string16 GetAccessibleWindowTitle() const override {
+    return base::ASCIIToUTF16(kAccessibleWindowTitle);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestWidgetDelegate);
+};
+
+constexpr char TestWidgetDelegate::kAccessibleWindowTitle[];
+
 class NativeWidgetMacAccessibilityTest : public test::WidgetTest {
  public:
   NativeWidgetMacAccessibilityTest() {}
 
   void SetUp() override {
     test::WidgetTest::SetUp();
-    widget_ = CreateTopLevelPlatformWidget();
-    widget_->SetBounds(gfx::Rect(50, 50, 100, 100));
+    widget_delegate_.InitWidget(CreateParams(Widget::InitParams::TYPE_WINDOW));
     widget()->Show();
   }
 
   void TearDown() override {
-    widget_->CloseNow();
+    widget()->CloseNow();
     test::WidgetTest::TearDown();
   }
 
   id A11yElementAtMidpoint() {
     // Accessibility hit tests come in Cocoa screen coordinates.
     NSPoint midpoint_in_screen_ = gfx::ScreenPointToNSPoint(
-        widget_->GetWindowBoundsInScreen().CenterPoint());
+        widget()->GetWindowBoundsInScreen().CenterPoint());
     return
-        [widget_->GetNativeWindow() accessibilityHitTest:midpoint_in_screen_];
+        [widget()->GetNativeWindow() accessibilityHitTest:midpoint_in_screen_];
   }
 
   id AttributeValueAtMidpoint(NSString* attribute) {
@@ -129,11 +132,71 @@ class NativeWidgetMacAccessibilityTest : public test::WidgetTest {
     return textfield;
   }
 
-  Widget* widget() { return widget_; }
-  gfx::Rect GetWidgetBounds() { return widget_->GetClientAreaBoundsInScreen(); }
+  // Shorthand helpers to get a11y properties from A11yElementAtMidpoint().
+  NSString* AXRoleString() {
+    return AttributeValueAtMidpoint(NSAccessibilityRoleAttribute);
+  }
+  id AXParent() {
+    return AttributeValueAtMidpoint(NSAccessibilityParentAttribute);
+  }
+  id AXValue() {
+    return AttributeValueAtMidpoint(NSAccessibilityValueAttribute);
+  }
+  NSString* AXTitle() {
+    return AttributeValueAtMidpoint(NSAccessibilityTitleAttribute);
+  }
+  NSString* AXDescription() {
+    return AttributeValueAtMidpoint(NSAccessibilityDescriptionAttribute);
+  }
+  NSString* AXSelectedText() {
+    return AttributeValueAtMidpoint(NSAccessibilitySelectedTextAttribute);
+  }
+  NSValue* AXSelectedTextRange() {
+    return AttributeValueAtMidpoint(NSAccessibilitySelectedTextRangeAttribute);
+  }
+  NSNumber* AXNumberOfCharacters() {
+    return AttributeValueAtMidpoint(NSAccessibilityNumberOfCharactersAttribute);
+  }
+  NSValue* AXVisibleCharacterRange() {
+    return AttributeValueAtMidpoint(
+        NSAccessibilityVisibleCharacterRangeAttribute);
+  }
+  NSNumber* AXInsertionPointLineNumber() {
+    return AttributeValueAtMidpoint(
+        NSAccessibilityInsertionPointLineNumberAttribute);
+  }
+  NSNumber* AXLineForIndex(id parameter) {
+    return [A11yElementAtMidpoint()
+        accessibilityAttributeValue:
+            NSAccessibilityLineForIndexParameterizedAttribute
+                       forParameter:parameter];
+  }
+  NSValue* AXRangeForLine(id parameter) {
+    return [A11yElementAtMidpoint()
+        accessibilityAttributeValue:
+            NSAccessibilityRangeForLineParameterizedAttribute
+                       forParameter:parameter];
+  }
+  NSString* AXStringForRange(id parameter) {
+    return [A11yElementAtMidpoint()
+        accessibilityAttributeValue:
+            NSAccessibilityStringForRangeParameterizedAttribute
+                       forParameter:parameter];
+  }
+  NSAttributedString* AXAttributedStringForRange(id parameter) {
+    return [A11yElementAtMidpoint()
+        accessibilityAttributeValue:
+            NSAccessibilityAttributedStringForRangeParameterizedAttribute
+                       forParameter:parameter];
+  }
+
+  Widget* widget() { return widget_delegate_.GetWidget(); }
+  gfx::Rect GetWidgetBounds() {
+    return widget()->GetClientAreaBoundsInScreen();
+  }
 
  private:
-  Widget* widget_ = nullptr;
+  TestWidgetDelegate widget_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetMacAccessibilityTest);
 };
@@ -229,8 +292,7 @@ TEST_F(NativeWidgetMacAccessibilityTest, FocusableElementsAreLeafNodes) {
   TestLabelButton* button = new TestLabelButton();
   button->SetSize(widget()->GetContentsView()->size());
   widget()->GetContentsView()->AddChildView(button);
-  EXPECT_NSEQ(NSAccessibilityButtonRole,
-              AttributeValueAtMidpoint(NSAccessibilityRoleAttribute));
+  EXPECT_NSEQ(NSAccessibilityButtonRole, AXRoleString());
   EXPECT_EQ(
       0u,
       [[button->GetNativeViewAccessible()
@@ -277,7 +339,7 @@ TEST_F(NativeWidgetMacAccessibilityTest, ChildrenAttribute) {
 
   // Check ignored children don't show up in the accessibility tree.
   widget()->GetContentsView()->AddChildView(
-      new FlexibleRoleTestView(ui::AX_ROLE_IGNORED));
+      new FlexibleRoleTestView(ax::mojom::Role::kIgnored));
   EXPECT_EQ(kNumChildren,
             [AttributeValueAtMidpoint(NSAccessibilityChildrenAttribute) count]);
 }
@@ -290,22 +352,23 @@ TEST_F(NativeWidgetMacAccessibilityTest, ParentAttribute) {
   // Views with Widget parents will have a NSWindow parent.
   EXPECT_NSEQ(
       NSAccessibilityWindowRole,
-      [AttributeValueAtMidpoint(NSAccessibilityParentAttribute) AXRole]);
+      [AXParent() accessibilityAttributeValue:NSAccessibilityRoleAttribute]);
 
   // Views with non-Widget parents will have the role of the parent view.
   widget()->GetContentsView()->RemoveChildView(child);
-  FlexibleRoleTestView* parent = new FlexibleRoleTestView(ui::AX_ROLE_GROUP);
+  FlexibleRoleTestView* parent =
+      new FlexibleRoleTestView(ax::mojom::Role::kGroup);
   parent->FitBoundsToNewChild(child);
   widget()->GetContentsView()->AddChildView(parent);
   EXPECT_NSEQ(
       NSAccessibilityGroupRole,
-      [AttributeValueAtMidpoint(NSAccessibilityParentAttribute) AXRole]);
+      [AXParent() accessibilityAttributeValue:NSAccessibilityRoleAttribute]);
 
   // Test an ignored role parent is skipped in favor of the grandparent.
-  parent->set_role(ui::AX_ROLE_IGNORED);
+  parent->set_role(ax::mojom::Role::kIgnored);
   EXPECT_NSEQ(
       NSAccessibilityWindowRole,
-      [AttributeValueAtMidpoint(NSAccessibilityParentAttribute) AXRole]);
+      [AXParent() accessibilityAttributeValue:NSAccessibilityRoleAttribute]);
 }
 
 // Test for NSAccessibilityPositionAttribute, including on Widget movement
@@ -328,7 +391,7 @@ TEST_F(NativeWidgetMacAccessibilityTest, PositionAttribute) {
 
 // Test for NSAccessibilityHelpAttribute.
 TEST_F(NativeWidgetMacAccessibilityTest, HelpAttribute) {
-  Label* label = new Label(base::SysNSStringToUTF16(kTestPlaceholderText));
+  Label* label = new Label(base::SysNSStringToUTF16(kTestStringValue));
   label->SetSize(GetWidgetBounds().size());
   EXPECT_NSEQ(@"", AttributeValueAtMidpoint(NSAccessibilityHelpAttribute));
   label->SetTooltipText(base::SysNSStringToUTF16(kTestPlaceholderText));
@@ -337,20 +400,23 @@ TEST_F(NativeWidgetMacAccessibilityTest, HelpAttribute) {
               AttributeValueAtMidpoint(NSAccessibilityHelpAttribute));
 }
 
-// Test for NSAccessibilityWindowAttribute and
-// NSAccessibilityTopLevelUIElementAttribute.
-TEST_F(NativeWidgetMacAccessibilityTest, WindowAndTopLevelUIElementAttributes) {
-  FlexibleRoleTestView* view = new FlexibleRoleTestView(ui::AX_ROLE_GROUP);
+// Test view properties that should report the native NSWindow, and test
+// specific properties on that NSWindow.
+TEST_F(NativeWidgetMacAccessibilityTest, NativeWindowProperties) {
+  FlexibleRoleTestView* view =
+      new FlexibleRoleTestView(ax::mojom::Role::kGroup);
   view->SetSize(GetWidgetBounds().size());
   widget()->GetContentsView()->AddChildView(view);
   // Make sure it's |view| in the hit test by checking its accessibility role.
-  EXPECT_EQ(NSAccessibilityGroupRole,
-            AttributeValueAtMidpoint(NSAccessibilityRoleAttribute));
-  EXPECT_NSEQ(widget()->GetNativeWindow(),
-              AttributeValueAtMidpoint(NSAccessibilityWindowAttribute));
+  EXPECT_EQ(NSAccessibilityGroupRole, AXRoleString());
+
+  NSWindow* window = widget()->GetNativeWindow();
+  EXPECT_NSEQ(window, AttributeValueAtMidpoint(NSAccessibilityWindowAttribute));
+  EXPECT_NSEQ(window, AttributeValueAtMidpoint(
+                          NSAccessibilityTopLevelUIElementAttribute));
   EXPECT_NSEQ(
-      widget()->GetNativeWindow(),
-      AttributeValueAtMidpoint(NSAccessibilityTopLevelUIElementAttribute));
+      base::SysUTF8ToNSString(TestWidgetDelegate::kAccessibleWindowTitle),
+      [window accessibilityAttributeValue:NSAccessibilityTitleAttribute]);
 }
 
 // Tests for accessibility attributes on a views::Textfield.
@@ -375,16 +441,9 @@ TEST_F(NativeWidgetMacAccessibilityTest, TextfieldGenericAttributes) {
                      boolValue]);
 
   // NSAccessibilityTitleAttribute.
-  EXPECT_NSEQ(kTestTitle,
-              AttributeValueAtMidpoint(NSAccessibilityTitleAttribute));
-
-  // NSAccessibilityValueAttribute.
-  EXPECT_NSEQ(kTestStringValue,
-              AttributeValueAtMidpoint(NSAccessibilityValueAttribute));
-
-  // NSAccessibilityRoleAttribute.
-  EXPECT_NSEQ(NSAccessibilityTextFieldRole,
-              AttributeValueAtMidpoint(NSAccessibilityRoleAttribute));
+  EXPECT_NSEQ(NSAccessibilityTextFieldRole, AXRoleString());
+  EXPECT_NSEQ(kTestTitle, AXTitle());
+  EXPECT_NSEQ(kTestStringValue, AXValue());
 
   // NSAccessibilitySubroleAttribute and
   // NSAccessibilityRoleDescriptionAttribute.
@@ -431,10 +490,8 @@ TEST_F(NativeWidgetMacAccessibilityTest, TextfieldEditableAttributes) {
                    NSAccessibilityInsertionPointLineNumberAttribute) intValue]);
 
   // NSAccessibilityNumberOfCharactersAttribute.
-  EXPECT_EQ(
-      kTestStringValue.length,
-      [AttributeValueAtMidpoint(NSAccessibilityNumberOfCharactersAttribute)
-          unsignedIntegerValue]);
+  EXPECT_EQ(kTestStringValue.length,
+            [AXNumberOfCharacters() unsignedIntegerValue]);
 
   // NSAccessibilityPlaceholderAttribute.
   EXPECT_NSEQ(
@@ -443,68 +500,55 @@ TEST_F(NativeWidgetMacAccessibilityTest, TextfieldEditableAttributes) {
 
   // NSAccessibilitySelectedTextAttribute and
   // NSAccessibilitySelectedTextRangeAttribute.
-  EXPECT_NSEQ(@"",
-              AttributeValueAtMidpoint(NSAccessibilitySelectedTextAttribute));
+  EXPECT_NSEQ(@"", AXSelectedText());
   // The cursor will be at the end of the textfield, so the selection range will
   // span 0 characters and be located at the index after the last character.
   EXPECT_EQ(gfx::Range(kTestStringValue.length, kTestStringValue.length),
-            gfx::Range([AttributeValueAtMidpoint(
-                NSAccessibilitySelectedTextRangeAttribute) rangeValue]));
+            gfx::Range([AXSelectedTextRange() rangeValue]));
 
   // Select some text in the middle of the textfield.
   const gfx::Range forward_range(2, 6);
   const NSRange ns_range = forward_range.ToNSRange();
   textfield->SelectRange(forward_range);
-  EXPECT_NSEQ([kTestStringValue substringWithRange:ns_range],
-              AttributeValueAtMidpoint(NSAccessibilitySelectedTextAttribute));
+  EXPECT_NSEQ([kTestStringValue substringWithRange:ns_range], AXSelectedText());
   EXPECT_EQ(textfield->GetSelectedText(),
-            base::SysNSStringToUTF16(AttributeValueAtMidpoint(
-                NSAccessibilitySelectedTextAttribute)));
-  EXPECT_EQ(forward_range,
-            gfx::Range([AttributeValueAtMidpoint(
-                NSAccessibilitySelectedTextRangeAttribute) rangeValue]));
+            base::SysNSStringToUTF16(AXSelectedText()));
+  EXPECT_EQ(forward_range, gfx::Range([AXSelectedTextRange() rangeValue]));
 
   const gfx::Range reversed_range(6, 2);
   textfield->SelectRange(reversed_range);
   // NSRange has no direction, so these are unchanged from the forward range.
-  EXPECT_NSEQ([kTestStringValue substringWithRange:ns_range],
-              AttributeValueAtMidpoint(NSAccessibilitySelectedTextAttribute));
+  EXPECT_NSEQ([kTestStringValue substringWithRange:ns_range], AXSelectedText());
   EXPECT_EQ(textfield->GetSelectedText(),
-            base::SysNSStringToUTF16(AttributeValueAtMidpoint(
-                NSAccessibilitySelectedTextAttribute)));
-  EXPECT_EQ(forward_range,
-            gfx::Range([AttributeValueAtMidpoint(
-                NSAccessibilitySelectedTextRangeAttribute) rangeValue]));
+            base::SysNSStringToUTF16(AXSelectedText()));
+  EXPECT_EQ(forward_range, gfx::Range([AXSelectedTextRange() rangeValue]));
 
   // NSAccessibilityVisibleCharacterRangeAttribute.
   EXPECT_EQ(gfx::Range(0, kTestStringValue.length),
-            gfx::Range([AttributeValueAtMidpoint(
-                NSAccessibilityVisibleCharacterRangeAttribute) rangeValue]));
+            gfx::Range([AXVisibleCharacterRange() rangeValue]));
 
   // Test an RTL string.
   textfield->SetText(base::SysNSStringToUTF16(kTestRTLStringValue));
   textfield->SelectRange(forward_range);
   EXPECT_EQ(textfield->GetSelectedText(),
-            base::SysNSStringToUTF16(AttributeValueAtMidpoint(
-                NSAccessibilitySelectedTextAttribute)));
+            base::SysNSStringToUTF16(AXSelectedText()));
   textfield->SelectRange(reversed_range);
   EXPECT_EQ(textfield->GetSelectedText(),
-            base::SysNSStringToUTF16(AttributeValueAtMidpoint(
-                NSAccessibilitySelectedTextAttribute)));
+            base::SysNSStringToUTF16(AXSelectedText()));
 }
 
 // Test writing accessibility attributes via an accessibility client for normal
 // Views.
 TEST_F(NativeWidgetMacAccessibilityTest, ViewWritableAttributes) {
-  FlexibleRoleTestView* view = new FlexibleRoleTestView(ui::AX_ROLE_GROUP);
+  FlexibleRoleTestView* view =
+      new FlexibleRoleTestView(ax::mojom::Role::kGroup);
   view->SetSize(GetWidgetBounds().size());
   widget()->GetContentsView()->AddChildView(view);
 
   // Make sure the accessibility object tested is the correct one.
   id ax_node = A11yElementAtMidpoint();
   EXPECT_TRUE(ax_node);
-  EXPECT_NSEQ(NSAccessibilityGroupRole,
-              AttributeValueAtMidpoint(NSAccessibilityRoleAttribute));
+  EXPECT_NSEQ(NSAccessibilityGroupRole, AXRoleString());
 
   // Make sure |view| is focusable, then focus/unfocus it.
   view->SetFocusBehavior(View::FocusBehavior::ALWAYS);
@@ -530,17 +574,14 @@ TEST_F(NativeWidgetMacAccessibilityTest, TextfieldWritableAttributes) {
   EXPECT_TRUE(ax_node);
 
   // Make sure it's the correct accessibility object.
-  id value =
-      [ax_node accessibilityAttributeValue:NSAccessibilityValueAttribute];
-  EXPECT_NSEQ(kTestStringValue, value);
+  EXPECT_NSEQ(kTestStringValue, AXValue());
 
   // Write a new NSAccessibilityValueAttribute.
   EXPECT_TRUE(
       [ax_node accessibilityIsAttributeSettable:NSAccessibilityValueAttribute]);
   [ax_node accessibilitySetValue:kTestPlaceholderText
                     forAttribute:NSAccessibilityValueAttribute];
-  EXPECT_NSEQ(kTestPlaceholderText,
-              AttributeValueAtMidpoint(NSAccessibilityValueAttribute));
+  EXPECT_NSEQ(kTestPlaceholderText, AXValue());
   EXPECT_EQ(base::SysNSStringToUTF16(kTestPlaceholderText), textfield->text());
 
   // Test a read-only textfield.
@@ -549,8 +590,7 @@ TEST_F(NativeWidgetMacAccessibilityTest, TextfieldWritableAttributes) {
       [ax_node accessibilityIsAttributeSettable:NSAccessibilityValueAttribute]);
   [ax_node accessibilitySetValue:kTestStringValue
                     forAttribute:NSAccessibilityValueAttribute];
-  EXPECT_NSEQ(kTestPlaceholderText,
-              AttributeValueAtMidpoint(NSAccessibilityValueAttribute));
+  EXPECT_NSEQ(kTestPlaceholderText, AXValue());
   EXPECT_EQ(base::SysNSStringToUTF16(kTestPlaceholderText), textfield->text());
   textfield->SetReadOnly(false);
 
@@ -563,8 +603,7 @@ TEST_F(NativeWidgetMacAccessibilityTest, TextfieldWritableAttributes) {
       [kTestStringValue stringByAppendingString:kTestPlaceholderText];
   [ax_node accessibilitySetValue:kTestStringValue
                     forAttribute:NSAccessibilitySelectedTextAttribute];
-  EXPECT_NSEQ(new_string,
-              AttributeValueAtMidpoint(NSAccessibilityValueAttribute));
+  EXPECT_NSEQ(new_string, AXValue());
   EXPECT_EQ(base::SysNSStringToUTF16(new_string), textfield->text());
 
   // Replace entire selection.
@@ -572,8 +611,7 @@ TEST_F(NativeWidgetMacAccessibilityTest, TextfieldWritableAttributes) {
   textfield->SelectRange(test_range);
   [ax_node accessibilitySetValue:kTestStringValue
                     forAttribute:NSAccessibilitySelectedTextAttribute];
-  EXPECT_NSEQ(kTestStringValue,
-              AttributeValueAtMidpoint(NSAccessibilityValueAttribute));
+  EXPECT_NSEQ(kTestStringValue, AXValue());
   EXPECT_EQ(base::SysNSStringToUTF16(kTestStringValue), textfield->text());
   // Make sure the cursor is at the end of the Textfield.
   EXPECT_EQ(gfx::Range([kTestStringValue length]),
@@ -590,8 +628,7 @@ TEST_F(NativeWidgetMacAccessibilityTest, TextfieldWritableAttributes) {
   textfield->SelectRange(test_range);
   [ax_node accessibilitySetValue:base::SysUTF16ToNSString(replacement)
                     forAttribute:NSAccessibilitySelectedTextAttribute];
-  EXPECT_NSEQ(new_string,
-              AttributeValueAtMidpoint(NSAccessibilityValueAttribute));
+  EXPECT_NSEQ(new_string, AXValue());
   EXPECT_EQ(base::SysNSStringToUTF16(new_string), textfield->text());
   // Make sure the cursor is at the end of the replacement.
   EXPECT_EQ(gfx::Range(front.length() + replacement.length()),
@@ -645,30 +682,17 @@ TEST_F(NativeWidgetMacAccessibilityTest, TextParameterizedAttributes) {
     EXPECT_TRUE([ax_node respondsToSelector:sel]);
   }
 
-  NSNumber* line =
-      [ax_node accessibilityAttributeValue:
-                   NSAccessibilityLineForIndexParameterizedAttribute
-                              forParameter:@5];
+  NSNumber* line = AXLineForIndex(@5);
   EXPECT_TRUE(line);
   EXPECT_EQ(0, [line intValue]);
 
   EXPECT_NSEQ([NSValue valueWithRange:NSMakeRange(0, kTestStringLength)],
-              [ax_node accessibilityAttributeValue:
-                           NSAccessibilityRangeForLineParameterizedAttribute
-                                      forParameter:line]);
+              AXRangeForLine(line));
 
   // The substring "est st" of kTestStringValue.
   NSValue* test_range = [NSValue valueWithRange:NSMakeRange(1, 6)];
-  EXPECT_NSEQ(@"est st",
-              [ax_node accessibilityAttributeValue:
-                           NSAccessibilityStringForRangeParameterizedAttribute
-                                      forParameter:test_range]);
-  EXPECT_NSEQ(
-      @"est st",
-      [[ax_node
-          accessibilityAttributeValue:
-              NSAccessibilityAttributedStringForRangeParameterizedAttribute
-                         forParameter:test_range] string]);
+  EXPECT_NSEQ(@"est st", AXStringForRange(test_range));
+  EXPECT_NSEQ(@"est st", [AXAttributedStringForRange(test_range) string]);
 
   // Not implemented yet. Update these tests when they are.
   EXPECT_NSEQ(nil,
@@ -700,13 +724,13 @@ TEST_F(NativeWidgetMacAccessibilityTest, TextParameterizedAttributes) {
 
 // Test performing a 'click' on Views with clickable roles work.
 TEST_F(NativeWidgetMacAccessibilityTest, PressAction) {
-  FlexibleRoleTestView* view = new FlexibleRoleTestView(ui::AX_ROLE_BUTTON);
+  FlexibleRoleTestView* view =
+      new FlexibleRoleTestView(ax::mojom::Role::kButton);
   widget()->GetContentsView()->AddChildView(view);
   view->SetSize(GetWidgetBounds().size());
 
   id ax_node = A11yElementAtMidpoint();
-  EXPECT_NSEQ(NSAccessibilityButtonRole,
-              AttributeValueAtMidpoint(NSAccessibilityRoleAttribute));
+  EXPECT_NSEQ(NSAccessibilityButtonRole, AXRoleString());
 
   EXPECT_TRUE([[ax_node accessibilityActionNames]
       containsObject:NSAccessibilityPressAction]);
@@ -769,35 +793,35 @@ TEST_F(NativeWidgetMacAccessibilityTest, ProtectedTextfields) {
   // Explicit checks done without comparing to NSTextField.
   EXPECT_TRUE(
       [ax_node accessibilityIsAttributeSettable:NSAccessibilityValueAttribute]);
-  EXPECT_NSEQ(NSAccessibilityTextFieldRole, [ax_node AXRole]);
+  EXPECT_NSEQ(NSAccessibilityTextFieldRole, AXRoleString());
 
   NSString* kShownValue = @"•"
                           @"••••••••••••••••";
   // Sanity check.
   EXPECT_EQ(kTestStringLength, static_cast<int>([kShownValue length]));
-  EXPECT_NSEQ(kShownValue, [ax_node AXValue]);
+  EXPECT_NSEQ(kShownValue, AXValue());
 
   // Cursor currently at the end of input.
-  EXPECT_NSEQ(@"", [ax_node AXSelectedText]);
+  EXPECT_NSEQ(@"", AXSelectedText());
   EXPECT_NSEQ([NSValue valueWithRange:NSMakeRange(kTestStringLength, 0)],
-              [ax_node AXSelectedTextRange]);
+              AXSelectedTextRange());
 
-  EXPECT_EQ(kTestStringLength, [[ax_node AXNumberOfCharacters] intValue]);
+  EXPECT_EQ(kTestStringLength, [AXNumberOfCharacters() intValue]);
   EXPECT_NSEQ(([NSValue valueWithRange:{0, kTestStringLength}]),
-              [ax_node AXVisibleCharacterRange]);
-  EXPECT_EQ(0, [[ax_node AXInsertionPointLineNumber] intValue]);
+              AXVisibleCharacterRange());
+  EXPECT_EQ(0, [AXInsertionPointLineNumber() intValue]);
 
   // Test replacing text.
   textfield->SetText(base::ASCIIToUTF16("123"));
-  EXPECT_NSEQ(@"•••", [ax_node AXValue]);
-  EXPECT_EQ(3, [[ax_node AXNumberOfCharacters] intValue]);
+  EXPECT_NSEQ(@"•••", AXValue());
+  EXPECT_EQ(3, [AXNumberOfCharacters() intValue]);
 
   textfield->SelectRange(gfx::Range(2, 3));  // Selects "3".
   [ax_node accessibilitySetValue:@"ab"
                     forAttribute:NSAccessibilitySelectedTextAttribute];
   EXPECT_EQ(base::ASCIIToUTF16("12ab"), textfield->text());
-  EXPECT_NSEQ(@"••••", [ax_node AXValue]);
-  EXPECT_EQ(4, [[ax_node AXNumberOfCharacters] intValue]);
+  EXPECT_NSEQ(@"••••", AXValue());
+  EXPECT_EQ(4, [AXNumberOfCharacters() intValue]);
 }
 
 // Test text-specific attributes of Labels.
@@ -811,20 +835,55 @@ TEST_F(NativeWidgetMacAccessibilityTest, Label) {
   id ax_node = A11yElementAtMidpoint();
   EXPECT_TRUE(ax_node);
 
-  EXPECT_NSEQ(NSAccessibilityStaticTextRole, [ax_node AXRole]);
-  EXPECT_NSEQ(kTestStringValue, [ax_node AXValue]);
+  EXPECT_NSEQ(NSAccessibilityStaticTextRole, AXRoleString());
+  EXPECT_NSEQ(kTestStringValue, AXValue());
+
+  // Title and description for StaticTextRole should always be empty.
+  EXPECT_NSEQ(@"", AXTitle());
+
+  // The description is "The purpose of the element, not including the role.".
+  // BrowserAccessibility returns an empty string instead of nil. Either should
+  // be OK.
+  EXPECT_EQ(nil, AXDescription());
 
   // No selection by default. TODO(tapted): Test selection when views::Label
   // uses RenderTextHarfBuzz on Mac. See http://crbug.com/454835.
   // For now, this tests that the codepaths are valid for views::Label.
-  EXPECT_NSEQ(@"", [ax_node AXSelectedText]);
+  EXPECT_NSEQ(@"", AXSelectedText());
   EXPECT_NSEQ([NSValue valueWithRange:NSMakeRange(0, 0)],
-              [ax_node AXSelectedTextRange]);
+              AXSelectedTextRange());
 
-  EXPECT_EQ(kTestStringLength, [[ax_node AXNumberOfCharacters] intValue]);
+  EXPECT_EQ(kTestStringLength, [AXNumberOfCharacters() intValue]);
   EXPECT_NSEQ(([NSValue valueWithRange:{0, kTestStringLength}]),
-              [ax_node AXVisibleCharacterRange]);
-  EXPECT_EQ(0, [[ax_node AXInsertionPointLineNumber] intValue]);
+              AXVisibleCharacterRange());
+  EXPECT_EQ(0, [AXInsertionPointLineNumber() intValue]);
+
+  // Test parameterized attributes for Static Text.
+  NSNumber* line = AXLineForIndex(@5);
+  EXPECT_TRUE(line);
+  EXPECT_EQ(0, [line intValue]);
+  EXPECT_NSEQ([NSValue valueWithRange:NSMakeRange(0, kTestStringLength)],
+              AXRangeForLine(line));
+  NSValue* test_range = [NSValue valueWithRange:NSMakeRange(1, 6)];
+  EXPECT_NSEQ(@"est st", AXStringForRange(test_range));
+  EXPECT_NSEQ(@"est st", [AXAttributedStringForRange(test_range) string]);
+
+  // TODO(tapted): Add a test for multiline Labels (currently not supported).
+}
+
+// Labels used as title bars should be exposed as normal static text on Mac.
+TEST_F(NativeWidgetMacAccessibilityTest, LabelUsedAsTitleBar) {
+  Label* label = new Label(base::SysNSStringToUTF16(kTestStringValue),
+                           style::CONTEXT_DIALOG_TITLE, style::STYLE_PRIMARY);
+  label->SetSize(GetWidgetBounds().size());
+  widget()->GetContentsView()->AddChildView(label);
+
+  // Get the Label's accessibility object.
+  id ax_node = A11yElementAtMidpoint();
+  EXPECT_TRUE(ax_node);
+
+  EXPECT_NSEQ(NSAccessibilityStaticTextRole, AXRoleString());
+  EXPECT_NSEQ(kTestStringValue, AXValue());
 }
 
 class TestComboboxModel : public ui::ComboboxModel {
@@ -844,19 +903,19 @@ class TestComboboxModel : public ui::ComboboxModel {
 
 // Test a11y attributes of Comboboxes.
 TEST_F(NativeWidgetMacAccessibilityTest, Combobox) {
-  Combobox* combobox = new Combobox(base::MakeUnique<TestComboboxModel>());
+  Combobox* combobox = new Combobox(std::make_unique<TestComboboxModel>());
   combobox->SetSize(GetWidgetBounds().size());
   widget()->GetContentsView()->AddChildView(combobox);
 
   id ax_node = A11yElementAtMidpoint();
   EXPECT_TRUE(ax_node);
 
-  EXPECT_NSEQ(NSAccessibilityPopUpButtonRole, [ax_node AXRole]);
+  EXPECT_NSEQ(NSAccessibilityPopUpButtonRole, AXRoleString());
 
   // The initial value should be the first item in the menu.
-  EXPECT_NSEQ(kTestStringValue, [ax_node AXValue]);
+  EXPECT_NSEQ(kTestStringValue, AXValue());
   combobox->SetSelectedIndex(1);
-  EXPECT_NSEQ(@"Second Item", [ax_node AXValue]);
+  EXPECT_NSEQ(@"Second Item", AXValue());
 
   // Expect to see both a press action and a show menu action. This matches
   // Cocoa behavior.

@@ -16,9 +16,6 @@
 #include <set>
 #include <vector>
 
-// Xlib defines RootWindow
-#undef RootWindow
-
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
@@ -70,13 +67,14 @@ static const int kPreviewHeight = 512;
 
 SelectFileDialogImpl* SelectFileDialogImpl::NewSelectFileDialogImplGTK(
     Listener* listener,
-    ui::SelectFilePolicy* policy) {
-  return new SelectFileDialogImplGTK(listener, policy);
+    std::unique_ptr<ui::SelectFilePolicy> policy) {
+  return new SelectFileDialogImplGTK(listener, std::move(policy));
 }
 
-SelectFileDialogImplGTK::SelectFileDialogImplGTK(Listener* listener,
-                                                 ui::SelectFilePolicy* policy)
-    : SelectFileDialogImpl(listener, policy), preview_(nullptr) {}
+SelectFileDialogImplGTK::SelectFileDialogImplGTK(
+    Listener* listener,
+    std::unique_ptr<ui::SelectFilePolicy> policy)
+    : SelectFileDialogImpl(listener, std::move(policy)), preview_(nullptr) {}
 
 SelectFileDialogImplGTK::~SelectFileDialogImplGTK() {
   for (std::set<aura::Window*>::iterator iter = parents_.begin();
@@ -172,6 +170,10 @@ void SelectFileDialogImplGTK::SelectFileImpl(
   if (owning_window) {
     aura::WindowTreeHost* host = owning_window->GetHost();
     if (host) {
+      // In some circumstances (e.g. dialog from flash plugin) the mouse has
+      // been captured and by turning off event listening, it is never
+      // released. So we manually ensure there is no current capture.
+      host->ReleaseCapture();
       std::unique_ptr<base::Closure> callback =
           views::DesktopWindowTreeHostX11::GetHostForXID(
               host->GetAcceleratedWidget())
@@ -294,9 +296,11 @@ GtkWidget* SelectFileDialogImplGTK::CreateFileOpenHelper(
     const std::string& title,
     const base::FilePath& default_path,
     gfx::NativeWindow parent) {
+  G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
   GtkWidget* dialog = gtk_file_chooser_dialog_new(
-      title.c_str(), nullptr, GTK_FILE_CHOOSER_ACTION_OPEN, "_Cancel",
-      GTK_RESPONSE_CANCEL, "_Open", GTK_RESPONSE_ACCEPT, nullptr);
+      title.c_str(), nullptr, GTK_FILE_CHOOSER_ACTION_OPEN, GTK_STOCK_CANCEL,
+      GTK_RESPONSE_CANCEL, GTK_STOCK_OPEN, GTK_RESPONSE_ACCEPT, nullptr);
+  G_GNUC_END_IGNORE_DEPRECATIONS;
   SetGtkTransientForAura(dialog, parent);
   AddFilters(GTK_FILE_CHOOSER(dialog));
 
@@ -329,16 +333,18 @@ GtkWidget* SelectFileDialogImplGTK::CreateSelectFolderDialog(
             ? l10n_util::GetStringUTF8(IDS_SELECT_UPLOAD_FOLDER_DIALOG_TITLE)
             : l10n_util::GetStringUTF8(IDS_SELECT_FOLDER_DIALOG_TITLE);
   }
+  G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
   std::string accept_button_label =
       (type == SELECT_UPLOAD_FOLDER)
           ? l10n_util::GetStringUTF8(
                 IDS_SELECT_UPLOAD_FOLDER_DIALOG_UPLOAD_BUTTON)
-          : "_Open";
+          : GTK_STOCK_OPEN;
 
   GtkWidget* dialog = gtk_file_chooser_dialog_new(
       title_string.c_str(), nullptr, GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
-      "_Cancel", GTK_RESPONSE_CANCEL, accept_button_label.c_str(),
+      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL, accept_button_label.c_str(),
       GTK_RESPONSE_ACCEPT, nullptr);
+  G_GNUC_END_IGNORE_DEPRECATIONS;
   SetGtkTransientForAura(dialog, parent);
 
   if (!default_path.empty()) {
@@ -392,9 +398,12 @@ GtkWidget* SelectFileDialogImplGTK::CreateSaveAsDialog(
       !title.empty() ? title
                      : l10n_util::GetStringUTF8(IDS_SAVE_AS_DIALOG_TITLE);
 
+  G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
   GtkWidget* dialog = gtk_file_chooser_dialog_new(
-      title_string.c_str(), nullptr, GTK_FILE_CHOOSER_ACTION_SAVE, "_Cancel",
-      GTK_RESPONSE_CANCEL, "_Save", GTK_RESPONSE_ACCEPT, nullptr);
+      title_string.c_str(), nullptr, GTK_FILE_CHOOSER_ACTION_SAVE,
+      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL, GTK_STOCK_SAVE,
+      GTK_RESPONSE_ACCEPT, nullptr);
+  G_GNUC_END_IGNORE_DEPRECATIONS;
   SetGtkTransientForAura(dialog, parent);
 
   AddFilters(GTK_FILE_CHOOSER(dialog));

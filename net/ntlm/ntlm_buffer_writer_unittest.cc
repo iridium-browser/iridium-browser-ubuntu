@@ -13,16 +13,15 @@ namespace ntlm {
 
 namespace {
 
-// Helper method to hide all the ugly casting.
+// Helper method to get a raw pointer to the buffer.
 const uint8_t* GetBufferPtr(const NtlmBufferWriter& writer) {
-  return reinterpret_cast<const uint8_t*>(writer.GetBuffer().data());
+  return writer.GetBuffer().data();
 }
 
 // Helper method to get a byte at a specific index in the buffer.
 uint8_t GetByteFromBuffer(const NtlmBufferWriter& writer, size_t index) {
-  base::StringPiece piece(writer.GetBuffer());
-  EXPECT_TRUE(index < piece.length());
-  return static_cast<uint8_t>(piece.data()[index]);
+  EXPECT_TRUE(index < writer.GetLength());
+  return writer.GetBuffer()[index];
 }
 
 }  // namespace
@@ -229,6 +228,23 @@ TEST(NtlmBufferWriterTest, WriteMessageTypePastEob) {
   NtlmBufferWriter writer(sizeof(uint32_t) - 1);
 
   ASSERT_FALSE(writer.WriteMessageType(MessageType::kNegotiate));
+}
+
+TEST(NtlmBufferWriterTest, WriteAvPairHeader) {
+  const uint8_t expected[4] = {0x06, 0x00, 0x11, 0x22};
+  NtlmBufferWriter writer(4);
+
+  ASSERT_TRUE(writer.WriteAvPairHeader(TargetInfoAvId::kFlags, 0x2211));
+  ASSERT_TRUE(writer.IsEndOfBuffer());
+
+  ASSERT_EQ(0, memcmp(expected, GetBufferPtr(writer), arraysize(expected)));
+}
+
+TEST(NtlmBufferWriterTest, WriteAvPairHeaderPastEob) {
+  NtlmBufferWriter writer(kAvPairHeaderLen - 1);
+
+  ASSERT_FALSE(writer.WriteAvPairHeader(TargetInfoAvId::kFlags, 0x2211));
+  ASSERT_EQ(0u, writer.GetCursor());
 }
 
 }  // namespace ntlm

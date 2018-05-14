@@ -10,9 +10,8 @@
 
 #include "base/bit_cast.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -97,7 +96,7 @@ HttpPostProviderInterface* HttpBridgeFactory::Create() {
   // and at pretty much any time), then we won't have a request_context_getter_.
   // Some external mechanism must ensure that this function is not called after
   // we've been asked to shut down.
-  CHECK(request_context_getter_.get());
+  DCHECK(request_context_getter_.get());
 
   scoped_refptr<HttpBridge> http =
       new HttpBridge(user_agent_, request_context_getter_,
@@ -228,7 +227,7 @@ void HttpBridge::MakeAsynchronousPost() {
   // on, and on which the url fetcher lives).
   DCHECK(!fetch_state_.http_request_timeout_timer.get());
   fetch_state_.http_request_timeout_timer =
-      base::MakeUnique<base::Timer>(false, false);
+      std::make_unique<base::Timer>(false, false);
   fetch_state_.http_request_timeout_timer->Start(
       FROM_HERE, base::TimeDelta::FromSeconds(kMaxHttpRequestTimeSeconds),
       base::Bind(&HttpBridge::OnURLFetchTimedOut, this));
@@ -251,7 +250,7 @@ void HttpBridge::MakeAsynchronousPost() {
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "Users can disable Chrome Sync by going into the profile settings "
             "and choosing to Sign Out."
@@ -367,10 +366,10 @@ void HttpBridge::OnURLFetchComplete(const net::URLFetcher* source) {
 
   if (fetch_state_.request_succeeded)
     LogTimeout(false);
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Sync.URLFetchResponse",
-                              source->GetStatus().is_success()
-                                  ? source->GetResponseCode()
-                                  : source->GetStatus().ToNetError());
+  base::UmaHistogramSparse("Sync.URLFetchResponse",
+                           source->GetStatus().is_success()
+                               ? source->GetResponseCode()
+                               : source->GetStatus().ToNetError());
   UMA_HISTOGRAM_LONG_TIMES("Sync.URLFetchTime",
                            fetch_state_.end_time - fetch_state_.start_time);
 

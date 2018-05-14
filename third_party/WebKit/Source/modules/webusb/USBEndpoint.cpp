@@ -6,7 +6,7 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/DOMException.h"
-#include "device/usb/public/interfaces/device.mojom-blink.h"
+#include "device/usb/public/mojom/device.mojom-blink.h"
 #include "modules/webusb/USBAlternateInterface.h"
 
 using device::mojom::blink::UsbTransferType;
@@ -90,8 +90,9 @@ String USBEndpoint::type() const {
   return ConvertTypeToEnum(Info().type);
 }
 
-DEFINE_TRACE(USBEndpoint) {
+void USBEndpoint::Trace(blink::Visitor* visitor) {
   visitor->Trace(alternate_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

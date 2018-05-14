@@ -31,8 +31,9 @@ enum ScrollSetting { "" /* none */, "up" };
     Constructor,
     RuntimeEnabled=WebVTTRegions
 ] interface VTTRegion {
+    attribute DOMString id;
     [RaisesException=Setter] attribute double width;
-    [RaisesException=Setter] attribute long lines;
+    attribute unsigned long lines;
     [RaisesException=Setter] attribute double regionAnchorX;
     [RaisesException=Setter] attribute double regionAnchorY;
     [RaisesException=Setter] attribute double viewportAnchorX;

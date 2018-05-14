@@ -25,6 +25,7 @@
 #include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/command.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/pref_names.h"
@@ -138,6 +139,7 @@ developer::RuntimeError ConstructRuntimeError(const RuntimeError& error) {
     default:
       NOTREACHED();
   }
+  result.context_url = error.context_url().spec();
   result.occurrences = error.occurrences();
   // NOTE(devlin): This is called "render_view_id" in the api for legacy
   // reasons, but it's not a high priority to change.
@@ -260,7 +262,7 @@ void ExtensionInfoGenerator::CreateExtensionInfo(
   if (pending_image_loads_ == 0) {
     // Don't call the callback re-entrantly.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(callback, base::Passed(&list_)));
+        FROM_HERE, base::BindOnce(callback, std::move(list_)));
     list_.clear();
   } else {
     callback_ = callback;
@@ -298,7 +300,7 @@ void ExtensionInfoGenerator::CreateExtensionsInfo(
   if (pending_image_loads_ == 0) {
     // Don't call the callback re-entrantly.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(callback, base::Passed(&list_)));
+        FROM_HERE, base::BindOnce(callback, std::move(list_)));
     list_.clear();
   } else {
     callback_ = callback;
@@ -315,16 +317,16 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
   int blacklist_text = -1;
   switch (extension_prefs_->GetExtensionBlacklistState(extension.id())) {
     case BLACKLISTED_MALWARE:
-      blacklist_text = IDS_OPTIONS_BLACKLISTED_MALWARE;
+      blacklist_text = IDS_EXTENSIONS_BLACKLISTED_MALWARE;
       break;
     case BLACKLISTED_SECURITY_VULNERABILITY:
-      blacklist_text = IDS_OPTIONS_BLACKLISTED_SECURITY_VULNERABILITY;
+      blacklist_text = IDS_EXTENSIONS_BLACKLISTED_SECURITY_VULNERABILITY;
       break;
     case BLACKLISTED_CWS_POLICY_VIOLATION:
-      blacklist_text = IDS_OPTIONS_BLACKLISTED_CWS_POLICY_VIOLATION;
+      blacklist_text = IDS_EXTENSIONS_BLACKLISTED_CWS_POLICY_VIOLATION;
       break;
     case BLACKLISTED_POTENTIALLY_UNWANTED:
-      blacklist_text = IDS_OPTIONS_BLACKLISTED_POTENTIALLY_UNWANTED;
+      blacklist_text = IDS_EXTENSIONS_BLACKLISTED_POTENTIALLY_UNWANTED;
       break;
     default:
       break;
@@ -343,7 +345,7 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
     if (is_policy_location) {
       info->controlled_info->type = developer::CONTROLLER_TYPE_POLICY;
       info->controlled_info->text =
-          l10n_util::GetStringUTF8(IDS_OPTIONS_INSTALL_LOCATION_ENTERPRISE);
+          l10n_util::GetStringUTF8(IDS_EXTENSIONS_INSTALL_LOCATION_ENTERPRISE);
     } else if (profile->IsChild()) {
       info->controlled_info->type = developer::CONTROLLER_TYPE_CHILD_CUSTODIAN;
       info->controlled_info->text = l10n_util::GetStringUTF8(
@@ -382,11 +384,12 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
   // Disable reasons.
   int disable_reasons = extension_prefs_->GetDisableReasons(extension.id());
   info->disable_reasons.suspicious_install =
-      (disable_reasons & Extension::DISABLE_NOT_VERIFIED) != 0;
+      (disable_reasons & disable_reason::DISABLE_NOT_VERIFIED) != 0;
   info->disable_reasons.corrupt_install =
-      (disable_reasons & Extension::DISABLE_CORRUPTED) != 0;
+      (disable_reasons & disable_reason::DISABLE_CORRUPTED) != 0;
   info->disable_reasons.update_required =
-      (disable_reasons & Extension::DISABLE_UPDATE_REQUIRED_BY_POLICY) != 0;
+      (disable_reasons & disable_reason::DISABLE_UPDATE_REQUIRED_BY_POLICY) !=
+      0;
 
   // Error collection.
   bool error_console_enabled =
@@ -407,6 +410,13 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
   // Home page.
   info->home_page.url = ManifestURL::GetHomepageURL(&extension).spec();
   info->home_page.specified = ManifestURL::SpecifiedHomepageURL(&extension);
+
+  // Developer and web store URLs.
+  // TODO(dschuyler) after MD extensions releases (expected in m64), look into
+  // removing the |home_page.url| and |home_page.specified| above.
+  info->manifest_home_page_url =
+      ManifestURL::GetManifestHomePageURL(&extension).spec();
+  info->web_store_url = ManifestURL::GetWebStoreURL(&extension).spec();
 
   info->id = extension.id();
 
@@ -449,11 +459,11 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
   // Location text.
   int location_text = -1;
   if (info->location == developer::LOCATION_UNKNOWN)
-    location_text = IDS_OPTIONS_INSTALL_LOCATION_UNKNOWN;
+    location_text = IDS_EXTENSIONS_INSTALL_LOCATION_UNKNOWN;
   else if (extension.location() == Manifest::EXTERNAL_REGISTRY)
-    location_text = IDS_OPTIONS_INSTALL_LOCATION_3RD_PARTY;
+    location_text = IDS_EXTENSIONS_INSTALL_LOCATION_3RD_PARTY;
   else if (extension.is_shared_module())
-    location_text = IDS_OPTIONS_INSTALL_LOCATION_SHARED_MODULE;
+    location_text = IDS_EXTENSIONS_INSTALL_LOCATION_SHARED_MODULE;
   if (location_text != -1) {
     info->location_text.reset(
         new std::string(l10n_util::GetStringUTF8(location_text)));
@@ -509,14 +519,21 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
   // Permissions.
   PermissionMessages messages =
       extension.permissions_data()->GetPermissionMessages();
-  // TODO(devlin): We need to include retained device/file info. We also need
-  // to indicate which can be removed and which can't.
-  for (const PermissionMessage& message : messages)
-    info->permissions.push_back(base::UTF16ToUTF8(message.message()));
+  // TODO(devlin): We need to indicate which permissions can be removed and
+  // which can't.
+  info->permissions.reserve(messages.size());
+  for (const PermissionMessage& message : messages) {
+    info->permissions.push_back(developer::Permission());
+    developer::Permission& permission_message = info->permissions.back();
+    permission_message.message = base::UTF16ToUTF8(message.message());
+    permission_message.submessages.reserve(message.submessages().size());
+    for (const auto& submessage : message.submessages())
+      permission_message.submessages.push_back(base::UTF16ToUTF8(submessage));
+  }
 
   // Runs on all urls.
   ScriptingPermissionsModifier permissions_modifier(
-      browser_context_, make_scoped_refptr(&extension));
+      browser_context_, base::WrapRefCounted(&extension));
   info->run_on_all_urls.is_enabled =
       (FeatureSwitch::scripts_require_action()->IsEnabled() &&
        permissions_modifier.CanAffectExtension(
@@ -592,6 +609,13 @@ const std::string& ExtensionInfoGenerator::GetDefaultIconUrl(
 std::string ExtensionInfoGenerator::GetIconUrlFromImage(
     const gfx::Image& image,
     bool should_greyscale) {
+  // Ignore |should_greyscale| if MD Extensions are enabled.
+  // TODO(dpapad): Remove should_greyscale logic once non-MD Extensions UI is
+  // removed.
+  should_greyscale =
+      should_greyscale &&
+      !base::FeatureList::IsEnabled(features::kMaterialDesignExtensions);
+
   scoped_refptr<base::RefCountedMemory> data;
   if (should_greyscale) {
     color_utils::HSL shift = {-1, 0, 0.6};

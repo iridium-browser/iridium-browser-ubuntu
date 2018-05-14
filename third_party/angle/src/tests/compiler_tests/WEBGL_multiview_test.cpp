@@ -58,33 +58,34 @@ class SymbolOccurrenceCounterByQualifier : public SymbolOccurrenceCounter
 class SymbolOccurrenceCounterByName : public SymbolOccurrenceCounter
 {
   public:
-    SymbolOccurrenceCounterByName(const TString &symbolName) : mSymbolName(symbolName) {}
+    SymbolOccurrenceCounterByName(const ImmutableString &symbolName) : mSymbolName(symbolName) {}
 
     bool shouldCountSymbol(const TIntermSymbol *node) const override
     {
-        return node->getName().getString() == mSymbolName;
+        return node->variable().symbolType() != SymbolType::Empty && node->getName() == mSymbolName;
     }
 
   private:
-    TString mSymbolName;
+    ImmutableString mSymbolName;
 };
 
 class SymbolOccurrenceCounterByNameAndQualifier : public SymbolOccurrenceCounter
 {
   public:
-    SymbolOccurrenceCounterByNameAndQualifier(const TString &symbolName, TQualifier qualifier)
+    SymbolOccurrenceCounterByNameAndQualifier(const ImmutableString &symbolName,
+                                              TQualifier qualifier)
         : mSymbolName(symbolName), mSymbolQualifier(qualifier)
     {
     }
 
     bool shouldCountSymbol(const TIntermSymbol *node) const override
     {
-        return node->getName().getString() == mSymbolName &&
-               node->getQualifier() == mSymbolQualifier;
+        return node->variable().symbolType() != SymbolType::Empty &&
+               node->getName() == mSymbolName && node->getQualifier() == mSymbolQualifier;
     }
 
   private:
-    TString mSymbolName;
+    ImmutableString mSymbolName;
     TQualifier mSymbolQualifier;
 };
 
@@ -171,7 +172,7 @@ class WEBGLMultiviewComputeShaderOutputCodeTest : public WEBGLMultiviewOutputCod
 };
 
 void VariableOccursNTimes(TIntermBlock *root,
-                          const TString &varName,
+                          const ImmutableString &varName,
                           const TQualifier varQualifier,
                           unsigned n)
 {
@@ -188,13 +189,13 @@ void VariableOccursNTimes(TIntermBlock *root,
     EXPECT_EQ(n, viewIDByName.getNumberOfOccurrences());
 }
 
-// Invalid combination of extensions (restricted in the WEBGL_multiview spec).
-TEST_F(WEBGLMultiviewVertexShaderTest, InvalidBothMultiviewAndMultiview2)
+// Unsupported GL_OVR_multiview2 extension directive (WEBGL_multiview spec only exposes
+// GL_OVR_multiview).
+TEST_F(WEBGLMultiviewVertexShaderTest, InvalidMultiview2)
 {
     const std::string &shaderString =
         "#version 300 es\n"
-        "#extension GL_OVR_multiview : require\n"
-        "#extension GL_OVR_multiview2 : enable\n"
+        "#extension GL_OVR_multiview2 : require\n"
         "layout(num_views = 2) in;\n"
         "void main()\n"
         "{\n"
@@ -212,7 +213,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, InvalidNumViewsMismatch)
 {
     const std::string &shaderString =
         "#version 300 es\n"
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "layout(num_views = 2) in;\n"
         "layout(num_views = 1) in;\n"
         "void main()\n"
@@ -231,7 +232,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, InvalidNumViewsZero)
 {
     const std::string &shaderString =
         "#version 300 es\n"
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "layout(num_views = 0) in;\n"
         "void main()\n"
         "{\n"
@@ -249,7 +250,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, InvalidNumViewsGreaterThanMax)
 {
     const std::string &shaderString =
         "#version 300 es\n"
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "layout(num_views = 5) in;\n"
         "void main()\n"
         "{\n"
@@ -262,163 +263,29 @@ TEST_F(WEBGLMultiviewVertexShaderTest, InvalidNumViewsGreaterThanMax)
     }
 }
 
-// Valid use of gl_ViewID_OVR in a ternary operator.
-TEST_F(WEBGLMultiviewVertexShaderTest, ValidViewIDInTernary)
+// Valid use of gl_ViewID_OVR.
+TEST_F(WEBGLMultiviewVertexShaderTest, ViewIDUsed)
 {
     const std::string &shaderString =
         "#version 300 es\n"
         "#extension GL_OVR_multiview : require\n"
         "layout(num_views = 2) in;\n"
         "layout(num_views = 2) in;  // Duplicated on purpose\n"
-        "void main()\n"
-        "{\n"
-        "    gl_Position.x = (gl_ViewID_OVR == 0u) ? 1.0 : 0.0;\n"
-        "    gl_Position.yzw = vec3(0, 0, 1);\n"
-        "}\n";
-    if (!compile(shaderString))
-    {
-        FAIL() << "Shader compilation failed, expecting success:\n" << mInfoLog;
-    }
-}
-
-// Valid use of gl_ViewID_OVR in an if statement.
-TEST_F(WEBGLMultiviewVertexShaderTest, ValidViewIDInIf)
-{
-    const std::string &shaderString =
-        "#version 300 es\n"
-        "#extension GL_OVR_multiview : require\n"
-        "layout(num_views = 2) in;\n"
-        "precision highp float;\n"
         "in vec4 pos;\n"
+        "out float myOutput;\n"
         "void main()\n"
         "{\n"
         "    if (gl_ViewID_OVR == 0u)\n"
         "    {\n"
-        "        gl_Position.x = pos.x;\n"
+        "        gl_Position = pos;\n"
+        "        myOutput = 1.0;\n"
         "    }\n"
         "    else\n"
         "    {\n"
-        "        gl_Position.x = 1.0;\n"
+        "        gl_Position = pos + vec4(1.0, 0.0, 0.0, 0.0);\n"
+        "        myOutput = 2.0;\n"
         "    }\n"
-        "    gl_Position.yzw = pos.yzw;\n"
-        "}\n";
-    if (!compile(shaderString))
-    {
-        FAIL() << "Shader compilation failed, expecting success:\n" << mInfoLog;
-    }
-}
-
-// Valid normal write of gl_Position in addition to the write that's dependent on gl_ViewID_OVR.
-TEST_F(WEBGLMultiviewVertexShaderTest, ValidWriteOfGlPosition)
-{
-    const std::string &shaderString =
-        "#version 300 es\n"
-        "#extension GL_OVR_multiview : require\n"
-        "layout(num_views = 2) in;\n"
-        "void main()\n"
-        "{\n"
-        "    if (0u == gl_ViewID_OVR)\n"
-        "    {\n"
-        "        gl_Position.x = 1.0;\n"
-        "    }\n"
-        "    else\n"
-        "    {\n"
-        "        gl_Position.x = 1.0;\n"
-        "    }\n"
-        "    gl_Position = vec4(1, 1, 1, 1);\n"
-        "}\n";
-    if (!compile(shaderString))
-    {
-        FAIL() << "Shader compilation failed, expecting success:\n" << mInfoLog;
-    }
-}
-
-// Invalid assignment to gl_Position.y inside if dependent on gl_ViewID_OVR.
-TEST_F(WEBGLMultiviewVertexShaderTest, InvalidGlPositionAssignmentInIf)
-{
-    const std::string &shaderString =
-        "#version 300 es\n"
-        "#extension GL_OVR_multiview : require\n"
-        "layout(num_views = 2) in;\n"
-        "void main()\n"
-        "{\n"
-        "    if (gl_ViewID_OVR == 0u)\n"
-        "    {\n"
-        "        gl_Position.y = 1.0;\n"
-        "    }\n"
-        "    else\n"
-        "    {\n"
-        "        gl_Position.y = 1.0;\n"
-        "    }\n"
-        "    gl_Position.xzw = vec3(0, 0, 1);\n"
-        "}\n";
-    if (compile(shaderString))
-    {
-        FAIL() << "Shader compilation succeeded, expecting failure:\n" << mInfoLog;
-    }
-}
-
-// Invalid multiple assignments inside if dependent on gl_ViewID_OVR.
-TEST_F(WEBGLMultiviewVertexShaderTest, InvalidMultipleGlPositionXAssignmentsInIf)
-{
-    const std::string &shaderString =
-        "#version 300 es\n"
-        "#extension GL_OVR_multiview : require\n"
-        "layout(num_views = 2) in;\n"
-        "void main()\n"
-        "{\n"
-        "    if (gl_ViewID_OVR == 0u)\n"
-        "    {\n"
-        "        gl_Position.x = 1.0;\n"
-        "        gl_Position.x = 2.0;\n"
-        "    }\n"
-        "    else\n"
-        "    {\n"
-        "        gl_Position.x = 1.0;\n"
-        "    }\n"
-        "    gl_Position.yzw = vec3(0, 0, 1);\n"
-        "}\n";
-    if (compile(shaderString))
-    {
-        FAIL() << "Shader compilation succeeded, expecting failure:\n" << mInfoLog;
-    }
-}
-
-// Invalid read of gl_Position
-TEST_F(WEBGLMultiviewVertexShaderTest, InvalidReadOfGlPosition)
-{
-    const std::string &shaderString =
-        "#version 300 es\n"
-        "#extension GL_OVR_multiview : require\n"
-        "layout(num_views = 2) in;\n"
-        "void main()\n"
-        "{\n"
-        "    if (gl_ViewID_OVR == 0u) {\n"
-        "        gl_Position.x = 1.0;\n"
-        "    } else {\n"
-        "        gl_Position.x = 1.0;\n"
-        "    }\n"
-        "    gl_Position.yzw = vec3(0, 0, 1);\n"
-        "    float f = gl_Position.y;\n"
-        "}\n";
-    if (compile(shaderString))
-    {
-        FAIL() << "Shader compilation succeeded, expecting failure:\n" << mInfoLog;
-    }
-}
-
-// Read gl_Position when the shader does not refer to gl_ViewID_OVR.
-TEST_F(WEBGLMultiviewVertexShaderTest, ValidReadOfGlPosition)
-{
-    const std::string &shaderString =
-        "#version 300 es\n"
-        "#extension GL_OVR_multiview : require\n"
-        "layout(num_views = 2) in;\n"
-        "uniform float u;\n"
-        "void main()\n"
-        "{\n"
-        "    gl_Position = vec4(0, 0, 0, 1);\n"
-        "    gl_Position.y = gl_Position.x * u;\n"
+        "    gl_Position += (gl_ViewID_OVR == 0u) ? 1.0 : 0.0;\n"
         "}\n";
     if (!compile(shaderString))
     {
@@ -427,7 +294,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, ValidReadOfGlPosition)
 }
 
 // Read gl_FragCoord in a OVR_multiview fragment shader.
-TEST_F(WEBGLMultiviewFragmentShaderTest, InvalidReadOfFragCoord)
+TEST_F(WEBGLMultiviewFragmentShaderTest, ReadOfFragCoord)
 {
     const std::string &shaderString =
         "#version 300 es\n"
@@ -438,14 +305,14 @@ TEST_F(WEBGLMultiviewFragmentShaderTest, InvalidReadOfFragCoord)
         "{\n"
         "    outColor = vec4(gl_FragCoord.xy, 0, 1);\n"
         "}\n";
-    if (compile(shaderString))
+    if (!compile(shaderString))
     {
-        FAIL() << "Shader compilation succeeded, expecting failure:\n" << mInfoLog;
+        FAIL() << "Shader compilation failed, expecting success:\n" << mInfoLog;
     }
 }
 
 // Read gl_ViewID_OVR in an OVR_multiview fragment shader.
-TEST_F(WEBGLMultiviewFragmentShaderTest, InvalidReadOfViewID)
+TEST_F(WEBGLMultiviewFragmentShaderTest, ReadOfViewID)
 {
     const std::string &shaderString =
         "#version 300 es\n"
@@ -456,72 +323,23 @@ TEST_F(WEBGLMultiviewFragmentShaderTest, InvalidReadOfViewID)
         "{\n"
         "    outColor = vec4(gl_ViewID_OVR, 0, 0, 1);\n"
         "}\n";
-    if (compile(shaderString))
-    {
-        FAIL() << "Shader compilation succeeded, expecting failure:\n" << mInfoLog;
-    }
-}
-
-// Tricky invalid read of view ID.
-TEST_F(WEBGLMultiviewVertexShaderTest, InvalidConsumingExpressionForAssignGLPositionX)
-{
-    const std::string &shaderString =
-        "#version 300 es\n"
-        "#extension GL_OVR_multiview : require\n"
-        "layout(num_views = 2) in;\n"
-        "void main()\n"
-        "{\n"
-        "    float f = (gl_Position.x = (gl_ViewID_OVR == 0u) ? 1.0 : 0.0);\n"
-        "    gl_Position.yzw = vec3(f, f, f);\n"
-        "}\n";
-    if (compile(shaderString))
-    {
-        FAIL() << "Shader compilation succeeded, expecting failure:\n" << mInfoLog;
-    }
-}
-
-// Using the OVR_multiview2 extension directive lifts restrictions of OVR_multiview.
-TEST_F(WEBGLMultiviewVertexShaderTest, RestrictionsLiftedMultiview2)
-{
-    const std::string &shaderString =
-        "#version 300 es\n"
-        "#extension GL_OVR_multiview2 : require\n"
-        "layout(num_views = 2) in;\n"
-        "out float out_f;\n"
-        "void main()\n"
-        "{\n"
-        "    if (gl_ViewID_OVR == 0u)\n"
-        "    {\n"
-        "        gl_Position.x = 1.0;\n"
-        "        gl_Position.x = 2.0;\n"
-        "    }\n"
-        "    else\n"
-        "    {\n"
-        "        gl_Position.x = 1.0;\n"
-        "    }\n"
-        "    gl_Position.yzw = vec3(0, 0, 1);\n"
-        "    gl_Position += vec4(1, 0, 0, 1);\n"
-        "    out_f = float(gl_ViewID_OVR * 2u);\n"
-        "}\n";
     if (!compile(shaderString))
     {
         FAIL() << "Shader compilation failed, expecting success:\n" << mInfoLog;
     }
 }
 
-// Correct use of GL_OVR_multiview macros.
-TEST_F(WEBGLMultiviewVertexShaderTest, ValidUseOfExtensionMacros)
+// Correct use of GL_OVR_multiview macro.
+TEST_F(WEBGLMultiviewVertexShaderTest, UseOfExtensionMacro)
 {
     const std::string &shaderString =
         "#version 300 es\n"
         "#ifdef GL_OVR_multiview\n"
-        "#ifdef GL_OVR_multiview2\n"
-        "#if (GL_OVR_multiview == 1) && (GL_OVR_multiview2 == 1)\n"
+        "#if (GL_OVR_multiview == 1)\n"
         "void main()\n"
         "{\n"
         "    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n"
         "}\n"
-        "#endif\n"
         "#endif\n"
         "#endif\n";
     if (!compile(shaderString))
@@ -530,29 +348,12 @@ TEST_F(WEBGLMultiviewVertexShaderTest, ValidUseOfExtensionMacros)
     }
 }
 
-// Test that the parent node is tracked correctly when validating assignment to gl_Position.
-TEST_F(WEBGLMultiviewVertexShaderTest, AssignmentWithViewIDInsideAssignment)
-{
-    const std::string &shaderString =
-        "#version 300 es\n"
-        "#extension GL_OVR_multiview : require\n"
-        "layout(num_views = 2) in;\n"
-        "void main()\n"
-        "{\n"
-        "    gl_Position.y = (gl_Position.x = (gl_ViewID_OVR == 0u) ? 1.0 : 0.0);\n"
-        "}\n";
-    if (compile(shaderString))
-    {
-        FAIL() << "Shader compilation succeeded, expecting failure:\n" << mInfoLog;
-    }
-}
-
 // Test that gl_ViewID_OVR can't be used as an l-value.
 TEST_F(WEBGLMultiviewVertexShaderTest, ViewIdAsLValue)
 {
     const std::string &shaderString =
         "#version 300 es\n"
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "layout(num_views = 2) in;\n"
         "void foo(out uint u)\n"
         "{\n"
@@ -573,7 +374,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, ViewIdAsLValue)
 TEST_F(WEBGLMultiviewVertexShaderTest, ESSL1Shader)
 {
     const std::string &shaderString =
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "layout(num_views = 2) in;\n"
         "void main()\n"
         "{\n"
@@ -596,7 +397,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, ESSL1Shader)
 TEST_F(WEBGLMultiviewVertexShaderTest, ESSL1ShaderUnsupportedGlobalLayoutQualifier)
 {
     const std::string &shaderString =
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "layout(num_views = 2) in;\n"
         "layout(std140) uniform;\n"
         "void main()\n"
@@ -620,7 +421,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, ESSL1ShaderUnsupportedGlobalLayoutQualifi
 TEST_F(WEBGLMultiviewVertexShaderTest, ESSL1ShaderUnsupportedInputStorageQualifier)
 {
     const std::string &shaderString =
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "layout(num_views = 2) in;\n"
         "in vec4 pos;\n"
         "void main()\n"
@@ -645,7 +446,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, ESSL1ShaderUnsupportedInputStorageQualifi
 TEST_F(WEBGLMultiviewFragmentShaderTest, ESSL1ShaderUnsupportedInStorageQualifier)
 {
     const std::string &shaderString =
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "precision highp float;\n"
         "in vec4 color;\n"
         "void main()\n"
@@ -689,7 +490,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, GLInstanceIDIsRenamed)
     mExtraCompileOptions |= SH_INITIALIZE_BUILTINS_FOR_INSTANCED_MULTIVIEW;
     compileAssumeSuccess(shaderString);
 
-    SymbolOccurrenceCounterByName glInstanceIDByName("gl_InstanceID");
+    SymbolOccurrenceCounterByName glInstanceIDByName(ImmutableString("gl_InstanceID"));
     mASTRoot->traverse(&glInstanceIDByName);
     EXPECT_EQ(2u, glInstanceIDByName.getNumberOfOccurrences());
 
@@ -697,7 +498,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, GLInstanceIDIsRenamed)
     mASTRoot->traverse(&glInstanceIDByQualifier);
     EXPECT_EQ(2u, glInstanceIDByQualifier.getNumberOfOccurrences());
 
-    SymbolOccurrenceCounterByName instanceIDByName("InstanceID");
+    SymbolOccurrenceCounterByName instanceIDByName(ImmutableString("InstanceID"));
     mASTRoot->traverse(&instanceIDByName);
     EXPECT_EQ(5u, instanceIDByName.getNumberOfOccurrences());
 }
@@ -709,7 +510,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, GLViewIDIsRenamed)
 {
     const std::string &shaderString =
         "#version 300 es\n"
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "layout(num_views = 2) in;\n"
         "flat out uint a;\n"
         "void main()\n"
@@ -721,7 +522,7 @@ TEST_F(WEBGLMultiviewVertexShaderTest, GLViewIDIsRenamed)
     mExtraCompileOptions |= SH_INITIALIZE_BUILTINS_FOR_INSTANCED_MULTIVIEW;
     compileAssumeSuccess(shaderString);
 
-    SymbolOccurrenceCounterByName glViewIDOVRByName("gl_ViewID_OVR");
+    SymbolOccurrenceCounterByName glViewIDOVRByName(ImmutableString("gl_ViewID_OVR"));
     mASTRoot->traverse(&glViewIDOVRByName);
     EXPECT_EQ(0u, glViewIDOVRByName.getNumberOfOccurrences());
 
@@ -729,7 +530,8 @@ TEST_F(WEBGLMultiviewVertexShaderTest, GLViewIDIsRenamed)
     mASTRoot->traverse(&glViewIDOVRByQualifier);
     EXPECT_EQ(0u, glViewIDOVRByQualifier.getNumberOfOccurrences());
 
-    SymbolOccurrenceCounterByNameAndQualifier viewIDByNameAndQualifier("ViewID_OVR", EvqFlatOut);
+    SymbolOccurrenceCounterByNameAndQualifier viewIDByNameAndQualifier(
+        ImmutableString("ViewID_OVR"), EvqFlatOut);
     mASTRoot->traverse(&viewIDByNameAndQualifier);
     EXPECT_EQ(6u, viewIDByNameAndQualifier.getNumberOfOccurrences());
 }
@@ -752,11 +554,11 @@ TEST_F(WEBGLMultiviewVertexShaderOutputCodeTest, ViewIDAndInstanceIDHaveCorrectV
     requestHLSLOutput();
     compile(shaderString, SH_INITIALIZE_BUILTINS_FOR_INSTANCED_MULTIVIEW);
 
-    EXPECT_TRUE(foundInAllGLSLCode("webgl_angle_ViewID_OVR = (uint(gl_InstanceID) % 3u)"));
-    EXPECT_TRUE(foundInAllGLSLCode("webgl_angle_InstanceID = (gl_InstanceID / 3)"));
+    EXPECT_TRUE(foundInAllGLSLCode("ViewID_OVR = (uint(gl_InstanceID) % 3u)"));
+    EXPECT_TRUE(foundInAllGLSLCode("InstanceID = int((uint(gl_InstanceID) / 3u))"));
 
-    EXPECT_TRUE(foundInHLSLCode("ViewID_OVR = (uvec1(gl_InstanceID) % 3)"));
-    EXPECT_TRUE(foundInHLSLCode("InstanceID = (gl_InstanceID / 3)"));
+    EXPECT_TRUE(foundInHLSLCode("ViewID_OVR = (uint_ctor(gl_InstanceID) % 3)"));
+    EXPECT_TRUE(foundInHLSLCode("InstanceID = int_ctor((uint_ctor(gl_InstanceID) / 3))"));
 }
 
 // The test checks that the directive enabling GL_OVR_multiview is not outputted if the extension is
@@ -775,10 +577,6 @@ TEST_F(WEBGLMultiviewVertexShaderOutputCodeTest, StrippedOVRMultiviewDirective)
     EXPECT_FALSE(foundInESSLCode("GL_OVR_multiview"));
     EXPECT_FALSE(foundInGLSLCode("GL_OVR_multiview"));
 
-    compile(shaderString, SH_TRANSLATE_VIEWID_OVR_TO_UNIFORM);
-    EXPECT_FALSE(foundInESSLCode("GL_OVR_multiview"));
-    EXPECT_FALSE(foundInGLSLCode("GL_OVR_multiview"));
-
     // The directive should be outputted from the ESSL translator with none of the options being
     // set.
     compile(shaderString);
@@ -790,7 +588,7 @@ TEST_F(WEBGLMultiviewVertexShaderOutputCodeTest, StrippedOVRMultiviewDirective)
 TEST_F(WEBGLMultiviewVertexShaderTest, InstaceIDCollectedESSL1)
 {
     const std::string &shaderString =
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "layout(num_views = 2) in;\n"
         "void main()\n"
         "{\n"
@@ -815,26 +613,26 @@ TEST_F(WEBGLMultiviewFragmentShaderTest, ViewIDDeclaredAsFlatInput)
 {
     const std::string &shaderString =
         "#version 300 es\n"
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "void main()\n"
         "{\n"
         "}\n";
     mExtraCompileOptions |= SH_INITIALIZE_BUILTINS_FOR_INSTANCED_MULTIVIEW;
     compileAssumeSuccess(shaderString);
-    VariableOccursNTimes(mASTRoot, "ViewID_OVR", EvqFlatIn, 1u);
+    VariableOccursNTimes(mASTRoot, ImmutableString("ViewID_OVR"), EvqFlatIn, 1u);
 }
 
 // Test that ViewID_OVR is declared as a flat output variable in an ESSL 1.00 vertex shader.
 TEST_F(WEBGLMultiviewVertexShaderTest, ViewIDDeclaredAsFlatOutput)
 {
     const std::string &shaderString =
-        "#extension GL_OVR_multiview2 : require\n"
+        "#extension GL_OVR_multiview : require\n"
         "void main()\n"
         "{\n"
         "}\n";
     mExtraCompileOptions |= SH_INITIALIZE_BUILTINS_FOR_INSTANCED_MULTIVIEW;
     compileAssumeSuccess(shaderString);
-    VariableOccursNTimes(mASTRoot, "ViewID_OVR", EvqFlatOut, 2u);
+    VariableOccursNTimes(mASTRoot, ImmutableString("ViewID_OVR"), EvqFlatOut, 2u);
 }
 
 // The test checks that the GL_NV_viewport_array2 extension is emitted in a vertex shader if the
@@ -890,11 +688,11 @@ TEST_F(WEBGLMultiviewFragmentShaderOutputCodeTest, ViewportArray2IsNotEmitted)
 TEST_F(WEBGLMultiviewComputeShaderOutputCodeTest, ViewportArray2IsNotEmitted)
 {
     const std::string &shaderString =
-        "#version 300 es\n"
-        "#extension GL_OVR_multiview : require\n"
-        "void main()\n"
-        "{\n"
-        "}\n";
+        R"(#version 310 es
+        #extension GL_OVR_multiview : require
+        void main()
+        {
+        })";
     compile(shaderString, SH_INITIALIZE_BUILTINS_FOR_INSTANCED_MULTIVIEW |
                               SH_SELECT_VIEW_IN_NV_GLSL_VERTEX_SHADER);
     EXPECT_FALSE(foundInGLSLCode("#extension GL_NV_viewport_array2"));
@@ -914,21 +712,58 @@ TEST_F(WEBGLMultiviewVertexShaderOutputCodeTest, GlViewportIndexIsSet)
         "}\n";
     compile(shaderString, SH_INITIALIZE_BUILTINS_FOR_INSTANCED_MULTIVIEW |
                               SH_SELECT_VIEW_IN_NV_GLSL_VERTEX_SHADER);
-    const char glViewportIndexAssignment[] = "gl_ViewportIndex = int(webgl_angle_ViewID_OVR)";
 
-    // Check that the viewport index is selected.
-    EXPECT_TRUE(foundInAllGLSLCode(glViewportIndexAssignment));
+    std::vector<const char *> expectedStrings = {"ViewID_OVR = (uint(gl_InstanceID) % 3u)",
+                                                 "gl_ViewportIndex = int(ViewID_OVR)"};
+    EXPECT_TRUE(foundInCodeInOrder(SH_ESSL_OUTPUT, expectedStrings));
+    EXPECT_TRUE(foundInCodeInOrder(SH_GLSL_COMPATIBILITY_OUTPUT, expectedStrings));
+}
 
-    // Setting gl_ViewportIndex must happen after ViewID_OVR's initialization.
-    const char viewIDOVRAssignment[] = "webgl_angle_ViewID_OVR = (uint(gl_InstanceID) % 3u)";
-    size_t viewIDOVRAssignmentLoc = findInCode(SH_GLSL_COMPATIBILITY_OUTPUT, viewIDOVRAssignment);
-    size_t glViewportIndexAssignmentLoc =
-        findInCode(SH_GLSL_COMPATIBILITY_OUTPUT, glViewportIndexAssignment);
-    EXPECT_LT(viewIDOVRAssignmentLoc, glViewportIndexAssignmentLoc);
+// The test checks that the layer is selected after the initialization of ViewID_OVR for
+// GLSL and ESSL ouputs.
+TEST_F(WEBGLMultiviewVertexShaderOutputCodeTest, GlLayerIsSet)
+{
+    const std::string &shaderString =
+        "#version 300 es\n"
+        "#extension GL_OVR_multiview : require\n"
+        "layout(num_views = 3) in;\n"
+        "void main()\n"
+        "{\n"
+        "}\n";
+    compile(shaderString, SH_INITIALIZE_BUILTINS_FOR_INSTANCED_MULTIVIEW |
+                              SH_SELECT_VIEW_IN_NV_GLSL_VERTEX_SHADER);
 
-    viewIDOVRAssignmentLoc       = findInCode(SH_ESSL_OUTPUT, viewIDOVRAssignment);
-    glViewportIndexAssignmentLoc = findInCode(SH_ESSL_OUTPUT, glViewportIndexAssignment);
-    EXPECT_LT(viewIDOVRAssignmentLoc, glViewportIndexAssignmentLoc);
+    std::vector<const char *> expectedStrings = {
+        "ViewID_OVR = (uint(gl_InstanceID) % 3u)",
+        "gl_Layer = (int(ViewID_OVR) + multiviewBaseViewLayerIndex)"};
+    EXPECT_TRUE(foundInCodeInOrder(SH_ESSL_OUTPUT, expectedStrings));
+    EXPECT_TRUE(foundInCodeInOrder(SH_GLSL_COMPATIBILITY_OUTPUT, expectedStrings));
+}
+
+// Test that a warning is generated in an ESSL 1.00 shader when using a layout qualifier to set
+// num_views and the extension is set to warn.
+TEST_F(WEBGLMultiviewVertexShaderTest, WarnOnGlobalLayoutQualifier)
+{
+    const std::string &shaderString =
+        R"(
+        #extension GL_OVR_multiview : warn
+        layout(num_views=2) in;
+
+        void main()
+        {
+        })";
+    if (compile(shaderString))
+    {
+        if (!hasWarning())
+        {
+            FAIL() << "Shader compilation succeeded without warnings, expecting warning:\n"
+                   << mInfoLog;
+        }
+    }
+    else
+    {
+        FAIL() << "Shader compilation failed, expecting success:\n" << mInfoLog;
+    }
 }
 
 }  // namespace

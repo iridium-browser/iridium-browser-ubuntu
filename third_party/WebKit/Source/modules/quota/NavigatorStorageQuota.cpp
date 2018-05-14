@@ -39,16 +39,14 @@ namespace blink {
 NavigatorStorageQuota::NavigatorStorageQuota(Navigator& navigator)
     : Supplement<Navigator>(navigator) {}
 
-const char* NavigatorStorageQuota::SupplementName() {
-  return "NavigatorStorageQuota";
-}
+const char NavigatorStorageQuota::kSupplementName[] = "NavigatorStorageQuota";
 
 NavigatorStorageQuota& NavigatorStorageQuota::From(Navigator& navigator) {
-  NavigatorStorageQuota* supplement = static_cast<NavigatorStorageQuota*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  NavigatorStorageQuota* supplement =
+      Supplement<Navigator>::From<NavigatorStorageQuota>(navigator);
   if (!supplement) {
     supplement = new NavigatorStorageQuota(navigator);
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
 }
@@ -88,7 +86,7 @@ StorageManager* NavigatorStorageQuota::storage() const {
   return storage_manager_.Get();
 }
 
-DEFINE_TRACE(NavigatorStorageQuota) {
+void NavigatorStorageQuota::Trace(blink::Visitor* visitor) {
   visitor->Trace(temporary_storage_);
   visitor->Trace(persistent_storage_);
   visitor->Trace(storage_manager_);

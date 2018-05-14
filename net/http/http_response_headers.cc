@@ -10,12 +10,12 @@
 #include "net/http/http_response_headers.h"
 
 #include <algorithm>
+#include <memory>
 #include <unordered_map>
 #include <utility>
 
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/pickle.h"
 #include "base/strings/string_number_conversions.h"
@@ -582,8 +582,7 @@ bool HttpResponseHeaders::HasHeader(const base::StringPiece& name) const {
   return FindHeader(0, name) != std::string::npos;
 }
 
-HttpResponseHeaders::~HttpResponseHeaders() {
-}
+HttpResponseHeaders::~HttpResponseHeaders() = default;
 
 // Note: this implementation implicitly assumes that line_end points at a valid
 // sentinel character (such as '\0').
@@ -954,9 +953,7 @@ HttpResponseHeaders::GetFreshnessLifetimes(const Time& response_time) const {
   // no-cache" even though RFC 2616 does not specify it.
   if (HasHeaderValue("cache-control", "no-cache") ||
       HasHeaderValue("cache-control", "no-store") ||
-      HasHeaderValue("pragma", "no-cache") ||
-      // Vary: * is never usable: see RFC 2616 section 13.6.
-      HasHeaderValue("vary", "*")) {
+      HasHeaderValue("pragma", "no-cache")) {
     return lifetimes;
   }
 
@@ -1266,8 +1263,8 @@ bool HttpResponseHeaders::GetContentRangeFor206(
 
 std::unique_ptr<base::Value> HttpResponseHeaders::NetLogCallback(
     NetLogCaptureMode capture_mode) const {
-  auto dict = base::MakeUnique<base::DictionaryValue>();
-  auto headers = base::MakeUnique<base::ListValue>();
+  auto dict = std::make_unique<base::DictionaryValue>();
+  auto headers = std::make_unique<base::ListValue>();
   headers->AppendString(EscapeNonASCII(GetStatusLine()));
   size_t iterator = 0;
   std::string name;
@@ -1282,37 +1279,6 @@ std::unique_ptr<base::Value> HttpResponseHeaders::NetLogCallback(
   }
   dict->Set("headers", std::move(headers));
   return std::move(dict);
-}
-
-// static
-bool HttpResponseHeaders::FromNetLogParam(
-    const base::Value* event_param,
-    scoped_refptr<HttpResponseHeaders>* http_response_headers) {
-  *http_response_headers = NULL;
-
-  const base::DictionaryValue* dict = NULL;
-  const base::ListValue* header_list = NULL;
-
-  if (!event_param ||
-      !event_param->GetAsDictionary(&dict) ||
-      !dict->GetList("headers", &header_list)) {
-    return false;
-  }
-
-  std::string raw_headers;
-  for (base::ListValue::const_iterator it = header_list->begin();
-       it != header_list->end();
-       ++it) {
-    std::string header_line;
-    if (!it->GetAsString(&header_line))
-      return false;
-
-    raw_headers.append(header_line);
-    raw_headers.push_back('\0');
-  }
-  raw_headers.push_back('\0');
-  *http_response_headers = new HttpResponseHeaders(raw_headers);
-  return true;
 }
 
 bool HttpResponseHeaders::IsChunkEncoded() const {

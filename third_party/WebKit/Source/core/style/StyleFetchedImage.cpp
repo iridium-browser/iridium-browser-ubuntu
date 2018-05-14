@@ -24,25 +24,27 @@
 #include "core/style/StyleFetchedImage.h"
 
 #include "core/css/CSSImageValue.h"
-#include "core/layout/LayoutObject.h"
+#include "core/dom/Document.h"
 #include "core/loader/resource/ImageResourceContent.h"
+#include "core/style/ComputedStyle.h"
 #include "core/svg/graphics/SVGImage.h"
 #include "core/svg/graphics/SVGImageForContainer.h"
+#include "platform/geometry/LayoutSize.h"
 
 namespace blink {
 
-StyleFetchedImage::StyleFetchedImage(ImageResourceContent* image,
-                                     const Document& document,
-                                     const KURL& url)
-    : image_(image), document_(&document), url_(url) {
+StyleFetchedImage::StyleFetchedImage(const Document& document,
+                                     FetchParameters& params)
+    : document_(&document), url_(params.Url()) {
   is_image_resource_ = true;
+  image_ = ImageResourceContent::Fetch(params, document_->Fetcher());
   image_->AddObserver(this);
   // ResourceFetcher is not determined from StyleFetchedImage and it is
   // impossible to send a request for refetching.
   image_->SetNotRefetchableDataFromDiskCache();
 }
 
-StyleFetchedImage::~StyleFetchedImage() {}
+StyleFetchedImage::~StyleFetchedImage() = default;
 
 void StyleFetchedImage::Dispose() {
   image_->RemoveObserver(this);
@@ -77,28 +79,30 @@ bool StyleFetchedImage::ErrorOccurred() const {
   return image_->ErrorOccurred();
 }
 
-LayoutSize StyleFetchedImage::ImageSize(
+FloatSize StyleFetchedImage::ImageSize(
     const Document&,
     float multiplier,
     const LayoutSize& default_object_size) const {
-  if (image_->GetImage() && image_->GetImage()->IsSVGImage())
-    return ImageSizeForSVGImage(ToSVGImage(image_->GetImage()), multiplier,
+  Image* image = image_->GetImage();
+  if (image->IsSVGImage()) {
+    return ImageSizeForSVGImage(ToSVGImage(image), multiplier,
                                 default_object_size);
-
+  }
   // Image orientation should only be respected for content images,
   // not decorative images such as StyleImage (backgrounds,
   // border-image, etc.)
   //
   // https://drafts.csswg.org/css-images-3/#the-image-orientation
-  return image_->ImageSize(kDoNotRespectImageOrientation, multiplier);
+  FloatSize size(image_->IntrinsicSize(kDoNotRespectImageOrientation));
+  return ApplyZoom(size, multiplier);
 }
 
 bool StyleFetchedImage::ImageHasRelativeSize() const {
-  return image_->ImageHasRelativeSize();
+  return image_->GetImage()->HasRelativeSize();
 }
 
 bool StyleFetchedImage::UsesImageContainerSize() const {
-  return image_->UsesImageContainerSize();
+  return image_->GetImage()->UsesContainerSize();
 }
 
 void StyleFetchedImage::AddClient(ImageResourceObserver* observer) {
@@ -110,24 +114,28 @@ void StyleFetchedImage::RemoveClient(ImageResourceObserver* observer) {
 }
 
 void StyleFetchedImage::ImageNotifyFinished(ImageResourceContent*) {
-  if (document_ && image_ && image_->GetImage() &&
-      image_->GetImage()->IsSVGImage())
-    ToSVGImage(image_->GetImage())->UpdateUseCounters(*document_);
+  if (image_ && image_->HasImage()) {
+    Image& image = *image_->GetImage();
+    Image::RecordCheckerableImageUMA(image, Image::ImageType::kCss);
+
+    if (document_ && image.IsSVGImage())
+      ToSVGImage(image).UpdateUseCounters(*document_);
+  }
+
   // Oilpan: do not prolong the Document's lifetime.
   document_.Clear();
 }
 
-PassRefPtr<Image> StyleFetchedImage::GetImage(
+scoped_refptr<Image> StyleFetchedImage::GetImage(
     const ImageResourceObserver&,
     const Document&,
     const ComputedStyle& style,
-    const IntSize& container_size) const {
-  if (!image_->GetImage()->IsSVGImage())
-    return image_->GetImage();
-
-  return SVGImageForContainer::Create(ToSVGImage(image_->GetImage()),
-                                      container_size, style.EffectiveZoom(),
-                                      url_);
+    const FloatSize& target_size) const {
+  Image* image = image_->GetImage();
+  if (!image->IsSVGImage())
+    return image;
+  return SVGImageForContainer::Create(ToSVGImage(image), target_size,
+                                      style.EffectiveZoom(), url_);
 }
 
 bool StyleFetchedImage::KnownToBeOpaque(const Document&,
@@ -136,7 +144,7 @@ bool StyleFetchedImage::KnownToBeOpaque(const Document&,
       Image::kPreCacheMetadata);
 }
 
-DEFINE_TRACE(StyleFetchedImage) {
+void StyleFetchedImage::Trace(blink::Visitor* visitor) {
   visitor->Trace(image_);
   visitor->Trace(document_);
   StyleImage::Trace(visitor);

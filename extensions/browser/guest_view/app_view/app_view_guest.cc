@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "content/public/browser/render_process_host.h"
@@ -182,14 +183,14 @@ void AppViewGuest::CreateWebContents(
       enabled_extensions.GetByID(GetOwnerSiteURL().host());
 
   if (!guest_extension || !guest_extension->is_platform_app() ||
-      !embedder_extension | !embedder_extension->is_platform_app()) {
+      !embedder_extension || !embedder_extension->is_platform_app()) {
     callback.Run(nullptr);
     return;
   }
 
   pending_response_map.Get().insert(std::make_pair(
       guest_instance_id(),
-      base::MakeUnique<ResponseInfo>(
+      std::make_unique<ResponseInfo>(
           guest_extension, weak_ptr_factory_.GetWeakPtr(), callback)));
 
   LazyBackgroundTaskQueue* queue =
@@ -197,9 +198,10 @@ void AppViewGuest::CreateWebContents(
   if (queue->ShouldEnqueueTask(browser_context(), guest_extension)) {
     queue->AddPendingTask(
         browser_context(), guest_extension->id(),
-        base::Bind(&AppViewGuest::LaunchAppAndFireEvent,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   base::Passed(base::WrapUnique(data->DeepCopy())), callback));
+        base::BindOnce(&AppViewGuest::LaunchAppAndFireEvent,
+                       weak_ptr_factory_.GetWeakPtr(),
+                       base::Passed(base::WrapUnique(data->DeepCopy())),
+                       callback));
     return;
   }
 

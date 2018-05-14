@@ -11,16 +11,14 @@ import junit.framework.TestCase;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-
 import org.robolectric.annotation.Config;
 
-import org.chromium.testing.local.LocalRobolectricTestRunner;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 
 /** Unit tests for RestrictionSkipCheck. */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class RestrictionSkipCheckTest {
-
     private static final String TEST_RESTRICTION_APPLIES =
             "org.chromium.base.test.util.RestrictionSkipCheckTest.TEST_RESTRICTION_APPLIES";
     private static final String TEST_RESTRICTION_DOES_NOT_APPLY =
@@ -30,6 +28,7 @@ public class RestrictionSkipCheckTest {
         public TestRestrictionSkipCheck() {
             super(null);
         }
+        @Override
         protected boolean restrictionApplies(String restriction) {
             return TextUtils.equals(restriction, TEST_RESTRICTION_APPLIES);
         }
@@ -73,6 +72,7 @@ public class RestrictionSkipCheckTest {
         public ExtendsRestrictedClass(String name) {
             super(name);
         }
+        @Override
         public void unannotatedMethod() {}
     }
 
@@ -80,6 +80,7 @@ public class RestrictionSkipCheckTest {
         public ExtendsUnrestrictedClass(String name) {
             super(name);
         }
+        @Override
         public void unannotatedMethod() {}
     }
 

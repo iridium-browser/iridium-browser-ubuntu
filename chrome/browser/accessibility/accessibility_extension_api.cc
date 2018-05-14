@@ -30,26 +30,22 @@
 #include "ui/events/keycodes/keyboard_codes.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/accessibility/accessibility_focus_ring_controller.h"
+#include "ash/shell.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#include "chrome/browser/chromeos/ui/accessibility_focus_ring_controller.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/power_manager_client.h"
+#include "chrome/browser/chromeos/arc/accessibility/arc_accessibility_helper_bridge.h"
+#include "ui/aura/window_tree_host.h"
+#include "ui/events/event_sink.h"
 
-using chromeos::AccessibilityFocusRingController;
+using ash::AccessibilityFocusRingController;
 #endif
 
 namespace accessibility_private = extensions::api::accessibility_private;
 
 namespace {
-#if defined(OS_CHROMEOS)
-// ScreenRect fields.
-const char kLeft[] = "left";
-const char kTop[] = "top";
-const char kWidth[] = "width";
-const char kHeight[] = "height";
-#endif  // defined(OS_CHROMEOS)
 
 const char kErrorNotSupported[] = "This API is not supported on this platform.";
+
 }  // namespace
 
 ExtensionFunction::ResponseAction
@@ -69,25 +65,22 @@ AccessibilityPrivateSetNativeAccessibilityEnabledFunction::Run() {
 ExtensionFunction::ResponseAction
 AccessibilityPrivateSetFocusRingFunction::Run() {
 #if defined(OS_CHROMEOS)
-  base::ListValue* rect_values = NULL;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetList(0, &rect_values));
+
+  std::unique_ptr<extensions::api::accessibility_private::SetFocusRing::Params>
+      params(
+          extensions::api::accessibility_private::SetFocusRing::Params::Create(
+              *args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
 
   std::vector<gfx::Rect> rects;
-  for (size_t i = 0; i < rect_values->GetSize(); ++i) {
-    base::DictionaryValue* rect_value = NULL;
-    EXTENSION_FUNCTION_VALIDATE(rect_values->GetDictionary(i, &rect_value));
-    int left, top, width, height;
-    EXTENSION_FUNCTION_VALIDATE(rect_value->GetInteger(kLeft, &left));
-    EXTENSION_FUNCTION_VALIDATE(rect_value->GetInteger(kTop, &top));
-    EXTENSION_FUNCTION_VALIDATE(rect_value->GetInteger(kWidth, &width));
-    EXTENSION_FUNCTION_VALIDATE(rect_value->GetInteger(kHeight, &height));
-    rects.push_back(gfx::Rect(left, top, width, height));
+  for (const extensions::api::accessibility_private::ScreenRect& rect :
+       params->rects) {
+    rects.push_back(gfx::Rect(rect.left, rect.top, rect.width, rect.height));
   }
 
-  std::string color_str;
-  if (args_->GetSize() >= 2 && args_->GetString(1, &color_str)) {
+  if (params->color) {
     SkColor color;
-    if (!extensions::image_util::ParseHexColorString(color_str, &color))
+    if (!extensions::image_util::ParseHexColorString(*(params->color), &color))
       return RespondNow(Error("Could not parse hex color"));
     AccessibilityFocusRingController::GetInstance()->SetFocusRingColor(color);
   } else {
@@ -105,6 +98,34 @@ AccessibilityPrivateSetFocusRingFunction::Run() {
         chromeos::AccessibilityManager::Get();
     manager->SetTouchAccessibilityAnchorPoint(rects[0].CenterPoint());
   }
+
+  return RespondNow(NoArguments());
+#endif  // defined(OS_CHROMEOS)
+
+  return RespondNow(Error(kErrorNotSupported));
+}
+
+ExtensionFunction::ResponseAction
+AccessibilityPrivateSetHighlightsFunction::Run() {
+#if defined(OS_CHROMEOS)
+  std::unique_ptr<extensions::api::accessibility_private::SetHighlights::Params>
+      params(
+          extensions::api::accessibility_private::SetHighlights::Params::Create(
+              *args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  std::vector<gfx::Rect> rects;
+  for (const extensions::api::accessibility_private::ScreenRect& rect :
+       params->rects) {
+    rects.push_back(gfx::Rect(rect.left, rect.top, rect.width, rect.height));
+  }
+
+  SkColor color;
+  if (!extensions::image_util::ParseHexColorString(params->color, &color))
+    return RespondNow(Error("Could not parse hex color"));
+
+  // Set the highlights to cover all of these rects.
+  AccessibilityFocusRingController::GetInstance()->SetHighlights(rects, color);
 
   return RespondNow(NoArguments());
 #endif  // defined(OS_CHROMEOS)
@@ -147,23 +168,14 @@ AccessibilityPrivateSetKeyboardListenerFunction::Run() {
 
 ExtensionFunction::ResponseAction
 AccessibilityPrivateDarkenScreenFunction::Run() {
-  ChromeExtensionFunctionDetails details(this);
-  CHECK(extension());
-
 #if defined(OS_CHROMEOS)
-  bool darken;
+  bool darken = false;
   EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(0, &darken));
-  chromeos::PowerManagerClient* client =
-      chromeos::DBusThreadManager::Get()->GetPowerManagerClient();
-
-  // Called twice to ensure the cros end of the dbus message is in a good
-  // state.
-  client->SetBacklightsForcedOff(!darken);
-  client->SetBacklightsForcedOff(darken);
+  chromeos::AccessibilityManager::Get()->SetDarkenScreen(darken);
   return RespondNow(NoArguments());
-#endif  // defined OS_CHROMEOS
-
+#else
   return RespondNow(Error(kErrorNotSupported));
+#endif
 }
 
 #if defined(OS_CHROMEOS)
@@ -190,4 +202,61 @@ AccessibilityPrivateSetSwitchAccessKeysFunction::Run() {
     manager->SetSwitchAccessKeys(key_codes);
   return RespondNow(NoArguments());
 }
+
+ExtensionFunction::ResponseAction
+AccessibilityPrivateSetNativeChromeVoxArcSupportForCurrentAppFunction::Run() {
+  std::unique_ptr<
+      accessibility_private::SetNativeChromeVoxArcSupportForCurrentApp::Params>
+      params = accessibility_private::
+          SetNativeChromeVoxArcSupportForCurrentApp::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  ChromeExtensionFunctionDetails details(this);
+  arc::ArcAccessibilityHelperBridge* bridge =
+      arc::ArcAccessibilityHelperBridge::GetForBrowserContext(
+          details.GetProfile());
+  if (bridge) {
+    bool enabled;
+    EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(0, &enabled));
+    bridge->SetNativeChromeVoxArcSupport(enabled);
+  }
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+AccessibilityPrivateSendSyntheticKeyEventFunction::Run() {
+  std::unique_ptr<accessibility_private::SendSyntheticKeyEvent::Params> params =
+      accessibility_private::SendSyntheticKeyEvent::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params);
+  accessibility_private::SyntheticKeyboardEvent* key_data = &params->key_event;
+
+  int modifiers = 0;
+  if (key_data->modifiers.get()) {
+    if (key_data->modifiers->ctrl)
+      modifiers |= ui::EF_CONTROL_DOWN;
+    if (key_data->modifiers->alt)
+      modifiers |= ui::EF_ALT_DOWN;
+    if (key_data->modifiers->search)
+      modifiers |= ui::EF_COMMAND_DOWN;
+    if (key_data->modifiers->shift)
+      modifiers |= ui::EF_SHIFT_DOWN;
+  }
+
+  ui::KeyEvent synthetic_key_event(
+      key_data->type ==
+              accessibility_private::SYNTHETIC_KEYBOARD_EVENT_TYPE_KEYUP
+          ? ui::ET_KEY_RELEASED
+          : ui::ET_KEY_PRESSED,
+      static_cast<ui::KeyboardCode>(key_data->key_code),
+      static_cast<ui::DomCode>(0), modifiers);
+
+  // Only keyboard events, so dispatching to primary window suffices.
+  ui::EventSink* sink =
+      ash::Shell::GetPrimaryRootWindow()->GetHost()->event_sink();
+  if (sink->OnEventFromSource(&synthetic_key_event).dispatcher_destroyed)
+    return RespondNow(Error("Unable to dispatch key "));
+
+  return RespondNow(NoArguments());
+}
+
 #endif  // defined (OS_CHROMEOS)

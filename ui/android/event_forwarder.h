@@ -15,6 +15,10 @@ class EventForwarder {
  public:
   ~EventForwarder();
 
+  base::android::ScopedJavaLocalRef<jobject> GetJavaWindowAndroid(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+
   jboolean OnTouchEvent(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
@@ -80,6 +84,23 @@ class EventForwarder {
                    const base::android::JavaParamRef<jobjectArray>& j_mimeTypes,
                    const base::android::JavaParamRef<jstring>& j_content);
 
+  bool OnGestureEvent(JNIEnv* env,
+                      const base::android::JavaParamRef<jobject>& jobj,
+                      jint type,
+                      jlong time_ms,
+                      jfloat scale);
+
+  void OnStartFling(JNIEnv* env,
+                    const base::android::JavaParamRef<jobject>& jobj,
+                    jlong time_ms,
+                    jfloat velocity_x,
+                    jfloat velocity_y,
+                    jboolean synthetic_scroll);
+
+  void OnCancelFling(JNIEnv* env,
+                     const base::android::JavaParamRef<jobject>& jobj,
+                     jlong time_ms);
+
  private:
   friend class ViewAndroid;
 
@@ -92,8 +113,6 @@ class EventForwarder {
 
   DISALLOW_COPY_AND_ASSIGN(EventForwarder);
 };
-
-bool RegisterEventForwarder(JNIEnv* env);
 
 }  // namespace ui
 

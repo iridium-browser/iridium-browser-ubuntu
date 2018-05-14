@@ -135,10 +135,9 @@ views::Label* CreateAnnotationLabel(
 
 }  // namespace
 
-CandidateView::CandidateView(
-    views::ButtonListener* listener,
-    ui::CandidateWindow::Orientation orientation)
-    : views::CustomButton(listener),
+CandidateView::CandidateView(views::ButtonListener* listener,
+                             ui::CandidateWindow::Orientation orientation)
+    : views::Button(listener),
       orientation_(orientation),
       shortcut_label_(NULL),
       candidate_label_(NULL),
@@ -224,7 +223,7 @@ void CandidateView::StateChanged(ButtonState old_state) {
   int text_style = state() == STATE_DISABLED ? views::style::STYLE_DISABLED
                                              : views::style::STYLE_PRIMARY;
   shortcut_label_->SetEnabledColor(views::style::GetColor(
-      views::style::CONTEXT_LABEL, text_style, GetNativeTheme()));
+      *shortcut_label_, views::style::CONTEXT_LABEL, text_style));
   if (state() == STATE_PRESSED)
     SetHighlighted(true);
 }
@@ -255,7 +254,7 @@ bool CandidateView::OnMouseDragged(const ui::MouseEvent& event) {
     return false;
   }
 
-  return views::CustomButton::OnMouseDragged(event);
+  return views::Button::OnMouseDragged(event);
 }
 
 void CandidateView::Layout() {

@@ -14,7 +14,7 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -103,7 +103,7 @@ void DatabaseErrorCallback(sql::Connection* db,
     // return errors until the handle is re-opened.
     sql::Recovery::RecoverDatabase(db, db_path);
 
-    // The DLOG(FATAL) below is intended to draw immediate attention to errors
+    // The DLOG(WARNING) below is intended to draw immediate attention to errors
     // in newly-written code.  Database corruption is generally a result of OS
     // or hardware issues, not coding errors at the client level, so displaying
     // the error would probably lead to confusion.  The ignored call signals the
@@ -113,8 +113,10 @@ void DatabaseErrorCallback(sql::Connection* db,
   }
 
   // The default handling is to assert on debug and to ignore on release.
-  if (!sql::Connection::IsExpectedSqliteError(extended_error))
-    DLOG(FATAL) << db->GetErrorMessage();
+  if (!sql::Connection::IsExpectedSqliteError(extended_error)) {
+    DLOG(WARNING) << db->GetErrorMessage();
+    base::UmaHistogramSparse("Previews.OptOut.SQLiteLoadError", extended_error);
+  }
 }
 
 void InitDatabase(sql::Connection* db, base::FilePath path) {
@@ -359,8 +361,8 @@ void LoadBlackListFromDataBase(
   }
 
   runner->PostTask(FROM_HERE,
-                   base::Bind(callback, base::Passed(&black_list_item_map),
-                              base::Passed(&host_indifferent_black_list_item)));
+                   base::BindOnce(callback, std::move(black_list_item_map),
+                                  std::move(host_indifferent_black_list_item)));
 }
 
 // Synchronous implementations, these are run on the background thread
@@ -447,13 +449,13 @@ void PreviewsOptOutStoreSQL::ClearBlackList(base::Time begin_time,
 void PreviewsOptOutStoreSQL::LoadBlackList(LoadBlackListCallback callback) {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
   if (!db_)
-    db_ = base::MakeUnique<sql::Connection>();
+    db_ = std::make_unique<sql::Connection>();
   std::unique_ptr<PreviewsTypeList> enabled_previews =
-      base::MakeUnique<PreviewsTypeList>(*enabled_previews_);
+      std::make_unique<PreviewsTypeList>(*enabled_previews_);
   background_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&LoadBlackListSync, db_.get(), db_file_path_,
-                            base::Passed(std::move(enabled_previews)),
-                            base::ThreadTaskRunnerHandle::Get(), callback));
+      FROM_HERE, base::BindOnce(&LoadBlackListSync, db_.get(), db_file_path_,
+                                std::move(enabled_previews),
+                                base::ThreadTaskRunnerHandle::Get(), callback));
 }
 
 }  // namespace previews

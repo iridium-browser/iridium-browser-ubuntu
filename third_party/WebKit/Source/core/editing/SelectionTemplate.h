@@ -8,9 +8,8 @@
 #include <iosfwd>
 #include "base/macros.h"
 #include "core/CoreExport.h"
-#include "core/editing/EphemeralRange.h"
+#include "core/editing/Forward.h"
 #include "core/editing/Position.h"
-#include "core/editing/PositionWithAffinity.h"
 #include "core/editing/SelectionType.h"
 #include "core/editing/TextAffinity.h"
 #include "platform/wtf/Allocator.h"
@@ -19,7 +18,8 @@ namespace blink {
 
 // SelectionTemplate is used for representing a selection in DOM tree or Flat
 // tree with template parameter |Strategy|. Instances of |SelectionTemplate|
-// are immutable objects, you can't change them once constructed.
+// are "virtually" immutable objects, we change |SelectionTemplate| by copying
+// in |SelectionEdtior| and |InvalidSelectionResetter|.
 //
 // To construct |SelectionTemplate| object, please use |Builder| class.
 template <typename Strategy>
@@ -49,6 +49,11 @@ class CORE_EXPORT SelectionTemplate final {
     // Select all children in |node|.
     Builder& SelectAllChildren(const Node& /* node */);
 
+    // Note: Since collapsed selection is a forward selection, we can't use
+    // |SetAsBackwardSelection()| for collapsed range.
+    Builder& SetAsBackwardSelection(const EphemeralRangeTemplate<Strategy>&);
+    Builder& SetAsForwardSelection(const EphemeralRangeTemplate<Strategy>&);
+
     Builder& SetBaseAndExtent(const EphemeralRangeTemplate<Strategy>&);
 
     // |extent| can not be null if |base| isn't null.
@@ -63,13 +68,29 @@ class CORE_EXPORT SelectionTemplate final {
         const PositionTemplate<Strategy>& extent);
 
     Builder& SetAffinity(TextAffinity);
-    Builder& SetIsDirectional(bool);
-    Builder& SetIsHandleVisible(bool);
 
    private:
     SelectionTemplate selection_;
 
     DISALLOW_COPY_AND_ASSIGN(Builder);
+  };
+
+  // Resets selection at end of life time of the object when base and extent
+  // are disconnected or moved to another document.
+  class InvalidSelectionResetter final {
+    DISALLOW_NEW();
+
+   public:
+    explicit InvalidSelectionResetter(const SelectionTemplate&);
+    ~InvalidSelectionResetter();
+
+    void Trace(blink::Visitor*);
+
+   private:
+    const Member<const Document> document_;
+    SelectionTemplate& selection_;
+
+    DISALLOW_COPY_AND_ASSIGN(InvalidSelectionResetter);
   };
 
   SelectionTemplate(const SelectionTemplate& other);
@@ -80,12 +101,11 @@ class CORE_EXPORT SelectionTemplate final {
   bool operator==(const SelectionTemplate&) const;
   bool operator!=(const SelectionTemplate&) const;
 
-  const PositionTemplate<Strategy>& Base() const;
-  const PositionTemplate<Strategy>& Extent() const;
+  PositionTemplate<Strategy> Base() const;
+  PositionTemplate<Strategy> Extent() const;
   TextAffinity Affinity() const { return affinity_; }
+  bool IsBaseFirst() const;
   bool IsCaret() const;
-  bool IsDirectional() const { return is_directional_; }
-  bool IsHandleVisible() const { return is_handle_visible_; }
   bool IsNone() const { return base_.IsNull(); }
   bool IsRange() const;
 
@@ -94,13 +114,14 @@ class CORE_EXPORT SelectionTemplate final {
   bool AssertValid() const;
   bool AssertValidFor(const Document&) const;
 
-  const PositionTemplate<Strategy>& ComputeEndPosition() const;
-  const PositionTemplate<Strategy>& ComputeStartPosition() const;
+  PositionTemplate<Strategy> ComputeEndPosition() const;
+  PositionTemplate<Strategy> ComputeStartPosition() const;
+  EphemeralRangeTemplate<Strategy> ComputeRange() const;
 
   // Returns |SelectionType| for |this| based on |base_| and |extent_|.
   SelectionType Type() const;
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   void PrintTo(std::ostream*, const char* type) const;
 #ifndef NDEBUG
@@ -110,13 +131,20 @@ class CORE_EXPORT SelectionTemplate final {
  private:
   friend class SelectionEditor;
 
+  enum class Direction {
+    kNotComputed,
+    kForward,   // base <= extent
+    kBackward,  // base > extent
+  };
+
   Document* GetDocument() const;
+  bool IsValidFor(const Document&) const;
+  void ResetDirectionCache() const;
 
   PositionTemplate<Strategy> base_;
   PositionTemplate<Strategy> extent_;
   TextAffinity affinity_ = TextAffinity::kDownstream;
-  bool is_directional_ = false;
-  bool is_handle_visible_ = false;
+  mutable Direction direction_ = Direction::kForward;
 #if DCHECK_IS_ON()
   uint64_t dom_tree_version_;
 #endif
@@ -129,6 +157,11 @@ extern template class CORE_EXTERN_TEMPLATE_EXPORT
 
 using SelectionInDOMTree = SelectionTemplate<EditingStrategy>;
 using SelectionInFlatTree = SelectionTemplate<EditingInFlatTreeStrategy>;
+
+CORE_EXPORT SelectionInDOMTree
+ConvertToSelectionInDOMTree(const SelectionInFlatTree&);
+CORE_EXPORT SelectionInFlatTree
+ConvertToSelectionInFlatTree(const SelectionInDOMTree&);
 
 CORE_EXPORT std::ostream& operator<<(std::ostream&, const SelectionInDOMTree&);
 CORE_EXPORT std::ostream& operator<<(std::ostream&, const SelectionInFlatTree&);

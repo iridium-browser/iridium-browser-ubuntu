@@ -49,7 +49,6 @@ class CORE_EXPORT V0InsertionPoint : public HTMLElement {
   bool IsActive() const;
   bool CanBeActive() const;
 
-  bool IsShadowInsertionPoint() const;
   bool IsContentInsertionPoint() const;
 
   StaticNodeList* getDistributedNodes();
@@ -65,10 +64,10 @@ class CORE_EXPORT V0InsertionPoint : public HTMLElement {
     return distributed_nodes_.at(index);
   }
   Node* FirstDistributedNode() const {
-    return distributed_nodes_.IsEmpty() ? 0 : distributed_nodes_.First();
+    return distributed_nodes_.IsEmpty() ? nullptr : distributed_nodes_.First();
   }
   Node* LastDistributedNode() const {
-    return distributed_nodes_.IsEmpty() ? 0 : distributed_nodes_.Last();
+    return distributed_nodes_.IsEmpty() ? nullptr : distributed_nodes_.Last();
   }
   Node* DistributedNodeNextTo(const Node* node) const {
     return distributed_nodes_.NextTo(node);
@@ -77,7 +76,7 @@ class CORE_EXPORT V0InsertionPoint : public HTMLElement {
     return distributed_nodes_.PreviousTo(node);
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   V0InsertionPoint(const QualifiedName&, Document&);
@@ -103,17 +102,10 @@ inline bool IsActiveV0InsertionPoint(const Node& node) {
   return node.IsV0InsertionPoint() && ToV0InsertionPoint(node).IsActive();
 }
 
-inline bool IsActiveShadowInsertionPoint(const Node& node) {
-  return node.IsV0InsertionPoint() &&
-         ToV0InsertionPoint(node).IsShadowInsertionPoint();
-}
-
 inline ElementShadow* ShadowWhereNodeCanBeDistributedForV0(const Node& node) {
   Node* parent = node.parentNode();
   if (!parent)
     return nullptr;
-  if (parent->IsShadowRoot() && !ToShadowRoot(parent)->IsYoungest())
-    return node.OwnerShadowHost()->Shadow();
   if (IsActiveV0InsertionPoint(*parent))
     return node.OwnerShadowHost()->Shadow();
   if (parent->IsElementNode())

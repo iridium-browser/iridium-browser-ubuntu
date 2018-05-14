@@ -11,7 +11,9 @@
 #include "base/metrics/sparse_histogram.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/child_process_data.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/features/features.h"
@@ -27,8 +29,18 @@
 
 ChromeStabilityMetricsProvider::ChromeStabilityMetricsProvider(
     PrefService* local_state)
-    : helper_(local_state) {
+    :
+#if defined(OS_ANDROID)
+      scoped_observer_(this),
+#endif  // defined(OS_ANDROID)
+      helper_(local_state) {
   BrowserChildProcessObserver::Add(this);
+
+#if defined(OS_ANDROID)
+  auto* crash_manager = breakpad::CrashDumpManager::GetInstance();
+  DCHECK(crash_manager);
+  scoped_observer_.Add(crash_manager);
+#endif  // defined(OS_ANDROID)
 }
 
 ChromeStabilityMetricsProvider::~ChromeStabilityMetricsProvider() {
@@ -69,7 +81,9 @@ void ChromeStabilityMetricsProvider::Observe(
     const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_LOAD_START: {
-      helper_.LogLoadStarted();
+      content::NavigationController* tab =
+          content::Source<content::NavigationController>(source).ptr();
+      helper_.LogLoadStarted(tab->GetBrowserContext()->IsOffTheRecord());
       break;
     }
 
@@ -127,3 +141,21 @@ void ChromeStabilityMetricsProvider::BrowserChildProcessCrashed(
 
   helper_.BrowserChildProcessCrashed();
 }
+
+#if defined(OS_ANDROID)
+void ChromeStabilityMetricsProvider::OnCrashDumpProcessed(
+    const breakpad::CrashDumpManager::CrashDumpDetails& details) {
+  // There is a delay for OOM flag to be removed when app goes to background, so
+  // we can't just check for OOM_PROTECTED flag.
+  if (details.status ==
+          breakpad::CrashDumpManager::CrashDumpStatus::kValidDump &&
+      details.process_type == content::PROCESS_TYPE_RENDERER &&
+      details.termination_status == base::TERMINATION_STATUS_OOM_PROTECTED &&
+      (details.app_state ==
+           base::android::APPLICATION_STATE_HAS_RUNNING_ACTIVITIES ||
+       details.app_state ==
+           base::android::APPLICATION_STATE_HAS_PAUSED_ACTIVITIES)) {
+    helper_.IncreaseRendererCrashCount();
+  }
+}
+#endif  // defined(OS_ANDROID)

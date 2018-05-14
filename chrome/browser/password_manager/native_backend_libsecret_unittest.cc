@@ -87,7 +87,18 @@ bool IsStringAttribute(const SecretSchema* schema, const std::string& name) {
 
 // The list of all libsecret items we have stored.
 std::vector<std::unique_ptr<MockSecretItem>>* global_mock_libsecret_items;
+std::unordered_map<GObject*, MockSecretItem*>* global_map_object_to_secret_item;
 bool global_mock_libsecret_reject_local_ids = false;
+
+GObject* MakeNewObject(MockSecretItem* item) {
+  // Create an object with a ref-count of 2. The caller is expected to release
+  // one reference, and the second reference is released during test tear down
+  // along with checks that the ref count is correct.
+  GObject* o = static_cast<GObject*>(g_object_new(G_TYPE_OBJECT, nullptr));
+  g_object_ref(o);
+  (*global_map_object_to_secret_item)[o] = item;
+  return o;
+}
 
 gboolean mock_secret_password_store_sync(const SecretSchema* schema,
                                          const gchar* collection,
@@ -119,8 +130,8 @@ gboolean mock_secret_password_store_sync(const SecretSchema* schema,
     g_hash_table_insert(attributes, g_strdup(name), value);
   }
   va_end(ap);
-  global_mock_libsecret_items->push_back(base::MakeUnique<MockSecretItem>(
-      base::MakeUnique<MockSecretValue>(g_strdup(password)), attributes));
+  global_mock_libsecret_items->push_back(std::make_unique<MockSecretItem>(
+      std::make_unique<MockSecretValue>(g_strdup(password)), attributes));
   return true;
 }
 
@@ -133,8 +144,9 @@ GList* mock_secret_service_search_sync(SecretService* service,
   EXPECT_TRUE(flags & SECRET_SEARCH_UNLOCK);
   GList* result = nullptr;
   for (std::unique_ptr<MockSecretItem>& item : *global_mock_libsecret_items) {
-    if (Matches(item.get(), attributes))
-      result = g_list_append(result, item.get());
+    if (Matches(item.get(), attributes)) {
+      result = g_list_append(result, MakeNewObject(item.get()));
+    }
   }
   return result;
 }
@@ -178,8 +190,9 @@ gboolean mock_secret_password_clear_sync(const SecretSchema* schema,
 }
 
 SecretValue* mock_secret_item_get_secret(SecretItem* self) {
+  GObject* o = reinterpret_cast<GObject*>(self);
   MockSecretValue* mock_value =
-      reinterpret_cast<MockSecretItem*>(self)->value.get();
+      (*global_map_object_to_secret_item)[o]->value.get();
   return reinterpret_cast<SecretValue*>(mock_value);
 }
 
@@ -190,7 +203,8 @@ const gchar* mock_secret_value_get_text(SecretValue* value) {
 GHashTable* mock_secret_item_get_attributes(SecretItem* self) {
   // Libsecret backend will make unreference of received attributes, so in
   // order to save them we need to increase their reference number.
-  MockSecretItem* mock_ptr = reinterpret_cast<MockSecretItem*>(self);
+  GObject* o = reinterpret_cast<GObject*>(self);
+  MockSecretItem* mock_ptr = (*global_map_object_to_secret_item)[o];
   g_hash_table_ref(mock_ptr->attributes);
   return mock_ptr->attributes;
 }
@@ -219,6 +233,7 @@ class MockLibsecretLoader : public LibsecretLoader {
     libsecret_loaded_ = true;
     // Reset the state of the mock library.
     global_mock_libsecret_items->clear();
+    global_map_object_to_secret_item->clear();
     global_mock_libsecret_reject_local_ids = false;
     return true;
   }
@@ -278,7 +293,9 @@ class NativeBackendLibsecretTest : public testing::Test {
 
   void SetUp() override {
     ASSERT_FALSE(global_mock_libsecret_items);
+    ASSERT_FALSE(global_map_object_to_secret_item);
     global_mock_libsecret_items = &mock_libsecret_items_;
+    global_map_object_to_secret_item = &mock_map_object_to_secret_item_;
 
     ASSERT_TRUE(MockLibsecretLoader::LoadMockLibsecret());
 
@@ -296,7 +313,7 @@ class NativeBackendLibsecretTest : public testing::Test {
     form_google_.display_name = UTF8ToUTF16("Joe Schmoe");
     form_google_.icon_url = GURL("http://www.google.com/icon");
     form_google_.federation_origin =
-        url::Origin(GURL("http://www.google.com/"));
+        url::Origin::Create(GURL("http://www.google.com/"));
     form_google_.skip_zero_click = true;
     form_google_.generation_upload_status = PasswordForm::POSITIVE_SIGNAL_SENT;
     form_google_.form_data.name = UTF8ToUTF16("form_name");
@@ -314,7 +331,7 @@ class NativeBackendLibsecretTest : public testing::Test {
     form_facebook_.display_name = UTF8ToUTF16("Joe Schmoe");
     form_facebook_.icon_url = GURL("http://www.facebook.com/icon");
     form_facebook_.federation_origin =
-        url::Origin(GURL("http://www.facebook.com/"));
+        url::Origin::Create(GURL("http://www.facebook.com/"));
     form_facebook_.skip_zero_click = true;
     form_facebook_.generation_upload_status = PasswordForm::NO_SIGNAL_SENT;
 
@@ -341,6 +358,12 @@ class NativeBackendLibsecretTest : public testing::Test {
     scoped_task_environment_.RunUntilIdle();
     ASSERT_TRUE(global_mock_libsecret_items);
     global_mock_libsecret_items = nullptr;
+    for (auto& pair : *global_map_object_to_secret_item) {
+      ASSERT_EQ(pair.first->ref_count, 1u);
+      g_object_unref(pair.first);
+    }
+    global_map_object_to_secret_item->clear();
+    global_map_object_to_secret_item = nullptr;
   }
 
   void CheckUint32Attribute(const MockSecretItem* item,
@@ -604,6 +627,7 @@ class NativeBackendLibsecretTest : public testing::Test {
   PasswordForm other_auth_;
 
   std::vector<std::unique_ptr<MockSecretItem>> mock_libsecret_items_;
+  std::unordered_map<GObject*, MockSecretItem*> mock_map_object_to_secret_item_;
 };
 
 TEST_F(NativeBackendLibsecretTest, BasicAddLogin) {
@@ -693,7 +717,8 @@ TEST_F(NativeBackendLibsecretTest, PSLUpdatingStrictAddLogin) {
 TEST_F(NativeBackendLibsecretTest, FetchFederatedCredentialOnHTTPS) {
   other_auth_.signon_realm = "federation://www.example.com/google.com";
   other_auth_.origin = GURL("https://www.example.com/");
-  other_auth_.federation_origin = url::Origin(GURL("https://google.com/"));
+  other_auth_.federation_origin =
+      url::Origin::Create(GURL("https://google.com/"));
   EXPECT_TRUE(CheckCredentialAvailability(other_auth_,
                                           GURL("https://www.example.com/"),
                                           PasswordForm::SCHEME_HTML, nullptr));
@@ -702,7 +727,8 @@ TEST_F(NativeBackendLibsecretTest, FetchFederatedCredentialOnHTTPS) {
 TEST_F(NativeBackendLibsecretTest, FetchFederatedCredentialOnLocalhost) {
   other_auth_.signon_realm = "federation://localhost/google.com";
   other_auth_.origin = GURL("http://localhost:8080/");
-  other_auth_.federation_origin = url::Origin(GURL("https://google.com/"));
+  other_auth_.federation_origin =
+      url::Origin::Create(GURL("https://google.com/"));
   EXPECT_TRUE(CheckCredentialAvailability(other_auth_,
                                           GURL("http://localhost:8080/"),
                                           PasswordForm::SCHEME_HTML, nullptr));
@@ -711,7 +737,8 @@ TEST_F(NativeBackendLibsecretTest, FetchFederatedCredentialOnLocalhost) {
 TEST_F(NativeBackendLibsecretTest, DontFetchFederatedCredentialOnHTTP) {
   other_auth_.signon_realm = "federation://www.example.com/google.com";
   other_auth_.origin = GURL("https://www.example.com/");
-  other_auth_.federation_origin = url::Origin(GURL("https://google.com/"));
+  other_auth_.federation_origin =
+      url::Origin::Create(GURL("https://google.com/"));
   EXPECT_FALSE(CheckCredentialAvailability(other_auth_,
                                            GURL("http://www.example.com/"),
                                            PasswordForm::SCHEME_HTML, nullptr));
@@ -720,7 +747,8 @@ TEST_F(NativeBackendLibsecretTest, DontFetchFederatedCredentialOnHTTP) {
 TEST_F(NativeBackendLibsecretTest, FetchPSLMatchedFederatedCredentialOnHTTPS) {
   other_auth_.signon_realm = "federation://www.sub.example.com/google.com";
   other_auth_.origin = GURL("https://www.sub.example.com/");
-  other_auth_.federation_origin = url::Origin(GURL("https://google.com/"));
+  other_auth_.federation_origin =
+      url::Origin::Create(GURL("https://google.com/"));
   EXPECT_TRUE(CheckCredentialAvailability(other_auth_,
                                           GURL("https://www.example.com/"),
                                           PasswordForm::SCHEME_HTML, nullptr));
@@ -730,7 +758,8 @@ TEST_F(NativeBackendLibsecretTest,
        DontFetchPSLMatchedFederatedCredentialOnHTTP) {
   other_auth_.signon_realm = "federation://www.sub.example.com/google.com";
   other_auth_.origin = GURL("https://www.sub.example.com/");
-  other_auth_.federation_origin = url::Origin(GURL("https://google.com/"));
+  other_auth_.federation_origin =
+      url::Origin::Create(GURL("https://google.com/"));
   EXPECT_FALSE(CheckCredentialAvailability(other_auth_,
                                            GURL("http://www.example.com/"),
                                            PasswordForm::SCHEME_HTML, nullptr));

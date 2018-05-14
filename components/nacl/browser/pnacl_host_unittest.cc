@@ -12,13 +12,13 @@
 #include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "build/build_config.h"
 #include "components/nacl/browser/pnacl_translation_cache.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/test_completion_callback.h"
+#include "net/disk_cache/disk_cache.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_WIN)
@@ -51,7 +51,8 @@ class PnaclHostTest : public testing::Test {
     EXPECT_EQ(0U, host_->pending_translations());
     // Give the host a chance to de-init the backend, and then delete it.
     host_->RendererClosing(0);
-    content::RunAllBlockingPoolTasksUntilIdle();
+    content::RunAllTasksUntilIdle();
+    disk_cache::FlushCacheThreadForTesting();
     EXPECT_EQ(PnaclHost::CacheUninitialized, host_->cache_state_);
   }
   int GetCacheSize() { return host_->disk_cache_->Size(); }
@@ -140,20 +141,20 @@ TEST_F(PnaclHostTest, BasicMiss) {
   // Test cold miss.
   GET_NEXE_FD(0, 0, false, info, false);
   EXPECT_EQ(1U, host_->pending_translations());
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1U, host_->pending_translations());
   EXPECT_EQ(1, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(0U, host_->pending_translations());
   // Test that a different cache info field also misses.
   info.etag = std::string("something else");
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2, temp_callback_count_);
   EXPECT_EQ(1U, host_->pending_translations());
   host_->RendererClosing(0);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   // Check that the cache has de-initialized after the last renderer goes away.
   EXPECT_FALSE(CacheIsInitialized());
 }
@@ -166,7 +167,7 @@ TEST_F(PnaclHostTest, BadArguments) {
   EXPECT_EQ(1U, host_->pending_translations());
   host_->RendererClosing(1);  // nonexistent renderer
   EXPECT_EQ(1U, host_->pending_translations());
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   host_->RendererClosing(0);  // close without finishing
 }
@@ -174,12 +175,12 @@ TEST_F(PnaclHostTest, BadArguments) {
 TEST_F(PnaclHostTest, BasicHit) {
   nacl::PnaclCacheInfo info = GetTestCacheInfo();
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   GET_NEXE_FD(0, 1, false, info, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2, temp_callback_count_);
   EXPECT_EQ(0U, host_->pending_translations());
 }
@@ -189,7 +190,7 @@ TEST_F(PnaclHostTest, TranslationErrors) {
   GET_NEXE_FD(0, 0, false, info, false);
   // Early abort, before temp file request returns
   host_->TranslationFinished(0, 0, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(0U, host_->pending_translations());
   EXPECT_EQ(0, temp_callback_count_);
   // The backend will have been freed when the query comes back and there
@@ -198,23 +199,23 @@ TEST_F(PnaclHostTest, TranslationErrors) {
   ReInitBackend();
   // Check that another request for the same info misses successfully.
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   EXPECT_EQ(0U, host_->pending_translations());
 
   // Now try sending the error after the temp file request returns
   info.abi_version = 222;
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2, temp_callback_count_);
   host_->TranslationFinished(0, 0, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(0U, host_->pending_translations());
   // Check another successful miss
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(3, temp_callback_count_);
   host_->TranslationFinished(0, 0, false);
   EXPECT_EQ(0U, host_->pending_translations());
@@ -223,19 +224,19 @@ TEST_F(PnaclHostTest, TranslationErrors) {
 TEST_F(PnaclHostTest, OverlappedMissesAfterTempReturn) {
   nacl::PnaclCacheInfo info = GetTestCacheInfo();
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   EXPECT_EQ(1U, host_->pending_translations());
   // Test that a second request for the same nexe while the first one is still
   // outstanding eventually hits.
   GET_NEXE_FD(0, 1, false, info, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2U, host_->pending_translations());
   // The temp file should not be returned to the second request until after the
   // first is finished translating.
   EXPECT_EQ(1, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2, temp_callback_count_);
   EXPECT_EQ(0U, host_->pending_translations());
 }
@@ -245,14 +246,14 @@ TEST_F(PnaclHostTest, OverlappedMissesBeforeTempReturn) {
   GET_NEXE_FD(0, 0, false, info, false);
   // Send the 2nd fd request before the first one returns a temp file.
   GET_NEXE_FD(0, 1, false, info, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   EXPECT_EQ(2U, host_->pending_translations());
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2U, host_->pending_translations());
   EXPECT_EQ(1, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2, temp_callback_count_);
   EXPECT_EQ(0U, host_->pending_translations());
 }
@@ -261,15 +262,15 @@ TEST_F(PnaclHostTest, OverlappedHitsBeforeTempReturn) {
   nacl::PnaclCacheInfo info = GetTestCacheInfo();
   // Store one in the cache and complete it.
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(0U, host_->pending_translations());
   GET_NEXE_FD(0, 0, false, info, true);
   // Request the second before the first temp file returns.
   GET_NEXE_FD(0, 1, false, info, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(3, temp_callback_count_);
   EXPECT_EQ(0U, host_->pending_translations());
 }
@@ -278,15 +279,15 @@ TEST_F(PnaclHostTest, OverlappedHitsAfterTempReturn) {
   nacl::PnaclCacheInfo info = GetTestCacheInfo();
   // Store one in the cache and complete it.
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(0U, host_->pending_translations());
   GET_NEXE_FD(0, 0, false, info, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   GET_NEXE_FD(0, 1, false, info, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(3, temp_callback_count_);
   EXPECT_EQ(0U, host_->pending_translations());
 }
@@ -297,14 +298,14 @@ TEST_F(PnaclHostTest, OverlappedMissesRendererClosing) {
   // Send the 2nd fd request from a different renderer.
   // Test that it eventually gets an fd after the first renderer closes.
   GET_NEXE_FD(1, 1, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   EXPECT_EQ(2U, host_->pending_translations());
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2U, host_->pending_translations());
   EXPECT_EQ(1, temp_callback_count_);
   host_->RendererClosing(0);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2, temp_callback_count_);
   EXPECT_EQ(1U, host_->pending_translations());
   host_->RendererClosing(1);
@@ -313,19 +314,19 @@ TEST_F(PnaclHostTest, OverlappedMissesRendererClosing) {
 TEST_F(PnaclHostTest, Incognito) {
   nacl::PnaclCacheInfo info = GetTestCacheInfo();
   GET_NEXE_FD(0, 0, true, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   // Check that an incognito translation is not stored in the cache
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   // Check that an incognito translation can hit from a normal one.
   GET_NEXE_FD(0, 0, true, info, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(3, temp_callback_count_);
 }
 
@@ -333,22 +334,22 @@ TEST_F(PnaclHostTest, IncognitoOverlappedMiss) {
   nacl::PnaclCacheInfo info = GetTestCacheInfo();
   GET_NEXE_FD(0, 0, true, info, false);
   GET_NEXE_FD(0, 1, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   // Check that both translations have returned misses, (i.e. that the
   // second one has not blocked on the incognito one)
   EXPECT_EQ(2, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
   host_->TranslationFinished(0, 1, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(0U, host_->pending_translations());
 
   // Same test, but issue the 2nd request after the first has returned a miss.
   info.abi_version = 222;
   GET_NEXE_FD(0, 0, true, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(3, temp_callback_count_);
   GET_NEXE_FD(0, 1, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(4, temp_callback_count_);
   host_->RendererClosing(0);
 }
@@ -360,14 +361,14 @@ TEST_F(PnaclHostTest, IncognitoSecondOverlappedMiss) {
   GET_NEXE_FD(0, 0, false, info, false);
   // Send the 2nd fd request before the first one returns a temp file.
   GET_NEXE_FD(0, 1, true, info, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   EXPECT_EQ(2U, host_->pending_translations());
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2U, host_->pending_translations());
   EXPECT_EQ(1, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2, temp_callback_count_);
   EXPECT_EQ(0U, host_->pending_translations());
 }
@@ -377,10 +378,10 @@ TEST_F(PnaclHostTest, CacheControlNoStore) {
   nacl::PnaclCacheInfo info = GetTestCacheInfo();
   info.has_no_store_header = true;
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(0U, host_->pending_translations());
   EXPECT_EQ(0, GetCacheSize());
 }
@@ -391,22 +392,22 @@ TEST_F(PnaclHostTest, NoStoreOverlappedMiss) {
   info.has_no_store_header = true;
   GET_NEXE_FD(0, 0, false, info, false);
   GET_NEXE_FD(0, 1, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   // Check that both translations have returned misses, (i.e. that the
   // second one has not blocked on the first one)
   EXPECT_EQ(2, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
   host_->TranslationFinished(0, 1, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(0U, host_->pending_translations());
 
   // Same test, but issue the 2nd request after the first has returned a miss.
   info.abi_version = 222;
   GET_NEXE_FD(0, 0, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(3, temp_callback_count_);
   GET_NEXE_FD(0, 1, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(4, temp_callback_count_);
   host_->RendererClosing(0);
 }
@@ -417,11 +418,11 @@ TEST_F(PnaclHostTest, ClearTranslationCache) {
   GET_NEXE_FD(0, 0, false, info, false);
   info.abi_version = 222;
   GET_NEXE_FD(0, 1, false, info, false);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2, temp_callback_count_);
   host_->TranslationFinished(0, 0, true);
   host_->TranslationFinished(0, 1, true);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(0U, host_->pending_translations());
   EXPECT_EQ(2, GetCacheSize());
   net::TestCompletionCallback cb;
@@ -458,7 +459,12 @@ TEST_F(PnaclHostTestDisk, DeInitWhileInitializing) {
   // the first one runs. We can just shortcut and call DeInitIfSafe while the
   // cache is still initializing.
   DeInit();
+
+  // Now let it finish initializing. (Other tests don't need this since they
+  // use in-memory storage).
+  disk_cache::FlushCacheThreadForTesting();
   base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(CacheIsInitialized());
 }
 
 }  // namespace pnacl

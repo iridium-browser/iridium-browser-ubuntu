@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/callback_forward.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "build/build_config.h"
@@ -24,16 +24,17 @@ class ShellJavaScriptDialogManager : public JavaScriptDialogManager {
 
   // JavaScriptDialogManager:
   void RunJavaScriptDialog(WebContents* web_contents,
-                           const GURL& origin_url,
+                           RenderFrameHost* render_frame_host,
                            JavaScriptDialogType dialog_type,
                            const base::string16& message_text,
                            const base::string16& default_prompt_text,
-                           const DialogClosedCallback& callback,
+                           DialogClosedCallback callback,
                            bool* did_suppress_message) override;
 
   void RunBeforeUnloadDialog(WebContents* web_contents,
+                             RenderFrameHost* render_frame_host,
                              bool is_reload,
-                             const DialogClosedCallback& callback) override;
+                             DialogClosedCallback callback) override;
 
   void CancelDialogs(WebContents* web_contents,
                      bool reset_state) override;
@@ -45,8 +46,9 @@ class ShellJavaScriptDialogManager : public JavaScriptDialogManager {
   void set_dialog_request_callback(const base::Closure& callback) {
     dialog_request_callback_ = callback;
   }
-  void set_should_proceed_on_beforeunload(bool proceed) {
+  void set_should_proceed_on_beforeunload(bool proceed, bool success) {
     should_proceed_on_beforeunload_ = proceed;
+    beforeunload_success_ = success;
   }
 
  private:
@@ -60,8 +62,9 @@ class ShellJavaScriptDialogManager : public JavaScriptDialogManager {
   base::Closure dialog_request_callback_;
 
   // Whether to automatically proceed when asked to display a BeforeUnload
-  // dialog.
+  // dialog, and the return value that should be passed (success or failure).
   bool should_proceed_on_beforeunload_;
+  bool beforeunload_success_;
 
   DialogClosedCallback before_unload_callback_;
 

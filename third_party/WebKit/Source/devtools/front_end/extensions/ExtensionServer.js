@@ -49,17 +49,13 @@ Extensions.ExtensionServer = class extends Common.Object {
     this._status = new Extensions.ExtensionStatus();
     /** @type {!Array<!Extensions.ExtensionSidebarPane>} */
     this._sidebarPanes = [];
-    /** @type {!Array<!Extensions.ExtensionAuditCategory>} */
-    this._auditCategories = [];
     /** @type {!Array<!Extensions.ExtensionTraceProvider>} */
     this._traceProviders = [];
     /** @type {!Map<string, !Extensions.TracingSession>} */
     this._traceSessions = new Map();
 
-    var commands = Extensions.extensionAPI.Commands;
+    const commands = Extensions.extensionAPI.Commands;
 
-    this._registerHandler(commands.AddAuditCategory, this._onAddAuditCategory.bind(this));
-    this._registerHandler(commands.AddAuditResult, this._onAddAuditResult.bind(this));
     this._registerHandler(commands.AddRequestHeaders, this._onAddRequestHeaders.bind(this));
     this._registerHandler(commands.AddTraceProvider, this._onAddTraceProvider.bind(this));
     this._registerHandler(commands.ApplyStyleSheet, this._onApplyStyleSheet.bind(this));
@@ -80,12 +76,10 @@ Extensions.ExtensionServer = class extends Common.Object {
     this._registerHandler(commands.SetSidebarContent, this._onSetSidebarContent.bind(this));
     this._registerHandler(commands.SetSidebarPage, this._onSetSidebarPage.bind(this));
     this._registerHandler(commands.ShowPanel, this._onShowPanel.bind(this));
-    this._registerHandler(commands.StopAuditCategoryRun, this._onStopAuditCategoryRun.bind(this));
     this._registerHandler(commands.Subscribe, this._onSubscribe.bind(this));
     this._registerHandler(commands.OpenResource, this._onOpenResource.bind(this));
     this._registerHandler(commands.Unsubscribe, this._onUnsubscribe.bind(this));
     this._registerHandler(commands.UpdateButton, this._onUpdateButton.bind(this));
-    this._registerHandler(commands.UpdateAuditProgress, this._onUpdateAuditProgress.bind(this));
     window.addEventListener('message', this._onWindowMessage.bind(this), false);  // Only for main window.
 
     InspectorFrontendHost.events.addEventListener(
@@ -146,24 +140,8 @@ Extensions.ExtensionServer = class extends Common.Object {
     if (event.data !== SDK.targetManager.mainTarget())
       return;
     this._requests = {};
-    var url = event.data.inspectedURL();
+    const url = event.data.inspectedURL();
     this._postNotification(Extensions.extensionAPI.Events.InspectedURLChanged, url);
-  }
-
-  /**
-   * @param {string} categoryId
-   * @param {!Extensions.ExtensionAuditCategoryResults} auditResults
-   */
-  startAuditRun(categoryId, auditResults) {
-    this._clientObjects[auditResults.id()] = auditResults;
-    this._postNotification('audit-started-' + categoryId, auditResults.id());
-  }
-
-  /**
-   * @param {!Extensions.ExtensionAuditCategoryResults} auditResults
-   */
-  stopAuditRun(auditResults) {
-    delete this._clientObjects[auditResults.id()];
   }
 
   /**
@@ -196,16 +174,16 @@ Extensions.ExtensionServer = class extends Common.Object {
    * @param {...*} vararg
    */
   _postNotification(type, vararg) {
-    var subscribers = this._subscribers[type];
+    const subscribers = this._subscribers[type];
     if (!subscribers)
       return;
-    var message = {command: 'notify-' + type, arguments: Array.prototype.slice.call(arguments, 1)};
-    for (var i = 0; i < subscribers.length; ++i)
+    const message = {command: 'notify-' + type, arguments: Array.prototype.slice.call(arguments, 1)};
+    for (let i = 0; i < subscribers.length; ++i)
       subscribers[i].postMessage(message);
   }
 
   _onSubscribe(message, port) {
-    var subscribers = this._subscribers[message.type];
+    const subscribers = this._subscribers[message.type];
     if (subscribers) {
       subscribers.push(port);
     } else {
@@ -216,7 +194,7 @@ Extensions.ExtensionServer = class extends Common.Object {
   }
 
   _onUnsubscribe(message, port) {
-    var subscribers = this._subscribers[message.type];
+    const subscribers = this._subscribers[message.type];
     if (!subscribers)
       return;
     subscribers.remove(port);
@@ -228,20 +206,20 @@ Extensions.ExtensionServer = class extends Common.Object {
   }
 
   _onAddRequestHeaders(message) {
-    var id = message.extensionId;
+    const id = message.extensionId;
     if (typeof id !== 'string')
       return this._status.E_BADARGTYPE('extensionId', typeof id, 'string');
-    var extensionHeaders = this._extraHeaders[id];
+    let extensionHeaders = this._extraHeaders[id];
     if (!extensionHeaders) {
       extensionHeaders = {};
       this._extraHeaders[id] = extensionHeaders;
     }
-    for (var name in message.headers)
+    for (const name in message.headers)
       extensionHeaders[name] = message.headers[name];
-    var allHeaders = /** @type {!Protocol.Network.Headers} */ ({});
-    for (var extension in this._extraHeaders) {
-      var headers = this._extraHeaders[extension];
-      for (name in headers) {
+    const allHeaders = /** @type {!Protocol.Network.Headers} */ ({});
+    for (const extension in this._extraHeaders) {
+      const headers = this._extraHeaders[extension];
+      for (const name in headers) {
         if (typeof headers[name] === 'string')
           allHeaders[name] = headers[name];
       }
@@ -257,22 +235,29 @@ Extensions.ExtensionServer = class extends Common.Object {
   _onApplyStyleSheet(message) {
     if (!Runtime.experiments.isEnabled('applyCustomStylesheet'))
       return;
-    var styleSheet = createElement('style');
+    const styleSheet = createElement('style');
     styleSheet.textContent = message.styleSheet;
     document.head.appendChild(styleSheet);
+
+    UI.themeSupport.addCustomStylesheet(message.styleSheet);
+    // Add to all the shadow roots that have already been created
+    for (let node = document.body; node; node = node.traverseNextNode(document.body)) {
+      if (node instanceof ShadowRoot)
+        UI.themeSupport.injectCustomStyleSheets(node);
+    }
   }
 
   _onCreatePanel(message, port) {
-    var id = message.id;
+    const id = message.id;
     // The ids are generated on the client API side and must be unique, so the check below
     // shouldn't be hit unless someone is bypassing the API.
     if (id in this._clientObjects || UI.inspectorView.hasPanel(id))
       return this._status.E_EXISTS(id);
 
-    var page = this._expandResourcePath(port._extensionOrigin, message.page);
-    var persistentId = port._extensionOrigin + message.title;
+    const page = this._expandResourcePath(port._extensionOrigin, message.page);
+    let persistentId = port._extensionOrigin + message.title;
     persistentId = persistentId.replace(/\s/g, '');
-    var panelView = new Extensions.ExtensionServerPanelView(
+    const panelView = new Extensions.ExtensionServerPanelView(
         persistentId, message.title, new Extensions.ExtensionPanel(this, persistentId, id, page));
     this._clientObjects[id] = panelView;
     UI.inspectorView.addPanel(panelView);
@@ -280,18 +265,18 @@ Extensions.ExtensionServer = class extends Common.Object {
   }
 
   _onShowPanel(message) {
-    var panelViewId = message.id;
-    var panelView = this._clientObjects[message.id];
+    let panelViewId = message.id;
+    const panelView = this._clientObjects[message.id];
     if (panelView && panelView instanceof Extensions.ExtensionServerPanelView)
       panelViewId = panelView.viewId();
     UI.inspectorView.showPanel(panelViewId);
   }
 
   _onCreateToolbarButton(message, port) {
-    var panelView = this._clientObjects[message.panel];
+    const panelView = this._clientObjects[message.panel];
     if (!panelView || !(panelView instanceof Extensions.ExtensionServerPanelView))
       return this._status.E_NOTFOUND(message.panel);
-    var button = new Extensions.ExtensionButton(
+    const button = new Extensions.ExtensionButton(
         this, message.id, this._expandResourcePath(port._extensionOrigin, message.icon), message.tooltip,
         message.disabled);
     this._clientObjects[message.id] = button;
@@ -309,7 +294,7 @@ Extensions.ExtensionServer = class extends Common.Object {
   }
 
   _onUpdateButton(message, port) {
-    var button = this._clientObjects[message.id];
+    const button = this._clientObjects[message.id];
     if (!button || !(button instanceof Extensions.ExtensionButton))
       return this._status.E_NOTFOUND(message.id);
     button.update(this._expandResourcePath(port._extensionOrigin, message.icon), message.tooltip, message.disabled);
@@ -320,7 +305,7 @@ Extensions.ExtensionServer = class extends Common.Object {
    * @param {!Object} message
    */
   _onCompleteTraceSession(message) {
-    var session = this._traceSessions.get(message.id);
+    const session = this._traceSessions.get(message.id);
     if (!session)
       return this._status.E_NOTFOUND(message.id);
     this._traceSessions.delete(message.id);
@@ -330,8 +315,8 @@ Extensions.ExtensionServer = class extends Common.Object {
   _onCreateSidebarPane(message) {
     if (message.panel !== 'elements' && message.panel !== 'sources')
       return this._status.E_NOTFOUND(message.panel);
-    var id = message.id;
-    var sidebar = new Extensions.ExtensionSidebarPane(this, message.panel, message.title, id);
+    const id = message.id;
+    const sidebar = new Extensions.ExtensionSidebarPane(this, message.panel, message.title, id);
     this._sidebarPanes.push(sidebar);
     this._clientObjects[id] = sidebar;
     this.dispatchEventToListeners(Extensions.ExtensionServer.Events.SidebarPaneAdded, sidebar);
@@ -347,7 +332,7 @@ Extensions.ExtensionServer = class extends Common.Object {
   }
 
   _onSetSidebarHeight(message) {
-    var sidebar = this._clientObjects[message.id];
+    const sidebar = this._clientObjects[message.id];
     if (!sidebar)
       return this._status.E_NOTFOUND(message.id);
     sidebar.setHeight(message.height);
@@ -355,7 +340,7 @@ Extensions.ExtensionServer = class extends Common.Object {
   }
 
   _onSetSidebarContent(message, port) {
-    var sidebar = this._clientObjects[message.id];
+    const sidebar = this._clientObjects[message.id];
     if (!sidebar)
       return this._status.E_NOTFOUND(message.id);
 
@@ -363,7 +348,7 @@ Extensions.ExtensionServer = class extends Common.Object {
      * @this {Extensions.ExtensionServer}
      */
     function callback(error) {
-      var result = error ? this._status.E_FAILED(error) : this._status.OK();
+      const result = error ? this._status.E_FAILED(error) : this._status.OK();
       this._dispatchCallback(message.requestId, port, result);
     }
     if (message.evaluateOnPage) {
@@ -374,26 +359,26 @@ Extensions.ExtensionServer = class extends Common.Object {
   }
 
   _onSetSidebarPage(message, port) {
-    var sidebar = this._clientObjects[message.id];
+    const sidebar = this._clientObjects[message.id];
     if (!sidebar)
       return this._status.E_NOTFOUND(message.id);
     sidebar.setPage(this._expandResourcePath(port._extensionOrigin, message.page));
   }
 
   _onOpenResource(message) {
-    var uiSourceCode = Workspace.workspace.uiSourceCodeForURL(message.url);
+    const uiSourceCode = Workspace.workspace.uiSourceCodeForURL(message.url);
     if (uiSourceCode) {
       Common.Revealer.reveal(uiSourceCode.uiLocation(message.lineNumber, 0));
       return this._status.OK();
     }
 
-    var resource = Bindings.resourceForURL(message.url);
+    const resource = Bindings.resourceForURL(message.url);
     if (resource) {
       Common.Revealer.reveal(resource);
       return this._status.OK();
     }
 
-    var request = NetworkLog.networkLog.requestForURL(message.url);
+    const request = BrowserSDK.networkLog.requestForURL(message.url);
     if (request) {
       Common.Revealer.reveal(request);
       return this._status.OK();
@@ -403,7 +388,7 @@ Extensions.ExtensionServer = class extends Common.Object {
   }
 
   _onSetOpenResourceHandler(message, port) {
-    var name = this._registeredExtensions[port._extensionOrigin].name || ('Extension ' + port._extensionOrigin);
+    const name = this._registeredExtensions[port._extensionOrigin].name || ('Extension ' + port._extensionOrigin);
     if (message.handlerPresent)
       Components.Linkifier.registerLinkHandler(name, this._handleOpenURL.bind(this, port));
     else
@@ -416,10 +401,10 @@ Extensions.ExtensionServer = class extends Common.Object {
   }
 
   _onReload(message) {
-    var options = /** @type {!ExtensionReloadOptions} */ (message.options || {});
+    const options = /** @type {!ExtensionReloadOptions} */ (message.options || {});
 
     SDK.multitargetNetworkManager.setUserAgentOverride(typeof options.userAgent === 'string' ? options.userAgent : '');
-    var injectedScript;
+    let injectedScript;
     if (options.injectedScript)
       injectedScript = '(function(){' + options.injectedScript + '})()';
     SDK.ResourceTreeModel.reloadAllPages(!!options.ignoreCache, injectedScript);
@@ -429,18 +414,18 @@ Extensions.ExtensionServer = class extends Common.Object {
   _onEvaluateOnInspectedPage(message, port) {
     /**
      * @param {?Protocol.Error} error
-     * @param {?SDK.RemoteObject} remoteObject
-     * @param {boolean=} wasThrown
+     * @param {?SDK.RemoteObject} object
+     * @param {boolean} wasThrown
      * @this {Extensions.ExtensionServer}
      */
-    function callback(error, remoteObject, wasThrown) {
-      var result;
-      if (error || !remoteObject)
+    function callback(error, object, wasThrown) {
+      let result;
+      if (error || !object)
         result = this._status.E_PROTOCOLERROR(error.toString());
       else if (wasThrown)
-        result = {isException: true, value: remoteObject.description};
+        result = {isException: true, value: object.description};
       else
-        result = {value: remoteObject.value};
+        result = {value: object.value};
 
       this._dispatchCallback(message.requestId, port, result);
     }
@@ -448,10 +433,10 @@ Extensions.ExtensionServer = class extends Common.Object {
         message.expression, true, true, message.evaluateOptions, port._extensionOrigin, callback.bind(this));
   }
 
-  _onGetHAR() {
-    var requests = NetworkLog.networkLog.requests();
-    var harLog = (new NetworkLog.HARLog(requests)).build();
-    for (var i = 0; i < harLog.entries.length; ++i)
+  async _onGetHAR() {
+    const requests = BrowserSDK.networkLog.requests();
+    const harLog = await BrowserSDK.HARLog.build(requests);
+    for (let i = 0; i < harLog.entries.length; ++i)
       harLog.entries[i]._requestId = this._requestId(requests[i]);
     return harLog;
   }
@@ -468,7 +453,7 @@ Extensions.ExtensionServer = class extends Common.Object {
    */
   _onGetPageResources() {
     /** @type {!Map<string, !Common.ContentProvider>} */
-    var resources = new Map();
+    const resources = new Map();
 
     /**
      * @this {Extensions.ExtensionServer}
@@ -477,11 +462,11 @@ Extensions.ExtensionServer = class extends Common.Object {
       if (!resources.has(contentProvider.contentURL()))
         resources.set(contentProvider.contentURL(), this._makeResource(contentProvider));
     }
-    var uiSourceCodes = Workspace.workspace.uiSourceCodesForProjectType(Workspace.projectTypes.Network);
+    let uiSourceCodes = Workspace.workspace.uiSourceCodesForProjectType(Workspace.projectTypes.Network);
     uiSourceCodes =
         uiSourceCodes.concat(Workspace.workspace.uiSourceCodesForProjectType(Workspace.projectTypes.ContentScripts));
     uiSourceCodes.forEach(pushResourceData.bind(this));
-    for (var resourceTreeModel of SDK.targetManager.models(SDK.ResourceTreeModel))
+    for (const resourceTreeModel of SDK.targetManager.models(SDK.ResourceTreeModel))
       resourceTreeModel.forAllResources(pushResourceData.bind(this));
     return resources.valuesArray();
   }
@@ -492,32 +477,21 @@ Extensions.ExtensionServer = class extends Common.Object {
    * @param {!MessagePort} port
    */
   async _getResourceContent(contentProvider, message, port) {
-    var content = null;
-    var encoded = false;
-    if (contentProvider instanceof SDK.NetworkRequest) {
-      var contentData = await contentProvider.contentData();
-      content = contentData.content;
-      encoded = content && contentData.encoded;
-    } else {
-      content = await contentProvider.requestContent();
-    }
-
-    if (content && contentProvider instanceof SDK.Resource)
-      encoded = contentProvider.contentEncoded;
-
+    const content = await contentProvider.requestContent();
+    const encoded = await contentProvider.contentEncoded();
     this._dispatchCallback(message.requestId, port, {encoding: encoded ? 'base64' : '', content: content});
   }
 
   _onGetRequestContent(message, port) {
-    var request = this._requestById(message.id);
+    const request = this._requestById(message.id);
     if (!request)
       return this._status.E_NOTFOUND(message.id);
     this._getResourceContent(request, message, port);
   }
 
   _onGetResourceContent(message, port) {
-    var url = /** @type {string} */ (message.url);
-    var contentProvider = Workspace.workspace.uiSourceCodeForURL(url) || Bindings.resourceForURL(url);
+    const url = /** @type {string} */ (message.url);
+    const contentProvider = Workspace.workspace.uiSourceCodeForURL(url) || Bindings.resourceForURL(url);
     if (!contentProvider)
       return this._status.E_NOTFOUND(url);
     this._getResourceContent(contentProvider, message, port);
@@ -529,14 +503,14 @@ Extensions.ExtensionServer = class extends Common.Object {
      * @this {Extensions.ExtensionServer}
      */
     function callbackWrapper(error) {
-      var response = error ? this._status.E_FAILED(error) : this._status.OK();
+      const response = error ? this._status.E_FAILED(error) : this._status.OK();
       this._dispatchCallback(message.requestId, port, response);
     }
 
-    var url = /** @type {string} */ (message.url);
-    var uiSourceCode = Workspace.workspace.uiSourceCodeForURL(url);
+    const url = /** @type {string} */ (message.url);
+    const uiSourceCode = Workspace.workspace.uiSourceCodeForURL(url);
     if (!uiSourceCode || !uiSourceCode.contentType().isDocumentOrScriptOrStyleSheet()) {
-      var resource = SDK.ResourceTreeModel.resourceForURL(url);
+      const resource = SDK.ResourceTreeModel.resourceForURL(url);
       if (!resource)
         return this._status.E_NOTFOUND(url);
       return this._status.E_NOTSUPPORTED('Resource is not editable');
@@ -559,20 +533,12 @@ Extensions.ExtensionServer = class extends Common.Object {
     return this._requests[id];
   }
 
-  _onAddAuditCategory(message, port) {
-    var category = new Extensions.ExtensionAuditCategory(
-        port._extensionOrigin, message.id, message.displayName, message.resultCount);
-    this._clientObjects[message.id] = category;
-    this._auditCategories.push(category);
-    this.dispatchEventToListeners(Extensions.ExtensionServer.Events.AuditCategoryAdded, category);
-  }
-
   /**
    * @param {!Object} message
    * @param {!MessagePort} port
    */
   _onAddTraceProvider(message, port) {
-    var provider = new Extensions.ExtensionTraceProvider(
+    const provider = new Extensions.ExtensionTraceProvider(
         port._extensionOrigin, message.id, message.categoryName, message.categoryTooltip);
     this._clientObjects[message.id] = provider;
     this._traceProviders.push(provider);
@@ -584,39 +550,6 @@ Extensions.ExtensionServer = class extends Common.Object {
    */
   traceProviders() {
     return this._traceProviders;
-  }
-
-  /**
-   * @return {!Array.<!Extensions.ExtensionAuditCategory>}
-   */
-  auditCategories() {
-    return this._auditCategories;
-  }
-
-  _onAddAuditResult(message) {
-    var auditResult = /** {!Extensions.ExtensionAuditCategoryResults} */ (this._clientObjects[message.resultId]);
-    if (!auditResult)
-      return this._status.E_NOTFOUND(message.resultId);
-    try {
-      auditResult.addResult(message.displayName, message.description, message.severity, message.details);
-    } catch (e) {
-      return e;
-    }
-    return this._status.OK();
-  }
-
-  _onUpdateAuditProgress(message) {
-    var auditResult = /** {!Extensions.ExtensionAuditCategoryResults} */ (this._clientObjects[message.resultId]);
-    if (!auditResult)
-      return this._status.E_NOTFOUND(message.resultId);
-    auditResult.updateProgress(Math.min(Math.max(0, message.progress), 1));
-  }
-
-  _onStopAuditCategoryRun(message) {
-    var auditRun = /** {!Extensions.ExtensionAuditCategoryResults} */ (this._clientObjects[message.resultId]);
-    if (!auditRun)
-      return this._status.E_NOTFOUND(message.resultId);
-    auditRun.done();
   }
 
   _onForwardKeyboardEvent(message) {
@@ -631,7 +564,7 @@ Extensions.ExtensionServer = class extends Common.Object {
         return;
       // Fool around closure compiler -- it has its own notion of both KeyboardEvent constructor
       // and initKeyboardEvent methods and overriding these in externs.js does not have effect.
-      var event = new window.KeyboardEvent(entry.eventType, {
+      const event = new window.KeyboardEvent(entry.eventType, {
         key: entry.key,
         code: entry.code,
         keyCode: entry.keyCode,
@@ -646,7 +579,7 @@ Extensions.ExtensionServer = class extends Common.Object {
     }
 
     function keyCodeForEntry(entry) {
-      var keyCode = entry.keyCode;
+      let keyCode = entry.keyCode;
       if (!keyCode) {
         // This is required only for synthetic events (e.g. dispatched in tests).
         if (entry.key === 'Escape')
@@ -690,30 +623,43 @@ Extensions.ExtensionServer = class extends Common.Object {
 
     SDK.targetManager.addEventListener(SDK.TargetManager.Events.InspectedURLChanged, this._inspectedURLChanged, this);
 
-    InspectorExtensionRegistry.getExtensionsAsync();
+    self.InspectorExtensionRegistry.getExtensionsAsync();
   }
 
   _notifyResourceAdded(event) {
-    var uiSourceCode = /** @type {!Workspace.UISourceCode} */ (event.data);
+    const uiSourceCode = /** @type {!Workspace.UISourceCode} */ (event.data);
     this._postNotification(Extensions.extensionAPI.Events.ResourceAdded, this._makeResource(uiSourceCode));
   }
 
   _notifyUISourceCodeContentCommitted(event) {
-    var uiSourceCode = /** @type {!Workspace.UISourceCode} */ (event.data.uiSourceCode);
-    var content = /** @type {string} */ (event.data.content);
+    const uiSourceCode = /** @type {!Workspace.UISourceCode} */ (event.data.uiSourceCode);
+    const content = /** @type {string} */ (event.data.content);
     this._postNotification(
         Extensions.extensionAPI.Events.ResourceContentCommitted, this._makeResource(uiSourceCode), content);
   }
 
-  _notifyRequestFinished(event) {
-    var request = /** @type {!SDK.NetworkRequest} */ (event.data);
-    this._postNotification(
-        Extensions.extensionAPI.Events.NetworkRequestFinished, this._requestId(request),
-        (new NetworkLog.HAREntry(request)).build());
+  async _notifyRequestFinished(event) {
+    const request = /** @type {!SDK.NetworkRequest} */ (event.data);
+    const entry = await BrowserSDK.HAREntry.build(request);
+    this._postNotification(Extensions.extensionAPI.Events.NetworkRequestFinished, this._requestId(request), entry);
   }
 
   _notifyElementsSelectionChanged() {
     this._postNotification(Extensions.extensionAPI.Events.PanelObjectSelected + 'elements');
+  }
+
+  /**
+   * @param {string} url
+   * @param {!TextUtils.TextRange} range
+   */
+  sourceSelectionChanged(url, range) {
+    this._postNotification(Extensions.extensionAPI.Events.PanelObjectSelected + 'sources', {
+      startLine: range.startLine,
+      startColumn: range.startColumn,
+      endLine: range.endLine,
+      endColumn: range.endColumn,
+      url: url,
+    });
   }
 
   /**
@@ -723,7 +669,7 @@ Extensions.ExtensionServer = class extends Common.Object {
     if (Extensions.extensionServer._overridePlatformExtensionAPIForTest)
       window.buildPlatformExtensionAPI = Extensions.extensionServer._overridePlatformExtensionAPIForTest;
 
-    var extensionInfos = /** @type {!Array.<!ExtensionDescriptor>} */ (event.data);
+    const extensionInfos = /** @type {!Array.<!ExtensionDescriptor>} */ (event.data);
     if (this._initializeCommandIssued)
       extensionInfos.forEach(this._addExtension, this);
     else
@@ -743,25 +689,25 @@ Extensions.ExtensionServer = class extends Common.Object {
    */
   _addExtension(extensionInfo) {
     const urlOriginRegExp = new RegExp('([^:]+:\/\/[^/]*)\/');  // Can't use regexp literal here, MinJS chokes on it.
-    var startPage = extensionInfo.startPage;
-    var name = extensionInfo.name;
+    const startPage = extensionInfo.startPage;
+    const name = extensionInfo.name;
 
     try {
-      var originMatch = urlOriginRegExp.exec(startPage);
+      const originMatch = urlOriginRegExp.exec(startPage);
       if (!originMatch) {
         console.error('Skipping extension with invalid URL: ' + startPage);
         return false;
       }
-      var extensionOrigin = originMatch[1];
+      const extensionOrigin = originMatch[1];
       if (!this._registeredExtensions[extensionOrigin]) {
         // See ExtensionAPI.js for details.
-        var injectedAPI = buildExtensionAPIInjectedScript(
+        const injectedAPI = buildExtensionAPIInjectedScript(
             extensionInfo, this._inspectedTabId, UI.themeSupport.themeName(),
             Extensions.extensionServer['_extensionAPITestHook']);
         InspectorFrontendHost.setInjectedScriptForOrigin(extensionOrigin, injectedAPI);
         this._registeredExtensions[extensionOrigin] = {name: name};
       }
-      var iframe = createElement('iframe');
+      const iframe = createElement('iframe');
       iframe.src = startPage;
       iframe.style.display = 'none';
       document.body.appendChild(iframe);  // Only for main window.
@@ -788,12 +734,12 @@ Extensions.ExtensionServer = class extends Common.Object {
       this._registerExtension(event.origin, event.ports[0]);
   }
 
-  _onmessage(event) {
-    var message = event.data;
-    var result;
+  async _onmessage(event) {
+    const message = event.data;
+    let result;
 
     if (message.command in this._handlers)
-      result = this._handlers[message.command](message, event.target);
+      result = await this._handlers[message.command](message, event.target);
     else
       result = this._status.E_NOTSUPPORTED(message.command);
 
@@ -865,10 +811,10 @@ Extensions.ExtensionServer = class extends Common.Object {
   }
 
   _normalizePath(path) {
-    var source = path.split('/');
-    var result = [];
+    const source = path.split('/');
+    const result = [];
 
-    for (var i = 0; i < source.length; ++i) {
+    for (let i = 0; i < source.length; ++i) {
       if (source[i] === '.')
         continue;
       // Ignore empty path components resulting from //, as well as a leading and traling slashes.
@@ -888,18 +834,18 @@ Extensions.ExtensionServer = class extends Common.Object {
    * @param {boolean} returnByValue
    * @param {?Object} options
    * @param {string} securityOrigin
-   * @param {function(?string, ?SDK.RemoteObject, boolean=)} callback
+   * @param {function(?string, ?SDK.RemoteObject, boolean)} callback
    * @return {!Extensions.ExtensionStatus.Record|undefined}
    */
   evaluate(expression, exposeCommandLineAPI, returnByValue, options, securityOrigin, callback) {
-    var context;
+    let context;
 
     /**
      * @param {string} url
      * @return {boolean}
      */
     function resolveURLToFrame(url) {
-      var found;
+      let found;
       function hasMatchingURL(frame) {
         found = (frame.url === url) ? frame : null;
         return found;
@@ -909,12 +855,12 @@ Extensions.ExtensionServer = class extends Common.Object {
     }
 
     options = options || {};
-    var frame;
+    let frame;
     if (options.frameURL) {
       frame = resolveURLToFrame(options.frameURL);
     } else {
-      var target = SDK.targetManager.mainTarget();
-      var resourceTreeModel = target && target.model(SDK.ResourceTreeModel);
+      const target = SDK.targetManager.mainTarget();
+      const resourceTreeModel = target && target.model(SDK.ResourceTreeModel);
       frame = resourceTreeModel && resourceTreeModel.mainFrame;
     }
     if (!frame) {
@@ -925,17 +871,17 @@ Extensions.ExtensionServer = class extends Common.Object {
       return this._status.E_NOTFOUND(options.frameURL || '<top>');
     }
 
-    var contextSecurityOrigin;
+    let contextSecurityOrigin;
     if (options.useContentScriptContext)
       contextSecurityOrigin = securityOrigin;
     else if (options.scriptExecutionContext)
       contextSecurityOrigin = options.scriptExecutionContext;
 
-    var runtimeModel = frame.resourceTreeModel().target().model(SDK.RuntimeModel);
-    var executionContexts = runtimeModel ? runtimeModel.executionContexts() : [];
+    const runtimeModel = frame.resourceTreeModel().target().model(SDK.RuntimeModel);
+    const executionContexts = runtimeModel ? runtimeModel.executionContexts() : [];
     if (contextSecurityOrigin) {
-      for (var i = 0; i < executionContexts.length; ++i) {
-        var executionContext = executionContexts[i];
+      for (let i = 0; i < executionContexts.length; ++i) {
+        const executionContext = executionContexts[i];
         if (executionContext.frameId === frame.id && executionContext.origin === contextSecurityOrigin &&
             !executionContext.isDefault)
           context = executionContext;
@@ -945,8 +891,8 @@ Extensions.ExtensionServer = class extends Common.Object {
         return this._status.E_NOTFOUND(contextSecurityOrigin);
       }
     } else {
-      for (var i = 0; i < executionContexts.length; ++i) {
-        var executionContext = executionContexts[i];
+      for (let i = 0; i < executionContexts.length; ++i) {
+        const executionContext = executionContexts[i];
         if (executionContext.frameId === frame.id && executionContext.isDefault)
           context = executionContext;
       }
@@ -954,19 +900,28 @@ Extensions.ExtensionServer = class extends Common.Object {
         return this._status.E_FAILED(frame.url + ' has no execution context');
     }
 
-    context.evaluate(expression, 'extension', exposeCommandLineAPI, true, returnByValue, false, false, onEvaluate);
+    context
+        .evaluate(
+            {
+              expression: expression,
+              objectGroup: 'extension',
+              includeCommandLineAPI: exposeCommandLineAPI,
+              silent: true,
+              returnByValue: returnByValue,
+              generatePreview: false
+            },
+            /* userGesture */ false, /* awaitPromise */ false)
+        .then(onEvaluate);
 
     /**
-     * @param {?SDK.RemoteObject} result
-     * @param {!Protocol.Runtime.ExceptionDetails=} exceptionDetails
-     * @param {string=} error
+     * @param {!SDK.RuntimeModel.EvaluationResult} result
      */
-    function onEvaluate(result, exceptionDetails, error) {
-      if (error) {
-        callback(error, null, !!exceptionDetails);
+    function onEvaluate(result) {
+      if (result.error) {
+        callback(result.error, null, false);
         return;
       }
-      callback(null, result, !!exceptionDetails);
+      callback(null, result.object || null, !!result.exceptionDetails);
     }
   }
 };
@@ -974,7 +929,6 @@ Extensions.ExtensionServer = class extends Common.Object {
 /** @enum {symbol} */
 Extensions.ExtensionServer.Events = {
   SidebarPaneAdded: Symbol('SidebarPaneAdded'),
-  AuditCategoryAdded: Symbol('AuditCategoryAdded'),
   TraceProviderAdded: Symbol('TraceProviderAdded')
 };
 
@@ -1021,8 +975,8 @@ Extensions.ExtensionStatus = class {
      * @return {!Extensions.ExtensionStatus.Record}
      */
     function makeStatus(code, description) {
-      var details = Array.prototype.slice.call(arguments, 2);
-      var status = {code: code, description: description, details: details};
+      const details = Array.prototype.slice.call(arguments, 2);
+      const status = {code: code, description: description, details: details};
       if (code !== 'OK') {
         status.isError = true;
         console.error('Extension server error: ' + String.vsprintf(description, details));

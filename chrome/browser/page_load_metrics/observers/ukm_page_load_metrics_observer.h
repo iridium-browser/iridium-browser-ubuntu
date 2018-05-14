@@ -27,12 +27,16 @@ extern const char kUkmLoadEventName[];
 extern const char kUkmFirstPaintName[];
 extern const char kUkmFirstContentfulPaintName[];
 extern const char kUkmFirstMeaningfulPaintName[];
+extern const char kUkmInteractiveName[];
+extern const char kUkmFirstInputDelayName[];
+extern const char kUkmFirstInputTimestampName[];
 extern const char kUkmForegroundDurationName[];
 extern const char kUkmFailedProvisionaLoadName[];
 extern const char kUkmNetErrorCode[];
 extern const char kUkmEffectiveConnectionType[];
 extern const char kUkmHttpRttEstimate[];
 extern const char kUkmTransportRttEstimate[];
+extern const char kUkmDownstreamKbpsEstimate[];
 extern const char kUkmPageTransition[];
 
 }  // namespace internal
@@ -74,6 +78,9 @@ class UkmPageLoadMetricsObserver
   void OnComplete(const page_load_metrics::mojom::PageLoadTiming& timing,
                   const page_load_metrics::PageLoadExtraInfo& info) override;
 
+  void OnLoadedResource(const page_load_metrics::ExtraRequestCompleteInfo&
+                            extra_request_complete_info) override;
+
  private:
   // Records page load timing related metrics available in PageLoadTiming, such
   // as first contentful paint.
@@ -91,11 +98,17 @@ class UkmPageLoadMetricsObserver
   net::NetworkQualityEstimator::NetworkQualityProvider* const
       network_quality_provider_;
 
+  // The number of body (not header) prefilter bytes consumed by requests for
+  // the page.
+  int64_t cache_bytes_ = 0;
+  int64_t network_bytes_ = 0;
+
   // Network quality estimates.
   net::EffectiveConnectionType effective_connection_type_ =
       net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
   base::Optional<base::TimeDelta> http_rtt_estimate_;
   base::Optional<base::TimeDelta> transport_rtt_estimate_;
+  base::Optional<int32_t> downstream_kbps_estimate_;
 
   // PAGE_TRANSITION_LINK is the default PageTransition value.
   ui::PageTransition page_transition_ = ui::PAGE_TRANSITION_LINK;

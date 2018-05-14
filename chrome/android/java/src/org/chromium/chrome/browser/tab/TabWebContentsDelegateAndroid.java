@@ -27,7 +27,6 @@ import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.FullscreenActivity;
 import org.chromium.chrome.browser.RepostFormWarningDialog;
 import org.chromium.chrome.browser.document.DocumentUtils;
@@ -46,7 +45,7 @@ import org.chromium.chrome.browser.tabmodel.TabWindowManager;
 import org.chromium.components.web_contents_delegate_android.WebContentsDelegateAndroid;
 import org.chromium.content.browser.ActivityContentVideoViewEmbedder;
 import org.chromium.content.browser.ContentVideoViewEmbedder;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_public.browser.InvalidateTypes;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.ResourceRequestBody;
@@ -80,7 +79,7 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
 
     private FindMatchRectsListener mFindMatchRectsListener;
 
-    private int mDisplayMode = WebDisplayMode.BROWSER;
+    private @WebDisplayMode int mDisplayMode = WebDisplayMode.BROWSER;
 
     protected Handler mHandler;
 
@@ -119,14 +118,13 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
 
     /**
      * Sets the current display mode which can be queried using media queries.
-     * @param displayMode A value from {@link org.chromium.blink_public.platform.WebDisplayMode}.
      */
-    public void setDisplayMode(int displayMode) {
+    public void setDisplayMode(@WebDisplayMode int displayMode) {
         mDisplayMode = displayMode;
     }
 
     @CalledByNative
-    private int getDisplayMode() {
+    private @WebDisplayMode int getDisplayMode() {
         return mDisplayMode;
     }
 
@@ -219,8 +217,7 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
 
     @Override
     public void toggleFullscreenModeForTab(boolean enableFullscreen) {
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.FULLSCREEN_ACTIVITY)
-                && mTab.getActivity().supportsFullscreenActivity()) {
+        if (FullscreenActivity.shouldUseFullscreenActivity(mTab)) {
             FullscreenActivity.toggleFullscreenMode(enableFullscreen, mTab);
         } else {
             mTab.toggleFullscreenMode(enableFullscreen);
@@ -506,6 +503,30 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
         if (tab != null) nativeNotifyStopped(tab.getWebContents());
     }
 
+    @CalledByNative
+    private void setOverlayMode(boolean useOverlayMode) {
+        mTab.getActivity().setOverlayMode(useOverlayMode);
+    }
+
+    @Override
+    public int getTopControlsHeight() {
+        return mTab.getTopControlsHeight();
+    }
+
+    @Override
+    public int getBottomControlsHeight() {
+        return mTab.getBottomControlsHeight();
+    }
+
+    @Override
+    public boolean controlsResizeView() {
+        return mTab.controlsResizeView();
+    }
+
+    private float getDipScale() {
+        return mTab.getWindowAndroid().getDisplay().getDipScale();
+    }
+
     @Override
     public ContentVideoViewEmbedder getContentVideoViewEmbedder() {
         return new ActivityContentVideoViewEmbedder(mTab.getActivity()) {
@@ -539,10 +560,15 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
         };
     }
 
+    public void showFramebustBlockInfobarForTesting(String url) {
+        nativeShowFramebustBlockInfoBar(mTab.getWebContents(), url);
+    }
+
     private static native void nativeOnRendererUnresponsive(WebContents webContents);
     private static native void nativeOnRendererResponsive(WebContents webContents);
     private static native boolean nativeIsCapturingAudio(WebContents webContents);
     private static native boolean nativeIsCapturingVideo(WebContents webContents);
     private static native boolean nativeIsCapturingScreen(WebContents webContents);
     private static native void nativeNotifyStopped(WebContents webContents);
+    private static native void nativeShowFramebustBlockInfoBar(WebContents webContents, String url);
 }

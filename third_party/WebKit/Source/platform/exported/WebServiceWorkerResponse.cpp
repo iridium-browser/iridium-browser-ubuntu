@@ -18,22 +18,23 @@ class WebServiceWorkerResponsePrivate
  public:
   WebServiceWorkerResponsePrivate()
       : status(0),
-        response_type(kWebServiceWorkerResponseTypeDefault),
-        error(kWebServiceWorkerResponseErrorUnknown) {}
+        response_type(network::mojom::FetchResponseType::kDefault),
+        error(mojom::ServiceWorkerResponseError::kUnknown) {}
   WebVector<WebURL> url_list;
   unsigned short status;
   WebString status_text;
-  WebServiceWorkerResponseType response_type;
+  network::mojom::FetchResponseType response_type;
   HTTPHeaderMap headers;
-  RefPtr<BlobDataHandle> blob_data_handle;
-  WebServiceWorkerResponseError error;
+  scoped_refptr<BlobDataHandle> blob_data_handle;
+  mojom::ServiceWorkerResponseError error;
   Time response_time;
   WebString cache_storage_cache_name;
   WebVector<WebString> cors_exposed_header_names;
+  scoped_refptr<BlobDataHandle> side_data_blob_data_handle;
 };
 
 WebServiceWorkerResponse::WebServiceWorkerResponse()
-    : private_(AdoptRef(new WebServiceWorkerResponsePrivate)) {}
+    : private_(base::AdoptRef(new WebServiceWorkerResponsePrivate)) {}
 
 void WebServiceWorkerResponse::Reset() {
   private_.Reset();
@@ -68,11 +69,12 @@ const WebString& WebServiceWorkerResponse::StatusText() const {
 }
 
 void WebServiceWorkerResponse::SetResponseType(
-    WebServiceWorkerResponseType response_type) {
+    network::mojom::FetchResponseType response_type) {
   private_->response_type = response_type;
 }
 
-WebServiceWorkerResponseType WebServiceWorkerResponse::ResponseType() const {
+network::mojom::FetchResponseType WebServiceWorkerResponse::ResponseType()
+    const {
   return private_->response_type;
 }
 
@@ -111,8 +113,14 @@ void WebServiceWorkerResponse::VisitHTTPHeaderFields(
     header_visitor->VisitHeader(i->key, i->value);
 }
 
-void WebServiceWorkerResponse::SetBlob(const WebString& uuid, uint64_t size) {
-  private_->blob_data_handle = BlobDataHandle::Create(uuid, String(), size);
+void WebServiceWorkerResponse::SetBlob(
+    const WebString& uuid,
+    uint64_t size,
+    mojo::ScopedMessagePipeHandle blob_pipe) {
+  private_->blob_data_handle = BlobDataHandle::Create(
+      uuid, String(), size,
+      mojom::blink::BlobPtrInfo(std::move(blob_pipe),
+                                mojom::blink::Blob::Version_));
 }
 
 WebString WebServiceWorkerResponse::BlobUUID() const {
@@ -127,11 +135,20 @@ uint64_t WebServiceWorkerResponse::BlobSize() const {
   return private_->blob_data_handle->size();
 }
 
-void WebServiceWorkerResponse::SetError(WebServiceWorkerResponseError error) {
+mojo::ScopedMessagePipeHandle WebServiceWorkerResponse::CloneBlobPtr() const {
+  if (!private_->blob_data_handle)
+    return mojo::ScopedMessagePipeHandle();
+  return private_->blob_data_handle->CloneBlobPtr()
+      .PassInterface()
+      .PassHandle();
+}
+
+void WebServiceWorkerResponse::SetError(
+    mojom::ServiceWorkerResponseError error) {
   private_->error = error;
 }
 
-WebServiceWorkerResponseError WebServiceWorkerResponse::GetError() const {
+mojom::ServiceWorkerResponseError WebServiceWorkerResponse::GetError() const {
   return private_->error;
 }
 
@@ -167,12 +184,39 @@ const HTTPHeaderMap& WebServiceWorkerResponse::Headers() const {
 }
 
 void WebServiceWorkerResponse::SetBlobDataHandle(
-    PassRefPtr<BlobDataHandle> blob_data_handle) {
+    scoped_refptr<BlobDataHandle> blob_data_handle) {
   private_->blob_data_handle = std::move(blob_data_handle);
 }
 
-PassRefPtr<BlobDataHandle> WebServiceWorkerResponse::GetBlobDataHandle() const {
+scoped_refptr<BlobDataHandle> WebServiceWorkerResponse::GetBlobDataHandle()
+    const {
   return private_->blob_data_handle;
+}
+
+void WebServiceWorkerResponse::SetSideDataBlobDataHandle(
+    scoped_refptr<BlobDataHandle> blob_data_handle) {
+  private_->side_data_blob_data_handle = std::move(blob_data_handle);
+}
+
+WebString WebServiceWorkerResponse::SideDataBlobUUID() const {
+  if (!private_->side_data_blob_data_handle)
+    return WebString();
+  return private_->side_data_blob_data_handle->Uuid();
+}
+
+uint64_t WebServiceWorkerResponse::SideDataBlobSize() const {
+  if (!private_->side_data_blob_data_handle)
+    return 0;
+  return private_->side_data_blob_data_handle->size();
+}
+
+mojo::ScopedMessagePipeHandle WebServiceWorkerResponse::CloneSideDataBlobPtr()
+    const {
+  if (!private_->side_data_blob_data_handle)
+    return mojo::ScopedMessagePipeHandle();
+  return private_->side_data_blob_data_handle->CloneBlobPtr()
+      .PassInterface()
+      .PassHandle();
 }
 
 }  // namespace blink

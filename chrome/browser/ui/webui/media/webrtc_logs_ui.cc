@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/media/webrtc_logs_ui.h"
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -11,7 +12,6 @@
 #include "base/bind_helpers.h"
 #include "base/i18n/time_formatting.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -19,7 +19,6 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/media/webrtc/webrtc_log_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
@@ -27,6 +26,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/upload_list/upload_list.h"
 #include "components/version_info/version_info.h"
+#include "components/webrtc_logging/browser/log_list.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -111,10 +111,11 @@ class WebRtcLogsDOMHandler : public WebUIMessageHandler {
 
 WebRtcLogsDOMHandler::WebRtcLogsDOMHandler(Profile* profile)
     : log_dir_(
-          WebRtcLogList::GetWebRtcLogDirectoryForProfile(profile->GetPath())),
+          webrtc_logging::LogList::GetWebRtcLogDirectoryForBrowserContextPath(
+              profile->GetPath())),
       list_available_(false),
       js_request_pending_(false) {
-  upload_list_ = WebRtcLogList::CreateWebRtcLogList(profile);
+  upload_list_ = webrtc_logging::LogList::CreateWebRtcLogList(profile);
 }
 
 WebRtcLogsDOMHandler::~WebRtcLogsDOMHandler() {
@@ -217,7 +218,7 @@ void WebRtcLogsDOMHandler::UpdateUI() {
 
 WebRtcLogsUI::WebRtcLogsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
-  web_ui->AddMessageHandler(base::MakeUnique<WebRtcLogsDOMHandler>(profile));
+  web_ui->AddMessageHandler(std::make_unique<WebRtcLogsDOMHandler>(profile));
 
   // Set up the chrome://webrtc-logs/ source.
   content::WebUIDataSource::Add(profile, CreateWebRtcLogsUIHTMLSource());

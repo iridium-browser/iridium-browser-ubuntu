@@ -63,7 +63,7 @@ class GitDroverTest(auto_stub.TestCase):
     self.UPLOAD_COMMANDS = [
         (['git', 'reset', '--hard'], self._target_repo),
         (['git', 'log', '-1', '--format=%ae'], self._target_repo),
-        (['git', 'cl', 'upload', '--tbrs', 'author@domain.org'],
+        (['git', 'cl', 'upload', '--send-mail', '--tbrs', 'author@domain.org'],
          self._target_repo),
     ]
     self.LAND_COMMAND = [
@@ -79,7 +79,8 @@ class GitDroverTest(auto_stub.TestCase):
           (['git', 'branch', '-D', 'drover_branch_123'], self._parent_repo),
       ]
     self.MANUAL_RESOLVE_PREPARATION_COMMANDS = [
-        (['git', 'status', '--porcelain'], self._target_repo),
+        (['git', '-c', 'core.quotePath=false', 'status', '--porcelain'],
+         self._target_repo),
         (['git', 'update-index', '--skip-worktree', '--stdin'],
          self._target_repo),
     ]
@@ -114,7 +115,7 @@ class GitDroverTest(auto_stub.TestCase):
       raise subprocess.CalledProcessError(1, args[0])
     if args == ['git', 'rev-parse', '--git-dir']:
       return os.path.join(self._parent_repo, '.git')
-    if args == ['git', 'status', '--porcelain']:
+    if args == ['git', '-c', 'core.quotePath=false', 'status', '--porcelain']:
       return ' D foo\nUU baz\n D bar\n'
     if args == ['git', 'log', '-1', '--format=%ae']:
       return 'author@domain.org'

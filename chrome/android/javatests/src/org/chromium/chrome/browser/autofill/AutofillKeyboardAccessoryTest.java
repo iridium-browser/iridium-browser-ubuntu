@@ -26,14 +26,13 @@ import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.UiUtils;
 
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -43,9 +42,8 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({"enable-features=AutofillKeyboardAccessory",
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.
+Add({"enable-features=AutofillKeyboardAccessory", ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class AutofillKeyboardAccessoryTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -91,16 +89,13 @@ public class AutofillKeyboardAccessoryTest {
                         + "Doooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooe",
                 "Acme Inc", "1 Main\nApt A", "CA", "San Francisco", "", "94102", "", "US",
                 "(415) 999-0000", "jane@acme.inc", "en"));
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mViewCoreRef.set(mActivityTestRule.getActivity().getCurrentContentViewCore());
-                mWebContentsRef.set(mViewCoreRef.get().getWebContents());
-                mContainerRef.set(mViewCoreRef.get().getContainerView());
-                mKeyboardAccessoryRef.set(mActivityTestRule.getActivity()
-                                                  .getWindowAndroid()
-                                                  .getKeyboardAccessoryView());
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mViewCoreRef.set(mActivityTestRule.getActivity().getCurrentContentViewCore());
+            mWebContentsRef.set(mViewCoreRef.get().getWebContents());
+            mContainerRef.set(mViewCoreRef.get().getContainerView());
+            mKeyboardAccessoryRef.set(mActivityTestRule.getActivity()
+                    .getWindowAndroid()
+                    .getKeyboardAccessoryView());
         });
         DOMUtils.waitForNonZeroNodeBounds(mWebContentsRef.get(), "fn");
     }
@@ -116,12 +111,8 @@ public class AutofillKeyboardAccessoryTest {
         loadTestPage(false);
         Assert.assertTrue("Keyboard accessory should be hidden.",
                 ThreadUtils
-                        .runOnUiThreadBlocking(new Callable<Boolean>() {
-                            @Override
-                            public Boolean call() {
-                                return mKeyboardAccessoryRef.get().getVisibility() == View.GONE;
-                            }
-                        })
+                        .runOnUiThreadBlocking(
+                                () -> mKeyboardAccessoryRef.get().getVisibility() == View.GONE)
                         .booleanValue());
     }
 
@@ -144,12 +135,8 @@ public class AutofillKeyboardAccessoryTest {
         });
         Assert.assertTrue("Keyboard accessory should be showing.",
                 ThreadUtils
-                        .runOnUiThreadBlocking(new Callable<Boolean>() {
-                            @Override
-                            public Boolean call() {
-                                return mKeyboardAccessoryRef.get().getVisibility() == View.VISIBLE;
-                            }
-                        })
+                        .runOnUiThreadBlocking(
+                                () -> mKeyboardAccessoryRef.get().getVisibility() == View.VISIBLE)
                         .booleanValue());
     }
 
@@ -170,12 +157,8 @@ public class AutofillKeyboardAccessoryTest {
                         mActivityTestRule.getActivity(), mContainerRef.get());
             }
         });
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                ((HorizontalScrollView) mKeyboardAccessoryRef.get()).scrollTo(2000, 0);
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> ((HorizontalScrollView) mKeyboardAccessoryRef.get()).scrollTo(2000, 0));
         CriteriaHelper.pollUiThread(
                 new Criteria("First suggestion should be off the screen after manual scroll.") {
                     @Override
@@ -223,12 +206,8 @@ public class AutofillKeyboardAccessoryTest {
                         mActivityTestRule.getActivity(), mContainerRef.get());
             }
         });
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                ((HorizontalScrollView) mKeyboardAccessoryRef.get()).scrollTo(0, 0);
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> ((HorizontalScrollView) mKeyboardAccessoryRef.get()).scrollTo(0, 0));
         CriteriaHelper.pollUiThread(
                 new Criteria("Last suggestion should be on the screen after manual scroll.") {
                     @Override
@@ -278,13 +257,10 @@ public class AutofillKeyboardAccessoryTest {
                         mActivityTestRule.getActivity(), mContainerRef.get());
             }
         });
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                View suggestion = getSuggestionAt(0);
-                if (suggestion != null) {
-                    suggestion.performClick();
-                }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            View suggestion = getSuggestionAt(0);
+            if (suggestion != null) {
+                suggestion.performClick();
             }
         });
         CriteriaHelper.pollUiThread(new Criteria("Keyboard should be hidden.") {
@@ -296,12 +272,8 @@ public class AutofillKeyboardAccessoryTest {
         });
         Assert.assertTrue("Keyboard accessory should be hidden.",
                 ThreadUtils
-                        .runOnUiThreadBlocking(new Callable<Boolean>() {
-                            @Override
-                            public Boolean call() {
-                                return mKeyboardAccessoryRef.get().getVisibility() == View.GONE;
-                            }
-                        })
+                        .runOnUiThreadBlocking(
+                                () -> mKeyboardAccessoryRef.get().getVisibility() == View.GONE)
                         .booleanValue());
     }
 

@@ -167,11 +167,11 @@ class RecentTabsSubMenuModelTest
 
     BrowserWithTestWindowTest::SetUp();
 
-    local_device_ = base::MakeUnique<syncer::LocalDeviceInfoProviderMock>(
+    local_device_ = std::make_unique<syncer::LocalDeviceInfoProviderMock>(
         "RecentTabsSubMenuModelTest", "Test Machine", "Chromium 10k",
         "Chrome 10k", sync_pb::SyncEnums_DeviceType_TYPE_LINUX, "device_id");
 
-    sync_prefs_ = base::MakeUnique<syncer::SyncPrefs>(profile()->GetPrefs());
+    sync_prefs_ = std::make_unique<syncer::SyncPrefs>(profile()->GetPrefs());
 
     mock_sync_service_ = static_cast<browser_sync::ProfileSyncServiceMock*>(
         ProfileSyncServiceFactory::GetForProfile(profile()));
@@ -183,12 +183,11 @@ class RecentTabsSubMenuModelTest
         .WillRepeatedly(Invoke(&fake_sync_service_observer_list_,
                                &FakeSyncServiceObserverList::RemoveObserver));
 
-    manager_ = base::MakeUnique<sync_sessions::SessionsSyncManager>(
+    manager_ = std::make_unique<sync_sessions::SessionsSyncManager>(
         mock_sync_service_->GetSyncClient()->GetSyncSessionsClient(),
         sync_prefs_.get(), local_device_.get(), &dummy_router_,
         base::Bind(&FakeSyncServiceObserverList::NotifyForeignSessionUpdated,
-                   base::Unretained(&fake_sync_service_observer_list_)),
-        base::Closure());
+                   base::Unretained(&fake_sync_service_observer_list_)));
 
     manager_->MergeDataAndStartSyncing(
         syncer::SESSIONS, syncer::SyncDataList(),
@@ -205,9 +204,7 @@ class RecentTabsSubMenuModelTest
     BrowserWithTestWindowTest::TearDown();
   }
 
-  void WaitForLoadFromLastSession() {
-    content::RunAllBlockingPoolTasksUntilIdle();
-  }
+  void WaitForLoadFromLastSession() { content::RunAllTasksUntilIdle(); }
 
   void DisableSync() {
     EXPECT_CALL(*mock_sync_service_, IsSyncActive())
@@ -228,7 +225,7 @@ class RecentTabsSubMenuModelTest
                 IsDataTypeControllerRunning(syncer::PROXY_TABS))
         .WillRepeatedly(Return(true));
     EXPECT_CALL(*mock_sync_service_, GetOpenTabsUIDelegateMock())
-        .WillRepeatedly(Return(manager_.get()));
+        .WillRepeatedly(Return(manager_->GetOpenTabsUIDelegate()));
   }
 
   void NotifySyncEnabled() {
@@ -237,7 +234,7 @@ class RecentTabsSubMenuModelTest
 
   static std::unique_ptr<KeyedService> GetTabRestoreService(
       content::BrowserContext* browser_context) {
-    return base::MakeUnique<sessions::PersistentTabRestoreService>(
+    return std::make_unique<sessions::PersistentTabRestoreService>(
         base::WrapUnique(new ChromeTabRestoreServiceClient(
             Profile::FromBrowserContext(browser_context))),
         nullptr);
@@ -408,7 +405,7 @@ TEST_F(RecentTabsSubMenuModelTest,
   TabRestoreServiceFactory::GetInstance()->SetTestingFactory(
       profile(), RecentTabsSubMenuModelTest::GetTabRestoreService);
   // Let the shutdown of previous TabRestoreService run.
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
 
   TestRecentTabsSubMenuModel model(nullptr, browser());
   TestRecentTabsMenuModelDelegate delegate(&model);

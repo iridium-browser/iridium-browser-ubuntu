@@ -61,7 +61,8 @@ int64_t internal_display_id_ = -1;
 }  // namespace
 
 bool CompareDisplayIds(int64_t id1, int64_t id2) {
-  DCHECK_NE(id1, id2);
+  if (id1 == id2)
+    return false;
   // Output index is stored in the first 8 bits. See GetDisplayIdFromEDID
   // in edid_parser.cc.
   int index_1 = id1 & 0xFF;
@@ -94,6 +95,7 @@ void Display::ResetForceDeviceScaleFactorForTesting() {
 // static
 void Display::SetForceDeviceScaleFactor(double dsf) {
   // Reset any previously set values and unset the flag.
+  g_has_forced_device_scale_factor = -1;
   g_forced_device_scale_factor = -1.0;
 
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
@@ -108,6 +110,12 @@ gfx::ColorSpace Display::GetForcedColorProfile() {
           switches::kForceColorProfile);
   if (value == "srgb") {
     return gfx::ColorSpace::CreateSRGB();
+  } else if (value == "display-p3-d65") {
+    return gfx::ColorSpace::CreateDisplayP3D65();
+  } else if (value == "scrgb-linear") {
+    return gfx::ColorSpace::CreateSCRGBLinear();
+  } else if (value == "extended-srgb") {
+    return gfx::ColorSpace::CreateExtendedSRGB();
   } else if (value == "generic-rgb") {
     return gfx::ColorSpace(gfx::ColorSpace::PrimaryID::APPLE_GENERIC_RGB,
                            gfx::ColorSpace::TransferID::GAMMA18);
@@ -118,9 +126,8 @@ gfx::ColorSpace Display::GetForcedColorProfile() {
     gfx::ColorSpace color_space(
         gfx::ColorSpace::PrimaryID::WIDE_GAMUT_COLOR_SPIN,
         gfx::ColorSpace::TransferID::GAMMA24);
-    gfx::ICCProfile icc_profile;
-    color_space.GetICCProfile(&icc_profile);
-    return icc_profile.GetColorSpace();
+    return gfx::ICCProfile::FromParametricColorSpace(color_space)
+        .GetColorSpace();
   }
   LOG(ERROR) << "Invalid forced color profile";
   return gfx::ColorSpace::CreateSRGB();
@@ -134,6 +141,14 @@ bool Display::HasForceColorProfile() {
   return has_force_color_profile;
 }
 
+// static
+bool Display::HasEnsureForcedColorProfile() {
+  static bool has_ensure_forced_color_profile =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnsureForcedColorProfile);
+  return has_ensure_forced_color_profile;
+}
+
 Display::Display() : Display(kInvalidDisplayId) {}
 
 Display::Display(int64_t id) : Display(id, gfx::Rect()) {}
@@ -143,14 +158,11 @@ Display::Display(int64_t id, const gfx::Rect& bounds)
       bounds_(bounds),
       work_area_(bounds),
       device_scale_factor_(GetForcedDeviceScaleFactor()),
-      color_space_(HasForceColorProfile() ? GetForcedColorProfile()
-                                          : gfx::ColorSpace::CreateSRGB()),
+      color_space_(gfx::ColorSpace::CreateSRGB()),
       color_depth_(DEFAULT_BITS_PER_PIXEL),
       depth_per_component_(DEFAULT_BITS_PER_COMPONENT) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableHDR)) {
-    color_depth_ = HDR_BITS_PER_PIXEL;
-    depth_per_component_ = HDR_BITS_PER_COMPONENT;
-  }
+  if (HasForceColorProfile())
+    SetColorSpaceAndDepth(GetForcedColorProfile());
 #if defined(USE_AURA)
   SetScaleAndBounds(device_scale_factor_, bounds);
 #endif
@@ -212,7 +224,7 @@ void Display::SetScaleAndBounds(float device_scale_factor,
 #endif
     device_scale_factor_ = device_scale_factor;
   }
-  device_scale_factor_ = std::max(1.0f, device_scale_factor_);
+  device_scale_factor_ = std::max(0.5f, device_scale_factor_);
   bounds_ = gfx::Rect(gfx::ScaleToFlooredPoint(bounds_in_pixel.origin(),
                                                1.0f / device_scale_factor_),
                       gfx::ScaleToFlooredSize(bounds_in_pixel.size(),
@@ -229,6 +241,17 @@ void Display::SetSize(const gfx::Size& size_in_pixel) {
   origin = gfx::ScaleToFlooredPoint(origin, device_scale_factor_);
 #endif
   SetScaleAndBounds(device_scale_factor_, gfx::Rect(origin, size_in_pixel));
+}
+
+void Display::SetColorSpaceAndDepth(const gfx::ColorSpace& color_space) {
+  color_space_ = color_space;
+  if (color_space_.IsHDR()) {
+    color_depth_ = HDR_BITS_PER_PIXEL;
+    depth_per_component_ = HDR_BITS_PER_COMPONENT;
+  } else {
+    color_depth_ = DEFAULT_BITS_PER_PIXEL;
+    depth_per_component_ = DEFAULT_BITS_PER_COMPONENT;
+  }
 }
 
 void Display::UpdateWorkAreaFromInsets(const gfx::Insets& insets) {
@@ -275,6 +298,19 @@ bool Display::IsInternalDisplayId(int64_t display_id) {
 // static
 bool Display::HasInternalDisplay() {
   return internal_display_id_ != kInvalidDisplayId;
+}
+
+bool Display::operator==(const Display& rhs) const {
+  return id_ == rhs.id_ && bounds_ == rhs.bounds_ &&
+         size_in_pixels_ == rhs.size_in_pixels_ &&
+         work_area_ == rhs.work_area_ &&
+         device_scale_factor_ == rhs.device_scale_factor_ &&
+         rotation_ == rhs.rotation_ && touch_support_ == rhs.touch_support_ &&
+         accelerometer_support_ == rhs.accelerometer_support_ &&
+         maximum_cursor_size_ == rhs.maximum_cursor_size_ &&
+         color_space_ == rhs.color_space_ && color_depth_ == rhs.color_depth_ &&
+         depth_per_component_ == rhs.depth_per_component_ &&
+         is_monochrome_ == rhs.is_monochrome_;
 }
 
 }  // namespace display

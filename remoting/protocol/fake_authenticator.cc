@@ -4,16 +4,17 @@
 
 #include "remoting/protocol/fake_authenticator.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/base64.h"
 #include "base/callback_helpers.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "remoting/base/constants.h"
 #include "remoting/protocol/p2p_stream_socket.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -27,7 +28,7 @@ FakeChannelAuthenticator::FakeChannelAuthenticator(bool accept, bool async)
       async_(async),
       weak_factory_(this) {}
 
-FakeChannelAuthenticator::~FakeChannelAuthenticator() {}
+FakeChannelAuthenticator::~FakeChannelAuthenticator() = default;
 
 void FakeChannelAuthenticator::SecureAndAuthenticate(
     std::unique_ptr<P2PStreamSocket> socket,
@@ -47,7 +48,8 @@ void FakeChannelAuthenticator::SecureAndAuthenticate(
       int result = socket_->Write(
           write_buf.get(), 1,
           base::Bind(&FakeChannelAuthenticator::OnAuthBytesWritten,
-                     weak_factory_.GetWeakPtr()));
+                     weak_factory_.GetWeakPtr()),
+          TRAFFIC_ANNOTATION_FOR_TESTS);
       if (result != net::ERR_IO_PENDING) {
         // This will not call the callback because |did_read_bytes_| is
         // still set to false.
@@ -89,7 +91,7 @@ void FakeChannelAuthenticator::CallDoneCallback() {
   base::ResetAndReturn(&done_callback_).Run(result_, std::move(socket_));
 }
 
-FakeAuthenticator::Config::Config() {}
+FakeAuthenticator::Config::Config() = default;
 FakeAuthenticator::Config::Config(Action action) : action(action) {}
 FakeAuthenticator::Config::Config(int round_trips, Action action, bool async)
     : round_trips(round_trips), action(action), async(async) {}
@@ -109,7 +111,7 @@ FakeAuthenticator::FakeAuthenticator(Action action)
                         std::string(),
                         std::string()) {}
 
-FakeAuthenticator::~FakeAuthenticator() {}
+FakeAuthenticator::~FakeAuthenticator() = default;
 
 void FakeAuthenticator::set_messages_till_started(int messages) {
   messages_till_started_ = messages;
@@ -225,7 +227,7 @@ const std::string& FakeAuthenticator::GetAuthKey() const {
 std::unique_ptr<ChannelAuthenticator>
 FakeAuthenticator::CreateChannelAuthenticator() const {
   EXPECT_EQ(ACCEPTED, state());
-  return base::MakeUnique<FakeChannelAuthenticator>(
+  return std::make_unique<FakeChannelAuthenticator>(
       config_.action != REJECT_CHANNEL, config_.async);
 }
 
@@ -233,7 +235,7 @@ FakeHostAuthenticatorFactory::FakeHostAuthenticatorFactory(
     int messages_till_started,
     FakeAuthenticator::Config config)
     : messages_till_started_(messages_till_started), config_(config) {}
-FakeHostAuthenticatorFactory::~FakeHostAuthenticatorFactory() {}
+FakeHostAuthenticatorFactory::~FakeHostAuthenticatorFactory() = default;
 
 std::unique_ptr<Authenticator>
 FakeHostAuthenticatorFactory::CreateAuthenticator(

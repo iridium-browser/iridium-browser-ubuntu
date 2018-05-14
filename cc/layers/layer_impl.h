@@ -31,12 +31,11 @@
 #include "cc/layers/performance_properties.h"
 #include "cc/layers/render_surface_impl.h"
 #include "cc/layers/touch_action_region.h"
-#include "cc/quads/shared_quad_state.h"
-#include "cc/resources/resource_provider.h"
 #include "cc/tiles/tile_priority.h"
 #include "cc/trees/element_id.h"
 #include "cc/trees/mutator_host_client.h"
 #include "cc/trees/target_property.h"
+#include "components/viz/common/quads/shared_quad_state.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/rect.h"
@@ -52,14 +51,18 @@ class TracedValue;
 class DictionaryValue;
 }
 
+namespace viz {
+class RenderPass;
+}
+
 namespace cc {
 
 class AppendQuadsData;
 class LayerTreeImpl;
+class LayerTreeResourceProvider;
 class MicroBenchmarkImpl;
 class MutatorHost;
 class PrioritizedTile;
-class RenderPass;
 class ScrollbarLayerImplBase;
 class SimpleEnclosedRegion;
 class Tile;
@@ -84,7 +87,6 @@ class CC_EXPORT LayerImpl {
   int id() const { return layer_id_; }
 
   // Interactions with attached animations.
-  gfx::ScrollOffset ScrollOffsetForAnimation() const;
   bool IsActive() const;
 
   void SetHasTransformNode(bool val) { has_transform_node_ = val; }
@@ -125,10 +127,12 @@ class CC_EXPORT LayerImpl {
 
   LayerTreeImpl* layer_tree_impl() const { return layer_tree_impl_; }
 
-  void PopulateSharedQuadState(SharedQuadState* state) const;
-  void PopulateScaledSharedQuadState(SharedQuadState* state,
+  void PopulateSharedQuadState(viz::SharedQuadState* state,
+                               bool contents_opaque) const;
+  void PopulateScaledSharedQuadState(viz::SharedQuadState* state,
                                      float layer_to_content_scale_x,
-                                     float layer_to_content_scale_y) const;
+                                     float layer_to_content_scale_y,
+                                     bool contents_opaque) const;
   // WillDraw must be called before AppendQuads. If WillDraw returns false,
   // AppendQuads and DidDraw will not be called. If WillDraw returns true,
   // DidDraw is guaranteed to be called before another WillDraw or before
@@ -136,19 +140,19 @@ class CC_EXPORT LayerImpl {
   // WillDraw/DidDraw must call the base class version only if WillDraw
   // returns true.
   virtual bool WillDraw(DrawMode draw_mode,
-                        ResourceProvider* resource_provider);
-  virtual void AppendQuads(RenderPass* render_pass,
+                        LayerTreeResourceProvider* resource_provider);
+  virtual void AppendQuads(viz::RenderPass* render_pass,
                            AppendQuadsData* append_quads_data) {}
-  virtual void DidDraw(ResourceProvider* resource_provider);
+  virtual void DidDraw(LayerTreeResourceProvider* resource_provider);
 
   // Verify that the resource ids in the quad are valid.
-  void ValidateQuadResources(DrawQuad* quad) const {
+  void ValidateQuadResources(viz::DrawQuad* quad) const {
 #if DCHECK_IS_ON()
     ValidateQuadResourcesInternal(quad);
 #endif
   }
 
-  virtual void GetContentsResourceId(ResourceId* resource_id,
+  virtual void GetContentsResourceId(viz::ResourceId* resource_id,
                                      gfx::Size* resource_size,
                                      gfx::SizeF* resource_uv_size) const;
 
@@ -160,8 +164,17 @@ class CC_EXPORT LayerImpl {
   void SetDrawsContent(bool draws_content);
   bool DrawsContent() const { return draws_content_; }
 
-  void SetShouldHitTest(bool should_hit_test);
-  bool should_hit_test() const { return should_hit_test_; }
+  // Make the layer hit test (see: |should_hit_test|) even if !draws_content_.
+  void SetHitTestableWithoutDrawsContent(bool should_hit_test);
+  bool hit_testable_without_draws_content() const {
+    return hit_testable_without_draws_content_;
+  }
+
+  // True if either the layer draws content or has been marked as hit testable
+  // without draws_content.
+  bool should_hit_test() const {
+    return draws_content_ || hit_testable_without_draws_content_;
+  }
 
   LayerImplTestProperties* test_properties() {
     if (!test_properties_)
@@ -176,8 +189,6 @@ class CC_EXPORT LayerImpl {
   // non-opaque color.  Tries to return background_color(), if possible.
   SkColor SafeOpaqueBackgroundColor() const;
 
-  bool HasPotentiallyRunningFilterAnimation() const;
-
   void SetMasksToBounds(bool masks_to_bounds);
   bool masks_to_bounds() const { return masks_to_bounds_; }
 
@@ -190,9 +201,6 @@ class CC_EXPORT LayerImpl {
   // Stable identifier for clients. See comment in cc/trees/element_id.h.
   void SetElementId(ElementId element_id);
   ElementId element_id() const { return element_id_; }
-
-  void SetMutableProperties(uint32_t properties);
-  uint32_t mutable_properties() const { return mutable_properties_; }
 
   void SetPosition(const gfx::PointF& position);
   gfx::PointF position() const { return position_; }
@@ -207,6 +215,9 @@ class CC_EXPORT LayerImpl {
   bool use_parent_backface_visibility() const {
     return use_parent_backface_visibility_;
   }
+
+  bool IsResizedByBrowserControls() const;
+  void SetIsResizedByBrowserControls(bool resized);
 
   void SetShouldCheckBackfaceVisibility(bool should_check_backface_visibility) {
     should_check_backface_visibility_ = should_check_backface_visibility;
@@ -324,16 +335,6 @@ class CC_EXPORT LayerImpl {
     return touch_action_region_;
   }
 
-  bool HasPotentiallyRunningTransformAnimation() const;
-
-  bool HasFilterAnimationThatInflatesBounds() const;
-  bool HasAnimationThatInflatesBounds() const;
-
-  bool FilterAnimationBoundsForBox(const gfx::BoxF& box,
-                                   gfx::BoxF* bounds) const;
-  bool TransformAnimationBoundsForBox(const gfx::BoxF& box,
-                                      gfx::BoxF* bounds) const;
-
   // Note this rect is in layer space (not content space).
   void SetUpdateRect(const gfx::Rect& update_rect);
   const gfx::Rect& update_rect() const { return update_rect_; }
@@ -341,13 +342,18 @@ class CC_EXPORT LayerImpl {
   void AddDamageRect(const gfx::Rect& damage_rect);
   const gfx::Rect& damage_rect() const { return damage_rect_; }
 
-  virtual std::unique_ptr<base::DictionaryValue> LayerTreeAsJson();
+  virtual std::unique_ptr<base::DictionaryValue> LayerAsJson();
+  // TODO(pdr): This should be removed because there is no longer a tree
+  // of layers, only a list.
+  std::unique_ptr<base::DictionaryValue> LayerTreeAsJson();
 
-  // This includes |layer_property_changed_| and property_trees changes.
+  // This includes |layer_property_changed_not_from_property_trees_| and
+  // property_trees changes.
   bool LayerPropertyChanged() const;
-  // Only checks |layer_property_changed_|. Used in damage_tracker to determine
-  // if there is a contributing content damage not from property_trees changes
-  // in animaiton.
+  bool LayerPropertyChangedFromPropertyTrees() const;
+  // Only checks |layer_property_changed_not_from_property_trees_|. Used in
+  // damage_tracker to determine if there is a contributing content damage not
+  // from property_trees changes in animaiton.
   bool LayerPropertyChangedNotFromPropertyTrees() const;
 
   void ResetChangeTracking();
@@ -415,16 +421,20 @@ class CC_EXPORT LayerImpl {
 
   bool has_copy_requests_in_target_subtree();
 
-  void UpdatePropertyTreeForAnimationIfNeeded();
+  void UpdatePropertyTreeForAnimationIfNeeded(ElementId element_id);
 
   float GetIdealContentsScale() const;
 
   void NoteLayerPropertyChanged();
+  void NoteLayerPropertyChangedFromPropertyTrees();
 
   void SetHasWillChangeTransformHint(bool has_will_change);
   bool has_will_change_transform_hint() const {
     return has_will_change_transform_hint_;
   }
+
+  void SetTrilinearFiltering(bool trilinear_filtering);
+  bool trilinear_filtering() const { return trilinear_filtering_; }
 
   MutatorHost* GetMutatorHost() const;
 
@@ -449,13 +459,13 @@ class CC_EXPORT LayerImpl {
   // Get the color and size of the layer's debug border.
   virtual void GetDebugBorderProperties(SkColor* color, float* width) const;
 
-  void AppendDebugBorderQuad(RenderPass* render_pass,
-                             const gfx::Size& bounds,
-                             const SharedQuadState* shared_quad_state,
+  void AppendDebugBorderQuad(viz::RenderPass* render_pass,
+                             const gfx::Rect& quad_rect,
+                             const viz::SharedQuadState* shared_quad_state,
                              AppendQuadsData* append_quads_data) const;
-  void AppendDebugBorderQuad(RenderPass* render_pass,
-                             const gfx::Size& bounds,
-                             const SharedQuadState* shared_quad_state,
+  void AppendDebugBorderQuad(viz::RenderPass* render_pass,
+                             const gfx::Rect& quad_rect,
+                             const viz::SharedQuadState* shared_quad_state,
                              AppendQuadsData* append_quads_data,
                              SkColor color,
                              float width) const;
@@ -463,11 +473,7 @@ class CC_EXPORT LayerImpl {
   gfx::Rect GetScaledEnclosingRectInTargetSpace(float scale) const;
 
  private:
-  // This includes all animations, even those that are finished but haven't yet
-  // been deleted.
-  bool HasAnyAnimationTargetingProperty(TargetProperty::Type property) const;
-
-  void ValidateQuadResourcesInternal(DrawQuad* quad) const;
+  void ValidateQuadResourcesInternal(viz::DrawQuad* quad) const;
 
   virtual const char* LayerTypeAsString() const;
 
@@ -493,7 +499,14 @@ class CC_EXPORT LayerImpl {
   bool should_flatten_transform_from_property_tree_ : 1;
 
   // Tracks if drawing-related properties have changed since last redraw.
-  bool layer_property_changed_ : 1;
+  // TODO(wutao): We want to distinquish the sources of change so that we can
+  // reuse the cache of render pass. For example, we can reuse the cache when
+  // transform and opacity changing on a surface during animation. Currently
+  // |layer_property_changed_from_property_trees_| does not mean the layer is
+  // damaged from animation. We need better mechanism to explicitly capture
+  // damage from animations. http://crbug.com/755828.
+  bool layer_property_changed_not_from_property_trees_ : 1;
+  bool layer_property_changed_from_property_trees_ : 1;
   bool may_contain_video_ : 1;
 
   bool masks_to_bounds_ : 1;
@@ -502,7 +515,12 @@ class CC_EXPORT LayerImpl {
   bool should_check_backface_visibility_ : 1;
   bool draws_content_ : 1;
   bool contributes_to_drawn_render_surface_ : 1;
-  bool should_hit_test_ : 1;
+
+  // Hit testing depends on draws_content (see: |LayerImpl::should_hit_test|)
+  // and this bit can be set to cause the layer to be hit testable without
+  // draws_content.
+  bool hit_testable_without_draws_content_ : 1;
+  bool is_resized_by_browser_controls_ : 1;
 
   static_assert(LAST_VIEWPORT_LAYER_TYPE < (1u << 3),
                 "enough bits for ViewportLayerType (viewport_layer_type_)");
@@ -534,7 +552,6 @@ class CC_EXPORT LayerImpl {
   TransformTree& GetTransformTree() const;
 
   ElementId element_id_;
-  uint32_t mutable_properties_;
   // Rect indicating what was repainted/updated during update.
   // Note that plugin layers bypass this and leave it empty.
   // This is in the layer's space.
@@ -554,6 +571,7 @@ class CC_EXPORT LayerImpl {
   base::trace_event::ConvertableToTraceFormat* debug_info_;
 
   bool has_will_change_transform_hint_ : 1;
+  bool trilinear_filtering_ : 1;
   bool needs_push_properties_ : 1;
   bool scrollbars_hidden_ : 1;
 

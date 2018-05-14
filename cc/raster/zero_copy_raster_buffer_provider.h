@@ -18,44 +18,46 @@ class ConvertableToTraceFormat;
 }
 }
 
+namespace gpu {
+class GpuMemoryBufferManager;
+}
+
 namespace cc {
-class ResourceProvider;
+class LayerTreeResourceProvider;
 
 class CC_EXPORT ZeroCopyRasterBufferProvider : public RasterBufferProvider {
  public:
-  ~ZeroCopyRasterBufferProvider() override;
-
-  static std::unique_ptr<RasterBufferProvider> Create(
-      ResourceProvider* resource_provider,
+  ZeroCopyRasterBufferProvider(
+      LayerTreeResourceProvider* resource_provider,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+      viz::ContextProvider* compositor_context_provider,
       viz::ResourceFormat preferred_tile_format);
+  ~ZeroCopyRasterBufferProvider() override;
 
   // Overridden from RasterBufferProvider:
   std::unique_ptr<RasterBuffer> AcquireBufferForRaster(
-      const Resource* resource,
+      const ResourcePool::InUsePoolResource& resource,
       uint64_t resource_content_id,
       uint64_t previous_content_id) override;
-  void ReleaseBufferForRaster(std::unique_ptr<RasterBuffer> buffer) override;
-  void OrderingBarrier() override;
   void Flush() override;
   viz::ResourceFormat GetResourceFormat(bool must_support_alpha) const override;
   bool IsResourceSwizzleRequired(bool must_support_alpha) const override;
   bool CanPartialRasterIntoProvidedResource() const override;
-  bool IsResourceReadyToDraw(ResourceId id) const override;
+  bool IsResourceReadyToDraw(
+      const ResourcePool::InUsePoolResource& resource) const override;
   uint64_t SetReadyToDrawCallback(
-      const ResourceProvider::ResourceIdArray& resource_ids,
+      const std::vector<const ResourcePool::InUsePoolResource*>& resources,
       const base::Closure& callback,
       uint64_t pending_callback_id) const override;
   void Shutdown() override;
-
- protected:
-  ZeroCopyRasterBufferProvider(ResourceProvider* resource_provider,
-                               viz::ResourceFormat preferred_tile_format);
 
  private:
   std::unique_ptr<base::trace_event::ConvertableToTraceFormat> StateAsValue()
       const;
 
-  ResourceProvider* resource_provider_;
+  LayerTreeResourceProvider* resource_provider_;
+  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
+  viz::ContextProvider* compositor_context_provider_;
   viz::ResourceFormat preferred_tile_format_;
 
   DISALLOW_COPY_AND_ASSIGN(ZeroCopyRasterBufferProvider);

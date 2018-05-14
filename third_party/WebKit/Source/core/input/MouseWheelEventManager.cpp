@@ -10,21 +10,18 @@
 #include "core/frame/LocalFrameView.h"
 #include "core/input/EventHandler.h"
 #include "core/input/EventHandlingUtil.h"
-#include "core/input/ScrollManager.h"
 #include "core/layout/HitTestRequest.h"
 #include "core/layout/HitTestResult.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "public/platform/WebMouseWheelEvent.h"
 
 namespace blink {
-MouseWheelEventManager::MouseWheelEventManager(LocalFrame& frame,
-                                               ScrollManager& scroll_manager)
-    : frame_(frame), wheel_target_(nullptr), scroll_manager_(scroll_manager) {}
+MouseWheelEventManager::MouseWheelEventManager(LocalFrame& frame)
+    : frame_(frame), wheel_target_(nullptr) {}
 
-DEFINE_TRACE(MouseWheelEventManager) {
+void MouseWheelEventManager::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(wheel_target_);
-  visitor->Trace(scroll_manager_);
 }
 
 void MouseWheelEventManager::Clear() {
@@ -37,7 +34,7 @@ WebInputEventResult MouseWheelEventManager::HandleWheelEvent(
       RuntimeEnabledFeatures::TouchpadAndWheelScrollLatchingEnabled();
 
   Document* doc = frame_->GetDocument();
-  if (!doc || doc->GetLayoutViewItem().IsNull())
+  if (!doc || !doc->GetLayoutView())
     return WebInputEventResult::kNotHandled;
 
   LocalFrameView* view = frame_->View();
@@ -69,7 +66,8 @@ WebInputEventResult MouseWheelEventManager::HandleWheelEvent(
       // Synthetic wheel events generated from GesturePinchUpdate don't have
       // phase info. Send these events to the target under the cursor.
       wheel_target_ = FindTargetNode(event, doc, view);
-    } else if (event.phase == WebMouseWheelEvent::kPhaseBegan) {
+    } else if (event.phase == WebMouseWheelEvent::kPhaseBegan ||
+               !wheel_target_) {
       // Find and save the wheel_target_, this target will be used for the rest
       // of the current scrolling sequence.
       wheel_target_ = FindTargetNode(event, doc, view);
@@ -98,8 +96,6 @@ WebInputEventResult MouseWheelEventManager::HandleWheelEvent(
   if (subframe) {
     WebInputEventResult result =
         subframe->GetEventHandler().HandleWheelEvent(event);
-    if (result != WebInputEventResult::kNotHandled)
-      scroll_manager_->SetFrameWasScrolledByUser();
     return result;
   }
 
@@ -115,16 +111,21 @@ WebInputEventResult MouseWheelEventManager::HandleWheelEvent(
   return WebInputEventResult::kNotHandled;
 }
 
+void MouseWheelEventManager::ElementRemoved(Node* target) {
+  if (wheel_target_ == target)
+    wheel_target_ = nullptr;
+}
+
 Node* MouseWheelEventManager::FindTargetNode(const WebMouseWheelEvent& event,
                                              const Document* doc,
                                              const LocalFrameView* view) {
-  DCHECK(doc && !doc->GetLayoutViewItem().IsNull() && view);
+  DCHECK(doc && doc->GetLayoutView() && view);
   LayoutPoint v_point =
       view->RootFrameToContents(FlooredIntPoint(event.PositionInRootFrame()));
 
   HitTestRequest request(HitTestRequest::kReadOnly);
   HitTestResult result(request, v_point);
-  doc->GetLayoutViewItem().HitTest(result);
+  doc->GetLayoutView()->HitTest(result);
 
   Node* node = result.InnerNode();
   // Wheel events should not dispatch to text nodes.

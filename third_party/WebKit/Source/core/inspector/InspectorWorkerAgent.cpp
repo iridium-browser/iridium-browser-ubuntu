@@ -30,10 +30,10 @@
 
 #include "core/inspector/InspectorWorkerAgent.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "core/dom/Document.h"
 #include "core/inspector/InspectedFrames.h"
 #include "platform/weborigin/KURL.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
@@ -52,7 +52,7 @@ int InspectorWorkerAgent::s_last_connection_ = 0;
 InspectorWorkerAgent::InspectorWorkerAgent(InspectedFrames* inspected_frames)
     : inspected_frames_(inspected_frames) {}
 
-InspectorWorkerAgent::~InspectorWorkerAgent() {}
+InspectorWorkerAgent::~InspectorWorkerAgent() = default;
 
 void InspectorWorkerAgent::Restore() {
   if (!AutoAttachEnabled())
@@ -94,10 +94,6 @@ Response InspectorWorkerAgent::setAutoAttach(bool auto_attach,
   return Response::OK();
 }
 
-Response InspectorWorkerAgent::setAttachToFrames(bool attach) {
-  return Response::OK();
-}
-
 bool InspectorWorkerAgent::AutoAttachEnabled() {
   return state_->booleanProperty(WorkerAgentState::kAutoAttach, false);
 }
@@ -131,15 +127,6 @@ Response InspectorWorkerAgent::sendMessageToTarget(const String& message,
   return Response::Error("Session id must be specified");
 }
 
-void InspectorWorkerAgent::SetTracingSessionId(
-    const String& tracing_session_id) {
-  tracing_session_id_ = tracing_session_id;
-  if (tracing_session_id.IsEmpty())
-    return;
-  for (auto& id_proxy : connected_proxies_)
-    id_proxy.value->WriteTimelineStartedEvent(tracing_session_id);
-}
-
 void InspectorWorkerAgent::ShouldWaitForDebuggerOnWorkerStart(bool* result) {
   if (AutoAttachEnabled() &&
       state_->booleanProperty(WorkerAgentState::kWaitForDebuggerOnStart, false))
@@ -150,8 +137,6 @@ void InspectorWorkerAgent::DidStartWorker(WorkerInspectorProxy* proxy,
                                           bool waiting_for_debugger) {
   DCHECK(GetFrontend() && AutoAttachEnabled());
   ConnectToProxy(proxy, waiting_for_debugger);
-  if (!tracing_session_id_.IsEmpty())
-    proxy->WriteTimelineStartedEvent(tracing_session_id_);
 }
 
 void InspectorWorkerAgent::WorkerTerminated(WorkerInspectorProxy* proxy) {
@@ -255,7 +240,7 @@ void InspectorWorkerAgent::DispatchMessageFromWorker(
                                            proxy->InspectorId());
 }
 
-DEFINE_TRACE(InspectorWorkerAgent) {
+void InspectorWorkerAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(connected_proxies_);
   visitor->Trace(inspected_frames_);
   InspectorBaseAgent::Trace(visitor);

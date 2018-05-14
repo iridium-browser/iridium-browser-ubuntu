@@ -4,12 +4,10 @@
 
 #include "net/spdy/chromium/bidirectional_stream_spdy_impl.h"
 
-#include <memory>
-
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "base/timer/mock_timer.h"
 #include "net/base/load_timing_info.h"
@@ -19,6 +17,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/log/test_net_log.h"
+#include "net/socket/socket_tag.h"
 #include "net/socket/socket_test_util.h"
 #include "net/spdy/chromium/spdy_session.h"
 #include "net/spdy/chromium/spdy_test_util_common.h"
@@ -68,7 +67,7 @@ class TestDelegateBase : public BidirectionalStreamImpl::Delegate {
   TestDelegateBase(base::WeakPtr<SpdySession> session,
                    IOBuffer* read_buf,
                    int read_buf_len)
-      : stream_(base::MakeUnique<BidirectionalStreamSpdyImpl>(session,
+      : stream_(std::make_unique<BidirectionalStreamSpdyImpl>(session,
                                                               NetLogSource())),
         read_buf_(read_buf),
         read_buf_len_(read_buf_len),
@@ -82,7 +81,7 @@ class TestDelegateBase : public BidirectionalStreamImpl::Delegate {
         not_expect_callback_(false),
         on_failed_called_(false) {}
 
-  ~TestDelegateBase() override {}
+  ~TestDelegateBase() override = default;
 
   void OnStreamReady(bool request_headers_sent) override {
     CHECK(!on_failed_called_);
@@ -134,7 +133,7 @@ class TestDelegateBase : public BidirectionalStreamImpl::Delegate {
              const NetLogWithSource& net_log) {
     stream_->Start(request, net_log,
                    /*send_request_headers_automatically=*/false, this,
-                   base::MakeUnique<base::Timer>(false, false));
+                   std::make_unique<base::Timer>(false, false));
     not_expect_callback_ = false;
   }
 
@@ -153,7 +152,7 @@ class TestDelegateBase : public BidirectionalStreamImpl::Delegate {
   // Sets whether the delegate should wait until the completion of the stream.
   void SetRunUntilCompletion(bool run_until_completion) {
     run_until_completion_ = run_until_completion;
-    loop_ = base::MakeUnique<base::RunLoop>();
+    loop_ = std::make_unique<base::RunLoop>();
   }
 
   // Wait until the stream reaches completion.
@@ -236,10 +235,14 @@ class BidirectionalStreamSpdyImplTest : public testing::TestWithParam<bool> {
   BidirectionalStreamSpdyImplTest()
       : default_url_(kDefaultUrl),
         host_port_pair_(HostPortPair::FromURL(default_url_)),
-        key_(host_port_pair_, ProxyServer::Direct(), PRIVACY_MODE_DISABLED),
+        key_(host_port_pair_,
+             ProxyServer::Direct(),
+             PRIVACY_MODE_DISABLED,
+             SocketTag()),
         ssl_data_(SSLSocketDataProvider(ASYNC, OK)) {
     ssl_data_.next_proto = kProtoHTTP2;
-    ssl_data_.cert = ImportCertFromFile(GetTestCertsDirectory(), "ok_cert.pem");
+    ssl_data_.ssl_info.cert =
+        ImportCertFromFile(GetTestCertsDirectory(), "ok_cert.pem");
   }
 
  protected:
@@ -255,9 +258,9 @@ class BidirectionalStreamSpdyImplTest : public testing::TestWithParam<bool> {
                    size_t reads_count,
                    MockWrite* writes,
                    size_t writes_count) {
-    ASSERT_TRUE(ssl_data_.cert.get());
+    ASSERT_TRUE(ssl_data_.ssl_info.cert.get());
     session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_data_);
-    sequenced_data_ = base::MakeUnique<SequencedSocketData>(
+    sequenced_data_ = std::make_unique<SequencedSocketData>(
         reads, reads_count, writes, writes_count);
     session_deps_.socket_factory->AddSocketDataProvider(sequenced_data_.get());
     session_deps_.net_log = net_log_.bound().net_log();
@@ -283,7 +286,7 @@ TEST_F(BidirectionalStreamSpdyImplTest, SimplePostRequest) {
   SpdySerializedFrame req(spdy_util_.ConstructSpdyPost(
       kDefaultUrl, 1, kBodyDataSize, LOW, nullptr, 0));
   SpdySerializedFrame data_frame(spdy_util_.ConstructSpdyDataFrame(
-      1, kBodyData, kBodyDataSize, /*fin=*/true));
+      1, base::StringPiece(kBodyData, kBodyDataSize), /*fin=*/true));
   MockWrite writes[] = {
       CreateMockWrite(req, 0), CreateMockWrite(data_frame, 3),
   };
@@ -301,10 +304,10 @@ TEST_F(BidirectionalStreamSpdyImplTest, SimplePostRequest) {
   request_info.method = "POST";
   request_info.url = default_url_;
   request_info.extra_headers.SetHeader(net::HttpRequestHeaders::kContentLength,
-                                       base::SizeTToString(kBodyDataSize));
+                                       base::NumberToString(kBodyDataSize));
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
-  auto delegate = base::MakeUnique<TestDelegateBase>(
+  auto delegate = std::make_unique<TestDelegateBase>(
       session_, read_buffer.get(), kReadBufferSize);
   delegate->SetRunUntilCompletion(true);
   delegate->Start(&request_info, net_log_.bound());
@@ -331,9 +334,9 @@ TEST_F(BidirectionalStreamSpdyImplTest, SimplePostRequest) {
 
 TEST_F(BidirectionalStreamSpdyImplTest, LoadTimingTwoRequests) {
   SpdySerializedFrame req(
-      spdy_util_.ConstructSpdyGet(nullptr, 0, /*stream_id=*/1, LOW, true));
+      spdy_util_.ConstructSpdyGet(nullptr, 0, /*stream_id=*/1, LOW));
   SpdySerializedFrame req2(
-      spdy_util_.ConstructSpdyGet(nullptr, 0, /*stream_id=*/3, LOW, true));
+      spdy_util_.ConstructSpdyGet(nullptr, 0, /*stream_id=*/3, LOW));
   MockWrite writes[] = {
       CreateMockWrite(req, 0), CreateMockWrite(req2, 2),
   };
@@ -357,9 +360,9 @@ TEST_F(BidirectionalStreamSpdyImplTest, LoadTimingTwoRequests) {
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   scoped_refptr<IOBuffer> read_buffer2(new IOBuffer(kReadBufferSize));
-  auto delegate = base::MakeUnique<TestDelegateBase>(
+  auto delegate = std::make_unique<TestDelegateBase>(
       session_, read_buffer.get(), kReadBufferSize);
-  auto delegate2 = base::MakeUnique<TestDelegateBase>(
+  auto delegate2 = std::make_unique<TestDelegateBase>(
       session_, read_buffer2.get(), kReadBufferSize);
   delegate->SetRunUntilCompletion(true);
   delegate2->SetRunUntilCompletion(true);
@@ -401,10 +404,10 @@ TEST_F(BidirectionalStreamSpdyImplTest, SendDataAfterStreamFailed) {
   request_info.method = "POST";
   request_info.url = default_url_;
   request_info.extra_headers.SetHeader(net::HttpRequestHeaders::kContentLength,
-                                       base::SizeTToString(kBodyDataSize * 3));
+                                       base::NumberToString(kBodyDataSize * 3));
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
-  auto delegate = base::MakeUnique<TestDelegateBase>(
+  auto delegate = std::make_unique<TestDelegateBase>(
       session_, read_buffer.get(), kReadBufferSize);
   delegate->SetRunUntilCompletion(true);
   delegate->Start(&request_info, net_log_.bound());
@@ -424,8 +427,7 @@ TEST_F(BidirectionalStreamSpdyImplTest, SendDataAfterStreamFailed) {
   // BidirectionalStreamSpdyStreamJob does not count the bytes sent for |rst|
   // because it is sent after SpdyStream::Delegate::OnClose is called.
   EXPECT_EQ(CountWriteBytes(writes, 1), delegate->GetTotalSentBytes());
-  EXPECT_EQ(CountReadBytes(reads, arraysize(reads)),
-            delegate->GetTotalReceivedBytes());
+  EXPECT_EQ(0, delegate->GetTotalReceivedBytes());
 }
 
 INSTANTIATE_TEST_CASE_P(BidirectionalStreamSpdyImplTests,
@@ -453,10 +455,10 @@ TEST_P(BidirectionalStreamSpdyImplTest, RstWithNoErrorBeforeSendIsComplete) {
   request_info.method = "POST";
   request_info.url = default_url_;
   request_info.extra_headers.SetHeader(net::HttpRequestHeaders::kContentLength,
-                                       base::SizeTToString(kBodyDataSize * 3));
+                                       base::NumberToString(kBodyDataSize * 3));
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
-  auto delegate = base::MakeUnique<TestDelegateBase>(
+  auto delegate = std::make_unique<TestDelegateBase>(
       session_, read_buffer.get(), kReadBufferSize);
   delegate->SetRunUntilCompletion(true);
   delegate->Start(&request_info, net_log_.bound());

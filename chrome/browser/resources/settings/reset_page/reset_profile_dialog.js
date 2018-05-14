@@ -41,7 +41,7 @@ Polymer({
     },
   },
 
-  /** @private {!settings.ResetBrowserProxy} */
+  /** @private {?settings.ResetBrowserProxy} */
   browserProxy_: null,
 
   /**
@@ -65,19 +65,19 @@ Polymer({
       return loadTimeData.getStringF(
           'triggeredResetPageTitle', this.triggeredResetToolName_);
     }
-    return loadTimeData.getStringF('resetPageTitle');
+    return loadTimeData.getStringF('resetTrigger');
   },
 
   /** @override */
   ready: function() {
     this.browserProxy_ = settings.ResetBrowserProxyImpl.getInstance();
 
-    this.addEventListener('cancel', function() {
+    this.addEventListener('cancel', () => {
       this.browserProxy_.onHideResetProfileDialog();
-    }.bind(this));
+    });
 
     this.$$('paper-checkbox a')
-        .addEventListener('tap', this.onShowReportedSettingsTap_.bind(this));
+        .addEventListener('click', this.onShowReportedSettingsTap_.bind(this));
     // Prevent toggling of the checkbox when hitting the "Enter" key on the
     // link.
     this.$$('paper-checkbox a').addEventListener('keydown', function(e) {
@@ -87,25 +87,25 @@ Polymer({
 
   /** @private */
   showDialog_: function() {
-    this.$.dialog.showModal();
+    if (!this.$.dialog.open)
+      this.$.dialog.showModal();
     this.browserProxy_.onShowResetProfileDialog();
   },
 
-  /** @override */
-  attached: function() {
+  show: function() {
     this.isTriggered_ =
         settings.getCurrentRoute() == settings.routes.TRIGGERED_RESET_DIALOG;
     if (this.isTriggered_) {
-      this.browserProxy_.getTriggeredResetToolName().then(function(name) {
+      this.browserProxy_.getTriggeredResetToolName().then(name => {
         this.resetRequestOrigin_ = 'triggeredreset';
         this.triggeredResetToolName_ = name;
         this.showDialog_();
-      }.bind(this));
+      });
     } else {
       // For the non-triggered reset dialog, a '#cct' hash indicates that the
       // reset request came from the Chrome Cleanup Tool by launching Chrome
       // with the startup URL chrome://settings/resetProfileSettings#cct.
-      var origin = window.location.hash.slice(1).toLowerCase() == 'cct' ?
+      const origin = window.location.hash.slice(1).toLowerCase() == 'cct' ?
           'cct' :
           settings.getQueryParameters().get('origin');
       this.resetRequestOrigin_ = origin || '';
@@ -124,12 +124,12 @@ Polymer({
     this.browserProxy_
         .performResetProfileSettings(
             this.$.sendSettings.checked, this.resetRequestOrigin_)
-        .then(function() {
+        .then(() => {
           this.clearingInProgress_ = false;
           if (this.$.dialog.open)
             this.$.dialog.close();
           this.fire('reset-done');
-        }.bind(this));
+        });
   },
 
   /**

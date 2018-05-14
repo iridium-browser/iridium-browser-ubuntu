@@ -40,6 +40,14 @@ bool SpeechMonitor::DidStop() {
   return did_stop_;
 }
 
+void SpeechMonitor::BlockUntilStop() {
+  if (!did_stop_) {
+    loop_runner_ = new content::MessageLoopRunner();
+    loop_runner_->Run();
+    loop_runner_ = NULL;
+  }
+}
+
 bool SpeechMonitor::SkipChromeVoxMessage(const std::string& message) {
   while (true) {
     if (utterance_queue_.empty()) {
@@ -59,17 +67,14 @@ bool SpeechMonitor::PlatformImplAvailable() {
   return true;
 }
 
-bool SpeechMonitor::Speak(
-    int utterance_id,
-    const std::string& utterance,
-    const std::string& lang,
-    const VoiceData& voice,
-    const UtteranceContinuousParameters& params) {
-  TtsController::GetInstance()->OnTtsEvent(
-      utterance_id,
-      TTS_EVENT_END,
-      static_cast<int>(utterance.size()),
-      std::string());
+bool SpeechMonitor::Speak(int utterance_id,
+                          const std::string& utterance,
+                          const std::string& lang,
+                          const VoiceData& voice,
+                          const UtteranceContinuousParameters& params) {
+  TtsController::GetInstance()->OnTtsEvent(utterance_id, TTS_EVENT_END,
+                                           static_cast<int>(utterance.size()),
+                                           std::string());
   return true;
 }
 

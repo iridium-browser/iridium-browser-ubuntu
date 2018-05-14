@@ -33,26 +33,66 @@
 #define LinkLoader_h
 
 #include "core/CoreExport.h"
+#include "core/html/LinkRelAttribute.h"
 #include "core/loader/LinkLoaderClient.h"
+#include "core/script/Modulator.h"
 #include "platform/CrossOriginAttributeValue.h"
 #include "platform/PrerenderClient.h"
-#include "platform/loader/fetch/ResourceOwner.h"
+#include "platform/loader/fetch/Resource.h"
 #include "platform/wtf/Optional.h"
 
 namespace blink {
 
 class Document;
-class LinkRelAttribute;
+class LinkHeader;
 class LocalFrame;
 class NetworkHintsInterface;
 class PrerenderHandle;
 struct ViewportDescriptionWrapper;
 
+// The parameter object for LinkLoader::LoadLink().
+struct LinkLoadParameters {
+  LinkLoadParameters(const LinkRelAttribute& rel,
+                     const CrossOriginAttributeValue& cross_origin,
+                     const String& type,
+                     const String& as,
+                     const String& media,
+                     const String& nonce,
+                     const String& integrity,
+                     const ReferrerPolicy& referrer_policy,
+                     const KURL& href,
+                     const String& srcset,
+                     const String& sizes)
+      : rel(rel),
+        cross_origin(cross_origin),
+        type(type),
+        as(as),
+        media(media),
+        nonce(nonce),
+        integrity(integrity),
+        referrer_policy(referrer_policy),
+        href(href),
+        srcset(srcset),
+        sizes(sizes) {}
+  LinkLoadParameters(const LinkHeader&, const KURL& base_url);
+
+  LinkRelAttribute rel;
+  CrossOriginAttributeValue cross_origin;
+  String type;
+  String as;
+  String media;
+  String nonce;
+  String integrity;
+  ReferrerPolicy referrer_policy;
+  KURL href;
+  String srcset;
+  String sizes;
+};
+
 // The LinkLoader can load link rel types icon, dns-prefetch, prefetch, and
 // prerender.
-class CORE_EXPORT LinkLoader final
-    : public GarbageCollectedFinalized<LinkLoader>,
-      public PrerenderClient {
+class CORE_EXPORT LinkLoader final : public SingleModuleClient,
+                                     public PrerenderClient {
   USING_GARBAGE_COLLECTED_MIXIN(LinkLoader);
 
  public:
@@ -68,15 +108,11 @@ class CORE_EXPORT LinkLoader final
   void DidSendDOMContentLoadedForPrerender() override;
 
   void Abort();
-  bool LoadLink(const LinkRelAttribute&,
-                CrossOriginAttributeValue,
-                const String& type,
-                const String& as,
-                const String& media,
-                ReferrerPolicy,
-                const KURL&,
+  bool LoadLink(const LinkLoadParameters&,
                 Document&,
                 const NetworkHintsInterface&);
+  void DispatchLinkLoadingErroredAsync();
+
   enum CanLoadResources {
     kOnlyLoadResources,
     kDoNotLoadResources,
@@ -98,13 +134,15 @@ class CORE_EXPORT LinkLoader final
 
   Resource* GetResourceForTesting();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   class FinishObserver;
-  LinkLoader(LinkLoaderClient*, RefPtr<WebTaskRunner>);
+  LinkLoader(LinkLoaderClient*, scoped_refptr<base::SingleThreadTaskRunner>);
 
   void NotifyFinished();
+  // SingleModuleClient implementation
+  void NotifyModuleLoadFinished(ModuleScript*) override;
 
   Member<FinishObserver> finish_observer_;
   Member<LinkLoaderClient> client_;

@@ -5,7 +5,7 @@
 #ifndef USBEndpoint_h
 #define USBEndpoint_h
 
-#include "device/usb/public/interfaces/device.mojom-blink.h"
+#include "device/usb/public/mojom/device.mojom-blink.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Heap.h"
 
@@ -14,8 +14,7 @@ namespace blink {
 class ExceptionState;
 class USBAlternateInterface;
 
-class USBEndpoint : public GarbageCollected<USBEndpoint>,
-                    public ScriptWrappable {
+class USBEndpoint : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -35,7 +34,7 @@ class USBEndpoint : public GarbageCollected<USBEndpoint>,
   String type() const;
   unsigned packetSize() const { return Info().packet_size; }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   Member<const USBAlternateInterface> alternate_;

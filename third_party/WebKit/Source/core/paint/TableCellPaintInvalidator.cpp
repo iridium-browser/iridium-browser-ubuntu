@@ -30,12 +30,13 @@ void TableCellPaintInvalidator::InvalidateContainerForCellGeometryChange(
   container_context.painting_layer->SetNeedsRepaint();
   container.InvalidateDisplayItemClients(PaintInvalidationReason::kGeometry);
 
-  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled() &&
+  if (!RuntimeEnabledFeatures::SlimmingPaintV175Enabled() &&
       context_.paint_invalidation_container !=
           container_context.paint_invalidation_container) {
     ObjectPaintInvalidatorWithContext(container, container_context)
         .InvalidatePaintRectangleWithContext(
-            container.VisualRect(), PaintInvalidationReason::kGeometry);
+            container.FirstFragment().VisualRect(),
+            PaintInvalidationReason::kGeometry);
   }
 }
 
@@ -44,7 +45,7 @@ PaintInvalidationReason TableCellPaintInvalidator::InvalidatePaint() {
   // and the row or table paints collapsed borders. If the cell's geometry
   // changed and the containers which will paint backgrounds and/or collapsed
   // borders haven't been full invalidated, invalidate the containers.
-  if (context_.old_location != context_.new_location ||
+  if (context_.old_location != context_.fragment_data->LocationInBacking() ||
       cell_.Size() != cell_.PreviousSize()) {
     const auto& row = *cell_.Row();
     const auto& section = *row.Section();
@@ -53,14 +54,14 @@ PaintInvalidationReason TableCellPaintInvalidator::InvalidatePaint() {
         (row.StyleRef().HasBackground() ||
          (table.HasCollapsedBorders() &&
           LIKELY(!table.ShouldPaintAllCollapsedBorders())))) {
-      InvalidateContainerForCellGeometryChange(row, *context_.parent_context);
+      InvalidateContainerForCellGeometryChange(row, *context_.ParentContext());
     }
 
     if (UNLIKELY(table.ShouldPaintAllCollapsedBorders()) &&
         !IsFullPaintInvalidationReason(table.GetPaintInvalidationReason())) {
       DCHECK(table.HasCollapsedBorders());
       InvalidateContainerForCellGeometryChange(
-          table, *context_.parent_context->parent_context->parent_context);
+          table, *context_.ParentContext()->ParentContext()->ParentContext());
     }
 
     if (!IsFullPaintInvalidationReason(section.GetPaintInvalidationReason())) {
@@ -76,7 +77,7 @@ PaintInvalidationReason TableCellPaintInvalidator::InvalidatePaint() {
       }
       if (section_paints_background) {
         InvalidateContainerForCellGeometryChange(
-            section, *context_.parent_context->parent_context);
+            section, *context_.ParentContext()->ParentContext());
       }
     }
   }

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/extensions/launch_util.h"
 
+#include <memory>
+
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
@@ -17,8 +19,8 @@
 #include "extensions/browser/pref_names.h"
 #include "extensions/common/extension.h"
 
-#if defined(USE_ASH)
-#include "ash/shell.h"  // nogncheck
+#if defined(OS_CHROMEOS)
+#include "ash/shell.h"
 #endif
 
 namespace extensions {
@@ -83,7 +85,7 @@ void SetLaunchType(content::BrowserContext* context,
 
   ExtensionPrefs::Get(context)->UpdateExtensionPref(
       extension_id, kPrefLaunchType,
-      base::MakeUnique<base::Value>(static_cast<int>(launch_type)));
+      std::make_unique<base::Value>(static_cast<int>(launch_type)));
 
   // Sync the launch type.
   const Extension* extension =
@@ -98,10 +100,7 @@ LaunchContainer GetLaunchContainer(const ExtensionPrefs* prefs,
   LaunchContainer manifest_launch_container =
       AppLaunchInfo::GetLaunchContainer(extension);
 
-  const LaunchContainer kInvalidLaunchContainer =
-      static_cast<LaunchContainer>(-1);
-
-  LaunchContainer result = kInvalidLaunchContainer;
+  base::Optional<LaunchContainer> result;
 
   if (manifest_launch_container == LAUNCH_CONTAINER_PANEL) {
     // Apps with app.launch.container = 'panel' should always respect the
@@ -116,7 +115,7 @@ LaunchContainer GetLaunchContainer(const ExtensionPrefs* prefs,
       // If the pref is set to launch a window (or no pref is set, and
       // window opening is the default), make the container a window.
       result = LAUNCH_CONTAINER_WINDOW;
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
     } else if (prefs_launch_type == LAUNCH_TYPE_FULLSCREEN) {
       // LAUNCH_TYPE_FULLSCREEN launches in a maximized app window in ash.
       // For desktop chrome AURA on all platforms we should open the
@@ -137,12 +136,12 @@ LaunchContainer GetLaunchContainer(const ExtensionPrefs* prefs,
   }
 
   // All paths should set |result|.
-  if (result == kInvalidLaunchContainer) {
+  if (!result) {
     DLOG(FATAL) << "Failed to set a launch container.";
     result = LAUNCH_CONTAINER_TAB;
   }
 
-  return result;
+  return *result;
 }
 
 bool HasPreferredLaunchContainer(const ExtensionPrefs* prefs,

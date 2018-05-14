@@ -20,7 +20,7 @@ namespace scheduler {
 
 class BLINK_PLATFORM_EXPORT ChildScheduler {
  public:
-  virtual ~ChildScheduler() {}
+  virtual ~ChildScheduler() = default;
 
   // Returns the default task runner.
   virtual scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() = 0;
@@ -29,6 +29,8 @@ class BLINK_PLATFORM_EXPORT ChildScheduler {
   // relative to other task types and may be starved for an arbitrarily long
   // time if no idle time is available.
   virtual scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner() = 0;
+
+  virtual scoped_refptr<base::SingleThreadTaskRunner> IPCTaskRunner() = 0;
 
   // Returns true if there is high priority work pending on the main thread
   // and the caller should yield to let the scheduler service that work. Note
@@ -61,7 +63,7 @@ class BLINK_PLATFORM_EXPORT ChildScheduler {
   virtual void Shutdown() = 0;
 
  protected:
-  ChildScheduler() {}
+  ChildScheduler() = default;
   DISALLOW_COPY_AND_ASSIGN(ChildScheduler);
 };
 

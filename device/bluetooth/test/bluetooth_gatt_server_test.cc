@@ -12,9 +12,9 @@
 
 namespace device {
 
-BluetoothGattServerTest::BluetoothGattServerTest() {}
+BluetoothGattServerTest::BluetoothGattServerTest() = default;
 
-BluetoothGattServerTest::~BluetoothGattServerTest() {}
+BluetoothGattServerTest::~BluetoothGattServerTest() = default;
 
 void BluetoothGattServerTest::StartGattSetup() {
   service_ = BluetoothLocalGattService::Create(
@@ -32,7 +32,7 @@ void BluetoothGattServerTest::SetUp() {
   BluetoothTest::SetUp();
   last_read_value_ = std::vector<uint8_t>();
   InitWithFakeAdapter();
-  delegate_ = base::MakeUnique<TestBluetoothLocalGattServiceDelegate>();
+  delegate_ = std::make_unique<TestBluetoothLocalGattServiceDelegate>();
 }
 
 void BluetoothGattServerTest::TearDown() {

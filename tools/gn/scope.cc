@@ -4,8 +4,9 @@
 
 #include "tools/gn/scope.h"
 
+#include <memory>
+
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "tools/gn/parse_tree.h"
 #include "tools/gn/source_file.h"
 #include "tools/gn/template.h"
@@ -30,23 +31,20 @@ bool IsPrivateVar(const base::StringPiece& name) {
 Scope::MergeOptions::MergeOptions()
     : clobber_existing(false),
       skip_private_vars(false),
-      mark_dest_used(false) {
-}
+      mark_dest_used(false) {}
 
-Scope::MergeOptions::~MergeOptions() {
-}
+Scope::MergeOptions::~MergeOptions() = default;
 
 Scope::ProgrammaticProvider::~ProgrammaticProvider() {
   scope_->RemoveProvider(this);
 }
 
-Scope::Scope(const Settings* settings, const InputFileSet& input_files)
+Scope::Scope(const Settings* settings)
     : const_containing_(nullptr),
       mutable_containing_(nullptr),
       settings_(settings),
       mode_flags_(0),
-      item_collector_(nullptr),
-      input_files_(input_files) {}
+      item_collector_(nullptr) {}
 
 Scope::Scope(Scope* parent)
     : const_containing_(nullptr),
@@ -54,7 +52,7 @@ Scope::Scope(Scope* parent)
       settings_(parent->settings()),
       mode_flags_(0),
       item_collector_(nullptr),
-      input_files_(parent->input_files_) {}
+      build_dependency_files_(parent->build_dependency_files_) {}
 
 Scope::Scope(const Scope* parent)
     : const_containing_(parent),
@@ -62,10 +60,9 @@ Scope::Scope(const Scope* parent)
       settings_(parent->settings()),
       mode_flags_(0),
       item_collector_(nullptr),
-      input_files_(parent->input_files_) {}
+      build_dependency_files_(parent->build_dependency_files_) {}
 
-Scope::~Scope() {
-}
+Scope::~Scope() = default;
 
 void Scope::DetachFromContaining() {
   const_containing_ = nullptr;
@@ -126,8 +123,8 @@ Value* Scope::GetMutableValue(const base::StringPiece& ident,
 
   // Search in the parent mutable scope if requested, but not const one.
   if (search_mode == SEARCH_NESTED && mutable_containing_) {
-    return mutable_containing_->GetMutableValue(
-        ident, Scope::SEARCH_NESTED, counts_as_used);
+    return mutable_containing_->GetMutableValue(ident, Scope::SEARCH_NESTED,
+                                                counts_as_used);
   }
   return nullptr;
 }
@@ -252,7 +249,8 @@ bool Scope::IsSetButUnused(const base::StringPiece& ident) const {
 bool Scope::CheckForUnusedVars(Err* err) const {
   for (const auto& pair : values_) {
     if (!pair.second.used) {
-      std::string help = "You set the variable \"" + pair.first.as_string() +
+      std::string help =
+          "You set the variable \"" + pair.first.as_string() +
           "\" here and it was unused before it went\nout of scope.";
 
       const BinaryOpNode* binary = pair.second.value.origin()->AsBinaryOp();
@@ -299,13 +297,16 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
         // Value present in both the source and the dest.
         std::string desc_string(desc_for_err);
         *err = Err(node_for_err, "Value collision.",
-            "This " + desc_string + " contains \"" + current_name.as_string() +
-            "\"");
-        err->AppendSubErr(Err(pair.second.value, "defined here.",
-            "Which would clobber the one in your current scope"));
-        err->AppendSubErr(Err(*existing_value, "defined here.",
-            "Executing " + desc_string + " should not conflict with anything "
-            "in the current\nscope unless the values are identical."));
+                   "This " + desc_string + " contains \"" +
+                       current_name.as_string() + "\"");
+        err->AppendSubErr(
+            Err(pair.second.value, "defined here.",
+                "Which would clobber the one in your current scope"));
+        err->AppendSubErr(
+            Err(*existing_value, "defined here.",
+                "Executing " + desc_string +
+                    " should not conflict with anything "
+                    "in the current\nscope unless the values are identical."));
         return false;
       }
     }
@@ -338,19 +339,25 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
           // target defaults.
           std::string desc_string(desc_for_err);
           *err = Err(node_for_err, "Target defaults collision.",
-              "This " + desc_string + " contains target defaults for\n"
-              "\"" + current_name + "\" which would clobber one for the\n"
-              "same target type in your current scope. It's unfortunate that "
-              "I'm too stupid\nto tell you the location of where the target "
-              "defaults were set. Usually\nthis happens in the BUILDCONFIG.gn "
-              "file or in a related .gni file.\n");
+                     "This " + desc_string +
+                         " contains target defaults for\n"
+                         "\"" +
+                         current_name +
+                         "\" which would clobber one for the\n"
+                         "same target type in your current scope. It's "
+                         "unfortunate that "
+                         "I'm too stupid\nto tell you the location of where "
+                         "the target "
+                         "defaults were set. Usually\nthis happens in the "
+                         "BUILDCONFIG.gn "
+                         "file or in a related .gni file.\n");
           return false;
         }
       }
     }
 
     std::unique_ptr<Scope>& dest_scope = dest->target_defaults_[current_name];
-    dest_scope = base::MakeUnique<Scope>(settings_, input_files_);
+    dest_scope = std::make_unique<Scope>(settings_);
     pair.second->NonRecursiveMergeTo(dest_scope.get(), options, node_for_err,
                                      "<SHOULDN'T HAPPEN>", err);
   }
@@ -362,13 +369,14 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
         // Sources assignment filter present in both the source and the dest.
         std::string desc_string(desc_for_err);
         *err = Err(node_for_err, "Assignment filter collision.",
-            "The " + desc_string + " contains a sources_assignment_filter "
-            "which\nwould clobber the one in your current scope.");
+                   "The " + desc_string +
+                       " contains a sources_assignment_filter "
+                       "which\nwould clobber the one in your current scope.");
         return false;
       }
     }
-    dest->sources_assignment_filter_.reset(
-        new PatternList(*sources_assignment_filter_));
+    dest->sources_assignment_filter_ =
+        std::make_unique<PatternList>(*sources_assignment_filter_);
   }
 
   // Templates.
@@ -391,15 +399,16 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
         // same one.
         std::string desc_string(desc_for_err);
         *err = Err(node_for_err, "Template collision.",
-            "This " + desc_string + " contains a template \"" +
-            current_name + "\"");
-        err->AppendSubErr(Err(pair.second->GetDefinitionRange(),
-            "defined here.",
-            "Which would clobber the one in your current scope"));
+                   "This " + desc_string + " contains a template \"" +
+                       current_name + "\"");
+        err->AppendSubErr(
+            Err(pair.second->GetDefinitionRange(), "defined here.",
+                "Which would clobber the one in your current scope"));
         err->AppendSubErr(Err(existing_template->GetDefinitionRange(),
-            "defined here.",
-            "Executing " + desc_string + " should not conflict with anything "
-            "in the current\nscope."));
+                              "defined here.",
+                              "Executing " + desc_string +
+                                  " should not conflict with anything "
+                                  "in the current\nscope."));
         return false;
       }
     }
@@ -408,8 +417,9 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
     dest->templates_[current_name] = pair.second;
   }
 
-  // Input files.
-  dest->input_files_.insert(input_files_.begin(), input_files_.end());
+  // Propogate build dependency files,
+  dest->build_dependency_files_.insert(build_dependency_files_.begin(),
+                                       build_dependency_files_.end());
 
   return true;
 }
@@ -419,14 +429,14 @@ std::unique_ptr<Scope> Scope::MakeClosure() const {
   if (const_containing_) {
     // We reached the top of the mutable scope stack. The result scope just
     // references the const scope (which will never change).
-    result.reset(new Scope(const_containing_));
+    result = std::make_unique<Scope>(const_containing_);
   } else if (mutable_containing_) {
     // There are more nested mutable scopes. Recursively go up the stack to
     // get the closure.
     result = mutable_containing_->MakeClosure();
   } else {
     // This is a standalone scope, just copy it.
-    result.reset(new Scope(settings_, input_files_));
+    result = std::make_unique<Scope>(settings_);
   }
 
   // Want to clobber since we've flattened some nested scopes, and our parent
@@ -444,7 +454,7 @@ std::unique_ptr<Scope> Scope::MakeClosure() const {
 
 Scope* Scope::MakeTargetDefaults(const std::string& target_type) {
   std::unique_ptr<Scope>& dest = target_defaults_[target_type];
-  dest = base::MakeUnique<Scope>(settings_, input_files_);
+  dest = std::make_unique<Scope>(settings_);
   return dest.get();
 }
 
@@ -509,8 +519,8 @@ const SourceDir& Scope::GetSourceDir() const {
   return source_dir_;
 }
 
-void Scope::AddInputFile(const InputFile* input_file) {
-  input_files_.insert(input_file);
+void Scope::AddBuildDependencyFile(const SourceFile& build_dependency_file) {
+  build_dependency_files_.insert(build_dependency_file);
 }
 
 Scope::ItemVector* Scope::GetItemCollector() {

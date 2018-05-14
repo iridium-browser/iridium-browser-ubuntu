@@ -25,7 +25,7 @@ class CORE_EXPORT RemoteFrameOwner final
  public:
   static RemoteFrameOwner* Create(
       SandboxFlags flags,
-      const WebParsedFeaturePolicy& container_policy,
+      const ParsedFeaturePolicy& container_policy,
       const WebFrameOwnerProperties& frame_owner_properties) {
     return new RemoteFrameOwner(flags, container_policy,
                                 frame_owner_properties);
@@ -37,10 +37,12 @@ class CORE_EXPORT RemoteFrameOwner final
   void ClearContentFrame() override;
   SandboxFlags GetSandboxFlags() const override { return sandbox_flags_; }
   void SetSandboxFlags(SandboxFlags flags) { sandbox_flags_ = flags; }
+  void AddResourceTiming(const ResourceTimingInfo&) override;
   void DispatchLoad() override;
   // TODO(dcheng): Implement.
   bool CanRenderFallbackContent() const override { return false; }
   void RenderFallbackContent() override {}
+  void IntrinsicSizingInfoChanged() override {}
 
   AtomicString BrowsingContextContainerName() const override {
     return browsing_context_container_name_;
@@ -51,11 +53,8 @@ class CORE_EXPORT RemoteFrameOwner final
   bool AllowFullscreen() const override { return allow_fullscreen_; }
   bool AllowPaymentRequest() const override { return allow_payment_request_; }
   bool IsDisplayNone() const override { return is_display_none_; }
-  AtomicString Csp() const override { return csp_; }
-  const WebVector<WebFeaturePolicyFeature>& AllowedFeatures() const override {
-    return allowed_features_;
-  }
-  const WebParsedFeaturePolicy& ContainerPolicy() const override {
+  AtomicString RequiredCsp() const override { return required_csp_; }
+  const ParsedFeaturePolicy& ContainerPolicy() const override {
     return container_policy_;
   }
 
@@ -74,20 +73,18 @@ class CORE_EXPORT RemoteFrameOwner final
   void SetIsDisplayNone(bool is_display_none) {
     is_display_none_ = is_display_none;
   }
-  void SetCsp(const WebString& csp) { csp_ = csp; }
-  void SetAllowedFeatures(
-      const WebVector<WebFeaturePolicyFeature>& allowed_features) {
-    allowed_features_ = allowed_features;
+  void SetRequiredCsp(const WebString& required_csp) {
+    required_csp_ = required_csp;
   }
-  void SetContainerPolicy(const WebParsedFeaturePolicy& container_policy) {
+  void SetContainerPolicy(const ParsedFeaturePolicy& container_policy) {
     container_policy_ = container_policy;
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   RemoteFrameOwner(SandboxFlags,
-                   const WebParsedFeaturePolicy&,
+                   const ParsedFeaturePolicy&,
                    const WebFrameOwnerProperties&);
 
   // Intentionally private to prevent redundant checks when the type is
@@ -104,9 +101,8 @@ class CORE_EXPORT RemoteFrameOwner final
   bool allow_fullscreen_;
   bool allow_payment_request_;
   bool is_display_none_;
-  WebString csp_;
-  WebVector<WebFeaturePolicyFeature> allowed_features_;
-  WebParsedFeaturePolicy container_policy_;
+  WebString required_csp_;
+  ParsedFeaturePolicy container_policy_;
 };
 
 DEFINE_TYPE_CASTS(RemoteFrameOwner,

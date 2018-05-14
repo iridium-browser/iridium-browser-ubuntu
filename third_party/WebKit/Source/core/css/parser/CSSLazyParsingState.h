@@ -8,22 +8,25 @@
 #include "core/css/CSSSelectorList.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/parser/CSSParserMode.h"
-#include "platform/wtf/Vector.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
 class CSSLazyPropertyParserImpl;
-class CSSParserTokenRange;
 
 // This class helps lazy parsing by retaining necessary state. It should not
 // outlive the StyleSheetContents that initiated the parse, as it retains a raw
 // reference to the UseCounter associated with the style sheet.
+//
+// Note: This class holds an extra reference to the underlying stylesheet
+// text, and will extend its lifetime until this class is garbage collected.
+// Currently, the only strong references to this class are from individual lazy
+// properties, so after an entire lazy sheet is parsed, the extra memory should
+// be released.
 class CSSLazyParsingState
     : public GarbageCollectedFinalized<CSSLazyParsingState> {
  public:
   CSSLazyParsingState(const CSSParserContext*,
-                      Vector<String> escaped_strings,
                       const String& sheet_text,
                       StyleSheetContents*);
 
@@ -32,16 +35,14 @@ class CSSLazyParsingState
   void FinishInitialParsing();
 
   // Helper method used to bump total_style_rules_.
-  CSSLazyPropertyParserImpl* CreateLazyParser(const CSSParserTokenRange& block);
+  CSSLazyPropertyParserImpl* CreateLazyParser(size_t offset);
 
   const CSSParserContext* Context();
-
+  const String& SheetText() const { return sheet_text_; }
   void CountRuleParsed();
+  bool ShouldLazilyParseProperties(const CSSSelectorList&) const;
 
-  bool ShouldLazilyParseProperties(const CSSSelectorList&,
-                                   const CSSParserTokenRange& block) const;
-
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   // Exposed for tests. This enum is used to back a histogram, so new values
   // must be appended to the end, before UsageLastValue.
@@ -62,7 +63,6 @@ class CSSLazyParsingState
   void RecordUsageMetrics();
 
   Member<const CSSParserContext> context_;
-  Vector<String> escaped_strings_;
   // Also referenced on the css resource.
   String sheet_text_;
 

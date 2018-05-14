@@ -29,7 +29,7 @@
 
 namespace blink {
 
-MediaKeyMessageEvent::MediaKeyMessageEvent() {}
+MediaKeyMessageEvent::MediaKeyMessageEvent() = default;
 
 MediaKeyMessageEvent::MediaKeyMessageEvent(
     const AtomicString& type,
@@ -41,13 +41,13 @@ MediaKeyMessageEvent::MediaKeyMessageEvent(
     message_ = initializer.message();
 }
 
-MediaKeyMessageEvent::~MediaKeyMessageEvent() {}
+MediaKeyMessageEvent::~MediaKeyMessageEvent() = default;
 
 const AtomicString& MediaKeyMessageEvent::InterfaceName() const {
   return EventNames::MediaKeyMessageEvent;
 }
 
-DEFINE_TRACE(MediaKeyMessageEvent) {
+void MediaKeyMessageEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(message_);
   Event::Trace(visitor);
 }

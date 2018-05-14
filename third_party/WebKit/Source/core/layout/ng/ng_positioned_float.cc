@@ -5,13 +5,12 @@
 #include "core/layout/ng/ng_positioned_float.h"
 
 #include "core/layout/ng/ng_layout_result.h"
-#include "core/layout/ng/ng_physical_box_fragment.h"
-#include "core/layout/ng/ng_unpositioned_float.h"
 
 namespace blink {
 
-NGPositionedFloat::NGPositionedFloat(RefPtr<NGLayoutResult> layout_result,
-                                     const NGLogicalOffset& logical_offset)
-    : layout_result(layout_result), logical_offset(logical_offset) {}
+NGPositionedFloat::NGPositionedFloat(
+    scoped_refptr<NGLayoutResult> layout_result,
+    const NGBfcOffset& bfc_offset)
+    : layout_result(layout_result), bfc_offset(bfc_offset) {}
 
 }  // namespace blink

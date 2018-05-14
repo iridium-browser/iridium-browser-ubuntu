@@ -55,7 +55,7 @@ constexpr CGFloat kMaxHeightAccounts = 3.5;
 - (instancetype)initWithBridge:(PasswordPromptBridgeInterface*)bridge {
   base::scoped_nsobject<AccountAvatarFetcherManager> avatarManager(
       [[AccountAvatarFetcherManager alloc]
-           initWithRequestContext:bridge->GetRequestContext()]);
+          initWithLoaderFactory:bridge->GetURLLoaderFactory()]);
   return [self initWithBridge:bridge avatarManager:avatarManager];
 }
 
@@ -218,8 +218,8 @@ constexpr CGFloat kMaxHeightAccounts = 3.5;
     } else {
       NSString* text = base::SysUTF16ToNSString(
           labels.first + base::ASCIIToUTF16("\n") + labels.second);
-      NSFont* font = ResourceBundle::GetSharedInstance()
-                         .GetFontList(ResourceBundle::SmallFont)
+      NSFont* font = ui::ResourceBundle::GetSharedInstance()
+                         .GetFontList(ui::ResourceBundle::SmallFont)
                          .GetPrimaryFont()
                          .GetNativeFont();
       NSDictionary* attrsDictionary =

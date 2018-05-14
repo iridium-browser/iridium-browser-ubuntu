@@ -29,6 +29,7 @@
 
 namespace gfx {
 class FontList;
+struct VectorIcon;
 }
 
 namespace views {
@@ -43,6 +44,7 @@ class TestMenuItemViewShown;
 
 class MenuController;
 class MenuDelegate;
+class TestMenuItemView;
 class SubmenuView;
 
 // MenuItemView --------------------------------------------------------------
@@ -153,6 +155,7 @@ class VIEWS_EXPORT MenuItemView : public View {
                               const base::string16& label,
                               const base::string16& sublabel,
                               const base::string16& minor_text,
+                              const gfx::VectorIcon* minor_icon,
                               const gfx::ImageSkia& icon,
                               Type type,
                               ui::MenuSeparatorType separator_style);
@@ -208,6 +211,7 @@ class VIEWS_EXPORT MenuItemView : public View {
                                    const base::string16& label,
                                    const base::string16& sublabel,
                                    const base::string16& minor_text,
+                                   const gfx::VectorIcon* minor_icon,
                                    const gfx::ImageSkia& icon,
                                    Type type,
                                    ui::MenuSeparatorType separator_style);
@@ -238,6 +242,9 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // Sets the minor text.
   void SetMinorText(const base::string16& minor_text);
+
+  // Sets the minor icon.
+  void SetMinorIcon(const gfx::VectorIcon* minor_icon);
 
   // Returns the type of this menu.
   const Type& GetType() const { return type_; }
@@ -351,6 +358,7 @@ class VIEWS_EXPORT MenuItemView : public View {
  private:
   friend class internal::MenuRunnerImpl;  // For access to ~MenuItemView.
   friend class test::TestMenuItemViewShown;  // for access to |submenu_|;
+  friend class TestMenuItemView;             // For access to AddEmptyMenus();
 
   enum PaintButtonMode { PB_NORMAL, PB_FOR_DRAG };
 
@@ -393,8 +401,8 @@ class VIEWS_EXPORT MenuItemView : public View {
   // are not rendered.
   void PaintButton(gfx::Canvas* canvas, PaintButtonMode mode);
 
-  // Paints the right-side text.
-  void PaintMinorText(gfx::Canvas* canvas, SkColor color);
+  // Paints the right-side icon and text.
+  void PaintMinorIconAndText(gfx::Canvas* canvas, SkColor color);
 
   // Destroys the window used to display this menu and recursively destroys
   // the windows used to display all descendants.
@@ -403,6 +411,9 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Returns the text that should be displayed on the end (right) of the menu
   // item. This will be the accelerator (if one exists), otherwise |subtitle_|.
   base::string16 GetMinorText() const;
+
+  // Returns the icon that should be displayed to the left of the minor text.
+  const gfx::VectorIcon* GetMinorIcon() const;
 
   // Returns the text color for the current state.  |minor| specifies if the
   // minor text or the normal text is desired.
@@ -482,6 +493,9 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Minor text.
   base::string16 minor_text_;
 
+  // Minor icon.
+  const gfx::VectorIcon* minor_icon_ = nullptr;
+
   // Does the title have a mnemonic? Only useful on the root menu item.
   bool has_mnemonics_;
 
@@ -535,6 +549,12 @@ class VIEWS_EXPORT MenuItemView : public View {
   // If set to false, the right margin will be removed for menu lines
   // containing other elements.
   bool use_right_margin_;
+
+  // Contains an image for the checkbox or radio icon.
+  ImageView* radio_check_image_view_;
+
+  // The submenu indicator arrow icon in case the menu item has a Submenu.
+  ImageView* submenu_arrow_image_view_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuItemView);
 };

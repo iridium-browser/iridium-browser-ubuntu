@@ -13,16 +13,19 @@ class FilePath;
 class SequencedTaskRunner;
 }
 
-namespace content {
+namespace download {
 class DownloadItem;
 }
 
+// Used in UMA, do not remove, change or reuse existing entries.
+// Update histograms.xml and enums.xml when adding entries.
 enum class PathValidationResult {
-  SUCCESS,
+  SUCCESS = 0,
   PATH_NOT_WRITABLE,
   NAME_TOO_LONG,
   CONFLICT,
-  SAME_AS_SOURCE
+  SAME_AS_SOURCE,
+  COUNT,
 };
 
 // Chrome attempts to uniquify filenames that are assigned to downloads in order
@@ -94,13 +97,12 @@ class DownloadPathReservationTracker {
   // The current implementation doesn't look at symlinks/mount points. E.g.: It
   // considers 'foo/bar/x.pdf' and 'foo/baz/x.pdf' to be two different paths,
   // even though 'bar' might be a symlink to 'baz'.
-  static void GetReservedPath(
-      content::DownloadItem* download_item,
-      const base::FilePath& requested_target_path,
-      const base::FilePath& default_download_path,
-      bool create_directory,
-      FilenameConflictAction conflict_action,
-      const ReservedPathCallback& callback);
+  static void GetReservedPath(download::DownloadItem* download_item,
+                              const base::FilePath& requested_target_path,
+                              const base::FilePath& default_download_path,
+                              bool create_directory,
+                              FilenameConflictAction conflict_action,
+                              const ReservedPathCallback& callback);
 
   // Returns true if |path| is in use by an existing path reservation. Should
   // only be called on the task runner returned by

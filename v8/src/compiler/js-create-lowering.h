@@ -16,7 +16,7 @@ namespace internal {
 class AllocationSiteUsageContext;
 class CompilationDependencies;
 class Factory;
-
+class JSRegExp;
 
 namespace compiler {
 
@@ -34,12 +34,10 @@ class V8_EXPORT_PRIVATE JSCreateLowering final
  public:
   JSCreateLowering(Editor* editor, CompilationDependencies* dependencies,
                    JSGraph* jsgraph,
-                   MaybeHandle<FeedbackVector> feedback_vector,
                    Handle<Context> native_context, Zone* zone)
       : AdvancedReducer(editor),
         dependencies_(dependencies),
         jsgraph_(jsgraph),
-        feedback_vector_(feedback_vector),
         native_context_(native_context),
         zone_(zone) {}
   ~JSCreateLowering() final {}
@@ -52,24 +50,37 @@ class V8_EXPORT_PRIVATE JSCreateLowering final
   Reduction ReduceJSCreate(Node* node);
   Reduction ReduceJSCreateArguments(Node* node);
   Reduction ReduceJSCreateArray(Node* node);
+  Reduction ReduceJSCreateBoundFunction(Node* node);
+  Reduction ReduceJSCreateClosure(Node* node);
   Reduction ReduceJSCreateIterResultObject(Node* node);
+  Reduction ReduceJSCreateStringIterator(Node* node);
   Reduction ReduceJSCreateKeyValueArray(Node* node);
-  Reduction ReduceJSCreateLiteral(Node* node);
+  Reduction ReduceJSCreatePromise(Node* node);
+  Reduction ReduceJSCreateLiteralArrayOrObject(Node* node);
+  Reduction ReduceJSCreateEmptyLiteralObject(Node* node);
+  Reduction ReduceJSCreateEmptyLiteralArray(Node* node);
+  Reduction ReduceJSCreateLiteralRegExp(Node* node);
   Reduction ReduceJSCreateFunctionContext(Node* node);
   Reduction ReduceJSCreateWithContext(Node* node);
   Reduction ReduceJSCreateCatchContext(Node* node);
   Reduction ReduceJSCreateBlockContext(Node* node);
   Reduction ReduceJSCreateGeneratorObject(Node* node);
+  Reduction ReduceNewArray(Node* node, Node* length, Handle<Map> initial_map,
+                           PretenureFlag pretenure);
   Reduction ReduceNewArray(Node* node, Node* length, int capacity,
-                           Handle<AllocationSite> site);
+                           Handle<Map> initial_map, PretenureFlag pretenure);
   Reduction ReduceNewArray(Node* node, std::vector<Node*> values,
-                           Handle<AllocationSite> site);
+                           Handle<Map> initial_map, PretenureFlag pretenure);
 
   Node* AllocateArguments(Node* effect, Node* control, Node* frame_state);
   Node* AllocateRestArguments(Node* effect, Node* control, Node* frame_state,
                               int start_index);
   Node* AllocateAliasedArguments(Node* effect, Node* control, Node* frame_state,
                                  Node* context, Handle<SharedFunctionInfo>,
+                                 bool* has_aliased_arguments);
+  Node* AllocateAliasedArguments(Node* effect, Node* control, Node* context,
+                                 Node* arguments_frame, Node* arguments_length,
+                                 Handle<SharedFunctionInfo>,
                                  bool* has_aliased_arguments);
   Node* AllocateElements(Node* effect, Node* control,
                          ElementsKind elements_kind, int capacity,
@@ -87,11 +98,10 @@ class V8_EXPORT_PRIVATE JSCreateLowering final
                                     Handle<JSObject> boilerplate,
                                     PretenureFlag pretenure,
                                     AllocationSiteUsageContext* site_context);
+  Node* AllocateLiteralRegExp(Node* effect, Node* control,
+                              Handle<JSRegExp> boilerplate);
 
   Reduction ReduceNewArrayToStubCall(Node* node, Handle<AllocationSite> site);
-
-  // Infers the FeedbackVector to use for a given {node}.
-  MaybeHandle<FeedbackVector> GetSpecializationFeedbackVector(Node* node);
 
   Factory* factory() const;
   Graph* graph() const;
@@ -105,7 +115,6 @@ class V8_EXPORT_PRIVATE JSCreateLowering final
 
   CompilationDependencies* const dependencies_;
   JSGraph* const jsgraph_;
-  MaybeHandle<FeedbackVector> const feedback_vector_;
   Handle<Context> const native_context_;
   Zone* const zone_;
 };

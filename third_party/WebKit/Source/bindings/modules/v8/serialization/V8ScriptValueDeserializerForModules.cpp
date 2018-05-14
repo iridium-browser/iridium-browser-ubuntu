@@ -37,7 +37,7 @@ ScriptWrappable* V8ScriptValueDeserializerForModules::ReadDOMObject(
         return nullptr;
       return DOMFileSystem::Create(ExecutionContext::From(GetScriptState()),
                                    name, static_cast<FileSystemType>(raw_type),
-                                   KURL(kParsedURLString, root_url));
+                                   KURL(root_url));
     }
     case kRTCCertificateTag: {
       String pem_private_key;
@@ -47,6 +47,8 @@ ScriptWrappable* V8ScriptValueDeserializerForModules::ReadDOMObject(
         return nullptr;
       std::unique_ptr<WebRTCCertificateGenerator> certificate_generator(
           Platform::Current()->CreateRTCCertificateGenerator());
+      if (!certificate_generator)
+        return nullptr;
       std::unique_ptr<WebRTCCertificate> certificate =
           certificate_generator->FromPEM(pem_private_key, pem_certificate);
       if (!certificate)

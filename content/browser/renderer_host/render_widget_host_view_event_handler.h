@@ -111,6 +111,10 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   // fullscreen.
   void TrackHost(aura::Window* reference_window);
 
+  MouseWheelPhaseHandler& mouse_wheel_phase_handler() {
+    return mouse_wheel_phase_handler_;
+  }
+
 #if defined(OS_WIN)
   // Sets the ContextMenuParams when a context menu is triggered. Required for
   // subsequent event processing.
@@ -143,6 +147,14 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   void OnTouchEvent(ui::TouchEvent* event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
 
+  void GestureEventAck(const blink::WebGestureEvent& event,
+                       InputEventAckState ack_result);
+
+  // Used to set the mouse_wheel_phase_handler_ timer timeout for testing.
+  void set_mouse_wheel_wheel_phase_handler_timeout(base::TimeDelta timeout) {
+    mouse_wheel_phase_handler_.set_mouse_wheel_end_dispatch_timeout(timeout);
+  }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(InputMethodResultAuraTest,
                            FinishImeCompositionSession);
@@ -171,6 +183,9 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   // |event| contains the WebMouseEvent being modified.
   void ModifyEventMovementAndCoords(const ui::MouseEvent& ui_mouse_event,
                                     blink::WebMouseEvent* event);
+
+  // This method moves cursor to window center for pointer lock.
+  void MoveCursorToCenter();
 
   // Helper function to set keyboard focus to the main window.
   void SetKeyboardFocus();
@@ -221,11 +236,11 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   // While the mouse is locked, they store the last known position just as mouse
   // lock was entered.
   // Relative to the upper-left corner of the view.
-  gfx::Point unlocked_mouse_position_;
+  gfx::PointF unlocked_mouse_position_;
   // Relative to the upper-left corner of the screen.
-  gfx::Point unlocked_global_mouse_position_;
+  gfx::PointF unlocked_global_mouse_position_;
   // Last cursor position relative to screen. Used to compute movementX/Y.
-  gfx::Point global_mouse_position_;
+  gfx::PointF global_mouse_position_;
   // In mouse locked mode, we synthetically move the mouse cursor to the center
   // of the window when it reaches the window borders to avoid it going outside.
   // This flag is used to differentiate between these synthetic mouse move

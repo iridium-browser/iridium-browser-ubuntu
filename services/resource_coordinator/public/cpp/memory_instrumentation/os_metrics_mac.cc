@@ -16,13 +16,12 @@
 
 #include "base/numerics/safe_math.h"
 #include "base/process/process_metrics.h"
-#include "base/trace_event/process_memory_dump.h"
 
 namespace memory_instrumentation {
 
 namespace {
 
-using VMRegion = base::trace_event::ProcessMemoryMaps::VMRegion;
+using VMRegion = mojom::VmRegion;
 
 bool IsAddressInSharedRegion(uint64_t address) {
   return address >= SHARED_REGION_BASE_X86_64 &&
@@ -137,6 +136,7 @@ void PopulateByteStats(VMRegion* region,
     case SM_PRIVATE:
     case SM_COW:
       region->byte_stats_private_dirty_resident = dirty_bytes;
+      break;
     case SM_SHARED:
     case SM_PRIVATE_ALIASED:
     case SM_TRUESHARED:
@@ -230,35 +230,24 @@ bool OSMetrics::FillOSMemoryDump(base::ProcessId pid,
   // additional information like ProcessHandle or port provider.
   DCHECK_EQ(base::kNullProcessId, pid);
   auto process_metrics = base::ProcessMetrics::CreateCurrentProcessMetrics();
-
-  size_t private_bytes;
-  size_t shared_bytes;
-  size_t resident_bytes;
-  size_t locked_bytes;
-  if (!process_metrics->GetMemoryBytes(&private_bytes, &shared_bytes,
-                                       &resident_bytes, &locked_bytes)) {
-    return false;
-  }
   base::ProcessMetrics::TaskVMInfo info = process_metrics->GetTaskVMInfo();
-  dump->platform_private_footprint.phys_footprint_bytes = info.phys_footprint;
-  dump->platform_private_footprint.internal_bytes = info.internal;
-  dump->platform_private_footprint.compressed_bytes = info.compressed;
-  dump->resident_set_kb = resident_bytes / 1024;
+  dump->platform_private_footprint->phys_footprint_bytes = info.phys_footprint;
+  dump->platform_private_footprint->internal_bytes = info.internal;
+  dump->platform_private_footprint->compressed_bytes = info.compressed;
   return true;
 }
 
 // static
-bool OSMetrics::FillProcessMemoryMaps(
-    base::ProcessId pid,
-    base::trace_event::ProcessMemoryDump* pmd) {
-  using VMRegion = base::trace_event::ProcessMemoryMaps::VMRegion;
+std::vector<mojom::VmRegionPtr> OSMetrics::GetProcessMemoryMaps(
+    base::ProcessId pid) {
+  std::vector<mojom::VmRegionPtr> maps;
 
   std::vector<VMRegion> dyld_regions;
   if (!GetDyldRegions(&dyld_regions))
-    return false;
+    return maps;
   std::vector<VMRegion> all_regions;
   if (!GetAllRegions(&all_regions))
-    return false;
+    return maps;
 
   // Merge information from dyld regions and all regions.
   for (const VMRegion& region : all_regions) {
@@ -289,15 +278,15 @@ bool OSMetrics::FillProcessMemoryMaps(
     }
     if (skip)
       continue;
-    pmd->process_mmaps()->AddVMRegion(region);
+
+    maps.push_back(VMRegion::New(region));
   }
 
   for (VMRegion& region : dyld_regions) {
-    pmd->process_mmaps()->AddVMRegion(region);
+    maps.push_back(VMRegion::New(region));
   }
 
-  pmd->set_has_process_mmaps();
-  return true;
+  return maps;
 }
 
 }  // namespace memory_instrumentation

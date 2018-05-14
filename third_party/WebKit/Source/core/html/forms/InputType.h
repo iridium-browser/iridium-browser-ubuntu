@@ -33,11 +33,12 @@
 #ifndef InputType_h
 #define InputType_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
-#include "core/frame/UseCounter.h"
-#include "core/html/TextControlElement.h"
+#include "core/frame/WebFeatureForward.h"
 #include "core/html/forms/ColorChooserClient.h"
 #include "core/html/forms/StepRange.h"
+#include "core/html/forms/TextControlElement.h"
 
 namespace blink {
 
@@ -51,16 +52,13 @@ class InputTypeView;
 // An InputType object represents the type-specific part of an HTMLInputElement.
 // Do not expose instances of InputType and classes derived from it to classes
 // other than HTMLInputElement.
-// FIXME: InputType should not inherit InputTypeView. It's conceptually wrong.
 class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
-  WTF_MAKE_NONCOPYABLE(InputType);
-
  public:
   static InputType* Create(HTMLInputElement&, const AtomicString&);
   static InputType* CreateText(HTMLInputElement&);
   static const AtomicString& NormalizeTypeName(const AtomicString&);
   virtual ~InputType();
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   virtual InputTypeView* CreateView() = 0;
   virtual const AtomicString& FormControlType() const = 0;
@@ -195,8 +193,6 @@ class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
   virtual Decimal FindClosestTickMarkValue(const Decimal&);
   virtual bool HasLegalLinkAttribute(const QualifiedName&) const;
   virtual const QualifiedName& SubResourceAttributeName() const;
-  virtual bool SupportsAutocapitalize() const;
-  virtual const AtomicString& DefaultAutocapitalize() const;
   virtual void CopyNonAttributeProperties(const HTMLInputElement&);
   virtual void OnAttachWithLayoutObject();
   virtual void OnDetachWithLayoutObject();
@@ -258,6 +254,8 @@ class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
                  ExceptionState&);
 
   Member<HTMLInputElement> element_;
+
+  DISALLOW_COPY_AND_ASSIGN(InputType);
 };
 
 }  // namespace blink

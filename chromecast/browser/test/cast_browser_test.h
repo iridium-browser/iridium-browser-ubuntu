@@ -17,6 +17,10 @@ class WebContents;
 }
 
 namespace chromecast {
+
+class CastWebContentsManager;
+class CastWebViewFactory;
+
 namespace shell {
 
 // This test allows for running an entire browser-process lifecycle per unit
@@ -35,6 +39,7 @@ class CastBrowserTest : public content::BrowserTestBase, CastWebView::Delegate {
   void PreRunTestOnMainThread() override;
   void PostRunTestOnMainThread() override;
 
+  content::WebContents* CreateWebView();
   content::WebContents* NavigateToURL(const GURL& url);
 
  private:
@@ -43,7 +48,14 @@ class CastBrowserTest : public content::BrowserTestBase, CastWebView::Delegate {
   void OnLoadingStateChanged(bool loading) override;
   void OnWindowDestroyed() override;
   void OnKeyEvent(const ui::KeyEvent& key_event) override;
+  bool OnAddMessageToConsoleReceived(content::WebContents* source,
+                                     int32_t level,
+                                     const base::string16& message,
+                                     int32_t line_no,
+                                     const base::string16& source_id) override;
 
+  std::unique_ptr<CastWebViewFactory> web_view_factory_;
+  std::unique_ptr<CastWebContentsManager> web_contents_manager_;
   std::unique_ptr<CastWebView> cast_web_view_;
 
   DISALLOW_COPY_AND_ASSIGN(CastBrowserTest);

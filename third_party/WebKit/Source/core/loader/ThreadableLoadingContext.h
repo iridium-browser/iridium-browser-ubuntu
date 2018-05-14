@@ -5,10 +5,10 @@
 #ifndef ThreadableLoadingContext_h
 #define ThreadableLoadingContext_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Heap.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
@@ -23,8 +23,6 @@ class WorkerGlobalScope;
 // context is bound to (e.g. on the main thread).
 class CORE_EXPORT ThreadableLoadingContext
     : public GarbageCollected<ThreadableLoadingContext> {
-  WTF_MAKE_NONCOPYABLE(ThreadableLoadingContext);
-
  public:
   static ThreadableLoadingContext* Create(Document&);
   static ThreadableLoadingContext* Create(WorkerGlobalScope&);
@@ -36,7 +34,9 @@ class CORE_EXPORT ThreadableLoadingContext
   virtual ExecutionContext* GetExecutionContext() = 0;
   BaseFetchContext* GetFetchContext();
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
+
+  DISALLOW_COPY_AND_ASSIGN(ThreadableLoadingContext);
 };
 
 }  // namespace blink

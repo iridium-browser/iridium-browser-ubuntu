@@ -17,7 +17,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/proxy_config/proxy_config_dictionary.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
-#include "net/proxy/proxy_server.h"
+#include "net/base/proxy_server.h"
 #include "url/gurl.h"
 
 //============================= ProxyConfigServiceImpl =======================
@@ -127,10 +127,11 @@ void ProxyConfigServiceImpl::RegisterObserver() {
 
 PrefProxyConfigTrackerImpl::PrefProxyConfigTrackerImpl(
     PrefService* pref_service,
-    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner)
+    scoped_refptr<base::SingleThreadTaskRunner>
+        proxy_config_service_task_runner)
     : pref_service_(pref_service),
-      proxy_config_service_impl_(NULL),
-      io_task_runner_(io_task_runner) {
+      proxy_config_service_impl_(nullptr),
+      proxy_config_service_task_runner_(proxy_config_service_task_runner) {
   pref_config_state_ = ReadPrefConfig(pref_service_, &pref_config_);
   active_config_state_ = pref_config_state_;
   active_config_ = pref_config_;
@@ -142,7 +143,7 @@ PrefProxyConfigTrackerImpl::PrefProxyConfigTrackerImpl(
 }
 
 PrefProxyConfigTrackerImpl::~PrefProxyConfigTrackerImpl() {
-  DCHECK(pref_service_ == NULL);
+  DCHECK(pref_service_ == nullptr);
 }
 
 std::unique_ptr<net::ProxyConfigService>
@@ -161,8 +162,8 @@ void PrefProxyConfigTrackerImpl::DetachFromPrefService() {
   DCHECK(thread_checker_.CalledOnValidThread());
   // Stop notifications.
   proxy_prefs_.RemoveAll();
-  pref_service_ = NULL;
-  proxy_config_service_impl_ = NULL;
+  pref_service_ = nullptr;
+  proxy_config_service_impl_ = nullptr;
 }
 
 // static
@@ -279,7 +280,19 @@ void PrefProxyConfigTrackerImpl::OnProxyConfigChanged(
 
   if (!proxy_config_service_impl_)
     return;
-  io_task_runner_->PostTask(
+
+  // If the ProxyConfigService lives on the current thread, just synchronously
+  // tell it about the new configuration.
+  // TODO(mmenke): When/if iOS is migrated to using the NetworkService, get rid
+  // of |proxy_config_service_task_runner_|. Can also merge
+  // ProxyConfigServiceImpl into the tracker, and make the class talk over the
+  // Mojo pipe directly, at that point.
+  if (!proxy_config_service_task_runner_) {
+    proxy_config_service_impl_->UpdateProxyConfig(config_state, config);
+    return;
+  }
+
+  proxy_config_service_task_runner_->PostTask(
       FROM_HERE, base::Bind(&ProxyConfigServiceImpl::UpdateProxyConfig,
                             base::Unretained(proxy_config_service_impl_),
                             config_state, config));

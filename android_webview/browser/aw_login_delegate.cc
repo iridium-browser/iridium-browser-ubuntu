@@ -8,58 +8,29 @@
 #include "base/android/jni_android.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/supports_user_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/resource_dispatcher_host.h"
-#include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/auth.h"
-#include "net/url_request/url_request.h"
 
 using namespace base::android;
 
 using content::BrowserThread;
-using content::RenderFrameHost;
-using content::ResourceDispatcherHost;
-using content::ResourceRequestInfo;
 using content::WebContents;
-
-namespace {
-const char* kAuthAttemptsKey = "android_webview_auth_attempts";
-
-class UrlRequestAuthAttemptsData : public base::SupportsUserData::Data {
- public:
-  UrlRequestAuthAttemptsData() : auth_attempts_(0) { }
-  int auth_attempts_;
-};
-
-}  // namespace
 
 namespace android_webview {
 
-AwLoginDelegate::AwLoginDelegate(net::AuthChallengeInfo* auth_info,
-                                 net::URLRequest* request)
-    : auth_info_(auth_info),
-      request_(request),
-      render_process_id_(0),
-      render_frame_id_(0) {
-    ResourceRequestInfo::GetRenderFrameForRequest(
-        request, &render_process_id_, &render_frame_id_);
-
-    UrlRequestAuthAttemptsData* count =
-        static_cast<UrlRequestAuthAttemptsData*>(
-            request->GetUserData(kAuthAttemptsKey));
-
-    if (count == NULL) {
-      count = new UrlRequestAuthAttemptsData();
-      request->SetUserData(kAuthAttemptsKey, base::WrapUnique(count));
-    }
-
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-        base::Bind(&AwLoginDelegate::HandleHttpAuthRequestOnUIThread,
-                   this, (count->auth_attempts_ == 0)));
-    count->auth_attempts_++;
+AwLoginDelegate::AwLoginDelegate(
+    net::AuthChallengeInfo* auth_info,
+    content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    bool first_auth_attempt,
+    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
+        auth_required_callback)
+    : auth_info_(auth_info), auth_required_callback_(auth_required_callback) {
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&AwLoginDelegate::HandleHttpAuthRequestOnUIThread, this,
+                 first_auth_attempt, web_contents_getter));
 }
 
 AwLoginDelegate::~AwLoginDelegate() {
@@ -83,16 +54,14 @@ void AwLoginDelegate::Cancel() {
 }
 
 void AwLoginDelegate::HandleHttpAuthRequestOnUIThread(
-    bool first_auth_attempt) {
+    bool first_auth_attempt,
+    const content::ResourceRequestInfo::WebContentsGetter&
+        web_contents_getter) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
+  WebContents* web_contents = web_contents_getter.Run();
   aw_http_auth_handler_.reset(
       new AwHttpAuthHandler(this, auth_info_.get(), first_auth_attempt));
-
-  RenderFrameHost* render_frame_host = RenderFrameHost::FromID(
-      render_process_id_, render_frame_id_);
-  WebContents* web_contents = WebContents::FromRenderFrameHost(
-      render_frame_host);
   if (!aw_http_auth_handler_->HandleOnUIThread(web_contents)) {
     Cancel();
     return;
@@ -101,28 +70,24 @@ void AwLoginDelegate::HandleHttpAuthRequestOnUIThread(
 
 void AwLoginDelegate::CancelOnIOThread() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (request_) {
-    request_->CancelAuth();
-    ResourceDispatcherHost::Get()->ClearLoginDelegateForRequest(request_);
-    request_ = NULL;
-  }
+  if (!auth_required_callback_.is_null())
+    std::move(auth_required_callback_).Run(base::nullopt);
   DeleteAuthHandlerSoon();
 }
 
 void AwLoginDelegate::ProceedOnIOThread(const base::string16& user,
                                         const base::string16& password) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (request_) {
-    request_->SetAuth(net::AuthCredentials(user, password));
-    ResourceDispatcherHost::Get()->ClearLoginDelegateForRequest(request_);
-    request_ = NULL;
+  if (!auth_required_callback_.is_null()) {
+    std::move(auth_required_callback_)
+        .Run(net::AuthCredentials(user, password));
   }
   DeleteAuthHandlerSoon();
 }
 
 void AwLoginDelegate::OnRequestCancelled() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  request_ = NULL;
+  auth_required_callback_.Reset();
   DeleteAuthHandlerSoon();
 }
 

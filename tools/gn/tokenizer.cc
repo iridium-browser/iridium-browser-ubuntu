@@ -77,8 +77,7 @@ Tokenizer::Tokenizer(const InputFile* input_file, Err* err)
       column_number_(1) {
 }
 
-Tokenizer::~Tokenizer() {
-}
+Tokenizer::~Tokenizer() = default;
 
 // static
 std::vector<Token> Tokenizer::Tokenize(const InputFile* input_file, Err* err) {
@@ -357,7 +356,7 @@ bool Tokenizer::IsCurrentStringTerminator(char quote_char) const {
     return false;
 
   // Check for escaping. \" is not a string terminator, but \\" is. Count
-  // the number of preceeding backslashes.
+  // the number of preceding backslashes.
   int num_backslashes = 0;
   for (int i = static_cast<int>(cur_) - 1; i >= 0 && input_[i] == '\\'; i--)
     num_backslashes++;

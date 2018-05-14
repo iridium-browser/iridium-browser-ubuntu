@@ -21,7 +21,7 @@ SiteEngagementServiceAndroid::GetOrCreate(JNIEnv* env,
   SiteEngagementServiceAndroid* android_service = service->GetAndroidService();
   if (!android_service) {
     service->SetAndroidService(
-        base::MakeUnique<SiteEngagementServiceAndroid>(env, service));
+        std::make_unique<SiteEngagementServiceAndroid>(env, service));
     android_service = service->GetAndroidService();
   }
 
@@ -64,11 +64,14 @@ void SiteEngagementServiceAndroid::ResetBaseScoreForURL(
   }
 }
 
-void SetParamValuesForTesting(JNIEnv* env, const JavaParamRef<jclass>& clazz) {
+void JNI_SiteEngagementService_SetParamValuesForTesting(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz) {
   SiteEngagementScore::SetParamValuesForTesting();
 }
 
-base::android::ScopedJavaLocalRef<jobject> SiteEngagementServiceForProfile(
+base::android::ScopedJavaLocalRef<jobject>
+JNI_SiteEngagementService_SiteEngagementServiceForProfile(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz,
     const JavaParamRef<jobject>& jprofile) {

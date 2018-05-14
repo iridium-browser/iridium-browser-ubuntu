@@ -9,18 +9,17 @@
 
 #include "base/format_macros.h"
 #include "base/mac/foundation_util.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #import "ios/chrome/browser/ui/static_content/static_html_view_controller.h"
+#import "ios/chrome/test/app/bookmarks_test_util.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/app/history_test_util.h"
 #include "ios/chrome/test/app/navigation_test_util.h"
 #import "ios/chrome/test/app/static_html_view_test_util.h"
 #import "ios/chrome/test/app/tab_test_util.h"
+#import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/testing/wait_util.h"
 #import "ios/web/public/test/earl_grey/js_test_util.h"
 #import "ios/web/public/test/web_view_content_test_util.h"
@@ -36,7 +35,7 @@
 namespace chrome_test_util {
 
 id ExecuteJavaScript(NSString* javascript,
-                     NSError* __unsafe_unretained* out_error) {
+                     NSError* __autoreleasing* out_error) {
   __block bool did_complete = false;
   __block id result = nil;
   __block NSError* temp_error = nil;
@@ -72,7 +71,8 @@ id ExecuteJavaScript(NSString* javascript,
 #pragma mark - History Utilities
 
 + (void)clearBrowsingHistory {
-  chrome_test_util::ClearBrowsingHistory();
+  GREYAssertTrue(chrome_test_util::ClearBrowsingHistory(),
+                 @"Clearing Browsing History timed out");
   // After clearing browsing history via code, wait for the UI to be done
   // with any updates. This includes icons from the new tab page being removed.
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
@@ -84,9 +84,7 @@ id ExecuteJavaScript(NSString* javascript,
   NSString* const kGetCookiesScript =
       @"document.cookie ? document.cookie.split(/;\\s*/) : [];";
 
-  // TODO(crbug.com/690057): Remove __unsafe_unretained once all callers of
-  // |ExecuteJavaScript| are converted to ARC.
-  NSError* __unsafe_unretained error = nil;
+  NSError* error = nil;
   id result = chrome_test_util::ExecuteJavaScript(kGetCookiesScript, &error);
 
   GREYAssertTrue(result && !error, @"Failed to get cookies.");
@@ -134,12 +132,7 @@ id ExecuteJavaScript(NSString* javascript,
 }
 
 + (void)waitForPageToFinishLoading {
-  GREYCondition* condition =
-      [GREYCondition conditionWithName:@"Wait for page to complete loading."
-                                 block:^BOOL {
-                                   return !chrome_test_util::IsLoading();
-                                 }];
-  GREYAssert([condition waitWithTimeout:testing::kWaitForPageLoadTimeout],
+  GREYAssert(chrome_test_util::WaitForPageToFinishLoading(),
              @"Page did not complete loading.");
 }
 
@@ -227,4 +220,43 @@ id ExecuteJavaScript(NSString* javascript,
              @"Failed waiting for incognito tab count to become %" PRIuNS,
              count);
 }
+
++ (void)waitForWebViewContainingBlockedImageElementWithID:(std::string)imageID {
+  GREYAssert(web::test::WaitForWebViewContainingImage(
+                 imageID, chrome_test_util::GetCurrentWebState(),
+                 web::test::IMAGE_STATE_BLOCKED),
+             @"Failed waiting for web view blocked image %s", imageID.c_str());
+}
+
++ (void)waitForWebViewContainingLoadedImageElementWithID:(std::string)imageID {
+  GREYAssert(web::test::WaitForWebViewContainingImage(
+                 imageID, chrome_test_util::GetCurrentWebState(),
+                 web::test::IMAGE_STATE_LOADED),
+             @"Failed waiting for web view loaded image %s", imageID.c_str());
+}
+
++ (void)waitForBookmarksToFinishLoading {
+  GREYAssert(testing::WaitUntilConditionOrTimeout(
+                 testing::kWaitForUIElementTimeout,
+                 ^{
+                   return chrome_test_util::BookmarksLoaded();
+                 }),
+             @"Bookmark model did not load");
+}
+
++ (void)waitForElementWithMatcherSufficientlyVisible:(id<GREYMatcher>)matcher {
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:@"Wait for element with matcher sufficiently visible"
+                  block:^BOOL {
+                    NSError* error = nil;
+                    [[EarlGrey selectElementWithMatcher:matcher]
+                        assertWithMatcher:grey_sufficientlyVisible()
+                                    error:&error];
+                    return error == nil;
+                  }];
+  GREYAssert([condition waitWithTimeout:testing::kWaitForUIElementTimeout],
+             @"Failed waiting for element with matcher %@ to become visible",
+             matcher);
+}
+
 @end

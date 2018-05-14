@@ -4,19 +4,20 @@
 
 #include "chrome/browser/chromeos/settings/device_settings_provider.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/files/file_util.h"
+#include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/test/scoped_path_override.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
 #include "chrome/browser/chromeos/settings/stub_install_attributes.h"
 #include "chrome/common/chrome_paths.h"
@@ -24,6 +25,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "components/user_manager/fake_user_manager.h"
 #include "components/user_manager/user.h"
@@ -42,6 +44,14 @@ using ::testing::_;
 namespace {
 
 const char kDisabledMessage[] = "This device has been disabled.";
+
+constexpr em::AutoUpdateSettingsProto_ConnectionType kConnectionTypes[] = {
+    em::AutoUpdateSettingsProto::CONNECTION_TYPE_ETHERNET,
+    em::AutoUpdateSettingsProto::CONNECTION_TYPE_WIFI,
+    em::AutoUpdateSettingsProto::CONNECTION_TYPE_WIMAX,
+    em::AutoUpdateSettingsProto::CONNECTION_TYPE_BLUETOOTH,
+    em::AutoUpdateSettingsProto::CONNECTION_TYPE_CELLULAR,
+};
 
 }  // namespace
 
@@ -86,7 +96,7 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
     proto->set_report_running_kiosk_app(enable_reporting);
     proto->set_device_status_frequency(frequency);
     device_policy_.Build();
-    device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+    session_manager_client_.set_device_policy(device_policy_.GetBlob());
     ReloadDeviceSettings();
     Mock::VerifyAndClearExpectations(this);
   }
@@ -99,7 +109,7 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
     proto->set_heartbeat_enabled(enable_heartbeat);
     proto->set_heartbeat_frequency(frequency);
     device_policy_.Build();
-    device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+    session_manager_client_.set_device_policy(device_policy_.GetBlob());
     ReloadDeviceSettings();
     Mock::VerifyAndClearExpectations(this);
   }
@@ -111,9 +121,20 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
         device_policy_.payload().mutable_device_log_upload_settings();
     proto->set_system_log_upload_enabled(enable_system_log_upload);
     device_policy_.Build();
-    device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+    session_manager_client_.set_device_policy(device_policy_.GetBlob());
     ReloadDeviceSettings();
     Mock::VerifyAndClearExpectations(this);
+  }
+
+  // Helper routine to set device wallpaper setting in policy.
+  void SetWallpaperSettings(const std::string& wallpaper_settings) {
+    EXPECT_CALL(*this, SettingChanged(_)).Times(AtLeast(1));
+    em::DeviceWallpaperImageProto* proto =
+        device_policy_.payload().mutable_device_wallpaper_image();
+    proto->set_device_wallpaper_image(wallpaper_settings);
+    device_policy_.Build();
+    session_manager_client_.set_device_policy(device_policy_.GetBlob());
+    ReloadDeviceSettings();
   }
 
   enum MetricsOption { DISABLE_METRICS, ENABLE_METRICS, REMOVE_METRICS_POLICY };
@@ -131,7 +152,7 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
       proto->set_metrics_enabled(option == ENABLE_METRICS);
     }
     device_policy_.Build();
-    device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+    session_manager_client_.set_device_policy(device_policy_.GetBlob());
     ReloadDeviceSettings();
     Mock::VerifyAndClearExpectations(this);
   }
@@ -141,12 +162,10 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
   void VerifyHeartbeatSettings(bool expected_enable_state,
                                int expected_frequency) {
     const base::Value expected_enabled_value(expected_enable_state);
-    EXPECT_TRUE(base::Value::Equals(provider_->Get(kHeartbeatEnabled),
-                                    &expected_enabled_value));
+    EXPECT_EQ(expected_enabled_value, *provider_->Get(kHeartbeatEnabled));
 
     const base::Value expected_frequency_value(expected_frequency);
-    EXPECT_TRUE(base::Value::Equals(provider_->Get(kHeartbeatFrequency),
-                                    &expected_frequency_value));
+    EXPECT_EQ(expected_frequency_value, *provider_->Get(kHeartbeatFrequency));
   }
 
   // Helper routine to ensure all reporting policies have been correctly
@@ -169,21 +188,28 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
 
     const base::Value expected_enable_value(expected_enable_state);
     for (auto* setting : reporting_settings) {
-      EXPECT_TRUE(base::Value::Equals(provider_->Get(setting),
-                                      &expected_enable_value))
+      EXPECT_EQ(expected_enable_value, *provider_->Get(setting))
           << "Value for " << setting << " does not match expected";
     }
     const base::Value expected_frequency_value(expected_frequency);
-    EXPECT_TRUE(base::Value::Equals(provider_->Get(kReportUploadFrequency),
-                                    &expected_frequency_value));
+    EXPECT_EQ(expected_frequency_value,
+              *provider_->Get(kReportUploadFrequency));
   }
 
   // Helper routine to ensure log upload policy has been correctly
   // decoded.
   void VerifyLogUploadSettings(bool expected_enable_state) {
     const base::Value expected_enabled_value(expected_enable_state);
-    EXPECT_TRUE(base::Value::Equals(provider_->Get(kSystemLogUploadEnabled),
-                                    &expected_enabled_value));
+    EXPECT_EQ(expected_enabled_value, *provider_->Get(kSystemLogUploadEnabled));
+  }
+
+  void VerifyPolicyValue(const char* policy_key,
+                         const base::Value* const ptr_to_expected_value) {
+    // The pointer might be null, so check before dereferencing.
+    if (ptr_to_expected_value)
+      EXPECT_EQ(*ptr_to_expected_value, *provider_->Get(policy_key));
+    else
+      EXPECT_EQ(nullptr, provider_->Get(policy_key));
   }
 
   // Helper routine to set LoginScreenDomainAutoComplete policy.
@@ -193,7 +219,7 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
         device_policy_.payload().mutable_login_screen_domain_auto_complete();
     proto->set_login_screen_domain_auto_complete(domain);
     device_policy_.Build();
-    device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+    session_manager_client_.set_device_policy(device_policy_.GetBlob());
     ReloadDeviceSettings();
     Mock::VerifyAndClearExpectations(this);
   }
@@ -201,9 +227,36 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
   // Helper routine to check value of the LoginScreenDomainAutoComplete policy.
   void VerifyDomainAutoComplete(
       const base::Value* const ptr_to_expected_value) {
-    EXPECT_TRUE(base::Value::Equals(
-        provider_->Get(kAccountsPrefLoginScreenDomainAutoComplete),
-        ptr_to_expected_value));
+    VerifyPolicyValue(kAccountsPrefLoginScreenDomainAutoComplete,
+                      ptr_to_expected_value);
+  }
+
+  // Helper routine to set AutoUpdates connection types policy.
+  void SetAutoUpdateConnectionTypes(const std::vector<int>& values) {
+    EXPECT_CALL(*this, SettingChanged(_)).Times(AtLeast(1));
+
+    em::AutoUpdateSettingsProto* proto =
+        device_policy_.payload().mutable_auto_update_settings();
+    proto->set_update_disabled(false);
+    for (auto const& value : values) {
+      proto->add_allowed_connection_types(kConnectionTypes[value]);
+    }
+    device_policy_.Build();
+    session_manager_client_.set_device_policy(device_policy_.GetBlob());
+    ReloadDeviceSettings();
+    Mock::VerifyAndClearExpectations(this);
+  }
+
+  // Helper routine to set HostnameTemplate policy.
+  void SetHostnameTemplate(const std::string& hostname_template) {
+    EXPECT_CALL(*this, SettingChanged(_)).Times(AtLeast(1));
+    em::NetworkHostnameProto* proto =
+        device_policy_.payload().mutable_network_hostname();
+    proto->set_device_hostname_template(hostname_template);
+    device_policy_.Build();
+    session_manager_client_.set_device_policy(device_policy_.GetBlob());
+    ReloadDeviceSettings();
+    Mock::VerifyAndClearExpectations(this);
   }
 
   ScopedTestingLocalState local_state_;
@@ -267,9 +320,9 @@ TEST_F(DeviceSettingsProviderTest, InitializationTestUnowned) {
   Mock::VerifyAndClearExpectations(this);
 
   // This shouldn't trigger a write.
-  device_settings_test_helper_.set_policy_blob(std::string());
+  session_manager_client_.set_device_policy(std::string());
   FlushDeviceSettings();
-  EXPECT_EQ(std::string(), device_settings_test_helper_.policy_blob());
+  EXPECT_EQ(std::string(), session_manager_client_.device_policy());
 
   // Verify the change has been applied.
   const base::Value* saved_value = provider_->Get(kReleaseChannel);
@@ -310,9 +363,9 @@ TEST_F(DeviceSettingsProviderTest, SetPrefFailed) {
   Mock::VerifyAndClearExpectations(this);
 
   // This shouldn't trigger a write.
-  device_settings_test_helper_.set_policy_blob(std::string());
+  session_manager_client_.set_device_policy(std::string());
   FlushDeviceSettings();
-  EXPECT_EQ(std::string(), device_settings_test_helper_.policy_blob());
+  EXPECT_EQ(std::string(), session_manager_client_.device_policy());
 
   // Verify the change has not been applied.
   const base::Value* saved_value = provider_->Get(kStatsReportingPref);
@@ -335,7 +388,7 @@ TEST_F(DeviceSettingsProviderTest, SetPrefSucceed) {
   Mock::VerifyAndClearExpectations(this);
 
   // Process the store.
-  device_settings_test_helper_.set_policy_blob(std::string());
+  session_manager_client_.set_device_policy(std::string());
   FlushDeviceSettings();
 
   // Verify that the device policy has been adjusted.
@@ -365,7 +418,7 @@ TEST_F(DeviceSettingsProviderTest, SetPrefTwice) {
   provider_->Set(kReleaseChannel, value2);
 
   // Let the changes propagate through the system.
-  device_settings_test_helper_.set_policy_blob(std::string());
+  session_manager_client_.set_device_policy(std::string());
   FlushDeviceSettings();
 
   // Verify the second change has been applied.
@@ -378,7 +431,7 @@ TEST_F(DeviceSettingsProviderTest, SetPrefTwice) {
 TEST_F(DeviceSettingsProviderTest, PolicyRetrievalFailedBadSignature) {
   owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
   device_policy_.policy().set_policy_data_signature("bad signature");
-  device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+  session_manager_client_.set_device_policy(device_policy_.GetBlob());
   ReloadDeviceSettings();
 
   // Verify that the cached settings blob is not "trusted".
@@ -390,7 +443,7 @@ TEST_F(DeviceSettingsProviderTest, PolicyRetrievalFailedBadSignature) {
 
 TEST_F(DeviceSettingsProviderTest, PolicyRetrievalNoPolicy) {
   owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
-  device_settings_test_helper_.set_policy_blob(std::string());
+  session_manager_client_.set_device_policy(std::string());
   ReloadDeviceSettings();
 
   // Verify that the cached settings blob is not "trusted".
@@ -401,7 +454,7 @@ TEST_F(DeviceSettingsProviderTest, PolicyRetrievalNoPolicy) {
 }
 
 TEST_F(DeviceSettingsProviderTest, PolicyFailedPermanentlyNotification) {
-  device_settings_test_helper_.set_policy_blob(std::string());
+  session_manager_client_.set_device_policy(std::string());
 
   EXPECT_CALL(*this, GetTrustedCallback());
   EXPECT_EQ(CrosSettingsProvider::TEMPORARILY_UNTRUSTED,
@@ -435,7 +488,7 @@ TEST_F(DeviceSettingsProviderTest, LegacyDeviceLocalAccounts) {
   account->set_deprecated_public_session_id(
       policy::PolicyBuilder::kFakeUsername);
   device_policy_.Build();
-  device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+  session_manager_client_.set_device_policy(device_policy_.GetBlob());
   ReloadDeviceSettings();
   Mock::VerifyAndClearExpectations(this);
 
@@ -450,7 +503,7 @@ TEST_F(DeviceSettingsProviderTest, LegacyDeviceLocalAccounts) {
   expected_accounts.Append(std::move(entry_dict));
   const base::Value* actual_accounts =
       provider_->Get(kAccountsPrefDeviceLocalAccounts);
-  EXPECT_TRUE(base::Value::Equals(&expected_accounts, actual_accounts));
+  EXPECT_EQ(expected_accounts, *actual_accounts);
 }
 
 TEST_F(DeviceSettingsProviderTest, DecodeDeviceState) {
@@ -460,23 +513,22 @@ TEST_F(DeviceSettingsProviderTest, DecodeDeviceState) {
   device_policy_.policy_data().mutable_device_state()->
       mutable_disabled_state()->set_message(kDisabledMessage);
   device_policy_.Build();
-  device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+  session_manager_client_.set_device_policy(device_policy_.GetBlob());
   ReloadDeviceSettings();
   Mock::VerifyAndClearExpectations(this);
 
   // Verify that the device state has been decoded correctly.
   const base::Value expected_disabled_value(true);
-  EXPECT_TRUE(base::Value::Equals(provider_->Get(kDeviceDisabled),
-                                  &expected_disabled_value));
+  EXPECT_EQ(expected_disabled_value, *provider_->Get(kDeviceDisabled));
   const base::Value expected_disabled_message_value(kDisabledMessage);
-  EXPECT_TRUE(base::Value::Equals(provider_->Get(kDeviceDisabledMessage),
-                                  &expected_disabled_message_value));
+  EXPECT_EQ(expected_disabled_message_value,
+            *provider_->Get(kDeviceDisabledMessage));
 
   // Verify that a change to the device state triggers a notification.
   EXPECT_CALL(*this, SettingChanged(_)).Times(AtLeast(1));
   device_policy_.policy_data().mutable_device_state()->clear_device_mode();
   device_policy_.Build();
-  device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+  session_manager_client_.set_device_policy(device_policy_.GetBlob());
   ReloadDeviceSettings();
   Mock::VerifyAndClearExpectations(this);
 
@@ -525,12 +577,58 @@ TEST_F(DeviceSettingsProviderTest, DecodeDomainAutoComplete) {
   VerifyDomainAutoComplete(&domain_value);
 }
 
+TEST_F(DeviceSettingsProviderTest, EmptyAllowedConnectionTypesForUpdate) {
+  // By default AllowedConnectionTypesForUpdate policy should not be set.
+  VerifyPolicyValue(kAllowedConnectionTypesForUpdate, nullptr);
+
+  // In case of empty list policy should not be set.
+  const std::vector<int> no_values = {};
+  SetAutoUpdateConnectionTypes(no_values);
+  VerifyPolicyValue(kAllowedConnectionTypesForUpdate, nullptr);
+
+  const std::vector<int> single_value = {0};
+  // Check some meaningful value. Policy should be set.
+  SetAutoUpdateConnectionTypes(single_value);
+  base::ListValue allowed_connections;
+  allowed_connections.AppendInteger(0);
+  VerifyPolicyValue(kAllowedConnectionTypesForUpdate, &allowed_connections);
+}
+
+TEST_F(DeviceSettingsProviderTest, DecodeHostnameTemplate) {
+  // By default DeviceHostnameTemplate policy should not be set.
+  VerifyPolicyValue(kDeviceHostnameTemplate, nullptr);
+
+  // Empty string means that the policy is not set.
+  SetHostnameTemplate("");
+  VerifyPolicyValue(kDeviceHostnameTemplate, nullptr);
+
+  // Check some meaningful value. Policy should be set.
+  const std::string hostname_template = "chromebook-${ASSET_ID}";
+  const base::Value template_value(hostname_template);
+  SetHostnameTemplate(hostname_template);
+  VerifyPolicyValue(kDeviceHostnameTemplate, &template_value);
+}
+
 TEST_F(DeviceSettingsProviderTest, DecodeLogUploadSettings) {
   SetLogUploadSettings(true);
   VerifyLogUploadSettings(true);
 
   SetLogUploadSettings(false);
   VerifyLogUploadSettings(false);
+}
+
+TEST_F(DeviceSettingsProviderTest, SetWallpaperSettings) {
+  // Invalid format should be ignored.
+  const std::string invalid_format = "\\\\invalid\\format";
+  SetWallpaperSettings(invalid_format);
+  EXPECT_EQ(nullptr, provider_->Get(kDeviceWallpaperImage));
+
+  // Set with valid json format.
+  const std::string valid_format("{\"type\":\"object\"}");
+  SetWallpaperSettings(valid_format);
+  std::unique_ptr<base::DictionaryValue> expected_value =
+      base::DictionaryValue::From(base::JSONReader::Read(valid_format));
+  EXPECT_EQ(*expected_value, *provider_->Get(kDeviceWallpaperImage));
 }
 
 }  // namespace chromeos

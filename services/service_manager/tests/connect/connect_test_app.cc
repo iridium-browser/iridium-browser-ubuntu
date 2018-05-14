@@ -16,7 +16,7 @@
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_runner.h"
-#include "services/service_manager/public/interfaces/connector.mojom.h"
+#include "services/service_manager/public/mojom/connector.mojom.h"
 #include "services/service_manager/tests/connect/connect_test.mojom.h"
 
 namespace service_manager {
@@ -203,7 +203,7 @@ class ConnectTestApp : public Service,
 
   void OnConnectionError() {
     if (bindings_.empty() && standalone_bindings_.empty())
-      base::MessageLoop::current()->QuitWhenIdle();
+      base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
   BinderRegistryWithArgs<const BindSourceInfo&> registry_;

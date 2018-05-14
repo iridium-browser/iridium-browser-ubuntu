@@ -19,15 +19,19 @@
 #include "chrome/browser/android/download/dangerous_download_infobar_delegate.h"
 #include "chrome/browser/android/download/download_manager_service.h"
 #include "chrome/browser/android/tab_android.h"
+#include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/offline_pages/android/offline_page_bridge.h"
 #include "chrome/browser/permissions/permission_update_infobar_delegate_android.h"
 #include "chrome/browser/ui/android/view_android_helper.h"
 #include "chrome/browser/vr/vr_tab_helper.h"
 #include "chrome/grit/chromium_strings.h"
+#include "components/download/public/common/download_url_parameters.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_item_utils.h"
 #include "content/public/browser/download_manager.h"
-#include "content/public/browser/download_url_parameters.h"
+#include "content/public/browser/download_request_utils.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/referrer.h"
@@ -44,7 +48,7 @@ using base::android::ScopedJavaLocalRef;
 using content::BrowserContext;
 using content::BrowserThread;
 using content::ContextMenuParams;
-using content::DownloadItem;
+using download::DownloadItem;
 using content::DownloadManager;
 using content::WebContents;
 
@@ -57,16 +61,6 @@ base::LazyInstance<base::Lock>::DestructorAtExit g_download_controller_lock_;
 int kDefaultAutoResumptionSizeLimit = 10 * 1024 * 1024;  // 10 MB
 const char kAutoResumptionSizeLimitParamName[] = "AutoResumptionSizeLimit";
 
-WebContents* GetWebContents(int render_process_id, int render_view_id) {
-  content::RenderViewHost* render_view_host =
-      content::RenderViewHost::FromID(render_process_id, render_view_id);
-
-  if (!render_view_host)
-    return nullptr;
-
-  return WebContents::FromRenderViewHost(render_view_host);
-}
-
 void CreateContextMenuDownload(
     const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::ContextMenuParams& params,
@@ -74,11 +68,8 @@ void CreateContextMenuDownload(
     const std::string& extra_headers,
     bool granted) {
   content::WebContents* web_contents = wc_getter.Run();
-  if (!granted) {
-    DownloadController::RecordStoragePermission(
-        DownloadController::StoragePermissionType::STORAGE_PERMISSION_DENIED);
+  if (!granted)
     return;
-  }
 
   if (!web_contents) {
     DownloadController::RecordStoragePermission(
@@ -87,21 +78,22 @@ void CreateContextMenuDownload(
     return;
   }
 
-  DownloadController::RecordStoragePermission(
-      DownloadController::StoragePermissionType::STORAGE_PERMISSION_GRANTED);
   const GURL& url = is_link ? params.link_url : params.src_url;
   const GURL& referring_url =
       params.frame_url.is_empty() ? params.page_url : params.frame_url;
   content::DownloadManager* dlm =
       content::BrowserContext::GetDownloadManager(
           web_contents->GetBrowserContext());
-  std::unique_ptr<content::DownloadUrlParameters> dl_params(
-      content::DownloadUrlParameters::CreateForWebContentsMainFrame(
+  std::unique_ptr<download::DownloadUrlParameters> dl_params(
+      content::DownloadRequestUtils::CreateDownloadForWebContentsMainFrame(
           web_contents, url, NO_TRAFFIC_ANNOTATION_YET));
   content::Referrer referrer = content::Referrer::SanitizeForRequest(
       url,
       content::Referrer(referring_url.GetAsReferrer(), params.referrer_policy));
-  dl_params->set_referrer(referrer);
+  dl_params->set_referrer(referrer.url);
+  dl_params->set_referrer_policy(
+      content::Referrer::ReferrerPolicyForUrlRequest(referrer.policy));
+
   if (is_link)
     dl_params->set_referrer_encoding(params.frame_charset);
   net::HttpRequestHeaders headers;
@@ -111,6 +103,11 @@ void CreateContextMenuDownload(
   if (!is_link && extra_headers.empty())
     dl_params->set_prefer_cache(true);
   dl_params->set_prompt(false);
+  dl_params->set_request_origin(
+      offline_pages::android::OfflinePageBridge::GetEncodedOriginApp(
+          web_contents));
+  RecordDownloadSource(DOWNLOAD_INITIATED_BY_CONTEXT_MENU);
+  dl_params->set_download_source(download::DownloadSource::CONTEXT_MENU);
   dlm->DownloadUrl(std::move(dl_params));
 }
 
@@ -124,30 +121,39 @@ int GetAutoResumptionSizeLimit() {
              : kDefaultAutoResumptionSizeLimit;
 }
 
-}  // namespace
-
-static void OnAcquirePermissionResult(
-    JNIEnv* env,
-    const JavaParamRef<jclass>& clazz,
-    jlong callback_id,
-    jboolean granted,
-    const JavaParamRef<jstring>& jpermission_to_update) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(callback_id);
-
-  std::string permission_to_update;
-  if (jpermission_to_update) {
-    permission_to_update =
-        base::android::ConvertJavaStringToUTF8(env, jpermission_to_update);
+// Helper class for retrieving a DownloadManager.
+class DownloadManagerGetter : public DownloadManager::Observer {
+ public:
+  explicit DownloadManagerGetter(DownloadManager* manager) : manager_(manager) {
+    manager_->AddObserver(this);
   }
-  // Convert java long long int to c++ pointer, take ownership.
-  std::unique_ptr<DownloadController::AcquirePermissionCallback> cb(
-      reinterpret_cast<DownloadController::AcquirePermissionCallback*>(
-          callback_id));
-  cb->Run(granted, permission_to_update);
+
+  ~DownloadManagerGetter() override {
+    if (manager_)
+      manager_->RemoveObserver(this);
+  }
+
+  void ManagerGoingDown(DownloadManager* manager) override {
+    manager_ = nullptr;
+  }
+
+  DownloadManager* manager() { return manager_; }
+
+ private:
+  DownloadManager* manager_;
+  DISALLOW_COPY_AND_ASSIGN(DownloadManagerGetter);
+};
+
+void RemoveDownloadItem(std::unique_ptr<DownloadManagerGetter> getter,
+                        const std::string& guid) {
+  if (!getter->manager())
+    return;
+  DownloadItem* item = getter->manager()->GetDownloadByGuid(guid);
+  if (item)
+    item->Remove();
 }
 
-static void OnRequestFileAccessResult(
+void OnRequestFileAccessResult(
     const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
     const DownloadControllerBase::AcquireFileAccessPermissionCallback& cb,
     bool granted,
@@ -170,6 +176,45 @@ static void OnRequestFileAccessResult(
         DownloadController::CANCEL_REASON_NO_STORAGE_PERMISSION);
   }
   cb.Run(granted);
+}
+
+void OnStoragePermissionDecided(
+    const DownloadControllerBase::AcquireFileAccessPermissionCallback& cb,
+    bool granted) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  if (granted) {
+    DownloadController::RecordStoragePermission(
+        DownloadController::StoragePermissionType::STORAGE_PERMISSION_GRANTED);
+  } else {
+    DownloadController::RecordStoragePermission(
+        DownloadController::StoragePermissionType::STORAGE_PERMISSION_DENIED);
+  }
+
+  cb.Run(granted);
+}
+
+}  // namespace
+
+static void JNI_DownloadController_OnAcquirePermissionResult(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    jlong callback_id,
+    jboolean granted,
+    const JavaParamRef<jstring>& jpermission_to_update) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(callback_id);
+
+  std::string permission_to_update;
+  if (jpermission_to_update) {
+    permission_to_update =
+        base::android::ConvertJavaStringToUTF8(env, jpermission_to_update);
+  }
+  // Convert java long long int to c++ pointer, take ownership.
+  std::unique_ptr<DownloadController::AcquirePermissionCallback> cb(
+      reinterpret_cast<DownloadController::AcquirePermissionCallback*>(
+          callback_id));
+  cb->Run(granted, permission_to_update);
 }
 
 // static
@@ -215,17 +260,25 @@ void DownloadController::AcquireFileAccessPermission(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   WebContents* web_contents = web_contents_getter.Run();
-  if (vr::VrTabHelper::IsInVr(web_contents))
+  if (vr::VrTabHelper::IsInVr(web_contents)) {
+    vr::VrTabHelper::UISuppressed(
+        vr::UiSuppressedElement::kFileAccessPermission);
     return;
+  }
+
+  RecordStoragePermission(StoragePermissionType::STORAGE_PERMISSION_REQUESTED);
 
   if (HasFileAccessPermission()) {
+    RecordStoragePermission(
+        StoragePermissionType::STORAGE_PERMISSION_NO_ACTION_NEEDED);
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE, base::Bind(cb, true));
     return;
   }
 
   AcquirePermissionCallback callback(
-      base::Bind(&OnRequestFileAccessResult, web_contents_getter, cb));
+      base::Bind(&OnRequestFileAccessResult, web_contents_getter,
+                 base::Bind(&OnStoragePermissionDecided, cb)));
   // Make copy on the heap so we can pass the pointer through JNI.
   intptr_t callback_id =
       reinterpret_cast<intptr_t>(new AcquirePermissionCallback(callback));
@@ -236,8 +289,6 @@ void DownloadController::AcquireFileAccessPermission(
 void DownloadController::CreateAndroidDownload(
     const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const DownloadInfo& info) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&DownloadController::StartAndroidDownload,
@@ -252,7 +303,7 @@ void DownloadController::AboutToResumeDownload(DownloadItem* download_item) {
   // validators so we know whether the resumption causes a restart.
   if (download_item->GetState() == DownloadItem::IN_PROGRESS ||
       download_item->GetLastReason() ==
-          content::DOWNLOAD_INTERRUPT_REASON_NONE) {
+          download::DOWNLOAD_INTERRUPT_REASON_NONE) {
     return;
   }
   if (download_item->GetETag().empty() &&
@@ -328,7 +379,8 @@ void DownloadController::OnDownloadStarted(
   if (!download_item->IsDangerous())
     Java_DownloadController_onDownloadStarted(env);
 
-  WebContents* web_contents = download_item->GetWebContents();
+  WebContents* web_contents =
+      content::DownloadItemUtils::GetWebContents(download_item);
   if (web_contents) {
     TabAndroid* tab = TabAndroid::FromWebContents(web_contents);
     if (tab && !tab->GetJavaObject().is_null()) {
@@ -390,9 +442,17 @@ void DownloadController::OnDownloadUpdated(DownloadItem* item) {
 }
 
 void DownloadController::OnDangerousDownload(DownloadItem* item) {
-  WebContents* web_contents = item->GetWebContents();
+  WebContents* web_contents = content::DownloadItemUtils::GetWebContents(item);
   if (!web_contents) {
-    item->Remove();
+    auto download_manager_getter = std::make_unique<DownloadManagerGetter>(
+        BrowserContext::GetDownloadManager(
+            content::DownloadItemUtils::GetBrowserContext(item)));
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::BindOnce(&RemoveDownloadItem,
+                       std::move(download_manager_getter),
+                       item->GetGuid()));
+    item->RemoveObserver(this);
     return;
   }
 
@@ -403,18 +463,11 @@ void DownloadController::OnDangerousDownload(DownloadItem* item) {
 void DownloadController::StartContextMenuDownload(
     const ContextMenuParams& params, WebContents* web_contents, bool is_link,
     const std::string& extra_headers) {
-  int process_id = web_contents->GetRenderProcessHost()->GetID();
+  int process_id = web_contents->GetRenderViewHost()->GetProcess()->GetID();
   int routing_id = web_contents->GetRenderViewHost()->GetRoutingID();
 
   const content::ResourceRequestInfo::WebContentsGetter& wc_getter(
       base::Bind(&GetWebContents, process_id, routing_id));
-
-  RecordStoragePermission(StoragePermissionType::STORAGE_PERMISSION_REQUESTED);
-
-  if (HasFileAccessPermission()) {
-    RecordStoragePermission(
-        StoragePermissionType::STORAGE_PERMISSION_NO_ACTION_NEEDED);
-  }
 
   AcquireFileAccessPermission(
       wc_getter, base::Bind(&CreateContextMenuDownload, wc_getter, params,
@@ -422,7 +475,7 @@ void DownloadController::StartContextMenuDownload(
 }
 
 bool DownloadController::IsInterruptedDownloadAutoResumable(
-    content::DownloadItem* download_item) {
+    download::DownloadItem* download_item) {
   if (!download_item->GetURL().SchemeIsHTTPOrHTTPS())
     return false;
 
@@ -447,11 +500,11 @@ bool DownloadController::IsInterruptedDownloadAutoResumable(
   }
 
   int interrupt_reason = download_item->GetLastReason();
-  DCHECK_NE(interrupt_reason, content::DOWNLOAD_INTERRUPT_REASON_NONE);
+  DCHECK_NE(interrupt_reason, download::DOWNLOAD_INTERRUPT_REASON_NONE);
   return interrupt_reason ==
-             content::DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT ||
+             download::DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT ||
          interrupt_reason ==
-             content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED ||
+             download::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED ||
          interrupt_reason ==
-             content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED;
+             download::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED;
 }

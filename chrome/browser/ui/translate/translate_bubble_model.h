@@ -85,6 +85,11 @@ class TranslateBubbleModel {
   // Returns true if the Always Translate checkbox should be checked by default.
   virtual bool ShouldAlwaysTranslateBeCheckedByDefault() const = 0;
 
+  // Returns true if the Always Translate checkbox should be shown on the
+  // initial translation prompt, when we think the user wants that
+  // functionality.
+  virtual bool ShouldShowAlwaysTranslateShortcut() const = 0;
+
   // Sets the value if the webpage in the current original language should be
   // translated into the current target language automatically.
   virtual void SetAlwaysTranslate(bool value) = 0;
@@ -102,6 +107,9 @@ class TranslateBubbleModel {
   // Returns true if the page is translated in the currently selected source
   // and target language.
   virtual bool IsPageTranslatedInCurrentLanguages() const = 0;
+
+  // True if the site of the current page can be blacklisted.
+  virtual bool CanBlacklistSite() = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_TRANSLATE_TRANSLATE_BUBBLE_MODEL_H_

@@ -27,18 +27,16 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "platform/SharedBuffer.h"
-#include "platform/WebTaskRunner.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/text/StringUTF8Adaptor.h"
 #include "public/platform/FilePathConversion.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebThread.h"
-#include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 namespace testing {
@@ -55,8 +53,8 @@ base::FilePath BlinkRootFilePath() {
 }  // namespace
 
 void RunPendingTasks() {
-  Platform::Current()->CurrentThread()->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE, WTF::Bind(&ExitRunLoop));
+  Platform::Current()->CurrentThread()->GetTaskRunner()->PostTask(
+      FROM_HERE, WTF::Bind(&ExitRunLoop));
 
   // We forbid GC in the tasks. Otherwise the registered GCTaskObserver tries
   // to run GC with NoHeapPointerOnStack.
@@ -66,8 +64,8 @@ void RunPendingTasks() {
 }
 
 void RunDelayedTasks(TimeDelta delay) {
-  Platform::Current()->CurrentThread()->GetWebTaskRunner()->PostDelayedTask(
-      BLINK_FROM_HERE, WTF::Bind(&ExitRunLoop), delay);
+  Platform::Current()->CurrentThread()->GetTaskRunner()->PostDelayedTask(
+      FROM_HERE, WTF::Bind(&ExitRunLoop), delay);
   EnterRunLoop();
 }
 
@@ -76,7 +74,7 @@ void EnterRunLoop() {
 }
 
 void ExitRunLoop() {
-  base::MessageLoop::current()->QuitWhenIdle();
+  base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 void YieldCurrentThread() {
@@ -107,11 +105,30 @@ String PlatformTestDataPath(const String& relative_path) {
           .Append(WebStringToFilePath(relative_path)));
 }
 
-PassRefPtr<SharedBuffer> ReadFromFile(const String& path) {
+scoped_refptr<SharedBuffer> ReadFromFile(const String& path) {
   base::FilePath file_path = blink::WebStringToFilePath(path);
   std::string buffer;
   base::ReadFileToString(file_path, &buffer);
   return SharedBuffer::Create(buffer.data(), buffer.size());
+}
+
+LineReader::LineReader(const std::string& text) : text_(text), index_(0) {}
+
+bool LineReader::GetNextLine(std::string* line) {
+  line->clear();
+  if (index_ >= text_.length())
+    return false;
+
+  size_t end_of_line_index = text_.find("\r\n", index_);
+  if (end_of_line_index == std::string::npos) {
+    *line = text_.substr(index_);
+    index_ = text_.length();
+    return true;
+  }
+
+  *line = text_.substr(index_, end_of_line_index - index_);
+  index_ = end_of_line_index + 2;
+  return true;
 }
 
 }  // namespace testing

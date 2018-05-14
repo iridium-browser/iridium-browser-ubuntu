@@ -7,15 +7,17 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
+#include <utility>
 
+#include "ash/app_list/model/search/search_model.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "ui/app_list/app_list_model.h"
+#include "ui/app_list/app_list_features.h"
 #include "ui/app_list/test/app_list_test_view_delegate.h"
 #include "ui/app_list/test/test_search_result.h"
-#include "ui/app_list/views/search_result_list_view_delegate.h"
 #include "ui/app_list/views/search_result_view.h"
 #include "ui/views/controls/progress_bar.h"
 #include "ui/views/test/views_test_base.h"
@@ -27,44 +29,34 @@ namespace {
 int kDefaultSearchItems = 5;
 }  // namespace
 
-class SearchResultListViewTest : public views::ViewsTestBase,
-                                 public SearchResultListViewDelegate {
+class SearchResultListViewTest : public views::ViewsTestBase {
  public:
-  SearchResultListViewTest() {}
-  ~SearchResultListViewTest() override {}
+  SearchResultListViewTest() = default;
+  ~SearchResultListViewTest() override = default;
 
   // Overridden from testing::Test:
   void SetUp() override {
     views::ViewsTestBase::SetUp();
-    view_.reset(new SearchResultListView(this, &view_delegate_));
-    view_->SetResults(view_delegate_.GetModel()->results());
+    view_.reset(new SearchResultListView(nullptr, &view_delegate_));
+    view_->SetResults(view_delegate_.GetSearchModel()->results());
   }
 
  protected:
-  SearchResultListView* view() { return view_.get(); }
+  SearchResultListView* view() const { return view_.get(); }
 
-  SearchResultView* GetResultViewAt(int index) {
+  SearchResultView* GetResultViewAt(int index) const {
     return view_->GetResultViewAt(index);
   }
 
-  AppListModel::SearchResults* GetResults() {
-    return view_delegate_.GetModel()->results();
-  }
-
-  void SetLongAutoLaunchTimeout() {
-    // Sets a long timeout that lasts longer than the test run.
-    view_delegate_.set_auto_launch_timeout(base::TimeDelta::FromDays(1));
-  }
-
-  base::TimeDelta GetAutoLaunchTimeout() {
-    return view_delegate_.GetAutoLaunchTimeout();
+  SearchModel::SearchResults* GetResults() {
+    return view_delegate_.GetSearchModel()->results();
   }
 
   void SetUpSearchResults() {
-    AppListModel::SearchResults* results = GetResults();
+    SearchModel::SearchResults* results = GetResults();
     for (int i = 0; i < kDefaultSearchItems; ++i) {
       std::unique_ptr<TestSearchResult> result =
-          base::MakeUnique<TestSearchResult>();
+          std::make_unique<TestSearchResult>();
       result->set_display_type(SearchResult::DISPLAY_LIST);
       result->set_title(base::UTF8ToUTF16(base::StringPrintf("Result %d", i)));
       if (i < 2)
@@ -84,16 +76,14 @@ class SearchResultListViewTest : public views::ViewsTestBase,
     return result;
   }
 
-  int GetResultCount() { return view_->num_results(); }
+  int GetResultCount() const { return view_->num_results(); }
 
-  int GetSelectedIndex() { return view_->selected_index(); }
+  int GetSelectedIndex() const { return view_->selected_index(); }
 
-  void ResetSelectedIndex() {
-    view_->SetSelectedIndex(0);
-  }
+  void ResetSelectedIndex() { view_->SetSelectedIndex(0); }
 
   void AddTestResultAtIndex(int index) {
-    GetResults()->Add(base::MakeUnique<TestSearchResult>());
+    GetResults()->Add(std::make_unique<TestSearchResult>());
   }
 
   void DeleteResultAt(int index) { GetResults()->DeleteAt(index); }
@@ -103,108 +93,26 @@ class SearchResultListViewTest : public views::ViewsTestBase,
     return view_->OnKeyPressed(event);
   }
 
-  bool IsAutoLaunching() { return !!view_->auto_launch_animation_; }
-
-  void ForceAutoLaunch() {
-    view_->ForceAutoLaunchForTest();
-  }
-
   void ExpectConsistent() {
     // Adding results will schedule Update().
     RunPendingMessages();
 
-    AppListModel::SearchResults* results = GetResults();
+    SearchModel::SearchResults* results = GetResults();
     for (size_t i = 0; i < results->item_count(); ++i) {
       EXPECT_EQ(results->GetItemAt(i), GetResultViewAt(i)->result());
     }
   }
 
-  views::ProgressBar* GetProgressBarAt(size_t index) {
+  views::ProgressBar* GetProgressBarAt(size_t index) const {
     return GetResultViewAt(index)->progress_bar_;
   }
 
  private:
-  void OnResultInstalled(SearchResult* result) override {}
-
   AppListTestViewDelegate view_delegate_;
   std::unique_ptr<SearchResultListView> view_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchResultListViewTest);
 };
-
-TEST_F(SearchResultListViewTest, Basic) {
-  SetUpSearchResults();
-
-  const int results = GetResultCount();
-  EXPECT_EQ(kDefaultSearchItems, results);
-  EXPECT_EQ(0, GetSelectedIndex());
-  EXPECT_FALSE(IsAutoLaunching());
-
-  EXPECT_TRUE(KeyPress(ui::VKEY_RETURN));
-  EXPECT_EQ(1, GetOpenResultCountAndReset(0));
-
-  for (int i = 1; i < results; ++i) {
-    EXPECT_TRUE(KeyPress(ui::VKEY_DOWN));
-    EXPECT_EQ(i, GetSelectedIndex());
-  }
-  // When navigating off the end of the list, pass the event to the parent to
-  // handle.
-  EXPECT_FALSE(KeyPress(ui::VKEY_DOWN));
-  EXPECT_EQ(results - 1, GetSelectedIndex());
-
-  for (int i = 1; i < results; ++i) {
-    EXPECT_TRUE(KeyPress(ui::VKEY_UP));
-    EXPECT_EQ(results - i - 1, GetSelectedIndex());
-  }
-  // Navigate off top of list.
-  EXPECT_FALSE(KeyPress(ui::VKEY_UP));
-  EXPECT_EQ(0, GetSelectedIndex());
-  ResetSelectedIndex();
-
-  for (int i = 1; i < results; ++i) {
-    EXPECT_TRUE(KeyPress(ui::VKEY_TAB));
-    EXPECT_EQ(i, GetSelectedIndex());
-  }
-  // Navigate off bottom of list.
-  EXPECT_FALSE(KeyPress(ui::VKEY_TAB));
-  EXPECT_EQ(results - 1, GetSelectedIndex());
-}
-
-TEST_F(SearchResultListViewTest, AutoLaunch) {
-  SetLongAutoLaunchTimeout();
-  SetUpSearchResults();
-
-  EXPECT_TRUE(IsAutoLaunching());
-  ForceAutoLaunch();
-
-  EXPECT_FALSE(IsAutoLaunching());
-  EXPECT_EQ(1, GetOpenResultCountAndReset(0));
-
-  // The timeout has to be cleared after the auto-launch, to prevent opening
-  // the search result twice. See the comment in AnimationEnded().
-  EXPECT_EQ(base::TimeDelta(), GetAutoLaunchTimeout());
-}
-
-TEST_F(SearchResultListViewTest, CancelAutoLaunch) {
-  SetLongAutoLaunchTimeout();
-  SetUpSearchResults();
-
-  EXPECT_TRUE(IsAutoLaunching());
-
-  EXPECT_TRUE(KeyPress(ui::VKEY_DOWN));
-  EXPECT_FALSE(IsAutoLaunching());
-
-  SetLongAutoLaunchTimeout();
-  view()->UpdateAutoLaunchState();
-  EXPECT_TRUE(IsAutoLaunching());
-
-  view()->SetVisible(false);
-  EXPECT_FALSE(IsAutoLaunching());
-
-  SetLongAutoLaunchTimeout();
-  view()->SetVisible(true);
-  EXPECT_TRUE(IsAutoLaunching());
-}
 
 TEST_F(SearchResultListViewTest, SpokenFeedback) {
   SetUpSearchResults();
@@ -219,8 +127,12 @@ TEST_F(SearchResultListViewTest, SpokenFeedback) {
             GetResultViewAt(2)->ComputeAccessibleName());
 }
 
-TEST_F(SearchResultListViewTest, DISABLED_ModelObservers) {
+TEST_F(SearchResultListViewTest, ModelObservers) {
   SetUpSearchResults();
+  ExpectConsistent();
+
+  // Remove from end.
+  DeleteResultAt(kDefaultSearchItems - 1);
   ExpectConsistent();
 
   // Insert at start.
@@ -228,7 +140,7 @@ TEST_F(SearchResultListViewTest, DISABLED_ModelObservers) {
   ExpectConsistent();
 
   // Remove from end.
-  DeleteResultAt(kDefaultSearchItems);
+  DeleteResultAt(kDefaultSearchItems - 1);
   ExpectConsistent();
 
   // Insert at end.

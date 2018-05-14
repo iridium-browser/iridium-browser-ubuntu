@@ -6,6 +6,8 @@
 
 #include "net/quic/core/crypto/crypto_server_config_protobuf.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/core/tls_server_handshaker.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/mock_clock.h"
@@ -49,8 +51,7 @@ class ShloVerifier {
 
   std::unique_ptr<ValidateClientHelloCallback>
   GetValidateClientHelloCallback() {
-    return std::unique_ptr<ValidateClientHelloCallback>(
-        new ValidateClientHelloCallback(this));
+    return QuicMakeUnique<ValidateClientHelloCallback>(this);
   }
 
  private:
@@ -60,7 +61,8 @@ class ShloVerifier {
     result_ = result;
     crypto_config_->ProcessClientHello(
         result_, /*reject_only=*/false, /*connection_id=*/1, server_addr_,
-        client_addr_, AllSupportedVersions().front(), AllSupportedVersions(),
+        client_addr_, AllSupportedTransportVersions().front(),
+        AllSupportedTransportVersions(),
         /*use_stateless_rejects=*/true, /*server_designated_connection_id=*/0,
         clock_, QuicRandom::GetInstance(), compressed_certs_cache_, params_,
         signed_config_, /*total_framing_overhead=*/50, kDefaultMaxPacketSize,
@@ -85,8 +87,7 @@ class ShloVerifier {
   };
 
   std::unique_ptr<ProcessClientHelloCallback> GetProcessClientHelloCallback() {
-    return std::unique_ptr<ProcessClientHelloCallback>(
-        new ProcessClientHelloCallback(this));
+    return QuicMakeUnique<ProcessClientHelloCallback>(this);
   }
 
   void ProcessClientHelloDone(std::unique_ptr<CryptoHandshakeMessage> message) {
@@ -114,7 +115,8 @@ TEST(CryptoTestUtilsTest, TestGenerateFullCHLO) {
   MockClock clock;
   QuicCryptoServerConfig crypto_config(
       QuicCryptoServerConfig::TESTING, QuicRandom::GetInstance(),
-      crypto_test_utils::ProofSourceForTesting());
+      crypto_test_utils::ProofSourceForTesting(),
+      TlsServerHandshaker::CreateSslCtx());
   QuicSocketAddress server_addr;
   QuicSocketAddress client_addr(QuicIpAddress::Loopback4(), 1);
   QuicReferenceCountedPointer<QuicSignedServerConfig> signed_config(
@@ -149,7 +151,7 @@ TEST(CryptoTestUtilsTest, TestGenerateFullCHLO) {
   string pub_hex =
       "#" + QuicTextUtils::HexEncode(public_value, sizeof(public_value));
 
-  QuicVersion version(AllSupportedVersions().front());
+  QuicTransportVersion version(AllSupportedTransportVersions().front());
   CryptoHandshakeMessage inchoate_chlo = crypto_test_utils::CreateCHLO(
       {{"PDMD", "X509"},
        {"AEAD", "AESG"},
@@ -157,7 +159,8 @@ TEST(CryptoTestUtilsTest, TestGenerateFullCHLO) {
        {"COPT", "SREJ"},
        {"PUBS", pub_hex},
        {"NONC", nonce_hex},
-       {"VER\0", QuicTagToString(QuicVersionToQuicTag(version))}},
+       {"VER\0",
+        QuicVersionLabelToString(QuicVersionToQuicVersionLabel(version))}},
       kClientHelloMinimumSize);
 
   crypto_test_utils::GenerateFullCHLO(

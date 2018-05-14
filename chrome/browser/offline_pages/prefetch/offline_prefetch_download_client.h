@@ -6,11 +6,16 @@
 #define CHROME_BROWSER_OFFLINE_PAGES_PREFETCH_OFFLINE_PREFETCH_DOWNLOAD_CLIENT_H_
 
 #include "base/macros.h"
-#include "components/download/public/client.h"
+#include "components/download/public/background_service/client.h"
 
 namespace content {
 class BrowserContext;
-}
+}  // namespace content
+
+namespace download {
+struct CompletionInfo;
+struct DownloadMetaData;
+}  // namespace download
 
 namespace offline_pages {
 
@@ -25,7 +30,7 @@ class OfflinePrefetchDownloadClient : public download::Client {
   // Overridden from Client:
   void OnServiceInitialized(
       bool state_lost,
-      const std::vector<std::string>& outstanding_download_guids) override;
+      const std::vector<download::DownloadMetaData>& downloads) override;
   void OnServiceUnavailable() override;
   download::Client::ShouldDownload OnDownloadStarted(
       const std::string& guid,
@@ -35,9 +40,11 @@ class OfflinePrefetchDownloadClient : public download::Client {
                          uint64_t bytes_downloaded) override;
   void OnDownloadFailed(const std::string& guid,
                         download::Client::FailureReason reason) override;
-  void OnDownloadSucceeded(const std::string& guid,
-                           const base::FilePath& path,
-                           uint64_t size) override;
+  void OnDownloadSucceeded(
+      const std::string& guid,
+      const download::CompletionInfo& completion_info) override;
+  bool CanServiceRemoveDownloadedFile(const std::string& guid,
+                                      bool force_delete) override;
 
   PrefetchDownloader* GetPrefetchDownloader() const;
 

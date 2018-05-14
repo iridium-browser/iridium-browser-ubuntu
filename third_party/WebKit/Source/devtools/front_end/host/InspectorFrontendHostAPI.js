@@ -37,7 +37,6 @@ InspectorFrontendHostAPI.Events = {
   DispatchMessage: Symbol('dispatchMessage'),
   DispatchMessageChunk: Symbol('dispatchMessageChunk'),
   EnterInspectElementMode: Symbol('enterInspectElementMode'),
-  EvaluateForTestInFrontend: Symbol('evaluateForTestInFrontend'),
   EyeDropperPickedColor: Symbol('eyeDropperPickedColor'),
   FileSystemsLoaded: Symbol('fileSystemsLoaded'),
   FileSystemRemoved: Symbol('fileSystemRemoved'),
@@ -71,7 +70,6 @@ InspectorFrontendHostAPI.EventDescriptors = [
   [InspectorFrontendHostAPI.Events.DispatchMessage, 'dispatchMessage', ['messageObject']],
   [InspectorFrontendHostAPI.Events.DispatchMessageChunk, 'dispatchMessageChunk', ['messageChunk', 'messageSize']],
   [InspectorFrontendHostAPI.Events.EnterInspectElementMode, 'enterInspectElementMode', []],
-  [InspectorFrontendHostAPI.Events.EvaluateForTestInFrontend, 'evaluateForTestInFrontend', ['callId', 'script']],
   [InspectorFrontendHostAPI.Events.EyeDropperPickedColor, 'eyeDropperPickedColor', ['color']],
   [InspectorFrontendHostAPI.Events.FileSystemsLoaded, 'fileSystemsLoaded', ['fileSystems']],
   [InspectorFrontendHostAPI.Events.FileSystemRemoved, 'fileSystemRemoved', ['fileSystemPath']],
@@ -89,7 +87,7 @@ InspectorFrontendHostAPI.EventDescriptors = [
   [InspectorFrontendHostAPI.Events.KeyEventUnhandled, 'keyEventUnhandled', ['event']],
   [InspectorFrontendHostAPI.Events.ReloadInspectedPage, 'reloadInspectedPage', ['hard']],
   [InspectorFrontendHostAPI.Events.RevealSourceLine, 'revealSourceLine', ['url', 'lineNumber', 'columnNumber']],
-  [InspectorFrontendHostAPI.Events.SavedURL, 'savedURL', ['url']],
+  [InspectorFrontendHostAPI.Events.SavedURL, 'savedURL', ['url', 'fileSystemPath']],
   [InspectorFrontendHostAPI.Events.SearchCompleted, 'searchCompleted', ['requestId', 'fileSystemPath', 'files']],
   [InspectorFrontendHostAPI.Events.SetInspectedTabId, 'setInspectedTabId', ['tabId']],
   [InspectorFrontendHostAPI.Events.SetUseSoftMenu, 'setUseSoftMenu', ['useSoftMenu']],
@@ -98,9 +96,9 @@ InspectorFrontendHostAPI.EventDescriptors = [
 
 InspectorFrontendHostAPI.prototype = {
   /**
-   * @param {string=} fileSystemPath
+   * @param {string=} type
    */
-  addFileSystem(fileSystemPath) {},
+  addFileSystem(type) {},
 
   /**
    * @param {string} url
@@ -125,6 +123,16 @@ InspectorFrontendHostAPI.prototype = {
    * @return {string}
    */
   getSelectionForegroundColor() {},
+
+  /**
+   * @return {string}
+   */
+  getInactiveSelectionBackgroundColor() {},
+
+  /**
+   * @return {string}
+   */
+  getInactiveSelectionForegroundColor() {},
 
   /**
    * Requests inspected page to be placed atop of the inspector frontend with specified bounds.
@@ -153,6 +161,11 @@ InspectorFrontendHostAPI.prototype = {
    * @param {string} url
    */
   openInNewTab(url) {},
+
+  /**
+   * @param {string} fileSystemPath
+   */
+  showItemInFolder(fileSystemPath) {},
 
   /**
    * @param {string} fileSystemPath
@@ -306,12 +319,14 @@ InspectorFrontendHostAPI.prototype = {
    */
   reattach(callback) {},
 
-  /**
-   * @return {boolean}
-   */
-  isUnderTest() {},
-
   readyForTest() {},
+
+  connectionReady() {},
+
+  /**
+   * @param {boolean} value
+   */
+  setOpenNewWindowForPopups(value) {},
 
   /**
    * @return {boolean}

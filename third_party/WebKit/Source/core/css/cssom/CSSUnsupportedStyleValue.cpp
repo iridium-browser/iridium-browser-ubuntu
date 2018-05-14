@@ -9,15 +9,4 @@
 
 namespace blink {
 
-const CSSValue* CSSUnsupportedStyleValue::ToCSSValue() const {
-  NOTREACHED();
-  return nullptr;
-}
-
-const CSSValue* CSSUnsupportedStyleValue::ToCSSValueWithProperty(
-    CSSPropertyID property_id) const {
-  return CSSParser::ParseSingleValue(property_id, css_text_,
-                                     StrictCSSParserContext());
-}
-
 }  // namespace blink

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
@@ -34,7 +36,7 @@ class TestManagementProvider : public ManagementPolicy::Provider {
   // MananagementPolicy::Provider:
   std::string GetDebugPolicyProviderName() const override { return "test"; }
   bool MustRemainDisabled(const Extension* extension,
-                          Extension::DisableReason* reason,
+                          disable_reason::DisableReason* reason,
                           base::string16* error) const override {
     return true;
   }
@@ -67,8 +69,8 @@ class CallbackHelper {
   // causes unit tests to crash), but rather runs the given |quit_closure| (with
   // the prompt still active|.
   ExtensionInstallPrompt::ShowDialogCallback CreateShowCallback(
-      const base::Closure& quit_closure) {
-    quit_closure_ = quit_closure;
+      base::OnceClosure quit_closure) {
+    quit_closure_ = std::move(quit_closure);
     return base::Bind(&CallbackHelper::OnShow, base::Unretained(this));
   }
 
@@ -82,14 +84,13 @@ class CallbackHelper {
   void OnShow(ExtensionInstallPromptShowParams* show_params,
               const ExtensionInstallPrompt::DoneCallback& done_callback,
               std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt) {
-    DCHECK(!quit_closure_.is_null());
-    quit_closure_.Run();
-    quit_closure_ = base::Closure();
+    DCHECK(quit_closure_);
+    std::move(quit_closure_).Run();
   }
 
   // The closure to quit the currently-running loop; used with test
   // ExtensionInstallPrompts.
-  base::Closure quit_closure_;
+  base::OnceClosure quit_closure_;
 
   // The result of the reenable process, or null if the process hasn't finished.
   std::unique_ptr<ExtensionReenabler::ReenableResult> result_;
@@ -154,7 +155,7 @@ TEST_F(ExtensionReenablerUnitTest, TestReenablingDisabledExtension) {
     // Disable the extension due to a permissions increase (the only type of
     // disablement we handle with the ExtensionReenabler so far).
     service()->DisableExtension(extension->id(),
-                                Extension::DISABLE_PERMISSIONS_INCREASE);
+                                disable_reason::DISABLE_PERMISSIONS_INCREASE);
     // Sanity check that it's disabled.
     EXPECT_TRUE(registry()->disabled_extensions().Contains(extension->id()));
 
@@ -188,7 +189,7 @@ TEST_F(ExtensionReenablerUnitTest, TestReenablingDisabledExtension) {
     TestManagementProvider test_provider;
     management_policy->RegisterProvider(&test_provider);
     service()->DisableExtension(extension->id(),
-                                Extension::DISABLE_PERMISSIONS_INCREASE);
+                                disable_reason::DISABLE_PERMISSIONS_INCREASE);
 
     std::unique_ptr<ExtensionReenabler> extension_reenabler =
         ExtensionReenabler::PromptForReenable(extension, profile(),
@@ -209,7 +210,7 @@ TEST_F(ExtensionReenablerUnitTest, TestReenablingDisabledExtension) {
   {
     // Disable it again, and try canceling the prompt.
     service()->DisableExtension(extension->id(),
-                                Extension::DISABLE_PERMISSIONS_INCREASE);
+                                disable_reason::DISABLE_PERMISSIONS_INCREASE);
     ScopedTestDialogAutoConfirm auto_confirm(
         ScopedTestDialogAutoConfirm::CANCEL);
     std::unique_ptr<ExtensionReenabler> extension_reenabler =
@@ -249,7 +250,7 @@ TEST_F(ExtensionReenablerUnitTest, TestReenablingDisabledExtension) {
   {
     // Disable again, and create another prompt.
     service()->DisableExtension(extension->id(),
-                                Extension::DISABLE_PERMISSIONS_INCREASE);
+                                disable_reason::DISABLE_PERMISSIONS_INCREASE);
     base::RunLoop run_loop;
     std::unique_ptr<ExtensionReenabler> extension_reenabler =
         ExtensionReenabler::PromptForReenableWithCallbackForTest(

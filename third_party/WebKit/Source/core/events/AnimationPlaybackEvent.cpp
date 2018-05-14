@@ -23,7 +23,7 @@ AnimationPlaybackEvent::AnimationPlaybackEvent(
     timeline_time_ = initializer.timelineTime();
 }
 
-AnimationPlaybackEvent::~AnimationPlaybackEvent() {}
+AnimationPlaybackEvent::~AnimationPlaybackEvent() = default;
 
 double AnimationPlaybackEvent::currentTime(bool& is_null) const {
   double result = currentTime();
@@ -49,7 +49,7 @@ const AtomicString& AnimationPlaybackEvent::InterfaceName() const {
   return EventNames::AnimationPlaybackEvent;
 }
 
-DEFINE_TRACE(AnimationPlaybackEvent) {
+void AnimationPlaybackEvent::Trace(blink::Visitor* visitor) {
   Event::Trace(visitor);
 }
 

@@ -4,8 +4,9 @@
 
 #include "chrome/browser/ui/webui/signin/inline_login_ui.h"
 
+#include <memory>
+
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/extensions/tab_helper.h"
@@ -19,7 +20,7 @@
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/signin/core/common/profile_management_switches.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/content_switches.h"
@@ -29,7 +30,6 @@ namespace {
 content::WebUIDataSource* CreateWebUIDataSource() {
   content::WebUIDataSource* source =
         content::WebUIDataSource::Create(chrome::kChromeUIChromeSigninHost);
-  source->OverrideContentSecurityPolicyChildSrc("child-src chrome-extension:;");
   source->OverrideContentSecurityPolicyObjectSrc("object-src chrome:;");
   source->SetJsonPath("strings.js");
 
@@ -61,8 +61,8 @@ InlineLoginUI::InlineLoginUI(content::WebUI* web_ui)
       auth_extension_(Profile::FromWebUI(web_ui)) {
   Profile* profile = Profile::FromWebUI(web_ui);
   content::WebUIDataSource::Add(profile, CreateWebUIDataSource());
-  web_ui->AddMessageHandler(base::MakeUnique<InlineLoginHandlerImpl>());
-  web_ui->AddMessageHandler(base::MakeUnique<MetricsHandler>());
+  web_ui->AddMessageHandler(std::make_unique<InlineLoginHandlerImpl>());
+  web_ui->AddMessageHandler(std::make_unique<MetricsHandler>());
 
   content::WebContents* contents = web_ui->GetWebContents();
   // Required for intercepting extension function calls when the page is loaded

@@ -28,7 +28,6 @@
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutState.h"
 #include "platform/PODFreeListArena.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollableArea.h"
 #include <memory>
@@ -141,9 +140,6 @@ class CORE_EXPORT LayoutView final : public LayoutBlockFlow {
 
   void InvalidatePaintForViewAndCompositedLayers();
 
-  PaintInvalidationReason InvalidatePaint(
-      const PaintInvalidatorContext&) const override;
-
   void Paint(const PaintInfo&, const LayoutPoint&) const override;
   void PaintBoxDecorationBackground(const PaintInfo&,
                                     const LayoutPoint&) const override;
@@ -164,6 +160,8 @@ class CORE_EXPORT LayoutView final : public LayoutBlockFlow {
 
   void CalculateScrollbarModes(ScrollbarMode& h_mode,
                                ScrollbarMode& v_mode) const;
+
+  void DispatchFakeMouseMoveEventSoon(EventHandler&) override;
 
   LayoutState* GetLayoutState() const { return layout_state_; }
 
@@ -199,12 +197,17 @@ class CORE_EXPORT LayoutView final : public LayoutBlockFlow {
   // requires walking the entire tree repeatedly and most pages don't actually
   // use either feature so we shouldn't take the performance hit when not
   // needed. Long term we should rewrite the counter and quotes code.
-  void AddLayoutCounter() { layout_counter_count_++; }
+  void AddLayoutCounter() {
+    layout_counter_count_++;
+    SetNeedsCounterUpdate();
+  }
   void RemoveLayoutCounter() {
     DCHECK_GT(layout_counter_count_, 0u);
     layout_counter_count_--;
   }
   bool HasLayoutCounters() { return layout_counter_count_; }
+  void SetNeedsCounterUpdate() { needs_counter_update_ = true; }
+  void UpdateCounters();
 
   bool BackgroundIsKnownToBeOpaqueInRect(
       const LayoutRect& local_rect) const override;
@@ -222,7 +225,7 @@ class CORE_EXPORT LayoutView final : public LayoutBlockFlow {
   }
 
   LayoutRect VisualOverflowRect() const override;
-  LayoutRect LocalVisualRect() const override;
+  LayoutRect LocalVisualRectIgnoringVisibility() const override;
 
   // Invalidates paint for the entire view, including composited descendants,
   // but not including child frames.
@@ -263,7 +266,8 @@ class CORE_EXPORT LayoutView final : public LayoutBlockFlow {
 
   bool CanHaveChildren() const override;
 
-  void LayoutContent();
+  void UpdateBlockLayout(bool relayout_children) override;
+
 #if DCHECK_IS_ON()
   void CheckLayoutState();
 #endif
@@ -295,10 +299,11 @@ class CORE_EXPORT LayoutView final : public LayoutBlockFlow {
 
   std::unique_ptr<ViewFragmentationContext> fragmentation_context_;
   std::unique_ptr<PaintLayerCompositor> compositor_;
-  RefPtr<IntervalArena> interval_arena_;
+  scoped_refptr<IntervalArena> interval_arena_;
 
   LayoutQuote* layout_quote_head_;
   unsigned layout_counter_count_;
+  bool needs_counter_update_ = false;
 
   unsigned hit_test_count_;
   unsigned hit_test_cache_hits_;

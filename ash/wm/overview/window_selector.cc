@@ -6,38 +6,43 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
 
-#include "ash/accessibility_delegate.h"
-#include "ash/accessibility_types.h"
-#include "ash/metrics/user_metrics_action.h"
+#include "ash/accessibility/accessibility_controller.h"
 #include "ash/metrics/user_metrics_recorder.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/screen_util.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/wm/mru_window_tracker.h"
+#include "ash/wm/overview/overview_utils.h"
+#include "ash/wm/overview/overview_window_drag_controller.h"
+#include "ash/wm/overview/rounded_rect_view.h"
 #include "ash/wm/overview/window_grid.h"
+#include "ash/wm/overview/window_selector_controller.h"
 #include "ash/wm/overview/window_selector_delegate.h"
 #include "ash/wm/overview/window_selector_item.h"
 #include "ash/wm/panels/panel_layout_manager.h"
+#include "ash/wm/splitview/split_view_overview_overlay.h"
 #include "ash/wm/switchable_windows.h"
+#include "ash/wm/tablet_mode/tablet_mode_window_state.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/auto_reset.h"
-#include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/vector_icons/vector_icons.h"
-#include "third_party/skia/include/core/SkPath.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/display/screen.h"
 #include "ui/events/event.h"
-#include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/border.h"
@@ -53,39 +58,45 @@ namespace ash {
 namespace {
 
 // The amount of padding surrounding the text in the text filtering textbox.
-const int kTextFilterHorizontalPadding = 10;
+constexpr int kTextFilterHorizontalPadding = 6;
 
 // The height of the text filtering textbox.
-const int kTextFilterHeight = 40;
+constexpr int kTextFilterHeight = 32;
 
 // The margin at the bottom to make sure the text filter layer is hidden.
 // This is needed because positioning the text filter directly touching the top
 // edge of the screen still allows the shadow to peek through.
-const int kTextFieldBottomMargin = 2;
+constexpr int kTextFieldBottomMargin = 2;
 
 // Distance from top of overview to the top of text filtering textbox as a
 // proportion of the total overview area.
-const float kTextFilterTopScreenProportion = 0.02f;
+constexpr float kTextFilterTopScreenProportion = 0.02f;
 
 // Width of the text filter area.
-const int kTextFilterWidth = 280;
+constexpr int kTextFilterWidth = 280;
 
-// The font style used for text filtering textbox.
-static const ui::ResourceBundle::FontStyle kTextFilterFontStyle =
-    ui::ResourceBundle::FontStyle::BaseFont;
+// The font delta used for text filtering textbox.
+constexpr int kTextFilterFontDelta = 1;
 
 // The color of the text and its background in the text filtering textbox.
-const SkColor kTextFilterTextColor = SkColorSetARGB(222, 0, 0, 0);
-const SkColor kTextFilterBackgroundColor = SK_ColorWHITE;
+constexpr SkColor kTextFilterTextColor = SkColorSetARGB(0xFF, 0x3C, 0x40, 0x43);
+constexpr SkColor kTextFilterBackgroundColor = SK_ColorWHITE;
 
 // The color or search icon.
-const SkColor kTextFilterIconColor = SkColorSetARGB(138, 0, 0, 0);
+constexpr SkColor kTextFilterIconColor = SkColorSetARGB(138, 0, 0, 0);
 
 // The size of search icon.
-const int kTextFilterIconSize = 20;
+constexpr int kTextFilterIconSize = 20;
 
 // The radius used for the rounded corners on the text filtering textbox.
-const int kTextFilterCornerRadius = 2;
+constexpr int kTextFilterCornerRadius = 16;
+
+// Values for the old overview ui.
+// TODO(crbug.com/782320): Delete these values when the old ui becomes obsolete.
+constexpr int kOldTextFilterHorizontalPadding = 6;
+constexpr int kOldTextFilterHeight = 40;
+constexpr SkColor kOldTextFilterTextColor = SkColorSetARGB(222, 0, 0, 0);
+constexpr int kOldTextFilterCornerRadius = 2;
 
 // A comparator for locating a selector item for a given root.
 struct WindowSelectorItemForRoot {
@@ -99,53 +110,40 @@ struct WindowSelectorItemForRoot {
   const aura::Window* root_window;
 };
 
-// A View having rounded corners and a specified background color which is
-// only painted within the bounds defined by the rounded corners.
-// TODO(tdanderson): This duplicates code from RoundedImageView. Refactor these
-//                   classes and move into ui/views.
-class RoundedContainerView : public views::View {
- public:
-  RoundedContainerView(int corner_radius, SkColor background)
-      : corner_radius_(corner_radius), background_(background) {}
-
-  ~RoundedContainerView() override {}
-
-  void OnPaint(gfx::Canvas* canvas) override {
-    views::View::OnPaint(canvas);
-
-    SkScalar radius = SkIntToScalar(corner_radius_);
-    const SkScalar kRadius[8] = {radius, radius, radius, radius,
-                                 radius, radius, radius, radius};
-    SkPath path;
-    gfx::Rect bounds(size());
-    path.addRoundRect(gfx::RectToSkRect(bounds), kRadius);
-
-    canvas->ClipPath(path, true);
-    canvas->DrawColor(background_);
-  }
-
- private:
-  int corner_radius_;
-  SkColor background_;
-
-  DISALLOW_COPY_AND_ASSIGN(RoundedContainerView);
-};
-
 // Triggers a shelf visibility update on all root window controllers.
 void UpdateShelfVisibility() {
   for (aura::Window* root : Shell::GetAllRootWindows())
     Shelf::ForWindow(root)->UpdateVisibilityState();
 }
 
+// Returns the bounds for the overview window grid according to the split view
+// state. If split view mode is active, the overview window should open on the
+// opposite side of the default snap window.
+gfx::Rect GetGridBoundsInScreen(aura::Window* root_window) {
+  SplitViewController* split_view_controller =
+      Shell::Get()->split_view_controller();
+  if (split_view_controller->IsSplitViewModeActive()) {
+    SplitViewController::SnapPosition oppsite_position =
+        (split_view_controller->default_snap_position() ==
+         SplitViewController::LEFT)
+            ? SplitViewController::RIGHT
+            : SplitViewController::LEFT;
+    return split_view_controller->GetSnappedWindowBoundsInScreen(
+        root_window, oppsite_position);
+  } else {
+    return split_view_controller->GetDisplayWorkAreaBoundsInScreen(root_window);
+  }
+}
+
 gfx::Rect GetTextFilterPosition(aura::Window* root_window) {
-  gfx::Rect total_bounds = ScreenUtil::GetDisplayWorkAreaBoundsInParent(
-      root_window->GetChildById(kShellWindowId_DefaultContainer));
-  ::wm::ConvertRectToScreen(root_window, &total_bounds);
+  const gfx::Rect total_bounds = GetGridBoundsInScreen(root_window);
   return gfx::Rect(
-      0.5 * (total_bounds.width() -
-             std::min(kTextFilterWidth, total_bounds.width())),
+      total_bounds.x() +
+          0.5 * (total_bounds.width() -
+                 std::min(kTextFilterWidth, total_bounds.width())),
       total_bounds.y() + total_bounds.height() * kTextFilterTopScreenProportion,
-      std::min(kTextFilterWidth, total_bounds.width()), kTextFilterHeight);
+      std::min(kTextFilterWidth, total_bounds.width()),
+      IsNewOverviewUi() ? kTextFilterHeight : kOldTextFilterHeight);
 }
 
 // Initializes the text filter on the top of the main root window and requests
@@ -169,29 +167,38 @@ views::Widget* CreateTextFilter(views::TextfieldController* controller,
 
   // Use |container| to specify the padding surrounding the text and to give
   // the textfield rounded corners.
-  views::View* container = new RoundedContainerView(kTextFilterCornerRadius,
-                                                    kTextFilterBackgroundColor);
-  ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-  const int text_height =
-      std::max(kTextFilterIconSize,
-               bundle.GetFontList(kTextFilterFontStyle).GetHeight());
+  views::View* container = new RoundedRectView(
+      IsNewOverviewUi() ? kTextFilterCornerRadius : kOldTextFilterCornerRadius,
+      kTextFilterBackgroundColor);
+  const gfx::FontList& font_list =
+      views::Textfield::GetDefaultFontList().Derive(
+          kTextFilterFontDelta, gfx::Font::FontStyle::NORMAL,
+          gfx::Font::Weight::NORMAL);
+  const int text_height = std::max(kTextFilterIconSize, font_list.GetHeight());
   DCHECK(text_height);
   const int vertical_padding = (params.bounds.height() - text_height) / 2;
-  views::BoxLayout* layout = new views::BoxLayout(
+  auto* layout = container->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kHorizontal,
-      gfx::Insets(vertical_padding, kTextFilterHorizontalPadding),
-      kTextFilterHorizontalPadding);
-  container->SetLayoutManager(layout);
+      gfx::Insets(vertical_padding,
+                  IsNewOverviewUi() ? kTextFilterHorizontalPadding
+                                    : kOldTextFilterHorizontalPadding,
+                  vertical_padding,
+                  IsNewOverviewUi() ? kTextFilterCornerRadius
+                                    : kOldTextFilterHorizontalPadding),
+      kTextFilterHorizontalPadding));
 
-  views::Textfield* textfield = new views::Textfield;
+  views::Textfield* textfield = new views::Textfield();
   textfield->set_controller(controller);
   textfield->SetBorder(views::NullBorder());
   textfield->SetBackgroundColor(kTextFilterBackgroundColor);
-  textfield->SetTextColor(kTextFilterTextColor);
-  views::ImageView* image_view = new views::ImageView;
+  textfield->SetTextColor(IsNewOverviewUi() ? kTextFilterTextColor
+                                            : kOldTextFilterTextColor);
+  textfield->SetFontList(font_list);
+
+  views::ImageView* image_view = new views::ImageView();
   image_view->SetImage(image);
+
   container->AddChildView(image_view);
-  textfield->SetFontList(bundle.GetFontList(kTextFilterFontStyle));
   container->AddChildView(textfield);
   layout->SetFlexForView(textfield, 1);
   widget->SetContentsView(container);
@@ -212,28 +219,26 @@ views::Widget* CreateTextFilter(views::TextfieldController* controller,
 }  // namespace
 
 // static
-bool WindowSelector::IsSelectable(aura::Window* window) {
+bool WindowSelector::IsSelectable(const aura::Window* window) {
   return wm::GetWindowState(window)->IsUserPositionable();
 }
 
 WindowSelector::WindowSelector(WindowSelectorDelegate* delegate)
     : delegate_(delegate),
       restore_focus_window_(wm::GetFocusedWindow()),
-      ignore_activations_(false),
-      selected_grid_index_(0),
-      overview_start_time_(base::Time::Now()),
-      num_key_presses_(0),
-      num_items_(0),
-      showing_text_filter_(false),
-      text_filter_string_length_(0),
-      num_times_textfield_cleared_(0),
-      restoring_minimized_windows_(false),
-      text_filter_bottom_(0) {
+      overview_start_time_(base::Time::Now()) {
   DCHECK(delegate_);
 }
 
 WindowSelector::~WindowSelector() {
-  RemoveAllObservers();
+  DCHECK(observed_windows_.empty());
+  // Don't delete |window_drag_controller_| yet since the stack might be still
+  // using it.
+  if (window_drag_controller_) {
+    window_drag_controller_->ResetWindowSelector();
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(
+        FROM_HERE, window_drag_controller_.release());
+  }
 }
 
 // NOTE: The work done in Init() is not done in the constructor because it may
@@ -242,9 +247,12 @@ WindowSelector::~WindowSelector() {
 void WindowSelector::Init(const WindowList& windows,
                           const WindowList& hide_windows) {
   hide_overview_windows_ =
-      base::MakeUnique<ScopedHideOverviewWindows>(std::move(hide_windows));
+      std::make_unique<ScopedHideOverviewWindows>(std::move(hide_windows));
   if (restore_focus_window_)
     restore_focus_window_->AddObserver(this);
+
+  if (SplitViewController::ShouldAllowSplitView())
+    split_view_overview_overlay_ = std::make_unique<SplitViewOverviewOverlay>();
 
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   std::sort(root_windows.begin(), root_windows.end(),
@@ -271,8 +279,9 @@ void WindowSelector::Init(const WindowList& windows,
     // root windows that don't contain any panel windows.
     PanelLayoutManager::Get(root)->SetShowCalloutWidgets(false);
 
-    std::unique_ptr<WindowGrid> grid(new WindowGrid(root, windows, this));
-    if (grid->empty())
+    std::unique_ptr<WindowGrid> grid(
+        new WindowGrid(root, windows, this, GetGridBoundsInScreen(root)));
+    if (!IsNewOverviewUi() && grid->empty())
       continue;
     num_items_ += grid->size();
     grid_list_.push_back(std::move(grid));
@@ -293,27 +302,41 @@ void WindowSelector::Init(const WindowList& windows,
     // as we don't want to cause any window updates until all windows in
     // overview are observed. See http://crbug.com/384495.
     for (std::unique_ptr<WindowGrid>& window_grid : grid_list_) {
+      if (IsNewOverviewAnimationsEnabled()) {
+        window_grid->SetWindowListAnimationStates(/*selected_item=*/nullptr,
+                                                  OverviewTransition::kEnter);
+      }
       window_grid->PrepareForOverview();
-      window_grid->PositionWindows(true);
+      window_grid->PositionWindows(/*animate=*/true);
+      // Reset |should_animate_when_entering_| in order to animate during
+      // overview mode, such as dragging animations.
+      if (IsNewOverviewAnimationsEnabled())
+        window_grid->ResetWindowListAnimationStates();
     }
 
-    search_image_ = gfx::CreateVectorIcon(
-        vector_icons::kSearchIcon, kTextFilterIconSize, kTextFilterIconColor);
+    // Image used for text filter textfield.
+    gfx::ImageSkia search_image =
+        gfx::CreateVectorIcon(IsNewOverviewUi() ? kOverviewTextFilterSearchIcon
+                                                : vector_icons::kSearchIcon,
+                              kTextFilterIconSize, kTextFilterIconColor);
+
     aura::Window* root_window = Shell::GetPrimaryRootWindow();
-    text_filter_widget_.reset(CreateTextFilter(this, root_window, search_image_,
+    text_filter_widget_.reset(CreateTextFilter(this, root_window, search_image,
                                                &text_filter_bottom_));
   }
 
-  DCHECK(!grid_list_.empty());
+  if (!IsNewOverviewUi())
+    DCHECK(!grid_list_.empty());
   UMA_HISTOGRAM_COUNTS_100("Ash.WindowSelector.Items", num_items_);
 
   Shell::Get()->activation_client()->AddObserver(this);
+  Shell::Get()->split_view_controller()->AddObserver(this);
 
   display::Screen::GetScreen()->AddObserver(this);
-  Shell::Get()->metrics()->RecordUserMetricsAction(UMA_WINDOW_OVERVIEW);
+  base::RecordAction(base::UserMetricsAction("WindowSelector_Overview"));
   // Send an a11y alert.
-  Shell::Get()->accessibility_delegate()->TriggerAccessibilityAlert(
-      A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
+  Shell::Get()->accessibility_controller()->TriggerAccessibilityAlert(
+      mojom::AccessibilityAlert::WINDOW_OVERVIEW_MODE_ENTERED);
 
   UpdateShelfVisibility();
 }
@@ -322,15 +345,26 @@ void WindowSelector::Init(const WindowList& windows,
 // may cause other, unrelated classes, (ie PanelLayoutManager) to make indirect
 // calls to restoring_minimized_windows() on a partially destructed object.
 void WindowSelector::Shutdown() {
-  is_shut_down_ = true;
   // Stop observing screen metrics changes first to avoid auto-positioning
   // windows in response to work area changes from window activation.
   display::Screen::GetScreen()->RemoveObserver(this);
 
+  // Stop observing split view state changes before restoring window focus.
+  // Otherwise the activation of the window triggers OnSplitViewStateChanged()
+  // that will call into this function again.
+  Shell::Get()->split_view_controller()->RemoveObserver(this);
+
   size_t remaining_items = 0;
   for (std::unique_ptr<WindowGrid>& window_grid : grid_list_) {
+    if (IsNewOverviewAnimationsEnabled()) {
+      window_grid->SetWindowListAnimationStates(
+          selected_item_ && selected_item_->window_grid() == window_grid.get()
+              ? selected_item_
+              : nullptr,
+          OverviewTransition::kExit);
+    }
     for (const auto& window_selector_item : window_grid->window_list())
-      window_selector_item->RestoreWindow();
+      window_selector_item->RestoreWindow(/*reset_transform=*/true);
     remaining_items += window_grid->size();
   }
 
@@ -374,6 +408,7 @@ void WindowSelector::Shutdown() {
 void WindowSelector::RemoveAllObservers() {
   for (auto* window : observed_windows_)
     window->RemoveObserver(this);
+  observed_windows_.clear();
 
   Shell::Get()->activation_client()->RemoveObserver(this);
   display::Screen::GetScreen()->RemoveObserver(this);
@@ -389,6 +424,7 @@ void WindowSelector::OnGridEmpty(WindowGrid* grid) {
   size_t index = 0;
   for (auto iter = grid_list_.begin(); iter != grid_list_.end(); ++iter) {
     if (grid == (*iter).get()) {
+      grid->Shutdown();
       index = iter - grid_list_.begin();
       grid_list_.erase(iter);
       break;
@@ -424,12 +460,14 @@ void WindowSelector::SelectWindow(WindowSelectorItem* item) {
   aura::Window::Windows window_list =
       Shell::Get()->mru_window_tracker()->BuildMruWindowList();
   if (!window_list.empty()) {
-    // Record UMA_WINDOW_OVERVIEW_ACTIVE_WINDOW_CHANGED if the user is selecting
-    // a window other than the window that was active prior to entering overview
+    // Record WindowSelector_ActiveWindowChanged if the user is selecting a
+    // window other than the window that was active prior to entering overview
     // mode (i.e., the window at the front of the MRU list).
     if (window_list[0] != window) {
-      Shell::Get()->metrics()->RecordUserMetricsAction(
-          UMA_WINDOW_OVERVIEW_ACTIVE_WINDOW_CHANGED);
+      base::RecordAction(
+          base::UserMetricsAction("WindowSelector_ActiveWindowChanged"));
+      Shell::Get()->metrics()->task_switch_metrics_recorder().OnTaskSwitch(
+          TaskSwitchSource::OVERVIEW_MODE);
     }
     const auto it = std::find(window_list.begin(), window_list.end(), window);
     if (it != window_list.end()) {
@@ -446,12 +484,138 @@ void WindowSelector::WindowClosing(WindowSelectorItem* window) {
   grid_list_[selected_grid_index_]->WindowClosing(window);
 }
 
+void WindowSelector::SetBoundsForWindowGridsInScreen(const gfx::Rect& bounds) {
+  for (std::unique_ptr<WindowGrid>& grid : grid_list_)
+    grid->SetBoundsAndUpdatePositions(bounds);
+}
+
+void WindowSelector::SetBoundsForWindowGridsInScreenIgnoringWindow(
+    const gfx::Rect& bounds,
+    WindowSelectorItem* ignored_item) {
+  for (std::unique_ptr<WindowGrid>& grid : grid_list_)
+    grid->SetBoundsAndUpdatePositionsIgnoringWindow(bounds, ignored_item);
+}
+
+void WindowSelector::SetSplitViewOverviewOverlayIndicatorState(
+    IndicatorState indicator_state,
+    const gfx::Point& event_location) {
+  DCHECK(split_view_overview_overlay_);
+  split_view_overview_overlay_->SetIndicatorState(indicator_state,
+                                                  event_location);
+}
+
+WindowGrid* WindowSelector::GetGridWithRootWindow(aura::Window* root_window) {
+  for (std::unique_ptr<WindowGrid>& grid : grid_list_) {
+    if (grid->root_window() == root_window)
+      return grid.get();
+  }
+
+  return nullptr;
+}
+
+void WindowSelector::AddItem(aura::Window* window) {
+  // Early exit if a grid already contains |window|.
+  WindowGrid* grid = GetGridWithRootWindow(window->GetRootWindow());
+  if (!grid || grid->GetWindowSelectorItemContaining(window))
+    return;
+
+  // This is meant to be called when a item in split view mode was previously
+  // snapped but should now be returned to the window grid (ie. split view
+  // divider dragged to either edge).
+  DCHECK(SplitViewController::ShouldAllowSplitView());
+  DCHECK(Shell::Get()->split_view_controller()->CanSnap(window));
+
+  // The dimensions of |window| will be very slim because of dragging the
+  // divider to the edge. Change the window dimensions to its tablet mode
+  // dimensions. Note: if split view is no longer constrained to tablet mode
+  // this will be need to updated.
+  TabletModeWindowState::UpdateWindowPosition(wm::GetWindowState(window));
+  grid->AddItem(window);
+
+  // Transfer focus from |window| to the text widget, to match the behavior of
+  // entering overview mode in the beginning.
+  wm::ActivateWindow(GetTextFilterWidgetWindow());
+}
+
+void WindowSelector::RemoveWindowSelectorItem(WindowSelectorItem* item) {
+  if (item->GetWindow()->HasObserver(this)) {
+    item->GetWindow()->RemoveObserver(this);
+    observed_windows_.erase(item->GetWindow());
+    if (item->GetWindow() == restore_focus_window_)
+      restore_focus_window_ = nullptr;
+  }
+
+  // Remove |item| from the corresponding grid.
+  for (std::unique_ptr<WindowGrid>& grid : grid_list_) {
+    if (grid->GetWindowSelectorItemContaining(item->GetWindow())) {
+      grid->RemoveItem(item);
+      if (grid->empty())
+        OnGridEmpty(grid.get());
+      break;
+    }
+  }
+}
+
+void WindowSelector::InitiateDrag(WindowSelectorItem* item,
+                                  const gfx::Point& location_in_screen) {
+  window_drag_controller_.reset(new OverviewWindowDragController(this));
+  window_drag_controller_->InitiateDrag(item, location_in_screen);
+
+  for (std::unique_ptr<WindowGrid>& grid : grid_list_)
+    grid->OnSelectorItemDragStarted(item);
+}
+
+void WindowSelector::Drag(WindowSelectorItem* item,
+                          const gfx::Point& location_in_screen) {
+  DCHECK(window_drag_controller_.get());
+  DCHECK_EQ(item, window_drag_controller_->item());
+  window_drag_controller_->Drag(location_in_screen);
+}
+
+void WindowSelector::CompleteDrag(WindowSelectorItem* item,
+                                  const gfx::Point& location_in_screen) {
+  DCHECK(window_drag_controller_.get());
+  DCHECK_EQ(item, window_drag_controller_->item());
+  window_drag_controller_->CompleteDrag(location_in_screen);
+
+  for (std::unique_ptr<WindowGrid>& grid : grid_list_)
+    grid->OnSelectorItemDragEnded();
+}
+
+void WindowSelector::ActivateDraggedWindow() {
+  DCHECK(window_drag_controller_.get());
+  window_drag_controller_->ActivateDraggedWindow();
+}
+
+void WindowSelector::ResetDraggedWindowGesture() {
+  DCHECK(window_drag_controller_.get());
+  window_drag_controller_->ResetGesture();
+}
+
+void WindowSelector::PositionWindows(bool animate) {
+  for (std::unique_ptr<WindowGrid>& grid : grid_list_)
+    grid->PositionWindows(animate);
+}
+
+bool WindowSelector::IsShuttingDown() const {
+  return Shell::Get()->window_selector_controller()->is_shutting_down();
+}
+
 bool WindowSelector::HandleKeyEvent(views::Textfield* sender,
                                     const ui::KeyEvent& key_event) {
+  // Do not do anything with the events if none of the window grids have windows
+  // in them.
+  bool empty_grids = true;
+  for (std::unique_ptr<WindowGrid>& grid : grid_list_)
+    empty_grids &= grid->empty();
+  if (empty_grids)
+    return true;
+
   if (key_event.type() != ui::ET_KEY_PRESSED)
     return false;
 
   switch (key_event.key_code()) {
+    case ui::VKEY_BROWSER_BACK:
     case ui::VKEY_ESCAPE:
       CancelSelection();
       break;
@@ -471,6 +635,7 @@ bool WindowSelector::HandleKeyEvent(views::Textfield* sender,
         Move(WindowSelector::RIGHT, true);
         break;
       }
+      FALLTHROUGH;
     case ui::VKEY_LEFT:
       num_key_presses_++;
       Move(WindowSelector::LEFT, true);
@@ -481,8 +646,8 @@ bool WindowSelector::HandleKeyEvent(views::Textfield* sender,
         // Allow the textfield to handle 'W' key when not used with Ctrl.
         return false;
       }
-      Shell::Get()->metrics()->RecordUserMetricsAction(
-          UMA_WINDOW_OVERVIEW_CLOSE_KEY);
+      base::RecordAction(
+          base::UserMetricsAction("WindowSelector_OverviewCloseKey"));
       grid_list_[selected_grid_index_]->SelectedWindow()->CloseWindow();
       break;
     case ui::VKEY_RETURN:
@@ -494,8 +659,8 @@ bool WindowSelector::HandleKeyEvent(views::Textfield* sender,
       UMA_HISTOGRAM_CUSTOM_COUNTS("Ash.WindowSelector.KeyPressesOverItemsRatio",
                                   (num_key_presses_ * 100) / num_items_, 1, 300,
                                   30);
-      Shell::Get()->metrics()->RecordUserMetricsAction(
-          UMA_WINDOW_OVERVIEW_ENTER_KEY);
+      base::RecordAction(
+          base::UserMetricsAction("WindowSelector_OverviewEnterKey"));
       SelectWindow(grid_list_[selected_grid_index_]->SelectedWindow());
       break;
     default:
@@ -514,8 +679,11 @@ void WindowSelector::OnDisplayRemoved(const display::Display& display) {
 
 void WindowSelector::OnDisplayMetricsChanged(const display::Display& display,
                                              uint32_t metrics) {
-  PositionWindows(/* animate */ false);
-  RepositionTextFilterOnDisplayMetricsChange();
+  // For metrics changes that happen when the split view mode is active, the
+  // display bounds will be adjusted in OnSplitViewDividerPositionChanged().
+  if (Shell::Get()->IsSplitViewModeActive())
+    return;
+  OnDisplayBoundsChanged();
 }
 
 void WindowSelector::OnWindowHierarchyChanged(
@@ -576,8 +744,15 @@ void WindowSelector::OnWindowActivated(ActivationReason reason,
     return;
   }
 
+  // Do not cancel the overview mode if the window activation was caused by
+  // snapping window to one side of the screen.
+  if (Shell::Get()->IsSplitViewModeActive())
+    return;
+
   // Don't restore focus on exit if a window was just activated.
   ResetFocusRestoreWindow(false);
+  if (iter != windows.end())
+    selected_item_ = iter->get();
   CancelSelection();
 }
 
@@ -589,6 +764,12 @@ void WindowSelector::OnAttemptToReactivateWindow(aura::Window* request_active,
 
 void WindowSelector::ContentsChanged(views::Textfield* sender,
                                      const base::string16& new_contents) {
+  // If the user enters underline mode via CTRL+SHIFT+U, ContentsChanged
+  // will get called after shutdown has started. Prevent anything from
+  // happening if shutdown has started (grids have been cleared).
+  if (grid_list_.size() < 1)
+    return;
+
   text_filter_string_length_ = new_contents.length();
   if (!text_filter_string_length_)
     num_times_textfield_cleared_++;
@@ -616,8 +797,8 @@ void WindowSelector::ContentsChanged(views::Textfield* sender,
     text_filter_widget_window->SetTransform(transform);
     showing_text_filter_ = should_show_text_filter;
   }
-  for (auto iter = grid_list_.begin(); iter != grid_list_.end(); iter++)
-    (*iter)->FilterItems(new_contents);
+  for (std::unique_ptr<WindowGrid>& grid : grid_list_)
+    grid->FilterItems(new_contents);
 
   // If the selection widget is not active, execute a Move() command so that it
   // shows up on the first undimmed item.
@@ -626,13 +807,34 @@ void WindowSelector::ContentsChanged(views::Textfield* sender,
   Move(WindowSelector::RIGHT, false);
 }
 
-aura::Window* WindowSelector::GetTextFilterWidgetWindow() {
-  return text_filter_widget_->GetNativeWindow();
+void WindowSelector::OnSplitViewStateChanged(
+    SplitViewController::State previous_state,
+    SplitViewController::State state) {
+  if (state != SplitViewController::NO_SNAP) {
+    // Do not restore focus if a window was just snapped and activated.
+    ResetFocusRestoreWindow(false);
+  }
+
+  if (state == SplitViewController::BOTH_SNAPPED) {
+    // If two windows were snapped to both sides of the screen, end overview
+    // mode.
+    CancelSelection();
+  } else {
+    // Otherwise adjust the overview window grid bounds if overview mode is
+    // active at the moment.
+    OnDisplayBoundsChanged();
+    for (auto& grid : grid_list_)
+      grid->UpdateCannotSnapWarningVisibility();
+  }
 }
 
-void WindowSelector::PositionWindows(bool animate) {
-  for (std::unique_ptr<WindowGrid>& grid : grid_list_)
-    grid->PositionWindows(animate);
+void WindowSelector::OnSplitViewDividerPositionChanged() {
+  DCHECK(Shell::Get()->IsSplitViewModeActive());
+  OnDisplayBoundsChanged();
+}
+
+aura::Window* WindowSelector::GetTextFilterWidgetWindow() {
+  return text_filter_widget_->GetNativeWindow();
 }
 
 void WindowSelector::RepositionTextFilterOnDisplayMetricsChange() {
@@ -685,6 +887,18 @@ void WindowSelector::Move(Direction direction, bool animate) {
         (selected_grid_index_ + display_direction + grid_list_.size()) %
         grid_list_.size();
   }
+}
+
+void WindowSelector::OnDisplayBoundsChanged() {
+  // Re-calculate the bounds for the window grids and position all the windows.
+  for (std::unique_ptr<WindowGrid>& grid : grid_list_) {
+    SetBoundsForWindowGridsInScreen(
+        GetGridBoundsInScreen(const_cast<aura::Window*>(grid->root_window())));
+  }
+  PositionWindows(/*animate=*/false);
+  RepositionTextFilterOnDisplayMetricsChange();
+  if (split_view_overview_overlay_)
+    split_view_overview_overlay_->OnDisplayBoundsChanged();
 }
 
 }  // namespace ash

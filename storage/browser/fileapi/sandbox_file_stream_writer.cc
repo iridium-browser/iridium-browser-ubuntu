@@ -61,7 +61,7 @@ SandboxFileStreamWriter::SandboxFileStreamWriter(
   DCHECK(url_.is_valid());
 }
 
-SandboxFileStreamWriter::~SandboxFileStreamWriter() {}
+SandboxFileStreamWriter::~SandboxFileStreamWriter() = default;
 
 int SandboxFileStreamWriter::Write(
     net::IOBuffer* buf, int buf_len,
@@ -118,7 +118,7 @@ void SandboxFileStreamWriter::DidCreateSnapshotFile(
     base::File::Error file_error,
     const base::File::Info& file_info,
     const base::FilePath& platform_path,
-    const scoped_refptr<storage::ShareableFileReference>& file_ref) {
+    scoped_refptr<storage::ShareableFileReference> file_ref) {
   DCHECK(!file_ref.get());
 
   if (CancelIfRequested())
@@ -169,13 +169,13 @@ void SandboxFileStreamWriter::DidCreateSnapshotFile(
 
 void SandboxFileStreamWriter::DidGetUsageAndQuota(
     const net::CompletionCallback& callback,
-    storage::QuotaStatusCode status,
+    blink::mojom::QuotaStatusCode status,
     int64_t usage,
     int64_t quota) {
   if (CancelIfRequested())
     return;
-  if (status != storage::kQuotaStatusOk) {
-    LOG(WARNING) << "Got unexpected quota error : " << status;
+  if (status != blink::mojom::QuotaStatusCode::kOk) {
+    LOG(WARNING) << "Got unexpected quota error : " << static_cast<int>(status);
 
     // crbug.com/349708
     TRACE_EVENT0("io", "SandboxFileStreamWriter::DidGetUsageAndQuota FAILED");
@@ -226,8 +226,8 @@ void SandboxFileStreamWriter::DidWrite(
     int overlapped = file_size_ - total_bytes_written_ - initial_offset_;
     if (overlapped < 0)
       overlapped = 0;
-    observers_.Notify(&FileUpdateObserver::OnUpdate,
-                      std::make_tuple(url_, write_response - overlapped));
+    observers_.Notify(&FileUpdateObserver::OnUpdate, url_,
+                      write_response - overlapped);
   }
   total_bytes_written_ += write_response;
 

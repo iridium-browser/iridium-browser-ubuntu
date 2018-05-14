@@ -173,7 +173,8 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   // ---------------------------------------------------------------------------
   // Declarations
 
-  // Lookup a variable in this scope. Returns the variable or NULL if not found.
+  // Lookup a variable in this scope. Returns the variable or nullptr if not
+  // found.
   Variable* LookupLocal(const AstRawString* name) {
     Variable* result = variables_.Lookup(name);
     if (result != nullptr || scope_info_.is_null()) return result;
@@ -183,7 +184,7 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   Variable* LookupInScopeInfo(const AstRawString* name);
 
   // Lookup a variable in this scope or outer scopes.
-  // Returns the variable or NULL if not found.
+  // Returns the variable or nullptr if not found.
   Variable* Lookup(const AstRawString* name);
 
   // Declare a local variable in this scope. If the variable has been
@@ -195,12 +196,12 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
 
   Variable* DeclareVariable(Declaration* declaration, VariableMode mode,
                             InitializationFlag init,
-                            bool allow_harmony_restrictive_generators,
                             bool* sloppy_mode_block_scope_function_redefinition,
                             bool* ok);
 
   // The return value is meaningful only if FLAG_preparser_scope_analysis is on.
   Variable* DeclareVariableName(const AstRawString* name, VariableMode mode);
+  void DeclareCatchVariableName(const AstRawString* name);
 
   // Declarations list.
   ThreadedList<Declaration>* declarations() { return &decls_; }
@@ -264,7 +265,6 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   // eval call.
   void RecordEvalCall() {
     scope_calls_eval_ = true;
-    RecordInnerScopeEvalCall();
   }
 
   void RecordInnerScopeEvalCall() {
@@ -334,14 +334,6 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   bool is_hidden() const { return is_hidden_; }
   void set_is_hidden() { is_hidden_ = true; }
 
-  // In some cases we want to force context allocation for a whole scope.
-  void ForceContextAllocation() {
-    DCHECK(!already_resolved_);
-    force_context_allocation_ = true;
-  }
-  bool has_forced_context_allocation() const {
-    return force_context_allocation_;
-  }
   void ForceContextAllocationForParameters() {
     DCHECK(!already_resolved_);
     force_context_allocation_for_parameters_ = true;
@@ -363,14 +355,11 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   bool is_with_scope() const { return scope_type_ == WITH_SCOPE; }
   bool is_declaration_scope() const { return is_declaration_scope_; }
 
-  // Information about which scopes calls eval.
-  bool calls_eval() const { return scope_calls_eval_; }
-  bool calls_sloppy_eval() const {
-    return scope_calls_eval_ && is_sloppy(language_mode());
-  }
   bool inner_scope_calls_eval() const { return inner_scope_calls_eval_; }
   bool IsAsmModule() const;
-  bool IsAsmFunction() const;
+  // Returns true if this scope or any inner scopes that might be eagerly
+  // compiled are asm modules.
+  bool ContainsAsmModule() const;
   // Does this scope have the potential to execute declarations non-linearly?
   bool is_nonlinear() const { return scope_nonlinear_; }
 
@@ -388,7 +377,9 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   ScopeType scope_type() const { return scope_type_; }
 
   // The language mode of this scope.
-  LanguageMode language_mode() const { return is_strict_ ? STRICT : SLOPPY; }
+  LanguageMode language_mode() const {
+    return is_strict_ ? LanguageMode::kStrict : LanguageMode::kSloppy;
+  }
 
   // inner_scope() and sibling() together implement the inner scope list of a
   // scope. Inner scope points to the an inner scope of the function, and
@@ -396,7 +387,7 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   Scope* inner_scope() const { return inner_scope_; }
   Scope* sibling() const { return sibling_; }
 
-  // The scope immediately surrounding this scope, or NULL.
+  // The scope immediately surrounding this scope, or nullptr.
   Scope* outer_scope() const { return outer_scope_; }
 
   Variable* catch_variable() const {
@@ -404,6 +395,8 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
     DCHECK_EQ(1, num_var());
     return static_cast<Variable*>(variables_.Start()->value);
   }
+
+  bool ShouldBanArguments();
 
   // ---------------------------------------------------------------------------
   // Variable allocation.
@@ -442,9 +435,6 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   // 'this' is bound, and what determines the function kind.
   DeclarationScope* GetReceiverScope();
 
-  // Find the module scope, assuming there is one.
-  ModuleScope* GetModuleScope();
-
   // Find the innermost outer scope that needs a context.
   Scope* GetOuterScopeWithContext();
 
@@ -467,11 +457,6 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
 
   // Check that all Scopes in the scope tree use the same Zone.
   void CheckZones();
-
-  bool replaced_from_parse_task() const { return replaced_from_parse_task_; }
-  void set_replaced_from_parse_task(bool replaced_from_parse_task) {
-    replaced_from_parse_task_ = replaced_from_parse_task;
-  }
 #endif
 
   // Retrieve `IsSimpleParameterList` of current or outer function.
@@ -525,7 +510,7 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   Zone* zone_;
 
   // Scope tree.
-  Scope* outer_scope_;  // the immediately enclosing outer scope, or NULL
+  Scope* outer_scope_;  // the immediately enclosing outer scope, or nullptr
   Scope* inner_scope_;  // an inner scope of this scope
   Scope* sibling_;  // a sibling inner scope of the outer scope of this scope.
 
@@ -556,10 +541,6 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   // True if this scope may contain objects from a temp zone that needs to be
   // fixed up.
   bool needs_migration_;
-
-  // True if scope comes from other zone - as a result of being created in a
-  // parse tasks.
-  bool replaced_from_parse_task_ = false;
 #endif
 
   // Source positions.
@@ -576,7 +557,7 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   // Scope-specific information computed during parsing.
   //
   // The language mode of this scope.
-  STATIC_ASSERT(LANGUAGE_END == 2);
+  STATIC_ASSERT(LanguageModeSize == 2);
   bool is_strict_ : 1;
   // This scope or a nested catch scope or with scope contain an 'eval' call. At
   // the 'eval' call site this scope is the declaration scope.
@@ -606,10 +587,11 @@ class V8_EXPORT_PRIVATE Scope : public NON_EXPORTED_BASE(ZoneObject) {
   // scope, and stopping when reaching the outer_scope_end scope. If the code is
   // executed because of a call to 'eval', the context parameter should be set
   // to the calling context of 'eval'.
-  Variable* LookupRecursive(VariableProxy* proxy, Scope* outer_scope_end);
+  Variable* LookupRecursive(ParseInfo* info, VariableProxy* proxy,
+                            Scope* outer_scope_end);
   void ResolveTo(ParseInfo* info, VariableProxy* proxy, Variable* var);
-  void ResolveVariable(ParseInfo* info, VariableProxy* proxy);
-  void ResolveVariablesRecursively(ParseInfo* info);
+  MUST_USE_RESULT bool ResolveVariable(ParseInfo* info, VariableProxy* proxy);
+  MUST_USE_RESULT bool ResolveVariablesRecursively(ParseInfo* info);
 
   // Finds free variables of this scope. This mutates the unresolved variables
   // list along the way, so full resolution cannot be done afterwards.
@@ -678,19 +660,22 @@ class V8_EXPORT_PRIVATE DeclarationScope : public Scope {
 
   // Inform the scope that the corresponding code uses "super".
   void RecordSuperPropertyUsage() {
-    DCHECK((IsConciseMethod(function_kind()) ||
-            IsAccessorFunction(function_kind()) ||
-            IsClassConstructor(function_kind())));
+    DCHECK(IsConciseMethod(function_kind()) ||
+           IsAccessorFunction(function_kind()) ||
+           IsClassConstructor(function_kind()));
     scope_uses_super_property_ = true;
   }
-  // Does this scope access "super" property (super.foo).
-  bool uses_super_property() const { return scope_uses_super_property_; }
 
+  // Does this scope access "super" property (super.foo).
   bool NeedsHomeObject() const {
     return scope_uses_super_property_ ||
            (inner_scope_calls_eval_ && (IsConciseMethod(function_kind()) ||
                                         IsAccessorFunction(function_kind()) ||
                                         IsClassConstructor(function_kind())));
+  }
+
+  bool calls_sloppy_eval() const {
+    return scope_calls_eval_ && is_sloppy(language_mode());
   }
 
   bool was_lazily_parsed() const { return was_lazily_parsed_; }
@@ -713,8 +698,10 @@ class V8_EXPORT_PRIVATE DeclarationScope : public Scope {
 
   bool asm_module() const { return asm_module_; }
   void set_asm_module();
-  bool asm_function() const { return asm_function_; }
-  void set_asm_function() { asm_function_ = true; }
+
+  bool should_ban_arguments() const {
+    return IsClassFieldsInitializerFunction(function_kind());
+  }
 
   void DeclareThis(AstValueFactory* ast_value_factory);
   void DeclareArguments(AstValueFactory* ast_value_factory);
@@ -773,11 +760,8 @@ class V8_EXPORT_PRIVATE DeclarationScope : public Scope {
   Variable* new_target_var() { return new_target_; }
 
   // The variable holding the function literal for named function
-  // literals, or NULL.  Only valid for function scopes.
-  Variable* function_var() const {
-    DCHECK(is_function_scope());
-    return function_;
-  }
+  // literals, or nullptr.  Only valid for function scopes.
+  Variable* function_var() const { return function_; }
 
   Variable* generator_object_var() const {
     DCHECK(is_function_scope() || is_module_scope());
@@ -824,7 +808,8 @@ class V8_EXPORT_PRIVATE DeclarationScope : public Scope {
     has_simple_parameters_ = false;
   }
 
-  // The local variable 'arguments' if we need to allocate it; NULL otherwise.
+  // The local variable 'arguments' if we need to allocate it; nullptr
+  // otherwise.
   Variable* arguments() const {
     DCHECK(!is_arrow_scope() || arguments_ == nullptr);
     return arguments_;
@@ -858,10 +843,19 @@ class V8_EXPORT_PRIVATE DeclarationScope : public Scope {
     return sloppy_block_function_map_;
   }
 
+  // Replaces the outer scope with the outer_scope_info in |info| if there is
+  // one.
+  void AttachOuterScopeInfo(ParseInfo* info, Isolate* isolate);
+
   // Compute top scope and allocate variables. For lazy compilation the top
   // scope only contains the single lazily compiled function, so this
   // doesn't re-allocate variables repeatedly.
-  static void Analyze(ParseInfo* info, Isolate* isolate, AnalyzeMode mode);
+  //
+  // Returns false if private fields can not be resolved and
+  // ParseInfo's pending_error_handler will be populated with an
+  // error. Otherwise, returns true.
+  MUST_USE_RESULT
+  static bool Analyze(ParseInfo* info);
 
   // To be called during parsing. Do just enough scope analysis that we can
   // discard the Scope contents for lazily compiled functions. In particular,
@@ -869,6 +863,11 @@ class V8_EXPORT_PRIVATE DeclarationScope : public Scope {
   // yet know what they will resolve to since the outer Scopes are incomplete)
   // and recreates them with the correct Zone with ast_node_factory.
   void AnalyzePartially(AstNodeFactory* ast_node_factory);
+
+  // Allocate ScopeInfos for top scope and any inner scopes that need them.
+  // Does nothing if ScopeInfo is already allocated.
+  static void AllocateScopeInfos(ParseInfo* info, Isolate* isolate,
+                                 AnalyzeMode mode);
 
   Handle<StringSet> CollectNonLocals(ParseInfo* info,
                                      Handle<StringSet> non_locals);
@@ -927,7 +926,9 @@ class V8_EXPORT_PRIVATE DeclarationScope : public Scope {
   // In the case of code compiled and run using 'eval', the context
   // parameter is the context in which eval was called.  In all other
   // cases the context parameter is an empty handle.
-  void AllocateVariables(ParseInfo* info, Isolate* isolate, AnalyzeMode mode);
+  //
+  // Returns false if private fields can not be resolved.
+  bool AllocateVariables(ParseInfo* info);
 
   void SetDefaults();
 
@@ -937,8 +938,6 @@ class V8_EXPORT_PRIVATE DeclarationScope : public Scope {
   bool has_simple_parameters_ : 1;
   // This scope contains an "use asm" annotation.
   bool asm_module_ : 1;
-  // This scope's outer context is an asm module.
-  bool asm_function_ : 1;
   bool force_eager_compilation_ : 1;
   // This function scope has a rest parameter.
   bool has_rest_ : 1;

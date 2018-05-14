@@ -9,6 +9,7 @@
 #include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
+namespace cssvalue {
 
 CSSRayValue* CSSRayValue::Create(const CSSPrimitiveValue& angle,
                                  const CSSIdentifierValue& size,
@@ -41,11 +42,12 @@ bool CSSRayValue::Equals(const CSSRayValue& other) const {
          DataEquivalent(contain_, other.contain_);
 }
 
-DEFINE_TRACE_AFTER_DISPATCH(CSSRayValue) {
+void CSSRayValue::TraceAfterDispatch(blink::Visitor* visitor) {
   visitor->Trace(angle_);
   visitor->Trace(size_);
   visitor->Trace(contain_);
   CSSValue::TraceAfterDispatch(visitor);
 }
 
+}  // namespace cssvalue
 }  // namespace blink

@@ -5,18 +5,20 @@
 #ifndef Sensor_h
 #define Sensor_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/DOMHighResTimeStamp.h"
 #include "core/dom/DOMTimeStamp.h"
-#include "core/dom/SuspendableObject.h"
+#include "core/dom/PausableObject.h"
 #include "core/frame/PlatformEventController.h"
 #include "modules/EventTargetModules.h"
 #include "modules/sensor/SensorOptions.h"
 #include "modules/sensor/SensorProxy.h"
+#include "modules/sensor/SpatialSensorOptions.h"
 #include "platform/WebTaskRunner.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
+#include "public/common/feature_policy/feature_policy.h"
 
 namespace blink {
 
@@ -49,6 +51,7 @@ class Sensor : public EventTargetWithInlineData,
 
   // Getters
   bool activated() const;
+  bool hasReading() const;
   DOMHighResTimeStamp timestamp(ScriptState*, bool& is_null) const;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
@@ -58,13 +61,20 @@ class Sensor : public EventTargetWithInlineData,
   // ActiveScriptWrappable overrides.
   bool HasPendingActivity() const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   Sensor(ExecutionContext*,
          const SensorOptions&,
          ExceptionState&,
-         device::mojom::blink::SensorType);
+         device::mojom::blink::SensorType,
+         const Vector<mojom::FeaturePolicyFeature>&);
+
+  Sensor(ExecutionContext*,
+         const SpatialSensorOptions&,
+         ExceptionState&,
+         device::mojom::blink::SensorType,
+         const Vector<mojom::FeaturePolicyFeature>&);
 
   using SensorConfigurationPtr = device::mojom::blink::SensorConfigurationPtr;
   using SensorConfiguration = device::mojom::blink::SensorConfiguration;
@@ -74,11 +84,9 @@ class Sensor : public EventTargetWithInlineData,
   // parameters if needed.
   virtual SensorConfigurationPtr CreateSensorConfig();
 
-  double ReadingValue(int index, bool& is_null) const;
-  double ReadingValueUnchecked(int index) const;
-  bool CanReturnReadings() const;
   bool IsActivated() const { return state_ == SensorState::kActivated; }
   bool IsIdleOrErrored() const;
+  const device::SensorReading& GetReading() const;
 
   // SensorProxy::Observer overrides.
   void OnSensorInitialized() override;
@@ -109,7 +117,7 @@ class Sensor : public EventTargetWithInlineData,
   void NotifyError(DOMException* error);
 
  private:
-  SensorOptions sensor_options_;
+  double frequency_;
   device::mojom::blink::SensorType type_;
   SensorState state_;
   Member<SensorProxy> sensor_proxy_;
@@ -118,8 +126,16 @@ class Sensor : public EventTargetWithInlineData,
   TaskHandle pending_reading_notification_;
   TaskHandle pending_activated_notification_;
   TaskHandle pending_error_notification_;
+  bool use_screen_coords_ = false;
 };
 
 }  // namespace blink
+
+// To be used in getters in concrete sensors
+// bindings code.
+#define INIT_IS_NULL_AND_RETURN(is_null, x) \
+  is_null = !hasReading();                  \
+  if (is_null)                              \
+  return (x)
 
 #endif  // Sensor_h

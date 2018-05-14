@@ -9,12 +9,14 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/engagement/important_sites_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
 #include "components/browser_sync/profile_sync_service.h"
+#include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
 
 namespace base {
@@ -40,6 +42,9 @@ class ClearBrowsingDataHandler : public SettingsPageUIHandler,
   void OnJavascriptAllowed() override;
   void OnJavascriptDisallowed() override;
 
+  // Calls |HandleClearBrowsingData| with test data for browser test.
+  void HandleClearBrowsingDataForTest();
+
  private:
   // Clears browsing data, called by Javascript.
   void HandleClearBrowsingData(const base::ListValue* value);
@@ -51,7 +56,9 @@ class ClearBrowsingDataHandler : public SettingsPageUIHandler,
 
   // Called when a clearing task finished. |webui_callback_id| is provided
   // by the WebUI action that initiated it.
-  void OnClearingTaskFinished(const std::string& webui_callback_id);
+  void OnClearingTaskFinished(
+      const std::string& webui_callback_id,
+      const base::flat_set<browsing_data::BrowsingDataType>& data_types);
 
   // Get important sites, called by Javascript.
   void HandleGetImportantSites(const base::ListValue* value);
@@ -73,21 +80,21 @@ class ClearBrowsingDataHandler : public SettingsPageUIHandler,
   // in user's account.
   void RefreshHistoryNotice();
 
-  // Called as an asynchronous response to |RefreshHistoryNotice()|. Shows or
-  // hides the footer about other forms of history stored in user's account.
-  void UpdateHistoryNotice(bool show);
-
   // Called as an asynchronous response to |RefreshHistoryNotice()|. Enables or
   // disables the dialog about other forms of history stored in user's account
   // that is shown when the history deletion is finished.
   void UpdateHistoryDeletionDialog(bool show);
 
   // Adds a browsing data |counter|.
-  void AddCounter(std::unique_ptr<browsing_data::BrowsingDataCounter> counter);
+  void AddCounter(std::unique_ptr<browsing_data::BrowsingDataCounter> counter,
+                  browsing_data::ClearBrowsingDataTab tab);
 
   // Updates a counter text according to the |result|.
   void UpdateCounterText(
       std::unique_ptr<browsing_data::BrowsingDataCounter::Result> result);
+
+  // Record changes to the time period preferences.
+  void HandleTimePeriodChanged(const std::string& pref_name);
 
   // Cached profile corresponding to the WebUI of this handler.
   Profile* profile_;
@@ -100,14 +107,13 @@ class ClearBrowsingDataHandler : public SettingsPageUIHandler,
   ScopedObserver<browser_sync::ProfileSyncService, syncer::SyncServiceObserver>
       sync_service_observer_;
 
-  // Whether the sentence about other forms of history stored in user's account
-  // should be displayed in the footer. This value is retrieved asynchronously,
-  // so we cache it here.
-  bool show_history_footer_;
-
   // Whether we should show a dialog informing the user about other forms of
   // history stored in their account after the history deletion is finished.
   bool show_history_deletion_dialog_;
+
+  // The TimePeriod preferences.
+  std::unique_ptr<IntegerPrefMember> period_;
+  std::unique_ptr<IntegerPrefMember> periodBasic_;
 
   // A weak pointer factory for asynchronous calls referencing this class.
   // The weak pointers are invalidated in |OnJavascriptDisallowed()| and

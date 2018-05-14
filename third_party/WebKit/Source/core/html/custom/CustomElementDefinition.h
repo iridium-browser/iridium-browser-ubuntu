@@ -5,13 +5,14 @@
 #ifndef CustomElementDefinition_h
 #define CustomElementDefinition_h
 
+#include "base/macros.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "core/CoreExport.h"
+#include "core/dom/CreateElementFlags.h"
 #include "core/html/custom/CustomElementDescriptor.h"
 #include "platform/bindings/ScriptWrappable.h"  // For TraceWrapperBase
 #include "platform/heap/Handle.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/text/AtomicString.h"
 #include "platform/wtf/text/AtomicStringHash.h"
 
@@ -26,8 +27,6 @@ class QualifiedName;
 class CORE_EXPORT CustomElementDefinition
     : public GarbageCollectedFinalized<CustomElementDefinition>,
       public TraceWrapperBase {
-  WTF_MAKE_NONCOPYABLE(CustomElementDefinition);
-
  public:
   // Each definition has an ID that is unique within the
   // CustomElementRegistry that created it.
@@ -38,8 +37,8 @@ class CORE_EXPORT CustomElementDefinition
                           const HashSet<AtomicString>&);
   virtual ~CustomElementDefinition();
 
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_VIRTUAL_TRACE_WRAPPERS() {}
+  virtual void Trace(blink::Visitor*);
+  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {}
 
   const CustomElementDescriptor& Descriptor() { return descriptor_; }
 
@@ -55,8 +54,12 @@ class CORE_EXPORT CustomElementDefinition
   ConstructionStack& GetConstructionStack() { return construction_stack_; }
 
   HTMLElement* CreateElementForConstructor(Document&);
-  virtual HTMLElement* CreateElementSync(Document&, const QualifiedName&) = 0;
-  HTMLElement* CreateElementAsync(Document&, const QualifiedName&);
+  virtual HTMLElement* CreateAutonomousCustomElementSync(
+      Document&,
+      const QualifiedName&) = 0;
+  HTMLElement* CreateElement(Document&,
+                             const QualifiedName&,
+                             const CreateElementFlags);
 
   void Upgrade(Element*);
 
@@ -116,6 +119,8 @@ class CORE_EXPORT CustomElementDefinition
   bool has_style_attribute_changed_callback_;
 
   void EnqueueAttributeChangedCallbackForAllAttributes(Element*);
+
+  DISALLOW_COPY_AND_ASSIGN(CustomElementDefinition);
 };
 
 }  // namespace blink

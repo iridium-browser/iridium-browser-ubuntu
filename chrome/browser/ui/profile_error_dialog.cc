@@ -6,6 +6,7 @@
 
 #include "base/base_switches.h"
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
@@ -32,8 +33,9 @@ void OnProfileErrorDialogDismissed(const std::string& diagnostics,
       l10n_util::GetStringUTF8(IDS_PROFILE_ERROR_FEEDBACK_DESCRIPTION);
 
   chrome::ShowFeedbackPage(nullptr, chrome::kFeedbackSourceProfileErrorDialog,
-                           feedback_description, kProfileErrorFeedbackCategory,
-                           diagnostics);
+                           feedback_description,
+                           std::string() /* description_placeholder_text */,
+                           kProfileErrorFeedbackCategory, diagnostics);
 }
 #endif  // !defined(OS_ANDROID)
 

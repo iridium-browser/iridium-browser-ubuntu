@@ -11,11 +11,19 @@
         ],
         "mash:launchable": [
           "mash::mojom::Launchable"
+        ],
+        "renderer": [
+          "spellcheck::mojom::SpellCheckHost",
+          "spellcheck::mojom::SpellCheckPanelHost",
+          "startup_metric_utils::mojom::StartupMetricHost"
         ]
       },
       "requires": {
+        "chrome_renderer": [ "browser" ],
         "service_manager": [
-          "service_manager:all_users"
+          "service_manager:all_users",
+          "service_manager:client_process",
+          "service_manager:instance_name"
         ]
       }
     }

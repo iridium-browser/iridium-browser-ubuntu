@@ -2,9 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//chromecast/chromecast.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 
-source_set("common") {
+cast_source_set("common") {
   sources = [
     "cast_content_client.cc",
     "cast_content_client.h",
@@ -15,6 +16,7 @@ source_set("common") {
 
   deps = [
     "//base",
+    "//chromecast:chromecast_buildflags",
     "//chromecast/base",
     "//chromecast/base:cast_version",
     "//chromecast/common/media",
@@ -23,12 +25,33 @@ source_set("common") {
     "//ui/gfx",
     "//url:url",
   ]
+
+  if (enable_chromecast_extensions) {
+    sources += [
+      "cast_extensions_client.cc",
+      "cast_extensions_client.h",
+    ]
+
+    deps += [
+      "//components/version_info",
+      "//extensions:extensions_resources_grd_grit",
+      "//extensions/common",
+      "//extensions/common/api:generated_api_bundle_generator_schema",
+      "//extensions/shell:resources",
+      "//extensions/shell:resources_grit",
+      "//extensions/shell/common/api",
+      "//extensions/shell/common/api:api_registration",
+      "//extensions/shell/common/api:extensions_features",
+    ]
+  }
 }
 
-if (!is_android) {
-  mojom("interfaces") {
-    sources = [
-      "memory_pressure.mojom",
-    ]
+mojom("interfaces") {
+  sources = [
+    "application_media_capabilities.mojom",
+  ]
+
+  if (!is_android) {
+    sources += [ "memory_pressure.mojom" ]
   }
 }

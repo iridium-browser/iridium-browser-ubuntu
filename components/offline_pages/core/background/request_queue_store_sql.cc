@@ -5,6 +5,7 @@
 #include "components/offline_pages/core/background/request_queue_store_sql.h"
 
 #include <unordered_set>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
@@ -15,6 +16,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/offline_pages/core/background/save_page_request.h"
+#include "components/offline_pages/core/offline_store_utils.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
@@ -127,9 +129,9 @@ std::unique_ptr<SavePageRequest> MakeSavePageRequest(
     const sql::Statement& statement) {
   const int64_t id = statement.ColumnInt64(0);
   const base::Time creation_time =
-      base::Time::FromInternalValue(statement.ColumnInt64(1));
+      store_utils::FromDatabaseTime(statement.ColumnInt64(1));
   const base::Time last_attempt_time =
-      base::Time::FromInternalValue(statement.ColumnInt64(3));
+      store_utils::FromDatabaseTime(statement.ColumnInt64(3));
   const int64_t started_attempt_count = statement.ColumnInt64(4);
   const int64_t completed_attempt_count = statement.ColumnInt64(5);
   const SavePageRequest::RequestState state =
@@ -181,7 +183,7 @@ ItemActionStatus DeleteRequestById(sql::Connection* db, int64_t request_id) {
   statement.BindInt64(0, request_id);
   if (!statement.Run())
     return ItemActionStatus::STORE_ERROR;
-  else if (db->GetLastChangeCount() == 0)
+  if (db->GetLastChangeCount() == 0)
     return ItemActionStatus::NOT_FOUND;
   return ItemActionStatus::SUCCESS;
 }
@@ -198,9 +200,10 @@ ItemActionStatus Insert(sql::Connection* db, const SavePageRequest& request) {
 
   sql::Statement statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
   statement.BindInt64(0, request.request_id());
-  statement.BindInt64(1, request.creation_time().ToInternalValue());
+  statement.BindInt64(1, store_utils::ToDatabaseTime(request.creation_time()));
   statement.BindInt64(2, 0);
-  statement.BindInt64(3, request.last_attempt_time().ToInternalValue());
+  statement.BindInt64(3,
+                      store_utils::ToDatabaseTime(request.last_attempt_time()));
   statement.BindInt64(4, request.started_attempt_count());
   statement.BindInt64(5, request.completed_attempt_count());
   statement.BindInt64(6, static_cast<int64_t>(request.request_state()));
@@ -227,9 +230,10 @@ ItemActionStatus Update(sql::Connection* db, const SavePageRequest& request) {
       " WHERE request_id = ?";
 
   sql::Statement statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
-  statement.BindInt64(0, request.creation_time().ToInternalValue());
+  statement.BindInt64(0, store_utils::ToDatabaseTime(request.creation_time()));
   statement.BindInt64(1, 0);
-  statement.BindInt64(2, request.last_attempt_time().ToInternalValue());
+  statement.BindInt64(2,
+                      store_utils::ToDatabaseTime(request.last_attempt_time()));
   statement.BindInt64(3, request.started_attempt_count());
   statement.BindInt64(4, request.completed_attempt_count());
   statement.BindInt64(5, static_cast<int64_t>(request.request_state()));
@@ -257,7 +261,7 @@ void PostStoreUpdateResultForIds(
       new UpdateRequestsResult(store_state));
   for (const auto& item_id : item_ids)
     result->item_statuses.push_back(std::make_pair(item_id, action_status));
-  runner->PostTask(FROM_HERE, base::Bind(callback, base::Passed(&result)));
+  runner->PostTask(FROM_HERE, base::BindOnce(callback, std::move(result)));
 }
 
 void PostStoreErrorForAllRequests(
@@ -310,8 +314,8 @@ void GetRequestsSync(sql::Connection* db,
   while (statement.Step())
     requests.push_back(MakeSavePageRequest(statement));
 
-  runner->PostTask(FROM_HERE, base::Bind(callback, statement.Succeeded(),
-                                         base::Passed(&requests)));
+  runner->PostTask(FROM_HERE, base::BindOnce(callback, statement.Succeeded(),
+                                             std::move(requests)));
 }
 
 void GetRequestsByIdsSync(sql::Connection* db,
@@ -348,7 +352,7 @@ void GetRequestsByIdsSync(sql::Connection* db,
     return;
   }
 
-  runner->PostTask(FROM_HERE, base::Bind(callback, base::Passed(&result)));
+  runner->PostTask(FROM_HERE, base::BindOnce(callback, std::move(result)));
 }
 
 void AddRequestSync(sql::Connection* db,
@@ -385,7 +389,7 @@ void UpdateRequestsSync(sql::Connection* db,
     return;
   }
 
-  runner->PostTask(FROM_HERE, base::Bind(callback, base::Passed(&result)));
+  runner->PostTask(FROM_HERE, base::BindOnce(callback, std::move(result)));
 }
 
 void RemoveRequestsSync(sql::Connection* db,
@@ -418,7 +422,7 @@ void RemoveRequestsSync(sql::Connection* db,
     return;
   }
 
-  runner->PostTask(FROM_HERE, base::Bind(callback, base::Passed(&result)));
+  runner->PostTask(FROM_HERE, base::BindOnce(callback, std::move(result)));
 }
 
 void OpenConnectionSync(sql::Connection* db,
@@ -474,7 +478,7 @@ void RequestQueueStoreSQL::GetRequests(const GetRequestsCallback& callback) {
   if (!CheckDb()) {
     std::vector<std::unique_ptr<SavePageRequest>> requests;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, false, base::Passed(&requests)));
+        FROM_HERE, base::BindOnce(callback, false, std::move(requests)));
     return;
   }
 

@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/app_list/app_list_model.h"
+#include "ash/app_list/model/app_list_model.h"
 
 #include <stddef.h>
 
 #include <map>
 #include <string>
 
+#include "ash/app_list/model/app_list_folder_item.h"
+#include "ash/app_list/model/app_list_item.h"
+#include "ash/app_list/model/app_list_model_observer.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/app_list/app_list_folder_item.h"
-#include "ui/app_list/app_list_item.h"
-#include "ui/app_list/app_list_model_observer.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/test/app_list_test_model.h"
 #include "ui/base/models/list_model_observer.h"
@@ -105,14 +105,14 @@ class AppListModelTest : public testing::Test {
 };
 
 TEST_F(AppListModelTest, SetStatus) {
-  EXPECT_EQ(AppListModel::STATUS_NORMAL, model_.status());
-  model_.SetStatus(AppListModel::STATUS_SYNCING);
+  EXPECT_EQ(ash::AppListModelStatus::kStatusNormal, model_.status());
+  model_.SetStatus(ash::AppListModelStatus::kStatusSyncing);
   EXPECT_EQ(1, observer_.status_changed_count());
-  EXPECT_EQ(AppListModel::STATUS_SYNCING, model_.status());
-  model_.SetStatus(AppListModel::STATUS_NORMAL);
+  EXPECT_EQ(ash::AppListModelStatus::kStatusSyncing, model_.status());
+  model_.SetStatus(ash::AppListModelStatus::kStatusNormal);
   EXPECT_EQ(2, observer_.status_changed_count());
   // Set the same status, no change is expected.
-  model_.SetStatus(AppListModel::STATUS_NORMAL);
+  model_.SetStatus(ash::AppListModelStatus::kStatusNormal);
   EXPECT_EQ(2, observer_.status_changed_count());
 }
 
@@ -224,7 +224,6 @@ TEST_F(AppListModelTest, AppOrder) {
 class AppListModelFolderTest : public AppListModelTest {
  public:
   AppListModelFolderTest() {
-    model_.SetFoldersEnabled(true);
   }
   ~AppListModelFolderTest() override {}
 
@@ -541,15 +540,6 @@ TEST_F(AppListModelFolderTest, DisableFolders) {
   std::string oem_folder_id = oem_folder->id();
   model_.AddItemToFolder(oem_item, oem_folder_id);
   EXPECT_EQ("folder1,oem_folder", GetModelContents());
-
-  // Disable folders. Ensure non-oem folder is removed.
-  model_.SetFoldersEnabled(false);
-  ASSERT_FALSE(model_.FindFolderItem(folder_id));
-  ASSERT_TRUE(model_.FindFolderItem(oem_folder_id));
-  EXPECT_EQ("Item 0,Item 1,oem_folder", GetModelContents());
-
-  // Ensure folder creation fails.
-  EXPECT_EQ(std::string(), model_.MergeItems(item0->id(), item1->id()));
 }
 
 }  // namespace app_list

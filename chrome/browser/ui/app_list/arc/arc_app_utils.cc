@@ -8,7 +8,6 @@
 #include <string>
 
 #include "ash/shell.h"
-#include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -18,6 +17,7 @@
 #include "chrome/browser/chromeos/arc/arc_migration_guide_notification.h"
 #include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
+#include "chrome/browser/chromeos/arc/boot_phase_monitor/arc_boot_phase_monitor_bridge.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/ash/launcher/arc_app_deferred_launcher_controller.h"
@@ -27,10 +27,12 @@
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/arc_util.h"
 #include "components/arc/common/intent_helper.mojom.h"
+#include "components/arc/intent_helper/arc_intent_helper_bridge.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/events/event_constants.h"
+#include "ui/gfx/geometry/rect.h"
 
 // Helper macro which returns the AppInstance.
 #define GET_APP_INSTANCE(method_name)                                    \
@@ -53,16 +55,11 @@ namespace arc {
 
 namespace {
 
-// Default sizes to use.
-constexpr int kNexus7Width = 960;
-constexpr int kNexus7Height = 600;
-constexpr int kNexus5Width = 410;
-constexpr int kNexus5Height = 690;
-
+// TODO(djacobo): Evaluate to build these strings by using
+// ArcIntentHelperBridge::AppendStringToIntentHelperPackageName.
 // Intent helper strings.
 constexpr char kIntentHelperClassName[] =
     "org.chromium.arc.intent_helper.SettingsReceiver";
-constexpr char kIntentHelperPackageName[] = "org.chromium.arc.intent_helper";
 constexpr char kSetInTouchModeIntent[] =
     "org.chromium.arc.intent_helper.SET_IN_TOUCH_MODE";
 constexpr char kShowTalkbackSettingsIntent[] =
@@ -83,37 +80,6 @@ constexpr char const* kAppIdsHiddenInLauncher[] = {
     kAndroidClockAppId, kSettingsAppId,
 };
 
-// Find a proper size and position for a given rectangle on the screen.
-// TODO(skuhne): This needs more consideration, but it is lacking
-// WindowPositioner functionality since we do not have an Aura::Window yet.
-gfx::Rect GetTargetRect(const gfx::Size& size) {
-  // Make sure that the window will fit into our workspace.
-  // Note that ARC will always be on the primary screen (for now).
-  // Note that Android's coordinate system is only valid inside the working
-  // area. We can therefore ignore the provided left / top offsets.
-  aura::Window* root = ash::Shell::GetPrimaryRootWindow();
-  gfx::Rect work_area =
-      display::Screen::GetScreen()->GetDisplayNearestWindow(root).work_area();
-
-  gfx::Rect result(size);
-
-  // We do not adjust sizes to fit the window into the work area here.
-  // The reason is that the used DP<->pix transformation is different on
-  // ChromeOS and ARC dependent on the device and zoom factor being used.
-  // As such the real size cannot be determined here (yet). However - ARC
-  // will adjust the bounds to not exceed the visible screen later.
-
-  // ChromeOS does not give us much logic at this time, so we emulate what
-  // WindowPositioner::GetDefaultWindowBounds does for now.
-  // Note: Android's positioning will not overlap the shelf - as such we can
-  // ignore the given workspace inset.
-  // TODO(skuhne): Replace this with some more useful logic from the
-  // WindowPositioner.
-  result.set_x((work_area.width() - result.width()) / 2);
-  result.set_y((work_area.height() - result.height()) / 2);
-  return result;
-}
-
 // Returns true if |event_flags| came from a mouse or touch event.
 bool IsMouseOrTouchEventFromFlags(int event_flags) {
   return (event_flags & (ui::EF_LEFT_MOUSE_BUTTON | ui::EF_MIDDLE_MOUSE_BUTTON |
@@ -121,11 +87,11 @@ bool IsMouseOrTouchEventFromFlags(int event_flags) {
                          ui::EF_FORWARD_MOUSE_BUTTON | ui::EF_FROM_TOUCH)) != 0;
 }
 
-bool LaunchAppWithRect(content::BrowserContext* context,
-                       const std::string& app_id,
-                       const base::Optional<std::string>& launch_intent,
-                       const gfx::Rect& target_rect,
-                       int event_flags) {
+bool Launch(content::BrowserContext* context,
+            const std::string& app_id,
+            const base::Optional<std::string>& intent,
+            int event_flags,
+            int64_t display_id) {
   ArcAppListPrefs* prefs = ArcAppListPrefs::Get(context);
   CHECK(prefs);
 
@@ -145,10 +111,6 @@ bool LaunchAppWithRect(content::BrowserContext* context,
     return false;
   }
 
-  arc::mojom::AppInstance* app_instance = GET_APP_INSTANCE(LaunchApp);
-  if (!app_instance)
-    return false;
-
   arc::mojom::IntentHelperInstance* intent_helper_instance =
       GET_INTENT_HELPER_INSTANCE(SendBroadcast);
   if (intent_helper_instance) {
@@ -157,99 +119,51 @@ bool LaunchAppWithRect(content::BrowserContext* context,
     std::string extras_string;
     base::JSONWriter::Write(extras, &extras_string);
     intent_helper_instance->SendBroadcast(
-        kSetInTouchModeIntent, kIntentHelperPackageName, kIntentHelperClassName,
-        extras_string);
+        kSetInTouchModeIntent,
+        ArcIntentHelperBridge::kArcIntentHelperPackageName,
+        kIntentHelperClassName, extras_string);
   }
 
-  if (app_info->shortcut || launch_intent.has_value()) {
-    // Before calling LaunchIntent, check if the interface is supported. Reusing
-    // the same |app_instance| for LaunchIntent is allowed.
-    if (!GET_APP_INSTANCE(LaunchIntent))
+  if (app_info->shortcut || intent.has_value()) {
+    const std::string intent_uri = intent.value_or(app_info->intent_uri);
+    if (auto* app_instance = GET_APP_INSTANCE(LaunchIntent)) {
+      app_instance->LaunchIntent(intent_uri, display_id);
+    } else if (auto* app_instance = GET_APP_INSTANCE(LaunchIntentDeprecated)) {
+      app_instance->LaunchIntentDeprecated(intent_uri, gfx::Rect());
+    } else {
       return false;
-    app_instance->LaunchIntent(launch_intent.value_or(app_info->intent_uri),
-                               target_rect);
+    }
   } else {
-    app_instance->LaunchApp(app_info->package_name, app_info->activity,
-                            target_rect);
+    if (auto* app_instance = GET_APP_INSTANCE(LaunchApp)) {
+      app_instance->LaunchApp(app_info->package_name, app_info->activity,
+                              display_id);
+    } else if (auto* app_instance = GET_APP_INSTANCE(LaunchAppDeprecated)) {
+      app_instance->LaunchAppDeprecated(app_info->package_name,
+                                        app_info->activity, gfx::Rect());
+    } else {
+      return false;
+    }
   }
   prefs->SetLastLaunchTime(app_id);
 
   return true;
 }
 
-// A class which handles the asynchronous ARC runtime callback to figure out if
-// an app can handle a certain resolution or not.
-// After LaunchAndRelease() is called, the object will destroy itself once done.
-class AppLauncher {
- public:
-  AppLauncher(content::BrowserContext* context,
-              const std::string& app_id,
-              const base::Optional<std::string>& launch_intent,
-              bool landscape_mode,
-              int event_flags)
-      : context_(context),
-        app_id_(app_id),
-        launch_intent_(launch_intent),
-        landscape_mode_(landscape_mode),
-        event_flags_(event_flags) {}
-
-  // This will launch the request and after the return the creator does not
-  // need to delete the object anymore.
-  bool LaunchAndRelease() {
-    landscape_ = landscape_mode_ ? gfx::Rect(0, 0, kNexus7Width, kNexus7Height)
-                                 : gfx::Rect(0, 0, kNexus5Width, kNexus5Height);
-    if (!ash::Shell::HasInstance()) {
-      // Skip this if there is no Ash shell.
-      LaunchAppWithRect(context_, app_id_, launch_intent_, landscape_,
-                        event_flags_);
-      delete this;
-      return true;
-    }
-
-    // TODO(skuhne): Change CanHandleResolution into a call which returns
-    // capability flags like [PHONE/TABLET]_[LANDSCAPE/PORTRAIT] and which
-    // might also return the used DP->PIX conversion constant to do better
-    // size calculations. base::Unretained is safe because this object is
-    // responsible for its own deletion.
-    bool result = CanHandleResolution(
-        context_, app_id_, landscape_,
-        base::Bind(&AppLauncher::Callback, base::Unretained(this)));
-    if (!result)
-      delete this;
-
-    return result;
-  }
-
- private:
-  content::BrowserContext* const context_;
-  const std::string app_id_;
-  const base::Optional<std::string> launch_intent_;
-  const bool landscape_mode_;
-  gfx::Rect landscape_;
-  const int event_flags_;
-
-  // The callback handler which gets called from the CanHandleResolution
-  // function.
-  void Callback(bool can_handle) {
-    gfx::Size target_size =
-        can_handle ? landscape_.size() : gfx::Size(kNexus5Width, kNexus5Height);
-    LaunchAppWithRect(context_, app_id_, launch_intent_,
-                      GetTargetRect(target_size), event_flags_);
-    // Now that we are done, we can delete ourselves.
-    delete this;
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(AppLauncher);
-};
-
 }  // namespace
 
 const char kPlayStoreAppId[] = "cnbgggchhmkkdmeppjobngjoejnihlei";
+const char kPlayBooksAppId[] = "cafegjnmmjpfibnlddppihpnkbkgicbg";
+const char kPlayGamesAppId[] = "nplnnjkbeijcggmpdcecpabgbjgeiedc";
+const char kPlayMoviesAppId[] = "dbbihmicnlldbflflckpafphlekmjfnm";
+const char kPlayMusicAppId[] = "ophbaopahelaolbjliokocojjbgfadfn";
 const char kLegacyPlayStoreAppId[] = "gpkmicpkkebkmabiaedjognfppcchdfa";
 const char kPlayStorePackage[] = "com.android.vending";
 const char kPlayStoreActivity[] = "com.android.vending.AssetBrowserActivity";
 const char kSettingsAppId[] = "mconboelelhjpkbdhhiijkgcimoangdj";
 const char kInitialStartParam[] = "S.org.chromium.arc.start_type=initialStart";
+constexpr char kSettingsAppPackage[] = "com.android.settings";
+const char kSettingsAppDomainUrlActivity[] =
+    "com.android.settings.Settings$ManageDomainUrlsActivity";
 
 bool ShouldShowInLauncher(const std::string& app_id) {
   for (auto* const id : kAppIdsHiddenInLauncher) {
@@ -260,10 +174,9 @@ bool ShouldShowInLauncher(const std::string& app_id) {
 }
 
 bool LaunchAndroidSettingsApp(content::BrowserContext* context,
-                              int event_flags) {
-  constexpr bool kUseLandscapeLayout = true;
-  return arc::LaunchApp(context, kSettingsAppId, kUseLandscapeLayout,
-                        event_flags);
+                              int event_flags,
+                              int64_t display_id) {
+  return LaunchApp(context, kSettingsAppId, event_flags, display_id);
 }
 
 bool LaunchPlayStoreWithUrl(const std::string& url) {
@@ -280,25 +193,28 @@ bool LaunchPlayStoreWithUrl(const std::string& url) {
 bool LaunchApp(content::BrowserContext* context,
                const std::string& app_id,
                int event_flags) {
-  constexpr bool kUseLandscapeLayout = true;
-  return LaunchApp(context, app_id, kUseLandscapeLayout, event_flags);
+  return LaunchApp(context, app_id, event_flags, display::kInvalidDisplayId);
 }
 
 bool LaunchApp(content::BrowserContext* context,
                const std::string& app_id,
-               bool landscape_layout,
-               int event_flags) {
-  return LaunchAppWithIntent(context, app_id,
-                             base::Optional<std::string>() /* launch_intent */,
-                             landscape_layout, event_flags);
+               int event_flags,
+               int64_t display_id) {
+  return LaunchAppWithIntent(context, app_id, base::nullopt /* launch_intent */,
+                             event_flags, display_id);
 }
 
 bool LaunchAppWithIntent(content::BrowserContext* context,
                          const std::string& app_id,
                          const base::Optional<std::string>& launch_intent,
-                         bool landscape_layout,
-                         int event_flags) {
+                         int event_flags,
+                         int64_t display_id) {
   DCHECK(!launch_intent.has_value() || !launch_intent->empty());
+
+  if (display_id == display::kInvalidDisplayId) {
+    if (auto* screen = display::Screen::GetScreen())
+      display_id = screen->GetPrimaryDisplay().id();
+  }
 
   Profile* const profile = Profile::FromBrowserContext(context);
 
@@ -350,12 +266,13 @@ bool LaunchAppWithIntent(content::BrowserContext* context,
       }
     }
 
+    arc::ArcBootPhaseMonitorBridge::RecordFirstAppLaunchDelayUMA(context);
     ChromeLauncherController* chrome_controller =
         ChromeLauncherController::instance();
     DCHECK(chrome_controller || !ash::Shell::HasInstance());
     if (chrome_controller) {
       chrome_controller->GetArcDeferredLauncher()->RegisterDeferredLaunch(
-          app_id, event_flags);
+          app_id, event_flags, display_id);
 
       // On some boards, ARC is booted with a restricted set of resources by
       // default to avoid slowing down Chrome's user session restoration.
@@ -366,9 +283,19 @@ bool LaunchAppWithIntent(content::BrowserContext* context,
     prefs->SetLastLaunchTime(app_id);
     return true;
   }
-  return (new AppLauncher(context, app_id, launch_intent, landscape_layout,
-                          event_flags))
-      ->LaunchAndRelease();
+  arc::ArcBootPhaseMonitorBridge::RecordFirstAppLaunchDelayUMA(context);
+
+  return Launch(context, app_id, launch_intent, event_flags, display_id);
+}
+
+bool LaunchSettingsAppActivity(content::BrowserContext* context,
+                               const std::string& activity,
+                               int event_flags,
+                               int64_t display_id) {
+  const std::string launch_intent = GetLaunchIntent(
+      kSettingsAppPackage, activity, std::vector<std::string>());
+  return LaunchAppWithIntent(context, kSettingsAppId, launch_intent,
+                             event_flags, display_id);
 }
 
 void SetTaskActive(int task_id) {
@@ -391,9 +318,10 @@ void ShowTalkBackSettings() {
   if (!intent_helper_instance)
     return;
 
-  intent_helper_instance->SendBroadcast(kShowTalkbackSettingsIntent,
-                                        kIntentHelperPackageName,
-                                        kIntentHelperClassName, "{}");
+  intent_helper_instance->SendBroadcast(
+      kShowTalkbackSettingsIntent,
+      ArcIntentHelperBridge::kArcIntentHelperPackageName,
+      kIntentHelperClassName, "{}");
 }
 
 void StartPaiFlow() {
@@ -401,28 +329,6 @@ void StartPaiFlow() {
   if (!app_instance)
     return;
   app_instance->StartPaiFlow();
-}
-
-bool CanHandleResolution(content::BrowserContext* context,
-                         const std::string& app_id,
-                         const gfx::Rect& rect,
-                         const CanHandleResolutionCallback& callback) {
-  const ArcAppListPrefs* prefs = ArcAppListPrefs::Get(context);
-  DCHECK(prefs);
-  std::unique_ptr<ArcAppListPrefs::AppInfo> app_info = prefs->GetApp(app_id);
-  if (!app_info) {
-    VLOG(2) << "Cannot test resolution capability of unavailable app:" << app_id
-            << ".";
-    return false;
-  }
-
-  arc::mojom::AppInstance* app_instance = GET_APP_INSTANCE(CanHandleResolution);
-  if (!app_instance)
-    return false;
-
-  app_instance->CanHandleResolution(app_info->package_name, app_info->activity,
-                                    rect, callback);
-  return true;
 }
 
 void UninstallPackage(const std::string& package_name) {
@@ -461,33 +367,28 @@ void RemoveCachedIcon(const std::string& icon_resource_id) {
   app_instance->RemoveCachedIcon(icon_resource_id);
 }
 
-// Deprecated.
-bool ShowPackageInfo(const std::string& package_name) {
+bool ShowPackageInfo(const std::string& package_name,
+                     mojom::ShowPackageInfoPage page,
+                     int64_t display_id) {
   VLOG(2) << "Showing package info for " << package_name;
 
-  arc::mojom::AppInstance* app_instance =
-      GET_APP_INSTANCE(ShowPackageInfoDeprecated);
-  if (!app_instance)
-    return false;
+  if (auto* app_instance = GET_APP_INSTANCE(ShowPackageInfoOnPage)) {
+    app_instance->ShowPackageInfoOnPage(package_name, page, display_id);
+    return true;
+  }
 
-  app_instance->ShowPackageInfoDeprecated(
-      package_name, GetTargetRect(gfx::Size(kNexus7Width, kNexus7Height)));
-  return true;
-}
+  if (auto* app_instance = GET_APP_INSTANCE(ShowPackageInfoOnPageDeprecated)) {
+    app_instance->ShowPackageInfoOnPageDeprecated(package_name, page,
+                                                  gfx::Rect());
+    return true;
+  }
 
-bool ShowPackageInfoOnPage(const std::string& package_name,
-                           mojom::ShowPackageInfoPage page) {
-  VLOG(2) << "Showing package info for " << package_name;
+  if (auto* app_instance = GET_APP_INSTANCE(ShowPackageInfoDeprecated)) {
+    app_instance->ShowPackageInfoDeprecated(package_name, gfx::Rect());
+    return true;
+  }
 
-  arc::mojom::AppInstance* app_instance =
-      GET_APP_INSTANCE(ShowPackageInfoOnPage);
-  if (!app_instance)
-    return false;
-
-  app_instance->ShowPackageInfoOnPage(
-      package_name, page,
-      GetTargetRect(gfx::Size(kNexus7Width, kNexus7Height)));
-  return true;
+  return false;
 }
 
 bool IsArcItem(content::BrowserContext* context, const std::string& id) {

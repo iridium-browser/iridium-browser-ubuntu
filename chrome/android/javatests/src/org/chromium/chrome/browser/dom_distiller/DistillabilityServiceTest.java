@@ -26,10 +26,10 @@ import org.chromium.chrome.browser.infobar.ReaderModeInfoBar;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageFinishedHelper;
 import org.chromium.content.browser.test.util.TestWebContentsObserver;
 import org.chromium.net.test.EmbeddedTestServer;
+import org.chromium.ui.test.util.UiRestriction;
 
 import java.util.concurrent.TimeoutException;
 
@@ -37,9 +37,10 @@ import java.util.concurrent.TimeoutException;
  * Tests for making sure the distillability service is communicating correctly.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({"enable-dom-distiller", "reader-mode-heuristics=alwaystrue",
+@CommandLineFlags.Add({
+        "enable-dom-distiller", "reader-mode-heuristics=alwaystrue",
         ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+})
 public class DistillabilityServiceTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -58,10 +59,10 @@ public class DistillabilityServiceTest {
     @Test
     @Feature({"Distillability-Service"})
     @MediumTest
-    @Restriction(ChromeRestriction.RESTRICTION_TYPE_PHONE)
+    @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
     public void testServiceAliveAfterNativePage() throws InterruptedException, TimeoutException {
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
 
         final CallbackHelper readerShownCallbackHelper = new CallbackHelper();
 
@@ -78,6 +79,10 @@ public class DistillabilityServiceTest {
 
             @Override
             public void onInfoBarContainerAttachedToWindow(boolean hasInfobars) {}
+
+            @Override
+            public void onInfoBarContainerShownRatioChanged(
+                    InfoBarContainer container, float shownRatio) {}
         });
 
         TestWebContentsObserver observer = new TestWebContentsObserver(

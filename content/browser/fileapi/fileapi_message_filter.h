@@ -25,7 +25,6 @@
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_operation_runner.h"
 #include "storage/common/fileapi/file_system_types.h"
-#include "storage/common/quota/quota_types.h"
 
 class GURL;
 
@@ -128,7 +127,7 @@ class CONTENT_EXPORT FileAPIMessageFilter : public BrowserMessageFilter {
                                   const base::File::Info& info);
   void DidReadDirectory(int request_id,
                         base::File::Error result,
-                        const std::vector<storage::DirectoryEntry>& entries,
+                        std::vector<storage::DirectoryEntry> entries,
                         bool has_more);
   void DidWrite(int request_id,
                 base::File::Error result,
@@ -149,7 +148,7 @@ class CONTENT_EXPORT FileAPIMessageFilter : public BrowserMessageFilter {
       base::File::Error result,
       const base::File::Info& info,
       const base::FilePath& platform_path,
-      const scoped_refptr<storage::ShareableFileReference>& file_ref);
+      scoped_refptr<storage::ShareableFileReference> file_ref);
 
   // Sends a FileSystemMsg_DidFail and returns false if |url| is invalid.
   bool ValidateFileSystemURL(int request_id, const storage::FileSystemURL& url);

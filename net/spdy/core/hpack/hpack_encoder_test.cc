@@ -104,7 +104,6 @@ class HpackEncoderPeer {
 
 namespace {
 
-using std::map;
 using testing::ElementsAre;
 using testing::Pair;
 
@@ -219,7 +218,7 @@ TEST_P(HpackEncoderTest, SingleDynamicIndex) {
   ExpectIndex(IndexOf(key_2_));
 
   SpdyHeaderBlock headers;
-  headers[key_2_->name().as_string()] = key_2_->value().as_string();
+  headers[key_2_->name()] = key_2_->value();
   CompareWithExpectedEncoding(headers);
   EXPECT_THAT(headers_observed_,
               ElementsAre(Pair(key_2_->name(), key_2_->value())));
@@ -229,7 +228,7 @@ TEST_P(HpackEncoderTest, SingleStaticIndex) {
   ExpectIndex(IndexOf(static_));
 
   SpdyHeaderBlock headers;
-  headers[static_->name().as_string()] = static_->value().as_string();
+  headers[static_->name()] = static_->value();
   CompareWithExpectedEncoding(headers);
 }
 
@@ -238,7 +237,7 @@ TEST_P(HpackEncoderTest, SingleStaticIndexTooLarge) {
   ExpectIndex(IndexOf(static_));
 
   SpdyHeaderBlock headers;
-  headers[static_->name().as_string()] = static_->value().as_string();
+  headers[static_->name()] = static_->value();
   CompareWithExpectedEncoding(headers);
 
   EXPECT_EQ(0u, peer_.table_peer().dynamic_entries()->size());
@@ -248,7 +247,7 @@ TEST_P(HpackEncoderTest, SingleLiteralWithIndexName) {
   ExpectIndexedLiteral(key_2_, "value3");
 
   SpdyHeaderBlock headers;
-  headers[key_2_->name().as_string()] = "value3";
+  headers[key_2_->name()] = "value3";
   CompareWithExpectedEncoding(headers);
 
   // A new entry was inserted and added to the reference set.
@@ -290,7 +289,7 @@ TEST_P(HpackEncoderTest, EmitThanEvict) {
   ExpectIndexedLiteral("key3", "value3");
 
   SpdyHeaderBlock headers;
-  headers[key_1_->name().as_string()] = key_1_->value().as_string();
+  headers[key_1_->name()] = key_1_->value();
   headers["key3"] = "value3";
   CompareWithExpectedEncoding(headers);
 }
@@ -446,7 +445,7 @@ TEST_P(HpackEncoderTest, PseudoHeadersFirst) {
 }
 
 TEST_P(HpackEncoderTest, CookieToCrumbs) {
-  test::HpackEncoderPeer peer(NULL);
+  test::HpackEncoderPeer peer(nullptr);
   std::vector<SpdyStringPiece> out;
 
   // Leading and trailing whitespace is consumed. A space after ';' is consumed.
@@ -480,7 +479,7 @@ TEST_P(HpackEncoderTest, CookieToCrumbs) {
 }
 
 TEST_P(HpackEncoderTest, DecomposeRepresentation) {
-  test::HpackEncoderPeer peer(NULL);
+  test::HpackEncoderPeer peer(nullptr);
   std::vector<SpdyStringPiece> out;
 
   peer.DecomposeRepresentation("", &out);

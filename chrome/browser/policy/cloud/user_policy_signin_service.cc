@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/profiler/scoped_tracker.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -90,7 +89,7 @@ void UserPolicySigninService::RegisterForPolicyWithLoginToken(
   // request context because the user is not signed in to this profile yet
   // (we are just doing a test registration to see if policy is supported for
   // this user).
-  registration_helper_ = base::MakeUnique<CloudPolicyClientRegistrationHelper>(
+  registration_helper_ = std::make_unique<CloudPolicyClientRegistrationHelper>(
       policy_client.get(),
       enterprise_management::DeviceRegisterRequest::BROWSER);
   registration_helper_->StartRegistrationWithLoginToken(
@@ -120,7 +119,7 @@ void UserPolicySigninService::RegisterForPolicyWithAccountId(
   // request context because the user is not signed in to this profile yet
   // (we are just doing a test registration to see if policy is supported for
   // this user).
-  registration_helper_ = base::MakeUnique<CloudPolicyClientRegistrationHelper>(
+  registration_helper_ = std::make_unique<CloudPolicyClientRegistrationHelper>(
       policy_client.get(),
       enterprise_management::DeviceRegisterRequest::BROWSER);
   registration_helper_->StartRegistration(
@@ -150,12 +149,6 @@ void UserPolicySigninService::GoogleSigninSucceeded(
 
 void UserPolicySigninService::OnRefreshTokenAvailable(
     const std::string& account_id) {
-  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
-  // fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "422460 UserPolicySigninService::OnRefreshTokenAvailable"));
-
   // Ignore OAuth tokens for any account but the primary one.
   if (account_id != signin_manager()->GetAuthenticatedAccountId())
     return;

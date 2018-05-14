@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <set>
 #include <string>
 
 #include "base/compiler_specific.h"
@@ -16,6 +17,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/net/reporting_permissions_checker.h"
 #include "chrome/browser/net/safe_search_util.h"
 #include "components/domain_reliability/monitor.h"
 #include "components/prefs/pref_member.h"
@@ -49,10 +51,6 @@ namespace net {
 class URLRequest;
 }
 
-namespace policy {
-class URLBlacklistManager;
-}
-
 // ChromeNetworkDelegate is the central point from within the chrome code to
 // add hooks into the network stack.
 class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
@@ -66,11 +64,6 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
 
   // Pass through to ChromeExtensionsNetworkDelegate::set_extension_info_map().
   void set_extension_info_map(extensions::InfoMap* extension_info_map);
-
-  void set_url_blacklist_manager(
-      const policy::URLBlacklistManager* url_blacklist_manager) {
-    url_blacklist_manager_ = url_blacklist_manager;
-  }
 
   // If |profile| is nullptr or not set, events will be broadcast to all
   // profiles, otherwise they will only be sent to the specified profile.
@@ -114,6 +107,20 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
     domain_reliability_monitor_ = std::move(monitor);
   }
 
+  domain_reliability::DomainReliabilityMonitor* domain_reliability_monitor() {
+    return domain_reliability_monitor_.get();
+  }
+
+  void set_reporting_permissions_checker(
+      std::unique_ptr<ReportingPermissionsChecker>
+          reporting_permissions_checker) {
+    reporting_permissions_checker_ = std::move(reporting_permissions_checker);
+  }
+
+  ReportingPermissionsChecker* reporting_permissions_checker() {
+    return reporting_permissions_checker_.get();
+  }
+
   void set_data_use_aggregator(
       data_usage::DataUseAggregator* data_use_aggregator,
       bool is_data_usage_off_the_record);
@@ -132,6 +139,12 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   // Returns true if access to |path| is allowed. |profile_path| is used to
   // locate certain paths on Chrome OS. See set_profile_path() for details.
   static bool IsAccessAllowed(const base::FilePath& path,
+                              const base::FilePath& profile_path);
+
+  // Like above, but also takes |path|'s absolute path in |absolute_path| to
+  // further validate access.
+  static bool IsAccessAllowed(const base::FilePath& path,
+                              const base::FilePath& absolute_path,
                               const base::FilePath& profile_path);
 
   // Enables access to all files for testing purposes. This function is used
@@ -175,21 +188,22 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   bool OnCanGetCookies(const net::URLRequest& request,
                        const net::CookieList& cookie_list) override;
   bool OnCanSetCookie(const net::URLRequest& request,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       net::CookieOptions* options) override;
   bool OnCanAccessFile(const net::URLRequest& request,
                        const base::FilePath& original_path,
                        const base::FilePath& absolute_path) const override;
-  bool OnCanEnablePrivacyMode(
-      const GURL& url,
-      const GURL& first_party_for_cookies) const override;
+  bool OnCanEnablePrivacyMode(const GURL& url,
+                              const GURL& site_for_cookies) const override;
   bool OnAreExperimentalCookieFeaturesEnabled() const override;
   bool OnCancelURLRequestWithPolicyViolatingReferrerHeader(
       const net::URLRequest& request,
       const GURL& target_url,
       const GURL& referrer_url) const override;
   bool OnCanQueueReportingReport(const url::Origin& origin) const override;
-  bool OnCanSendReportingReport(const url::Origin& origin) const override;
+  void OnCanSendReportingReports(std::set<url::Origin> origins,
+                                 base::OnceCallback<void(std::set<url::Origin>)>
+                                     result_callback) const override;
   bool OnCanSetReportingClient(const url::Origin& origin,
                                const GURL& endpoint) const override;
   bool OnCanUseReportingClient(const url::Origin& origin,
@@ -215,9 +229,9 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   StringPrefMember* allowed_domains_for_apps_;
 
   // Weak, owned by our owner.
-  const policy::URLBlacklistManager* url_blacklist_manager_;
   std::unique_ptr<domain_reliability::DomainReliabilityMonitor>
       domain_reliability_monitor_;
+  std::unique_ptr<ReportingPermissionsChecker> reporting_permissions_checker_;
 
   bool experimental_web_platform_features_enabled_;
 

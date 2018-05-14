@@ -44,7 +44,6 @@ public class ImeUtils {
             outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         }
 
-        int imeAction = 0;
         if (inputMode == WebTextInputMode.DEFAULT) {
             if (inputType == TextInputType.TEXT) {
                 // Normal text field
@@ -81,52 +80,37 @@ public class ImeUtils {
             switch (inputMode) {
                 default:
                 case WebTextInputMode.DEFAULT:
-                case WebTextInputMode.VERBATIM:
-                case WebTextInputMode.LATIN:
-                case WebTextInputMode.LATIN_NAME:
-                case WebTextInputMode.LATIN_PROSE:
-                case WebTextInputMode.FULL_WIDTH_LATIN:
-                case WebTextInputMode.KANA:
-                case WebTextInputMode.KANA_NAME:
-                case WebTextInputMode.KATA_KANA:
+                case WebTextInputMode.TEXT:
+                case WebTextInputMode.SEARCH:
                     outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE;
                     if ((inputFlags & WebTextInputFlags.AUTOCORRECT_OFF) == 0) {
                         outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT;
                     }
                     break;
-                case WebTextInputMode.NUMERIC:
-                    outAttrs.inputType =
-                            InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_NORMAL;
-                    break;
                 case WebTextInputMode.TEL:
                     outAttrs.inputType = InputType.TYPE_CLASS_PHONE;
-                    break;
-                case WebTextInputMode.EMAIL:
-                    outAttrs.inputType = InputType.TYPE_CLASS_TEXT
-                            | InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS;
                     break;
                 case WebTextInputMode.URL:
                     outAttrs.inputType =
                             InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI;
                     break;
+                case WebTextInputMode.EMAIL:
+                    outAttrs.inputType = InputType.TYPE_CLASS_TEXT
+                            | InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS;
+                    break;
+                case WebTextInputMode.NUMERIC:
+                    outAttrs.inputType =
+                            InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_NORMAL;
+                    break;
+                case WebTextInputMode.DECIMAL:
+                    outAttrs.inputType =
+                            InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL;
+                    break;
             }
         }
 
-        if (inputMode == WebTextInputMode.DEFAULT && inputType == TextInputType.SEARCH) {
-            imeAction |= EditorInfo.IME_ACTION_SEARCH;
-        } else if ((outAttrs.inputType & EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE) != 0) {
-            // For textarea that sends you to another webpage on enter key press using
-            // JavaScript, we will only show ENTER.
-            imeAction |= EditorInfo.IME_ACTION_NONE;
-        } else if ((inputFlags & WebTextInputFlags.HAVE_NEXT_FOCUSABLE_ELEMENT) != 0) {
-            imeAction |= EditorInfo.IME_ACTION_NEXT;
-        } else {
-            // For last element inside form, we should give preference to GO key as PREVIOUS
-            // has less importance in those cases.
-            imeAction |= EditorInfo.IME_ACTION_GO;
-        }
-
-        outAttrs.imeOptions |= imeAction;
+        outAttrs.imeOptions |= getImeAction(inputType, inputFlags, inputMode,
+                (outAttrs.inputType & EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE) != 0);
 
         // Handling of autocapitalize. Blink will send the flag taking into account the element's
         // type. This is not using AutocapitalizeNone because Android does not autocapitalize by
@@ -139,13 +123,33 @@ public class ImeUtils {
         } else if ((inputFlags & WebTextInputFlags.AUTOCAPITALIZE_SENTENCES) != 0) {
             outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
         }
-        // Content editable doesn't use autocapitalize so we need to set it manually.
-        if (inputType == TextInputType.CONTENT_EDITABLE) {
-            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
+
+        if ((inputFlags & WebTextInputFlags.HAS_BEEN_PASSWORD_FIELD) != 0) {
+            outAttrs.inputType =
+                    InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD;
         }
 
         outAttrs.initialSelStart = initialSelStart;
         outAttrs.initialSelEnd = initialSelEnd;
+    }
+
+    private static int getImeAction(
+            int inputType, int inputFlags, int inputMode, boolean isMultiLineInput) {
+        int imeAction = 0;
+        if (inputMode == WebTextInputMode.DEFAULT && inputType == TextInputType.SEARCH) {
+            imeAction |= EditorInfo.IME_ACTION_SEARCH;
+        } else if (isMultiLineInput) {
+            // For textarea that sends you to another webpage on enter key press using
+            // JavaScript, we will only show ENTER.
+            imeAction |= EditorInfo.IME_ACTION_NONE;
+        } else if ((inputFlags & WebTextInputFlags.HAVE_NEXT_FOCUSABLE_ELEMENT) != 0) {
+            imeAction |= EditorInfo.IME_ACTION_NEXT;
+        } else {
+            // For last element inside form, we should give preference to GO key as PREVIOUS
+            // has less importance in those cases.
+            imeAction |= EditorInfo.IME_ACTION_GO;
+        }
+        return imeAction;
     }
 
     /**

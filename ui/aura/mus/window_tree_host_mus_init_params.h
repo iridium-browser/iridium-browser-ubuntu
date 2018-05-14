@@ -39,6 +39,11 @@ struct AURA_EXPORT DisplayInitParams {
   ui::mojom::WmViewportMetrics viewport_metrics;
 
   bool is_primary_display = false;
+
+  // |mirrors| contains a list of physical displays presenting contents mirrored
+  // from another physical display, or from part of a virtual unified display.
+  // See |display::DisplayManager::software_mirroring_display_list_| for info.
+  std::vector<display::Display> mirrors;
 };
 
 // Used to create a WindowTreeHostMus. The typical case is to use
@@ -69,6 +74,12 @@ struct AURA_EXPORT WindowTreeHostMusInitParams {
   // Use classic IME (i.e. InputMethodChromeOS) instead of servicified IME
   // (i.e. InputMethodMus).
   bool use_classic_ime = false;
+
+  // Whether this client hosts a real gfx::AcceleratedWidget or not. This is set
+  // to true only when mus is not hosting viz, and instead expects the client
+  // to host viz (which is why the client would get the real
+  // gfx::AcceleratedWidget).
+  bool uses_real_accelerated_widget = false;
 };
 
 // Creates a WindowTreeHostMusInitParams that is used when creating a top-level

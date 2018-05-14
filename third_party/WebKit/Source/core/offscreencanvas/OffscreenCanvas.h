@@ -8,10 +8,10 @@
 #include <memory>
 #include "bindings/core/v8/ScriptPromise.h"
 #include "core/dom/DOMNodeIds.h"
-#include "core/events/EventTarget.h"
-#include "core/html/HTMLCanvasElement.h"
+#include "core/dom/events/EventTarget.h"
 #include "core/html/canvas/CanvasImageSource.h"
 #include "core/html/canvas/CanvasRenderingContextHost.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
 #include "core/imagebitmap/ImageBitmapSource.h"
 #include "core/offscreencanvas/ImageEncodeOptions.h"
 #include "platform/bindings/ScriptState.h"
@@ -22,7 +22,8 @@
 
 namespace blink {
 
-class CanvasContextCreationAttributes;
+class CanvasContextCreationAttributesCore;
+class CanvasResourceProvider;
 class ImageBitmap;
 class
     OffscreenCanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContext;
@@ -72,8 +73,7 @@ class CORE_EXPORT OffscreenCanvas final
   CanvasRenderingContext* GetCanvasRenderingContext(
       ExecutionContext*,
       const String&,
-      const CanvasContextCreationAttributes&);
-  CanvasRenderingContext* RenderingContext() { return context_; }
+      const CanvasContextCreationAttributesCore&);
 
   static void RegisterRenderingContextFactory(
       std::unique_ptr<CanvasRenderingContextFactory>);
@@ -86,8 +86,10 @@ class CORE_EXPORT OffscreenCanvas final
   }
 
   void DiscardImageBuffer() override;
-  ImageBuffer* GetImageBuffer() const { return image_buffer_.get(); }
-  ImageBuffer* GetOrCreateImageBuffer() override;
+  CanvasResourceProvider* GetResourceProvider() const {
+    return resource_provider_.get();
+  }
+  CanvasResourceProvider* GetOrCreateResourceProvider();
 
   void SetFrameSinkId(uint32_t client_id, uint32_t sink_id) {
     client_id_ = client_id;
@@ -96,14 +98,14 @@ class CORE_EXPORT OffscreenCanvas final
   uint32_t ClientId() const { return client_id_; }
   uint32_t SinkId() const { return sink_id_; }
 
-  ScriptPromise Commit(RefPtr<StaticBitmapImage>,
+  // CanvasRenderingContextHost implementation.
+  ScriptPromise Commit(scoped_refptr<StaticBitmapImage>,
                        const SkIRect& damage_rect,
-                       bool is_web_gl_software_rendering,
                        ScriptState*,
                        ExceptionState&) override;
   void FinalizeFrame() override;
-
   void DetachContext() override { context_ = nullptr; }
+  CanvasRenderingContext* RenderingContext() const override { return context_; }
 
   // OffscreenCanvasFrameDispatcherClient implementation
   void BeginFrame() final;
@@ -129,30 +131,32 @@ class CORE_EXPORT OffscreenCanvas final
   ScriptPromise CreateImageBitmap(ScriptState*,
                                   EventTarget&,
                                   Optional<IntRect>,
-                                  const ImageBitmapOptions&,
-                                  ExceptionState&) final;
+                                  const ImageBitmapOptions&) final;
 
   // CanvasImageSource implementation
-  PassRefPtr<Image> GetSourceImageForCanvas(SourceImageStatus*,
-                                            AccelerationHint,
-                                            SnapshotReason,
-                                            const FloatSize&) final;
-  bool WouldTaintOrigin(SecurityOrigin*) const final { return !origin_clean_; }
+  scoped_refptr<Image> GetSourceImageForCanvas(SourceImageStatus*,
+                                               AccelerationHint,
+                                               const FloatSize&) final;
+  bool WouldTaintOrigin(const SecurityOrigin*) const final {
+    return !origin_clean_;
+  }
   FloatSize ElementSize(const FloatSize& default_object_size) const final {
     return FloatSize(width(), height());
   }
   bool IsOpaque() const final;
   bool IsAccelerated() const final;
-  int SourceWidth() final { return width(); }
-  int SourceHeight() final { return height(); }
 
   DispatchEventResult HostDispatchEvent(Event* event) {
     return DispatchEvent(event);
   }
 
-  bool IsWebGLAllowed() const override { return true; }
+  bool IsWebGL1Enabled() const override { return true; }
+  bool IsWebGL2Enabled() const override { return true; }
+  bool IsWebGLBlocked() const override { return false; }
 
-  DECLARE_VIRTUAL_TRACE();
+  FontSelector* GetFontSelector() override;
+
+  virtual void Trace(blink::Visitor*);
 
  private:
   friend class OffscreenCanvasTest;
@@ -175,16 +179,13 @@ class CORE_EXPORT OffscreenCanvas final
   bool origin_clean_ = true;
   bool disable_reading_from_canvas_ = false;
 
-  bool IsPaintable() const;
-
   std::unique_ptr<OffscreenCanvasFrameDispatcher> frame_dispatcher_;
 
   Member<ScriptPromiseResolver> commit_promise_resolver_;
-  RefPtr<StaticBitmapImage> current_frame_;
-  bool current_frame_is_web_gl_software_rendering_ = false;
+  scoped_refptr<StaticBitmapImage> current_frame_;
   SkIRect current_frame_damage_rect_;
 
-  std::unique_ptr<ImageBuffer> image_buffer_;
+  std::unique_ptr<CanvasResourceProvider> resource_provider_;
   bool needs_matrix_clip_restore_ = false;
 
   // cc::FrameSinkId is broken into two integer components as this can be used

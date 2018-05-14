@@ -75,23 +75,19 @@ class MipmapTest : public BaseMipmapTest
     void setUp2DProgram()
     {
         // Vertex Shader source
-        // clang-format off
-        const std::string vs = SHADER_SOURCE
-        (
-            attribute vec4 position;
+        const std::string vs =
+            R"(attribute vec4 position;
             varying vec2 vTexCoord;
 
             void main()
             {
                 gl_Position = position;
                 vTexCoord   = (position.xy * 0.5) + 0.5;
-            }
-        );
+            })";
 
         // Fragment Shader source
-        const std::string fs = SHADER_SOURCE
-        (
-            precision mediump float;
+        const std::string fs =
+            R"(precision mediump float;
 
             uniform sampler2D uTexture;
             varying vec2 vTexCoord;
@@ -99,9 +95,7 @@ class MipmapTest : public BaseMipmapTest
             void main()
             {
                 gl_FragColor = texture2D(uTexture, vTexCoord);
-            }
-        );
-        // clang-format on
+            })";
 
         m2DProgram = CompileProgram(vs, fs);
         ASSERT_NE(0u, m2DProgram);
@@ -110,31 +104,25 @@ class MipmapTest : public BaseMipmapTest
     void setUpCubeProgram()
     {
         // A simple vertex shader for the texture cube
-        // clang-format off
-        const std::string cubeVS = SHADER_SOURCE
-        (
-            attribute vec4 position;
+        const std::string cubeVS =
+            R"(attribute vec4 position;
             varying vec4 vPosition;
             void main()
             {
                 gl_Position = position;
                 vPosition = position;
-            }
-        );
+            })";
 
         // A very simple fragment shader to sample from the negative-Y face of a texture cube.
-        const std::string cubeFS = SHADER_SOURCE
-        (
-            precision mediump float;
+        const std::string cubeFS =
+            R"(precision mediump float;
             uniform samplerCube uTexture;
             varying vec4 vPosition;
 
             void main()
             {
                 gl_FragColor = textureCube(uTexture, vec3(vPosition.x, -1, vPosition.y));
-            }
-        );
-        // clang-format on
+            })";
 
         mCubeProgram = CompileProgram(cubeVS, cubeFS);
         ASSERT_NE(0u, mCubeProgram);
@@ -264,9 +252,8 @@ class MipmapTestES3 : public BaseMipmapTest
         // Don't put "#version ..." on its own line. See [cpp]p1:
         // "If there are sequences of preprocessing tokens within the list of arguments that
         //  would otherwise act as preprocessing directives, the behavior is undefined"
-        // clang-format off
-        return SHADER_SOURCE
-        (   #version 300 es\n
+        return
+            R"(#version 300 es
             precision highp float;
             in vec4 position;
             out vec2 texcoord;
@@ -275,15 +262,13 @@ class MipmapTestES3 : public BaseMipmapTest
             {
                 gl_Position = vec4(position.xy, 0.0, 1.0);
                 texcoord = (position.xy * 0.5) + 0.5;
-            }
-        );
-        // clang-format on
+            })";
     }
 
     void setUpArrayProgram()
     {
-        const std::string fragmentShaderSourceArray = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string fragmentShaderSourceArray =
+            R"(#version 300 es
             precision highp float;
             uniform highp sampler2DArray tex;
             uniform int slice;
@@ -293,8 +278,7 @@ class MipmapTestES3 : public BaseMipmapTest
             void main()
             {
                 out_FragColor = texture(tex, vec3(texcoord, float(slice)));
-            }
-        );
+            })";
 
         mArrayProgram = CompileProgram(vertexShaderSource(), fragmentShaderSourceArray);
         if (mArrayProgram == 0)
@@ -312,8 +296,8 @@ class MipmapTestES3 : public BaseMipmapTest
 
     void setUp3DProgram()
     {
-        const std::string fragmentShaderSource3D = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string fragmentShaderSource3D =
+            R"(#version 300 es
             precision highp float;
             uniform highp sampler3D tex;
             uniform float slice;
@@ -324,8 +308,7 @@ class MipmapTestES3 : public BaseMipmapTest
             void main()
             {
                 out_FragColor = textureLod(tex, vec3(texcoord, slice), lod);
-            }
-        );
+            })";
 
         m3DProgram = CompileProgram(vertexShaderSource(), fragmentShaderSource3D);
         if (m3DProgram == 0)
@@ -347,9 +330,8 @@ class MipmapTestES3 : public BaseMipmapTest
 
     void setUp2DProgram()
     {
-        // clang-format off
-        const std::string fragmentShaderSource2D = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string fragmentShaderSource2D =
+            R"(#version 300 es
             precision highp float;
             uniform highp sampler2D tex;
             in vec2 texcoord;
@@ -358,9 +340,7 @@ class MipmapTestES3 : public BaseMipmapTest
             void main()
             {
                 out_FragColor = texture(tex, texcoord);
-            }
-        );
-        // clang-format on
+            })";
 
         m2DProgram = CompileProgram(vertexShaderSource(), fragmentShaderSource2D);
         ASSERT_NE(0u, m2DProgram);
@@ -371,9 +351,8 @@ class MipmapTestES3 : public BaseMipmapTest
     void setUpCubeProgram()
     {
         // A very simple fragment shader to sample from the negative-Y face of a texture cube.
-        // clang-format off
-        const std::string cubeFS = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string cubeFS =
+            R"(#version 300 es
             precision mediump float;
             uniform samplerCube uTexture;
             in vec2 texcoord;
@@ -382,9 +361,7 @@ class MipmapTestES3 : public BaseMipmapTest
             void main()
             {
                 out_FragColor = texture(uTexture, vec3(texcoord.x, -1, texcoord.y));
-            }
-        );
-        // clang-format on
+            })";
 
         mCubeProgram = CompileProgram(vertexShaderSource(), cubeFS);
         ASSERT_NE(0u, mCubeProgram);
@@ -626,11 +603,7 @@ TEST_P(MipmapTest, GenerateMipmapFromRenderedImage)
 TEST_P(MipmapTest, RenderOntoLevelZeroAfterGenerateMipmap)
 {
     // TODO(geofflang): Figure out why this is broken on AMD OpenGL
-    if ((IsAMD() || IsIntel()) && getPlatformRenderer() == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
-    {
-        std::cout << "Test skipped on Intel/AMD OpenGL." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL());
 
     glBindTexture(GL_TEXTURE_2D, mTexture2D);
 
@@ -690,12 +663,9 @@ TEST_P(MipmapTest, RenderOntoLevelZeroAfterGenerateMipmap)
 // Regression test for a bug that cause mipmaps to only generate using the top left corner as input.
 TEST_P(MipmapTest, MipMapGenerationD3D9Bug)
 {
-    if (!extensionEnabled("GL_EXT_texture_storage") || !extensionEnabled("GL_OES_rgb8_rgba8") ||
-        !extensionEnabled("GL_ANGLE_texture_usage"))
-    {
-        std::cout << "Test skipped due to missing extensions." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(!extensionEnabled("GL_EXT_texture_storage") ||
+                       !extensionEnabled("GL_OES_rgb8_rgba8") ||
+                       !extensionEnabled("GL_ANGLE_texture_usage"));
 
     const GLColor mip0Color[4] = {
         GLColor::red, GLColor::green, GLColor::red, GLColor::green,
@@ -942,12 +912,8 @@ TEST_P(MipmapTestES3, MipmapsForTexture3D)
 // the levelbase array, are left unchanged by this computation."
 TEST_P(MipmapTestES3, GenerateMipmapBaseLevel)
 {
-    if (IsAMD() && IsDesktopOpenGL())
-    {
-        // Observed incorrect rendering on AMD, sampling level 2 returns black.
-        std::cout << "Test skipped on AMD OpenGL." << std::endl;
-        return;
-    }
+    // Observed incorrect rendering on AMD, sampling level 2 returns black.
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsDesktopOpenGL());
 
     glBindTexture(GL_TEXTURE_2D, mTexture);
 
@@ -997,12 +963,8 @@ TEST_P(MipmapTestES3, GenerateMipmapBaseLevel)
 // the levelbase array, are left unchanged by this computation."
 TEST_P(MipmapTestES3, GenerateMipmapCubeBaseLevel)
 {
-    if (IsAMD() && IsDesktopOpenGL())
-    {
-        // Observed incorrect rendering on AMD, sampling level 2 returns black.
-        std::cout << "Test skipped on AMD OpenGL." << std::endl;
-        return;
-    }
+    // Observed incorrect rendering on AMD, sampling level 2 returns black.
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsDesktopOpenGL());
 
     ASSERT_EQ(getWindowWidth(), getWindowHeight());
 
@@ -1036,13 +998,9 @@ TEST_P(MipmapTestES3, GenerateMipmapCubeBaseLevel)
     clearAndDrawQuad(mCubeProgram, getWindowWidth() / 4, getWindowHeight() / 4);
     EXPECT_PIXEL_COLOR_EQ(getWindowWidth() / 8, getWindowHeight() / 8, GLColor::red);
 
-    if (IsNVIDIA() && IsOpenGL())
-    {
-        // Observed incorrect rendering on NVIDIA, level zero seems to be incorrectly affected by
-        // GenerateMipmap.
-        std::cout << "Test partially skipped on NVIDIA OpenGL." << std::endl;
-        return;
-    }
+    // Observed incorrect rendering on NVIDIA, level zero seems to be incorrectly affected by
+    // GenerateMipmap.
+    ANGLE_SKIP_TEST_IF(IsNVIDIA() && IsOpenGL());
 
     // Draw using level 0. It should still be blue.
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, 0);
@@ -1156,22 +1114,12 @@ TEST_P(MipmapTestES3, GenerateMipmapBaseLevelOutOfRangeImmutableTexture)
 // A native version of the WebGL2 test tex-base-level-bug.html
 TEST_P(MipmapTestES3, BaseLevelTextureBug)
 {
-    if (IsOpenGL() && IsAMD())
-    {
-        std::cout << "Test skipped on Windows AMD OpenGL." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsAMD());
 
-#if defined(ANGLE_PLATFORM_APPLE)
     // Regression in 10.12.4 needing workaround -- crbug.com/705865.
     // Seems to be passing on AMD GPUs. Definitely not NVIDIA.
     // Probably not Intel.
-    if (IsNVIDIA() || IsIntel())
-    {
-        std::cout << "Test skipped on macOS with NVIDIA and Intel GPUs." << std::endl;
-        return;
-    }
-#endif
+    ANGLE_SKIP_TEST_IF(IsOSX() && (IsNVIDIA() || IsIntel()));
 
     glBindTexture(GL_TEXTURE_2D, mTexture);
     glTexImage2D(GL_TEXTURE_2D, 2, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, &GLColor::red);

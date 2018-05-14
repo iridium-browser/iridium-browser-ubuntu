@@ -37,13 +37,16 @@ class ContentSettingsCollectionViewControllerTest
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
 };
 
-TEST_F(ContentSettingsCollectionViewControllerTest, TestModel) {
+// Tests that there are 3 sections in Content Settings if mailto: URL
+// rewriting feature is enabled.
+TEST_F(ContentSettingsCollectionViewControllerTest,
+       TestModelWithMailToUrlRewriting) {
   CreateController();
   CheckController();
   CheckTitleWithId(IDS_IOS_CONTENT_SETTINGS_TITLE);
 
   ASSERT_EQ(1, NumberOfSections());
-  EXPECT_EQ(3, NumberOfItemsInSection(0));
+  ASSERT_EQ(3, NumberOfItemsInSection(0));
   CheckDetailItemTextWithIds(IDS_IOS_BLOCK_POPUPS, IDS_IOS_SETTING_ON, 0, 0);
   CheckDetailItemTextWithIds(IDS_IOS_TRANSLATE_SETTING, IDS_IOS_SETTING_ON, 0,
                              1);

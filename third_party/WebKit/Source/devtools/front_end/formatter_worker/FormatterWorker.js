@@ -32,17 +32,17 @@
  * @return {function(string, function(string, ?string, number, number):(!Object|undefined))}
  */
 FormatterWorker.createTokenizer = function(mimeType) {
-  var mode = CodeMirror.getMode({indentUnit: 2}, mimeType);
-  var state = CodeMirror.startState(mode);
+  const mode = CodeMirror.getMode({indentUnit: 2}, mimeType);
+  const state = CodeMirror.startState(mode);
   /**
    * @param {string} line
    * @param {function(string, ?string, number, number):?} callback
    */
   function tokenize(line, callback) {
-    var stream = new CodeMirror.StringStream(line);
+    const stream = new CodeMirror.StringStream(line);
     while (!stream.eol()) {
-      var style = mode.token(stream, state);
-      var value = stream.current();
+      const style = mode.token(stream, state);
+      const value = stream.current();
       if (callback(value, style, stream.start, stream.start + value.length) === FormatterWorker.AbortTokenization)
         return;
       stream.start = stream.pos;
@@ -54,8 +54,8 @@ FormatterWorker.createTokenizer = function(mimeType) {
 FormatterWorker.AbortTokenization = {};
 
 self.onmessage = function(event) {
-  var method = /** @type {string} */ (event.data.method);
-  var params = /** @type !{indentString: string, content: string, mimeType: string} */ (event.data.params);
+  const method = /** @type {string} */ (event.data.method);
+  const params = /** @type !{indentString: string, content: string, mimeType: string} */ (event.data.params);
   if (!method)
     return;
 
@@ -81,6 +81,9 @@ self.onmessage = function(event) {
     case 'parseJSONRelaxed':
       FormatterWorker.parseJSONRelaxed(params.content);
       break;
+    case 'preprocessTopLevelAwaitExpressions':
+      FormatterWorker.preprocessTopLevelAwaitExpressions(params.content);
+      break;
     default:
       console.error('Unsupport method name: ' + method);
   }
@@ -97,20 +100,20 @@ FormatterWorker.parseJSONRelaxed = function(content) {
  * @param {string} content
  */
 FormatterWorker.evaluatableJavaScriptSubstring = function(content) {
-  var tokenizer = acorn.tokenizer(content, {ecmaVersion: 8});
-  var result = '';
+  const tokenizer = acorn.tokenizer(content, {ecmaVersion: 8});
+  let result = '';
   try {
-    var token = tokenizer.getToken();
+    let token = tokenizer.getToken();
     while (token.type !== acorn.tokTypes.eof && FormatterWorker.AcornTokenizer.punctuator(token))
       token = tokenizer.getToken();
 
-    var startIndex = token.start;
-    var endIndex = token.end;
-    var openBracketsCounter = 0;
+    const startIndex = token.start;
+    let endIndex = token.end;
+    let openBracketsCounter = 0;
     while (token.type !== acorn.tokTypes.eof) {
-      var isIdentifier = FormatterWorker.AcornTokenizer.identifier(token);
-      var isThis = FormatterWorker.AcornTokenizer.keyword(token, 'this');
-      var isString = token.type === acorn.tokTypes.string;
+      const isIdentifier = FormatterWorker.AcornTokenizer.identifier(token);
+      const isThis = FormatterWorker.AcornTokenizer.keyword(token, 'this');
+      const isString = token.type === acorn.tokTypes.string;
       if (!isThis && !isIdentifier && !isString)
         break;
 
@@ -138,12 +141,97 @@ FormatterWorker.evaluatableJavaScriptSubstring = function(content) {
 /**
  * @param {string} content
  */
+FormatterWorker.preprocessTopLevelAwaitExpressions = function(content) {
+  let wrapped = '(async () => {' + content + '})()';
+  const root = acorn.parse(wrapped, {ecmaVersion: 8});
+  const body = root.body[0].expression.callee.body;
+  const changes = [];
+  let containsAwait = false;
+  let containsReturn = false;
+  class Visitor {
+    ClassDeclaration(node) {
+      if (node.parent === body)
+        changes.push({text: node.id.name + '=', start: node.start, end: node.start});
+    }
+    FunctionDeclaration(node) {
+      changes.push({text: node.id.name + '=', start: node.start, end: node.start});
+      return FormatterWorker.ESTreeWalker.SkipSubtree;
+    }
+    FunctionExpression(node) {
+      return FormatterWorker.ESTreeWalker.SkipSubtree;
+    }
+    ArrowFunctionExpression(node) {
+      return FormatterWorker.ESTreeWalker.SkipSubtree;
+    }
+    MethodDefinition(node) {
+      return FormatterWorker.ESTreeWalker.SkipSubtree;
+    }
+    AwaitExpression(node) {
+      containsAwait = true;
+    }
+    ReturnStatement(node) {
+      containsReturn = true;
+    }
+    VariableDeclaration(node) {
+      if (node.kind !== 'var' && node.parent !== body)
+        return;
+      const onlyOneDeclaration = node.declarations.length === 1;
+      changes.push(
+          {text: onlyOneDeclaration ? 'void' : 'void (', start: node.start, end: node.start + node.kind.length});
+      for (const declaration of node.declarations) {
+        if (!declaration.init) {
+          changes.push({text: '(', start: declaration.start, end: declaration.start});
+          changes.push({text: '=undefined)', start: declaration.end, end: declaration.end});
+          continue;
+        }
+        changes.push({text: '(', start: declaration.start, end: declaration.start});
+        changes.push({text: ')', start: declaration.end, end: declaration.end});
+      }
+      if (!onlyOneDeclaration) {
+        const last = node.declarations.peekLast();
+        changes.push({text: ')', start: last.end, end: last.end});
+      }
+    }
+  }
+  const walker = new FormatterWorker.ESTreeWalker(visit.bind(new Visitor()));
+  walker.walk(body);
+  /**
+   * @param {!ESTree.Node} node
+   * @this {Object}
+   */
+  function visit(node) {
+    if (node.type in this)
+      return this[node.type](node);
+  }
+  // Top-level return is not allowed.
+  if (!containsAwait || containsReturn) {
+    postMessage('');
+    return;
+  }
+  const last = body.body[body.body.length - 1];
+  if (last.type === 'ExpressionStatement') {
+    changes.push({text: 'return (', start: last.start, end: last.start});
+    if (wrapped[last.end - 1] !== ';')
+      changes.push({text: ')', start: last.end, end: last.end});
+    else
+      changes.push({text: ')', start: last.end - 1, end: last.end - 1});
+  }
+  while (changes.length) {
+    const change = changes.pop();
+    wrapped = wrapped.substr(0, change.start) + change.text + wrapped.substr(change.end);
+  }
+  postMessage(wrapped);
+};
+
+/**
+ * @param {string} content
+ */
 FormatterWorker.javaScriptIdentifiers = function(content) {
-  var root = acorn.parse(content, {ranges: false, ecmaVersion: 8});
+  const root = acorn.parse(content, {ranges: false, ecmaVersion: 8});
 
   /** @type {!Array<!ESTree.Node>} */
-  var identifiers = [];
-  var walker = new FormatterWorker.ESTreeWalker(beforeVisit);
+  const identifiers = [];
+  const walker = new FormatterWorker.ESTreeWalker(beforeVisit);
 
   /**
    * @param {!ESTree.Node} node
@@ -178,11 +266,11 @@ FormatterWorker.javaScriptIdentifiers = function(content) {
     return;
   }
 
-  var functionNode = root.body[0];
-  for (var param of functionNode.params)
+  const functionNode = root.body[0];
+  for (const param of functionNode.params)
     walker.walk(param);
   walker.walk(functionNode.body);
-  var reduced = identifiers.map(id => ({name: id.name, offset: id.start}));
+  const reduced = identifiers.map(id => ({name: id.name, offset: id.start}));
   postMessage(reduced);
 };
 
@@ -194,26 +282,30 @@ FormatterWorker.javaScriptIdentifiers = function(content) {
 FormatterWorker.format = function(mimeType, text, indentString) {
   // Default to a 4-space indent.
   indentString = indentString || '    ';
-  var result = {};
-  var builder = new FormatterWorker.FormattedContentBuilder(indentString);
-  var lineEndings = text.computeLineEndings();
+  const result = {};
+  const builder = new FormatterWorker.FormattedContentBuilder(indentString);
+  const lineEndings = text.computeLineEndings();
   try {
     switch (mimeType) {
-      case 'text/html':
-        var formatter = new FormatterWorker.HTMLFormatter(builder);
+      case 'text/html': {
+        const formatter = new FormatterWorker.HTMLFormatter(builder);
         formatter.format(text, lineEndings);
         break;
-      case 'text/css':
-        var formatter = new FormatterWorker.CSSFormatter(builder);
+      }
+      case 'text/css': {
+        const formatter = new FormatterWorker.CSSFormatter(builder);
         formatter.format(text, lineEndings, 0, text.length);
         break;
-      case 'text/javascript':
-        var formatter = new FormatterWorker.JavaScriptFormatter(builder);
+      }
+      case 'text/javascript': {
+        const formatter = new FormatterWorker.JavaScriptFormatter(builder);
         formatter.format(text, lineEndings, 0, text.length);
         break;
-      default:
-        var formatter = new FormatterWorker.IdentityFormatter(builder);
+      }
+      default: {
+        const formatter = new FormatterWorker.IdentityFormatter(builder);
         formatter.format(text, lineEndings, 0, text.length);
+      }
     }
     result.mapping = builder.mapping();
     result.content = builder.content();
@@ -243,7 +335,7 @@ FormatterWorker.FormatterWorkerContentParser.prototype = {
  * @param {string} mimeType
  */
 FormatterWorker.FormatterWorkerContentParser.parse = function(content, mimeType) {
-  var extension = self.runtime.extensions(FormatterWorker.FormatterWorkerContentParser).find(findExtension);
+  const extension = self.runtime.extensions(FormatterWorker.FormatterWorkerContentParser).find(findExtension);
   console.assert(extension);
   extension.instance().then(instance => instance.parse(content)).catchException(null).then(postMessage);
 
@@ -255,3 +347,8 @@ FormatterWorker.FormatterWorkerContentParser.parse = function(content, mimeType)
     return extension.descriptor()['mimeType'] === mimeType;
   }
 };
+
+(function disableLoggingForTest() {
+  if (Runtime.queryParam('test'))
+    console.error = () => undefined;
+})();

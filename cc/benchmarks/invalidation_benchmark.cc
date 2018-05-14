@@ -29,8 +29,8 @@ const char* kDefaultInvalidationMode = "viewport";
 
 InvalidationBenchmark::InvalidationBenchmark(
     std::unique_ptr<base::Value> value,
-    const MicroBenchmark::DoneCallback& callback)
-    : MicroBenchmark(callback), seed_(0) {
+    MicroBenchmark::DoneCallback callback)
+    : MicroBenchmark(std::move(callback)), seed_(0) {
   base::DictionaryValue* settings = nullptr;
   value->GetAsDictionary(&settings);
   if (!settings)
@@ -61,7 +61,7 @@ InvalidationBenchmark::InvalidationBenchmark(
   }
 }
 
-InvalidationBenchmark::~InvalidationBenchmark() {}
+InvalidationBenchmark::~InvalidationBenchmark() = default;
 
 void InvalidationBenchmark::DidUpdateLayers(LayerTreeHost* layer_tree_host) {
   LayerTreeHostCommon::CallFunctionForEveryLayer(
@@ -124,7 +124,7 @@ bool InvalidationBenchmark::ProcessMessage(std::unique_ptr<base::Value> value) {
   if (message->HasKey("notify_done")) {
     message->GetBoolean("notify_done", &notify_done);
     if (notify_done)
-      NotifyDone(base::MakeUnique<base::Value>());
+      NotifyDone(std::make_unique<base::Value>());
     return true;
   }
   return false;

@@ -6,9 +6,11 @@
 
 #include "xfa/fxfa/parser/cxfa_layoutitem.h"
 
-#include "xfa/fxfa/app/cxfa_ffnotify.h"
+#include "fxjs/xfa/cjx_object.h"
+#include "xfa/fxfa/cxfa_ffnotify.h"
 #include "xfa/fxfa/parser/cxfa_containerlayoutitem.h"
 #include "xfa/fxfa/parser/cxfa_contentlayoutitem.h"
+#include "xfa/fxfa/parser/cxfa_margin.h"
 #include "xfa/fxfa/parser/cxfa_measurement.h"
 #include "xfa/fxfa/parser/cxfa_node.h"
 
@@ -16,7 +18,7 @@ void XFA_ReleaseLayoutItem(CXFA_LayoutItem* pLayoutItem) {
   CXFA_LayoutItem* pNode = pLayoutItem->m_pFirstChild;
   CXFA_FFNotify* pNotify = pLayoutItem->m_pFormNode->GetDocument()->GetNotify();
   CXFA_LayoutProcessor* pDocLayout =
-      pLayoutItem->m_pFormNode->GetDocument()->GetDocLayout();
+      pLayoutItem->m_pFormNode->GetDocument()->GetLayoutProcessor();
   while (pNode) {
     CXFA_LayoutItem* pNext = pNode->m_pNextSibling;
     pNode->m_pParent = nullptr;
@@ -73,23 +75,28 @@ CFX_RectF CXFA_LayoutItem::GetRect(bool bRelative) const {
        pLayoutItem = pLayoutItem->m_pParent) {
     if (CXFA_ContentLayoutItem* pContent = pLayoutItem->AsContentLayoutItem()) {
       sPos += pContent->m_sPos;
-      CXFA_Node* pMarginNode =
-          pLayoutItem->m_pFormNode->GetFirstChildByClass(XFA_Element::Margin);
+      CXFA_Margin* pMarginNode =
+          pLayoutItem->m_pFormNode->GetFirstChildByClass<CXFA_Margin>(
+              XFA_Element::Margin);
       if (pMarginNode) {
-        sPos += CFX_PointF(pMarginNode->GetMeasure(XFA_ATTRIBUTE_LeftInset)
-                               .ToUnit(XFA_UNIT_Pt),
-                           pMarginNode->GetMeasure(XFA_ATTRIBUTE_TopInset)
-                               .ToUnit(XFA_UNIT_Pt));
+        sPos += CFX_PointF(pMarginNode->JSObject()
+                               ->GetMeasure(XFA_Attribute::LeftInset)
+                               .ToUnit(XFA_Unit::Pt),
+                           pMarginNode->JSObject()
+                               ->GetMeasure(XFA_Attribute::TopInset)
+                               .ToUnit(XFA_Unit::Pt));
       }
       continue;
     }
 
     if (pLayoutItem->m_pFormNode->GetElementType() ==
         XFA_Element::ContentArea) {
-      sPos += CFX_PointF(pLayoutItem->m_pFormNode->GetMeasure(XFA_ATTRIBUTE_X)
-                             .ToUnit(XFA_UNIT_Pt),
-                         pLayoutItem->m_pFormNode->GetMeasure(XFA_ATTRIBUTE_Y)
-                             .ToUnit(XFA_UNIT_Pt));
+      sPos += CFX_PointF(pLayoutItem->m_pFormNode->JSObject()
+                             ->GetMeasure(XFA_Attribute::X)
+                             .ToUnit(XFA_Unit::Pt),
+                         pLayoutItem->m_pFormNode->JSObject()
+                             ->GetMeasure(XFA_Attribute::Y)
+                             .ToUnit(XFA_Unit::Pt));
       break;
     }
     if (pLayoutItem->m_pFormNode->GetElementType() == XFA_Element::PageArea)

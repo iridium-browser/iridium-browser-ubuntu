@@ -8,12 +8,14 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "gpu/config/gpu_info.h"
 #include "third_party/re2/src/re2/re2.h"
 
@@ -35,7 +37,7 @@ bool ProcessVersionString(const std::string& version_string,
   // we split it into the order of "yyyy", "mm", "dd".
   if (splitter == '-') {
     std::string year = version->back();
-    for (int i = version->size() - 1; i > 0; --i) {
+    for (size_t i = version->size() - 1; i > 0; --i) {
       (*version)[i] = (*version)[i - 1];
     }
     (*version)[0] = year;
@@ -428,6 +430,13 @@ bool GpuControlList::Entry::Contains(OsType target_os_type,
   return true;
 }
 
+bool GpuControlList::Entry::AppliesToTestGroup(
+    uint32_t target_test_group) const {
+  if (conditions.more)
+    return conditions.more->test_group == target_test_group;
+  return target_test_group == 0u;
+}
+
 bool GpuControlList::Conditions::NeedsMoreInfo(const GPUInfo& gpu_info) const {
   // We only check for missing info that might be collected with a gl context.
   // If certain info is missing due to some error, say, we fail to collect
@@ -480,11 +489,15 @@ void GpuControlList::Entry::GetFeatureNames(
     DCHECK(iter != feature_map.end());
     feature_names->AppendString(iter->second);
   }
+  for (size_t ii = 0; ii < disabled_extension_size; ++ii) {
+    std::string name =
+        base::StringPrintf("disable(%s)", disabled_extensions[ii]);
+    feature_names->AppendString(name);
+  }
 }
 
 GpuControlList::GpuControlList(const GpuControlListData& data)
-    : version_(data.version),
-      entry_count_(data.entry_count),
+    : entry_count_(data.entry_count),
       entries_(data.entries),
       max_entry_id_(0),
       needs_more_info_(false),
@@ -494,22 +507,28 @@ GpuControlList::GpuControlList(const GpuControlListData& data)
   max_entry_id_ = entries_[entry_count_ - 1].id;
 }
 
-GpuControlList::~GpuControlList() {
+GpuControlList::~GpuControlList() = default;
+
+std::set<int32_t> GpuControlList::MakeDecision(GpuControlList::OsType os,
+                                               const std::string& os_version,
+                                               const GPUInfo& gpu_info) {
+  return MakeDecision(os, os_version, gpu_info, 0);
 }
 
-std::set<int> GpuControlList::MakeDecision(GpuControlList::OsType os,
-                                           const std::string& os_version,
-                                           const GPUInfo& gpu_info) {
+std::set<int32_t> GpuControlList::MakeDecision(GpuControlList::OsType os,
+                                               const std::string& os_version,
+                                               const GPUInfo& gpu_info,
+                                               uint32_t target_test_group) {
   active_entries_.clear();
   std::set<int> features;
 
   needs_more_info_ = false;
   // Has all features permanently in the list without any possibility of
   // removal in the future (subset of "features" set).
-  std::set<int> permanent_features;
+  std::set<int32_t> permanent_features;
   // Has all features absent from "features" set that could potentially be
   // included later with more information.
-  std::set<int> potential_features;
+  std::set<int32_t> potential_features;
 
   if (os == kOsAny)
     os = GetOsType();
@@ -525,6 +544,8 @@ std::set<int> GpuControlList::MakeDecision(GpuControlList::OsType os,
   for (size_t ii = 0; ii < entry_count_; ++ii) {
     const Entry& entry = entries_[ii];
     DCHECK_NE(0u, entry.id);
+    if (!entry.AppliesToTestGroup(target_test_group))
+      continue;
     if (entry.Contains(os, processed_os_version, gpu_info)) {
       bool needs_more_info_main = entry.NeedsMoreInfo(gpu_info, false);
       bool needs_more_info_exception = entry.NeedsMoreInfo(gpu_info, true);
@@ -535,7 +556,7 @@ std::set<int> GpuControlList::MakeDecision(GpuControlList::OsType os,
       // set. If we don't have enough info for an exception, it's safer if we
       // just ignore the exception and assume the exception doesn't apply.
       for (size_t jj = 0; jj < entry.feature_size; ++jj) {
-        int feature = entry.features[jj];
+        int32_t feature = entry.features[jj];
         if (needs_more_info_main) {
           if (!features.count(feature))
             potential_features.insert(feature);
@@ -548,7 +569,7 @@ std::set<int> GpuControlList::MakeDecision(GpuControlList::OsType os,
       }
 
       if (!needs_more_info_main)
-        active_entries_.push_back(ii);
+        active_entries_.push_back(base::checked_cast<uint32_t>(ii));
     }
   }
 
@@ -557,14 +578,18 @@ std::set<int> GpuControlList::MakeDecision(GpuControlList::OsType os,
   return features;
 }
 
-void GpuControlList::GetDecisionEntries(
-    std::vector<uint32_t>* entry_ids) const {
-  DCHECK(entry_ids);
-  entry_ids->clear();
-  for (auto index : active_entries_) {
+const std::vector<uint32_t>& GpuControlList::GetActiveEntries() const {
+  return active_entries_;
+}
+
+std::vector<uint32_t> GpuControlList::GetEntryIDsFromIndices(
+    const std::vector<uint32_t>& entry_indices) const {
+  std::vector<uint32_t> ids;
+  for (auto index : entry_indices) {
     DCHECK_LT(index, entry_count_);
-    entry_ids->push_back(entries_[index].id);
+    ids.push_back(entries_[index].id);
   }
+  return ids;
 }
 
 std::vector<std::string> GpuControlList::GetDisabledExtensions() {
@@ -580,21 +605,36 @@ std::vector<std::string> GpuControlList::GetDisabledExtensions() {
                                   disabled_extensions.end());
 }
 
-void GpuControlList::GetReasons(base::ListValue* problem_list,
-                                const std::string& tag) const {
-  DCHECK(problem_list);
+std::vector<std::string> GpuControlList::GetDisabledWebGLExtensions() {
+  std::set<std::string> disabled_webgl_extensions;
   for (auto index : active_entries_) {
+    DCHECK_LT(index, entry_count_);
     const Entry& entry = entries_[index];
-    auto problem = base::MakeUnique<base::DictionaryValue>();
+    for (size_t ii = 0; ii < entry.disabled_webgl_extension_size; ++ii) {
+      disabled_webgl_extensions.insert(entry.disabled_webgl_extensions[ii]);
+    }
+  }
+  return std::vector<std::string>(disabled_webgl_extensions.begin(),
+                                  disabled_webgl_extensions.end());
+}
+
+void GpuControlList::GetReasons(base::ListValue* problem_list,
+                                const std::string& tag,
+                                const std::vector<uint32_t>& entries) const {
+  DCHECK(problem_list);
+  for (auto index : entries) {
+    DCHECK_LT(index, entry_count_);
+    const Entry& entry = entries_[index];
+    auto problem = std::make_unique<base::DictionaryValue>();
 
     problem->SetString("description", entry.description);
 
-    auto cr_bugs = base::MakeUnique<base::ListValue>();
+    auto cr_bugs = std::make_unique<base::ListValue>();
     for (size_t jj = 0; jj < entry.cr_bug_size; ++jj)
       cr_bugs->AppendInteger(entry.cr_bugs[jj]);
     problem->Set("crBugs", std::move(cr_bugs));
 
-    auto features = base::MakeUnique<base::ListValue>();
+    auto features = std::make_unique<base::ListValue>();
     entry.GetFeatureNames(features.get(), feature_map_);
     problem->Set("affectedGpuSettings", std::move(features));
 
@@ -613,10 +653,6 @@ uint32_t GpuControlList::max_entry_id() const {
   return max_entry_id_;
 }
 
-std::string GpuControlList::version() const {
-  return version_;
-}
-
 // static
 GpuControlList::OsType GpuControlList::GetOsType() {
 #if defined(OS_CHROMEOS)
@@ -625,6 +661,8 @@ GpuControlList::OsType GpuControlList::GetOsType() {
   return kOsWin;
 #elif defined(OS_ANDROID)
   return kOsAndroid;
+#elif defined(OS_FUCHSIA)
+  return kOsFuchsia;
 #elif defined(OS_LINUX) || defined(OS_OPENBSD)
   return kOsLinux;
 #elif defined(OS_MACOSX)
@@ -637,6 +675,17 @@ GpuControlList::OsType GpuControlList::GetOsType() {
 void GpuControlList::AddSupportedFeature(
     const std::string& feature_name, int feature_id) {
   feature_map_[feature_id] = feature_name;
+}
+
+// static
+bool GpuControlList::AreEntryIndicesValid(
+    const std::vector<uint32_t>& entry_indices,
+    size_t total_entries) {
+  for (auto index : entry_indices) {
+    if (index >= total_entries)
+      return false;
+  }
+  return true;
 }
 
 }  // namespace gpu

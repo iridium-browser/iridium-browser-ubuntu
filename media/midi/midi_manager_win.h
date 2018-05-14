@@ -41,7 +41,7 @@ class MidiManagerWin final
   void DispatchSendMidiData(MidiManagerClient* client,
                             uint32_t port_index,
                             const std::vector<uint8_t>& data,
-                            double timestamp) override;
+                            base::TimeTicks timestamp) override;
 
   // base::SystemMonitor::DevicesChangedObserver overrides:
   void OnDevicesChanged(base::SystemMonitor::DeviceType device_type) override;
@@ -57,13 +57,13 @@ class MidiManagerWin final
 
   // Posts a task to TaskRunner, and ensures that the instance keeps alive while
   // the task is running.
-  void PostTask(const base::Closure&);
-  void PostDelayedTask(const base::Closure&, base::TimeDelta delay);
+  void PostTask(base::OnceClosure);
+  void PostDelayedTask(base::OnceClosure, base::TimeDelta delay);
 
   // Posts a reply task to the I/O thread that hosts MidiManager instance, runs
   // it safely, and ensures that the instance keeps alive while the task is
   // running.
-  void PostReplyTask(const base::Closure&);
+  void PostReplyTask(base::OnceClosure);
 
   // Initializes instance asynchronously on TaskRunner.
   void InitializeOnTaskRunner();

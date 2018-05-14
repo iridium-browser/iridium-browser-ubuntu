@@ -6,14 +6,13 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/test/simple_test_tick_clock.h"
-#include "cc/test/ordered_simple_task_runner.h"
+#include "components/viz/test/ordered_simple_task_runner.h"
 #include "platform/scheduler/base/lazy_now.h"
 #include "platform/scheduler/base/task_queue.h"
-#include "platform/scheduler/base/test_time_source.h"
 #include "platform/scheduler/child/idle_helper.h"
 #include "platform/scheduler/child/scheduler_helper.h"
-#include "platform/scheduler/child/scheduler_tqm_delegate_for_test.h"
 #include "platform/scheduler/renderer/main_thread_scheduler_helper.h"
+#include "platform/scheduler/test/create_task_queue_manager_for_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
@@ -32,12 +31,10 @@ class IdleCanceledDelayedTaskSweeperTest : public ::testing::Test,
                                            public IdleHelper::Delegate {
  public:
   IdleCanceledDelayedTaskSweeperTest()
-      : clock_(new base::SimpleTestTickClock()),
-        mock_task_runner_(new cc::OrderedSimpleTaskRunner(clock_.get(), true)),
-        delegate_(SchedulerTqmDelegateForTest::Create(
-            mock_task_runner_,
-            base::WrapUnique(new TestTimeSource(clock_.get())))),
-        scheduler_helper_(new MainThreadSchedulerHelper(delegate_, nullptr)),
+      : mock_task_runner_(new cc::OrderedSimpleTaskRunner(&clock_, true)),
+        scheduler_helper_(new MainThreadSchedulerHelper(
+            CreateTaskQueueManagerForTest(nullptr, mock_task_runner_, &clock_),
+            nullptr)),
         idle_helper_(
             new IdleHelper(scheduler_helper_.get(),
                            this,
@@ -45,15 +42,15 @@ class IdleCanceledDelayedTaskSweeperTest : public ::testing::Test,
                            base::TimeDelta::FromSeconds(30),
                            scheduler_helper_->NewTaskQueue(
                                MainThreadTaskQueue::QueueCreationParams(
-                                   MainThreadTaskQueue::QueueType::TEST)))),
+                                   MainThreadTaskQueue::QueueType::kTest)))),
         idle_canceled_delayed_taks_sweeper_(
             new IdleCanceledDelayedTaskSweeper(scheduler_helper_.get(),
                                                idle_helper_->IdleTaskRunner())),
         default_task_queue_(scheduler_helper_->DefaultMainThreadTaskQueue()) {
-    clock_->Advance(base::TimeDelta::FromMicroseconds(5000));
+    clock_.Advance(base::TimeDelta::FromMicroseconds(5000));
   }
 
-  ~IdleCanceledDelayedTaskSweeperTest() override {}
+  ~IdleCanceledDelayedTaskSweeperTest() override = default;
 
   void TearDown() override {
     // Check that all tests stop posting tasks.
@@ -74,10 +71,9 @@ class IdleCanceledDelayedTaskSweeperTest : public ::testing::Test,
   void OnPendingTasksChanged(bool has_tasks) {}
 
  protected:
-  std::unique_ptr<base::SimpleTestTickClock> clock_;
+  base::SimpleTestTickClock clock_;
   scoped_refptr<cc::OrderedSimpleTaskRunner> mock_task_runner_;
 
-  scoped_refptr<SchedulerTqmDelegateForTest> delegate_;
   std::unique_ptr<MainThreadSchedulerHelper> scheduler_helper_;
   std::unique_ptr<IdleHelper> idle_helper_;
   std::unique_ptr<IdleCanceledDelayedTaskSweeper>
@@ -124,7 +120,7 @@ TEST_F(IdleCanceledDelayedTaskSweeperTest, TestSweep) {
   // Give the IdleCanceledDelayedTaskSweeper a chance to run but don't let
   // the first non canceled delayed task run.  This is important because the
   // canceled tasks would get removed by TaskQueueImpl::WakeUpForDelayedWork.
-  clock_->Advance(base::TimeDelta::FromSeconds(40));
+  clock_.Advance(base::TimeDelta::FromSeconds(40));
   idle_helper_->EnableLongIdlePeriod();
   mock_task_runner_->RunForPeriod(base::TimeDelta::FromSeconds(40));
 

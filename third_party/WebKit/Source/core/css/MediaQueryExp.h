@@ -31,15 +31,14 @@
 
 #include "core/CSSValueKeywords.h"
 #include "core/CoreExport.h"
-#include "core/MediaFeatureNames.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSValue.h"
+#include "core/css/media_feature_names.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
-class CSSParserToken;
+class CSSParserTokenRange;
 
 struct MediaQueryExpValue {
   DISALLOW_NEW();
@@ -83,7 +82,7 @@ class CORE_EXPORT MediaQueryExp {
  public:
   // Returns an invalid MediaQueryExp if the arguments are invalid.
   static MediaQueryExp Create(const String& media_feature,
-                              const Vector<CSSParserToken, 4>&);
+                              CSSParserTokenRange&);
   static MediaQueryExp Invalid() {
     return MediaQueryExp(String(), MediaQueryExpValue());
   }

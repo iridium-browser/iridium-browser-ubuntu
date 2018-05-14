@@ -6,10 +6,12 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include "ash/app_list/model/search/search_result.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -20,6 +22,7 @@
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_test.h"
 #include "chrome/browser/ui/app_list/extension_app_model_builder.h"
+#include "chrome/browser/ui/app_list/test/fake_app_list_model_updater.h"
 #include "chrome/browser/ui/app_list/test/test_app_list_controller_delegate.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/base/testing_profile.h"
@@ -30,10 +33,6 @@
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_set.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/app_list/app_list_folder_item.h"
-#include "ui/app_list/app_list_item.h"
-#include "ui/app_list/app_list_model.h"
-#include "ui/app_list/search_result.h"
 
 namespace app_list {
 namespace test {
@@ -64,22 +63,18 @@ class AppSearchProviderTest : public AppListTestBase {
   void SetUp() override {
     AppListTestBase::SetUp();
 
-    model_.reset(new app_list::AppListModel);
+    model_updater_ = std::make_unique<FakeAppListModelUpdater>();
     controller_.reset(new ::test::TestAppListControllerDelegate);
-    builder_.reset(new ExtensionAppModelBuilder(controller_.get()));
-    builder_->InitializeWithProfile(profile_.get(), model_.get());
   }
 
   void CreateSearch() {
-    std::unique_ptr<base::SimpleTestClock> clock(new base::SimpleTestClock());
-    clock->SetNow(kTestCurrentTime);
-    app_search_.reset(new AppSearchProvider(profile_.get(), nullptr,
-                                            std::move(clock),
-                                            model_->top_level_item_list()));
+    clock_.SetNow(kTestCurrentTime);
+    app_search_.reset(new AppSearchProvider(profile_.get(), nullptr, &clock_,
+                                            model_updater_.get()));
   }
 
   std::string RunQuery(const std::string& query) {
-    app_search_->Start(false, base::UTF8ToUTF16(query));
+    app_search_->Start(base::UTF8ToUTF16(query));
 
     // Sort results by relevance.
     std::vector<SearchResult*> sorted_results;
@@ -140,14 +135,14 @@ class AppSearchProviderTest : public AppListTestBase {
     service()->AddExtension(extension.get());
   }
 
-  AppListModel* model() { return model_.get(); }
   const SearchProvider::Results& results() { return app_search_->results(); }
   ArcAppTest& arc_test() { return arc_test_; }
 
  private:
+  base::SimpleTestClock clock_;
   std::unique_ptr<app_list::AppListModel> model_;
+  std::unique_ptr<FakeAppListModelUpdater> model_updater_;
   std::unique_ptr<AppSearchProvider> app_search_;
-  std::unique_ptr<ExtensionAppModelBuilder> builder_;
   std::unique_ptr<::test::TestAppListControllerDelegate> controller_;
   ArcAppTest arc_test_;
 
@@ -192,7 +187,7 @@ TEST_F(AppSearchProviderTest, DisableAndEnable) {
   EXPECT_EQ("Hosted App", RunQuery("host"));
 
   service_->DisableExtension(kHostedAppId,
-                             extensions::Extension::DISABLE_NONE);
+                             extensions::disable_reason::DISABLE_USER_ACTION);
   EXPECT_EQ("Hosted App", RunQuery("host"));
 
   service_->EnableExtension(kHostedAppId);
@@ -206,7 +201,6 @@ TEST_F(AppSearchProviderTest, UninstallExtension) {
   EXPECT_FALSE(results().empty());
   service_->UninstallExtension(kPackagedApp1Id,
                                extensions::UNINSTALL_REASON_FOR_TESTING,
-                               base::Bind(&base::DoNothing),
                                NULL);
 
   // Allow async AppSearchProvider::UpdateResults to run.
@@ -285,7 +279,6 @@ TEST_F(AppSearchProviderTest, FetchRecommendations) {
 TEST_F(AppSearchProviderTest, FetchUnlaunchedRecommendations) {
   CreateSearch();
 
-  const char kFolderId[] = "folder1";
   extensions::ExtensionPrefs* prefs =
       extensions::ExtensionPrefs::Get(profile_.get());
 
@@ -294,24 +287,6 @@ TEST_F(AppSearchProviderTest, FetchUnlaunchedRecommendations) {
   prefs->SetLastLaunchTime(kHostedAppId, base::Time::Now());
   prefs->SetLastLaunchTime(kPackagedApp1Id, base::Time::FromInternalValue(0));
   prefs->SetLastLaunchTime(kPackagedApp2Id, base::Time::FromInternalValue(0));
-  EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2", RunQuery(""));
-
-  // Switching the app list order should not change the query result.
-  model()->SetItemPosition(
-      model()->FindItem(kPackagedApp2Id),
-      model()->FindItem(kPackagedApp1Id)->position().CreateBefore());
-  EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2", RunQuery(""));
-
-  // Moving an app into a folder should not deprioritize it.
-  model()->AddItem(std::unique_ptr<AppListFolderItem>(
-      new AppListFolderItem(kFolderId, AppListFolderItem::FOLDER_TYPE_NORMAL)));
-  model()->MoveItemToFolder(model()->FindItem(kPackagedApp1Id), kFolderId);
-  EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2", RunQuery(""));
-
-  // The position of the folder shouldn't matter.
-  model()->SetItemPosition(
-      model()->FindItem(kFolderId),
-      model()->FindItem(kPackagedApp2Id)->position().CreateBefore());
   EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2", RunQuery(""));
 }
 

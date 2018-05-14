@@ -10,6 +10,7 @@
 
 #include "base/json/json_reader.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -113,7 +114,7 @@ static std::unique_ptr<URLFetcher> CreateFetcher(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "This feature cannot be disabled in settings, but if user signs "
             "out of Chrome, this request would not be made."
@@ -151,7 +152,7 @@ std::unique_ptr<base::DictionaryValue> ParseGetAccessTokenResponse(
   std::string data;
   source->GetResponseAsString(&data);
   std::unique_ptr<base::Value> value = base::JSONReader::Read(data);
-  if (!value.get() || value->GetType() != base::Value::Type::DICTIONARY)
+  if (!value.get() || value->type() != base::Value::Type::DICTIONARY)
     value.reset();
 
   return std::unique_ptr<base::DictionaryValue>(
@@ -201,8 +202,8 @@ void OAuth2AccessTokenFetcherImpl::EndGetAccessToken(
   URLRequestStatus status = source->GetStatus();
   int histogram_value =
       status.is_success() ? source->GetResponseCode() : status.error();
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Gaia.ResponseCodesForOAuth2AccessToken",
-                              histogram_value);
+  base::UmaHistogramSparse("Gaia.ResponseCodesForOAuth2AccessToken",
+                           histogram_value);
   if (!status.is_success()) {
     OnGetTokenFailure(CreateAuthError(status));
     return;

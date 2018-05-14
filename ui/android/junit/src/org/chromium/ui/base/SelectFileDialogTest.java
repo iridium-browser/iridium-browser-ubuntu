@@ -6,6 +6,7 @@ package org.chromium.ui.base;
 
 import static org.junit.Assert.assertEquals;
 
+import android.net.Uri;
 import android.webkit.MimeTypeMap;
 
 import org.junit.Test;
@@ -14,7 +15,8 @@ import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowMimeTypeMap;
 
-import org.chromium.testing.local.LocalRobolectricTestRunner;
+import org.chromium.base.ContextUtils;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -22,7 +24,7 @@ import java.util.Arrays;
 /**
  * Tests logic in the SelectFileDialog class.
  */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class SelectFileDialogTest {
     /**
@@ -126,5 +128,20 @@ public class SelectFileDialogTest {
         assertEquals(null,
                 SelectFileDialog.convertToImageMimeTypes(
                         Arrays.asList(".jpg", "image/jpeg", ".mpg")));
+    }
+
+    @Test
+    public void testMultipleFileSelectorWithFileUris() throws Throwable {
+        SelectFileDialog selectFileDialog = new SelectFileDialog(0);
+        SelectFileDialog.GetDisplayNameTask task =
+                selectFileDialog.new GetDisplayNameTask(ContextUtils.getApplicationContext(), true);
+        Uri[] filePathArray = new Uri[] {
+                Uri.parse("file:///storage/emulated/0/DCIM/Camera/IMG_0.jpg"),
+                Uri.parse("file:///storage/emulated/0/DCIM/Camera/IMG_1.jpg")};
+        task.doInBackground(filePathArray);
+        assertEquals(task.mFilePaths[0].toString(),
+                "///storage/emulated/0/DCIM/Camera/IMG_0.jpg");
+        assertEquals(task.mFilePaths[1].toString(),
+                "///storage/emulated/0/DCIM/Camera/IMG_1.jpg");
     }
 }

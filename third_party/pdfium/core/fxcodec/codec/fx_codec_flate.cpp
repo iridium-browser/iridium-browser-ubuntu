@@ -7,11 +7,13 @@
 #include "core/fxcodec/codec/codec_int.h"
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
 
-#include "core/fxcodec/fx_codec.h"
+#include "core/fxcodec/codec/ccodec_flatemodule.h"
+#include "core/fxcodec/codec/ccodec_scanlinedecoder.h"
 #include "core/fxcrt/fx_extension.h"
 #include "third_party/base/numerics/safe_conversions.h"
 #include "third_party/base/ptr_util.h"
@@ -38,9 +40,12 @@ static void my_free_func(void* opaque, void* address) {
 
 namespace {
 
+constexpr const static uint32_t kMaxTotalOutSize = 1024 * 1024 * 1024;  // 1 GiB
+
 uint32_t FlateGetPossiblyTruncatedTotalOut(void* context) {
-  return pdfium::base::saturated_cast<uint32_t>(
-      static_cast<z_stream*>(context)->total_out);
+  return std::min(pdfium::base::saturated_cast<uint32_t>(
+                      static_cast<z_stream*>(context)->total_out),
+                  kMaxTotalOutSize);
 }
 
 uint32_t FlateGetPossiblyTruncatedTotalIn(void* context) {
@@ -189,6 +194,8 @@ int CLZWDecoder::Decode(uint8_t* dest_buf,
       }
     }
     m_InPos += m_CodeLen;
+    if (code == 257)
+      break;
     if (code < 256) {
       if (m_OutPos == dest_size) {
         return -5;
@@ -205,9 +212,8 @@ int CLZWDecoder::Decode(uint8_t* dest_buf,
       m_CodeLen = 9;
       m_nCodes = 0;
       old_code = 0xFFFFFFFF;
-    } else if (code == 257) {
-      break;
     } else {
+      // Else 257 or greater.
       if (old_code == 0xFFFFFFFF)
         return 2;
 
@@ -472,7 +478,7 @@ void TIFF_PredictLine(uint8_t* dest_buf,
   }
   int BytesPerPixel = BitsPerComponent * Colors / 8;
   if (BitsPerComponent == 16) {
-    for (uint32_t i = BytesPerPixel; i < row_size; i += 2) {
+    for (uint32_t i = BytesPerPixel; i + 1 < row_size; i += 2) {
       uint16_t pixel =
           (dest_buf[i - BytesPerPixel] << 8) | dest_buf[i - BytesPerPixel + 1];
       pixel += (dest_buf[i] << 8) | dest_buf[i + 1];

@@ -19,7 +19,6 @@
 #include "core/fxcodec/jbig2/JBig2_HuffmanTable_Standard.h"
 #include "core/fxcodec/jbig2/JBig2_SymbolDict.h"
 #include "core/fxcodec/jbig2/JBig2_TrdProc.h"
-#include "core/fxcrt/fx_basic.h"
 #include "third_party/base/ptr_util.h"
 
 std::unique_ptr<CJBig2_SymbolDict> CJBig2_SDDProc::decode_Arith(
@@ -309,25 +308,23 @@ std::unique_ptr<CJBig2_SymbolDict> CJBig2_SDDProc::decode_Huffman(
     HCFIRSTSYM = NSYMSDECODED;
     for (;;) {
       nVal = pHuffmanDecoder->decodeAValue(SDHUFFDW, &DW);
-      if (nVal == JBIG2_OOB) {
+      if (nVal == JBIG2_OOB)
         break;
-      } else if (nVal != 0) {
+      if (nVal != 0)
         return nullptr;
-      } else {
-        if (NSYMSDECODED >= SDNUMNEWSYMS)
-          return nullptr;
+      if (NSYMSDECODED >= SDNUMNEWSYMS)
+        return nullptr;
 
-        SYMWIDTH = SYMWIDTH + DW;
-        if ((int)SYMWIDTH < 0 || (int)SYMWIDTH > JBIG2_MAX_IMAGE_SIZE) {
-          return nullptr;
-        } else if (HCHEIGHT == 0 || SYMWIDTH == 0) {
-          TOTWIDTH = TOTWIDTH + SYMWIDTH;
-          SDNEWSYMS[NSYMSDECODED] = nullptr;
-          NSYMSDECODED = NSYMSDECODED + 1;
-          continue;
-        }
+      SYMWIDTH = SYMWIDTH + DW;
+      if ((int)SYMWIDTH < 0 || (int)SYMWIDTH > JBIG2_MAX_IMAGE_SIZE)
+        return nullptr;
+      if (HCHEIGHT == 0 || SYMWIDTH == 0) {
         TOTWIDTH = TOTWIDTH + SYMWIDTH;
+        SDNEWSYMS[NSYMSDECODED] = nullptr;
+        NSYMSDECODED = NSYMSDECODED + 1;
+        continue;
       }
+      TOTWIDTH = TOTWIDTH + SYMWIDTH;
       if (SDREFAGG == 1) {
         if (pHuffmanDecoder->decodeAValue(SDHUFFAGGINST, (int*)&REFAGGNINST) !=
             0) {
@@ -470,8 +467,8 @@ std::unique_ptr<CJBig2_SymbolDict> CJBig2_SDDProc::decode_Huffman(
         if (pStream->getByteLeft() >= stride * HCHEIGHT) {
           BHC = pdfium::MakeUnique<CJBig2_Image>(TOTWIDTH, HCHEIGHT);
           for (I = 0; I < HCHEIGHT; I++) {
-            JBIG2_memcpy(BHC->m_pData + I * BHC->stride(),
-                         pStream->getPointer(), stride);
+            JBIG2_memcpy(BHC->data() + I * BHC->stride(), pStream->getPointer(),
+                         stride);
             pStream->offset(stride);
           }
         } else {

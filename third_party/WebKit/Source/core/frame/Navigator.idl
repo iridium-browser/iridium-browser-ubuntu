@@ -34,6 +34,8 @@ interface Navigator {
 
 Navigator implements NavigatorConcurrentHardware;
 Navigator implements NavigatorCookies;
+Navigator implements NavigatorDeviceMemory;
 Navigator implements NavigatorID;
 Navigator implements NavigatorLanguage;
 Navigator implements NavigatorOnLine;
+Navigator implements NavigatorAutomationInformation;

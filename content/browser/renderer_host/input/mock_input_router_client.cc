@@ -19,7 +19,7 @@ using blink::WebTouchPoint;
 namespace content {
 
 MockInputRouterClient::MockInputRouterClient()
-    : input_router_(NULL),
+    : input_router_(nullptr),
       in_flight_event_count_(0),
       has_touch_handler_(false),
       filter_state_(INPUT_EVENT_ACK_STATE_NOT_CONSUMED),
@@ -36,8 +36,7 @@ InputEventAckState MockInputRouterClient::FilterInputEvent(
   return filter_state_;
 }
 
-void MockInputRouterClient::IncrementInFlightEventCount(
-    blink::WebInputEvent::Type event_type) {
+void MockInputRouterClient::IncrementInFlightEventCount() {
   ++in_flight_event_count_;
 }
 
@@ -64,12 +63,23 @@ void MockInputRouterClient::OnSetWhiteListedTouchAction(
 void MockInputRouterClient::DidStopFlinging() {
 }
 
+void MockInputRouterClient::SetNeedsBeginFrameForFlingProgress() {}
+
 void MockInputRouterClient::ForwardGestureEventWithLatencyInfo(
     const blink::WebGestureEvent& gesture_event,
     const ui::LatencyInfo& latency_info) {
   if (input_router_)
     input_router_->SendGestureEvent(
         GestureEventWithLatencyInfo(gesture_event, latency_info));
+}
+
+void MockInputRouterClient::ForwardWheelEventWithLatencyInfo(
+    const blink::WebMouseWheelEvent& wheel_event,
+    const ui::LatencyInfo& latency_info) {
+  if (input_router_) {
+    input_router_->SendWheelEvent(
+        MouseWheelEventWithLatencyInfo(wheel_event, latency_info));
+  }
 }
 
 bool MockInputRouterClient::GetAndResetFilterEventCalled() {

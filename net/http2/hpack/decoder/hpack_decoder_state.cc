@@ -33,12 +33,7 @@ HpackDecoderState::HpackDecoderState(HpackDecoderListener* listener)
       error_detected_(false) {
   CHECK(listener);
 }
-HpackDecoderState::~HpackDecoderState() {}
-
-void HpackDecoderState::set_listener(HpackDecoderListener* listener) {
-  CHECK(listener);
-  listener_ = listener;
-}
+HpackDecoderState::~HpackDecoderState() = default;
 
 void HpackDecoderState::set_tables_debug_listener(
     HpackDecoderTablesDebugListener* debug_listener) {

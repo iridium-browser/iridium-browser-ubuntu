@@ -26,11 +26,9 @@
 #include "modules/webdatabase/Database.h"
 
 #include <memory>
-#include "bindings/modules/v8/DatabaseCallback.h"
+
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
-#include "core/html/VoidCallback.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/probe/CoreProbes.h"
 #include "modules/webdatabase/ChangeVersionData.h"
@@ -42,21 +40,20 @@
 #include "modules/webdatabase/DatabaseThread.h"
 #include "modules/webdatabase/DatabaseTracker.h"
 #include "modules/webdatabase/SQLError.h"
-#include "modules/webdatabase/SQLTransaction.h"
 #include "modules/webdatabase/SQLTransactionBackend.h"
-#include "modules/webdatabase/SQLTransactionCallback.h"
 #include "modules/webdatabase/SQLTransactionClient.h"
 #include "modules/webdatabase/SQLTransactionCoordinator.h"
-#include "modules/webdatabase/SQLTransactionErrorCallback.h"
 #include "modules/webdatabase/StorageLog.h"
 #include "modules/webdatabase/sqlite/SQLiteStatement.h"
 #include "modules/webdatabase/sqlite/SQLiteTransaction.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/WaitableEvent.h"
+#include "platform/WebTaskRunner.h"
 #include "platform/heap/SafePoint.h"
 #include "platform/wtf/Atomics.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebDatabaseObserver.h"
 #include "public/platform/WebSecurityOrigin.h"
 
@@ -226,8 +223,7 @@ Database::Database(DatabaseContext* database_context,
                    const String& name,
                    const String& expected_version,
                    const String& display_name,
-                   unsigned estimated_size,
-                   DatabaseCallback* creation_callback)
+                   unsigned estimated_size)
     : database_context_(database_context),
       name_(name.IsolatedCopy()),
       expected_version_(expected_version.IsolatedCopy()),
@@ -236,7 +232,6 @@ Database::Database(DatabaseContext* database_context,
       guid_(0),
       opened_(0),
       new_(false),
-      creation_callback_(this, creation_callback),
       transaction_in_progress_(false),
       is_transaction_queue_enabled_(true) {
   DCHECK(IsMainThread());
@@ -250,7 +245,7 @@ Database::Database(DatabaseContext* database_context,
     name_ = "";
 
   {
-    MutexLocker locker(GuidMutex());
+    RecursiveMutexLocker locker(GuidMutex());
     guid_ = GuidForOriginAndName(GetSecurityOrigin()->ToString(), name);
     GuidCount().insert(guid_);
   }
@@ -263,7 +258,7 @@ Database::Database(DatabaseContext* database_context,
   DCHECK(database_context_->GetDatabaseThread());
   DCHECK(database_context_->IsContextThread());
   database_task_runner_ =
-      TaskRunnerHelper::Get(TaskType::kDatabaseAccess, GetExecutionContext());
+      GetExecutionContext()->GetTaskRunner(TaskType::kDatabaseAccess);
 }
 
 Database::~Database() {
@@ -279,20 +274,17 @@ Database::~Database() {
   DCHECK(!opened_);
 }
 
-DEFINE_TRACE(Database) {
+void Database::Trace(blink::Visitor* visitor) {
   visitor->Trace(database_context_);
   visitor->Trace(sqlite_database_);
   visitor->Trace(database_authorizer_);
-  visitor->Trace(creation_callback_);
-}
-
-DEFINE_TRACE_WRAPPERS(Database) {
-  visitor->TraceWrappers(creation_callback_);
+  ScriptWrappable::Trace(visitor);
 }
 
 bool Database::OpenAndVerifyVersion(bool set_version_in_new_database,
                                     DatabaseError& error,
-                                    String& error_message) {
+                                    String& error_message,
+                                    V8DatabaseCallback* creation_callback) {
   WaitableEvent event;
   if (!GetDatabaseContext()->DatabaseThreadAvailable())
     return false;
@@ -303,28 +295,30 @@ bool Database::OpenAndVerifyVersion(bool set_version_in_new_database,
       this, set_version_in_new_database, &event, error, error_message, success);
   GetDatabaseContext()->GetDatabaseThread()->ScheduleTask(std::move(task));
   event.Wait();
-  if (creation_callback_) {
+  if (creation_callback) {
     if (success && IsNew()) {
       STORAGE_DVLOG(1)
           << "Scheduling DatabaseCreationCallbackTask for database " << this;
+      auto* v8persistent_callback =
+          ToV8PersistentCallbackFunction(creation_callback);
       probe::AsyncTaskScheduled(GetExecutionContext(), "openDatabase",
-                                creation_callback_);
-      TaskRunnerHelper::Get(TaskType::kDatabaseAccess, GetExecutionContext())
-          ->PostTask(BLINK_FROM_HERE, WTF::Bind(&Database::RunCreationCallback,
-                                                WrapPersistent(this)));
-    } else {
-      creation_callback_ = nullptr;
+                                v8persistent_callback);
+      GetExecutionContext()
+          ->GetTaskRunner(TaskType::kDatabaseAccess)
+          ->PostTask(
+              FROM_HERE,
+              WTF::Bind(&Database::RunCreationCallback, WrapPersistent(this),
+                        WrapPersistent(v8persistent_callback)));
     }
   }
 
   return success;
 }
 
-void Database::RunCreationCallback() {
-  probe::AsyncTask async_task(GetExecutionContext(), creation_callback_);
-  bool return_value;
-  creation_callback_->call(nullptr, this, return_value);
-  creation_callback_ = nullptr;
+void Database::RunCreationCallback(
+    V8PersistentCallbackFunction<V8DatabaseCallback>* creation_callback) {
+  probe::AsyncTask async_task(GetExecutionContext(), creation_callback);
+  creation_callback->InvokeAndReportException(nullptr, this);
 }
 
 void Database::Close() {
@@ -379,7 +373,9 @@ void Database::InProgressTransactionCompleted() {
 }
 
 void Database::ScheduleTransaction() {
-  DCHECK(!transaction_in_progress_mutex_.TryLock());  // Locked by caller.
+#if DCHECK_IS_ON()
+  DCHECK(transaction_in_progress_mutex_.Locked());  // Locked by caller.
+#endif                                              // DCHECK_IS_ON()
   SQLTransactionBackend* transaction = nullptr;
 
   if (is_transaction_queue_enabled_ && !transaction_queue_.IsEmpty())
@@ -430,7 +426,7 @@ void Database::CloseDatabase() {
   // See comment at the top this file regarding calling removeOpenDatabase().
   DatabaseTracker::Tracker().RemoveOpenDatabase(this);
   {
-    MutexLocker locker(GuidMutex());
+    RecursiveMutexLocker locker(GuidMutex());
 
     DCHECK(GuidCount().Contains(guid_));
     if (GuidCount().erase(guid_)) {
@@ -468,7 +464,7 @@ class DoneCreatingDatabaseOnExitCaller {
 bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
                                     DatabaseError& error,
                                     String& error_message) {
-  double call_start_time = WTF::MonotonicallyIncreasingTime();
+  double call_start_time = WTF::CurrentTimeTicksInSeconds();
   DoneCreatingDatabaseOnExitCaller on_exit_caller(this);
   DCHECK(error_message.IsEmpty());
   DCHECK_EQ(error,
@@ -481,7 +477,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
   if (!sqlite_database_.Open(filename_)) {
     ReportOpenDatabaseResult(
         1, kInvalidStateError, sqlite_database_.LastError(),
-        WTF::MonotonicallyIncreasingTime() - call_start_time);
+        WTF::CurrentTimeTicksInSeconds() - call_start_time);
     error_message = FormatErrorMessage("unable to open database",
                                        sqlite_database_.LastError(),
                                        sqlite_database_.LastErrorMsg());
@@ -496,7 +492,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
 
   String current_version;
   {
-    MutexLocker locker(GuidMutex());
+    RecursiveMutexLocker locker(GuidMutex());
 
     GuidVersionMap::iterator entry = GuidToVersionMap().find(guid_);
     if (entry != GuidToVersionMap().end()) {
@@ -529,7 +525,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
       if (!transaction.InProgress()) {
         ReportOpenDatabaseResult(
             2, kInvalidStateError, sqlite_database_.LastError(),
-            WTF::MonotonicallyIncreasingTime() - call_start_time);
+            WTF::CurrentTimeTicksInSeconds() - call_start_time);
         error_message = FormatErrorMessage(
             "unable to open database, failed to start transaction",
             sqlite_database_.LastError(), sqlite_database_.LastErrorMsg());
@@ -547,7 +543,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
                 "REPLACE,value TEXT NOT NULL ON CONFLICT FAIL);")) {
           ReportOpenDatabaseResult(
               3, kInvalidStateError, sqlite_database_.LastError(),
-              WTF::MonotonicallyIncreasingTime() - call_start_time);
+              WTF::CurrentTimeTicksInSeconds() - call_start_time);
           error_message = FormatErrorMessage(
               "unable to open database, failed to create 'info' table",
               sqlite_database_.LastError(), sqlite_database_.LastErrorMsg());
@@ -558,7 +554,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
       } else if (!GetVersionFromDatabase(current_version, false)) {
         ReportOpenDatabaseResult(
             4, kInvalidStateError, sqlite_database_.LastError(),
-            WTF::MonotonicallyIncreasingTime() - call_start_time);
+            WTF::CurrentTimeTicksInSeconds() - call_start_time);
         error_message = FormatErrorMessage(
             "unable to open database, failed to read current version",
             sqlite_database_.LastError(), sqlite_database_.LastErrorMsg());
@@ -577,7 +573,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
         if (!SetVersionInDatabase(expected_version_, false)) {
           ReportOpenDatabaseResult(
               5, kInvalidStateError, sqlite_database_.LastError(),
-              WTF::MonotonicallyIncreasingTime() - call_start_time);
+              WTF::CurrentTimeTicksInSeconds() - call_start_time);
           error_message = FormatErrorMessage(
               "unable to open database, failed to write current version",
               sqlite_database_.LastError(), sqlite_database_.LastErrorMsg());
@@ -607,7 +603,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
       expected_version_.length() && expected_version_ != current_version) {
     ReportOpenDatabaseResult(
         6, kInvalidStateError, 0,
-        WTF::MonotonicallyIncreasingTime() - call_start_time);
+        WTF::CurrentTimeTicksInSeconds() - call_start_time);
     error_message =
         "unable to open database, version mismatch, '" + expected_version_ +
         "' does not match the currentVersion of '" + current_version + "'";
@@ -633,7 +629,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
   }
 
   ReportOpenDatabaseResult(
-      0, -1, 0, WTF::MonotonicallyIncreasingTime() - call_start_time);  // OK
+      0, -1, 0, WTF::CurrentTimeTicksInSeconds() - call_start_time);  // OK
 
   if (GetDatabaseContext()->GetDatabaseThread())
     GetDatabaseContext()->GetDatabaseThread()->RecordDatabaseOpen(this);
@@ -710,13 +706,13 @@ void Database::SetExpectedVersion(const String& version) {
 }
 
 String Database::GetCachedVersion() const {
-  MutexLocker locker(GuidMutex());
+  RecursiveMutexLocker locker(GuidMutex());
   return GuidToVersionMap().at(guid_).IsolatedCopy();
 }
 
 void Database::SetCachedVersion(const String& actual_version) {
   // Update the in memory database version map.
-  MutexLocker locker(GuidMutex());
+  RecursiveMutexLocker locker(GuidMutex());
   UpdateGuidVersionMap(guid_, actual_version);
 }
 
@@ -858,42 +854,59 @@ void Database::CloseImmediately() {
   if (GetDatabaseContext()->DatabaseThreadAvailable() && Opened()) {
     LogErrorMessage("forcibly closing database");
     GetDatabaseContext()->GetDatabaseThread()->ScheduleTask(
-        DatabaseCloseTask::Create(this, 0));
+        DatabaseCloseTask::Create(this, nullptr));
   }
 }
 
 void Database::changeVersion(const String& old_version,
                              const String& new_version,
-                             SQLTransactionCallback* callback,
-                             SQLTransactionErrorCallback* error_callback,
-                             VoidCallback* success_callback) {
+                             V8SQLTransactionCallback* callback,
+                             V8SQLTransactionErrorCallback* error_callback,
+                             V8VoidCallback* success_callback) {
   ChangeVersionData data(old_version, new_version);
-  RunTransaction(callback, error_callback, success_callback, false, &data);
+  RunTransaction(SQLTransaction::OnProcessV8Impl::Create(callback),
+                 SQLTransaction::OnErrorV8Impl::Create(error_callback),
+                 SQLTransaction::OnSuccessV8Impl::Create(success_callback),
+                 false, &data);
 }
 
-void Database::transaction(SQLTransactionCallback* callback,
-                           SQLTransactionErrorCallback* error_callback,
-                           VoidCallback* success_callback) {
+void Database::transaction(V8SQLTransactionCallback* callback,
+                           V8SQLTransactionErrorCallback* error_callback,
+                           V8VoidCallback* success_callback) {
+  RunTransaction(SQLTransaction::OnProcessV8Impl::Create(callback),
+                 SQLTransaction::OnErrorV8Impl::Create(error_callback),
+                 SQLTransaction::OnSuccessV8Impl::Create(success_callback),
+                 false);
+}
+
+void Database::readTransaction(V8SQLTransactionCallback* callback,
+                               V8SQLTransactionErrorCallback* error_callback,
+                               V8VoidCallback* success_callback) {
+  RunTransaction(SQLTransaction::OnProcessV8Impl::Create(callback),
+                 SQLTransaction::OnErrorV8Impl::Create(error_callback),
+                 SQLTransaction::OnSuccessV8Impl::Create(success_callback),
+                 true);
+}
+
+void Database::PerformTransaction(
+    SQLTransaction::OnProcessCallback* callback,
+    SQLTransaction::OnErrorCallback* error_callback,
+    SQLTransaction::OnSuccessCallback* success_callback) {
   RunTransaction(callback, error_callback, success_callback, false);
 }
 
-void Database::readTransaction(SQLTransactionCallback* callback,
-                               SQLTransactionErrorCallback* error_callback,
-                               VoidCallback* success_callback) {
-  RunTransaction(callback, error_callback, success_callback, true);
-}
-
 static void CallTransactionErrorCallback(
-    SQLTransactionErrorCallback* callback,
+    SQLTransaction::OnErrorCallback* callback,
     std::unique_ptr<SQLErrorData> error_data) {
-  callback->handleEvent(SQLError::Create(*error_data));
+  callback->OnError(SQLError::Create(*error_data));
 }
 
-void Database::RunTransaction(SQLTransactionCallback* callback,
-                              SQLTransactionErrorCallback* error_callback,
-                              VoidCallback* success_callback,
-                              bool read_only,
-                              const ChangeVersionData* change_version_data) {
+void Database::RunTransaction(
+    SQLTransaction::OnProcessCallback* callback,
+    SQLTransaction::OnErrorCallback* error_callback,
+    SQLTransaction::OnSuccessCallback* success_callback,
+    bool read_only,
+    const ChangeVersionData* change_version_data) {
   if (!GetExecutionContext())
     return;
 
@@ -903,14 +916,15 @@ void Database::RunTransaction(SQLTransactionCallback* callback,
 // into Database so that we only create the SQLTransaction if we're
 // actually going to run it.
 #if DCHECK_IS_ON()
-  SQLTransactionErrorCallback* original_error_callback = error_callback;
+  SQLTransaction::OnErrorCallback* original_error_callback = error_callback;
 #endif
   SQLTransaction* transaction = SQLTransaction::Create(
       this, callback, success_callback, error_callback, read_only);
   SQLTransactionBackend* transaction_backend =
       RunTransaction(transaction, read_only, change_version_data);
   if (!transaction_backend) {
-    SQLTransactionErrorCallback* callback = transaction->ReleaseErrorCallback();
+    SQLTransaction::OnErrorCallback* callback =
+        transaction->ReleaseErrorCallback();
 #if DCHECK_IS_ON()
     DCHECK_EQ(callback, original_error_callback);
 #endif
@@ -918,7 +932,7 @@ void Database::RunTransaction(SQLTransactionCallback* callback,
       std::unique_ptr<SQLErrorData> error = SQLErrorData::Create(
           SQLError::kUnknownErr, "database has been closed");
       GetDatabaseTaskRunner()->PostTask(
-          BLINK_FROM_HERE,
+          FROM_HERE,
           WTF::Bind(&CallTransactionErrorCallback, WrapPersistent(callback),
                     WTF::Passed(std::move(error))));
     }
@@ -928,9 +942,9 @@ void Database::RunTransaction(SQLTransactionCallback* callback,
 void Database::ScheduleTransactionCallback(SQLTransaction* transaction) {
   // The task is constructed in a database thread, and destructed in the
   // context thread.
-  GetDatabaseTaskRunner()->PostTask(
-      BLINK_FROM_HERE, CrossThreadBind(&SQLTransaction::PerformPendingCallback,
-                                       WrapCrossThreadPersistent(transaction)));
+  PostCrossThreadTask(*GetDatabaseTaskRunner(), FROM_HERE,
+                      CrossThreadBind(&SQLTransaction::PerformPendingCallback,
+                                      WrapCrossThreadPersistent(transaction)));
 }
 
 Vector<String> Database::PerformGetTableNames() {
@@ -980,13 +994,13 @@ Vector<String> Database::TableNames() {
   return result;
 }
 
-SecurityOrigin* Database::GetSecurityOrigin() const {
+const SecurityOrigin* Database::GetSecurityOrigin() const {
   if (!GetExecutionContext())
     return nullptr;
   if (GetExecutionContext()->IsContextThread())
-    return context_thread_security_origin_.Get();
+    return context_thread_security_origin_.get();
   if (GetDatabaseContext()->GetDatabaseThread()->IsDatabaseThread())
-    return database_thread_security_origin_.Get();
+    return database_thread_security_origin_.get();
   return nullptr;
 }
 
@@ -994,8 +1008,8 @@ bool Database::Opened() {
   return static_cast<bool>(AcquireLoad(&opened_));
 }
 
-WebTaskRunner* Database::GetDatabaseTaskRunner() const {
-  return database_task_runner_.Get();
+base::SingleThreadTaskRunner* Database::GetDatabaseTaskRunner() const {
+  return database_task_runner_.get();
 }
 
 }  // namespace blink

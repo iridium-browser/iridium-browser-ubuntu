@@ -17,18 +17,15 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/test/values_test_util.h"
 #include "base/values.h"
-#include "components/sync/base/attachment_id_proto.h"
 #include "components/sync/base/cancelation_signal.h"
 #include "components/sync/base/extensions_activity.h"
 #include "components/sync/base/fake_encryptor.h"
 #include "components/sync/base/hash_util.h"
 #include "components/sync/base/mock_unrecoverable_error_handler.h"
 #include "components/sync/base/model_type_test_util.h"
-#include "components/sync/base/sync_features.h"
 #include "components/sync/engine/engine_util.h"
 #include "components/sync/engine/events/protocol_event.h"
 #include "components/sync/engine/model_safe_worker.h"
@@ -229,12 +226,8 @@ class SyncApiTest : public testing::Test {
   void TearDown() override { test_user_share_.TearDown(); }
 
  protected:
-  // Create an entry with the given |model_type|, |client_tag| and
-  // |attachment_metadata|.
-  void CreateEntryWithAttachmentMetadata(
-      const ModelType& model_type,
-      const std::string& client_tag,
-      const sync_pb::AttachmentMetadata& attachment_metadata);
+  // Create an entry with the given |model_type| and |client_tag|.
+  void CreateEntry(const ModelType& model_type, const std::string& client_tag);
 
   // Attempts to load the entry specified by |model_type| and |client_tag| and
   // returns the lookup result code.
@@ -280,17 +273,14 @@ bool SyncApiTest::ReloadDir() {
   return test_user_share_.Reload();
 }
 
-void SyncApiTest::CreateEntryWithAttachmentMetadata(
-    const ModelType& model_type,
-    const std::string& client_tag,
-    const sync_pb::AttachmentMetadata& attachment_metadata) {
+void SyncApiTest::CreateEntry(const ModelType& model_type,
+                              const std::string& client_tag) {
   WriteTransaction trans(FROM_HERE, user_share());
   ReadNode root_node(&trans);
   root_node.InitByRootLookup();
   WriteNode node(&trans);
   ASSERT_EQ(node.InitUniqueByCreation(model_type, root_node, client_tag),
             WriteNode::INIT_SUCCESS);
-  node.SetAttachmentMetadata(attachment_metadata);
 }
 
 BaseNode::InitByLookupResult SyncApiTest::LookupEntryByClientTag(
@@ -505,8 +495,6 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
 
 TEST_F(SyncApiTest, WriteAndReadPassword) {
   KeyParams params = {"localhost", "username", "passphrase"};
-  EXPECT_FALSE(base::FeatureList::IsEnabled(kFillPasswordMetadata));
-
   {
     ReadTransaction trans(FROM_HERE, user_share());
     trans.GetCryptographer()->AddKey(params);
@@ -534,11 +522,6 @@ TEST_F(SyncApiTest, WriteAndReadPassword) {
     const sync_pb::PasswordSpecificsData& data =
         password_node.GetPasswordSpecifics();
     EXPECT_EQ(kPasswordValue, data.password_value());
-    // Check that when feature is disabled nothing appears in the unencrypted
-    // field.
-    EXPECT_FALSE(password_node.GetEntitySpecifics()
-                     .password()
-                     .has_unencrypted_metadata());
   }
 }
 
@@ -549,11 +532,6 @@ TEST_F(SyncApiTest, WritePasswordAndCheckMetadata) {
     trans.GetCryptographer()->AddKey(params);
   }
 
-  base::FieldTrialList field_trial_list(nullptr);
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(kFillPasswordMetadata);
-
-  EXPECT_TRUE(base::FeatureList::IsEnabled(kFillPasswordMetadata));
   {
     WriteTransaction trans(FROM_HERE, user_share());
     ReadNode root_node(&trans);
@@ -738,57 +716,6 @@ TEST_F(SyncApiTest, GetTotalNodeCountMultipleChildren) {
   ignore_result(MakeBookmarkWithParent(user_share(), child1, nullptr));
   EXPECT_EQ(6, GetTotalNodeCount(user_share(), type_root));
   EXPECT_EQ(4, GetTotalNodeCount(user_share(), parent));
-}
-
-// Verify that Directory keeps track of which attachments are referenced by
-// which entries.
-TEST_F(SyncApiTest, AttachmentLinking) {
-  // Add an entry with an attachment.
-  std::string tag1("some tag");
-  AttachmentId attachment_id(AttachmentId::Create(0, 0));
-  sync_pb::AttachmentMetadata attachment_metadata;
-  sync_pb::AttachmentMetadataRecord* record = attachment_metadata.add_record();
-  *record->mutable_id() = attachment_id.GetProto();
-  ASSERT_FALSE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
-  CreateEntryWithAttachmentMetadata(PREFERENCES, tag1, attachment_metadata);
-
-  // See that the directory knows it's linked.
-  ASSERT_TRUE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
-
-  // Add a second entry referencing the same attachment.
-  std::string tag2("some other tag");
-  CreateEntryWithAttachmentMetadata(PREFERENCES, tag2, attachment_metadata);
-
-  // See that the directory knows it's still linked.
-  ASSERT_TRUE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
-
-  // Tombstone the first entry.
-  ReplaceWithTombstone(PREFERENCES, tag1);
-
-  // See that the attachment is still considered linked because the entry hasn't
-  // been purged from the Directory.
-  ASSERT_TRUE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
-
-  // Save changes and see that the entry is truly gone.
-  ASSERT_TRUE(dir()->SaveChanges());
-  ASSERT_EQ(LookupEntryByClientTag(PREFERENCES, tag1),
-            WriteNode::INIT_FAILED_ENTRY_NOT_GOOD);
-
-  // However, the attachment is still linked.
-  ASSERT_TRUE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
-
-  // Save, destroy, and recreate the directory.  See that it's still linked.
-  ASSERT_TRUE(ReloadDir());
-  ASSERT_TRUE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
-
-  // Tombstone the second entry, save changes, see that it's truly gone.
-  ReplaceWithTombstone(PREFERENCES, tag2);
-  ASSERT_TRUE(dir()->SaveChanges());
-  ASSERT_EQ(LookupEntryByClientTag(PREFERENCES, tag2),
-            WriteNode::INIT_FAILED_ENTRY_NOT_GOOD);
-
-  // Finally, the attachment is no longer linked.
-  ASSERT_FALSE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
 }
 
 // This tests directory integrity in the case of creating a new unique node
@@ -2094,9 +2021,6 @@ TEST_F(SyncManagerTest, UpdatePasswordSetPasswordSpecifics) {
 TEST_F(SyncManagerTest, UpdatePasswordNewPassphrase) {
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
   sync_pb::EntitySpecifics entity_specifics;
-  base::FieldTrialList field_trial_list(nullptr);
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(kFillPasswordMetadata);
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     Cryptographer* cryptographer = trans.GetCryptographer();
@@ -2171,8 +2095,6 @@ TEST_F(SyncManagerTest, UpdatePasswordNewPassphrase) {
 // Passwords have their own handling for encryption. Verify it does not result
 // in unnecessary writes via ReencryptEverything.
 TEST_F(SyncManagerTest, UpdatePasswordReencryptEverything) {
-  EXPECT_FALSE(base::FeatureList::IsEnabled(kFillPasswordMetadata));
-
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
   sync_pb::EntitySpecifics entity_specifics;
   {
@@ -2203,9 +2125,6 @@ TEST_F(SyncManagerTest, UpdatePasswordReencryptEverything) {
 // unsynced, when data was written to the unencrypted metadata field.
 TEST_F(SyncManagerTest, UpdatePasswordReencryptEverythingFillMetadata) {
   base::FieldTrialList field_trial_list(nullptr);
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(kFillPasswordMetadata);
-  EXPECT_TRUE(base::FeatureList::IsEnabled(kFillPasswordMetadata));
 
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
   sync_pb::EntitySpecifics entity_specifics;
@@ -2252,9 +2171,6 @@ TEST_F(SyncManagerTest, UpdatePasswordReencryptEverythingFillMetadata) {
 TEST_F(SyncManagerTest,
        UpdatePasswordReencryptEverythingDontMarkUnsyncWhenNotNeeded) {
   base::FieldTrialList field_trial_list(nullptr);
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(kFillPasswordMetadata);
-  EXPECT_TRUE(base::FeatureList::IsEnabled(kFillPasswordMetadata));
 
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
   sync_pb::EntitySpecifics entity_specifics;
@@ -3403,66 +3319,6 @@ TEST_F(SyncManagerChangeProcessingTest, DeletionsAndChanges) {
   // Deletes should appear before updates.
   EXPECT_LT(child_pos, folder_a_pos);
   EXPECT_LT(folder_b_pos, folder_a_pos);
-}
-
-// See that attachment metadata changes are not filtered out by
-// SyncManagerImpl::VisiblePropertiesDiffer.
-TEST_F(SyncManagerChangeProcessingTest, AttachmentMetadataOnlyChanges) {
-  // Create an article with no attachments.  See that a change is generated.
-  int64_t article_id = kInvalidId;
-  {
-    syncable::WriteTransaction trans(FROM_HERE, syncable::SYNCER,
-                                     share()->directory.get());
-    int64_t type_root = GetIdForDataType(ARTICLES);
-    syncable::Entry root(&trans, syncable::GET_BY_HANDLE, type_root);
-    ASSERT_TRUE(root.good());
-    syncable::MutableEntry article(&trans, syncable::CREATE, ARTICLES,
-                                   root.GetId(), "article");
-    ASSERT_TRUE(article.good());
-    SetNodeProperties(&article);
-    article_id = article.GetMetahandle();
-  }
-  ASSERT_EQ(1UL, GetChangeListSize());
-  FindChangeInList(article_id, ChangeRecord::ACTION_ADD);
-  ClearChangeList();
-
-  // Modify the article by adding one attachment.  Don't touch anything else.
-  // See that a change is generated.
-  {
-    syncable::WriteTransaction trans(FROM_HERE, syncable::SYNCER,
-                                     share()->directory.get());
-    syncable::MutableEntry article(&trans, syncable::GET_BY_HANDLE, article_id);
-    sync_pb::AttachmentMetadata metadata;
-    *metadata.add_record()->mutable_id() = CreateAttachmentIdProto(0, 0);
-    article.PutAttachmentMetadata(metadata);
-  }
-  ASSERT_EQ(1UL, GetChangeListSize());
-  FindChangeInList(article_id, ChangeRecord::ACTION_UPDATE);
-  ClearChangeList();
-
-  // Modify the article by replacing its attachment with a different one.  See
-  // that a change is generated.
-  {
-    syncable::WriteTransaction trans(FROM_HERE, syncable::SYNCER,
-                                     share()->directory.get());
-    syncable::MutableEntry article(&trans, syncable::GET_BY_HANDLE, article_id);
-    sync_pb::AttachmentMetadata metadata = article.GetAttachmentMetadata();
-    *metadata.add_record()->mutable_id() = CreateAttachmentIdProto(0, 0);
-    article.PutAttachmentMetadata(metadata);
-  }
-  ASSERT_EQ(1UL, GetChangeListSize());
-  FindChangeInList(article_id, ChangeRecord::ACTION_UPDATE);
-  ClearChangeList();
-
-  // Modify the article by replacing its attachment metadata with the same
-  // attachment metadata.  No change should be generated.
-  {
-    syncable::WriteTransaction trans(FROM_HERE, syncable::SYNCER,
-                                     share()->directory.get());
-    syncable::MutableEntry article(&trans, syncable::GET_BY_HANDLE, article_id);
-    article.PutAttachmentMetadata(article.GetAttachmentMetadata());
-  }
-  ASSERT_EQ(0UL, GetChangeListSize());
 }
 
 // During initialization SyncManagerImpl loads sqlite database. If it fails to

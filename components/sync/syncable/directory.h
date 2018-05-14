@@ -8,7 +8,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <memory>
 #include <set>
 #include <string>
@@ -16,13 +15,13 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/circular_deque.h"
 #include "base/containers/hash_tables.h"
 #include "base/files/file_util.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/values.h"
 #include "components/sync/base/weak_handle.h"
-#include "components/sync/model/attachments/attachment_id.h"
 #include "components/sync/syncable/dir_open_result.h"
 #include "components/sync/syncable/entry.h"
 #include "components/sync/syncable/entry_kernel.h"
@@ -73,9 +72,6 @@ class Directory {
       std::unordered_map<int64_t, std::unique_ptr<EntryKernel>>;
   using IdsMap = std::unordered_map<std::string, EntryKernel*>;
   using TagsMap = std::unordered_map<std::string, EntryKernel*>;
-  using AttachmentIdUniqueId = std::string;
-  using IndexByAttachmentId =
-      std::unordered_map<AttachmentIdUniqueId, MetahandleSet>;
 
   static const base::FilePath::CharType kSyncDatabaseFilename[];
 
@@ -199,17 +195,6 @@ class Directory {
     // Contains non-deleted items, indexed according to parent and position
     // within parent.  Protected by the ScopedKernelLock.
     ParentChildIndex parent_child_index;
-
-    // This index keeps track of which metahandles refer to a given attachment.
-    // Think of it as the inverse of EntryKernel's AttachmentMetadata Records.
-    //
-    // Because entries can be undeleted (e.g. PutIsDel(false)), entries should
-    // not removed from the index until they are actually deleted from memory.
-    //
-    // All access should go through IsAttachmentLinked,
-    // RemoveFromAttachmentIndex, AddToAttachmentIndex, and
-    // UpdateAttachmentIndex methods to avoid iterator invalidation errors.
-    IndexByAttachmentId index_by_attachment_id;
 
     // 3 in-memory indices on bits used extremely frequently by the syncer.
     // |unapplied_update_metahandles| is keyed by the server model type.
@@ -348,7 +333,7 @@ class Directory {
   // Called to set the unrecoverable error on the directory and to propagate
   // the error to upper layers.
   void OnUnrecoverableError(const BaseTransaction* trans,
-                            const tracked_objects::Location& location,
+                            const base::Location& location,
                             const std::string& message);
 
   DeleteJournal* delete_journal();
@@ -477,41 +462,14 @@ class Directory {
   // WARNING! This can be slow, as it iterates over all entries for a type.
   bool ResetVersionsForType(BaseWriteTransaction* trans, ModelType type);
 
-  // Returns true iff the attachment identified by |attachment_id_proto| is
-  // linked to an entry.
-  //
-  // An attachment linked to a deleted entry is still considered linked if the
-  // entry hasn't yet been purged.
-  bool IsAttachmentLinked(
-      const sync_pb::AttachmentIdProto& attachment_id_proto) const;
-
-  // Given attachment id return metahandles to all entries that reference this
-  // attachment.
-  void GetMetahandlesByAttachmentId(
-      BaseTransaction* trans,
-      const sync_pb::AttachmentIdProto& attachment_id_proto,
-      Metahandles* result);
-
   // Change entry to not dirty. Used in special case when we don't want to
   // persist modified entry on disk. e.g. SyncBackupManager uses this to
   // preserve sync preferences in DB on disk.
   void UnmarkDirtyEntry(WriteTransaction* trans, Entry* entry);
 
-  // Clears |ids| and fills it with the ids of attachments that need to be
-  // uploaded to the sync server.
-  void GetAttachmentIdsToUpload(BaseTransaction* trans,
-                                ModelType type,
-                                AttachmentIdList* ids);
-
   // For new entry creation only.
   bool InsertEntry(BaseWriteTransaction* trans,
                    std::unique_ptr<EntryKernel> entry);
-
-  // Update the attachment index for |metahandle| removing it from the index
-  // under |old_metadata| entries and add it under |new_metadata| entries.
-  void UpdateAttachmentIndex(const int64_t metahandle,
-                             const sync_pb::AttachmentMetadata& old_metadata,
-                             const sync_pb::AttachmentMetadata& new_metadata);
 
   virtual EntryKernel* GetEntryById(const Id& id);
   virtual EntryKernel* GetEntryByClientTag(const std::string& tag);
@@ -564,18 +522,6 @@ class Directory {
                    BaseWriteTransaction* trans,
                    std::unique_ptr<EntryKernel> entry);
 
-  // Remove each of |metahandle|'s attachment ids from index_by_attachment_id.
-  void RemoveFromAttachmentIndex(
-      const ScopedKernelLock& lock,
-      const int64_t metahandle,
-      const sync_pb::AttachmentMetadata& attachment_metadata);
-
-  // Add each of |metahandle|'s attachment ids to the index_by_attachment_id.
-  void AddToAttachmentIndex(
-      const ScopedKernelLock& lock,
-      const int64_t metahandle,
-      const sync_pb::AttachmentMetadata& attachment_metadata);
-
   void ClearDirtyMetahandles(const ScopedKernelLock& lock);
 
   DirOpenResult OpenImpl(
@@ -617,7 +563,7 @@ class Directory {
   void GetChildSetForKernel(
       BaseTransaction*,
       EntryKernel* kernel_,
-      std::deque<const OrderedChildSet*>* child_sets) const;
+      base::circular_deque<const OrderedChildSet*>* child_sets) const;
 
   // Append the handles of the children of |parent_id| to |result|.
   void AppendChildHandles(const ScopedKernelLock& lock,

@@ -35,7 +35,6 @@
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
-#include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/policy/schema_registry_service.h"
@@ -50,9 +49,9 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/web_data_service_factory.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
@@ -65,11 +64,11 @@
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database_params.h"
-#include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/history/core/test/history_service_test_util.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
-#include "components/offline_pages/features/features.h"
+#include "components/offline_pages/buildflags/buildflags.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/history_index_restore_observer.h"
 #include "components/omnibox/browser/in_memory_url_index.h"
@@ -78,7 +77,6 @@
 #include "components/policy/core/common/policy_service_impl.h"
 #include "components/policy/core/common/schema.h"
 #include "components/prefs/testing_pref_store.h"
-#include "components/proxy_config/pref_proxy_config_tracker.h"
 #include "components/sync/model/fake_sync_change_processor.h"
 #include "components/sync/model/sync_error_factory_mock.h"
 #include "components/sync_preferences/pref_service_mock_factory.h"
@@ -148,28 +146,6 @@ namespace {
 // Default profile name
 const char kTestingProfile[] = "testing_profile";
 
-// Task used to make sure history has finished processing a request. Intended
-// for use with BlockUntilHistoryProcessesPendingRequests.
-
-class QuittingHistoryDBTask : public history::HistoryDBTask {
- public:
-  QuittingHistoryDBTask() {}
-
-  bool RunOnDBThread(history::HistoryBackend* backend,
-                     history::HistoryDatabase* db) override {
-    return true;
-  }
-
-  void DoneRunOnMainThread() override {
-    base::MessageLoop::current()->QuitWhenIdle();
-  }
-
- private:
-  ~QuittingHistoryDBTask() override {}
-
-  DISALLOW_COPY_AND_ASSIGN(QuittingHistoryDBTask);
-};
-
 class TestExtensionURLRequestContext : public net::URLRequestContext {
  public:
   TestExtensionURLRequestContext() {
@@ -206,10 +182,10 @@ class TestExtensionURLRequestContextGetter
 
 std::unique_ptr<KeyedService> BuildHistoryService(
     content::BrowserContext* context) {
-  return base::MakeUnique<history::HistoryService>(
-      base::MakeUnique<ChromeHistoryClient>(
+  return std::make_unique<history::HistoryService>(
+      std::make_unique<ChromeHistoryClient>(
           BookmarkModelFactory::GetForBrowserContext(context)),
-      base::MakeUnique<history::ContentVisitDelegate>(context));
+      std::make_unique<history::ContentVisitDelegate>(context));
 }
 
 std::unique_ptr<KeyedService> BuildInMemoryURLIndex(
@@ -229,7 +205,7 @@ std::unique_ptr<KeyedService> BuildBookmarkModel(
     content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
   std::unique_ptr<BookmarkModel> bookmark_model(
-      new BookmarkModel(base::MakeUnique<ChromeBookmarkClient>(
+      new BookmarkModel(std::make_unique<ChromeBookmarkClient>(
           profile, ManagedBookmarkServiceFactory::GetForProfile(profile))));
   bookmark_model->Load(profile->GetPrefs(), profile->GetPath(),
                        profile->GetIOTaskRunner(),
@@ -247,18 +223,17 @@ void TestProfileErrorCallback(WebDataServiceWrapper::ErrorType error_type,
 std::unique_ptr<KeyedService> BuildWebDataService(
     content::BrowserContext* context) {
   const base::FilePath& context_path = context->GetPath();
-  return base::MakeUnique<WebDataServiceWrapper>(
+  return std::make_unique<WebDataServiceWrapper>(
       context_path, g_browser_process->GetApplicationLocale(),
       BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::DB),
       sync_start_util::GetFlareForSyncableService(context_path),
-      &TestProfileErrorCallback);
+      base::BindRepeating(&TestProfileErrorCallback));
 }
 
 #if BUILDFLAG(ENABLE_OFFLINE_PAGES)
 std::unique_ptr<KeyedService> BuildOfflinePageModel(
     content::BrowserContext* context) {
-  return base::MakeUnique<offline_pages::StubOfflinePageModel>();
+  return std::make_unique<offline_pages::StubOfflinePageModel>();
 }
 #endif
 
@@ -346,7 +321,7 @@ TestingProfile::TestingProfile(
     const TestingFactories& factories,
     const std::string& profile_name)
     : start_time_(Time::Now()),
-      prefs_(prefs.release()),
+      prefs_(std::move(prefs)),
       testing_prefs_(NULL),
       force_incognito_(false),
       original_profile_(parent),
@@ -395,7 +370,7 @@ TestingProfile::TestingProfile(
 }
 
 void TestingProfile::CreateTempProfileDir() {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   if (!temp_dir_.CreateUniqueTempDir()) {
     LOG(ERROR) << "Failed to create unique temporary directory.";
 
@@ -423,7 +398,7 @@ void TestingProfile::CreateTempProfileDir() {
 }
 
 void TestingProfile::Init() {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   // If threads have been initialized, we should be on the UI thread.
   DCHECK(!content::BrowserThread::IsThreadInitialized(
              content::BrowserThread::UI) ||
@@ -560,9 +535,6 @@ TestingProfile::~TestingProfile() {
   if (host_content_settings_map_.get())
     host_content_settings_map_->ShutdownOnUIThread();
 
-  if (pref_proxy_config_tracker_.get())
-    pref_proxy_config_tracker_->DetachFromPrefService();
-
   // Shutdown storage partitions before we post a task to delete
   // the resource context.
   ShutdownStoragePartitions();
@@ -576,7 +548,7 @@ TestingProfile::~TestingProfile() {
     content::RunAllPendingInMessageLoop(BrowserThread::IO);
   }
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   ignore_result(temp_dir_.Delete());
 }
 
@@ -587,7 +559,9 @@ void TestingProfile::CreateFaviconService() {
 }
 
 bool TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
-  DestroyHistoryService();
+  // Should never be created multiple times.
+  DCHECK(!HistoryServiceFactory::GetForProfileWithoutCreating(this));
+
   if (delete_file) {
     base::FilePath path = GetPath();
     path = path.Append(history::kHistoryFilename);
@@ -611,31 +585,6 @@ bool TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
   // Disable WebHistoryService by default, since it makes network requests.
   WebHistoryServiceFactory::GetInstance()->SetTestingFactory(this, nullptr);
   return true;
-}
-
-void TestingProfile::DestroyHistoryService() {
-  history::HistoryService* history_service =
-      HistoryServiceFactory::GetForProfileWithoutCreating(this);
-  if (!history_service)
-    return;
-
-  history_service->ClearCachedDataForContextID(0);
-  history_service->SetOnBackendDestroyTask(
-      base::MessageLoop::QuitWhenIdleClosure());
-  history_service->Cleanup();
-  HistoryServiceFactory::ShutdownForProfile(this);
-
-  // Wait for the backend class to terminate before deleting the files and
-  // moving to the next test. Note: if this never terminates, somebody is
-  // probably leaking a reference to the history backend, so it never calls
-  // our destroy task.
-  base::RunLoop().Run();
-
-  // Make sure we don't have any event pending that could disrupt the next
-  // test.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
-  base::RunLoop().Run();
 }
 
 void TestingProfile::CreateBookmarkModel(bool delete_file) {
@@ -688,7 +637,7 @@ base::FilePath TestingProfile::GetPath() const {
 #if !defined(OS_ANDROID)
 std::unique_ptr<content::ZoomLevelDelegate>
 TestingProfile::CreateZoomLevelDelegate(const base::FilePath& partition_path) {
-  return base::MakeUnique<ChromeZoomLevelPrefs>(
+  return std::make_unique<ChromeZoomLevelPrefs>(
       GetPrefs(), GetPath(), partition_path,
       zoom::ZoomEventManager::GetForBrowserContext(this)->GetWeakPtr());
 }
@@ -750,6 +699,12 @@ Profile* TestingProfile::GetOriginalProfile() {
   return this;
 }
 
+const Profile* TestingProfile::GetOriginalProfile() const {
+  if (original_profile_)
+    return original_profile_;
+  return this;
+}
+
 void TestingProfile::SetSupervisedUserId(const std::string& id) {
   supervised_user_id_ = id;
   if (!id.empty())
@@ -803,7 +758,7 @@ void TestingProfile::CreateTestingPrefService() {
   testing_prefs_ = new sync_preferences::TestingPrefServiceSyncable();
   prefs_.reset(testing_prefs_);
   user_prefs::UserPrefs::Set(this, prefs_.get());
-  chrome::RegisterUserProfilePrefs(testing_prefs_->registry());
+  RegisterUserProfilePrefs(testing_prefs_->registry());
 }
 
 void TestingProfile::CreatePrefServiceForSupervisedUser() {
@@ -813,7 +768,7 @@ void TestingProfile::CreatePrefServiceForSupervisedUser() {
   SupervisedUserSettingsService* supervised_user_settings =
       SupervisedUserSettingsServiceFactory::GetForProfile(this);
   scoped_refptr<PrefStore> supervised_user_prefs =
-      make_scoped_refptr(new SupervisedUserPrefStore(supervised_user_settings));
+      base::MakeRefCounted<SupervisedUserPrefStore>(supervised_user_settings);
 
   factory.set_supervised_user_prefs(supervised_user_prefs);
 
@@ -821,7 +776,7 @@ void TestingProfile::CreatePrefServiceForSupervisedUser() {
       new user_prefs::PrefRegistrySyncable);
 
   prefs_ = factory.CreateSyncable(registry.get());
-  chrome::RegisterUserProfilePrefs(registry.get());
+  RegisterUserProfilePrefs(registry.get());
   user_prefs::UserPrefs::Set(this, prefs_.get());
 }
 
@@ -830,8 +785,8 @@ void TestingProfile::CreateIncognitoPrefService() {
   DCHECK(!testing_prefs_);
   // Simplified version of ProfileImpl::GetOffTheRecordPrefs(). Note this
   // leaves testing_prefs_ unset.
-  prefs_.reset(CreateIncognitoPrefServiceSyncable(
-      original_profile_->prefs_.get(), nullptr, nullptr));
+  prefs_ = CreateIncognitoPrefServiceSyncable(original_profile_->prefs_.get(),
+                                              nullptr, nullptr);
   user_prefs::UserPrefs::Set(this, prefs_.get());
 }
 
@@ -844,7 +799,9 @@ void TestingProfile::CreateProfilePolicyConnector() {
 
   if (!policy_service_) {
     std::vector<policy::ConfigurationPolicyProvider*> providers;
-    policy_service_.reset(new policy::PolicyServiceImpl(providers));
+    std::unique_ptr<policy::PolicyServiceImpl> policy_service =
+        std::make_unique<policy::PolicyServiceImpl>(std::move(providers));
+    policy_service_ = std::move(policy_service);
   }
   profile_policy_connector_.reset(new policy::ProfilePolicyConnector());
   profile_policy_connector_->InitForTesting(std::move(policy_service_));
@@ -928,45 +885,16 @@ void TestingProfile::set_last_selected_directory(const base::FilePath& path) {
   last_selected_directory_ = path;
 }
 
-PrefProxyConfigTracker* TestingProfile::GetProxyConfigTracker() {
-  if (!pref_proxy_config_tracker_.get()) {
-    // TestingProfile is used in unit tests, where local state is not available.
-    pref_proxy_config_tracker_.reset(
-        ProxyServiceFactory::CreatePrefProxyConfigTrackerOfProfile(GetPrefs(),
-                                                                   NULL));
-  }
-  return pref_proxy_config_tracker_.get();
-}
-
 void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
   history::HistoryService* history_service =
       HistoryServiceFactory::GetForProfile(this,
                                            ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(history_service);
-  DCHECK(base::MessageLoop::current());
-
-  base::CancelableTaskTracker tracker;
-  history_service->ScheduleDBTask(
-      std::unique_ptr<history::HistoryDBTask>(new QuittingHistoryDBTask()),
-      &tracker);
-  base::RunLoop().Run();
+  history::BlockUntilHistoryProcessesPendingRequests(history_service);
 }
 
 chrome_browser_net::Predictor* TestingProfile::GetNetworkPredictor() {
   return NULL;
-}
-
-DevToolsNetworkControllerHandle*
-TestingProfile::GetDevToolsNetworkControllerHandle() {
-  return NULL;
-}
-
-void TestingProfile::ClearNetworkingHistorySince(
-    base::Time time,
-    const base::Closure& completion) {
-  if (!completion.is_null()) {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, completion);
-  }
 }
 
 GURL TestingProfile::GetHomePage() {
@@ -991,6 +919,10 @@ content::SSLHostStateDelegate* TestingProfile::GetSSLHostStateDelegate() {
 
 content::PermissionManager* TestingProfile::GetPermissionManager() {
   return NULL;
+}
+
+content::BackgroundFetchDelegate* TestingProfile::GetBackgroundFetchDelegate() {
+  return nullptr;
 }
 
 content::BackgroundSyncController*
@@ -1050,6 +982,10 @@ bool TestingProfile::IsGuestSession() const {
 
 Profile::ExitType TestingProfile::GetLastSessionExitType() {
   return last_session_exited_cleanly_ ? EXIT_NORMAL : EXIT_CRASHED;
+}
+
+network::mojom::NetworkContextPtr TestingProfile::CreateMainNetworkContext() {
+  return nullptr;
 }
 
 TestingProfile::Builder::Builder()

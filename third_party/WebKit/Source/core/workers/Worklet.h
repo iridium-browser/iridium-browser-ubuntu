@@ -5,32 +5,32 @@
 #ifndef Worklet_h
 #define Worklet_h
 
+#include "base/macros.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/workers/WorkletGlobalScopeProxy.h"
+#include "core/workers/WorkletModuleResponsesMap.h"
 #include "core/workers/WorkletOptions.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class LocalFrame;
+class Document;
 class ScriptPromiseResolver;
 
 // This is the base implementation of Worklet interface defined in the spec:
 // https://drafts.css-houdini.org/worklets/#worklet
 // Although some worklets run off the main thread, this must be created and
 // destroyed on the main thread.
-class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
-                            public ScriptWrappable,
+class CORE_EXPORT Worklet : public ScriptWrappable,
                             public ContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(Worklet);
   // Eager finalization is needed to notify parent object destruction of the
   // GC-managed messaging proxy and to initiate worklet termination.
   EAGERLY_FINALIZE();
-  WTF_MAKE_NONCOPYABLE(Worklet);
 
  public:
   virtual ~Worklet();
@@ -44,14 +44,13 @@ class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
   // ContextLifecycleObserver
   void ContextDestroyed(ExecutionContext*) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  protected:
-  // The Worklet inherits the url and userAgent from the frame->document().
-  explicit Worklet(LocalFrame*);
+  explicit Worklet(Document*);
 
   // Returns one of available global scopes.
-  WorkletGlobalScopeProxy* FindAvailableGlobalScope() const;
+  WorkletGlobalScopeProxy* FindAvailableGlobalScope();
 
   size_t GetNumberOfGlobalScopes() const { return proxies_.size(); }
 
@@ -66,11 +65,25 @@ class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
   virtual bool NeedsToCreateGlobalScope() = 0;
   virtual WorkletGlobalScopeProxy* CreateGlobalScope() = 0;
 
+  // A worklet may or may not have more than one global scope. In the case where
+  // there are multiple global scopes, this function MUST be overriden. The
+  // default behavior is to return the global scope at index 0, which is for the
+  // case where there is only one global scope.
+  virtual size_t SelectGlobalScope();
+
   // "A Worklet has a list of the worklet's WorkletGlobalScopes. Initially this
   // list is empty; it is populated when the user agent chooses to create its
   // WorkletGlobalScope."
   // https://drafts.css-houdini.org/worklets/#worklet-section
-  HeapHashSet<Member<WorkletGlobalScopeProxy>> proxies_;
+  HeapVector<Member<WorkletGlobalScopeProxy>> proxies_;
+
+  // "A Worklet has a module responses map. This is a ordered map of module URLs
+  // to values that are a fetch responses. The map's entries are ordered based
+  // on their insertion order. Access to this map should be thread-safe."
+  // https://drafts.css-houdini.org/worklets/#module-responses-map
+  Member<WorkletModuleResponsesMap> module_responses_map_;
+
+  DISALLOW_COPY_AND_ASSIGN(Worklet);
 };
 
 }  // namespace blink

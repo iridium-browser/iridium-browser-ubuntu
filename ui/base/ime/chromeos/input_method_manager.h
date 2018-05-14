@@ -79,6 +79,14 @@ class UI_BASE_IME_EXPORT InputMethodManager {
     virtual void InputMethodChanged(InputMethodManager* manager,
                                     Profile* profile,
                                     bool show_message) = 0;
+    // Called when the availability of any of the extra input methods (emoji,
+    // handwriting, voice) has changed. The overall state is toggle-able
+    // independently of the individual options.
+    virtual void OnExtraInputEnabledStateChange(
+        bool is_extra_input_options_enabled,
+        bool is_emoji_enabled,
+        bool is_handwriting_enabled,
+        bool is_voice_enabled){};
   };
 
   // CandidateWindowObserver is notified of events related to the candidate
@@ -135,6 +143,11 @@ class UI_BASE_IME_EXPORT InputMethodManager {
     // is not active, switch to the first one in the active input method list.
     virtual void ChangeInputMethod(const std::string& input_method_id,
                                    bool show_message) = 0;
+
+    // Switching the input methods for JP106 language input keys.
+    virtual void ChangeInputMethodToJpKeyboard() = 0;
+    virtual void ChangeInputMethodToJpIme() = 0;
+    virtual void ToggleInputMethodForJpIme() = 0;
 
     // Adds one entry to the list of active input method IDs, and then starts or
     // stops the system input method framework as needed.
@@ -310,16 +323,16 @@ class UI_BASE_IME_EXPORT InputMethodManager {
   // it indicates that we should override the url back with the keyboard keyset.
   virtual void OverrideKeyboardUrlRef(const std::string& keyset) = 0;
 
-  // Returns whether the extra inputs: emoji, handwriting and voice inputs on
-  // opt-in IME menu has been enabled.
-  virtual bool IsEmojiHandwritingVoiceOnImeMenuEnabled() = 0;
-
   // Enables or disables some advanced features, e.g. handwiring, voices input.
   virtual void SetImeMenuFeatureEnabled(ImeMenuFeature feature,
                                         bool enabled) = 0;
 
   // Returns the true if the given feature is enabled.
   virtual bool GetImeMenuFeatureEnabled(ImeMenuFeature feature) const = 0;
+
+  // Notifies when any of the extra inputs (emoji, handwriting, voice) enabled
+  // status has changed.
+  virtual void NotifyObserversImeExtraInputStateChange() = 0;
 };
 
 }  // namespace input_method

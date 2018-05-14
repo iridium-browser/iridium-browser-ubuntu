@@ -9,12 +9,12 @@
 #include <stdint.h>
 
 #include <algorithm>
-#include <deque>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "base/containers/circular_deque.h"
 #include "base/logging.h"
 #include "net/spdy/core/spdy_bug_tracker.h"
 #include "net/spdy/core/spdy_protocol.h"
@@ -35,6 +35,8 @@ class PriorityWriteSchedulerPeer;
 // for each priority value.  Each PriorityInfo contains a list of streams of
 // that priority that are ready to write, as well as a timestamp of the last
 // I/O event that occurred for a stream of that priority.
+//
+// DO NOT USE. Deprecated.
 template <typename StreamIdType>
 class PriorityWriteScheduler : public WriteScheduler<StreamIdType> {
  public:
@@ -248,6 +250,17 @@ class PriorityWriteScheduler : public WriteScheduler<StreamIdType> {
   // Returns the number of ready streams.
   size_t NumReadyStreams() const override { return num_ready_streams_; }
 
+  // This function is used for debugging and test only. Returns true if a stream
+  // is ready.
+  bool IsStreamReady(StreamIdType stream_id) const {
+    auto it = stream_infos_.find(stream_id);
+    if (it == stream_infos_.end()) {
+      DLOG(INFO) << "Stream " << stream_id << " not registered";
+      return false;
+    }
+    return it->second.ready;
+  }
+
  private:
   friend class test::PriorityWriteSchedulerPeer<StreamIdType>;
 
@@ -259,8 +272,8 @@ class PriorityWriteScheduler : public WriteScheduler<StreamIdType> {
     bool ready;
   };
 
-  // 0(1) size lookup, 0(1) insert at front or back.
-  typedef std::deque<StreamInfo*> ReadyList;
+  // 0(1) size lookup, Amortized 0(1) insert at front or back.
+  using ReadyList = base::circular_deque<StreamInfo*>;
 
   // State kept for each priority level.
   struct PriorityInfo {

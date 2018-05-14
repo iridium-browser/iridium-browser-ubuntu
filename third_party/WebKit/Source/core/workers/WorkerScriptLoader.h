@@ -29,6 +29,7 @@
 #define WorkerScriptLoader_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/loader/ThreadableLoader.h"
@@ -37,11 +38,11 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Functional.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/RefCounted.h"
 #include "platform/wtf/text/StringBuilder.h"
-#include "public/platform/WebAddressSpace.h"
+#include "public/mojom/net/ip_address_space.mojom-blink.h"
 #include "public/platform/WebURLRequest.h"
+#include "services/network/public/mojom/fetch_api.mojom-blink.h"
 
 namespace blink {
 
@@ -56,24 +57,24 @@ class CORE_EXPORT WorkerScriptLoader final
   USING_FAST_MALLOC(WorkerScriptLoader);
 
  public:
-  static PassRefPtr<WorkerScriptLoader> Create() {
-    return AdoptRef(new WorkerScriptLoader());
+  static scoped_refptr<WorkerScriptLoader> Create() {
+    return base::AdoptRef(new WorkerScriptLoader());
   }
 
   void LoadSynchronously(ExecutionContext&,
                          const KURL&,
                          WebURLRequest::RequestContext,
-                         WebAddressSpace);
+                         mojom::IPAddressSpace);
 
   // Note that callbacks could be invoked before loadAsynchronously() returns.
   void LoadAsynchronously(ExecutionContext&,
                           const KURL&,
                           WebURLRequest::RequestContext,
-                          WebURLRequest::FetchRequestMode,
-                          WebURLRequest::FetchCredentialsMode,
-                          WebAddressSpace,
-                          std::unique_ptr<WTF::Closure> response_callback,
-                          std::unique_ptr<WTF::Closure> finished_callback);
+                          network::mojom::FetchRequestMode,
+                          network::mojom::FetchCredentialsMode,
+                          mojom::IPAddressSpace,
+                          base::OnceClosure response_callback,
+                          base::OnceClosure finished_callback);
 
   // This will immediately invoke |finishedCallback| if loadAsynchronously()
   // is in progress.
@@ -99,9 +100,9 @@ class CORE_EXPORT WorkerScriptLoader final
     return content_security_policy_.Release();
   }
 
-  String GetReferrerPolicy() { return referrer_policy_; }
+  const String& GetReferrerPolicy() const { return referrer_policy_; }
 
-  WebAddressSpace ResponseAddressSpace() const {
+  mojom::IPAddressSpace ResponseAddressSpace() const {
     return response_address_space_;
   }
 
@@ -131,8 +132,8 @@ class CORE_EXPORT WorkerScriptLoader final
   void ProcessContentSecurityPolicy(const ResourceResponse&);
 
   // Callbacks for loadAsynchronously().
-  std::unique_ptr<WTF::Closure> response_callback_;
-  std::unique_ptr<WTF::Closure> finished_callback_;
+  base::OnceClosure response_callback_;
+  base::OnceClosure finished_callback_;
 
   Persistent<ThreadableLoader> threadable_loader_;
   String response_encoding_;
@@ -151,7 +152,7 @@ class CORE_EXPORT WorkerScriptLoader final
   std::unique_ptr<Vector<char>> cached_metadata_;
   Persistent<ContentSecurityPolicy> content_security_policy_;
   Persistent<ExecutionContext> execution_context_;
-  WebAddressSpace response_address_space_;
+  mojom::IPAddressSpace response_address_space_;
   std::unique_ptr<Vector<String>> origin_trial_tokens_;
   String referrer_policy_;
 };

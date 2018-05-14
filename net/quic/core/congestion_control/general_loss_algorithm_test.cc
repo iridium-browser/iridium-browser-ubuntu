@@ -54,12 +54,12 @@ class GeneralLossAlgorithmTest : public QuicTest {
     if (largest_newly_acked > unacked_packets_.largest_observed()) {
       unacked_packets_.IncreaseLargestObserved(largest_newly_acked);
     }
-    SendAlgorithmInterface::CongestionVector lost_packets;
+    LostPacketVector lost_packets;
     loss_algorithm_.DetectLosses(unacked_packets_, clock_.Now(), rtt_stats_,
                                  largest_newly_acked, &lost_packets);
     ASSERT_EQ(losses_expected.size(), lost_packets.size());
     for (size_t i = 0; i < losses_expected.size(); ++i) {
-      EXPECT_EQ(lost_packets[i].first, losses_expected[i]);
+      EXPECT_EQ(lost_packets[i].packet_number, losses_expected[i]);
     }
   }
 
@@ -420,7 +420,7 @@ TEST_F(GeneralLossAlgorithmTest, IncreaseThresholdUponSpuriousLoss) {
   // Advance the time 1/4 RTT and indicate the loss was spurious.
   // The new threshold should be 1/2 RTT.
   clock_.AdvanceTime(rtt_stats_.smoothed_rtt() * (1.0f / 4));
-  if (FLAGS_quic_reloadable_flag_quic_fix_adaptive_time_loss) {
+  if (GetQuicReloadableFlag(quic_fix_adaptive_time_loss)) {
     // The flag fixes an issue where adaptive time loss would increase the
     // reordering threshold by an extra factor of two.
     clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(1));

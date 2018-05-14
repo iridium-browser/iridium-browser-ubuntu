@@ -24,16 +24,17 @@ class WorkerNavigatorBudget final
   WTF_MAKE_NONCOPYABLE(WorkerNavigatorBudget);
 
  public:
+  static const char kSupplementName[];
+
   static WorkerNavigatorBudget& From(WorkerNavigator&);
 
   static BudgetService* budget(ExecutionContext*, WorkerNavigator&);
   BudgetService* budget(ExecutionContext*);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit WorkerNavigatorBudget(WorkerNavigator&);
-  static const char* SupplementName();
 
   Member<BudgetService> budget_;
 };

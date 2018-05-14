@@ -5,7 +5,7 @@
 #ifndef EventModules_h
 #define EventModules_h
 
-#include "core/events/Event.h"
-#include "modules/EventModulesNames.h"
+#include "core/dom/events/Event.h"
+#include "modules/event_modules_names.h"
 
 #endif  // EventModules_h

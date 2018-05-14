@@ -15,7 +15,7 @@ import httplib2
 
 from google.appengine.api import users
 from google.appengine.api import app_identity
-from google.appengine.api import urlfetch
+from google.appengine.ext import ndb
 
 from dashboard import buildbucket_job
 from dashboard import can_bisect
@@ -28,13 +28,8 @@ from dashboard.common import utils
 from dashboard.models import graph_data
 from dashboard.models import try_job
 from dashboard.services import buildbucket_service
-from dashboard.services import gitiles_service
 from dashboard.services import issue_tracker_service
-from dashboard.services import rietveld_service
 
-
-# Path to the perf bisect script config file, relative to chromium/src.
-_BISECT_CONFIG_PATH = 'tools/auto_bisect/bisect.cfg'
 
 # Path to the perf trybot config file, relative to chromium/src.
 _PERF_CONFIG_PATH = 'tools/run-perf-test.cfg'
@@ -83,11 +78,18 @@ _NON_TELEMETRY_TEST_COMMANDS = {
         '--chartjson',
         '{CHROMIUM_OUTPUT_DIR}',
     ],
+    'tracing_perftests': [
+        './out/Release/tracing_perftests',
+        '--test-launcher-print-test-stdio=always',
+        '--verbose',
+    ],
 }
+_NON_TELEMETRY_ANDROID_COMMAND = 'src/build/android/test_runner.py '\
+                                 'gtest --release -s %(suite)s --verbose'
+_NON_TELEMETRY_ANDROID_SUPPORTED_TESTS = ['cc_perftests', 'tracing_perftests']
+
 _DISABLE_STORY_FILTER_SUITE_LIST = set([
     'octane',  # Has a single story.
-    'memory.top_10_mobile',  # Stories are not independent.
-    'memory.top_10_mobile_stress',  # Stories are not independent.
 ])
 
 _DISABLE_STORY_FILTER_STORY_LIST = set([
@@ -103,7 +105,6 @@ class StartBisectHandler(request_handler.RequestHandler):
   value of the "step" parameter:
     "prefill-info": Returns JSON with some info to fill into the form.
     "perform-bisect": Triggers a bisect job.
-    "perform-perf-try": Triggers a perf try job.
   """
 
   def post(self):
@@ -126,8 +127,6 @@ class StartBisectHandler(request_handler.RequestHandler):
       result = _PrefillInfo(self.request.get('test_path'))
     elif step == 'perform-bisect':
       result = self._PerformBisectStep(user)
-    elif step == 'perform-perf-try':
-      result = self._PerformPerfTryStep(user)
     else:
       result = {'error': 'Invalid parameters.'}
 
@@ -170,39 +169,17 @@ class StartBisectHandler(request_handler.RequestHandler):
         internal_only=internal_only,
         job_type='bisect')
 
+    alert_keys = self.request.get('alerts')
+    alerts = None
+    if alert_keys:
+      alerts = [ndb.Key(urlsafe=a).get() for a in json.loads(alert_keys)]
+
     try:
-      results = PerformBisect(bisect_job)
+      results = PerformBisect(bisect_job, alerts=alerts)
     except request_handler.InvalidInputError as iie:
       results = {'error': iie.message}
     if 'error' in results and bisect_job.key:
       bisect_job.key.delete()
-    return results
-
-  def _PerformPerfTryStep(self, user):
-    """Gathers the parameters required for a perf try job and starts the job."""
-    perf_config = _GetPerfTryConfig(
-        bisect_bot=self.request.get('bisect_bot'),
-        suite=self.request.get('suite'),
-        good_revision=self.request.get('good_revision'),
-        bad_revision=self.request.get('bad_revision'),
-        rerun_option=self.request.get('rerun_option'))
-
-    if 'error' in perf_config:
-      return perf_config
-
-    config_python_string = 'config = %s\n' % json.dumps(
-        perf_config, sort_keys=True, indent=2, separators=(',', ': '))
-
-    perf_job = try_job.TryJob(
-        bot=self.request.get('bisect_bot'),
-        config=config_python_string,
-        bug_id=-1,
-        email=user.email(),
-        job_type='perf-try')
-
-    results = _PerformPerfTryJob(perf_job)
-    if 'error' in results and perf_job.key:
-      perf_job.key.delete()
     return results
 
 
@@ -353,7 +330,8 @@ def GuessTargetArch(bisect_bot):
 
 
 def _GetPerfTryConfig(
-    bisect_bot, suite, good_revision, bad_revision, rerun_option=None):
+    bisect_bot, suite, good_revision, bad_revision,
+    chrome_trace_filter_string=None, atrace_filter_string=None):
   """Fills in a JSON response with the filled-in config file.
 
   Args:
@@ -361,13 +339,16 @@ def _GetPerfTryConfig(
     suite: Test suite name.
     good_revision: Known good revision number.
     bad_revision: Known bad revision number.
-    rerun_option: Optional rerun command line parameter.
+    chrome_trace_filter_string: Argument to telemetry --extra-chrome-categories.
+    atrace_filter_string: Argument to telemetry --extra-atrace-categories.
 
   Returns:
     A dictionary with the result; if successful, this will contain "config",
     which is a config string; if there's an error, this will contain "error".
   """
-  command = GuessCommand(bisect_bot, suite, rerun_option=rerun_option)
+  command = GuessCommand(
+      bisect_bot, suite, chrome_trace_filter_string=chrome_trace_filter_string,
+      atrace_filter_string=atrace_filter_string)
   if not command:
     return {'error': 'Only Telemetry is supported at the moment.'}
 
@@ -431,18 +412,21 @@ def _IsNonTelemetrySuiteName(suite):
 
 
 def GuessCommand(
-    bisect_bot, suite, story_filter=None, rerun_option=None):
+    bisect_bot, suite, story_filter=None, chrome_trace_filter_string=None,
+    atrace_filter_string=None):
   """Returns a command to use in the bisect configuration."""
   if _IsNonTelemetrySuiteName(suite):
     return _GuessCommandNonTelemetry(suite, bisect_bot)
-  return _GuessCommandTelemetry(suite, bisect_bot, story_filter, rerun_option)
+  return _GuessCommandTelemetry(
+      suite, bisect_bot, story_filter, chrome_trace_filter_string,
+      atrace_filter_string)
 
 
 def _GuessCommandNonTelemetry(suite, bisect_bot):
   """Returns a command string to use for non-Telemetry tests."""
-  if suite == 'cc_perftests' and bisect_bot.startswith('android'):
-    return ('src/build/android/test_runner.py '
-            'gtest --release -s cc_perftests --verbose')
+  if bisect_bot.startswith('android'):
+    if suite in _NON_TELEMETRY_ANDROID_SUPPORTED_TESTS:
+      return _NON_TELEMETRY_ANDROID_COMMAND % {'suite': suite}
   if suite.startswith('resource_sizes'):
     match = re.match(r'.*\((.*)\)', suite)
     if not match:
@@ -459,7 +443,7 @@ def _GuessCommandNonTelemetry(suite, bisect_bot):
   # For Windows x64, the compilation output is put in "out/Release_x64".
   # Note that the legacy bisect script always extracts binaries into Release
   # regardless of platform, so this change is only necessary for recipe bisect.
-  if _GuessBrowserName(bisect_bot) == 'release_x64':
+  if GuessBrowserName(bisect_bot) == 'release_x64':
     command[0] = command[0].replace('/Release/', '/Release_x64/')
 
   if bisect_bot.startswith('win') or bisect_bot.startswith('staging_win'):
@@ -468,7 +452,9 @@ def _GuessCommandNonTelemetry(suite, bisect_bot):
   return ' '.join(command)
 
 
-def _GuessCommandTelemetry(suite, bisect_bot, story_filter, rerun_option):
+def _GuessCommandTelemetry(
+    suite, bisect_bot, story_filter, chrome_trace_filter_string,
+    atrace_filter_string):
   """Returns a command to use given that |suite| is a Telemetry benchmark."""
   command = []
 
@@ -483,7 +469,7 @@ def _GuessCommandTelemetry(suite, bisect_bot, story_filter, rerun_option):
   command.extend([
       test_cmd,
       '-v',
-      '--browser=%s' % _GuessBrowserName(bisect_bot),
+      '--browser=%s' % GuessBrowserName(bisect_bot),
       '--output-format=chartjson',
       '--upload-results',
       '--pageset-repeat=%d' % pageset_repeat,
@@ -491,6 +477,12 @@ def _GuessCommandTelemetry(suite, bisect_bot, story_filter, rerun_option):
   ])
   if story_filter:
     command.append('--story-filter=%s' % pipes.quote(story_filter))
+
+  if chrome_trace_filter_string:
+    command.append('--extra-chrome-categories=%s' % chrome_trace_filter_string)
+
+  if atrace_filter_string:
+    command.append('--extra-atrace-categories=%s' % atrace_filter_string)
 
   # Test command might be a little different from the test name on the bots.
   if suite == 'blink_perf':
@@ -503,13 +495,10 @@ def _GuessCommandTelemetry(suite, bisect_bot, story_filter, rerun_option):
     test_name = suite
   command.append(test_name)
 
-  if rerun_option:
-    command.append(rerun_option)
-
   return ' '.join(command)
 
 
-def _GuessBrowserName(bisect_bot):
+def GuessBrowserName(bisect_bot):
   """Returns a browser name string for Telemetry to use."""
   default = 'release'
   browser_map = namespaced_stored_object.Get(_BOT_BROWSER_MAP_KEY)
@@ -549,6 +538,14 @@ def GuessStoryFilter(test_path):
     pass
   if subtest_keys:  # Stories do not have subtests.
     return ''
+
+  # memory.top_10_mobile runs pairs of "{url}" and "after_{url}" stories to
+  # gather foreground and background measurements. Story filters may be used,
+  # but we need to strip off the "after_" prefix so that both stories in the
+  # pair are always run together.
+  # TODO(crbug.com/761014): Remove when benchmark is deprecated.
+  if suite_name == 'memory.top_10_mobile' and story_name.startswith('after_'):
+    story_name = story_name[len('after_'):]
 
   # During import, some chars in story names got replaced by "_" so they
   # could be safely included in the test_path. At this point we don't know
@@ -629,15 +626,10 @@ def _CreatePatch(base_config, config_changes, config_path):
   return (patch, base_checksum, base_hashes)
 
 
-def PerformBisect(bisect_job):
+def PerformBisect(bisect_job, alerts=None):
   """Starts the bisect job.
 
   This creates a patch, uploads it, then tells Rietveld to try the patch.
-
-  TODO(qyearsley): If we want to use other tryservers sometimes in the future,
-  then we need to have some way to decide which one to use. This could
-  perhaps be passed as part of the bisect bot name, or guessed from the bisect
-  bot name.
 
   Args:
     bisect_job: A TryJob entity.
@@ -669,76 +661,16 @@ def PerformBisect(bisect_job):
   bisect_job.results_data.update(result)
   bisect_job.put()
 
+  if alerts:
+    for a in alerts:
+      a.recipe_bisects.append(bisect_job.key)
+
   if bisect_job.bug_id:
     logging.info('Commenting on bug %s for bisect job', bisect_job.bug_id)
     issue_tracker = issue_tracker_service.IssueTrackerService(
         utils.ServiceAccountHttp())
     issue_tracker.AddBugComment(bisect_job.bug_id, comment, send_email=False)
   return result
-
-
-def _PerformPerfTryJob(perf_job):
-  """Performs the perf try job on the try bot.
-
-  This creates a patch, uploads it, then tells Rietveld to try the patch.
-
-  Args:
-    perf_job: TryJob entity with initialized bot name and config.
-
-  Returns:
-    A dictionary containing the result; if successful, this dictionary contains
-    the field "issue_id", otherwise it contains "error".
-  """
-  assert perf_job.bot and perf_job.config
-
-  if not perf_job.key:
-    perf_job.put()
-
-  bot = perf_job.bot
-  email = perf_job.email
-
-  config_dict = perf_job.GetConfigDict()
-  config_dict['try_job_id'] = perf_job.key.id()
-  perf_job.config = utils.BisectConfigPythonString(config_dict)
-
-  # Get the base config file contents and make a patch.
-  try:
-    base_config = gitiles_service.FileContents(
-        'https://chromium.googlesource.com/chromium/src', 'master',
-        _PERF_CONFIG_PATH)
-  except (urlfetch.Error, gitiles_service.NotFoundError):
-    base_config = None
-
-  if not base_config:
-    return {'error': 'Error downloading base config'}
-  patch, base_checksum, base_hashes = _CreatePatch(
-      base_config, perf_job.config, _PERF_CONFIG_PATH)
-
-  # Upload the patch to Rietveld.
-  server = rietveld_service.RietveldService()
-  subject = 'Perf Try Job on behalf of %s' % email
-  issue_id, patchset_id = server.UploadPatch(subject,
-                                             patch,
-                                             base_checksum,
-                                             base_hashes,
-                                             base_config,
-                                             _PERF_CONFIG_PATH)
-
-  if not issue_id:
-    return {'error': 'Error uploading patch to rietveld_service.'}
-  url = 'https://codereview.chromium.org/%s/' % issue_id
-
-  # Tell Rietveld to try the patch.
-  master = 'tryserver.chromium.perf'
-  trypatch_success = server.TryPatch(master, issue_id, patchset_id, bot)
-  if trypatch_success:
-    # Create TryJob entity. The update_bug_with_results cron job will be
-    # tracking the job.
-    perf_job.rietveld_issue_id = int(issue_id)
-    perf_job.rietveld_patchset_id = int(patchset_id)
-    perf_job.SetStarted()
-    return {'issue_id': issue_id}
-  return {'error': 'Error starting try job. Try to fix at %s' % url}
 
 
 def LogBisectResult(job, comment):

@@ -9,6 +9,7 @@ import android.content.pm.ResolveInfo;
 
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.webapps.WebappScopePolicy;
 
 import java.util.List;
 
@@ -30,16 +31,12 @@ interface ExternalNavigationDelegate {
     boolean willChromeHandleIntent(Intent intent);
 
     /**
-     * Search for intent handlers that are specific to this URL aka, specialized apps like
-     * google maps or youtube
+     * If the current activity is a webapp, applies the webapp's scope policy and returns the
+     * result. Returns {@link WebappScopePolicy#NavigationDirective#NORMAL_BEHAVIOR} if the current
+     * activity is not a webapp.
      */
-    boolean isSpecializedHandlerAvailable(List<ResolveInfo> infos);
-
-    /**
-     * Returns true if the current activity is a webapp and {@params url} lies within the scope of
-     * that webapp.
-     */
-    boolean isWithinCurrentWebappScope(String url);
+    @WebappScopePolicy.NavigationDirective
+    int applyWebappScopePolicyForUrl(String url);
 
     /**
      * Returns the number of specialized intent handlers in {@params infos}. Specialized intent
@@ -75,7 +72,8 @@ interface ExternalNavigationDelegate {
     /**
      * Display a dialog warning the user that they may be leaving Chrome by starting this
      * intent. Give the user the opportunity to cancel the action. And if it is canceled, a
-     * navigation will happen in Chrome.
+     * navigation will happen in Chrome. Catches BadTokenExceptions caused by showing the dialog
+     * on certain devices. (crbug.com/782602)
      * @param intent The intent for external application that will be sent.
      * @param referrerUrl The referrer for the current navigation.
      * @param fallbackUrl The URL to load if the user doesn't proceed with external intent.
@@ -83,8 +81,9 @@ interface ExternalNavigationDelegate {
      * @param needsToCloseTab Whether the current tab has to be closed after the intent is sent.
      * @param proxy Whether we need to proxy the intent through AuthenticatedProxyActivity (this is
      *              used by Instant Apps intents.
+     * @return True if the function returned error free, false if it threw an exception.
      */
-    void startIncognitoIntent(Intent intent, String referrerUrl, String fallbackUrl, Tab tab,
+    boolean startIncognitoIntent(Intent intent, String referrerUrl, String fallbackUrl, Tab tab,
             boolean needsToCloseTab, boolean proxy);
 
     /**
@@ -104,6 +103,13 @@ interface ExternalNavigationDelegate {
      * @param needsToCloseTab Whether this action should close the current tab.
      */
     void startFileIntent(Intent intent, String referrerUrl, Tab tab, boolean needsToCloseTab);
+
+    /**
+     * Launches a Chrome Custom Tab to be shown on top of a WebappActivity.
+     * @param url
+     * @param launchInNewTask Whether the CCT should be launched in a new task.
+     */
+    void launchCctForWebappUrl(String url, boolean launchInNewTask);
 
     /**
      * Clobber the current tab and try not to pass an intent when it should be handled by Chrome

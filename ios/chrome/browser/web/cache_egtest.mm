@@ -4,20 +4,19 @@
 
 #import <EarlGrey/EarlGrey.h>
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
+#include "base/ios/ios_util.h"
 #include "base/strings/stringprintf.h"
-#include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/content_settings/core/common/content_settings.h"
-#include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
+#include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #include "ios/chrome/test/app/history_test_util.h"
 #include "ios/chrome/test/app/navigation_test_util.h"
-#include "ios/chrome/test/app/web_view_interaction_test_util.h"
+#import "ios/chrome/test/app/web_view_interaction_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#include "ios/chrome/test/scoped_block_popups_pref.h"
 #import "ios/testing/wait_util.h"
 #include "ios/web/public/test/http_server/html_response_provider.h"
 #import "ios/web/public/test/http_server/http_server.h"
@@ -28,6 +27,8 @@
 #error "This file requires ARC support."
 #endif
 
+using chrome_test_util::GetOriginalBrowserState;
+using chrome_test_util::TapWebViewElementWithId;
 using web::test::HttpServer;
 
 namespace {
@@ -109,44 +110,6 @@ class CacheTestResponseProvider : public web::DataResponseProvider {
   GURL third_page_url_;
 };
 
-// ScopedBlockPopupsPref modifies the block popups preference and resets the
-// preference to its original value when this object goes out of scope.
-// TODO(crbug.com/638674): Evaluate if this can move to shared code.
-class ScopedBlockPopupsPref {
- public:
-  explicit ScopedBlockPopupsPref(ContentSetting setting) {
-    original_setting_ = GetPrefValue();
-    SetPrefValue(setting);
-  }
-  ~ScopedBlockPopupsPref() { SetPrefValue(original_setting_); }
-
- private:
-  // Gets the current value of the preference.
-  ContentSetting GetPrefValue() {
-    ContentSetting popupSetting =
-        ios::HostContentSettingsMapFactory::GetForBrowserState(
-            chrome_test_util::GetOriginalBrowserState())
-            ->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_POPUPS, NULL);
-    return popupSetting;
-  }
-
-  // Sets the preference to the given value.
-  void SetPrefValue(ContentSetting setting) {
-    DCHECK(setting == CONTENT_SETTING_BLOCK ||
-           setting == CONTENT_SETTING_ALLOW);
-    ios::ChromeBrowserState* state =
-        chrome_test_util::GetOriginalBrowserState();
-    ios::HostContentSettingsMapFactory::GetForBrowserState(state)
-        ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_POPUPS, setting);
-  }
-
-  // Saves the original pref setting so that it can be restored when the scoper
-  // is destroyed.
-  ContentSetting original_setting_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedBlockPopupsPref);
-};
-
 }  // namespace
 
 // Tests the browser cache behavior when navigating to cached pages.
@@ -155,27 +118,17 @@ class ScopedBlockPopupsPref {
 
 @implementation CacheTestCase
 
-// Reloads the web view and waits for the loading to complete.
-// TODO(crbug.com/638674): Evaluate if this can move to shared code
-- (void)reloadPage {
-  [chrome_test_util::BrowserCommandDispatcherForMainBVC() reload];
-
-  [ChromeEarlGrey waitForPageToFinishLoading];
-}
-
-// Navigates back to the previous webpage.
-// TODO(crbug.com/638674): Evaluate if this can move to shared code.
-- (void)goBack {
-  [chrome_test_util::BrowserCommandDispatcherForMainBVC() goBack];
-
-  [ChromeEarlGrey waitForPageToFinishLoading];
-}
-
 // Tests caching behavior on navigate back and page reload. Navigate back should
 // use the cached page. Page reload should use cache-control in the request
 // header and show updated page.
 - (void)testCachingBehaviorOnNavigateBackAndPageReload {
-  web::test::SetUpHttpServer(base::MakeUnique<CacheTestResponseProvider>());
+  // TODO(crbug.com/747436): re-enable this test on iOS 10.3.1 and afterwards
+  // once the bug is fixed.
+  if (base::ios::IsRunningOnOrLater(10, 3, 1)) {
+    EARL_GREY_TEST_DISABLED(@"Disabled on iOS 10.3.1 and afterwards.");
+  }
+
+  web::test::SetUpHttpServer(std::make_unique<CacheTestResponseProvider>());
 
   const GURL cacheTestFirstPageURL =
       HttpServer::MakeUrl(kCacheTestFirstPageURL);
@@ -185,17 +138,18 @@ class ScopedBlockPopupsPref {
   [ChromeEarlGrey waitForWebViewContainingText:"serverHitCounter: 1"];
 
   // Navigate to another page. 2nd hit to server.
-  chrome_test_util::TapWebViewElementWithId(kCacheTestLinkID);
+  GREYAssert(chrome_test_util::TapWebViewElementWithId(kCacheTestLinkID),
+             @"Failed to tap %s", kCacheTestLinkID);
   [ChromeEarlGrey waitForWebViewContainingText:"serverHitCounter: 2"];
 
   // Navigate back. This should not hit the server. Verify the page has been
   // loaded from cache. The serverHitCounter will remain the same.
-  [self goBack];
+  [ChromeEarlGrey goBack];
   [ChromeEarlGrey waitForWebViewContainingText:"serverHitCounter: 1"];
 
   // Reload page. 3rd hit to server. Verify that page reload causes the
   // hitCounter to show updated value.
-  [self reloadPage];
+  [ChromeEarlGrey reload];
   [ChromeEarlGrey waitForWebViewContainingText:"serverHitCounter: 3"];
 
   // Verify that page reload causes Cache-Control value to be sent with request.
@@ -205,7 +159,7 @@ class ScopedBlockPopupsPref {
 // Tests caching behavior when opening new tab. New tab should not use the
 // cached page.
 - (void)testCachingBehaviorOnOpenNewTab {
-  web::test::SetUpHttpServer(base::MakeUnique<CacheTestResponseProvider>());
+  web::test::SetUpHttpServer(std::make_unique<CacheTestResponseProvider>());
 
   const GURL cacheTestFirstPageURL =
       HttpServer::MakeUrl(kCacheTestFirstPageURL);
@@ -223,8 +177,10 @@ class ScopedBlockPopupsPref {
 
   // Open the first page in a new tab. Verify that cache was not used. Must
   // first allow popups.
-  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW);
-  chrome_test_util::TapWebViewElementWithId(kCacheTestLinkID);
+  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW,
+                                   GetOriginalBrowserState());
+  GREYAssert(chrome_test_util::TapWebViewElementWithId(kCacheTestLinkID),
+             @"Failed to tap %s", kCacheTestLinkID);
   [ChromeEarlGrey waitForMainTabCount:2];
   [ChromeEarlGrey waitForPageToFinishLoading];
   [ChromeEarlGrey waitForWebViewContainingText:"First Page"];
@@ -234,10 +190,17 @@ class ScopedBlockPopupsPref {
 // Tests that cache is not used when selecting omnibox suggested website, even
 // though cache for that website exists.
 - (void)testCachingBehaviorOnSelectOmniboxSuggestion {
-  web::test::SetUpHttpServer(base::MakeUnique<CacheTestResponseProvider>());
+  // TODO(crbug.com/753098): Re-enable this test on iOS 11 iPad once
+  // grey_typeText works on iOS 11.
+  if (base::ios::IsRunningOnIOS11OrLater() && IsIPadIdiom()) {
+    EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 11.");
+  }
+
+  web::test::SetUpHttpServer(std::make_unique<CacheTestResponseProvider>());
 
   // Clear the history to ensure expected omnibox autocomplete results.
-  chrome_test_util::ClearBrowsingHistory();
+  GREYAssertTrue(chrome_test_util::ClearBrowsingHistory(),
+                 @"Clearing Browsing History timed out");
 
   const GURL cacheTestFirstPageURL =
       HttpServer::MakeUrl(kCacheTestFirstPageURL);

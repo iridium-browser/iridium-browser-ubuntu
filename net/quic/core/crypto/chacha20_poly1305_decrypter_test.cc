@@ -7,11 +7,11 @@
 #include <memory>
 
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 
-using std::string;
 
 namespace {
 
@@ -126,7 +126,7 @@ QuicData* DecryptWithNonce(ChaCha20Poly1305Decrypter* decrypter,
   std::unique_ptr<char[]> output(new char[ciphertext.length()]);
   size_t output_length = 0;
   const bool success = decrypter->DecryptPacket(
-      QuicVersionMax(), packet_number, associated_data, ciphertext,
+      QuicTransportVersionMax(), packet_number, associated_data, ciphertext,
       output.get(), &output_length, ciphertext.length());
   if (!success) {
     return nullptr;
@@ -142,12 +142,12 @@ TEST_F(ChaCha20Poly1305DecrypterTest, Decrypt) {
     bool has_pt = test_vectors[i].pt;
 
     // Decode the test vector.
-    string key = QuicTextUtils::HexDecode(test_vectors[i].key);
-    string iv = QuicTextUtils::HexDecode(test_vectors[i].iv);
-    string fixed = QuicTextUtils::HexDecode(test_vectors[i].fixed);
-    string aad = QuicTextUtils::HexDecode(test_vectors[i].aad);
-    string ct = QuicTextUtils::HexDecode(test_vectors[i].ct);
-    string pt;
+    QuicString key = QuicTextUtils::HexDecode(test_vectors[i].key);
+    QuicString iv = QuicTextUtils::HexDecode(test_vectors[i].iv);
+    QuicString fixed = QuicTextUtils::HexDecode(test_vectors[i].fixed);
+    QuicString aad = QuicTextUtils::HexDecode(test_vectors[i].aad);
+    QuicString ct = QuicTextUtils::HexDecode(test_vectors[i].ct);
+    QuicString pt;
     if (has_pt) {
       pt = QuicTextUtils::HexDecode(test_vectors[i].pt);
     }

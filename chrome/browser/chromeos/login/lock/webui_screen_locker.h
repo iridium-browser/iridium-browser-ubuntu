@@ -32,7 +32,7 @@ class WebUI;
 namespace chromeos {
 
 class ScreenLocker;
-class WebUILoginDisplay;
+class LoginDisplayWebUI;
 
 namespace login {
 class NetworkStateHelper;
@@ -86,32 +86,27 @@ class WebUIScreenLocker : public WebUILoginView,
 
   // LoginDisplay::Delegate:
   void CancelPasswordChangedFlow() override;
-  void CompleteLogin(const UserContext& user_context) override;
   base::string16 GetConnectedNetworkName() override;
   bool IsSigninInProgress() const override;
   void Login(const UserContext& user_context,
              const SigninSpecifics& specifics) override;
   void MigrateUserData(const std::string& old_password) override;
   void OnSigninScreenReady() override;
-  void OnGaiaScreenReady() override;
   void OnStartEnterpriseEnrollment() override;
   void OnStartEnableDebuggingScreen() override;
   void OnStartKioskEnableScreen() override;
   void OnStartKioskAutolaunchScreen() override;
   void ShowWrongHWIDScreen() override;
+  void ShowUpdateRequiredScreen() override;
   void ResetAutoLoginTimer() override;
   void ResyncUserData() override;
-  void SetDisplayEmail(const std::string& email) override;
-  void SetDisplayAndGivenName(const std::string& display_name,
-                              const std::string& given_name) override;
   void Signout() override;
-  bool IsUserWhitelisted(const AccountId& account_id) override;
 
   // WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
 
   // PowerManagerClient::Observer:
-  void SuspendImminent() override;
+  void SuspendImminent(power_manager::SuspendImminent::Reason reason) override;
   void SuspendDone(const base::TimeDelta& sleep_duration) override;
   void LidEventReceived(PowerManagerClient::LidState state,
                         const base::TimeTicks& time) override;
@@ -153,7 +148,7 @@ class WebUIScreenLocker : public WebUILoginView,
   std::unique_ptr<SignInScreenController> signin_screen_controller_;
 
   // Login UI implementation instance.
-  std::unique_ptr<WebUILoginDisplay> login_display_;
+  std::unique_ptr<LoginDisplayWebUI> login_display_;
 
   // Tracks when the lock window is displayed and ready.
   bool lock_ready_ = false;

@@ -16,7 +16,6 @@ import org.chromium.android_webview.AwResource;
 import org.chromium.android_webview.shell.R;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 
 /**
  * This is a service for imitating a second browser process in the application.
@@ -52,13 +51,12 @@ public class SecondBrowserProcess extends Service {
         return START_STICKY;
     }
 
-    @SuppressFBWarnings("DMI_HARDCODED_ABSOLUTE_FILENAME")
     private void startBrowserProcess() throws Exception {
         CommandLine.initFromFile("/data/local/tmp/android-webview-command-line");
         AwResource.setResources(this.getResources());
         AwResource.setConfigKeySystemUuidMapping(R.array.config_key_system_uuid_mapping);
         ContextUtils.initApplicationContext(getApplicationContext());
-        AwBrowserProcess.loadLibrary();
+        AwBrowserProcess.loadLibrary(null);
         AwBrowserProcess.start();
     }
 }

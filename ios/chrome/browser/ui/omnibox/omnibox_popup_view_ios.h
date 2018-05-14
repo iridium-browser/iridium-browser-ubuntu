@@ -9,54 +9,58 @@
 
 #include <memory>
 
-#include "base/mac/scoped_nsobject.h"
 #include "base/strings/string16.h"
 #include "components/omnibox/browser/omnibox_popup_view.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_popup_mediator.h"
+#include "ios/chrome/browser/ui/omnibox/omnibox_popup_provider.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_popup_view_controller.h"
 
-struct AutocompleteMatch;
 class OmniboxEditModel;
-@class OmniboxPopupMaterialViewController;
+@class OmniboxPopupMediator;
 class OmniboxPopupModel;
-@protocol OmniboxPopupPositioner;
-class OmniboxViewIOS;
+class OmniboxPopupViewSuggestionsDelegate;
+struct AutocompleteMatch;
 
 // iOS implementation of AutocompletePopupView.
-class OmniboxPopupViewIOS : public OmniboxPopupView {
+class OmniboxPopupViewIOS : public OmniboxPopupView,
+                            public OmniboxPopupMediatorDelegate,
+                            public OmniboxPopupProvider {
  public:
-  OmniboxPopupViewIOS(OmniboxViewIOS* edit_view,
-                      OmniboxEditModel* edit_model,
-                      id<OmniboxPopupPositioner> positioner);
+  OmniboxPopupViewIOS(OmniboxEditModel* edit_model,
+                      OmniboxPopupViewSuggestionsDelegate* delegate);
   ~OmniboxPopupViewIOS() override;
+
+  // Popup model used for this.
+  OmniboxPopupModel* model() const;
 
   // AutocompletePopupView implementation.
   bool IsOpen() const override;
   void InvalidateLine(size_t line) override {}
   void OnLineSelected(size_t line) override {}
   void UpdatePopupAppearance() override;
-  gfx::Rect GetTargetBounds() override;
+  void OnMatchIconUpdated(size_t match_index) override {}
   void PaintUpdatesNow() override {}
   void OnDragCanceled() override {}
 
-  void OpenURLForRow(size_t row);
-  void DidScroll();
   void UpdateEditViewIcon();
-  void CopyToOmnibox(const base::string16& text);
-  void SetTextAlignment(NSTextAlignment alignment);
-  bool IsStarredMatch(const AutocompleteMatch& match) const;
-  void DeleteMatch(const AutocompleteMatch& match) const;
+
+  // OmniboxPopupProvider implemetation.
+  void SetTextAlignment(NSTextAlignment alignment) override;
+  bool IsPopupOpen() override;
+
+  // OmniboxPopupViewControllerDelegate implementation.
+  bool IsStarredMatch(const AutocompleteMatch& match) const override;
+  void OnMatchSelected(const AutocompleteMatch& match, size_t row) override;
+  void OnMatchSelectedForAppending(const AutocompleteMatch& match) override;
+  void OnMatchSelectedForDeletion(const AutocompleteMatch& match) override;
+  void OnScroll() override;
+
+  void SetMediator(OmniboxPopupMediator* mediator) { mediator_ = mediator; }
 
  private:
   std::unique_ptr<OmniboxPopupModel> model_;
-  OmniboxViewIOS* edit_view_;  // weak, owns this instance
-  __weak id<OmniboxPopupPositioner> positioner_;
-  // View that contains the omnibox popup table view and shadow.
-  base::scoped_nsobject<UIView> popupView_;
-  base::scoped_nsobject<OmniboxPopupMaterialViewController> popup_controller_;
-  bool is_open_;
-  // Animate the appearance of the omnibox popup view.
-  void AnimateDropdownExpansion(CGFloat parentHeight);
-  // Animate the disappearance of the omnibox popup view.
-  void AnimateDropdownCollapse();
+  OmniboxPopupViewSuggestionsDelegate* delegate_;  // weak
+  OmniboxPopupMediator* mediator_;
 };
 
 #endif  // IOS_CHROME_BROWSER_UI_OMNIBOX_OMNIBOX_POPUP_VIEW_IOS_H_

@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/api/mediaconstraintsinterface.h"
+#include "api/mediaconstraintsinterface.h"
 
-#include "webrtc/api/peerconnectioninterface.h"
-#include "webrtc/rtc_base/stringencode.h"
+#include "api/peerconnectioninterface.h"
+#include "rtc_base/stringencode.h"
 
 namespace {
 
@@ -67,7 +67,7 @@ void ConstraintToOptional(const webrtc::MediaConstraintsInterface* constraints,
   T value;
   bool present = FindConstraint<T>(constraints, key, &value, nullptr);
   if (present) {
-    *value_out = rtc::Optional<T>(value);
+    *value_out = value;
   }
 }
 }  // namespace
@@ -197,7 +197,7 @@ void CopyConstraintsIntoRtcConfiguration(
                  &configuration->media_config.enable_dscp, nullptr);
   FindConstraint(
       constraints, MediaConstraintsInterface::kCpuOveruseDetection,
-      &configuration->media_config.video.enable_cpu_overuse_detection, nullptr);
+      &configuration->media_config.video.enable_cpu_adaptation, nullptr);
   FindConstraint(constraints, MediaConstraintsInterface::kEnableRtpDataChannels,
                  &configuration->enable_rtp_data_channel, nullptr);
   // Find Suspend Below Min Bitrate constraint.
@@ -268,7 +268,7 @@ void CopyConstraintsIntoAudioOptions(
   // When |kAudioNetworkAdaptorConfig| is defined, it both means that audio
   // network adaptor is desired, and provides the config string.
   if (options->audio_network_adaptor_config) {
-    options->audio_network_adaptor = rtc::Optional<bool>(true);
+    options->audio_network_adaptor = true;
   }
 }
 

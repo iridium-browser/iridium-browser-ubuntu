@@ -447,6 +447,51 @@ TEST_F(TextfieldModelTest, Word) {
   TextfieldModel model(NULL);
   model.Append(
       base::ASCIIToUTF16("The answer to Life, the Universe, and Everything"));
+#if defined(OS_WIN)  // Move right by word includes space/punctuation.
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_NONE);
+  EXPECT_EQ(4U, model.GetCursorPosition());
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_NONE);
+  EXPECT_EQ(11U, model.GetCursorPosition());
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_NONE);
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_NONE);
+  // Should pass the non word chars ', ' and be at the start of "the".
+  EXPECT_EQ(20U, model.GetCursorPosition());
+
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_RETAIN);
+  EXPECT_EQ(24U, model.GetCursorPosition());
+  EXPECT_STR_EQ("the ", model.GetSelectedText());
+
+  // Move to the end.
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_RETAIN);
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_RETAIN);
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_RETAIN);
+  EXPECT_STR_EQ("the Universe, and Everything", model.GetSelectedText());
+  // Should be safe to go next word at the end.
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_RETAIN);
+  EXPECT_STR_EQ("the Universe, and Everything", model.GetSelectedText());
+  model.InsertChar('2');
+  EXPECT_EQ(21U, model.GetCursorPosition());
+
+  // Now backwards.
+  model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_LEFT,
+                   gfx::SELECTION_NONE);  // leave 2.
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_LEFT, gfx::SELECTION_RETAIN);
+  EXPECT_EQ(14U, model.GetCursorPosition());
+  EXPECT_STR_EQ("Life, ", model.GetSelectedText());
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_LEFT, gfx::SELECTION_RETAIN);
+  EXPECT_STR_EQ("to Life, ", model.GetSelectedText());
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_LEFT, gfx::SELECTION_RETAIN);
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_LEFT, gfx::SELECTION_RETAIN);
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_LEFT,
+                   gfx::SELECTION_RETAIN);  // Now at start.
+  EXPECT_STR_EQ("The answer to Life, ", model.GetSelectedText());
+  // Should be safe to go to the previous word at the beginning.
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_LEFT, gfx::SELECTION_RETAIN);
+  EXPECT_STR_EQ("The answer to Life, ", model.GetSelectedText());
+  model.ReplaceChar('4');
+  EXPECT_EQ(base::string16(), model.GetSelectedText());
+  EXPECT_STR_EQ("42", model.text());
+#else  // Non-Windows: move right by word does NOT include space/punctuation.
   model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_NONE);
   EXPECT_EQ(3U, model.GetCursorPosition());
   model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_NONE);
@@ -490,6 +535,7 @@ TEST_F(TextfieldModelTest, Word) {
   model.ReplaceChar('4');
   EXPECT_EQ(base::string16(), model.GetSelectedText());
   EXPECT_STR_EQ("42", model.text());
+#endif
 }
 
 TEST_F(TextfieldModelTest, SetText) {
@@ -676,6 +722,55 @@ TEST_F(TextfieldModelTest, RangeTest) {
   EXPECT_EQ(0U, range.start());
   EXPECT_EQ(0U, range.end());
 
+#if defined(OS_WIN)  // Move/select right by word includes space/punctuation.
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_RETAIN);
+  range = model.render_text()->selection();
+  EXPECT_FALSE(range.is_empty());
+  EXPECT_FALSE(range.is_reversed());
+  EXPECT_EQ(0U, range.start());
+  EXPECT_EQ(6U, range.end());
+
+  model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_LEFT,
+                   gfx::SELECTION_RETAIN);
+  range = model.render_text()->selection();
+  EXPECT_FALSE(range.is_empty());
+  EXPECT_EQ(0U, range.start());
+  EXPECT_EQ(5U, range.end());
+
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_LEFT, gfx::SELECTION_RETAIN);
+  range = model.render_text()->selection();
+  EXPECT_TRUE(range.is_empty());
+  EXPECT_EQ(0U, range.start());
+  EXPECT_EQ(0U, range.end());
+
+  // now from the end.
+  model.MoveCursor(gfx::LINE_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_NONE);
+  range = model.render_text()->selection();
+  EXPECT_TRUE(range.is_empty());
+  EXPECT_EQ(11U, range.start());
+  EXPECT_EQ(11U, range.end());
+
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_LEFT, gfx::SELECTION_RETAIN);
+  range = model.render_text()->selection();
+  EXPECT_FALSE(range.is_empty());
+  EXPECT_TRUE(range.is_reversed());
+  EXPECT_EQ(11U, range.start());
+  EXPECT_EQ(6U, range.end());
+  model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_RIGHT,
+                   gfx::SELECTION_RETAIN);
+  range = model.render_text()->selection();
+  EXPECT_FALSE(range.is_empty());
+  EXPECT_TRUE(range.is_reversed());
+  EXPECT_EQ(11U, range.start());
+  EXPECT_EQ(7U, range.end());
+
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_RETAIN);
+  range = model.render_text()->selection();
+  EXPECT_TRUE(range.is_empty());
+  EXPECT_EQ(11U, range.start());
+  EXPECT_EQ(11U, range.end());
+#else
+  // Non-Windows: move/select right by word does NOT include space/punctuation.
   model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_RETAIN);
   range = model.render_text()->selection();
   EXPECT_FALSE(range.is_empty());
@@ -723,6 +818,7 @@ TEST_F(TextfieldModelTest, RangeTest) {
   EXPECT_TRUE(range.is_empty());
   EXPECT_EQ(11U, range.start());
   EXPECT_EQ(11U, range.end());
+#endif
 
   // Select All
   model.MoveCursor(gfx::LINE_BREAK, gfx::CURSOR_LEFT, gfx::SELECTION_RETAIN);
@@ -784,6 +880,16 @@ TEST_F(TextfieldModelTest, SelectionTest) {
   gfx::Range selection = model.render_text()->selection();
   EXPECT_EQ(gfx::Range(0), selection);
 
+#if defined(OS_WIN)  // Select word right includes trailing space/punctuation.
+  model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_RETAIN);
+  selection = model.render_text()->selection();
+  EXPECT_EQ(gfx::Range(0, 6), selection);
+
+  model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_LEFT,
+                   gfx::SELECTION_RETAIN);
+  selection = model.render_text()->selection();
+  EXPECT_EQ(gfx::Range(0, 5), selection);
+#else  // Non-Windows: select word right does NOT include space/punctuation.
   model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_RETAIN);
   selection = model.render_text()->selection();
   EXPECT_EQ(gfx::Range(0, 5), selection);
@@ -792,11 +898,11 @@ TEST_F(TextfieldModelTest, SelectionTest) {
                    gfx::SELECTION_RETAIN);
   selection = model.render_text()->selection();
   EXPECT_EQ(gfx::Range(0, 4), selection);
+#endif
 
   model.MoveCursor(gfx::WORD_BREAK, gfx::CURSOR_LEFT, gfx::SELECTION_RETAIN);
   selection = model.render_text()->selection();
   EXPECT_EQ(gfx::Range(0), selection);
-
   // now from the end.
   model.MoveCursor(gfx::LINE_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_NONE);
   selection = model.render_text()->selection();
@@ -867,7 +973,7 @@ TEST_F(TextfieldModelTest, CompositionTextTest) {
 
   ui::CompositionText composition;
   composition.text = base::ASCIIToUTF16("678");
-  composition.underlines.push_back(ui::CompositionUnderline(0, 3, 0, false));
+  composition.ime_text_spans.push_back(ui::ImeTextSpan(0, 3, 0, false));
 
   // Cursor should be at the end of composition when characters are just typed.
   composition.selection = gfx::Range(3, 3);
@@ -881,15 +987,15 @@ TEST_F(TextfieldModelTest, CompositionTextTest) {
 
   // Restart composition with targeting "67" in "678".
   composition.selection = gfx::Range(1, 3);
-  composition.underlines.clear();
-  composition.underlines.push_back(ui::CompositionUnderline(0, 2, 0, true));
-  composition.underlines.push_back(ui::CompositionUnderline(2, 3, 0, false));
+  composition.ime_text_spans.clear();
+  composition.ime_text_spans.push_back(ui::ImeTextSpan(0, 2, 0, true));
+  composition.ime_text_spans.push_back(ui::ImeTextSpan(2, 3, 0, false));
   model.SetCompositionText(composition);
   EXPECT_TRUE(model.HasCompositionText());
   EXPECT_TRUE(model.HasSelection());
 #if !defined(OS_CHROMEOS)
   // |composition.selection| is ignored because SetCompositionText checks
-  // if a bold underline exists first.
+  // if a thick underline exists first.
   EXPECT_EQ(gfx::Range(5, 7), model.render_text()->selection());
   EXPECT_EQ(7U, model.render_text()->cursor_position());
 #else
@@ -922,9 +1028,9 @@ TEST_F(TextfieldModelTest, CompositionTextTest) {
   composition_text_confirmed_or_cleared_ = false;
   model.MoveCursor(gfx::LINE_BREAK, gfx::CURSOR_RIGHT, gfx::SELECTION_NONE);
 
-  // Also test the case where a selection exists but a bold underline doesn't.
+  // Also test the case where a selection exists but a thick underline doesn't.
   composition.selection = gfx::Range(0, 1);
-  composition.underlines.clear();
+  composition.ime_text_spans.clear();
   model.SetCompositionText(composition);
   EXPECT_STR_EQ("1234567890678", model.text());
   EXPECT_TRUE(model.HasSelection());
@@ -1475,7 +1581,7 @@ TEST_F(TextfieldModelTest, UndoRedo_CompositionText) {
 
   ui::CompositionText composition;
   composition.text = base::ASCIIToUTF16("abc");
-  composition.underlines.push_back(ui::CompositionUnderline(0, 3, 0, false));
+  composition.ime_text_spans.push_back(ui::ImeTextSpan(0, 3, 0, false));
   composition.selection = gfx::Range(2, 3);
 
   model.SetText(base::ASCIIToUTF16("ABCDE"));

@@ -5,6 +5,7 @@
 import datetime
 import json
 import math
+import numbers
 import random
 import uuid
 
@@ -14,7 +15,7 @@ from tracing.value.diagnostics import reserved_infos
 
 
 # pylint: disable=too-many-lines
-# TODO(benjhayden): Split this file up.
+# TODO(#3613) Split this file.
 
 
 # This should be equal to sys.float_info.max, but that value might differ
@@ -126,11 +127,21 @@ def Percentile(ary, percent):
 
 
 class Range(object):
+  __slots__ = '_empty', '_min', '_max'
 
   def __init__(self):
     self._empty = True
     self._min = None
     self._max = None
+
+  def __eq__(self, other):
+    if not isinstance(other, Range):
+      return False
+    if self.empty and other.empty:
+      return True
+    if self.empty != other.empty:
+      return False
+    return  (self.min == other.min) and (self.max == other.max)
 
   @staticmethod
   def FromExplicitRange(lower, upper):
@@ -181,6 +192,8 @@ class Range(object):
 
 # This class computes statistics online in O(1).
 class RunningStatistics(object):
+  __slots__ = (
+      '_count', '_mean', '_max', '_min', '_sum', '_variance', '_meanlogs')
 
   def __init__(self):
     self._count = 0
@@ -331,170 +344,18 @@ class RunningStatistics(object):
     return result
 
 
-class Ownership(diagnostic.Diagnostic):
-
-  def __init__(self, emails, component=None):
-    super(Ownership, self).__init__()
-
-    emails = emails or []
-
-    self._emails = emails[:]
-
-    if (component is None) or isinstance(component, basestring):
-      self._component = component
-    else:
-      raise TypeError('component must be None or string')
-
-  def __eq__(self, other):
-    if self.component != other.component:
-      return False
-    if self.emails != other.emails:
-      return False
-
-    return True
-
-  def __ne__(self, other):
-    return not self == other
-
-  @property
-  def emails(self):
-    return self._emails[:]
-
-  @property
-  def component(self):
-    return self._component
-
-  def _AsDictInto(self, dct):
-    dct['emails'] = self.emails
-
-    if self.component is not None:
-      dct['component'] = self.component
-
-  @staticmethod
-  def FromDict(dct):
-    return Ownership(dct.get('emails'), dct.get('component'))
-
-class Breakdown(diagnostic.Diagnostic):
-
-  def __init__(self):
-    super(Breakdown, self).__init__()
-    self._values = {}
-    self._color_scheme = None
-
-  @property
-  def color_scheme(self):
-    return self._color_scheme
-
-  @staticmethod
-  def FromDict(d):
-    result = Breakdown()
-    result._color_scheme = d.get('colorScheme')
-    for name, value in d['values'].iteritems():
-      if value in ['NaN', 'Infinity', '-Infinity']:
-        value = float(value)
-      result.Set(name, value)
-    return result
-
-  def _AsDictInto(self, d):
-    d['values'] = {}
-    for name, value in self:
-      # JSON serializes NaN and the infinities as 'null', preventing
-      # distinguishing between them. Override that behavior by serializing them
-      # as their Javascript string names, not their python string names since
-      # the reference implementation is in Javascript.
-      if math.isnan(value):
-        value = 'NaN'
-      elif math.isinf(value):
-        if value > 0:
-          value = 'Infinity'
-        else:
-          value = '-Infinity'
-      d['values'][name] = value
-    if self._color_scheme:
-      d['colorScheme'] = self._color_scheme
-
-  def Set(self, name, value):
-    assert isinstance(name, basestring)
-    assert isinstance(value, (int, float))
-    self._values[name] = value
-
-  def Get(self, name):
-    return self._values.get(name, 0)
-
-  def __iter__(self):
-    for name, value in self._values.iteritems():
-      yield name, value
-
-
-# A GenericSet diagnostic can contain any Plain-Ol'-Data objects that can be
-# serialized using json.dumps(): None, boolean, number, string, list, dict.
-# Dicts, lists, and booleans are deduplicated by their JSON representation.
-# Dicts and lists are not hashable.
-# (1 == True) and (0 == False) in Python, but not in JSON.
-class GenericSet(diagnostic.Diagnostic):
-
-  def __init__(self, values):
-    super(GenericSet, self).__init__()
-
-    # Use a list because Python sets cannot store dicts or lists because they
-    # are not hashable.
-    self._values = list(values)
-
-    # Cache a set to facilitate comparing and merging GenericSets.
-    # Dicts, lists, and booleans are serialized; other types are not.
-    self._comparable_set = None
-
-  def __iter__(self):
-    for value in self._values:
-      yield value
-
-  def __len__(self):
-    return len(self._values)
-
-  def __eq__(self, other):
-    return self._GetComparableSet() == other._GetComparableSet()
-
-  def _GetComparableSet(self):
-    if self._comparable_set is None:
-      self._comparable_set = set()
-      for value in self:
-        if isinstance(value, (dict, list, bool)):
-          self._comparable_set.add(json.dumps(value, sort_keys=True))
-        else:
-          self._comparable_set.add(value)
-    return self._comparable_set
-
-  def CanAddDiagnostic(self, other_diagnostic, unused_name=None,
-                       unused_parent_hist=None, unused_other_parent_hist=None):
-    return isinstance(other_diagnostic, GenericSet)
-
-  def AddDiagnostic(self, other_diagnostic, unused_name=None,
-                    unused_parent_hist=None, unused_other_parent_hist=None):
-    comparable_set = self._GetComparableSet()
-    for value in other_diagnostic:
-      if isinstance(value, (dict, list, bool)):
-        json_value = json.dumps(value, sort_keys=True)
-        if json_value not in comparable_set:
-          self._values.append(value)
-          self._comparable_set.add(json_value)
-      elif value not in comparable_set:
-        self._values.append(value)
-        self._comparable_set.add(value)
-
-  def _AsDictInto(self, dct):
-    dct['values'] = list(self)
-
-  @staticmethod
-  def FromDict(dct):
-    return GenericSet(dct['values'])
-
-
 class DateRange(diagnostic.Diagnostic):
+  __slots__ = '_range',
 
   def __init__(self, ms):
     super(DateRange, self).__init__()
     self._range = Range()
     self._range.AddValue(ms)
+
+  def __eq__(self, other):
+    if not isinstance(other, DateRange):
+      return False
+    return self._range == other._range
 
   @property
   def min_date(self):
@@ -507,6 +368,13 @@ class DateRange(diagnostic.Diagnostic):
   @property
   def duration_ms(self):
     return self._range.duration
+
+  def __str__(self):
+    min_date = self.min_date.isoformat().replace('T', ' ')[:19]
+    if self.duration_ms == 0:
+      return min_date
+    max_date = self.max_date.isoformat().replace('T', ' ')[:19]
+    return min_date + ' - ' + max_date
 
   def _AsDictInto(self, dct):
     dct['min'] = self._range.min
@@ -521,15 +389,14 @@ class DateRange(diagnostic.Diagnostic):
       dr._range.AddValue(dct['max'])
     return dr
 
-  def CanAddDiagnostic(self, other_diagnostic, unused_name=None,
-                       unused_parent_hist=None, unused_other_parent_hist=None):
+  def CanAddDiagnostic(self, other_diagnostic):
     return isinstance(other_diagnostic, DateRange)
 
-  def AddDiagnostic(self, other_diagnostic, unused_name=None,
-                    unused_parent_hist=None, unused_other_parent_hist=None):
+  def AddDiagnostic(self, other_diagnostic):
     self._range.AddRange(other_diagnostic._range)
 
 class HistogramRef(object):
+  __slots__ = '_guid',
 
   def __init__(self, guid):
     self._guid = guid
@@ -539,51 +406,62 @@ class HistogramRef(object):
     return self._guid
 
 
-class RelatedHistogramSet(diagnostic.Diagnostic):
+class RelatedNameMap(diagnostic.Diagnostic):
+  __slots__ = '_map',
 
-  def __init__(self, histograms=()):
-    super(RelatedHistogramSet, self).__init__()
-    self._histograms_by_guid = {}
-    for hist in histograms:
-      self.Add(hist)
+  def __init__(self):
+    super(RelatedNameMap, self).__init__()
+    self._map = {}
 
-  def Add(self, hist):
-    assert isinstance(hist, (Histogram, HistogramRef))
-    assert not self.Has(hist)
-    self._histograms_by_guid[hist.guid] = hist
+  def __eq__(self, other):
+    if not isinstance(other, RelatedNameMap):
+      return False
+    if set(self._map.keys()) != set(other._map.keys()):
+      return False
+    for key, name in self._map.iteritems():
+      if name != other.Get(key):
+        return False
+    return True
 
-  def Has(self, hist):
-    return hist.guid in self._histograms_by_guid
+  def CanAddDiagnostic(self, other):
+    return isinstance(other, RelatedNameMap)
 
-  def __len__(self):
-    return len(self._histograms_by_guid)
+  def AddDiagnostic(self, other):
+    for key, name in other._map.iteritems():
+      existing = self.Get(key)
+      if existing is None:
+        self.Set(key, name)
+      elif existing != name:
+        raise ValueError('Histogram names differ: "%s" != "%s"' % (
+            existing, name))
+
+  def Get(self, key):
+    return self._map.get(key)
+
+  def Set(self, key, name):
+    self._map[key] = name
 
   def __iter__(self):
-    for hist in self._histograms_by_guid.itervalues():
-      yield hist
+    for key, name in self._map.iteritems():
+      yield key, name
 
-  def Resolve(self, histograms, required=False):
-    for hist in self:
-      if isinstance(hist, Histogram):
-        continue
-      guid = hist.guid
-      hist = histograms.LookupHistogram(guid)
-      if isinstance(hist, Histogram):
-        self._histograms_by_guid[guid] = hist
-      else:
-        assert not required, guid
+  def Values(self):
+    return self._map.values()
 
-  def _AsDictInto(self, d):
-    d['guids'] = []
-    for hist in self:
-      d['guids'].append(hist.guid)
+  def _AsDictInto(self, dct):
+    dct['names'] = dict(self._map)
 
   @staticmethod
-  def FromDict(d):
-    return RelatedHistogramSet(HistogramRef(guid) for guid in d['guids'])
+  def FromDict(dct):
+    names = RelatedNameMap()
+    for key, name in dct['names'].iteritems():
+      names.Set(key, name)
+    return names
+
 
 
 class RelatedHistogramMap(diagnostic.Diagnostic):
+  __slots__ = '_histograms_by_name',
 
   def __init__(self):
     super(RelatedHistogramMap, self).__init__()
@@ -593,7 +471,9 @@ class RelatedHistogramMap(diagnostic.Diagnostic):
     return self._histograms_by_name.get(name)
 
   def Set(self, name, hist):
-    assert isinstance(hist, (Histogram, HistogramRef))
+    assert isinstance(hist, (Histogram, HistogramRef)), (
+        'Expected Histogram or HistogramRef, found %s: "%r"',
+        (type(hist).__name__, hist))
     self._histograms_by_name[name] = hist
 
   def Add(self, hist):
@@ -616,7 +496,7 @@ class RelatedHistogramMap(diagnostic.Diagnostic):
       if isinstance(hist, Histogram):
         self._histograms_by_name[name] = hist
       else:
-        assert not required, guid
+        assert not required, ('Missing required Histogram %s' % guid)
 
   def _AsDictInto(self, d):
     d['values'] = {}
@@ -632,6 +512,7 @@ class RelatedHistogramMap(diagnostic.Diagnostic):
 
 
 class RelatedHistogramBreakdown(RelatedHistogramMap):
+  __slots__ = '_color_scheme',
 
   def __init__(self):
     super(RelatedHistogramBreakdown, self).__init__()
@@ -639,7 +520,8 @@ class RelatedHistogramBreakdown(RelatedHistogramMap):
 
   def Set(self, name, hist):
     if not isinstance(hist, HistogramRef):
-      assert isinstance(hist, Histogram)
+      assert isinstance(hist, Histogram), (
+          'Expected Histogram, found %s: "%r"' % (type(hist).__name__, hist))
       # All Histograms must have the same unit.
       for _, other_hist in self:
         expected_unit = other_hist.unit
@@ -664,12 +546,19 @@ class RelatedHistogramBreakdown(RelatedHistogramMap):
 
 
 class TagMap(diagnostic.Diagnostic):
+  __slots__ = '_tags_to_story_names',
 
   def __init__(self, info):
     super(TagMap, self).__init__()
     self._tags_to_story_names = dict(
         (k, set(v)) for k, v in info.get(
             'tagsToStoryNames', {}).iteritems())
+
+  def __eq__(self, other):
+    if not isinstance(other, TagMap):
+      return False
+
+    return self.tags_to_story_names == other.tags_to_story_names
 
   def _AsDictInto(self, d):
     d['tagsToStoryNames'] = dict(
@@ -688,12 +577,10 @@ class TagMap(diagnostic.Diagnostic):
       self.tags_to_story_names[tag] = set()
     self.tags_to_story_names[tag].add(story_display_name)
 
-  def CanAddDiagnostic(self, other_diagnostic, unused_name,
-                       unused_parent_hist, unused_other_parent_hist):
+  def CanAddDiagnostic(self, other_diagnostic):
     return isinstance(other_diagnostic, TagMap)
 
-  def AddDiagnostic(self, other_diagnostic, unused_name,
-                    unused_parent_hist, unused_other_parent_hist):
+  def AddDiagnostic(self, other_diagnostic):
     for name, story_display_names in\
         other_diagnostic.tags_to_story_names.iteritems():
       if not name in self.tags_to_story_names:
@@ -703,330 +590,8 @@ class TagMap(diagnostic.Diagnostic):
         self.tags_to_story_names[name].add(t)
 
 
-class BuildbotInfo(diagnostic.Diagnostic):
-
-  def __init__(self, info):
-    super(BuildbotInfo, self).__init__()
-    self._display_master_name = info.get('displayMasterName', '')
-    self._display_bot_name = info.get('displayBotName', '')
-    self._buildbot_master_name = info.get('buildbotMasterName', '')
-    self._buildbot_name = info.get('buildbotName', '')
-    self._build_number = info.get('buildNumber', 0)
-    self._log_uri = info.get('logUri', '')
-
-  def __eq__(self, other):
-    if self.display_master_name != other.display_master_name:
-      return False
-    if self.display_bot_name != other.display_bot_name:
-      return False
-    if self.buildbot_master_name != other.buildbot_master_name:
-      return False
-    if self.buildbot_name != other.buildbot_name:
-      return False
-    if self.build_number != other.build_number:
-      return False
-    if self.log_uri != other.log_uri:
-      return False
-    return True
-
-  def __ne__(self, other):
-    return not self == other
-
-  def _AsDictInto(self, d):
-    d['displayMasterName'] = self.display_master_name
-    d['displayBotName'] = self.display_bot_name
-    d['buildbotMasterName'] = self.buildbot_master_name
-    d['buildbotName'] = self.buildbot_name
-    d['buildNumber'] = self.build_number
-    d['logUri'] = self.log_uri
-
-  @staticmethod
-  def FromDict(d):
-    return BuildbotInfo(d)
-
-  @property
-  def display_master_name(self):
-    return self._display_master_name
-
-  @property
-  def display_bot_name(self):
-    return self._display_bot_name
-
-  @property
-  def buildbot_master_name(self):
-    return self._buildbot_master_name
-
-  @property
-  def buildbot_name(self):
-    return self._buildbot_name
-
-  @property
-  def build_number(self):
-    return self._build_number
-
-  @property
-  def log_uri(self):
-    return self._log_uri
-
-
-class RevisionInfo(diagnostic.Diagnostic):
-
-  def __init__(self, info):
-    super(RevisionInfo, self).__init__()
-    self._chromium_commit_position = info.get('chromiumCommitPosition', None)
-    self._v8_commit_position = info.get('v8CommitPosition', None)
-    self._chromium = info.get('chromium', [])
-    self._v8 = info.get('v8', [])
-    self._catapult = info.get('catapult', [])
-    self._angle = info.get('angle', [])
-    self._skia = info.get('skia', [])
-    self._webrtc = info.get('webrtc', [])
-
-  @property
-  def chromium_commit_position(self):
-    return self._chromium_commit_position
-
-  @property
-  def v8_commit_position(self):
-    return self._v8_commit_position
-
-  @property
-  def v8(self):
-    return self._v8
-
-  @property
-  def catapult(self):
-    return self._catapult
-
-  @property
-  def angle(self):
-    return self._angle
-
-  @property
-  def skia(self):
-    return self._skia
-
-  @property
-  def webrtc(self):
-    return self._webrtc
-
-  @property
-  def chromium(self):
-    return self._chromium
-
-  def _AsDictInto(self, d):
-    d['chromiumCommitPosition'] = self._chromium_commit_position
-    d['v8CommitPosition'] = self._v8_commit_position
-    d['chromium'] = self._chromium
-    d['v8'] = self.v8
-    d['catapult'] = self.catapult
-    d['angle'] = self.angle
-    d['skia'] = self.skia
-    d['webrtc'] = self.webrtc
-
-  @staticmethod
-  def FromDict(d):
-    return RevisionInfo(d)
-
-
-# TODO(benjhayden): Unify this with telemetry's IterationInfo.
-class TelemetryInfo(diagnostic.Diagnostic):
-
-  def __init__(self):
-    super(TelemetryInfo, self).__init__()
-    self._benchmark_name = ''
-    self._benchmark_start = None
-    self._label = ''
-    self._legacy_tir_label = ''
-    self._story_display_name = ''
-    self._story_grouping_keys = {}
-    self._story_url = ''
-    self._storyset_repeat_counter = None
-
-  def __eq__(self, other):
-    if self.benchmark_name != other.benchmark_name:
-      return False
-    if self.benchmark_start != other.benchmark_start:
-      return False
-    if self.label != other.label:
-      return False
-    if self.legacy_tir_label != other.legacy_tir_label:
-      return False
-    if self.story_display_name != other.story_display_name:
-      return False
-    if self.story_grouping_keys != other.story_grouping_keys:
-      return False
-    if self.story_url != other.story_url:
-      return False
-    if self.storyset_repeat_counter != other.storyset_repeat_counter:
-      return False
-    return True
-
-  def __ne__(self, other):
-    return not self == other
-
-  def AddInfo(self, info):
-    if 'benchmarkName' in info:
-      self._benchmark_name = info['benchmarkName']
-    if 'benchmarkStartMs' in info:
-      self._benchmark_start = info['benchmarkStartMs']
-    if 'label' in info:
-      self._label = info['label']
-    if 'storyDisplayName' in info:
-      self._story_display_name = info['storyDisplayName']
-    if 'storyGroupingKeys' in info:
-      self._story_grouping_keys = info['storyGroupingKeys']
-    if 'storysetRepeatCounter' in info:
-      self._storyset_repeat_counter = info['storysetRepeatCounter']
-    if 'legacyTIRLabel' in info:
-      self._legacy_tir_label = info['legacyTIRLabel']
-
-  def _AsDictInto(self, d):
-    d['benchmarkName'] = self.benchmark_name
-    d['benchmarkStartMs'] = self.benchmark_start
-    d['label'] = self.label
-    d['storyDisplayName'] = self.story_display_name
-    d['storyGroupingKeys'] = self.story_grouping_keys
-    d['storysetRepeatCounter'] = self.storyset_repeat_counter
-    d['legacyTIRLabel'] = self.legacy_tir_label
-
-  @property
-  def benchmark_name(self):
-    return self._benchmark_name
-
-  @property
-  def benchmark_start(self):
-    return self._benchmark_start
-
-  @property
-  def label(self):
-    return self._label
-
-  @property
-  def story_display_name(self):
-    return self._story_display_name
-
-  @property
-  def story_grouping_keys(self):
-    return self._story_grouping_keys
-
-  @property
-  def storyset_repeat_counter(self):
-    return self._storyset_repeat_counter
-
-  @property
-  def story_url(self):
-    return self._story_url
-
-  @property
-  def legacy_tir_label(self):
-    return self._legacy_tir_label
-
-  @staticmethod
-  def FromDict(d):
-    info = TelemetryInfo()
-    info.AddInfo(d)
-    return info
-
-
-class DeviceInfo(diagnostic.Diagnostic):
-
-  def __init__(self):
-    super(DeviceInfo, self).__init__()
-    self._chrome_version = ''
-    self._os_name = ''
-    self._os_version = ''
-    self._gpu_info = None
-    self._arch = None
-    self._ram = 0
-
-  def __eq__(self, other):
-    if self.chrome_version != other.chrome_version:
-      return False
-    if self.os_name != other.os_name:
-      return False
-    if self.os_version != other.os_version:
-      return False
-    if self.gpu_info != other.gpu_info:
-      return False
-    if self.arch != other.arch:
-      return False
-    if self.ram != other.ram:
-      return False
-    return True
-
-  def __ne__(self, other):
-    return not self == other
-
-  @staticmethod
-  def FromDict(d):
-    info = DeviceInfo()
-    info.chrome_version = d.get('chromeVersion', '')
-    info.os_name = d.get('osName', '')
-    info.os_version = d.get('osVersion', '')
-    info.gpu_info = d.get('gpuInfo')
-    info.arch = d.get('arch')
-    info.ram = d.get('ram', 0)
-    return info
-
-  def _AsDictInto(self, d):
-    d['chromeVersion'] = self.chrome_version
-    d['osName'] = self.os_name
-    d['osVersion'] = self.os_version
-    d['gpuInfo'] = self.gpu_info
-    d['arch'] = self.arch
-    d['ram'] = self.ram
-
-  @property
-  def chrome_version(self):
-    return self._chrome_version
-
-  @chrome_version.setter
-  def chrome_version(self, v):
-    self._chrome_version = v
-
-  @property
-  def os_name(self):
-    return self._os_name
-
-  @os_name.setter
-  def os_name(self, v):
-    self._os_name = v
-
-  @property
-  def os_version(self):
-    return self._os_version
-
-  @os_version.setter
-  def os_version(self, v):
-    self._os_version = v
-
-  @property
-  def gpu_info(self):
-    return self._gpu_info
-
-  @gpu_info.setter
-  def gpu_info(self, v):
-    self._gpu_info = v
-
-  @property
-  def arch(self):
-    return self._arch
-
-  @arch.setter
-  def arch(self, v):
-    self._arch = v
-
-  @property
-  def ram(self):
-    return self._ram
-
-  @ram.setter
-  def ram(self, v):
-    self._ram = v
-
-
 class RelatedEventSet(diagnostic.Diagnostic):
+  __slots__ = '_events_by_stable_id',
 
   def __init__(self):
     super(RelatedEventSet, self).__init__()
@@ -1054,6 +619,7 @@ class RelatedEventSet(diagnostic.Diagnostic):
 
 
 class UnmergeableDiagnosticSet(diagnostic.Diagnostic):
+  __slots__ = '_diagnostics',
 
   def __init__(self, diagnostics):
     super(UnmergeableDiagnosticSet, self).__init__()
@@ -1066,20 +632,16 @@ class UnmergeableDiagnosticSet(diagnostic.Diagnostic):
     for diag in self._diagnostics:
       yield diag
 
-  def CanAddDiagnostic(self, unused_other_diagnostic, unused_name,
-                       unused_parent_hist, unused_other_parent_hist):
+  def CanAddDiagnostic(self, unused_other_diagnostic):
     return True
 
-  def AddDiagnostic(self, other_diagnostic, name, parent_hist,
-                    other_parent_hist):
+  def AddDiagnostic(self, other_diagnostic):
     if isinstance(other_diagnostic, UnmergeableDiagnosticSet):
       self._diagnostics.extend(other_diagnostic._diagnostics)
       return
     for diag in self:
-      if diag.CanAddDiagnostic(other_diagnostic, name, parent_hist,
-                               other_parent_hist):
-        diag.AddDiagnostic(other_diagnostic, name, parent_hist,
-                           other_parent_hist)
+      if diag.CanAddDiagnostic(other_diagnostic):
+        diag.AddDiagnostic(other_diagnostic)
         return
     self._diagnostics.append(other_diagnostic)
 
@@ -1098,6 +660,7 @@ class UnmergeableDiagnosticSet(diagnostic.Diagnostic):
 
 
 class DiagnosticMap(dict):
+  __slots__ = '_allow_reserved_names',
 
   def __init__(self, *args, **kwargs):
     self._allow_reserved_names = True
@@ -1151,22 +714,14 @@ class DiagnosticMap(dict):
       dct[name] = diag.AsDictOrReference()
     return dct
 
-  def Merge(self, other, parent_hist, other_parent_hist):
-    merged_from = self.get(reserved_infos.MERGED_FROM.name)
-    if merged_from is None:
-      merged_from = RelatedHistogramSet()
-      self[reserved_infos.MERGED_FROM.name] = merged_from
-    merged_from.Add(other_parent_hist)
-
+  def Merge(self, other):
     for name, other_diagnostic in other.iteritems():
       if name not in self:
         self[name] = other_diagnostic
         continue
       my_diagnostic = self[name]
-      if my_diagnostic.CanAddDiagnostic(
-          other_diagnostic, name, parent_hist, other_parent_hist):
-        my_diagnostic.AddDiagnostic(
-            other_diagnostic, name, parent_hist, other_parent_hist)
+      if my_diagnostic.CanAddDiagnostic(other_diagnostic):
+        my_diagnostic.AddDiagnostic(other_diagnostic)
         continue
       self[name] = UnmergeableDiagnosticSet([
           my_diagnostic, other_diagnostic])
@@ -1176,6 +731,7 @@ MAX_DIAGNOSTIC_MAPS = 16
 
 
 class HistogramBin(object):
+  __slots__ = '_range', '_count', '_diagnostic_maps'
 
   def __init__(self, rang):
     self._range = rang
@@ -1217,7 +773,7 @@ class HistogramBin(object):
     return [self.count, [d.AsDict() for d in self._diagnostic_maps]]
 
 
-# TODO(benjhayden): Presubmit to compare with unit.html.
+# TODO(#3814) Presubmit to compare with unit.html.
 UNIT_NAMES = [
     'ms',
     'tsMs',
@@ -1241,9 +797,11 @@ ExtendUnitNames()
 
 
 class Scalar(object):
+  __slots__ = '_unit', '_value'
 
   def __init__(self, unit, value):
-    assert unit in UNIT_NAMES
+    assert unit in UNIT_NAMES, (
+        'Unrecognized unit "%r"' % unit)
     self._unit = unit
     self._value = value
 
@@ -1279,18 +837,40 @@ DEFAULT_SUMMARY_OPTIONS = {
 
 
 class Histogram(object):
+  __slots__ = (
+      '_guid',
+      '_bin_boundaries_dict',
+      '_description',
+      '_name',
+      '_diagnostics',
+      '_nan_diagnostic_maps',
+      '_num_nans',
+      '_running',
+      '_sample_values',
+      '_short_name',
+      '_summary_options',
+      '_unit',
+      '_bins',
+      '_max_num_sample_values')
 
   def __init__(self, name, unit, bin_boundaries=None):
-    assert unit in UNIT_NAMES
+    assert unit in UNIT_NAMES, (
+        'Unrecognized unit "%r"' % unit)
 
     if bin_boundaries is None:
-      bin_boundaries = DEFAULT_BOUNDARIES_FOR_UNIT[unit]
+      base_unit = unit.split('_')[0]
+      bin_boundaries = DEFAULT_BOUNDARIES_FOR_UNIT[base_unit]
 
     self._guid = None
 
+    # Serialize bin boundaries here instead of holding a reference to it in case
+    # it is modified.
     self._bin_boundaries_dict = bin_boundaries.AsDict()
 
-    self._bins = []
+    # HistogramBinBoundaries creates empty HistogramBins. Save memory by sharing
+    # those empty HistogramBin instances with other Histograms. Wait to copy
+    # HistogramBins until we need to modify it (copy-on-write).
+    self._bins = list(bin_boundaries.bins)
     self._description = ''
     self._name = name
     self._diagnostics = DiagnosticMap()
@@ -1303,9 +883,6 @@ class Histogram(object):
     self._summary_options = dict(DEFAULT_SUMMARY_OPTIONS)
     self._summary_options['percentile'] = []
     self._unit = unit
-
-    for rang in bin_boundaries.bin_ranges:
-      self._bins.append(HistogramBin(rang))
 
     self._max_num_sample_values = self._GetDefaultMaxNumSampleValues()
 
@@ -1350,7 +927,7 @@ class Histogram(object):
 
   @guid.setter
   def guid(self, g):
-    assert self._guid is None
+    assert self._guid is None, self._guid
     self._guid = g
 
   @property
@@ -1375,10 +952,15 @@ class Histogram(object):
     if 'allBins' in dct:
       if isinstance(dct['allBins'], list):
         for i, bin_dct in enumerate(dct['allBins']):
+          # Copy HistogramBin on write, share the rest with the other
+          # Histograms that use the same HistogramBinBoundaries.
+          hist._bins[i] = HistogramBin(hist._bins[i].range)
           hist._bins[i].FromDict(bin_dct)
       else:
         for i, bin_dct in dct['allBins'].iteritems():
-          hist._bins[int(i)].FromDict(bin_dct)
+          i = int(i)
+          hist._bins[i] = HistogramBin(hist._bins[i].range)
+          hist._bins[i].FromDict(bin_dct)
     if 'running' in dct:
       hist._running = RunningStatistics.FromDict(dct['running'])
     if 'summaryOptions' in dct:
@@ -1453,19 +1035,22 @@ class Histogram(object):
         return hbin.range.center
     return self._bins[len(self._bins) - 1].range.min
 
-  def GetBinForValue(self, value):
+  def GetBinIndexForValue(self, value):
     index = FindHighIndexInSortedArray(
         self._bins, lambda b: (-1 if (value < b.range.max) else 1))
     if 0 <= index < len(self._bins):
-      return self._bins[index]
-    return self._bins[len(self._bins) - 1]
+      return index
+    return len(self._bins) - 1
+
+  def GetBinForValue(self, value):
+    return self._bins[self.GetBinIndexForValue(value)]
 
   def AddSample(self, value, diagnostic_map=None):
     if (diagnostic_map is not None and
         not isinstance(diagnostic_map, DiagnosticMap)):
       diagnostic_map = DiagnosticMap(diagnostic_map)
 
-    if not isinstance(value, (int, float)) or math.isnan(value):
+    if not isinstance(value, numbers.Number) or math.isnan(value):
       self._num_nans += 1
       if diagnostic_map:
         UniformlySampleStream(self._nan_diagnostic_maps, self.num_nans,
@@ -1475,7 +1060,11 @@ class Histogram(object):
         self._running = RunningStatistics()
       self._running.Add(value)
 
-      hbin = self.GetBinForValue(value)
+      bin_index = self.GetBinIndexForValue(value)
+      hbin = self._bins[bin_index]
+      if hbin.count == 0:
+        hbin = HistogramBin(hbin.range)
+        self._bins[bin_index] = hbin
       hbin.AddSample(value)
       if diagnostic_map:
         hbin.AddDiagnosticMap(diagnostic_map)
@@ -1504,9 +1093,18 @@ class Histogram(object):
       self._running = self._running.Merge(other.running)
 
     for i, hbin in enumerate(other.bins):
-      self.bins[i].AddBin(hbin)
+      mybin = self._bins[i]
+      if mybin.count == 0:
+        self._bins[i] = mybin = HistogramBin(mybin.range)
+      mybin.AddBin(hbin)
 
-    self.diagnostics.Merge(other.diagnostics, self, other)
+    merged_from = self.diagnostics.get(reserved_infos.MERGED_FROM.name)
+    if merged_from is None:
+      merged_from = RelatedHistogramMap()
+      self.diagnostics[reserved_infos.MERGED_FROM.name] = merged_from
+    merged_from.Set(len(merged_from), other)
+
+    self.diagnostics.Merge(other.diagnostics)
 
   def CustomizeSummaryOptions(self, options):
     for key, value in options.iteritems():
@@ -1548,7 +1146,7 @@ class Histogram(object):
         if self._running is None:
           self._running = RunningStatistics()
         stat_value = getattr(self._running, key)
-        if isinstance(stat_value, (int, float)):
+        if isinstance(stat_value, numbers.Number):
           results[stat_name] = Scalar(stat_unit, stat_value)
     return results
 
@@ -1615,6 +1213,8 @@ class Histogram(object):
 
 
 class HistogramBinBoundaries(object):
+  __slots__ = '_builder', '_range', '_bin_ranges', '_bins'
+
   CACHE = {}
   SLICE_TYPE_LINEAR = 0
   SLICE_TYPE_EXPONENTIAL = 1
@@ -1624,6 +1224,7 @@ class HistogramBinBoundaries(object):
     self._range = Range()
     self._range.AddValue(min_bin_boundary)
     self._bin_ranges = None
+    self._bins = None
 
   @property
   def range(self):
@@ -1673,7 +1274,10 @@ class HistogramBinBoundaries(object):
     if next_max_bin_boundary <= self.range.max:
       raise ValueError('The added max bin boundary must be larger than ' +
                        'the current max boundary')
+
     self._bin_ranges = None
+    self._bins = None
+
     self._PushBuilderSlice(next_max_bin_boundary)
     self.range.AddValue(next_max_bin_boundary)
     return self
@@ -1686,6 +1290,8 @@ class HistogramBinBoundaries(object):
                        'the previous max bin boundary')
 
     self._bin_ranges = None
+    self._bins = None
+
     self._PushBuilderSlice([
         HistogramBinBoundaries.SLICE_TYPE_LINEAR,
         next_max_bin_boundary, bin_count])
@@ -1702,6 +1308,7 @@ class HistogramBinBoundaries(object):
                        'the current max boundary boundary')
 
     self._bin_ranges = None
+    self._bins = None
 
     self._PushBuilderSlice([
         HistogramBinBoundaries.SLICE_TYPE_EXPONENTIAL,
@@ -1710,13 +1317,22 @@ class HistogramBinBoundaries(object):
     return self
 
   @property
+  def bins(self):
+    if self._bins is None:
+      self._BuildBins()
+    return self._bins
+
+  def _BuildBins(self):
+    self._bins = [HistogramBin(r) for r in self.bin_ranges]
+
+  @property
   def bin_ranges(self):
     if self._bin_ranges is None:
-      self._Build()
+      self._BuildBinRanges()
     return self._bin_ranges
 
-  def _Build(self):
-    if not isinstance(self._builder[0], (int, float)):
+  def _BuildBinRanges(self):
+    if not isinstance(self._builder[0], numbers.Number):
       raise ValueError('Invalid start of builder_')
 
     self._bin_ranges = []
@@ -1769,10 +1385,10 @@ HistogramBinBoundaries.SINGULAR = HistogramBinBoundaries(JS_MAX_VALUE)
 
 
 DEFAULT_BOUNDARIES_FOR_UNIT = {
-    'ms': HistogramBinBoundaries.CreateExponential(1e-3, 1e6, 1e2),
-    'tsMs': HistogramBinBoundaries.CreateLinear(0, 1e10, 1e3),
+    'ms': HistogramBinBoundaries.CreateExponential(1e-3, 1e6, 100),
+    'tsMs': HistogramBinBoundaries.CreateLinear(0, 1e10, 1000),
     'n%': HistogramBinBoundaries.CreateLinear(0, 1.0, 20),
-    'sizeInBytes': HistogramBinBoundaries.CreateExponential(1, 1e12, 1e2),
+    'sizeInBytes': HistogramBinBoundaries.CreateExponential(1, 1e12, 100),
     'J': HistogramBinBoundaries.CreateExponential(1e-3, 1e3, 50),
     'W': HistogramBinBoundaries.CreateExponential(1e-3, 1, 50),
     'unitless': HistogramBinBoundaries.CreateExponential(1e-3, 1e3, 50),

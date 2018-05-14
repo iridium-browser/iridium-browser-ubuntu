@@ -23,7 +23,8 @@ import android.widget.FrameLayout;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.shell.DrawGL;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content_public.browser.ContentViewCore;
+import org.chromium.content_public.browser.WebContents;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -273,6 +274,10 @@ public class AwTestContainerView extends FrameLayout {
         return mAwContents.getContentViewCore();
     }
 
+    public WebContents getWebContents() {
+        return mAwContents.getWebContents();
+    }
+
     public AwContents getAwContents() {
         return mAwContents;
     }
@@ -313,21 +318,11 @@ public class AwTestContainerView extends FrameLayout {
         if (mHardwareView == null || mHardwareView.isReadyToRender()) {
             attachedContentsInternal();
         } else {
-            mHardwareView.setReadyToRenderCallback(new Runnable() {
-                @Override
-                public void run() {
-                    attachedContentsInternal();
-                }
-            });
+            mHardwareView.setReadyToRenderCallback(() -> attachedContentsInternal());
         }
 
         if (mHardwareView != null) {
-            mHardwareView.setReadyToDetachCallback(new Runnable() {
-                @Override
-                public void run() {
-                    detachedContentsInternal();
-                }
-            });
+            mHardwareView.setReadyToDetachCallback(() -> detachedContentsInternal());
         }
     }
 
@@ -447,6 +442,7 @@ public class AwTestContainerView extends FrameLayout {
     }
 
     private class NativeDrawGLFunctorFactory implements AwContents.NativeDrawGLFunctorFactory {
+        @Override
         public NativeDrawGLFunctor createFunctor(long context) {
             return new NativeDrawGLFunctor(context);
         }
@@ -551,11 +547,6 @@ public class AwTestContainerView extends FrameLayout {
         @Override
         public void onScrollChanged(int l, int t, int oldl, int oldt) {
             AwTestContainerView.super.onScrollChanged(l, t, oldl, oldt);
-        }
-
-        @Override
-        public boolean awakenScrollBars() {
-            return AwTestContainerView.super.awakenScrollBars();
         }
 
         @Override

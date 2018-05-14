@@ -19,7 +19,7 @@ CompositorFloatAnimationCurve::CompositorFloatAnimationCurve(
     std::unique_ptr<cc::KeyframedFloatAnimationCurve> curve)
     : curve_(std::move(curve)) {}
 
-CompositorFloatAnimationCurve::~CompositorFloatAnimationCurve() {}
+CompositorFloatAnimationCurve::~CompositorFloatAnimationCurve() = default;
 
 std::unique_ptr<CompositorFloatAnimationCurve>
 CompositorFloatAnimationCurve::CreateForTesting(
@@ -37,7 +37,7 @@ CompositorFloatAnimationCurve::KeyframesForTesting() const {
   return keyframes;
 }
 
-PassRefPtr<TimingFunction>
+scoped_refptr<TimingFunction>
 CompositorFloatAnimationCurve::GetTimingFunctionForTesting() const {
   return CreateCompositorTimingFunctionFromCC(
       curve_->timing_function_for_testing());

@@ -15,9 +15,9 @@ bool RefCountedMemory::Equals(
          (memcmp(front(), other->front(), size()) == 0);
 }
 
-RefCountedMemory::RefCountedMemory() {}
+RefCountedMemory::RefCountedMemory() = default;
 
-RefCountedMemory::~RefCountedMemory() {}
+RefCountedMemory::~RefCountedMemory() = default;
 
 const unsigned char* RefCountedStaticMemory::front() const {
   return data_;
@@ -27,9 +27,9 @@ size_t RefCountedStaticMemory::size() const {
   return length_;
 }
 
-RefCountedStaticMemory::~RefCountedStaticMemory() {}
+RefCountedStaticMemory::~RefCountedStaticMemory() = default;
 
-RefCountedBytes::RefCountedBytes() {}
+RefCountedBytes::RefCountedBytes() = default;
 
 RefCountedBytes::RefCountedBytes(const std::vector<unsigned char>& initializer)
     : data_(initializer) {
@@ -37,6 +37,8 @@ RefCountedBytes::RefCountedBytes(const std::vector<unsigned char>& initializer)
 
 RefCountedBytes::RefCountedBytes(const unsigned char* p, size_t size)
     : data_(p, p + size) {}
+
+RefCountedBytes::RefCountedBytes(size_t size) : data_(size, 0) {}
 
 scoped_refptr<RefCountedBytes> RefCountedBytes::TakeVector(
     std::vector<unsigned char>* to_destroy) {
@@ -48,18 +50,18 @@ scoped_refptr<RefCountedBytes> RefCountedBytes::TakeVector(
 const unsigned char* RefCountedBytes::front() const {
   // STL will assert if we do front() on an empty vector, but calling code
   // expects a NULL.
-  return size() ? &data_.front() : NULL;
+  return size() ? &data_.front() : nullptr;
 }
 
 size_t RefCountedBytes::size() const {
   return data_.size();
 }
 
-RefCountedBytes::~RefCountedBytes() {}
+RefCountedBytes::~RefCountedBytes() = default;
 
-RefCountedString::RefCountedString() {}
+RefCountedString::RefCountedString() = default;
 
-RefCountedString::~RefCountedString() {}
+RefCountedString::~RefCountedString() = default;
 
 // static
 scoped_refptr<RefCountedString> RefCountedString::TakeString(
@@ -70,8 +72,8 @@ scoped_refptr<RefCountedString> RefCountedString::TakeString(
 }
 
 const unsigned char* RefCountedString::front() const {
-  return data_.empty() ? NULL :
-         reinterpret_cast<const unsigned char*>(data_.data());
+  return data_.empty() ? nullptr
+                       : reinterpret_cast<const unsigned char*>(data_.data());
 }
 
 size_t RefCountedString::size() const {

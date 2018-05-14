@@ -6,7 +6,12 @@
 
 #include "ui/gfx/geometry/insets.h"
 
-DECLARE_EXPORTED_UI_CLASS_PROPERTY_TYPE(VIEWS_EXPORT, gfx::Insets*);
+#if !defined(USE_AURA)
+// aura_constants.cc also declared the bool ClassProperty type.
+DEFINE_EXPORTED_UI_CLASS_PROPERTY_TYPE(VIEWS_EXPORT, bool);
+#endif
+
+DEFINE_EXPORTED_UI_CLASS_PROPERTY_TYPE(VIEWS_EXPORT, gfx::Insets*);
 
 namespace views {
 

@@ -27,7 +27,7 @@
 
 #include "core/xmlhttprequest/XMLHttpRequestProgressEventThrottle.h"
 
-#include "core/EventTypeNames.h"
+#include "core/event_type_names.h"
 #include "core/events/ProgressEvent.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/probe/CoreProbes.h"
@@ -78,13 +78,14 @@ Event* XMLHttpRequestProgressEventThrottle::DeferredEvent::Take() {
 XMLHttpRequestProgressEventThrottle::XMLHttpRequestProgressEventThrottle(
     XMLHttpRequest* target)
     : TimerBase(
-          Platform::Current()->CurrentThread()->Scheduler()->TimerTaskRunner()),
+          target->GetExecutionContext()->GetTaskRunner(TaskType::kNetworking)),
       target_(target),
       has_dispatched_progress_progress_event_(false) {
   DCHECK(target);
 }
 
-XMLHttpRequestProgressEventThrottle::~XMLHttpRequestProgressEventThrottle() {}
+XMLHttpRequestProgressEventThrottle::~XMLHttpRequestProgressEventThrottle() =
+    default;
 
 void XMLHttpRequestProgressEventThrottle::DispatchProgressEvent(
     const AtomicString& type,
@@ -104,8 +105,7 @@ void XMLHttpRequestProgressEventThrottle::DispatchProgressEvent(
   } else {
     DispatchProgressProgressEvent(ProgressEvent::Create(
         EventTypeNames::progress, length_computable, loaded, total));
-    StartOneShot(kMinimumProgressEventDispatchingIntervalInSeconds,
-                 BLINK_FROM_HERE);
+    StartOneShot(kMinimumProgressEventDispatchingIntervalInSeconds, FROM_HERE);
   }
 }
 
@@ -169,25 +169,24 @@ void XMLHttpRequestProgressEventThrottle::Fired() {
   DispatchProgressProgressEvent(deferred_.Take());
 
   // Watch if another "progress" ProgressEvent arrives in the next 50ms.
-  StartOneShot(kMinimumProgressEventDispatchingIntervalInSeconds,
-               BLINK_FROM_HERE);
+  StartOneShot(kMinimumProgressEventDispatchingIntervalInSeconds, FROM_HERE);
 }
 
-void XMLHttpRequestProgressEventThrottle::Suspend() {
+void XMLHttpRequestProgressEventThrottle::Pause() {
   Stop();
 }
 
-void XMLHttpRequestProgressEventThrottle::Resume() {
+void XMLHttpRequestProgressEventThrottle::Unpause() {
   if (!deferred_.IsSet())
     return;
 
   // Do not dispatch events inline here, since ExecutionContext is iterating
-  // over the list of SuspendableObjects to resume them, and any activated JS
-  // event-handler could insert new SuspendableObjects to the list.
-  StartOneShot(0, BLINK_FROM_HERE);
+  // over the list of PausableObjects to resume them, and any activated JS
+  // event-handler could insert new PausableObjects to the list.
+  StartOneShot(TimeDelta(), FROM_HERE);
 }
 
-DEFINE_TRACE(XMLHttpRequestProgressEventThrottle) {
+void XMLHttpRequestProgressEventThrottle::Trace(blink::Visitor* visitor) {
   visitor->Trace(target_);
 }
 

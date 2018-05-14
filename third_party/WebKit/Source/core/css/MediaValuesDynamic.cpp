@@ -4,23 +4,22 @@
 
 #include "core/css/MediaValuesDynamic.h"
 
-#include "core/css/CSSHelper.h"
 #include "core/css/CSSPrimitiveValue.h"
+#include "core/css/CSSResolutionUnits.h"
 #include "core/css/CSSToLengthConversionData.h"
 #include "core/css/MediaValuesCached.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
-#include "core/layout/api/LayoutViewItem.h"
 
 namespace blink {
 
 MediaValues* MediaValuesDynamic::Create(Document& document) {
-  return MediaValuesDynamic::Create(FrameFrom(document));
+  return MediaValuesDynamic::Create(document.GetFrameOfMasterDocument());
 }
 
 MediaValues* MediaValuesDynamic::Create(LocalFrame* frame) {
   if (!frame || !frame->View() || !frame->GetDocument() ||
-      frame->GetDocument()->GetLayoutViewItem().IsNull())
+      !frame->GetDocument()->GetLayoutView())
     return MediaValuesCached::Create();
   return new MediaValuesDynamic(frame);
 }
@@ -118,6 +117,10 @@ bool MediaValuesDynamic::ThreeDEnabled() const {
   return CalculateThreeDEnabled(frame_);
 }
 
+bool MediaValuesDynamic::InImmersiveMode() const {
+  return CalculateInImmersiveMode(frame_);
+}
+
 const String MediaValuesDynamic::MediaType() const {
   return CalculateMediaType(frame_);
 }
@@ -146,7 +149,7 @@ bool MediaValuesDynamic::HasValues() const {
   return frame_;
 }
 
-DEFINE_TRACE(MediaValuesDynamic) {
+void MediaValuesDynamic::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   MediaValues::Trace(visitor);
 }

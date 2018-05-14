@@ -22,13 +22,14 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/safe_browsing/common/safebrowsing_messages.h"
-#include "components/safe_browsing/csd.pb.h"
-#include "components/safe_browsing_db/database_manager.h"
-#include "components/safe_browsing_db/test_database_manager.h"
+#include "components/safe_browsing/db/database_manager.h"
+#include "components/safe_browsing/db/test_database_manager.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
@@ -95,7 +96,7 @@ MATCHER(CallbackIsNull, "") {
 
 ACTION(QuitUIMessageLoop) {
   EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  base::MessageLoopForUI::current()->QuitWhenIdle();
+  base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 ACTION_P(InvokeDoneCallback, verdict) {
@@ -108,9 +109,6 @@ ACTION_P(InvokeMalwareCallback, verdict) {
   std::unique_ptr<ClientMalwareRequest> request(::std::tr1::get<1>(args));
   request->CopyFrom(*verdict);
   ::std::tr1::get<2>(args).Run(true, std::move(request));
-}
-
-void EmptyUrlCheckCallback(bool processed) {
 }
 
 class MockClientSideDetectionService : public ClientSideDetectionService {
@@ -164,9 +162,9 @@ class MockSafeBrowsingDatabaseManager : public TestSafeBrowsingDatabaseManager {
  public:
   MockSafeBrowsingDatabaseManager() {}
 
-  MOCK_METHOD1(MatchCsdWhitelistUrl, bool(const GURL&));
+  MOCK_METHOD2(CheckCsdWhitelistUrl,
+               AsyncMatch(const GURL&, SafeBrowsingDatabaseManager::Client*));
   MOCK_METHOD1(MatchMalwareIP, bool(const std::string& ip_address));
-  MOCK_METHOD0(IsMalwareKillSwitchOn, bool());
 
  protected:
   virtual ~MockSafeBrowsingDatabaseManager() {}
@@ -204,12 +202,65 @@ class MockBrowserFeatureExtractor : public BrowserFeatureExtractor {
 
 }  // namespace
 
+class FakePhishingDetector : public mojom::PhishingDetector {
+ public:
+  FakePhishingDetector() = default;
+
+  ~FakePhishingDetector() override = default;
+
+  void BindRequest(mojo::ScopedMessagePipeHandle handle) {
+    bindings_.AddBinding(this,
+                         mojom::PhishingDetectorRequest(std::move(handle)));
+  }
+
+  // mojom::PhishingDetector
+  void StartPhishingDetection(const GURL& url) override {
+    url_ = url;
+    phishing_detection_started_ = true;
+    return;
+  }
+
+  void CheckMessage(const GURL* url) {
+    if (!url) {
+      EXPECT_FALSE(phishing_detection_started_);
+    } else {
+      ASSERT_TRUE(phishing_detection_started_);
+      EXPECT_EQ(*url, url_);
+    }
+  }
+
+  void Reset() {
+    phishing_detection_started_ = false;
+    url_ = GURL();
+  }
+
+ private:
+  mojo::BindingSet<mojom::PhishingDetector> bindings_;
+  bool phishing_detection_started_ = false;
+  GURL url_;
+
+  DISALLOW_COPY_AND_ASSIGN(FakePhishingDetector);
+};
+
 class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
  public:
   typedef security_interstitials::UnsafeResource UnsafeResource;
 
+  void InitTestApi() {
+    service_manager::InterfaceProvider* remote_interfaces =
+        web_contents()->GetMainFrame()->GetRemoteInterfaces();
+
+    service_manager::InterfaceProvider::TestApi test_api(remote_interfaces);
+
+    test_api.SetBinderForName(
+        mojom::PhishingDetector::Name_,
+        base::BindRepeating(&FakePhishingDetector::BindRequest,
+                            base::Unretained(&fake_phishing_detector_)));
+  }
+
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
+    InitTestApi();
 
     // Inject service classes.
     csd_service_.reset(new StrictMock<MockClientSideDetectionService>());
@@ -244,8 +295,8 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
     return mock_profile_;
   }
 
-  void OnPhishingDetectionDone(const std::string& verdict_str) {
-    csd_host_->OnPhishingDetectionDone(verdict_str);
+  void PhishingDetectionDone(const std::string& verdict_str) {
+    csd_host_->PhishingDetectionDone(verdict_str);
   }
 
   void DidStopLoading() { csd_host_->DidStopLoading(); }
@@ -262,7 +313,6 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
                                      const bool* is_private,
                                      const bool* is_incognito,
                                      const bool* match_csd_whitelist,
-                                     const bool* malware_killswitch,
                                      const bool* get_valid_cached_result,
                                      const bool* is_in_cache,
                                      const bool* over_phishing_report_limit,
@@ -276,12 +326,9 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
           .WillRepeatedly(Return(*is_incognito));
     }
     if (match_csd_whitelist) {
-      EXPECT_CALL(*database_manager_.get(), MatchCsdWhitelistUrl(url))
-          .WillOnce(Return(*match_csd_whitelist));
-    }
-    if (malware_killswitch) {
-      EXPECT_CALL(*database_manager_.get(), IsMalwareKillSwitchOn())
-          .WillRepeatedly(Return(*malware_killswitch));
+      EXPECT_CALL(*database_manager_.get(), CheckCsdWhitelistUrl(url, _))
+          .WillOnce(Return(*match_csd_whitelist ? AsyncMatch::MATCH
+                                                : AsyncMatch::NO_MATCH));
     }
     if (get_valid_cached_result) {
       EXPECT_CALL(*csd_service_, GetValidCachedResult(url, NotNull()))
@@ -326,21 +373,6 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
     EXPECT_EQ(should_classify, csd_host_->should_classify_for_malware_);
   }
 
-  void ExpectStartPhishingDetection(const GURL* url) {
-    const IPC::Message* msg = process()->sink().GetFirstMessageMatching(
-        SafeBrowsingMsg_StartPhishingDetection::ID);
-    if (url) {
-      ASSERT_TRUE(msg);
-      std::tuple<GURL> actual_url;
-      SafeBrowsingMsg_StartPhishingDetection::Read(msg, &actual_url);
-      EXPECT_EQ(*url, std::get<0>(actual_url));
-      EXPECT_EQ(main_rfh()->GetRoutingID(), msg->routing_id());
-      process()->sink().ClearMessages();
-    } else {
-      ASSERT_FALSE(msg);
-    }
-  }
-
   void TestUnsafeResourceCopied(const UnsafeResource& resource) {
     ASSERT_TRUE(csd_host_->unsafe_resource_.get());
     // Test that the resource from OnSafeBrowsingHit notification was copied
@@ -361,12 +393,12 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
     resource.original_url = web_contents()->GetURL();
     resource.is_subresource = true;
     resource.threat_type = SB_THREAT_TYPE_URL_MALWARE;
-    resource.callback = base::Bind(&EmptyUrlCheckCallback);
+    resource.callback = base::DoNothing();
     resource.callback_thread =
         BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
     resource.web_contents_getter =
         SafeBrowsingUIManager::UnsafeResource::GetWebContentsGetter(
-            web_contents()->GetRenderProcessHost()->GetID(),
+            web_contents()->GetMainFrame()->GetProcess()->GetID(),
             web_contents()->GetMainFrame()->GetRoutingID());
     csd_host_->OnSafeBrowsingHit(resource);
     resource.callback.Reset();
@@ -393,7 +425,7 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
     resource.original_url = url;
     resource.is_subresource = false;
     resource.threat_type = SB_THREAT_TYPE_URL_MALWARE;
-    resource.callback = base::Bind(&EmptyUrlCheckCallback);
+    resource.callback = base::DoNothing();
     resource.callback_thread =
         BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
     resource.web_contents_getter =
@@ -445,9 +477,10 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
   scoped_refptr<StrictMock<MockSafeBrowsingUIManager> > ui_manager_;
   scoped_refptr<StrictMock<MockSafeBrowsingDatabaseManager> > database_manager_;
   MockTestingProfile* mock_profile_;  // We don't own this object
+  FakePhishingDetector fake_phishing_detector_;
 };
 
-TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneInvalidVerdict) {
+TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneInvalidVerdict) {
   // Case 0: renderer sends an invalid verdict string that we're unable to
   // parse.
   MockBrowserFeatureExtractor* mock_extractor =
@@ -456,11 +489,11 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneInvalidVerdict) {
           csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _)).Times(0);
-  OnPhishingDetectionDone("Invalid Protocol Buffer");
+  PhishingDetectionDone("Invalid Protocol Buffer");
   EXPECT_TRUE(Mock::VerifyAndClear(mock_extractor));
 }
 
-TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneNotPhishing) {
+TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneNotPhishing) {
   // Case 1: client thinks the page is phishing.  The server does not agree.
   // No interstitial is shown.
   MockBrowserFeatureExtractor* mock_extractor =
@@ -481,7 +514,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneNotPhishing) {
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _, _))
       .WillOnce(DoAll(DeleteArg<0>(), SaveArg<2>(&cb)));
-  OnPhishingDetectionDone(verdict.SerializeAsString());
+  PhishingDetectionDone(verdict.SerializeAsString());
   EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   ASSERT_FALSE(cb.is_null());
 
@@ -492,7 +525,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneNotPhishing) {
   EXPECT_TRUE(Mock::VerifyAndClear(ui_manager_.get()));
 }
 
-TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneDisabled) {
+TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneDisabled) {
   // Case 2: client thinks the page is phishing and so does the server but
   // showing the interstitial is disabled => no interstitial is shown.
   MockBrowserFeatureExtractor* mock_extractor =
@@ -513,7 +546,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneDisabled) {
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _, _))
       .WillOnce(DoAll(DeleteArg<0>(), SaveArg<2>(&cb)));
-  OnPhishingDetectionDone(verdict.SerializeAsString());
+  PhishingDetectionDone(verdict.SerializeAsString());
   EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   ASSERT_FALSE(cb.is_null());
 
@@ -524,7 +557,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneDisabled) {
   EXPECT_TRUE(Mock::VerifyAndClear(ui_manager_.get()));
 }
 
-TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneShowInterstitial) {
+TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneShowInterstitial) {
   // Case 3: client thinks the page is phishing and so does the server.
   // We show an interstitial.
   MockBrowserFeatureExtractor* mock_extractor =
@@ -546,7 +579,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneShowInterstitial) {
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _, _))
       .WillOnce(DoAll(DeleteArg<0>(), SaveArg<2>(&cb)));
-  OnPhishingDetectionDone(verdict.SerializeAsString());
+  PhishingDetectionDone(verdict.SerializeAsString());
   EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
   ASSERT_FALSE(cb.is_null());
@@ -572,7 +605,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneShowInterstitial) {
                      ui_manager_, resource.callback));
 }
 
-TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
+TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneMultiplePings) {
   // Case 4 & 5: client thinks a page is phishing then navigates to
   // another page which is also considered phishing by the client
   // before the server responds with a verdict.  After a while the
@@ -597,7 +630,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _, _))
       .WillOnce(DoAll(DeleteArg<0>(), SaveArg<2>(&cb)));
-  OnPhishingDetectionDone(verdict.SerializeAsString());
+  PhishingDetectionDone(verdict.SerializeAsString());
   EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
   ASSERT_FALSE(cb.is_null());
@@ -609,7 +642,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
                                                   csd_host_.get()));
   GURL other_phishing_url("http://other_phishing_url.com/bla");
   ExpectPreClassificationChecks(other_phishing_url, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse, &kFalse);
   // We navigate away.  The callback cb should be revoked.
   NavigateAndCommit(other_phishing_url);
   // Wait for the pre-classification checks to finish for other_phishing_url.
@@ -627,7 +660,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
   std::vector<GURL> redirect_chain;
   redirect_chain.push_back(other_phishing_url);
   SetRedirectChain(redirect_chain);
-  OnPhishingDetectionDone(verdict.SerializeAsString());
+  PhishingDetectionDone(verdict.SerializeAsString());
   base::RunLoop().Run();
   EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
@@ -658,8 +691,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
                      ui_manager_, resource.callback));
 }
 
-TEST_F(ClientSideDetectionHostTest,
-       OnPhishingDetectionDoneVerdictNotPhishing) {
+TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneVerdictNotPhishing) {
   // Case 6: renderer sends a verdict string that isn't phishing.
   MockBrowserFeatureExtractor* mock_extractor =
       new StrictMock<MockBrowserFeatureExtractor>(
@@ -673,12 +705,12 @@ TEST_F(ClientSideDetectionHostTest,
   verdict.set_is_phishing(false);
 
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _)).Times(0);
-  OnPhishingDetectionDone(verdict.SerializeAsString());
+  PhishingDetectionDone(verdict.SerializeAsString());
   EXPECT_TRUE(Mock::VerifyAndClear(mock_extractor));
 }
 
 TEST_F(ClientSideDetectionHostTest,
-       OnPhishingDetectionDoneVerdictNotPhishingButSBMatchSubResource) {
+       PhishingDetectionDoneVerdictNotPhishingButSBMatchSubResource) {
   // Case 7: renderer sends a verdict string that isn't phishing but the URL
   // of a subresource was on the regular phishing or malware lists.
   GURL url("http://not-phishing.com/");
@@ -689,7 +721,7 @@ TEST_F(ClientSideDetectionHostTest,
 
   // First we have to navigate to the URL to set the unique page ID.
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
   SetUnsafeSubResourceForCurrent(true /* expect_unsafe_resource */);
@@ -701,22 +733,21 @@ TEST_F(ClientSideDetectionHostTest,
   std::vector<GURL> redirect_chain;
   redirect_chain.push_back(url);
   SetRedirectChain(redirect_chain);
-  OnPhishingDetectionDone(verdict.SerializeAsString());
+  PhishingDetectionDone(verdict.SerializeAsString());
   base::RunLoop().Run();
   EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
 }
 
 TEST_F(ClientSideDetectionHostTest,
-       OnPhishingDetectionDoneVerdictNotPhishingButSBMatchOnNewRVH) {
+       PhishingDetectionDoneVerdictNotPhishingButSBMatchOnNewRVH) {
   // When navigating to a different host (thus creating a pending RVH) which
   // matches regular malware list, and after navigation the renderer sends a
   // verdict string that isn't phishing, we should still send the report.
 
   // Do an initial navigation to a safe host.
   GURL start_url("http://safe.example.com/");
-  ExpectPreClassificationChecks(
-      start_url, &kFalse, &kFalse, &kFalse, &kFalse, &kFalse, &kFalse, &kFalse,
-      &kFalse);
+  ExpectPreClassificationChecks(start_url, &kFalse, &kFalse, &kFalse, &kFalse,
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(start_url);
   WaitAndCheckPreClassificationChecks();
 
@@ -729,7 +760,7 @@ TEST_F(ClientSideDetectionHostTest,
   verdict.set_is_phishing(false);
 
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateWithSBHitAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
@@ -740,27 +771,26 @@ TEST_F(ClientSideDetectionHostTest,
   std::vector<GURL> redirect_chain;
   redirect_chain.push_back(url);
   SetRedirectChain(redirect_chain);
-  OnPhishingDetectionDone(verdict.SerializeAsString());
+  PhishingDetectionDone(verdict.SerializeAsString());
   base::RunLoop().Run();
   EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
 
   ExpectPreClassificationChecks(start_url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateWithoutSBHitAndCommit(start_url);
   WaitAndCheckPreClassificationChecks();
 }
 
 TEST_F(
     ClientSideDetectionHostTest,
-    OnPhishingDetectionDoneVerdictNotPhishingButSBMatchOnSubresourceWhileNavPending) {
+    PhishingDetectionDoneVerdictNotPhishingButSBMatchOnSubresourceWhileNavPending) {
   // When a malware hit happens on a committed page while a slow pending load is
   // in progress, the csd report should be sent for the committed page.
 
   // Do an initial navigation to a safe host.
   GURL start_url("http://safe.example.com/");
-  ExpectPreClassificationChecks(
-      start_url, &kFalse, &kFalse, &kFalse, &kFalse, &kFalse, &kFalse, &kFalse,
-      &kFalse);
+  ExpectPreClassificationChecks(start_url, &kFalse, &kFalse, &kFalse, &kFalse,
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(start_url);
   WaitAndCheckPreClassificationChecks();
 
@@ -772,7 +802,7 @@ TEST_F(
   verdict.set_is_phishing(false);
 
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateWithoutSBHitAndCommit(url);
 
   // Simulate a subresource malware hit on committed page.
@@ -780,7 +810,10 @@ TEST_F(
 
   // Create a pending navigation, but don't commit it.
   GURL pending_url("http://slow.example.com/");
-  content::WebContentsTester::For(web_contents())->StartNavigation(pending_url);
+  auto pending_navigation =
+      content::NavigationSimulator::CreateBrowserInitiated(pending_url,
+                                                           web_contents());
+  pending_navigation->Start();
 
   WaitAndCheckPreClassificationChecks();
 
@@ -794,7 +827,7 @@ TEST_F(
   std::vector<GURL> redirect_chain;
   redirect_chain.push_back(url);
   SetRedirectChain(redirect_chain);
-  OnPhishingDetectionDone(verdict.SerializeAsString());
+  PhishingDetectionDone(verdict.SerializeAsString());
   base::RunLoop().Run();
   EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
 }
@@ -833,8 +866,7 @@ TEST_F(ClientSideDetectionHostTest,
   badipurl->set_url("http://badip.com");
 
   ExpectPreClassificationChecks(GURL(malware_verdict.url()), &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse);
+                                &kFalse, &kFalse, &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(GURL(malware_verdict.url()));
   WaitAndCheckPreClassificationChecks();
 
@@ -932,9 +964,13 @@ TEST_F(ClientSideDetectionHostTest, UpdateIPUrlMap) {
                   browse_info->ips["100.100.100.256"]);
 }
 
-TEST_F(ClientSideDetectionHostTest, NavigationCancelsShouldClassifyUrl) {
+// This test doesn't work because it makes assumption about how
+// the message loop is run, and those assumptions are wrong when properly
+// simulating a navigation with browser-side navigations.
+// TODO(clamy): Fix the test and re-enable. See crbug.com/753357.
+TEST_F(ClientSideDetectionHostTest,
+       DISABLED_NavigationCancelsShouldClassifyUrl) {
   // Test that canceling pending should classify requests works as expected.
-
   GURL first_url("http://first.phishy.url.com");
   GURL second_url("http://second.url.com/");
   // The first few checks are done synchronously so check that they have been
@@ -945,10 +981,10 @@ TEST_F(ClientSideDetectionHostTest, NavigationCancelsShouldClassifyUrl) {
   EXPECT_CALL(*csd_service_, IsPrivateIPAddress(_))
       .WillOnce(Return(false))
       .WillOnce(Return(false));
-  ExpectPreClassificationChecks(first_url, NULL, &kFalse, &kFalse, &kFalse,
-                                NULL, NULL, NULL, NULL);
+  ExpectPreClassificationChecks(first_url, NULL, &kFalse, &kFalse, NULL, NULL,
+                                NULL, NULL);
   ExpectPreClassificationChecks(second_url, NULL, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
 
   NavigateAndCommit(first_url);
   // Don't flush the message loop, as we want to navigate to a different
@@ -961,34 +997,35 @@ TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckPass) {
   // Navigate the tab to a page.  We should see a StartPhishingDetection IPC.
   GURL url("http://host.com/");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(&url);
+  fake_phishing_detector_.CheckMessage(&url);
   ExpectShouldClassifyForMalwareResult(true);
 }
 
 TEST_F(ClientSideDetectionHostTest,
-       TestPreClassificationCheckInPageNavigation) {
+       TestPreClassificationCheckSameDocumentNavigation) {
   GURL url("http://host.com/");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(&url);
+  fake_phishing_detector_.CheckMessage(&url);
+  fake_phishing_detector_.Reset();
   ExpectShouldClassifyForMalwareResult(true);
 
-  // Now try an in-page navigation.  This should not trigger an IPC.
+  // Now try an same-document navigation.  This should not trigger an IPC.
   EXPECT_CALL(*csd_service_, IsPrivateIPAddress(_)).Times(0);
   GURL inpage("http://host.com/#foo");
   ExpectPreClassificationChecks(inpage, NULL, NULL, NULL, NULL, NULL, NULL,
-                                NULL, NULL);
+                                NULL);
   NavigateAndCommit(inpage);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(NULL);
+  fake_phishing_detector_.CheckMessage(NULL);
   ExpectShouldClassifyForMalwareResult(true);
 }
 
@@ -998,11 +1035,11 @@ TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckXHTML) {
   RenderFrameHostTester::For(web_contents()->GetMainFrame())->
       SetContentsMimeType("application/xhtml+xml");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(&url);
+  fake_phishing_detector_.CheckMessage(&url);
   ExpectShouldClassifyForMalwareResult(true);
 }
 
@@ -1010,20 +1047,23 @@ TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckTwoNavigations) {
   // Navigate to two hosts, which should cause two IPCs.
   GURL url1("http://host1.com/");
   ExpectPreClassificationChecks(url1, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url1);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(&url1);
+  fake_phishing_detector_.CheckMessage(&url1);
   ExpectShouldClassifyForMalwareResult(true);
 
   GURL url2("http://host2.com/");
   ExpectPreClassificationChecks(url2, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url2);
+  // Re-override the binder for PhishingDetector because navigation causes
+  // a new web InterfaceProvider to be created
+  InitTestApi();
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(&url2);
+  fake_phishing_detector_.CheckMessage(&url2);
   ExpectShouldClassifyForMalwareResult(true);
 }
 
@@ -1038,11 +1078,11 @@ TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckMimeType) {
   RenderFrameHostTester::For(web_contents()->GetMainFrame())->
       SetContentsMimeType("image/jpeg");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(NULL);
+  fake_phishing_detector_.CheckMessage(NULL);
   ExpectShouldClassifyForMalwareResult(true);
 }
 
@@ -1051,12 +1091,11 @@ TEST_F(ClientSideDetectionHostTest,
   // If IsPrivateIPAddress returns true, no IPC should be triggered.
   GURL url("http://host3.com/");
   ExpectPreClassificationChecks(url, &kTrue, &kFalse, NULL, NULL, NULL, NULL,
-                                NULL, NULL);
+                                NULL);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
-  const IPC::Message* msg = process()->sink().GetFirstMessageMatching(
-      SafeBrowsingMsg_StartPhishingDetection::ID);
-  ASSERT_FALSE(msg);
+
+  fake_phishing_detector_.CheckMessage(NULL);
   ExpectShouldClassifyForMalwareResult(false);
 }
 
@@ -1065,11 +1104,11 @@ TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckIncognito) {
   // even check the csd-whitelist.
   GURL url("http://host4.com/");
   ExpectPreClassificationChecks(url, &kFalse, &kTrue, NULL, NULL, NULL, NULL,
-                                NULL, NULL);
+                                NULL);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(NULL);
+  fake_phishing_detector_.CheckMessage(NULL);
   ExpectShouldClassifyForMalwareResult(false);
 }
 
@@ -1078,52 +1117,38 @@ TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckCsdWhitelist) {
   // but we should classify the URL for malware.
   GURL url("http://host5.com/");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kTrue, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(NULL);
+  fake_phishing_detector_.CheckMessage(NULL);
   ExpectShouldClassifyForMalwareResult(true);
 }
 
 TEST_F(ClientSideDetectionHostTest,
        TestPreClassificationCheckMalwareKillSwitch) {
-  // If the malware killswitch is on we shouldn't classify the page for malware.
+  // The malware killswitch should be ignored.
   GURL url("http://host5.com/kill-switch");
-  ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kTrue, &kFalse,
+  ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
                                 &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(&url);
-  ExpectShouldClassifyForMalwareResult(false);
-}
-
-TEST_F(ClientSideDetectionHostTest,
-       TestPreClassificationCheckKillswitchAndCsdWhitelist) {
-  // If both the malware kill-swtich is on and the URL is on the csd whitelist,
-  // we will leave pre-classification checks early.
-  GURL url("http://host5.com/kill-switch-and-whitelisted");
-  ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kTrue, &kTrue, NULL,
-                                NULL, NULL, NULL);
-  NavigateAndCommit(url);
-  WaitAndCheckPreClassificationChecks();
-
-  ExpectStartPhishingDetection(NULL);
-  ExpectShouldClassifyForMalwareResult(false);
+  fake_phishing_detector_.CheckMessage(&url);
+  ExpectShouldClassifyForMalwareResult(true);
 }
 
 TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckInvalidCache) {
   // If item is in the cache but it isn't valid, we will classify regardless
   // of whether we are over the reporting limit.
   GURL url("http://host6.com/");
-  ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kTrue, NULL, &kFalse);
+  ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse, &kTrue,
+                                NULL, &kFalse);
 
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(&url);
+  fake_phishing_detector_.CheckMessage(&url);
   ExpectShouldClassifyForMalwareResult(true);
 }
 
@@ -1133,11 +1158,11 @@ TEST_F(ClientSideDetectionHostTest,
   // don't do classification.
   GURL url("http://host7.com/");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kTrue, &kFalse);
+                                &kFalse, &kTrue, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(NULL);
+  fake_phishing_detector_.CheckMessage(NULL);
   ExpectShouldClassifyForMalwareResult(true);
 }
 
@@ -1145,11 +1170,11 @@ TEST_F(ClientSideDetectionHostTest,
        TestPreClassificationCheckOverMalwareReportingLimit) {
   GURL url("http://host.com/");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kTrue);
+                                &kFalse, &kFalse, &kTrue);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(&url);
+  fake_phishing_detector_.CheckMessage(&url);
   ExpectShouldClassifyForMalwareResult(false);
 }
 
@@ -1157,22 +1182,22 @@ TEST_F(ClientSideDetectionHostTest,
        TestPreClassificationCheckOverBothReportingLimits) {
   GURL url("http://host.com/");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kTrue, &kTrue);
+                                &kFalse, &kTrue, &kTrue);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(NULL);
+  fake_phishing_detector_.CheckMessage(NULL);
   ExpectShouldClassifyForMalwareResult(false);
 }
 
 TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckHttpsUrl) {
   GURL url("https://host.com/");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(&url);
+  fake_phishing_detector_.CheckMessage(&url);
   ExpectShouldClassifyForMalwareResult(true);
 }
 
@@ -1180,11 +1205,11 @@ TEST_F(ClientSideDetectionHostTest,
        TestPreClassificationCheckNoneHttpOrHttpsUrl) {
   GURL url("file://host.com/");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
-                                &kFalse, &kFalse, &kFalse, &kFalse);
+                                &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
 
-  ExpectStartPhishingDetection(NULL);
+  fake_phishing_detector_.CheckMessage(NULL);
   ExpectShouldClassifyForMalwareResult(true);
 }
 
@@ -1192,8 +1217,8 @@ TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckValidCached) {
   // If result is cached, we will try and display the blocking page directly
   // with no start classification message.
   GURL url("http://host8.com/");
-  ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse, &kTrue,
-                                &kFalse, &kFalse, &kFalse);
+  ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kTrue, &kFalse,
+                                &kFalse, &kFalse);
 
   UnsafeResource resource;
   EXPECT_CALL(*ui_manager_.get(), DisplayBlockingPage(_))
@@ -1204,8 +1229,7 @@ TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckValidCached) {
   EXPECT_EQ(url, resource.url);
   EXPECT_EQ(url, resource.original_url);
 
-  ExpectStartPhishingDetection(NULL);
-
+  fake_phishing_detector_.CheckMessage(NULL);
   // Showing a phishing warning will invalidate all the weak pointers which
   // means we will not extract malware features.
   ExpectShouldClassifyForMalwareResult(false);

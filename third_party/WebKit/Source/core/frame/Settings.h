@@ -29,17 +29,18 @@
 #define Settings_h
 
 #include <memory>
+
+#include "base/macros.h"
 #include "bindings/core/v8/V8CacheOptions.h"
-#include "bindings/core/v8/V8CacheStrategiesForCacheStorage.h"
 #include "core/CoreExport.h"
-#include "core/SettingsMacros.h"
+#include "core/dom/events/AddEventListenerOptionsDefaults.h"
 #include "core/editing/EditingBehaviorTypes.h"
 #include "core/editing/SelectionStrategy.h"
-#include "core/events/AddEventListenerOptionsDefaults.h"
 #include "core/frame/SettingsDelegate.h"
 #include "core/html/media/AutoplayPolicy.h"
 #include "core/html/track/TextTrackKindUserPreference.h"
 #include "core/loader/FrameLoaderTypes.h"
+#include "core/settings_macros.h"
 #include "platform/Timer.h"
 #include "platform/fonts/GenericFontFamilySettings.h"
 #include "platform/geometry/IntSize.h"
@@ -48,12 +49,12 @@
 #include "platform/weborigin/KURL.h"
 #include "public/platform/PointerProperties.h"
 #include "public/platform/WebDisplayMode.h"
+#include "public/platform/WebEffectiveConnectionType.h"
 #include "public/platform/WebViewportStyle.h"
 
 namespace blink {
 
 class CORE_EXPORT Settings {
-  WTF_MAKE_NONCOPYABLE(Settings);
   USING_FAST_MALLOC(Settings);
 
  public:
@@ -84,6 +85,12 @@ class CORE_EXPORT Settings {
 
   void SetDelegate(SettingsDelegate*);
 
+  // TODO(lunalu): Service worker and shared worker count feature usage on the
+  // blink side use counter via the shadow page. Once blink side use counter is
+  // removed, this flag is no longer needed (crbug.com/811948).
+  void SetIsShadowPage(bool);
+  bool IsShadowPage() const { return is_shadow_page_; }
+
  private:
   Settings();
 
@@ -94,8 +101,14 @@ class CORE_EXPORT Settings {
   GenericFontFamilySettings generic_font_family_settings_;
   IntSize text_autosizing_window_size_override_;
   bool text_autosizing_enabled_ : 1;
+  // TODO(lunalu): Service worker is counting feature usage on the blink side
+  // use counter via the shadow page. Once blink side use counter is removed,
+  // this flag is no longer needed (crbug.com/811948).
+  bool is_shadow_page_;
 
   SETTINGS_MEMBER_VARIABLES
+
+  DISALLOW_COPY_AND_ASSIGN(Settings);
 };
 
 }  // namespace blink

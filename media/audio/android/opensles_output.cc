@@ -52,9 +52,17 @@ OpenSLESOutputStream::OpenSLESOutputStream(AudioManagerAndroid* manager,
       buffer_size_bytes_(have_float_output_
                              ? bytes_per_frame_ * params.frames_per_buffer()
                              : params.GetBytesPerBuffer()),
+      performance_mode_(SL_ANDROID_PERFORMANCE_NONE),
       delay_calculator_(samples_per_second_) {
   DVLOG(2) << "OpenSLESOutputStream::OpenSLESOutputStream("
            << "stream_type=" << stream_type << ")";
+
+  if (AudioManagerAndroid::SupportsPerformanceModeForOutput()) {
+    if (params.latency_tag() == AudioLatency::LATENCY_PLAYBACK)
+      performance_mode_ = SL_ANDROID_PERFORMANCE_POWER_SAVING;
+    else if (params.latency_tag() == AudioLatency::LATENCY_RTC)
+      performance_mode_ = SL_ANDROID_PERFORMANCE_LATENCY_EFFECTS;
+  }
 
   audio_bus_ = AudioBus::Create(params);
 
@@ -307,11 +315,19 @@ bool OpenSLESOutputStream::CreatePlayer() {
 
   // Set configuration using the stream type provided at construction.
   LOG_ON_FAILURE_AND_RETURN(
-      (*player_config)->SetConfiguration(player_config,
-                                         SL_ANDROID_KEY_STREAM_TYPE,
-                                         &stream_type_,
-                                         sizeof(SLint32)),
+      (*player_config)
+          ->SetConfiguration(player_config, SL_ANDROID_KEY_STREAM_TYPE,
+                             &stream_type_, sizeof(SLint32)),
       false);
+
+  // Set configuration using the stream type provided at construction.
+  if (performance_mode_ > SL_ANDROID_PERFORMANCE_NONE) {
+    LOG_ON_FAILURE_AND_RETURN(
+        (*player_config)
+            ->SetConfiguration(player_config, SL_ANDROID_KEY_PERFORMANCE_MODE,
+                               &performance_mode_, sizeof(SLuint32)),
+        false);
+  }
 
   // Realize the player object in synchronous mode.
   LOG_ON_FAILURE_AND_RETURN(

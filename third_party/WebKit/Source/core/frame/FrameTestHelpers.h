@@ -35,16 +35,19 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
-#include "core/exported/WebViewBase.h"
+
+#include "base/macros.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/Settings.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/WebTaskRunner.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/scroll/ScrollbarTheme.h"
+#include "platform/testing/UseMockScrollbarSettings.h"
+#include "platform/testing/WebLayerTreeViewImplForTesting.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebCachePolicy.h"
 #include "public/platform/WebMouseEvent.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURLRequest.h"
+#include "public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
 #include "public/web/WebFrameClient.h"
 #include "public/web/WebFrameOwnerProperties.h"
 #include "public/web/WebHistoryItem.h"
@@ -53,34 +56,10 @@
 #include "public/web/WebViewClient.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
-#define ASSERT_POINT_EQ(expected, actual)    \
-  do {                                       \
-    ASSERT_EQ((expected).x(), (actual).x()); \
-    ASSERT_EQ((expected).y(), (actual).y()); \
-  } while (false)
-
-#define ASSERT_SIZE_EQ(expected, actual)               \
-  do {                                                 \
-    ASSERT_EQ((expected).Width(), (actual).Width());   \
-    ASSERT_EQ((expected).Height(), (actual).Height()); \
-  } while (false)
-
-#define EXPECT_POINT_EQ(expected, actual)    \
-  do {                                       \
-    EXPECT_EQ((expected).X(), (actual).X()); \
-    EXPECT_EQ((expected).Y(), (actual).Y()); \
-  } while (false)
-
 #define EXPECT_FLOAT_POINT_EQ(expected, actual)    \
   do {                                             \
     EXPECT_FLOAT_EQ((expected).X(), (actual).X()); \
     EXPECT_FLOAT_EQ((expected).Y(), (actual).Y()); \
-  } while (false)
-
-#define EXPECT_SIZE_EQ(expected, actual)               \
-  do {                                                 \
-    EXPECT_EQ((expected).Width(), (actual).Width());   \
-    EXPECT_EQ((expected).Height(), (actual).Height()); \
   } while (false)
 
 #define EXPECT_FLOAT_SIZE_EQ(expected, actual)               \
@@ -100,8 +79,7 @@
 namespace blink {
 
 class WebFrame;
-class WebLocalFrameBase;
-class WebRemoteFrameBase;
+class WebLocalFrameImpl;
 class WebRemoteFrameImpl;
 class WebSettings;
 
@@ -124,7 +102,7 @@ void LoadHTMLString(WebLocalFrame*,
 void LoadHistoryItem(WebLocalFrame*,
                      const WebHistoryItem&,
                      WebHistoryLoadType,
-                     WebCachePolicy);
+                     mojom::FetchCacheMode);
 // Same as above, but for WebLocalFrame::Reload().
 void ReloadFrame(WebLocalFrame*);
 void ReloadFrameBypassingCache(WebLocalFrame*);
@@ -145,20 +123,20 @@ WebMouseEvent CreateMouseEvent(WebInputEvent::Type,
 // ensuring that non-null clients outlive the created frame.
 
 // Helper for creating a local child frame of a local parent frame.
-WebLocalFrameBase* CreateLocalChild(WebLocalFrame& parent,
+WebLocalFrameImpl* CreateLocalChild(WebLocalFrame& parent,
                                     WebTreeScopeType,
                                     TestWebFrameClient* = nullptr);
 
 // Similar, but unlike the overload which takes the client as a raw pointer,
 // ownership of the TestWebFrameClient is transferred to the test framework.
 // TestWebFrameClient may not be null.
-WebLocalFrameBase* CreateLocalChild(WebLocalFrame& parent,
+WebLocalFrameImpl* CreateLocalChild(WebLocalFrame& parent,
                                     WebTreeScopeType,
                                     std::unique_ptr<TestWebFrameClient>);
 
 // Helper for creating a provisional local frame that can replace a remote
 // frame.
-WebLocalFrameBase* CreateProvisional(WebRemoteFrame& old_frame,
+WebLocalFrameImpl* CreateProvisional(WebRemoteFrame& old_frame,
                                      TestWebFrameClient* = nullptr);
 
 // Helper for creating a remote frame. Generally used when creating a remote
@@ -168,7 +146,7 @@ WebLocalFrameBase* CreateProvisional(WebRemoteFrame& old_frame,
 WebRemoteFrameImpl* CreateRemote(TestWebRemoteFrameClient* = nullptr);
 
 // Helper for creating a local child frame of a remote parent frame.
-WebLocalFrameBase* CreateLocalChild(
+WebLocalFrameImpl* CreateLocalChild(
     WebRemoteFrame& parent,
     const WebString& name = WebString(),
     const WebFrameOwnerProperties& = WebFrameOwnerProperties(),
@@ -179,49 +157,14 @@ WebLocalFrameBase* CreateLocalChild(
 // Helper for creating a remote child frame of a remote parent frame.
 WebRemoteFrameImpl* CreateRemoteChild(WebRemoteFrame& parent,
                                       const WebString& name = WebString(),
-                                      RefPtr<SecurityOrigin> = nullptr,
+                                      scoped_refptr<SecurityOrigin> = nullptr,
                                       TestWebRemoteFrameClient* = nullptr);
-
-// Forces to use mocked overlay scrollbars instead of the default native theme
-// scrollbars to avoid crash in Chromium code when it tries to load UI
-// resources that are not available when running blink unit tests, and to
-// ensure consistent layout regardless of differences between scrollbar themes.
-// WebViewHelper includes this, so this is only needed if a test doesn't use
-// WebViewHelper or the test needs a bigger scope of mock scrollbar settings
-// than the scope of WebViewHelper.
-class UseMockScrollbarSettings {
- public:
-  UseMockScrollbarSettings()
-      : original_mock_scrollbar_enabled_(Settings::MockScrollbarsEnabled()),
-        original_overlay_scrollbars_enabled_(
-            RuntimeEnabledFeatures::OverlayScrollbarsEnabled()) {
-    Settings::SetMockScrollbarsEnabled(true);
-    RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(true);
-    EXPECT_TRUE(ScrollbarTheme::GetTheme().UsesOverlayScrollbars());
-  }
-
-  UseMockScrollbarSettings(bool use_mock, bool use_overlay)
-      : original_mock_scrollbar_enabled_(Settings::MockScrollbarsEnabled()),
-        original_overlay_scrollbars_enabled_(
-            RuntimeEnabledFeatures::OverlayScrollbarsEnabled()) {
-    Settings::SetMockScrollbarsEnabled(use_mock);
-    RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(use_overlay);
-  }
-
-  ~UseMockScrollbarSettings() {
-    Settings::SetMockScrollbarsEnabled(original_mock_scrollbar_enabled_);
-    RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(
-        original_overlay_scrollbars_enabled_);
-  }
-
- private:
-  bool original_mock_scrollbar_enabled_;
-  bool original_overlay_scrollbars_enabled_;
-};
 
 class TestWebWidgetClient : public WebWidgetClient {
  public:
-  virtual ~TestWebWidgetClient() {}
+  ~TestWebWidgetClient() override = default;
+
+  // WebWidgetClient:
   bool AllowsBrokenNullLayerTreeView() const override { return true; }
   WebLayerTreeView* InitializeLayerTreeView() override;
 
@@ -233,8 +176,9 @@ class TestWebViewWidgetClient : public TestWebWidgetClient {
  public:
   explicit TestWebViewWidgetClient(TestWebViewClient& test_web_view_client)
       : test_web_view_client_(test_web_view_client) {}
-  virtual ~TestWebViewWidgetClient() {}
+  ~TestWebViewWidgetClient() override = default;
 
+  // TestWebViewWidgetClient:
   WebLayerTreeView* InitializeLayerTreeView() override;
   void ScheduleAnimation() override;
   void DidMeaningfulLayout(WebMeaningfulLayout) override;
@@ -245,8 +189,11 @@ class TestWebViewWidgetClient : public TestWebWidgetClient {
 
 class TestWebViewClient : public WebViewClient {
  public:
-  ~TestWebViewClient() override {}
+  ~TestWebViewClient() override = default;
 
+  WebLayerTreeViewImplForTesting* GetLayerTreeViewForTesting();
+
+  // WebViewClient:
   WebLayerTreeView* InitializeLayerTreeView() override;
   void ScheduleAnimation() override { animation_scheduled_ = true; }
   bool AnimationScheduled() { return animation_scheduled_; }
@@ -257,15 +204,13 @@ class TestWebViewClient : public WebViewClient {
  private:
   friend class TestWebViewWidgetClient;
 
-  std::unique_ptr<WebLayerTreeView> layer_tree_view_;
+  std::unique_ptr<WebLayerTreeViewImplForTesting> layer_tree_view_;
   bool animation_scheduled_ = false;
 };
 
 // Convenience class for handling the lifetime of a WebView and its associated
 // mainframe in tests.
 class WebViewHelper {
-  WTF_MAKE_NONCOPYABLE(WebViewHelper);
-
  public:
   WebViewHelper();
   ~WebViewHelper();
@@ -277,7 +222,7 @@ class WebViewHelper {
   // for ensuring that non-null clients outlive the created frame.
 
   // Creates and initializes the WebView with a main WebLocalFrame.
-  WebViewBase* InitializeWithOpener(
+  WebViewImpl* InitializeWithOpener(
       WebFrame* opener,
       TestWebFrameClient* = nullptr,
       TestWebViewClient* = nullptr,
@@ -285,14 +230,14 @@ class WebViewHelper {
       void (*update_settings_func)(WebSettings*) = nullptr);
 
   // Same as InitializeWithOpener(), but always sets the opener to null.
-  WebViewBase* Initialize(TestWebFrameClient* = nullptr,
+  WebViewImpl* Initialize(TestWebFrameClient* = nullptr,
                           TestWebViewClient* = nullptr,
                           TestWebWidgetClient* = nullptr,
-                          void (*update_settings_func)(WebSettings*) = 0);
+                          void (*update_settings_func)(WebSettings*) = nullptr);
 
   // Same as Initialize() but also performs the initial load of the url. Only
   // returns once the load is complete.
-  WebViewBase* InitializeAndLoad(
+  WebViewImpl* InitializeAndLoad(
       const std::string& url,
       TestWebFrameClient* = nullptr,
       TestWebViewClient* = nullptr,
@@ -302,27 +247,37 @@ class WebViewHelper {
   // Creates and initializes the WebView with a main WebRemoteFrame. Passing
   // nullptr as the SecurityOrigin results in a frame with a unique security
   // origin.
-  WebViewBase* InitializeRemote(TestWebRemoteFrameClient* = nullptr,
-                                RefPtr<SecurityOrigin> = nullptr,
+  WebViewImpl* InitializeRemote(TestWebRemoteFrameClient* = nullptr,
+                                scoped_refptr<SecurityOrigin> = nullptr,
                                 TestWebViewClient* = nullptr);
+
+  // Load the 'Ahem' font to this WebView.
+  // The 'Ahem' font is the only font whose font metrics is consistent across
+  // platforms, but it's not guaranteed to be available.
+  // See external/wpt/css/fonts/ahem/README for more about the 'Ahem' font.
+  void LoadAhem();
 
   void Resize(WebSize);
 
   void Reset();
 
-  WebViewBase* WebView() const { return web_view_; }
+  WebViewImpl* GetWebView() const { return web_view_; }
 
-  WebLocalFrameBase* LocalMainFrame() const;
-  WebRemoteFrameBase* RemoteMainFrame() const;
+  WebLocalFrameImpl* LocalMainFrame() const;
+  WebRemoteFrameImpl* RemoteMainFrame() const;
+
+  void SetViewportSize(const WebSize&);
 
  private:
-  void InitializeWebView(TestWebViewClient*);
+  void InitializeWebView(TestWebViewClient*, class WebView* opener);
 
-  WebViewBase* web_view_;
+  WebViewImpl* web_view_;
   UseMockScrollbarSettings mock_scrollbar_settings_;
   // Non-null if the WebViewHelper owns the TestWebViewClient.
   std::unique_ptr<TestWebViewClient> owned_test_web_view_client_;
   TestWebViewClient* test_web_view_client_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebViewHelper);
 };
 
 // Minimal implementation of WebFrameClient needed for unit tests that load
@@ -331,6 +286,9 @@ class WebViewHelper {
 class TestWebFrameClient : public WebFrameClient {
  public:
   TestWebFrameClient();
+  ~TestWebFrameClient() override = default;
+
+  static bool IsLoading() { return loads_in_progress_ > 0; }
 
   WebLocalFrame* Frame() const { return frame_; }
   // Pass ownership of the TestWebFrameClient to |self_owned| here if the
@@ -340,28 +298,25 @@ class TestWebFrameClient : public WebFrameClient {
   // Note: only needed for local roots.
   void BindWidgetClient(std::unique_ptr<TestWebWidgetClient>);
 
-  void FrameDetached(WebLocalFrame*, DetachType) override;
+  // WebFrameClient:
+  void FrameDetached(DetachType) override;
   WebLocalFrame* CreateChildFrame(WebLocalFrame* parent,
                                   WebTreeScopeType,
                                   const WebString& name,
                                   const WebString& fallback_name,
                                   WebSandboxFlags,
-                                  const WebParsedFeaturePolicy&,
+                                  const ParsedFeaturePolicy&,
                                   const WebFrameOwnerProperties&) override;
   void DidStartLoading(bool) override;
   void DidStopLoading() override;
-
-  static bool IsLoading() { return loads_in_progress_ > 0; }
-
   service_manager::InterfaceProvider* GetInterfaceProvider() override {
     return interface_provider_.get();
   }
-
-  std::unique_ptr<blink::WebURLLoader> CreateURLLoader(
-      const blink::WebURLRequest& request,
-      SingleThreadTaskRunner* task_runner) override {
-    // TODO(yhirano): Stop using Platform::CreateURLLoader() here.
-    return Platform::Current()->CreateURLLoader(request, task_runner);
+  std::unique_ptr<blink::WebURLLoaderFactory> CreateURLLoaderFactory()
+      override {
+    // TODO(kinuko,toyoshim): Stop using Platform's URLLoaderFactory, but create
+    // its own WebURLLoaderFactoryWithMock. (crbug.com/751425)
+    return Platform::Current()->CreateDefaultURLLoaderFactory();
   }
 
  private:
@@ -387,6 +342,7 @@ class TestWebFrameClient : public WebFrameClient {
 class TestWebRemoteFrameClient : public WebRemoteFrameClient {
  public:
   TestWebRemoteFrameClient();
+  ~TestWebRemoteFrameClient() override = default;
 
   WebRemoteFrame* Frame() const { return frame_; }
   // Pass ownership of the TestWebFrameClient to |self_owned| here if the
@@ -394,12 +350,13 @@ class TestWebRemoteFrameClient : public WebRemoteFrameClient {
   void Bind(WebRemoteFrame*,
             std::unique_ptr<TestWebRemoteFrameClient> self_owned = nullptr);
 
-  // WebRemoteFrameClient overrides:
+  // WebRemoteFrameClient:
   void FrameDetached(DetachType) override;
   void ForwardPostMessage(WebLocalFrame* source_frame,
                           WebRemoteFrame* target_frame,
                           WebSecurityOrigin target_origin,
-                          WebDOMMessageEvent) override {}
+                          WebDOMMessageEvent,
+                          bool has_user_gesture) override {}
 
  private:
   // If set to a non-null value, self-deletes on frame detach.

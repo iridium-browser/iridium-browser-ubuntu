@@ -4,11 +4,14 @@
 
 #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
 
+#include <utility>
+
 #include "base/auto_reset.h"
+#include "base/command_line.h"
 #include "base/macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/task_scheduler/post_task.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "build/build_config.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -19,17 +22,19 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tab_ui_helper.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
+#include "chrome/browser/ui/tabs/tab_network_state.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/mime_util/mime_util.h"
+#include "components/feature_engagement/buildflags.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/prefs/pref_service.h"
@@ -43,42 +48,36 @@
 #include "content/public/common/webplugininfo.h"
 #include "ipc/ipc_message.h"
 #include "net/base/filename_util.h"
+#include "third_party/WebKit/public/common/mime_util/mime_util.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/widget/widget.h"
 #include "url/origin.h"
 
+#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
+#include "chrome/browser/feature_engagement/new_tab/new_tab_tracker.h"
+#include "chrome/browser/feature_engagement/new_tab/new_tab_tracker_factory.h"
+#endif
+
 using base::UserMetricsAction;
 using content::WebContents;
 
 namespace {
 
-TabRendererData::NetworkState TabContentsNetworkState(
-    WebContents* contents) {
-  DCHECK(contents);
-
-  if (!contents->IsLoadingToDifferentDocument()) {
-    content::NavigationEntry* entry =
-        contents->GetController().GetLastCommittedEntry();
-    if (entry && (entry->GetPageType() == content::PAGE_TYPE_ERROR))
-      return TabRendererData::NETWORK_STATE_ERROR;
-    return TabRendererData::NETWORK_STATE_NONE;
-  }
-
-  if (contents->IsWaitingForResponse())
-    return TabRendererData::NETWORK_STATE_WAITING;
-  return TabRendererData::NETWORK_STATE_LOADING;
-}
-
 bool DetermineTabStripLayoutStacked(PrefService* prefs, bool* adjust_layout) {
   *adjust_layout = false;
   // For ash, always allow entering stacked mode.
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
   *adjust_layout = true;
-  return prefs->GetBoolean(prefs::kTabStripStackedLayout);
+  // Stacked layout is always enabled in touch optimized UI design.
+  return ui::MaterialDesignController::IsTouchOptimizedUiEnabled() ||
+         prefs->GetBoolean(prefs::kTabStripStackedLayout);
 #else
-  return false;
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kForceStackedTabStripLayout);
 #endif
 }
 
@@ -311,11 +310,6 @@ void BrowserTabStripController::ShowContextMenuForTab(
   context_menu_contents_->RunMenuAt(p, source_type);
 }
 
-void BrowserTabStripController::UpdateLoadingAnimations() {
-  for (int i = 0, tab_count = tabstrip_->tab_count(); i < tab_count; ++i)
-    tabstrip_->tab_at(i)->StepLoadingAnimation();
-}
-
 int BrowserTabStripController::HasAvailableDragActions() const {
   return model_->delegate()->GetDragActions();
 }
@@ -334,8 +328,8 @@ void BrowserTabStripController::OnDropIndexUpdate(int index,
 void BrowserTabStripController::PerformDrop(bool drop_before,
                                             int index,
                                             const GURL& url) {
-  chrome::NavigateParams params(browser_view_->browser(), url,
-                                ui::PAGE_TRANSITION_LINK);
+  NavigateParams params(browser_view_->browser(), url,
+                        ui::PAGE_TRANSITION_LINK);
   params.tabstrip_index = index;
 
   if (drop_before) {
@@ -346,18 +340,24 @@ void BrowserTabStripController::PerformDrop(bool drop_before,
     params.disposition = WindowOpenDisposition::CURRENT_TAB;
     params.source_contents = model_->GetWebContentsAt(index);
   }
-  params.window_action = chrome::NavigateParams::SHOW_WINDOW;
-  chrome::Navigate(&params);
+  params.window_action = NavigateParams::SHOW_WINDOW;
+  Navigate(&params);
 }
 
 bool BrowserTabStripController::IsCompatibleWith(TabStrip* other) const {
-  Profile* other_profile =
-      static_cast<BrowserTabStripController*>(other->controller())->profile();
-  return other_profile == profile();
+  Profile* other_profile = other->controller()->GetProfile();
+  return other_profile == GetProfile();
 }
 
 void BrowserTabStripController::CreateNewTab() {
   model_->delegate()->AddTabAt(GURL(), -1, true);
+#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
+  auto* new_tab_tracker =
+      feature_engagement::NewTabTrackerFactory::GetInstance()->GetForProfile(
+          browser_view_->browser()->profile());
+  new_tab_tracker->OnNewTabOpened();
+  new_tab_tracker->CloseBubble();
+#endif
 }
 
 void BrowserTabStripController::CreateNewTabWithLocation(
@@ -365,8 +365,9 @@ void BrowserTabStripController::CreateNewTabWithLocation(
   // Use autocomplete to clean up the text, going so far as to turn it into
   // a search query if necessary.
   AutocompleteMatch match;
-  AutocompleteClassifierFactory::GetForProfile(profile())->Classify(
-      location, false, false, metrics::OmniboxEventProto::BLANK, &match, NULL);
+  AutocompleteClassifierFactory::GetForProfile(GetProfile())
+      ->Classify(location, false, false, metrics::OmniboxEventProto::BLANK,
+                 &match, NULL);
   if (match.destination_url.is_valid())
     model_->delegate()->AddTabAt(match.destination_url, -1, true);
 }
@@ -421,6 +422,10 @@ base::string16 BrowserTabStripController::GetAccessibleTabName(
       false /* include_app_name */, tabstrip_->GetModelIndexOfTab(tab));
 }
 
+Profile* BrowserTabStripController::GetProfile() const {
+  return model_->profile();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserTabStripController, TabStripModelObserver implementation:
 
@@ -441,6 +446,19 @@ void BrowserTabStripController::TabDetachedAt(WebContents* contents,
   tabstrip_->RemoveTabAt(contents, model_index);
 }
 
+void BrowserTabStripController::ActiveTabChanged(
+    content::WebContents* old_contents,
+    content::WebContents* new_contents,
+    int index,
+    int reason) {
+  // It's possible for |new_contents| to be null when the final tab in a tab
+  // strip is closed.
+  if (new_contents && index != TabStripModel::kNoTab) {
+    TabUIHelper::FromWebContents(new_contents)->set_was_active_at_least_once();
+    SetTabDataAt(new_contents, index);
+  }
+}
+
 void BrowserTabStripController::TabSelectionChanged(
     TabStripModel* tab_strip_model,
     const ui::ListSelectionModel& old_model) {
@@ -453,16 +471,17 @@ void BrowserTabStripController::TabMoved(WebContents* contents,
   // Cancel any pending tab transition.
   hover_tab_selector_.CancelTabTransition();
 
-  // Pass in the TabRendererData as the pinned state may have changed.
-  TabRendererData data;
-  SetTabRendererDataFromModel(contents, to_model_index, &data, EXISTING_TAB);
-  tabstrip_->MoveTab(from_model_index, to_model_index, data);
+  // A move may have resulted in the pinned state changing, so pass in a
+  // TabRendererData.
+  tabstrip_->MoveTab(
+      from_model_index, to_model_index,
+      TabRendererDataFromModel(contents, to_model_index, EXISTING_TAB));
 }
 
 void BrowserTabStripController::TabChangedAt(WebContents* contents,
                                              int model_index,
                                              TabChangeType change_type) {
-  if (change_type == TITLE_NOT_LOADING) {
+  if (change_type == TabChangeType::kTitleNotLoading) {
     tabstrip_->TabTitleChangedNotLoading(model_index);
     // We'll receive another notification of the change asynchronously.
     return;
@@ -490,29 +509,37 @@ void BrowserTabStripController::TabBlockedStateChanged(WebContents* contents,
   SetTabDataAt(contents, model_index);
 }
 
-void BrowserTabStripController::SetTabRendererDataFromModel(
+void BrowserTabStripController::SetTabNeedsAttentionAt(int index,
+                                                       bool attention) {
+  tabstrip_->SetTabNeedsAttention(index, attention);
+}
+
+TabRendererData BrowserTabStripController::TabRendererDataFromModel(
     WebContents* contents,
     int model_index,
-    TabRendererData* data,
     TabStatus tab_status) {
-  data->favicon = favicon::TabFaviconFromWebContents(contents).AsImageSkia();
-  data->network_state = TabContentsNetworkState(contents);
-  data->title = contents->GetTitle();
-  data->url = contents->GetURL();
-  data->crashed_status = contents->GetCrashedStatus();
-  data->incognito = contents->GetBrowserContext()->IsOffTheRecord();
-  data->pinned = model_->IsTabPinned(model_index);
-  data->show_icon = data->pinned || favicon::ShouldDisplayFavicon(contents);
-  data->blocked = model_->IsTabBlocked(model_index);
-  data->app = extensions::TabHelper::FromWebContents(contents)->is_app();
-  data->alert_state = chrome::GetTabAlertStateForContents(contents);
+  TabRendererData data;
+  TabUIHelper* tab_ui_helper = TabUIHelper::FromWebContents(contents);
+  data.favicon = tab_ui_helper->GetFavicon().AsImageSkia();
+  data.network_state = TabNetworkStateForWebContents(contents);
+  data.title = tab_ui_helper->GetTitle();
+  data.url = contents->GetURL();
+  data.crashed_status = contents->GetCrashedStatus();
+  data.incognito = contents->GetBrowserContext()->IsOffTheRecord();
+  data.pinned = model_->IsTabPinned(model_index);
+  data.show_icon = data.pinned || favicon::ShouldDisplayFavicon(contents);
+  data.blocked = model_->IsTabBlocked(model_index);
+  data.app = extensions::TabHelper::FromWebContents(contents)->is_app();
+  data.alert_state = chrome::GetTabAlertStateForContents(contents);
+  data.should_hide_throbber = tab_ui_helper->ShouldHideThrobber();
+  return data;
 }
 
 void BrowserTabStripController::SetTabDataAt(content::WebContents* web_contents,
                                              int model_index) {
-  TabRendererData data;
-  SetTabRendererDataFromModel(web_contents, model_index, &data, EXISTING_TAB);
-  tabstrip_->SetTabData(model_index, data);
+  tabstrip_->SetTabData(
+      model_index,
+      TabRendererDataFromModel(web_contents, model_index, EXISTING_TAB));
 }
 
 void BrowserTabStripController::StartHighlightTabsForCommand(
@@ -548,9 +575,8 @@ void BrowserTabStripController::AddTab(WebContents* contents,
   // Cancel any pending tab transition.
   hover_tab_selector_.CancelTabTransition();
 
-  TabRendererData data;
-  SetTabRendererDataFromModel(contents, index, &data, NEW_TAB);
-  tabstrip_->AddTabAt(index, data, is_active);
+  tabstrip_->AddTabAt(index, TabRendererDataFromModel(contents, index, NEW_TAB),
+                      is_active);
 }
 
 void BrowserTabStripController::UpdateStackedLayout() {
@@ -571,7 +597,7 @@ void BrowserTabStripController::OnFindURLMimeTypeCompleted(
   content::WebPluginInfo plugin;
   tabstrip_->FileSupported(
       url,
-      mime_type.empty() || mime_util::IsSupportedMimeType(mime_type) ||
+      mime_type.empty() || blink::IsSupportedMimeType(mime_type) ||
           content::PluginService::GetInstance()->GetPluginInfo(
               -1,                // process ID
               MSG_ROUTING_NONE,  // routing ID

@@ -16,11 +16,17 @@ ifdef DRV_AMDGPU
 	CFLAGS += $(shell $(PKG_CONFIG) --cflags libdrm_amdgpu)
 	LDLIBS += -lamdgpuaddr
 endif
+ifdef DRV_AMLOGIC
+	CFLAGS += $(shell $(PKG_CONFIG) --cflags libdrm_amlogic)
+endif
 ifdef DRV_EXYNOS
 	CFLAGS += $(shell $(PKG_CONFIG) --cflags libdrm_exynos)
 endif
 ifdef DRV_I915
 	CFLAGS += $(shell $(PKG_CONFIG) --cflags libdrm_intel)
+endif
+ifdef DRV_RADEON
+	CFLAGS += $(shell $(PKG_CONFIG) --cflags libdrm_radeon)
 endif
 ifdef DRV_ROCKCHIP
 	CFLAGS += $(shell $(PKG_CONFIG) --cflags libdrm_rockchip)

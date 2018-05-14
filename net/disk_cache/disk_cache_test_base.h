@@ -18,6 +18,14 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
+namespace base {
+namespace test {
+
+class ScopedTaskEnvironment;
+
+}  // namespace test
+}  // namespace base
+
 namespace net {
 
 class IOBuffer;
@@ -31,6 +39,7 @@ class BackendImpl;
 class Entry;
 class MemBackendImpl;
 class SimpleBackendImpl;
+class SimpleFileTracker;
 
 }  // namespace disk_cache
 
@@ -72,10 +81,16 @@ class DiskCacheTestWithCache : public DiskCacheTest {
     std::unique_ptr<disk_cache::Backend::Iterator> iterator_;
   };
 
+  // Assumes NetTestSuite is available.
   DiskCacheTestWithCache();
+
+  // Does not take ownership of |scoped_task_env|, and will not use it past
+  // TearDown(). Does not require NetTestSuite.
+  explicit DiskCacheTestWithCache(
+      base::test::ScopedTaskEnvironment* scoped_task_env);
   ~DiskCacheTestWithCache() override;
 
-  void CreateBackend(uint32_t flags, base::Thread* thread);
+  void CreateBackend(uint32_t flags);
 
   void InitCache();
   void SimulateCrash();
@@ -86,12 +101,16 @@ class DiskCacheTestWithCache : public DiskCacheTest {
   }
 
   void SetSimpleCacheMode() {
+    DCHECK(!use_current_thread_);
     simple_cache_mode_ = true;
   }
 
   void SetMask(uint32_t mask) { mask_ = mask; }
 
   void SetMaxSize(int size);
+
+  // Returns value last given to SetMaxSize (or 0).
+  int MaxSize() const { return size_; }
 
   // Deletes and re-creates the files on initialization errors.
   void SetForceCreation() {
@@ -114,7 +133,9 @@ class DiskCacheTestWithCache : public DiskCacheTest {
     integrity_ = false;
   }
 
+  // This is only supported for blockfile cache.
   void UseCurrentThread() {
+    DCHECK(!simple_cache_mode_);
     use_current_thread_ = true;
   }
 
@@ -168,6 +189,7 @@ class DiskCacheTestWithCache : public DiskCacheTest {
   // initialized. The implementation pointers can be NULL.
   std::unique_ptr<disk_cache::Backend> cache_;
   disk_cache::BackendImpl* cache_impl_;
+  std::unique_ptr<disk_cache::SimpleFileTracker> simple_file_tracker_;
   disk_cache::SimpleBackendImpl* simple_cache_impl_;
   disk_cache::MemBackendImpl* mem_cache_;
 
@@ -188,8 +210,8 @@ class DiskCacheTestWithCache : public DiskCacheTest {
  private:
   void InitMemoryCache();
   void InitDiskCache();
+  base::test::ScopedTaskEnvironment* scoped_task_env_;
 
-  base::Thread cache_thread_;
   DISALLOW_COPY_AND_ASSIGN(DiskCacheTestWithCache);
 };
 

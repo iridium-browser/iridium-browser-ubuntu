@@ -4,13 +4,26 @@
 
 package org.chromium.net;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
 import static org.chromium.base.CollectionUtil.newHashSet;
+import static org.chromium.net.CronetTestRule.getContext;
 
 import android.support.test.filters.SmallTest;
 
 import org.json.JSONObject;
+import org.junit.After;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
 
+import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
+import org.chromium.net.CronetTestRule.OnlyRunNativeCronet;
 import org.chromium.net.MetricsTestUtil.TestRequestFinishedListener;
 
 import java.nio.ByteBuffer;
@@ -20,7 +33,11 @@ import java.util.HashSet;
 /**
  * Tests functionality of BidirectionalStream's QUIC implementation.
  */
-public class BidirectionalStreamQuicTest extends CronetTestBase {
+@RunWith(BaseJUnit4ClassRunner.class)
+public class BidirectionalStreamQuicTest {
+    @Rule
+    public final CronetTestRule mTestRule = new CronetTestRule();
+
     private ExperimentalCronetEngine mCronetEngine;
     private enum QuicBidirectionalStreams {
         ENABLED,
@@ -55,12 +72,12 @@ public class BidirectionalStreamQuicTest extends CronetTestBase {
         mCronetEngine = builder.build();
     }
 
-    @Override
-    protected void tearDown() throws Exception {
+    @After
+    public void tearDown() throws Exception {
         QuicTestServer.shutdownQuicTestServer();
-        super.tearDown();
     }
 
+    @Test
     @SmallTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
@@ -83,6 +100,7 @@ public class BidirectionalStreamQuicTest extends CronetTestBase {
         assertEquals("quic/1+spdy/3", callback.mResponseInfo.getNegotiatedProtocol());
     }
 
+    @Test
     @SmallTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
@@ -124,6 +142,7 @@ public class BidirectionalStreamQuicTest extends CronetTestBase {
         assertEquals("quic/1+spdy/3", callback.mResponseInfo.getNegotiatedProtocol());
     }
 
+    @Test
     @SmallTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
@@ -157,6 +176,7 @@ public class BidirectionalStreamQuicTest extends CronetTestBase {
         }
     }
 
+    @Test
     @SmallTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
@@ -193,6 +213,7 @@ public class BidirectionalStreamQuicTest extends CronetTestBase {
         }
     }
 
+    @Test
     @SmallTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
@@ -237,6 +258,7 @@ public class BidirectionalStreamQuicTest extends CronetTestBase {
         }
     }
 
+    @Test
     @SmallTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
@@ -268,6 +290,7 @@ public class BidirectionalStreamQuicTest extends CronetTestBase {
         }
     }
 
+    @Test
     @SmallTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
@@ -289,6 +312,7 @@ public class BidirectionalStreamQuicTest extends CronetTestBase {
         assertNull(callback.mResponseInfo);
     }
 
+    @Test
     @SmallTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
@@ -338,6 +362,41 @@ public class BidirectionalStreamQuicTest extends CronetTestBase {
         assertTrue(callback.mError instanceof QuicException);
     }
 
+    @Test
+    @SmallTest
+    @Feature({"Cronet"})
+    @OnlyRunNativeCronet
+    public void testStreamFailWithQuicDetailedErrorCode() throws Exception {
+        setUp(QuicBidirectionalStreams.ENABLED);
+        String path = "/simple.txt";
+        String quicURL = QuicTestServer.getServerURL() + path;
+        TestBidirectionalStreamCallback callback = new TestBidirectionalStreamCallback() {
+            @Override
+            public void onStreamReady(BidirectionalStream stream) {
+                // Shut down the server, and the stream should error out.
+                // The second call to shutdownQuicTestServer is no-op.
+                QuicTestServer.shutdownQuicTestServer();
+            }
+        };
+        BidirectionalStream stream =
+                mCronetEngine
+                        .newBidirectionalStreamBuilder(quicURL, callback, callback.getExecutor())
+                        .setHttpMethod("GET")
+                        .delayRequestHeadersUntilFirstFlush(true)
+                        .addHeader("Content-Type", "zebra")
+                        .build();
+        stream.start();
+        callback.blockForDone();
+        assertTrue(stream.isDone());
+        assertNotNull(callback.mError);
+        assertTrue(callback.mError instanceof QuicException);
+        QuicException quicException = (QuicException) callback.mError;
+        // Checks that detailed quic error code is not QUIC_NO_ERROR == 0.
+        assertTrue("actual error " + quicException.getQuicDetailedErrorCode(),
+                0 < quicException.getQuicDetailedErrorCode());
+    }
+
+    @Test
     @SmallTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet

@@ -40,7 +40,7 @@ typedef struct HEVCParserContext {
 
     H2645Packet pkt;
     HEVCParamSets ps;
-    HEVCSEIContext sei;
+    HEVCSEI sei;
     SliceHeader sh;
 
     int parsed_extradata;
@@ -54,9 +54,10 @@ static int hevc_parse_slice_header(AVCodecParserContext *s, H2645NAL *nal,
 {
     HEVCParserContext *ctx = s->priv_data;
     HEVCParamSets *ps = &ctx->ps;
-    HEVCSEIContext *sei = &ctx->sei;
+    HEVCSEI *sei = &ctx->sei;
     SliceHeader *sh = &ctx->sh;
     GetBitContext *gb = &nal->gb;
+    const HEVCWindow *ow;
     int i, num = 0, den = 0;
 
     sh->first_slice_in_pic_flag = get_bits1(gb);
@@ -83,11 +84,12 @@ static int hevc_parse_slice_header(AVCodecParserContext *s, H2645NAL *nal,
         ps->sps = (HEVCSPS*)ps->sps_list[ps->pps->sps_id]->data;
         ps->vps = (HEVCVPS*)ps->vps_list[ps->sps->vps_id]->data;
     }
+    ow  = &ps->sps->output_window;
 
     s->coded_width  = ps->sps->width;
     s->coded_height = ps->sps->height;
-    s->width        = ps->sps->output_width;
-    s->height       = ps->sps->output_height;
+    s->width        = ps->sps->width  - ow->left_offset - ow->right_offset;
+    s->height       = ps->sps->height - ow->top_offset  - ow->bottom_offset;
     s->format       = ps->sps->pix_fmt;
     avctx->profile  = ps->sps->ptl.general_ptl.profile_idc;
     avctx->level    = ps->sps->ptl.general_ptl.level_idc;
@@ -178,7 +180,7 @@ static int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
 {
     HEVCParserContext *ctx = s->priv_data;
     HEVCParamSets *ps = &ctx->ps;
-    HEVCSEIContext *sei = &ctx->sei;
+    HEVCSEI *sei = &ctx->sei;
     int is_global = buf == avctx->extradata;
     int ret, i;
 
@@ -267,7 +269,7 @@ static int hevc_find_frame_end(AVCodecParserContext *s, const uint8_t *buf,
 
         nut = (pc->state64 >> 2 * 8 + 1) & 0x3F;
         // Beginning of access unit
-        if ((nut >= HEVC_NAL_VPS && nut <= HEVC_NAL_AUD) || nut == HEVC_NAL_SEI_PREFIX ||
+        if ((nut >= HEVC_NAL_VPS && nut <= HEVC_NAL_EOB_NUT) || nut == HEVC_NAL_SEI_PREFIX ||
             (nut >= 41 && nut <= 44) || (nut >= 48 && nut <= 55)) {
             if (pc->frame_start_found) {
                 pc->frame_start_found = 0;
@@ -357,18 +359,10 @@ static int hevc_split(AVCodecContext *avctx, const uint8_t *buf, int buf_size)
 static void hevc_parser_close(AVCodecParserContext *s)
 {
     HEVCParserContext *ctx = s->priv_data;
-    int i;
 
-    for (i = 0; i < FF_ARRAY_ELEMS(ctx->ps.vps_list); i++)
-        av_buffer_unref(&ctx->ps.vps_list[i]);
-    for (i = 0; i < FF_ARRAY_ELEMS(ctx->ps.sps_list); i++)
-        av_buffer_unref(&ctx->ps.sps_list[i]);
-    for (i = 0; i < FF_ARRAY_ELEMS(ctx->ps.pps_list); i++)
-        av_buffer_unref(&ctx->ps.pps_list[i]);
-
-    ctx->ps.sps = NULL;
-
+    ff_hevc_ps_uninit(&ctx->ps);
     ff_h2645_packet_uninit(&ctx->pkt);
+    ff_hevc_reset_sei(&ctx->sei);
 
     av_freep(&ctx->pc.buffer);
 }

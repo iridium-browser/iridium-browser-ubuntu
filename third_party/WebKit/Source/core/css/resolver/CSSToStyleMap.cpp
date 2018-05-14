@@ -42,6 +42,7 @@
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/frame/Deprecation.h"
 #include "core/style/BorderImageLengthBox.h"
+#include "core/style/ComputedStyle.h"
 #include "core/style/FillLayer.h"
 
 namespace blink {
@@ -60,13 +61,13 @@ void CSSToStyleMap::MapFillAttachment(StyleResolverState&,
   const CSSIdentifierValue& identifier_value = ToCSSIdentifierValue(value);
   switch (identifier_value.GetValueID()) {
     case CSSValueFixed:
-      layer->SetAttachment(kFixedBackgroundAttachment);
+      layer->SetAttachment(EFillAttachment::kFixed);
       break;
     case CSSValueScroll:
-      layer->SetAttachment(kScrollBackgroundAttachment);
+      layer->SetAttachment(EFillAttachment::kScroll);
       break;
     case CSSValueLocal:
-      layer->SetAttachment(kLocalBackgroundAttachment);
+      layer->SetAttachment(EFillAttachment::kLocal);
       break;
     default:
       return;
@@ -141,7 +142,7 @@ void CSSToStyleMap::MapFillImage(StyleResolverState& state,
     return;
   }
 
-  CSSPropertyID property = layer->GetType() == kBackgroundFillLayer
+  CSSPropertyID property = layer->GetType() == EFillLayerType::kBackground
                                ? CSSPropertyBackgroundImage
                                : CSSPropertyWebkitMaskImage;
   layer->SetImage(state.GetStyleImage(property, value));
@@ -192,12 +193,12 @@ void CSSToStyleMap::MapFillSize(StyleResolverState& state,
 
   if (value.IsIdentifierValue() &&
       ToCSSIdentifierValue(value).GetValueID() == CSSValueContain)
-    layer->SetSizeType(kContain);
+    layer->SetSizeType(EFillSizeType::kContain);
   else if (value.IsIdentifierValue() &&
            ToCSSIdentifierValue(value).GetValueID() == CSSValueCover)
-    layer->SetSizeType(kCover);
+    layer->SetSizeType(EFillSizeType::kCover);
   else
-    layer->SetSizeType(kSizeLength);
+    layer->SetSizeType(EFillSizeType::kSizeLength);
 
   LengthSize b = FillLayer::InitialFillSizeLength(layer->GetType());
 
@@ -228,11 +229,11 @@ void CSSToStyleMap::MapFillSize(StyleResolverState& state,
   layer->SetSizeLength(b);
 }
 
-void CSSToStyleMap::MapFillXPosition(StyleResolverState& state,
+void CSSToStyleMap::MapFillPositionX(StyleResolverState& state,
                                      FillLayer* layer,
                                      const CSSValue& value) {
   if (value.IsInitialValue()) {
-    layer->SetXPosition(FillLayer::InitialFillXPosition(layer->GetType()));
+    layer->SetPositionX(FillLayer::InitialFillPositionX(layer->GetType()));
     return;
   }
 
@@ -249,18 +250,18 @@ void CSSToStyleMap::MapFillXPosition(StyleResolverState& state,
                                                           CSSValueRight>(state,
                                                                          value);
 
-  layer->SetXPosition(length);
+  layer->SetPositionX(length);
   if (value.IsValuePair())
     layer->SetBackgroundXOrigin(
         ToCSSIdentifierValue(ToCSSValuePair(value).First())
             .ConvertTo<BackgroundEdgeOrigin>());
 }
 
-void CSSToStyleMap::MapFillYPosition(StyleResolverState& state,
+void CSSToStyleMap::MapFillPositionY(StyleResolverState& state,
                                      FillLayer* layer,
                                      const CSSValue& value) {
   if (value.IsInitialValue()) {
-    layer->SetYPosition(FillLayer::InitialFillYPosition(layer->GetType()));
+    layer->SetPositionY(FillLayer::InitialFillPositionY(layer->GetType()));
     return;
   }
 
@@ -277,7 +278,7 @@ void CSSToStyleMap::MapFillYPosition(StyleResolverState& state,
                                                           CSSValueBottom>(
         state, value);
 
-  layer->SetYPosition(length);
+  layer->SetPositionY(length);
   if (value.IsValuePair())
     layer->SetBackgroundYOrigin(
         ToCSSIdentifierValue(ToCSSValuePair(value).First())
@@ -298,10 +299,10 @@ void CSSToStyleMap::MapFillMaskSourceType(StyleResolverState&,
 
   switch (ToCSSIdentifierValue(value).GetValueID()) {
     case CSSValueAlpha:
-      type = kMaskAlpha;
+      type = EMaskSourceType::kAlpha;
       break;
     case CSSValueLuminance:
-      type = kMaskLuminance;
+      type = EMaskSourceType::kLuminance;
       break;
     case CSSValueAuto:
       break;
@@ -385,9 +386,9 @@ EAnimPlayState CSSToStyleMap::MapAnimationPlayState(const CSSValue& value) {
   if (value.IsInitialValue())
     return CSSAnimationData::InitialPlayState();
   if (ToCSSIdentifierValue(value).GetValueID() == CSSValuePaused)
-    return kAnimPlayStatePaused;
+    return EAnimPlayState::kPaused;
   DCHECK_EQ(ToCSSIdentifierValue(value).GetValueID(), CSSValueRunning);
-  return kAnimPlayStatePlaying;
+  return EAnimPlayState::kPlaying;
 }
 
 CSSTransitionData::TransitionProperty CSSToStyleMap::MapAnimationProperty(
@@ -407,7 +408,7 @@ CSSTransitionData::TransitionProperty CSSToStyleMap::MapAnimationProperty(
       CSSTransitionData::kTransitionNone);
 }
 
-PassRefPtr<TimingFunction> CSSToStyleMap::MapAnimationTimingFunction(
+scoped_refptr<TimingFunction> CSSToStyleMap::MapAnimationTimingFunction(
     const CSSValue& value,
     bool allow_step_middle,
     Document* document) {
@@ -457,8 +458,8 @@ PassRefPtr<TimingFunction> CSSToStyleMap::MapAnimationTimingFunction(
   }
 
   if (value.IsCubicBezierTimingFunctionValue()) {
-    const CSSCubicBezierTimingFunctionValue& cubic_timing_function =
-        ToCSSCubicBezierTimingFunctionValue(value);
+    const cssvalue::CSSCubicBezierTimingFunctionValue& cubic_timing_function =
+        cssvalue::ToCSSCubicBezierTimingFunctionValue(value);
     return CubicBezierTimingFunction::Create(
         cubic_timing_function.X1(), cubic_timing_function.Y1(),
         cubic_timing_function.X2(), cubic_timing_function.Y2());
@@ -468,14 +469,14 @@ PassRefPtr<TimingFunction> CSSToStyleMap::MapAnimationTimingFunction(
     return CSSTimingData::InitialTimingFunction();
 
   if (value.IsFramesTimingFunctionValue()) {
-    const CSSFramesTimingFunctionValue& frames_timing_function =
-        ToCSSFramesTimingFunctionValue(value);
+    const cssvalue::CSSFramesTimingFunctionValue& frames_timing_function =
+        cssvalue::ToCSSFramesTimingFunctionValue(value);
     return FramesTimingFunction::Create(
         frames_timing_function.NumberOfFrames());
   }
 
-  const CSSStepsTimingFunctionValue& steps_timing_function =
-      ToCSSStepsTimingFunctionValue(value);
+  const cssvalue::CSSStepsTimingFunctionValue& steps_timing_function =
+      cssvalue::ToCSSStepsTimingFunctionValue(value);
   if (steps_timing_function.GetStepPosition() ==
       StepsTimingFunction::StepPosition::MIDDLE) {
     if (!allow_step_middle) {
@@ -576,8 +577,8 @@ void CSSToStyleMap::MapNinePieceImageSlice(StyleResolverState&,
     return;
 
   // Retrieve the border image value.
-  const CSSBorderImageSliceValue& border_image_slice =
-      ToCSSBorderImageSliceValue(value);
+  const cssvalue::CSSBorderImageSliceValue& border_image_slice =
+      cssvalue::ToCSSBorderImageSliceValue(value);
 
   // Set up a length box to represent our image slices.
   LengthBox box;

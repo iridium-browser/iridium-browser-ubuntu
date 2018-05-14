@@ -29,6 +29,7 @@
 #ifndef AXImageMapLink_h
 #define AXImageMapLink_h
 
+#include "base/macros.h"
 #include "core/html/HTMLAreaElement.h"
 #include "core/html/HTMLMapElement.h"
 #include "modules/accessibility/AXNodeObject.h"
@@ -38,17 +39,15 @@ namespace blink {
 class AXObjectCacheImpl;
 
 class AXImageMapLink final : public AXNodeObject {
-  WTF_MAKE_NONCOPYABLE(AXImageMapLink);
-
  private:
   explicit AXImageMapLink(HTMLAreaElement*, AXObjectCacheImpl&);
 
  public:
   static AXImageMapLink* Create(HTMLAreaElement*, AXObjectCacheImpl&);
   ~AXImageMapLink() override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
-  HTMLAreaElement* AreaElement() const { return toHTMLAreaElement(GetNode()); }
+  HTMLAreaElement* AreaElement() const { return ToHTMLAreaElement(GetNode()); }
 
   HTMLMapElement* MapElement() const;
 
@@ -63,10 +62,13 @@ class AXImageMapLink final : public AXNodeObject {
   AXObject* ComputeParent() const override;
   void GetRelativeBounds(AXObject** out_container,
                          FloatRect& out_bounds_in_container,
-                         SkMatrix44& out_container_transform) const override;
+                         SkMatrix44& out_container_transform,
+                         bool* clips_children = nullptr) const override;
 
  private:
   bool IsImageMapLink() const override { return true; }
+
+  DISALLOW_COPY_AND_ASSIGN(AXImageMapLink);
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXImageMapLink, IsImageMapLink());

@@ -33,6 +33,8 @@
 #include <string>
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "platform/loader/fetch/ResourceLoader.h"
+#include "platform/network/http_names.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/FilePathConversion.h"
 #include "public/platform/Platform.h"
@@ -68,6 +70,7 @@ void RegisterMockedURLLoad(const WebURL& full_url,
 
   WebURLResponse response(full_url);
   response.SetMIMEType(mime_type);
+  response.SetHTTPHeaderField(HTTPNames::Content_Type, mime_type);
   response.SetHTTPStatusCode(200);
   response.SetLoadTiming(timing);
 
@@ -80,11 +83,11 @@ void RegisterMockedErrorURLLoad(const WebURL& full_url) {
 
   WebURLResponse response;
   response.SetMIMEType("image/png");
+  response.SetHTTPHeaderField(HTTPNames::Content_Type, "image/png");
   response.SetHTTPStatusCode(404);
   response.SetLoadTiming(timing);
 
-  WebURLError error;
-  error.reason = 404;
+  ResourceError error = ResourceError::Failure(full_url);
   Platform::Current()->GetURLLoaderMockFactory()->RegisterErrorURL(
       full_url, response, error);
 }
@@ -94,6 +97,10 @@ void RegisterMockedURLLoadWithCustomResponse(const WebURL& full_url,
                                              WebURLResponse response) {
   Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
       full_url, response, file_path);
+}
+
+void RegisterMockedURLUnregister(const WebURL& url) {
+  Platform::Current()->GetURLLoaderMockFactory()->UnregisterURL(url);
 }
 
 }  // namespace URLTestHelpers

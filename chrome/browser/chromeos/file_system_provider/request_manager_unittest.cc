@@ -131,13 +131,13 @@ class EventLogger {
   virtual ~EventLogger() {}
 
   void OnExecute(int request_id) {
-    execute_events_.push_back(base::MakeUnique<ExecuteEvent>(request_id));
+    execute_events_.push_back(std::make_unique<ExecuteEvent>(request_id));
   }
 
   void OnSuccess(int request_id,
                  std::unique_ptr<RequestValue> result,
                  bool has_more) {
-    success_events_.push_back(base::MakeUnique<SuccessEvent>(
+    success_events_.push_back(std::make_unique<SuccessEvent>(
         request_id, std::move(result), has_more));
   }
 
@@ -145,7 +145,7 @@ class EventLogger {
                std::unique_ptr<RequestValue> result,
                base::File::Error error) {
     error_events_.push_back(
-        base::MakeUnique<ErrorEvent>(request_id, std::move(result), error));
+        std::make_unique<ErrorEvent>(request_id, std::move(result), error));
   }
 
   std::vector<std::unique_ptr<ExecuteEvent>>& execute_events() {
@@ -327,7 +327,7 @@ class FileSystemProviderRequestManagerTest : public testing::Test {
     profile_.reset(new TestingProfile);
     notification_manager_.reset(new FakeNotificationManager);
     request_manager_.reset(new RequestManager(profile_.get(),
-                                              std::string() /* extension_id */,
+                                              std::string() /* provider_id */,
                                               notification_manager_.get()));
   }
 
@@ -695,7 +695,7 @@ TEST_F(FileSystemProviderRequestManagerTest, AbortOnDestroy) {
 
   {
     RequestManager request_manager(profile_.get(),
-                                   std::string() /* extension_id */, nullptr);
+                                   std::string() /* provider_id */, nullptr);
     request_manager.AddObserver(&observer);
 
     request_id = request_manager.CreateRequest(
@@ -807,7 +807,7 @@ TEST_F(FileSystemProviderRequestManagerTest, ContinueOnTimeout) {
   // Wait until the request is timeouted.
   base::RunLoop().RunUntilIdle();
 
-  // Let the extension more time by closing the notification.
+  // Let the provider have more time by closing the notification.
   EXPECT_EQ(1u, notification_manager_->size());
   notification_manager_->Continue();
   EXPECT_EQ(0u, notification_manager_->size());

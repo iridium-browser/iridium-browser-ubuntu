@@ -65,8 +65,8 @@ bool ToolbarModelDelegateIOS::ShouldDisplayURL() const {
         virtual_url.SchemeIs(kChromeUIScheme)) {
       if (!url.SchemeIs(kChromeUIScheme))
         url = virtual_url;
-      const std::string host = url.host();
-      return host != kChromeUIBookmarksHost && host != kChromeUINewTabHost;
+      base::StringPiece host = url.host_piece();
+      return host != kChromeUINewTabHost;
     }
   }
   return true;

@@ -15,7 +15,10 @@ import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
 import android.text.Editable;
 import android.text.TextUtils;
+import android.view.ActionMode;
 import android.view.KeyEvent;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.InputMethodManager;
 
@@ -44,11 +47,13 @@ import org.chromium.chrome.test.util.OmniboxTestUtils.StubAutocompleteController
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.KeyUtils;
+import org.chromium.content.browser.test.util.TouchCommon;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -58,16 +63,15 @@ import java.util.concurrent.atomic.AtomicReference;
  * framework once it supports Test Rule Parameterization
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
-@CommandLineParameter({"", "enable-features=" + ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@CommandLineParameter({"", "disable-features=" + ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE})
 public class UrlBarTest {
-    // 9000+ chars of goodness
 
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
             new ChromeActivityTestRule<>(ChromeActivity.class);
 
+    // 9000+ chars of goodness
     private static final String HUGE_URL =
             "data:text/plain,H"
             + new String(new char[9000]).replace('\0', 'u')
@@ -398,6 +402,94 @@ public class UrlBarTest {
             Assert.assertEquals(
                     "Text w/ Autocomplete", "testing is fun", state.textWithAutocomplete);
         }
+    }
+
+    /**
+     * Ensure that we send cursor position with autocomplete requests.
+     *
+     * When reading this test, it helps to remember that autocomplete requests are not sent
+     * with the user simply moves the cursor.  They're only sent on text modifications.
+     */
+    @Test
+    @SmallTest
+    @Feature({"Omnibox"})
+    @RetryOnFailure
+    public void testSendCursorPosition() throws InterruptedException, TimeoutException {
+        mActivityTestRule.startMainActivityOnBlankPage();
+
+        final CallbackHelper autocompleteHelper = new CallbackHelper();
+        final AtomicInteger cursorPositionUsed = new AtomicInteger();
+        final StubAutocompleteController controller = new StubAutocompleteController() {
+            @Override
+            public void start(Profile profile, String url, String text, int cursorPosition,
+                    boolean preventInlineAutocomplete, boolean focusedFromFakebox) {
+                cursorPositionUsed.set(cursorPosition);
+                autocompleteHelper.notifyCalled();
+            }
+        };
+        setAutocompleteController(controller);
+
+        final UrlBar urlBar = getUrlBar();
+        toggleFocusAndIgnoreImeOperations(urlBar, true);
+
+        // Add "a" to the omnibox and leave the cursor at the end of the new
+        // text.
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    urlBar.getInputConnection().commitText("a", 1);
+                });
+        autocompleteHelper.waitForCallback(0);
+        // omnmibox text: a|
+        Assert.assertEquals(1, cursorPositionUsed.get());
+
+        // Append "cd" to the omnibox and leave the cursor at the end of the new
+        // text.
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    urlBar.getInputConnection().commitText("cd", 1);
+                });
+        autocompleteHelper.waitForCallback(1);
+        // omnmibox text: acd|
+        Assert.assertEquals(3, cursorPositionUsed.get());
+
+        // Move the cursor.
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    urlBar.getInputConnection().setSelection(1, 1);
+                });
+        // omnmibox text: a|cd
+        // Moving the cursor shouldn't have caused a new call.
+        Assert.assertEquals(2, autocompleteHelper.getCallCount());
+        // The cursor position used on the last call should be the old position.
+        Assert.assertEquals(3, cursorPositionUsed.get());
+
+        // Insert "b" at the current cursor position and leave the cursor at
+        // the end of the new text.
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    urlBar.getInputConnection().commitText("b", 1);
+                });
+        autocompleteHelper.waitForCallback(2);
+        // omnmibox text: ab|cd
+        Assert.assertEquals(2, cursorPositionUsed.get());
+
+        // Delete the character before the cursor.
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    urlBar.getInputConnection().deleteSurroundingText(1, 0);
+                });
+        autocompleteHelper.waitForCallback(3);
+        // omnmibox text: a|cd
+        Assert.assertEquals(1, cursorPositionUsed.get());
+
+        // Delete the character before the cursor (again).
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    urlBar.getInputConnection().deleteSurroundingText(1, 0);
+                });
+        autocompleteHelper.waitForCallback(4);
+        // omnmibox text: |cd
+        Assert.assertEquals(0, cursorPositionUsed.get());
     }
 
     /**
@@ -958,6 +1050,52 @@ public class UrlBarTest {
                         ? clip.getItemAt(0).getText()
                         : null;
                 return text != null ? text.toString() : null;
+            }
+        });
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Omnibox"})
+    @RetryOnFailure
+    public void testLongPress() throws InterruptedException {
+        // This is a more realistic test than HUGE_URL because ita's full of separator characters
+        // which have historically been known to trigger odd behavior with long-pressing.
+        final String longPressUrl = "data:text/plain,hi.hi.hi.hi.hi.hi.hi.hi.hi.hi/hi/hi/hi/hi/hi/";
+        mActivityTestRule.startMainActivityWithURL(longPressUrl);
+
+        class ActionModeCreatedCallback implements ActionMode.Callback {
+            public boolean actionModeCreated;
+
+            @Override
+            public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
+                return false;
+            }
+
+            @Override
+            public boolean onCreateActionMode(ActionMode mode, Menu menu) {
+                actionModeCreated = true;
+                return true;
+            }
+
+            @Override
+            public void onDestroyActionMode(ActionMode mode) {}
+
+            @Override
+            public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
+                return false;
+            }
+        }
+        ActionModeCreatedCallback callback = new ActionModeCreatedCallback();
+        getUrlBar().setCustomSelectionActionModeCallback(callback);
+
+        TouchCommon.longPressView(getUrlBar());
+
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return callback.actionModeCreated && getUrlBar().getSelectionStart() == 0
+                        && getUrlBar().getSelectionEnd() == longPressUrl.length();
             }
         });
     }

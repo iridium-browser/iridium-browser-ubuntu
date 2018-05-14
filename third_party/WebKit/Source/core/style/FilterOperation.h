@@ -26,6 +26,8 @@
 #ifndef FilterOperation_h
 #define FilterOperation_h
 
+#include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "core/CoreExport.h"
 #include "core/style/ShadowData.h"
 #include "platform/Length.h"
@@ -33,7 +35,6 @@
 #include "platform/graphics/BoxReflection.h"
 #include "platform/graphics/Color.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
@@ -46,7 +47,6 @@ class SVGElementProxy;
 
 class CORE_EXPORT FilterOperation
     : public GarbageCollectedFinalized<FilterOperation> {
-  WTF_MAKE_NONCOPYABLE(FilterOperation);
 
  public:
   enum OperationType {
@@ -88,8 +88,8 @@ class CORE_EXPORT FilterOperation
     return false;
   }
 
-  virtual ~FilterOperation() {}
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual ~FilterOperation() = default;
+  virtual void Trace(blink::Visitor* visitor) {}
 
   static FilterOperation* Blend(const FilterOperation* from,
                                 const FilterOperation* to,
@@ -121,6 +121,7 @@ class CORE_EXPORT FilterOperation
  private:
   virtual FilterOperation* Blend(const FilterOperation* from,
                                  double progress) const = 0;
+  DISALLOW_COPY_AND_ASSIGN(FilterOperation);
 };
 
 #define DEFINE_FILTER_OPERATION_TYPE_CASTS(thisType, operationType)  \
@@ -146,10 +147,10 @@ class CORE_EXPORT ReferenceFilterOperation : public FilterOperation {
 
   SVGElementProxy& ElementProxy() const { return *element_proxy_; }
 
-  void AddClient(SVGResourceClient*);
+  void AddClient(SVGResourceClient*, base::SingleThreadTaskRunner*);
   void RemoveClient(SVGResourceClient*);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   ReferenceFilterOperation(const String& url, SVGElementProxy&);

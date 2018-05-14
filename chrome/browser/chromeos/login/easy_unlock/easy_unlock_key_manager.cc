@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager.h"
@@ -40,18 +39,15 @@ const char kPermitTypeLicence[] = "licence";
 
 EasyUnlockKeyManager::EasyUnlockKeyManager() : weak_ptr_factory_(this) {}
 
-EasyUnlockKeyManager::~EasyUnlockKeyManager() {
-}
+EasyUnlockKeyManager::~EasyUnlockKeyManager() {}
 
 void EasyUnlockKeyManager::RefreshKeys(const UserContext& user_context,
                                        const base::ListValue& remote_devices,
                                        const RefreshKeysCallback& callback) {
-  base::Closure do_refresh_keys = base::Bind(
-      &EasyUnlockKeyManager::RefreshKeysWithTpmKeyPresent,
-      weak_ptr_factory_.GetWeakPtr(),
-      user_context,
-      base::Owned(remote_devices.DeepCopy()),
-      callback);
+  base::Closure do_refresh_keys =
+      base::Bind(&EasyUnlockKeyManager::RefreshKeysWithTpmKeyPresent,
+                 weak_ptr_factory_.GetWeakPtr(), user_context,
+                 base::Owned(remote_devices.DeepCopy()), callback);
 
   EasyUnlockTpmKeyManager* tpm_key_manager =
       EasyUnlockTpmKeyManagerFactory::GetInstance()->GetForUser(
@@ -93,7 +89,7 @@ void EasyUnlockKeyManager::RefreshKeysWithTpmKeyPresent(
     devices.clear();
 
   write_operation_queue_.push_back(
-      base::MakeUnique<EasyUnlockRefreshKeysOperation>(
+      std::make_unique<EasyUnlockRefreshKeysOperation>(
           user_context, tpm_public_key, devices,
           base::Bind(&EasyUnlockKeyManager::OnKeysRefreshed,
                      weak_ptr_factory_.GetWeakPtr(), callback)));
@@ -103,7 +99,7 @@ void EasyUnlockKeyManager::RefreshKeysWithTpmKeyPresent(
 void EasyUnlockKeyManager::GetDeviceDataList(
     const UserContext& user_context,
     const GetDeviceDataListCallback& callback) {
-  read_operation_queue_.push_back(base::MakeUnique<EasyUnlockGetKeysOperation>(
+  read_operation_queue_.push_back(std::make_unique<EasyUnlockGetKeysOperation>(
       user_context, base::Bind(&EasyUnlockKeyManager::OnKeysFetched,
                                weak_ptr_factory_.GetWeakPtr(), callback)));
   RunNextOperation();
@@ -191,8 +187,7 @@ bool EasyUnlockKeyManager::RemoteDeviceListToDeviceDataList(
     EasyUnlockDeviceKeyDataList* data_list) {
   EasyUnlockDeviceKeyDataList parsed_devices;
   for (base::ListValue::const_iterator it = device_list.begin();
-       it != device_list.end();
-       ++it) {
+       it != device_list.end(); ++it) {
     const base::DictionaryValue* dict;
     if (!it->GetAsDictionary(&dict) || !dict)
       return false;

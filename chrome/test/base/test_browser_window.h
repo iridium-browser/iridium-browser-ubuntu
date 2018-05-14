@@ -5,12 +5,19 @@
 #ifndef CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_
 #define CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_
 
+#include <vector>
+
 #include "base/macros.h"
 #include "chrome/browser/download/test_download_shelf.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/arc/intent_helper/arc_navigation_throttle.h"
+#endif  // defined(OS_CHROMEOS)
 
 class LocationBarTesting;
 class OmniboxView;
@@ -65,8 +72,6 @@ class TestBrowserWindow : public BrowserWindow {
   bool ShouldHideUIForFullscreen() const override;
   bool IsFullscreen() const override;
   bool IsFullscreenBubbleVisible() const override;
-  void MaybeShowNewBackShortcutBubble(bool forward) override {}
-  void HideNewBackShortcutBubble() override {}
   LocationBar* GetLocationBar() const override;
   void SetFocusToLocationBar(bool select_all) override {}
   void UpdateReloadStopState(bool is_loading, bool force) override {}
@@ -77,7 +82,7 @@ class TestBrowserWindow : public BrowserWindow {
   void ToolbarSizeChanged(bool is_animating) override {}
   void FocusAppMenu() override {}
   void FocusBookmarksToolbar() override {}
-  void FocusInfobars() override {}
+  void FocusInactivePopupForAccessibility() override {}
   void RotatePaneFocus(bool forwards) override {}
   void ShowAppMenu() override {}
   content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
@@ -91,6 +96,12 @@ class TestBrowserWindow : public BrowserWindow {
   bool IsToolbarShowing() const override;
   void ShowUpdateChromeDialog() override {}
   void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) override {}
+#if defined(OS_CHROMEOS)
+  void ShowIntentPickerBubble(
+      std::vector<arc::ArcNavigationThrottle::AppInfo> app_info,
+      IntentPickerResponse callback) override {}
+  void SetIntentPickerViewVisibility(bool visible) override {}
+#endif  // defined(OS_CHROMEOS)
   autofill::SaveCardBubbleView* ShowSaveCreditCardBubble(
       content::WebContents* contents,
       autofill::SaveCardBubbleController* controller,
@@ -113,11 +124,6 @@ class TestBrowserWindow : public BrowserWindow {
       bool app_modal,
       const base::Callback<void(bool)>& callback) override {}
   void UserChangedTheme() override {}
-  void ShowPageInfo(
-      Profile* profile,
-      content::WebContents* web_contents,
-      const GURL& virtual_url,
-      const security_state::SecurityInfo& security_info) override {}
   void CutCopyPaste(int command_id) override {}
   WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) override;
@@ -150,7 +156,6 @@ class TestBrowserWindow : public BrowserWindow {
     ~TestLocationBar() override {}
 
     // LocationBar:
-    void ShowFirstRunBubble() override {}
     GURL GetDestinationURL() const override;
     WindowOpenDisposition GetWindowOpenDisposition() const override;
     ui::PageTransition GetPageTransition() const override;
@@ -160,6 +165,7 @@ class TestBrowserWindow : public BrowserWindow {
     void UpdateContentSettingsIcons() override {}
     void UpdateManagePasswordsIconAndBubble() override {}
     void UpdateSaveCreditCardIcon() override {}
+    void UpdateFindBarIconVisibility() override {}
     void UpdateBookmarkStarVisibility() override {}
     void UpdateZoomViewVisibility() override {}
     void UpdateLocationBarVisibility(bool visible, bool animate) override {}
@@ -181,7 +187,7 @@ class TestBrowserWindow : public BrowserWindow {
 
 // Handles destroying a TestBrowserWindow when the Browser it is attached to is
 // destroyed.
-class TestBrowserWindowOwner : public chrome::BrowserListObserver {
+class TestBrowserWindowOwner : public BrowserListObserver {
  public:
   explicit TestBrowserWindowOwner(TestBrowserWindow* window);
   ~TestBrowserWindowOwner() override;
@@ -194,12 +200,8 @@ class TestBrowserWindowOwner : public chrome::BrowserListObserver {
   DISALLOW_COPY_AND_ASSIGN(TestBrowserWindowOwner);
 };
 
-namespace chrome {
-
 // Helper that handle the lifetime of TestBrowserWindow instances.
 std::unique_ptr<Browser> CreateBrowserWithTestWindowForParams(
     Browser::CreateParams* params);
-
-}  // namespace chrome
 
 #endif  // CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_

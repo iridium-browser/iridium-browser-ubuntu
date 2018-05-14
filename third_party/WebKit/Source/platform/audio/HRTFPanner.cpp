@@ -24,11 +24,11 @@
  */
 
 #include "platform/audio/HRTFPanner.h"
+#include "base/memory/scoped_refptr.h"
 #include "platform/audio/AudioBus.h"
 #include "platform/audio/AudioUtilities.h"
 #include "platform/audio/HRTFDatabase.h"
 #include "platform/wtf/MathExtras.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -63,7 +63,7 @@ HRTFPanner::HRTFPanner(float sample_rate, HRTFDatabaseLoader* database_loader)
   DCHECK(database_loader);
 }
 
-HRTFPanner::~HRTFPanner() {}
+HRTFPanner::~HRTFPanner() = default;
 
 size_t HRTFPanner::FftSizeForSampleRate(float sample_rate) {
   // The HRTF impulse responses (loaded as audio resources) are 512

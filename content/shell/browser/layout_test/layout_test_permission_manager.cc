@@ -101,10 +101,6 @@ int LayoutTestPermissionManager::RequestPermissions(
   return kNoPendingOperation;
 }
 
-void LayoutTestPermissionManager::CancelPermissionRequest(int request_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-}
-
 void LayoutTestPermissionManager::ResetPermission(
     PermissionType permission,
     const GURL& requesting_origin,
@@ -133,6 +129,17 @@ blink::mojom::PermissionStatus LayoutTestPermissionManager::GetPermissionStatus(
       PermissionDescription(permission, requesting_origin, embedding_origin));
   if (it == permissions_.end())
     return blink::mojom::PermissionStatus::DENIED;
+
+  // Immitates the behaviour of the NotificationPermissionContext in that
+  // permission cannot be requested from cross-origin iframes, which the current
+  // permission status should reflect when it's status is ASK.
+  if (permission == PermissionType::NOTIFICATIONS) {
+    if (requesting_origin != embedding_origin &&
+        it->second == blink::mojom::PermissionStatus::ASK) {
+      return blink::mojom::PermissionStatus::DENIED;
+    }
+  }
+
   return it->second;
 }
 
@@ -143,7 +150,7 @@ int LayoutTestPermissionManager::SubscribePermissionStatusChange(
     const base::Callback<void(blink::mojom::PermissionStatus)>& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  auto subscription = base::MakeUnique<Subscription>();
+  auto subscription = std::make_unique<Subscription>();
   subscription->permission =
       PermissionDescription(permission, requesting_origin, embedding_origin);
   subscription->callback = callback;
@@ -166,11 +173,12 @@ void LayoutTestPermissionManager::UnsubscribePermissionStatusChange(
 void LayoutTestPermissionManager::SetPermission(
     PermissionType permission,
     blink::mojom::PermissionStatus status,
-    const GURL& origin,
-    const GURL& embedding_origin) {
+    const GURL& url,
+    const GURL& embedding_url) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  PermissionDescription description(permission, origin, embedding_origin);
+  PermissionDescription description(permission, url.GetOrigin(),
+                                    embedding_url.GetOrigin());
 
   base::AutoLock lock(permissions_lock_);
 

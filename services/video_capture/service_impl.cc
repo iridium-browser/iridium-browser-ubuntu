@@ -7,7 +7,7 @@
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/video_capture/device_factory_provider_impl.h"
-#include "services/video_capture/public/interfaces/constants.mojom.h"
+#include "services/video_capture/public/mojom/constants.mojom.h"
 #include "services/video_capture/public/uma/video_capture_service_event.h"
 #include "services/video_capture/testing_controls_impl.h"
 
@@ -21,15 +21,20 @@ ServiceImpl::~ServiceImpl() {
   DCHECK(thread_checker_.CalledOnValidThread());
 }
 
+// static
+std::unique_ptr<service_manager::Service> ServiceImpl::Create() {
+  return std::make_unique<ServiceImpl>();
+}
+
 void ServiceImpl::OnStart() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   video_capture::uma::LogVideoCaptureServiceEvent(
       video_capture::uma::SERVICE_STARTED);
 
-  ref_factory_ =
-      base::MakeUnique<service_manager::ServiceContextRefFactory>(base::Bind(
-          &ServiceImpl::MaybeRequestQuitDelayed, base::Unretained(this)));
+  ref_factory_ = std::make_unique<service_manager::ServiceContextRefFactory>(
+      base::BindRepeating(&ServiceImpl::MaybeRequestQuitDelayed,
+                          weak_factory_.GetWeakPtr()));
   registry_.AddInterface<mojom::DeviceFactoryProvider>(
       // Unretained |this| is safe because |registry_| is owned by |this|.
       base::Bind(&ServiceImpl::OnDeviceFactoryProviderRequest,
@@ -38,6 +43,9 @@ void ServiceImpl::OnStart() {
       // Unretained |this| is safe because |registry_| is owned by |this|.
       base::Bind(&ServiceImpl::OnTestingControlsRequest,
                  base::Unretained(this)));
+
+  factory_provider_bindings_.set_connection_error_handler(base::BindRepeating(
+      &ServiceImpl::OnProviderClientDisconnected, base::Unretained(this)));
 }
 
 void ServiceImpl::OnBindInterface(
@@ -54,25 +62,24 @@ bool ServiceImpl::OnServiceManagerConnectionLost() {
   return true;
 }
 
+void ServiceImpl::SetFactoryProviderClientDisconnectedObserver(
+    const base::RepeatingClosure& observer_cb) {
+  factory_provider_client_disconnected_cb_ = observer_cb;
+}
+
 void ServiceImpl::OnDeviceFactoryProviderRequest(
     mojom::DeviceFactoryProviderRequest request) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  mojo::MakeStrongBinding(
-      base::MakeUnique<DeviceFactoryProviderImpl>(
-          ref_factory_->CreateRef(),
-          // Use of unretained |this| is safe, because the
-          // VideoCaptureServiceImpl has shared ownership of |this| via the
-          // reference created by ref_factory->CreateRef().
-          base::Bind(&ServiceImpl::SetShutdownDelayInSeconds,
-                     base::Unretained(this))),
-      std::move(request));
+  LazyInitializeDeviceFactoryProvider();
+  factory_provider_bindings_.AddBinding(device_factory_provider_.get(),
+                                        std::move(request));
 }
 
 void ServiceImpl::OnTestingControlsRequest(
     mojom::TestingControlsRequest request) {
   DCHECK(thread_checker_.CalledOnValidThread());
   mojo::MakeStrongBinding(
-      base::MakeUnique<TestingControlsImpl>(ref_factory_->CreateRef()),
+      std::make_unique<TestingControlsImpl>(ref_factory_->CreateRef()),
       std::move(request));
 }
 
@@ -95,10 +102,34 @@ void ServiceImpl::MaybeRequestQuit() {
   if (ref_factory_->HasNoRefs()) {
     video_capture::uma::LogVideoCaptureServiceEvent(
         video_capture::uma::SERVICE_SHUTTING_DOWN_BECAUSE_NO_CLIENT);
-    context()->RequestQuit();
+    context()->CreateQuitClosure().Run();
   } else {
     video_capture::uma::LogVideoCaptureServiceEvent(
         video_capture::uma::SERVICE_SHUTDOWN_TIMEOUT_CANCELED);
+  }
+}
+
+void ServiceImpl::LazyInitializeDeviceFactoryProvider() {
+  if (device_factory_provider_)
+    return;
+
+  device_factory_provider_ = std::make_unique<DeviceFactoryProviderImpl>(
+      ref_factory_->CreateRef(),
+      // Use of unretained |this| is safe, because the
+      // VideoCaptureServiceImpl has shared ownership of |this| via the
+      // reference created by ref_factory->CreateRef().
+      base::Bind(&ServiceImpl::SetShutdownDelayInSeconds,
+                 base::Unretained(this)));
+}
+
+void ServiceImpl::OnProviderClientDisconnected() {
+  // Reset factory provider if no client is connected.
+  if (factory_provider_bindings_.empty()) {
+    device_factory_provider_.reset();
+  }
+
+  if (!factory_provider_client_disconnected_cb_.is_null()) {
+    factory_provider_client_disconnected_cb_.Run();
   }
 }
 

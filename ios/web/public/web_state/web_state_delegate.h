@@ -12,6 +12,8 @@
 #include "base/callback.h"
 #import "ios/web/public/web_state/web_state.h"
 
+@class UIViewController;
+
 namespace web {
 
 struct ContextMenuParams;
@@ -43,9 +45,9 @@ class WebStateDelegate {
                                         const WebState::OpenURLParams&);
 
   // Notifies the delegate that the user triggered the context menu with the
-  // given |ContextMenuParams|. Returns true if the context menu operation was
-  // handled by the delegate.
-  virtual bool HandleContextMenu(WebState* source,
+  // given |ContextMenuParams|. If the delegate does not implement this method,
+  // no context menu will be displayed.
+  virtual void HandleContextMenu(WebState* source,
                                  const ContextMenuParams& params);
 
   // Requests the repost form confirmation dialog. Clients must call |callback|
@@ -71,6 +73,21 @@ class WebStateDelegate {
                               NSURLProtectionSpace* protection_space,
                               NSURLCredential* proposed_credential,
                               const AuthCallback& callback) = 0;
+
+  // Determines whether the given link with |link_url| should show a preview on
+  // force touch.
+  virtual bool ShouldPreviewLink(WebState* source, const GURL& link_url);
+  // Called when the user performs a peek action on a link with |link_url| with
+  // force touch. Returns a view controller shown as a pop-up. Uses Webkit's
+  // default preview behavior when it returns nil.
+  virtual UIViewController* GetPreviewingViewController(WebState* source,
+                                                        const GURL& link_url);
+  // Called when the user performs a pop action on the preview on force touch.
+  // |previewing_view_controller| is the view controller that is popped.
+  // It should display |previewing_view_controller| inside the app.
+  virtual void CommitPreviewingViewController(
+      WebState* source,
+      UIViewController* previewing_view_controller);
 
  protected:
   virtual ~WebStateDelegate();

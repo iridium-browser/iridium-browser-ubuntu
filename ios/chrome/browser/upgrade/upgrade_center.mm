@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "base/mac/bundle_locations.h"
-#include "base/memory/ptr_util.h"
 #include "base/scoped_observer.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/version.h"
@@ -17,8 +16,7 @@
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_manager.h"
 #include "components/version_info/version_info.h"
-#import "ios/chrome/browser/open_url_util.h"
-#import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/open_url_command.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -50,6 +48,8 @@
 - (BOOL)infoBarShownRecently;
 // Called when the application become active again.
 - (void)applicationWillEnterForeground:(NSNotification*)note;
+// The dispatcher for this object.
+@property(nonatomic, weak) id<ApplicationCommands> dispatcher;
 @end
 
 namespace {
@@ -91,14 +91,9 @@ class UpgradeInfoBarDelegate : public ConfirmInfoBarDelegate {
 
   gfx::Image GetIcon() const override {
     if (icon_.IsEmpty()) {
-      icon_ = gfx::Image([UIImage imageNamed:@"infobar_update"],
-                         base::scoped_policy::RETAIN);
+      icon_ = gfx::Image([UIImage imageNamed:@"infobar_update"]);
     }
     return icon_;
-  }
-
-  InfoBarDelegate::Type GetInfoBarType() const override {
-    return PAGE_ACTION_TYPE;
   }
 
   base::string16 GetMessageText() const override {
@@ -217,11 +212,12 @@ class UpgradeInfoBarDismissObserver
       upgradeInfoBarDelegates_;
   // Stores the clients of the upgrade center. These objectiveC objects are not
   // retained.
-  __strong NSHashTable<id<UpgradeCenterClientProtocol>>* clients_;
+  __strong NSHashTable<id<UpgradeCenterClient>>* clients_;
 #if DCHECK_IS_ON()
   BOOL inCallback_;
 #endif
 }
+@synthesize dispatcher = _dispatcher;
 
 + (UpgradeCenter*)sharedInstance {
   static UpgradeCenter* obj;
@@ -269,7 +265,7 @@ class UpgradeInfoBarDismissObserver
 - (BOOL)infoBarShownRecently {
   NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
   NSDate* lastDisplay = [defaults objectForKey:kLastInfobarDisplayTimeKey];
-  // Absolute value is to ensure the infobar won't be supressed forever if the
+  // Absolute value is to ensure the infobar won't be suppressed forever if the
   // clock temporarily jumps to the distant future.
   if (lastDisplay &&
       fabs([lastDisplay timeIntervalSinceNow]) < kInfobarDisplayInterval) {
@@ -288,13 +284,15 @@ class UpgradeInfoBarDismissObserver
     [self showUpgradeInfoBars];
 }
 
-- (void)registerClient:(id<UpgradeCenterClientProtocol>)client {
+- (void)registerClient:(id<UpgradeCenterClient>)client
+        withDispatcher:(id<ApplicationCommands>)dispatcher {
   [clients_ addObject:client];
+  self.dispatcher = dispatcher;
   if (upgradeInfoBarIsVisible_)
     [client showUpgrade:self];
 }
 
-- (void)unregisterClient:(id<UpgradeCenterClientProtocol>)client {
+- (void)unregisterClient:(id<UpgradeCenterClient>)client {
 #if DCHECK_IS_ON()
   DCHECK(!inCallback_);
 #endif
@@ -314,7 +312,7 @@ class UpgradeInfoBarDismissObserver
   if ([upgradeInfoBarDelegates_ objectForKey:tabId])
     return;
 
-  auto infobarDelegate = base::MakeUnique<UpgradeInfoBarDelegate>();
+  auto infobarDelegate = std::make_unique<UpgradeInfoBarDelegate>();
   DelegateHolder* delegateHolder =
       [[DelegateHolder alloc] initWithInfoBarManager:infoBarManager
                                      infoBarDelegate:infobarDelegate.get()
@@ -332,7 +330,7 @@ class UpgradeInfoBarDismissObserver
 
 - (void)dismissedInfoBar:(NSString*)tabId performUpgrade:(BOOL)shouldUpgrade {
   // If the tabId is not in the upgradeInfoBarDelegates_ just ignore the
-  // notification. In all likelyhood it was trigerred by calling
+  // notification. In all likelihood it was trigerred by calling
   // -hideUpgradeInfoBars. Or because a tab was closed without dismissing the
   // infobar.
   DelegateHolder* delegateHolder =
@@ -352,22 +350,22 @@ class UpgradeInfoBarDismissObserver
     if (!urlString)
       return;  // Missing URL, no upgrade possible.
 
-    GURL url = GURL(base::SysNSStringToUTF8(urlString));
-    if (!url.is_valid())
+    GURL URL = GURL(base::SysNSStringToUTF8(urlString));
+    if (!URL.is_valid())
       return;
 
-    if (web::UrlHasWebScheme(url)) {
+    if (web::UrlHasWebScheme(URL)) {
       // This URL can be opened in the application, just open in a new tab.
       OpenUrlCommand* command =
-          [[OpenUrlCommand alloc] initWithURLFromChrome:url];
-      UIWindow* main_window = [[UIApplication sharedApplication] keyWindow];
-      DCHECK(main_window);
-      [main_window chromeExecuteCommand:command];
+          [[OpenUrlCommand alloc] initWithURLFromChrome:URL];
+      [self.dispatcher openURL:command];
     } else {
       // This URL scheme is not understood, ask the system to open it.
-      NSURL* nsurl = [NSURL URLWithString:urlString];
-      if (nsurl) {
-        OpenUrlWithCompletionHandler(nsurl, nil);
+      NSURL* launchURL = [NSURL URLWithString:urlString];
+      if (launchURL) {
+        [[UIApplication sharedApplication] openURL:launchURL
+                                           options:@{}
+                                 completionHandler:nil];
       }
     }
   }
@@ -379,7 +377,7 @@ class UpgradeInfoBarDismissObserver
   inCallback_ = YES;
 #endif
   upgradeInfoBarIsVisible_ = YES;
-  for (id<UpgradeCenterClientProtocol> upgradeClient in clients_)
+  for (id<UpgradeCenterClient> upgradeClient in clients_)
     [upgradeClient showUpgrade:self];
 #if DCHECK_IS_ON()
   inCallback_ = NO;

@@ -7,37 +7,69 @@
 
 #include "platform/PlatformExport.h"
 #include "platform/wtf/Allocator.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebClientHintsType.h"
 
 namespace blink {
 
+class KURL;
+class ResourceResponse;
+
+// TODO (tbansal): Remove PLATFORM_EXPORT, and pass WebClientHintsType
+// everywhere.
 class PLATFORM_EXPORT ClientHintsPreferences {
   DISALLOW_NEW();
 
  public:
   class Context {
    public:
-    virtual void CountClientHints(WebClientHintsType) = 0;
+    virtual void CountClientHints(mojom::WebClientHintsType) = 0;
+    virtual void CountPersistentClientHintHeaders() = 0;
 
    protected:
-    virtual ~Context() {}
+    virtual ~Context() = default;
   };
 
   ClientHintsPreferences();
 
   void UpdateFrom(const ClientHintsPreferences&);
-  void UpdateFromAcceptClientHintsHeader(const String& header_value, Context*);
 
-  bool ShouldSend(WebClientHintsType type) const {
-    return enabled_types_[type];
+  // Parses the client hints headers, and populates |this| with the client hint
+  // preferences. |url| is the URL of the resource whose response included the
+  // |header_value|. |context| may be null. If client hints are not allowed for
+  // |url|, then |this| would not be updated.
+  void UpdateFromAcceptClientHintsHeader(const String& header_value,
+                                         const KURL&,
+                                         Context*);
+
+  bool ShouldSend(mojom::WebClientHintsType type) const {
+    return enabled_hints_.IsEnabled(type);
   }
-  void SetShouldSendForTesting(WebClientHintsType type) {
-    enabled_types_[type] = true;
+  void SetShouldSendForTesting(mojom::WebClientHintsType type) {
+    enabled_hints_.SetIsEnabled(type, true);
   }
+
+  // Parses the client hints headers, and populates |enabled_hints| with the
+  // client hint preferences that should be persisted for |persist_duration|.
+  // |persist_duration| should be non-null.
+  // If there are no client hints that need to be persisted,
+  // |persist_duration| is not set, otherwise it is set to the duration for
+  // which the client hint preferences should be persisted.
+  // UpdatePersistentHintsFromHeaders may be called for all responses
+  // received (including subresources). |context| may be null.
+  static void UpdatePersistentHintsFromHeaders(
+      const ResourceResponse&,
+      Context*,
+      WebEnabledClientHints& enabled_hints,
+      TimeDelta* persist_duration);
+
+  // Returns true if client hints are allowed for the provided KURL. Client
+  // hints are allowed only on HTTP URLs that belong to secure contexts.
+  static bool IsClientHintsAllowed(const KURL&);
 
  private:
-  bool enabled_types_[kWebClientHintsTypeLast + 1] = {};
+  WebEnabledClientHints enabled_hints_;
 };
 
 }  // namespace blink

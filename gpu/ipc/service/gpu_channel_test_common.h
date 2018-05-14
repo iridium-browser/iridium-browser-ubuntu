@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef GPU_IPC_SERVICE_GPU_CHANNEL_TEST_COMMON_H_
+#define GPU_IPC_SERVICE_GPU_CHANNEL_TEST_COMMON_H_
+
 #include <memory>
 
 #include "base/memory/ref_counted.h"
@@ -19,6 +22,7 @@ class Message;
 namespace gpu {
 class GpuChannel;
 class GpuChannelManager;
+class Scheduler;
 class SyncPointManager;
 class TestGpuChannelManagerDelegate;
 
@@ -41,6 +45,7 @@ class GpuChannelTestCommon : public testing::Test {
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   scoped_refptr<base::TestSimpleTaskRunner> io_task_runner_;
   std::unique_ptr<SyncPointManager> sync_point_manager_;
+  std::unique_ptr<Scheduler> scheduler_;
   std::unique_ptr<TestGpuChannelManagerDelegate> channel_manager_delegate_;
   std::unique_ptr<GpuChannelManager> channel_manager_;
 
@@ -48,3 +53,5 @@ class GpuChannelTestCommon : public testing::Test {
 };
 
 }  // namespace gpu
+
+#endif  // GPU_IPC_SERVICE_GPU_CHANNEL_TEST_COMMON_H_

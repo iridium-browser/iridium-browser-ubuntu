@@ -28,26 +28,23 @@ bool WeakReference::Flag::IsValid() const {
   return is_valid_;
 }
 
-WeakReference::Flag::~Flag() {
-}
+WeakReference::Flag::~Flag() = default;
 
-WeakReference::WeakReference() {
-}
+WeakReference::WeakReference() = default;
 
-WeakReference::WeakReference(const Flag* flag) : flag_(flag) {
-}
+WeakReference::WeakReference(const scoped_refptr<Flag>& flag) : flag_(flag) {}
 
-WeakReference::~WeakReference() {
-}
+WeakReference::~WeakReference() = default;
 
 WeakReference::WeakReference(WeakReference&& other) = default;
 
 WeakReference::WeakReference(const WeakReference& other) = default;
 
-bool WeakReference::is_valid() const { return flag_.get() && flag_->IsValid(); }
-
-WeakReferenceOwner::WeakReferenceOwner() {
+bool WeakReference::is_valid() const {
+  return flag_ && flag_->IsValid();
 }
+
+WeakReferenceOwner::WeakReferenceOwner() = default;
 
 WeakReferenceOwner::~WeakReferenceOwner() {
   Invalidate();
@@ -58,19 +55,19 @@ WeakReference WeakReferenceOwner::GetRef() const {
   if (!HasRefs())
     flag_ = new WeakReference::Flag();
 
-  return WeakReference(flag_.get());
+  return WeakReference(flag_);
 }
 
 void WeakReferenceOwner::Invalidate() {
-  if (flag_.get()) {
+  if (flag_) {
     flag_->Invalidate();
-    flag_ = NULL;
+    flag_ = nullptr;
   }
 }
 
 WeakPtrBase::WeakPtrBase() : ptr_(0) {}
 
-WeakPtrBase::~WeakPtrBase() {}
+WeakPtrBase::~WeakPtrBase() = default;
 
 WeakPtrBase::WeakPtrBase(const WeakReference& ref, uintptr_t ptr)
     : ref_(ref), ptr_(ptr) {}

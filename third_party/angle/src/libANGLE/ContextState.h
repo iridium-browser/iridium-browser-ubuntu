@@ -19,12 +19,13 @@ namespace gl
 {
 class BufferManager;
 class ContextState;
-class FenceSyncManager;
 class FramebufferManager;
 class PathManager;
+class ProgramPipelineManager;
 class RenderbufferManager;
 class SamplerManager;
 class ShaderProgramManager;
+class SyncManager;
 class TextureManager;
 class ValidationContext;
 
@@ -62,6 +63,7 @@ class ContextState final : angle::NonCopyable
 
     bool usingDisplayTextureShareGroup() const;
 
+    bool isWebGL() const;
     bool isWebGL1() const;
 
   private:
@@ -81,9 +83,10 @@ class ContextState final : angle::NonCopyable
     TextureManager *mTextures;
     RenderbufferManager *mRenderbuffers;
     SamplerManager *mSamplers;
-    FenceSyncManager *mFenceSyncs;
+    SyncManager *mSyncs;
     PathManager *mPaths;
     FramebufferManager *mFramebuffers;
+    ProgramPipelineManager *mPipelines;
 };
 
 class ValidationContext : angle::NonCopyable
@@ -98,7 +101,7 @@ class ValidationContext : angle::NonCopyable
                       const Extensions &extensions,
                       const Limitations &limitations,
                       bool skipValidation);
-    virtual ~ValidationContext() {}
+    virtual ~ValidationContext();
 
     virtual void handleError(const Error &error) = 0;
 
@@ -124,21 +127,28 @@ class ValidationContext : angle::NonCopyable
     bool isBufferGenerated(GLuint buffer) const;
     bool isRenderbufferGenerated(GLuint renderbuffer) const;
     bool isFramebufferGenerated(GLuint framebuffer) const;
+    bool isProgramPipelineGenerated(GLuint pipeline) const;
 
     bool usingDisplayTextureShareGroup() const;
 
     // Hack for the special WebGL 1 "DEPTH_STENCIL" internal format.
     GLenum getConvertedRenderbufferFormat(GLenum internalformat) const;
 
+    bool isWebGL() const { return mState.isWebGL(); }
     bool isWebGL1() const { return mState.isWebGL1(); }
 
     template <typename T>
     const T &getParams() const;
 
+    bool isValidBufferBinding(BufferBinding binding) const { return mValidBufferBindings[binding]; }
+
   protected:
     ContextState mState;
     bool mSkipValidation;
     bool mDisplayTextureShareGroup;
+
+    // Stores for each buffer binding type whether is it allowed to be used in this context.
+    angle::PackedEnumBitSet<BufferBinding> mValidBufferBindings;
 
     // Caches entry point parameters and values re-used between layers.
     mutable const ParamTypeInfo *mSavedArgsType;

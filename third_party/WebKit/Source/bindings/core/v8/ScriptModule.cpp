@@ -6,70 +6,37 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8BindingForCore.h"
-#include "core/dom/Modulator.h"
-#include "core/dom/ScriptModuleResolver.h"
+#include "bindings/core/v8/V8ScriptRunner.h"
 #include "core/probe/CoreProbes.h"
+#include "core/script/Modulator.h"
+#include "core/script/ScriptModuleResolver.h"
 
 namespace blink {
 
-const char* ScriptModuleStateToString(ScriptModuleState state) {
-  switch (state) {
-    case ScriptModuleState::kUninstantiated:
-      return "uninstantiated";
-    case ScriptModuleState::kInstantiating:
-      return "instatinating";
-    case ScriptModuleState::kInstantiated:
-      return "instantiated";
-    case ScriptModuleState::kEvaluating:
-      return "evaluating";
-    case ScriptModuleState::kEvaluated:
-      return "evaluated";
-    case ScriptModuleState::kErrored:
-      return "errored";
-  }
-  NOTREACHED();
-  return "";
-}
-
-ScriptModule::ScriptModule() {
-  // We ensure module-related code is not executed without the flag.
-  // https://crbug.com/715376
-  CHECK(RuntimeEnabledFeatures::ModuleScriptsEnabled());
-}
-
-ScriptModule::ScriptModule(WTF::HashTableDeletedValueType)
-    : module_(WTF::kHashTableDeletedValue) {
-  // We ensure module-related code is not executed without the flag.
-  // https://crbug.com/715376
-  CHECK(RuntimeEnabledFeatures::ModuleScriptsEnabled());
-}
+ScriptModule::ScriptModule() = default;
 
 ScriptModule::ScriptModule(v8::Isolate* isolate, v8::Local<v8::Module> module)
     : module_(SharedPersistent<v8::Module>::Create(module, isolate)),
       identity_hash_(static_cast<unsigned>(module->GetIdentityHash())) {
-  // We ensure module-related code is not executed without the flag.
-  // https://crbug.com/715376
-  CHECK(RuntimeEnabledFeatures::ModuleScriptsEnabled());
-
   DCHECK(!module_->IsEmpty());
 }
 
-ScriptModule::~ScriptModule() {}
+ScriptModule::~ScriptModule() = default;
 
 ScriptModule ScriptModule::Compile(v8::Isolate* isolate,
                                    const String& source,
-                                   const String& file_name,
+                                   const KURL& source_url,
+                                   const KURL& base_url,
+                                   const ScriptFetchOptions& options,
                                    AccessControlStatus access_control_status,
-                                   const TextPosition& start_position,
+                                   const TextPosition& text_position,
                                    ExceptionState& exception_state) {
-  // We ensure module-related code is not executed without the flag.
-  // https://crbug.com/715376
-  CHECK(RuntimeEnabledFeatures::ModuleScriptsEnabled());
-
   v8::TryCatch try_catch(isolate);
   v8::Local<v8::Module> module;
-  if (!V8ScriptRunner::CompileModule(isolate, source, file_name,
-                                     access_control_status, start_position)
+
+  if (!V8ScriptRunner::CompileModule(isolate, source, source_url,
+                                     access_control_status, text_position,
+                                     ReferrerScriptInfo(base_url, options))
            .ToLocal(&module)) {
     DCHECK(try_catch.HasCaught());
     exception_state.RethrowV8Exception(try_catch.Exception());
@@ -86,6 +53,7 @@ ScriptValue ScriptModule::Instantiate(ScriptState* script_state) {
 
   DCHECK(!IsNull());
   v8::Local<v8::Context> context = script_state->GetContext();
+  probe::ExecuteScript probe(ExecutionContext::From(script_state));
   bool success;
   if (!NewLocal(script_state->GetIsolate())
            ->InstantiateModule(context, &ResolveModuleCallback)
@@ -98,41 +66,31 @@ ScriptValue ScriptModule::Instantiate(ScriptState* script_state) {
   return ScriptValue();
 }
 
-void ScriptModule::Evaluate(ScriptState* script_state) const {
+ScriptValue ScriptModule::Evaluate(ScriptState* script_state) const {
   v8::Isolate* isolate = script_state->GetIsolate();
 
   // Isolate exceptions that occur when executing the code. These exceptions
   // should not interfere with javascript code we might evaluate from C++ when
   // returning from here.
   v8::TryCatch try_catch(isolate);
-  try_catch.SetVerbose(true);
 
   probe::ExecuteScript probe(ExecutionContext::From(script_state));
   // TODO(kouhei): We currently don't have a code-path which use return value of
   // EvaluateModule. Stop ignoring result once we have such path.
   v8::Local<v8::Value> result;
-  if (!V8ScriptRunner::EvaluateModule(module_->NewLocal(isolate),
-                                      script_state->GetContext(), isolate)
+  if (!V8ScriptRunner::EvaluateModule(isolate, module_->NewLocal(isolate),
+                                      script_state->GetContext())
            .ToLocal(&result)) {
-    return;
+    DCHECK(try_catch.HasCaught());
+    return ScriptValue(script_state, try_catch.Exception());
   }
+
+  return ScriptValue();
 }
 
 void ScriptModule::ReportException(ScriptState* script_state,
-                                   v8::Local<v8::Value> exception,
-                                   const String& file_name,
-                                   const TextPosition& start_position) {
-  // We ensure module-related code is not executed without the flag.
-  // https://crbug.com/715376
-  CHECK(RuntimeEnabledFeatures::ModuleScriptsEnabled());
-
-  v8::Isolate* isolate = script_state->GetIsolate();
-
-  v8::TryCatch try_catch(isolate);
-  try_catch.SetVerbose(true);
-
-  V8ScriptRunner::ReportExceptionForModule(isolate, exception, file_name,
-                                           start_position);
+                                   v8::Local<v8::Value> exception) {
+  V8ScriptRunner::ReportException(script_state->GetIsolate(), exception);
 }
 
 Vector<String> ScriptModule::ModuleRequests(ScriptState* script_state) {
@@ -170,29 +128,16 @@ Vector<TextPosition> ScriptModule::ModuleRequestPositions(
   return ret;
 }
 
-ScriptModuleState ScriptModule::Status(ScriptState* script_state) {
+v8::Local<v8::Value> ScriptModule::V8Namespace(v8::Isolate* isolate) {
   DCHECK(!IsNull());
-
-  v8::Local<v8::Module> module = module_->NewLocal(script_state->GetIsolate());
-  return module->GetStatus();
-}
-
-v8::Local<v8::Value> ScriptModule::ErrorCompletion(ScriptState* script_state) {
-  DCHECK(!IsNull());
-  DCHECK_EQ(ScriptModuleState::kErrored, Status(script_state));
-
-  v8::Local<v8::Module> module = module_->NewLocal(script_state->GetIsolate());
-  return module->GetException();
+  v8::Local<v8::Module> module = module_->NewLocal(isolate);
+  return module->GetModuleNamespace();
 }
 
 v8::MaybeLocal<v8::Module> ScriptModule::ResolveModuleCallback(
     v8::Local<v8::Context> context,
     v8::Local<v8::String> specifier,
     v8::Local<v8::Module> referrer) {
-  // We ensure module-related code is not executed without the flag.
-  // https://crbug.com/715376
-  CHECK(RuntimeEnabledFeatures::ModuleScriptsEnabled());
-
   v8::Isolate* isolate = context->GetIsolate();
   Modulator* modulator = Modulator::From(ScriptState::From(context));
   DCHECK(modulator);
@@ -202,13 +147,9 @@ v8::MaybeLocal<v8::Module> ScriptModule::ResolveModuleCallback(
                                  "ScriptModule", "resolveModuleCallback");
   ScriptModule resolved = modulator->GetScriptModuleResolver()->Resolve(
       ToCoreStringWithNullCheck(specifier), referrer_record, exception_state);
-  if (resolved.IsNull()) {
-    DCHECK(exception_state.HadException());
-    return v8::MaybeLocal<v8::Module>();
-  }
-
+  DCHECK(!resolved.IsNull());
   DCHECK(!exception_state.HadException());
-  return v8::MaybeLocal<v8::Module>(resolved.module_->NewLocal(isolate));
+  return resolved.module_->NewLocal(isolate);
 }
 
 }  // namespace blink

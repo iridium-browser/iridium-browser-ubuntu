@@ -9,72 +9,61 @@
 #include "bindings/core/v8/ToV8ForCore.h"
 #include "core/StylePropertyShorthand.h"
 #include "core/css/cssom/StyleValueFactory.h"
-#include "core/css/parser/CSSParser.h"
+#include "core/css/parser/CSSParserContext.h"
+#include "core/css/properties/CSSProperty.h"
 
 namespace blink {
 
-ScriptValue CSSStyleValue::parse(ScriptState* script_state,
-                                 const String& property_name,
-                                 const String& value,
-                                 ExceptionState& exception_state) {
-  if (property_name.IsEmpty()) {
-    exception_state.ThrowTypeError("Property name cannot be empty");
-    return ScriptValue::CreateNull(script_state);
-  }
+namespace {
 
-  CSSPropertyID property_id = cssPropertyID(property_name);
-  // TODO(timloh): Handle custom properties
-  if (property_id == CSSPropertyInvalid || property_id == CSSPropertyVariable) {
+CSSStyleValueVector ParseCSSStyleValue(
+    const ExecutionContext* execution_context,
+    const String& property_name,
+    const String& value,
+    ExceptionState& exception_state) {
+  const CSSPropertyID property_id = cssPropertyID(property_name);
+
+  if (property_id == CSSPropertyInvalid) {
     exception_state.ThrowTypeError("Invalid property name");
-    return ScriptValue::CreateNull(script_state);
-  }
-  if (isShorthandProperty(property_id)) {
-    exception_state.ThrowTypeError(
-        "Parsing shorthand properties is not supported");
-    return ScriptValue::CreateNull(script_state);
+    return CSSStyleValueVector();
   }
 
-  const CSSValue* css_value =
-      CSSParser::ParseSingleValue(property_id, value, StrictCSSParserContext());
-  if (!css_value)
-    return ScriptValue::CreateNull(script_state);
-
-  CSSStyleValueVector style_value_vector =
-      StyleValueFactory::CssValueToStyleValueVector(property_id, *css_value);
-  if (style_value_vector.size() != 1) {
-    // TODO(meade): Support returning a CSSStyleValueOrCSSStyleValueSequence
-    // from this function.
-    return ScriptValue::CreateNull(script_state);
+  const auto style_values = StyleValueFactory::FromString(
+      property_id, value, CSSParserContext::Create(*execution_context));
+  if (style_values.IsEmpty()) {
+    exception_state.ThrowTypeError("The value provided ('" + value +
+                                   "') could not be parsed as a '" +
+                                   property_name + "'.");
+    return CSSStyleValueVector();
   }
 
-  v8::Local<v8::Value> wrapped_value =
-      ToV8(style_value_vector[0], script_state->GetContext()->Global(),
-           script_state->GetIsolate());
-  return ScriptValue(script_state, wrapped_value);
+  return style_values;
 }
 
-String CSSStyleValue::StyleValueTypeToString(StyleValueType type) {
-  switch (type) {
-    case StyleValueType::kNumberType:
-      return "number";
-    case StyleValueType::kPercentType:
-      return "percent";
-    case StyleValueType::kLengthType:
-      return "length";
-    case StyleValueType::kAngleType:
-      return "angle";
-    case StyleValueType::kTimeType:
-      return "time";
-    case StyleValueType::kFrequencyType:
-      return "frequency";
-    case StyleValueType::kResolutionType:
-      return "resolution";
-    case StyleValueType::kFlexType:
-      return "flex";
-    default:
-      NOTREACHED();
-      return "";
-  }
+}  // namespace
+
+CSSStyleValue* CSSStyleValue::parse(const ExecutionContext* execution_context,
+                                    const String& property_name,
+                                    const String& value,
+                                    ExceptionState& exception_state) {
+  CSSStyleValueVector style_value_vector = ParseCSSStyleValue(
+      execution_context, property_name, value, exception_state);
+  return style_value_vector.IsEmpty() ? nullptr : style_value_vector[0];
+}
+
+CSSStyleValueVector CSSStyleValue::parseAll(
+    const ExecutionContext* execution_context,
+    const String& property_name,
+    const String& value,
+    ExceptionState& exception_state) {
+  return ParseCSSStyleValue(execution_context, property_name, value,
+                            exception_state);
+}
+
+String CSSStyleValue::toString() const {
+  const CSSValue* result = ToCSSValue();
+  DCHECK(result);
+  return result->CssText();
 }
 
 }  // namespace blink

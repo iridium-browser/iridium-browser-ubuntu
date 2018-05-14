@@ -86,6 +86,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
     _observer.reset(new autofill::PersonalDataManagerObserverBridge(self));
     _personalDataManager->AddObserver(_observer.get());
 
+    // TODO(crbug.com/764578): -updateEditButton and -loadModel should not be
+    // called from initializer.
     [self updateEditButton];
     [self loadModel];
   }
@@ -156,6 +158,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
       [[CollectionViewSwitchItem alloc] initWithType:ItemTypeAutofillSwitch];
   switchItem.text = l10n_util::GetNSString(IDS_IOS_AUTOFILL);
   switchItem.on = [self isAutofillEnabled];
+  switchItem.accessibilityIdentifier = @"autofillItem_switch";
   return switchItem;
 }
 
@@ -164,6 +167,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
       [[CollectionViewSwitchItem alloc] initWithType:ItemTypeWalletSwitch];
   switchItem.text = l10n_util::GetNSString(IDS_IOS_AUTOFILL_USE_WALLET_DATA);
   switchItem.on = [self isWalletEnabled];
+  switchItem.accessibilityIdentifier = @"walletItem_switch";
   return switchItem;
 }
 
@@ -231,7 +235,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 }
 
 - (BOOL)localProfilesOrCreditCardsExist {
-  return !_personalDataManager->web_profiles().empty() ||
+  return !_personalDataManager->GetProfiles().empty() ||
          !_personalDataManager->GetLocalCreditCards().empty();
 }
 
@@ -319,6 +323,26 @@ typedef NS_ENUM(NSInteger, ItemType) {
       base::mac::ObjCCastStrict<CollectionViewSwitchItem>(
           [self.collectionViewModel itemAtIndexPath:switchPath]);
   switchItem.on = on;
+}
+
+// Sets switchItem's enabled status to |enabled| and reconfigures the
+// corresponding cell. It is important that there is no more than one item of
+// |switchItemType| in SectionIdentifierSwitches.
+- (void)setSwitchItemEnabled:(BOOL)enabled itemType:(ItemType)switchItemType {
+  CollectionViewModel* model = self.collectionViewModel;
+
+  if (![model hasItemForItemType:switchItemType
+               sectionIdentifier:SectionIdentifierSwitches]) {
+    return;
+  }
+  NSIndexPath* switchPath =
+      [model indexPathForItemType:switchItemType
+                sectionIdentifier:SectionIdentifierSwitches];
+  CollectionViewSwitchItem* switchItem =
+      base::mac::ObjCCastStrict<CollectionViewSwitchItem>(
+          [model itemAtIndexPath:switchPath]);
+  [switchItem setEnabled:enabled];
+  [self reconfigureCellsForItems:@[ switchItem ]];
 }
 
 #pragma mark - Insert or Delete Items and Sections
@@ -427,7 +451,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   }
 
   CollectionViewModel* model = self.collectionViewModel;
-  UIViewController* controller;
+  SettingsRootCollectionViewController* controller;
   switch ([model itemTypeForIndexPath:indexPath]) {
     case ItemTypeAddress: {
       const std::vector<autofill::AutofillProfile*> autofillProfiles =
@@ -450,6 +474,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   }
 
   if (controller) {
+    controller.dispatcher = self.dispatcher;
     [self.navigationController pushViewController:controller animated:YES];
   }
 }
@@ -458,6 +483,20 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
 - (BOOL)collectionViewAllowsEditing:(UICollectionView*)collectionView {
   return YES;
+}
+
+- (void)collectionViewWillBeginEditing:(UICollectionView*)collectionView {
+  [super collectionViewWillBeginEditing:collectionView];
+
+  [self setSwitchItemEnabled:NO itemType:ItemTypeAutofillSwitch];
+  [self setSwitchItemEnabled:NO itemType:ItemTypeWalletSwitch];
+}
+
+- (void)collectionViewWillEndEditing:(UICollectionView*)collectionView {
+  [super collectionViewWillEndEditing:collectionView];
+
+  [self setSwitchItemEnabled:YES itemType:ItemTypeAutofillSwitch];
+  [self setSwitchItemEnabled:YES itemType:ItemTypeWalletSwitch];
 }
 
 - (BOOL)collectionView:(UICollectionView*)collectionView
@@ -531,7 +570,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
           }
 
           // Turn off edit mode if there is nothing to edit.
-          if (![strongSelf localProfilesOrCreditCardsExist]) {
+          if (![strongSelf localProfilesOrCreditCardsExist] &&
+              [strongSelf.editor isEditing]) {
             [[strongSelf editor] setEditing:NO];
           }
           [strongSelf updateEditButton];
@@ -554,7 +594,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   if (_userInteractionInProgress)
     return;
 
-  if (![self localProfilesOrCreditCardsExist]) {
+  if (![self localProfilesOrCreditCardsExist] && [self.editor isEditing]) {
     // Turn off edit mode if there exists nothing to edit.
     [self.editor setEditing:NO];
   }

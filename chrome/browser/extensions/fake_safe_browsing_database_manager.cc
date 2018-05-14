@@ -15,13 +15,13 @@
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "components/safe_browsing_db/util.h"
-#include "components/safe_browsing_db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/db/util.h"
+#include "components/safe_browsing/db/v4_protocol_manager_util.h"
 
 namespace extensions {
 
 FakeSafeBrowsingDatabaseManager::FakeSafeBrowsingDatabaseManager(bool enabled)
-    : LocalSafeBrowsingDatabaseManager(make_scoped_refptr(
+    : LocalSafeBrowsingDatabaseManager(base::WrapRefCounted(
           safe_browsing::SafeBrowsingService::CreateSafeBrowsingService())),
       enabled_(enabled) {}
 
@@ -120,7 +120,7 @@ bool FakeSafeBrowsingDatabaseManager::CheckExtensionIDs(
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(&FakeSafeBrowsingDatabaseManager::OnSafeBrowsingResult,
-                     this, base::Passed(&safe_browsing_check)));
+                     this, std::move(safe_browsing_check)));
   return false;
 }
 

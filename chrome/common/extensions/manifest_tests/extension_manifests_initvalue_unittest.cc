@@ -35,7 +35,7 @@ class InitValueManifestTest : public ChromeManifestTest {
 };
 
 TEST_F(InitValueManifestTest, InitFromValueInvalid) {
-  extensions::SimpleFeature::ScopedWhitelistForTest whitelist(kWhitelistID);
+  SimpleFeature::ScopedThreadUnsafeWhitelistForTest whitelist(kWhitelistID);
   Testcase testcases[] = {
       Testcase("init_invalid_version_missing.json", errors::kInvalidVersion),
       Testcase("init_invalid_version_invalid.json", errors::kInvalidVersion),
@@ -48,12 +48,6 @@ TEST_F(InitValueManifestTest, InitFromValueInvalid) {
       Testcase("init_invalid_icons_invalid.json", errors::kInvalidIcons),
       Testcase("init_invalid_icons_path_invalid.json",
                errors::kInvalidIconPath),
-      Testcase("init_invalid_launcher_page_invalid.json",
-               errors::kInvalidLauncherPage),
-      Testcase("init_invalid_launcher_page_page_missing.json",
-               errors::kLauncherPagePageRequired),
-      Testcase("init_invalid_launcher_page_page_invalid.json",
-               errors::kInvalidLauncherPagePage),
       Testcase("init_invalid_script_invalid.json",
                errors::kInvalidContentScriptsList),
       Testcase("init_invalid_script_item_invalid.json",

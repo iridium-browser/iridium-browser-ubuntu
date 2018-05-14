@@ -6,17 +6,31 @@ compiled_resources*.gyp
 demo*.html
 */demos/
 docs.html
+.eslintrc.json
 .github
 .gitignore
 hero.svg
 index.html
 *.md
 metadata.html
+package.json
+package-lock.json
 */test/
 */tests/
 .travis.yml
+*.d.ts
+*wct.conf.json
 
 # app-layout specific
 */patterns/
 */site/
 */templates/
+
+# iron-flex-layout
+iron-flex-layout/classes/
+
+# paper-spinner
+paper-spinner/paper-spinner.html
+
+# paper-styles
+paper-styles/classes/shadow-layout.html

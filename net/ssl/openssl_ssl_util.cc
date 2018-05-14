@@ -8,12 +8,15 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "crypto/openssl_util.h"
 #include "net/base/net_errors.h"
+#include "net/cert/x509_util.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "third_party/boringssl/src/include/openssl/err.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
@@ -140,7 +143,7 @@ std::unique_ptr<base::Value> NetLogOpenSSLErrorCallback(
 
 }  // namespace
 
-void OpenSSLPutNetError(const tracked_objects::Location& location, int err) {
+void OpenSSLPutNetError(const base::Location& location, int err) {
   // Net error codes are negative. Encode them as positive numbers.
   err = -err;
   if (err < 0 || err > 0xfff) {
@@ -222,6 +225,25 @@ int GetNetSSLVersion(SSL* ssl) {
       NOTREACHED();
       return SSL_CONNECTION_VERSION_UNKNOWN;
   }
+}
+
+bool SetSSLChainAndKey(SSL* ssl,
+                       X509Certificate* cert,
+                       EVP_PKEY* pkey,
+                       const SSL_PRIVATE_KEY_METHOD* custom_key) {
+  std::vector<CRYPTO_BUFFER*> chain_raw;
+  chain_raw.reserve(1 + cert->intermediate_buffers().size());
+  chain_raw.push_back(cert->cert_buffer());
+  for (const auto& handle : cert->intermediate_buffers())
+    chain_raw.push_back(handle.get());
+
+  if (!SSL_set_chain_and_key(ssl, chain_raw.data(), chain_raw.size(), pkey,
+                             custom_key)) {
+    LOG(WARNING) << "Failed to set client certificate";
+    return false;
+  }
+
+  return true;
 }
 
 }  // namespace net

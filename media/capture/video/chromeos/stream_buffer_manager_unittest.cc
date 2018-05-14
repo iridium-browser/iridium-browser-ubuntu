@@ -9,15 +9,15 @@
 #include <utility>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "media/capture/video/chromeos/camera_buffer_factory.h"
 #include "media/capture/video/chromeos/camera_device_context.h"
 #include "media/capture/video/chromeos/camera_device_delegate.h"
+#include "media/capture/video/chromeos/mock_gpu_memory_buffer_manager.h"
 #include "media/capture/video/chromeos/mock_video_capture_client.h"
-#include "media/capture/video/chromeos/mojo/arc_camera3.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,6 +26,7 @@ using testing::A;
 using testing::AtLeast;
 using testing::Invoke;
 using testing::InvokeWithoutArgs;
+using testing::Return;
 
 namespace media {
 
@@ -67,6 +68,46 @@ const VideoCaptureFormat kDefaultCaptureFormat(gfx::Size(1280, 720),
                                                30.0,
                                                PIXEL_FORMAT_NV12);
 
+class MockCameraBufferFactory : public CameraBufferFactory {
+ public:
+  MOCK_METHOD2(CreateGpuMemoryBuffer,
+               std::unique_ptr<gfx::GpuMemoryBuffer>(const gfx::Size& size,
+                                                     gfx::BufferFormat format));
+
+  MOCK_METHOD1(ResolveStreamBufferFormat,
+               ChromiumPixelFormat(arc::mojom::HalPixelFormat hal_format));
+};
+
+std::unique_ptr<gfx::GpuMemoryBuffer> CreateMockGpuMemoryBuffer(
+    const gfx::Size& size,
+    gfx::BufferFormat format) {
+  auto mock_buffer = std::make_unique<unittest_internal::MockGpuMemoryBuffer>();
+  gfx::GpuMemoryBufferHandle fake_handle;
+  fake_handle.native_pixmap_handle.fds.push_back(
+      base::FileDescriptor(0, false));
+  fake_handle.native_pixmap_handle.planes.push_back(
+      gfx::NativePixmapPlane(1280, 0, 1280 * 720));
+  fake_handle.native_pixmap_handle.planes.push_back(
+      gfx::NativePixmapPlane(1280, 0, 1280 * 720 / 2));
+  void* fake_mapped_address = reinterpret_cast<void*>(0xdeadbeef);
+
+  EXPECT_CALL(*mock_buffer, Map()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_buffer, memory(0))
+      .WillRepeatedly(Return(fake_mapped_address));
+  EXPECT_CALL(*mock_buffer, GetHandle()).WillRepeatedly(Return(fake_handle));
+  return mock_buffer;
+}
+
+std::unique_ptr<CameraBufferFactory> CreateMockCameraBufferFactory() {
+  auto buffer_factory = std::make_unique<MockCameraBufferFactory>();
+  EXPECT_CALL(*buffer_factory, CreateGpuMemoryBuffer(_, _))
+      .WillRepeatedly(Invoke(CreateMockGpuMemoryBuffer));
+  EXPECT_CALL(*buffer_factory, ResolveStreamBufferFormat(_))
+      .WillRepeatedly(Return(ChromiumPixelFormat{
+          PIXEL_FORMAT_NV12, gfx::BufferFormat::YUV_420_BIPLANAR}));
+  return buffer_factory;
+}
+
 }  // namespace
 
 class StreamBufferManagerTest : public ::testing::Test {
@@ -75,13 +116,13 @@ class StreamBufferManagerTest : public ::testing::Test {
     quit_ = false;
     arc::mojom::Camera3CallbackOpsRequest callback_ops_request =
         mojo::MakeRequest(&mock_callback_ops_);
-    device_context_ = base::MakeUnique<CameraDeviceContext>(
-        base::MakeUnique<unittest_internal::MockVideoCaptureClient>());
+    device_context_ = std::make_unique<CameraDeviceContext>(
+        std::make_unique<unittest_internal::MockVideoCaptureClient>());
 
-    stream_buffer_manager_ = base::MakeUnique<StreamBufferManager>(
+    stream_buffer_manager_ = std::make_unique<StreamBufferManager>(
         std::move(callback_ops_request),
-        base::MakeUnique<MockStreamCaptureInterface>(), device_context_.get(),
-        base::ThreadTaskRunnerHandle::Get());
+        std::make_unique<MockStreamCaptureInterface>(), device_context_.get(),
+        CreateMockCameraBufferFactory(), base::ThreadTaskRunnerHandle::Get());
   }
 
   void TearDown() override { stream_buffer_manager_.reset(); }
@@ -216,9 +257,10 @@ class StreamBufferManagerTest : public ::testing::Test {
 TEST_F(StreamBufferManagerTest, SimpleCaptureTest) {
   GetMockVideoCaptureClient()->SetFrameCb(base::BindOnce(
       &StreamBufferManagerTest::QuitCaptureLoop, base::Unretained(this)));
-  EXPECT_CALL(*GetMockCaptureInterface(),
-              DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::SHM,
-                               _, _, _, _, _, _))
+  EXPECT_CALL(
+      *GetMockCaptureInterface(),
+      DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::GRALLOC, _,
+                       _, _, _, _, _))
       .Times(AtLeast(1))
       .WillOnce(Invoke(this, &StreamBufferManagerTest::RegisterBuffer));
   EXPECT_CALL(*GetMockCaptureInterface(), DoProcessCaptureRequest(_, _))
@@ -247,9 +289,10 @@ TEST_F(StreamBufferManagerTest, PartialResultTest) {
         test->QuitCaptureLoop();
       },
       base::Unretained(this)));
-  EXPECT_CALL(*GetMockCaptureInterface(),
-              DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::SHM,
-                               _, _, _, _, _, _))
+  EXPECT_CALL(
+      *GetMockCaptureInterface(),
+      DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::GRALLOC, _,
+                       _, _, _, _, _))
       .Times(AtLeast(1))
       .WillOnce(Invoke(this, &StreamBufferManagerTest::RegisterBuffer));
   EXPECT_CALL(*GetMockCaptureInterface(), DoProcessCaptureRequest(_, _))
@@ -294,9 +337,10 @@ TEST_F(StreamBufferManagerTest, DeviceErrorTest) {
       .Times(1)
       .WillOnce(
           InvokeWithoutArgs(this, &StreamBufferManagerTest::QuitCaptureLoop));
-  EXPECT_CALL(*GetMockCaptureInterface(),
-              DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::SHM,
-                               _, _, _, _, _, _))
+  EXPECT_CALL(
+      *GetMockCaptureInterface(),
+      DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::GRALLOC, _,
+                       _, _, _, _, _))
       .Times(1)
       .WillOnce(Invoke(this, &StreamBufferManagerTest::RegisterBuffer));
   EXPECT_CALL(*GetMockCaptureInterface(), DoProcessCaptureRequest(_, _))
@@ -332,9 +376,10 @@ TEST_F(StreamBufferManagerTest, RequestErrorTest) {
         test->QuitCaptureLoop();
       },
       base::Unretained(this)));
-  EXPECT_CALL(*GetMockCaptureInterface(),
-              DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::SHM,
-                               _, _, _, _, _, _))
+  EXPECT_CALL(
+      *GetMockCaptureInterface(),
+      DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::GRALLOC, _,
+                       _, _, _, _, _))
       .Times(AtLeast(2))
       .WillOnce(Invoke(this, &StreamBufferManagerTest::RegisterBuffer))
       .WillOnce(Invoke(this, &StreamBufferManagerTest::RegisterBuffer));
@@ -374,9 +419,10 @@ TEST_F(StreamBufferManagerTest, ResultErrorTest) {
         test->QuitCaptureLoop();
       },
       base::Unretained(this)));
-  EXPECT_CALL(*GetMockCaptureInterface(),
-              DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::SHM,
-                               _, _, _, _, _, _))
+  EXPECT_CALL(
+      *GetMockCaptureInterface(),
+      DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::GRALLOC, _,
+                       _, _, _, _, _))
       .Times(AtLeast(1))
       .WillOnce(Invoke(this, &StreamBufferManagerTest::RegisterBuffer));
   EXPECT_CALL(*GetMockCaptureInterface(), DoProcessCaptureRequest(_, _))
@@ -421,9 +467,10 @@ TEST_F(StreamBufferManagerTest, BufferErrorTest) {
         test->QuitCaptureLoop();
       },
       base::Unretained(this)));
-  EXPECT_CALL(*GetMockCaptureInterface(),
-              DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::SHM,
-                               _, _, _, _, _, _))
+  EXPECT_CALL(
+      *GetMockCaptureInterface(),
+      DoRegisterBuffer(0, arc::mojom::Camera3DeviceOps::BufferType::GRALLOC, _,
+                       _, _, _, _, _))
       .Times(AtLeast(2))
       .WillOnce(Invoke(this, &StreamBufferManagerTest::RegisterBuffer))
       .WillOnce(Invoke(this, &StreamBufferManagerTest::RegisterBuffer));

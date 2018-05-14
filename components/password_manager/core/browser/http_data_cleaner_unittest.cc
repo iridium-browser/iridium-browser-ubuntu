@@ -4,12 +4,12 @@
 
 #include "components/password_manager/core/browser/http_data_cleaner.h"
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/password_manager/core/browser/mock_password_store.h"
 #include "components/password_manager/core/browser/password_manager_test_utils.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
@@ -70,11 +70,12 @@ class HTTPDataCleanerTest : public testing::Test {
  public:
   HTTPDataCleanerTest()
       : store_(new NiceMock<MockPasswordStore>),
-        prefs_(base::MakeUnique<TestingPrefServiceSimple>()),
+        prefs_(std::make_unique<TestingPrefServiceSimple>()),
         request_context_(new net::TestURLRequestContextGetter(
             base::ThreadTaskRunnerHandle::Get())) {
     prefs()->registry()->RegisterBooleanPref(prefs::kWasObsoleteHttpDataCleaned,
                                              false);
+    store_->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
   }
 
   ~HTTPDataCleanerTest() override { store_->ShutdownOnUIThread(); }
@@ -87,8 +88,10 @@ class HTTPDataCleanerTest : public testing::Test {
     return request_context_;
   }
 
+  void WaitUntilIdle() { scoped_task_environment_.RunUntilIdle(); }
+
  private:
-  base::MessageLoop message_loop_;  // Used by store_ and request_context_.
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   scoped_refptr<MockPasswordStore> store_;
   std::unique_ptr<TestingPrefServiceSimple> prefs_;
   scoped_refptr<net::TestURLRequestContextGetter> request_context_;
@@ -130,7 +133,7 @@ TEST_F(HTTPDataCleanerTest, TestBlacklistDeletion) {
       // completion.
       CleanObsoleteHttpDataForPasswordStoreAndPrefsForTesting(
           store(), prefs(), request_context());
-      base::RunLoop().RunUntilIdle();
+      WaitUntilIdle();
 
       // Verify and clear all expectations as well as the preference.
       Mock::VerifyAndClearExpectations(store());
@@ -191,7 +194,7 @@ TEST_F(HTTPDataCleanerTest, TestAutofillableDeletion) {
           // completion.
           CleanObsoleteHttpDataForPasswordStoreAndPrefsForTesting(
               store(), prefs(), request_context());
-          base::RunLoop().RunUntilIdle();
+          WaitUntilIdle();
 
           // Verify and clear all expectations as well as the preference.
           Mock::VerifyAndClearExpectations(store());
@@ -229,7 +232,7 @@ TEST_F(HTTPDataCleanerTest, TestSiteStatsDeletion) {
       // completion.
       CleanObsoleteHttpDataForPasswordStoreAndPrefsForTesting(
           store(), prefs(), request_context());
-      base::RunLoop().RunUntilIdle();
+      WaitUntilIdle();
 
       // Verify and clear all expectations as well as the preference.
       Mock::VerifyAndClearExpectations(store());

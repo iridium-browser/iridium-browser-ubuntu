@@ -30,14 +30,13 @@
 #ifndef BasicShapes_h
 #define BasicShapes_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
-#include "core/style/ComputedStyleConstants.h"
 #include "platform/Length.h"
 #include "platform/LengthSize.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/RefCounted.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -48,7 +47,7 @@ class Path;
 
 class CORE_EXPORT BasicShape : public RefCounted<BasicShape> {
  public:
-  virtual ~BasicShape() {}
+  virtual ~BasicShape() = default;
 
   enum ShapeType {
     kBasicShapeEllipseType,
@@ -59,20 +58,18 @@ class CORE_EXPORT BasicShape : public RefCounted<BasicShape> {
     kStylePathType
   };
 
-  bool CanBlend(const BasicShape*) const;
   bool IsSameType(const BasicShape& other) const {
     return GetType() == other.GetType();
   }
 
   virtual void GetPath(Path&, const FloatRect&) = 0;
   virtual WindRule GetWindRule() const { return RULE_NONZERO; }
-  virtual PassRefPtr<BasicShape> Blend(const BasicShape*, double) const = 0;
   virtual bool operator==(const BasicShape&) const = 0;
 
   virtual ShapeType GetType() const = 0;
 
  protected:
-  BasicShape() {}
+  BasicShape() = default;
 };
 
 #define DEFINE_BASICSHAPE_TYPE_CASTS(thisType)                         \
@@ -108,13 +105,6 @@ class BasicShapeCenterCoordinate {
   const Length& length() const { return length_; }
   const Length& ComputedLength() const { return computed_length_; }
 
-  BasicShapeCenterCoordinate Blend(const BasicShapeCenterCoordinate& other,
-                                   double progress) const {
-    return BasicShapeCenterCoordinate(
-        kTopLeft, computed_length_.Blend(other.computed_length_, progress,
-                                         kValueRangeAll));
-  }
-
  private:
   Direction direction_;
   Length length_;
@@ -138,19 +128,6 @@ class BasicShapeRadius {
   const Length& Value() const { return value_; }
   RadiusType GetType() const { return type_; }
 
-  bool CanBlend(const BasicShapeRadius& other) const {
-    // FIXME determine how to interpolate between keywords. See issue 330248.
-    return type_ == kValue && other.GetType() == kValue;
-  }
-
-  BasicShapeRadius Blend(const BasicShapeRadius& other, double progress) const {
-    if (type_ != kValue || other.GetType() != kValue)
-      return BasicShapeRadius(other);
-
-    return BasicShapeRadius(
-        value_.Blend(other.Value(), progress, kValueRangeNonNegative));
-  }
-
  private:
   Length value_;
   RadiusType type_;
@@ -158,8 +135,8 @@ class BasicShapeRadius {
 
 class CORE_EXPORT BasicShapeCircle final : public BasicShape {
  public:
-  static PassRefPtr<BasicShapeCircle> Create() {
-    return AdoptRef(new BasicShapeCircle);
+  static scoped_refptr<BasicShapeCircle> Create() {
+    return base::AdoptRef(new BasicShapeCircle);
   }
 
   const BasicShapeCenterCoordinate& CenterX() const { return center_x_; }
@@ -172,13 +149,12 @@ class CORE_EXPORT BasicShapeCircle final : public BasicShape {
   void SetRadius(BasicShapeRadius radius) { radius_ = radius; }
 
   void GetPath(Path&, const FloatRect&) override;
-  PassRefPtr<BasicShape> Blend(const BasicShape*, double) const override;
   bool operator==(const BasicShape&) const override;
 
   ShapeType GetType() const override { return kBasicShapeCircleType; }
 
  private:
-  BasicShapeCircle() {}
+  BasicShapeCircle() = default;
 
   BasicShapeCenterCoordinate center_x_;
   BasicShapeCenterCoordinate center_y_;
@@ -189,8 +165,8 @@ DEFINE_BASICSHAPE_TYPE_CASTS(BasicShapeCircle);
 
 class BasicShapeEllipse final : public BasicShape {
  public:
-  static PassRefPtr<BasicShapeEllipse> Create() {
-    return AdoptRef(new BasicShapeEllipse);
+  static scoped_refptr<BasicShapeEllipse> Create() {
+    return base::AdoptRef(new BasicShapeEllipse);
   }
 
   const BasicShapeCenterCoordinate& CenterX() const { return center_x_; }
@@ -207,13 +183,12 @@ class BasicShapeEllipse final : public BasicShape {
   void SetRadiusY(BasicShapeRadius radius_y) { radius_y_ = radius_y; }
 
   void GetPath(Path&, const FloatRect&) override;
-  PassRefPtr<BasicShape> Blend(const BasicShape*, double) const override;
   bool operator==(const BasicShape&) const override;
 
   ShapeType GetType() const override { return kBasicShapeEllipseType; }
 
  private:
-  BasicShapeEllipse() {}
+  BasicShapeEllipse() = default;
 
   BasicShapeCenterCoordinate center_x_;
   BasicShapeCenterCoordinate center_y_;
@@ -225,13 +200,11 @@ DEFINE_BASICSHAPE_TYPE_CASTS(BasicShapeEllipse);
 
 class BasicShapePolygon final : public BasicShape {
  public:
-  static PassRefPtr<BasicShapePolygon> Create() {
-    return AdoptRef(new BasicShapePolygon);
+  static scoped_refptr<BasicShapePolygon> Create() {
+    return base::AdoptRef(new BasicShapePolygon);
   }
 
   const Vector<Length>& Values() const { return values_; }
-  Length GetXAt(unsigned i) const { return values_.at(2 * i); }
-  Length GetYAt(unsigned i) const { return values_.at(2 * i + 1); }
 
   void SetWindRule(WindRule wind_rule) { wind_rule_ = wind_rule; }
   void AppendPoint(const Length& x, const Length& y) {
@@ -240,7 +213,6 @@ class BasicShapePolygon final : public BasicShape {
   }
 
   void GetPath(Path&, const FloatRect&) override;
-  PassRefPtr<BasicShape> Blend(const BasicShape*, double) const override;
   bool operator==(const BasicShape&) const override;
 
   WindRule GetWindRule() const override { return wind_rule_; }
@@ -258,8 +230,8 @@ DEFINE_BASICSHAPE_TYPE_CASTS(BasicShapePolygon);
 
 class BasicShapeInset : public BasicShape {
  public:
-  static PassRefPtr<BasicShapeInset> Create() {
-    return AdoptRef(new BasicShapeInset);
+  static scoped_refptr<BasicShapeInset> Create() {
+    return base::AdoptRef(new BasicShapeInset);
   }
 
   const Length& Top() const { return top_; }
@@ -289,13 +261,12 @@ class BasicShapeInset : public BasicShape {
   }
 
   void GetPath(Path&, const FloatRect&) override;
-  PassRefPtr<BasicShape> Blend(const BasicShape*, double) const override;
   bool operator==(const BasicShape&) const override;
 
   ShapeType GetType() const override { return kBasicShapeInsetType; }
 
  private:
-  BasicShapeInset() {}
+  BasicShapeInset() = default;
 
   Length right_;
   Length top_;

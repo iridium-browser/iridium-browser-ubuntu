@@ -5,7 +5,9 @@
 import("//build/buildflag_header.gni")
 import("//build/config/chromecast_build.gni")
 import("//build/config/features.gni")
+import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
+import("//content/public/common/zygote_features.gni")
 import("//media/media_options.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//ppapi/features/features.gni")
@@ -102,14 +104,12 @@ source_set("static_features") {
   public_configs = [ ":static_switches_defines" ]
 }
 
-source_set("common_sources") {
+jumbo_source_set("common_sources") {
   # External code should depend on via ":common" above.
   visibility = [ "//content/*" ]
 
   sources = [
     "appcache_info.h",
-    "associated_interface_provider.h",
-    "associated_interface_registry.h",
     "bind_interface_helpers.h",
     "bindings_policy.h",
     "browser_controls_state.h",
@@ -117,10 +117,7 @@ source_set("common_sources") {
     "browser_side_navigation_policy.h",
     "cdm_info.h",
     "child_process_host.h",
-    "child_process_host_delegate.cc",
     "child_process_host_delegate.h",
-    "color_suggestion.cc",
-    "color_suggestion.h",
     "common_param_traits.cc",
     "common_param_traits.h",
     "common_param_traits_macros.h",
@@ -149,10 +146,13 @@ source_set("common_sources") {
     "file_chooser_file_info.h",
     "file_chooser_params.cc",
     "file_chooser_params.h",
+    "font_cache_dispatcher_win.h",
     "frame_navigate_params.cc",
     "frame_navigate_params.h",
     "injection_test_mac.h",
     "injection_test_win.h",
+    "input_event_ack_source.h",
+    "input_event_ack_state.h",
     "isolated_world_ids.h",
     "javascript_dialog_type.h",
     "main_function_params.h",
@@ -170,7 +170,8 @@ source_set("common_sources") {
     "mhtml_generation_params.h",
     "mojo_channel_switches.cc",
     "mojo_channel_switches.h",
-    "mutable_network_traffic_annotation_tag_struct_traits.h",
+    "network_connection_tracker.cc",
+    "network_connection_tracker.h",
     "notification_resources.cc",
     "notification_resources.h",
     "origin_trial_policy.cc",
@@ -194,31 +195,19 @@ source_set("common_sources") {
     "process_type.h",
     "push_event_payload.h",
     "push_subscription_options.h",
-    "quarantine.h",
     "referrer.cc",
     "referrer.h",
     "renderer_preferences.cc",
     "renderer_preferences.h",
-    "request_context_frame_type.h",
     "request_context_type.h",
-    "resource_devtools_info.cc",
-    "resource_devtools_info.h",
-    "resource_request.cc",
-    "resource_request.h",
-    "resource_request_body.cc",
-    "resource_request_body.h",
-    "resource_request_completion_status.cc",
-    "resource_request_completion_status.h",
-    "resource_response.cc",
-    "resource_response.h",
-    "resource_response_info.cc",
-    "resource_response_info.h",
+    "resource_request_body_android.cc",
+    "resource_request_body_android.h",
     "resource_type.cc",
     "resource_type.h",
+    "resource_usage_reporter_type_converters.cc",
+    "resource_usage_reporter_type_converters.h",
     "result_codes.h",
     "sandbox_init.h",
-    "sandbox_linux.h",
-    "sandbox_type.h",
     "sandboxed_process_launcher_delegate.cc",
     "sandboxed_process_launcher_delegate.h",
     "screen_info.cc",
@@ -226,7 +215,8 @@ source_set("common_sources") {
     "screen_orientation_values.h",
     "send_zygote_child_ping_linux.h",
     "service_manager_connection.h",
-    "service_worker_modes.h",
+    "shared_url_loader_factory.cc",
+    "shared_url_loader_factory.h",
     "simple_connection_filter.cc",
     "simple_connection_filter.h",
     "socket_permission_request.h",
@@ -240,16 +230,19 @@ source_set("common_sources") {
     "url_constants.cc",
     "url_constants.h",
     "url_fetcher.h",
+    "url_loader_throttle.cc",
     "url_loader_throttle.h",
     "url_utils.cc",
     "url_utils.h",
+    "use_zoom_for_dsf_policy.cc",
+    "use_zoom_for_dsf_policy.h",
     "user_agent.h",
     "web_preferences.cc",
     "web_preferences.h",
     "webplugininfo.cc",
     "webplugininfo.h",
+    "webplugininfo_param_traits.h",
     "zygote_fork_delegate_linux.h",
-    "zygote_handle.h",
   ]
 
   configs += [
@@ -264,31 +257,37 @@ source_set("common_sources") {
     ":service_names",
     "//content/common",
     "//ipc",
+    "//media/capture:capture_base",
     "//mojo/edk/system",
     "//mojo/public/cpp/bindings",
     "//net",
+    "//services/network:network_service",
+    "//services/network/public/mojom",
     "//services/service_manager/embedder",
     "//services/service_manager/public/cpp",
-    "//services/service_manager/public/interfaces",
+    "//services/service_manager/public/mojom",
     "//third_party/WebKit/public:blink_headers",
+    "//third_party/WebKit/public:mojo_bindings",
     "//ui/accessibility",
     "//ui/surface",
     "//url/ipc:url_ipc",
   ]
   deps = [
     ":content_descriptor_keys",
+    ":zygote_features",
 
     # This looks needless as we have //content/common in public_deps, but it's
     # needed because of allow_circular_includes_from.
-    "//components/mime_util",
     "//content/common:mojo_bindings",
     "//media",
     "//mojo/common",
     "//ppapi/c",
     "//ppapi/features",
+    "//services/network/public/cpp",
     "//services/service_manager/public/cpp",
     "//skia",
     "//storage/common",
+    "//third_party/WebKit/public/common",
     "//third_party/icu",
     "//ui/accessibility",
     "//ui/base",
@@ -301,6 +300,10 @@ source_set("common_sources") {
 
   if (use_aura) {
     deps += [ "//ui/aura" ]
+  }
+
+  if (is_android) {
+    deps += [ "//content/public/android:jni" ]
   }
 
   # //content/common needs to include public headers.
@@ -323,11 +326,14 @@ source_set("common_sources") {
       "webrtc_ip_handling_policy.h",
     ]
   }
+
+  if (use_zygote_handle) {
+    sources += [ "zygote_handle.h" ]
+  }
 }
 
 buildflag_header("features") {
   header = "features.h"
-
   flags = [ "RTC_USE_H264=$rtc_use_h264" ]
 }
 
@@ -335,6 +341,7 @@ source_set("feature_h264_with_openh264_ffmpeg") {
   deps = [
     ":features",
     "//base",
+    "//media:media_features",
   ]
   sources = [
     "feature_h264_with_openh264_ffmpeg.cc",
@@ -342,27 +349,39 @@ source_set("feature_h264_with_openh264_ffmpeg") {
   ]
 }
 
+buildflag_header("zygote_features") {
+  header = "zygote_features.h"
+  flags = [ "USE_ZYGOTE_HANDLE=$use_zygote_handle" ]
+}
+
 mojom("interfaces") {
   # Must depend on //content/public/common/ instead, for component build.
   visibility = [
     ":common_sources",
     "//content/common/*",
+    "//chrome/common:mojo_bindings",
+    "//chrome/common:mojo_bindings_blink",
   ]
 
   sources = [
-    "mutable_network_traffic_annotation_tag.mojom",
-    "network_service.mojom",
-    "network_service_test.mojom",
+    "appcache_info.mojom",
+    "fullscreen_video_element.mojom",
     "push_messaging_status.mojom",
-    "url_loader.mojom",
-    "url_loader_factory.mojom",
+    "resource_usage_reporter.mojom",
+    "webplugininfo.mojom",
     "window_container_type.mojom",
   ]
 
+  if (is_win) {
+    sources += [ "font_cache_win.mojom" ]
+  }
+
   public_deps = [
+    ":resource_type_bindings",
     "//mojo/common:common_custom_types",
-    "//url/mojo:url_mojom_gurl",
-    "//url/mojo:url_mojom_origin",
+    "//services/network/public/mojom",
+    "//url/mojom:url_mojom_gurl",
+    "//url/mojom:url_mojom_origin",
   ]
 
   component_output_prefix = "content_public_common_mojo_bindings"

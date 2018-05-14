@@ -7,7 +7,9 @@
 #import <Foundation/Foundation.h>
 
 #include <limits>
+#include <memory>
 
+#include "base/auto_reset.h"
 #include "base/logging.h"
 #include "base/mac/call_with_eh_frame.h"
 #include "base/mac/scoped_cftyperef.h"
@@ -23,7 +25,18 @@
 
 namespace base {
 
+// kMessageLoopExclusiveRunLoopMode must be defined before kAllModes to generate
+// a sane static initialization order.
+const CFStringRef kMessageLoopExclusiveRunLoopMode =
+    CFSTR("kMessageLoopExclusiveRunLoopMode");
+
 namespace {
+
+// kCFRunLoopCommonModes is const but not constexpr; hence kAllModes is
+// initialized at run-time. This initialization being trivial, constant, and
+// without side-effects: this is fine.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wglobal-constructors"
 
 // AppKit RunLoop modes observed to potentially run tasks posted to Chrome's
 // main thread task runner. Some are internal to AppKit but must be observed to
@@ -44,24 +57,29 @@ const CFStringRef kAllModes[] = {
     CFSTR("NSUnhighlightMenuRunLoopMode"),
 };
 
-// Mask that determines which modes in |kAllModes| to use.
-enum { kCommonModeMask = 0x1, kAllModesMask = ~0 };
+#pragma clang diagnostic pop  // -Wglobal-constructors
 
-// Modes to use for MessagePumpNSApplication. Currently just common and
-// exclusive modes. TODO(tapted): Use kAllModesMask once http://crbug.com/640466
-// blockers are fixed.
-enum { kNSApplicationModeMask = 0x3 };
+// Mask that determines which modes in |kAllModes| to use.
+enum { kCommonModeMask = 0x1, kAllModesMask = 0xf };
+
+// Modes to use for MessagePumpNSApplication that are considered "safe".
+// Currently just common and exclusive modes. Ideally, messages would be pumped
+// in all modes, but that interacts badly with app modal dialogs (e.g. NSAlert).
+enum { kNSApplicationModalSafeModeMask = 0x3 };
 
 void NoOp(void* info) {
 }
 
-const CFTimeInterval kCFTimeIntervalMax =
+constexpr CFTimeInterval kCFTimeIntervalMax =
     std::numeric_limits<CFTimeInterval>::max();
 
 #if !defined(OS_IOS)
 // Set to true if MessagePumpMac::Create() is called before NSApp is
 // initialized.  Only accessed from the main thread.
 bool g_not_using_cr_app = false;
+
+// The MessagePump controlling [NSApp run].
+MessagePumpNSApplication* g_app_pump;
 
 // Various CoreFoundation definitions.
 typedef struct __CFRuntimeBase {
@@ -107,10 +125,6 @@ void __ChromeCFRunLoopTimerSetValid(CFRunLoopTimerRef timer, bool valid) {
 
 }  // namespace
 
-// static
-const CFStringRef kMessageLoopExclusiveRunLoopMode =
-    CFSTR("kMessageLoopExclusiveRunLoopMode");
-
 // A scoper for autorelease pools created from message pump run loops.
 // Avoids dirtying up the ScopedNSAutoreleasePool interface for the rare
 // case where an autorelease pool needs to be passed in.
@@ -126,6 +140,40 @@ class MessagePumpScopedAutoreleasePool {
  private:
   NSAutoreleasePool* pool_;
   DISALLOW_COPY_AND_ASSIGN(MessagePumpScopedAutoreleasePool);
+};
+
+class MessagePumpCFRunLoopBase::ScopedModeEnabler {
+ public:
+  ScopedModeEnabler(MessagePumpCFRunLoopBase* owner, int mode_index)
+      : owner_(owner), mode_index_(mode_index) {
+    CFRunLoopRef loop = owner_->run_loop_;
+    CFRunLoopAddTimer(loop, owner_->delayed_work_timer_, mode());
+    CFRunLoopAddSource(loop, owner_->work_source_, mode());
+    CFRunLoopAddSource(loop, owner_->idle_work_source_, mode());
+    CFRunLoopAddSource(loop, owner_->nesting_deferred_work_source_, mode());
+    CFRunLoopAddObserver(loop, owner_->pre_wait_observer_, mode());
+    CFRunLoopAddObserver(loop, owner_->pre_source_observer_, mode());
+    CFRunLoopAddObserver(loop, owner_->enter_exit_observer_, mode());
+  }
+
+  ~ScopedModeEnabler() {
+    CFRunLoopRef loop = owner_->run_loop_;
+    CFRunLoopRemoveObserver(loop, owner_->enter_exit_observer_, mode());
+    CFRunLoopRemoveObserver(loop, owner_->pre_source_observer_, mode());
+    CFRunLoopRemoveObserver(loop, owner_->pre_wait_observer_, mode());
+    CFRunLoopRemoveSource(loop, owner_->nesting_deferred_work_source_, mode());
+    CFRunLoopRemoveSource(loop, owner_->idle_work_source_, mode());
+    CFRunLoopRemoveSource(loop, owner_->work_source_, mode());
+    CFRunLoopRemoveTimer(loop, owner_->delayed_work_timer_, mode());
+  }
+
+  const CFStringRef& mode() const { return kAllModes[mode_index_]; }
+
+ private:
+  MessagePumpCFRunLoopBase* const owner_;  // Weak. Owns this.
+  const int mode_index_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedModeEnabler);
 };
 
 // Must be called on the run loop thread.
@@ -180,9 +228,8 @@ void MessagePumpCFRunLoopBase::SetTimerSlack(TimerSlack timer_slack) {
 }
 
 // Must be called on the run loop thread.
-MessagePumpCFRunLoopBase::MessagePumpCFRunLoopBase(int mode_mask)
-    : mode_mask_(mode_mask),
-      delegate_(NULL),
+MessagePumpCFRunLoopBase::MessagePumpCFRunLoopBase(int initial_mode_mask)
+    : delegate_(NULL),
       delayed_work_fire_time_(kCFTimeIntervalMax),
       timer_slack_(base::TIMER_SLACK_NONE),
       nesting_level_(0),
@@ -205,7 +252,6 @@ MessagePumpCFRunLoopBase::MessagePumpCFRunLoopBase(int mode_mask)
                                              0,                   // priority
                                              RunDelayedWorkTimer,
                                              &timer_context);
-  InvokeForEnabledModes(&CFRunLoopAddTimer, delayed_work_timer_);
 
   CFRunLoopSourceContext source_context = CFRunLoopSourceContext();
   source_context.info = this;
@@ -213,19 +259,14 @@ MessagePumpCFRunLoopBase::MessagePumpCFRunLoopBase(int mode_mask)
   work_source_ = CFRunLoopSourceCreate(NULL,  // allocator
                                        1,     // priority
                                        &source_context);
-  InvokeForEnabledModes(&CFRunLoopAddSource, work_source_);
-
   source_context.perform = RunIdleWorkSource;
   idle_work_source_ = CFRunLoopSourceCreate(NULL,  // allocator
                                             2,     // priority
                                             &source_context);
-  InvokeForEnabledModes(&CFRunLoopAddSource, idle_work_source_);
-
   source_context.perform = RunNestingDeferredWorkSource;
   nesting_deferred_work_source_ = CFRunLoopSourceCreate(NULL,  // allocator
                                                         0,     // priority
                                                         &source_context);
-  InvokeForEnabledModes(&CFRunLoopAddSource, nesting_deferred_work_source_);
 
   CFRunLoopObserverContext observer_context = CFRunLoopObserverContext();
   observer_context.info = this;
@@ -235,16 +276,12 @@ MessagePumpCFRunLoopBase::MessagePumpCFRunLoopBase(int mode_mask)
                                                0,     // priority
                                                PreWaitObserver,
                                                &observer_context);
-  InvokeForEnabledModes(&CFRunLoopAddObserver, pre_wait_observer_);
-
   pre_source_observer_ = CFRunLoopObserverCreate(NULL,  // allocator
                                                  kCFRunLoopBeforeSources,
                                                  true,  // repeat
                                                  0,     // priority
                                                  PreSourceObserver,
                                                  &observer_context);
-  InvokeForEnabledModes(&CFRunLoopAddObserver, pre_source_observer_);
-
   enter_exit_observer_ = CFRunLoopObserverCreate(NULL,  // allocator
                                                  kCFRunLoopEntry |
                                                      kCFRunLoopExit,
@@ -252,24 +289,20 @@ MessagePumpCFRunLoopBase::MessagePumpCFRunLoopBase(int mode_mask)
                                                  0,     // priority
                                                  EnterExitObserver,
                                                  &observer_context);
-  InvokeForEnabledModes(&CFRunLoopAddObserver, enter_exit_observer_);
+  SetModeMask(initial_mode_mask);
 }
 
 // Ideally called on the run loop thread.  If other run loops were running
 // lower on the run loop thread's stack when this object was created, the
 // same number of run loops must be running when this object is destroyed.
 MessagePumpCFRunLoopBase::~MessagePumpCFRunLoopBase() {
-  for (const CFRunLoopObserverRef& observer :
-       {enter_exit_observer_, pre_source_observer_, pre_wait_observer_}) {
-    InvokeForEnabledModes(&CFRunLoopRemoveObserver, observer);
-    CFRelease(observer);
-  }
-  for (const CFRunLoopSourceRef& source :
-       {nesting_deferred_work_source_, idle_work_source_, work_source_}) {
-    InvokeForEnabledModes(&CFRunLoopRemoveSource, source);
-    CFRelease(source);
-  }
-  InvokeForEnabledModes(&CFRunLoopRemoveTimer, delayed_work_timer_);
+  SetModeMask(0);
+  CFRelease(enter_exit_observer_);
+  CFRelease(pre_source_observer_);
+  CFRelease(pre_wait_observer_);
+  CFRelease(nesting_deferred_work_source_);
+  CFRelease(idle_work_source_);
+  CFRelease(work_source_);
   CFRelease(delayed_work_timer_);
   CFRelease(run_loop_);
 }
@@ -297,15 +330,23 @@ AutoreleasePoolType* MessagePumpCFRunLoopBase::CreateAutoreleasePool() {
   return [[NSAutoreleasePool alloc] init];
 }
 
-template <typename Argument>
-void MessagePumpCFRunLoopBase::InvokeForEnabledModes(void method(CFRunLoopRef,
-                                                                 Argument,
-                                                                 CFStringRef),
-                                                     Argument argument) {
+void MessagePumpCFRunLoopBase::SetModeMask(int mode_mask) {
+  static_assert(arraysize(enabled_modes_) == arraysize(kAllModes),
+                "mode size mismatch");
   for (size_t i = 0; i < arraysize(kAllModes); ++i) {
-    if (mode_mask_ & (0x1 << i))
-      method(run_loop_, argument, kAllModes[i]);
+    bool enable = mode_mask & (0x1 << i);
+    if (enable == !enabled_modes_[i]) {
+      enabled_modes_[i] =
+          enable ? std::make_unique<ScopedModeEnabler>(this, i) : nullptr;
+    }
   }
+}
+
+int MessagePumpCFRunLoopBase::GetModeMask() const {
+  int mask = 0;
+  for (size_t i = 0; i < arraysize(enabled_modes_); ++i)
+    mask |= enabled_modes_[i] ? (0x1 << i) : 0;
+  return mask;
 }
 
 #if !defined(OS_IOS)
@@ -679,22 +720,22 @@ MessagePumpNSRunLoop::MessagePumpNSRunLoop()
   quit_source_ = CFRunLoopSourceCreate(NULL,  // allocator
                                        0,     // priority
                                        &source_context);
-  InvokeForEnabledModes(&CFRunLoopAddSource, quit_source_);
+  CFRunLoopAddSource(run_loop(), quit_source_, kCFRunLoopCommonModes);
 }
 
 MessagePumpNSRunLoop::~MessagePumpNSRunLoop() {
-  InvokeForEnabledModes(&CFRunLoopRemoveSource, quit_source_);
+  CFRunLoopRemoveSource(run_loop(), quit_source_, kCFRunLoopCommonModes);
   CFRelease(quit_source_);
 }
 
 void MessagePumpNSRunLoop::DoRun(Delegate* delegate) {
+  AutoReset<bool> auto_reset_keep_running(&keep_running_, true);
+
   while (keep_running_) {
     // NSRunLoop manages autorelease pools itself.
     [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
                              beforeDate:[NSDate distantFuture]];
   }
-
-  keep_running_ = true;
 }
 
 void MessagePumpNSRunLoop::Quit() {
@@ -726,14 +767,39 @@ void MessagePumpUIApplication::Attach(Delegate* delegate) {
 
 #else
 
-MessagePumpNSApplication::MessagePumpNSApplication()
-    : MessagePumpCFRunLoopBase(kNSApplicationModeMask),
-      keep_running_(true),
-      running_own_loop_(false) {}
+ScopedPumpMessagesInPrivateModes::ScopedPumpMessagesInPrivateModes() {
+  DCHECK(g_app_pump);
+  DCHECK_EQ(kNSApplicationModalSafeModeMask, g_app_pump->GetModeMask());
+  // Pumping events in private runloop modes is known to interact badly with
+  // app modal windows like NSAlert.
+  if (![NSApp modalWindow])
+    g_app_pump->SetModeMask(kAllModesMask);
+}
 
-MessagePumpNSApplication::~MessagePumpNSApplication() {}
+ScopedPumpMessagesInPrivateModes::~ScopedPumpMessagesInPrivateModes() {
+  DCHECK(g_app_pump);
+  g_app_pump->SetModeMask(kNSApplicationModalSafeModeMask);
+}
+
+int ScopedPumpMessagesInPrivateModes::GetModeMaskForTest() {
+  return g_app_pump ? g_app_pump->GetModeMask() : -1;
+}
+
+MessagePumpNSApplication::MessagePumpNSApplication()
+    : MessagePumpCFRunLoopBase(kNSApplicationModalSafeModeMask),
+      keep_running_(true),
+      running_own_loop_(false) {
+  DCHECK_EQ(nullptr, g_app_pump);
+  g_app_pump = this;
+}
+
+MessagePumpNSApplication::~MessagePumpNSApplication() {
+  DCHECK_EQ(this, g_app_pump);
+  g_app_pump = nullptr;
+}
 
 void MessagePumpNSApplication::DoRun(Delegate* delegate) {
+  AutoReset<bool> auto_reset_keep_running(&keep_running_, true);
   bool last_running_own_loop_ = running_own_loop_;
 
   // NSApp must be initialized by calling:
@@ -760,7 +826,6 @@ void MessagePumpNSApplication::DoRun(Delegate* delegate) {
         [NSApp sendEvent:event];
       }
     }
-    keep_running_ = true;
   }
 
   running_own_loop_ = last_running_own_loop_;

@@ -125,7 +125,7 @@ extern vpx_codec_iface_t *vpx_codec_vp9_cx(void);
 enum vp8e_enc_control_id {
   /*!\brief Codec control function to pass an ROI map to encoder.
    *
-   * Supported in codecs: VP8, VP9
+   * Supported in codecs: VP8
    */
   VP8E_SET_ROI_MAP = 8,
 
@@ -408,7 +408,7 @@ enum vp8e_enc_control_id {
 
   /*!\brief Codec control function to set noise sensitivity.
    *
-   *  0: off, 1: On(YOnly)
+   *  0: off, 1: On(YOnly), 2: For SVC only, on top two spatial layers(YOnly)
    *
    * Supported in codecs: VP9
    */
@@ -422,6 +422,12 @@ enum vp8e_enc_control_id {
    * Supported in codecs: VP9
    */
   VP9E_SET_SVC,
+
+  /*!\brief Codec control function to pass an ROI map to encoder.
+   *
+   * Supported in codecs: VP9
+   */
+  VP9E_SET_ROI_MAP,
 
   /*!\brief Codec control function to set parameters for SVC.
    * \note Parameters contain min_q, max_q, scaling factor for each of the
@@ -444,6 +450,7 @@ enum vp8e_enc_control_id {
    * \note Valid parameter range:
    *              VP9E_CONTENT_DEFAULT = Regular video content (Default)
    *              VP9E_CONTENT_SCREEN  = Screen capture content
+   *              VP9E_CONTENT_FILM    = Film content: improves grain retention
    *
    * Supported in codecs: VP9
    */
@@ -528,7 +535,7 @@ enum vp8e_enc_control_id {
    * struct #vpx_svc_ref_frame_config defined below.
    *
    * Supported in codecs: VP9
-  */
+   */
   VP9E_SET_SVC_REF_FRAME_CONFIG,
 
   /*!\brief Codec control function to set intended rendering image size.
@@ -549,11 +556,11 @@ enum vp8e_enc_control_id {
   VP9E_SET_TARGET_LEVEL,
 
   /*!\brief Codec control function to set row level multi-threading.
-  *
-  * 0 : off, 1 : on
-  *
-  * Supported in codecs: VP9
-  */
+   *
+   * 0 : off, 1 : on
+   *
+   * Supported in codecs: VP9
+   */
   VP9E_SET_ROW_MT,
 
   /*!\brief Codec control function to get bitstream level.
@@ -573,18 +580,18 @@ enum vp8e_enc_control_id {
   VP9E_SET_ALT_REF_AQ,
 
   /*!\brief Boost percentage for Golden Frame in CBR mode.
-    *
-    * This value controls the amount of boost given to Golden Frame in
-    * CBR mode. It is expressed as a percentage of the average
-    * per-frame bitrate, with the special (and default) value 0 meaning
-    * the feature is off, i.e., no golden frame boost in CBR mode and
-    * average bitrate target is used.
-    *
-    * For example, to allow 100% more bits, i.e, 2X, in a golden frame
-    * than average frame, set this to 100.
-    *
-    * Supported in codecs: VP8
-    */
+   *
+   * This value controls the amount of boost given to Golden Frame in
+   * CBR mode. It is expressed as a percentage of the average
+   * per-frame bitrate, with the special (and default) value 0 meaning
+   * the feature is off, i.e., no golden frame boost in CBR mode and
+   * average bitrate target is used.
+   *
+   * For example, to allow 100% more bits, i.e, 2X, in a golden frame
+   * than average frame, set this to 100.
+   *
+   * Supported in codecs: VP8
+   */
   VP8E_SET_GF_CBR_BOOST_PCT,
 
   /*!\brief Codec control function to enable the extreme motion vector unit test
@@ -642,16 +649,20 @@ typedef enum vp9e_temporal_layering_mode {
  */
 
 typedef struct vpx_roi_map {
-  /*! An id between 0 and 3 for each 16x16 region within a frame. */
+  /*! If ROI is enabled. */
+  uint8_t enabled;
+  /*! An id between 0-3 (0-7 for vp9) for each 16x16 (8x8 for VP9)
+   * region within a frame. */
   unsigned char *roi_map;
   unsigned int rows; /**< Number of rows. */
   unsigned int cols; /**< Number of columns. */
-  // TODO(paulwilkins): broken for VP9 which has 8 segments
-  // q and loop filter deltas for each segment
-  // (see MAX_MB_SEGMENTS)
-  int delta_q[4];  /**< Quantizer deltas. */
-  int delta_lf[4]; /**< Loop filter deltas. */
-  /*! Static breakout threshold for each segment. */
+  /*! VP8 only uses the first 4 segments. VP9 uses 8 segments. */
+  int delta_q[8];  /**< Quantizer deltas. */
+  int delta_lf[8]; /**< Loop filter deltas. */
+  /*! skip and ref frame segment is only used in VP9. */
+  int skip[8];      /**< Skip this block. */
+  int ref_frame[8]; /**< Reference frame for this block. */
+  /*! Static breakout threshold for each segment. Only used in VP8. */
   unsigned int static_threshold[4];
 } vpx_roi_map_t;
 
@@ -696,6 +707,7 @@ typedef enum {
 typedef enum {
   VP9E_CONTENT_DEFAULT,
   VP9E_CONTENT_SCREEN,
+  VP9E_CONTENT_FILM,
   VP9E_CONTENT_INVALID
 } vp9e_tune_content;
 
@@ -747,6 +759,8 @@ VPX_CTRL_USE_TYPE(VP8E_SET_TEMPORAL_LAYER_ID, int)
 #define VPX_CTRL_VP8E_SET_TEMPORAL_LAYER_ID
 VPX_CTRL_USE_TYPE(VP8E_SET_ROI_MAP, vpx_roi_map_t *)
 #define VPX_CTRL_VP8E_SET_ROI_MAP
+VPX_CTRL_USE_TYPE(VP9E_SET_ROI_MAP, vpx_roi_map_t *)
+#define VPX_CTRL_VP9E_SET_ROI_MAP
 VPX_CTRL_USE_TYPE(VP8E_SET_ACTIVEMAP, vpx_active_map_t *)
 #define VPX_CTRL_VP8E_SET_ACTIVEMAP
 VPX_CTRL_USE_TYPE(VP8E_SET_SCALEMODE, vpx_scaling_mode_t *)

@@ -9,6 +9,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/common/chrome_paths.h"
+#include "components/nacl/common/buildflags.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -57,7 +58,7 @@ void JavaScriptBrowserTest::SetUpOnMainThread() {
 // js2gtest GN template.
 #if (!defined(MEMORY_SANITIZER) && !defined(ADDRESS_SANITIZER) && \
      !defined(LEAK_SANITIZER) && !defined(SYZYASAN)) ||           \
-    !defined(DISABLE_NACL) || defined(OS_CHROMEOS)
+    BUILDFLAG(ENABLE_NACL) || defined(OS_CHROMEOS)
   base::FilePath gen_test_data_directory;
   ASSERT_TRUE(
       PathService::Get(chrome::DIR_GEN_TEST_DATA, &gen_test_data_directory));
@@ -77,7 +78,7 @@ void JavaScriptBrowserTest::SetUpOnMainThread() {
 // calls.
 void JavaScriptBrowserTest::BuildJavascriptLibraries(
     std::vector<base::string16>* libraries) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   ASSERT_TRUE(libraries != NULL);
   std::vector<base::FilePath>::iterator user_libraries_iterator;
   for (user_libraries_iterator = user_libraries_.begin();
@@ -119,9 +120,9 @@ base::string16 JavaScriptBrowserTest::BuildRunTestJSCall(
     const std::string& function_name,
     std::vector<base::Value> test_func_args) {
   std::vector<std::unique_ptr<base::Value>> arguments;
-  arguments.push_back(base::MakeUnique<base::Value>(is_async));
-  arguments.push_back(base::MakeUnique<base::Value>(function_name));
-  auto baked_argument_list = base::MakeUnique<base::ListValue>();
+  arguments.push_back(std::make_unique<base::Value>(is_async));
+  arguments.push_back(std::make_unique<base::Value>(function_name));
+  auto baked_argument_list = std::make_unique<base::ListValue>();
   for (const auto& arg : test_func_args)
     baked_argument_list->Append(arg.CreateDeepCopy());
   arguments.push_back(std::move(baked_argument_list));

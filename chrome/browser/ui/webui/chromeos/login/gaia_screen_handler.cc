@@ -4,7 +4,8 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 
-#include "ash/system/devicetype_utils.h"
+#include <memory>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/feature_list.h"
@@ -13,28 +14,38 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/sys_info.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/lock_screen_utils.h"
+#include "chrome/browser/chromeos/login/reauth_stats.h"
 #include "chrome/browser/chromeos/login/screens/network_error.h"
+#include "chrome/browser/chromeos/login/signin_partition_manager.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_impl.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
+#include "chrome/browser/chromeos/policy/temp_certs_cache_nss.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/net/system_network_context_manager.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/chromeos/login/active_directory_password_change_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/enrollment_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
+#include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/installer/util/google_update_settings.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/auth/authpolicy_login_helper.h"
 #include "chromeos/login/auth/user_context.h"
@@ -42,6 +53,7 @@
 #include "chromeos/system/devicetype.h"
 #include "chromeos/system/version_loader.h"
 #include "components/login/localized_values_builder.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/user_manager/known_user.h"
@@ -53,6 +65,8 @@
 #include "google_apis/gaia/gaia_urls.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/ime/chromeos/input_method_util.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/chromeos/devicetype_utils.h"
 
 using content::BrowserThread;
 namespace em = enterprise_management;
@@ -210,6 +224,11 @@ bool IsOnline(NetworkPortalDetector::CaptivePortalStatus status) {
   return status == NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE;
 }
 
+void GetVersionAndConsent(std::string* out_version, bool* out_consent) {
+  *out_version = version_loader::GetVersion(version_loader::VERSION_SHORT);
+  *out_consent = GoogleUpdateSettings::GetCollectStatsConsent();
+}
+
 }  // namespace
 
 // A class that's used to specify the way how Gaia should be loaded.
@@ -236,10 +255,14 @@ GaiaScreenHandler::GaiaContext::GaiaContext() {}
 
 GaiaScreenHandler::GaiaScreenHandler(
     CoreOobeView* core_oobe_view,
-    const scoped_refptr<NetworkStateInformer>& network_state_informer)
+    const scoped_refptr<NetworkStateInformer>& network_state_informer,
+    ActiveDirectoryPasswordChangeScreenHandler*
+        active_directory_password_change_screen_handler)
     : BaseScreenHandler(kScreenId),
       network_state_informer_(network_state_informer),
       core_oobe_view_(core_oobe_view),
+      active_directory_password_change_screen_handler_(
+          active_directory_password_change_screen_handler),
       weak_factory_(this) {
   DCHECK(network_state_informer_.get());
   set_call_js_prefix(kJsScreenPath);
@@ -261,7 +284,9 @@ void GaiaScreenHandler::MaybePreloadAuthExtension() {
 
   if (!network_portal_detector_) {
     NetworkPortalDetectorImpl* detector = new NetworkPortalDetectorImpl(
-        g_browser_process->system_request_context(), false);
+        g_browser_process->system_network_context_manager()
+            ->GetURLLoaderFactory(),
+        false);
     detector->set_portal_test_url(GURL(kRestrictiveProxyURL));
     network_portal_detector_.reset(detector);
     network_portal_detector_->AddObserver(this);
@@ -283,16 +308,39 @@ void GaiaScreenHandler::DisableRestrictiveProxyCheckForTest() {
 }
 
 void GaiaScreenHandler::LoadGaia(const GaiaContext& context) {
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
-      base::Bind(&version_loader::GetVersion, version_loader::VERSION_SHORT),
-      base::Bind(&GaiaScreenHandler::LoadGaiaWithVersion,
-                 weak_factory_.GetWeakPtr(), context));
+  // Start a new session with SigninPartitionManager, generating a unique
+  // StoragePartition.
+  login::SigninPartitionManager* signin_partition_manager =
+      login::SigninPartitionManager::Factory::GetForBrowserContext(
+          Profile::FromWebUI(web_ui()));
+  signin_partition_manager->StartSigninSession(
+      web_ui()->GetWebContents(),
+      base::BindOnce(&GaiaScreenHandler::LoadGaiaWithPartition,
+                     weak_factory_.GetWeakPtr(), context));
 }
 
-void GaiaScreenHandler::LoadGaiaWithVersion(
+void GaiaScreenHandler::LoadGaiaWithPartition(
     const GaiaContext& context,
-    const std::string& platform_version) {
+    const std::string& partition_name) {
+  std::unique_ptr<std::string> version = std::make_unique<std::string>();
+  std::unique_ptr<bool> consent = std::make_unique<bool>();
+  base::OnceClosure get_version_and_consent =
+      base::BindOnce(&GetVersionAndConsent, base::Unretained(version.get()),
+                     base::Unretained(consent.get()));
+  base::OnceClosure load_gaia = base::BindOnce(
+      &GaiaScreenHandler::LoadGaiaWithPartitionAndVersionAndConsent,
+      weak_factory_.GetWeakPtr(), context, partition_name,
+      base::Owned(version.release()), base::Owned(consent.release()));
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      std::move(get_version_and_consent), std::move(load_gaia));
+}
+
+void GaiaScreenHandler::LoadGaiaWithPartitionAndVersionAndConsent(
+    const GaiaContext& context,
+    const std::string& partition_name,
+    const std::string* platform_version,
+    const bool* collect_stats_consent) {
   base::DictionaryValue params;
 
   params.SetBoolean("forceReload", context.force_reload);
@@ -303,12 +351,17 @@ void GaiaScreenHandler::LoadGaiaWithVersion(
 
   UpdateAuthParams(&params, IsRestrictiveProxy());
 
+  int user_count = LoginDisplayHost::default_host()
+                       ? LoginDisplayHost::default_host()->GetUsers().size()
+                       : 0;
+  params.SetInteger("userCount", user_count);
+
   GaiaScreenMode screen_mode = GetGaiaScreenMode(context.email,
                                                  context.use_offline);
   params.SetInteger("screenMode", screen_mode);
 
   if (screen_mode == GAIA_SCREEN_MODE_AD && !authpolicy_login_helper_)
-    authpolicy_login_helper_ = base::MakeUnique<AuthPolicyLoginHelper>();
+    authpolicy_login_helper_ = std::make_unique<AuthPolicyLoginHelper>();
 
   if (screen_mode != GAIA_SCREEN_MODE_OFFLINE) {
     const std::string app_locale = g_browser_process->GetApplicationLocale();
@@ -342,8 +395,8 @@ void GaiaScreenHandler::LoadGaiaWithVersion(
   params.SetString("clientId",
                    GaiaUrls::GetInstance()->oauth2_chrome_client_id());
   params.SetString("clientVersion", version_info::GetVersionNumber());
-  if (!platform_version.empty())
-    params.SetString("platformVersion", platform_version);
+  if (!platform_version->empty())
+    params.SetString("platformVersion", *platform_version);
   params.SetString("releaseChannel", chrome::GetChannelString());
   params.SetString("endpointGen", kEndpointGen);
 
@@ -356,31 +409,20 @@ void GaiaScreenHandler::LoadGaiaWithVersion(
 
   params.SetString("gaiaUrl", GaiaUrls::GetInstance()->gaia_url().spec());
 
-  if (use_easy_bootstrap_) {
-    params.SetBoolean("useEafe", true);
-    // Easy login overrides.
-    std::string eafe_url = "https://easylogin.corp.google.com/";
-    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-    if (command_line->HasSwitch(switches::kEafeUrl))
-      eafe_url = command_line->GetSwitchValueASCII(switches::kEafeUrl);
-    std::string eafe_path = "planters/cbaudioChrome";
-    if (command_line->HasSwitch(switches::kEafePath))
-      eafe_path = command_line->GetSwitchValueASCII(switches::kEafePath);
-
-    params.SetString("gaiaUrl", eafe_url);
-    params.SetString("gaiaPath", eafe_path);
-  }
-
-  // Easy bootstrap is not v2-compatible
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kCrosGaiaApiV1) ||
-      use_easy_bootstrap_) {
+          switches::kCrosGaiaApiV1)) {
     params.SetString("chromeOSApiVersion", "1");
   } else {
     // This enables GLIF MM UI for the online Gaia screen by default.
     // (see https://crbug.com/709244 ).
     params.SetString("chromeOSApiVersion", "2");
   }
+  // We only send |chromeos_board| Gaia URL parameter if user has opted into
+  // sending device statistics.
+  if (*collect_stats_consent)
+    params.SetString("lsbReleaseBoard", base::SysInfo::GetLsbReleaseBoard());
+
+  params.SetString("webviewPartitionName", partition_name);
 
   frame_state_ = FRAME_STATE_LOADING;
   CallJS("loadAuthExtension", params);
@@ -419,7 +461,7 @@ void GaiaScreenHandler::DeclareLocalizedValues(
   builder->Add("whitelistErrorEnterprise",
                IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST);
   builder->Add("tryAgainButton", IDS_WHITELIST_ERROR_TRY_AGAIN_BUTTON);
-  builder->Add("learnMoreButton", IDS_WHITELIST_ERROR_LEARN_MORE_BUTTON);
+  builder->Add("learnMoreButton", IDS_LEARN_MORE);
   builder->Add("gaiaLoading", IDS_LOGIN_GAIA_LOADING_MESSAGE);
 
   // Strings used by the SAML fatal error dialog.
@@ -436,7 +478,7 @@ void GaiaScreenHandler::DeclareLocalizedValues(
                IDS_LOGIN_FATAL_ERROR_TRY_AGAIN_BUTTON);
 
   builder->AddF("loginWelcomeMessage", IDS_LOGIN_WELCOME_MESSAGE,
-                ash::GetChromeOSDeviceTypeResourceId());
+                ui::GetChromeOSDeviceTypeResourceId());
   builder->Add("offlineLoginEmail", IDS_OFFLINE_LOGIN_EMAIL);
   builder->Add("offlineLoginPassword", IDS_OFFLINE_LOGIN_PASSWORD);
   builder->Add("offlineLoginInvalidEmail", IDS_OFFLINE_LOGIN_INVALID_EMAIL);
@@ -459,6 +501,19 @@ void GaiaScreenHandler::DeclareLocalizedValues(
   builder->Add("adAuthWelcomeMessage", IDS_AD_DOMAIN_AUTH_WELCOME_MESSAGE);
   builder->Add("adAuthLoginUsername", IDS_AD_AUTH_LOGIN_USER);
   builder->Add("adLoginPassword", IDS_AD_LOGIN_PASSWORD);
+
+  builder->Add("adPassChangeOldPasswordHint",
+               IDS_AD_PASSWORD_CHANGE_OLD_PASSWORD_HINT);
+  builder->Add("adPassChangeNewPasswordHint",
+               IDS_AD_PASSWORD_CHANGE_NEW_PASSWORD_HINT);
+  builder->Add("adPassChangeRepeatNewPasswordHint",
+               IDS_AD_PASSWORD_CHANGE_REPEAT_NEW_PASSWORD_HINT);
+  builder->Add("adPassChangeOldPasswordError",
+               IDS_AD_PASSWORD_CHANGE_INVALID_PASSWORD_ERROR);
+  builder->Add("adPassChangeNewPasswordRejected",
+               IDS_AD_PASSWORD_CHANGE_NEW_PASSWORD_REJECTED_SHORT_ERROR);
+  builder->Add("adPassChangePasswordsMismatch",
+               IDS_AD_PASSWORD_CHANGE_PASSWORDS_MISMATCH_ERROR);
 }
 
 void GaiaScreenHandler::Initialize() {
@@ -470,16 +525,12 @@ void GaiaScreenHandler::RegisterMessages() {
   AddCallback("completeLogin", &GaiaScreenHandler::HandleCompleteLogin);
   AddCallback("completeAuthentication",
               &GaiaScreenHandler::HandleCompleteAuthentication);
-  AddCallback("completeAuthenticationAuthCodeOnly",
-              &GaiaScreenHandler::HandleCompleteAuthenticationAuthCodeOnly);
   AddCallback("usingSAMLAPI", &GaiaScreenHandler::HandleUsingSAMLAPI);
   AddCallback("scrapedPasswordCount",
               &GaiaScreenHandler::HandleScrapedPasswordCount);
   AddCallback("scrapedPasswordVerificationFailed",
               &GaiaScreenHandler::HandleScrapedPasswordVerificationFailed);
   AddCallback("loginWebuiReady", &GaiaScreenHandler::HandleGaiaUIReady);
-  AddCallback("toggleEasyBootstrap",
-              &GaiaScreenHandler::HandleToggleEasyBootstrap);
   AddCallback("identifierEntered", &GaiaScreenHandler::HandleIdentifierEntered);
   AddCallback("updateOfflineLogin",
               &GaiaScreenHandler::set_offline_login_is_active);
@@ -487,10 +538,16 @@ void GaiaScreenHandler::RegisterMessages() {
               &GaiaScreenHandler::HandleAuthExtensionLoaded);
   AddCallback("completeAdAuthentication",
               &GaiaScreenHandler::HandleCompleteAdAuthentication);
-  AddCallback("completeAdPasswordChange",
-              &GaiaScreenHandler::HandleCompleteAdPasswordChange);
   AddCallback("cancelAdAuthentication",
               &GaiaScreenHandler::HandleCancelActiveDirectoryAuth);
+  AddRawCallback("showAddUser", &GaiaScreenHandler::HandleShowAddUser);
+  AddCallback("updateGaiaDialogSize",
+              &GaiaScreenHandler::HandleUpdateGaiaDialogSize);
+  AddCallback("updateGaiaDialogVisibility",
+              &GaiaScreenHandler::HandleUpdateGaiaDialogVisibility);
+
+  // Allow UMA metrics collection from JS.
+  web_ui()->AddMessageHandler(std::make_unique<MetricsHandler>());
 }
 
 void GaiaScreenHandler::OnPortalDetectionCompleted(
@@ -512,9 +569,12 @@ void GaiaScreenHandler::OnPortalDetectionCompleted(
 }
 
 void GaiaScreenHandler::HandleIdentifierEntered(const std::string& user_email) {
-  if (!Delegate()->IsUserWhitelisted(user_manager::known_user::GetAccountId(
-          user_email, std::string() /* id */, AccountType::UNKNOWN)))
+  if (LoginDisplayHost::default_host() &&
+      !LoginDisplayHost::default_host()->IsUserWhitelisted(
+          user_manager::known_user::GetAccountId(
+              user_email, std::string() /* id */, AccountType::UNKNOWN))) {
     ShowWhitelistCheckFailedError();
+  }
 }
 
 void GaiaScreenHandler::HandleAuthExtensionLoaded() {
@@ -579,81 +639,62 @@ void GaiaScreenHandler::DoAdAuth(
     const Key& key,
     authpolicy::ErrorType error,
     const authpolicy::ActiveDirectoryAccountInfo& account_info) {
+  if (error != authpolicy::ERROR_NONE)
+    authpolicy_login_helper_->CancelRequestsAndRestart();
+
   switch (error) {
     case authpolicy::ERROR_NONE: {
       DCHECK(account_info.has_account_id() &&
-             !account_info.account_id().empty());
+             !account_info.account_id().empty() &&
+             LoginDisplayHost::default_host());
       const AccountId account_id(GetAccountId(
           username, account_info.account_id(), AccountType::ACTIVE_DIRECTORY));
-      Delegate()->SetDisplayAndGivenName(account_info.display_name(),
-                                         account_info.given_name());
+      LoginDisplayHost::default_host()->SetDisplayAndGivenName(
+          account_info.display_name(), account_info.given_name());
       UserContext user_context(account_id);
       user_context.SetKey(key);
       user_context.SetAuthFlow(UserContext::AUTH_FLOW_ACTIVE_DIRECTORY);
       user_context.SetIsUsingOAuth(false);
       user_context.SetUserType(
           user_manager::UserType::USER_TYPE_ACTIVE_DIRECTORY);
-      Delegate()->CompleteLogin(user_context);
+      LoginDisplayHost::default_host()->CompleteLogin(user_context);
       break;
     }
     case authpolicy::ERROR_PASSWORD_EXPIRED:
-      core_oobe_view_->ShowActiveDirectoryPasswordChangeScreen(username);
+      DCHECK(active_directory_password_change_screen_handler_);
+      active_directory_password_change_screen_handler_->ShowScreen(username);
       break;
     case authpolicy::ERROR_PARSE_UPN_FAILED:
     case authpolicy::ERROR_BAD_USER_NAME:
       CallJS("invalidateAd", username,
              static_cast<int>(ActiveDirectoryErrorState::BAD_USERNAME));
-      return;
+      break;
     case authpolicy::ERROR_BAD_PASSWORD:
       CallJS("invalidateAd", username,
              static_cast<int>(ActiveDirectoryErrorState::BAD_PASSWORD));
-    case authpolicy::ERROR_UNKNOWN:
-    case authpolicy::ERROR_DBUS_FAILURE:
-    case authpolicy::ERROR_CANNOT_RESOLVE_KDC:
-    case authpolicy::ERROR_KINIT_FAILED:
-    case authpolicy::ERROR_NET_FAILED:
-    case authpolicy::ERROR_SMBCLIENT_FAILED:
-    case authpolicy::ERROR_PARSE_FAILED:
-    case authpolicy::ERROR_PARSE_PREG_FAILED:
-    case authpolicy::ERROR_BAD_GPOS:
-    case authpolicy::ERROR_LOCAL_IO:
-    case authpolicy::ERROR_NOT_JOINED:
-    case authpolicy::ERROR_NOT_LOGGED_IN:
-    case authpolicy::ERROR_STORE_POLICY_FAILED:
-      LoadAuthExtension(true, false /* offline */);
       break;
     default:
-      // TODO(rsorokin): Proper error handling.
       DLOG(WARNING) << "Unhandled error code: " << error;
-      LoadAuthExtension(true, false /* offline */);
+      CallJS("invalidateAd", username,
+             static_cast<int>(ActiveDirectoryErrorState::NONE));
+      core_oobe_view_->ShowSignInError(
+          0, l10n_util::GetStringUTF8(IDS_AD_AUTH_UNKNOWN_ERROR), std::string(),
+          HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
   }
 }
 
 void GaiaScreenHandler::HandleCompleteAdAuthentication(
     const std::string& username,
     const std::string& password) {
-  Delegate()->SetDisplayEmail(username);
+  if (LoginDisplayHost::default_host())
+    LoginDisplayHost::default_host()->SetDisplayEmail(username);
+
   set_populated_email(username);
   DCHECK(authpolicy_login_helper_);
   authpolicy_login_helper_->AuthenticateUser(
       username, std::string() /* object_guid */, password,
       base::BindOnce(&GaiaScreenHandler::DoAdAuth, weak_factory_.GetWeakPtr(),
                      username, Key(password)));
-}
-
-void GaiaScreenHandler::HandleCompleteAdPasswordChange(
-    const std::string& username,
-    const std::string& old_password,
-    const std::string& new_password) {
-  Delegate()->SetDisplayEmail(username);
-  set_populated_email(username);
-
-  DCHECK(authpolicy_login_helper_);
-  authpolicy_login_helper_->AuthenticateUser(
-      username, std::string() /* object_guid */,
-      old_password + "\n" + new_password + "\n" + new_password,
-      base::BindOnce(&GaiaScreenHandler::DoAdAuth, weak_factory_.GetWeakPtr(),
-                     username, Key(new_password)));
 }
 
 void GaiaScreenHandler::HandleCancelActiveDirectoryAuth() {
@@ -668,39 +709,36 @@ void GaiaScreenHandler::HandleCompleteAuthentication(
     const std::string& auth_code,
     bool using_saml,
     const std::string& gaps_cookie) {
-  if (!Delegate())
+  if (!LoginDisplayHost::default_host())
     return;
 
   DCHECK(!email.empty());
   DCHECK(!gaia_id.empty());
   const std::string sanitized_email = gaia::SanitizeEmail(email);
-  Delegate()->SetDisplayEmail(sanitized_email);
+  LoginDisplayHost::default_host()->SetDisplayEmail(sanitized_email);
 
   UserContext user_context(GetAccountId(email, gaia_id, AccountType::GOOGLE));
   user_context.SetKey(Key(password));
+  // Only save the password for enterprise users. See https://crbug.com/386606.
+  const bool is_enterprise_managed = g_browser_process->platform_part()
+                                         ->browser_policy_connector_chromeos()
+                                         ->IsEnterpriseManaged();
+  if (is_enterprise_managed) {
+    user_context.SetPasswordKey(Key(password));
+  }
   user_context.SetAuthCode(auth_code);
   user_context.SetAuthFlow(using_saml
                                ? UserContext::AUTH_FLOW_GAIA_WITH_SAML
                                : UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML);
   user_context.SetGAPSCookie(gaps_cookie);
-  Delegate()->CompleteLogin(user_context);
-}
-
-void GaiaScreenHandler::HandleCompleteAuthenticationAuthCodeOnly(
-    const std::string& auth_code) {
-  if (!Delegate())
-    return;
-
-  UserContext user_context;
-  user_context.SetAuthFlow(UserContext::AUTH_FLOW_EASY_BOOTSTRAP);
-  user_context.SetAuthCode(auth_code);
-  Delegate()->CompleteLogin(user_context);
+  LoginDisplayHost::default_host()->CompleteLogin(user_context);
 }
 
 void GaiaScreenHandler::HandleCompleteLogin(const std::string& gaia_id,
                                             const std::string& typed_email,
                                             const std::string& password,
                                             bool using_saml) {
+  VLOG(1) << "HandleCompleteLogin";
   DoCompleteLogin(gaia_id, typed_email, password, using_saml);
 }
 
@@ -722,11 +760,6 @@ void GaiaScreenHandler::HandleScrapedPasswordVerificationFailed() {
   RecordSAMLScrapingVerificationResultInHistogram(false);
 }
 
-void GaiaScreenHandler::HandleToggleEasyBootstrap() {
-  use_easy_bootstrap_ = !use_easy_bootstrap_;
-  LoadAuthExtension(true /* force */, false /* offline */);
-}
-
 void GaiaScreenHandler::HandleGaiaUIReady() {
   VLOG(1) << "Gaia is loaded";
 
@@ -743,15 +776,48 @@ void GaiaScreenHandler::HandleGaiaUIReady() {
 
   if (test_expects_complete_login_)
     SubmitLoginFormForTest();
-  if (Delegate())
-    Delegate()->OnGaiaScreenReady();
+
+  if (LoginDisplayHost::default_host())
+    LoginDisplayHost::default_host()->OnGaiaScreenReady();
+}
+
+void GaiaScreenHandler::HandleUpdateGaiaDialogSize(int width, int height) {
+  if (LoginDisplayHost::default_host())
+    LoginDisplayHost::default_host()->UpdateGaiaDialogSize(width, height);
+}
+
+void GaiaScreenHandler::HandleUpdateGaiaDialogVisibility(bool visible) {
+  if (LoginDisplayHost::default_host())
+    LoginDisplayHost::default_host()->UpdateGaiaDialogVisibility(visible);
+}
+
+void GaiaScreenHandler::HandleShowAddUser(const base::ListValue* args) {
+  // TODO(xiaoyinh): Add trace event for gaia webui in views login screen.
+  TRACE_EVENT_ASYNC_STEP_INTO0("ui", "ShowLoginWebUI",
+                               LoginDisplayHostWebUI::kShowLoginWebUIid,
+                               "ShowAddUser");
+
+  std::string email;
+  // |args| can be null if it's OOBE.
+  if (args)
+    args->GetString(0, &email);
+  set_populated_email(email);
+  if (!email.empty())
+    SendReauthReason(AccountId::FromUserEmail(email));
+  OnShowAddUser();
+}
+
+void GaiaScreenHandler::OnShowAddUser() {
+  signin_screen_handler_->is_account_picker_showing_first_time_ = false;
+  lock_screen_utils::EnforcePolicyInputMethods(std::string());
+  ShowGaiaAsync();
 }
 
 void GaiaScreenHandler::DoCompleteLogin(const std::string& gaia_id,
                                         const std::string& typed_email,
                                         const std::string& password,
                                         bool using_saml) {
-  if (!Delegate())
+  if (!LoginDisplayHost::default_host())
     return;
 
   if (using_saml && !using_saml_api_)
@@ -760,14 +826,14 @@ void GaiaScreenHandler::DoCompleteLogin(const std::string& gaia_id,
   DCHECK(!typed_email.empty());
   DCHECK(!gaia_id.empty());
   const std::string sanitized_email = gaia::SanitizeEmail(typed_email);
-  Delegate()->SetDisplayEmail(sanitized_email);
+  LoginDisplayHost::default_host()->SetDisplayEmail(sanitized_email);
   UserContext user_context(
       GetAccountId(typed_email, gaia_id, AccountType::GOOGLE));
   user_context.SetKey(Key(password));
   user_context.SetAuthFlow(using_saml
                                ? UserContext::AUTH_FLOW_GAIA_WITH_SAML
                                : UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML);
-  Delegate()->CompleteLogin(user_context);
+  LoginDisplayHost::default_host()->CompleteLogin(user_context);
 
   if (test_expects_complete_login_) {
     VLOG(2) << "Complete test login for " << typed_email
@@ -832,7 +898,7 @@ void GaiaScreenHandler::ShowSigninScreenForTest(const std::string& username,
   if (frame_state() == GaiaScreenHandler::FRAME_STATE_LOADED) {
     SubmitLoginFormForTest();
   } else if (frame_state() != GaiaScreenHandler::FRAME_STATE_LOADING) {
-    signin_screen_handler_->OnShowAddUser();
+    OnShowAddUser();
   }
 }
 
@@ -881,10 +947,9 @@ void GaiaScreenHandler::CancelShowGaiaAsync() {
 }
 
 void GaiaScreenHandler::ShowGaiaScreenIfReady() {
-  if (!dns_cleared_ ||
-      !cookies_cleared_ ||
+  if (!dns_cleared_ || !cookies_cleared_ ||
       !show_when_dns_and_cookies_cleared_ ||
-      !Delegate()) {
+      !LoginDisplayHost::default_host()) {
     return;
   }
 
@@ -898,10 +963,11 @@ void GaiaScreenHandler::ShowGaiaScreenIfReady() {
 
   // Note that LoadAuthExtension clears |populated_email_|.
   if (populated_email_.empty()) {
-    Delegate()->LoadSigninWallpaper();
+    LoginDisplayHost::default_host()->LoadSigninWallpaper();
   } else {
-    Delegate()->LoadWallpaper(user_manager::known_user::GetAccountId(
-        populated_email_, std::string() /* id */, AccountType::UNKNOWN));
+    LoginDisplayHost::default_host()->LoadWallpaper(
+        user_manager::known_user::GetAccountId(
+            populated_email_, std::string() /* id */, AccountType::UNKNOWN));
   }
 
   input_method::InputMethodManager* imm =
@@ -939,6 +1005,18 @@ void GaiaScreenHandler::ShowGaiaScreenIfReady() {
     } else if (!owner_im.empty()) {
       gaia_ime_state->ChangeInputMethod(owner_im, false /* show_message */);
     }
+  }
+
+  if (!untrusted_authority_certs_cache_) {
+    // Make additional untrusted authority certificates available for client
+    // certificate discovery in case a SAML flow is used which requires a client
+    // certificate to be present.
+    // When the WebUI is destroyed, |untrusted_authority_certs_cache_| will go
+    // out of scope and the certificates will not be held in memory anymore.
+    untrusted_authority_certs_cache_ =
+        std::make_unique<policy::TempCertsCacheNSS>(
+            policy::TempCertsCacheNSS::
+                GetUntrustedAuthoritiesFromDeviceOncPolicy());
   }
 
   LoadAuthExtension(!gaia_silent_load_ /* force */, false /* offline */);
@@ -1008,10 +1086,6 @@ void GaiaScreenHandler::LoadAuthExtension(bool force,
 void GaiaScreenHandler::UpdateState(NetworkError::ErrorReason reason) {
   if (signin_screen_handler_)
     signin_screen_handler_->UpdateState(reason);
-}
-
-SigninScreenHandlerDelegate* GaiaScreenHandler::Delegate() {
-  return signin_screen_handler_->delegate_;
 }
 
 bool GaiaScreenHandler::IsRestrictiveProxy() const {

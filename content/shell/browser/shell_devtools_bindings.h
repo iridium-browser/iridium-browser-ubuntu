@@ -46,6 +46,7 @@ class ShellDevToolsBindings : public WebContentsObserver,
                         ShellDevToolsDelegate* delegate);
 
   void InspectElementAt(int x, int y);
+  virtual void Attach();
 
   void CallClientFunction(const std::string& function_name,
                           const base::Value* arg1,
@@ -53,19 +54,18 @@ class ShellDevToolsBindings : public WebContentsObserver,
                           const base::Value* arg3);
   ~ShellDevToolsBindings() override;
 
- protected:
+  WebContents* inspected_contents() { return inspected_contents_; }
+
+ private:
   // content::DevToolsAgentHostClient implementation.
-  void AgentHostClosed(DevToolsAgentHost* agent_host, bool replaced) override;
+  void AgentHostClosed(DevToolsAgentHost* agent_host) override;
   void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
                                const std::string& message) override;
 
-  void SetPreferences(const std::string& json);
-  virtual void HandleMessageFromDevToolsFrontend(const std::string& message);
+  void HandleMessageFromDevToolsFrontend(const std::string& message);
 
- private:
   // WebContentsObserver overrides
   void ReadyToCommitNavigation(NavigationHandle* navigation_handle) override;
-  void DocumentAvailableInMainFrame() override;
   void WebContentsDestroyed() override;
 
   // net::URLFetcherDelegate overrides.

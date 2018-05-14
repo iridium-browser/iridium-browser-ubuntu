@@ -13,8 +13,6 @@
 #error "This file requires ARC support."
 #endif
 
-namespace ios_internal {
-
 // Converts a UIKit size class to a size class for reporting.
 SizeClassForReporting SizeClassForReportingForUIUserInterfaceSizeClass(
     UIUserInterfaceSizeClass sizeClass) {
@@ -27,11 +25,6 @@ SizeClassForReporting SizeClassForReportingForUIUserInterfaceSizeClass(
       return SizeClassForReporting::REGULAR;
   }
 }
-
-}  // namespace ios_internal
-
-using ios_internal::SizeClassForReporting;
-using ios_internal::SizeClassForReportingForUIUserInterfaceSizeClass;
 
 namespace {
 
@@ -86,15 +79,6 @@ void ReportHorizontalSizeClassUsed(UIUserInterfaceSizeClass sizeClass) {
   return self;
 }
 
-- (instancetype)init {
-  NOTREACHED();
-  return nil;
-}
-
-- (void)dealloc {
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
-}
-
 - (void)horizontalSizeClassDidChange:(UIUserInterfaceSizeClass)newSizeClass {
   // iOS sometimes changes from Compact to Regular to Compact again when putting
   // the application in the background, to update the application screenshot.
@@ -104,7 +88,7 @@ void ReportHorizontalSizeClassUsed(UIUserInterfaceSizeClass sizeClass) {
   ReportHorizontalSizeClassUsed(newSizeClass);
 }
 
-- (void)pageLoadedWithHorizontalSizeClass:(UIUserInterfaceSizeClass)sizeClass {
++ (void)pageLoadedWithHorizontalSizeClass:(UIUserInterfaceSizeClass)sizeClass {
   SizeClassForReporting sizeClassForReporting =
       SizeClassForReporting(sizeClass);
   UMA_HISTOGRAM_ENUMERATION("Tab.PageLoadInHorizontalSizeClass",

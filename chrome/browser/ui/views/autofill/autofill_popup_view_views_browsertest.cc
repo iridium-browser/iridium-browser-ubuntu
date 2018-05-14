@@ -55,6 +55,7 @@ class MockAutofillPopupController : public AutofillPopupController {
     return suggestions;
   }
 #if !defined(OS_ANDROID)
+  MOCK_METHOD1(SetTypesetter, void(gfx::Typesetter typesetter));
   MOCK_METHOD1(GetElidedValueWidthForRow, int(int row));
   MOCK_METHOD1(GetElidedLabelWidthForRow, int(int row));
 #endif
@@ -73,6 +74,7 @@ class MockAutofillPopupController : public AutofillPopupController {
   MOCK_METHOD1(RemoveSuggestion, bool(int index));
   MOCK_CONST_METHOD1(GetBackgroundColorIDForRow,
                      ui::NativeTheme::ColorId(int index));
+  MOCK_METHOD1(SetSelectedLine, void(base::Optional<int> selected_line));
   MOCK_CONST_METHOD0(selected_line, base::Optional<int>());
   const AutofillPopupLayoutModel& layout_model() const override {
     return *layout_model_;

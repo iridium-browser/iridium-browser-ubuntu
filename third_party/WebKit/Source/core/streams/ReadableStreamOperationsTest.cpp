@@ -11,7 +11,7 @@
 #include "bindings/core/v8/V8BindingForTesting.h"
 #include "bindings/core/v8/V8IteratorResultValue.h"
 #include "core/dom/Document.h"
-#include "core/streams/ReadableStreamController.h"
+#include "core/streams/ReadableStreamDefaultControllerWrapper.h"
 #include "core/streams/UnderlyingSourceBase.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/V8BindingMacros.h"
@@ -24,21 +24,22 @@ namespace blink {
 
 namespace {
 
-class NotReached : public ScriptFunction {
+class ReadableStreamOperationsTestNotReached : public ScriptFunction {
  public:
   static v8::Local<v8::Function> CreateFunction(ScriptState* script_state) {
-    NotReached* self = new NotReached(script_state);
+    ReadableStreamOperationsTestNotReached* self =
+        new ReadableStreamOperationsTestNotReached(script_state);
     return self->BindToV8Function();
   }
 
  private:
-  explicit NotReached(ScriptState* script_state)
+  explicit ReadableStreamOperationsTestNotReached(ScriptState* script_state)
       : ScriptFunction(script_state) {}
 
   ScriptValue Call(ScriptValue) override;
 };
 
-ScriptValue NotReached::Call(ScriptValue) {
+ScriptValue ReadableStreamOperationsTestNotReached::Call(ScriptValue) {
   EXPECT_TRUE(false) << "'Unreachable' code was reached";
   return ScriptValue();
 }
@@ -68,7 +69,7 @@ class Iteration final : public GarbageCollectedFinalized<Iteration> {
   bool IsValid() const { return is_valid_; }
   const String& Value() const { return value_; }
 
-  DEFINE_INLINE_TRACE() {}
+  void Trace(blink::Visitor* visitor) {}
 
  private:
   bool is_set_;
@@ -85,7 +86,7 @@ class ReaderFunction : public ScriptFunction {
     return self->BindToV8Function();
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(iteration_);
     ScriptFunction::Trace(visitor);
   }
@@ -263,10 +264,12 @@ TEST(ReadableStreamOperationsTest, Read) {
   Iteration* it2 = new Iteration();
   ReadableStreamOperations::DefaultReaderRead(scope.GetScriptState(), reader)
       .Then(ReaderFunction::CreateFunction(scope.GetScriptState(), it1),
-            NotReached::CreateFunction(scope.GetScriptState()));
+            ReadableStreamOperationsTestNotReached::CreateFunction(
+                scope.GetScriptState()));
   ReadableStreamOperations::DefaultReaderRead(scope.GetScriptState(), reader)
       .Then(ReaderFunction::CreateFunction(scope.GetScriptState(), it2),
-            NotReached::CreateFunction(scope.GetScriptState()));
+            ReadableStreamOperationsTestNotReached::CreateFunction(
+                scope.GetScriptState()));
 
   v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
   EXPECT_FALSE(it1->IsSet());
@@ -328,13 +331,16 @@ TEST(ReadableStreamOperationsTest,
   Iteration* it3 = new Iteration();
   ReadableStreamOperations::DefaultReaderRead(scope.GetScriptState(), reader)
       .Then(ReaderFunction::CreateFunction(scope.GetScriptState(), it1),
-            NotReached::CreateFunction(scope.GetScriptState()));
+            ReadableStreamOperationsTestNotReached::CreateFunction(
+                scope.GetScriptState()));
   ReadableStreamOperations::DefaultReaderRead(scope.GetScriptState(), reader)
       .Then(ReaderFunction::CreateFunction(scope.GetScriptState(), it2),
-            NotReached::CreateFunction(scope.GetScriptState()));
+            ReadableStreamOperationsTestNotReached::CreateFunction(
+                scope.GetScriptState()));
   ReadableStreamOperations::DefaultReaderRead(scope.GetScriptState(), reader)
       .Then(ReaderFunction::CreateFunction(scope.GetScriptState(), it3),
-            NotReached::CreateFunction(scope.GetScriptState()));
+            ReadableStreamOperationsTestNotReached::CreateFunction(
+                scope.GetScriptState()));
 
   v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
 
@@ -475,10 +481,12 @@ TEST(ReadableStreamOperationsTest, Tee) {
   Iteration* it2 = new Iteration();
   ReadableStreamOperations::DefaultReaderRead(scope.GetScriptState(), reader1)
       .Then(ReaderFunction::CreateFunction(scope.GetScriptState(), it1),
-            NotReached::CreateFunction(scope.GetScriptState()));
+            ReadableStreamOperationsTestNotReached::CreateFunction(
+                scope.GetScriptState()));
   ReadableStreamOperations::DefaultReaderRead(scope.GetScriptState(), reader2)
       .Then(ReaderFunction::CreateFunction(scope.GetScriptState(), it2),
-            NotReached::CreateFunction(scope.GetScriptState()));
+            ReadableStreamOperationsTestNotReached::CreateFunction(
+                scope.GetScriptState()));
 
   v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
   EXPECT_FALSE(it1->IsSet());

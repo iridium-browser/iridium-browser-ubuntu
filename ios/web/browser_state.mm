@@ -4,21 +4,26 @@
 
 #include "ios/web/public/browser_state.h"
 
+#include <memory>
+
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/guid.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/process/process_handle.h"
-#include "ios/web/active_state_manager_impl.h"
 #include "ios/web/public/certificate_policy_cache.h"
 #include "ios/web/public/service_manager_connection.h"
 #include "ios/web/public/service_names.mojom.h"
 #include "ios/web/public/web_client.h"
 #include "ios/web/public/web_thread.h"
 #include "ios/web/webui/url_data_manager_ios_backend.h"
+#include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "services/network/url_loader.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/interfaces/service.mojom.h"
+#include "services/service_manager/public/mojom/service.mojom.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -37,7 +42,6 @@ const char kBrowserStateIdentifierKey[] = "BrowserStateIdentifierKey";
 
 // Data key names.
 const char kCertificatePolicyCacheKeyName[] = "cert_policy_cache";
-const char kActiveStateManagerKeyName[] = "active_state_manager";
 const char kMojoWasInitialized[] = "mojo-was-initialized";
 const char kServiceManagerConnection[] = "service-manager-connection";
 const char kServiceUserId[] = "service-user-id";
@@ -102,13 +106,59 @@ class BrowserStateServiceManagerConnectionHolder
 
 }  // namespace
 
+class BrowserState::URLLoaderFactory : public network::mojom::URLLoaderFactory {
+ public:
+  explicit URLLoaderFactory(net::URLRequestContextGetter* request_context)
+      : request_context_(request_context) {}
+
+  void CreateLoaderAndStart(network::mojom::URLLoaderRequest request,
+                            int32_t routing_id,
+                            int32_t request_id,
+                            uint32_t options,
+                            const network::ResourceRequest& resource_request,
+                            network::mojom::URLLoaderClientPtr client,
+                            const net::MutableNetworkTrafficAnnotationTag&
+                                traffic_annotation) override {
+    WebThread::PostTask(
+        web::WebThread::IO, FROM_HERE,
+        base::BindOnce(URLLoaderFactory::CreateLoaderAndStartOnIO,
+                       request_context_, std::move(request), routing_id,
+                       request_id, options, resource_request,
+                       client.PassInterface(), traffic_annotation));
+  }
+
+  void Clone(network::mojom::URLLoaderFactoryRequest request) override {
+    NOTREACHED() << "Clone shouldn't be called on iOS";
+  }
+
+ private:
+  static void CreateLoaderAndStartOnIO(
+      scoped_refptr<net::URLRequestContextGetter> request_getter,
+      network::mojom::URLLoaderRequest request,
+      int32_t routing_id,
+      int32_t request_id,
+      uint32_t options,
+      const network::ResourceRequest& resource_request,
+      network::mojom::URLLoaderClientPtrInfo client_info,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
+    // Object deletes itself when the pipe or the URLRequestContext goes away.
+    network::mojom::URLLoaderClientPtr client(std::move(client_info));
+    new network::URLLoader(
+        request_getter, nullptr, std::move(request), options, resource_request,
+        false, std::move(client),
+        static_cast<net::NetworkTrafficAnnotationTag>(traffic_annotation), 0,
+        nullptr, nullptr);
+  }
+  scoped_refptr<net::URLRequestContextGetter> request_context_;
+};
+
 // static
 scoped_refptr<CertificatePolicyCache> BrowserState::GetCertificatePolicyCache(
     BrowserState* browser_state) {
   DCHECK_CURRENTLY_ON(WebThread::UI);
   if (!browser_state->GetUserData(kCertificatePolicyCacheKeyName)) {
     browser_state->SetUserData(kCertificatePolicyCacheKeyName,
-                               base::MakeUnique<CertificatePolicyCacheHandle>(
+                               std::make_unique<CertificatePolicyCacheHandle>(
                                    new CertificatePolicyCache()));
   }
 
@@ -118,36 +168,13 @@ scoped_refptr<CertificatePolicyCache> BrowserState::GetCertificatePolicyCache(
   return handle->policy_cache;
 }
 
-// static
-bool BrowserState::HasActiveStateManager(BrowserState* browser_state) {
-  DCHECK_CURRENTLY_ON(WebThread::UI);
-  return browser_state->GetUserData(kActiveStateManagerKeyName) != nullptr;
-}
-
-// static
-ActiveStateManager* BrowserState::GetActiveStateManager(
-    BrowserState* browser_state) {
-  DCHECK_CURRENTLY_ON(WebThread::UI);
-  DCHECK(browser_state);
-
-  ActiveStateManagerImpl* active_state_manager =
-      static_cast<ActiveStateManagerImpl*>(
-          browser_state->GetUserData(kActiveStateManagerKeyName));
-  if (!active_state_manager) {
-    active_state_manager = new ActiveStateManagerImpl(browser_state);
-    browser_state->SetUserData(kActiveStateManagerKeyName,
-                               base::WrapUnique(active_state_manager));
-  }
-  return active_state_manager;
-}
-
 BrowserState::BrowserState() : url_data_manager_ios_backend_(nullptr) {
   // (Refcounted)?BrowserStateKeyedServiceFactories needs to be able to convert
   // a base::SupportsUserData to a BrowserState. Moreover, since the factories
   // may be passed a content::BrowserContext instead of a BrowserState, attach
   // an empty object to this via a private key.
   SetUserData(kBrowserStateIdentifierKey,
-              base::MakeUnique<SupportsUserData::Data>());
+              std::make_unique<SupportsUserData::Data>());
 }
 
 BrowserState::~BrowserState() {
@@ -168,6 +195,15 @@ BrowserState::~BrowserState() {
     if (!posted)
       delete url_data_manager_ios_backend_;
   }
+}
+
+network::mojom::URLLoaderFactory* BrowserState::GetURLLoaderFactory() {
+  if (!url_loader_factory_) {
+    url_loader_factory_ =
+        std::make_unique<URLLoaderFactory>(GetRequestContext());
+  }
+
+  return url_loader_factory_.get();
 }
 
 URLDataManagerIOSBackend*
@@ -201,10 +237,10 @@ void BrowserState::Initialize(BrowserState* browser_state,
   RemoveBrowserStateFromUserIdMap(browser_state);
   g_user_id_to_browser_state.Get()[new_id] = browser_state;
   browser_state->SetUserData(kServiceUserId,
-                             base::MakeUnique<ServiceUserIdHolder>(new_id));
+                             std::make_unique<ServiceUserIdHolder>(new_id));
 
   browser_state->SetUserData(kMojoWasInitialized,
-                             base::MakeUnique<base::SupportsUserData::Data>());
+                             std::make_unique<base::SupportsUserData::Data>());
 
   ServiceManagerConnection* service_manager_connection =
       ServiceManagerConnection::Get();
@@ -226,7 +262,7 @@ void BrowserState::Initialize(BrowserState* browser_state,
 
     service_manager_connection->GetConnector()->StartService(identity);
     auto connection_holder =
-        base::MakeUnique<BrowserStateServiceManagerConnectionHolder>(
+        std::make_unique<BrowserStateServiceManagerConnectionHolder>(
             std::move(service_request));
 
     ServiceManagerConnection* connection =

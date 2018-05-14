@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "net/socket/stream_socket.h"
 #include "remoting/base/compound_buffer.h"
@@ -36,7 +37,7 @@ ClientVideoDispatcher::ClientVideoDispatcher(VideoStub* video_stub,
       client_stub_(client_stub),
       weak_factory_(this) {}
 
-ClientVideoDispatcher::~ClientVideoDispatcher() {}
+ClientVideoDispatcher::~ClientVideoDispatcher() = default;
 
 void ClientVideoDispatcher::OnIncomingMessage(
     std::unique_ptr<CompoundBuffer> message) {
@@ -48,8 +49,7 @@ void ClientVideoDispatcher::OnIncomingMessage(
   int frame_id = video_packet->frame_id();
 
   if (!video_packet->has_frame_id()) {
-    video_stub_->ProcessVideoPacket(std::move(video_packet),
-                                    base::Bind(&base::DoNothing));
+    video_stub_->ProcessVideoPacket(std::move(video_packet), base::DoNothing());
     return;
   }
 

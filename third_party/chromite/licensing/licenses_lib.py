@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -45,6 +46,8 @@ STOCK_LICENSE_DIRS = [
 CUSTOM_LICENSE_DIRS = [
     os.path.join(constants.SOURCE_ROOT,
                  'src/third_party/chromiumos-overlay/licenses'),
+    os.path.join(constants.SOURCE_ROOT,
+                 'src/private-overlays/chromeos-overlay/licenses'),
 ]
 
 COPYRIGHT_ATTRIBUTION_DIR = (

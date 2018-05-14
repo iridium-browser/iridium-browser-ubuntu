@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -114,9 +115,11 @@ ChromeOS (board specified.) Also, it can deploy the result to ChromeOS DUT
     git.RunGit(self.repo_dir, ['pull', 'origin', 'master'])
     self.GclientSync(reset=True, nohooks=True)
 
-  def SyncToHead(self):
+  def SyncToHead(self, fetch_tags=False):
     """Syncs the repo to origin/master."""
     git.CleanAndCheckoutUpstream(self.repo_dir)
+    if fetch_tags:
+      git.RunGit(self.repo_dir, ['fetch', '--tags'])
 
   def GclientSync(self, reset=False, nohooks=False):
     """Runs gclient sync.
@@ -147,7 +150,7 @@ ChromeOS (board specified.) Also, it can deploy the result to ChromeOS DUT
       commit_label: Commit label used for build archive path naming.
 
     Returns:
-      Path to build to deploy.
+      Path to build to deploy. None if it fails to build.
     """
     archive_path = os.path.join(
         self.archive_base, 'out_%s_%s' % (self.board, commit_label),
@@ -170,14 +173,25 @@ ChromeOS (board specified.) Also, it can deploy the result to ChromeOS DUT
 
     with cros_build_lib.TimedSection() as timer:
       self.GclientSync()
-      self.chrome_sdk.Run(
+      error_step = None
+      result = self.chrome_sdk.Run(
           ['bash', '-c', 'gn gen %s --args="$GN_ARGS"' % build_out_dir],
           run_args=self.log_output_args)
-      self.chrome_sdk.Ninja(
-          targets=['chrome', 'chrome_sandbox', 'nacl_helper'],
-          run_args=self.log_output_args)
-    logging.info('Build successfully. Elapsed time: %s', timer.delta)
+      if result.returncode:
+        error_step = 'gn gen'
+      else:
+        result = self.chrome_sdk.Ninja(
+            targets=['chrome', 'chrome_sandbox', 'nacl_helper'],
+            run_args=self.log_output_args)
+        if result.returncode:
+          error_step = 'ninja'
+      if error_step:
+        logging.error(
+            '%s for commit %s failed. returncode %d. stderr %s',
+            error_step, commit_label, result.returncode, result.stderr)
+        return None
 
+    logging.info('Build successfully. Elapsed time: %s', timer.delta)
     if self.archive_build:
       logging.info('Archiving build from %s to %s', build_out_full_path,
                    archive_path)
@@ -195,6 +209,9 @@ ChromeOS (board specified.) Also, it can deploy the result to ChromeOS DUT
       remote: DUT to deploy (refer lib.commandline.Device).
       build_to_deploy: Path to build to deploy.
       commit_label: Commit label used for logging.
+
+    Returns:
+      True if it deploys successfully. False otherwise.
     """
     logging.info('Deploying chromium(%s) to DUT: %s', commit_label, remote.raw)
     with cros_build_lib.TimedSection() as timer:
@@ -203,5 +220,10 @@ ChromeOS (board specified.) Also, it can deploy the result to ChromeOS DUT
                  '--to', remote.hostname, '--force']
       if remote.port:
         command.extend(['--port', str(remote.port)])
-      self.chrome_sdk.Run(command, run_args=self.log_output_args)
+      result = self.chrome_sdk.Run(command, run_args=self.log_output_args)
+      if result.returncode:
+        logging.error('Deploy failed. returncode %d. stderr %s',
+                      result.returncode, result.stderr)
+        return False
     logging.info('Deploy successfully. Elapsed time: %s', timer.delta)
+    return True

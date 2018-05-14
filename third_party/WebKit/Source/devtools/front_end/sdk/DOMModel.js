@@ -48,7 +48,7 @@ SDK.DOMNode = class {
    * @return {!SDK.DOMNode}
    */
   static create(domModel, doc, isInShadowTree, payload) {
-    var node = new SDK.DOMNode(domModel);
+    const node = new SDK.DOMNode(domModel);
     node._init(doc, isInShadowTree, payload);
     return node;
   }
@@ -97,9 +97,9 @@ SDK.DOMNode = class {
     this.parentNode = null;
 
     if (payload.shadowRoots) {
-      for (var i = 0; i < payload.shadowRoots.length; ++i) {
-        var root = payload.shadowRoots[i];
-        var node = SDK.DOMNode.create(this._domModel, this.ownerDocument, true, root);
+      for (let i = 0; i < payload.shadowRoots.length; ++i) {
+        const root = payload.shadowRoots[i];
+        const node = SDK.DOMNode.create(this._domModel, this.ownerDocument, true, root);
         this._shadowRoots.push(node);
         node.parentNode = this;
       }
@@ -108,11 +108,25 @@ SDK.DOMNode = class {
     if (payload.templateContent) {
       this._templateContent = SDK.DOMNode.create(this._domModel, this.ownerDocument, true, payload.templateContent);
       this._templateContent.parentNode = this;
+      this._children = [];
+    }
+
+    if (payload.contentDocument) {
+      this._contentDocument = SDK.DOMNode.create(this._domModel, this.ownerDocument, true, payload.contentDocument);
+      this._contentDocument.parentNode = this;
+      this._children = [];
+    } else if (payload.nodeName === 'IFRAME' && payload.frameId && Runtime.experiments.isEnabled('oopifInlineDOM')) {
+      const childTarget = SDK.targetManager.targetById(payload.frameId);
+      const childModel = childTarget ? childTarget.model(SDK.DOMModel) : null;
+      if (childModel)
+        childModel.requestDocument();
+      this._children = [];
     }
 
     if (payload.importedDocument) {
       this._importedDocument = SDK.DOMNode.create(this._domModel, this.ownerDocument, true, payload.importedDocument);
       this._importedDocument.parentNode = this;
+      this._children = [];
     }
 
     if (payload.distributedNodes)
@@ -122,12 +136,6 @@ SDK.DOMNode = class {
       this._setChildrenPayload(payload.children);
 
     this._setPseudoElements(payload.pseudoElements);
-
-    if (payload.contentDocument) {
-      this._contentDocument = new SDK.DOMDocument(this._domModel, payload.contentDocument);
-      this._children = [this._contentDocument];
-      this._renumber();
-    }
 
     if (this._nodeType === Node.ELEMENT_NODE) {
       // HTML and BODY from internal iframes should not overwrite top-level ones.
@@ -206,6 +214,20 @@ SDK.DOMNode = class {
    */
   templateContent() {
     return this._templateContent || null;
+  }
+
+  /**
+   * @return {?SDK.DOMNode}
+   */
+  contentDocument() {
+    return this._contentDocument || null;
+  }
+
+  /**
+   * @return {boolean}
+   */
+  isIframe() {
+    return this._nodeName === 'IFRAME';
   }
 
   /**
@@ -294,7 +316,7 @@ SDK.DOMNode = class {
    * @return {?SDK.DOMNode}
    */
   ancestorShadowHost() {
-    var ancestorShadowRoot = this.ancestorShadowRoot();
+    const ancestorShadowRoot = this.ancestorShadowRoot();
     return ancestorShadowRoot ? ancestorShadowRoot.parentNode : null;
   }
 
@@ -305,7 +327,7 @@ SDK.DOMNode = class {
     if (!this._isInShadowTree)
       return null;
 
-    var current = this;
+    let current = this;
     while (current && !current.isShadowRoot())
       current = current.parentNode;
     return current;
@@ -315,7 +337,7 @@ SDK.DOMNode = class {
    * @return {?SDK.DOMNode}
    */
   ancestorUserAgentShadowRoot() {
-    var ancestorShadowRoot = this.ancestorShadowRoot();
+    const ancestorShadowRoot = this.ancestorShadowRoot();
     if (!ancestorShadowRoot)
       return null;
     return ancestorShadowRoot.shadowRootType() === SDK.DOMNode.ShadowRootTypes.UserAgent ? ancestorShadowRoot : null;
@@ -339,7 +361,7 @@ SDK.DOMNode = class {
    * @return {string}
    */
   nodeNameInCorrectCase() {
-    var shadowRootType = this.shadowRootType();
+    const shadowRootType = this.shadowRootType();
     if (shadowRootType)
       return '#shadow-root (' + shadowRootType + ')';
 
@@ -357,14 +379,14 @@ SDK.DOMNode = class {
 
   /**
    * @param {string} name
-   * @param {function(?Protocol.Error, number)=} callback
+   * @param {function(?Protocol.Error, ?SDK.DOMNode)=} callback
    */
   setNodeName(name, callback) {
     this._agent.invoke_setNodeName({nodeId: this.id, name}).then(response => {
       if (!response[Protocol.Error])
         this._domModel.markUndoableState();
       if (callback)
-        callback(response[Protocol.Error] || null, response.nodeId);
+        callback(response[Protocol.Error] || null, this._domModel.nodeForId(response.nodeId));
     });
   }
 
@@ -400,7 +422,7 @@ SDK.DOMNode = class {
    * @return {string}
    */
   getAttribute(name) {
-    var attr = this._attributesMap[name];
+    const attr = this._attributesMap[name];
     return attr ? attr.value : undefined;
   }
 
@@ -453,11 +475,11 @@ SDK.DOMNode = class {
    * @return {!Promise}
    */
   async removeAttribute(name) {
-    var response = await this._agent.invoke_removeAttribute({nodeId: this.id, name});
+    const response = await this._agent.invoke_removeAttribute({nodeId: this.id, name});
     if (response[Protocol.Error])
       return;
     delete this._attributesMap[name];
-    var index = this._attributes.findIndex(attr => attr.name === name);
+    const index = this._attributes.findIndex(attr => attr.name === name);
     if (index !== -1)
       this._attributes.splice(index, 1);
     this._domModel.markUndoableState();
@@ -478,10 +500,11 @@ SDK.DOMNode = class {
 
   /**
    * @param {number} depth
+   * @param {boolean} pierce
    * @return {!Promise<?Array<!SDK.DOMNode>>}
    */
-  async getSubtree(depth) {
-    var response = await this._agent.invoke_requestChildNodes({id: this.id, depth});
+  async getSubtree(depth, pierce) {
+    const response = await this._agent.invoke_requestChildNodes({nodeId: this.id, depth: depth, pierce: pierce});
     return response[Protocol.Error] ? null : this._children;
   }
 
@@ -521,7 +544,7 @@ SDK.DOMNode = class {
    * @return {!Promise<?string>}
    */
   async copyNode() {
-    var text = await this._agent.getOuterHTML(this.id);
+    const text = await this._agent.getOuterHTML(this.id);
     if (text !== null)
       InspectorFrontendHost.copyText(text);
     return text;
@@ -538,10 +561,10 @@ SDK.DOMNode = class {
       return node && ('index' in node || (node.isShadowRoot() && node.parentNode)) && node._nodeName.length;
     }
 
-    var path = [];
-    var node = this;
+    const path = [];
+    let node = this;
     while (canPush(node)) {
-      var index = typeof node.index === 'number' ?
+      const index = typeof node.index === 'number' ?
           node.index :
           (node.shadowRootType() === SDK.DOMNode.ShadowRootTypes.UserAgent ? 'u' : 'a');
       path.push([index, node._nodeName]);
@@ -559,7 +582,7 @@ SDK.DOMNode = class {
     if (!node)
       return false;
 
-    var currentNode = node.parentNode;
+    let currentNode = node.parentNode;
     while (currentNode) {
       if (this === currentNode)
         return true;
@@ -580,7 +603,7 @@ SDK.DOMNode = class {
    * @return {?Protocol.Page.FrameId}
    */
   frameId() {
-    var node = this.parentNode || this;
+    let node = this.parentNode || this;
     while (!node._frameOwnerFrameId && node.parentNode)
       node = node.parentNode;
     return node._frameOwnerFrameId;
@@ -591,15 +614,15 @@ SDK.DOMNode = class {
    * @return {boolean}
    */
   _setAttributesPayload(attrs) {
-    var attributesChanged = !this._attributes || attrs.length !== this._attributes.length * 2;
-    var oldAttributesMap = this._attributesMap || {};
+    let attributesChanged = !this._attributes || attrs.length !== this._attributes.length * 2;
+    const oldAttributesMap = this._attributesMap || {};
 
     this._attributes = [];
     this._attributesMap = {};
 
-    for (var i = 0; i < attrs.length; i += 2) {
-      var name = attrs[i];
-      var value = attrs[i + 1];
+    for (let i = 0; i < attrs.length; i += 2) {
+      const name = attrs[i];
+      const value = attrs[i + 1];
       this._addAttribute(name, value);
 
       if (attributesChanged)
@@ -617,7 +640,7 @@ SDK.DOMNode = class {
    * @return {!SDK.DOMNode}
    */
   _insertChild(prev, payload) {
-    var node = SDK.DOMNode.create(this._domModel, this.ownerDocument, this._isInShadowTree, payload);
+    const node = SDK.DOMNode.create(this._domModel, this.ownerDocument, this._isInShadowTree, payload);
     this._children.splice(this._children.indexOf(prev) + 1, 0, node);
     this._renumber();
     return node;
@@ -630,7 +653,7 @@ SDK.DOMNode = class {
     if (node.pseudoType()) {
       this._pseudoElements.delete(node.pseudoType());
     } else {
-      var shadowRootIndex = this._shadowRoots.indexOf(node);
+      const shadowRootIndex = this._shadowRoots.indexOf(node);
       if (shadowRootIndex !== -1) {
         this._shadowRoots.splice(shadowRootIndex, 1);
       } else {
@@ -649,14 +672,10 @@ SDK.DOMNode = class {
    * @param {!Array.<!Protocol.DOM.Node>} payloads
    */
   _setChildrenPayload(payloads) {
-    // We set children in the constructor.
-    if (this._contentDocument)
-      return;
-
     this._children = [];
-    for (var i = 0; i < payloads.length; ++i) {
-      var payload = payloads[i];
-      var node = SDK.DOMNode.create(this._domModel, this.ownerDocument, this._isInShadowTree, payload);
+    for (let i = 0; i < payloads.length; ++i) {
+      const payload = payloads[i];
+      const node = SDK.DOMNode.create(this._domModel, this.ownerDocument, this._isInShadowTree, payload);
       this._children.push(node);
     }
     this._renumber();
@@ -670,8 +689,8 @@ SDK.DOMNode = class {
     if (!payloads)
       return;
 
-    for (var i = 0; i < payloads.length; ++i) {
-      var node = SDK.DOMNode.create(this._domModel, this.ownerDocument, this._isInShadowTree, payloads[i]);
+    for (let i = 0; i < payloads.length; ++i) {
+      const node = SDK.DOMNode.create(this._domModel, this.ownerDocument, this._isInShadowTree, payloads[i]);
       node.parentNode = this;
       this._pseudoElements.set(node.pseudoType(), node);
     }
@@ -682,7 +701,7 @@ SDK.DOMNode = class {
    */
   _setDistributedNodePayloads(payloads) {
     this._distributedNodes = [];
-    for (var payload of payloads) {
+    for (const payload of payloads) {
       this._distributedNodes.push(
           new SDK.DOMNodeShortcut(this._domModel.target(), payload.backendNodeId, payload.nodeType, payload.nodeName));
     }
@@ -697,8 +716,8 @@ SDK.DOMNode = class {
     }
     this.firstChild = this._children[0];
     this.lastChild = this._children[this._childNodeCount - 1];
-    for (var i = 0; i < this._childNodeCount; ++i) {
-      var child = this._children[i];
+    for (let i = 0; i < this._childNodeCount; ++i) {
+      const child = this._children[i];
       child.index = i;
       child.nextSibling = i + 1 < this._childNodeCount ? this._children[i + 1] : null;
       child.previousSibling = i - 1 >= 0 ? this._children[i - 1] : null;
@@ -711,7 +730,7 @@ SDK.DOMNode = class {
    * @param {string} value
    */
   _addAttribute(name, value) {
-    var attr = {name: name, value: value, _node: this};
+    const attr = {name: name, value: value, _node: this};
     this._attributesMap[name] = attr;
     this._attributes.push(attr);
   }
@@ -721,7 +740,7 @@ SDK.DOMNode = class {
    * @param {string} value
    */
   _setAttribute(name, value) {
-    var attr = this._attributesMap[name];
+    const attr = this._attributesMap[name];
     if (attr)
       attr.value = value;
     else
@@ -732,7 +751,7 @@ SDK.DOMNode = class {
    * @param {string} name
    */
   _removeAttribute(name) {
-    var attr = this._attributesMap[name];
+    const attr = this._attributesMap[name];
     if (attr) {
       this._attributes.remove(attr);
       delete this._attributesMap[name];
@@ -759,7 +778,7 @@ SDK.DOMNode = class {
   /**
    * @param {!SDK.DOMNode} targetNode
    * @param {?SDK.DOMNode} anchorNode
-   * @param {function(?Protocol.Error, !Protocol.DOM.NodeId=)=} callback
+   * @param {function(?Protocol.Error, ?SDK.DOMNode)=} callback
    */
   moveTo(targetNode, anchorNode, callback) {
     this._agent
@@ -769,7 +788,7 @@ SDK.DOMNode = class {
           if (!response[Protocol.Error])
             this._domModel.markUndoableState();
           if (callback)
-            callback(response[Protocol.Error] || null, response.nodeId);
+            callback(response[Protocol.Error] || null, this._domModel.nodeForId(response.nodeId));
         });
   }
 
@@ -790,19 +809,19 @@ SDK.DOMNode = class {
         return;
 
       this._markers.delete(name);
-      for (var node = this; node; node = node.parentNode)
+      for (let node = this; node; node = node.parentNode)
         --node._subtreeMarkerCount;
-      for (var node = this; node; node = node.parentNode)
+      for (let node = this; node; node = node.parentNode)
         this._domModel.dispatchEventToListeners(SDK.DOMModel.Events.MarkersChanged, node);
       return;
     }
 
     if (this.parentNode && !this._markers.has(name)) {
-      for (var node = this; node; node = node.parentNode)
+      for (let node = this; node; node = node.parentNode)
         ++node._subtreeMarkerCount;
     }
     this._markers.set(name, value);
-    for (var node = this; node; node = node.parentNode)
+    for (let node = this; node; node = node.parentNode)
       this._domModel.dispatchEventToListeners(SDK.DOMModel.Events.MarkersChanged, node);
   }
 
@@ -825,11 +844,11 @@ SDK.DOMNode = class {
     function traverse(node) {
       if (!node._subtreeMarkerCount)
         return;
-      for (var marker of node._markers.keys())
+      for (const marker of node._markers.keys())
         visitor(node, marker);
       if (!node._children)
         return;
-      for (var child of node._children)
+      for (const child of node._children)
         traverse(child);
     }
     traverse(this);
@@ -842,7 +861,7 @@ SDK.DOMNode = class {
   resolveURL(url) {
     if (!url)
       return url;
-    for (var frameOwnerCandidate = this; frameOwnerCandidate; frameOwnerCandidate = frameOwnerCandidate.parentNode) {
+    for (let frameOwnerCandidate = this; frameOwnerCandidate; frameOwnerCandidate = frameOwnerCandidate.parentNode) {
       if (frameOwnerCandidate.baseURL)
         return Common.ParsedURL.completeURL(frameOwnerCandidate.baseURL, url);
     }
@@ -866,7 +885,7 @@ SDK.DOMNode = class {
    * @return {!Promise<?SDK.RemoteObject>}
    */
   async resolveToObject(objectGroup) {
-    var object = await this._agent.resolveNode(this.id, undefined, objectGroup);
+    const object = await this._agent.resolveNode(this.id, undefined, objectGroup);
     return object && this._domModel._runtimeModel.createRemoteObject(object);
   }
 
@@ -878,9 +897,9 @@ SDK.DOMNode = class {
   }
 
   setAsInspectedNode() {
-    var node = this;
+    let node = this;
     while (true) {
-      var ancestor = node.ancestorUserAgentShadowRoot();
+      let ancestor = node.ancestorUserAgentShadowRoot();
       if (!ancestor)
         break;
       ancestor = node.ancestorShadowHost();
@@ -896,7 +915,7 @@ SDK.DOMNode = class {
    *  @return {?SDK.DOMNode}
    */
   enclosingElementOrSelf() {
-    var node = this;
+    let node = this;
     if (node && node.nodeType() === Node.TEXT_NODE && node.parentNode)
       node = node.parentNode;
 
@@ -906,10 +925,11 @@ SDK.DOMNode = class {
   }
 
   async scrollIntoView() {
-    var node = this.enclosingElementOrSelf();
-    var object = await node.resolveToObject('');
-    if (object)
-      object.callFunction(scrollIntoView);
+    const node = this.enclosingElementOrSelf();
+    const object = await node.resolveToObject();
+    if (!object)
+      return;
+    object.callFunction(scrollIntoView);
     object.release();
     node.highlightForTwoSeconds();
 
@@ -920,6 +940,44 @@ SDK.DOMNode = class {
     function scrollIntoView() {
       this.scrollIntoViewIfNeeded(true);
     }
+  }
+
+  async focus() {
+    const node = this.enclosingElementOrSelf();
+    const object = await node.resolveToObject();
+    if (!object)
+      return;
+    await object.callFunctionPromise(focusInPage);
+    object.release();
+    node.highlightForTwoSeconds();
+    this._domModel.target().pageAgent().bringToFront();
+
+    /**
+     * @suppressReceiverCheck
+     * @this {!Element}
+     */
+    function focusInPage() {
+      this.focus();
+    }
+  }
+
+  /**
+   * @return {string}
+   */
+  simpleSelector() {
+    const lowerCaseName = this.localName() || this.nodeName().toLowerCase();
+    if (this.nodeType() !== Node.ELEMENT_NODE)
+      return lowerCaseName;
+    if (lowerCaseName === 'input' && this.getAttribute('type') && !this.getAttribute('id') &&
+        !this.getAttribute('class'))
+      return lowerCaseName + '[type="' + this.getAttribute('type') + '"]';
+    if (this.getAttribute('id'))
+      return lowerCaseName + '#' + this.getAttribute('id');
+    if (this.getAttribute('class')) {
+      return (lowerCaseName === 'div' ? '' : lowerCaseName) + '.' +
+          this.getAttribute('class').trim().replace(/\s+/g, '.');
+    }
+    return lowerCaseName;
   }
 };
 
@@ -952,7 +1010,7 @@ SDK.DeferredDOMNode = class {
    * @param {number} backendNodeId
    */
   constructor(target, backendNodeId) {
-    this._domModel = target.model(SDK.DOMModel);
+    this._domModel = /** @type {!SDK.DOMModel} */ (target.model(SDK.DOMModel));
     this._backendNodeId = backendNodeId;
   }
 
@@ -967,9 +1025,7 @@ SDK.DeferredDOMNode = class {
    * @return {!Promise<?SDK.DOMNode>}
    */
   async resolvePromise() {
-    if (!this._domModel)
-      return null;
-    var nodeIds = await this._domModel.pushNodesByBackendIdsToFrontend(new Set([this._backendNodeId]));
+    const nodeIds = await this._domModel.pushNodesByBackendIdsToFrontend(new Set([this._backendNodeId]));
     return nodeIds && nodeIds.get(this._backendNodeId) || null;
   }
 
@@ -980,9 +1036,15 @@ SDK.DeferredDOMNode = class {
     return this._backendNodeId;
   }
 
+  /**
+   * @return {!SDK.DOMModel}
+   */
+  domModel() {
+    return this._domModel;
+  }
+
   highlight() {
-    if (this._domModel)
-      this._domModel.overlayModel().highlightDOMNode(undefined, undefined, this._backendNodeId);
+    this._domModel.overlayModel().highlightDOMNode(undefined, undefined, this._backendNodeId);
   }
 };
 
@@ -1041,7 +1103,8 @@ SDK.DOMModel = class extends SDK.SDKModel {
 
     this._runtimeModel = /** @type {!SDK.RuntimeModel} */ (target.model(SDK.RuntimeModel));
 
-    this._agent.enable();
+    if (!target.suspended())
+      this._agent.enable();
   }
 
   /**
@@ -1066,7 +1129,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
   }
 
   static cancelSearch() {
-    for (var domModel of SDK.targetManager.models(SDK.DOMModel))
+    for (const domModel of SDK.targetManager.models(SDK.DOMModel))
       domModel._cancelSearch();
   }
 
@@ -1094,33 +1157,52 @@ SDK.DOMModel = class extends SDK.SDKModel {
   }
 
   /**
-   * @param {function(!SDK.DOMDocument)} callback
+   * @return {!Promise<!SDK.DOMDocument>}
    */
-  requestDocument(callback) {
+  requestDocument() {
     if (this._document)
-      callback(this._document);
-    else
-      this.requestDocumentPromise().then(callback);
+      return Promise.resolve(this._document);
+    if (!this._pendingDocumentRequestPromise)
+      this._pendingDocumentRequestPromise = this._requestDocument();
+    return this._pendingDocumentRequestPromise;
   }
 
   /**
    * @return {!Promise<!SDK.DOMDocument>}
    */
-  requestDocumentPromise() {
-    if (this._document)
-      return Promise.resolve(this._document);
-    if (this._pendingDocumentRequestPromise)
-      return this._pendingDocumentRequestPromise;
+  async _requestDocument() {
+    const documentPayload = await this._agent.getDocument();
+    delete this._pendingDocumentRequestPromise;
 
-    this._pendingDocumentRequestPromise = this._agent.getDocument().then(root => {
-      if (root)
-        this._setDocument(root);
-      delete this._pendingDocumentRequestPromise;
-      if (!this._document)
-        console.error('No document');
-      return this._document;
-    });
-    return this._pendingDocumentRequestPromise;
+    if (documentPayload)
+      this._setDocument(documentPayload);
+    if (!this._document) {
+      console.error('No document');
+      return null;
+    }
+
+    const parentModel = this.parentModel();
+    if (parentModel && !this._frameOwnerNode) {
+      await parentModel.requestDocument();
+      const response = await parentModel._agent.invoke_getFrameOwner({frameId: this.target().id()});
+      if (!response[Protocol.Error])
+        this._frameOwnerNode = parentModel.nodeForId(response.nodeId);
+    }
+
+    // Document could have been cleared by now.
+    if (this._frameOwnerNode) {
+      const oldDocument = this._frameOwnerNode._contentDocument;
+      this._frameOwnerNode._contentDocument = this._document;
+      this._frameOwnerNode._children = [];
+      if (this._document) {
+        this._document.parentNode = this._frameOwnerNode;
+        this.dispatchEventToListeners(SDK.DOMModel.Events.NodeInserted, this._document);
+      } else if (oldDocument) {
+        this.dispatchEventToListeners(
+            SDK.DOMModel.Events.NodeRemoved, {node: oldDocument, parent: this._frameOwnerNode});
+      }
+    }
+    return this._document;
   }
 
   /**
@@ -1135,8 +1217,8 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @return {!Promise<?SDK.DOMNode>}
    */
   async pushNodeToFrontend(objectId) {
-    await this.requestDocumentPromise();
-    var nodeId = await this._agent.requestNode(objectId);
+    await this.requestDocument();
+    const nodeId = await this._agent.requestNode(objectId);
     return nodeId ? this.nodeForId(nodeId) : null;
   }
 
@@ -1145,7 +1227,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @return {!Promise<?Protocol.DOM.NodeId>}
    */
   pushNodeByPathToFrontend(path) {
-    return this.requestDocumentPromise().then(() => this._agent.pushNodeByPathToFrontend(path));
+    return this.requestDocument().then(() => this._agent.pushNodeByPathToFrontend(path));
   }
 
   /**
@@ -1153,14 +1235,14 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @return {!Promise<?Map<number, ?SDK.DOMNode>>}
    */
   async pushNodesByBackendIdsToFrontend(backendNodeIds) {
-    await this.requestDocumentPromise();
-    var backendNodeIdsArray = backendNodeIds.valuesArray();
-    var nodeIds = await this._agent.pushNodesByBackendIdsToFrontend(backendNodeIdsArray);
+    await this.requestDocument();
+    const backendNodeIdsArray = backendNodeIds.valuesArray();
+    const nodeIds = await this._agent.pushNodesByBackendIdsToFrontend(backendNodeIdsArray);
     if (!nodeIds)
       return null;
     /** @type {!Map<number, ?SDK.DOMNode>} */
-    var map = new Map();
-    for (var i = 0; i < nodeIds.length; ++i) {
+    const map = new Map();
+    for (let i = 0; i < nodeIds.length; ++i) {
       if (nodeIds[i])
         map.set(backendNodeIdsArray[i], this.nodeForId(nodeIds[i]));
     }
@@ -1191,7 +1273,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {string} value
    */
   _attributeModified(nodeId, name, value) {
-    var node = this._idToDOMNode[nodeId];
+    const node = this._idToDOMNode[nodeId];
     if (!node)
       return;
 
@@ -1205,7 +1287,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {string} name
    */
   _attributeRemoved(nodeId, name) {
-    var node = this._idToDOMNode[nodeId];
+    const node = this._idToDOMNode[nodeId];
     if (!node)
       return;
     node._removeAttribute(name);
@@ -1224,13 +1306,13 @@ SDK.DOMModel = class extends SDK.SDKModel {
 
   _loadNodeAttributes() {
     delete this._loadNodeAttributesTimeout;
-    for (let nodeId of this._attributeLoadNodeIds) {
+    for (const nodeId of this._attributeLoadNodeIds) {
       this._agent.getAttributes(nodeId).then(attributes => {
         if (!attributes) {
           // We are calling _loadNodeAttributes asynchronously, it is ok if node is not found.
           return;
         }
-        var node = this._idToDOMNode[nodeId];
+        const node = this._idToDOMNode[nodeId];
         if (!node)
           return;
         if (node._setAttributesPayload(attributes)) {
@@ -1247,7 +1329,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {string} newValue
    */
   _characterDataModified(nodeId, newValue) {
-    var node = this._idToDOMNode[nodeId];
+    const node = this._idToDOMNode[nodeId];
     node._nodeValue = newValue;
     this.dispatchEventToListeners(SDK.DOMModel.Events.CharacterDataModified, node);
     this._scheduleMutationEvent(node);
@@ -1262,7 +1344,11 @@ SDK.DOMModel = class extends SDK.SDKModel {
   }
 
   _documentUpdated() {
+    // If we have this._pendingDocumentRequestPromise in flight,
+    // if it hits backend post document update, it will contain most recent result.
     this._setDocument(null);
+    if (this.parentModel())
+      this.requestDocument();
   }
 
   /**
@@ -1274,7 +1360,10 @@ SDK.DOMModel = class extends SDK.SDKModel {
       this._document = new SDK.DOMDocument(this, payload);
     else
       this._document = null;
-    this.dispatchEventToListeners(SDK.DOMModel.Events.DocumentUpdated, this);
+    SDK.domModelUndoStack._dispose(this);
+
+    if (!this.parentModel())
+      this.dispatchEventToListeners(SDK.DOMModel.Events.DocumentUpdated, this);
   }
 
   /**
@@ -1297,7 +1386,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
       return;
     }
 
-    var parent = this._idToDOMNode[parentId];
+    const parent = this._idToDOMNode[parentId];
     parent._setChildrenPayload(payloads);
   }
 
@@ -1306,7 +1395,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {number} newValue
    */
   _childNodeCountUpdated(nodeId, newValue) {
-    var node = this._idToDOMNode[nodeId];
+    const node = this._idToDOMNode[nodeId];
     node._childNodeCount = newValue;
     this.dispatchEventToListeners(SDK.DOMModel.Events.ChildNodeCountUpdated, node);
     this._scheduleMutationEvent(node);
@@ -1318,9 +1407,9 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {!Protocol.DOM.Node} payload
    */
   _childNodeInserted(parentId, prevId, payload) {
-    var parent = this._idToDOMNode[parentId];
-    var prev = this._idToDOMNode[prevId];
-    var node = parent._insertChild(prev, payload);
+    const parent = this._idToDOMNode[parentId];
+    const prev = this._idToDOMNode[prevId];
+    const node = parent._insertChild(prev, payload);
     this._idToDOMNode[node.id] = node;
     this.dispatchEventToListeners(SDK.DOMModel.Events.NodeInserted, node);
     this._scheduleMutationEvent(node);
@@ -1331,8 +1420,8 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {!Protocol.DOM.NodeId} nodeId
    */
   _childNodeRemoved(parentId, nodeId) {
-    var parent = this._idToDOMNode[parentId];
-    var node = this._idToDOMNode[nodeId];
+    const parent = this._idToDOMNode[parentId];
+    const node = this._idToDOMNode[nodeId];
     parent._removeChild(node);
     this._unbind(node);
     this.dispatchEventToListeners(SDK.DOMModel.Events.NodeRemoved, {node: node, parent: parent});
@@ -1344,10 +1433,10 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {!Protocol.DOM.Node} root
    */
   _shadowRootPushed(hostId, root) {
-    var host = this._idToDOMNode[hostId];
+    const host = this._idToDOMNode[hostId];
     if (!host)
       return;
-    var node = SDK.DOMNode.create(this, host.ownerDocument, true, root);
+    const node = SDK.DOMNode.create(this, host.ownerDocument, true, root);
     node.parentNode = host;
     this._idToDOMNode[node.id] = node;
     host._shadowRoots.unshift(node);
@@ -1360,10 +1449,10 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {!Protocol.DOM.NodeId} rootId
    */
   _shadowRootPopped(hostId, rootId) {
-    var host = this._idToDOMNode[hostId];
+    const host = this._idToDOMNode[hostId];
     if (!host)
       return;
-    var root = this._idToDOMNode[rootId];
+    const root = this._idToDOMNode[rootId];
     if (!root)
       return;
     host._removeChild(root);
@@ -1377,10 +1466,10 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {!Protocol.DOM.Node} pseudoElement
    */
   _pseudoElementAdded(parentId, pseudoElement) {
-    var parent = this._idToDOMNode[parentId];
+    const parent = this._idToDOMNode[parentId];
     if (!parent)
       return;
-    var node = SDK.DOMNode.create(this, parent.ownerDocument, false, pseudoElement);
+    const node = SDK.DOMNode.create(this, parent.ownerDocument, false, pseudoElement);
     node.parentNode = parent;
     this._idToDOMNode[node.id] = node;
     console.assert(!parent._pseudoElements.get(node.pseudoType()));
@@ -1394,10 +1483,10 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {!Protocol.DOM.NodeId} pseudoElementId
    */
   _pseudoElementRemoved(parentId, pseudoElementId) {
-    var parent = this._idToDOMNode[parentId];
+    const parent = this._idToDOMNode[parentId];
     if (!parent)
       return;
-    var pseudoElement = this._idToDOMNode[pseudoElementId];
+    const pseudoElement = this._idToDOMNode[pseudoElementId];
     if (!pseudoElement)
       return;
     parent._removeChild(pseudoElement);
@@ -1411,7 +1500,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @param {!Array.<!Protocol.DOM.BackendNode>} distributedNodes
    */
   _distributedNodesUpdated(insertionPointId, distributedNodes) {
-    var insertionPoint = this._idToDOMNode[insertionPointId];
+    const insertionPoint = this._idToDOMNode[insertionPointId];
     if (!insertionPoint)
       return;
     insertionPoint._setDistributedNodePayloads(distributedNodes);
@@ -1424,12 +1513,12 @@ SDK.DOMModel = class extends SDK.SDKModel {
    */
   _unbind(node) {
     delete this._idToDOMNode[node.id];
-    for (var i = 0; node._children && i < node._children.length; ++i)
+    for (let i = 0; node._children && i < node._children.length; ++i)
       this._unbind(node._children[i]);
-    for (var i = 0; i < node._shadowRoots.length; ++i)
+    for (let i = 0; i < node._shadowRoots.length; ++i)
       this._unbind(node._shadowRoots[i]);
-    var pseudoElements = node.pseudoElements();
-    for (var value of pseudoElements.values())
+    const pseudoElements = node.pseudoElements();
+    for (const value of pseudoElements.values())
       this._unbind(value);
     if (node._templateContent)
       this._unbind(node._templateContent);
@@ -1441,7 +1530,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
    * @return {!Promise<number>}
    */
   async performSearch(query, includeUserAgentShadowDOM) {
-    var response = await this._agent.invoke_performSearch({query, includeUserAgentShadowDOM});
+    const response = await this._agent.invoke_performSearch({query, includeUserAgentShadowDOM});
     if (!response[Protocol.Error])
       this._searchId = response.searchId;
     return response[Protocol.Error] ? 0 : response.resultCount;
@@ -1454,7 +1543,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
   async searchResult(index) {
     if (!this._searchId)
       return null;
-    var nodeIds = await this._agent.getSearchResults(this._searchId, index, index + 1);
+    const nodeIds = await this._agent.getSearchResults(this._searchId, index, index + 1);
     return nodeIds && nodeIds.length === 1 ? this.nodeForId(nodeIds[0]) : null;
   }
 
@@ -1491,22 +1580,11 @@ SDK.DOMModel = class extends SDK.SDKModel {
     return this._agent.querySelectorAll(nodeId, selectors);
   }
 
-  markUndoableState() {
-    this._agent.markUndoableState();
-  }
-
   /**
-   * @return {!Promise}
+   * @param {boolean=} minorChange
    */
-  undo() {
-    return this._agent.undo();
-  }
-
-  /**
-   * @return {!Promise}
-   */
-  redo() {
-    return this._agent.redo();
+  markUndoableState(minorChange) {
+    SDK.domModelUndoStack._markUndoableState(this, minorChange || false);
   }
 
   /**
@@ -1542,6 +1620,23 @@ SDK.DOMModel = class extends SDK.SDKModel {
    */
   resumeModel() {
     return this._agent.enable();
+  }
+
+  /**
+   * @override
+   */
+  dispose() {
+    SDK.domModelUndoStack._dispose(this);
+  }
+
+  /**
+   * @return {?SDK.DOMModel}
+   */
+  parentModel() {
+    if (!Runtime.experiments.isEnabled('oopifInlineDOM'))
+      return null;
+    const parentTarget = this.target().parentTarget();
+    return parentTarget ? parentTarget.model(SDK.DOMModel) : null;
   }
 };
 
@@ -1699,3 +1794,82 @@ SDK.DOMDispatcher = class {
     this._domModel._distributedNodesUpdated(insertionPointId, distributedNodes);
   }
 };
+
+SDK.DOMModelUndoStack = class {
+  constructor() {
+    /** @type {!Array<!SDK.DOMModel>} */
+    this._stack = [];
+    this._index = 0;
+    /** @type {?SDK.DOMModel} */
+    this._lastModelWithMinorChange = null;
+  }
+
+  /**
+   * @param {!SDK.DOMModel} model
+   * @param {boolean} minorChange
+   */
+  _markUndoableState(model, minorChange) {
+    // Both minor and major changes get into the stack, but minor updates are coalesced.
+    // Commit major undoable state in the old model upon model switch.
+    if (this._lastModelWithMinorChange && model !== this._lastModelWithMinorChange) {
+      this._lastModelWithMinorChange.markUndoableState();
+      this._lastModelWithMinorChange = null;
+    }
+
+    // Previous minor change is already in the stack.
+    if (minorChange && this._lastModelWithMinorChange === model)
+      return;
+
+    this._stack = this._stack.slice(0, this._index);
+    this._stack.push(model);
+    this._index = this._stack.length;
+
+    // Delay marking as major undoable states in case of minor operations until the
+    // major or model switch.
+    if (minorChange) {
+      this._lastModelWithMinorChange = model;
+    } else {
+      model._agent.markUndoableState();
+      this._lastModelWithMinorChange = null;
+    }
+  }
+
+  /**
+   * @return {!Promise}
+   */
+  undo() {
+    if (this._index === 0)
+      return Promise.resolve();
+    --this._index;
+    this._lastModelWithMinorChange = null;
+    return this._stack[this._index]._agent.undo();
+  }
+
+  /**
+   * @return {!Promise}
+   */
+  redo() {
+    if (this._index >= this._stack.length)
+      return Promise.resolve();
+    ++this._index;
+    this._lastModelWithMinorChange = null;
+    return this._stack[this._index - 1]._agent.redo();
+  }
+
+  /**
+   * @param {!SDK.DOMModel} model
+   */
+  _dispose(model) {
+    let shift = 0;
+    for (let i = 0; i < this._index; ++i) {
+      if (this._stack[i] === model)
+        ++shift;
+    }
+    this._stack.remove(model);
+    this._index -= shift;
+    if (this._lastModelWithMinorChange === model)
+      this._lastModelWithMinorChange = null;
+  }
+};
+
+SDK.domModelUndoStack = new SDK.DOMModelUndoStack();

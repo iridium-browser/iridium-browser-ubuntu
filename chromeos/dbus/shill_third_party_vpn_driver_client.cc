@@ -7,7 +7,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <map>
+#include <set>
+
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "chromeos/dbus/shill_third_party_vpn_observer.h"
 #include "dbus/bus.h"
@@ -142,7 +146,7 @@ ShillThirdPartyVpnDriverClientImpl::~ShillThirdPartyVpnDriverClientImpl() {
     bus_->RemoveObjectProxy(
         shill::kFlimflamServiceName,
         helper_info->helper()->object_proxy()->object_path(),
-        base::Bind(&base::DoNothing));
+        base::DoNothing());
     delete helper_info;
   }
 }
@@ -196,7 +200,7 @@ void ShillThirdPartyVpnDriverClientImpl::DeleteHelper(
   }
 
   bus_->RemoveObjectProxy(shill::kFlimflamServiceName, object_path,
-                          base::Bind(&base::DoNothing));
+                          base::DoNothing());
   helpers_.erase(helpers_.find(object_path.value()));
   delete helper_info;
 }
@@ -331,11 +335,9 @@ ShillThirdPartyVpnDriverClientImpl::GetHelperInfo(
 
 }  // namespace
 
-ShillThirdPartyVpnDriverClient::ShillThirdPartyVpnDriverClient() {
-}
+ShillThirdPartyVpnDriverClient::ShillThirdPartyVpnDriverClient() = default;
 
-ShillThirdPartyVpnDriverClient::~ShillThirdPartyVpnDriverClient() {
-}
+ShillThirdPartyVpnDriverClient::~ShillThirdPartyVpnDriverClient() = default;
 
 // static
 ShillThirdPartyVpnDriverClient* ShillThirdPartyVpnDriverClient::Create() {

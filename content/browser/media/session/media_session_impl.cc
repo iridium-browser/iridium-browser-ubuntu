@@ -395,6 +395,34 @@ void MediaSessionImpl::Stop(SuspendType suspend_type) {
   AbandonSystemAudioFocusIfNeeded();
 }
 
+void MediaSessionImpl::SeekForward(base::TimeDelta seek_time) {
+  for (const auto& it : normal_players_)
+    it.observer->OnSeekForward(it.player_id, seek_time);
+}
+
+void MediaSessionImpl::SeekBackward(base::TimeDelta seek_time) {
+  for (const auto& it : normal_players_)
+    it.observer->OnSeekBackward(it.player_id, seek_time);
+}
+
+bool MediaSessionImpl::IsControllable() const {
+  // Only media session having focus Gain can be controllable unless it is
+  // inactive. Also, the session will be uncontrollable if it contains one-shot
+  // players.
+  return audio_focus_state_ != State::INACTIVE &&
+         audio_focus_type_ == AudioFocusManager::AudioFocusType::Gain &&
+         one_shot_players_.empty();
+}
+
+bool MediaSessionImpl::IsActuallyPaused() const {
+  if (routed_service_ && routed_service_->playback_state() ==
+                             blink::mojom::MediaSessionPlaybackState::PLAYING) {
+    return false;
+  }
+
+  return !IsActive();
+}
+
 void MediaSessionImpl::StartDucking() {
   if (is_ducking_)
     return;
@@ -426,24 +454,6 @@ bool MediaSessionImpl::IsActive() const {
 
 bool MediaSessionImpl::IsSuspended() const {
   return audio_focus_state_ == State::SUSPENDED;
-}
-
-bool MediaSessionImpl::IsControllable() const {
-  // Only media session having focus Gain can be controllable unless it is
-  // inactive. Also, the session will be uncontrollable if it contains one-shot
-  // players.
-  return audio_focus_state_ != State::INACTIVE &&
-         audio_focus_type_ == AudioFocusManager::AudioFocusType::Gain &&
-         one_shot_players_.empty();
-}
-
-bool MediaSessionImpl::IsActuallyPaused() const {
-  if (routed_service_ && routed_service_->playback_state() ==
-                             blink::mojom::MediaSessionPlaybackState::PLAYING) {
-    return false;
-  }
-
-  return !IsActive();
 }
 
 bool MediaSessionImpl::HasPepper() const {
@@ -576,6 +586,7 @@ void MediaSessionImpl::AbandonSystemAudioFocusIfNeeded() {
     return;
   }
   delegate_->AbandonAudioFocus();
+  is_ducking_ = false;
 
   SetAudioFocusState(State::INACTIVE);
   NotifyAboutStateChange();

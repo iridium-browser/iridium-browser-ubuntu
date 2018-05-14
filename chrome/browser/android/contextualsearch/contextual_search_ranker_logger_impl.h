@@ -6,15 +6,31 @@
 #define CHROME_BROWSER_ANDROID_CONTEXTUALSEARCH_CONTEXTUAL_SEARCH_RANKER_LOGGER_IMPL_H_
 
 #include "base/android/jni_android.h"
-#include "services/metrics/public/cpp/ukm_recorder.h"
-#include "url/gurl.h"
+#include "base/memory/weak_ptr.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 
-class GURL;
+namespace content {
+class BrowserContext;
+class WebContents;
+}  // namespace content
 
-namespace ukm {
-class UkmRecorder;
-}  // namespace ukm
+namespace assist_ranker {
+class BinaryClassifierPredictor;
+class RankerExample;
+}  // namespace assist_ranker
 
+// A Java counterpart will be generated for this enum.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.contextualsearch
+enum AssistRankerPrediction {
+  ASSIST_RANKER_PREDICTION_UNDETERMINED,
+  ASSIST_RANKER_PREDICTION_UNAVAILABLE,
+  ASSIST_RANKER_PREDICTION_SUPPRESS,
+  ASSIST_RANKER_PREDICTION_SHOW,
+};
+
+// Runs Ranker inference and logging through UKM for Ranker model development.
+// This is used to prediction whether a tap gesture will be useful to the user
+// or not.
 class ContextualSearchRankerLoggerImpl {
  public:
   ContextualSearchRankerLoggerImpl(JNIEnv* env, jobject obj);
@@ -26,12 +42,12 @@ class ContextualSearchRankerLoggerImpl {
 
   // Sets up the logging and Ranker for Contextual Search features using the
   // given details.
-  // |j_base_page_url| is the URL of the Contextual Search base-page (where the
-  // user might tap.
+  // |java_web_contents| is the |WebContents| of the base-page (where the user
+  // tapped).
   void SetupLoggingAndRanker(
       JNIEnv* env,
       jobject obj,
-      const base::android::JavaParamRef<jstring>& j_base_page_url);
+      const base::android::JavaParamRef<jobject>& java_web_contents);
 
   // Logs a long value with the given feature name.
   void LogLong(JNIEnv* env,
@@ -39,24 +55,48 @@ class ContextualSearchRankerLoggerImpl {
                const base::android::JavaParamRef<jstring>& j_feature,
                jlong j_long);
 
+  // Runs the model and returns the inference result as an
+  // AssistRankerPrediction enum.
+  AssistRankerPrediction RunInference(JNIEnv* env, jobject obj);
+
   // Writes the currently logged data and resets the current builder to be
   // ready to start logging the next set of data.
   void WriteLogAndReset(JNIEnv* env, jobject obj);
 
+  // Returns whether or not AssistRanker query is enabled.
+  bool IsQueryEnabled(JNIEnv* env, jobject obj);
+
  private:
-  // Set the UKM recorder and base-page URL.
-  // TODO(donnd): write a test, using this to inject a test-ukm-recorder.
-  void SetUkmRecorder(ukm::UkmRecorder* ukm_recorder, const GURL& page_url);
+  // Returns whether or not AssistRanker query is enabled.
+  bool IsQueryEnabledInternal();
 
-  // Used to log URL-keyed metrics. This pointer will outlive |this|, and may
-  // be nullptr.
-  ukm::UkmRecorder* ukm_recorder_;
+  // Adds feature to the RankerExample.
+  void LogFeature(const std::string& feature_name, int value);
 
-  // The UKM source ID being used for this session.
-  int32_t source_id_;
+  // Sets up the Ranker Predictor for the given |web_contents|.
+  void SetupRankerPredictor(const content::WebContents& web_contents);
 
-  // The entry builder for the current record, or nullptr if not yet configured.
-  std::unique_ptr<ukm::UkmEntryBuilder> builder_;
+  // Logs to UMA when an important feature or outcome is present in the example.
+  void logImportantFeaturePresent(const std::string& feature,
+                                  bool is_outcome) const;
+
+  // The source_id for UKMs for the current page.
+  ukm::SourceId source_id_ = ukm::kInvalidSourceId;
+
+  // The Ranker Predictor for whether a tap gesture should be suppressed or not.
+  base::WeakPtr<assist_ranker::BinaryClassifierPredictor> predictor_;
+
+  // The |BrowserContext| currently associated with the above predictor.
+  // The object not owned by ContextualSearchRankerLoggerImpl.
+  content::BrowserContext* browser_context_ = nullptr;
+
+  // The current RankerExample or null.
+  // Set of features from one example of a Tap to predict a suppression
+  // decision.
+  std::unique_ptr<assist_ranker::RankerExample> ranker_example_;
+
+  // Whether Ranker has predicted the decision yet.
+  bool has_predicted_decision_ = false;
 
   // The linked Java object.
   base::android::ScopedJavaGlobalRef<jobject> java_object_;

@@ -19,6 +19,7 @@
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/installable/installable_logging.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
@@ -50,7 +51,7 @@ const unsigned int kRecentLastLaunchInDays = 10;
 
 // Dictionary keys to use for the events. Must be kept in sync with
 // AppBannerEvent.
-const char* kBannerEventKeys[] = {
+constexpr const char* kBannerEventKeys[] = {
     "couldShowBannerEvents",
     "didShowBannerEvent",
     "didBlockBannerEvent",
@@ -70,30 +71,31 @@ double gTotalEngagementToTrigger = kDefaultTotalEngagementToTrigger;
 unsigned int gDaysAfterDismissedToShow = kMinimumBannerBlockedToBannerShown;
 unsigned int gDaysAfterIgnoredToShow = kMinimumDaysBetweenBannerShows;
 
-std::unique_ptr<base::DictionaryValue> GetOriginDict(
+std::unique_ptr<base::DictionaryValue> GetOriginAppBannerData(
     HostContentSettingsMap* settings,
     const GURL& origin_url) {
   if (!settings)
-    return base::MakeUnique<base::DictionaryValue>();
+    return std::make_unique<base::DictionaryValue>();
 
   std::unique_ptr<base::DictionaryValue> dict =
       base::DictionaryValue::From(settings->GetWebsiteSetting(
           origin_url, origin_url, CONTENT_SETTINGS_TYPE_APP_BANNER,
           std::string(), NULL));
   if (!dict)
-    return base::MakeUnique<base::DictionaryValue>();
+    return std::make_unique<base::DictionaryValue>();
 
   return dict;
 }
 
-base::DictionaryValue* GetAppDict(base::DictionaryValue* origin_dict,
-                                  const std::string& key_name) {
-  base::DictionaryValue* app_dict = nullptr;
-  if (!origin_dict->GetDictionaryWithoutPathExpansion(key_name, &app_dict)) {
+base::Value* GetAppDict(base::DictionaryValue* origin_dict,
+                        const std::string& key_name) {
+  base::Value* app_dict =
+      origin_dict->FindKeyOfType(key_name, base::Value::Type::DICTIONARY);
+  if (!app_dict) {
     // Don't allow more than kMaxAppsPerSite dictionaries.
     if (origin_dict->size() < kMaxAppsPerSite) {
-      app_dict = origin_dict->SetDictionaryWithoutPathExpansion(
-          key_name, base::MakeUnique<base::DictionaryValue>());
+      app_dict = origin_dict->SetKey(
+          key_name, base::Value(base::Value::Type::DICTIONARY));
     }
   }
 
@@ -134,6 +136,21 @@ void UpdateSiteEngagementToTrigger() {
       AppBannerSettingsHelper::SetTotalEngagementToTrigger(total_engagement);
     }
   }
+}
+
+// Reports whether |event| was recorded within the |period| up until |now|.
+bool WasEventWithinPeriod(AppBannerSettingsHelper::AppBannerEvent event,
+                          base::TimeDelta period,
+                          content::WebContents* web_contents,
+                          const GURL& origin_url,
+                          const std::string& package_name_or_start_url,
+                          base::Time now) {
+  base::Time event_time = AppBannerSettingsHelper::GetSingleBannerEvent(
+      web_contents, origin_url, package_name_or_start_url, event);
+
+  // Null times are in the distant past, so the delta between real times and
+  // null events will always be greater than the limits.
+  return (now - event_time < period);
 }
 
 }  // namespace
@@ -206,26 +223,26 @@ void AppBannerSettingsHelper::RecordBannerEvent(
   HostContentSettingsMap* settings =
       HostContentSettingsMapFactory::GetForProfile(profile);
   std::unique_ptr<base::DictionaryValue> origin_dict =
-      GetOriginDict(settings, origin_url);
+      GetOriginAppBannerData(settings, origin_url);
   if (!origin_dict)
     return;
 
-  base::DictionaryValue* app_dict =
+  base::Value* app_dict =
       GetAppDict(origin_dict.get(), package_name_or_start_url);
   if (!app_dict)
     return;
 
   // Dates are stored in their raw form (i.e. not local dates) to be resilient
   // to time zone changes.
-  std::string event_key(kBannerEventKeys[event]);
+  const char* event_key = kBannerEventKeys[event];
 
   if (event == APP_BANNER_EVENT_COULD_SHOW) {
     // Do not overwrite a could show event, as this is used for metrics.
-    double internal_date;
-    if (app_dict->GetDouble(event_key, &internal_date))
+    if (app_dict->FindKeyOfType(event_key, base::Value::Type::DOUBLE))
       return;
   }
-  app_dict->SetDouble(event_key, time.ToInternalValue());
+  app_dict->SetKey(event_key,
+                   base::Value(static_cast<double>(time.ToInternalValue())));
 
   settings->SetWebsiteSettingDefaultScope(
       origin_url, GURL(), CONTENT_SETTINGS_TYPE_APP_BANNER, std::string(),
@@ -240,40 +257,41 @@ void AppBannerSettingsHelper::RecordBannerEvent(
     settings->FlushLossyWebsiteSettings();
 }
 
-InstallableStatusCode AppBannerSettingsHelper::ShouldShowBanner(
+bool AppBannerSettingsHelper::HasBeenInstalled(
     content::WebContents* web_contents,
     const GURL& origin_url,
-    const std::string& package_name_or_start_url,
-    base::Time time) {
-  // Never show a banner when the package name or URL is empty.
-  if (package_name_or_start_url.empty())
-    return PACKAGE_NAME_OR_START_URL_EMPTY;
-
-  // Don't show if it has been added to the homescreen.
+    const std::string& package_name_or_start_url) {
   base::Time added_time =
       GetSingleBannerEvent(web_contents, origin_url, package_name_or_start_url,
                            APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN);
-  if (!added_time.is_null())
-    return ALREADY_INSTALLED;
 
-  base::Time blocked_time =
-      GetSingleBannerEvent(web_contents, origin_url, package_name_or_start_url,
-                           APP_BANNER_EVENT_DID_BLOCK);
+  return !added_time.is_null();
+}
 
-  // Null times are in the distant past, so the delta between real times and
-  // null events will always be greater than the limits.
-  if (time - blocked_time <
-      base::TimeDelta::FromDays(gDaysAfterDismissedToShow)) {
-    return PREVIOUSLY_BLOCKED;
-  }
+bool AppBannerSettingsHelper::WasBannerRecentlyBlocked(
+    content::WebContents* web_contents,
+    const GURL& origin_url,
+    const std::string& package_name_or_start_url,
+    base::Time now) {
+  DCHECK(!package_name_or_start_url.empty());
 
-  base::Time shown_time =
-      GetSingleBannerEvent(web_contents, origin_url, package_name_or_start_url,
-                           APP_BANNER_EVENT_DID_SHOW);
-  if (time - shown_time < base::TimeDelta::FromDays(gDaysAfterIgnoredToShow))
-    return PREVIOUSLY_IGNORED;
+  return WasEventWithinPeriod(
+      APP_BANNER_EVENT_DID_BLOCK,
+      base::TimeDelta::FromDays(gDaysAfterDismissedToShow), web_contents,
+      origin_url, package_name_or_start_url, now);
+}
 
-  return NO_ERROR_DETECTED;
+bool AppBannerSettingsHelper::WasBannerRecentlyIgnored(
+    content::WebContents* web_contents,
+    const GURL& origin_url,
+    const std::string& package_name_or_start_url,
+    base::Time now) {
+  DCHECK(!package_name_or_start_url.empty());
+
+  return WasEventWithinPeriod(
+      APP_BANNER_EVENT_DID_SHOW,
+      base::TimeDelta::FromDays(gDaysAfterIgnoredToShow), web_contents,
+      origin_url, package_name_or_start_url, now);
 }
 
 base::Time AppBannerSettingsHelper::GetSingleBannerEvent(
@@ -288,22 +306,22 @@ base::Time AppBannerSettingsHelper::GetSingleBannerEvent(
   HostContentSettingsMap* settings =
       HostContentSettingsMapFactory::GetForProfile(profile);
   std::unique_ptr<base::DictionaryValue> origin_dict =
-      GetOriginDict(settings, origin_url);
+      GetOriginAppBannerData(settings, origin_url);
 
   if (!origin_dict)
     return base::Time();
 
-  base::DictionaryValue* app_dict =
+  base::Value* app_dict =
       GetAppDict(origin_dict.get(), package_name_or_start_url);
   if (!app_dict)
     return base::Time();
 
-  std::string event_key(kBannerEventKeys[event]);
-  double internal_time;
-  if (!app_dict->GetDouble(event_key, &internal_time))
+  base::Value* internal_time = app_dict->FindKeyOfType(
+      kBannerEventKeys[event], base::Value::Type::DOUBLE);
+  if (!internal_time)
     return base::Time();
 
-  return base::Time::FromInternalValue(internal_time);
+  return base::Time::FromInternalValue(internal_time->GetDouble());
 }
 
 bool AppBannerSettingsHelper::HasSufficientEngagement(double total_engagement) {
@@ -334,7 +352,7 @@ bool AppBannerSettingsHelper::WasLaunchedRecently(Profile* profile,
   HostContentSettingsMap* settings =
       HostContentSettingsMapFactory::GetForProfile(profile);
   std::unique_ptr<base::DictionaryValue> origin_dict =
-      GetOriginDict(settings, origin_url);
+      GetOriginAppBannerData(settings, origin_url);
 
   if (!origin_dict)
     return false;
@@ -346,15 +364,15 @@ bool AppBannerSettingsHelper::WasLaunchedRecently(Profile* profile,
       base::TimeDelta::FromDays(kRecentLastLaunchInDays);
   for (base::DictionaryValue::Iterator it(*origin_dict); !it.IsAtEnd();
        it.Advance()) {
-    if (it.value().IsType(base::Value::Type::DICTIONARY)) {
+    if (it.value().is_dict()) {
       const base::DictionaryValue* value;
       it.value().GetAsDictionary(&value);
 
-      std::string event_key(
-          kBannerEventKeys[APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN]);
       double internal_time;
       if (it.key() == kInstantAppsKey ||
-          !value->GetDouble(event_key, &internal_time)) {
+          !value->GetDouble(
+              kBannerEventKeys[APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN],
+              &internal_time)) {
         continue;
       }
 
@@ -400,8 +418,22 @@ AppBannerSettingsHelper::GetHomescreenLanguageOption() {
   if (param.empty() || !base::StringToUint(param, &language_option) ||
       language_option < LANGUAGE_OPTION_MIN ||
       language_option > LANGUAGE_OPTION_MAX) {
-    return LANGUAGE_OPTION_ADD;
+    return LANGUAGE_OPTION_DEFAULT;
   }
 
   return static_cast<LanguageOption>(language_option);
+}
+
+AppBannerSettingsHelper::ScopedTriggerSettings::ScopedTriggerSettings(
+    unsigned int dismiss_days,
+    unsigned int ignore_days) {
+  old_dismiss_ = gDaysAfterDismissedToShow;
+  old_ignore_ = gDaysAfterIgnoredToShow;
+  gDaysAfterDismissedToShow = dismiss_days;
+  gDaysAfterIgnoredToShow = ignore_days;
+}
+
+AppBannerSettingsHelper::ScopedTriggerSettings::~ScopedTriggerSettings() {
+  gDaysAfterDismissedToShow = old_dismiss_;
+  gDaysAfterIgnoredToShow = old_ignore_;
 }

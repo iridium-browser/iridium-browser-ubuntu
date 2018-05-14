@@ -19,6 +19,7 @@ const char ArcAppItem::kItemType[] = "ArcAppItem";
 
 ArcAppItem::ArcAppItem(
     Profile* profile,
+    AppListModelUpdater* model_updater,
     const app_list::AppListSyncableService::SyncItem* sync_item,
     const std::string& id,
     const std::string& name)
@@ -36,6 +37,9 @@ ArcAppItem::ArcAppItem(
     UpdateFromSync(sync_item);
   else
     SetDefaultPositionIfApplicable();
+
+  // Set model updater last to avoid being called during construction.
+  set_model_updater(model_updater);
 }
 
 ArcAppItem::~ArcAppItem() {
@@ -46,8 +50,10 @@ const char* ArcAppItem::GetItemType() const {
 }
 
 void ArcAppItem::Activate(int event_flags) {
-  if (!arc::LaunchApp(profile(), id(), event_flags))
+  if (!arc::LaunchApp(profile(), id(), event_flags,
+                      GetController()->GetAppListDisplayId())) {
     return;
+  }
 
   // Manually close app_list view because focus is not changed on ARC app start,
   // and current view remains active.
@@ -77,4 +83,8 @@ ui::MenuModel* ArcAppItem::GetContextMenuModel() {
                                             id(),
                                             GetController()));
   return context_menu_->GetMenuModel();
+}
+
+app_list::AppContextMenu* ArcAppItem::GetAppContextMenu() {
+  return context_menu_.get();
 }

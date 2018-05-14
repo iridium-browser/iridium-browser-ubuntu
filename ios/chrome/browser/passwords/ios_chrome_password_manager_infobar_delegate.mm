@@ -10,7 +10,7 @@
 #include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_manager_constants.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/open_url_command.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
@@ -35,11 +35,6 @@ IOSChromePasswordManagerInfoBarDelegate::
       infobar_response_(password_manager::metrics_util::NO_DIRECT_INTERACTION),
       is_smart_lock_branding_enabled_(is_smart_lock_branding_enabled) {}
 
-infobars::InfoBarDelegate::Type
-IOSChromePasswordManagerInfoBarDelegate::GetInfoBarType() const {
-  return PAGE_ACTION_TYPE;
-};
-
 base::string16 IOSChromePasswordManagerInfoBarDelegate::GetLinkText() const {
   return is_smart_lock_branding_enabled_
              ? l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SMART_LOCK)
@@ -58,7 +53,6 @@ bool IOSChromePasswordManagerInfoBarDelegate::LinkClicked(
        inIncognito:NO
       inBackground:NO
           appendTo:kCurrentTab];
-  UIWindow* mainWindow = [[UIApplication sharedApplication] keyWindow];
-  [mainWindow chromeExecuteCommand:command];
+  [dispatcher_ openURL:command];
   return true;
 };

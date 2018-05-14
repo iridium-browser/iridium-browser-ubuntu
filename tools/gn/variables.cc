@@ -383,23 +383,23 @@ Example
 
 // Target variables ------------------------------------------------------------
 
-#define COMMON_ORDERING_HELP \
-    "\n" \
-    "Ordering of flags and values\n" \
-    "\n" \
-    "  1. Those set on the current target (not in a config).\n" \
-    "  2. Those set on the \"configs\" on the target in order that the\n" \
-    "     configs appear in the list.\n" \
-    "  3. Those set on the \"all_dependent_configs\" on the target in order\n" \
-    "     that the configs appear in the list.\n" \
-    "  4. Those set on the \"public_configs\" on the target in order that\n" \
-    "     those configs appear in the list.\n" \
-    "  5. all_dependent_configs pulled from dependencies, in the order of\n" \
-    "     the \"deps\" list. This is done recursively. If a config appears\n" \
-    "     more than once, only the first occurance will be used.\n" \
-    "  6. public_configs pulled from dependencies, in the order of the\n" \
-    "     \"deps\" list. If a dependency is public, they will be applied\n" \
-    "     recursively.\n"
+#define COMMON_ORDERING_HELP                                                 \
+  "\n"                                                                       \
+  "Ordering of flags and values\n"                                           \
+  "\n"                                                                       \
+  "  1. Those set on the current target (not in a config).\n"                \
+  "  2. Those set on the \"configs\" on the target in order that the\n"      \
+  "     configs appear in the list.\n"                                       \
+  "  3. Those set on the \"all_dependent_configs\" on the target in order\n" \
+  "     that the configs appear in the list.\n"                              \
+  "  4. Those set on the \"public_configs\" on the target in order that\n"   \
+  "     those configs appear in the list.\n"                                 \
+  "  5. all_dependent_configs pulled from dependencies, in the order of\n"   \
+  "     the \"deps\" list. This is done recursively. If a config appears\n"  \
+  "     more than once, only the first occurence will be used.\n"            \
+  "  6. public_configs pulled from dependencies, in the order of the\n"      \
+  "     \"deps\" list. If a dependency is public, they will be applied\n"    \
+  "     recursively.\n"
 
 const char kAllDependentConfigs[] = "all_dependent_configs";
 const char kAllDependentConfigs_HelpShort[] =
@@ -586,16 +586,34 @@ Example
 
   bundle_data("info_plist") {
     sources = [ "Info.plist" ]
-    outputs = [ "{{bundle_root_dir}}/Info.plist" ]
+    outputs = [ "{{bundle_contents_dir}}/Info.plist" ]
   }
 
   create_bundle("doom_melon.app") {
     deps = [ ":info_plist" ]
-    bundle_root_dir = root_build_dir + "/doom_melon.app/Contents"
-    bundle_resources_dir = bundle_root_dir + "/Resources"
-    bundle_executable_dir = bundle_root_dir + "/MacOS"
-    bundle_plugins_dir = bundle_root_dir + "/PlugIns"
+    bundle_root_dir = "${root_build_dir}/doom_melon.app"
+    bundle_contents_dir = "${bundle_root_dir}/Contents"
+    bundle_resources_dir = "${bundle_contents_dir}/Resources"
+    bundle_executable_dir = "${bundle_contents_dir}/MacOS"
+    bundle_plugins_dir = "${bundle_contents_dir}/PlugIns"
   }
+)";
+
+const char kBundleContentsDir[] = "bundle_contents_dir";
+const char kBundleContentsDir_HelpShort[] =
+    "bundle_contents_dir: "
+        "Expansion of {{bundle_contents_dir}} in create_bundle.";
+const char kBundleContentsDir_Help[] =
+    R"(bundle_contents_dir: Expansion of {{bundle_contents_dir}} in
+                             create_bundle.
+
+  A string corresponding to a path in $root_build_dir.
+
+  This string is used by the "create_bundle" target to expand the
+  {{bundle_contents_dir}} of the "bundle_data" target it depends on. This must
+  correspond to a path under "bundle_root_dir".
+
+  See "gn help bundle_root_dir" for examples.
 )";
 
 const char kBundleResourcesDir[] = "bundle_resources_dir";
@@ -954,7 +972,7 @@ const char kData_Help[] =
   However, no verification is done on these so GN doesn't enforce this. The
   paths are just rebased and passed along when requested.
 
-  Note: On iOS and OS X, create_bundle targets will not be recursed into when
+  Note: On iOS and macOS, create_bundle targets will not be recursed into when
   gathering data. See "gn help create_bundle" for details.
 
   See "gn help runtime_deps" for how these are used.
@@ -975,7 +993,7 @@ const char kDataDeps_Help[] =
   This is normally used for things like plugins or helper programs that a
   target needs at runtime.
 
-  Note: On iOS and OS X, create_bundle targets will not be recursed into when
+  Note: On iOS and macOS, create_bundle targets will not be recursed into when
   gathering data_deps. See "gn help create_bundle" for details.
 
   See also "gn help deps" and "gn help data".
@@ -1056,7 +1074,7 @@ const char kDeps_Help[] =
   A list of target labels.
 
   Specifies private dependencies of a target. Private dependencies are
-  propagated up the dependency tree and linked to dependant targets, but do not
+  propagated up the dependency tree and linked to dependent targets, but do not
   grant the ability to include headers from the dependency. Public configs are
   not forwarded.
 
@@ -1069,7 +1087,7 @@ Details of dependency propagation
   Executables, shared libraries, and complete static libraries will link all
   propagated targets and stop propagation. Actions and copy steps also stop
   propagation, allowing them to take a library as an input but not force
-  dependants to link to it.
+  dependents to link to it.
 
   Propagation of all_dependent_configs and public_configs happens independently
   of target type. all_dependent_configs are always propagated across all types
@@ -1260,14 +1278,14 @@ Types of libs
   System libraries
       Values not containing '/' will be treated as system library names. These
       will be passed unmodified to the linker and prefixed with the
-      "lib_prefix" attribute of the linker tool. Generally you would set the
+      "lib_switch" attribute of the linker tool. Generally you would set the
       "lib_dirs" so the given library is found. Your BUILD.gn file should not
-      specify the switch (like "-l"): this will be encoded in the "lib_prefix"
+      specify the switch (like "-l"): this will be encoded in the "lib_switch"
       of the tool.
 
   Apple frameworks
       System libraries ending in ".framework" will be special-cased: the switch
-      "-framework" will be prepended instead of the lib_prefix, and the
+      "-framework" will be prepended instead of the lib_switch, and the
       ".framework" suffix will be trimmed. This is to support the way Mac links
       framework dependencies.
 )"
@@ -1402,6 +1420,20 @@ Example
     output_prefix_override = true
     ...
   }
+)";
+
+const char kPartialInfoPlist[] = "partial_info_plist";
+const char kPartialInfoPlist_HelpShort[] =
+    "partial_info_plist: [filename] Path plist from asset catalog compiler.";
+const char kPartialInfoPlist_Help[] =
+    R"(partial_info_plist: [filename] Path plist from asset catalog compiler.
+
+  Valid for create_bundle target, corresponds to the path for the partial
+  Info.plist created by the asset catalog compiler that needs to be merged
+  with the application Info.plist (usually done by the code signing script).
+
+  The file will be generated regardless of whether the asset compiler has
+  been invoked or not. See "gn help create_bundle".
 )";
 
 const char kOutputs[] = "outputs";
@@ -1727,7 +1759,7 @@ Sources for binary targets
 
   As a special case, a file ending in ".def" will be treated as a Windows
   module definition file. It will be appended to the link line with a
-  preceeding "/DEF:" string. There must be at most one .def file in a target
+  preceding "/DEF:" string. There must be at most one .def file in a target
   and they do not cross dependency boundaries (so specifying a .def file in a
   static library or source set will have no effect on the executable or shared
   library they're linked into).
@@ -1917,6 +1949,7 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(Asmflags)
     INSERT_VARIABLE(AssertNoDeps)
     INSERT_VARIABLE(BundleRootDir)
+    INSERT_VARIABLE(BundleContentsDir)
     INSERT_VARIABLE(BundleResourcesDir)
     INSERT_VARIABLE(BundleDepsFilter)
     INSERT_VARIABLE(BundleExecutableDir)
@@ -1949,6 +1982,7 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(OutputName)
     INSERT_VARIABLE(OutputPrefixOverride)
     INSERT_VARIABLE(Outputs)
+    INSERT_VARIABLE(PartialInfoPlist)
     INSERT_VARIABLE(Pool)
     INSERT_VARIABLE(PrecompiledHeader)
     INSERT_VARIABLE(PrecompiledHeaderType)

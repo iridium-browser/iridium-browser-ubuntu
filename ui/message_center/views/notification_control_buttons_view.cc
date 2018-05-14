@@ -4,17 +4,23 @@
 
 #include "ui/message_center/views/notification_control_buttons_view.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/events/event.h"
 #include "ui/gfx/animation/linear_animation.h"
-#include "ui/message_center/message_center_style.h"
+#include "ui/gfx/color_palette.h"
+#include "ui/gfx/paint_vector_icon.h"
+#include "ui/message_center/public/cpp/message_center_constants.h"
+#include "ui/message_center/vector_icons.h"
 #include "ui/message_center/views/message_view.h"
 #include "ui/message_center/views/padded_button.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/background.h"
 #include "ui/views/layout/box_layout.h"
+
+namespace message_center {
 
 namespace {
 
@@ -24,12 +30,9 @@ constexpr auto kBackgroundColorChangeDuration =
     base::TimeDelta::FromMilliseconds(360);
 
 // The initial background color of the view.
-constexpr SkColor kInitialBackgroundColor =
-    message_center::kControlButtonBackgroundColor;
+constexpr SkColor kInitialBackgroundColor = kControlButtonBackgroundColor;
 
 }  // anonymous namespace
-
-namespace message_center {
 
 const char NotificationControlButtonsView::kViewClassName[] =
     "NotificationControlButtonsView";
@@ -40,7 +43,8 @@ NotificationControlButtonsView::NotificationControlButtonsView(
       bgcolor_origin_(kInitialBackgroundColor),
       bgcolor_target_(kInitialBackgroundColor) {
   DCHECK(message_view);
-  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kHorizontal));
+  SetLayoutManager(
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal));
 
   // Use layer to change the opacity.
   SetPaintToLayer();
@@ -53,10 +57,11 @@ NotificationControlButtonsView::~NotificationControlButtonsView() = default;
 
 void NotificationControlButtonsView::ShowCloseButton(bool show) {
   if (show && !close_button_) {
-    close_button_ = base::MakeUnique<message_center::PaddedButton>(this);
+    close_button_ = std::make_unique<PaddedButton>(this);
     close_button_->set_owned_by_client();
-    close_button_->SetImage(views::CustomButton::STATE_NORMAL,
-                            message_center::GetCloseIcon());
+    close_button_->SetImage(views::Button::STATE_NORMAL,
+                            gfx::CreateVectorIcon(kNotificationCloseButtonIcon,
+                                                  gfx::kChromeIconGrey));
     close_button_->SetAccessibleName(l10n_util::GetStringUTF16(
         IDS_MESSAGE_CENTER_CLOSE_NOTIFICATION_BUTTON_ACCESSIBLE_NAME));
     close_button_->SetTooltipText(l10n_util::GetStringUTF16(
@@ -75,10 +80,12 @@ void NotificationControlButtonsView::ShowCloseButton(bool show) {
 
 void NotificationControlButtonsView::ShowSettingsButton(bool show) {
   if (show && !settings_button_) {
-    settings_button_ = base::MakeUnique<message_center::PaddedButton>(this);
+    settings_button_ = std::make_unique<PaddedButton>(this);
     settings_button_->set_owned_by_client();
-    settings_button_->SetImage(views::CustomButton::STATE_NORMAL,
-                               message_center::GetSettingsIcon());
+    settings_button_->SetImage(
+        views::Button::STATE_NORMAL,
+        gfx::CreateVectorIcon(kNotificationSettingsButtonIcon,
+                              gfx::kChromeIconGrey));
     settings_button_->SetAccessibleName(l10n_util::GetStringUTF16(
         IDS_MESSAGE_NOTIFICATION_SETTINGS_BUTTON_ACCESSIBLE_NAME));
     settings_button_->SetTooltipText(l10n_util::GetStringUTF16(
@@ -131,13 +138,11 @@ bool NotificationControlButtonsView::IsSettingsButtonFocused() const {
   return settings_button_ && settings_button_->HasFocus();
 }
 
-message_center::PaddedButton* NotificationControlButtonsView::close_button()
-    const {
+views::Button* NotificationControlButtonsView::close_button() const {
   return close_button_.get();
 }
 
-message_center::PaddedButton* NotificationControlButtonsView::settings_button()
-    const {
+views::Button* NotificationControlButtonsView::settings_button() const {
   return settings_button_.get();
 }
 
@@ -150,7 +155,7 @@ void NotificationControlButtonsView::ButtonPressed(views::Button* sender,
   if (close_button_ && sender == close_button_.get()) {
     message_view_->OnCloseButtonPressed();
   } else if (settings_button_ && sender == settings_button_.get()) {
-    message_view_->OnSettingsButtonPressed();
+    message_view_->OnSettingsButtonPressed(event);
   }
 }
 

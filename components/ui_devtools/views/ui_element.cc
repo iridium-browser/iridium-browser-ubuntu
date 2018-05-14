@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "components/ui_devtools/Protocol.h"
 #include "components/ui_devtools/views/ui_element_delegate.h"
 #include "components/ui_devtools/views/view_element.h"
 #include "components/ui_devtools/views/widget_element.h"
@@ -26,6 +27,8 @@ UIElement::~UIElement() {
 
 std::string UIElement::GetTypeName() const {
   switch (type_) {
+    case UIElementType::ROOT:
+      return "Root";
     case UIElementType::WINDOW:
       return "Window";
     case UIElementType::WIDGET:
@@ -56,9 +59,12 @@ void UIElement::RemoveChild(UIElement* child) {
 }
 
 void UIElement::ReorderChild(UIElement* child, int new_index) {
-  // Remove |child| out of vector |children_|.
   auto iter = std::find(children_.begin(), children_.end(), child);
   DCHECK(iter != children_.end());
+
+  // Don't re-order if the new position is the same as the old position.
+  if (std::distance(children_.begin(), iter) == new_index)
+    return;
   children_.erase(iter);
 
   // Move child to new position |new_index| in vector |children_|.
@@ -68,11 +74,48 @@ void UIElement::ReorderChild(UIElement* child, int new_index) {
   delegate()->OnUIElementReordered(child->parent(), child);
 }
 
+template <class T>
+int UIElement::FindUIElementIdForBackendElement(T* element) const {
+  NOTREACHED();
+  return 0;
+}
+
+template <>
+int UIElement::FindUIElementIdForBackendElement<aura::Window>(
+    aura::Window* element) const {
+  if (type_ == UIElementType::WINDOW &&
+      UIElement::GetBackingElement<aura::Window, WindowElement>(this) ==
+          element) {
+    return node_id_;
+  }
+  for (auto* child : children_) {
+    int ui_element_id = child->FindUIElementIdForBackendElement(element);
+    if (ui_element_id)
+      return ui_element_id;
+  }
+  return 0;
+}
+
+template <>
+int UIElement::FindUIElementIdForBackendElement<views::View>(
+    views::View* element) const {
+  if (type_ == UIElementType::VIEW &&
+      UIElement::GetBackingElement<views::View, ViewElement>(this) == element) {
+    return node_id_;
+  }
+  for (auto* child : children_) {
+    int ui_element_id = child->FindUIElementIdForBackendElement(element);
+    if (ui_element_id)
+      return ui_element_id;
+  }
+  return 0;
+}
+
 UIElement::UIElement(const UIElementType type,
                      UIElementDelegate* delegate,
                      UIElement* parent)
     : node_id_(++node_ids), type_(type), parent_(parent), delegate_(delegate) {
-  delegate_->OnUIElementAdded(0, this);
+  delegate_->OnUIElementAdded(nullptr, this);
 }
 
 }  // namespace ui_devtools

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -18,6 +19,7 @@ from chromite.lib import cros_test_lib
 from chromite.lib import git
 from chromite.lib import gob_util
 from chromite.lib import osutils
+from chromite.lib import partial_mock
 from chromite.lib import portage_util
 from chromite.scripts import cros_mark_chrome_as_stable
 
@@ -261,7 +263,9 @@ class CrosMarkChromeAsStable(cros_test_lib.MockTempDirTestCase):
         mock.call(package_dir, ['add', new_ebuild_path]),
         mock.call(package_dir, ['rm', old_ebuild_path]),
     ])
-    commit_mock.assert_call(mock.call(commit_string_indicator, package_dir))
+    commit_mock.assert_called_with(
+        partial_mock.HasString(commit_string_indicator),
+        package_dir)
 
   def testStickyMarkAsStable(self):
     """Tests to see if we can mark chrome as stable for a new sticky release."""

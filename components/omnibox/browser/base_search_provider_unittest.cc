@@ -4,12 +4,15 @@
 
 #include "components/omnibox/browser/base_search_provider.h"
 
+#include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
 #include "components/omnibox/browser/autocomplete_scheme_classifier.h"
@@ -76,20 +79,21 @@ class BaseSearchProviderTest : public testing::Test {
             nullptr, std::unique_ptr<SearchTermsData>(new SearchTermsData),
             nullptr, std::unique_ptr<TemplateURLServiceClient>(), nullptr,
             nullptr, base::Closure()));
-    client_.reset(new NiceMock<MockAutocompleteProviderClient>());
+    client_.reset(new MockAutocompleteProviderClient());
     client_->set_template_url_service(std::move(template_url_service));
     provider_ = new NiceMock<TestBaseSearchProvider>(
         AutocompleteProvider::TYPE_SEARCH, client_.get());
   }
 
-  scoped_refptr<NiceMock<TestBaseSearchProvider> > provider_;
-  std::unique_ptr<NiceMock<MockAutocompleteProviderClient>> client_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  scoped_refptr<NiceMock<TestBaseSearchProvider>> provider_;
+  std::unique_ptr<MockAutocompleteProviderClient> client_;
 };
 
 TEST_F(BaseSearchProviderTest, PreserveAnswersWhenDeduplicating) {
   TemplateURLData data;
   data.SetURL("http://foo.com/url?bar={searchTerms}");
-  auto template_url = base::MakeUnique<TemplateURL>(data);
+  auto template_url = std::make_unique<TemplateURL>(data);
 
   TestBaseSearchProvider::MatchMap map;
   base::string16 query = base::ASCIIToUTF16("weather los angeles");
@@ -175,11 +179,10 @@ TEST_F(BaseSearchProviderTest, PreserveAnswersWhenDeduplicating) {
 TEST_F(BaseSearchProviderTest, MatchTailSuggestionProperly) {
   TemplateURLData data;
   data.SetURL("http://foo.com/url?bar={searchTerms}");
-  auto template_url = base::MakeUnique<TemplateURL>(data);
+  auto template_url = std::make_unique<TemplateURL>(data);
 
   AutocompleteInput autocomplete_input(
-      base::ASCIIToUTF16("weather"), 7, std::string(), GURL(), base::string16(),
-      metrics::OmniboxEventProto::BLANK, false, false, false, false, false,
+      base::ASCIIToUTF16("weather"), 7, metrics::OmniboxEventProto::BLANK,
       TestSchemeClassifier());
 
   EXPECT_CALL(*provider_, GetInput(_))

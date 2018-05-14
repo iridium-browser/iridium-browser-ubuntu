@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "components/arc/arc_bridge_service.h"
-#include "components/arc/instance_holder.h"
 
 namespace arc {
 
@@ -30,24 +29,25 @@ namespace {
 
 // The thin wrapper for InterfacePtr<T>, where T is one of ARC mojo Instance
 // class.
-template <typename T>
+template <typename InstanceType, typename HostType>
 class MojoChannelImpl : public ArcBridgeHostImpl::MojoChannel {
  public:
-  MojoChannelImpl(InstanceHolder<T>* holder, mojo::InterfacePtr<T> ptr)
+  MojoChannelImpl(ConnectionHolder<InstanceType, HostType>* holder,
+                  mojo::InterfacePtr<InstanceType> ptr)
       : holder_(holder), ptr_(std::move(ptr)) {
-    // Delay registration to the InstanceHolder until the version is ready.
+    // Delay registration to the ConnectionHolder until the version is ready.
   }
 
-  ~MojoChannelImpl() override { holder_->SetInstance(nullptr, 0); }
+  ~MojoChannelImpl() override { holder_->CloseInstance(ptr_.get()); }
 
-  void set_connection_error_handler(const base::Closure& error_handler) {
-    ptr_.set_connection_error_handler(error_handler);
+  void set_connection_error_handler(base::OnceClosure error_handler) {
+    ptr_.set_connection_error_handler(std::move(error_handler));
   }
 
   void QueryVersion() {
     // Note: the callback will not be called if |ptr_| is destroyed.
-    ptr_.QueryVersion(base::Bind(&MojoChannelImpl<T>::OnVersionReady,
-                                 base::Unretained(this)));
+    ptr_.QueryVersion(
+        base::Bind(&MojoChannelImpl::OnVersionReady, base::Unretained(this)));
   }
 
  private:
@@ -56,11 +56,11 @@ class MojoChannelImpl : public ArcBridgeHostImpl::MojoChannel {
   }
 
   // Owned by ArcBridgeService.
-  InstanceHolder<T>* const holder_;
+  ConnectionHolder<InstanceType, HostType>* const holder_;
 
   // Put as a last member to ensure that any callback tied to the |ptr_|
   // is not invoked.
-  mojo::InterfacePtr<T> ptr_;
+  mojo::InterfacePtr<InstanceType> ptr_;
 
   DISALLOW_COPY_AND_ASSIGN(MojoChannelImpl);
 };
@@ -75,7 +75,7 @@ ArcBridgeHostImpl::ArcBridgeHostImpl(ArcBridgeService* arc_bridge_service,
   DCHECK(arc_bridge_service_);
   DCHECK(instance_.is_bound());
   instance_.set_connection_error_handler(
-      base::Bind(&ArcBridgeHostImpl::OnClosed, base::Unretained(this)));
+      base::BindOnce(&ArcBridgeHostImpl::OnClosed, base::Unretained(this)));
   mojom::ArcBridgeHostPtr host_proxy;
   binding_.Bind(mojo::MakeRequest(&host_proxy));
   instance_->Init(std::move(host_proxy));
@@ -104,6 +104,12 @@ void ArcBridgeHostImpl::OnAuthInstanceReady(mojom::AuthInstancePtr auth_ptr) {
   OnInstanceReady(arc_bridge_service_->auth(), std::move(auth_ptr));
 }
 
+void ArcBridgeHostImpl::OnBackupSettingsInstanceReady(
+    mojom::BackupSettingsInstancePtr backup_settings_ptr) {
+  OnInstanceReady(arc_bridge_service_->backup_settings(),
+                  std::move(backup_settings_ptr));
+}
+
 void ArcBridgeHostImpl::OnBluetoothInstanceReady(
     mojom::BluetoothInstancePtr bluetooth_ptr) {
   OnInstanceReady(arc_bridge_service_->bluetooth(), std::move(bluetooth_ptr));
@@ -113,6 +119,17 @@ void ArcBridgeHostImpl::OnBootPhaseMonitorInstanceReady(
     mojom::BootPhaseMonitorInstancePtr boot_phase_monitor_ptr) {
   OnInstanceReady(arc_bridge_service_->boot_phase_monitor(),
                   std::move(boot_phase_monitor_ptr));
+}
+
+void ArcBridgeHostImpl::OnCastReceiverInstanceReady(
+    mojom::CastReceiverInstancePtr cast_receiver_ptr) {
+  OnInstanceReady(arc_bridge_service_->cast_receiver(),
+                  std::move(cast_receiver_ptr));
+}
+
+void ArcBridgeHostImpl::OnCertStoreInstanceReady(
+    mojom::CertStoreInstancePtr instance_ptr) {
+  OnInstanceReady(arc_bridge_service_->cert_store(), std::move(instance_ptr));
 }
 
 void ArcBridgeHostImpl::OnClipboardInstanceReady(
@@ -164,6 +181,11 @@ void ArcBridgeHostImpl::OnMetricsInstanceReady(
   OnInstanceReady(arc_bridge_service_->metrics(), std::move(metrics_ptr));
 }
 
+void ArcBridgeHostImpl::OnMidisInstanceReady(
+    mojom::MidisInstancePtr midis_ptr) {
+  OnInstanceReady(arc_bridge_service_->midis(), std::move(midis_ptr));
+}
+
 void ArcBridgeHostImpl::OnNetInstanceReady(mojom::NetInstancePtr net_ptr) {
   OnInstanceReady(arc_bridge_service_->net(), std::move(net_ptr));
 }
@@ -178,6 +200,11 @@ void ArcBridgeHostImpl::OnObbMounterInstanceReady(
     mojom::ObbMounterInstancePtr obb_mounter_ptr) {
   OnInstanceReady(arc_bridge_service_->obb_mounter(),
                   std::move(obb_mounter_ptr));
+}
+
+void ArcBridgeHostImpl::OnOemCryptoInstanceReady(
+    mojom::OemCryptoInstancePtr oemcrypto_ptr) {
+  OnInstanceReady(arc_bridge_service_->oemcrypto(), std::move(oemcrypto_ptr));
 }
 
 void ArcBridgeHostImpl::OnPolicyInstanceReady(
@@ -200,10 +227,27 @@ void ArcBridgeHostImpl::OnProcessInstanceReady(
   OnInstanceReady(arc_bridge_service_->process(), std::move(process_ptr));
 }
 
+void ArcBridgeHostImpl::OnRotationLockInstanceReady(
+    mojom::RotationLockInstancePtr rotation_lock_ptr) {
+  OnInstanceReady(arc_bridge_service_->rotation_lock(),
+                  std::move(rotation_lock_ptr));
+}
+
+void ArcBridgeHostImpl::OnScreenCaptureInstanceReady(
+    mojom::ScreenCaptureInstancePtr screen_capture_ptr) {
+  OnInstanceReady(arc_bridge_service_->screen_capture(),
+                  std::move(screen_capture_ptr));
+}
+
 void ArcBridgeHostImpl::OnStorageManagerInstanceReady(
     mojom::StorageManagerInstancePtr storage_manager_ptr) {
   OnInstanceReady(arc_bridge_service_->storage_manager(),
                   std::move(storage_manager_ptr));
+}
+
+void ArcBridgeHostImpl::OnTimerInstanceReady(
+    mojom::TimerInstancePtr timer_ptr) {
+  OnInstanceReady(arc_bridge_service_->timer(), std::move(timer_ptr));
 }
 
 void ArcBridgeHostImpl::OnTracingInstanceReady(
@@ -213,6 +257,11 @@ void ArcBridgeHostImpl::OnTracingInstanceReady(
 
 void ArcBridgeHostImpl::OnTtsInstanceReady(mojom::TtsInstancePtr tts_ptr) {
   OnInstanceReady(arc_bridge_service_->tts(), std::move(tts_ptr));
+}
+
+void ArcBridgeHostImpl::OnUsbHostInstanceReady(
+    mojom::UsbHostInstancePtr usb_host_ptr) {
+  OnInstanceReady(arc_bridge_service_->usb_host(), std::move(usb_host_ptr));
 }
 
 void ArcBridgeHostImpl::OnVideoInstanceReady(
@@ -254,9 +303,10 @@ void ArcBridgeHostImpl::OnClosed() {
     binding_.Close();
 }
 
-template <typename T>
-void ArcBridgeHostImpl::OnInstanceReady(InstanceHolder<T>* holder,
-                                        mojo::InterfacePtr<T> ptr) {
+template <typename InstanceType, typename HostType>
+void ArcBridgeHostImpl::OnInstanceReady(
+    ConnectionHolder<InstanceType, HostType>* holder,
+    mojo::InterfacePtr<InstanceType> ptr) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(binding_.is_bound());
   DCHECK(ptr.is_bound());
@@ -264,13 +314,14 @@ void ArcBridgeHostImpl::OnInstanceReady(InstanceHolder<T>* holder,
   // Track |channel|'s lifetime via |mojo_channels_| so that it will be
   // closed on ArcBridgeHost/Instance closing or the ArcBridgeHostImpl's
   // destruction.
-  auto* channel = new MojoChannelImpl<T>(holder, std::move(ptr));
+  auto* channel =
+      new MojoChannelImpl<InstanceType, HostType>(holder, std::move(ptr));
   mojo_channels_.emplace_back(channel);
 
   // Since |channel| is managed by |mojo_channels_|, its lifetime is shorter
   // than |this|. Thus, the connection error handler will be invoked only
   // when |this| is alive and base::Unretained is safe here.
-  channel->set_connection_error_handler(base::Bind(
+  channel->set_connection_error_handler(base::BindOnce(
       &ArcBridgeHostImpl::OnChannelClosed, base::Unretained(this), channel));
 
   // Call QueryVersion so that the version info is properly stored in the

@@ -35,7 +35,7 @@ GamepadProvider::ClosureAndThread::ClosureAndThread(
 GamepadProvider::ClosureAndThread::ClosureAndThread(
     const ClosureAndThread& other) = default;
 
-GamepadProvider::ClosureAndThread::~ClosureAndThread() {}
+GamepadProvider::ClosureAndThread::~ClosureAndThread() = default;
 
 GamepadProvider::GamepadProvider(
     GamepadConnectionChangeClient* connection_change_client)
@@ -44,7 +44,7 @@ GamepadProvider::GamepadProvider(
       devices_changed_(true),
       ever_had_user_gesture_(false),
       sanitize_(true),
-      gamepad_shared_buffer_(new GamepadSharedBuffer()),
+      gamepad_shared_buffer_(std::make_unique<GamepadSharedBuffer>()),
       connection_change_client_(connection_change_client) {
   Initialize(std::unique_ptr<GamepadDataFetcher>());
 }
@@ -57,7 +57,7 @@ GamepadProvider::GamepadProvider(
       devices_changed_(true),
       ever_had_user_gesture_(false),
       sanitize_(true),
-      gamepad_shared_buffer_(new GamepadSharedBuffer()),
+      gamepad_shared_buffer_(std::make_unique<GamepadSharedBuffer>()),
       connection_change_client_(connection_change_client) {
   Initialize(std::move(fetcher));
 }
@@ -90,16 +90,59 @@ base::SharedMemoryHandle GamepadProvider::DuplicateSharedMemoryHandle() {
 mojo::ScopedSharedBufferHandle GamepadProvider::GetSharedBufferHandle() {
   // TODO(heke): Use mojo::SharedBuffer rather than base::SharedMemory in
   // GamepadSharedBuffer. See crbug.com/670655 for details
-  base::SharedMemoryHandle handle = base::SharedMemory::DuplicateHandle(
-      gamepad_shared_buffer_->shared_memory()->handle());
-  return mojo::WrapSharedMemoryHandle(handle, sizeof(GamepadHardwareBuffer),
-                                      true /* read_only */);
+  return mojo::WrapSharedMemoryHandle(
+      gamepad_shared_buffer_->shared_memory()->GetReadOnlyHandle(),
+      sizeof(GamepadHardwareBuffer),
+      mojo::UnwrappedSharedMemoryHandleProtection::kReadOnly);
 }
 
 void GamepadProvider::GetCurrentGamepadData(Gamepads* data) {
   const Gamepads* pads = gamepad_shared_buffer_->buffer();
   base::AutoLock lock(shared_memory_lock_);
   *data = *pads;
+}
+
+void GamepadProvider::PlayVibrationEffectOnce(
+    int pad_index,
+    mojom::GamepadHapticEffectType type,
+    mojom::GamepadEffectParametersPtr params,
+    mojom::GamepadHapticsManager::PlayVibrationEffectOnceCallback callback) {
+  PadState* pad_state = GetConnectedPadState(pad_index);
+  if (!pad_state) {
+    std::move(callback).Run(
+        mojom::GamepadHapticsResult::GamepadHapticsResultError);
+    return;
+  }
+
+  GamepadDataFetcher* fetcher = GetSourceGamepadDataFetcher(pad_state->source);
+  if (!fetcher) {
+    std::move(callback).Run(
+        mojom::GamepadHapticsResult::GamepadHapticsResultNotSupported);
+    return;
+  }
+
+  fetcher->PlayEffect(pad_state->source_id, type, std::move(params),
+                      std::move(callback));
+}
+
+void GamepadProvider::ResetVibrationActuator(
+    int pad_index,
+    mojom::GamepadHapticsManager::ResetVibrationActuatorCallback callback) {
+  PadState* pad_state = GetConnectedPadState(pad_index);
+  if (!pad_state) {
+    std::move(callback).Run(
+        mojom::GamepadHapticsResult::GamepadHapticsResultError);
+    return;
+  }
+
+  GamepadDataFetcher* fetcher = GetSourceGamepadDataFetcher(pad_state->source);
+  if (!fetcher) {
+    std::move(callback).Run(
+        mojom::GamepadHapticsResult::GamepadHapticsResultNotSupported);
+    return;
+  }
+
+  fetcher->ResetVibration(pad_state->source_id, std::move(callback));
 }
 
 void GamepadProvider::Pause() {
@@ -173,14 +216,27 @@ void GamepadProvider::Initialize(std::unique_ptr<GamepadDataFetcher> fetcher) {
 void GamepadProvider::AddGamepadDataFetcher(
     std::unique_ptr<GamepadDataFetcher> fetcher) {
   polling_thread_->task_runner()->PostTask(
-      FROM_HERE, base::Bind(&GamepadProvider::DoAddGamepadDataFetcher,
-                            base::Unretained(this), base::Passed(&fetcher)));
+      FROM_HERE, base::BindOnce(&GamepadProvider::DoAddGamepadDataFetcher,
+                                base::Unretained(this), std::move(fetcher)));
 }
 
 void GamepadProvider::RemoveSourceGamepadDataFetcher(GamepadSource source) {
   polling_thread_->task_runner()->PostTask(
       FROM_HERE, base::Bind(&GamepadProvider::DoRemoveSourceGamepadDataFetcher,
                             base::Unretained(this), source));
+}
+
+GamepadDataFetcher* GamepadProvider::GetSourceGamepadDataFetcher(
+    GamepadSource source) {
+  for (GamepadFetcherVector::iterator it = data_fetchers_.begin();
+       it != data_fetchers_.end();) {
+    if ((*it)->source() == source) {
+      return it->get();
+    } else {
+      ++it;
+    }
+  }
+  return nullptr;
 }
 
 void GamepadProvider::DoAddGamepadDataFetcher(
@@ -230,7 +286,10 @@ void GamepadProvider::DoPoll() {
     devices_changed_ = false;
   }
 
-  // Loop through each registered data fetcher and poll it's gamepad data.
+  for (unsigned i = 0; i < Gamepads::kItemsLengthCap; ++i)
+    pad_states_.get()[i].is_active = false;
+
+  // Loop through each registered data fetcher and poll its gamepad data.
   // It's expected that GetGamepadData will mark each gamepad as active (via
   // GetPadState). If a gamepad is not marked as active during the calls to
   // GetGamepadData then it's assumed to be disconnected.
@@ -246,7 +305,8 @@ void GamepadProvider::DoPoll() {
     for (unsigned i = 0; i < Gamepads::kItemsLengthCap; ++i) {
       PadState& state = pad_states_.get()[i];
 
-      if (!state.active_state && state.source != GAMEPAD_SOURCE_NONE) {
+      if (!state.is_newly_active && !state.is_active &&
+          state.source != GAMEPAD_SOURCE_NONE) {
         auto pad = buffer->items[i];
         pad.connected = false;
         OnGamepadConnectionChange(false, i, pad);
@@ -273,17 +333,26 @@ void GamepadProvider::DoPoll() {
     for (unsigned i = 0; i < Gamepads::kItemsLengthCap; ++i) {
       PadState& state = pad_states_.get()[i];
 
-      if (state.active_state) {
-        if (state.active_state == GAMEPAD_NEWLY_ACTIVE &&
-            buffer->items[i].connected) {
-          OnGamepadConnectionChange(true, i, buffer->items[i]);
-        }
-        state.active_state = GAMEPAD_INACTIVE;
+      if (state.is_newly_active && buffer->items[i].connected) {
+        state.is_newly_active = false;
+        OnGamepadConnectionChange(true, i, buffer->items[i]);
       }
     }
   }
 
-  CheckForUserGesture();
+  bool did_notify = CheckForUserGesture();
+
+  // Avoid double-notifying gamepad connection observers when a gamepad is
+  // connected in the same polling cycle as the initial user gesture.
+  //
+  // If a gamepad is connected in the same polling cycle as the initial user
+  // gesture, the user gesture will trigger a gamepadconnected event during the
+  // CheckForUserGesture call above. If we don't clear |is_newly_active| here,
+  // we will notify again for the same gamepad on the next polling cycle.
+  if (did_notify) {
+    for (unsigned i = 0; i < Gamepads::kItemsLengthCap; ++i)
+      pad_states_.get()[i].is_newly_active = false;
+  }
 
   // Schedule our next interval of polling.
   ScheduleDoPoll();
@@ -313,10 +382,10 @@ void GamepadProvider::OnGamepadConnectionChange(bool connected,
     connection_change_client_->OnGamepadConnectionChange(connected, index, pad);
 }
 
-void GamepadProvider::CheckForUserGesture() {
+bool GamepadProvider::CheckForUserGesture() {
   base::AutoLock lock(user_gesture_lock_);
   if (user_gesture_observers_.empty() && ever_had_user_gesture_)
-    return;
+    return false;
 
   const Gamepads* pads = gamepad_shared_buffer_->buffer();
   if (GamepadsHaveUserGesture(*pads)) {
@@ -326,7 +395,9 @@ void GamepadProvider::CheckForUserGesture() {
           FROM_HERE, user_gesture_observers_[i].closure);
     }
     user_gesture_observers_.clear();
+    return true;
   }
+  return false;
 }
 
 }  // namespace device

@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef GPU_COMMAND_BUFFER_TESTS_TEXTURE_IMAGE_FACTORY_H_
+#define GPU_COMMAND_BUFFER_TESTS_TEXTURE_IMAGE_FACTORY_H_
+
 #include "gpu/command_buffer/service/image_factory.h"
 
 namespace gpu {
@@ -17,10 +20,11 @@ class TextureImageFactory : public gpu::ImageFactory {
       unsigned internalformat,
       int client_id,
       SurfaceHandle surface_handle) override;
-  scoped_refptr<gl::GLImage> CreateAnonymousImage(
-      const gfx::Size& size,
-      gfx::BufferFormat format,
-      unsigned internalformat) override;
+  scoped_refptr<gl::GLImage> CreateAnonymousImage(const gfx::Size& size,
+                                                  gfx::BufferFormat format,
+                                                  gfx::BufferUsage usage,
+                                                  unsigned internalformat,
+                                                  bool* is_cleared) override;
   unsigned RequiredTextureType() override;
   bool SupportsFormatRGB() override;
 
@@ -31,3 +35,5 @@ class TextureImageFactory : public gpu::ImageFactory {
 };
 
 }  // namespace gpu
+
+#endif  // GPU_COMMAND_BUFFER_TESTS_TEXTURE_IMAGE_FACTORY_H_

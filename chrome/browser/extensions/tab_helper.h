@@ -16,11 +16,10 @@
 #include "base/scoped_observer.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
 #include "chrome/browser/extensions/extension_reenabler.h"
+#include "chrome/common/chrome_render_frame.mojom.h"
 #include "chrome/common/extensions/mojom/inline_install.mojom.h"
 #include "chrome/common/extensions/webstore_install_result.h"
 #include "chrome/common/web_application_info.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_binding_set.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -50,7 +49,6 @@ class WebstoreInlineInstallerFactory;
 class TabHelper : public content::WebContentsObserver,
                   public ExtensionFunctionDispatcher::Delegate,
                   public ExtensionRegistryObserver,
-                  public content::NotificationObserver,
                   public content::WebContentsUserData<TabHelper>,
                   public mojom::InlineInstaller {
  public:
@@ -58,10 +56,6 @@ class TabHelper : public content::WebContentsObserver,
 
   void CreateHostedAppFromWebContents();
   bool CanCreateBookmarkApp() const;
-
-  void UpdateShortcutOnLoadComplete() {
-    update_shortcut_on_load_complete_ = true;
-  }
 
   // ScriptExecutionObserver::Delegate
   virtual void AddScriptExecutionObserver(ScriptExecutionObserver* observer);
@@ -80,9 +74,6 @@ class TabHelper : public content::WebContentsObserver,
   // |extension_app_id| is empty, or an extension can't be found given the
   // specified id.
   void SetExtensionAppById(const ExtensionId& extension_app_id);
-
-  // Set just the app icon, used by panels created by an extension.
-  void SetExtensionAppIconById(const ExtensionId& extension_app_id);
 
   const Extension* extension_app() const { return extension_app_; }
   bool is_app() const { return extension_app_ != NULL; }
@@ -109,10 +100,6 @@ class TabHelper : public content::WebContentsObserver,
     return active_tab_permission_granter_.get();
   }
 
-  // Sets a non-extension app icon associated with WebContents and fires an
-  // INVALIDATE_TYPE_TITLE navigation state change to trigger repaint of title.
-  void SetAppIcon(const SkBitmap& app_icon);
-
   // Sets the factory used to create inline webstore item installers.
   // Used for testing. Takes ownership of the factory instance.
   void SetWebstoreInlineInstallerFactoryForTests(
@@ -127,11 +114,10 @@ class TabHelper : public content::WebContentsObserver,
   void InvokeForContentRulesRegistries(const Func& func);
 
   // Different types of action when web app info is available.
-  // OnDidGetApplicationInfo uses this to dispatch calls.
+  // OnDidGetWebApplicationInfo uses this to dispatch calls.
   enum WebAppAction {
     NONE,               // No action at all.
     CREATE_HOSTED_APP,  // Create and install a hosted app.
-    UPDATE_SHORTCUT     // Update icon for app shortcut.
   };
 
   explicit TabHelper(content::WebContents* web_contents);
@@ -169,8 +155,9 @@ class TabHelper : public content::WebContentsObserver,
       DoInlineInstallCallback callback) override;
 
   // Message handlers.
-  void OnDidGetWebApplicationInfo(content::RenderFrameHost* sender,
-                                  const WebApplicationInfo& info);
+  void OnDidGetWebApplicationInfo(
+      chrome::mojom::ChromeRenderFrameAssociatedPtr chrome_render_frame,
+      const WebApplicationInfo& info);
   void OnGetAppInstallState(content::RenderFrameHost* host,
                             const GURL& requestor_url,
                             int return_route_id,
@@ -200,13 +187,8 @@ class TabHelper : public content::WebContentsObserver,
   void OnReenableComplete(const ExtensionId& extension_id,
                           ExtensionReenabler::ReenableResult result);
 
-  // content::NotificationObserver.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
-
   // Requests application info for the specified page. This is an asynchronous
-  // request. The delegate is notified by way of OnDidGetApplicationInfo when
+  // request. The delegate is notified by way of OnDidGetWebApplicationInfo when
   // the data is available.
   void GetApplicationInfo(WebAppAction action);
 
@@ -230,18 +212,13 @@ class TabHelper : public content::WebContentsObserver,
   // Cached web app info data.
   WebApplicationInfo web_app_info_;
 
-  // Which deferred action to perform when OnDidGetApplicationInfo is notified
-  // from a WebContents.
+  // Which deferred action to perform when OnDidGetWebApplicationInfo is
+  // notified from a WebContents.
   WebAppAction pending_web_app_action_;
 
   // Which navigation entry was active when the GetApplicationInfo request was
   // sent, for verification when the reply returns.
   int last_committed_nav_entry_unique_id_;
-
-  // Whether to trigger an update when the page load completes.
-  bool update_shortcut_on_load_complete_;
-
-  content::NotificationRegistrar registrar_;
 
   std::unique_ptr<ScriptExecutor> script_executor_;
 

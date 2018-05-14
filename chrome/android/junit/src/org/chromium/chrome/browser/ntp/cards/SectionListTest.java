@@ -6,12 +6,17 @@ package org.chromium.chrome.browser.ntp.cards;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -27,6 +32,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -35,6 +41,7 @@ import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.Callback;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.DisableHistogramsRule;
@@ -43,15 +50,19 @@ import org.chromium.chrome.browser.ntp.snippets.CategoryStatus;
 import org.chromium.chrome.browser.ntp.snippets.KnownCategories;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
+import org.chromium.chrome.browser.preferences.Pref;
+import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.suggestions.ContentSuggestionsAdditionalAction;
 import org.chromium.chrome.browser.suggestions.DestructionObserver;
 import org.chromium.chrome.browser.suggestions.SuggestionsEventReporter;
 import org.chromium.chrome.browser.suggestions.SuggestionsRanker;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
+import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 import org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.CategoryInfoBuilder;
 import org.chromium.chrome.test.util.browser.suggestions.FakeSuggestionsSource;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
+import org.chromium.net.NetworkChangeNotifier;
 
 import java.util.HashMap;
 import java.util.List;
@@ -59,18 +70,23 @@ import java.util.List;
 /**
  * Unit tests for {@link SuggestionsSection}.
  */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
+@DisableFeatures(ChromeFeatureList.NTP_ARTICLE_SUGGESTIONS_EXPANDABLE_HEADER)
 public class SectionListTest {
     @Rule
     public DisableHistogramsRule mDisableHistogramsRule = new DisableHistogramsRule();
     @Rule
-    public Features.Processor mFeaturesProcessor = new Features.Processor();
+    public TestRule mFeaturesProcessor = new Features.JUnitProcessor();
 
     @CategoryInt
     private static final int CATEGORY1 = 42;
     @CategoryInt
     private static final int CATEGORY2 = CATEGORY1 + 1;
+
+    private static final int ARTICLES_SECTION_ENABLED_PREF = Pref.NTP_ARTICLES_SECTION_ENABLED;
+
+    private static final int EXPANDABLE_HEADER_PREF = Pref.NTP_ARTICLES_LIST_VISIBLE;
 
     @Mock
     private SuggestionsUiDelegate mUiDelegate;
@@ -78,22 +94,35 @@ public class SectionListTest {
     private OfflinePageBridge mOfflinePageBridge;
     @Mock
     private SuggestionsEventReporter mEventReporter;
+    @Mock
+    private PrefServiceBridge mPrefServiceBridge;
+
     private FakeSuggestionsSource mSuggestionSource;
 
     @Before
     public void setUp() {
-        CardsVariationParameters.setTestVariationParams(new HashMap<String, String>());
+        // Ensure that NetworkChangeNotifier is initialized.
+        if (!NetworkChangeNotifier.isInitialized()) {
+            NetworkChangeNotifier.init();
+        }
+        NetworkChangeNotifier.forceConnectivityState(true);
+
+        CardsVariationParameters.setTestVariationParams(new HashMap<>());
         MockitoAnnotations.initMocks(this);
         mSuggestionSource = spy(new FakeSuggestionsSource());
 
         when(mUiDelegate.getSuggestionsSource()).thenReturn(mSuggestionSource);
         when(mUiDelegate.getEventReporter()).thenReturn(mEventReporter);
         when(mUiDelegate.getSuggestionsRanker()).thenReturn(new SuggestionsRanker());
+
+        doNothing().when(mPrefServiceBridge).setBoolean(anyInt(), anyBoolean());
+        PrefServiceBridge.setInstanceForTesting(mPrefServiceBridge);
     }
 
     @After
     public void tearDown() {
         CardsVariationParameters.setTestVariationParams(null);
+        PrefServiceBridge.setInstanceForTesting(null);
     }
 
     @Test
@@ -173,10 +202,10 @@ public class SectionListTest {
         List<SnippetArticle> newSuggestions1 = createDummySuggestions(2, CATEGORY1, "new");
         List<SnippetArticle> newSuggestions2 = createDummySuggestions(2, CATEGORY2, "new");
 
-        sectionList.getSectionForTesting(CATEGORY1).appendSuggestions(
-                newSuggestions1.subList(0, 1), /*keepSectionSize=*/false);
-        sectionList.getSectionForTesting(CATEGORY2).appendSuggestions(
-                newSuggestions2, /*keepSectionSize=*/false);
+        sectionList.getSection(CATEGORY1).appendSuggestions(newSuggestions1.subList(0, 1),
+                /* keepSectionSize = */ false, /* reportPrefetchedSuggestionsCount = */ false);
+        sectionList.getSection(CATEGORY2).appendSuggestions(newSuggestions2,
+                /* keepSectionSize = */ false, /* reportPrefetchedSuggestionsCount = */ false);
 
         bindViewHolders(sectionList, 3, sectionList.getItemCount());
 
@@ -209,8 +238,8 @@ public class SectionListTest {
         assertThat(newSuggestions2.get(1).getPerSectionRank(), equalTo(5));
 
         // Add one more suggestions1
-        sectionList.getSectionForTesting(CATEGORY1).appendSuggestions(
-                newSuggestions1.subList(1, 2), /*keepSectionSize=*/false);
+        sectionList.getSection(CATEGORY1).appendSuggestions(newSuggestions1.subList(1, 2),
+                /* keepSectionSize = */ false, /* reportPrefetchedSuggestionsCount = */ false);
         bindViewHolders(sectionList);
 
         // After the changes we should have:
@@ -259,13 +288,9 @@ public class SectionListTest {
         sectionList.refreshSuggestions();
         bindViewHolders(sectionList);
 
-        assertThat(sectionList.getSectionForTesting(CATEGORY1)
-                           .getActionItemForTesting()
-                           .getPerSectionRank(),
+        assertThat(sectionList.getSection(CATEGORY1).getActionItemForTesting().getPerSectionRank(),
                 equalTo(0));
-        assertThat(sectionList.getSectionForTesting(CATEGORY2)
-                           .getActionItemForTesting()
-                           .getPerSectionRank(),
+        assertThat(sectionList.getSection(CATEGORY2).getActionItemForTesting().getPerSectionRank(),
                 equalTo(3));
     }
 
@@ -288,7 +313,7 @@ public class SectionListTest {
         verify(mUiDelegate, atLeastOnce()).addDestructionObserver(argument.capture());
 
         assertFalse(sectionList.isEmpty());
-        SuggestionsSection section = sectionList.getSectionForTesting(CATEGORY1);
+        SuggestionsSection section = sectionList.getSection(CATEGORY1);
         assertNotNull(section);
 
         // Now destroy the UI and thus notify the SectionList.
@@ -307,7 +332,7 @@ public class SectionListTest {
 
         SectionList sectionList = new SectionList(mUiDelegate, mOfflinePageBridge);
         sectionList.refreshSuggestions();
-        SuggestionsSection articles = sectionList.getSectionForTesting(KnownCategories.ARTICLES);
+        SuggestionsSection articles = sectionList.getSection(KnownCategories.ARTICLES);
         assertFalse(articles.getHeaderItemForTesting().isVisible());
     }
 
@@ -318,7 +343,7 @@ public class SectionListTest {
 
         SectionList sectionList = new SectionList(mUiDelegate, mOfflinePageBridge);
         sectionList.refreshSuggestions();
-        SuggestionsSection section = sectionList.getSectionForTesting(CATEGORY1);
+        SuggestionsSection section = sectionList.getSection(CATEGORY1);
         assertTrue(section.getHeaderItemForTesting().isVisible());
     }
 
@@ -330,17 +355,81 @@ public class SectionListTest {
 
         SectionList sectionList = new SectionList(mUiDelegate, mOfflinePageBridge);
         sectionList.refreshSuggestions();
-        SuggestionsSection articles = sectionList.getSectionForTesting(KnownCategories.ARTICLES);
+        SuggestionsSection articles = sectionList.getSection(KnownCategories.ARTICLES);
         assertTrue(articles.getHeaderItemForTesting().isVisible());
     }
 
     @Test
-    @Features(@Features.Register(ChromeFeatureList.CHROME_HOME))
+    @Feature({"Ntp"})
+    @EnableFeatures(ChromeFeatureList.NTP_ARTICLE_SUGGESTIONS_EXPANDABLE_HEADER)
+    public void testArticlesHeaderShownWhenExplicitlyDisabled() {
+        when(mPrefServiceBridge.getBoolean(ARTICLES_SECTION_ENABLED_PREF)).thenReturn(true);
+        registerCategory(mSuggestionSource, KnownCategories.ARTICLES, 0);
+        mSuggestionSource.setStatusForCategory(
+                KnownCategories.ARTICLES, CategoryStatus.CATEGORY_EXPLICITLY_DISABLED);
+
+        SectionList sectionList = new SectionList(mUiDelegate, mOfflinePageBridge);
+        sectionList.refreshSuggestions();
+        SuggestionsSection section = sectionList.getSection(KnownCategories.ARTICLES);
+        assertEquals(1, section.getItemCount());
+        assertEquals(ItemViewType.HEADER, section.getItemViewType(0));
+        assertTrue(section.getHeaderItemForTesting().isVisible());
+    }
+
+    @Test
+    @Feature({"Ntp"})
+    @EnableFeatures(ChromeFeatureList.NTP_ARTICLE_SUGGESTIONS_EXPANDABLE_HEADER)
+    public void testArticlesHeaderHiddenWhenDisabledByPolicy() {
+        when(mPrefServiceBridge.getBoolean(ARTICLES_SECTION_ENABLED_PREF)).thenReturn(false);
+        registerCategory(mSuggestionSource, KnownCategories.ARTICLES, 0);
+        mSuggestionSource.setStatusForCategory(
+                KnownCategories.ARTICLES, CategoryStatus.CATEGORY_EXPLICITLY_DISABLED);
+
+        SectionList sectionList = new SectionList(mUiDelegate, mOfflinePageBridge);
+        sectionList.refreshSuggestions();
+        SuggestionsSection section = sectionList.getSection(KnownCategories.ARTICLES);
+        assertNull(section);
+    }
+
+    @Test
+    @Feature({"Ntp"})
+    @EnableFeatures(ChromeFeatureList.NTP_ARTICLE_SUGGESTIONS_EXPANDABLE_HEADER)
+    public void testSuggestionsVisibilityOnPreferenceChanged() {
+        when(mPrefServiceBridge.getBoolean(ARTICLES_SECTION_ENABLED_PREF)).thenReturn(true);
+        when(mPrefServiceBridge.getBoolean(EXPANDABLE_HEADER_PREF)).thenReturn(true);
+        registerCategory(mSuggestionSource, KnownCategories.ARTICLES, 3);
+
+        SectionList sectionList = new SectionList(mUiDelegate, mOfflinePageBridge);
+        sectionList.refreshSuggestions();
+
+        // The suggestions should be visible initially.
+        SuggestionsSection section = sectionList.getSection(KnownCategories.ARTICLES);
+        assertEquals(5, section.getItemCount());
+        assertEquals(ItemViewType.SNIPPET, section.getItemViewType(1));
+        assertEquals(ItemViewType.SNIPPET, section.getItemViewType(2));
+        assertEquals(ItemViewType.SNIPPET, section.getItemViewType(3));
+
+        // Simulate visibility changed on article header collapsed.
+        when(mPrefServiceBridge.getBoolean(EXPANDABLE_HEADER_PREF)).thenReturn(false);
+        mSuggestionSource.fireOnSuggestionsVisibilityChanged(KnownCategories.ARTICLES);
+        assertEquals(1, section.getItemCount());
+        assertEquals(ItemViewType.HEADER, section.getItemViewType(0));
+
+        // Simulate visibility changed on article header expanded.
+        when(mPrefServiceBridge.getBoolean(EXPANDABLE_HEADER_PREF)).thenReturn(true);
+        mSuggestionSource.fireOnSuggestionsVisibilityChanged(KnownCategories.ARTICLES);
+        assertEquals(5, section.getItemCount());
+        assertEquals(ItemViewType.SNIPPET, section.getItemViewType(1));
+        assertEquals(ItemViewType.SNIPPET, section.getItemViewType(2));
+        assertEquals(ItemViewType.SNIPPET, section.getItemViewType(3));
+    }
+
+    @Test
     public void testSynchroniseWithSourceWithNoChange() {
         registerCategory(mSuggestionSource, CATEGORY1, 1);
         registerCategory(mSuggestionSource, CATEGORY2, 2);
         when(mUiDelegate.isVisible()).thenReturn(true); // Prevent updates on new suggestions.
-        SectionList sectionList = spy(new SectionList(mUiDelegate, mOfflinePageBridge));
+        SectionList sectionList = new SectionList(mUiDelegate, mOfflinePageBridge);
         sectionList.refreshSuggestions();
 
         // No changes since initialisation
@@ -355,26 +444,26 @@ public class SectionListTest {
     }
 
     @Test
-    @Features(@Features.Register(ChromeFeatureList.CHROME_HOME))
     public void testSynchroniseWithSourceWithStaleSection() {
         final int initialSectionSize = 2;
         final int updatedSectionSize = 5;
         registerCategory(mSuggestionSource, CATEGORY1, 1);
-        registerCategory(mSuggestionSource, CATEGORY2, initialSectionSize);
+        List<SnippetArticle> suggestions =
+                registerCategory(mSuggestionSource, CATEGORY2, initialSectionSize);
         when(mUiDelegate.isVisible()).thenReturn(true); // Prevent updates on new suggestions.
-        SectionList sectionList = spy(new SectionList(mUiDelegate, mOfflinePageBridge));
+        SectionList sectionList = new SectionList(mUiDelegate, mOfflinePageBridge);
         sectionList.refreshSuggestions();
 
-        assertThat(sectionList.getSectionForTesting(CATEGORY2).getSuggestionsCount(),
-                is(initialSectionSize));
+        assertThat(sectionList.getSection(CATEGORY2).getSuggestionsCount(), is(initialSectionSize));
+
+        // Mark all suggestions as seen so that they cannot get replaced.
+        for (SnippetArticle suggestion : suggestions) suggestion.mExposed = true;
 
         // New suggestions are added, which will make CATEGORY2 stale.
-        bindViewHolders(sectionList);
         mSuggestionSource.setSuggestionsForCategory(
                 CATEGORY2, createDummySuggestions(updatedSectionSize, CATEGORY2));
-        assertTrue(sectionList.getSectionForTesting(CATEGORY2).isDataStale());
-        assertThat(sectionList.getSectionForTesting(CATEGORY2).getSuggestionsCount(),
-                is(initialSectionSize));
+        assertTrue(sectionList.getSection(CATEGORY2).isDataStale());
+        assertThat(sectionList.getSection(CATEGORY2).getSuggestionsCount(), is(initialSectionSize));
 
         clearInvocations(mSuggestionSource);
         sectionList.synchroniseWithSource();
@@ -384,12 +473,10 @@ public class SectionListTest {
         inOrder.verify(mSuggestionSource).getSuggestionsForCategory(CATEGORY2);
         // CATEGORY1 doesn't need to be refreshed.
         inOrder.verify(mSuggestionSource, never()).getSuggestionsForCategory(CATEGORY1);
-        assertThat(sectionList.getSectionForTesting(CATEGORY2).getSuggestionsCount(),
-                is(updatedSectionSize));
+        assertThat(sectionList.getSection(CATEGORY2).getSuggestionsCount(), is(updatedSectionSize));
     }
 
     @Test
-    @Features(@Features.Register(ChromeFeatureList.CHROME_HOME))
     public void testSynchroniseWithSourceWithChangedCategories() {
         registerCategory(mSuggestionSource, CATEGORY1, 1);
 
@@ -449,7 +536,7 @@ public class SectionListTest {
         assertFalse(sectionList.categoriesChanged(mSuggestionSource.getCategories()));
         assertFalse(sectionList.categoriesChanged(new int[] {CATEGORY1}));
 
-        mSuggestionSource.setStatusForCategory(CATEGORY2, CategoryStatus.AVAILABLE_LOADING);
+        mSuggestionSource.setStatusForCategory(CATEGORY2, CategoryStatus.AVAILABLE);
 
         // After notifying of a change for the category, it stops being ignored.
         assertTrue(sectionList.categoriesChanged(mSuggestionSource.getCategories()));

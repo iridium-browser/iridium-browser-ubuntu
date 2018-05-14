@@ -27,8 +27,9 @@ struct ActivationContext;
 // DataTypeController implementation for Unified Sync and Storage model types.
 class ModelTypeController : public DataTypeController {
  public:
-  using BridgeProvider = base::Callback<base::WeakPtr<ModelTypeSyncBridge>()>;
-  using BridgeTask = base::Callback<void(ModelTypeSyncBridge*)>;
+  using BridgeProvider =
+      base::OnceCallback<base::WeakPtr<ModelTypeSyncBridge>()>;
+  using BridgeTask = base::OnceCallback<void(ModelTypeSyncBridge*)>;
 
   ModelTypeController(
       ModelType type,
@@ -46,15 +47,18 @@ class ModelTypeController : public DataTypeController {
   void ActivateDataType(ModelTypeConfigurer* configurer) override;
   void DeactivateDataType(ModelTypeConfigurer* configurer) override;
   void Stop() override;
-  std::string name() const override;
   State state() const override;
   void GetAllNodes(const AllNodesCallback& callback) override;
   void GetStatusCounters(const StatusCountersCallback& callback) override;
   void RecordMemoryUsageHistogram() override;
 
+ protected:
+  void ReportModelError(const ModelError& error);
+
+  SyncClient* sync_client() const { return sync_client_; }
+
  private:
   void RecordStartFailure(ConfigureResult result) const;
-  void ReportModelError(const ModelError& error);
 
   // If the DataType controller is waiting for models to load, once the models
   // are loaded this function should be called to let the base class
@@ -73,8 +77,7 @@ class ModelTypeController : public DataTypeController {
 
   // Post the given task that requires the bridge object to run to the model
   // thread, where the bridge lives.
-  void PostBridgeTask(const tracked_objects::Location& location,
-                      const BridgeTask& task);
+  virtual void PostBridgeTask(const base::Location& location, BridgeTask task);
 
   // The sync client, which provides access to this type's ModelTypeSyncBridge.
   SyncClient* const sync_client_;

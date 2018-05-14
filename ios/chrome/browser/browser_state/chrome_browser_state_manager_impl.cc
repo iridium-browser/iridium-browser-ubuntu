@@ -12,6 +12,8 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/thread_restrictions.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/password_manager/core/browser/password_store.h"
@@ -20,6 +22,7 @@
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/ios/browser/active_state_manager.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/browser_state_info_cache.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state_impl.h"
@@ -37,8 +40,7 @@
 #include "ios/chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "ios/chrome/browser/signin/signin_manager_factory.h"
 #include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
-#include "ios/web/public/active_state_manager.h"
-#include "ios/web/public/web_thread.h"
+#include "ios/chrome/browser/sync/ios_user_event_service_factory.h"
 
 namespace {
 
@@ -54,7 +56,7 @@ int64_t ComputeFilesSize(const base::FilePath& directory,
 
 // Simple task to log the size of the browser state at |path|.
 void BrowserStateSizeTask(const base::FilePath& path) {
-  DCHECK_CURRENTLY_ON(web::WebThread::FILE);
+  base::AssertBlockingAllowed();
   const int64_t kBytesInOneMB = 1024 * 1024;
 
   int64_t size = ComputeFilesSize(path, FILE_PATH_LITERAL("*"));
@@ -113,16 +115,15 @@ ChromeBrowserStateManagerImpl::ChromeBrowserStateManagerImpl() {}
 ChromeBrowserStateManagerImpl::~ChromeBrowserStateManagerImpl() {
   for (const auto& pair : browser_states_) {
     ChromeBrowserStateImpl* browser_state = pair.second.get();
-    web::BrowserState::GetActiveStateManager(browser_state)->SetActive(false);
+    ActiveStateManager::FromBrowserState(browser_state)->SetActive(false);
     if (!browser_state->HasOffTheRecordChromeBrowserState())
       continue;
 
     web::BrowserState* otr_browser_state =
         browser_state->GetOffTheRecordChromeBrowserState();
-    if (!web::BrowserState::HasActiveStateManager(otr_browser_state))
+    if (!ActiveStateManager::ExistsForBrowserState(otr_browser_state))
       continue;
-    web::BrowserState::GetActiveStateManager(otr_browser_state)
-        ->SetActive(false);
+    ActiveStateManager::FromBrowserState(otr_browser_state)->SetActive(false);
   }
 }
 
@@ -140,8 +141,15 @@ ios::ChromeBrowserState* ChromeBrowserStateManagerImpl::GetBrowserState(
     return iter->second.get();
   }
 
+  // Get sequenced task runner for making sure that file operations of
+  // this profile are executed in expected order (what was previously assured by
+  // the FILE thread).
+  scoped_refptr<base::SequencedTaskRunner> io_task_runner =
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::TaskShutdownBehavior::BLOCK_SHUTDOWN, base::MayBlock()});
+
   std::unique_ptr<ChromeBrowserStateImpl> browser_state_impl(
-      new ChromeBrowserStateImpl(path));
+      new ChromeBrowserStateImpl(io_task_runner, path));
   DCHECK(!browser_state_impl->IsOffTheRecord());
 
   std::pair<ChromeBrowserStateImplPathMap::iterator, bool> insert_result =
@@ -190,9 +198,12 @@ void ChromeBrowserStateManagerImpl::DoFinalInit(
   // Log the browser state size after a reasonable startup delay.
   base::FilePath path =
       browser_state->GetOriginalChromeBrowserState()->GetStatePath();
-  web::WebThread::PostDelayedTask(web::WebThread::FILE, FROM_HERE,
-                                  base::Bind(&BrowserStateSizeTask, path),
-                                  base::TimeDelta::FromSeconds(112));
+  base::PostDelayedTaskWithTraits(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+      base::Bind(&BrowserStateSizeTask, path),
+      base::TimeDelta::FromSeconds(112));
 
   LogNumberOfBrowserStates(
       GetApplicationContext()->GetChromeBrowserStateManager());
@@ -213,6 +224,10 @@ void ChromeBrowserStateManagerImpl::DoFinalInitForServices(
       ->SetupInvalidationsOnProfileLoad(invalidation_service);
   ios::AccountReconcilorFactory::GetForBrowserState(browser_state);
   DesktopPromotionSyncServiceFactory::GetForBrowserState(browser_state);
+  // TODO(crbug.com/709094), TODO(crbug.com/761485): Remove this following line
+  // when UserEventService will be initialized synchronously. Until then, the
+  // service has to be created as early as possible.
+  IOSUserEventServiceFactory::GetForBrowserState(browser_state);
 }
 
 void ChromeBrowserStateManagerImpl::AddBrowserStateToCache(

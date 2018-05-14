@@ -32,8 +32,7 @@ import java.util.concurrent.TimeoutException;
  *  Simple tests of html5 video.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class VideoTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -45,8 +44,8 @@ public class VideoTest {
     @LargeTest
     @RetryOnFailure
     public void testLoadMediaUrl() throws InterruptedException, TimeoutException {
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         try {
             Tab tab = mActivityTestRule.getActivity().getActivityTab();
             TabTitleObserver titleObserver = new TabTitleObserver(tab, "ready_to_play");

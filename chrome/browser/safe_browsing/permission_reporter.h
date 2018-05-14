@@ -5,10 +5,10 @@
 #ifndef CHROME_BROWSER_SAFE_BROWSING_PERMISSION_REPORTER_H_
 #define CHROME_BROWSER_SAFE_BROWSING_PERMISSION_REPORTER_H_
 
-#include <queue>
 #include <string>
 #include <unordered_map>
 
+#include "base/containers/queue.h"
 #include "base/time/time.h"
 #include "chrome/browser/permissions/permission_uma_util.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -62,7 +62,7 @@ class PermissionReporter {
   // Used by tests. This constructor allows tests to have access to the
   // ReportSender and use a test Clock.
   PermissionReporter(std::unique_ptr<net::ReportSender> report_sender,
-                     std::unique_ptr<base::Clock> clock);
+                     base::Clock* clock);
 
   // Builds and serializes a permission report with |report_info| included.
   // The serialized report is written into |output|. Returns true if the
@@ -81,11 +81,11 @@ class PermissionReporter {
   // are not removed until a new report with the corresponding key is added. We
   // should address this issue if that becomes a problem in the future.
   std::unordered_map<PermissionAndOrigin,
-                     std::queue<base::Time>,
+                     base::queue<base::Time>,
                      PermissionAndOriginHash>
       report_logs_;
 
-  std::unique_ptr<base::Clock> clock_;
+  base::Clock* clock_;
 
   DISALLOW_COPY_AND_ASSIGN(PermissionReporter);
 };

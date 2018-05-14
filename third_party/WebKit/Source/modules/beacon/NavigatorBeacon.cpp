@@ -5,40 +5,38 @@
 #include "modules/beacon/NavigatorBeacon.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/modules/v8/ArrayBufferViewOrBlobOrStringOrFormData.h"
+#include "bindings/modules/v8/array_buffer_view_or_blob_or_string_or_form_data.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/fileapi/Blob.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
-#include "core/html/FormData.h"
+#include "core/html/forms/FormData.h"
 #include "core/loader/PingLoader.h"
 #include "core/typed_arrays/DOMArrayBufferView.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/loader/fetch/FetchUtils.h"
+#include "platform/loader/cors/CORS.h"
 
 namespace blink {
 
 NavigatorBeacon::NavigatorBeacon(Navigator& navigator)
-    : Supplement<Navigator>(navigator), transmitted_bytes_(0) {}
+    : Supplement<Navigator>(navigator) {}
 
-NavigatorBeacon::~NavigatorBeacon() {}
+NavigatorBeacon::~NavigatorBeacon() = default;
 
-DEFINE_TRACE(NavigatorBeacon) {
+void NavigatorBeacon::Trace(blink::Visitor* visitor) {
   Supplement<Navigator>::Trace(visitor);
 }
 
-const char* NavigatorBeacon::SupplementName() {
-  return "NavigatorBeacon";
-}
+const char NavigatorBeacon::kSupplementName[] = "NavigatorBeacon";
 
 NavigatorBeacon& NavigatorBeacon::From(Navigator& navigator) {
-  NavigatorBeacon* supplement = static_cast<NavigatorBeacon*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  NavigatorBeacon* supplement =
+      Supplement<Navigator>::From<NavigatorBeacon>(navigator);
   if (!supplement) {
     supplement = new NavigatorBeacon(navigator);
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
 }
@@ -64,32 +62,6 @@ bool NavigatorBeacon::CanSendBeacon(ExecutionContext* context,
   return true;
 }
 
-// Determine the remaining size allowance for Beacon transmissions.
-// If (-1) is returned, a no limit policy is in place, otherwise
-// it is the max size (in bytes) of a beacon request.
-//
-// The loader takes the allowance into account once the Beacon
-// payload size has been determined, deciding if the transmission
-// will be allowed to go ahead or not.
-int NavigatorBeacon::MaxAllowance() const {
-  DCHECK(GetSupplementable()->GetFrame());
-  const Settings* settings = GetSupplementable()->GetFrame()->GetSettings();
-  if (settings) {
-    int max_allowed = settings->GetMaxBeaconTransmission();
-    // Any negative value represent no max limit.
-    if (max_allowed < 0)
-      return -1;
-    if (static_cast<size_t>(max_allowed) <= transmitted_bytes_)
-      return 0;
-    return max_allowed - static_cast<int>(transmitted_bytes_);
-  }
-  return -1;
-}
-
-void NavigatorBeacon::AddTransmittedBytes(size_t sent_bytes) {
-  transmitted_bytes_ += sent_bytes;
-}
-
 bool NavigatorBeacon::sendBeacon(
     ScriptState* script_state,
     Navigator& navigator,
@@ -110,17 +82,14 @@ bool NavigatorBeacon::SendBeaconImpl(
   if (!CanSendBeacon(context, url, exception_state))
     return false;
 
-  int allowance = MaxAllowance();
-  size_t beacon_size = 0;
   bool allowed;
 
-  if (data.isArrayBufferView()) {
-    allowed =
-        PingLoader::SendBeacon(GetSupplementable()->GetFrame(), allowance, url,
-                               data.getAsArrayBufferView().View(), beacon_size);
-  } else if (data.isBlob()) {
-    Blob* blob = data.getAsBlob();
-    if (!FetchUtils::IsCORSSafelistedContentType(AtomicString(blob->type()))) {
+  if (data.IsArrayBufferView()) {
+    allowed = PingLoader::SendBeacon(GetSupplementable()->GetFrame(), url,
+                                     data.GetAsArrayBufferView().View());
+  } else if (data.IsBlob()) {
+    Blob* blob = data.GetAsBlob();
+    if (!CORS::IsCORSSafelistedContentType(blob->type())) {
       UseCounter::Count(context,
                         WebFeature::kSendBeaconWithNonSimpleContentType);
       if (RuntimeEnabledFeatures::
@@ -132,17 +101,17 @@ bool NavigatorBeacon::SendBeaconImpl(
         return false;
       }
     }
-    allowed = PingLoader::SendBeacon(GetSupplementable()->GetFrame(), allowance,
-                                     url, blob, beacon_size);
-  } else if (data.isString()) {
-    allowed = PingLoader::SendBeacon(GetSupplementable()->GetFrame(), allowance,
-                                     url, data.getAsString(), beacon_size);
-  } else if (data.isFormData()) {
-    allowed = PingLoader::SendBeacon(GetSupplementable()->GetFrame(), allowance,
-                                     url, data.getAsFormData(), beacon_size);
+    allowed =
+        PingLoader::SendBeacon(GetSupplementable()->GetFrame(), url, blob);
+  } else if (data.IsString()) {
+    allowed = PingLoader::SendBeacon(GetSupplementable()->GetFrame(), url,
+                                     data.GetAsString());
+  } else if (data.IsFormData()) {
+    allowed = PingLoader::SendBeacon(GetSupplementable()->GetFrame(), url,
+                                     data.GetAsFormData());
   } else {
-    allowed = PingLoader::SendBeacon(GetSupplementable()->GetFrame(), allowance,
-                                     url, String(), beacon_size);
+    allowed =
+        PingLoader::SendBeacon(GetSupplementable()->GetFrame(), url, String());
   }
 
   if (!allowed) {
@@ -150,9 +119,6 @@ bool NavigatorBeacon::SendBeaconImpl(
     return false;
   }
 
-  // Only accumulate transmission size if a limit is imposed.
-  if (allowance >= 0)
-    AddTransmittedBytes(beacon_size);
   return true;
 }
 

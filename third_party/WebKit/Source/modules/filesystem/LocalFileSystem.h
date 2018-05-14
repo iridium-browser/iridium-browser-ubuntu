@@ -51,11 +51,14 @@ class WebFileSystem;
 
 class LocalFileSystem final : public GarbageCollectedFinalized<LocalFileSystem>,
                               public Supplement<LocalFrame>,
-                              public Supplement<WorkerClients> {
+                              public Supplement<WorkerClients>,
+                              public TraceWrapperBase {
   USING_GARBAGE_COLLECTED_MIXIN(LocalFileSystem);
   WTF_MAKE_NONCOPYABLE(LocalFileSystem);
 
  public:
+  static const char kSupplementName[];
+
   LocalFileSystem(LocalFrame&, std::unique_ptr<FileSystemClient>);
   LocalFileSystem(WorkerClients&, std::unique_ptr<FileSystemClient>);
   ~LocalFileSystem();
@@ -70,18 +73,18 @@ class LocalFileSystem final : public GarbageCollectedFinalized<LocalFileSystem>,
 
   FileSystemClient& Client() const { return *client_; }
 
-  static const char* SupplementName();
   static LocalFileSystem* From(ExecutionContext&);
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  private:
   WebFileSystem* GetFileSystem() const;
   void FileSystemNotAvailable(ExecutionContext*, CallbackWrapper*);
 
   void RequestFileSystemAccessInternal(ExecutionContext*,
-                                       std::unique_ptr<WTF::Closure> allowed,
-                                       std::unique_ptr<WTF::Closure> denied);
+                                       base::OnceClosure allowed,
+                                       base::OnceClosure denied);
   void FileSystemNotAllowedInternal(ExecutionContext*, CallbackWrapper*);
   void FileSystemAllowedInternal(ExecutionContext*,
                                  FileSystemType,

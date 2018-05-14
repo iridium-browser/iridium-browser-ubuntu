@@ -11,7 +11,11 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/browser/conflicts/module_database_win.h"
 #include "chrome/common/conflicts/module_watcher_win.h"
+#include "chrome/test/base/scoped_testing_local_state.h"
+#include "chrome/test/base/testing_browser_process.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#include <windows.h>
 
 namespace {
 
@@ -27,11 +31,12 @@ const uint64_t kInvalidLoadAddress = 0xDEADBEEF;
 class ModuleEventSinkImplTest : public testing::Test {
  protected:
   ModuleEventSinkImplTest()
-      : module_database_(base::MakeUnique<ModuleDatabase>(
+      : scoped_testing_local_state_(TestingBrowserProcess::GetGlobal()),
+        module_database_(std::make_unique<ModuleDatabase>(
             base::SequencedTaskRunnerHandle::Get())) {}
 
   void CreateModuleSinkImpl() {
-    module_event_sink_impl_ = base::MakeUnique<ModuleEventSinkImpl>(
+    module_event_sink_impl_ = std::make_unique<ModuleEventSinkImpl>(
         ::GetCurrentProcess(), content::PROCESS_TYPE_BROWSER,
         module_database_.get());
   }
@@ -40,14 +45,9 @@ class ModuleEventSinkImplTest : public testing::Test {
     return module_database_->modules_;
   }
 
-  const ModuleDatabase::ProcessMap& processes() {
-    return module_database_->processes_;
-  }
-
-  uint32_t process_id() { return module_event_sink_impl_->process_id_; }
-
   // Must be before |module_database_|.
   base::test::ScopedTaskEnvironment scoped_task_environment_;
+  ScopedTestingLocalState scoped_testing_local_state_;
   std::unique_ptr<ModuleDatabase> module_database_;
   std::unique_ptr<ModuleEventSinkImpl> module_event_sink_impl_;
 
@@ -59,24 +59,17 @@ TEST_F(ModuleEventSinkImplTest, CallsForwardedAsExpected) {
   const uintptr_t kValidLoadAddress = reinterpret_cast<uintptr_t>(&__ImageBase);
 
   EXPECT_EQ(0u, modules().size());
-  EXPECT_EQ(0u, processes().size());
 
-  // Construction should immediately fire off a call to OnProcessStarted and
-  // create a process entry in the module database.
   CreateModuleSinkImpl();
-  EXPECT_EQ(::GetCurrentProcessId(), process_id());
   EXPECT_EQ(0u, modules().size());
-  EXPECT_EQ(1u, processes().size());
 
   // An invalid load event should not cause a module entry.
   module_event_sink_impl_->OnModuleEvent(
       mojom::ModuleEventType::MODULE_ALREADY_LOADED, kInvalidLoadAddress);
   EXPECT_EQ(0u, modules().size());
-  EXPECT_EQ(1u, processes().size());
 
   // A valid load event should cause a module entry.
   module_event_sink_impl_->OnModuleEvent(mojom::ModuleEventType::MODULE_LOADED,
                                          kValidLoadAddress);
   EXPECT_EQ(1u, modules().size());
-  EXPECT_EQ(1u, processes().size());
 }

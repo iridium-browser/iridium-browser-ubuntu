@@ -45,12 +45,14 @@ class Navigator;
 class MODULES_EXPORT NavigatorGamepad final
     : public GarbageCollectedFinalized<NavigatorGamepad>,
       public Supplement<Navigator>,
-      public ContextLifecycleObserver,
+      public DOMWindowClient,
       public PlatformEventController,
       public LocalDOMWindow::EventListenerObserver {
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorGamepad);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorGamepad* From(Document&);
   static NavigatorGamepad& From(Navigator&);
   ~NavigatorGamepad() override;
@@ -58,19 +60,19 @@ class MODULES_EXPORT NavigatorGamepad final
   static GamepadList* getGamepads(Navigator&);
   GamepadList* Gamepads();
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit NavigatorGamepad(Navigator&);
 
-  static const char* SupplementName();
-
   void DispatchOneEvent();
   void DidRemoveGamepadEventListeners();
   bool StartUpdatingIfAttached();
+  void SampleAndCheckConnectedGamepads();
+  bool CheckConnectedGamepads(GamepadList*, GamepadList*);
+  void CheckConnectedGamepad(Gamepad*, Gamepad*, bool*, bool*);
 
-  // ContextLifecycleObserver and PageVisibilityObserver
-  void ContextDestroyed(ExecutionContext*) override;
+  // PageVisibilityObserver
   void PageVisibilityChanged() override;
 
   // PlatformEventController
@@ -85,6 +87,7 @@ class MODULES_EXPORT NavigatorGamepad final
   void DidRemoveAllEventListeners(LocalDOMWindow*) override;
 
   Member<GamepadList> gamepads_;
+  Member<GamepadList> gamepads_back_;
   HeapDeque<Member<Gamepad>> pending_events_;
   Member<AsyncMethodRunner<NavigatorGamepad>> dispatch_one_event_runner_;
 };

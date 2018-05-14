@@ -7,6 +7,7 @@
 
 #include "core/workers/WorkletGlobalScopeProxy.h"
 
+#include "core/workers/MainThreadWorkletReportingProxy.h"
 #include "modules/ModulesExport.h"
 #include "modules/csspaint/PaintWorkletGlobalScope.h"
 
@@ -25,14 +26,17 @@ class MODULES_EXPORT PaintWorkletGlobalScopeProxy
   static PaintWorkletGlobalScopeProxy* From(WorkletGlobalScopeProxy*);
 
   PaintWorkletGlobalScopeProxy(LocalFrame*,
-                               PaintWorkletPendingGeneratorRegistry*);
-  virtual ~PaintWorkletGlobalScopeProxy() = default;
+                               PaintWorkletPendingGeneratorRegistry*,
+                               size_t global_scope_number);
+  ~PaintWorkletGlobalScopeProxy() override = default;
 
   // Implements WorkletGlobalScopeProxy.
-  void FetchAndInvokeScript(const KURL& module_url_record,
-                            WebURLRequest::FetchCredentialsMode,
-                            RefPtr<WebTaskRunner> outside_settings_task_runner,
-                            WorkletPendingTasks*) override;
+  void FetchAndInvokeScript(
+      const KURL& module_url_record,
+      WorkletModuleResponsesMap*,
+      network::mojom::FetchCredentialsMode,
+      scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
+      WorkletPendingTasks*) override;
   void WorkletObjectDestroyed() override;
   void TerminateWorkletGlobalScope() override;
 
@@ -40,9 +44,10 @@ class MODULES_EXPORT PaintWorkletGlobalScopeProxy
 
   PaintWorkletGlobalScope* global_scope() const { return global_scope_.Get(); }
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
+  std::unique_ptr<MainThreadWorkletReportingProxy> reporting_proxy_;
   Member<PaintWorkletGlobalScope> global_scope_;
 };
 

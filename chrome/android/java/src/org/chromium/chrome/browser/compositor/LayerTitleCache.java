@@ -129,10 +129,9 @@ public class LayerTitleCache implements TitleCache {
             isDarkTheme |= ColorUtils.shouldUseLightForegroundOnBackground(tab.getThemeColor());
         }
 
-        ColorUtils.shouldUseLightForegroundOnBackground(tab.getThemeColor());
         boolean isRtl = tab.isTitleDirectionRtl();
-        TitleBitmapFactory titleBitmapFactory = isDarkTheme
-                ? mDarkTitleBitmapFactory : mStandardTitleBitmapFactory;
+        TitleBitmapFactory titleBitmapFactory =
+                isDarkTheme ? mDarkTitleBitmapFactory : mStandardTitleBitmapFactory;
 
         Title title = mTitles.get(tabId);
         if (title == null) {

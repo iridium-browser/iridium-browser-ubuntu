@@ -25,11 +25,6 @@ ChromecastConfigAndroid* ChromecastConfigAndroid::GetInstance() {
   return g_instance.Pointer();
 }
 
-// static
-bool ChromecastConfigAndroid::RegisterJni(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
-
 ChromecastConfigAndroid::ChromecastConfigAndroid() {
 }
 
@@ -54,9 +49,10 @@ void ChromecastConfigAndroid::RunSendUsageStatsChangedCallback(bool enabled) {
 }
 
 // Called from Java.
-void SetSendUsageStatsEnabled(JNIEnv* env,
-                              const JavaParamRef<jclass>& caller,
-                              jboolean enabled) {
+void JNI_ChromecastConfigAndroid_SetSendUsageStatsEnabled(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& caller,
+    jboolean enabled) {
   ChromecastConfigAndroid::GetInstance()->RunSendUsageStatsChangedCallback(
       enabled);
 }

@@ -12,11 +12,11 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chromeos/settings/cros_settings_provider.h"
 #include "components/ownership/owner_settings_service.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/prefs/pref_value_map.h"
 
 namespace base {
@@ -53,6 +53,12 @@ class DeviceSettingsProvider
   TrustedStatus PrepareTrustedValues(const base::Closure& callback) override;
   bool HandlesSetting(const std::string& path) const override;
 
+  // Helper function that decodes policies from provided proto into the pref
+  // map.
+  static void DecodePolicies(
+      const enterprise_management::ChromeDeviceSettingsProto& policy,
+      PrefValueMap* new_values_cache);
+
  private:
   // CrosSettingsProvider implementation:
   void DoSet(const std::string& path, const base::Value& value) override;
@@ -76,11 +82,6 @@ class DeviceSettingsProvider
       const enterprise_management::PolicyData& policy_data,
       const enterprise_management::ChromeDeviceSettingsProto& settings,
       TrustedStatus trusted_status);
-
-  // Applies the data roaming policy.
-  void ApplyRoamingSetting(bool new_value);
-  void ApplyRoamingSettingFromProto(
-      const enterprise_management::ChromeDeviceSettingsProto& settings);
 
   // In case of missing policy blob we should verify if this is upgrade of
   // machine owned from pre version 12 OS and the user never touched the device

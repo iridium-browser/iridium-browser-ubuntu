@@ -15,7 +15,6 @@
 
 #include "base/format_macros.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_task_environment.h"
@@ -98,12 +97,12 @@ class GetURLTask : public history::HistoryDBTask {
 
   bool RunOnDBThread(history::HistoryBackend* backend,
                      history::HistoryDatabase* db) override {
-    *result_storage_ = backend->GetURL(url_, NULL);
+    *result_storage_ = backend->GetURL(url_, nullptr);
     return true;
   }
 
   void DoneRunOnMainThread() override {
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
  private:
@@ -198,7 +197,7 @@ class HistoryQuickProviderTest : public testing::Test {
 };
 
 void HistoryQuickProviderTest::SetUp() {
-  client_.reset(new FakeAutocompleteProviderClient());
+  client_ = std::make_unique<FakeAutocompleteProviderClient>();
   ASSERT_TRUE(client_->GetHistoryService());
   ASSERT_NO_FATAL_FAILURE(FillData());
 
@@ -219,14 +218,8 @@ void HistoryQuickProviderTest::SetUp() {
 
 void HistoryQuickProviderTest::TearDown() {
   provider_ = nullptr;
-  // The InMemoryURLIndex must be explicitly shut down or it will DCHECK() in
-  // its destructor.
-  client_->GetInMemoryURLIndex()->Shutdown();
-  client_->set_in_memory_url_index(nullptr);
-  // History index rebuild task is created from main thread during SetUp,
-  // performed on DB thread and must be deleted on main thread.
-  // Run main loop to process delete task, to prevent leaks.
-  base::RunLoop().RunUntilIdle();
+  client_.reset();
+  scoped_task_environment_.RunUntilIdle();
 }
 
 std::vector<HistoryQuickProviderTest::TestURLInfo>
@@ -332,10 +325,10 @@ void HistoryQuickProviderTest::RunTestWithCursor(
     base::string16 expected_autocompletion) {
   SCOPED_TRACE(text);  // Minimal hint to query being run.
   base::RunLoop().RunUntilIdle();
-  AutocompleteInput input(
-      text, cursor_position, std::string(), GURL(), base::string16(),
-      metrics::OmniboxEventProto::INVALID_SPEC, prevent_inline_autocomplete,
-      false, true, true, false, TestSchemeClassifier());
+  AutocompleteInput input(text, cursor_position,
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  input.set_prevent_inline_autocomplete(prevent_inline_autocomplete);
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->done());
 
@@ -387,6 +380,7 @@ bool HistoryQuickProviderTest::GetURLProxy(const GURL& url) {
   base::CancelableTaskTracker task_tracker;
   bool result = false;
   client_->GetHistoryService()->ScheduleDBTask(
+      FROM_HERE,
       std::unique_ptr<history::HistoryDBTask>(new GetURLTask(url, &result)),
       &task_tracker);
   // Run the message loop until GetURLTask::DoneRunOnMainThread stops it.  If
@@ -746,12 +740,87 @@ TEST_F(HistoryQuickProviderTest, PreventInlineAutocomplete) {
 }
 
 TEST_F(HistoryQuickProviderTest, DoesNotProvideMatchesOnFocus) {
-  AutocompleteInput input(ASCIIToUTF16("popularsite"), base::string16::npos,
-                          std::string(), GURL(), base::string16(),
-                          metrics::OmniboxEventProto::INVALID_SPEC, false,
-                          false, true, true, true, TestSchemeClassifier());
+  AutocompleteInput input(ASCIIToUTF16("popularsite"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  input.set_from_omnibox_focus(true);
   provider().Start(input, false);
   EXPECT_TRUE(provider().matches().empty());
+}
+
+ScoredHistoryMatch BuildScoredHistoryMatch(const std::string& url_text) {
+  return ScoredHistoryMatch(
+      history::URLRow(GURL(url_text)), VisitInfoVector(), ASCIIToUTF16("h"),
+      String16Vector(1, ASCIIToUTF16("h")), WordStarts(1, 0), RowWordStarts(),
+      false, 0, base::Time());
+}
+
+// Trim the http:// scheme from the contents in the general case.
+TEST_F(HistoryQuickProviderTest, DoTrimHttpScheme) {
+  AutocompleteInput input(ASCIIToUTF16("face"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  provider().Start(input, false);
+  ScoredHistoryMatch history_match =
+      BuildScoredHistoryMatch("http://www.facebook.com");
+
+  AutocompleteMatch match = provider().QuickMatchToACMatch(history_match, 100);
+  EXPECT_EQ(ASCIIToUTF16("facebook.com"), match.contents);
+}
+
+// Don't trim the http:// scheme from the match contents if
+// the user input included a scheme.
+TEST_F(HistoryQuickProviderTest, DontTrimHttpSchemeIfInputHasScheme) {
+  AutocompleteInput input(ASCIIToUTF16("http://face"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  provider().Start(input, false);
+  ScoredHistoryMatch history_match =
+      BuildScoredHistoryMatch("http://www.facebook.com");
+
+  AutocompleteMatch match = provider().QuickMatchToACMatch(history_match, 100);
+  EXPECT_EQ(ASCIIToUTF16("http://facebook.com"), match.contents);
+}
+
+// Don't trim the http:// scheme from the match contents if
+// the user input matched it.
+TEST_F(HistoryQuickProviderTest, DontTrimHttpSchemeIfInputMatches) {
+  AutocompleteInput input(ASCIIToUTF16("ht"), metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  provider().Start(input, false);
+  ScoredHistoryMatch history_match =
+      BuildScoredHistoryMatch("http://www.facebook.com");
+  history_match.match_in_scheme = true;
+
+  AutocompleteMatch match = provider().QuickMatchToACMatch(history_match, 100);
+  EXPECT_EQ(ASCIIToUTF16("http://facebook.com"), match.contents);
+}
+
+// Don't trim the https:// scheme from the match contents if the user input
+// included a scheme.
+TEST_F(HistoryQuickProviderTest, DontTrimHttpsSchemeIfInputHasScheme) {
+  AutocompleteInput input(ASCIIToUTF16("https://face"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  provider().Start(input, false);
+  ScoredHistoryMatch history_match =
+      BuildScoredHistoryMatch("https://www.facebook.com");
+
+  AutocompleteMatch match = provider().QuickMatchToACMatch(history_match, 100);
+  EXPECT_EQ(ASCIIToUTF16("https://facebook.com"), match.contents);
+}
+
+// Trim the https:// scheme from the match contents if nothing prevents it.
+TEST_F(HistoryQuickProviderTest, DoTrimHttpsScheme) {
+  AutocompleteInput input(ASCIIToUTF16("face"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  provider().Start(input, false);
+  ScoredHistoryMatch history_match =
+      BuildScoredHistoryMatch("https://www.facebook.com");
+
+  AutocompleteMatch match = provider().QuickMatchToACMatch(history_match, 100);
+  EXPECT_EQ(ASCIIToUTF16("facebook.com"), match.contents);
 }
 
 // HQPOrderingTest -------------------------------------------------------------
@@ -789,7 +858,7 @@ HQPOrderingTest::GetTestData() {
       {"http://store.steampowered.com/", "", 6, 6, 1},
       {"http://techmeme.com/", "techmeme", 111, 110, 4},
       {"http://www.teamliquid.net/tlpd", "team liquid progaming database", 15,
-       15, 2},
+       15, 4},
       {"http://store.steampowered.com/", "the steam summer camp sale", 6, 6, 1},
       {"http://www.teamliquid.net/tlpd/korean/players",
        "tlpd - bw korean - player index", 25, 7, 219},
@@ -824,7 +893,7 @@ TEST_F(HQPOrderingTest, TEAMatch) {
   std::vector<std::string> expected_urls;
   expected_urls.push_back("http://www.teamliquid.net/");
   expected_urls.push_back("http://www.teamliquid.net/tlpd");
-  expected_urls.push_back("http://www.teamliquid.net/tlpd/korean/players");
+  expected_urls.push_back("http://teamliquid.net/");
   RunTest(ASCIIToUTF16("tea"), false, expected_urls, true,
           ASCIIToUTF16("www.teamliquid.net"),
                  ASCIIToUTF16("mliquid.net"));

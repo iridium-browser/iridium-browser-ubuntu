@@ -29,6 +29,9 @@ class WebstoreBindings : public ObjectBackedNativeHandler,
   explicit WebstoreBindings(ScriptContext* context);
   ~WebstoreBindings() override;
 
+  // ObjectBackedNativeHandler:
+  void AddRoutes() override;
+
   // mojom::InlineInstallProgressListener:
   void InlineInstallStageChanged(api::webstore::InstallStage stage) override;
   void InlineInstallDownloadProgress(int percent_downloaded) override;
@@ -50,6 +53,9 @@ class WebstoreBindings : public ObjectBackedNativeHandler,
       const std::string& preferred_store_link_url,
       std::string* webstore_item_id,
       std::string* error);
+
+  // ObjectBackedNativeHandler:
+  void Invalidate() override;
 
   mojom::InlineInstallerAssociatedPtr inline_installer_;
 

@@ -31,11 +31,6 @@ class RstStreamPayloadDecoderPeer {
   // Returns the mask of flags that affect the decoding of the payload (i.e.
   // flags that that indicate the presence of certain fields or padding).
   static constexpr uint8_t FlagsAffectingPayloadDecoding() { return 0; }
-
-  static void Randomize(RstStreamPayloadDecoder* p, RandomBase* rng) {
-    VLOG(1) << "RstStreamPayloadDecoderPeer::Randomize";
-    test::Randomize(&p->rst_stream_fields_, rng);
-  }
 };
 
 namespace {
@@ -87,7 +82,7 @@ TEST_F(RstStreamPayloadDecoderTest, AllErrors) {
                             RandStreamId());
     set_frame_header(header);
     FrameParts expected(header);
-    expected.opt_rst_stream_error_code = error_code;
+    expected.SetOptRstStreamErrorCode(error_code);
     EXPECT_TRUE(DecodePayloadAndValidateSeveralWays(fb.buffer(), expected));
   }
 }

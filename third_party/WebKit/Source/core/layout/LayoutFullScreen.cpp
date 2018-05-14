@@ -44,7 +44,7 @@ class LayoutFullScreenPlaceholder final : public LayoutBlockFlow {
   }
 
   // Must call setStyleWithWritingModeOfParent() instead.
-  void SetStyle(PassRefPtr<ComputedStyle>) = delete;
+  void SetStyle(scoped_refptr<ComputedStyle>) = delete;
 
  private:
   bool IsOfType(LayoutObjectType type) const override {
@@ -77,6 +77,9 @@ LayoutFullScreen* LayoutFullScreen::CreateAnonymous(Document* document) {
 
 void LayoutFullScreen::WillBeDestroyed() {
   if (placeholder_) {
+    // Remove children before self.
+    if (LayoutObjectChildList* children = Children())
+      children->DestroyLeftoverChildren();
     Remove();
     if (!placeholder_->BeingDestroyed())
       placeholder_->Destroy();
@@ -93,7 +96,7 @@ void LayoutFullScreen::WillBeDestroyed() {
 }
 
 void LayoutFullScreen::UpdateStyle(LayoutObject* parent) {
-  RefPtr<ComputedStyle> fullscreen_style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> fullscreen_style = ComputedStyle::Create();
 
   // Create a stacking context:
   fullscreen_style->SetZIndex(INT_MAX);
@@ -103,11 +106,11 @@ void LayoutFullScreen::UpdateStyle(LayoutObject* parent) {
   fullscreen_style->GetFont().Update(nullptr);
 
   fullscreen_style->SetDisplay(EDisplay::kFlex);
-  fullscreen_style->SetJustifyContentPosition(kContentPositionCenter);
+  fullscreen_style->SetJustifyContentPosition(ContentPosition::kCenter);
   // TODO (lajava): Since the FullScrenn layout object is anonymous, its Default
   // Alignment (align-items) value can't be used to resolve its children Self
   // Alignment 'auto' values.
-  fullscreen_style->SetAlignItemsPosition(kItemPositionCenter);
+  fullscreen_style->SetAlignItemsPosition(ItemPosition::kCenter);
   fullscreen_style->SetFlexDirection(EFlexDirection::kColumn);
 
   fullscreen_style->SetPosition(EPosition::kFixed);
@@ -132,6 +135,9 @@ LayoutObject* LayoutFullScreen::WrapLayoutObject(LayoutObject* object,
   // FIXME: We should not modify the structure of the layout tree during
   // layout. crbug.com/370459
   DeprecatedDisableModifyLayoutTreeStructureAsserts disabler;
+
+  // A fullscreen <html> element should not be wrapped (see crbug.com/676432).
+  DCHECK(!object || object->GetNode() != document->documentElement());
 
   LayoutFullScreen* fullscreen_layout_object =
       LayoutFullScreen::CreateAnonymous(document);
@@ -202,7 +208,7 @@ void LayoutFullScreen::UnwrapLayoutObject() {
   Destroy();
 }
 
-void LayoutFullScreen::CreatePlaceholder(PassRefPtr<ComputedStyle> style,
+void LayoutFullScreen::CreatePlaceholder(scoped_refptr<ComputedStyle> style,
                                          const LayoutRect& frame_rect) {
   if (style->Width().IsAuto())
     style->SetWidth(Length(frame_rect.Width(), kFixed));

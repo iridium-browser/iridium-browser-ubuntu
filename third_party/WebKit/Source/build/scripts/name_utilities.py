@@ -32,21 +32,41 @@ import re
 
 # Acronyms are kept as all caps.
 ACRONYMS = [
+    '2D',
+    '2G',
     '3D',
-    'CSSOM',
+    '3G',
+    'API',
+    'CORS',
+    'CSP',
     'CSS',
+    'CSSOM',
     'DNS',
+    'DOM',
     'FE',
     'FTP',
+    'GL',
     'HTML',
+    'IDB',
+    'IFrame',
     'JS',
+    'NFC',
+    'NG',
+    'OM',
+    'RFC',
+    'RTCRtp',
     'SMIL',
     'SVG',
+    'UI',
     'URL',
+    'USB',
+    'VR',
+    'VTT',
     'WOFF',
     'XML',
     'XSLT',
     'XSS',
+    'YUV',
 ]
 
 
@@ -120,9 +140,9 @@ def enum_for_css_property(property_name):
 def enum_for_css_property_alias(property_name):
     return 'CSSPropertyAlias' + upper_camel_case(property_name)
 
-# TODO(shend): Merge these with the above methods.
+# FIXME: Merge these with the above methods.
 # and update all the generators to use these ones.
-# TODO(shend): Switch external callers of these methods to use the high level
+# FIXME: Switch external callers of these methods to use the high level
 # API below instead.
 
 

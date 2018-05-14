@@ -14,9 +14,7 @@
 
 namespace blink {
 
-class USBIsochronousInTransferResult final
-    : public GarbageCollectedFinalized<USBIsochronousInTransferResult>,
-      public ScriptWrappable {
+class USBIsochronousInTransferResult final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -43,16 +41,17 @@ class USBIsochronousInTransferResult final
       const HeapVector<Member<USBIsochronousInTransferPacket>>& packets)
       : data_(data), packets_(packets) {}
 
-  virtual ~USBIsochronousInTransferResult() {}
+  virtual ~USBIsochronousInTransferResult() = default;
 
   DOMDataView* data() const { return data_; }
   const HeapVector<Member<USBIsochronousInTransferPacket>>& packets() const {
     return packets_;
   }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(data_);
     visitor->Trace(packets_);
+    ScriptWrappable::Trace(visitor);
   }
 
  private:

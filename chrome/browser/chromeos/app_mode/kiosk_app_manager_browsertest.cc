@@ -13,7 +13,6 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
@@ -278,7 +277,7 @@ class KioskAppManagerTest : public InProcessBrowserTest {
   // Locks device for enterprise.
   InstallAttributes::LockResult LockDeviceForEnterprise() {
     std::unique_ptr<InstallAttributes::LockResult> lock_result =
-        base::MakeUnique<InstallAttributes::LockResult>(
+        std::make_unique<InstallAttributes::LockResult>(
             InstallAttributes::LOCK_NOT_READY);
     scoped_refptr<content::MessageLoopRunner> runner =
         new content::MessageLoopRunner;
@@ -325,14 +324,12 @@ class KioskAppManagerTest : public InProcessBrowserTest {
     // Fake an account id. Note this needs to match GenerateKioskAppAccountId
     // in kiosk_app_manager.cc to make SetAutoLaunchApp work with the
     // existing app entry created here.
-    entry->SetStringWithoutPathExpansion(kAccountsPrefDeviceLocalAccountsKeyId,
-                                         app_id + "@kiosk-apps");
-    entry->SetIntegerWithoutPathExpansion(
-        kAccountsPrefDeviceLocalAccountsKeyType,
-        policy::DeviceLocalAccount::TYPE_KIOSK_APP);
-    entry->SetStringWithoutPathExpansion(
-        kAccountsPrefDeviceLocalAccountsKeyKioskAppId,
-        app_id);
+    entry->SetKey(kAccountsPrefDeviceLocalAccountsKeyId,
+                  base::Value(app_id + "@kiosk-apps"));
+    entry->SetKey(kAccountsPrefDeviceLocalAccountsKeyType,
+                  base::Value(policy::DeviceLocalAccount::TYPE_KIOSK_APP));
+    entry->SetKey(kAccountsPrefDeviceLocalAccountsKeyKioskAppId,
+                  base::Value(app_id));
     device_local_accounts.Append(std::move(entry));
     owner_settings_service_->Set(kAccountsPrefDeviceLocalAccounts,
                                  device_local_accounts);
@@ -594,8 +591,8 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateAppDataFromCrx) {
   ExternalCachePutWaiter put_waiter;
   manager()->PutValidatedExternalExtension(
       kAppId, crx_file, "2.0.0",
-      base::Bind(&ExternalCachePutWaiter::OnPutExtension,
-                 base::Unretained(&put_waiter)));
+      base::BindOnce(&ExternalCachePutWaiter::OnPutExtension,
+                     base::Unretained(&put_waiter)));
   put_waiter.Wait();
   ASSERT_TRUE(put_waiter.success());
 
@@ -681,7 +678,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, RemoveApp) {
 
   // Remove the app now.
   manager()->RemoveApp(kTestLocalFsKioskApp, owner_settings_service_.get());
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   manager()->GetApps(&apps);
   ASSERT_EQ(0u, apps.size());
   EXPECT_FALSE(base::PathExists(crx_path));
@@ -763,7 +760,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, UpdateAndRemoveApp) {
 
   // Remove the app now.
   manager()->RemoveApp(kTestLocalFsKioskApp, owner_settings_service_.get());
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   manager()->GetApps(&apps);
   ASSERT_EQ(0u, apps.size());
   // Verify both v1 and v2 crx files are removed.

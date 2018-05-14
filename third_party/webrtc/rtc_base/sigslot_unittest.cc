@@ -8,9 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/sigslot.h"
-
-#include "webrtc/rtc_base/gunit.h"
+#include "rtc_base/sigslot.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/sigslotrepeater.h"
 
 // This function, when passed a has_slots or signalx, will break the build if
 // its threading requirement is not single threaded
@@ -125,7 +125,7 @@ class SigslotMTLockTest : public SigslotMTLockBase {
  protected:
   SigslotMTLockTest() {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     EXPECT_EQ(0, SlotLockCount());
     SigslotMTLockBase::SetUp();
     // Connects to two signals (ST and MT). However,
@@ -134,7 +134,7 @@ class SigslotMTLockTest : public SigslotMTLockBase {
     // keep track of their own count).
     EXPECT_EQ(1, SlotLockCount());
   }
-  virtual void TearDown() {
+  void TearDown() override {
     const int previous_lock_count = SlotLockCount();
     SigslotMTLockBase::TearDown();
     // Disconnects from two signals. Note analogous to SetUp().
@@ -354,4 +354,37 @@ TEST(SigslotTest, CallDisconnectAllWhileSignalFiring) {
 
   EXPECT_EQ(1, receiver1.signal_count());
   EXPECT_EQ(0, receiver2.signal_count());
+}
+
+// Basic test that a sigslot repeater works.
+TEST(SigslotRepeaterTest, RepeatsSignalsAfterRepeatCalled) {
+  sigslot::signal<> signal;
+  sigslot::repeater<> repeater;
+  repeater.repeat(signal);
+  // Note that receiver is connected to the repeater, not directly to the
+  // source signal.
+  SigslotReceiver<> receiver;
+  receiver.Connect(&repeater);
+  // The repeater should repeat the signal, causing the receiver to see it.
+  signal();
+  EXPECT_EQ(1, receiver.signal_count());
+  // Repeat another signal for good measure.
+  signal();
+  EXPECT_EQ(2, receiver.signal_count());
+}
+
+// After calling "stop", a repeater should stop repeating signals.
+TEST(SigslotRepeaterTest, StopsRepeatingSignalsAfterStopCalled) {
+  // Same setup as above test.
+  sigslot::signal<> signal;
+  sigslot::repeater<> repeater;
+  repeater.repeat(signal);
+  SigslotReceiver<> receiver;
+  receiver.Connect(&repeater);
+  signal();
+  ASSERT_EQ(1, receiver.signal_count());
+  // Now call stop. The next signal should NOT propagate to the receiver.
+  repeater.stop(signal);
+  signal();
+  EXPECT_EQ(1, receiver.signal_count());
 }

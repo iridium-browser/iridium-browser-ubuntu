@@ -25,7 +25,7 @@ DevicePermissionsDialogController::~DevicePermissionsDialogController() {
   prompt_->SetObserver(nullptr);
 }
 
-bool DevicePermissionsDialogController::ShouldShowFootnoteView() const {
+bool DevicePermissionsDialogController::ShouldShowHelpButton() const {
   return false;
 }
 
@@ -55,12 +55,6 @@ base::string16 DevicePermissionsDialogController::GetOption(
              : l10n_util::GetStringFUTF16(
                    IDS_DEVICE_CHOOSER_DEVICE_NAME_WITH_ID, device_name,
                    prompt_->GetDeviceSerialNumber(index));
-}
-
-void DevicePermissionsDialogController::RefreshOptions() {}
-
-base::string16 DevicePermissionsDialogController::GetStatus() const {
-  return base::string16();
 }
 
 void DevicePermissionsDialogController::Select(

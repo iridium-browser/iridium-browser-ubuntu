@@ -40,7 +40,7 @@ Disassembler::Disassembler(const uint8_t* start, size_t length)
   end_ = start_ + length_;
 }
 
-Disassembler::~Disassembler() {}
+Disassembler::~Disassembler() = default;
 
 const uint8_t* Disassembler::FileOffsetToPointer(FileOffset file_offset) const {
   CHECK_LE(file_offset, static_cast<FileOffset>(end_ - start_));
@@ -60,7 +60,7 @@ std::unique_ptr<AssemblyProgram> Disassembler::CreateProgram(bool annotate) {
     return nullptr;
 
   std::unique_ptr<AssemblyProgram> program =
-      base::MakeUnique<AssemblyProgram>(kind(), image_base());
+      std::make_unique<AssemblyProgram>(kind(), image_base());
 
   PrecomputeLabels(program.get());
   RemoveUnusedRel32Locations(program.get());

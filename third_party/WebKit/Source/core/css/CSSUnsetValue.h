@@ -5,10 +5,14 @@
 #ifndef CSSUnsetValue_h
 #define CSSUnsetValue_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/css/CSSValue.h"
-#include "platform/wtf/PassRefPtr.h"
 
 namespace blink {
+
+class CSSValuePool;
+
+namespace cssvalue {
 
 class CSSUnsetValue : public CSSValue {
  public:
@@ -18,18 +22,19 @@ class CSSUnsetValue : public CSSValue {
 
   bool Equals(const CSSUnsetValue&) const { return true; }
 
-  DEFINE_INLINE_TRACE_AFTER_DISPATCH() {
+  void TraceAfterDispatch(blink::Visitor* visitor) {
     CSSValue::TraceAfterDispatch(visitor);
   }
 
  private:
-  friend class CSSValuePool;
+  friend class ::blink::CSSValuePool;
 
   CSSUnsetValue() : CSSValue(kUnsetClass) {}
 };
 
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSUnsetValue, IsUnsetValue());
 
+}  // namespace cssvalue
 }  // namespace blink
 
 #endif  // CSSUnsetValue_h

@@ -15,7 +15,6 @@
 #include "ash/system/network/vpn_list.h"
 #include "ash/system/network/vpn_list_view.h"
 #include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_item_more.h"
 #include "ash/system/tray/tray_popup_item_style.h"
@@ -45,7 +44,7 @@ class VpnDefaultView : public TrayItemMore,
   static bool ShouldShow() {
     // Show the VPN entry in the ash tray bubble if at least one third-party VPN
     // provider is installed.
-    if (Shell::Get()->vpn_list()->HaveThirdPartyVPNProviders())
+    if (Shell::Get()->vpn_list()->HaveThirdPartyOrArcVPNProviders())
       return true;
 
     // Also show the VPN entry if at least one VPN network is configured.
@@ -146,7 +145,7 @@ TrayVPN::TrayVPN(SystemTray* system_tray)
   network_state_observer_.reset(new TrayNetworkStateObserver(this));
 }
 
-TrayVPN::~TrayVPN() {}
+TrayVPN::~TrayVPN() = default;
 
 views::View* TrayVPN::CreateDefaultView(LoginStatus status) {
   CHECK(default_ == nullptr);
@@ -187,7 +186,7 @@ void TrayVPN::OnDetailedViewDestroyed() {
   detailed_ = nullptr;
 }
 
-void TrayVPN::NetworkStateChanged() {
+void TrayVPN::NetworkStateChanged(bool /* notify_a11y */) {
   if (default_)
     default_->Update();
   if (detailed_)

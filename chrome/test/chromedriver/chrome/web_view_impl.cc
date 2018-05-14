@@ -41,17 +41,23 @@ namespace {
 
 const int kWaitForNavigationStopSeconds = 10;
 
-Status GetContextIdForFrame(FrameTracker* tracker,
+Status GetContextIdForFrame(WebViewImpl* web_view,
                             const std::string& frame,
                             int* context_id) {
-  if (frame.empty()) {
+  if (frame.empty() || frame == web_view->GetId()) {
     *context_id = 0;
     return Status(kOk);
   }
-  Status status = tracker->GetContextIdForFrame(frame, context_id);
+  Status status =
+      web_view->GetFrameTracker()->GetContextIdForFrame(frame, context_id);
   if (status.IsError())
     return status;
   return Status(kOk);
+}
+
+WebView* GetTargetForFrame(WebViewImpl* web_view, const std::string& frame) {
+  return frame.empty() ? web_view
+                       : web_view->GetFrameTracker()->GetTargetForFrame(frame);
 }
 
 const char* GetAsString(MouseEventType type) {
@@ -70,24 +76,11 @@ const char* GetAsString(MouseEventType type) {
 const char* GetAsString(TouchEventType type) {
   switch (type) {
     case kTouchStart:
-      return "touchStart";
+      return "touchstart";
     case kTouchEnd:
-      return "touchEnd";
+      return "touchend";
     case kTouchMove:
-      return "touchMove";
-    default:
-      return "";
-  }
-}
-
-const char* GetPointStateString(TouchEventType type) {
-  switch (type) {
-    case kTouchStart:
-      return "touchPressed";
-    case kTouchEnd:
-      return "touchReleased";
-    case kTouchMove:
-      return "touchMoved";
+      return "touchmove";
     default:
       return "";
   }
@@ -134,23 +127,37 @@ WebViewImpl::WebViewImpl(const std::string& id,
     : id_(id),
       w3c_compliant_(w3c_compliant),
       browser_info_(browser_info),
-      dom_tracker_(new DomTracker(client.get())),
-      frame_tracker_(new FrameTracker(client.get())),
-      dialog_manager_(new JavaScriptDialogManager(client.get())),
-      navigation_tracker_(PageLoadStrategy::Create(
-          page_load_strategy, client.get(),
-          browser_info, dialog_manager_.get())),
+      client_(std::move(client)),
+      dom_tracker_(new DomTracker(client_.get())),
+      frame_tracker_(new FrameTracker(client_.get(), this, browser_info)),
+      dialog_manager_(new JavaScriptDialogManager(client_.get(), browser_info)),
+      navigation_tracker_(PageLoadStrategy::Create(page_load_strategy,
+                                                   client_.get(),
+                                                   browser_info,
+                                                   dialog_manager_.get())),
       mobile_emulation_override_manager_(
-          new MobileEmulationOverrideManager(client.get(), device_metrics)),
+          new MobileEmulationOverrideManager(client_.get(), device_metrics)),
       geolocation_override_manager_(
-          new GeolocationOverrideManager(client.get())),
+          new GeolocationOverrideManager(client_.get())),
       network_conditions_override_manager_(
-          new NetworkConditionsOverrideManager(client.get())),
-      heap_snapshot_taker_(new HeapSnapshotTaker(client.get())),
-      debugger_(new DebuggerTracker(client.get())),
-      client_(client.release()) {}
+          new NetworkConditionsOverrideManager(client_.get())),
+      heap_snapshot_taker_(new HeapSnapshotTaker(client_.get())),
+      debugger_(new DebuggerTracker(client_.get())) {}
 
 WebViewImpl::~WebViewImpl() {}
+
+WebView* WebViewImpl::CreateChild(const std::string& session_id,
+                                  const std::string& target_id) const {
+  DevToolsClientImpl* parent_client =
+      static_cast<DevToolsClientImpl*>(client_.get());
+  std::unique_ptr<DevToolsClient> child_client(
+      std::make_unique<DevToolsClientImpl>(parent_client, session_id));
+  return new WebViewImpl(target_id, w3c_compliant_, browser_info_,
+                         std::move(child_client), nullptr,
+                         navigation_tracker_->IsNonBlocking()
+                             ? PageLoadStrategy::kNone
+                             : PageLoadStrategy::kNormal);
+}
 
 std::string WebViewImpl::GetId() {
   return id_;
@@ -197,6 +204,15 @@ Status WebViewImpl::Load(const std::string& url, const Timeout* timeout) {
     return Status(kUnknownError, "unsupported protocol");
   base::DictionaryValue params;
   params.SetString("url", url);
+  if (browser_info_->major_version >= 63 &&
+      navigation_tracker_->IsNonBlocking()) {
+    // With non-bloakcing navigation tracker, the previous navigation might
+    // still be in progress, and this can cause the new navigate command to be
+    // ignored on Chrome v63 and above. Stop previous navigation first.
+    client_->SendCommand("Page.stopLoading", base::DictionaryValue());
+    // Use SendCommandAndIgnoreResponse to ensure no blocking occurs.
+    return client_->SendCommandAndIgnoreResponse("Page.navigate", params);
+  }
   return client_->SendCommandWithTimeout("Page.navigate", params, timeout);
 }
 
@@ -279,9 +295,12 @@ Status WebViewImpl::TraverseHistoryWithJavaScript(int delta) {
 Status WebViewImpl::EvaluateScript(const std::string& frame,
                                    const std::string& expression,
                                    std::unique_ptr<base::Value>* result) {
+  WebView* target = GetTargetForFrame(this, frame);
+  if (target != nullptr && target != this)
+    return target->EvaluateScript(frame, expression, result);
+
   int context_id;
-  Status status = GetContextIdForFrame(frame_tracker_.get(), frame,
-                                       &context_id);
+  Status status = GetContextIdForFrame(this, frame, &context_id);
   if (status.IsError())
     return status;
   return internal::EvaluateScriptAndGetValue(
@@ -332,9 +351,12 @@ Status WebViewImpl::GetFrameByFunction(const std::string& frame,
                                        const std::string& function,
                                        const base::ListValue& args,
                                        std::string* out_frame) {
+  WebView* target = GetTargetForFrame(this, frame);
+  if (target != nullptr && target != this)
+    return target->GetFrameByFunction(frame, function, args, out_frame);
+
   int context_id;
-  Status status = GetContextIdForFrame(frame_tracker_.get(), frame,
-                                       &context_id);
+  Status status = GetContextIdForFrame(this, frame, &context_id);
   if (status.IsError())
     return status;
   bool found_node;
@@ -351,6 +373,10 @@ Status WebViewImpl::GetFrameByFunction(const std::string& frame,
 
 Status WebViewImpl::DispatchMouseEvents(const std::list<MouseEvent>& events,
                                         const std::string& frame) {
+  WebView* target = GetTargetForFrame(this, frame);
+  if (target != nullptr && target != this)
+    return target->DispatchMouseEvents(events, frame);
+
   double page_scale_factor = 1.0;
   if (browser_info_->build_no >= 2358 && browser_info_->build_no <= 2430 &&
       (browser_info_->is_android ||
@@ -386,16 +412,12 @@ Status WebViewImpl::DispatchMouseEvents(const std::list<MouseEvent>& events,
 }
 
 Status WebViewImpl::DispatchTouchEvent(const TouchEvent& event) {
-  base::DictionaryValue params;
-  params.SetString("type", GetAsString(event.type));
-  auto point = base::MakeUnique<base::DictionaryValue>();
-  point->SetString("state", GetPointStateString(event.type));
-  point->SetInteger("x", event.x);
-  point->SetInteger("y", event.y);
-  auto point_list = base::MakeUnique<base::ListValue>();
-  point_list->Append(std::move(point));
-  params.Set("touchPoints", std::move(point_list));
-  return client_->SendCommand("Input.dispatchTouchEvent", params);
+  base::ListValue args;
+  args.Append(std::make_unique<base::Value>(event.x));
+  args.Append(std::make_unique<base::Value>(event.y));
+  args.Append(std::make_unique<base::Value>(GetAsString(event.type)));
+  std::unique_ptr<base::Value> unused;
+  return CallFunction(std::string(), kDispatchTouchEventScript, args, &unused);
 }
 
 Status WebViewImpl::DispatchTouchEvents(const std::list<TouchEvent>& events) {
@@ -422,7 +444,6 @@ Status WebViewImpl::DispatchKeyEvents(const std::list<KeyEvent>& events) {
     }
     params.SetString("text", it->modified_text);
     params.SetString("unmodifiedText", it->unmodified_text);
-    params.SetInteger("nativeVirtualKeyCode", it->key_code);
     params.SetInteger("windowsVirtualKeyCode", it->key_code);
     ui::DomCode dom_code = ui::UsLayoutKeyboardCodeToDomCode(it->key_code);
     std::string code = ui::KeycodeConverter::DomCodeToCodeString(dom_code);
@@ -446,7 +467,7 @@ Status WebViewImpl::GetCookies(std::unique_ptr<base::ListValue>* cookies,
       browser_info_->browser_name != "webview") {
     base::ListValue url_list;
     url_list.AppendString(current_page_url);
-    params.Set("urls", base::MakeUnique<base::Value>(url_list));
+    params.SetKey("urls", url_list.Clone());
     Status status =
         client_->SendCommandAndGetResult("Network.getCookies", params, &result);
     if (status.IsError())
@@ -466,11 +487,23 @@ Status WebViewImpl::GetCookies(std::unique_ptr<base::ListValue>* cookies,
 }
 
 Status WebViewImpl::DeleteCookie(const std::string& name,
-                                 const std::string& url) {
+                                 const std::string& url,
+                                 const std::string& domain,
+                                 const std::string& path) {
   base::DictionaryValue params;
-  params.SetString("cookieName", name);
   params.SetString("url", url);
-  return client_->SendCommand("Page.deleteCookie", params);
+  std::string command;
+  if (browser_info_->build_no >= 3189) {
+    params.SetString("name", name);
+    params.SetString("domain", domain);
+    params.SetString("path", path);
+    command = "Network.deleteCookies";
+  } else {
+    params.SetString("cookieName", name);
+    command = "Page.deleteCookie";
+  }
+
+  return client_->SendCommand(command, params);
 }
 
 Status WebViewImpl::AddCookie(const std::string& name,
@@ -490,7 +523,15 @@ Status WebViewImpl::AddCookie(const std::string& name,
   params.SetBoolean("secure", secure);
   params.SetBoolean("httpOnly", httpOnly);
   params.SetDouble("expirationDate", expiry);
-  return client_->SendCommand("Network.setCookie", params);
+  params.SetDouble("expires", expiry);
+
+  std::unique_ptr<base::DictionaryValue> result;
+  Status status =
+      client_->SendCommandAndGetResult("Network.setCookie", params, &result);
+  bool success;
+  if (!result->GetBoolean("success", &success) || !success)
+    return Status(kUnableToSetCookie);
+  return Status(kOk);
 }
 
 Status WebViewImpl::WaitForPendingNavigations(const std::string& frame_id,
@@ -503,9 +544,13 @@ Status WebViewImpl::WaitForPendingNavigations(const std::string& frame_id,
   Status status = client_->HandleEventsUntil(not_pending_navigation, timeout);
   if (status.code() == kTimeout && stop_load_on_timeout) {
     VLOG(0) << "Timed out. Stopping navigation...";
-    std::unique_ptr<base::Value> unused_value;
     navigation_tracker_->set_timed_out(true);
-    EvaluateScript(std::string(), "window.stop();", &unused_value);
+    if (browser_info_->major_version >= 63) {
+      client_->SendCommand("Page.stopLoading", base::DictionaryValue());
+    } else {
+      std::unique_ptr<base::Value> unused_value;
+      EvaluateScript(std::string(), "window.stop();", &unused_value);
+    }
     // We don't consider |timeout| here to make sure the navigation actually
     // stops and we cleanup properly after a command that caused a navigation
     // that timed out.  Otherwise we might have to wait for that before
@@ -559,6 +604,10 @@ Status WebViewImpl::SetFileInputFiles(
     const std::string& frame,
     const base::DictionaryValue& element,
     const std::vector<base::FilePath>& files) {
+  WebView* target = GetTargetForFrame(this, frame);
+  if (target != nullptr && target != this)
+    return target->SetFileInputFiles(frame, element, files);
+
   base::ListValue file_list;
   for (size_t i = 0; i < files.size(); ++i) {
     if (!files[i].IsAbsolute()) {
@@ -573,8 +622,7 @@ Status WebViewImpl::SetFileInputFiles(
   }
 
   int context_id;
-  Status status = GetContextIdForFrame(frame_tracker_.get(), frame,
-                                       &context_id);
+  Status status = GetContextIdForFrame(this, frame, &context_id);
   if (status.IsError())
     return status;
   base::ListValue args;
@@ -590,7 +638,7 @@ Status WebViewImpl::SetFileInputFiles(
     return Status(kUnknownError, "no node ID for file input");
   base::DictionaryValue params;
   params.SetInteger("nodeId", node_id);
-  params.Set("files", base::MakeUnique<base::Value>(file_list));
+  params.SetKey("files", file_list.Clone());
   return client_->SendCommand("DOM.setFileInputFiles", params);
 }
 
@@ -812,6 +860,15 @@ Status WebViewImpl::IsNotPendingNavigation(const std::string& frame_id,
   return Status(kOk);
 }
 
+bool WebViewImpl::IsOOPIF(const std::string& frame_id) {
+  WebView* target = GetTargetForFrame(this, frame_id);
+  return target != nullptr && frame_id == target->GetId();
+}
+
+FrameTracker* WebViewImpl::GetFrameTracker() const {
+  return frame_tracker_.get();
+}
+
 namespace internal {
 
 Status EvaluateScript(DevToolsClient* client,
@@ -886,7 +943,7 @@ Status EvaluateScriptAndGetValue(DevToolsClient* client,
     return Status(kUnknownError, "Runtime.evaluate missing string 'type'");
 
   if (type == "undefined") {
-    *result = base::MakeUnique<base::Value>();
+    *result = std::make_unique<base::Value>();
   } else {
     base::Value* value;
     if (!temp_result->Get("value", &value))
@@ -913,8 +970,8 @@ Status ParseCallFunctionResult(const base::Value& temp_result,
   }
   const base::Value* unscoped_value;
   if (!dict->Get("value", &unscoped_value)) {
-    return Status(kUnknownError,
-                  "call function result missing 'value'");
+    // Missing 'value' indicates the JavaScript code didn't return a value.
+    return Status(kOk);
   }
   result->reset(unscoped_value->DeepCopy());
   return Status(kOk);

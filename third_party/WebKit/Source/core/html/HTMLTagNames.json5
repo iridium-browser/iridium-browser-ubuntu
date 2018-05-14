@@ -37,7 +37,10 @@
       name: "aside",
       interfaceName: "HTMLElement",
     },
-    "audio",
+    {
+      name: "audio",
+      interfaceHeaderDir: "core/html/media",
+    },
     {
       name: "b",
       interfaceName: "HTMLElement",
@@ -73,8 +76,14 @@
       name: "br",
       interfaceName: "HTMLBRElement",
     },
-    "button",
-    "canvas",
+    {
+      name: "button",
+      interfaceHeaderDir: "core/html/forms",
+    },
+    {
+      name: "canvas",
+      interfaceHeaderDir: "core/html/canvas",
+    },
     {
       name: "caption",
       interfaceName: "HTMLTableCaptionElement",
@@ -108,8 +117,13 @@
       interfaceName: "HTMLContentElement",
     },
     {
+      name: "data",
+      interfaceName: "HTMLDataElement",
+    },
+    {
       name: "datalist",
       interfaceName: "HTMLDataListElement",
+      interfaceHeaderDir: "core/html/forms",
     },
     {
       name: "dd",
@@ -144,11 +158,12 @@
     },
     {
       name: "embed",
-      constructorNeedsCreatedByParser: true,
+      constructorNeedsCreateElementFlags: true,
     },
     {
       name: "fieldset",
       interfaceName: "HTMLFieldSetElement",
+      interfaceHeaderDir: "core/html/forms",
     },
     {
       name: "figcaption",
@@ -163,7 +178,10 @@
       name: "footer",
       interfaceName: "HTMLElement",
     },
-    "form",
+    {
+      name: "form",
+      interfaceHeaderDir: "core/html/forms",
+    },
     "frame",
     {
       name: "frameset",
@@ -221,12 +239,13 @@
     },
     {
       name: "img",
-      constructorNeedsCreatedByParser: true,
+      constructorNeedsCreateElementFlags: true,
       interfaceName: "HTMLImageElement",
     },
     {
       name: "input",
-      constructorNeedsCreatedByParser: true,
+      constructorNeedsCreateElementFlags: true,
+      interfaceHeaderDir: "core/html/forms",
     },
     {
       name: "ins",
@@ -240,19 +259,25 @@
       name: "keygen",
       interfaceName: "HTMLUnknownElement",
     },
-    "label",
+    {
+      name: "label",
+      interfaceHeaderDir: "core/html/forms",
+    },
     {
       name: "layer",
       interfaceName: "HTMLElement",
     },
-    "legend",
+    {
+      name: "legend",
+      interfaceHeaderDir: "core/html/forms",
+    },
     {
       name: "li",
       interfaceName: "HTMLLIElement",
     },
     {
       name: "link",
-      constructorNeedsCreatedByParser: true,
+      constructorNeedsCreateElementFlags: true,
     },
     {
       name: "listing",
@@ -297,7 +322,7 @@
     },
     {
       name: "object",
-      constructorNeedsCreatedByParser: true,
+      constructorNeedsCreateElementFlags: true,
     },
     {
       name: "ol",
@@ -306,9 +331,16 @@
     {
       name: "optgroup",
       interfaceName: "HTMLOptGroupElement",
+      interfaceHeaderDir: "core/html/forms",
     },
-    "option",
-    "output",
+    {
+      name: "option",
+      interfaceHeaderDir: "core/html/forms",
+    },
+    {
+      name: "output",
+      interfaceHeaderDir: "core/html/forms",
+    },
     {
       name: "shadow",
       interfaceName: "HTMLShadowElement",
@@ -367,13 +399,16 @@
     },
     {
       name: "script",
-      constructorNeedsCreatedByParser: true,
+      constructorNeedsCreateElementFlags: true,
     },
     {
       name: "section",
       interfaceName: "HTMLElement",
     },
-    "select",
+    {
+      name: "select",
+      interfaceHeaderDir: "core/html/forms",
+    },      
     {
       name: "slot",
       interfaceName: "HTMLSlotElement",
@@ -394,7 +429,7 @@
     },
     {
       name: "style",
-      constructorNeedsCreatedByParser: true,
+      constructorNeedsCreateElementFlags: true,
     },
     {
       name: "sub",
@@ -422,6 +457,7 @@
     {
       name: "textarea",
       interfaceName: "HTMLTextAreaElement",
+      interfaceHeaderDir: "core/html/forms",
     },
     {
       name: "tfoot",
@@ -435,12 +471,19 @@
       name: "thead",
       interfaceName: "HTMLTableSectionElement",
     },
+    {
+      name: "time",
+      interfaceName: "HTMLTimeElement",
+    },
     "title",
     {
       name: "tr",
       interfaceName: "HTMLTableRowElement",
     },
-    "track",
+    {
+      name: "track",
+      interfaceHeaderDir: "core/html/track",
+    },
     {
       name: "tt",
       interfaceName: "HTMLElement",
@@ -457,7 +500,10 @@
       name: "var",
       interfaceName: "HTMLElement",
     },
-    "video",
+    {
+      name: "video",
+      interfaceHeaderDir: "core/html/media",
+    },
     {
       name: "wbr",
       JSInterfaceName: "HTMLElement",

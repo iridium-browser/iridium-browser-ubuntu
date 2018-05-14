@@ -7,9 +7,9 @@
 
 #include <string>
 
+#include "ash/app_list/model/app_list_item_observer.h"
 #include "base/macros.h"
 #include "ui/app_list/app_list_export.h"
-#include "ui/app_list/app_list_item_observer.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/view.h"
@@ -41,6 +41,8 @@ class APP_LIST_EXPORT FolderHeaderView : public views::View,
   // Overridden from views::View:
   gfx::Size CalculatePreferredSize() const override;
 
+  views::View* GetFolderNameViewForTest() const;
+
  private:
   class FolderNameView;
   friend class test::FolderHeaderViewTest;
@@ -66,11 +68,12 @@ class APP_LIST_EXPORT FolderHeaderView : public views::View,
   // views::View overrides:
   void Layout() override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
-  void OnPaint(gfx::Canvas* canvas) override;
 
   // views::TextfieldController overrides:
   void ContentsChanged(views::Textfield* sender,
                        const base::string16& new_contents) override;
+  bool HandleKeyEvent(views::Textfield* sender,
+                      const ui::KeyEvent& key_event) override;
 
   // views::ButtonListener overrides:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
@@ -87,7 +90,6 @@ class APP_LIST_EXPORT FolderHeaderView : public views::View,
   FolderHeaderViewDelegate* delegate_;
 
   bool folder_name_visible_;
-  bool is_fullscreen_app_list_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(FolderHeaderView);
 };

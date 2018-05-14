@@ -11,10 +11,10 @@
 
 #include "base/logging.h"
 #include "media/base/decrypt_config.h"
-#include "media/filters/h265_parser.h"
 #include "media/formats/mp4/avc.h"
 #include "media/formats/mp4/box_definitions.h"
 #include "media/formats/mp4/box_reader.h"
+#include "media/video/h265_parser.h"
 
 namespace media {
 namespace mp4 {
@@ -245,8 +245,13 @@ bool HEVCBitstreamConverter::ConvertFrame(
     RCHECK(HEVC::InsertParamSetsAnnexB(*hevc_config_, frame_buf, subsamples));
   }
 
-  DCHECK(HEVC::IsValidAnnexB(*frame_buf, *subsamples));
   return true;
+}
+
+bool HEVCBitstreamConverter::IsValid(
+    std::vector<uint8_t>* frame_buf,
+    std::vector<SubsampleEntry>* subsamples) const {
+  return HEVC::IsValidAnnexB(*frame_buf, *subsamples);
 }
 
 }  // namespace mp4

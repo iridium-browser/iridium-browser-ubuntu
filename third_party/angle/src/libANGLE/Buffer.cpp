@@ -19,7 +19,7 @@ namespace gl
 
 BufferState::BufferState()
     : mLabel(),
-      mUsage(GL_STATIC_DRAW),
+      mUsage(BufferUsage::StaticDraw),
       mSize(0),
       mAccessFlags(0),
       mAccess(GL_WRITE_ONLY_OES),
@@ -44,11 +44,12 @@ Buffer::~Buffer()
     SafeDelete(mImpl);
 }
 
-void Buffer::onDestroy(const Context *context)
+Error Buffer::onDestroy(const Context *context)
 {
     // In tests, mImpl might be null.
     if (mImpl)
         mImpl->destroy(context);
+    return NoError();
 }
 
 void Buffer::setLabel(const std::string &label)
@@ -62,10 +63,10 @@ const std::string &Buffer::getLabel() const
 }
 
 Error Buffer::bufferData(const Context *context,
-                         GLenum target,
+                         BufferBinding target,
                          const void *data,
                          GLsizeiptr size,
-                         GLenum usage)
+                         BufferUsage usage)
 {
     const void *dataForImpl = data;
 
@@ -89,7 +90,7 @@ Error Buffer::bufferData(const Context *context,
 }
 
 Error Buffer::bufferSubData(const Context *context,
-                            GLenum target,
+                            BufferBinding target,
                             const void *data,
                             GLsizeiptr size,
                             GLintptr offset)
@@ -191,7 +192,8 @@ void Buffer::onPixelUnpack()
     mIndexRangeCache.clear();
 }
 
-Error Buffer::getIndexRange(GLenum type,
+Error Buffer::getIndexRange(const gl::Context *context,
+                            GLenum type,
                             size_t offset,
                             size_t count,
                             bool primitiveRestartEnabled,
@@ -202,7 +204,8 @@ Error Buffer::getIndexRange(GLenum type,
         return NoError();
     }
 
-    ANGLE_TRY(mImpl->getIndexRange(type, offset, count, primitiveRestartEnabled, outRange));
+    ANGLE_TRY(
+        mImpl->getIndexRange(context, type, offset, count, primitiveRestartEnabled, outRange));
 
     mIndexRangeCache.addRange(type, offset, count, primitiveRestartEnabled, *outRange);
 

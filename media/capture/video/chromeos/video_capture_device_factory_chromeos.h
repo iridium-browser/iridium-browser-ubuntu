@@ -18,7 +18,9 @@ class CAPTURE_EXPORT VideoCaptureDeviceFactoryChromeOS final
  public:
   explicit VideoCaptureDeviceFactoryChromeOS(
       scoped_refptr<base::SingleThreadTaskRunner>
-          task_runner_for_screen_observer);
+          task_runner_for_screen_observer,
+      gpu::GpuMemoryBufferManager* gpu_buffer_manager,
+      MojoJpegDecodeAcceleratorFactoryCB jda_factory);
 
   ~VideoCaptureDeviceFactoryChromeOS() override;
 
@@ -35,10 +37,16 @@ class CAPTURE_EXPORT VideoCaptureDeviceFactoryChromeOS final
   // VideoCaptureDeviceFactoryChromeOS on the device.
   static bool ShouldEnable();
 
+  static gpu::GpuMemoryBufferManager* GetBufferManager();
+
+  // For testing purpose only.
+  static void SetBufferManagerForTesting(
+      gpu::GpuMemoryBufferManager* buffer_manager);
+
  private:
   // Initializes the factory. The factory is functional only after this call
   // succeeds.
-  bool Init();
+  bool Init(MojoJpegDecodeAcceleratorFactoryCB jda_factory);
 
   const scoped_refptr<base::SingleThreadTaskRunner>
       task_runner_for_screen_observer_;

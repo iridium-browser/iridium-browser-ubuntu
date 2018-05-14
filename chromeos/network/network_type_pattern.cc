@@ -18,6 +18,7 @@ const char kPatternDefault[] = "PatternDefault";
 const char kPatternWireless[] = "PatternWireless";
 const char kPatternMobile[] = "PatternMobile";
 const char kPatternNonVirtual[] = "PatternNonVirtual";
+const char kPatternPhysical[] = "PatternPhysical";
 
 enum NetworkTypeBitFlag {
   kNetworkTypeNone = 0,
@@ -72,13 +73,24 @@ NetworkTypePattern NetworkTypePattern::Mobile() {
 }
 
 // static
+NetworkTypePattern NetworkTypePattern::Physical() {
+  return NetworkTypePattern(kNetworkTypeWifi | kNetworkTypeWimax |
+                            kNetworkTypeCellular | kNetworkTypeEthernet);
+}
+
+// static
 NetworkTypePattern NetworkTypePattern::NonVirtual() {
-  return NetworkTypePattern(~(kNetworkTypeVPN));
+  return NetworkTypePattern(~(kNetworkTypeVPN | kNetworkTypeEthernetEap));
 }
 
 // static
 NetworkTypePattern NetworkTypePattern::Ethernet() {
   return NetworkTypePattern(kNetworkTypeEthernet);
+}
+
+// static
+NetworkTypePattern NetworkTypePattern::EthernetOrEthernetEAP() {
+  return NetworkTypePattern(kNetworkTypeEthernet | kNetworkTypeEthernetEap);
 }
 
 // static
@@ -118,6 +130,11 @@ bool NetworkTypePattern::Equals(const NetworkTypePattern& other) const {
 
 bool NetworkTypePattern::MatchesType(
     const std::string& shill_network_type) const {
+  if (shill_network_type.empty()) {
+    LOG(ERROR) << "NetworkTypePattern: " << ToDebugString()
+               << ": Can not match empty type.";
+    return false;
+  }
   return MatchesPattern(Primitive(shill_network_type));
 }
 
@@ -129,6 +146,11 @@ bool NetworkTypePattern::MatchesPattern(
   return pattern_ & other_pattern.pattern_;
 }
 
+NetworkTypePattern NetworkTypePattern::operator|(
+    const NetworkTypePattern& other) const {
+  return NetworkTypePattern(pattern_ | other.pattern_);
+}
+
 std::string NetworkTypePattern::ToDebugString() const {
   if (Equals(Default()))
     return kPatternDefault;
@@ -136,6 +158,8 @@ std::string NetworkTypePattern::ToDebugString() const {
     return kPatternWireless;
   if (Equals(Mobile()))
     return kPatternMobile;
+  if (Equals(Physical()))
+    return kPatternPhysical;
   if (Equals(NonVirtual()))
     return kPatternNonVirtual;
 

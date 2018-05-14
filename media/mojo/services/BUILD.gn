@@ -18,6 +18,8 @@ component("services") {
     "interface_factory_impl.h",
     "media_interface_provider.cc",
     "media_interface_provider.h",
+    "media_metrics_provider.cc",
+    "media_metrics_provider.h",
     "media_mojo_export.h",
     "media_resource_shim.cc",
     "media_resource_shim.h",
@@ -27,12 +29,12 @@ component("services") {
     "media_service_factory.h",
     "mojo_audio_decoder_service.cc",
     "mojo_audio_decoder_service.h",
+    "mojo_audio_input_stream.cc",
+    "mojo_audio_input_stream.h",
     "mojo_audio_output_stream.cc",
     "mojo_audio_output_stream.h",
     "mojo_audio_output_stream_provider.cc",
     "mojo_audio_output_stream_provider.h",
-    "mojo_cdm_allocator.cc",
-    "mojo_cdm_allocator.h",
     "mojo_cdm_promise.cc",
     "mojo_cdm_promise.h",
     "mojo_cdm_service.cc",
@@ -43,6 +45,8 @@ component("services") {
     "mojo_decryptor_service.h",
     "mojo_demuxer_stream_adapter.cc",
     "mojo_demuxer_stream_adapter.h",
+    "mojo_jpeg_decode_accelerator_service.cc",
+    "mojo_jpeg_decode_accelerator_service.h",
     "mojo_media_client.cc",
     "mojo_media_client.h",
     "mojo_media_log.cc",
@@ -53,10 +57,18 @@ component("services") {
     "mojo_renderer_service.h",
     "mojo_video_decoder_service.cc",
     "mojo_video_decoder_service.h",
+    "mojo_video_encode_accelerator_provider.cc",
+    "mojo_video_encode_accelerator_provider.h",
     "mojo_video_encode_accelerator_service.cc",
     "mojo_video_encode_accelerator_service.h",
     "test_mojo_media_client.cc",
     "test_mojo_media_client.h",
+    "video_decode_perf_history.cc",
+    "video_decode_perf_history.h",
+    "video_decode_stats_recorder.cc",
+    "video_decode_stats_recorder.h",
+    "watch_time_recorder.cc",
+    "watch_time_recorder.h",
   ]
 
   defines = [ "MEDIA_MOJO_IMPLEMENTATION" ]
@@ -68,6 +80,7 @@ component("services") {
     "//base",
     "//media",
     "//media/gpu",
+    "//media/gpu/ipc/common",
     "//media/mojo:features",
     "//media/mojo/interfaces",
     "//mojo/public/cpp/bindings",
@@ -77,13 +90,18 @@ component("services") {
   ]
 
   deps = [
+    "//gpu/ipc/service",
     "//media:shared_memory_support",
-    "//media/cdm:cdm_api",
     "//media/cdm:cdm_manager",
+    "//media/gpu",
+    "//media/gpu:features",
+    "//media/gpu/ipc/service",
     "//media/mojo/common",
     "//media/mojo/common:mojo_shared_buffer_video_frame",
     "//mojo/common",
-    "//services/service_manager/public/interfaces",
+    "//services/metrics/public/cpp:metrics_cpp",
+    "//services/metrics/public/cpp:ukm_builders",
+    "//services/service_manager/public/mojom",
   ]
 
   if (is_android) {
@@ -93,6 +111,30 @@ component("services") {
       "mojo_media_drm_storage.cc",
       "mojo_media_drm_storage.h",
     ]
+  }
+
+  if (enable_library_cdms) {
+    sources += [
+      "cdm_service.cc",
+      "cdm_service.h",
+      "mojo_cdm_allocator.cc",
+      "mojo_cdm_allocator.h",
+      "mojo_cdm_file_io.cc",
+      "mojo_cdm_file_io.h",
+      "mojo_cdm_helper.cc",
+      "mojo_cdm_helper.h",
+      "mojo_cdm_proxy.cc",
+      "mojo_cdm_proxy.h",
+      "mojo_cdm_proxy_service.cc",
+      "mojo_cdm_proxy_service.h",
+    ]
+    deps += [ "//media/cdm:cdm_api" ]
+
+    # TODO(xhwang): Ideally media should not worry about sandbox. Find a way to
+    # remove this dependency.
+    if (is_mac) {
+      deps += [ "//sandbox" ]
+    }
   }
 }
 
@@ -127,8 +169,7 @@ service_test("media_service_unittests") {
   deps = [
     ":services",
     "//base",
-    "//media",
-    "//media/base:test_support",
+    "//media:test_support",
     "//media/mojo/clients",
     "//media/mojo/common",
     "//media/mojo/interfaces",
@@ -185,4 +226,42 @@ catalog("media_service_unittests_catalog") {
 catalog("media_pipeline_integration_unittests_catalog") {
   embedded_services = [ ":pipeline_test_manifest" ]
   standalone_services = [ ":media_manifest" ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+
+  sources = [
+    "media_metrics_provider_unittest.cc",
+    "mojo_audio_input_stream_unittest.cc",
+    "mojo_audio_output_stream_provider_unittest.cc",
+    "mojo_audio_output_stream_unittest.cc",
+    "mojo_jpeg_decode_accelerator_service_unittest.cc",
+    "mojo_video_encode_accelerator_service_unittest.cc",
+    "video_decode_perf_history_unittest.cc",
+    "watch_time_recorder_unittest.cc",
+  ]
+
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//components/ukm:test_support",
+    "//media:test_support",
+    "//media/mojo:test_support",
+    "//mojo/edk/system",
+    "//services/metrics/public/cpp:ukm_builders",
+    "//testing/gmock",
+    "//testing/gtest",
+  ]
+
+  if (enable_library_cdms) {
+    sources += [
+      "mojo_cdm_allocator_unittest.cc",
+      "mojo_cdm_file_io_unittest.cc",
+      "mojo_cdm_helper_unittest.cc",
+      "mojo_cdm_proxy_unittest.cc",
+    ]
+
+    deps += [ "//media/cdm:cdm_api" ]
+  }
 }

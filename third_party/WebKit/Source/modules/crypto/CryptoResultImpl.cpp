@@ -66,7 +66,7 @@ class CryptoResultImpl::Resolver final : public ScriptPromiseResolver {
   static Resolver* Create(ScriptState* script_state, CryptoResultImpl* result) {
     DCHECK(script_state->ContextIsValid());
     Resolver* resolver = new Resolver(script_state, result);
-    resolver->SuspendIfNeeded();
+    resolver->PauseIfNeeded();
     resolver->KeepAliveWhilePending();
     return resolver;
   }
@@ -77,7 +77,7 @@ class CryptoResultImpl::Resolver final : public ScriptPromiseResolver {
     ScriptPromiseResolver::ContextDestroyed(destroyed_context);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(result_);
     ScriptPromiseResolver::Trace(visitor);
   }
@@ -131,7 +131,7 @@ CryptoResultImpl::~CryptoResultImpl() {
   DCHECK(!resolver_);
 }
 
-DEFINE_TRACE(CryptoResultImpl) {
+void CryptoResultImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(resolver_);
   CryptoResult::Trace(visitor);
 }
@@ -182,7 +182,7 @@ void CryptoResultImpl::CompleteWithJson(const char* utf8_data,
 
   v8::TryCatch exception_catcher(script_state->GetIsolate());
   v8::Local<v8::Value> json_dictionary;
-  if (v8::JSON::Parse(script_state->GetIsolate(), json_string)
+  if (v8::JSON::Parse(script_state->GetContext(), json_string)
           .ToLocal(&json_dictionary))
     resolver_->Resolve(json_dictionary);
   else
@@ -228,7 +228,7 @@ void CryptoResultImpl::CompleteWithKeyPair(const WebCryptoKey& public_key,
 void CryptoResultImpl::Cancel() {
   DCHECK(cancel_);
   cancel_->Cancel();
-  cancel_.Clear();
+  cancel_ = nullptr;
   ClearResolver();
 }
 

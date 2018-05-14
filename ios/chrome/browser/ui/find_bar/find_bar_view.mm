@@ -5,10 +5,10 @@
 #import "ios/chrome/browser/ui/find_bar/find_bar_view.h"
 
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
-#import "ios/chrome/browser/ui/commands/ios_command_ids.h"
+#import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/find_bar/find_bar_touch_forwarding_view.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/browser/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -65,6 +65,12 @@ NSString* const kFindInPageCloseButtonId = @"kFindInPageCloseButtonId";
 #pragma mark - Internal
 
 - (void)setupSubviews {
+  UIView* safeAreaView = [[UIView alloc] initWithFrame:CGRectZero];
+  safeAreaView.translatesAutoresizingMaskIntoConstraints = NO;
+  [self addSubview:safeAreaView];
+
+  PinToSafeArea(safeAreaView, self);
+
   [self setBackgroundColor:[UIColor clearColor]];
 
   // Input field.
@@ -72,7 +78,6 @@ NSString* const kFindInPageCloseButtonId = @"kFindInPageCloseButtonId";
       [[UITextField alloc] initWithFrame:CGRectZero];
   self.inputField = inputFieldScoped;
   self.inputField.backgroundColor = [UIColor clearColor];
-  self.inputField.tag = IDC_FIND_UPDATE;
   self.inputField.translatesAutoresizingMaskIntoConstraints = NO;
   self.inputField.placeholder =
       l10n_util::GetNSString(IDS_IOS_PLACEHOLDER_FIND_IN_PAGE);
@@ -96,13 +101,15 @@ NSString* const kFindInPageCloseButtonId = @"kFindInPageCloseButtonId";
   [inputStackView setLayoutMarginsRelativeArrangement:YES];
   [inputStackView setSpacing:12];
   [inputStackView setTranslatesAutoresizingMaskIntoConstraints:NO];
-  [self addSubview:inputStackView];
+  [safeAreaView addSubview:inputStackView];
 
   NSMutableArray* constraints = [[NSMutableArray alloc] init];
   [constraints addObjectsFromArray:@[
-    [[inputStackView leadingAnchor] constraintEqualToAnchor:self.leadingAnchor],
-    [[inputStackView topAnchor] constraintEqualToAnchor:self.topAnchor],
-    [[inputStackView bottomAnchor] constraintEqualToAnchor:self.bottomAnchor],
+    [[inputStackView leadingAnchor]
+        constraintEqualToAnchor:safeAreaView.leadingAnchor],
+    [[inputStackView topAnchor] constraintEqualToAnchor:safeAreaView.topAnchor],
+    [[inputStackView bottomAnchor]
+        constraintEqualToAnchor:safeAreaView.bottomAnchor],
   ]];
 
   // Touch-forwarding view is put on top of |inputStackView| to forward touches
@@ -112,7 +119,7 @@ NSString* const kFindInPageCloseButtonId = @"kFindInPageCloseButtonId";
   FindBarTouchForwardingView* forwarder =
       [[FindBarTouchForwardingView alloc] init];
   [forwarder setTargetView:self.inputField];
-  [self addSubview:forwarder];
+  [safeAreaView addSubview:forwarder];
   [constraints addObjectsFromArray:@[
     [[forwarder leadingAnchor]
         constraintEqualToAnchor:[inputStackView leadingAnchor]],
@@ -128,12 +135,13 @@ NSString* const kFindInPageCloseButtonId = @"kFindInPageCloseButtonId";
   UIView* separatorScoped = [[UIView alloc] initWithFrame:CGRectZero];
   UIView* separator = separatorScoped;
   separator.backgroundColor = [UIColor colorWithWhite:0.83 alpha:1];
-  [self addSubview:separator];
+  [safeAreaView addSubview:separator];
   [constraints addObjectsFromArray:@[
     [separator.widthAnchor constraintEqualToConstant:1],
-    [separator.bottomAnchor constraintEqualToAnchor:self.bottomAnchor
+    [separator.bottomAnchor constraintEqualToAnchor:safeAreaView.bottomAnchor
                                            constant:-8],
-    [separator.topAnchor constraintEqualToAnchor:self.topAnchor constant:8],
+    [separator.topAnchor constraintEqualToAnchor:safeAreaView.topAnchor
+                                        constant:8],
     [separator.leadingAnchor
         constraintEqualToAnchor:inputStackView.trailingAnchor],
   ]];
@@ -143,10 +151,10 @@ NSString* const kFindInPageCloseButtonId = @"kFindInPageCloseButtonId";
   // Previous button with an arrow.
   UIButton* previousButtonScoped = [[UIButton alloc] initWithFrame:CGRectZero];
   self.previousButton = previousButtonScoped;
-  [self addSubview:self.previousButton];
+  [safeAreaView addSubview:self.previousButton];
   [constraints addObjectsFromArray:@[
     [self.previousButton.centerYAnchor
-        constraintEqualToAnchor:self.centerYAnchor],
+        constraintEqualToAnchor:safeAreaView.centerYAnchor],
     [self.previousButton.widthAnchor constraintEqualToConstant:48],
     [self.previousButton.heightAnchor constraintEqualToConstant:56],
     [self.previousButton.leadingAnchor
@@ -154,49 +162,38 @@ NSString* const kFindInPageCloseButtonId = @"kFindInPageCloseButtonId";
   ]];
   self.previousButton.isAccessibilityElement = YES;
   self.previousButton.accessibilityTraits = UIAccessibilityTraitButton;
-  self.previousButton.tag = IDC_FIND_PREVIOUS;
   self.previousButton.translatesAutoresizingMaskIntoConstraints = NO;
 
   // Next button with an arrow.
   UIButton* nextButtonScoped = [[UIButton alloc] initWithFrame:CGRectZero];
   self.nextButton = nextButtonScoped;
-  [self addSubview:self.nextButton];
+  [safeAreaView addSubview:self.nextButton];
   [constraints addObjectsFromArray:@[
-    [self.nextButton.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+    [self.nextButton.centerYAnchor
+        constraintEqualToAnchor:safeAreaView.centerYAnchor],
     [self.nextButton.widthAnchor constraintEqualToConstant:48],
     [self.nextButton.heightAnchor constraintEqualToConstant:56],
     [self.nextButton.leadingAnchor
         constraintEqualToAnchor:self.previousButton.trailingAnchor],
   ]];
-  self.nextButton.tag = IDC_FIND_NEXT;
   self.nextButton.translatesAutoresizingMaskIntoConstraints = NO;
 
   // Close button with a cross.
   UIButton* closeButtonScoped = [[UIButton alloc] initWithFrame:CGRectZero];
   self.closeButton = closeButtonScoped;
-  [self addSubview:self.closeButton];
+  [safeAreaView addSubview:self.closeButton];
   [constraints addObjectsFromArray:@[
-    [self.closeButton.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
-    [self.closeButton.trailingAnchor constraintEqualToAnchor:self.trailingAnchor
-                                                    constant:-4],
+    [self.closeButton.centerYAnchor
+        constraintEqualToAnchor:safeAreaView.centerYAnchor],
+    [self.closeButton.trailingAnchor
+        constraintEqualToAnchor:safeAreaView.trailingAnchor
+                       constant:-4],
     [self.closeButton.widthAnchor constraintEqualToConstant:48],
     [self.closeButton.heightAnchor constraintEqualToConstant:56],
     [self.closeButton.leadingAnchor
         constraintEqualToAnchor:self.nextButton.trailingAnchor],
   ]];
-  self.closeButton.tag = IDC_FIND_CLOSE;
   self.closeButton.translatesAutoresizingMaskIntoConstraints = NO;
-
-  // Connect outlets.
-  [self.nextButton addTarget:self
-                      action:@selector(chromeExecuteCommand:)
-            forControlEvents:UIControlEventTouchUpInside];
-  [self.previousButton addTarget:self
-                          action:@selector(chromeExecuteCommand:)
-                forControlEvents:UIControlEventTouchUpInside];
-  [self.closeButton addTarget:self
-                       action:@selector(chromeExecuteCommand:)
-             forControlEvents:UIControlEventTouchUpInside];
 
   // A11y labels.
   SetA11yLabelAndUiAutomationName(self.closeButton,

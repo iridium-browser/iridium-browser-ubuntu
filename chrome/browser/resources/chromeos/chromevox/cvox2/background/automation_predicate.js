@@ -46,18 +46,23 @@ AutomationPredicate.roles = function(roles) {
 /**
  * Constructs a predicate given a list of roles or predicates.
  * @param {{anyRole: (Array<Role>|undefined),
- *          anyPredicate: (Array<AutomationPredicate.Unary>|undefined)}} params
+ *          anyPredicate: (Array<AutomationPredicate.Unary>|undefined),
+ *          anyAttribute: (Object|undefined)}} params
  * @return {AutomationPredicate.Unary}
  */
 AutomationPredicate.match = function(params) {
   var anyRole = params.anyRole || [];
   var anyPredicate = params.anyPredicate || [];
+  var anyAttribute = params.anyAttribute || {};
   return function(node) {
     return anyRole.some(function(role) {
       return role == node.role;
     }) ||
         anyPredicate.some(function(p) {
           return p(node);
+        }) ||
+        Object.keys(anyAttribute).some(function(key) {
+          return node[key] === anyAttribute[key];
         });
   };
 };
@@ -66,8 +71,10 @@ AutomationPredicate.match = function(params) {
 AutomationPredicate.checkBox =
     AutomationPredicate.roles([Role.CHECK_BOX, Role.SWITCH]);
 /** @type {AutomationPredicate.Unary} */
-AutomationPredicate.comboBox = AutomationPredicate.roles(
-    [Role.COMBO_BOX, Role.POP_UP_BUTTON, Role.MENU_LIST_POPUP]);
+AutomationPredicate.comboBox = AutomationPredicate.roles([
+  Role.COMBO_BOX_GROUPING, Role.COMBO_BOX_MENU_BUTTON,
+  Role.TEXT_FIELD_WITH_COMBO_BOX, Role.POP_UP_BUTTON, Role.MENU_LIST_POPUP
+]);
 /** @type {AutomationPredicate.Unary} */
 AutomationPredicate.heading = AutomationPredicate.roles([Role.HEADING]);
 /** @type {AutomationPredicate.Unary} */
@@ -93,7 +100,8 @@ AutomationPredicate.button = function(node) {
  * @return {boolean}
  */
 AutomationPredicate.editText = function(node) {
-  return node.state.editable && node.parent && !node.parent.state.editable;
+  return node.role == Role.TEXT_FIELD ||
+      (node.state.editable && node.parent && !node.parent.state.editable);
 };
 
 /** @type {AutomationPredicate.Unary} */
@@ -142,7 +150,7 @@ AutomationPredicate.landmark = AutomationPredicate.roles([
  * @return {boolean}
  */
 AutomationPredicate.visitedLink = function(node) {
-  return node.state.visited;
+  return node.state[State.VISITED];
 };
 
 /**
@@ -159,7 +167,7 @@ AutomationPredicate.focused = function(node) {
  */
 AutomationPredicate.leaf = function(node) {
   return !node.firstChild || node.role == Role.BUTTON ||
-      node.role == Role.BUTTON_DROP_DOWN || node.role == Role.POP_UP_BUTTON ||
+      node.role == Role.POP_UP_BUTTON ||
       node.role == Role.SLIDER || node.role == Role.TEXT_FIELD ||
       node.state[State.INVISIBLE] || node.children.every(function(n) {
         return n.state[State.INVISIBLE];
@@ -172,6 +180,23 @@ AutomationPredicate.leaf = function(node) {
  */
 AutomationPredicate.leafWithText = function(node) {
   return AutomationPredicate.leaf(node) && !!(node.name || node.value);
+};
+
+/**
+ * @param {!AutomationNode} node
+ * @return {boolean}
+ */
+AutomationPredicate.leafWithWordStop = function(node) {
+  function hasWordStop(node) {
+    if (node.role == Role.INLINE_TEXT_BOX)
+      return node.wordStarts && node.wordStarts.length;
+
+    // Non-text objects  are treated as having a single word stop.
+    return true;
+  }
+  // Do not include static text leaves, which occur for an en end-of-line.
+  return AutomationPredicate.leaf(node) && !node.state[State.INVISIBLE] &&
+      node.role != Role.STATIC_TEXT && hasWordStop(node);
 };
 
 /**
@@ -197,18 +222,28 @@ AutomationPredicate.object = function(node) {
   // Editable nodes are within a text-like field and don't make sense when
   // performing object navigation. Users should use line, word, or character
   // navigation. Only navigate to the top level node.
-  if (node.parent && node.parent.state.editable)
+  if (node.parent && node.parent.state.editable &&
+      !node.parent.state[State.RICHLY_EDITABLE])
     return false;
 
   // Descend into large nodes.
   if (node.name && node.name.length > constants.OBJECT_MAX_CHARCOUNT)
     return false;
 
-  return node.state.focusable ||
-      (AutomationPredicate.leafOrStaticText(node) &&
-       (/\S+/.test(node.name) ||
-        (node.role != Role.LINE_BREAK && node.role != Role.STATIC_TEXT &&
-         node.role != Role.INLINE_TEXT_BOX)));
+  // Given no other information, ChromeVox wants to visit focusable
+  // (e.g. tabindex=0) nodes only when it has a name or is a control.
+  if (node.state.focusable &&
+      (node.name || node.state[State.EDITABLE] ||
+       AutomationPredicate.formField(node)))
+    return true;
+
+  // Otherwise, leaf or static text nodes that don't contain only whitespace
+  // should be visited with the exception of non-text only nodes. This covers
+  // cases where an author might make a link with a name of ' '.
+  return AutomationPredicate.leafOrStaticText(node) &&
+      (/\S+/.test(node.name) ||
+       (node.role != Role.LINE_BREAK && node.role != Role.STATIC_TEXT &&
+        node.role != Role.INLINE_TEXT_BOX));
 };
 
 /**
@@ -230,9 +265,9 @@ AutomationPredicate.group = AutomationPredicate.match({
  * @return {boolean}
  */
 AutomationPredicate.linebreak = function(first, second) {
-  // TODO(dtseng): Use next/previousOnLin once available.
-  var fl = first.location;
-  var sl = second.location;
+  // TODO(dtseng): Use next/previousOnLine once available.
+  var fl = first.unclippedLocation;
+  var sl = second.unclippedLocation;
   return fl.top != sl.top || (fl.top + fl.height != sl.top + sl.height);
 };
 
@@ -245,8 +280,8 @@ AutomationPredicate.linebreak = function(first, second) {
 AutomationPredicate.container = function(node) {
   return AutomationPredicate.match({
     anyRole: [
-      Role.GENERIC_CONTAINER, Role.DOCUMENT, Role.GROUP, Role.LIST_ITEM,
-      Role.TOOLBAR, Role.WINDOW
+      Role.GENERIC_CONTAINER, Role.DOCUMENT, Role.GROUP, Role.LIST,
+      Role.LIST_ITEM, Role.TOOLBAR, Role.WINDOW
     ],
     anyPredicate: [
       AutomationPredicate.landmark, AutomationPredicate.structuralContainer,
@@ -270,9 +305,9 @@ AutomationPredicate.container = function(node) {
  * @return {boolean}
  */
 AutomationPredicate.structuralContainer = AutomationPredicate.roles([
-  Role.ALERT_DIALOG, Role.DIALOG, Role.ROOT_WEB_AREA, Role.WEB_VIEW,
-  Role.WINDOW, Role.EMBEDDED_OBJECT, Role.IFRAME, Role.IFRAME_PRESENTATIONAL,
-  Role.UNKNOWN
+  Role.ALERT_DIALOG, Role.CLIENT, Role.DIALOG, Role.ROOT_WEB_AREA,
+  Role.WEB_VIEW, Role.WINDOW, Role.EMBEDDED_OBJECT, Role.IFRAME,
+  Role.IFRAME_PRESENTATIONAL, Role.UNKNOWN
 ]);
 
 /**
@@ -284,6 +319,8 @@ AutomationPredicate.structuralContainer = AutomationPredicate.roles([
 AutomationPredicate.root = function(node) {
   switch (node.role) {
     case Role.WINDOW:
+    case Role.MENU:
+    case Role.MENU_BAR:
       return true;
     case Role.DIALOG:
       // The below logic handles nested dialogs properly in the desktop tree
@@ -296,10 +333,31 @@ AutomationPredicate.root = function(node) {
     case Role.TOOLBAR:
       return node.root.role == Role.DESKTOP;
     case Role.ROOT_WEB_AREA:
-      return !node.parent || node.parent.root.role == Role.DESKTOP;
+      if (node.parent && node.parent.role == Role.WEB_VIEW &&
+          !node.parent.state[State.FOCUSED]) {
+        // If parent web view is not focused, we should allow this root web area
+        // to be crossed when performing traversals up the ancestry chain.
+        return false;
+      }
+      return !node.parent || !node.parent.root ||
+          (node.parent.root.role == Role.DESKTOP &&
+           node.parent.role == Role.WEB_VIEW);
     default:
-      return node.state.richlyEditable && node.state.focused;
+      return !!node.modal;
   }
+};
+
+/**
+ * Returns whether the given node should not be crossed when performing
+ * traversal inside of an editable. Note that this predicate should not be
+ * applied everywhere since there would be no way for a user to exit the
+ * editable.
+ * @param {AutomationNode} node
+ * @return {boolean}
+ */
+AutomationPredicate.editableRoot = function(node) {
+  return AutomationPredicate.root(node) ||
+      node.state.richlyEditable && node.state.focused;
 };
 
 /**
@@ -318,10 +376,6 @@ AutomationPredicate.shouldIgnoreNode = function(node) {
   if (AutomationPredicate.structuralContainer(node))
     return true;
 
-  // Ignore list markers since we already announce listitem role.
-  if (node.role == Role.LIST_MARKER)
-    return true;
-
   // Don't ignore nodes with names or name-like attribute.
   if (node.name || node.value || node.description || node.url)
     return false;
@@ -329,7 +383,7 @@ AutomationPredicate.shouldIgnoreNode = function(node) {
   // Ignore some roles.
   return AutomationPredicate.leaf(node) && (AutomationPredicate.roles([
            Role.CLIENT, Role.COLUMN, Role.GENERIC_CONTAINER, Role.GROUP,
-           Role.IMAGE, Role.STATIC_TEXT, Role.SVG_ROOT,
+           Role.IMAGE, Role.PARAGRAPH, Role.STATIC_TEXT, Role.SVG_ROOT,
            Role.TABLE_HEADER_CONTAINER, Role.UNKNOWN
          ])(node));
 };
@@ -343,6 +397,16 @@ AutomationPredicate.checkable = AutomationPredicate.roles([
   Role.CHECK_BOX, Role.RADIO_BUTTON, Role.MENU_ITEM_CHECK_BOX,
   Role.MENU_ITEM_RADIO, Role.TREE_ITEM
 ]);
+
+/**
+ * Returns if the node is clickable.
+ * @param {!AutomationNode} node
+ * @return {boolean}
+ */
+AutomationPredicate.clickable = AutomationPredicate.match({
+  anyPredicate: [AutomationPredicate.button, AutomationPredicate.link],
+  anyAttribute: {clickable: true}
+});
 
 // Table related predicates.
 /**
@@ -442,5 +506,25 @@ AutomationPredicate.makeHeadingPredicate = function(level) {
  */
 AutomationPredicate.supportsImageData =
     AutomationPredicate.roles([Role.CANVAS, Role.IMAGE, Role.VIDEO]);
+
+/**
+ * Matches against a node that forces showing surrounding contextual information
+ * for braille.
+ * @param {!AutomationNode} node
+ * @return {boolean}
+ */
+AutomationPredicate.contextualBraille = function(node) {
+  return node.parent != null && node.parent.role == Role.ROW &&
+      AutomationPredicate.cellLike(node);
+};
+
+/**
+ * Matches against a node that handles multi line key commands.
+ * @param {!AutomationNode} node
+ * @return {boolean}
+ */
+AutomationPredicate.multiline = function(node) {
+  return node.state[State.MULTILINE] || node.state[State.RICHLY_EDITABLE];
+};
 
 });  // goog.scope

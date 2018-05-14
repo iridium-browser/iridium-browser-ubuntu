@@ -24,7 +24,7 @@ base::string16 MacAddressAsString16(const uint8_t mac_as_int[6]) {
 WifiDataProviderCommon::WifiDataProviderCommon()
     : is_first_scan_complete_(false), weak_factory_(this) {}
 
-WifiDataProviderCommon::~WifiDataProviderCommon() {}
+WifiDataProviderCommon::~WifiDataProviderCommon() = default;
 
 void WifiDataProviderCommon::StartDataProvider() {
   DCHECK(!wlan_api_);
@@ -57,6 +57,10 @@ bool WifiDataProviderCommon::GetData(WifiData* data) {
 }
 
 void WifiDataProviderCommon::DoWifiScanTask() {
+  // Abort the wifi scan if the provider is already being torn down.
+  if (!wlan_api_)
+    return;
+
   bool update_available = false;
   WifiData new_data;
   if (!wlan_api_->GetAccessPointData(&new_data.access_point_data)) {

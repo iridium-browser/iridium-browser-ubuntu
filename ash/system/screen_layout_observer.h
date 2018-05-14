@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <set>
 
 #include "ash/ash_export.h"
 #include "ash/display/window_tree_host_manager.h"
@@ -24,8 +25,15 @@ class ASH_EXPORT ScreenLayoutObserver : public WindowTreeHostManager::Observer {
   ScreenLayoutObserver();
   ~ScreenLayoutObserver() override;
 
+  static const char kNotificationId[];
+
   // WindowTreeHostManager::Observer:
   void OnDisplayConfigurationChanged() override;
+
+  // No notification will be shown only for the next ui scale change for the
+  // display with |display_id|. This state will be consumed and subsequent
+  // changes won't be affected.
+  void SetDisplayChangedFromSettingsUI(int64_t display_id);
 
   // Notifications are shown in production and are not shown in unit tests.
   // Allow individual unit tests to show notifications.
@@ -38,8 +46,6 @@ class ASH_EXPORT ScreenLayoutObserver : public WindowTreeHostManager::Observer {
 
   using DisplayInfoMap = std::map<int64_t, display::ManagedDisplayInfo>;
 
-  static const char kNotificationId[];
-
   // Scans the current display info and updates |display_info_|. Sets the
   // previous data to |old_info| if it's not NULL.
   void UpdateDisplayInfo(DisplayInfoMap* old_info);
@@ -47,9 +53,9 @@ class ASH_EXPORT ScreenLayoutObserver : public WindowTreeHostManager::Observer {
   // Compares the current display settings with |old_info| and determine what
   // message should be shown for notification. Returns true if there's a
   // meaningful change. Note that it's possible to return true and set
-  // |message_out| to empty, which means the notification should be removed. It
-  // also sets |additional_message_out| which appears in the notification with
-  // the |message_out|.
+  // |out_message| to empty, which means the notification should be removed. It
+  // also sets |out_additional_message| which appears in the notification with
+  // the |out_message|.
   bool GetDisplayMessageForNotification(const DisplayInfoMap& old_info,
                                         base::string16* out_message,
                                         base::string16* out_additional_message);
@@ -76,6 +82,10 @@ class ASH_EXPORT ScreenLayoutObserver : public WindowTreeHostManager::Observer {
 
   DisplayMode old_display_mode_ = DisplayMode::SINGLE;
   DisplayMode current_display_mode_ = DisplayMode::SINGLE;
+
+  // When the UI scale of a display is modified from the Settings UI, we should
+  // ignore this change and avoid showing a notification for it.
+  std::set<int64_t> displays_changed_from_settings_ui_;
 
   bool show_notifications_for_testing_ = true;
 

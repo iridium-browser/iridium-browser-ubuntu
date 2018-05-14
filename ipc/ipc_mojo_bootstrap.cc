@@ -8,11 +8,11 @@
 
 #include <map>
 #include <memory>
-#include <queue>
 #include <utility>
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/queue.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -44,9 +44,10 @@ class ChannelAssociatedGroupController
  public:
   ChannelAssociatedGroupController(
       bool set_interface_id_namespace_bit,
-      const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner)
+      const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner,
+      const scoped_refptr<base::SingleThreadTaskRunner>& proxy_task_runner)
       : task_runner_(ipc_task_runner),
-        proxy_task_runner_(base::ThreadTaskRunnerHandle::Get()),
+        proxy_task_runner_(proxy_task_runner),
         set_interface_id_namespace_bit_(set_interface_id_namespace_bit),
         filters_(this),
         control_message_handler_(this),
@@ -122,9 +123,11 @@ class ChannelAssociatedGroupController
 
   void ShutDown() {
     DCHECK(thread_checker_.CalledOnValidThread());
+    shut_down_ = true;
     connector_->CloseMessagePipe();
     OnPipeError();
     connector_.reset();
+    outgoing_messages_.clear();
   }
 
   // mojo::AssociatedGroupController:
@@ -171,6 +174,15 @@ class ChannelAssociatedGroupController
       mojo::InterfaceId id) override {
     if (!mojo::IsValidInterfaceId(id))
       return mojo::ScopedInterfaceEndpointHandle();
+
+    // Unless it is the master ID, |id| is from the remote side and therefore
+    // its namespace bit is supposed to be different than the value that this
+    // router would use.
+    if (!mojo::IsMasterInterfaceId(id) &&
+        set_interface_id_namespace_bit_ ==
+            mojo::HasInterfaceIdNamespaceBitSet(id)) {
+      return mojo::ScopedInterfaceEndpointHandle();
+    }
 
     base::AutoLock locker(lock_);
     bool inserted = false;
@@ -493,7 +505,7 @@ class ChannelAssociatedGroupController
       {
         base::AutoLock locker(controller_->lock_);
         if (!sync_message_event_) {
-          sync_message_event_ = base::MakeUnique<base::WaitableEvent>(
+          sync_message_event_ = std::make_unique<base::WaitableEvent>(
               base::WaitableEvent::ResetPolicy::MANUAL,
               base::WaitableEvent::InitialState::NOT_SIGNALED);
           if (peer_closed_ || !sync_messages_.empty())
@@ -501,7 +513,7 @@ class ChannelAssociatedGroupController
         }
       }
 
-      sync_watcher_ = base::MakeUnique<mojo::SyncEventWatcher>(
+      sync_watcher_ = std::make_unique<mojo::SyncEventWatcher>(
           sync_message_event_.get(),
           base::Bind(&Endpoint::OnSyncMessageEventReady,
                      base::Unretained(this)));
@@ -525,7 +537,7 @@ class ChannelAssociatedGroupController
     scoped_refptr<base::SequencedTaskRunner> task_runner_;
     std::unique_ptr<mojo::SyncEventWatcher> sync_watcher_;
     std::unique_ptr<base::WaitableEvent> sync_message_event_;
-    std::queue<std::pair<uint32_t, MessageWrapper>> sync_messages_;
+    base::queue<std::pair<uint32_t, MessageWrapper>> sync_messages_;
     uint32_t next_sync_message_id_ = 0;
 
     DISALLOW_COPY_AND_ASSIGN(Endpoint);
@@ -575,7 +587,15 @@ class ChannelAssociatedGroupController
     if (task_runner_->BelongsToCurrentThread()) {
       DCHECK(thread_checker_.CalledOnValidThread());
       if (!connector_ || paused_) {
-        outgoing_messages_.emplace_back(std::move(*message));
+        if (!shut_down_) {
+          outgoing_messages_.emplace_back(std::move(*message));
+
+          // TODO(https://crbug.com/813045): Remove this. Typically this queue
+          // won't exceed something like 50 messages even on slow devices. If
+          // the massive leaks we see can be attributed to this queue, it would
+          // have to be quite a bit larger.
+          CHECK_LE(outgoing_messages_.size(), 100000u);
+        }
         return true;
       }
       return connector_->Accept(message);
@@ -821,8 +841,6 @@ class ChannelAssociatedGroupController
       const base::Optional<mojo::DisconnectReason>& reason) override {
     DCHECK(thread_checker_.CalledOnValidThread());
 
-    DCHECK(!mojo::IsMasterInterfaceId(id) || reason);
-
     scoped_refptr<ChannelAssociatedGroupController> keepalive(this);
     base::AutoLock locker(lock_);
     scoped_refptr<Endpoint> endpoint = FindOrInsertEndpoint(id, nullptr);
@@ -861,6 +879,7 @@ class ChannelAssociatedGroupController
   base::Lock lock_;
 
   bool encountered_error_ = false;
+  bool shut_down_ = false;
 
   // ID #1 is reserved for the mojom::Channel interface.
   uint32_t next_interface_id_ = 2;
@@ -920,10 +939,12 @@ class MojoBootstrapImpl : public MojoBootstrap {
 std::unique_ptr<MojoBootstrap> MojoBootstrap::Create(
     mojo::ScopedMessagePipeHandle handle,
     Channel::Mode mode,
-    const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner) {
-  return base::MakeUnique<MojoBootstrapImpl>(
-      std::move(handle), new ChannelAssociatedGroupController(
-                             mode == Channel::MODE_SERVER, ipc_task_runner));
+    const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner,
+    const scoped_refptr<base::SingleThreadTaskRunner>& proxy_task_runner) {
+  return std::make_unique<MojoBootstrapImpl>(
+      std::move(handle),
+      new ChannelAssociatedGroupController(mode == Channel::MODE_SERVER,
+                                           ipc_task_runner, proxy_task_runner));
 }
 
 }  // namespace IPC

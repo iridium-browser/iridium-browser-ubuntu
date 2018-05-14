@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -218,18 +217,20 @@ WebstorePrivateBeginInstallWithManifest3Function::Run() {
   ActiveInstallData install_data(details().id);
   scoped_active_install_.reset(new ScopedActiveInstall(tracker, install_data));
 
-  net::URLRequestContextGetter* context_getter = nullptr;
+  network::mojom::URLLoaderFactory* loader_factory = nullptr;
   if (!icon_url.is_empty()) {
-    context_getter = content::BrowserContext::GetDefaultStoragePartition(
-        browser_context())->GetURLRequestContext();
+    loader_factory =
+        content::BrowserContext::GetDefaultStoragePartition(browser_context())
+            ->GetURLLoaderFactoryForBrowserProcess()
+            .get();
   }
 
   scoped_refptr<WebstoreInstallHelper> helper = new WebstoreInstallHelper(
-      this, details().id, details().manifest, icon_url, context_getter);
+      this, details().id, details().manifest, icon_url);
 
   // The helper will call us back via OnWebstoreParseSuccess or
   // OnWebstoreParseFailure.
-  helper->Start();
+  helper->Start(loader_factory);
 
   // Matched with a Release in OnWebstoreParseSuccess/OnWebstoreParseFailure.
   AddRef();
@@ -642,19 +643,19 @@ WebstorePrivateIsPendingCustodianApprovalFunction::Run() {
   ExtensionPrefs* extensions_prefs = ExtensionPrefs::Get(browser_context());
 
   if (extensions_prefs->HasDisableReason(
-          params->id, Extension::DISABLE_PERMISSIONS_INCREASE)) {
+          params->id, disable_reason::DISABLE_PERMISSIONS_INCREASE)) {
     return RespondNow(BuildResponse(true));
   }
 
   bool is_pending_approval = extensions_prefs->HasDisableReason(
-      params->id, Extension::DISABLE_CUSTODIAN_APPROVAL_REQUIRED);
+      params->id, disable_reason::DISABLE_CUSTODIAN_APPROVAL_REQUIRED);
 
   return RespondNow(BuildResponse(is_pending_approval));
 }
 
 ExtensionFunction::ResponseValue
 WebstorePrivateIsPendingCustodianApprovalFunction::BuildResponse(bool result) {
-  return OneArgument(base::MakeUnique<base::Value>(result));
+  return OneArgument(std::make_unique<base::Value>(result));
 }
 
 }  // namespace extensions

@@ -11,6 +11,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/timer/timer.h"
 #include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
 #include "net/cert/cert_verify_result.h"
@@ -57,14 +58,15 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
   void OnIncorrectConnectionId(QuicConnectionId connection_id) override;
   void OnUndecryptablePacket() override;
   void OnDuplicatePacket(QuicPacketNumber packet_number) override;
-  void OnProtocolVersionMismatch(QuicVersion version) override;
+  void OnProtocolVersionMismatch(ParsedQuicVersion version) override;
   void OnPacketHeader(const QuicPacketHeader& header) override;
   void OnStreamFrame(const QuicStreamFrame& frame) override;
   void OnAckFrame(const QuicAckFrame& frame) override;
   void OnStopWaitingFrame(const QuicStopWaitingFrame& frame) override;
   void OnRstStreamFrame(const QuicRstStreamFrame& frame) override;
   void OnConnectionCloseFrame(const QuicConnectionCloseFrame& frame) override;
-  void OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
+  void OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame,
+                           const QuicTime& receive_time) override;
   void OnBlockedFrame(const QuicBlockedFrame& frame) override;
   void OnGoAwayFrame(const QuicGoAwayFrame& frame) override;
   void OnPingFrame(const QuicPingFrame& frame) override;
@@ -74,7 +76,8 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
   void OnConnectionClosed(QuicErrorCode error,
                           const std::string& error_details,
                           ConnectionCloseSource source) override;
-  void OnSuccessfulVersionNegotiation(const QuicVersion& version) override;
+  void OnSuccessfulVersionNegotiation(
+      const QuicTransportVersion& version) override;
   void OnRttChanged(QuicTime::Delta rtt) const override;
 
   void OnCryptoHandshakeMessageReceived(const CryptoHandshakeMessage& message);
@@ -96,6 +99,8 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
   // For connections longer than 21 received packets, this call will calculate
   // the overall packet loss rate, and record it into a histogram.
   void RecordAggregatePacketLossRate() const;
+
+  void UpdateIsCapturing();
 
   NetLogWithSource net_log_;
   QuicSpdySession* session_;  // Unowned.
@@ -154,6 +159,10 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
   // Receives notifications regarding the performance of the underlying socket
   // for the QUIC connection. May be null.
   const std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher_;
+  // Lower the overhead of checking whether logging is active, by
+  // periodically polling and caching the result of net_log_.IsCapturing().
+  bool net_log_is_capturing_;
+  base::RepeatingTimer timer_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionLogger);
 };

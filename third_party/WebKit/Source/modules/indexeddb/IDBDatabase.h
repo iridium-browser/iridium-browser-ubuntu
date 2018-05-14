@@ -28,7 +28,9 @@
 
 #include <memory>
 
-#include "bindings/modules/v8/StringOrStringSequence.h"
+#include "base/memory/scoped_refptr.h"
+#include "bindings/core/v8/ActiveScriptWrappable.h"
+#include "bindings/core/v8/string_or_string_sequence.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/DOMStringList.h"
 #include "modules/EventModules.h"
@@ -41,11 +43,11 @@
 #include "modules/indexeddb/IDBObjectStoreParameters.h"
 #include "modules/indexeddb/IDBTransaction.h"
 #include "modules/indexeddb/IndexedDB.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/bindings/ScriptState.h"
+#include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/modules/indexeddb/WebIDBDatabase.h"
+#include "public/platform/modules/indexeddb/WebIDBDatabaseCallbacks.h"
 
 namespace blink {
 
@@ -68,7 +70,8 @@ class MODULES_EXPORT IDBDatabase final
                              IDBDatabaseCallbacks*,
                              v8::Isolate*);
   ~IDBDatabase() override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
   // Overwrites the database metadata, including object store and index
   // metadata. Used to pass metadata to the database when it is opened.
@@ -116,10 +119,9 @@ class MODULES_EXPORT IDBDatabase final
   void OnVersionChange(int64_t old_version, int64_t new_version);
   void OnAbort(int64_t, DOMException*);
   void OnComplete(int64_t);
-  void OnChanges(const std::unordered_map<int32_t, std::vector<int32_t>>&
-                     observation_index_map,
-                 const WebVector<WebIDBObservation>& observations,
-                 const IDBDatabaseCallbacks::TransactionMap& transactions);
+  void OnChanges(const WebIDBDatabaseCallbacks::ObservationIndexMap&,
+                 WebVector<WebIDBObservation> observations,
+                 const WebIDBDatabaseCallbacks::TransactionMap& transactions);
 
   // ScriptWrappable
   bool HasPendingActivity() const final;
@@ -142,7 +144,8 @@ class MODULES_EXPORT IDBDatabase final
   }
   void RenameObjectStore(int64_t store_id, const String& new_name);
   void RevertObjectStoreCreation(int64_t object_store_id);
-  void RevertObjectStoreMetadata(RefPtr<IDBObjectStoreMetadata> old_metadata);
+  void RevertObjectStoreMetadata(
+      scoped_refptr<IDBObjectStoreMetadata> old_metadata);
 
   // Will return nullptr if this database is stopped.
   WebIDBDatabase* Backend() const { return backend_.get(); }
@@ -191,7 +194,7 @@ class MODULES_EXPORT IDBDatabase final
   std::unique_ptr<WebIDBDatabase> backend_;
   Member<IDBTransaction> version_change_transaction_;
   HeapHashMap<int64_t, Member<IDBTransaction>> transactions_;
-  HeapHashMap<int32_t, Member<IDBObserver>> observers_;
+  HeapHashMap<int32_t, TraceWrapperMember<IDBObserver>> observers_;
 
   bool close_pending_ = false;
 

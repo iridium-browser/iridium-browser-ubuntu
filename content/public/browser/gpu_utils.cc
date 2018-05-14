@@ -11,6 +11,7 @@
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
+#include "gpu/command_buffer/service/service_utils.h"
 #include "gpu/config/gpu_switches.h"
 #include "media/media_features.h"
 #include "ui/gl/gl_switches.h"
@@ -53,18 +54,10 @@ const gpu::GpuPreferences GetGpuPreferencesFromCommandLine() {
       command_line->HasSwitch(switches::kSingleProcess);
   gpu_preferences.in_process_gpu =
       command_line->HasSwitch(switches::kInProcessGPU);
-  gpu_preferences.ui_prioritize_in_gpu_process =
-      command_line->HasSwitch(switches::kUIPrioritizeInGpuProcess);
   gpu_preferences.disable_accelerated_video_decode =
       command_line->HasSwitch(switches::kDisableAcceleratedVideoDecode);
-#if defined(OS_CHROMEOS)
-  gpu_preferences.disable_vaapi_accelerated_video_encode =
-      command_line->HasSwitch(switches::kDisableVaapiAcceleratedVideoEncode);
-#endif
-#if BUILDFLAG(ENABLE_WEBRTC)
-  gpu_preferences.disable_web_rtc_hw_encoding =
-      command_line->HasSwitch(switches::kDisableWebRtcHWEncoding);
-#endif
+  gpu_preferences.disable_accelerated_video_encode =
+      command_line->HasSwitch(switches::kDisableAcceleratedVideoEncode);
 #if defined(OS_WIN)
   uint32_t enable_accelerated_vpx_decode_val =
       gpu::GpuPreferences::VPX_VENDOR_MICROSOFT;
@@ -81,14 +74,16 @@ const gpu::GpuPreferences GetGpuPreferencesFromCommandLine() {
   gpu_preferences.enable_nv12_dxgi_video =
       !command_line->HasSwitch(switches::kDisableNv12DxgiVideo);
 #endif
+  gpu_preferences.disable_software_rasterizer =
+      command_line->HasSwitch(switches::kDisableSoftwareRasterizer);
+  gpu_preferences.log_gpu_control_list_decisions =
+      command_line->HasSwitch(switches::kLogGpuControlListDecisions);
   gpu_preferences.compile_shader_always_succeeds =
       command_line->HasSwitch(switches::kCompileShaderAlwaysSucceeds);
   gpu_preferences.disable_gl_error_limit =
       command_line->HasSwitch(switches::kDisableGLErrorLimit);
   gpu_preferences.disable_glsl_translator =
       command_line->HasSwitch(switches::kDisableGLSLTranslator);
-  gpu_preferences.disable_gpu_driver_bug_workarounds =
-      command_line->HasSwitch(switches::kDisableGpuDriverBugWorkarounds);
   gpu_preferences.disable_shader_name_hashing =
       command_line->HasSwitch(switches::kDisableShaderNameHashing);
   gpu_preferences.enable_gpu_command_logging =
@@ -119,12 +114,25 @@ const gpu::GpuPreferences GetGpuPreferencesFromCommandLine() {
       command_line->HasSwitch(switches::kGLShaderIntermOutput);
   gpu_preferences.emulate_shader_precision =
       command_line->HasSwitch(switches::kEmulateShaderPrecision);
+  gpu_preferences.enable_raster_decoder =
+      command_line->HasSwitch(switches::kEnableRasterDecoder);
   gpu_preferences.enable_gpu_service_logging =
       command_line->HasSwitch(switches::kEnableGPUServiceLogging);
   gpu_preferences.enable_gpu_service_tracing =
       command_line->HasSwitch(switches::kEnableGPUServiceTracing);
   gpu_preferences.use_passthrough_cmd_decoder =
-      command_line->HasSwitch(switches::kUsePassthroughCmdDecoder);
+      gpu::gles2::UsePassthroughCommandDecoder(command_line);
+  gpu_preferences.gpu_startup_dialog =
+      command_line->HasSwitch(switches::kGpuStartupDialog);
+  gpu_preferences.disable_gpu_watchdog =
+      command_line->HasSwitch(switches::kDisableGpuWatchdog) ||
+      (gpu_preferences.single_process || gpu_preferences.in_process_gpu);
+  gpu_preferences.gpu_sandbox_start_early =
+      command_line->HasSwitch(switches::kGpuSandboxStartEarly);
+  gpu_preferences.disable_gpu_driver_bug_workarounds =
+      command_line->HasSwitch(switches::kDisableGpuDriverBugWorkarounds);
+  gpu_preferences.ignore_gpu_blacklist =
+      command_line->HasSwitch(switches::kIgnoreGpuBlacklist);
   // Some of these preferences are set or adjusted in
   // GpuDataManagerImplPrivate::AppendGpuCommandLine.
   return gpu_preferences;

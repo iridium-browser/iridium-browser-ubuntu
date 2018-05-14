@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/test/video_capturer.h"
+#include "test/video_capturer.h"
 
-#include "webrtc/rtc_base/basictypes.h"
-#include "webrtc/rtc_base/constructormagic.h"
+#include "rtc_base/basictypes.h"
+#include "rtc_base/constructormagic.h"
 
 namespace webrtc {
 namespace test {
@@ -28,7 +28,7 @@ rtc::Optional<VideoFrame> VideoCapturer::AdaptFrame(const VideoFrame& frame) {
           frame.width(), frame.height(), frame.timestamp_us() * 1000,
           &cropped_width, &cropped_height, &out_width, &out_height)) {
     // Drop frame in order to respect frame rate constraint.
-    return rtc::Optional<VideoFrame>();
+    return rtc::nullopt;
   }
 
   rtc::Optional<VideoFrame> out_frame;

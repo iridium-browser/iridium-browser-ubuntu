@@ -16,13 +16,17 @@ class LoadingMobileStorySet(story.StorySet):
   Design doc: https://docs.google.com/document/d/1QKlZIoURAxZk-brrXsKYZl9O8ieqXht3ogeF9yLNFCI/edit
   """
 
-  def __init__(self, cache_temperatures=None, traffic_settings=None):
+  def __init__(self, cache_temperatures=None, cache_temperatures_for_pwa=None,
+               traffic_settings=None):
     super(LoadingMobileStorySet, self).__init__(
         archive_data_file='data/loading_mobile.json',
         cloud_storage_bucket=story.PARTNER_BUCKET)
 
     if cache_temperatures is None:
       cache_temperatures = [cache_temperature_module.ANY]
+
+    if cache_temperatures_for_pwa is None:
+      cache_temperatures_for_pwa = [cache_temperature_module.ANY]
 
     if traffic_settings is None:
       traffic_settings = [traffic_setting_module.NONE]
@@ -87,45 +91,33 @@ class LoadingMobileStorySet(story.StorySet):
        'FlipKart'),
       ('https://smp.suumo.jp/mansion/tokyo/sc_104/cond/?moreCond=1',
        'Suumo'),
-      ('https://guitar-tuner.appspot.com', 'GuitarTuner'),
-      ('https://andreasbovens.github.io/inbox-attack/',
-       'InboxAttack'),
       ('https://voice-memos.appspot.com', 'VoiceMemos'),
       ('https://dev.opera.com/', 'DevOpera'),
-      ('https://www.pokedex.org/', 'Pokedex'),
-      ('https://2048-opera-pwa.surge.sh/', '2048'),
-      ('https://jakearchibald.github.io/trained-to-thrill/',
-       'TrainedToThrill'),
-      ('https://townwork.net', 'TownWork'),
       ('https://flipboard.com/topic/yoga', 'FlipBoard'),
       # TODO(rnephew): Record these. crbug.com/728882
       # ('https://wiki-offline.jakearchibald.com/',
       #  'WikiOffline'),
       # ('https://busrouter.sg', 'BusRouter'),
       # ('https://airhorner.com', 'AirHorner'),
-    ], cache_temperatures, traffic_settings)
+    ], cache_temperatures_for_pwa, traffic_settings)
 
     self.AddStories(['tough_ttfmp'], [
       ('http://www.localmoxie.com', 'LocalMoxie'),
       ('http://www.dawn.com', 'Dawn'),
       ('http://www.thairath.co.th', 'Thairath'),
       ('http://www.hashocean.com', 'HashOcean'),
-      ('http://www.163.com', '163'),
     ], cache_temperatures, traffic_settings)
 
     self.AddStories(['easy_ttfmp'], [
       ('http://www.slideshare.net', 'SlideShare'),
       ('http://www.bradesco.com.br', 'Bradesco'),
       ('http://www.gsshop.com', 'GSShop'),
-      ('http://www.sbs.co.kr', 'SBS'),
-      ('http://www.futura-sciences.com', 'FuturaSciences'),
     ], cache_temperatures, traffic_settings)
 
     self.AddStories(['tough_tti'], [
       ('http://www.thestar.com.my', 'TheStar'),
       ('http://www.58pic.com', '58Pic'),
       ('http://www.hongkiat.com', 'Hongkiat'),
-      ('http://www.ebs.in', 'EBS'),
       ('http://www.ibicn.com', 'IBI'),
     ], cache_temperatures, traffic_settings)
 
@@ -133,8 +125,6 @@ class LoadingMobileStorySet(story.StorySet):
       ('http://www.dramaq.com.tw', 'Dramaq'),
       ('http://www.locanto.in', 'Locanto'),
       ('http://www.francetvinfo.fr', 'FranceTVInfo'),
-      ('http://www.gfk.com', 'GFK'),
-      ('http://www.mlsmatrix.com', 'MLSMatrix'),
     ], cache_temperatures, traffic_settings)
 
   def AddStories(self, tags, urls, cache_temperatures, traffic_settings):
@@ -144,33 +134,3 @@ class LoadingMobileStorySet(story.StorySet):
           self.AddStory(page_cycler_story.PageCyclerStory(url, self, name=name,
               shared_page_state_class=shared_page_state.SharedMobilePageState,
               cache_temperature=temp, traffic_setting=traffic, tags=tags))
-
-class LoadingMobileExpectations(story.expectations.StoryExpectations):
-  def SetExpectations(self):
-    self.DisableStory('GFK', [story.expectations.ALL],
-                      'N5X Timeout issue: crbug.com/702175')
-    self.DisableStory('MLSMatrix', [story.expectations.ALL],
-                      'N5XTimeout issue: crbug.com/702175')
-    self.DisableStory('EBS', [story.expectations.ALL],
-                      'N5XTimeout issue: crbug.com/702175')
-    self.DisableStory('IBI', [story.expectations.ALL],
-                      'N5XTimeout issue: crbug.com/702175')
-    self.DisableStory('SBS', [story.expectations.ALL],
-                      'N5XTimeout issue: crbug.com/702175')
-    self.DisableStory('FuturaSciences', [story.expectations.ALL],
-                      'N5XTimeout issue: crbug.com/702175')
-    self.DisableStory('HashOcean', [story.expectations.ALL],
-                      'N5XTimeout issue: crbug.com/702175')
-    self.DisableStory('163', [story.expectations.ALL],
-                      'N5XTimeout issue: crbug.com/702175')
-    self.DisableStory('G1', [story.expectations.ALL], 'crbug.com/656861')
-    # TODO(rnephew): Uncomment Disablings. crbug.com/728882
-    # self.DisableStory(
-    #     'AirHorner', [story.expectations.ALL], 'crbug.com/653775')
-    # self.DisableStory(
-    #     'BusRouter', [story.expectations.ALL], 'crbug.com/653775')
-    # self.DisableStory('WikiOffline', [story.expectations.ALL],
-    #                   'crbug.com/653775')
-    # self.DisableStory('Detik', [story.expectations.ALL], 'crbug.com/653775')
-    # self.DisableStory(
-    #     'Blogspot', [story.expectations.ALL], 'crbug.com/653775')

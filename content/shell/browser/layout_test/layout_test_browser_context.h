@@ -9,6 +9,10 @@
 #include "base/macros.h"
 #include "content/shell/browser/shell_browser_context.h"
 
+namespace device {
+class ScopedGeolocationOverrider;
+}
+
 namespace net {
 class NetLog;
 }
@@ -44,6 +48,7 @@ class LayoutTestBrowserContext : public ShellBrowserContext {
   std::unique_ptr<LayoutTestPushMessagingService> push_messaging_service_;
   std::unique_ptr<PermissionManager> permission_manager_;
   std::unique_ptr<BackgroundSyncController> background_sync_controller_;
+  std::unique_ptr<device::ScopedGeolocationOverrider> geolocation_overrider_;
 
   DISALLOW_COPY_AND_ASSIGN(LayoutTestBrowserContext);
 };

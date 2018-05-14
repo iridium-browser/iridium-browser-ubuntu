@@ -12,6 +12,10 @@ namespace switches {
 UI_BASE_EXPORT bool IsLinkDisambiguationPopupEnabled();
 UI_BASE_EXPORT bool IsTouchDragDropEnabled();
 
+// Returns whether the touchable app context menu switch has been set. Prefer
+// features::IsTouchableAppContextMenuEnabled().
+UI_BASE_EXPORT bool IsTouchableAppContextMenuEnabled();
+
 }  // namespace switches
 
 #endif  // UI_BASE_UI_BASE_SWITCHES_UTIL_H_

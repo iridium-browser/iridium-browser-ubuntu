@@ -15,6 +15,7 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/common/content_features.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 using content::WebContents;
@@ -80,12 +81,13 @@ ExclusiveAccessManager::GetExclusiveAccessExitBubbleType() const {
   return EXCLUSIVE_ACCESS_BUBBLE_TYPE_NONE;
 }
 
-void ExclusiveAccessManager::UpdateExclusiveAccessExitBubbleContent() {
+void ExclusiveAccessManager::UpdateExclusiveAccessExitBubbleContent(
+    ExclusiveAccessBubbleHideCallback bubble_first_hide_callback) {
   GURL url = GetExclusiveAccessBubbleURL();
   ExclusiveAccessBubbleType bubble_type = GetExclusiveAccessExitBubbleType();
 
   exclusive_access_context_->UpdateExclusiveAccessExitBubbleContent(
-      url, bubble_type);
+      url, bubble_type, std::move(bubble_first_hide_callback));
 }
 
 GURL ExclusiveAccessManager::GetExclusiveAccessBubbleURL() const {
@@ -97,7 +99,8 @@ GURL ExclusiveAccessManager::GetExclusiveAccessBubbleURL() const {
 
 // static
 bool ExclusiveAccessManager::IsExperimentalKeyboardLockUIEnabled() {
-  return base::FeatureList::IsEnabled(features::kExperimentalKeyboardLockUI);
+  return base::FeatureList::IsEnabled(features::kKeyboardLockAPI) ||
+         base::FeatureList::IsEnabled(features::kExperimentalKeyboardLockUI);
 }
 
 // static

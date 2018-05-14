@@ -13,11 +13,15 @@
 #include "media/base/video_decoder.h"
 #include "media/base/video_renderer_sink.h"
 
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
+#include "media/cdm/cdm_proxy.h"
+#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
+
 namespace media {
 
-MojoMediaClient::MojoMediaClient() {}
+MojoMediaClient::MojoMediaClient() = default;
 
-MojoMediaClient::~MojoMediaClient() {}
+MojoMediaClient::~MojoMediaClient() = default;
 
 void MojoMediaClient::Initialize(service_manager::Connector* connector) {}
 
@@ -30,7 +34,7 @@ std::unique_ptr<VideoDecoder> MojoMediaClient::CreateVideoDecoder(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     MediaLog* media_log,
     mojom::CommandBufferIdPtr command_buffer_id,
-    OutputWithReleaseMailboxCB output_cb) {
+    RequestOverlayInfoCB request_overlay_info_cb) {
   return nullptr;
 }
 
@@ -53,5 +57,12 @@ std::unique_ptr<CdmFactory> MojoMediaClient::CreateCdmFactory(
     service_manager::mojom::InterfaceProvider* host_interfaces) {
   return nullptr;
 }
+
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
+std::unique_ptr<CdmProxy> MojoMediaClient::CreateCdmProxy(
+    const std::string& cdm_guid) {
+  return nullptr;
+}
+#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
 }  // namespace media

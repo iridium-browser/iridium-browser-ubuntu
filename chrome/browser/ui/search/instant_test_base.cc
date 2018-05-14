@@ -4,7 +4,8 @@
 
 #include "chrome/browser/ui/search/instant_test_base.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -30,25 +31,21 @@ void InstantTestBase::SetupInstant(Browser* browser) {
   search_test_utils::WaitForTemplateURLServiceToLoad(service);
 
   TemplateURLData data;
-  // Necessary to use exact URL for both the main URL and the alternate URL for
-  // search term extraction to work in InstantExtended.
   data.SetShortName(base::ASCIIToUTF16("name"));
-  data.SetURL(instant_url_.spec() + "q={searchTerms}&is_search");
-  data.instant_url = instant_url_.spec();
+  data.SetURL(base_url_.spec() + "q={searchTerms}&is_search");
   data.new_tab_url = ntp_url_.spec();
   if (init_suggestions_url_)
-    data.suggestions_url = instant_url_.spec() + "#q={searchTerms}";
-  data.alternate_urls.push_back(instant_url_.spec() + "#q={searchTerms}");
-  data.search_terms_replacement_key = "strk";
+    data.suggestions_url = base_url_.spec() + "#q={searchTerms}";
+  data.alternate_urls.push_back(base_url_.spec() + "#q={searchTerms}");
 
-  TemplateURL* template_url = service->Add(base::MakeUnique<TemplateURL>(data));
+  TemplateURL* template_url = service->Add(std::make_unique<TemplateURL>(data));
   service->SetUserSelectedDefaultSearchProvider(template_url);
 }
 
-void InstantTestBase::Init(const GURL& instant_url,
+void InstantTestBase::Init(const GURL& base_url,
                            const GURL& ntp_url,
                            bool init_suggestions_url) {
-  instant_url_ = instant_url;
+  base_url_ = base_url;
   ntp_url_ = ntp_url;
   init_suggestions_url_ = init_suggestions_url;
 }

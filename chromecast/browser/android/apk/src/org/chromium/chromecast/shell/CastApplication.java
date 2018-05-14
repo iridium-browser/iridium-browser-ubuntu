@@ -4,12 +4,13 @@
 
 package org.chromium.chromecast.shell;
 
+import android.app.Application;
 import android.content.Context;
 
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CommandLineInitUtil;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.PathUtils;
-import org.chromium.content.app.ContentApplication;
 
 /**
  * Entry point for the Android cast shell application.  Handles initialization of information that
@@ -19,7 +20,7 @@ import org.chromium.content.app.ContentApplication;
  * processes don't need most of the full "setup" performed in CastBrowserHelper.java, but they do
  * require a few basic pieces (found here).
  */
-public class CastApplication extends ContentApplication {
+public class CastApplication extends Application {
     private static final String TAG = "CastApplication";
 
     private static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "cast_shell";
@@ -35,10 +36,10 @@ public class CastApplication extends ContentApplication {
     public void onCreate() {
         super.onCreate();
         PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
+        ApplicationStatus.initialize(this);
     }
 
-    @Override
     public void initCommandLine() {
-        CommandLineInitUtil.initCommandLine(this, COMMAND_LINE_FILE);
+        CommandLineInitUtil.initCommandLine(COMMAND_LINE_FILE);
     }
 }

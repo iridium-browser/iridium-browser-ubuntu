@@ -26,6 +26,8 @@
 #ifndef InspectorCSSAgent_h
 #define InspectorCSSAgent_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSSelector.h"
 #include "core/dom/SecurityContext.h"
@@ -37,8 +39,6 @@
 #include "platform/wtf/HashCountedSet.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -50,6 +50,8 @@ class CSSStyleRule;
 class CSSStyleSheet;
 class Document;
 class Element;
+class FontCustomPlatformData;
+class FontFace;
 class InspectedFrames;
 class InspectorNetworkAgent;
 class InspectorResourceContainer;
@@ -63,7 +65,6 @@ class CORE_EXPORT InspectorCSSAgent final
     : public InspectorBaseAgent<protocol::CSS::Metainfo>,
       public InspectorDOMAgent::DOMListener,
       public InspectorStyleSheetBase::Listener {
-  WTF_MAKE_NONCOPYABLE(InspectorCSSAgent);
   USING_GARBAGE_COLLECTED_MIXIN(InspectorCSSAgent);
 
  public:
@@ -108,7 +109,7 @@ class CORE_EXPORT InspectorCSSAgent final
                                             HeapVector<Member<CSSStyleSheet>>&);
 
   ~InspectorCSSAgent() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   void ForcePseudoState(Element*, CSSSelector::PseudoType, bool* result);
   void DidCommitLoadForLocalFrame(LocalFrame*) override;
@@ -119,8 +120,11 @@ class CORE_EXPORT InspectorCSSAgent final
 
   void ActiveStyleSheetsUpdated(Document*);
   void DocumentDetached(Document*);
-  void FontsUpdated();
+  void FontsUpdated(const FontFace*,
+                    const String& src,
+                    const FontCustomPlatformData*);
   void SetCoverageEnabled(bool);
+  void WillChangeStyleElement(Element*);
 
   void enable(std::unique_ptr<EnableCallback>) override;
   protocol::Response disable() override;
@@ -192,7 +196,10 @@ class CORE_EXPORT InspectorCSSAgent final
       const String& value) override;
   protocol::Response getBackgroundColors(
       int node_id,
-      protocol::Maybe<protocol::Array<String>>* background_colors) override;
+      protocol::Maybe<protocol::Array<String>>* background_colors,
+      protocol::Maybe<String>* computed_font_size,
+      protocol::Maybe<String>* computed_font_weight,
+      protocol::Maybe<String>* computed_body_font_size) override;
 
   protocol::Response startRuleUsageTracking() override;
   protocol::Response takeCoverageDelta(
@@ -215,7 +222,7 @@ class CORE_EXPORT InspectorCSSAgent final
       CSSRule*);
 
   CSSStyleDeclaration* FindEffectiveDeclaration(
-      CSSPropertyID,
+      const CSSProperty&,
       const HeapVector<Member<CSSStyleDeclaration>>& styles);
 
   HeapVector<Member<CSSStyleDeclaration>> MatchingStyles(Element*);
@@ -331,6 +338,7 @@ class CORE_EXPORT InspectorCSSAgent final
 
   friend class InspectorResourceContentLoaderCallback;
   friend class StyleSheetBinder;
+  DISALLOW_COPY_AND_ASSIGN(InspectorCSSAgent);
 };
 
 }  // namespace blink

@@ -35,10 +35,12 @@
 #include "platform/PlatformChromeClient.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/scheduler/child/web_scheduler.h"
 #include "platform/scroll/MainThreadScrollingReason.h"
 #include "platform/scroll/ProgrammaticScrollAnimator.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "platform/scroll/SmoothScrollSequencer.h"
+#include "public/platform/Platform.h"
 
 static const int kPixelsPerLineStep = 40;
 static const float kMinFractionToStepWhenPaging = 0.875f;
@@ -55,14 +57,29 @@ float ScrollableArea::MinFractionToStepWhenPaging() {
   return kMinFractionToStepWhenPaging;
 }
 
-int ScrollableArea::MaxOverlapBetweenPages() {
-  static int max_overlap_between_pages =
-      ScrollbarTheme::GetTheme().MaxOverlapBetweenPages();
-  return max_overlap_between_pages;
+int ScrollableArea::MaxOverlapBetweenPages() const {
+  return GetPageScrollbarTheme().MaxOverlapBetweenPages();
+}
+
+// static
+ScrollBehavior ScrollableArea::DetermineScrollBehavior(
+    ScrollBehavior behavior_from_param,
+    ScrollBehavior behavior_from_style) {
+  if (behavior_from_param == kScrollBehaviorSmooth)
+    return kScrollBehaviorSmooth;
+
+  if (behavior_from_param == kScrollBehaviorAuto &&
+      behavior_from_style == kScrollBehaviorSmooth) {
+    return kScrollBehaviorSmooth;
+  }
+
+  return kScrollBehaviorInstant;
 }
 
 ScrollableArea::ScrollableArea()
-    : scrollbar_overlay_color_theme_(kScrollbarOverlayColorThemeDark),
+    : autosize_vertical_scrollbar_mode_(kScrollbarAuto),
+      autosize_horizontal_scrollbar_mode_(kScrollbarAuto),
+      scrollbar_overlay_color_theme_(kScrollbarOverlayColorThemeDark),
       scroll_origin_changed_(false),
       horizontal_scrollbar_needs_paint_invalidation_(false),
       vertical_scrollbar_needs_paint_invalidation_(false),
@@ -72,7 +89,7 @@ ScrollableArea::ScrollableArea()
       mouse_over_scrollbar_(false),
       needs_show_scrollbar_layers_(false) {}
 
-ScrollableArea::~ScrollableArea() {}
+ScrollableArea::~ScrollableArea() = default;
 
 void ScrollableArea::ClearScrollableArea() {
 #if defined(OS_MACOSX)
@@ -110,7 +127,7 @@ void ScrollableArea::SetScrollOrigin(const IntPoint& origin) {
 }
 
 GraphicsLayer* ScrollableArea::LayerForContainer() const {
-  return LayerForScrolling() ? LayerForScrolling()->Parent() : 0;
+  return LayerForScrolling() ? LayerForScrolling()->Parent() : nullptr;
 }
 
 ScrollbarOrientation ScrollableArea::ScrollbarOrientationFromDirection(
@@ -271,12 +288,9 @@ void ScrollableArea::UserScrollHelper(const ScrollOffset& offset,
   GetScrollAnimator().ScrollToOffsetWithoutAnimation(ScrollOffset(x, y));
 }
 
-LayoutRect ScrollableArea::ScrollIntoView(const LayoutRect& rect_in_content,
-                                          const ScrollAlignment& align_x,
-                                          const ScrollAlignment& align_y,
-                                          bool is_smooth,
-                                          ScrollType,
-                                          bool is_for_scroll_sequence) {
+LayoutRect ScrollableArea::ScrollIntoView(
+    const LayoutRect& rect_in_content,
+    const WebScrollIntoViewParams& params) {
   // TODO(bokan): This should really be implemented here but ScrollAlignment is
   // in Core which is a dependency violation.
   NOTREACHED();
@@ -294,6 +308,11 @@ void ScrollableArea::ScrollOffsetChanged(const ScrollOffset& offset,
 
   // Tell the derived class to scroll its contents.
   UpdateScrollOffset(truncated_offset, scroll_type);
+
+  // If the layout object has been detached as a result of updating the scroll
+  // this object will be cleaned up shortly.
+  if (HasBeenDisposed())
+    return;
 
   // Tell the scrollbars to update their thumb postions.
   // If the scrollbar does not have its own layer, it must always be
@@ -436,12 +455,12 @@ void ScrollableArea::SetScrollbarOverlayColorTheme(
   scrollbar_overlay_color_theme_ = overlay_theme;
 
   if (Scrollbar* scrollbar = HorizontalScrollbar()) {
-    ScrollbarTheme::GetTheme().UpdateScrollbarOverlayColorTheme(*scrollbar);
+    GetPageScrollbarTheme().UpdateScrollbarOverlayColorTheme(*scrollbar);
     scrollbar->SetNeedsPaintInvalidation(kAllParts);
   }
 
   if (Scrollbar* scrollbar = VerticalScrollbar()) {
-    ScrollbarTheme::GetTheme().UpdateScrollbarOverlayColorTheme(*scrollbar);
+    GetPageScrollbarTheme().UpdateScrollbarOverlayColorTheme(*scrollbar);
     scrollbar->SetNeedsPaintInvalidation(kAllParts);
   }
 }
@@ -571,6 +590,11 @@ bool ScrollableArea::ScrollbarsHidden() const {
 }
 
 void ScrollableArea::SetScrollbarsHidden(bool hidden) {
+  // If scrollable area has been disposed, we can not get the page scrollbar
+  // theme setting. Should early return here.
+  if (HasBeenDisposed())
+    return;
+
   if (scrollbars_hidden_ == static_cast<unsigned>(hidden))
     return;
 
@@ -583,30 +607,33 @@ void ScrollableArea::FadeOverlayScrollbarsTimerFired(TimerBase*) {
 }
 
 void ScrollableArea::ShowOverlayScrollbars() {
-  if (!ScrollbarTheme::GetTheme().UsesOverlayScrollbars())
+  if (!GetPageScrollbarTheme().UsesOverlayScrollbars())
     return;
 
   SetScrollbarsHidden(false);
   needs_show_scrollbar_layers_ = true;
 
   const double time_until_disable =
-      ScrollbarTheme::GetTheme().OverlayScrollbarFadeOutDelaySeconds() +
-      ScrollbarTheme::GetTheme().OverlayScrollbarFadeOutDurationSeconds();
+      GetPageScrollbarTheme().OverlayScrollbarFadeOutDelaySeconds() +
+      GetPageScrollbarTheme().OverlayScrollbarFadeOutDurationSeconds();
 
   // If the overlay scrollbars don't fade out, don't do anything. This is the
   // case for the mock overlays used in tests and on Mac, where the fade-out is
   // animated in ScrollAnimatorMac.
-  if (!time_until_disable)
+  // We also don't fade out overlay scrollbar for popup since we don't create
+  // compositor for popup and thus they don't appear on hover so users without
+  // a wheel can't scroll if they fade out.
+  if (!time_until_disable || GetChromeClient()->IsPopup())
     return;
 
   if (!fade_overlay_scrollbars_timer_) {
-    fade_overlay_scrollbars_timer_.reset(new Timer<ScrollableArea>(
+    fade_overlay_scrollbars_timer_.reset(new TaskRunnerTimer<ScrollableArea>(
+        Platform::Current()->MainThread()->Scheduler()->CompositorTaskRunner(),
         this, &ScrollableArea::FadeOverlayScrollbarsTimerFired));
   }
 
   if (!scrollbar_captured_ && !mouse_over_scrollbar_) {
-    fade_overlay_scrollbars_timer_->StartOneShot(time_until_disable,
-                                                 BLINK_FROM_HERE);
+    fade_overlay_scrollbars_timer_->StartOneShot(time_until_disable, FROM_HERE);
   }
 }
 
@@ -679,7 +706,14 @@ void ScrollableArea::DidScroll(const gfx::ScrollOffset& offset) {
   SetScrollOffset(new_offset, kCompositorScroll);
 }
 
-DEFINE_TRACE(ScrollableArea) {
+void ScrollableArea::SetAutosizeScrollbarModes(ScrollbarMode vertical,
+                                               ScrollbarMode horizontal) {
+  DCHECK_EQ(vertical == kScrollbarAuto, horizontal == kScrollbarAuto);
+  autosize_vertical_scrollbar_mode_ = vertical;
+  autosize_horizontal_scrollbar_mode_ = horizontal;
+}
+
+void ScrollableArea::Trace(blink::Visitor* visitor) {
   visitor->Trace(scroll_animator_);
   visitor->Trace(programmatic_scroll_animator_);
 }

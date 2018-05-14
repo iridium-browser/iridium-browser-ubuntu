@@ -13,6 +13,7 @@
 """
 
 import ConfigParser
+import fnmatch
 import glob
 import optparse
 import os
@@ -119,6 +120,7 @@ def CopySectionFilesToStagingDir(config, section, staging_dir, src_dir):
       continue
 
     dst_dir = os.path.join(staging_dir, config.get(section, option))
+    dst_dir = dst_dir.replace('\\', os.sep)
     src_paths = glob.glob(os.path.join(src_dir, option))
     if src_paths and not os.path.exists(dst_dir):
       os.makedirs(dst_dir)
@@ -138,8 +140,11 @@ def GenerateDiffPatch(options, orig_file, new_file, patch_file):
   RunSystemCommand(cmd, options.verbose)
 
 def GetLZMAExec(build_dir):
-  lzma_exec = os.path.join(build_dir, "..", "..", "third_party",
-                           "lzma_sdk", "Executable", "7za.exe")
+  if sys.platform == 'win32':
+    lzma_exec = os.path.join(build_dir, "..", "..", "third_party",
+                             "lzma_sdk", "Executable", "7za.exe")
+  else:
+    lzma_exec = '7zr'  # Use system 7zr.
   return lzma_exec
 
 def GetPrevVersion(build_dir, temp_dir, last_chrome_installer, output_name):
@@ -158,7 +163,7 @@ def GetPrevVersion(build_dir, temp_dir, last_chrome_installer, output_name):
   dll_path = glob.glob(os.path.join(temp_dir, 'Chrome-bin', '*', 'chrome.dll'))
   return os.path.split(os.path.split(dll_path[0])[0])[1]
 
-def MakeStagingDirectories(staging_dir):
+def MakeStagingDirectory(staging_dir):
   """Creates a staging path for installer archive. If directory exists already,
   deletes the existing directory.
   """
@@ -166,12 +171,7 @@ def MakeStagingDirectories(staging_dir):
   if os.path.exists(file_path):
     shutil.rmtree(file_path)
   os.makedirs(file_path)
-
-  temp_file_path = os.path.join(staging_dir, TEMP_ARCHIVE_DIR)
-  if os.path.exists(temp_file_path):
-    shutil.rmtree(temp_file_path)
-  os.makedirs(temp_file_path)
-  return (file_path, temp_file_path)
+  return file_path
 
 def Readconfig(input_file, current_version):
   """Reads config information from input file after setting default value of
@@ -268,8 +268,8 @@ def CreateArchiveFile(options, staging_dir, current_version, prev_version):
     os.remove(archive_file)
     RunSystemCommand(cmd, options.verbose)
 
-  # Do not compress the archive in developer (component) builds.
-  if options.component_build == '1':
+  # Do not compress the archive when skip_archive_compression is specified.
+  if options.skip_archive_compression:
     compressed_file = os.path.join(
         options.output_dir, options.output_name + COMPRESSED_ARCHIVE_SUFFIX)
     if os.path.exists(compressed_file):
@@ -321,7 +321,10 @@ def PrepareSetupExec(options, current_version, prev_version):
     CompressUsingLZMA(options.build_dir, setup_file_path, patch_file,
                       options.verbose)
   else:
-    cmd = ['makecab.exe',
+    # Use makecab.py instead of makecab.exe so that this works when building
+    # on non-Windows hosts too.
+    makecab_py = os.path.join(os.path.dirname(__file__), 'makecab.py')
+    cmd = [sys.executable, makecab_py,
            '/D', 'CompressionType=LZX',
            '/V1',
            '/L', options.output_dir,
@@ -496,11 +499,16 @@ def DoComponentBuildTasks(staging_dir, build_dir, target_arch,
   # chrome.exe can find them at runtime), except the ones that are already
   # staged (i.e. non-component DLLs).
   build_dlls = ParseDLLsFromDeps(build_dir, chrome_runtime_deps)
-  staged_dll_basenames = [os.path.basename(staged_dll) for staged_dll in \
-                          glob.glob(os.path.join(version_dir, '*.dll'))]
+  # Generate a list of relative dll paths that have already been staged into the
+  # version directory (i.e., non-component DLLs).
+  staged_dlls = [os.path.normcase(os.path.relpath(os.path.join(dir, file),
+                                                  version_dir)) \
+                 for dir, _, files in os.walk(version_dir) \
+                 for file in files if fnmatch.fnmatch(file, '*.dll')]
   component_dll_filenames = []
   for component_dll in [dll for dll in build_dlls if \
-                        os.path.basename(dll) not in staged_dll_basenames]:
+                        os.path.normcase(os.path.relpath(dll, build_dir)) \
+                        not in staged_dlls]:
     component_dll_name = os.path.basename(component_dll)
     component_dll_filenames.append(component_dll_name)
     g_archive_inputs.append(component_dll)
@@ -526,9 +534,9 @@ def main(options):
 
   config = Readconfig(options.input_file, current_version)
 
-  (staging_dir, temp_dir) = MakeStagingDirectories(options.staging_dir)
+  staging_dir = MakeStagingDirectory(options.staging_dir)
 
-  prev_version = GetPrevVersion(options.build_dir, temp_dir,
+  prev_version = GetPrevVersion(options.build_dir, staging_dir,
                                 options.last_chrome_installer,
                                 options.output_name)
 
@@ -605,9 +613,11 @@ def _ParseOptions():
   parser.add_option('--enable_hidpi', default='0',
       help='Whether to include HiDPI resource files.')
   parser.add_option('--component_build', default='0',
-      help='Whether this archive is packaging a component build. This will '
-           'also turn off compression of chrome.7z into chrome.packed.7z and '
-           'helpfully delete any old chrome.packed.7z in |output_dir|.')
+      help='Whether this archive is packaging a component build.')
+  parser.add_option('--skip_archive_compression',
+      action='store_true', default=False,
+      help='This will turn off compression of chrome.7z into chrome.packed.7z '
+           'and helpfully delete any old chrome.packed.7z in |output_dir|.')
   parser.add_option('--depfile',
       help='Generate a depfile with the given name listing the implicit inputs '
            'to the archive process that can be used with a build system.')

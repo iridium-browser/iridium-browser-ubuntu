@@ -9,12 +9,11 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/macros.h"
-#include "services/metrics/public/cpp/mojo_ukm_recorder.h"
-#include "services/metrics/public/cpp/ukm_recorder.h"
-#include "services/resource_coordinator/coordination_unit/coordination_unit_graph_observer.h"
-#include "services/resource_coordinator/coordination_unit/coordination_unit_impl.h"
+#include "services/resource_coordinator/coordination_unit/coordination_unit_base.h"
 #include "services/resource_coordinator/coordination_unit/coordination_unit_provider_impl.h"
+#include "services/resource_coordinator/observers/coordination_unit_graph_observer.h"
 #include "services/resource_coordinator/public/cpp/coordination_unit_types.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 
 namespace ukm {
@@ -24,21 +23,22 @@ class UkmEntryBuilder;
 namespace resource_coordinator {
 
 CoordinationUnitManager::CoordinationUnitManager() {
-  CoordinationUnitImpl::AssertNoActiveCoordinationUnits();
+  CoordinationUnitBase::AssertNoActiveCoordinationUnits();
 }
 
 CoordinationUnitManager::~CoordinationUnitManager() {
   // TODO(oysteine): Keep the map of coordination units as a member of this
-  // class, rather than statically inside CoordinationUnitImpl, to avoid this
+  // class, rather than statically inside CoordinationUnitBase, to avoid this
   // manual lifetime management.
-  CoordinationUnitImpl::ClearAllCoordinationUnits();
+  CoordinationUnitBase::ClearAllCoordinationUnits();
 }
 
 void CoordinationUnitManager::OnStart(
-    service_manager::BinderRegistry* registry,
+    service_manager::BinderRegistryWithArgs<
+        const service_manager::BindSourceInfo&>* registry,
     service_manager::ServiceContextRefFactory* service_ref_factory) {
   provider_ =
-      base::MakeUnique<CoordinationUnitProviderImpl>(service_ref_factory, this);
+      std::make_unique<CoordinationUnitProviderImpl>(service_ref_factory, this);
 
   registry->AddInterface(base::Bind(&CoordinationUnitProviderImpl::Bind,
                                     base::Unretained(provider_.get())));
@@ -46,11 +46,12 @@ void CoordinationUnitManager::OnStart(
 
 void CoordinationUnitManager::RegisterObserver(
     std::unique_ptr<CoordinationUnitGraphObserver> observer) {
+  observer->set_coordination_unit_manager(this);
   observers_.push_back(std::move(observer));
 }
 
 void CoordinationUnitManager::OnCoordinationUnitCreated(
-    CoordinationUnitImpl* coordination_unit) {
+    CoordinationUnitBase* coordination_unit) {
   for (auto& observer : observers_) {
     if (observer->ShouldObserve(coordination_unit)) {
       coordination_unit->AddObserver(observer.get());
@@ -60,15 +61,8 @@ void CoordinationUnitManager::OnCoordinationUnitCreated(
 }
 
 void CoordinationUnitManager::OnBeforeCoordinationUnitDestroyed(
-    CoordinationUnitImpl* coordination_unit) {
+    CoordinationUnitBase* coordination_unit) {
   coordination_unit->BeforeDestroyed();
-}
-
-std::unique_ptr<ukm::UkmEntryBuilder>
-CoordinationUnitManager::CreateUkmEntryBuilder(const char* event_name) {
-  DCHECK(ukm_recorder_ != nullptr);
-  return ukm_recorder_->GetEntryBuilder(ukm::UkmRecorder::GetNewSourceID(),
-                                        event_name);
 }
 
 }  // namespace resource_coordinator

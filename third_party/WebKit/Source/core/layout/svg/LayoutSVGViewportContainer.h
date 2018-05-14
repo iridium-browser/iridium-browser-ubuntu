@@ -42,6 +42,10 @@ class LayoutSVGViewportContainer final : public LayoutSVGContainer {
 
   const char* GetName() const override { return "LayoutSVGViewportContainer"; }
 
+  AffineTransform LocalToSVGParentTransform() const override {
+    return local_to_parent_transform_;
+  }
+
  private:
   bool IsOfType(LayoutObjectType type) const override {
     return type == kLayoutObjectSVGViewportContainer ||
@@ -50,15 +54,13 @@ class LayoutSVGViewportContainer final : public LayoutSVGContainer {
 
   void UpdateLayout() override;
 
-  AffineTransform LocalToSVGParentTransform() const override {
-    return local_to_parent_transform_;
-  }
-
   SVGTransformChange CalculateLocalTransform() override;
 
   bool NodeAtFloatPoint(HitTestResult&,
                         const FloatPoint& point_in_parent,
                         HitTestAction) override;
+
+  void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
 
   FloatRect viewport_;
   mutable AffineTransform local_to_parent_transform_;

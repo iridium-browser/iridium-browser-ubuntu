@@ -16,6 +16,12 @@
 
 namespace ui {
 
+ui::IMEEngineHandlerInterface* InputMethodBase::GetEngine() {
+  if (ui::IMEBridge::Get())
+    return ui::IMEBridge::Get()->GetCurrentEngineHandler();
+  return nullptr;
+}
+
 InputMethodBase::InputMethodBase()
     : sending_key_event_(false),
       delegate_(nullptr),
@@ -34,12 +40,10 @@ void InputMethodBase::SetDelegate(internal::InputMethodDelegate* delegate) {
 }
 
 void InputMethodBase::OnFocus() {
-  if (ui::IMEBridge::Get()) {
-    ui::IMEBridge::Get()->SetInputContextHandler(this);
-    ui::IMEEngineHandlerInterface* engine =
-        ui::IMEBridge::Get()->GetCurrentEngineHandler();
-    if (engine)
-      engine->MaybeSwitchEngine();
+  ui::IMEBridge* bridge = ui::IMEBridge::Get();
+  if (bridge) {
+    bridge->SetInputContextHandler(this);
+    bridge->MaybeSwitchEngine();
   }
 }
 
@@ -135,6 +139,22 @@ ui::EventDispatchDetails InputMethodBase::DispatchKeyEventPostIME(
   if (delegate_)
     details = delegate_->DispatchKeyEventPostIME(event);
   return details;
+}
+
+ui::EventDispatchDetails InputMethodBase::DispatchKeyEventPostIME(
+    ui::KeyEvent* event,
+    std::unique_ptr<base::OnceCallback<void(bool)>> ack_callback) const {
+  if (delegate_) {
+    ui::EventDispatchDetails details =
+        delegate_->DispatchKeyEventPostIME(event);
+    if (ack_callback && !ack_callback->is_null())
+      std::move(*ack_callback).Run(event->stopped_propagation());
+    return details;
+  }
+
+  if (ack_callback && !ack_callback->is_null())
+    std::move(*ack_callback).Run(false);
+  return EventDispatchDetails();
 }
 
 void InputMethodBase::NotifyTextInputStateChanged(

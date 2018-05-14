@@ -6,9 +6,12 @@
 
 #include "ash/animation/animation_change_type.h"
 #include "ash/focus_cycler.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/window_properties.h"
+#include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/shelf/app_list_button.h"
+#include "ash/shelf/login_shelf_view.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_background_animator_observer.h"
 #include "ash/shelf/shelf_constants.h"
@@ -17,17 +20,35 @@
 #include "ash/shell.h"
 #include "ash/system/status_area_layout_manager.h"
 #include "ash/system/status_area_widget.h"
-#include "base/memory/ptr_util.h"
+#include "ash/system/tray/system_tray.h"
+#include "base/command_line.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/views/accessible_pane_view.h"
+#include "ui/views/focus/focus_search.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/wm/core/coordinate_conversion.h"
 
 namespace ash {
+namespace {
+
+// Return the first or last focusable child of |root|.
+views::View* FindFirstOrLastFocusableChild(views::View* root,
+                                           bool find_last_child) {
+  views::FocusSearch search(root, find_last_child /*cycle*/,
+                            false /*accessibility_mode*/);
+  views::FocusTraversable* dummy_focus_traversable;
+  views::View* dummy_focus_traversable_view;
+  return search.FindNextFocusableView(
+      root, find_last_child, views::FocusSearch::DOWN,
+      false /*check_starting_view*/, &dummy_focus_traversable,
+      &dummy_focus_traversable_view);
+}
+
+}  // namespace
 
 // The contents view of the Shelf. This view contains ShelfView and
 // sizes it to the width of the shelf minus the size of the status area.
@@ -41,14 +62,18 @@ class ShelfWidget::DelegateView : public views::WidgetDelegate,
   void set_focus_cycler(FocusCycler* focus_cycler) {
     focus_cycler_ = focus_cycler;
   }
+
   FocusCycler* focus_cycler() { return focus_cycler_; }
 
   ui::Layer* opaque_background() { return &opaque_background_; }
-  ui::Layer* opaque_foreground() { return &opaque_foreground_; }
 
   void SetParentLayer(ui::Layer* layer);
 
-  // views::WidgetDelegateView overrides:
+  void set_default_last_focusable_child(bool default_last_focusable_child) {
+    default_last_focusable_child_ = default_last_focusable_child;
+  }
+
+  // views::WidgetDelegateView:
   views::Widget* GetWidget() override { return View::GetWidget(); }
   const views::Widget* GetWidget() const override { return View::GetWidget(); }
 
@@ -57,19 +82,21 @@ class ShelfWidget::DelegateView : public views::WidgetDelegate,
   // This will be called when the parent local bounds change.
   void OnBoundsChanged(const gfx::Rect& old_bounds) override;
 
+  // views::AccessiblePaneView:
+  views::View* GetDefaultFocusableChild() override;
+
   // ShelfBackgroundAnimatorObserver:
   void UpdateShelfBackground(SkColor color) override;
 
  private:
   ShelfWidget* shelf_widget_;
   FocusCycler* focus_cycler_;
-  // A black background layer that may be visible depending on a
+  // A background layer that may be visible depending on a
   // ShelfBackgroundAnimator.
   ui::Layer opaque_background_;
-  // A black foreground layer which is shown while transitioning between users.
-  // Note: Since the back- and foreground layers have different functions they
-  // can be used simultaneously - so no repurposing possible.
-  ui::Layer opaque_foreground_;
+
+  // When true, the default focus of the shelf is the last focusable child.
+  bool default_last_focusable_child_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(DelegateView);
 };
@@ -77,44 +104,59 @@ class ShelfWidget::DelegateView : public views::WidgetDelegate,
 ShelfWidget::DelegateView::DelegateView(ShelfWidget* shelf_widget)
     : shelf_widget_(shelf_widget),
       focus_cycler_(nullptr),
-      opaque_background_(ui::LAYER_SOLID_COLOR),
-      opaque_foreground_(ui::LAYER_SOLID_COLOR) {
+      opaque_background_(ui::LAYER_SOLID_COLOR) {
   DCHECK(shelf_widget_);
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
   set_allow_deactivate_on_esc(true);
   opaque_background_.SetBounds(GetLocalBounds());
-  opaque_foreground_.SetBounds(GetLocalBounds());
-  opaque_foreground_.SetOpacity(0.0f);
 }
 
-ShelfWidget::DelegateView::~DelegateView() {}
+ShelfWidget::DelegateView::~DelegateView() = default;
+
+// static
+bool ShelfWidget::IsUsingViewsShelf() {
+  switch (Shell::Get()->session_controller()->GetSessionState()) {
+    case session_manager::SessionState::ACTIVE:
+      return true;
+    // See https://crbug.com/798869.
+    case session_manager::SessionState::OOBE:
+      return false;
+    case session_manager::SessionState::LOCKED:
+    case session_manager::SessionState::LOGIN_SECONDARY:
+      return switches::IsUsingViewsLock();
+    case session_manager::SessionState::UNKNOWN:
+    case session_manager::SessionState::LOGIN_PRIMARY:
+    case session_manager::SessionState::LOGGED_IN_NOT_ACTIVE:
+      return switches::IsUsingViewsLogin();
+  }
+}
 
 void ShelfWidget::DelegateView::SetParentLayer(ui::Layer* layer) {
   layer->Add(&opaque_background_);
-  layer->Add(&opaque_foreground_);
   ReorderLayers();
 }
 
 bool ShelfWidget::DelegateView::CanActivate() const {
-  // Allow to activate as fallback.
-  if (shelf_widget_->activating_as_fallback_)
-    return true;
-  // Allow to activate from the focus cycler.
-  if (focus_cycler_ && focus_cycler_->widget_activating() == GetWidget())
-    return true;
-  // Disallow activating in other cases, especially when using mouse.
-  return false;
+  // Only allow activation from the focus cycler, not from mouse events, etc.
+  return focus_cycler_ && focus_cycler_->widget_activating() == GetWidget();
 }
 
 void ShelfWidget::DelegateView::ReorderChildLayers(ui::Layer* parent_layer) {
   views::View::ReorderChildLayers(parent_layer);
   parent_layer->StackAtBottom(&opaque_background_);
-  parent_layer->StackAtTop(&opaque_foreground_);
 }
 
 void ShelfWidget::DelegateView::OnBoundsChanged(const gfx::Rect& old_bounds) {
   opaque_background_.SetBounds(GetLocalBounds());
-  opaque_foreground_.SetBounds(GetLocalBounds());
+}
+
+views::View* ShelfWidget::DelegateView::GetDefaultFocusableChild() {
+  // If views-based login shelf is shown, we want to focus either its first or
+  // last child, otherwise focus on the first child as default.
+  if (IsUsingViewsShelf())
+    return FindFirstOrLastFocusableChild(shelf_widget_->login_shelf_view_,
+                                         default_last_focusable_child_);
+  return GetFirstFocusableChild();
 }
 
 void ShelfWidget::DelegateView::UpdateShelfBackground(SkColor color) {
@@ -123,13 +165,15 @@ void ShelfWidget::DelegateView::UpdateShelfBackground(SkColor color) {
 
 ShelfWidget::ShelfWidget(aura::Window* shelf_container, Shelf* shelf)
     : shelf_(shelf),
-      status_area_widget_(nullptr),
       delegate_view_(new DelegateView(this)),
       shelf_view_(new ShelfView(Shell::Get()->shelf_model(), shelf_, this)),
+      login_shelf_view_(
+          new LoginShelfView(RootWindowController::ForWindow(shelf_container)
+                                 ->lock_screen_action_background_controller())),
       background_animator_(SHELF_BACKGROUND_DEFAULT,
                            shelf_,
                            Shell::Get()->wallpaper_controller()),
-      activating_as_fallback_(false) {
+      scoped_session_observer_(this) {
   DCHECK(shelf_container);
   DCHECK(shelf_);
 
@@ -151,6 +195,7 @@ ShelfWidget::ShelfWidget(aura::Window* shelf_container, Shelf* shelf)
   // added to the model.
   shelf_view_->Init();
   GetContentsView()->AddChildView(shelf_view_);
+  GetContentsView()->AddChildView(login_shelf_view_);
 
   shelf_layout_manager_ = new ShelfLayoutManager(this, shelf_);
   shelf_layout_manager_->AddObserver(this);
@@ -164,6 +209,9 @@ ShelfWidget::ShelfWidget(aura::Window* shelf_container, Shelf* shelf)
   // Calls back into |this| and depends on |shelf_view_|.
   background_animator_.AddObserver(this);
   background_animator_.AddObserver(delegate_view_);
+
+  // Sets initial session state to make sure the UI is properly shown.
+  OnSessionStateChanged(Shell::Get()->session_controller()->GetSessionState());
 }
 
 ShelfWidget::~ShelfWidget() {
@@ -179,12 +227,11 @@ ShelfWidget::~ShelfWidget() {
 void ShelfWidget::CreateStatusAreaWidget(aura::Window* status_container) {
   DCHECK(status_container);
   DCHECK(!status_area_widget_);
-  status_area_widget_ = new StatusAreaWidget(status_container, shelf_);
-  status_area_widget_->CreateTrayViews();
-  // NOTE: Container may be hidden depending on login/display state.
-  status_area_widget_->Show();
-  Shell::Get()->focus_cycler()->AddWidget(status_area_widget_);
-  background_animator_.AddObserver(status_area_widget_);
+  status_area_widget_ =
+      std::make_unique<StatusAreaWidget>(status_container, shelf_);
+  status_area_widget_->Initialize();
+  Shell::Get()->focus_cycler()->AddWidget(status_area_widget_.get());
+  background_animator_.AddObserver(status_area_widget_.get());
   status_container->SetLayoutManager(new StatusAreaLayoutManager(this));
 }
 
@@ -197,25 +244,9 @@ ShelfBackgroundType ShelfWidget::GetBackgroundType() const {
   return background_animator_.target_background_type();
 }
 
-void ShelfWidget::HideShelfBehindBlackBar(bool hide, int animation_time_ms) {
-  if (IsShelfHiddenBehindBlackBar() == hide)
-    return;
-
-  ui::Layer* opaque_foreground = delegate_view_->opaque_foreground();
-  float target_opacity = hide ? 1.0f : 0.0f;
-  std::unique_ptr<ui::ScopedLayerAnimationSettings> opaque_foreground_animation;
-  opaque_foreground_animation.reset(
-      new ui::ScopedLayerAnimationSettings(opaque_foreground->GetAnimator()));
-  opaque_foreground_animation->SetTransitionDuration(
-      base::TimeDelta::FromMilliseconds(animation_time_ms));
-  opaque_foreground_animation->SetPreemptionStrategy(
-      ui::LayerAnimator::REPLACE_QUEUED_ANIMATIONS);
-
-  opaque_foreground->SetOpacity(target_opacity);
-}
-
-bool ShelfWidget::IsShelfHiddenBehindBlackBar() const {
-  return delegate_view_->opaque_foreground()->GetTargetOpacity() != 0.0f;
+int ShelfWidget::GetBackgroundAlphaValue(
+    ShelfBackgroundType background_type) const {
+  return background_animator_.GetBackgroundAlphaValue(background_type);
 }
 
 void ShelfWidget::OnShelfAlignmentChanged() {
@@ -234,7 +265,7 @@ void ShelfWidget::PostCreateShelf() {
 
   shelf_layout_manager_->LayoutShelf();
   shelf_layout_manager_->UpdateAutoHideState();
-  Show();
+  ShowIfHidden();
 }
 
 bool ShelfWidget::IsShowingAppList() const {
@@ -268,10 +299,9 @@ void ShelfWidget::Shutdown() {
     shelf_layout_manager_->PrepareForShutdown();
 
   if (status_area_widget_) {
-    background_animator_.RemoveObserver(status_area_widget_);
-    Shell::Get()->focus_cycler()->RemoveWidget(status_area_widget_);
-    status_area_widget_->Shutdown();
-    status_area_widget_ = nullptr;
+    background_animator_.RemoveObserver(status_area_widget_.get());
+    Shell::Get()->focus_cycler()->RemoveWidget(status_area_widget_.get());
+    status_area_widget_.reset();
   }
 
   CloseNow();
@@ -311,9 +341,14 @@ ShelfWidget::GetDragAndDropHostForAppList() {
   return shelf_view_;
 }
 
+void ShelfWidget::set_default_last_focusable_child(
+    bool default_last_focusable_child) {
+  delegate_view_->set_default_last_focusable_child(
+      default_last_focusable_child);
+}
+
 void ShelfWidget::OnWidgetActivationChanged(views::Widget* widget,
                                             bool active) {
-  activating_as_fallback_ = false;
   if (active)
     delegate_view_->SetPaneFocusAndFocusDefault();
   else
@@ -327,6 +362,55 @@ void ShelfWidget::UpdateShelfItemBackground(SkColor color) {
 void ShelfWidget::WillDeleteShelfLayoutManager() {
   shelf_layout_manager_->RemoveObserver(this);
   shelf_layout_manager_ = nullptr;
+}
+
+void ShelfWidget::OnSessionStateChanged(session_manager::SessionState state) {
+  // Do not show shelf widget:
+  // * when views based shelf is disabled
+  // * in UNKNOWN state - it might be called before shelf was initialized
+  // * on secondary screens in states other than ACTIVE
+  bool using_views_shelf = IsUsingViewsShelf();
+  bool unknown_state = state == session_manager::SessionState::UNKNOWN;
+  bool hide_on_secondary_screen = shelf_->ShouldHideOnSecondaryDisplay(state);
+  if (!using_views_shelf || unknown_state || hide_on_secondary_screen) {
+    HideIfShown();
+  } else {
+    switch (state) {
+      case session_manager::SessionState::ACTIVE:
+        login_shelf_view_->SetVisible(false);
+        shelf_view_->SetVisible(true);
+        break;
+      case session_manager::SessionState::LOCKED:
+      case session_manager::SessionState::LOGIN_SECONDARY:
+        shelf_view_->SetVisible(false);
+        login_shelf_view_->SetVisible(true);
+        break;
+      case session_manager::SessionState::OOBE:
+        login_shelf_view_->SetVisible(true);
+        shelf_view_->SetVisible(false);
+        break;
+      case session_manager::SessionState::LOGIN_PRIMARY:
+      case session_manager::SessionState::LOGGED_IN_NOT_ACTIVE:
+        login_shelf_view_->SetVisible(true);
+        shelf_view_->SetVisible(false);
+        break;
+      default:
+        // session_manager::SessionState::UNKNOWN handled in if statement above.
+        NOTREACHED();
+    }
+    ShowIfHidden();
+  }
+  login_shelf_view_->UpdateAfterSessionStateChange(state);
+}
+
+void ShelfWidget::HideIfShown() {
+  if (IsVisible())
+    Hide();
+}
+
+void ShelfWidget::ShowIfHidden() {
+  if (!IsVisible())
+    Show();
 }
 
 }  // namespace ash

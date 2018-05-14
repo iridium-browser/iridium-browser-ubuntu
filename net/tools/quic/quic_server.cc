@@ -18,6 +18,7 @@
 #include "net/quic/core/quic_crypto_stream.h"
 #include "net/quic/core/quic_data_reader.h"
 #include "net/quic/core/quic_packets.h"
+#include "net/quic/core/tls_server_handshaker.h"
 #include "net/quic/platform/api/quic_clock.h"
 #include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
@@ -63,7 +64,7 @@ QuicServer::QuicServer(
     std::unique_ptr<ProofSource> proof_source,
     const QuicConfig& config,
     const QuicCryptoServerConfig::ConfigOptions& crypto_config_options,
-    const QuicVersionVector& supported_versions,
+    const ParsedQuicVersionVector& supported_versions,
     QuicHttpResponseCache* response_cache)
     : port_(0),
       fd_(-1),
@@ -73,7 +74,8 @@ QuicServer::QuicServer(
       config_(config),
       crypto_config_(kSourceAddressTokenSecret,
                      QuicRandom::GetInstance(),
-                     std::move(proof_source)),
+                     std::move(proof_source),
+                     TlsServerHandshaker::CreateSslCtx()),
       crypto_config_options_(crypto_config_options),
       version_manager_(supported_versions),
       packet_reader_(new QuicPacketReader()),
@@ -109,10 +111,13 @@ void QuicServer::Initialize() {
       QuicRandom::GetInstance(), &clock, crypto_config_options_));
 }
 
-QuicServer::~QuicServer() {}
+QuicServer::~QuicServer() = default;
 
 bool QuicServer::CreateUDPSocketAndListen(const QuicSocketAddress& address) {
-  fd_ = QuicSocketUtils::CreateUDPSocket(address, &overflow_supported_);
+  fd_ = QuicSocketUtils::CreateUDPSocket(
+      address,
+      /*receive_buffer_size =*/kDefaultSocketReceiveBuffer,
+      /*send_buffer_size =*/kDefaultSocketReceiveBuffer, &overflow_supported_);
   if (fd_ < 0) {
     QUIC_LOG(ERROR) << "CreateSocket() failed: " << strerror(errno);
     return false;
@@ -181,9 +186,7 @@ void QuicServer::OnEvent(int fd, EpollEvent* event) {
   if (event->in_events & EPOLLIN) {
     QUIC_DVLOG(1) << "EPOLLIN";
 
-    if (FLAGS_quic_reloadable_flag_quic_limit_num_new_sessions_per_epoll_loop) {
-      dispatcher_->ProcessBufferedChlos(kNumSessionsToCreatePerSocketEvent);
-    }
+    dispatcher_->ProcessBufferedChlos(kNumSessionsToCreatePerSocketEvent);
 
     bool more_to_read = true;
     while (more_to_read) {
@@ -192,8 +195,7 @@ void QuicServer::OnEvent(int fd, EpollEvent* event) {
           overflow_supported_ ? &packets_dropped_ : nullptr);
     }
 
-    if (FLAGS_quic_reloadable_flag_quic_limit_num_new_sessions_per_epoll_loop &&
-        dispatcher_->HasChlosBuffered()) {
+    if (dispatcher_->HasChlosBuffered()) {
       // Register EPOLLIN event to consume buffered CHLO(s).
       event->out_ready_mask |= EPOLLIN;
     }

@@ -6,6 +6,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/permissions/permissions_browsertest.h"
 #include "chrome/browser/ui/permission_bubble/mock_permission_prompt_factory.h"
 #include "chrome/common/chrome_features.h"
@@ -53,11 +54,11 @@ class FlashPermissionBrowserTest : public PermissionsBrowserTest {
 
     ASSERT_TRUE(ppapi::RegisterFlashTestPlugin(command_line));
 
-    // Set a high engagement threshhold so it doesn't interfere with testing the
-    // permission.
-    content::EnableFeatureWithParam(features::kPreferHtmlOverPlugins,
-                                    "engagement_threshold_for_flash", "100",
-                                    command_line);
+    // These tests are for the permission prompt to add and remove Flash from
+    // navigator.plugins. We disable Plugin Power Saver, because its plugin
+    // throttling make it harder to test if Flash was succcessfully enabled.
+    command_line->AppendSwitchASCII(
+        switches::kOverridePluginPowerSaverForTesting, "never");
   }
 
   void TriggerPrompt() override {
@@ -91,6 +92,11 @@ class FlashPermissionBrowserTest : public PermissionsBrowserTest {
     return RunScriptReturnBool("flashIsEnabled();") ||
            RunScriptReturnBool("flashIsEnabledForPluginWithoutFallback();");
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(FlashPermissionBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(FlashPermissionBrowserTest,
@@ -121,8 +127,7 @@ IN_PROC_BROWSER_TEST_F(FlashPermissionBrowserTest, SucceedsInPopupWindow) {
   PermissionRequestManager* manager = PermissionRequestManager::FromWebContents(
       GetWebContents());
   auto popup_prompt_factory =
-      base::MakeUnique<MockPermissionPromptFactory>(manager);
-  manager->DisplayPendingRequests();
+      std::make_unique<MockPermissionPromptFactory>(manager);
 
   EXPECT_EQ(0, popup_prompt_factory->TotalRequestCount());
   popup_prompt_factory->set_response_type(PermissionRequestManager::ACCEPT_ALL);

@@ -38,19 +38,19 @@ class CastContentWindow {
   // Creates the platform specific CastContentWindow. |delegate| should outlive
   // the created CastContentWindow.
   static std::unique_ptr<CastContentWindow> Create(
-      CastContentWindow::Delegate* delegate);
+      CastContentWindow::Delegate* delegate,
+      bool is_headless,
+      bool enable_touch_input);
 
   virtual ~CastContentWindow() {}
 
-  // Sets the window's background to be transparent (call before
-  // CreateWindowTree).
-  virtual void SetTransparent() = 0;
-
-  // Creates a full-screen window for |web_contents| and display it.
+  // Creates a full-screen window for |web_contents| and displays it if
+  // |is_visible| is true.
   // |web_contents| should outlive this CastContentWindow.
   // |window_manager| should outlive this CastContentWindow.
-  virtual void ShowWebContents(content::WebContents* web_contents,
-                               CastWindowManager* window_manager) = 0;
+  virtual void CreateWindowForWebContents(content::WebContents* web_contents,
+                                          CastWindowManager* window_manager,
+                                          bool is_visible) = 0;
 };
 
 }  // namespace shell

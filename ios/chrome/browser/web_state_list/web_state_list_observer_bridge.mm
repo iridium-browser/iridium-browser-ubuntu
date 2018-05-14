@@ -17,14 +17,17 @@ WebStateListObserverBridge::~WebStateListObserverBridge() {}
 void WebStateListObserverBridge::WebStateInsertedAt(
     WebStateList* web_state_list,
     web::WebState* web_state,
-    int index) {
-  const SEL selector = @selector(webStateList:didInsertWebState:atIndex:);
+    int index,
+    bool activating) {
+  const SEL selector =
+      @selector(webStateList:didInsertWebState:atIndex:activating:);
   if (![observer_ respondsToSelector:selector])
     return;
 
   [observer_ webStateList:web_state_list
         didInsertWebState:web_state
-                  atIndex:index];
+                  atIndex:index
+               activating:activating];
 }
 
 void WebStateListObserverBridge::WebStateMoved(WebStateList* web_state_list,
@@ -87,14 +90,17 @@ void WebStateListObserverBridge::WebStateDetachedAt(
 void WebStateListObserverBridge::WillCloseWebStateAt(
     WebStateList* web_state_list,
     web::WebState* web_state,
-    int index) {
-  const SEL selector = @selector(webStateList:willCloseWebState:atIndex:);
+    int index,
+    bool user_action) {
+  const SEL selector =
+      @selector(webStateList:willCloseWebState:atIndex:userAction:);
   if (![observer_ respondsToSelector:selector])
     return;
 
   [observer_ webStateList:web_state_list
         willCloseWebState:web_state
-                  atIndex:index];
+                  atIndex:index
+               userAction:(user_action ? YES : NO)];
 }
 
 void WebStateListObserverBridge::WebStateActivatedAt(
@@ -102,9 +108,9 @@ void WebStateListObserverBridge::WebStateActivatedAt(
     web::WebState* old_web_state,
     web::WebState* new_web_state,
     int active_index,
-    bool user_action) {
+    int reason) {
   const SEL selector = @selector
-      (webStateList:didChangeActiveWebState:oldWebState:atIndex:userAction:);
+      (webStateList:didChangeActiveWebState:oldWebState:atIndex:reason:);
   if (![observer_ respondsToSelector:selector])
     return;
 
@@ -112,5 +118,5 @@ void WebStateListObserverBridge::WebStateActivatedAt(
       didChangeActiveWebState:new_web_state
                   oldWebState:old_web_state
                       atIndex:active_index
-                   userAction:(user_action ? YES : NO)];
+                       reason:reason];
 }

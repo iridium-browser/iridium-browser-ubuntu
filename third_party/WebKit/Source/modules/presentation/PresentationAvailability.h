@@ -5,17 +5,17 @@
 #ifndef PresentationAvailability_h
 #define PresentationAvailability_h
 
-#include "core/dom/SuspendableObject.h"
-#include "core/events/EventTarget.h"
+#include "bindings/core/v8/ActiveScriptWrappable.h"
+#include "core/dom/PausableObject.h"
+#include "core/dom/events/EventTarget.h"
 #include "core/page/PageVisibilityObserver.h"
 #include "modules/ModulesExport.h"
+#include "modules/presentation/PresentationAvailabilityObserver.h"
 #include "modules/presentation/PresentationPromiseProperty.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/Vector.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebVector.h"
-#include "public/platform/modules/presentation/WebPresentationAvailabilityObserver.h"
 
 namespace blink {
 
@@ -28,9 +28,9 @@ class ExecutionContext;
 class MODULES_EXPORT PresentationAvailability final
     : public EventTargetWithInlineData,
       public ActiveScriptWrappable<PresentationAvailability>,
-      public SuspendableObject,
+      public PausableObject,
       public PageVisibilityObserver,
-      public WebPresentationAvailabilityObserver {
+      public PresentationAvailabilityObserver {
   USING_GARBAGE_COLLECTED_MIXIN(PresentationAvailability);
   DEFINE_WRAPPERTYPEINFO();
 
@@ -44,16 +44,16 @@ class MODULES_EXPORT PresentationAvailability final
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
-  // WebPresentationAvailabilityObserver implementation.
+  // PresentationAvailabilityObserver implementation.
   void AvailabilityChanged(blink::mojom::ScreenAvailability) override;
-  const WebVector<WebURL>& Urls() const override;
+  const Vector<KURL>& Urls() const override;
 
   // ScriptWrappable implementation.
   bool HasPendingActivity() const final;
 
-  // SuspendableObject implementation.
-  void Suspend() override;
-  void Resume() override;
+  // PausableObject implementation.
+  void Pause() override;
+  void Unpause() override;
   void ContextDestroyed(ExecutionContext*) override;
 
   // PageVisibilityObserver implementation.
@@ -63,7 +63,7 @@ class MODULES_EXPORT PresentationAvailability final
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(change);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   // EventTarget implementation.
@@ -71,7 +71,7 @@ class MODULES_EXPORT PresentationAvailability final
                           RegisteredEventListener&) override;
 
  private:
-  // Current state of the SuspendableObject. It is Active when created. It
+  // Current state of the PausableObject. It is Active when created. It
   // becomes Suspended when suspend() is called and moves back to Active if
   // resume() is called. It becomes Inactive when stop() is called or at
   // destruction time.
@@ -86,7 +86,7 @@ class MODULES_EXPORT PresentationAvailability final
   void SetState(State);
   void UpdateListening();
 
-  WebVector<WebURL> urls_;
+  Vector<KURL> urls_;
   bool value_;
   State state_;
 };

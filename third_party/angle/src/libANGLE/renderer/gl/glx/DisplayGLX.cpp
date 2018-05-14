@@ -49,7 +49,7 @@ class FunctionsGLGLX : public FunctionsGL
     ~FunctionsGLGLX() override {}
 
   private:
-    void *loadProcAddress(const std::string &function) override
+    void *loadProcAddress(const std::string &function) const override
     {
         return reinterpret_cast<void*>(mGetProc(function.c_str()));
     }
@@ -292,7 +292,7 @@ egl::Error DisplayGLX::initialize(egl::Display *display)
     }
 
     mFunctionsGL = new FunctionsGLGLX(mGLX.getProc);
-    mFunctionsGL->initialize();
+    mFunctionsGL->initialize(eglAttributes);
 
     // TODO(cwallez, angleproject:1303) Disable the OpenGL ES backend on Linux NVIDIA and Intel as
     // it has problems on our automated testing. An OpenGL ES backend might not trigger this test if
@@ -393,10 +393,10 @@ SurfaceImpl *DisplayGLX::createPixmapSurface(const egl::SurfaceState &state,
     return nullptr;
 }
 
-egl::Error DisplayGLX::getDevice(DeviceImpl **device)
+DeviceImpl *DisplayGLX::createDevice()
 {
     UNIMPLEMENTED();
-    return egl::EglBadDisplay();
+    return nullptr;
 }
 
 egl::Error DisplayGLX::initializeContext(glx::FBConfig config,
@@ -791,6 +791,8 @@ void DisplayGLX::generateExtensions(egl::DisplayExtensions *outExtensions) const
     outExtensions->displayTextureShareGroup = true;
 
     outExtensions->surfacelessContext = true;
+
+    DisplayGL::generateExtensions(outExtensions);
 }
 
 void DisplayGLX::generateCaps(egl::Caps *outCaps) const
@@ -821,6 +823,8 @@ egl::Error DisplayGLX::createContextAttribs(glx::FBConfig,
 
     if (mHasARBCreateContextRobustness)
     {
+        attribs.push_back(GLX_CONTEXT_FLAGS_ARB);
+        attribs.push_back(GLX_CONTEXT_ROBUST_ACCESS_BIT_ARB);
         attribs.push_back(GLX_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB);
         attribs.push_back(GLX_LOSE_CONTEXT_ON_RESET_ARB);
     }

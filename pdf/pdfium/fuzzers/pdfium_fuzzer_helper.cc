@@ -8,27 +8,32 @@
 
 #include <assert.h>
 #include <limits.h>
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #include <Windows.h>
-#else
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else  // Linux
 #include <unistd.h>
-#endif
+#endif  // _WIN32
 
 #include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
 
+#include "base/memory/free_deleter.h"
 #include "third_party/pdfium/public/cpp/fpdf_deleters.h"
 #include "third_party/pdfium/public/fpdf_dataavail.h"
 #include "third_party/pdfium/public/fpdf_text.h"
 #include "third_party/pdfium/testing/test_support.h"
+#include "v8/include/v8-platform.h"
 
 namespace {
 
@@ -78,29 +83,37 @@ FPDF_BOOL Is_Data_Avail(FX_FILEAVAIL* pThis, size_t offset, size_t size) {
 void Add_Segment(FX_DOWNLOADHINTS* pThis, size_t offset, size_t size) {}
 
 std::string ProgramPath() {
-#ifdef _MSC_VER
+  std::string result;
+
+#ifdef _WIN32
   wchar_t wpath[MAX_PATH];
   char path[MAX_PATH];
-  DWORD res = GetModuleFileName(NULL, wpath, MAX_PATH);
-  assert(res != 0);
-  wcstombs(path, wpath, MAX_PATH);
-  return std::string(path, res);
-#else
-  char* path = new char[PATH_MAX + 1];
-  assert(path);
-  ssize_t sz = readlink("/proc/self/exe", path, PATH_MAX);
-  assert(sz > 0);
-  std::string result(path, sz);
-  delete[] path;
-  return result;
+  DWORD len = GetModuleFileNameA(NULL, path, MAX_PATH);
+  if (len != 0)
+    result = std::string(path, len);
+#elif defined(__APPLE__)
+  char path[PATH_MAX];
+  unsigned int len = PATH_MAX;
+  if (!_NSGetExecutablePath(path, &len)) {
+    std::unique_ptr<char, base::FreeDeleter> resolved_path(
+        realpath(path, nullptr));
+    if (resolved_path.get())
+      result = std::string(resolved_path.get());
+  }
+#else  // Linux
+  char path[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", path, PATH_MAX);
+  if (len > 0)
+    result = std::string(path, len);
 #endif
+  return result;
 }
 
 }  // namespace
 
-PDFiumFuzzerHelper::PDFiumFuzzerHelper() {}
+PDFiumFuzzerHelper::PDFiumFuzzerHelper() = default;
 
-PDFiumFuzzerHelper::~PDFiumFuzzerHelper() {}
+PDFiumFuzzerHelper::~PDFiumFuzzerHelper() = default;
 
 bool PDFiumFuzzerHelper::OnFormFillEnvLoaded(FPDF_DOCUMENT doc) {
   return true;
@@ -172,7 +185,7 @@ void PDFiumFuzzerHelper::RenderPdf(const char* pBuf, size_t len) {
   if (!OnFormFillEnvLoaded(doc.get()))
     return;
 
-  FPDF_SetFormFieldHighlightColor(form.get(), 0, 0xFFE4DD);
+  FPDF_SetFormFieldHighlightColor(form.get(), FPDF_FORMFIELD_UNKNOWN, 0xFFE4DD);
   FPDF_SetFormFieldHighlightAlpha(form.get(), 100);
   FORM_DoDocumentJSAction(form.get());
   FORM_DoDocumentOpenAction(form.get());
@@ -223,10 +236,10 @@ bool PDFiumFuzzerHelper::RenderPage(FPDF_DOCUMENT doc,
 struct TestCase {
   TestCase() {
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
-    InitializeV8ForPDFium(ProgramPath(), "", &natives_blob, &snapshot_blob,
-                          &platform);
+    platform = InitializeV8ForPDFiumWithStartupData(
+        ProgramPath(), "", &natives_blob, &snapshot_blob);
 #else
-    InitializeV8ForPDFium(ProgramPath(), &platform);
+    platform = InitializeV8ForPDFium(ProgramPath());
 #endif
 
     memset(&config, '\0', sizeof(config));
@@ -242,10 +255,11 @@ struct TestCase {
     FSDK_SetUnSpObjProcessHandler(&unsupport_info);
   }
 
-  v8::Platform* platform;
+  std::unique_ptr<v8::Platform> platform;
   v8::StartupData natives_blob;
   v8::StartupData snapshot_blob;
   FPDF_LIBRARY_CONFIG config;
   UNSUPPORT_INFO unsupport_info;
 };
-static TestCase* testCase = new TestCase();
+
+static TestCase* test_case = new TestCase();

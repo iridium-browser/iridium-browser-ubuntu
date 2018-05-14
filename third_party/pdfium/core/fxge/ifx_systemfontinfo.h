@@ -10,7 +10,6 @@
 #include <memory>
 
 #include "core/fxge/cfx_fontmapper.h"
-#include "core/fxge/fx_font.h"
 
 const uint32_t kTableNAME = FXDWORD_GET_MSBFIRST("name");
 const uint32_t kTableTTCF = FXDWORD_GET_MSBFIRST("ttcf");
@@ -20,15 +19,14 @@ class IFX_SystemFontInfo {
   static std::unique_ptr<IFX_SystemFontInfo> CreateDefault(
       const char** pUserPaths);
 
-  virtual ~IFX_SystemFontInfo() {}
+  virtual ~IFX_SystemFontInfo() = default;
 
   virtual bool EnumFontList(CFX_FontMapper* pMapper) = 0;
   virtual void* MapFont(int weight,
                         bool bItalic,
                         int charset,
                         int pitch_family,
-                        const char* face,
-                        int& iExact) = 0;
+                        const char* face) = 0;
 
 #ifdef PDF_ENABLE_XFA
   virtual void* MapFontByUnicode(uint32_t dwUnicode,
@@ -42,7 +40,7 @@ class IFX_SystemFontInfo {
                                uint32_t table,
                                uint8_t* buffer,
                                uint32_t size) = 0;
-  virtual bool GetFaceName(void* hFont, CFX_ByteString* name) = 0;
+  virtual bool GetFaceName(void* hFont, ByteString* name) = 0;
   virtual bool GetFontCharset(void* hFont, int* charset) = 0;
   virtual int GetFaceIndex(void* hFont);
   virtual void DeleteFont(void* hFont) = 0;

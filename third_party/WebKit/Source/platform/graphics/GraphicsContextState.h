@@ -61,7 +61,8 @@ class PLATFORM_EXPORT GraphicsContextState final {
 
   // PaintFlags objects that reflect the current state. If the length of the
   // path to be stroked is known, pass it in for correct dash or dot placement.
-  const PaintFlags& StrokeFlags(int stroked_path_length = 0) const;
+  const PaintFlags& StrokeFlags(const int stroked_path_length = 0,
+                                const int dash_thickness = 0) const;
   const PaintFlags& FillFlags() const { return fill_flags_; }
 
   uint16_t SaveCount() const { return save_count_; }
@@ -115,7 +116,7 @@ class PLATFORM_EXPORT GraphicsContextState final {
  private:
   GraphicsContextState();
   explicit GraphicsContextState(const GraphicsContextState&);
-  GraphicsContextState& operator=(const GraphicsContextState&);
+  GraphicsContextState& operator=(const GraphicsContextState&) = delete;
 
   // This is mutable to enable dash path effect updates when the paint is
   // fetched for use.

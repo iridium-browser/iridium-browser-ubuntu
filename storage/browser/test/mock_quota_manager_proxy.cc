@@ -6,9 +6,6 @@
 
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "url/gurl.h"
-
-using storage::kStorageTypeUnknown;
 
 namespace content {
 
@@ -18,7 +15,7 @@ MockQuotaManagerProxy::MockQuotaManagerProxy(
     : QuotaManagerProxy(quota_manager, task_runner),
       storage_accessed_count_(0),
       storage_modified_count_(0),
-      last_notified_type_(kStorageTypeUnknown),
+      last_notified_type_(blink::mojom::StorageType::kUnknown),
       last_notified_delta_(0),
       registered_client_(NULL) {}
 
@@ -38,31 +35,35 @@ void MockQuotaManagerProxy::SimulateQuotaManagerDestroyed() {
 
 void MockQuotaManagerProxy::GetUsageAndQuota(
     base::SequencedTaskRunner* original_task_runner,
-    const GURL& origin,
-    StorageType type,
-    const QuotaManager::UsageAndQuotaCallback& callback) {
+    const url::Origin& origin,
+    blink::mojom::StorageType type,
+    QuotaManager::UsageAndQuotaCallback callback) {
   if (mock_manager()) {
-    mock_manager()->GetUsageAndQuota(origin, type, callback);
+    mock_manager()->GetUsageAndQuota(origin.GetURL(), type,
+                                     std::move(callback));
   }
 }
 
 void MockQuotaManagerProxy::NotifyStorageAccessed(
-    QuotaClient::ID client_id, const GURL& origin, StorageType type) {
+    QuotaClient::ID client_id,
+    const url::Origin& origin,
+    blink::mojom::StorageType type) {
   ++storage_accessed_count_;
   last_notified_origin_ = origin;
   last_notified_type_ = type;
 }
 
-void MockQuotaManagerProxy::NotifyStorageModified(QuotaClient::ID client_id,
-                                                  const GURL& origin,
-                                                  StorageType type,
-                                                  int64_t delta) {
+void MockQuotaManagerProxy::NotifyStorageModified(
+    QuotaClient::ID client_id,
+    const url::Origin& origin,
+    blink::mojom::StorageType type,
+    int64_t delta) {
   ++storage_modified_count_;
   last_notified_origin_ = origin;
   last_notified_type_ = type;
   last_notified_delta_ = delta;
   if (mock_manager())
-    mock_manager()->UpdateUsage(origin, type, delta);
+    mock_manager()->UpdateUsage(origin.GetURL(), type, delta);
 }
 
 MockQuotaManagerProxy::~MockQuotaManagerProxy() {

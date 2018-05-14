@@ -19,11 +19,11 @@
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/input_method_factory.h"
 #include "ui/keyboard/content/keyboard_constants.h"
+#include "ui/keyboard/content/keyboard_content_util.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
 #include "ui/keyboard/keyboard_test_util.h"
 #include "ui/keyboard/keyboard_ui.h"
-#include "ui/keyboard/keyboard_util.h"
 
 namespace {
 const int kKeyboardHeightForTest = 100;
@@ -41,8 +41,7 @@ class VirtualKeyboardWebContentTest : public InProcessBrowserTest {
 
   // Ensure that the virtual keyboard is enabled.
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(
-        keyboard::switches::kEnableVirtualKeyboard);
+    command_line->AppendSwitch(keyboard::switches::kEnableVirtualKeyboard);
   }
 
   keyboard::KeyboardUI* ui() {
@@ -112,33 +111,6 @@ IN_PROC_BROWSER_TEST_F(VirtualKeyboardWebContentTest,
   // Keyboard should not become visible if previous keyboard is not, even if it
   // is currently focused on an editable node.
   EXPECT_FALSE(IsKeyboardVisible());
-}
-
-// Test for crbug.com/489366. In FLOATING mode, switch to a new IME in a
-// different extension should exit FLOATING mode and position the new IME in
-// FULL_WIDTH mode.
-IN_PROC_BROWSER_TEST_F(VirtualKeyboardWebContentTest,
-                       IMEInDifferentExtensionNotCentered) {
-  gfx::Rect test_bounds(0, 0, 0, kKeyboardHeightForTest);
-  FocusEditableNodeAndShowKeyboard(test_bounds);
-  keyboard::KeyboardController* controller =
-      keyboard::KeyboardController::GetInstance();
-  const gfx::Rect& screen_bounds = ash::Shell::GetPrimaryRootWindow()->bounds();
-  gfx::Rect keyboard_bounds = controller->GetContainerWindow()->bounds();
-  EXPECT_EQ(kKeyboardHeightForTest, keyboard_bounds.height());
-  EXPECT_EQ(screen_bounds.height(),
-            keyboard_bounds.height() + keyboard_bounds.y());
-  controller->SetKeyboardMode(keyboard::FLOATING);
-  // Move keyboard to a random place.
-  ui()->GetContentsWindow()->SetBounds(gfx::Rect(50, 50, 50, 50));
-  EXPECT_EQ(gfx::Rect(50, 50, 50, 50),
-            controller->GetContainerWindow()->bounds());
-
-  MockEnableIMEInDifferentExtension("chrome-extension://domain-1", test_bounds);
-  keyboard_bounds = controller->GetContainerWindow()->bounds();
-  EXPECT_EQ(kKeyboardHeightForTest, keyboard_bounds.height());
-  EXPECT_EQ(screen_bounds.height(),
-            keyboard_bounds.height() + keyboard_bounds.y());
 }
 
 class VirtualKeyboardAppWindowTest : public extensions::PlatformAppBrowserTest {

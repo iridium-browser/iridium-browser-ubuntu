@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "base/atomic_sequence_num.h"
-#include "base/memory/ptr_util.h"
 #include "crypto/rsa_private_key.h"
 #include "net/cert/x509_util.h"
 #include "net/ssl/client_cert_identity_test_util.h"
@@ -20,7 +19,7 @@ const char kTokenUrl[] = "https://example.com/token";
 const char kTokenValidationUrl[] = "https://example.com/validate";
 const char kTokenValidationCertIssuer[] = "*";
 
-base::StaticAtomicSequenceNumber g_serial_number;
+base::AtomicSequenceNumber g_serial_number;
 
 std::unique_ptr<net::FakeClientCertIdentity> CreateFakeCert(
     base::Time valid_start,
@@ -41,7 +40,7 @@ std::unique_ptr<net::FakeClientCertIdentity> CreateFakeCert(
   if (!ssl_private_key)
     return nullptr;
 
-  return base::MakeUnique<net::FakeClientCertIdentity>(cert, ssl_private_key);
+  return std::make_unique<net::FakeClientCertIdentity>(cert, ssl_private_key);
 }
 
 }  // namespace
@@ -74,7 +73,7 @@ TestTokenValidator::TestTokenValidator(const ThirdPartyAuthConfig& config) :
     TokenValidatorBase(config, "", nullptr) {
 }
 
-TestTokenValidator::~TestTokenValidator() {}
+TestTokenValidator::~TestTokenValidator() = default;
 
 void TestTokenValidator::SelectCertificates(
     net::ClientCertIdentityList selected_certs) {

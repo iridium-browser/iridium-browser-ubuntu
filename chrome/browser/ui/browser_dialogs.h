@@ -14,11 +14,13 @@
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
+#include "content/public/browser/resource_request_info.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/arc/intent_helper/arc_navigation_throttle.h"
+#include "url/gurl.h"
 #endif  // OS_CHROMEOS
 
 class Browser;
@@ -26,6 +28,10 @@ class LoginHandler;
 class Profile;
 class WebShareTarget;
 struct WebApplicationInfo;
+
+namespace base {
+class FilePath;
+}
 
 namespace content {
 class BrowserContext;
@@ -39,7 +45,7 @@ class Extension;
 
 namespace net {
 class AuthChallengeInfo;
-class URLRequest;
+class AuthCredentials;
 }
 
 namespace payments {
@@ -50,6 +56,8 @@ class PaymentRequestDialog;
 namespace safe_browsing {
 class ChromeCleanerController;
 class ChromeCleanerDialogController;
+class ChromeCleanerRebootDialogController;
+class SettingsResetPromptController;
 }
 
 namespace task_manager {
@@ -58,7 +66,13 @@ class TaskManagerTableModel;
 
 namespace ui {
 class WebDialogDelegate;
+struct SelectedFileInfo;
 }
+
+namespace views {
+class View;
+class Widget;
+}  // namespace views
 
 namespace chrome {
 
@@ -80,7 +94,7 @@ gfx::NativeWindow ShowWebDialog(gfx::NativeView parent,
                                 ui::WebDialogDelegate* delegate);
 #endif  // !defined(OS_MACOSX)
 
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
 // Creates and shows an HTML dialog with the given delegate and browser context.
 // The dialog is placed in the ash window hierarchy in the given container. The
 // window is automatically destroyed when it is closed.
@@ -90,7 +104,7 @@ gfx::NativeWindow ShowWebDialog(gfx::NativeView parent,
 gfx::NativeWindow ShowWebDialogInContainer(int container_id,
                                            content::BrowserContext* context,
                                            ui::WebDialogDelegate* delegate);
-#endif  // defined(USE_ASH)
+#endif  // defined(OS_CHROMEOS)
 
 // Shows the create chrome app shortcut dialog box.
 // |close_callback| may be null.
@@ -100,10 +114,11 @@ void ShowCreateChromeAppShortcutsDialog(
     const extensions::Extension* app,
     const base::Callback<void(bool /* created */)>& close_callback);
 
-// Callback type used with the ShowBookmarkAppDialog() method. The boolean
-// parameter is true when the user accepts the dialog. The WebApplicationInfo
-// parameter contains the WebApplicationInfo as edited by the user.
-using ShowBookmarkAppDialogCallback =
+// Callback used to indicate whether a user has accepted the installation of a
+// web app. The boolean parameter is true when the user accepts the dialog. The
+// WebApplicationInfo parameter contains the information about the app,
+// possibly modified by the user.
+using AppInstallationAcceptanceCallback =
     base::OnceCallback<void(bool, const WebApplicationInfo&)>;
 
 // Shows the Bookmark App bubble.
@@ -111,9 +126,16 @@ using ShowBookmarkAppDialogCallback =
 // bookmark apps.
 //
 // |web_app_info| is the WebApplicationInfo being converted into an app.
-void ShowBookmarkAppDialog(gfx::NativeWindow parent_window,
+void ShowBookmarkAppDialog(content::WebContents* web_contents,
                            const WebApplicationInfo& web_app_info,
-                           ShowBookmarkAppDialogCallback callback);
+                           AppInstallationAcceptanceCallback callback);
+
+// Shows the PWA installation confirmation bubble.
+//
+// |web_app_info| is the WebApplicationInfo to be installed.
+void ShowPWAInstallDialog(content::WebContents* web_contents,
+                          const WebApplicationInfo& web_app_info,
+                          AppInstallationAcceptanceCallback callback);
 
 // Shows a color chooser that reports to the given WebContents.
 content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,
@@ -133,8 +155,11 @@ void ShowUpdateChromeDialogViews(gfx::NativeWindow parent);
 #if defined(TOOLKIT_VIEWS)
 
 // Creates a toolkit-views based LoginHandler (e.g. HTTP-Auth dialog).
-LoginHandler* CreateLoginHandlerViews(net::AuthChallengeInfo* auth_info,
-                                      net::URLRequest* request);
+LoginHandler* CreateLoginHandlerViews(
+    net::AuthChallengeInfo* auth_info,
+    content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
+        auth_required_callback);
 
 // Shows the toolkit-views based BookmarkEditor.
 void ShowBookmarkEditorViews(gfx::NativeWindow parent_window,
@@ -245,6 +270,11 @@ enum class DialogIdentifier {
   VALIDATION_MESSAGE = 77,
   WEB_SHARE_TARGET_PICKER = 78,
   ZOOM = 79,
+  LOCK_SCREEN_NOTE_APP_TOAST = 80,
+  PWA_CONFIRMATION = 81,
+  RELAUNCH_RECOMMENDED = 82,
+  CROSTINI_INSTALLER = 83,
+  RELAUNCH_REQUIRED = 84,
   MAX_VALUE
 };
 
@@ -253,6 +283,12 @@ void RecordDialogCreation(DialogIdentifier identifier);
 
 #if defined(OS_WIN)
 
+// Shows the settings reset prompt dialog asking the user if they want to reset
+// some of their settings.
+void ShowSettingsResetPrompt(
+    Browser* browser,
+    safe_browsing::SettingsResetPromptController* controller);
+
 // Shows the Chrome Cleanup dialog asking the user if they want to clean their
 // system from unwanted software. This is called when unwanted software has been
 // detected on the system.
@@ -260,6 +296,13 @@ void ShowChromeCleanerPrompt(
     Browser* browser,
     safe_browsing::ChromeCleanerDialogController* dialog_controller,
     safe_browsing::ChromeCleanerController* cleaner_controller);
+
+// Shows the Chrome Cleanup reboot dialog asking the user if they want to
+// restart their computer once a cleanup has finished. This is called when the
+// Chrome Cleanup ends in a reboot required state.
+void ShowChromeCleanerRebootPrompt(
+    Browser* browser,
+    safe_browsing::ChromeCleanerRebootDialogController* dialog_controller);
 
 #endif  // OS_WIN
 
@@ -276,14 +319,27 @@ using IntentPickerResponse =
     base::Callback<void(const std::string&,
                         arc::ArcNavigationThrottle::CloseReason)>;
 
-// Return a pointer to the IntentPickerBubbleView::ShowBubble method.
+// TODO(djacobo): Decide whether or not refactor as base::RepeatableCallback.
+// Return a pointer to the IntentPickerBubbleView::ShowBubble method, which in
+// turn receives a View to be used as an anchor, the WebContents associated
+// with the current tab, a list of app candidates to be displayed to the user
+// and a callback to report back the user's response respectively. The newly
+// created widget is returned.
 using BubbleShowPtr =
-    void (*)(content::WebContents*,
-             const std::vector<arc::ArcNavigationThrottle::AppInfo>&,
-             const IntentPickerResponse&);
+    views::Widget* (*)(views::View*,
+                       content::WebContents*,
+                       const std::vector<arc::ArcNavigationThrottle::AppInfo>&,
+                       bool disable_display_in_chrome,
+                       const IntentPickerResponse&);
 
 BubbleShowPtr ShowIntentPickerBubble();
 
 #endif  // OS_CHROMEOS
+
+void ShowFolderUploadConfirmationDialog(
+    const base::FilePath& path,
+    base::OnceCallback<void(const std::vector<ui::SelectedFileInfo>&)> callback,
+    std::vector<ui::SelectedFileInfo> selected_files,
+    content::WebContents* web_contents);
 
 #endif  // CHROME_BROWSER_UI_BROWSER_DIALOGS_H_

@@ -4,6 +4,8 @@
 
 #include "android_webview/browser/aw_settings.h"
 
+#include <memory>
+
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/aw_contents.h"
 #include "android_webview/browser/renderer_host/aw_render_view_host_ext.h"
@@ -11,7 +13,6 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/supports_user_data.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -83,7 +84,7 @@ AwSettings::AwSettings(JNIEnv* env,
       javascript_can_open_windows_automatically_(false),
       aw_settings_(env, obj) {
   web_contents->SetUserData(kAwSettingsUserDataKey,
-                            base::MakeUnique<AwSettingsUserData>(this));
+                            std::make_unique<AwSettingsUserData>(this));
 }
 
 AwSettings::~AwSettings() {
@@ -109,6 +110,11 @@ void AwSettings::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
 
 AwSettings* AwSettings::FromWebContents(content::WebContents* web_contents) {
   return AwSettingsUserData::GetSettings(web_contents);
+}
+
+bool AwSettings::GetAllowSniffingFileUrls() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  return Java_AwSettings_getAllowSniffingFileUrls(env);
 }
 
 AwRenderViewHostExt* AwSettings::GetAwRenderViewHostExt() {
@@ -434,9 +440,10 @@ void AwSettings::PopulateWebPreferencesLocked(JNIEnv* env,
     // Using 100M instead of max int to avoid overflows.
     web_prefs->minimum_accelerated_2d_canvas_size = 100 * 1000 * 1000;
   }
-  web_prefs->experimental_webgl_enabled =
-      web_prefs->experimental_webgl_enabled &&
-      enable_supported_hardware_accelerated_features;
+  web_prefs->webgl1_enabled = web_prefs->webgl1_enabled &&
+                              enable_supported_hardware_accelerated_features;
+  web_prefs->webgl2_enabled = web_prefs->webgl2_enabled &&
+                              enable_supported_hardware_accelerated_features;
 
   // If strict mixed content checking is enabled then running should not be
   // allowed.
@@ -460,6 +467,9 @@ void AwSettings::PopulateWebPreferencesLocked(JNIEnv* env,
   web_prefs->do_not_update_selection_on_mutating_selection_range =
       Java_AwSettings_getDoNotUpdateSelectionOnMutatingSelectionRange(env, obj);
 
+  web_prefs->css_hex_alpha_color_enabled =
+      Java_AwSettings_getCSSHexAlphaColorEnabledLocked(env, obj);
+
   // Keep spellcheck disabled on html elements unless the spellcheck="true"
   // attribute is explicitly specified. This "opt-in" behavior is for backward
   // consistency in apps that use WebView (see crbug.com/652314).
@@ -469,23 +479,19 @@ void AwSettings::PopulateWebPreferencesLocked(JNIEnv* env,
       Java_AwSettings_getScrollTopLeftInteropEnabledLocked(env, obj);
 }
 
-static jlong Init(JNIEnv* env,
-                  const JavaParamRef<jobject>& obj,
-                  const JavaParamRef<jobject>& web_contents) {
+static jlong JNI_AwSettings_Init(JNIEnv* env,
+                                 const JavaParamRef<jobject>& obj,
+                                 const JavaParamRef<jobject>& web_contents) {
   content::WebContents* contents =
       content::WebContents::FromJavaWebContents(web_contents);
   AwSettings* settings = new AwSettings(env, obj, contents);
   return reinterpret_cast<intptr_t>(settings);
 }
 
-static ScopedJavaLocalRef<jstring> GetDefaultUserAgent(
+static ScopedJavaLocalRef<jstring> JNI_AwSettings_GetDefaultUserAgent(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz) {
   return base::android::ConvertUTF8ToJavaString(env, GetUserAgent());
-}
-
-bool RegisterAwSettings(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace android_webview

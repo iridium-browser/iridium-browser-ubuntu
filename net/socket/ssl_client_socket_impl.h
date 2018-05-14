@@ -32,12 +32,12 @@
 #include "net/ssl/openssl_ssl_util.h"
 #include "net/ssl/ssl_client_cert_type.h"
 #include "net/ssl/ssl_config_service.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "third_party/boringssl/src/include/openssl/base.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
 
 namespace base {
 class FilePath;
-class SequencedTaskRunner;
 namespace trace_event {
 class ProcessMemoryDump;
 }
@@ -51,7 +51,6 @@ namespace net {
 
 class CertVerifier;
 class CTVerifier;
-class SocketBIOAdapter;
 class SSLCertRequestInfo;
 class SSLInfo;
 
@@ -78,11 +77,9 @@ class SSLClientSocketImpl : public SSLClientSocket,
   }
 
 #if !defined(OS_NACL)
-  // Log SSL key material to |path| on |task_runner|. Must be called before any
-  // SSLClientSockets are created.
-  static void SetSSLKeyLogFile(
-      const base::FilePath& path,
-      const scoped_refptr<base::SequencedTaskRunner>& task_runner);
+  // Log SSL key material to |path|. Must be called before any SSLClientSockets
+  // are created.
+  static void SetSSLKeyLogFile(const base::FilePath& path);
 #endif
 
   // SSLClientSocket implementation.
@@ -120,6 +117,7 @@ class SSLClientSocketImpl : public SSLClientSocket,
   void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
   int64_t GetTotalReceivedBytes() const override;
   void DumpMemoryStats(SocketMemoryStats* stats) const override;
+  void ApplySocketTag(const SocketTag& tag) override;
 
   // Dumps memory allocation stats. |pmd| is the browser process memory dump.
   static void DumpSSLClientSessionMemoryStats(
@@ -134,7 +132,8 @@ class SSLClientSocketImpl : public SSLClientSocket,
                   const CompletionCallback& callback) override;
   int Write(IOBuffer* buf,
             int buf_len,
-            const CompletionCallback& callback) override;
+            const CompletionCallback& callback,
+            const NetworkTrafficAnnotationTag& traffic_annotation) override;
   int SetReceiveBufferSize(int32_t size) override;
   int SetSendBufferSize(int32_t size) override;
 
@@ -195,20 +194,20 @@ class SSLClientSocketImpl : public SSLClientSocket,
   // the |ssl_info|.signed_certificate_timestamps list.
   void AddCTInfoToSSLInfo(SSLInfo* ssl_info) const;
 
-  // Returns a unique key string for the SSL session cache for
-  // this socket.
+  // Returns a unique key string for the SSL session cache for this socket. This
+  // must not be called if |ssl_session_cache_shard_| is empty.
   std::string GetSessionCacheKey() const;
 
   // Returns true if renegotiations are allowed.
   bool IsRenegotiationAllowed() const;
 
   // Callbacks for operations with the private key.
-  ssl_private_key_result_t PrivateKeySignDigestCallback(uint8_t* out,
-                                                        size_t* out_len,
-                                                        size_t max_out,
-                                                        const EVP_MD* md,
-                                                        const uint8_t* in,
-                                                        size_t in_len);
+  ssl_private_key_result_t PrivateKeySignCallback(uint8_t* out,
+                                                  size_t* out_len,
+                                                  size_t max_out,
+                                                  uint16_t algorithm,
+                                                  const uint8_t* in,
+                                                  size_t in_len);
   ssl_private_key_result_t PrivateKeyCompleteCallback(uint8_t* out,
                                                       size_t* out_len,
                                                       size_t max_out);
@@ -233,10 +232,6 @@ class SSLClientSocketImpl : public SSLClientSocket,
   // Record whether ALPN was used, and if so, the negotiated protocol,
   // in a UMA histogram.
   void RecordNegotiatedProtocol() const;
-
-  // Records histograms for channel id support during full handshakes - resumed
-  // handshakes are ignored.
-  void RecordChannelIDSupport() const;
 
   // Returns whether TLS channel ID is enabled.
   bool IsChannelIDEnabled() const;
@@ -293,8 +288,6 @@ class SSLClientSocketImpl : public SSLClientSocket,
 
   // The service for retrieving Channel ID keys.  May be NULL.
   ChannelIDService* channel_id_service_;
-  bool tb_was_negotiated_;
-  TokenBindingParam tb_negotiated_param_;
   TokenBindingSignatureMap tb_signature_map_;
 
   // OpenSSL stuff
@@ -308,7 +301,6 @@ class SSLClientSocketImpl : public SSLClientSocket,
   // session cache. i.e. sessions created with one value will not attempt to
   // resume on the socket with a different value.
   const std::string ssl_session_cache_shard_;
-  int ssl_session_cache_lookup_count_;
 
   enum State {
     STATE_NONE,
@@ -353,6 +345,10 @@ class SSLClientSocketImpl : public SSLClientSocket,
 
   // True if PKP is bypassed due to a local trust anchor.
   bool pkp_bypassed_;
+
+  // True if there was a certificate error which should be treated as fatal,
+  // and false otherwise.
+  bool is_fatal_cert_error_;
 
   SSLErrorDetails connect_error_details_;
 

@@ -14,7 +14,9 @@
 #include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/result_codes.h"
+#include "content/public/common/zygote_features.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "services/catalog/public/cpp/manifest_parsing_util.h"
 
@@ -25,15 +27,15 @@
 #if defined(OS_WIN)
 #include "sandbox/win/src/sandbox_types.h"
 #else
-#include "content/public/browser/file_descriptor_info.h"
-#endif
-
-#if defined(OS_LINUX)
-#include "content/public/common/zygote_handle.h"
+#include "content/public/browser/posix_file_descriptor_info.h"
 #endif
 
 #if defined(OS_MACOSX)
 #include "sandbox/mac/seatbelt_exec.h"
+#endif
+
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+#include "content/public/common/zygote_handle.h"
 #endif
 
 namespace base {
@@ -43,16 +45,19 @@ class CommandLine;
 namespace content {
 
 class ChildProcessLauncher;
-class FileDescriptorInfo;
 class SandboxedProcessLauncherDelegate;
+struct ChildProcessLauncherPriority;
+
+#if defined(OS_POSIX)
+class PosixFileDescriptorInfo;
+#endif
 
 namespace internal {
 
-
-#if defined(OS_WIN)
-using FileMappedForLaunch = base::HandlesToInheritVector;
+#if defined(OS_POSIX)
+using FileMappedForLaunch = PosixFileDescriptorInfo;
 #else
-using FileMappedForLaunch = FileDescriptorInfo;
+using FileMappedForLaunch = base::HandlesToInheritVector;
 #endif
 
 // ChildProcessLauncherHelper is used by ChildProcessLauncher to start a
@@ -72,9 +77,9 @@ class ChildProcessLauncherHelper :
 
     base::Process process;
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
     ZygoteHandle zygote = nullptr;
-#endif
+#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
   };
 
   ChildProcessLauncherHelper(
@@ -83,7 +88,10 @@ class ChildProcessLauncherHelper :
       std::unique_ptr<base::CommandLine> command_line,
       std::unique_ptr<SandboxedProcessLauncherDelegate> delegate,
       const base::WeakPtr<ChildProcessLauncher>& child_process_launcher,
-      bool terminate_on_shutdown);
+      bool terminate_on_shutdown,
+      std::unique_ptr<mojo::edk::OutgoingBrokerClientInvitation>
+          broker_client_invitation,
+      const mojo::edk::ProcessErrorCallback& process_error_callback);
 
   // The methods below are defined in the order they are called.
 
@@ -101,8 +109,11 @@ class ChildProcessLauncherHelper :
   // Platform specific.
   std::unique_ptr<FileMappedForLaunch> GetFilesToMap();
 
-  // Platform specific.
-  void BeforeLaunchOnLauncherThread(
+  // Platform specific, returns success or failure. If failure is returned,
+  // LaunchOnLauncherThread will not call LaunchProcessOnLauncherThread and
+  // AfterLaunchOnLauncherThread, and the launch_result will be reported as
+  // LAUNCH_RESULT_FAILURE.
+  bool BeforeLaunchOnLauncherThread(
       const FileMappedForLaunch& files_to_register,
       base::LaunchOptions* options);
 
@@ -119,8 +130,8 @@ class ChildProcessLauncherHelper :
       int* launch_result);
 
   // Called right after the process has been launched, whether it was created
-  // yet or not.
-  // Platform specific.
+  // successfully or not. If the process launch is asynchronous, the process may
+  // not yet be created. Platform specific.
   void AfterLaunchOnLauncherThread(
       const ChildProcessLauncherHelper::Process& process,
       const base::LaunchOptions& options);
@@ -157,9 +168,9 @@ class ChildProcessLauncherHelper :
   static void ForceNormalProcessTerminationAsync(
       ChildProcessLauncherHelper::Process process);
 
-  void SetProcessPriorityOnLauncherThread(base::Process process,
-                                          bool background,
-                                          bool boost_for_pending_views);
+  void SetProcessPriorityOnLauncherThread(
+      base::Process process,
+      const ChildProcessLauncherPriority& priority);
 
   static void SetRegisteredFilesForService(
       const std::string& service_name,
@@ -192,6 +203,12 @@ class ChildProcessLauncherHelper :
   static void ForceNormalProcessTerminationSync(
       ChildProcessLauncherHelper::Process process);
 
+#if defined(OS_ANDROID)
+  void set_java_peer_available_on_client_thread() {
+    java_peer_avaiable_on_client_thread_ = true;
+  }
+#endif
+
   const int child_process_id_;
   const BrowserThread::ID client_thread_id_;
   base::TimeTicks begin_launch_time_;
@@ -201,6 +218,9 @@ class ChildProcessLauncherHelper :
   mojo::edk::ScopedPlatformHandle mojo_client_handle_;
   mojo::edk::ScopedPlatformHandle mojo_server_handle_;
   bool terminate_on_shutdown_;
+  std::unique_ptr<mojo::edk::OutgoingBrokerClientInvitation>
+      broker_client_invitation_;
+  const mojo::edk::ProcessErrorCallback process_error_callback_;
 
 #if defined(OS_MACOSX)
   std::unique_ptr<sandbox::SeatbeltExecClient> seatbelt_exec_client_;
@@ -208,6 +228,7 @@ class ChildProcessLauncherHelper :
 
 #if defined(OS_ANDROID)
   base::android::ScopedJavaGlobalRef<jobject> java_peer_;
+  bool java_peer_avaiable_on_client_thread_ = false;
 #endif
 };
 

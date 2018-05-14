@@ -12,7 +12,6 @@
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
-#include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/url_constants.h"
 #include "components/rappor/rappor_service_impl.h"
 #include "content/public/browser/browser_context.h"
@@ -20,7 +19,6 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/common/content_switches.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -42,26 +40,26 @@ ChromeExtensionWebContentsObserver::ChromeExtensionWebContentsObserver(
 
 ChromeExtensionWebContentsObserver::~ChromeExtensionWebContentsObserver() {}
 
-void ChromeExtensionWebContentsObserver::RenderViewCreated(
-    content::RenderViewHost* render_view_host) {
-  ReloadIfTerminated(render_view_host);
-  ExtensionWebContentsObserver::RenderViewCreated(render_view_host);
+void ChromeExtensionWebContentsObserver::RenderFrameCreated(
+    content::RenderFrameHost* render_frame_host) {
+  ReloadIfTerminated(render_frame_host);
+  ExtensionWebContentsObserver::RenderFrameCreated(render_frame_host);
 
-  const Extension* extension = GetExtension(render_view_host);
+  const Extension* extension = GetExtensionFromFrame(render_frame_host, false);
   if (!extension)
     return;
 
-  int process_id = render_view_host->GetProcess()->GetID();
+  int process_id = render_frame_host->GetProcess()->GetID();
   auto* policy = content::ChildProcessSecurityPolicy::GetInstance();
 
   // Components of chrome that are implemented as extensions or platform apps
   // are allowed to use chrome://resources/ and chrome://theme/ URLs.
   if ((extension->is_extension() || extension->is_platform_app()) &&
       Manifest::IsComponentLocation(extension->location())) {
+    policy->GrantOrigin(
+        process_id, url::Origin::Create(GURL(content::kChromeUIResourcesURL)));
     policy->GrantOrigin(process_id,
-                        url::Origin(GURL(content::kChromeUIResourcesURL)));
-    policy->GrantOrigin(process_id,
-                        url::Origin(GURL(chrome::kChromeUIThemeURL)));
+                        url::Origin::Create(GURL(chrome::kChromeUIThemeURL)));
   }
 
   // Extensions, legacy packaged apps, and component platform apps are allowed
@@ -73,9 +71,10 @@ void ChromeExtensionWebContentsObserver::RenderViewCreated(
       (extension->is_platform_app() &&
        Manifest::IsComponentLocation(extension->location()))) {
     policy->GrantOrigin(process_id,
-                        url::Origin(GURL(chrome::kChromeUIFaviconURL)));
-    policy->GrantOrigin(process_id,
-                        url::Origin(GURL(chrome::kChromeUIExtensionIconURL)));
+                        url::Origin::Create(GURL(chrome::kChromeUIFaviconURL)));
+    policy->GrantOrigin(
+        process_id,
+        url::Origin::Create(GURL(chrome::kChromeUIExtensionIconURL)));
   }
 }
 
@@ -135,8 +134,8 @@ void ChromeExtensionWebContentsObserver::InitializeRenderFrame(
 }
 
 void ChromeExtensionWebContentsObserver::ReloadIfTerminated(
-    content::RenderViewHost* render_view_host) {
-  std::string extension_id = GetExtensionId(render_view_host);
+    content::RenderFrameHost* render_frame_host) {
+  std::string extension_id = GetExtensionIdFromFrame(render_frame_host);
   if (extension_id.empty())
     return;
 

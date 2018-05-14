@@ -25,7 +25,8 @@
 
 #include "modules/indexeddb/IDBOpenDBRequest.h"
 
-#include "bindings/core/v8/Nullable.h"
+#include <memory>
+#include "bindings/modules/v8/idb_object_store_or_idb_index_or_idb_cursor.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
@@ -33,7 +34,7 @@
 #include "modules/indexeddb/IDBDatabaseCallbacks.h"
 #include "modules/indexeddb/IDBTracing.h"
 #include "modules/indexeddb/IDBVersionChangeEvent.h"
-#include <memory>
+#include "platform/wtf/Optional.h"
 
 using blink::WebIDBDatabase;
 
@@ -47,7 +48,7 @@ IDBOpenDBRequest* IDBOpenDBRequest::Create(
     IDBRequest::AsyncTraceState metrics) {
   IDBOpenDBRequest* request = new IDBOpenDBRequest(
       script_state, callbacks, transaction_id, version, std::move(metrics));
-  request->SuspendIfNeeded();
+  request->PauseIfNeeded();
   return request;
 }
 
@@ -57,7 +58,7 @@ IDBOpenDBRequest::IDBOpenDBRequest(ScriptState* script_state,
                                    int64_t version,
                                    IDBRequest::AsyncTraceState metrics)
     : IDBRequest(script_state,
-                 IDBAny::CreateNull(),
+                 IDBRequest::Source(),
                  nullptr,
                  std::move(metrics)),
       database_callbacks_(callbacks),
@@ -66,9 +67,9 @@ IDBOpenDBRequest::IDBOpenDBRequest(ScriptState* script_state,
   DCHECK(!ResultAsAny());
 }
 
-IDBOpenDBRequest::~IDBOpenDBRequest() {}
+IDBOpenDBRequest::~IDBOpenDBRequest() = default;
 
-DEFINE_TRACE(IDBOpenDBRequest) {
+void IDBOpenDBRequest::Trace(blink::Visitor* visitor) {
   visitor->Trace(database_callbacks_);
   IDBRequest::Trace(visitor);
 }
@@ -87,10 +88,10 @@ void IDBOpenDBRequest::EnqueueBlocked(int64_t old_version) {
   IDB_TRACE("IDBOpenDBRequest::onBlocked()");
   if (!ShouldEnqueueEvent())
     return;
-  Nullable<unsigned long long> new_version_nullable =
-      (version_ == IDBDatabaseMetadata::kDefaultVersion)
-          ? Nullable<unsigned long long>()
-          : Nullable<unsigned long long>(version_);
+  Optional<unsigned long long> new_version_nullable;
+  if (version_ != IDBDatabaseMetadata::kDefaultVersion) {
+    new_version_nullable = version_;
+  }
   EnqueueEvent(IDBVersionChangeEvent::Create(
       EventTypeNames::blocked, old_version, new_version_nullable));
 }
@@ -172,8 +173,8 @@ void IDBOpenDBRequest::EnqueueResponse(int64_t old_version) {
     old_version = IDBDatabaseMetadata::kDefaultVersion;
   }
   SetResult(IDBAny::CreateUndefined());
-  EnqueueEvent(IDBVersionChangeEvent::Create(
-      EventTypeNames::success, old_version, Nullable<unsigned long long>()));
+  EnqueueEvent(IDBVersionChangeEvent::Create(EventTypeNames::success,
+                                             old_version, WTF::nullopt));
   metrics_.RecordAndReset();
 }
 

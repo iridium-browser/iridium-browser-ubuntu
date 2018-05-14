@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
 
+#include <utility>
+
 #include "base/task_runner.h"
 #include "chrome/browser/chromeos/login/users/fake_supervised_user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -12,7 +14,7 @@ namespace {
 
 class FakeTaskRunner : public base::TaskRunner {
  public:
-  bool PostDelayedTask(const tracked_objects::Location& from_here,
+  bool PostDelayedTask(const base::Location& from_here,
                        base::OnceClosure task,
                        base::TimeDelta delay) override {
     std::move(task).Run();
@@ -64,10 +66,6 @@ const user_manager::User* MockUserManager::GetPrimaryUser() const {
   return GetActiveUser();
 }
 
-BootstrapManager* MockUserManager::GetBootstrapManager() {
-  return nullptr;
-}
-
 MultiProfileUserController* MockUserManager::GetMultiProfileUserController() {
   return nullptr;
 }
@@ -79,6 +77,13 @@ UserImageManager* MockUserManager::GetUserImageManager(
 
 SupervisedUserManager* MockUserManager::GetSupervisedUserManager() {
   return supervised_user_manager_.get();
+}
+
+void MockUserManager::ScheduleResolveLocale(
+    const std::string& locale,
+    base::OnceClosure on_resolved_callback,
+    std::string* out_resolved_locale) const {
+  DoScheduleResolveLocale(locale, &on_resolved_callback, out_resolved_locale);
 }
 
 // Creates a new User instance.
@@ -119,7 +124,8 @@ void MockUserManager::AddUser(const AccountId& account_id) {
 
 void MockUserManager::AddUserWithAffiliation(const AccountId& account_id,
                                              bool is_affiliated) {
-  user_manager::User* user = user_manager::User::CreateRegularUser(account_id);
+  user_manager::User* user = user_manager::User::CreateRegularUser(
+      account_id, user_manager::USER_TYPE_REGULAR);
   user->SetAffiliation(is_affiliated);
   user_list_.push_back(user);
   ProfileHelper::Get()->SetProfileToUserMappingForTesting(user);

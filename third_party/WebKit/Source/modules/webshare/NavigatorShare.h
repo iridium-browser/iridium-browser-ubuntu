@@ -8,7 +8,7 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/events/EventTarget.h"
+#include "core/dom/events/EventTarget.h"
 #include "core/frame/Navigator.h"
 #include "platform/Supplementable.h"
 #include "platform/bindings/ScriptWrappable.h"
@@ -26,6 +26,8 @@ class NavigatorShare final : public GarbageCollectedFinalized<NavigatorShare>,
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorShare);
 
  public:
+  static const char kSupplementName[];
+
   ~NavigatorShare();
 
   // Gets, or creates, NavigatorShare supplement on Navigator.
@@ -36,13 +38,12 @@ class NavigatorShare final : public GarbageCollectedFinalized<NavigatorShare>,
   ScriptPromise share(ScriptState*, const ShareData&);
   static ScriptPromise share(ScriptState*, Navigator&, const ShareData&);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   class ShareClientImpl;
 
   NavigatorShare();
-  static const char* SupplementName();
 
   void OnConnectionError();
 

@@ -6,12 +6,11 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "media/base/audio_buffer.h"
 #include "media/base/audio_decoder_config.h"
-#include "media/base/cdm_config.h"
 #include "media/base/cdm_key_information.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
@@ -52,7 +51,7 @@ std::unique_ptr<media::DecryptConfig>
 TypeConverter<std::unique_ptr<media::DecryptConfig>,
               media::mojom::DecryptConfigPtr>::
     Convert(const media::mojom::DecryptConfigPtr& input) {
-  return base::MakeUnique<media::DecryptConfig>(input->key_id, input->iv,
+  return std::make_unique<media::DecryptConfig>(input->key_id, input->iv,
                                                 input->subsamples);
 }
 
@@ -177,30 +176,8 @@ std::unique_ptr<media::CdmKeyInformation>
 TypeConverter<std::unique_ptr<media::CdmKeyInformation>,
               media::mojom::CdmKeyInformationPtr>::
     Convert(const media::mojom::CdmKeyInformationPtr& input) {
-  return base::MakeUnique<media::CdmKeyInformation>(
+  return std::make_unique<media::CdmKeyInformation>(
       input->key_id, input->status, input->system_code);
-}
-
-// static
-media::mojom::CdmConfigPtr
-TypeConverter<media::mojom::CdmConfigPtr, media::CdmConfig>::Convert(
-    const media::CdmConfig& input) {
-  media::mojom::CdmConfigPtr config(media::mojom::CdmConfig::New());
-  config->allow_distinctive_identifier = input.allow_distinctive_identifier;
-  config->allow_persistent_state = input.allow_persistent_state;
-  config->use_hw_secure_codecs = input.use_hw_secure_codecs;
-  return config;
-}
-
-// static
-media::CdmConfig
-TypeConverter<media::CdmConfig, media::mojom::CdmConfigPtr>::Convert(
-    const media::mojom::CdmConfigPtr& input) {
-  media::CdmConfig config;
-  config.allow_distinctive_identifier = input->allow_distinctive_identifier;
-  config.allow_persistent_state = input->allow_persistent_state;
-  config.use_hw_secure_codecs = input->use_hw_secure_codecs;
-  return config;
 }
 
 // static

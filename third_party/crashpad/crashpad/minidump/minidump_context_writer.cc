@@ -23,6 +23,7 @@
 #include "base/logging.h"
 #include "snapshot/cpu_context.h"
 #include "util/file/file_writer.h"
+#include "util/stdlib/aligned_allocator.h"
 
 namespace crashpad {
 
@@ -65,12 +66,24 @@ MinidumpContextWriter::CreateFromSnapshot(const CPUContext* context_snapshot) {
     }
 
     case kCPUArchitectureX86_64: {
-      MSVC_PUSH_DISABLE_WARNING(4316);  // Object on heap may not be aligned.
       MinidumpContextAMD64Writer* context_amd64 =
           new MinidumpContextAMD64Writer();
-      MSVC_POP_WARNING();  // C4316
       context.reset(context_amd64);
       context_amd64->InitializeFromSnapshot(context_snapshot->x86_64);
+      break;
+    }
+
+    case kCPUArchitectureARM: {
+      context = std::make_unique<MinidumpContextARMWriter>();
+      reinterpret_cast<MinidumpContextARMWriter*>(context.get())
+          ->InitializeFromSnapshot(context_snapshot->arm);
+      break;
+    }
+
+    case kCPUArchitectureARM64: {
+      context = std::make_unique<MinidumpContextARM64Writer>();
+      reinterpret_cast<MinidumpContextARM64Writer*>(context.get())
+          ->InitializeFromSnapshot(context_snapshot->arm64);
       break;
     }
 
@@ -152,12 +165,32 @@ size_t MinidumpContextX86Writer::ContextSize() const {
   return sizeof(context_);
 }
 
+static_assert(alignof(MinidumpContextAMD64) >= 16,
+              "MinidumpContextAMD64 alignment");
+static_assert(alignof(MinidumpContextAMD64Writer) >=
+                  alignof(MinidumpContextAMD64),
+              "MinidumpContextAMD64Writer alignment");
+
 MinidumpContextAMD64Writer::MinidumpContextAMD64Writer()
     : MinidumpContextWriter(), context_() {
   context_.context_flags = kMinidumpContextAMD64;
 }
 
 MinidumpContextAMD64Writer::~MinidumpContextAMD64Writer() {
+}
+
+// static
+void* MinidumpContextAMD64Writer::operator new(size_t size) {
+  // MinidumpContextAMD64 requests an alignment of 16, which can be larger than
+  // what standard new provides. This may trigger MSVC warning C4316. As a
+  // workaround to this language deficiency, provide a custom allocation
+  // function to allocate a block meeting the alignment requirement.
+  return AlignedAllocate(alignof(MinidumpContextAMD64Writer), size);
+}
+
+// static
+void MinidumpContextAMD64Writer::operator delete(void* pointer) {
+  return AlignedFree(pointer);
 }
 
 void MinidumpContextAMD64Writer::InitializeFromSnapshot(
@@ -217,6 +250,92 @@ bool MinidumpContextAMD64Writer::WriteObject(FileWriterInterface* file_writer) {
 size_t MinidumpContextAMD64Writer::ContextSize() const {
   DCHECK_GE(state(), kStateFrozen);
 
+  return sizeof(context_);
+}
+
+MinidumpContextARMWriter::MinidumpContextARMWriter()
+    : MinidumpContextWriter(), context_() {
+  context_.context_flags = kMinidumpContextARM;
+}
+
+MinidumpContextARMWriter::~MinidumpContextARMWriter() = default;
+
+void MinidumpContextARMWriter::InitializeFromSnapshot(
+    const CPUContextARM* context_snapshot) {
+  DCHECK_EQ(state(), kStateMutable);
+  DCHECK_EQ(context_.context_flags, kMinidumpContextARM);
+
+  context_.context_flags = kMinidumpContextARMAll;
+
+  static_assert(sizeof(context_.regs) == sizeof(context_snapshot->regs),
+                "GPRS size mismatch");
+  memcpy(context_.regs, context_snapshot->regs, sizeof(context_.regs));
+  context_.fp = context_snapshot->fp;
+  context_.ip = context_snapshot->ip;
+  context_.sp = context_snapshot->sp;
+  context_.lr = context_snapshot->lr;
+  context_.pc = context_snapshot->pc;
+  context_.cpsr = context_snapshot->cpsr;
+
+  context_.fpscr = context_snapshot->vfp_regs.fpscr;
+  static_assert(sizeof(context_.vfp) == sizeof(context_snapshot->vfp_regs.vfp),
+                "VFP size mismatch");
+  memcpy(context_.vfp, context_snapshot->vfp_regs.vfp, sizeof(context_.vfp));
+
+  memset(context_.extra, 0, sizeof(context_.extra));
+}
+
+bool MinidumpContextARMWriter::WriteObject(FileWriterInterface* file_writer) {
+  DCHECK_EQ(state(), kStateWritable);
+  return file_writer->Write(&context_, sizeof(context_));
+}
+
+size_t MinidumpContextARMWriter::ContextSize() const {
+  DCHECK_GE(state(), kStateFrozen);
+  return sizeof(context_);
+}
+
+MinidumpContextARM64Writer::MinidumpContextARM64Writer()
+    : MinidumpContextWriter(), context_() {
+  context_.context_flags = kMinidumpContextARM64;
+}
+
+MinidumpContextARM64Writer::~MinidumpContextARM64Writer() = default;
+
+void MinidumpContextARM64Writer::InitializeFromSnapshot(
+    const CPUContextARM64* context_snapshot) {
+  DCHECK_EQ(state(), kStateMutable);
+  DCHECK_EQ(context_.context_flags, kMinidumpContextARM64);
+
+  context_.context_flags = kMinidumpContextARM64All;
+
+  static_assert(sizeof(context_.regs) == sizeof(context_snapshot->regs),
+                "GPRs size mismatch");
+  memcpy(context_.regs, context_snapshot->regs, sizeof(context_.regs));
+  context_.sp = context_snapshot->sp;
+  context_.pc = context_snapshot->pc;
+
+  if (context_snapshot->pstate >
+      std::numeric_limits<decltype(context_.cpsr)>::max()) {
+    LOG(WARNING) << "pstate truncation";
+  }
+  context_.cpsr =
+      static_cast<decltype(context_.cpsr)>(context_snapshot->pstate);
+
+  context_.fpsr = context_snapshot->fpsr;
+  context_.fpcr = context_snapshot->fpcr;
+  static_assert(sizeof(context_.fpsimd) == sizeof(context_snapshot->fpsimd),
+                "FPSIMD size mismatch");
+  memcpy(context_.fpsimd, context_snapshot->fpsimd, sizeof(context_.fpsimd));
+}
+
+bool MinidumpContextARM64Writer::WriteObject(FileWriterInterface* file_writer) {
+  DCHECK_EQ(state(), kStateWritable);
+  return file_writer->Write(&context_, sizeof(context_));
+}
+
+size_t MinidumpContextARM64Writer::ContextSize() const {
+  DCHECK_GE(state(), kStateFrozen);
   return sizeof(context_);
 }
 

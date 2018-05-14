@@ -32,6 +32,8 @@
 
 namespace blink {
 
+constexpr float kDefaultFontSize = 16.0;
+
 // Converts |points| to pixels. One point is 1/72 of an inch.
 static float PointsToPixels(float points) {
   const float kPixelsPerInch = 96.0f;
@@ -41,14 +43,12 @@ static float PointsToPixels(float points) {
 
 // static
 void LayoutThemeFontProvider::SystemFont(CSSValueID system_font_id,
-                                         FontStyle& font_style,
-                                         FontWeight& font_weight,
+                                         FontSelectionValue& font_style,
+                                         FontSelectionValue& font_weight,
                                          float& font_size,
                                          AtomicString& font_family) {
-  font_style = kFontStyleNormal;
-  font_weight = kFontWeightNormal;
-  font_size = default_font_size_;
-  font_family = DefaultGUIFont();
+  font_style = NormalSlopeValue();
+  font_weight = NormalWeightValue();
 
   switch (system_font_id) {
     case CSSValueSmallCaption:
@@ -67,19 +67,14 @@ void LayoutThemeFontProvider::SystemFont(CSSValueID system_font_id,
     case CSSValueWebkitSmallControl:
     case CSSValueWebkitControl:
       // Why 2 points smaller? Because that's what Gecko does.
-      font_size = default_font_size_ - PointsToPixels(2);
+      font_size = kDefaultFontSize - PointsToPixels(2);
       font_family = DefaultGUIFont();
       break;
     default:
-      font_size = default_font_size_;
+      font_size = kDefaultFontSize;
       font_family = DefaultGUIFont();
       break;
   }
-}
-
-// static
-void LayoutThemeFontProvider::SetDefaultFontSize(int font_size) {
-  default_font_size_ = static_cast<float>(font_size);
 }
 
 }  // namespace blink

@@ -24,9 +24,11 @@
 
 #include "core/html/HTMLAnchorElement.h"
 
+#include "core/dom/UserGestureIndicator.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/events/MouseEvent.h"
+#include "core/frame/Deprecation.h"
 #include "core/frame/LocalFrameClient.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
@@ -49,14 +51,15 @@ HTMLAnchorElement::HTMLAnchorElement(const QualifiedName& tag_name,
                                      Document& document)
     : HTMLElement(tag_name, document),
       link_relations_(0),
+      was_focused_by_mouse_(false),
       cached_visited_link_hash_(0),
-      was_focused_by_mouse_(false) {}
+      rel_list_(RelList::Create(this)) {}
 
 HTMLAnchorElement* HTMLAnchorElement::Create(Document& document) {
   return new HTMLAnchorElement(aTag, document);
 }
 
-HTMLAnchorElement::~HTMLAnchorElement() {}
+HTMLAnchorElement::~HTMLAnchorElement() = default;
 
 bool HTMLAnchorElement::SupportsFocus() const {
   if (HasEditableStyle(*this))
@@ -119,10 +122,10 @@ static void AppendServerMapMousePosition(StringBuilder& url, Event* event) {
   DCHECK(event->target());
   Node* target = event->target()->ToNode();
   DCHECK(target);
-  if (!isHTMLImageElement(*target))
+  if (!IsHTMLImageElement(*target))
     return;
 
-  HTMLImageElement& image_element = toHTMLImageElement(*target);
+  HTMLImageElement& image_element = ToHTMLImageElement(*target);
   if (!image_element.IsServerMap())
     return;
 
@@ -201,6 +204,7 @@ void HTMLAnchorElement::ParseAttribute(
     if (was_link || IsLink()) {
       PseudoStateChanged(CSSSelector::kPseudoLink);
       PseudoStateChanged(CSSSelector::kPseudoVisited);
+      PseudoStateChanged(CSSSelector::kPseudoWebkitAnyLink);
       PseudoStateChanged(CSSSelector::kPseudoAnyLink);
     }
     if (IsLink()) {
@@ -217,6 +221,7 @@ void HTMLAnchorElement::ParseAttribute(
     // Do nothing.
   } else if (params.name == relAttr) {
     SetRel(params.new_value);
+    rel_list_->DidUpdateAttributeValue(params.old_value, params.new_value);
   } else {
     HTMLElement::ParseAttribute(params);
   }
@@ -224,7 +229,7 @@ void HTMLAnchorElement::ParseAttribute(
 
 void HTMLAnchorElement::AccessKeyAction(bool send_mouse_events) {
   DispatchSimulatedClick(
-      0, send_mouse_events ? kSendMouseUpDownEvents : kSendNoEvents);
+      nullptr, send_mouse_events ? kSendMouseUpDownEvents : kSendNoEvents);
 }
 
 bool HTMLAnchorElement::IsURLAttribute(const Attribute& attribute) const {
@@ -307,20 +312,31 @@ bool HTMLAnchorElement::IsLiveLink() const {
 void HTMLAnchorElement::SendPings(const KURL& destination_url) const {
   const AtomicString& ping_value = getAttribute(pingAttr);
   if (ping_value.IsNull() || !GetDocument().GetSettings() ||
-      !GetDocument().GetSettings()->GetHyperlinkAuditingEnabled())
+      !GetDocument().GetSettings()->GetHyperlinkAuditingEnabled()) {
     return;
+  }
 
   // Pings should not be sent if MHTML page is loaded.
   if (GetDocument().Fetcher()->Archive())
     return;
 
+  if ((ping_value.Contains('\n') || ping_value.Contains('\r') ||
+       ping_value.Contains('\t')) &&
+      ping_value.Contains('<')) {
+    Deprecation::CountDeprecation(
+        GetDocument(), WebFeature::kCanRequestURLHTTPContainingNewline);
+    if (RuntimeEnabledFeatures::RestrictCanRequestURLCharacterSetEnabled())
+      return;
+  }
+
   UseCounter::Count(GetDocument(), WebFeature::kHTMLAnchorElementPingAttribute);
 
   SpaceSplitString ping_urls(ping_value);
-  for (unsigned i = 0; i < ping_urls.size(); i++)
+  for (unsigned i = 0; i < ping_urls.size(); i++) {
     PingLoader::SendLinkAuditPing(GetDocument().GetFrame(),
                                   GetDocument().CompleteURL(ping_urls[i]),
                                   destination_url);
+  }
 }
 
 void HTMLAnchorElement::HandleClick(Event* event) {
@@ -363,24 +379,40 @@ void HTMLAnchorElement::HandleClick(Event* event) {
   }
 
   if (hasAttribute(downloadAttr)) {
-    request.SetRequestContext(WebURLRequest::kRequestContextDownload);
-    request.SetRequestorOrigin(SecurityOrigin::Create(GetDocument().Url()));
-    frame->Client()->DownloadURL(request, FastGetAttribute(downloadAttr));
-  } else {
-    request.SetRequestContext(WebURLRequest::kRequestContextHyperlink);
-    FrameLoadRequest frame_request(&GetDocument(), request,
-                                   getAttribute(targetAttr));
-    frame_request.SetTriggeringEvent(event);
-    if (HasRel(kRelationNoReferrer)) {
-      frame_request.SetShouldSendReferrer(kNeverSendReferrer);
-      frame_request.SetShouldSetOpener(kNeverSetOpener);
+    if (GetDocument().IsSandboxed(kSandboxDownloads)) {
+      // TODO(jochen): Also measure navigations resulting in downloads.
+      UseCounter::Count(
+          GetDocument(),
+          UserGestureIndicator::ProcessingUserGesture()
+              ? WebFeature::kHTMLAnchorElementDownloadInSandboxWithUserGesture
+              : WebFeature::
+                    kHTMLAnchorElementDownloadInSandboxWithoutUserGesture);
     }
-    if (HasRel(kRelationNoOpener))
-      frame_request.SetShouldSetOpener(kNeverSetOpener);
-    // TODO(japhet): Link clicks can be emulated via JS without a user gesture.
-    // Why doesn't this go through NavigationScheduler?
-    frame->Loader().Load(frame_request);
+    // TODO(jochen): Only set the suggested filename for URLs we can request.
+    request.SetSuggestedFilename(
+        static_cast<String>(FastGetAttribute(downloadAttr)));
+    if (!GetDocument().GetSecurityOrigin()->TaintsCanvas(completed_url)) {
+      // TODO(jochen): Handle cross origin server redirects.
+      request.SetRequestContext(WebURLRequest::kRequestContextDownload);
+      request.SetRequestorOrigin(SecurityOrigin::Create(GetDocument().Url()));
+      frame->Client()->DownloadURL(
+          request, static_cast<String>(FastGetAttribute(downloadAttr)));
+      return;
+    }
   }
+  request.SetRequestContext(WebURLRequest::kRequestContextHyperlink);
+  FrameLoadRequest frame_request(&GetDocument(), request,
+                                 getAttribute(targetAttr));
+  frame_request.SetTriggeringEvent(event);
+  if (HasRel(kRelationNoReferrer)) {
+    frame_request.SetShouldSendReferrer(kNeverSendReferrer);
+    frame_request.SetShouldSetOpener(kNeverSetOpener);
+  }
+  if (HasRel(kRelationNoOpener))
+    frame_request.SetShouldSetOpener(kNeverSetOpener);
+  // TODO(japhet): Link clicks can be emulated via JS without a user gesture.
+  // Why doesn't this go through NavigationScheduler?
+  frame->Loader().Load(frame_request);
 }
 
 bool IsEnterKeyKeydownEvent(Event* event) {
@@ -390,12 +422,15 @@ bool IsEnterKeyKeydownEvent(Event* event) {
 }
 
 bool IsLinkClick(Event* event) {
-  // Allow detail <= 1 so that synthetic clicks work. They may have detail == 0.
-  return (event->type() == EventTypeNames::click ||
-          event->type() == EventTypeNames::auxclick) &&
-         (!event->IsMouseEvent() ||
-          ToMouseEvent(event)->button() !=
-              static_cast<short>(WebPointerProperties::Button::kRight));
+  if ((event->type() != EventTypeNames::click &&
+       event->type() != EventTypeNames::auxclick) ||
+      !event->IsMouseEvent()) {
+    return false;
+  }
+  MouseEvent* mouse_event = ToMouseEvent(event);
+  short button = mouse_event->button();
+  return (button == static_cast<short>(WebPointerProperties::Button::kLeft) ||
+          button == static_cast<short>(WebPointerProperties::Button::kMiddle));
 }
 
 bool HTMLAnchorElement::WillRespondToMouseClickEvents() {
@@ -412,6 +447,17 @@ Node::InsertionNotificationRequest HTMLAnchorElement::InsertedInto(
       HTMLElement::InsertedInto(insertion_point);
   LogAddElementIfIsolatedWorldAndInDocument("a", hrefAttr);
   return request;
+}
+
+void HTMLAnchorElement::Trace(blink::Visitor* visitor) {
+  visitor->Trace(rel_list_);
+  HTMLElement::Trace(visitor);
+}
+
+void HTMLAnchorElement::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
+  visitor->TraceWrappers(rel_list_);
+  HTMLElement::TraceWrappers(visitor);
 }
 
 }  // namespace blink

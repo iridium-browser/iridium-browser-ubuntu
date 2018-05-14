@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
+#include "base/containers/circular_deque.h"
 #include "base/debug/stack_trace.h"
 #include "base/macros.h"
 #include "base/memory/memory_pressure_listener.h"
@@ -33,8 +34,8 @@
 #include "media/base/test_helpers.h"
 #include "media/base/video_frame.h"
 #include "media/base/wall_clock_time_source.h"
-#include "media/renderers/mock_gpu_memory_buffer_video_frame_pool.h"
 #include "media/renderers/video_renderer_impl.h"
+#include "media/video/mock_gpu_memory_buffer_video_frame_pool.h"
 #include "testing/gmock_mutant.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -73,8 +74,7 @@ class VideoRendererImplTest : public testing::Test {
   }
 
   VideoRendererImplTest()
-      : tick_clock_(new base::SimpleTestTickClock()),
-        decoder_(nullptr),
+      : decoder_(nullptr),
         demuxer_stream_(DemuxerStream::VIDEO),
         simulate_decode_delay_(false),
         expect_init_success_(true) {
@@ -94,10 +94,9 @@ class VideoRendererImplTest : public testing::Test {
         true,
         nullptr,  // gpu_factories
         &media_log_));
-    renderer_->SetTickClockForTesting(
-        std::unique_ptr<base::TickClock>(tick_clock_));
-    null_video_sink_->set_tick_clock_for_testing(tick_clock_);
-    time_source_.set_tick_clock_for_testing(tick_clock_);
+    renderer_->SetTickClockForTesting(&tick_clock_);
+    null_video_sink_->set_tick_clock_for_testing(&tick_clock_);
+    time_source_.set_tick_clock_for_testing(&tick_clock_);
 
     // Start wallclock time at a non-zero value.
     AdvanceWallclockTimeInMs(12345);
@@ -110,7 +109,7 @@ class VideoRendererImplTest : public testing::Test {
                        scoped_refptr<DecoderBuffer>(new DecoderBuffer(0))));
   }
 
-  virtual ~VideoRendererImplTest() {}
+  virtual ~VideoRendererImplTest() = default;
 
   void Initialize() {
     InitializeWithLowDelay(false);
@@ -141,6 +140,7 @@ class VideoRendererImplTest : public testing::Test {
       demuxer_stream->set_liveness(DemuxerStream::LIVENESS_LIVE);
     EXPECT_CALL(mock_cb_, OnWaitingForDecryptionKey()).Times(0);
     EXPECT_CALL(mock_cb_, OnAudioConfigChange(_)).Times(0);
+    EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
     renderer_->Initialize(demuxer_stream, nullptr, &mock_cb_,
                           base::Bind(&WallClockTimeSource::GetWallClockTimes,
                                      base::Unretained(&time_source_)),
@@ -200,7 +200,7 @@ class VideoRendererImplTest : public testing::Test {
       if (base::StringToInt(token, &timestamp_in_ms)) {
         gfx::Size natural_size = TestVideoConfig::NormalCodedSize();
         scoped_refptr<VideoFrame> frame = VideoFrame::CreateFrame(
-            PIXEL_FORMAT_YV12, natural_size, gfx::Rect(natural_size),
+            PIXEL_FORMAT_I420, natural_size, gfx::Rect(natural_size),
             natural_size, base::TimeDelta::FromMilliseconds(timestamp_in_ms));
         QueueFrame(DecodeStatus::OK, frame);
         continue;
@@ -289,7 +289,7 @@ class VideoRendererImplTest : public testing::Test {
   void AdvanceWallclockTimeInMs(int time_ms) {
     DCHECK_EQ(&message_loop_, base::MessageLoop::current());
     base::AutoLock l(lock_);
-    tick_clock_->Advance(base::TimeDelta::FromMilliseconds(time_ms));
+    tick_clock_.Advance(base::TimeDelta::FromMilliseconds(time_ms));
   }
 
   void AdvanceTimeInMs(int time_ms) {
@@ -410,15 +410,14 @@ class VideoRendererImplTest : public testing::Test {
       WaitableMessageLoopEvent event;
       EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_NOTHING))
           .WillOnce(RunClosure(event.GetClosure()));
-      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(20))).Times(1);
+      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(60))).Times(1);
       EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
-      AdvanceTimeInMs(20);
+      AdvanceTimeInMs(79);
       event.RunAndWait();
       Mock::VerifyAndClearExpectations(&mock_cb_);
     }
 
-    AdvanceTimeInMs(59);
-    EXPECT_EQ(3u, renderer_->frames_queued_for_testing());
+    EXPECT_EQ(1u, renderer_->frames_queued_for_testing());
     time_source_.StopTicking();
     renderer_->OnTimeStopped();
     EXPECT_EQ(0u, renderer_->frames_queued_for_testing());
@@ -433,13 +432,14 @@ class VideoRendererImplTest : public testing::Test {
       EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
       EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
           .WillOnce(RunClosure(event.GetClosure()));
+
       // Note: In the normal underflow case we queue 5 frames here instead of
       // four since the underflow increases the number of required frames to
       // reach the have enough state.
       if (type == UnderflowTestType::NORMAL)
         QueueFrames("80 100 120 140 160");
       else
-        QueueFrames("40 60 80 90");
+        QueueFrames("40 60 80 90 100");
       SatisfyPendingDecode();
       event.RunAndWait();
     }
@@ -456,7 +456,7 @@ class VideoRendererImplTest : public testing::Test {
   // Fixture members.
   base::test::ScopedFeatureList scoped_feature_list_;
   std::unique_ptr<VideoRendererImpl> renderer_;
-  base::SimpleTestTickClock* tick_clock_;  // Owned by |renderer_|.
+  base::SimpleTestTickClock tick_clock_;
   NiceMock<MockVideoDecoder>* decoder_;    // Owned by |renderer_|.
   NiceMock<MockDemuxerStream> demuxer_stream_;
   bool simulate_decode_delay_;
@@ -490,7 +490,7 @@ class VideoRendererImplTest : public testing::Test {
       return;
 
     if (simulate_decode_delay_)
-      tick_clock_->Advance(OnSimulateDecodeDelay());
+      tick_clock_.Advance(OnSimulateDecodeDelay());
 
     SatisfyPendingDecode();
   }
@@ -518,7 +518,7 @@ class VideoRendererImplTest : public testing::Test {
   // Run during DecodeRequested() to unblock WaitForPendingDecode().
   base::Closure wait_for_pending_decode_cb_;
 
-  std::deque<std::pair<DecodeStatus, scoped_refptr<VideoFrame>>>
+  base::circular_deque<std::pair<DecodeStatus, scoped_refptr<VideoFrame>>>
       decode_results_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoRendererImplTest);
@@ -769,9 +769,9 @@ TEST_F(VideoRendererImplTest, ComplexityBasedBufferingRealtimeIncapable) {
       .WillRepeatedly(Return(base::TimeDelta::FromSeconds(4)));
 
   StartPlayingFrom(0);
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->min_buffered_frames_for_testing());
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->max_buffered_frames_for_testing());
 
   renderer_->OnTimeProgressing();
@@ -784,17 +784,17 @@ TEST_F(VideoRendererImplTest, ComplexityBasedBufferingRealtimeIncapable) {
   event.RunAndWait();
 
   // No buffering should have been triggered due to speed.
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->min_buffered_frames_for_testing());
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->max_buffered_frames_for_testing());
   Destroy();
 }
 
 class TestMemoryPressureMonitor : public base::MemoryPressureMonitor {
  public:
-  TestMemoryPressureMonitor() {}
-  ~TestMemoryPressureMonitor() override {}
+  TestMemoryPressureMonitor() = default;
+  ~TestMemoryPressureMonitor() override = default;
 
   MemoryPressureLevel GetCurrentPressureLevel() override {
     return base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE;
@@ -828,9 +828,9 @@ TEST_F(VideoRendererImplTest, ComplexityBasedBufferingMemoryPressure) {
       .WillRepeatedly(Return(base::TimeDelta::FromMilliseconds(100)));
 
   StartPlayingFrom(0);
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->min_buffered_frames_for_testing());
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->max_buffered_frames_for_testing());
 
   renderer_->OnTimeProgressing();
@@ -843,10 +843,10 @@ TEST_F(VideoRendererImplTest, ComplexityBasedBufferingMemoryPressure) {
   event.RunAndWait();
 
   // No buffering should have been triggered due to memory pressure.
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->min_buffered_frames_for_testing());
 
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->max_buffered_frames_for_testing());
   Destroy();
 }
@@ -872,9 +872,9 @@ TEST_F(VideoRendererImplTest, ComplexityBasedBufferingBackgroundRendering) {
       .WillRepeatedly(Return(base::TimeDelta::FromMilliseconds(100)));
 
   StartPlayingFrom(0);
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->min_buffered_frames_for_testing());
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->max_buffered_frames_for_testing());
 
   renderer_->OnTimeProgressing();
@@ -887,9 +887,9 @@ TEST_F(VideoRendererImplTest, ComplexityBasedBufferingBackgroundRendering) {
   event.RunAndWait();
 
   // No buffering should have been triggered due to background rendering.
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->min_buffered_frames_for_testing());
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->max_buffered_frames_for_testing());
   Destroy();
 }
@@ -913,9 +913,9 @@ TEST_F(VideoRendererImplTest, ComplexityBasedBuffering) {
   StartPlayingFrom(0);
 
   // Prior to playback start no extended buffering should be triggered.
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->min_buffered_frames_for_testing());
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->max_buffered_frames_for_testing());
 
   renderer_->OnTimeProgressing();
@@ -928,9 +928,9 @@ TEST_F(VideoRendererImplTest, ComplexityBasedBuffering) {
     EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(1000)))
         .WillOnce(RunClosure(event.GetClosure()));
     event.RunAndWait();
-    EXPECT_EQ(limits::kMaxVideoFrames,
+    EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
               renderer_->min_buffered_frames_for_testing());
-    EXPECT_EQ(limits::kMaxVideoFrames,
+    EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
               renderer_->max_buffered_frames_for_testing());
   }
 
@@ -948,9 +948,9 @@ TEST_F(VideoRendererImplTest, ComplexityBasedBuffering) {
   Flush();
 
   // Ensure min/max buffered frames is reset.
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->min_buffered_frames_for_testing());
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->max_buffered_frames_for_testing());
   Destroy();
 }
@@ -974,7 +974,7 @@ TEST_F(VideoRendererImplTest, ComplexityBasedBufferingUnderflow) {
   StartPlayingFrom(0);
 
   // Prior to playback start no extended buffering should be triggered.
-  EXPECT_EQ(limits::kMaxVideoFrames,
+  EXPECT_EQ(static_cast<size_t>(limits::kMaxVideoFrames),
             renderer_->max_buffered_frames_for_testing());
 
   renderer_->OnTimeProgressing();
@@ -1344,19 +1344,19 @@ TEST_F(VideoRendererImplTest, NaturalSizeChange) {
   gfx::Size larger_size(16, 16);
 
   QueueFrame(DecodeStatus::OK,
-             VideoFrame::CreateFrame(PIXEL_FORMAT_YV12, initial_size,
+             VideoFrame::CreateFrame(PIXEL_FORMAT_I420, initial_size,
                                      gfx::Rect(initial_size), initial_size,
                                      base::TimeDelta::FromMilliseconds(0)));
   QueueFrame(DecodeStatus::OK,
-             VideoFrame::CreateFrame(PIXEL_FORMAT_YV12, larger_size,
+             VideoFrame::CreateFrame(PIXEL_FORMAT_I420, larger_size,
                                      gfx::Rect(larger_size), larger_size,
                                      base::TimeDelta::FromMilliseconds(10)));
   QueueFrame(DecodeStatus::OK,
-             VideoFrame::CreateFrame(PIXEL_FORMAT_YV12, larger_size,
+             VideoFrame::CreateFrame(PIXEL_FORMAT_I420, larger_size,
                                      gfx::Rect(larger_size), larger_size,
                                      base::TimeDelta::FromMilliseconds(20)));
   QueueFrame(DecodeStatus::OK,
-             VideoFrame::CreateFrame(PIXEL_FORMAT_YV12, initial_size,
+             VideoFrame::CreateFrame(PIXEL_FORMAT_I420, initial_size,
                                      gfx::Rect(initial_size), initial_size,
                                      base::TimeDelta::FromMilliseconds(30)));
 
@@ -1406,8 +1406,8 @@ TEST_F(VideoRendererImplTest, OpacityChange) {
   Initialize();
 
   gfx::Size frame_size(8, 8);
-  VideoPixelFormat opaque_format = PIXEL_FORMAT_YV12;
-  VideoPixelFormat non_opaque_format = PIXEL_FORMAT_YV12A;
+  VideoPixelFormat opaque_format = PIXEL_FORMAT_I420;
+  VideoPixelFormat non_opaque_format = PIXEL_FORMAT_I420A;
 
   QueueFrame(DecodeStatus::OK,
              VideoFrame::CreateFrame(non_opaque_format, frame_size,
@@ -1478,7 +1478,7 @@ class VideoRendererImplAsyncAddFrameReadyTest : public VideoRendererImplTest {
   }
 
  protected:
-  std::vector<base::Closure> frame_ready_cbs_;
+  std::vector<base::OnceClosure> frame_ready_cbs_;
 };
 
 TEST_F(VideoRendererImplAsyncAddFrameReadyTest, InitializeAndStartPlayingFrom) {
@@ -1494,7 +1494,7 @@ TEST_F(VideoRendererImplAsyncAddFrameReadyTest, InitializeAndStartPlayingFrom) {
 
   uint32_t frame_ready_index = 0;
   while (frame_ready_index < frame_ready_cbs_.size()) {
-    frame_ready_cbs_[frame_ready_index++].Run();
+    std::move(frame_ready_cbs_[frame_ready_index++]).Run();
     base::RunLoop().RunUntilIdle();
   }
   Destroy();
@@ -1507,7 +1507,7 @@ TEST_F(VideoRendererImplAsyncAddFrameReadyTest, WeakFactoryDiscardsOneFrame) {
   Flush();
   ASSERT_EQ(1u, frame_ready_cbs_.size());
   // This frame will be discarded.
-  frame_ready_cbs_.front().Run();
+  std::move(frame_ready_cbs_.front()).Run();
   Destroy();
 }
 

@@ -31,9 +31,9 @@
 #ifndef WebFileChooserCompletionImpl_h
 #define WebFileChooserCompletionImpl_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
-#include "platform/FileChooser.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "core/html/forms/FileChooser.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebVector.h"
 #include "public/web/WebFileChooserCompletion.h"
@@ -41,15 +41,15 @@
 namespace blink {
 
 class CORE_EXPORT WebFileChooserCompletionImpl final
-    : public NON_EXPORTED_BASE(WebFileChooserCompletion) {
+    : public WebFileChooserCompletion {
  public:
-  explicit WebFileChooserCompletionImpl(PassRefPtr<FileChooser>);
+  explicit WebFileChooserCompletionImpl(scoped_refptr<FileChooser>);
   ~WebFileChooserCompletionImpl() override;
   void DidChooseFile(const WebVector<WebString>& file_names) override;
   void DidChooseFile(const WebVector<SelectedFileInfo>& files) override;
 
  private:
-  RefPtr<FileChooser> file_chooser_;
+  scoped_refptr<FileChooser> file_chooser_;
 };
 
 }  // namespace blink

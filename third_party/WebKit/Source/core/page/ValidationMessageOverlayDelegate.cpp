@@ -28,7 +28,7 @@ class ValidationMessageChromeClient : public EmptyChromeClient {
         anchor_view_(anchor_view),
         overlay_(overlay) {}
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(main_chrome_client_);
     visitor->Trace(anchor_view_);
     EmptyChromeClient::Trace(visitor);
@@ -98,7 +98,9 @@ void ValidationMessageOverlayDelegate::PaintPageOverlay(
   const_cast<ValidationMessageOverlayDelegate*>(this)->UpdateFrameViewState(
       overlay, view_size);
   LocalFrameView& view = FrameView();
-  view.Paint(context, CullRect(IntRect(0, 0, view.Width(), view.Height())));
+  view.PaintWithLifecycleUpdate(
+      context, kGlobalPaintNormalPhase,
+      CullRect(IntRect(0, 0, view.Width(), view.Height())));
 }
 
 void ValidationMessageOverlayDelegate::UpdateFrameViewState(
@@ -145,21 +147,25 @@ void ValidationMessageOverlayDelegate::EnsurePage(const PageOverlay& overlay,
   frame->View()->SetBaseBackgroundColor(Color::kTransparent);
   page_->GetVisualViewport().SetSize(view_size);
 
-  RefPtr<SharedBuffer> data = SharedBuffer::Create();
-  WriteDocument(data.Get());
+  scoped_refptr<SharedBuffer> data = SharedBuffer::Create();
+  WriteDocument(data.get());
   float zoom_factor = anchor_->GetDocument().GetFrame()->PageZoomFactor();
   frame->SetPageZoomFactor(zoom_factor);
   // Propagate deprecated DSF for platforms without use-zoom-for-dsf.
   page_->SetDeviceScaleFactorDeprecated(
       main_page_->DeviceScaleFactorDeprecated());
-  frame->Loader().Load(
-      FrameLoadRequest(nullptr, ResourceRequest(BlankURL()),
-                       SubstituteData(data, "text/html", "UTF-8", KURL(),
-                                      kForceSynchronousLoad)));
+  frame->ForceSynchronousDocumentInstall("text/html", data);
 
   Element& container = GetElementById("container");
-  if (LayoutTestSupport::IsRunningLayoutTest())
+  if (LayoutTestSupport::IsRunningLayoutTest()) {
     container.SetInlineStyleProperty(CSSPropertyTransition, "none");
+    GetElementById("icon").SetInlineStyleProperty(CSSPropertyTransition,
+                                                  "none");
+    GetElementById("main-message")
+        .SetInlineStyleProperty(CSSPropertyTransition, "none");
+    GetElementById("sub-message")
+        .SetInlineStyleProperty(CSSPropertyTransition, "none");
+  }
   // Get the size to decide position later.
   FrameView().UpdateAllLifecyclePhases();
   bubble_size_ = container.VisibleBoundsInVisualViewport().Size();
@@ -241,14 +247,6 @@ void ValidationMessageOverlayDelegate::AdjustBubblePosition(
                                    CSSPrimitiveValue::UnitType::kPixels);
   container.SetInlineStyleProperty(CSSPropertyTop, bubble_y / zoom_factor,
                                    CSSPrimitiveValue::UnitType::kPixels);
-  if (show_bottom_arrow) {
-    container.setAttribute(HTMLNames::classAttr, "shown-fully bottom-arrow");
-    container.SetInlineStyleProperty(CSSPropertyTransformOrigin,
-                                     "center bottom");
-  } else {
-    container.setAttribute(HTMLNames::classAttr, "shown-fully");
-    container.SetInlineStyleProperty(CSSPropertyTransformOrigin, "center top");
-  }
 
   // Should match to --arrow-size in validation_bubble.css.
   const int kArrowSize = 8;
@@ -285,6 +283,7 @@ void ValidationMessageOverlayDelegate::AdjustBubblePosition(
     }
   }
   double arrow_x = arrow_anchor_x / zoom_factor - kArrowSize;
+  double arrow_anchor_percent = arrow_anchor_x * 100 / bubble_size_.Width();
   if (show_bottom_arrow) {
     GetElementById("outer-arrow-bottom")
         .SetInlineStyleProperty(CSSPropertyLeft, arrow_x,
@@ -292,6 +291,10 @@ void ValidationMessageOverlayDelegate::AdjustBubblePosition(
     GetElementById("inner-arrow-bottom")
         .SetInlineStyleProperty(CSSPropertyLeft, arrow_x,
                                 CSSPrimitiveValue::UnitType::kPixels);
+    container.setAttribute(HTMLNames::classAttr, "shown-fully bottom-arrow");
+    container.SetInlineStyleProperty(
+        CSSPropertyTransformOrigin,
+        String::Format("%.2f%% bottom", arrow_anchor_percent));
   } else {
     GetElementById("outer-arrow-top")
         .SetInlineStyleProperty(CSSPropertyLeft, arrow_x,
@@ -299,6 +302,10 @@ void ValidationMessageOverlayDelegate::AdjustBubblePosition(
     GetElementById("inner-arrow-top")
         .SetInlineStyleProperty(CSSPropertyLeft, arrow_x,
                                 CSSPrimitiveValue::UnitType::kPixels);
+    container.setAttribute(HTMLNames::classAttr, "shown-fully");
+    container.SetInlineStyleProperty(
+        CSSPropertyTransformOrigin,
+        String::Format("%.2f%% top", arrow_anchor_percent));
   }
 }
 

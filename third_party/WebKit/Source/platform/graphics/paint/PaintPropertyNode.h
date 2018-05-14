@@ -5,10 +5,16 @@
 #ifndef PaintPropertyNode_h
 #define PaintPropertyNode_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/PlatformExport.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "platform/json/JSONValues.h"
 #include "platform/wtf/RefCounted.h"
-#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/text/WTFString.h"
+
+#if DCHECK_IS_ON()
+#include "platform/wtf/ListHashSet.h"
+#include "platform/wtf/text/StringBuilder.h"
+#endif
 
 namespace blink {
 
@@ -35,8 +41,16 @@ template <typename NodeType>
 class PaintPropertyNode : public RefCounted<NodeType> {
  public:
   // Parent property node, or nullptr if this is the root node.
-  const NodeType* Parent() const { return parent_.Get(); }
+  const NodeType* Parent() const { return parent_.get(); }
   bool IsRoot() const { return !parent_; }
+
+  bool IsAncestorOf(const NodeType& other) const {
+    for (const NodeType* node = &other; node != this; node = node->Parent()) {
+      if (!node)
+        return false;
+    }
+    return true;
+  }
 
   // TODO(wangxianzhu): Changed() and ClearChangedToRoot() are inefficient
   // due to the tree walks. Optimize this if this affects overall performance.
@@ -67,11 +81,27 @@ class PaintPropertyNode : public RefCounted<NodeType> {
       n->changed_ = false;
   }
 
+  String ToString() const {
+    auto s = static_cast<const NodeType*>(this)->ToJSON()->ToJSONString();
+#if DCHECK_IS_ON()
+    return debug_name_ + String::Format(" %p ", this) + s;
+#else
+    return s;
+#endif
+  }
+
+#if DCHECK_IS_ON()
+  String ToTreeString() const;
+
+  String DebugName() const { return debug_name_; }
+  void SetDebugName(const String& name) { debug_name_ = name; }
+#endif
+
  protected:
-  PaintPropertyNode(PassRefPtr<const NodeType> parent)
+  PaintPropertyNode(scoped_refptr<const NodeType> parent)
       : parent_(std::move(parent)), changed_(false) {}
 
-  bool Update(PassRefPtr<const NodeType> parent) {
+  bool Update(scoped_refptr<const NodeType> parent) {
     DCHECK(!IsRoot());
     DCHECK(parent != this);
     if (parent == parent_)
@@ -85,9 +115,74 @@ class PaintPropertyNode : public RefCounted<NodeType> {
   void SetChanged() { changed_ = true; }
 
  private:
-  RefPtr<const NodeType> parent_;
+  scoped_refptr<const NodeType> parent_;
   mutable bool changed_;
+
+#if DCHECK_IS_ON()
+  String debug_name_;
+#endif
 };
+
+#if DCHECK_IS_ON()
+
+template <typename NodeType>
+class PropertyTreePrinter {
+ public:
+  void AddNode(const NodeType* node) {
+    if (node)
+      nodes_.insert(node);
+  }
+
+  String NodesAsTreeString() {
+    if (nodes_.IsEmpty())
+      return "";
+    StringBuilder string_builder;
+    BuildTreeString(string_builder, RootNode(), 0);
+    return string_builder.ToString();
+  }
+
+  String PathAsString(const NodeType* last_node) {
+    for (const auto* n = last_node; !n->IsRoot(); n = n->Parent())
+      AddNode(n);
+    return NodesAsTreeString();
+  }
+
+ private:
+  void BuildTreeString(StringBuilder& string_builder,
+                       const NodeType* node,
+                       unsigned indent) {
+    DCHECK(node);
+    for (unsigned i = 0; i < indent; i++)
+      string_builder.Append(' ');
+    string_builder.Append(node->ToString());
+    string_builder.Append("\n");
+
+    for (const auto* child_node : nodes_) {
+      if (child_node->Parent() == node)
+        BuildTreeString(string_builder, child_node, indent + 2);
+    }
+  }
+
+  const NodeType* RootNode() {
+    const auto* node = nodes_.back();
+    while (!node->IsRoot())
+      node = node->Parent();
+    if (node->DebugName().IsEmpty())
+      const_cast<NodeType*>(node)->SetDebugName("root");
+    nodes_.insert(node);
+    return node;
+  }
+
+  ListHashSet<const NodeType*> nodes_;
+};
+
+template <typename NodeType>
+String PaintPropertyNode<NodeType>::ToTreeString() const {
+  return PropertyTreePrinter<NodeType>().PathAsString(
+      static_cast<const NodeType*>(this));
+}
+
+#endif  // DCHECK_IS_ON()
 
 }  // namespace blink
 

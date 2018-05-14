@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2011 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -596,9 +597,12 @@ class TestCase(unittest.TestCase):
         raise AssertionError('\n'.join(bad))
       return e
 
-  def assertExists(self, path):
+  def assertExists(self, path, msg=None):
     """Make sure |path| exists"""
-    if not os.path.exists(path):
+    if os.path.exists(path):
+      return
+
+    if msg is None:
       msg = ['path is missing: %s' % path]
       while path != '/':
         path = os.path.dirname(path)
@@ -610,30 +614,47 @@ class TestCase(unittest.TestCase):
         if result:
           msg.append('\tcontents: %r' % os.listdir(path))
           break
-      raise self.failureException('\n'.join(msg))
+      msg = '\n'.join(msg)
 
-  def assertNotExists(self, path):
+    raise self.failureException(msg)
+
+  def assertNotExists(self, path, msg=None):
     """Make sure |path| does not exist"""
-    if os.path.exists(path):
-      raise self.failureException('path exists when it should not: %s' % path)
+    if not os.path.exists(path):
+      return
 
-  def assertStartsWith(self, s, prefix):
+    if msg is None:
+      msg = 'path exists when it should not: %s' % (path,)
+
+    raise self.failureException(msg)
+
+  def assertStartsWith(self, s, prefix, msg=None):
     """Asserts that |s| starts with |prefix|.
 
     This function should be preferred over assertTrue(s.startswith(prefix)) for
     it produces better error failure message than the other.
     """
-    if not s.startswith(prefix):
-      raise self.failureException('%s does not starts with %s' % (s, prefix))
+    if s.startswith(prefix):
+      return
 
-  def assertEndsWith(self, s, suffix):
+    if msg is None:
+      msg = '%s does not starts with %s' % (s, prefix)
+
+    raise self.failureException(msg)
+
+  def assertEndsWith(self, s, suffix, msg=None):
     """Asserts that |s| ends with |suffix|.
 
     This function should be preferred over assertTrue(s.endswith(suffix)) for
     it produces better error failure message than the other.
     """
-    if not s.endswith(suffix):
-      raise self.failureException('%s does not starts with %s' % (s, suffix))
+    if s.endswith(suffix):
+      return
+
+    if msg is None:
+      msg = '%s does not starts with %s' % (s, suffix)
+
+    raise self.failureException(msg)
 
   def GetSequenceDiff(self, seq1, seq2):
     """Get a string describing the difference between two sequences.
@@ -953,8 +974,12 @@ class TempDirTestCase(TestCase):
     self._tempdir_obj = osutils.TempDir(prefix='chromite.test', set_global=True,
                                         delete=self.DELETE)
     self.tempdir = self._tempdir_obj.tempdir
+    # We must use addCleanup here so that inheriting TestCase classes can use
+    # addCleanup with the guarantee that the tempdir will be cleand up _after_
+    # their addCleanup has run. TearDown runs before cleanup functions.
+    self.addCleanup(self._CleanTempDir)
 
-  def tearDown(self):
+  def _CleanTempDir(self):
     if self._tempdir_obj is not None:
       self._tempdir_obj.Cleanup()
       self._tempdir_obj = None
@@ -992,7 +1017,7 @@ class LocalSqlServerTestCase(TempDirTestCase):
     self.mysqld_port = None
     self._mysqld_dir = None
     self._mysqld_runner = None
-    self._mysqld_needs_cleanup = False
+
     # This class has assumptions about the mariadb installation that are only
     # guaranteed to hold inside the chroot.
     cros_build_lib.AssertInsideChroot()
@@ -1032,6 +1057,7 @@ class LocalSqlServerTestCase(TempDirTestCase):
         halt_on_error=True)
     queue = self._mysqld_runner.__enter__()
     queue.put((cmd,))
+    self.addCleanup(self._ShutdownMysqld)
 
     # Ensure that the Sql server is up before continuing.
     cmd = [
@@ -1040,38 +1066,51 @@ class LocalSqlServerTestCase(TempDirTestCase):
         'ping',
     ]
     try:
-      retry_util.RunCommandWithRetries(cmd=cmd, quiet=True, max_retry=5,
-                                       sleep=1, backoff_factor=1.5)
+      # Retry at:
+      # 1 + 2 + 4 + 8 + 16 + 32 + 64 + 128 = 255 seconds total timeout in case
+      # of failure.
+      # Smaller timeouts make this check flaky on heavily loaded builders.
+      retry_util.RunCommandWithRetries(cmd=cmd, quiet=True, max_retry=8,
+                                       sleep=1, backoff_factor=2)
     except Exception as e:
-      self._mysqld_needs_cleanup = True
-      logging.warning('Mysql server failed to show up! (%s)', e)
+      self.addCleanup(lambda: self._CleanupMysqld(
+          'mysqladmin failed to ping mysqld: %s' % e))
       raise
 
-  def tearDown(self):
+  def _ShutdownMysqld(self):
     """Cleanup mysqld and our mysqld data directory."""
-    mysqld_socket = os.path.join(self._mysqld_dir, 'mysqld.socket')
-    if os.path.exists(mysqld_socket):
-      try:
-        cmd = [
-            'mysqladmin',
-            '-S', os.path.join(self._mysqld_dir, 'mysqld.socket'),
-            '-u', 'root',
-            'shutdown',
-        ]
-        cros_build_lib.RunCommand(cmd, quiet=True)
-      except cros_build_lib.RunCommandError as e:
-        self._mysqld_needs_cleanup = True
-        logging.warning('Could not stop test mysqld daemon (%s)', e)
+    if self._mysqld_runner is None:
+      return
 
-    # Explicitly stop the mysqld process before removing the working directory.
-    if self._mysqld_runner is not None:
-      if self._mysqld_needs_cleanup:
+    try:
+      cmd = [
+          'mysqladmin',
+          '-S', os.path.join(self._mysqld_dir, 'mysqld.socket'),
+          '-u', 'root',
+          'shutdown',
+      ]
+      cros_build_lib.RunCommand(cmd, quiet=True)
+    except cros_build_lib.RunCommandError as e:
+      self._CleanupMysqld(
+          failure='mysqladmin failed to shutdown mysqld: %s' % e)
+    else:
+      self._CleanupMysqld()
+
+  def _CleanupMysqld(self, failure=None):
+    if self._mysqld_runner is None:
+      return
+
+    try:
+      if failure is not None:
         self._mysqld_runner.__exit__(
-            cros_build_lib.RunCommandError,
-            'Artification exception to cleanup mysqld',
-            None)
+            Exception,
+            '%s. We force killed the mysqld process.' % failure,
+            None,
+        )
       else:
         self._mysqld_runner.__exit__(None, None, None)
+    finally:
+      self._mysqld_runner = None
 
 
 class MockTestCase(TestCase):
@@ -1214,7 +1253,8 @@ class GerritTestCase(MockTempDirTestCase):
     if os.path.exists(netrc_path):
       self._populate_netrc(netrc_path)
       # Set netrc file for http authentication.
-      self.PatchObject(gob_util, 'NETRC', netrc.netrc(gi.netrc_file))
+      self.PatchObject(gob_util, '_GetNetRC',
+                       return_value=netrc.netrc(gi.netrc_file))
 
     if gi.cookies_path:
       cros_build_lib.RunCommand(
@@ -1557,10 +1597,20 @@ class ProgressBarTestCase(MockOutputTestCase):
     self._terminal_size.return_value = operation._TerminalSize(width, height)
 
   def AssertProgressBarAllEvents(self, num_events):
-    """Check that the progress bar is correct for all events."""
-    for i in xrange(num_events + 1):
-      self.AssertOutputContainsLine('%d%%' % (i * 100 / num_events))
+    """Check that the progress bar generates expected events."""
+    skipped = 0
+    for i in xrange(num_events):
+      try:
+        self.AssertOutputContainsLine('%d%%' % (i * 100 / num_events))
+      except AssertionError:
+        skipped += 1
 
+    # crbug.com/560953 It's normal to skip a few events under heavy CPU load.
+    self.assertLessEqual(skipped, num_events / 2,
+                         'Skipped %s of %s progress updates' %
+                         (skipped, num_events))
+
+    self.AssertOutputContainsLine('100%')
 
 class MockLoggingTestCase(MockTestCase, LoggingTestCase):
   """Convenience class mixing Logging and Mock."""

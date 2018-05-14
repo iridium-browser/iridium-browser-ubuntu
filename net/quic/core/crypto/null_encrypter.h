@@ -27,7 +27,8 @@ class QUIC_EXPORT_PRIVATE NullEncrypter : public QuicEncrypter {
   // QuicEncrypter implementation
   bool SetKey(QuicStringPiece key) override;
   bool SetNoncePrefix(QuicStringPiece nonce_prefix) override;
-  bool EncryptPacket(QuicVersion version,
+  bool SetIV(QuicStringPiece iv) override;
+  bool EncryptPacket(QuicTransportVersion version,
                      QuicPacketNumber packet_number,
                      QuicStringPiece associated_data,
                      QuicStringPiece plaintext,
@@ -36,6 +37,7 @@ class QUIC_EXPORT_PRIVATE NullEncrypter : public QuicEncrypter {
                      size_t max_output_length) override;
   size_t GetKeySize() const override;
   size_t GetNoncePrefixSize() const override;
+  size_t GetIVSize() const override;
   size_t GetMaxPlaintextSize(size_t ciphertext_size) const override;
   size_t GetCiphertextSize(size_t plaintext_size) const override;
   QuicStringPiece GetKey() const override;

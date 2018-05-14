@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -11,7 +12,9 @@ import mock
 from chromite.cbuildbot import cbuildbot_unittest
 from chromite.cbuildbot.stages import generic_stages_unittest
 from chromite.cbuildbot.stages import release_stages
+from chromite.lib import config_lib
 from chromite.lib import failures_lib
+from chromite.lib import parallel
 from chromite.lib import results_lib
 from chromite.lib import timeout_util
 
@@ -304,6 +307,16 @@ class PaygenStageTest(generic_stages_unittest.AbstractStageTestCase,
     self.validateMock = self.PatchObject(
         paygen_build_lib, 'ValidateBoardConfig')
 
+    instanceMock = mock.MagicMock()
+    self.paygenBuildMock = self.PatchObject(paygen_build_lib, 'PaygenBuild',
+                                            return_value=instanceMock)
+
+    instanceMock.CreatePayloads.side_effect = iter([(
+        'foo-suite-name',
+        'foo-archive-board',
+        'foo-archive-build',
+    )])
+
   # pylint: disable=arguments-differ
   def ConstructStage(self, channels=None):
     return release_stages.PaygenStage(self._run, self._current_board,
@@ -341,6 +354,11 @@ class PaygenStageTest(generic_stages_unittest.AbstractStageTestCase,
       stage = self.ConstructStage(channels=['stable', 'beta'])
 
       stage.PerformStage()
+
+      # Verify that we validate with the board name in release name space.
+      self.assertEqual(
+          self.validateMock.call_args_list,
+          [mock.call('x86-alex-he')])
 
       # Verify that we queue up work
       self.assertEqual(
@@ -396,89 +414,81 @@ class PaygenStageTest(generic_stages_unittest.AbstractStageTestCase,
 
   def testRunPaygenInProcess(self):
     """Test that _RunPaygenInProcess works in the simple case."""
-    with patch(paygen_build_lib, 'CreatePayloads') as create_payloads:
-      # Have to patch and verify that the PaygenTestStage is created.
-      stage = self.ConstructStage()
+    # Have to patch and verify that the PaygenTestStage is created.
+    stage = self.ConstructStage()
 
-      # CreatePayloads should return a tuple of a suite name and the finished
-      # URI.
-      create_payloads.side_effect = iter([('foo-suite-name',
-                                           'foo-archive-board',
-                                           'foo-archive-build',
-                                           'foo-finished_uri')])
-      with patch(paygen_build_lib, 'ScheduleAutotestTests') as sched_tests:
-        # Call the method under test.
-        stage._RunPaygenInProcess('foo', 'foo-board', 'foo-version',
-                                  True, False, False, skip_duts_check=False)
-        # Ensure that PaygenTestStage is created and schedules the test suite
-        # with the correct arguments.
-        sched_tests.assert_called_once_with(
-            'foo-suite-name', 'foo-archive-board', 'foo-archive-build',
-            False, True, job_keyvals=mock.ANY)
+    with patch(paygen_build_lib, 'ScheduleAutotestTests') as sched_tests:
+      # Call the method under test.
+      stage._RunPaygenInProcess('foo', 'foo-board', 'foo-version',
+                                True, False, False, skip_duts_check=False)
+      # Ensure that PaygenTestStage is created and schedules the test suite
+      # with the correct arguments.
+      sched_tests.assert_called_once_with(
+          'foo-suite-name', 'foo-archive-board', None, 'foo-archive-build',
+          False, True, job_keyvals=mock.ANY)
 
-      # Ensure arguments are properly converted and passed along.
-      create_payloads.assert_called_with(gspaths.Build(version='foo-version',
-                                                       board='foo-board',
-                                                       channel='foo-channel'),
-                                         work_dir=mock.ANY,
-                                         site_config=stage._run.site_config,
-                                         dry_run=True,
-                                         run_parallel=True,
-                                         skip_delta_payloads=False,
-                                         disable_tests=False,
-                                         skip_duts_check=False)
+    # Ensure arguments are properly converted and passed along.
+    self.paygenBuildMock.assert_called_with(
+        gspaths.Build(
+            version='foo-version',
+            board='foo-board',
+            channel='foo-channel'),
+        work_dir=mock.ANY,
+        site_config=stage._run.site_config,
+        dry_run=True,
+        skip_delta_payloads=False,
+        skip_duts_check=False)
 
   def testRunPaygenInProcessComplex(self):
     """Test that _RunPaygenInProcess with arguments that are more unusual."""
-    with patch(paygen_build_lib, 'CreatePayloads') as create_payloads:
-      # Make CreatePayloads return the suite_name, archive_board, archive_build,
-      # and finished_uri.
-      create_payloads.side_effect = iter([('foo-suite-name',
-                                           'foo-archive-board',
-                                           'foo-archive-build',
-                                           'foo-finished_uri')])
+    # Call the method under test.
+    # Use release tools channel naming, and a board name including a variant.
+    stage = self.ConstructStage()
+    stage._RunPaygenInProcess('foo-channel', 'foo-board-variant',
+                              'foo-version', True, True, True,
+                              skip_duts_check=False)
 
-      # Call the method under test.
-      # Use release tools channel naming, and a board name including a variant.
-      stage = self.ConstructStage()
-      stage._RunPaygenInProcess('foo-channel', 'foo-board-variant',
-                                'foo-version', True, True, True,
-                                skip_duts_check=False)
-
-      # Ensure arguments are properly converted and passed along.
-      create_payloads.assert_called_with(
-          gspaths.Build(version='foo-version',
-                        board='foo-board-variant',
-                        channel='foo-channel'),
-          dry_run=True,
-          work_dir=mock.ANY,
-          site_config=stage._run.site_config,
-          run_parallel=True,
-          skip_delta_payloads=True,
-          disable_tests=True,
-          skip_duts_check=False)
+    # Ensure arguments are properly converted and passed along.
+    self.paygenBuildMock.assert_called_with(
+        gspaths.Build(version='foo-version',
+                      board='foo-board-variant',
+                      channel='foo-channel'),
+        dry_run=True,
+        work_dir=mock.ANY,
+        site_config=stage._run.site_config,
+        skip_delta_payloads=True,
+        skip_duts_check=False)
 
   def testRunPaygenInProcessWithUnifiedBuild(self):
-    self._run.config.models = ["model1", "model2"]
-    with patch(paygen_build_lib, 'CreatePayloads') as create_payloads:
-      # Have to patch and verify that the PaygenTestStage is created.
-      stage = self.ConstructStage()
+    self._run.config.models = [config_lib.ModelTestConfig('model1', 'model1'),
+                               config_lib.ModelTestConfig(
+                                   'model2', 'board', ['au'])]
 
-      # CreatePayloads should return a tuple of a suite name and the finished
-      # URI.
-      create_payloads.side_effect = iter([('foo-suite-name',
-                                           'foo-archive-board',
-                                           'foo-archive-build',
-                                           'foo-finished_uri')])
-      with patch(paygen_build_lib, 'ScheduleAutotestTests') as sched_tests:
-        # Call the method under test.
-        stage._RunPaygenInProcess('foo', 'foo-board', 'foo-version',
-                                  True, False, False, skip_duts_check=False)
-        # Ensure that the first model from the unified build was selected
-        # as the platform to be tested
-        sched_tests.assert_called_once_with(
-            'foo-suite-name', 'model1', 'foo-archive-build',
-            False, True, job_keyvals=mock.ANY)
+    # Have to patch and verify that the PaygenTestStage is created.
+    stage = self.ConstructStage()
+
+    with patch(paygen_build_lib, 'ScheduleAutotestTests') as sched_tests:
+      # Call the method under test.
+      stage._RunPaygenInProcess('foo', 'foo-board', 'foo-version',
+                                True, False, False, skip_duts_check=False)
+      # Ensure that the first model from the unified build was selected
+      # as the platform to be tested
+      sched_tests.assert_called_once_with(
+          'foo-suite-name', 'board', 'model2', 'foo-archive-build',
+          False, True, job_keyvals=mock.ANY)
+
+  def testRunPaygenInParallelWithUnifiedBuild(self):
+    self._run.config.models = [
+        config_lib.ModelTestConfig('model1', 'model1', ['au']),
+        config_lib.ModelTestConfig('model2', 'model1', ['au'])]
+
+    # Have to patch and verify that the PaygenTestStage is created.
+    stage = self.ConstructStage()
+
+    with patch(parallel, 'RunParallelSteps') as parallel_tests:
+      stage._RunPaygenInProcess('foo', 'foo-board', 'foo-version',
+                                True, False, False, skip_duts_check=False)
+      parallel_tests.assert_called_once_with([mock.ANY, mock.ANY])
 
 
 class PaygenBuildStageTest(generic_stages_unittest.AbstractStageTestCase,
@@ -491,10 +501,6 @@ class PaygenBuildStageTest(generic_stages_unittest.AbstractStageTestCase,
 
   def setUp(self):
     self._Prepare()
-
-    # This method fetches a file from GS, mock it out.
-    # self.validateMock = self.PatchObject(
-    #     paygen_build_lib, 'ValidateBoardConfig')
 
   # pylint: disable=arguments-differ
   def ConstructStage(self):
@@ -524,28 +530,25 @@ class PaygenTestStageTest(generic_stages_unittest.AbstractStageTestCase,
   def setUp(self):
     self._Prepare()
 
-    # This method fetches a file from GS, mock it out.
-    # self.validateMock = self.PatchObject(
-    #     paygen_build_lib, 'ValidateBoardConfig')
-
   # pylint: disable=arguments-differ
   def ConstructStage(self):
     return release_stages.PaygenTestStage(
         builder_run=self._run,
         suite_name='foo-test-suite',
         board=self._current_board,
+        model=self._current_board,
+        lab_board_name=self._current_board,
         # The PaygenBuild stage will add the '-channel' suffix to the channel
         # when converting to release tools naming.
         channel='foochan-channel',
         build='foo-version',
-        finished_uri='foo-finished-uri',
         skip_duts_check=False,
         debug=True)
 
   def testStageName(self):
     """See if the stage name is correctly formed."""
     stage = self.ConstructStage()
-    self.assertEqual(stage.name, 'PaygenTestFoochan')
+    self.assertEqual(stage.name, 'PaygenTestFoochan [x86-alex_he]')
 
   def testPerformStageTestLabFail(self):
     """Test that exception from RunHWTestSuite are properly handled."""

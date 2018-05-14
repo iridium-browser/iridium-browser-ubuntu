@@ -30,7 +30,7 @@ RTCStatsResponse* RTCStatsResponse::Create() {
   return new RTCStatsResponse();
 }
 
-RTCStatsResponse::RTCStatsResponse() {}
+RTCStatsResponse::RTCStatsResponse() = default;
 
 RTCLegacyStatsReport* RTCStatsResponse::namedItem(const AtomicString& name) {
   if (idmap_.find(name) != idmap_.end())
@@ -51,7 +51,7 @@ void RTCStatsResponse::AddStats(const WebRTCLegacyStats& stats) {
   }
 }
 
-DEFINE_TRACE(RTCStatsResponse) {
+void RTCStatsResponse::Trace(blink::Visitor* visitor) {
   visitor->Trace(result_);
   RTCStatsResponseBase::Trace(visitor);
 }

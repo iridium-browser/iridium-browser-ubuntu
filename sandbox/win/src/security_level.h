@@ -10,8 +10,8 @@
 namespace sandbox {
 
 // List of all the integrity levels supported in the sandbox. This is used
-// only on Windows Vista. You can't set the integrity level of the process
-// in the sandbox to a level higher than yours.
+// only on Windows Vista and newer. You can't set the integrity level of the
+// process in the sandbox to a level higher than yours.
 enum IntegrityLevel {
   INTEGRITY_LEVEL_SYSTEM,
   INTEGRITY_LEVEL_HIGH,
@@ -70,14 +70,14 @@ enum IntegrityLevel {
 //  broker is process might be started by a user that belongs to the Admins
 //  or power users groups.
 enum TokenLevel {
-   USER_LOCKDOWN = 0,
-   USER_RESTRICTED,
-   USER_LIMITED,
-   USER_INTERACTIVE,
-   USER_NON_ADMIN,
-   USER_RESTRICTED_SAME_ACCESS,
-   USER_UNPROTECTED,
-   USER_LAST
+  USER_LOCKDOWN = 0,
+  USER_RESTRICTED,
+  USER_LIMITED,
+  USER_INTERACTIVE,
+  USER_NON_ADMIN,
+  USER_RESTRICTED_SAME_ACCESS,
+  USER_UNPROTECTED,
+  USER_LAST
 };
 
 // The Job level specifies a set of decreasing security profiles for the

@@ -5,7 +5,6 @@
 #import "ios/chrome/browser/ui/commands/open_url_command.h"
 
 #include "base/logging.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #include "ios/web/public/referrer.h"
 #include "url/gurl.h"
 
@@ -23,17 +22,12 @@
 @synthesize fromChrome = _fromChrome;
 @synthesize appendTo = _appendTo;
 
-- (instancetype)initWithTag:(NSInteger)tag {
-  NOTREACHED();
-  return nil;
-}
-
 - (instancetype)initWithURL:(const GURL&)url
                    referrer:(const web::Referrer&)referrer
                 inIncognito:(BOOL)inIncognito
                inBackground:(BOOL)inBackground
                    appendTo:(OpenPosition)appendTo {
-  if ((self = [super initWithTag:IDC_OPEN_URL])) {
+  if ((self = [super init])) {
     _url = url;
     _referrer = referrer;
     _inIncognito = inIncognito;

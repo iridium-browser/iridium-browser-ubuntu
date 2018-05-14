@@ -18,7 +18,7 @@ namespace ui {
 
 InputDeviceServer::InputDeviceServer() {
 #if defined(OS_CHROMEOS)
-  touch_device_server_ = base::MakeUnique<TouchDeviceServer>();
+  touch_device_server_ = std::make_unique<TouchDeviceServer>();
 #endif
 }
 
@@ -72,13 +72,7 @@ void InputDeviceServer::OnKeyboardDeviceConfigurationChanged() {
 }
 
 void InputDeviceServer::OnTouchscreenDeviceConfigurationChanged() {
-  if (!manager_->AreDeviceListsComplete())
-    return;
-
-  auto& devices = manager_->GetTouchscreenDevices();
-  observers_.ForAllPtrs([&devices](mojom::InputDeviceObserverMojo* observer) {
-    observer->OnTouchscreenDeviceConfigurationChanged(devices);
-  });
+  CallOnTouchscreenDeviceConfigurationChanged();
 }
 
 void InputDeviceServer::OnMouseDeviceConfigurationChanged() {
@@ -113,13 +107,32 @@ void InputDeviceServer::OnStylusStateChanged(StylusState state) {
   });
 }
 
+void InputDeviceServer::OnTouchDeviceAssociationChanged() {
+  CallOnTouchscreenDeviceConfigurationChanged();
+}
+
 void InputDeviceServer::SendDeviceListsComplete(
     mojom::InputDeviceObserverMojo* observer) {
   DCHECK(manager_->AreDeviceListsComplete());
 
   observer->OnDeviceListsComplete(
       manager_->GetKeyboardDevices(), manager_->GetTouchscreenDevices(),
-      manager_->GetMouseDevices(), manager_->GetTouchpadDevices());
+      manager_->GetMouseDevices(), manager_->GetTouchpadDevices(),
+      manager_->AreTouchscreenTargetDisplaysValid());
+}
+
+void InputDeviceServer::CallOnTouchscreenDeviceConfigurationChanged() {
+  if (!manager_->AreDeviceListsComplete())
+    return;
+
+  auto& devices = manager_->GetTouchscreenDevices();
+  const bool are_touchscreen_target_displays_valid =
+      manager_->AreTouchscreenTargetDisplaysValid();
+  observers_.ForAllPtrs([&devices, are_touchscreen_target_displays_valid](
+                            mojom::InputDeviceObserverMojo* observer) {
+    observer->OnTouchscreenDeviceConfigurationChanged(
+        devices, are_touchscreen_target_displays_valid);
+  });
 }
 
 void InputDeviceServer::BindInputDeviceServerRequest(

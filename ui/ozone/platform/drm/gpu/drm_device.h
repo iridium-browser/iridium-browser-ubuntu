@@ -15,6 +15,7 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/time/time.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/overlay_transform.h"
@@ -39,15 +40,17 @@ class HardwareDisplayPlaneManager;
 // would be called. In unit tests this interface would be stubbed.
 class DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
  public:
-  typedef base::Callback<void(unsigned int /* frame */,
-                              unsigned int /* seconds */,
-                              unsigned int /* useconds */)> PageFlipCallback;
+  using PageFlipCallback =
+      base::Callback<void(unsigned int /* frame */,
+                          base::TimeTicks /* timestamp */)>;
 
   DrmDevice(const base::FilePath& device_path,
             base::File file,
             bool is_primary_device);
 
   bool is_primary_device() const { return is_primary_device_; }
+
+  bool allow_addfb2_modifiers() const { return allow_addfb2_modifiers_; }
 
   // Open device.
   virtual bool Initialize(bool use_atomic);
@@ -204,6 +207,8 @@ class DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
   std::unique_ptr<IOWatcher> watcher_;
 
   bool is_primary_device_;
+
+  bool allow_addfb2_modifiers_;
 
   DISALLOW_COPY_AND_ASSIGN(DrmDevice);
 };

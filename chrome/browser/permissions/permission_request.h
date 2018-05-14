@@ -15,28 +15,36 @@ struct VectorIcon;
 }
 
 // Used for UMA to record the types of permission prompts shown.
-// This corresponds to the PermissionRequestType enum in
-// src/tools/metrics/histograms.xml. The usual rules of updating UMA values
-// applies to this enum:
+// When updating, you also need to update:
+//   1) The PermissionRequestType enum in tools/metrics/histograms/enums.xml.
+//   2) The PermissionRequestTypes suffix list in
+//      tools/metrics/histograms/histograms.xml.
+//   3) GetPermissionRequestString in
+//      chrome/browser/permissions/permission_uma_util.cc.
+//
+// The usual rules of updating UMA values applies to this enum:
 // - don't remove values
 // - only ever add values at the end
-// - keep the PermissionRequestType enum in sync with this definition.
 enum class PermissionRequestType {
-  UNKNOWN,
-  MULTIPLE,
-  UNUSED_PERMISSION,
-  QUOTA,
-  DOWNLOAD,
-  MEDIA_STREAM,
-  REGISTER_PROTOCOL_HANDLER,
-  PERMISSION_GEOLOCATION,
-  PERMISSION_MIDI_SYSEX,
-  PERMISSION_NOTIFICATIONS,
-  PERMISSION_PROTECTED_MEDIA_IDENTIFIER,
-  PERMISSION_PUSH_MESSAGING,
-  PERMISSION_FLASH,
-  PERMISSION_MEDIASTREAM_MIC,
-  PERMISSION_MEDIASTREAM_CAMERA,
+  UNKNOWN = 0,
+  MULTIPLE = 1,
+  // UNUSED_PERMISSION = 2,
+  QUOTA = 3,
+  DOWNLOAD = 4,
+  // MEDIA_STREAM = 5,
+  REGISTER_PROTOCOL_HANDLER = 6,
+  PERMISSION_GEOLOCATION = 7,
+  PERMISSION_MIDI_SYSEX = 8,
+  PERMISSION_NOTIFICATIONS = 9,
+  PERMISSION_PROTECTED_MEDIA_IDENTIFIER = 10,
+  // PERMISSION_PUSH_MESSAGING = 11,
+  PERMISSION_FLASH = 12,
+  PERMISSION_MEDIASTREAM_MIC = 13,
+  PERMISSION_MEDIASTREAM_CAMERA = 14,
+  PERMISSION_ACCESSIBILITY_EVENTS = 15,
+  PERMISSION_CLIPBOARD_READ = 16,
+  PERMISSION_SECURITY_KEY_ATTESTATION = 17,
+  PERMISSION_PAYMENT_HANDLER = 18,
   // NUM must be the last value in the enum.
   NUM
 };
@@ -108,9 +116,6 @@ class PermissionRequest {
   // eventually be called on every request which is not unregistered.
   virtual void RequestFinished() = 0;
 
-  // True if a persistence toggle should be shown in the UI for this request.
-  virtual bool ShouldShowPersistenceToggle() const;
-
   // Used to record UMA metrics for permission requests.
   virtual PermissionRequestType GetPermissionRequestType() const = 0;
 
@@ -123,15 +128,7 @@ class PermissionRequest {
   // this permission request.
   virtual ContentSettingsType GetContentSettingsType() const;
 
-  void set_persist(bool persist) { persist_ = persist; }
-
- protected:
-  bool persist() const { return persist_; }
-
  private:
-  // Whether or not the response for this prompt should be persisted.
-  bool persist_;
-
   DISALLOW_COPY_AND_ASSIGN(PermissionRequest);
 };
 

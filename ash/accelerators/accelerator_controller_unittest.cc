@@ -5,20 +5,22 @@
 #include "ash/accelerators/accelerator_controller.h"
 
 #include "ash/accelerators/accelerator_table.h"
-#include "ash/accessibility_delegate.h"
-#include "ash/accessibility_types.h"
-#include "ash/ash_switches.h"
+#include "ash/accessibility/accessibility_controller.h"
+#include "ash/accessibility/test_accessibility_controller_client.h"
 #include "ash/ime/ime_controller.h"
+#include "ash/media_controller.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/interfaces/ime_info.mojom.h"
 #include "ash/session/session_controller.h"
+#include "ash/session/test_session_controller_client.h"
 #include "ash/shell.h"
-#include "ash/shell_port.h"
+#include "ash/shell_test_api.h"
 #include "ash/system/brightness_control_delegate.h"
 #include "ash/system/keyboard_brightness_control_delegate.h"
-#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test_media_client.h"
 #include "ash/test_screenshot_delegate.h"
 #include "ash/wm/lock_state_controller.h"
 #include "ash/wm/lock_state_controller_test_api.h"
@@ -29,6 +31,7 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "base/command_line.h"
+#include "base/run_loop.h"
 #include "base/test/user_action_tester.h"
 #include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "ui/app_list/presenter/app_list.h"
@@ -48,11 +51,6 @@
 #include "ui/events/test/event_generator.h"
 #include "ui/message_center/message_center.h"
 #include "ui/views/widget/widget.h"
-
-#if defined(USE_X11)
-#include <X11/Xlib.h>
-#include "ui/events/test/events_test_utils_x11.h"
-#endif
 
 using chromeos::input_method::InputMethodManager;
 
@@ -75,7 +73,7 @@ void AddTestImes() {
 class TestTarget : public ui::AcceleratorTarget {
  public:
   TestTarget() : accelerator_pressed_count_(0), accelerator_repeat_count_(0) {}
-  ~TestTarget() override {}
+  ~TestTarget() override = default;
 
   int accelerator_pressed_count() const { return accelerator_pressed_count_; }
 
@@ -108,7 +106,7 @@ class DummyBrightnessControlDelegate : public BrightnessControlDelegate {
  public:
   DummyBrightnessControlDelegate()
       : handle_brightness_down_count_(0), handle_brightness_up_count_(0) {}
-  ~DummyBrightnessControlDelegate() override {}
+  ~DummyBrightnessControlDelegate() override = default;
 
   void HandleBrightnessDown(const ui::Accelerator& accelerator) override {
     ++handle_brightness_down_count_;
@@ -120,8 +118,8 @@ class DummyBrightnessControlDelegate : public BrightnessControlDelegate {
   }
   void SetBrightnessPercent(double percent, bool gradual) override {}
   void GetBrightnessPercent(
-      const base::Callback<void(double)>& callback) override {
-    callback.Run(100.0);
+      base::OnceCallback<void(base::Optional<double>)> callback) override {
+    std::move(callback).Run(100.0);
   }
 
   int handle_brightness_down_count() const {
@@ -161,7 +159,7 @@ class DummyKeyboardBrightnessControlDelegate
   DummyKeyboardBrightnessControlDelegate()
       : handle_keyboard_brightness_down_count_(0),
         handle_keyboard_brightness_up_count_(0) {}
-  ~DummyKeyboardBrightnessControlDelegate() override {}
+  ~DummyKeyboardBrightnessControlDelegate() override = default;
 
   void HandleKeyboardBrightnessDown(
       const ui::Accelerator& accelerator) override {
@@ -241,6 +239,16 @@ class AcceleratorControllerTest : public AshTestBase {
     return GetController()->Process(accelerator);
   }
 
+  bool ContainsHighContrastNotification() const {
+    return nullptr != message_center()->FindVisibleNotificationById(
+                          kHighContrastToggleAccelNotificationId);
+  }
+
+  void RemoveAllNotifications() const {
+    message_center()->RemoveAllNotifications(
+        false /* by_user */, message_center::MessageCenter::RemoveType::ALL);
+  }
+
   static const ui::Accelerator& GetPreviousAccelerator() {
     return GetController()->accelerator_history()->previous_accelerator();
   }
@@ -265,6 +273,10 @@ class AcceleratorControllerTest : public AshTestBase {
   }
   static bool is_exiting(ExitWarningHandler* ewh) {
     return ewh->state_ == ExitWarningHandler::EXITING;
+  }
+
+  message_center::MessageCenter* message_center() const {
+    return message_center::MessageCenter::Get();
   }
 
   void SetBrightnessControlDelegate(
@@ -528,10 +540,6 @@ TEST_F(AcceleratorControllerTest, TestRepeatedSnap) {
 }
 
 TEST_F(AcceleratorControllerTest, RotateScreen) {
-  // TODO: needs GetDisplayInfo http://crbug.com/622480.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   display::Display display = display::Screen::GetScreen()->GetPrimaryDisplay();
   display::Display::Rotation initial_rotation =
       GetActiveDisplayRotation(display.id());
@@ -542,7 +550,7 @@ TEST_F(AcceleratorControllerTest, RotateScreen) {
                        ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN);
   display::Display::Rotation new_rotation =
       GetActiveDisplayRotation(display.id());
-  // |new_rotation| is determined by the AcceleratorControllerDelegate.
+  // |new_rotation| is determined by the AcceleratorController.
   EXPECT_NE(initial_rotation, new_rotation);
 }
 
@@ -637,7 +645,6 @@ TEST_F(AcceleratorControllerTest, DontRepeatToggleFullscreen) {
 }
 
 // TODO(oshima): Fix this test to use EventGenerator.
-#if defined(USE_X11)
 TEST_F(AcceleratorControllerTest, ProcessOnce) {
   // The IME event filter interferes with the basic key event propagation we
   // attempt to do here, so we disable it.
@@ -649,9 +656,7 @@ TEST_F(AcceleratorControllerTest, ProcessOnce) {
   // The accelerator is processed only once.
   ui::EventSink* sink = Shell::GetPrimaryRootWindow()->GetHost()->event_sink();
 
-  ui::ScopedXI2Event key_event;
-  key_event.InitKeyEvent(ui::ET_KEY_PRESSED, ui::VKEY_A, 0);
-  ui::KeyEvent key_event1(key_event);
+  ui::KeyEvent key_event1(ui::ET_KEY_PRESSED, ui::VKEY_A, ui::EF_NONE);
   ui::EventDispatchDetails details = sink->OnEventFromSource(&key_event1);
   EXPECT_TRUE(key_event1.handled() || details.dispatcher_destroyed);
 
@@ -659,19 +664,13 @@ TEST_F(AcceleratorControllerTest, ProcessOnce) {
   details = sink->OnEventFromSource(&key_event2);
   EXPECT_FALSE(key_event2.handled() || details.dispatcher_destroyed);
 
-  key_event.InitKeyEvent(ui::ET_KEY_RELEASED, ui::VKEY_A, 0);
-  ui::KeyEvent key_event3(key_event);
+  ui::KeyEvent key_event3(ui::ET_KEY_RELEASED, ui::VKEY_A, ui::EF_NONE);
   details = sink->OnEventFromSource(&key_event3);
   EXPECT_FALSE(key_event3.handled() || details.dispatcher_destroyed);
   EXPECT_EQ(1, target.accelerator_pressed_count());
 }
-#endif
 
 TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
-  // TODO: TestScreenshotDelegate is null in mash http://crbug.com/632111.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   // CycleBackward
   EXPECT_TRUE(ProcessInController(
       ui::Accelerator(ui::VKEY_TAB, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN)));
@@ -801,8 +800,8 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
       ui::Accelerator(ui::VKEY_T, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN)));
 
   // Show task manager
-  EXPECT_TRUE(
-      ProcessInController(ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN)));
+  EXPECT_TRUE(ProcessInController(
+      ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_COMMAND_DOWN)));
 
   // Open file manager
   EXPECT_TRUE(ProcessInController(
@@ -814,13 +813,17 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
   // effect of locking the screen.
   EXPECT_TRUE(
       ProcessInController(ui::Accelerator(ui::VKEY_L, ui::EF_COMMAND_DOWN)));
+
+  message_center::MessageCenter::Get()->RemoveAllNotifications(
+      false /* by_user */, message_center::MessageCenter::RemoveType::ALL);
 }
 
 TEST_F(AcceleratorControllerTest, GlobalAcceleratorsToggleAppList) {
   app_list::test::TestAppListPresenter test_app_list_presenter;
   Shell::Get()->app_list()->SetAppListPresenter(
       test_app_list_presenter.CreateInterfacePtrAndBind());
-  AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
+  AccessibilityController* controller =
+      Shell::Get()->accessibility_controller();
 
   // The press event should not toggle the AppList, the release should instead.
   EXPECT_FALSE(
@@ -836,12 +839,14 @@ TEST_F(AcceleratorControllerTest, GlobalAcceleratorsToggleAppList) {
   EXPECT_EQ(ui::VKEY_LWIN, GetPreviousAccelerator().key_code());
 
   // When spoken feedback is on, the AppList should not toggle.
-  delegate->ToggleSpokenFeedback(A11Y_NOTIFICATION_NONE);
+  controller->SetSpokenFeedbackEnabled(true, A11Y_NOTIFICATION_NONE);
+  EXPECT_TRUE(controller->IsSpokenFeedbackEnabled());
   EXPECT_FALSE(
       ProcessInController(ui::Accelerator(ui::VKEY_LWIN, ui::EF_NONE)));
   EXPECT_FALSE(ProcessInController(
       CreateReleaseAccelerator(ui::VKEY_LWIN, ui::EF_NONE)));
-  delegate->ToggleSpokenFeedback(A11Y_NOTIFICATION_NONE);
+  controller->SetSpokenFeedbackEnabled(false, A11Y_NOTIFICATION_NONE);
+  EXPECT_FALSE(controller->IsSpokenFeedbackEnabled());
   RunAllPendingInMessageLoop();
   EXPECT_EQ(1u, test_app_list_presenter.toggle_count());
 
@@ -871,6 +876,25 @@ TEST_F(AcceleratorControllerTest, GlobalAcceleratorsToggleAppList) {
       CreateReleaseAccelerator(ui::VKEY_LWIN, ui::EF_NONE)));
   RunAllPendingInMessageLoop();
   EXPECT_EQ(3u, test_app_list_presenter.toggle_count());
+}
+
+TEST_F(AcceleratorControllerTest, MediaGlobalAccelerators) {
+  TestMediaClient client;
+  Shell::Get()->media_controller()->SetClient(client.CreateAssociatedPtrInfo());
+  EXPECT_EQ(0, client.handle_media_next_track_count());
+  ProcessInController(ui::Accelerator(ui::VKEY_MEDIA_NEXT_TRACK, ui::EF_NONE));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, client.handle_media_next_track_count());
+
+  EXPECT_EQ(0, client.handle_media_play_pause_count());
+  ProcessInController(ui::Accelerator(ui::VKEY_MEDIA_PLAY_PAUSE, ui::EF_NONE));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, client.handle_media_play_pause_count());
+
+  EXPECT_EQ(0, client.handle_media_prev_track_count());
+  ProcessInController(ui::Accelerator(ui::VKEY_MEDIA_PREV_TRACK, ui::EF_NONE));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, client.handle_media_prev_track_count());
 }
 
 TEST_F(AcceleratorControllerTest, ImeGlobalAccelerators) {
@@ -939,7 +963,7 @@ TEST_F(AcceleratorControllerTest, PreferredReservedAccelerators) {
 
 namespace {
 
-// Tests the five combinations of the TOGGLE_CAPS_LOCK accelerator.
+// Tests the four combinations of the TOGGLE_CAPS_LOCK accelerator.
 TEST_F(AcceleratorControllerTest, ToggleCapsLockAccelerators) {
   chromeos::input_method::InputMethodManager* input_method_manager =
       chromeos::input_method::InputMethodManager::Get();
@@ -980,21 +1004,12 @@ TEST_F(AcceleratorControllerTest, ToggleCapsLockAccelerators) {
   EXPECT_TRUE(ProcessInController(release_alt_before_search));
   EXPECT_TRUE(input_method_manager->GetImeKeyboard()->CapsLockIsEnabled());
   input_method_manager->GetImeKeyboard()->SetCapsLockEnabled(false);
-
-  // 5. Press Caps Lock, Release Caps Lock.
-  const ui::Accelerator press_caps_lock(ui::VKEY_CAPITAL, ui::EF_NONE);
-  EXPECT_FALSE(ProcessInController(press_caps_lock));
-  EXPECT_FALSE(input_method_manager->GetImeKeyboard()->CapsLockIsEnabled());
-  const ui::Accelerator release_caps_lock(
-      CreateReleaseAccelerator(ui::VKEY_CAPITAL, ui::EF_NONE));
-  EXPECT_TRUE(ProcessInController(release_caps_lock));
-  EXPECT_TRUE(input_method_manager->GetImeKeyboard()->CapsLockIsEnabled());
 }
 
 class PreferredReservedAcceleratorsTest : public AshTestBase {
  public:
-  PreferredReservedAcceleratorsTest() {}
-  ~PreferredReservedAcceleratorsTest() override {}
+  PreferredReservedAcceleratorsTest() = default;
+  ~PreferredReservedAcceleratorsTest() override = default;
 
   // AshTestBase:
   void SetUp() override {
@@ -1010,10 +1025,6 @@ class PreferredReservedAcceleratorsTest : public AshTestBase {
 }  // namespace
 
 TEST_F(PreferredReservedAcceleratorsTest, AcceleratorsWithFullscreen) {
-  // TODO: needs LockStateController ported: http://crbug.com/632189.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   aura::Window* w1 = CreateTestWindowInShellWithId(0);
   aura::Window* w2 = CreateTestWindowInShellWithId(1);
   wm::ActivateWindow(w1);
@@ -1060,9 +1071,6 @@ TEST_F(PreferredReservedAcceleratorsTest, AcceleratorsWithFullscreen) {
 }
 
 TEST_F(PreferredReservedAcceleratorsTest, AcceleratorsWithPinned) {
-  // TODO: needs LockStateController ported: http://crbug.com/632189.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
   aura::Window* w1 = CreateTestWindowInShellWithId(0);
   aura::Window* w2 = CreateTestWindowInShellWithId(1);
   wm::ActivateWindow(w1);
@@ -1091,10 +1099,6 @@ TEST_F(PreferredReservedAcceleratorsTest, AcceleratorsWithPinned) {
 }
 
 TEST_F(AcceleratorControllerTest, DisallowedAtModalWindow) {
-  // TODO: TestScreenshotDelegate is null in mash http://crbug.com/632111.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   std::set<AcceleratorAction> all_actions;
   for (size_t i = 0; i < kAcceleratorDataLength; ++i)
     all_actions.insert(kAcceleratorData[i].action);
@@ -1119,7 +1123,7 @@ TEST_F(AcceleratorControllerTest, DisallowedAtModalWindow) {
   std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
   wm::ActivateWindow(window.get());
-  ShellPort::Get()->SimulateModalWindowOpenForTesting(true);
+  ShellTestApi().SimulateModalWindowOpenForTest(true);
   for (const auto& action : all_actions) {
     if (actionsAllowedAtModalWindow.find(action) ==
         actionsAllowedAtModalWindow.end()) {
@@ -1195,13 +1199,19 @@ TEST_F(AcceleratorControllerTest, DisallowedAtModalWindow) {
 }
 
 TEST_F(AcceleratorControllerTest, DisallowedWithNoWindow) {
-  AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
+  TestAccessibilityControllerClient client;
+  AccessibilityController* controller =
+      Shell::Get()->accessibility_controller();
+  controller->SetClient(client.CreateInterfacePtrAndBind());
 
   for (size_t i = 0; i < kActionsNeedingWindowLength; ++i) {
-    delegate->TriggerAccessibilityAlert(A11Y_ALERT_NONE);
+    controller->TriggerAccessibilityAlert(mojom::AccessibilityAlert::NONE);
+    controller->FlushMojoForTest();
     EXPECT_TRUE(
         GetController()->PerformActionIfEnabled(kActionsNeedingWindow[i]));
-    EXPECT_EQ(delegate->GetLastAccessibilityAlert(), A11Y_ALERT_WINDOW_NEEDED);
+    controller->FlushMojoForTest();
+    EXPECT_EQ(mojom::AccessibilityAlert::WINDOW_NEEDED,
+              client.last_a11y_alert());
   }
 
   // Make sure we don't alert if we do have a window.
@@ -1209,9 +1219,12 @@ TEST_F(AcceleratorControllerTest, DisallowedWithNoWindow) {
   for (size_t i = 0; i < kActionsNeedingWindowLength; ++i) {
     window.reset(CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
     wm::ActivateWindow(window.get());
-    delegate->TriggerAccessibilityAlert(A11Y_ALERT_NONE);
+    controller->TriggerAccessibilityAlert(mojom::AccessibilityAlert::NONE);
+    controller->FlushMojoForTest();
     GetController()->PerformActionIfEnabled(kActionsNeedingWindow[i]);
-    EXPECT_NE(delegate->GetLastAccessibilityAlert(), A11Y_ALERT_WINDOW_NEEDED);
+    controller->FlushMojoForTest();
+    EXPECT_NE(mojom::AccessibilityAlert::WINDOW_NEEDED,
+              client.last_a11y_alert());
   }
 
   // Don't alert if we have a minimized window either.
@@ -1219,10 +1232,32 @@ TEST_F(AcceleratorControllerTest, DisallowedWithNoWindow) {
     window.reset(CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
     wm::ActivateWindow(window.get());
     GetController()->PerformActionIfEnabled(WINDOW_MINIMIZE);
-    delegate->TriggerAccessibilityAlert(A11Y_ALERT_NONE);
+    controller->TriggerAccessibilityAlert(mojom::AccessibilityAlert::NONE);
+    controller->FlushMojoForTest();
     GetController()->PerformActionIfEnabled(kActionsNeedingWindow[i]);
-    EXPECT_NE(delegate->GetLastAccessibilityAlert(), A11Y_ALERT_WINDOW_NEEDED);
+    controller->FlushMojoForTest();
+    EXPECT_NE(mojom::AccessibilityAlert::WINDOW_NEEDED,
+              client.last_a11y_alert());
   }
+}
+
+TEST_F(AcceleratorControllerTest, TestToggleHighContrast) {
+  ui::Accelerator accelerator(ui::VKEY_H,
+                              ui::EF_COMMAND_DOWN | ui::EF_CONTROL_DOWN);
+  // High Contrast Mode Enabled notification should be shown.
+  EXPECT_TRUE(ProcessInController(accelerator));
+  EXPECT_TRUE(ContainsHighContrastNotification());
+
+  // High Contrast Mode Enabled notification should be hidden as the feature is
+  // disabled.
+  EXPECT_TRUE(ProcessInController(accelerator));
+  EXPECT_FALSE(ContainsHighContrastNotification());
+
+  // It should be shown again when toggled.
+  EXPECT_TRUE(ProcessInController(accelerator));
+  EXPECT_TRUE(ContainsHighContrastNotification());
+
+  RemoveAllNotifications();
 }
 
 namespace {
@@ -1256,15 +1291,6 @@ class DeprecatedAcceleratorTester : public AcceleratorControllerTest {
     return message_center()->GetVisibleNotifications().empty();
   }
 
-  void RemoveAllNotifications() const {
-    message_center()->RemoveAllNotifications(
-        false /* by_user */, message_center::MessageCenter::RemoveType::ALL);
-  }
-
-  message_center::MessageCenter* message_center() const {
-    return message_center::MessageCenter::Get();
-  }
-
  private:
   DISALLOW_COPY_AND_ASSIGN(DeprecatedAcceleratorTester);
 };
@@ -1272,10 +1298,6 @@ class DeprecatedAcceleratorTester : public AcceleratorControllerTest {
 }  // namespace
 
 TEST_F(DeprecatedAcceleratorTester, TestDeprecatedAcceleratorsBehavior) {
-  // TODO: disabled because of UnblockUserSession() not working:
-  // http://crbug.com/632201.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
   for (size_t i = 0; i < kDeprecatedAcceleratorsLength; ++i) {
     const AcceleratorData& entry = kDeprecatedAccelerators[i];
 
@@ -1332,6 +1354,18 @@ TEST_F(DeprecatedAcceleratorTester, TestNewAccelerators) {
     // screen before we proceed testing the rest of accelerators.
     ResetStateIfNeeded();
   }
+
+  RemoveAllNotifications();
+}
+
+using AcceleratorControllerGuestModeTest = NoSessionAshTestBase;
+
+TEST_F(AcceleratorControllerGuestModeTest, IncognitoWindowDisabled) {
+  SimulateGuestLogin();
+
+  // New incognito window is disabled.
+  EXPECT_FALSE(Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
+      NEW_INCOGNITO_WINDOW));
 }
 
 }  // namespace ash

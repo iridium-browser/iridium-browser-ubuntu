@@ -16,6 +16,7 @@
 #include "base/task_scheduler/task_scheduler.h"
 #include "base/values.h"
 #include "ios/web/public/user_agent.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 #include "services/service_manager/embedder/embedded_service_info.h"
 #include "ui/base/layout.h"
 #include "url/url_util.h"
@@ -76,10 +77,6 @@ class WebClient {
   // schemes early on in the startup sequence.
   virtual void AddAdditionalSchemes(Schemes* schemes) const {}
 
-  // Returns the languages used in the Accept-Languages HTTP header.
-  // Used to decide URL formatting.
-  virtual std::string GetAcceptLangs(BrowserState* state) const;
-
   // Returns the embedding application locale string.
   virtual std::string GetApplicationLocale() const;
 
@@ -126,7 +123,8 @@ class WebClient {
   //
   // TODO(crbug.com/703964): Change the return value to NSArray<NSString*> to
   // improve performance.
-  virtual NSString* GetEarlyPageScript(BrowserState* browser_state) const;
+  virtual NSString* GetDocumentStartScriptForMainFrame(
+      BrowserState* browser_state) const;
 
   using StaticServiceMap =
       std::map<std::string, service_manager::EmbeddedServiceInfo>;
@@ -140,6 +138,14 @@ class WebClient {
   // respective sections.
   virtual std::unique_ptr<base::Value> GetServiceManifestOverlay(
       base::StringPiece name);
+
+  // Allows the embedder to bind an interface request for a WebState-scoped
+  // interface that originated from the main frame of |web_state|. Called if
+  // |web_state| could not bind the request for |interface_name| itself.
+  virtual void BindInterfaceRequestFromMainFrame(
+      WebState* web_state,
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle interface_pipe) {}
 
   // Informs the embedder that a certificate error has occurred. If
   // |overridable| is true, the user can ignore the error and continue. The

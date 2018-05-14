@@ -9,6 +9,7 @@
 #include <map>
 #include <utility>
 
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -38,7 +39,7 @@ ShareServiceImpl::~ShareServiceImpl() = default;
 // static
 void ShareServiceImpl::Create(
     blink::mojom::ShareServiceRequest request) {
-  mojo::MakeStrongBinding(base::MakeUnique<ShareServiceImpl>(),
+  mojo::MakeStrongBinding(std::make_unique<ShareServiceImpl>(),
                           std::move(request));
 }
 
@@ -100,7 +101,7 @@ bool ShareServiceImpl::ReplacePlaceholders(base::StringPiece url_template,
   split_template.push_back(url_template.substr(
       start_index_to_copy, url_template.size() - start_index_to_copy));
 
-  *url_template_filled = base::JoinString(split_template, base::StringPiece());
+  *url_template_filled = base::StrCat(split_template);
   return true;
 }
 
@@ -140,14 +141,16 @@ ShareServiceImpl::GetTargetsWithSufficientEngagement() {
 
   PrefService* pref_service = GetPrefService();
 
-  std::unique_ptr<base::DictionaryValue> share_targets_dict =
-      pref_service->GetDictionary(prefs::kWebShareVisitedTargets)
-          ->CreateDeepCopy();
+  const base::DictionaryValue* share_targets_dict =
+      pref_service->GetDictionary(prefs::kWebShareVisitedTargets);
 
   std::vector<WebShareTarget> sufficiently_engaged_targets;
   for (const auto& it : *share_targets_dict) {
     GURL manifest_url(it.first);
-    DCHECK(manifest_url.is_valid());
+    // This should not happen, but if the prefs file is corrupted, it might, so
+    // don't (D)CHECK, just continue gracefully.
+    if (!manifest_url.is_valid())
+      continue;
 
     if (GetEngagementLevel(manifest_url) < kMinimumEngagementLevel)
       continue;
@@ -191,8 +194,6 @@ void ShareServiceImpl::OnPickerClosed(const std::string& title,
     return;
   }
 
-  const GURL& chosen_target = result->manifest_url();
-
   std::string url_template_filled;
   if (!ReplacePlaceholders(result->url_template(), title, text, share_url,
                            &url_template_filled)) {
@@ -204,12 +205,8 @@ void ShareServiceImpl::OnPickerClosed(const std::string& title,
   }
 
   // The template is relative to the manifest URL (minus the filename).
-  // Concatenate to make an absolute URL.
-  const std::string& chosen_target_spec = chosen_target.spec();
-  base::StringPiece url_base(
-      chosen_target_spec.data(),
-      chosen_target_spec.size() - chosen_target.ExtractFileName().size());
-  const GURL target(url_base.as_string() + url_template_filled);
+  // Resolve it based on the manifest URL to make an absolute URL.
+  const GURL target = result->manifest_url().Resolve(url_template_filled);
   // User should not be able to cause an invalid target URL. Possibilities are:
   // - The base URL: can't be invalid since it's derived from the manifest URL.
   // - The template: can only be invalid if it contains a NUL character or

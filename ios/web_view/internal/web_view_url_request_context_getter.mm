@@ -19,6 +19,7 @@
 #include "net/cert/cert_verifier.h"
 #include "net/cert/multi_log_ct_verifier.h"
 #include "net/dns/host_resolver.h"
+#include "net/extras/sqlite/sqlite_channel_id_store.h"
 #include "net/extras/sqlite/sqlite_persistent_cookie_store.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
@@ -26,8 +27,8 @@
 #include "net/http/http_server_properties_impl.h"
 #include "net/http/transport_security_persister.h"
 #include "net/http/transport_security_state.h"
-#include "net/proxy/proxy_config_service_ios.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_config_service_ios.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/default_channel_id_store.h"
 #include "net/ssl/ssl_config_service_defaults.h"
@@ -45,13 +46,9 @@ namespace ios_web_view {
 
 WebViewURLRequestContextGetter::WebViewURLRequestContextGetter(
     const base::FilePath& base_path,
-    const scoped_refptr<base::SingleThreadTaskRunner>& network_task_runner,
-    const scoped_refptr<base::SingleThreadTaskRunner>& file_task_runner,
-    const scoped_refptr<base::SingleThreadTaskRunner>& cache_task_runner)
+    const scoped_refptr<base::SingleThreadTaskRunner>& network_task_runner)
     : base_path_(base_path),
-      file_task_runner_(file_task_runner),
       network_task_runner_(network_task_runner),
-      cache_task_runner_(cache_task_runner),
       proxy_config_service_(new net::ProxyConfigServiceIOS),
       net_log_(new net::NetLog()) {}
 
@@ -64,7 +61,7 @@ net::URLRequestContext* WebViewURLRequestContextGetter::GetURLRequestContext() {
     url_request_context_.reset(new net::URLRequestContext());
     url_request_context_->set_net_log(net_log_.get());
     DCHECK(!network_delegate_.get());
-    network_delegate_ = base::MakeUnique<WebViewNetworkDelegate>();
+    network_delegate_ = std::make_unique<WebViewNetworkDelegate>();
     url_request_context_->set_network_delegate(network_delegate_.get());
 
     storage_.reset(
@@ -74,7 +71,7 @@ net::URLRequestContext* WebViewURLRequestContextGetter::GetURLRequestContext() {
     base::FilePath cookie_path;
     bool cookie_path_found = PathService::Get(base::DIR_APP_DATA, &cookie_path);
     DCHECK(cookie_path_found);
-    cookie_path = cookie_path.Append("WebShell").Append("Cookies");
+    cookie_path = cookie_path.Append("ChromeWebView").Append("Cookies");
     scoped_refptr<net::CookieMonster::PersistentCookieStore> persistent_store =
         new net::SQLitePersistentCookieStore(
             cookie_path, network_task_runner_,
@@ -89,25 +86,38 @@ net::URLRequestContext* WebViewURLRequestContextGetter::GetURLRequestContext() {
         web::GetWebClient()->GetUserAgent(web::UserAgentType::MOBILE);
 
     storage_->set_http_user_agent_settings(
-        base::MakeUnique<net::StaticHttpUserAgentSettings>("en-us,en",
+        std::make_unique<net::StaticHttpUserAgentSettings>("en-us,en",
                                                            user_agent));
-    storage_->set_proxy_service(
-        net::ProxyService::CreateUsingSystemProxyResolver(
+    storage_->set_proxy_resolution_service(
+        net::ProxyResolutionService::CreateUsingSystemProxyResolver(
             std::move(proxy_config_service_), url_request_context_->net_log()));
     storage_->set_ssl_config_service(new net::SSLConfigServiceDefaults);
     storage_->set_cert_verifier(net::CertVerifier::CreateDefault());
 
     storage_->set_transport_security_state(
-        base::MakeUnique<net::TransportSecurityState>());
+        std::make_unique<net::TransportSecurityState>());
     storage_->set_cert_transparency_verifier(
         base::WrapUnique(new net::MultiLogCTVerifier));
     storage_->set_ct_policy_enforcer(
         base::WrapUnique(new net::CTPolicyEnforcer));
-    transport_security_persister_.reset(new net::TransportSecurityPersister(
-        url_request_context_->transport_security_state(), base_path_,
-        file_task_runner_, false));
-    storage_->set_channel_id_service(base::MakeUnique<net::ChannelIDService>(
-        new net::DefaultChannelIDStore(nullptr)));
+    transport_security_persister_ =
+        std::make_unique<net::TransportSecurityPersister>(
+            url_request_context_->transport_security_state(), base_path_,
+            base::CreateSequencedTaskRunnerWithTraits(
+                {base::MayBlock(), base::TaskPriority::BACKGROUND}));
+
+    // Setup channel id store.
+    base::FilePath channel_id_path;
+    PathService::Get(base::DIR_APP_DATA, &channel_id_path);
+    channel_id_path =
+        channel_id_path.Append("ChromeWebView").Append("Channel ID");
+    scoped_refptr<net::SQLiteChannelIDStore> channel_id_db =
+        new net::SQLiteChannelIDStore(
+            channel_id_path,
+            base::CreateSequencedTaskRunnerWithTraits(
+                {base::MayBlock(), base::TaskPriority::BACKGROUND}));
+    storage_->set_channel_id_service(std::make_unique<net::ChannelIDService>(
+        new net::DefaultChannelIDStore(channel_id_db.get())));
     storage_->set_http_server_properties(
         std::unique_ptr<net::HttpServerProperties>(
             new net::HttpServerPropertiesImpl()));
@@ -129,8 +139,8 @@ net::URLRequestContext* WebViewURLRequestContextGetter::GetURLRequestContext() {
     network_session_context.channel_id_service =
         url_request_context_->channel_id_service();
     network_session_context.net_log = url_request_context_->net_log();
-    network_session_context.proxy_service =
-        url_request_context_->proxy_service();
+    network_session_context.proxy_resolution_service =
+        url_request_context_->proxy_resolution_service();
     network_session_context.ssl_config_service =
         url_request_context_->ssl_config_service();
     network_session_context.http_auth_handler_factory =
@@ -144,21 +154,20 @@ net::URLRequestContext* WebViewURLRequestContextGetter::GetURLRequestContext() {
 
     base::FilePath cache_path = base_path_.Append(FILE_PATH_LITERAL("Cache"));
     std::unique_ptr<net::HttpCache::DefaultBackend> main_backend(
-        new net::HttpCache::DefaultBackend(net::DISK_CACHE,
-                                           net::CACHE_BACKEND_DEFAULT,
-                                           cache_path, 0, cache_task_runner_));
+        new net::HttpCache::DefaultBackend(
+            net::DISK_CACHE, net::CACHE_BACKEND_DEFAULT, cache_path, 0));
 
     storage_->set_http_network_session(
-        base::MakeUnique<net::HttpNetworkSession>(
+        std::make_unique<net::HttpNetworkSession>(
             net::HttpNetworkSession::Params(), network_session_context));
-    storage_->set_http_transaction_factory(base::MakeUnique<net::HttpCache>(
+    storage_->set_http_transaction_factory(std::make_unique<net::HttpCache>(
         storage_->http_network_session(), std::move(main_backend),
         true /* set_up_quic_server_info */));
 
     std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory(
         new net::URLRequestJobFactoryImpl());
     bool set_protocol = job_factory->SetProtocolHandler(
-        "data", base::MakeUnique<net::DataProtocolHandler>());
+        "data", std::make_unique<net::DataProtocolHandler>());
     DCHECK(set_protocol);
 
     storage_->set_job_factory(std::move(job_factory));

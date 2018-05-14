@@ -6,6 +6,7 @@
 #define ConsoleMessage_h
 
 #include "core/CoreExport.h"
+#include "core/dom/DOMNodeIds.h"
 #include "core/inspector/ConsoleTypes.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
@@ -13,7 +14,10 @@
 
 namespace blink {
 
+class DocumentLoader;
+class LocalFrame;
 class SourceLocation;
+class WorkerThread;
 
 class CORE_EXPORT ConsoleMessage final
     : public GarbageCollectedFinalized<ConsoleMessage> {
@@ -34,25 +38,29 @@ class CORE_EXPORT ConsoleMessage final
                                           MessageLevel,
                                           const String& message,
                                           const String& url,
+                                          DocumentLoader*,
                                           unsigned long request_identifier);
 
   // This creates message from WorkerMessageSource.
   static ConsoleMessage* CreateFromWorker(MessageLevel,
                                           const String& message,
                                           std::unique_ptr<SourceLocation>,
-                                          const String& worker_id);
+                                          WorkerThread*);
 
   ~ConsoleMessage();
 
   SourceLocation* Location() const;
-  unsigned long RequestIdentifier() const;
+  const String& RequestIdentifier() const;
   double Timestamp() const;
   MessageSource Source() const;
   MessageLevel Level() const;
   const String& Message() const;
   const String& WorkerId() const;
+  LocalFrame* Frame() const;
+  Vector<DOMNodeId>& Nodes();
+  void SetNodes(LocalFrame*, Vector<DOMNodeId> nodes);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   ConsoleMessage(MessageSource,
@@ -64,9 +72,11 @@ class CORE_EXPORT ConsoleMessage final
   MessageLevel level_;
   String message_;
   std::unique_ptr<SourceLocation> location_;
-  unsigned long request_identifier_;
+  String request_identifier_;
   double timestamp_;
   String worker_id_;
+  WeakMember<LocalFrame> frame_;
+  Vector<DOMNodeId> nodes_;
 };
 
 }  // namespace blink

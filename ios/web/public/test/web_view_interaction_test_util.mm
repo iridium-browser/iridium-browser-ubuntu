@@ -19,6 +19,9 @@
 #endif
 
 using web::NavigationManager;
+using testing::WaitUntilConditionOrTimeout;
+using testing::kWaitForUIElementTimeout;
+using testing::kWaitForJSCompletionTimeout;
 
 namespace web {
 namespace test {
@@ -40,23 +43,25 @@ std::unique_ptr<base::Value> ExecuteJavaScript(web::WebState* web_state,
                                  did_finish = true;
                                }));
 
-  bool completed = testing::WaitUntilConditionOrTimeout(
-      testing::kWaitForJSCompletionTimeout, ^{
-        return did_finish;
-      });
+  bool completed = WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
+    return did_finish;
+  });
   if (!completed) {
     return nullptr;
   }
 
   // As result is marked __block, this return call does a copy and not a move
   // (marking the variable as __block mean it is allocated in the block object
-  // and not the stack). Since the "return std::move()" pattern is discouraged
-  // use a local variable.
+  // and not the stack). Use an explicit move to a local variable.
   //
-  // Fixes the following compilation failure:
-  //   ../web_view_matchers.mm:ll:cc: error: call to implicitly-deleted copy
-  //       constructor of 'std::unique_ptr<base::Value>'
-  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
+  // Fixes the following compilation failures:
+  //   ../web_view_interaction_test_util.mm:58:10: error:
+  //       call to implicitly-deleted copy constructor of
+  //       'std::unique_ptr<base::Value>'
+  //
+  //   ../web_view_interaction_test_util.mm:58:10: error:
+  //       moving a local object in a return statement prevents copy elision
+  //       [-Werror,-Wpessimizing-move]
   std::unique_ptr<base::Value> stack_result = std::move(result);
   return stack_result;
 }
@@ -83,22 +88,21 @@ CGRect GetBoundingRectOfElementWithId(web::WebState* web_state,
 
   __block base::DictionaryValue const* rect = nullptr;
 
-  bool found =
-      testing::WaitUntilConditionOrTimeout(testing::kWaitForUIElementTimeout, ^{
-        std::unique_ptr<base::Value> value =
-            ExecuteJavaScript(web_state, kGetBoundsScript);
-        base::DictionaryValue* dictionary = nullptr;
-        if (value && value->GetAsDictionary(&dictionary)) {
-          std::string error;
-          if (dictionary->GetString("error", &error)) {
-            DLOG(ERROR) << "Error getting rect: " << error << ", retrying..";
-          } else {
-            rect = dictionary->DeepCopy();
-            return true;
-          }
-        }
-        return false;
-      });
+  bool found = WaitUntilConditionOrTimeout(kWaitForUIElementTimeout, ^{
+    std::unique_ptr<base::Value> value =
+        ExecuteJavaScript(web_state, kGetBoundsScript);
+    base::DictionaryValue* dictionary = nullptr;
+    if (value && value->GetAsDictionary(&dictionary)) {
+      std::string error;
+      if (dictionary->GetString("error", &error)) {
+        DLOG(ERROR) << "Error getting rect: " << error << ", retrying..";
+      } else {
+        rect = dictionary->DeepCopy();
+        return true;
+      }
+    }
+    return false;
+  });
 
   if (!found)
     return CGRectNull;
@@ -116,10 +120,12 @@ CGRect GetBoundingRectOfElementWithId(web::WebState* web_state,
 }
 
 // Returns whether the Javascript action specified by |action| ran on
-// |element_id| in the passed |web_state|.
+// |element_id| in the passed |web_state|. |error| can be nil, and will return
+// any error from executing JavaScript.
 bool RunActionOnWebViewElementWithId(web::WebState* web_state,
                                      const std::string& element_id,
-                                     ElementAction action) {
+                                     ElementAction action,
+                                     NSError* __autoreleasing* error) {
   CRWWebController* web_controller =
       static_cast<WebStateImpl*>(web_state)->GetWebController();
   const char* js_action = nullptr;
@@ -146,39 +152,52 @@ bool RunActionOnWebViewElementWithId(web::WebState* web_state,
                        element_id.c_str(), js_action];
   __block bool did_complete = false;
   __block bool element_found = false;
+  __block NSError* block_error = nil;
 
   // |executeUserJavaScript:completionHandler:| is no-op for app-specific URLs,
   // so simulate a user gesture by calling TouchTracking method.
   [web_controller touched:YES];
   [web_controller executeJavaScript:script
-                  completionHandler:^(id result, NSError*) {
+                  completionHandler:^(id result, NSError* error) {
                     did_complete = true;
                     element_found = [result boolValue];
+                    block_error = [error copy];
                   }];
 
-  testing::WaitUntilConditionOrTimeout(testing::kWaitForJSCompletionTimeout, ^{
+  bool js_finished = WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
     return did_complete;
   });
 
-  return element_found;
+  if (error) {
+    *error = block_error;
+  }
+
+  return js_finished && element_found;
 }
 
 bool TapWebViewElementWithId(web::WebState* web_state,
                              const std::string& element_id) {
   return RunActionOnWebViewElementWithId(web_state, element_id,
-                                         ELEMENT_ACTION_CLICK);
+                                         ELEMENT_ACTION_CLICK, nil);
+}
+
+bool TapWebViewElementWithId(web::WebState* web_state,
+                             const std::string& element_id,
+                             NSError* __autoreleasing* error) {
+  return RunActionOnWebViewElementWithId(web_state, element_id,
+                                         ELEMENT_ACTION_CLICK, error);
 }
 
 bool FocusWebViewElementWithId(web::WebState* web_state,
                                const std::string& element_id) {
   return RunActionOnWebViewElementWithId(web_state, element_id,
-                                         ELEMENT_ACTION_FOCUS);
+                                         ELEMENT_ACTION_FOCUS, nil);
 }
 
 bool SubmitWebViewFormWithId(web::WebState* web_state,
                              const std::string& form_id) {
   return RunActionOnWebViewElementWithId(web_state, form_id,
-                                         ELEMENT_ACTION_SUBMIT);
+                                         ELEMENT_ACTION_SUBMIT, nil);
 }
 
 }  // namespace test

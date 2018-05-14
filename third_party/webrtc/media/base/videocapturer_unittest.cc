@@ -13,15 +13,15 @@
 #include <memory>
 #include <vector>
 
-#include "webrtc/media/base/fakevideocapturer.h"
-#include "webrtc/media/base/fakevideorenderer.h"
-#include "webrtc/media/base/testutils.h"
-#include "webrtc/media/base/videocapturer.h"
-#include "webrtc/rtc_base/gunit.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/thread.h"
+#include "media/base/fakevideocapturer.h"
+#include "media/base/fakevideorenderer.h"
+#include "media/base/testutils.h"
+#include "media/base/videocapturer.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/thread.h"
 
-using cricket::FakeVideoCapturer;
+using cricket::FakeVideoCapturerWithTaskQueue;
 
 namespace {
 
@@ -42,8 +42,8 @@ class VideoCapturerTest
 
  protected:
   void InitCapturer(bool is_screencast) {
-    capturer_ = std::unique_ptr<FakeVideoCapturer>(
-        new FakeVideoCapturer(is_screencast));
+    capturer_ = std::unique_ptr<FakeVideoCapturerWithTaskQueue>(
+        new FakeVideoCapturerWithTaskQueue(is_screencast));
     capturer_->SignalStateChange.connect(this,
                                          &VideoCapturerTest::OnStateChange);
     capturer_->AddOrUpdateSink(&renderer_, rtc::VideoSinkWants());
@@ -58,7 +58,7 @@ class VideoCapturerTest
   cricket::CaptureState capture_state() { return capture_state_; }
   int num_state_changes() { return num_state_changes_; }
 
-  std::unique_ptr<cricket::FakeVideoCapturer> capturer_;
+  std::unique_ptr<FakeVideoCapturerWithTaskQueue> capturer_;
   cricket::CaptureState capture_state_;
   int num_state_changes_;
   cricket::FakeVideoRenderer renderer_;

@@ -62,8 +62,10 @@ bool CapabilitiesToDeviceInfo(const DeviceCapabilities& capabilities,
 extern const DeviceCapabilities kXboxGamepad;
 extern const DeviceCapabilities kHJCGamepad;
 extern const DeviceCapabilities kiBuffaloGamepad;
+extern const DeviceCapabilities kEveTouchScreen;
 extern const DeviceCapabilities kLinkKeyboard;
 extern const DeviceCapabilities kLinkTouchscreen;
+extern const DeviceCapabilities kLinkWithToolTypeTouchscreen;
 extern const DeviceCapabilities kLinkTouchpad;
 extern const DeviceCapabilities kHpUsbKeyboard;
 extern const DeviceCapabilities kHpUsbKeyboard_Extra;

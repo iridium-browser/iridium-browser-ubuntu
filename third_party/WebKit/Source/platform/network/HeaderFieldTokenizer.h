@@ -5,6 +5,7 @@
 #ifndef HeaderFieldTokenizer_h
 #define HeaderFieldTokenizer_h
 
+#include "platform/PlatformExport.h"
 #include "platform/network/ParsedContentHeaderFieldParameters.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -12,7 +13,7 @@ namespace blink {
 
 // Parses header fields into tokens, quoted strings and separators.
 // Commonly used by ParsedContent* classes.
-class HeaderFieldTokenizer final {
+class PLATFORM_EXPORT HeaderFieldTokenizer final {
   STACK_ALLOCATED();
 
  public:
@@ -28,6 +29,12 @@ class HeaderFieldTokenizer final {
   bool Consume(char);
   bool ConsumeToken(Mode, StringView& output);
   bool ConsumeTokenOrQuotedString(Mode, String& output);
+
+  // Consume all characters before (but excluding) any of the characters from
+  // the Vector parameter are found.
+  // Because we potentially have to iterate through the entire Vector for each
+  // character of the base string, the Vector should be small (< 3 members).
+  void ConsumeBeforeAnyCharMatch(Vector<LChar>);
 
   unsigned Index() const { return index_; }
   bool IsConsumed() const { return index_ >= input_.length(); }

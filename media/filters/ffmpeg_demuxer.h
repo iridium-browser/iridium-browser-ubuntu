@@ -105,6 +105,7 @@ class MEDIA_EXPORT FFmpegDemuxerStream : public DemuxerStream {
   void enable_negative_timestamp_fixups() {
     fixup_negative_timestamps_ = true;
   }
+  void enable_chained_ogg_fixups() { fixup_chained_ogg_ = true; }
 
   // DemuxerStream implementation.
   Type type() const override;
@@ -114,7 +115,6 @@ class MEDIA_EXPORT FFmpegDemuxerStream : public DemuxerStream {
   bool SupportsConfigChanges() override;
   AudioDecoderConfig audio_decoder_config() override;
   VideoDecoderConfig video_decoder_config() override;
-  VideoRotation video_rotation() override;
 
   bool IsEnabled() const;
   void SetEnabled(bool enabled, base::TimeDelta timestamp);
@@ -184,7 +184,6 @@ class MEDIA_EXPORT FFmpegDemuxerStream : public DemuxerStream {
   base::TimeDelta last_packet_timestamp_;
   base::TimeDelta last_packet_duration_;
   Ranges<base::TimeDelta> buffered_ranges_;
-  VideoRotation video_rotation_;
   bool is_enabled_;
   bool waiting_for_keyframe_;
   bool aborted_;
@@ -199,6 +198,7 @@ class MEDIA_EXPORT FFmpegDemuxerStream : public DemuxerStream {
 
   std::string encryption_key_id_;
   bool fixup_negative_timestamps_;
+  bool fixup_chained_ogg_;
 
   DISALLOW_COPY_AND_ASSIGN(FFmpegDemuxerStream);
 };

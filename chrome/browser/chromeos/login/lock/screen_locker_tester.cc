@@ -8,6 +8,7 @@
 
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -84,10 +85,10 @@ void LoginAttemptObserver::WaitForAttempt() {
 void LoginAttemptObserver::LoginAttempted() {
   login_attempted_ = true;
   if (waiting_)
-    base::MessageLoopForUI::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
-}  // anyonymous namespace
+}  // namespace
 
 namespace chromeos {
 
@@ -153,9 +154,8 @@ void WebUIScreenLockerTester::EnterPassword(const std::string& password) {
 
   // Attempt to sign in.
   LoginAttemptObserver login;
-  v = content::ExecuteScriptAndGetValue(
-      RenderViewHost()->GetMainFrame(),
-      "$('pod-row').pods[0].activate();");
+  v = content::ExecuteScriptAndGetValue(RenderViewHost()->GetMainFrame(),
+                                        "$('pod-row').pods[0].activate();");
   ASSERT_TRUE(v->GetAsBoolean(&result));
   ASSERT_TRUE(result);
 
@@ -163,8 +163,7 @@ void WebUIScreenLockerTester::EnterPassword(const std::string& password) {
   login.WaitForAttempt();
 }
 
-void WebUIScreenLockerTester::EmulateWindowManagerReady() {
-}
+void WebUIScreenLockerTester::EmulateWindowManagerReady() {}
 
 views::Widget* WebUIScreenLockerTester::GetWidget() const {
   return webui_screen_locker()->lock_window_;
@@ -190,15 +189,12 @@ content::WebUI* WebUIScreenLockerTester::webui() const {
   return webui;
 }
 
-ScreenLockerTester::ScreenLockerTester() {
-}
+ScreenLockerTester::ScreenLockerTester() {}
 
-ScreenLockerTester::~ScreenLockerTester() {
-}
+ScreenLockerTester::~ScreenLockerTester() {}
 
 bool ScreenLockerTester::IsLocked() {
-  return ScreenLocker::screen_locker_ &&
-      ScreenLocker::screen_locker_->locked_;
+  return ScreenLocker::screen_locker_ && ScreenLocker::screen_locker_->locked_;
 }
 
 void ScreenLockerTester::InjectStubUserContext(

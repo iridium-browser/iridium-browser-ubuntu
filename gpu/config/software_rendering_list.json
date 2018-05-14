@@ -1,6 +1,5 @@
 {
   "name": "software rendering list",
-  "version": "13.10",
   "entries": [
     {
       "id": 1,
@@ -129,6 +128,9 @@
         {
           "vendor_id": "0x1414",
           "device_id": ["0x02c1"]
+        },
+        {
+          "driver_vendor": "swiftshader"
         }
       ],
       "features": [
@@ -441,29 +443,6 @@
       ]
     },
     {
-      "comment": [
-        "Panel fitting is only used with OS_CHROMEOS. To avoid displaying an ",
-        "error in chrome:gpu on every other platform, this blacklist entry ",
-        "needs to only match on chromeos. The drawback is that panel_fitting ",
-        "will not appear to be blacklisted if accidentally queried on ",
-        "non-chromeos."
-      ],
-      "id": 57,
-      "description": "Chrome OS panel fitting is only supported for Intel IVB and SNB Graphics Controllers",
-      "os": {
-        "type": "chromeos"
-      },
-      "exceptions": [
-        {
-          "vendor_id": "0x8086",
-          "device_id": ["0x0106", "0x0116", "0x0166"]
-        }
-      ],
-      "features": [
-        "panel_fitting"
-      ]
-    },
-    {
       "id": 59,
       "description": "NVidia driver 8.15.11.8593 is crashy on Windows",
       "cr_bugs": [155749],
@@ -496,8 +475,8 @@
     },
     {
       "id": 68,
-      "description": "VMware Fusion 4 has corrupt rendering with Win Vista+",
-      "cr_bugs": [169470],
+      "description": "VMware has corrupt rendering on Windows",
+      "cr_bugs": [169470, 754435],
       "os": {
         "type": "win",
         "version": {
@@ -506,10 +485,6 @@
         }
       },
       "vendor_id": "0x15ad",
-      "driver_version": {
-        "op": "<=",
-        "value": "7.14.1.1134"
-      },
       "features": [
         "all"
       ]
@@ -882,11 +857,15 @@
     {
       "id": 104,
       "description": "GPU raster broken on PowerVR Rogue",
-      "cr_bugs": [436331, 483574],
+      "cr_bugs": [436331, 483574, 684586],
       "os": {
         "type": "android"
       },
       "gl_renderer": "PowerVR Rogue.*",
+      "driver_version": {
+        "op": "<",
+        "value": "1.8"
+      },
       "features": [
         "accelerated_2d_canvas",
         "gpu_rasterization"
@@ -1007,12 +986,13 @@
     {
       "id": 112,
       "description": "Intel HD 3000 driver crashes frequently on Mac",
-      "cr_bugs": [592130],
+      "cr_bugs": [592130, 661596],
       "os": {
         "type": "macosx"
       },
       "vendor_id": "0x8086",
       "device_id": ["0x0116", "0x0126"],
+      "multi_gpu_category": "any",
       "features": [
         "all"
       ]
@@ -1245,7 +1225,7 @@
         "value": "4.1"
       },
       "features": [
-        "webgl2"
+        "accelerated_webgl2"
       ]
     },
     {
@@ -1330,6 +1310,9 @@
         },
         {
           "gl_renderer": ".*Gallium.*llvmpipe.*"
+        },
+        {
+          "gl_renderer": "Mesa OffScreen"
         }
       ],
       "features": [
@@ -1382,16 +1365,6 @@
       ]
     },
     {
-      "id": 138,
-      "description": "Accelerated video encode is unavailable on Linux",
-      "os": {
-        "type": "linux"
-      },
-      "features": [
-        "accelerated_video_encode"
-      ]
-    },
-    {
       "id": 139,
       "description": "GPU Rasterization is disabled on pre-GCN AMD cards",
       "cr_bugs": [643850],
@@ -1415,7 +1388,7 @@
       "cr_bugs": [449116, 698197],
       "gl_renderer": "Adreno \\(TM\\) 3.*",
       "features": [
-        "webgl2"
+        "accelerated_webgl2"
       ]
     },
     {
@@ -1429,7 +1402,7 @@
         }
       },
       "features": [
-        "webgl2"
+        "accelerated_webgl2"
       ]
     },
     {
@@ -1445,7 +1418,7 @@
         "value": "8.17.12.6973"
       },
       "features": [
-        "webgl2"
+        "accelerated_webgl2"
       ]
     },
     {
@@ -1457,7 +1430,7 @@
       },
       "vendor_id": "0x102b",
       "features": [
-        "webgl2"
+        "accelerated_webgl2"
       ]
     },
     {
@@ -1473,7 +1446,7 @@
         "value": "2011.1"
       },
       "features": [
-        "webgl2"
+        "accelerated_webgl2"
       ]
     },
     {
@@ -1489,19 +1462,23 @@
         "value": "8.16"
       },
       "features": [
-        "webgl2"
+        "accelerated_webgl2"
       ]
     },
     {
       "id": 146,
       "description": "Disable D3D11/WebGL2 on AMD switchable graphics",
-      "cr_bugs": [451420],
+      "cr_bugs": [451420, 755722],
       "os": {
         "type": "win"
       },
+      "driver_date": {
+        "op": "<",
+        "value": "2016.6"
+      },
       "multi_gpu_style": "amd_switchable",
       "features": [
-        "webgl2"
+        "accelerated_webgl2"
       ]
     },
     {
@@ -1532,9 +1509,77 @@
       "features": [
         "gpu_rasterization"
       ]
+    },
+    {
+      "id": 149,
+      "description": "Adreno 420 support for EXT_multisampled_render_to_texture is buggy on Android < 5.1",
+      "comment": "Corresponds to GPU driver bug #116",
+      "cr_bugs": [490379, 767913],
+      "os": {
+        "type": "android",
+        "version": {
+          "op": "<",
+          "value": "5.1"
+        }
+      },
+      "gl_renderer": "Adreno \\(TM\\) 4.*",
+      "features": [
+        "accelerated_webgl2"
+      ]
+    },
+    {
+      "id": 150,
+      "description": "Macs with NVidia GPUs experience rendering issues on High Sierra",
+      "cr_bugs": [773705],
+      "os": {
+        "type": "macosx",
+        "version": {
+          "op": ">=",
+          "value": "10.13"
+        }
+      },
+      "vendor_id": "0x10de",
+      "multi_gpu_category": "any",
+      "features": [
+        "gpu_rasterization"
+      ]
+    },
+    {
+      "id": 151,
+      "description": "Rendering artifacts on older macOS releases and Intel GPUs",
+      "cr_bugs": [794819],
+      "os": {
+        "type": "macosx",
+        "version": {
+          "op": "<=",
+          "value": "10.11"
+        }
+      },
+      "vendor_id": "0x8086",
+      "multi_gpu_category": "any",
+      "features": [
+        "accelerated_2d_canvas",
+        "gpu_rasterization"
+      ]
+    },
+    {
+      "id": 152,
+      "description": "Test entry where all features except WebGL blacklisted",
+      "test_group": 1,
+      "features": [
+        "all",
+        {"exceptions": [
+          "accelerated_webgl"
+        ]}
+      ]
+    },
+    {
+      "id": 153,
+      "description": "Test entry where WebGL is blacklisted",
+      "test_group": 2,
+      "features": [
+        "accelerated_webgl"
+      ]
     }
-  ],
-  "comment": [
-    "Please update the version number on top whenever you change this file"
   ]
 }

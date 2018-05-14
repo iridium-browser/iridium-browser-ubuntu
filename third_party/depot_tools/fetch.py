@@ -26,6 +26,8 @@ import subprocess
 import sys
 import textwrap
 
+import git_common
+
 from distutils import spawn
 
 
@@ -59,11 +61,15 @@ class Checkout(object):
   def sync(self):
     pass
 
-  def run(self, cmd, **kwargs):
+  def run(self, cmd, return_stdout=False, **kwargs):
     print 'Running: %s' % (' '.join(pipes.quote(x) for x in cmd))
     if self.options.dry_run:
       return ''
-    return subprocess.check_output(cmd, **kwargs)
+    if return_stdout:
+      return subprocess.check_output(cmd, **kwargs)
+    else:
+      subprocess.check_call(cmd, **kwargs)
+      return ''
 
 
 class GclientCheckout(Checkout):
@@ -77,7 +83,7 @@ class GclientCheckout(Checkout):
 
   def exists(self):
     try:
-      gclient_root = self.run_gclient('root').strip()
+      gclient_root = self.run_gclient('root', return_stdout=True).strip()
       return (os.path.exists(os.path.join(gclient_root, '.gclient')) or
               os.path.exists(os.path.join(os.getcwd(), self.root)))
     except subprocess.CalledProcessError:
@@ -88,11 +94,10 @@ class GclientCheckout(Checkout):
 class GitCheckout(Checkout):
 
   def run_git(self, *cmd, **kwargs):
-    if sys.platform == 'win32' and not spawn.find_executable('git'):
-      git_path = os.path.join(SCRIPT_PATH, 'git.bat')
-    else:
-      git_path = 'git'
-    return self.run((git_path,) + cmd, **kwargs)
+    print 'Running: git %s' % (' '.join(pipes.quote(x) for x in cmd))
+    if self.options.dry_run:
+      return ''
+    return git_common.run(*cmd, **kwargs)
 
 
 class GclientGitCheckout(GclientCheckout, GitCheckout):
@@ -139,9 +144,10 @@ class GclientGitCheckout(GclientCheckout, GitCheckout):
         'submodule', 'foreach',
         'git config -f $toplevel/.git/config submodule.$name.ignore all',
         cwd=wd)
-    self.run_git(
-        'config', '--add', 'remote.origin.fetch',
-        '+refs/tags/*:refs/tags/*', cwd=wd)
+    if not self.options.no_history:
+      self.run_git(
+          'config', '--add', 'remote.origin.fetch',
+          '+refs/tags/*:refs/tags/*', cwd=wd)
     self.run_git('config', 'diff.ignoreSubmodules', 'all', cwd=wd)
 
 

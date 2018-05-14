@@ -4,7 +4,12 @@
 
 #include "ash/ash_touch_exploration_manager_chromeos.h"
 
-#include "ash/accessibility_delegate.h"
+#include <memory>
+#include <vector>
+
+#include "ash/accessibility/accessibility_controller.h"
+#include "ash/accessibility/accessibility_focus_ring_controller.h"
+#include "ash/accessibility/touch_exploration_controller.h"
 #include "ash/keyboard/keyboard_observer_register.h"
 #include "ash/public/cpp/app_types.h"
 #include "ash/root_window_controller.h"
@@ -12,24 +17,28 @@
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "chromeos/audio/chromeos_sounds.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/chromeos_switches.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/chromeos/touch_exploration_controller.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/wm/public/activation_client.h"
 
 namespace ash {
 
+namespace {
+
+AccessibilityController* GetA11yController() {
+  return Shell::Get()->accessibility_controller();
+}
+
+}  // namespace
+
 AshTouchExplorationManager::AshTouchExplorationManager(
     RootWindowController* root_window_controller)
     : root_window_controller_(root_window_controller),
       audio_handler_(chromeos::CrasAudioHandler::Get()),
-      enable_chromevox_arc_support_(
-          base::CommandLine::ForCurrentProcess()->HasSwitch(
-              chromeos::switches::kEnableChromeVoxArcSupport)),
       keyboard_observer_(this) {
   Shell::Get()->AddShellObserver(this);
   Shell::Get()->system_tray_notifier()->AddAccessibilityObserver(this);
@@ -48,7 +57,7 @@ AshTouchExplorationManager::~AshTouchExplorationManager() {
   Shell::Get()->RemoveShellObserver(this);
 }
 
-void AshTouchExplorationManager::OnAccessibilityModeChanged(
+void AshTouchExplorationManager::OnAccessibilityStatusChanged(
     AccessibilityNotificationVisibility notify) {
   UpdateTouchExplorationState();
 }
@@ -66,8 +75,8 @@ void AshTouchExplorationManager::SetOutputLevel(int volume) {
 }
 
 void AshTouchExplorationManager::SilenceSpokenFeedback() {
-  if (Shell::Get()->accessibility_delegate()->IsSpokenFeedbackEnabled())
-    Shell::Get()->accessibility_delegate()->SilenceSpokenFeedback();
+  if (GetA11yController()->IsSpokenFeedbackEnabled())
+    GetA11yController()->SilenceSpokenFeedback();
 }
 
 void AshTouchExplorationManager::PlayVolumeAdjustEarcon() {
@@ -75,29 +84,25 @@ void AshTouchExplorationManager::PlayVolumeAdjustEarcon() {
     return;
   if (!audio_handler_->IsOutputMuted() &&
       audio_handler_->GetOutputVolumePercent() != 100) {
-    Shell::Get()->accessibility_delegate()->PlayEarcon(
-        chromeos::SOUND_VOLUME_ADJUST);
+    GetA11yController()->PlayEarcon(chromeos::SOUND_VOLUME_ADJUST);
   }
 }
 
 void AshTouchExplorationManager::PlayPassthroughEarcon() {
-  Shell::Get()->accessibility_delegate()->PlayEarcon(
-      chromeos::SOUND_PASSTHROUGH);
+  GetA11yController()->PlayEarcon(chromeos::SOUND_PASSTHROUGH);
 }
 
 void AshTouchExplorationManager::PlayExitScreenEarcon() {
-  Shell::Get()->accessibility_delegate()->PlayEarcon(
-      chromeos::SOUND_EXIT_SCREEN);
+  GetA11yController()->PlayEarcon(chromeos::SOUND_EXIT_SCREEN);
 }
 
 void AshTouchExplorationManager::PlayEnterScreenEarcon() {
-  Shell::Get()->accessibility_delegate()->PlayEarcon(
-      chromeos::SOUND_ENTER_SCREEN);
+  GetA11yController()->PlayEarcon(chromeos::SOUND_ENTER_SCREEN);
 }
 
 void AshTouchExplorationManager::HandleAccessibilityGesture(
-    ui::AXGesture gesture) {
-  Shell::Get()->accessibility_delegate()->HandleAccessibilityGesture(gesture);
+    ax::mojom::Gesture gesture) {
+  GetA11yController()->HandleAccessibilityGesture(gesture);
 }
 
 void AshTouchExplorationManager::OnDisplayMetricsChanged(
@@ -111,26 +116,37 @@ void AshTouchExplorationManager::OnDisplayMetricsChanged(
 }
 
 void AshTouchExplorationManager::OnTwoFingerTouchStart() {
-  AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
-  delegate->OnTwoFingerTouchStart();
+  GetA11yController()->OnTwoFingerTouchStart();
 }
 
 void AshTouchExplorationManager::OnTwoFingerTouchStop() {
-  AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
-  delegate->OnTwoFingerTouchStop();
+  GetA11yController()->OnTwoFingerTouchStop();
 }
 
 void AshTouchExplorationManager::PlaySpokenFeedbackToggleCountdown(
     int tick_count) {
-  AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
-  if (delegate->ShouldToggleSpokenFeedbackViaTouch())
-    delegate->PlaySpokenFeedbackToggleCountdown(tick_count);
+  GetA11yController()->ShouldToggleSpokenFeedbackViaTouch(base::BindOnce(
+      [](int tick_count, bool should_toggle) {
+        if (!should_toggle)
+          return;
+        GetA11yController()->PlaySpokenFeedbackToggleCountdown(tick_count);
+      },
+      tick_count));
+}
+
+void AshTouchExplorationManager::PlayTouchTypeEarcon() {
+  GetA11yController()->PlayEarcon(chromeos::SOUND_TOUCH_TYPE);
 }
 
 void AshTouchExplorationManager::ToggleSpokenFeedback() {
-  AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
-  if (delegate->ShouldToggleSpokenFeedbackViaTouch())
-    delegate->ToggleSpokenFeedback(ash::A11Y_NOTIFICATION_SHOW);
+  GetA11yController()->ShouldToggleSpokenFeedbackViaTouch(
+      base::BindOnce([](bool should_toggle) {
+        if (!should_toggle)
+          return;
+        GetA11yController()->SetSpokenFeedbackEnabled(
+            !GetA11yController()->IsSpokenFeedbackEnabled(),
+            ash::A11Y_NOTIFICATION_SHOW);
+      }));
 }
 
 void AshTouchExplorationManager::OnWindowActivated(
@@ -148,7 +164,7 @@ void AshTouchExplorationManager::SetTouchAccessibilityAnchorPoint(
   }
 }
 
-void AshTouchExplorationManager::OnKeyboardBoundsChanging(
+void AshTouchExplorationManager::OnKeyboardVisibleBoundsChanged(
     const gfx::Rect& new_bounds) {
   UpdateTouchExplorationState();
 }
@@ -170,23 +186,22 @@ void AshTouchExplorationManager::UpdateTouchExplorationState() {
   // See crbug.com/603745 for more details.
   const bool pass_through_surface =
       wm::GetActiveWindow() &&
-      wm::GetActiveWindow()->GetProperty(aura::client::kAppType) ==
-          static_cast<int>(ash::AppType::ARC_APP) &&
-      !enable_chromevox_arc_support_;
+      wm::GetActiveWindow()->GetProperty(
+          aura::client::kAccessibilityTouchExplorationPassThrough);
 
   const bool spoken_feedback_enabled =
-      Shell::Get()->accessibility_delegate()->IsSpokenFeedbackEnabled();
+      GetA11yController()->IsSpokenFeedbackEnabled();
 
   if (!touch_accessibility_enabler_) {
     // Always enable gesture to toggle spoken feedback.
-    touch_accessibility_enabler_.reset(new ui::TouchAccessibilityEnabler(
+    touch_accessibility_enabler_.reset(new TouchAccessibilityEnabler(
         root_window_controller_->GetRootWindow(), this));
   }
 
   if (spoken_feedback_enabled) {
     if (!touch_exploration_controller_.get()) {
       touch_exploration_controller_ =
-          base::MakeUnique<ui::TouchExplorationController>(
+          std::make_unique<TouchExplorationController>(
               root_window_controller_->GetRootWindow(), this,
               touch_accessibility_enabler_->GetWeakPtr());
     }
@@ -197,7 +212,10 @@ void AshTouchExplorationManager::UpdateTouchExplorationState() {
       const gfx::Rect work_area = display.work_area();
       touch_exploration_controller_->SetExcludeBounds(work_area);
       SilenceSpokenFeedback();
-      Shell::Get()->accessibility_delegate()->ClearFocusHighlight();
+      // Clear the focus highlight.
+      AccessibilityFocusRingController::GetInstance()->SetFocusRing(
+          std::vector<gfx::Rect>(),
+          AccessibilityFocusRingController::PERSIST_FOCUS_RING);
     } else {
       touch_exploration_controller_->SetExcludeBounds(gfx::Rect());
     }

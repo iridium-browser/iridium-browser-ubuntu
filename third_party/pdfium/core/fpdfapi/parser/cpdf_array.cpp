@@ -14,13 +14,13 @@
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
+#include "core/fxcrt/fx_stream.h"
 #include "third_party/base/logging.h"
 #include "third_party/base/stl_util.h"
 
 CPDF_Array::CPDF_Array() {}
 
-CPDF_Array::CPDF_Array(const CFX_WeakPtr<CFX_ByteStringPool>& pPool)
-    : m_pPool(pPool) {}
+CPDF_Array::CPDF_Array(const WeakPtr<ByteStringPool>& pPool) : m_pPool(pPool) {}
 
 CPDF_Array::~CPDF_Array() {
   // Break cycles for cyclic references.
@@ -99,15 +99,15 @@ CPDF_Object* CPDF_Array::GetDirectObjectAt(size_t i) const {
   return m_Objects[i]->GetDirect();
 }
 
-CFX_ByteString CPDF_Array::GetStringAt(size_t i) const {
+ByteString CPDF_Array::GetStringAt(size_t i) const {
   if (i >= m_Objects.size())
-    return CFX_ByteString();
+    return ByteString();
   return m_Objects[i]->GetString();
 }
 
-CFX_WideString CPDF_Array::GetUnicodeTextAt(size_t i) const {
+WideString CPDF_Array::GetUnicodeTextAt(size_t i) const {
   if (i >= m_Objects.size())
-    return CFX_WideString();
+    return WideString();
   return m_Objects[i]->GetUnicodeText();
 }
 
@@ -142,20 +142,13 @@ CPDF_Array* CPDF_Array::GetArrayAt(size_t i) const {
   return ToArray(GetDirectObjectAt(i));
 }
 
-void CPDF_Array::RemoveAt(size_t i) {
-  if (i < m_Objects.size())
-    m_Objects.erase(m_Objects.begin() + i);
-}
-
 void CPDF_Array::Clear() {
   m_Objects.clear();
 }
 
-void CPDF_Array::Truncate(size_t nNewSize) {
-  if (nNewSize >= m_Objects.size())
-    return;
-
-  m_Objects.resize(nNewSize);
+void CPDF_Array::RemoveAt(size_t i) {
+  if (i < m_Objects.size())
+    m_Objects.erase(m_Objects.begin() + i);
 }
 
 void CPDF_Array::ConvertToIndirectObjectAt(size_t i,

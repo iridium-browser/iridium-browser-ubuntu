@@ -5,6 +5,8 @@
 #ifndef IOS_WEB_PUBLIC_TEST_WEB_TEST_H_
 #define IOS_WEB_PUBLIC_TEST_WEB_TEST_H_
 
+#include <memory>
+
 #include "ios/web/public/test/fakes/test_browser_state.h"
 #include "ios/web/public/test/scoped_testing_web_client.h"
 #include "ios/web/public/test/test_web_thread_bundle.h"
@@ -13,22 +15,21 @@
 namespace web {
 
 class BrowserState;
-class TestWebClient;
+class WebClient;
 class WebTestRenderProcessCrashObserver;
 
 // A test fixture for web tests that need a minimum environment set up that
 // mimics a web embedder.
 class WebTest : public PlatformTest {
  protected:
-  WebTest();
+  explicit WebTest(TestWebThreadBundle::Options options =
+                       TestWebThreadBundle::Options::DEFAULT);
+  WebTest(std::unique_ptr<web::WebClient> web_client,
+          TestWebThreadBundle::Options = TestWebThreadBundle::Options::DEFAULT);
   ~WebTest() override;
 
-  // PlatformTest methods.
-  void SetUp() override;
-  void TearDown() override;
-
   // Returns the WebClient that is used for testing.
-  TestWebClient* GetWebClient();
+  virtual web::WebClient* GetWebClient();
 
   // Returns the BrowserState that is used for testing.
   virtual BrowserState* GetBrowserState();

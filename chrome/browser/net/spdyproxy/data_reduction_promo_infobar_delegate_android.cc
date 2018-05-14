@@ -21,7 +21,7 @@ void DataReductionPromoInfoBarDelegateAndroid::Create(
   infobar_service->AddInfoBar(
       DataReductionPromoInfoBarDelegateAndroid::CreateInfoBar(
           infobar_service,
-          base::MakeUnique<DataReductionPromoInfoBarDelegateAndroid>()));
+          std::make_unique<DataReductionPromoInfoBarDelegateAndroid>()));
 }
 
 DataReductionPromoInfoBarDelegateAndroid::
@@ -66,8 +66,9 @@ bool DataReductionPromoInfoBarDelegateAndroid::Accept() {
 }
 
 // JNI for DataReductionPromoInfoBarDelegate.
-void Launch(JNIEnv* env,
-            const JavaParamRef<jclass>& clazz,
-            const JavaParamRef<jobject>& jweb_contents) {
+void JNI_DataReductionPromoInfoBarDelegate_Launch(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& jweb_contents) {
   DataReductionPromoInfoBarDelegateAndroid::Launch(env, jweb_contents);
 }

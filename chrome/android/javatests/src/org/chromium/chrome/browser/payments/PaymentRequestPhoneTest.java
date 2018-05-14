@@ -22,7 +22,6 @@ import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.concurrent.ExecutionException;
@@ -32,10 +31,7 @@ import java.util.concurrent.TimeoutException;
  * A payment integration test for a merchant that requests phone number.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestPhoneTest implements MainActivityStartCallback {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
@@ -144,12 +140,12 @@ public class PaymentRequestPhoneTest implements MainActivityStartCallback {
 
     /**
      * Test that ending a payment request that requires only the shipping address results in the
-     * appropriate metric being logged in the PaymentRequest.RequestedInformation histogram.
+     * appropriate metric being logged in the PaymentRequest.Events.
      */
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testRequestedInformationMetric()
+    public void testPaymentRequestEventsMetric()
             throws InterruptedException, ExecutionException, TimeoutException {
         // Start and abort the Payment Request.
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
@@ -157,11 +153,11 @@ public class PaymentRequestPhoneTest implements MainActivityStartCallback {
                 R.id.close_button, mPaymentRequestTestRule.getDismissed());
         mPaymentRequestTestRule.expectResultContains(new String[] {"Request cancelled"});
 
-        // Make sure that only the appropriate enum value was logged.
-        for (int i = 0; i < RequestedInformation.MAX; ++i) {
-            Assert.assertEquals((i == RequestedInformation.PHONE ? 1 : 0),
-                    RecordHistogram.getHistogramValueCountForTesting(
-                            "PaymentRequest.RequestedInformation", i));
-        }
+        int expectedSample = Event.SHOWN | Event.USER_ABORTED | Event.HAD_INITIAL_FORM_OF_PAYMENT
+                | Event.HAD_NECESSARY_COMPLETE_SUGGESTIONS | Event.REQUEST_PAYER_PHONE
+                | Event.REQUEST_METHOD_BASIC_CARD | Event.REQUEST_METHOD_OTHER;
+        Assert.assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.Events", expectedSample));
     }
 }

@@ -1,5 +1,0 @@
-include_rules = [
-  "+net",
-  "+third_party/leveldatabase",
-  "+components/data_use_measurement/core",
-]

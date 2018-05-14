@@ -5,11 +5,13 @@
 #ifndef FirstMeaningfulPaintDetector_h
 #define FirstMeaningfulPaintDetector_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/paint/PaintEvent.h"
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/Time.h"
+#include "public/platform/WebLayerTreeView.h"
 
 namespace blink {
 
@@ -22,7 +24,6 @@ class PaintTiming;
 // See https://goo.gl/vpaxv6 and http://goo.gl/TEiMi4 for more details.
 class CORE_EXPORT FirstMeaningfulPaintDetector
     : public GarbageCollectedFinalized<FirstMeaningfulPaintDetector> {
-  WTF_MAKE_NONCOPYABLE(FirstMeaningfulPaintDetector);
 
  public:
   // Used by FrameView to keep track of the number of layout objects created
@@ -40,7 +41,7 @@ class CORE_EXPORT FirstMeaningfulPaintDetector
   static FirstMeaningfulPaintDetector& From(Document&);
 
   FirstMeaningfulPaintDetector(PaintTiming*, Document&);
-  virtual ~FirstMeaningfulPaintDetector() {}
+  virtual ~FirstMeaningfulPaintDetector() = default;
 
   void MarkNextPaintAsMeaningfulIfNeeded(const LayoutObjectCounter&,
                                          int contents_height_before_layout,
@@ -49,14 +50,21 @@ class CORE_EXPORT FirstMeaningfulPaintDetector
   void NotifyInputEvent();
   void NotifyPaint();
   void CheckNetworkStable();
-  void ReportSwapTime(PaintEvent, bool did_swap, double timestamp);
+  void ReportSwapTime(PaintEvent, WebLayerTreeView::SwapResult, double);
+  void NotifyFirstContentfulPaint(TimeTicks swap_stamp);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   enum HadUserInput { kNoUserInput, kHadUserInput, kHadUserInputEnumMax };
 
  private:
   friend class FirstMeaningfulPaintDetectorTest;
+
+  enum DeferFirstMeaningfulPaint {
+    kDoNotDefer,
+    kDeferOutstandingSwapPromises,
+    kDeferFirstContentfulPaintNotSet
+  };
 
   // The page is n-quiet if there are no more than n active network requests for
   // this duration of time.
@@ -70,6 +78,7 @@ class CORE_EXPORT FirstMeaningfulPaintDetector
   void Network2QuietTimerFired(TimerBase*);
   void ReportHistograms();
   void RegisterNotifySwapTime(PaintEvent);
+  void SetFirstMeaningfulPaint(TimeTicks stamp, TimeTicks swap_stamp);
 
   bool next_paint_is_meaningful_ = false;
   HadUserInput had_user_input_ = kNoUserInput;
@@ -77,19 +86,21 @@ class CORE_EXPORT FirstMeaningfulPaintDetector
       kNoUserInput;
 
   Member<PaintTiming> paint_timing_;
-  double provisional_first_meaningful_paint_ = 0.0;
-  double provisional_first_meaningful_paint_swap_ = 0.0;
+  TimeTicks provisional_first_meaningful_paint_;
+  TimeTicks provisional_first_meaningful_paint_swap_;
   double max_significance_so_far_ = 0.0;
   double accumulated_significance_while_having_blank_text_ = 0.0;
   unsigned prev_layout_object_count_ = 0;
   bool seen_first_meaningful_paint_candidate_ = false;
   bool network0_quiet_reached_ = false;
   bool network2_quiet_reached_ = false;
-  double first_meaningful_paint0_quiet_ = 0.0;
-  double first_meaningful_paint2_quiet_ = 0.0;
-  double first_meaningful_paint2_quiet_swap_ = 0.0;
+  TimeTicks first_meaningful_paint0_quiet_;
+  TimeTicks first_meaningful_paint2_quiet_;
+  unsigned outstanding_swap_promise_count_ = 0;
+  DeferFirstMeaningfulPaint defer_first_meaningful_paint_ = kDoNotDefer;
   TaskRunnerTimer<FirstMeaningfulPaintDetector> network0_quiet_timer_;
   TaskRunnerTimer<FirstMeaningfulPaintDetector> network2_quiet_timer_;
+  DISALLOW_COPY_AND_ASSIGN(FirstMeaningfulPaintDetector);
 };
 
 }  // namespace blink

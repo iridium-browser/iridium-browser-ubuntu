@@ -6,10 +6,10 @@
 
 #include <math.h>  // For floor()
 
+#include <memory>
 #include <utility>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -87,8 +87,7 @@ void PopulateBookmarkTreeNode(
         new double(floor(node->date_added().ToDoubleT() * 1000)));
   }
 
-  if (bookmarks::IsDescendantOf(node, managed->managed_node()) ||
-      bookmarks::IsDescendantOf(node, managed->supervised_node())) {
+  if (bookmarks::IsDescendantOf(node, managed->managed_node())) {
     out_bookmark_tree_node->unmodifiable =
         api::bookmarks::BOOKMARK_TREE_NODE_UNMODIFIABLE_MANAGED;
   }
@@ -135,8 +134,7 @@ bool RemoveNode(BookmarkModel* model,
     *error = keys::kModifySpecialError;
     return false;
   }
-  if (bookmarks::IsDescendantOf(node, managed->managed_node()) ||
-      bookmarks::IsDescendantOf(node, managed->supervised_node())) {
+  if (bookmarks::IsDescendantOf(node, managed->managed_node())) {
     *error = keys::kModifyManagedError;
     return false;
   }
@@ -155,11 +153,11 @@ void GetMetaInfo(const BookmarkNode& node,
     return;
 
   const BookmarkNode::MetaInfoMap* meta_info = node.GetMetaInfoMap();
-  auto value = base::MakeUnique<base::DictionaryValue>();
+  auto value = std::make_unique<base::DictionaryValue>();
   if (meta_info) {
     BookmarkNode::MetaInfoMap::const_iterator itr;
     for (itr = meta_info->begin(); itr != meta_info->end(); ++itr) {
-      value->SetStringWithoutPathExpansion(itr->first, itr->second);
+      value->SetKey(itr->first, base::Value(itr->second));
     }
   }
   id_to_meta_info_map->Set(base::Int64ToString(node.id()), std::move(value));

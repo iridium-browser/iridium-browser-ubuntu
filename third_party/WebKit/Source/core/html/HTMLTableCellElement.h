@@ -50,15 +50,18 @@ class CORE_EXPORT HTMLTableCellElement final : public HTMLTablePartElement {
   const AtomicString& Headers() const;
   void setRowSpan(unsigned);
 
+  bool HasNonInBodyInsertionMode() const override { return true; }
+
  private:
   HTMLTableCellElement(const QualifiedName&, Document&);
 
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
-  const StylePropertySet* AdditionalPresentationAttributeStyle() override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
+  const CSSPropertyValueSet* AdditionalPresentationAttributeStyle() override;
 
   bool IsURLAttribute(const Attribute&) const override;
   bool HasLegalLinkAttribute(const QualifiedName&) const override;

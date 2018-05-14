@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -76,6 +77,7 @@ import time
 
 from chromite.lib import auto_update_util
 from chromite.cli import command
+from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import dev_server_wrapper as ds_wrapper
@@ -108,6 +110,9 @@ ERROR_MSG_IN_LOADING_LIB = 'python: error while loading shared libraries'
 # 2. for some retriable commands to be retried.
 MAX_RETRY = 5
 
+# Number of times to retry update_engine_client --status. See crbug.com/744212.
+UPDATE_ENGINE_STATUS_RETRY = 30
+
 # The delay between retriable tasks.
 DELAY_SEC_FOR_RETRY = 5
 
@@ -117,6 +122,15 @@ THIRD_PARTY_PKG_DIR = '/usr/lib/python2.7/dist-packages/'
 # Third-party package list
 THIRD_PARTY_PKG_LIST = ['cherrypy', 'google/protobuf']
 
+# update_payload path from update_engine.
+UPDATE_PAYLOAD_DIR = os.path.join(
+    constants.UPDATE_ENGINE_SCRIPTS_PATH, 'update_payload')
+
+# Number of seconds to wait for the post check version to settle.
+POST_CHECK_SETTLE_SECONDS = 15
+
+# Number of seconds to delay between post check retries.
+POST_CHECK_RETRY_SECONDS = 5
 
 class ChromiumOSUpdateError(Exception):
   """Thrown when there is a general ChromiumOS-specific update error."""
@@ -142,6 +156,10 @@ class DevserverCannotStartError(ChromiumOSUpdateError):
   """Raised when devserver cannot restart after stateful update."""
 
 
+class RebootVerificationError(ChromiumOSUpdateError):
+  """Raised for failing to reboot errors."""
+
+
 class BaseUpdater(object):
   """The base updater class."""
   def __init__(self, device, payload_dir):
@@ -165,6 +183,7 @@ class ChromiumOSFlashUpdater(BaseUpdater):
   REMOTE_UPDATE_ENGINE_LOGFILE_PATH = '/var/log/update_engine.log'
   REMOTE_PROVISION_FAILED_FILE_PATH = '/var/tmp/provision_failed'
   REMOTE_HOSTLOG_FILE_PATH = '/var/log/devserver_hostlog'
+  REMOTE_QUICK_PROVISION_LOGFILE_PATH = '/var/log/quick-provision.log'
 
   UPDATE_CHECK_INTERVAL_PROGRESSBAR = 0.5
   UPDATE_CHECK_INTERVAL_NORMAL = 10
@@ -175,11 +194,19 @@ class ChromiumOSFlashUpdater(BaseUpdater):
       'update_engine_performance_monitor.py'
   REMOTE_UPDATE_ENGINE_PERF_RESULTS_PATH = '/var/log/perf_data_results.json'
 
+  # `mode` parameter when copying payload files to the DUT.
+  PAYLOAD_MODE_PARALLEL = 'parallel'
+  PAYLOAD_MODE_SCP = 'scp'
+
+  # Related to crbug.com/276094: Restore to 5 mins once the 'host did not
+  # return from reboot' bug is solved.
+  REBOOT_TIMEOUT = 480
 
   def __init__(self, device, payload_dir, dev_dir='', tempdir=None,
                original_payload_dir=None, do_rootfs_update=True,
                do_stateful_update=True, reboot=True, disable_verification=False,
-               clobber_stateful=False, yes=False, payload_filename=None):
+               clobber_stateful=False, yes=False, payload_filename=None,
+               send_payload_in_parallel=False):
     """Initialize a ChromiumOSFlashUpdater for auto-update a chromium OS device.
 
     Args:
@@ -210,6 +237,8 @@ class ChromiumOSFlashUpdater(BaseUpdater):
       payload_filename: Filename of exact payload file to use for
           update instead of the default: update.gz. Defaults to None. Use
           only if you staged a payload by filename (i.e not artifact) first.
+      send_payload_in_parallel: whether to transfer payload in chunks
+          in parallel. The default is False.
     """
     super(ChromiumOSFlashUpdater, self).__init__(device, payload_dir)
     if tempdir is not None:
@@ -222,7 +251,7 @@ class ChromiumOSFlashUpdater(BaseUpdater):
 
     # Update setting
     self._cmd_kwargs = {}
-    self._cmd_kwargs_omit_error = {}
+    self._cmd_kwargs_omit_error = {'error_code_ok': True}
     self._do_stateful_update = do_stateful_update
     self._do_rootfs_update = do_rootfs_update
     self._disable_verification = disable_verification
@@ -236,6 +265,11 @@ class ChromiumOSFlashUpdater(BaseUpdater):
     self.stateful_update_bin = None
     # autoupdate_EndToEndTest uses exact payload filename for update
     self.payload_filename = payload_filename
+    if send_payload_in_parallel:
+      self.payload_mode = self.PAYLOAD_MODE_PARALLEL
+    else:
+      self.payload_mode = self.PAYLOAD_MODE_SCP
+    self.perf_id = None
 
   @property
   def is_au_endtoendtest(self):
@@ -414,7 +448,7 @@ class ChromiumOSFlashUpdater(BaseUpdater):
     status, = self.GetUpdateStatus(self.device)
     if status == UPDATE_STATUS_UPDATED_NEED_REBOOT:
       logging.info('Device needs to reboot before updating...')
-      self.device.Reboot()
+      self._Reboot('setup of Rootfs Update')
       status, = self.GetUpdateStatus(self.device)
 
     if status != UPDATE_STATUS_IDLE:
@@ -503,7 +537,7 @@ class ChromiumOSFlashUpdater(BaseUpdater):
     Returns:
       The payload filename. (update.gz or a custom payload filename).
     """
-    if self.payload_filename:
+    if self.is_au_endtoendtest:
       return self.payload_filename
     else:
       return ds_wrapper.ROOTFS_FILENAME
@@ -515,6 +549,9 @@ class ChromiumOSFlashUpdater(BaseUpdater):
     osutils.RmDir(src_dir, ignore_missing=True)
     # Filter python files from (binary) garbage.
     self._CopyPythonFilesToTemp(ds_wrapper.DEVSERVER_PKG_DIR, src_dir)
+    # Copy update_payload from update_engine repository.
+    update_payload_dir = os.path.join(src_dir, 'update_payload')
+    self._CopyPythonFilesToTemp(UPDATE_PAYLOAD_DIR, update_payload_dir)
     # Make sure the device.work_dir exist after any installation and reboot.
     self._EnsureDeviceDirectory(self.device.work_dir)
     # Python packages are plain text files so we chose rsync --compress.
@@ -534,24 +571,28 @@ class ChromiumOSFlashUpdater(BaseUpdater):
     logging.info('Copying rootfs payload to device...')
     payload_name = self._GetRootFsPayloadFileName()
     payload = os.path.join(self.payload_dir, payload_name)
-    # ROOTFS_FILENAME=update.gz is an already compressed file, can't use rsync.
-    # TODO(ihf): Expand update.gz after download to devserver and get rid of
-    # this scp below (use rsync probably without --compress).
-    self.device.CopyToDevice(payload, device_payload_dir, mode='scp',
+    self.device.CopyToDevice(payload, device_payload_dir,
+                             mode=self.payload_mode,
                              log_output=True, **self._cmd_kwargs)
 
     if self.is_au_endtoendtest:
-      # If rootfs was staged by Google Storage URI rather than build_name we
-      # need to strip partial paths and rename it.
-      expected_path = os.path.join(device_payload_dir,
-                                   ds_wrapper.ROOTFS_FILENAME)
+      self.RenameRootfsPayloadForAUTest(device_payload_dir, payload_name)
 
-      # Strip any partial paths from the filename e.g payloads/payload.bin
-      payload_name = payload_name.rpartition('/')[2]
-      current_path = os.path.join(device_payload_dir, payload_name)
-      # Rename the payload on the DUT so we don't break the current
-      # devserver staging. Rename to update.gz so DUTs devserver can respond.
-      self.device.RunCommand(['mv', current_path, expected_path])
+  def RenameRootfsPayloadForAUTest(self, payload_dir, payload_name):
+    """Rename the payload supplied by autoupdate_EndToEndTest on the DUT.
+
+    The au test takes in a payload that we want to update to. In order not
+    to break the devservers update handling we rename this payload to
+    update.gz after we copy it to the DUT.
+    """
+    expected_path = os.path.join(payload_dir, ds_wrapper.ROOTFS_FILENAME)
+
+    # Strip any partial paths from the filename e.g payloads/payload.bin
+    payload_name = payload_name.rpartition('/')[2]
+    current_path = os.path.join(payload_dir, payload_name)
+    # Rename the payload on the DUT so we don't break the current
+    # devserver staging. Rename to update.gz so DUTs devserver can respond.
+    self.device.RunCommand(['mv', current_path, expected_path])
 
   def TransferStatefulUpdate(self):
     """Transfer files for stateful update.
@@ -578,24 +619,20 @@ class ChromiumOSFlashUpdater(BaseUpdater):
       original_payload = os.path.join(
           self.original_payload_dir, ds_wrapper.STATEFUL_FILENAME)
       self._EnsureDeviceDirectory(self.device_restore_dir)
-      # STATEFUL_FILENAME=stateful.tgz is an already compressed file tree, so
-      # can't use rsync.
-      # TODO(ihf): Expand stateful.tgz after download to devserver and get rid
-      # of the scp below (use rsync probably without --compress).
       self.device.CopyToDevice(original_payload, self.device_restore_dir,
-                               mode='scp', log_output=True, **self._cmd_kwargs)
+                               mode=self.payload_mode, log_output=True,
+                               **self._cmd_kwargs)
 
     logging.info('Copying target stateful payload to device...')
     payload = os.path.join(self.payload_dir, ds_wrapper.STATEFUL_FILENAME)
-    # TODO(ihf): As above for now we use scp, but this should change to rsync.
-    self.device.CopyToWorkDir(payload, mode='scp', log_output=True,
-                              **self._cmd_kwargs)
+    self.device.CopyToWorkDir(payload, mode=self.payload_mode,
+                              log_output=True, **self._cmd_kwargs)
 
   def RestoreStateful(self):
     """Restore stateful partition for device."""
     logging.warning('Restoring the stateful partition')
     self.RunUpdateStateful()
-    self.device.Reboot()
+    self._Reboot('stateful partition restoration')
     try:
       self._CheckDevserverCanRun()
       logging.info('Stateful partition restored.')
@@ -632,7 +669,10 @@ class ChromiumOSFlashUpdater(BaseUpdater):
     """Revert the boot partition."""
     part = self.GetRootDev(self.device)
     logging.warning('Reverting update; Boot partition will be %s', part)
-    self.device.RunCommand(['/postinst', part], **self._cmd_kwargs)
+    try:
+      self.device.RunCommand(['/postinst', part], **self._cmd_kwargs)
+    except cros_build_lib.RunCommandError as e:
+      logging.warning('Reverting the boot partition failed: %s', e)
 
   def UpdateRootfs(self):
     """Update the rootfs partition of the device."""
@@ -640,13 +680,9 @@ class ChromiumOSFlashUpdater(BaseUpdater):
     devserver_bin = os.path.join(self.device_dev_dir,
                                  self.REMOTE_DEVSERVER_FILENAME)
     ds = ds_wrapper.RemoteDevServerWrapper(
-        self.device, devserver_bin, static_dir=self.device_static_dir,
+        self.device, devserver_bin, self.is_au_endtoendtest,
+        static_dir=self.device_static_dir,
         log_dir=self.device.work_dir)
-
-    perf_id = None
-    if self.is_au_endtoendtest:
-      perf_id = self._StartPerformanceMonitoring()
-
     try:
       ds.Start()
       logging.debug('Successfully started devserver on the device on port '
@@ -658,6 +694,8 @@ class ChromiumOSFlashUpdater(BaseUpdater):
           ip='127.0.0.1', port=ds.port, sub_dir='update/pregenerated')
       cmd = [self.REMOTE_UPDATE_ENGINE_BIN_FILENAME, '-check_for_update',
              '-omaha_url=%s' % omaha_url]
+
+      self._StartPerformanceMonitoringForAUTest()
       self.device.RunCommand(cmd, **self._cmd_kwargs)
 
       # If we are using a progress bar, update it every 0.5s instead of 10s.
@@ -674,7 +712,7 @@ class ChromiumOSFlashUpdater(BaseUpdater):
 
         #TODO(dhaddock): Remove retry when M61 is stable. See crbug.com/744212.
         op, progress = retry_util.RetryException(cros_build_lib.RunCommandError,
-                                                 MAX_RETRY,
+                                                 UPDATE_ENGINE_STATUS_RETRY,
                                                  self.GetUpdateStatus,
                                                  self.device,
                                                  ['CURRENT_OP', 'PROGRESS'],
@@ -724,12 +762,13 @@ class ChromiumOSFlashUpdater(BaseUpdater):
           follow_symlinks=True,
           **self._cmd_kwargs_omit_error)
       self.device.CopyFromDevice(
-          self.REMOTE_HOSTLOG_FILE_PATH,
-          os.path.join(self.tempdir, '_'.join([os.path.basename(
-              self.REMOTE_HOSTLOG_FILE_PATH), 'rootfs'])),
+          self.REMOTE_QUICK_PROVISION_LOGFILE_PATH,
+          os.path.join(self.tempdir, os.path.basename(
+              self.REMOTE_QUICK_PROVISION_LOGFILE_PATH)),
+          follow_symlinks=True,
           **self._cmd_kwargs_omit_error)
-      if perf_id is not None:
-        self._StopPerformanceMonitoring(perf_id)
+      self._CopyHostLogFromDevice('rootfs')
+      self._StopPerformanceMonitoringForAUTest()
 
   def UpdateStateful(self, use_original_build=False):
     """Update the stateful partition of the device.
@@ -852,12 +891,15 @@ class ChromiumOSFlashUpdater(BaseUpdater):
   def _CollectDevServerHostLog(self, devserver):
     """Write the host_log events from the remote DUTs devserver to a file.
 
+    The hostlog is needed for analysis by autoupdate_EndToEndTest only.
     We retry several times as some DUTs are slow immediately after
     starting up a devserver and return no hostlog on the first call(s).
 
     Args:
       devserver: The remote devserver wrapper for the running devserver.
     """
+    if not self.is_au_endtoendtest:
+      return
 
     for _ in range(0, MAX_RETRY):
       try:
@@ -889,27 +931,54 @@ class ChromiumOSFlashUpdater(BaseUpdater):
         logging.debug('Exception raised while trying to write the hostlog: '
                       '%s', e)
 
-  def _StartPerformanceMonitoring(self):
-    """Start update_engine performance monitoring script in rootfs update."""
-    if self._clobber_stateful:
+  def _StartPerformanceMonitoringForAUTest(self):
+    """Start update_engine performance monitoring script in rootfs update.
+
+    This script is used by autoupdate_EndToEndTest.
+    """
+    if self._clobber_stateful or not self.is_au_endtoendtest:
       return None
 
     cmd = ['python', self.REMOTE_UPDATE_ENGINE_PERF_SCRIPT_PATH, '--start-bg']
     try:
       perf_id = self.device.RunCommand(cmd).output.strip()
       logging.info('update_engine_performance_monitors pid is %s.', perf_id)
-      return perf_id
+      self.perf_id = perf_id
     except cros_build_lib.RunCommandError as e:
       logging.debug('Could not start performance monitoring script: %s', e)
-    return None
 
-  def _StopPerformanceMonitoring(self, pid):
+  def _StopPerformanceMonitoringForAUTest(self):
     """Stop the performance monitoring script and save results to file."""
+    if self.perf_id is None:
+      return
     cmd = ['python', self.REMOTE_UPDATE_ENGINE_PERF_SCRIPT_PATH, '--stop-bg',
-           pid]
-    perf_json_data = self.device.RunCommand(cmd).output.strip()
-    self.device.RunCommand(['echo', json.dumps(perf_json_data), '>',
-                            self.REMOTE_UPDATE_ENGINE_PERF_RESULTS_PATH])
+           self.perf_id]
+    try:
+      perf_json_data = self.device.RunCommand(cmd).output.strip()
+      self.device.RunCommand(['echo', json.dumps(perf_json_data), '>',
+                              self.REMOTE_UPDATE_ENGINE_PERF_RESULTS_PATH])
+    except cros_build_lib.RunCommandError as e:
+      logging.debug('Could not stop performance monitoring process: %s', e)
+
+  def _CopyHostLogFromDevice(self, partial_filename):
+    """Copy the hostlog file generated by the devserver from the device."""
+    if self.is_au_endtoendtest:
+      self.device.CopyFromDevice(
+          self.REMOTE_HOSTLOG_FILE_PATH,
+          os.path.join(self.tempdir, '_'.join([os.path.basename(
+              self.REMOTE_HOSTLOG_FILE_PATH), partial_filename])),
+          **self._cmd_kwargs_omit_error)
+
+  def _Reboot(self, error_stage):
+    try:
+      self.device.Reboot(timeout_sec=self.REBOOT_TIMEOUT)
+    except cros_build_lib.DieSystemExit:
+      raise ChromiumOSUpdateError('%s cannot recover from reboot at %s' % (
+          self.device.hostname, error_stage))
+    except remote_access.SSHConnectionError:
+      raise ChromiumOSUpdateError('Failed to connect to %s at %s' % (
+          self.device.hostname, error_stage))
+
 
 class ChromiumOSUpdater(ChromiumOSFlashUpdater):
   """Used to auto-update Cros DUT with image.
@@ -923,14 +992,11 @@ class ChromiumOSUpdater(ChromiumOSFlashUpdater):
   """
   REMOTE_STATEFUL_PATH_TO_CHECK = ['/var', '/home', '/mnt/stateful_partition']
   REMOTE_STATEFUL_TEST_FILENAME = '.test_file_to_be_deleted'
-  REMOTE_UPDATED_MARKERFILE_PATH = '/var/run/update_engine_autoupdate_completed'
+  REMOTE_UPDATED_MARKERFILE_PATH = '/run/update_engine_autoupdate_completed'
   REMOTE_LAB_MACHINE_FILE_PATH = '/mnt/stateful_partition/.labmachine'
   KERNEL_A = {'name': 'KERN-A', 'kernel': 2, 'root': 3}
   KERNEL_B = {'name': 'KERN-B', 'kernel': 4, 'root': 5}
-  KERNEL_UPDATE_TIMEOUT = 120
-  # Related to crbug.com/276094: Restore to 5 mins once the 'host did not
-  # return from reboot' bug is solved.
-  REBOOT_TIMEOUT = 480
+  KERNEL_UPDATE_TIMEOUT = 180
 
   def __init__(self, device, build_name, payload_dir, dev_dir='',
                log_file=None, tempdir=None, original_payload_dir=None,
@@ -976,7 +1042,6 @@ class ChromiumOSUpdater(ChromiumOSFlashUpdater):
       self._cmd_kwargs_omit_error['log_stdout_to_file'] = log_file
       self._cmd_kwargs_omit_error['append_to_file'] = True
       self._cmd_kwargs_omit_error['combine_stdout_stderr'] = True
-      self._cmd_kwargs_omit_error['error_code_ok'] = True
 
     self.inactive_kernel = None
     if local_devserver:
@@ -1093,6 +1158,7 @@ class ChromiumOSUpdater(ChromiumOSFlashUpdater):
         with the wrong partition.
     """
     logging.debug('Start verifying boot expectations...')
+
     # Figure out the newly active kernel
     active_kernel_state = self._GetKernelState()[0]
 
@@ -1201,8 +1267,9 @@ class ChromiumOSUpdater(ChromiumOSFlashUpdater):
          The file will be removed by stateful update or full install.
     """
     logging.debug('Start pre-setup for the whole CrOS update process...')
-    self._RetryCommand(['touch', self.REMOTE_PROVISION_FAILED_FILE_PATH],
-                       **self._cmd_kwargs)
+    if not self.is_au_endtoendtest:
+      self._RetryCommand(['touch', self.REMOTE_PROVISION_FAILED_FILE_PATH],
+                         **self._cmd_kwargs)
 
     # Related to crbug.com/360944.
     release_pattern = r'^.*-release/R[0-9]+-[0-9]+\.[0-9]+\.0$'
@@ -1232,7 +1299,7 @@ class ChromiumOSUpdater(ChromiumOSFlashUpdater):
   def PostCheckStatefulUpdate(self):
     """Post-check for stateful update for CrOS host."""
     logging.debug('Start post check for stateful update...')
-    self.device.Reboot(timeout_sec=self.REBOOT_TIMEOUT)
+    self._Reboot('post check of stateful update')
     if self._clobber_stateful:
       for folder in self.REMOTE_STATEFUL_PATH_TO_CHECK:
         test_file_path = os.path.join(folder,
@@ -1245,7 +1312,7 @@ class ChromiumOSUpdater(ChromiumOSFlashUpdater):
   def PreSetupRootfsUpdate(self):
     """Pre-setup for rootfs update for CrOS host."""
     logging.debug('Start pre-setup for rootfs update...')
-    self.device.Reboot(timeout_sec=self.REBOOT_TIMEOUT)
+    self._Reboot('pre-setup of rootfs update')
     self._RetryCommand(['sudo', 'stop', 'ap-update-manager'],
                        **self._cmd_kwargs_omit_error)
     self._ResetUpdateEngine()
@@ -1314,39 +1381,62 @@ class ChromiumOSUpdater(ChromiumOSFlashUpdater):
       # all; this change is just papering over the real bug.
       self._RetryCommand('crossystem clear_tpm_owner_request=1',
                          **self._cmd_kwargs_omit_error)
-    self.device.Reboot(timeout_sec=self.REBOOT_TIMEOUT)
+    self._Reboot('post check of rootfs update')
 
   def PostCheckCrOSUpdate(self):
     """Post check for the whole auto-update process."""
     logging.debug('Post check for the whole CrOS update...')
+    start_time = time.time()
     # Not use 'sh' here since current device.RunCommand cannot recognize
     # the content of $FILE.
     autoreboot_cmd = ('FILE="%s" ; [ -f "$FILE" ] || '
                       '( touch "$FILE" ; start autoreboot )')
     self._RetryCommand(autoreboot_cmd % self.REMOTE_LAB_MACHINE_FILE_PATH,
                        **self._cmd_kwargs)
-    self._VerifyBootExpectations(
-        self.inactive_kernel, rollback_message=
-        'Build %s failed to boot on %s; system rolled back to previous '
-        'build' % (self.update_version, self.device.hostname))
-    # Check that we've got the build we meant to install.
-    if not self._CheckVersionToConfirmInstall():
-      raise ChromiumOSUpdateError(
-          'Failed to update %s to build %s; found build '
-          '%s instead' % (self.device.hostname,
-                          self.update_version,
-                          self._GetReleaseVersion()))
 
+    # Loop in case the initial check happens before the reboot.
+    while True:
+      try:
+        start_verify_time = time.time()
+        self._VerifyBootExpectations(
+            self.inactive_kernel, rollback_message=
+            'Build %s failed to boot on %s; system rolled back to previous '
+            'build' % (self.update_version, self.device.hostname))
+
+        # Check that we've got the build we meant to install.
+        if not self._CheckVersionToConfirmInstall():
+          raise ChromiumOSUpdateError(
+              'Failed to update %s to build %s; found build '
+              '%s instead' % (self.device.hostname,
+                              self.update_version,
+                              self._GetReleaseVersion()))
+      except RebootVerificationError as e:
+        # If a minimum amount of time since starting the check has not
+        # occurred, wait and retry.  Use the start of the verification
+        # time in case an SSH call takes a long time to return/fail.
+        if start_verify_time - start_time < POST_CHECK_SETTLE_SECONDS:
+          logging.warning('Delaying for re-check of %s to update to %s (%s)' %
+                          (self.device.hostname, self.update_version, e))
+          time.sleep(POST_CHECK_RETRY_SECONDS)
+          continue
+        raise
+      break
+
+    # For autoupdate_EndToEndTest only, we have one extra step to verify.
     if self.is_au_endtoendtest and not self._clobber_stateful:
-      logging.debug('Doing one final update check to get post update hostlog.')
-      self.PostRebootUpdateCheck()
+      self.PostRebootUpdateCheckForAUTest()
 
-  def PostRebootUpdateCheck(self):
-    """Do another update check after reboot to get the post update hostlog."""
+  def PostRebootUpdateCheckForAUTest(self):
+    """Do another update check after reboot to get the post update hostlog.
+
+    This is only done with autoupdate_EndToEndTest.
+    """
+    logging.debug('Doing one final update check to get post update hostlog.')
     devserver_bin = os.path.join(self.device_dev_dir,
                                  self.REMOTE_DEVSERVER_FILENAME)
     ds = ds_wrapper.RemoteDevServerWrapper(
-        self.device, devserver_bin, static_dir=self.device_static_dir,
+        self.device, devserver_bin, self.is_au_endtoendtest,
+        static_dir=self.device_static_dir,
         log_dir=self.device.work_dir)
 
     try:
@@ -1371,8 +1461,24 @@ class ChromiumOSUpdater(ChromiumOSFlashUpdater):
       if ds.is_alive():
         self._CollectDevServerHostLog(ds)
       ds.Stop()
-      self.device.CopyFromDevice(
-          self.REMOTE_HOSTLOG_FILE_PATH,
-          os.path.join(self.tempdir, '_'.join([os.path.basename(
-              self.REMOTE_HOSTLOG_FILE_PATH), 'reboot'])),
-          **self._cmd_kwargs_omit_error)
+      self._CopyHostLogFromDevice('reboot')
+
+  def AwaitReboot(self, old_boot_id):
+    """Await a reboot, ensuring that it is no longer running old_boot_id.
+
+    Args:
+      old_boot_id: The boot_id that must be transitioned away from for success.
+
+    Returns:
+      True if the device has successfully rebooted.
+
+    Raises:
+      RebootVerificationError if a successful reboot has not occurred.
+    """
+    logging.debug('Awaiting reboot from %s...', old_boot_id)
+
+    if not self.device.AwaitReboot(old_boot_id):
+      raise RebootVerificationError('Device has not rebooted from %s' %
+                                    old_boot_id)
+
+    return True

@@ -27,20 +27,18 @@
 #ifndef SecurityContext_h
 #define SecurityContext_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/dom/SandboxFlags.h"
 #include "platform/heap/Handle.h"
-#include "platform/weborigin/Suborigin.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/StringHash.h"
 #include "platform/wtf/text/WTFString.h"
-#include "public/platform/WebAddressSpace.h"
-#include "public/platform/WebFeaturePolicy.h"
+#include "public/mojom/net/ip_address_space.mojom-blink.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/common/feature_policy/feature_policy.h"
 
 #include <memory>
 
@@ -50,14 +48,18 @@ class SecurityOrigin;
 class ContentSecurityPolicy;
 
 class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
-  WTF_MAKE_NONCOPYABLE(SecurityContext);
-
  public:
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   using InsecureNavigationsSet = HashSet<unsigned, WTF::AlreadyHashed>;
+  static std::vector<unsigned> SerializeInsecureNavigationSet(
+      const InsecureNavigationsSet&);
 
-  SecurityOrigin* GetSecurityOrigin() const { return security_origin_.Get(); }
+  const SecurityOrigin* GetSecurityOrigin() const {
+    return security_origin_.get();
+  }
+  SecurityOrigin* GetMutableSecurityOrigin() { return security_origin_.get(); }
+
   ContentSecurityPolicy* GetContentSecurityPolicy() const {
     return content_security_policy_.Get();
   }
@@ -65,17 +67,25 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
   // Explicitly override the security origin for this security context.
   // Note: It is dangerous to change the security origin of a script context
   //       that already contains content.
-  void SetSecurityOrigin(PassRefPtr<SecurityOrigin>);
+  void SetSecurityOrigin(scoped_refptr<SecurityOrigin>);
   virtual void DidUpdateSecurityOrigin() = 0;
 
   SandboxFlags GetSandboxFlags() const { return sandbox_flags_; }
   bool IsSandboxed(SandboxFlags mask) const { return sandbox_flags_ & mask; }
   virtual void EnforceSandboxFlags(SandboxFlags mask);
 
-  void SetAddressSpace(WebAddressSpace space) { address_space_ = space; }
-  WebAddressSpace AddressSpace() const { return address_space_; }
+  void SetAddressSpace(mojom::IPAddressSpace space) { address_space_ = space; }
+  mojom::IPAddressSpace AddressSpace() const { return address_space_; }
   String addressSpaceForBindings() const;
 
+  void SetRequireTrustedTypes() { require_safe_types_ = true; }
+  bool RequireTrustedTypes() const { return require_safe_types_; }
+
+  void SetInsecureNavigationsSet(const std::vector<unsigned>& set) {
+    insecure_navigations_to_upgrade_.clear();
+    for (unsigned hash : set)
+      insecure_navigations_to_upgrade_.insert(hash);
+  }
   void AddInsecureNavigationUpgrade(unsigned hashed_host) {
     insecure_navigations_to_upgrade_.insert(hashed_host);
   }
@@ -90,15 +100,16 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
     return insecure_request_policy_;
   }
 
-  void EnforceSuborigin(const Suborigin&);
-
-  WebFeaturePolicy* GetFeaturePolicy() const { return feature_policy_.get(); }
-  void InitializeFeaturePolicy(const WebParsedFeaturePolicy& parsed_header,
-                               const WebParsedFeaturePolicy& container_policy,
-                               const WebFeaturePolicy* parent_feature_policy);
+  FeaturePolicy* GetFeaturePolicy() const { return feature_policy_.get(); }
+  void InitializeFeaturePolicy(const ParsedFeaturePolicy& parsed_header,
+                               const ParsedFeaturePolicy& container_policy,
+                               const FeaturePolicy* parent_feature_policy);
   void UpdateFeaturePolicyOrigin();
 
-  void ApplySandboxFlags(SandboxFlags mask);
+  // Apply the sandbox flag, and also maybe update the security origin
+  // to the newly created unique one with |is_potentially_trustworthy|.
+  void ApplySandboxFlags(SandboxFlags mask,
+                         bool is_potentially_trustworthy = false);
 
  protected:
   SecurityContext();
@@ -106,16 +117,18 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
 
   void SetContentSecurityPolicy(ContentSecurityPolicy*);
 
- private:
-  RefPtr<SecurityOrigin> security_origin_;
-  Member<ContentSecurityPolicy> content_security_policy_;
-  std::unique_ptr<WebFeaturePolicy> feature_policy_;
-
   SandboxFlags sandbox_flags_;
 
-  WebAddressSpace address_space_;
+ private:
+  scoped_refptr<SecurityOrigin> security_origin_;
+  Member<ContentSecurityPolicy> content_security_policy_;
+  std::unique_ptr<FeaturePolicy> feature_policy_;
+
+  mojom::IPAddressSpace address_space_;
   WebInsecureRequestPolicy insecure_request_policy_;
   InsecureNavigationsSet insecure_navigations_to_upgrade_;
+  bool require_safe_types_;
+  DISALLOW_COPY_AND_ASSIGN(SecurityContext);
 };
 
 }  // namespace blink

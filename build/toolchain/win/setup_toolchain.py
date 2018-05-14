@@ -139,9 +139,11 @@ def _LoadToolchainEnv(cpu, sdk_dir):
         raise Exception('%s is missing - make sure VC++ tools are installed.' %
                         script_path)
       script_path = other_path
-    # Chromium requires the 10.0.14393.0 SDK or higher - previous versions don't
-    # have all of the required declarations.
-    args = [script_path, 'amd64_x86' if cpu == 'x86' else 'amd64']
+    # Chromium requires the 10.0.15063.468 SDK - previous versions don't have
+    # all of the required declarations and 10.0.16299.0 has some
+    # incompatibilities (crbug.com/773476).
+    args = [script_path, 'amd64_x86' if cpu == 'x86' else 'amd64',
+            '10.0.15063.0']
     variables = _LoadEnvFromBat(args)
   return _ExtractImportantEnvironment(variables)
 
@@ -159,14 +161,15 @@ def _FormatAsEnvironmentBlock(envvar_dict):
 
 
 def main():
-  if len(sys.argv) != 5:
+  if len(sys.argv) != 6:
     print('Usage setup_toolchain.py '
           '<visual studio path> <win sdk path> '
-          '<runtime dirs> <target_cpu> <include prefix>')
+          '<runtime dirs> <target_cpu> <goma_disabled>')
     sys.exit(2)
   win_sdk_path = sys.argv[2]
   runtime_dirs = sys.argv[3]
   target_cpu = sys.argv[4]
+  goma_disabled = sys.argv[5]
 
   cpus = ('x86', 'x64')
   assert target_cpu in cpus
@@ -180,6 +183,7 @@ def main():
     # Extract environment variables for subprocesses.
     env = _LoadToolchainEnv(cpu, win_sdk_path)
     env['PATH'] = runtime_dirs + os.pathsep + env['PATH']
+    env['GOMA_DISABLED'] = goma_disabled
 
     if cpu == target_cpu:
       for path in env['PATH'].split(os.pathsep):

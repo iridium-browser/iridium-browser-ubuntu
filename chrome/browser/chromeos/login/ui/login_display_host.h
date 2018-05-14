@@ -5,10 +5,13 @@
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_UI_LOGIN_DISPLAY_HOST_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_UI_LOGIN_DISPLAY_HOST_H_
 
+#include <memory>
 #include <string>
 
 #include "base/callback_forward.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
+#include "chrome/browser/chromeos/login/auth/auth_prewarmer.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "ui/gfx/native_widget_types.h"
@@ -23,15 +26,28 @@ class OobeUI;
 class WebUILoginView;
 class WizardController;
 
-// An interface that defines OOBE/login screen host.
-// Host encapsulates WebUI window OOBE/login controllers,
-// UI implementation (such as LoginDisplay).
+// An interface that defines an out-of-box-experience (OOBE) or login screen
+// host. It contains code specific to the login UI implementation.
+//
+// The inheritance graph is as folllows:
+//
+//                               LoginDisplayHost
+//                                   /       |
+//                LoginDisplayHostCommon   MockLoginDisplayHost
+//                      /      |
+//   LoginDisplayHostViews   LoginDisplayHostWebUI
+//
+//
+// - LoginDisplayHost defines the generic interface.
+// - LoginDisplayHostCommon is UI-agnostic code shared between the views and
+//   webui hosts.
+// - MockLoginDisplayHost is for tests.
+// - LoginDisplayHostViews is for the login screen, which is written in views.
+// - LoginDisplayHostWebUI is for OOBE, which is written in HTML/JS/CSS.
 class LoginDisplayHost {
  public:
   // Returns the default LoginDisplayHost instance if it has been created.
   static LoginDisplayHost* default_host() { return default_host_; }
-
-  virtual ~LoginDisplayHost() {}
 
   // Creates UI implementation specific login display instance (views/WebUI).
   // The caller takes ownership of the returned value.
@@ -54,9 +70,6 @@ class LoginDisplayHost {
   // instance may delete itself. |completion_callback| will be invoked when the
   // instance is gone.
   virtual void Finalize(base::OnceClosure completion_callback) = 0;
-
-  // Open proxy settings dialog.
-  virtual void OpenProxySettings() = 0;
 
   // Toggles status area visibility.
   virtual void SetStatusAreaVisible(bool visible) = 0;
@@ -109,9 +122,54 @@ class LoginDisplayHost {
   // Returns whether current host is for voice interaction OOBE.
   virtual bool IsVoiceInteractionOobe() = 0;
 
+  // Update the visibility of the gaia dialog.
+  virtual void UpdateGaiaDialogVisibility(bool visible) = 0;
+
+  // Update the size of the gaia dialog.
+  virtual void UpdateGaiaDialogSize(int width, int height) = 0;
+
+  // Get users that are visible in the login screen UI.
+  // This is mainly used by views login screen. WebUI login screen will
+  // return an empty list.
+  // TODO(crbug.com/808271): WebUI and views implementation should return the
+  // same user list.
+  virtual const user_manager::UserList GetUsers() = 0;
+
+  // Confirms sign in by provided credentials in |user_context|.
+  // Used for new user login via GAIA extension.
+  virtual void CompleteLogin(const UserContext& user_context) = 0;
+
+  // Notify the backend controller when the GAIA UI is finished loading.
+  virtual void OnGaiaScreenReady() = 0;
+
+  // Sets the displayed email for the next login attempt. If it succeeds,
+  // user's displayed email value will be updated to |email|.
+  virtual void SetDisplayEmail(const std::string& email) = 0;
+
+  // Sets the displayed name and given name for the next login attempt. If it
+  // succeeds, user's displayed name and give name values will be updated to
+  // |display_name| and |given_name|.
+  virtual void SetDisplayAndGivenName(const std::string& display_name,
+                                      const std::string& given_name) = 0;
+
+  // Load wallpaper for given |account_id|.
+  virtual void LoadWallpaper(const AccountId& account_id) = 0;
+
+  // Loads the default sign-in wallpaper.
+  virtual void LoadSigninWallpaper() = 0;
+
+  // Returns true if user is allowed to log in by domain policy.
+  virtual bool IsUserWhitelisted(const AccountId& account_id) = 0;
+
  protected:
-  // Default LoginDisplayHost. Child class sets the reference.
+  LoginDisplayHost();
+  virtual ~LoginDisplayHost();
+
+ private:
+  // Global LoginDisplayHost instance.
   static LoginDisplayHost* default_host_;
+
+  DISALLOW_COPY_AND_ASSIGN(LoginDisplayHost);
 };
 
 }  // namespace chromeos

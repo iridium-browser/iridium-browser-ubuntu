@@ -31,7 +31,7 @@ TestInterfaces::TestInterfaces()
       main_view_(nullptr) {
   blink::SetLayoutTestMode(true);
   // NOTE: please don't put feature specific enable flags here,
-  // instead add them to RuntimeEnabledFeatures.json5
+  // instead add them to runtime_enabled_features.json5
 
   ResetAll();
 }
@@ -88,11 +88,13 @@ void TestInterfaces::SetTestIsRunning(bool running) {
 }
 
 void TestInterfaces::ConfigureForTestWithURL(const blink::WebURL& test_url,
-                                             bool generate_pixels) {
+                                             bool generate_pixels,
+                                             bool initial_configuration) {
   std::string spec = GURL(test_url).spec();
   size_t path_start = spec.rfind("LayoutTests/");
   if (path_start != std::string::npos)
     spec = spec.substr(path_start);
+  bool is_devtools_test = spec.find("/devtools/") != std::string::npos;
   test_runner_->setShouldGeneratePixelResults(generate_pixels);
   if (spec.find("loading/") != std::string::npos)
     test_runner_->setShouldDumpFrameLoadCallbacks(true);
@@ -100,24 +102,8 @@ void TestInterfaces::ConfigureForTestWithURL(const blink::WebURL& test_url,
     test_runner_->setShouldDumpAsText(true);
     test_runner_->setShouldGeneratePixelResults(false);
   }
-  if (spec.find("/inspector/") != std::string::npos ||
-      spec.find("/inspector-enabled/") != std::string::npos) {
-    test_runner_->ClearDevToolsLocalStorage();
-    test_runner_->SetV8CacheDisabled(true);
-  } else {
-    test_runner_->SetV8CacheDisabled(false);
-  }
-  if (spec.find("/inspector/") != std::string::npos &&
-      spec.find("integration_test_runner.html") == std::string::npos &&
-      spec.find("unit_test_runner.html") == std::string::npos) {
-    // Subfolder name determines default panel to open.
-    std::string test_path = spec.substr(spec.find("/inspector/") + 11);
-    base::DictionaryValue settings;
-    settings.SetString("testPath", base::GetQuotedJSONString(spec));
-    std::string settings_string;
-    base::JSONWriter::Write(settings, &settings_string);
-    test_runner_->ShowDevTools(settings_string, std::string());
-  }
+  test_runner_->SetV8CacheDisabled(is_devtools_test);
+
   if (spec.find("/viewsource/") != std::string::npos) {
     test_runner_->setShouldEnableViewSource(true);
     test_runner_->setShouldGeneratePixelResults(false);
@@ -128,6 +114,10 @@ void TestInterfaces::ConfigureForTestWithURL(const blink::WebURL& test_url,
       spec.find("://web-platform.test") != std::string::npos ||
       spec.find("/harness-tests/wpt/") != std::string::npos)
     test_runner_->set_is_web_platform_tests_mode();
+
+  // The actions below should only be done *once* per test.
+  if (!initial_configuration)
+    return;
 }
 
 void TestInterfaces::WindowOpened(WebViewTestProxyBase* proxy) {
@@ -161,7 +151,7 @@ const std::vector<WebViewTestProxyBase*>& TestInterfaces::GetWindowList() {
 
 blink::WebThemeEngine* TestInterfaces::GetThemeEngine() {
   if (!test_runner_->UseMockTheme())
-    return 0;
+    return nullptr;
   if (!theme_engine_.get())
     theme_engine_.reset(new MockWebThemeEngine());
   return theme_engine_.get();

@@ -26,7 +26,7 @@
 
 #include "core/dom/TreeScope.h"
 
-#include "core/HTMLNames.h"
+#include "core/css/StyleChangeReason.h"
 #include "core/css/resolver/ScopedStyleResolver.h"
 #include "core/dom/ContainerNode.h"
 #include "core/dom/Document.h"
@@ -36,21 +36,21 @@
 #include "core/dom/IdTargetObserverRegistry.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/dom/StyleChangeReason.h"
 #include "core/dom/TreeScopeAdopter.h"
+#include "core/dom/events/EventPath.h"
 #include "core/editing/DOMSelection.h"
-#include "core/events/EventPath.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/HTMLMapElement.h"
+#include "core/html_names.h"
 #include "core/layout/HitTestResult.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/svg/SVGTreeScopeResources.h"
-#include "platform/ScriptForbiddenScope.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -74,25 +74,16 @@ TreeScope::TreeScope(Document& document)
   root_node_->SetTreeScope(this);
 }
 
-TreeScope::~TreeScope() {}
+TreeScope::~TreeScope() = default;
 
 void TreeScope::ResetTreeScope() {
   selection_ = nullptr;
 }
 
-TreeScope* TreeScope::OlderShadowRootOrParentTreeScope() const {
-  if (RootNode().IsShadowRoot()) {
-    if (ShadowRoot* older_shadow_root =
-            ToShadowRoot(RootNode()).OlderShadowRoot())
-      return older_shadow_root;
-  }
-  return ParentTreeScope();
-}
-
 bool TreeScope::IsInclusiveOlderSiblingShadowRootOrAncestorTreeScopeOf(
     const TreeScope& scope) const {
   for (const TreeScope* current = &scope; current;
-       current = current->OlderShadowRootOrParentTreeScope()) {
+       current = current->ParentTreeScope()) {
     if (current == this)
       return true;
   }
@@ -191,12 +182,14 @@ HTMLMapElement* TreeScope::GetImageMap(const String& url) const {
     return nullptr;
   size_t hash_pos = url.find('#');
   String name = hash_pos == kNotFound ? url : url.Substring(hash_pos + 1);
-  return toHTMLMapElement(
+  return ToHTMLMapElement(
       image_maps_by_name_->GetElementByMapName(AtomicString(name), *this));
 }
 
-static bool PointWithScrollAndZoomIfPossible(const Document& document,
-                                             IntPoint& point) {
+// If the point is not in the viewport, returns false. Otherwise, adjusts the
+// point to account for the frame's zoom and scroll.
+static bool PointInFrameContentIfVisible(Document& document,
+                                         DoublePoint& point_in_frame) {
   LocalFrame* frame = document.GetFrame();
   if (!frame)
     return false;
@@ -204,54 +197,73 @@ static bool PointWithScrollAndZoomIfPossible(const Document& document,
   if (!frame_view)
     return false;
 
-  FloatPoint point_in_document(point);
-  point_in_document.Scale(frame->PageZoomFactor(), frame->PageZoomFactor());
-  point_in_document.Move(frame_view->GetScrollOffset());
-  IntPoint rounded_point_in_document = RoundedIntPoint(point_in_document);
+  // The VisibleContentRect check below requires that scrollbars are up-to-date.
+  document.UpdateStyleAndLayoutIgnorePendingStylesheets();
 
-  if (!frame_view->VisibleContentRect().Contains(rounded_point_in_document))
+  auto* scrollable_area = frame_view->LayoutViewportScrollableArea();
+  IntRect visible_frame_rect(IntPoint(),
+                             scrollable_area->VisibleContentRect().Size());
+  visible_frame_rect.Scale(1 / frame->PageZoomFactor());
+  if (!visible_frame_rect.Contains(RoundedIntPoint(point_in_frame)))
     return false;
 
-  point = rounded_point_in_document;
+  point_in_frame.Scale(frame->PageZoomFactor(), frame->PageZoomFactor());
+  // For non RLS case, the point needs to be adjusted by the frame's scroll
+  // offset.
+  if (!RuntimeEnabledFeatures::RootLayerScrollingEnabled())
+    point_in_frame.Move(scrollable_area->GetScrollOffset());
+
   return true;
 }
 
-HitTestResult HitTestInDocument(const Document* document,
-                                int x,
-                                int y,
+HitTestResult HitTestInDocument(Document* document,
+                                double x,
+                                double y,
                                 const HitTestRequest& request) {
-  IntPoint hit_point(x, y);
-  if (!PointWithScrollAndZoomIfPossible(*document, hit_point))
-    return HitTestResult();
-
   if (!document->IsActive())
     return HitTestResult();
 
-  HitTestResult result(request, hit_point);
-  document->GetLayoutViewItem().HitTest(result);
+  DoublePoint hit_point(x, y);
+  if (!PointInFrameContentIfVisible(*document, hit_point))
+    return HitTestResult();
+
+  HitTestResult result(request, LayoutPoint(hit_point));
+  document->GetLayoutView()->HitTest(result);
   return result;
 }
 
-Element* TreeScope::ElementFromPoint(int x, int y) const {
+Element* TreeScope::ElementFromPoint(double x, double y) const {
   return HitTestPoint(x, y,
                       HitTestRequest::kReadOnly | HitTestRequest::kActive);
 }
 
-Element* TreeScope::HitTestPoint(int x,
-                                 int y,
+Element* TreeScope::HitTestPoint(double x,
+                                 double y,
                                  const HitTestRequest& request) const {
   HitTestResult result =
       HitTestInDocument(&RootNode().GetDocument(), x, y, request);
-  Node* node = result.InnerNode();
+  if (request.AllowsChildFrameContent()) {
+    return HitTestPointInternal(result.InnerNode(),
+                                HitTestPointType::kInternal);
+  }
+  return HitTestPointInternal(result.InnerNode(),
+                              HitTestPointType::kWebExposed);
+}
+
+Element* TreeScope::HitTestPointInternal(Node* node,
+                                         HitTestPointType type) const {
   if (!node || node->IsDocumentNode())
     return nullptr;
+  Element* element;
   if (node->IsPseudoElement() || node->IsTextNode())
-    node = node->ParentOrShadowHostNode();
-  DCHECK(!node || node->IsElementNode() || node->IsShadowRoot());
-  node = AncestorInThisScope(node);
-  if (!node || !node->IsElementNode())
+    element = node->ParentOrShadowHostElement();
+  else
+    element = ToElement(node);
+  if (!element)
     return nullptr;
-  return ToElement(node);
+  if (type == HitTestPointType::kWebExposed)
+    return Retarget(*element);
+  return element;
 }
 
 HeapVector<Member<Element>> TreeScope::ElementsFromHitTestResult(
@@ -261,13 +273,11 @@ HeapVector<Member<Element>> TreeScope::ElementsFromHitTestResult(
   Node* last_node = nullptr;
   for (const auto rect_based_node : result.ListBasedTestResult()) {
     Node* node = rect_based_node.Get();
-    if (!node || !node->IsElementNode() || node->IsDocumentNode())
+    // In some cases the hit test doesn't return slot elements, so we can only
+    // get it through its child and can't skip it.
+    if (!node->IsElementNode() && !IsHTMLSlotElement(node->parentNode()))
       continue;
-
-    if (node->IsPseudoElement() || node->IsTextNode())
-      node = node->ParentOrShadowHostNode();
-    node = AncestorInThisScope(node);
-
+    node = HitTestPointInternal(node, HitTestPointType::kWebExposed);
     // Prune duplicate entries. A pseduo ::before content above its parent
     // node should only result in a single entry.
     if (node == last_node)
@@ -289,17 +299,18 @@ HeapVector<Member<Element>> TreeScope::ElementsFromHitTestResult(
   return elements;
 }
 
-HeapVector<Member<Element>> TreeScope::ElementsFromPoint(int x, int y) const {
+HeapVector<Member<Element>> TreeScope::ElementsFromPoint(double x,
+                                                         double y) const {
   Document& document = RootNode().GetDocument();
-  IntPoint hit_point(x, y);
-  if (!PointWithScrollAndZoomIfPossible(document, hit_point))
+  DoublePoint hit_point(x, y);
+  if (!PointInFrameContentIfVisible(document, hit_point))
     return HeapVector<Member<Element>>();
 
   HitTestRequest request(HitTestRequest::kReadOnly | HitTestRequest::kActive |
                          HitTestRequest::kListBased |
                          HitTestRequest::kPenetratingList);
-  HitTestResult result(request, hit_point);
-  document.GetLayoutViewItem().HitTest(result);
+  HitTestResult result(request, LayoutPoint(hit_point));
+  document.GetLayoutView()->HitTest(result);
 
   return ElementsFromHitTestResult(result);
 }
@@ -308,6 +319,22 @@ SVGTreeScopeResources& TreeScope::EnsureSVGTreeScopedResources() {
   if (!svg_tree_scoped_resources_)
     svg_tree_scoped_resources_ = new SVGTreeScopeResources(this);
   return *svg_tree_scoped_resources_;
+}
+
+bool TreeScope::HasMoreStyleSheets() const {
+  return more_style_sheets_ && more_style_sheets_->length() > 0;
+}
+
+StyleSheetList& TreeScope::MoreStyleSheets() {
+  if (!more_style_sheets_)
+    SetMoreStyleSheets(StyleSheetList::Create(this));
+  return *more_style_sheets_;
+}
+
+void TreeScope::SetMoreStyleSheets(StyleSheetList* more_style_sheets) {
+  GetDocument().GetStyleEngine().MoreStyleSheetsWillChange(
+      *this, more_style_sheets_, more_style_sheets);
+  more_style_sheets_ = more_style_sheets;
 }
 
 DOMSelection* TreeScope::GetSelection() const {
@@ -356,7 +383,43 @@ void TreeScope::AdoptIfNeeded(Node& node) {
     adopter.Execute();
 }
 
+// This method corresponds to the Retarget algorithm specified in
+// https://dom.spec.whatwg.org/#retarget
+// This retargets |target| against the root of |this|.
+// The steps are different with the spec for performance reasons,
+// but the results should be the same.
 Element* TreeScope::Retarget(const Element& target) const {
+  const TreeScope& target_scope = target.GetTreeScope();
+  if (!target_scope.RootNode().IsShadowRoot())
+    return const_cast<Element*>(&target);
+
+  HeapVector<Member<const TreeScope>> target_ancestor_scopes;
+  HeapVector<Member<const TreeScope>> context_ancestor_scopes;
+  for (const TreeScope* tree_scope = &target_scope; tree_scope;
+       tree_scope = tree_scope->ParentTreeScope())
+    target_ancestor_scopes.push_back(tree_scope);
+  for (const TreeScope* tree_scope = this; tree_scope;
+       tree_scope = tree_scope->ParentTreeScope())
+    context_ancestor_scopes.push_back(tree_scope);
+
+  auto target_ancestor_riterator = target_ancestor_scopes.rbegin();
+  auto context_ancestor_riterator = context_ancestor_scopes.rbegin();
+  while (context_ancestor_riterator != context_ancestor_scopes.rend() &&
+         target_ancestor_riterator != target_ancestor_scopes.rend() &&
+         *context_ancestor_riterator == *target_ancestor_riterator) {
+    ++context_ancestor_riterator;
+    ++target_ancestor_riterator;
+  }
+
+  if (target_ancestor_riterator == target_ancestor_scopes.rend())
+    return const_cast<Element*>(&target);
+  Node& first_different_scope_root =
+      (*target_ancestor_riterator).Get()->RootNode();
+  return &ToShadowRoot(first_different_scope_root).host();
+}
+
+Element* TreeScope::AdjustedFocusedElementInternal(
+    const Element& target) const {
   for (const Element* ancestor = &target; ancestor;
        ancestor = ancestor->OwnerShadowHost()) {
     if (this == ancestor->GetTreeScope())
@@ -375,7 +438,7 @@ Element* TreeScope::AdjustedFocusedElement() const {
     return nullptr;
 
   if (RootNode().IsInV1ShadowTree()) {
-    if (Element* retargeted = Retarget(*element)) {
+    if (Element* retargeted = AdjustedFocusedElementInternal(*element)) {
       return (this == &retargeted->GetTreeScope()) ? retargeted : nullptr;
     }
     return nullptr;
@@ -439,14 +502,6 @@ unsigned short TreeScope::ComparePosition(const TreeScope& other_scope) const {
       if (shadow_host1 != shadow_host2)
         return shadow_host1->compareDocumentPosition(
             shadow_host2, Node::kTreatShadowTreesAsDisconnected);
-
-      for (const ShadowRoot* child =
-               ToShadowRoot(child2->RootNode()).OlderShadowRoot();
-           child; child = child->OlderShadowRoot()) {
-        if (child == child1)
-          return Node::kDocumentPositionFollowing;
-      }
-
       return Node::kDocumentPositionPreceding;
     }
   }
@@ -505,8 +560,7 @@ Element* TreeScope::GetElementByAccessKey(const String& key) const {
     if (DeprecatedEqualIgnoringCase(element.FastGetAttribute(accesskeyAttr),
                                     key))
       result = &element;
-    for (ShadowRoot* shadow_root = element.YoungestShadowRoot(); shadow_root;
-         shadow_root = shadow_root->OlderShadowRoot()) {
+    if (ShadowRoot* shadow_root = element.GetShadowRoot()) {
       if (Element* shadow_result = shadow_root->GetElementByAccessKey(key))
         result = shadow_result;
     }
@@ -517,8 +571,7 @@ Element* TreeScope::GetElementByAccessKey(const String& key) const {
 void TreeScope::SetNeedsStyleRecalcForViewportUnits() {
   for (Element* element = ElementTraversal::FirstWithin(RootNode()); element;
        element = ElementTraversal::NextIncludingPseudo(*element)) {
-    for (ShadowRoot* root = element->YoungestShadowRoot(); root;
-         root = root->OlderShadowRoot())
+    if (ShadowRoot* root = element->GetShadowRoot())
       root->SetNeedsStyleRecalcForViewportUnits();
     const ComputedStyle* style = element->GetComputedStyle();
     if (style && style->HasViewportUnits())
@@ -528,7 +581,7 @@ void TreeScope::SetNeedsStyleRecalcForViewportUnits() {
   }
 }
 
-DEFINE_TRACE(TreeScope) {
+void TreeScope::Trace(blink::Visitor* visitor) {
   visitor->Trace(root_node_);
   visitor->Trace(document_);
   visitor->Trace(parent_tree_scope_);
@@ -539,6 +592,7 @@ DEFINE_TRACE(TreeScope) {
   visitor->Trace(scoped_style_resolver_);
   visitor->Trace(radio_button_group_scope_);
   visitor->Trace(svg_tree_scoped_resources_);
+  visitor->Trace(more_style_sheets_);
 }
 
 }  // namespace blink

@@ -7,26 +7,25 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#ifndef WEBRTC_TEST_CALL_TEST_H_
-#define WEBRTC_TEST_CALL_TEST_H_
+#ifndef TEST_CALL_TEST_H_
+#define TEST_CALL_TEST_H_
 
 #include <memory>
 #include <vector>
 
-#include "webrtc/call/call.h"
-#include "webrtc/logging/rtc_event_log/rtc_event_log.h"
-#include "webrtc/test/encoder_settings.h"
-#include "webrtc/test/fake_audio_device.h"
-#include "webrtc/test/fake_decoder.h"
-#include "webrtc/test/fake_encoder.h"
-#include "webrtc/test/fake_videorenderer.h"
-#include "webrtc/test/frame_generator_capturer.h"
-#include "webrtc/test/rtp_rtcp_observer.h"
+#include "call/call.h"
+#include "call/rtp_transport_controller_send.h"
+#include "logging/rtc_event_log/rtc_event_log.h"
+#include "test/encoder_settings.h"
+#include "test/fake_audio_device.h"
+#include "test/fake_decoder.h"
+#include "test/fake_encoder.h"
+#include "test/fake_videorenderer.h"
+#include "test/frame_generator_capturer.h"
+#include "test/rtp_rtcp_observer.h"
+#include "test/single_threaded_task_queue.h"
 
 namespace webrtc {
-
-class VoEBase;
-
 namespace test {
 
 class BaseTest;
@@ -36,7 +35,8 @@ class CallTest : public ::testing::Test {
   CallTest();
   virtual ~CallTest();
 
-  static const size_t kNumSsrcs = 3;
+  static constexpr size_t kNumSsrcs = 6;
+  static const int kNumSimulcastStreams = 3;
   static const int kDefaultWidth = 320;
   static const int kDefaultHeight = 180;
   static const int kDefaultFramerate = 30;
@@ -64,9 +64,8 @@ class CallTest : public ::testing::Test {
   static const std::map<uint8_t, MediaType> payload_type_map_;
 
  protected:
-  // RunBaseTest overwrites the audio_state and the voice_engine of the send and
-  // receive Call configs to simplify test code and avoid having old VoiceEngine
-  // APIs in the tests.
+  // RunBaseTest overwrites the audio_state of the send and receive Call configs
+  // to simplify test code.
   void RunBaseTest(BaseTest* test);
 
   void CreateCalls(const Call::Config& sender_config,
@@ -75,11 +74,22 @@ class CallTest : public ::testing::Test {
   void CreateReceiverCall(const Call::Config& config);
   void DestroyCalls();
 
+  void CreateVideoSendConfig(VideoSendStream::Config* video_config,
+                             size_t num_video_streams,
+                             size_t num_used_ssrcs,
+                             Transport* send_transport);
+  void CreateAudioAndFecSendConfigs(size_t num_audio_streams,
+                                    size_t num_flexfec_streams,
+                                    Transport* send_transport);
   void CreateSendConfig(size_t num_video_streams,
                         size_t num_audio_streams,
                         size_t num_flexfec_streams,
                         Transport* send_transport);
 
+  std::vector<VideoReceiveStream::Config> CreateMatchingVideoReceiveConfigs(
+      const VideoSendStream::Config& video_send_config,
+      Transport* rtcp_send_transport);
+  void CreateMatchingAudioAndFecConfigs(Transport* rtcp_send_transport);
   void CreateMatchingReceiveConfigs(Transport* rtcp_send_transport);
 
   void CreateFrameGeneratorCapturerWithDrift(Clock* drift_clock,
@@ -95,6 +105,10 @@ class CallTest : public ::testing::Test {
   void CreateVideoStreams();
   void CreateAudioStreams();
   void CreateFlexfecStreams();
+
+  void AssociateFlexfecStreamsWithVideoStreams();
+  void DissociateFlexfecStreamsFromVideoStreams();
+
   void Start();
   void Stop();
   void DestroyStreams();
@@ -104,6 +118,7 @@ class CallTest : public ::testing::Test {
 
   std::unique_ptr<webrtc::RtcEventLog> event_log_;
   std::unique_ptr<Call> sender_call_;
+  RtpTransportControllerSend* sender_call_transport_controller_;
   std::unique_ptr<PacketTransport> send_transport_;
   VideoSendStream::Config video_send_config_;
   VideoEncoderConfig video_encoder_config_;
@@ -130,32 +145,13 @@ class CallTest : public ::testing::Test {
   rtc::scoped_refptr<AudioEncoderFactory> encoder_factory_;
   test::FakeVideoRenderer fake_renderer_;
 
+  SingleThreadedTaskQueueForTesting task_queue_;
+
  private:
-  // TODO(holmer): Remove once VoiceEngine is fully refactored to the new API.
-  // These methods are used to set up legacy voice engines and channels which is
-  // necessary while voice engine is being refactored to the new stream API.
-  struct VoiceEngineState {
-    VoiceEngineState()
-        : voice_engine(nullptr),
-          base(nullptr),
-          channel_id(-1) {}
-
-    VoiceEngine* voice_engine;
-    VoEBase* base;
-    int channel_id;
-  };
-
-  void CreateVoiceEngines();
-  void DestroyVoiceEngines();
-
-  VoiceEngineState voe_send_;
-  VoiceEngineState voe_recv_;
   rtc::scoped_refptr<AudioProcessing> apm_send_;
   rtc::scoped_refptr<AudioProcessing> apm_recv_;
-
-  // The audio devices must outlive the voice engines.
-  std::unique_ptr<test::FakeAudioDevice> fake_send_audio_device_;
-  std::unique_ptr<test::FakeAudioDevice> fake_recv_audio_device_;
+  rtc::scoped_refptr<test::FakeAudioDevice> fake_send_audio_device_;
+  rtc::scoped_refptr<test::FakeAudioDevice> fake_recv_audio_device_;
 };
 
 class BaseTest : public RtpRtcpObserver {
@@ -178,10 +174,15 @@ class BaseTest : public RtpRtcpObserver {
 
   virtual Call::Config GetSenderCallConfig();
   virtual Call::Config GetReceiverCallConfig();
+  virtual void OnRtpTransportControllerSendCreated(
+      RtpTransportControllerSend* controller);
   virtual void OnCallsCreated(Call* sender_call, Call* receiver_call);
 
-  virtual test::PacketTransport* CreateSendTransport(Call* sender_call);
-  virtual test::PacketTransport* CreateReceiveTransport();
+  virtual test::PacketTransport* CreateSendTransport(
+      SingleThreadedTaskQueueForTesting* task_queue,
+      Call* sender_call);
+  virtual test::PacketTransport* CreateReceiveTransport(
+      SingleThreadedTaskQueueForTesting* task_queue);
 
   virtual void ModifyVideoConfigs(
       VideoSendStream::Config* send_config,
@@ -209,7 +210,7 @@ class BaseTest : public RtpRtcpObserver {
   virtual void OnFrameGeneratorCapturerCreated(
       FrameGeneratorCapturer* frame_generator_capturer);
 
-  virtual void OnTestFinished();
+  virtual void OnStreamsStopped();
 
   std::unique_ptr<webrtc::RtcEventLog> event_log_;
 };
@@ -232,4 +233,4 @@ class EndToEndTest : public BaseTest {
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_CALL_TEST_H_
+#endif  // TEST_CALL_TEST_H_

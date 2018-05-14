@@ -4,7 +4,7 @@
 
 #include "core/css/MediaValues.h"
 
-#include "core/css/CSSHelper.h"
+#include "core/css/CSSResolutionUnits.h"
 #include "core/css/MediaValuesCached.h"
 #include "core/css/MediaValuesDynamic.h"
 #include "core/dom/Document.h"
@@ -12,12 +12,11 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
-#include "core/html/imports/HTMLImportsController.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/api/LayoutViewItem.h"
-#include "core/layout/compositing/PaintLayerCompositor.h"
+#include "core/layout/LayoutView.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
+#include "core/paint/compositing/PaintLayerCompositor.h"
 #include "platform/graphics/ColorSpaceGamut.h"
 #include "public/platform/WebScreenInfo.h"
 
@@ -126,12 +125,18 @@ WebDisplayMode MediaValues::CalculateDisplayMode(LocalFrame* frame) {
 
 bool MediaValues::CalculateThreeDEnabled(LocalFrame* frame) {
   DCHECK(frame);
-  DCHECK(!frame->ContentLayoutItem().IsNull());
-  DCHECK(frame->ContentLayoutItem().Compositor());
+  DCHECK(frame->ContentLayoutObject());
+  DCHECK(frame->ContentLayoutObject()->Compositor());
   bool three_d_enabled = false;
-  if (LayoutViewItem view = frame->ContentLayoutItem())
-    three_d_enabled = view.Compositor()->HasAcceleratedCompositing();
+  if (LayoutView* view = frame->ContentLayoutObject())
+    three_d_enabled = view->Compositor()->HasAcceleratedCompositing();
   return three_d_enabled;
+}
+
+bool MediaValues::CalculateInImmersiveMode(LocalFrame* frame) {
+  DCHECK(frame);
+  DCHECK(frame->GetSettings());
+  return frame->GetSettings()->GetImmersiveModeEnabled();
 }
 
 PointerType MediaValues::CalculatePrimaryPointerType(LocalFrame* frame) {
@@ -220,6 +225,9 @@ bool MediaValues::ComputeLengthImpl(double value,
     case CSSPrimitiveValue::UnitType::kMillimeters:
       result = value * kCssPixelsPerMillimeter;
       return true;
+    case CSSPrimitiveValue::UnitType::kQuarterMillimeters:
+      result = value * kCssPixelsPerQuarterMillimeter;
+      return true;
     case CSSPrimitiveValue::UnitType::kInches:
       result = value * kCssPixelsPerInch;
       return true;
@@ -232,14 +240,6 @@ bool MediaValues::ComputeLengthImpl(double value,
     default:
       return false;
   }
-}
-
-LocalFrame* MediaValues::FrameFrom(Document& document) {
-  Document* executing_document = document.ImportsController()
-                                     ? document.ImportsController()->Master()
-                                     : &document;
-  DCHECK(executing_document);
-  return executing_document->GetFrame();
 }
 
 }  // namespace blink

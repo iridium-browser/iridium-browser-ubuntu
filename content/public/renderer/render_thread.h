@@ -22,6 +22,12 @@ namespace base {
 class WaitableEvent;
 }
 
+namespace blink {
+namespace scheduler {
+enum class RendererProcessType;
+}
+}  // namespace blink
+
 namespace IPC {
 class MessageFilter;
 class SyncChannel;
@@ -107,10 +113,9 @@ class CONTENT_EXPORT RenderThread : virtual public ChildThread {
   // Retrieve the process ID of the browser process.
   virtual int32_t GetClientId() = 0;
 
-  // Handles for posting tasks to appropriate renderer scheduler task queues.
-  virtual scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() = 0;
-  virtual scoped_refptr<base::SingleThreadTaskRunner>
-  GetLoadingTaskRunner() = 0;
+  // Set the renderer process type.
+  virtual void SetRendererProcessType(
+      blink::scheduler::RendererProcessType type) = 0;
 };
 
 }  // namespace content

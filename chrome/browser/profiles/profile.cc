@@ -9,9 +9,11 @@
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/first_run/first_run.h"
+#include "chrome/browser/net/profile_network_context_service.h"
+#include "chrome/browser/net/profile_network_context_service_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/pref_names.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
@@ -38,6 +40,8 @@
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "extensions/browser/extension_pref_store.h"
+#include "extensions/browser/extension_pref_value_map_factory.h"
 #include "extensions/browser/pref_names.h"
 #endif
 
@@ -50,10 +54,10 @@
 
 namespace {
 
-base::LazyInstance<base::Lock>::Leaky g_instances_lock =
+base::LazyInstance<base::Lock>::Leaky g_profile_instances_lock =
     LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<std::set<content::BrowserContext*>>::Leaky g_instances =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<std::set<content::BrowserContext*>>::Leaky
+    g_profile_instances = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -66,8 +70,8 @@ Profile::Profile()
       is_guest_profile_(false),
       is_system_profile_(false) {
 #if DCHECK_IS_ON()
-  base::AutoLock lock(g_instances_lock.Get());
-  g_instances.Get().insert(this);
+  base::AutoLock lock(g_profile_instances_lock.Get());
+  g_profile_instances.Get().insert(this);
 #endif  // DCHECK_IS_ON()
 
   BrowserContextDependencyManager::GetInstance()->MarkBrowserContextLive(this);
@@ -75,8 +79,8 @@ Profile::Profile()
 
 Profile::~Profile() {
 #if DCHECK_IS_ON()
-  base::AutoLock lock(g_instances_lock.Get());
-  g_instances.Get().erase(this);
+  base::AutoLock lock(g_profile_instances_lock.Get());
+  g_profile_instances.Get().erase(this);
 #endif  // DCHECK_IS_ON()
 }
 
@@ -90,8 +94,8 @@ Profile* Profile::FromBrowserContext(content::BrowserContext* browser_context) {
   // testing, however, there are several BrowserContext subclasses that are not
   // Profile subclasses, and we can catch them. http://crbug.com/725276
 #if DCHECK_IS_ON()
-  base::AutoLock lock(g_instances_lock.Get());
-  if (!g_instances.Get().count(browser_context)) {
+  base::AutoLock lock(g_profile_instances_lock.Get());
+  if (!g_profile_instances.Get().count(browser_context)) {
     DCHECK(false)
         << "Non-Profile BrowserContext passed to Profile::FromBrowserContext! "
            "If you have a test linked in chrome/ you need a chrome/ based test "
@@ -147,10 +151,6 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterInt64Pref(prefs::kSiteEngagementLastUpdateTime, 0,
                               PrefRegistry::LOSSY_PREF);
   registry->RegisterBooleanPref(prefs::kSSLErrorOverrideAllowed, true);
-  // This pref is intentionally outside the above #if. That flag corresponds
-  // to the Notifier extension and does not gate the launcher page.
-  // TODO(skare): Remove or rename ENABLE_GOOGLE_NOW: http://crbug.com/459827.
-  registry->RegisterBooleanPref(prefs::kGoogleNowLauncherEnabled, true);
   registry->RegisterBooleanPref(prefs::kDisableExtensions, false);
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   registry->RegisterBooleanPref(extensions::pref_names::kAlertsInitialized,
@@ -212,6 +212,7 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kMediaRouterFirstRunFlowAcknowledged,
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kMediaRouterMediaRemotingEnabled, true);
   registry->RegisterListPref(prefs::kMediaRouterTabMirroringSources);
 
 #if defined(OS_CHROMEOS)
@@ -245,6 +246,19 @@ bool Profile::IsSystemProfile() const {
   return is_system_profile_;
 }
 
+bool Profile::ShouldRestoreOldSessionCookies() {
+  return false;
+}
+
+bool Profile::ShouldPersistSessionCookies() {
+  return false;
+}
+
+network::mojom::NetworkContextPtr Profile::CreateMainNetworkContext() {
+  return ProfileNetworkContextServiceFactory::GetForContext(this)
+      ->CreateMainNetworkContext();
+}
+
 bool Profile::IsNewProfile() {
   // The profile has been shut down if the prefs were loaded from disk, unless
   // first-run autoimport wrote them and reloaded the pref service.
@@ -276,6 +290,17 @@ void Profile::MaybeSendDestroyedNotification() {
         content::Source<Profile>(this),
         content::NotificationService::NoDetails());
   }
+}
+
+PrefStore* Profile::CreateExtensionPrefStore(Profile* profile,
+                                             bool incognito_pref_store) {
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  return new ExtensionPrefStore(
+      ExtensionPrefValueMapFactory::GetForBrowserContext(profile),
+      incognito_pref_store);
+#else
+  return nullptr;
+#endif
 }
 
 bool ProfileCompare::operator()(Profile* a, Profile* b) const {

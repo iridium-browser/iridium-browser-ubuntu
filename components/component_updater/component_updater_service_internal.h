@@ -12,8 +12,6 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner.h"
-#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "components/component_updater/timer.h"
 
@@ -38,8 +36,8 @@ class CrxUpdateService : public ComponentUpdateService,
   using Observer = ComponentUpdateService::Observer;
 
  public:
-  CrxUpdateService(const scoped_refptr<Configurator>& config,
-                   const scoped_refptr<UpdateClient>& update_client);
+  CrxUpdateService(scoped_refptr<Configurator> config,
+                   scoped_refptr<UpdateClient> update_client);
   ~CrxUpdateService() override;
 
   // Overrides for ComponentUpdateService.
@@ -50,10 +48,10 @@ class CrxUpdateService : public ComponentUpdateService,
   std::vector<std::string> GetComponentIDs() const override;
   std::unique_ptr<ComponentInfo> GetComponentForMimeType(
       const std::string& id) const override;
+  std::vector<ComponentInfo> GetComponents() const override;
   OnDemandUpdater& GetOnDemandUpdater() override;
   void MaybeThrottle(const std::string& id,
-                     const base::Closure& callback) override;
-  scoped_refptr<base::SequencedTaskRunner> GetSequencedTaskRunner() override;
+                     base::OnceClosure callback) override;
   bool GetComponentDetails(const std::string& id,
                            CrxUpdateItem* item) const override;
 
@@ -61,7 +59,7 @@ class CrxUpdateService : public ComponentUpdateService,
   void OnEvent(Events event, const std::string& id) override;
 
   // Overrides for OnDemandUpdater.
-  void OnDemandUpdate(const std::string& id, const Callback& callback) override;
+  void OnDemandUpdate(const std::string& id, Callback callback) override;
 
  private:
   void Start();
@@ -69,7 +67,7 @@ class CrxUpdateService : public ComponentUpdateService,
 
   bool CheckForUpdates();
 
-  void OnDemandUpdateInternal(const std::string& id, const Callback& callback);
+  void OnDemandUpdateInternal(const std::string& id, Callback callback);
   bool OnDemandUpdateWithCooldown(const std::string& id);
 
   bool DoUnregisterComponent(const CrxComponent& component);
@@ -109,7 +107,8 @@ class CrxUpdateService : public ComponentUpdateService,
   std::vector<std::string> components_pending_unregistration_;
 
   // Contains the active resource throttles associated with a given component.
-  using ResourceThrottleCallbacks = std::multimap<std::string, base::Closure>;
+  using ResourceThrottleCallbacks =
+      std::multimap<std::string, base::OnceClosure>;
   ResourceThrottleCallbacks ready_callbacks_;
 
   // Contains the state of the component.
@@ -120,8 +119,6 @@ class CrxUpdateService : public ComponentUpdateService,
   // for that media type. Only the most recently-registered component is
   // tracked. May include the IDs of un-registered components.
   std::map<std::string, std::string> component_ids_by_mime_type_;
-
-  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(CrxUpdateService);
 };

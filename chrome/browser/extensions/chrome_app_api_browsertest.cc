@@ -201,8 +201,9 @@ IN_PROC_BROWSER_TEST_F(ChromeAppAPITest, InstallAndRunningState) {
   // Disable the extension and verify the state.
   ExtensionService* service = extensions::ExtensionSystem::Get(
       browser()->profile())->extension_service();
-  service->DisableExtension(extension->id(),
-                            Extension::DISABLE_PERMISSIONS_INCREASE);
+  service->DisableExtension(
+      extension->id(),
+      extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE);
   ui_test_utils::NavigateToURL(browser(), app_url);
 
   EXPECT_EQ("disabled", InstallStateInMainFrame());
@@ -223,7 +224,13 @@ IN_PROC_BROWSER_TEST_F(ChromeAppAPITest, InstallAndRunningState) {
 
   EXPECT_EQ("installed", InstallStateInIFrame());
   EXPECT_EQ("cannot_run", RunningStateInIFrame());
-  EXPECT_FALSE(IsAppInstalledInIFrame());
+
+  // With --site-per-process, the iframe on nonapp.com will currently swap
+  // processes and go into the hosted app process.
+  if (content::AreAllSitesIsolatedForTesting())
+    EXPECT_TRUE(IsAppInstalledInIFrame());
+  else
+    EXPECT_FALSE(IsAppInstalledInIFrame());
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeAppAPITest, InstallAndRunningStateFrame) {

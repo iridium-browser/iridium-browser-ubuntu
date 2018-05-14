@@ -29,6 +29,9 @@ class UI_BASE_IME_EXPORT MockInputMethodManager : public InputMethodManager {
     void RemoveInputMethodExtension(const std::string& extension_id) override;
     void ChangeInputMethod(const std::string& input_method_id,
                            bool show_message) override;
+    void ChangeInputMethodToJpKeyboard() override;
+    void ChangeInputMethodToJpIme() override;
+    void ToggleInputMethodForJpIme() override;
     bool EnableInputMethod(
         const std::string& new_active_input_method_id) override;
     void EnableLoginLayouts(
@@ -104,9 +107,9 @@ class UI_BASE_IME_EXPORT MockInputMethodManager : public InputMethodManager {
       const std::vector<InputMethodManager::MenuItem>& items) override;
   void MaybeNotifyImeMenuActivationChanged() override;
   void OverrideKeyboardUrlRef(const std::string& keyset) override;
-  bool IsEmojiHandwritingVoiceOnImeMenuEnabled() override;
   void SetImeMenuFeatureEnabled(ImeMenuFeature feature, bool enabled) override;
   bool GetImeMenuFeatureEnabled(ImeMenuFeature feature) const override;
+  void NotifyObserversImeExtraInputStateChange() override;
 
  private:
   uint32_t features_enabled_state_;

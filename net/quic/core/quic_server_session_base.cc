@@ -10,9 +10,8 @@
 #include "net/quic/platform/api/quic_bug_tracker.h"
 #include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_string_piece.h"
-
-using std::string;
 
 namespace net {
 
@@ -55,8 +54,7 @@ void QuicServerSessionBase::OnConfigNegotiated() {
   bandwidth_resumption_enabled_ =
       last_bandwidth_resumption || max_bandwidth_resumption;
 
-  if (!FLAGS_quic_reloadable_flag_quic_enable_server_push_by_default ||
-      connection()->version() < QUIC_VERSION_35) {
+  if (connection()->transport_version() < QUIC_VERSION_35) {
     set_server_push_enabled(
         ContainsQuicTag(config()->ReceivedConnectionOptions(), kSPSH));
   }
@@ -86,12 +84,12 @@ void QuicServerSessionBase::OnConfigNegotiated() {
 }
 
 void QuicServerSessionBase::OnConnectionClosed(QuicErrorCode error,
-                                               const string& error_details,
+                                               const QuicString& error_details,
                                                ConnectionCloseSource source) {
   QuicSession::OnConnectionClosed(error, error_details, source);
   // In the unlikely event we get a connection close while doing an asynchronous
   // crypto event, make sure we cancel the callback.
-  if (crypto_stream_.get() != nullptr) {
+  if (crypto_stream_ != nullptr) {
     crypto_stream_->CancelOutstandingCallbacks();
   }
 }
@@ -195,7 +193,6 @@ void QuicServerSessionBase::OnCongestionWindowChange(QuicTime now) {
 }
 
 bool QuicServerSessionBase::ShouldCreateIncomingDynamicStream(QuicStreamId id) {
-  DCHECK(!FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
   if (!connection()->connected()) {
     QUIC_BUG << "ShouldCreateIncomingDynamicStream called when disconnected";
     return false;
@@ -212,7 +209,6 @@ bool QuicServerSessionBase::ShouldCreateIncomingDynamicStream(QuicStreamId id) {
 }
 
 bool QuicServerSessionBase::ShouldCreateOutgoingDynamicStream() {
-  DCHECK(!FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
   if (!connection()->connected()) {
     QUIC_BUG << "ShouldCreateOutgoingDynamicStream called when disconnected";
     return false;

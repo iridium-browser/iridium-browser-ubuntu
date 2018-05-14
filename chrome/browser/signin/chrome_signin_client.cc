@@ -5,6 +5,9 @@
 #include "chrome/browser/signin/chrome_signin_client.h"
 
 #include <stddef.h>
+
+#include <memory>
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
@@ -12,6 +15,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/buildflag.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -20,26 +24,27 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_window.h"
+#include "chrome/browser/signin/account_consistency_mode_manager.h"
 #include "chrome/browser/signin/force_signin_verifier.h"
 #include "chrome/browser/signin/local_auth.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_util.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/web_data_service_factory.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/metrics/metrics_service.h"
 #include "components/prefs/pref_service.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "components/signin/core/browser/signin_cookie_changed_subscription.h"
+#include "components/signin/core/browser/signin_cookie_change_subscription.h"
+#include "components/signin/core/browser/signin_features.h"
 #include "components/signin/core/browser/signin_header_helper.h"
-#include "components/signin/core/common/profile_management_switches.h"
-#include "components/signin/core/common/signin_pref_names.h"
-#include "components/signin/core/common/signin_switches.h"
+#include "components/signin/core/browser/signin_pref_names.h"
+#include "components/signin/core/browser/signin_switches.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -54,6 +59,8 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
+#else
+#include "chrome/browser/ui/user_manager.h"
 #endif
 
 #if !defined(OS_ANDROID)
@@ -65,10 +72,12 @@ ChromeSigninClient::ChromeSigninClient(
     SigninErrorController* signin_error_controller)
     : OAuth2TokenService::Consumer("chrome_signin_client"),
       profile_(profile),
-      signin_error_controller_(signin_error_controller) {
+      signin_error_controller_(signin_error_controller),
+      weak_ptr_factory_(this) {
   signin_error_controller_->AddObserver(this);
 #if !defined(OS_CHROMEOS)
-  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+  g_browser_process->network_connection_tracker()->AddNetworkConnectionObserver(
+      this);
 #else
   // UserManager may not exist in unit_tests.
   if (!user_manager::UserManager::IsInitialized())
@@ -100,11 +109,9 @@ ChromeSigninClient::ChromeSigninClient(
 
 ChromeSigninClient::~ChromeSigninClient() {
   signin_error_controller_->RemoveObserver(this);
-}
-
-void ChromeSigninClient::Shutdown() {
 #if !defined(OS_CHROMEOS)
-  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
+  g_browser_process->network_connection_tracker()
+      ->RemoveNetworkConnectionObserver(this);
 #endif
 }
 
@@ -197,7 +204,7 @@ net::URLRequestContextGetter* ChromeSigninClient::GetURLRequestContext() {
 }
 
 bool ChromeSigninClient::ShouldMergeSigninCredentialsIntoCookieJar() {
-  return !switches::IsAccountConsistencyMirrorEnabled();
+  return !signin::IsAccountConsistencyMirrorEnabled();
 }
 
 std::string ChromeSigninClient::GetProductVersion() {
@@ -233,17 +240,16 @@ void ChromeSigninClient::RemoveContentSettingsObserver(
       ->RemoveObserver(observer);
 }
 
-std::unique_ptr<SigninClient::CookieChangedSubscription>
-ChromeSigninClient::AddCookieChangedCallback(
+std::unique_ptr<SigninClient::CookieChangeSubscription>
+ChromeSigninClient::AddCookieChangeCallback(
     const GURL& url,
     const std::string& name,
-    const net::CookieStore::CookieChangedCallback& callback) {
+    net::CookieChangeCallback callback) {
   scoped_refptr<net::URLRequestContextGetter> context_getter =
       profile_->GetRequestContext();
   DCHECK(context_getter.get());
-  std::unique_ptr<SigninCookieChangedSubscription> subscription(
-      new SigninCookieChangedSubscription(context_getter, url, name, callback));
-  return std::move(subscription);
+  return std::make_unique<SigninCookieChangeSubscription>(
+      context_getter, url, name, std::move(callback));
 }
 
 void ChromeSigninClient::OnSignedIn(const std::string& account_id,
@@ -375,9 +381,9 @@ void ChromeSigninClient::OnGetTokenFailure(
 }
 
 #if !defined(OS_CHROMEOS)
-void ChromeSigninClient::OnNetworkChanged(
-    net::NetworkChangeNotifier::ConnectionType type) {
-  if (type >= net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE)
+void ChromeSigninClient::OnConnectionChanged(
+    network::mojom::ConnectionType type) {
+  if (type == network::mojom::ConnectionType::CONNECTION_NONE)
     return;
 
   for (const base::Closure& callback : delayed_callbacks_)
@@ -395,7 +401,13 @@ void ChromeSigninClient::DelayNetworkCall(const base::Closure& callback) {
   return;
 #else
   // Don't bother if we don't have any kind of network connection.
-  if (net::NetworkChangeNotifier::IsOffline()) {
+  network::mojom::ConnectionType type;
+  bool sync =
+      g_browser_process->network_connection_tracker()->GetConnectionType(
+          &type, base::BindOnce(&ChromeSigninClient::OnConnectionChanged,
+                                weak_ptr_factory_.GetWeakPtr()));
+  if (!sync || type == network::mojom::ConnectionType::CONNECTION_NONE) {
+    // Connection type cannot be retrieved synchronously so delay the callback.
     delayed_callbacks_.push_back(callback);
   } else {
     callback.Run();
@@ -407,13 +419,13 @@ std::unique_ptr<GaiaAuthFetcher> ChromeSigninClient::CreateGaiaAuthFetcher(
     GaiaAuthConsumer* consumer,
     const std::string& source,
     net::URLRequestContextGetter* getter) {
-  return base::MakeUnique<GaiaAuthFetcher>(consumer, source, getter);
+  return std::make_unique<GaiaAuthFetcher>(consumer, source, getter);
 }
 
 void ChromeSigninClient::VerifySyncToken() {
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
   if (signin_util::IsForceSigninEnabled())
-    force_signin_verifier_ = base::MakeUnique<ForceSigninVerifier>(profile_);
+    force_signin_verifier_ = std::make_unique<ForceSigninVerifier>(profile_);
 #endif
 }
 
@@ -454,6 +466,15 @@ void ChromeSigninClient::AfterCredentialsCopied() {
   }
 }
 
+void ChromeSigninClient::SetReadyForDiceMigration(bool is_ready) {
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  AccountConsistencyModeManager::GetForProfile(profile_)
+      ->SetReadyForDiceMigration(is_ready);
+#else
+  NOTREACHED();
+#endif
+}
+
 void ChromeSigninClient::OnCloseBrowsersSuccess(
     const base::Callback<void()>& sign_out,
     const signin_metrics::ProfileSignout signout_source_metric,
@@ -461,7 +482,6 @@ void ChromeSigninClient::OnCloseBrowsersSuccess(
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
   if (signin_util::IsForceSigninEnabled() && force_signin_verifier_.get()) {
     force_signin_verifier_->Cancel();
-    force_signin_verifier_->AbortSignoutCountdownIfExisted();
   }
 #endif
   SigninClient::PreSignOut(sign_out, signout_source_metric);

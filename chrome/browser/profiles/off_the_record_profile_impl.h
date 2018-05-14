@@ -21,9 +21,6 @@
 #include "content/public/browser/host_zoom_map.h"
 #endif
 
-using base::Time;
-using base::TimeDelta;
-
 namespace sync_preferences {
 class PrefServiceSyncable;
 }
@@ -50,6 +47,7 @@ class OffTheRecordProfileImpl : public Profile {
   void DestroyOffTheRecordProfile() override;
   bool HasOffTheRecordProfile() override;
   Profile* GetOriginalProfile() override;
+  const Profile* GetOriginalProfile() const override;
   bool IsSupervised() const override;
   bool IsChild() const override;
   bool IsLegacySupervised() const override;
@@ -74,7 +72,7 @@ class OffTheRecordProfileImpl : public Profile {
   void RegisterInProcessServices(StaticServiceMap* services) override;
   net::SSLConfigService* GetSSLConfigService() override;
   bool IsSameProfile(Profile* profile) override;
-  Time GetStartTime() const override;
+  base::Time GetStartTime() const override;
   base::FilePath last_selected_directory() override;
   void set_last_selected_directory(const base::FilePath& path) override;
   bool WasCreatedByVersionOrLater(const std::string& version) override;
@@ -87,13 +85,7 @@ class OffTheRecordProfileImpl : public Profile {
   void InitChromeOSPreferences() override;
 #endif  // defined(OS_CHROMEOS)
 
-  PrefProxyConfigTracker* GetProxyConfigTracker() override;
-
   chrome_browser_net::Predictor* GetNetworkPredictor() override;
-  DevToolsNetworkControllerHandle* GetDevToolsNetworkControllerHandle()
-      override;
-  void ClearNetworkingHistorySince(base::Time time,
-                                   const base::Closure& completion) override;
   GURL GetHomePage() override;
 
   // content::BrowserContext implementation:
@@ -111,9 +103,11 @@ class OffTheRecordProfileImpl : public Profile {
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   content::PermissionManager* GetPermissionManager() override;
+  content::BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
       override;
+  media::VideoDecodePerfHistory* GetVideoDecodePerfHistory() override;
 
  private:
   void InitIoData();
@@ -123,11 +117,6 @@ class OffTheRecordProfileImpl : public Profile {
   void TrackZoomLevelsFromParent();
 #endif  // !defined(OS_ANDROID)
 
-#if defined(OS_ANDROID)
-  void UseSystemProxy();
-#endif  // defined(OS_ANDROID)
-
-  PrefProxyConfigTracker* CreateProxyConfigTracker();
 #if !defined(OS_ANDROID)
   // Callback function for tracking parent's zoom level changes.
   void OnParentZoomLevelChanged(
@@ -148,11 +137,9 @@ class OffTheRecordProfileImpl : public Profile {
   std::unique_ptr<OffTheRecordProfileIOData::Handle> io_data_;
 
   // Time we were started.
-  Time start_time_;
+  base::Time start_time_;
 
   base::FilePath last_selected_directory_;
-
-  std::unique_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(OffTheRecordProfileImpl);
 };

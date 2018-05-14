@@ -5,11 +5,11 @@
 #ifndef WaitUntilObserver_h
 #define WaitUntilObserver_h
 
+#include "base/callback.h"
 #include "modules/ModulesExport.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "platform/Timer.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/Functional.h"
 
 namespace blink {
 
@@ -22,9 +22,11 @@ class ScriptState;
 class MODULES_EXPORT WaitUntilObserver final
     : public GarbageCollectedFinalized<WaitUntilObserver> {
  public:
-  using PromiseSettledCallback = Function<void(const ScriptValue&)>;
+  using PromiseSettledCallback =
+      base::RepeatingCallback<void(const ScriptValue&)>;
 
   enum EventType {
+    kAbortPayment,
     kActivate,
     kCanMakePayment,
     kFetch,
@@ -62,10 +64,10 @@ class MODULES_EXPORT WaitUntilObserver final
       ScriptState*,
       ScriptPromise /* script_promise */,
       ExceptionState&,
-      std::unique_ptr<PromiseSettledCallback> on_promise_fulfilled = nullptr,
-      std::unique_ptr<PromiseSettledCallback> on_promise_rejected = nullptr);
+      PromiseSettledCallback on_promise_fulfilled = PromiseSettledCallback(),
+      PromiseSettledCallback on_promise_rejected = PromiseSettledCallback());
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   friend class InternalsServiceWorker;

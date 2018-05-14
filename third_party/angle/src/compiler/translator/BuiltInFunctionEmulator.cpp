@@ -6,9 +6,9 @@
 
 #include "compiler/translator/BuiltInFunctionEmulator.h"
 #include "angle_gl.h"
-#include "compiler/translator/Cache.h"
 #include "compiler/translator/IntermTraverse.h"
 #include "compiler/translator/SymbolTable.h"
+#include "compiler/translator/StaticType.h"
 
 namespace sh
 {
@@ -45,7 +45,7 @@ class BuiltInFunctionEmulator::BuiltInFunctionEmulationMarker : public TIntermTr
             }
             const TIntermSequence &sequence = *(node->getSequence());
             bool needToEmulate              = false;
-            // Right now we only handle built-in functions with two or three parameters.
+            // Right now we only handle built-in functions with two to four parameters.
             if (sequence.size() == 2)
             {
                 TIntermTyped *param1 = sequence[0]->getAsTyped();
@@ -281,24 +281,24 @@ void BuiltInFunctionEmulator::addFunctionMap(BuiltinQueryFunc queryFunc)
 void BuiltInFunctionEmulator::WriteEmulatedFunctionName(TInfoSinkBase &out, const char *name)
 {
     ASSERT(name[strlen(name) - 1] != '(');
-    out << "webgl_" << name << "_emu";
+    out << name << "_emu";
 }
 
 FunctionId::FunctionId()
     : mOp(EOpNull),
-      mParam1(TCache::getType(EbtVoid)),
-      mParam2(TCache::getType(EbtVoid)),
-      mParam3(TCache::getType(EbtVoid)),
-      mParam4(TCache::getType(EbtVoid))
+      mParam1(StaticType::GetBasic<EbtVoid>()),
+      mParam2(StaticType::GetBasic<EbtVoid>()),
+      mParam3(StaticType::GetBasic<EbtVoid>()),
+      mParam4(StaticType::GetBasic<EbtVoid>())
 {
 }
 
 FunctionId::FunctionId(TOperator op, const TType *param)
     : mOp(op),
       mParam1(param),
-      mParam2(TCache::getType(EbtVoid)),
-      mParam3(TCache::getType(EbtVoid)),
-      mParam4(TCache::getType(EbtVoid))
+      mParam2(StaticType::GetBasic<EbtVoid>()),
+      mParam3(StaticType::GetBasic<EbtVoid>()),
+      mParam4(StaticType::GetBasic<EbtVoid>())
 {
 }
 
@@ -306,13 +306,17 @@ FunctionId::FunctionId(TOperator op, const TType *param1, const TType *param2)
     : mOp(op),
       mParam1(param1),
       mParam2(param2),
-      mParam3(TCache::getType(EbtVoid)),
-      mParam4(TCache::getType(EbtVoid))
+      mParam3(StaticType::GetBasic<EbtVoid>()),
+      mParam4(StaticType::GetBasic<EbtVoid>())
 {
 }
 
 FunctionId::FunctionId(TOperator op, const TType *param1, const TType *param2, const TType *param3)
-    : mOp(op), mParam1(param1), mParam2(param2), mParam3(param3), mParam4(TCache::getType(EbtVoid))
+    : mOp(op),
+      mParam1(param1),
+      mParam2(param2),
+      mParam3(param3),
+      mParam4(StaticType::GetBasic<EbtVoid>())
 {
 }
 

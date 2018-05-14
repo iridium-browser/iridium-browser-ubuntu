@@ -7,8 +7,8 @@
 #include <utility>
 
 #include "ash/accelerators/key_hold_detector.h"
-#include "ash/accessibility_delegate.h"
-#include "ash/accessibility_types.h"
+#include "ash/accessibility/accessibility_controller.h"
+#include "ash/public/cpp/accessibility_types.h"
 #include "ash/shell.h"
 #include "ui/events/event.h"
 
@@ -53,8 +53,10 @@ bool SpokenFeedbackToggler::ShouldStopEventPropagation() const {
 void SpokenFeedbackToggler::OnKeyHold(const ui::KeyEvent* event) {
   if (!toggled_) {
     toggled_ = true;
-    Shell::Get()->accessibility_delegate()->ToggleSpokenFeedback(
-        A11Y_NOTIFICATION_SHOW);
+    AccessibilityController* controller =
+        Shell::Get()->accessibility_controller();
+    controller->SetSpokenFeedbackEnabled(!controller->IsSpokenFeedbackEnabled(),
+                                         A11Y_NOTIFICATION_SHOW);
   }
 }
 
@@ -64,6 +66,6 @@ void SpokenFeedbackToggler::OnKeyUnhold(const ui::KeyEvent* event) {
 
 SpokenFeedbackToggler::SpokenFeedbackToggler() : toggled_(false) {}
 
-SpokenFeedbackToggler::~SpokenFeedbackToggler() {}
+SpokenFeedbackToggler::~SpokenFeedbackToggler() = default;
 
 }  // namespace ash

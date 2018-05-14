@@ -31,13 +31,14 @@
 #ifndef ScriptController_h
 #define ScriptController_h
 
+#include "bindings/core/v8/ScriptSourceLocationType.h"
 #include "bindings/core/v8/WindowProxyManager.h"
 #include "core/CoreExport.h"
 #include "core/dom/ExecutionContext.h"
 #include "platform/bindings/SharedPersistent.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/AccessControlStatus.h"
-#include "platform/loader/fetch/CrossOriginAccessControl.h"
+#include "platform/loader/fetch/ScriptFetchOptions.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/Vector.h"
@@ -74,7 +75,7 @@ class CORE_EXPORT ScriptController final
     return new ScriptController(frame, window_proxy_manager);
   }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   // This returns an initialized window proxy. (If the window proxy is not
   // yet initialized, it's implicitly initialized at the first access.)
@@ -84,16 +85,24 @@ class CORE_EXPORT ScriptController final
 
   // Evaluate JavaScript in the main world.
   void ExecuteScriptInMainWorld(
-      const String&,
+      const String& script,
+      ScriptSourceLocationType = ScriptSourceLocationType::kUnknown,
       ExecuteScriptPolicy = kDoNotExecuteScriptWhenScriptsDisabled);
-  void ExecuteScriptInMainWorld(const ScriptSourceCode&,
-                                AccessControlStatus = kNotSharableCrossOrigin);
+  void ExecuteScriptInMainWorld(
+      const ScriptSourceCode&,
+      const KURL& base_url = KURL(),
+      const ScriptFetchOptions& = ScriptFetchOptions(),
+      AccessControlStatus = kNotSharableCrossOrigin);
   v8::Local<v8::Value> ExecuteScriptInMainWorldAndReturnValue(
       const ScriptSourceCode&,
+      const KURL& base_url = KURL(),
+      const ScriptFetchOptions& = ScriptFetchOptions(),
       ExecuteScriptPolicy = kDoNotExecuteScriptWhenScriptsDisabled);
   v8::Local<v8::Value> ExecuteScriptAndReturnValue(
       v8::Local<v8::Context>,
       const ScriptSourceCode&,
+      const KURL& base_url = KURL(),
+      const ScriptFetchOptions& = ScriptFetchOptions(),
       AccessControlStatus = kNotSharableCrossOrigin);
 
   // Executes JavaScript in an isolated world. The script gets its own global
@@ -113,7 +122,7 @@ class CORE_EXPORT ScriptController final
 
   // Creates a new isolated world for DevTools with the given human readable
   // |world_name| and returns it id or nullptr on failure.
-  PassRefPtr<DOMWrapperWorld> CreateNewInspectorIsolatedWorld(
+  scoped_refptr<DOMWrapperWorld> CreateNewInspectorIsolatedWorld(
       const String& world_name);
 
   // Returns true if the current world is isolated, and has its own Content
@@ -128,7 +137,7 @@ class CORE_EXPORT ScriptController final
   void ClearWindowProxy();
   void UpdateDocument();
 
-  void UpdateSecurityOrigin(SecurityOrigin*);
+  void UpdateSecurityOrigin(const SecurityOrigin*);
 
   void ClearForClose();
 
@@ -150,6 +159,8 @@ class CORE_EXPORT ScriptController final
   void EnableEval();
 
   v8::Local<v8::Value> EvaluateScriptInMainWorld(const ScriptSourceCode&,
+                                                 const KURL& base_url,
+                                                 const ScriptFetchOptions&,
                                                  AccessControlStatus,
                                                  ExecuteScriptPolicy);
 

@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser;
 
-import android.content.Context;
 import android.text.TextUtils;
 import android.view.ActionMode;
 import android.view.Menu;
@@ -13,12 +12,14 @@ import android.view.MenuItem;
 import org.chromium.base.Callback;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.omnibox.geo.GeolocationHeader;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
+import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.content.R;
 import org.chromium.content_public.browser.ActionModeCallbackHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -28,12 +29,10 @@ import org.chromium.ui.base.PageTransition;
  * A class that handles selection action mode for an associated {@link Tab}.
  */
 public class ChromeActionModeCallback implements ActionMode.Callback {
-    private final Context mContext;
     private final Tab mTab;
     private final ActionModeCallbackHelper mHelper;
 
-    public ChromeActionModeCallback(Context context, Tab tab, ActionModeCallbackHelper helper) {
-        mContext = context;
+    public ChromeActionModeCallback(Tab tab, ActionModeCallbackHelper helper) {
         mTab = tab;
         mHelper = helper;
     }
@@ -67,11 +66,8 @@ public class ChromeActionModeCallback implements ActionMode.Callback {
 
         if (item.getItemId() == R.id.select_action_menu_web_search) {
             final String selectedText = mHelper.getSelectedText();
-            Callback<Boolean> callback = new Callback<Boolean>() {
-                @Override
-                public void onResult(Boolean result) {
-                    if (result != null && result) search(selectedText);
-                }
+            Callback<Boolean> callback = result -> {
+                if (result != null && result) search(selectedText);
             };
             LocaleManager.getInstance().showSearchEnginePromoIfNeeded(mTab.getActivity(), callback);
             mHelper.finishActionMode();
@@ -115,6 +111,8 @@ public class ChromeActionModeCallback implements ActionMode.Callback {
                 searchText, ActionModeCallbackHelper.MAX_SEARCH_QUERY_LENGTH);
         if (TextUtils.isEmpty(query)) return;
 
+        TrackerFactory.getTrackerForProfile(mTab.getProfile())
+                .notifyEvent(EventConstants.WEB_SEARCH_PERFORMED);
         mTab.getTabModelSelector().openNewTab(generateUrlParamsForSearch(query),
                 TabLaunchType.FROM_LONGPRESS_FOREGROUND, mTab, mTab.isIncognito());
     }

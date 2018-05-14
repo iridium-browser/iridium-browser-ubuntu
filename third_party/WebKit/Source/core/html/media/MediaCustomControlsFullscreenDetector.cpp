@@ -4,11 +4,13 @@
 
 #include "core/html/media/MediaCustomControlsFullscreenDetector.h"
 
-#include "core/dom/TaskRunnerHelper.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/fullscreen/Fullscreen.h"
-#include "core/html/HTMLVideoElement.h"
+#include "core/html/media/HTMLVideoElement.h"
 #include "core/layout/IntersectionGeometry.h"
+#include "platform/runtime_enabled_features.h"
+#include "public/platform/TaskType.h"
+#include "third_party/WebKit/public/platform/WebFullscreenVideoStatus.h"
 
 namespace blink {
 
@@ -25,7 +27,7 @@ MediaCustomControlsFullscreenDetector::MediaCustomControlsFullscreenDetector(
     : EventListener(kCPPEventListenerType),
       video_element_(video),
       check_viewport_intersection_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnthrottled, &video.GetDocument()),
+          video.GetDocument().GetTaskRunner(TaskType::kUnthrottled),
           this,
           &MediaCustomControlsFullscreenDetector::
               OnCheckViewportIntersectionTimerFired) {
@@ -55,8 +57,10 @@ void MediaCustomControlsFullscreenDetector::Detach() {
       EventTypeNames::fullscreenchange, this, true);
   check_viewport_intersection_timer_.Stop();
 
-  if (VideoElement().GetWebMediaPlayer())
-    VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(false);
+  if (VideoElement().GetWebMediaPlayer()) {
+    VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(
+        blink::WebFullscreenVideoStatus::kNotEffectivelyFullscreen);
+  }
 }
 
 bool MediaCustomControlsFullscreenDetector::ComputeIsDominantVideoForTests(
@@ -109,21 +113,23 @@ void MediaCustomControlsFullscreenDetector::handleEvent(
   if (!VideoElement().isConnected() || !IsVideoOrParentFullscreen()) {
     check_viewport_intersection_timer_.Stop();
 
-    if (VideoElement().GetWebMediaPlayer())
-      VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(false);
+    if (VideoElement().GetWebMediaPlayer()) {
+      VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(
+          blink::WebFullscreenVideoStatus::kNotEffectivelyFullscreen);
+    }
 
     return;
   }
 
   check_viewport_intersection_timer_.StartOneShot(
-      kCheckFullscreenIntervalSeconds, BLINK_FROM_HERE);
+      kCheckFullscreenIntervalSeconds, FROM_HERE);
 }
 
 void MediaCustomControlsFullscreenDetector::ContextDestroyed() {
   // This method is called by HTMLVideoElement when it observes context destroy.
   // The reason is that when HTMLMediaElement observes context destroy, it will
-  // destroy webMediaPlayer() thus the final setIsEffectivelyFullscreen(false)
-  // is not called.
+  // destroy webMediaPlayer() thus the final
+  // setIsEffectivelyFullscreen(kNotEffectivelyFullscreen) is not called.
   Detach();
 }
 
@@ -138,8 +144,27 @@ void MediaCustomControlsFullscreenDetector::
       geometry.TargetIntRect(), geometry.RootIntRect(),
       geometry.IntersectionIntRect());
 
-  if (VideoElement().GetWebMediaPlayer())
-    VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(is_dominant);
+  if (!VideoElement().GetWebMediaPlayer())
+    return;
+
+  if (!is_dominant) {
+    VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(
+        blink::WebFullscreenVideoStatus::kNotEffectivelyFullscreen);
+    return;
+  }
+
+  // Picture-in-Picture can be disabled by the website when the API is enabled.
+  bool picture_in_picture_allowed =
+      !RuntimeEnabledFeatures::PictureInPictureEnabled() &&
+      !VideoElement().FastHasAttribute(HTMLNames::disablepictureinpictureAttr);
+  if (picture_in_picture_allowed) {
+    VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(
+        blink::WebFullscreenVideoStatus::kFullscreenAndPictureInPictureEnabled);
+  } else {
+    VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(
+        blink::WebFullscreenVideoStatus::
+            kFullscreenAndPictureInPictureDisabled);
+  }
 }
 
 bool MediaCustomControlsFullscreenDetector::IsVideoOrParentFullscreen() {
@@ -151,7 +176,7 @@ bool MediaCustomControlsFullscreenDetector::IsVideoOrParentFullscreen() {
   return fullscreen_element->contains(&VideoElement());
 }
 
-DEFINE_TRACE(MediaCustomControlsFullscreenDetector) {
+void MediaCustomControlsFullscreenDetector::Trace(blink::Visitor* visitor) {
   EventListener::Trace(visitor);
   visitor->Trace(video_element_);
 }

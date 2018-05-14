@@ -70,7 +70,7 @@ class DigestorImpl : public blink::WebCryptoDigestor {
     if (!digest_algorithm)
       return Status::ErrorUnsupported();
 
-    if (!EVP_DigestInit_ex(digest_context_.get(), digest_algorithm, NULL))
+    if (!EVP_DigestInit_ex(digest_context_.get(), digest_algorithm, nullptr))
       return Status::OperationError();
 
     initialized_ = true;
@@ -119,7 +119,7 @@ class ShaImplementation : public AlgorithmImplementation {
 }  // namespace
 
 std::unique_ptr<AlgorithmImplementation> CreateShaImplementation() {
-  return base::MakeUnique<ShaImplementation>();
+  return std::make_unique<ShaImplementation>();
 }
 
 std::unique_ptr<blink::WebCryptoDigestor> CreateDigestorImplementation(

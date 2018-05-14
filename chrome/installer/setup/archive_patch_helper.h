@@ -43,8 +43,9 @@ class ArchivePatchHelper {
 
   // Uncompresses |compressed_archive| in |working_directory| then applies the
   // extracted patch file to |patch_source|, writing the result to |target|.
-  // Ensemble patching via Courgette is attempted first. If that fails, bspatch
-  // is attempted. Returns false if uncompression or both patching steps fail.
+  // Ensemble patching via Zucchini is attempted first (if it is enabled). If
+  // that fails Courgette is attempted with fallback to bspatch. Returns false
+  // if uncompression or all patching steps fail.
   static bool UncompressAndPatch(const base::FilePath& working_directory,
                                  const base::FilePath& compressed_archive,
                                  const base::FilePath& patch_source,
@@ -56,9 +57,20 @@ class ArchivePatchHelper {
   // file extracted from the archive.
   bool Uncompress(base::FilePath* last_uncompressed_file);
 
-  // Attempts to use courgette to apply last_uncompressed_file() to
+  // Performs ensemble patching on the uncompressed version of
+  // |compressed_archive| in |working_directory| as specified in the
+  // constructor using files from |patch_source|. Ensemble patching via
+  // Zucchini is attempted first (if it is enabled). If that fails patching via
+  // Courgette is attempted. Courgette falls back to bspatch if unsuccessful.
+  bool ApplyPatch();
+
+  // Attempts to use Courgette to apply last_uncompressed_file() to
   // patch_source() to generate target(). Returns false if patching fails.
-  bool EnsemblePatch();
+  bool CourgetteEnsemblePatch();
+
+  // Attempts to use Zucchini to apply last_uncompressed_file() to
+  // patch_source() to generate target(). Returns false if patching fails.
+  bool ZucchiniEnsemblePatch();
 
   // Attempts to use bspatch to apply last_uncompressed_file() to patch_source()
   // to generate target(). Returns false if patching fails.

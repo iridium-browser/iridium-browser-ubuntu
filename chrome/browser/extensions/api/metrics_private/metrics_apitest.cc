@@ -94,8 +94,8 @@ void ValidateSparseHistogramSamples(
 
 void ValidateHistograms(const RecordedHistogram* recorded,
                         int count) {
-  base::StatisticsRecorder::Histograms histograms;
-  base::StatisticsRecorder::GetHistograms(&histograms);
+  const base::StatisticsRecorder::Histograms histograms =
+      base::StatisticsRecorder::GetHistograms();
 
   // Code other than the tests tun here will record some histogram values, but
   // we will ignore those. This function validates that all the histogram we
@@ -106,7 +106,7 @@ void ValidateHistograms(const RecordedHistogram* recorded,
     size_t j = 0;
     for (j = 0; j < histograms.size(); ++j) {
       base::HistogramBase* histogram(histograms[j]);
-      if (r.name == histogram->histogram_name()) {
+      if (std::string(r.name) == histogram->histogram_name()) {
         std::unique_ptr<base::HistogramSamples> snapshot =
             histogram->SnapshotSamples();
         base::HistogramBase::Count sample_count = snapshot->TotalCount();

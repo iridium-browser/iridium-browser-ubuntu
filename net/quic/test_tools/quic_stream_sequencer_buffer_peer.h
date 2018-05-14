@@ -34,9 +34,7 @@ class QuicStreamSequencerBufferPeer {
 
   QuicStreamSequencerBuffer::BufferBlock* GetBlock(size_t index);
 
-  int GapSize();
-
-  std::list<QuicStreamSequencerBuffer::Gap> GetGaps();
+  int IntervalSize();
 
   size_t max_buffer_capacity();
 
@@ -47,9 +45,13 @@ class QuicStreamSequencerBufferPeer {
 
   void set_total_bytes_read(QuicStreamOffset total_bytes_read);
 
-  void set_gaps(const std::list<QuicStreamSequencerBuffer::Gap>& gaps);
+  void AddBytesReceived(QuicStreamOffset offset, QuicByteCount length);
 
   bool IsBufferAllocated();
+
+  size_t block_count();
+
+  const QuicIntervalSet<QuicStreamOffset>& bytes_received();
 
  private:
   QuicStreamSequencerBuffer* buffer_;

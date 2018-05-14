@@ -10,10 +10,23 @@
 namespace blink {
 namespace scheduler {
 
+class WorkerScheduler;
+
 class PLATFORM_EXPORT WorkerTaskQueue : public TaskQueue {
  public:
-  explicit WorkerTaskQueue(std::unique_ptr<internal::TaskQueueImpl> impl);
+  WorkerTaskQueue(std::unique_ptr<internal::TaskQueueImpl> impl,
+                  const Spec& spec,
+                  WorkerScheduler* worker_scheduler);
   ~WorkerTaskQueue() override;
+
+  void OnTaskCompleted(const TaskQueue::Task& task,
+                       base::TimeTicks start,
+                       base::TimeTicks end,
+                       base::Optional<base::TimeDelta> thread_time);
+
+ private:
+  // Not owned.
+  WorkerScheduler* worker_scheduler_;
 };
 
 }  // namespace scheduler

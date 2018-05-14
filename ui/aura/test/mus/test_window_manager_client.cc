@@ -4,6 +4,8 @@
 
 #include "ui/aura/test/mus/test_window_manager_client.h"
 
+#include <algorithm>
+
 namespace aura {
 
 TestWindowManagerClient::TestWindowManagerClient() {}
@@ -20,16 +22,22 @@ size_t TestWindowManagerClient::GetChangeCountForType(
   return count;
 }
 
-void TestWindowManagerClient::AddActivationParent(Id transport_window_id) {
+size_t TestWindowManagerClient::IndexOfFirstChangeOfType(
+    WindowManagerClientChangeType type) const {
+  auto iter = std::find(changes_.begin(), changes_.end(), type);
+  return iter == changes_.end() ? static_cast<size_t>(-1)
+                                : iter - changes_.begin();
+}
+
+void TestWindowManagerClient::AddActivationParent(ui::Id transport_window_id) {
   changes_.push_back(WindowManagerClientChangeType::ADD_ACTIVATION_PARENT);
 }
 
-void TestWindowManagerClient::RemoveActivationParent(Id transport_window_id) {}
-
-void TestWindowManagerClient::ActivateNextWindow() {}
+void TestWindowManagerClient::RemoveActivationParent(
+    ui::Id transport_window_id) {}
 
 void TestWindowManagerClient::SetExtendedHitRegionForChildren(
-    Id window_id,
+    ui::Id window_id,
     const gfx::Insets& mouse_insets,
     const gfx::Insets& touch_insets) {}
 
@@ -46,7 +54,8 @@ void TestWindowManagerClient::SetDisplayRoot(
     const display::Display& display,
     ui::mojom::WmViewportMetricsPtr viewport_metrics,
     bool is_primary_display,
-    Id window_id,
+    ui::Id window_id,
+    const std::vector<display::Display>& mirrors,
     const SetDisplayRootCallback& callback) {}
 
 void TestWindowManagerClient::SetDisplayConfiguration(
@@ -54,6 +63,7 @@ void TestWindowManagerClient::SetDisplayConfiguration(
     std::vector<::ui::mojom::WmViewportMetricsPtr> viewport_metrics,
     int64_t primary_display_id,
     int64_t internal_display_id,
+    const std::vector<display::Display>& mirrors,
     const SetDisplayConfigurationCallback& callback) {
   last_internal_display_id_ = internal_display_id;
   changes_.push_back(WindowManagerClientChangeType::SET_DISPLAY_CONFIGURATION);
@@ -64,16 +74,22 @@ void TestWindowManagerClient::SwapDisplayRoots(
     int64_t display_id2,
     const SwapDisplayRootsCallback& callback) {}
 
+void TestWindowManagerClient::SetBlockingContainers(
+    std::vector<ui::mojom::BlockingContainersPtr> blocking_containers,
+    const SetBlockingContainersCallback& callback) {}
+
 void TestWindowManagerClient::WmResponse(uint32_t change_id, bool response) {}
 
 void TestWindowManagerClient::WmSetBoundsResponse(uint32_t change_id) {}
 
-void TestWindowManagerClient::WmRequestClose(Id transport_window_id) {}
+void TestWindowManagerClient::WmRequestClose(ui::Id transport_window_id) {}
 
 void TestWindowManagerClient::WmSetFrameDecorationValues(
-    ui::mojom::FrameDecorationValuesPtr values) {}
+    ui::mojom::FrameDecorationValuesPtr values) {
+  changes_.push_back(WindowManagerClientChangeType::SET_FRAME_DECORATIONS);
+}
 
-void TestWindowManagerClient::WmSetNonClientCursor(uint32_t window_id,
+void TestWindowManagerClient::WmSetNonClientCursor(ui::Id window_id,
                                                    ui::CursorData cursor_data) {
 }
 
@@ -92,9 +108,15 @@ void TestWindowManagerClient::WmMoveCursorToDisplayLocation(
     const gfx::Point& display_pixels,
     int64_t display_id) {}
 
+void TestWindowManagerClient::WmConfineCursorToBounds(
+    const gfx::Rect& bounds_in_pixles,
+    int64_t display_id) {}
+
+void TestWindowManagerClient::WmSetCursorTouchVisible(bool enabled) {}
+
 void TestWindowManagerClient::OnWmCreatedTopLevelWindow(
     uint32_t change_id,
-    Id transport_window_id) {}
+    ui::Id transport_window_id) {}
 
 void TestWindowManagerClient::OnAcceleratorAck(
     uint32_t event_id,

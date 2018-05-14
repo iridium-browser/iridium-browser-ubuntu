@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "tools/gn/functions.h"
 #include "tools/gn/target.h"
@@ -60,8 +60,8 @@ class GetTargetOutputsTest : public testing::Test {
 }  // namespace
 
 TEST_F(GetTargetOutputsTest, Copy) {
-  auto action = base::MakeUnique<Target>(
-      setup_.settings(), GetLabel("//foo/", "bar"), InputFileSet{});
+  auto action =
+      std::make_unique<Target>(setup_.settings(), GetLabel("//foo/", "bar"));
   action->set_output_type(Target::COPY_FILES);
   action->sources().push_back(SourceFile("//file.txt"));
   action->action_values().outputs() =
@@ -76,8 +76,8 @@ TEST_F(GetTargetOutputsTest, Copy) {
 }
 
 TEST_F(GetTargetOutputsTest, Action) {
-  auto action = base::MakeUnique<Target>(
-      setup_.settings(), GetLabel("//foo/", "bar"), InputFileSet{});
+  auto action =
+      std::make_unique<Target>(setup_.settings(), GetLabel("//foo/", "bar"));
   action->set_output_type(Target::ACTION);
   action->action_values().outputs() = SubstitutionList::MakeForTest(
       "//output1.txt",
@@ -92,8 +92,8 @@ TEST_F(GetTargetOutputsTest, Action) {
 }
 
 TEST_F(GetTargetOutputsTest, ActionForeach) {
-  auto action = base::MakeUnique<Target>(
-      setup_.settings(), GetLabel("//foo/", "bar"), InputFileSet{});
+  auto action =
+      std::make_unique<Target>(setup_.settings(), GetLabel("//foo/", "bar"));
   action->set_output_type(Target::ACTION_FOREACH);
   action->sources().push_back(SourceFile("//file.txt"));
   action->action_values().outputs() = SubstitutionList::MakeForTest(

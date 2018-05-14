@@ -44,12 +44,6 @@ NON_PERL_FILES = {
         'src/crypto/curve25519/asm/x25519-asm-arm.S',
         'src/crypto/poly1305/poly1305_arm_asm.S',
     ],
-    ('linux', 'x86_64'): [
-        'src/crypto/curve25519/asm/x25519-asm-x86_64.S',
-    ],
-    ('mac', 'x86_64'): [
-        'src/crypto/curve25519/asm/x25519-asm-x86_64.S',
-    ],
 }
 
 PREFIX = None
@@ -106,20 +100,12 @@ class Android(object):
         if arch == 'aarch64':
           arch = 'arm64'
 
-        blueprint.write('        android_%s: {\n' % arch)
+        blueprint.write('        linux_%s: {\n' % arch)
         blueprint.write('            srcs: [\n')
         for f in sorted(asm_files):
           blueprint.write('                "%s",\n' % f)
         blueprint.write('            ],\n')
         blueprint.write('        },\n')
-
-        if arch == 'x86' or arch == 'x86_64':
-          blueprint.write('        linux_%s: {\n' % arch)
-          blueprint.write('            srcs: [\n')
-          for f in sorted(asm_files):
-            blueprint.write('                "%s",\n' % f)
-          blueprint.write('            ],\n')
-          blueprint.write('        },\n')
 
       blueprint.write('    },\n')
       blueprint.write('}\n\n')
@@ -229,11 +215,55 @@ class Bazel(object):
           continue
         out.write('    "%s",\n' % PathOf(filename))
 
-      out.write(']\n\n')
+      out.write(']\n')
 
       self.PrintVariableSection(out, 'crypto_test_sources',
                                 files['crypto_test'])
       self.PrintVariableSection(out, 'ssl_test_sources', files['ssl_test'])
+
+
+class Eureka(object):
+
+  def __init__(self):
+    self.header = \
+"""# Copyright (C) 2017 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# This file is created by generate_build_files.py. Do not edit manually.
+
+"""
+
+  def PrintVariableSection(self, out, name, files):
+    out.write('%s := \\\n' % name)
+    for f in sorted(files):
+      out.write('  %s\\\n' % f)
+    out.write('\n')
+
+  def WriteFiles(self, files, asm_outputs):
+    # Legacy Android.mk format
+    with open('eureka.mk', 'w+') as makefile:
+      makefile.write(self.header)
+
+      self.PrintVariableSection(makefile, 'crypto_sources', files['crypto'])
+      self.PrintVariableSection(makefile, 'ssl_sources', files['ssl'])
+      self.PrintVariableSection(makefile, 'tool_sources', files['tool'])
+
+      for ((osname, arch), asm_files) in asm_outputs:
+        if osname != 'linux':
+          continue
+        self.PrintVariableSection(
+            makefile, '%s_%s_sources' % (osname, arch), asm_files)
 
 
 class GN(object):
@@ -551,11 +581,18 @@ def ExtractVariablesFromCMakeFile(cmakefile):
 
 def main(platforms):
   cmake = ExtractVariablesFromCMakeFile(os.path.join('src', 'sources.cmake'))
-  crypto_c_files = FindCFiles(os.path.join('src', 'crypto'), NoTestsNorFIPSFragments)
+  crypto_c_files = (FindCFiles(os.path.join('src', 'crypto'), NoTestsNorFIPSFragments) +
+                    FindCFiles(os.path.join('src', 'third_party', 'fiat'), NoTestsNorFIPSFragments))
   fips_fragments = FindCFiles(os.path.join('src', 'crypto', 'fipsmodule'), OnlyFIPSFragments)
   ssl_source_files = FindCFiles(os.path.join('src', 'ssl'), NoTests)
   tool_c_files = FindCFiles(os.path.join('src', 'tool'), NoTests)
   tool_h_files = FindHeaderFiles(os.path.join('src', 'tool'), AllFiles)
+
+  # third_party/fiat/p256.c lives in third_party/fiat, but it is a FIPS
+  # fragment, not a normal source file.
+  p256 = os.path.join('src', 'third_party', 'fiat', 'p256.c')
+  fips_fragments.append(p256)
+  crypto_c_files.remove(p256)
 
   # Generate err_data.c
   with open('err_data.c', 'w+') as err_data:
@@ -602,8 +639,9 @@ def main(platforms):
           NotSSLHeaderFiles))
 
   ssl_internal_h_files = FindHeaderFiles(os.path.join('src', 'ssl'), NoTests)
-  crypto_internal_h_files = FindHeaderFiles(
-      os.path.join('src', 'crypto'), NoTests)
+  crypto_internal_h_files = (
+      FindHeaderFiles(os.path.join('src', 'crypto'), NoTests) +
+      FindHeaderFiles(os.path.join('src', 'third_party', 'fiat'), NoTests))
 
   files = {
       'crypto': crypto_c_files,
@@ -632,7 +670,7 @@ def main(platforms):
 
 if __name__ == '__main__':
   parser = optparse.OptionParser(usage='Usage: %prog [--prefix=<path>]'
-      ' [android|bazel|gn|gyp]')
+      ' [android|bazel|eureka|gn|gyp]')
   parser.add_option('--prefix', dest='prefix',
       help='For Bazel, prepend argument to all source files')
   options, args = parser.parse_args(sys.argv[1:])
@@ -648,6 +686,8 @@ if __name__ == '__main__':
       platforms.append(Android())
     elif s == 'bazel':
       platforms.append(Bazel())
+    elif s == 'eureka':
+      platforms.append(Eureka())
     elif s == 'gn':
       platforms.append(GN())
     elif s == 'gyp':

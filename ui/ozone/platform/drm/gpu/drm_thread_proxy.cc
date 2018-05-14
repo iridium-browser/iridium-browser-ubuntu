@@ -17,14 +17,20 @@ DrmThreadProxy::DrmThreadProxy() {}
 
 DrmThreadProxy::~DrmThreadProxy() {}
 
+// Used only with the paramtraits implementation.
 void DrmThreadProxy::BindThreadIntoMessagingProxy(
     InterThreadMessagingProxy* messaging_proxy) {
   messaging_proxy->SetDrmThread(&drm_thread_);
 }
 
+// Used only for the mojo implementation.
+void DrmThreadProxy::StartDrmThread(base::OnceClosure binding_drainer) {
+  drm_thread_.Start(std::move(binding_drainer));
+}
+
 std::unique_ptr<DrmWindowProxy> DrmThreadProxy::CreateDrmWindowProxy(
     gfx::AcceleratedWidget widget) {
-  return base::MakeUnique<DrmWindowProxy>(widget, &drm_thread_);
+  return std::make_unique<DrmWindowProxy>(widget, &drm_thread_);
 }
 
 scoped_refptr<GbmBuffer> DrmThreadProxy::CreateBuffer(
@@ -32,7 +38,10 @@ scoped_refptr<GbmBuffer> DrmThreadProxy::CreateBuffer(
     const gfx::Size& size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage) {
+  DCHECK(drm_thread_.task_runner())
+      << "no task runner! in DrmThreadProxy::CreateBuffer";
   scoped_refptr<GbmBuffer> buffer;
+
   PostSyncTask(
       drm_thread_.task_runner(),
       base::Bind(&DrmThread::CreateBuffer, base::Unretained(&drm_thread_),
@@ -63,11 +72,23 @@ void DrmThreadProxy::GetScanoutFormats(
                  widget, scanout_formats));
 }
 
-void DrmThreadProxy::AddBinding(ozone::mojom::DeviceCursorRequest request) {
+void DrmThreadProxy::AddBindingCursorDevice(
+    ozone::mojom::DeviceCursorRequest request) {
   drm_thread_.task_runner()->PostTask(
       FROM_HERE,
-      base::Bind(&DrmThread::AddBinding, base::Unretained(&drm_thread_),
-                 base::Passed(&request)));
+      base::Bind(&DrmThread::AddBindingCursorDevice,
+                 base::Unretained(&drm_thread_), base::Passed(&request)));
+}
+
+void DrmThreadProxy::AddBindingDrmDevice(
+    ozone::mojom::DrmDeviceRequest request) {
+  DCHECK(drm_thread_.task_runner()) << "DrmThreadProxy::AddBindingDrmDevice "
+                                       "drm_thread_ task runner missing";
+
+  drm_thread_.task_runner()->PostTask(
+      FROM_HERE,
+      base::Bind(&DrmThread::AddBindingDrmDevice,
+                 base::Unretained(&drm_thread_), base::Passed(&request)));
 }
 
 }  // namespace ui

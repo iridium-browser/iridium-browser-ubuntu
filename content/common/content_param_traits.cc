@@ -7,18 +7,18 @@
 #include <stddef.h>
 
 #include "base/strings/string_number_conversions.h"
-#include "content/common/accessibility_mode.h"
-#include "content/common/message_port.h"
+#include "content/common/frame_message_structs.h"
+#include "ipc/ipc_mojo_message_helper.h"
 #include "ipc/ipc_mojo_param_traits.h"
 #include "net/base/ip_endpoint.h"
+#include "third_party/WebKit/public/common/message_port/message_port_channel.h"
+#include "third_party/WebKit/public/common/message_port/transferable_message.h"
+#include "third_party/WebKit/public/mojom/message_port/message_port.mojom.h"
+#include "ui/accessibility/ax_modes.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/events/blink/web_input_event_traits.h"
 
 namespace IPC {
-
-void ParamTraits<WebInputEventPointer>::GetSize(base::PickleSizer* s,
-                                                const param_type& p) {
-  s->AddData(p->size());
-}
 
 void ParamTraits<WebInputEventPointer>::Write(base::Pickle* m,
                                               const param_type& p) {
@@ -65,61 +65,182 @@ void ParamTraits<WebInputEventPointer>::Log(const param_type& p,
   l->append(")");
 }
 
-void ParamTraits<content::MessagePort>::GetSize(base::PickleSizer* s,
-                                                const param_type& p) {
-  ParamTraits<mojo::MessagePipeHandle>::GetSize(s, p.GetHandle().get());
-}
-
-void ParamTraits<content::MessagePort>::Write(base::Pickle* m,
-                                              const param_type& p) {
+void ParamTraits<blink::MessagePortChannel>::Write(base::Pickle* m,
+                                                   const param_type& p) {
   ParamTraits<mojo::MessagePipeHandle>::Write(m, p.ReleaseHandle().release());
 }
 
-bool ParamTraits<content::MessagePort>::Read(
-    const base::Pickle* m,
-    base::PickleIterator* iter,
-    param_type* r) {
+bool ParamTraits<blink::MessagePortChannel>::Read(const base::Pickle* m,
+                                                  base::PickleIterator* iter,
+                                                  param_type* r) {
   mojo::MessagePipeHandle handle;
   if (!ParamTraits<mojo::MessagePipeHandle>::Read(m, iter, &handle))
     return false;
-  *r = content::MessagePort(mojo::ScopedMessagePipeHandle(handle));
+  *r = blink::MessagePortChannel(mojo::ScopedMessagePipeHandle(handle));
   return true;
 }
 
-void ParamTraits<content::MessagePort>::Log(const param_type& p,
-                                            std::string* l) {
-}
+void ParamTraits<blink::MessagePortChannel>::Log(const param_type& p,
+                                                 std::string* l) {}
 
-void ParamTraits<content::AccessibilityMode>::GetSize(base::PickleSizer* s,
-                                                      const param_type& p) {
-  IPC::GetParamSize(s, p.mode());
-}
-
-void ParamTraits<content::AccessibilityMode>::Write(base::Pickle* m,
-                                                    const param_type& p) {
+void ParamTraits<ui::AXMode>::Write(base::Pickle* m, const param_type& p) {
   IPC::WriteParam(m, p.mode());
 }
 
-bool ParamTraits<content::AccessibilityMode>::Read(const base::Pickle* m,
-                                                   base::PickleIterator* iter,
-                                                   param_type* r) {
+bool ParamTraits<ui::AXMode>::Read(const base::Pickle* m,
+                                   base::PickleIterator* iter,
+                                   param_type* r) {
   uint32_t value;
   if (!IPC::ReadParam(m, iter, &value))
     return false;
-  *r = content::AccessibilityMode(value);
+  *r = ui::AXMode(value);
   return true;
 }
 
-void ParamTraits<content::AccessibilityMode>::Log(const param_type& p,
-                                                  std::string* l) {}
-}  // namespace IPC
+void ParamTraits<ui::AXMode>::Log(const param_type& p, std::string* l) {}
 
-// Generate param traits size methods.
-#include "ipc/param_traits_size_macros.h"
-namespace IPC {
-#undef CONTENT_COMMON_CONTENT_PARAM_TRAITS_MACROS_H_
-#include "content/common/content_param_traits_macros.h"
+void ParamTraits<scoped_refptr<storage::BlobHandle>>::Write(
+    base::Pickle* m,
+    const param_type& p) {
+  WriteParam(m, p != nullptr);
+  if (p) {
+    auto info = p->Clone().PassInterface();
+    m->WriteUInt32(info.version());
+    MojoMessageHelper::WriteMessagePipeTo(m, info.PassHandle());
+  }
 }
+
+bool ParamTraits<scoped_refptr<storage::BlobHandle>>::Read(
+    const base::Pickle* m,
+    base::PickleIterator* iter,
+    param_type* r) {
+  bool is_not_null;
+  if (!ReadParam(m, iter, &is_not_null))
+    return false;
+  if (!is_not_null)
+    return true;
+
+  uint32_t version;
+  if (!ReadParam(m, iter, &version))
+    return false;
+  mojo::ScopedMessagePipeHandle handle;
+  if (!MojoMessageHelper::ReadMessagePipeFrom(m, iter, &handle))
+    return false;
+  DCHECK(handle.is_valid());
+  blink::mojom::BlobPtr blob;
+  blob.Bind(blink::mojom::BlobPtrInfo(std::move(handle), version));
+  *r = base::MakeRefCounted<storage::BlobHandle>(std::move(blob));
+  return true;
+}
+
+void ParamTraits<scoped_refptr<storage::BlobHandle>>::Log(const param_type& p,
+                                                          std::string* l) {
+  l->append("<storage::BlobHandle>");
+}
+
+// static
+void ParamTraits<content::FrameMsg_ViewChanged_Params>::Write(
+    base::Pickle* m,
+    const param_type& p) {
+  DCHECK(base::FeatureList::IsEnabled(features::kMash) ||
+         (p.frame_sink_id.has_value() && p.frame_sink_id->is_valid()));
+  WriteParam(m, p.frame_sink_id);
+}
+
+bool ParamTraits<content::FrameMsg_ViewChanged_Params>::Read(
+    const base::Pickle* m,
+    base::PickleIterator* iter,
+    param_type* r) {
+  if (!ReadParam(m, iter, &(r->frame_sink_id)))
+    return false;
+  if (!base::FeatureList::IsEnabled(features::kMash) &&
+      (!r->frame_sink_id || !r->frame_sink_id->is_valid())) {
+    NOTREACHED();
+    return false;
+  }
+  return true;
+}
+
+// static
+void ParamTraits<content::FrameMsg_ViewChanged_Params>::Log(const param_type& p,
+                                                            std::string* l) {
+  l->append("(");
+  LogParam(p.frame_sink_id, l);
+  l->append(")");
+}
+
+template <>
+struct ParamTraits<blink::mojom::SerializedBlobPtr> {
+  using param_type = blink::mojom::SerializedBlobPtr;
+  static void Write(base::Pickle* m, const param_type& p) {
+    WriteParam(m, p->uuid);
+    WriteParam(m, p->content_type);
+    WriteParam(m, p->size);
+    WriteParam(m, p->blob.PassHandle().release());
+  }
+
+  static bool Read(const base::Pickle* m,
+                   base::PickleIterator* iter,
+                   param_type* r) {
+    *r = blink::mojom::SerializedBlob::New();
+    mojo::MessagePipeHandle handle;
+    if (!ReadParam(m, iter, &(*r)->uuid) ||
+        !ReadParam(m, iter, &(*r)->content_type) ||
+        !ReadParam(m, iter, &(*r)->size) || !ReadParam(m, iter, &handle)) {
+      return false;
+    }
+    (*r)->blob = blink::mojom::BlobPtrInfo(
+        mojo::ScopedMessagePipeHandle(handle), blink::mojom::Blob::Version_);
+    return true;
+  }
+};
+
+void ParamTraits<scoped_refptr<base::RefCountedData<
+    blink::TransferableMessage>>>::Write(base::Pickle* m, const param_type& p) {
+  m->WriteData(reinterpret_cast<const char*>(p->data.encoded_message.data()),
+               p->data.encoded_message.length());
+  WriteParam(m, p->data.blobs);
+  WriteParam(m, p->data.stack_trace_id);
+  WriteParam(m, p->data.stack_trace_debugger_id_first);
+  WriteParam(m, p->data.stack_trace_debugger_id_second);
+  WriteParam(m, p->data.ports);
+  WriteParam(m, p->data.has_user_gesture);
+}
+
+bool ParamTraits<
+    scoped_refptr<base::RefCountedData<blink::TransferableMessage>>>::
+    Read(const base::Pickle* m, base::PickleIterator* iter, param_type* r) {
+  *r = new base::RefCountedData<blink::TransferableMessage>();
+
+  const char* data;
+  int length;
+  if (!iter->ReadData(&data, &length))
+    return false;
+  // This just makes encoded_message point into the IPC message buffer. Usually
+  // code receiving a TransferableMessage will synchronously process the message
+  // so this avoids an unnecessary copy. If a receiver needs to hold on to the
+  // message longer, it should make sure to call EnsureDataIsOwned on the
+  // returned message.
+  (*r)->data.encoded_message =
+      base::make_span(reinterpret_cast<const uint8_t*>(data), length);
+  if (!ReadParam(m, iter, &(*r)->data.blobs) ||
+      !ReadParam(m, iter, &(*r)->data.stack_trace_id) ||
+      !ReadParam(m, iter, &(*r)->data.stack_trace_debugger_id_first) ||
+      !ReadParam(m, iter, &(*r)->data.stack_trace_debugger_id_second) ||
+      !ReadParam(m, iter, &(*r)->data.ports) ||
+      !ReadParam(m, iter, &(*r)->data.has_user_gesture)) {
+    return false;
+  }
+  return true;
+}
+
+void ParamTraits<scoped_refptr<
+    base::RefCountedData<blink::TransferableMessage>>>::Log(const param_type& p,
+                                                            std::string* l) {
+  l->append("<blink::TransferableMessage>");
+}
+
+}  // namespace IPC
 
 // Generate param traits write methods.
 #include "ipc/param_traits_write_macros.h"

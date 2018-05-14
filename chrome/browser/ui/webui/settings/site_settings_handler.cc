@@ -9,30 +9,36 @@
 #include <string>
 #include <utility>
 
+#include "base/barrier_closure.h"
 #include "base/bind.h"
 #include "base/i18n/number_formatting.h"
 #include "base/macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/values.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/web_site_settings_uma_util.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/permissions/chooser_context_base.h"
-#include "chrome/browser/permissions/permission_manager.h"
-#include "chrome/browser/permissions/permission_result.h"
+#include "chrome/browser/permissions/permission_decision_auto_blocker.h"
 #include "chrome/browser/permissions/permission_uma_util.h"
 #include "chrome/browser/permissions/permission_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/page_info/page_info_infobar_delegate.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/site_settings_helper.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/content_settings/core/common/content_settings_utils.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/url_constants.h"
@@ -40,11 +46,14 @@
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "storage/browser/quota/quota_manager.h"
-#include "storage/common/quota/quota_status_code.h"
+#include "third_party/WebKit/public/mojom/quota/quota_types.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/bytes_formatting.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/common/pref_names.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -52,7 +61,7 @@ namespace settings {
 
 namespace {
 
-const char kZoom[] = "zoom";
+constexpr char kZoom[] = "zoom";
 
 // Return an appropriate API Permission ID for the given string name.
 extensions::APIPermission::APIPermission::ID APIPermissionFromGroupName(
@@ -84,7 +93,7 @@ void AddExceptionsGrantedByHostedApps(content::BrowserContext* context,
         !(*extension)->permissions_data()->HasAPIPermission(permission))
       continue;
 
-    extensions::URLPatternSet web_extent = (*extension)->web_extent();
+    const extensions::URLPatternSet& web_extent = (*extension)->web_extent();
     // Add patterns from web extent.
     for (extensions::URLPatternSet::const_iterator pattern = web_extent.begin();
          pattern != web_extent.end(); ++pattern) {
@@ -101,89 +110,6 @@ void AddExceptionsGrantedByHostedApps(content::BrowserContext* context,
     site_settings::AddExceptionForHostedApp(
         launch_url.spec(), *extension->get(), exceptions);
   }
-}
-
-// Retrieves the corresponding string, according to the following precedence
-// order from highest to lowest priority:
-//    1. Kill-switch.
-//    2. Enterprise policy.
-//    3. Extensions.
-//    4. User-set per-origin setting.
-//    5. Embargo.
-//    6. User-set patterns.
-//    7. User-set global default for a ContentSettingsType.
-//    8. Chrome's built-in default.
-std::string ConvertContentSettingSourceToString(
-    const content_settings::SettingInfo& info,
-    PermissionStatusSource permission_status_source) {
-  // TODO(patricialor): Do some plumbing for sources #1, #2, #3, and #5 through
-  // to the Web UI. Currently there aren't strings to represent these sources.
-  if (permission_status_source == PermissionStatusSource::KILL_SWITCH)
-    return site_settings::kPreferencesSource;  // Source #1.
-
-  if (info.source == content_settings::SETTING_SOURCE_POLICY ||
-      info.source == content_settings::SETTING_SOURCE_SUPERVISED) {
-    return site_settings::kPolicyProviderId;  // Source #2.
-  }
-
-  if (info.source == content_settings::SETTING_SOURCE_EXTENSION)
-    return site_settings::kExtensionProviderId;  // Source #3.
-
-  DCHECK_NE(content_settings::SETTING_SOURCE_NONE, info.source);
-  if (info.source == content_settings::SETTING_SOURCE_USER) {
-    if (permission_status_source ==
-            PermissionStatusSource::SAFE_BROWSING_BLACKLIST ||
-        permission_status_source ==
-            PermissionStatusSource::MULTIPLE_DISMISSALS ||
-        permission_status_source == PermissionStatusSource::MULTIPLE_IGNORES) {
-      return site_settings::kPreferencesSource;  // Source #5.
-    }
-    if (info.primary_pattern == ContentSettingsPattern::Wildcard() &&
-        info.secondary_pattern == ContentSettingsPattern::Wildcard()) {
-      return "default";  // Source #7, #8.
-    }
-    // Source #4, #6. When #4 is the source, |permission_status_source|
-    // won't be set to any of the source #5 enum values, as PermissionManager is
-    // aware of the difference between these two sources internally. The
-    // subtlety here should go away when PermissionManager can handle all
-    // content settings and all possible sources.
-    return site_settings::kPreferencesSource;
-  }
-
-  NOTREACHED();
-  return site_settings::kPreferencesSource;
-}
-
-ContentSetting GetContentSettingForOrigin(const GURL& origin,
-                                          ContentSettingsType content_type,
-                                          Profile* profile,
-                                          std::string* source_string) {
-  // TODO(patricialor): In future, PermissionManager should know about all
-  // content settings, not just the permissions, plus all the possible sources,
-  // and the calls to HostContentSettingsMap should be removed.
-  content_settings::SettingInfo info;
-  HostContentSettingsMap* map =
-      HostContentSettingsMapFactory::GetForProfile(profile);
-  std::unique_ptr<base::Value> value = map->GetWebsiteSetting(
-      origin, origin, content_type, std::string(), &info);
-
-  // Retrieve the content setting.
-  PermissionResult result(CONTENT_SETTING_DEFAULT,
-                          PermissionStatusSource::UNSPECIFIED);
-  if (PermissionUtil::IsPermission(content_type)) {
-    result = PermissionManager::Get(profile)->GetPermissionStatus(
-        content_type, origin, origin);
-  } else {
-    DCHECK(value.get());
-    DCHECK_EQ(base::Value::Type::INTEGER, value->GetType());
-    result.content_setting =
-        content_settings::ValueToContentSetting(value.get());
-  }
-
-  // Retrieve the source of the content setting.
-  *source_string = ConvertContentSettingSourceToString(info, result.source);
-
-  return result.content_setting;
 }
 
 }  // namespace
@@ -230,13 +156,23 @@ void SiteSettingsHandler::RegisterMessages() {
       base::Bind(&SiteSettingsHandler::HandleGetOriginPermissions,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      "resetCategoryPermissionForOrigin",
-      base::Bind(&SiteSettingsHandler::HandleResetCategoryPermissionForOrigin,
+      "setOriginPermissions",
+      base::Bind(&SiteSettingsHandler::HandleSetOriginPermissions,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      "setCategoryPermissionForOrigin",
-      base::Bind(&SiteSettingsHandler::HandleSetCategoryPermissionForOrigin,
+      "clearFlashPref", base::Bind(&SiteSettingsHandler::HandleClearFlashPref,
+                                   base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "resetCategoryPermissionForPattern",
+      base::Bind(&SiteSettingsHandler::HandleResetCategoryPermissionForPattern,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "setCategoryPermissionForPattern",
+      base::Bind(&SiteSettingsHandler::HandleSetCategoryPermissionForPattern,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "isOriginValid", base::Bind(&SiteSettingsHandler::HandleIsOriginValid,
+                                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "isPatternValid",
       base::Bind(&SiteSettingsHandler::HandleIsPatternValid,
@@ -280,12 +216,24 @@ void SiteSettingsHandler::OnJavascriptAllowed() {
           ->AddZoomLevelChangedCallback(
               base::Bind(&SiteSettingsHandler::OnZoomLevelChanged,
                          base::Unretained(this)));
+
+#if defined(OS_CHROMEOS)
+  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
+  pref_change_registrar_->Init(profile_->GetPrefs());
+  pref_change_registrar_->Add(
+      prefs::kEnableDRM,
+      base::Bind(&SiteSettingsHandler::OnPrefEnableDrmChanged,
+                 base::Unretained(this)));
+#endif
 }
 
 void SiteSettingsHandler::OnJavascriptDisallowed() {
   observer_.RemoveAll();
   notification_registrar_.RemoveAll();
   host_zoom_map_subscription_.reset();
+#if defined(OS_CHROMEOS)
+  pref_change_registrar_->Remove(prefs::kEnableDRM);
+#endif
 }
 
 void SiteSettingsHandler::OnGetUsageInfo(
@@ -298,18 +246,30 @@ void SiteSettingsHandler::OnGetUsageInfo(
       CallJavascriptFunction("settings.WebsiteUsagePrivateApi.returnUsageTotal",
                              base::Value(entry.host),
                              base::Value(ui::FormatBytes(entry.usage)),
-                             base::Value(entry.type));
+                             base::Value(static_cast<int>(entry.type)));
       return;
     }
   }
 }
 
-void SiteSettingsHandler::OnUsageInfoCleared(storage::QuotaStatusCode code) {
-  if (code == storage::kQuotaStatusOk) {
-    CallJavascriptFunction("settings.WebsiteUsagePrivateApi.onUsageCleared",
-                           base::Value(clearing_origin_));
+void SiteSettingsHandler::OnStorageCleared(base::OnceClosure callback,
+                                           blink::mojom::QuotaStatusCode code) {
+  if (code == blink::mojom::QuotaStatusCode::kOk) {
+    std::move(callback).Run();
   }
 }
+
+void SiteSettingsHandler::OnUsageCleared() {
+  CallJavascriptFunction("settings.WebsiteUsagePrivateApi.onUsageCleared",
+                         base::Value(clearing_origin_));
+}
+
+#if defined(OS_CHROMEOS)
+void SiteSettingsHandler::OnPrefEnableDrmChanged() {
+  CallJavascriptFunction("cr.webUIListenerCallback",
+                         base::Value("prefEnableDrmChanged"));
+}
+#endif
 
 void SiteSettingsHandler::OnContentSettingChanged(
     const ContentSettingsPattern& primary_pattern,
@@ -403,19 +363,25 @@ void SiteSettingsHandler::HandleClearUsage(
   if (url.is_valid()) {
     clearing_origin_ = origin;
 
+    // Call OnUsageCleared when StorageInfoFetcher::ClearStorage and
+    // BrowsingDataLocalStorageHelper::DeleteOrigin are done.
+    base::RepeatingClosure barrier = base::BarrierClosure(
+        2, base::BindOnce(&SiteSettingsHandler::OnUsageCleared,
+                          base::Unretained(this)));
+
     // Start by clearing the storage data asynchronously.
     scoped_refptr<StorageInfoFetcher> storage_info_fetcher
         = new StorageInfoFetcher(profile_);
     storage_info_fetcher->ClearStorage(
         url.host(),
-        static_cast<storage::StorageType>(static_cast<int>(storage_type)),
-        base::Bind(&SiteSettingsHandler::OnUsageInfoCleared,
-            base::Unretained(this)));
+        static_cast<blink::mojom::StorageType>(static_cast<int>(storage_type)),
+        base::BindRepeating(&SiteSettingsHandler::OnStorageCleared,
+                            base::Unretained(this), barrier));
 
     // Also clear the *local* storage data.
     scoped_refptr<BrowsingDataLocalStorageHelper> local_storage_helper =
         new BrowsingDataLocalStorageHelper(profile_);
-    local_storage_helper->DeleteOrigin(url);
+    local_storage_helper->DeleteOrigin(url, barrier);
   }
 }
 
@@ -467,6 +433,8 @@ void SiteSettingsHandler::HandleSetDefaultValueForContentType(
   CHECK(args->GetString(1, &setting));
   ContentSetting default_setting;
   CHECK(content_settings::ContentSettingFromString(setting, &default_setting));
+  ContentSettingsType type =
+      site_settings::ContentSettingsTypeFromGroupName(content_type);
 
   Profile* profile = profile_;
 #if defined(OS_CHROMEOS)
@@ -477,9 +445,20 @@ void SiteSettingsHandler::HandleSetDefaultValueForContentType(
 #endif
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile);
-  map->SetDefaultContentSetting(
-      site_settings::ContentSettingsTypeFromGroupName(content_type),
-      default_setting);
+  ContentSetting previous_setting =
+      map->GetDefaultContentSetting(type, nullptr);
+  map->SetDefaultContentSetting(type, default_setting);
+
+  if (type == CONTENT_SETTINGS_TYPE_SOUND &&
+      previous_setting != default_setting) {
+    if (default_setting == CONTENT_SETTING_BLOCK) {
+      base::RecordAction(
+          base::UserMetricsAction("SoundContentSetting.MuteBy.DefaultSwitch"));
+    } else {
+      base::RecordAction(base::UserMetricsAction(
+          "SoundContentSetting.UnmuteBy.DefaultSwitch"));
+    }
+  }
 }
 
 void SiteSettingsHandler::HandleGetDefaultValueForContentType(
@@ -554,25 +533,30 @@ void SiteSettingsHandler::HandleGetOriginPermissions(
 
   // Note: Invalid URLs will just result in default settings being shown.
   const GURL origin_url(origin);
-  auto exceptions = base::MakeUnique<base::ListValue>();
+  auto exceptions = std::make_unique<base::ListValue>();
   for (size_t i = 0; i < types->GetSize(); ++i) {
     std::string type;
     types->GetString(i, &type);
     ContentSettingsType content_type =
         site_settings::ContentSettingsTypeFromGroupName(type);
+    HostContentSettingsMap* map =
+        HostContentSettingsMapFactory::GetForProfile(profile_);
+    const auto* extension_registry =
+        extensions::ExtensionRegistry::Get(profile_);
 
-    std::string source_string;
-    ContentSetting content_setting = GetContentSettingForOrigin(
-        origin_url, content_type, profile_, &source_string);
+    std::string source_string, display_name;
+    ContentSetting content_setting = site_settings::GetContentSettingForOrigin(
+        profile_, map, origin_url, content_type, &source_string,
+        extension_registry, &display_name);
     std::string content_setting_string =
         content_settings::ContentSettingToString(content_setting);
 
-    auto raw_site_exception = base::MakeUnique<base::DictionaryValue>();
+    auto raw_site_exception = std::make_unique<base::DictionaryValue>();
     raw_site_exception->SetString(site_settings::kEmbeddingOrigin, origin);
     raw_site_exception->SetBoolean(site_settings::kIncognito,
                                    profile_->IsOffTheRecord());
     raw_site_exception->SetString(site_settings::kOrigin, origin);
-    raw_site_exception->SetString(site_settings::kDisplayName, origin);
+    raw_site_exception->SetString(site_settings::kDisplayName, display_name);
     raw_site_exception->SetString(site_settings::kSetting,
                                   content_setting_string);
     raw_site_exception->SetString(site_settings::kSource, source_string);
@@ -582,7 +566,89 @@ void SiteSettingsHandler::HandleGetOriginPermissions(
   ResolveJavascriptCallback(*callback_id, *exceptions);
 }
 
-void SiteSettingsHandler::HandleResetCategoryPermissionForOrigin(
+void SiteSettingsHandler::HandleSetOriginPermissions(
+    const base::ListValue* args) {
+  CHECK_EQ(3U, args->GetSize());
+  std::string origin_string;
+  CHECK(args->GetString(0, &origin_string));
+  const base::ListValue* types;
+  CHECK(args->GetList(1, &types));
+  std::string value;
+  CHECK(args->GetString(2, &value));
+
+  const GURL origin(origin_string);
+  if (!origin.is_valid())
+    return;
+
+  ContentSetting setting;
+  CHECK(content_settings::ContentSettingFromString(value, &setting));
+  for (size_t i = 0; i < types->GetSize(); ++i) {
+    std::string type;
+    types->GetString(i, &type);
+
+    ContentSettingsType content_type =
+        site_settings::ContentSettingsTypeFromGroupName(type);
+    HostContentSettingsMap* map =
+        HostContentSettingsMapFactory::GetForProfile(profile_);
+
+    PermissionUtil::ScopedRevocationReporter scoped_revocation_reporter(
+        profile_, origin, origin, content_type,
+        PermissionSourceUI::SITE_SETTINGS);
+
+    // Clear any existing embargo status if the new setting isn't block.
+    if (setting != CONTENT_SETTING_BLOCK) {
+      PermissionDecisionAutoBlocker::GetForProfile(profile_)
+          ->RemoveEmbargoByUrl(origin, content_type);
+    }
+    map->SetContentSettingDefaultScope(origin, origin, content_type,
+                                       std::string(), setting);
+    if (content_type == CONTENT_SETTINGS_TYPE_SOUND) {
+      ContentSetting default_setting =
+          map->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SOUND, nullptr);
+      bool mute = (setting == CONTENT_SETTING_BLOCK) ||
+                  (setting == CONTENT_SETTING_DEFAULT &&
+                   default_setting == CONTENT_SETTING_BLOCK);
+      if (mute) {
+        base::RecordAction(
+            base::UserMetricsAction("SoundContentSetting.MuteBy.SiteSettings"));
+      } else {
+        base::RecordAction(base::UserMetricsAction(
+            "SoundContentSetting.UnmuteBy.SiteSettings"));
+      }
+    }
+    WebSiteSettingsUmaUtil::LogPermissionChange(content_type, setting);
+  }
+
+  // Show an infobar reminding the user to reload tabs where their site
+  // permissions have been updated.
+  for (auto* it : *BrowserList::GetInstance()) {
+    TabStripModel* tab_strip = it->tab_strip_model();
+    for (int i = 0; i < tab_strip->count(); ++i) {
+      content::WebContents* web_contents = tab_strip->GetWebContentsAt(i);
+      GURL tab_url = web_contents->GetLastCommittedURL();
+      if (url::IsSameOriginWith(origin, tab_url)) {
+        InfoBarService* infobar_service =
+            InfoBarService::FromWebContents(web_contents);
+        PageInfoInfoBarDelegate::Create(infobar_service);
+      }
+    }
+  }
+}
+
+void SiteSettingsHandler::HandleClearFlashPref(const base::ListValue* args) {
+  CHECK_EQ(1U, args->GetSize());
+  std::string origin_string;
+  CHECK(args->GetString(0, &origin_string));
+
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile_);
+  const GURL origin(origin_string);
+  map->SetWebsiteSettingDefaultScope(origin, origin,
+                                     CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+                                     std::string(), nullptr);
+}
+
+void SiteSettingsHandler::HandleResetCategoryPermissionForPattern(
     const base::ListValue* args) {
   CHECK_EQ(4U, args->GetSize());
   std::string primary_pattern_string;
@@ -622,11 +688,22 @@ void SiteSettingsHandler::HandleResetCategoryPermissionForOrigin(
   map->SetContentSettingCustomScope(primary_pattern, secondary_pattern,
                                     content_type, "", CONTENT_SETTING_DEFAULT);
 
+  if (content_type == CONTENT_SETTINGS_TYPE_SOUND) {
+    ContentSetting default_setting =
+        map->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SOUND, nullptr);
+    if (default_setting == CONTENT_SETTING_BLOCK) {
+      base::RecordAction(base::UserMetricsAction(
+          "SoundContentSetting.MuteBy.PatternException"));
+    } else {
+      base::RecordAction(base::UserMetricsAction(
+          "SoundContentSetting.UnmuteBy.PatternException"));
+    }
+  }
   WebSiteSettingsUmaUtil::LogPermissionChange(
       content_type, ContentSetting::CONTENT_SETTING_DEFAULT);
 }
 
-void SiteSettingsHandler::HandleSetCategoryPermissionForOrigin(
+void SiteSettingsHandler::HandleSetCategoryPermissionForPattern(
     const base::ListValue* args) {
   CHECK_EQ(5U, args->GetSize());
   std::string primary_pattern_string;
@@ -672,7 +749,33 @@ void SiteSettingsHandler::HandleSetCategoryPermissionForOrigin(
   map->SetContentSettingCustomScope(primary_pattern, secondary_pattern,
                                     content_type, "", setting);
 
+  if (content_type == CONTENT_SETTINGS_TYPE_SOUND) {
+    ContentSetting default_setting =
+        map->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SOUND, nullptr);
+    bool mute = (setting == CONTENT_SETTING_BLOCK) ||
+                (setting == CONTENT_SETTING_DEFAULT &&
+                 default_setting == CONTENT_SETTING_BLOCK);
+    if (mute) {
+      base::RecordAction(base::UserMetricsAction(
+          "SoundContentSetting.MuteBy.PatternException"));
+    } else {
+      base::RecordAction(base::UserMetricsAction(
+          "SoundContentSetting.UnmuteBy.PatternException"));
+    }
+  }
   WebSiteSettingsUmaUtil::LogPermissionChange(content_type, setting);
+}
+
+void SiteSettingsHandler::HandleIsOriginValid(const base::ListValue* args) {
+  AllowJavascript();
+  CHECK_EQ(2U, args->GetSize());
+  const base::Value* callback_id;
+  CHECK(args->Get(0, &callback_id));
+  std::string origin_string;
+  CHECK(args->GetString(1, &origin_string));
+
+  ResolveJavascriptCallback(*callback_id,
+                            base::Value(GURL(origin_string).is_valid()));
 }
 
 void SiteSettingsHandler::HandleIsPatternValid(
@@ -790,8 +893,9 @@ void SiteSettingsHandler::SendZoomLevels() {
     int zoom_percent = static_cast<int>(
         content::ZoomLevelToZoomFactor(zoom_level.zoom_level) * 100 + 0.5);
     exception->SetString(kZoom, base::FormatPercent(zoom_percent));
-    exception->SetString(
-        site_settings::kSource, site_settings::kPreferencesSource);
+    exception->SetString(site_settings::kSource,
+                         site_settings::SiteSettingSourceToString(
+                             site_settings::SiteSettingSource::kPreference));
     // Append the new entry to the list and map.
     zoom_levels_exceptions.Append(std::move(exception));
   }

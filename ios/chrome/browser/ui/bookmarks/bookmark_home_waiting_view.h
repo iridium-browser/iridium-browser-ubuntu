@@ -9,12 +9,13 @@
 
 #include "base/ios/block_types.h"
 
-// Displays a waiting UI for BookmarkHomeTabletNTPController and
-// BookmarkHomeHandsetController.
+// Displays a waiting UI for BookmarkHomeHandsetController.
 // It displays a gray background and an activity indicator.
 // The activity indicator appears after a delay, starting from the moment
 // |startWaiting| is called.
 @interface BookmarkHomeWaitingView : UIView
+
+- (instancetype)initWithFrame:(CGRect)frame backgroundColor:(UIColor*)color;
 
 // Call this method when this view is added to the visible view hierarchy.
 // After a delay, an activity indicator will be presented if this view is still

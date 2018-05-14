@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
+#include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_timeouts.h"
@@ -118,7 +119,7 @@ class WindowedAppShimLaunchObserver : public apps::AppShimHandler {
 };
 
 // Watches for a hosted app browser window to open.
-class HostedAppBrowserListObserver : public chrome::BrowserListObserver {
+class HostedAppBrowserListObserver : public BrowserListObserver {
  public:
   explicit HostedAppBrowserListObserver(const std::string& app_id)
       : app_id_(app_id), observed_add_(false), observed_removed_(false) {
@@ -262,7 +263,7 @@ const extensions::Extension* AppShimInteractiveTest::InstallAppWithShim(
   // (always) in tests. If it wasn't the case, the following test would fail
   // (but flakily since the creation happens on the FILE thread).
   shim_path_ = GetAppShimPath(profile(), app);
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_FALSE(base::PathExists(shim_path_));
 
   // To create a shim in a test, instead call UpdateAllShortcuts, which has been

@@ -200,9 +200,8 @@ class FindInPageControllerTest : public InProcessBrowserTest {
   void FlushHistoryService() {
     HistoryServiceFactory::GetForProfile(browser()->profile(),
                                          ServiceAccessType::IMPLICIT_ACCESS)
-        ->FlushForTest(base::Bind(
-            &base::MessageLoop::QuitWhenIdle,
-            base::Unretained(base::MessageLoop::current()->current())));
+        ->FlushForTest(
+            base::Bind(&base::RunLoop::QuitCurrentWhenIdleDeprecated));
     content::RunMessageLoop();
   }
 };
@@ -435,7 +434,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindLongString) {
       base::FilePath().AppendASCII("LongFind.txt"));
   std::string query;
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     base::ReadFileToString(path, &query);
   }
   EXPECT_EQ(1, FindInPage16(web_contents, base::UTF8ToUTF16(query),
@@ -499,7 +498,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindWholeFileContent) {
 
   std::string query;
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     base::ReadFileToString(path, &query);
   }
   EXPECT_EQ(1, FindInPage16(web_contents, base::UTF8ToUTF16(query),

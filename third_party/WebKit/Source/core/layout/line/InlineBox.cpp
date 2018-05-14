@@ -38,7 +38,7 @@ namespace blink {
 class LayoutObject;
 
 struct SameSizeAsInlineBox : DisplayItemClient {
-  virtual ~SameSizeAsInlineBox() {}
+  ~SameSizeAsInlineBox() override = default;
   void* a[4];
   LayoutPoint b;
   LayoutUnit c;
@@ -78,8 +78,8 @@ void InlineBox::Remove(MarkLineBoxes mark_line_boxes) {
 }
 
 void* InlineBox::operator new(size_t sz) {
-  return PartitionAlloc(WTF::Partitions::LayoutPartition(), sz,
-                        WTF_HEAP_PROFILER_TYPE_NAME(InlineBox));
+  return WTF::Partitions::LayoutPartition()->Alloc(
+      sz, WTF_HEAP_PROFILER_TYPE_NAME(InlineBox));
 }
 
 void InlineBox::operator delete(void* ptr) {
@@ -95,8 +95,13 @@ String InlineBox::DebugName() const {
 }
 
 LayoutRect InlineBox::VisualRect() const {
-  // TODO(chrishtr): tighten these bounds.
+  // TODO(wangxianzhu): tighten it.
   return GetLineLayoutItem().VisualRect();
+}
+
+LayoutRect InlineBox::PartialInvalidationRect() const {
+  // TODO(wangxianzhu): tighten it.
+  return GetLineLayoutItem().PartialInvalidationRect();
 }
 
 #ifndef NDEBUG
@@ -108,35 +113,39 @@ void InlineBox::ShowLineTreeForThis() const {
   GetLineLayoutItem().ContainingBlock().ShowLineTreeAndMark(this, "*");
 }
 
-void InlineBox::ShowLineTreeAndMark(const InlineBox* marked_box1,
+void InlineBox::DumpLineTreeAndMark(StringBuilder& string_builder,
+                                    const InlineBox* marked_box1,
                                     const char* marked_label1,
                                     const InlineBox* marked_box2,
                                     const char* marked_label2,
                                     const LayoutObject* obj,
                                     int depth) const {
-  int printed_characters = 0;
+  StringBuilder string_inlinebox;
   if (this == marked_box1)
-    printed_characters += fprintf(stderr, "%s", marked_label1);
+    string_inlinebox.Append(marked_label1);
   if (this == marked_box2)
-    printed_characters += fprintf(stderr, "%s", marked_label2);
+    string_inlinebox.Append(marked_label2);
   if (GetLineLayoutItem().IsEqual(obj))
-    printed_characters += fprintf(stderr, "*");
-  for (; printed_characters < depth * 2; printed_characters++)
-    fputc(' ', stderr);
+    string_inlinebox.Append("*");
+  while ((int)string_inlinebox.length() < (depth * 2))
+    string_inlinebox.Append(" ");
 
-  ShowBox(printed_characters);
+  DumpBox(string_inlinebox);
+  string_builder.Append('\n');
+  string_builder.Append(string_inlinebox);
 }
 
-void InlineBox::ShowBox(int printed_characters) const {
-  printed_characters += fprintf(stderr, "%s %p", BoxName(), this);
-  for (; printed_characters < kShowTreeCharacterOffset; printed_characters++)
-    fputc(' ', stderr);
-  fprintf(stderr, "\t%s %p {pos=%g,%g size=%g,%g} baseline=%i/%i\n",
-          GetLineLayoutItem().DecoratedName().Ascii().data(),
-          GetLineLayoutItem().DebugPointer(), X().ToFloat(), Y().ToFloat(),
-          Width().ToFloat(), Height().ToFloat(),
-          BaselinePosition(kAlphabeticBaseline),
-          BaselinePosition(kIdeographicBaseline));
+void InlineBox::DumpBox(StringBuilder& string_inlinebox) const {
+  string_inlinebox.Append(String::Format("%s %p", BoxName(), this));
+  while (string_inlinebox.length() < kShowTreeCharacterOffset)
+    string_inlinebox.Append(" ");
+  string_inlinebox.Append(
+      String::Format("\t%s %p {pos=%g,%g size=%g,%g} baseline=%i/%i",
+                     GetLineLayoutItem().DecoratedName().Ascii().data(),
+                     GetLineLayoutItem().DebugPointer(), X().ToFloat(),
+                     Y().ToFloat(), Width().ToFloat(), Height().ToFloat(),
+                     BaselinePosition(kAlphabeticBaseline).ToInt(),
+                     BaselinePosition(kIdeographicBaseline).ToInt()));
 }
 #endif
 
@@ -166,7 +175,7 @@ LayoutUnit InlineBox::LogicalHeight() const {
   return result;
 }
 
-int InlineBox::BaselinePosition(FontBaseline baseline_type) const {
+LayoutUnit InlineBox::BaselinePosition(FontBaseline baseline_type) const {
   return BoxModelObject().BaselinePosition(
       baseline_type, bitfields_.FirstLine(),
       IsHorizontal() ? kHorizontalLine : kVerticalLine,
@@ -243,8 +252,8 @@ bool InlineBox::NodeAtPoint(HitTestResult& result,
         GetLineLayoutItem().ContainingBlock().FlipForWritingModeForChild(
             LineLayoutBox(GetLineLayoutItem()), child_point);
 
-  return GetLineLayoutItem().HitTest(result, location_in_container,
-                                     child_point);
+  return GetLineLayoutItem().HitTestAllPhases(result, location_in_container,
+                                              child_point);
 }
 
 const RootInlineBox& InlineBox::Root() const {
@@ -332,12 +341,6 @@ LayoutPoint InlineBox::PhysicalLocation() const {
   return rect.Location();
 }
 
-void InlineBox::LogicalRectToPhysicalRect(LayoutRect& rect) const {
-  if (!IsHorizontal())
-    rect = rect.TransposedRect();
-  FlipForWritingMode(rect);
-}
-
 void InlineBox::FlipForWritingMode(FloatRect& rect) const {
   if (!UNLIKELY(GetLineLayoutItem().HasFlippedBlocksWritingMode()))
     return;
@@ -376,6 +379,12 @@ void InlineBox::SetLineLayoutItemShouldDoFullPaintInvalidationIfNeeded() {
   // style. Otherwise it paints nothing so we don't need to invalidate it.
   if (!IsRootInlineBox() || IsFirstLineStyle())
     line_layout_item_.SetShouldDoFullPaintInvalidation();
+}
+
+bool CanUseInlineBox(const LayoutObject& node) {
+  DCHECK(node.IsText() || node.IsInline() || node.IsLayoutBlockFlow());
+  return !RuntimeEnabledFeatures::LayoutNGEnabled() ||
+         !node.EnclosingNGBlockFlow();
 }
 
 }  // namespace blink

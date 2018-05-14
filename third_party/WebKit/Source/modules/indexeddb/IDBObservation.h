@@ -5,29 +5,32 @@
 #ifndef IDBObservation_h
 #define IDBObservation_h
 
+#include <memory>
+
 #include "bindings/core/v8/ScriptValue.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/modules/indexeddb/WebIDBTypes.h"
 
 namespace blink {
 
+class IDBAny;
 class IDBKeyRange;
-class IDBValue;
 class ScriptState;
 struct WebIDBObservation;
 
-class IDBObservation final : public GarbageCollectedFinalized<IDBObservation>,
-                             public ScriptWrappable {
+class IDBObservation final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static WebIDBOperationType StringToOperationType(const String&);
-  static IDBObservation* Create(const WebIDBObservation&, v8::Isolate*);
+
+  // Consumes the WebIDBObservation.
+  static IDBObservation* Create(WebIDBObservation, v8::Isolate*);
+
   ~IDBObservation();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   // Implement the IDL
   ScriptValue key(ScriptState*);
@@ -35,9 +38,10 @@ class IDBObservation final : public GarbageCollectedFinalized<IDBObservation>,
   const String& type() const;
 
  private:
-  IDBObservation(const WebIDBObservation&, v8::Isolate*);
+  IDBObservation(WebIDBObservation, v8::Isolate*);
+
   Member<IDBKeyRange> key_range_;
-  RefPtr<IDBValue> value_;
+  Member<IDBAny> value_;
   const WebIDBOperationType operation_type_;
 };
 

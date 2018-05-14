@@ -12,26 +12,29 @@
 namespace extensions {
 
 UserGesturesNativeHandler::UserGesturesNativeHandler(ScriptContext* context)
-    : ObjectBackedNativeHandler(context) {
-  RouteFunction("IsProcessingUserGesture",
-                "test",
-                base::Bind(&UserGesturesNativeHandler::IsProcessingUserGesture,
-                           base::Unretained(this)));
-  RouteFunction("RunWithUserGesture",
-                "test",
-                base::Bind(&UserGesturesNativeHandler::RunWithUserGesture,
-                           base::Unretained(this)));
-  RouteFunction("RunWithoutUserGesture",
-                "test",
-                base::Bind(&UserGesturesNativeHandler::RunWithoutUserGesture,
-                           base::Unretained(this)));
+    : ObjectBackedNativeHandler(context) {}
+
+void UserGesturesNativeHandler::AddRoutes() {
+  RouteHandlerFunction(
+      "IsProcessingUserGesture", "test",
+      base::Bind(&UserGesturesNativeHandler::IsProcessingUserGesture,
+                 base::Unretained(this)));
+  RouteHandlerFunction(
+      "RunWithUserGesture", "test",
+      base::Bind(&UserGesturesNativeHandler::RunWithUserGesture,
+                 base::Unretained(this)));
+  RouteHandlerFunction(
+      "RunWithoutUserGesture", "test",
+      base::Bind(&UserGesturesNativeHandler::RunWithoutUserGesture,
+                 base::Unretained(this)));
 }
 
 void UserGesturesNativeHandler::IsProcessingUserGesture(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  args.GetReturnValue().Set(v8::Boolean::New(
-      args.GetIsolate(),
-      blink::WebUserGestureIndicator::IsProcessingUserGesture()));
+  args.GetReturnValue().Set(
+      v8::Boolean::New(args.GetIsolate(),
+                       blink::WebUserGestureIndicator::IsProcessingUserGesture(
+                           context()->web_frame())));
 }
 
 void UserGesturesNativeHandler::RunWithUserGesture(
@@ -45,7 +48,7 @@ void UserGesturesNativeHandler::RunWithUserGesture(
 
 void UserGesturesNativeHandler::RunWithoutUserGesture(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  blink::WebUserGestureIndicator::ConsumeUserGesture();
+  blink::WebUserGestureIndicator::ConsumeUserGesture(context()->web_frame());
   CHECK_EQ(args.Length(), 1);
   CHECK(args[0]->IsFunction());
   v8::Local<v8::Value> no_args;

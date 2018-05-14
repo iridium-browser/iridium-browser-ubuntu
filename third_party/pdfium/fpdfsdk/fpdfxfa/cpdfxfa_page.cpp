@@ -8,6 +8,7 @@
 
 #include "core/fpdfapi/page/cpdf_page.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
+#include "core/fxcrt/fx_fallthrough.h"
 #include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
 #include "fpdfsdk/fpdfxfa/cxfa_fwladaptertimermgr.h"
 #include "fpdfsdk/fsdk_define.h"
@@ -64,15 +65,15 @@ bool CPDFXFA_Page::LoadPage() {
   if (!m_pContext || m_iPageIndex < 0)
     return false;
 
-  switch (m_pContext->GetDocType()) {
-    case XFA_DocType::PDF:
-    case XFA_DocType::Static:
+  switch (m_pContext->GetFormType()) {
+    case FormType::kNone:
+    case FormType::kAcroForm:
+    case FormType::kXFAForeground:
       return LoadPDFPage();
-    case XFA_DocType::Dynamic:
+    case FormType::kXFAFull:
       return LoadXFAPageView();
-    default:
-      return false;
   }
+  return false;
 }
 
 bool CPDFXFA_Page::LoadPDFPage(CPDF_Dictionary* pageDict) {
@@ -89,20 +90,17 @@ float CPDFXFA_Page::GetPageWidth() const {
   if (!m_pPDFPage && !m_pXFAPageView)
     return 0.0f;
 
-  switch (m_pContext->GetDocType()) {
-    case XFA_DocType::Dynamic: {
+  switch (m_pContext->GetFormType()) {
+    case FormType::kNone:
+    case FormType::kAcroForm:
+    case FormType::kXFAForeground:
+      if (m_pPDFPage)
+        return m_pPDFPage->GetPageWidth();
+      FX_FALLTHROUGH;
+    case FormType::kXFAFull:
       if (m_pXFAPageView)
         return m_pXFAPageView->GetPageViewRect().width;
       break;
-    }
-    case XFA_DocType::Static:
-    case XFA_DocType::PDF: {
-      if (m_pPDFPage)
-        return m_pPDFPage->GetPageWidth();
-      break;
-    }
-    default:
-      return 0.0f;
   }
 
   return 0.0f;
@@ -112,20 +110,17 @@ float CPDFXFA_Page::GetPageHeight() const {
   if (!m_pPDFPage && !m_pXFAPageView)
     return 0.0f;
 
-  switch (m_pContext->GetDocType()) {
-    case XFA_DocType::PDF:
-    case XFA_DocType::Static: {
+  switch (m_pContext->GetFormType()) {
+    case FormType::kNone:
+    case FormType::kAcroForm:
+    case FormType::kXFAForeground:
       if (m_pPDFPage)
         return m_pPDFPage->GetPageHeight();
-      break;
-    }
-    case XFA_DocType::Dynamic: {
+      FX_FALLTHROUGH;
+    case FormType::kXFAFull:
       if (m_pXFAPageView)
         return m_pXFAPageView->GetPageViewRect().height;
       break;
-    }
-    default:
-      return 0.0f;
   }
 
   return 0.0f;
@@ -182,22 +177,19 @@ CFX_Matrix CPDFXFA_Page::GetDisplayMatrix(int xPos,
   if (!m_pPDFPage && !m_pXFAPageView)
     return CFX_Matrix();
 
-  switch (m_pContext->GetDocType()) {
-    case XFA_DocType::Dynamic: {
-      if (m_pXFAPageView) {
-        return m_pXFAPageView->GetDisplayMatrix(
-            CFX_Rect(xPos, yPos, xSize, ySize), iRotate);
-      }
-      break;
-    }
-    case XFA_DocType::PDF:
-    case XFA_DocType::Static: {
+  switch (m_pContext->GetFormType()) {
+    case FormType::kNone:
+    case FormType::kAcroForm:
+    case FormType::kXFAForeground:
       if (m_pPDFPage)
         return m_pPDFPage->GetDisplayMatrix(xPos, yPos, xSize, ySize, iRotate);
+      FX_FALLTHROUGH;
+    case FormType::kXFAFull:
+      if (m_pXFAPageView)
+        return m_pXFAPageView->GetDisplayMatrix(
+            CFX_Rect(xPos, yPos, xSize, ySize), iRotate);
       break;
-    }
-    default:
-      return CFX_Matrix();
   }
+
   return CFX_Matrix();
 }

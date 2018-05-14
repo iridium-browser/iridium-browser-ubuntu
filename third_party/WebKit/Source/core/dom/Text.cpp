@@ -23,7 +23,6 @@
 #include "core/dom/Text.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/SVGNames.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/FirstLetterPseudoElement.h"
@@ -33,13 +32,13 @@
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/dom/WhitespaceAttacher.h"
-#include "core/events/ScopedEventQueue.h"
+#include "core/dom/events/ScopedEventQueue.h"
 #include "core/layout/LayoutText.h"
 #include "core/layout/LayoutTextCombine.h"
 #include "core/layout/LayoutTextFragment.h"
-#include "core/layout/api/LayoutTextItem.h"
 #include "core/layout/svg/LayoutSVGInlineText.h"
 #include "core/svg/SVGForeignObjectElement.h"
+#include "core/svg_names.h"
 #include "platform/bindings/DOMDataStore.h"
 #include "platform/wtf/text/CString.h"
 #include "platform/wtf/text/StringBuilder.h"
@@ -64,7 +63,7 @@ Node* Text::MergeNextSiblingNodesIfPossible() {
   }
 
   // Merge text nodes.
-  while (Node* next_sibling = this->nextSibling()) {
+  while (Node* next_sibling = nextSibling()) {
     if (next_sibling->getNodeType() != kTextNode)
       break;
 
@@ -113,7 +112,7 @@ Text* Text::splitText(unsigned offset, ExceptionState& exception_state) {
 
   EventQueueScope scope;
   String old_str = data();
-  Text* new_text = CloneWithData(old_str.Substring(offset));
+  Text* new_text = CloneWithData(GetDocument(), old_str.Substring(offset));
   SetDataWithoutUpdate(old_str.Substring(0, offset));
 
   DidModifyData(old_str, CharacterData::kUpdateFromNonParser);
@@ -239,11 +238,18 @@ Node::NodeType Text::getNodeType() const {
   return kTextNode;
 }
 
-Node* Text::cloneNode(bool /*deep*/, ExceptionState&) {
-  return CloneWithData(data());
+Node* Text::Clone(Document& factory, CloneChildrenFlag) const {
+  return CloneWithData(factory, data());
 }
 
-static inline bool CanHaveWhitespaceChildren(const LayoutObject& parent) {
+static inline bool EndsWithWhitespace(const String& text) {
+  return text.length() && IsASCIISpace(text[text.length() - 1]);
+}
+
+static inline bool CanHaveWhitespaceChildren(
+    const LayoutObject& parent,
+    const ComputedStyle& style,
+    const Text::AttachContext& context) {
   // <button> and <fieldset> should allow whitespace even though
   // LayoutFlexibleBox doesn't.
   if (parent.IsLayoutButton() || parent.IsFieldset())
@@ -253,13 +259,15 @@ static inline bool CanHaveWhitespaceChildren(const LayoutObject& parent) {
       parent.IsLayoutTableCol() || parent.IsFrameSet() ||
       parent.IsFlexibleBox() || parent.IsLayoutGrid() || parent.IsSVGRoot() ||
       parent.IsSVGContainer() || parent.IsSVGImage() || parent.IsSVGShape()) {
-    return false;
+    if (!context.use_previous_in_flow || !context.previous_in_flow ||
+        !context.previous_in_flow->IsText())
+      return false;
+
+    return style.PreserveNewline() ||
+           !EndsWithWhitespace(
+               ToLayoutText(context.previous_in_flow)->GetText());
   }
   return true;
-}
-
-static inline bool EndsWithWhitespace(const String& text) {
-  return text.length() && IsASCIISpace(text[text.length() - 1]);
 }
 
 bool Text::TextLayoutObjectIsNeeded(const AttachContext& context,
@@ -282,8 +290,7 @@ bool Text::TextLayoutObjectIsNeeded(const AttachContext& context,
   if (!ContainsOnlyWhitespace())
     return true;
 
-  if (style.Display() != EDisplay::kContents &&
-      !CanHaveWhitespaceChildren(parent))
+  if (!CanHaveWhitespaceChildren(parent, style, context))
     return false;
 
   // pre-wrap in SVG never makes layoutObject.
@@ -313,7 +320,7 @@ static bool IsSVGText(Text* text) {
   Node* parent_or_shadow_host_node = text->ParentOrShadowHostNode();
   DCHECK(parent_or_shadow_host_node);
   return parent_or_shadow_host_node->IsSVGElement() &&
-         !isSVGForeignObjectElement(*parent_or_shadow_host_node);
+         !IsSVGForeignObjectElement(*parent_or_shadow_host_node);
 }
 
 LayoutText* Text::CreateTextLayoutObject(const ComputedStyle& style) {
@@ -338,6 +345,7 @@ void Text::AttachLayoutTree(AttachContext& context) {
       LayoutTreeBuilderForText(*this, parent_layout_object,
                                style_parent->MutableComputedStyle())
           .CreateLayoutObject();
+      context.previous_in_flow = GetLayoutObject();
     }
   }
   CharacterData::AttachLayoutTree(context);
@@ -374,12 +382,23 @@ void Text::ReattachLayoutTreeIfNeeded(const AttachContext& context) {
 }
 
 void Text::RecalcTextStyle(StyleRecalcChange change) {
-  if (LayoutTextItem layout_item = LayoutTextItem(this->GetLayoutObject())) {
-    if (change != kNoChange || NeedsStyleRecalc())
-      layout_item.SetStyle(
-          GetDocument().EnsureStyleResolver().StyleForText(this));
+  if (LayoutText* layout_text = GetLayoutObject()) {
+    if (change != kNoChange || NeedsStyleRecalc()) {
+      scoped_refptr<ComputedStyle> new_style =
+          GetDocument().EnsureStyleResolver().StyleForText(this);
+      const ComputedStyle* layout_parent_style =
+          GetLayoutObject()->Parent()->Style();
+      if (new_style != layout_parent_style &&
+          !new_style->InheritedEqual(*layout_parent_style)) {
+        // The computed style or the need for an anonymous inline wrapper for a
+        // display:contents text child changed.
+        SetNeedsReattachLayoutTree();
+        return;
+      }
+      layout_text->SetStyle(std::move(new_style));
+    }
     if (NeedsStyleRecalc())
-      layout_item.SetText(DataImpl());
+      layout_text->SetText(DataImpl());
     ClearNeedsStyleRecalc();
   } else if (NeedsStyleRecalc() || NeedsWhitespaceLayoutObject()) {
     SetNeedsReattachLayoutTree();
@@ -444,11 +463,11 @@ void Text::UpdateTextLayoutObject(unsigned offset_of_replaced_data,
                                         length_of_replaced_data);
 }
 
-Text* Text::CloneWithData(const String& data) {
-  return Create(GetDocument(), data);
+Text* Text::CloneWithData(Document& factory, const String& data) const {
+  return Create(factory, data);
 }
 
-DEFINE_TRACE(Text) {
+void Text::Trace(blink::Visitor* visitor) {
   CharacterData::Trace(visitor);
 }
 

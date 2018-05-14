@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/public/cpp/window_properties.h"
 #include "ash/scoped_root_window_for_new_windows.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_positioner.h"
 #include "ash/wm/window_resizer.h"
-#include "ash/wm/window_state.h"
 #include "base/memory/ptr_util.h"
-#include "build/build_config.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/window_sizer/window_sizer_common_unittest.h"
@@ -31,6 +30,10 @@ using WindowSizerAshTest = ash::AshTestBase;
 
 namespace {
 
+// Shorten identifiers to improve line wrapping.
+const int kDesktopBorderSize = WindowSizer::kDesktopBorderSize;
+const int kMaximumWindowWidth = WindowSizer::kMaximumWindowWidth;
+
 std::unique_ptr<Browser> CreateTestBrowser(aura::Window* window,
                                            const gfx::Rect& bounds,
                                            Browser::CreateParams* params) {
@@ -40,8 +43,8 @@ std::unique_ptr<Browser> CreateTestBrowser(aura::Window* window,
       chrome::CreateBrowserWithAuraTestWindowForParams(base::WrapUnique(window),
                                                        params);
   if (!browser->is_type_popup()) {
-    ash::wm::GetWindowState(browser->window()->GetNativeWindow())
-        ->set_window_position_managed(true);
+    browser->window()->GetNativeWindow()->SetProperty(
+        ash::kWindowPositionManagedTypeKey, true);
   }
   return browser;
 }
@@ -51,18 +54,14 @@ std::unique_ptr<Browser> CreateTestBrowser(aura::Window* window,
 // Test that the window is sized appropriately for the first run experience
 // where the default window bounds calculation is invoked.
 TEST_F(WindowSizerAshTest, DefaultSizeCase) {
-#if defined(OS_WIN)
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(switches::kOpenAsh);
-#endif
   { // 4:3 monitor case, 1024x768, no taskbar
     gfx::Rect window_bounds;
     GetWindowBounds(p1024x768, p1024x768, gfx::Rect(), gfx::Rect(),
                     gfx::Rect(), DEFAULT, NULL, gfx::Rect(), &window_bounds);
-    EXPECT_EQ(gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                        ash::WindowPositioner::kDesktopBorderSize,
-                        1024 - ash::WindowPositioner::kDesktopBorderSize * 2,
-                        768 - ash::WindowPositioner::kDesktopBorderSize),
-              window_bounds);
+    EXPECT_EQ(
+        gfx::Rect(kDesktopBorderSize, kDesktopBorderSize,
+                  1024 - kDesktopBorderSize * 2, 768 - kDesktopBorderSize),
+        window_bounds);
   }
 
   { // 4:3 monitor case, 1024x768, taskbar on bottom
@@ -70,11 +69,9 @@ TEST_F(WindowSizerAshTest, DefaultSizeCase) {
     GetWindowBounds(p1024x768, taskbar_bottom_work_area, gfx::Rect(),
                     gfx::Rect(), gfx::Rect(), DEFAULT, NULL, gfx::Rect(),
                     &window_bounds);
-    EXPECT_EQ(gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                        ash::WindowPositioner::kDesktopBorderSize,
-                        1024 - ash::WindowPositioner::kDesktopBorderSize * 2,
-                        taskbar_bottom_work_area.height() -
-                          ash::WindowPositioner::kDesktopBorderSize),
+    EXPECT_EQ(gfx::Rect(kDesktopBorderSize, kDesktopBorderSize,
+                        1024 - kDesktopBorderSize * 2,
+                        taskbar_bottom_work_area.height() - kDesktopBorderSize),
               window_bounds);
   }
 
@@ -83,12 +80,11 @@ TEST_F(WindowSizerAshTest, DefaultSizeCase) {
     GetWindowBounds(p1024x768, taskbar_right_work_area, gfx::Rect(),
                     gfx::Rect(), gfx::Rect(), DEFAULT, NULL, gfx::Rect(),
                     &window_bounds);
-    EXPECT_EQ(gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                        ash::WindowPositioner::kDesktopBorderSize,
-                        taskbar_right_work_area.width() -
-                          ash::WindowPositioner::kDesktopBorderSize * 2,
-                        768 - ash::WindowPositioner::kDesktopBorderSize),
-              window_bounds);
+    EXPECT_EQ(
+        gfx::Rect(kDesktopBorderSize, kDesktopBorderSize,
+                  taskbar_right_work_area.width() - kDesktopBorderSize * 2,
+                  768 - kDesktopBorderSize),
+        window_bounds);
   }
 
   { // 4:3 monitor case, 1024x768, taskbar on left
@@ -96,13 +92,10 @@ TEST_F(WindowSizerAshTest, DefaultSizeCase) {
     GetWindowBounds(p1024x768, taskbar_left_work_area, gfx::Rect(),
                     gfx::Rect(), gfx::Rect(), DEFAULT, NULL, gfx::Rect(),
                     &window_bounds);
-    EXPECT_EQ(gfx::Rect(taskbar_left_work_area.x() +
-                          ash::WindowPositioner::kDesktopBorderSize,
-                        ash::WindowPositioner::kDesktopBorderSize,
-                        taskbar_left_work_area.width() -
-                          ash::WindowPositioner::kDesktopBorderSize * 2,
-                        taskbar_left_work_area.height() -
-                          ash::WindowPositioner::kDesktopBorderSize),
+    EXPECT_EQ(gfx::Rect(taskbar_left_work_area.x() + kDesktopBorderSize,
+                        kDesktopBorderSize,
+                        taskbar_left_work_area.width() - kDesktopBorderSize * 2,
+                        taskbar_left_work_area.height() - kDesktopBorderSize),
               window_bounds);
   }
 
@@ -111,12 +104,10 @@ TEST_F(WindowSizerAshTest, DefaultSizeCase) {
     GetWindowBounds(p1024x768, taskbar_top_work_area, gfx::Rect(),
                     gfx::Rect(), gfx::Rect(), DEFAULT, NULL, gfx::Rect(),
                     &window_bounds);
-    EXPECT_EQ(gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                        taskbar_top_work_area.y() +
-                          ash::WindowPositioner::kDesktopBorderSize,
-                        1024 - ash::WindowPositioner::kDesktopBorderSize * 2,
-                        taskbar_top_work_area.height() -
-                            ash::WindowPositioner::kDesktopBorderSize),
+    EXPECT_EQ(gfx::Rect(kDesktopBorderSize,
+                        taskbar_top_work_area.y() + kDesktopBorderSize,
+                        1024 - kDesktopBorderSize * 2,
+                        taskbar_top_work_area.height() - kDesktopBorderSize),
               window_bounds);
   }
 
@@ -124,10 +115,8 @@ TEST_F(WindowSizerAshTest, DefaultSizeCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(p1280x1024, p1280x1024, gfx::Rect(), gfx::Rect(),
                     gfx::Rect(), DEFAULT, NULL, gfx::Rect(), &window_bounds);
-    EXPECT_EQ(gfx::Rect((1280 - ash::WindowPositioner::kMaximumWindowWidth) / 2,
-                        ash::WindowPositioner::kDesktopBorderSize,
-                        ash::WindowPositioner::kMaximumWindowWidth,
-                        1024 - ash::WindowPositioner::kDesktopBorderSize),
+    EXPECT_EQ(gfx::Rect((1280 - kMaximumWindowWidth) / 2, kDesktopBorderSize,
+                        kMaximumWindowWidth, 1024 - kDesktopBorderSize),
               window_bounds);
   }
 
@@ -135,10 +124,8 @@ TEST_F(WindowSizerAshTest, DefaultSizeCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(p1600x1200, p1600x1200, gfx::Rect(), gfx::Rect(),
                     gfx::Rect(), DEFAULT, NULL, gfx::Rect(), &window_bounds);
-    EXPECT_EQ(gfx::Rect((1600 - ash::WindowPositioner::kMaximumWindowWidth) / 2,
-                        ash::WindowPositioner::kDesktopBorderSize,
-                        ash::WindowPositioner::kMaximumWindowWidth,
-                        1200 - ash::WindowPositioner::kDesktopBorderSize),
+    EXPECT_EQ(gfx::Rect((1600 - kMaximumWindowWidth) / 2, kDesktopBorderSize,
+                        kMaximumWindowWidth, 1200 - kDesktopBorderSize),
               window_bounds);
   }
 
@@ -146,10 +133,8 @@ TEST_F(WindowSizerAshTest, DefaultSizeCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(p1680x1050, p1680x1050, gfx::Rect(), gfx::Rect(),
                     gfx::Rect(), DEFAULT, NULL, gfx::Rect(), &window_bounds);
-    EXPECT_EQ(gfx::Rect((1680 - ash::WindowPositioner::kMaximumWindowWidth) / 2,
-                        ash::WindowPositioner::kDesktopBorderSize,
-                        ash::WindowPositioner::kMaximumWindowWidth,
-                        1050 - ash::WindowPositioner::kDesktopBorderSize),
+    EXPECT_EQ(gfx::Rect((1680 - kMaximumWindowWidth) / 2, kDesktopBorderSize,
+                        kMaximumWindowWidth, 1050 - kDesktopBorderSize),
               window_bounds);
   }
 
@@ -157,10 +142,8 @@ TEST_F(WindowSizerAshTest, DefaultSizeCase) {
     gfx::Rect window_bounds;
     GetWindowBounds(p1920x1200, p1920x1200, gfx::Rect(), gfx::Rect(),
                     gfx::Rect(), DEFAULT, NULL, gfx::Rect(), &window_bounds);
-    EXPECT_EQ(gfx::Rect((1920 - ash::WindowPositioner::kMaximumWindowWidth) / 2,
-                        ash::WindowPositioner::kDesktopBorderSize,
-                        ash::WindowPositioner::kMaximumWindowWidth,
-                        1200 - ash::WindowPositioner::kDesktopBorderSize),
+    EXPECT_EQ(gfx::Rect((1920 - kMaximumWindowWidth) / 2, kDesktopBorderSize,
+                        kMaximumWindowWidth, 1200 - kDesktopBorderSize),
               window_bounds);
   }
 }
@@ -170,75 +153,61 @@ TEST_F(WindowSizerAshTest, DefaultSizeCase) {
 TEST_F(WindowSizerAshTest, LastWindowBoundsCase) {
   { // normal, in the middle of the screen somewhere.
     gfx::Rect window_bounds;
-    GetWindowBounds(
-        p1024x768, p1024x768, gfx::Rect(),
-        gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                  ash::WindowPositioner::kDesktopBorderSize, 500, 400),
-        gfx::Rect(), LAST_ACTIVE, NULL, gfx::Rect(),
-        &window_bounds);
-    EXPECT_EQ(
-        gfx::Rect(kWindowTilePixels + ash::WindowPositioner::kDesktopBorderSize,
-                  kWindowTilePixels + ash::WindowPositioner::kDesktopBorderSize,
-                  500, 400).ToString(),
-        window_bounds.ToString());
+    GetWindowBounds(p1024x768, p1024x768, gfx::Rect(),
+                    gfx::Rect(kDesktopBorderSize, kDesktopBorderSize, 500, 400),
+                    gfx::Rect(), LAST_ACTIVE, NULL, gfx::Rect(),
+                    &window_bounds);
+    EXPECT_EQ(gfx::Rect(kWindowTilePixels + kDesktopBorderSize,
+                        kWindowTilePixels + kDesktopBorderSize, 500, 400)
+                  .ToString(),
+              window_bounds.ToString());
   }
 
   { // taskbar on top.
     gfx::Rect window_bounds;
-    GetWindowBounds(
-        p1024x768, taskbar_top_work_area, gfx::Rect(),
-        gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                  ash::WindowPositioner::kDesktopBorderSize, 500, 400),
-        gfx::Rect(), LAST_ACTIVE, NULL, gfx::Rect(),
-        &window_bounds);
-    EXPECT_EQ(
-        gfx::Rect(kWindowTilePixels + ash::WindowPositioner::kDesktopBorderSize,
-                  std::max(kWindowTilePixels +
-                           ash::WindowPositioner::kDesktopBorderSize,
-                           34 /* toolbar height */),
-                  500, 400).ToString(),
-        window_bounds.ToString());
+    GetWindowBounds(p1024x768, taskbar_top_work_area, gfx::Rect(),
+                    gfx::Rect(kDesktopBorderSize, kDesktopBorderSize, 500, 400),
+                    gfx::Rect(), LAST_ACTIVE, NULL, gfx::Rect(),
+                    &window_bounds);
+    EXPECT_EQ(gfx::Rect(kWindowTilePixels + kDesktopBorderSize,
+                        std::max(kWindowTilePixels + kDesktopBorderSize,
+                                 34 /* toolbar height */),
+                        500, 400)
+                  .ToString(),
+              window_bounds.ToString());
   }
 
   { // Too small to satisify the minimum visibility condition.
     gfx::Rect window_bounds;
-    GetWindowBounds(
-        p1024x768, p1024x768, gfx::Rect(),
-        gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                  ash::WindowPositioner::kDesktopBorderSize, 29, 29),
-        gfx::Rect(), LAST_ACTIVE, NULL, gfx::Rect(),
-        &window_bounds);
-    EXPECT_EQ(
-        gfx::Rect(kWindowTilePixels + ash::WindowPositioner::kDesktopBorderSize,
-                  kWindowTilePixels + ash::WindowPositioner::kDesktopBorderSize,
-                  30 /* not 29 */,
-                  30 /* not 29 */).ToString(),
-        window_bounds.ToString());
+    GetWindowBounds(p1024x768, p1024x768, gfx::Rect(),
+                    gfx::Rect(kDesktopBorderSize, kDesktopBorderSize, 29, 29),
+                    gfx::Rect(), LAST_ACTIVE, NULL, gfx::Rect(),
+                    &window_bounds);
+    EXPECT_EQ(gfx::Rect(kWindowTilePixels + kDesktopBorderSize,
+                        kWindowTilePixels + kDesktopBorderSize, 30 /* not 29 */,
+                        30 /* not 29 */)
+                  .ToString(),
+              window_bounds.ToString());
   }
 
 
   { // Normal.
     gfx::Rect window_bounds;
-    GetWindowBounds(
-        p1024x768, p1024x768, gfx::Rect(),
-        gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                  ash::WindowPositioner::kDesktopBorderSize, 500, 400),
-        gfx::Rect(), LAST_ACTIVE, NULL, gfx::Rect(),
-        &window_bounds);
-    EXPECT_EQ(
-        gfx::Rect(kWindowTilePixels + ash::WindowPositioner::kDesktopBorderSize,
-                  kWindowTilePixels + ash::WindowPositioner::kDesktopBorderSize,
-                  500, 400).ToString(),
-        window_bounds.ToString());
+    GetWindowBounds(p1024x768, p1024x768, gfx::Rect(),
+                    gfx::Rect(kDesktopBorderSize, kDesktopBorderSize, 500, 400),
+                    gfx::Rect(), LAST_ACTIVE, NULL, gfx::Rect(),
+                    &window_bounds);
+    EXPECT_EQ(gfx::Rect(kWindowTilePixels + kDesktopBorderSize,
+                        kWindowTilePixels + kDesktopBorderSize, 500, 400)
+                  .ToString(),
+              window_bounds.ToString());
   }
 }
 
 // Test that the window opened is sized appropriately given persisted sizes.
 TEST_F(WindowSizerAshTest, PersistedBoundsCase) {
   { // normal, in the middle of the screen somewhere.
-    gfx::Rect initial_bounds(
-        ash::WindowPositioner::kDesktopBorderSize,
-        ash::WindowPositioner::kDesktopBorderSize, 500, 400);
+    gfx::Rect initial_bounds(kDesktopBorderSize, kDesktopBorderSize, 500, 400);
 
     gfx::Rect window_bounds;
     GetWindowBounds(p1024x768, p1024x768, gfx::Rect(), initial_bounds,
@@ -313,38 +282,27 @@ TEST_F(WindowSizerAshTest, PersistedBoundsCase) {
 
   { // width and height too small
     gfx::Rect window_bounds;
-    GetWindowBounds(
-        p1024x768, p1024x768, gfx::Rect(),
-        gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                  ash::WindowPositioner::kDesktopBorderSize, 29, 29),
-        gfx::Rect(), PERSISTED, NULL, gfx::Rect(), &window_bounds);
-    EXPECT_EQ(gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                        ash::WindowPositioner::kDesktopBorderSize,
-                        30 /* not 29 */, 30 /* not 29 */).ToString(),
+    GetWindowBounds(p1024x768, p1024x768, gfx::Rect(),
+                    gfx::Rect(kDesktopBorderSize, kDesktopBorderSize, 29, 29),
+                    gfx::Rect(), PERSISTED, NULL, gfx::Rect(), &window_bounds);
+    EXPECT_EQ(gfx::Rect(kDesktopBorderSize, kDesktopBorderSize, 30 /* not 29 */,
+                        30 /* not 29 */)
+                  .ToString(),
               window_bounds.ToString());
   }
 }
 
-//////////////////////////////////////////////////////////////////////////////
-// The following unittests have different results on Mac/non-Mac because we
-// reposition windows aggressively on Mac.  The *WithAggressiveReposition tests
-// are run on Mac, and the *WithNonAggressiveRepositioning tests are run on
-// other platforms.
-
 TEST_F(WindowSizerAshTest, LastWindowOffscreenWithNonAggressiveRepositioning) {
   { // taskbar on left.
     gfx::Rect window_bounds;
-    GetWindowBounds(
-        p1024x768, taskbar_left_work_area, gfx::Rect(),
-        gfx::Rect(ash::WindowPositioner::kDesktopBorderSize,
-                  ash::WindowPositioner::kDesktopBorderSize, 500, 400),
-        gfx::Rect(), LAST_ACTIVE, NULL, gfx::Rect(),
-        &window_bounds);
-    EXPECT_EQ(
-        gfx::Rect(kWindowTilePixels + ash::WindowPositioner::kDesktopBorderSize,
-                  kWindowTilePixels + ash::WindowPositioner::kDesktopBorderSize,
-                  500, 400).ToString(),
-        window_bounds.ToString());
+    GetWindowBounds(p1024x768, taskbar_left_work_area, gfx::Rect(),
+                    gfx::Rect(kDesktopBorderSize, kDesktopBorderSize, 500, 400),
+                    gfx::Rect(), LAST_ACTIVE, NULL, gfx::Rect(),
+                    &window_bounds);
+    EXPECT_EQ(gfx::Rect(kWindowTilePixels + kDesktopBorderSize,
+                        kWindowTilePixels + kDesktopBorderSize, 500, 400)
+                  .ToString(),
+              window_bounds.ToString());
   }
 
   { // offset would put the new window offscreen at the bottom but the minimum
@@ -415,7 +373,7 @@ TEST_F(WindowSizerAshTest, PlaceNewWindows) {
   // existing windows.
   Browser::CreateParams native_params(profile.get(), true);
   std::unique_ptr<Browser> browser(
-      chrome::CreateBrowserWithTestWindowForParams(&native_params));
+      CreateBrowserWithTestWindowForParams(&native_params));
 
   // Creating a popup handler here to make sure it does not interfere with the
   // existing windows.
@@ -463,12 +421,11 @@ TEST_F(WindowSizerAshTest, PlaceNewWindows) {
     // since that might get used if the resolution is too big.
     EXPECT_EQ(
         gfx::Rect(
-            std::max(ash::WindowPositioner::kDesktopBorderSize,
-                     (1600 - ash::WindowPositioner::kMaximumWindowWidth) / 2),
-            ash::WindowPositioner::kDesktopBorderSize,
-            std::min(ash::WindowPositioner::kMaximumWindowWidth,
-                     1600 - 2 * ash::WindowPositioner::kDesktopBorderSize),
-            1200 - ash::WindowPositioner::kDesktopBorderSize).ToString(),
+            std::max(kDesktopBorderSize, (1600 - kMaximumWindowWidth) / 2),
+            kDesktopBorderSize,
+            std::min(kMaximumWindowWidth, 1600 - 2 * kDesktopBorderSize),
+            1200 - kDesktopBorderSize)
+            .ToString(),
         window_bounds.ToString());
   }
 }
@@ -481,7 +438,7 @@ TEST_F(WindowSizerAshTest, PlaceNewBrowserWindowOnEmptyDesktop) {
   std::unique_ptr<TestingProfile> profile(new TestingProfile());
   Browser::CreateParams native_params(profile.get(), true);
   std::unique_ptr<Browser> browser(
-      chrome::CreateBrowserWithTestWindowForParams(&native_params));
+      CreateBrowserWithTestWindowForParams(&native_params));
 
   // A common screen size for Chrome OS devices where this behavior is
   // desirable.
@@ -539,22 +496,11 @@ TEST_F(WindowSizerAshTest, PlaceNewBrowserWindowOnEmptyDesktop) {
       gfx::Rect(),             // Don't request valid bounds.
       0u,                      // Display index.
       &window_bounds, &out_show_state3);
-#if defined(OS_WIN)
-  EXPECT_EQ(ui::SHOW_STATE_MAXIMIZED, out_show_state3);
-#else
   EXPECT_EQ(ui::SHOW_STATE_DEFAULT, out_show_state3);
-#endif
 }
 
-#if defined(OS_CHROMEOS)
-#define MAYBE_PlaceNewWindowsOnMultipleDisplays PlaceNewWindowsOnMultipleDisplays
-#else
-// No multiple displays on windows ash.
-#define MAYBE_PlaceNewWindowsOnMultipleDisplays DISABLED_PlaceNewWindowsOnMultipleDisplays
-#endif
-
 // Test the placement of newly created windows on multiple dislays.
-TEST_F(WindowSizerAshTest, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
+TEST_F(WindowSizerAshTest, PlaceNewWindowsOnMultipleDisplays) {
   UpdateDisplay("1600x1200,1600x1200");
   gfx::Rect primary_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
@@ -737,15 +683,11 @@ TEST_F(WindowSizerAshTest, TestShowStateDefaults) {
                         gfx::Rect(16, 32, 128, 256), &params_popup));
 
   // Check that a browser creation state always get used if not given as
-  // SHOW_STATE_DEFAULT. On Windows ASH it should be SHOW_STATE_MAXIMIZED.
+  // SHOW_STATE_DEFAULT.
   ui::WindowShowState window_show_state =
       GetWindowShowState(ui::SHOW_STATE_MAXIMIZED, ui::SHOW_STATE_MAXIMIZED,
                          DEFAULT, browser.get(), p1600x1200, p1600x1200);
-#if defined(OS_WIN)
-  EXPECT_EQ(window_show_state, ui::SHOW_STATE_MAXIMIZED);
-#else
   EXPECT_EQ(window_show_state, ui::SHOW_STATE_DEFAULT);
-#endif
 
   browser->set_initial_show_state(ui::SHOW_STATE_MINIMIZED);
   EXPECT_EQ(
@@ -784,7 +726,7 @@ TEST_F(WindowSizerAshTest, DefaultStateBecomesMaximized) {
   std::unique_ptr<TestingProfile> profile(new TestingProfile());
   Browser::CreateParams native_params(profile.get(), true);
   std::unique_ptr<Browser> browser(
-      chrome::CreateBrowserWithTestWindowForParams(&native_params));
+      CreateBrowserWithTestWindowForParams(&native_params));
 
   gfx::Rect display_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();

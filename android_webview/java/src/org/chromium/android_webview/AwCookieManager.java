@@ -6,8 +6,8 @@ package org.chromium.android_webview;
 
 import android.os.Handler;
 import android.os.Looper;
-import android.webkit.ValueCallback;
 
+import org.chromium.base.Callback;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.library_loader.LibraryLoader;
@@ -50,7 +50,8 @@ public final class AwCookieManager {
      * Synchronous version of setCookie.
      */
     public void setCookie(String url, String value) {
-        nativeSetCookieSync(url, value);
+        UrlValue pair = fixupUrlValue(url, value);
+        nativeSetCookieSync(pair.mUrl, pair.mValue);
     }
 
     /**
@@ -75,10 +76,10 @@ public final class AwCookieManager {
      * @param value The value for set-cookie: in http response header.
      * @param callback A callback called with the success status after the cookie is set.
      */
-    public void setCookie(final String url, final String value,
-            final ValueCallback<Boolean> callback) {
+    public void setCookie(final String url, final String value, final Callback<Boolean> callback) {
         try {
-            nativeSetCookie(url, value, CookieCallback.convert(callback));
+            UrlValue pair = fixupUrlValue(url, value);
+            nativeSetCookie(pair.mUrl, pair.mValue, CookieCallback.convert(callback));
         } catch (IllegalStateException e) {
             throw new IllegalStateException(
                     "SetCookie must be called on a thread with a running Looper.");
@@ -102,7 +103,7 @@ public final class AwCookieManager {
      * The value of the callback is true iff at least one cookie was removed.
      * @param callback A callback called after the cookies (if any) are removed.
      */
-    public void removeSessionCookies(ValueCallback<Boolean> callback) {
+    public void removeSessionCookies(Callback<Boolean> callback) {
         try {
             nativeRemoveSessionCookies(CookieCallback.convert(callback));
         } catch (IllegalStateException e) {
@@ -116,7 +117,7 @@ public final class AwCookieManager {
      * The value of the callback is true iff at least one cookie was removed.
      * @param callback A callback called after the cookies (if any) are removed.
      */
-    public void removeAllCookies(ValueCallback<Boolean> callback) {
+    public void removeAllCookies(Callback<Boolean> callback) {
         try {
             nativeRemoveAllCookies(CookieCallback.convert(callback));
         } catch (IllegalStateException e) {
@@ -170,24 +171,24 @@ public final class AwCookieManager {
     }
 
     /**
-     * CookieCallback is a bridge that knows how to call a ValueCallback on its original thread.
-     * We need to arrange for the users ValueCallback#onReceiveValue to be called on the original
+     * CookieCallback is a bridge that knows how to call a Callback on its original thread.
+     * We need to arrange for the users Callback#onResult to be called on the original
      * thread after the work is done. When the API is called we construct a CookieCallback which
      * remembers the handler of the current thread. Later the native code uses
      * invokeBooleanCookieCallback to call CookieCallback#onReceiveValue which posts a Runnable
-     * on the handler of the original thread which in turn calls ValueCallback#onReceiveValue.
+     * on the handler of the original thread which in turn calls Callback#onResult.
      */
     private static class CookieCallback<T> {
-        ValueCallback<T> mCallback;
+        Callback<T> mCallback;
         Handler mHandler;
 
-        public CookieCallback(ValueCallback<T> callback, Handler handler) {
+        public CookieCallback(Callback<T> callback, Handler handler) {
             mCallback = callback;
             mHandler = handler;
         }
 
-        public static <T> CookieCallback<T> convert(ValueCallback<T> callback) throws
-                IllegalStateException {
+        public static <T> CookieCallback<T> convert(Callback<T> callback)
+                throws IllegalStateException {
             if (callback == null) return null;
             if (Looper.myLooper() == null) {
                 throw new IllegalStateException("CookieCallback.convert should be called on "
@@ -197,13 +198,45 @@ public final class AwCookieManager {
         }
 
         public void onReceiveValue(final T t) {
-            mHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    mCallback.onReceiveValue(t);
-                }
-            });
+            mHandler.post(() -> mCallback.onResult(t));
         }
+    }
+
+    /**
+     * A tuple to hold a URL and Value when setting a cookie.
+     */
+    private static class UrlValue {
+        public String mUrl;
+        public String mValue;
+
+        public UrlValue(String url, String value) {
+            mUrl = url;
+            mValue = value;
+        }
+    }
+
+    private static String appendDomain(String value, String domain) {
+        // Prefer the explicit Domain attribute, if available. We allow any case for "Domain".
+        if (value.matches("^.*(?i);[\\t ]*Domain[\\t ]*=.*$")) {
+            return value;
+        } else if (value.matches("^.*;\\s*$")) {
+            return value + " Domain=" + domain;
+        }
+        return value + "; Domain=" + domain;
+    }
+
+    private static UrlValue fixupUrlValue(String url, String value) {
+        final String leadingHttpTripleSlashDot = "http:///.";
+
+        // The app passed a domain instead of a real URL (and the glue layer "fixed" it into this
+        // form). For backwards compatibility, we fix this into a well-formed URL and add a Domain
+        // attribute to the cookie value.
+        if (url.startsWith(leadingHttpTripleSlashDot)) {
+            String domain = url.substring(leadingHttpTripleSlashDot.length() - 1);
+            url = "http://" + url.substring(leadingHttpTripleSlashDot.length());
+            value = appendDomain(value, domain);
+        }
+        return new UrlValue(url, value);
     }
 
     private native void nativeSetShouldAcceptCookies(boolean accept);

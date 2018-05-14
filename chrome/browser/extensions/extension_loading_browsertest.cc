@@ -12,7 +12,6 @@
 #include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/test_extension_dir.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -23,6 +22,7 @@
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/test/extension_test_message_listener.h"
+#include "extensions/test/test_extension_dir.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -87,7 +87,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
   // Upgrade the extension.
   new_tab_extension = UpdateExtension(
       new_tab_extension->id(), extension_dir.Pack(), 0 /*expected upgrade*/);
-  EXPECT_THAT(new_tab_extension->version()->components(),
+  EXPECT_THAT(new_tab_extension->version().components(),
               testing::ElementsAre(2));
 
   // The extension takes a couple round-trips to the renderer in order
@@ -159,7 +159,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
 
   EXPECT_TRUE(new_tab_extension->permissions_data()->HasAPIPermission(
       APIPermission::kNewTabPageOverride));
-  EXPECT_THAT(new_tab_extension->version()->components(),
+  EXPECT_THAT(new_tab_extension->version().components(),
               testing::ElementsAre(2));
 }
 

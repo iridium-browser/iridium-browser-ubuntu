@@ -12,14 +12,13 @@
 #include "base/run_loop.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
-#include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
-#include "chrome/browser/extensions/extension_action_test_util.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/browser_action_test_util.h"
 #include "chrome/browser/ui/extensions/extension_action_view_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
@@ -264,8 +263,10 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
 
   // Load an extension with a page action.
   scoped_refptr<const extensions::Extension> page_action_extension =
-      extensions::extension_action_test_util::CreateActionExtension(
-          "page action", extensions::extension_action_test_util::PAGE_ACTION);
+      extensions::ExtensionBuilder("page action")
+          .SetAction(extensions::ExtensionBuilder::ActionType::PAGE_ACTION)
+          .SetLocation(extensions::Manifest::INTERNAL)
+          .Build();
   extension_service()->AddExtension(page_action_extension.get());
 
   // Verify that the extension was added at the last index.
@@ -516,7 +517,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
   EXPECT_TRUE(browser_actions_bar()->HasPopup());
   // Cleanup the popup (to avoid having windows open at tear down).
   browser_actions_bar()->HidePopup();
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_FALSE(browser_actions_bar()->HasPopup());
 }
 
@@ -525,16 +526,22 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, RemovePoppedOutAction) {
   // First, load up three separate extensions and reduce the visible count to
   // one (so that two are in the overflow).
   scoped_refptr<const extensions::Extension> extension1 =
-      extensions::extension_action_test_util::CreateActionExtension(
-          "extension1", extensions::extension_action_test_util::BROWSER_ACTION);
+      extensions::ExtensionBuilder("extension1")
+          .SetAction(extensions::ExtensionBuilder::ActionType::BROWSER_ACTION)
+          .SetLocation(extensions::Manifest::INTERNAL)
+          .Build();
   extension_service()->AddExtension(extension1.get());
   scoped_refptr<const extensions::Extension> extension2 =
-      extensions::extension_action_test_util::CreateActionExtension(
-          "extension2", extensions::extension_action_test_util::BROWSER_ACTION);
+      extensions::ExtensionBuilder("extension2")
+          .SetAction(extensions::ExtensionBuilder::ActionType::BROWSER_ACTION)
+          .SetLocation(extensions::Manifest::INTERNAL)
+          .Build();
   extension_service()->AddExtension(extension2.get());
   scoped_refptr<const extensions::Extension> extension3 =
-      extensions::extension_action_test_util::CreateActionExtension(
-          "extension3", extensions::extension_action_test_util::BROWSER_ACTION);
+      extensions::ExtensionBuilder("extension3")
+          .SetAction(extensions::ExtensionBuilder::ActionType::BROWSER_ACTION)
+          .SetLocation(extensions::Manifest::INTERNAL)
+          .Build();
   extension_service()->AddExtension(extension3.get());
 
   toolbar_model()->SetVisibleIconCount(1);
@@ -543,7 +550,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, RemovePoppedOutAction) {
   EXPECT_EQ(3, browser_actions_bar()->NumberOfBrowserActions());
 
   // Pop out Extension 3 (index 3).
-  base::Closure closure = base::Bind(&base::DoNothing);
+  base::Closure closure = base::DoNothing();
   ToolbarActionsBar* toolbar_actions_bar =
       browser()->window()->GetToolbarActionsBar();
   EXPECT_EQ(extension3->id(), toolbar_actions_bar->GetActions()[2]->GetId());

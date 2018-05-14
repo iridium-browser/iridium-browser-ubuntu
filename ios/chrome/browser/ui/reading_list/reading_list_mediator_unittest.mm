@@ -4,10 +4,10 @@
 
 #import "ios/chrome/browser/ui/reading_list/reading_list_mediator.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/strings/sys_string_conversions.h"
 #include "base/test/simple_test_clock.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "components/favicon/core/large_icon_service.h"
 #include "components/favicon/core/test/mock_favicon_service.h"
 #include "components/reading_list/core/reading_list_model_impl.h"
@@ -31,9 +31,9 @@ class ReadingListMediatorTest : public PlatformTest {
  public:
   ReadingListMediatorTest() {
     std::unique_ptr<base::SimpleTestClock> clock =
-        base::MakeUnique<base::SimpleTestClock>();
+        std::make_unique<base::SimpleTestClock>();
     clock_ = clock.get();
-    model_ = base::MakeUnique<ReadingListModelImpl>(nullptr, nullptr,
+    model_ = std::make_unique<ReadingListModelImpl>(nullptr, nullptr,
                                                     std::move(clock));
     EXPECT_CALL(mock_favicon_service_,
                 GetLargestRawFaviconForPageURL(_, _, _, _, _))
@@ -58,8 +58,7 @@ class ReadingListMediatorTest : public PlatformTest {
     model_->SetReadStatus(GURL("http://chromium.org/read2"), true);
 
     large_icon_service_.reset(new favicon::LargeIconService(
-        &mock_favicon_service_, base::ThreadTaskRunnerHandle::Get(),
-        /*image_fetcher=*/nullptr));
+        &mock_favicon_service_, /*image_fetcher=*/nullptr));
 
     mediator_ =
         [[ReadingListMediator alloc] initWithModel:model_.get()

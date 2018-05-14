@@ -7,18 +7,19 @@
 
 #include <cmath>
 
+// Clients of this interface shouldn't depend on lots of heap internals.
+// Do not include anything from src/heap other than src/heap/heap.h here!
+#include "src/heap/heap.h"
+
 #include "src/base/platform/platform.h"
 #include "src/counters-inl.h"
-#include "src/feedback-vector-inl.h"
-#include "src/heap/heap.h"
+#include "src/feedback-vector.h"
+// TODO(mstarzinger): There are 3 more includes to remove in order to no longer
+// leak heap internals to users of this interface!
 #include "src/heap/incremental-marking-inl.h"
-#include "src/heap/mark-compact.h"
-#include "src/heap/object-stats.h"
-#include "src/heap/remembered-set.h"
 #include "src/heap/spaces-inl.h"
 #include "src/heap/store-buffer.h"
 #include "src/isolate.h"
-#include "src/list-inl.h"
 #include "src/log.h"
 #include "src/msan.h"
 #include "src/objects-inl.h"
@@ -26,6 +27,7 @@
 #include "src/objects/script-inl.h"
 #include "src/profiler/heap-profiler.h"
 #include "src/string-hasher.h"
+#include "src/zone/zone-list-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -50,6 +52,13 @@ ROOT_LIST(ROOT_ACCESSOR)
 STRUCT_LIST(STRUCT_MAP_ACCESSOR)
 #undef STRUCT_MAP_ACCESSOR
 
+#define DATA_HANDLER_MAP_ACCESSOR(NAME, Name, Size, name)  \
+  Map* Heap::name##_map() {                                \
+    return Map::cast(roots_[k##Name##Size##MapRootIndex]); \
+  }
+DATA_HANDLER_LIST(DATA_HANDLER_MAP_ACCESSOR)
+#undef DATA_HANDLER_MAP_ACCESSOR
+
 #define STRING_ACCESSOR(name, str) \
   String* Heap::name() { return String::cast(roots_[k##name##RootIndex]); }
 INTERNALIZED_STRING_LIST(STRING_ACCESSOR)
@@ -65,6 +74,13 @@ PRIVATE_SYMBOL_LIST(SYMBOL_ACCESSOR)
 PUBLIC_SYMBOL_LIST(SYMBOL_ACCESSOR)
 WELL_KNOWN_SYMBOL_LIST(SYMBOL_ACCESSOR)
 #undef SYMBOL_ACCESSOR
+
+#define ACCESSOR_INFO_ACCESSOR(accessor_name, AccessorName)                \
+  AccessorInfo* Heap::accessor_name##_accessor() {                         \
+    return AccessorInfo::cast(roots_[k##AccessorName##AccessorRootIndex]); \
+  }
+ACCESSOR_INFO_LIST(ACCESSOR_INFO_ACCESSOR)
+#undef ACCESSOR_INFO_ACCESSOR
 
 #define ROOT_ACCESSOR(type, name, camel_name)                                 \
   void Heap::set_##name(type* value) {                                        \
@@ -217,8 +233,16 @@ AllocationResult Heap::CopyFixedDoubleArray(FixedDoubleArray* src) {
   return CopyFixedDoubleArrayWithMap(src, src->map());
 }
 
+AllocationResult Heap::AllocateFixedArrayWithMap(RootListIndex map_root_index,
+                                                 int length,
+                                                 PretenureFlag pretenure) {
+  return AllocateFixedArrayWithFiller(map_root_index, length, pretenure,
+                                      undefined_value());
+}
+
 AllocationResult Heap::AllocateFixedArray(int length, PretenureFlag pretenure) {
-  return AllocateFixedArrayWithFiller(length, pretenure, undefined_value());
+  return AllocateFixedArrayWithFiller(Heap::kFixedArrayMapRootIndex, length,
+                                      pretenure, undefined_value());
 }
 
 AllocationResult Heap::AllocateRaw(int size_in_bytes, AllocationSpace space,
@@ -226,11 +250,14 @@ AllocationResult Heap::AllocateRaw(int size_in_bytes, AllocationSpace space,
   DCHECK(AllowHandleAllocation::IsAllowed());
   DCHECK(AllowHeapAllocation::IsAllowed());
   DCHECK(gc_state_ == NOT_IN_GC);
-#ifdef DEBUG
-  if (FLAG_gc_interval >= 0 && !always_allocate() &&
-      Heap::allocation_timeout_-- <= 0) {
-    return AllocationResult::Retry(space);
+#ifdef V8_ENABLE_ALLOCATION_TIMEOUT
+  if (FLAG_random_gc_interval > 0 || FLAG_gc_interval >= 0) {
+    if (!always_allocate() && Heap::allocation_timeout_-- <= 0) {
+      return AllocationResult::Retry(space);
+    }
   }
+#endif
+#ifdef DEBUG
   isolate_->counters()->objs_since_last_full()->Increment();
   isolate_->counters()->objs_since_last_young()->Increment();
 #endif
@@ -297,10 +324,10 @@ void Heap::OnAllocationEvent(HeapObject* object, int size_in_bytes) {
     if (allocations_count_ % FLAG_dump_allocations_digest_at_alloc == 0) {
       PrintAllocationsHash();
     }
-  }
-
-  if (FLAG_trace_allocation_stack_interval > 0) {
-    if (!FLAG_verify_predictable) ++allocations_count_;
+  } else if (FLAG_fuzzer_gc_analysis) {
+    ++allocations_count_;
+  } else if (FLAG_trace_allocation_stack_interval > 0) {
+    ++allocations_count_;
     if (allocations_count_ % FLAG_trace_allocation_stack_interval == 0) {
       isolate()->PrintStack(stdout, Isolate::kPrintStackConcise);
     }
@@ -332,9 +359,10 @@ void Heap::OnMoveEvent(HeapObject* target, HeapObject* source,
     if (allocations_count_ % FLAG_dump_allocations_digest_at_alloc == 0) {
       PrintAllocationsHash();
     }
+  } else if (FLAG_fuzzer_gc_analysis) {
+    ++allocations_count_;
   }
 }
-
 
 void Heap::UpdateAllocationsHash(HeapObject* object) {
   Address object_address = object->address();
@@ -373,17 +401,13 @@ void Heap::FinalizeExternalString(String* string) {
           kHeapObjectTag);
 
   // Dispose of the C++ object if it has not already been disposed.
-  if (*resource_addr != NULL) {
+  if (*resource_addr != nullptr) {
     (*resource_addr)->Dispose();
-    *resource_addr = NULL;
+    *resource_addr = nullptr;
   }
 }
 
 Address Heap::NewSpaceTop() { return new_space_->top(); }
-
-bool Heap::DeoptMaybeTenuredAllocationSites() {
-  return new_space_->IsAtMaximumCapacity() && maximum_size_scavenges_ == 0;
-}
 
 bool Heap::InNewSpace(Object* object) {
   // Inlined check from NewSpace::Contains.
@@ -426,11 +450,11 @@ bool Heap::ShouldBePromoted(Address old_address) {
          (!page->ContainsLimit(age_mark) || old_address < age_mark);
 }
 
-void Heap::RecordWrite(Object* object, int offset, Object* o) {
-  if (!InNewSpace(o) || !object->IsHeapObject() || InNewSpace(object)) {
+void Heap::RecordWrite(Object* object, Object** slot, Object* value) {
+  if (!InNewSpace(value) || !object->IsHeapObject() || InNewSpace(object)) {
     return;
   }
-  store_buffer()->InsertEntry(HeapObject::cast(object)->address() + offset);
+  store_buffer()->InsertEntry(reinterpret_cast<Address>(slot));
 }
 
 void Heap::RecordWriteIntoCode(Code* host, RelocInfo* rinfo, Object* value) {
@@ -518,9 +542,9 @@ AllocationMemento* Heap::FindAllocationMemento(Map* map, HeapObject* object) {
   UNREACHABLE();
 }
 
-template <Heap::UpdateAllocationSiteMode mode>
 void Heap::UpdateAllocationSite(Map* map, HeapObject* object,
-                                base::HashMap* pretenuring_feedback) {
+                                PretenuringFeedbackMap* pretenuring_feedback) {
+  DCHECK_NE(pretenuring_feedback, &global_pretenuring_feedback_);
   DCHECK(InFromSpace(object) ||
          (InToSpace(object) &&
           Page::FromAddress(object->address())
@@ -535,37 +559,11 @@ void Heap::UpdateAllocationSite(Map* map, HeapObject* object,
       FindAllocationMemento<kForGC>(map, object);
   if (memento_candidate == nullptr) return;
 
-  if (mode == kGlobal) {
-    DCHECK_EQ(pretenuring_feedback, global_pretenuring_feedback_);
-    // Entering global pretenuring feedback is only used in the scavenger, where
-    // we are allowed to actually touch the allocation site.
-    if (!memento_candidate->IsValid()) return;
-    AllocationSite* site = memento_candidate->GetAllocationSite();
-    DCHECK(!site->IsZombie());
-    // For inserting in the global pretenuring storage we need to first
-    // increment the memento found count on the allocation site.
-    if (site->IncrementMementoFoundCount()) {
-      global_pretenuring_feedback_->LookupOrInsert(site,
-                                                   ObjectHash(site->address()));
-    }
-  } else {
-    DCHECK_EQ(mode, kCached);
-    DCHECK_NE(pretenuring_feedback, global_pretenuring_feedback_);
-    // Entering cached feedback is used in the parallel case. We are not allowed
-    // to dereference the allocation site and rather have to postpone all checks
-    // till actually merging the data.
-    Address key = memento_candidate->GetAllocationSiteUnchecked();
-    base::HashMap::Entry* e =
-        pretenuring_feedback->LookupOrInsert(key, ObjectHash(key));
-    DCHECK(e != nullptr);
-    (*bit_cast<intptr_t*>(&e->value))++;
-  }
-}
-
-
-void Heap::RemoveAllocationSitePretenuringFeedback(AllocationSite* site) {
-  global_pretenuring_feedback_->Remove(
-      site, static_cast<uint32_t>(bit_cast<uintptr_t>(site)));
+  // Entering cached feedback is used in the parallel case. We are not allowed
+  // to dereference the allocation site and rather have to postpone all checks
+  // till actually merging the data.
+  Address key = memento_candidate->GetAllocationSiteUnchecked();
+  (*pretenuring_feedback)[reinterpret_cast<AllocationSite*>(key)]++;
 }
 
 Isolate* Heap::isolate() {
@@ -574,70 +572,13 @@ Isolate* Heap::isolate() {
       reinterpret_cast<size_t>(reinterpret_cast<Isolate*>(16)->heap()) + 16);
 }
 
-void Heap::ExternalStringTable::PromoteAllNewSpaceStrings() {
-  old_space_strings_.AddAll(new_space_strings_);
-  new_space_strings_.Clear();
-}
-
 void Heap::ExternalStringTable::AddString(String* string) {
   DCHECK(string->IsExternalString());
   if (heap_->InNewSpace(string)) {
-    new_space_strings_.Add(string);
+    new_space_strings_.push_back(string);
   } else {
-    old_space_strings_.Add(string);
+    old_space_strings_.push_back(string);
   }
-}
-
-void Heap::ExternalStringTable::IterateNewSpaceStrings(RootVisitor* v) {
-  if (!new_space_strings_.is_empty()) {
-    Object** start = &new_space_strings_[0];
-    v->VisitRootPointers(Root::kExternalStringsTable, start,
-                         start + new_space_strings_.length());
-  }
-}
-
-void Heap::ExternalStringTable::IterateAll(RootVisitor* v) {
-  IterateNewSpaceStrings(v);
-  if (!old_space_strings_.is_empty()) {
-    Object** start = &old_space_strings_[0];
-    v->VisitRootPointers(Root::kExternalStringsTable, start,
-                         start + old_space_strings_.length());
-  }
-}
-
-
-// Verify() is inline to avoid ifdef-s around its calls in release
-// mode.
-void Heap::ExternalStringTable::Verify() {
-#ifdef DEBUG
-  for (int i = 0; i < new_space_strings_.length(); ++i) {
-    Object* obj = Object::cast(new_space_strings_[i]);
-    DCHECK(heap_->InNewSpace(obj));
-    DCHECK(!obj->IsTheHole(heap_->isolate()));
-  }
-  for (int i = 0; i < old_space_strings_.length(); ++i) {
-    Object* obj = Object::cast(old_space_strings_[i]);
-    DCHECK(!heap_->InNewSpace(obj));
-    DCHECK(!obj->IsTheHole(heap_->isolate()));
-  }
-#endif
-}
-
-
-void Heap::ExternalStringTable::AddOldString(String* string) {
-  DCHECK(string->IsExternalString());
-  DCHECK(!heap_->InNewSpace(string));
-  old_space_strings_.Add(string);
-}
-
-
-void Heap::ExternalStringTable::ShrinkNewStrings(int position) {
-  new_space_strings_.Rewind(position);
-#ifdef VERIFY_HEAP
-  if (FLAG_verify_heap) {
-    Verify();
-  }
-#endif
 }
 
 Oddball* Heap::ToBoolean(bool condition) {
@@ -662,68 +603,10 @@ int Heap::NextScriptId() {
   return last_id;
 }
 
-void Heap::SetArgumentsAdaptorDeoptPCOffset(int pc_offset) {
-  DCHECK(arguments_adaptor_deopt_pc_offset() == Smi::kZero);
-  set_arguments_adaptor_deopt_pc_offset(Smi::FromInt(pc_offset));
-}
-
-void Heap::SetConstructStubCreateDeoptPCOffset(int pc_offset) {
-  // TODO(tebbi): Remove second half of DCHECK once
-  // FLAG_harmony_restrict_constructor_return is gone.
-  DCHECK(construct_stub_create_deopt_pc_offset() == Smi::kZero ||
-         construct_stub_create_deopt_pc_offset() == Smi::FromInt(pc_offset));
-  set_construct_stub_create_deopt_pc_offset(Smi::FromInt(pc_offset));
-}
-
-void Heap::SetConstructStubInvokeDeoptPCOffset(int pc_offset) {
-  // TODO(tebbi): Remove second half of DCHECK once
-  // FLAG_harmony_restrict_constructor_return is gone.
-  DCHECK(construct_stub_invoke_deopt_pc_offset() == Smi::kZero ||
-         construct_stub_invoke_deopt_pc_offset() == Smi::FromInt(pc_offset));
-  set_construct_stub_invoke_deopt_pc_offset(Smi::FromInt(pc_offset));
-}
-
-void Heap::SetGetterStubDeoptPCOffset(int pc_offset) {
-  DCHECK(getter_stub_deopt_pc_offset() == Smi::kZero);
-  set_getter_stub_deopt_pc_offset(Smi::FromInt(pc_offset));
-}
-
-void Heap::SetSetterStubDeoptPCOffset(int pc_offset) {
-  DCHECK(setter_stub_deopt_pc_offset() == Smi::kZero);
-  set_setter_stub_deopt_pc_offset(Smi::FromInt(pc_offset));
-}
-
-void Heap::SetInterpreterEntryReturnPCOffset(int pc_offset) {
-  DCHECK(interpreter_entry_return_pc_offset() == Smi::kZero);
-  set_interpreter_entry_return_pc_offset(Smi::FromInt(pc_offset));
-}
-
 int Heap::GetNextTemplateSerialNumber() {
   int next_serial_number = next_template_serial_number()->value() + 1;
   set_next_template_serial_number(Smi::FromInt(next_serial_number));
   return next_serial_number;
-}
-
-void Heap::SetSerializedTemplates(FixedArray* templates) {
-  DCHECK_EQ(empty_fixed_array(), serialized_templates());
-  DCHECK(isolate()->serializer_enabled());
-  set_serialized_templates(templates);
-}
-
-void Heap::SetSerializedGlobalProxySizes(FixedArray* sizes) {
-  DCHECK_EQ(empty_fixed_array(), serialized_global_proxy_sizes());
-  DCHECK(isolate()->serializer_enabled());
-  set_serialized_global_proxy_sizes(sizes);
-}
-
-void Heap::CreateObjectStats() {
-  if (V8_LIKELY(FLAG_gc_stats == 0)) return;
-  if (!live_object_stats_) {
-    live_object_stats_ = new ObjectStats(this);
-  }
-  if (!dead_object_stats_) {
-    dead_object_stats_ = new ObjectStats(this);
-  }
 }
 
 AlwaysAllocateScope::AlwaysAllocateScope(Isolate* isolate)
@@ -733,6 +616,56 @@ AlwaysAllocateScope::AlwaysAllocateScope(Isolate* isolate)
 
 AlwaysAllocateScope::~AlwaysAllocateScope() {
   heap_->always_allocate_scope_count_.Decrement(1);
+}
+
+CodeSpaceMemoryModificationScope::CodeSpaceMemoryModificationScope(Heap* heap)
+    : heap_(heap) {
+  if (heap_->write_protect_code_memory()) {
+    heap_->increment_code_space_memory_modification_scope_depth();
+    heap_->code_space()->SetReadAndWritable();
+    LargePage* page = heap_->lo_space()->first_page();
+    while (page != nullptr) {
+      if (page->IsFlagSet(MemoryChunk::IS_EXECUTABLE)) {
+        CHECK(heap_->memory_allocator()->IsMemoryChunkExecutable(page));
+        page->SetReadAndWritable();
+      }
+      page = page->next_page();
+    }
+  }
+}
+
+CodeSpaceMemoryModificationScope::~CodeSpaceMemoryModificationScope() {
+  if (heap_->write_protect_code_memory()) {
+    heap_->decrement_code_space_memory_modification_scope_depth();
+    heap_->code_space()->SetReadAndExecutable();
+    LargePage* page = heap_->lo_space()->first_page();
+    while (page != nullptr) {
+      if (page->IsFlagSet(MemoryChunk::IS_EXECUTABLE)) {
+        CHECK(heap_->memory_allocator()->IsMemoryChunkExecutable(page));
+        page->SetReadAndExecutable();
+      }
+      page = page->next_page();
+    }
+  }
+}
+
+CodePageMemoryModificationScope::CodePageMemoryModificationScope(
+    MemoryChunk* chunk)
+    : chunk_(chunk),
+      scope_active_(chunk_->heap()->write_protect_code_memory() &&
+                    chunk_->IsFlagSet(MemoryChunk::IS_EXECUTABLE)) {
+  if (scope_active_) {
+    DCHECK(chunk_->owner()->identity() == CODE_SPACE ||
+           (chunk_->owner()->identity() == LO_SPACE &&
+            chunk_->IsFlagSet(MemoryChunk::IS_EXECUTABLE)));
+    chunk_->SetReadAndWritable();
+  }
+}
+
+CodePageMemoryModificationScope::~CodePageMemoryModificationScope() {
+  if (scope_active_) {
+    chunk_->SetReadAndExecutable();
+  }
 }
 
 }  // namespace internal

@@ -7,6 +7,7 @@
 
 #include "src/compiler/types.h"
 #include "src/date.h"
+#include "src/objects/code.h"
 #include "src/objects/string.h"
 
 namespace v8 {
@@ -35,6 +36,8 @@ class TypeCache final {
   Type* const kUint32 = Type::Unsigned32();
   Type* const kFloat32 = Type::Number();
   Type* const kFloat64 = Type::Number();
+  Type* const kBigInt64 = Type::BigInt();
+  Type* const kBigUint64 = Type::BigInt();
 
   Type* const kHoleySmi =
       Type::Union(Type::SignedSmall(), Type::Hole(), zone());
@@ -43,6 +46,8 @@ class TypeCache final {
   Type* const kSingletonOne = CreateRange(1.0, 1.0);
   Type* const kSingletonTen = CreateRange(10.0, 10.0);
   Type* const kSingletonMinusOne = CreateRange(-1.0, -1.0);
+  Type* const kZeroOrMinusZero =
+      Type::Union(kSingletonZero, Type::MinusZero(), zone());
   Type* const kZeroOrUndefined =
       Type::Union(kSingletonZero, Type::Undefined(), zone());
   Type* const kTenOrUndefined =
@@ -92,8 +97,8 @@ class TypeCache final {
   // [0, kMaxUInt32].
   Type* const kJSArrayLengthType = Type::Unsigned32();
 
-  // The JSTyped::length property always contains a tagged number in the range
-  // [0, kMaxSmiValue].
+  // The JSTypedArray::length property always contains a tagged number in the
+  // range [0, kMaxSmiValue].
   Type* const kJSTypedArrayLengthType = Type::UnsignedSmall();
 
   // The String::length property always contains a smi in the range

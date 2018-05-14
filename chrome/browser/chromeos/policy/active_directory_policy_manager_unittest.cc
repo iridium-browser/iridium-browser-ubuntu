@@ -10,7 +10,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -28,22 +27,25 @@ class TestAuthPolicyClient : public chromeos::AuthPolicyClient {
  public:
   void Init(dbus::Bus* bus) override { NOTIMPLEMENTED(); }
 
-  void JoinAdDomain(const std::string& machine_name,
-                    const std::string& user_principal_name,
+  void JoinAdDomain(const authpolicy::JoinDomainRequest& request,
                     int password_fd,
                     JoinCallback callback) override {
     NOTIMPLEMENTED();
   }
 
-  void AuthenticateUser(const std::string& user_principal_name,
-                        const std::string& object_guid,
+  void AuthenticateUser(const authpolicy::AuthenticateUserRequest& request,
                         int password_fd,
                         AuthCallback callback) override {
     NOTIMPLEMENTED();
   }
 
-  void GetUserStatus(const std::string& object_guid,
+  void GetUserStatus(const authpolicy::GetUserStatusRequest& request,
                      GetUserStatusCallback callback) override {
+    NOTIMPLEMENTED();
+  }
+
+  void GetUserKerberosFiles(const std::string& object_guid,
+                            GetUserKerberosFilesCallback callback) override {
     NOTIMPLEMENTED();
   }
 
@@ -55,15 +57,23 @@ class TestAuthPolicyClient : public chromeos::AuthPolicyClient {
                          RefreshPolicyCallback callback) override {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback),
-                                  refresh_user_policy_callback_success_));
+                                  refresh_user_policy_callback_error_));
   }
 
-  void SetRefreshUserPolicyCallbackSuccess(bool success) {
-    refresh_user_policy_callback_success_ = success;
+  void ConnectToSignal(
+      const std::string& signal_name,
+      dbus::ObjectProxy::SignalCallback signal_callback,
+      dbus::ObjectProxy::OnConnectedCallback on_connected_callback) override {
+    NOTIMPLEMENTED();
+  }
+
+  void SetRefreshUserPolicyCallbackError(authpolicy::ErrorType error) {
+    refresh_user_policy_callback_error_ = error;
   }
 
  private:
-  bool refresh_user_policy_callback_success_ = true;
+  authpolicy::ErrorType refresh_user_policy_callback_error_ =
+      authpolicy::ERROR_NONE;
 };
 
 }  // namespace
@@ -76,7 +86,7 @@ namespace policy {
 class ActiveDirectoryPolicyManagerTest : public testing::Test {
  public:
   ActiveDirectoryPolicyManagerTest() {
-    auto mock_client_unique_ptr = base::MakeUnique<TestAuthPolicyClient>();
+    auto mock_client_unique_ptr = std::make_unique<TestAuthPolicyClient>();
     mock_client_ = mock_client_unique_ptr.get();
     chromeos::DBusThreadManager::GetSetterForTesting()->SetAuthPolicyClient(
         std::move(mock_client_unique_ptr));
@@ -118,7 +128,7 @@ class ActiveDirectoryPolicyManagerTest : public testing::Test {
 
   // To be handed over to ActiveDirectoryPolicyManager ...
   std::unique_ptr<MockCloudPolicyStore> mock_store_unique_ptr_{
-      base::MakeUnique<MockCloudPolicyStore>()};
+      std::make_unique<MockCloudPolicyStore>()};
 
   // ... but keeping a non-owned pointer.
   MockCloudPolicyStore* mock_store_{mock_store_unique_ptr_.get()};
@@ -144,7 +154,7 @@ TEST_F(ActiveDirectoryPolicyManagerTest, DontWait) {
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Configure mock policy fetch to fail.
-  mock_client_->SetRefreshUserPolicyCallbackSuccess(false);
+  mock_client_->SetRefreshUserPolicyCallbackError(authpolicy::ERROR_UNKNOWN);
 
   // Trigger mock policy fetch from authpolicyd.
   policy_manager_->Init(&schema_registry_);
@@ -175,13 +185,13 @@ TEST_F(ActiveDirectoryPolicyManagerTest,
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Configure mock policy fetch to succeed.
-  mock_client_->SetRefreshUserPolicyCallbackSuccess(true);
+  mock_client_->SetRefreshUserPolicyCallbackError(authpolicy::ERROR_NONE);
 
   // Trigger mock policy fetch from authpolicyd.
   policy_manager_->Init(&schema_registry_);
 
   // Simulate successful store load.
-  mock_store_->policy_ = base::MakeUnique<enterprise_management::PolicyData>();
+  mock_store_->policy_ = std::make_unique<enterprise_management::PolicyData>();
   mock_store_->NotifyStoreLoaded();
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
@@ -205,13 +215,13 @@ TEST_F(ActiveDirectoryPolicyManagerTest,
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Configure mock policy fetch to succeed.
-  mock_client_->SetRefreshUserPolicyCallbackSuccess(true);
+  mock_client_->SetRefreshUserPolicyCallbackError(authpolicy::ERROR_NONE);
 
   // Trigger mock policy fetch from authpolicyd.
   policy_manager_->Init(&schema_registry_);
 
   // Simulate successful store load.
-  mock_store_->policy_ = base::MakeUnique<enterprise_management::PolicyData>();
+  mock_store_->policy_ = std::make_unique<enterprise_management::PolicyData>();
   mock_store_->NotifyStoreLoaded();
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
@@ -242,13 +252,13 @@ TEST_F(ActiveDirectoryPolicyManagerTest, WaitInfinite_LoadSuccess_FetchFail) {
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Configure mock policy fetch to fail.
-  mock_client_->SetRefreshUserPolicyCallbackSuccess(false);
+  mock_client_->SetRefreshUserPolicyCallbackError(authpolicy::ERROR_UNKNOWN);
 
   // Trigger mock policy fetch from authpolicyd.
   policy_manager_->Init(&schema_registry_);
 
   // Simulate successful store load.
-  mock_store_->policy_ = base::MakeUnique<enterprise_management::PolicyData>();
+  mock_store_->policy_ = std::make_unique<enterprise_management::PolicyData>();
   mock_store_->NotifyStoreLoaded();
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
@@ -277,13 +287,13 @@ TEST_F(ActiveDirectoryPolicyManagerTest, WaitFinite_LoadSuccess_FetchFail) {
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Configure mock policy fetch to fail.
-  mock_client_->SetRefreshUserPolicyCallbackSuccess(false);
+  mock_client_->SetRefreshUserPolicyCallbackError(authpolicy::ERROR_UNKNOWN);
 
   // Trigger mock policy fetch from authpolicyd.
   policy_manager_->Init(&schema_registry_);
 
   // Simulate successful store load.
-  mock_store_->policy_ = base::MakeUnique<enterprise_management::PolicyData>();
+  mock_store_->policy_ = std::make_unique<enterprise_management::PolicyData>();
   mock_store_->NotifyStoreLoaded();
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
@@ -311,7 +321,7 @@ TEST_F(ActiveDirectoryPolicyManagerTest, WaitFinite_FetchFail_LoadSuccess) {
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Configure mock policy fetch to fail.
-  mock_client_->SetRefreshUserPolicyCallbackSuccess(false);
+  mock_client_->SetRefreshUserPolicyCallbackError(authpolicy::ERROR_UNKNOWN);
 
   // Trigger mock policy fetch from authpolicyd.
   policy_manager_->Init(&schema_registry_);
@@ -321,7 +331,7 @@ TEST_F(ActiveDirectoryPolicyManagerTest, WaitFinite_FetchFail_LoadSuccess) {
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Simulate successful store load.
-  mock_store_->policy_ = base::MakeUnique<enterprise_management::PolicyData>();
+  mock_store_->policy_ = std::make_unique<enterprise_management::PolicyData>();
   mock_store_->NotifyStoreLoaded();
   EXPECT_TRUE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 }
@@ -337,7 +347,7 @@ TEST_F(ActiveDirectoryPolicyManagerTest, WaitFinite_LoadFail_FetchFail) {
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Configure mock policy fetch to fail.
-  mock_client_->SetRefreshUserPolicyCallbackSuccess(false);
+  mock_client_->SetRefreshUserPolicyCallbackError(authpolicy::ERROR_UNKNOWN);
 
   // Trigger mock policy fetch from authpolicyd.
   policy_manager_->Init(&schema_registry_);
@@ -355,7 +365,7 @@ TEST_F(ActiveDirectoryPolicyManagerTest, WaitFinite_LoadFail_FetchFail) {
   ExpectSessionExited();
 
   // Simulate successful store load.
-  mock_store_->policy_ = base::MakeUnique<enterprise_management::PolicyData>();
+  mock_store_->policy_ = std::make_unique<enterprise_management::PolicyData>();
   mock_store_->NotifyStoreLoaded();
   EXPECT_TRUE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 }
@@ -372,13 +382,13 @@ TEST_F(ActiveDirectoryPolicyManagerTest, WaitFinite_LoadSuccess_FetchTimeout) {
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Configure mock policy fetch to fail.
-  mock_client_->SetRefreshUserPolicyCallbackSuccess(false);
+  mock_client_->SetRefreshUserPolicyCallbackError(authpolicy::ERROR_UNKNOWN);
 
   // Trigger mock policy fetch from authpolicyd.
   policy_manager_->Init(&schema_registry_);
 
   // Simulate successful store load.
-  mock_store_->policy_ = base::MakeUnique<enterprise_management::PolicyData>();
+  mock_store_->policy_ = std::make_unique<enterprise_management::PolicyData>();
   mock_store_->NotifyStoreLoaded();
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
@@ -406,7 +416,7 @@ TEST_F(ActiveDirectoryPolicyManagerTest, WaitFinite_LoadTimeout_FetchTimeout) {
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Configure mock policy fetch to fail.
-  mock_client_->SetRefreshUserPolicyCallbackSuccess(false);
+  mock_client_->SetRefreshUserPolicyCallbackError(authpolicy::ERROR_UNKNOWN);
 
   // Trigger mock policy fetch from authpolicyd.
   policy_manager_->Init(&schema_registry_);
@@ -424,7 +434,7 @@ TEST_F(ActiveDirectoryPolicyManagerTest, WaitFinite_LoadTimeout_FetchTimeout) {
   EXPECT_FALSE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Simulate successful store load.
-  mock_store_->policy_ = base::MakeUnique<enterprise_management::PolicyData>();
+  mock_store_->policy_ = std::make_unique<enterprise_management::PolicyData>();
   mock_store_->NotifyStoreLoaded();
   EXPECT_TRUE(policy_manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 }

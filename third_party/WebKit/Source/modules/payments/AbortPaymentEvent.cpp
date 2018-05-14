@@ -31,7 +31,7 @@ AbortPaymentEvent* AbortPaymentEvent::Create(
                                wait_until_observer);
 }
 
-AbortPaymentEvent::~AbortPaymentEvent() {}
+AbortPaymentEvent::~AbortPaymentEvent() = default;
 
 const AtomicString& AbortPaymentEvent::InterfaceName() const {
   return EventNames::AbortPaymentEvent;
@@ -46,7 +46,7 @@ void AbortPaymentEvent::respondWith(ScriptState* script_state,
   }
 }
 
-DEFINE_TRACE(AbortPaymentEvent) {
+void AbortPaymentEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(observer_);
   ExtendableEvent::Trace(visitor);
 }

@@ -37,6 +37,7 @@
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/pairing_registry_delegate_win.h"
 #include "remoting/host/screen_resolution.h"
+#include "remoting/host/switches.h"
 #include "remoting/host/win/launch_process_with_token.h"
 #include "remoting/host/win/security_descriptor.h"
 #include "remoting/host/win/unprivileged_process_delegate.h"
@@ -64,8 +65,10 @@ class WtsTerminalMonitor;
 // The command line parameters that should be copied from the service's command
 // line to the host process.
 const char kEnableVp9SwitchName[] = "enable-vp9";
-const char* kCopiedSwitchNames[] =
-    { switches::kV, switches::kVModule, kEnableVp9SwitchName };
+const char kEnableH264SwitchName[] = "enable-h264";
+const char* kCopiedSwitchNames[] = {switches::kV, switches::kVModule,
+                                    kEnableVp9SwitchName,
+                                    kEnableH264SwitchName};
 
 class DaemonProcessWin : public DaemonProcess {
  public:
@@ -92,8 +95,7 @@ class DaemonProcessWin : public DaemonProcess {
       int terminal_id,
       const ScreenResolution& resolution,
       bool virtual_terminal) override;
-  void DoCrashNetworkProcess(
-      const tracked_objects::Location& location) override;
+  void DoCrashNetworkProcess(const base::Location& location) override;
   void LaunchNetworkProcess() override;
 
   // Changes the service start type to 'manual'.
@@ -198,8 +200,7 @@ std::unique_ptr<DesktopSession> DaemonProcessWin::DoCreateDesktopSession(
   }
 }
 
-void DaemonProcessWin::DoCrashNetworkProcess(
-    const tracked_objects::Location& location) {
+void DaemonProcessWin::DoCrashNetworkProcess(const base::Location& location) {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
   network_launcher_->Crash(location);

@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_WEBKIT_SOURCE_PLATFORM_SCHEDULER_TEST_TEST_TASK_QUEUE_H_
 #define THIRD_PARTY_WEBKIT_SOURCE_PLATFORM_SCHEDULER_TEST_TEST_TASK_QUEUE_H_
 
+#include "base/memory/weak_ptr.h"
 #include "platform/scheduler/base/task_queue.h"
 
 namespace blink {
@@ -12,10 +13,17 @@ namespace scheduler {
 
 class TestTaskQueue : public TaskQueue {
  public:
-  explicit TestTaskQueue(std::unique_ptr<internal::TaskQueueImpl> impl);
+  explicit TestTaskQueue(std::unique_ptr<internal::TaskQueueImpl> impl,
+                         const TaskQueue::Spec& spec);
   ~TestTaskQueue() override;
 
   using TaskQueue::GetTaskQueueImpl;
+
+  base::WeakPtr<TestTaskQueue> GetWeakPtr();
+
+ private:
+  // Used to ensure that task queue is deleted in tests.
+  base::WeakPtrFactory<TestTaskQueue> weak_factory_;
 };
 
 }  // namespace scheduler

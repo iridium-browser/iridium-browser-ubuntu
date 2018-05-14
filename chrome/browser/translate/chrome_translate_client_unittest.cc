@@ -15,17 +15,17 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/user_event_service_factory.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
-#include "components/metrics/proto/translate_event.pb.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/user_events/fake_user_event_service.h"
 #include "components/translate/core/common/language_detection_details.h"
 #include "content/public/browser/web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/metrics_proto/translate_event.pb.h"
 #include "url/gurl.h"
 
 std::unique_ptr<KeyedService> BuildFakeUserEventService(
     content::BrowserContext* context) {
-  return base::MakeUnique<syncer::FakeUserEventService>();
+  return std::make_unique<syncer::FakeUserEventService>();
 }
 
 metrics::TranslateEventProto BuildTranslateEventProto(
@@ -47,7 +47,7 @@ class ChromeTranslateClientTest : public ChromeRenderViewHostTestHarness {
         browser_sync::UserEventServiceFactory::GetInstance()
             ->SetTestingFactoryAndUse(browser_context(),
                                       &BuildFakeUserEventService));
-    scoped_feature_list_ = base::MakeUnique<base::test::ScopedFeatureList>();
+    scoped_feature_list_ = std::make_unique<base::test::ScopedFeatureList>();
     scoped_feature_list_->InitWithFeatures(
         {switches::kSyncUserLanguageDetectionEvents,
          switches::kSyncUserTranslationEvents},

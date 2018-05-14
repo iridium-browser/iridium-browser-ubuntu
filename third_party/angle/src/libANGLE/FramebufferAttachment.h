@@ -43,6 +43,12 @@ struct Format;
 class Renderbuffer;
 class Texture;
 
+enum class InitState
+{
+    MayNeedInit,
+    Initialized,
+};
+
 // FramebufferAttachment implements a GL framebuffer attachment.
 // Attachments are "light" containers, which store pointers to ref-counted GL objects.
 // We support GL texture (2D/3D/Cube/2D array) and renderbuffer object attachments.
@@ -97,7 +103,7 @@ class FramebufferAttachment final
     GLenum cubeMapFace() const;
     GLint mipLevel() const;
     GLint layer() const;
-    GLint getNumViews() const;
+    GLsizei getNumViews() const;
     GLenum getMultiviewLayout() const;
     GLint getBaseViewIndex() const;
     const std::vector<Offset> &getMultiviewViewportOffsets() const;
@@ -115,6 +121,9 @@ class FramebufferAttachment final
     Texture *getTexture() const;
     const egl::Surface *getSurface() const;
     FramebufferAttachmentObject *getResource() const;
+    InitState initState() const;
+    Error initializeContents(const Context *context);
+    void setInitState(InitState initState) const;
 
     // "T" must be static_castable from FramebufferAttachmentRenderTarget
     template <typename T>
@@ -129,7 +138,8 @@ class FramebufferAttachment final
     bool operator==(const FramebufferAttachment &other) const;
     bool operator!=(const FramebufferAttachment &other) const;
 
-    static const GLint kDefaultNumViews;
+    static std::vector<Offset> GetDefaultViewportOffsetVector();
+    static const GLsizei kDefaultNumViews;
     static const GLenum kDefaultMultiviewLayout;
     static const GLint kDefaultBaseViewIndex;
     static const GLint kDefaultViewportOffsets[2];
@@ -163,18 +173,18 @@ class FramebufferAttachment final
     GLenum mType;
     Target mTarget;
     FramebufferAttachmentObject *mResource;
-    GLint mNumViews;
+    GLsizei mNumViews;
     GLenum mMultiviewLayout;
     GLint mBaseViewIndex;
     std::vector<Offset> mViewportOffsets;
 };
 
 // A base class for objects that FBO Attachments may point to.
-class FramebufferAttachmentObject
+class FramebufferAttachmentObject : public angle::Subject
 {
   public:
-    FramebufferAttachmentObject() {}
-    virtual ~FramebufferAttachmentObject() {}
+    FramebufferAttachmentObject();
+    virtual ~FramebufferAttachmentObject();
 
     virtual Extents getAttachmentSize(const ImageIndex &imageIndex) const = 0;
     virtual const Format &getAttachmentFormat(GLenum binding,
@@ -185,17 +195,19 @@ class FramebufferAttachmentObject
     virtual void onDetach(const Context *context) = 0;
     virtual GLuint getId() const = 0;
 
+    // These are used for robust resource initialization.
+    virtual InitState initState(const ImageIndex &imageIndex) const = 0;
+    virtual void setInitState(const ImageIndex &imageIndex, InitState initState) = 0;
+
     Error getAttachmentRenderTarget(const Context *context,
                                     GLenum binding,
                                     const ImageIndex &imageIndex,
                                     rx::FramebufferAttachmentRenderTarget **rtOut) const;
 
-    angle::BroadcastChannel<> *getDirtyChannel();
+    Error initializeContents(const Context *context, const ImageIndex &imageIndex);
 
   protected:
     virtual rx::FramebufferAttachmentObjectImpl *getAttachmentImpl() const = 0;
-
-    angle::BroadcastChannel<> mDirtyChannel;
 };
 
 inline Extents FramebufferAttachment::getSize() const

@@ -4,6 +4,7 @@
 
 #include "components/ntp_snippets/offline_pages/recent_tab_suggestions_provider.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,8 @@ namespace ntp_snippets {
 
 namespace {
 
+const int64_t kSystemDownloadId = 0;
+
 OfflinePageItem CreateDummyRecentTab(int offline_id) {
   // This is used to assign unique tab IDs to pages.  Since offline IDs are
   // typically small integers like 1, 2, 3 etc, we start at 1001 to ensure that
@@ -67,6 +70,8 @@ OfflinePageItem CreateDummyRecentTab(int id, base::Time time) {
   return item;
 }
 
+void GetAllItemsDummyCallback(const std::vector<OfflineItem>& items) {}
+
 }  // namespace
 
 class RecentTabSuggestionsProviderTestNoLoad : public testing::Test {
@@ -78,7 +83,7 @@ class RecentTabSuggestionsProviderTestNoLoad : public testing::Test {
     RecentTabSuggestionsProvider::RegisterProfilePrefs(
         pref_service()->registry());
 
-    taco_ = base::MakeUnique<offline_pages::RequestCoordinatorStubTaco>();
+    taco_ = std::make_unique<offline_pages::RequestCoordinatorStubTaco>();
     taco_->CreateRequestCoordinator();
 
     ui_adapter_ = offline_pages::RecentTabsUIAdapterDelegate::
@@ -86,8 +91,11 @@ class RecentTabSuggestionsProviderTestNoLoad : public testing::Test {
     delegate_ =
         offline_pages::RecentTabsUIAdapterDelegate::FromDownloadUIAdapter(
             ui_adapter_);
-    provider_ = base::MakeUnique<RecentTabSuggestionsProvider>(
+    provider_ = std::make_unique<RecentTabSuggestionsProvider>(
         &observer_, ui_adapter_, pref_service());
+    // Force adapter to load its cache.
+    ui_adapter_->GetAllItems(base::BindOnce(&GetAllItemsDummyCallback));
+    provider_->FetchRecentTabs();
   }
 
   Category recent_tabs_category() {
@@ -118,7 +126,8 @@ class RecentTabSuggestionsProviderTestNoLoad : public testing::Test {
     RemoveTab(tab_id);
     ui_adapter_->OfflinePageDeleted(
         offline_pages::OfflinePageModel::DeletedPageInfo(
-            item.offline_id, item.client_id, "" /* request_origin */));
+            item.offline_id, kSystemDownloadId, item.client_id,
+            "" /* request_origin */));
   }
 
   std::set<std::string> ReadDismissedIDsFromPrefs() {
@@ -178,6 +187,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldConvertToSuggestions) {
   for (OfflinePageItem& recent_tab : recent_tabs_list) {
     AddTabAndOfflinePageToModel(recent_tab);
   }
+  task_runner()->RunUntilIdle();
 }
 
 TEST_F(RecentTabSuggestionsProviderTest, ShouldSortByCreationTime) {
@@ -195,6 +205,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldSortByCreationTime) {
                        ElementsAre(Property(&ContentSuggestion::url,
                                             GURL("http://dummy.com/1")))));
   AddTabAndOfflinePageToModel(CreateDummyRecentTab(1, now));
+  task_runner()->RunUntilIdle();
 
   EXPECT_CALL(
       *observer(),
@@ -204,6 +215,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldSortByCreationTime) {
               Property(&ContentSuggestion::url, GURL("http://dummy.com/1")),
               Property(&ContentSuggestion::url, GURL("http://dummy.com/2")))));
   AddTabAndOfflinePageToModel(CreateDummyRecentTab(2, yesterday));
+  task_runner()->RunUntilIdle();
 
   offline_pages[1].last_access_time =
       offline_pages[0].last_access_time + base::TimeDelta::FromHours(1);
@@ -217,6 +229,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldSortByCreationTime) {
               Property(&ContentSuggestion::url, GURL("http://dummy.com/1")),
               Property(&ContentSuggestion::url, GURL("http://dummy.com/2")))));
   AddTabAndOfflinePageToModel(CreateDummyRecentTab(3, tomorrow));
+  task_runner()->RunUntilIdle();
 }
 
 TEST_F(RecentTabSuggestionsProviderTest, ShouldDeliverCorrectCategoryInfo) {
@@ -233,6 +246,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldDismiss) {
   for (OfflinePageItem& recent_tab : recent_tabs_list) {
     AddTabAndOfflinePageToModel(recent_tab);
   }
+  task_runner()->RunUntilIdle();
 
   // Dismiss 2 and 3.
   EXPECT_CALL(*observer(), OnNewSuggestions(_, _, _)).Times(0);
@@ -250,6 +264,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldDismiss) {
               Property(&ContentSuggestion::url, GURL("http://dummy.com/4")))));
 
   AddTabAndOfflinePageToModel(CreateDummyRecentTab(4));
+  task_runner()->RunUntilIdle();
   Mock::VerifyAndClearExpectations(observer());
 
   // And appear in the dismissed suggestions.
@@ -257,6 +272,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldDismiss) {
   provider()->GetDismissedSuggestionsForDebugging(
       recent_tabs_category(),
       base::Bind(&CaptureDismissedSuggestions, &dismissed_suggestions));
+  task_runner()->RunUntilIdle();
   EXPECT_THAT(
       dismissed_suggestions,
       UnorderedElementsAre(
@@ -265,18 +281,21 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldDismiss) {
 
   // Clear dismissed suggestions.
   provider()->ClearDismissedSuggestionsForDebugging(recent_tabs_category());
+  task_runner()->RunUntilIdle();
 
   // They should be gone from the dismissed suggestions.
   dismissed_suggestions.clear();
   provider()->GetDismissedSuggestionsForDebugging(
       recent_tabs_category(),
       base::Bind(&CaptureDismissedSuggestions, &dismissed_suggestions));
+  task_runner()->RunUntilIdle();
   EXPECT_THAT(dismissed_suggestions, IsEmpty());
 
   // And appear in the reported suggestions for the category again.
   EXPECT_CALL(*observer(),
               OnNewSuggestions(_, recent_tabs_category(), SizeIs(5)));
   AddTabAndOfflinePageToModel(CreateDummyRecentTab(5));
+  task_runner()->RunUntilIdle();
   Mock::VerifyAndClearExpectations(observer());
 }
 
@@ -286,6 +305,7 @@ TEST_F(RecentTabSuggestionsProviderTest,
   std::vector<OfflinePageItem> offline_pages = CreateDummyRecentTabs({1, 2, 3});
   for (OfflinePageItem& recent_tab : offline_pages)
     AddTabAndOfflinePageToModel(recent_tab);
+  task_runner()->RunUntilIdle();
 
   // Invalidation of suggestion 2 should be forwarded.
   EXPECT_CALL(*observer(), OnSuggestionInvalidated(_, GetDummySuggestionId(2)));
@@ -297,6 +317,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldClearDismissedOnInvalidate) {
   std::vector<OfflinePageItem> offline_pages = CreateDummyRecentTabs({1, 2, 3});
   for (OfflinePageItem& recent_tab : offline_pages)
     AddTabAndOfflinePageToModel(recent_tab);
+  task_runner()->RunUntilIdle();
   EXPECT_THAT(ReadDismissedIDsFromPrefs(), IsEmpty());
 
   provider()->DismissSuggestion(GetDummySuggestionId(2));
@@ -311,6 +332,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldClearDismissedOnFetch) {
   std::vector<OfflinePageItem> offline_pages = CreateDummyRecentTabs({1, 2, 3});
   for (OfflinePageItem& recent_tab : offline_pages)
     AddTabAndOfflinePageToModel(recent_tab);
+  task_runner()->RunUntilIdle();
 
   provider()->DismissSuggestion(GetDummySuggestionId(2));
   provider()->DismissSuggestion(GetDummySuggestionId(3));
@@ -337,6 +359,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldNotShowSameUrlMutlipleTimes) {
 
   AddTabAndOfflinePageToModel(offline_pages[0]);
   AddTabAndOfflinePageToModel(offline_pages[1]);
+  task_runner()->RunUntilIdle();
   Mock::VerifyAndClearExpectations(observer());
   EXPECT_CALL(*observer(),
               OnNewSuggestions(
@@ -346,6 +369,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldNotShowSameUrlMutlipleTimes) {
                       Property(&ContentSuggestion::publish_date, tomorrow))));
 
   AddTabAndOfflinePageToModel(offline_pages[2]);
+  task_runner()->RunUntilIdle();
 }
 
 TEST_F(RecentTabSuggestionsProviderTest,
@@ -361,6 +385,7 @@ TEST_F(RecentTabSuggestionsProviderTest,
        ShouldInvalidateSuggestionWhenTabGone) {
   OfflinePageItem first_tab = CreateDummyRecentTab(1);
   AddTabAndOfflinePageToModel(first_tab);
+  task_runner()->RunUntilIdle();
   Mock::VerifyAndClearExpectations(observer());
 
   EXPECT_CALL(*observer(), OnSuggestionInvalidated(_, GetDummySuggestionId(1)))
@@ -391,6 +416,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldNotShowPagesWithoutTab) {
       first_tab.client_id));
   OfflinePageItem second_tab = CreateDummyRecentTab(2);
   AddTabAndOfflinePageToModel(second_tab);
+  task_runner()->RunUntilIdle();
 
   Mock::VerifyAndClearExpectations(observer());
 
@@ -410,6 +436,7 @@ TEST_F(RecentTabSuggestionsProviderTest, ShouldNotShowPagesWithoutTab) {
               Property(&ContentSuggestion::url, GURL("http://dummy.com/3")))));
 
   AddTabAndOfflinePageToModel(CreateDummyRecentTab(3));
+  task_runner()->RunUntilIdle();
 }
 
 // The following test uses a different fixture that does not automatically pump

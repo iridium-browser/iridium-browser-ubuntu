@@ -164,11 +164,12 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
   return base::mac::ObjCCastStrict<SessionIOS>(rootObject);
 }
 
-- (void)deleteLastSessionFileInDirectory:(NSString*)directory {
+- (void)deleteLastSessionFileInDirectory:(NSString*)directory
+                              completion:(base::OnceClosure)callback {
   NSString* sessionPath = [[self class] sessionPathForDirectory:directory];
-  _taskRunner->PostTask(
+  _taskRunner->PostTaskAndReply(
       FROM_HERE, base::BindBlockArc(^{
-        base::ThreadRestrictions::AssertIOAllowed();
+        base::AssertBlockingAllowed();
         NSFileManager* fileManager = [NSFileManager defaultManager];
         if (![fileManager fileExistsAtPath:sessionPath])
           return;
@@ -178,7 +179,8 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
           CHECK(false) << "Unable to delete session file: "
                        << base::SysNSStringToUTF8(sessionPath) << ": "
                        << base::SysNSStringToUTF8([error description]);
-      }));
+      }),
+      std::move(callback));
 }
 
 + (NSString*)sessionPathForDirectory:(NSString*)directory {
@@ -218,7 +220,7 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
 
 - (void)performSaveSessionData:(NSData*)sessionData
                    sessionPath:(NSString*)sessionPath {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   NSFileManager* fileManager = [NSFileManager defaultManager];
   NSString* directory = [sessionPath stringByDeletingLastPathComponent];

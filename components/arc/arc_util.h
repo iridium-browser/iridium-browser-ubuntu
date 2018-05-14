@@ -75,6 +75,13 @@ void SetArcAvailableCommandLineForTesting(base::CommandLine* command_line);
 // should also return true in that case.
 bool IsArcKioskMode();
 
+// Returns true if current user is a robot account user.
+// These are Public Session and ARC Kiosk users.
+// As it can return true only when user is already initialized, it implies
+// that ARC availability was checked before.
+// The check is basically IsArcKioskMode() | IsPublicSessionMode().
+bool IsRobotAccountMode();
+
 // Returns true if ARC is allowed for the given user. Note this should not be
 // used as a signal of whether ARC is allowed alone because it only considers
 // user meta data. e.g. a user could be allowed for ARC but if the user signs in
@@ -93,6 +100,7 @@ bool IsArcAppWindow(aura::Window* window);
 // Adjusts the amount of CPU the ARC instance is allowed to use. When
 // |do_restrict| is true, the limit is adjusted so ARC can only use tightly
 // restricted CPU resources.
+// TODO(yusukes): Use enum instead of bool.
 void SetArcCpuRestriction(bool do_restrict);
 
 }  // namespace arc

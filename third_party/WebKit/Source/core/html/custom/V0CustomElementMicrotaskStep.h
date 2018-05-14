@@ -31,28 +31,28 @@
 #ifndef V0CustomElementMicrotaskStep_h
 #define V0CustomElementMicrotaskStep_h
 
+#include "base/macros.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
 class V0CustomElementMicrotaskStep
     : public GarbageCollectedFinalized<V0CustomElementMicrotaskStep> {
-  WTF_MAKE_NONCOPYABLE(V0CustomElementMicrotaskStep);
-
  public:
-  V0CustomElementMicrotaskStep() {}
-  virtual ~V0CustomElementMicrotaskStep() {}
+  V0CustomElementMicrotaskStep() = default;
+  virtual ~V0CustomElementMicrotaskStep() = default;
 
   enum Result { kProcessing, kFinishedProcessing };
 
   virtual Result Process() = 0;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
 
 #if !defined(NDEBUG)
   virtual void Show(unsigned indent) = 0;
 #endif
+
+  DISALLOW_COPY_AND_ASSIGN(V0CustomElementMicrotaskStep);
 };
 
 }  // namespace blink

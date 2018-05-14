@@ -15,13 +15,10 @@ namespace blink {
 
 void BlockFlowPainter::PaintContents(const PaintInfo& paint_info,
                                      const LayoutPoint& paint_offset) {
-  // Avoid painting descendants of the root element when stylesheets haven't
-  // loaded. This eliminates FOUC.  It's ok not to draw, because later on, when
-  // all the stylesheets do load, styleResolverMayHaveChanged() on Document will
-  // trigger a full paint invalidation.
-  if (layout_block_flow_.GetDocument().DidLayoutWithPendingStylesheets() &&
-      !layout_block_flow_.IsLayoutView())
+  if (paint_info.SuppressPaintingDescendants() &&
+      !layout_block_flow_.IsLayoutView()) {
     return;
+  }
 
   if (!layout_block_flow_.ChildrenInline()) {
     BlockPainter(layout_block_flow_).PaintContents(paint_info, paint_offset);
@@ -40,12 +37,12 @@ void BlockFlowPainter::PaintFloats(const PaintInfo& paint_info,
   if (!layout_block_flow_.GetFloatingObjects())
     return;
 
-  DCHECK(paint_info.phase == kPaintPhaseFloat ||
-         paint_info.phase == kPaintPhaseSelection ||
-         paint_info.phase == kPaintPhaseTextClip);
+  DCHECK(paint_info.phase == PaintPhase::kFloat ||
+         paint_info.phase == PaintPhase::kSelection ||
+         paint_info.phase == PaintPhase::kTextClip);
   PaintInfo float_paint_info(paint_info);
-  if (paint_info.phase == kPaintPhaseFloat)
-    float_paint_info.phase = kPaintPhaseForeground;
+  if (paint_info.phase == PaintPhase::kFloat)
+    float_paint_info.phase = PaintPhase::kForeground;
 
   for (const auto& floating_object :
        layout_block_flow_.GetFloatingObjects()->Set()) {

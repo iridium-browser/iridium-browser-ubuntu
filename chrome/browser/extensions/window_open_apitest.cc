@@ -37,14 +37,25 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/base_window.h"
 
-#if defined(USE_ASH)
-#include "extensions/browser/app_window/app_window_registry.h"
+#if defined(OS_CHROMEOS)
+#include "ash/public/cpp/window_properties.h"
+#include "ash/public/interfaces/window_pin_type.mojom.h"
+#include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/extensions/window_controller.h"
+#include "chrome/browser/extensions/window_controller_list.h"
+#include "chrome/browser/ui/browser_command_controller.h"
+#include "ui/aura/window.h"
 #endif
 
 using content::OpenURLParams;
 using content::Referrer;
 using content::WebContents;
+
+namespace aura {
+class Window;
+}
 
 class WindowOpenApiTest : public ExtensionApiTest {
   void SetUpOnMainThread() override {
@@ -246,7 +257,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenExtension) {
   WebContents* newtab = NULL;
   ASSERT_NO_FATAL_FAILURE(
       OpenWindow(browser()->tab_strip_model()->GetActiveWebContents(),
-                 start_url.Resolve("newtab.html"), true, &newtab));
+                 start_url.Resolve("newtab.html"), true, true, &newtab));
 
   bool result = false;
   ASSERT_TRUE(content::ExecuteScriptAndExtractBool(newtab, "testExtensionApi()",
@@ -264,25 +275,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenInvalidExtension) {
   GURL start_url = extension->GetResourceURL("/test.html");
   ui_test_utils::NavigateToURL(browser(), start_url);
   WebContents* newtab = nullptr;
-  bool expect_error_page_in_new_process =
-      content::IsBrowserSideNavigationEnabled();
+  bool new_page_in_same_process = true;
+  bool expect_success = false;
   ASSERT_NO_FATAL_FAILURE(OpenWindow(
       browser()->tab_strip_model()->GetActiveWebContents(),
       GURL("chrome-extension://thisissurelynotavalidextensionid/newtab.html"),
-      expect_error_page_in_new_process, &newtab));
+      new_page_in_same_process, expect_success, &newtab));
 
-  // This is expected to commit an error page.
-  ASSERT_EQ(content::PAGE_TYPE_ERROR,
-            newtab->GetController().GetLastCommittedEntry()->GetPageType());
-
-  std::string document_body;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      newtab, "domAutomationController.send(document.body.innerText.trim());",
-      &document_body));
-
-  // Currently, in this test, the error page is blocked by CSP. This is
-  // https://crbug.com/703801.
-  EXPECT_EQ("", document_body);
+  // This is expected to redirect to about:blank.
+  EXPECT_EQ(GURL(url::kAboutBlankURL), newtab->GetLastCommittedURL());
 }
 
 // Tests that calling window.open from the newtab page to an extension URL
@@ -298,10 +299,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenNoPrivileges) {
   ASSERT_NO_FATAL_FAILURE(
       OpenWindow(browser()->tab_strip_model()->GetActiveWebContents(),
                  GURL(std::string(extensions::kExtensionScheme) +
-                     url::kStandardSchemeSeparator +
-                     last_loaded_extension_id() + "/newtab.html"),
-                 false,
-                 &newtab));
+                      url::kStandardSchemeSeparator +
+                      last_loaded_extension_id() + "/newtab.html"),
+                 false, true, &newtab));
 
   // Extension API should succeed.
   bool result = false;
@@ -340,12 +340,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest,
   EXPECT_FALSE(newtab->GetMainFrame()->GetSiteInstance()->GetSiteURL().SchemeIs(
       extensions::kExtensionScheme));
 
-  // Verify that the blocking was recorded correctly in UMA.
+  // Verify that the blocking was recorded correctly in UMA. ShouldAllowOpenURL
+  // is called twice by the content layer, once when creating the window, and
+  // again when attempting to navigate the newly-created window.
   uma.ExpectUniqueSample("Extensions.ShouldAllowOpenURL.Failure",
                          2, /* FAILURE_SCHEME_NOT_HTTP_OR_HTTPS_OR_EXTENSION */
-                         1);
+                         2);
   uma.ExpectUniqueSample("Extensions.ShouldAllowOpenURL.Failure.Scheme",
-                         6 /* SCHEME_DATA */, 1);
+                         6 /* SCHEME_DATA */, 2);
 }
 
 // Test that navigating to an extension URL is allowed on chrome:// and
@@ -384,3 +386,141 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest,
     EXPECT_EQ("HOWDIE!!!", result);
   }
 }
+
+#if defined(OS_CHROMEOS)
+
+namespace {
+
+aura::Window* GetCurrentWindow() {
+  extensions::WindowController* controller = nullptr;
+  for (auto* iter :
+       extensions::WindowControllerList::GetInstance()->windows()) {
+    if (iter->window()->IsActive()) {
+      controller = iter;
+      break;
+    }
+  }
+  EXPECT_TRUE(controller);
+  return controller->window()->GetNativeWindow();
+}
+
+ash::mojom::WindowPinType GetCurrentWindowPinType() {
+  ash::mojom::WindowPinType type =
+      GetCurrentWindow()->GetProperty(ash::kWindowPinTypeKey);
+  return type;
+}
+
+void SetCurrentWindowPinType(ash::mojom::WindowPinType type) {
+  GetCurrentWindow()->SetProperty(ash::kWindowPinTypeKey, type);
+}
+
+}  // namespace
+
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, OpenLockedFullscreenWindow) {
+  ASSERT_TRUE(RunExtensionTestWithArg("locked_fullscreen/with_permission",
+                                      "openLockedFullscreenWindow"))
+      << message_;
+
+  // Make sure the newly created window is "trusted pinned" (which means that
+  // it's in locked fullscreen mode).
+  EXPECT_EQ(ash::mojom::WindowPinType::TRUSTED_PINNED,
+            GetCurrentWindowPinType());
+}
+
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, UpdateWindowToLockedFullscreen) {
+  ASSERT_TRUE(RunExtensionTestWithArg("locked_fullscreen/with_permission",
+                                      "updateWindowToLockedFullscreen"))
+      << message_;
+
+  // Make sure the current window is put into the "trusted pinned" state.
+  EXPECT_EQ(ash::mojom::WindowPinType::TRUSTED_PINNED,
+            GetCurrentWindowPinType());
+}
+
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, RemoveLockedFullscreenFromWindow) {
+  // After locking the window, do a LockedFullscreenStateChanged so the
+  // command_controller state catches up as well.
+  SetCurrentWindowPinType(ash::mojom::WindowPinType::TRUSTED_PINNED);
+  browser()->command_controller()->LockedFullscreenStateChanged();
+
+  ASSERT_TRUE(RunExtensionTestWithArg("locked_fullscreen/with_permission",
+                                      "removeLockedFullscreenFromWindow"))
+      << message_;
+
+  // Make sure the current window is removed from locked-fullscreen state.
+  EXPECT_EQ(ash::mojom::WindowPinType::NONE, GetCurrentWindowPinType());
+}
+
+// Make sure that commands disabling code works in locked fullscreen mode.
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, VerifyCommandsInLockedFullscreen) {
+  // IDC_EXIT is always enabled in regular mode so it's a perfect candidate for
+  // testing.
+  EXPECT_TRUE(browser()->command_controller()->IsCommandEnabled(IDC_EXIT));
+  ASSERT_TRUE(RunExtensionTestWithArg("locked_fullscreen/with_permission",
+                                      "updateWindowToLockedFullscreen"))
+      << message_;
+
+  // IDC_EXIT is not enabled in locked fullscreen.
+  EXPECT_FALSE(browser()->command_controller()->IsCommandEnabled(IDC_EXIT));
+
+  // Verify some whitelisted commands.
+  EXPECT_TRUE(browser()->command_controller()->IsCommandEnabled(IDC_COPY));
+  EXPECT_TRUE(browser()->command_controller()->IsCommandEnabled(IDC_FIND));
+  EXPECT_TRUE(browser()->command_controller()->IsCommandEnabled(IDC_ZOOM_PLUS));
+}
+
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest,
+                       OpenLockedFullscreenWindowWithoutPermission) {
+  ASSERT_TRUE(RunExtensionTestWithArg("locked_fullscreen/without_permission",
+                                      "openLockedFullscreenWindow"))
+      << message_;
+
+  // Make sure no new windows get created (so only the one created by default
+  // exists) since the call to chrome.windows.create fails on the javascript
+  // side.
+  EXPECT_EQ(1u,
+            extensions::WindowControllerList::GetInstance()->windows().size());
+}
+
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest,
+                       UpdateWindowToLockedFullscreenWithoutPermission) {
+  ASSERT_TRUE(RunExtensionTestWithArg("locked_fullscreen/without_permission",
+                                      "updateWindowToLockedFullscreen"))
+      << message_;
+
+  // chrome.windows.update call fails since this extension doesn't have the
+  // correct permission and hence the current window has NONE as WindowPinType.
+  EXPECT_EQ(ash::mojom::WindowPinType::NONE, GetCurrentWindowPinType());
+}
+
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest,
+                       RemoveLockedFullscreenFromWindowWithoutPermission) {
+  SetCurrentWindowPinType(ash::mojom::WindowPinType::TRUSTED_PINNED);
+  browser()->command_controller()->LockedFullscreenStateChanged();
+
+  ASSERT_TRUE(RunExtensionTestWithArg("locked_fullscreen/without_permission",
+                                      "removeLockedFullscreenFromWindow"))
+      << message_;
+
+  // The current window is still locked-fullscreen.
+  EXPECT_EQ(ash::mojom::WindowPinType::TRUSTED_PINNED,
+            GetCurrentWindowPinType());
+}
+#endif  // defined(OS_CHROMEOS)
+
+#if !defined(OS_CHROMEOS)
+// Loading an extension requiring the 'lockWindowFullscreenPrivate' permission
+// on non Chrome OS platforms should always fail since the API is available only
+// on Chrome OS.
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest,
+                       OpenLockedFullscreenWindowNonChromeOS) {
+  const extensions::Extension* extension = LoadExtensionWithFlags(
+      test_data_dir_.AppendASCII("locked_fullscreen/with_permission"),
+      ExtensionBrowserTest::kFlagIgnoreManifestWarnings);
+  ASSERT_TRUE(extension);
+  EXPECT_EQ(1u, extension->install_warnings().size());
+  EXPECT_EQ(std::string("'lockWindowFullscreenPrivate' "
+                        "is not allowed for specified platform."),
+            extension->install_warnings().front().message);
+}
+#endif

@@ -5,7 +5,7 @@
 #include "modules/webusb/USBConfiguration.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "device/usb/public/interfaces/device.mojom-blink.h"
+#include "device/usb/public/mojom/device.mojom-blink.h"
 #include "modules/webusb/USBDevice.h"
 #include "modules/webusb/USBInterface.h"
 
@@ -55,8 +55,9 @@ HeapVector<Member<USBInterface>> USBConfiguration::interfaces() const {
   return interfaces;
 }
 
-DEFINE_TRACE(USBConfiguration) {
+void USBConfiguration::Trace(blink::Visitor* visitor) {
   visitor->Trace(device_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

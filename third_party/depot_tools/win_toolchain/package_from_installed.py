@@ -45,10 +45,11 @@ def GetVSPath():
   if VS_VERSION == '2015':
     return r'C:\Program Files (x86)\Microsoft Visual Studio 14.0'
   elif VS_VERSION == '2017':
-    # Use vswhere to find the VS 2017 installation. This handles preview
-    # versions automatically. This assumes that only one version is installed.
+    # Use vswhere to find the VS 2017 installation. This will find prerelease
+    # versions because -prerelease is specified. This assumes that only one
+    # version is installed.
     command = (r'C:\Program Files (x86)\Microsoft Visual Studio\Installer'
-               r'\vswhere.exe')
+               r'\vswhere.exe -prerelease')
     marker = 'installationPath: '
     for line in subprocess.check_output(command).splitlines():
       if line.startswith(marker):
@@ -60,10 +61,24 @@ def GetVSPath():
 
 def ExpandWildcards(root, sub_dir):
   # normpath is needed to change '/' to '\\' characters.
-  matches = glob.glob(os.path.normpath(os.path.join(root, sub_dir)))
+  path = os.path.normpath(os.path.join(root, sub_dir))
+  matches = glob.glob(path)
   if len(matches) != 1:
-    raise Exception('%s had %d matches - should be one' % (full, len(matches)))
+    raise Exception('%s had %d matches - should be one' % (path, len(matches)))
   return matches[0]
+
+
+def BuildRepackageFileList(src_dir):
+  # Strip off a trailing slash if present
+  if src_dir.endswith('\\'):
+    src_dir = src_dir[:-1]
+  result = []
+  for root, _, files in os.walk(src_dir):
+    for f in files:
+      final_from = os.path.normpath(os.path.join(root, f))
+      dest = final_from[len(src_dir) + 1:]
+      result.append((final_from, dest))
+  return result
 
 
 def BuildFileList(override_dir):
@@ -110,18 +125,14 @@ def BuildFileList(override_dir):
     ]
   elif VS_VERSION == '2017':
     paths += [
-        ('VC/redist/MSVC/14.*.*/x86/Microsoft.VC150.CRT', 'sys32'),
-        ('VC/redist/MSVC/14.*.*/x86/Microsoft.VC150.CRT', 'win_sdk/bin/x86'),
-        ('VC/redist/MSVC/14.*.*/x86/Microsoft.VC150.MFC', 'sys32'),
-        ('VC/redist/MSVC/14.*.*/debug_nonredist/x86/Microsoft.VC150.DebugCRT', 'sys32'),
-        ('VC/redist/MSVC/14.*.*/debug_nonredist/x86/Microsoft.VC150.DebugMFC', 'sys32'),
-        ('VC/redist/MSVC/14.*.*/x64/Microsoft.VC150.CRT', 'sys64'),
-        ('VC/redist/MSVC/14.*.*/x64/Microsoft.VC150.CRT', 'VC/bin/amd64_x86'),
-        ('VC/redist/MSVC/14.*.*/x64/Microsoft.VC150.CRT', 'VC/bin/amd64'),
-        ('VC/redist/MSVC/14.*.*/x64/Microsoft.VC150.CRT', 'win_sdk/bin/x64'),
-        ('VC/redist/MSVC/14.*.*/x64/Microsoft.VC150.MFC', 'sys64'),
-        ('VC/redist/MSVC/14.*.*/debug_nonredist/x64/Microsoft.VC150.DebugCRT', 'sys64'),
-        ('VC/redist/MSVC/14.*.*/debug_nonredist/x64/Microsoft.VC150.DebugMFC', 'sys64'),
+        ('VC/redist/MSVC/14.*.*/x86/Microsoft.VC*.CRT', 'sys32'),
+        ('VC/redist/MSVC/14.*.*/x86/Microsoft.VC*.CRT', 'win_sdk/bin/x86'),
+        ('VC/redist/MSVC/14.*.*/debug_nonredist/x86/Microsoft.VC*.DebugCRT', 'sys32'),
+        ('VC/redist/MSVC/14.*.*/x64/Microsoft.VC*.CRT', 'sys64'),
+        ('VC/redist/MSVC/14.*.*/x64/Microsoft.VC*.CRT', 'VC/bin/amd64_x86'),
+        ('VC/redist/MSVC/14.*.*/x64/Microsoft.VC*.CRT', 'VC/bin/amd64'),
+        ('VC/redist/MSVC/14.*.*/x64/Microsoft.VC*.CRT', 'win_sdk/bin/x64'),
+        ('VC/redist/MSVC/14.*.*/debug_nonredist/x64/Microsoft.VC*.DebugCRT', 'sys64'),
     ]
   else:
     raise ValueError('VS_VERSION %s' % VS_VERSION)
@@ -138,6 +149,11 @@ def BuildFileList(override_dir):
       raise Exception('%s not a directory.' % combined)
     for root, _, files in os.walk(combined):
       for f in files:
+        # vctip.exe doesn't shutdown, leaving locks on directories. It's
+        # optional so let's avoid this problem by not packaging it.
+        # https://crbug.com/735226
+        if f.lower() =='vctip.exe':
+          continue
         final_from = os.path.normpath(os.path.join(root, f))
         if isinstance(path, tuple):
           assert final_from.startswith(combined)
@@ -253,14 +269,17 @@ def GenerateSetEnvCmd(target_dir):
   ])
   # Common to x86 and x64
   env = collections.OrderedDict([
-    # Yuck: These two have a trailing \ character. No good way to represent this
-    # in an OS-independent way.
+    # Yuck: These have a trailing \ character. No good way to represent this in
+    # an OS-independent way.
     ('VSINSTALLDIR', [['..', '..\\']]),
     ('VCINSTALLDIR', [['..', '..', 'VC\\']]),
     ('INCLUDE', include_dirs),
   ])
   # x86. Always use amd64_x86 cross, not x86 on x86.
   if VS_VERSION == '2017':
+    env['VCToolsInstallDir'] = [['..', '..'] + vc_tools_parts[:]]
+    # Yuck: This one ends in a slash as well.
+    env['VCToolsInstallDir'][0][-1] += '\\'
     env_x86 = collections.OrderedDict([
       ('PATH', [
         ['..', '..', 'win_sdk', 'bin', WIN_VERSION, 'x64'],
@@ -394,37 +413,43 @@ def main():
   parser.add_option('--override', action='store', type='string',
                     dest='override_dir', default=None,
                     help='Specify alternate bin/include/lib directory')
+  parser.add_option('--repackage', action='store', type='string',
+                    dest='repackage_dir', default=None,
+                    help='Specify raw directory to be packaged, for hot fixes.')
   (options, args) = parser.parse_args()
 
-  if len(args) != 1 or args[0] not in ('2015', '2017'):
-    print 'Must specify 2015 or 2017'
-    parser.print_help();
-    return 1
-
-  if options.override_dir:
-    if (not os.path.exists(os.path.join(options.override_dir, 'bin')) or
-        not os.path.exists(os.path.join(options.override_dir, 'include')) or
-        not os.path.exists(os.path.join(options.override_dir, 'lib'))):
-      print 'Invalid override directory - must contain bin/include/lib dirs'
+  if options.repackage_dir:
+    files = BuildRepackageFileList(options.repackage_dir)
+  else:
+    if len(args) != 1 or args[0] not in ('2015', '2017'):
+      print 'Must specify 2015 or 2017'
+      parser.print_help();
       return 1
 
-  global VS_VERSION
-  VS_VERSION = args[0]
-  global WIN_VERSION
-  WIN_VERSION = options.winver
-  global VC_TOOLS
-  if VS_VERSION == '2017':
-    vs_path = GetVSPath()
-    temp_tools_path = ExpandWildcards(vs_path, 'VC/Tools/MSVC/14.*.*')
-    # Strip off the leading vs_path characters and switch back to / separators.
-    VC_TOOLS = temp_tools_path[len(vs_path) + 1:].replace('\\', '/')
-  else:
-    VC_TOOLS = 'VC'
+    if options.override_dir:
+      if (not os.path.exists(os.path.join(options.override_dir, 'bin')) or
+          not os.path.exists(os.path.join(options.override_dir, 'include')) or
+          not os.path.exists(os.path.join(options.override_dir, 'lib'))):
+        print 'Invalid override directory - must contain bin/include/lib dirs'
+        return 1
 
-  print 'Building file list for VS %s Windows %s...' % (VS_VERSION, WIN_VERSION)
-  files = BuildFileList(options.override_dir)
+    global VS_VERSION
+    VS_VERSION = args[0]
+    global WIN_VERSION
+    WIN_VERSION = options.winver
+    global VC_TOOLS
+    if VS_VERSION == '2017':
+      vs_path = GetVSPath()
+      temp_tools_path = ExpandWildcards(vs_path, 'VC/Tools/MSVC/14.*.*')
+      # Strip off the leading vs_path characters and switch back to / separators.
+      VC_TOOLS = temp_tools_path[len(vs_path) + 1:].replace('\\', '/')
+    else:
+      VC_TOOLS = 'VC'
 
-  AddEnvSetup(files)
+    print 'Building file list for VS %s Windows %s...' % (VS_VERSION, WIN_VERSION)
+    files = BuildFileList(options.override_dir)
+
+    AddEnvSetup(files)
 
   if False:
     for f in files:
@@ -443,7 +468,7 @@ def main():
       sys.stdout.write('\r%d/%d ...%s' % (count, len(files), disk_name[-40:]))
       sys.stdout.flush()
       count += 1
-      if disk_name.count(WIN_VERSION) > 0:
+      if not options.repackage_dir and disk_name.count(WIN_VERSION) > 0:
         version_match_count += 1
       if os.path.exists(disk_name):
         if options.dryrun:
@@ -460,7 +485,7 @@ def main():
     return 0
   if missing_files:
     raise Exception('One or more files were missing - aborting')
-  if version_match_count == 0:
+  if not options.repackage_dir and version_match_count == 0:
     raise Exception('No files found that match the specified winversion')
   sys.stdout.write('\rWrote to %s.%s\n' % (output, ' '*50))
   sys.stdout.flush()

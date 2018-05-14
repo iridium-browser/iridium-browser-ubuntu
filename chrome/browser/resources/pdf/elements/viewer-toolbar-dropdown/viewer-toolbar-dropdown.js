@@ -27,6 +27,9 @@ Polymer({
     /** Icon to display when the dropdown is open. */
     openIcon: String,
 
+    /** Unique id to identify this dropdown for metrics purposes. */
+    metricsId: String,
+
     /** True if the dropdown is currently open. */
     dropdownOpen: {type: Boolean, reflectToAttribute: true, value: false},
 
@@ -66,6 +69,7 @@ Polymer({
       this.$.dropdown.style.display = 'block';
       if (!this.maxHeightValid_)
         this.updateMaxHeight();
+      this.fire('dropdown-opened', this.metricsId);
     }
     this.cancelAnimation_();
     this.playAnimation_(this.dropdownOpen);
@@ -93,11 +97,11 @@ Polymer({
    */
   playAnimation_: function(isEntry) {
     this.animation_ = isEntry ? this.animateEntry_() : this.animateExit_();
-    this.animation_.onfinish = function() {
+    this.animation_.onfinish = () => {
       this.animation_ = null;
       if (!this.dropdownOpen)
         this.$.dropdown.style.display = 'none';
-    }.bind(this);
+    };
   },
 
   animateEntry_: function() {

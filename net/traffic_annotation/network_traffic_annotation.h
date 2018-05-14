@@ -27,6 +27,8 @@ constexpr uint32_t recursive_hash<1>(const char* str) {
 #define COMPUTE_STRING_HASH(S) \
   static_cast<int32_t>(recursive_hash<sizeof(S) - 1>(S))
 
+constexpr int TRAFFIC_ANNOTATION_UNINITIALIZED = -1;
+
 }  // namespace
 
 namespace net {
@@ -34,6 +36,15 @@ namespace net {
 // Defined types for network traffic annotation tags.
 struct NetworkTrafficAnnotationTag {
   const int32_t unique_id_hash_code;
+
+  bool operator==(const NetworkTrafficAnnotationTag& other) const {
+    return unique_id_hash_code == other.unique_id_hash_code;
+  }
+
+  static NetworkTrafficAnnotationTag NotReached() {
+    NOTREACHED();
+    return net::NetworkTrafficAnnotationTag({TRAFFIC_ANNOTATION_UNINITIALIZED});
+  }
 };
 struct PartialNetworkTrafficAnnotationTag {
   const int32_t unique_id_hash_code;
@@ -61,7 +72,8 @@ struct PartialNetworkTrafficAnnotationTag {
 // |unique_id| should be a string that uniquely identifies this annotation
 // across all of Chromium source code. |unique_id| should be kept unchanged
 // as long as possible as its hashed value will be used for differnt logging,
-// debugging, or auditing tasks.
+// debugging, or auditing tasks. Unique ids should include only alphanumeric
+// characters and underline.
 // |proto| is a text-encoded NetworkTrafficAnnotation protobuf (see
 // tools/traffic_annotation/traffic_annotation.proto)
 //
@@ -194,11 +206,9 @@ NetworkTrafficAnnotationTag BranchedCompleteNetworkTrafficAnnotation(
 //   }
 // }
 
-#define TRAFFIC_ANNOTATION_UNINITIALIZED -1
-
-// Do not use this unless net-serialization is required.
-// TODO(crbug.com/690323): Add tools to check constructor of this structure is
-// used only in .mojom.cc files.
+// Please do not use this unless uninitialized annotations are required.
+// Mojo interfaces for this class and the next one are defined in
+// '/services/network/public/mojom'.
 struct MutableNetworkTrafficAnnotationTag {
   MutableNetworkTrafficAnnotationTag()
       : unique_id_hash_code(TRAFFIC_ANNOTATION_UNINITIALIZED) {}
@@ -208,9 +218,20 @@ struct MutableNetworkTrafficAnnotationTag {
 
   int32_t unique_id_hash_code;
 
+  bool operator==(const MutableNetworkTrafficAnnotationTag& other) const {
+    return unique_id_hash_code == other.unique_id_hash_code;
+  }
+
   explicit operator NetworkTrafficAnnotationTag() const {
+    DCHECK(is_valid());
     return NetworkTrafficAnnotationTag({unique_id_hash_code});
   }
+
+  bool is_valid() const {
+    return unique_id_hash_code != TRAFFIC_ANNOTATION_UNINITIALIZED;
+  }
+
+  void reset() { unique_id_hash_code = TRAFFIC_ANNOTATION_UNINITIALIZED; }
 };
 
 struct MutablePartialNetworkTrafficAnnotationTag {
@@ -228,8 +249,19 @@ struct MutablePartialNetworkTrafficAnnotationTag {
   int32_t completing_id_hash_code;
 
   explicit operator PartialNetworkTrafficAnnotationTag() const {
+    DCHECK(is_valid());
     return PartialNetworkTrafficAnnotationTag(
         {unique_id_hash_code, completing_id_hash_code});
+  }
+
+  bool is_valid() const {
+    return unique_id_hash_code != TRAFFIC_ANNOTATION_UNINITIALIZED &&
+           completing_id_hash_code != TRAFFIC_ANNOTATION_UNINITIALIZED;
+  }
+
+  void reset() {
+    unique_id_hash_code = TRAFFIC_ANNOTATION_UNINITIALIZED;
+    completing_id_hash_code = TRAFFIC_ANNOTATION_UNINITIALIZED;
   }
 #else
   MutablePartialNetworkTrafficAnnotationTag()
@@ -243,6 +275,12 @@ struct MutablePartialNetworkTrafficAnnotationTag {
   explicit operator PartialNetworkTrafficAnnotationTag() const {
     return PartialNetworkTrafficAnnotationTag({unique_id_hash_code});
   }
+
+  bool is_valid() const {
+    return unique_id_hash_code != TRAFFIC_ANNOTATION_UNINITIALIZED;
+  }
+
+  void reset() { unique_id_hash_code = TRAFFIC_ANNOTATION_UNINITIALIZED; }
 #endif  // !defined(NDEBUG) || defined(DCHECK_ALWAYS_ON)
 };
 
@@ -259,6 +297,12 @@ struct MutablePartialNetworkTrafficAnnotationTag {
 #define MISSING_TRAFFIC_ANNOTATION     \
   net::DefineNetworkTrafficAnnotation( \
       "missing", "Function called without traffic annotation.")
+
+// TODO(crbug.com/656607): Remove this temporary tag which is only used during
+// refactoring.
+#define NO_TRAFFIC_ANNOTATION_BUG_656607                  \
+  net::DefineNetworkTrafficAnnotation("undefined-656607", \
+                                      "Temporary tag for crbug.com/656607.")
 
 #undef COMPUTE_STRING_HASH
 

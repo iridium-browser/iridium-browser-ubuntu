@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/values.h"
@@ -41,6 +42,8 @@ ExtensionKeybindingRegistry::ExtensionKeybindingRegistry(
   registrar_.Add(this,
                  extensions::NOTIFICATION_EXTENSION_COMMAND_REMOVED,
                  content::Source<Profile>(profile->GetOriginalProfile()));
+  media_keys_listener_ = ui::MediaKeysListener::Create(
+      this, ui::MediaKeysListener::Scope::kFocused);
 }
 
 ExtensionKeybindingRegistry::~ExtensionKeybindingRegistry() {
@@ -71,6 +74,10 @@ void ExtensionKeybindingRegistry::RemoveExtensionKeybinding(
       // Let each platform-specific implementation get a chance to clean up.
       RemoveExtensionKeybindingImpl(old->first, command_name);
       event_targets_.erase(old);
+
+      if (media_keys_listener_ && !IsAnyMediaKeyRegistered()) {
+        media_keys_listener_->StopWatchingMediaKeys();
+      }
 
       // If a specific command_name was requested, it has now been deleted so no
       // further work is required.
@@ -123,7 +130,7 @@ void ExtensionKeybindingRegistry::CommandExecuted(
   args->AppendString(command);
 
   auto event =
-      base::MakeUnique<Event>(events::COMMANDS_ON_COMMAND, kOnCommandEventName,
+      std::make_unique<Event>(events::COMMANDS_ON_COMMAND, kOnCommandEventName,
                               std::move(args), browser_context_);
   event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
   EventRouter::Get(browser_context_)
@@ -143,8 +150,17 @@ void ExtensionKeybindingRegistry::AddEventTarget(
       std::make_pair(extension_id, command_name));
   // Shortcuts except media keys have only one target in the list. See comment
   // about |event_targets_|.
-  if (!extensions::Command::IsMediaKey(accelerator))
+  if (!Command::IsMediaKey(accelerator)) {
     DCHECK_EQ(1u, event_targets_[accelerator].size());
+  }
+
+  if (media_keys_listener_ && !media_keys_listener_->IsWatchingMediaKeys() &&
+      IsAnyMediaKeyRegistered()) {
+    // If media keys were not already being watched, this must have been the
+    // first.
+    DCHECK(Command::IsMediaKey(accelerator));
+    media_keys_listener_->StartWatchingMediaKeys();
+  }
 }
 
 bool ExtensionKeybindingRegistry::GetFirstTarget(
@@ -226,6 +242,15 @@ void ExtensionKeybindingRegistry::Observe(
   }
 }
 
+ui::MediaKeysListener::MediaKeysHandleResult
+ExtensionKeybindingRegistry::OnMediaKeysAccelerator(
+    const ui::Accelerator& accelerator) {
+  return NotifyEventTargets(accelerator)
+             ? ui::MediaKeysListener::MediaKeysHandleResult::
+                   kSuppressPropagation
+             : ui::MediaKeysListener::MediaKeysHandleResult::kIgnore;
+}
+
 bool ExtensionKeybindingRegistry::ExtensionMatchesFilter(
     const extensions::Extension* extension)
 {
@@ -261,6 +286,15 @@ bool ExtensionKeybindingRegistry::ExecuteCommands(
   }
 
   return executed;
+}
+
+bool ExtensionKeybindingRegistry::IsAnyMediaKeyRegistered() const {
+  for (const auto& iter : event_targets_) {
+    if (Command::IsMediaKey(iter.first)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace extensions

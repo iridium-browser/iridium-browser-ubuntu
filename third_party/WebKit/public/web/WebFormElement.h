@@ -43,10 +43,10 @@ class WebFormControlElement;
 // information about the form.
 class BLINK_EXPORT WebFormElement final : public WebElement {
  public:
-  ~WebFormElement() { Reset(); }
+  ~WebFormElement() override { Reset(); }
 
   WebFormElement() : WebElement() {}
-  WebFormElement(const WebFormElement& element) : WebElement(element) {}
+  WebFormElement(const WebFormElement& element) = default;
 
   WebFormElement& operator=(const WebFormElement& element) {
     WebElement::Assign(element);
@@ -61,7 +61,7 @@ class BLINK_EXPORT WebFormElement final : public WebElement {
 
   void GetFormControlElements(WebVector<WebFormControlElement>&) const;
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebFormElement(HTMLFormElement*);
   WebFormElement& operator=(HTMLFormElement*);
   operator HTMLFormElement*() const;

@@ -55,9 +55,10 @@ int TargetPickerTableModel::RowCount() {
 base::string16 TargetPickerTableModel::GetText(int row, int /*column_id*/) {
   // Show "title (origin)", to disambiguate titles that are the same, and as a
   // security measure.
-  return base::UTF8ToUTF16(targets_[row].name() + " (" +
-                           targets_[row].manifest_url().GetOrigin().spec() +
-                           ")");
+  return l10n_util::GetStringFUTF16(
+      IDS_WEBSHARE_TARGET_DIALOG_ITEM_TEXT,
+      base::UTF8ToUTF16(targets_[row].name()),
+      base::UTF8ToUTF16(targets_[row].manifest_url().GetOrigin().spec()));
 }
 
 void TargetPickerTableModel::SetObserver(ui::TableModelObserver* observer) {}
@@ -80,14 +81,15 @@ WebShareTargetPickerView::WebShareTargetPickerView(
     std::vector<WebShareTarget> targets,
     chrome::WebShareTargetPickerCallback close_callback)
     : targets_(std::move(targets)),
-      table_model_(base::MakeUnique<TargetPickerTableModel>(targets_)),
+      table_model_(std::make_unique<TargetPickerTableModel>(targets_)),
       close_callback_(std::move(close_callback)) {
   const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
-  views::BoxLayout* layout = new views::BoxLayout(
-      views::BoxLayout::kVertical,
-      provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS),
-      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL));
-  SetLayoutManager(layout);
+  views::BoxLayout* layout =
+      SetLayoutManager(std::make_unique<views::BoxLayout>(
+          views::BoxLayout::kVertical,
+          provider->GetDialogInsetsForContentType(views::TEXT, views::CONTROL),
+          provider->GetDistanceMetric(
+              views::DISTANCE_RELATED_CONTROL_VERTICAL)));
 
   views::Label* overview_label = new views::Label(
       l10n_util::GetStringUTF16(IDS_WEBSHARE_TARGET_PICKER_LABEL));
@@ -165,7 +167,7 @@ bool WebShareTargetPickerView::IsDialogButtonEnabled(
 }
 
 void WebShareTargetPickerView::OnSelectionChanged() {
-  GetDialogClientView()->UpdateDialogButtons();
+  DialogModelChanged();
 }
 
 void WebShareTargetPickerView::OnDoubleClick() {

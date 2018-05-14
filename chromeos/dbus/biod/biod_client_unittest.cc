@@ -5,7 +5,9 @@
 #include "chromeos/dbus/biod/biod_client.h"
 
 #include <map>
+#include <memory>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
@@ -51,15 +53,15 @@ MATCHER_P(HasMember, name, "") {
 // bare pointer rather than an std::unique_ptr.
 void RunResponseCallback(dbus::ObjectProxy::ResponseCallback callback,
                          std::unique_ptr<dbus::Response> response) {
-  callback.Run(response.get());
+  std::move(callback).Run(response.get());
 }
 
 }  // namespace
 
 class BiodClientTest : public testing::Test {
  public:
-  BiodClientTest() {}
-  ~BiodClientTest() override {}
+  BiodClientTest() = default;
+  ~BiodClientTest() override = default;
 
   void SetUp() override {
     dbus::Bus::Options options;
@@ -77,7 +79,7 @@ class BiodClientTest : public testing::Test {
         .WillRepeatedly(Return(proxy_.get()));
 
     // Save |client_|'s signal callback.
-    EXPECT_CALL(*proxy_.get(), ConnectToSignal(kInterface, _, _, _))
+    EXPECT_CALL(*proxy_.get(), DoConnectToSignal(kInterface, _, _, _))
         .WillRepeatedly(Invoke(this, &BiodClientTest::ConnectToSignal));
 
     client_.reset(BiodClient::Create(REAL_DBUS_CLIENT_IMPLEMENTATION));
@@ -98,7 +100,7 @@ class BiodClientTest : public testing::Test {
                             std::unique_ptr<dbus::Response> response) {
     ASSERT_FALSE(pending_method_calls_.count(method_name));
     pending_method_calls_[method_name] = std::move(response);
-    EXPECT_CALL(*proxy_.get(), CallMethod(HasMember(method_name), _, _))
+    EXPECT_CALL(*proxy_.get(), DoCallMethod(HasMember(method_name), _, _))
         .WillOnce(Invoke(this, &BiodClientTest::OnCallMethod));
   }
 
@@ -176,26 +178,27 @@ class BiodClientTest : public testing::Test {
       const std::string& interface_name,
       const std::string& signal_name,
       dbus::ObjectProxy::SignalCallback signal_callback,
-      dbus::ObjectProxy::OnConnectedCallback on_connected_callback) {
+      dbus::ObjectProxy::OnConnectedCallback* on_connected_callback) {
     EXPECT_EQ(interface_name, kInterface);
     signal_callbacks_[signal_name] = signal_callback;
     message_loop_.task_runner()->PostTask(
-        FROM_HERE, base::Bind(on_connected_callback, interface_name,
-                              signal_name, true /* success */));
+        FROM_HERE,
+        base::BindOnce(std::move(*on_connected_callback), interface_name,
+                       signal_name, true /* success */));
   }
 
   // Handles calls to |proxy_|'s CallMethod().
   void OnCallMethod(dbus::MethodCall* method_call,
                     int timeout_ms,
-                    const dbus::ObjectProxy::ResponseCallback& callback) {
+                    dbus::ObjectProxy::ResponseCallback* callback) {
     auto it = pending_method_calls_.find(method_call->GetMember());
     ASSERT_TRUE(it != pending_method_calls_.end());
     auto pending_response = std::move(it->second);
     pending_method_calls_.erase(it);
 
     message_loop_.task_runner()->PostTask(
-        FROM_HERE, base::Bind(&RunResponseCallback, callback,
-                              base::Passed(&pending_response)));
+        FROM_HERE, base::BindOnce(&RunResponseCallback, std::move(*callback),
+                                  base::Passed(&pending_response)));
   }
 
   DISALLOW_COPY_AND_ASSIGN(BiodClientTest);
@@ -288,20 +291,20 @@ TEST_F(BiodClientTest, TestDestroyAllRecords) {
   // Create an empty response to simulate success.
   AddMethodExpectation(biod::kBiometricsManagerDestroyAllRecordsMethod,
                        std::move(response));
-  DBusMethodCallStatus returned_status = static_cast<DBusMethodCallStatus>(-1);
+  bool result = false;
   client_->DestroyAllRecords(
-      base::Bind(&test_utils::CopyDBusMethodCallStatus, &returned_status));
+      base::BindOnce(&test_utils::CopyDBusMethodCallResult, &result));
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(DBUS_METHOD_CALL_SUCCESS, returned_status);
+  EXPECT_TRUE(result);
 
   // Return a null response to simulate failure.
   AddMethodExpectation(biod::kBiometricsManagerDestroyAllRecordsMethod,
                        nullptr);
-  returned_status = static_cast<DBusMethodCallStatus>(-1);
+  result = false;
   client_->DestroyAllRecords(
-      base::Bind(&test_utils::CopyDBusMethodCallStatus, &returned_status));
+      base::BindOnce(&test_utils::CopyDBusMethodCallResult, &result));
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(DBUS_METHOD_CALL_FAILURE, returned_status);
+  EXPECT_FALSE(result);
 }
 
 TEST_F(BiodClientTest, TestStartAuthentication) {

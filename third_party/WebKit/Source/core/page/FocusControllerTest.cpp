@@ -8,27 +8,18 @@
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "core/dom/ShadowRootInit.h"
 #include "core/html/HTMLElement.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/testing/PageTestBase.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
-class FocusControllerTest : public ::testing::Test {
- public:
-  Document& GetDocument() const { return page_holder_->GetDocument(); }
-  FocusController& GetFocusController() const {
-    return GetDocument().GetPage()->GetFocusController();
-  }
-  DummyPageHolder* PageHolder() const { return page_holder_.get(); }
-
+class FocusControllerTest : public PageTestBase {
  private:
-  void SetUp() override { page_holder_ = DummyPageHolder::Create(); }
-
-  std::unique_ptr<DummyPageHolder> page_holder_;
+  void SetUp() override { PageTestBase::SetUp(IntSize()); }
 };
 
 TEST_F(FocusControllerTest, SetInitialFocus) {
-  GetDocument().body()->setInnerHTML("<input><textarea>");
+  GetDocument().body()->SetInnerHTMLFromString("<input><textarea>");
   Element* input = ToElement(GetDocument().body()->firstChild());
   // Set sequential focus navigation point before the initial focus.
   input->focus();
@@ -40,7 +31,7 @@ TEST_F(FocusControllerTest, SetInitialFocus) {
 }
 
 TEST_F(FocusControllerTest, DoNotCrash1) {
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLFromString(
       "<div id='host'></div>This test is for crbug.com/609012<p id='target' "
       "tabindex='0'></p>");
   // <div> with shadow root
@@ -63,7 +54,7 @@ TEST_F(FocusControllerTest, DoNotCrash1) {
 }
 
 TEST_F(FocusControllerTest, DoNotCrash2) {
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLFromString(
       "<p id='target' tabindex='0'></p>This test is for crbug.com/609012<div "
       "id='host'></div>");
   // <p>
@@ -91,12 +82,12 @@ TEST_F(FocusControllerTest, SetActiveOnInactiveDocument) {
   // Document::shutdown() detaches document from its frame, and thus
   // document().page() becomes nullptr.
   // Use DummyPageHolder's page to retrieve FocusController.
-  PageHolder()->GetPage().GetFocusController().SetActive(true);
+  GetPage().GetFocusController().SetActive(true);
 }
 
 // This test is for crbug.com/733218
 TEST_F(FocusControllerTest, SVGFocusableElementInForm) {
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLFromString(
       "<form>"
       "<input id='first'>"
       "<svg width='100px' height='100px' tabindex='0'>"

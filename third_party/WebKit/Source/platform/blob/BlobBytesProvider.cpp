@@ -5,6 +5,9 @@
 #include "platform/blob/BlobBytesProvider.h"
 
 #include "base/numerics/safe_conversions.h"
+#include "platform/CrossThreadFunctional.h"
+#include "platform/Histogram.h"
+#include "platform/WebTaskRunner.h"
 #include "platform/wtf/Functional.h"
 #include "public/platform/Platform.h"
 
@@ -17,14 +20,14 @@ namespace {
 // written, or when the data pipe is disconnected.
 class BlobBytesStreamer {
  public:
-  BlobBytesStreamer(Vector<RefPtr<RawData>> data,
+  BlobBytesStreamer(Vector<scoped_refptr<RawData>> data,
                     mojo::ScopedDataPipeProducerHandle pipe)
       : data_(std::move(data)),
         pipe_(std::move(pipe)),
         watcher_(FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::AUTOMATIC) {
     watcher_.Watch(pipe_.get(), MOJO_HANDLE_SIGNAL_WRITABLE,
-                   ConvertToBaseCallback(WTF::Bind(
-                       &BlobBytesStreamer::OnWritable, WTF::Unretained(this))));
+                   WTF::BindRepeating(&BlobBytesStreamer::OnWritable,
+                                      WTF::Unretained(this)));
   }
 
   void OnWritable(MojoResult result) {
@@ -38,9 +41,9 @@ class BlobBytesStreamer {
     while (true) {
       uint32_t num_bytes = base::saturated_cast<uint32_t>(
           data_[current_item_]->length() - current_item_offset_);
-      MojoResult write_result = mojo::WriteDataRaw(
-          pipe_.get(), data_[current_item_]->data() + current_item_offset_,
-          &num_bytes, MOJO_WRITE_DATA_FLAG_NONE);
+      MojoResult write_result =
+          pipe_->WriteData(data_[current_item_]->data() + current_item_offset_,
+                           &num_bytes, MOJO_WRITE_DATA_FLAG_NONE);
       if (write_result == MOJO_RESULT_OK) {
         current_item_offset_ += num_bytes;
         if (current_item_offset_ >= data_[current_item_]->length()) {
@@ -56,7 +59,9 @@ class BlobBytesStreamer {
       } else if (write_result == MOJO_RESULT_SHOULD_WAIT) {
         break;
       } else {
-        // TOOD(mek): Something went wrong, log this error somewhere.
+        // Writing failed. This isn't necessarily bad, as this could just mean
+        // the browser no longer needs the data for this blob. So just delete
+        // this as sending data is definitely finished.
         delete this;
         return;
       }
@@ -70,28 +75,62 @@ class BlobBytesStreamer {
   // data pipe.
   size_t current_item_offset_ = 0;
   // The data being written.
-  Vector<RefPtr<RawData>> data_;
+  Vector<scoped_refptr<RawData>> data_;
 
   mojo::ScopedDataPipeProducerHandle pipe_;
   mojo::SimpleWatcher watcher_;
 };
 
+// This keeps the process alive while blobs are being transferred.
+void IncreaseChildProcessRefCount() {
+  if (!Platform::Current()->MainThread()->IsCurrentThread()) {
+    PostCrossThreadTask(*Platform::Current()->MainThread()->GetTaskRunner(),
+                        FROM_HERE,
+                        CrossThreadBind(&IncreaseChildProcessRefCount));
+    return;
+  }
+  Platform::Current()->SuddenTerminationChanged(false);
+  Platform::Current()->AddRefProcess();
+}
+
+void DecreaseChildProcessRefCount() {
+  if (!Platform::Current()->MainThread()->IsCurrentThread()) {
+    PostCrossThreadTask(*Platform::Current()->MainThread()->GetTaskRunner(),
+                        FROM_HERE,
+                        CrossThreadBind(&DecreaseChildProcessRefCount));
+    return;
+  }
+  Platform::Current()->SuddenTerminationChanged(true);
+  Platform::Current()->ReleaseRefProcess();
+}
+
 }  // namespace
 
-BlobBytesProvider::BlobBytesProvider(RefPtr<RawData> data) {
-  // TODO(mek): This is probably not enough to keep the renderer alive while
-  // data is being transferred. The IPC based blob code additionally calls
-  // ChildProcess::current()->AddRefProcess/ReleaseProcess.
-  Platform::Current()->SuddenTerminationChanged(false);
-  data_.push_back(std::move(data));
+constexpr size_t BlobBytesProvider::kMaxConsolidatedItemSizeInBytes;
+
+BlobBytesProvider::BlobBytesProvider() {
+  IncreaseChildProcessRefCount();
+}
+
+BlobBytesProvider::BlobBytesProvider(scoped_refptr<RawData> data)
+    : BlobBytesProvider() {
+  AppendData(std::move(data));
 }
 
 BlobBytesProvider::~BlobBytesProvider() {
-  Platform::Current()->SuddenTerminationChanged(true);
+  DecreaseChildProcessRefCount();
 }
 
-void BlobBytesProvider::AppendData(RefPtr<RawData> data) {
+void BlobBytesProvider::AppendData(scoped_refptr<RawData> data) {
   data_.push_back(std::move(data));
+}
+
+void BlobBytesProvider::AppendData(base::span<const char> data) {
+  if (data_.IsEmpty() || data_.back()->length() + data.length() >
+                             kMaxConsolidatedItemSizeInBytes) {
+    data_.push_back(RawData::Create());
+  }
+  data_.back()->MutableData()->Append(data.data(), data.length());
 }
 
 void BlobBytesProvider::RequestAsReply(RequestAsReplyCallback callback) {
@@ -114,8 +153,13 @@ void BlobBytesProvider::RequestAsFile(uint64_t source_offset,
                                       base::File file,
                                       uint64_t file_offset,
                                       RequestAsFileCallback callback) {
-  // TODO(mek): Make sure this code runs on a thread that is allowed to do
-  // file IO.
+  DCHECK(!Platform::Current()->FileTaskRunner() ||
+         Platform::Current()->FileTaskRunner()->RunsTasksInCurrentSequence());
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(BooleanHistogram, seek_histogram,
+                                  ("Storage.Blob.RendererFileSeekFailed"));
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(BooleanHistogram, write_histogram,
+                                  ("Storage.Blob.RendererFileWriteFailed"));
+
   if (!file.IsValid()) {
     std::move(callback).Run(WTF::nullopt);
     return;
@@ -124,8 +168,8 @@ void BlobBytesProvider::RequestAsFile(uint64_t source_offset,
   int64_t seek_distance =
       file.Seek(base::File::FROM_BEGIN, SafeCast<int64_t>(file_offset));
   bool seek_failed = seek_distance < 0;
+  seek_histogram.Count(seek_failed);
   if (seek_failed) {
-    // TODO(mek): Log histogram Storage.Blob.RendererFileSeekFailed.
     std::move(callback).Run(WTF::nullopt);
     return;
   }
@@ -135,7 +179,7 @@ void BlobBytesProvider::RequestAsFile(uint64_t source_offset,
   // Offset of the current data chunk in the overall stream provided by this
   // provider.
   uint64_t offset = 0;
-  for (const RefPtr<RawData>& data : data_) {
+  for (const scoped_refptr<RawData>& data : data_) {
     // Skip any chunks that are entirely before the data we need to write.
     if (offset + data->length() <= source_offset) {
       offset += data->length();
@@ -158,8 +202,8 @@ void BlobBytesProvider::RequestAsFile(uint64_t source_offset,
       int actual_written = file.WriteAtCurrentPos(
           data->data() + data_offset + written, writing_size);
       bool write_failed = actual_written < 0;
+      write_histogram.Count(write_failed);
       if (write_failed) {
-        // TODO(mek): Log histogram Storage.Blob.RendererFileWriteFailed
         std::move(callback).Run(WTF::nullopt);
         return;
       }

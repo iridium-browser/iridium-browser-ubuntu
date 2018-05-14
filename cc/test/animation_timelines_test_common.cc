@@ -7,11 +7,13 @@
 #include "base/memory/ptr_util.h"
 #include "cc/animation/animation_events.h"
 #include "cc/animation/animation_id_provider.h"
-#include "cc/animation/animation_player.h"
 #include "cc/animation/animation_timeline.h"
 #include "cc/animation/element_animations.h"
-#include "cc/base/filter_operation.h"
-#include "cc/base/filter_operations.h"
+#include "cc/animation/keyframe_effect.h"
+#include "cc/animation/single_keyframe_effect_animation.h"
+#include "cc/paint/filter_operation.h"
+#include "cc/paint/filter_operations.h"
+#include "cc/trees/property_tree.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
@@ -24,7 +26,7 @@ TestLayer::TestLayer() {
   ClearMutatedProperties();
 }
 
-TestLayer::~TestLayer() {}
+TestLayer::~TestLayer() = default;
 
 void TestLayer::ClearMutatedProperties() {
   transform_ = gfx::Transform();
@@ -316,7 +318,7 @@ TestAnimationDelegate::TestAnimationDelegate()
 
 void TestAnimationDelegate::NotifyAnimationStarted(
     base::TimeTicks monotonic_time,
-    TargetProperty::Type target_property,
+    int target_property,
     int group) {
   started_ = true;
   start_time_ = monotonic_time;
@@ -324,22 +326,22 @@ void TestAnimationDelegate::NotifyAnimationStarted(
 
 void TestAnimationDelegate::NotifyAnimationFinished(
     base::TimeTicks monotonic_time,
-    TargetProperty::Type target_property,
+    int target_property,
     int group) {
   finished_ = true;
 }
 
 void TestAnimationDelegate::NotifyAnimationAborted(
     base::TimeTicks monotonic_time,
-    TargetProperty::Type target_property,
+    int target_property,
     int group) {
   aborted_ = true;
 }
 
 void TestAnimationDelegate::NotifyAnimationTakeover(
     base::TimeTicks monotonic_time,
-    TargetProperty::Type target_property,
-    double animation_start_time,
+    int target_property,
+    base::TimeTicks animation_start_time,
     std::unique_ptr<AnimationCurve> curve) {
   takeover_ = true;
 }
@@ -350,7 +352,7 @@ AnimationTimelinesTest::AnimationTimelinesTest()
       host_(nullptr),
       host_impl_(nullptr),
       timeline_id_(AnimationIdProvider::NextTimelineId()),
-      player_id_(AnimationIdProvider::NextPlayerId()),
+      animation_id_(AnimationIdProvider::NextAnimationId()),
       next_test_layer_id_(0) {
   host_ = client_.host();
   host_impl_ = client_impl_.host();
@@ -358,12 +360,10 @@ AnimationTimelinesTest::AnimationTimelinesTest()
   element_id_ = ElementId(NextTestLayerId());
 }
 
-AnimationTimelinesTest::~AnimationTimelinesTest() {
-}
+AnimationTimelinesTest::~AnimationTimelinesTest() = default;
 
 void AnimationTimelinesTest::SetUp() {
   timeline_ = AnimationTimeline::Create(timeline_id_);
-  player_ = AnimationPlayer::Create(player_id_);
 }
 
 void AnimationTimelinesTest::TearDown() {
@@ -395,32 +395,34 @@ void AnimationTimelinesTest::CreateTestImplLayer(
   client_impl_.RegisterElement(element_id_, element_list_type);
 }
 
-void AnimationTimelinesTest::AttachTimelinePlayerLayer() {
+void AnimationTimelinesTest::AttachTimelineAnimationLayer() {
   host_->AddAnimationTimeline(timeline_);
-  timeline_->AttachPlayer(player_);
-  player_->AttachElement(element_id_);
+  timeline_->AttachAnimation(animation_);
+  animation_->AttachElement(element_id_);
 
-  element_animations_ = player_->element_animations();
+  element_animations_ = animation_->keyframe_effect()->element_animations();
 }
 
-void AnimationTimelinesTest::CreateImplTimelineAndPlayer() {
+void AnimationTimelinesTest::CreateImplTimelineAndAnimation() {
   host_->PushPropertiesTo(host_impl_);
-  GetImplTimelineAndPlayerByID();
+  GetImplTimelineAndAnimationByID();
 }
 
-void AnimationTimelinesTest::GetImplTimelineAndPlayerByID() {
+void AnimationTimelinesTest::GetImplTimelineAndAnimationByID() {
   timeline_impl_ = host_impl_->GetTimelineById(timeline_id_);
   EXPECT_TRUE(timeline_impl_);
-  player_impl_ = timeline_impl_->GetPlayerById(player_id_);
-  EXPECT_TRUE(player_impl_);
+  animation_impl_ = static_cast<SingleKeyframeEffectAnimation*>(
+      timeline_impl_->GetAnimationById(animation_id_));
+  EXPECT_TRUE(animation_impl_);
 
-  element_animations_impl_ = player_impl_->element_animations();
+  element_animations_impl_ =
+      animation_impl_->keyframe_effect()->element_animations();
 }
 
 void AnimationTimelinesTest::ReleaseRefPtrs() {
-  player_ = nullptr;
+  animation_ = nullptr;
   timeline_ = nullptr;
-  player_impl_ = nullptr;
+  animation_impl_ = nullptr;
   timeline_impl_ = nullptr;
 }
 
@@ -429,31 +431,35 @@ void AnimationTimelinesTest::TickAnimationsTransferEvents(
     unsigned expect_events) {
   std::unique_ptr<MutatorEvents> events = host_->CreateEvents();
 
-  host_impl_->TickAnimations(time);
+  // TODO(smcgruer): Construct a proper ScrollTree for the tests.
+  ScrollTree scroll_tree;
+  host_impl_->TickAnimations(time, scroll_tree);
   host_impl_->UpdateAnimationState(true, events.get());
 
   auto* animation_events = static_cast<const AnimationEvents*>(events.get());
   EXPECT_EQ(expect_events, animation_events->events_.size());
 
-  host_->TickAnimations(time);
+  host_->TickAnimations(time, scroll_tree);
   host_->UpdateAnimationState(true, nullptr);
   host_->SetAnimationEvents(std::move(events));
 }
 
-AnimationPlayer* AnimationTimelinesTest::GetPlayerForElementId(
+KeyframeEffect* AnimationTimelinesTest::GetKeyframeEffectForElementId(
     ElementId element_id) {
   const scoped_refptr<ElementAnimations> element_animations =
       host_->GetElementAnimationsForElementId(element_id);
-  return element_animations ? &*element_animations->players_list().begin()
-                            : nullptr;
+  return element_animations
+             ? &*element_animations->keyframe_effects_list().begin()
+             : nullptr;
 }
 
-AnimationPlayer* AnimationTimelinesTest::GetImplPlayerForLayerId(
+KeyframeEffect* AnimationTimelinesTest::GetImplKeyframeEffectForLayerId(
     ElementId element_id) {
   const scoped_refptr<ElementAnimations> element_animations =
       host_impl_->GetElementAnimationsForElementId(element_id);
-  return element_animations ? &*element_animations->players_list().begin()
-                            : nullptr;
+  return element_animations
+             ? &*element_animations->keyframe_effects_list().begin()
+             : nullptr;
 }
 
 int AnimationTimelinesTest::NextTestLayerId() {
@@ -461,28 +467,21 @@ int AnimationTimelinesTest::NextTestLayerId() {
   return next_test_layer_id_;
 }
 
-bool AnimationTimelinesTest::CheckPlayerTimelineNeedsPushProperties(
+bool AnimationTimelinesTest::CheckKeyframeEffectTimelineNeedsPushProperties(
     bool needs_push_properties) const {
-  DCHECK(player_);
+  DCHECK(animation_);
   DCHECK(timeline_);
 
   bool result = true;
 
-  if (player_->needs_push_properties() != needs_push_properties) {
-    ADD_FAILURE() << "player_->needs_push_properties() expected to be "
+  KeyframeEffect* keyframe_effect = animation_->keyframe_effect();
+  if (keyframe_effect->needs_push_properties() != needs_push_properties) {
+    ADD_FAILURE() << "keyframe_effect->needs_push_properties() expected to be "
                   << needs_push_properties;
     result = false;
   }
   if (timeline_->needs_push_properties() != needs_push_properties) {
     ADD_FAILURE() << "timeline_->needs_push_properties() expected to be "
-                  << needs_push_properties;
-    result = false;
-  }
-  if (player_->element_animations() &&
-      player_->element_animations()->needs_push_properties() !=
-          needs_push_properties) {
-    ADD_FAILURE() << "player_->element_animations()->needs_push_properties() "
-                     "expected to be "
                   << needs_push_properties;
     result = false;
   }

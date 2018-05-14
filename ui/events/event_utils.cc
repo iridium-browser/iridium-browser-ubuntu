@@ -62,40 +62,45 @@ int RegisterCustomEventType() {
 }
 
 void ValidateEventTimeClock(base::TimeTicks* timestamp) {
+#if defined(USE_X11) || DCHECK_IS_ON()
   if (base::debug::BeingDebugged())
     return;
 
   base::TimeTicks now = EventTimeForNow();
   int64_t delta = (now - *timestamp).InMilliseconds();
   bool has_valid_timebase = delta >= 0 && delta <= 60 * 1000;
-  UMA_HISTOGRAM_BOOLEAN("Event.TimestampHasValidTimebase.Browser",
-                        has_valid_timebase);
 
 #if defined(USE_X11)
   // Restrict this correction to X11 which is known to provide bogus timestamps
   // that require correction (crbug.com/611950).
   if (!has_valid_timebase)
     *timestamp = now;
+#else
+  DCHECK(has_valid_timebase)
+      << "Event timestamp (" << *timestamp << ") is not consistent with "
+      << "current time (" << now << ").";
 #endif
+
+#endif  // defined(USE_X11) || DCHECK_IS_ON()
 }
 
 bool ShouldDefaultToNaturalScroll() {
   return GetInternalDisplayTouchSupport() ==
-         display::Display::TOUCH_SUPPORT_AVAILABLE;
+         display::Display::TouchSupport::AVAILABLE;
 }
 
 display::Display::TouchSupport GetInternalDisplayTouchSupport() {
   display::Screen* screen = display::Screen::GetScreen();
   // No screen in some unit tests.
   if (!screen)
-    return display::Display::TOUCH_SUPPORT_UNKNOWN;
+    return display::Display::TouchSupport::UNKNOWN;
   const std::vector<display::Display>& displays = screen->GetAllDisplays();
   for (std::vector<display::Display>::const_iterator it = displays.begin();
        it != displays.end(); ++it) {
     if (it->IsInternal())
       return it->touch_support();
   }
-  return display::Display::TOUCH_SUPPORT_UNAVAILABLE;
+  return display::Display::TouchSupport::UNAVAILABLE;
 }
 
 void ComputeEventLatencyOS(const base::NativeEvent& native_event) {
@@ -128,6 +133,21 @@ void ComputeEventLatencyOS(const base::NativeEvent& native_event) {
     default:
       return;
   }
+}
+
+void ConvertEventLocationToTargetWindowLocation(
+    const gfx::Point& target_window_origin,
+    const gfx::Point& current_window_origin,
+    ui::LocatedEvent* located_event) {
+  if (current_window_origin == target_window_origin)
+    return;
+
+  DCHECK(located_event);
+  gfx::Vector2d offset = current_window_origin - target_window_origin;
+  gfx::PointF location_in_pixel_in_host =
+      located_event->location_f() + gfx::Vector2dF(offset);
+  located_event->set_location_f(location_in_pixel_in_host);
+  located_event->set_root_location_f(location_in_pixel_in_host);
 }
 
 }  // namespace ui

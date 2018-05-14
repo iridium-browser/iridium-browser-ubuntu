@@ -14,7 +14,7 @@
 
 #include "ANGLEPerfTest.h"
 
-struct DrawCallPerfParams final : public RenderTestParams
+struct DrawCallPerfParams : public RenderTestParams
 {
     // Common default options
     DrawCallPerfParams()
@@ -24,6 +24,7 @@ struct DrawCallPerfParams final : public RenderTestParams
         windowWidth  = 256;
         windowHeight = 256;
     }
+    virtual ~DrawCallPerfParams() {}
 
     std::string suffix() const override;
 
@@ -33,16 +34,10 @@ struct DrawCallPerfParams final : public RenderTestParams
     bool useFBO             = false;
 };
 
-std::ostream &operator<<(std::ostream &os, const DrawCallPerfParams &params);
-
 DrawCallPerfParams DrawCallPerfD3D11Params(bool useNullDevice, bool renderToTexture);
-
 DrawCallPerfParams DrawCallPerfD3D9Params(bool useNullDevice, bool renderToTexture);
-
-DrawCallPerfParams DrawCallPerfOpenGLParams(bool useNullDevice, bool renderToTexture);
-
+DrawCallPerfParams DrawCallPerfOpenGLOrGLESParams(bool useNullDevice, bool renderToTexture);
 DrawCallPerfParams DrawCallPerfValidationOnly();
-
 DrawCallPerfParams DrawCallPerfVulkanParams(bool renderToTexture);
 
 #endif  // TESTS_PERF_TESTS_DRAW_CALL_PERF_PARAMS_H_

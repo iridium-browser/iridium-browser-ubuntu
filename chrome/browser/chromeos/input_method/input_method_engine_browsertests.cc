@@ -7,6 +7,7 @@
 #include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -32,6 +33,7 @@
 #include "ui/events/event.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
+#include "ui/keyboard/keyboard_util.h"
 
 namespace chromeos {
 namespace input_method {
@@ -126,7 +128,7 @@ class KeyEventDoneCallback {
 
   void Run(bool consumed) {
     if (consumed == expected_argument_) {
-      base::MessageLoop::current()->QuitWhenIdle();
+      base::RunLoop::QuitCurrentWhenIdleDeprecated();
       is_called_ = true;
     }
   }
@@ -562,20 +564,20 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
     const ui::CompositionText& composition_text =
         mock_input_context->last_update_composition_arg().composition_text;
     EXPECT_EQ(base::UTF8ToUTF16("COMPOSITION_TEXT"), composition_text.text);
-    const ui::CompositionUnderlines underlines = composition_text.underlines;
+    const ui::ImeTextSpans ime_text_spans = composition_text.ime_text_spans;
 
-    ASSERT_EQ(2U, underlines.size());
+    ASSERT_EQ(2U, ime_text_spans.size());
     // single underline
-    EXPECT_EQ(SK_ColorBLACK, underlines[0].color);
-    EXPECT_FALSE(underlines[0].thick);
-    EXPECT_EQ(0U, underlines[0].start_offset);
-    EXPECT_EQ(5U, underlines[0].end_offset);
+    EXPECT_EQ(SK_ColorBLACK, ime_text_spans[0].underline_color);
+    EXPECT_FALSE(ime_text_spans[0].thick);
+    EXPECT_EQ(0U, ime_text_spans[0].start_offset);
+    EXPECT_EQ(5U, ime_text_spans[0].end_offset);
 
     // double underline
-    EXPECT_EQ(SK_ColorBLACK, underlines[1].color);
-    EXPECT_TRUE(underlines[1].thick);
-    EXPECT_EQ(6U, underlines[1].start_offset);
-    EXPECT_EQ(10U, underlines[1].end_offset);
+    EXPECT_EQ(SK_ColorBLACK, ime_text_spans[1].underline_color);
+    EXPECT_TRUE(ime_text_spans[1].thick);
+    EXPECT_EQ(6U, ime_text_spans[1].start_offset);
+    EXPECT_EQ(10U, ime_text_spans[1].end_offset);
   }
   {
     SCOPED_TRACE("clearComposition test");
@@ -1026,14 +1028,14 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
     const ui::CompositionText& composition_text =
         mock_input_context->last_update_composition_arg().composition_text;
     EXPECT_EQ(base::UTF8ToUTF16("us"), composition_text.text);
-    const ui::CompositionUnderlines underlines = composition_text.underlines;
+    const ui::ImeTextSpans ime_text_spans = composition_text.ime_text_spans;
 
-    ASSERT_EQ(1U, underlines.size());
+    ASSERT_EQ(1U, ime_text_spans.size());
     // single underline
-    EXPECT_EQ(SK_ColorBLACK, underlines[0].color);
-    EXPECT_FALSE(underlines[0].thick);
-    EXPECT_EQ(0U, underlines[0].start_offset);
-    EXPECT_EQ(1U, underlines[0].end_offset);
+    EXPECT_EQ(SK_ColorBLACK, ime_text_spans[0].underline_color);
+    EXPECT_FALSE(ime_text_spans[0].thick);
+    EXPECT_EQ(0U, ime_text_spans[0].start_offset);
+    EXPECT_EQ(1U, ime_text_spans[0].end_offset);
     EXPECT_TRUE(mock_input_context->last_commit_text().empty());
 
     InputMethodManager::Get()->GetActiveIMEState()->ChangeInputMethod(
@@ -1073,13 +1075,12 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest, RestrictedKeyboard) {
       ui::IMEBridge::Get()->GetCurrentEngineHandler();
   ASSERT_TRUE(engine_handler);
 
-  extensions::VirtualKeyboardAPI* virtual_keyboard_api =
-      extensions::BrowserContextKeyedAPIFactory<
-          extensions::VirtualKeyboardAPI>::Get(profile());
-  ASSERT_TRUE(virtual_keyboard_api);
-  ASSERT_TRUE(virtual_keyboard_api->delegate());
-  virtual_keyboard_api->delegate()->SetKeyboardRestricted(true);
-
+  keyboard::KeyboardConfig keyboard_config = keyboard::GetKeyboardConfig();
+  // Turn off these features, which are on by default.
+  keyboard_config.auto_correct = false;
+  keyboard_config.auto_complete = false;
+  keyboard_config.spell_check = false;
+  keyboard::UpdateKeyboardConfig(keyboard_config);
   extensions::ExtensionHost* host =
       extensions::ProcessManager::Get(profile())->GetBackgroundHostForExtension(
           extension_->id());
@@ -1091,7 +1092,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest, RestrictedKeyboard) {
     SCOPED_TRACE("Text");
 
     ExtensionTestMessageListener focus_listener(
-        "onFocus:password:false:false:false", false);
+        "onFocus:text:false:false:false", false);
     ui::IMEEngineHandlerInterface::InputContext context(
         ui::TEXT_INPUT_TYPE_TEXT, ui::TEXT_INPUT_MODE_DEFAULT,
         ui::TEXT_INPUT_FLAG_NONE);
@@ -1114,8 +1115,8 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest, RestrictedKeyboard) {
   {
     SCOPED_TRACE("URL");
 
-    ExtensionTestMessageListener focus_listener(
-        "onFocus:password:false:false:false", false);
+    ExtensionTestMessageListener focus_listener("onFocus:url:false:false:false",
+                                                false);
     ui::IMEEngineHandlerInterface::InputContext context(
         ui::TEXT_INPUT_TYPE_URL, ui::TEXT_INPUT_MODE_DEFAULT,
         ui::TEXT_INPUT_FLAG_NONE);
@@ -1127,7 +1128,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest, RestrictedKeyboard) {
     SCOPED_TRACE("Search");
 
     ExtensionTestMessageListener focus_listener(
-        "onFocus:password:false:false:false", false);
+        "onFocus:search:false:false:false", false);
     ui::IMEEngineHandlerInterface::InputContext context(
         ui::TEXT_INPUT_TYPE_SEARCH, ui::TEXT_INPUT_MODE_DEFAULT,
         ui::TEXT_INPUT_FLAG_NONE);
@@ -1139,7 +1140,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest, RestrictedKeyboard) {
     SCOPED_TRACE("Email");
 
     ExtensionTestMessageListener focus_listener(
-        "onFocus:password:false:false:false", false);
+        "onFocus:email:false:false:false", false);
     ui::IMEEngineHandlerInterface::InputContext context(
         ui::TEXT_INPUT_TYPE_EMAIL, ui::TEXT_INPUT_MODE_DEFAULT,
         ui::TEXT_INPUT_FLAG_NONE);

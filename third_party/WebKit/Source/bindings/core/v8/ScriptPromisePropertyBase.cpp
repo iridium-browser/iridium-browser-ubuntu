@@ -9,7 +9,6 @@
 #include "core/dom/ExecutionContext.h"
 #include "platform/bindings/ScopedPersistent.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -82,7 +81,7 @@ void ScriptPromisePropertyBase::ResolveOrReject(State target_state) {
       // wrapper has died.
       // Since v8 GC can run during the iteration and clear the reference,
       // we can't move this check out of the loop.
-      wrappers_.erase(i);
+      wrappers_.EraseAt(i);
       continue;
     }
     v8::Local<v8::Object> wrapper = persistent->NewLocal(isolate_);
@@ -135,7 +134,7 @@ v8::Local<v8::Object> ScriptPromisePropertyBase::EnsureHolderWrapper(
       // wrapper has died.
       // Since v8 GC can run during the iteration and clear the reference,
       // we can't move this check out of the loop.
-      wrappers_.erase(i);
+      wrappers_.EraseAt(i);
       continue;
     }
 
@@ -146,7 +145,7 @@ v8::Local<v8::Object> ScriptPromisePropertyBase::EnsureHolderWrapper(
   }
   v8::Local<v8::Object> wrapper = Holder(isolate_, context->Global());
   std::unique_ptr<ScopedPersistent<v8::Object>> weak_persistent =
-      WTF::WrapUnique(new ScopedPersistent<v8::Object>);
+      std::make_unique<ScopedPersistent<v8::Object>>();
   weak_persistent->Set(isolate_, wrapper);
   weak_persistent->SetPhantom();
   wrappers_.push_back(std::move(weak_persistent));
@@ -212,7 +211,7 @@ V8PrivateProperty::Symbol ScriptPromisePropertyBase::ResolverSymbol() {
   return V8PrivateProperty::GetSymbol(isolate_, "noResolver");
 }
 
-DEFINE_TRACE(ScriptPromisePropertyBase) {
+void ScriptPromisePropertyBase::Trace(blink::Visitor* visitor) {
   ContextClient::Trace(visitor);
 }
 

@@ -6,6 +6,7 @@
 
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "platform/CrossThreadFunctional.h"
+#include "platform/WebTaskRunner.h"
 #include "platform/graphics/SkiaTextureHolder.h"
 #include "platform/graphics/gpu/SharedGpuContext.h"
 #include "public/platform/Platform.h"
@@ -19,7 +20,8 @@ namespace {
 void ReleaseTexture(
     bool is_converted_from_skia_texture,
     unsigned texture_id,
-    WeakPtr<WebGraphicsContext3DProviderWrapper> context_provider,
+    std::unique_ptr<gpu::Mailbox> mailbox,
+    base::WeakPtr<WebGraphicsContext3DProviderWrapper> context_provider,
     std::unique_ptr<gpu::SyncToken> sync_token) {
   if (!is_converted_from_skia_texture && texture_id && context_provider) {
     context_provider->ContextProvider()->ContextGL()->WaitSyncTokenCHROMIUM(
@@ -35,78 +37,127 @@ MailboxTextureHolder::MailboxTextureHolder(
     const gpu::Mailbox& mailbox,
     const gpu::SyncToken& sync_token,
     unsigned texture_id_to_delete_after_mailbox_consumed,
-    WeakPtr<WebGraphicsContext3DProviderWrapper> context_provider,
+    base::WeakPtr<WebGraphicsContext3DProviderWrapper>&&
+        context_provider_wrapper,
     IntSize mailbox_size)
-    : mailbox_(mailbox),
+    : TextureHolder(std::move(context_provider_wrapper)),
+      mailbox_(mailbox),
       sync_token_(sync_token),
       texture_id_(texture_id_to_delete_after_mailbox_consumed),
-      context_provider_(context_provider),
       size_(mailbox_size),
-      is_converted_from_skia_texture_(false) {}
+      is_converted_from_skia_texture_(false),
+      thread_id_(0) {
+  InitCommon();
+}
 
 MailboxTextureHolder::MailboxTextureHolder(
-    std::unique_ptr<TextureHolder> texture_holder) {
+    std::unique_ptr<TextureHolder> texture_holder,
+    GLenum filter)
+    : TextureHolder(texture_holder->ContextProviderWrapper()),
+      texture_id_(0),
+      is_converted_from_skia_texture_(true),
+      thread_id_(0) {
   DCHECK(texture_holder->IsSkiaTextureHolder());
   sk_sp<SkImage> image = texture_holder->GetSkImage();
   DCHECK(image);
+  size_ = IntSize(image->width(), image->height());
 
-  gpu::gles2::GLES2Interface* shared_gl = SharedGpuContext::Gl();
-  GrContext* shared_gr_context = SharedGpuContext::Gr();
-  if (!shared_gr_context) {
-    // Can happen if the context is lost. The SkImage won't be any good now
-    // anyway.
+  if (!ContextProviderWrapper())
+    return;
+
+  ContextProviderWrapper()->Utils()->GetMailboxForSkImage(mailbox_, image,
+                                                          filter);
+
+  InitCommon();
+}
+
+void MailboxTextureHolder::Sync(MailboxSyncMode mode) {
+  if (IsCrossThread()) {
+    // Was originally created on another thread. Should already have a sync
+    // token from the original source context, already verified if needed.
+    DCHECK(sync_token_.HasData());
+    DCHECK(mode != kVerifiedSyncToken || sync_token_.verified_flush());
     return;
   }
-  GLuint image_texture_id =
-      skia::GrBackendObjectToGrGLTextureInfo(image->getTextureHandle(true))
-          ->fID;
-  shared_gl->BindTexture(GL_TEXTURE_2D, image_texture_id);
 
-  shared_gl->GenMailboxCHROMIUM(mailbox_.name);
-  shared_gl->ProduceTextureCHROMIUM(GL_TEXTURE_2D, mailbox_.name);
-  const GLuint64 fence_sync = shared_gl->InsertFenceSyncCHROMIUM();
-  shared_gl->Flush();
-  shared_gl->GenSyncTokenCHROMIUM(fence_sync, sync_token_.GetData());
+  if (!ContextProviderWrapper() || IsAbandoned())
+    return;
 
-  shared_gl->BindTexture(GL_TEXTURE_2D, 0);
-  // We changed bound textures in this function, so reset the GrContext.
-  shared_gr_context->resetContext(kTextureBinding_GrGLBackendState);
-  size_ = IntSize(image->width(), image->height());
-  texture_id_ = image_texture_id;
-  is_converted_from_skia_texture_ = true;
+  gpu::gles2::GLES2Interface* gl =
+      ContextProviderWrapper()->ContextProvider()->ContextGL();
+
+  if (mode == kOrderingBarrier) {
+    if (!did_issue_ordering_barrier_) {
+      gl->OrderingBarrierCHROMIUM();
+      did_issue_ordering_barrier_ = true;
+    }
+    return;
+  }
+
+  if (!sync_token_.HasData()) {
+    if (mode == kVerifiedSyncToken) {
+      gl->GenSyncTokenCHROMIUM(sync_token_.GetData());
+    } else {
+      gl->GenUnverifiedSyncTokenCHROMIUM(sync_token_.GetData());
+    }
+    return;
+  }
+
+  // At this point we have a pre-existing sync token. We just need to verify
+  // it if needed.  Providing a verified sync token when unverified is requested
+  // is fine.
+  if (mode == kVerifiedSyncToken && !sync_token_.verified_flush()) {
+    int8_t* token_data = sync_token_.GetData();
+    // TODO(junov): Batch this verification in the case where there are multiple
+    // offscreen canvases being committed.
+    gl->ShallowFlushCHROMIUM();
+    gl->VerifySyncTokensCHROMIUM(&token_data, 1);
+    sync_token_.SetVerifyFlush();
+  }
+}
+
+void MailboxTextureHolder::InitCommon() {
+  WebThread* thread = Platform::Current()->CurrentThread();
+  thread_id_ = thread->ThreadId();
+  texture_thread_task_runner_ = thread->GetTaskRunner();
+}
+
+bool MailboxTextureHolder::IsValid() const {
+  if (IsCrossThread()) {
+    // If context is is from another thread, validity cannot be verified.
+    // Just assume valid. Potential problem will be detected later.
+    return true;
+  }
+  return !IsAbandoned() && !!ContextProviderWrapper();
+}
+
+bool MailboxTextureHolder::IsCrossThread() const {
+  return thread_id_ != Platform::Current()->CurrentThread()->ThreadId();
 }
 
 MailboxTextureHolder::~MailboxTextureHolder() {
-  // Avoid leaking mailboxes in cases where the texture gets recycled by skia.
-  if (SharedGpuContext::IsValid()) {
-    SharedGpuContext::Gl()->ProduceTextureDirectCHROMIUM(0, GL_TEXTURE_2D,
-                                                         mailbox_.name);
-  }
-  ReleaseTextureThreadSafe();
-}
-
-void MailboxTextureHolder::ReleaseTextureThreadSafe() {
-  // If this member is still null, it means we are still at the thread where
-  // the m_texture was created.
   std::unique_ptr<gpu::SyncToken> passed_sync_token(
       new gpu::SyncToken(sync_token_));
-  if (!WasTransferred()) {
-    ReleaseTexture(is_converted_from_skia_texture_, texture_id_,
-                   context_provider_, std::move(passed_sync_token));
-  } else if (WasTransferred() && TextureThreadTaskRunner()) {
-    TextureThreadTaskRunner()->PostTask(
-        BLINK_FROM_HERE,
-        CrossThreadBind(&ReleaseTexture, is_converted_from_skia_texture_,
-                        texture_id_, WTF::Passed(std::move(context_provider_)),
-                        WTF::Passed(std::move(passed_sync_token))));
-  }
-  texture_id_ = 0u;  // invalidate the texture.
-  SetWasTransferred(false);
-  SetTextureThreadTaskRunner(nullptr);
-}
+  std::unique_ptr<gpu::Mailbox> passed_mailbox(new gpu::Mailbox(mailbox_));
 
-unsigned MailboxTextureHolder::SharedContextId() {
-  return SharedGpuContext::kNoSharedContext;
+  if (!IsAbandoned()) {
+    if (texture_thread_task_runner_ &&
+        thread_id_ != Platform::Current()->CurrentThread()->ThreadId()) {
+      PostCrossThreadTask(
+          *texture_thread_task_runner_, FROM_HERE,
+          CrossThreadBind(&ReleaseTexture, is_converted_from_skia_texture_,
+                          texture_id_, WTF::Passed(std::move(passed_mailbox)),
+                          WTF::Passed(ContextProviderWrapper()),
+                          WTF::Passed(std::move(passed_sync_token))));
+    } else {
+      ReleaseTexture(is_converted_from_skia_texture_, texture_id_,
+                     std::move(passed_mailbox), ContextProviderWrapper(),
+                     std::move(passed_sync_token));
+    }
+  }
+
+  texture_id_ = 0u;  // invalidate the texture.
+  texture_thread_task_runner_ = nullptr;
 }
 
 }  // namespace blink

@@ -34,13 +34,13 @@ namespace blink {
 
 SVGPaintServer::SVGPaintServer(Color color) : color_(color) {}
 
-SVGPaintServer::SVGPaintServer(PassRefPtr<Gradient> gradient,
+SVGPaintServer::SVGPaintServer(scoped_refptr<Gradient> gradient,
                                const AffineTransform& transform)
     : gradient_(std::move(gradient)),
       transform_(transform),
       color_(Color::kBlack) {}
 
-SVGPaintServer::SVGPaintServer(PassRefPtr<Pattern> pattern,
+SVGPaintServer::SVGPaintServer(scoped_refptr<Pattern> pattern,
                                const AffineTransform& transform)
     : pattern_(std::move(pattern)),
       transform_(transform),
@@ -90,7 +90,7 @@ static SVGPaintDescription RequestPaint(const LayoutObject& object,
     case SVG_PAINTTYPE_URI_CURRENTCOLOR:
       // The keyword `currentcolor` takes its value from the value of the
       // `color` property on the same element.
-      color = style.VisitedDependentColor(CSSPropertyColor);
+      color = style.VisitedDependentColor(GetCSSPropertyColor());
       has_color = true;
       break;
     case SVG_PAINTTYPE_RGBCOLOR:
@@ -98,6 +98,7 @@ static SVGPaintDescription RequestPaint(const LayoutObject& object,
       color = apply_to_fill ? svg_style.FillPaintColor()
                             : svg_style.StrokePaintColor();
       has_color = true;
+      break;
     default:
       break;
   }
@@ -132,7 +133,7 @@ static SVGPaintDescription RequestPaint(const LayoutObject& object,
 
   LayoutSVGResourcePaintServer* uri_resource = nullptr;
   if (SVGResources* resources =
-          SVGResourcesCache::CachedResourcesForLayoutObject(&object))
+          SVGResourcesCache::CachedResourcesForLayoutObject(object))
     uri_resource = apply_to_fill ? resources->Fill() : resources->Stroke();
 
   // If the requested resource is not available, return the color resource or
@@ -168,8 +169,8 @@ SVGPaintServer SVGPaintServer::RequestForLayoutObject(
     return Invalid();
   if (!paint_description.resource)
     return SVGPaintServer(paint_description.color);
-  SVGPaintServer paint_server =
-      paint_description.resource->PreparePaintServer(layout_object);
+  SVGPaintServer paint_server = paint_description.resource->PreparePaintServer(
+      layout_object, layout_object.ObjectBoundingBox());
   if (paint_server.IsValid())
     return paint_server;
   if (paint_description.has_fallback)
@@ -187,7 +188,7 @@ bool SVGPaintServer::ExistsForLayoutObject(
 LayoutSVGResourcePaintServer::LayoutSVGResourcePaintServer(SVGElement* element)
     : LayoutSVGResourceContainer(element) {}
 
-LayoutSVGResourcePaintServer::~LayoutSVGResourcePaintServer() {}
+LayoutSVGResourcePaintServer::~LayoutSVGResourcePaintServer() = default;
 
 SVGPaintDescription LayoutSVGResourcePaintServer::RequestPaintDescription(
     const LayoutObject& layout_object,

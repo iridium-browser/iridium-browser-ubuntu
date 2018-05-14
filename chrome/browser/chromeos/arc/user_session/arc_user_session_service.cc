@@ -7,6 +7,7 @@
 #include "base/memory/singleton.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
+#include "components/arc/intent_helper/arc_intent_helper_bridge.h"
 #include "components/session_manager/core/session_manager.h"
 
 namespace arc {
@@ -45,12 +46,10 @@ ArcUserSessionService::ArcUserSessionService(content::BrowserContext* context,
 }
 
 ArcUserSessionService::~ArcUserSessionService() {
-  // TODO(hidehiko): Currently, the lifetime of ArcBridgeService and
-  // BrowserContextKeyedService is not nested.
-  // If ArcServiceManager::Get() returns nullptr, it is already destructed,
-  // so do not touch it.
-  if (ArcServiceManager::Get())
-    arc_bridge_service_->intent_helper()->RemoveObserver(this);
+  // OnConnectionClosed() is not guaranteed to be called before destruction.
+  session_manager::SessionManager::Get()->RemoveObserver(this);
+
+  arc_bridge_service_->intent_helper()->RemoveObserver(this);
 }
 
 void ArcUserSessionService::OnSessionStateChanged() {
@@ -65,16 +64,19 @@ void ArcUserSessionService::OnSessionStateChanged() {
     return;
 
   instance->SendBroadcast(
-      "org.chromium.arc.intent_helper.USER_SESSION_ACTIVE",
-      "org.chromium.arc.intent_helper",
-      "org.chromium.arc.intent_helper.ArcIntentHelperService", "{}");
+      ArcIntentHelperBridge::AppendStringToIntentHelperPackageName(
+          "USER_SESSION_ACTIVE"),
+      ArcIntentHelperBridge::kArcIntentHelperPackageName,
+      ArcIntentHelperBridge::AppendStringToIntentHelperPackageName(
+          "ArcIntentHelperService"),
+      "{}");
 }
 
-void ArcUserSessionService::OnInstanceReady() {
+void ArcUserSessionService::OnConnectionReady() {
   session_manager::SessionManager::Get()->AddObserver(this);
 }
 
-void ArcUserSessionService::OnInstanceClosed() {
+void ArcUserSessionService::OnConnectionClosed() {
   session_manager::SessionManager::Get()->RemoveObserver(this);
 }
 

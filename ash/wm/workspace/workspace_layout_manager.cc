@@ -5,6 +5,7 @@
 #include "ash/wm/workspace/workspace_layout_manager.h"
 
 #include <algorithm>
+#include <memory>
 
 #include "ash/keyboard/keyboard_observer_register.h"
 #include "ash/public/cpp/shell_window_ids.h"
@@ -41,7 +42,7 @@ WorkspaceLayoutManager::WorkspaceLayoutManager(aura::Window* window)
       root_window_(window->GetRootWindow()),
       root_window_controller_(RootWindowController::ForWindow(root_window_)),
       work_area_in_parent_(
-          ScreenUtil::GetDisplayWorkAreaBoundsInParent(window_)),
+          screen_util::GetDisplayWorkAreaBoundsInParent(window_)),
       is_fullscreen_(wm::GetWindowForFullscreenMode(window) != nullptr),
       keyboard_observer_(this) {
   Shell::Get()->AddShellObserver(this);
@@ -49,7 +50,7 @@ WorkspaceLayoutManager::WorkspaceLayoutManager(aura::Window* window)
   root_window_->AddObserver(this);
   display::Screen::GetScreen()->AddObserver(this);
   DCHECK(window->GetProperty(kSnapChildrenToPixelBoundary));
-  backdrop_controller_ = base::MakeUnique<BackdropController>(window_);
+  backdrop_controller_ = std::make_unique<BackdropController>(window_);
 }
 
 WorkspaceLayoutManager::~WorkspaceLayoutManager() {
@@ -94,7 +95,19 @@ void WorkspaceLayoutManager::OnWindowAddedToLayout(aura::Window* child) {
 void WorkspaceLayoutManager::OnWillRemoveWindowFromLayout(aura::Window* child) {
   windows_.erase(child);
   child->RemoveObserver(this);
-  wm::GetWindowState(child)->RemoveObserver(this);
+  wm::WindowState* window_state = wm::GetWindowState(child);
+  window_state->RemoveObserver(this);
+
+  // When a window is removing from a workspace layout, it is going to be added
+  // to a new workspace layout or destroyed.
+  if (!window_state->pre_added_to_workspace_window_bounds()) {
+    if (window_state->pre_auto_manage_window_bounds()) {
+      window_state->SetPreAddedToWorkspaceWindowBounds(
+          *window_state->pre_auto_manage_window_bounds());
+    } else {
+      window_state->SetPreAddedToWorkspaceWindowBounds(child->bounds());
+    }
+  }
 
   if (child->layer()->GetTargetVisibility())
     WindowPositioner::RearrangeVisibleWindowOnHideOrRemove(child);
@@ -132,18 +145,8 @@ void WorkspaceLayoutManager::SetChildBounds(aura::Window* child,
 //////////////////////////////////////////////////////////////////////////////
 // WorkspaceLayoutManager, keyboard::KeyboardControllerObserver implementation:
 
-void WorkspaceLayoutManager::OnKeyboardBoundsChanging(
+void WorkspaceLayoutManager::OnKeyboardWorkspaceDisplacingBoundsChanged(
     const gfx::Rect& new_bounds) {
-  // If new window behavior is disable or the keyboard is in sticky mode, change
-  // the work area.
-  const bool change_work_area =
-      (base::CommandLine::ForCurrentProcess()->HasSwitch(
-           ::switches::kDisableNewVirtualKeyboardBehavior) ||
-       (keyboard::KeyboardController::GetInstance() &&
-        keyboard::KeyboardController::GetInstance()->keyboard_locked()));
-  if (!change_work_area)
-    return;
-
   aura::Window* window = wm::GetActiveWindow();
   if (!window)
     return;
@@ -240,7 +243,8 @@ void WorkspaceLayoutManager::OnWindowDestroying(aura::Window* window) {
 void WorkspaceLayoutManager::OnWindowBoundsChanged(
     aura::Window* window,
     const gfx::Rect& old_bounds,
-    const gfx::Rect& new_bounds) {
+    const gfx::Rect& new_bounds,
+    ui::PropertyChangeReason reason) {
   if (root_window_ == window) {
     const wm::WMEvent wm_event(wm::WM_EVENT_DISPLAY_BOUNDS_CHANGED);
     AdjustAllWindowsBoundsForWorkAreaChange(&wm_event);
@@ -250,16 +254,21 @@ void WorkspaceLayoutManager::OnWindowBoundsChanged(
 //////////////////////////////////////////////////////////////////////////////
 // WorkspaceLayoutManager, wm::ActivationChangeObserver implementation:
 
-void WorkspaceLayoutManager::OnWindowActivated(ActivationReason reason,
-                                               aura::Window* gained_active,
-                                               aura::Window* lost_active) {
+void WorkspaceLayoutManager::OnWindowActivating(ActivationReason reason,
+                                                aura::Window* gaining_active,
+                                                aura::Window* losing_active) {
   wm::WindowState* window_state =
-      gained_active ? wm::GetWindowState(gained_active) : nullptr;
+      gaining_active ? wm::GetWindowState(gaining_active) : nullptr;
   if (window_state && window_state->IsMinimized() &&
-      !gained_active->IsVisible()) {
+      !gaining_active->IsVisible()) {
     window_state->Unminimize();
     DCHECK(!window_state->IsMinimized());
   }
+}
+
+void WorkspaceLayoutManager::OnWindowActivated(ActivationReason reason,
+                                               aura::Window* gained_active,
+                                               aura::Window* lost_active) {
   UpdateFullscreenState();
   UpdateShelfVisibility();
 }
@@ -269,10 +278,10 @@ void WorkspaceLayoutManager::OnWindowActivated(ActivationReason reason,
 
 void WorkspaceLayoutManager::OnPostWindowStateTypeChange(
     wm::WindowState* window_state,
-    wm::WindowStateType old_type) {
+    mojom::WindowStateType old_type) {
   // Notify observers that fullscreen state may be changing.
   if (window_state->IsFullscreen() ||
-      old_type == wm::WINDOW_STATE_TYPE_FULLSCREEN) {
+      old_type == mojom::WindowStateType::FULLSCREEN) {
     UpdateFullscreenState();
   }
 
@@ -292,7 +301,7 @@ void WorkspaceLayoutManager::OnDisplayMetricsChanged(
   }
 
   const gfx::Rect work_area(
-      ScreenUtil::GetDisplayWorkAreaBoundsInParent(window_));
+      screen_util::GetDisplayWorkAreaBoundsInParent(window_));
   if (work_area != work_area_in_parent_) {
     const wm::WMEvent event(wm::WM_EVENT_WORKAREA_BOUNDS_CHANGED);
     AdjustAllWindowsBoundsForWorkAreaChange(&event);
@@ -348,7 +357,7 @@ void WorkspaceLayoutManager::AdjustAllWindowsBoundsForWorkAreaChange(
   DCHECK(event->type() == wm::WM_EVENT_DISPLAY_BOUNDS_CHANGED ||
          event->type() == wm::WM_EVENT_WORKAREA_BOUNDS_CHANGED);
 
-  work_area_in_parent_ = ScreenUtil::GetDisplayWorkAreaBoundsInParent(window_);
+  work_area_in_parent_ = screen_util::GetDisplayWorkAreaBoundsInParent(window_);
 
   // Don't do any adjustments of the insets while we are in screen locked mode.
   // This would happen if the launcher was auto hidden before the login screen

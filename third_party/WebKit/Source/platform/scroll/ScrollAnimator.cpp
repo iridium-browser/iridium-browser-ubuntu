@@ -31,15 +31,15 @@
 #include "platform/scroll/ScrollAnimator.h"
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "cc/animation/scroll_offset_animation_curve.h"
-#include "platform/animation/CompositorAnimation.h"
+#include "platform/animation/CompositorKeyframeModel.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/scroll/MainThreadScrollingReason.h"
 #include "platform/scroll/ScrollableArea.h"
-#include "platform/wtf/CurrentTime.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
 
@@ -66,7 +66,7 @@ ScrollAnimator::ScrollAnimator(ScrollableArea* scrollable_area,
       time_function_(time_function),
       last_granularity_(kScrollByPixel) {}
 
-ScrollAnimator::~ScrollAnimator() {}
+ScrollAnimator::~ScrollAnimator() = default;
 
 ScrollOffset ScrollAnimator::DesiredTargetOffset() const {
   if (run_state_ == RunState::kWaitingToCancelOnCompositor)
@@ -255,8 +255,9 @@ bool ScrollAnimator::SendAnimationToCompositor() {
   if (scrollable_area_->ShouldScrollOnMainThread())
     return false;
 
-  std::unique_ptr<CompositorAnimation> animation = CompositorAnimation::Create(
-      *animation_curve_, CompositorTargetProperty::SCROLL_OFFSET, 0, 0);
+  std::unique_ptr<CompositorKeyframeModel> animation =
+      CompositorKeyframeModel::Create(
+          *animation_curve_, CompositorTargetProperty::SCROLL_OFFSET, 0, 0);
   // Being here means that either there is an animation that needs
   // to be sent to the compositor, or an animation that needs to
   // be updated (a new scroll event before the previous animation
@@ -340,8 +341,8 @@ void ScrollAnimator::UpdateCompositorAnimations() {
   }
 
   if (run_state_ == RunState::kWaitingToSendToCompositor) {
-    if (!compositor_animation_attached_to_element_id_)
-      ReattachCompositorPlayerIfNeeded(
+    if (!element_id_)
+      ReattachCompositorAnimationIfNeeded(
           GetScrollableArea()->GetCompositorAnimationTimeline());
 
     if (!animation_curve_)
@@ -428,7 +429,7 @@ void ScrollAnimator::TakeOverCompositorAnimation() {
 
 void ScrollAnimator::LayerForCompositedScrollingDidChange(
     CompositorAnimationTimeline* timeline) {
-  if (ReattachCompositorPlayerIfNeeded(timeline) && animation_curve_)
+  if (ReattachCompositorAnimationIfNeeded(timeline) && animation_curve_)
     AddMainThreadScrollingReason();
 }
 
@@ -442,7 +443,7 @@ bool ScrollAnimator::RegisterAndScheduleAnimation() {
   return true;
 }
 
-DEFINE_TRACE(ScrollAnimator) {
+void ScrollAnimator::Trace(blink::Visitor* visitor) {
   ScrollAnimatorBase::Trace(visitor);
 }
 

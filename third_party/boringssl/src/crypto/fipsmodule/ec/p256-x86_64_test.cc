@@ -27,6 +27,7 @@
 #include <openssl/mem.h>
 
 #include "../bn/internal.h"
+#include "../../internal.h"
 #include "../../test/file_test.h"
 #include "../../test/test_util.h"
 #include "p256-x86_64.h"
@@ -39,7 +40,7 @@
 
 TEST(P256_X86_64Test, SelectW5) {
   // Fill a table with some garbage input.
-  P256_POINT table[16];
+  alignas(64) P256_POINT table[16];
   for (size_t i = 0; i < 16; i++) {
     OPENSSL_memset(table[i].X, 3 * i, sizeof(table[i].X));
     OPENSSL_memset(table[i].Y, 3 * i + 1, sizeof(table[i].Y));
@@ -64,7 +65,7 @@ TEST(P256_X86_64Test, SelectW5) {
 
 TEST(P256_X86_64Test, SelectW7) {
   // Fill a table with some garbage input.
-  P256_POINT_AFFINE table[64];
+  alignas(64) P256_POINT_AFFINE table[64];
   for (size_t i = 0; i < 64; i++) {
     OPENSSL_memset(table[i].X, 2 * i, sizeof(table[i].X));
     OPENSSL_memset(table[i].Y, 2 * i + 1, sizeof(table[i].Y));
@@ -159,17 +160,16 @@ static bool PointToAffine(P256_POINT_AFFINE *out, const P256_POINT *in) {
     return false;
   }
 
-  OPENSSL_memset(out, 0, sizeof(P256_POINT_AFFINE));
-
   if (BN_is_zero(z.get())) {
     // The point at infinity is represented as (0, 0).
+    OPENSSL_memset(out, 0, sizeof(P256_POINT_AFFINE));
     return true;
   }
 
   bssl::UniquePtr<BN_CTX> ctx(BN_CTX_new());
-  bssl::UniquePtr<BN_MONT_CTX> mont(BN_MONT_CTX_new());
+  bssl::UniquePtr<BN_MONT_CTX> mont(
+      BN_MONT_CTX_new_for_modulus(p.get(), ctx.get()));
   if (!ctx || !mont ||
-      !BN_MONT_CTX_set(mont.get(), p.get(), ctx.get()) ||
       // Invert Z.
       !BN_from_montgomery(z.get(), z.get(), mont.get(), ctx.get()) ||
       !BN_mod_inverse(z.get(), z.get(), p.get(), ctx.get()) ||
@@ -184,12 +184,11 @@ static bool PointToAffine(P256_POINT_AFFINE *out, const P256_POINT *in) {
       !BN_mod_mul_montgomery(y.get(), y.get(), z.get(), mont.get(),
                              ctx.get()) ||
       !BN_mod_mul_montgomery(y.get(), y.get(), z.get(), mont.get(),
-                             ctx.get())) {
+                             ctx.get()) ||
+      !bn_copy_words(out->X, P256_LIMBS, x.get()) ||
+      !bn_copy_words(out->Y, P256_LIMBS, y.get())) {
     return false;
   }
-
-  OPENSSL_memcpy(out->X, x->d, sizeof(BN_ULONG) * x->top);
-  OPENSSL_memcpy(out->Y, y->d, sizeof(BN_ULONG) * y->top);
   return true;
 }
 

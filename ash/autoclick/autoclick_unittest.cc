@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "ash/autoclick/autoclick_controller.h"
-#include "ash/public/cpp/config.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ui/aura/test/test_window_delegate.h"
@@ -22,7 +21,7 @@ namespace ash {
 class MouseEventCapturer : public ui::EventHandler {
  public:
   MouseEventCapturer() { Reset(); }
-  ~MouseEventCapturer() override {}
+  ~MouseEventCapturer() override = default;
 
   void Reset() { events_.clear(); }
 
@@ -58,8 +57,8 @@ class MouseEventCapturer : public ui::EventHandler {
 
 class AutoclickTest : public AshTestBase {
  public:
-  AutoclickTest() {}
-  ~AutoclickTest() override {}
+  AutoclickTest() = default;
+  ~AutoclickTest() override = default;
 
   void SetUp() override {
     AshTestBase::SetUp();
@@ -71,8 +70,7 @@ class AutoclickTest : public AshTestBase {
 
     // Make sure the display is initialized so we don't fail the test due to any
     // input events caused from creating the display.
-    if (Shell::GetAshConfig() != Config::MASH)
-      Shell::Get()->display_manager()->UpdateDisplays();
+    Shell::Get()->display_manager()->UpdateDisplays();
     RunAllPendingInMessageLoop();
   }
 

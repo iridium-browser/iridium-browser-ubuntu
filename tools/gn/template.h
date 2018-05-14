@@ -21,7 +21,7 @@ class Value;
 // includes a closure and the code to run when the template is invoked.
 //
 // This class is immutable so we can reference it from multiple threads without
-// locking. Normally, this will be assocated with a .gni file and then a
+// locking. Normally, this will be associated with a .gni file and then a
 // reference will be taken by each .gn file that imports it. These files might
 // execute the template in parallel.
 class Template : public base::RefCountedThreadSafe<Template> {
@@ -52,7 +52,15 @@ class Template : public base::RefCountedThreadSafe<Template> {
   Template();
   ~Template();
 
-  std::unique_ptr<Scope> closure_;
+  // It's important that this Scope is const. A template can be referenced by
+  // the root BUILDCONFIG file and then duplicated to all threads. Therefore,
+  // this scope must be usable from multiple threads at the same time.
+  //
+  // When executing a template, a new scope will be created as a child of this
+  // one, which will reference it as mutable or not according to the mutability
+  // of this value.
+  std::unique_ptr<const Scope> closure_;
+
   const FunctionCallNode* definition_;
 };
 

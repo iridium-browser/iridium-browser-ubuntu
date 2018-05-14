@@ -8,13 +8,13 @@
 #include <memory>
 #include <vector>
 
+#include "build/build_config.h"
+
 namespace content {
 
-struct MainFunctionParams;
 class ZygoteForkDelegate;
 
 bool ZygoteMain(
-    const MainFunctionParams& params,
     std::vector<std::unique_ptr<ZygoteForkDelegate>> fork_delegates);
 
 }  // namespace content

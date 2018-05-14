@@ -36,12 +36,11 @@
 
 namespace memory {
 
-using base::SequencedWorkerPool;
 using base::TimeDelta;
 
 namespace {
 
-base::LazyInstance<MemoryKillsMonitor>::Leaky g_instance =
+base::LazyInstance<MemoryKillsMonitor>::Leaky g_memory_kills_monitor_instance =
     LAZY_INSTANCE_INITIALIZER;
 
 int64_t GetTimestamp(const std::string& line) {
@@ -93,14 +92,14 @@ std::unique_ptr<MemoryKillsMonitor::Handle> MemoryKillsMonitor::Initialize() {
 
   auto* login_state = chromeos::LoginState::Get();
   if (login_state)
-    login_state->AddObserver(g_instance.Pointer());
+    login_state->AddObserver(g_memory_kills_monitor_instance.Pointer());
   else
     LOG(ERROR) << "LoginState is not initialized";
 
   // The MemoryKillsMonitor::Handle will notify the MemoryKillsMonitor
   // when it is destroyed so that the underlying thread can at a minimum not
   // do extra work during shutdown.
-  return base::MakeUnique<Handle>(g_instance.Pointer());
+  return std::make_unique<Handle>(g_memory_kills_monitor_instance.Pointer());
 }
 
 // static
@@ -108,7 +107,8 @@ void MemoryKillsMonitor::LogLowMemoryKill(
     const std::string& type, int estimated_freed_kb) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  g_instance.Get().LogLowMemoryKillImpl(type, estimated_freed_kb);
+  g_memory_kills_monitor_instance.Get().LogLowMemoryKillImpl(
+      type, estimated_freed_kb);
 }
 
 // static
@@ -121,7 +121,7 @@ void MemoryKillsMonitor::TryMatchOomKillLine(const std::string& line) {
                         "Out of memory: Kill process .* score (\\d+)",
                         &oom_badness)) {
     int64_t time_stamp = GetTimestamp(line);
-    g_instance.Get().LogOOMKill(time_stamp, oom_badness);
+    g_memory_kills_monitor_instance.Get().LogOOMKill(time_stamp, oom_badness);
   }
 }
 
@@ -183,7 +183,7 @@ void MemoryKillsMonitor::StartMonitoring() {
 
   base::SimpleThread::Options non_joinable_options;
   non_joinable_options.joinable = false;
-  non_joinable_worker_thread_ = base::MakeUnique<base::DelegateSimpleThread>(
+  non_joinable_worker_thread_ = std::make_unique<base::DelegateSimpleThread>(
       this, "memory_kills_monitor", non_joinable_options);
   non_joinable_worker_thread_->Start();
   monitoring_started_.Set();
@@ -265,7 +265,7 @@ void MemoryKillsMonitor::LogOOMKill(int64_t time_stamp, int oom_badness) {
 }
 
 MemoryKillsMonitor* MemoryKillsMonitor::GetForTesting() {
-  return g_instance.Pointer();
+  return g_memory_kills_monitor_instance.Pointer();
 }
 
 }  // namespace memory

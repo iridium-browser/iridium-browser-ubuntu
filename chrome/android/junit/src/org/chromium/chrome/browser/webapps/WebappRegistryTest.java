@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.webapps;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -17,15 +18,16 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.browsing_data.UrlFilters;
 import org.chromium.testing.local.BackgroundShadowAsyncTask;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 import org.chromium.webapk.lib.common.WebApkConstants;
 
 import java.util.Arrays;
@@ -39,14 +41,15 @@ import java.util.Set;
  * Tests the WebappRegistry class by ensuring that it persists data to
  * SharedPreferences as expected.
  */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE, shadows = {BackgroundShadowAsyncTask.class})
 public class WebappRegistryTest {
-
     // These were copied from WebappRegistry for backward compatibility checking.
     private static final String REGISTRY_FILE_NAME = "webapp_registry";
     private static final String KEY_WEBAPP_SET = "webapp_set";
     private static final String KEY_LAST_CLEANUP = "last_cleanup";
+
+    private static final String START_URL = "https://foo.com";
 
     private static final int INITIAL_TIME = 0;
 
@@ -76,7 +79,6 @@ public class WebappRegistryTest {
 
     @Before
     public void setUp() throws Exception {
-        ContextUtils.initApplicationContextForTests(RuntimeEnvironment.application);
         WebappRegistry.refreshSharedPrefsForTesting();
         mSharedPreferences = ContextUtils.getApplicationContext().getSharedPreferences(
                 REGISTRY_FILE_NAME, Context.MODE_PRIVATE);
@@ -325,13 +327,13 @@ public class WebappRegistryTest {
         String webappId2 = WebApkConstants.WEBAPK_ID_PREFIX + "uninstalledWebApk2";
         String webApkPackage2 = "uninstalledWebApk2";
 
-        FetchStorageCallback storageCallback1 = new FetchStorageCallback(
-                createWebApkIntent(webappId1, webApkPackage1));
+        FetchStorageCallback storageCallback1 =
+                new FetchStorageCallback(createWebApkIntent(webappId1, START_URL, webApkPackage1));
         registerWebapp(webappId1, storageCallback1);
         assertTrue(storageCallback1.getCallbackCalled());
 
-        FetchStorageCallback storageCallback2 = new FetchStorageCallback(
-                createWebApkIntent(webappId1, webApkPackage2));
+        FetchStorageCallback storageCallback2 =
+                new FetchStorageCallback(createWebApkIntent(webappId1, START_URL, webApkPackage2));
         registerWebapp(webappId2, storageCallback2);
         assertTrue(storageCallback2.getCallbackCalled());
 
@@ -363,13 +365,13 @@ public class WebappRegistryTest {
         String uninstalledWebappId = WebApkConstants.WEBAPK_ID_PREFIX + "uninstalledWebApk";
         String uninstalledWebApkPackage = "uninstalledWebApk";
 
-        FetchStorageCallback storageCallback = new FetchStorageCallback(
-                createWebApkIntent(webappId, webApkPackage));
+        FetchStorageCallback storageCallback =
+                new FetchStorageCallback(createWebApkIntent(webappId, START_URL, webApkPackage));
         registerWebapp(webappId, storageCallback);
         assertTrue(storageCallback.getCallbackCalled());
 
         FetchStorageCallback storageCallback2 = new FetchStorageCallback(
-                createWebApkIntent(uninstalledWebappId, uninstalledWebApkPackage));
+                createWebApkIntent(uninstalledWebappId, START_URL, uninstalledWebApkPackage));
         registerWebapp(uninstalledWebappId, storageCallback2);
         assertTrue(storageCallback2.getCallbackCalled());
 
@@ -379,7 +381,8 @@ public class WebappRegistryTest {
         assertTrue(actual.contains(webappId));
         assertTrue(actual.contains(uninstalledWebappId));
 
-        RuntimeEnvironment.getRobolectricPackageManager().addPackage(webApkPackage);
+        Shadows.shadowOf(RuntimeEnvironment.application.getPackageManager())
+                .addPackage(webApkPackage);
 
         // Set the current time such that the task runs.
         long currentTime = System.currentTimeMillis() + WebappRegistry.FULL_CLEANUP_DURATION;
@@ -404,13 +407,13 @@ public class WebappRegistryTest {
         String webApkPackage = "installedWebApk";
         String installedWebappId = WebApkConstants.WEBAPK_ID_PREFIX + "installedWebApk";
 
-        FetchStorageCallback storageCallback =
-                new FetchStorageCallback(createWebApkIntent(deprecatedWebappId, webApkPackage));
+        FetchStorageCallback storageCallback = new FetchStorageCallback(
+                createWebApkIntent(deprecatedWebappId, START_URL, webApkPackage));
         registerWebapp(deprecatedWebappId, storageCallback);
         assertTrue(storageCallback.getCallbackCalled());
 
-        FetchStorageCallback storageCallback2 =
-                new FetchStorageCallback(createWebApkIntent(installedWebappId, webApkPackage));
+        FetchStorageCallback storageCallback2 = new FetchStorageCallback(
+                createWebApkIntent(installedWebappId, START_URL, webApkPackage));
         registerWebapp(installedWebappId, storageCallback2);
         assertTrue(storageCallback2.getCallbackCalled());
 
@@ -420,7 +423,8 @@ public class WebappRegistryTest {
         assertTrue(actual.contains(deprecatedWebappId));
         assertTrue(actual.contains(installedWebappId));
 
-        RuntimeEnvironment.getRobolectricPackageManager().addPackage(webApkPackage);
+        Shadows.shadowOf(RuntimeEnvironment.application.getPackageManager())
+                .addPackage(webApkPackage);
 
         // Set the current time such that the task runs.
         long currentTime = System.currentTimeMillis() + WebappRegistry.FULL_CLEANUP_DURATION;
@@ -642,6 +646,31 @@ public class WebappRegistryTest {
         assertEquals(null, storage6);
     }
 
+    @Test
+    @Feature({"WebApk"})
+    public void testGetWebappDataStorageForUrlWithWebApk() throws Exception {
+        final String startUrl = START_URL;
+        final String testUrl = START_URL + "/index.html";
+
+        String webApkId = WebApkConstants.WEBAPK_ID_PREFIX + "WebApk";
+        registerWebapp(webApkId,
+                new FetchStorageCallback(
+                        createWebApkIntent(webApkId, startUrl, "org.chromium.webapk")));
+
+        // testUrl should return null.
+        WebappDataStorage storage1 =
+                WebappRegistry.getInstance().getWebappDataStorageForUrl(testUrl);
+        assertNull(storage1);
+
+        String webappId = "webapp";
+        registerWebapp(webappId, new FetchStorageCallback(createShortcutIntent(startUrl)));
+
+        // testUrl should return the webapp.
+        WebappDataStorage storage2 =
+                WebappRegistry.getInstance().getWebappDataStorageForUrl(testUrl);
+        assertEquals(webappId, storage2.getId());
+    }
+
     private Set<String> addWebappsToRegistry(String... webapps) {
         final Set<String> expected = new HashSet<>(Arrays.asList(webapps));
         mSharedPreferences.edit().putStringSet(WebappRegistry.KEY_WEBAPP_SET, expected).apply();
@@ -657,10 +686,10 @@ public class WebappRegistryTest {
         return ShortcutHelper.createWebappShortcutIntentForTesting("id", url);
     }
 
-    private Intent createWebApkIntent(String webappId, String webApkPackage) {
+    private Intent createWebApkIntent(String webappId, String url, String webApkPackage) {
         Intent intent = new Intent();
         intent.putExtra(ShortcutHelper.EXTRA_ID, webappId)
-                .putExtra(ShortcutHelper.EXTRA_URL, "https://foo.com")
+                .putExtra(ShortcutHelper.EXTRA_URL, url)
                 .putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, webApkPackage);
         return intent;
     }

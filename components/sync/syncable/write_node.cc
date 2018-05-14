@@ -11,7 +11,6 @@
 #include "base/values.h"
 #include "components/sync/base/cryptographer.h"
 #include "components/sync/base/hash_util.h"
-#include "components/sync/base/sync_features.h"
 #include "components/sync/engine/engine_util.h"
 #include "components/sync/protocol/bookmark_specifics.pb.h"
 #include "components/sync/protocol/typed_url_specifics.pb.h"
@@ -140,7 +139,6 @@ void WriteNode::SetPasswordSpecifics(
 
   const std::string metadata_url(data.signon_realm());
   if (!IsExplicitPassphrase(GetTransaction()->GetPassphraseType()) &&
-      base::FeatureList::IsEnabled(kFillPasswordMetadata) &&
       password_specifics->unencrypted_metadata().url() != metadata_url) {
     password_specifics->mutable_unencrypted_metadata()->set_url(metadata_url);
   }
@@ -157,7 +155,11 @@ void WriteNode::SetPasswordSpecifics(
 
 void WriteNode::SetEntitySpecifics(const sync_pb::EntitySpecifics& new_value) {
   ModelType new_specifics_type = GetModelTypeFromSpecifics(new_value);
+
+  // Purposefully crash if we have client only data, as this could result in
+  // sending password in plain text.
   CHECK(!new_value.password().has_client_only_encrypted_data());
+
   DCHECK_NE(new_specifics_type, UNSPECIFIED);
   DVLOG(1) << "Writing entity specifics of type "
            << ModelTypeToString(new_specifics_type);
@@ -440,11 +442,6 @@ bool WriteNode::SetPosition(const BaseNode& new_parent,
   // Mark this entry as unsynced, to wake up the syncer.
   MarkForSyncing();
   return true;
-}
-
-void WriteNode::SetAttachmentMetadata(
-    const sync_pb::AttachmentMetadata& attachment_metadata) {
-  entry_->PutAttachmentMetadata(attachment_metadata);
 }
 
 const syncable::Entry* WriteNode::GetEntry() const {

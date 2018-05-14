@@ -5,47 +5,43 @@
 #ifndef CONTENT_RENDERER_SERVICE_WORKER_SERVICE_WORKER_FETCH_CONTEXT_IMPL_H_
 #define CONTENT_RENDERER_SERVICE_WORKER_SERVICE_WORKER_FETCH_CONTEXT_IMPL_H_
 
-#include "content/common/worker_url_loader_factory_provider.mojom.h"
+#include "content/public/common/shared_url_loader_factory.h"
 #include "third_party/WebKit/public/platform/WebWorkerFetchContext.h"
 #include "url/gurl.h"
 
-namespace base {
-class SingleThreadTaskRunner;
-}  // namespace base
-
 namespace content {
 class ResourceDispatcher;
+class URLLoaderThrottleProvider;
 
 class ServiceWorkerFetchContextImpl : public blink::WebWorkerFetchContext {
  public:
   ServiceWorkerFetchContextImpl(
       const GURL& worker_script_url,
-      mojom::WorkerURLLoaderFactoryProviderPtrInfo provider_info,
-      int service_worker_provider_id);
+      std::unique_ptr<SharedURLLoaderFactoryInfo> url_loader_factory_info,
+      int service_worker_provider_id,
+      std::unique_ptr<URLLoaderThrottleProvider> throttle_provider);
   ~ServiceWorkerFetchContextImpl() override;
 
   // blink::WebWorkerFetchContext implementation:
-  void InitializeOnWorkerThread(base::SingleThreadTaskRunner*) override;
-  std::unique_ptr<blink::WebURLLoader> CreateURLLoader(
-      const blink::WebURLRequest& request,
-      base::SingleThreadTaskRunner* task_runner) override;
+  void InitializeOnWorkerThread() override;
+  std::unique_ptr<blink::WebURLLoaderFactory> CreateURLLoaderFactory() override;
+  std::unique_ptr<blink::WebURLLoaderFactory> WrapURLLoaderFactory(
+      mojo::ScopedMessagePipeHandle url_loader_factory_handle) override;
   void WillSendRequest(blink::WebURLRequest&) override;
   bool IsControlledByServiceWorker() const override;
-  void SetDataSaverEnabled(bool enabled) override;
-  bool IsDataSaverEnabled() const override;
-  blink::WebURL FirstPartyForCookies() const override;
+  blink::WebURL SiteForCookies() const override;
 
  private:
   const GURL worker_script_url_;
-  mojom::WorkerURLLoaderFactoryProviderPtrInfo provider_info_;
+  // Consumed on the worker thread to create |url_loader_factory_|.
+  std::unique_ptr<SharedURLLoaderFactoryInfo> url_loader_factory_info_;
   const int service_worker_provider_id_;
 
   // Initialized on the worker thread when InitializeOnWorkerThread() is called.
   std::unique_ptr<ResourceDispatcher> resource_dispatcher_;
-  mojom::WorkerURLLoaderFactoryProviderPtr provider_;
-  mojom::URLLoaderFactoryAssociatedPtr url_loader_factory_;
+  scoped_refptr<SharedURLLoaderFactory> url_loader_factory_;
 
-  bool is_data_saver_enabled_ = false;
+  std::unique_ptr<URLLoaderThrottleProvider> throttle_provider_;
 };
 
 }  // namespace content

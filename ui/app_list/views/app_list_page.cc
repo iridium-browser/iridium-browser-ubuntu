@@ -6,12 +6,6 @@
 
 #include "ui/app_list/views/contents_view.h"
 
-namespace {
-
-// The default z height for the search box.
-const int kDefaultSearchBoxZHeight = 2;
-}  // namespace
-
 namespace app_list {
 
 AppListPage::AppListPage() : contents_view_(nullptr) {}
@@ -27,8 +21,8 @@ void AppListPage::OnHidden() {}
 void AppListPage::OnWillBeHidden() {}
 
 void AppListPage::OnAnimationUpdated(double progress,
-                                     AppListModel::State from_state,
-                                     AppListModel::State to_state) {}
+                                     ash::AppListState from_state,
+                                     ash::AppListState to_state) {}
 
 gfx::Rect AppListPage::GetSearchBoxBounds() const {
   DCHECK(contents_view_);
@@ -36,20 +30,24 @@ gfx::Rect AppListPage::GetSearchBoxBounds() const {
 }
 
 gfx::Rect AppListPage::GetSearchBoxBoundsForState(
-    AppListModel::State state) const {
+    ash::AppListState state) const {
   return GetSearchBoxBounds();
 }
 
 gfx::Rect AppListPage::GetPageBoundsDuringDragging(
-    AppListModel::State state) const {
+    ash::AppListState state) const {
   return GetPageBoundsForState(state);
 }
 
-int AppListPage::GetSearchBoxZHeight() const {
-  return kDefaultSearchBoxZHeight;
+views::View* AppListPage::GetSelectedView() const {
+  return nullptr;
 }
 
-views::View* AppListPage::GetSelectedView() const {
+views::View* AppListPage::GetFirstFocusableView() {
+  return nullptr;
+}
+
+views::View* AppListPage::GetLastFocusableView() {
   return nullptr;
 }
 
@@ -76,11 +74,6 @@ gfx::Rect AppListPage::GetFullContentsBounds() const {
 gfx::Rect AppListPage::GetDefaultContentsBounds() const {
   DCHECK(contents_view_);
   return contents_view_->GetDefaultContentsBounds();
-}
-
-bool AppListPage::IsCustomLauncherPageActive() const {
-  return contents_view_->IsStateActive(
-      AppListModel::STATE_CUSTOM_LAUNCHER_PAGE);
 }
 
 }  // namespace app_list

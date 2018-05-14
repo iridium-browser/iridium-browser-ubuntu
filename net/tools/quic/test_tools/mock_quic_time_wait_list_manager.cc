@@ -5,7 +5,6 @@
 #include "net/tools/quic/test_tools/mock_quic_time_wait_list_manager.h"
 
 using testing::_;
-using testing::AnyNumber;
 using testing::Invoke;
 
 namespace net {
@@ -27,7 +26,7 @@ MockTimeWaitListManager::MockTimeWaitListManager(
                            QuicTimeWaitListManager_AddConnectionIdToTimeWait));
 }
 
-MockTimeWaitListManager::~MockTimeWaitListManager() {}
+MockTimeWaitListManager::~MockTimeWaitListManager() = default;
 
 }  // namespace test
 }  // namespace net

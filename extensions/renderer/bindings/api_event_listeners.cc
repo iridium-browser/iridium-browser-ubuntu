@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "content/public/child/v8_value_converter.h"
+#include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/event_filter.h"
 #include "extensions/common/event_filtering_info.h"
 #include "extensions/common/event_matcher.h"
@@ -38,7 +38,7 @@ bool ValidateFilter(v8::Local<v8::Context> context,
   v8::HandleScope handle_scope(isolate);
 
   if (filter.IsEmpty()) {
-    *filter_dict = base::MakeUnique<base::DictionaryValue>();
+    *filter_dict = std::make_unique<base::DictionaryValue>();
     return true;
   }
 
@@ -203,7 +203,7 @@ bool FilteredEventListeners::AddListener(v8::Local<v8::Function> listener,
 
   int filter_id = event_filter_->AddEventMatcher(
       event_name_,
-      base::MakeUnique<EventMatcher>(std::move(filter_dict), kIgnoreRoutingId));
+      std::make_unique<EventMatcher>(std::move(filter_dict), kIgnoreRoutingId));
 
   if (filter_id == -1) {
     *error = "Could not add listener";

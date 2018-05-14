@@ -17,6 +17,7 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/text_utils.h"
 #include "ui/native_theme/common_theme.h"
 #include "ui/strings/grit/ui_strings.h"
@@ -152,7 +153,7 @@ bool MenuItemView::GetTooltipText(const gfx::Point& p,
 }
 
 void MenuItemView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  node_data->role = ui::AX_ROLE_MENU_ITEM;
+  node_data->role = ax::mojom::Role::kMenuItem;
 
   base::string16 item_text;
   if (IsContainer()) {
@@ -161,7 +162,8 @@ void MenuItemView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
     View* child = child_at(0);
     ui::AXNodeData node_data;
     child->GetAccessibleNodeData(&node_data);
-    item_text = node_data.GetString16Attribute(ui::AX_ATTR_NAME);
+    item_text =
+        node_data.GetString16Attribute(ax::mojom::StringAttribute::kName);
   } else {
     item_text = title_;
   }
@@ -169,20 +171,26 @@ void MenuItemView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
 
   switch (GetType()) {
     case SUBMENU:
-      node_data->AddState(ui::AX_STATE_HASPOPUP);
+      node_data->AddState(ax::mojom::State::kHaspopup);
       break;
     case CHECKBOX:
     case RADIO: {
       const bool is_checked = GetDelegate()->IsItemChecked(GetCommand());
-      const ui::AXCheckedState checked_state =
-          is_checked ? ui::AX_CHECKED_STATE_TRUE : ui::AX_CHECKED_STATE_FALSE;
-      node_data->AddIntAttribute(ui::AX_ATTR_CHECKED_STATE, checked_state);
+      node_data->SetCheckedState(is_checked ? ax::mojom::CheckedState::kTrue
+                                            : ax::mojom::CheckedState::kFalse);
     } break;
     case NORMAL:
     case SEPARATOR:
     case EMPTY:
       // No additional accessibility states currently for these menu states.
       break;
+  }
+
+  base::char16 mnemonic = GetMnemonic();
+  if (mnemonic != '\0') {
+    node_data->AddStringAttribute(
+        ax::mojom::StringAttribute::kKeyShortcuts,
+        base::UTF16ToUTF8(base::string16(1, mnemonic)));
   }
 }
 
@@ -234,6 +242,7 @@ MenuItemView* MenuItemView::AddMenuItemAt(
     const base::string16& label,
     const base::string16& sublabel,
     const base::string16& minor_text,
+    const gfx::VectorIcon* minor_icon,
     const gfx::ImageSkia& icon,
     Type type,
     ui::MenuSeparatorType separator_style) {
@@ -253,6 +262,7 @@ MenuItemView* MenuItemView::AddMenuItemAt(
     item->SetTitle(label);
   item->SetSubtitle(sublabel);
   item->SetMinorText(minor_text);
+  item->SetMinorIcon(minor_icon);
   if (!icon.isNull())
     item->SetIcon(icon);
   if (type == SUBMENU)
@@ -282,20 +292,22 @@ MenuItemView* MenuItemView::AppendMenuItem(int item_id,
                                            const base::string16& label,
                                            Type type) {
   return AppendMenuItemImpl(item_id, label, base::string16(), base::string16(),
-      gfx::ImageSkia(), type, ui::NORMAL_SEPARATOR);
+                            nullptr, gfx::ImageSkia(), type,
+                            ui::NORMAL_SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendSubMenu(int item_id,
                                           const base::string16& label) {
   return AppendMenuItemImpl(item_id, label, base::string16(), base::string16(),
-      gfx::ImageSkia(), SUBMENU, ui::NORMAL_SEPARATOR);
+                            nullptr, gfx::ImageSkia(), SUBMENU,
+                            ui::NORMAL_SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendSubMenuWithIcon(int item_id,
                                                   const base::string16& label,
                                                   const gfx::ImageSkia& icon) {
   return AppendMenuItemImpl(item_id, label, base::string16(), base::string16(),
-                            icon, SUBMENU, ui::NORMAL_SEPARATOR);
+                            nullptr, icon, SUBMENU, ui::NORMAL_SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendMenuItemWithLabel(
@@ -310,14 +322,15 @@ MenuItemView* MenuItemView::AppendDelegateMenuItem(int item_id) {
 
 void MenuItemView::AppendSeparator() {
   AppendMenuItemImpl(0, base::string16(), base::string16(), base::string16(),
-                     gfx::ImageSkia(), SEPARATOR, ui::NORMAL_SEPARATOR);
+                     nullptr, gfx::ImageSkia(), SEPARATOR,
+                     ui::NORMAL_SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendMenuItemWithIcon(int item_id,
                                                    const base::string16& label,
                                                    const gfx::ImageSkia& icon) {
   return AppendMenuItemImpl(item_id, label, base::string16(), base::string16(),
-                            icon, NORMAL, ui::NORMAL_SEPARATOR);
+                            nullptr, icon, NORMAL, ui::NORMAL_SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendMenuItemImpl(
@@ -325,17 +338,24 @@ MenuItemView* MenuItemView::AppendMenuItemImpl(
     const base::string16& label,
     const base::string16& sublabel,
     const base::string16& minor_text,
+    const gfx::VectorIcon* minor_icon,
     const gfx::ImageSkia& icon,
     Type type,
     ui::MenuSeparatorType separator_style) {
   const int index = submenu_ ? submenu_->child_count() : 0;
-  return AddMenuItemAt(index, item_id, label, sublabel, minor_text, icon, type,
-                       separator_style);
+  return AddMenuItemAt(index, item_id, label, sublabel, minor_text, minor_icon,
+                       icon, type, separator_style);
 }
 
 SubmenuView* MenuItemView::CreateSubmenu() {
-  if (!submenu_)
+  if (!submenu_) {
     submenu_ = new SubmenuView(this);
+
+    // Initialize the submenu indicator icon (arrow).
+    submenu_arrow_image_view_ = new ImageView();
+    AddChildView(submenu_arrow_image_view_);
+  }
+
   return submenu_;
 }
 
@@ -363,6 +383,11 @@ void MenuItemView::SetSubtitle(const base::string16& subtitle) {
 
 void MenuItemView::SetMinorText(const base::string16& minor_text) {
   minor_text_ = minor_text;
+  invalidate_dimensions();  // Triggers preferred size recalculation.
+}
+
+void MenuItemView::SetMinorIcon(const gfx::VectorIcon* minor_icon) {
+  minor_icon_ = minor_icon;
   invalidate_dimensions();  // Triggers preferred size recalculation.
 }
 
@@ -547,7 +572,11 @@ void MenuItemView::Layout() {
     int x = width() - (use_right_margin_ ? item_right_margin_ : 0);
     for (int i = child_count() - 1; i >= 0; --i) {
       View* child = child_at(i);
-      if (icon_view_ && (icon_view_ == child))
+      if (icon_view_ == child)
+        continue;
+      if (radio_check_image_view_ == child)
+        continue;
+      if (submenu_arrow_image_view_ == child)
         continue;
       int width = child->GetPreferredSize().width();
       child->SetBounds(x - width, 0, width, height());
@@ -565,6 +594,22 @@ void MenuItemView::Layout() {
       int y =
           (height() + GetTopMargin() - GetBottomMargin() - size.height()) / 2;
       icon_view_->SetPosition(gfx::Point(x, y));
+    }
+
+    if (radio_check_image_view_) {
+      int x = config.item_left_margin + left_icon_margin_;
+      int y =
+          (height() + GetTopMargin() - GetBottomMargin() - kMenuCheckSize) / 2;
+      radio_check_image_view_->SetBounds(x, y, kMenuCheckSize, kMenuCheckSize);
+    }
+
+    if (submenu_arrow_image_view_) {
+      int x = this->width() - config.arrow_width - config.arrow_to_edge_padding;
+      int y =
+          (height() + GetTopMargin() - GetBottomMargin() - kSubmenuArrowSize) /
+          2;
+      submenu_arrow_image_view_->SetBounds(x, y, config.arrow_width,
+                                           kSubmenuArrowSize);
     }
   }
 }
@@ -650,10 +695,25 @@ void MenuItemView::Init(MenuItemView* parent,
   selected_ = false;
   command_ = command;
   submenu_ = NULL;
+  radio_check_image_view_ = nullptr;
+  submenu_arrow_image_view_ = nullptr;
   show_mnemonics_ = false;
   // Assign our ID, this allows SubmenuItemView to find MenuItemViews.
   set_id(kMenuItemViewID);
   has_icons_ = false;
+
+  if (type_ == CHECKBOX || type_ == RADIO) {
+    radio_check_image_view_ = new ImageView();
+    bool show_check_radio_icon =
+        type_ == RADIO ||
+        (type_ == CHECKBOX && GetDelegate()->IsItemChecked(GetCommand()));
+    radio_check_image_view_->SetVisible(show_check_radio_icon);
+    radio_check_image_view_->set_can_process_events_within_subtree(false);
+    AddChildView(radio_check_image_view_);
+  }
+
+  if (submenu_arrow_image_view_)
+    submenu_arrow_image_view_->SetVisible(HasSubmenu());
 
   // Don't request enabled status from the root menu item as it is just
   // a container for real items.  EMPTY items will be disabled.
@@ -715,7 +775,7 @@ const gfx::FontList& MenuItemView::GetFontList() const {
 
 void MenuItemView::AddEmptyMenus() {
   DCHECK(HasSubmenu());
-  if (!submenu_->has_children()) {
+  if (!submenu_->HasVisibleChildren()) {
     submenu_->AddChildViewAt(new EmptyMenuMenuItem(this), 0);
   } else {
     for (int i = 0, item_count = submenu_->GetMenuItemCount(); i < item_count;
@@ -774,7 +834,6 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
                         ui::NativeTheme::ExtraParams());
   }
 
-  const int icon_x = config.item_left_margin + left_icon_margin_;
   const int top_margin = GetTopMargin();
   const int bottom_margin = GetBottomMargin();
   const int available_height = height() - top_margin - bottom_margin;
@@ -785,24 +844,10 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
 
   // Render the check.
   if (type_ == CHECKBOX && delegate->IsItemChecked(GetCommand())) {
-    gfx::ImageSkia check = GetMenuCheckImage(icon_color);
-    // Don't use config.check_width here as it's padded
-    // to force more padding (AURA).
-    gfx::Rect check_bounds(icon_x,
-                           top_margin + (available_height - check.height()) / 2,
-                           check.width(),
-                           check.height());
-    AdjustBoundsForRTLUI(&check_bounds);
-    canvas->DrawImageInt(check, check_bounds.x(), check_bounds.y());
+    radio_check_image_view_->SetImage(GetMenuCheckImage(icon_color));
   } else if (type_ == RADIO) {
-    gfx::ImageSkia image = GetRadioButtonImage(
-        delegate->IsItemChecked(GetCommand()), render_selection, icon_color);
-    gfx::Rect radio_bounds(icon_x,
-                           top_margin + (available_height - image.height()) / 2,
-                           image.width(),
-                           image.height());
-    AdjustBoundsForRTLUI(&radio_bounds);
-    canvas->DrawImageInt(image, radio_bounds.x(), radio_bounds.y());
+    radio_check_image_view_->SetImage(GetRadioButtonImage(
+        delegate->IsItemChecked(GetCommand()), render_selection, icon_color));
   }
 
   // Render the foreground.
@@ -833,43 +878,56 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
         flags);
   }
 
-  PaintMinorText(canvas, GetTextColor(true, render_selection, emphasized));
+  PaintMinorIconAndText(canvas,
+                        GetTextColor(true, render_selection, emphasized));
 
-  // Render the submenu indicator (arrow).
-  if (HasSubmenu()) {
-    gfx::ImageSkia arrow = GetSubmenuArrowImage(icon_color);
-    gfx::Rect arrow_bounds(this->width() - config.arrow_width -
-                               config.arrow_to_edge_padding,
-                           top_margin + (available_height - arrow.height()) / 2,
-                           config.arrow_width,
-                           arrow.height());
-    AdjustBoundsForRTLUI(&arrow_bounds);
-    canvas->DrawImageInt(arrow, arrow_bounds.x(), arrow_bounds.y());
-  }
+  // Set the submenu indicator (arrow) image and color.
+  if (HasSubmenu())
+    submenu_arrow_image_view_->SetImage(GetSubmenuArrowImage(icon_color));
 }
 
-void MenuItemView::PaintMinorText(gfx::Canvas* canvas, SkColor color) {
+void MenuItemView::PaintMinorIconAndText(gfx::Canvas* canvas, SkColor color) {
   base::string16 minor_text = GetMinorText();
-  if (minor_text.empty())
+  const gfx::VectorIcon* minor_icon = GetMinorIcon();
+  if (minor_text.empty() && !minor_icon)
     return;
 
   int available_height = height() - GetTopMargin() - GetBottomMargin();
-  int max_accel_width =
+  int max_minor_text_width =
       parent_menu_item_->GetSubmenu()->max_minor_text_width();
   const MenuConfig& config = MenuConfig::instance();
-  int accel_right_margin = config.align_arrow_and_shortcut ?
-                           config.arrow_to_edge_padding :  item_right_margin_;
-  gfx::Rect accel_bounds(width() - accel_right_margin - max_accel_width,
-                         GetTopMargin(), max_accel_width, available_height);
-  accel_bounds.set_x(GetMirroredXForRect(accel_bounds));
-  int flags = GetDrawStringFlags();
-  flags &= ~(gfx::Canvas::TEXT_ALIGN_RIGHT | gfx::Canvas::TEXT_ALIGN_LEFT);
-  if (base::i18n::IsRTL())
-    flags |= gfx::Canvas::TEXT_ALIGN_LEFT;
-  else
-    flags |= gfx::Canvas::TEXT_ALIGN_RIGHT;
-  canvas->DrawStringRectWithFlags(minor_text, GetFontList(), color,
-                                  accel_bounds, flags);
+  int minor_text_right_margin = config.align_arrow_and_shortcut
+                                    ? config.arrow_to_edge_padding
+                                    : item_right_margin_;
+  gfx::Rect minor_text_bounds(
+      width() - minor_text_right_margin - max_minor_text_width, GetTopMargin(),
+      max_minor_text_width, available_height);
+  minor_text_bounds.set_x(GetMirroredXForRect(minor_text_bounds));
+
+  auto render_text = gfx::RenderText::CreateHarfBuzzInstance();
+  if (!minor_text.empty()) {
+    render_text->SetText(minor_text);
+    render_text->SetFontList(GetFontList());
+    render_text->SetColor(color);
+    render_text->SetDisplayRect(minor_text_bounds);
+    render_text->SetHorizontalAlignment(base::i18n::IsRTL() ? gfx::ALIGN_LEFT
+                                                            : gfx::ALIGN_RIGHT);
+    render_text->Draw(canvas);
+  }
+
+  if (minor_icon) {
+    gfx::ImageSkia image = CreateVectorIcon(*minor_icon, color);
+
+    int image_x = GetMirroredRect(minor_text_bounds).right() -
+                  render_text->GetContentWidth() -
+                  (minor_text.empty() ? 0 : config.icon_to_label_padding) -
+                  image.width();
+    int minor_text_center_y =
+        minor_text_bounds.y() + minor_text_bounds.height() / 2;
+    int image_y = minor_text_center_y - image.height() / 2;
+    canvas->DrawImageInt(
+        image, GetMirroredXWithWidthInView(image_x, image.width()), image_y);
+  }
 }
 
 SkColor MenuItemView::GetTextColor(bool minor,
@@ -929,7 +987,11 @@ gfx::Size MenuItemView::GetChildPreferredSize() const {
   int width = 0;
   for (int i = 0; i < child_count(); ++i) {
     const View* child = child_at(i);
-    if (icon_view_ && (icon_view_ == child))
+    if (icon_view_ == child)
+      continue;
+    if (radio_check_image_view_ == child)
+      continue;
+    if (submenu_arrow_image_view_ == child)
       continue;
     if (i)
       width += kChildXPadding;
@@ -1028,6 +1090,10 @@ base::string16 MenuItemView::GetMinorText() const {
   return minor_text_;
 }
 
+const gfx::VectorIcon* MenuItemView::GetMinorIcon() const {
+  return minor_icon_;
+}
+
 bool MenuItemView::IsContainer() const {
   // Let the first child take over |this| when we only have one child and no
   // title.
@@ -1037,7 +1103,9 @@ bool MenuItemView::IsContainer() const {
 int MenuItemView::NonIconChildViewsCount() const {
   // Note that what child_count() returns is the number of children,
   // not the number of menu items.
-  return child_count() - (icon_view_ ? 1 : 0);
+  return child_count() - (icon_view_ ? 1 : 0) -
+         (radio_check_image_view_ ? 1 : 0) -
+         (submenu_arrow_image_view_ ? 1 : 0);
 }
 
 int MenuItemView::GetMaxIconViewWidth() const {

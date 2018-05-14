@@ -52,7 +52,7 @@ void SlotScopedTraversalTest::SetupSampleHTML(const char* main_html,
                                               const char* shadow_html,
                                               unsigned index) {
   Element* body = GetDocument().body();
-  body->setInnerHTML(String::FromUTF8(main_html));
+  body->SetInnerHTMLFromString(String::FromUTF8(main_html));
   if (shadow_html) {
     Element* shadow_host = ToElement(NodeTraversal::ChildAt(*body, index));
     AttachOpenShadowRoot(*shadow_host, shadow_html);
@@ -62,9 +62,9 @@ void SlotScopedTraversalTest::SetupSampleHTML(const char* main_html,
 void SlotScopedTraversalTest::AttachOpenShadowRoot(
     Element& shadow_host,
     const char* shadow_inner_html) {
-  ShadowRoot* shadow_root = shadow_host.CreateShadowRootInternal(
-      ShadowRootType::kOpen, ASSERT_NO_EXCEPTION);
-  shadow_root->setInnerHTML(String::FromUTF8(shadow_inner_html));
+  ShadowRoot& shadow_root =
+      shadow_host.AttachShadowRootInternal(ShadowRootType::kOpen);
+  shadow_root.SetInnerHTMLFromString(String::FromUTF8(shadow_inner_html));
   GetDocument().body()->UpdateDistribution();
 }
 
@@ -74,10 +74,8 @@ TEST_F(SlotScopedTraversalTest, emptySlot) {
   SetupSampleHTML(main_html, shadow_html, 0);
 
   Element* host = GetDocument().QuerySelector("#host");
-  ShadowRoot* shadow_root = host->openShadowRoot();
-  Element* slot_element = shadow_root->QuerySelector("slot");
-  DCHECK(isHTMLSlotElement(slot_element));
-  HTMLSlotElement* slot = toHTMLSlotElement(slot_element);
+  ShadowRoot* shadow_root = host->OpenShadowRoot();
+  auto* slot = ToHTMLSlotElement(shadow_root->QuerySelector("slot"));
 
   EXPECT_EQ(nullptr, SlotScopedTraversal::FirstAssignedToSlot(*slot));
   EXPECT_EQ(nullptr, SlotScopedTraversal::LastAssignedToSlot(*slot));
@@ -110,10 +108,8 @@ TEST_F(SlotScopedTraversalTest, simpleSlot) {
   Element* host = GetDocument().QuerySelector("#host");
   Element* inner1 = GetDocument().QuerySelector("#inner1");
   Element* inner2 = GetDocument().QuerySelector("#inner2");
-  ShadowRoot* shadow_root = host->openShadowRoot();
-  Element* slot_element = shadow_root->QuerySelector("slot");
-  DCHECK(isHTMLSlotElement(slot_element));
-  HTMLSlotElement* slot = toHTMLSlotElement(slot_element);
+  ShadowRoot* shadow_root = host->OpenShadowRoot();
+  auto* slot = ToHTMLSlotElement(shadow_root->QuerySelector("slot"));
 
   EXPECT_EQ(inner1, SlotScopedTraversal::FirstAssignedToSlot(*slot));
   EXPECT_EQ(inner2, SlotScopedTraversal::LastAssignedToSlot(*slot));
@@ -159,16 +155,16 @@ TEST_F(SlotScopedTraversalTest, multipleSlots) {
   inner[4] = GetDocument().QuerySelector("#inner4");
   inner[5] = GetDocument().QuerySelector("#inner5");
 
-  ShadowRoot* shadow_root = host->openShadowRoot();
+  ShadowRoot* shadow_root = host->OpenShadowRoot();
   Element* slot_element[3];
   slot_element[0] = shadow_root->QuerySelector("#slot0");
   slot_element[1] = shadow_root->QuerySelector("#slot1");
   slot_element[2] = shadow_root->QuerySelector("#unnamedslot");
 
   HTMLSlotElement* slot[3];
-  slot[0] = toHTMLSlotElement(slot_element[0]);
-  slot[1] = toHTMLSlotElement(slot_element[1]);
-  slot[2] = toHTMLSlotElement(slot_element[2]);
+  slot[0] = ToHTMLSlotElement(slot_element[0]);
+  slot[1] = ToHTMLSlotElement(slot_element[1]);
+  slot[2] = ToHTMLSlotElement(slot_element[2]);
 
   {
     // <slot id='slot0'> : Expected assigned nodes: inner0, inner4
@@ -237,10 +233,8 @@ TEST_F(SlotScopedTraversalTest, shadowHostAtTopLevel) {
 
     AttachOpenShadowRoot(*inner[i], shadow_html);
 
-    ShadowRoot* shadow_root = host->openShadowRoot();
-    Element* slot_element = shadow_root->QuerySelector("slot");
-    DCHECK(isHTMLSlotElement(slot_element));
-    HTMLSlotElement* slot = toHTMLSlotElement(slot_element);
+    ShadowRoot* shadow_root = host->OpenShadowRoot();
+    auto* slot = ToHTMLSlotElement(shadow_root->QuerySelector("slot"));
 
     switch (i) {
       case 0: {
@@ -345,10 +339,8 @@ TEST_F(SlotScopedTraversalTest, shadowHostAtSecondLevel) {
       DCHECK(span[i]);
     }
 
-    ShadowRoot* shadow_root = host->openShadowRoot();
-    Element* slot_element = shadow_root->QuerySelector("slot");
-    DCHECK(isHTMLSlotElement(slot_element));
-    HTMLSlotElement* slot = toHTMLSlotElement(slot_element);
+    ShadowRoot* shadow_root = host->OpenShadowRoot();
+    auto* slot = ToHTMLSlotElement(shadow_root->QuerySelector("slot"));
 
     switch (i) {
       case 0: {

@@ -78,17 +78,13 @@ void RunGenerateFileNameTestCase(const GenerateFilenameCase* test_case) {
       << GetLocaleWarningString();
 }
 
-}  // namespace
-
-static const base::FilePath::CharType* kSafePortableBasenames[] = {
-    FILE_PATH_LITERAL("a"),
-    FILE_PATH_LITERAL("a.txt"),
-    FILE_PATH_LITERAL("a b.txt"),
-    FILE_PATH_LITERAL("a-b.txt"),
+constexpr const base::FilePath::CharType* kSafePortableBasenames[] = {
+    FILE_PATH_LITERAL("a"),           FILE_PATH_LITERAL("a.txt"),
+    FILE_PATH_LITERAL("a b.txt"),     FILE_PATH_LITERAL("a-b.txt"),
     FILE_PATH_LITERAL("My Computer"),
 };
 
-static const base::FilePath::CharType* kUnsafePortableBasenames[] = {
+constexpr const base::FilePath::CharType* kUnsafePortableBasenames[] = {
     FILE_PATH_LITERAL(""),
     FILE_PATH_LITERAL("."),
     FILE_PATH_LITERAL(".."),
@@ -115,19 +111,19 @@ static const base::FilePath::CharType* kUnsafePortableBasenames[] = {
 #endif
 };
 
-static const base::FilePath::CharType* kUnsafePortableBasenamesForWindows[] = {
-    FILE_PATH_LITERAL("con"),
-    FILE_PATH_LITERAL("con.zip"),
-    FILE_PATH_LITERAL("NUL"),
-    FILE_PATH_LITERAL("NUL.zip"),
+constexpr const base::FilePath::CharType* kUnsafePortableBasenamesForWin[] = {
+    FILE_PATH_LITERAL("con"), FILE_PATH_LITERAL("con.zip"),
+    FILE_PATH_LITERAL("NUL"), FILE_PATH_LITERAL("NUL.zip"),
 };
 
-static const base::FilePath::CharType* kSafePortableRelativePaths[] = {
+constexpr const base::FilePath::CharType* kSafePortableRelativePaths[] = {
     FILE_PATH_LITERAL("a/a"),
 #if defined(OS_WIN)
     FILE_PATH_LITERAL("a\\a"),
 #endif
 };
+
+}  // namespace
 
 TEST(FilenameUtilTest, IsSafePortablePathComponent) {
   for (size_t i = 0; i < arraysize(kSafePortableBasenames); ++i) {
@@ -290,11 +286,8 @@ TEST(FilenameUtilTest, FileURLConversion) {
 #if defined(OS_WIN)
 #define JPEG_EXT L".jpg"
 #define HTML_EXT L".htm"
-#elif defined(OS_MACOSX)
-#define JPEG_EXT L".jpeg"
-#define HTML_EXT L".html"
 #else
-#define JPEG_EXT L".jpg"
+#define JPEG_EXT L".jpeg"
 #define HTML_EXT L".html"
 #endif
 #define TXT_EXT L".txt"
@@ -521,7 +514,7 @@ TEST(FilenameUtilTest, GenerateFileName) {
      "",
      "",
      L"",
-     L"-test.html"},
+     L"_test.html"},
     {__LINE__,
      "http://www.google.com/",
      "attachment; filename=\"..\\test.html\"",
@@ -537,7 +530,7 @@ TEST(FilenameUtilTest, GenerateFileName) {
      "",
      "",
      L"",
-     L"-test.html"},
+     L"_test.html"},
     {// Filename disappears after leading and trailing periods are removed.
      __LINE__,
      "http://www.google.com/",
@@ -805,26 +798,26 @@ TEST(FilenameUtilTest, GenerateFileName) {
     {// Disposition has relative paths, remove directory separators
      __LINE__, "http://www.evil.com/my_download.txt",
      "filename=../../../../././../a_file_name.txt", "", "", "text/plain",
-     L"download", L"-..-..-..-.-.-..-a_file_name.txt"},
+     L"download", L"_.._.._.._._._.._a_file_name.txt"},
     {// Disposition has parent directories, remove directory separators
      __LINE__, "http://www.evil.com/my_download.txt",
      "filename=dir1/dir2/a_file_name.txt", "", "", "text/plain", L"download",
-     L"dir1-dir2-a_file_name.txt"},
+     L"dir1_dir2_a_file_name.txt"},
     {// Disposition has relative paths, remove directory separators
      __LINE__, "http://www.evil.com/my_download.txt",
      "filename=..\\..\\..\\..\\.\\.\\..\\a_file_name.txt", "", "", "text/plain",
-     L"download", L"-..-..-..-.-.-..-a_file_name.txt"},
+     L"download", L"_.._.._.._._._.._a_file_name.txt"},
     {// Disposition has parent directories, remove directory separators
      __LINE__, "http://www.evil.com/my_download.txt",
      "filename=dir1\\dir2\\a_file_name.txt", "", "", "text/plain", L"download",
-     L"dir1-dir2-a_file_name.txt"},
+     L"dir1_dir2_a_file_name.txt"},
     {// No useful information in disposition or URL, use default
      __LINE__, "http://www.truncated.com/path/", "", "", "", "text/plain",
      L"download", L"download" TXT_EXT},
     {// Filename looks like HTML?
      __LINE__, "http://www.evil.com/get/malware/here",
      "filename=\"<blink>Hello kitty</blink>\"", "", "", "text/plain",
-     L"default", L"-blink-Hello kitty--blink-"},
+     L"default", L"_blink_Hello kitty__blink_"},
     {// A normal avi should get .avi and not .avi.avi
      __LINE__, "https://blah.google.com/misc/2.avi", "", "", "",
      "video/x-msvideo", L"download", L"2.avi"},
@@ -857,17 +850,17 @@ TEST(FilenameUtilTest, GenerateFileName) {
     {__LINE__, "http://www.goodguy.com/evil.exe ", "filename=evil.exe ", "", "",
      "binary/octet-stream", L"download", L"evil.exe"},
     {__LINE__, "http://www.goodguy.com/evil.exe.", "filename=evil.exe.", "", "",
-     "binary/octet-stream", L"download", L"evil.exe-"},
+     "binary/octet-stream", L"download", L"evil.exe_"},
     {__LINE__, "http://www.goodguy.com/evil.exe.  .  .",
      "filename=evil.exe.  .  .", "", "", "binary/octet-stream", L"download",
-     L"evil.exe-------"},
+     L"evil.exe_______"},
     {__LINE__, "http://www.goodguy.com/evil.", "filename=evil.", "", "",
-     "binary/octet-stream", L"download", L"evil-"},
+     "binary/octet-stream", L"download", L"evil_"},
     {__LINE__, "http://www.goodguy.com/. . . . .", "filename=. . . . .", "", "",
      "binary/octet-stream", L"download", L"download"},
     {__LINE__, "http://www.badguy.com/attachment?name=meh.exe%C2%A0",
      "attachment; filename=\"meh.exe\xC2\xA0\"", "", "", "binary/octet-stream",
-     L"", L"meh.exe-"},
+     L"", L"meh.exe_"},
 #endif  // OS_WIN
     {__LINE__, "http://www.goodguy.com/utils.js", "filename=utils.js", "", "",
      "application/x-javascript", L"download", L"utils.js"},
@@ -884,15 +877,15 @@ TEST(FilenameUtilTest, GenerateFileName) {
     {__LINE__, "http://www.goodguy.com/program.exe", "filename=program.exe", "",
      "", "application/foo-bar", L"download", L"program.exe"},
     {__LINE__, "http://www.evil.com/../foo.txt", "filename=../foo.txt", "", "",
-     "text/plain", L"download", L"-foo.txt"},
+     "text/plain", L"download", L"_foo.txt"},
     {__LINE__, "http://www.evil.com/..\\foo.txt", "filename=..\\foo.txt", "",
-     "", "text/plain", L"download", L"-foo.txt"},
+     "", "text/plain", L"download", L"_foo.txt"},
     {__LINE__, "http://www.evil.com/.hidden", "filename=.hidden", "", "",
      "text/plain", L"download", L"hidden"},
     {__LINE__, "http://www.evil.com/trailing.", "filename=trailing.", "", "",
      "dance/party", L"download",
 #if defined(OS_WIN)
-     L"trailing-"
+     L"trailing_"
 #else
      L"trailing"
 #endif
@@ -900,7 +893,7 @@ TEST(FilenameUtilTest, GenerateFileName) {
     {__LINE__, "http://www.evil.com/trailing.", "filename=trailing.", "", "",
      "text/plain", L"download",
 #if defined(OS_WIN)
-     L"trailing-"
+     L"trailing_"
 #else
      L"trailing"
 #endif
@@ -1034,7 +1027,7 @@ TEST(FilenameUtilTest, GenerateFileName) {
      __LINE__, "http://www.example.com/image.aspx?id=blargh", "", "", "",
      "image/jpeg", L"download", L"image" JPEG_EXT},
     {__LINE__, "http://www.example.com/image.aspx?id=blargh", "", "", " .foo",
-     "", L"download", L"-.foo"},
+     "", L"download", L"_.foo"},
 
     // Note that the next 4 tests will not fail on all platforms on regression.
     // They only fail if application/[x-]gzip has a default extension, which
@@ -1075,10 +1068,10 @@ TEST(FilenameUtilTest, IsReservedNameOnWindows) {
         << kSafePortableBasenames[i];
   }
 
-  for (size_t i = 0; i < arraysize(kUnsafePortableBasenamesForWindows); ++i) {
+  for (size_t i = 0; i < arraysize(kUnsafePortableBasenamesForWin); ++i) {
     EXPECT_TRUE(IsReservedNameOnWindows(
-        base::FilePath(kUnsafePortableBasenamesForWindows[i]).value()))
-        << kUnsafePortableBasenamesForWindows[i];
+        base::FilePath(kUnsafePortableBasenamesForWin[i]).value()))
+        << kUnsafePortableBasenamesForWin[i];
   }
 }
 

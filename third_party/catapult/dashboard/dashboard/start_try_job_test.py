@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import base64
 import httplib2
 import json
 import unittest
@@ -18,14 +17,12 @@ from dashboard import start_try_job
 from dashboard.common import testing_common
 from dashboard.common import utils
 from dashboard.common import namespaced_stored_object
+from dashboard.models import anomaly
 from dashboard.models import bug_data
 from dashboard.models import graph_data
 from dashboard.models import try_job
 from dashboard.services import issue_tracker_service
-from dashboard.services import rietveld_service
 
-# TODO(qyearsley): Shorten this module.
-# See https://github.com/catapult-project/catapult/issues/1917
 # pylint: disable=too-many-lines
 
 # Below is a series of test strings which may contain long lines.
@@ -58,6 +55,20 @@ _EXPECTED_PERF_CONFIG_DIFF = """config = {
 -  'max_time_minutes': '',
 +  "bad_revision": "215828",
 +  "command": "src/tools/perf/run_benchmark -v --browser=release --output-format=chartjson --upload-results --pageset-repeat=1 --also-run-disabled-tests dromaeo.jslibstylejquery",
++  "good_revision": "215806",
++  "max_time_minutes": "60",
++  "repeat_count": "1",
++  "try_job_id": 1
+ }
+"""
+
+_EXPECTED_PERF_CONFIG_TRACING_DIFF = """config = {
+-  'command': '',
+-  'metric': '',
+-  'repeat_count': '',
+-  'max_time_minutes': '',
++  "bad_revision": "215828",
++  "command": "src/tools/perf/run_benchmark -v --browser=release --output-format=chartjson --upload-results --pageset-repeat=1 --also-run-disabled-tests --extra-chrome-categories=toplevel --extra-atrace-categories=battor dromaeo.jslibstylejquery",
 +  "good_revision": "215806",
 +  "max_time_minutes": "60",
 +  "repeat_count": "1",
@@ -234,19 +245,6 @@ _TEST_EXPECTED_BOT = None
 _TEST_EXPECTED_CONFIG_CONTENTS = None
 
 
-def _MockFetch(url=None):
-  if start_try_job._BISECT_CONFIG_PATH in url:
-    return testing_common.FakeResponseObject(
-        200, base64.encodestring(_BISECT_CONFIG_CONTENTS))
-  elif start_try_job._PERF_CONFIG_PATH in url:
-    return testing_common.FakeResponseObject(
-        200, base64.encodestring(_PERF_CONFIG_CONTENTS))
-
-
-def _MockFailedFetch(url=None):  # pylint: disable=unused-argument
-  return testing_common.FakeResponseObject(404, {})
-
-
 def _MockMakeRequest(path, *args, **kwargs):  # pylint: disable=unused-argument
   """Mocks out a request, returning a canned response."""
   if path.endswith('xsrf_token'):
@@ -311,13 +309,6 @@ class StartBisectTest(testing_common.TestCase):
             'ChromiumPerf': 'master.tryserver.chromium.perf'
         })
     testing_common.SetSheriffDomains(['chromium.org'])
-    # Add fake Rietveld auth info.
-    rietveld_config = rietveld_service.RietveldConfig(
-        id='default_rietveld_config',
-        client_email='sullivan@chromium.org',
-        service_account_key='Fake Account Key',
-        server_url='https://test-rietveld.appspot.com')
-    rietveld_config.put()
 
   @mock.patch.object(utils, 'IsGroupMember', mock.MagicMock(return_value=False))
   def testPost_InvalidUser_ShowsErrorMessage(self):
@@ -350,7 +341,7 @@ class StartBisectTest(testing_common.TestCase):
                     'dev.chromium.org': {},
                     'test.blogspot.com': {},
                     'http___test.com_': {},
-                    'Wikipedia (1 tab)': {}
+                    'Wikipedia_(1_tab)': {}
                 },
                 'vm_final_size_renderer': {
                     'ref': {},
@@ -370,6 +361,14 @@ class StartBisectTest(testing_common.TestCase):
                     'garden2_10s.webm_seek_warm': {},
                     'video.html?src_garden2_10s.webm': {}
                 }
+            },
+            'memory.top_10_mobile': {
+                'foreground': {
+                    'http_en_m_wikipedia_org': {}
+                },
+                'background': {
+                    'after_http_en_m_wikipedia_org': {}
+                }
             }
         })
     tests = graph_data.TestMetadata.query().fetch()
@@ -382,14 +381,14 @@ class StartBisectTest(testing_common.TestCase):
 
     response = self.testapp.post('/start_try_job', {
         'test_path': ('ChromiumPerf/win7/page_cycler.morejs/'
-                      'times/Wikipedia (1 tab)'),
+                      'times/Wikipedia_(1_tab)'),
         'step': 'prefill-info',
     })
     info = json.loads(response.body)
     self.assertEqual('win_perf_bisect', info['bisect_bot'])
     self.assertEqual('foo@chromium.org', info['email'])
     self.assertEqual('page_cycler.morejs', info['suite'])
-    self.assertEqual('times/Wikipedia (1 tab)', info['default_metric'])
+    self.assertEqual('times/Wikipedia_(1_tab)', info['default_metric'])
     self.assertEqual('ChromiumPerf', info['master'])
     self.assertFalse(info['internal_only'])
     self.assertFalse(info['is_admin'])
@@ -405,7 +404,7 @@ class StartBisectTest(testing_common.TestCase):
         ], info['all_bots'])
     self.assertEqual(
         [
-            'times/Wikipedia (1 tab)',
+            'times/Wikipedia_(1_tab)',
             'times/blog.chromium.org',
             'times/dev.chromium.org',
             'times/http___test.com_',
@@ -477,6 +476,16 @@ class StartBisectTest(testing_common.TestCase):
     info = json.loads(response.body)
     # No story filter used for non-page leaf metrics.
     self.assertEqual(info['story_filter'], '')
+
+    response = self.testapp.post('/start_try_job', {
+        'test_path': (
+            'ChromiumPerf/android-nexus7/memory.top_10_mobile'
+            '/background/after_http_en_m_wikipedia_org'),
+        'step': 'prefill-info',
+    })
+    info = json.loads(response.body)
+    # Special story filter for memory.top_10_mobile.
+    self.assertEqual(info['story_filter'], 'http.en.m.wikipedia.org')
 
     response = self.testapp.post('/start_try_job', {
         'test_path': ('ChromiumPerf/chromium-rel-win8-dual/'
@@ -728,14 +737,8 @@ class StartBisectTest(testing_common.TestCase):
   @mock.patch(
       'google.appengine.api.app_identity.get_default_version_hostname',
       mock.MagicMock(return_value='my-dashboard.appspot.com'))
-  @mock.patch(
-      'google.appengine.api.urlfetch.fetch',
-      mock.MagicMock(side_effect=_MockFetch))
   @mock.patch.object(start_try_job.buildbucket_service, 'PutJob',
                      mock.MagicMock(return_value='33001'))
-  @mock.patch.object(
-      start_try_job.rietveld_service.RietveldService, 'MakeRequest',
-      mock.MagicMock(side_effect=_MockMakeRequest))
   def testPerformBisect(self, _):
     self.SetCurrentUser('foo@chromium.org')
 
@@ -771,38 +774,43 @@ class StartBisectTest(testing_common.TestCase):
     self.assertEqual(issue_url, try_jobs[0].results_data['issue_url'])
     self.assertEqual('33001', try_jobs[0].results_data['issue_id'])
 
+  @mock.patch.object(issue_tracker_service.IssueTrackerService, 'AddBugComment')
   @mock.patch(
-      'google.appengine.api.urlfetch.fetch',
-      mock.MagicMock(side_effect=_MockFetch))
-  @mock.patch.object(
-      start_try_job.rietveld_service.RietveldService, 'MakeRequest',
-      mock.MagicMock(side_effect=_MockMakeRequest))
-  def testPerformPerfTry(self):
+      'google.appengine.api.app_identity.get_default_version_hostname',
+      mock.MagicMock(return_value='my-dashboard.appspot.com'))
+  @mock.patch.object(start_try_job.buildbucket_service, 'PutJob',
+                     mock.MagicMock(return_value='33001'))
+  def testPerformBisect_AddsToAlert(self, _):
     self.SetCurrentUser('foo@chromium.org')
 
+    # Create bug.
+    bug_data.Bug(id=12345).put()
+
+    test_key = utils.TestKey('M/B/S/foo')
+    anomaly_entity = anomaly.Anomaly(
+        start_revision=1, end_revision=2, test=test_key)
+    anomaly_entity.put()
+
     query_parameters = {
-        'bisect_bot': 'linux_perf_bisect',
+        'bisect_bot': 'win_perf_bisect',
         'suite': 'dromaeo.jslibstylejquery',
+        'metric': 'jslib/jslib',
         'good_revision': '215806',
         'bad_revision': '215828',
-        'step': 'perform-perf-try',
-        'rerun_option': '',
+        'repeat_count': '20',
+        'max_time_minutes': '20',
+        'bug_id': 12345,
+        'step': 'perform-bisect',
+        'alerts': json.dumps([anomaly_entity.key.urlsafe()])
     }
-    global _EXPECTED_CONFIG_DIFF
-    global _TEST_EXPECTED_CONFIG_CONTENTS
-    global _TEST_EXPECTED_BOT
-    _EXPECTED_CONFIG_DIFF = _EXPECTED_PERF_CONFIG_DIFF
-    _TEST_EXPECTED_CONFIG_CONTENTS = _PERF_CONFIG_CONTENTS
-    _TEST_EXPECTED_BOT = 'linux_perf_bisect'
-    response = self.testapp.post('/start_try_job', query_parameters)
-    self.assertEqual(json.dumps({'issue_id': '33001'}), response.body)
+    self.testapp.post('/start_try_job', query_parameters)
+
+    try_jobs = try_job.TryJob.query().fetch(use_cache=False)
+    self.assertEqual([try_jobs[0].key], anomaly_entity.recipe_bisects)
 
   @mock.patch.object(issue_tracker_service.IssueTrackerService, 'AddBugComment')
   @mock.patch.object(start_try_job.buildbucket_service, 'PutJob',
                      mock.MagicMock(side_effect=httplib2.HttpLib2Error))
-  @mock.patch.object(
-      start_try_job.rietveld_service.RietveldService, 'MakeRequest',
-      mock.MagicMock(side_effect=_MockMakeRequest))
   def testPerformBisectStep_DeleteJobOnFailedBisect(self, _):
     self.SetCurrentUser('foo@chromium.org')
     query_parameters = {
@@ -811,7 +819,6 @@ class StartBisectTest(testing_common.TestCase):
         'metric': 'jslib/jslib',
         'good_revision': '215806',
         'bad_revision': '215828',
-        'rerun_option': '',
     }
     global _EXPECTED_CONFIG_DIFF
     global _TEST_EXPECTED_CONFIG_CONTENTS
@@ -825,36 +832,6 @@ class StartBisectTest(testing_common.TestCase):
     try_jobs = try_job.TryJob.query().fetch()
     self.assertEqual(0, len(try_jobs))
 
-  @mock.patch(
-      'google.appengine.api.urlfetch.fetch',
-      mock.MagicMock(side_effect=_MockFailedFetch))
-  @mock.patch.object(
-      start_try_job.rietveld_service.RietveldService, 'MakeRequest',
-      mock.MagicMock(side_effect=_MockMakeRequest))
-  def testPerformPerfTryStep_DeleteJobOnFailedBisect(self):
-    self.SetCurrentUser('foo@chromium.org')
-    query_parameters = {
-        'bisect_bot': 'linux_perf_bisect',
-        'suite': 'dromaeo.jslibstylejquery',
-        'good_revision': '215806',
-        'bad_revision': '215828',
-        'rerun_option': '',
-    }
-    global _EXPECTED_CONFIG_DIFF
-    global _TEST_EXPECTED_CONFIG_CONTENTS
-    global _TEST_EXPECTED_BOT
-    _EXPECTED_CONFIG_DIFF = _EXPECTED_PERF_CONFIG_DIFF
-    _TEST_EXPECTED_CONFIG_CONTENTS = _PERF_CONFIG_CONTENTS
-    _TEST_EXPECTED_BOT = 'linux_perf_bisect'
-
-    query_parameters['step'] = 'perform-perf-try'
-    self.testapp.post('/start_try_job', query_parameters)
-    try_jobs = try_job.TryJob.query().fetch()
-    self.assertEqual(0, len(try_jobs))
-
-  @mock.patch(
-      'google.appengine.api.urlfetch.fetch',
-      mock.MagicMock(side_effect=_MockFetch))
   @mock.patch(
       'google.appengine.api.app_identity.get_default_version_hostname',
       mock.MagicMock(return_value='my-dashboard.appspot.com'))
@@ -951,6 +928,20 @@ class StartBisectTest(testing_common.TestCase):
         'gtest --release -s cc_perftests --verbose',
         bisect_bot='android_nexus7_perf_bisect',
         suite='cc_perftests')
+
+  def testGetConfig_TracingPerftests(self):
+    self._TestGetConfigCommand(
+        ('./src/out/Release/tracing_perftests '
+         '--test-launcher-print-test-stdio=always --verbose'),
+        bisect_bot='linux_perf_bisect',
+        suite='tracing_perftests')
+
+  def testGetConfig_AndroidTracingPerftests(self):
+    self._TestGetConfigCommand(
+        'src/build/android/test_runner.py '
+        'gtest --release -s tracing_perftests --verbose',
+        bisect_bot='android_nexus7_perf_bisect',
+        suite='tracing_perftests')
 
   def testGetConfig_IdbPerf(self):
     self._TestGetConfigCommand(

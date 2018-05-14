@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/ptr_util.h"
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/V8BindingForCore.h"
-#include "bindings/core/v8/V8DOMActivityLogger.h"
 #include "core/frame/FrameTestHelpers.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
+#include "platform/bindings/V8DOMActivityLogger.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/Base64.h"
 #include "public/platform/WebCache.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -22,7 +22,7 @@ using blink::FrameTestHelpers::PumpPendingRequestsForFrameToLoad;
 
 class TestActivityLogger : public V8DOMActivityLogger {
  public:
-  ~TestActivityLogger() override {}
+  ~TestActivityLogger() override = default;
 
   void LogGetter(const String& api_name) override {
     logged_activities_.push_back(api_name);
@@ -75,13 +75,13 @@ class ActivityLoggerTest : public ::testing::Test {
   ActivityLoggerTest() {
     activity_logger_ = new TestActivityLogger();
     V8DOMActivityLogger::SetActivityLogger(kIsolatedWorldId, String(),
-                                           WTF::WrapUnique(activity_logger_));
+                                           base::WrapUnique(activity_logger_));
     web_view_helper_.Initialize();
-    script_controller_ = &web_view_helper_.WebView()
+    script_controller_ = &web_view_helper_.GetWebView()
                               ->MainFrameImpl()
                               ->GetFrame()
                               ->GetScriptController();
-    FrameTestHelpers::LoadFrame(web_view_helper_.WebView()->MainFrameImpl(),
+    FrameTestHelpers::LoadFrame(web_view_helper_.GetWebView()->MainFrameImpl(),
                                 "about:blank");
   }
 
@@ -90,7 +90,8 @@ class ActivityLoggerTest : public ::testing::Test {
   void ExecuteScriptInMainWorld(const String& script) const {
     v8::HandleScope scope(v8::Isolate::GetCurrent());
     script_controller_->ExecuteScriptInMainWorld(script);
-    PumpPendingRequestsForFrameToLoad(web_view_helper_.WebView()->MainFrame());
+    PumpPendingRequestsForFrameToLoad(
+        web_view_helper_.GetWebView()->MainFrame());
   }
 
   void ExecuteScriptInIsolatedWorld(const String& script) const {
@@ -99,8 +100,9 @@ class ActivityLoggerTest : public ::testing::Test {
     sources.push_back(ScriptSourceCode(script));
     Vector<v8::Local<v8::Value>> results;
     script_controller_->ExecuteScriptInIsolatedWorld(kIsolatedWorldId, sources,
-                                                     0);
-    PumpPendingRequestsForFrameToLoad(web_view_helper_.WebView()->MainFrame());
+                                                     nullptr);
+    PumpPendingRequestsForFrameToLoad(
+        web_view_helper_.GetWebView()->MainFrame());
   }
 
   bool VerifyActivities(const String& activities) {

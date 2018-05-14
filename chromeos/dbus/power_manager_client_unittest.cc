@@ -5,9 +5,12 @@
 #include "chromeos/dbus/power_manager_client.h"
 
 #include <map>
+#include <memory>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -75,7 +78,7 @@ MATCHER_P3(IsSuspendReadiness, method_name, suspend_id, delay_id, "") {
 // bare pointer rather than an std::unique_ptr.
 void RunResponseCallback(dbus::ObjectProxy::ResponseCallback callback,
                          std::unique_ptr<dbus::Response> response) {
-  callback.Run(response.get());
+  std::move(callback).Run(response.get());
 }
 
 // Stub implementation of PowerManagerClient::Observer.
@@ -112,10 +115,12 @@ class TestObserver : public PowerManagerClient::Observer {
   }
 
   // PowerManagerClient::Observer:
-  void SuspendImminent() override {
+  void SuspendImminent(power_manager::SuspendImminent::Reason reason) override {
     num_suspend_imminent_++;
-    if (take_suspend_readiness_callback_)
-      suspend_readiness_callback_ = client_->GetSuspendReadinessCallback();
+    if (take_suspend_readiness_callback_) {
+      suspend_readiness_callback_ =
+          client_->GetSuspendReadinessCallback(FROM_HERE);
+    }
     if (run_suspend_readiness_callback_immediately_)
       CHECK(RunSuspendReadinessCallback());
   }
@@ -124,8 +129,10 @@ class TestObserver : public PowerManagerClient::Observer {
   }
   void DarkSuspendImminent() override {
     num_dark_suspend_imminent_++;
-    if (take_suspend_readiness_callback_)
-      suspend_readiness_callback_ = client_->GetSuspendReadinessCallback();
+    if (take_suspend_readiness_callback_) {
+      suspend_readiness_callback_ =
+          client_->GetSuspendReadinessCallback(FROM_HERE);
+    }
     if (run_suspend_readiness_callback_immediately_)
       CHECK(RunSuspendReadinessCallback());
   }
@@ -160,7 +167,7 @@ class TestDelegate : public PowerManagerClient::RenderProcessManagerDelegate {
   explicit TestDelegate(PowerManagerClient* client) : weak_ptr_factory_(this) {
     client->SetRenderProcessManagerDelegate(weak_ptr_factory_.GetWeakPtr());
   }
-  ~TestDelegate() override {}
+  ~TestDelegate() override = default;
 
   int num_suspend_imminent() const { return num_suspend_imminent_; }
   int num_suspend_done() const { return num_suspend_done_; }
@@ -183,8 +190,8 @@ class TestDelegate : public PowerManagerClient::RenderProcessManagerDelegate {
 
 class PowerManagerClientTest : public testing::Test {
  public:
-  PowerManagerClientTest() {}
-  ~PowerManagerClientTest() override {}
+  PowerManagerClientTest() = default;
+  ~PowerManagerClientTest() override = default;
 
   void SetUp() override {
     dbus::Bus::Options options;
@@ -204,7 +211,7 @@ class PowerManagerClientTest : public testing::Test {
         .WillRepeatedly(Return(proxy_.get()));
 
     // Save |client_|'s signal and name-owner-changed callbacks.
-    EXPECT_CALL(*proxy_.get(), ConnectToSignal(kInterface, _, _, _))
+    EXPECT_CALL(*proxy_.get(), DoConnectToSignal(kInterface, _, _, _))
         .WillRepeatedly(Invoke(this, &PowerManagerClientTest::ConnectToSignal));
     EXPECT_CALL(*proxy_.get(), SetNameOwnerChangedCallback(_))
         .WillRepeatedly(SaveArg<0>(&name_owner_changed_callback_));
@@ -213,13 +220,14 @@ class PowerManagerClientTest : public testing::Test {
     // delays.
     EXPECT_CALL(
         *proxy_.get(),
-        CallMethod(HasMember(power_manager::kRegisterSuspendDelayMethod), _, _))
+        DoCallMethod(HasMember(power_manager::kRegisterSuspendDelayMethod), _,
+                     _))
         .WillRepeatedly(
             Invoke(this, &PowerManagerClientTest::RegisterSuspendDelay));
     EXPECT_CALL(
         *proxy_.get(),
-        CallMethod(HasMember(power_manager::kRegisterDarkSuspendDelayMethod), _,
-                   _))
+        DoCallMethod(HasMember(power_manager::kRegisterDarkSuspendDelayMethod),
+                     _, _))
         .WillRepeatedly(
             Invoke(this, &PowerManagerClientTest::RegisterSuspendDelay));
 
@@ -248,6 +256,7 @@ class PowerManagerClientTest : public testing::Test {
                                  int suspend_id) {
     power_manager::SuspendImminent proto;
     proto.set_suspend_id(suspend_id);
+    proto.set_reason(power_manager::SuspendImminent_Reason_OTHER);
     dbus::Signal signal(kInterface, signal_name);
     dbus::MessageWriter(&signal).AppendProtoAsArrayOfBytes(proto);
     EmitSignal(&signal);
@@ -269,8 +278,8 @@ class PowerManagerClientTest : public testing::Test {
                               int delay_id) {
     EXPECT_CALL(
         *proxy_.get(),
-        CallMethod(IsSuspendReadiness(method_name, suspend_id, delay_id), _,
-                   _));
+        DoCallMethod(IsSuspendReadiness(method_name, suspend_id, delay_id), _,
+                     _));
   }
 
   // Arbitrary delay IDs returned to |client_|.
@@ -299,19 +308,20 @@ class PowerManagerClientTest : public testing::Test {
       const std::string& interface_name,
       const std::string& signal_name,
       dbus::ObjectProxy::SignalCallback signal_callback,
-      dbus::ObjectProxy::OnConnectedCallback on_connected_callback) {
+      dbus::ObjectProxy::OnConnectedCallback* on_connected_callback) {
     CHECK_EQ(interface_name, power_manager::kPowerManagerInterface);
     signal_callbacks_[signal_name] = signal_callback;
 
     message_loop_.task_runner()->PostTask(
-        FROM_HERE, base::Bind(on_connected_callback, interface_name,
-                              signal_name, true /* success */));
+        FROM_HERE,
+        base::BindOnce(std::move(*on_connected_callback), interface_name,
+                       signal_name, true /* success */));
   }
 
   // Handles calls to |proxy_|'s CallMethod() method to register suspend delays.
   void RegisterSuspendDelay(dbus::MethodCall* method_call,
                             int timeout_ms,
-                            dbus::ObjectProxy::ResponseCallback callback) {
+                            dbus::ObjectProxy::ResponseCallback* callback) {
     power_manager::RegisterSuspendDelayReply proto;
     proto.set_delay_id(method_call->GetMember() ==
                                power_manager::kRegisterDarkSuspendDelayMethod
@@ -324,8 +334,8 @@ class PowerManagerClientTest : public testing::Test {
     CHECK(dbus::MessageWriter(response.get()).AppendProtoAsArrayOfBytes(proto));
 
     message_loop_.task_runner()->PostTask(
-        FROM_HERE,
-        base::Bind(&RunResponseCallback, callback, base::Passed(&response)));
+        FROM_HERE, base::BindOnce(&RunResponseCallback, std::move(*callback),
+                                  base::Passed(&response)));
   }
 
   DISALLOW_COPY_AND_ASSIGN(PowerManagerClientTest);

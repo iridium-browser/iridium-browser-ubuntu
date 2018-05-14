@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
@@ -64,7 +63,7 @@ std::unique_ptr<KeyedService> BookmarkModelFactory::BuildServiceInstanceFor(
       ios::ChromeBrowserState::FromBrowserState(context);
   std::unique_ptr<bookmarks::BookmarkModel> bookmark_model(
       new bookmarks::BookmarkModel(
-          base::MakeUnique<BookmarkClientImpl>(browser_state)));
+          std::make_unique<BookmarkClientImpl>(browser_state)));
   bookmark_model->Load(
       browser_state->GetPrefs(),
       browser_state->GetStatePath(),
@@ -73,8 +72,7 @@ std::unique_ptr<KeyedService> BookmarkModelFactory::BuildServiceInstanceFor(
       web::WebThread::GetTaskRunnerForThread(web::WebThread::UI));
   ios::BookmarkUndoServiceFactory::GetForBrowserState(browser_state)
       ->Start(bookmark_model.get());
-  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
-  return std::move(bookmark_model);
+  return bookmark_model;
 }
 
 web::BrowserState* BookmarkModelFactory::GetBrowserStateToUse(

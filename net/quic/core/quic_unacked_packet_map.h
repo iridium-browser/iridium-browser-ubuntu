@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_transmission_info.h"
-#include "net/quic/core/stream_notifier_interface.h"
+#include "net/quic/core/session_notifier_interface.h"
 #include "net/quic/platform/api/quic_export.h"
 
 namespace net {
@@ -42,18 +42,19 @@ class QUIC_EXPORT_PRIVATE QuicUnackedPacketMap {
   // Returns true if the packet |packet_number| is unacked.
   bool IsUnacked(QuicPacketNumber packet_number) const;
 
-  // Notifies all the AckListeners attached to the |info| and
-  // clears them to ensure they're not notified again.
-  void NotifyAndClearListeners(std::list<AckListenerWrapper>* ack_listeners,
-                               QuicTime::Delta delta_largest_observed);
+  // Notifies session_notifier that frames have been acked. Returns true if any
+  // new data gets acked, returns false otherwise.
+  bool NotifyFramesAcked(const QuicTransmissionInfo& info,
+                         QuicTime::Delta ack_delay);
 
-  // Notifies all the AckListeners attached to |newest_transmission|.
-  void NotifyAndClearListeners(QuicPacketNumber newest_transmission,
-                               QuicTime::Delta delta_largest_observed);
+  // Notifies session_notifier that frames in |info| are considered as lost.
+  void NotifyFramesLost(const QuicTransmissionInfo& info,
+                        TransmissionType type);
 
-  // Notifies stream_notifier that stream frames have been acked.
-  void NotifyStreamFramesAcked(const QuicTransmissionInfo& info,
-                               QuicTime::Delta ack_delay);
+  // Notifies session_notifier to retransmit frames in |info| with
+  // |transmission_type|.
+  void RetransmitFrames(const QuicTransmissionInfo& info,
+                        TransmissionType type);
 
   // Marks |info| as no longer in flight.
   void RemoveFromInFlight(QuicTransmissionInfo* info);
@@ -61,18 +62,18 @@ class QUIC_EXPORT_PRIVATE QuicUnackedPacketMap {
   // Marks |packet_number| as no longer in flight.
   void RemoveFromInFlight(QuicPacketNumber packet_number);
 
-  // Marks |packet_number| as in flight.  Must not be unackable.
-  void RestoreToInFlight(QuicPacketNumber packet_number);
-
   // No longer retransmit data for |stream_id|.
   void CancelRetransmissionsForStream(QuicStreamId stream_id);
 
-  // Returns true if the unacked packet |packet_number| has retransmittable
-  // frames.  This will return false if the packet has been acked, if a
-  // previous transmission of this packet was ACK'd, or if this packet has been
-  // retransmitted as with different packet number, or if the packet never
-  // had any retransmittable packets in the first place.
+  // Returns true if |packet_number| has retransmittable frames. This will
+  // return false if all frames of this packet are either non-retransmittable or
+  // have been acked.
   bool HasRetransmittableFrames(QuicPacketNumber packet_number) const;
+
+  // Returns true if |info| has retransmittable frames. This will return false
+  // if all frames of this packet are either non-retransmittable or have been
+  // acked.
+  bool HasRetransmittableFrames(const QuicTransmissionInfo& info) const;
 
   // Returns true if there are any unacked packets.
   bool HasUnackedPackets() const;
@@ -99,6 +100,8 @@ class QUIC_EXPORT_PRIVATE QuicUnackedPacketMap {
   // been acked by the peer.  If there are no unacked packets, returns 0.
   QuicPacketNumber GetLeastUnacked() const;
 
+  // This can not be a QuicDeque since pointers into this are
+  // assumed to be stable.
   typedef std::deque<QuicTransmissionInfo> UnackedPacketMap;
 
   typedef UnackedPacketMap::const_iterator const_iterator;
@@ -132,6 +135,8 @@ class QUIC_EXPORT_PRIVATE QuicUnackedPacketMap {
   bool HasMultipleInFlightPackets() const;
 
   // Returns true if there are any pending crypto packets.
+  // TODO(fayang): Remove this method and call session_notifier_'s
+  // HasPendingCryptoData() when session_decides_what_to_write_ is default true.
   bool HasPendingCryptoPackets() const;
 
   // Removes any retransmittable frames from this transmission or an associated
@@ -151,7 +156,14 @@ class QUIC_EXPORT_PRIVATE QuicUnackedPacketMap {
   // RTT measurement purposes.
   void RemoveObsoletePackets();
 
-  void SetStreamNotifier(StreamNotifierInterface* stream_notifier);
+  // Called to start/stop letting session decide what to write.
+  void SetSessionDecideWhatToWrite(bool session_decides_what_to_write);
+
+  void SetSessionNotifier(SessionNotifierInterface* session_notifier);
+
+  bool session_decides_what_to_write() const {
+    return session_decides_what_to_write_;
+  }
 
  private:
   // Called when a packet is retransmitted with a new packet number.
@@ -201,9 +213,11 @@ class QUIC_EXPORT_PRIVATE QuicUnackedPacketMap {
   // Number of retransmittable crypto handshake packets.
   size_t pending_crypto_packet_count_;
 
-  // Receives notifications of stream frames being retransmitted or
-  // acknowledged.
-  StreamNotifierInterface* stream_notifier_;
+  // Receives notifications of frames being retransmitted or acknowledged.
+  SessionNotifierInterface* session_notifier_;
+
+  // If true, let session decides what to write.
+  bool session_decides_what_to_write_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicUnackedPacketMap);
 };

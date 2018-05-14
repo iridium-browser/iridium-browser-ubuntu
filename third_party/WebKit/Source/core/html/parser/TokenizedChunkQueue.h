@@ -6,9 +6,9 @@
 #define TokenizedChunkQueue_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "core/html/parser/HTMLDocumentParser.h"
 #include "platform/wtf/Deque.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/ThreadSafeRefCounted.h"
 #include "platform/wtf/ThreadingPrimitives.h"
 #include "platform/wtf/Vector.h"
@@ -25,8 +25,8 @@ namespace blink {
 // thread kicks a consumer task on Blink main thread.
 class TokenizedChunkQueue : public ThreadSafeRefCounted<TokenizedChunkQueue> {
  public:
-  static PassRefPtr<TokenizedChunkQueue> Create() {
-    return AdoptRef(new TokenizedChunkQueue);
+  static scoped_refptr<TokenizedChunkQueue> Create() {
+    return base::AdoptRef(new TokenizedChunkQueue);
   }
 
   ~TokenizedChunkQueue();
@@ -35,16 +35,11 @@ class TokenizedChunkQueue : public ThreadSafeRefCounted<TokenizedChunkQueue> {
   void Clear();
 
   void TakeAll(Vector<std::unique_ptr<HTMLDocumentParser::TokenizedChunk>>&);
-  size_t PeakPendingChunkCount();
-  size_t PeakPendingTokenCount();
 
  private:
   TokenizedChunkQueue();
 
   Vector<std::unique_ptr<HTMLDocumentParser::TokenizedChunk>> pending_chunks_;
-  size_t peak_pending_chunk_count_ = 0;
-  size_t peak_pending_token_count_ = 0;
-  size_t pending_token_count_ = 0;
 };
 
 }  // namespace blink

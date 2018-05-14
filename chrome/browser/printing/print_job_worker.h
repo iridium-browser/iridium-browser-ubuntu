@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
+#include "build/build_config.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "content/public/browser/browser_thread.h"
 #include "printing/page_number.h"
@@ -53,8 +54,14 @@ class PrintJobWorker {
                    bool is_scripted,
                    bool is_modifiable);
 
-  // Set the new print settings.
+  // Set the new print settings from a dictionary value.
   void SetSettings(std::unique_ptr<base::DictionaryValue> new_settings);
+
+#if defined(OS_CHROMEOS)
+  // Set the new print settings from a POD type.
+  void SetSettingsFromPOD(
+      std::unique_ptr<printing::PrintSettings> new_settings);
+#endif
 
   // Starts the printing loop. Every pages are printed as soon as the data is
   // available. Makes sure the new_document is the right one.
@@ -75,8 +82,7 @@ class PrintJobWorker {
   bool IsRunning() const;
 
   // Posts the given task to be run.
-  bool PostTask(const tracked_objects::Location& from_here,
-                const base::Closure& task);
+  bool PostTask(const base::Location& from_here, base::OnceClosure task);
 
   // Signals the thread to exit in the near future.
   void StopSoon();
@@ -99,8 +105,17 @@ class PrintJobWorker {
   // and DEFAULT_INIT_DONE. These three are sent through PrintJob::InitDone().
   class NotificationTask;
 
+  // Posts a task to call OnNewPage(). Used to wait for pages/document to be
+  // available.
+  void PostWaitForPage();
+
+#if defined(OS_WIN)
   // Renders a page in the printer.
   void SpoolPage(PrintedPage* page);
+#else
+  // Renders the document to the printer.
+  void SpoolJob();
+#endif
 
   // Closes the job since spooling is done.
   void OnDocumentDone();
@@ -120,6 +135,12 @@ class PrintJobWorker {
   // Called on the UI thread to update the print settings.
   void UpdatePrintSettings(std::unique_ptr<base::DictionaryValue> new_settings);
 
+#if defined(OS_CHROMEOS)
+  // Called on the UI thread to update the print settings.
+  void UpdatePrintSettingsFromPOD(
+      std::unique_ptr<printing::PrintSettings> new_settings);
+#endif
+
   // Reports settings back to owner_.
   void GetSettingsDone(PrintingContext::Result result);
 
@@ -129,16 +150,14 @@ class PrintJobWorker {
   void UseDefaultSettings();
 
   // Printing context delegate.
-  std::unique_ptr<PrintingContext::Delegate> printing_context_delegate_;
+  const std::unique_ptr<PrintingContext::Delegate> printing_context_delegate_;
 
   // Information about the printer setting.
-  std::unique_ptr<PrintingContext> printing_context_;
+  const std::unique_ptr<PrintingContext> printing_context_;
 
   // The printed document. Only has read-only access.
   scoped_refptr<PrintedDocument> document_;
 
-  int render_process_id_;
-  int render_frame_id_;
   // The print job owning this worker thread. It is guaranteed to outlive this
   // object.
   PrintJobWorkerOwner* owner_;
@@ -149,7 +168,7 @@ class PrintJobWorker {
   // Thread to run worker tasks.
   base::Thread thread_;
 
-  // Tread-safe pointer to task runner of the |thread_|.
+  // Thread-safe pointer to task runner of the |thread_|.
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   // Used to generate a WeakPtr for callbacks.

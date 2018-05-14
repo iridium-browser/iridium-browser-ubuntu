@@ -90,7 +90,7 @@ std::string TexSubImageParams::suffix() const
 }
 
 TexSubImageBenchmark::TexSubImageBenchmark()
-    : ANGLERenderTest("TexSubImage", GetParam()),
+    : ANGLERenderTest("TexSubImage", GetParam(), {"GL_EXT_texture_storage"}),
       mProgram(0),
       mPositionLoc(-1),
       mTexCoordLoc(-1),
@@ -131,15 +131,24 @@ void TexSubImageBenchmark::initializeBenchmark()
 {
     const auto &params = GetParam();
 
-    const std::string vs = SHADER_SOURCE(attribute vec4 a_position; attribute vec2 a_texCoord;
-                                         varying vec2 v_texCoord; void main() {
-                                             gl_Position = a_position;
-                                             v_texCoord  = a_texCoord;
-                                         });
+    const std::string vs =
+        R"(attribute vec4 a_position;
+        attribute vec2 a_texCoord;
+        varying vec2 v_texCoord;
+        void main()
+        {
+            gl_Position = a_position;
+            v_texCoord  = a_texCoord;
+        })";
 
     const std::string fs =
-        SHADER_SOURCE(precision mediump float; varying vec2 v_texCoord; uniform sampler2D s_texture;
-                      void main() { gl_FragColor = texture2D(s_texture, v_texCoord); });
+        R"(precision mediump float;
+        varying vec2 v_texCoord;
+        uniform sampler2D s_texture;
+        void main()
+        {
+            gl_FragColor = texture2D(s_texture, v_texCoord);
+        })";
 
     mProgram = CompileProgram(vs, fs);
     ASSERT_NE(0u, mProgram);
@@ -265,10 +274,10 @@ TexSubImageParams D3D9Params()
     return params;
 }
 
-TexSubImageParams OpenGLParams()
+TexSubImageParams OpenGLOrGLESParams()
 {
     TexSubImageParams params;
-    params.eglParameters = egl_platform::OPENGL();
+    params.eglParameters = egl_platform::OPENGL_OR_GLES(false);
     return params;
 }
 
@@ -279,4 +288,4 @@ TEST_P(TexSubImageBenchmark, Run)
     run();
 }
 
-ANGLE_INSTANTIATE_TEST(TexSubImageBenchmark, D3D11Params(), D3D9Params(), OpenGLParams());
+ANGLE_INSTANTIATE_TEST(TexSubImageBenchmark, D3D11Params(), D3D9Params(), OpenGLOrGLESParams());

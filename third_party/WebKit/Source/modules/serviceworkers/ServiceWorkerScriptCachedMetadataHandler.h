@@ -26,15 +26,16 @@ class ServiceWorkerScriptCachedMetadataHandler : public CachedMetadataHandler {
                                                         script_url, meta_data);
   }
   ~ServiceWorkerScriptCachedMetadataHandler() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
   void SetCachedMetadata(uint32_t data_type_id,
                          const char*,
                          size_t,
                          CacheType) override;
   void ClearCachedMetadata(CacheType) override;
-  RefPtr<CachedMetadata> GetCachedMetadata(
+  scoped_refptr<CachedMetadata> GetCachedMetadata(
       uint32_t data_type_id) const override;
   String Encoding() const override;
+  bool IsServedFromCacheStorage() const override;
 
  private:
   ServiceWorkerScriptCachedMetadataHandler(WorkerGlobalScope*,
@@ -43,7 +44,7 @@ class ServiceWorkerScriptCachedMetadataHandler : public CachedMetadataHandler {
 
   Member<WorkerGlobalScope> worker_global_scope_;
   KURL script_url_;
-  RefPtr<CachedMetadata> cached_metadata_;
+  scoped_refptr<CachedMetadata> cached_metadata_;
 };
 
 }  // namespace blink

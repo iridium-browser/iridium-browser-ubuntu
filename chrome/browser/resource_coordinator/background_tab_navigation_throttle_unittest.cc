@@ -8,13 +8,14 @@
 
 #include "base/macros.h"
 #include "base/test/scoped_feature_list.h"
-#include "chrome/common/chrome_features.h"
+#include "chrome/browser/resource_coordinator/tab_manager_features.h"
+#include "chrome/browser/ui/tab_ui_helper.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/web_contents.h"
-#include "content/test/test_web_contents.h"
+#include "content/public/test/web_contents_tester.h"
 #include "url/gurl.h"
 
 namespace resource_coordinator {
@@ -39,18 +40,19 @@ class BackgroundTabNavigationThrottleTest
                      bool,  // is_background_tab
                      bool,  // no_opener
                      bool,  // is_initial_navigation
+                     bool,  // has_tab_ui_helper
                      GURL>> {
  public:
   BackgroundTabNavigationThrottleTest() {}
 
   void SetUp() override {
     std::tie(expected_instantiation_result_, enable_feature_, is_in_main_frame_,
-             is_background_tab_, no_opener_, is_initial_navigation_, url_) =
-        GetParam();
+             is_background_tab_, no_opener_, is_initial_navigation_,
+             has_tab_ui_helper_, url_) = GetParam();
 
     if (enable_feature_) {
       scoped_feature_list_.InitAndEnableFeature(
-          features::kStaggeredBackgroundTabOpen);
+          features::kStaggeredBackgroundTabOpening);
     }
 
     ChromeRenderViewHostTestHarness::SetUp();
@@ -70,6 +72,7 @@ class BackgroundTabNavigationThrottleTest
   bool is_background_tab_;
   bool no_opener_;
   bool is_initial_navigation_;
+  bool has_tab_ui_helper_;
   GURL url_;
 
  private:
@@ -79,6 +82,9 @@ class BackgroundTabNavigationThrottleTest
 };
 
 TEST_P(BackgroundTabNavigationThrottleTest, Instantiate) {
+  if (has_tab_ui_helper_)
+    TabUIHelper::CreateForWebContents(web_contents());
+
   if (!is_initial_navigation_)
     NavigateAndCommit(GURL(kTestUrl));
 
@@ -87,12 +93,10 @@ TEST_P(BackgroundTabNavigationThrottleTest, Instantiate) {
   else
     web_contents()->WasShown();
 
-  std::unique_ptr<content::TestWebContents> opener(
-      content::TestWebContents::Create(browser_context(),
-                                       main_rfh()->GetSiteInstance()));
+  std::unique_ptr<content::WebContents> opener;
   if (!no_opener_) {
-    static_cast<content::TestWebContents*>(web_contents())
-        ->SetOpener(opener.get());
+    opener.reset(CreateTestWebContents());
+    content::WebContentsTester::For(web_contents())->SetOpener(opener.get());
   }
 
   content::RenderFrameHost* rfh;
@@ -121,9 +125,11 @@ INSTANTIATE_TEST_CASE_P(
                                       true,  // Is background tab
                                       true,  // No opener
                                       true,  // Is initial navigation
+                                      true,  // Has tab UI helper
                                       GURL(kTestUrl)),
                       std::make_tuple(EXPECT_NO_INSTANTIATION,
                                       false,  // Disable feature
+                                      true,
                                       true,
                                       true,
                                       true,
@@ -135,11 +141,13 @@ INSTANTIATE_TEST_CASE_P(
                                       true,
                                       true,
                                       true,
+                                      true,
                                       GURL(kTestUrl)),
                       std::make_tuple(EXPECT_NO_INSTANTIATION,
                                       true,
                                       true,
                                       false,  // Is foreground tab
+                                      true,
                                       true,
                                       true,
                                       GURL(kTestUrl)),
@@ -149,6 +157,7 @@ INSTANTIATE_TEST_CASE_P(
                                       true,
                                       false,  // Has opener
                                       true,
+                                      true,
                                       GURL(kTestUrl)),
                       std::make_tuple(EXPECT_NO_INSTANTIATION,
                                       true,
@@ -156,6 +165,15 @@ INSTANTIATE_TEST_CASE_P(
                                       true,
                                       true,
                                       false,  // Is not initial navigation
+                                      true,
+                                      GURL(kTestUrl)),
+                      std::make_tuple(EXPECT_NO_INSTANTIATION,
+                                      true,
+                                      true,
+                                      true,
+                                      true,
+                                      true,
+                                      false,  // Do not have tab UI helper
                                       GURL(kTestUrl))));
 
 }  // namespace resource_coordinator

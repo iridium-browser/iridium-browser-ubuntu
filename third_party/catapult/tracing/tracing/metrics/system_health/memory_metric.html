@@ -5,12 +5,13 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<link rel="import" href="/tracing/base/iteration_helpers.html">
 <link rel="import" href="/tracing/base/math/range.html">
 <link rel="import" href="/tracing/base/multi_dimensional_view.html">
 <link rel="import" href="/tracing/base/unit.html">
+<link rel="import" href="/tracing/base/utils.html">
 <link rel="import" href="/tracing/extras/chrome/chrome_processes.html">
 <link rel="import" href="/tracing/metrics/metric_registry.html">
+<link rel="import" href="/tracing/metrics/system_health/utils.html">
 <link rel="import" href="/tracing/model/container_memory_dump.html">
 <link rel="import" href="/tracing/model/helpers/chrome_model_helper.html">
 <link rel="import" href="/tracing/model/memory_allocator_dump.html">
@@ -57,74 +58,11 @@ tr.exportTo('tr.metrics.sh', function() {
     const rangeOfInterest =
       opt_options ? opt_options.rangeOfInterest : undefined;
     const browserNameToGlobalDumps =
-        splitGlobalDumpsByBrowserName(model, rangeOfInterest);
+        tr.metrics.sh.splitGlobalDumpsByBrowserName(model, rangeOfInterest);
     addGeneralMemoryDumpValues(browserNameToGlobalDumps, values);
     addDetailedMemoryDumpValues(browserNameToGlobalDumps, values);
     addMemoryDumpCountValues(browserNameToGlobalDumps, values);
   }
-
-  /**
-   * Splits the global memory dumps in |model| by browser name.
-   *
-   * @param {!tr.Model} model The trace model from which the global dumps
-   *     should be extracted.
-   * @param {!tr.b.math.Range=} opt_rangeOfInterest If provided, global memory
-   *     dumps that do not inclusively intersect the range will be skipped.
-   * @return {!Map<string, !Array<!tr.model.GlobalMemoryDump>} A map from
-   *     browser names to the associated global memory dumps.
-   */
-  function splitGlobalDumpsByBrowserName(model, opt_rangeOfInterest) {
-    const chromeModelHelper =
-        model.getOrCreateHelper(tr.model.helpers.ChromeModelHelper);
-    const browserNameToGlobalDumps = new Map();
-    const globalDumpToBrowserHelper = new WeakMap();
-
-    // 1. For each browser process in the model, add its global memory dumps to
-    // |browserNameToGlobalDumps|. |chromeModelHelper| can be undefined if
-    // it fails to find any browser, renderer or GPU process (see
-    // tr.model.helpers.ChromeModelHelper.supportsModel).
-    if (chromeModelHelper) {
-      chromeModelHelper.browserHelpers.forEach(function(helper) {
-        // Retrieve the associated global memory dumps and check that they
-        // haven't been classified as belonging to another browser process.
-        const globalDumps = skipDumpsThatDoNotIntersectRange(
-            helper.process.memoryDumps.map(d => d.globalMemoryDump),
-            opt_rangeOfInterest);
-        globalDumps.forEach(function(globalDump) {
-          const existingHelper = globalDumpToBrowserHelper.get(globalDump);
-          if (existingHelper !== undefined) {
-            throw new Error('Memory dump ID clash across multiple browsers ' +
-                'with PIDs: ' + existingHelper.pid + ' and ' + helper.pid);
-          }
-          globalDumpToBrowserHelper.set(globalDump, helper);
-        });
-
-        makeKeyUniqueAndSet(browserNameToGlobalDumps,
-            tr.e.chrome.chrome_processes.canonicalizeName(helper.browserName),
-            globalDumps);
-      });
-    }
-
-    // 2. If any global memory dump does not have any associated browser
-    // process for some reason, associate it with an 'unknown_browser' browser
-    // so that we don't lose the data.
-    const unclassifiedGlobalDumps = skipDumpsThatDoNotIntersectRange(
-        model.globalMemoryDumps.filter(g => !globalDumpToBrowserHelper.has(g)),
-        opt_rangeOfInterest);
-    if (unclassifiedGlobalDumps.length > 0) {
-      makeKeyUniqueAndSet(
-          browserNameToGlobalDumps, 'unknown_browser', unclassifiedGlobalDumps);
-    }
-
-    return browserNameToGlobalDumps;
-  }
-
-  function skipDumpsThatDoNotIntersectRange(dumps, opt_range) {
-    if (!opt_range) return dumps;
-    return dumps.filter(d => opt_range.intersectsExplicitRangeInclusive(
-        d.start, d.end));
-  }
-
 
   const USER_FRIENDLY_BROWSER_NAMES = {
     'chrome': 'Chrome',
@@ -185,36 +123,6 @@ tr.exportTo('tr.metrics.sh', function() {
   }
 
   /**
-   * Function for adding entries with duplicate keys to a map without
-   * overriding existing entries.
-   *
-   * This is achieved by appending numeric indices (2, 3, 4, ...) to duplicate
-   * keys. Example:
-   *
-   *   const map = new Map();
-   *   // map = Map {}.
-   *
-   *   makeKeyUniqueAndSet(map, 'key', 'a');
-   *   // map = Map {"key" => "a"}.
-   *
-   *   makeKeyUniqueAndSet(map, 'key', 'b');
-   *   // map = Map {"key" => "a", "key2" => "b"}.
-   *                                ^^^^
-   *   makeKeyUniqueAndSet(map, 'key', 'c');
-   *   // map = Map {"key" => "a", "key2" => "b", "key3" => "c"}.
-   *                                ^^^^           ^^^^
-   */
-  function makeKeyUniqueAndSet(map, key, value) {
-    let uniqueKey = key;
-    let nextIndex = 2;
-    while (map.has(uniqueKey)) {
-      uniqueKey = key + nextIndex;
-      nextIndex++;
-    }
-    map.set(uniqueKey, value);
-  }
-
-  /**
    * Add general memory dump values calculated from all global memory dumps to
    * |values|. In particular, this function adds the following values:
    *
@@ -257,6 +165,12 @@ tr.exportTo('tr.metrics.sh', function() {
               component: ['system_memory'],
               value: processDump.totals.peakResidentBytes
             });
+            addProcessScalar({
+              source: 'reported_by_os',
+              property: PRIVATE_FOOTPRINT_SIZE,
+              component: ['system_memory'],
+              value: processDump.totals.privateFootprintBytes,
+            });
           }
 
           // Add memory:<browser-name>:<process-name>:reported_by_chrome:...
@@ -290,6 +204,10 @@ tr.exportTo('tr.metrics.sh', function() {
             }
           });
 
+          // Add memory:<browser-name>:<process-name>:reported_by_chrome:
+          //    {malloc, blinkgc, partitionalloc}:<largestCategory>:...
+          addTopHeapDumpCategoryValue(processDump, addProcessScalar);
+
           // Add memory:<browser-name>:<process-name>:reported_by_chrome:v8:
           //     {heap, allocated_by_malloc}:...
           addV8MemoryDumpValues(processDump, addProcessScalar);
@@ -305,6 +223,55 @@ tr.exportTo('tr.metrics.sh', function() {
             componentTree.values[i].total -= tracingNode.values[i].total;
           }
         }, values);
+  }
+
+  /**
+   * Add memory dump values for the top category in each allocator heap dump in
+   * the process dump.
+   *
+   * @param {!tr.model.ProcessMemoryDump} processDump The process memory dump.
+   * @param {!function} addProcessScalar The callback for adding a scalar value.
+   */
+  function addTopHeapDumpCategoryValue(processDump, addProcessScalar) {
+    if (!processDump.heapDumps) {
+      return;
+    }
+    for (const allocatorName in processDump.heapDumps) {
+      const heapDump = processDump.heapDumps[allocatorName];
+      if (heapDump.entries === undefined || heapDump.entries.length === 0) {
+        return;
+      }
+      // Create a map of category to total size.
+      const typeToSize = {};
+      for (let i = 0; i < heapDump.entries.length; i += 1) {
+        const entry = heapDump.entries[i];
+        // Count only the entries with empty backtrace which contains totals for
+        // the object type.
+        if (!entry.objectTypeName || entry.leafStackFrame) {
+          continue;
+        }
+        if (!typeToSize[entry.objectTypeName]) {
+          typeToSize[entry.objectTypeName] = 0;
+        }
+        typeToSize[entry.objectTypeName] += entry.size;
+      }
+
+      // Find the largest type in the heap dump.
+      let largestValue = 0;
+      let largestType = '';
+      for (const key in typeToSize) {
+        if (largestValue < typeToSize[key]) {
+          largestValue = typeToSize[key];
+          largestType = key;
+        }
+      }
+      addProcessScalar({
+        source: 'reported_by_chrome',
+        component: [allocatorName, largestType],
+        property: HEAP_CATEGORY_SIZE,
+        value: largestValue
+      });
+    }
   }
 
   /**
@@ -444,6 +411,17 @@ tr.exportTo('tr.metrics.sh', function() {
     }
   };
 
+  const HEAP_CATEGORY_SIZE = {
+    name: 'heap_category_size',
+    unit: sizeInBytes_smallerIsBetter,
+    buildDescriptionPrefix(componentPath, processName) {
+      return buildChromeValueDescriptionPrefix(componentPath, processName, {
+        userFriendlyPropertyName: 'heap profiler category size',
+        componentPreposition: 'for'
+      });
+    }
+  };
+
   const CODE_AND_METADATA_SIZE = {
     name: 'code_and_metadata_size',
     unit: sizeInBytes_smallerIsBetter,
@@ -557,6 +535,15 @@ tr.exportTo('tr.metrics.sh', function() {
     buildDescriptionPrefix(componentPath, processName) {
       return buildOsValueDescriptionPrefix(componentPath, processName,
           'private dirty size');
+    }
+  };
+
+  const PRIVATE_FOOTPRINT_SIZE = {
+    name: 'private_footprint_size',
+    unit: sizeInBytes_smallerIsBetter,
+    buildDescriptionPrefix(componentPath, processName) {
+      return buildOsValueDescriptionPrefix(componentPath, processName,
+          'private footprint size');
     }
   };
 
@@ -1089,7 +1076,7 @@ tr.exportTo('tr.metrics.sh', function() {
    * (corresponding to global memory dumps associated with the given browser)
    * |values| for each process (e.g. 'gpu_process', 'browser_process', etc).
    * We also report a special 'all_processes' histogram which agregates all
-   * others, this has a RelatedHistogramBreakdown diagnostic explaining
+   * others, this has a RelatedNameMap diagnostic explaining
    * how it is built from the other histograms.
    *
    * See addMemoryDumpValues for more details.
@@ -1121,32 +1108,30 @@ tr.exportTo('tr.metrics.sh', function() {
     }
     cachedHistograms.set(histogram.name, histogram);
 
-    const processBreakdown = new tr.v.d.RelatedHistogramBreakdown();
-    processBreakdown.colorScheme =
-      tr.e.chrome.chrome_processes.PROCESS_COLOR_SCHEME_NAME;
+    const processNames = new tr.v.d.RelatedNameMap();
     for (const [childProcessName, childProcessNode] of tree.children[0]) {
       processPath.push(childProcessName);
       const childProcessHistogram =
         recurse(processPath, componentPath, childProcessNode);
-      processBreakdown.set(childProcessName, childProcessHistogram);
+      processNames.set(childProcessName, childProcessHistogram.name);
       processPath.pop();
     }
 
-    const componentBreakdown = new tr.v.d.RelatedHistogramBreakdown();
+    const componentNames = new tr.v.d.RelatedNameMap();
     for (const [childComponentName, childComponentNode] of tree.children[1]) {
       componentPath.push(childComponentName);
       const childComponentHistogram =
         recurse(processPath, componentPath, childComponentNode);
-      componentBreakdown.set(childComponentName, childComponentHistogram);
+      componentNames.set(childComponentName, childComponentHistogram.name);
       componentPath.pop();
     }
 
     values.addHistogram(histogram);
     if (tree.children[0].size > 0) {
-      histogram.diagnostics.set('processes', processBreakdown);
+      histogram.diagnostics.set('processes', processNames);
     }
     if (tree.children[1].size > 0) {
-      histogram.diagnostics.set('components', componentBreakdown);
+      histogram.diagnostics.set('components', componentNames);
     }
 
     return histogram;
@@ -1198,6 +1183,33 @@ tr.exportTo('tr.metrics.sh', function() {
     return numeric;
   }
 
+  function buildSampleDiagnostics(value, node) {
+    if (node.children.length < 2) return undefined;
+    const diagnostics = new Map();
+    const i = node.values.indexOf(value);
+
+    const processBreakdown = new tr.v.d.Breakdown();
+    processBreakdown.colorScheme =
+      tr.e.chrome.chrome_processes.PROCESS_COLOR_SCHEME_NAME;
+    for (const [name, subNode] of node.children[0]) {
+      processBreakdown.set(name, subNode.values[i].total);
+    }
+    if (processBreakdown.size > 0) {
+      diagnostics.set('processes', processBreakdown);
+    }
+
+    const componentBreakdown = new tr.v.d.Breakdown();
+    for (const [name, subNode] of node.children[1]) {
+      componentBreakdown.set(name, subNode.values[i].total);
+    }
+    if (componentBreakdown.size > 0) {
+      diagnostics.set('components', componentBreakdown);
+    }
+
+    if (diagnostics.size === 0) return undefined;
+    return diagnostics;
+  }
+
   /**
    * Create a memory tr.v.Histogram with |unit| and add all total values in
    * |node| to it.
@@ -1205,7 +1217,10 @@ tr.exportTo('tr.metrics.sh', function() {
   function buildMemoryNumericFromNode(name, node, unit) {
     const histogram = new tr.v.Histogram(
         name, unit, BOUNDARIES_FOR_UNIT_MAP.get(unit));
-    node.values.forEach(v => histogram.addSample(v.total));
+
+    node.values.forEach(v => histogram.addSample(
+        v.total, buildSampleDiagnostics(v, node)));
+
     return histogram;
   }
 

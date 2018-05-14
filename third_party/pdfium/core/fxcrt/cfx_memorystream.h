@@ -9,15 +9,15 @@
 
 #include <vector>
 
-#include "core/fxcrt/cfx_retain_ptr.h"
 #include "core/fxcrt/fx_stream.h"
+#include "core/fxcrt/retain_ptr.h"
 
 class CFX_MemoryStream : public IFX_SeekableStream {
  public:
   enum Type { kConsecutive = 1 << 0, kTakeOver = 1 << 1 };
 
   template <typename T, typename... Args>
-  friend CFX_RetainPtr<T> pdfium::MakeRetain(Args&&... args);
+  friend RetainPtr<T> pdfium::MakeRetain(Args&&... args);
 
   // IFX_SeekableStream
   FX_FILESIZE GetSize() override;
@@ -27,6 +27,9 @@ class CFX_MemoryStream : public IFX_SeekableStream {
   size_t ReadBlock(void* buffer, size_t size) override;
   bool WriteBlock(const void* buffer, FX_FILESIZE offset, size_t size) override;
   bool Flush() override;
+
+  // Sets the cursor position to |pos| if possible
+  bool Seek(size_t pos);
 
   bool IsConsecutive() const { return !!(m_dwFlags & Type::kConsecutive); }
 

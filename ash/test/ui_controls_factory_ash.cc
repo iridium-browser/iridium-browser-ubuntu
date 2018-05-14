@@ -15,7 +15,7 @@
 #include "ui/base/test/ui_controls_aura.h"
 #include "ui/display/screen.h"
 
-DECLARE_UI_CLASS_PROPERTY_TYPE(ui_controls::UIControlsAura*)
+DEFINE_UI_CLASS_PROPERTY_TYPE(ui_controls::UIControlsAura*)
 
 namespace ash {
 namespace test {
@@ -50,8 +50,8 @@ UIControlsAura* GetUIControlsAt(const gfx::Point& point_in_screen) {
 
 class UIControlsAsh : public UIControlsAura {
  public:
-  UIControlsAsh() {}
-  ~UIControlsAsh() override {}
+  UIControlsAsh() = default;
+  ~UIControlsAsh() override = default;
 
   // UIControslAura overrides:
   bool SendKeyPress(gfx::NativeWindow window,

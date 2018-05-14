@@ -4,11 +4,9 @@
 
 package org.chromium.chrome.browser.ntp;
 
-import android.annotation.TargetApi;
 import android.graphics.Canvas;
 import android.graphics.Point;
 import android.graphics.Rect;
-import android.os.Build;
 import android.support.v4.view.ViewCompat;
 import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
@@ -16,7 +14,6 @@ import android.view.LayoutInflater;
 import android.view.View;
 
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.CommandLine;
 import org.chromium.base.DiscardableReferencePool;
 import org.chromium.base.Log;
 import org.chromium.base.TraceEvent;
@@ -25,7 +22,6 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.NativePage;
 import org.chromium.chrome.browser.NativePageHost;
 import org.chromium.chrome.browser.UrlConstants;
@@ -37,6 +33,8 @@ import org.chromium.chrome.browser.ntp.snippets.SuggestionsSource;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService.TemplateUrlServiceObserver;
+import org.chromium.chrome.browser.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.suggestions.SuggestionsConfig;
 import org.chromium.chrome.browser.suggestions.SuggestionsDependencyFactory;
 import org.chromium.chrome.browser.suggestions.SuggestionsEventReporter;
 import org.chromium.chrome.browser.suggestions.SuggestionsMetrics;
@@ -46,13 +44,10 @@ import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegateImpl;
 import org.chromium.chrome.browser.suggestions.Tile;
 import org.chromium.chrome.browser.suggestions.TileGroup;
 import org.chromium.chrome.browser.suggestions.TileGroupDelegateImpl;
-import org.chromium.chrome.browser.sync.SyncSessionsMetrics;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
-import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.chrome.browser.vr_shell.VrShellDelegate;
@@ -62,6 +57,9 @@ import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.mojom.WindowOpenDisposition;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -75,7 +73,6 @@ public class NewTabPage
     private static final String NAVIGATION_ENTRY_SCROLL_POSITION_KEY = "NewTabPageScrollPosition";
 
     private final Tab mTab;
-    private final TabModelSelector mTabModelSelector;
 
     private final String mTitle;
     private final int mBackgroundColor;
@@ -155,10 +152,25 @@ public class NewTabPage
      * @return Whether the passed in URL is used to render the NTP.
      */
     public static boolean isNTPUrl(String url) {
-        // Also handle the legacy chrome://newtab URL since that will redirect to
+        // Also handle the legacy chrome://newtab and about:newtab URLs since they will redirect to
         // chrome-native://newtab natively.
-        return url != null
-                && (url.startsWith(UrlConstants.NTP_URL) || url.startsWith("chrome://newtab"));
+        if (url == null) return false;
+        try {
+            // URL().getProtocol() throws MalformedURLException if the scheme is "invalid",
+            // including common ones like "about:", so it's not usable for isInternalScheme().
+            URI uri = new URI(url);
+            if (!UrlUtilities.isInternalScheme(uri)) return false;
+
+            String host = uri.getHost();
+            if (host == null) {
+                // "about:newtab" would lead to null host.
+                uri = new URI(uri.getScheme() + "://" + uri.getSchemeSpecificPart());
+                host = uri.getHost();
+            }
+            return UrlConstants.NTP_HOST.equals(host);
+        } catch (URISyntaxException e) {
+            return false;
+        }
     }
 
     private class NewTabPageManagerImpl
@@ -166,9 +178,10 @@ public class NewTabPage
         public NewTabPageManagerImpl(SuggestionsSource suggestionsSource,
                 SuggestionsEventReporter eventReporter,
                 SuggestionsNavigationDelegate navigationDelegate, Profile profile,
-                NativePageHost nativePageHost, DiscardableReferencePool referencePool) {
+                NativePageHost nativePageHost, DiscardableReferencePool referencePool,
+                SnackbarManager snackbarManager) {
             super(suggestionsSource, eventReporter, navigationDelegate, profile, nativePageHost,
-                    referencePool);
+                    referencePool, snackbarManager);
         }
 
         @Override
@@ -180,34 +193,6 @@ public class NewTabPage
         @Override
         public boolean isVoiceSearchEnabled() {
             return mFakeboxDelegate != null && mFakeboxDelegate.isVoiceSearchEnabled();
-        }
-
-        @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-        private boolean switchToExistingTab(String url) {
-            String matchPattern = CommandLine.getInstance().getSwitchValue(
-                    ChromeSwitches.NTP_SWITCH_TO_EXISTING_TAB);
-            boolean matchByHost;
-            if ("url".equals(matchPattern)) {
-                matchByHost = false;
-            } else if ("host".equals(matchPattern)) {
-                matchByHost = true;
-            } else {
-                return false;
-            }
-
-            TabModel tabModel = mTabModelSelector.getModel(false);
-            for (int i = tabModel.getCount() - 1; i >= 0; --i) {
-                if (matchURLs(tabModel.getTabAt(i).getUrl(), url, matchByHost)) {
-                    TabModelUtils.setIndex(tabModel, i);
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private boolean matchURLs(String url1, String url2, boolean matchByHost) {
-            if (url1 == null || url2 == null) return false;
-            return matchByHost ? UrlUtilities.sameHost(url1, url2) : url1.equals(url2);
         }
 
         @Override
@@ -242,8 +227,6 @@ public class NewTabPage
             NewTabPageUma.recordNTPImpression(NewTabPageUma.NTP_IMPRESSION_REGULAR);
             // If not visible when loading completes, wait until onShown is received.
             if (!mTab.isHidden()) recordNTPShown();
-
-            SyncSessionsMetrics.recordYoungestForeignTabAgeOnNTP();
         }
     }
 
@@ -253,14 +236,12 @@ public class NewTabPage
      */
     private class NewTabPageTileGroupDelegate extends TileGroupDelegateImpl {
         private NewTabPageTileGroupDelegate(ChromeActivity activity, Profile profile,
-                TabModelSelector tabModelSelector,
                 SuggestionsNavigationDelegate navigationDelegate) {
-            super(activity, profile, tabModelSelector, navigationDelegate,
-                    activity.getSnackbarManager());
+            super(activity, profile, navigationDelegate, activity.getSnackbarManager());
         }
 
         @Override
-        public void onLoadingComplete(Tile[] tiles) {
+        public void onLoadingComplete(List<Tile> tiles) {
             if (mIsDestroyed) return;
 
             super.onLoadingComplete(tiles);
@@ -292,7 +273,6 @@ public class NewTabPage
         TraceEvent.begin(TAG);
 
         mTab = nativePageHost.getActiveTab();
-        mTabModelSelector = tabModelSelector;
         Profile profile = mTab.getProfile();
 
         SuggestionsDependencyFactory depsFactory = SuggestionsDependencyFactory.getInstance();
@@ -303,12 +283,14 @@ public class NewTabPage
                 new SuggestionsNavigationDelegateImpl(
                         activity, profile, nativePageHost, tabModelSelector);
         mNewTabPageManager = new NewTabPageManagerImpl(suggestionsSource, eventReporter,
-                navigationDelegate, profile, nativePageHost, activity.getReferencePool());
-        mTileGroupDelegate = new NewTabPageTileGroupDelegate(
-                activity, profile, tabModelSelector, navigationDelegate);
+                navigationDelegate, profile, nativePageHost, activity.getReferencePool(),
+                activity.getSnackbarManager());
+        mTileGroupDelegate = new NewTabPageTileGroupDelegate(activity, profile, navigationDelegate);
 
         mTitle = activity.getResources().getString(R.string.button_new_tab);
-        mBackgroundColor = ApiCompatibilityUtils.getColor(activity.getResources(), R.color.ntp_bg);
+        mBackgroundColor = ApiCompatibilityUtils.getColor(activity.getResources(),
+                SuggestionsConfig.useModernLayout() ? R.color.modern_primary_color
+                                                    : R.color.ntp_bg);
         mThemeColor = ApiCompatibilityUtils.getColor(
                 activity.getResources(), R.color.default_primary_color);
         TemplateUrlService.getInstance().addObserver(this);
@@ -363,7 +345,7 @@ public class NewTabPage
         eventReporter.onSurfaceOpened();
 
         DownloadManagerService.getDownloadManagerService().checkForExternallyRemovedDownloads(
-                /*isOffRecord=*/false);
+                /*isOffTheRecord=*/false);
 
         RecordHistogram.recordBooleanHistogram(
                 "NewTabPage.MobileIsUserOnline", NetworkChangeNotifier.isOnline());
@@ -462,6 +444,7 @@ public class NewTabPage
      */
     public void setFakeboxDelegate(FakeboxDelegate fakeboxDelegate) {
         mFakeboxDelegate = fakeboxDelegate;
+        mNewTabPageView.setFakeboxDelegate(fakeboxDelegate);
         if (mFakeboxDelegate != null) {
             mNewTabPageView.updateVoiceSearchButtonVisibility();
 

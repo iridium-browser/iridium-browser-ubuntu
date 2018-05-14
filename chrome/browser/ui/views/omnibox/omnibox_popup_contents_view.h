@@ -12,12 +12,9 @@
 #include "components/omnibox/browser/omnibox_popup_model.h"
 #include "components/omnibox/browser/omnibox_popup_view.h"
 #include "ui/base/window_open_disposition.h"
-#include "ui/gfx/animation/animation_delegate.h"
-#include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/view.h"
-#include "ui/views/view_targeter_delegate.h"
 
 struct AutocompleteMatch;
 class LocationBarView;
@@ -26,81 +23,59 @@ class OmniboxResultView;
 class OmniboxView;
 
 // A view representing the contents of the autocomplete popup.
-class OmniboxPopupContentsView : public views::View,
-                                 public OmniboxPopupView,
-                                 public views::ViewTargeterDelegate,
-                                 public gfx::AnimationDelegate {
+class OmniboxPopupContentsView : public views::View, public OmniboxPopupView {
  public:
-  // Factory method for creating the AutocompletePopupView.
-  static OmniboxPopupView* Create(const gfx::FontList& font_list,
-                                  OmniboxView* omnibox_view,
-                                  OmniboxEditModel* edit_model,
-                                  LocationBarView* location_bar_view);
-
-  // Returns the bounds the popup should be shown at. This is the display bounds
-  // and includes offsets for the dropshadow which this view's border renders.
-  gfx::Rect GetPopupBounds() const;
-
-  virtual void LayoutChildren();
-
-  // OmniboxPopupView:
-  bool IsOpen() const override;
-  void InvalidateLine(size_t line) override;
-  void OnLineSelected(size_t line) override;
-  void UpdatePopupAppearance() override;
-  gfx::Rect GetTargetBounds() override;
-  void PaintUpdatesNow() override;
-  void OnDragCanceled() override;
-
-  // gfx::AnimationDelegate:
-  void AnimationProgressed(const gfx::Animation* animation) override;
-
-  // views::View:
-  void Layout() override;
-  views::View* GetTooltipHandlerForPoint(const gfx::Point& point) override;
-  bool OnMousePressed(const ui::MouseEvent& event) override;
-  bool OnMouseDragged(const ui::MouseEvent& event) override;
-  void OnMouseReleased(const ui::MouseEvent& event) override;
-  void OnMouseCaptureLost() override;
-  void OnMouseMoved(const ui::MouseEvent& event) override;
-  void OnMouseEntered(const ui::MouseEvent& event) override;
-  void OnMouseExited(const ui::MouseEvent& event) override;
-  void OnGestureEvent(ui::GestureEvent* event) override;
-
-  bool IsSelectedIndex(size_t index) const;
-  bool IsHoveredIndex(size_t index) const;
-  gfx::Image GetIconIfExtensionMatch(size_t index) const;
-  bool IsStarredMatch(const AutocompleteMatch& match) const;
-
-  int max_match_contents_width() const { return max_match_contents_width_; }
-
- protected:
   OmniboxPopupContentsView(const gfx::FontList& font_list,
                            OmniboxView* omnibox_view,
                            OmniboxEditModel* edit_model,
                            LocationBarView* location_bar_view);
   ~OmniboxPopupContentsView() override;
 
-  LocationBarView* location_bar_view() { return location_bar_view_; }
+  // Opens a match from the list specified by |index| with the type of tab or
+  // window specified by |disposition|.
+  void OpenMatch(size_t index, WindowOpenDisposition disposition);
 
-  // Calculates the height needed to show all the results in the model.
-  virtual int CalculatePopupHeight();
-  virtual OmniboxResultView* CreateResultView(int model_index,
-                                              const gfx::FontList& font_list);
+  // Returns the icon that should be displayed next to |match|. If the icon is
+  // available as a vector icon, it will be |vector_icon_color|.
+  gfx::Image GetMatchIcon(const AutocompleteMatch& match,
+                          SkColor vector_icon_color) const;
 
- private:
-  class AutocompletePopupWidget;
+  // Sets the line specified by |index| as selected.
+  virtual void SetSelectedLine(size_t index);
+
+  // Returns true if the line specified by |index| is selected.
+  virtual bool IsSelectedIndex(size_t index) const;
+
+  // OmniboxPopupView:
+  bool IsOpen() const override;
+  void InvalidateLine(size_t line) override;
+  void OnLineSelected(size_t line) override;
+  void UpdatePopupAppearance() override;
+  void OnMatchIconUpdated(size_t match_index) override;
+  void PaintUpdatesNow() override;
+  void OnDragCanceled() override;
 
   // views::View:
-  const char* GetClassName() const override;
-  void OnPaint(gfx::Canvas* canvas) override;
-  void PaintChildren(const ui::PaintContext& context) override;
+  void Layout() override;
+  views::View* GetTooltipHandlerForPoint(const gfx::Point& point) override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
-  // views::ViewTargeterDelegate:
-  views::View* TargetForRect(views::View* root, const gfx::Rect& rect) override;
+ private:
+  friend class OmniboxPopupContentsViewTest;
+  class AutocompletePopupWidget;
 
-  // Call immediately after construction.
-  void Init();
+  // Updates |start_margin_| and |end_margin_| and returns the target popup
+  // bounds by querying the bounds of |location_bar_view_| and its parent view
+  // on screen.
+  gfx::Rect UpdateMarginsAndGetTargetBounds();
+
+  // Calculates the height needed to show all the results in the model.
+  int CalculatePopupHeight();
+
+  // Size our children to the available content area.
+  void LayoutChildren();
 
   // Returns true if the model has a match at the specified index.
   bool HasMatchAt(size_t index) const;
@@ -113,17 +88,14 @@ class OmniboxPopupContentsView : public views::View,
   // the specified point.
   size_t GetIndexForPoint(const gfx::Point& point);
 
-  // Processes a located event (e.g. mouse/gesture) and sets the selection/hover
-  // state of a line in the list.
-  void UpdateLineEvent(const ui::LocatedEvent& event,
-                       bool should_set_selected_line);
-
-  // Opens an entry from the list depending on the event and the selected
-  // disposition.
-  void OpenSelectedLine(const ui::LocatedEvent& event,
-                        WindowOpenDisposition disposition);
-
   OmniboxResultView* result_view_at(size_t i);
+
+  LocationBarView* location_bar_view() { return location_bar_view_; }
+
+  // views::View:
+  const char* GetClassName() const override;
+  void OnPaint(gfx::Canvas* canvas) override;
+  void PaintChildren(const views::PaintInfo& paint_info) override;
 
   std::unique_ptr<OmniboxPopupModel> model_;
 
@@ -141,27 +113,8 @@ class OmniboxPopupContentsView : public views::View,
   // The font list used for result rows, based on the omnibox font list.
   gfx::FontList font_list_;
 
-  // If the user cancels a dragging action (i.e. by pressing ESC), we don't have
-  // a convenient way to release mouse capture. Instead we use this flag to
-  // simply ignore all remaining drag events, and the eventual mouse release
-  // event. Since OnDragCanceled() can be called when we're not dragging, this
-  // flag is reset to false on a mouse pressed event, to make sure we don't
-  // erroneously ignore the next drag.
-  bool ignore_mouse_drag_;
-
-  // The popup sizes vertically using an animation when the popup is getting
-  // shorter (not larger, that makes it look "slow").
-  gfx::SlideAnimation size_animation_;
-  gfx::Rect start_bounds_;
-  gfx::Rect target_bounds_;
-
   int start_margin_;
   int end_margin_;
-
-  // When the dropdown is not wide enough while displaying tail suggestions,
-  // we use the width of widest match contents to shift the suggestions so that
-  // the widest suggestion just reaches the end edge.
-  int max_match_contents_width_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxPopupContentsView);
 };

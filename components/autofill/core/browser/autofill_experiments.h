@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/strings/string16.h"
-#include "base/time/time.h"
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
 
@@ -26,16 +25,27 @@ namespace autofill {
 
 struct Suggestion;
 
+extern const base::Feature kAutofillAlwaysFillAddresses;
+extern const base::Feature kAutofillAutoDismissableUpstreamBubble;
+extern const base::Feature kAutofillCreateDataForTest;
 extern const base::Feature kAutofillCreditCardAssist;
 extern const base::Feature kAutofillScanCardholderName;
+extern const base::Feature kAutofillCreditCardAblationExperiment;
 extern const base::Feature kAutofillCreditCardBankNameDisplay;
 extern const base::Feature kAutofillCreditCardPopupLayout;
 extern const base::Feature kAutofillCreditCardLastUsedDateDisplay;
-extern const base::Feature kAutofillOfferLocalSaveIfServerCardManuallyEntered;
+extern const base::Feature kAutofillDeleteDisusedAddresses;
+extern const base::Feature kAutofillDeleteDisusedCreditCards;
+extern const base::Feature kAutofillExpandedPopupViews;
+extern const base::Feature kAutofillPreferServerNamePredictions;
+extern const base::Feature kAutofillRationalizeFieldTypePredictions;
+extern const base::Feature kAutofillSendBillingCustomerNumber;
 extern const base::Feature kAutofillSuppressDisusedAddresses;
+extern const base::Feature kAutofillSuppressDisusedCreditCards;
+extern const base::Feature kAutofillUpstreamAllowAllEmailDomains;
 extern const base::Feature kAutofillUpstreamRequestCvcIfMissing;
-extern const base::Feature kAutofillUpstreamUseAutofillProfileComparator;
-extern const base::Feature kAutofillUpstreamUseNotRecentlyUsedAutofillProfile;
+extern const base::Feature kAutofillUpstreamSendDetectedValues;
+extern const base::Feature kAutofillUpstreamSendPanFirstSix;
 extern const char kCreditCardSigninPromoImpressionLimitParamKey[];
 extern const char kAutofillCreditCardLastUsedDateShowExpirationDateKey[];
 extern const char kAutofillUpstreamMaxMinutesSinceAutofillProfileUseKey[];
@@ -72,6 +82,10 @@ bool IsCreditCardUploadEnabled(const PrefService* pref_service,
 // Returns whether the new Autofill credit card popup layout experiment is
 // enabled.
 bool IsAutofillCreditCardPopupLayoutExperimentEnabled();
+
+// Returns whether the experiment to make the credit card Upstream bubble non
+// sticky is enabled.
+bool IsAutofillAutoDismissableUpstreamBubbleExperimentEnabled();
 
 // Returns whether Autofill credit card last used date display experiment is
 // enabled.
@@ -115,20 +129,25 @@ void ModifyAutofillCreditCardSuggestion(struct Suggestion* suggestion);
 // layout.
 unsigned int GetPopupMargin();
 
-// Returns whether the experiment is enabled where if Chrome Autofill has a
-// server card synced down from Payments but the user manually enters its card
-// number into a checkout form anyway, the option to locally save the card is
-// offered.
-bool IsAutofillOfferLocalSaveIfServerCardManuallyEnteredExperimentEnabled();
+// Returns whether the experiment is enabled where Chrome reads billing customer
+// number from priority preference and sends it along with UploadCardRequest and
+// FullCardRequest.
+bool IsAutofillSendBillingCustomerNumberExperimentEnabled();
 
 // Returns whether the experiment is enabled where Chrome Upstream requests CVC
 // in the offer to save bubble if it was not detected during the checkout flow.
 bool IsAutofillUpstreamRequestCvcIfMissingExperimentEnabled();
 
-// Returns the maximum time that could have elapsed since an address profile's
-// most recent use for the adress profile to be included in the candidate set
-// for card upload. Returns 0 if the experiment is not enabled.
-base::TimeDelta GetMaxTimeSinceAutofillProfileUseForCardUpload();
+// Returns whether the experiment is enabled where Chrome Upstream always checks
+// to see if it can offer to save (even though some data like name, address, and
+// CVC might be missing) by sending metadata on what form values were detected
+// along with whether the user is a Google Payments customer.
+bool IsAutofillUpstreamSendDetectedValuesExperimentEnabled();
+
+// Returns whether the experiment is enabled where Chrome Upstream sends the
+// first six digits of the card PAN to Google Payments to help determine whether
+// card upload is possible.
+bool IsAutofillUpstreamSendPanFirstSixExperimentEnabled();
 
 #if defined(OS_MACOSX)
 // Returns whether the Credit Card Autofill Touch Bar experiment is enabled.

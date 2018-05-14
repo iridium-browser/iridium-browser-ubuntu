@@ -31,8 +31,6 @@ ExtensionToolbarMenuView::ExtensionToolbarMenuView(
     : browser_(browser),
       app_menu_(app_menu),
       menu_item_(menu_item),
-      container_(nullptr),
-      max_height_(0),
       toolbar_actions_bar_observer_(this),
       weak_factory_(this) {
   // Use a transparent background so that the menu's background shows through.
@@ -40,8 +38,9 @@ ExtensionToolbarMenuView::ExtensionToolbarMenuView(
   SetBackgroundColor(SK_ColorTRANSPARENT);
   BrowserActionsContainer* main =
       BrowserView::GetBrowserViewForBrowser(browser_)
-          ->toolbar()->browser_actions();
-  container_ = new BrowserActionsContainer(browser_, main);
+          ->button_provider()
+          ->GetBrowserActionsContainer();
+  container_ = new BrowserActionsContainer(browser_, main, main->delegate());
   SetContents(container_);
 
   // Listen for the drop to finish so we can close the app menu, if necessary.

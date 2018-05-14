@@ -30,17 +30,17 @@
 
 #include "modules/mediasource/SourceBufferList.h"
 
-#include "core/events/GenericEventQueue.h"
+#include "core/dom/events/MediaElementEventQueue.h"
 #include "modules/EventModules.h"
 #include "modules/mediasource/SourceBuffer.h"
 
 namespace blink {
 
 SourceBufferList::SourceBufferList(ExecutionContext* context,
-                                   GenericEventQueue* async_event_queue)
+                                   MediaElementEventQueue* async_event_queue)
     : ContextClient(context), async_event_queue_(async_event_queue) {}
 
-SourceBufferList::~SourceBufferList() {}
+SourceBufferList::~SourceBufferList() = default;
 
 void SourceBufferList::Add(SourceBuffer* buffer) {
   list_.push_back(buffer);
@@ -56,7 +56,7 @@ void SourceBufferList::Remove(SourceBuffer* buffer) {
   size_t index = list_.Find(buffer);
   if (index == kNotFound)
     return;
-  list_.erase(index);
+  list_.EraseAt(index);
   ScheduleEvent(EventTypeNames::removesourcebuffer);
 }
 
@@ -71,14 +71,14 @@ void SourceBufferList::ScheduleEvent(const AtomicString& event_name) {
   Event* event = Event::Create(event_name);
   event->SetTarget(this);
 
-  async_event_queue_->EnqueueEvent(BLINK_FROM_HERE, event);
+  async_event_queue_->EnqueueEvent(FROM_HERE, event);
 }
 
 const AtomicString& SourceBufferList::InterfaceName() const {
   return EventTargetNames::SourceBufferList;
 }
 
-DEFINE_TRACE(SourceBufferList) {
+void SourceBufferList::Trace(blink::Visitor* visitor) {
   visitor->Trace(async_event_queue_);
   visitor->Trace(list_);
   EventTargetWithInlineData::Trace(visitor);

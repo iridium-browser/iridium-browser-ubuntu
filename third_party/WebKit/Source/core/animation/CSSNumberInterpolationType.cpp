@@ -15,13 +15,14 @@ namespace blink {
 class InheritedNumberChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
-  static std::unique_ptr<InheritedNumberChecker> Create(CSSPropertyID property,
-                                                        double number) {
+  static std::unique_ptr<InheritedNumberChecker> Create(
+      const CSSProperty& property,
+      double number) {
     return WTF::WrapUnique(new InheritedNumberChecker(property, number));
   }
 
  private:
-  InheritedNumberChecker(CSSPropertyID property, double number)
+  InheritedNumberChecker(const CSSProperty& property, double number)
       : property_(property), number_(number) {}
 
   bool IsValid(const StyleResolverState& state,
@@ -33,7 +34,7 @@ class InheritedNumberChecker
     return parent_number == number_;
   }
 
-  const CSSPropertyID property_;
+  const CSSProperty& property_;
   const double number_;
 };
 
@@ -108,7 +109,7 @@ void CSSNumberInterpolationType::ApplyStandardPropertyValue(
   if (!NumberPropertyFunctions::SetNumber(CssProperty(), *state.Style(),
                                           clamped_number))
     StyleBuilder::ApplyProperty(
-        CssProperty(), state,
+        GetProperty().GetCSSProperty(), state,
         *CSSPrimitiveValue::Create(clamped_number,
                                    CSSPrimitiveValue::UnitType::kNumber));
 }

@@ -13,6 +13,7 @@
 #include <limits.h>  // For ULONG_MAX returned by strtoul.
 #include <stdio.h>
 #include <stdlib.h>  // For strtoul.
+#include <string.h>
 
 #include <algorithm>
 #include <ios>
@@ -21,21 +22,21 @@
 #include <numeric>
 #include <string>
 
-#include "gflags/gflags.h"
-#include "webrtc/modules/audio_coding/neteq/include/neteq.h"
-#include "webrtc/modules/audio_coding/neteq/tools/fake_decode_from_file.h"
-#include "webrtc/modules/audio_coding/neteq/tools/input_audio_file.h"
-#include "webrtc/modules/audio_coding/neteq/tools/neteq_delay_analyzer.h"
-#include "webrtc/modules/audio_coding/neteq/tools/neteq_packet_source_input.h"
-#include "webrtc/modules/audio_coding/neteq/tools/neteq_replacement_input.h"
-#include "webrtc/modules/audio_coding/neteq/tools/neteq_test.h"
-#include "webrtc/modules/audio_coding/neteq/tools/output_audio_file.h"
-#include "webrtc/modules/audio_coding/neteq/tools/output_wav_file.h"
-#include "webrtc/modules/audio_coding/neteq/tools/rtp_file_source.h"
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/test/testsupport/fileutils.h"
-#include "webrtc/typedefs.h"
+#include "modules/audio_coding/neteq/include/neteq.h"
+#include "modules/audio_coding/neteq/tools/fake_decode_from_file.h"
+#include "modules/audio_coding/neteq/tools/input_audio_file.h"
+#include "modules/audio_coding/neteq/tools/neteq_delay_analyzer.h"
+#include "modules/audio_coding/neteq/tools/neteq_packet_source_input.h"
+#include "modules/audio_coding/neteq/tools/neteq_replacement_input.h"
+#include "modules/audio_coding/neteq/tools/neteq_test.h"
+#include "modules/audio_coding/neteq/tools/output_audio_file.h"
+#include "modules/audio_coding/neteq/tools/output_wav_file.h"
+#include "modules/audio_coding/neteq/tools/rtp_file_source.h"
+#include "modules/include/module_common_types.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/flags.h"
+#include "test/testsupport/fileutils.h"
+#include "typedefs.h"  // NOLINT(build/include)
 
 namespace webrtc {
 namespace test {
@@ -65,86 +66,51 @@ bool ParseSsrc(const std::string& str, uint32_t* ssrc) {
 }
 
 // Flag validators.
-bool ValidatePayloadType(const char* flagname, int32_t value) {
+bool ValidatePayloadType(int value) {
   if (value >= 0 && value <= 127)  // Value is ok.
     return true;
-  printf("Invalid value for --%s: %d\n", flagname, static_cast<int>(value));
+  printf("Payload type must be between 0 and 127, not %d\n",
+         static_cast<int>(value));
   return false;
 }
 
-bool ValidateSsrcValue(const char* flagname, const std::string& str) {
+bool ValidateSsrcValue(const std::string& str) {
   uint32_t dummy_ssrc;
-  return ParseSsrc(str, &dummy_ssrc);
+  if (ParseSsrc(str, &dummy_ssrc)) // Value is ok.
+    return true;
+  printf("Invalid SSRC: %s\n", str.c_str());
+  return false;
 }
 
-static bool ValidateExtensionId(const char* flagname, int32_t value) {
+static bool ValidateExtensionId(int value) {
   if (value > 0 && value <= 255)  // Value is ok.
     return true;
-  printf("Invalid value for --%s: %d\n", flagname, static_cast<int>(value));
+  printf("Extension ID must be between 1 and 255, not %d\n",
+         static_cast<int>(value));
   return false;
 }
 
 // Define command line flags.
-DEFINE_int32(pcmu, 0, "RTP payload type for PCM-u");
-const bool pcmu_dummy =
-    google::RegisterFlagValidator(&FLAGS_pcmu, &ValidatePayloadType);
-DEFINE_int32(pcma, 8, "RTP payload type for PCM-a");
-const bool pcma_dummy =
-    google::RegisterFlagValidator(&FLAGS_pcma, &ValidatePayloadType);
-DEFINE_int32(ilbc, 102, "RTP payload type for iLBC");
-const bool ilbc_dummy =
-    google::RegisterFlagValidator(&FLAGS_ilbc, &ValidatePayloadType);
-DEFINE_int32(isac, 103, "RTP payload type for iSAC");
-const bool isac_dummy =
-    google::RegisterFlagValidator(&FLAGS_isac, &ValidatePayloadType);
-DEFINE_int32(isac_swb, 104, "RTP payload type for iSAC-swb (32 kHz)");
-const bool isac_swb_dummy =
-    google::RegisterFlagValidator(&FLAGS_isac_swb, &ValidatePayloadType);
-DEFINE_int32(opus, 111, "RTP payload type for Opus");
-const bool opus_dummy =
-    google::RegisterFlagValidator(&FLAGS_opus, &ValidatePayloadType);
-DEFINE_int32(pcm16b, 93, "RTP payload type for PCM16b-nb (8 kHz)");
-const bool pcm16b_dummy =
-    google::RegisterFlagValidator(&FLAGS_pcm16b, &ValidatePayloadType);
-DEFINE_int32(pcm16b_wb, 94, "RTP payload type for PCM16b-wb (16 kHz)");
-const bool pcm16b_wb_dummy =
-    google::RegisterFlagValidator(&FLAGS_pcm16b_wb, &ValidatePayloadType);
-DEFINE_int32(pcm16b_swb32, 95, "RTP payload type for PCM16b-swb32 (32 kHz)");
-const bool pcm16b_swb32_dummy =
-    google::RegisterFlagValidator(&FLAGS_pcm16b_swb32, &ValidatePayloadType);
-DEFINE_int32(pcm16b_swb48, 96, "RTP payload type for PCM16b-swb48 (48 kHz)");
-const bool pcm16b_swb48_dummy =
-    google::RegisterFlagValidator(&FLAGS_pcm16b_swb48, &ValidatePayloadType);
-DEFINE_int32(g722, 9, "RTP payload type for G.722");
-const bool g722_dummy =
-    google::RegisterFlagValidator(&FLAGS_g722, &ValidatePayloadType);
-DEFINE_int32(avt, 106, "RTP payload type for AVT/DTMF (8 kHz)");
-const bool avt_dummy =
-    google::RegisterFlagValidator(&FLAGS_avt, &ValidatePayloadType);
-DEFINE_int32(avt_16, 114, "RTP payload type for AVT/DTMF (16 kHz)");
-const bool avt_16_dummy =
-    google::RegisterFlagValidator(&FLAGS_avt_16, &ValidatePayloadType);
-DEFINE_int32(avt_32, 115, "RTP payload type for AVT/DTMF (32 kHz)");
-const bool avt_32_dummy =
-    google::RegisterFlagValidator(&FLAGS_avt_32, &ValidatePayloadType);
-DEFINE_int32(avt_48, 116, "RTP payload type for AVT/DTMF (48 kHz)");
-const bool avt_48_dummy =
-    google::RegisterFlagValidator(&FLAGS_avt_48, &ValidatePayloadType);
-DEFINE_int32(red, 117, "RTP payload type for redundant audio (RED)");
-const bool red_dummy =
-    google::RegisterFlagValidator(&FLAGS_red, &ValidatePayloadType);
-DEFINE_int32(cn_nb, 13, "RTP payload type for comfort noise (8 kHz)");
-const bool cn_nb_dummy =
-    google::RegisterFlagValidator(&FLAGS_cn_nb, &ValidatePayloadType);
-DEFINE_int32(cn_wb, 98, "RTP payload type for comfort noise (16 kHz)");
-const bool cn_wb_dummy =
-    google::RegisterFlagValidator(&FLAGS_cn_wb, &ValidatePayloadType);
-DEFINE_int32(cn_swb32, 99, "RTP payload type for comfort noise (32 kHz)");
-const bool cn_swb32_dummy =
-    google::RegisterFlagValidator(&FLAGS_cn_swb32, &ValidatePayloadType);
-DEFINE_int32(cn_swb48, 100, "RTP payload type for comfort noise (48 kHz)");
-const bool cn_swb48_dummy =
-    google::RegisterFlagValidator(&FLAGS_cn_swb48, &ValidatePayloadType);
+DEFINE_int(pcmu, 0, "RTP payload type for PCM-u");
+DEFINE_int(pcma, 8, "RTP payload type for PCM-a");
+DEFINE_int(ilbc, 102, "RTP payload type for iLBC");
+DEFINE_int(isac, 103, "RTP payload type for iSAC");
+DEFINE_int(isac_swb, 104, "RTP payload type for iSAC-swb (32 kHz)");
+DEFINE_int(opus, 111, "RTP payload type for Opus");
+DEFINE_int(pcm16b, 93, "RTP payload type for PCM16b-nb (8 kHz)");
+DEFINE_int(pcm16b_wb, 94, "RTP payload type for PCM16b-wb (16 kHz)");
+DEFINE_int(pcm16b_swb32, 95, "RTP payload type for PCM16b-swb32 (32 kHz)");
+DEFINE_int(pcm16b_swb48, 96, "RTP payload type for PCM16b-swb48 (48 kHz)");
+DEFINE_int(g722, 9, "RTP payload type for G.722");
+DEFINE_int(avt, 106, "RTP payload type for AVT/DTMF (8 kHz)");
+DEFINE_int(avt_16, 114, "RTP payload type for AVT/DTMF (16 kHz)");
+DEFINE_int(avt_32, 115, "RTP payload type for AVT/DTMF (32 kHz)");
+DEFINE_int(avt_48, 116, "RTP payload type for AVT/DTMF (48 kHz)");
+DEFINE_int(red, 117, "RTP payload type for redundant audio (RED)");
+DEFINE_int(cn_nb, 13, "RTP payload type for comfort noise (8 kHz)");
+DEFINE_int(cn_wb, 98, "RTP payload type for comfort noise (16 kHz)");
+DEFINE_int(cn_swb32, 99, "RTP payload type for comfort noise (32 kHz)");
+DEFINE_int(cn_swb48, 100, "RTP payload type for comfort noise (48 kHz)");
 DEFINE_bool(codec_map, false, "Prints the mapping between RTP payload type and "
     "codec");
 DEFINE_string(replacement_audio_file, "",
@@ -153,17 +119,17 @@ DEFINE_string(ssrc,
               "",
               "Only use packets with this SSRC (decimal or hex, the latter "
               "starting with 0x)");
-const bool hex_ssrc_dummy =
-    google::RegisterFlagValidator(&FLAGS_ssrc, &ValidateSsrcValue);
-DEFINE_int32(audio_level, 1, "Extension ID for audio level (RFC 6464)");
-const bool audio_level_dummy =
-    google::RegisterFlagValidator(&FLAGS_audio_level, &ValidateExtensionId);
-DEFINE_int32(abs_send_time, 3, "Extension ID for absolute sender time");
-const bool abs_send_time_dummy =
-    google::RegisterFlagValidator(&FLAGS_abs_send_time, &ValidateExtensionId);
+DEFINE_int(audio_level, 1, "Extension ID for audio level (RFC 6464)");
+DEFINE_int(abs_send_time, 3, "Extension ID for absolute sender time");
+DEFINE_int(transport_seq_no, 5, "Extension ID for transport sequence number");
 DEFINE_bool(matlabplot,
             false,
             "Generates a matlab script for plotting the delay profile");
+DEFINE_bool(pythonplot,
+            false,
+            "Generates a python script for plotting the delay profile");
+DEFINE_bool(help, false, "Prints this message");
+DEFINE_bool(concealment_events, false, "Prints concealment events");
 
 // Maps a codec type to a printable name string.
 std::string CodecName(NetEqDecoder codec) {
@@ -214,53 +180,53 @@ std::string CodecName(NetEqDecoder codec) {
   }
 }
 
-void PrintCodecMappingEntry(NetEqDecoder codec, google::int32 flag) {
+void PrintCodecMappingEntry(NetEqDecoder codec, int flag) {
   std::cout << CodecName(codec) << ": " << flag << std::endl;
 }
 
 void PrintCodecMapping() {
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderPCMu, FLAGS_pcmu);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderPCMa, FLAGS_pcma);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderILBC, FLAGS_ilbc);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderISAC, FLAGS_isac);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderISACswb, FLAGS_isac_swb);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderOpus, FLAGS_opus);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderPCM16B, FLAGS_pcm16b);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderPCM16Bwb, FLAGS_pcm16b_wb);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderPCMu, FLAG_pcmu);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderPCMa, FLAG_pcma);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderILBC, FLAG_ilbc);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderISAC, FLAG_isac);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderISACswb, FLAG_isac_swb);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderOpus, FLAG_opus);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderPCM16B, FLAG_pcm16b);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderPCM16Bwb, FLAG_pcm16b_wb);
   PrintCodecMappingEntry(NetEqDecoder::kDecoderPCM16Bswb32kHz,
-                         FLAGS_pcm16b_swb32);
+                         FLAG_pcm16b_swb32);
   PrintCodecMappingEntry(NetEqDecoder::kDecoderPCM16Bswb48kHz,
-                         FLAGS_pcm16b_swb48);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderG722, FLAGS_g722);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderAVT, FLAGS_avt);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderAVT16kHz, FLAGS_avt_16);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderAVT32kHz, FLAGS_avt_32);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderAVT48kHz, FLAGS_avt_48);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderRED, FLAGS_red);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderCNGnb, FLAGS_cn_nb);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderCNGwb, FLAGS_cn_wb);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderCNGswb32kHz, FLAGS_cn_swb32);
-  PrintCodecMappingEntry(NetEqDecoder::kDecoderCNGswb48kHz, FLAGS_cn_swb48);
+                         FLAG_pcm16b_swb48);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderG722, FLAG_g722);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderAVT, FLAG_avt);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderAVT16kHz, FLAG_avt_16);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderAVT32kHz, FLAG_avt_32);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderAVT48kHz, FLAG_avt_48);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderRED, FLAG_red);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderCNGnb, FLAG_cn_nb);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderCNGwb, FLAG_cn_wb);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderCNGswb32kHz, FLAG_cn_swb32);
+  PrintCodecMappingEntry(NetEqDecoder::kDecoderCNGswb48kHz, FLAG_cn_swb48);
 }
 
 rtc::Optional<int> CodecSampleRate(uint8_t payload_type) {
-  if (payload_type == FLAGS_pcmu || payload_type == FLAGS_pcma ||
-      payload_type == FLAGS_ilbc || payload_type == FLAGS_pcm16b ||
-      payload_type == FLAGS_cn_nb || payload_type == FLAGS_avt)
-    return rtc::Optional<int>(8000);
-  if (payload_type == FLAGS_isac || payload_type == FLAGS_pcm16b_wb ||
-      payload_type == FLAGS_g722 || payload_type == FLAGS_cn_wb ||
-      payload_type == FLAGS_avt_16)
-    return rtc::Optional<int>(16000);
-  if (payload_type == FLAGS_isac_swb || payload_type == FLAGS_pcm16b_swb32 ||
-      payload_type == FLAGS_cn_swb32 || payload_type == FLAGS_avt_32)
-    return rtc::Optional<int>(32000);
-  if (payload_type == FLAGS_opus || payload_type == FLAGS_pcm16b_swb48 ||
-      payload_type == FLAGS_cn_swb48 || payload_type == FLAGS_avt_48)
-    return rtc::Optional<int>(48000);
-  if (payload_type == FLAGS_red)
-    return rtc::Optional<int>(0);
-  return rtc::Optional<int>();
+  if (payload_type == FLAG_pcmu || payload_type == FLAG_pcma ||
+      payload_type == FLAG_ilbc || payload_type == FLAG_pcm16b ||
+      payload_type == FLAG_cn_nb || payload_type == FLAG_avt)
+    return 8000;
+  if (payload_type == FLAG_isac || payload_type == FLAG_pcm16b_wb ||
+      payload_type == FLAG_g722 || payload_type == FLAG_cn_wb ||
+      payload_type == FLAG_avt_16)
+    return 16000;
+  if (payload_type == FLAG_isac_swb || payload_type == FLAG_pcm16b_swb32 ||
+      payload_type == FLAG_cn_swb32 || payload_type == FLAG_avt_32)
+    return 32000;
+  if (payload_type == FLAG_opus || payload_type == FLAG_pcm16b_swb48 ||
+      payload_type == FLAG_cn_swb48 || payload_type == FLAG_avt_48)
+    return 48000;
+  if (payload_type == FLAG_red)
+    return 0;
+  return rtc::nullopt;
 }
 
 // Class to let through only the packets with a given SSRC. Should be used as an
@@ -332,7 +298,7 @@ class SsrcSwitchDetector : public NetEqPostInsertPacket {
                 << static_cast<int>(packet.header.payloadType) << ")"
                 << std::endl;
     }
-    last_ssrc_ = rtc::Optional<uint32_t>(packet.header.ssrc);
+    last_ssrc_ = packet.header.ssrc;
     if (other_callback_) {
       other_callback_->AfterInsertPacket(packet, neteq);
     }
@@ -352,18 +318,33 @@ class StatsGetter : public NetEqGetAudioCallback {
     double preferred_buffer_size_ms = 0.0;
     double jitter_peaks_found = 0.0;
     double packet_loss_rate = 0.0;
-    double packet_discard_rate = 0.0;
     double expand_rate = 0.0;
     double speech_expand_rate = 0.0;
     double preemptive_rate = 0.0;
     double accelerate_rate = 0.0;
     double secondary_decoded_rate = 0.0;
+    double secondary_discarded_rate = 0.0;
     double clockdrift_ppm = 0.0;
     double added_zero_samples = 0.0;
     double mean_waiting_time_ms = 0.0;
     double median_waiting_time_ms = 0.0;
     double min_waiting_time_ms = 0.0;
     double max_waiting_time_ms = 0.0;
+  };
+
+  struct ConcealmentEvent {
+    uint64_t duration_ms;
+    size_t concealment_event_number;
+    int64_t time_from_previous_event_end_ms;
+
+    friend std::ostream& operator<<(std::ostream& stream,
+                                    const ConcealmentEvent& concealment_event) {
+      stream << "ConcealmentEvent duration_ms:" << concealment_event.duration_ms
+             << " event_number:" << concealment_event.concealment_event_number
+             << " time_from_previous_event_end_ms:"
+             << concealment_event.time_from_previous_event_end_ms << "\n";
+      return stream;
+    }
   };
 
   // Takes a pointer to another callback object, which will be invoked after
@@ -388,8 +369,33 @@ class StatsGetter : public NetEqGetAudioCallback {
       RTC_CHECK_EQ(neteq->NetworkStatistics(&stats), 0);
       stats_.push_back(stats);
     }
+    const auto lifetime_stat = neteq->GetLifetimeStatistics();
+    if (current_concealment_event_ != lifetime_stat.concealment_events) {
+      if (last_event_end_time_ms_ > 0) {
+        // Do not account for the first event to avoid start of the call
+        // skewing.
+        ConcealmentEvent concealment_event;
+        uint64_t last_event_voice_concealed_samples =
+            lifetime_stat.voice_concealed_samples -
+            voice_concealed_samples_until_last_event_;
+        RTC_CHECK_GT(last_event_voice_concealed_samples, 0);
+        concealment_event.duration_ms = last_event_voice_concealed_samples /
+                                        (audio_frame.sample_rate_hz_ / 1000);
+        concealment_event.concealment_event_number = current_concealment_event_;
+        concealment_event.time_from_previous_event_end_ms =
+            time_now_ms - last_event_end_time_ms_;
+        concealment_events_.emplace_back(concealment_event);
+        voice_concealed_samples_until_last_event_ =
+            lifetime_stat.voice_concealed_samples;
+      }
+      last_event_end_time_ms_ = time_now_ms;
+      voice_concealed_samples_until_last_event_ =
+          lifetime_stat.voice_concealed_samples;
+      current_concealment_event_ = lifetime_stat.concealment_events;
+    }
+
     if (other_callback_) {
-      other_callback_->BeforeGetAudio(neteq);
+      other_callback_->AfterGetAudio(time_now_ms, audio_frame, muted, neteq);
     }
   }
 
@@ -402,6 +408,12 @@ class StatsGetter : public NetEqGetAudioCallback {
     return sum_speech_expand / 16384.0 / stats_.size();
   }
 
+  const std::vector<ConcealmentEvent>& concealment_events() {
+    // Do not account for the last concealment event to avoid potential end
+    // call skewing.
+    return concealment_events_;
+  }
+
   Stats AverageStats() const {
     Stats sum_stats = std::accumulate(
         stats_.begin(), stats_.end(), Stats(),
@@ -410,18 +422,22 @@ class StatsGetter : public NetEqGetAudioCallback {
           a.preferred_buffer_size_ms += b.preferred_buffer_size_ms;
           a.jitter_peaks_found += b.jitter_peaks_found;
           a.packet_loss_rate += b.packet_loss_rate / 16384.0;
-          a.packet_discard_rate += b.packet_discard_rate / 16384.0;
           a.expand_rate += b.expand_rate / 16384.0;
           a.speech_expand_rate += b.speech_expand_rate / 16384.0;
           a.preemptive_rate += b.preemptive_rate / 16384.0;
           a.accelerate_rate += b.accelerate_rate / 16384.0;
           a.secondary_decoded_rate += b.secondary_decoded_rate / 16384.0;
+          a.secondary_discarded_rate += b.secondary_discarded_rate / 16384.0;
           a.clockdrift_ppm += b.clockdrift_ppm;
           a.added_zero_samples += b.added_zero_samples;
           a.mean_waiting_time_ms += b.mean_waiting_time_ms;
           a.median_waiting_time_ms += b.median_waiting_time_ms;
-          a.min_waiting_time_ms += b.min_waiting_time_ms;
-          a.max_waiting_time_ms += b.max_waiting_time_ms;
+          a.min_waiting_time_ms =
+              std::min(a.min_waiting_time_ms,
+                       static_cast<double>(b.min_waiting_time_ms));
+          a.max_waiting_time_ms =
+              std::max(a.max_waiting_time_ms,
+                       static_cast<double>(b.max_waiting_time_ms));
           return a;
         });
 
@@ -429,18 +445,16 @@ class StatsGetter : public NetEqGetAudioCallback {
     sum_stats.preferred_buffer_size_ms /= stats_.size();
     sum_stats.jitter_peaks_found /= stats_.size();
     sum_stats.packet_loss_rate /= stats_.size();
-    sum_stats.packet_discard_rate /= stats_.size();
     sum_stats.expand_rate /= stats_.size();
     sum_stats.speech_expand_rate /= stats_.size();
     sum_stats.preemptive_rate /= stats_.size();
     sum_stats.accelerate_rate /= stats_.size();
     sum_stats.secondary_decoded_rate /= stats_.size();
+    sum_stats.secondary_discarded_rate /= stats_.size();
     sum_stats.clockdrift_ppm /= stats_.size();
     sum_stats.added_zero_samples /= stats_.size();
     sum_stats.mean_waiting_time_ms /= stats_.size();
     sum_stats.median_waiting_time_ms /= stats_.size();
-    sum_stats.min_waiting_time_ms /= stats_.size();
-    sum_stats.max_waiting_time_ms /= stats_.size();
 
     return sum_stats;
   }
@@ -449,35 +463,70 @@ class StatsGetter : public NetEqGetAudioCallback {
   NetEqGetAudioCallback* other_callback_;
   size_t counter_ = 0;
   std::vector<NetEqNetworkStatistics> stats_;
+  size_t current_concealment_event_ = 1;
+  uint64_t voice_concealed_samples_until_last_event_ = 0;
+  std::vector<ConcealmentEvent> concealment_events_;
+  int64_t last_event_end_time_ms_ = 0;
 };
 
 int RunTest(int argc, char* argv[]) {
   std::string program_name = argv[0];
   std::string usage = "Tool for decoding an RTP dump file using NetEq.\n"
-      "Run " + program_name + " --helpshort for usage.\n"
+      "Run " + program_name + " --help for usage.\n"
       "Example usage:\n" + program_name +
       " input.rtp output.{pcm, wav}\n";
-  google::SetUsageMessage(usage);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  if (rtc::FlagList::SetFlagsFromCommandLine(&argc, argv, true)) {
+    return 1;
+  }
+  if (FLAG_help) {
+    std::cout << usage;
+    rtc::FlagList::Print(nullptr, false);
+    return 0;
+  }
 
-  if (FLAGS_codec_map) {
+  if (FLAG_codec_map) {
     PrintCodecMapping();
   }
 
   if (argc != 3) {
-    if (FLAGS_codec_map) {
+    if (FLAG_codec_map) {
       // We have already printed the codec map. Just end the program.
       return 0;
     }
     // Print usage information.
-    std::cout << google::ProgramUsage();
+    std::cout << usage;
     return 0;
   }
+  RTC_CHECK(ValidatePayloadType(FLAG_pcmu));
+  RTC_CHECK(ValidatePayloadType(FLAG_pcma));
+  RTC_CHECK(ValidatePayloadType(FLAG_ilbc));
+  RTC_CHECK(ValidatePayloadType(FLAG_isac));
+  RTC_CHECK(ValidatePayloadType(FLAG_isac_swb));
+  RTC_CHECK(ValidatePayloadType(FLAG_opus));
+  RTC_CHECK(ValidatePayloadType(FLAG_pcm16b));
+  RTC_CHECK(ValidatePayloadType(FLAG_pcm16b_wb));
+  RTC_CHECK(ValidatePayloadType(FLAG_pcm16b_swb32));
+  RTC_CHECK(ValidatePayloadType(FLAG_pcm16b_swb48));
+  RTC_CHECK(ValidatePayloadType(FLAG_g722));
+  RTC_CHECK(ValidatePayloadType(FLAG_avt));
+  RTC_CHECK(ValidatePayloadType(FLAG_avt_16));
+  RTC_CHECK(ValidatePayloadType(FLAG_avt_32));
+  RTC_CHECK(ValidatePayloadType(FLAG_avt_48));
+  RTC_CHECK(ValidatePayloadType(FLAG_red));
+  RTC_CHECK(ValidatePayloadType(FLAG_cn_nb));
+  RTC_CHECK(ValidatePayloadType(FLAG_cn_wb));
+  RTC_CHECK(ValidatePayloadType(FLAG_cn_swb32));
+  RTC_CHECK(ValidatePayloadType(FLAG_cn_swb48));
+  RTC_CHECK(ValidateSsrcValue(FLAG_ssrc));
+  RTC_CHECK(ValidateExtensionId(FLAG_audio_level));
+  RTC_CHECK(ValidateExtensionId(FLAG_abs_send_time));
+  RTC_CHECK(ValidateExtensionId(FLAG_transport_seq_no));
 
   // Gather RTP header extensions in a map.
   NetEqPacketSourceInput::RtpHeaderExtensionMap rtp_ext_map = {
-      {FLAGS_audio_level, kRtpExtensionAudioLevel},
-      {FLAGS_abs_send_time, kRtpExtensionAbsoluteSendTime}};
+      {FLAG_audio_level, kRtpExtensionAudioLevel},
+      {FLAG_abs_send_time, kRtpExtensionAbsoluteSendTime},
+      {FLAG_transport_seq_no, kRtpExtensionTransportSequenceNumber}};
 
   const std::string input_file_name = argv[1];
   std::unique_ptr<NetEqInput> input;
@@ -493,9 +542,9 @@ int RunTest(int argc, char* argv[]) {
   RTC_CHECK(!input->ended()) << "Input file is empty";
 
   // Check if an SSRC value was provided.
-  if (!FLAGS_ssrc.empty()) {
+  if (strlen(FLAG_ssrc) > 0) {
     uint32_t ssrc;
-    RTC_CHECK(ParseSsrc(FLAGS_ssrc, &ssrc)) << "Flag verification has failed.";
+    RTC_CHECK(ParseSsrc(FLAG_ssrc, &ssrc)) << "Flag verification has failed.";
     input.reset(new FilterSsrcInput(std::move(input), ssrc));
   }
 
@@ -550,39 +599,39 @@ int RunTest(int argc, char* argv[]) {
   std::cout << "Output file: " << output_file_name << std::endl;
 
   NetEqTest::DecoderMap codecs = {
-      {FLAGS_pcmu, std::make_pair(NetEqDecoder::kDecoderPCMu, "pcmu")},
-      {FLAGS_pcma, std::make_pair(NetEqDecoder::kDecoderPCMa, "pcma")},
-      {FLAGS_ilbc, std::make_pair(NetEqDecoder::kDecoderILBC, "ilbc")},
-      {FLAGS_isac, std::make_pair(NetEqDecoder::kDecoderISAC, "isac")},
-      {FLAGS_isac_swb,
+      {FLAG_pcmu, std::make_pair(NetEqDecoder::kDecoderPCMu, "pcmu")},
+      {FLAG_pcma, std::make_pair(NetEqDecoder::kDecoderPCMa, "pcma")},
+      {FLAG_ilbc, std::make_pair(NetEqDecoder::kDecoderILBC, "ilbc")},
+      {FLAG_isac, std::make_pair(NetEqDecoder::kDecoderISAC, "isac")},
+      {FLAG_isac_swb,
        std::make_pair(NetEqDecoder::kDecoderISACswb, "isac-swb")},
-      {FLAGS_opus, std::make_pair(NetEqDecoder::kDecoderOpus, "opus")},
-      {FLAGS_pcm16b, std::make_pair(NetEqDecoder::kDecoderPCM16B, "pcm16-nb")},
-      {FLAGS_pcm16b_wb,
+      {FLAG_opus, std::make_pair(NetEqDecoder::kDecoderOpus, "opus")},
+      {FLAG_pcm16b, std::make_pair(NetEqDecoder::kDecoderPCM16B, "pcm16-nb")},
+      {FLAG_pcm16b_wb,
        std::make_pair(NetEqDecoder::kDecoderPCM16Bwb, "pcm16-wb")},
-      {FLAGS_pcm16b_swb32,
+      {FLAG_pcm16b_swb32,
        std::make_pair(NetEqDecoder::kDecoderPCM16Bswb32kHz, "pcm16-swb32")},
-      {FLAGS_pcm16b_swb48,
+      {FLAG_pcm16b_swb48,
        std::make_pair(NetEqDecoder::kDecoderPCM16Bswb48kHz, "pcm16-swb48")},
-      {FLAGS_g722, std::make_pair(NetEqDecoder::kDecoderG722, "g722")},
-      {FLAGS_avt, std::make_pair(NetEqDecoder::kDecoderAVT, "avt")},
-      {FLAGS_avt_16, std::make_pair(NetEqDecoder::kDecoderAVT16kHz, "avt-16")},
-      {FLAGS_avt_32,
+      {FLAG_g722, std::make_pair(NetEqDecoder::kDecoderG722, "g722")},
+      {FLAG_avt, std::make_pair(NetEqDecoder::kDecoderAVT, "avt")},
+      {FLAG_avt_16, std::make_pair(NetEqDecoder::kDecoderAVT16kHz, "avt-16")},
+      {FLAG_avt_32,
        std::make_pair(NetEqDecoder::kDecoderAVT32kHz, "avt-32")},
-      {FLAGS_avt_48,
+      {FLAG_avt_48,
        std::make_pair(NetEqDecoder::kDecoderAVT48kHz, "avt-48")},
-      {FLAGS_red, std::make_pair(NetEqDecoder::kDecoderRED, "red")},
-      {FLAGS_cn_nb, std::make_pair(NetEqDecoder::kDecoderCNGnb, "cng-nb")},
-      {FLAGS_cn_wb, std::make_pair(NetEqDecoder::kDecoderCNGwb, "cng-wb")},
-      {FLAGS_cn_swb32,
+      {FLAG_red, std::make_pair(NetEqDecoder::kDecoderRED, "red")},
+      {FLAG_cn_nb, std::make_pair(NetEqDecoder::kDecoderCNGnb, "cng-nb")},
+      {FLAG_cn_wb, std::make_pair(NetEqDecoder::kDecoderCNGwb, "cng-wb")},
+      {FLAG_cn_swb32,
        std::make_pair(NetEqDecoder::kDecoderCNGswb32kHz, "cng-swb32")},
-      {FLAGS_cn_swb48,
+      {FLAG_cn_swb48,
        std::make_pair(NetEqDecoder::kDecoderCNGswb48kHz, "cng-swb48")}};
 
   // Check if a replacement audio file was provided.
   std::unique_ptr<AudioDecoder> replacement_decoder;
   NetEqTest::ExtDecoderMap ext_codecs;
-  if (!FLAGS_replacement_audio_file.empty()) {
+  if (strlen(FLAG_replacement_audio_file) > 0) {
     // Find largest unused payload type.
     int replacement_pt = 127;
     while (!(codecs.find(replacement_pt) == codecs.end() &&
@@ -600,16 +649,16 @@ int RunTest(int argc, char* argv[]) {
     };
 
     std::set<uint8_t> cn_types = std_set_int32_to_uint8(
-        {FLAGS_cn_nb, FLAGS_cn_wb, FLAGS_cn_swb32, FLAGS_cn_swb48});
+        {FLAG_cn_nb, FLAG_cn_wb, FLAG_cn_swb32, FLAG_cn_swb48});
     std::set<uint8_t> forbidden_types =
-        std_set_int32_to_uint8({FLAGS_g722, FLAGS_red, FLAGS_avt,
-                                FLAGS_avt_16, FLAGS_avt_32, FLAGS_avt_48});
+        std_set_int32_to_uint8({FLAG_g722, FLAG_red, FLAG_avt,
+                                FLAG_avt_16, FLAG_avt_32, FLAG_avt_48});
     input.reset(new NetEqReplacementInput(std::move(input), replacement_pt,
                                           cn_types, forbidden_types));
 
     replacement_decoder.reset(new FakeDecodeFromFile(
         std::unique_ptr<InputAudioFile>(
-            new InputAudioFile(FLAGS_replacement_audio_file)),
+            new InputAudioFile(FLAG_replacement_audio_file)),
         48000, false));
     NetEqTest::ExternalDecoderInfo ext_dec_info = {
         replacement_decoder.get(), NetEqDecoder::kDecoderArbitrary,
@@ -619,7 +668,7 @@ int RunTest(int argc, char* argv[]) {
 
   NetEqTest::Callbacks callbacks;
   std::unique_ptr<NetEqDelayAnalyzer> delay_analyzer;
-  if (FLAGS_matlabplot) {
+  if (FLAG_matlabplot || FLAG_pythonplot) {
     delay_analyzer.reset(new NetEqDelayAnalyzer);
   }
 
@@ -634,29 +683,49 @@ int RunTest(int argc, char* argv[]) {
 
   int64_t test_duration_ms = test.Run();
 
-  if (FLAGS_matlabplot) {
-    std::cout << "Creating Matlab plot script " << output_file_name + ".m"
+  if (FLAG_matlabplot) {
+    auto matlab_script_name = output_file_name;
+    std::replace(matlab_script_name.begin(), matlab_script_name.end(), '.',
+                 '_');
+    std::cout << "Creating Matlab plot script " << matlab_script_name + ".m"
               << std::endl;
-    delay_analyzer->CreateMatlabScript(output_file_name + ".m");
+    delay_analyzer->CreateMatlabScript(matlab_script_name + ".m");
+  }
+  if (FLAG_pythonplot) {
+    auto python_script_name = output_file_name;
+    std::replace(python_script_name.begin(), python_script_name.end(), '.',
+                 '_');
+    std::cout << "Creating Python plot script " << python_script_name + ".py"
+              << std::endl;
+    delay_analyzer->CreatePythonScript(python_script_name + ".py");
   }
 
   printf("Simulation statistics:\n");
   printf("  output duration: %" PRId64 " ms\n", test_duration_ms);
   auto stats = stats_getter.AverageStats();
   printf("  packet_loss_rate: %f %%\n", 100.0 * stats.packet_loss_rate);
-  printf("  packet_discard_rate: %f %%\n", 100.0 * stats.packet_discard_rate);
   printf("  expand_rate: %f %%\n", 100.0 * stats.expand_rate);
   printf("  speech_expand_rate: %f %%\n", 100.0 * stats.speech_expand_rate);
   printf("  preemptive_rate: %f %%\n", 100.0 * stats.preemptive_rate);
   printf("  accelerate_rate: %f %%\n", 100.0 * stats.accelerate_rate);
   printf("  secondary_decoded_rate: %f %%\n",
          100.0 * stats.secondary_decoded_rate);
+  printf("  secondary_discarded_rate: %f %%\n",
+         100.0 * stats.secondary_discarded_rate);
   printf("  clockdrift_ppm: %f ppm\n", stats.clockdrift_ppm);
   printf("  mean_waiting_time_ms: %f ms\n", stats.mean_waiting_time_ms);
   printf("  median_waiting_time_ms: %f ms\n", stats.median_waiting_time_ms);
   printf("  min_waiting_time_ms: %f ms\n", stats.min_waiting_time_ms);
   printf("  max_waiting_time_ms: %f ms\n", stats.max_waiting_time_ms);
-
+  printf("  current_buffer_size_ms: %f ms\n", stats.current_buffer_size_ms);
+  printf("  preferred_buffer_size_ms: %f ms\n", stats.preferred_buffer_size_ms);
+  if (FLAG_concealment_events) {
+    std::cout << " concealment_events_ms:"
+              << "\n";
+    for (auto concealment_event : stats_getter.concealment_events())
+      std::cout << concealment_event;
+    std::cout << " end of concealment_events_ms\n";
+  }
   return 0;
 }
 
@@ -665,5 +734,5 @@ int RunTest(int argc, char* argv[]) {
 }  // namespace webrtc
 
 int main(int argc, char* argv[]) {
-  webrtc::test::RunTest(argc, argv);
+  return webrtc::test::RunTest(argc, argv);
 }

@@ -14,6 +14,7 @@
 
 #include "base/containers/flat_map.h"
 #include "base/time/time.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "ui/gfx/geometry/point_f.h"
 
 #if !defined(OS_IOS)
@@ -46,6 +47,13 @@ enum LatencyComponentType {
   // scroll processing in impl thread. This is the timestamp when we consider
   // the main thread scroll listener update is begun.
   LATENCY_BEGIN_SCROLL_LISTENER_UPDATE_MAIN_COMPONENT,
+  // The BeginFrame::frame_time of various frame sources.
+  LATENCY_BEGIN_FRAME_RENDERER_MAIN_COMPONENT,
+  LATENCY_BEGIN_FRAME_RENDERER_INVALIDATE_COMPONENT,
+  LATENCY_BEGIN_FRAME_RENDERER_COMPOSITOR_COMPONENT,
+  LATENCY_BEGIN_FRAME_UI_MAIN_COMPONENT,
+  LATENCY_BEGIN_FRAME_UI_COMPOSITOR_COMPONENT,
+  LATENCY_BEGIN_FRAME_DISPLAY_COMPOSITOR_COMPONENT,
   // ---------------------------NORMAL COMPONENT-------------------------------
   // The original timestamp of the touch event which converts to scroll update.
   INPUT_EVENT_LATENCY_SCROLL_UPDATE_ORIGINAL_COMPONENT,
@@ -108,8 +116,10 @@ enum LatencyComponentType {
 enum SourceEventType {
   UNKNOWN,
   WHEEL,
+  MOUSE,
   TOUCH,
   KEY_PRESS,
+  FRAME,
   OTHER,
   SOURCE_EVENT_TYPE_LAST = OTHER,
 };
@@ -155,6 +165,11 @@ class LatencyInfo {
   // for corruption/compromise detection.
   static bool Verify(const std::vector<LatencyInfo>& latency_info,
                      const char* referring_msg);
+
+  // Adds trace flow events only to LatencyInfos that are being traced.
+  static void TraceIntermediateFlowEvents(
+      const std::vector<LatencyInfo>& latency_info,
+      const char* trace_name);
 
   // Copy LatencyComponents with type |type| from |other| into |this|.
   void CopyLatencyFrom(const LatencyInfo& other, LatencyComponentType type);
@@ -223,6 +238,9 @@ class LatencyInfo {
   bool coalesced() const { return coalesced_; }
   int64_t trace_id() const { return trace_id_; }
   void set_trace_id(int64_t trace_id) { trace_id_ = trace_id; }
+  ukm::SourceId ukm_source_id() const { return ukm_source_id_; }
+  void set_ukm_source_id(ukm::SourceId id) { ukm_source_id_ = id; }
+  const std::string& trace_name() const { return trace_name_; }
 
  private:
   void AddLatencyNumberWithTimestampImpl(LatencyComponentType component,
@@ -244,6 +262,9 @@ class LatencyInfo {
 
   // The unique id for matching the ASYNC_BEGIN/END trace event.
   int64_t trace_id_;
+  // UKM Source id to be used for recording UKM metrics associated with this
+  // event.
+  ukm::SourceId ukm_source_id_;
   // Whether this event has been coalesced into another event.
   bool coalesced_;
   // Whether a begin component has been added.

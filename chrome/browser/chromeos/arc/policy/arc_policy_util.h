@@ -37,10 +37,17 @@ constexpr size_t kEcryptfsMigrationActionMaxValue =
     static_cast<size_t>(EcryptfsMigrationAction::kAskForEcryptfsArcUsers);
 
 // Returns true if the account is managed. Otherwise false.
-bool IsAccountManaged(Profile* profile);
+bool IsAccountManaged(const Profile* profile);
 
 // Returns true if ARC is disabled by --enterprise-diable-arc flag.
 bool IsArcDisabledForEnterprise();
+
+// Returns the default ecryptfs migration action for a managed user.
+// |active_directory_user| specifies if the user authenticates with active
+// directory. We have a separate default for active directory users, as these
+// are assumed to be enterprise users.
+EcryptfsMigrationAction GetDefaultEcryptfsMigrationActionForManagedUser(
+    bool active_directory_user);
 
 }  // namespace policy_util
 }  // namespace arc

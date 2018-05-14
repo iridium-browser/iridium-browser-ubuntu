@@ -62,8 +62,8 @@ CredentialsItemView::CredentialsItemView(
     const base::string16& lower_text,
     SkColor hover_color,
     const autofill::PasswordForm* form,
-    net::URLRequestContextGetter* request_context)
-    : CustomButton(button_listener),
+    network::mojom::URLLoaderFactory* loader_factory)
+    : Button(button_listener),
       form_(form),
       upper_label_(nullptr),
       lower_label_(nullptr),
@@ -75,7 +75,7 @@ CredentialsItemView::CredentialsItemView(
   // the parent can receive the events instead.
   image_view_ = new CircularImageView;
   image_view_->set_can_process_events_within_subtree(false);
-  gfx::Image image = ResourceBundle::GetSharedInstance().GetImageNamed(
+  gfx::Image image = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
       IDR_PROFILE_AVATAR_PLACEHOLDER_LARGE);
   DCHECK(image.Width() >= kAvatarImageSize &&
          image.Height() >= kAvatarImageSize);
@@ -84,7 +84,7 @@ CredentialsItemView::CredentialsItemView(
     // Fetch the actual avatar.
     AccountAvatarFetcher* fetcher = new AccountAvatarFetcher(
         form_->icon_url, weak_ptr_factory_.GetWeakPtr());
-    fetcher->Start(request_context);
+    fetcher->Start(loader_factory);
   }
   AddChildView(image_view_);
 
@@ -148,7 +148,7 @@ gfx::Size CredentialsItemView::CalculatePreferredSize() const {
   const gfx::Insets insets(GetInsets());
   size.Enlarge(insets.width(), insets.height());
   size.Enlarge(ChromeLayoutProvider::Get()->GetDistanceMetric(
-                   DISTANCE_RELATED_LABEL_HORIZONTAL),
+                   views::DISTANCE_RELATED_LABEL_HORIZONTAL),
                0);
 
   // Make the size at least as large as the minimum size needed by the border.
@@ -178,7 +178,7 @@ void CredentialsItemView::Layout() {
       (upper_size.height() + lower_size.height())) / 2;
   gfx::Point label_origin(image_origin.x() + image_size.width() +
                               ChromeLayoutProvider::Get()->GetDistanceMetric(
-                                  DISTANCE_RELATED_LABEL_HORIZONTAL),
+                                  views::DISTANCE_RELATED_LABEL_HORIZONTAL),
                           child_area.origin().y() + y_offset);
   if (upper_label_)
     upper_label_->SetBoundsRect(gfx::Rect(label_origin, upper_size));

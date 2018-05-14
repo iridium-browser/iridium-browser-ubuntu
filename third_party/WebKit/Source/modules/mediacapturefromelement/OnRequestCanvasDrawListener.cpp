@@ -5,7 +5,6 @@
 #include "modules/mediacapturefromelement/OnRequestCanvasDrawListener.h"
 
 #include "third_party/skia/include/core/SkImage.h"
-#include <memory>
 
 namespace blink {
 
@@ -13,7 +12,7 @@ OnRequestCanvasDrawListener::OnRequestCanvasDrawListener(
     std::unique_ptr<WebCanvasCaptureHandler> handler)
     : CanvasDrawListener(std::move(handler)) {}
 
-OnRequestCanvasDrawListener::~OnRequestCanvasDrawListener() {}
+OnRequestCanvasDrawListener::~OnRequestCanvasDrawListener() = default;
 
 // static
 OnRequestCanvasDrawListener* OnRequestCanvasDrawListener::Create(
@@ -21,9 +20,11 @@ OnRequestCanvasDrawListener* OnRequestCanvasDrawListener::Create(
   return new OnRequestCanvasDrawListener(std::move(handler));
 }
 
-void OnRequestCanvasDrawListener::SendNewFrame(sk_sp<SkImage> image) {
+void OnRequestCanvasDrawListener::SendNewFrame(
+    sk_sp<SkImage> image,
+    base::WeakPtr<WebGraphicsContext3DProviderWrapper> context_provider) {
   frame_capture_requested_ = false;
-  CanvasDrawListener::SendNewFrame(std::move(image));
+  CanvasDrawListener::SendNewFrame(image, context_provider);
 }
 
 }  // namespace blink

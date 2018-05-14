@@ -31,21 +31,22 @@
 #include "core/fileapi/FileReader.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/StringOrArrayBuffer.h"
+#include "bindings/core/v8/string_or_array_buffer.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/ProgressEvent.h"
 #include "core/fileapi/File.h"
+#include "core/frame/UseCounter.h"
 #include "core/probe/CoreProbes.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "platform/Supplementable.h"
 #include "platform/wtf/AutoReset.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/Deque.h"
 #include "platform/wtf/HashSet.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/CString.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -73,15 +74,17 @@ class FileReader::ThrottlingController final
   USING_GARBAGE_COLLECTED_MIXIN(FileReader::ThrottlingController);
 
  public:
+  static const char kSupplementName[];
+
   static ThrottlingController* From(ExecutionContext* context) {
     if (!context)
-      return 0;
+      return nullptr;
 
-    ThrottlingController* controller = static_cast<ThrottlingController*>(
-        Supplement<ExecutionContext>::From(*context, SupplementName()));
+    ThrottlingController* controller =
+        Supplement<ExecutionContext>::From<ThrottlingController>(*context);
     if (!controller) {
       controller = new ThrottlingController(*context);
-      ProvideTo(*context, SupplementName(), controller);
+      ProvideTo(*context, controller);
     }
     return controller;
   }
@@ -117,7 +120,7 @@ class FileReader::ThrottlingController final
     probe::AsyncTaskCanceled(context, reader);
   }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(pending_readers_);
     visitor->Trace(running_readers_);
     Supplement<ExecutionContext>::Trace(visitor);
@@ -172,10 +175,6 @@ class FileReader::ThrottlingController final
     }
   }
 
-  static const char* SupplementName() {
-    return "FileReaderThrottlingController";
-  }
-
   const size_t max_running_readers_;
 
   using FileReaderDeque = HeapDeque<Member<FileReader>>;
@@ -184,6 +183,10 @@ class FileReader::ThrottlingController final
   FileReaderDeque pending_readers_;
   FileReaderHashSet running_readers_;
 };
+
+// static
+const char FileReader::ThrottlingController::kSupplementName[] =
+    "FileReaderThrottlingController";
 
 FileReader* FileReader::Create(ExecutionContext* context) {
   return new FileReader(context);
@@ -274,13 +277,6 @@ void FileReader::ReadInternal(Blob* blob,
     return;
   }
 
-  if (blob->isClosed()) {
-    exception_state.ThrowDOMException(
-        kInvalidStateError,
-        String(blob->IsFile() ? "File" : "Blob") + " has been closed.");
-    return;
-  }
-
   ExecutionContext* context = GetExecutionContext();
   if (!context) {
     exception_state.ThrowDOMException(
@@ -352,19 +348,26 @@ void FileReader::abort() {
   // called from the event handler and we do not want the resource loading code
   // to be on the stack when doing so. The persistent reference keeps the
   // reader alive until the task has completed.
-  TaskRunnerHelper::Get(TaskType::kFileReading, GetExecutionContext())
-      ->PostTask(BLINK_FROM_HERE,
+  GetExecutionContext()
+      ->GetTaskRunner(TaskType::kFileReading)
+      ->PostTask(FROM_HERE,
                  WTF::Bind(&FileReader::Terminate, WrapPersistent(this)));
 }
 
-void FileReader::result(StringOrArrayBuffer& result_attribute) const {
+void FileReader::result(ScriptState* state,
+                        StringOrArrayBuffer& result_attribute) const {
   if (error_ || !loader_)
     return;
 
+  if (!loader_->HasFinishedLoading()) {
+    UseCounter::Count(ExecutionContext::From(state),
+                      WebFeature::kFileReaderResultBeforeCompletion);
+  }
+
   if (read_type_ == FileReaderLoader::kReadAsArrayBuffer)
-    result_attribute.setArrayBuffer(loader_->ArrayBufferResult());
+    result_attribute.SetArrayBuffer(loader_->ArrayBufferResult());
   else
-    result_attribute.setString(loader_->StringResult());
+    result_attribute.SetString(loader_->StringResult());
 }
 
 void FileReader::Terminate() {
@@ -467,7 +470,7 @@ void FileReader::FireEvent(const AtomicString& type) {
         ProgressEvent::Create(type, false, loader_->BytesLoaded(), 0));
 }
 
-DEFINE_TRACE(FileReader) {
+void FileReader::Trace(blink::Visitor* visitor) {
   visitor->Trace(error_);
   EventTargetWithInlineData::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);

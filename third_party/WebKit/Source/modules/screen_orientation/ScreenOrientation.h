@@ -6,7 +6,7 @@
 #define ScreenOrientation_h
 
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/events/EventTarget.h"
+#include "core/dom/events/EventTarget.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/text/AtomicString.h"
@@ -49,7 +49,7 @@ class ScreenOrientation final : public EventTargetWithInlineData,
   // Helper being used by this class and LockOrientationCallback.
   static const AtomicString& OrientationTypeToString(WebScreenOrientationType);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit ScreenOrientation(LocalFrame*);

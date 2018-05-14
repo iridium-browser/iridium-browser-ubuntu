@@ -7,14 +7,34 @@
 
 #include "WebCommon.h"
 #include "WebLayer.h"
+#include "WebLayerTreeView.h"
+#include "components/viz/common/surfaces/surface_id.h"
 
 namespace blink {
+
+// Listens for updates made on the WebLayer by the WebSurfaceLayerBridge.
+class BLINK_PLATFORM_EXPORT WebSurfaceLayerBridgeObserver {
+ public:
+  // Triggered by resizing or surface layer creation.
+  virtual void OnWebLayerUpdated() = 0;
+
+  // Called when new a SurfaceLayer is created.
+  virtual void RegisterContentsLayer(WebLayer*) = 0;
+  virtual void UnregisterContentsLayer(WebLayer*) = 0;
+
+  // Called when a SurfaceLayer is activated.
+  virtual void OnSurfaceIdUpdated(viz::SurfaceId surface_id){};
+};
 
 // Maintains and exposes the SurfaceLayer.
 class BLINK_PLATFORM_EXPORT WebSurfaceLayerBridge {
  public:
-  static WebSurfaceLayerBridge* Create();
+  static std::unique_ptr<WebSurfaceLayerBridge> Create(
+      WebLayerTreeView*,
+      WebSurfaceLayerBridgeObserver*);
+  virtual ~WebSurfaceLayerBridge();
   virtual WebLayer* GetWebLayer() const = 0;
+  virtual const viz::FrameSinkId& GetFrameSinkId() const = 0;
 };
 
 }  // namespace blink

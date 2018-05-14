@@ -7,14 +7,16 @@
 #include <algorithm>
 #include <utility>
 
-#include "ash/wm/window_util.h"
+#include "ash/public/cpp/shelf_types.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/browser/ui/ash/launcher/launcher_context_menu.h"
 #include "chrome/browser/ui/ash/launcher/launcher_controller_helper.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/base/base_window.h"
 #include "ui/wm/core/window_animations.h"
+#include "ui/wm/core/window_util.h"
 
 AppWindowLauncherItemController::AppWindowLauncherItemController(
     const ash::ShelfID& shelf_id)
@@ -100,10 +102,11 @@ void AppWindowLauncherItemController::ItemSelected(
       action, GetAppMenuItems(event ? event->flags() : ui::EF_NONE));
 }
 
-void AppWindowLauncherItemController::ExecuteCommand(uint32_t command_id,
-                                                     int32_t event_flags) {
-  // This delegate does not support showing an application menu.
-  NOTIMPLEMENTED();
+std::unique_ptr<ui::MenuModel> AppWindowLauncherItemController::GetContextMenu(
+    int64_t display_id) {
+  ChromeLauncherController* controller = ChromeLauncherController::instance();
+  const ash::ShelfItem* item = controller->GetItem(shelf_id());
+  return LauncherContextMenu::Create(controller, item, display_id);
 }
 
 void AppWindowLauncherItemController::Close() {
@@ -135,9 +138,9 @@ void AppWindowLauncherItemController::OnWindowPropertyChanged(
     intptr_t old) {
   if (key == aura::client::kDrawAttentionKey) {
     ash::ShelfItemStatus status;
-    if (ash::wm::IsActiveWindow(window)) {
-      status = ash::STATUS_ACTIVE;
-    } else if (window->GetProperty(aura::client::kDrawAttentionKey)) {
+    // Active windows don't draw attention because the user is looking at them.
+    if (window->GetProperty(aura::client::kDrawAttentionKey) &&
+        !wm::IsActiveWindow(window)) {
       status = ash::STATUS_ATTENTION;
     } else {
       status = ash::STATUS_RUNNING;

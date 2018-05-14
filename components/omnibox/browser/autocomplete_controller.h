@@ -6,6 +6,7 @@
 #define COMPONENTS_OMNIBOX_BROWSER_AUTOCOMPLETE_CONTROLLER_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
@@ -14,6 +15,7 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "base/trace_event/memory_dump_provider.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/autocomplete_provider_client.h"
@@ -47,7 +49,8 @@ class ZeroSuggestProvider;
 //
 // The coordinator for autocomplete queries, responsible for combining the
 // matches from a series of providers into one AutocompleteResult.
-class AutocompleteController : public AutocompleteProviderListener {
+class AutocompleteController : public AutocompleteProviderListener,
+                               public base::trace_event::MemoryDumpProvider {
  public:
   typedef std::vector<scoped_refptr<AutocompleteProvider> > Providers;
 
@@ -121,6 +124,9 @@ class AutocompleteController : public AutocompleteProviderListener {
       const TemplateURLRef::SearchTermsArgs& search_terms_args,
       AutocompleteMatch* match) const;
 
+  // Prepend missing tail suggestion prefixes in results, if present.
+  void InlineTailPrefixes();
+
   HistoryURLProvider* history_url_provider() const {
     return history_url_provider_;
   }
@@ -142,7 +148,10 @@ class AutocompleteController : public AutocompleteProviderListener {
   FRIEND_TEST_ALL_PREFIXES(AutocompleteProviderTest, UpdateAssistedQueryStats);
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewTest, DoesNotUpdateAutocompleteOnBlur);
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, CloseOmniboxPopupOnTextDrag);
+  FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, FriendlyAccessibleLabel);
+  FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, AccessiblePopup);
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, MaintainCursorAfterFocusCycle);
+  FRIEND_TEST_ALL_PREFIXES(OmniboxPopupModelTest, SetSelectedLine);
 
   // Updates |result_| to reflect the current provider state and fires
   // notifications.  If |regenerate_result| then we clear the result
@@ -192,6 +201,11 @@ class AutocompleteController : public AutocompleteProviderListener {
   // triggered by a user's idleness, i.e., not an explicit user action.
   void StopHelper(bool clear_result,
                   bool due_to_user_inactivity);
+
+  // MemoryDumpProvider:
+  bool OnMemoryDump(
+      const base::trace_event::MemoryDumpArgs& args,
+      base::trace_event::ProcessMemoryDump* process_memory_dump) override;
 
   AutocompleteControllerDelegate* delegate_;
 

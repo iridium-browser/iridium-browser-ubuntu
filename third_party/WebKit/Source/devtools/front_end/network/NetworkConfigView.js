@@ -1,16 +1,10 @@
 // Copyright (c) 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-/**
- * @unrestricted
- */
+
 Network.NetworkConfigView = class extends UI.VBox {
   constructor() {
     super(true);
-    /** @type {!Element} */
-    this._autoCheckbox;
-    /** @type {!{input: !Element, select: !Element}} */
-    this._customSelectAndInput;
     this.registerRequiredCSS('network/networkConfigView.css');
     this.contentElement.classList.add('network-config');
 
@@ -25,25 +19,25 @@ Network.NetworkConfigView = class extends UI.VBox {
    * @return {{select: !Element, input: !Element}}
    */
   static createUserAgentSelectAndInput() {
-    var userAgentSetting = Common.settings.createSetting('customUserAgent', '');
-    var userAgentSelectElement = createElement('select');
+    const userAgentSetting = Common.settings.createSetting('customUserAgent', '');
+    const userAgentSelectElement = createElement('select');
 
     const customOverride = {title: Common.UIString('Custom...'), value: 'custom'};
     userAgentSelectElement.appendChild(new Option(customOverride.title, customOverride.value));
 
-    var groups = Network.NetworkConfigView._userAgentGroups;
-    for (var userAgentDescriptor of groups) {
-      var groupElement = userAgentSelectElement.createChild('optgroup');
+    const groups = Network.NetworkConfigView._userAgentGroups;
+    for (const userAgentDescriptor of groups) {
+      const groupElement = userAgentSelectElement.createChild('optgroup');
       groupElement.label = userAgentDescriptor.title;
-      for (var userAgentVersion of userAgentDescriptor.values) {
-        var userAgentValue = SDK.MultitargetNetworkManager.patchUserAgentWithChromeVersion(userAgentVersion.value);
+      for (const userAgentVersion of userAgentDescriptor.values) {
+        const userAgentValue = SDK.MultitargetNetworkManager.patchUserAgentWithChromeVersion(userAgentVersion.value);
         groupElement.appendChild(new Option(userAgentVersion.title, userAgentValue));
       }
     }
 
     userAgentSelectElement.selectedIndex = 0;
 
-    var otherUserAgentElement = UI.createInput('', 'text');
+    const otherUserAgentElement = UI.createInput('', 'text');
     otherUserAgentElement.value = userAgentSetting.get();
     otherUserAgentElement.title = userAgentSetting.get();
     otherUserAgentElement.placeholder = Common.UIString('Enter a custom user agent');
@@ -54,7 +48,7 @@ Network.NetworkConfigView = class extends UI.VBox {
     otherUserAgentElement.addEventListener('input', applyOtherUserAgent, false);
 
     function userAgentSelected() {
-      var value = userAgentSelectElement.options[userAgentSelectElement.selectedIndex].value;
+      const value = userAgentSelectElement.options[userAgentSelectElement.selectedIndex].value;
       if (value !== customOverride.value) {
         userAgentSetting.set(value);
         otherUserAgentElement.value = value;
@@ -65,10 +59,10 @@ Network.NetworkConfigView = class extends UI.VBox {
     }
 
     function settingChanged() {
-      var value = userAgentSetting.get();
-      var options = userAgentSelectElement.options;
-      var selectionRestored = false;
-      for (var i = 0; i < options.length; ++i) {
+      const value = userAgentSetting.get();
+      const options = userAgentSelectElement.options;
+      let selectionRestored = false;
+      for (let i = 0; i < options.length; ++i) {
         if (options[i].value === value) {
           userAgentSelectElement.selectedIndex = i;
           selectionRestored = true;
@@ -97,7 +91,7 @@ Network.NetworkConfigView = class extends UI.VBox {
    * @return {!Element}
    */
   _createSection(title, className) {
-    var section = this.contentElement.createChild('section', 'network-config-group');
+    const section = this.contentElement.createChild('section', 'network-config-group');
     if (className)
       section.classList.add(className);
     section.createChild('div', 'network-config-title').textContent = title;
@@ -105,52 +99,48 @@ Network.NetworkConfigView = class extends UI.VBox {
   }
 
   _createCacheSection() {
-    var section = this._createSection(Common.UIString('Caching'), 'network-config-disable-cache');
+    const section = this._createSection(Common.UIString('Caching'), 'network-config-disable-cache');
     section.appendChild(UI.SettingsUI.createSettingCheckbox(
         Common.UIString('Disable cache'), Common.moduleSetting('cacheDisabled'), true));
   }
 
   _createNetworkThrottlingSection() {
-    var section = this._createSection(Common.UIString('Network throttling'), 'network-config-throttling');
-    this._networkThrottlingSelect =
+    const section = this._createSection(Common.UIString('Network throttling'), 'network-config-throttling');
+    const networkThrottlingSelect =
         /** @type {!HTMLSelectElement} */ (section.createChild('select', 'chrome-select'));
-    MobileThrottling.throttlingManager().decorateSelectWithNetworkThrottling(this._networkThrottlingSelect);
+    MobileThrottling.throttlingManager().decorateSelectWithNetworkThrottling(networkThrottlingSelect);
   }
 
   _createUserAgentSection() {
-    var section = this._createSection(Common.UIString('User agent'), 'network-config-ua');
-    var checkboxLabel = UI.CheckboxLabel.create(Common.UIString('Select automatically'), true);
+    const section = this._createSection(Common.UIString('User agent'), 'network-config-ua');
+    const checkboxLabel = UI.CheckboxLabel.create(Common.UIString('Select automatically'), true);
     section.appendChild(checkboxLabel);
-    this._autoCheckbox = checkboxLabel.checkboxElement;
-    this._autoCheckbox.addEventListener('change', this._userAgentTypeChanged.bind(this));
+    const autoCheckbox = checkboxLabel.checkboxElement;
 
-    this._customUserAgentSetting = Common.settings.createSetting('customUserAgent', '');
-    this._customUserAgentSetting.addChangeListener(this._customUserAgentChanged, this);
+    const customUserAgentSetting = Common.settings.createSetting('customUserAgent', '');
+    customUserAgentSetting.addChangeListener(() => {
+      if (autoCheckbox.checked)
+        return;
+      SDK.multitargetNetworkManager.setCustomUserAgentOverride(customUserAgentSetting.get());
+    });
+    const customUserAgentSelectBox = section.createChild('div', 'network-config-ua-custom');
+    autoCheckbox.addEventListener('change', userAgentSelectBoxChanged);
+    const customSelectAndInput = Network.NetworkConfigView.createUserAgentSelectAndInput();
+    customSelectAndInput.select.classList.add('chrome-select');
+    customUserAgentSelectBox.appendChild(customSelectAndInput.select);
+    customUserAgentSelectBox.appendChild(customSelectAndInput.input);
+    userAgentSelectBoxChanged();
 
-    this._customUserAgent = section.createChild('div', 'network-config-ua-custom');
-    this._customSelectAndInput = Network.NetworkConfigView.createUserAgentSelectAndInput();
-    this._customSelectAndInput.select.classList.add('chrome-select');
-    this._customUserAgent.appendChild(this._customSelectAndInput.select);
-    this._customUserAgent.appendChild(this._customSelectAndInput.input);
-    this._userAgentTypeChanged();
-  }
-
-  _customUserAgentChanged() {
-    if (this._autoCheckbox.checked)
-      return;
-    SDK.multitargetNetworkManager.setCustomUserAgentOverride(this._customUserAgentSetting.get());
-  }
-
-  _userAgentTypeChanged() {
-    var useCustomUA = !this._autoCheckbox.checked;
-    this._customUserAgent.classList.toggle('checked', useCustomUA);
-    this._customSelectAndInput.select.disabled = !useCustomUA;
-    this._customSelectAndInput.input.disabled = !useCustomUA;
-    var customUA = useCustomUA ? this._customUserAgentSetting.get() : '';
-    SDK.multitargetNetworkManager.setCustomUserAgentOverride(customUA);
+    function userAgentSelectBoxChanged() {
+      const useCustomUA = !autoCheckbox.checked;
+      customUserAgentSelectBox.classList.toggle('checked', useCustomUA);
+      customSelectAndInput.select.disabled = !useCustomUA;
+      customSelectAndInput.input.disabled = !useCustomUA;
+      const customUA = useCustomUA ? customUserAgentSetting.get() : '';
+      SDK.multitargetNetworkManager.setCustomUserAgentOverride(customUA);
+    }
   }
 };
-
 
 /** @type {!Array.<{title: string, values: !Array.<{title: string, value: string}>}>} */
 Network.NetworkConfigView._userAgentGroups = [
@@ -211,6 +201,10 @@ Network.NetworkConfigView._userAgentGroups = [
         title: 'Chrome \u2014 iPad',
         value:
             'Mozilla/5.0 (iPad; CPU OS 9_1 like Mac OS X) AppleWebKit/601.1 (KHTML, like Gecko) CriOS/%s Mobile/13B143 Safari/601.1.46'
+      },
+      {
+        title: 'Chrome \u2014 Chrome OS',
+        value: 'Mozilla/5.0 (X11; CrOS x86_64 10066.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36'
       },
       {
         title: 'Chrome \u2014 Mac',

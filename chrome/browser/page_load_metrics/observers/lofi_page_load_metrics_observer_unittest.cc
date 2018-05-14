@@ -6,12 +6,16 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_test_harness.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
+#include "chrome/browser/page_load_metrics/page_load_tracker.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
+#include "chrome/common/page_load_metrics/test/page_load_metrics_test_util.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
 
 namespace data_reduction_proxy {
@@ -112,7 +116,7 @@ class LoFiPageLoadMetricsObserverTest
 
  protected:
   void RegisterObservers(page_load_metrics::PageLoadTracker* tracker) override {
-    tracker->AddObserver(base::MakeUnique<LoFiPageLoadMetricsObserver>());
+    tracker->AddObserver(std::make_unique<LoFiPageLoadMetricsObserver>());
   }
 
   page_load_metrics::mojom::PageLoadTiming timing_;
@@ -126,7 +130,7 @@ TEST_F(LoFiPageLoadMetricsObserverTest, LoFiNotSeen) {
   RunTest();
 
   std::unique_ptr<DataReductionProxyData> data =
-      base::MakeUnique<DataReductionProxyData>();
+      std::make_unique<DataReductionProxyData>();
   data->set_used_data_reduction_proxy(true);
 
   // Prepare 4 resources of varying size and configurations, none of which have
@@ -136,23 +140,27 @@ TEST_F(LoFiPageLoadMetricsObserverTest, LoFiNotSeen) {
       {GURL(kResourceUrl), net::HostPortPair(), -1, true /*was_cached*/,
        1024 * 40 /* raw_body_bytes */, 0 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0,
+       nullptr /* load_timing_info */},
       // Uncached non-proxied request.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
       // Uncached proxied request with .1 compression ratio.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 * 10 /* original_network_content_length */, data->DeepCopy(),
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
       // Uncached proxied request with .5 compression ratio.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 * 5 /* original_network_content_length */, std::move(data),
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
   };
 
   int network_resources = 0;
@@ -186,7 +194,7 @@ TEST_F(LoFiPageLoadMetricsObserverTest, ClientLoFiSeen) {
   RunTest();
 
   std::unique_ptr<DataReductionProxyData> data =
-      base::MakeUnique<DataReductionProxyData>();
+      std::make_unique<DataReductionProxyData>();
   data->set_client_lofi_requested(true);
 
   // Prepare 4 resources of varying size and configurations, 2 of which have
@@ -196,23 +204,27 @@ TEST_F(LoFiPageLoadMetricsObserverTest, ClientLoFiSeen) {
       {GURL(kResourceUrl), net::HostPortPair(), -1, true /*was_cached*/,
        1024 * 40 /* raw_body_bytes */, 0 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0,
+       nullptr /* load_timing_info */},
       // Uncached non-proxied request.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
       // Uncached proxied request with .1 compression ratio.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 * 10 /* original_network_content_length */, data->DeepCopy(),
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
       // Uncached proxied request with .5 compression ratio.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 * 5 /* original_network_content_length */, std::move(data),
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
   };
 
   int network_resources = 0;
@@ -246,7 +258,7 @@ TEST_F(LoFiPageLoadMetricsObserverTest, ServerLoFiSeen) {
   RunTest();
 
   std::unique_ptr<DataReductionProxyData> data =
-      base::MakeUnique<DataReductionProxyData>();
+      std::make_unique<DataReductionProxyData>();
   data->set_used_data_reduction_proxy(true);
   data->set_lofi_received(true);
 
@@ -257,23 +269,27 @@ TEST_F(LoFiPageLoadMetricsObserverTest, ServerLoFiSeen) {
       {GURL(kResourceUrl), net::HostPortPair(), -1, true /*was_cached*/,
        1024 * 40 /* raw_body_bytes */, 0 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0,
+       nullptr /* load_timing_info */},
       // Uncached non-proxied request.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
       // Uncached proxied request with .1 compression ratio.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 * 10 /* original_network_content_length */, data->DeepCopy(),
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
       // Uncached proxied request with .5 compression ratio.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 * 5 /* original_network_content_length */, std::move(data),
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
   };
 
   int network_resources = 0;
@@ -307,12 +323,12 @@ TEST_F(LoFiPageLoadMetricsObserverTest, BothLoFiSeen) {
   RunTest();
 
   std::unique_ptr<DataReductionProxyData> data1 =
-      base::MakeUnique<DataReductionProxyData>();
+      std::make_unique<DataReductionProxyData>();
   data1->set_used_data_reduction_proxy(true);
   data1->set_lofi_received(true);
 
   std::unique_ptr<DataReductionProxyData> data2 =
-      base::MakeUnique<DataReductionProxyData>();
+      std::make_unique<DataReductionProxyData>();
   data2->set_used_data_reduction_proxy(true);
   data2->set_client_lofi_requested(true);
 
@@ -323,23 +339,27 @@ TEST_F(LoFiPageLoadMetricsObserverTest, BothLoFiSeen) {
       {GURL(kResourceUrl), net::HostPortPair(), -1, true /*was_cached*/,
        1024 * 40 /* raw_body_bytes */, 0 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0,
+       nullptr /* load_timing_info */},
       // Uncached non-proxied request.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
       // Uncached proxied request with .1 compression ratio.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 * 10 /* original_network_content_length */, std::move(data1),
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
       // Uncached proxied request with .5 compression ratio.
       {GURL(kResourceUrl), net::HostPortPair(), -1, false /*was_cached*/,
        1024 * 40 /* raw_body_bytes */,
        1024 * 40 * 5 /* original_network_content_length */, std::move(data2),
-       content::ResourceType::RESOURCE_TYPE_IMAGE, 0},
+       content::ResourceType::RESOURCE_TYPE_IMAGE, 0,
+       nullptr /* load_timing_info */},
   };
 
   int network_resources = 0;

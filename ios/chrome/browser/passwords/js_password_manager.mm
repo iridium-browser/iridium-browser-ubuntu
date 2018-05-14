@@ -44,8 +44,9 @@ NSString* JSONEscape(NSString* JSONString) {
 - (void)extractForm:(NSString*)formName
       completionHandler:(void (^)(NSString*))completionHandler {
   DCHECK(completionHandler);
-  NSString* extra = [NSString
-      stringWithFormat:@"__gCrWeb.getPasswordForm(%@)", JSONEscape(formName)];
+  NSString* extra =
+      [NSString stringWithFormat:@"__gCrWeb.getPasswordFormDataAsString(%@)",
+                                 JSONEscape(formName)];
   [self evaluateExtraScript:extra completionHandler:completionHandler];
 }
 
@@ -59,29 +60,6 @@ NSString* JSONEscape(NSString* JSONString) {
                        JSONEscape(username), JSONEscape(password)];
   [self executeJavaScript:script completionHandler:^(id result, NSError*) {
     completionHandler([result isEqual:@YES]);
-  }];
-}
-
-- (void)clearAutofilledPasswordsInForm:(NSString*)formName
-                     completionHandler:(void (^)(BOOL))completionHandler {
-  NSString* script =
-      [NSString stringWithFormat:@"__gCrWeb.clearAutofilledPasswords(%@)",
-                                 JSONEscape(formName)];
-  [self executeJavaScript:script completionHandler:^(id result, NSError*) {
-    completionHandler([result isEqual:@YES]);
-  }];
-}
-
-- (void)fillPasswordForm:(NSString*)formName
-   withGeneratedPassword:(NSString*)password
-       completionHandler:(void (^)(BOOL))completionHandler {
-  NSString* script =
-      [NSString stringWithFormat:
-                    @"__gCrWeb.fillPasswordFormWithGeneratedPassword(%@, %@)",
-                    JSONEscape(formName), JSONEscape(password)];
-  [self executeJavaScript:script completionHandler:^(id result, NSError*) {
-    if (completionHandler)
-      completionHandler([result isEqual:@YES]);
   }];
 }
 

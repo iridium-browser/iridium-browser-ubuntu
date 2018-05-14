@@ -4,6 +4,8 @@
 
 #include "mash/simple_wm/simple_wm.h"
 
+#include <memory>
+
 #include "base/observer_list.h"
 #include "base/strings/utf_string_conversions.h"
 #include "mash/simple_wm/move_event_handler.h"
@@ -193,11 +195,11 @@ class SimpleWM::FrameView : public views::WidgetDelegateView,
       : client_window_(client_window) {
     client_window_->AddObserver(this);
   }
-  ~FrameView() override {}
+  ~FrameView() override = default;
 
   void Init() {
     move_event_handler_ =
-        base::MakeUnique<MoveEventHandler>(GetWidget()->GetNativeWindow());
+        std::make_unique<MoveEventHandler>(GetWidget()->GetNativeWindow());
   }
 
  private:
@@ -258,7 +260,7 @@ class SimpleWM::WorkspaceLayoutManager : public aura::WindowObserver {
  public:
   explicit WorkspaceLayoutManager(aura::Window* window_root)
       : window_root_(window_root) {}
-  ~WorkspaceLayoutManager() override {}
+  ~WorkspaceLayoutManager() override = default;
 
  private:
   // aura::WindowObserver:
@@ -305,7 +307,7 @@ class SimpleWM::DisplayLayoutManager : public aura::LayoutManager {
       : display_root_(display_root),
         window_root_(window_root),
         window_list_view_(window_list_view) {}
-  ~DisplayLayoutManager() override {}
+  ~DisplayLayoutManager() override = default;
 
  private:
   // aura::LayoutManager:
@@ -344,7 +346,7 @@ class SimpleWM::DisplayLayoutManager : public aura::LayoutManager {
 ////////////////////////////////////////////////////////////////////////////////
 // SimpleWM, public:
 
-SimpleWM::SimpleWM() {}
+SimpleWM::SimpleWM() = default;
 
 SimpleWM::~SimpleWM() {
   // WindowTreeHost uses state from WindowTreeClient, so destroy it first.
@@ -362,7 +364,7 @@ SimpleWM::~SimpleWM() {
 void SimpleWM::OnStart() {
   CHECK(!started_);
   started_ = true;
-  screen_ = base::MakeUnique<display::ScreenBase>();
+  screen_ = std::make_unique<display::ScreenBase>();
   display::Screen::SetScreenInstance(screen_.get());
   aura_init_ = views::AuraInit::Create(
       context()->connector(), context()->identity(), "views_mus_resources.pak",
@@ -371,7 +373,7 @@ void SimpleWM::OnStart() {
     context()->QuitNow();
     return;
   }
-  window_tree_client_ = base::MakeUnique<aura::WindowTreeClient>(
+  window_tree_client_ = std::make_unique<aura::WindowTreeClient>(
       context()->connector(), this, this);
   aura::Env::GetInstance()->SetWindowTreeClient(window_tree_client_.get());
   window_tree_client_->ConnectAsWindowManager();
@@ -498,9 +500,9 @@ void SimpleWM::OnWmNewDisplay(
   display_root_->AddChild(window_root_);
   window_root_->Show();
   workspace_layout_manager_ =
-      base::MakeUnique<WorkspaceLayoutManager>(window_root_);
+      std::make_unique<WorkspaceLayoutManager>(window_root_);
 
-  window_list_model_ = base::MakeUnique<WindowListModel>(window_root_);
+  window_list_model_ = std::make_unique<WindowListModel>(window_root_);
 
   views::Widget* window_list_widget = new views::Widget;
   views::NativeWidgetAura* window_list_widget_native_widget =
@@ -528,7 +530,7 @@ void SimpleWM::OnWmNewDisplay(
   frame_decoration_values->max_title_bar_button_width = 0;
   window_manager_client_->SetFrameDecorationValues(
       std::move(frame_decoration_values));
-  focus_controller_ = base::MakeUnique<wm::FocusController>(this);
+  focus_controller_ = std::make_unique<wm::FocusController>(this);
   aura::client::SetFocusClient(display_root_, focus_controller_.get());
   wm::SetActivationClient(display_root_, focus_controller_.get());
   display_root_->AddPreTargetHandler(focus_controller_.get());
@@ -553,6 +555,8 @@ void SimpleWM::OnWmPerformMoveLoop(
 
 void SimpleWM::OnWmCancelMoveLoop(aura::Window* window) {}
 
+void SimpleWM::OnCursorTouchVisibleChanged(bool enabled) {}
+
 void SimpleWM::OnWmSetClientArea(
     aura::Window* window,
     const gfx::Insets& insets,
@@ -561,6 +565,9 @@ void SimpleWM::OnWmSetClientArea(
 bool SimpleWM::IsWindowActive(aura::Window* window) { return false; }
 
 void SimpleWM::OnWmDeactivateWindow(aura::Window* window) {}
+
+void SimpleWM::OnWmPerformAction(aura::Window* window,
+                                 const std::string& action) {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // SimpleWM, wm::BaseFocusRules implementation:

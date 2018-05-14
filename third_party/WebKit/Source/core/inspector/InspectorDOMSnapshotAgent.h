@@ -5,6 +5,7 @@
 #ifndef InspectorDOMSnapshotAgent_h
 #define InspectorDOMSnapshotAgent_h
 
+#include "base/macros.h"
 #include "core/CSSPropertyNames.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/protocol/DOMSnapshot.h"
@@ -19,18 +20,19 @@ class Node;
 
 class CORE_EXPORT InspectorDOMSnapshotAgent final
     : public InspectorBaseAgent<protocol::DOMSnapshot::Metainfo> {
-  WTF_MAKE_NONCOPYABLE(InspectorDOMSnapshotAgent);
-
  public:
-  static InspectorDOMSnapshotAgent* Create(InspectedFrames* inspected_frames) {
-    return new InspectorDOMSnapshotAgent(inspected_frames);
+  static InspectorDOMSnapshotAgent* Create(
+      InspectedFrames* inspected_frames,
+      InspectorDOMDebuggerAgent* dom_debugger_agent) {
+    return new InspectorDOMSnapshotAgent(inspected_frames, dom_debugger_agent);
   }
 
   ~InspectorDOMSnapshotAgent() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   protocol::Response getSnapshot(
       std::unique_ptr<protocol::Array<String>> style_whitelist,
+      protocol::Maybe<bool> get_dom_listeners,
       std::unique_ptr<protocol::Array<protocol::DOMSnapshot::DOMNode>>*
           dom_nodes,
       std::unique_ptr<protocol::Array<protocol::DOMSnapshot::LayoutTreeNode>>*
@@ -39,12 +41,16 @@ class CORE_EXPORT InspectorDOMSnapshotAgent final
           computed_styles) override;
 
  private:
-  explicit InspectorDOMSnapshotAgent(InspectedFrames*);
+  InspectorDOMSnapshotAgent(InspectedFrames*, InspectorDOMDebuggerAgent*);
 
   // Adds a DOMNode for the given Node to |dom_nodes_| and returns its index.
-  int VisitNode(Node*);
-  std::unique_ptr<protocol::Array<int>> VisitContainerChildren(Node* container);
-  std::unique_ptr<protocol::Array<int>> VisitPseudoElements(Element* parent);
+  int VisitNode(Node*, bool include_event_listeners);
+  std::unique_ptr<protocol::Array<int>> VisitContainerChildren(
+      Node* container,
+      bool include_event_listeners);
+  std::unique_ptr<protocol::Array<int>> VisitPseudoElements(
+      Element* parent,
+      bool include_event_listeners);
   std::unique_ptr<protocol::Array<protocol::DOMSnapshot::NameValue>>
   BuildArrayForElementAttributes(Element*);
 
@@ -79,6 +85,9 @@ class CORE_EXPORT InspectorDOMSnapshotAgent final
       css_property_whitelist_;
 
   Member<InspectedFrames> inspected_frames_;
+  Member<InspectorDOMDebuggerAgent> dom_debugger_agent_;
+
+  DISALLOW_COPY_AND_ASSIGN(InspectorDOMSnapshotAgent);
 };
 
 }  // namespace blink

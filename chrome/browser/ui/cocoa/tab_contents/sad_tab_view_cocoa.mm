@@ -51,19 +51,21 @@ const CGFloat kMaxTopMargin = 130;
   NSTextView* message_;
   HyperlinkTextView* help_;
   NSButton* button_;
-  chrome::SadTab* sadTab_;
+  SadTab* sadTab_;
+  BOOL recordedFirstPaint_;
 }
 
-- (instancetype)initWithFrame:(NSRect)frame sadTab:(chrome::SadTab*)sadTab {
+- (instancetype)initWithFrame:(NSRect)frame sadTab:(SadTab*)sadTab {
   if ((self = [super initWithFrame:frame])) {
     sadTab_ = sadTab;
+    recordedFirstPaint_ = NO;
 
     self.wantsLayer = YES;
     self.layer.backgroundColor =
         [NSColor colorWithCalibratedWhite:245.0f / 255.0f alpha:1.0].CGColor;
     container_ = [[SadTabContainerView new] autorelease];
 
-    NSImage* iconImage = ResourceBundle::GetSharedInstance()
+    NSImage* iconImage = ui::ResourceBundle::GetSharedInstance()
                              .GetNativeImageNamed(IDR_CRASH_SAD_TAB)
                              .ToNSImage();
     NSImageView* icon = [[NSImageView new] autorelease];
@@ -182,9 +184,13 @@ const CGFloat kMaxTopMargin = 130;
 }
 
 - (void)updateLayer {
-  // Currently, updateLayer is only called once. If that changes, a DCHECK in
-  // SadTab::RecordFirstPaint will pipe up and we should add a guard here.
-  sadTab_->RecordFirstPaint();
+  // updateLayer seems to be called whenever NSBackingLayerDisplayIfNeeded is
+  // called by AppKit, which could be multiple times - at least twice has been
+  // observed. Guard against repeated recordings of first paint.
+  if (!recordedFirstPaint_) {
+    sadTab_->RecordFirstPaint();
+    recordedFirstPaint_ = YES;
+  }
 }
 
 - (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
@@ -216,14 +222,14 @@ const CGFloat kMaxTopMargin = 130;
 }
 
 - (void)buttonClicked {
-  sadTab_->PerformAction(chrome::SadTab::Action::BUTTON);
+  sadTab_->PerformAction(SadTab::Action::BUTTON);
 }
 
 // Called when someone clicks on the embedded link.
 - (BOOL)textView:(NSTextView*)textView
     clickedOnLink:(id)link
           atIndex:(NSUInteger)charIndex {
-  sadTab_->PerformAction(chrome::SadTab::Action::HELP_LINK);
+  sadTab_->PerformAction(SadTab::Action::HELP_LINK);
   return YES;
 }
 

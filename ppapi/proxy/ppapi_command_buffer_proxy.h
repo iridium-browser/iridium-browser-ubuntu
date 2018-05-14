@@ -55,30 +55,29 @@ class PPAPI_PROXY_EXPORT PpapiCommandBufferProxy : public gpu::CommandBuffer,
 
   // gpu::GpuControl implementation:
   void SetGpuControlClient(gpu::GpuControlClient*) override;
-  gpu::Capabilities GetCapabilities() override;
+  const gpu::Capabilities& GetCapabilities() const override;
   int32_t CreateImage(ClientBuffer buffer,
                       size_t width,
                       size_t height,
                       unsigned internalformat) override;
   void DestroyImage(int32_t id) override;
-  void SignalQuery(uint32_t query, const base::Closure& callback) override;
+  void SignalQuery(uint32_t query, base::OnceClosure callback) override;
+  void CreateGpuFence(uint32_t gpu_fence_id, ClientGpuFence source) override;
+  void GetGpuFence(uint32_t gpu_fence_id,
+                   base::OnceCallback<void(std::unique_ptr<gfx::GpuFence>)>
+                       callback) override;
   void SetLock(base::Lock*) override;
   void EnsureWorkVisible() override;
   gpu::CommandBufferNamespace GetNamespaceID() const override;
   gpu::CommandBufferId GetCommandBufferID() const override;
-  int32_t GetStreamId() const override;
-  void FlushOrderingBarrierOnStream(int32_t stream_id) override;
+  void FlushPendingWork() override;
   uint64_t GenerateFenceSyncRelease() override;
-  bool IsFenceSyncRelease(uint64_t release) override;
-  bool IsFenceSyncFlushed(uint64_t release) override;
-  bool IsFenceSyncFlushReceived(uint64_t release) override;
   bool IsFenceSyncReleased(uint64_t release) override;
   void SignalSyncToken(const gpu::SyncToken& sync_token,
-                       const base::Closure& callback) override;
+                       base::OnceClosure callback) override;
   void WaitSyncTokenHint(const gpu::SyncToken& sync_token) override;
   bool CanWaitUnverifiedSyncToken(const gpu::SyncToken& sync_token) override;
-  void AddLatencyInfo(
-      const std::vector<ui::LatencyInfo>& latency_info) override;
+  void SetSnapshotRequested() override;
 
  private:
   bool Send(IPC::Message* msg);

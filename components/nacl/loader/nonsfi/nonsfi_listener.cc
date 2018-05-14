@@ -4,12 +4,12 @@
 
 #include "components/nacl/loader/nonsfi/nonsfi_listener.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
 #include "base/file_descriptor_posix.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
@@ -53,12 +53,12 @@ void NonSfiListener::Listen() {
   mojo::ScopedMessagePipeHandle channel_handle;
   std::unique_ptr<service_manager::ServiceContext> service_context =
       CreateNaClServiceContext(io_thread_.task_runner(), &channel_handle);
-  channel_ = IPC::SyncChannel::Create(channel_handle.release(),
-                                      IPC::Channel::MODE_CLIENT,
-                                      this,  // As a Listener.
-                                      io_thread_.task_runner(),
-                                      true,  // Create pipe now.
-                                      &shutdown_event_);
+  channel_ = IPC::SyncChannel::Create(
+      channel_handle.release(), IPC::Channel::MODE_CLIENT,
+      this,  // As a Listener.
+      io_thread_.task_runner(), base::ThreadTaskRunnerHandle::Get(),
+      true,  // Create pipe now.
+      &shutdown_event_);
   base::RunLoop().Run();
 }
 
@@ -108,7 +108,7 @@ void NonSfiListener::OnStart(const nacl::NaClStartParams& params) {
       params.manifest_service_channel_handle);
   ppapi::StartUpPlugin();
 
-  trusted_listener_ = base::MakeUnique<NaClTrustedListener>(
+  trusted_listener_ = std::make_unique<NaClTrustedListener>(
       mojo::MakeProxy(nacl::mojom::NaClRendererHostPtrInfo(
           mojo::ScopedMessagePipeHandle(
               params.trusted_service_channel_handle.mojo_handle),

@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
@@ -16,9 +17,11 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/search_engines/template_url_service.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/strings/grit/ui_strings.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
@@ -29,7 +32,7 @@ KeywordHintView::KeywordHintView(views::ButtonListener* listener,
                                  const gfx::FontList& bubble_font_list,
                                  SkColor text_color,
                                  SkColor background_color)
-    : CustomButton(listener),
+    : Button(listener),
       profile_(profile),
       leading_label_(nullptr),
       chip_container_(new views::View()),
@@ -51,14 +54,21 @@ KeywordHintView::KeywordHintView(views::ButtonListener* listener,
 
   chip_container_->SetBorder(views::CreateEmptyBorder(
       gfx::Insets(GetLayoutConstant(LOCATION_BAR_BUBBLE_VERTICAL_PADDING), 0)));
-  chip_container_->SetBackground(base::MakeUnique<BackgroundWith1PxBorder>(
+  chip_container_->SetBackground(std::make_unique<BackgroundWith1PxBorder>(
       tab_bg_color, tab_border_color));
   chip_container_->AddChildView(chip_label_);
-  chip_container_->SetLayoutManager(new views::FillLayout());
+  chip_container_->SetLayoutManager(std::make_unique<views::FillLayout>());
   AddChildView(chip_container_);
 
   trailing_label_ =
       CreateLabel(font_list, text_color, background_color);
+
+  SetFocusBehavior(FocusBehavior::NEVER);
+
+  // Use leaf alert role so that name is spoken by screen reader, but redundant
+  // child label text is not also spoken.
+  GetViewAccessibility().OverrideRole(ax::mojom::Role::kAlert);
+  GetViewAccessibility().OverrideIsLeaf();
 }
 
 KeywordHintView::~KeywordHintView() {}
@@ -88,7 +98,10 @@ void KeywordHintView::SetKeyword(const base::string16& keyword) {
     int message_id = is_extension_keyword
                          ? IDS_OMNIBOX_EXTENSION_KEYWORD_HINT_TOUCH
                          : IDS_OMNIBOX_KEYWORD_HINT_TOUCH;
-    chip_label_->SetText(l10n_util::GetStringFUTF16(message_id, short_name));
+    base::string16 visible_text =
+        l10n_util::GetStringFUTF16(message_id, short_name);
+    chip_label_->SetText(visible_text);
+    SetAccessibleName(visible_text);
 
     leading_label_->SetText(base::string16());
     trailing_label_->SetText(base::string16());
@@ -105,7 +118,15 @@ void KeywordHintView::SetKeyword(const base::string16& keyword) {
         keyword_hint.substr(0, content_param_offsets.front()));
     trailing_label_->SetText(
         keyword_hint.substr(content_param_offsets.front()));
+
+    const base::string16 tab_key_name =
+        l10n_util::GetStringUTF16(IDS_OMNIBOX_KEYWORD_HINT_KEY_ACCNAME);
+    SetAccessibleName(leading_label_->text() + tab_key_name +
+                      trailing_label_->text());
   }
+
+  // Fire an accessibility alert event, causing the hint to be spoken.
+  NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
 }
 
 gfx::Size KeywordHintView::CalculatePreferredSize() const {
@@ -113,7 +134,7 @@ gfx::Size KeywordHintView::CalculatePreferredSize() const {
   return gfx::Size(leading_label_->GetPreferredSize().width() +
                        chip_container_->GetPreferredSize().width() +
                        trailing_label_->GetPreferredSize().width() +
-                       LocationBarView::kIconInteriorPadding,
+                       GetLayoutConstant(LOCATION_BAR_ICON_INTERIOR_PADDING),
                    0);
 }
 

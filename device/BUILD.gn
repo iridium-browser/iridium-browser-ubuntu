@@ -64,9 +64,21 @@ test("device_unittests") {
     "bluetooth/test/test_bluetooth_local_gatt_service_delegate.cc",
     "bluetooth/test/test_bluetooth_local_gatt_service_delegate.h",
     "bluetooth/uribeacon/uri_encoder_unittest.cc",
+    "fido/ctap_request_unittest.cc",
+    "fido/ctap_response_unittest.cc",
+    "fido/fido_hid_message_unittest.cc",
+    "fido/u2f_apdu_unittest.cc",
+    "fido/u2f_ble_connection_unittest.cc",
+    "fido/u2f_ble_device_unittest.cc",
+    "fido/u2f_ble_frames_unittest.cc",
+    "fido/u2f_discovery_unittest.cc",
+    "fido/u2f_register_unittest.cc",
+    "fido/u2f_request_unittest.cc",
+    "fido/u2f_sign_unittest.cc",
+    "gamepad/abstract_haptic_gamepad_unittest.cc",
     "gamepad/gamepad_provider_unittest.cc",
     "gamepad/gamepad_service_unittest.cc",
-    "gamepad/public/interfaces/gamepad_struct_traits_unittest.cc",
+    "gamepad/public/mojom/gamepad_mojom_traits_unittest.cc",
     "sensors/data_fetcher_shared_memory_base_unittest.cc",
     "sensors/sensor_manager_android_unittest.cc",
     "sensors/sensor_manager_chromeos_unittest.cc",
@@ -76,20 +88,23 @@ test("device_unittests") {
   deps = [
     "//base/test:test_support",
     "//base/third_party/dynamic_annotations:dynamic_annotations",
+    "//components/cbor",
     "//device/base/synchronization",
     "//device/bluetooth",
+    "//device/bluetooth:deprecated_experimental_mojo",
     "//device/bluetooth:mocks",
-    "//device/bluetooth:mojo",
     "//device/bluetooth/uribeacon",
+    "//device/fido",
+    "//device/fido:mocks",
     "//device/gamepad",
     "//device/gamepad:test_helpers",
     "//device/gamepad/public/cpp:shared_with_blink",
-    "//device/gamepad/public/interfaces",
-    "//device/gamepad/public/interfaces:gamepad_struct_traits_test",
+    "//device/gamepad/public/mojom",
+    "//device/gamepad/public/mojom:gamepad_mojom_traits_test",
     "//device/geolocation:unittests",
     "//device/sensors",
     "//device/sensors/public/cpp:full",
-    "//device/sensors/public/interfaces",
+    "//device/sensors/public/mojom",
     "//mojo/common",
     "//mojo/edk/system",
     "//mojo/public/cpp/bindings",
@@ -101,34 +116,27 @@ test("device_unittests") {
     "//url",
   ]
 
-  # HID and Serial:
+  # U2F and Serial:
   # Android doesn't compile.
   # Linux, requires udev.
   if (!is_linux_without_udev && !is_android) {
     sources += [
-      "hid/hid_connection_unittest.cc",
-      "hid/hid_device_filter_unittest.cc",
-      "hid/hid_report_descriptor_unittest.cc",
-      "hid/hid_service_unittest.cc",
-      "hid/input_service_linux_unittest.cc",
-      "hid/test_report_descriptors.cc",
-      "hid/test_report_descriptors.h",
-      "serial/serial_io_handler_posix_unittest.cc",
-      "u2f/u2f_apdu_unittest.cc",
-      "u2f/u2f_hid_device_unittest.cc",
-      "u2f/u2f_message_unittest.cc",
-      "u2f/u2f_register_unittest.cc",
-      "u2f/u2f_request_unittest.cc",
-      "u2f/u2f_sign_unittest.cc",
+      "fido/u2f_hid_device_unittest.cc",
+      "fido/u2f_hid_discovery_unittest.cc",
     ]
     deps += [
-      "//device/hid",
-      "//device/hid:mocks",
-      "//device/serial",
-      "//device/serial:test_support",
-      "//device/u2f",
-      "//device/u2f:mocks",
+      "//device/fido:test_support",
+      "//services/device/public/cpp/hid",
+      "//services/device/public/mojom",
+      "//services/service_manager/public/cpp",
+      "//services/service_manager/public/mojom",
     ]
+
+    # Serial is supported in below platforms. See //device/servial/BUILD.gn
+    if (is_win || is_linux || is_mac) {
+      sources += [ "serial/serial_io_handler_posix_unittest.cc" ]
+      deps += [ "//device/serial" ]
+    }
   }
 
   if (use_udev) {
@@ -141,8 +149,6 @@ test("device_unittests") {
     sources += [
       "test/test_device_client.cc",
       "test/test_device_client.h",
-      "test/usb_test_gadget.h",
-      "test/usb_test_gadget_impl.cc",
       "usb/mojo/device_impl_unittest.cc",
       "usb/mojo/device_manager_impl_unittest.cc",
       "usb/mojo/mock_permission_provider.cc",
@@ -150,20 +156,24 @@ test("device_unittests") {
       "usb/public/cpp/filter_utils_unittest.cc",
       "usb/usb_descriptors_unittest.cc",
       "usb/usb_device_handle_unittest.cc",
-      "usb/usb_ids_unittest.cc",
       "usb/usb_service_unittest.cc",
       "usb/webusb_descriptors_unittest.cc",
     ]
     deps += [
+      ":usb_test_gadget",
       "//device/base",
       "//device/base:mocks",
       "//device/usb",
       "//device/usb:test_support",
       "//device/usb/mojo",
       "//device/usb/public/cpp",
-      "//device/usb/public/interfaces",
+      "//device/usb/public/mojom",
       "//net:test_support",
     ]
+
+    if (!is_android) {
+      sources += [ "usb/usb_ids_unittest.cc" ]
+    }
   }
 
   # UsbContext is a libusb-specific object.
@@ -210,6 +220,11 @@ test("device_unittests") {
     deps += [ "//dbus" ]
   }
 
+  # BLE discovery: works on Linux.
+  if (is_linux) {
+    sources += [ "fido/u2f_ble_discovery_unittest.cc" ]
+  }
+
   if (is_mac) {
     deps += [ "//third_party/ocmock" ]
     ldflags = [ "-ObjC" ]
@@ -239,23 +254,44 @@ test("device_unittests") {
     ]
   }
 
-  if (enable_vr) {
+  if (enable_vr && is_android) {
     sources += [
-      "vr/vr_device_manager_unittest.cc",
+      "vr/orientation/orientation_device_provider_unittest.cc",
+      "vr/orientation/orientation_device_unittest.cc",
+      "vr/vr_device_base_unittest.cc",
       "vr/vr_display_impl_unittest.cc",
-      "vr/vr_service_impl_unittest.cc",
     ]
 
     deps += [
       "//device/vr",
       "//device/vr:fakes",
-      "//device/vr:mojo_bindings",
+      "//device/vr:java",
+      "//device/vr/public/mojom",
+      "//services/device/public/cpp/generic_sensor",
+      "//ui/display",
     ]
   }
 }
 
+source_set("usb_test_gadget") {
+  testonly = true
+
+  sources = [
+    "test/usb_test_gadget.h",
+    "test/usb_test_gadget_impl.cc",
+  ]
+
+  deps = [
+    "//device/base",
+    "//device/usb",
+    "//net:test_support",
+  ]
+}
+
 if (is_android) {
-  bluetooth_java_sources_needing_jni = [ "bluetooth/test/android/java/src/org/chromium/device/bluetooth/Fakes.java" ]
+  bluetooth_java_sources_needing_jni = [
+    "bluetooth/test/android/java/src/org/chromium/device/bluetooth/Fakes.java",
+  ]
 
   generate_jni("bluetooth_test_jni_headers") {
     sources = bluetooth_java_sources_needing_jni
@@ -263,6 +299,7 @@ if (is_android) {
   }
 
   android_library("bluetooth_test_java") {
+    testonly = true
     java_files = bluetooth_java_sources_needing_jni
     deps = [
       "//base:base_java",
@@ -270,6 +307,8 @@ if (is_android) {
       "//device/bluetooth:java",
       "//third_party/android_tools:android_support_annotations_java",
     ]
+
+    deps += android_extra_test_deps
 
     srcjar_deps = [ ":bluetooth_test_javagen" ]
   }
@@ -285,6 +324,7 @@ if (is_android) {
       "$google_play_services_package:google_play_services_location_java",
       "//base:base_java",
       "//base:base_java_test_support",
+      "//base:base_junit_test_support",
       "//device/gamepad:java",
       "//device/geolocation:geolocation_java",
       "//device/geolocation:geolocation_java_test_support",

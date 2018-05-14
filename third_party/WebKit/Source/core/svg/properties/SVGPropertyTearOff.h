@@ -34,6 +34,7 @@
 #include "core/dom/QualifiedName.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/properties/SVGProperty.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -42,10 +43,9 @@ class ExceptionState;
 
 enum PropertyIsAnimValType { kPropertyIsNotAnimVal, kPropertyIsAnimVal };
 
-class SVGPropertyTearOffBase
-    : public GarbageCollectedFinalized<SVGPropertyTearOffBase> {
+class SVGPropertyTearOffBase : public ScriptWrappable {
  public:
-  virtual ~SVGPropertyTearOffBase() {}
+  virtual ~SVGPropertyTearOffBase() = default;
 
   PropertyIsAnimValType PropertyIsAnimVal() const {
     return property_is_anim_val_;
@@ -68,14 +68,13 @@ class SVGPropertyTearOffBase
     context_element_ = context_element;
     // Requires SVGPropertyTearOffBase to be the left-most class in the
     // inheritance hierarchy.
-    ScriptWrappableVisitor::WriteBarrier(this, context_element_.Get());
+    ScriptWrappableMarkingVisitor::WriteBarrier(context_element_.Get());
     attribute_name_ = attribute_name;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
-
-  DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
+  void TraceWrappers(const ScriptWrappableVisitor* visitor) const override {
     visitor->TraceWrappersWithManualWriteBarrier(context_element_.Get());
+    ScriptWrappable::TraceWrappers(visitor);
   }
 
   static void ThrowReadOnly(ExceptionState&);
@@ -110,12 +109,12 @@ class SVGPropertyTearOff : public SVGPropertyTearOffBase {
 
   void SetTarget(Property* target) { target_ = target; }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(target_);
     SVGPropertyTearOffBase::Trace(visitor);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
+  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
     SVGPropertyTearOffBase::TraceWrappers(visitor);
   }
 

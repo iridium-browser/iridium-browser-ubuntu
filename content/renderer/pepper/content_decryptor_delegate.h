@@ -9,12 +9,12 @@
 #include <stdint.h>
 
 #include <map>
-#include <queue>
 #include <string>
 #include <vector>
 
 #include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -68,6 +68,8 @@ class ContentDecryptorDelegate {
   // Provides access to PPP_ContentDecryptor_Private.
   void SetServerCertificate(const std::vector<uint8_t>& certificate,
                             std::unique_ptr<media::SimpleCdmPromise> promise);
+  void GetStatusForPolicy(media::HdcpVersion min_hdcp_version,
+                          std::unique_ptr<media::KeyStatusCdmPromise> promise);
   void CreateSessionAndGenerateRequest(
       media::CdmSessionType session_type,
       media::EmeInitDataType init_data_type,
@@ -107,6 +109,8 @@ class ContentDecryptorDelegate {
 
   // PPB_ContentDecryptor_Private dispatching methods.
   void OnPromiseResolved(uint32_t promise_id);
+  void OnPromiseResolvedWithKeyStatus(uint32_t promise_id,
+                                      PP_CdmKeyStatus key_status);
   void OnPromiseResolvedWithSession(uint32_t promise_id, PP_Var session_id);
   void OnPromiseRejected(uint32_t promise_id,
                          PP_CdmExceptionCode exception_code,
@@ -233,7 +237,7 @@ class ContentDecryptorDelegate {
   scoped_refptr<PPB_Buffer_Impl> audio_input_resource_;
   scoped_refptr<PPB_Buffer_Impl> video_input_resource_;
 
-  std::queue<uint32_t> free_buffers_;
+  base::queue<uint32_t> free_buffers_;
 
   // Keep track of audio parameters.
   int audio_samples_per_second_;

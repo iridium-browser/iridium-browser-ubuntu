@@ -49,9 +49,8 @@ DecoderStreamTraits<DemuxerStream::AUDIO>::DecoderStreamTraits(
 void DecoderStreamTraits<DemuxerStream::AUDIO>::ReportStatistics(
     const StatisticsCB& statistics_cb,
     int bytes_decoded) {
-  PipelineStatistics statistics;
-  statistics.audio_bytes_decoded = bytes_decoded;
-  statistics_cb.Run(statistics);
+  stats_.audio_bytes_decoded = bytes_decoded;
+  statistics_cb.Run(stats_);
 }
 
 void DecoderStreamTraits<DemuxerStream::AUDIO>::InitializeDecoder(
@@ -62,6 +61,7 @@ void DecoderStreamTraits<DemuxerStream::AUDIO>::InitializeDecoder(
     const InitCB& init_cb,
     const OutputCB& output_cb) {
   DCHECK(config.IsValidConfig());
+  stats_.audio_decoder_name = decoder->GetDisplayName();
   decoder->Initialize(config, cdm_context, init_cb, output_cb);
 }
 
@@ -79,9 +79,17 @@ void DecoderStreamTraits<DemuxerStream::AUDIO>::OnDecode(
   audio_ts_validator_->CheckForTimestampGap(buffer);
 }
 
-void DecoderStreamTraits<DemuxerStream::AUDIO>::OnDecodeDone(
+PostDecodeAction DecoderStreamTraits<DemuxerStream::AUDIO>::OnDecodeDone(
     const scoped_refptr<OutputType>& buffer) {
   audio_ts_validator_->RecordOutputDuration(buffer);
+  return PostDecodeAction::DELIVER;
+}
+
+void DecoderStreamTraits<DemuxerStream::AUDIO>::OnConfigChanged(
+    const DecoderConfigType& config) {
+  // Reset validator with the latest config. Also ensures that we do not attempt
+  // to match timestamps across config boundaries.
+  audio_ts_validator_.reset(new AudioTimestampValidator(config, media_log_));
 }
 
 // Video decoder stream traits implementation.
@@ -118,19 +126,18 @@ DecoderStreamTraits<DemuxerStream::VIDEO>::DecoderStreamTraits(
 void DecoderStreamTraits<DemuxerStream::VIDEO>::ReportStatistics(
     const StatisticsCB& statistics_cb,
     int bytes_decoded) {
-  PipelineStatistics statistics;
-  statistics.video_bytes_decoded = bytes_decoded;
+  stats_.video_bytes_decoded = bytes_decoded;
 
   if (keyframe_distance_average_.count()) {
-    statistics.video_keyframe_distance_average =
+    stats_.video_keyframe_distance_average =
         keyframe_distance_average_.Average();
   } else {
     // Before we have enough keyframes to calculate the average distance, we
     // will assume the average keyframe distance is infinitely large.
-    statistics.video_keyframe_distance_average = base::TimeDelta::Max();
+    stats_.video_keyframe_distance_average = base::TimeDelta::Max();
   }
 
-  statistics_cb.Run(statistics);
+  statistics_cb.Run(stats_);
 }
 
 void DecoderStreamTraits<DemuxerStream::VIDEO>::InitializeDecoder(
@@ -141,6 +148,7 @@ void DecoderStreamTraits<DemuxerStream::VIDEO>::InitializeDecoder(
     const InitCB& init_cb,
     const OutputCB& output_cb) {
   DCHECK(config.IsValidConfig());
+  stats_.video_decoder_name = decoder->GetDisplayName();
   decoder->Initialize(config, low_delay, cdm_context, init_cb, output_cb);
 }
 
@@ -148,6 +156,7 @@ void DecoderStreamTraits<DemuxerStream::VIDEO>::OnStreamReset(
     DemuxerStream* stream) {
   DCHECK(stream);
   last_keyframe_timestamp_ = base::TimeDelta();
+  frames_to_drop_.clear();
 }
 
 void DecoderStreamTraits<DemuxerStream::VIDEO>::OnDecode(
@@ -159,6 +168,9 @@ void DecoderStreamTraits<DemuxerStream::VIDEO>::OnDecode(
     last_keyframe_timestamp_ = base::TimeDelta();
     return;
   }
+
+  if (buffer->discard_padding().first == kInfiniteDuration)
+    frames_to_drop_.insert(buffer->timestamp());
 
   if (!buffer->is_key_frame())
     return;
@@ -174,6 +186,21 @@ void DecoderStreamTraits<DemuxerStream::VIDEO>::OnDecode(
   UMA_HISTOGRAM_MEDIUM_TIMES("Media.Video.KeyFrameDistance", frame_distance);
   last_keyframe_timestamp_ = current_frame_timestamp;
   keyframe_distance_average_.AddSample(frame_distance);
+}
+
+PostDecodeAction DecoderStreamTraits<DemuxerStream::VIDEO>::OnDecodeDone(
+    const scoped_refptr<OutputType>& buffer) {
+  auto it = frames_to_drop_.find(buffer->timestamp());
+  if (it != frames_to_drop_.end()) {
+    // We erase from the beginning onward to our target frame since frames
+    // should be returned in presentation order. It's possible to accumulate
+    // entries in this queue if playback begins at a non-keyframe; those frames
+    // may never be returned from the decoder.
+    frames_to_drop_.erase(frames_to_drop_.begin(), it + 1);
+    return PostDecodeAction::DROP;
+  }
+
+  return PostDecodeAction::DELIVER;
 }
 
 }  // namespace media

@@ -4,15 +4,15 @@
 
 #include "ash/wallpaper/wallpaper_view.h"
 
-#include "ash/login/ui/login_constants.h"
+#include "ash/public/cpp/login_constants.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_port.h"
 #include "ash/wallpaper/wallpaper_controller.h"
-#include "ash/wallpaper/wallpaper_delegate.h"
 #include "ash/wallpaper/wallpaper_widget_controller.h"
 #include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/window_animation_types.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
 #include "ui/display/manager/display_manager.h"
@@ -74,8 +74,7 @@ class LayerControlView : public views::View {
   DISALLOW_COPY_AND_ASSIGN(LayerControlView);
 };
 
-// Returns the color used to darken the wallpaper, needed by login, lock, OOBE
-// and add user screens.
+// Returns the color used to dim the wallpaper.
 SkColor GetWallpaperDarkenColor() {
   SkColor darken_color =
       Shell::Get()->wallpaper_controller()->GetProminentColor(
@@ -99,8 +98,8 @@ SkColor GetWallpaperDarkenColor() {
 //   - Disabling overview mode on mouse release.
 class PreEventDispatchHandler : public ui::EventHandler {
  public:
-  PreEventDispatchHandler() {}
-  ~PreEventDispatchHandler() override {}
+  PreEventDispatchHandler() = default;
+  ~PreEventDispatchHandler() override = default;
 
  private:
   // ui::EventHandler:
@@ -160,54 +159,68 @@ void WallpaperView::OnPaint(gfx::Canvas* canvas) {
     return;
 
   cc::PaintFlags flags;
-  if (Shell::Get()->session_controller()->IsUserSessionBlocked()) {
+  if (controller->ShouldApplyDimming()) {
     flags.setColorFilter(SkColorFilter::MakeModeFilter(
         GetWallpaperDarkenColor(), SkBlendMode::kDarken));
   }
 
-  if (layout == wallpaper::WALLPAPER_LAYOUT_CENTER_CROPPED) {
-    // The dimension with the smallest ratio must be cropped, the other one
-    // is preserved. Both are set in gfx::Size cropped_size.
-    double horizontal_ratio =
-        static_cast<double>(width()) / static_cast<double>(wallpaper.width());
-    double vertical_ratio =
-        static_cast<double>(height()) / static_cast<double>(wallpaper.height());
+  switch (layout) {
+    case wallpaper::WALLPAPER_LAYOUT_CENTER_CROPPED: {
+      // The dimension with the smallest ratio must be cropped, the other one
+      // is preserved. Both are set in gfx::Size cropped_size.
+      double horizontal_ratio =
+          static_cast<double>(width()) / static_cast<double>(wallpaper.width());
+      double vertical_ratio = static_cast<double>(height()) /
+                              static_cast<double>(wallpaper.height());
 
-    gfx::Size cropped_size;
-    if (vertical_ratio > horizontal_ratio) {
-      cropped_size = gfx::Size(
-          gfx::ToFlooredInt(static_cast<double>(width()) / vertical_ratio),
-          wallpaper.height());
-    } else {
-      cropped_size = gfx::Size(
-          wallpaper.width(),
-          gfx::ToFlooredInt(static_cast<double>(height()) / horizontal_ratio));
+      gfx::Size cropped_size;
+      if (vertical_ratio > horizontal_ratio) {
+        cropped_size = gfx::Size(
+            gfx::ToFlooredInt(static_cast<double>(width()) / vertical_ratio),
+            wallpaper.height());
+      } else {
+        cropped_size = gfx::Size(
+            wallpaper.width(), gfx::ToFlooredInt(static_cast<double>(height()) /
+                                                 horizontal_ratio));
+      }
+
+      gfx::Rect wallpaper_cropped_rect(0, 0, wallpaper.width(),
+                                       wallpaper.height());
+      wallpaper_cropped_rect.ClampToCenteredSize(cropped_size);
+      canvas->DrawImageInt(
+          wallpaper, wallpaper_cropped_rect.x(), wallpaper_cropped_rect.y(),
+          wallpaper_cropped_rect.width(), wallpaper_cropped_rect.height(), 0, 0,
+          width(), height(), true, flags);
+      break;
     }
-
-    gfx::Rect wallpaper_cropped_rect(0, 0, wallpaper.width(),
-                                     wallpaper.height());
-    wallpaper_cropped_rect.ClampToCenteredSize(cropped_size);
-    canvas->DrawImageInt(
-        wallpaper, wallpaper_cropped_rect.x(), wallpaper_cropped_rect.y(),
-        wallpaper_cropped_rect.width(), wallpaper_cropped_rect.height(), 0, 0,
-        width(), height(), true, flags);
-  } else if (layout == wallpaper::WALLPAPER_LAYOUT_TILE) {
-    canvas->TileImageInt(wallpaper, 0, 0, 0, 0, width(), height(), 1.0f,
-                         &flags);
-  } else if (layout == wallpaper::WALLPAPER_LAYOUT_STRETCH) {
-    // This is generally not recommended as it may show artifacts.
-    canvas->DrawImageInt(wallpaper, 0, 0, wallpaper.width(), wallpaper.height(),
-                         0, 0, width(), height(), true, flags);
-  } else {
-    float image_scale = canvas->image_scale();
-    gfx::Rect wallpaper_rect(0, 0, wallpaper.width() / image_scale,
-                             wallpaper.height() / image_scale);
-    // All other are simply centered, and not scaled (but may be clipped).
-    canvas->DrawImageInt(wallpaper, 0, 0, wallpaper.width(), wallpaper.height(),
-                         (width() - wallpaper_rect.width()) / 2,
-                         (height() - wallpaper_rect.height()) / 2,
-                         wallpaper_rect.width(), wallpaper_rect.height(), true,
-                         flags);
+    case wallpaper::WALLPAPER_LAYOUT_TILE: {
+      canvas->TileImageInt(wallpaper, 0, 0, 0, 0, width(), height(), 1.0f,
+                           &flags);
+      break;
+    }
+    case wallpaper::WALLPAPER_LAYOUT_STRETCH: {
+      // This is generally not recommended as it may show artifacts.
+      canvas->DrawImageInt(wallpaper, 0, 0, wallpaper.width(),
+                           wallpaper.height(), 0, 0, width(), height(), true,
+                           flags);
+      break;
+    }
+    case wallpaper::WALLPAPER_LAYOUT_CENTER: {
+      float image_scale = canvas->image_scale();
+      gfx::Rect wallpaper_rect(0, 0, wallpaper.width() / image_scale,
+                               wallpaper.height() / image_scale);
+      // Simply centered and not scaled (but may be clipped).
+      canvas->DrawImageInt(
+          wallpaper, 0, 0, wallpaper.width(), wallpaper.height(),
+          (width() - wallpaper_rect.width()) / 2,
+          (height() - wallpaper_rect.height()) / 2, wallpaper_rect.width(),
+          wallpaper_rect.height(), true, flags);
+      break;
+    }
+    default: {
+      NOTREACHED();
+      break;
+    }
   }
 }
 
@@ -221,9 +234,9 @@ void WallpaperView::ShowContextMenuForView(views::View* source,
   ShellPort::Get()->ShowContextMenu(point, source_type);
 }
 
-views::Widget* CreateWallpaper(aura::Window* root_window, int container_id) {
+views::Widget* CreateWallpaperWidget(aura::Window* root_window,
+                                     int container_id) {
   WallpaperController* controller = Shell::Get()->wallpaper_controller();
-  WallpaperDelegate* wallpaper_delegate = Shell::Get()->wallpaper_delegate();
 
   views::Widget* wallpaper_widget = new views::Widget;
   views::Widget::InitParams params(
@@ -234,7 +247,10 @@ views::Widget* CreateWallpaper(aura::Window* root_window, int container_id) {
   params.parent = root_window->GetChildById(container_id);
   wallpaper_widget->Init(params);
   wallpaper_widget->SetContentsView(new LayerControlView(new WallpaperView()));
-  int animation_type = wallpaper_delegate->GetAnimationType();
+  int animation_type =
+      controller->ShouldShowInitialAnimation()
+          ? wm::WINDOW_VISIBILITY_ANIMATION_TYPE_BRIGHTNESS_GRAYSCALE
+          : ::wm::WINDOW_VISIBILITY_ANIMATION_TYPE_FADE;
   aura::Window* wallpaper_window = wallpaper_widget->GetNativeWindow();
   ::wm::SetWindowVisibilityAnimationType(wallpaper_window, animation_type);
 
@@ -243,17 +259,17 @@ views::Widget* CreateWallpaper(aura::Window* root_window, int container_id) {
   // 2. Wallpaper fades in from a non empty background.
   // 3. From an empty background, chrome transit to a logged in user session.
   // 4. From an empty background, guest user logged in.
-  if (wallpaper_delegate->ShouldShowInitialAnimation() ||
+  if (controller->ShouldShowInitialAnimation() ||
       RootWindowController::ForWindow(root_window)
-          ->animating_wallpaper_widget_controller() ||
+          ->wallpaper_widget_controller()
+          ->IsAnimating() ||
       Shell::Get()->session_controller()->NumberOfLoggedInUsers()) {
     ::wm::SetWindowVisibilityAnimationTransition(wallpaper_window,
                                                  ::wm::ANIMATE_SHOW);
-    int duration_override = wallpaper_delegate->GetAnimationDurationOverride();
-    if (duration_override) {
-      ::wm::SetWindowVisibilityAnimationDuration(
-          wallpaper_window,
-          base::TimeDelta::FromMilliseconds(duration_override));
+    base::TimeDelta animation_duration = controller->animation_duration();
+    if (!animation_duration.is_zero()) {
+      ::wm::SetWindowVisibilityAnimationDuration(wallpaper_window,
+                                                 animation_duration);
     }
   } else {
     // Disable animation if transition to login screen from an empty background.

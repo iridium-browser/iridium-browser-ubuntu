@@ -50,8 +50,8 @@ class URLFetcher;
 //     void MyTextCheck(BrowserContext* context, const base::string16& text) {
 //        client_.reset(new SpellingServiceClient);
 //        client_->RequestTextCheck(context, 0, text,
-//            base::Bind(&MyClient::OnTextCheckComplete,
-//                       base::Unretained(this));
+//            base::BindOnce(&MyClient::OnTextCheckComplete,
+//                           base::Unretained(this));
 //     }
 //    private:
 //     std::unique_ptr<SpellingServiceClient> client_;
@@ -69,11 +69,11 @@ class SpellingServiceClient : public net::URLFetcherDelegate {
     SUGGEST = 1,
     SPELLCHECK = 2,
   };
-  typedef base::Callback<void(
+  typedef base::OnceCallback<void(
       bool /* success */,
       const base::string16& /* text */,
       const std::vector<SpellCheckResult>& /* results */)>
-          TextCheckCompleteCallback;
+      TextCheckCompleteCallback;
 
   SpellingServiceClient();
   ~SpellingServiceClient() override;
@@ -85,7 +85,7 @@ class SpellingServiceClient : public net::URLFetcherDelegate {
   bool RequestTextCheck(content::BrowserContext* context,
                         ServiceType type,
                         const base::string16& text,
-                        const TextCheckCompleteCallback& callback);
+                        TextCheckCompleteCallback callback);
 
   // Returns whether the specified service is available for the given context.
   static bool IsAvailable(content::BrowserContext* context, ServiceType type);
@@ -97,6 +97,7 @@ class SpellingServiceClient : public net::URLFetcherDelegate {
 
  private:
   struct TextCheckCallbackData {
+   public:
     TextCheckCallbackData(std::unique_ptr<net::URLFetcher> fetcher,
                           TextCheckCompleteCallback callback,
                           base::string16 text);
@@ -111,6 +112,9 @@ class SpellingServiceClient : public net::URLFetcherDelegate {
 
     // The text checked by the Spelling service.
     base::string16 text;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(TextCheckCallbackData);
   };
 
   // net::URLFetcherDelegate implementation.

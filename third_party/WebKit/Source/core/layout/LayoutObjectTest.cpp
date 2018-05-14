@@ -4,19 +4,45 @@
 
 #include "core/layout/LayoutObject.h"
 
+#include "bindings/core/v8/V8BindingForTesting.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/layout/LayoutTestHelper.h"
+#include "core/layout/LayoutTextFragment.h"
 #include "core/layout/LayoutView.h"
+#include "core/svg/SVGGElement.h"
 #include "platform/json/JSONValues.h"
 #include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
+using ::testing::Return;
+
 class LayoutObjectTest : public RenderingTest {
  public:
   LayoutObjectTest() : RenderingTest(EmptyLocalFrameClient::Create()) {}
+
+ protected:
+  template <bool should_have_wrapper>
+  void ExpectAnonymousInlineWrapperFor(Node*);
 };
+
+template <bool should_have_wrapper>
+void LayoutObjectTest::ExpectAnonymousInlineWrapperFor(Node* node) {
+  ASSERT_TRUE(node);
+  EXPECT_TRUE(node->IsTextNode());
+  LayoutObject* text_layout = node->GetLayoutObject();
+  ASSERT_TRUE(text_layout);
+  LayoutObject* text_parent = text_layout->Parent();
+  ASSERT_TRUE(text_parent);
+  if (should_have_wrapper) {
+    EXPECT_TRUE(text_parent->IsAnonymous());
+    EXPECT_TRUE(text_parent->IsInline());
+  } else {
+    EXPECT_FALSE(text_parent->IsAnonymous());
+  }
+}
 
 TEST_F(LayoutObjectTest, LayoutDecoratedNameCalledWithPositionedObject) {
   SetBodyInnerHTML("<div id='div' style='position: fixed'>test</div>");
@@ -86,41 +112,126 @@ TEST_F(LayoutObjectTest,
 TEST_F(
     LayoutObjectTest,
     ContainingBlockAbsoluteLayoutObjectShouldBeNonStaticallyPositionedBlockAncestor) {
-  SetBodyInnerHTML(
-      "<div style='position:relative'><bar "
-      "style='position:absolute'></bar></div>");
+  SetBodyInnerHTML(R"HTML(
+    <div style='position:relative; left:20px'>
+      <bar style='position:absolute; left:2px; top:10px'></bar>
+    </div>
+  )HTML");
   LayoutObject* containing_blocklayout_object =
       GetDocument().body()->GetLayoutObject()->SlowFirstChild();
   LayoutObject* layout_object = containing_blocklayout_object->SlowFirstChild();
+  EXPECT_TRUE(
+      containing_blocklayout_object->CanContainOutOfFlowPositionedElement(
+          EPosition::kAbsolute));
+  EXPECT_FALSE(
+      containing_blocklayout_object->CanContainOutOfFlowPositionedElement(
+          EPosition::kFixed));
+  EXPECT_EQ(layout_object->Container(), containing_blocklayout_object);
   EXPECT_EQ(layout_object->ContainingBlock(), containing_blocklayout_object);
+  EXPECT_EQ(layout_object->ContainingBlockForAbsolutePosition(),
+            containing_blocklayout_object);
+  EXPECT_EQ(layout_object->ContainingBlockForFixedPosition(), GetLayoutView());
+  auto offset =
+      layout_object->OffsetFromContainer(containing_blocklayout_object);
+  EXPECT_EQ(offset.Width().ToInt(), 2);
+  EXPECT_EQ(offset.Height().ToInt(), 10);
+}
+
+TEST_F(LayoutObjectTest, ContainingBlockFixedLayoutObjectInTransformedDiv) {
+  SetBodyInnerHTML(R"HTML(
+    <div style='transform:translateX(0px)'>
+      <bar style='position:fixed'></bar>
+    </div>
+  )HTML");
+  LayoutObject* containing_blocklayout_object =
+      GetDocument().body()->GetLayoutObject()->SlowFirstChild();
+  LayoutObject* layout_object = containing_blocklayout_object->SlowFirstChild();
+  EXPECT_TRUE(
+      containing_blocklayout_object->CanContainOutOfFlowPositionedElement(
+          EPosition::kAbsolute));
+  EXPECT_TRUE(
+      containing_blocklayout_object->CanContainOutOfFlowPositionedElement(
+          EPosition::kFixed));
+  EXPECT_EQ(layout_object->Container(), containing_blocklayout_object);
+  EXPECT_EQ(layout_object->ContainingBlock(), containing_blocklayout_object);
+  EXPECT_EQ(layout_object->ContainingBlockForAbsolutePosition(),
+            containing_blocklayout_object);
+  EXPECT_EQ(layout_object->ContainingBlockForFixedPosition(),
+            containing_blocklayout_object);
+}
+
+TEST_F(LayoutObjectTest, ContainingBlockFixedLayoutObjectInBody) {
+  SetBodyInnerHTML("<div style='position:fixed'></div>");
+  LayoutObject* layout_object =
+      GetDocument().body()->GetLayoutObject()->SlowFirstChild();
+  EXPECT_TRUE(layout_object->CanContainOutOfFlowPositionedElement(
+      EPosition::kAbsolute));
+  EXPECT_FALSE(
+      layout_object->CanContainOutOfFlowPositionedElement(EPosition::kFixed));
+  EXPECT_EQ(layout_object->Container(), GetLayoutView());
+  EXPECT_EQ(layout_object->ContainingBlock(), GetLayoutView());
+  EXPECT_EQ(layout_object->ContainingBlockForAbsolutePosition(),
+            GetLayoutView());
+  EXPECT_EQ(layout_object->ContainingBlockForFixedPosition(), GetLayoutView());
+}
+
+TEST_F(LayoutObjectTest, ContainingBlockAbsoluteLayoutObjectInBody) {
+  SetBodyInnerHTML("<div style='position:absolute'></div>");
+  LayoutObject* layout_object =
+      GetDocument().body()->GetLayoutObject()->SlowFirstChild();
+  EXPECT_TRUE(layout_object->CanContainOutOfFlowPositionedElement(
+      EPosition::kAbsolute));
+  EXPECT_FALSE(
+      layout_object->CanContainOutOfFlowPositionedElement(EPosition::kFixed));
+  EXPECT_EQ(layout_object->Container(), GetLayoutView());
+  EXPECT_EQ(layout_object->ContainingBlock(), GetLayoutView());
+  EXPECT_EQ(layout_object->ContainingBlockForAbsolutePosition(),
+            GetLayoutView());
+  EXPECT_EQ(layout_object->ContainingBlockForFixedPosition(), GetLayoutView());
 }
 
 TEST_F(
     LayoutObjectTest,
     ContainingBlockAbsoluteLayoutObjectShouldNotBeNonStaticallyPositionedInlineAncestor) {
+  // Test note: We can't use a raw string literal here, since extra whitespace
+  // causes failures.
   SetBodyInnerHTML(
-      "<span style='position:relative'><bar "
-      "style='position:absolute'></bar></span>");
+      "<span style='position:relative; top:1px; left:2px'><bar "
+      "style='position:absolute; top:10px; left:20px;'></bar></span>");
   LayoutObject* body_layout_object = GetDocument().body()->GetLayoutObject();
-  LayoutObject* layout_object =
-      body_layout_object->SlowFirstChild()->SlowFirstChild();
+  LayoutObject* span_layout_object = body_layout_object->SlowFirstChild();
+  LayoutObject* layout_object = span_layout_object->SlowFirstChild();
+
+  EXPECT_TRUE(span_layout_object->CanContainOutOfFlowPositionedElement(
+      EPosition::kAbsolute));
+  EXPECT_FALSE(span_layout_object->CanContainOutOfFlowPositionedElement(
+      EPosition::kFixed));
+
+  auto offset = layout_object->OffsetFromContainer(span_layout_object);
+  EXPECT_EQ(offset.Width().ToInt(), 20);
+  EXPECT_EQ(offset.Height().ToInt(), 10);
 
   // Sanity check: Make sure we don't generate anonymous objects.
   EXPECT_EQ(nullptr, body_layout_object->SlowFirstChild()->NextSibling());
   EXPECT_EQ(nullptr, layout_object->SlowFirstChild());
   EXPECT_EQ(nullptr, layout_object->NextSibling());
 
+  EXPECT_EQ(layout_object->Container(), span_layout_object);
   EXPECT_EQ(layout_object->ContainingBlock(), body_layout_object);
+  EXPECT_EQ(layout_object->ContainingBlockForAbsolutePosition(),
+            body_layout_object);
+  EXPECT_EQ(layout_object->ContainingBlockForFixedPosition(), GetLayoutView());
 }
 
 TEST_F(LayoutObjectTest, PaintingLayerOfOverflowClipLayerUnderColumnSpanAll) {
-  SetBodyInnerHTML(
-      "<div id='columns' style='columns: 3'>"
-      "  <div style='column-span: all'>"
-      "    <div id='overflow-clip-layer' style='height: 100px; overflow: "
-      "hidden'></div>"
-      "  </div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <div id='columns' style='columns: 3'>
+      <div style='column-span: all'>
+        <div id='overflow-clip-layer' style='height: 100px; overflow:
+    hidden'></div>
+      </div>
+    </div>
+  )HTML");
 
   LayoutObject* overflow_clip_object =
       GetLayoutObjectByElementId("overflow-clip-layer");
@@ -129,12 +240,13 @@ TEST_F(LayoutObjectTest, PaintingLayerOfOverflowClipLayerUnderColumnSpanAll) {
 }
 
 TEST_F(LayoutObjectTest, FloatUnderBlock) {
-  SetBodyInnerHTML(
-      "<div id='layered-div' style='position: absolute'>"
-      "  <div id='container'>"
-      "    <div id='floating' style='float: left'>FLOAT</div>"
-      "  </div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <div id='layered-div' style='position: absolute'>
+      <div id='container'>
+        <div id='floating' style='float: left'>FLOAT</div>
+      </div>
+    </div>
+  )HTML");
 
   LayoutBoxModelObject* layered_div =
       ToLayoutBoxModelObject(GetLayoutObjectByElementId("layered-div"));
@@ -149,14 +261,15 @@ TEST_F(LayoutObjectTest, FloatUnderBlock) {
 }
 
 TEST_F(LayoutObjectTest, FloatUnderInline) {
-  SetBodyInnerHTML(
-      "<div id='layered-div' style='position: absolute'>"
-      "  <div id='container'>"
-      "    <span id='layered-span' style='position: relative'>"
-      "      <div id='floating' style='float: left'>FLOAT</div>"
-      "    </span>"
-      "  </div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <div id='layered-div' style='position: absolute'>
+      <div id='container'>
+        <span id='layered-span' style='position: relative'>
+          <div id='floating' style='float: left'>FLOAT</div>
+        </span>
+      </div>
+    </div>
+  )HTML");
 
   LayoutBoxModelObject* layered_div =
       ToLayoutBoxModelObject(GetLayoutObjectByElementId("layered-div"));
@@ -286,6 +399,329 @@ TEST_F(LayoutObjectTest, NeedsPaintOffsetAndVisualRectUpdate) {
   parent->ClearPaintInvalidationFlags();
   EXPECT_FALSE(parent->MayNeedPaintInvalidation());
   EXPECT_FALSE(parent->NeedsPaintOffsetAndVisualRectUpdate());
+}
+
+TEST_F(LayoutObjectTest, AssociatedLayoutObjectOfFirstLetterPunctuations) {
+  const char* body_content =
+      "<style>p:first-letter {color:red;}</style><p id=sample>(a)bc</p>";
+  SetBodyInnerHTML(body_content);
+
+  Node* sample = GetDocument().getElementById("sample");
+  Node* text = sample->firstChild();
+
+  const LayoutTextFragment* layout_object0 =
+      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 0));
+  EXPECT_FALSE(layout_object0->IsRemainingTextLayoutObject());
+
+  const LayoutTextFragment* layout_object1 =
+      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 1));
+  EXPECT_EQ(layout_object0, layout_object1)
+      << "A character 'a' should be part of first letter.";
+
+  const LayoutTextFragment* layout_object2 =
+      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 2));
+  EXPECT_EQ(layout_object0, layout_object2)
+      << "close parenthesis should be part of first letter.";
+
+  const LayoutTextFragment* layout_object3 =
+      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 3));
+  EXPECT_TRUE(layout_object3->IsRemainingTextLayoutObject());
+}
+
+TEST_F(LayoutObjectTest, AssociatedLayoutObjectOfFirstLetterSplit) {
+  V8TestingScope scope;
+
+  const char* body_content =
+      "<style>p:first-letter {color:red;}</style><p id=sample>abc</p>";
+  SetBodyInnerHTML(body_content);
+
+  Node* sample = GetDocument().getElementById("sample");
+  Node* first_letter = sample->firstChild();
+  // Split "abc" into "a" "bc"
+  ToText(first_letter)->splitText(1, ASSERT_NO_EXCEPTION);
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  const LayoutTextFragment* layout_object0 =
+      ToLayoutTextFragment(AssociatedLayoutObjectOf(*first_letter, 0));
+  EXPECT_FALSE(layout_object0->IsRemainingTextLayoutObject());
+
+  const LayoutTextFragment* layout_object1 =
+      ToLayoutTextFragment(AssociatedLayoutObjectOf(*first_letter, 1));
+  EXPECT_EQ(layout_object0, layout_object1);
+}
+
+TEST_F(LayoutObjectTest,
+       AssociatedLayoutObjectOfFirstLetterWithTrailingWhitespace) {
+  const char* body_content = R"HTML(
+    <style>
+      div:first-letter {
+        color:red;
+      }
+    </style>
+    <div id=sample>a
+      <div></div>
+    </div>
+  )HTML";
+  SetBodyInnerHTML(body_content);
+
+  Node* sample = GetDocument().getElementById("sample");
+  Node* text = sample->firstChild();
+
+  const LayoutTextFragment* layout_object0 =
+      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 0));
+  EXPECT_FALSE(layout_object0->IsRemainingTextLayoutObject());
+
+  const LayoutTextFragment* layout_object1 =
+      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 1));
+  EXPECT_TRUE(layout_object1->IsRemainingTextLayoutObject());
+
+  const LayoutTextFragment* layout_object2 =
+      ToLayoutTextFragment(AssociatedLayoutObjectOf(*text, 2));
+  EXPECT_EQ(layout_object1, layout_object2);
+}
+
+TEST_F(LayoutObjectTest, VisualRect) {
+  class MockLayoutObject : public LayoutObject {
+   public:
+    MockLayoutObject() : LayoutObject(nullptr) {}
+    MOCK_CONST_METHOD0(VisualRectRespectsVisibility, bool());
+
+   private:
+    LayoutRect LocalVisualRectIgnoringVisibility() const {
+      return LayoutRect(10, 10, 20, 20);
+    }
+    const char* GetName() const final { return "MockLayoutObject"; }
+    void UpdateLayout() final {}
+    FloatRect LocalBoundingBoxRectForAccessibility() const final {
+      return FloatRect();
+    }
+  };
+
+  MockLayoutObject mock_object;
+  auto style = ComputedStyle::Create();
+  mock_object.SetStyle(style.get());
+  EXPECT_EQ(LayoutRect(10, 10, 20, 20), mock_object.LocalVisualRect());
+  EXPECT_EQ(LayoutRect(10, 10, 20, 20), mock_object.LocalVisualRect());
+
+  style->SetVisibility(EVisibility::kHidden);
+  EXPECT_CALL(mock_object, VisualRectRespectsVisibility())
+      .WillOnce(Return(true));
+  EXPECT_EQ(LayoutRect(), mock_object.LocalVisualRect());
+  EXPECT_CALL(mock_object, VisualRectRespectsVisibility())
+      .WillOnce(Return(false));
+  EXPECT_EQ(LayoutRect(10, 10, 20, 20), mock_object.LocalVisualRect());
+}
+
+TEST_F(LayoutObjectTest, DisplayContentsInlineWrapper) {
+  SetBodyInnerHTML("<div id='div' style='display:contents;color:pink'>A</div>");
+  Element* div = GetDocument().getElementById("div");
+  ASSERT_TRUE(div);
+  Node* text = div->firstChild();
+  ASSERT_TRUE(text);
+  ExpectAnonymousInlineWrapperFor<true>(text);
+}
+
+TEST_F(LayoutObjectTest, DisplayContentsNoInlineWrapper) {
+  SetBodyInnerHTML("<div id='div' style='display:contents'>A</div>");
+  Element* div = GetDocument().getElementById("div");
+  ASSERT_TRUE(div);
+  Node* text = div->firstChild();
+  ASSERT_TRUE(text);
+  ExpectAnonymousInlineWrapperFor<false>(text);
+}
+
+TEST_F(LayoutObjectTest, DisplayContentsAddInlineWrapper) {
+  SetBodyInnerHTML("<div id='div' style='display:contents'>A</div>");
+  Element* div = GetDocument().getElementById("div");
+  ASSERT_TRUE(div);
+  Node* text = div->firstChild();
+  ASSERT_TRUE(text);
+  ExpectAnonymousInlineWrapperFor<false>(text);
+
+  div->SetInlineStyleProperty(CSSPropertyColor, "pink");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  ExpectAnonymousInlineWrapperFor<true>(text);
+}
+
+TEST_F(LayoutObjectTest, DisplayContentsRemoveInlineWrapper) {
+  SetBodyInnerHTML("<div id='div' style='display:contents;color:pink'>A</div>");
+  Element* div = GetDocument().getElementById("div");
+  ASSERT_TRUE(div);
+  Node* text = div->firstChild();
+  ASSERT_TRUE(text);
+  ExpectAnonymousInlineWrapperFor<true>(text);
+
+  div->RemoveInlineStyleProperty(CSSPropertyColor);
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  ExpectAnonymousInlineWrapperFor<false>(text);
+}
+
+TEST_F(LayoutObjectTest, DisplayContentsWrapperPerTextNode) {
+  // This test checks the current implementation; that text node siblings do not
+  // share inline wrappers. Doing so requires code to handle all situations
+  // where text nodes are no longer layout tree siblings by splitting wrappers,
+  // and merge wrappers when text nodes become layout tree siblings.
+  SetBodyInnerHTML(
+      "<div id='div' style='display:contents;color:pink'>A<!-- -->B</div>");
+  Element* div = GetDocument().getElementById("div");
+  ASSERT_TRUE(div);
+  Node* text1 = div->firstChild();
+  ASSERT_TRUE(text1);
+  Node* text2 = div->lastChild();
+  ASSERT_TRUE(text2);
+  EXPECT_NE(text1, text2);
+
+  ExpectAnonymousInlineWrapperFor<true>(text1);
+  ExpectAnonymousInlineWrapperFor<true>(text2);
+
+  EXPECT_NE(text1->GetLayoutObject()->Parent(),
+            text2->GetLayoutObject()->Parent());
+}
+
+TEST_F(LayoutObjectTest, DisplayContentsWrapperInTable) {
+  SetBodyInnerHTML(R"HTML(
+    <div id='table' style='display:table'>
+      <div id='none' style='display:none'></div>
+      <div id='contents' style='display:contents;color:green'>Green</div>
+    </div>
+  )HTML");
+
+  Element* none = GetDocument().getElementById("none");
+  Element* contents = GetDocument().getElementById("contents");
+
+  ExpectAnonymousInlineWrapperFor<true>(contents->firstChild());
+
+  none->SetInlineStyleProperty(CSSPropertyDisplay, "inline");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  ASSERT_TRUE(none->GetLayoutObject());
+  LayoutObject* inline_parent = none->GetLayoutObject()->Parent();
+  ASSERT_TRUE(inline_parent);
+  LayoutObject* wrapper_parent =
+      contents->firstChild()->GetLayoutObject()->Parent()->Parent();
+  ASSERT_TRUE(wrapper_parent);
+  EXPECT_EQ(wrapper_parent, inline_parent);
+  EXPECT_TRUE(inline_parent->IsTableCell());
+  EXPECT_TRUE(inline_parent->IsAnonymous());
+}
+
+TEST_F(LayoutObjectTest, DisplayContentsWrapperInTableSection) {
+  SetBodyInnerHTML(R"HTML(
+    <div id='section' style='display:table-row-group'>
+      <div id='none' style='display:none'></div>
+      <div id='contents' style='display:contents;color:green'>Green</div>
+    </div>
+  )HTML");
+
+  Element* none = GetDocument().getElementById("none");
+  Element* contents = GetDocument().getElementById("contents");
+
+  ExpectAnonymousInlineWrapperFor<true>(contents->firstChild());
+
+  none->SetInlineStyleProperty(CSSPropertyDisplay, "inline");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  ASSERT_TRUE(none->GetLayoutObject());
+  LayoutObject* inline_parent = none->GetLayoutObject()->Parent();
+  ASSERT_TRUE(inline_parent);
+  LayoutObject* wrapper_parent =
+      contents->firstChild()->GetLayoutObject()->Parent()->Parent();
+  ASSERT_TRUE(wrapper_parent);
+  EXPECT_EQ(wrapper_parent, inline_parent);
+  EXPECT_TRUE(inline_parent->IsTableCell());
+  EXPECT_TRUE(inline_parent->IsAnonymous());
+}
+
+TEST_F(LayoutObjectTest, DisplayContentsWrapperInTableRow) {
+  SetBodyInnerHTML(R"HTML(
+    <div id='row' style='display:table-row'>
+      <div id='none' style='display:none'></div>
+      <div id='contents' style='display:contents;color:green'>Green</div>
+    </div>
+  )HTML");
+
+  Element* none = GetDocument().getElementById("none");
+  Element* contents = GetDocument().getElementById("contents");
+
+  ExpectAnonymousInlineWrapperFor<true>(contents->firstChild());
+
+  none->SetInlineStyleProperty(CSSPropertyDisplay, "inline");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  ASSERT_TRUE(none->GetLayoutObject());
+  LayoutObject* inline_parent = none->GetLayoutObject()->Parent();
+  ASSERT_TRUE(inline_parent);
+  LayoutObject* wrapper_parent =
+      contents->firstChild()->GetLayoutObject()->Parent()->Parent();
+  ASSERT_TRUE(wrapper_parent);
+  EXPECT_EQ(wrapper_parent, inline_parent);
+  EXPECT_TRUE(inline_parent->IsTableCell());
+  EXPECT_TRUE(inline_parent->IsAnonymous());
+}
+
+TEST_F(LayoutObjectTest, DisplayContentsWrapperInTableCell) {
+  SetBodyInnerHTML(R"HTML(
+    <div id='cell' style='display:table-cell'>
+      <div id='none' style='display:none'></div>
+      <div id='contents' style='display:contents;color:green'>Green</div>
+    </div>
+  )HTML");
+
+  Element* cell = GetDocument().getElementById("cell");
+  Element* none = GetDocument().getElementById("none");
+  Element* contents = GetDocument().getElementById("contents");
+
+  ExpectAnonymousInlineWrapperFor<true>(contents->firstChild());
+
+  none->SetInlineStyleProperty(CSSPropertyDisplay, "inline");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  ASSERT_TRUE(none->GetLayoutObject());
+  EXPECT_EQ(cell->GetLayoutObject(), none->GetLayoutObject()->Parent());
+}
+
+TEST_F(LayoutObjectTest, DumpLayoutObject) {
+  // Test dumping for debugging, in particular that newlines and non-ASCII
+  // characters are escaped as expected.
+  SetBodyInnerHTML(String::FromUTF8(R"HTML(
+    <div id='block' style='background:
+lime'>
+      testing Среќен роденден
+</div>
+  )HTML"));
+
+  LayoutObject* block = GetLayoutObjectByElementId("block");
+  ASSERT_TRUE(block);
+  LayoutObject* text = block->SlowFirstChild();
+  ASSERT_TRUE(text);
+
+  StringBuilder result;
+  block->DumpLayoutObject(result, false, 0);
+  EXPECT_EQ(
+      result.ToString(),
+      String("LayoutBlockFlow\tDIV id=\"block\" style=\"background:\\nlime\""));
+
+  result.Clear();
+  text->DumpLayoutObject(result, false, 0);
+  EXPECT_EQ(
+      result.ToString(),
+      String("LayoutText\t#text \"\\n      testing "
+             "\\u0421\\u0440\\u0435\\u045C\\u0435\\u043D "
+             "\\u0440\\u043E\\u0434\\u0435\\u043D\\u0434\\u0435\\u043D\\n\""));
+}
+
+TEST_F(LayoutObjectTest, DisplayContentsSVGGElementInHTML) {
+  SetBodyInnerHTML(R"HTML(
+    <style>*|g { display:contents}</style>
+    <span id=span></span>
+  )HTML");
+
+  Element* span = GetDocument().getElementById("span");
+  SVGGElement* svg_element = SVGGElement::Create(GetDocument());
+  Text* text = Text::Create(GetDocument(), "text");
+  svg_element->appendChild(text);
+  span->appendChild(svg_element);
+
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  ASSERT_FALSE(svg_element->GetLayoutObject());
+  ASSERT_FALSE(text->GetLayoutObject());
 }
 
 }  // namespace blink

@@ -24,6 +24,9 @@
  */
 
 #include "modules/webaudio/DelayNode.h"
+
+#include <memory>
+
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
@@ -31,26 +34,45 @@
 #include "modules/webaudio/DelayOptions.h"
 #include "modules/webaudio/DelayProcessor.h"
 #include "platform/wtf/MathExtras.h"
-#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
 const double kMaximumAllowedDelayTime = 180;
 
+DelayHandler::DelayHandler(AudioNode& node,
+                           float sample_rate,
+                           AudioParamHandler& delay_time,
+                           double max_delay_time)
+    : AudioBasicProcessorHandler(
+          kNodeTypeDelay,
+          node,
+          sample_rate,
+          std::make_unique<DelayProcessor>(sample_rate,
+                                           1,
+                                           delay_time,
+                                           max_delay_time)) {
+  // Initialize the handler so that AudioParams can be processed.
+  Initialize();
+}
+
+scoped_refptr<DelayHandler> DelayHandler::Create(AudioNode& node,
+                                                 float sample_rate,
+                                                 AudioParamHandler& delay_time,
+                                                 double max_delay_time) {
+  return base::AdoptRef(
+      new DelayHandler(node, sample_rate, delay_time, max_delay_time));
+}
+
 DelayNode::DelayNode(BaseAudioContext& context, double max_delay_time)
     : AudioNode(context),
       delay_time_(AudioParam::Create(context,
                                      kParamTypeDelayDelayTime,
+                                     "Delay.delayTime",
                                      0.0,
                                      0.0,
                                      max_delay_time)) {
-  SetHandler(AudioBasicProcessorHandler::Create(
-      AudioHandler::kNodeTypeDelay, *this, context.sampleRate(),
-      WTF::WrapUnique(new DelayProcessor(
-          context.sampleRate(), 1, delay_time_->Handler(), max_delay_time))));
-
-  // Initialize the handler so that AudioParams can be processed.
-  Handler().Initialize();
+  SetHandler(DelayHandler::Create(*this, context.sampleRate(),
+                                  delay_time_->Handler(), max_delay_time));
 }
 
 DelayNode* DelayNode::Create(BaseAudioContext& context,
@@ -104,7 +126,7 @@ AudioParam* DelayNode::delayTime() {
   return delay_time_;
 }
 
-DEFINE_TRACE(DelayNode) {
+void DelayNode::Trace(blink::Visitor* visitor) {
   visitor->Trace(delay_time_);
   AudioNode::Trace(visitor);
 }

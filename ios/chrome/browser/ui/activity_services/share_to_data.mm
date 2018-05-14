@@ -15,8 +15,11 @@
 
 @interface ShareToData () {
  @private
-  // URL to be shared.
-  GURL url_;
+  // URL to be shared with share extensions.
+  GURL shareURL_;
+
+  // URL to be shared with password managers.
+  GURL passwordManagerURL_;
 
   // Title to be shared (not nil).
   NSString* title_;
@@ -42,22 +45,20 @@
 @synthesize isOriginalTitle = isOriginalTitle_;
 @synthesize isPagePrintable = isPagePrintable_;
 
-- (id)init {
-  NOTREACHED();
-  return nil;
-}
-
-- (id)initWithURL:(const GURL&)url
+- (id)initWithShareURL:(const GURL&)shareURL
+    passwordManagerURL:(const GURL&)passwordManagerURL
                  title:(NSString*)title
        isOriginalTitle:(BOOL)isOriginalTitle
        isPagePrintable:(BOOL)isPagePrintable
     thumbnailGenerator:(ThumbnailGeneratorBlock)thumbnailGenerator {
-  DCHECK(url.is_valid());
+  DCHECK(shareURL.is_valid());
+  DCHECK(passwordManagerURL.is_valid());
   DCHECK(title);
   self = [super init];
   if (self) {
-    url_ = url;
-    title_ = title;
+    shareURL_ = shareURL;
+    passwordManagerURL_ = passwordManagerURL;
+    title_ = [title copy];
     isOriginalTitle_ = isOriginalTitle;
     isPagePrintable_ = isPagePrintable;
     thumbnailGenerator_ = thumbnailGenerator;
@@ -65,12 +66,20 @@
   return self;
 }
 
-- (const GURL&)url {
-  return url_;
+- (const GURL&)shareURL {
+  return shareURL_;
 }
 
-- (NSURL*)nsurl {
-  return net::NSURLWithGURL(url_);
+- (const GURL&)passwordManagerURL {
+  return passwordManagerURL_;
+}
+
+- (NSURL*)shareNSURL {
+  return net::NSURLWithGURL(shareURL_);
+}
+
+- (NSURL*)passwordManagerNSURL {
+  return net::NSURLWithGURL(passwordManagerURL_);
 }
 
 @end

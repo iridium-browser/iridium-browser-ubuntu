@@ -19,7 +19,9 @@ struct RemoteDevice {
   std::string public_key;
   std::string bluetooth_address;
   std::string persistent_symmetric_key;
-  std::string sign_in_challenge;
+  bool unlock_key;
+  bool supports_mobile_hotspot;
+  int64_t last_update_time_millis;
 
   // Note: To save space, the BeaconSeeds may not necessarily be included in
   // this object.
@@ -32,7 +34,9 @@ struct RemoteDevice {
                const std::string& public_key,
                const std::string& bluetooth_address,
                const std::string& persistent_symmetric_key,
-               std::string sign_in_challenge);
+               bool unlock_key,
+               bool supports_mobile_hotspot,
+               int64_t last_update_time_millis);
   RemoteDevice(const RemoteDevice& other);
   ~RemoteDevice();
 
@@ -52,6 +56,13 @@ struct RemoteDevice {
   // Compares devices via their public keys. Note that this function is
   // necessary in order to use |RemoteDevice| as a key of a std::map.
   bool operator<(const RemoteDevice& other) const;
+
+  // Generates the device ID for a device given its public key.
+  static std::string GenerateDeviceId(const std::string& public_key);
+
+  // Derives the public key that was used to generate the given device ID;
+  // returns empty string if |device_id| is not a valid device ID.
+  static std::string DerivePublicKey(const std::string& device_id);
 
   // Static method for truncated device ID for logs.
   static std::string TruncateDeviceIdForLogs(const std::string& full_id);

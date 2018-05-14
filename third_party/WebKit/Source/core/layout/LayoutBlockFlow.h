@@ -36,6 +36,8 @@
 #ifndef LayoutBlockFlow_h
 #define LayoutBlockFlow_h
 
+#include <memory>
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/layout/FloatingObjects.h"
 #include "core/layout/LayoutBlock.h"
@@ -43,12 +45,12 @@
 #include "core/layout/line/LineBoxList.h"
 #include "core/layout/line/RootInlineBox.h"
 #include "core/layout/line/TrailingObjects.h"
-#include <memory>
 
 namespace blink {
 
+template <class Run>
+class BidiRunList;
 class BlockChildrenLayoutInfo;
-class MarginInfo;
 class LayoutInline;
 class LineInfo;
 class LineLayoutState;
@@ -56,8 +58,14 @@ class LineWidth;
 class LayoutMultiColumnFlowThread;
 class LayoutMultiColumnSpannerPlaceholder;
 class LayoutRubyRun;
-template <class Run>
-class BidiRunList;
+class MarginInfo;
+class NGBreakToken;
+class NGConstraintSpace;
+class NGLayoutResult;
+class NGPaintFragment;
+class NGPhysicalFragment;
+
+struct NGInlineNodeData;
 
 enum IndentTextOrNot { kDoNotIndentText, kIndentText };
 
@@ -106,6 +114,8 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
 
   void DeleteLineBoxTree();
 
+  bool CanContainFirstFormattedLine() const;
+
   LayoutUnit AvailableLogicalWidthForLine(
       LayoutUnit position,
       IndentTextOrNot indent_text,
@@ -146,6 +156,42 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
                                       position, indent_text, logical_height);
   }
 
+  LayoutUnit AvailableLogicalWidthForAvoidingFloats(
+      LayoutUnit position,
+      LayoutUnit logical_height = LayoutUnit()) const {
+    return (LogicalRightOffsetForAvoidingFloats(position, logical_height) -
+            LogicalLeftOffsetForAvoidingFloats(position, logical_height))
+        .ClampNegativeToZero();
+  }
+  LayoutUnit LogicalLeftOffsetForAvoidingFloats(
+      LayoutUnit position,
+      LayoutUnit logical_height = LayoutUnit()) const {
+    return LogicalLeftFloatOffsetForAvoidingFloats(
+        position, LogicalLeftOffsetForContent(), logical_height);
+  }
+  LayoutUnit LogicalRightOffsetForAvoidingFloats(
+      LayoutUnit position,
+      LayoutUnit logical_height = LayoutUnit()) const {
+    return LogicalRightFloatOffsetForAvoidingFloats(
+        position, LogicalRightOffsetForContent(), logical_height);
+  }
+  LayoutUnit StartOffsetForAvoidingFloats(
+      LayoutUnit position,
+      LayoutUnit logical_height = LayoutUnit()) const {
+    return Style()->IsLeftToRightDirection()
+               ? LogicalLeftOffsetForAvoidingFloats(position, logical_height)
+               : LogicalWidth() - LogicalRightOffsetForAvoidingFloats(
+                                      position, logical_height);
+  }
+  LayoutUnit EndOffsetForAvoidingFloats(
+      LayoutUnit position,
+      LayoutUnit logical_height = LayoutUnit()) const {
+    return !Style()->IsLeftToRightDirection()
+               ? LogicalLeftOffsetForAvoidingFloats(position, logical_height)
+               : LogicalWidth() - LogicalRightOffsetForAvoidingFloats(
+                                      position, logical_height);
+  }
+
   const LineBoxList& LineBoxes() const { return line_boxes_; }
   LineBoxList* LineBoxes() { return &line_boxes_; }
   InlineFlowBox* FirstLineBox() const { return line_boxes_.FirstLineBox(); }
@@ -171,8 +217,8 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   // |stopRootInlineBox|, if specified.
   int LineCount(const RootInlineBox* stop_root_inline_box = nullptr) const;
 
-  int FirstLineBoxBaseline() const override;
-  int InlineBlockBaseline(LineDirectionMode) const override;
+  LayoutUnit FirstLineBoxBaseline() const override;
+  LayoutUnit InlineBlockBaseline(LineDirectionMode) const override;
 
   void RemoveFloatingObjectsFromDescendants();
   void MarkAllDescendantsWithFloatsForLayout(
@@ -276,7 +322,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   }
 
   LayoutMultiColumnFlowThread* MultiColumnFlowThread() const {
-    return rare_data_ ? rare_data_->multi_column_flow_thread_ : 0;
+    return rare_data_ ? rare_data_->multi_column_flow_thread_ : nullptr;
   }
   void ResetMultiColumnFlowThread() {
     if (rare_data_)
@@ -388,7 +434,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   void SimplifiedNormalFlowInlineLayout();
   bool RecalcInlineChildrenOverflowAfterStyleChange();
 
-  PositionWithAffinity PositionForPoint(const LayoutPoint&) override;
+  PositionWithAffinity PositionForPoint(const LayoutPoint&) const override;
 
   LayoutUnit LowestFloatLogicalBottom(EClear = EClear::kBoth) const;
 
@@ -411,6 +457,25 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   // This function is only public so we can call it from NGBlockNode while we're
   // still working on LayoutNG.
   void AddOverflowFromFloats();
+
+  virtual NGInlineNodeData* GetNGInlineNodeData() const { return nullptr; }
+  virtual void ResetNGInlineNodeData() {}
+  virtual bool HasNGInlineNodeData() const { return false; }
+  virtual NGPaintFragment* PaintFragment() const { return nullptr; }
+  virtual Vector<NGPaintFragment*> GetPaintFragments(const LayoutObject&) const;
+  virtual scoped_refptr<NGLayoutResult> CachedLayoutResult(
+      const NGConstraintSpace&,
+      NGBreakToken*) const;
+  virtual scoped_refptr<NGLayoutResult> CachedLayoutResultForTesting();
+  virtual void SetCachedLayoutResult(const NGConstraintSpace&,
+                                     NGBreakToken*,
+                                     scoped_refptr<NGLayoutResult>);
+  virtual void WillCollectInlines() {}
+  virtual void SetPaintFragment(scoped_refptr<const NGPhysicalFragment>);
+  virtual void ClearPaintFragment() {}
+  virtual const NGPhysicalBoxFragment* CurrentFragment() const {
+    return nullptr;
+  }
 
 #ifndef NDEBUG
   void ShowLineTreeAndMark(const InlineBox* = nullptr,
@@ -544,6 +609,15 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   LayoutUnit LogicalLeftFloatOffsetForLine(LayoutUnit logical_top,
                                            LayoutUnit fixed_offset,
                                            LayoutUnit logical_height) const;
+
+  LayoutUnit LogicalLeftFloatOffsetForAvoidingFloats(
+      LayoutUnit logical_top,
+      LayoutUnit fixed_offset,
+      LayoutUnit logical_height) const;
+  LayoutUnit LogicalRightFloatOffsetForAvoidingFloats(
+      LayoutUnit logical_top,
+      LayoutUnit fixed_offset,
+      LayoutUnit logical_height) const;
 
   LayoutUnit LogicalRightOffsetForPositioningFloat(
       LayoutUnit logical_top,
@@ -688,7 +762,6 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
 
   // Allocated only when some of these fields have non-default values
   struct LayoutBlockFlowRareData {
-    WTF_MAKE_NONCOPYABLE(LayoutBlockFlowRareData);
     USING_FAST_MALLOC(LayoutBlockFlowRareData);
 
    public:
@@ -733,6 +806,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
     bool did_break_at_line_to_avoid_widow_ : 1;
     bool discard_margin_before_ : 1;
     bool discard_margin_after_ : 1;
+    DISALLOW_COPY_AND_ASSIGN(LayoutBlockFlowRareData);
   };
 
   const FloatingObjects* GetFloatingObjects() const {
@@ -741,6 +815,10 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
 
   static void UpdateAncestorShouldPaintFloatingObject(
       const LayoutBox& float_box);
+
+  bool ShouldTruncateOverflowingText() const;
+
+  int GetLayoutPassCountForTesting();
 
  protected:
   LayoutUnit MaxPositiveMarginBefore() const {
@@ -877,8 +955,6 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   bool IsSelfCollapsingBlock() const override;
   bool CheckIfIsSelfCollapsingBlock() const;
 
-  bool ShouldTruncateOverflowingText(const LayoutBlockFlow*) const;
-
  protected:
   std::unique_ptr<LayoutBlockFlowRareData> rare_data_;
   std::unique_ptr<FloatingObjects> floating_objects_;
@@ -970,12 +1046,14 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
                                          LayoutUnit width,
                                          const AtomicString&,
                                          InlineBox*);
+  void ClearTruncationOnAtomicInlines(RootInlineBox*);
   void MarkLinesDirtyInBlockRange(LayoutUnit logical_top,
                                   LayoutUnit logical_bottom,
                                   RootInlineBox* highest = nullptr);
   // Positions new floats and also adjust all floats encountered on the line if
   // any of them have to move to the next page/column.
   void PositionDialog();
+  void IncrementLayoutPassCount();
 
   // END METHODS DEFINED IN LayoutBlockFlowLine
 };

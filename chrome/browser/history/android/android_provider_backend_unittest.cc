@@ -91,7 +91,7 @@ class AndroidProviderBackendDelegate : public HistoryBackend::Delegate {
   void NotifyURLsModified(const history::URLRows& rows) override {
     modified_details_.reset(new history::URLRows(rows));
   }
-  void NotifyURLsDeleted(bool all_history,
+  void NotifyURLsDeleted(const DeletionTimeRange& time_range,
                          bool expired,
                          const URLRows& deleted_rows,
                          const std::set<GURL>& favicon_urls) override {
@@ -140,7 +140,7 @@ class AndroidProviderBackendNotifier : public HistoryBackendNotifier {
   void NotifyURLsModified(const history::URLRows& rows) override {
     modified_details_.reset(new history::URLRows(rows));
   }
-  void NotifyURLsDeleted(bool all_history,
+  void NotifyURLsDeleted(const DeletionTimeRange& time_range,
                          bool expired,
                          const history::URLRows& rows,
                          const std::set<GURL>& favicon_urls) override {
@@ -321,7 +321,8 @@ TEST_F(AndroidProviderBackendTest, UpdateTables) {
 
   // Set favicon to url2.
   std::vector<SkBitmap> bitmaps(1u, CreateBitmap());
-  history_backend->SetFavicons(url2, favicon_base::FAVICON, GURL(), bitmaps);
+  history_backend->SetFavicons({url2}, favicon_base::IconType::kFavicon, GURL(),
+                               bitmaps);
   history_backend->Closing();
   }
 
@@ -458,7 +459,8 @@ TEST_F(AndroidProviderBackendTest, QueryHistoryAndBookmarks) {
 
   // Set favicon to url2.
   std::vector<SkBitmap> bitmaps(1u, CreateBitmap());
-  history_backend->SetFavicons(url2, favicon_base::FAVICON, GURL(), bitmaps);
+  history_backend->SetFavicons({url2}, favicon_base::IconType::kFavicon, GURL(),
+                               bitmaps);
   history_backend->Closing();
   }
 
@@ -1204,7 +1206,7 @@ TEST_F(AndroidProviderBackendTest, UpdateFavicon) {
 
   std::vector<IconMapping> icon_mappings;
   EXPECT_TRUE(thumbnail_db_.GetIconMappingsForPageURL(
-      row1.url(), favicon_base::FAVICON, &icon_mappings));
+      row1.url(), {favicon_base::IconType::kFavicon}, &icon_mappings));
   EXPECT_EQ(1u, icon_mappings.size());
   std::vector<FaviconBitmap> favicon_bitmaps;
   EXPECT_TRUE(thumbnail_db_.GetFaviconBitmaps(icon_mappings[0].icon_id,
@@ -1233,7 +1235,7 @@ TEST_F(AndroidProviderBackendTest, UpdateFavicon) {
               notifier_.favicon_changed()->find(row1.url()));
 
   EXPECT_FALSE(thumbnail_db_.GetIconMappingsForPageURL(
-      row1.url(), favicon_base::FAVICON, NULL));
+      row1.url(), {favicon_base::IconType::kFavicon}, NULL));
 }
 
 TEST_F(AndroidProviderBackendTest, UpdateSearchTermTable) {
@@ -1847,7 +1849,8 @@ TEST_F(AndroidProviderBackendTest, QueryWithoutThumbnailDB) {
 
   // Set favicon to url2.
   std::vector<SkBitmap> bitmaps(1u, CreateBitmap());
-  history_backend->SetFavicons(url2, favicon_base::FAVICON, GURL(), bitmaps);
+  history_backend->SetFavicons({url2}, favicon_base::IconType::kFavicon, GURL(),
+                               bitmaps);
   history_backend->Closing();
   }
 

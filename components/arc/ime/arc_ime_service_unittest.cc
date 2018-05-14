@@ -8,7 +8,6 @@
 #include <set>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/arc/arc_bridge_service.h"
@@ -27,7 +26,8 @@ namespace {
 
 class FakeArcImeBridge : public ArcImeBridge {
  public:
-  FakeArcImeBridge() : count_send_insert_text_(0) {}
+  FakeArcImeBridge()
+      : count_send_insert_text_(0), last_keyboard_availability_(false) {}
 
   void SendSetCompositionText(const ui::CompositionText& composition) override {
   }
@@ -36,15 +36,26 @@ class FakeArcImeBridge : public ArcImeBridge {
   void SendInsertText(const base::string16& text) override {
     count_send_insert_text_++;
   }
-  void SendOnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override {
-  }
   void SendExtendSelectionAndDelete(size_t before, size_t after) override {
+  }
+  void SendOnKeyboardAppearanceChanging(const gfx::Rect& new_bounds,
+                                        bool is_available) override {
+    last_keyboard_bounds_ = new_bounds;
+    last_keyboard_availability_ = is_available;
   }
 
   int count_send_insert_text() const { return count_send_insert_text_; }
+  const gfx::Rect& last_keyboard_bounds() const {
+    return last_keyboard_bounds_;
+  }
+  bool last_keyboard_availability() const {
+    return last_keyboard_availability_;
+  }
 
  private:
   int count_send_insert_text_;
+  gfx::Rect last_keyboard_bounds_;
+  bool last_keyboard_availability_;
 };
 
 class FakeInputMethod : public ui::DummyInputMethod {
@@ -100,7 +111,8 @@ class FakeInputMethod : public ui::DummyInputMethod {
 // not depending on the full setup of Exo and Ash.
 class FakeArcWindowDelegate : public ArcImeService::ArcWindowDelegate {
  public:
-  FakeArcWindowDelegate() : next_id_(0) {}
+  explicit FakeArcWindowDelegate(ui::InputMethod* input_method)
+      : next_id_(0), test_input_method_(input_method) {}
 
   bool IsArcWindow(const aura::Window* window) const override {
     return arc_window_id_.count(window->id());
@@ -108,6 +120,11 @@ class FakeArcWindowDelegate : public ArcImeService::ArcWindowDelegate {
 
   void RegisterFocusObserver() override {}
   void UnregisterFocusObserver() override {}
+
+  ui::InputMethod* GetInputMethodForWindow(
+      aura::Window* window) const override {
+    return window ? test_input_method_ : nullptr;
+  }
 
   std::unique_ptr<aura::Window> CreateFakeArcWindow() {
     const int id = next_id_++;
@@ -126,6 +143,7 @@ class FakeArcWindowDelegate : public ArcImeService::ArcWindowDelegate {
   aura::test::TestWindowDelegate dummy_delegate_;
   int next_id_;
   std::set<int> arc_window_id_;
+  ui::InputMethod* test_input_method_;
 };
 
 }  // namespace
@@ -145,22 +163,22 @@ class ArcImeServiceTest : public testing::Test {
 
  private:
   void SetUp() override {
-    arc_bridge_service_ = base::MakeUnique<ArcBridgeService>();
+    arc_bridge_service_ = std::make_unique<ArcBridgeService>();
     instance_ =
-        base::MakeUnique<ArcImeService>(nullptr, arc_bridge_service_.get());
+        std::make_unique<ArcImeService>(nullptr, arc_bridge_service_.get());
     fake_arc_ime_bridge_ = new FakeArcImeBridge();
     instance_->SetImeBridgeForTesting(base::WrapUnique(fake_arc_ime_bridge_));
 
-    fake_input_method_ = base::MakeUnique<FakeInputMethod>();
-    instance_->SetInputMethodForTesting(fake_input_method_.get());
+    fake_input_method_ = std::make_unique<FakeInputMethod>();
 
-    fake_window_delegate_ = new FakeArcWindowDelegate();
+    fake_window_delegate_ = new FakeArcWindowDelegate(fake_input_method_.get());
     instance_->SetArcWindowDelegateForTesting(
         base::WrapUnique(fake_window_delegate_));
     arc_win_ = fake_window_delegate_->CreateFakeArcWindow();
   }
 
   void TearDown() override {
+    ArcImeService::SetOverrideDefaultDeviceScaleFactorForTesting(base::nullopt);
     arc_win_.reset();
     fake_window_delegate_ = nullptr;
     fake_arc_ime_bridge_ = nullptr;
@@ -266,6 +284,26 @@ TEST_F(ArcImeServiceTest, WindowFocusTracking) {
   EXPECT_EQ(2, fake_input_method_->count_set_focused_text_input_client());
 }
 
+TEST_F(ArcImeServiceTest, RootWindowChange) {
+  std::unique_ptr<aura::Window> dummy_root =
+      fake_window_delegate_->CreateFakeNonArcWindow();
+
+  instance_->OnWindowFocused(arc_win_.get(), nullptr);
+  EXPECT_EQ(instance_.get(), fake_input_method_->GetTextInputClient());
+
+  // Moving to another root window with that shares the same input method.
+  // ArcImeService should keep attached to the IME.
+  instance_->OnWindowRemovingFromRootWindow(arc_win_.get(), dummy_root.get());
+  EXPECT_EQ(instance_.get(), fake_input_method_->GetTextInputClient());
+
+  // Removed from a root window. It should be detached.
+  instance_->OnWindowRemovingFromRootWindow(arc_win_.get(), nullptr);
+  EXPECT_NE(instance_.get(), fake_input_method_->GetTextInputClient());
+
+  // Unfocusing afterwards should not cause any trouble like crashing.
+  instance_->OnWindowFocused(nullptr, arc_win_.get());
+}
+
 TEST_F(ArcImeServiceTest, GetTextFromRange) {
   instance_->OnWindowFocused(arc_win_.get(), nullptr);
 
@@ -277,7 +315,8 @@ TEST_F(ArcImeServiceTest, GetTextFromRange) {
   const gfx::Range selection_range(cursor_pos, cursor_pos);
 
   instance_->OnCursorRectChangedWithSurroundingText(
-      gfx::Rect(0, 0, 1, 1), text_range, text_in_range, selection_range);
+      gfx::Rect(0, 0, 1, 1), text_range, text_in_range, selection_range,
+      true /* is_screen_coordinates */);
 
   gfx::Range temp;
   instance_->GetTextRange(&temp);
@@ -289,6 +328,58 @@ TEST_F(ArcImeServiceTest, GetTextFromRange) {
 
   instance_->GetSelectionRange(&temp);
   EXPECT_EQ(selection_range, temp);
+}
+
+TEST_F(ArcImeServiceTest, OnKeyboardAppearanceChanged) {
+  instance_->OnWindowFocused(arc_win_.get(), nullptr);
+  EXPECT_EQ(gfx::Rect(), fake_arc_ime_bridge_->last_keyboard_bounds());
+  EXPECT_FALSE(fake_arc_ime_bridge_->last_keyboard_availability());
+
+  const gfx::Rect keyboard_bounds(0, 480, 1200, 320);
+  keyboard::KeyboardStateDescriptor desc1{true, false, keyboard_bounds,
+                                          keyboard_bounds, keyboard_bounds};
+  instance_->OnKeyboardAppearanceChanged(desc1);
+  EXPECT_EQ(keyboard_bounds, fake_arc_ime_bridge_->last_keyboard_bounds());
+  EXPECT_TRUE(fake_arc_ime_bridge_->last_keyboard_availability());
+
+  // Change the default scale factor of the internal display.
+  const double new_scale_factor = 10.0;
+  const gfx::Rect new_keyboard_bounds(
+      0 * new_scale_factor, 480 * new_scale_factor, 1200 * new_scale_factor,
+      320 * new_scale_factor);
+  instance_->SetOverrideDefaultDeviceScaleFactorForTesting(new_scale_factor);
+
+  // Keyboard bounds passed to Android should be changed.
+  instance_->OnKeyboardAppearanceChanged(desc1);
+  EXPECT_EQ(new_keyboard_bounds, fake_arc_ime_bridge_->last_keyboard_bounds());
+  EXPECT_TRUE(fake_arc_ime_bridge_->last_keyboard_availability());
+}
+
+TEST_F(ArcImeServiceTest, GetCaretBounds) {
+  EXPECT_EQ(gfx::Rect(), instance_->GetCaretBounds());
+
+  const gfx::Rect window_rect(123, 321, 100, 100);
+  arc_win_->SetBounds(window_rect);
+  instance_->OnWindowFocused(arc_win_.get(), nullptr);
+
+  const gfx::Rect cursor_rect(10, 12, 2, 8);
+  instance_->OnCursorRectChanged(cursor_rect, true);  // screen coordinates
+  EXPECT_EQ(cursor_rect, instance_->GetCaretBounds());
+
+  instance_->OnCursorRectChanged(cursor_rect, false);  // window coordinates
+  EXPECT_EQ(cursor_rect + window_rect.OffsetFromOrigin(),
+            instance_->GetCaretBounds());
+
+  const double new_scale_factor = 10.0;
+  const gfx::Rect new_cursor_rect(10 * new_scale_factor, 12 * new_scale_factor,
+                                  2 * new_scale_factor, 8 * new_scale_factor);
+  instance_->SetOverrideDefaultDeviceScaleFactorForTesting(new_scale_factor);
+  instance_->OnCursorRectChanged(new_cursor_rect, true);  // screen coordinates
+  EXPECT_EQ(cursor_rect, instance_->GetCaretBounds());
+
+  instance_->OnCursorRectChanged(new_cursor_rect, false);  // window coordinates
+  EXPECT_EQ(cursor_rect + window_rect.OffsetFromOrigin(),
+            instance_->GetCaretBounds());
 }
 
 }  // namespace arc

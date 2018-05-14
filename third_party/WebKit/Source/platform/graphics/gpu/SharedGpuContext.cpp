@@ -4,8 +4,10 @@
 
 #include "platform/graphics/gpu/SharedGpuContext.h"
 
+#include "base/single_thread_task_runner.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
-#include "gpu/command_buffer/common/capabilities.h"
+#include "gpu/config/gpu_driver_bug_workaround_type.h"
+#include "gpu/config/gpu_feature_info.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/WaitableEvent.h"
 #include "platform/WebTaskRunner.h"
@@ -20,118 +22,157 @@ SharedGpuContext* SharedGpuContext::GetInstanceForCurrentThread() {
   return thread_specific_instance;
 }
 
-SharedGpuContext::SharedGpuContext() : context_id_(kNoSharedContext) {
-  CreateContextProviderIfNeeded();
+SharedGpuContext::SharedGpuContext() = default;
+
+// static
+bool SharedGpuContext::IsGpuCompositingEnabled() {
+  SharedGpuContext* this_ptr = GetInstanceForCurrentThread();
+  // The check for gpu compositing enabled implies a context will
+  // desired, so we combine them into a single trip to the main thread.
+  // This also ensures that the compositing mode does not change before
+  // the context is created, so if it does change the context will be lost
+  // and this class will know to check the compositing mode again.
+  bool only_if_gpu_compositing = true;
+  this_ptr->CreateContextProviderIfNeeded(only_if_gpu_compositing);
+  return !this_ptr->is_gpu_compositing_disabled_;
 }
 
-void SharedGpuContext::CreateContextProviderOnMainThread(
+base::WeakPtr<WebGraphicsContext3DProviderWrapper>
+SharedGpuContext::ContextProviderWrapper() {
+  SharedGpuContext* this_ptr = GetInstanceForCurrentThread();
+  bool only_if_gpu_compositing = false;
+  this_ptr->CreateContextProviderIfNeeded(only_if_gpu_compositing);
+  if (!this_ptr->context_provider_wrapper_)
+    return nullptr;
+  return this_ptr->context_provider_wrapper_->GetWeakPtr();
+}
+
+static void CreateContextProviderOnMainThread(
+    bool only_if_gpu_compositing,
+    bool* gpu_compositing_disabled,
+    std::unique_ptr<WebGraphicsContext3DProviderWrapper>* wrapper,
     WaitableEvent* waitable_event) {
   DCHECK(IsMainThread());
+
   Platform::ContextAttributes context_attributes;
   context_attributes.web_gl_version = 1;  // GLES2
+  context_attributes.enable_raster_interface = true;
+
+  *gpu_compositing_disabled = Platform::Current()->IsGpuCompositingDisabled();
+  if (*gpu_compositing_disabled && only_if_gpu_compositing) {
+    waitable_event->Signal();
+    return;
+  }
+
   Platform::GraphicsInfo graphics_info;
-  context_provider_ =
+  auto context_provider =
       Platform::Current()->CreateOffscreenGraphicsContext3DProvider(
           context_attributes, WebURL(), nullptr, &graphics_info);
-  if (waitable_event)
-    waitable_event->Signal();
+  if (context_provider) {
+    *wrapper = std::make_unique<WebGraphicsContext3DProviderWrapper>(
+        std::move(context_provider));
+  }
+  waitable_event->Signal();
 }
 
-void SharedGpuContext::CreateContextProviderIfNeeded() {
-  if (context_provider_ &&
-      context_provider_->ContextGL()->GetGraphicsResetStatusKHR() ==
-          GL_NO_ERROR)
+void SharedGpuContext::CreateContextProviderIfNeeded(
+    bool only_if_gpu_compositing) {
+  // Once true, |is_gpu_compositing_disabled_| will always stay true.
+  if (is_gpu_compositing_disabled_ && only_if_gpu_compositing)
     return;
 
-  std::unique_ptr<WebGraphicsContext3DProvider> old_context_provider =
-      std::move(context_provider_);
+  // TODO(danakj): This needs to check that the context is being used on the
+  // thread it was made on, or else lock it.
+  if (context_provider_wrapper_ &&
+      context_provider_wrapper_->ContextProvider()
+              ->ContextGL()
+              ->GetGraphicsResetStatusKHR() == GL_NO_ERROR) {
+    // If the context isn't lost then |is_gpu_compositing_disabled_| state
+    // hasn't changed yet. RenderThreadImpl::CompositingModeFallbackToSoftware()
+    // will lose the context to let us know if it changes.
+    return;
+  }
+
+  is_gpu_compositing_disabled_ = false;
+  context_provider_wrapper_ = nullptr;
+
   if (context_provider_factory_) {
-    // This path should only be used in unit tests
-    context_provider_ = context_provider_factory_();
+    // This path should only be used in unit tests.
+    auto context_provider =
+        context_provider_factory_.Run(&is_gpu_compositing_disabled_);
+    if (context_provider) {
+      context_provider_wrapper_ =
+          std::make_unique<WebGraphicsContext3DProviderWrapper>(
+              std::move(context_provider));
+    }
   } else if (IsMainThread()) {
-    context_provider_ = blink::Platform::Current()
-                            ->CreateSharedOffscreenGraphicsContext3DProvider();
+    is_gpu_compositing_disabled_ =
+        Platform::Current()->IsGpuCompositingDisabled();
+    if (is_gpu_compositing_disabled_ && only_if_gpu_compositing)
+      return;
+    auto context_provider =
+        Platform::Current()->CreateSharedOffscreenGraphicsContext3DProvider();
+    if (context_provider) {
+      context_provider_wrapper_ =
+          std::make_unique<WebGraphicsContext3DProviderWrapper>(
+              std::move(context_provider));
+    }
   } else {
     // This synchronous round-trip to the main thread is the reason why
     // SharedGpuContext encasulates the context provider: so we only have to do
     // this once per thread.
     WaitableEvent waitable_event;
-    RefPtr<WebTaskRunner> task_runner =
-        Platform::Current()->MainThread()->GetWebTaskRunner();
-    task_runner->PostTask(
-        BLINK_FROM_HERE,
-        CrossThreadBind(&SharedGpuContext::CreateContextProviderOnMainThread,
-                        CrossThreadUnretained(this),
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+        Platform::Current()->MainThread()->GetTaskRunner();
+    PostCrossThreadTask(
+        *task_runner, FROM_HERE,
+        CrossThreadBind(&CreateContextProviderOnMainThread,
+                        only_if_gpu_compositing,
+                        CrossThreadUnretained(&is_gpu_compositing_disabled_),
+                        CrossThreadUnretained(&context_provider_wrapper_),
                         CrossThreadUnretained(&waitable_event)));
     waitable_event.Wait();
-    if (context_provider_ && !context_provider_->BindToCurrentThread())
-      context_provider_ = nullptr;
-  }
-
-  if (context_provider_) {
-    context_id_++;
-    // In the unlikely event of an overflow...
-    if (context_id_ == kNoSharedContext)
-      context_id_++;
-  } else {
-    context_provider_ = std::move(old_context_provider);
+    if (context_provider_wrapper_ &&
+        !context_provider_wrapper_->ContextProvider()->BindToCurrentThread())
+      context_provider_wrapper_ = nullptr;
   }
 }
 
+// static
 void SharedGpuContext::SetContextProviderFactoryForTesting(
     ContextProviderFactory factory) {
   SharedGpuContext* this_ptr = GetInstanceForCurrentThread();
-  this_ptr->context_provider_.reset();
-  this_ptr->context_provider_factory_ = factory;
-  this_ptr->CreateContextProviderIfNeeded();
+  DCHECK(!this_ptr->context_provider_wrapper_);
+  this_ptr->context_provider_factory_ = std::move(factory);
 }
 
-unsigned SharedGpuContext::ContextId() {
-  if (!IsValid())
-    return kNoSharedContext;
+// static
+void SharedGpuContext::ResetForTesting() {
   SharedGpuContext* this_ptr = GetInstanceForCurrentThread();
-  return this_ptr->context_id_;
-}
-
-gpu::gles2::GLES2Interface* SharedGpuContext::Gl() {
-  if (IsValid()) {
-    SharedGpuContext* this_ptr = GetInstanceForCurrentThread();
-    return this_ptr->context_provider_->ContextGL();
-  }
-  return nullptr;
-}
-
-GrContext* SharedGpuContext::Gr() {
-  if (IsValid()) {
-    SharedGpuContext* this_ptr = GetInstanceForCurrentThread();
-    return this_ptr->context_provider_->GetGrContext();
-  }
-  return nullptr;
-}
-
-bool SharedGpuContext::IsValid() {
-  SharedGpuContext* this_ptr = GetInstanceForCurrentThread();
-  this_ptr->CreateContextProviderIfNeeded();
-  if (!this_ptr->context_provider_)
-    return false;
-  return this_ptr->context_provider_->ContextGL()
-             ->GetGraphicsResetStatusKHR() == GL_NO_ERROR;
+  this_ptr->is_gpu_compositing_disabled_ = false;
+  this_ptr->context_provider_wrapper_.reset();
+  this_ptr->context_provider_factory_.Reset();
 }
 
 bool SharedGpuContext::IsValidWithoutRestoring() {
   SharedGpuContext* this_ptr = GetInstanceForCurrentThread();
-  if (!this_ptr->context_provider_)
+  if (!this_ptr->context_provider_wrapper_)
     return false;
-  return this_ptr->context_provider_->ContextGL()
+  return this_ptr->context_provider_wrapper_->ContextProvider()
+             ->ContextGL()
              ->GetGraphicsResetStatusKHR() == GL_NO_ERROR;
 }
 
 bool SharedGpuContext::AllowSoftwareToAcceleratedCanvasUpgrade() {
-  if (!IsValid())
-    return kNoSharedContext;
   SharedGpuContext* this_ptr = GetInstanceForCurrentThread();
-  return this_ptr->context_provider_->GetCapabilities()
-      .software_to_accelerated_canvas_upgrade;
+  bool only_if_gpu_compositing = false;
+  this_ptr->CreateContextProviderIfNeeded(only_if_gpu_compositing);
+  if (!this_ptr->context_provider_wrapper_)
+    return false;
+  return !this_ptr->context_provider_wrapper_->ContextProvider()
+              ->GetGpuFeatureInfo()
+              .IsWorkaroundEnabled(
+                  gpu::DISABLE_SOFTWARE_TO_ACCELERATED_CANVAS_UPGRADE);
 }
 
 }  // blink

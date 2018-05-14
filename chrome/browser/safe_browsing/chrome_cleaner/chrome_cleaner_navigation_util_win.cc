@@ -4,8 +4,10 @@
 
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_navigation_util_win.h"
 
+#include "chrome/browser/safe_browsing/chrome_cleaner/srt_field_trial_win.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "ui/base/page_transition_types.h"
@@ -13,6 +15,15 @@
 #include "url/gurl.h"
 
 namespace chrome_cleaner_util {
+
+namespace {
+GURL GetCleanupPageURL() {
+  if (safe_browsing::UserInitiatedCleanupsEnabled())
+    return chrome::GetSettingsUrl(chrome::kCleanupSubPage);
+  else
+    return chrome::GetSettingsUrl("");
+}
+}  // namespace
 
 Browser* FindBrowser() {
   BrowserList* browser_list = BrowserList::GetInstance();
@@ -22,28 +33,28 @@ Browser* FindBrowser() {
        ++browser_iterator) {
     Browser* browser = *browser_iterator;
     if (browser->is_type_tabbed() &&
-        (browser->window()->IsActive() || !browser->window()->IsMinimized()))
+        (browser->window()->IsActive() || !browser->window()->IsMinimized())) {
       return browser;
+    }
   }
 
   return nullptr;
 }
 
-void OpenSettingsPage(Browser* browser,
-                      WindowOpenDisposition disposition,
-                      bool skip_if_current_tab) {
+bool CleanupPageIsActiveTab(Browser* browser) {
   DCHECK(browser);
 
-  // Skip opening the settings page if it's already the currently active tab.
   content::WebContents* web_contents =
       browser->tab_strip_model()->GetActiveWebContents();
-  if (skip_if_current_tab && web_contents &&
-      web_contents->GetLastCommittedURL() == chrome::kChromeUISettingsURL) {
-    return;
-  }
+  return web_contents &&
+         web_contents->GetLastCommittedURL() == GetCleanupPageURL();
+}
+
+void OpenCleanupPage(Browser* browser, WindowOpenDisposition disposition) {
+  DCHECK(browser);
 
   browser->OpenURL(content::OpenURLParams(
-      GURL(chrome::kChromeUISettingsURL), content::Referrer(), disposition,
+      GetCleanupPageURL(), content::Referrer(), disposition,
       ui::PAGE_TRANSITION_AUTO_TOPLEVEL, /*is_renderer_initiated=*/false));
 }
 

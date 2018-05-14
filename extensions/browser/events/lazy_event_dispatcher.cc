@@ -49,11 +49,11 @@ bool LazyEventDispatcher::HasAlreadyDispatched(
     const EventListener* listener) const {
   std::unique_ptr<LazyContextId> dispatch_context;
   if (listener->is_for_service_worker()) {
-    dispatch_context = base::MakeUnique<LazyContextId>(
+    dispatch_context = std::make_unique<LazyContextId>(
         context, listener->extension_id(), listener->listener_url());
   } else {
     dispatch_context =
-        base::MakeUnique<LazyContextId>(context, listener->extension_id());
+        std::make_unique<LazyContextId>(context, listener->extension_id());
   }
 
   return HasAlreadyDispatchedImpl(dispatch_context.get());
@@ -120,7 +120,7 @@ bool LazyEventDispatcher::QueueEventDispatch(
   }
 
   queue->AddPendingTaskToDispatchEvent(
-      dispatch_context, base::Bind(dispatch_function_, dispatched_event));
+      dispatch_context, base::BindOnce(dispatch_function_, dispatched_event));
 
   return true;
 }

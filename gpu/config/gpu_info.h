@@ -20,24 +20,11 @@
 #include "gpu/gpu_export.h"
 #include "ui/gfx/geometry/size.h"
 
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#if defined(USE_X11)
 typedef unsigned long VisualID;
 #endif
 
 namespace gpu {
-
-// Result for the various Collect*Info* functions below.
-// Fatal failures are for cases where we can't create a context at all or
-// something, making the use of the GPU impossible.
-// Non-fatal failures are for cases where we could gather most info, but maybe
-// some is missing (e.g. unable to parse a version string or to detect the exact
-// model).
-enum CollectInfoResult {
-  kCollectInfoNone = 0,
-  kCollectInfoSuccess = 1,
-  kCollectInfoNonFatalFailure = 2,
-  kCollectInfoFatalFailure = 3
-};
 
 // Video profile.  This *must* match media::VideoCodecProfile.
 enum VideoCodecProfile {
@@ -66,7 +53,9 @@ enum VideoCodecProfile {
   DOLBYVISION_PROFILE4,
   DOLBYVISION_PROFILE5,
   DOLBYVISION_PROFILE7,
-  VIDEO_CODEC_PROFILE_MAX = DOLBYVISION_PROFILE7,
+  THEORAPROFILE_ANY,
+  AV1PROFILE_PROFILE0,
+  VIDEO_CODEC_PROFILE_MAX = AV1PROFILE_PROFILE0,
 };
 
 // Specification of a decoding profile supported by a hardware decoder.
@@ -127,6 +116,9 @@ struct GPU_EXPORT GPUInfo {
   GPUInfo(const GPUInfo& other);
   ~GPUInfo();
 
+  // The currently active gpu.
+  const GPUDevice& active_gpu() const;
+
   // The amount of time taken to get from the process starting to the message
   // loop being pumped.
   base::TimeDelta initialization_time;
@@ -142,9 +134,6 @@ struct GPU_EXPORT GPUInfo {
 
   // Secondary GPUs, for example, the integrated GPU in a dual GPU machine.
   std::vector<GPUDevice> secondary_gpus;
-
-  // The currently active gpu.
-  const GPUDevice& active_gpu() const;
 
   // The vendor of the graphics driver currently installed.
   std::string driver_vendor;
@@ -211,33 +200,24 @@ struct GPU_EXPORT GPUInfo {
   // Whether the gpu process is running in a sandbox.
   bool sandboxed;
 
-  // Number of GPU process crashes recorded.
-  int process_crash_count;
-
   // True if the GPU is running in the browser process instead of its own.
   bool in_process_gpu;
 
   // True if the GPU process is using the passthrough command decoder.
   bool passthrough_cmd_decoder;
 
+  // True if we use direct composition surfaces on Windows.
+  bool direct_composition = false;
+
   // True if the current set of outputs supports overlays.
   bool supports_overlays = false;
-
-  // True if the current set of outputs supports HDR.
-  bool hdr = false;
 
   // True only on android when extensions for threaded mailbox sharing are
   // present. Threaded mailbox sharing is used on Android only, so this check
   // is only implemented on Android.
   bool can_support_threaded_texture_mailbox = false;
 
-  // The state of whether the basic/context/DxDiagnostics info is collected and
-  // if the collection fails or not.
-  CollectInfoResult basic_info_state;
-  CollectInfoResult context_info_state;
 #if defined(OS_WIN)
-  CollectInfoResult dx_diagnostics_info_state;
-
   // The information returned by the DirectX Diagnostics Tool.
   DxDiagNode dx_diagnostics;
 #endif
@@ -247,7 +227,7 @@ struct GPU_EXPORT GPUInfo {
       video_encode_accelerator_supported_profiles;
   bool jpeg_decode_accelerator_supported;
 
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#if defined(USE_X11)
   VisualID system_visual;
   VisualID rgba_visual;
 #endif
@@ -292,7 +272,7 @@ struct GPU_EXPORT GPUInfo {
     virtual void EndAuxAttributes() = 0;
 
    protected:
-    virtual ~Enumerator() {}
+    virtual ~Enumerator() = default;
   };
 
   // Outputs the fields in this structure to the provided enumerator.

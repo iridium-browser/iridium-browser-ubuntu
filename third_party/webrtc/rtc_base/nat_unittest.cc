@@ -12,17 +12,17 @@
 #include <memory>
 #include <string>
 
-#include "webrtc/rtc_base/asynctcpsocket.h"
-#include "webrtc/rtc_base/gunit.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/natserver.h"
-#include "webrtc/rtc_base/natsocketfactory.h"
-#include "webrtc/rtc_base/nethelpers.h"
-#include "webrtc/rtc_base/network.h"
-#include "webrtc/rtc_base/physicalsocketserver.h"
-#include "webrtc/rtc_base/ptr_util.h"
-#include "webrtc/rtc_base/testclient.h"
-#include "webrtc/rtc_base/virtualsocketserver.h"
+#include "rtc_base/asynctcpsocket.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/natserver.h"
+#include "rtc_base/natsocketfactory.h"
+#include "rtc_base/nethelpers.h"
+#include "rtc_base/network.h"
+#include "rtc_base/physicalsocketserver.h"
+#include "rtc_base/ptr_util.h"
+#include "rtc_base/testclient.h"
+#include "rtc_base/virtualsocketserver.h"
 
 using namespace rtc;
 
@@ -215,7 +215,7 @@ void TestPhysicalInternal(const SocketAddress& int_addr) {
                                 }),
                  networks.end());
   if (networks.empty()) {
-    LOG(LS_WARNING) << "Not enough network adapters for test.";
+    RTC_LOG(LS_WARNING) << "Not enough network adapters for test.";
     return;
   }
 
@@ -232,11 +232,11 @@ void TestPhysicalInternal(const SocketAddress& int_addr) {
     }
   }
   if (ext_addr2.IsNil()) {
-    LOG(LS_WARNING) << "No available IP of same family as " << int_addr;
+    RTC_LOG(LS_WARNING) << "No available IP of same family as " << int_addr;
     return;
   }
 
-  LOG(LS_INFO) << "selected ip " << ext_addr2.ipaddr();
+  RTC_LOG(LS_INFO) << "selected ip " << ext_addr2.ipaddr();
 
   SocketAddress ext_addrs[4] = {
       SocketAddress(ext_addr1),
@@ -260,7 +260,7 @@ TEST(NatTest, TestPhysicalIPv6) {
   if (HasIPv6Enabled()) {
     TestPhysicalInternal(SocketAddress("::1", 0));
   } else {
-    LOG(LS_WARNING) << "No IPv6, skipping";
+    RTC_LOG(LS_WARNING) << "No IPv6, skipping";
   }
 }
 
@@ -300,7 +300,7 @@ TEST(NatTest, TestVirtualIPv6) {
   if (HasIPv6Enabled()) {
     TestVirtualInternal(AF_INET6);
   } else {
-    LOG(LS_WARNING) << "No IPv6, skipping";
+    RTC_LOG(LS_WARNING) << "No IPv6, skipping";
   }
 }
 

@@ -8,10 +8,10 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
-#include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -25,8 +25,8 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/browser_action_test_util.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -72,7 +72,7 @@ void ExecuteExtensionAction(Browser* browser, const Extension* extension) {
 
 std::unique_ptr<base::ScopedTempDir> CreateAndSetDownloadsDirectory(
     PrefService* pref_service) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   std::unique_ptr<base::ScopedTempDir> dir(new base::ScopedTempDir);
 
   if (!dir->CreateUniqueTempDir())
@@ -798,10 +798,10 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionWithRectangularIcon) {
 // Regression test for crbug.com/584747.
 IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionOpenPopupOnPopup) {
   // Open a new web popup window.
-  chrome::NavigateParams params(browser(), GURL("http://www.google.com/"),
-                                ui::PAGE_TRANSITION_LINK);
+  NavigateParams params(browser(), GURL("http://www.google.com/"),
+                        ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::NEW_POPUP;
-  params.window_action = chrome::NavigateParams::SHOW_WINDOW;
+  params.window_action = NavigateParams::SHOW_WINDOW;
   ui_test_utils::NavigateToURL(&params);
   Browser* popup_browser = params.browser;
   // Verify it is a popup, and it is the active window.
@@ -998,7 +998,7 @@ IN_PROC_BROWSER_TEST_F(NavigatingExtensionPopupBrowserTest, DownloadViaPost) {
   // Override the default downloads directory, so that the test can cleanup
   // after itself.  This section is based on CreateAndSetDownloadsDirectory
   // method defined in a few other source files with tests.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   std::unique_ptr<base::ScopedTempDir> downloads_directory =
       CreateAndSetDownloadsDirectory(browser()->profile()->GetPrefs());
   ASSERT_TRUE(downloads_directory);
@@ -1020,7 +1020,7 @@ IN_PROC_BROWSER_TEST_F(NavigatingExtensionPopupBrowserTest, DownloadViaPost) {
   downloads_observer.WaitForFinished();
   EXPECT_EQ(0u, downloads_observer.NumDangerousDownloadsSeen());
   EXPECT_EQ(1u, downloads_observer.NumDownloadsSeenInState(
-                    content::DownloadItem::COMPLETE));
+                    download::DownloadItem::COMPLETE));
   EXPECT_TRUE(base::PathExists(downloads_directory->GetPath().AppendASCII(
       "download-test3-attachment.gif")));
 

@@ -27,38 +27,39 @@
 #define IDBCursor_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ScriptValue.h"
+#include "bindings/modules/v8/idb_object_store_or_idb_index.h"
 #include "modules/indexeddb/IDBKey.h"
 #include "modules/indexeddb/IDBRequest.h"
 #include "modules/indexeddb/IndexedDB.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/wtf/Compiler.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/modules/indexeddb/WebIDBCursor.h"
 #include "public/platform/modules/indexeddb/WebIDBTypes.h"
 
 namespace blink {
 
 class ExceptionState;
-class IDBAny;
 class IDBTransaction;
 class IDBValue;
 class ScriptState;
 
-class IDBCursor : public GarbageCollectedFinalized<IDBCursor>,
-                  public ScriptWrappable {
+class IDBCursor : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
+  using Source = IDBObjectStoreOrIDBIndex;
+
   static WebIDBCursorDirection StringToDirection(const String& mode_string);
 
   static IDBCursor* Create(std::unique_ptr<WebIDBCursor>,
                            WebIDBCursorDirection,
                            IDBRequest*,
-                           IDBAny* source,
+                           const Source&,
                            IDBTransaction*);
   virtual ~IDBCursor();
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
   void ContextWillBeDestroyed() { backend_.reset(); }
 
   WARN_UNUSED_RESULT v8::Local<v8::Object> AssociateWithWrapper(
@@ -71,30 +72,32 @@ class IDBCursor : public GarbageCollectedFinalized<IDBCursor>,
   ScriptValue key(ScriptState*);
   ScriptValue primaryKey(ScriptState*);
   ScriptValue value(ScriptState*);
-  ScriptValue source(ScriptState*) const;
+  void source(Source&) const;
 
   IDBRequest* update(ScriptState*, const ScriptValue&, ExceptionState&);
   void advance(unsigned, ExceptionState&);
-  void continueFunction(ScriptState*, const ScriptValue& key, ExceptionState&);
+  void Continue(ScriptState*, const ScriptValue& key, ExceptionState&);
   void continuePrimaryKey(ScriptState*,
                           const ScriptValue& key,
                           const ScriptValue& primary_key,
                           ExceptionState&);
-  IDBRequest* deleteFunction(ScriptState*, ExceptionState&);
+  IDBRequest* Delete(ScriptState*, ExceptionState&);
 
   bool isKeyDirty() const { return key_dirty_; }
   bool isPrimaryKeyDirty() const { return primary_key_dirty_; }
   bool isValueDirty() const { return value_dirty_; }
 
-  void Continue(IDBKey*,
-                IDBKey* primary_key,
+  void Continue(std::unique_ptr<IDBKey>,
+                std::unique_ptr<IDBKey> primary_key,
                 IDBRequest::AsyncTraceState,
                 ExceptionState&);
   void PostSuccessHandlerCallback();
   bool IsDeleted() const;
   void Close();
-  void SetValueReady(IDBKey*, IDBKey* primary_key, RefPtr<IDBValue>);
-  IDBKey* IdbPrimaryKey() const { return primary_key_; }
+  void SetValueReady(std::unique_ptr<IDBKey>,
+                     std::unique_ptr<IDBKey> primary_key,
+                     std::unique_ptr<IDBValue>);
+  const IDBKey* IdbPrimaryKey() const;
   virtual bool IsKeyCursor() const { return true; }
   virtual bool IsCursorWithValue() const { return false; }
 
@@ -102,7 +105,7 @@ class IDBCursor : public GarbageCollectedFinalized<IDBCursor>,
   IDBCursor(std::unique_ptr<WebIDBCursor>,
             WebIDBCursorDirection,
             IDBRequest*,
-            IDBAny* source,
+            const Source&,
             IDBTransaction*);
 
  private:
@@ -111,15 +114,26 @@ class IDBCursor : public GarbageCollectedFinalized<IDBCursor>,
   std::unique_ptr<WebIDBCursor> backend_;
   Member<IDBRequest> request_;
   const WebIDBCursorDirection direction_;
-  Member<IDBAny> source_;
+  Source source_;
   Member<IDBTransaction> transaction_;
   bool got_value_ = false;
   bool key_dirty_ = true;
   bool primary_key_dirty_ = true;
   bool value_dirty_ = true;
-  Member<IDBKey> key_;
-  Member<IDBKey> primary_key_;
-  RefPtr<IDBValue> value_;
+  std::unique_ptr<IDBKey> key_;
+
+  // Owns the cursor's primary key, unless it needs to be injected in the
+  // cursor's value. IDBValue's class comment describes when primary key
+  // injection occurs.
+  //
+  // The cursor's primary key should generally be accessed via IdbPrimaryKey(),
+  // as it handles both cases correctly.
+  std::unique_ptr<IDBKey> primary_key_unless_injected_;
+  Member<IDBAny> value_;
+
+#if DCHECK_IS_ON()
+  bool value_has_injected_primary_key_ = false;
+#endif  // DCHECK_IS_ON()
 };
 
 }  // namespace blink

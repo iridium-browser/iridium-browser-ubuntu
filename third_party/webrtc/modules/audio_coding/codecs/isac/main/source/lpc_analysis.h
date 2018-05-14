@@ -15,11 +15,11 @@
  *
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_ANALYSIS_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_ANALYSIS_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_ANALYSIS_H_
+#define MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_ANALYSIS_H_
 
-#include "settings.h"
-#include "structs.h"
+#include "modules/audio_coding/codecs/isac/main/source/settings.h"
+#include "modules/audio_coding/codecs/isac/main/source/structs.h"
 
 double WebRtcIsac_LevDurb(double *a, double *k, double *r, size_t order);
 
@@ -47,4 +47,4 @@ void WebRtcIsac_GetLpcCoefUb(
     double*      varscale,
     int16_t  bandwidth);
 
-#endif /* WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_ANALYIS_H_ */
+#endif /* MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_ANALYIS_H_ */

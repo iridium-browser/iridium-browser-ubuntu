@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "ash/ash_switches.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -29,6 +29,7 @@
 #include "components/ssl_config/ssl_config_switches.h"
 #include "components/sync/base/pref_names.h"
 #include "content/public/common/content_switches.h"
+#include "services/network/public/cpp/network_switches.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/display/display_switches.h"
 
@@ -48,6 +49,12 @@ const CommandLinePrefStore::SwitchToPreferenceMapEntry
         {switches::kAuthAndroidNegotiateAccountType,
          prefs::kAuthAndroidNegotiateAccountType},
 #endif
+        {switches::kUnsafelyTreatInsecureOriginAsSecure,
+         prefs::kUnsafelyTreatInsecureOriginAsSecure},
+        // TODO(https://crbug.com/760761): This is not the ideal way to
+        // implement this. Refactor enterprise policy and command line handling
+        // so that this line isn't necessary, if possible.
+        {switches::kIsolateOrigins, prefs::kIsolateOrigins},
 };
 
 const CommandLinePrefStore::SwitchToPreferenceMapEntry
@@ -62,10 +69,8 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
         {switches::kEnableCloudPrintProxy, prefs::kCloudPrintProxyEnabled,
          true},
         {switches::kAllowOutdatedPlugins, prefs::kPluginsAllowOutdated, true},
-        {switches::kAlwaysAuthorizePlugins, prefs::kPluginsAlwaysAuthorize,
-         true},
         {switches::kNoPings, prefs::kEnableHyperlinkAuditing, false},
-        {switches::kNoReferrers, prefs::kEnableReferrers, false},
+        {network::switches::kNoReferrers, prefs::kEnableReferrers, false},
         {switches::kAllowRunningInsecureContent,
          prefs::kWebKitAllowRunningInsecureContent, true},
         {switches::kAllowCrossOriginAuthPrompt,
@@ -76,6 +81,8 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
          prefs::kEnableTouchpadThreeFingerClick, true},
         {switches::kEnableUnifiedDesktop,
          prefs::kUnifiedDesktopEnabledByDefault, true},
+        {chromeos::switches::kEnableCastReceiver, prefs::kCastReceiverEnabled,
+         true},
 #endif
         {switches::kUnsafePacUrl, prefs::kPacHttpsUrlStrippingEnabled, false},
         {switches::kEnableLocalSyncBackend,
@@ -84,6 +91,7 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
         {switches::kUseSystemDefaultPrinter,
          prefs::kPrintPreviewUseSystemDefaultPrinter, true},
 #endif
+        {switches::kSitePerProcess, prefs::kSitePerProcess, true},
 };
 
 const CommandLinePrefStore::SwitchToPreferenceMapEntry
@@ -167,7 +175,7 @@ void ChromeCommandLinePrefStore::ApplySSLSwitches() {
       command_line()->GetSwitchValueASCII(switches::kTLS13Variant) !=
           switches::kTLS13VariantDisabled) {
     SetValue(ssl_config::prefs::kSSLVersionMax,
-             base::MakeUnique<base::Value>(switches::kSSLVersionTLSv13),
+             std::make_unique<base::Value>(switches::kSSLVersionTLSv13),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }
 }
@@ -175,7 +183,7 @@ void ChromeCommandLinePrefStore::ApplySSLSwitches() {
 void ChromeCommandLinePrefStore::ApplyBackgroundModeSwitches() {
   if (command_line()->HasSwitch(switches::kDisableExtensions)) {
     SetValue(prefs::kBackgroundModeEnabled,
-             base::MakeUnique<base::Value>(false),
+             std::make_unique<base::Value>(false),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }
 }

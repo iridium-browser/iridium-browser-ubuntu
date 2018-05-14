@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -21,9 +22,6 @@ from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib import retry_util
-
-
-site_config = config_lib.GetConfig()
 
 
 # Retry a git operation if git returns a error response with any of these
@@ -89,17 +87,22 @@ class GitException(Exception):
   """An exception related to git."""
 
 
-class RemoteRef(object):
-  """Object representing a remote ref.
+# remote: git remote name (e.g., 'origin',
+#   'https://chromium.googlesource.com/chromiumos/chromite.git', etc.).
+# ref: git remote/local ref name (e.g., 'refs/heads/master').
+# project_name: git project name (e.g., 'chromiumos/chromite'.)
+_RemoteRef = collections.namedtuple(
+    '_RemoteRef', ('remote', 'ref', 'project_name'))
 
-  A remote ref encapsulates both a remote (e.g., 'origin',
-  'https://chromium.googlesource.com/chromiumos/chromite.git', etc.) and a ref
-  name (e.g., 'refs/heads/master').
-  """
 
-  def __init__(self, remote, ref):
-    self.remote = remote
-    self.ref = ref
+class RemoteRef(_RemoteRef):
+  """Object representing a remote ref."""
+
+  def __new__(cls, remote, ref, project_name=None):
+    return super(RemoteRef, cls).__new__(cls, remote, ref, project_name)
+
+  def __init__(self, remote, ref, project_name=None):
+    super(RemoteRef, self).__init__(remote, ref, project_name)
 
 
 def FindRepoDir(path):
@@ -310,6 +313,7 @@ class ProjectCheckout(dict):
       return False
 
     # Old heuristic.
+    site_config = config_lib.GetConfig()
     if (self['remote'] not in site_config.params.CROS_REMOTES or
         self['remote'] not in site_config.params.BRANCHABLE_PROJECTS):
       return False
@@ -487,6 +491,7 @@ class Manifest(object):
         remote_name, StripRefs(upstream),
     )
 
+    site_config = config_lib.GetConfig()
     attrs['pushable'] = remote in site_config.params.GIT_REMOTES
     if attrs['pushable']:
       attrs['push_remote'] = remote
@@ -633,10 +638,9 @@ class ManifestCheckout(Manifest):
     """
     checkouts = []
     for checkout in self.checkouts_by_name.get(project, []):
-      if project == checkout['name']:
-        tracking_branch = checkout['tracking_branch']
-        if branch is None or StripRefs(branch) == StripRefs(tracking_branch):
-          checkouts.append(checkout)
+      tracking_branch = checkout['tracking_branch']
+      if branch is None or StripRefs(branch) == StripRefs(tracking_branch):
+        checkouts.append(checkout)
     return checkouts
 
   def FindCheckout(self, project, branch=None, strict=True):
@@ -1015,7 +1019,9 @@ def GetTrackingBranchViaManifest(git_repo, for_checkout=True, for_push=False,
       if not revision.startswith('refs/heads/'):
         return None
 
-    return RemoteRef(remote, revision)
+    project_name = checkout.get('name', None)
+
+    return RemoteRef(remote, revision, project_name=project_name)
   except EnvironmentError as e:
     if e.errno != errno.ENOENT:
       raise
@@ -1224,7 +1230,8 @@ def UploadCL(git_repo, remote, branch, local_branch='HEAD', draft=False,
     ref = ref + '%'+ ','.join(reviewer_list)
   remote_ref = RemoteRef(remote, ref)
   kwargs.setdefault('capture_output', False)
-  GitPush(git_repo, local_branch, remote_ref, **kwargs)
+  kwargs.setdefault('combine_stdout_stderr', True)
+  return GitPush(git_repo, local_branch, remote_ref, **kwargs)
 
 
 def GitPush(git_repo, refspec, push_to, force=False, retry=True,
@@ -1251,7 +1258,8 @@ def GitPush(git_repo, refspec, push_to, force=False, retry=True,
     logging.info('Would have run "%s"', cmd)
     return
 
-  RunGit(git_repo, cmd, retry=retry, capture_output=capture_output, **kwargs)
+  return RunGit(git_repo, cmd, retry=retry, capture_output=capture_output,
+                **kwargs)
 
 
 # TODO(build): Switch callers of this function to use CreateBranch instead.
@@ -1277,31 +1285,36 @@ def CreatePushBranch(branch, git_repo, sync=True, remote_push_branch=None):
   RunGit(git_repo, ['checkout', '-B', branch, '-t', remote_push_branch.ref])
 
 
-def SyncPushBranch(git_repo, remote, rebase_target):
-  """Sync and rebase a local push branch to the latest remote version.
+def SyncPushBranch(git_repo, remote, target, use_merge=False, **kwargs):
+  """Sync and rebase or merge a local push branch to the latest remote version.
 
   Args:
     git_repo: Git repository to rebase in.
     remote: The remote returned by GetTrackingBranch(for_push=True)
-    rebase_target: The branch name returned by GetTrackingBranch().  Must
+    target: The branch name returned by GetTrackingBranch().  Must
       start with refs/remotes/ (specifically must be a proper remote
       target rather than an ambiguous name).
+    use_merge: Default: False. If True, use merge to bring local branch up to
+      date with remote branch. Otherwise, use rebase.
+    kwargs: Arguments passed through to RunGit.
   """
-  if not rebase_target.startswith('refs/remotes/'):
+  subcommand = 'merge' if use_merge else 'rebase'
+
+  if not target.startswith('refs/remotes/'):
     raise Exception(
-        'Was asked to rebase to a non branch target w/in the push pathways.  '
-        'This is highly indicative of an internal bug.  remote %s, rebase %s'
-        % (remote, rebase_target))
+        'Was asked to %s to a non branch target w/in the push pathways.  '
+        'This is highly indicative of an internal bug.  remote %s, %s %s'
+        % (subcommand, remote, subcommand, target))
 
   cmd = ['remote', 'update', remote]
-  RunGit(git_repo, cmd)
+  RunGit(git_repo, cmd, **kwargs)
 
   try:
-    RunGit(git_repo, ['rebase', rebase_target])
+    RunGit(git_repo, [subcommand, target], **kwargs)
   except cros_build_lib.RunCommandError:
     # Looks like our change conflicts with upstream. Cleanup our failed
     # rebase.
-    RunGit(git_repo, ['rebase', '--abort'], error_code_ok=True)
+    RunGit(git_repo, [subcommand, '--abort'], error_code_ok=True, **kwargs)
     raise
 
 

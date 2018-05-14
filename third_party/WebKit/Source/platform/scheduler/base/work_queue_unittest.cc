@@ -5,9 +5,9 @@
 #include "platform/scheduler/base/work_queue.h"
 
 #include <stddef.h>
+#include <memory>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "platform/scheduler/base/real_time_domain.h"
 #include "platform/scheduler/base/task_queue_impl.h"
 #include "platform/scheduler/base/work_queue_sets.h"
@@ -18,17 +18,25 @@ namespace scheduler {
 namespace internal {
 namespace {
 void NopTask() {}
-}
+
+struct Cancelable {
+  Cancelable() : weak_ptr_factory(this) {}
+
+  void NopTask() {}
+
+  base::WeakPtrFactory<Cancelable> weak_ptr_factory;
+};
+}  // namespace
 
 class WorkQueueTest : public ::testing::Test {
  public:
   void SetUp() override {
     time_domain_.reset(new RealTimeDomain());
-    task_queue_ = base::MakeUnique<TaskQueueImpl>(nullptr, time_domain_.get(),
+    task_queue_ = std::make_unique<TaskQueueImpl>(nullptr, time_domain_.get(),
                                                   TaskQueue::Spec("test"));
 
     work_queue_.reset(new WorkQueue(task_queue_.get(), "test",
-                                    WorkQueue::QueueType::IMMEDIATE));
+                                    WorkQueue::QueueType::kImmediate));
     work_queue_sets_.reset(new WorkQueueSets(1, "test"));
     work_queue_sets_->AddQueue(work_queue_.get(), 0);
   }
@@ -36,10 +44,31 @@ class WorkQueueTest : public ::testing::Test {
   void TearDown() override { work_queue_sets_->RemoveQueue(work_queue_.get()); }
 
  protected:
-  TaskQueueImpl::Task FakeTaskWithEnqueueOrder(int enqueue_order) {
-    TaskQueueImpl::Task fake_task(FROM_HERE, base::Bind(&NopTask),
-                                  base::TimeTicks(), 0, true);
+  TaskQueueImpl::Task FakeCancelableTaskWithEnqueueOrder(
+      int enqueue_order,
+      base::WeakPtr<Cancelable> weak_ptr) {
+    TaskQueueImpl::Task fake_task(
+        TaskQueue::PostedTask(base::BindOnce(&Cancelable::NopTask, weak_ptr),
+                              FROM_HERE),
+        base::TimeTicks(), 0);
     fake_task.set_enqueue_order(enqueue_order);
+    return fake_task;
+  }
+
+  TaskQueueImpl::Task FakeTaskWithEnqueueOrder(int enqueue_order) {
+    TaskQueueImpl::Task fake_task(
+        TaskQueue::PostedTask(base::BindOnce(&NopTask), FROM_HERE),
+        base::TimeTicks(), 0);
+    fake_task.set_enqueue_order(enqueue_order);
+    return fake_task;
+  }
+
+  TaskQueueImpl::Task FakeNonNestableTaskWithEnqueueOrder(int enqueue_order) {
+    TaskQueueImpl::Task fake_task(
+        TaskQueue::PostedTask(base::BindOnce(&NopTask), FROM_HERE),
+        base::TimeTicks(), 0);
+    fake_task.set_enqueue_order(enqueue_order);
+    fake_task.nestable = base::Nestable::kNonNestable;
     return fake_task;
   }
 
@@ -119,6 +148,42 @@ TEST_F(WorkQueueTest, PushAfterFenceHit) {
 
   work_queue_->Push(FakeTaskWithEnqueueOrder(2));
   EXPECT_FALSE(work_queue_sets_->GetOldestQueueInSet(0, &work_queue));
+}
+
+TEST_F(WorkQueueTest, PushNonNestableTaskToFront) {
+  WorkQueue* work_queue;
+  EXPECT_FALSE(work_queue_sets_->GetOldestQueueInSet(0, &work_queue));
+
+  work_queue_->PushNonNestableTaskToFront(
+      FakeNonNestableTaskWithEnqueueOrder(3));
+  EXPECT_TRUE(work_queue_sets_->GetOldestQueueInSet(0, &work_queue));
+  EXPECT_EQ(work_queue_.get(), work_queue);
+
+  work_queue_->PushNonNestableTaskToFront(
+      FakeNonNestableTaskWithEnqueueOrder(2));
+
+  EXPECT_EQ(2ull, work_queue_->GetFrontTask()->enqueue_order());
+  EXPECT_EQ(3ull, work_queue_->GetBackTask()->enqueue_order());
+}
+
+TEST_F(WorkQueueTest, PushNonNestableTaskToFrontAfterFenceHit) {
+  work_queue_->InsertFence(1);
+  WorkQueue* work_queue;
+  EXPECT_FALSE(work_queue_sets_->GetOldestQueueInSet(0, &work_queue));
+
+  work_queue_->PushNonNestableTaskToFront(
+      FakeNonNestableTaskWithEnqueueOrder(2));
+  EXPECT_FALSE(work_queue_sets_->GetOldestQueueInSet(0, &work_queue));
+}
+
+TEST_F(WorkQueueTest, PushNonNestableTaskToFrontBeforeFenceHit) {
+  work_queue_->InsertFence(3);
+  WorkQueue* work_queue;
+  EXPECT_FALSE(work_queue_sets_->GetOldestQueueInSet(0, &work_queue));
+
+  work_queue_->PushNonNestableTaskToFront(
+      FakeNonNestableTaskWithEnqueueOrder(2));
+  EXPECT_TRUE(work_queue_sets_->GetOldestQueueInSet(0, &work_queue));
 }
 
 TEST_F(WorkQueueTest, ReloadEmptyImmediateQueue) {
@@ -366,6 +431,42 @@ TEST_F(WorkQueueTest, InsertFenceAfterEnqueuing) {
 
   EnqueueOrder enqueue_order;
   EXPECT_FALSE(work_queue_->GetFrontTaskEnqueueOrder(&enqueue_order));
+}
+
+TEST_F(WorkQueueTest, RemoveAllCanceledTasksFromFront) {
+  {
+    Cancelable cancelable;
+    work_queue_->Push(FakeCancelableTaskWithEnqueueOrder(
+        2, cancelable.weak_ptr_factory.GetWeakPtr()));
+    work_queue_->Push(FakeCancelableTaskWithEnqueueOrder(
+        3, cancelable.weak_ptr_factory.GetWeakPtr()));
+    work_queue_->Push(FakeCancelableTaskWithEnqueueOrder(
+        4, cancelable.weak_ptr_factory.GetWeakPtr()));
+    work_queue_->Push(FakeTaskWithEnqueueOrder(5));
+  }
+  EXPECT_TRUE(work_queue_->RemoveAllCanceledTasksFromFront());
+
+  EnqueueOrder enqueue_order;
+  EXPECT_TRUE(work_queue_->GetFrontTaskEnqueueOrder(&enqueue_order));
+  EXPECT_EQ(5ull, enqueue_order);
+}
+
+TEST_F(WorkQueueTest, RemoveAllCanceledTasksFromFrontTasksNotCanceled) {
+  {
+    Cancelable cancelable;
+    work_queue_->Push(FakeCancelableTaskWithEnqueueOrder(
+        2, cancelable.weak_ptr_factory.GetWeakPtr()));
+    work_queue_->Push(FakeCancelableTaskWithEnqueueOrder(
+        3, cancelable.weak_ptr_factory.GetWeakPtr()));
+    work_queue_->Push(FakeCancelableTaskWithEnqueueOrder(
+        4, cancelable.weak_ptr_factory.GetWeakPtr()));
+    work_queue_->Push(FakeTaskWithEnqueueOrder(5));
+    EXPECT_FALSE(work_queue_->RemoveAllCanceledTasksFromFront());
+
+    EnqueueOrder enqueue_order;
+    EXPECT_TRUE(work_queue_->GetFrontTaskEnqueueOrder(&enqueue_order));
+    EXPECT_EQ(2ull, enqueue_order);
+  }
 }
 
 }  // namespace internal

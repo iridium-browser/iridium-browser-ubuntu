@@ -10,7 +10,6 @@
 #include <memory>
 #include <vector>
 
-#import "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
 #import "ios/web/public/navigation_item_list.h"
@@ -36,8 +35,6 @@ class LegacyNavigationManagerImpl : public NavigationManagerImpl {
   void SetBrowserState(BrowserState* browser_state) override;
   void SetSessionController(CRWSessionController* session_controller) override;
   void InitializeSession() override;
-  void ReplaceSessionHistory(std::vector<std::unique_ptr<NavigationItem>> items,
-                             int current_index) override;
   void OnNavigationItemsPruned(size_t pruned_item_count) override;
   void OnNavigationItemChanged() override;
   void OnNavigationItemCommitted() override;
@@ -50,23 +47,18 @@ class LegacyNavigationManagerImpl : public NavigationManagerImpl {
       NavigationInitiationType initiation_type,
       UserAgentOverrideOption user_agent_override_option) override;
   void CommitPendingItem() override;
-  std::unique_ptr<std::vector<BrowserURLRewriter::URLRewriter>>
-  GetTransientURLRewriters() override;
-  void RemoveTransientURLRewriters() override;
   int GetIndexForOffset(int offset) const override;
   int GetPreviousItemIndex() const override;
+  void SetPreviousItemIndex(int previous_item_index) override;
+  void AddPushStateItemIfNecessary(const GURL& url,
+                                   NSString* state_object,
+                                   ui::PageTransition transition) override;
 
   // NavigationManager:
   BrowserState* GetBrowserState() const override;
   WebState* GetWebState() const override;
   NavigationItem* GetVisibleItem() const override;
-  NavigationItem* GetLastCommittedItem() const override;
-  NavigationItem* GetPendingItem() const override;
-  NavigationItem* GetTransientItem() const override;
   void DiscardNonCommittedItems() override;
-  void LoadURLWithParams(const NavigationManager::WebLoadParams&) override;
-  void AddTransientURLRewriter(
-      BrowserURLRewriter::URLRewriter rewriter) override;
   int GetItemCount() const override;
   NavigationItem* GetItemAtIndex(size_t index) const override;
   int GetIndexOfItem(const NavigationItem* item) const override;
@@ -78,9 +70,10 @@ class LegacyNavigationManagerImpl : public NavigationManagerImpl {
   bool CanGoToOffset(int offset) const override;
   void GoBack() override;
   void GoForward() override;
-  void GoToIndex(int index) override;
   NavigationItemList GetBackwardItems() const override;
   NavigationItemList GetForwardItems() const override;
+  void Restore(int last_committed_item_index,
+               std::vector<std::unique_ptr<NavigationItem>> items) override;
   void CopyStateFromAndPrune(const NavigationManager* source) override;
   bool CanPruneAllButLastCommittedItem() const override;
 
@@ -89,24 +82,16 @@ class LegacyNavigationManagerImpl : public NavigationManagerImpl {
   // NavigationManagerImpl.
   friend SessionStorageBuilder;
 
-  // NavigationManagerImpl methods used by SessionStorageBuilder.
+  // NavigationManagerImpl:
   NavigationItemImpl* GetNavigationItemImplAtIndex(size_t index) const override;
-
-  // Returns true if the PageTransition for the underlying navigation item at
-  // |index| has ui::PAGE_TRANSITION_IS_REDIRECT_MASK.
-  bool IsRedirectItemAtIndex(int index) const;
-
-  // Returns the most recent NavigationItem that does not have an app-specific
-  // URL.
-  NavigationItem* GetLastCommittedNonAppSpecificItem() const;
+  NavigationItemImpl* GetLastCommittedItemImpl() const override;
+  NavigationItemImpl* GetPendingItemImpl() const override;
+  NavigationItemImpl* GetTransientItemImpl() const override;
+  void FinishGoToIndex(int index, NavigationInitiationType type) override;
 
   // CRWSessionController that backs this instance.
   // TODO(stuartmorgan): Fold CRWSessionController into this class.
-  base::scoped_nsobject<CRWSessionController> session_controller_;
-
-  // List of transient url rewriters added by |AddTransientURLRewriter()|.
-  std::unique_ptr<std::vector<BrowserURLRewriter::URLRewriter>>
-      transient_url_rewriters_;
+  CRWSessionController* session_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(LegacyNavigationManagerImpl);
 };

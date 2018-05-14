@@ -29,33 +29,41 @@ class MODULES_EXPORT AudioWorkletProcessorDefinition final
   static AudioWorkletProcessorDefinition* Create(
       v8::Isolate*,
       const String& name,
-      v8::Local<v8::Function> constructor,
+      v8::Local<v8::Object> constructor,
       v8::Local<v8::Function> process);
 
   virtual ~AudioWorkletProcessorDefinition();
 
   const String& GetName() const { return name_; }
-  v8::Local<v8::Function> ConstructorLocal(v8::Isolate*);
+  v8::Local<v8::Object> ConstructorLocal(v8::Isolate*);
   v8::Local<v8::Function> ProcessLocal(v8::Isolate*);
   void SetAudioParamDescriptors(const HeapVector<AudioParamDescriptor>&);
   const Vector<String> GetAudioParamDescriptorNames() const;
   const AudioParamDescriptor* GetAudioParamDescriptor(const String& key) const;
 
-  DEFINE_INLINE_TRACE() { visitor->Trace(audio_param_descriptors_); };
-  DECLARE_TRACE_WRAPPERS();
+  // Flag for data synchronization of definition between
+  // AudioWorkletMessagingProxy and AudioWorkletGlobalScope.
+  bool IsSynchronized() const { return is_synchronized_; }
+  void MarkAsSynchronized() { is_synchronized_ = true; }
+
+  void Trace(blink::Visitor* visitor) {
+    visitor->Trace(audio_param_descriptors_);
+  };
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   AudioWorkletProcessorDefinition(
       v8::Isolate*,
       const String& name,
-      v8::Local<v8::Function> constructor,
+      v8::Local<v8::Object> constructor,
       v8::Local<v8::Function> process);
 
   const String name_;
+  bool is_synchronized_ = false;
 
   // The definition is per global scope. The active instance of
   // |AudioProcessorWorklet| should be passed into these to perform JS function.
-  TraceWrapperV8Reference<v8::Function> constructor_;
+  TraceWrapperV8Reference<v8::Object> constructor_;
   TraceWrapperV8Reference<v8::Function> process_;
 
   HeapVector<AudioParamDescriptor> audio_param_descriptors_;

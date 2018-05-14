@@ -20,10 +20,8 @@ web-platform-tests, including tips for writing and reviewing tests.
 
 ## Importing tests
 
-Chromium has a mirror
-([web-platform-tests](https://chromium.googlesource.com/external/w3c/web-platform-tests/)
-of the
-GitHub repos, and periodically imports a subset of the tests so that they are
+Chromium has a [mirror](https://chromium.googlesource.com/external/w3c/web-platform-tests/)
+of the GitHub repo and periodically imports a subset of the tests to
 run as part of the regular Blink layout test testing process.
 
 The goals of this process are to be able to run web-platform-tests unmodified
@@ -44,7 +42,11 @@ The easiest way to check the status of recent imports is to look at:
 -   Recent CLs created by
     [blink-w3c-test-autoroller@chromium.org](https://chromium-review.googlesource.com/q/owner:blink-w3c-test-autoroller%40chromium.org).
 
-Automatic imports are intended to run at least once every 24 hours.
+The import jobs will generally be green if either there was nothing to do,
+or a CL was successfully submitted.
+
+If the importer starts misbehaving, it could be disabled by turning off the
+auto-import mode by landing [this CL](https://crrev.com/c/617479/).
 
 ### Failures caused by automatic imports.
 
@@ -91,7 +93,7 @@ For maintainers:
 -   The exporter runs continuously under the
     [chromium.infra.cron master](https://build.chromium.org/p/chromium.infra.cron/builders/wpt-exporter).
 -   The source lives in
-    [third_party/WebKit/Tools/Scripts/wpt-exporter](../../third_party/WebKit/Tools/Scripts/wpt-exporter).
+    [third_party/WebKit/Tools/Scripts/wpt-export](../../third_party/WebKit/Tools/Scripts/wpt-export).
 -   If the exporter starts misbehaving
     (for example, creating the same PR over and over again)
     put it in "dry run" mode by landing [this CL](https://crrev.com/c/462381/).
@@ -108,6 +110,25 @@ for Windows. To check what files are skipped in import, check the recent logs
 for [wpt-importer
 builder](https://build.chromium.org/p/chromium.infra.cron/builders/wpt-importer).
 
+### GitHub credentials
+
+When manually running the `wpt-import` and `wpt-export` scripts, several
+requests are made to GitHub to query the status of pull requests, look for
+existing exported commits etc. GitHub has a [fairly
+low](https://developer.github.com/v3/#rate-limiting) request limit for
+unauthenticated requests, so it is recommended that you let `wpt-export` and
+`wpt-import` use your GitHub credentials when sending requests:
+
+ 1. Generate a new [personal access token](https://github.com/settings/tokens)
+ 1. Set up your credentials by either:
+     * Setting the `GH_USER` environment variable to your GitHub user name
+       and the `GH_TOKEN` environment variable to the access token you have
+       just created **or**
+     * Creating a JSON file with two keys: `GH_USER`, your GitHub user name,
+       and `GH_TOKEN`, the access token you have just generated. After that,
+       pass `--credentials-json <path-to-json>` to `wpt-export` and
+       `wpt-import`.
+
 ### Manual import
 
 To pull the latest versions of the tests that are currently being imported, you
@@ -118,6 +139,10 @@ That script will pull the latest version of the tests from our mirrors of the
 upstream repositories. If any new versions of tests are found, they will be
 committed locally to your local repository. You may then upload the changes.
 
+Remember your import might fail due to GitHub's limit for unauthenticated
+requests, so consider [passing your GitHub credentials](#GitHub-credentials) to
+the script.
+
 ### Enabling import for a new directory
 
 If you wish to add more tests (by un-skipping some of the directories currently
@@ -125,7 +150,11 @@ skipped in `W3CImportExpectations`), you can modify that file locally and commit
 it, and on the next auto-import, the new tests should be imported.
 
 If you want to import immediately (in order to try the tests out locally, etc)
-you can also run `wpt-import --allow-local-commits`, but this is not required.
+you can also run `wpt-import`, but this is not required.
+
+Remember your import might fail due to GitHub's limit for unauthenticated
+requests, so consider [passing your GitHub credentials](#GitHub-credentials) to
+the script.
 
 ## Writing tests
 
@@ -154,16 +183,21 @@ should be derived from a specification's normative requirements, and not go
 beyond them. It is often necessary to change the specification to clarify what
 is and isn't required.
 
-When the standards discussion is still ongoing or blocked on some implementation
-successfully shipping the hoped-for behavior, write the tests outside of
-web-platform-tests and upstream them when the specification is finally updated.
-Optionally, it may be possible to write deliberately failing tests against the
-current specification and later update them.
+When implementation experience is needed to inform the specification work,
+[tentative tests](http://web-platform-tests.org/writing-tests/file-names.html)
+can be appropriate. It should be apparent in context why the test is tentative
+and what needs to be resolved to make it non-tentative.
 
 ### Tests that require testing APIs
 
-Tests that depend on `internals.*`, `eventSender.*` or other internal testing
-APIs cannot yet be written as part of web-platform-tests.
+[testdriver.js](http://web-platform-tests.org/writing-tests/testdriver.html)
+provides a means to automate tests that cannot be written purely using web
+platform APIs, similar to `internals.*` and `eventSender.*` in regular Blink
+layout tests.
+
+If no testdriver.js API exists, check if it's a
+[known issue](https://github.com/w3c/web-platform-tests/labels/testdriver.js)
+and otherwise consider filing a new issue.
 
 An alternative is to write manual tests that are automated with scripts from
 [wpt_automation](../../third_party/WebKit/LayoutTests/external/wpt_automation).
@@ -176,10 +210,6 @@ engines, but are more valuable than purely manual tests.
 Manual tests that have no automation are still imported, but skipped in
 [NeverFixTests](../../third_party/WebKit/LayoutTests/NeverFixTests); see
 [issue 738489](https://crbug.com/738489).
-
-*** note
-TODO(foolip): Figure out and document a more scalable test automation solution.
-***
 
 ### Adding new top-level directories
 
@@ -197,6 +227,9 @@ GitHub. You can [add it as a secondary address on your GitHub
 account](https://help.github.com/articles/adding-an-email-address-to-your-github-account/)
 to link your exported commits to your GitHub profile.
 
+If you are a Googler, you can also register your GitHub account at go/github,
+making it easier for other Googlers to find you.
+
 ### What if there are conflicts?
 
 This cannot be avoided entirely as the two repositories are independent, but
@@ -208,6 +241,13 @@ resolve the conflict.
 
 It's still possible to make direct pull requests to web-platform-tests, see
 http://web-platform-tests.org/appendix/github-intro.html.
+
+## Running tests
+
+Same as Blink layout tests, you can use
+[`run-webkit-tests`](layout_tests.md#running-the-tests) to run any WPT test.
+
+One thing to note is that glob patterns for WPT tests are not yet supported.
 
 ## Reviewing tests
 

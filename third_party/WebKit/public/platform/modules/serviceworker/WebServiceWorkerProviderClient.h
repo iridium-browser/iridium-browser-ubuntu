@@ -32,29 +32,32 @@
 #define WebServiceWorkerProviderClient_h
 
 #include "public/platform/WebCommon.h"
-#include "public/platform/WebMessagePortChannel.h"
+#include "public/platform/WebVector.h"
 #include "public/platform/modules/serviceworker/WebServiceWorker.h"
+#include "public/platform/web_feature.mojom-shared.h"
+#include "third_party/WebKit/public/common/message_port/transferable_message.h"
 
 #include <memory>
 
 namespace blink {
 
 class WebServiceWorker;
-class WebString;
 
-// This class is the interface for embedders to talk to
-// ServiceWorkerContainer.
+// See WebServiceWorkerProvider for full documentation.
+//
+// WebServiceWorkerProviderClient is implemented by ServiceWorkerContainer.
+// We probably wouldn't need this abstract class, except we also make a
+// MockServiceWorkerProviderClient for unit tests.
 class WebServiceWorkerProviderClient {
  public:
-  virtual ~WebServiceWorkerProviderClient() {}
+  virtual ~WebServiceWorkerProviderClient() = default;
 
   virtual void SetController(std::unique_ptr<WebServiceWorker::Handle>,
                              bool should_notify_controller_change) = 0;
 
   virtual void DispatchMessageEvent(std::unique_ptr<WebServiceWorker::Handle>,
-                                    const WebString& message,
-                                    WebMessagePortChannelArray channels) = 0;
-  virtual void CountFeature(uint32_t feature) = 0;
+                                    TransferableMessage) = 0;
+  virtual void CountFeature(mojom::WebFeature) = 0;
 };
 
 }  // namespace blink

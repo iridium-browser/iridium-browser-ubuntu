@@ -8,6 +8,7 @@
 
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
+#import "ios/chrome/browser/ui/util/top_view_controller.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 
@@ -31,15 +32,9 @@ NSString* kTitle = @"Foo Title";
 
 // Tests that if the alert coordinator is destroyed, the alert is dismissed.
 - (void)testDismissOnDestroy {
-// TODO(crbug.com/663026): Reenable the test for devices.
-#if !TARGET_IPHONE_SIMULATOR
-  EARL_GREY_TEST_DISABLED(@"Disabled for devices because existing system "
-                          @"alerts would prevent app alerts to present "
-                          @"correctly.");
-#endif
-
+  // TODO(crbug.com/754642): Remove TopPresentedViewControllerFrom().
   UIViewController* topViewController =
-      [[[UIApplication sharedApplication] keyWindow] rootViewController];
+      top_view_controller::TopPresentedViewController();
 
   AlertCoordinator* alertCoordinator =
       [[AlertCoordinator alloc] initWithBaseViewController:topViewController
@@ -56,15 +51,9 @@ NSString* kTitle = @"Foo Title";
 }
 
 - (void)testNoInteractionActionAfterTap {
-// TODO(crbug.com/663026): Reenable the test for devices.
-#if !TARGET_IPHONE_SIMULATOR
-  EARL_GREY_TEST_DISABLED(@"Disabled for devices because existing system "
-                          @"alerts would prevent app alerts to present "
-                          @"correctly.");
-#endif
-
+  // TODO(crbug.com/754642): Remove TopPresentedViewControllerFrom().
   UIViewController* topViewController =
-      [[[UIApplication sharedApplication] keyWindow] rootViewController];
+      top_view_controller::TopPresentedViewController();
 
   AlertCoordinator* alertCoordinator =
       [[AlertCoordinator alloc] initWithBaseViewController:topViewController

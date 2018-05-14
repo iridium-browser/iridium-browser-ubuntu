@@ -4,11 +4,11 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromeos/dbus/fake_gsm_sms_client.h"
@@ -29,8 +29,7 @@ FakeGsmSMSClient::FakeGsmSMSClient()
   test_messages_.push_back("Test Message 6");
 }
 
-FakeGsmSMSClient::~FakeGsmSMSClient() {
-}
+FakeGsmSMSClient::~FakeGsmSMSClient() = default;
 
 void FakeGsmSMSClient::Init(dbus::Bus* bus) {
 }
@@ -51,28 +50,31 @@ void FakeGsmSMSClient::ResetSmsReceivedHandler(
 void FakeGsmSMSClient::Delete(const std::string& service_name,
                               const dbus::ObjectPath& object_path,
                               uint32_t index,
-                              const DeleteCallback& callback) {
-  message_list_.Remove(index, NULL);
-  callback.Run();
+                              VoidDBusMethodCallback callback) {
+  message_list_.Remove(index, nullptr);
+  std::move(callback).Run(true);
 }
 
 void FakeGsmSMSClient::Get(const std::string& service_name,
                            const dbus::ObjectPath& object_path,
                            uint32_t index,
-                           const GetCallback& callback) {
-  base::DictionaryValue* dictionary = NULL;
-  if (message_list_.GetDictionary(index, &dictionary)) {
-    callback.Run(*dictionary);
+                           DBusMethodCallback<base::DictionaryValue> callback) {
+  base::DictionaryValue* dictionary = nullptr;
+  if (!message_list_.GetDictionary(index, &dictionary)) {
+    std::move(callback).Run(base::nullopt);
     return;
   }
-  base::DictionaryValue empty_dictionary;
-  callback.Run(empty_dictionary);
+
+  // TODO(crbug.com/646113): Once migration is done, this can be simplified.
+  base::DictionaryValue copy;
+  copy.MergeDictionary(dictionary);
+  std::move(callback).Run(std::move(copy));
 }
 
 void FakeGsmSMSClient::List(const std::string& service_name,
                             const dbus::ObjectPath& object_path,
-                            const ListCallback& callback) {
-  callback.Run(message_list_);
+                            DBusMethodCallback<base::ListValue> callback) {
+  std::move(callback).Run(base::ListValue(message_list_.GetList()));
 }
 
 void FakeGsmSMSClient::RequestUpdate(const std::string& service_name,
@@ -106,7 +108,7 @@ void FakeGsmSMSClient::PushTestMessageDelayed() {
 bool FakeGsmSMSClient::PushTestMessage() {
   if (test_index_ >= static_cast<int>(test_messages_.size()))
     return false;
-  auto message = base::MakeUnique<base::DictionaryValue>();
+  auto message = std::make_unique<base::DictionaryValue>();
   message->SetString("number", "000-000-0000");
   message->SetString("text", test_messages_[test_index_]);
   message->SetInteger("index", test_index_);

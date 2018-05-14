@@ -32,13 +32,20 @@
 #define WebURLRequest_h
 
 #include <memory>
-#include "WebAddressSpace.h"
-#include "WebCachePolicy.h"
 #include "WebCommon.h"
 #include "WebHTTPBody.h"
 #include "WebReferrerPolicy.h"
+#include "WebSecurityOrigin.h"
+#include "base/optional.h"
+#include "services/network/public/mojom/cors.mojom-shared.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "services/network/public/mojom/request_context_frame_type.mojom-shared.h"
 
 namespace blink {
+
+namespace mojom {
+enum class FetchCacheMode : int32_t;
+}  // namespace mojom
 
 class ResourceRequest;
 class WebHTTPBody;
@@ -49,13 +56,15 @@ class WebURL;
 
 class WebURLRequest {
  public:
-  enum Priority {
-    kPriorityUnresolved = -1,
-    kPriorityVeryLow,
-    kPriorityLow,
-    kPriorityMedium,
-    kPriorityHigh,
-    kPriorityVeryHigh,
+  enum class Priority {
+    kUnresolved = -1,
+    kVeryLow,
+    kLow,
+    kMedium,
+    kHigh,
+    kVeryHigh,
+    kLowest = kVeryLow,
+    kHighest = kVeryHigh,
   };
 
   // Corresponds to Fetch's "context":
@@ -97,45 +106,6 @@ class WebURLRequest {
     kRequestContextXSLT
   };
 
-  // Corresponds to Fetch's "context frame type":
-  // http://fetch.spec.whatwg.org/#concept-request-context-frame-type
-  enum FrameType : uint8_t {
-    kFrameTypeAuxiliary,
-    kFrameTypeNested,
-    kFrameTypeNone,
-    kFrameTypeTopLevel
-  };
-
-  enum FetchRequestMode : uint8_t {
-    kFetchRequestModeSameOrigin,
-    kFetchRequestModeNoCORS,
-    kFetchRequestModeCORS,
-    kFetchRequestModeCORSWithForcedPreflight,
-    kFetchRequestModeNavigate
-  };
-
-  enum FetchCredentialsMode : uint8_t {
-    kFetchCredentialsModeOmit,
-    kFetchCredentialsModeSameOrigin,
-    kFetchCredentialsModeInclude,
-    kFetchCredentialsModePassword
-  };
-
-  enum FetchRequestCacheMode : uint8_t {
-    kFetchRequestCacheModeDefault,
-    kFetchRequestCacheModeNoStore,
-    kFetchRequestCacheModeReload,
-    kFetchRequestCacheModeNoCache,
-    kFetchRequestCacheModeForceCache,
-    kFetchRequestCacheModeOnlyIfCached
-  };
-
-  enum FetchRedirectMode : uint8_t {
-    kFetchRedirectModeFollow,
-    kFetchRedirectModeError,
-    kFetchRedirectModeManual
-  };
-
   // Used to report performance metrics timed from the UI action that
   // triggered them (as opposed to navigation start time used in the
   // Navigation Timing API).
@@ -166,30 +136,13 @@ class WebURLRequest {
     kPreviewsOff = 1 << 5,  // Request a normal (non-Preview) version of
                             // the resource. Server transformations may
                             // still happen if the page is heavy.
+    kNoScriptOn = 1 << 6,   // Request that script be disabled for page load.
     kPreviewsStateLast = kPreviewsOff
-  };
-
-  // Indicates which service workers will receive fetch events for this request.
-  enum class ServiceWorkerMode : uint8_t {
-    // Relevant local and foreign service workers will get a fetch or
-    // foreignfetch event for this request.
-    kAll,
-    // Only relevant foreign service workers will get a foreignfetch event for
-    // this request.
-    kForeign,
-    // Neither local nor foreign service workers will get events for this
-    // request.
-    kNone
-  };
-
-  enum class LoadingIPCType : uint8_t {
-    kChromeIPC,
-    kMojo,
   };
 
   class ExtraData {
    public:
-    virtual ~ExtraData() {}
+    virtual ~ExtraData() = default;
   };
 
   BLINK_PLATFORM_EXPORT ~WebURLRequest();
@@ -204,8 +157,8 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT void SetURL(const WebURL&);
 
   // Used to implement third-party cookie blocking.
-  BLINK_PLATFORM_EXPORT WebURL FirstPartyForCookies() const;
-  BLINK_PLATFORM_EXPORT void SetFirstPartyForCookies(const WebURL&);
+  BLINK_PLATFORM_EXPORT WebURL SiteForCookies() const;
+  BLINK_PLATFORM_EXPORT void SetSiteForCookies(const WebURL&);
 
   // The origin of the execution context which originated the request. Used to
   // implement First-Party-Only cookie restrictions.
@@ -217,15 +170,15 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT bool AllowStoredCredentials() const;
   BLINK_PLATFORM_EXPORT void SetAllowStoredCredentials(bool);
 
-  BLINK_PLATFORM_EXPORT WebCachePolicy GetCachePolicy() const;
-  BLINK_PLATFORM_EXPORT void SetCachePolicy(WebCachePolicy);
+  BLINK_PLATFORM_EXPORT mojom::FetchCacheMode GetCacheMode() const;
+  BLINK_PLATFORM_EXPORT void SetCacheMode(mojom::FetchCacheMode);
 
   BLINK_PLATFORM_EXPORT WebString HttpMethod() const;
   BLINK_PLATFORM_EXPORT void SetHTTPMethod(const WebString&);
 
   BLINK_PLATFORM_EXPORT WebString HttpHeaderField(const WebString& name) const;
   // It's not possible to set the referrer header using this method. Use
-  // setHTTPReferrer instead.
+  // SetHTTPReferrer instead.
   BLINK_PLATFORM_EXPORT void SetHTTPHeaderField(const WebString& name,
                                                 const WebString& value);
   BLINK_PLATFORM_EXPORT void SetHTTPReferrer(const WebString& referrer,
@@ -254,14 +207,16 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT RequestContext GetRequestContext() const;
   BLINK_PLATFORM_EXPORT void SetRequestContext(RequestContext);
 
-  BLINK_PLATFORM_EXPORT FrameType GetFrameType() const;
-  BLINK_PLATFORM_EXPORT void SetFrameType(FrameType);
+  BLINK_PLATFORM_EXPORT network::mojom::RequestContextFrameType GetFrameType()
+      const;
+  BLINK_PLATFORM_EXPORT void SetFrameType(
+      network::mojom::RequestContextFrameType);
 
   BLINK_PLATFORM_EXPORT WebReferrerPolicy GetReferrerPolicy() const;
 
-  // Adds an HTTP origin header if it is empty and the HTTP method of the
+  // Sets an HTTP origin header if it is empty and the HTTP method of the
   // request requires it.
-  BLINK_PLATFORM_EXPORT void AddHTTPOriginIfNeeded(const WebSecurityOrigin&);
+  BLINK_PLATFORM_EXPORT void SetHTTPOriginIfNeeded(const WebSecurityOrigin&);
 
   // True if the request was user initiated.
   BLINK_PLATFORM_EXPORT bool HasUserGesture() const;
@@ -272,17 +227,19 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT int RequestorID() const;
   BLINK_PLATFORM_EXPORT void SetRequestorID(int);
 
-  // A consumer controlled value intended to be used to identify the
-  // process of the requestor.
-  BLINK_PLATFORM_EXPORT int RequestorProcessID() const;
-  BLINK_PLATFORM_EXPORT void SetRequestorProcessID(int);
+  // The unique child id (not PID) of the process from which this request
+  // originated. In the case of out-of-process plugins, this allows to link back
+  // the request to the plugin process (as it is processed through a render view
+  // process).
+  BLINK_PLATFORM_EXPORT int GetPluginChildID() const;
+  BLINK_PLATFORM_EXPORT void SetPluginChildID(int);
 
   // Allows the request to be matched up with its app cache host.
   BLINK_PLATFORM_EXPORT int AppCacheHostID() const;
   BLINK_PLATFORM_EXPORT void SetAppCacheHostID(int);
 
   // If true, the response body will be downloaded to a file managed by the
-  // WebURLLoader. See WebURLResponse::downloadedFilePath.
+  // WebURLLoader. See WebURLResponse::DownloadFilePath.
   BLINK_PLATFORM_EXPORT bool DownloadToFile() const;
   BLINK_PLATFORM_EXPORT void SetDownloadToFile(bool);
 
@@ -294,26 +251,31 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT bool GetKeepalive() const;
   BLINK_PLATFORM_EXPORT void SetKeepalive(bool);
 
-  // The service worker mode indicating which service workers should get events
-  // for this request.
-  BLINK_PLATFORM_EXPORT ServiceWorkerMode GetServiceWorkerMode() const;
-  BLINK_PLATFORM_EXPORT void SetServiceWorkerMode(ServiceWorkerMode);
+  // True if the service workers should not get events for the request.
+  BLINK_PLATFORM_EXPORT bool GetSkipServiceWorker() const;
+  BLINK_PLATFORM_EXPORT void SetSkipServiceWorker(bool);
 
   // True if corresponding AppCache group should be resetted.
   BLINK_PLATFORM_EXPORT bool ShouldResetAppCache() const;
   BLINK_PLATFORM_EXPORT void SetShouldResetAppCache(bool);
 
   // The request mode which will be passed to the ServiceWorker.
-  BLINK_PLATFORM_EXPORT FetchRequestMode GetFetchRequestMode() const;
-  BLINK_PLATFORM_EXPORT void SetFetchRequestMode(FetchRequestMode);
+  BLINK_PLATFORM_EXPORT network::mojom::FetchRequestMode GetFetchRequestMode()
+      const;
+  BLINK_PLATFORM_EXPORT void SetFetchRequestMode(
+      network::mojom::FetchRequestMode);
 
   // The credentials mode which will be passed to the ServiceWorker.
-  BLINK_PLATFORM_EXPORT FetchCredentialsMode GetFetchCredentialsMode() const;
-  BLINK_PLATFORM_EXPORT void SetFetchCredentialsMode(FetchCredentialsMode);
+  BLINK_PLATFORM_EXPORT network::mojom::FetchCredentialsMode
+  GetFetchCredentialsMode() const;
+  BLINK_PLATFORM_EXPORT void SetFetchCredentialsMode(
+      network::mojom::FetchCredentialsMode);
 
   // The redirect mode which is used in Fetch API.
-  BLINK_PLATFORM_EXPORT FetchRedirectMode GetFetchRedirectMode() const;
-  BLINK_PLATFORM_EXPORT void SetFetchRedirectMode(FetchRedirectMode);
+  BLINK_PLATFORM_EXPORT network::mojom::FetchRedirectMode GetFetchRedirectMode()
+      const;
+  BLINK_PLATFORM_EXPORT void SetFetchRedirectMode(
+      network::mojom::FetchRedirectMode);
 
   // The integrity which is used in Fetch API.
   BLINK_PLATFORM_EXPORT WebString GetFetchIntegrity() const;
@@ -332,7 +294,7 @@ class WebURLRequest {
   // data pointer will cause the underlying resource request to be
   // dissociated from any existing non-null extra data pointer.
   BLINK_PLATFORM_EXPORT ExtraData* GetExtraData() const;
-  BLINK_PLATFORM_EXPORT void SetExtraData(ExtraData*);
+  BLINK_PLATFORM_EXPORT void SetExtraData(std::unique_ptr<ExtraData>);
 
   BLINK_PLATFORM_EXPORT Priority GetPriority() const;
   BLINK_PLATFORM_EXPORT void SetPriority(Priority);
@@ -357,11 +319,10 @@ class WebURLRequest {
   // https://wicg.github.io/cors-rfc1918/#external-request
   BLINK_PLATFORM_EXPORT bool IsExternalRequest() const;
 
-  BLINK_PLATFORM_EXPORT LoadingIPCType GetLoadingIPCType() const;
+  BLINK_PLATFORM_EXPORT network::mojom::CORSPreflightPolicy
+  GetCORSPreflightPolicy() const;
 
   BLINK_PLATFORM_EXPORT void SetNavigationStartTime(double);
-
-  BLINK_PLATFORM_EXPORT bool ShouldProcessCORSOutOfBlink() const;
 
   // PlzNavigate: specify that the request was intended to be loaded as a same
   // document navigation. No network requests should be made and the request
@@ -369,21 +330,25 @@ class WebURLRequest {
   // in-between.
   BLINK_PLATFORM_EXPORT void SetIsSameDocumentNavigation(bool);
 
+  // If this request was created from an anchor with a download attribute, this
+  // is the value provided there.
+  BLINK_PLATFORM_EXPORT base::Optional<WebString> GetSuggestedFilename() const;
+
 #if INSIDE_BLINK
   BLINK_PLATFORM_EXPORT ResourceRequest& ToMutableResourceRequest();
   BLINK_PLATFORM_EXPORT const ResourceRequest& ToResourceRequest() const;
 
  protected:
   // Permit subclasses to set arbitrary ResourceRequest pointer as
-  // |m_resourceRequest|. |m_ownedResourceRequest| is not set in this case.
+  // |resource_request_|. |owned_resource_request_| is not set in this case.
   BLINK_PLATFORM_EXPORT explicit WebURLRequest(ResourceRequest&);
 #endif
 
  private:
   struct ResourceRequestContainer;
 
-  // If this instance owns a ResourceRequest then |m_ownedResourceRequest|
-  // is non-null and |m_resourceRequest| points to the ResourceRequest
+  // If this instance owns a ResourceRequest then |owned_resource_request_|
+  // is non-null and |resource_request_| points to the ResourceRequest
   // instance it contains.
   std::unique_ptr<ResourceRequestContainer> owned_resource_request_;
 

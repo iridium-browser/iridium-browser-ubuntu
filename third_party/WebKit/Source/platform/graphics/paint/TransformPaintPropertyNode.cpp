@@ -4,59 +4,56 @@
 
 #include "platform/graphics/paint/TransformPaintPropertyNode.h"
 
-#include "platform/graphics/paint/PropertyTreeState.h"
-
 namespace blink {
 
 // The root of the transform tree. The root transform node references the root
 // scroll node.
 TransformPaintPropertyNode* TransformPaintPropertyNode::Root() {
   DEFINE_STATIC_REF(TransformPaintPropertyNode, root,
-                    AdoptRef(new TransformPaintPropertyNode(
+                    base::AdoptRef(new TransformPaintPropertyNode(
                         nullptr, TransformationMatrix(), FloatPoint3D(), false,
-                        0, kCompositingReasonNone, CompositorElementId(),
+                        0, CompositingReason::kNone, CompositorElementId(),
                         ScrollPaintPropertyNode::Root())));
   return root;
 }
 
-const ScrollPaintPropertyNode*
-TransformPaintPropertyNode::FindEnclosingScrollNode() const {
-  if (scroll_)
-    return scroll_.Get();
-
-  for (const auto* ancestor = Parent(); ancestor;
-       ancestor = ancestor->Parent()) {
-    if (const auto* scroll_node = ancestor->ScrollNode())
-      return scroll_node;
+const TransformPaintPropertyNode&
+TransformPaintPropertyNode::NearestScrollTranslationNode() const {
+  const auto* transform = this;
+  while (!transform->ScrollNode()) {
+    transform = transform->Parent();
+    // The transform should never be null because the root transform has an
+    // associated scroll node (see: TransformPaintPropertyNode::Root()).
+    DCHECK(transform);
   }
-  // The root transform node references the root scroll node so a scroll node
-  // should always exist.
-  NOTREACHED();
-  return nullptr;
+  return *transform;
 }
 
-String TransformPaintPropertyNode::ToString() const {
-  auto transform = String::Format(
-      "parent=%p transform=%s origin=%s flattensInheritedTransform=%s "
-      "renderingContextId=%x directCompositingReasons=%s "
-      "compositorElementId=%lu",
-      Parent(), matrix_.ToString().Ascii().data(),
-      origin_.ToString().Ascii().data(),
-      flattens_inherited_transform_ ? "yes" : "no", rendering_context_id_,
-      CompositingReasonsAsString(direct_compositing_reasons_).Ascii().data(),
-      static_cast<unsigned long>(compositor_element_id_.id_));
+std::unique_ptr<JSONObject> TransformPaintPropertyNode::ToJSON() const {
+  auto json = JSONObject::Create();
+  if (Parent())
+    json->SetString("parent", String::Format("%p", Parent()));
+  if (!matrix_.IsIdentity())
+    json->SetString("matrix", matrix_.ToString());
+  if (!matrix_.IsIdentityOrTranslation())
+    json->SetString("origin", origin_.ToString());
+  if (!flattens_inherited_transform_)
+    json->SetBoolean("flattensInheritedTransform", false);
+  if (rendering_context_id_) {
+    json->SetString("renderingContextId",
+                    String::Format("%x", rendering_context_id_));
+  }
+  if (direct_compositing_reasons_ != CompositingReason::kNone) {
+    json->SetString("directCompositingReasons",
+                    CompositingReason::ToString(direct_compositing_reasons_));
+  }
+  if (compositor_element_id_) {
+    json->SetString("compositorElementId",
+                    compositor_element_id_.ToString().c_str());
+  }
   if (scroll_)
-    return transform + " scroll=" + scroll_->ToString();
-  return transform;
+    json->SetString("scroll", String::Format("%p", scroll_.get()));
+  return json;
 }
-
-#if DCHECK_IS_ON()
-
-String TransformPaintPropertyNode::ToTreeString() const {
-  return blink::PropertyTreeStatePrinter<blink::TransformPaintPropertyNode>()
-      .PathAsString(this);
-}
-
-#endif
 
 }  // namespace blink

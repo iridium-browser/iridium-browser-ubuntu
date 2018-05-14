@@ -37,7 +37,7 @@ using content::DesktopMediaID;
 
 namespace {
 
-#if !defined(USE_ASH)
+#if !defined(OS_CHROMEOS)
 DesktopMediaID::Id AcceleratedWidgetToDesktopMediaId(
     gfx::AcceleratedWidget accelerated_widget) {
 #if defined(OS_WIN)
@@ -51,22 +51,19 @@ DesktopMediaID::Id AcceleratedWidgetToDesktopMediaId(
 }  // namespace
 
 DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
-    content::WebContents* parent_web_contents,
-    gfx::NativeWindow context,
+    const DesktopMediaPicker::Params& params,
     DesktopMediaPickerViews* parent,
-    const base::string16& app_name,
-    const base::string16& target_name,
-    std::vector<std::unique_ptr<DesktopMediaList>> source_lists,
-    bool request_audio)
+    std::vector<std::unique_ptr<DesktopMediaList>> source_lists)
     : parent_(parent),
+      modality_(params.modality),
       description_label_(new views::Label()),
       audio_share_checkbox_(nullptr),
       pane_(new views::TabbedPane()) {
   const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
 
-  SetLayoutManager(new views::BoxLayout(
+  SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kVertical,
-      provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS),
+      provider->GetDialogInsetsForContentType(views::TEXT, views::CONTROL),
       provider->GetDistanceMetric(DISTANCE_RELATED_CONTROL_VERTICAL_SMALL)));
 
   description_label_->SetMultiLine(true);
@@ -182,19 +179,20 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
     }
   }
 
-  if (app_name == target_name) {
-    description_label_->SetText(
-        l10n_util::GetStringFUTF16(IDS_DESKTOP_MEDIA_PICKER_TEXT, app_name));
-  } else {
+  if (params.app_name == params.target_name) {
     description_label_->SetText(l10n_util::GetStringFUTF16(
-        IDS_DESKTOP_MEDIA_PICKER_TEXT_DELEGATED, app_name, target_name));
+        IDS_DESKTOP_MEDIA_PICKER_TEXT, params.app_name));
+  } else {
+    description_label_->SetText(
+        l10n_util::GetStringFUTF16(IDS_DESKTOP_MEDIA_PICKER_TEXT_DELEGATED,
+                                   params.app_name, params.target_name));
   }
 
   DCHECK(!source_types_.empty());
   pane_->SetFocusBehavior(views::View::FocusBehavior::NEVER);
   AddChildView(pane_);
 
-  if (request_audio) {
+  if (params.request_audio) {
     audio_share_checkbox_ = new views::Checkbox(
         l10n_util::GetStringUTF16(IDS_DESKTOP_MEDIA_PICKER_AUDIO_SHARE));
     audio_share_checkbox_->SetChecked(true);
@@ -203,18 +201,18 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
   // Focus on the first non-null media_list.
   OnSourceTypeSwitched(0);
 
-  // If |parent_web_contents| is set and it's not a background page then the
+  // If |params.web_contents| is set and it's not a background page then the
   // picker will be shown modal to the web contents. Otherwise the picker is
   // shown in a separate window.
   views::Widget* widget = nullptr;
   bool modal_dialog =
-      parent_web_contents &&
-      !parent_web_contents->GetDelegate()->IsNeverVisible(parent_web_contents);
+      params.web_contents &&
+      !params.web_contents->GetDelegate()->IsNeverVisible(params.web_contents);
   if (modal_dialog) {
     widget =
-        constrained_window::ShowWebModalDialogViews(this, parent_web_contents);
+        constrained_window::ShowWebModalDialogViews(this, params.web_contents);
   } else {
-    widget = DialogDelegate::CreateDialogWidget(this, context, nullptr);
+    widget = DialogDelegate::CreateDialogWidget(this, params.context, nullptr);
     widget->Show();
   }
   chrome::RecordDialogCreation(chrome::DialogIdentifier::DESKTOP_MEDIA_PICKER);
@@ -229,7 +227,7 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
         DesktopMediaID::TYPE_WINDOW, widget->GetNativeWindow());
 
     // Set native window ID if the windows is outside Ash.
-#if !defined(USE_ASH)
+#if !defined(OS_CHROMEOS)
     dialog_window_id.id = AcceleratedWidgetToDesktopMediaId(
         widget->GetNativeWindow()->GetHost()->GetAcceleratedWidget());
 #endif
@@ -244,7 +242,7 @@ DesktopMediaPickerDialogView::~DesktopMediaPickerDialogView() {}
 void DesktopMediaPickerDialogView::TabSelectedAt(int index) {
   OnSourceTypeSwitched(index);
   list_views_[index]->RequestFocus();
-  GetDialogClientView()->UpdateDialogButtons();
+  DialogModelChanged();
 }
 
 void DesktopMediaPickerDialogView::OnSourceTypeSwitched(int index) {
@@ -281,7 +279,7 @@ gfx::Size DesktopMediaPickerDialogView::CalculatePreferredSize() const {
 }
 
 ui::ModalType DesktopMediaPickerDialogView::GetModalType() const {
-  return ui::MODAL_TYPE_CHILD;
+  return modality_;
 }
 
 base::string16 DesktopMediaPickerDialogView::GetWindowTitle() const {
@@ -358,7 +356,7 @@ void DesktopMediaPickerDialogView::DeleteDelegate() {
 }
 
 void DesktopMediaPickerDialogView::OnSelectionChanged() {
-  GetDialogClientView()->UpdateDialogButtons();
+  DialogModelChanged();
 }
 
 void DesktopMediaPickerDialogView::OnDoubleClick() {
@@ -426,18 +424,12 @@ DesktopMediaPickerViews::~DesktopMediaPickerViews() {
 }
 
 void DesktopMediaPickerViews::Show(
-    content::WebContents* web_contents,
-    gfx::NativeWindow context,
-    gfx::NativeWindow parent,
-    const base::string16& app_name,
-    const base::string16& target_name,
+    const DesktopMediaPicker::Params& params,
     std::vector<std::unique_ptr<DesktopMediaList>> source_lists,
-    bool request_audio,
     const DoneCallback& done_callback) {
   callback_ = done_callback;
-  dialog_ = new DesktopMediaPickerDialogView(
-      web_contents, context, this, app_name, target_name,
-      std::move(source_lists), request_audio);
+  dialog_ =
+      new DesktopMediaPickerDialogView(params, this, std::move(source_lists));
 }
 
 void DesktopMediaPickerViews::NotifyDialogResult(DesktopMediaID source) {
@@ -445,7 +437,8 @@ void DesktopMediaPickerViews::NotifyDialogResult(DesktopMediaID source) {
   dialog_->DetachParent();
   dialog_ = nullptr;
 
-  DCHECK(!callback_.is_null());
+  if (callback_.is_null())
+    return;
 
   // Notify the |callback_| asynchronously because it may need to destroy
   // DesktopMediaPicker.

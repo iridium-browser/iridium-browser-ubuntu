@@ -21,86 +21,6 @@
 cr.define('cr.ui.Oobe', function() {
   return {
     /**
-     * Setups given "select" element using the list and adds callback.
-     * Creates option groups if needed.
-     * @param {!Element} select Select object to be updated.
-     * @param {!Object} list List of the options to be added.
-     * Elements with optionGroupName are considered option group.
-     * @param {string} callback Callback name which should be send to Chrome or
-     * an empty string if the event listener shouldn't be added.
-     *
-     * Note: do not forget to update getSelectedTitle() below if this is
-     * updated!
-     */
-    setupSelect: function(select, list, callback) {
-      select.innerHTML = '';
-      var optgroup = select;
-      for (var i = 0; i < list.length; ++i) {
-        var item = list[i];
-        if (item.optionGroupName) {
-          optgroup = document.createElement('optgroup');
-          optgroup.label = item.optionGroupName;
-          select.appendChild(optgroup);
-        } else {
-          var option =
-              new Option(item.title, item.value, item.selected, item.selected);
-          optgroup.appendChild(option);
-        }
-      }
-      if (callback) {
-        var runCallback = function() {
-          callback(select.options[select.selectedIndex].value);
-        };
-        select.addEventListener('blur', runCallback);
-        select.addEventListener('click', runCallback);
-        select.addEventListener('keyup', function(event) {
-          var keycodeInterested = [
-            9,   // Tab
-            13,  // Enter
-            27,  // Escape
-          ];
-          if (keycodeInterested.indexOf(event.keyCode) >= 0)
-            runCallback();
-        });
-      }
-    },
-
-    /**
-     * Returns title of the selected option (see setupSelect() above).
-     * @param {!Object} list The same as in setupSelect() above.
-     */
-    getSelectedTitle: function(list) {
-      var firstTitle = '';
-      for (var i = 0; i < list.length; ++i) {
-        var item = list[i];
-        if (item.optionGroupName)
-          continue;
-
-        if (!firstTitle)
-          firstTitle = item.title;
-
-        if (item.selected)
-          return item.title;
-      }
-      return firstTitle;
-    },
-
-    /**
-     * Returns value of the selected option (see setupSelect() above).
-     * @param {!Object} list The same as in setupSelect() above.
-     */
-    getSelectedValue: function(list) {
-      for (var i = 0; i < list.length; ++i) {
-        var item = list[i];
-        if (item.optionGroupName)
-          continue;
-        if (item.selected)
-          return item.value;
-      }
-      return null;
-    },
-
-    /**
      * Initializes the OOBE flow.  This will cause all C++ handlers to
      * be invoked to do final setup.
      */
@@ -125,6 +45,7 @@ cr.define('cr.ui.Oobe', function() {
       login.PasswordChangedScreen.register();
       login.SupervisedUserCreationScreen.register();
       login.TermsOfServiceScreen.register();
+      login.SyncConsentScreen.register();
       login.ArcTermsOfServiceScreen.register();
       login.AppLaunchSplashScreen.register();
       login.ArcKioskSplashScreen.register();
@@ -298,12 +219,7 @@ cr.define('cr.ui.Oobe', function() {
      * @param {text} oemEulaUrl OEM EULA URL.
      */
     setOemEulaUrl: function(oemEulaUrl) {
-      if (oemEulaUrl) {
-        $('oem-eula-frame').src = oemEulaUrl;
-        $('eulas').classList.remove('one-column');
-      } else {
-        $('eulas').classList.add('one-column');
-      }
+      $('eula').setOemEulaUrl(oemEulaUrl);
     },
 
     /**
@@ -311,15 +227,7 @@ cr.define('cr.ui.Oobe', function() {
      * @param {text} password TPM password to be shown.
      */
     setTpmPassword: function(password) {
-      $('tpm-busy').hidden = true;
-
-      if (password.length) {
-        $('tpm-password').textContent = password;
-        $('tpm-password').hidden = false;
-      } else {
-        $('tpm-desc').hidden = true;
-        $('tpm-desc-powerwash').hidden = false;
-      }
+      $('eula').setTpmPassword(password);
     },
 
     /**
@@ -347,14 +255,22 @@ cr.define('cr.ui.Oobe', function() {
       i18nTemplate.process(document, loadTimeData);
 
       // Update language and input method menu lists.
-      Oobe.setupSelect($('language-select'), data.languageList);
-      Oobe.setupSelect($('keyboard-select'), data.inputMethodsList);
-      Oobe.setupSelect($('timezone-select'), data.timezoneList);
+      setupSelect($('language-select'), data.languageList);
+      setupSelect($('keyboard-select'), data.inputMethodsList);
+      setupSelect($('timezone-select'), data.timezoneList);
 
       this.setMDMode_();
 
       // Update localized content of the screens.
       Oobe.updateLocalizedContent();
+    },
+
+    /**
+     * Updates "device in tablet mode" state when tablet mode is changed.
+     * @param {Boolean} isInTabletMode True when in tablet mode.
+     */
+    setTabletModeState: function(isInTabletMode) {
+      Oobe.getInstance().setTabletModeState_(isInTabletMode);
     },
 
     /**

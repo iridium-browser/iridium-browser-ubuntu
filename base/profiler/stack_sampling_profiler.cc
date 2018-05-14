@@ -29,6 +29,12 @@ namespace base {
 
 namespace {
 
+// This value is used to initialize the WaitableEvent object. This MUST BE set
+// to MANUAL for correct operation of the IsSignaled() call in Start(). See the
+// comment there for why.
+constexpr WaitableEvent::ResetPolicy kResetPolicy =
+    WaitableEvent::ResetPolicy::MANUAL;
+
 // This value is used when there is no collection in progress and thus no ID
 // for referencing the active collection to the SamplingThread.
 const int NULL_PROFILER_ID = -1;
@@ -59,7 +65,7 @@ StackSamplingProfiler::Module::Module(uintptr_t base_address,
                                       const FilePath& filename)
     : base_address(base_address), id(id), filename(filename) {}
 
-StackSamplingProfiler::Module::~Module() {}
+StackSamplingProfiler::Module::~Module() = default;
 
 // StackSamplingProfiler::Frame -----------------------------------------------
 
@@ -67,7 +73,7 @@ StackSamplingProfiler::Frame::Frame(uintptr_t instruction_pointer,
                                     size_t module_index)
     : instruction_pointer(instruction_pointer), module_index(module_index) {}
 
-StackSamplingProfiler::Frame::~Frame() {}
+StackSamplingProfiler::Frame::~Frame() = default;
 
 StackSamplingProfiler::Frame::Frame()
     : instruction_pointer(0), module_index(kUnknownModuleIndex) {
@@ -75,11 +81,11 @@ StackSamplingProfiler::Frame::Frame()
 
 // StackSamplingProfiler::Sample ----------------------------------------------
 
-StackSamplingProfiler::Sample::Sample() {}
+StackSamplingProfiler::Sample::Sample() = default;
 
 StackSamplingProfiler::Sample::Sample(const Sample& sample) = default;
 
-StackSamplingProfiler::Sample::~Sample() {}
+StackSamplingProfiler::Sample::~Sample() = default;
 
 StackSamplingProfiler::Sample::Sample(const Frame& frame) {
   frames.push_back(std::move(frame));
@@ -90,12 +96,12 @@ StackSamplingProfiler::Sample::Sample(const std::vector<Frame>& frames)
 
 // StackSamplingProfiler::CallStackProfile ------------------------------------
 
-StackSamplingProfiler::CallStackProfile::CallStackProfile() {}
+StackSamplingProfiler::CallStackProfile::CallStackProfile() = default;
 
 StackSamplingProfiler::CallStackProfile::CallStackProfile(
     CallStackProfile&& other) = default;
 
-StackSamplingProfiler::CallStackProfile::~CallStackProfile() {}
+StackSamplingProfiler::CallStackProfile::~CallStackProfile() = default;
 
 StackSamplingProfiler::CallStackProfile&
 StackSamplingProfiler::CallStackProfile::operator=(CallStackProfile&& other) =
@@ -151,7 +157,7 @@ class StackSamplingProfiler::SamplingThread : public Thread {
           callback(callback),
           finished(finished),
           native_sampler(std::move(sampler)) {}
-    ~CollectionContext() {}
+    ~CollectionContext() = default;
 
     // An identifier for the profiler associated with this collection, used to
     // uniquely identify the collection to outside interests.
@@ -231,9 +237,12 @@ class StackSamplingProfiler::SamplingThread : public Thread {
 
   // Finishes a collection and reports collected data via callback. Returns
   // the new collection params, if a new collection should be started. The
-  // |collection| should already have been removed from |active_collections_|
-  // by the caller, as this is needed to avoid flakyness in unit tests.
-  Optional<SamplingParams> FinishCollection(CollectionContext* collection);
+  // collection's |finished| waitable event will be signalled if no new params
+  // are available or |allow_collection_restart| is false. The |collection|
+  // should already have been removed from |active_collections_| by the caller,
+  // as this is needed to avoid flakyness in unit tests.
+  Optional<SamplingParams> FinishCollection(CollectionContext* collection,
+                                            bool allow_collection_restart);
 
   // Records a single sample of a collection.
   void RecordSample(CollectionContext* collection);
@@ -388,7 +397,7 @@ int StackSamplingProfiler::SamplingThread::Add(
 
   task_runner->PostTask(
       FROM_HERE, BindOnce(&SamplingThread::AddCollectionTask, Unretained(this),
-                          Passed(&collection)));
+                          std::move(collection)));
 
   return id;
 }
@@ -427,8 +436,16 @@ StackSamplingProfiler::SamplingThread::GetOrCreateTaskRunnerForAdd() {
   }
 
   if (thread_execution_state_ == EXITING) {
-    // The previous instance has only been partially cleaned up. It is necessary
-    // to call Stop() before Start().
+    // StopSoon() was previously called to shut down the thread
+    // asynchonously. Stop() must now be called before calling Start() again to
+    // reset the thread state.
+    //
+    // We must allow blocking here to satisfy the Thread implementation, but in
+    // practice the Stop() call is unlikely to actually block. For this to
+    // happen a new profiling request would have to be made within the narrow
+    // window between StopSoon() and thread exit following the end of the 60
+    // second idle period.
+    ScopedAllowBlocking allow_blocking;
     Stop();
   }
 
@@ -481,7 +498,8 @@ StackSamplingProfiler::SamplingThread::GetTaskRunnerOnSamplingThread() {
 
 Optional<StackSamplingProfiler::SamplingParams>
 StackSamplingProfiler::SamplingThread::FinishCollection(
-    CollectionContext* collection) {
+    CollectionContext* collection,
+    bool allow_collection_restart) {
   DCHECK_EQ(GetThreadId(), PlatformThread::CurrentId());
   DCHECK_EQ(0u, active_collections_.count(collection->profiler_id));
 
@@ -504,9 +522,12 @@ StackSamplingProfiler::SamplingThread::FinishCollection(
 
   // Run the associated callback, passing the collected profiles.
   Optional<SamplingParams> new_params = callback.Run(std::move(profiles));
+  if (!allow_collection_restart)
+    new_params.reset();
 
-  // Signal that this collection is finished.
-  finished->Signal();
+  // Signal that this collection is finished if it shouldn't be rescheduled.
+  if (!new_params.has_value())
+    finished->Signal();
 
   return new_params;
 }
@@ -599,7 +620,7 @@ void StackSamplingProfiler::SamplingThread::RemoveCollectionTask(int id) {
   size_t count = active_collections_.erase(id);
   DCHECK_EQ(1U, count);
 
-  FinishCollection(collection.get());
+  FinishCollection(collection.get(), false);
   ScheduleShutdownIfIdle();
 }
 
@@ -641,7 +662,7 @@ void StackSamplingProfiler::SamplingThread::PerformCollectionTask(int id) {
 
   // All capturing has completed so finish the collection. If no new params
   // are returned, a new collection should not be started.
-  Optional<SamplingParams> new_params = FinishCollection(collection);
+  Optional<SamplingParams> new_params = FinishCollection(collection, true);
   if (!new_params.has_value()) {
     // By not adding it to the task queue, the collection will "expire" (i.e.
     // no further work will be done).
@@ -651,7 +672,7 @@ void StackSamplingProfiler::SamplingThread::PerformCollectionTask(int id) {
 
   // Restart the collection with the new params. Keep the same id so the
   // Stop() operation continues to work.
-  auto new_collection = MakeUnique<SamplingThread::CollectionContext>(
+  auto new_collection = std::make_unique<SamplingThread::CollectionContext>(
       id, collection->target, new_params.value(), collection->callback,
       collection->finished, std::move(collection->native_sampler));
   AddCollectionTask(std::move(new_collection));
@@ -772,8 +793,7 @@ StackSamplingProfiler::StackSamplingProfiler(
       completed_callback_(callback),
       // The event starts "signaled" so code knows it's safe to start thread
       // and "manual" so that it can be waited in multiple places.
-      profiling_inactive_(WaitableEvent::ResetPolicy::MANUAL,
-                          WaitableEvent::InitialState::SIGNALED),
+      profiling_inactive_(kResetPolicy, WaitableEvent::InitialState::SIGNALED),
       profiler_id_(NULL_PROFILER_ID),
       test_delegate_(test_delegate) {}
 
@@ -807,13 +827,21 @@ void StackSamplingProfiler::Start() {
   if (!native_sampler)
     return;
 
-  // Wait for profiling to be "inactive", then reset it for the upcoming run.
-  profiling_inactive_.Wait();
+  // The IsSignaled() check below requires that the WaitableEvent be manually
+  // reset, to avoid signaling the event in IsSignaled() itself.
+  static_assert(kResetPolicy == WaitableEvent::ResetPolicy::MANUAL,
+                "The reset policy must be set to MANUAL");
+
+  // If a previous profiling phase is still winding down, wait for it to
+  // complete. We can't use task posting for this coordination because the
+  // thread owning the profiler may not have a message loop.
+  if (!profiling_inactive_.IsSignaled())
+    profiling_inactive_.Wait();
   profiling_inactive_.Reset();
 
   DCHECK_EQ(NULL_PROFILER_ID, profiler_id_);
   profiler_id_ = SamplingThread::GetInstance()->Add(
-      MakeUnique<SamplingThread::CollectionContext>(
+      std::make_unique<SamplingThread::CollectionContext>(
           SamplingThread::CollectionContext::next_profiler_id.GetNext(),
           thread_id_, params_, completed_callback_, &profiling_inactive_,
           std::move(native_sampler)));

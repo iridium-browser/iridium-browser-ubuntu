@@ -30,9 +30,14 @@ import gn_helpers
 
 COLORAMA_ROOT = os.path.join(host_paths.DIR_SOURCE_ROOT,
                              'third_party', 'colorama', 'src')
-# aapt should ignore OWNERS files in addition the default ignore pattern.
-AAPT_IGNORE_PATTERN = ('!OWNERS:!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:' +
-                       '!CVS:!thumbs.db:!picasa.ini:!*~:!*.d.stamp')
+AAPT_IGNORE_PATTERN = ':'.join([
+    'OWNERS',  # Allow OWNERS files within res/
+    '*.py',  # PRESUBMIT.py sometimes exist.
+    '*.pyc',
+    '*~',  # Some editors create these as temp files.
+    '.*',  # Never makes sense to include dot(files/dirs).
+    '*.d.stamp', # Ignore stamp files
+    ])
 HERMETIC_TIMESTAMP = (2001, 1, 1, 0, 0, 0)
 _HERMETIC_FILE_ATTR = (0644 << 16L)
 
@@ -44,6 +49,12 @@ def TempDir():
     yield dirname
   finally:
     shutil.rmtree(dirname)
+
+
+def IterFiles(root_dir):
+  for root, _, files in os.walk(root_dir):
+    for f in files:
+      yield os.path.join(root, f)
 
 
 def MakeDirectory(dir_path):

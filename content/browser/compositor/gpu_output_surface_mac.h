@@ -24,24 +24,15 @@ class GpuOutputSurfaceMac
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager);
   ~GpuOutputSurfaceMac() override;
 
-  // cc::OutputSurface implementation.
-  void SwapBuffers(cc::OutputSurfaceFrame frame) override;
+  // viz::OutputSurface implementation.
+  void SwapBuffers(viz::OutputSurfaceFrame frame) override;
   bool SurfaceIsSuspendForRecycle() const override;
 
   // BrowserCompositorOutputSurface implementation.
-  void OnGpuSwapBuffersCompleted(
-      const std::vector<ui::LatencyInfo>& latency_info,
-      gfx::SwapResult result,
-      const gpu::GpuProcessHostedCALayerTreeParamsMac* params_mac) override;
   void SetSurfaceSuspendedForRecycle(bool suspended) override;
 
  private:
   gfx::AcceleratedWidget widget_;
-
-  // Store remote layers in a separate structure, so that non-Objective-C files
-  // may include this header.
-  struct RemoteLayers;
-  std::unique_ptr<RemoteLayers> remote_layers_;
 
   enum ShouldShowFramesState {
     // Frames that come from the GPU process should appear on-screen.

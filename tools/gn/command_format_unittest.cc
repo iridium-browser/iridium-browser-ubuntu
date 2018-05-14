@@ -2,16 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "tools/gn/command_format.h"
+
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "tools/gn/command_format.h"
 #include "tools/gn/commands.h"
 #include "tools/gn/setup.h"
+#include "tools/gn/test_with_scheduler.h"
+
+using FormatTest = TestWithScheduler;
 
 #define FORMAT_TEST(n)                                                      \
-  TEST(Format, n) {                                                         \
+  TEST_F(FormatTest, n) {                                                   \
     ::Setup setup;                                                          \
     std::string out;                                                        \
     std::string expected;                                                   \
@@ -99,3 +103,6 @@ FORMAT_TEST(064)
 FORMAT_TEST(065)
 FORMAT_TEST(066)
 FORMAT_TEST(067)
+FORMAT_TEST(068)
+FORMAT_TEST(069)
+FORMAT_TEST(070)

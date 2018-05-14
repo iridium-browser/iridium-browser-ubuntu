@@ -9,6 +9,7 @@
 #include <limits>
 
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "net/base/net_export.h"
 #include "net/disk_cache/blockfile/backend_impl.h"
 #include "net/disk_cache/blockfile/disk_format.h"
@@ -16,6 +17,10 @@
 #include "net/disk_cache/blockfile/errors.h"
 #include "net/disk_cache/blockfile/histogram_macros.h"
 #include "net/disk_cache/blockfile/stress_support.h"
+
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
 
 // Provide a BackendImpl object to macros from histogram_macros.h.
 #define CACHE_UMA_BACKEND_IMPL_OBJ backend_
@@ -78,10 +83,15 @@ enum CrashLocation {
 };
 
 #ifndef NDEBUG
-void TerminateSelf() {
+[[noreturn]] void TerminateSelf() {
 #if defined(OS_WIN)
   // Windows does more work on _exit() than we would like, so we force exit.
   TerminateProcess(GetCurrentProcess(), 0);
+#if defined(__clang__)
+  // Let clang know that TerminateProcess(GetCurrentProcess()) can't return,
+  // so that it doesn't warn about TerminateSelf() returning.
+  __builtin_unreachable();
+#endif
 #elif defined(OS_POSIX)
   // On POSIX, _exit() will terminate the process with minimal cleanup,
   // and it is cleaner than killing.
@@ -221,7 +231,7 @@ void Rankings::Iterator::Reset() {
 
 Rankings::Rankings() : init_(false) {}
 
-Rankings::~Rankings() {}
+Rankings::~Rankings() = default;
 
 bool Rankings::Init(BackendImpl* backend, bool count_lists) {
   DCHECK(!init_);

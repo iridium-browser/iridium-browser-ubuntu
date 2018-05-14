@@ -9,12 +9,16 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/test/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_service_manager_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/display/screen.h"
 #include "ui/display/test/test_screen.h"
-#include "ui/events/test/device_data_manager_test_api.h"
 #include "ui/gfx/geometry/size.h"
+
+#if defined(USE_OZONE) || defined(USE_X11)
+#include "services/ui/public/cpp/input_devices/input_device_client_test_api.h"
+#endif
 
 namespace {
 
@@ -29,12 +33,14 @@ class ChromeBrowserMainExtraPartsMetricsTest : public testing::Test {
   ~ChromeBrowserMainExtraPartsMetricsTest() override;
 
  protected:
-  // Test API wrapping |device_data_manager_|.
-  ui::test::DeviceDataManagerTestAPI device_data_manager_test_api_;
+#if defined(USE_OZONE) || defined(USE_X11)
+  ui::InputDeviceClientTestApi input_device_client_test_api_;
+#endif
 
  private:
   // Provides a message loop and allows the use of the task scheduler
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  content::TestBrowserThreadBundle thread_bundle_;
+  content::TestServiceManagerContext service_manager_context_;
 
   // Dummy screen required by a ChromeBrowserMainExtraPartsMetrics test target.
   display::test::TestScreen test_screen_;
@@ -42,8 +48,8 @@ class ChromeBrowserMainExtraPartsMetricsTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainExtraPartsMetricsTest);
 };
 
-ChromeBrowserMainExtraPartsMetricsTest::ChromeBrowserMainExtraPartsMetricsTest()
-    : device_data_manager_test_api_() {
+ChromeBrowserMainExtraPartsMetricsTest::
+    ChromeBrowserMainExtraPartsMetricsTest() {
   display::Screen::SetScreenInstance(&test_screen_);
 }
 
@@ -82,7 +88,7 @@ TEST_F(ChromeBrowserMainExtraPartsMetricsTest,
        VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart) {
   base::HistogramTester histogram_tester;
 
-  device_data_manager_test_api_.OnDeviceListsComplete();
+  input_device_client_test_api_.OnDeviceListsComplete();
 
   ChromeBrowserMainExtraPartsMetrics test_target;
 
@@ -99,7 +105,7 @@ TEST_F(ChromeBrowserMainExtraPartsMetricsTest,
   ChromeBrowserMainExtraPartsMetrics test_target;
 
   test_target.PostBrowserStart();
-  device_data_manager_test_api_.NotifyObserversDeviceListsComplete();
+  input_device_client_test_api_.NotifyObserversDeviceListsComplete();
   histogram_tester.ExpectTotalCount(
       kTouchEventFeatureDetectionEnabledHistogramName, 1);
 }
@@ -112,8 +118,8 @@ TEST_F(ChromeBrowserMainExtraPartsMetricsTest,
   ChromeBrowserMainExtraPartsMetrics test_target;
 
   test_target.PostBrowserStart();
-  device_data_manager_test_api_.NotifyObserversDeviceListsComplete();
-  device_data_manager_test_api_.NotifyObserversDeviceListsComplete();
+  input_device_client_test_api_.NotifyObserversDeviceListsComplete();
+  input_device_client_test_api_.NotifyObserversDeviceListsComplete();
   histogram_tester.ExpectTotalCount(
       kTouchEventFeatureDetectionEnabledHistogramName, 1);
 }

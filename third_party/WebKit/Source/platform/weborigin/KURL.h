@@ -31,10 +31,10 @@
 #include "platform/PlatformExport.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/HashTableDeletedValueType.h"
 #include "platform/wtf/text/WTFString.h"
 #include "url/third_party/mozilla/url_parse.h"
 #include "url/url_canon.h"
+#include "url/url_util.h"
 
 // KURL is Blink's main URL class, and is the analog to GURL in other Chromium
 // code. It is not thread safe but is generally cheap to copy and compare KURLs
@@ -62,11 +62,11 @@ namespace WTF {
 class TextEncoding;
 }
 
+class GURL;
+
 namespace blink {
 
 struct KURLHash;
-
-enum ParsedURLStringTag { kParsedURLString };
 
 class PLATFORM_EXPORT KURL {
   USING_FAST_MALLOC(KURL);
@@ -81,18 +81,15 @@ class PLATFORM_EXPORT KURL {
   KURL& operator=(const KURL&);
 
   // The argument is an absolute URL string. The string is assumed to be
-  // output of KURL::string() called on a valid KURL object, or indiscernible
-  // from such. It is usually best to avoid repeatedly parsing a string,
-  // unless memory saving outweigh the possible slow-downs.
-  KURL(ParsedURLStringTag, const String&);
-  explicit KURL(WTF::HashTableDeletedValueType);
+  // output of KURL::GetString() called on a valid KURL object, or
+  // indiscernible from such.
+  //
+  // It is usually best to avoid repeatedly parsing a String, unless memory
+  // saving outweigh the possible slow-downs.
+  explicit KURL(const String&);
 
   // Creates an isolated URL object suitable for sending to another thread.
-  static KURL CreateIsolated(ParsedURLStringTag, const String&);
-
-  bool IsHashTableDeletedValue() const {
-    return GetString().IsHashTableDeletedValue();
-  }
+  static KURL CreateIsolated(const String&);
 
   // Resolves the relative URL with the given base URL. If provided, the
   // TextEncoding is used to encode non-ASCII characers. The base URL can be
@@ -218,7 +215,14 @@ class PLATFORM_EXPORT KURL {
     return parsed_.potentially_dangling_markup;
   }
 
+  // Returns a GURL with the same properties. This can be used in platform/ and
+  // web/. However, in core/ and modules/, this should only be used to pass
+  // a GURL to a layer that is expecting one instead of a KURL or a WebURL.
+  operator GURL() const;
+
  private:
+  friend struct WTF::HashTraits<blink::KURL>;
+
   void Init(const KURL& base,
             const String& relative,
             const WTF::TextEncoding* query_encoding);
@@ -270,17 +274,18 @@ PLATFORM_EXPORT bool ProtocolIsJavaScript(const String& url);
 
 PLATFORM_EXPORT bool IsValidProtocol(const String&);
 
-// Unescapes the given string using URL escaping rules, given an optional
-// encoding (defaulting to UTF-8 otherwise).
+using DecodeURLResult = url::DecodeURLResult;
+
+// Unescapes the given string using URL escaping rules.
 //
 // DANGER: If the URL has "%00" in it, the resulting string will have embedded
 // null characters!
 //
 // This function is also used to decode javascript: URLs and as a general
 // purpose unescaping function.
-PLATFORM_EXPORT String DecodeURLEscapeSequences(const String&);
+// TODO(tkent): Remove the second argument after collecting data.
 PLATFORM_EXPORT String DecodeURLEscapeSequences(const String&,
-                                                const WTF::TextEncoding&);
+                                                DecodeURLResult* = nullptr);
 
 PLATFORM_EXPORT String EncodeWithURLEscapeSequences(const String&);
 

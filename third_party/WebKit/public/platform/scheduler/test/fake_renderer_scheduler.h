@@ -8,6 +8,7 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "build/build_config.h"
 #include "public/platform/scheduler/renderer/renderer_scheduler.h"
 
 namespace blink {
@@ -22,12 +23,12 @@ class FakeRendererScheduler : public RendererScheduler {
   std::unique_ptr<WebThread> CreateMainThread() override;
   scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
-  scoped_refptr<base::SingleThreadTaskRunner> LoadingTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> InputTaskRunner() override;
   scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner() override;
-  scoped_refptr<base::SingleThreadTaskRunner> TimerTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> IPCTaskRunner() override;
   std::unique_ptr<RenderWidgetSchedulingState> NewRenderWidgetSchedulingState()
       override;
-  void WillBeginFrame(const cc::BeginFrameArgs& args) override;
+  void WillBeginFrame(const viz::BeginFrameArgs& args) override;
   void BeginFrameNotExpectedSoon() override;
   void BeginMainFrameNotExpectedUntil(base::TimeTicks time) override;
   void DidCommitFrameToCompositor() override;
@@ -40,11 +41,14 @@ class FakeRendererScheduler : public RendererScheduler {
   void DidAnimateForInputOnCompositorThread() override;
   void SetRendererHidden(bool hidden) override;
   void SetRendererBackgrounded(bool backgrounded) override;
-  void SuspendRenderer() override;
-  void ResumeRenderer() override;
+  void SetSchedulerKeepActive(bool keep_active) override;
+  std::unique_ptr<RendererPauseHandle> PauseRenderer() override;
+#if defined(OS_ANDROID)
+  void PauseTimersForAndroidWebView() override;
+  void ResumeTimersForAndroidWebView() override;
+#endif
   void AddPendingNavigation(NavigatingFrameType type) override;
   void RemovePendingNavigation(NavigatingFrameType type) override;
-  void OnNavigate() override;
   bool IsHighPriorityWorkAnticipated() override;
   bool CanExceedIdleDeadlineIfRequired() const override;
   bool ShouldYieldForHighPriorityWork() override;
@@ -52,16 +56,15 @@ class FakeRendererScheduler : public RendererScheduler {
   void RemoveTaskObserver(
       base::MessageLoop::TaskObserver* task_observer) override;
   void Shutdown() override;
-  void SuspendTimerQueue() override;
-  void ResumeTimerQueue() override;
-  void VirtualTimePaused() override;
-  void VirtualTimeResumed() override;
-  void SetTimerQueueSuspensionWhenBackgroundedEnabled(bool enabled) override;
+  void SetStoppingWhenBackgroundedEnabled(bool enabled) override;
   void SetTopLevelBlameContext(
       base::trace_event::BlameContext* blame_context) override;
   void SetRAILModeObserver(RAILModeObserver* observer) override;
   bool MainThreadSeemsUnresponsive(
       base::TimeDelta main_thread_responsiveness_threshold) override;
+  void SetRendererProcessType(RendererProcessType type) override;
+  WebScopedVirtualTimePauser CreateWebScopedVirtualTimePauser(
+      WebScopedVirtualTimePauser::VirtualTaskDuration duration) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeRendererScheduler);

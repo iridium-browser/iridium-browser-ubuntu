@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_ANDROID_SHORTCUT_HELPER_H_
 #define CHROME_BROWSER_ANDROID_SHORTCUT_HELPER_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -29,19 +30,19 @@ class ShortcutHelper {
   using WebApkInfoCallback =
       base::Callback<void(const std::vector<WebApkInfo>&)>;
 
+  // Creates a ShortcutInfo struct suitable for adding a shortcut to the home
+  // screen.
+  static std::unique_ptr<ShortcutInfo> CreateShortcutInfo(
+      const GURL& manifest_url,
+      const content::Manifest& manifest,
+      const GURL& primary_icon_url,
+      const GURL& badge_icon_url);
+
   // Adds a shortcut to the launcher using a SkBitmap. The type of shortcut
   // added depends on the properties in |info|.
   static void AddToLauncherWithSkBitmap(content::WebContents* web_contents,
                                         const ShortcutInfo& info,
                                         const SkBitmap& icon_bitmap);
-
-  // Installs WebAPK and adds shortcut to the launcher.
-  static void InstallWebApkWithSkBitmap(
-      content::WebContents* web_contents,
-      const ShortcutInfo& info,
-      const SkBitmap& primary_icon_bitmap,
-      const SkBitmap& badge_icon_bitmap,
-      const WebApkInstallService::FinishCallback& callback);
 
   // Shows toast notifying user that a WebAPK install is already in progress
   // when user tries to queue a new install for the same WebAPK.

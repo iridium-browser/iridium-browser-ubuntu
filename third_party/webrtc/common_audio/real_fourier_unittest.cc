@@ -8,13 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/common_audio/real_fourier.h"
+#include "common_audio/real_fourier.h"
 
 #include <stdlib.h>
 
-#include "webrtc/common_audio/real_fourier_ooura.h"
-#include "webrtc/common_audio/real_fourier_openmax.h"
-#include "webrtc/test/gtest.h"
+#include "common_audio/real_fourier_ooura.h"
+#include "test/gtest.h"
+
+#ifdef RTC_USE_OPENMAX_DL
+#include "common_audio/real_fourier_openmax.h"
+#endif
 
 namespace webrtc {
 
@@ -106,4 +109,3 @@ TYPED_TEST(RealFourierTest, SimpleBackwardTransform) {
 }
 
 }  // namespace webrtc
-

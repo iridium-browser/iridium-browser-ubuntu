@@ -49,12 +49,25 @@ class ASH_EXPORT WindowSelectorController : public WindowSelectorDelegate {
   // are visible during overview mode.
   bool IsRestoringMinimizedWindows() const;
 
+  // Called when the overview button tray has been long pressed. Enters
+  // splitview mode if the active window is snappable. Also enters overview mode
+  // if device is not currently in overview mode.
+  void OnOverviewButtonTrayLongPressed(const gfx::Point& event_location);
+
+  // Gets the windows list that are shown in the overview windows grids if the
+  // overview mode is active for testing.
+  std::vector<aura::Window*> GetWindowsListInOverviewGridsForTesting();
+
+  bool is_shutting_down() const { return is_shutting_down_; }
+
   // WindowSelectorDelegate:
   void OnSelectionEnded() override;
   void AddDelayedAnimationObserver(
       std::unique_ptr<DelayedAnimationObserver> animation) override;
   void RemoveAndDestroyAnimationObserver(
       DelayedAnimationObserver* animation) override;
+
+  WindowSelector* window_selector() { return window_selector_.get(); }
 
  private:
   friend class WindowSelectorTest;
@@ -69,6 +82,9 @@ class ASH_EXPORT WindowSelectorController : public WindowSelectorDelegate {
   std::vector<std::unique_ptr<DelayedAnimationObserver>> delayed_animations_;
   std::unique_ptr<WindowSelector> window_selector_;
   base::Time last_selection_time_;
+
+  // If we are in middle of ending overview mode.
+  bool is_shutting_down_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(WindowSelectorController);
 };

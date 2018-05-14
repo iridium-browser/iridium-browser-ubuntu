@@ -6,6 +6,10 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_delegate.h"
+#include "ui/compositor/layer_owner.h"
+#include "ui/compositor/paint_recorder.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/insets_f.h"
@@ -186,6 +190,38 @@ void ImagePainter::Paint(gfx::Canvas* canvas, const gfx::Size& size) {
   nine_painter_->Paint(canvas, gfx::Rect(size));
 }
 
+class PaintedLayer : public ui::LayerOwner, public ui::LayerDelegate {
+ public:
+  explicit PaintedLayer(std::unique_ptr<Painter> painter);
+  ~PaintedLayer() override;
+
+  // LayerDelegate:
+  void OnPaintLayer(const ui::PaintContext& context) override;
+  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                  float new_device_scale_factor) override;
+
+ private:
+  std::unique_ptr<Painter> painter_;
+
+  DISALLOW_COPY_AND_ASSIGN(PaintedLayer);
+};
+
+PaintedLayer::PaintedLayer(std::unique_ptr<Painter> painter)
+    : painter_(std::move(painter)) {
+  SetLayer(std::make_unique<ui::Layer>(ui::LAYER_TEXTURED));
+  layer()->set_delegate(this);
+}
+
+PaintedLayer::~PaintedLayer() {}
+
+void PaintedLayer::OnPaintLayer(const ui::PaintContext& context) {
+  ui::PaintRecorder recorder(context, layer()->size());
+  painter_->Paint(recorder.canvas(), layer()->size());
+}
+
+void PaintedLayer::OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                              float new_device_scale_factor) {}
+
 }  // namespace
 
 
@@ -220,7 +256,7 @@ void Painter::PaintFocusPainter(View* view,
 // static
 std::unique_ptr<Painter> Painter::CreateSolidRoundRectPainter(SkColor color,
                                                               float radius) {
-  return base::MakeUnique<SolidRoundRectPainter>(color, SK_ColorTRANSPARENT,
+  return std::make_unique<SolidRoundRectPainter>(color, SK_ColorTRANSPARENT,
                                                  radius);
 }
 
@@ -229,7 +265,7 @@ std::unique_ptr<Painter> Painter::CreateRoundRectWith1PxBorderPainter(
     SkColor bg_color,
     SkColor stroke_color,
     float radius) {
-  return base::MakeUnique<SolidRoundRectPainter>(bg_color, stroke_color,
+  return std::make_unique<SolidRoundRectPainter>(bg_color, stroke_color,
                                                  radius);
 }
 
@@ -237,24 +273,24 @@ std::unique_ptr<Painter> Painter::CreateRoundRectWith1PxBorderPainter(
 std::unique_ptr<Painter> Painter::CreateImagePainter(
     const gfx::ImageSkia& image,
     const gfx::Insets& insets) {
-  return base::MakeUnique<ImagePainter>(image, insets);
+  return std::make_unique<ImagePainter>(image, insets);
 }
 
 // static
 std::unique_ptr<Painter> Painter::CreateImageGridPainter(
     const int image_ids[]) {
-  return base::MakeUnique<ImagePainter>(image_ids);
+  return std::make_unique<ImagePainter>(image_ids);
 }
 
 // static
 std::unique_ptr<Painter> Painter::CreateDashedFocusPainter() {
-  return base::MakeUnique<DashedFocusPainter>(gfx::Insets());
+  return std::make_unique<DashedFocusPainter>(gfx::Insets());
 }
 
 // static
 std::unique_ptr<Painter> Painter::CreateDashedFocusPainterWithInsets(
     const gfx::Insets& insets) {
-  return base::MakeUnique<DashedFocusPainter>(insets);
+  return std::make_unique<DashedFocusPainter>(insets);
 }
 
 // static
@@ -266,7 +302,7 @@ std::unique_ptr<Painter> Painter::CreateSolidFocusPainter(
   // Subtract that here so it works the same way with the new
   // Canvas::DrawSolidFocusRect.
   const gfx::Insets corrected_insets = insets - gfx::Insets(0, 0, 1, 1);
-  return base::MakeUnique<SolidFocusPainter>(color, 1, corrected_insets);
+  return std::make_unique<SolidFocusPainter>(color, 1, corrected_insets);
 }
 
 // static
@@ -274,7 +310,13 @@ std::unique_ptr<Painter> Painter::CreateSolidFocusPainter(
     SkColor color,
     int thickness,
     const gfx::InsetsF& insets) {
-  return base::MakeUnique<SolidFocusPainter>(color, thickness, insets);
+  return std::make_unique<SolidFocusPainter>(color, thickness, insets);
+}
+
+// static
+std::unique_ptr<ui::LayerOwner> Painter::CreatePaintedLayer(
+    std::unique_ptr<Painter> painter) {
+  return std::make_unique<PaintedLayer>(std::move(painter));
 }
 
 }  // namespace views

@@ -13,25 +13,28 @@
 #include "ui/views/layout/layout_provider.h"
 
 enum ChromeInsetsMetric {
+  // Padding applied around the text in the omnibox's editable area.
+  INSETS_OMNIBOX = views::VIEWS_INSETS_END,
   // Margins used by toasts.
-  INSETS_TOAST = views::VIEWS_INSETS_END,
+  INSETS_TOAST,
 };
 
 enum ChromeDistanceMetric {
   // Default minimum width of a button.
   DISTANCE_BUTTON_MINIMUM_WIDTH = views::VIEWS_DISTANCE_END,
+  // Vertical spacing at the beginning and end of a content list (a vertical
+  // stack of composite views that behaves like a menu) containing one item.
+  DISTANCE_CONTENT_LIST_VERTICAL_SINGLE,
+  // Same as |DISTANCE_CONTENT_LIST_VERTICAL_SINGLE|, but used at the beginning
+  // and end of a multi-item content list.
+  DISTANCE_CONTENT_LIST_VERTICAL_MULTI,
   // Vertical spacing between a list of multiple controls in one column.
   DISTANCE_CONTROL_LIST_VERTICAL,
-  // The combined vertical padding applied to text in a control.
-  DISTANCE_CONTROL_TOTAL_VERTICAL_TEXT_PADDING,
   // Smaller horizontal spacing between other controls that are logically
   // related.
   DISTANCE_RELATED_CONTROL_HORIZONTAL_SMALL,
   // Smaller vertical spacing between controls that are logically related.
   DISTANCE_RELATED_CONTROL_VERTICAL_SMALL,
-  // Horizontal spacing between an item such as an icon or checkbox and a
-  // label related to it.
-  DISTANCE_RELATED_LABEL_HORIZONTAL,
   // Horizontal spacing between an item and the related label, in the context of
   // a row of such items. E.g. the bookmarks bar.
   DISTANCE_RELATED_LABEL_HORIZONTAL_LIST,
@@ -48,19 +51,21 @@ enum ChromeDistanceMetric {
   DISTANCE_UNRELATED_CONTROL_HORIZONTAL_LARGE,
   // Larger vertical spacing between unrelated controls.
   DISTANCE_UNRELATED_CONTROL_VERTICAL_LARGE,
+  // Width of modal dialogs unless the content is too wide to make that
+  // feasible.
+  DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH,
+  // Width of a bubble unless the content is too wide to make that
+  // feasible.
+  DISTANCE_BUBBLE_PREFERRED_WIDTH,
 };
 
 class ChromeLayoutProvider : public views::LayoutProvider {
  public:
-  ChromeLayoutProvider() {}
-  ~ChromeLayoutProvider() override {}
+  ChromeLayoutProvider();
+  ~ChromeLayoutProvider() override;
 
   static ChromeLayoutProvider* Get();
   static std::unique_ptr<views::LayoutProvider> CreateLayoutProvider();
-
-  // Calculates the control height based on the |font|'s reported glyph height,
-  // the default line spacing and DISTANCE_CONTROL_TOTAL_VERTICAL_TEXT_PADDING.
-  static int GetControlHeightForFont(const gfx::FontList& font);
 
   // views::LayoutProvider:
   gfx::Insets GetInsetsMetric(int metric) const override;

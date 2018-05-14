@@ -32,9 +32,10 @@
 #define ImageBitmapFactories_h
 
 #include <memory>
-#include "bindings/core/v8/ImageBitmapSource.h"
+#include "base/single_thread_task_runner.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "bindings/core/v8/image_bitmap_source.h"
 #include "core/fileapi/FileReaderLoader.h"
 #include "core/fileapi/FileReaderLoaderClient.h"
 #include "core/frame/LocalDOMWindow.h"
@@ -51,11 +52,9 @@ namespace blink {
 
 class Blob;
 class EventTarget;
-class ExceptionState;
 class ExecutionContext;
 class ImageBitmapSource;
 class ImageBitmapOptions;
-class WebTaskRunner;
 
 typedef HTMLImageElementOrSVGImageElementOrHTMLVideoElementOrHTMLCanvasElementOrBlobOrImageDataOrImageBitmapOrOffscreenCanvas
     ImageBitmapSourceUnion;
@@ -63,15 +62,17 @@ typedef HTMLImageElementOrSVGImageElementOrHTMLVideoElementOrHTMLCanvasElementOr
 class ImageBitmapFactories final
     : public GarbageCollectedFinalized<ImageBitmapFactories>,
       public Supplement<LocalDOMWindow>,
-      public Supplement<WorkerGlobalScope> {
+      public Supplement<WorkerGlobalScope>,
+      public TraceWrapperBase {
   USING_GARBAGE_COLLECTED_MIXIN(ImageBitmapFactories);
 
  public:
+  static const char kSupplementName[];
+
   static ScriptPromise createImageBitmap(ScriptState*,
                                          EventTarget&,
                                          const ImageBitmapSourceUnion&,
-                                         const ImageBitmapOptions&,
-                                         ExceptionState&);
+                                         const ImageBitmapOptions&);
   static ScriptPromise createImageBitmap(ScriptState*,
                                          EventTarget&,
                                          const ImageBitmapSourceUnion&,
@@ -79,27 +80,22 @@ class ImageBitmapFactories final
                                          int sy,
                                          int sw,
                                          int sh,
-                                         const ImageBitmapOptions&,
-                                         ExceptionState&);
+                                         const ImageBitmapOptions&);
   static ScriptPromise createImageBitmap(ScriptState*,
                                          EventTarget&,
                                          ImageBitmapSource*,
                                          Optional<IntRect> crop_rect,
-                                         const ImageBitmapOptions&,
-                                         ExceptionState&);
+                                         const ImageBitmapOptions&);
   static ScriptPromise CreateImageBitmapFromBlob(ScriptState*,
                                                  EventTarget&,
                                                  ImageBitmapSource*,
                                                  Optional<IntRect> crop_rect,
-                                                 const ImageBitmapOptions&,
-                                                 ExceptionState&);
+                                                 const ImageBitmapOptions&);
 
-  virtual ~ImageBitmapFactories() {}
+  virtual ~ImageBitmapFactories() = default;
 
-  DECLARE_TRACE();
-
- protected:
-  static const char* SupplementName();
+  void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  private:
   class ImageBitmapLoader final
@@ -116,9 +112,9 @@ class ImageBitmapFactories final
     void LoadBlobAsync(ExecutionContext*, Blob*);
     ScriptPromise Promise() { return resolver_->Promise(); }
 
-    DECLARE_TRACE();
+    void Trace(blink::Visitor*);
 
-    ~ImageBitmapLoader() override {}
+    ~ImageBitmapLoader() override = default;
 
    private:
     ImageBitmapLoader(ImageBitmapFactories&,
@@ -126,11 +122,16 @@ class ImageBitmapFactories final
                       ScriptState*,
                       const ImageBitmapOptions&);
 
-    void RejectPromise();
+    enum ImageBitmapRejectionReason {
+      kUndecodableImageBitmapRejectionReason,
+      kAllocationFailureImageBitmapRejectionReason,
+    };
+
+    void RejectPromise(ImageBitmapRejectionReason);
 
     void ScheduleAsyncImageBitmapDecoding(DOMArrayBuffer*);
     void DecodeImageOnDecoderThread(
-        RefPtr<WebTaskRunner>,
+        scoped_refptr<base::SingleThreadTaskRunner>,
         DOMArrayBuffer*,
         const String& premultiply_alpha_option,
         const String& color_space_conversion_option);

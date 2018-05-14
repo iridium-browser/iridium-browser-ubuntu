@@ -44,6 +44,7 @@
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 
 using extensions::AppWindow;
 using extensions::AppWindowRegistry;
@@ -60,7 +61,8 @@ bool IsPepperPlugin(const base::FilePath& plugin_path) {
 }
 
 void RebootDevice() {
-  DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart();
+  DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart(
+      power_manager::REQUEST_RESTART_OTHER, "kiosk app session");
 }
 
 // Sends a SIGFPE signal to plugin subprocesses that matches |child_ids|
@@ -133,10 +135,9 @@ class AppSession::AppWindowHandler : public AppWindowRegistry::Observer {
                                               ->GetAccountId())) {
       // If we were in demo mode, we disabled all our network technologies,
       // re-enable them.
-      NetworkStateHandler* handler =
-          NetworkHandler::Get()->network_state_handler();
-      handler->SetTechnologyEnabled(NetworkTypePattern::NonVirtual(), true,
-                                    chromeos::network_handler::ErrorCallback());
+      NetworkHandler::Get()->network_state_handler()->SetTechnologyEnabled(
+          NetworkTypePattern::Physical(), true,
+          chromeos::network_handler::ErrorCallback());
     }
 
     app_session_->OnLastAppWindowClosed();
@@ -151,7 +152,7 @@ class AppSession::AppWindowHandler : public AppWindowRegistry::Observer {
   DISALLOW_COPY_AND_ASSIGN(AppWindowHandler);
 };
 
-class AppSession::BrowserWindowHandler : public chrome::BrowserListObserver {
+class AppSession::BrowserWindowHandler : public BrowserListObserver {
  public:
   BrowserWindowHandler() {
     BrowserList::AddObserver(this);
@@ -170,7 +171,7 @@ class AppSession::BrowserWindowHandler : public chrome::BrowserListObserver {
     browser->window()->Close();
   }
 
-  // chrome::BrowserListObserver overrides:
+  // BrowserListObserver overrides:
   void OnBrowserAdded(Browser* browser) override {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,

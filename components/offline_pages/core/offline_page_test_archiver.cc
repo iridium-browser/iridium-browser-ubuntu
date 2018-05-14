@@ -18,6 +18,7 @@ OfflinePageTestArchiver::OfflinePageTestArchiver(
     ArchiverResult result,
     const base::string16& result_title,
     int64_t size_to_report,
+    const std::string& digest_to_report,
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner)
     : observer_(observer),
       url_(url),
@@ -26,6 +27,7 @@ OfflinePageTestArchiver::OfflinePageTestArchiver(
       create_archive_called_(false),
       delayed_(false),
       result_title_(result_title),
+      digest_to_report_(digest_to_report),
       task_runner_(task_runner) {}
 
 OfflinePageTestArchiver::~OfflinePageTestArchiver() {
@@ -44,6 +46,18 @@ void OfflinePageTestArchiver::CreateArchive(
     CompleteCreateArchive();
 }
 
+void OfflinePageTestArchiver::PublishArchive(
+    const OfflinePageItem& offline_page,
+    const scoped_refptr<base::SequencedTaskRunner>& background_task_runner,
+    const base::FilePath& new_file_path,
+    SystemDownloadManager* download_manager,
+    PublishArchiveDoneCallback publish_done_callback) {
+  publish_archive_result_.move_result = SavePageResult::SUCCESS;
+  publish_archive_result_.new_file_path = offline_page.file_path;
+  publish_archive_result_.download_id = 0;
+  std::move(publish_done_callback).Run(offline_page, &publish_archive_result_);
+}
+
 void OfflinePageTestArchiver::CompleteCreateArchive() {
   DCHECK(!callback_.is_null());
   base::FilePath archive_path;
@@ -57,7 +71,7 @@ void OfflinePageTestArchiver::CompleteCreateArchive() {
   observer_->SetLastPathCreatedByArchiver(archive_path);
   task_runner_->PostTask(
       FROM_HERE, base::Bind(callback_, this, result_, url_, archive_path,
-                            result_title_, size_to_report_));
+                            result_title_, size_to_report_, digest_to_report_));
 }
 
 }  // namespace offline_pages

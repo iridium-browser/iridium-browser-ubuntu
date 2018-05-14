@@ -34,8 +34,6 @@ class LayoutSVGResourceClipper final : public LayoutSVGResourceContainer {
   const char* GetName() const override { return "LayoutSVGResourceClipper"; }
 
   void RemoveAllClientsFromCache(bool mark_for_invalidation = true) override;
-  void RemoveClientFromCache(LayoutObject*,
-                             bool mark_for_invalidation = true) override;
 
   FloatRect ResourceBoundingBox(const FloatRect& reference_box);
 
@@ -45,13 +43,13 @@ class LayoutSVGResourceClipper final : public LayoutSVGResourceContainer {
   bool HitTestClipContent(const FloatRect&, const FloatPoint&);
 
   SVGUnitTypes::SVGUnitType ClipPathUnits() const {
-    return toSVGClipPathElement(GetElement())
+    return ToSVGClipPathElement(GetElement())
         ->clipPathUnits()
         ->CurrentValue()
         ->EnumValue();
   }
 
-  bool AsPath(const AffineTransform&, const FloatRect& reference_box, Path&);
+  Optional<Path> AsPath();
   sk_sp<const PaintRecord> CreatePaintRecord();
 
   bool HasCycle() { return in_clip_expansion_; }
@@ -67,10 +65,12 @@ class LayoutSVGResourceClipper final : public LayoutSVGResourceContainer {
  private:
   void CalculateLocalClipBounds();
 
-  // Return true if the clip path was calculated or a cached value is available.
-  bool CalculateClipContentPathIfNeeded();
-
   // Cache of the clip path when using path clipping.
+  enum ClipContentPathValidity {
+    kClipContentPathUnknown,
+    kClipContentPathValid,
+    kClipContentPathInvalid
+  } clip_content_path_validity_ = kClipContentPathUnknown;
   Path clip_content_path_;
 
   // Cache of the clip path paint record when falling back to masking for

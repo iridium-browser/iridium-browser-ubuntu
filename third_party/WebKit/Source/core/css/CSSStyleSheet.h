@@ -22,10 +22,12 @@
 #ifndef CSSStyleSheet_h
 #define CSSStyleSheet_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSRule.h"
 #include "core/css/MediaQueryEvaluator.h"
 #include "core/css/StyleSheet.h"
+#include "core/dom/TreeScope.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/text/TextEncoding.h"
@@ -37,6 +39,7 @@ class CSSImportRule;
 class CSSRule;
 class CSSRuleList;
 class CSSStyleSheet;
+class CSSStyleSheetInit;
 class Document;
 class ExceptionState;
 class MediaQuerySet;
@@ -45,10 +48,15 @@ class StyleSheetContents;
 
 class CORE_EXPORT CSSStyleSheet final : public StyleSheet {
   DEFINE_WRAPPERTYPEINFO();
-  WTF_MAKE_NONCOPYABLE(CSSStyleSheet);
 
  public:
   static const Document* SingleOwnerDocument(const CSSStyleSheet*);
+
+  static CSSStyleSheet* Create(Document&, const String&, ExceptionState&);
+  static CSSStyleSheet* Create(Document&,
+                               const String&,
+                               const CSSStyleSheetInit&,
+                               ExceptionState&);
 
   static CSSStyleSheet* Create(StyleSheetContents*,
                                CSSImportRule* owner_rule = nullptr);
@@ -67,18 +75,18 @@ class CORE_EXPORT CSSStyleSheet final : public StyleSheet {
 
   CSSStyleSheet* parentStyleSheet() const override;
   Node* ownerNode() const override { return owner_node_; }
-  MediaList* media() const override;
+  MediaList* media() override;
   String href() const override;
   String title() const override { return title_; }
   bool disabled() const override { return is_disabled_; }
   void setDisabled(bool) override;
 
-  CSSRuleList* cssRules();
+  CSSRuleList* cssRules(ExceptionState&);
   unsigned insertRule(const String& rule, unsigned index, ExceptionState&);
   void deleteRule(unsigned index, ExceptionState&);
 
   // IE Extensions
-  CSSRuleList* rules();
+  CSSRuleList* rules(ExceptionState&);
   int addRule(const String& selector,
               const String& style,
               int index,
@@ -100,8 +108,8 @@ class CORE_EXPORT CSSStyleSheet final : public StyleSheet {
 
   void ClearOwnerRule() { owner_rule_ = nullptr; }
   Document* OwnerDocument() const;
-  const MediaQuerySet* MediaQueries() const { return media_queries_.Get(); }
-  void SetMediaQueries(RefPtr<MediaQuerySet>);
+  const MediaQuerySet* MediaQueries() const { return media_queries_.get(); }
+  void SetMediaQueries(scoped_refptr<MediaQuerySet>);
   bool MatchesMediaQueries(const MediaQueryEvaluator&);
   bool HasMediaQueryResults() const {
     return !viewport_dependent_media_query_results_.IsEmpty() ||
@@ -116,10 +124,18 @@ class CORE_EXPORT CSSStyleSheet final : public StyleSheet {
   void SetTitle(const String& title) { title_ = title; }
   // Set by LinkStyle iff CORS-enabled fetch of stylesheet succeeded from this
   // origin.
-  void SetAllowRuleAccessFromOrigin(PassRefPtr<SecurityOrigin> allowed_origin);
+  void SetAllowRuleAccessFromOrigin(
+      scoped_refptr<const SecurityOrigin> allowed_origin);
+
+  void AddedConstructedToTreeScope(TreeScope* tree_scope) {
+    constructed_tree_scopes_.insert(tree_scope);
+  }
+
+  void RemovedConstructedFromTreeScope(TreeScope* tree_scope) {
+    constructed_tree_scopes_.erase(tree_scope);
+  }
 
   class RuleMutationScope {
-    WTF_MAKE_NONCOPYABLE(RuleMutationScope);
     STACK_ALLOCATED();
 
    public:
@@ -129,6 +145,7 @@ class CORE_EXPORT CSSStyleSheet final : public StyleSheet {
 
    private:
     Member<CSSStyleSheet> style_sheet_;
+    DISALLOW_COPY_AND_ASSIGN(RuleMutationScope);
   };
 
   void WillMutateRules();
@@ -144,8 +161,12 @@ class CORE_EXPORT CSSStyleSheet final : public StyleSheet {
   bool LoadCompleted() const { return load_completed_; }
   void StartLoadingDynamicSheet();
   void SetText(const String&);
+  void SetMedia(MediaList*);
+  void SetAlternateFromConstructor(bool);
+  bool IsAlternate() const;
+  bool CanBeActivated(const String& current_preferrable_name) const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   CSSStyleSheet(StyleSheetContents*, CSSImportRule* owner_rule);
@@ -163,24 +184,37 @@ class CORE_EXPORT CSSStyleSheet final : public StyleSheet {
 
   void SetLoadCompleted(bool);
 
+  FRIEND_TEST_ALL_PREFIXES(
+      CSSStyleSheetTest,
+      CSSStyleSheetConstructionWithEmptyCSSStyleSheetInitAndText);
+  FRIEND_TEST_ALL_PREFIXES(
+      CSSStyleSheetTest,
+      CSSStyleSheetConstructionWithoutEmptyCSSStyleSheetInitAndText);
+  bool AlternateFromConstructor() const { return alternate_from_constructor_; }
+
   Member<StyleSheetContents> contents_;
   bool is_inline_stylesheet_ = false;
   bool is_disabled_ = false;
   bool load_completed_ = false;
+  // This alternate variable is only used for constructed CSSStyleSheet.
+  // For other CSSStyleSheet, consult the alternate attribute.
+  bool alternate_from_constructor_ = false;
   String title_;
-  RefPtr<MediaQuerySet> media_queries_;
+  scoped_refptr<MediaQuerySet> media_queries_;
   MediaQueryResultList viewport_dependent_media_query_results_;
   MediaQueryResultList device_dependent_media_query_results_;
 
-  RefPtr<SecurityOrigin> allow_rule_access_from_origin_;
+  scoped_refptr<const SecurityOrigin> allow_rule_access_from_origin_;
 
   Member<Node> owner_node_;
   Member<CSSRule> owner_rule_;
+  HeapHashSet<Member<TreeScope>> constructed_tree_scopes_;
 
   TextPosition start_position_;
-  mutable Member<MediaList> media_cssom_wrapper_;
+  Member<MediaList> media_cssom_wrapper_;
   mutable HeapVector<Member<CSSRule>> child_rule_cssom_wrappers_;
   mutable Member<CSSRuleList> rule_list_cssom_wrapper_;
+  DISALLOW_COPY_AND_ASSIGN(CSSStyleSheet);
 };
 
 inline CSSStyleSheet::RuleMutationScope::RuleMutationScope(CSSStyleSheet* sheet)

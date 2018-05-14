@@ -12,6 +12,8 @@
 // than the corresponding #define labels.  If you change a given command's
 // number, any NIB files that refer to it will also need to be updated.
 
+// clang-format off
+
 // Values below IDC_MinimumLabelValue are reserved for dynamic menu items.
 #define IDC_MinimumLabelValue           4000
 
@@ -29,8 +31,6 @@
 #define IDC_RELOAD_BYPASSING_CACHE      33007
 #define IDC_LOAD_NEW_TAB_PAGE           33008
 #define IDC_RELOAD_CLEARING_CACHE       33009
-#define IDC_BACKSPACE_BACK              33010
-#define IDC_BACKSPACE_FORWARD           33011
 
 // Window management commands
 #define IDC_NEW_WINDOW                  34000
@@ -69,7 +69,14 @@
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #define IDC_USE_SYSTEM_TITLE_BAR        34051
+#define IDC_RESTORE_WINDOW              34052
 #endif
+
+// Hosted app commands
+#define IDC_COPY_URL                    34060
+#define IDC_OPEN_IN_CHROME              34061
+#define IDC_SITE_SETTINGS               34062
+#define IDC_HOSTED_APP_MENU_APP_INFO    34063
 
 // Page-related commands
 #define IDC_BOOKMARK_PAGE               35000
@@ -83,7 +90,7 @@
 #define IDC_TRANSLATE_PAGE              35009
 #define IDC_MANAGE_PASSWORDS_FOR_PAGE   35010
 #define IDC_ROUTE_MEDIA                 35011
-#define IDC_WINDOW_MUTE_TAB             35012
+#define IDC_WINDOW_MUTE_SITE            35012
 #define IDC_WINDOW_PIN_TAB              35013
 
 // Clipboard commands
@@ -113,7 +120,7 @@
 #define IDC_FOCUS_NEXT_PANE             39004
 #define IDC_FOCUS_PREVIOUS_PANE         39005
 #define IDC_FOCUS_BOOKMARKS             39006
-#define IDC_FOCUS_INFOBARS              39007
+#define IDC_FOCUS_INACTIVE_POPUP_FOR_ACCESSIBILITY 39007
 
 // Show various bits of UI
 #define IDC_OPEN_FILE                   40000
@@ -173,6 +180,7 @@
 #define IDC_TOGGLE_FULLSCREEN_TOOLBAR   40250
 #define IDC_CUSTOMIZE_TOUCH_BAR         40251
 #define IDC_SHOW_BETA_FORUM             40252
+#define IDC_TOGGLE_JAVASCRIPT_APPLE_EVENTS 40253
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -211,7 +219,6 @@
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_PROFILE_MAIN_MENU           46100     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
-#define IDC_TOUCH_HUD_PROJECTION_TOGGLE 46400     // ChromeOS only
 
 // The range of command ids reserved for context menus added by web content.
 #define IDC_CONTENT_CONTEXT_CUSTOM_FIRST 47000
@@ -232,6 +239,7 @@
 #define IDC_CONTENT_CONTEXT_OPENLINKWITH 50106
 #define IDC_CONTENT_CONTEXT_COPYLINKTEXT 50107
 #define IDC_CONTENT_CONTEXT_OPENLINKINPROFILE 50108
+#define IDC_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP 50109
 // Image items.
 #define IDC_CONTENT_CONTEXT_SAVEIMAGEAS 50110
 #define IDC_CONTENT_CONTEXT_COPYIMAGELOCATION 50111
@@ -244,6 +252,7 @@
 #define IDC_CONTENT_CONTEXT_SAVEAVAS 50120
 #define IDC_CONTENT_CONTEXT_COPYAVLOCATION 50121
 #define IDC_CONTENT_CONTEXT_OPENAVNEWTAB 50122
+#define IDC_CONTENT_CONTENT_PICTUREINPICTURE 50123
 // Media items.
 #define IDC_CONTENT_CONTEXT_PLAYPAUSE 50130
 #define IDC_CONTENT_CONTEXT_MUTE 50131
@@ -278,6 +287,7 @@
 #define IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD 50165
 #define IDC_CONTENT_CONTEXT_GENERATEPASSWORD 50166
 #define IDC_CONTENT_CONTEXT_EXIT_FULLSCREEN 50167
+#define IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS 50168
 // Frame items.
 #define IDC_CONTENT_CONTEXT_RELOADFRAME 50170
 #define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50171

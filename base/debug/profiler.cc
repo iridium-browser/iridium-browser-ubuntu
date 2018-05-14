@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "base/debug/debugging_flags.h"
+#include "base/debug/debugging_buildflags.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -92,19 +92,19 @@ bool IsBinaryInstrumented() {
 }
 
 ReturnAddressLocationResolver GetProfilerReturnAddrResolutionFunc() {
-  return NULL;
+  return nullptr;
 }
 
 DynamicFunctionEntryHook GetProfilerDynamicFunctionEntryHookFunc() {
-  return NULL;
+  return nullptr;
 }
 
 AddDynamicSymbol GetProfilerAddDynamicSymbolFunc() {
-  return NULL;
+  return nullptr;
 }
 
 MoveDynamicSymbol GetProfilerMoveDynamicSymbolFunc() {
-  return NULL;
+  return nullptr;
 }
 
 #else  // defined(OS_WIN)

@@ -9,7 +9,7 @@
 #include "ash/system/tray/tray_popup_ink_drop_style.h"
 #include "base/macros.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/views/controls/button/custom_button.h"
+#include "ui/views/controls/button/button.h"
 
 namespace ash {
 class SystemTrayItem;
@@ -22,9 +22,9 @@ class SystemTrayItem;
 // Exported for SystemTray.
 //
 // TODO(bruthig): Consider removing ActionableView and make clients use
-// CustomButtons instead. (See crbug.com/614453)
+// Buttons instead. (See crbug.com/614453)
 class ASH_EXPORT ActionableView : public views::ButtonListener,
-                                  public views::CustomButton {
+                                  public views::Button {
  public:
   static const char kViewClassName[];
 
@@ -33,9 +33,6 @@ class ASH_EXPORT ActionableView : public views::ButtonListener,
   ActionableView(SystemTrayItem* owner, TrayPopupInkDropStyle ink_drop_style);
 
   ~ActionableView() override;
-
-  void SetAccessibleName(const base::string16& name);
-  const base::string16& accessible_name() const { return accessible_name_; }
 
   // Closes the system tray bubble. The |owner_| must not be nullptr.
   void CloseSystemBubble();
@@ -56,7 +53,7 @@ class ASH_EXPORT ActionableView : public views::ButtonListener,
   virtual void HandlePerformActionResult(bool action_performed,
                                          const ui::Event& event);
 
-  // Overridden from views::CustomButton.
+  // Overridden from views::Button.
   const char* GetClassName() const override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
@@ -76,8 +73,6 @@ class ASH_EXPORT ActionableView : public views::ButtonListener,
   bool* destroyed_;
 
   SystemTrayItem* owner_;
-
-  base::string16 accessible_name_;
 
   // Defines the flavor of ink drop ripple/highlight that should be constructed.
   TrayPopupInkDropStyle ink_drop_style_;

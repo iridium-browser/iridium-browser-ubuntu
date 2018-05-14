@@ -4,7 +4,7 @@
 
 #include "content/common/presentation/presentation_struct_traits.h"
 
-#include "url/mojo/url_gurl_struct_traits.h"
+#include "url/mojom/url_gurl_mojom_traits.h"
 
 namespace mojo {
 
@@ -47,14 +47,11 @@ bool UnionTraits<blink::mojom::PresentationConnectionMessageDataView,
     Read(blink::mojom::PresentationConnectionMessageDataView data,
          content::PresentationConnectionMessage* out) {
   if (data.is_message()) {
-    if (!data.ReadMessage(&(out->message)) ||
-        out->message->length() >
-            content::kMaxPresentationConnectionMessageSize) {
+    if (!data.ReadMessage(&(out->message))) {
       return false;
     }
   } else {
-    if (!data.ReadData(&(out->data)) ||
-        out->data->size() > content::kMaxPresentationConnectionMessageSize) {
+    if (!data.ReadData(&(out->data))) {
       return false;
     }
   }

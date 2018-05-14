@@ -20,13 +20,14 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/test/background_sync_test_util.h"
+#include "content/public/test/mock_permission_manager.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
-#include "content/test/mock_permission_manager.h"
 #include "content/test/test_background_sync_context.h"
 #include "mojo/public/cpp/bindings/interface_ptr.h"
 #include "net/base/network_change_notifier.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
 
@@ -161,9 +162,10 @@ class BackgroundSyncServiceImplTest : public testing::Test {
 
   void CreateServiceWorkerRegistration() {
     bool called = false;
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = GURL(kServiceWorkerPattern);
     embedded_worker_helper_->context()->RegisterServiceWorker(
-        GURL(kServiceWorkerScript),
-        ServiceWorkerRegistrationOptions(GURL(kServiceWorkerPattern)), nullptr,
+        GURL(kServiceWorkerScript), options,
         base::AdaptCallbackForRepeating(base::BindOnce(
             &RegisterServiceWorkerCallback, &called, &sw_registration_id_)));
     base::RunLoop().RunUntilIdle();

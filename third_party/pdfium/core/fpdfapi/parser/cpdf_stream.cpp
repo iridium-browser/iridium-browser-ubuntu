@@ -12,6 +12,7 @@
 #include "core/fpdfapi/parser/cpdf_number.h"
 #include "core/fpdfapi/parser/cpdf_stream_acc.h"
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
+#include "core/fxcrt/fx_stream.h"
 #include "third_party/base/numerics/safe_conversions.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
@@ -21,7 +22,9 @@ CPDF_Stream::CPDF_Stream() {}
 CPDF_Stream::CPDF_Stream(std::unique_ptr<uint8_t, FxFreeDeleter> pData,
                          uint32_t size,
                          std::unique_ptr<CPDF_Dictionary> pDict)
-    : m_dwSize(size), m_pDict(std::move(pDict)), m_pDataBuf(std::move(pData)) {}
+    : m_pDict(std::move(pDict)) {
+  SetData(std::move(pData), size);
+}
 
 CPDF_Stream::~CPDF_Stream() {
   m_ObjNum = kInvalidObjNum;
@@ -53,18 +56,11 @@ void CPDF_Stream::InitStream(const uint8_t* pData,
                              uint32_t size,
                              std::unique_ptr<CPDF_Dictionary> pDict) {
   m_pDict = std::move(pDict);
-  m_bMemoryBased = true;
-  m_pFile = nullptr;
-  m_pDataBuf.reset(FX_Alloc(uint8_t, size));
-  if (pData)
-    memcpy(m_pDataBuf.get(), pData, size);
-  m_dwSize = size;
-  if (m_pDict)
-    m_pDict->SetNewFor<CPDF_Number>("Length", static_cast<int>(m_dwSize));
+  SetData(pData, size);
 }
 
 void CPDF_Stream::InitStreamFromFile(
-    const CFX_RetainPtr<IFX_SeekableReadStream>& pFile,
+    const RetainPtr<IFX_SeekableReadStream>& pFile,
     std::unique_ptr<CPDF_Dictionary> pDict) {
   m_pDict = std::move(pDict);
   m_bMemoryBased = false;
@@ -84,7 +80,7 @@ std::unique_ptr<CPDF_Object> CPDF_Stream::CloneNonCyclic(
     std::set<const CPDF_Object*>* pVisited) const {
   pVisited->insert(this);
   auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(this);
-  pAcc->LoadAllData(true);
+  pAcc->LoadAllDataRaw();
 
   uint32_t streamSize = pAcc->GetSize();
   CPDF_Dictionary* pDict = GetDict();
@@ -97,20 +93,48 @@ std::unique_ptr<CPDF_Object> CPDF_Stream::CloneNonCyclic(
                                          std::move(pNewDict));
 }
 
-void CPDF_Stream::SetData(const uint8_t* pData, uint32_t size) {
-  m_bMemoryBased = true;
-  m_pDataBuf.reset(FX_Alloc(uint8_t, size));
-  if (pData)
-    memcpy(m_pDataBuf.get(), pData, size);
-  m_dwSize = size;
-  if (!m_pDict)
-    m_pDict = pdfium::MakeUnique<CPDF_Dictionary>();
-  m_pDict->SetNewFor<CPDF_Number>("Length", static_cast<int>(size));
+void CPDF_Stream::SetDataAndRemoveFilter(const uint8_t* pData, uint32_t size) {
+  SetData(pData, size);
   m_pDict->RemoveFor("Filter");
   m_pDict->RemoveFor("DecodeParms");
 }
 
+void CPDF_Stream::SetDataAndRemoveFilter(std::ostringstream* stream) {
+  if (stream->tellp() <= 0) {
+    SetDataAndRemoveFilter(nullptr, 0);
+    return;
+  }
+
+  SetDataAndRemoveFilter(
+      reinterpret_cast<const uint8_t*>(stream->str().c_str()), stream->tellp());
+}
+
+void CPDF_Stream::SetData(const uint8_t* pData, uint32_t size) {
+  std::unique_ptr<uint8_t, FxFreeDeleter> data_copy;
+  if (pData) {
+    data_copy.reset(FX_Alloc(uint8_t, size));
+    memcpy(data_copy.get(), pData, size);
+  }
+  SetData(std::move(data_copy), size);
+}
+
+void CPDF_Stream::SetData(std::unique_ptr<uint8_t, FxFreeDeleter> pData,
+                          uint32_t size) {
+  m_bMemoryBased = true;
+  m_pFile = nullptr;
+  m_pDataBuf = std::move(pData);
+  m_dwSize = size;
+  if (!m_pDict)
+    m_pDict = pdfium::MakeUnique<CPDF_Dictionary>();
+  m_pDict->SetNewFor<CPDF_Number>("Length", static_cast<int>(size));
+}
+
 void CPDF_Stream::SetData(std::ostringstream* stream) {
+  if (stream->tellp() <= 0) {
+    SetData(nullptr, 0);
+    return;
+  }
+
   SetData(reinterpret_cast<const uint8_t*>(stream->str().c_str()),
           stream->tellp());
 }
@@ -131,9 +155,9 @@ bool CPDF_Stream::HasFilter() const {
   return m_pDict && m_pDict->KeyExist("Filter");
 }
 
-CFX_WideString CPDF_Stream::GetUnicodeText() const {
+WideString CPDF_Stream::GetUnicodeText() const {
   auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(this);
-  pAcc->LoadAllData(false);
+  pAcc->LoadAllDataFiltered();
   return PDF_DecodeText(pAcc->GetData(), pAcc->GetSize());
 }
 
@@ -142,7 +166,7 @@ bool CPDF_Stream::WriteTo(IFX_ArchiveStream* archive) const {
     return false;
 
   auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(this);
-  pAcc->LoadAllData(true);
+  pAcc->LoadAllDataRaw();
   return archive->WriteBlock(pAcc->GetData(), pAcc->GetSize()) &&
          archive->WriteString("\r\nendstream");
 }

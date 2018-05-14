@@ -6,7 +6,9 @@
 
 #include <stddef.h>
 
-#include "base/command_line.h"
+#include <memory>
+
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/user_metrics.h"
@@ -25,17 +27,16 @@
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
-#include "chrome/browser/ui/settings_window_manager.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/md_bookmarks/md_bookmarks_ui.h"
 #include "chrome/browser/ui/webui/site_settings_helper.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/signin/core/browser/signin_header_helper.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/common/constants.h"
@@ -49,9 +50,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/genius_app/app_id.h"
-#include "chrome/grit/generated_resources.h"
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "extensions/browser/extension_registry.h"
-#include "ui/base/l10n/l10n_util.h"
 #endif
 
 #if !defined(OS_ANDROID)
@@ -93,6 +93,11 @@ void ShowHelpImpl(Browser* browser, Profile* profile, HelpSource source) {
       extensions::ExtensionRegistry::Get(profile)->GetExtensionById(
           genius_app::kGeniusAppId,
           extensions::ExtensionRegistry::EVERYTHING);
+  if (!extension) {
+    DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kDisableDefaultApps));
+    return;
+  }
   extensions::AppLaunchSource app_launch_source(extensions::SOURCE_UNTRACKED);
   switch (source) {
     case HELP_SOURCE_KEYBOARD:
@@ -153,6 +158,7 @@ std::string GenerateContentSettingsExceptionsSubPage(ContentSettingsType type) {
         {CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC, "backgroundSync"},
         {CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, "microphone"},
         {CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, "camera"},
+        {CONTENT_SETTINGS_TYPE_MIDI_SYSEX, "midiDevices"},
         {CONTENT_SETTINGS_TYPE_PLUGINS, "flash"},
         {CONTENT_SETTINGS_TYPE_ADS, "ads"},
         {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, "unsandboxedPlugins"}}));
@@ -163,6 +169,30 @@ std::string GenerateContentSettingsExceptionsSubPage(ContentSettingsType type) {
           : it->second;
 
   return std::string(kContentSettingsSubPage) + "/" + content_type_path;
+}
+
+void ShowSiteSettingsImpl(Browser* browser, Profile* profile, const GURL& url) {
+  // If a valid non-file origin, open a settings page specific to the current
+  // origin of the page. Otherwise, open Content Settings.
+  url::Origin site_origin = url::Origin::Create(url);
+  std::string link_destination(chrome::kChromeUIContentSettingsURL);
+  // TODO(https://crbug.com/444047): Site Details should work with file:// urls
+  // when this bug is fixed, so add it to the whitelist when that happens.
+  if (!site_origin.unique() && (url.SchemeIsHTTPOrHTTPS() ||
+                                url.SchemeIs(extensions::kExtensionScheme))) {
+    std::string origin_string = site_origin.Serialize();
+    url::RawCanonOutputT<char> percent_encoded_origin;
+    url::EncodeURIComponent(origin_string.c_str(), origin_string.length(),
+                            &percent_encoded_origin);
+    link_destination = chrome::kChromeUISiteDetailsPrefixURL +
+                       std::string(percent_encoded_origin.data(),
+                                   percent_encoded_origin.length());
+  }
+  NavigateParams params(profile, GURL(link_destination),
+                        ui::PAGE_TRANSITION_TYPED);
+  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+  params.browser = browser;
+  Navigate(&params);
 }
 
 }  // namespace
@@ -248,12 +278,6 @@ GURL GetSettingsUrl(const std::string& sub_page) {
   return GURL(std::string(kChromeUISettingsURL) + sub_page);
 }
 
-bool IsSettingsSubPage(const GURL& url, const std::string& sub_page) {
-  return (url.SchemeIs(content::kChromeUIScheme) &&
-          (url.host_piece() == chrome::kChromeUISettingsHost) &&
-          url.path_piece() == "/" + sub_page);
-}
-
 bool IsTrustedPopupWindowWithScheme(const Browser* browser,
                                     const std::string& scheme) {
   if (!browser->is_type_popup() || !browser->is_trusted_source())
@@ -274,28 +298,27 @@ void ShowSettings(Browser* browser) {
 }
 
 void ShowSettingsSubPage(Browser* browser, const std::string& sub_page) {
-  if (::switches::SettingsWindowEnabled()) {
-    ShowSettingsSubPageForProfile(browser->profile(), sub_page);
-    return;
-  }
+#if defined(OS_CHROMEOS)
+  ShowSettingsSubPageForProfile(browser->profile(), sub_page);
+#else
   ShowSettingsSubPageInTabbedBrowser(browser, sub_page);
+#endif
 }
 
 void ShowSettingsSubPageForProfile(Profile* profile,
                                    const std::string& sub_page) {
   std::string sub_page_path = sub_page;
 
-  if (::switches::SettingsWindowEnabled()) {
-    base::RecordAction(base::UserMetricsAction("ShowOptions"));
-    SettingsWindowManager::GetInstance()->ShowChromePageForProfile(
-        profile, GetSettingsUrl(sub_page_path));
-    return;
-  }
+#if defined(OS_CHROMEOS)
+  base::RecordAction(base::UserMetricsAction("ShowOptions"));
+  SettingsWindowManager::GetInstance()->ShowChromePageForProfile(
+      profile, GetSettingsUrl(sub_page_path));
+#else
   Browser* browser = chrome::FindTabbedBrowser(profile, false);
-  if (!browser) {
+  if (!browser)
     browser = new Browser(Browser::CreateParams(profile, true));
-  }
   ShowSettingsSubPageInTabbedBrowser(browser, sub_page_path);
+#endif
 }
 
 void ShowSettingsSubPageInTabbedBrowser(Browser* browser,
@@ -313,12 +336,20 @@ void ShowContentSettingsExceptions(Browser* browser,
       browser, GenerateContentSettingsExceptionsSubPage(content_settings_type));
 }
 
-void ShowContentSettingsExceptionsInWindow(
+void ShowContentSettingsExceptionsForProfile(
     Profile* profile,
     ContentSettingsType content_settings_type) {
-  DCHECK(switches::SettingsWindowEnabled());
   ShowSettingsSubPageForProfile(
       profile, GenerateContentSettingsExceptionsSubPage(content_settings_type));
+}
+
+void ShowSiteSettings(Browser* browser, const GURL& url) {
+  ShowSiteSettingsImpl(browser, browser->profile(), url);
+}
+
+void ShowSiteSettings(Profile* profile, const GURL& url) {
+  DCHECK(profile);
+  ShowSiteSettingsImpl(nullptr, profile, url);
 }
 
 void ShowContentSettings(Browser* browser,
@@ -346,15 +377,15 @@ void ShowImportDialog(Browser* browser) {
 
 void ShowAboutChrome(Browser* browser) {
   base::RecordAction(UserMetricsAction("AboutChrome"));
-  if (::switches::SettingsWindowEnabled()) {
-    SettingsWindowManager::GetInstance()->ShowChromePageForProfile(
-        browser->profile(), GURL(kChromeUIHelpURL));
-    return;
-  }
+#if defined(OS_CHROMEOS)
+  SettingsWindowManager::GetInstance()->ShowChromePageForProfile(
+      browser->profile(), GURL(kChromeUIHelpURL));
+#else
   NavigateParams params(
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIHelpURL)));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
   ShowSingletonTabOverwritingNTP(browser, params);
+#endif
 }
 
 void ShowSearchEngineSettings(Browser* browser) {
@@ -369,37 +400,38 @@ void ShowBrowserSignin(Browser* browser,
   SigninManagerBase* manager =
       SigninManagerFactory::GetForProfile(original_profile);
   DCHECK(manager->IsSigninAllowed());
-  // If the browser's profile is an incognito profile, make sure to use
-  // a browser window from the original profile.  The user cannot sign in
-  // from an incognito window.
-  bool switched_browser = false;
-  std::unique_ptr<ScopedTabbedBrowserDisplayer> displayer;
-  if (browser->profile()->IsOffTheRecord()) {
-    switched_browser = true;
-    displayer.reset(new ScopedTabbedBrowserDisplayer(original_profile));
-    browser = displayer->browser();
-  }
 
-  // Since the extension is a separate application, it might steal focus
-  // away from Chrome, and accidentally close the avatar bubble. The same will
-  // happen if we had to switch browser windows to show the sign in page. In
-  // this case, fallback to the full-tab signin page.
-  bool show_avatar_bubble =
-      access_point != signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS &&
-      !switched_browser;
+  // If the browser's profile is an incognito profile, make sure to use
+  // a browser window from the original profile. The user cannot sign in
+  // from an incognito window.
+  auto displayer =
+      std::make_unique<ScopedTabbedBrowserDisplayer>(original_profile);
+  browser = displayer->browser();
+
 #if defined(OS_CHROMEOS)
   // ChromeOS doesn't have the avatar bubble.
-  show_avatar_bubble = false;
-#endif
+  const bool can_show_avatar_bubble = false;
+#else
+  // The sign-in modal dialog is presented as a tab-modal dialog (which is
+  // automatically dismissed when the page navigates). Displaying the dialog on
+  // a new tab that loads any page will lead to it being dismissed as soon as
+  // the new tab is loaded. So the sign-in dialog must only be presented on top
+  // of an existing tab.
+  //
+  // If ScopedTabbedBrowserDisplayer had to create a (non-incognito) Browser*,
+  // it won't have any tabs yet. Fallback to the full-tab sign-in flow in this
+  // case.
+  const bool can_show_avatar_bubble = !browser->tab_strip_model()->empty();
+#endif  // defined(OS_CHROMEOS)
 
-  if (show_avatar_bubble) {
+  if (can_show_avatar_bubble) {
     browser->window()->ShowAvatarBubbleFromAvatarButton(
         BrowserWindow::AVATAR_BUBBLE_MODE_SIGNIN,
         signin::ManageAccountsParams(), access_point, false);
   } else {
     NavigateToSingletonTab(
         browser,
-        signin::GetPromoURL(
+        signin::GetPromoURLForTab(
             access_point, signin_metrics::Reason::REASON_SIGNIN_PRIMARY_ACCOUNT,
             false));
     DCHECK_GT(browser->tab_strip_model()->count(), 0);

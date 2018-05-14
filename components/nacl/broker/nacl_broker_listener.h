@@ -15,6 +15,7 @@
 #include "components/nacl/common/nacl_types.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "ipc/ipc_listener.h"
+#include "services/service_manager/sandbox/sandbox_type.h"
 
 namespace IPC {
 class Channel;
@@ -32,6 +33,7 @@ class NaClBrokerListener : public content::SandboxedProcessLauncherDelegate,
 
   // content::SandboxedProcessLauncherDelegate implementation:
   bool PreSpawnTarget(sandbox::TargetPolicy* policy) override;
+  service_manager::SandboxType GetSandboxType() override;
 
   // IPC::Listener implementation.
   void OnChannelConnected(int32_t peer_pid) override;

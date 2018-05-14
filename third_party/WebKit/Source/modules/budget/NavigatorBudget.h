@@ -20,16 +20,17 @@ class NavigatorBudget final : public GarbageCollected<NavigatorBudget>,
   WTF_MAKE_NONCOPYABLE(NavigatorBudget);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorBudget& From(Navigator&);
 
-  static BudgetService* budget(Navigator&);
-  BudgetService* budget();
+  static BudgetService* budget(ExecutionContext*, Navigator&);
+  BudgetService* budget(ExecutionContext*);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit NavigatorBudget(Navigator&);
-  static const char* SupplementName();
 
   Member<BudgetService> budget_;
 };

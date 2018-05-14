@@ -85,7 +85,7 @@ ScrollbarAnimationController::ScrollbarAnimationController(
       thinning_duration);
 }
 
-ScrollbarAnimationController::~ScrollbarAnimationController() {}
+ScrollbarAnimationController::~ScrollbarAnimationController() = default;
 
 ScrollbarSet ScrollbarAnimationController::Scrollbars() const {
   return client_->ScrollbarsFor(scroll_element_id_);
@@ -130,6 +130,11 @@ void ScrollbarAnimationController::PostDelayedAnimation(
 
 bool ScrollbarAnimationController::Animate(base::TimeTicks now) {
   bool animated = false;
+
+  for (ScrollbarLayerImplBase* scrollbar : Scrollbars()) {
+    if (!scrollbar->CanScrollOrientation())
+      scrollbar->SetOverlayScrollbarLayerOpacityAnimated(0);
+  }
 
   if (is_animating_) {
     DCHECK(animation_change_ != NONE);

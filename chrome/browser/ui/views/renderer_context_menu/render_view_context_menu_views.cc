@@ -25,6 +25,7 @@
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/strings/grit/ui_strings.h"
 #include "ui/views/widget/widget.h"
 
 using content::WebContents;
@@ -266,10 +267,8 @@ void RenderViewContextMenuViews::Show() {
   if (menu_model().GetItemCount() == 0)
     return;
 
-  gfx::Point screen_point(params().x, params().y);
-  screen_point += RenderViewContextMenuViews::GetOffset(GetRenderFrameHost());
-
   // Convert from target window coordinates to root window coordinates.
+  gfx::Point screen_point(params().x, params().y);
   aura::Window* target_window = GetActiveNativeView();
   aura::Window* root_window = target_window->GetRootWindow();
   aura::client::ScreenPositionClient* screen_position_client =

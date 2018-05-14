@@ -5,6 +5,9 @@
 #ifndef UI_VIEWS_WIDGET_DESKTOP_AURA_DESKTOP_WINDOW_TREE_HOST_WIN_H_
 #define UI_VIEWS_WIDGET_DESKTOP_AURA_DESKTOP_WINDOW_TREE_HOST_WIN_H_
 
+#include <memory>
+#include <string>
+
 #include "base/macros.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/views/views_export.h"
@@ -21,6 +24,7 @@ class FocusClient;
 
 namespace ui {
 class InputMethod;
+class KeyboardHook;
 }  // namespace ui
 
 namespace wm {
@@ -55,7 +59,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   void Init(aura::Window* content_window,
             const Widget::InitParams& params) override;
   void OnNativeWidgetCreated(const Widget::InitParams& params) override;
-  void OnNativeWidgetActivationChanged(bool active) override;
+  void OnActiveWindowChanged(bool active) override;
   void OnWidgetInitDone() override;
   std::unique_ptr<corewm::Tooltip> CreateTooltip() override;
   std::unique_ptr<aura::client::DragDropClient> CreateDragDropClient(
@@ -77,7 +81,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   gfx::Rect GetRestoredBounds() const override;
   std::string GetWorkspace() const override;
   gfx::Rect GetWorkAreaBoundsInScreen() const override;
-  void SetShape(std::unique_ptr<SkRegion> native_region) override;
+  void SetShape(std::unique_ptr<Widget::ShapeRects> native_shape) override;
   void Activate() override;
   void Deactivate() override;
   bool IsActive() const override;
@@ -127,6 +131,9 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   gfx::Point GetLocationOnScreenInPixels() const override;
   void SetCapture() override;
   void ReleaseCapture() override;
+  bool CaptureSystemKeyEventsImpl(
+      base::Optional<base::flat_set<int>> keys_codes) override;
+  void ReleaseSystemKeyEventCapture() override;
   void SetCursorNative(gfx::NativeCursor cursor) override;
   void OnCursorVisibilityChangedNative(bool show) override;
   void MoveCursorToScreenLocationInPixels(
@@ -163,7 +170,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   gfx::Size DIPToScreenSize(const gfx::Size& dip_size) const override;
   void ResetWindowControls() override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
-  bool ShouldHandleSystemCommands() const override;
   void HandleAppDeactivated() override;
   void HandleActivationChanged(bool active) override;
   bool HandleAppCommand(short command) override;
@@ -188,6 +194,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   void HandleNativeFocus(HWND last_focused_window) override;
   void HandleNativeBlur(HWND focused_window) override;
   bool HandleMouseEvent(const ui::MouseEvent& event) override;
+  bool HandlePointerEvent(ui::PointerEvent* event) override;
   void HandleKeyEvent(ui::KeyEvent* event) override;
   void HandleTouchEvent(const ui::TouchEvent& event) override;
   bool HandleIMEMessage(UINT message,
@@ -220,6 +227,12 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
 
   // Returns true if a modal window is active in the current root window chain.
   bool IsModalWindowActive() const;
+
+  // Called whenever the HWND resizes or moves, to see if the nearest HMONITOR
+  // has changed, and, if so, inform the aura::WindowTreeHost.
+  void CheckForMonitorChange();
+
+  HMONITOR last_monitor_from_window_ = nullptr;
 
   std::unique_ptr<HWNDMessageHandler> message_handler_;
   std::unique_ptr<aura::client::FocusClient> focus_client_;
@@ -273,6 +286,9 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   // member static ensures that ::ShowCursor() is always called exactly once
   // whenever the cursor visibility state changes.
   static bool is_cursor_visible_;
+
+  // Captures system key events when keyboard lock is requested.
+  std::unique_ptr<ui::KeyboardHook> keyboard_hook_;
 
   std::unique_ptr<wm::ScopedTooltipDisabler> tooltip_disabler_;
 

@@ -5,19 +5,12 @@
 #include "chrome/browser/android/download/intercept_download_resource_throttle.h"
 
 #include "base/strings/string_util.h"
+#include "chrome/browser/android/download/download_controller_base.h"
+#include "net/cookies/canonical_cookie.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
-
-namespace {
-static const char kOMADrmMessageMimeType[] = "application/vnd.oma.drm.message";
-static const char kOMADrmContentMimeType[] = "application/vnd.oma.drm.content";
-static const char kOMADrmRightsMimeType1[] =
-    "application/vnd.oma.drm.rights+xml";
-static const char kOMADrmRightsMimeType2[] =
-    "application/vnd.oma.drm.rights+wbxml";
-}
 
 InterceptDownloadResourceThrottle::InterceptDownloadResourceThrottle(
     net::URLRequest* request,
@@ -81,7 +74,7 @@ void InterceptDownloadResourceThrottle::CheckCookiePolicy(
   DownloadInfo info(request_);
   if (request_->context()->network_delegate()->CanGetCookies(*request_,
                                                              cookie_list)) {
-    std::string cookie = net::CookieStore::BuildCookieLine(cookie_list);
+    std::string cookie = net::CanonicalCookie::BuildCookieLine(cookie_list);
     if (!cookie.empty())
       info.cookie = cookie;
   }

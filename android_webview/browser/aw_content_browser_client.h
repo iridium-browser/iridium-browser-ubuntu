@@ -11,11 +11,20 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "content/public/browser/content_browser_client.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 
 namespace content {
 class RenderFrameHost;
+}
+
+namespace net {
+class NetLog;
+}
+
+namespace safe_browsing {
+class UrlCheckerDelegate;
 }
 
 namespace android_webview {
@@ -41,8 +50,11 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       const content::MainFunctionParams& parameters) override;
   content::WebContentsViewDelegate* GetWebContentsViewDelegate(
       content::WebContents* web_contents) override;
-  void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
+  void RenderProcessWillLaunch(
+      content::RenderProcessHost* host,
+      service_manager::mojom::ServiceRequest* service_request) override;
   bool IsHandledURL(const GURL& url) override;
+  bool ForceSniffingFileUrlsForHtml() override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
   std::string GetApplicationLocale() override;
@@ -59,7 +71,7 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
                       int render_frame_id) override;
   bool AllowSetCookie(const GURL& url,
                       const GURL& first_party,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       content::ResourceContext* context,
                       int render_process_id,
                       int render_frame_id,
@@ -85,7 +97,6 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       const net::SSLInfo& ssl_info,
       const GURL& request_url,
       content::ResourceType resource_type,
-      bool overridable,
       bool strict_enforcement,
       bool expired_previous_decision,
       const base::Callback<void(content::CertificateRequestResultType)>&
@@ -124,7 +135,7 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
-      content::FileDescriptorInfo* mappings) override;
+      content::PosixFileDescriptorInfo* mappings) override;
   void OverrideWebkitPrefs(content::RenderViewHost* rvh,
                            content::WebPreferences* web_prefs) override;
   std::vector<std::unique_ptr<content::NavigationThrottle>>
@@ -137,14 +148,53 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost* render_frame_host,
       const std::string& interface_name,
       mojo::ScopedMessagePipeHandle interface_pipe) override;
+  void ExposeInterfacesToRenderer(
+      service_manager::BinderRegistry* registry,
+      blink::AssociatedInterfaceRegistry* associated_registry,
+      content::RenderProcessHost* render_process_host) override;
+  std::vector<std::unique_ptr<content::URLLoaderThrottle>>
+  CreateURLLoaderThrottles(
+      const network::ResourceRequest& request,
+      content::ResourceContext* resource_context,
+      const base::RepeatingCallback<content::WebContents*()>& wc_getter,
+      content::NavigationUIData* navigation_ui_data,
+      int frame_tree_node_id) override;
+  bool ShouldOverrideUrlLoading(int frame_tree_node_id,
+                                bool browser_initiated,
+                                const GURL& gurl,
+                                const std::string& request_method,
+                                bool has_user_gesture,
+                                bool is_redirect,
+                                bool is_main_frame,
+                                ui::PageTransition transition) override;
+  bool ShouldCreateTaskScheduler() override;
+  content::ResourceDispatcherHostLoginDelegate* CreateLoginDelegate(
+      net::AuthChallengeInfo* auth_info,
+      content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+      bool is_main_frame,
+      const GURL& url,
+      bool first_auth_attempt,
+      const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
+          auth_required_callback) override;
+
+  static void DisableCreatingTaskScheduler();
 
  private:
+  safe_browsing::UrlCheckerDelegate* GetSafeBrowsingUrlCheckerDelegate();
+
+  std::unique_ptr<net::NetLog> net_log_;
+
   // Android WebView currently has a single global (non-off-the-record) browser
   // context.
   std::unique_ptr<AwBrowserContext> browser_context_;
 
   service_manager::BinderRegistryWithArgs<content::RenderFrameHost*>
       frame_interfaces_;
+
+  scoped_refptr<safe_browsing::UrlCheckerDelegate>
+      safe_browsing_url_checker_delegate_;
+
+  bool sniff_file_urls_;
 
   DISALLOW_COPY_AND_ASSIGN(AwContentBrowserClient);
 };

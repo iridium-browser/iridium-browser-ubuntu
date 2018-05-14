@@ -66,7 +66,7 @@ DataFetcherSharedMemoryBase::PollingThread::PollingThread(
     DataFetcherSharedMemoryBase* fetcher)
     : base::Thread(name), consumers_bitmask_(0), fetcher_(fetcher) {}
 
-DataFetcherSharedMemoryBase::PollingThread::~PollingThread() {}
+DataFetcherSharedMemoryBase::PollingThread::~PollingThread() = default;
 
 void DataFetcherSharedMemoryBase::PollingThread::AddConsumer(
     ConsumerType consumer_type,
@@ -185,7 +185,8 @@ mojo::ScopedSharedBufferHandle
 DataFetcherSharedMemoryBase::GetSharedMemoryHandle(ConsumerType consumer_type) {
   auto it = shared_memory_map_.find(consumer_type);
   DCHECK(it != shared_memory_map_.end());
-  return it->second.first->Clone();
+  return it->second.first->Clone(
+      mojo::SharedBufferHandle::AccessMode::READ_ONLY);
 }
 
 bool DataFetcherSharedMemoryBase::InitAndStartPollingThreadIfNecessary() {

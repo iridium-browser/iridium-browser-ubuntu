@@ -21,17 +21,18 @@ class ServiceWorkerRegistrationPush final
   WTF_MAKE_NONCOPYABLE(ServiceWorkerRegistrationPush);
 
  public:
+  static const char kSupplementName[];
+
   virtual ~ServiceWorkerRegistrationPush();
   static ServiceWorkerRegistrationPush& From(ServiceWorkerRegistration&);
 
   static PushManager* pushManager(ServiceWorkerRegistration&);
   PushManager* pushManager();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit ServiceWorkerRegistrationPush(ServiceWorkerRegistration*);
-  static const char* SupplementName();
 
   Member<ServiceWorkerRegistration> registration_;
   Member<PushManager> push_manager_;

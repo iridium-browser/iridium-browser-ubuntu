@@ -22,6 +22,7 @@
 #define HTMLDetailsElement_h
 
 #include "core/html/HTMLElement.h"
+#include "platform/WebTaskRunner.h"
 
 namespace blink {
 
@@ -35,12 +36,16 @@ class HTMLDetailsElement final : public HTMLElement {
 
   Element* FindMainSummary() const;
 
+  // Used for slot assignment.
+  static bool IsFirstSummary(const Node&);
+
  private:
   explicit HTMLDetailsElement(Document&);
 
   void DispatchPendingEvent();
 
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  bool ShouldForceLegacyLayout() const final { return true; }
   void ParseAttribute(const AttributeModificationParams&) override;
   void DidAddUserAgentShadowRoot(ShadowRoot&) override;
   bool IsInteractiveContent() const override;

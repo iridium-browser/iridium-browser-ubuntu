@@ -44,13 +44,12 @@ const char kTetherGuid[] = "tether_guid";
 
 class MockDelegate : public NetworkConnect::Delegate {
  public:
-  MockDelegate() {}
-  ~MockDelegate() override {}
+  MockDelegate() = default;
+  ~MockDelegate() override = default;
 
   MOCK_METHOD1(ShowNetworkConfigure, void(const std::string& network_id));
   MOCK_METHOD1(ShowNetworkSettings, void(const std::string& network_id));
   MOCK_METHOD1(ShowEnrollNetwork, bool(const std::string& network_id));
-  MOCK_METHOD0(ShowMobileSimDialog, void());
   MOCK_METHOD1(ShowMobileSetupDialog, void(const std::string& network_id));
   MOCK_METHOD2(ShowNetworkConnectError,
                void(const std::string& error_name,
@@ -60,8 +59,8 @@ class MockDelegate : public NetworkConnect::Delegate {
 
 class FakeTetherDelegate : public NetworkConnectionHandler::TetherDelegate {
  public:
-  FakeTetherDelegate() {}
-  ~FakeTetherDelegate() override {}
+  FakeTetherDelegate() = default;
+  ~FakeTetherDelegate() override = default;
 
   std::string last_connected_tether_network_guid() {
     return last_connected_tether_network_guid_;
@@ -88,8 +87,8 @@ class FakeTetherDelegate : public NetworkConnectionHandler::TetherDelegate {
 
 class NetworkConnectTest : public testing::Test {
  public:
-  NetworkConnectTest() {}
-  ~NetworkConnectTest() override {}
+  NetworkConnectTest() = default;
+  ~NetworkConnectTest() override = default;
 
   void SetUp() override {
     testing::Test::SetUp();
@@ -214,62 +213,6 @@ TEST_F(NetworkConnectTest,
                                                       false);
 }
 
-TEST_F(NetworkConnectTest, ShowConfigureUI) {
-  EXPECT_CALL(*mock_delegate_, ShowNetworkConfigure(kWiFi1Guid)).Times(5);
-
-  NetworkConnect::Get()->MaybeShowConfigureUI(
-      kWiFi1Guid, NetworkConnectionHandler::kErrorBadPassphrase);
-  NetworkConnect::Get()->MaybeShowConfigureUI(
-      kWiFi1Guid, NetworkConnectionHandler::kErrorPassphraseRequired);
-  NetworkConnect::Get()->MaybeShowConfigureUI(
-      kWiFi1Guid, NetworkConnectionHandler::kErrorConfigurationRequired);
-  NetworkConnect::Get()->MaybeShowConfigureUI(
-      kWiFi1Guid, NetworkConnectionHandler::kErrorAuthenticationRequired);
-  NetworkConnect::Get()->MaybeShowConfigureUI(
-      kWiFi1Guid, NetworkConnectionHandler::kErrorConnectFailed);
-}
-
-TEST_F(NetworkConnectTest, ConfigureUINotShownForTetherAssociatedWifiNetwork) {
-  // The configure UI should *not* be shown for Wi-Fi networks which serve as
-  // the underlying Wi-Fi hotspot for a Tether network.
-  EXPECT_CALL(*mock_delegate_, ShowNetworkConfigure(kWiFi1Guid)).Times(0);
-
-  AddTetherNetwork(false /* has_connected_to_host */);
-  NetworkHandler::Get()
-      ->network_state_handler()
-      ->AssociateTetherNetworkStateWithWifiNetwork(kTetherGuid, kWiFi1Guid);
-
-  NetworkConnect::Get()->MaybeShowConfigureUI(
-      kWiFi1Guid, NetworkConnectionHandler::kErrorConnectFailed);
-}
-
-TEST_F(NetworkConnectTest, ShowConfigureUI_BadErrorCode) {
-  EXPECT_CALL(*mock_delegate_, ShowNetworkConfigure(kWiFi1Guid)).Times(0);
-
-  NetworkConnect::Get()->MaybeShowConfigureUI(kWiFi1Guid,
-                                              "incorrect error code");
-}
-
-TEST_F(NetworkConnectTest, ShowConfigureUI_CertRequired_ShowEnrollNetwork) {
-  EXPECT_CALL(*mock_delegate_, ShowEnrollNetwork(_)).Times(AnyNumber());
-  EXPECT_CALL(*mock_delegate_, ShowNetworkConfigure(kWiFi1Guid)).Times(0);
-
-  NetworkConnect::Get()->MaybeShowConfigureUI(
-      kWiFi1Guid, NetworkConnectionHandler::kErrorCertificateRequired);
-}
-
-TEST_F(NetworkConnectTest,
-       ShowConfigureUI_CertRequired_DoNotShowEnrollNetwork) {
-  EXPECT_CALL(*mock_delegate_, ShowEnrollNetwork(_)).Times(AnyNumber());
-  EXPECT_CALL(*mock_delegate_, ShowNetworkConfigure(kWiFi1Guid));
-
-  ON_CALL(*mock_delegate_, ShowEnrollNetwork(kWiFi1Guid))
-      .WillByDefault(Return(false));
-
-  NetworkConnect::Get()->MaybeShowConfigureUI(
-      kWiFi1Guid, NetworkConnectionHandler::kErrorCertificateRequired);
-}
-
 TEST_F(NetworkConnectTest, ConnectThenDisconnectWiFiNetwork) {
   const NetworkState* network =
       NetworkHandler::Get()->network_state_handler()->GetNetworkStateFromGuid(
@@ -305,26 +248,6 @@ TEST_F(NetworkConnectTest, ConnectToTetherNetwork_HasNotConnectedToHost) {
       fake_tether_delegate_->last_connected_tether_network_guid().empty());
 }
 
-// ShowNetworkSettings only applies to cellular networks.
-TEST_F(NetworkConnectTest, ShowNetworkSettings) {
-  EXPECT_CALL(*mock_delegate_, ShowNetworkSettings(kCellular1Guid));
-
-  NetworkConnect::Get()->MaybeShowConfigureUI(
-      kCellular1Guid, NetworkConnectionHandler::kErrorConnectFailed);
-}
-
-TEST_F(NetworkConnectTest, ShowNetworkSettings_CellOutOfCredits) {
-  EXPECT_CALL(*mock_delegate_, ShowNetworkSettings(kCellular1Guid)).Times(0);
-  EXPECT_CALL(*mock_delegate_, ShowMobileSetupDialog(kCellular1Guid));
-
-  service_test_->SetServiceProperty(
-      kCellular1ServicePath, shill::kOutOfCreditsProperty, base::Value(true));
-  base::RunLoop().RunUntilIdle();
-
-  NetworkConnect::Get()->MaybeShowConfigureUI(
-      kCellular1Guid, NetworkConnectionHandler::kErrorConnectFailed);
-}
-
 TEST_F(NetworkConnectTest, ActivateCellular) {
   EXPECT_CALL(*mock_delegate_, ShowMobileSetupDialog(kCellular1Guid));
 
@@ -348,54 +271,6 @@ TEST_F(NetworkConnectTest, ActivateCellular_Error) {
   base::RunLoop().RunUntilIdle();
 
   NetworkConnect::Get()->ConnectToNetworkId(kCellular1Guid);
-}
-
-TEST_F(NetworkConnectTest, ShowMobileSimDialog) {
-  EXPECT_CALL(*mock_delegate_, ShowMobileSimDialog());
-
-  NetworkConnect::Get()->SetTechnologyEnabled(NetworkTypePattern::Cellular(),
-                                              false);
-
-  device_test_->SetDeviceProperty(
-      kCellular1DevicePath, shill::kSIMPresentProperty, base::Value(true));
-  device_test_->SetSimLocked(kCellular1DevicePath, true);
-
-  base::RunLoop().RunUntilIdle();
-
-  NetworkConnect::Get()->SetTechnologyEnabled(NetworkTypePattern::Cellular(),
-                                              true);
-}
-
-TEST_F(NetworkConnectTest, ShowMobileSimDialog_SimAbsent) {
-  EXPECT_CALL(*mock_delegate_, ShowMobileSimDialog()).Times(0);
-
-  NetworkConnect::Get()->SetTechnologyEnabled(NetworkTypePattern::Cellular(),
-                                              false);
-
-  device_test_->SetDeviceProperty(
-      kCellular1DevicePath, shill::kSIMPresentProperty, base::Value(false));
-  device_test_->SetSimLocked(kCellular1DevicePath, true);
-
-  base::RunLoop().RunUntilIdle();
-
-  NetworkConnect::Get()->SetTechnologyEnabled(NetworkTypePattern::Cellular(),
-                                              true);
-}
-
-TEST_F(NetworkConnectTest, ShowMobileSimDialog_SimUnlocked) {
-  EXPECT_CALL(*mock_delegate_, ShowMobileSimDialog()).Times(0);
-
-  NetworkConnect::Get()->SetTechnologyEnabled(NetworkTypePattern::Cellular(),
-                                              false);
-
-  device_test_->SetDeviceProperty(
-      kCellular1DevicePath, shill::kSIMPresentProperty, base::Value(true));
-  device_test_->SetSimLocked(kCellular1DevicePath, false);
-
-  base::RunLoop().RunUntilIdle();
-
-  NetworkConnect::Get()->SetTechnologyEnabled(NetworkTypePattern::Cellular(),
-                                              true);
 }
 
 }  // namespace chromeos

@@ -36,7 +36,7 @@ class SpeechGrammar;
 
 class WebSpeechGrammar {
  public:
-  WebSpeechGrammar() {}
+  WebSpeechGrammar() = default;
   WebSpeechGrammar(const WebSpeechGrammar& grammar) { Assign(grammar); }
   ~WebSpeechGrammar() { Reset(); }
 
@@ -46,7 +46,7 @@ class WebSpeechGrammar {
   BLINK_EXPORT void Reset();
   BLINK_EXPORT void Assign(const WebSpeechGrammar&);
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebSpeechGrammar& operator=(SpeechGrammar*);
 #endif
 

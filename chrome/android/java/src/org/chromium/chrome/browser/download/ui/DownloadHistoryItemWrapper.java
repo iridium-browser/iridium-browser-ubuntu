@@ -16,12 +16,16 @@ import org.chromium.chrome.browser.download.DownloadInfo;
 import org.chromium.chrome.browser.download.DownloadItem;
 import org.chromium.chrome.browser.download.DownloadNotificationService;
 import org.chromium.chrome.browser.download.DownloadUtils;
-import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadItem;
+import org.chromium.chrome.browser.download.items.OfflineContentAggregatorFactory;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.widget.DateDividedAdapter.TimedItem;
+import org.chromium.components.download.DownloadState;
+import org.chromium.components.offline_items_collection.OfflineContentProvider;
+import org.chromium.components.offline_items_collection.OfflineItem;
 import org.chromium.components.offline_items_collection.OfflineItem.Progress;
-import org.chromium.components.offline_items_collection.OfflineItemProgressUnit;
+import org.chromium.components.offline_items_collection.OfflineItemFilter;
+import org.chromium.components.offline_items_collection.OfflineItemState;
 import org.chromium.components.url_formatter.UrlFormatter;
-import org.chromium.content_public.browser.DownloadState;
 import org.chromium.ui.widget.Toast;
 
 import java.io.File;
@@ -75,6 +79,7 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
     protected File mFile;
     private Long mStableId;
     private boolean mIsDeletionPending;
+    private boolean mShouldShowRecentBadge;
 
     private DownloadHistoryItemWrapper(BackendProvider provider, ComponentName component) {
         mBackendProvider = provider;
@@ -102,9 +107,29 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
     }
 
     /** @return Whether this download should be shown to the user. */
-    boolean isVisibleToUser(int filter) {
+    boolean isVisibleToUser(@DownloadFilter.Type int filter) {
         if (isDeletionPending()) return false;
         return filter == getFilterType() || filter == DownloadFilter.FILTER_ALL;
+    }
+
+    /** Called when this download should be shared. */
+    void share() {
+        mBackendProvider.getUIDelegate().shareItem(this);
+    }
+
+    /**
+     * Starts the delete process, which may or may not immediately delete the item or bring up a UI
+     * surface first.
+     */
+    void startRemove() {
+        mBackendProvider.getUIDelegate().deleteItem(this);
+    }
+
+    /**
+     * @return Whether or not this item can be interacted with or not.  This will change based on
+     *         the current selection state of the owning list. */
+    boolean isInteractive() {
+        return !mBackendProvider.getSelectionDelegate().isSelectionEnabled();
     }
 
     /** @return Item that is being wrapped. */
@@ -143,7 +168,7 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
     public abstract String getUrl();
 
     /** @return {@link DownloadFilter} that represents the file type. */
-    public abstract int getFilterType();
+    public abstract @DownloadFilter.Type int getFilterType();
 
     /** @return The mime type or null if the item doesn't have one. */
     public abstract String getMimeType();
@@ -163,11 +188,20 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
     /** @return Whether this download is associated with the off the record profile. */
     abstract boolean isOffTheRecord();
 
+    /** @return Whether the item is an offline page. */
+    public abstract boolean isOfflinePage();
+
+    /** @return Whether this item is to be shown in the suggested reading section. */
+    abstract boolean isSuggested();
+
     /** @return Whether the item has been completely downloaded. */
     abstract boolean isComplete();
 
     /** @return Whether the download is currently paused. */
     abstract boolean isPaused();
+
+    /** @return Whether the download is currently pending. */
+    abstract boolean isPending();
 
     /** Called when the user wants to open the file. */
     abstract void open();
@@ -187,7 +221,17 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
      *
      * @return Whether the file associated with the download item was deleted.
      */
-    abstract boolean remove();
+    abstract boolean removePermanently();
+
+    /** @return Whether this item should be marked as NEW in download home. */
+    public boolean shouldShowRecentBadge() {
+        return mShouldShowRecentBadge;
+    }
+
+    /** Set whether this item should be badged as NEW addition. */
+    public void setShouldShowRecentBadge(boolean shouldShowRecentBadge) {
+        mShouldShowRecentBadge = shouldShowRecentBadge;
+    }
 
     protected void recordOpenSuccess() {
         RecordUserAction.record("Android.DownloadManager.Item.OpenSucceeded");
@@ -229,7 +273,6 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
 
         @Override
         public boolean replaceItem(Object item) {
-            assert item instanceof DownloadItem;
             DownloadItem downloadItem = (DownloadItem) item;
             assert TextUtils.equals(mItem.getId(), downloadItem.getId());
 
@@ -353,10 +396,12 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
         }
 
         @Override
-        public boolean remove() {
+        public boolean removePermanently() {
             // Tell the DownloadManager to remove the file from history.
-            mBackendProvider.getDownloadDelegate().removeDownload(getId(), isOffTheRecord());
-            return false;
+            mBackendProvider.getDownloadDelegate().removeDownload(
+                    getId(), isOffTheRecord(), hasBeenExternallyRemoved());
+            mBackendProvider.getThumbnailProvider().removeThumbnailsFromDisk(getId());
+            return true;
         }
 
         @Override
@@ -370,6 +415,16 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
         }
 
         @Override
+        public boolean isOfflinePage() {
+            return false;
+        }
+
+        @Override
+        public boolean isSuggested() {
+            return false;
+        }
+
+        @Override
         public boolean isComplete() {
             return mItem.getDownloadInfo().state() == DownloadState.COMPLETE;
         }
@@ -380,7 +435,12 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
         }
 
         @Override
-        boolean isVisibleToUser(int filter) {
+        public boolean isPending() {
+            return DownloadUtils.isDownloadPending(mItem);
+        }
+
+        @Override
+        boolean isVisibleToUser(@DownloadFilter.Type int filter) {
             if (!super.isVisibleToUser(filter)) return false;
 
             if (TextUtils.isEmpty(getFilePath()) || TextUtils.isEmpty(getDisplayFileName())) {
@@ -413,26 +473,24 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
         }
     }
 
-    /** Wraps a {@link OfflinePageDownloadItem}. */
-    public static class OfflinePageItemWrapper extends DownloadHistoryItemWrapper {
-        private OfflinePageDownloadItem mItem;
+    /** Wraps a {@link OfflineItem}. */
+    public static class OfflineItemWrapper extends DownloadHistoryItemWrapper {
+        private OfflineItem mItem;
 
-        OfflinePageItemWrapper(OfflinePageDownloadItem item, BackendProvider provider,
-                ComponentName component) {
+        OfflineItemWrapper(OfflineItem item, BackendProvider provider, ComponentName component) {
             super(provider, component);
             mItem = item;
         }
 
         @Override
-        public OfflinePageDownloadItem getItem() {
+        public OfflineItem getItem() {
             return mItem;
         }
 
         @Override
         public boolean replaceItem(Object item) {
-            assert item instanceof OfflinePageDownloadItem;
-            OfflinePageDownloadItem newItem = (OfflinePageDownloadItem) item;
-            assert TextUtils.equals(newItem.getGuid(), mItem.getGuid());
+            OfflineItem newItem = (OfflineItem) item;
+            assert mItem.id.equals(newItem.id);
 
             mItem = newItem;
             mFile = null;
@@ -441,22 +499,22 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
 
         @Override
         public String getId() {
-            return mItem.getGuid();
+            return mItem.id.id;
         }
 
         @Override
         public long getTimestamp() {
-            return mItem.getStartTimeMs();
+            return mItem.creationTimeMs;
         }
 
         @Override
         public String getFilePath() {
-            return mItem.getTargetPath();
+            return mItem.filePath;
         }
 
         @Override
         public String getDisplayFileName() {
-            String title = mItem.getTitle();
+            String title = mItem.title;
             if (TextUtils.isEmpty(title)) {
                 return getDisplayHostname();
             } else {
@@ -466,115 +524,112 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
 
         @Override
         public long getFileSize() {
-            return mItem.getTotalBytes();
+            return mItem.totalSizeBytes;
         }
 
         @Override
         public String getUrl() {
-            return mItem.getUrl();
+            return mItem.pageUrl;
         }
 
         @Override
         public int getFilterType() {
-            return DownloadFilter.FILTER_PAGE;
+            // TODO(shaktisahu): Make DownloadFilter unnecessary.
+            return isOfflinePage() ? DownloadFilter.FILTER_PAGE
+                                   : DownloadFilter.fromMimeType(mItem.mimeType);
+        }
+
+        @OfflineItemFilter
+        public int getOfflineItemFilter() {
+            return mItem.filter;
         }
 
         @Override
         public String getMimeType() {
-            return "text/html";
+            return mItem.mimeType;
         }
 
         @Override
         public int getFileExtensionType() {
+            // TODO(shaktisahu): Fix this.
             return FILE_EXTENSION_OTHER;
         }
 
         @Override
         public Progress getDownloadProgress() {
-            // Only completed offline page downloads are shown.
-            return isComplete() ? new Progress(100, 100L, OfflineItemProgressUnit.PERCENTAGE)
-                    : Progress.createIndeterminateProgress();
+            return mItem.progress;
         }
 
         @Override
         public String getStatusString() {
-            Context context = ContextUtils.getApplicationContext();
+            return isOfflinePage() ? DownloadUtils.getOfflinePageStatusString(mItem) : "";
+        }
 
-            int state = mItem.getDownloadState();
-
-            if (state == org.chromium.components.offlinepages.downloads.DownloadState.COMPLETE) {
-                return context.getString(R.string.download_notification_completed);
-            }
-
-            if (state == org.chromium.components.offlinepages.downloads.DownloadState.PENDING) {
-                return context.getString(R.string.download_notification_pending);
-            }
-
-            if (state == org.chromium.components.offlinepages.downloads.DownloadState.PAUSED) {
-                return context.getString(R.string.download_notification_paused);
-            }
-
-            long bytesReceived = mItem.getDownloadProgressBytes();
-            if (bytesReceived == 0) {
-                return context.getString(R.string.download_started);
-            } else {
-                return DownloadUtils.getStringForDownloadedBytes(context, bytesReceived);
-            }
+        private OfflineContentProvider getOfflineContentProvider() {
+            return OfflineContentAggregatorFactory.forProfile(
+                    Profile.getLastUsedProfile().getOriginalProfile());
         }
 
         @Override
         public void open() {
-            mBackendProvider.getOfflinePageBridge().openItem(getId(), mComponentName);
+            getOfflineContentProvider().openItem(mItem.id);
             recordOpenSuccess();
         }
 
         @Override
         public void cancel() {
-            mBackendProvider.getOfflinePageBridge().cancelDownload(getId());
+            getOfflineContentProvider().cancelDownload(mItem.id);
         }
 
         @Override
         public void pause() {
-            mBackendProvider.getOfflinePageBridge().pauseDownload(getId());
+            getOfflineContentProvider().pauseDownload(mItem.id);
         }
 
         @Override
         public void resume() {
-            mBackendProvider.getOfflinePageBridge().resumeDownload(getId());
+            getOfflineContentProvider().resumeDownload(mItem.id, true);
         }
 
         @Override
-        public boolean remove() {
-            mBackendProvider.getOfflinePageBridge().deleteItem(getId());
+        public boolean removePermanently() {
+            getOfflineContentProvider().removeItem(mItem.id);
             return true;
         }
 
         @Override
         boolean hasBeenExternallyRemoved() {
-            // We don't currently detect when offline pages have been removed externally.
-            return false;
+            return mItem.externallyRemoved;
         }
 
         @Override
         boolean isOffTheRecord() {
-            return false;
+            return mItem.isOffTheRecord;
         }
 
-        /** @return Whether this page is to be shown in the suggested reading section. */
+        @Override
+        public boolean isOfflinePage() {
+            return mItem.filter == OfflineItemFilter.FILTER_PAGE;
+        }
+
+        @Override
         public boolean isSuggested() {
-            return mItem.isSuggested();
+            return mItem.isSuggested;
         }
 
         @Override
         public boolean isComplete() {
-            return mItem.getDownloadState()
-                    == org.chromium.components.offlinepages.downloads.DownloadState.COMPLETE;
+            return mItem.state == OfflineItemState.COMPLETE;
         }
 
         @Override
         public boolean isPaused() {
-            return mItem.getDownloadState()
-                    == org.chromium.components.offlinepages.downloads.DownloadState.PAUSED;
+            return mItem.state == OfflineItemState.PAUSED;
+        }
+
+        @Override
+        public boolean isPending() {
+            return mItem.state == OfflineItemState.PENDING;
         }
     }
 }

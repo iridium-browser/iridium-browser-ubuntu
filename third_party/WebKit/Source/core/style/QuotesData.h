@@ -22,7 +22,7 @@
 #ifndef QuotesData_h
 #define QuotesData_h
 
-#include "platform/wtf/PassRefPtr.h"
+#include "base/memory/scoped_refptr.h"
 #include "platform/wtf/RefCounted.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/WTFString.h"
@@ -31,11 +31,13 @@ namespace blink {
 
 class QuotesData : public RefCounted<QuotesData> {
  public:
-  static PassRefPtr<QuotesData> Create() { return AdoptRef(new QuotesData()); }
-  static PassRefPtr<QuotesData> Create(UChar open1,
-                                       UChar close1,
-                                       UChar open2,
-                                       UChar close2);
+  static scoped_refptr<QuotesData> Create() {
+    return base::AdoptRef(new QuotesData());
+  }
+  static scoped_refptr<QuotesData> Create(UChar open1,
+                                          UChar close1,
+                                          UChar open2,
+                                          UChar close2);
 
   bool operator==(const QuotesData& o) const {
     return quote_pairs_ == o.quote_pairs_;
@@ -48,7 +50,7 @@ class QuotesData : public RefCounted<QuotesData> {
   int size() { return quote_pairs_.size(); }
 
  private:
-  QuotesData() {}
+  QuotesData() = default;
 
   Vector<std::pair<String, String>> quote_pairs_;
 };

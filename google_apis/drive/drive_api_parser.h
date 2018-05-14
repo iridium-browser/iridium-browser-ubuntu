@@ -135,8 +135,7 @@ class DriveAppIcon {
 
   // Extracts the icon category from the given string. Returns false and does
   // not change |result| when |scheme| has an unrecognizable value.
-  static bool GetIconCategory(const base::StringPiece& category,
-                              IconCategory* result);
+  static bool GetIconCategory(base::StringPiece category, IconCategory* result);
 
   friend class base::internal::RepeatedMessageConverter<DriveAppIcon>;
   friend class AppResource;
@@ -639,6 +638,9 @@ class FileResource {
   // Returns modified time of this file.
   const base::Time& modified_date() const { return modified_date_; }
 
+  // Returns last modified time by the user.
+  const base::Time& modified_by_me_date() const { return modified_by_me_date_; }
+
   // Returns last access time by the user.
   const base::Time& last_viewed_by_me_date() const {
     return last_viewed_by_me_date_;
@@ -697,6 +699,9 @@ class FileResource {
   void set_modified_date(const base::Time& modified_date) {
     modified_date_ = modified_date;
   }
+  void set_modified_by_me_date(const base::Time& modified_by_me_date) {
+    modified_by_me_date_ = modified_by_me_date;
+  }
   void set_last_viewed_by_me_date(const base::Time& last_viewed_by_me_date) {
     last_viewed_by_me_date_ = last_viewed_by_me_date;
   }
@@ -738,6 +743,7 @@ class FileResource {
   ImageMediaMetadata image_media_metadata_;
   base::Time created_date_;
   base::Time modified_date_;
+  base::Time modified_by_me_date_;
   base::Time last_viewed_by_me_date_;
   base::Time shared_with_me_date_;
   bool shared_;
@@ -894,7 +900,7 @@ class ChangeResource {
 
   // Extracts the change type from the given string. Returns false and does
   // not change |result| when |type_name| has an unrecognizable value.
-  static bool GetType(const base::StringPiece& type_name,
+  static bool GetType(base::StringPiece type_name,
                       ChangeResource::ChangeType* result);
 
   int64_t change_id_;

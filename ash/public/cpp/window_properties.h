@@ -9,6 +9,7 @@
 #include <string>
 
 #include "ash/public/cpp/ash_public_export.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/class_property.h"
 
 namespace aura {
@@ -16,19 +17,46 @@ template <typename T>
 using WindowProperty = ui::ClassProperty<T>;
 }
 
+namespace gfx {
+class Rect;
+}
+
 namespace ash {
 
 namespace mojom {
 enum class WindowPinType;
+enum class WindowStateType;
 }
 
 // Shell-specific window property keys for use by ash and its clients.
 
 // Alphabetical sort.
 
+// If true, will send system keys to the window for dispatch.
+ASH_PUBLIC_EXPORT extern const aura::WindowProperty<bool>* const
+    kCanConsumeSystemKeysKey;
+
+// Whether the shelf should be hidden when this window is put into fullscreen.
+// Exposed because some windows want to explicitly opt-out of this.
+ASH_PUBLIC_EXPORT extern const aura::WindowProperty<bool>* const
+    kHideShelfWhenFullscreenKey;
+
 // If true (and the window is a panel), it's attached to its shelf item.
 ASH_PUBLIC_EXPORT extern const aura::WindowProperty<bool>* const
     kPanelAttachedKey;
+
+// A property key which stores the bounds to restore a window to. These take
+// preference over the current bounds. This is used by e.g. the tablet mode
+// window manager.
+ASH_PUBLIC_EXPORT extern const aura::WindowProperty<gfx::Rect*>* const
+    kRestoreBoundsOverrideKey;
+
+// A property key which stores the window state to restore a window to. These
+// take preference over the current state if
+// |kRestoreWindowStateTypeOverrideKey| is set. This is used by e.g. the tablet
+// mode window manager.
+ASH_PUBLIC_EXPORT extern const aura::WindowProperty<
+    mojom::WindowStateType>* const kRestoreWindowStateTypeOverrideKey;
 
 // A property key to store the id for a window's shelf item.
 ASH_PUBLIC_EXPORT extern const aura::WindowProperty<std::string*>* const
@@ -43,6 +71,13 @@ ASH_PUBLIC_EXPORT extern const aura::WindowProperty<int32_t>* const
 ASH_PUBLIC_EXPORT extern const aura::WindowProperty<bool>* const
     kShowInOverviewKey;
 
+// A property key to store the active color on the window frame.
+ASH_PUBLIC_EXPORT extern const aura::WindowProperty<SkColor>* const
+    kFrameActiveColorKey;
+// A property key to store the inactive color on the window frame.
+ASH_PUBLIC_EXPORT extern const aura::WindowProperty<SkColor>* const
+    kFrameInactiveColorKey;
+
 // A property key to store ash::WindowPinType for a window.
 // When setting this property to PINNED or TRUSTED_PINNED, the window manager
 // will try to fullscreen the window and pin it on the top of the screen. If the
@@ -50,6 +85,16 @@ ASH_PUBLIC_EXPORT extern const aura::WindowProperty<bool>* const
 // setting this property to NONE, the window manager will restore the window.
 ASH_PUBLIC_EXPORT extern const aura::WindowProperty<mojom::WindowPinType>* const
     kWindowPinTypeKey;
+
+// A property key to indicate whether ash should perform auto management of
+// window positions; when you open a second browser, ash will move the two to
+// minimize overlap.
+ASH_PUBLIC_EXPORT extern const aura::WindowProperty<bool>* const
+    kWindowPositionManagedTypeKey;
+
+// A property key to indicate ash's extended window state.
+ASH_PUBLIC_EXPORT extern const aura::WindowProperty<
+    mojom::WindowStateType>* const kWindowStateTypeKey;
 
 // Alphabetical sort.
 

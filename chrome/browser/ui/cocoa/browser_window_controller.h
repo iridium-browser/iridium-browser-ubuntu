@@ -9,6 +9,9 @@
 // object. Handles interactions between Cocoa and the cross-platform
 // code. Each window has a single toolbar and, by virtue of being a
 // TabWindowController, a tab strip along the top.
+// Note that under the hood the BrowserWindowController is neither an
+// NSWindowController nor its window's delegate, though it receives all
+// NSWindowDelegate methods as if it were.
 
 #import <Cocoa/Cocoa.h>
 
@@ -47,7 +50,6 @@ class ExclusiveAccessContext;
 @class FullscreenToolbarController;
 @class FullscreenToolbarVisibilityLockController;
 @class FullscreenWindow;
-class FullscreenLowPowerCoordinatorCocoa;
 @class InfoBarContainerController;
 class LocationBarViewMac;
 @class OverlayableContentsController;
@@ -98,8 +100,6 @@ constexpr const gfx::Size kMinCocoaPopupWindowSize(100, 122);
   std::unique_ptr<ExclusiveAccessController> exclusiveAccessController_;
   base::scoped_nsobject<BrowserWindowFullscreenTransition>
       fullscreenTransition_;
-  std::unique_ptr<FullscreenLowPowerCoordinatorCocoa>
-      fullscreenLowPowerCoordinator_;
   base::scoped_nsobject<BrowserWindowTouchBar> touchBar_;
 
   // Strong. StatusBubble is a special case of a strong reference that
@@ -207,8 +207,9 @@ constexpr const gfx::Size kMinCocoaPopupWindowSize(100, 122);
       omniboxPopupModelObserverBridge_;
 }
 
-// A convenience class method which gets the |BrowserWindowController| for a
-// given window. This method returns nil if no window in the chain has a BWC.
+// A convenience class method which returns the |BrowserWindowController| for
+// |window|, or nil if neither |window| nor its parent or any other ancestor
+// has one.
 + (BrowserWindowController*)browserWindowControllerForWindow:(NSWindow*)window;
 
 // A convenience class method which gets the |BrowserWindowController| for a
@@ -292,6 +293,13 @@ constexpr const gfx::Size kMinCocoaPopupWindowSize(100, 122);
 
 // Brings this controller's window to the front.
 - (void)activate;
+
+// Called by FrameBrowserWindow when |makeFirstResponder:| is called.
+// This method checks to see if a view in TopChrome has the first responder
+// status. If it does, it will lock the fullscreen toolbar so that the toolbar
+// will remain dropped down when the user is still interacting with it via
+// keyboard access. Otherwise, it will release the toolbar.
+- (void)firstResponderUpdated:(NSResponder*)responder;
 
 // Make the location bar the first responder, if possible.
 - (void)focusLocationBar:(BOOL)selectAll;
@@ -629,7 +637,9 @@ constexpr const gfx::Size kMinCocoaPopupWindowSize(100, 122);
 // Sets the fullscreen toolbar controller.
 - (void)setFullscreenToolbarController:(FullscreenToolbarController*)controller;
 
-@end  // @interface BrowserWindowController (TestingAPI)
+// Sets |browserWindowTouchbar_|.
+- (void)setBrowserWindowTouchBar:(BrowserWindowTouchBar*)touchBar;
 
+@end  // @interface BrowserWindowController (TestingAPI)
 
 #endif  // CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_CONTROLLER_H_

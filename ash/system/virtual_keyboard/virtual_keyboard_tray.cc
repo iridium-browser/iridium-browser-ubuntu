@@ -68,6 +68,8 @@ void VirtualKeyboardTray::HideBubbleWithView(
 void VirtualKeyboardTray::ClickedOutsideBubble() {}
 
 bool VirtualKeyboardTray::PerformAction(const ui::Event& event) {
+  UserMetricsRecorder::RecordUserClickOnTray(
+      LoginMetricsRecorder::TrayClickTarget::kVirtualKeyboardTray);
   const int64_t display_id = display::Screen::GetScreen()
                                  ->GetDisplayNearestWindow(shelf_->GetWindow())
                                  .id();
@@ -93,12 +95,10 @@ void VirtualKeyboardTray::OnKeyboardEnabledStateChanged(bool new_enabled) {
   }
 }
 
-void VirtualKeyboardTray::OnKeyboardBoundsChanging(
-    const gfx::Rect& new_bounds) {
-  SetIsActive(!new_bounds.IsEmpty());
+void VirtualKeyboardTray::OnKeyboardAvailabilityChanged(
+    const bool is_available) {
+  SetIsActive(is_available);
 }
-
-void VirtualKeyboardTray::OnKeyboardClosed() {}
 
 void VirtualKeyboardTray::OnKeyboardControllerCreated() {
   ObserveKeyboardController();

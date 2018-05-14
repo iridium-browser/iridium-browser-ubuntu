@@ -32,14 +32,13 @@
 
 #include "platform/network/HTTPParsers.h"
 
+#include <memory>
 #include "net/http/http_content_disposition.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
-#include "platform/HTTPNames.h"
-#include "platform/json/JSONParser.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/network/HeaderFieldTokenizer.h"
-#include "platform/weborigin/Suborigin.h"
+#include "platform/network/http_names.h"
 #include "platform/wtf/DateMath.h"
 #include "platform/wtf/MathExtras.h"
 #include "platform/wtf/text/CString.h"
@@ -134,90 +133,6 @@ inline bool IsASCIILowerAlphaOrDigit(CharType c) {
 template <typename CharType>
 inline bool IsASCIILowerAlphaOrDigitOrHyphen(CharType c) {
   return IsASCIILowerAlphaOrDigit(c) || c == '-';
-}
-
-Suborigin::SuboriginPolicyOptions GetSuboriginPolicyOptionFromString(
-    const String& policy_option_name) {
-  if (policy_option_name == "'unsafe-postmessage-send'")
-    return Suborigin::SuboriginPolicyOptions::kUnsafePostMessageSend;
-
-  if (policy_option_name == "'unsafe-postmessage-receive'")
-    return Suborigin::SuboriginPolicyOptions::kUnsafePostMessageReceive;
-
-  if (policy_option_name == "'unsafe-cookies'")
-    return Suborigin::SuboriginPolicyOptions::kUnsafeCookies;
-
-  if (policy_option_name == "'unsafe-credentials'")
-    return Suborigin::SuboriginPolicyOptions::kUnsafeCredentials;
-
-  return Suborigin::SuboriginPolicyOptions::kNone;
-}
-
-// suborigin-name = LOWERALPHA *( LOWERALPHA / DIGIT )
-//
-// Does not trim whitespace before or after the suborigin-name.
-const UChar* ParseSuboriginName(const UChar* begin,
-                                const UChar* end,
-                                String& name,
-                                WTF::Vector<String>& messages) {
-  // Parse the name of the suborigin (no spaces, single string)
-  if (begin == end) {
-    messages.push_back(String("No Suborigin name specified."));
-    return nullptr;
-  }
-
-  const UChar* position = begin;
-
-  if (!skipExactly<UChar, IsASCIILower>(position, end)) {
-    messages.push_back("Invalid character \'" + String(position, 1) +
-                       "\' in suborigin. First character must be a lower case "
-                       "alphabetic character.");
-    return nullptr;
-  }
-
-  skipWhile<UChar, IsASCIILowerAlphaOrDigit>(position, end);
-  if (position != end && !IsASCIISpace(*position)) {
-    messages.push_back("Invalid character \'" + String(position, 1) +
-                       "\' in suborigin.");
-    return nullptr;
-  }
-
-  size_t length = position - begin;
-  name = String(begin, length).DeprecatedLower();
-  return position;
-}
-
-const UChar* ParseSuboriginPolicyOption(const UChar* begin,
-                                        const UChar* end,
-                                        String& option,
-                                        WTF::Vector<String>& messages) {
-  const UChar* position = begin;
-
-  if (*position != '\'') {
-    messages.push_back("Invalid character \'" + String(position, 1) +
-                       "\' in suborigin policy. Suborigin policy options must "
-                       "start and end with a single quote.");
-    return nullptr;
-  }
-  position = position + 1;
-
-  skipWhile<UChar, IsASCIILowerAlphaOrDigitOrHyphen>(position, end);
-  if (position == end || IsASCIISpace(*position)) {
-    messages.push_back(String("Expected \' to end policy option."));
-    return nullptr;
-  }
-
-  if (*position != '\'') {
-    messages.push_back("Invalid character \'" + String(position, 1) +
-                       "\' in suborigin policy.");
-    return nullptr;
-  }
-
-  DCHECK_GT(position, begin);
-  size_t length = (position + 1) - begin;
-
-  option = String(begin, length);
-  return position + 1;
 }
 
 // Parse a number with ignoring trailing [0-9.].
@@ -484,8 +399,13 @@ ReflectedXSSDisposition ParseXSSProtectionHeader(const String& header,
 }
 
 ContentTypeOptionsDisposition ParseContentTypeOptionsHeader(
-    const String& header) {
-  if (header.StripWhiteSpace().DeprecatedLower() == "nosniff")
+    const String& value) {
+  if (value.IsEmpty())
+    return kContentTypeOptionsNone;
+
+  Vector<String> results;
+  value.Split(",", results);
+  if (results[0].StripWhiteSpace().LowerASCII() == "nosniff")
     return kContentTypeOptionsNosniff;
   return kContentTypeOptionsNone;
 }
@@ -667,59 +587,6 @@ void ParseCommaDelimitedHeader(const String& header_value,
     header_set.insert(value.StripWhiteSpace(IsWhitespace));
 }
 
-bool ParseSuboriginHeader(const String& header,
-                          Suborigin* suborigin,
-                          WTF::Vector<String>& messages) {
-  Vector<String> headers;
-  header.Split(',', true, headers);
-
-  if (headers.size() > 1)
-    messages.push_back(
-        "Multiple Suborigin headers found. Ignoring all but the first.");
-
-  Vector<UChar> characters;
-  headers[0].AppendTo(characters);
-
-  const UChar* position = characters.data();
-  const UChar* end = position + characters.size();
-
-  skipWhile<UChar, IsASCIISpace>(position, end);
-
-  String name;
-  position = ParseSuboriginName(position, end, name, messages);
-  // For now it is appropriate to simply return false if the name is empty and
-  // act as if the header doesn't exist. If suborigin policy options are created
-  // that can apply to the empty suborigin, than this will have to change.
-  if (!position || name.IsEmpty())
-    return false;
-
-  suborigin->SetName(name);
-
-  while (position < end) {
-    skipWhile<UChar, IsASCIISpace>(position, end);
-    if (position == end)
-      return true;
-
-    String option_name;
-    position = ParseSuboriginPolicyOption(position, end, option_name, messages);
-
-    if (!position) {
-      suborigin->Clear();
-      return false;
-    }
-
-    Suborigin::SuboriginPolicyOptions option =
-        GetSuboriginPolicyOptionFromString(option_name);
-    if (option == Suborigin::SuboriginPolicyOptions::kNone)
-      messages.push_back("Ignoring unknown suborigin policy option " +
-                         option_name + ".");
-    else
-      suborigin->AddPolicyOption(option);
-  }
-
-  return true;
-}
-
 bool ParseMultipartHeadersFromBody(const char* bytes,
                                    size_t size,
                                    ResourceResponse* response,
@@ -804,18 +671,6 @@ bool ParseMultipartFormHeadersFromBody(const char* bytes,
   return true;
 }
 
-// See https://tools.ietf.org/html/draft-ietf-httpbis-jfv-01, Section 4.
-std::unique_ptr<JSONArray> ParseJSONHeader(const String& header,
-                                           int max_parse_depth) {
-  StringBuilder sb;
-  sb.Append("[");
-  sb.Append(header);
-  sb.Append("]");
-  std::unique_ptr<JSONValue> header_value =
-      ParseJSON(sb.ToString(), max_parse_depth);
-  return JSONArray::From(std::move(header_value));
-}
-
 bool ParseContentRangeHeaderFor206(const String& content_range,
                                    int64_t* first_byte_position,
                                    int64_t* last_byte_position,
@@ -828,32 +683,35 @@ bool ParseContentRangeHeaderFor206(const String& content_range,
 std::unique_ptr<ServerTimingHeaderVector> ParseServerTimingHeader(
     const String& headerValue) {
   std::unique_ptr<ServerTimingHeaderVector> headers =
-      WTF::MakeUnique<ServerTimingHeaderVector>();
+      std::make_unique<ServerTimingHeaderVector>();
 
   if (!headerValue.IsNull()) {
     DCHECK(headerValue.Is8Bit());
 
     HeaderFieldTokenizer tokenizer(headerValue);
     while (!tokenizer.IsConsumed()) {
-      StringView metric;
-      if (!tokenizer.ConsumeToken(Mode::kNormal, metric)) {
+      StringView name;
+      if (!tokenizer.ConsumeToken(Mode::kNormal, name)) {
         break;
       }
 
-      double value = 0.0;
-      String description = "";
-      if (tokenizer.Consume('=')) {
-        StringView valueOutput;
-        if (tokenizer.ConsumeToken(Mode::kNormal, valueOutput)) {
-          value = valueOutput.ToString().ToDouble();
+      ServerTimingHeader header(name.ToString());
+
+      while (tokenizer.Consume(';')) {
+        StringView parameter_name;
+        if (!tokenizer.ConsumeToken(Mode::kNormal, parameter_name)) {
+          break;
         }
-      }
-      if (tokenizer.Consume(';')) {
-        tokenizer.ConsumeTokenOrQuotedString(Mode::kNormal, description);
+
+        String value = "";
+        if (tokenizer.Consume('=')) {
+          tokenizer.ConsumeTokenOrQuotedString(Mode::kNormal, value);
+          tokenizer.ConsumeBeforeAnyCharMatch({',', ';'});
+        }
+        header.SetParameter(parameter_name, value);
       }
 
-      headers->push_back(WTF::MakeUnique<ServerTimingHeader>(
-          metric.ToString(), value, description));
+      headers->push_back(std::make_unique<ServerTimingHeader>(header));
 
       if (!tokenizer.Consume(',')) {
         break;

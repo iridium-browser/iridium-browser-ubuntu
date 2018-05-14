@@ -73,7 +73,15 @@ class CORE_EXPORT LayoutTableBoxComponent : public LayoutBox {
     return Children()->LastChild();
   }
 
+  void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
+
  private:
+  // Column, section and row's visibility has rules different from other
+  // elements. For example, column's visibility:hidden doesn't apply; row's
+  // visibility:hidden shouldn't hide row's background painted behind visible
+  // cells, etc.
+  bool VisualRectRespectsVisibility() const final { return false; }
+
   // If you have a LayoutTableBoxComponent, use firstChild or lastChild instead.
   void SlowFirstChild() const = delete;
   void SlowLastChild() const = delete;

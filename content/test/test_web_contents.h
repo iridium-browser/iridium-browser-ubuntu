@@ -10,6 +10,7 @@
 #include <list>
 #include <map>
 #include <string>
+#include <utility>
 
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/test/web_contents_tester.h"
@@ -45,9 +46,10 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
 
   static TestWebContents* Create(BrowserContext* browser_context,
                                  scoped_refptr<SiteInstance> instance);
+  static TestWebContents* Create(const CreateParams& params);
 
   // WebContentsImpl overrides (returning the same values, but in Test* types)
-  TestRenderFrameHost* GetMainFrame() override;
+  TestRenderFrameHost* GetMainFrame() const override;
   TestRenderViewHost* GetRenderViewHost() const override;
   // Overrides to avoid establishing Mojo connection with renderer process.
   int DownloadImage(const GURL& url,
@@ -59,22 +61,14 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
 
   // WebContentsTester implementation.
   void CommitPendingNavigation() override;
-  TestRenderFrameHost* GetPendingMainFrame() const override;
-  void StartNavigation(const GURL& url) override;
+  TestRenderFrameHost* GetPendingMainFrame() override;
   void NavigateAndCommit(const GURL& url) override;
   void TestSetIsLoading(bool value) override;
-  void ProceedWithCrossSiteNavigation() override;
   void TestDidNavigate(RenderFrameHost* render_frame_host,
                        int nav_entry_id,
                        bool did_create_new_entry,
                        const GURL& url,
                        ui::PageTransition transition) override;
-  void TestDidNavigateWithReferrer(RenderFrameHost* render_frame_host,
-                                   int nav_entry_id,
-                                   bool did_create_new_entry,
-                                   const GURL& url,
-                                   const Referrer& referrer,
-                                   ui::PageTransition transition) override;
   void TestDidNavigateWithSequenceNumber(RenderFrameHost* render_frame_host,
                                          int nav_entry_id,
                                          bool did_create_new_entry,
@@ -84,6 +78,13 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
                                          bool was_within_same_document,
                                          int item_sequence_number,
                                          int document_sequence_number);
+  void SetNavigationData(
+      NavigationHandle* navigation_handle,
+      std::unique_ptr<NavigationData> navigation_data) override;
+  void SetHttpResponseHeaders(
+      NavigationHandle* navigation_handle,
+      scoped_refptr<net::HttpResponseHeaders> response_headers) override;
+  void SetOpener(WebContents* opener) override;
   const std::string& GetSaveFrameHeaders() override;
   bool HasPendingDownloadImage(const GURL& url) override;
   bool TestDidDownloadImage(
@@ -92,7 +93,10 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
       const std::vector<SkBitmap>& bitmaps,
       const std::vector<gfx::Size>& original_bitmap_sizes) override;
   void SetLastCommittedURL(const GURL& url) override;
+  void SetMainFrameMimeType(const std::string& mime_type) override;
   void SetWasRecentlyAudible(bool audible) override;
+  void SetIsCurrentlyAudible(bool audible) override;
+  void TestOnUserInteraction(blink::WebInputEvent::Type type) override;
 
   // True if a cross-site navigation is pending.
   bool CrossProcessNavigationPending();
@@ -102,8 +106,9 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
       RenderViewHost* render_view_host,
       int opener_frame_routing_id,
       int proxy_routing_id,
+      const base::UnguessableToken& devtools_frame_token,
       const FrameReplicationState& replicated_frame_state) override;
-  void UpdateRenderViewSizeForRenderManager() override {}
+  void UpdateRenderViewSizeForRenderManager(bool is_main_frame) override {}
 
   // Returns a clone of this TestWebContents. The returned object is also a
   // TestWebContents. The caller owns the returned object.
@@ -114,10 +119,6 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   void set_delegate_view(RenderViewHostDelegateView* view) {
     delegate_view_override_ = view;
   }
-
-  // Allows us to simulate this tab's main frame having an opener that points
-  // to the main frame of the |opener|.
-  void SetOpener(TestWebContents* opener);
 
   // Allows us to simulate that a contents was created via CreateNewWindow.
   void AddPendingContents(TestWebContents* contents);
@@ -136,16 +137,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   void TestDidFinishLoad(const GURL& url);
   void TestDidFailLoadWithError(const GURL& url,
                                 int error_code,
-                                const base::string16& error_description,
-                                bool was_ignored_by_handler);
-
-  void SetNavigationData(
-      NavigationHandle* navigation_handle,
-      std::unique_ptr<NavigationData> navigation_data) override;
-
-  void SetHttpResponseHeaders(
-      NavigationHandle* navigation_handle,
-      scoped_refptr<net::HttpResponseHeaders> response_headers) override;
+                                const base::string16& error_description);
 
  protected:
   // The deprecated WebContentsTester still needs to subclass this.

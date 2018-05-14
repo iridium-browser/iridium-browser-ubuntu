@@ -8,11 +8,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <map>
 #include <string>
 #include <vector>
 
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "components/sync/engine/commit_queue.h"
 #include "components/sync/engine/model_type_processor.h"
@@ -34,7 +34,7 @@ class MockModelTypeWorker : public CommitQueue {
   ~MockModelTypeWorker() override;
 
   // Implementation of ModelTypeWorker.
-  void EnqueueForCommit(const CommitRequestDataList& list) override;
+  void NudgeForCommit() override;
 
   // Getters to inspect the requests sent to this object.
   size_t GetNumPendingCommits() const;
@@ -95,12 +95,20 @@ class MockModelTypeWorker : public CommitQueue {
   // Pops one pending commit from the front of the queue and send a commit
   // response to the processor for it.
   void AckOnePendingCommit();
+  void AckOnePendingCommit(int64_t version_offset);
+
+  // Pops one pending commit, but returns empty commit response list to indicate
+  // that commit failed for requested entities.
+  void FailOneCommit();
 
   // Set the encryption key to |ekn| and inform the processor with an update
   // containing the data in |update|, which defaults to an empty list.
   void UpdateWithEncryptionKey(const std::string& ekn);
   void UpdateWithEncryptionKey(const std::string& ekn,
                                const UpdateResponseDataList& update);
+
+  void UpdateWithGarbageConllection(
+      const sync_pb::GarbageCollectionDirective& gcd);
 
  private:
   // Generate an ID string.
@@ -109,7 +117,8 @@ class MockModelTypeWorker : public CommitQueue {
   // Returns a commit response that indicates a successful commit of the
   // given |request_data|. Updates server state accordingly.
   CommitResponseData SuccessfulCommitResponse(
-      const CommitRequestData& request_data);
+      const CommitRequestData& request_data,
+      int64_t version_offset);
 
   // Retrieve or set the server version.
   int64_t GetServerVersion(const std::string& tag_hash);
@@ -121,7 +130,7 @@ class MockModelTypeWorker : public CommitQueue {
   ModelTypeProcessor* processor_;
 
   // A record of past commits requests.
-  std::deque<CommitRequestDataList> pending_commits_;
+  base::circular_deque<CommitRequestDataList> pending_commits_;
 
   // Map of versions by client tag hash.
   // This is an essential part of the mocked server state.

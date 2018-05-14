@@ -5,12 +5,12 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 #include <set>
 #include <sstream>
 
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "tools/gn/commands.h"
 #include "tools/gn/config.h"
@@ -56,7 +56,7 @@ void PrintValue(const base::Value* value, int indentLevel) {
       PrintValue(&iter.value(), indentLevel + 1);
       iter.Advance();
     }
-  } else if (value->IsType(base::Value::Type::NONE)) {
+  } else if (value->is_none()) {
     OutputString(indent + "<null>\n");
   }
 }
@@ -272,6 +272,7 @@ bool PrintConfig(const Config* config,
   HANDLER(variables::kCflagsObjCC, DefaultHandler);
   HANDLER(variables::kDefines, DefaultHandler);
   HANDLER(variables::kIncludeDirs, DefaultHandler);
+  HANDLER(variables::kInputs, DefaultHandler);
   HANDLER(variables::kLdflags, DefaultHandler);
   HANDLER(variables::kLibs, DefaultHandler);
   HANDLER(variables::kLibDirs, DefaultHandler);
@@ -457,7 +458,7 @@ int RunDesc(const std::vector<std::string>& args) {
 
   if (json) {
     // Convert all targets/configs to JSON, serialize and print them
-    auto res = base::MakeUnique<base::DictionaryValue>();
+    auto res = std::make_unique<base::DictionaryValue>();
     if (!target_matches.empty()) {
       for (const auto* target : target_matches) {
         res->SetWithoutPathExpansion(

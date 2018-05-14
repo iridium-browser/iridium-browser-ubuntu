@@ -12,7 +12,7 @@
 #include "chrome/browser/ui/aura/accessibility/ax_tree_source_aura.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/accessibility/ax_action_data.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_serializable_tree.h"
 #include "ui/accessibility/ax_tree_serializer.h"
@@ -30,9 +30,8 @@ using views::Textfield;
 using views::View;
 using views::Widget;
 
-using AuraAXTreeSerializer = ui::AXTreeSerializer<views::AXAuraObjWrapper*,
-                                                  ui::AXNodeData,
-                                                  ui::AXTreeData>;
+using AuraAXTreeSerializer = ui::
+    AXTreeSerializer<views::AXAuraObjWrapper*, ui::AXNodeData, ui::AXTreeData>;
 
 // Helper to count the number of nodes in a tree.
 size_t GetSize(AXAuraObjWrapper* tree) {
@@ -79,11 +78,14 @@ class AXTreeSourceAuraTest : public ash::AshTestBase {
 };
 
 TEST_F(AXTreeSourceAuraTest, Accessors) {
+  // Focus the textfield so the cursor does not disappear.
+  textfield_->RequestFocus();
+
   AXTreeSourceAura ax_tree;
   ASSERT_TRUE(ax_tree.GetRoot());
 
-  // ID's should start at 1 and there should be a root.
-  ASSERT_EQ(1, ax_tree.GetRoot()->GetID());
+  // ID's should be > 0.
+  ASSERT_GE(ax_tree.GetRoot()->GetUniqueId().Get(), 1);
 
   // Grab the content view directly from cache to avoid walking down the tree.
   AXAuraObjWrapper* content =
@@ -103,6 +105,8 @@ TEST_F(AXTreeSourceAuraTest, Accessors) {
 
   ASSERT_EQ(content, textfield->GetParent());
 
+  ASSERT_NE(textfield->GetUniqueId(), ax_tree.GetRoot()->GetUniqueId());
+
   // Try walking up the tree to the root.
   AXAuraObjWrapper* test_root = NULL;
   for (AXAuraObjWrapper* root_finder = ax_tree.GetParent(content); root_finder;
@@ -121,8 +125,8 @@ TEST_F(AXTreeSourceAuraTest, DoDefault) {
   // Click and verify focus.
   ASSERT_FALSE(textfield_->HasFocus());
   ui::AXActionData action_data;
-  action_data.action = ui::AX_ACTION_DO_DEFAULT;
-  action_data.target_node_id = textfield_wrapper->GetID();
+  action_data.action = ax::mojom::Action::kDoDefault;
+  action_data.target_node_id = textfield_wrapper->GetUniqueId().Get();
   textfield_wrapper->HandleAccessibleAction(action_data);
   ASSERT_TRUE(textfield_->HasFocus());
 }
@@ -137,8 +141,8 @@ TEST_F(AXTreeSourceAuraTest, Focus) {
   // Focus and verify.
   ASSERT_FALSE(textfield_->HasFocus());
   ui::AXActionData action_data;
-  action_data.action = ui::AX_ACTION_FOCUS;
-  action_data.target_node_id = textfield_wrapper->GetID();
+  action_data.action = ax::mojom::Action::kFocus;
+  action_data.target_node_id = textfield_wrapper->GetUniqueId().Get();
   textfield_wrapper->HandleAccessibleAction(action_data);
   ASSERT_TRUE(textfield_->HasFocus());
 }
@@ -175,11 +179,11 @@ TEST_F(AXTreeSourceAuraTest, Serialize) {
 
   int text_field_update_index = -1;
   for (size_t i = 0; i < node_count; ++i) {
-    if (textfield_wrapper->GetID() == out_update2.nodes[i].id)
+    if (textfield_wrapper->GetUniqueId().Get() == out_update2.nodes[i].id)
       text_field_update_index = i;
   }
 
   ASSERT_NE(-1, text_field_update_index);
-  ASSERT_EQ(ui::AX_ROLE_TEXT_FIELD,
+  ASSERT_EQ(ax::mojom::Role::kTextField,
             out_update2.nodes[text_field_update_index].role);
 }

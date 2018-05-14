@@ -84,7 +84,6 @@ TEST_F(ServerBackedStateKeysBrokerTest, Retry) {
   mocked_main_runner_->RunUntilIdle();
   EXPECT_TRUE(updated_);
 
-  EXPECT_FALSE(broker_.pending());
   EXPECT_FALSE(broker_.available());
   EXPECT_TRUE(broker_.state_keys().empty());
   EXPECT_TRUE(broker_.current_state_key().empty());
@@ -92,7 +91,7 @@ TEST_F(ServerBackedStateKeysBrokerTest, Retry) {
   fake_session_manager_client_.set_server_backed_state_keys(state_keys_);
   updated_ = false;
   ServerBackedStateKeysBroker::Subscription subscription2 =
-      broker_.RegisterUpdateCallback(base::Bind(&base::DoNothing));
+      broker_.RegisterUpdateCallback(base::DoNothing());
   mocked_main_runner_->RunUntilIdle();
   EXPECT_TRUE(updated_);
   ExpectGood();

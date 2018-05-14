@@ -35,8 +35,7 @@
 namespace content {
 
 ShellBrowserContext::ShellResourceContext::ShellResourceContext()
-    : getter_(NULL) {
-}
+    : getter_(nullptr) {}
 
 ShellBrowserContext::ShellResourceContext::~ShellResourceContext() {
 }
@@ -54,15 +53,18 @@ ShellBrowserContext::ShellResourceContext::GetRequestContext() {
 }
 
 ShellBrowserContext::ShellBrowserContext(bool off_the_record,
-                                         net::NetLog* net_log)
+                                         net::NetLog* net_log,
+                                         bool delay_services_creation)
     : resource_context_(new ShellResourceContext),
       ignore_certificate_errors_(false),
       off_the_record_(off_the_record),
       net_log_(net_log),
-      guest_manager_(NULL) {
+      guest_manager_(nullptr) {
   InitWhileIOAllowed();
-  BrowserContextDependencyManager::GetInstance()->
-      CreateBrowserContextServices(this);
+  if (!delay_services_creation) {
+    BrowserContextDependencyManager::GetInstance()
+        ->CreateBrowserContextServices(this);
+  }
 }
 
 ShellBrowserContext::~ShellBrowserContext() {
@@ -77,6 +79,12 @@ ShellBrowserContext::~ShellBrowserContext() {
       BrowserThread::IO, FROM_HERE, resource_context_.release());
   }
   ShutdownStoragePartitions();
+  if (url_request_getter_) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::BindOnce(&ShellURLRequestContextGetter::NotifyContextShuttingDown,
+                       url_request_getter_));
+  }
 }
 
 void ShellBrowserContext::InitWhileIOAllowed() {
@@ -154,7 +162,7 @@ ShellBrowserContext::CreateURLRequestContextGetter(
     ProtocolHandlerMap* protocol_handlers,
     URLRequestInterceptorScopedVector request_interceptors) {
   return new ShellURLRequestContextGetter(
-      ignore_certificate_errors_, GetPath(),
+      ignore_certificate_errors_, off_the_record_, GetPath(),
       BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
       protocol_handlers, std::move(request_interceptors), net_log_);
 }
@@ -200,21 +208,25 @@ BrowserPluginGuestManager* ShellBrowserContext::GetGuestManager() {
 }
 
 storage::SpecialStoragePolicy* ShellBrowserContext::GetSpecialStoragePolicy() {
-  return NULL;
+  return nullptr;
 }
 
 PushMessagingService* ShellBrowserContext::GetPushMessagingService() {
-  return NULL;
+  return nullptr;
 }
 
 SSLHostStateDelegate* ShellBrowserContext::GetSSLHostStateDelegate() {
-  return NULL;
+  return nullptr;
 }
 
 PermissionManager* ShellBrowserContext::GetPermissionManager() {
   if (!permission_manager_.get())
     permission_manager_.reset(new ShellPermissionManager());
   return permission_manager_.get();
+}
+
+BackgroundFetchDelegate* ShellBrowserContext::GetBackgroundFetchDelegate() {
+  return nullptr;
 }
 
 BackgroundSyncController* ShellBrowserContext::GetBackgroundSyncController() {

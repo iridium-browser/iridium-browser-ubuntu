@@ -14,8 +14,6 @@ blink_core_sources("svg_layout") {
     "LayoutSVGEllipse.h",
     "LayoutSVGForeignObject.cpp",
     "LayoutSVGForeignObject.h",
-    "LayoutSVGGradientStop.cpp",
-    "LayoutSVGGradientStop.h",
     "LayoutSVGHiddenContainer.cpp",
     "LayoutSVGHiddenContainer.h",
     "LayoutSVGImage.cpp",
@@ -93,10 +91,5 @@ blink_core_sources("svg_layout") {
     "SVGTextMetrics.h",
     "SVGTextQuery.cpp",
     "SVGTextQuery.h",
-  ]
-
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
   ]
 }

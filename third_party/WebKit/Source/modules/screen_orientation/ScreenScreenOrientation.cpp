@@ -12,11 +12,11 @@ namespace blink {
 
 // static
 ScreenScreenOrientation& ScreenScreenOrientation::From(Screen& screen) {
-  ScreenScreenOrientation* supplement = static_cast<ScreenScreenOrientation*>(
-      Supplement<Screen>::From(screen, SupplementName()));
+  ScreenScreenOrientation* supplement =
+      Supplement<Screen>::From<ScreenScreenOrientation>(screen);
   if (!supplement) {
     supplement = new ScreenScreenOrientation();
-    ProvideTo(screen, SupplementName(), supplement);
+    ProvideTo(screen, supplement);
   }
   return *supplement;
 }
@@ -34,11 +34,10 @@ ScreenOrientation* ScreenScreenOrientation::orientation(ScriptState* state,
   return self.orientation_;
 }
 
-const char* ScreenScreenOrientation::SupplementName() {
-  return "ScreenScreenOrientation";
-}
+const char ScreenScreenOrientation::kSupplementName[] =
+    "ScreenScreenOrientation";
 
-DEFINE_TRACE(ScreenScreenOrientation) {
+void ScreenScreenOrientation::Trace(blink::Visitor* visitor) {
   visitor->Trace(orientation_);
   Supplement<Screen>::Trace(visitor);
 }

@@ -3,9 +3,8 @@
 // found in the LICENSE file.
 
 #include "core/dom/Document.h"
-#include "core/html/HTMLMediaElement.h"
+#include "core/html/media/HTMLMediaElement.h"
 #include "core/testing/sim/SimCompositor.h"
-#include "core/testing/sim/SimDisplayItemList.h"
 #include "core/testing/sim/SimRequest.h"
 #include "core/testing/sim/SimTest.h"
 #include "platform/testing/UnitTestHelpers.h"
@@ -15,7 +14,7 @@ namespace blink {
 
 class MediaElementFillingViewportTest : public SimTest {
  protected:
-  MediaElementFillingViewportTest() {}
+  MediaElementFillingViewportTest() = default;
 
   void SetUp() override {
     SimTest::SetUp();
@@ -24,10 +23,6 @@ class MediaElementFillingViewportTest : public SimTest {
 
   bool IsMostlyFillingViewport(HTMLMediaElement* element) {
     return element->mostly_filling_viewport_;
-  }
-
-  bool ViewportFillDebouncerTimerActive(HTMLMediaElement* element) {
-    return element->viewport_fill_debouncer_timer_.IsActive();
   }
 
   void CheckViewportIntersectionChanged(HTMLMediaElement* element) {
@@ -47,60 +42,59 @@ class MediaElementFillingViewportTest : public SimTest {
 
 TEST_F(MediaElementFillingViewportTest, MostlyFillingViewport) {
   std::unique_ptr<SimRequest> main_resource = CreateMainResource();
-  main_resource->Complete(
-      "<!DOCTYPE html>"
-      "<html>"
-      "<video id='video' style = 'position:fixed; left:0; top:0; width:100%; "
-      "height:100%;'>"
-      "source src='test.webm'"
-      "</video>"
-      "</html>");
+  main_resource->Complete(R"HTML(
+    <!DOCTYPE html>
+    <html>
+    <video id='video' style = 'position:fixed; left:0; top:0; width:100%;
+    height:100%;'>
+    source src='test.webm'
+    </video>
+    </html>
+  )HTML");
   Compositor().BeginFrame();
 
   HTMLMediaElement* element =
       ToElement<HTMLMediaElement>(GetDocument().getElementById("video"));
   CheckViewportIntersectionChanged(element);
-  EXPECT_FALSE(IsMostlyFillingViewport(element));
-  EXPECT_TRUE(ViewportFillDebouncerTimerActive(element));
-  // TODO(xjz): Mock the time and check isMostlyFillingViewport() after 5s.
+  EXPECT_TRUE(IsMostlyFillingViewport(element));
 }
 
 TEST_F(MediaElementFillingViewportTest, NotMostlyFillingViewport) {
   std::unique_ptr<SimRequest> main_resource = CreateMainResource();
-  main_resource->Complete(
-      "<!DOCTYPE html>"
-      "<html>"
-      "<video id='video' style = 'position:fixed; left:0; top:0; width:80%; "
-      "height:80%;'>"
-      "source src='test.webm'"
-      "</video>"
-      "</html>");
+  main_resource->Complete(R"HTML(
+    <!DOCTYPE html>
+    <html>
+    <video id='video' style = 'position:fixed; left:0; top:0; width:80%;
+    height:80%;'>
+    source src='test.webm'
+    </video>
+    </html>
+  )HTML");
   Compositor().BeginFrame();
 
   HTMLMediaElement* element =
       ToElement<HTMLMediaElement>(GetDocument().getElementById("video"));
   CheckViewportIntersectionChanged(element);
   EXPECT_FALSE(IsMostlyFillingViewport(element));
-  EXPECT_FALSE(ViewportFillDebouncerTimerActive(element));
 }
 
 TEST_F(MediaElementFillingViewportTest, FillingViewportChanged) {
   std::unique_ptr<SimRequest> main_resource = CreateMainResource();
-  main_resource->Complete(
-      "<!DOCTYPE html>"
-      "<html>"
-      "<video id='video' style = 'position:fixed; left:0; top:0; width:100%; "
-      "height:100%;'>"
-      "source src='test.webm'"
-      "</video>"
-      "</html>");
+  main_resource->Complete(R"HTML(
+    <!DOCTYPE html>
+    <html>
+    <video id='video' style = 'position:fixed; left:0; top:0; width:100%;
+    height:100%;'>
+    source src='test.webm'
+    </video>
+    </html>
+  )HTML");
   Compositor().BeginFrame();
 
   HTMLMediaElement* element =
       ToElement<HTMLMediaElement>(GetDocument().getElementById("video"));
   CheckViewportIntersectionChanged(element);
-  EXPECT_FALSE(IsMostlyFillingViewport(element));
-  EXPECT_TRUE(ViewportFillDebouncerTimerActive(element));
+  EXPECT_TRUE(IsMostlyFillingViewport(element));
 
   element->setAttribute("style",
                         "position:fixed; left:0; top:0; width:80%; height:80%;",
@@ -109,45 +103,44 @@ TEST_F(MediaElementFillingViewportTest, FillingViewportChanged) {
 
   CheckViewportIntersectionChanged(element);
   EXPECT_FALSE(IsMostlyFillingViewport(element));
-  EXPECT_FALSE(ViewportFillDebouncerTimerActive(element));
 }
 
 TEST_F(MediaElementFillingViewportTest, LargeVideo) {
   std::unique_ptr<SimRequest> main_resource = CreateMainResource();
-  main_resource->Complete(
-      "<!DOCTYPE html>"
-      "<html>"
-      "<video id='video' style = 'position:fixed; left:0; top:0; width:200%; "
-      "height:200%;'>"
-      "source src='test.webm'"
-      "</video>"
-      "</html>");
+  main_resource->Complete(R"HTML(
+    <!DOCTYPE html>
+    <html>
+    <video id='video' style = 'position:fixed; left:0; top:0; width:200%;
+    height:200%;'>
+    source src='test.webm'
+    </video>
+    </html>
+  )HTML");
   Compositor().BeginFrame();
 
   HTMLMediaElement* element =
       ToElement<HTMLMediaElement>(GetDocument().getElementById("video"));
   CheckViewportIntersectionChanged(element);
-  EXPECT_FALSE(IsMostlyFillingViewport(element));
-  EXPECT_TRUE(ViewportFillDebouncerTimerActive(element));
+  EXPECT_TRUE(IsMostlyFillingViewport(element));
 }
 
 TEST_F(MediaElementFillingViewportTest, VideoScrollOutHalf) {
   std::unique_ptr<SimRequest> main_resource = CreateMainResource();
-  main_resource->Complete(
-      "<!DOCTYPE html>"
-      "<html>"
-      "<video id='video' style = 'position:fixed; left:0; top:0; width:100%; "
-      "height:100%;'>"
-      "source src='test.webm'"
-      "</video>"
-      "</html>");
+  main_resource->Complete(R"HTML(
+    <!DOCTYPE html>
+    <html>
+    <video id='video' style = 'position:fixed; left:0; top:0; width:100%;
+    height:100%;'>
+    source src='test.webm'
+    </video>
+    </html>
+  )HTML");
   Compositor().BeginFrame();
 
   HTMLMediaElement* element =
       ToElement<HTMLMediaElement>(GetDocument().getElementById("video"));
   CheckViewportIntersectionChanged(element);
-  EXPECT_FALSE(IsMostlyFillingViewport(element));
-  EXPECT_TRUE(ViewportFillDebouncerTimerActive(element));
+  EXPECT_TRUE(IsMostlyFillingViewport(element));
 
   element->setAttribute(
       "style", "position:fixed; left:0; top:240px; width:100%; height:100%;",
@@ -155,7 +148,6 @@ TEST_F(MediaElementFillingViewportTest, VideoScrollOutHalf) {
   Compositor().BeginFrame();
   CheckViewportIntersectionChanged(element);
   EXPECT_FALSE(IsMostlyFillingViewport(element));
-  EXPECT_FALSE(ViewportFillDebouncerTimerActive(element));
 }
 
 }  // namespace blink

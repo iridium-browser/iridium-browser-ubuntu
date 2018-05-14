@@ -25,10 +25,9 @@ declare_args() {
   # when finalized.
   blink_gc_plugin_option_warn_unneeded_finalizer = false
 
-  # Set to true to have the clang Blink GC plugin use Chromium-style naming
-  # rather than legacy Blink name.
-  # TODO(https://crbug.com/675879): Remove this option after the Blink rename.
-  blink_gc_plugin_option_use_chromium_style_naming = true
+  # Set to true to have the clang Blink GC plugin additionally check if a
+  # TraceWrappers method also dispatches to all its base classes.
+  blink_gc_plugin_option_warn_trace_wrappers_missing_base_dispatch = false
 }
 
 # features ---------------------------------------------------------------------
@@ -107,9 +106,9 @@ config("config") {
   if (is_clang && blink_gc_plugin && clang_use_chrome_plugins) {
     # On Windows, the plugin is built directly into clang, so there's
     # no need to load it dynamically.
-    if (!is_win) {
+    if (host_os != "win") {
       _blink_gc_plugin_dll_extension = "so"
-      if (is_mac || is_ios) {
+      if (host_os == "mac") {
         _blink_gc_plugin_dll_extension = "dylib"
       }
       cflags += [
@@ -145,12 +144,12 @@ config("config") {
         "warn-unneeded-finalizer",
       ]
     }
-    if (blink_gc_plugin_option_use_chromium_style_naming) {
+    if (blink_gc_plugin_option_warn_trace_wrappers_missing_base_dispatch) {
       cflags += [
         "-Xclang",
         "-plugin-arg-blink-gc-plugin",
         "-Xclang",
-        "use-chromium-style-naming",
+        "warn_trace_wrappers_missing_base_dispatch",
       ]
     }
   }

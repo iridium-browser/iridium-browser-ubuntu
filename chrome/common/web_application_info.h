@@ -5,9 +5,11 @@
 #ifndef CHROME_COMMON_WEB_APPLICATION_INFO_H_
 #define CHROME_COMMON_WEB_APPLICATION_INFO_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -45,6 +47,9 @@ struct WebApplicationInfo {
   // The launch URL for the app.
   GURL app_url;
 
+  // Scope for the app. Dictates what URLs will be opened in the app.
+  GURL scope;
+
   // Set of available icons.
   std::vector<IconInfo> icons;
 
@@ -54,6 +59,9 @@ struct WebApplicationInfo {
 
   // The color to use if an icon needs to be generated for the web app.
   SkColor generated_icon_color;
+
+  // The color to use for the web app frame.
+  base::Optional<SkColor> theme_color;
 
   // Whether the app should be opened in a window. If false, the app will be
   // opened in a tab.

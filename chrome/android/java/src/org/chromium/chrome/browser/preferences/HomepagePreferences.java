@@ -11,7 +11,6 @@ import android.preference.PreferenceFragment;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
-import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
 
 /**
  * Fragment that allows the user to configure homepage related preferences.
@@ -27,9 +26,9 @@ public class HomepagePreferences extends PreferenceFragment {
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
-        mHomepageManager = HomepageManager.getInstance(getActivity());
+        mHomepageManager = HomepageManager.getInstance();
         getActivity().setTitle(R.string.options_homepage_title);
-        addPreferencesFromResource(R.xml.homepage_preferences);
+        PreferenceUtils.addPreferencesFromResource(this, R.xml.homepage_preferences);
 
         mHomepageSwitch = (ChromeSwitchPreference) findPreference(PREF_HOMEPAGE_SWITCH);
         boolean isHomepageEnabled = mHomepageManager.getPrefHomepageEnabled();
@@ -46,9 +45,9 @@ public class HomepagePreferences extends PreferenceFragment {
         updateCurrentHomepageUrl();
     }
     private void updateCurrentHomepageUrl() {
-        mHomepageEdit.setSummary((mHomepageManager.getPrefHomepageUseDefaultUri()
-                ? PartnerBrowserCustomizations.getHomePageUrl()
-                : mHomepageManager.getPrefHomepageCustomUri()));
+        mHomepageEdit.setSummary(mHomepageManager.getPrefHomepageUseDefaultUri()
+                        ? HomepageManager.getDefaultHomepageUri()
+                        : mHomepageManager.getPrefHomepageCustomUri());
     }
     @Override
     public void onResume() {

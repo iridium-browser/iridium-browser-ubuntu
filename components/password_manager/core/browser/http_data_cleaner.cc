@@ -8,6 +8,7 @@
 #include <iterator>
 #include <memory>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -143,7 +144,7 @@ void ObsoleteHttpCleaner::OnGetPasswordStoreResults(
   for (const auto& form : blacklisted_http_forms) {
     PostHSTSQueryForHostAndRequestContext(
         form->origin, request_context(),
-        base::Bind(&RemoveLoginIfHSTS, make_scoped_refptr(store()), *form));
+        base::Bind(&RemoveLoginIfHSTS, base::WrapRefCounted(store()), *form));
   }
 
   // Return early if there are no non-blacklisted HTTP forms.
@@ -170,7 +171,7 @@ void ObsoleteHttpCleaner::OnGetPasswordStoreResults(
                            form_cmp)) {
       PostHSTSQueryForHostAndRequestContext(
           form->origin, request_context(),
-          base::Bind(&RemoveLoginIfHSTS, make_scoped_refptr(store()), *form));
+          base::Bind(&RemoveLoginIfHSTS, base::WrapRefCounted(store()), *form));
     }
   }
 }
@@ -182,7 +183,7 @@ void ObsoleteHttpCleaner::OnGetSiteStatistics(
     if (stat.origin_domain.SchemeIs(url::kHttpScheme)) {
       PostHSTSQueryForHostAndRequestContext(
           stat.origin_domain, request_context(),
-          base::Bind(&RemoveSiteStatsIfHSTS, make_scoped_refptr(store()),
+          base::Bind(&RemoveSiteStatsIfHSTS, base::WrapRefCounted(store()),
                      stat));
     }
   }
@@ -208,9 +209,9 @@ void WaitUntilCleaningIsDone(std::unique_ptr<ObsoleteHttpCleaner> cleaner,
     const auto post_to_thread =
         [](std::unique_ptr<ObsoleteHttpCleaner> cleaner, PrefService* prefs,
            scoped_refptr<base::SequencedTaskRunner> thread_runner) {
-          thread_runner->PostTask(
-              FROM_HERE, base::Bind(&WaitUntilCleaningIsDone,
-                                    base::Passed(std::move(cleaner)), prefs));
+          thread_runner->PostTask(FROM_HERE,
+                                  base::BindOnce(&WaitUntilCleaningIsDone,
+                                                 std::move(cleaner), prefs));
         };
 
     // Calling |ScheduleTask| through the raw pointer is necessary, because
@@ -233,7 +234,7 @@ void InitiateCleaning(
     PrefService* prefs,
     const scoped_refptr<net::URLRequestContextGetter>& request_context) {
   WaitUntilCleaningIsDone(
-      base::MakeUnique<ObsoleteHttpCleaner>(store, request_context), prefs);
+      std::make_unique<ObsoleteHttpCleaner>(store, request_context), prefs);
 }
 
 void DelayCleanObsoleteHttpDataForPasswordStoreAndPrefsImpl(
@@ -245,7 +246,7 @@ void DelayCleanObsoleteHttpDataForPasswordStoreAndPrefsImpl(
           password_manager::prefs::kWasObsoleteHttpDataCleaned)) {
     base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&InitiateCleaning, make_scoped_refptr(store), prefs,
+        base::Bind(&InitiateCleaning, base::WrapRefCounted(store), prefs,
                    request_context),
         base::TimeDelta::FromSeconds(delay_in_seconds));
   }

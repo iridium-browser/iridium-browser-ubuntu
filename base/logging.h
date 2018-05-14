@@ -365,17 +365,15 @@ const LogSeverity LOG_DFATAL = LOG_FATAL;
   ::logging::ClassName(__FILE__, __LINE__, ::logging::LOG_FATAL, ##__VA_ARGS__)
 #define COMPACT_GOOGLE_LOG_EX_DFATAL(ClassName, ...) \
   ::logging::ClassName(__FILE__, __LINE__, ::logging::LOG_DFATAL, ##__VA_ARGS__)
+#define COMPACT_GOOGLE_LOG_EX_DCHECK(ClassName, ...) \
+  ::logging::ClassName(__FILE__, __LINE__, ::logging::LOG_DCHECK, ##__VA_ARGS__)
 
-#define COMPACT_GOOGLE_LOG_INFO \
-  COMPACT_GOOGLE_LOG_EX_INFO(LogMessage)
-#define COMPACT_GOOGLE_LOG_WARNING \
-  COMPACT_GOOGLE_LOG_EX_WARNING(LogMessage)
-#define COMPACT_GOOGLE_LOG_ERROR \
-  COMPACT_GOOGLE_LOG_EX_ERROR(LogMessage)
-#define COMPACT_GOOGLE_LOG_FATAL \
-  COMPACT_GOOGLE_LOG_EX_FATAL(LogMessage)
-#define COMPACT_GOOGLE_LOG_DFATAL \
-  COMPACT_GOOGLE_LOG_EX_DFATAL(LogMessage)
+#define COMPACT_GOOGLE_LOG_INFO COMPACT_GOOGLE_LOG_EX_INFO(LogMessage)
+#define COMPACT_GOOGLE_LOG_WARNING COMPACT_GOOGLE_LOG_EX_WARNING(LogMessage)
+#define COMPACT_GOOGLE_LOG_ERROR COMPACT_GOOGLE_LOG_EX_ERROR(LogMessage)
+#define COMPACT_GOOGLE_LOG_FATAL COMPACT_GOOGLE_LOG_EX_FATAL(LogMessage)
+#define COMPACT_GOOGLE_LOG_DFATAL COMPACT_GOOGLE_LOG_EX_DFATAL(LogMessage)
+#define COMPACT_GOOGLE_LOG_DCHECK COMPACT_GOOGLE_LOG_EX_DCHECK(LogMessage)
 
 #if defined(OS_WIN)
 // wingdi.h defines ERROR to be 0. When we call LOG(ERROR), it gets
@@ -575,7 +573,11 @@ class CheckOpResult {
 // TODO(scottmg): Reinvestigate a short sequence that will work on both
 // compilers once clang supports more intrinsics. See https://crbug.com/693713.
 #if defined(__clang__)
-#define IMMEDIATE_CRASH() ({__asm int 3 __asm ud2 __asm push __COUNTER__})
+#define IMMEDIATE_CRASH()                           \
+  ({                                                \
+    {__asm int 3 __asm ud2 __asm push __COUNTER__}; \
+    __builtin_unreachable();                        \
+  })
 #else
 #define IMMEDIATE_CRASH() __debugbreak()
 #endif  // __clang__
@@ -602,7 +604,13 @@ class CheckOpResult {
 #define CHECK(condition) \
   UNLIKELY(!(condition)) ? IMMEDIATE_CRASH() : EAT_STREAM_PARAMETERS
 
-#define PCHECK(condition) CHECK(condition)
+// PCHECK includes the system error code, which is useful for determining
+// why the condition failed. In official builds, preserve only the error code
+// message so that it is available in crash reports. The stringified
+// condition and any additional stream parameters are dropped.
+#define PCHECK(condition)                                  \
+  LAZY_STREAM(PLOG_STREAM(FATAL), UNLIKELY(!(condition))); \
+  EAT_STREAM_PARAMETERS
 
 #define CHECK_OP(name, op, val1, val2) CHECK((val1) op (val2))
 
@@ -811,18 +819,17 @@ DEFINE_CHECK_OP_IMPL(GT, > )
 
 #if DCHECK_IS_ON()
 
-#define COMPACT_GOOGLE_LOG_EX_DCHECK(ClassName, ...) \
-  COMPACT_GOOGLE_LOG_EX_FATAL(ClassName, ##__VA_ARGS__)
-#define COMPACT_GOOGLE_LOG_DCHECK COMPACT_GOOGLE_LOG_FATAL
+#if defined(SYZYASAN)
+BASE_EXPORT extern LogSeverity LOG_DCHECK;
+#else
 const LogSeverity LOG_DCHECK = LOG_FATAL;
+#endif
 
 #else  // DCHECK_IS_ON()
 
-// These are just dummy values.
-#define COMPACT_GOOGLE_LOG_EX_DCHECK(ClassName, ...) \
-  COMPACT_GOOGLE_LOG_EX_INFO(ClassName , ##__VA_ARGS__)
-#define COMPACT_GOOGLE_LOG_DCHECK COMPACT_GOOGLE_LOG_INFO
-const LogSeverity LOG_DCHECK = LOG_INFO;
+// There may be users of LOG_DCHECK that are enabled independently
+// of DCHECK_IS_ON(), so default to FATAL logging for those.
+const LogSeverity LOG_DCHECK = LOG_FATAL;
 
 #endif  // DCHECK_IS_ON()
 
@@ -1018,7 +1025,7 @@ class BASE_EXPORT LogMessage {
 // is not used" and "statement has no effect".
 class LogMessageVoidify {
  public:
-  LogMessageVoidify() { }
+  LogMessageVoidify() = default;
   // This has to be an operator with a precedence lower than << but
   // higher than ?:
   void operator&(std::ostream&) { }
@@ -1127,25 +1134,9 @@ inline std::ostream& operator<<(std::ostream& out, const std::wstring& wstr) {
 }
 }  // namespace std
 
-// The NOTIMPLEMENTED() macro annotates codepaths which have
-// not been implemented yet.
-//
-// The implementation of this macro is controlled by NOTIMPLEMENTED_POLICY:
-//   0 -- Do nothing (stripped by compiler)
-//   1 -- Warn at compile time
-//   2 -- Fail at compile time
-//   3 -- Fail at runtime (DCHECK)
-//   4 -- [default] LOG(ERROR) at runtime
-//   5 -- LOG(ERROR) at runtime, only once per call-site
-
-#ifndef NOTIMPLEMENTED_POLICY
-#if defined(OS_ANDROID) && defined(OFFICIAL_BUILD)
-#define NOTIMPLEMENTED_POLICY 0
-#else
-// Select default policy: LOG(ERROR)
-#define NOTIMPLEMENTED_POLICY 4
-#endif
-#endif
+// The NOTIMPLEMENTED() macro annotates codepaths which have not been
+// implemented yet. If output spam is a serious concern,
+// NOTIMPLEMENTED_LOG_ONCE can be used.
 
 #if defined(COMPILER_GCC)
 // On Linux, with GCC, we can use __PRETTY_FUNCTION__ to get the demangled name
@@ -1155,24 +1146,18 @@ inline std::ostream& operator<<(std::ostream& out, const std::wstring& wstr) {
 #define NOTIMPLEMENTED_MSG "NOT IMPLEMENTED"
 #endif
 
-#if NOTIMPLEMENTED_POLICY == 0
+#if defined(OS_ANDROID) && defined(OFFICIAL_BUILD)
 #define NOTIMPLEMENTED() EAT_STREAM_PARAMETERS
-#elif NOTIMPLEMENTED_POLICY == 1
-// TODO, figure out how to generate a warning
-#define NOTIMPLEMENTED() static_assert(false, "NOT_IMPLEMENTED")
-#elif NOTIMPLEMENTED_POLICY == 2
-#define NOTIMPLEMENTED() static_assert(false, "NOT_IMPLEMENTED")
-#elif NOTIMPLEMENTED_POLICY == 3
-#define NOTIMPLEMENTED() NOTREACHED()
-#elif NOTIMPLEMENTED_POLICY == 4
+#define NOTIMPLEMENTED_LOG_ONCE() EAT_STREAM_PARAMETERS
+#else
 #define NOTIMPLEMENTED() LOG(ERROR) << NOTIMPLEMENTED_MSG
-#elif NOTIMPLEMENTED_POLICY == 5
-#define NOTIMPLEMENTED() do {\
-  static bool logged_once = false;\
-  LOG_IF(ERROR, !logged_once) << NOTIMPLEMENTED_MSG;\
-  logged_once = true;\
-} while(0);\
-EAT_STREAM_PARAMETERS
+#define NOTIMPLEMENTED_LOG_ONCE()                      \
+  do {                                                 \
+    static bool logged_once = false;                   \
+    LOG_IF(ERROR, !logged_once) << NOTIMPLEMENTED_MSG; \
+    logged_once = true;                                \
+  } while (0);                                         \
+  EAT_STREAM_PARAMETERS
 #endif
 
 #endif  // BASE_LOGGING_H_

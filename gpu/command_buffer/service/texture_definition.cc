@@ -45,6 +45,7 @@ class GLImageSync : public gl::GLImage {
                             gfx::OverlayTransform transform,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect) override;
+  void SetColorSpace(const gfx::ColorSpace& color_space) override {}
   void Flush() override {}
   void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                     uint64_t process_tracing_id,
@@ -178,7 +179,7 @@ scoped_refptr<NativeImageBufferEGL> NativeImageBufferEGL::Create(
 NativeImageBufferEGL::ClientInfo::ClientInfo(gl::GLImage* client)
     : client(client), needs_wait_before_read(true) {}
 
-NativeImageBufferEGL::ClientInfo::~ClientInfo() {}
+NativeImageBufferEGL::ClientInfo::~ClientInfo() = default;
 
 NativeImageBufferEGL::NativeImageBufferEGL(EGLDisplay display,
                                            EGLImageKHR image)
@@ -241,7 +242,7 @@ class NativeImageBufferStub : public NativeImageBuffer {
   NativeImageBufferStub() : NativeImageBuffer() {}
 
  private:
-  ~NativeImageBufferStub() override {}
+  ~NativeImageBufferStub() override = default;
   void AddClient(gl::GLImage* client) override {}
   void RemoveClient(gl::GLImage* client) override {}
   bool IsClient(gl::GLImage* client) override { return true; }
@@ -308,7 +309,7 @@ TextureDefinition::LevelInfo::LevelInfo(GLenum target,
 
 TextureDefinition::LevelInfo::LevelInfo(const LevelInfo& other) = default;
 
-TextureDefinition::LevelInfo::~LevelInfo() {}
+TextureDefinition::LevelInfo::~LevelInfo() = default;
 
 TextureDefinition::TextureDefinition()
     : version_(0),
@@ -318,8 +319,8 @@ TextureDefinition::TextureDefinition()
       wrap_s_(0),
       wrap_t_(0),
       usage_(0),
-      immutable_(true) {
-}
+      immutable_(true),
+      defined_(false) {}
 
 TextureDefinition::TextureDefinition(
     Texture* texture,
@@ -341,6 +342,7 @@ TextureDefinition::TextureDefinition(
     DCHECK(image_buffer_.get());
   }
 
+  DCHECK(!texture->face_infos_.empty());
   const Texture::FaceInfo& first_face = texture->face_infos_[0];
   if (image_buffer_.get()) {
     scoped_refptr<gl::GLImage> gl_image(new GLImageSync(
@@ -349,6 +351,7 @@ TextureDefinition::TextureDefinition(
     texture->SetLevelImage(target_, 0, gl_image.get(), Texture::BOUND);
   }
 
+  DCHECK(!first_face.level_infos.empty());
   const Texture::LevelInfo& level = first_face.level_infos[0];
   level_info_ = LevelInfo(level.target, level.internal_format, level.width,
                           level.height, level.depth, level.border, level.format,
@@ -357,10 +360,11 @@ TextureDefinition::TextureDefinition(
 
 TextureDefinition::TextureDefinition(const TextureDefinition& other) = default;
 
-TextureDefinition::~TextureDefinition() {
-}
+TextureDefinition::~TextureDefinition() = default;
 
 Texture* TextureDefinition::CreateTexture() const {
+  if (!target_)
+    return nullptr;
   GLuint texture_id;
   glGenTextures(1, &texture_id);
 
@@ -385,9 +389,9 @@ void TextureDefinition::UpdateTextureInternal(Texture* texture) const {
     }
   }
 
+  texture->face_infos_.resize(1);
+  texture->face_infos_[0].level_infos.resize(1);
   if (defined_) {
-    texture->face_infos_.resize(1);
-    texture->face_infos_[0].level_infos.resize(1);
     texture->SetLevelInfo(level_info_.target, 0,
                           level_info_.internal_format, level_info_.width,
                           level_info_.height, level_info_.depth,

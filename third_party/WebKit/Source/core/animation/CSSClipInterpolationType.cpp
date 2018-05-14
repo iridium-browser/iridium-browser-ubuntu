@@ -9,6 +9,7 @@
 #include "core/css/CSSIdentifierValue.h"
 #include "core/css/CSSQuadValue.h"
 #include "core/css/resolver/StyleResolverState.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
@@ -80,11 +81,11 @@ class InheritedAutosChecker
 
 class CSSClipNonInterpolableValue : public NonInterpolableValue {
  public:
-  ~CSSClipNonInterpolableValue() final {}
+  ~CSSClipNonInterpolableValue() final = default;
 
-  static PassRefPtr<CSSClipNonInterpolableValue> Create(
+  static scoped_refptr<CSSClipNonInterpolableValue> Create(
       const ClipAutos& clip_autos) {
-    return AdoptRef(new CSSClipNonInterpolableValue(clip_autos));
+    return base::AdoptRef(new CSSClipNonInterpolableValue(clip_autos));
   }
 
   const ClipAutos& GetClipAutos() const { return clip_autos_; }
@@ -106,7 +107,7 @@ DEFINE_NON_INTERPOLABLE_VALUE_TYPE_CASTS(CSSClipNonInterpolableValue);
 class UnderlyingAutosChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
-  ~UnderlyingAutosChecker() final {}
+  ~UnderlyingAutosChecker() final = default;
 
   static std::unique_ptr<UnderlyingAutosChecker> Create(
       const ClipAutos& underlying_autos) {

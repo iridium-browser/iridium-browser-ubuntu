@@ -5,7 +5,7 @@
 #include "modules/webusb/USBInterface.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "device/usb/public/interfaces/device.mojom-blink.h"
+#include "device/usb/public/mojom/device.mojom-blink.h"
 #include "modules/webusb/USBAlternateInterface.h"
 #include "modules/webusb/USBConfiguration.h"
 #include "modules/webusb/USBDevice.h"
@@ -67,8 +67,9 @@ bool USBInterface::claimed() const {
   return device_->IsInterfaceClaimed(configuration_index_, interface_index_);
 }
 
-DEFINE_TRACE(USBInterface) {
+void USBInterface::Trace(blink::Visitor* visitor) {
   visitor->Trace(device_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

@@ -33,7 +33,7 @@ namespace blink {
 
 class SVGUseElement final : public SVGGraphicsElement,
                             public SVGURIReference,
-                            public DocumentResourceClient {
+                            public ResourceClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(SVGUseElement);
   USING_PRE_FINALIZER(SVGUseElement, Dispose);
@@ -57,9 +57,9 @@ class SVGUseElement final : public SVGGraphicsElement,
   String title() const override;
 
   void DispatchPendingEvent();
-  void ToClipPath(Path&) const;
+  Path ToClipPath() const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit SVGUseElement(Document&);
@@ -68,9 +68,10 @@ class SVGUseElement final : public SVGGraphicsElement,
 
   FloatRect GetBBox() override;
 
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 
   bool IsStructurallyExternal() const override;
 
@@ -119,20 +120,18 @@ class SVGUseElement final : public SVGGraphicsElement,
   void NotifyFinished(Resource*) override;
   String DebugName() const override { return "SVGUseElement"; }
   void UpdateTargetReference();
-  void SetDocumentResource(DocumentResource*);
 
   Member<SVGAnimatedLength> x_;
   Member<SVGAnimatedLength> y_;
   Member<SVGAnimatedLength> width_;
   Member<SVGAnimatedLength> height_;
 
-  AtomicString element_identifier_;
-  bool element_identifier_is_local_;
+  KURL element_url_;
+  bool element_url_is_local_;
   bool have_fired_load_event_;
   bool needs_shadow_tree_recreation_;
   Member<SVGElement> target_element_instance_;
   Member<IdTargetObserver> target_id_observer_;
-  Member<DocumentResource> resource_;
 };
 
 }  // namespace blink

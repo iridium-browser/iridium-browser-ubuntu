@@ -10,8 +10,6 @@
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
 #include "ui/base/models/list_selection_model.h"
 
-class TabStrip;
-
 class FakeBaseTabStripController : public TabStripController {
  public:
   FakeBaseTabStripController();
@@ -42,7 +40,6 @@ class FakeBaseTabStripController : public TabStripController {
   void ShowContextMenuForTab(Tab* tab,
                              const gfx::Point& p,
                              ui::MenuSourceType source_type) override;
-  void UpdateLoadingAnimations() override;
   int HasAvailableDragActions() const override;
   void OnDropIndexUpdate(int index, bool drop_before) override;
   void PerformDrop(bool drop_before, int index, const GURL& url) override;
@@ -56,12 +53,13 @@ class FakeBaseTabStripController : public TabStripController {
   void CheckFileSupported(const GURL& url) override;
   SkColor GetToolbarTopSeparatorColor() const override;
   base::string16 GetAccessibleTabName(const Tab* tab) const override;
+  Profile* GetProfile() const override;
 
  private:
-  TabStrip* tab_strip_;
+  TabStrip* tab_strip_ = nullptr;
 
-  int num_tabs_;
-  int active_index_;
+  int num_tabs_ = 0;
+  int active_index_ = -1;
 
   ui::ListSelectionModel selection_model_;
 

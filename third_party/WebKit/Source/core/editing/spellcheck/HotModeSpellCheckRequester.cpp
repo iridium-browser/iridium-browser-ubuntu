@@ -6,6 +6,9 @@
 
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
+#include "core/editing/EphemeralRange.h"
+#include "core/editing/FrameSelection.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/editing/commands/CompositeEditCommand.h"
 #include "core/editing/commands/TypingCommand.h"
@@ -44,24 +47,14 @@ EphemeralRange CurrentWordIfTypingInPartialWord(const Element& editable) {
   if (RootEditableElementOf(selection.Base()) != &editable)
     return EphemeralRange();
 
-  CompositeEditCommand* typing_command =
-      frame.GetEditor().LastTypingCommandIfStillOpenForTyping();
-  if (!typing_command)
+  CompositeEditCommand* last_command = frame.GetEditor().LastEditCommand();
+  if (!last_command || !last_command->IsTypingCommand())
     return EphemeralRange();
-  if (typing_command->EndingSelection().AsSelection() != selection)
+  if (!last_command->EndingSelection().IsValidFor(*frame.GetDocument()))
+    return EphemeralRange();
+  if (last_command->EndingSelection().AsSelection() != selection)
     return EphemeralRange();
   return AdjacentWordIfExists(selection.Base());
-}
-
-bool IsUnderActiveEditing(const Element& editable, const Position& position) {
-  if (!editable.IsSpellCheckingEnabled() &&
-      !SpellChecker::IsSpellCheckingEnabledAt(position))
-    return false;
-  if (editable.VisibleBoundsInVisualViewport().IsEmpty())
-    return false;
-  // TODO(xiaochengh): Design more aggressive strategies to reduce checking when
-  // we are just moving selection around without modifying anything.
-  return true;
 }
 
 EphemeralRange CalculateHotModeCheckingRange(const Element& editable,
@@ -86,8 +79,8 @@ EphemeralRange CalculateHotModeCheckingRange(const Element& editable,
   TextIteratorBehavior behavior = TextIteratorBehavior::Builder()
                                       .SetEmitsObjectReplacementCharacter(true)
                                       .Build();
-  BackwardsCharacterIterator backward_iterator(full_range.StartPosition(),
-                                               position, behavior);
+  BackwardsCharacterIterator backward_iterator(
+      EphemeralRange(full_range.StartPosition(), position), behavior);
   if (!backward_iterator.AtEnd())
     backward_iterator.Advance(kHotModeChunkSize / 2);
   const Position& chunk_start = backward_iterator.EndPosition();
@@ -114,8 +107,10 @@ void HotModeSpellCheckRequester::CheckSpellingAt(const Position& position) {
     return;
   processed_root_editables_.push_back(root_editable);
 
-  if (!IsUnderActiveEditing(*root_editable, position))
+  if (!root_editable->IsSpellCheckingEnabled() &&
+      !SpellChecker::IsSpellCheckingEnabledAt(position)) {
     return;
+  }
 
   const EphemeralRange& current_word =
       CurrentWordIfTypingInPartialWord(*root_editable);

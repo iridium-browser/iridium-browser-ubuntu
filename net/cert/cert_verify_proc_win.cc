@@ -4,13 +4,13 @@
 
 #include "net/cert/cert_verify_proc_win.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "base/memory/free_deleter.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sha1.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_local.h"
@@ -24,6 +24,7 @@
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/crl_set.h"
 #include "net/cert/ev_root_ca_metadata.h"
+#include "net/cert/known_roots.h"
 #include "net/cert/known_roots_win.h"
 #include "net/cert/test_root_certs.h"
 #include "net/cert/x509_certificate.h"
@@ -265,19 +266,6 @@ bool CertSubjectCommonNameHasNull(PCCERT_CONTEXT cert) {
   return false;
 }
 
-// IsIssuedByKnownRoot returns true if the given chain is rooted at a root CA
-// which we recognise as a standard root.
-// static
-bool IsIssuedByKnownRoot(PCCERT_CHAIN_CONTEXT chain_context) {
-  PCERT_SIMPLE_CHAIN first_chain = chain_context->rgpChain[0];
-  int num_elements = first_chain->cElement;
-  if (num_elements < 1)
-    return false;
-  PCERT_CHAIN_ELEMENT* element = first_chain->rgpElement;
-  PCCERT_CONTEXT cert = element[num_elements - 1]->pCertContext;
-  return IsKnownRoot(cert);
-}
-
 // Saves some information about the certificate chain |chain_context| in
 // |*verify_result|. The caller MUST initialize |*verify_result| before
 // calling this function.
@@ -376,6 +364,12 @@ bool HashSPKI(PCCERT_CONTEXT cert, std::string* hash) {
   return true;
 }
 
+bool GetSubject(PCCERT_CONTEXT cert, base::StringPiece* out_subject) {
+  base::StringPiece der_bytes(
+      reinterpret_cast<const char*>(cert->pbCertEncoded), cert->cbCertEncoded);
+  return asn1::ExtractSubjectFromDERCert(der_bytes, out_subject);
+}
+
 enum CRLSetResult {
   // Indicates an error happened while attempting to determine CRLSet status.
   // For example, if the certificate's SPKI could not be extracted.
@@ -423,18 +417,20 @@ CRLSetResult CheckRevocationWithCRLSet(CRLSet* crl_set,
   DCHECK(crl_set);
   DCHECK(subject_cert);
 
-  // Check to see if |subject_cert|'s SPKI is revoked. The actual revocation
-  // is handled by the SHA-256 hash of the SPKI, so compute that.
+  // Check to see if |subject_cert|'s SPKI or Subject is revoked.
   std::string subject_hash;
-  if (!HashSPKI(subject_cert, &subject_hash)) {
+  base::StringPiece subject_name;
+  if (!HashSPKI(subject_cert, &subject_hash) ||
+      !GetSubject(subject_cert, &subject_name)) {
     NOTREACHED();  // Indicates Windows accepted something irrecoverably bad.
     previous_hash->clear();
     return kCRLSetError;
   }
 
-  CRLSet::Result result = crl_set->CheckSPKI(subject_hash);
-  if (result == CRLSet::REVOKED)
+  if (crl_set->CheckSPKI(subject_hash) == CRLSet::REVOKED ||
+      crl_set->CheckSubject(subject_name, subject_hash) == CRLSet::REVOKED) {
     return kCRLSetRevoked;
+  }
 
   // If no issuer cert is provided, nor a hash of the issuer's SPKI, no
   // further checks can be done.
@@ -469,7 +465,7 @@ CRLSetResult CheckRevocationWithCRLSet(CRLSet* crl_set,
   }
 
   // Look up by serial & issuer SPKI.
-  result = crl_set->CheckSerial(serial, *issuer_hash);
+  const CRLSet::Result result = crl_set->CheckSerial(serial, *issuer_hash);
   if (result == CRLSet::REVOKED)
     return kCRLSetRevoked;
 
@@ -520,17 +516,20 @@ CRLSetResult CheckChainRevocationWithCRLSet(PCCERT_CHAIN_CONTEXT chain,
   return result;
 }
 
-void AppendPublicKeyHashes(PCCERT_CHAIN_CONTEXT chain,
-                           HashValueVector* hashes) {
+void AppendPublicKeyHashesAndUpdateKnownRoot(PCCERT_CHAIN_CONTEXT chain,
+                                             HashValueVector* hashes,
+                                             bool* known_root) {
   if (chain->cChain == 0)
     return;
 
   PCERT_SIMPLE_CHAIN first_chain = chain->rgpChain[0];
   PCERT_CHAIN_ELEMENT* const element = first_chain->rgpElement;
-
   const DWORD num_elements = first_chain->cElement;
-  for (DWORD i = 0; i < num_elements; i++) {
-    PCCERT_CONTEXT cert = element[i]->pCertContext;
+
+  // Walk the chain in reverse, from the probable root to the known leaf, as
+  // an optimization for IsKnownRoot checks.
+  for (DWORD i = num_elements; i > 0; i--) {
+    PCCERT_CONTEXT cert = element[i - 1]->pCertContext;
 
     base::StringPiece der_bytes(
         reinterpret_cast<const char*>(cert->pbCertEncoded),
@@ -542,7 +541,15 @@ void AppendPublicKeyHashes(PCCERT_CHAIN_CONTEXT chain,
     HashValue sha256(HASH_VALUE_SHA256);
     crypto::SHA256HashString(spki_bytes, sha256.data(), crypto::kSHA256Length);
     hashes->push_back(sha256);
+
+    if (!*known_root) {
+      *known_root =
+          GetNetTrustAnchorHistogramIdForSPKI(sha256) != 0 || IsKnownRoot(cert);
+    }
   }
+
+  // Reverse the hash list, such that it's ordered from leaf to root.
+  std::reverse(hashes->begin(), hashes->end());
 }
 
 // Returns true if the certificate is an extended-validation certificate.
@@ -582,11 +589,9 @@ bool CheckEV(PCCERT_CHAIN_CONTEXT chain_context,
 
   // Look up the EV policy OID of the root CA.
   PCCERT_CONTEXT root_cert = element[num_elements - 1]->pCertContext;
-  SHA1HashValue weak_fingerprint;
-  base::SHA1HashBytes(root_cert->pbCertEncoded, root_cert->cbCertEncoded,
-                      weak_fingerprint.data);
+  SHA256HashValue fingerprint = x509_util::CalculateFingerprint256(root_cert);
   EVRootCAMetadata* metadata = EVRootCAMetadata::GetInstance();
-  return metadata->HasEVPolicyOID(weak_fingerprint, policy_oid);
+  return metadata->HasEVPolicyOID(fingerprint, policy_oid);
 }
 
 // Custom revocation provider function that compares incoming certificates with
@@ -857,7 +862,8 @@ int CertVerifyProcWin::VerifyInternal(
   // CRLSet.
   ScopedThreadLocalCRLSet thread_local_crlset(crl_set);
 
-  ScopedPCCERT_CONTEXT cert_list = x509_util::CreateCertContextWithChain(cert);
+  ScopedPCCERT_CONTEXT cert_list = x509_util::CreateCertContextWithChain(
+      cert, x509_util::InvalidIntermediateBehavior::kIgnore);
   if (!cert_list) {
     verify_result->cert_status |= CERT_STATUS_INVALID;
     return ERR_CERT_INVALID;
@@ -1157,8 +1163,9 @@ int CertVerifyProcWin::VerifyInternal(
     verify_result->cert_status &= ~CERT_STATUS_UNABLE_TO_CHECK_REVOCATION;
   }
 
-  AppendPublicKeyHashes(chain_context, &verify_result->public_key_hashes);
-  verify_result->is_issued_by_known_root = IsIssuedByKnownRoot(chain_context);
+  AppendPublicKeyHashesAndUpdateKnownRoot(
+      chain_context, &verify_result->public_key_hashes,
+      &verify_result->is_issued_by_known_root);
 
   if (IsCertStatusError(verify_result->cert_status))
     return MapCertStatusToNetError(verify_result->cert_status);

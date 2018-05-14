@@ -9,7 +9,7 @@
 
 #include <map>
 
-#include "core/fxcrt/cfx_unowned_ptr.h"
+#include "core/fxcrt/unowned_ptr.h"
 #include "fpdfsdk/formfiller/cba_fontmap.h"
 #include "fpdfsdk/formfiller/cffl_interactiveformfiller.h"
 #include "fpdfsdk/pdfsdk_fieldaction.h"
@@ -19,7 +19,8 @@ class CPDFSDK_FormFillEnvironment;
 class CPDFSDK_PageView;
 class CPDFSDK_Widget;
 
-class CFFL_FormFiller : public IPWL_Provider, public CPWL_TimerHandler {
+class CFFL_FormFiller : public CPWL_Wnd::ProviderIface,
+                        public CPWL_TimerHandler {
  public:
   CFFL_FormFiller(CPDFSDK_FormFillEnvironment* pFormFillEnv,
                   CPDFSDK_Widget* pWidget);
@@ -30,11 +31,11 @@ class CFFL_FormFiller : public IPWL_Provider, public CPWL_TimerHandler {
   virtual void OnDraw(CPDFSDK_PageView* pPageView,
                       CPDFSDK_Annot* pAnnot,
                       CFX_RenderDevice* pDevice,
-                      CFX_Matrix* pUser2Device);
+                      const CFX_Matrix& mtUser2Device);
   virtual void OnDrawDeactive(CPDFSDK_PageView* pPageView,
                               CPDFSDK_Annot* pAnnot,
                               CFX_RenderDevice* pDevice,
-                              CFX_Matrix* pUser2Device);
+                              const CFX_Matrix& mtUser2Device);
 
   virtual void OnMouseEnter(CPDFSDK_PageView* pPageView, CPDFSDK_Annot* pAnnot);
   virtual void OnMouseExit(CPDFSDK_PageView* pPageView, CPDFSDK_Annot* pAnnot);
@@ -74,7 +75,8 @@ class CFFL_FormFiller : public IPWL_Provider, public CPWL_TimerHandler {
                          uint32_t nFlags);
   virtual bool OnChar(CPDFSDK_Annot* pAnnot, uint32_t nChar, uint32_t nFlags);
 
-  CFX_WideString GetSelectedText(CPDFSDK_Annot* pAnnot);
+  WideString GetSelectedText(CPDFSDK_Annot* pAnnot);
+  void ReplaceSelection(CPDFSDK_Annot* pAnnot, const WideString& text);
 
   void SetFocusForAnnot(CPDFSDK_Annot* pAnnot, uint32_t nFlag);
   void KillFocusForAnnot(CPDFSDK_Annot* pAnnot, uint32_t nFlag);
@@ -83,8 +85,8 @@ class CFFL_FormFiller : public IPWL_Provider, public CPWL_TimerHandler {
   void TimerProc() override;
   CFX_SystemHandler* GetSystemHandler() const override;
 
-  // IPWL_Provider
-  CFX_Matrix GetWindowMatrix(void* pAttachedData) override;
+  // CPWL_Wnd::ProviderIface:
+  CFX_Matrix GetWindowMatrix(CPWL_Wnd::PrivateData* pAttached) override;
 
   virtual void GetActionData(CPDFSDK_PageView* pPageView,
                              CPDF_AAction::AActionType type,
@@ -113,10 +115,6 @@ class CFFL_FormFiller : public IPWL_Provider, public CPWL_TimerHandler {
   CFX_FloatRect FFLtoWnd(CPDFSDK_PageView* pPageView,
                          const CFX_FloatRect& rect);
 
-  void SetWindowRect(CPDFSDK_PageView* pPageView,
-                     const CFX_FloatRect& rcWindow);
-  CFX_FloatRect GetWindowRect(CPDFSDK_PageView* pPageView);
-
   bool CommitData(CPDFSDK_PageView* pPageView, uint32_t nFlag);
   virtual bool IsDataChanged(CPDFSDK_PageView* pPageView);
   virtual void SaveData(CPDFSDK_PageView* pPageView);
@@ -129,8 +127,8 @@ class CFFL_FormFiller : public IPWL_Provider, public CPWL_TimerHandler {
   void DestroyPDFWindow(CPDFSDK_PageView* pPageView);
   void EscapeFiller(CPDFSDK_PageView* pPageView, bool bDestroyPDFWindow);
 
-  virtual PWL_CREATEPARAM GetCreateParam();
-  virtual CPWL_Wnd* NewPDFWindow(const PWL_CREATEPARAM& cp) = 0;
+  virtual CPWL_Wnd::CreateParams GetCreateParam();
+  virtual CPWL_Wnd* NewPDFWindow(const CPWL_Wnd::CreateParams& cp) = 0;
   virtual CFX_FloatRect GetFocusBox(CPDFSDK_PageView* pPageView);
 
   bool IsValid() const;
@@ -139,7 +137,6 @@ class CFFL_FormFiller : public IPWL_Provider, public CPWL_TimerHandler {
   CPDFSDK_PageView* GetCurPageView(bool renew);
   void SetChangeMark();
 
-  virtual void InvalidateRect(const FX_RECT& rect);
   CPDFSDK_Annot* GetSDKAnnot() { return m_pWidget.Get(); }
 
  protected:
@@ -153,11 +150,12 @@ class CFFL_FormFiller : public IPWL_Provider, public CPWL_TimerHandler {
   // until the PWL_Edit is done with it. pdfium:566
   void DestroyWindows();
 
-  CFX_UnownedPtr<CPDFSDK_FormFillEnvironment> const m_pFormFillEnv;
-  CFX_UnownedPtr<CPDFSDK_Widget> m_pWidget;
+  void InvalidateRect(const FX_RECT& rect);
+
+  UnownedPtr<CPDFSDK_FormFillEnvironment> const m_pFormFillEnv;
+  UnownedPtr<CPDFSDK_Widget> m_pWidget;
   bool m_bValid;
   CFFL_PageView2PDFWindow m_Maps;
-  CFX_PointF m_ptOldPos;
 };
 
 #endif  // FPDFSDK_FORMFILLER_CFFL_FORMFILLER_H_

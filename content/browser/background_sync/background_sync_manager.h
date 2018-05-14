@@ -51,7 +51,7 @@ class ServiceWorkerContextWrapper;
 // the sync registrations are removed. This class must be run on the IO
 // thread. The asynchronous methods are executed sequentially.
 class CONTENT_EXPORT BackgroundSyncManager
-    : NON_EXPORTED_BASE(public ServiceWorkerContextCoreObserver) {
+    : public ServiceWorkerContextCoreObserver {
  public:
   using BoolCallback = base::OnceCallback<void(bool)>;
   using StatusAndRegistrationCallback =
@@ -95,9 +95,9 @@ class CONTENT_EXPORT BackgroundSyncManager
     return network_observer_.get();
   }
 
-  void set_clock(std::unique_ptr<base::Clock> clock) {
+  void set_clock(base::Clock* clock) {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
-    clock_ = std::move(clock);
+    clock_ = clock;
   }
 
   // Called from DevTools
@@ -105,7 +105,7 @@ class CONTENT_EXPORT BackgroundSyncManager
       const std::string& tag,
       scoped_refptr<ServiceWorkerVersion> active_version,
       bool last_chance,
-      const ServiceWorkerVersion::StatusCallback& callback);
+      ServiceWorkerVersion::StatusCallback callback);
 
  protected:
   explicit BackgroundSyncManager(
@@ -120,16 +120,15 @@ class CONTENT_EXPORT BackgroundSyncManager
       const GURL& origin,
       const std::string& backend_key,
       const std::string& data,
-      const ServiceWorkerStorage::StatusCallback& callback);
+      ServiceWorkerStorage::StatusCallback callback);
   virtual void GetDataFromBackend(
       const std::string& backend_key,
-      const ServiceWorkerStorage::GetUserDataForAllRegistrationsCallback&
-          callback);
+      ServiceWorkerStorage::GetUserDataForAllRegistrationsCallback callback);
   virtual void DispatchSyncEvent(
       const std::string& tag,
       scoped_refptr<ServiceWorkerVersion> active_version,
-      blink::mojom::BackgroundSyncEventLastChance last_chance,
-      const ServiceWorkerVersion::StatusCallback& callback);
+      bool last_chance,
+      ServiceWorkerVersion::StatusCallback callback);
   virtual void ScheduleDelayedTask(base::OnceClosure callback,
                                    base::TimeDelta delay);
   virtual void HasMainFrameProviderHost(const GURL& origin,
@@ -176,7 +175,7 @@ class CONTENT_EXPORT BackgroundSyncManager
   // Write all registrations for a given |sw_registration_id| to persistent
   // storage.
   void StoreRegistrations(int64_t sw_registration_id,
-                          const ServiceWorkerStorage::StatusCallback& callback);
+                          ServiceWorkerStorage::StatusCallback callback);
 
   // Removes the active registration if it is in the map.
   void RemoveActiveRegistration(int64_t sw_registration_id,
@@ -299,7 +298,7 @@ class CONTENT_EXPORT BackgroundSyncManager
 
   std::unique_ptr<BackgroundSyncNetworkObserver> network_observer_;
 
-  std::unique_ptr<base::Clock> clock_;
+  base::Clock* clock_;
 
   base::WeakPtrFactory<BackgroundSyncManager> weak_ptr_factory_;
 

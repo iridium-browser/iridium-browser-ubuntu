@@ -6,13 +6,13 @@
 #define NotificationImageLoader_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "core/loader/ThreadableLoader.h"
 #include "core/loader/ThreadableLoaderClient.h"
 #include "modules/ModulesExport.h"
 #include "platform/SharedBuffer.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Functional.h"
-#include "platform/wtf/RefPtr.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace blink {
@@ -32,7 +32,7 @@ class MODULES_EXPORT NotificationImageLoader final
 
   // The bitmap may be empty if the request failed or the image data could not
   // be decoded.
-  using ImageCallback = Function<void(const SkBitmap&)>;
+  using ImageCallback = base::OnceCallback<void(const SkBitmap&)>;
 
   explicit NotificationImageLoader(Type);
   ~NotificationImageLoader() override;
@@ -44,7 +44,7 @@ class MODULES_EXPORT NotificationImageLoader final
   // Asynchronously downloads an image from the given url, decodes the loaded
   // data, and passes the bitmap to the callback. Times out if the load takes
   // too long and ImageCallback is invoked with an empty bitmap.
-  void Start(ExecutionContext*, const KURL&, std::unique_ptr<ImageCallback>);
+  void Start(ExecutionContext*, const KURL&, ImageCallback);
 
   // Cancels the pending load, if there is one. The |m_imageCallback| will not
   // be run.
@@ -57,7 +57,7 @@ class MODULES_EXPORT NotificationImageLoader final
   void DidFail(const ResourceError&) override;
   void DidFailRedirectCheck() override;
 
-  DEFINE_INLINE_TRACE() { visitor->Trace(threadable_loader_); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(threadable_loader_); }
 
  private:
   void RunCallbackWithEmptyBitmap();
@@ -65,8 +65,8 @@ class MODULES_EXPORT NotificationImageLoader final
   Type type_;
   bool stopped_;
   double start_time_;
-  RefPtr<SharedBuffer> data_;
-  std::unique_ptr<ImageCallback> image_callback_;
+  scoped_refptr<SharedBuffer> data_;
+  ImageCallback image_callback_;
   Member<ThreadableLoader> threadable_loader_;
 };
 

@@ -34,10 +34,10 @@ class CPDF_AAction {
     SaveDocument,
     DocumentSaved,
     PrintDocument,
-    DocumentPrinted
+    DocumentPrinted,
+    NumberOfActions  // Must be last.
   };
 
-  CPDF_AAction();
   explicit CPDF_AAction(CPDF_Dictionary* pDict);
   CPDF_AAction(const CPDF_AAction& that);
   ~CPDF_AAction();
@@ -47,7 +47,7 @@ class CPDF_AAction {
   CPDF_Dictionary* GetDict() const { return m_pDict.Get(); }
 
  private:
-  CFX_UnownedPtr<CPDF_Dictionary> const m_pDict;
+  UnownedPtr<CPDF_Dictionary> const m_pDict;
 };
 
 #endif  // CORE_FPDFDOC_CPDF_AACTION_H_

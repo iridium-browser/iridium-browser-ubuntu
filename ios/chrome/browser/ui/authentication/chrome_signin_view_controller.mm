@@ -18,10 +18,12 @@
 #import "base/strings/sys_string_conversions.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/timer/timer.h"
+#include "components/consent_auditor/consent_auditor.h"
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#include "ios/chrome/browser/consent_auditor/consent_auditor_factory.h"
 #import "ios/chrome/browser/signin/authentication_service.h"
 #import "ios/chrome/browser/signin/authentication_service_factory.h"
 #import "ios/chrome/browser/signin/chrome_identity_service_observer_bridge.h"
@@ -34,6 +36,7 @@
 #include "ios/chrome/browser/ui/authentication/signin_account_selector_view_controller.h"
 #include "ios/chrome/browser/ui/authentication/signin_confirmation_view_controller.h"
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/rtl_geometry.h"
 #import "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
@@ -65,9 +68,6 @@ enum LayoutType {
   LAYOUT_COMPACT,
 };
 
-// Alpha threshold upon which a view is considered hidden.
-const CGFloat kHiddenAlphaThreshold = 0.1;
-
 // Minimum duration of the pending state in milliseconds.
 const int64_t kMinimunPendingStateDurationMs = 300;
 
@@ -80,7 +80,8 @@ struct AuthenticationViewConstants {
   CGFloat GradientHeight;
   CGFloat ButtonHeight;
   CGFloat ButtonHorizontalPadding;
-  CGFloat ButtonVerticalPadding;
+  CGFloat ButtonTopPadding;
+  CGFloat ButtonBottomPadding;
 };
 
 const AuthenticationViewConstants kCompactConstants = {
@@ -88,8 +89,9 @@ const AuthenticationViewConstants kCompactConstants = {
     14,  // SecondaryFontSize
     40,  // GradientHeight
     36,  // ButtonHeight
-    32,  // ButtonHorizontalPadding
-    32,  // ButtonVerticalPadding
+    16,  // ButtonHorizontalPadding
+    16,  // ButtonTopPadding
+    16,  // ButtonBottomPadding
 };
 
 const AuthenticationViewConstants kRegularConstants = {
@@ -97,8 +99,9 @@ const AuthenticationViewConstants kRegularConstants = {
     1.5 * kCompactConstants.SecondaryFontSize,
     kCompactConstants.GradientHeight,
     1.5 * kCompactConstants.ButtonHeight,
-    kCompactConstants.ButtonHorizontalPadding,
-    kCompactConstants.ButtonVerticalPadding,
+    32,
+    32,
+    32,
 };
 
 enum AuthenticationState {
@@ -108,20 +111,6 @@ enum AuthenticationState {
   IDENTITY_SELECTED_STATE,
   DONE_STATE,
 };
-
-// Fades in |button| on screen if not already visible.
-void ShowButton(UIButton* button) {
-  if (button.alpha > kHiddenAlphaThreshold)
-    return;
-  button.alpha = 1.0;
-}
-
-// Fades out |button| on screen if not already hidden.
-void HideButton(UIButton* button) {
-  if (button.alpha < kHiddenAlphaThreshold)
-    return;
-  button.alpha = 0.0;
-}
 
 }  // namespace
 
@@ -149,7 +138,6 @@ void HideButton(UIButton* button) {
   BOOL _didSignIn;
   BOOL _didAcceptSignIn;
   BOOL _didFinishSignIn;
-  BOOL _isPresentedOnSettings;
   signin_metrics::AccessPoint _accessPoint;
   signin_metrics::PromoAction _promoAction;
   ChromeIdentityInteractionManager* _interactionManager;
@@ -181,16 +169,13 @@ void HideButton(UIButton* button) {
 @synthesize dispatcher = _dispatcher;
 
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-               isPresentedOnSettings:(BOOL)isPresentedOnSettings
                          accessPoint:(signin_metrics::AccessPoint)accessPoint
                          promoAction:(signin_metrics::PromoAction)promoAction
                       signInIdentity:(ChromeIdentity*)identity
-                          dispatcher:
-                              (id<ApplicationSettingsCommands>)dispatcher {
+                          dispatcher:(id<ApplicationCommands>)dispatcher {
   self = [super init];
   if (self) {
     _browserState = browserState;
-    _isPresentedOnSettings = isPresentedOnSettings;
     _accessPoint = accessPoint;
     _promoAction = promoAction;
     _dispatcher = dispatcher;
@@ -217,7 +202,6 @@ void HideButton(UIButton* button) {
   [_secondaryButton removeTarget:self
                           action:@selector(onSecondaryButtonPressed:)
                 forControlEvents:UIControlEventTouchDown];
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)cancel {
@@ -247,6 +231,15 @@ void HideButton(UIButton* button) {
 
 - (void)acceptSignInAndShowAccountsSettings:(BOOL)showAccountsSettings {
   signin_metrics::LogSigninAccessPointCompleted(_accessPoint, _promoAction);
+  DCHECK(_confirmationVC);
+  const std::vector<int>& consent_text_ids = _confirmationVC.consentStringIds;
+  int consent_confirmation_id = showAccountsSettings
+                                    ? _confirmationVC.openSettingsStringId
+                                    : [self acceptSigninButtonStringId];
+  ConsentAuditorFactory::GetForBrowserState(_browserState)
+      ->RecordGaiaConsent(consent_auditor::Feature::CHROME_SYNC,
+                          consent_text_ids, consent_confirmation_id,
+                          consent_auditor::ConsentStatus::GIVEN);
   _didAcceptSignIn = YES;
   if (!_didFinishSignIn) {
     _didFinishSignIn = YES;
@@ -263,7 +256,7 @@ void HideButton(UIButton* button) {
 - (void)setPrimaryButtonStyling:(MDCButton*)button {
   [button setBackgroundColor:[[MDCPalette cr_bluePalette] tint500]
                     forState:UIControlStateNormal];
-  [button setCustomTitleColor:[UIColor whiteColor]];
+  [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
   [button setUnderlyingColorHint:[UIColor blackColor]];
   [button setInkColor:[UIColor colorWithWhite:1 alpha:0.2f]];
 }
@@ -271,7 +264,8 @@ void HideButton(UIButton* button) {
 - (void)setSecondaryButtonStyling:(MDCButton*)button {
   [button setBackgroundColor:self.backgroundColor
                     forState:UIControlStateNormal];
-  [button setCustomTitleColor:[[MDCPalette cr_bluePalette] tint500]];
+  [button setTitleColor:[[MDCPalette cr_bluePalette] tint500]
+               forState:UIControlStateNormal];
   [button setUnderlyingColorHint:[UIColor whiteColor]];
   [button setInkColor:[UIColor colorWithWhite:0 alpha:0.06f]];
 }
@@ -302,9 +296,12 @@ void HideButton(UIButton* button) {
   return l10n_util::GetNSString(IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_TITLE);
 }
 
+- (int)acceptSigninButtonStringId {
+  return IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_OK_BUTTON;
+}
+
 - (NSString*)acceptSigninButtonTitle {
-  return l10n_util::GetNSString(
-      IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_OK_BUTTON);
+  return l10n_util::GetNSString([self acceptSigninButtonStringId]);
 }
 
 - (NSString*)skipSigninButtonTitle {
@@ -335,7 +332,7 @@ void HideButton(UIButton* button) {
   if (!ShouldHandleSigninError(error)) {
     return;
   }
-  _alertCoordinator = ios_internal::ErrorCoordinator(error, nil, self);
+  _alertCoordinator = ErrorCoordinator(error, nil, self);
   [_alertCoordinator start];
 }
 
@@ -348,6 +345,7 @@ void HideButton(UIButton* button) {
                                        shouldClearData:_shouldClearData
                                       postSignInAction:POST_SIGNIN_ACTION_NONE
                               presentingViewController:self];
+  _authenticationFlow.dispatcher = self.dispatcher;
   __weak ChromeSigninViewController* weakSelf = self;
   [_authenticationFlow startSignInWithCompletion:^(BOOL success) {
     [weakSelf onAccountSigninCompletion:success];
@@ -503,14 +501,22 @@ void HideButton(UIButton* button) {
   [_secondaryButton setTitle:self.skipSigninButtonTitle
                     forState:UIControlStateNormal];
   [self.view setNeedsLayout];
-
-  HideButton(_primaryButton);
-  HideButton(_secondaryButton);
-  [UIView animateWithDuration:kAnimationDuration
-                   animations:^{
-                     ShowButton(_primaryButton);
-                     ShowButton(_secondaryButton);
-                   }];
+  _primaryButton.hidden = YES;
+  _secondaryButton.hidden = YES;
+  [UIView transitionWithView:_primaryButton
+                    duration:kAnimationDuration
+                     options:UIViewAnimationOptionTransitionCrossDissolve
+                  animations:^{
+                    _primaryButton.hidden = NO;
+                  }
+                  completion:nil];
+  [UIView transitionWithView:_secondaryButton
+                    duration:kAnimationDuration
+                     options:UIViewAnimationOptionTransitionCrossDissolve
+                  animations:^{
+                    _secondaryButton.hidden = NO;
+                  }
+                  completion:nil];
 }
 
 - (void)reloadIdentityPickerState {
@@ -521,10 +527,18 @@ void HideButton(UIButton* button) {
 }
 
 - (void)leaveIdentityPickerState:(AuthenticationState)nextState {
-  [UIView animateWithDuration:kAnimationDuration
+  [UIView transitionWithView:_primaryButton
+                    duration:kAnimationDuration
+                     options:UIViewAnimationOptionTransitionCrossDissolve
+                  animations:^{
+                    _primaryButton.hidden = YES;
+                  }
+                  completion:nil];
+  [UIView transitionWithView:_secondaryButton
+      duration:kAnimationDuration
+      options:UIViewAnimationOptionTransitionCrossDissolve
       animations:^{
-        HideButton(_primaryButton);
-        HideButton(_secondaryButton);
+        _secondaryButton.hidden = YES;
       }
       completion:^(BOOL finished) {
         [_accountSelectorVC willMoveToParentViewController:nil];
@@ -543,7 +557,7 @@ void HideButton(UIButton* button) {
   [self.view setNeedsLayout];
 
   _pendingStateTimer.reset(new base::ElapsedTimer());
-  ShowButton(_secondaryButton);
+  _secondaryButton.hidden = NO;
   [_activityIndicator startAnimating];
 
   [self signIntoIdentity:self.selectedIdentity];
@@ -620,15 +634,22 @@ void HideButton(UIButton* button) {
   [_secondaryButton setTitle:secondaryButtonTitle
                     forState:UIControlStateNormal];
   [self.view setNeedsLayout];
-
-  HideButton(_primaryButton);
-  HideButton(_secondaryButton);
-  [UIView animateWithDuration:kAnimationDuration
-                   animations:^{
-                     ShowButton(_primaryButton);
-                     ShowButton(_secondaryButton);
-                   }
-                   completion:nil];
+  _primaryButton.hidden = YES;
+  _secondaryButton.hidden = YES;
+  [UIView transitionWithView:_primaryButton
+                    duration:kAnimationDuration
+                     options:UIViewAnimationOptionTransitionCrossDissolve
+                  animations:^{
+                    _primaryButton.hidden = NO;
+                  }
+                  completion:nil];
+  [UIView transitionWithView:_secondaryButton
+                    duration:kAnimationDuration
+                     options:UIViewAnimationOptionTransitionCrossDissolve
+                  animations:^{
+                    _secondaryButton.hidden = NO;
+                  }
+                  completion:nil];
 }
 
 - (void)reloadIdentitySelectedState {
@@ -647,8 +668,8 @@ void HideButton(UIButton* button) {
   [_confirmationVC removeFromParentViewController];
   _confirmationVC = nil;
   [self setPrimaryButtonStyling:_primaryButton];
-  HideButton(_primaryButton);
-  HideButton(_secondaryButton);
+  _primaryButton.hidden = YES;
+  _secondaryButton.hidden = YES;
   [self undoSignIn];
   [self enterState:nextState];
 }
@@ -664,7 +685,7 @@ void HideButton(UIButton* button) {
   [_primaryButton addTarget:self
                      action:@selector(onPrimaryButtonPressed:)
            forControlEvents:UIControlEventTouchUpInside];
-  HideButton(_primaryButton);
+  _primaryButton.hidden = YES;
   [self.view addSubview:_primaryButton];
 
   _secondaryButton = [[MDCFlatButton alloc] init];
@@ -673,7 +694,7 @@ void HideButton(UIButton* button) {
                        action:@selector(onSecondaryButtonPressed:)
              forControlEvents:UIControlEventTouchUpInside];
   [_secondaryButton setAccessibilityIdentifier:@"ic_close"];
-  HideButton(_secondaryButton);
+  _secondaryButton.hidden = YES;
   [self.view addSubview:_secondaryButton];
 
   _activityIndicator = [[MDCActivityIndicator alloc] initWithFrame:CGRectZero];
@@ -811,9 +832,9 @@ void HideButton(UIButton* button) {
   [self layoutButtons:constants];
 
   CGSize viewSize = self.view.bounds.size;
-  CGFloat collectionViewHeight = viewSize.height -
-                                 _primaryButton.frame.size.height -
-                                 constants.ButtonVerticalPadding;
+  CGFloat collectionViewHeight =
+      viewSize.height - _primaryButton.frame.size.height -
+      constants.ButtonBottomPadding - constants.ButtonTopPadding;
   CGRect collectionViewFrame =
       CGRectMake(0, 0, viewSize.width, collectionViewHeight);
   [_accountSelectorVC.view setFrame:collectionViewFrame];
@@ -821,7 +842,8 @@ void HideButton(UIButton* button) {
 
   // Layout the gradient view right above the buttons.
   CGFloat gradientOriginY = CGRectGetHeight(self.view.bounds) -
-                            constants.ButtonVerticalPadding -
+                            constants.ButtonBottomPadding -
+                            constants.ButtonTopPadding -
                             constants.ButtonHeight - constants.GradientHeight;
   [_gradientView setFrame:CGRectMake(0, gradientOriginY, viewSize.width,
                                      constants.GradientHeight)];
@@ -834,10 +856,10 @@ void HideButton(UIButton* button) {
 }
 
 - (void)layoutButtons:(const AuthenticationViewConstants&)constants {
-  [_primaryButton titleLabel].font =
+  UIFont* font =
       [[MDCTypography fontLoader] mediumFontOfSize:constants.SecondaryFontSize];
-  [_secondaryButton titleLabel].font =
-      [[MDCTypography fontLoader] mediumFontOfSize:constants.SecondaryFontSize];
+  [_primaryButton setTitleFont:font forState:UIControlStateNormal];
+  [_secondaryButton setTitleFont:font forState:UIControlStateNormal];
 
   LayoutRect primaryButtonLayout = LayoutRectZero;
   primaryButtonLayout.boundingWidth = CGRectGetWidth(self.view.bounds);
@@ -847,7 +869,7 @@ void HideButton(UIButton* button) {
                                          primaryButtonLayout.size.width -
                                          constants.ButtonHorizontalPadding;
   primaryButtonLayout.position.originY = CGRectGetHeight(self.view.bounds) -
-                                         constants.ButtonVerticalPadding -
+                                         constants.ButtonBottomPadding -
                                          constants.ButtonHeight;
   primaryButtonLayout.size.height = constants.ButtonHeight;
   [_primaryButton setFrame:LayoutRectGetRect(primaryButtonLayout)];

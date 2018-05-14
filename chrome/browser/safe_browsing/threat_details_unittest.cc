@@ -22,10 +22,12 @@
 #include "components/history/core/browser/history_service.h"
 #include "components/safe_browsing/browser/threat_details.h"
 #include "components/safe_browsing/browser/threat_details_history.h"
-#include "components/safe_browsing/common/safebrowsing_messages.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/common/safe_browsing.mojom.h"
+#include "components/safe_browsing/proto/csd.pb.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
 #include "net/base/io_buffer.h"
@@ -152,7 +154,7 @@ void FillCacheHttps(net::URLRequestContextGetter* context_getter) {
   FillCacheBase(context_getter, /*use_https_threat_url=*/true);
 }
 
-// Lets us provide a MockURLRequestContext with an HTTP Cache we pre-populate.
+// Lets us control synchronization of the done callback for ThreatDetails.
 // Also exposes the constructor.
 class ThreatDetailsWrap : public ThreatDetails {
  public:
@@ -166,35 +168,62 @@ class ThreatDetailsWrap : public ThreatDetails {
                       web_contents,
                       unsafe_resource,
                       request_context_getter,
-                      history_service) {
-    request_context_getter_ = request_context_getter;
+                      history_service,
+                      /*trim_to_ad_tags=*/false,
+                      base::Bind(&ThreatDetailsWrap::ThreatDetailsDone,
+                                 base::Unretained(this))),
+        run_loop_(nullptr),
+        done_callback_count_(0) {}
+
+  ThreatDetailsWrap(
+      SafeBrowsingUIManager* ui_manager,
+      WebContents* web_contents,
+      const security_interstitials::UnsafeResource& unsafe_resource,
+      net::URLRequestContextGetter* request_context_getter,
+      history::HistoryService* history_service,
+      bool trim_to_ad_tags)
+      : ThreatDetails(ui_manager,
+                      web_contents,
+                      unsafe_resource,
+                      request_context_getter,
+                      history_service,
+                      trim_to_ad_tags,
+                      base::Bind(&ThreatDetailsWrap::ThreatDetailsDone,
+                                 base::Unretained(this))),
+        run_loop_(nullptr),
+        done_callback_count_(0) {}
+
+  void ThreatDetailsDone(content::WebContents* web_contents) {
+    ++done_callback_count_;
+    run_loop_->Quit();
+    run_loop_ = NULL;
   }
+
+  // Used to synchronize ThreatDetailsDone() with WaitForThreatDetailsDone().
+  // RunLoop::RunUntilIdle() is not sufficient because the MessageLoop task
+  // queue completely drains at some point between the send and the wait.
+  void SetRunLoopToQuit(base::RunLoop* run_loop) {
+    DCHECK(run_loop_ == NULL);
+    run_loop_ = run_loop;
+  }
+
+  size_t done_callback_count() { return done_callback_count_; }
 
  private:
   ~ThreatDetailsWrap() override {}
+
+  base::RunLoop* run_loop_;
+  size_t done_callback_count_;
 };
 
 class MockSafeBrowsingUIManager : public SafeBrowsingUIManager {
  public:
-  base::RunLoop* run_loop_;
   // The safe browsing UI manager does not need a service for this test.
-  MockSafeBrowsingUIManager() : SafeBrowsingUIManager(NULL), run_loop_(NULL) {}
+  MockSafeBrowsingUIManager() : SafeBrowsingUIManager(NULL) {}
 
-  // When the ThreatDetails is done, this is called.
+  // When the serialized report is sent, this is called.
   void SendSerializedThreatDetails(const std::string& serialized) override {
-    DVLOG(1) << "SendSerializedThreatDetails";
-    run_loop_->Quit();
-    run_loop_ = NULL;
     serialized_ = serialized;
-  }
-
-  // Used to synchronize SendSerializedThreatDetails() with
-  // WaitForSerializedReport(). RunLoop::RunUntilIdle() is not sufficient
-  // because the MessageLoop task queue completely drains at some point
-  // between the send and the wait.
-  void SetRunLoopToQuit(base::RunLoop* run_loop) {
-    DCHECK(run_loop_ == NULL);
-    run_loop_ = run_loop;
   }
 
   const std::string& GetSerialized() { return serialized_; }
@@ -220,17 +249,18 @@ class ThreatDetailsTest : public ChromeRenderViewHostTestHarness {
                                                 false /* no_db */));
   }
 
-  std::string WaitForSerializedReport(ThreatDetails* report,
-                                      bool did_proceed,
-                                      int num_visit) {
+  std::string WaitForThreatDetailsDone(ThreatDetailsWrap* report,
+                                       bool did_proceed,
+                                       int num_visit) {
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                             base::BindOnce(&ThreatDetails::FinishCollection,
                                            report, did_proceed, num_visit));
-    // Wait for the callback (SendSerializedThreatDetails).
-    DVLOG(1) << "Waiting for SendSerializedThreatDetails";
+    // Wait for the callback (ThreatDetailsDone).
     base::RunLoop run_loop;
-    ui_manager_->SetRunLoopToQuit(&run_loop);
+    report->SetRunLoopToQuit(&run_loop);
     run_loop.Run();
+    // Make sure the done callback was run exactly once.
+    EXPECT_EQ(1u, report->done_callback_count());
     return ui_manager_->GetSerialized();
   }
 
@@ -251,7 +281,7 @@ class ThreatDetailsTest : public ChromeRenderViewHostTestHarness {
     resource->threat_source = threat_source;
     resource->web_contents_getter =
         SafeBrowsingUIManager::UnsafeResource::GetWebContentsGetter(
-            web_contents()->GetRenderProcessHost()->GetID(),
+            web_contents()->GetMainFrame()->GetProcess()->GetID(),
             web_contents()->GetMainFrame()->GetRoutingID());
   }
 
@@ -282,7 +312,7 @@ class ThreatDetailsTest : public ChromeRenderViewHostTestHarness {
               static_cast<int>(actual_resource_map.size()));
     for (const ClientSafeBrowsingReportRequest::Resource& expected_resource :
          expected_pb.resources()) {
-      ASSERT_TRUE(actual_resource_map.count(expected_resource.id()) > 0);
+      ASSERT_GT(actual_resource_map.count(expected_resource.id()), 0u);
       VerifyResource(*actual_resource_map[expected_resource.id()],
                      expected_resource);
     }
@@ -298,7 +328,7 @@ class ThreatDetailsTest : public ChromeRenderViewHostTestHarness {
     // be unique).
     ASSERT_EQ(expected_pb.dom_size(), static_cast<int>(actual_dom_map.size()));
     for (const HTMLElement& expected_element : expected_pb.dom()) {
-      ASSERT_TRUE(actual_dom_map.count(expected_element.id()) > 0);
+      ASSERT_GT(actual_dom_map.count(expected_element.id()), 0u);
       VerifyElement(*actual_dom_map[expected_element.id()], expected_element);
     }
 
@@ -360,7 +390,7 @@ class ThreatDetailsTest : public ChromeRenderViewHostTestHarness {
               static_cast<int>(actual_attributes_map.size()));
     for (const HTMLElement::Attribute& expected_attribute :
          expected.attribute()) {
-      ASSERT_TRUE(actual_attributes_map.count(expected_attribute.name()) > 0);
+      ASSERT_GT(actual_attributes_map.count(expected_attribute.name()), 0u);
       EXPECT_EQ(expected_attribute.value(),
                 actual_attributes_map[expected_attribute.name()]);
     }
@@ -382,14 +412,11 @@ class ThreatDetailsTest : public ChromeRenderViewHostTestHarness {
 
 // Tests creating a simple threat report of a malware URL.
 TEST_F(ThreatDetailsTest, ThreatSubResource) {
-  // Commit a load.
-  content::WebContentsTester::For(web_contents())
-      ->TestDidNavigateWithReferrer(
-          web_contents()->GetMainFrame(), 0 /* nav_entry_id */,
-          true /* did_create_new_entry */, GURL(kLandingURL),
-          content::Referrer(GURL(kReferrerURL),
-                            blink::kWebReferrerPolicyDefault),
-          ui::PAGE_TRANSITION_TYPED);
+  auto navigation = content::NavigationSimulator::CreateBrowserInitiated(
+      GURL(kLandingURL), web_contents());
+  navigation->SetReferrer(
+      content::Referrer(GURL(kReferrerURL), blink::kWebReferrerPolicyDefault));
+  navigation->Commit();
 
   UnsafeResource resource;
   InitResource(SB_THREAT_TYPE_URL_MALWARE, ThreatSource::CLIENT_SIDE_DETECTION,
@@ -398,7 +425,7 @@ TEST_F(ThreatDetailsTest, ThreatSubResource) {
   scoped_refptr<ThreatDetailsWrap> report = new ThreatDetailsWrap(
       ui_manager_.get(), web_contents(), resource, NULL, history_service());
 
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), true /* did_proceed*/, 1 /* num_visit */);
 
   ClientSafeBrowsingReportRequest actual;
@@ -442,7 +469,7 @@ TEST_F(ThreatDetailsTest, ThreatSubResourceWithOriginalUrl) {
   scoped_refptr<ThreatDetailsWrap> report = new ThreatDetailsWrap(
       ui_manager_.get(), web_contents(), resource, NULL, history_service());
 
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), false /* did_proceed*/, 1 /* num_visit */);
 
   ClientSafeBrowsingReportRequest actual;
@@ -490,20 +517,23 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails) {
       ui_manager_.get(), web_contents(), resource, NULL, history_service());
 
   // Send a message from the DOM, with 2 nodes, a parent and a child.
-  std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node> params;
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node child_node;
-  child_node.url = GURL(kDOMChildURL);
-  child_node.tag_name = "iframe";
-  child_node.parent = GURL(kDOMParentURL);
-  child_node.attributes.push_back(std::make_pair("src", kDOMChildURL));
-  params.push_back(child_node);
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node parent_node;
-  parent_node.url = GURL(kDOMParentURL);
-  parent_node.children.push_back(GURL(kDOMChildURL));
-  params.push_back(parent_node);
-  report->OnReceivedThreatDOMDetails(main_rfh(), params);
+  std::vector<mojom::ThreatDOMDetailsNodePtr> params;
+  mojom::ThreatDOMDetailsNodePtr child_node =
+      mojom::ThreatDOMDetailsNode::New();
+  child_node->url = GURL(kDOMChildURL);
+  child_node->tag_name = "iframe";
+  child_node->parent = GURL(kDOMParentURL);
+  child_node->attributes.push_back(
+      mojom::AttributeNameValue::New("src", kDOMChildURL));
+  params.push_back(std::move(child_node));
+  mojom::ThreatDOMDetailsNodePtr parent_node =
+      mojom::ThreatDOMDetailsNode::New();
+  parent_node->url = GURL(kDOMParentURL);
+  parent_node->children.push_back(GURL(kDOMChildURL));
+  params.push_back(std::move(parent_node));
+  report->OnReceivedThreatDOMDetails(nullptr, main_rfh(), std::move(params));
 
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), false /* did_proceed*/, 0 /* num_visit */);
   ClientSafeBrowsingReportRequest actual;
   actual.ParseFromString(serialized);
@@ -565,53 +595,65 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_MultipleFrames) {
 
   // Define two sets of DOM nodes - one for an outer page containing an iframe,
   // and then another for the inner page containing the contents of that iframe.
-  std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node> outer_params;
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node outer_child_div;
-  outer_child_div.node_id = 1;
-  outer_child_div.child_node_ids.push_back(2);
-  outer_child_div.tag_name = "div";
-  outer_child_div.parent = GURL(kDOMParentURL);
-  outer_child_div.attributes.push_back(std::make_pair("id", "outer"));
-  outer_params.push_back(outer_child_div);
+  std::vector<mojom::ThreatDOMDetailsNodePtr> outer_params;
+  mojom::ThreatDOMDetailsNodePtr outer_child_div =
+      mojom::ThreatDOMDetailsNode::New();
+  outer_child_div->node_id = 1;
+  outer_child_div->child_node_ids.push_back(2);
+  outer_child_div->tag_name = "div";
+  outer_child_div->parent = GURL(kDOMParentURL);
+  outer_child_div->attributes.push_back(
+      mojom::AttributeNameValue::New("id", "outer"));
+  outer_params.push_back(std::move(outer_child_div));
 
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node outer_child_iframe;
-  outer_child_iframe.node_id = 2;
-  outer_child_iframe.parent_node_id = 1;
-  outer_child_iframe.url = GURL(kDOMChildURL);
-  outer_child_iframe.tag_name = "iframe";
-  outer_child_iframe.parent = GURL(kDOMParentURL);
-  outer_child_iframe.attributes.push_back(std::make_pair("src", kDOMChildURL));
-  outer_child_iframe.attributes.push_back(std::make_pair("foo", "bar"));
-  outer_child_iframe.child_frame_routing_id = child_rfh->GetRoutingID();
-  outer_params.push_back(outer_child_iframe);
+  mojom::ThreatDOMDetailsNodePtr outer_child_iframe =
+      mojom::ThreatDOMDetailsNode::New();
+  outer_child_iframe->node_id = 2;
+  outer_child_iframe->parent_node_id = 1;
+  outer_child_iframe->url = GURL(kDOMChildURL);
+  outer_child_iframe->tag_name = "iframe";
+  outer_child_iframe->parent = GURL(kDOMParentURL);
+  outer_child_iframe->attributes.push_back(
+      mojom::AttributeNameValue::New("src", kDOMChildURL));
+  outer_child_iframe->attributes.push_back(
+      mojom::AttributeNameValue::New("foo", "bar"));
+  outer_child_iframe->child_frame_routing_id = child_rfh->GetRoutingID();
+  outer_params.push_back(std::move(outer_child_iframe));
 
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node outer_summary_node;
-  outer_summary_node.url = GURL(kDOMParentURL);
-  outer_summary_node.children.push_back(GURL(kDOMChildURL));
-  outer_params.push_back(outer_summary_node);
+  mojom::ThreatDOMDetailsNodePtr outer_summary_node =
+      mojom::ThreatDOMDetailsNode::New();
+  outer_summary_node->url = GURL(kDOMParentURL);
+  outer_summary_node->children.push_back(GURL(kDOMChildURL));
+  outer_params.push_back(std::move(outer_summary_node));
 
   // Now define some more nodes for the body of the iframe.
-  std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node> inner_params;
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node inner_child_div;
-  inner_child_div.node_id = 1;
-  inner_child_div.tag_name = "div";
-  inner_child_div.parent = GURL(kDOMChildURL);
-  inner_child_div.attributes.push_back(std::make_pair("id", "inner"));
-  inner_child_div.attributes.push_back(std::make_pair("bar", "baz"));
-  inner_params.push_back(inner_child_div);
+  std::vector<mojom::ThreatDOMDetailsNodePtr> inner_params;
+  mojom::ThreatDOMDetailsNodePtr inner_child_div =
+      mojom::ThreatDOMDetailsNode::New();
+  inner_child_div->node_id = 1;
+  inner_child_div->tag_name = "div";
+  inner_child_div->parent = GURL(kDOMChildURL);
+  inner_child_div->attributes.push_back(
+      mojom::AttributeNameValue::New("id", "inner"));
+  inner_child_div->attributes.push_back(
+      mojom::AttributeNameValue::New("bar", "baz"));
+  inner_params.push_back(std::move(inner_child_div));
 
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node inner_child_script;
-  inner_child_script.node_id = 2;
-  inner_child_script.url = GURL(kDOMChildUrl2);
-  inner_child_script.tag_name = "script";
-  inner_child_script.parent = GURL(kDOMChildURL);
-  inner_child_script.attributes.push_back(std::make_pair("src", kDOMChildUrl2));
-  inner_params.push_back(inner_child_script);
+  mojom::ThreatDOMDetailsNodePtr inner_child_script =
+      mojom::ThreatDOMDetailsNode::New();
+  inner_child_script->node_id = 2;
+  inner_child_script->url = GURL(kDOMChildUrl2);
+  inner_child_script->tag_name = "script";
+  inner_child_script->parent = GURL(kDOMChildURL);
+  inner_child_script->attributes.push_back(
+      mojom::AttributeNameValue::New("src", kDOMChildUrl2));
+  inner_params.push_back(std::move(inner_child_script));
 
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node inner_summary_node;
-  inner_summary_node.url = GURL(kDOMChildURL);
-  inner_summary_node.children.push_back(GURL(kDOMChildUrl2));
-  inner_params.push_back(inner_summary_node);
+  mojom::ThreatDOMDetailsNodePtr inner_summary_node =
+      mojom::ThreatDOMDetailsNode::New();
+  inner_summary_node->url = GURL(kDOMChildURL);
+  inner_summary_node->children.push_back(GURL(kDOMChildUrl2));
+  inner_params.push_back(std::move(inner_summary_node));
 
   ClientSafeBrowsingReportRequest expected;
   expected.set_type(ClientSafeBrowsingReportRequest::URL_UNWANTED);
@@ -695,11 +737,22 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_MultipleFrames) {
     scoped_refptr<ThreatDetailsWrap> report = new ThreatDetailsWrap(
         ui_manager_.get(), web_contents(), resource, NULL, history_service());
 
-    // Send both sets of nodes from different render frames.
-    report->OnReceivedThreatDOMDetails(main_rfh(), outer_params);
-    report->OnReceivedThreatDOMDetails(child_rfh, inner_params);
+    std::vector<mojom::ThreatDOMDetailsNodePtr> outer_params_copy;
+    for (auto& node : outer_params) {
+      outer_params_copy.push_back(node.Clone());
+    }
+    std::vector<mojom::ThreatDOMDetailsNodePtr> inner_params_copy;
+    for (auto& node : inner_params) {
+      inner_params_copy.push_back(node.Clone());
+    }
 
-    std::string serialized = WaitForSerializedReport(
+    // Send both sets of nodes from different render frames.
+    report->OnReceivedThreatDOMDetails(nullptr, main_rfh(),
+                                       std::move(outer_params_copy));
+    report->OnReceivedThreatDOMDetails(nullptr, child_rfh,
+                                       std::move(inner_params_copy));
+
+    std::string serialized = WaitForThreatDetailsDone(
         report.get(), false /* did_proceed*/, 0 /* num_visit */);
     ClientSafeBrowsingReportRequest actual;
     actual.ParseFromString(serialized);
@@ -740,10 +793,12 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_MultipleFrames) {
         ui_manager_.get(), web_contents(), resource, NULL, history_service());
 
     // Send both sets of nodes from different render frames.
-    report->OnReceivedThreatDOMDetails(child_rfh, inner_params);
-    report->OnReceivedThreatDOMDetails(main_rfh(), outer_params);
+    report->OnReceivedThreatDOMDetails(nullptr, child_rfh,
+                                       std::move(inner_params));
+    report->OnReceivedThreatDOMDetails(nullptr, main_rfh(),
+                                       std::move(outer_params));
 
-    std::string serialized = WaitForSerializedReport(
+    std::string serialized = WaitForThreatDetailsDone(
         report.get(), false /* did_proceed*/, 0 /* num_visit */);
     ClientSafeBrowsingReportRequest actual;
     actual.ParseFromString(serialized);
@@ -767,37 +822,42 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_AmbiguousDOM) {
       ->NavigateAndCommit(GURL(kLandingURL));
   content::RenderFrameHost* child_rfh =
       content::RenderFrameHostTester::For(main_rfh())->AppendChild("subframe");
-
   // Define two sets of DOM nodes - one for an outer page containing a frame,
   // and then another for the inner page containing the contents of that frame.
-  std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node> outer_params;
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node outer_child_node;
-  outer_child_node.url = GURL(kDataURL);
-  outer_child_node.tag_name = "frame";
-  outer_child_node.parent = GURL(kDOMParentURL);
-  outer_child_node.attributes.push_back(std::make_pair("src", kDataURL));
-  outer_params.push_back(outer_child_node);
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node outer_summary_node;
-  outer_summary_node.url = GURL(kDOMParentURL);
-  outer_summary_node.children.push_back(GURL(kDataURL));
+  std::vector<mojom::ThreatDOMDetailsNodePtr> outer_params;
+  mojom::ThreatDOMDetailsNodePtr outer_child_node =
+      mojom::ThreatDOMDetailsNode::New();
+  outer_child_node->url = GURL(kDataURL);
+  outer_child_node->tag_name = "frame";
+  outer_child_node->parent = GURL(kDOMParentURL);
+  outer_child_node->attributes.push_back(
+      mojom::AttributeNameValue::New("src", kDataURL));
+  outer_params.push_back(std::move(outer_child_node));
+  mojom::ThreatDOMDetailsNodePtr outer_summary_node =
+      mojom::ThreatDOMDetailsNode::New();
+  outer_summary_node->url = GURL(kDOMParentURL);
+  outer_summary_node->children.push_back(GURL(kDataURL));
   // Set |child_frame_routing_id| for this node to something non-sensical so
   // that the child frame lookup fails.
-  outer_summary_node.child_frame_routing_id = -100;
-  outer_params.push_back(outer_summary_node);
+  outer_summary_node->child_frame_routing_id = -100;
+  outer_params.push_back(std::move(outer_summary_node));
 
   // Now define some more nodes for the body of the frame. The URL of this
   // inner frame is "about:blank".
-  std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node> inner_params;
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node inner_child_node;
-  inner_child_node.url = GURL(kDOMChildUrl2);
-  inner_child_node.tag_name = "script";
-  inner_child_node.parent = GURL(kBlankURL);
-  inner_child_node.attributes.push_back(std::make_pair("src", kDOMChildUrl2));
-  inner_params.push_back(inner_child_node);
-  SafeBrowsingHostMsg_ThreatDOMDetails_Node inner_summary_node;
-  inner_summary_node.url = GURL(kBlankURL);
-  inner_summary_node.children.push_back(GURL(kDOMChildUrl2));
-  inner_params.push_back(inner_summary_node);
+  std::vector<mojom::ThreatDOMDetailsNodePtr> inner_params;
+  mojom::ThreatDOMDetailsNodePtr inner_child_node =
+      mojom::ThreatDOMDetailsNode::New();
+  inner_child_node->url = GURL(kDOMChildUrl2);
+  inner_child_node->tag_name = "script";
+  inner_child_node->parent = GURL(kBlankURL);
+  inner_child_node->attributes.push_back(
+      mojom::AttributeNameValue::New("src", kDOMChildUrl2));
+  inner_params.push_back(std::move(inner_child_node));
+  mojom::ThreatDOMDetailsNodePtr inner_summary_node =
+      mojom::ThreatDOMDetailsNode::New();
+  inner_summary_node->url = GURL(kBlankURL);
+  inner_summary_node->children.push_back(GURL(kDOMChildUrl2));
+  inner_params.push_back(std::move(inner_summary_node));
 
   ClientSafeBrowsingReportRequest expected;
   expected.set_type(ClientSafeBrowsingReportRequest::URL_UNWANTED);
@@ -859,10 +919,11 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_AmbiguousDOM) {
   base::HistogramTester histograms;
 
   // Send both sets of nodes from different render frames.
-  report->OnReceivedThreatDOMDetails(main_rfh(), outer_params);
-  report->OnReceivedThreatDOMDetails(child_rfh, inner_params);
-
-  std::string serialized = WaitForSerializedReport(
+  report->OnReceivedThreatDOMDetails(nullptr, main_rfh(),
+                                     std::move(outer_params));
+  report->OnReceivedThreatDOMDetails(nullptr, child_rfh,
+                                     std::move(inner_params));
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), false /* did_proceed*/, 0 /* num_visit */);
   ClientSafeBrowsingReportRequest actual;
   actual.ParseFromString(serialized);
@@ -870,6 +931,257 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_AmbiguousDOM) {
 
   // This DOM should be ambiguous, expect the UMA metric to be incremented.
   histograms.ExpectTotalCount(kAmbiguousDomMetric, 1);
+}
+
+// Tests creating a threat report when receiving data from multiple renderers
+// that gets trimmed to just the ad and its contents.
+// This test uses the following structure.
+// kDOMParentURL
+//  \- <div id=outer>  # Trimmed
+//  \- <script id=outer-sibling src=kReferrerURL>  # Reported (parent of ad ID)
+//   \- <script id=sibling src=kFirstRedirectURL>  # Reported (sibling of ad ID)
+//   \- <div data-google-query-id=ad-tag>  # Reported (ad ID)
+//     \- <iframe src=kDOMChildURL foo=bar>  # Reported (child of ad ID)
+//       \- <div id=inner bar=baz/>  # Reported (child of ad ID)
+//       \- <script src=kDOMChildURL2>  # Reported (child of ad ID)
+TEST_F(ThreatDetailsTest, ThreatDOMDetails_TrimToAdTags) {
+  // Create a child renderer inside the main frame to house the inner iframe.
+  // Perform the navigation first in order to manipulate the frame tree.
+  content::WebContentsTester::For(web_contents())
+      ->NavigateAndCommit(GURL(kLandingURL));
+  content::RenderFrameHost* child_rfh =
+      content::RenderFrameHostTester::For(main_rfh())->AppendChild("subframe");
+
+  // Define two sets of DOM nodes - one for an outer page containing an iframe,
+  // and then another for the inner page containing the contents of that iframe.
+  std::vector<mojom::ThreatDOMDetailsNodePtr> outer_params;
+  mojom::ThreatDOMDetailsNodePtr outer_div = mojom::ThreatDOMDetailsNode::New();
+  outer_div->node_id = 1;
+  outer_div->tag_name = "div";
+  outer_div->parent = GURL(kDOMParentURL);
+  outer_div->attributes.push_back(
+      mojom::AttributeNameValue::New("id", "outer"));
+  outer_params.push_back(std::move(outer_div));
+
+  mojom::ThreatDOMDetailsNodePtr outer_sibling_script =
+      mojom::ThreatDOMDetailsNode::New();
+  outer_sibling_script->node_id = 2;
+  outer_sibling_script->url = GURL(kReferrerURL);
+  outer_sibling_script->child_node_ids.push_back(3);
+  outer_sibling_script->child_node_ids.push_back(4);
+  outer_sibling_script->tag_name = "script";
+  outer_sibling_script->parent = GURL(kDOMParentURL);
+  outer_sibling_script->attributes.push_back(
+      mojom::AttributeNameValue::New("src", kReferrerURL));
+  outer_sibling_script->attributes.push_back(
+      mojom::AttributeNameValue::New("id", "outer-sibling"));
+  outer_params.push_back(std::move(outer_sibling_script));
+
+  mojom::ThreatDOMDetailsNodePtr sibling_script =
+      mojom::ThreatDOMDetailsNode::New();
+  sibling_script->node_id = 3;
+  sibling_script->url = GURL(kFirstRedirectURL);
+  sibling_script->tag_name = "script";
+  sibling_script->parent = GURL(kDOMParentURL);
+  sibling_script->parent_node_id = 2;
+  sibling_script->attributes.push_back(
+      mojom::AttributeNameValue::New("src", kFirstRedirectURL));
+  sibling_script->attributes.push_back(
+      mojom::AttributeNameValue::New("id", "sibling"));
+  outer_params.push_back(std::move(sibling_script));
+
+  mojom::ThreatDOMDetailsNodePtr outer_ad_tag_div =
+      mojom::ThreatDOMDetailsNode::New();
+  outer_ad_tag_div->node_id = 4;
+  outer_ad_tag_div->parent_node_id = 2;
+  outer_ad_tag_div->child_node_ids.push_back(5);
+  outer_ad_tag_div->tag_name = "div";
+  outer_ad_tag_div->parent = GURL(kDOMParentURL);
+  outer_ad_tag_div->attributes.push_back(
+      mojom::AttributeNameValue::New("data-google-query-id", "ad-tag"));
+  outer_params.push_back(std::move(outer_ad_tag_div));
+
+  mojom::ThreatDOMDetailsNodePtr outer_child_iframe =
+      mojom::ThreatDOMDetailsNode::New();
+  outer_child_iframe->node_id = 5;
+  outer_child_iframe->parent_node_id = 4;
+  outer_child_iframe->url = GURL(kDOMChildURL);
+  outer_child_iframe->tag_name = "iframe";
+  outer_child_iframe->parent = GURL(kDOMParentURL);
+  outer_child_iframe->attributes.push_back(
+      mojom::AttributeNameValue::New("src", kDOMChildURL));
+  outer_child_iframe->attributes.push_back(
+      mojom::AttributeNameValue::New("foo", "bar"));
+  outer_child_iframe->child_frame_routing_id = child_rfh->GetRoutingID();
+  outer_params.push_back(std::move(outer_child_iframe));
+
+  mojom::ThreatDOMDetailsNodePtr outer_summary_node =
+      mojom::ThreatDOMDetailsNode::New();
+  outer_summary_node->url = GURL(kDOMParentURL);
+  outer_summary_node->children.push_back(GURL(kDOMChildURL));
+  outer_summary_node->children.push_back(GURL(kReferrerURL));
+  outer_summary_node->children.push_back(GURL(kFirstRedirectURL));
+  outer_params.push_back(std::move(outer_summary_node));
+
+  // Now define some more nodes for the body of the iframe.
+  std::vector<mojom::ThreatDOMDetailsNodePtr> inner_params;
+  mojom::ThreatDOMDetailsNodePtr inner_child_div =
+      mojom::ThreatDOMDetailsNode::New();
+  inner_child_div->node_id = 1;
+  inner_child_div->tag_name = "div";
+  inner_child_div->parent = GURL(kDOMChildURL);
+  inner_child_div->attributes.push_back(
+      mojom::AttributeNameValue::New("id", "inner"));
+  inner_child_div->attributes.push_back(
+      mojom::AttributeNameValue::New("bar", "baz"));
+  inner_params.push_back(std::move(inner_child_div));
+
+  mojom::ThreatDOMDetailsNodePtr inner_child_script =
+      mojom::ThreatDOMDetailsNode::New();
+  inner_child_script->node_id = 2;
+  inner_child_script->url = GURL(kDOMChildUrl2);
+  inner_child_script->tag_name = "script";
+  inner_child_script->parent = GURL(kDOMChildURL);
+  inner_child_script->attributes.push_back(
+      mojom::AttributeNameValue::New("src", kDOMChildUrl2));
+  inner_params.push_back(std::move(inner_child_script));
+
+  mojom::ThreatDOMDetailsNodePtr inner_summary_node =
+      mojom::ThreatDOMDetailsNode::New();
+  inner_summary_node->url = GURL(kDOMChildURL);
+  inner_summary_node->children.push_back(GURL(kDOMChildUrl2));
+  inner_params.push_back(std::move(inner_summary_node));
+
+  ClientSafeBrowsingReportRequest expected;
+  expected.set_type(ClientSafeBrowsingReportRequest::URL_UNWANTED);
+  expected.mutable_client_properties()->set_url_api_type(
+      ClientSafeBrowsingReportRequest::PVER4_NATIVE);
+  expected.set_url(kThreatURL);
+  expected.set_page_url(kLandingURL);
+  expected.set_referrer_url("");
+  expected.set_did_proceed(false);
+  expected.set_repeat_visit(false);
+  expected.set_complete(false);  // Since the cache was missing.
+
+  ClientSafeBrowsingReportRequest::Resource* pb_resource =
+      expected.add_resources();
+  pb_resource->set_id(0);
+  pb_resource->set_url(kLandingURL);
+
+  pb_resource = expected.add_resources();
+  pb_resource->set_id(1);
+  pb_resource->set_url(kThreatURL);
+
+  ClientSafeBrowsingReportRequest::Resource* res_dom_child2 =
+      expected.add_resources();
+  res_dom_child2->set_id(2);
+  res_dom_child2->set_url(kDOMChildUrl2);
+  res_dom_child2->set_parent_id(3);
+  res_dom_child2->set_tag_name("script");
+
+  ClientSafeBrowsingReportRequest::Resource* res_dom_child =
+      expected.add_resources();
+  res_dom_child->set_id(3);
+  res_dom_child->set_url(kDOMChildURL);
+  res_dom_child->set_parent_id(5);
+  res_dom_child->add_child_ids(2);
+  res_dom_child->set_tag_name("iframe");
+
+  ClientSafeBrowsingReportRequest::Resource* res_ad_parent =
+      expected.add_resources();
+  res_ad_parent->set_id(4);
+  res_ad_parent->set_url(kReferrerURL);
+  res_ad_parent->set_parent_id(5);
+  res_ad_parent->set_tag_name("script");
+
+  ClientSafeBrowsingReportRequest::Resource* res_sibling =
+      expected.add_resources();
+  res_sibling->set_id(6);
+  res_sibling->set_url(kFirstRedirectURL);
+  res_sibling->set_parent_id(5);
+  res_sibling->set_tag_name("script");
+
+  ClientSafeBrowsingReportRequest::Resource* res_dom_parent =
+      expected.add_resources();
+  res_dom_parent->set_id(5);
+  res_dom_parent->set_url(kDOMParentURL);
+  res_dom_parent->add_child_ids(3);
+  res_dom_parent->add_child_ids(4);
+  res_dom_parent->add_child_ids(6);
+
+  HTMLElement* elem_dom_parent_script = expected.add_dom();
+  elem_dom_parent_script->set_id(3);
+  elem_dom_parent_script->set_tag("SCRIPT");
+  elem_dom_parent_script->set_resource_id(res_ad_parent->id());
+  elem_dom_parent_script->add_attribute()->set_name("src");
+  elem_dom_parent_script->mutable_attribute(0)->set_value(kReferrerURL);
+  elem_dom_parent_script->add_attribute()->set_name("id");
+  elem_dom_parent_script->mutable_attribute(1)->set_value("outer-sibling");
+  elem_dom_parent_script->add_child_ids(4);
+  elem_dom_parent_script->add_child_ids(5);
+
+  HTMLElement* elem_dom_sibling_script = expected.add_dom();
+  elem_dom_sibling_script->set_id(4);
+  elem_dom_sibling_script->set_tag("SCRIPT");
+  elem_dom_sibling_script->set_resource_id(res_sibling->id());
+  elem_dom_sibling_script->add_attribute()->set_name("src");
+  elem_dom_sibling_script->mutable_attribute(0)->set_value(kFirstRedirectURL);
+  elem_dom_sibling_script->add_attribute()->set_name("id");
+  elem_dom_sibling_script->mutable_attribute(1)->set_value("sibling");
+
+  HTMLElement* elem_dom_ad_tag_div = expected.add_dom();
+  elem_dom_ad_tag_div->set_id(5);
+  elem_dom_ad_tag_div->set_tag("DIV");
+  elem_dom_ad_tag_div->add_attribute()->set_name("data-google-query-id");
+  elem_dom_ad_tag_div->mutable_attribute(0)->set_value("ad-tag");
+  elem_dom_ad_tag_div->add_child_ids(6);
+
+  HTMLElement* elem_dom_outer_iframe = expected.add_dom();
+  elem_dom_outer_iframe->set_id(6);
+  elem_dom_outer_iframe->set_tag("IFRAME");
+  elem_dom_outer_iframe->set_resource_id(res_dom_child->id());
+  elem_dom_outer_iframe->add_attribute()->set_name("src");
+  elem_dom_outer_iframe->mutable_attribute(0)->set_value(kDOMChildURL);
+  elem_dom_outer_iframe->add_attribute()->set_name("foo");
+  elem_dom_outer_iframe->mutable_attribute(1)->set_value("bar");
+  elem_dom_outer_iframe->add_child_ids(0);
+  elem_dom_outer_iframe->add_child_ids(1);
+
+  HTMLElement* elem_dom_inner_div = expected.add_dom();
+  elem_dom_inner_div->set_id(0);
+  elem_dom_inner_div->set_tag("DIV");
+  elem_dom_inner_div->add_attribute()->set_name("id");
+  elem_dom_inner_div->mutable_attribute(0)->set_value("inner");
+  elem_dom_inner_div->add_attribute()->set_name("bar");
+  elem_dom_inner_div->mutable_attribute(1)->set_value("baz");
+
+  HTMLElement* elem_dom_inner_script = expected.add_dom();
+  elem_dom_inner_script->set_id(1);
+  elem_dom_inner_script->set_tag("SCRIPT");
+  elem_dom_inner_script->set_resource_id(res_dom_child2->id());
+  elem_dom_inner_script->add_attribute()->set_name("src");
+  elem_dom_inner_script->mutable_attribute(0)->set_value(kDOMChildUrl2);
+
+  UnsafeResource resource;
+  InitResource(SB_THREAT_TYPE_URL_UNWANTED, ThreatSource::LOCAL_PVER4,
+               true /* is_subresource */, GURL(kThreatURL), &resource);
+
+  // Send both sets of nodes, from different render frames.
+  scoped_refptr<ThreatDetailsWrap> trimmed_report = new ThreatDetailsWrap(
+      ui_manager_.get(), web_contents(), resource, NULL, history_service(),
+      /*trim_to_ad_tags=*/true);
+
+  // Send both sets of nodes from different render frames.
+  trimmed_report->OnReceivedThreatDOMDetails(nullptr, child_rfh,
+                                             std::move(inner_params));
+  trimmed_report->OnReceivedThreatDOMDetails(nullptr, main_rfh(),
+                                             std::move(outer_params));
+
+  std::string serialized = WaitForThreatDetailsDone(
+      trimmed_report.get(), false /* did_proceed*/, 0 /* num_visit */);
+  ClientSafeBrowsingReportRequest actual;
+  actual.ParseFromString(serialized);
+  VerifyResults(actual, expected);
 }
 
 // Tests creating a threat report of a malware page where there are redirect
@@ -891,7 +1203,7 @@ TEST_F(ThreatDetailsTest, ThreatWithRedirectUrl) {
   scoped_refptr<ThreatDetailsWrap> report = new ThreatDetailsWrap(
       ui_manager_.get(), web_contents(), resource, NULL, history_service());
 
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), true /* did_proceed*/, 0 /* num_visit */);
   ClientSafeBrowsingReportRequest actual;
   actual.ParseFromString(serialized);
@@ -941,13 +1253,11 @@ TEST_F(ThreatDetailsTest, ThreatOnMainPageLoadBlocked) {
 
   // Load and commit an unrelated URL. The ThreatDetails should not use this
   // navigation entry.
-  content::WebContentsTester::For(web_contents())
-      ->TestDidNavigateWithReferrer(
-          web_contents()->GetMainFrame(), 0 /* nav_entry_id */,
-          true /* did_create_new_entry */, GURL(kUnrelatedURL),
-          content::Referrer(GURL(kUnrelatedReferrerURL),
-                            blink::kWebReferrerPolicyDefault),
-          ui::PAGE_TRANSITION_TYPED);
+  auto navigation = content::NavigationSimulator::CreateBrowserInitiated(
+      GURL(kUnrelatedURL), web_contents());
+  navigation->SetReferrer(content::Referrer(GURL(kUnrelatedReferrerURL),
+                                            blink::kWebReferrerPolicyDefault));
+  navigation->Commit();
 
   // Start a pending load with a referrer.
   controller().LoadURL(
@@ -968,7 +1278,7 @@ TEST_F(ThreatDetailsTest, ThreatOnMainPageLoadBlocked) {
   controller().DiscardNonCommittedEntries();
 
   // Finish ThreatDetails collection.
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), false /* did_proceed*/, 1 /* num_visit */);
 
   ClientSafeBrowsingReportRequest actual;
@@ -1002,13 +1312,11 @@ TEST_F(ThreatDetailsTest, ThreatWithPendingLoad) {
   const char* kPendingURL = "http://www.pending.com/some/path";
 
   // Load and commit the landing URL with a referrer.
-  content::WebContentsTester::For(web_contents())
-      ->TestDidNavigateWithReferrer(
-          web_contents()->GetMainFrame(), 0 /* nav_entry_id */,
-          true /* did_create_new_entry */, GURL(kLandingURL),
-          content::Referrer(GURL(kReferrerURL),
-                            blink::kWebReferrerPolicyDefault),
-          ui::PAGE_TRANSITION_TYPED);
+  auto navigation = content::NavigationSimulator::CreateBrowserInitiated(
+      GURL(kLandingURL), web_contents());
+  navigation->SetReferrer(
+      content::Referrer(GURL(kReferrerURL), blink::kWebReferrerPolicyDefault));
+  navigation->Commit();
 
   // Create UnsafeResource for fake sub-resource of landing page.
   UnsafeResource resource;
@@ -1024,7 +1332,7 @@ TEST_F(ThreatDetailsTest, ThreatWithPendingLoad) {
   // Do ThreatDetails collection.
   scoped_refptr<ThreatDetailsWrap> report = new ThreatDetailsWrap(
       ui_manager_.get(), web_contents(), resource, NULL, history_service());
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), true /* did_proceed*/, 1 /* num_visit */);
 
   ClientSafeBrowsingReportRequest actual;
@@ -1071,7 +1379,7 @@ TEST_F(ThreatDetailsTest, ThreatOnFreshTab) {
   // Do ThreatDetails collection.
   scoped_refptr<ThreatDetailsWrap> report = new ThreatDetailsWrap(
       ui_manager_.get(), web_contents(), resource, NULL, history_service());
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), true /* did_proceed*/, 1 /* num_visit */);
 
   ClientSafeBrowsingReportRequest actual;
@@ -1111,14 +1419,14 @@ TEST_F(ThreatDetailsTest, HTTPCache) {
                      base::RetainedRef(profile()->GetRequestContext())));
 
   // The cache collection starts after the IPC from the DOM is fired.
-  std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node> params;
-  report->OnReceivedThreatDOMDetails(main_rfh(), params);
+  std::vector<mojom::ThreatDOMDetailsNodePtr> params;
+  report->OnReceivedThreatDOMDetails(nullptr, main_rfh(), std::move(params));
 
   // Let the cache callbacks complete.
   base::RunLoop().RunUntilIdle();
 
   DVLOG(1) << "Getting serialized report";
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), true /* did_proceed*/, -1 /* num_visit */);
   ClientSafeBrowsingReportRequest actual;
   actual.ParseFromString(serialized);
@@ -1195,14 +1503,14 @@ TEST_F(ThreatDetailsTest, HttpsResourceSanitization) {
                      base::RetainedRef(profile()->GetRequestContext())));
 
   // The cache collection starts after the IPC from the DOM is fired.
-  std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node> params;
-  report->OnReceivedThreatDOMDetails(main_rfh(), params);
+  std::vector<mojom::ThreatDOMDetailsNodePtr> params;
+  report->OnReceivedThreatDOMDetails(nullptr, main_rfh(), std::move(params));
 
   // Let the cache callbacks complete.
   base::RunLoop().RunUntilIdle();
 
   DVLOG(1) << "Getting serialized report";
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), true /* did_proceed*/, -1 /* num_visit */);
   ClientSafeBrowsingReportRequest actual;
   actual.ParseFromString(serialized);
@@ -1273,14 +1581,14 @@ TEST_F(ThreatDetailsTest, HTTPCacheNoEntries) {
   // No call to FillCache
 
   // The cache collection starts after the IPC from the DOM is fired.
-  std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node> params;
-  report->OnReceivedThreatDOMDetails(main_rfh(), params);
+  std::vector<mojom::ThreatDOMDetailsNodePtr> params;
+  report->OnReceivedThreatDOMDetails(nullptr, main_rfh(), std::move(params));
 
   // Let the cache callbacks complete.
   base::RunLoop().RunUntilIdle();
 
   DVLOG(1) << "Getting serialized report";
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), false /* did_proceed*/, -1 /* num_visit */);
   ClientSafeBrowsingReportRequest actual;
   actual.ParseFromString(serialized);
@@ -1329,13 +1637,13 @@ TEST_F(ThreatDetailsTest, HistoryServiceUrls) {
       ui_manager_.get(), web_contents(), resource, NULL, history_service());
 
   // The redirects collection starts after the IPC from the DOM is fired.
-  std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node> params;
-  report->OnReceivedThreatDOMDetails(main_rfh(), params);
+  std::vector<mojom::ThreatDOMDetailsNodePtr> params;
+  report->OnReceivedThreatDOMDetails(nullptr, main_rfh(), std::move(params));
 
   // Let the redirects callbacks complete.
   base::RunLoop().RunUntilIdle();
 
-  std::string serialized = WaitForSerializedReport(
+  std::string serialized = WaitForThreatDetailsDone(
       report.get(), true /* did_proceed*/, 1 /* num_visit */);
   ClientSafeBrowsingReportRequest actual;
   actual.ParseFromString(serialized);

@@ -22,8 +22,6 @@ from telemetry import story
 from telemetry.util import statistics
 from telemetry.value import scalar
 
-from metrics import power
-
 _GB = 1024 * 1024 * 1024
 
 DESCRIPTIONS = {
@@ -72,13 +70,6 @@ class _OctaneMeasurement(legacy_page_test.LegacyPageTest):
 
   def __init__(self):
     super(_OctaneMeasurement, self).__init__()
-    self._power_metric = None
-
-  def CustomizeBrowserOptions(self, options):
-    power.PowerMetric.CustomizeBrowserOptions(options)
-
-  def WillStartBrowser(self, platform):
-    self._power_metric = power.PowerMetric(platform)
 
   def WillNavigateToPage(self, page, tab):
     total_memory = tab.browser.platform.GetSystemTotalPhysicalMemory()
@@ -96,16 +87,10 @@ class _OctaneMeasurement(legacy_page_test.LegacyPageTest):
         skipBenchmarks = [%s]
         """ % (skipBenchmarks)
 
-  def DidNavigateToPage(self, page, tab):
-    self._power_metric.Start(page, tab)
-
   def ValidateAndMeasurePage(self, page, tab, results):
     tab.WaitForJavaScriptCondition('window.completed', timeout=10)
     tab.WaitForJavaScriptCondition(
         '!document.getElementById("progress-bar-container")', timeout=1200)
-
-    self._power_metric.Stop(page, tab)
-    self._power_metric.AddResults(tab, results)
 
     results_log = tab.EvaluateJavaScript('__results')
     all_scores = []
@@ -132,7 +117,7 @@ class _OctaneMeasurement(legacy_page_test.LegacyPageTest):
                            'benchmark collection.'))
 
 
-@benchmark.Owner(emails=['bmeurer@chromium.org', 'mvstanton@chromium.org'])
+@benchmark.Owner(emails=['hablich@chromium.org'])
 class Octane(perf_benchmark.PerfBenchmark):
   """Google's Octane JavaScript benchmark.
 
@@ -154,9 +139,3 @@ class Octane(perf_benchmark.PerfBenchmark):
         ps, ps.base_dir, make_javascript_deterministic=False,
         name='http://chromium.github.io/octane/index.html?auto=1'))
     return ps
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        pass # Octane not disabled.
-    return StoryExpectations()

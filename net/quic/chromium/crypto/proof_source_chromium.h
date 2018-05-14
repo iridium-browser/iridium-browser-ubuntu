@@ -36,18 +36,27 @@ class NET_EXPORT_PRIVATE ProofSourceChromium : public ProofSource {
   void GetProof(const QuicSocketAddress& server_ip,
                 const std::string& hostname,
                 const std::string& server_config,
-                QuicVersion quic_version,
+                QuicTransportVersion quic_version,
                 QuicStringPiece chlo_hash,
-                const QuicTagVector& connection_options,
                 std::unique_ptr<Callback> callback) override;
+
+  QuicReferenceCountedPointer<Chain> GetCertChain(
+      const QuicSocketAddress& server_address,
+      const std::string& hostname) override;
+
+  void ComputeTlsSignature(
+      const QuicSocketAddress& server_address,
+      const std::string& hostname,
+      uint16_t signature_algorithm,
+      QuicStringPiece in,
+      std::unique_ptr<SignatureCallback> callback) override;
 
  private:
   bool GetProofInner(const QuicSocketAddress& server_ip,
                      const std::string& hostname,
                      const std::string& server_config,
-                     QuicVersion quic_version,
+                     QuicTransportVersion quic_version,
                      QuicStringPiece chlo_hash,
-                     const QuicTagVector& connection_options,
                      QuicReferenceCountedPointer<ProofSource::Chain>* out_chain,
                      QuicCryptoProof* proof);
 

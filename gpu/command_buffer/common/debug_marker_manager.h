@@ -5,15 +5,16 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_DEBUG_MARKER_MANAGER_H_
 #define GPU_COMMAND_BUFFER_SERVICE_DEBUG_MARKER_MANAGER_H_
 
-#include <stack>
 #include <string>
-#include "gpu/gpu_export.h"
+
+#include "base/containers/stack.h"
+#include "gpu/gpu_gles2_export.h"
 
 namespace gpu {
 namespace gles2 {
 
 // Tracks debug marker.
-class GPU_EXPORT DebugMarkerManager {
+class GPU_GLES2_EXPORT DebugMarkerManager {
  public:
    DebugMarkerManager();
    ~DebugMarkerManager();
@@ -49,7 +50,7 @@ class GPU_EXPORT DebugMarkerManager {
     std::string marker_;
   };
 
-  typedef std::stack<Group> GroupStack;
+  using GroupStack = base::stack<Group>;
 
   GroupStack group_stack_;
   std::string empty_;

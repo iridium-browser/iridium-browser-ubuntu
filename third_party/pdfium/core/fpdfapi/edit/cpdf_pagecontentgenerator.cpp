@@ -25,6 +25,7 @@
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
+#include "third_party/skia_shared/SkFloatToDecimal.h"
 
 namespace {
 
@@ -121,9 +122,9 @@ void CPDF_PageContentGenerator::GenerateContent() {
                                        pStream->GetObjNum());
 }
 
-CFX_ByteString CPDF_PageContentGenerator::RealizeResource(
+ByteString CPDF_PageContentGenerator::RealizeResource(
     uint32_t dwResourceObjNum,
-    const CFX_ByteString& bsType) {
+    const ByteString& bsType) {
   ASSERT(dwResourceObjNum);
   if (!m_pObjHolder->m_pResources) {
     m_pObjHolder->m_pResources = m_pDocument->NewIndirect<CPDF_Dictionary>();
@@ -135,13 +136,13 @@ CFX_ByteString CPDF_PageContentGenerator::RealizeResource(
   if (!pResList)
     pResList = m_pObjHolder->m_pResources->SetNewFor<CPDF_Dictionary>(bsType);
 
-  CFX_ByteString name;
+  ByteString name;
   int idnum = 1;
   while (1) {
-    name.Format("FX%c%d", bsType[0], idnum);
-    if (!pResList->KeyExist(name)) {
+    name = ByteString::Format("FX%c%d", bsType[0], idnum);
+    if (!pResList->KeyExist(name))
       break;
-    }
+
     idnum++;
   }
   pResList->SetNewFor<CPDF_Reference>(name, m_pDocument.Get(),
@@ -175,7 +176,7 @@ void CPDF_PageContentGenerator::ProcessImage(std::ostringstream* buf,
   }
   *buf << "q " << pImageObj->matrix() << " cm ";
 
-  CFX_RetainPtr<CPDF_Image> pImage = pImageObj->GetImage();
+  RetainPtr<CPDF_Image> pImage = pImageObj->GetImage();
   if (pImage->IsInline())
     return;
 
@@ -188,7 +189,7 @@ void CPDF_PageContentGenerator::ProcessImage(std::ostringstream* buf,
     pImage->ConvertStreamToIndirectObject();
 
   uint32_t dwObjNum = pStream->GetObjNum();
-  CFX_ByteString name = RealizeResource(dwObjNum, "XObject");
+  ByteString name = RealizeResource(dwObjNum, "XObject");
   if (bWasInline)
     pImageObj->SetImage(m_pDocument->GetPageData()->GetImage(dwObjNum));
 
@@ -221,7 +222,14 @@ void CPDF_PageContentGenerator::ProcessPath(std::ostringstream* buf,
     for (size_t i = 0; i < pPoints.size(); i++) {
       if (i > 0)
         *buf << " ";
-      *buf << pPoints[i].m_Point.x << " " << pPoints[i].m_Point.y;
+
+      char buffer[pdfium::skia::kMaximumSkFloatToDecimalLength];
+      unsigned size =
+          pdfium::skia::SkFloatToDecimal(pPoints[i].m_Point.x, buffer);
+      buf->write(buffer, size) << " ";
+      size = pdfium::skia::SkFloatToDecimal(pPoints[i].m_Point.y, buffer);
+      buf->write(buffer, size);
+
       FXPT_TYPE pointType = pPoints[i].m_Type;
       if (pointType == FXPT_TYPE::MoveTo) {
         *buf << " m";
@@ -295,7 +303,7 @@ void CPDF_PageContentGenerator::ProcessGraphics(std::ostringstream* buf,
     return;
   }
 
-  CFX_ByteString name;
+  ByteString name;
   auto it = m_pObjHolder->m_GraphicsMap.find(graphD);
   if (it != m_pObjHolder->m_GraphicsMap.end()) {
     name = it->second;
@@ -330,7 +338,7 @@ void CPDF_PageContentGenerator::ProcessDefaultGraphics(
   defaultGraphics.strokeAlpha = 1.0f;
   defaultGraphics.blendType = FXDIB_BLEND_NORMAL;
   auto it = m_pObjHolder->m_GraphicsMap.find(defaultGraphics);
-  CFX_ByteString name;
+  ByteString name;
   if (it != m_pObjHolder->m_GraphicsMap.end()) {
     name = it->second;
   } else {
@@ -352,6 +360,7 @@ void CPDF_PageContentGenerator::ProcessDefaultGraphics(
 // Tj sets the actual text, <####...> is used when specifying charcodes.
 void CPDF_PageContentGenerator::ProcessText(std::ostringstream* buf,
                                             CPDF_TextObject* pTextObj) {
+  ProcessGraphics(buf, pTextObj);
   *buf << "BT " << pTextObj->GetTextMatrix() << " Tm ";
   CPDF_Font* pFont = pTextObj->GetFont();
   if (!pFont)
@@ -367,7 +376,7 @@ void CPDF_PageContentGenerator::ProcessText(std::ostringstream* buf,
     return;
   fontD.baseFont = pFont->GetBaseFont();
   auto it = m_pObjHolder->m_FontsMap.find(fontD);
-  CFX_ByteString dictName;
+  ByteString dictName;
   if (it != m_pObjHolder->m_FontsMap.end()) {
     dictName = it->second;
   } else {
@@ -386,12 +395,11 @@ void CPDF_PageContentGenerator::ProcessText(std::ostringstream* buf,
   }
   *buf << "/" << PDF_NameEncode(dictName) << " " << pTextObj->GetFontSize()
        << " Tf ";
-  CFX_ByteString text;
-  for (uint32_t charcode : pTextObj->m_CharCodes) {
+  ByteString text;
+  for (uint32_t charcode : pTextObj->GetCharCodes()) {
     if (charcode != CPDF_Font::kInvalidCharCode)
       pFont->AppendChar(&text, charcode);
   }
-  ProcessGraphics(buf, pTextObj);
   *buf << PDF_EncodeString(text, true) << " Tj ET";
   *buf << " Q\n";
 }

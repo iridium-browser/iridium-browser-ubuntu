@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -450,6 +451,28 @@ class MountTests(cros_test_lib.TestCase):
           cros_build_lib.SudoRunCommand(['umount', '-lf', tempdir],
                                         error_code_ok=True)
 
+  def testUnmountTree(self):
+    with osutils.TempDir(prefix='chromite.test.osutils') as tempdir:
+      # Mount the dir and verify it worked.
+      st_before = os.stat(tempdir)
+      osutils.MountTmpfsDir(tempdir)
+      st_after = os.stat(tempdir)
+      self.assertNotEqual(st_before.st_dev, st_after.st_dev)
+
+      # Mount an inner dir the same way.
+      tempdir2 = os.path.join(tempdir, 'inner')
+      osutils.SafeMakedirsNonRoot(tempdir2)
+      st_before2 = os.stat(tempdir2)
+      osutils.MountTmpfsDir(tempdir2)
+      st_after2 = os.stat(tempdir2)
+      self.assertNotEqual(st_before2.st_dev, st_after2.st_dev)
+
+      # Unmount the whole tree and verify it worked.
+      osutils.UmountTree(tempdir)
+      st_umount = os.stat(tempdir)
+      self.assertNotExists(tempdir2)
+      self.assertEqual(st_before.st_dev, st_umount.st_dev)
+
 
 class IteratePathsTest(cros_test_lib.TestCase):
   """Test iterating through all segments of a path."""
@@ -900,3 +923,104 @@ class IsInsideVmTest(cros_test_lib.MockTempDirTestCase):
   def testIsNotInsideVm(self):
     osutils.WriteFile(self.model_file, "ST1000DM000-1CH1")
     self.assertFalse(osutils.IsInsideVm())
+
+
+class CopyDirContentsTestCase(cros_test_lib.TempDirTestCase):
+  """Test CopyDirContents."""
+
+  def testCopyEmptyDir(self):
+    """Copy "empty" contents from a dir."""
+    in_dir = os.path.join(self.tempdir, 'input')
+    out_dir = os.path.join(self.tempdir, 'output')
+    osutils.SafeMakedirsNonRoot(in_dir)
+    osutils.SafeMakedirsNonRoot(out_dir)
+    osutils.CopyDirContents(in_dir, out_dir)
+
+  def testCopyFiles(self):
+    """Copy from a dir that contains files."""
+    in_dir = os.path.join(self.tempdir, 'input')
+    out_dir = os.path.join(self.tempdir, 'output')
+    osutils.SafeMakedirsNonRoot(in_dir)
+    osutils.WriteFile(os.path.join(in_dir, 'a.txt'), 'aaa')
+    osutils.WriteFile(os.path.join(in_dir, 'b.txt'), 'bbb')
+    osutils.SafeMakedirsNonRoot(out_dir)
+    osutils.CopyDirContents(in_dir, out_dir)
+    self.assertEqual(
+        osutils.ReadFile(os.path.join(out_dir, 'a.txt')).strip(), 'aaa')
+    self.assertEqual(
+        osutils.ReadFile(os.path.join(out_dir, 'b.txt')).strip(), 'bbb')
+
+  def testCopyTree(self):
+    """Copy from a dir that contains files."""
+    in_dir = os.path.join(self.tempdir, 'input')
+    out_dir = os.path.join(self.tempdir, 'output')
+    osutils.SafeMakedirsNonRoot(in_dir)
+    osutils.SafeMakedirsNonRoot(os.path.join(in_dir, 'a'))
+    osutils.WriteFile(os.path.join(in_dir, 'a', 'b.txt'), 'bbb')
+    osutils.SafeMakedirsNonRoot(out_dir)
+    osutils.CopyDirContents(in_dir, out_dir)
+    self.assertEqual(
+        osutils.ReadFile(os.path.join(out_dir, 'a', 'b.txt')).strip(), 'bbb')
+
+  def testSourceDirDoesNotExistRaises(self):
+    """Coping from a non-existent source dir raises."""
+    in_dir = os.path.join(self.tempdir, 'input')
+    out_dir = os.path.join(self.tempdir, 'output')
+    osutils.SafeMakedirsNonRoot(out_dir)
+    with self.assertRaises(osutils.BadPathsException):
+      osutils.CopyDirContents(in_dir, out_dir)
+
+  def testDestinationDirDoesNotExistRaises(self):
+    """Coping to a non-existent destination dir raises."""
+    in_dir = os.path.join(self.tempdir, 'input')
+    out_dir = os.path.join(self.tempdir, 'output')
+    osutils.SafeMakedirsNonRoot(in_dir)
+    with self.assertRaises(osutils.BadPathsException):
+      osutils.CopyDirContents(in_dir, out_dir)
+
+  def testDestinationDirNonEmptyRaises(self):
+    """Coping to a non-empty destination dir raises."""
+    in_dir = os.path.join(self.tempdir, 'input')
+    out_dir = os.path.join(self.tempdir, 'output')
+    osutils.SafeMakedirsNonRoot(in_dir)
+    osutils.SafeMakedirsNonRoot(out_dir)
+    osutils.SafeMakedirsNonRoot(os.path.join(out_dir, 'blah'))
+    with self.assertRaises(osutils.BadPathsException):
+      osutils.CopyDirContents(in_dir, out_dir)
+
+
+class WhichTests(cros_test_lib.TempDirTestCase):
+  """Test Which."""
+
+  def setUp(self):
+    self.prog_path = os.path.join(self.tempdir, 'prog')
+    osutils.Touch(self.prog_path, mode=0o755)
+    self.text_path = os.path.join(self.tempdir, 'text')
+    osutils.Touch(self.text_path, mode=0o644)
+
+    # A random path for us to validate.
+    os.environ['PATH'] = '/:%s' % (self.tempdir,)
+
+  def testPath(self):
+    """Check $PATH/path handling."""
+    self.assertEqual(self.prog_path, osutils.Which('prog'))
+
+    os.environ['PATH'] = ''
+    self.assertEqual(None, osutils.Which('prog'))
+
+    self.assertEqual(self.prog_path, osutils.Which('prog', path=self.tempdir))
+
+  def testMode(self):
+    """Check mode handling."""
+    self.assertEqual(self.prog_path, osutils.Which('prog'))
+    self.assertEqual(self.prog_path, osutils.Which('prog', mode=os.X_OK))
+    self.assertEqual(self.prog_path, osutils.Which('prog', mode=os.R_OK))
+    self.assertEqual(None, osutils.Which('text'))
+    self.assertEqual(None, osutils.Which('text', mode=os.X_OK))
+    self.assertEqual(self.text_path, osutils.Which('text', mode=os.F_OK))
+
+  def testRoot(self):
+    """Check root handling."""
+    self.assertEqual(None, osutils.Which('prog', root='/.........'))
+    self.assertEqual(self.prog_path, osutils.Which('prog', path='/',
+                                                   root=self.tempdir))

@@ -36,7 +36,7 @@ AXSVGRoot::AXSVGRoot(LayoutObject* layout_object,
                      AXObjectCacheImpl& ax_object_cache)
     : AXLayoutObject(layout_object, ax_object_cache) {}
 
-AXSVGRoot::~AXSVGRoot() {}
+AXSVGRoot::~AXSVGRoot() = default;
 
 AXSVGRoot* AXSVGRoot::Create(LayoutObject* layout_object,
                              AXObjectCacheImpl& ax_object_cache) {
@@ -70,8 +70,12 @@ AccessibilityRole AXSVGRoot::DetermineAccessibilityRole() {
   return role;
 }
 
-// SVG elements are only ignored when a generic element would also be ignored.
+// SVG elements are only ignored if they are a descendant of a leaf or when a
+// generic element would also be ignored.
 bool AXSVGRoot::ComputeAccessibilityIsIgnored(IgnoredReasons* reasons) const {
+  if (IsDescendantOfLeafNode())
+    return AXLayoutObject::ComputeAccessibilityIsIgnored(reasons);
+
   return AccessibilityIsIgnoredByDefault(reasons);
 }
 

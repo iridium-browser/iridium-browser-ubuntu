@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/time/time.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/service_worker/embedded_worker_registry.h"
@@ -21,11 +22,14 @@
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_storage.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
+#include "content/browser/service_worker/service_worker_version.h"
 #include "content/common/service_worker/embedded_worker_messages.h"
 #include "content/common/service_worker/service_worker_messages.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_event_status.mojom.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
 
@@ -79,6 +83,9 @@ void ExpectRegisteredWorkers(
   } else {
     EXPECT_FALSE(registration->active_version());
   }
+
+  EXPECT_EQ(blink::mojom::ServiceWorkerUpdateViaCache::kImports,
+            registration->update_via_cache());
 }
 
 class RejectInstallTestHelper : public EmbeddedWorkerTestHelper {
@@ -86,11 +93,10 @@ class RejectInstallTestHelper : public EmbeddedWorkerTestHelper {
   RejectInstallTestHelper() : EmbeddedWorkerTestHelper(base::FilePath()) {}
 
   void OnInstallEvent(
-      mojom::ServiceWorkerInstallEventMethodsAssociatedPtrInfo client,
       mojom::ServiceWorkerEventDispatcher::DispatchInstallEventCallback
           callback) override {
     dispatched_events()->push_back(Event::Install);
-    std::move(callback).Run(SERVICE_WORKER_ERROR_EVENT_WAITUNTIL_REJECTED,
+    std::move(callback).Run(blink::mojom::ServiceWorkerEventStatus::REJECTED,
                             true /* has_fetch_handler */, base::Time::Now());
   }
 };
@@ -103,7 +109,7 @@ class RejectActivateTestHelper : public EmbeddedWorkerTestHelper {
       mojom::ServiceWorkerEventDispatcher::DispatchActivateEventCallback
           callback) override {
     dispatched_events()->push_back(Event::Activate);
-    std::move(callback).Run(SERVICE_WORKER_ERROR_EVENT_WAITUNTIL_REJECTED,
+    std::move(callback).Run(blink::mojom::ServiceWorkerEventStatus::REJECTED,
                             base::Time::Now());
   }
 };
@@ -178,15 +184,10 @@ class RecordableEmbeddedWorkerInstanceClient
   const std::vector<Message>& events() const { return events_; }
 
  protected:
-  void StartWorker(const EmbeddedWorkerStartParams& params,
-                   mojom::ServiceWorkerEventDispatcherRequest request,
-                   mojom::ServiceWorkerInstalledScriptsInfoPtr scripts_info,
-                   mojom::EmbeddedWorkerInstanceHostAssociatedPtrInfo
-                       instance_host) override {
+  void StartWorker(mojom::EmbeddedWorkerStartParamsPtr params) override {
     events_.push_back(Message::StartWorker);
     EmbeddedWorkerTestHelper::MockEmbeddedWorkerInstanceClient::StartWorker(
-        params, std::move(request), std::move(scripts_info),
-        std::move(instance_host));
+        std::move(params));
   }
 
   void StopWorker() override {
@@ -204,33 +205,32 @@ class RecordableEmbeddedWorkerInstanceClient
 TEST_F(ServiceWorkerContextTest, Register) {
   GURL pattern("http://www.example.com/");
   GURL script_url("http://www.example.com/service_worker.js");
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = pattern;
 
   RecordableEmbeddedWorkerInstanceClient* client = nullptr;
   client = helper_->CreateAndRegisterMockInstanceClient<
       RecordableEmbeddedWorkerInstanceClient>(helper_->AsWeakPtr());
 
-  int64_t registration_id = kInvalidServiceWorkerRegistrationId;
+  int64_t registration_id = blink::mojom::kInvalidServiceWorkerRegistrationId;
   bool called = false;
   context()->RegisterServiceWorker(
-      script_url, ServiceWorkerRegistrationOptions(pattern), nullptr,
-      MakeRegisteredCallback(&called, &registration_id));
+      script_url, options, MakeRegisteredCallback(&called, &registration_id));
 
   ASSERT_FALSE(called);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(called);
 
   ASSERT_EQ(2UL, helper_->dispatched_events()->size());
-  ASSERT_EQ(2UL, client->events().size());
+  ASSERT_EQ(1UL, client->events().size());
   EXPECT_EQ(RecordableEmbeddedWorkerInstanceClient::Message::StartWorker,
             client->events()[0]);
   EXPECT_EQ(EmbeddedWorkerTestHelper::Event::Install,
             helper_->dispatched_events()->at(0));
   EXPECT_EQ(EmbeddedWorkerTestHelper::Event::Activate,
             helper_->dispatched_events()->at(1));
-  EXPECT_EQ(RecordableEmbeddedWorkerInstanceClient::Message::StopWorker,
-            client->events()[1]);
 
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId, registration_id);
 
   ASSERT_EQ(1u, notifications_.size());
   EXPECT_EQ(REGISTRATION_STORED, notifications_[0].type);
@@ -238,12 +238,9 @@ TEST_F(ServiceWorkerContextTest, Register) {
   EXPECT_EQ(registration_id, notifications_[0].registration_id);
 
   context()->storage()->FindRegistrationForId(
-      registration_id,
-      pattern.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers,
-                 SERVICE_WORKER_OK,
-                 false /* expect_waiting */,
-                 true /* expect_active */));
+      registration_id, pattern.GetOrigin(),
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_OK,
+                     false /* expect_waiting */, true /* expect_active */));
   base::RunLoop().RunUntilIdle();
 }
 
@@ -253,6 +250,8 @@ TEST_F(ServiceWorkerContextTest, Register) {
 TEST_F(ServiceWorkerContextTest, Register_RejectInstall) {
   GURL pattern("http://www.example.com/");
   GURL script_url("http://www.example.com/service_worker.js");
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = pattern;
 
   helper_.reset();  // Make sure the process lookups stay overridden.
   helper_.reset(new RejectInstallTestHelper);
@@ -262,11 +261,10 @@ TEST_F(ServiceWorkerContextTest, Register_RejectInstall) {
   client = helper_->CreateAndRegisterMockInstanceClient<
       RecordableEmbeddedWorkerInstanceClient>(helper_->AsWeakPtr());
 
-  int64_t registration_id = kInvalidServiceWorkerRegistrationId;
+  int64_t registration_id = blink::mojom::kInvalidServiceWorkerRegistrationId;
   bool called = false;
   context()->RegisterServiceWorker(
-      script_url, ServiceWorkerRegistrationOptions(pattern), nullptr,
-      MakeRegisteredCallback(&called, &registration_id));
+      script_url, options, MakeRegisteredCallback(&called, &registration_id));
 
   ASSERT_FALSE(called);
   base::RunLoop().RunUntilIdle();
@@ -281,7 +279,7 @@ TEST_F(ServiceWorkerContextTest, Register_RejectInstall) {
   EXPECT_EQ(RecordableEmbeddedWorkerInstanceClient::Message::StopWorker,
             client->events()[1]);
 
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId, registration_id);
 
   ASSERT_EQ(1u, notifications_.size());
   EXPECT_EQ(REGISTRATION_STORED, notifications_[0].type);
@@ -289,12 +287,9 @@ TEST_F(ServiceWorkerContextTest, Register_RejectInstall) {
   EXPECT_EQ(registration_id, notifications_[0].registration_id);
 
   context()->storage()->FindRegistrationForId(
-      registration_id,
-      pattern.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers,
-                 SERVICE_WORKER_ERROR_NOT_FOUND,
-                 false /* expect_waiting */,
-                 false /* expect_active */));
+      registration_id, pattern.GetOrigin(),
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_ERROR_NOT_FOUND,
+                     false /* expect_waiting */, false /* expect_active */));
   base::RunLoop().RunUntilIdle();
 }
 
@@ -303,6 +298,8 @@ TEST_F(ServiceWorkerContextTest, Register_RejectInstall) {
 TEST_F(ServiceWorkerContextTest, Register_RejectActivate) {
   GURL pattern("http://www.example.com/");
   GURL script_url("http://www.example.com/service_worker.js");
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = pattern;
 
   helper_.reset();
   helper_.reset(new RejectActivateTestHelper);
@@ -312,28 +309,25 @@ TEST_F(ServiceWorkerContextTest, Register_RejectActivate) {
   client = helper_->CreateAndRegisterMockInstanceClient<
       RecordableEmbeddedWorkerInstanceClient>(helper_->AsWeakPtr());
 
-  int64_t registration_id = kInvalidServiceWorkerRegistrationId;
+  int64_t registration_id = blink::mojom::kInvalidServiceWorkerRegistrationId;
   bool called = false;
   context()->RegisterServiceWorker(
-      script_url, ServiceWorkerRegistrationOptions(pattern), nullptr,
-      MakeRegisteredCallback(&called, &registration_id));
+      script_url, options, MakeRegisteredCallback(&called, &registration_id));
 
   ASSERT_FALSE(called);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(called);
 
   ASSERT_EQ(2UL, helper_->dispatched_events()->size());
-  ASSERT_EQ(2UL, client->events().size());
+  ASSERT_EQ(1UL, client->events().size());
   EXPECT_EQ(RecordableEmbeddedWorkerInstanceClient::Message::StartWorker,
             client->events()[0]);
   EXPECT_EQ(EmbeddedWorkerTestHelper::Event::Install,
             helper_->dispatched_events()->at(0));
   EXPECT_EQ(EmbeddedWorkerTestHelper::Event::Activate,
             helper_->dispatched_events()->at(1));
-  EXPECT_EQ(RecordableEmbeddedWorkerInstanceClient::Message::StopWorker,
-            client->events()[1]);
 
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId, registration_id);
 
   ASSERT_EQ(1u, notifications_.size());
   EXPECT_EQ(REGISTRATION_STORED, notifications_[0].type);
@@ -342,26 +336,27 @@ TEST_F(ServiceWorkerContextTest, Register_RejectActivate) {
 
   context()->storage()->FindRegistrationForId(
       registration_id, pattern.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers, SERVICE_WORKER_OK,
-                 false /* expect_waiting */, true /* expect_active */));
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_OK,
+                     false /* expect_waiting */, true /* expect_active */));
   base::RunLoop().RunUntilIdle();
 }
 
 // Make sure registrations are cleaned up when they are unregistered.
 TEST_F(ServiceWorkerContextTest, Unregister) {
   GURL pattern("http://www.example.com/");
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = pattern;
 
   bool called = false;
-  int64_t registration_id = kInvalidServiceWorkerRegistrationId;
+  int64_t registration_id = blink::mojom::kInvalidServiceWorkerRegistrationId;
   context()->RegisterServiceWorker(
-      GURL("http://www.example.com/service_worker.js"),
-      ServiceWorkerRegistrationOptions(pattern), nullptr,
+      GURL("http://www.example.com/service_worker.js"), options,
       MakeRegisteredCallback(&called, &registration_id));
 
   ASSERT_FALSE(called);
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId, registration_id);
 
   called = false;
   context()->UnregisterServiceWorker(pattern,
@@ -372,12 +367,9 @@ TEST_F(ServiceWorkerContextTest, Unregister) {
   ASSERT_TRUE(called);
 
   context()->storage()->FindRegistrationForId(
-      registration_id,
-      pattern.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers,
-                 SERVICE_WORKER_ERROR_NOT_FOUND,
-                 false /* expect_waiting */,
-                 false /* expect_active */));
+      registration_id, pattern.GetOrigin(),
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_ERROR_NOT_FOUND,
+                     false /* expect_waiting */, false /* expect_active */));
   base::RunLoop().RunUntilIdle();
 
   ASSERT_EQ(2u, notifications_.size());
@@ -395,75 +387,93 @@ TEST_F(ServiceWorkerContextTest, UnregisterMultiple) {
   GURL origin1_p2("http://www.example.com/hello");
   GURL origin2_p1("http://www.example.com:8080/again");
   GURL origin3_p1("http://www.other.com/");
+  int64_t registration_id1 = blink::mojom::kInvalidServiceWorkerRegistrationId;
+  int64_t registration_id2 = blink::mojom::kInvalidServiceWorkerRegistrationId;
+  int64_t registration_id3 = blink::mojom::kInvalidServiceWorkerRegistrationId;
+  int64_t registration_id4 = blink::mojom::kInvalidServiceWorkerRegistrationId;
+
+  {
+    bool called = false;
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = origin1_p1;
+    context()->RegisterServiceWorker(
+        GURL("http://www.example.com/service_worker.js"), options,
+        MakeRegisteredCallback(&called, &registration_id1));
+    ASSERT_FALSE(called);
+    base::RunLoop().RunUntilIdle();
+    ASSERT_TRUE(called);
+  }
+
+  {
+    bool called = false;
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = origin1_p2;
+    context()->RegisterServiceWorker(
+        GURL("http://www.example.com/service_worker2.js"), options,
+        MakeRegisteredCallback(&called, &registration_id2));
+    ASSERT_FALSE(called);
+    base::RunLoop().RunUntilIdle();
+    ASSERT_TRUE(called);
+  }
+
+  {
+    bool called = false;
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = origin2_p1;
+    context()->RegisterServiceWorker(
+        GURL("http://www.example.com:8080/service_worker3.js"), options,
+        MakeRegisteredCallback(&called, &registration_id3));
+    ASSERT_FALSE(called);
+    base::RunLoop().RunUntilIdle();
+    ASSERT_TRUE(called);
+  }
+
+  {
+    bool called = false;
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = origin3_p1;
+    context()->RegisterServiceWorker(
+        GURL("http://www.other.com/service_worker4.js"), options,
+        MakeRegisteredCallback(&called, &registration_id4));
+    ASSERT_FALSE(called);
+    base::RunLoop().RunUntilIdle();
+    ASSERT_TRUE(called);
+  }
+
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+            registration_id1);
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+            registration_id2);
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+            registration_id3);
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+            registration_id4);
 
   bool called = false;
-  int64_t registration_id1 = kInvalidServiceWorkerRegistrationId;
-  int64_t registration_id2 = kInvalidServiceWorkerRegistrationId;
-  int64_t registration_id3 = kInvalidServiceWorkerRegistrationId;
-  int64_t registration_id4 = kInvalidServiceWorkerRegistrationId;
-  context()->RegisterServiceWorker(
-      GURL("http://www.example.com/service_worker.js"),
-      ServiceWorkerRegistrationOptions(origin1_p1), nullptr,
-      MakeRegisteredCallback(&called, &registration_id1));
-  context()->RegisterServiceWorker(
-      GURL("http://www.example.com/service_worker2.js"),
-      ServiceWorkerRegistrationOptions(origin1_p2), nullptr,
-      MakeRegisteredCallback(&called, &registration_id2));
-  context()->RegisterServiceWorker(
-      GURL("http://www.example.com:8080/service_worker3.js"),
-      ServiceWorkerRegistrationOptions(origin2_p1), nullptr,
-      MakeRegisteredCallback(&called, &registration_id3));
-  context()->RegisterServiceWorker(
-      GURL("http://www.other.com/service_worker4.js"),
-      ServiceWorkerRegistrationOptions(origin3_p1), nullptr,
-      MakeRegisteredCallback(&called, &registration_id4));
-
-  ASSERT_FALSE(called);
-  base::RunLoop().RunUntilIdle();
-  ASSERT_TRUE(called);
-
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, registration_id1);
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, registration_id2);
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, registration_id3);
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, registration_id4);
-
-  called = false;
-  context()->UnregisterServiceWorkers(origin1_p1.GetOrigin(),
-                                      MakeUnregisteredCallback(&called));
+  context()->DeleteForOrigin(origin1_p1.GetOrigin(),
+                             MakeUnregisteredCallback(&called));
 
   ASSERT_FALSE(called);
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(called);
 
   context()->storage()->FindRegistrationForId(
-      registration_id1,
-      origin1_p1.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers,
-                 SERVICE_WORKER_ERROR_NOT_FOUND,
-                 false /* expect_waiting */,
-                 false /* expect_active */));
+      registration_id1, origin1_p1.GetOrigin(),
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_ERROR_NOT_FOUND,
+                     false /* expect_waiting */, false /* expect_active */));
   context()->storage()->FindRegistrationForId(
-      registration_id2,
-      origin1_p2.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers,
-                 SERVICE_WORKER_ERROR_NOT_FOUND,
-                 false /* expect_waiting */,
-                 false /* expect_active */));
+      registration_id2, origin1_p2.GetOrigin(),
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_ERROR_NOT_FOUND,
+                     false /* expect_waiting */, false /* expect_active */));
   context()->storage()->FindRegistrationForId(
-      registration_id3,
-      origin2_p1.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers,
-                 SERVICE_WORKER_OK,
-                 false /* expect_waiting */,
-                 true /* expect_active */));
+      registration_id3, origin2_p1.GetOrigin(),
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_OK,
+                     false /* expect_waiting */, true /* expect_active */));
 
   context()->storage()->FindRegistrationForId(
-      registration_id4,
-      origin3_p1.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers,
-                 SERVICE_WORKER_OK,
-                 false /* expect_waiting */,
-                 true /* expect_active */));
+      registration_id4, origin3_p1.GetOrigin(),
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_OK,
+                     false /* expect_waiting */, true /* expect_active */));
 
   base::RunLoop().RunUntilIdle();
 
@@ -481,41 +491,45 @@ TEST_F(ServiceWorkerContextTest, UnregisterMultiple) {
   EXPECT_EQ(origin3_p1, notifications_[3].pattern);
   EXPECT_EQ(registration_id4, notifications_[3].registration_id);
   EXPECT_EQ(REGISTRATION_DELETED, notifications_[4].type);
-  EXPECT_EQ(origin1_p2, notifications_[4].pattern);
-  EXPECT_EQ(registration_id2, notifications_[4].registration_id);
+  EXPECT_EQ(origin1_p1, notifications_[4].pattern);
+  EXPECT_EQ(registration_id1, notifications_[4].registration_id);
   EXPECT_EQ(REGISTRATION_DELETED, notifications_[5].type);
-  EXPECT_EQ(origin1_p1, notifications_[5].pattern);
-  EXPECT_EQ(registration_id1, notifications_[5].registration_id);
+  EXPECT_EQ(origin1_p2, notifications_[5].pattern);
+  EXPECT_EQ(registration_id2, notifications_[5].registration_id);
 }
 
 // Make sure registering a new script shares an existing registration.
 TEST_F(ServiceWorkerContextTest, RegisterNewScript) {
   GURL pattern("http://www.example.com/");
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = pattern;
 
   bool called = false;
-  int64_t old_registration_id = kInvalidServiceWorkerRegistrationId;
+  int64_t old_registration_id =
+      blink::mojom::kInvalidServiceWorkerRegistrationId;
   context()->RegisterServiceWorker(
-      GURL("http://www.example.com/service_worker.js"),
-      ServiceWorkerRegistrationOptions(pattern), nullptr,
+      GURL("http://www.example.com/service_worker.js"), options,
       MakeRegisteredCallback(&called, &old_registration_id));
 
   ASSERT_FALSE(called);
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, old_registration_id);
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+            old_registration_id);
 
   called = false;
-  int64_t new_registration_id = kInvalidServiceWorkerRegistrationId;
+  int64_t new_registration_id =
+      blink::mojom::kInvalidServiceWorkerRegistrationId;
   context()->RegisterServiceWorker(
-      GURL("http://www.example.com/service_worker_new.js"),
-      ServiceWorkerRegistrationOptions(pattern), nullptr,
+      GURL("http://www.example.com/service_worker_new.js"), options,
       MakeRegisteredCallback(&called, &new_registration_id));
 
   ASSERT_FALSE(called);
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(called);
 
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, new_registration_id);
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+            new_registration_id);
   EXPECT_EQ(old_registration_id, new_registration_id);
 
   ASSERT_EQ(2u, notifications_.size());
@@ -532,22 +546,27 @@ TEST_F(ServiceWorkerContextTest, RegisterNewScript) {
 TEST_F(ServiceWorkerContextTest, RegisterDuplicateScript) {
   GURL pattern("http://www.example.com/");
   GURL script_url("http://www.example.com/service_worker.js");
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = pattern;
 
   bool called = false;
-  int64_t old_registration_id = kInvalidServiceWorkerRegistrationId;
+  int64_t old_registration_id =
+      blink::mojom::kInvalidServiceWorkerRegistrationId;
   context()->RegisterServiceWorker(
-      script_url, ServiceWorkerRegistrationOptions(pattern), nullptr,
+      script_url, options,
       MakeRegisteredCallback(&called, &old_registration_id));
 
   ASSERT_FALSE(called);
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_NE(kInvalidServiceWorkerRegistrationId, old_registration_id);
+  EXPECT_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+            old_registration_id);
 
   called = false;
-  int64_t new_registration_id = kInvalidServiceWorkerRegistrationId;
+  int64_t new_registration_id =
+      blink::mojom::kInvalidServiceWorkerRegistrationId;
   context()->RegisterServiceWorker(
-      script_url, ServiceWorkerRegistrationOptions(pattern), nullptr,
+      script_url, options,
       MakeRegisteredCallback(&called, &new_registration_id));
 
   ASSERT_FALSE(called);
@@ -596,13 +615,32 @@ TEST_F(ServiceWorkerContextTest, ProviderHostIterator) {
           context()->AsWeakPtr(), &remote_endpoints.back());
   host3->SetDocumentUrl(kOrigin1);
 
-  // Host4 (provider_id=4): process_id=2, origin2, for ServiceWorker.
+  // Host4 (provider_id < -1): process_id=2, origin2, for ServiceWorker.
+  // Since the provider host is created via
+  // CreateProviderHostForServiceWorkerContext, the provider_id is not a fixed
+  // number.
+  blink::mojom::ServiceWorkerRegistrationOptions registration_opt;
+  registration_opt.scope = GURL("http://www.example.com/test/");
+  scoped_refptr<ServiceWorkerRegistration> registration =
+      base::MakeRefCounted<ServiceWorkerRegistration>(
+          registration_opt, 1L /* registration_id */,
+          helper_->context()->AsWeakPtr());
+  scoped_refptr<ServiceWorkerVersion> version =
+      base::MakeRefCounted<ServiceWorkerVersion>(
+          registration.get(), GURL("http://www.example.com/test/script_url"),
+          1L /* version_id */, helper_->context()->AsWeakPtr());
+  // CreateProviderHostForServiceWorkerContext calls
+  // ServiceWorkerProviderHost::CompleteStartWorkerPreparation, which requires a
+  // dispatcher host.
+  helper_->EnsureDispatcherHostForProcess(kRenderProcessId2);
   remote_endpoints.emplace_back();
   std::unique_ptr<ServiceWorkerProviderHost> host4 =
       CreateProviderHostForServiceWorkerContext(
-          kRenderProcessId2, provider_id++, true /* is_parent_frame_secure */,
+          kRenderProcessId2, true /* is_parent_frame_secure */, version.get(),
           context()->AsWeakPtr(), &remote_endpoints.back());
   host4->SetDocumentUrl(kOrigin2);
+  const int host4_provider_id = host4->provider_id();
+  EXPECT_LT(host4_provider_id, kInvalidServiceWorkerProviderId);
 
   ServiceWorkerProviderHost* host1_raw = host1.get();
   ServiceWorkerProviderHost* host2_raw = host2.get();
@@ -648,12 +686,12 @@ TEST_F(ServiceWorkerContextTest, ProviderHostIterator) {
   context()->RemoveProviderHost(kRenderProcessId1, 1);
   context()->RemoveProviderHost(kRenderProcessId2, 2);
   context()->RemoveProviderHost(kRenderProcessId2, 3);
-  context()->RemoveProviderHost(kRenderProcessId2, 4);
+  context()->RemoveProviderHost(kRenderProcessId2, host4_provider_id);
 }
 
 class ServiceWorkerContextRecoveryTest
     : public ServiceWorkerContextTest,
-      public testing::WithParamInterface<bool> {
+      public testing::WithParamInterface<bool /* is_storage_on_disk */> {
  public:
   ServiceWorkerContextRecoveryTest() {}
   virtual ~ServiceWorkerContextRecoveryTest() {}
@@ -665,6 +703,8 @@ class ServiceWorkerContextRecoveryTest
 TEST_P(ServiceWorkerContextRecoveryTest, DeleteAndStartOver) {
   GURL pattern("http://www.example.com/");
   GURL script_url("http://www.example.com/service_worker.js");
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = pattern;
 
   if (is_storage_on_disk()) {
     // Reinitialize the helper to test on-disk storage.
@@ -674,28 +714,24 @@ TEST_P(ServiceWorkerContextRecoveryTest, DeleteAndStartOver) {
     helper_->context_wrapper()->AddObserver(this);
   }
 
-  int64_t registration_id = kInvalidServiceWorkerRegistrationId;
+  int64_t registration_id = blink::mojom::kInvalidServiceWorkerRegistrationId;
   bool called = false;
   context()->RegisterServiceWorker(
-      script_url, ServiceWorkerRegistrationOptions(pattern), nullptr,
-      MakeRegisteredCallback(&called, &registration_id));
+      script_url, options, MakeRegisteredCallback(&called, &registration_id));
 
   ASSERT_FALSE(called);
-  base::RunLoop().RunUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_TRUE(called);
 
   context()->storage()->FindRegistrationForId(
-      registration_id,
-      pattern.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers,
-                 SERVICE_WORKER_OK,
-                 false /* expect_waiting */,
-                 true /* expect_active */));
-  base::RunLoop().RunUntilIdle();
+      registration_id, pattern.GetOrigin(),
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_OK,
+                     false /* expect_waiting */, true /* expect_active */));
+  content::RunAllTasksUntilIdle();
 
-  // Next handle ids should be 0 (the next call should return 1).
-  EXPECT_EQ(0, context()->GetNewServiceWorkerHandleId());
-  EXPECT_EQ(0, context()->GetNewRegistrationHandleId());
+  // Next handle id should be 1 (the next call should return 2) because
+  // registered worker should have taken ID 0.
+  EXPECT_EQ(1, context()->GetNewServiceWorkerHandleId());
 
   context()->ScheduleDeleteAndStartOver();
 
@@ -703,42 +739,35 @@ TEST_P(ServiceWorkerContextRecoveryTest, DeleteAndStartOver) {
   // operation should be aborted.
   context()->storage()->FindRegistrationForId(
       registration_id, pattern.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers, SERVICE_WORKER_ERROR_ABORT,
-                 false /* expect_waiting */, true /* expect_active */));
-  base::RunLoop().RunUntilIdle();
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_ERROR_ABORT,
+                     false /* expect_waiting */, true /* expect_active */));
+  content::RunAllTasksUntilIdle();
 
   // The context started over and the storage was re-initialized, so the
   // registration should not be found.
   context()->storage()->FindRegistrationForId(
-      registration_id,
-      pattern.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers,
-                 SERVICE_WORKER_ERROR_NOT_FOUND,
-                 false /* expect_waiting */,
-                 true /* expect_active */));
-  base::RunLoop().RunUntilIdle();
+      registration_id, pattern.GetOrigin(),
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_ERROR_NOT_FOUND,
+                     false /* expect_waiting */, true /* expect_active */));
+  content::RunAllTasksUntilIdle();
 
   called = false;
   context()->RegisterServiceWorker(
-      script_url, ServiceWorkerRegistrationOptions(pattern), nullptr,
-      MakeRegisteredCallback(&called, &registration_id));
+      script_url, options, MakeRegisteredCallback(&called, &registration_id));
 
   ASSERT_FALSE(called);
-  base::RunLoop().RunUntilIdle();
+  content::RunAllTasksUntilIdle();
   EXPECT_TRUE(called);
 
   context()->storage()->FindRegistrationForId(
-      registration_id,
-      pattern.GetOrigin(),
-      base::Bind(&ExpectRegisteredWorkers,
-                 SERVICE_WORKER_OK,
-                 false /* expect_waiting */,
-                 true /* expect_active */));
-  base::RunLoop().RunUntilIdle();
+      registration_id, pattern.GetOrigin(),
+      base::BindOnce(&ExpectRegisteredWorkers, SERVICE_WORKER_OK,
+                     false /* expect_waiting */, true /* expect_active */));
+  content::RunAllTasksUntilIdle();
 
-  // The new context should take over next handle ids.
-  EXPECT_EQ(1, context()->GetNewServiceWorkerHandleId());
-  EXPECT_EQ(1, context()->GetNewRegistrationHandleId());
+  // The new context should take over next handle id. ID 2 should have been
+  // taken by the running registration, so the following method calls return 3.
+  EXPECT_EQ(3, context()->GetNewServiceWorkerHandleId());
 
   ASSERT_EQ(3u, notifications_.size());
   EXPECT_EQ(REGISTRATION_STORED, notifications_[0].type);
@@ -752,6 +781,6 @@ TEST_P(ServiceWorkerContextRecoveryTest, DeleteAndStartOver) {
 
 INSTANTIATE_TEST_CASE_P(ServiceWorkerContextRecoveryTest,
                         ServiceWorkerContextRecoveryTest,
-                        testing::Bool());
+                        testing::Bool() /* is_storage_on_disk */);
 
 }  // namespace content

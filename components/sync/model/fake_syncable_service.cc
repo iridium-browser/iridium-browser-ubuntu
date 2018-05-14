@@ -26,15 +26,6 @@ void FakeSyncableService::set_process_sync_changes_error(
   process_sync_changes_error_ = error;
 }
 
-void FakeSyncableService::set_attachment_store(
-    std::unique_ptr<AttachmentStore> attachment_store) {
-  attachment_store_ = std::move(attachment_store);
-}
-
-const AttachmentService* FakeSyncableService::attachment_service() const {
-  return attachment_service_.get();
-}
-
 bool FakeSyncableService::syncing() const {
   return syncing_;
 }
@@ -66,20 +57,9 @@ SyncDataList FakeSyncableService::GetAllSyncData(ModelType type) const {
 }
 
 SyncError FakeSyncableService::ProcessSyncChanges(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const SyncChangeList& change_list) {
   return process_sync_changes_error_;
-}
-
-std::unique_ptr<AttachmentStoreForSync>
-FakeSyncableService::GetAttachmentStoreForSync() {
-  return attachment_store_ ? attachment_store_->CreateAttachmentStoreForSync()
-                           : std::unique_ptr<AttachmentStoreForSync>();
-}
-
-void FakeSyncableService::SetAttachmentService(
-    std::unique_ptr<AttachmentService> attachment_service) {
-  attachment_service_ = std::move(attachment_service);
 }
 
 }  // namespace syncer

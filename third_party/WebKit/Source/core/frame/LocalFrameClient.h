@@ -51,20 +51,26 @@
 #include "platform/wtf/Vector.h"
 #include "public/platform/WebContentSecurityPolicyStruct.h"
 #include "public/platform/WebEffectiveConnectionType.h"
-#include "public/platform/WebFeaturePolicy.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "public/platform/WebLoadingBehaviorFlag.h"
+#include "public/platform/WebScopedVirtualTimePauser.h"
 #include "public/platform/WebSuddenTerminationDisablerType.h"
 #include "public/platform/WebURLRequest.h"
+#include "public/web/WebGlobalObjectReusePolicy.h"
 #include "public/web/WebTriggeringEventInfo.h"
+#include "third_party/WebKit/public/common/feature_policy/feature_policy.h"
 #include "v8/include/v8.h"
 
 namespace service_manager {
 class InterfaceProvider;
-}
+}  // namespace service_manager
 
 namespace blink {
+namespace mojom {
+enum class WebFeature : int32_t;
+}  // namespace mojom
 
+class AssociatedInterfaceProvider;
 class Document;
 class DocumentLoader;
 class HTMLFormElement;
@@ -74,36 +80,38 @@ class HTMLPlugInElement;
 class HistoryItem;
 class KURL;
 class LocalFrame;
-class PluginView;
+class WebPluginContainerImpl;
 class ResourceError;
 class ResourceRequest;
 class ResourceResponse;
 class SecurityOrigin;
 class SharedWorkerRepositoryClient;
 class SubstituteData;
-class TextCheckerClient;
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
 class WebCookieJar;
 class WebFrame;
+class WebLayerTreeView;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebMediaPlayerSource;
-class WebRemotePlaybackClient;
 class WebRTCPeerConnectionHandler;
+class WebRemotePlaybackClient;
+struct WebResourceTimingInfo;
 class WebServiceWorkerProvider;
 class WebSpellCheckPanelHostClient;
-class WebTaskRunner;
-class WebURLLoader;
+struct WebScrollIntoViewParams;
+class WebTextCheckClient;
 
 class CORE_EXPORT LocalFrameClient : public FrameClient {
  public:
-  ~LocalFrameClient() override {}
+  ~LocalFrameClient() override = default;
 
   virtual WebFrame* GetWebFrame() const { return nullptr; }
 
   virtual bool HasWebView() const = 0;  // mainly for assertions
 
+  virtual void WillBeDetached() = 0;
   virtual void DispatchWillSendRequest(ResourceRequest&) = 0;
   virtual void DispatchDidReceiveResponse(const ResourceResponse&) = 0;
   virtual void DispatchDidLoadResourceFromMemoryCache(
@@ -120,7 +128,9 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
                                                ResourceRequest&) = 0;
   virtual void DispatchDidReceiveTitle(const String&) = 0;
   virtual void DispatchDidChangeIcons(IconType) = 0;
-  virtual void DispatchDidCommitLoad(HistoryItem*, HistoryCommitType) = 0;
+  virtual void DispatchDidCommitLoad(HistoryItem*,
+                                     HistoryCommitType,
+                                     WebGlobalObjectReusePolicy) = 0;
   virtual void DispatchDidFailProvisionalLoad(const ResourceError&,
                                               HistoryCommitType) = 0;
   virtual void DispatchDidFailLoad(const ResourceError&, HistoryCommitType) = 0;
@@ -148,12 +158,10 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   virtual void ProgressEstimateChanged(double progress_estimate) = 0;
   virtual void DidStopLoading() = 0;
 
+  virtual void ForwardResourceTimingToParent(const WebResourceTimingInfo&) = 0;
+
   virtual void DownloadURL(const ResourceRequest&,
                            const String& suggested_name) = 0;
-  virtual void LoadURLExternally(const ResourceRequest&,
-                                 NavigationPolicy,
-                                 WebTriggeringEventInfo,
-                                 bool replaces_current_history_item) = 0;
   virtual void LoadErrorPage(int reason) = 0;
 
   virtual bool NavigateBackForward(int offset) const = 0;
@@ -173,14 +181,21 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   // The indicated security origin has run active content (such as a script)
   // from an insecure source.  Note that the insecure content can spread to
   // other frames in the same origin.
-  virtual void DidRunInsecureContent(SecurityOrigin*, const KURL&) = 0;
+  virtual void DidRunInsecureContent(const SecurityOrigin*, const KURL&) = 0;
   virtual void DidDetectXSS(const KURL&, bool did_block_entire_page) = 0;
   virtual void DidDispatchPingLoader(const KURL&) = 0;
 
   // The frame displayed content with certificate errors with given URL.
-  virtual void DidDisplayContentWithCertificateErrors(const KURL&) = 0;
+  virtual void DidDisplayContentWithCertificateErrors() = 0;
   // The frame ran content with certificate errors with the given URL.
-  virtual void DidRunContentWithCertificateErrors(const KURL&) = 0;
+  virtual void DidRunContentWithCertificateErrors() = 0;
+
+  // The frame loaded a resource with a legacy Symantec certificate that is
+  // slated for distrust (indicated by |did_fail| being false) or has already
+  // been distrusted (indicated by |did_fail| being true). Prints a console
+  // message (possibly overridden by the embedder) to warn about the
+  // certificate.
+  virtual void ReportLegacySymantecCert(const KURL&, bool did_fail) {}
 
   // Will be called when |PerformanceTiming| events are updated
   virtual void DidChangePerformanceTiming() {}
@@ -189,16 +204,25 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   // propogates renderer loading behavior to the browser process for histograms.
   virtual void DidObserveLoadingBehavior(WebLoadingBehaviorFlag) {}
 
+  // Will be called when a new UseCounter feature has been observed in a frame.
+  // This propogates feature usage to the browser process for histograms.
+  virtual void DidObserveNewFeatureUsage(mojom::WebFeature) {}
+  // Will be called by a Page upon DidCommitLoad, deciding whether to track
+  // UseCounter usage or not based on its url.
+  virtual bool ShouldTrackUseCounter(const KURL&) { return true; }
+
   // Transmits the change in the set of watched CSS selectors property that
   // match any element on the frame.
   virtual void SelectorMatchChanged(
       const Vector<String>& added_selectors,
       const Vector<String>& removed_selectors) = 0;
 
-  virtual DocumentLoader* CreateDocumentLoader(LocalFrame*,
-                                               const ResourceRequest&,
-                                               const SubstituteData&,
-                                               ClientRedirectPolicy) = 0;
+  virtual DocumentLoader* CreateDocumentLoader(
+      LocalFrame*,
+      const ResourceRequest&,
+      const SubstituteData&,
+      ClientRedirectPolicy,
+      const base::UnguessableToken& devtools_navigation_token) = 0;
 
   virtual String UserAgent() = 0;
 
@@ -217,18 +241,19 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   };
   virtual bool CanCreatePluginWithoutRenderer(
       const String& mime_type) const = 0;
-  virtual PluginView* CreatePlugin(HTMLPlugInElement&,
-                                   const KURL&,
-                                   const Vector<String>&,
-                                   const Vector<String>&,
-                                   const String&,
-                                   bool load_manually,
-                                   DetachedPluginPolicy) = 0;
+  virtual WebPluginContainerImpl* CreatePlugin(HTMLPlugInElement&,
+                                               const KURL&,
+                                               const Vector<String>&,
+                                               const Vector<String>&,
+                                               const String&,
+                                               bool load_manually,
+                                               DetachedPluginPolicy) = 0;
 
   virtual std::unique_ptr<WebMediaPlayer> CreateWebMediaPlayer(
       HTMLMediaElement&,
       const WebMediaPlayerSource&,
-      WebMediaPlayerClient*) = 0;
+      WebMediaPlayerClient*,
+      WebLayerTreeView*) = 0;
   virtual WebRemotePlaybackClient* CreateWebRemotePlaybackClient(
       HTMLMediaElement&) = 0;
 
@@ -258,15 +283,15 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   virtual void DidChangeName(const String&) {}
 
   virtual void DidEnforceInsecureRequestPolicy(WebInsecureRequestPolicy) {}
-
-  virtual void DidUpdateToUniqueOrigin() {}
+  virtual void DidEnforceInsecureNavigationsSet(const std::vector<unsigned>&) {}
 
   virtual void DidChangeFramePolicy(Frame* child_frame,
                                     SandboxFlags,
-                                    const WebParsedFeaturePolicy&) {}
+                                    const ParsedFeaturePolicy&) {}
 
-  virtual void DidSetFeaturePolicyHeader(
-      const WebParsedFeaturePolicy& parsed_header) {}
+  virtual void DidSetFramePolicyHeaders(
+      SandboxFlags,
+      const ParsedFeaturePolicy& parsed_header) {}
 
   // Called when a set of new Content Security Policies is added to the frame's
   // document. This can be triggered by handling of HTTP headers, handling of
@@ -280,9 +305,7 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   virtual void DispatchWillStartUsingPeerConnectionHandler(
       WebRTCPeerConnectionHandler*) {}
 
-  virtual bool AllowWebGL(bool enabled_per_settings) {
-    return enabled_per_settings;
-  }
+  virtual bool ShouldBlockWebGL() { return false; }
 
   // If an HTML document is being loaded, informs the embedder that the document
   // will have its <body> attached soon.
@@ -294,7 +317,7 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   virtual ContentSettingsClient& GetContentSettingsClient() = 0;
 
   virtual SharedWorkerRepositoryClient* GetSharedWorkerRepositoryClient() {
-    return 0;
+    return nullptr;
   }
 
   virtual std::unique_ptr<WebApplicationCacheHost> CreateApplicationCacheHost(
@@ -310,23 +333,17 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
       bool present,
       WebSuddenTerminationDisablerType) {}
 
-  virtual LinkResource* CreateServiceWorkerLinkResource(HTMLLinkElement*) {
-    return nullptr;
-  }
-
   // Effective connection type when this frame was loaded.
   virtual WebEffectiveConnectionType GetEffectiveConnectionType() {
     return WebEffectiveConnectionType::kTypeUnknown;
   }
+  // Overrides the effective connection type for testing.
+  virtual void SetEffectiveConnectionTypeForTesting(
+      WebEffectiveConnectionType) {}
 
-  // Returns whether or not Client Lo-Fi is enabled for the frame
-  // (and so image requests may be replaced with a placeholder).
-  virtual bool IsClientLoFiActiveForFrame() { return false; }
-
-  // Returns whether or not the requested image should be replaced with a
-  // placeholder as part of the Client Lo-Fi previews feature.
-  virtual bool ShouldUseClientLoFiForRequest(const ResourceRequest&) {
-    return false;
+  // Returns the PreviewsState active for the frame.
+  virtual WebURLRequest::PreviewsState GetPreviewsStateForFrame() const {
+    return WebURLRequest::kPreviewsUnspecified;
   }
 
   // Overwrites the given URL to use an HTML5 embed if possible. An empty URL is
@@ -339,20 +356,47 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
     return nullptr;
   }
 
+  virtual AssociatedInterfaceProvider*
+  GetRemoteNavigationAssociatedInterfaces() {
+    return nullptr;
+  }
+
   virtual void SetHasReceivedUserGesture(bool received_previously) {}
 
-  virtual void SetDevToolsFrameId(const String& devtools_frame_id) {}
+  virtual void SetHasReceivedUserGestureBeforeNavigation(bool value) {}
 
   virtual void AbortClientNavigation() {}
 
   virtual WebSpellCheckPanelHostClient* SpellCheckPanelHostClient() const = 0;
 
-  virtual TextCheckerClient& GetTextCheckerClient() const = 0;
+  virtual WebTextCheckClient* GetTextCheckerClient() const = 0;
 
-  virtual std::unique_ptr<WebURLLoader> CreateURLLoader(const ResourceRequest&,
-                                                        WebTaskRunner*) = 0;
+  virtual std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() = 0;
 
   virtual void AnnotatedRegionsChanged() = 0;
+
+  virtual void DidBlockFramebust(const KURL&) {}
+
+  // Called when the corresponding frame should be scrolled in a remote parent
+  // frame.
+  virtual void ScrollRectToVisibleInParentFrame(
+      const WebRect&,
+      const WebScrollIntoViewParams&) {}
+
+  virtual void SetVirtualTimePauser(
+      WebScopedVirtualTimePauser virtual_time_pauser) {}
+
+  virtual String evaluateInInspectorOverlayForTesting(const String& script) = 0;
+
+  virtual bool HandleCurrentKeyboardEvent() { return false; }
+
+  virtual void DidChangeSelection(bool is_selection_empty) {}
+
+  virtual void DidChangeContents() {}
+
+  virtual Frame* FindFrame(const AtomicString& name) const = 0;
+
+  virtual void FrameRectsChanged(const IntRect&) {}
 };
 
 }  // namespace blink

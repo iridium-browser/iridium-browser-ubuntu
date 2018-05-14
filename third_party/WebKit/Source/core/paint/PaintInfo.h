@@ -28,6 +28,7 @@
 #define PaintInfo_h
 
 #include "core/CoreExport.h"
+#include "core/layout/LayoutObject.h"
 // TODO(jchaffraix): Once we unify PaintBehavior and PaintLayerFlags, we should
 // move PaintLayerFlags to PaintPhase and rename it. Thus removing the need for
 // this #include "core/paint/PaintLayerPaintingInfo.h"
@@ -36,12 +37,12 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/GraphicsContext.h"
+#include "platform/graphics/Image.h"
 #include "platform/graphics/paint/CullRect.h"
 #include "platform/graphics/paint/DisplayItem.h"
 #include "platform/transforms/AffineTransform.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/ListHashSet.h"
 
 #include <limits>
 
@@ -53,18 +54,23 @@ struct CORE_EXPORT PaintInfo {
   USING_FAST_MALLOC(PaintInfo);
 
  public:
-  PaintInfo(GraphicsContext& new_context,
+  PaintInfo(GraphicsContext& context,
             const IntRect& cull_rect,
-            PaintPhase new_phase,
+            PaintPhase phase,
             GlobalPaintFlags global_paint_flags,
             PaintLayerFlags paint_flags,
-            const LayoutBoxModelObject* new_paint_container = nullptr)
-      : context(new_context),
-        phase(new_phase),
+            const LayoutBoxModelObject* paint_container = nullptr,
+            LayoutUnit fragment_logical_top_in_flow_thread = LayoutUnit(),
+            bool suppress_painting_descendants = false)
+      : context(context),
+        phase(phase),
         cull_rect_(cull_rect),
-        paint_container_(new_paint_container),
+        paint_container_(paint_container),
+        fragment_logical_top_in_flow_thread_(
+            fragment_logical_top_in_flow_thread),
         paint_flags_(paint_flags),
-        global_paint_flags_(global_paint_flags) {}
+        global_paint_flags_(global_paint_flags),
+        suppress_painting_descendants_(suppress_painting_descendants) {}
 
   PaintInfo(GraphicsContext& new_context,
             const PaintInfo& copy_other_fields_from)
@@ -72,17 +78,21 @@ struct CORE_EXPORT PaintInfo {
         phase(copy_other_fields_from.phase),
         cull_rect_(copy_other_fields_from.cull_rect_),
         paint_container_(copy_other_fields_from.paint_container_),
+        fragment_logical_top_in_flow_thread_(
+            copy_other_fields_from.fragment_logical_top_in_flow_thread_),
         paint_flags_(copy_other_fields_from.paint_flags_),
-        global_paint_flags_(copy_other_fields_from.global_paint_flags_) {}
+        global_paint_flags_(copy_other_fields_from.global_paint_flags_),
+        suppress_painting_descendants_(
+            copy_other_fields_from.suppress_painting_descendants_) {}
 
   // Creates a PaintInfo for painting descendants. See comments about the paint
   // phases in PaintPhase.h for details.
   PaintInfo ForDescendants() const {
     PaintInfo result(*this);
-    if (phase == kPaintPhaseDescendantOutlinesOnly)
-      result.phase = kPaintPhaseOutline;
-    else if (phase == kPaintPhaseDescendantBlockBackgroundsOnly)
-      result.phase = kPaintPhaseBlockBackground;
+    if (phase == PaintPhase::kDescendantOutlinesOnly)
+      result.phase = PaintPhase::kOutline;
+    else if (phase == PaintPhase::kDescendantBlockBackgroundsOnly)
+      result.phase = PaintPhase::kBlockBackground;
     return result;
   }
 
@@ -101,6 +111,10 @@ struct CORE_EXPORT PaintInfo {
   }
 
   bool IsPrinting() const { return global_paint_flags_ & kGlobalPaintPrinting; }
+
+  bool SuppressPaintingDescendants() const {
+    return suppress_painting_descendants_;
+  }
 
   DisplayItem::Type DisplayItemTypeForClipping() const {
     return DisplayItem::PaintPhaseToClipBoxType(phase);
@@ -127,6 +141,20 @@ struct CORE_EXPORT PaintInfo {
                                           local_to_parent_transform);
   }
 
+  // Returns the fragment of the current painting object matching the current
+  // layer fragment.
+  const FragmentData* FragmentToPaint(const LayoutObject& object) const {
+    for (const auto* fragment = &object.FirstFragment(); fragment;
+         fragment = fragment->NextFragment()) {
+      if (fragment->LogicalTopInFlowThread() ==
+          fragment_logical_top_in_flow_thread_)
+        return fragment;
+    }
+    // No fragment of the current painting object matches the layer fragment,
+    // which means the object should not paint in this fragment.
+    return nullptr;
+  }
+
   // FIXME: Introduce setters/getters at some point. Requires a lot of changes
   // throughout layout/.
   GraphicsContext& context;
@@ -138,13 +166,20 @@ struct CORE_EXPORT PaintInfo {
   // The box model object that originates the current painting.
   const LayoutBoxModelObject* paint_container_;
 
+  // The logical top of the current fragment of the self-painting PaintLayer
+  // which initiated the current painting, in the containing flow thread.
+  LayoutUnit fragment_logical_top_in_flow_thread_;
+
   const PaintLayerFlags paint_flags_;
   const GlobalPaintFlags global_paint_flags_;
+  const bool suppress_painting_descendants_;
 
   // TODO(chrishtr): temporary while we implement CullRect everywhere.
   friend class SVGPaintContext;
   friend class SVGShapePainter;
 };
+
+Image::ImageDecodingMode GetImageDecodingMode(Node*);
 
 }  // namespace blink
 

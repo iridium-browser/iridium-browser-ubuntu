@@ -5,6 +5,8 @@
 #ifndef REMOTING_IOS_FACADE_IOS_CLIENT_RUNTIME_DELEGATE_H_
 #define REMOTING_IOS_FACADE_IOS_CLIENT_RUNTIME_DELEGATE_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "remoting/client/chromoting_client_runtime.h"
@@ -20,10 +22,15 @@ class IosClientRuntimeDelegate : public ChromotingClientRuntime::Delegate {
   void RuntimeWillShutdown() override;
   void RuntimeDidShutdown() override;
   void RequestAuthTokenForLogger() override;
+  OAuthTokenGetter* token_getter() override;
+
+  // Sets the access token. Should be called when the user switches accounts.
+  void SetAuthToken(const std::string& access_token);
 
   base::WeakPtr<IosClientRuntimeDelegate> GetWeakPtr();
 
  private:
+  std::unique_ptr<OAuthTokenGetter> token_getter_;
   ChromotingClientRuntime* runtime_;
 
   base::WeakPtrFactory<IosClientRuntimeDelegate> weak_factory_;

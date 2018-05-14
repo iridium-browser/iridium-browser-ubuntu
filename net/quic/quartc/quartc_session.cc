@@ -4,6 +4,8 @@
 
 #include "net/quic/quartc/quartc_session.h"
 
+#include "net/quic/core/tls_client_handshaker.h"
+#include "net/quic/core/tls_server_handshaker.h"
 #include "net/quic/platform/api/quic_ptr_util.h"
 
 using std::string;
@@ -35,9 +37,8 @@ class DummyProofSource : public ProofSource {
   void GetProof(const QuicSocketAddress& server_addr,
                 const string& hostname,
                 const string& server_config,
-                QuicVersion quic_version,
+                QuicTransportVersion transport_version,
                 QuicStringPiece chlo_hash,
-                const QuicTagVector& connection_options,
                 std::unique_ptr<Callback> callback) override {
     QuicReferenceCountedPointer<ProofSource::Chain> chain;
     QuicCryptoProof proof;
@@ -47,6 +48,21 @@ class DummyProofSource : public ProofSource {
     proof.signature = "Dummy signature";
     proof.leaf_cert_scts = "Dummy timestamp";
     callback->Run(true, chain, proof, nullptr /* details */);
+  }
+
+  QuicReferenceCountedPointer<Chain> GetCertChain(
+      const QuicSocketAddress& server_address,
+      const string& hostname) override {
+    return QuicReferenceCountedPointer<Chain>();
+  }
+
+  void ComputeTlsSignature(
+      const QuicSocketAddress& server_address,
+      const string& hostname,
+      uint16_t signature_algorithm,
+      QuicStringPiece in,
+      std::unique_ptr<SignatureCallback> callback) override {
+    callback->Run(true, "Dummy signature");
   }
 };
 
@@ -63,7 +79,7 @@ class InsecureProofVerifier : public ProofVerifier {
       const string& hostname,
       const uint16_t port,
       const string& server_config,
-      QuicVersion quic_version,
+      QuicTransportVersion transport_version,
       QuicStringPiece chlo_hash,
       const std::vector<string>& certs,
       const string& cert_sct,
@@ -114,8 +130,8 @@ QuartcSession::QuartcSession(std::unique_ptr<QuicConnection> connection,
   // Initialization with default crypto configuration.
   if (perspective_ == Perspective::IS_CLIENT) {
     std::unique_ptr<ProofVerifier> proof_verifier(new InsecureProofVerifier);
-    quic_crypto_client_config_.reset(
-        new QuicCryptoClientConfig(std::move(proof_verifier)));
+    quic_crypto_client_config_ = QuicMakeUnique<QuicCryptoClientConfig>(
+        std::move(proof_verifier), TlsClientHandshaker::CreateSslCtx());
   } else {
     std::unique_ptr<ProofSource> proof_source(new DummyProofSource);
     // Generate a random source address token secret. For long-running servers
@@ -124,9 +140,10 @@ QuartcSession::QuartcSession(std::unique_ptr<QuicConnection> connection,
     char source_address_token_secret[kInputKeyingMaterialLength];
     helper_->GetRandomGenerator()->RandBytes(source_address_token_secret,
                                              kInputKeyingMaterialLength);
-    quic_crypto_server_config_.reset(new QuicCryptoServerConfig(
+    quic_crypto_server_config_ = QuicMakeUnique<QuicCryptoServerConfig>(
         string(source_address_token_secret, kInputKeyingMaterialLength),
-        helper_->GetRandomGenerator(), std::move(proof_source)));
+        helper_->GetRandomGenerator(), std::move(proof_source),
+        TlsServerHandshaker::CreateSslCtx());
     // Provide server with serialized config string to prove ownership.
     QuicCryptoServerConfig::ConfigOptions options;
     // The |message| is used to handle the return value of AddDefaultConfig
@@ -147,10 +164,9 @@ QuicCryptoStream* QuartcSession::GetMutableCryptoStream() {
   return crypto_stream_.get();
 }
 
-QuartcStream* QuartcSession::CreateOutgoingDynamicStream(
-    SpdyPriority priority) {
+QuartcStream* QuartcSession::CreateOutgoingDynamicStream() {
   return ActivateDataStream(
-      CreateDataStream(GetNextOutgoingStreamId(), priority));
+      CreateDataStream(GetNextOutgoingStreamId(), kDefaultPriority));
 }
 
 void QuartcSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
@@ -187,6 +203,19 @@ void QuartcSession::ResetStream(QuicStreamId stream_id,
   if (stream) {
     stream->Reset(error);
   }
+}
+
+bool QuartcSession::IsOpenStream(QuicStreamId stream_id) {
+  return QuicSession::IsOpenStream(stream_id);
+}
+
+QuartcSessionStats QuartcSession::GetStats() {
+  QuartcSessionStats stats;
+  const QuicConnectionStats& connection_stats = connection_->GetStats();
+  stats.bandwidth_estimate = connection_stats.estimated_bandwidth;
+  stats.smoothed_rtt =
+      QuicTime::Delta::FromMicroseconds(connection_stats.srtt_us);
+  return stats;
 }
 
 void QuartcSession::OnConnectionClosed(QuicErrorCode error,
@@ -234,10 +263,16 @@ bool QuartcSession::ExportKeyingMaterial(const string& label,
   return success;
 }
 
+void QuartcSession::CloseConnection(const string& details) {
+  connection_->CloseConnection(
+      QuicErrorCode::QUIC_CONNECTION_CANCELLED, details,
+      ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET_WITH_NO_ACK);
+}
+
 QuartcStreamInterface* QuartcSession::CreateOutgoingStream(
     const OutgoingStreamParameters& param) {
   // The |param| is for forward-compatibility. Not used for now.
-  return CreateOutgoingDynamicStream(kDefaultPriority);
+  return CreateOutgoingDynamicStream();
 }
 
 void QuartcSession::SetDelegate(
@@ -250,6 +285,7 @@ void QuartcSession::SetDelegate(
 }
 
 void QuartcSession::OnTransportCanWrite() {
+  connection()->writer()->SetWritable();
   if (HasDataToWrite()) {
     connection()->OnCanWrite();
   }
@@ -286,10 +322,6 @@ QuicStream* QuartcSession::CreateIncomingDynamicStream(QuicStreamId id) {
   return ActivateDataStream(CreateDataStream(id, kDefaultPriority));
 }
 
-std::unique_ptr<QuicStream> QuartcSession::CreateStream(QuicStreamId id) {
-  return CreateDataStream(id, kDefaultPriority);
-}
-
 std::unique_ptr<QuartcStream> QuartcSession::CreateDataStream(
     QuicStreamId id,
     SpdyPriority priority) {
@@ -308,11 +340,6 @@ std::unique_ptr<QuartcStream> QuartcSession::CreateDataStream(
       DCHECK(session_delegate_);
       // Incoming streams need to be registered with the session_delegate_.
       session_delegate_->OnIncomingStream(stream.get());
-      // Quartc doesn't send on incoming streams.
-      stream->set_fin_sent(true);
-    } else {
-      // Quartc doesn't receive on outgoing streams.
-      stream->set_fin_received(true);
     }
   }
   return stream;

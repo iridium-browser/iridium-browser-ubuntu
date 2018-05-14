@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_embedder_interface.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
@@ -22,20 +23,24 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "services/metrics/public/cpp/ukm_recorder.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "ui/base/page_transition_types.h"
 
 // This macro invokes the specified method on each observer, passing the
 // variable length arguments as the method's arguments, and removes the observer
 // from the list of observers if the given method returns STOP_OBSERVING.
-#define INVOKE_AND_PRUNE_OBSERVERS(observers, Method, ...)    \
-  for (auto it = observers.begin(); it != observers.end();) { \
-    if ((*it)->Method(__VA_ARGS__) ==                         \
-        PageLoadMetricsObserver::STOP_OBSERVING) {            \
-      it = observers.erase(it);                               \
-    } else {                                                  \
-      ++it;                                                   \
-    }                                                         \
+#define INVOKE_AND_PRUNE_OBSERVERS(observers, Method, ...)      \
+  {                                                             \
+    TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),          \
+                 "PageLoadMetricsObserver::" #Method);          \
+    for (auto it = observers.begin(); it != observers.end();) { \
+      if ((*it)->Method(__VA_ARGS__) ==                         \
+          PageLoadMetricsObserver::STOP_OBSERVING) {            \
+        it = observers.erase(it);                               \
+      } else {                                                  \
+        ++it;                                                   \
+      }                                                         \
+    }                                                           \
   }
 
 namespace page_load_metrics {
@@ -129,6 +134,9 @@ void DispatchObserverTimingCallbacks(
   if (new_timing.document_timing->first_layout &&
       !last_timing.document_timing->first_layout)
     observer->OnFirstLayout(new_timing, extra_info);
+  if (new_timing.interactive_timing->first_input_delay &&
+      !last_timing.interactive_timing->first_input_delay)
+    observer->OnFirstInputInPage(new_timing, extra_info);
   if (new_timing.paint_timing->first_paint &&
       !last_timing.paint_timing->first_paint)
     observer->OnFirstPaintInPage(new_timing, extra_info);
@@ -144,6 +152,9 @@ void DispatchObserverTimingCallbacks(
   if (new_timing.paint_timing->first_meaningful_paint &&
       !last_timing.paint_timing->first_meaningful_paint)
     observer->OnFirstMeaningfulPaintInMainFrameDocument(new_timing, extra_info);
+  if (new_timing.interactive_timing->interactive &&
+      !last_timing.interactive_timing->interactive)
+    observer->OnPageInteractive(new_timing, extra_info);
   if (new_timing.parse_timing->parse_start &&
       !last_timing.parse_timing->parse_start)
     observer->OnParseStart(new_timing, extra_info);
@@ -178,7 +189,8 @@ PageLoadTracker::PageLoadTracker(
       aborted_chain_size_same_url_(aborted_chain_size_same_url),
       embedder_interface_(embedder_interface),
       metrics_update_dispatcher_(this, navigation_handle, embedder_interface),
-      source_id_(ukm::UkmRecorder::GetNewSourceID()) {
+      source_id_(ukm::ConvertToSourceId(navigation_handle->GetNavigationId(),
+                                        ukm::SourceIdType::NAVIGATION_ID)) {
   DCHECK(!navigation_handle->HasCommitted());
   embedder_interface_->RegisterObservers(this);
   INVOKE_AND_PRUNE_OBSERVERS(observers_, OnStart, navigation_handle,
@@ -334,12 +346,6 @@ void PageLoadTracker::Commit(content::NavigationHandle* navigation_handle) {
   const std::string& mime_type =
       navigation_handle->GetWebContents()->GetContentsMimeType();
   INVOKE_AND_PRUNE_OBSERVERS(observers_, ShouldObserveMimeType, mime_type);
-
-  // Only record page load UKM data for standard web page mime types, such as
-  // HTML and XHTML.
-  if (PageLoadMetricsObserver::IsStandardWebPageMimeType(mime_type))
-    RecordUkmSourceInfo();
-
   INVOKE_AND_PRUNE_OBSERVERS(observers_, OnCommit, navigation_handle,
                              source_id_);
   LogAbortChainHistograms(navigation_handle);
@@ -366,16 +372,6 @@ void PageLoadTracker::FailedProvisionalLoad(
   failed_provisional_load_info_.reset(new FailedProvisionalLoadInfo(
       failed_load_time - navigation_handle->NavigationStart(),
       navigation_handle->GetNetErrorCode()));
-  RecordUkmSourceInfo();
-}
-
-void PageLoadTracker::RecordUkmSourceInfo() {
-  ukm::UkmRecorder* ukm_recorder = g_browser_process->ukm_recorder();
-  if (!ukm_recorder)
-    return;
-
-  ukm_recorder->UpdateSourceURL(source_id_, start_url_);
-  ukm_recorder->UpdateSourceURL(source_id_, url_);
 }
 
 void PageLoadTracker::Redirect(content::NavigationHandle* navigation_handle) {
@@ -642,6 +638,14 @@ void PageLoadTracker::OnSubframeMetadataChanged() {
 void PageLoadTracker::BroadcastEventToObservers(const void* const event_key) {
   for (const auto& observer : observers_) {
     observer->OnEventOccurred(event_key);
+  }
+}
+
+void PageLoadTracker::UpdateFeaturesUsage(
+    const mojom::PageLoadFeatures& new_features) {
+  PageLoadExtraInfo extra_info(ComputePageLoadExtraInfo());
+  for (const auto& observer : observers_) {
+    observer->OnFeaturesUsageObserved(new_features, extra_info);
   }
 }
 

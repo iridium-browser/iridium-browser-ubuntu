@@ -68,7 +68,7 @@ QtCreatorWriter::QtCreatorWriter(const BuildSettings* build_settings,
       project_prefix_(project_prefix),
       root_target_name_(root_target_name) {}
 
-QtCreatorWriter::~QtCreatorWriter() {}
+QtCreatorWriter::~QtCreatorWriter() = default;
 
 void QtCreatorWriter::CollectDeps(const Target* target) {
   for (const auto& dep : target->GetDeps(Target::DEPS_ALL)) {
@@ -121,9 +121,11 @@ void QtCreatorWriter::HandleTarget(const Target* target) {
 
   AddToSources(target->sources());
   AddToSources(target->public_headers());
-  AddToSources(target->inputs());
 
   for (ConfigValuesIterator it(target); !it.done(); it.Next()) {
+    for (const auto& input : it.cur().inputs())
+      sources_.insert(FilePathToUTF8(build_settings_->GetFullPath(input)));
+
     SourceFile precompiled_source = it.cur().precompiled_source();
     if (!precompiled_source.is_null()) {
       sources_.insert(

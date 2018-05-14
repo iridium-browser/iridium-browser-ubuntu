@@ -69,7 +69,6 @@ class GbmBuffer : public ScanoutBuffer {
             uint32_t format,
             uint32_t flags,
             uint64_t modifier,
-            uint32_t addfb_flags,
             std::vector<base::ScopedFD>&& fds,
             const gfx::Size& size,
             const std::vector<gfx::NativePixmapPlane>&& planes);
@@ -80,9 +79,7 @@ class GbmBuffer : public ScanoutBuffer {
       gbm_bo* bo,
       uint32_t format,
       const gfx::Size& size,
-      uint32_t flags,
-      uint64_t modifiers,
-      uint32_t addfb_flags);
+      uint32_t flags);
 
   scoped_refptr<GbmDevice> drm_;
   gbm_bo* bo_;
@@ -119,6 +116,7 @@ class GbmPixmap : public gfx::NativePixmap {
   uint64_t GetDmaBufModifier(size_t plane) const override;
   gfx::BufferFormat GetBufferFormat() const override;
   gfx::Size GetBufferSize() const override;
+  uint32_t GetUniqueId() const override;
   bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
                             int plane_z_order,
                             gfx::OverlayTransform plane_transform,

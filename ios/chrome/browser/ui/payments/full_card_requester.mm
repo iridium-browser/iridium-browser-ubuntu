@@ -12,41 +12,9 @@
 #error "This file requires ARC support."
 #endif
 
-namespace {
-
-// The unmask prompt UI for Payment Request.
-class PRCardUnmaskPromptViewBridge
-    : public autofill::CardUnmaskPromptViewBridge {
- public:
-  PRCardUnmaskPromptViewBridge(autofill::CardUnmaskPromptController* controller,
-                               UIViewController* base_view_controller)
-      : autofill::CardUnmaskPromptViewBridge(controller),
-        base_view_controller_(base_view_controller) {}
-
-  // autofill::CardUnmaskPromptView:
-  void Show() override {
-    view_controller_.reset(
-        [[CardUnmaskPromptViewController alloc] initWithBridge:this]);
-    [view_controller_ setModalPresentationStyle:UIModalPresentationFormSheet];
-    [view_controller_
-        setModalTransitionStyle:UIModalTransitionStyleCoverVertical];
-    [base_view_controller_ presentViewController:view_controller_
-                                        animated:YES
-                                      completion:nil];
-  };
-
- private:
-  __weak UIViewController* base_view_controller_;
-  DISALLOW_COPY_AND_ASSIGN(PRCardUnmaskPromptViewBridge);
-};
-
-}  // namespace
-
-FullCardRequester::FullCardRequester(id<FullCardRequesterConsumer> consumer,
-                                     UIViewController* base_view_controller,
+FullCardRequester::FullCardRequester(UIViewController* base_view_controller,
                                      ios::ChromeBrowserState* browser_state)
-    : consumer_(consumer),
-      base_view_controller_(base_view_controller),
+    : base_view_controller_(base_view_controller),
       unmask_controller_(browser_state->GetPrefs(),
                          browser_state->IsOffTheRecord()) {}
 
@@ -62,22 +30,13 @@ void FullCardRequester::GetFullCard(
       result_delegate, AsWeakPtr());
 }
 
-void FullCardRequester::OnInstrumentDetailsReady(
-    const std::string& method_name,
-    const std::string& stringified_details) {
-  [consumer_ fullCardRequestDidSucceedWithMethodName:method_name
-                                  stringifiedDetails:stringified_details];
-}
-
 void FullCardRequester::ShowUnmaskPrompt(
     const autofill::CreditCard& card,
     autofill::AutofillClient::UnmaskCardReason reason,
     base::WeakPtr<autofill::CardUnmaskDelegate> delegate) {
-  unmask_controller_.ShowPrompt(
-      // PRCardUnmaskPromptViewBridge manages its own lifetime.
-      new PRCardUnmaskPromptViewBridge(&unmask_controller_,
-                                       base_view_controller_),
-      card, reason, delegate);
+  unmask_controller_.ShowPrompt(new autofill::CardUnmaskPromptViewBridge(
+                                    &unmask_controller_, base_view_controller_),
+                                card, reason, delegate);
 }
 
 void FullCardRequester::OnUnmaskVerificationResult(

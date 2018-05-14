@@ -47,6 +47,7 @@
 #include "platform/fonts/TextRenderingMode.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/graphics/TouchAction.h"
+#include "platform/scroll/ScrollCustomization.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "platform/text/TextRun.h"
 #include "platform/text/WritingMode.h"
@@ -154,8 +155,8 @@ inline EBorderStyle CSSIdentifierValue::ConvertTo() const {
 template <>
 inline OutlineIsAuto CSSIdentifierValue::ConvertTo() const {
   if (value_id_ == CSSValueAuto)
-    return kOutlineIsAutoOn;
-  return kOutlineIsAutoOff;
+    return OutlineIsAuto::kOn;
+  return OutlineIsAuto::kOff;
 }
 
 template <>
@@ -339,6 +340,9 @@ inline CSSIdentifierValue::CSSIdentifierValue(ControlPart e)
     case kMediaDownloadIconPart:
       value_id_ = CSSValueInternalMediaDownloadButton;
       break;
+    case kMediaControlPart:
+      value_id_ = CSSValueInternalMediaControl;
+      break;
     case kMenulistPart:
       value_id_ = CSSValueMenulist;
       break;
@@ -407,13 +411,13 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EFillAttachment e)
     : CSSValue(kIdentifierClass) {
   switch (e) {
-    case kScrollBackgroundAttachment:
+    case EFillAttachment::kScroll:
       value_id_ = CSSValueScroll;
       break;
-    case kLocalBackgroundAttachment:
+    case EFillAttachment::kLocal:
       value_id_ = CSSValueLocal;
       break;
-    case kFixedBackgroundAttachment:
+    case EFillAttachment::kFixed:
       value_id_ = CSSValueFixed;
       break;
   }
@@ -423,33 +427,33 @@ template <>
 inline EFillAttachment CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
     case CSSValueScroll:
-      return kScrollBackgroundAttachment;
+      return EFillAttachment::kScroll;
     case CSSValueLocal:
-      return kLocalBackgroundAttachment;
+      return EFillAttachment::kLocal;
     case CSSValueFixed:
-      return kFixedBackgroundAttachment;
+      return EFillAttachment::kFixed;
     default:
       break;
   }
 
   NOTREACHED();
-  return kScrollBackgroundAttachment;
+  return EFillAttachment::kScroll;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EFillBox e)
     : CSSValue(kIdentifierClass) {
   switch (e) {
-    case kBorderFillBox:
+    case EFillBox::kBorder:
       value_id_ = CSSValueBorderBox;
       break;
-    case kPaddingFillBox:
+    case EFillBox::kPadding:
       value_id_ = CSSValuePaddingBox;
       break;
-    case kContentFillBox:
+    case EFillBox::kContent:
       value_id_ = CSSValueContentBox;
       break;
-    case kTextFillBox:
+    case EFillBox::kText:
       value_id_ = CSSValueText;
       break;
   }
@@ -460,37 +464,37 @@ inline EFillBox CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
     case CSSValueBorder:
     case CSSValueBorderBox:
-      return kBorderFillBox;
+      return EFillBox::kBorder;
     case CSSValuePadding:
     case CSSValuePaddingBox:
-      return kPaddingFillBox;
+      return EFillBox::kPadding;
     case CSSValueContent:
     case CSSValueContentBox:
-      return kContentFillBox;
+      return EFillBox::kContent;
     case CSSValueText:
-      return kTextFillBox;
+      return EFillBox::kText;
     default:
       break;
   }
 
   NOTREACHED();
-  return kBorderFillBox;
+  return EFillBox::kBorder;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EFillRepeat e)
     : CSSValue(kIdentifierClass) {
   switch (e) {
-    case kRepeatFill:
+    case EFillRepeat::kRepeatFill:
       value_id_ = CSSValueRepeat;
       break;
-    case kNoRepeatFill:
+    case EFillRepeat::kNoRepeatFill:
       value_id_ = CSSValueNoRepeat;
       break;
-    case kRoundFill:
+    case EFillRepeat::kRoundFill:
       value_id_ = CSSValueRound;
       break;
-    case kSpaceFill:
+    case EFillRepeat::kSpaceFill:
       value_id_ = CSSValueSpace;
       break;
   }
@@ -500,35 +504,35 @@ template <>
 inline EFillRepeat CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
     case CSSValueRepeat:
-      return kRepeatFill;
+      return EFillRepeat::kRepeatFill;
     case CSSValueNoRepeat:
-      return kNoRepeatFill;
+      return EFillRepeat::kNoRepeatFill;
     case CSSValueRound:
-      return kRoundFill;
+      return EFillRepeat::kRoundFill;
     case CSSValueSpace:
-      return kSpaceFill;
+      return EFillRepeat::kSpaceFill;
     default:
       break;
   }
 
   NOTREACHED();
-  return kRepeatFill;
+  return EFillRepeat::kRepeatFill;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(BackgroundEdgeOrigin e)
     : CSSValue(kIdentifierClass) {
   switch (e) {
-    case kTopEdge:
+    case BackgroundEdgeOrigin::kTop:
       value_id_ = CSSValueTop;
       break;
-    case kRightEdge:
+    case BackgroundEdgeOrigin::kRight:
       value_id_ = CSSValueRight;
       break;
-    case kBottomEdge:
+    case BackgroundEdgeOrigin::kBottom:
       value_id_ = CSSValueBottom;
       break;
-    case kLeftEdge:
+    case BackgroundEdgeOrigin::kLeft:
       value_id_ = CSSValueLeft;
       break;
   }
@@ -538,19 +542,19 @@ template <>
 inline BackgroundEdgeOrigin CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
     case CSSValueTop:
-      return kTopEdge;
+      return BackgroundEdgeOrigin::kTop;
     case CSSValueRight:
-      return kRightEdge;
+      return BackgroundEdgeOrigin::kRight;
     case CSSValueBottom:
-      return kBottomEdge;
+      return BackgroundEdgeOrigin::kBottom;
     case CSSValueLeft:
-      return kLeftEdge;
+      return BackgroundEdgeOrigin::kLeft;
     default:
       break;
   }
 
   NOTREACHED();
-  return kTopEdge;
+  return BackgroundEdgeOrigin::kTop;
 }
 
 template <>
@@ -658,21 +662,6 @@ inline ETableLayout CSSIdentifierValue::ConvertTo() const {
 }
 
 template <>
-inline TextDecorationSkip CSSIdentifierValue::ConvertTo() const {
-  switch (value_id_) {
-    case CSSValueObjects:
-      return TextDecorationSkip::kObjects;
-    case CSSValueInk:
-      return TextDecorationSkip::kInk;
-    default:
-      break;
-  }
-
-  NOTREACHED();
-  return TextDecorationSkip::kObjects;
-}
-
-template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EVerticalAlign a)
     : CSSValue(kIdentifierClass) {
   switch (a) {
@@ -735,34 +724,6 @@ inline EVerticalAlign CSSIdentifierValue::ConvertTo() const {
 
   NOTREACHED();
   return EVerticalAlign::kTop;
-}
-
-template <>
-inline CSSIdentifierValue::CSSIdentifierValue(TextEmphasisPosition position)
-    : CSSValue(kIdentifierClass) {
-  switch (position) {
-    case TextEmphasisPosition::kOver:
-      value_id_ = CSSValueOver;
-      break;
-    case TextEmphasisPosition::kUnder:
-      value_id_ = CSSValueUnder;
-      break;
-  }
-}
-
-template <>
-inline TextEmphasisPosition CSSIdentifierValue::ConvertTo() const {
-  switch (value_id_) {
-    case CSSValueOver:
-      return TextEmphasisPosition::kOver;
-    case CSSValueUnder:
-      return TextEmphasisPosition::kUnder;
-    default:
-      break;
-  }
-
-  NOTREACHED();
-  return TextEmphasisPosition::kOver;
 }
 
 template <>
@@ -884,16 +845,16 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EFillSizeType fill_size)
     : CSSValue(kIdentifierClass) {
   switch (fill_size) {
-    case kContain:
+    case EFillSizeType::kContain:
       value_id_ = CSSValueContain;
       break;
-    case kCover:
+    case EFillSizeType::kCover:
       value_id_ = CSSValueCover;
       break;
-    case kSizeNone:
+    case EFillSizeType::kSizeNone:
       value_id_ = CSSValueNone;
       break;
-    case kSizeLength:
+    case EFillSizeType::kSizeLength:
     default:
       NOTREACHED();
   }
@@ -938,177 +899,6 @@ inline FontSmoothingMode CSSIdentifierValue::ConvertTo() const {
 
   NOTREACHED();
   return kAutoSmoothing;
-}
-
-template <>
-inline CSSIdentifierValue::CSSIdentifierValue(FontWeight weight)
-    : CSSValue(kIdentifierClass) {
-  switch (weight) {
-    case kFontWeight900:
-      value_id_ = CSSValue900;
-      return;
-    case kFontWeight800:
-      value_id_ = CSSValue800;
-      return;
-    case kFontWeight700:
-      value_id_ = CSSValueBold;
-      return;
-    case kFontWeight600:
-      value_id_ = CSSValue600;
-      return;
-    case kFontWeight500:
-      value_id_ = CSSValue500;
-      return;
-    case kFontWeight400:
-      value_id_ = CSSValueNormal;
-      return;
-    case kFontWeight300:
-      value_id_ = CSSValue300;
-      return;
-    case kFontWeight200:
-      value_id_ = CSSValue200;
-      return;
-    case kFontWeight100:
-      value_id_ = CSSValue100;
-      return;
-  }
-
-  NOTREACHED();
-  value_id_ = CSSValueNormal;
-}
-
-template <>
-inline FontWeight CSSIdentifierValue::ConvertTo() const {
-  switch (value_id_) {
-    case CSSValueBold:
-      return kFontWeightBold;
-    case CSSValueNormal:
-      return kFontWeightNormal;
-    case CSSValue900:
-      return kFontWeight900;
-    case CSSValue800:
-      return kFontWeight800;
-    case CSSValue700:
-      return kFontWeight700;
-    case CSSValue600:
-      return kFontWeight600;
-    case CSSValue500:
-      return kFontWeight500;
-    case CSSValue400:
-      return kFontWeight400;
-    case CSSValue300:
-      return kFontWeight300;
-    case CSSValue200:
-      return kFontWeight200;
-    case CSSValue100:
-      return kFontWeight100;
-    default:
-      break;
-  }
-
-  NOTREACHED();
-  return kFontWeightNormal;
-}
-
-template <>
-inline CSSIdentifierValue::CSSIdentifierValue(FontStyle italic)
-    : CSSValue(kIdentifierClass) {
-  switch (italic) {
-    case kFontStyleNormal:
-      value_id_ = CSSValueNormal;
-      return;
-    case kFontStyleOblique:
-      value_id_ = CSSValueOblique;
-      return;
-    case kFontStyleItalic:
-      value_id_ = CSSValueItalic;
-      return;
-  }
-
-  NOTREACHED();
-  value_id_ = CSSValueNormal;
-}
-
-template <>
-inline FontStyle CSSIdentifierValue::ConvertTo() const {
-  switch (value_id_) {
-    case CSSValueOblique:
-      return kFontStyleOblique;
-    case CSSValueItalic:
-      return kFontStyleItalic;
-    case CSSValueNormal:
-      return kFontStyleNormal;
-    default:
-      break;
-  }
-  NOTREACHED();
-  return kFontStyleNormal;
-}
-
-template <>
-inline CSSIdentifierValue::CSSIdentifierValue(FontStretch stretch)
-    : CSSValue(kIdentifierClass) {
-  switch (stretch) {
-    case kFontStretchUltraCondensed:
-      value_id_ = CSSValueUltraCondensed;
-      return;
-    case kFontStretchExtraCondensed:
-      value_id_ = CSSValueExtraCondensed;
-      return;
-    case kFontStretchCondensed:
-      value_id_ = CSSValueCondensed;
-      return;
-    case kFontStretchSemiCondensed:
-      value_id_ = CSSValueSemiCondensed;
-      return;
-    case kFontStretchNormal:
-      value_id_ = CSSValueNormal;
-      return;
-    case kFontStretchSemiExpanded:
-      value_id_ = CSSValueSemiExpanded;
-      return;
-    case kFontStretchExpanded:
-      value_id_ = CSSValueExpanded;
-      return;
-    case kFontStretchExtraExpanded:
-      value_id_ = CSSValueExtraExpanded;
-      return;
-    case kFontStretchUltraExpanded:
-      value_id_ = CSSValueUltraExpanded;
-      return;
-  }
-
-  NOTREACHED();
-  value_id_ = CSSValueNormal;
-}
-
-template <>
-inline FontStretch CSSIdentifierValue::ConvertTo() const {
-  switch (value_id_) {
-    case CSSValueUltraCondensed:
-      return kFontStretchUltraCondensed;
-    case CSSValueExtraCondensed:
-      return kFontStretchExtraCondensed;
-    case CSSValueCondensed:
-      return kFontStretchCondensed;
-    case CSSValueSemiCondensed:
-      return kFontStretchSemiCondensed;
-    case CSSValueNormal:
-      return kFontStretchNormal;
-    case CSSValueSemiExpanded:
-      return kFontStretchSemiExpanded;
-    case CSSValueExpanded:
-      return kFontStretchExpanded;
-    case CSSValueExtraExpanded:
-      return kFontStretchExtraExpanded;
-    case CSSValueUltraExpanded:
-      return kFontStretchUltraExpanded;
-    default:
-      break;
-  }
-
-  NOTREACHED();
-  return kFontStretchNormal;
 }
 
 template <>
@@ -1722,22 +1512,50 @@ inline TouchAction CSSIdentifierValue::ConvertTo() const {
 }
 
 template <>
+inline ScrollCustomization::ScrollDirection CSSIdentifierValue::ConvertTo()
+    const {
+  switch (value_id_) {
+    case CSSValueNone:
+      return ScrollCustomization::kScrollDirectionNone;
+    case CSSValueAuto:
+      return ScrollCustomization::kScrollDirectionAuto;
+    case CSSValuePanLeft:
+      return ScrollCustomization::kScrollDirectionPanLeft;
+    case CSSValuePanRight:
+      return ScrollCustomization::kScrollDirectionPanRight;
+    case CSSValuePanX:
+      return ScrollCustomization::kScrollDirectionPanX;
+    case CSSValuePanUp:
+      return ScrollCustomization::kScrollDirectionPanUp;
+    case CSSValuePanDown:
+      return ScrollCustomization::kScrollDirectionPanDown;
+    case CSSValuePanY:
+      return ScrollCustomization::kScrollDirectionPanY;
+    default:
+      break;
+  }
+
+  NOTREACHED();
+  return ScrollCustomization::kScrollDirectionNone;
+}
+
+template <>
 inline CSSIdentifierValue::CSSIdentifierValue(CSSBoxType css_box)
     : CSSValue(kIdentifierClass) {
   switch (css_box) {
-    case kMarginBox:
+    case CSSBoxType::kMargin:
       value_id_ = CSSValueMarginBox;
       break;
-    case kBorderBox:
+    case CSSBoxType::kBorder:
       value_id_ = CSSValueBorderBox;
       break;
-    case kPaddingBox:
+    case CSSBoxType::kPadding:
       value_id_ = CSSValuePaddingBox;
       break;
-    case kContentBox:
+    case CSSBoxType::kContent:
       value_id_ = CSSValueContentBox;
       break;
-    case kBoxMissing:
+    case CSSBoxType::kMissing:
       // The missing box should convert to a null primitive value.
       NOTREACHED();
   }
@@ -1747,64 +1565,67 @@ template <>
 inline CSSBoxType CSSIdentifierValue::ConvertTo() const {
   switch (GetValueID()) {
     case CSSValueMarginBox:
-      return kMarginBox;
+      return CSSBoxType::kMargin;
     case CSSValueBorderBox:
-      return kBorderBox;
+      return CSSBoxType::kBorder;
     case CSSValuePaddingBox:
-      return kPaddingBox;
+      return CSSBoxType::kPadding;
     case CSSValueContentBox:
-      return kContentBox;
+      return CSSBoxType::kContent;
     default:
       break;
   }
   NOTREACHED();
-  return kContentBox;
+  return CSSBoxType::kContent;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(ItemPosition item_position)
     : CSSValue(kIdentifierClass) {
   switch (item_position) {
-    case kItemPositionAuto:
+    case ItemPosition::kLegacy:
+      value_id_ = CSSValueLegacy;
+      break;
+    case ItemPosition::kAuto:
       value_id_ = CSSValueAuto;
       break;
-    case kItemPositionNormal:
+    case ItemPosition::kNormal:
       value_id_ = CSSValueNormal;
       break;
-    case kItemPositionStretch:
+    case ItemPosition::kStretch:
       value_id_ = CSSValueStretch;
       break;
-    case kItemPositionBaseline:
+    case ItemPosition::kBaseline:
       value_id_ = CSSValueBaseline;
       break;
-    case kItemPositionLastBaseline:
+    case ItemPosition::kLastBaseline:
       value_id_ = CSSValueLastBaseline;
       break;
-    case kItemPositionCenter:
+    case ItemPosition::kCenter:
       value_id_ = CSSValueCenter;
       break;
-    case kItemPositionStart:
+    case ItemPosition::kStart:
       value_id_ = CSSValueStart;
       break;
-    case kItemPositionEnd:
+    case ItemPosition::kEnd:
       value_id_ = CSSValueEnd;
       break;
-    case kItemPositionSelfStart:
+    case ItemPosition::kSelfStart:
       value_id_ = CSSValueSelfStart;
       break;
-    case kItemPositionSelfEnd:
+    case ItemPosition::kSelfEnd:
       value_id_ = CSSValueSelfEnd;
       break;
-    case kItemPositionFlexStart:
+    case ItemPosition::kFlexStart:
       value_id_ = CSSValueFlexStart;
       break;
-    case kItemPositionFlexEnd:
+    case ItemPosition::kFlexEnd:
       value_id_ = CSSValueFlexEnd;
       break;
-    case kItemPositionLeft:
+    case ItemPosition::kLeft:
       value_id_ = CSSValueLeft;
       break;
-    case kItemPositionRight:
+    case ItemPosition::kRight:
       value_id_ = CSSValueRight;
       break;
   }
@@ -1813,75 +1634,77 @@ inline CSSIdentifierValue::CSSIdentifierValue(ItemPosition item_position)
 template <>
 inline ItemPosition CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
+    case CSSValueLegacy:
+      return ItemPosition::kLegacy;
     case CSSValueAuto:
-      return kItemPositionAuto;
+      return ItemPosition::kAuto;
     case CSSValueNormal:
-      return kItemPositionNormal;
+      return ItemPosition::kNormal;
     case CSSValueStretch:
-      return kItemPositionStretch;
+      return ItemPosition::kStretch;
     case CSSValueBaseline:
-      return kItemPositionBaseline;
+      return ItemPosition::kBaseline;
     case CSSValueFirstBaseline:
-      return kItemPositionBaseline;
+      return ItemPosition::kBaseline;
     case CSSValueLastBaseline:
-      return kItemPositionLastBaseline;
+      return ItemPosition::kLastBaseline;
     case CSSValueCenter:
-      return kItemPositionCenter;
+      return ItemPosition::kCenter;
     case CSSValueStart:
-      return kItemPositionStart;
+      return ItemPosition::kStart;
     case CSSValueEnd:
-      return kItemPositionEnd;
+      return ItemPosition::kEnd;
     case CSSValueSelfStart:
-      return kItemPositionSelfStart;
+      return ItemPosition::kSelfStart;
     case CSSValueSelfEnd:
-      return kItemPositionSelfEnd;
+      return ItemPosition::kSelfEnd;
     case CSSValueFlexStart:
-      return kItemPositionFlexStart;
+      return ItemPosition::kFlexStart;
     case CSSValueFlexEnd:
-      return kItemPositionFlexEnd;
+      return ItemPosition::kFlexEnd;
     case CSSValueLeft:
-      return kItemPositionLeft;
+      return ItemPosition::kLeft;
     case CSSValueRight:
-      return kItemPositionRight;
+      return ItemPosition::kRight;
     default:
       break;
   }
   NOTREACHED();
-  return kItemPositionAuto;
+  return ItemPosition::kAuto;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(ContentPosition content_position)
     : CSSValue(kIdentifierClass) {
   switch (content_position) {
-    case kContentPositionNormal:
+    case ContentPosition::kNormal:
       value_id_ = CSSValueNormal;
       break;
-    case kContentPositionBaseline:
+    case ContentPosition::kBaseline:
       value_id_ = CSSValueBaseline;
       break;
-    case kContentPositionLastBaseline:
+    case ContentPosition::kLastBaseline:
       value_id_ = CSSValueLastBaseline;
       break;
-    case kContentPositionCenter:
+    case ContentPosition::kCenter:
       value_id_ = CSSValueCenter;
       break;
-    case kContentPositionStart:
+    case ContentPosition::kStart:
       value_id_ = CSSValueStart;
       break;
-    case kContentPositionEnd:
+    case ContentPosition::kEnd:
       value_id_ = CSSValueEnd;
       break;
-    case kContentPositionFlexStart:
+    case ContentPosition::kFlexStart:
       value_id_ = CSSValueFlexStart;
       break;
-    case kContentPositionFlexEnd:
+    case ContentPosition::kFlexEnd:
       value_id_ = CSSValueFlexEnd;
       break;
-    case kContentPositionLeft:
+    case ContentPosition::kLeft:
       value_id_ = CSSValueLeft;
       break;
-    case kContentPositionRight:
+    case ContentPosition::kRight:
       value_id_ = CSSValueRight;
       break;
   }
@@ -1891,32 +1714,32 @@ template <>
 inline ContentPosition CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
     case CSSValueNormal:
-      return kContentPositionNormal;
+      return ContentPosition::kNormal;
     case CSSValueBaseline:
-      return kContentPositionBaseline;
+      return ContentPosition::kBaseline;
     case CSSValueFirstBaseline:
-      return kContentPositionBaseline;
+      return ContentPosition::kBaseline;
     case CSSValueLastBaseline:
-      return kContentPositionLastBaseline;
+      return ContentPosition::kLastBaseline;
     case CSSValueCenter:
-      return kContentPositionCenter;
+      return ContentPosition::kCenter;
     case CSSValueStart:
-      return kContentPositionStart;
+      return ContentPosition::kStart;
     case CSSValueEnd:
-      return kContentPositionEnd;
+      return ContentPosition::kEnd;
     case CSSValueFlexStart:
-      return kContentPositionFlexStart;
+      return ContentPosition::kFlexStart;
     case CSSValueFlexEnd:
-      return kContentPositionFlexEnd;
+      return ContentPosition::kFlexEnd;
     case CSSValueLeft:
-      return kContentPositionLeft;
+      return ContentPosition::kLeft;
     case CSSValueRight:
-      return kContentPositionRight;
+      return ContentPosition::kRight;
     default:
       break;
   }
   NOTREACHED();
-  return kContentPositionNormal;
+  return ContentPosition::kNormal;
 }
 
 template <>
@@ -1924,19 +1747,19 @@ inline CSSIdentifierValue::CSSIdentifierValue(
     ContentDistributionType content_distribution)
     : CSSValue(kIdentifierClass) {
   switch (content_distribution) {
-    case kContentDistributionDefault:
+    case ContentDistributionType::kDefault:
       value_id_ = CSSValueDefault;
       break;
-    case kContentDistributionSpaceBetween:
+    case ContentDistributionType::kSpaceBetween:
       value_id_ = CSSValueSpaceBetween;
       break;
-    case kContentDistributionSpaceAround:
+    case ContentDistributionType::kSpaceAround:
       value_id_ = CSSValueSpaceAround;
       break;
-    case kContentDistributionSpaceEvenly:
+    case ContentDistributionType::kSpaceEvenly:
       value_id_ = CSSValueSpaceEvenly;
       break;
-    case kContentDistributionStretch:
+    case ContentDistributionType::kStretch:
       value_id_ = CSSValueStretch;
       break;
   }
@@ -1946,18 +1769,18 @@ template <>
 inline ContentDistributionType CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
     case CSSValueSpaceBetween:
-      return kContentDistributionSpaceBetween;
+      return ContentDistributionType::kSpaceBetween;
     case CSSValueSpaceAround:
-      return kContentDistributionSpaceAround;
+      return ContentDistributionType::kSpaceAround;
     case CSSValueSpaceEvenly:
-      return kContentDistributionSpaceEvenly;
+      return ContentDistributionType::kSpaceEvenly;
     case CSSValueStretch:
-      return kContentDistributionStretch;
+      return ContentDistributionType::kStretch;
     default:
       break;
   }
   NOTREACHED();
-  return kContentDistributionStretch;
+  return ContentDistributionType::kStretch;
 }
 
 template <>
@@ -1965,13 +1788,13 @@ inline CSSIdentifierValue::CSSIdentifierValue(
     OverflowAlignment overflow_alignment)
     : CSSValue(kIdentifierClass) {
   switch (overflow_alignment) {
-    case kOverflowAlignmentDefault:
+    case OverflowAlignment::kDefault:
       value_id_ = CSSValueDefault;
       break;
-    case kOverflowAlignmentUnsafe:
+    case OverflowAlignment::kUnsafe:
       value_id_ = CSSValueUnsafe;
       break;
-    case kOverflowAlignmentSafe:
+    case OverflowAlignment::kSafe:
       value_id_ = CSSValueSafe;
       break;
   }
@@ -1981,14 +1804,14 @@ template <>
 inline OverflowAlignment CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
     case CSSValueUnsafe:
-      return kOverflowAlignmentUnsafe;
+      return OverflowAlignment::kUnsafe;
     case CSSValueSafe:
-      return kOverflowAlignmentSafe;
+      return OverflowAlignment::kSafe;
     default:
       break;
   }
   NOTREACHED();
-  return kOverflowAlignmentUnsafe;
+  return OverflowAlignment::kUnsafe;
 }
 
 template <>
@@ -2026,19 +1849,19 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(SnapAxis axis)
     : CSSValue(kIdentifierClass) {
   switch (axis) {
-    case kSnapAxisX:
+    case SnapAxis::kX:
       value_id_ = CSSValueX;
       break;
-    case kSnapAxisY:
+    case SnapAxis::kY:
       value_id_ = CSSValueY;
       break;
-    case kSnapAxisBlock:
+    case SnapAxis::kBlock:
       value_id_ = CSSValueBlock;
       break;
-    case kSnapAxisInline:
+    case SnapAxis::kInline:
       value_id_ = CSSValueInline;
       break;
-    case kSnapAxisBoth:
+    case SnapAxis::kBoth:
       value_id_ = CSSValueBoth;
       break;
   }
@@ -2048,30 +1871,30 @@ template <>
 inline SnapAxis CSSIdentifierValue::ConvertTo() const {
   switch (GetValueID()) {
     case CSSValueX:
-      return kSnapAxisX;
+      return SnapAxis::kX;
     case CSSValueY:
-      return kSnapAxisY;
+      return SnapAxis::kY;
     case CSSValueBlock:
-      return kSnapAxisBlock;
+      return SnapAxis::kBlock;
     case CSSValueInline:
-      return kSnapAxisInline;
+      return SnapAxis::kInline;
     case CSSValueBoth:
-      return kSnapAxisBoth;
+      return SnapAxis::kBoth;
     default:
       break;
   }
   NOTREACHED();
-  return kSnapAxisBoth;
+  return SnapAxis::kBoth;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(SnapStrictness strictness)
     : CSSValue(kIdentifierClass) {
   switch (strictness) {
-    case kSnapStrictnessProximity:
+    case SnapStrictness::kProximity:
       value_id_ = CSSValueProximity;
       break;
-    case kSnapStrictnessMandatory:
+    case SnapStrictness::kMandatory:
       value_id_ = CSSValueMandatory;
       break;
   }
@@ -2081,30 +1904,30 @@ template <>
 inline SnapStrictness CSSIdentifierValue::ConvertTo() const {
   switch (GetValueID()) {
     case CSSValueProximity:
-      return kSnapStrictnessProximity;
+      return SnapStrictness::kProximity;
     case CSSValueMandatory:
-      return kSnapStrictnessMandatory;
+      return SnapStrictness::kMandatory;
     default:
       break;
   }
   NOTREACHED();
-  return kSnapStrictnessProximity;
+  return SnapStrictness::kProximity;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(SnapAlignment alignment)
     : CSSValue(kIdentifierClass) {
   switch (alignment) {
-    case kSnapAlignmentNone:
+    case SnapAlignment::kNone:
       value_id_ = CSSValueNone;
       break;
-    case kSnapAlignmentStart:
+    case SnapAlignment::kStart:
       value_id_ = CSSValueStart;
       break;
-    case kSnapAlignmentEnd:
+    case SnapAlignment::kEnd:
       value_id_ = CSSValueEnd;
       break;
-    case kSnapAlignmentCenter:
+    case SnapAlignment::kCenter:
       value_id_ = CSSValueCenter;
       break;
   }
@@ -2114,18 +1937,18 @@ template <>
 inline SnapAlignment CSSIdentifierValue::ConvertTo() const {
   switch (GetValueID()) {
     case CSSValueNone:
-      return kSnapAlignmentNone;
+      return SnapAlignment::kNone;
     case CSSValueStart:
-      return kSnapAlignmentStart;
+      return SnapAlignment::kStart;
     case CSSValueEnd:
-      return kSnapAlignmentEnd;
+      return SnapAlignment::kEnd;
     case CSSValueCenter:
-      return kSnapAlignmentCenter;
+      return SnapAlignment::kCenter;
     default:
       break;
   }
   NOTREACHED();
-  return kSnapAlignmentNone;
+  return SnapAlignment::kNone;
 }
 
 template <>

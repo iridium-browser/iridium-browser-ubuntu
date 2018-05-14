@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -18,13 +19,13 @@ from chromite.cbuildbot import topology
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import test_stages
 from chromite.lib import buildbucket_lib
+from chromite.lib import builder_status_lib
 from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import failures_lib
 from chromite.lib import git
-from chromite.lib import metrics
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import portage_util
@@ -62,11 +63,12 @@ class CleanUpStage(generic_stages.BuilderStage):
   def _DeleteChroot(self):
     logging.info('Deleting chroot.')
     chroot = os.path.join(self._build_root, constants.DEFAULT_CHROOT_DIR)
-    if os.path.exists(chroot):
+    if os.path.exists(chroot) or os.path.exists(chroot + '.img'):
       # At this stage, it's not safe to run the cros_sdk inside the buildroot
       # itself because we haven't sync'd yet, and the version of the chromite
       # in there might be broken. Since we've already unmounted everything in
       # there, we can just remove it using rm -rf.
+      cros_build_lib.CleanupChrootMount(chroot, delete_image=True)
       osutils.RmDir(chroot, ignore_missing=True, sudo=True)
 
   def _DeleteArchivedTrybotImages(self):
@@ -156,29 +158,10 @@ class CleanUpStage(generic_stages.BuilderStage):
           logging.info('Found builds %s in status %s.', ids, status)
           buildbucket_ids.extend(ids)
 
-      if buildbucket_ids:
-        logging.info('Going to cancel buildbucket_ids: %s', buildbucket_ids)
-
-        if not self._run.options.debug:
-          fields = {'build_type': self._run.config.build_type,
-                    'build_name': self._run.config.name}
-          metrics.Counter(constants.MON_BB_CANCEL_BATCH_BUILDS_COUNT).increment(
-              fields=fields)
-
-        cancel_content = buildbucket_client.CancelBatchBuildsRequest(
-            buildbucket_ids,
-            dryrun=self._run.options.debug)
-
-        result_map = buildbucket_lib.GetResultMap(cancel_content)
-        for buildbucket_id, result in result_map.iteritems():
-          # Check if the result contains error messages.
-          if buildbucket_lib.GetNestedAttr(result, ['error']):
-            # TODO(nxia): Get build url and log url in the warnings.
-            logging.warning("Error cancelling build %s with reason: %s. "
-                            "Please check the status of the build.",
-                            buildbucket_id,
-                            buildbucket_lib.GetErrorReason(result))
-
+      builder_status_lib.CancelBuilds(buildbucket_ids,
+                                      buildbucket_client,
+                                      self._run.options.debug,
+                                      self._run.config)
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
     if (not (self._run.options.buildbot or self._run.options.remote_trybot)
@@ -204,7 +187,16 @@ class CleanUpStage(generic_stages.BuilderStage):
                           self._build_root, e)
 
     # Clean mount points first to be safe about deleting.
-    commands.CleanUpMountPoints(self._build_root)
+    cros_build_lib.CleanupChrootMount(buildroot=self._build_root)
+    osutils.UmountTree(self._build_root)
+
+    # Re-mount chroot if it exists so that subsequent steps can clean up inside.
+    try:
+      cros_build_lib.MountChroot(buildroot=self._build_root, create=False)
+    except cros_build_lib.RunCommandError as e:
+      logging.error('Unable to mount chroot under %s.  Deleting chroot.  '
+                    'Error: %s', self._build_root, e)
+      self._DeleteChroot()
 
     if manifest is None:
       self._DeleteChroot()
@@ -248,7 +240,16 @@ class InitSDKStage(generic_stages.BuilderStage):
     super(InitSDKStage, self).__init__(builder_run, **kwargs)
     self.force_chroot_replace = chroot_replace
 
+  def DepotToolsEnsureBootstrap(self):
+    """Ensure that depot_tools binaries are populated."""
+    depot_tools_path = constants.DEPOT_TOOLS_DIR
+    ensure_bootstrap_script = os.path.join(depot_tools_path, 'ensure_bootstrap')
+    cros_build_lib.RunCommand([ensure_bootstrap_script], cwd=depot_tools_path)
+
   def PerformStage(self):
+    # This prepares depot_tools in the source tree, in advance.
+    self.DepotToolsEnsureBootstrap()
+
     chroot_path = os.path.join(self._build_root, constants.DEFAULT_CHROOT_DIR)
     replace = self._run.config.chroot_replace or self.force_chroot_replace
     pre_ver = post_ver = None
@@ -417,8 +418,12 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
     if not self._ShouldEnableGoma():
       return None
 
+    # TODO(crbug.com/751010): Revisit to enable DepsCache for non-chrome-pfq
+    # bots, too.
+    use_goma_deps_cache = self._run.config.name.endswith('chrome-pfq')
     goma = goma_util.Goma(
-        self._run.options.goma_dir, self._run.options.goma_client_json)
+        self._run.options.goma_dir, self._run.options.goma_client_json,
+        stage_name=self.StageNamePrefix() if use_goma_deps_cache else None)
 
     # Set USE_GOMA env var so that chrome is built with goma.
     self._portage_extra_env['USE_GOMA'] = 'true'
@@ -436,8 +441,6 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
     return chroot_args
 
   def PerformStage(self):
-    # If we have rietveld patches, always compile Chrome from source.
-    noworkon = not self._run.options.rietveld_patches
     packages = self.GetListOfPackagesToBuild()
     self.VerifyChromeBinpkg(packages)
     self.RecordPackagesUnderTest(packages)
@@ -464,7 +467,6 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
                    packages=packages,
                    skip_chroot_upgrade=True,
                    chrome_root=self._run.options.chrome_root,
-                   noworkon=noworkon,
                    noretry=self._run.config.nobuildretry,
                    chroot_args=chroot_args,
                    extra_env=self._portage_extra_env,
@@ -494,14 +496,11 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
       logging.info('No build-events.json file to archive')
 
     if self._update_metadata:
-      # TODO: Consider moving this into its own stage if there are other similar
-      # things to do after build_packages.
-      # sjg@chromium.org: Considered, but gosh there are a lot of stages
-      # already. What is the benefit?
-
       # Extract firmware version information from the newly created updater.
-      main, ec = commands.GetFirmwareVersions(self._build_root,
-                                              self._current_board)
+      fw_versions = commands.GetFirmwareVersions(self._build_root,
+                                                 self._current_board)
+      main = fw_versions.main_rw or fw_versions.main
+      ec = fw_versions.ec_rw or fw_versions.ec
       update_dict = {'main-firmware-version': main, 'ec-firmware-version': ec}
       self._run.attrs.metadata.UpdateBoardDictWithDict(
           self._current_board, update_dict)
@@ -513,12 +512,25 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
                                        update_dict)
 
       # Get a list of models supported by this board.
-      models = commands.GetModels(self._build_root, self._current_board)
+      models = commands.GetModels(
+          self._build_root, cros_build_lib.GetSysroot(self._current_board))
       self._run.attrs.metadata.UpdateWithDict({'unibuild': bool(models)})
-      # TODO(sjg@chromium.org): Adjust the code above to write the firmware
-      # version for each model, rather than for the build as a whole. This
-      # will require an updated chromeos-firmwareupdate tool as well as an
-      # updated firmware package.
+      if models:
+        all_fw_versions = commands.GetAllFirmwareVersions(self._build_root,
+                                                          self._current_board)
+        models_data = {}
+        for model in models:
+          if model in all_fw_versions:
+            fw_versions = all_fw_versions[model]
+            ec = fw_versions.ec_rw or fw_versions.ec
+            main_ro = fw_versions.main
+            main_rw = fw_versions.main_rw
+            models_data[model] = {'main-readonly-firmware-version': main_ro,
+                                  'main-readwrite-firmware-version': main_rw,
+                                  'ec-firmware-version': ec}
+        if models_data:
+          self._run.attrs.metadata.UpdateBoardDictWithDict(
+              self._current_board, {'models': models_data})
 
 
 class BuildImageStage(BuildPackagesStage):
@@ -677,5 +689,4 @@ class RegenPortageCacheStage(generic_stages.BuilderStage):
 
   def PerformStage(self):
     _, push_overlays = self._ExtractOverlays()
-    inputs = [[overlay] for overlay in push_overlays if os.path.isdir(overlay)]
-    parallel.RunTasksInProcessPool(portage_util.RegenCache, inputs)
+    commands.RegenPortageCache(push_overlays)

@@ -4,9 +4,10 @@
 
 #include "chromeos/components/tether/fake_active_host.h"
 
+#include <memory>
+
 #include "base/base64.h"
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "components/cryptauth/remote_device.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,7 +22,7 @@ FakeActiveHost::FakeActiveHost()
       tether_network_guid_(std::string()),
       wifi_network_guid_(std::string()) {}
 
-FakeActiveHost::~FakeActiveHost() {}
+FakeActiveHost::~FakeActiveHost() = default;
 
 void FakeActiveHost::SetActiveHostDisconnected() {
   SetActiveHost(ActiveHost::ActiveHostStatus::DISCONNECTED, "", "", "");
@@ -53,7 +54,7 @@ void FakeActiveHost::GetActiveHost(
     ASSERT_TRUE(base::Base64Decode(GetActiveHostDeviceId(), &public_key));
 
     // Create a new RemoteDevice and set its public key.
-    remote_device = base::MakeUnique<cryptauth::RemoteDevice>();
+    remote_device = std::make_unique<cryptauth::RemoteDevice>();
     remote_device->public_key = public_key;
   }
 

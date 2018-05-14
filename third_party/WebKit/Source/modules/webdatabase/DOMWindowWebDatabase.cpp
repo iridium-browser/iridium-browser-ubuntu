@@ -27,12 +27,13 @@
 #include "modules/webdatabase/DOMWindowWebDatabase.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/modules/v8/DatabaseCallback.h"
+#include "bindings/modules/v8/v8_database_callback.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalDOMWindow.h"
+#include "core/frame/UseCounter.h"
 #include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseManager.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/SecurityOrigin.h"
 
 namespace blink {
@@ -53,7 +54,7 @@ Database* DOMWindowWebDatabase::openDatabase(
     const String& version,
     const String& display_name,
     unsigned estimated_size,
-    DatabaseCallback* creation_callback,
+    V8DatabaseCallback* creation_callback,
     ExceptionState& exception_state) {
   if (!window.IsCurrentlyDisplayedInFrame())
     return nullptr;
@@ -63,6 +64,9 @@ Database* DOMWindowWebDatabase::openDatabase(
   DatabaseError error = DatabaseError::kNone;
   if (RuntimeEnabledFeatures::DatabaseEnabled() &&
       window.document()->GetSecurityOrigin()->CanAccessDatabase()) {
+    if (window.document()->GetSecurityOrigin()->IsLocal())
+      UseCounter::Count(window.document(), WebFeature::kFileAccessedDatabase);
+
     String error_message;
     database = db_manager.OpenDatabase(window.document(), name, version,
                                        display_name, estimated_size,

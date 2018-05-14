@@ -29,10 +29,12 @@
 
 #include "core/dom/Document.h"
 
+#include "core/dom/events/ScopedEventQueue.h"
+#include "core/editing/EditingTriState.h"
 #include "core/editing/Editor.h"
-#include "core/events/ScopedEventQueue.h"
+#include "core/editing/commands/EditingCommandsUtilities.h"
 #include "core/frame/UseCounter.h"
-#include "core/html/TextControlElement.h"
+#include "core/html/forms/TextControlElement.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "platform/Histogram.h"
 #include "platform/wtf/AutoReset.h"
@@ -83,7 +85,7 @@ bool Document::execCommand(const String& command_name,
   // Postpone DOM mutation events, which can execute scripts and change
   // DOM tree against implementation assumption.
   EventQueueScope event_queue_scope;
-  Editor::TidyUpHTMLStructure(*this);
+  TidyUpHTMLStructure(*this);
   Editor::Command editor_command = GetCommand(this, command_name);
 
   DEFINE_STATIC_LOCAL(SparseHistogram, editor_command_histogram,
@@ -113,7 +115,7 @@ bool Document::queryCommandIndeterm(const String& command_name,
     return false;
   }
 
-  return GetCommand(this, command_name).GetState() == kMixedTriState;
+  return GetCommand(this, command_name).GetState() == EditingTriState::kMixed;
 }
 
 bool Document::queryCommandState(const String& command_name,
@@ -125,7 +127,7 @@ bool Document::queryCommandState(const String& command_name,
     return false;
   }
 
-  return GetCommand(this, command_name).GetState() == kTrueTriState;
+  return GetCommand(this, command_name).GetState() == EditingTriState::kTrue;
 }
 
 bool Document::queryCommandSupported(const String& command_name,

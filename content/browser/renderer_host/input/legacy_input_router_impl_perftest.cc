@@ -10,7 +10,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_task_environment.h"
-#include "content/browser/renderer_host/input/input_ack_handler.h"
+#include "content/browser/renderer_host/input/input_disposition_handler.h"
 #include "content/browser/renderer_host/input/input_router_client.h"
 #include "content/browser/renderer_host/input/legacy_input_router_impl.h"
 #include "content/common/input_messages.h"
@@ -33,29 +33,34 @@ namespace content {
 
 namespace {
 
-class NullInputAckHandler : public InputAckHandler {
+class NullInputDispositionHandler : public InputDispositionHandler {
  public:
-  NullInputAckHandler() : ack_count_(0) {}
-  ~NullInputAckHandler() override {}
+  NullInputDispositionHandler() : ack_count_(0) {}
+  ~NullInputDispositionHandler() override {}
 
-  // InputAckHandler
+  // InputDispositionHandler
   void OnKeyboardEventAck(const NativeWebKeyboardEventWithLatencyInfo& event,
+                          InputEventAckSource ack_source,
                           InputEventAckState ack_result) override {
     ++ack_count_;
   }
   void OnMouseEventAck(const MouseEventWithLatencyInfo& event,
+                       InputEventAckSource ack_source,
                        InputEventAckState ack_result) override {
     ++ack_count_;
   }
   void OnWheelEventAck(const MouseWheelEventWithLatencyInfo& event,
+                       InputEventAckSource ack_source,
                        InputEventAckState ack_result) override {
     ++ack_count_;
   }
   void OnTouchEventAck(const TouchEventWithLatencyInfo& event,
+                       InputEventAckSource ack_source,
                        InputEventAckState ack_result) override {
     ++ack_count_;
   }
   void OnGestureEventAck(const GestureEventWithLatencyInfo& event,
+                         InputEventAckSource ack_source,
                          InputEventAckState ack_result) override {
     ++ack_count_;
   }
@@ -86,17 +91,20 @@ class NullInputRouterClient : public InputRouterClient {
       const ui::LatencyInfo& latency_info) override {
     return INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
   }
-  void IncrementInFlightEventCount(
-      blink::WebInputEvent::Type event_type) override {}
+  void IncrementInFlightEventCount() override {}
   void DecrementInFlightEventCount(InputEventAckSource ack_source) override {}
   void OnHasTouchEventHandlers(bool has_handlers) override {}
   void DidOverscroll(const ui::DidOverscrollParams& params) override {}
   void OnSetWhiteListedTouchAction(
       cc::TouchAction white_listed_touch_action) override {}
   void DidStopFlinging() override {}
+  void ForwardWheelEventWithLatencyInfo(
+      const blink::WebMouseWheelEvent& event,
+      const ui::LatencyInfo& latency_info) override {}
   void ForwardGestureEventWithLatencyInfo(
       const blink::WebGestureEvent& event,
       const ui::LatencyInfo& latency_info) override {}
+  void SetNeedsBeginFrameForFlingProgress() override {}
 };
 
 class NullIPCSender : public IPC::Sender {
@@ -209,7 +217,6 @@ class InputEventTimer {
 bool ShouldBlockEventStream(const blink::WebInputEvent& event) {
   return ui::WebInputEventTraits::ShouldBlockEventStream(
       event,
-      base::FeatureList::IsEnabled(features::kRafAlignedTouchInputEvents),
       base::FeatureList::IsEnabled(features::kTouchpadAndWheelScrollLatching));
 }
 
@@ -228,17 +235,17 @@ class LegacyInputRouterImplPerfTest : public testing::Test {
   void SetUp() override {
     sender_.reset(new NullIPCSender());
     client_.reset(new NullInputRouterClient());
-    ack_handler_.reset(new NullInputAckHandler());
+    disposition_handler_.reset(new NullInputDispositionHandler());
     input_router_.reset(new LegacyInputRouterImpl(
-        sender_.get(), client_.get(), ack_handler_.get(), MSG_ROUTING_NONE,
-        InputRouter::Config()));
+        sender_.get(), client_.get(), disposition_handler_.get(),
+        MSG_ROUTING_NONE, InputRouter::Config()));
   }
 
   void TearDown() override {
     base::RunLoop().RunUntilIdle();
 
     input_router_.reset();
-    ack_handler_.reset();
+    disposition_handler_.reset();
     client_.reset();
     sender_.reset();
   }
@@ -272,9 +279,11 @@ class LegacyInputRouterImplPerfTest : public testing::Test {
     return sender_->GetAndResetSentEventCount();
   }
 
-  size_t GetAndResetAckCount() { return ack_handler_->GetAndResetAckCount(); }
+  size_t GetAndResetAckCount() {
+    return disposition_handler_->GetAndResetAckCount();
+  }
 
-  size_t AckCount() const { return ack_handler_->ack_count(); }
+  size_t AckCount() const { return disposition_handler_->ack_count(); }
 
   int64_t NextLatencyID() { return ++last_input_id_; }
 
@@ -353,7 +362,7 @@ class LegacyInputRouterImplPerfTest : public testing::Test {
   int64_t last_input_id_;
   std::unique_ptr<NullIPCSender> sender_;
   std::unique_ptr<NullInputRouterClient> client_;
-  std::unique_ptr<NullInputAckHandler> ack_handler_;
+  std::unique_ptr<NullInputDispositionHandler> disposition_handler_;
   std::unique_ptr<LegacyInputRouterImpl> input_router_;
 };
 

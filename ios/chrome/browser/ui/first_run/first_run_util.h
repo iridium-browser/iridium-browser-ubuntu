@@ -9,6 +9,7 @@
 
 @class FirstRunConfiguration;
 @class Tab;
+@protocol SyncPresenter;
 
 namespace base {
 class TimeTicks;
@@ -25,8 +26,6 @@ extern NSString* const kChromeFirstRunUIWillFinishNotification;
 // Notification sent when the first run has finished and has dismissed the Terms
 // of Service modal view.
 extern NSString* const kChromeFirstRunUIDidFinishNotification;
-
-namespace ios_internal {
 
 // Checks if the last line of the label only contains one word and if so, insert
 // a newline character before the second to last word so that there are two
@@ -47,7 +46,8 @@ void WriteFirstRunSentinelAndRecordMetrics(
 // Methods for writing sentinel and recording metrics and posting notifications
 void FinishFirstRun(ios::ChromeBrowserState* browserState,
                     Tab* tab,
-                    FirstRunConfiguration* config);
+                    FirstRunConfiguration* config,
+                    id<SyncPresenter> presenter);
 
 // Records Product tour timing metrics using histogram.
 void RecordProductTourTimingMetrics(NSString* timer_name,
@@ -61,7 +61,5 @@ void FirstRunDismissed();
 void SetDataReductionProxyEnabled(ios::ChromeBrowserState* browserState,
                                   BOOL enabled,
                                   BOOL toggled_switch);
-
-}  // namespace ios_internal
 
 #endif  // IOS_CHROME_BROWSER_UI_FIRST_RUN_FIRST_RUN_UTIL_H_

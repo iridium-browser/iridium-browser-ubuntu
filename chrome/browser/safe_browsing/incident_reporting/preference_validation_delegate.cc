@@ -9,11 +9,10 @@
 #include <vector>
 
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_receiver.h"
 #include "chrome/browser/safe_browsing/incident_reporting/tracked_preference_incident.h"
-#include "components/safe_browsing/csd.pb.h"
-#include "services/preferences/public/interfaces/tracked_preference_validation_delegate.mojom.h"
+#include "components/safe_browsing/proto/csd.pb.h"
+#include "services/preferences/public/mojom/tracked_preference_validation_delegate.mojom.h"
 
 namespace safe_browsing {
 
@@ -79,7 +78,7 @@ void PreferenceValidationDelegate::OnAtomicPreferenceValidation(
     }
     incident->set_value_state(proto_value_state);
     incident_receiver_->AddIncidentForProfile(
-        profile_, base::MakeUnique<TrackedPreferenceIncident>(
+        profile_, std::make_unique<TrackedPreferenceIncident>(
                       std::move(incident), is_personal));
   }
 }
@@ -113,7 +112,7 @@ void PreferenceValidationDelegate::OnSplitPreferenceValidation(
     }
     incident->set_value_state(proto_value_state);
     incident_receiver_->AddIncidentForProfile(
-        profile_, base::MakeUnique<TrackedPreferenceIncident>(
+        profile_, std::make_unique<TrackedPreferenceIncident>(
                       std::move(incident), is_personal));
   }
 }

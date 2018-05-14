@@ -41,6 +41,7 @@
 #include "public/platform/WebAudioSourceProvider.h"
 #include "public/platform/WebMediaStream.h"
 #include "public/platform/WebMediaStreamCenter.h"
+#include "public/platform/WebMediaStreamSource.h"
 #include "public/platform/WebMediaStreamTrack.h"
 
 namespace blink {
@@ -54,7 +55,7 @@ MediaStreamCenter& MediaStreamCenter::Instance() {
 MediaStreamCenter::MediaStreamCenter()
     : private_(Platform::Current()->CreateMediaStreamCenter(this)) {}
 
-MediaStreamCenter::~MediaStreamCenter() {}
+MediaStreamCenter::~MediaStreamCenter() = default;
 
 void MediaStreamCenter::DidSetMediaStreamTrackEnabled(
     MediaStreamComponent* component) {
@@ -67,27 +68,6 @@ void MediaStreamCenter::DidSetMediaStreamTrackEnabled(
   }
 }
 
-bool MediaStreamCenter::DidAddMediaStreamTrack(
-    MediaStreamDescriptor* stream,
-    MediaStreamComponent* component) {
-  return private_ && private_->DidAddMediaStreamTrack(stream, component);
-}
-
-bool MediaStreamCenter::DidRemoveMediaStreamTrack(
-    MediaStreamDescriptor* stream,
-    MediaStreamComponent* component) {
-  return private_ && private_->DidRemoveMediaStreamTrack(stream, component);
-}
-
-void MediaStreamCenter::DidStopLocalMediaStream(MediaStreamDescriptor* stream) {
-  if (private_)
-    private_->DidStopLocalMediaStream(stream);
-}
-
-bool MediaStreamCenter::DidStopMediaStreamTrack(MediaStreamComponent* track) {
-  return private_ && private_->DidStopMediaStreamTrack(track);
-}
-
 void MediaStreamCenter::DidCreateMediaStreamAndTracks(
     MediaStreamDescriptor* stream) {
   if (!private_)
@@ -98,16 +78,6 @@ void MediaStreamCenter::DidCreateMediaStreamAndTracks(
 
   for (size_t i = 0; i < stream->NumberOfVideoComponents(); ++i)
     DidCreateMediaStreamTrack(stream->VideoComponent(i));
-
-  WebMediaStream web_stream(stream);
-  private_->DidCreateMediaStream(web_stream);
-}
-
-void MediaStreamCenter::DidCreateMediaStream(MediaStreamDescriptor* stream) {
-  if (private_) {
-    WebMediaStream web_stream(stream);
-    private_->DidCreateMediaStream(web_stream);
-  }
 }
 
 void MediaStreamCenter::DidCreateMediaStreamTrack(MediaStreamComponent* track) {
@@ -136,6 +106,11 @@ MediaStreamCenter::CreateWebAudioSourceFromMediaStreamTrack(
   }
 
   return nullptr;
+}
+
+void MediaStreamCenter::DidStopMediaStreamSource(MediaStreamSource* source) {
+  if (private_)
+    private_->DidStopMediaStreamSource(source);
 }
 
 void MediaStreamCenter::StopLocalMediaStream(const WebMediaStream& web_stream) {

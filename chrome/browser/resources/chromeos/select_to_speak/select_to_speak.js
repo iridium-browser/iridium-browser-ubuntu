@@ -3,65 +3,69 @@
 // found in the LICENSE file.
 
 var AutomationEvent = chrome.automation.AutomationEvent;
-var AutomationNode = chrome.automation.AutomationNode;
 var EventType = chrome.automation.EventType;
 var RoleType = chrome.automation.RoleType;
 
-/**
- * Return the rect that encloses two points.
- * @param {number} x1 The first x coordinate.
- * @param {number} y1 The first y coordinate.
- * @param {number} x2 The second x coordinate.
- * @param {number} y2 The second x coordinate.
- * @return {{left: number, top: number, width: number, height: number}}
- */
-function rectFromPoints(x1, y1, x2, y2) {
-  var left = Math.min(x1, x2);
-  var right = Math.max(x1, x2);
-  var top = Math.min(y1, y2);
-  var bottom = Math.max(y1, y2);
-  return {left: left, top: top, width: right - left, height: bottom - top};
-}
+// CrosSelectToSpeakStartSpeechMethod enums.
+// These values are persited to logs and should not be renumbered or re-used.
+// See tools/metrics/histograms/enums.xml.
+const START_SPEECH_METHOD_MOUSE = 0;
+const START_SPEECH_METHOD_KEYSTROKE = 1;
+// The number of enum values in CrosSelectToSpeapStartSpeechMethod. This should
+// be kept in sync with the enum count in tools/metrics/histograms/enums.xml.
+const START_SPEECH_METHOD_COUNT = 2;
+
+// Number of milliseconds to wait after requesting a clipboard read
+// before clipboard change and paste events are ignored.
+const CLIPBOARD_READ_MAX_DELAY_MS = 1000;
+
+// Matches one of the known Drive apps which need the clipboard to find and read
+// selected text. Includes sandbox and non-sandbox versions.
+const DRIVE_APP_REGEXP =
+    /^https:\/\/docs\.(?:sandbox\.)?google\.com\/(?:(?:presentation)|(?:document)|(?:spreadsheets)|(?:drawings)){1}\//;
 
 /**
- * Returns true if |rect1| and |rect2| overlap. The rects must define
- * left, top, width, and height.
- * @param {{left: number, top: number, width: number, height: number}} rect1
- * @param {{left: number, top: number, width: number, height: number}} rect2
- * @return {boolean} True if the rects overlap.
+ * Determines if a node is in one of the known Google Drive apps that needs
+ * special case treatment for speaking selected text. Not all Google Drive pages
+ * are included, because some are not known to have a problem with selection:
+ * Forms is not included since it's relatively similar to any HTML page, for
+ * example.
+ * @param {AutomationNode=}  node The node to check
+ * @return {?AutomationNode} The Drive App root node, or null if none is
+ *     found.
  */
-function overlaps(rect1, rect2) {
-  var l1 = rect1.left;
-  var r1 = rect1.left + rect1.width;
-  var t1 = rect1.top;
-  var b1 = rect1.top + rect1.height;
-  var l2 = rect2.left;
-  var r2 = rect2.left + rect2.width;
-  var t2 = rect2.top;
-  var b2 = rect2.top + rect2.height;
-  return (l1 < r2 && r1 > l2 && t1 < b2 && b1 > t2);
+function getDriveAppRoot(node) {
+  while (node !== undefined && node.root !== undefined) {
+    if (node.root.url !== undefined && DRIVE_APP_REGEXP.exec(node.root.url))
+      return node.root;
+    node = node.root.parent;
+  }
+  return null;
 }
 
 /**
  * @constructor
  */
 var SelectToSpeak = function() {
-  /** @private { AutomationNode } */
+  /** @private {AutomationNode} */
   this.node_ = null;
 
-  /** @private { boolean } */
+  /** @private {boolean} */
   this.trackingMouse_ = false;
 
-  /** @private { boolean } */
+  /** @private {boolean} */
   this.didTrackMouse_ = false;
 
-  /** @private { boolean } */
+  /** @private {boolean} */
   this.isSearchKeyDown_ = false;
 
-  /** @private { !Set<number> } */
+  /** @private {boolean} */
+  this.isSelectionKeyDown_ = false;
+
+  /** @private {!Set<number>} */
   this.keysCurrentlyDown_ = new Set();
 
-  /** @private { !Set<number> } */
+  /** @private {!Set<number>} */
   this.keysPressedTogether_ = new Set();
 
   /** @private {{x: number, y: number}} */
@@ -70,7 +74,6 @@ var SelectToSpeak = function() {
   /** @private {{x: number, y: number}} */
   this.mouseEnd_ = {x: 0, y: 0};
 
-  /** @private {AutomationRootNode} */
   chrome.automation.getDesktop(function(desktop) {
     this.desktop_ = desktop;
 
@@ -79,22 +82,85 @@ var SelectToSpeak = function() {
     // hit test is a MOUSE_RELEASED accessibility event.
     desktop.addEventListener(
         EventType.MOUSE_RELEASED, this.onAutomationHitTest_.bind(this), true);
+
+    // When Select-To-Speak is active, we do a hit test on the active node
+    // and the result is a HOVER accessibility event. This event is used to
+    // check that the current node is in the foreground window.
+    desktop.addEventListener(
+        EventType.HOVER, this.onHitTestCheckCurrentNodeMatches_.bind(this),
+        true);
   }.bind(this));
 
-  /** @private { ?string } */
+  /** @private {?string} */
   this.voiceNameFromPrefs_ = null;
 
-  /** @private { ?string } */
+  /** @private {?string} */
   this.voiceNameFromLocale_ = null;
 
-  /** @private { Set<string> } */
+  /** @private {Set<string>} */
   this.validVoiceNames_ = new Set();
 
-  /** @private { number } */
+  /** @private {number} */
   this.speechRate_ = 1.0;
 
-  /** @const { string } */
+  /** @private {number} */
+  this.speechPitch_ = 1.0;
+
+  /** @private {boolean} */
+  this.wordHighlight_ = true;
+
+  /** @const {string} */
   this.color_ = '#f73a98';
+
+  /** @private {string} */
+  this.highlightColor_ = '#5e9bff';
+
+  /** @private {?NodeGroupItem} */
+  this.currentNode_ = null;
+
+  /** @private {number} */
+  this.currentNodeGroupIndex_ = -1;
+
+  /** @private {?Object} */
+  this.currentNodeWord_ = null;
+
+  /** @private {?AutomationNode} */
+  this.currentBlockParent_ = null;
+
+  /** @private {boolean} */
+  this.visible_ = true;
+
+  /** @private {boolean} */
+  this.scrollToSpokenNode_ = false;
+
+  /**
+   * The timestamp at which clipboard data read was requested by the user
+   * doing a "read selection" keystroke on a Google Docs app. If a
+   * clipboard change event comes in within CLIPBOARD_READ_MAX_DELAY_MS,
+   * Select-to-Speak will read that text out loud.
+   * @private {number}
+   */
+  this.readClipboardDataTimeMs_ = -1;
+
+  /**
+   * The interval ID from a call to setInterval, which is set whenever
+   * speech is in progress.
+   * @private {number|undefined}
+   */
+  this.intervalId_;
+
+  // Enable reading selection at keystroke when experimental accessibility
+  // features are enabled.
+  // TODO(katie): When the feature is approved, remove this variable and
+  // callback. The feature will be always enabled.
+  this.readSelectionEnabled_ = false;
+  chrome.commandLinePrivate.hasSwitch(
+      'enable-experimental-accessibility-features', (result) => {
+        this.readSelectionEnabled_ = result;
+      });
+
+  /** @private {Audio} */
+  this.null_selection_tone_ = new Audio('earcons/null_selection.ogg');
 
   this.initPreferences_();
 
@@ -106,6 +172,12 @@ SelectToSpeak.SEARCH_KEY_CODE = 91;
 
 /** @const {number} */
 SelectToSpeak.CONTROL_KEY_CODE = 17;
+
+/** @const {number} */
+SelectToSpeak.READ_SELECTION_KEY_CODE = 83;
+
+/** @const {number} */
+SelectToSpeak.NODE_STATE_TEST_INTERVAL_MS = 1000;
 
 SelectToSpeak.prototype = {
   /**
@@ -119,7 +191,9 @@ SelectToSpeak.prototype = {
    *    handlers to run.
    */
   onMouseDown_: function(evt) {
-    if (!this.isSearchKeyDown_)
+    // If the user hasn't clicked 'search', or if they are currently
+    // trying to highlight a selection, don't track the mouse.
+    if (!this.isSearchKeyDown_ || this.isSelectionKeyDown_)
       return false;
 
     this.trackingMouse_ = true;
@@ -161,10 +235,12 @@ SelectToSpeak.prototype = {
    * @return {boolean} True if the default action should be performed.
    */
   onMouseUp_: function(evt) {
+    if (!this.trackingMouse_)
+      return false;
     this.onMouseMove_(evt);
     this.trackingMouse_ = false;
 
-    chrome.accessibilityPrivate.setFocusRing([]);
+    this.clearFocusRingAndNode_();
 
     this.mouseEnd_ = {x: evt.screenX, y: evt.screenY};
     var ctrX = Math.floor((this.mouseStart_.x + this.mouseEnd_.x) / 2);
@@ -177,6 +253,25 @@ SelectToSpeak.prototype = {
     // onAutomationHitTest_.
     this.desktop_.hitTest(ctrX, ctrY, EventType.MOUSE_RELEASED);
     return false;
+  },
+
+  onClipboardDataChanged_: function() {
+    if (Date.now() - this.readClipboardDataTimeMs_ <
+        CLIPBOARD_READ_MAX_DELAY_MS) {
+      // The data has changed, and we are ready to read it.
+      // Get it using a paste.
+      document.execCommand('paste');
+    }
+  },
+
+  onClipboardPaste_: function(evt) {
+    if (Date.now() - this.readClipboardDataTimeMs_ <
+        CLIPBOARD_READ_MAX_DELAY_MS) {
+      // Read the current clipboard data.
+      evt.preventDefault();
+      this.startSpeech_(evt.clipboardData.getData('text/plain'));
+      this.readClipboardDataTimeMs_ = -1;
+    }
   },
 
   /**
@@ -192,6 +287,7 @@ SelectToSpeak.prototype = {
     // container. In the future we might include other container-like
     // roles here.
     var root = evt.target;
+    // TODO: Use AutomationPredicate.root instead?
     while (root.parent && root.role != RoleType.WINDOW &&
            root.role != RoleType.ROOT_WEB_AREA &&
            root.role != RoleType.DESKTOP && root.role != RoleType.DIALOG &&
@@ -204,8 +300,16 @@ SelectToSpeak.prototype = {
         this.mouseStart_.x, this.mouseStart_.y, this.mouseEnd_.x,
         this.mouseEnd_.y);
     var nodes = [];
-    this.findAllMatching_(root, rect, nodes);
-    this.startSpeechQueue_(nodes);
+    chrome.automation.getFocus(function(focusedNode) {
+      // In some cases, e.g. ARC++, the window received in the hit test request,
+      // which is computed based on which window is the event handler for the
+      // hit point, isn't the part of the tree that contains the actual
+      // content. In such cases, use focus to get the root.
+      if (!findAllMatching(root, rect, nodes) && focusedNode)
+        findAllMatching(focusedNode.root, rect, nodes);
+      this.startSpeechQueue_(nodes);
+      this.recordStartEvent_(START_SPEECH_METHOD_MOUSE);
+    }.bind(this));
   },
 
   /**
@@ -215,7 +319,14 @@ SelectToSpeak.prototype = {
     if (this.keysPressedTogether_.size == 0 &&
         evt.keyCode == SelectToSpeak.SEARCH_KEY_CODE) {
       this.isSearchKeyDown_ = true;
+    } else if (
+        this.readSelectionEnabled_ && this.keysCurrentlyDown_.size == 1 &&
+        evt.keyCode == SelectToSpeak.READ_SELECTION_KEY_CODE &&
+        !this.trackingMouse_) {
+      // Only go into selection mode if we aren't already tracking the mouse.
+      this.isSelectionKeyDown_ = true;
     } else if (!this.trackingMouse_) {
+      // Some other key was pressed.
       this.isSearchKeyDown_ = false;
     }
 
@@ -227,14 +338,21 @@ SelectToSpeak.prototype = {
    * @param {!Event} evt
    */
   onKeyUp_: function(evt) {
-    if (evt.keyCode == SelectToSpeak.SEARCH_KEY_CODE) {
+    if (evt.keyCode == SelectToSpeak.READ_SELECTION_KEY_CODE) {
+      if (this.isSelectionKeyDown_ && this.keysPressedTogether_.size == 2 &&
+          this.keysPressedTogether_.has(evt.keyCode) &&
+          this.keysPressedTogether_.has(SelectToSpeak.SEARCH_KEY_CODE)) {
+        chrome.tts.isSpeaking(this.cancelIfSpeaking_.bind(this));
+        chrome.automation.getFocus(this.requestSpeakSelectedText_.bind(this));
+      }
+      this.isSelectionKeyDown_ = false;
+    } else if (evt.keyCode == SelectToSpeak.SEARCH_KEY_CODE) {
       this.isSearchKeyDown_ = false;
 
       // If we were in the middle of tracking the mouse, cancel it.
       if (this.trackingMouse_) {
         this.trackingMouse_ = false;
-        chrome.accessibilityPrivate.setFocusRing([]);
-        chrome.tts.stop();
+        this.stopAll_();
       }
     }
 
@@ -246,8 +364,7 @@ SelectToSpeak.prototype = {
         this.keysPressedTogether_.has(evt.keyCode) &&
         this.keysPressedTogether_.size == 1) {
       this.trackingMouse_ = false;
-      chrome.accessibilityPrivate.setFocusRing([]);
-      chrome.tts.stop();
+      chrome.tts.isSpeaking(this.cancelIfSpeaking_.bind(this));
     }
 
     this.keysCurrentlyDown_.delete(evt.keyCode);
@@ -255,6 +372,224 @@ SelectToSpeak.prototype = {
       this.keysPressedTogether_.clear();
       this.didTrackMouse_ = false;
     }
+  },
+
+  /**
+   * Queues up selected text for reading by finding the Position objects
+   * representing the selection.
+   */
+  requestSpeakSelectedText_: function(focusedNode) {
+    // If nothing is selected, return early.
+    if (!focusedNode || !focusedNode.root || !focusedNode.root.anchorObject ||
+        !focusedNode.root.focusObject) {
+      this.onNullSelection_();
+      return;
+    }
+    let anchorObject = focusedNode.root.anchorObject;
+    let anchorOffset = focusedNode.root.anchorOffset || 0;
+    let focusObject = focusedNode.root.focusObject;
+    let focusOffset = focusedNode.root.focusOffset || 0;
+    if (anchorObject === focusObject && anchorOffset == focusOffset) {
+      this.onNullSelection_();
+      return;
+    }
+    // First calculate the equivalant position for this selection.
+    // Sometimes the automation selection returns a offset into a root
+    // node rather than a child node, which may be a bug. This allows us to
+    // work around that bug until it is fixed or redefined.
+    // Note that this calculation is imperfect: it uses node name length
+    // to index into child nodes. However, not all node names are
+    // user-visible text, so this does not always work. Instead, we must
+    // fix the Blink bug where focus offset is not specific enough to
+    // say which node is selected and at what charOffset. See
+    // https://crbug.com/803160 for more.
+    let anchorPosition =
+        getDeepEquivalentForSelection(anchorObject, anchorOffset, true);
+    let focusPosition =
+        getDeepEquivalentForSelection(focusObject, focusOffset, false);
+    let firstPosition;
+    let lastPosition;
+    if (anchorPosition.node === focusPosition.node) {
+      if (anchorPosition.offset < focusPosition.offset) {
+        firstPosition = anchorPosition;
+        lastPosition = focusPosition;
+      } else {
+        lastPosition = anchorPosition;
+        firstPosition = focusPosition;
+      }
+    } else {
+      let dir =
+          AutomationUtil.getDirection(anchorPosition.node, focusPosition.node);
+      // Highlighting may be forwards or backwards. Make sure we start at the
+      // first node.
+      if (dir == constants.Dir.FORWARD) {
+        firstPosition = anchorPosition;
+        lastPosition = focusPosition;
+      } else {
+        lastPosition = anchorPosition;
+        firstPosition = focusPosition;
+      }
+    }
+
+    // Adjust such that non-text types don't have offsets into their names.
+    if (firstPosition.node.role != RoleType.STATIC_TEXT &&
+        firstPosition.node.role != RoleType.INLINE_TEXT_BOX) {
+      firstPosition.offset = 0;
+    }
+    if (lastPosition.node.role != RoleType.STATIC_TEXT &&
+        lastPosition.node.role != RoleType.INLINE_TEXT_BOX) {
+      lastPosition.offset = lastPosition.node.name ?
+          lastPosition.node.name.length :
+          lastPosition.node.value ? lastPosition.node.value.length : 0;
+    }
+    this.readNodesInSelection_(firstPosition, lastPosition, focusedNode);
+  },
+
+  /**
+   * Reads nodes between the first and last position selected by the user.
+   * @param {Position} firstPosition The first position at which to start
+   *     reading.
+   * @param {Position} lastPosition The last position at which to stop reading.
+   * @param {AutomationNode} focusedNode The node with user focus.
+   */
+  readNodesInSelection_: function(firstPosition, lastPosition, focusedNode) {
+    let nodes = [];
+    let selectedNode = firstPosition.node;
+    if (selectedNode.name && firstPosition.offset < selectedNode.name.length &&
+        !shouldIgnoreNode(selectedNode, /* include offscreen */ true)) {
+      // Initialize to the first node in the list if it's valid and inside
+      // of the offset bounds.
+      nodes.push(selectedNode);
+    } else {
+      // The selectedNode actually has no content selected. Let the list
+      // initialize itself to the next node in the loop below.
+      // This can happen if you click-and-drag starting after the text in
+      // a first line to highlight text in a second line.
+      firstPosition.offset = 0;
+    }
+    while (selectedNode && selectedNode != lastPosition.node &&
+           AutomationUtil.getDirection(selectedNode, lastPosition.node) ===
+               constants.Dir.FORWARD) {
+      // TODO: Is there a way to optimize the directionality checking of
+      // AutomationUtil.getDirection(selectedNode, finalNode)?
+      // For example, by making a helper and storing partial computation?
+      selectedNode = AutomationUtil.findNextNode(
+          selectedNode, constants.Dir.FORWARD,
+          AutomationPredicate.leafWithText);
+      if (!selectedNode) {
+        break;
+      } else if (isTextField(selectedNode)) {
+        // Dive down into the next text node.
+        // Why does leafWithText return text fields?
+        selectedNode = AutomationUtil.findNextNode(
+            selectedNode, constants.Dir.FORWARD,
+            AutomationPredicate.leafWithText);
+        if (!selectedNode)
+          break;
+      }
+      if (!shouldIgnoreNode(selectedNode, /* include offscreen */ true))
+        nodes.push(selectedNode);
+    }
+    if (nodes.length > 0) {
+      if (lastPosition.node !== nodes[nodes.length - 1]) {
+        // The node at the last position was not added to the list, perhaps it
+        // was whitespace or invisible. Clear the ending offset because it
+        // relates to a node that doesn't exist.
+        this.startSpeechQueue_(nodes, firstPosition.offset);
+      } else {
+        this.startSpeechQueue_(
+            nodes, firstPosition.offset, lastPosition.offset);
+      }
+    } else {
+      let driveAppRootNode = getDriveAppRoot(focusedNode);
+      if (!driveAppRootNode)
+        return;
+      chrome.tabs.query({active: true}, (tabs) => {
+        if (tabs.length == 0) {
+          return;
+        }
+        let tab = tabs[0];
+        this.readClipboardDataTimeMs_ = Date.now();
+        this.currentNode_ = new NodeGroupItem(driveAppRootNode, 0, false);
+        chrome.tabs.executeScript(tab.id, {
+          allFrames: true,
+          matchAboutBlank: true,
+          code: 'document.execCommand("copy");'
+        });
+      });
+      return;
+    }
+    this.initializeScrollingToOffscreenNodes_(focusedNode.root);
+    this.recordStartEvent_(START_SPEECH_METHOD_KEYSTROKE);
+  },
+
+  /**
+   * Gets ready to cancel future scrolling to offscreen nodes as soon as
+   * a user-initiated scroll is done.
+   * @param {AutomationNode=} root The root node to listen for events on.
+   */
+  initializeScrollingToOffscreenNodes_: function(root) {
+    if (!root) {
+      return;
+    }
+    this.scrollToSpokenNode_ = true;
+    let listener = (event) => {
+      if (event.eventFrom != 'action') {
+        // User initiated event. Cancel all future scrolling to spoken nodes.
+        // If the user wants a certain scroll position we will respect that.
+        this.scrollToSpokenNode_ = false;
+
+        // Now remove this event listener, we no longer need it.
+        root.removeEventListener(
+            EventType.SCROLL_POSITION_CHANGED, listener, false);
+      }
+    };
+    root.addEventListener(EventType.SCROLL_POSITION_CHANGED, listener, false);
+  },
+
+  /**
+   * Plays a tone to let the user know they did the correct
+   * keystroke but nothing was selected.
+   */
+  onNullSelection_: function() {
+    this.null_selection_tone_.play();
+  },
+
+  /**
+   * Stop speech. If speech was in-progress, the interruption
+   * event will be caught and clearFocusRingAndNode_ will be
+   * called, stopping visual feedback as well.
+   * If speech was not in progress, i.e. if the user was drawing
+   * a focus ring on the screen, this still clears the visual
+   * focus ring.
+   */
+  stopAll_: function() {
+    chrome.tts.stop();
+    this.clearFocusRing_();
+  },
+
+  /**
+   * Clears the current focus ring and node, but does
+   * not stop the speech.
+   */
+  clearFocusRingAndNode_: function() {
+    this.clearFocusRing_();
+    // Clear the node and also stop the interval testing.
+    this.currentNode_ = null;
+    this.currentNodeGroupIndex_ = -1;
+    this.currentNodeWord_ = null;
+    clearInterval(this.intervalId_);
+    this.intervalId_ = undefined;
+    this.scrollToSpokenNode_ = false;
+  },
+
+  /**
+   * Clears the focus ring, but does not clear the current
+   * node.
+   */
+  clearFocusRing_: function() {
+    chrome.accessibilityPrivate.setFocusRing([]);
+    chrome.accessibilityPrivate.setHighlights([], this.highlightColor_);
   },
 
   /**
@@ -269,93 +604,252 @@ SelectToSpeak.prototype = {
     document.addEventListener('mousedown', this.onMouseDown_.bind(this));
     document.addEventListener('mousemove', this.onMouseMove_.bind(this));
     document.addEventListener('mouseup', this.onMouseUp_.bind(this));
+    chrome.clipboard.onClipboardDataChanged.addListener(
+        this.onClipboardDataChanged_.bind(this));
+    document.addEventListener('paste', this.onClipboardPaste_.bind(this));
   },
 
   /**
-   * Finds all nodes within the subtree rooted at |node| that overlap
-   * a given rectangle.
-   * @param {AutomationNode} node The starting node.
-   * @param {{left: number, top: number, width: number, height: number}} rect
-   *     The bounding box to search.
-   * @param {Array<AutomationNode>} nodes The matching node array to be
-   *     populated.
-   * @return {boolean} True if any matches are found.
+   * Enqueue speech for the single given string. The string is not associated
+   * with any particular nodes, so this does not do any work around drawing
+   * focus rings, unlike startSpeechQueue_ below.
+   * @param {string} text The text to speak.
    */
-  findAllMatching_: function(node, rect, nodes) {
-    var found = false;
-    for (var c = node.firstChild; c; c = c.nextSibling) {
-      if (this.findAllMatching_(c, rect, nodes))
-        found = true;
-    }
-
-    if (found)
-      return true;
-
-    if (!node.name || !node.location)
-      return false;
-
-    if (overlaps(node.location, rect)) {
-      nodes.push(node);
-      return true;
-    }
-
-    return false;
+  startSpeech_: function(text) {
+    this.prepareForSpeech_();
+    let options = this.speechOptions_();
+    options.onEvent = (event) => {
+      if (event.type == 'start') {
+        this.testCurrentNode_();
+      } else if (
+          event.type == 'end' || event.type == 'interrupted' ||
+          event.type == 'cancelled') {
+        this.clearFocusRingAndNode_();
+      }
+    };
+    chrome.tts.speak(text, options);
   },
 
   /**
    * Enqueue speech commands for all of the given nodes.
    * @param {Array<AutomationNode>} nodes The nodes to speak.
+   * @param {number=} opt_startIndex The index into the first node's text
+   * at which to start speaking. If this is not passed, will start at 0.
+   * @param {number=} opt_endIndex The index into the last node's text
+   * at which to end speech. If this is not passed, will stop at the end.
    */
-  startSpeechQueue_: function(nodes) {
-    chrome.tts.stop();
+  startSpeechQueue_: function(nodes, opt_startIndex, opt_endIndex) {
+    this.prepareForSpeech_();
     for (var i = 0; i < nodes.length; i++) {
-      var node = nodes[i];
-      var isLast = (i == nodes.length - 1);
-
-      var options = {
-        rate: this.rate_,
-        'enqueue': true,
-        onEvent:
-            (function(node, isLast, event) {
-              if (event.type == 'start') {
-                chrome.accessibilityPrivate.setFocusRing(
-                    [node.location], this.color_);
-              } else if (
-                  event.type == 'interrupted' || event.type == 'cancelled') {
-                chrome.accessibilityPrivate.setFocusRing([]);
-              } else if (event.type == 'end') {
-                if (isLast) {
-                  chrome.accessibilityPrivate.setFocusRing([]);
-                }
-              }
-            }).bind(this, node, isLast)
-      };
-
-      // Pick the voice name from prefs first, or the one that matches
-      // the locale next, but don't pick a voice that isn't currently
-      // loaded. If no voices are found, leave the voiceName option
-      // unset to let the browser try to route the speech request
-      // anyway if possible.
-      console.log('Pref: ' + this.voiceNameFromPrefs_);
-      console.log('Locale: ' + this.voiceNameFromLocale_);
-      var valid = '';
-      this.validVoiceNames_.forEach(function(voiceName) {
-        if (valid)
-          valid += ',';
-        valid += voiceName;
-      });
-      console.log('Valid: ' + valid);
-      if (this.voiceNameFromPrefs_ &&
-          this.validVoiceNames_.has(this.voiceNameFromPrefs_)) {
-        options['voiceName'] = this.voiceNameFromPrefs_;
-      } else if (
-          this.voiceNameFromLocale_ &&
-          this.validVoiceNames_.has(this.voiceNameFromLocale_)) {
-        options['voiceName'] = this.voiceNameFromLocale_;
+      let node = nodes[i];
+      let nodeGroup = buildNodeGroup(nodes, i);
+      if (i == 0) {
+        // We need to start in the middle of a node. Remove all text before
+        // the start index so that it is not spoken.
+        // Backfill with spaces so that index counting functions don't get
+        // confused.
+        // Must check opt_startIndex in its own if statement to make the
+        // Closure compiler happy.
+        if (opt_startIndex !== undefined) {
+          if (nodeGroup.nodes.length > 0 && nodeGroup.nodes[0].hasInlineText) {
+            // The first node is inlineText type. Find the start index in
+            // its staticText parent.
+            let startIndexInParent = getStartCharIndexInParent(nodes[0]);
+            opt_startIndex += startIndexInParent;
+            nodeGroup.text = ' '.repeat(opt_startIndex) +
+                nodeGroup.text.substr(opt_startIndex);
+          }
+        }
+      }
+      let isFirst = i == 0;
+      // Advance i to the end of this group, to skip all nodes it contains.
+      i = nodeGroup.endIndex;
+      let isLast = (i == nodes.length - 1);
+      if (isLast && opt_endIndex !== undefined && nodeGroup.nodes.length > 0) {
+        // We need to stop in the middle of a node. Remove all text after
+        // the end index so it is not spoken. Backfill with spaces so that
+        // index counting functions don't get confused.
+        // This only applies to inlineText nodes.
+        if (nodeGroup.nodes[nodeGroup.nodes.length - 1].hasInlineText) {
+          let startIndexInParent = getStartCharIndexInParent(nodes[i]);
+          opt_endIndex += startIndexInParent;
+          nodeGroup.text = nodeGroup.text.substr(
+              0,
+              nodeGroup.nodes[nodeGroup.nodes.length - 1].startChar +
+                  opt_endIndex);
+        }
+      }
+      if (nodeGroup.nodes.length == 0 && !isLast) {
+        continue;
       }
 
-      chrome.tts.speak(node.name || '', options);
+      let options = this.speechOptions_();
+      options.onEvent = (event) => {
+        if (event.type == 'start' && nodeGroup.nodes.length > 0) {
+          this.currentBlockParent_ = nodeGroup.blockParent;
+          this.currentNodeGroupIndex_ = 0;
+          this.currentNode_ = nodeGroup.nodes[this.currentNodeGroupIndex_];
+          if (this.wordHighlight_) {
+            // At 'start', find the first word and highlight that.
+            // Clear the previous word in the node.
+            this.currentNodeWord_ = null;
+            // If this is the first nodeGroup, pass the opt_startIndex.
+            // If this is the last nodeGroup, pass the opt_endIndex.
+            this.updateNodeHighlight_(
+                nodeGroup.text, event.charIndex,
+                isFirst ? opt_startIndex : undefined,
+                isLast ? opt_endIndex : undefined);
+          } else {
+            this.testCurrentNode_();
+          }
+        } else if (event.type == 'interrupted' || event.type == 'cancelled') {
+          this.clearFocusRingAndNode_();
+        } else if (event.type == 'end') {
+          if (isLast) {
+            this.clearFocusRingAndNode_();
+          }
+        } else if (event.type == 'word') {
+          console.debug(nodeGroup.text + ' (index ' + event.charIndex + ')');
+          console.debug('-'.repeat(event.charIndex) + '^');
+          if (this.currentNodeGroupIndex_ + 1 < nodeGroup.nodes.length) {
+            let next = nodeGroup.nodes[this.currentNodeGroupIndex_ + 1];
+            // Check if we've reached this next node yet using the
+            // character index of the event. Add 1 for the space character
+            // between words, and another to make it to the start of the
+            // next node name.
+            if (event.charIndex + 2 >= next.startChar) {
+              // Move to the next node.
+              this.currentNodeGroupIndex_ += 1;
+              this.currentNode_ = next;
+              this.currentNodeWord_ = null;
+              if (!this.wordHighlight_) {
+                // If we are doing a per-word highlight, we will test the
+                // node after figuring out what the currently highlighted
+                // word is.
+                this.testCurrentNode_();
+              }
+            }
+          }
+          if (this.wordHighlight_) {
+            this.updateNodeHighlight_(
+                nodeGroup.text, event.charIndex, undefined,
+                isLast ? opt_endIndex : undefined);
+          } else {
+            this.currentNodeWord_ = null;
+          }
+        }
+      };
+      chrome.tts.speak(nodeGroup.text || '', options);
     }
+  },
+
+  /**
+   * Prepares for speech. Call once before chrome.tts.speak is called.
+   */
+  prepareForSpeech_: function() {
+    chrome.tts.stop();
+    if (this.intervalRef_ !== undefined) {
+      clearInterval(this.intervalRef_);
+    }
+    this.intervalRef_ = setInterval(
+        this.testCurrentNode_.bind(this),
+        SelectToSpeak.NODE_STATE_TEST_INTERVAL_MS);
+  },
+
+  /**
+   * Generates the basic speech options for Select-to-Speak based on user
+   * preferences. Call for each chrome.tts.speak.
+   * @return {Object} options The TTS options.
+   */
+  speechOptions_: function() {
+    let options = {
+      rate: this.speechRate_,
+      pitch: this.speechPitch_,
+      enqueue: true
+    };
+
+    // Pick the voice name from prefs first, or the one that matches
+    // the locale next, but don't pick a voice that isn't currently
+    // loaded. If no voices are found, leave the voiceName option
+    // unset to let the browser try to route the speech request
+    // anyway if possible.
+    var valid = '';
+    this.validVoiceNames_.forEach(function(voiceName) {
+      if (valid)
+        valid += ',';
+      valid += voiceName;
+    });
+    if (this.voiceNameFromPrefs_ &&
+        this.validVoiceNames_.has(this.voiceNameFromPrefs_)) {
+      options['voiceName'] = this.voiceNameFromPrefs_;
+    } else if (
+        this.voiceNameFromLocale_ &&
+        this.validVoiceNames_.has(this.voiceNameFromLocale_)) {
+      options['voiceName'] = this.voiceNameFromLocale_;
+    }
+    return options;
+  },
+
+  /**
+   * Cancels the current speech queue if speech is in progress.
+   */
+  cancelIfSpeaking_: function(speaking) {
+    if (speaking) {
+      this.stopAll_();
+      this.recordCancelEvent_();
+    }
+  },
+
+  /**
+   * Converts the speech rate into an enum based on
+   * tools/metrics/histograms/enums.xml.
+   * These values are persisted to logs. Entries should not be
+   * renumbered and numeric values should never be reused.
+   * @return {number} the current speech rate as an int for metrics.
+   */
+  speechRateToSparceHistogramInt_: function() {
+    return this.speechRate_ * 100;
+  },
+
+  /**
+   * Converts the speech pitch into an enum based on
+   * tools/metrics/histograms/enums.xml.
+   * These values are persisted to logs. Entries should not be
+   * renumbered and numeric values should never be reused.
+   * @return {number} the current speech pitch as an int for metrics.
+   */
+  speechPitchToSparceHistogramInt_: function() {
+    return this.speechPitch_ * 100;
+  },
+
+  /**
+   * Records an event that Select-to-Speak has begun speaking.
+   * @param {number} method The CrosSelectToSpeakStartSpeechMethod enum
+   *    that reflects how this event was triggered by the user.
+   */
+  recordStartEvent_: function(method) {
+    chrome.metricsPrivate.recordUserAction(
+        'Accessibility.CrosSelectToSpeak.StartSpeech');
+    chrome.metricsPrivate.recordSparseValue(
+        'Accessibility.CrosSelectToSpeak.SpeechRate',
+        this.speechRateToSparceHistogramInt_());
+    chrome.metricsPrivate.recordSparseValue(
+        'Accessibility.CrosSelectToSpeak.SpeechPitch',
+        this.speechPitchToSparceHistogramInt_());
+    chrome.metricsPrivate.recordBoolean(
+        'Accessibility.CrosSelectToSpeak.WordHighlighting',
+        this.wordHighlight_);
+    chrome.metricsPrivate.recordEnumerationValue(
+        'Accessibility.CrosSelectToSpeak.StartSpeechMethod', method,
+        START_SPEECH_METHOD_COUNT);
+  },
+
+  /**
+   * Records an event that Select-to-Speak speech has been canceled.
+   */
+  recordCancelEvent_: function() {
+    chrome.metricsPrivate.recordUserAction(
+        'Accessibility.CrosSelectToSpeak.CancelSpeech');
   },
 
   /**
@@ -364,20 +858,38 @@ SelectToSpeak.prototype = {
    * change.
    */
   initPreferences_: function() {
-    var updatePrefs = (function() {
-                        chrome.storage.sync.get(
-                            ['voice', 'rate'],
-                            (function(prefs) {
-                              if (prefs['voice']) {
-                                this.voiceNameFromPrefs_ = prefs['voice'];
-                              }
-                              if (prefs['rate']) {
-                                this.rate_ = parseFloat(prefs['rate']);
-                              } else {
-                                chrome.storage.sync.set({'rate': this.rate_});
-                              }
-                            }).bind(this));
-                      }).bind(this);
+    var updatePrefs =
+        (function() {
+          chrome.storage.sync.get(
+              ['voice', 'rate', 'pitch', 'wordHighlight', 'highlightColor'],
+              (function(prefs) {
+                if (prefs['voice']) {
+                  this.voiceNameFromPrefs_ = prefs['voice'];
+                }
+                if (prefs['rate']) {
+                  this.speechRate_ = parseFloat(prefs['rate']);
+                } else {
+                  chrome.storage.sync.set({'rate': this.speechRate_});
+                }
+                if (prefs['pitch']) {
+                  this.speechPitch_ = parseFloat(prefs['pitch']);
+                } else {
+                  chrome.storage.sync.set({'pitch': this.speechPitch_});
+                }
+                if (prefs['wordHighlight'] !== undefined) {
+                  this.wordHighlight_ = prefs['wordHighlight'];
+                } else {
+                  chrome.storage.sync.set(
+                      {'wordHighlight': this.wordHighlight_});
+                }
+                if (prefs['highlightColor']) {
+                  this.highlightColor_ = prefs['highlightColor'];
+                } else {
+                  chrome.storage.sync.set(
+                      {'highlightColor': this.highlightColor_});
+                }
+              }).bind(this));
+        }).bind(this);
 
     updatePrefs();
     chrome.storage.onChanged.addListener(updatePrefs);
@@ -397,7 +909,6 @@ SelectToSpeak.prototype = {
 
     chrome.tts.getVoices(
         (function(voices) {
-          console.log('updateDefaultVoice_ voices: ' + voices.length);
           this.validVoiceNames_ = new Set();
 
           if (voices.length == 0)
@@ -430,5 +941,222 @@ SelectToSpeak.prototype = {
                 }
               }).bind(this));
         }).bind(this));
+  },
+
+  /**
+   * Hides the speech and focus ring states if necessary based on a node's
+   * current state.
+   *
+   * @param {NodeGroupItem} nodeGroupItem The node to use for updates
+   * @param {boolean} inForeground Whether the node is in the foreground window.
+   */
+  updateFromNodeState_: function(nodeGroupItem, inForeground) {
+    switch (getNodeState(nodeGroupItem.node)) {
+      case NodeState.NODE_STATE_INVALID:
+        // If the node is invalid, stop speaking entirely.
+        this.stopAll_();
+        break;
+      case NodeState.NODE_STATE_INVISIBLE:
+        // If it is invisible but still valid, just clear the focus ring.
+        // Don't clear the current node because we may still use it
+        // if it becomes visibile later.
+        this.clearFocusRing_();
+        this.visible_ = false;
+        break;
+      case NodeState.NODE_STATE_NORMAL:
+      default:
+        if (inForeground && !this.visible_) {
+          this.visible_ = true;
+          // Just came to the foreground.
+          this.updateHighlightAndFocus_(nodeGroupItem);
+        } else if (!inForeground) {
+          this.clearFocusRing_();
+          this.visible_ = false;
+        }
+    }
+  },
+
+  /**
+   * Updates the speech and focus ring states based on a node's current state.
+   *
+   * @param {NodeGroupItem} nodeGroupItem The node to use for updates
+   */
+  updateHighlightAndFocus_: function(nodeGroupItem) {
+    if (!this.visible_) {
+      return;
+    }
+    let node = nodeGroupItem.hasInlineText && this.currentNodeWord_ ?
+        findInlineTextNodeByCharacterIndex(
+            nodeGroupItem.node, this.currentNodeWord_.start) :
+        nodeGroupItem.node;
+    if (this.scrollToSpokenNode_ && node.state.offscreen) {
+      node.makeVisible();
+    }
+    if (this.wordHighlight_ && this.currentNodeWord_ != null) {
+      // Only show the highlight if this is an inline text box.
+      // Otherwise we'd be highlighting entire nodes, like images.
+      // Highlight should be only for text.
+      // Note that boundsForRange doesn't work on staticText.
+      if (node.role == RoleType.INLINE_TEXT_BOX) {
+        let charIndexInParent = getStartCharIndexInParent(node);
+        chrome.accessibilityPrivate.setHighlights(
+            [node.boundsForRange(
+                this.currentNodeWord_.start - charIndexInParent,
+                this.currentNodeWord_.end - charIndexInParent)],
+            this.highlightColor_);
+      } else {
+        chrome.accessibilityPrivate.setHighlights([], this.highlightColor_);
+      }
+    }
+    // Show the parent element of the currently verbalized node with the
+    // focus ring. This is a nicer user-facing behavior than jumping from
+    // node to node, as nodes may not correspond well to paragraphs or
+    // blocks.
+    // TODO: Better test: has no siblings in the group, highlight just
+    // the one node. if it has siblings, highlight the parent.
+    if (this.currentBlockParent_ != null &&
+        node.role == RoleType.INLINE_TEXT_BOX) {
+      chrome.accessibilityPrivate.setFocusRing(
+          [this.currentBlockParent_.location], this.color_);
+    } else {
+      chrome.accessibilityPrivate.setFocusRing([node.location], this.color_);
+    }
+  },
+
+  /**
+   * Tests the active node to make sure the bounds are drawn correctly.
+   */
+  testCurrentNode_: function() {
+    if (this.currentNode_ == null) {
+      return;
+    }
+    if (this.currentNode_.node.location === undefined) {
+      // Don't do the hit test because there is no location to test against.
+      // Just directly update Select To Speak from node state.
+      this.updateFromNodeState_(this.currentNode_, false);
+    } else {
+      this.updateHighlightAndFocus_(this.currentNode_);
+      // Do a hit test to make sure the node is not in a background window
+      // or minimimized. On the result checkCurrentNodeMatchesHitTest_ will be
+      // called, and we will use that result plus the currentNode's state to
+      // deterimine how to set the focus and whether to stop speech.
+      this.desktop_.hitTest(
+          this.currentNode_.node.location.left,
+          this.currentNode_.node.location.top, EventType.HOVER);
+    }
+  },
+
+  /**
+   * Checks that the current node is in the same window as the HitTest node.
+   * Uses this information to update Select-To-Speak from node state.
+   */
+  onHitTestCheckCurrentNodeMatches_: function(evt) {
+    if (this.currentNode_ == null) {
+      return;
+    }
+    chrome.automation.getFocus(function(focusedNode) {
+      var window = getNearestContainingWindow(evt.target);
+      var currentWindow = getNearestContainingWindow(this.currentNode_.node);
+      var inForeground =
+          currentWindow != null && window != null && currentWindow == window;
+      if (!inForeground && focusedNode && currentWindow) {
+        // See if the focused node window matches the currentWindow.
+        // This may happen in some cases, for example, ARC++, when the window
+        // which received the hit test request is not part of the tree that
+        // contains the actual content. In such cases, use focus to get the
+        // appropriate root.
+        var focusedWindow = getNearestContainingWindow(focusedNode.root);
+        inForeground = focusedWindow != null && currentWindow == focusedWindow;
+      }
+      this.updateFromNodeState_(this.currentNode_, inForeground);
+    }.bind(this));
+  },
+
+  /**
+   * Updates the currently highlighted node word based on the current text
+   * and the character index of an event.
+   * @param {string} text The current text
+   * @param {number} charIndex The index of a current event in the text.
+   * @param {number=} opt_startIndex The index at which to start the highlight.
+   * This takes precedence over the charIndex.
+   * @param {number=} opt_endIndex The index at which to end the highlight. This
+   * takes precedence over the next word end.
+   */
+  updateNodeHighlight_: function(
+      text, charIndex, opt_startIndex, opt_endIndex) {
+    if (charIndex >= text.length) {
+      // No need to do work if we are at the end of the paragraph.
+      return;
+    }
+    // Get the next word based on the event's charIndex.
+    let nextWordStart = getNextWordStart(text, charIndex, this.currentNode_);
+    let nextWordEnd = getNextWordEnd(
+        text, opt_startIndex === undefined ? nextWordStart : opt_startIndex,
+        this.currentNode_);
+    // Map the next word into the node's index from the text.
+    let nodeStart = opt_startIndex === undefined ?
+        nextWordStart - this.currentNode_.startChar :
+        opt_startIndex - this.currentNode_.startChar;
+    let nodeEnd = Math.min(
+        nextWordEnd - this.currentNode_.startChar,
+        this.currentNode_.node.name.length);
+    if ((this.currentNodeWord_ == null ||
+         nodeStart >= this.currentNodeWord_.end) &&
+        nodeStart < nodeEnd) {
+      // Only update the bounds if they have increased from the
+      // previous node. Because tts may send multiple callbacks
+      // for the end of one word and the beginning of the next,
+      // checking that the current word has changed allows us to
+      // reduce extra work.
+      this.currentNodeWord_ = {'start': nodeStart, 'end': nodeEnd};
+      this.testCurrentNode_();
+    }
+  },
+
+  // ---------- Functionality for testing ---------- //
+
+  /**
+   * Fires a mock key down event for testing.
+   * @param {!Event} event The fake key down event to fire. The object
+   * must contain at minimum a keyCode.
+   */
+  fireMockKeyDownEvent: function(event) {
+    this.onKeyDown_(event);
+  },
+
+  /**
+   * Fires a mock key up event for testing.
+   * @param {!Event} event The fake key up event to fire. The object
+   * must contain at minimum a keyCode.
+   */
+  fireMockKeyUpEvent: function(event) {
+    this.onKeyUp_(event);
+  },
+
+  /**
+   * Fires a mock mouse down event for testing.
+   * @param {!Event} event The fake mouse down event to fire. The object
+   * must contain at minimum a screenX and a screenY.
+   */
+  fireMockMouseDownEvent: function(event) {
+    this.onMouseDown_(event);
+  },
+
+  /**
+   * Fires a mock mouse up event for testing.
+   * @param {!Event} event The fake mouse up event to fire. The object
+   * must contain at minimum a screenX and a screenY.
+   */
+  fireMockMouseUpEvent: function(event) {
+    this.onMouseUp_(event);
+  },
+
+  /**
+   * Overrides default setting to read selected text and enables the
+   * ability to read selected text at a keystroke. Should only be used
+   * for testing.
+   */
+  enableReadSelectedTextForTesting: function() {
+    this.readSelectionEnabled_ = true;
   }
 };

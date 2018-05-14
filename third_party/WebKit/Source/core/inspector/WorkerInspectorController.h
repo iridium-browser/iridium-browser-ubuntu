@@ -31,13 +31,13 @@
 #ifndef WorkerInspectorController_h
 #define WorkerInspectorController_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/inspector/InspectorSession.h"
 #include "core/inspector/InspectorTaskRunner.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebThread.h"
 
 namespace blink {
@@ -50,12 +50,10 @@ class WorkerInspectorController final
     : public GarbageCollectedFinalized<WorkerInspectorController>,
       public InspectorSession::Client,
       private WebThread::TaskObserver {
-  WTF_MAKE_NONCOPYABLE(WorkerInspectorController);
-
  public:
   static WorkerInspectorController* Create(WorkerThread*);
   ~WorkerInspectorController() override;
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   CoreProbeSink* GetProbeSink() const { return probe_sink_.Get(); }
 
@@ -69,10 +67,11 @@ class WorkerInspectorController final
   WorkerInspectorController(WorkerThread*, WorkerThreadDebugger*);
 
   // InspectorSession::Client implementation.
-  void SendProtocolMessage(int session_id,
-                           int call_id,
-                           const String& response,
-                           const String& state) override;
+  void SendProtocolResponse(int session_id,
+                            int call_id,
+                            const String& response,
+                            const String& state) override;
+  void SendProtocolNotification(int session_id, const String& message) override;
 
   // WebThread::TaskObserver implementation.
   void WillProcessTask() override;
@@ -82,6 +81,7 @@ class WorkerInspectorController final
   WorkerThread* thread_;
   Member<CoreProbeSink> probe_sink_;
   HeapHashMap<int, Member<InspectorSession>> sessions_;
+  DISALLOW_COPY_AND_ASSIGN(WorkerInspectorController);
 };
 
 }  // namespace blink

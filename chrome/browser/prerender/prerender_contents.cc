@@ -23,12 +23,14 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_resource_throttle.h"
+#include "chrome/browser/prerender/prerender_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/web_contents_tags.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/prerender_types.h"
+#include "chrome/common/prerender_util.h"
 #include "components/history/core/browser/history_types.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_thread.h"
@@ -38,7 +40,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
-#include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -51,23 +52,12 @@
 using content::BrowserThread;
 using content::OpenURLParams;
 using content::RenderViewHost;
-using content::ResourceRedirectDetails;
 using content::SessionStorageNamespace;
 using content::WebContents;
 
 namespace prerender {
 
 namespace {
-
-// Valid HTTP methods for both prefetch and prerendering.
-const char* const kValidHttpMethods[] = {
-    "GET", "HEAD",
-};
-
-// Additional valid HTTP methods for prerendering.
-const char* const kValidHttpMethodsForPrerendering[] = {
-    "OPTIONS", "POST", "TRACE",
-};
 
 void ResumeThrottles(
     std::vector<base::WeakPtr<PrerenderResourceThrottle>> throttles,
@@ -197,15 +187,13 @@ class PrerenderContents::WebContentsDelegateImpl
 
 PrerenderContents::Observer::~Observer() {}
 
-PrerenderContents::PrerenderContents(
-    PrerenderManager* prerender_manager,
-    Profile* profile,
-    const GURL& url,
-    const content::Referrer& referrer,
-    Origin origin)
+PrerenderContents::PrerenderContents(PrerenderManager* prerender_manager,
+                                     Profile* profile,
+                                     const GURL& url,
+                                     const content::Referrer& referrer,
+                                     Origin origin)
     : prerender_mode_(FULL_PRERENDER),
       prerendering_has_started_(false),
-      session_storage_namespace_id_(-1),
       prerender_canceler_binding_(this),
       prerender_manager_(prerender_manager),
       prerender_url_(url),
@@ -221,6 +209,8 @@ PrerenderContents::PrerenderContents(
       network_bytes_(0),
       weak_factory_(this) {
   DCHECK(prerender_manager);
+  registry_.AddInterface(base::Bind(
+      &PrerenderContents::OnPrerenderCancelerRequest, base::Unretained(this)));
 }
 
 bool PrerenderContents::Init() {
@@ -230,27 +220,6 @@ bool PrerenderContents::Init() {
 void PrerenderContents::SetPrerenderMode(PrerenderMode mode) {
   DCHECK(!prerendering_has_started_);
   prerender_mode_ = mode;
-}
-
-bool PrerenderContents::IsValidHttpMethod(const std::string& method) {
-  DCHECK_NE(prerender_mode(), NO_PRERENDER);
-  // |method| has been canonicalized to upper case at this point so we can just
-  // compare them.
-  DCHECK_EQ(method, base::ToUpperASCII(method));
-  for (auto* valid_method : kValidHttpMethods) {
-    if (method == valid_method)
-      return true;
-  }
-
-  if (prerender_mode() == PREFETCH_ONLY)
-    return false;
-
-  for (auto* valid_method : kValidHttpMethodsForPrerendering) {
-    if (method == valid_method)
-      return true;
-  }
-
-  return false;
 }
 
 // static
@@ -335,10 +304,6 @@ void PrerenderContents::StartPrerendering(
     load_url_params.transition_type = ui::PageTransitionFromInt(
         ui::PAGE_TRANSITION_TYPED |
         ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
-  } else if (origin_ == ORIGIN_INSTANT) {
-    load_url_params.transition_type = ui::PageTransitionFromInt(
-        ui::PAGE_TRANSITION_GENERATED |
-        ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
   }
   load_url_params.override_user_agent =
       prerender_manager_->config().is_overriding_user_agent ?
@@ -377,9 +342,7 @@ PrerenderContents::~PrerenderContents() {
   DCHECK_NE(ORIGIN_MAX, origin());
 
   prerender_manager_->RecordFinalStatus(origin(), final_status());
-
-  bool used = final_status() == FINAL_STATUS_USED;
-  prerender_manager_->RecordNetworkBytes(origin(), used, network_bytes_);
+  prerender_manager_->RecordNetworkBytesConsumed(origin(), network_bytes_);
 
   // Broadcast the removal of aliases.
   for (content::RenderProcessHost::iterator host_iterator =
@@ -387,7 +350,13 @@ PrerenderContents::~PrerenderContents() {
        !host_iterator.IsAtEnd();
        host_iterator.Advance()) {
     content::RenderProcessHost* host = host_iterator.GetCurrentValue();
-    host->Send(new PrerenderMsg_OnPrerenderRemoveAliases(alias_urls_));
+    IPC::ChannelProxy* channel = host->GetChannel();
+    // |channel| might be NULL in tests.
+    if (channel) {
+      chrome::mojom::PrerenderDispatcherAssociatedPtr prerender_dispatcher;
+      channel->GetRemoteAssociatedInterface(&prerender_dispatcher);
+      prerender_dispatcher->PrerenderRemoveAliases(alias_urls_);
+    }
   }
 
   if (!prerender_contents_)
@@ -485,8 +454,7 @@ bool PrerenderContents::CheckURL(const GURL& url) {
     Destroy(FINAL_STATUS_UNSUPPORTED_SCHEME);
     return false;
   }
-  if (origin() != ORIGIN_OFFLINE &&
-      prerender_manager_->HasRecentlyBeenNavigatedTo(origin(), url)) {
+  if (prerender_manager_->HasRecentlyBeenNavigatedTo(origin(), url)) {
     Destroy(FINAL_STATUS_RECENTLY_VISITED);
     return false;
   }
@@ -504,7 +472,13 @@ bool PrerenderContents::AddAliasURL(const GURL& url) {
        !host_iterator.IsAtEnd();
        host_iterator.Advance()) {
     content::RenderProcessHost* host = host_iterator.GetCurrentValue();
-    host->Send(new PrerenderMsg_OnPrerenderAddAlias(url));
+    IPC::ChannelProxy* channel = host->GetChannel();
+    // |channel| might be NULL in tests.
+    if (channel) {
+      chrome::mojom::PrerenderDispatcherAssociatedPtr prerender_dispatcher;
+      channel->GetRemoteAssociatedInterface(&prerender_dispatcher);
+      prerender_dispatcher->PrerenderAddAlias(url);
+    }
   }
 
   return true;
@@ -531,18 +505,22 @@ void PrerenderContents::RenderProcessGone(base::TerminationStatus status) {
   Destroy(FINAL_STATUS_RENDERER_CRASHED);
 }
 
+void PrerenderContents::OnInterfaceRequestFromFrame(
+    content::RenderFrameHost* render_frame_host,
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle* interface_pipe) {
+  registry_.TryBindInterface(interface_name, interface_pipe);
+}
+
 void PrerenderContents::RenderFrameCreated(
     content::RenderFrameHost* render_frame_host) {
-  render_frame_host->GetInterfaceRegistry()->AddInterface(
-      base::Bind(&PrerenderContents::OnPrerenderCancelerRequest,
-                 weak_factory_.GetWeakPtr()));
-
   // When a new RenderFrame is created for a prerendering WebContents, tell the
   // new RenderFrame it's being used for prerendering before any navigations
   // occur.  Note that this is always triggered before the first navigation, so
   // there's no need to send the message just after the WebContents is created.
   render_frame_host->Send(new PrerenderMsg_SetIsPrerendering(
-      render_frame_host->GetRoutingID(), prerender_mode_));
+      render_frame_host->GetRoutingID(), prerender_mode_,
+      PrerenderHistograms::GetHistogramPrefix(origin_)));
 }
 
 void PrerenderContents::DidStopLoading() {
@@ -575,6 +553,17 @@ void PrerenderContents::DidStartNavigation(
   has_finished_loading_ = false;
 }
 
+void PrerenderContents::DidRedirectNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInMainFrame())
+    return;
+
+  // If it's a redirect on the top-level resource, the name needs to be
+  // remembered for future matching, and if it redirects to an https resource,
+  // it needs to be canceled. If a subresource is redirected, nothing changes.
+  CheckURL(navigation_handle->GetURL());
+}
+
 void PrerenderContents::DidFinishLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url) {
@@ -605,13 +594,6 @@ void PrerenderContents::DidFinishNavigation(
     return;
   }
 
-  // Prevent ORIGIN_OFFLINE prerenders from being destroyed on location.href
-  // change, since the history is never merged for offline prerenders. Also
-  // avoid adding aliases as they may potentially mark other valid requests to
-  // offline as duplicate.
-  if (origin() == ORIGIN_OFFLINE)
-    return;
-
   // If the prerender made a second navigation entry, abort the prerender. This
   // avoids having to correctly implement a complex history merging case (this
   // interacts with location.replace) and correctly synchronize with the
@@ -634,17 +616,6 @@ void PrerenderContents::DidFinishNavigation(
     if (!AddAliasURL(redirect))
       return;
   }
-}
-
-void PrerenderContents::DidGetRedirectForResourceRequest(
-    const content::ResourceRedirectDetails& details) {
-  // DidGetRedirectForResourceRequest can come for any resource on a page.  If
-  // it's a redirect on the top-level resource, the name needs to be remembered
-  // for future matching, and if it redirects to an https resource, it needs to
-  // be canceled. If a subresource is redirected, nothing changes.
-  if (details.resource_type != content::RESOURCE_TYPE_MAIN_FRAME)
-    return;
-  CheckURL(details.new_url);
 }
 
 void PrerenderContents::Destroy(FinalStatus final_status) {
@@ -735,7 +706,7 @@ void PrerenderContents::CommitHistory(WebContents* tab) {
 std::unique_ptr<base::DictionaryValue> PrerenderContents::GetAsValue() const {
   if (!prerender_contents_)
     return nullptr;
-  auto dict_value = base::MakeUnique<base::DictionaryValue>();
+  auto dict_value = std::make_unique<base::DictionaryValue>();
   dict_value->SetString("url", prerender_url_.spec());
   base::TimeTicks current_time = base::TimeTicks::Now();
   base::TimeDelta duration = current_time - load_start_time_;
@@ -745,18 +716,12 @@ std::unique_ptr<base::DictionaryValue> PrerenderContents::GetAsValue() const {
   return dict_value;
 }
 
-bool PrerenderContents::IsCrossSiteNavigationPending() const {
-  return prerender_contents_ &&
-         prerender_contents_->GetSiteInstance() !=
-             prerender_contents_->GetPendingSiteInstance();
-}
-
 void PrerenderContents::PrepareForUse() {
   SetFinalStatus(FINAL_STATUS_USED);
 
   if (prerender_contents_.get()) {
-    prerender_contents_->SendToAllFrames(
-        new PrerenderMsg_SetIsPrerendering(MSG_ROUTING_NONE, NO_PRERENDER));
+    prerender_contents_->SendToAllFrames(new PrerenderMsg_SetIsPrerendering(
+        MSG_ROUTING_NONE, NO_PRERENDER, std::string()));
   }
 
   NotifyPrerenderStop();
@@ -770,6 +735,19 @@ void PrerenderContents::PrepareForUse() {
 
 void PrerenderContents::CancelPrerenderForPrinting() {
   Destroy(FINAL_STATUS_WINDOW_PRINT);
+}
+
+void PrerenderContents::CancelPrerenderForUnsupportedMethod() {
+  Destroy(FINAL_STATUS_INVALID_HTTP_METHOD);
+}
+
+void PrerenderContents::CancelPrerenderForUnsupportedScheme(const GURL& url) {
+  Destroy(FINAL_STATUS_UNSUPPORTED_SCHEME);
+  ReportUnsupportedPrerenderScheme(url);
+}
+
+void PrerenderContents::CancelPrerenderForSyncDeferredRedirect() {
+  Destroy(FINAL_STATUS_BAD_DEFERRED_REDIRECT);
 }
 
 void PrerenderContents::OnPrerenderCancelerRequest(

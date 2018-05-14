@@ -28,11 +28,7 @@ using ::testing::AssertionSuccess;
 namespace net {
 namespace test {
 
-Http2String HexEncode(Http2StringPiece s) {
-  return base::HexEncode(s.data(), s.size());
-}
-
-RandomDecoderTest::RandomDecoderTest() {}
+RandomDecoderTest::RandomDecoderTest() = default;
 
 bool RandomDecoderTest::StopDecodeOnDone() {
   return stop_decode_on_done_;

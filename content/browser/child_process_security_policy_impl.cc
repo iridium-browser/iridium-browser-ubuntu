@@ -8,18 +8,20 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/strings/string_split.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "content/browser/bad_message.h"
 #include "content/browser/isolated_origin_util.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/common/site_isolation_policy.h"
+#include "content/browser/site_isolation_policy.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
@@ -27,10 +29,10 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/bindings_policy.h"
-#include "content/public/common/resource_request_body.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/filename_util.h"
 #include "net/url_request/url_request.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "storage/browser/fileapi/file_permission_policy.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_url.h"
@@ -83,16 +85,9 @@ bool IsMalformedBlobUrl(const GURL& url) {
 
   // If the part after blob: survives a roundtrip through url::Origin, then
   // it's a normal blob URL.
-  std::string canonical_origin = url::Origin(url).Serialize();
+  std::string canonical_origin = url::Origin::Create(url).Serialize();
   canonical_origin.append(1, '/');
   if (base::StartsWith(url.GetContent(), canonical_origin,
-                       base::CompareCase::INSENSITIVE_ASCII))
-    return false;
-
-  // blob:blobinternal:// is used by blink for stream URLs. This doesn't survive
-  // url::Origin canonicalization -- blobinternal is a fake scheme -- but allow
-  // it anyway. TODO(nick): Added speculatively, might be unnecessary.
-  if (base::StartsWith(url.GetContent(), "blobinternal://",
                        base::CompareCase::INSENSITIVE_ASCII))
     return false;
 
@@ -215,7 +210,7 @@ class ChildProcessSecurityPolicyImpl::SecurityState {
       return true;
 
     // Otherwise, check for permission for specific origin.
-    if (CanCommitOrigin(url::Origin(url)))
+    if (CanCommitOrigin(url::Origin::Create(url)))
       return true;
 
     // file:// URLs are more granular.  The child may have been given
@@ -268,6 +263,8 @@ class ChildProcessSecurityPolicyImpl::SecurityState {
   void LockToOrigin(const GURL& gurl) {
     origin_lock_ = gurl;
   }
+
+  const GURL& origin_lock() { return origin_lock_; }
 
   ChildProcessSecurityPolicyImpl::CheckOriginLockResult CheckOriginLock(
       const GURL& gurl) {
@@ -351,8 +348,6 @@ ChildProcessSecurityPolicyImpl::ChildProcessSecurityPolicyImpl() {
   RegisterPseudoScheme(url::kAboutScheme);
   RegisterPseudoScheme(url::kJavaScriptScheme);
   RegisterPseudoScheme(kViewSourceScheme);
-  RegisterPseudoScheme(url::kHttpSuboriginScheme);
-  RegisterPseudoScheme(url::kHttpsSuboriginScheme);
   RegisterPseudoScheme(url::kTraceScheme);
 }
 
@@ -655,7 +650,7 @@ bool ChildProcessSecurityPolicyImpl::CanRequestURL(
     if (IsMalformedBlobUrl(url))
       return false;
 
-    url::Origin origin(url);
+    url::Origin origin = url::Origin::Create(url);
     return origin.unique() || IsWebSafeScheme(origin.scheme()) ||
            CanCommitURL(child_id, GURL(origin.Serialize()));
   }
@@ -677,6 +672,10 @@ bool ChildProcessSecurityPolicyImpl::CanRedirectToURL(const GURL& url) {
     return false;  // Can't redirect to invalid URLs.
 
   const std::string& scheme = url.scheme();
+
+  // Can't redirect to error pages.
+  if (scheme == kChromeErrorScheme)
+    return false;
 
   if (IsPseudoScheme(scheme)) {
     // Redirects to a pseudo scheme (about, javascript, view-source, ...) are
@@ -714,7 +713,7 @@ bool ChildProcessSecurityPolicyImpl::CanCommitURL(int child_id,
     if (IsMalformedBlobUrl(url))
       return false;
 
-    url::Origin origin(url);
+    url::Origin origin = url::Origin::Create(url);
     return origin.unique() || CanCommitURL(child_id, GURL(origin.Serialize()));
   }
 
@@ -750,15 +749,6 @@ bool ChildProcessSecurityPolicyImpl::CanSetAsOriginHeader(int child_id,
   if (!url.is_valid())
     return false;  // Can't set invalid URLs as origin headers.
 
-  const std::string& scheme = url.scheme();
-
-  // Suborigin URLs are a special case and are allowed to be an origin header.
-  if (scheme == url::kHttpSuboriginScheme ||
-      scheme == url::kHttpsSuboriginScheme) {
-    DCHECK(IsPseudoScheme(scheme));
-    return true;
-  }
-
   // about:srcdoc cannot be used as an origin
   if (url == kAboutSrcDocURL)
     return false;
@@ -773,8 +763,10 @@ bool ChildProcessSecurityPolicyImpl::CanSetAsOriginHeader(int child_id,
   // document origin.
   {
     base::AutoLock lock(lock_);
-    if (base::ContainsKey(schemes_okay_to_appear_as_origin_headers_, scheme))
+    if (base::ContainsKey(schemes_okay_to_appear_as_origin_headers_,
+                          url.scheme())) {
       return true;
+    }
   }
   return false;
 }
@@ -796,40 +788,27 @@ bool ChildProcessSecurityPolicyImpl::CanReadAllFiles(
 bool ChildProcessSecurityPolicyImpl::CanReadRequestBody(
     int child_id,
     const storage::FileSystemContext* file_system_context,
-    const scoped_refptr<ResourceRequestBody>& body) {
+    const scoped_refptr<network::ResourceRequestBody>& body) {
   if (!body)
     return true;
 
-  for (const ResourceRequestBody::Element& element : *body->elements()) {
+  for (const network::DataElement& element : *body->elements()) {
     switch (element.type()) {
-      case ResourceRequestBody::Element::TYPE_FILE:
+      case network::DataElement::TYPE_FILE:
         if (!CanReadFile(child_id, element.path()))
           return false;
         break;
 
-      case ResourceRequestBody::Element::TYPE_FILE_FILESYSTEM:
-        if (!CanReadFileSystemFile(child_id, file_system_context->CrackURL(
-                                                 element.filesystem_url())))
-          return false;
-        break;
-
-      case ResourceRequestBody::Element::TYPE_DISK_CACHE_ENTRY:
-        // TYPE_DISK_CACHE_ENTRY can't be sent via IPC according to
-        // content/common/resource_messages.cc
-        NOTREACHED();
-        return false;
-
-      case ResourceRequestBody::Element::TYPE_BYTES:
-      case ResourceRequestBody::Element::TYPE_BYTES_DESCRIPTION:
+      case network::DataElement::TYPE_BYTES:
         // Data is self-contained within |body| - no need to check access.
         break;
 
-      case ResourceRequestBody::Element::TYPE_BLOB:
+      case network::DataElement::TYPE_BLOB:
         // No need to validate - the unguessability of the uuid of the blob is a
         // sufficient defense against access from an unrelated renderer.
         break;
 
-      case ResourceRequestBody::Element::TYPE_UNKNOWN:
+      case network::DataElement::TYPE_UNKNOWN:
       default:
         // Fail safe - deny access.
         NOTREACHED();
@@ -841,7 +820,7 @@ bool ChildProcessSecurityPolicyImpl::CanReadRequestBody(
 
 bool ChildProcessSecurityPolicyImpl::CanReadRequestBody(
     SiteInstance* site_instance,
-    const scoped_refptr<ResourceRequestBody>& body) {
+    const scoped_refptr<network::ResourceRequestBody>& body) {
   DCHECK(site_instance);
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -1020,7 +999,7 @@ void ChildProcessSecurityPolicyImpl::AddChild(int child_id) {
     return;
   }
 
-  security_state_[child_id] = base::MakeUnique<SecurityState>();
+  security_state_[child_id] = std::make_unique<SecurityState>();
 }
 
 bool ChildProcessSecurityPolicyImpl::ChildProcessHasPermissionsForFile(
@@ -1040,7 +1019,7 @@ bool ChildProcessSecurityPolicyImpl::CanAccessDataForOrigin(int child_id,
   // TODO(creis): We must pass the valid browser_context to convert hosted apps
   // URLs. Currently, hosted apps cannot set cookies in this mode. See
   // http://crbug.com/160576.
-  GURL site_url = SiteInstanceImpl::GetSiteForURL(NULL, url);
+  GURL site_url = SiteInstanceImpl::GetSiteForURL(nullptr, url);
 
   base::AutoLock lock(lock_);
   SecurityStateMap::iterator state = security_state_.find(child_id);
@@ -1049,7 +1028,21 @@ bool ChildProcessSecurityPolicyImpl::CanAccessDataForOrigin(int child_id,
     // workaround for https://crbug.com/600441
     return true;
   }
-  return state->second->CanAccessDataForOrigin(site_url);
+  bool can_access = state->second->CanAccessDataForOrigin(site_url);
+  if (!can_access) {
+    // Returning false here will result in a renderer kill.  Set some crash
+    // keys that will help understand the circumstances of that kill.
+    base::debug::SetCrashKeyString(bad_message::GetRequestedSiteURLKey(),
+                                   site_url.spec());
+    base::debug::SetCrashKeyString(bad_message::GetKilledProcessOriginLockKey(),
+                                   state->second->origin_lock().spec());
+
+    static auto* requested_origin_key = base::debug::AllocateCrashKeyString(
+        "requested_origin", base::debug::CrashKeySize::Size64);
+    base::debug::SetCrashKeyString(requested_origin_key,
+                                   url.GetOrigin().spec());
+  }
+  return can_access;
 }
 
 bool ChildProcessSecurityPolicyImpl::HasSpecificPermissionForOrigin(
@@ -1065,7 +1058,7 @@ bool ChildProcessSecurityPolicyImpl::HasSpecificPermissionForOrigin(
 void ChildProcessSecurityPolicyImpl::LockToOrigin(int child_id,
                                                   const GURL& gurl) {
   // "gurl" can be currently empty in some cases, such as file://blah.
-  DCHECK(SiteInstanceImpl::GetSiteForURL(NULL, gurl) == gurl);
+  DCHECK(SiteInstanceImpl::GetSiteForURL(nullptr, gurl) == gurl);
   base::AutoLock lock(lock_);
   SecurityStateMap::iterator state = security_state_.find(child_id);
   DCHECK(state != security_state_.end());
@@ -1080,6 +1073,14 @@ ChildProcessSecurityPolicyImpl::CheckOriginLock(int child_id,
   if (state == security_state_.end())
     return ChildProcessSecurityPolicyImpl::CheckOriginLockResult::NO_LOCK;
   return state->second->CheckOriginLock(site_url);
+}
+
+GURL ChildProcessSecurityPolicyImpl::GetOriginLock(int child_id) {
+  base::AutoLock lock(lock_);
+  SecurityStateMap::iterator state = security_state_.find(child_id);
+  if (state == security_state_.end())
+    return GURL();
+  return state->second->origin_lock();
 }
 
 void ChildProcessSecurityPolicyImpl::GrantPermissionsForFileSystem(
@@ -1123,26 +1124,21 @@ bool ChildProcessSecurityPolicyImpl::CanSendMidiSysExMessage(int child_id) {
   return state->second->can_send_midi_sysex();
 }
 
-void ChildProcessSecurityPolicyImpl::AddIsolatedOrigin(
-    const url::Origin& origin) {
-  CHECK(IsolatedOriginUtil::IsValidIsolatedOrigin(origin));
+void ChildProcessSecurityPolicyImpl::AddIsolatedOrigins(
+    std::vector<url::Origin> origins_to_add) {
+  // Filter out origins that cannot be used as an isolated origin.
+  base::EraseIf(origins_to_add, [](const url::Origin& origin) {
+    if (IsolatedOriginUtil::IsValidIsolatedOrigin(origin))
+      return false;  // Don't remove.
 
+    LOG(ERROR) << "Invalid isolated origin: " << origin;
+    return true;  // Remove.
+  });
+
+  // Taking the lock once and doing a batch insertion via base::flat_set::insert
+  // is important because of performance characteristics of base::flat_set.
   base::AutoLock lock(lock_);
-  CHECK(!isolated_origins_.count(origin))
-      << "Duplicate isolated origin: " << origin.Serialize();
-
-  isolated_origins_.insert(origin);
-}
-
-void ChildProcessSecurityPolicyImpl::AddIsolatedOriginsFromCommandLine(
-    const std::string& origin_list) {
-  for (const base::StringPiece& origin_piece :
-       base::SplitStringPiece(origin_list, ",", base::TRIM_WHITESPACE,
-                              base::SPLIT_WANT_NONEMPTY)) {
-    url::Origin origin((GURL(origin_piece)));
-    if (!origin.unique())
-      AddIsolatedOrigin(origin);
-  }
+  isolated_origins_.insert(origins_to_add.begin(), origins_to_add.end());
 }
 
 bool ChildProcessSecurityPolicyImpl::IsIsolatedOrigin(

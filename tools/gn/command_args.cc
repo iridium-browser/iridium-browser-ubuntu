@@ -36,6 +36,7 @@ namespace {
 
 const char kSwitchList[] = "list";
 const char kSwitchShort[] = "short";
+const char kSwitchOverridesOnly[] = "overrides-only";
 
 bool DoesLineBeginWithComment(const base::StringPiece& line) {
   // Skip whitespace.
@@ -55,7 +56,7 @@ size_t BackUpToLineBegin(const std::string& data, size_t offset) {
 
   size_t cur = offset;
   do {
-    cur --;
+    cur--;
     if (Tokenizer::IsNewline(data, cur))
       return cur + 1;  // Want the first character *after* the newline.
   } while (cur > 0);
@@ -63,7 +64,7 @@ size_t BackUpToLineBegin(const std::string& data, size_t offset) {
 }
 
 // Assumes DoesLineBeginWithComment(), this strips the # character from the
-// beginning and normalizes preceeding whitespace.
+// beginning and normalizes preceding whitespace.
 std::string StripHashFromLine(const base::StringPiece& line) {
   // Replace the # sign and everything before it with 3 spaces, so that a
   // normal comment that has a space after the # will be indented 4 spaces
@@ -171,9 +172,15 @@ int ListArgs(const std::string& build_dir) {
     args.insert(preserved);
   }
 
+  // Cache this to avoid looking it up for each |arg| in the loops below.
+  const bool overrides_only =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(kSwitchOverridesOnly);
+
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(kSwitchShort)) {
     // Short <key>=<current_value> output.
     for (const auto& arg : args) {
+      if (overrides_only && !arg.second.has_override)
+        continue;
       OutputString(arg.first.as_string());
       OutputString(" = ");
       if (arg.second.has_override)
@@ -187,6 +194,8 @@ int ListArgs(const std::string& build_dir) {
 
   // Long output.
   for (const auto& arg : args) {
+    if (overrides_only && !arg.second.has_override)
+      continue;
     PrintArgHelp(arg.first, arg.second);
     OutputString("\n");
   }
@@ -319,11 +328,11 @@ int EditArgsFile(const std::string& build_dir) {
 
 }  // namespace
 
-extern const char kArgs[] = "args";
-extern const char kArgs_HelpShort[] =
+const char kArgs[] = "args";
+const char kArgs_HelpShort[] =
     "args: Display or configure arguments declared by the build.";
-extern const char kArgs_Help[] =
-    R"(gn args <out_dir> [--list] [--short] [--args]
+const char kArgs_Help[] =
+    R"(gn args <out_dir> [--list] [--short] [--args] [--overrides-only]
 
   See also "gn help buildargs" for a more high-level overview of how
   build arguments work.
@@ -345,17 +354,22 @@ Usage
       Note: you can edit the build args manually by editing the file "args.gn"
       in the build directory and then running "gn gen <out_dir>".
 
-  gn args <out_dir> --list[=<exact_arg>] [--short]
+  gn args <out_dir> --list[=<exact_arg>] [--short] [--overrides-only]
       Lists all build arguments available in the current configuration, or, if
       an exact_arg is specified for the list flag, just that one build
       argument.
 
       The output will list the declaration location, current value for the
       build, default value (if different than the current value), and comment
-      preceeding the declaration.
+      preceding the declaration.
 
       If --short is specified, only the names and current values will be
       printed.
+
+      If --overrides-only is specified, only the names and current values of
+      arguments that have been overridden (i.e. non-default arguments) will
+      be printed. Overrides come from the <out_dir>/args.gn file and //.gn
+
 
 Examples
 
@@ -365,6 +379,9 @@ Examples
   gn args out/Debug --list --short
     Prints all arguments with their default values for the out/Debug
     build.
+
+  gn args out/Debug --list --short --overrides-only
+    Prints overridden arguments for the out/Debug build.
 
   gn args out/Debug --list=target_cpu
     Prints information about the "target_cpu" argument for the "

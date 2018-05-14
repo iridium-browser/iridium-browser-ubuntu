@@ -11,11 +11,13 @@ import android.util.AttributeSet;
 import android.view.View;
 
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.WindowDelegate;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.omnibox.LocationBarLayout;
 import org.chromium.chrome.browser.omnibox.OmniboxSuggestion;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.ui.UiUtils;
+import org.chromium.ui.base.WindowAndroid;
 
 import java.util.List;
 
@@ -67,12 +69,17 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
     }
 
     @Override
+    public void initializeControls(WindowDelegate windowDelegate, WindowAndroid windowAndroid) {
+        super.initializeControls(windowDelegate, windowAndroid);
+        setShowCachedZeroSuggestResults(true);
+    }
+
+    @Override
     public void onNativeLibraryReady() {
         super.onNativeLibraryReady();
         setAutocompleteProfile(Profile.getLastUsedProfile().getOriginalProfile());
 
         mPendingSearchPromoDecision = LocaleManager.getInstance().needToCheckForSearchEnginePromo();
-        setShowCachedZeroSuggestResults(true);
     }
 
     @Override
@@ -97,13 +104,17 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
         }
     }
 
-    /** Begins a new query. */
-    void beginQuery(boolean isVoiceSearchIntent) {
+    /**
+     * Begins a new query.
+     * @param isVoiceSearchIntent Whether this is a voice search.
+     * @param optionalText Prepopulate with a query, this may be null.
+     * */
+    void beginQuery(boolean isVoiceSearchIntent, String optionalText) {
         // Clear the text regardless of the promo decision.  This allows the user to enter text
         // before native has been initialized and have it not be cleared one the delayed beginQuery
         // logic is performed.
         mUrlBar.setIgnoreTextChangesForAutocomplete(true);
-        mUrlBar.setUrl("", null);
+        mUrlBar.setUrl(optionalText == null ? "" : optionalText, null);
         mUrlBar.setIgnoreTextChangesForAutocomplete(false);
 
         mUrlBar.setCursorVisible(true);
@@ -143,5 +154,10 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
                 UiUtils.showKeyboard(mUrlBar);
             }
         });
+    }
+
+    @Override
+    public boolean useModernDesign() {
+        return false;
     }
 }

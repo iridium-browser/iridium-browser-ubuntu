@@ -9,8 +9,7 @@
 
 #include "ash/ash_export.h"
 #include "ash/session/session_observer.h"
-#include "ash/system/session/last_window_closed_observer.h"
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -33,24 +32,20 @@ class LogoutConfirmationDialog;
 //
 // In public sessions, asks the user to end the session when the last window is
 // closed.
-class ASH_EXPORT LogoutConfirmationController
-    : public SessionObserver,
-      public LastWindowClosedObserver {
+class ASH_EXPORT LogoutConfirmationController : public SessionObserver {
  public:
-  // The |logout_closure| must be safe to call as long as |this| is alive.
-  explicit LogoutConfirmationController(const base::Closure& logout_closure);
+  LogoutConfirmationController();
   ~LogoutConfirmationController() override;
 
-  base::TickClock* clock() const { return clock_.get(); }
+  base::TickClock* clock() const { return clock_; }
 
   // Shows a LogoutConfirmationDialog. If a confirmation dialog is already being
   // shown, it is closed and a new one opened if |logout_time| is earlier than
   // the current dialog's |logout_time_|.
   void ConfirmLogout(base::TimeTicks logout_time);
 
-  void SetClockForTesting(std::unique_ptr<base::TickClock> clock);
-
   // SessionObserver:
+  void OnLoginStatusChanged(LoginStatus login_status) override;
   void OnLockStateChanged(bool locked) override;
 
   // Called by the |dialog_| when the user confirms logout.
@@ -59,17 +54,22 @@ class ASH_EXPORT LogoutConfirmationController
   // Called by the |dialog_| when it is closed.
   void OnDialogClosed();
 
+  // Overrides the internal clock for testing. This doesn't take the ownership
+  // of the clock. |clock| must outlive the LogoutConfirmationController
+  // instance.
+  void SetClockForTesting(base::TickClock* clock);
+  void SetLogoutClosureForTesting(const base::Closure& logout_closure);
   LogoutConfirmationDialog* dialog_for_testing() const { return dialog_; }
 
  private:
-  // LastWindowClosedObserver:
-  void OnLastWindowClosed() override;
+  class LastWindowClosedObserver;
+  std::unique_ptr<LastWindowClosedObserver> last_window_closed_observer_;
 
-  std::unique_ptr<base::TickClock> clock_;
+  base::TickClock* clock_;
   base::Closure logout_closure_;
 
   base::TimeTicks logout_time_;
-  LogoutConfirmationDialog* dialog_;  // Owned by the Views hierarchy.
+  LogoutConfirmationDialog* dialog_ = nullptr;  // Owned by the Views hierarchy.
   base::Timer logout_timer_;
 
   ScopedSessionObserver scoped_session_observer_;

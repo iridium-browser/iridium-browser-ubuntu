@@ -35,8 +35,8 @@ BasicBlock::BasicBlock(Zone* zone, Id id)
 
 bool BasicBlock::LoopContains(BasicBlock* block) const {
   // RPO numbers must be initialized.
-  DCHECK(rpo_number_ >= 0);
-  DCHECK(block->rpo_number_ >= 0);
+  DCHECK_LE(0, rpo_number_);
+  DCHECK_LE(0, block->rpo_number_);
   if (loop_end_ == nullptr) return false;  // This is not a loop.
   return block->rpo_number_ >= rpo_number_ &&
          block->rpo_number_ < loop_end_->rpo_number_;
@@ -198,7 +198,7 @@ void Schedule::PlanNode(BasicBlock* block, Node* node) {
     os << "Planning #" << node->id() << ":" << node->op()->mnemonic()
        << " for future add to B" << block->id() << "\n";
   }
-  DCHECK(this->block(node) == nullptr);
+  DCHECK_NULL(this->block(node));
   SetBlockForNode(block, node);
 }
 
@@ -230,6 +230,7 @@ bool IsPotentiallyThrowingCall(IrOpcode::Value opcode) {
     JS_OP_LIST(BUILD_BLOCK_JS_CASE)
 #undef BUILD_BLOCK_JS_CASE
     case IrOpcode::kCall:
+    case IrOpcode::kCallWithCallerSavedRegisters:
       return true;
     default:
       return false;

@@ -29,7 +29,7 @@ const char ImageButton::kViewClassName[] = "ImageButton";
 // ImageButton, public:
 
 ImageButton::ImageButton(ButtonListener* listener)
-    : CustomButton(listener),
+    : Button(listener),
       h_alignment_(ALIGN_LEFT),
       v_alignment_(ALIGN_TOP),
       draw_image_mirrored_(false) {
@@ -110,6 +110,19 @@ gfx::Size ImageButton::CalculatePreferredSize() const {
   gfx::Insets insets = GetInsets();
   size.Enlarge(insets.width(), insets.height());
   return size;
+}
+
+views::PaintInfo::ScaleType ImageButton::GetPaintScaleType() const {
+  // ImageButton contains an image which is rastered at the device scale factor.
+  // By default, the paint commands are recorded at a scale factor slighlty
+  // different from the device scale factor. Re-rastering the image at this
+  // paint recording scale will result in a distorted image. Paint recording
+  // scale might also not be uniform along the x and y axis, thus resulting in
+  // further distortion in the aspect ratio of the final image.
+  // |kUniformScaling| ensures that the paint recording scale is uniform along
+  // the x & y axis and keeps the scale equal to the device scale factor.
+  // See http://crbug.com/754010 for more details.
+  return views::PaintInfo::ScaleType::kUniformScaling;
 }
 
 void ImageButton::PaintButtonContents(gfx::Canvas* canvas) {
@@ -204,7 +217,7 @@ void ToggleImageButton::SetToggled(bool toggled) {
   toggled_ = toggled;
   SchedulePaint();
 
-  NotifyAccessibilityEvent(ui::AX_EVENT_ARIA_ATTRIBUTE_CHANGED, true);
+  NotifyAccessibilityEvent(ax::mojom::Event::kAriaAttributeChanged, true);
 }
 
 void ToggleImageButton::SetToggledImage(ButtonState image_state,
@@ -266,10 +279,9 @@ void ToggleImageButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   // accessible toggle button.
   if ((toggled_ && !images_[ButtonState::STATE_NORMAL].isNull()) ||
       (!toggled_ && !alternate_images_[ButtonState::STATE_NORMAL].isNull())) {
-    node_data->role = ui::AX_ROLE_TOGGLE_BUTTON;
-    node_data->AddIntAttribute(
-        ui::AX_ATTR_CHECKED_STATE,
-        toggled_ ? ui::AX_CHECKED_STATE_TRUE : ui::AX_CHECKED_STATE_FALSE);
+    node_data->role = ax::mojom::Role::kToggleButton;
+    node_data->SetCheckedState(toggled_ ? ax::mojom::CheckedState::kTrue
+                                        : ax::mojom::CheckedState::kFalse);
   }
 }
 

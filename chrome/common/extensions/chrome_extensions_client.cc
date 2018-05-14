@@ -13,6 +13,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/api_features.h"
 #include "chrome/common/extensions/api/behavior_features.h"
@@ -93,7 +94,7 @@ ChromeChannelForHistogram GetChromeChannelForHistogram(
 
 }  // namespace
 
-static base::LazyInstance<ChromeExtensionsClient>::DestructorAtExit g_client =
+static base::LazyInstance<ChromeExtensionsClient>::Leaky g_client =
     LAZY_INSTANCE_INITIALIZER;
 
 ChromeExtensionsClient::ChromeExtensionsClient() {}
@@ -123,9 +124,23 @@ void ChromeExtensionsClient::Initialize() {
   // TODO(dmazzoni): remove this once we have an extension API that
   // allows any extension to request read-only access to webui pages.
   scripting_whitelist_.push_back(extension_misc::kChromeVoxExtensionId);
+  InitializeWebStoreUrls(base::CommandLine::ForCurrentProcess());
+}
 
-  webstore_base_url_ = GURL(extension_urls::kChromeWebstoreBaseURL);
-  webstore_update_url_ = GURL(extension_urls::GetDefaultWebstoreUpdateUrl());
+void ChromeExtensionsClient::InitializeWebStoreUrls(
+    base::CommandLine* command_line) {
+  if (command_line->HasSwitch(switches::kAppsGalleryURL)) {
+    webstore_base_url_ =
+        GURL(command_line->GetSwitchValueASCII(switches::kAppsGalleryURL));
+  } else {
+    webstore_base_url_ = GURL(extension_urls::kChromeWebstoreBaseURL);
+  }
+  if (command_line->HasSwitch(switches::kAppsGalleryUpdateURL)) {
+    webstore_update_url_ = GURL(
+        command_line->GetSwitchValueASCII(switches::kAppsGalleryUpdateURL));
+  } else {
+    webstore_update_url_ = GURL(extension_urls::GetDefaultWebstoreUpdateUrl());
+  }
 }
 
 const PermissionMessageProvider&
@@ -244,8 +259,9 @@ bool ChromeExtensionsClient::IsAPISchemaGenerated(
 base::StringPiece ChromeExtensionsClient::GetAPISchema(
     const std::string& name) const {
   // Test from most common to least common.
-  if (api::ChromeGeneratedSchemas::IsGenerated(name))
-    return api::ChromeGeneratedSchemas::Get(name);
+  base::StringPiece chrome_schema = api::ChromeGeneratedSchemas::Get(name);
+  if (!chrome_schema.empty())
+    return chrome_schema;
 
   return api::GeneratedSchemas::Get(name);
 }
@@ -264,29 +280,10 @@ void ChromeExtensionsClient::RecordDidSuppressFatalError() {
 }
 
 const GURL& ChromeExtensionsClient::GetWebstoreBaseURL() const {
-  // Browser tests like to alter the command line at runtime with new update
-  // URLs. Just update the cached value of the base url (to avoid reparsing
-  // it) if the value has changed.
-  base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
-  if (cmdline->HasSwitch(switches::kAppsGalleryURL)) {
-    std::string url = cmdline->GetSwitchValueASCII(switches::kAppsGalleryURL);
-    if (webstore_base_url_.possibly_invalid_spec() != url)
-      webstore_base_url_ = GURL(url);
-  }
   return webstore_base_url_;
 }
 
 const GURL& ChromeExtensionsClient::GetWebstoreUpdateURL() const {
-  // Browser tests like to alter the command line at runtime with new update
-  // URLs. Just update the cached value of the update url (to avoid reparsing
-  // it) if the value has changed.
-  base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
-  if (cmdline->HasSwitch(switches::kAppsGalleryUpdateURL)) {
-    std::string url =
-        cmdline->GetSwitchValueASCII(switches::kAppsGalleryUpdateURL);
-    if (webstore_update_url_.possibly_invalid_spec() != url)
-      webstore_update_url_ = GURL(url);
-  }
   return webstore_update_url_;
 }
 
@@ -334,6 +331,10 @@ std::set<base::FilePath> ChromeExtensionsClient::GetBrowserImagePaths(
 bool ChromeExtensionsClient::ExtensionAPIEnabledInExtensionServiceWorkers()
     const {
   return GetCurrentChannel() == version_info::Channel::UNKNOWN;
+}
+
+std::string ChromeExtensionsClient::GetUserAgent() const {
+  return ::GetUserAgent();
 }
 
 // static

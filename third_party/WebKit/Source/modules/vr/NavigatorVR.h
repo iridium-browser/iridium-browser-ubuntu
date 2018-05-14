@@ -15,12 +15,12 @@
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Noncopyable.h"
-#include "public/platform/WebVector.h"
 
 namespace blink {
 
 class Document;
 class Navigator;
+class XR;
 class VRController;
 
 class MODULES_EXPORT NavigatorVR final
@@ -32,10 +32,19 @@ class MODULES_EXPORT NavigatorVR final
   WTF_MAKE_NONCOPYABLE(NavigatorVR);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorVR* From(Document&);
   static NavigatorVR& From(Navigator&);
-  virtual ~NavigatorVR();
+  ~NavigatorVR() override;
 
+  // XR API
+  // TODO(offenwanger) Should eventually move this out into it's own separate
+  // Navigator supplement.
+  static XR* xr(Navigator&);
+  XR* xr();
+
+  // Legacy API
   static ScriptPromise getVRDisplays(ScriptState*, Navigator&);
   ScriptPromise getVRDisplays(ScriptState*);
 
@@ -57,7 +66,7 @@ class MODULES_EXPORT NavigatorVR final
   void DidRemoveEventListener(LocalDOMWindow*, const AtomicString&) override;
   void DidRemoveAllEventListeners(LocalDOMWindow*) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   friend class VRDisplay;
@@ -65,15 +74,18 @@ class MODULES_EXPORT NavigatorVR final
 
   explicit NavigatorVR(Navigator&);
 
-  static const char* SupplementName();
-
   void FireVRDisplayPresentChange(VRDisplay*);
 
+  Member<XR> xr_;
   Member<VRController> controller_;
 
   // Whether this page is listening for vrdisplayactivate event.
   bool listening_for_activate_ = false;
   bool focused_ = false;
+
+  // Metrics data - indicates whether we've already measured this data so we
+  // don't do it every frame.
+  bool did_log_getVRDisplays_ = false;
 };
 
 }  // namespace blink

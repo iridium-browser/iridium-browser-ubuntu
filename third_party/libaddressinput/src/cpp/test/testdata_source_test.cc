@@ -16,10 +16,9 @@
 
 #include <libaddressinput/callback.h>
 #include <libaddressinput/source.h>
-#include <libaddressinput/util/basictypes.h>
-#include <libaddressinput/util/scoped_ptr.h>
 
 #include <cstddef>
+#include <memory>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -30,40 +29,46 @@ namespace {
 
 using i18n::addressinput::BuildCallback;
 using i18n::addressinput::RegionDataConstants;
-using i18n::addressinput::scoped_ptr;
 using i18n::addressinput::Source;
 using i18n::addressinput::TestdataSource;
+using i18n::addressinput::kDataFileName;
 
 // Tests for TestdataSource object.
 class TestdataSourceTest : public testing::TestWithParam<std::string> {
+ public:
+  TestdataSourceTest(const TestdataSourceTest&) = delete;
+  TestdataSourceTest& operator=(const TestdataSourceTest&) = delete;
+
  protected:
   TestdataSourceTest()
       : source_(false),
+        source_with_path_(false, kDataFileName),
         aggregate_source_(true),
+        aggregate_source_with_path_(true, kDataFileName),
         success_(false),
         key_(),
         data_(),
         data_ready_(BuildCallback(this, &TestdataSourceTest::OnDataReady)) {}
 
   TestdataSource source_;
+  TestdataSource source_with_path_;
   TestdataSource aggregate_source_;
+  TestdataSource aggregate_source_with_path_;
   bool success_;
   std::string key_;
   std::string data_;
-  const scoped_ptr<const Source::Callback> data_ready_;
+  const std::unique_ptr<const Source::Callback> data_ready_;
 
  private:
   void OnDataReady(bool success, const std::string& key, std::string* data) {
-    ASSERT_FALSE(success && data == NULL);
+    ASSERT_FALSE(success && data == nullptr);
     success_ = success;
     key_ = key;
-    if (data != NULL) {
+    if (data != nullptr) {
       data_ = *data;
       delete data;
     }
   }
-
-  DISALLOW_COPY_AND_ASSIGN(TestdataSourceTest);
 };
 
 // Returns testing::AssertionSuccess if |data| is valid callback data for
@@ -74,7 +79,7 @@ testing::AssertionResult DataIsValid(const std::string& data,
     return testing::AssertionFailure() << "empty data";
   }
 
-  std::string expected_data_begin = "{\"id\":\"" + key + "\"";
+  std::string expected_data_begin = R"({"id":")" + key + R"(")";
   if (data.compare(0, expected_data_begin.length(), expected_data_begin) != 0) {
     return testing::AssertionFailure() << data << " does not begin with "
                                        << expected_data_begin;
@@ -98,6 +103,16 @@ testing::AssertionResult DataIsValid(const std::string& data,
 TEST_P(TestdataSourceTest, TestdataSourceHasValidDataForRegion) {
   std::string key = "data/" + GetParam();
   source_.Get(key, *data_ready_);
+
+  EXPECT_TRUE(success_);
+  EXPECT_EQ(key, key_);
+  EXPECT_TRUE(DataIsValid(data_, key));
+};
+
+// Verifies that TestdataSource gets valid data for a region code.
+TEST_P(TestdataSourceTest, TestdataSourceWithPathHasValidDataForRegion) {
+  std::string key = "data/" + GetParam();
+  source_with_path_.Get(key, *data_ready_);
 
   EXPECT_TRUE(success_);
   EXPECT_EQ(key, key_);
@@ -136,6 +151,18 @@ testing::AssertionResult AggregateDataIsValid(const std::string& data,
 TEST_P(TestdataSourceTest, TestdataSourceHasValidAggregatedDataForRegion) {
   std::string key = "data/" + GetParam();
   aggregate_source_.Get(key, *data_ready_);
+
+  EXPECT_TRUE(success_);
+  EXPECT_EQ(key, key_);
+  EXPECT_TRUE(AggregateDataIsValid(data_, key));
+};
+
+// Verifies that TestdataSource gets valid aggregated data for a region code.
+TEST_P(TestdataSourceTest,
+    TestdataSourceWithPathHasValidAggregatedDataForRegion) {
+
+  std::string key = "data/" + GetParam();
+  aggregate_source_with_path_.Get(key, *data_ready_);
 
   EXPECT_TRUE(success_);
   EXPECT_EQ(key, key_);

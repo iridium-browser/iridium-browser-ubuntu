@@ -11,7 +11,7 @@
 #include "chromeos/dbus/biod/biod_client.h"
 #include "dbus/object_path.h"
 #include "services/device/fingerprint/fingerprint_export.h"
-#include "services/device/public/interfaces/fingerprint.mojom.h"
+#include "services/device/public/mojom/fingerprint.mojom.h"
 
 namespace device {
 
@@ -19,7 +19,7 @@ namespace device {
 // This is used to connect to biod(through dbus) and perform fingerprint related
 // operations. It observes signals from biod.
 class SERVICES_DEVICE_FINGERPRINT_EXPORT FingerprintChromeOS
-    : public NON_EXPORTED_BASE(mojom::Fingerprint),
+    : public mojom::Fingerprint,
       public chromeos::BiodClient::Observer {
  public:
   enum class FingerprintSession {
@@ -74,10 +74,10 @@ class SERVICES_DEVICE_FINGERPRINT_EXPORT FingerprintChromeOS
                                 const dbus::ObjectPath& record_path,
                                 const std::string& label);
 
-  void OnCloseEnrollSessionForAuth(chromeos::DBusMethodCallStatus result);
+  void OnCloseEnrollSessionForAuth(bool result);
   void OnCloseAuthSessionForEnroll(const std::string& user_id,
                                    const std::string& label,
-                                   chromeos::DBusMethodCallStatus result);
+                                   bool result);
   void ScheduleStartEnroll(const std::string& user_id,
                            const std::string& label);
   void ScheduleStartAuth();

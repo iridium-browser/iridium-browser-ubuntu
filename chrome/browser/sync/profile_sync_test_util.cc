@@ -7,8 +7,8 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -22,15 +22,16 @@
 #include "components/sync/driver/signin_manager_wrapper.h"
 #include "components/sync/driver/startup_controller.h"
 #include "components/sync/driver/sync_api_component_factory_mock.h"
+#include "components/sync/model/model_type_store_test_util.h"
 
 using browser_sync::ProfileSyncService;
 
 ProfileSyncService::InitParams CreateProfileSyncServiceParamsForTest(
     Profile* profile) {
-  auto sync_client = base::MakeUnique<browser_sync::ChromeSyncClient>(profile);
+  auto sync_client = std::make_unique<browser_sync::ChromeSyncClient>(profile);
 
   sync_client->SetSyncApiComponentFactoryForTesting(
-      base::MakeUnique<syncer::SyncApiComponentFactoryMock>());
+      std::make_unique<syncer::SyncApiComponentFactoryMock>());
 
   ProfileSyncService::InitParams init_params =
       CreateProfileSyncServiceParamsForTest(std::move(sync_client), profile);
@@ -43,24 +44,25 @@ ProfileSyncService::InitParams CreateProfileSyncServiceParamsForTest(
     Profile* profile) {
   ProfileSyncService::InitParams init_params;
 
-  init_params.signin_wrapper = base::MakeUnique<SigninManagerWrapper>(
+  init_params.signin_wrapper = std::make_unique<SigninManagerWrapper>(
       SigninManagerFactory::GetForProfile(profile));
   init_params.oauth2_token_service =
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
   init_params.start_behavior = ProfileSyncService::MANUAL_START;
   init_params.sync_client = std::move(sync_client);
-  init_params.network_time_update_callback =
-      base::Bind(&browser_sync::EmptyNetworkTimeUpdate);
+  init_params.network_time_update_callback = base::DoNothing();
   init_params.base_directory = profile->GetPath();
   init_params.url_request_context = profile->GetRequestContext();
   init_params.debug_identifier = profile->GetDebugName();
   init_params.channel = chrome::GetChannel();
+  init_params.model_type_store_factory =
+      syncer::ModelTypeStoreTestUtil::FactoryForInMemoryStoreForTest();
 
   return init_params;
 }
 
 std::unique_ptr<TestingProfile> MakeSignedInTestingProfile() {
-  auto profile = base::MakeUnique<TestingProfile>();
+  auto profile = std::make_unique<TestingProfile>();
   SigninManagerFactory::GetForProfile(profile.get())
       ->SetAuthenticatedAccountInfo("12345", "foo");
   return profile;
@@ -68,7 +70,7 @@ std::unique_ptr<TestingProfile> MakeSignedInTestingProfile() {
 
 std::unique_ptr<KeyedService> BuildMockProfileSyncService(
     content::BrowserContext* context) {
-  return base::MakeUnique<browser_sync::ProfileSyncServiceMock>(
+  return std::make_unique<browser_sync::ProfileSyncServiceMock>(
       CreateProfileSyncServiceParamsForTest(
           Profile::FromBrowserContext(context)));
 }

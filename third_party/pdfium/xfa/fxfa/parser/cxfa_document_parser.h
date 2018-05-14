@@ -22,18 +22,19 @@ class CXFA_DocumentParser {
   explicit CXFA_DocumentParser(CXFA_FFNotify* pNotify);
   ~CXFA_DocumentParser();
 
-  int32_t StartParse(const CFX_RetainPtr<IFX_SeekableStream>& pStream,
-                     XFA_XDPPACKET ePacketID);
+  int32_t StartParse(const RetainPtr<IFX_SeekableStream>& pStream,
+                     XFA_PacketType ePacketID);
   int32_t DoParse();
 
-  CFX_XMLDoc* GetXMLDoc() const;
   CXFA_FFNotify* GetNotify() const;
   CXFA_Document* GetDocument() const;
 
  private:
-  CXFA_SimpleParser m_nodeParser;
-  CXFA_FFNotify* m_pNotify;
+  UnownedPtr<CXFA_FFNotify> const m_pNotify;
+  // Note, the |m_nodeParser| has an unowned pointer to the |m_pDocument| so
+  // the |m_nodeParser| must be cleaned up first.
   std::unique_ptr<CXFA_Document> m_pDocument;
+  CXFA_SimpleParser m_nodeParser;
 };
 
 #endif  // XFA_FXFA_PARSER_CXFA_DOCUMENT_PARSER_H_

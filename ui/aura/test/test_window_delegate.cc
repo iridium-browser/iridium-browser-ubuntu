@@ -76,8 +76,8 @@ void TestWindowDelegate::OnPaint(const ui::PaintContext& context) {
 }
 
 void TestWindowDelegate::OnDeviceScaleFactorChanged(
-    float device_scale_factor) {
-}
+    float old_device_scale_factor,
+    float new_device_scale_factor) {}
 
 void TestWindowDelegate::OnWindowDestroying(Window* window) {
 }
@@ -163,6 +163,7 @@ void EventCountDelegate::OnKeyEvent(ui::KeyEvent* event) {
       break;
     case ui::ET_KEY_RELEASED:
       key_release_count_++;
+      break;
     default:
       break;
   }

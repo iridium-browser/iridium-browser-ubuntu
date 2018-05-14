@@ -8,6 +8,11 @@
 #include <utility>
 
 #include "base/optional.h"
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
+#include "remoting/host/win/evaluate_d3d.h"
+#endif
 
 namespace remoting {
 
@@ -40,7 +45,14 @@ DesktopEnvironmentOptions::operator=(
 void DesktopEnvironmentOptions::Initialize() {
   desktop_capture_options_.set_detect_updated_region(true);
 #if defined (OS_WIN)
-  desktop_capture_options_.set_allow_directx_capturer(true);
+  // Whether DirectX capturer can be enabled depends on various facts, include
+  // also how many applications are using related APIs. WebRTC/DesktopCapturer
+  // will take care of all the details. So the check here only ensures it won't
+  // crash the binary: GetD3DCapability() returns false only when the binary
+  // crashes.
+  if (GetD3DCapability()) {
+    desktop_capture_options_.set_allow_directx_capturer(true);
+  }
 #endif
 }
 
@@ -70,8 +82,16 @@ void DesktopEnvironmentOptions::set_enable_user_interface(bool enabled) {
   enable_user_interface_ = enabled;
 }
 
-void DesktopEnvironmentOptions::ApplyHostSessionOptions(
-    const HostSessionOptions& options) {
+bool DesktopEnvironmentOptions::enable_file_transfer() const {
+  return enable_file_transfer_;
+}
+
+void DesktopEnvironmentOptions::set_enable_file_transfer(bool enabled) {
+  enable_file_transfer_ = enabled;
+}
+
+void DesktopEnvironmentOptions::ApplySessionOptions(
+    const SessionOptions& options) {
 #if defined(OS_WIN)
   base::Optional<bool> directx_capturer =
       options.GetBool("DirectX-Capturer");

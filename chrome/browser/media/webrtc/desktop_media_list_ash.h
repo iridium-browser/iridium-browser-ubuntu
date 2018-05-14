@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_MEDIA_WEBRTC_DESKTOP_MEDIA_LIST_ASH_H_
 #define CHROME_BROWSER_MEDIA_WEBRTC_DESKTOP_MEDIA_LIST_ASH_H_
 
+#include <vector>
+
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "chrome/browser/media/webrtc/desktop_media_list_base.h"
@@ -12,10 +14,6 @@
 
 namespace aura {
 class Window;
-}
-
-namespace base {
-class TaskRunner;
 }
 
 namespace gfx {
@@ -39,13 +37,9 @@ class DesktopMediaListAsh : public DesktopMediaListBase {
   void EnumerateSources(
       std::vector<DesktopMediaListAsh::SourceDescription>* windows);
   void CaptureThumbnail(content::DesktopMediaID id, aura::Window* window);
-  void OnThumbnailCaptured(content::DesktopMediaID id,
-                           const gfx::Image& image);
+  void OnThumbnailCaptured(content::DesktopMediaID id, gfx::Image image);
 
   int pending_window_capture_requests_ = 0;
-
-  // Used to scale the thumbnails.
-  scoped_refptr<base::TaskRunner> background_task_runner_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

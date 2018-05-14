@@ -10,53 +10,37 @@
 #import <UIKit/UIKit.h>
 
 #import "base/ios/block_types.h"
-#import "ios/chrome/browser/ui/commands/application_commands.h"
-#import "ios/chrome/browser/ui/commands/browser_commands.h"
+#import "ios/chrome/browser/ui/settings/sync_utils/sync_presenter.h"
 #import "ios/chrome/browser/ui/side_swipe/side_swipe_controller.h"
+#import "ios/chrome/browser/ui/toolbar/clean/toolbar_coordinator_delegate.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_owner.h"
-#import "ios/chrome/browser/ui/toolbar/web_toolbar_controller.h"
 #import "ios/chrome/browser/ui/url_loader.h"
 #import "ios/public/provider/chrome/browser/voice/voice_search_presenter.h"
 
+@protocol ApplicationCommands;
+@protocol BrowserCommands;
 @class BrowserContainerView;
 @class BrowserViewControllerDependencyFactory;
-@class ContextualSearchController;
-@class ContextualSearchPanelView;
-@class FindBarControllerIOS;
 class GURL;
-@class NoTabsController;
-@class PageInfoViewController;
-@class PreloadController;
-@class PrintController;
-@class SideSwipeController;
+@protocol OmniboxFocuser;
+@protocol FakeboxFocuser;
+@protocol SnackbarCommands;
 @class Tab;
 @class TabModel;
-@class TabStripController;
-@class ThumbnailHelper;
-@class VoiceSearchBarView;
+@protocol TabStripFoldAnimation;
+@protocol ToolbarCommands;
 
 namespace ios {
 class ChromeBrowserState;
 }
 
-namespace ios_internal {
-// Notification sent when the page info is shown.
-extern NSString* const kPageInfoWillShowNotification;
-// Notification sent when the page info is hidden.
-extern NSString* const kPageInfoWillHideNotification;
-// Notification sent when the location bar becomes first responder.
-extern NSString* const kLocationBarBecomesFirstResponderNotification;
-// Notification sent when the location bar resigns first responder.
-extern NSString* const kLocationBarResignsFirstResponderNotification;
-}  // namespace ios_internal
-
 // The top-level view controller for the browser UI. Manages other controllers
 // which implement the interface.
-@interface BrowserViewController : UIViewController<SideSwipeControllerDelegate,
+@interface BrowserViewController : UIViewController<SyncPresenter,
+                                                    ToolbarCoordinatorDelegate,
                                                     ToolbarOwner,
                                                     UrlLoader,
-                                                    VoiceSearchPresenter,
-                                                    WebToolbarDelegate>
+                                                    VoiceSearchPresenter>
 
 // Initializes a new BVC from its nib. |model| must not be nil. The
 // webUsageSuspended property for this BVC will be based on |model|, and future
@@ -74,7 +58,13 @@ applicationCommandEndpoint:(id<ApplicationCommands>)applicationCommandEndpoint
 
 - (instancetype)initWithCoder:(NSCoder*)aDecoder NS_UNAVAILABLE;
 
-@property(nonatomic, readonly) id<ApplicationCommands, BrowserCommands>
+@property(nonatomic, readonly) id<ApplicationCommands,
+                                  BrowserCommands,
+                                  OmniboxFocuser,
+                                  FakeboxFocuser,
+                                  SnackbarCommands,
+                                  ToolbarCommands,
+                                  UrlLoader>
     dispatcher;
 
 // The top-level browser container view.
@@ -103,6 +93,15 @@ applicationCommandEndpoint:(id<ApplicationCommands>)applicationCommandEndpoint
 
 // Called when the typing shield is tapped.
 - (void)shieldWasTapped:(id)sender;
+
+// Called when the user explicitly opens the tab switcher.
+- (void)userEnteredTabSwitcher;
+
+// Presents either the new tab tip or incognito tab tip in-product help bubbles
+// if the the user is in a valid state to see one of them. At most one bubble
+// will be shown. If the feature engagement tracker determines it is not valid
+// to see one of the bubbles, that bubble will not be shown.
+- (void)presentBubblesIfEligible;
 
 // Called when the browser state provided to this instance is being destroyed.
 // At this point the browser will no longer ever be active, and will likely be
@@ -136,27 +135,19 @@ applicationCommandEndpoint:(id<ApplicationCommands>)applicationCommandEndpoint
 // related to showing the previously selected tab.
 - (void)expectNewForegroundTab;
 
-// Shows the voice search UI.
-- (void)startVoiceSearch;
+// Shows the voice search UI. |originView|'s center is used for the presentation
+// and dismissal animations of the Voice Search UI. |originView| can be nil.
+- (void)startVoiceSearchWithOriginView:(UIView*)originView;
 
-// Shows the QR scanner UI.
-- (void)showQRScanner;
+// Dismisses all presented views, excluding the omnibox if |dismissOmnibox| is
+// NO, then calls |completion|.
+- (void)clearPresentedStateWithCompletion:(ProceduralBlock)completion
+                           dismissOmnibox:(BOOL)dismissOmnibox;
 
-// Focuses the omnibox.
-- (void)focusOmnibox;
-
-// Dismisses all presented views then calls |completion|.
-- (void)clearPresentedStateWithCompletion:(ProceduralBlock)completion;
-
-// Returns a set with the names of the files received from other applications
-// that are bookmarked or referenced by an open or recently closed tab.
-- (NSSet*)referencedExternalFiles;
-
-// Removes files received from other applications. If |immediately| is YES,
-// initiates the removal of files immediately. |completionHandler| is called
-// when files have been removed.
-- (void)removeExternalFilesImmediately:(BOOL)immediately
-                     completionHandler:(ProceduralBlock)completionHandler;
+// Returns a tab strip placeholder view created from the current state of the
+// tab strip. It is used to animate the transition from the browser view
+// controller to the tab switcher.
+- (UIView<TabStripFoldAnimation>*)tabStripPlaceholderView;
 
 // Called before the instance is deallocated.
 - (void)shutdown;

@@ -27,6 +27,7 @@
 #ifndef XPathPredicate_h
 #define XPathPredicate_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/xml/XPathExpressionNode.h"
 #include "core/xml/XPathValue.h"
@@ -38,7 +39,7 @@ namespace XPath {
 class CORE_EXPORT Number final : public Expression {
  public:
   explicit Number(double);
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   Value Evaluate(EvaluationContext&) const override;
@@ -50,7 +51,7 @@ class CORE_EXPORT Number final : public Expression {
 class CORE_EXPORT StringExpression final : public Expression {
  public:
   explicit StringExpression(const String&);
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   Value Evaluate(EvaluationContext&) const override;
@@ -117,11 +118,9 @@ class Union final : public Expression {
 };
 
 class Predicate final : public GarbageCollected<Predicate> {
-  WTF_MAKE_NONCOPYABLE(Predicate);
-
  public:
   explicit Predicate(Expression*);
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   bool Evaluate(EvaluationContext&) const;
   bool IsContextPositionSensitive() const {
@@ -134,6 +133,7 @@ class Predicate final : public GarbageCollected<Predicate> {
 
  private:
   Member<Expression> expr_;
+  DISALLOW_COPY_AND_ASSIGN(Predicate);
 };
 
 }  // namespace XPath

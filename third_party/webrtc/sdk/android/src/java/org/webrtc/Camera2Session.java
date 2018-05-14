@@ -12,6 +12,7 @@ package org.webrtc;
 
 import android.annotation.TargetApi;
 import android.content.Context;
+import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -225,8 +226,12 @@ class Camera2Session implements CameraSession {
               transformMatrix =
                   RendererCommon.rotateTextureMatrix(transformMatrix, -cameraOrientation);
 
-              events.onTextureFrameCaptured(Camera2Session.this, captureFormat.width,
-                  captureFormat.height, oesTextureId, transformMatrix, rotation, timestampNs);
+              VideoFrame.Buffer buffer = surfaceTextureHelper.createTextureBuffer(
+                  captureFormat.width, captureFormat.height,
+                  RendererCommon.convertMatrixToAndroidGraphicsMatrix(transformMatrix));
+              final VideoFrame frame = new VideoFrame(buffer, rotation, timestampNs);
+              events.onFrameCaptured(Camera2Session.this, frame);
+              frame.release();
             }
           });
       Logging.d(TAG, "Camera device successfully started.");
@@ -281,7 +286,7 @@ class Camera2Session implements CameraSession {
     }
   }
 
-  private class CameraCaptureCallback extends CameraCaptureSession.CaptureCallback {
+  private static class CameraCaptureCallback extends CameraCaptureSession.CaptureCallback {
     @Override
     public void onCaptureFailed(
         CameraCaptureSession session, CaptureRequest request, CaptureFailure failure) {

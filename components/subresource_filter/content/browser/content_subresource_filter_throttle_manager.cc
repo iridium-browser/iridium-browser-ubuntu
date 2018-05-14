@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
@@ -19,25 +18,16 @@
 #include "components/subresource_filter/content/browser/subframe_navigation_filtering_throttle.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer_manager.h"
 #include "components/subresource_filter/content/common/subresource_filter_messages.h"
+#include "components/subresource_filter/content/common/subresource_filter_utils.h"
 #include "components/subresource_filter/core/browser/subresource_filter_constants.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/navigation_throttle.h"
-#include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/console_message_level.h"
 #include "net/base/net_errors.h"
 
 namespace subresource_filter {
-
-bool ContentSubresourceFilterThrottleManager::Delegate::
-    AllowStrongPopupBlocking() {
-  return false;
-}
-
-bool ContentSubresourceFilterThrottleManager::Delegate::AllowRulesetRules() {
-  return true;
-}
 
 ContentSubresourceFilterThrottleManager::
     ContentSubresourceFilterThrottleManager(
@@ -66,6 +56,7 @@ void ContentSubresourceFilterThrottleManager::OnSubresourceFilterGoingAway() {
 void ContentSubresourceFilterThrottleManager::RenderFrameDeleted(
     content::RenderFrameHost* frame_host) {
   activated_frame_hosts_.erase(frame_host);
+  ad_frames_.erase(frame_host);
   DestroyRulesetHandleIfNoLongerUsed();
 }
 
@@ -83,7 +74,7 @@ void ContentSubresourceFilterThrottleManager::ReadyToCommitNavigation(
 
   // TODO(crbug.com/736249): Remove CHECKs in this file when the root cause of
   // the crash is found.
-  ActivationStateComputingNavigationThrottle* throttle = it->second;
+  ActivationStateComputingNavigationThrottle* throttle = it->second.throttle;
   CHECK_EQ(navigation_handle, throttle->navigation_handle());
 
   // Main frame throttles with disabled page-level activation will not have
@@ -102,17 +93,22 @@ void ContentSubresourceFilterThrottleManager::ReadyToCommitNavigation(
       "ContentSubresourceFilterThrottleManager::ReadyToCommitNavigation",
       "activation_state", filter->activation_state().ToTracedValue());
 
-  // Only send the IPC to the renderer if not actively ignoring rules from our
-  // ruleset. Note, if we ever want to do anything more complex in the renderer
-  // (other than just consume the rules), we will likely have to find a
-  // different solution here.
-  throttle->CouldSendActivationToRenderer();
-  if (delegate_->AllowRulesetRules()) {
-    content::RenderFrameHost* frame_host =
-        navigation_handle->GetRenderFrameHost();
-    frame_host->Send(new SubresourceFilterMsg_ActivateForNextCommittedLoad(
-        frame_host->GetRoutingID(), filter->activation_state()));
-  }
+  throttle->WillSendActivationToRenderer();
+
+  // is_ad_subframe is guaranteed to have the correct value at this point since
+  // the ruleset checking and its notification is done before the navigation is
+  // resumed.
+  bool is_ad_subframe = it->second.is_ad_subframe;
+  DCHECK(!is_ad_subframe || level == ActivationLevel::DRYRUN);
+  DCHECK(!is_ad_subframe || !navigation_handle->IsInMainFrame());
+
+  content::RenderFrameHost* frame_host =
+      navigation_handle->GetRenderFrameHost();
+  if (is_ad_subframe)
+    ad_frames_.insert(frame_host);
+
+  frame_host->Send(new SubresourceFilterMsg_ActivateForNextCommittedLoad(
+      frame_host->GetRoutingID(), filter->activation_state(), is_ad_subframe));
 }
 
 void ContentSubresourceFilterThrottleManager::DidFinishNavigation(
@@ -125,12 +121,14 @@ void ContentSubresourceFilterThrottleManager::DidFinishNavigation(
     return;
   }
 
-  auto throttle = ongoing_activation_throttles_.find(navigation_handle);
+  auto throttle_it = ongoing_activation_throttles_.find(navigation_handle);
   std::unique_ptr<AsyncDocumentSubresourceFilter> filter;
-  if (throttle != ongoing_activation_throttles_.end()) {
-    CHECK_EQ(navigation_handle, throttle->second->navigation_handle());
-    filter = throttle->second->ReleaseFilter();
-    ongoing_activation_throttles_.erase(throttle);
+  if (throttle_it != ongoing_activation_throttles_.end()) {
+    ActivationStateComputingNavigationThrottle* throttle =
+        throttle_it->second.throttle;
+    CHECK_EQ(navigation_handle, throttle->navigation_handle());
+    filter = throttle->ReleaseFilter();
+    ongoing_activation_throttles_.erase(throttle_it);
   }
 
   content::RenderFrameHost* frame_host =
@@ -140,7 +138,7 @@ void ContentSubresourceFilterThrottleManager::DidFinishNavigation(
     statistics_.reset();
     if (filter) {
       statistics_ =
-          base::MakeUnique<PageLoadStatistics>(filter->activation_state());
+          std::make_unique<PageLoadStatistics>(filter->activation_state());
       if (filter->activation_state().enable_logging) {
         DCHECK(filter->activation_state().activation_level !=
                ActivationLevel::DISABLED);
@@ -164,7 +162,13 @@ void ContentSubresourceFilterThrottleManager::DidFinishNavigation(
     activated_frame_hosts_[frame_host] = std::move(filter);
   } else {
     activated_frame_hosts_.erase(frame_host);
+
+    // If this is for a special url that did not go through the navigation
+    // throttles, then based on the parent's activation state, possibly add this
+    // to activated_frame_hosts_.
+    MaybeActivateSubframeSpecialUrls(navigation_handle);
   }
+
   DestroyRulesetHandleIfNoLongerUsed();
 }
 
@@ -203,10 +207,34 @@ void ContentSubresourceFilterThrottleManager::OnPageActivationComputed(
   // Do not notify the throttle if activation is disabled.
   if (activation_state.activation_level == ActivationLevel::DISABLED)
     return;
+
   auto it = ongoing_activation_throttles_.find(navigation_handle);
   if (it != ongoing_activation_throttles_.end()) {
-    it->second->NotifyPageActivationWithRuleset(EnsureRulesetHandle(),
-                                                activation_state);
+    it->second.throttle->NotifyPageActivationWithRuleset(EnsureRulesetHandle(),
+                                                         activation_state);
+  }
+}
+
+void ContentSubresourceFilterThrottleManager::OnSubframeNavigationEvaluated(
+    content::NavigationHandle* navigation_handle,
+    LoadPolicy load_policy) {
+  DCHECK(!navigation_handle->IsInMainFrame());
+  auto it = ongoing_activation_throttles_.find(navigation_handle);
+  if (it == ongoing_activation_throttles_.end())
+    return;
+
+  // Note that is_ad_subframe is only relevant for
+  // LoadPolicy:WOULD_DISALLOW(dryrun mode), although also setting it for
+  // DISALLOW for completeness.
+  it->second.is_ad_subframe = load_policy != LoadPolicy::ALLOW;
+
+  // If this frame was not identified as an ad via ruleset matching, tag it
+  // based on whether its parent frame is an ad or not.
+  if (!it->second.is_ad_subframe) {
+    content::RenderFrameHost* parent_frame =
+        navigation_handle->GetParentFrame();
+    if (parent_frame && base::ContainsKey(ad_frames_, parent_frame))
+      it->second.is_ad_subframe = true;
   }
 }
 
@@ -221,10 +249,10 @@ void ContentSubresourceFilterThrottleManager::MaybeAppendNavigationThrottles(
     throttles->push_back(std::move(filtering_throttle));
   }
 
-  CHECK(!base::ContainsKey(ongoing_activation_throttles_, navigation_handle));
+  DCHECK(!base::ContainsKey(ongoing_activation_throttles_, navigation_handle));
   if (auto activation_throttle =
           MaybeCreateActivationStateComputingThrottle(navigation_handle)) {
-    ongoing_activation_throttles_[navigation_handle] =
+    ongoing_activation_throttles_[navigation_handle].throttle =
         activation_throttle.get();
     activation_throttle->set_destruction_closure(base::BindOnce(
         &ContentSubresourceFilterThrottleManager::OnActivationThrottleDestroyed,
@@ -233,33 +261,9 @@ void ContentSubresourceFilterThrottleManager::MaybeAppendNavigationThrottles(
   }
 }
 
-// Blocking popups here should trigger the standard popup blocking UI, so don't
-// force the subresource filter specific UI.
-bool ContentSubresourceFilterThrottleManager::ShouldDisallowNewWindow(
-    const content::OpenURLParams* open_url_params) {
-  auto it = activated_frame_hosts_.find(web_contents()->GetMainFrame());
-  if (it == activated_frame_hosts_.end())
-    return false;
-  const ActivationState state = it->second->activation_state();
-  if (state.activation_level != ActivationLevel::ENABLED ||
-      state.filtering_disabled_for_document ||
-      state.generic_blocking_rules_disabled ||
-      !delegate_->AllowStrongPopupBlocking()) {
-    return false;
-  }
-
-  // Block new windows from navigations whose triggering JS Event has an
-  // isTrusted bit set to false. This bit is set to true if the event is
-  // generated via a user action. See docs:
-  // https://developer.mozilla.org/en-US/docs/Web/API/Event/isTrusted
-  bool should_block = true;
-  if (open_url_params) {
-    should_block = open_url_params->triggering_event_info ==
-                   blink::WebTriggeringEventInfo::kFromUntrustedEvent;
-  }
-  if (should_block)
-    delegate_->OnFirstSubresourceLoadDisallowed();
-  return should_block;
+bool ContentSubresourceFilterThrottleManager::IsFrameTaggedAsAdForTesting(
+    content::RenderFrameHost* frame_host) {
+  return base::ContainsKey(ad_frames_, frame_host);
 }
 
 std::unique_ptr<SubframeNavigationFilteringThrottle>
@@ -268,11 +272,9 @@ ContentSubresourceFilterThrottleManager::
         content::NavigationHandle* navigation_handle) {
   if (navigation_handle->IsInMainFrame())
     return nullptr;
-  if (!delegate_->AllowRulesetRules())
-    return nullptr;
   AsyncDocumentSubresourceFilter* parent_filter =
       GetParentFrameFilter(navigation_handle);
-  return parent_filter ? base::MakeUnique<SubframeNavigationFilteringThrottle>(
+  return parent_filter ? std::make_unique<SubframeNavigationFilteringThrottle>(
                              navigation_handle, parent_filter)
                        : nullptr;
 }
@@ -304,8 +306,25 @@ ContentSubresourceFilterThrottleManager::GetParentFrameFilter(
   DCHECK(!child_frame_navigation->IsInMainFrame());
   content::RenderFrameHost* parent = child_frame_navigation->GetParentFrame();
   DCHECK(parent);
-  auto it = activated_frame_hosts_.find(parent);
-  return it == activated_frame_hosts_.end() ? nullptr : it->second.get();
+
+  // Filter will be null for those special url navigations that were added in
+  // MaybeActivateSubframeSpecialUrls. Return the filter of the first parent
+  // with a non-null filter.
+  while (parent) {
+    auto it = activated_frame_hosts_.find(parent);
+    if (it == activated_frame_hosts_.end())
+      return nullptr;
+
+    if (it->second.get())
+      return it->second.get();
+    parent = it->first->GetParent();
+  }
+
+  // Since null filter is only possible for special navigations of iframes, the
+  // above loop should have found a filter for at least the top level frame,
+  // thus making this unreachable.
+  NOTREACHED();
+  return nullptr;
 }
 
 void ContentSubresourceFilterThrottleManager::MaybeCallFirstDisallowedLoad() {
@@ -318,7 +337,7 @@ void ContentSubresourceFilterThrottleManager::MaybeCallFirstDisallowedLoad() {
 VerifiedRuleset::Handle*
 ContentSubresourceFilterThrottleManager::EnsureRulesetHandle() {
   if (!ruleset_handle_)
-    ruleset_handle_ = base::MakeUnique<VerifiedRuleset::Handle>(dealer_handle_);
+    ruleset_handle_ = std::make_unique<VerifiedRuleset::Handle>(dealer_handle_);
   return ruleset_handle_.get();
 }
 
@@ -340,6 +359,25 @@ void ContentSubresourceFilterThrottleManager::OnActivationThrottleDestroyed(
     content::NavigationHandle* navigation_handle) {
   size_t num_erased = ongoing_activation_throttles_.erase(navigation_handle);
   CHECK_EQ(0u, num_erased);
+}
+
+void ContentSubresourceFilterThrottleManager::MaybeActivateSubframeSpecialUrls(
+    content::NavigationHandle* navigation_handle) {
+  if (navigation_handle->IsInMainFrame())
+    return;
+
+  if (!ShouldUseParentActivation(navigation_handle->GetURL()))
+    return;
+
+  content::RenderFrameHost* frame_host =
+      navigation_handle->GetRenderFrameHost();
+  if (!frame_host)
+    return;
+
+  content::RenderFrameHost* parent = navigation_handle->GetParentFrame();
+  DCHECK(parent);
+  if (base::ContainsKey(activated_frame_hosts_, parent))
+    activated_frame_hosts_[frame_host] = nullptr;
 }
 
 }  // namespace subresource_filter

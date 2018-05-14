@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "base/containers/queue.h"
+#include "base/metrics/histogram_macros.h"
 #include "content/renderer/media/gpu/gpu_video_accelerator_factories_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "media/base/bind_to_current_loop.h"
@@ -35,10 +37,12 @@ VEAEncoder::VEAEncoder(
     const VideoTrackRecorder::OnErrorCB& on_error_callback,
     int32_t bits_per_second,
     media::VideoCodecProfile codec,
-    const gfx::Size& size)
+    const gfx::Size& size,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : Encoder(on_encoded_video_callback,
               bits_per_second > 0 ? bits_per_second
                                   : size.GetArea() * kVEADefaultBitratePerPixel,
+              std::move(task_runner),
               RenderThreadImpl::current()->GetGpuFactories()->GetTaskRunner()),
       gpu_factories_(RenderThreadImpl::current()->GetGpuFactories()),
       codec_(codec),
@@ -49,8 +53,9 @@ VEAEncoder::VEAEncoder(
   DCHECK_GE(size.height(), kVEAEncoderMinResolutionHeight);
 
   encoding_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&VEAEncoder::ConfigureEncoderOnEncodingTaskRunner,
-                            this, size));
+      FROM_HERE,
+      base::BindOnce(&VEAEncoder::ConfigureEncoderOnEncodingTaskRunner, this,
+                     size));
 }
 
 VEAEncoder::~VEAEncoder() {
@@ -65,8 +70,8 @@ VEAEncoder::~VEAEncoder() {
   // It is currently unsafe because |video_encoder_| might be in use on another
   // function on |encoding_task_runner_|, see http://crbug.com/701030.
   encoding_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&VEAEncoder::DestroyOnEncodingTaskRunner,
-                            base::Unretained(this), &release_waiter));
+      FROM_HERE, base::BindOnce(&VEAEncoder::DestroyOnEncodingTaskRunner,
+                                base::Unretained(this), &release_waiter));
   release_waiter.Wait();
 }
 
@@ -78,7 +83,7 @@ void VEAEncoder::RequireBitstreamBuffers(unsigned int /*input_count*/,
 
   vea_requested_input_coded_size_ = input_coded_size;
   output_buffers_.clear();
-  std::queue<std::unique_ptr<base::SharedMemory>>().swap(input_buffers_);
+  base::queue<std::unique_ptr<base::SharedMemory>>().swap(input_buffers_);
 
   for (int i = 0; i < kVEAEncoderOutputBufferCount; ++i) {
     std::unique_ptr<base::SharedMemory> shm =
@@ -107,15 +112,18 @@ void VEAEncoder::BitstreamBufferReady(int32_t bitstream_buffer_id,
   const auto front_frame = frames_in_encode_.front();
   frames_in_encode_.pop();
   origin_task_runner_->PostTask(
-      FROM_HERE, base::Bind(OnFrameEncodeCompleted, on_encoded_video_callback_,
-                            front_frame.first, base::Passed(&data), nullptr,
-                            front_frame.second, keyframe));
+      FROM_HERE,
+      base::BindOnce(OnFrameEncodeCompleted, on_encoded_video_callback_,
+                     front_frame.first, std::move(data), nullptr,
+                     front_frame.second, keyframe));
   UseOutputBitstreamBufferId(bitstream_buffer_id);
 }
 
 void VEAEncoder::NotifyError(media::VideoEncodeAccelerator::Error error) {
   DVLOG(3) << __func__;
   DCHECK(encoding_task_runner_->BelongsToCurrentThread());
+  UMA_HISTOGRAM_ENUMERATION("Media.MediaRecorder.VEAError", error,
+                            media::VideoEncodeAccelerator::kErrorMax + 1);
   on_error_callback_.Run();
   error_notified_ = true;
 }

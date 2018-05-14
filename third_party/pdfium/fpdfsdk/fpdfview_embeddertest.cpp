@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <cmath>
 #include <limits>
+#include <memory>
 #include <string>
 
 #include "fpdfsdk/fpdfview_c_api_test.h"
@@ -11,11 +13,36 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/utils/path_service.h"
 
+namespace {
+
+class MockDownloadHints : public FX_DOWNLOADHINTS {
+ public:
+  static void SAddSegment(FX_DOWNLOADHINTS* pThis, size_t offset, size_t size) {
+  }
+
+  MockDownloadHints() {
+    FX_DOWNLOADHINTS::version = 1;
+    FX_DOWNLOADHINTS::AddSegment = SAddSegment;
+  }
+
+  ~MockDownloadHints() {}
+};
+
+}  // namespace
+
 TEST(fpdf, CApiTest) {
   EXPECT_TRUE(CheckPDFiumCApi());
 }
 
-class FPDFViewEmbeddertest : public EmbedderTest {};
+class FPDFViewEmbeddertest : public EmbedderTest {
+ protected:
+  void TestRenderPageBitmapWithMatrix(FPDF_PAGE page,
+                                      const int bitmap_width,
+                                      const int bitmap_height,
+                                      const FS_MATRIX& matrix,
+                                      const FS_RECTF& rect,
+                                      const char* expected_md5);
+};
 
 TEST_F(FPDFViewEmbeddertest, Document) {
   EXPECT_TRUE(OpenDocument("about_blank.pdf"));
@@ -28,6 +55,12 @@ TEST_F(FPDFViewEmbeddertest, Document) {
 
   EXPECT_EQ(0xFFFFFFFF, FPDF_GetDocPermissions(document()));
   EXPECT_EQ(-1, FPDF_GetSecurityHandlerRevision(document()));
+}
+
+TEST_F(FPDFViewEmbeddertest, LoadNonexistentDocument) {
+  FPDF_DOCUMENT doc = FPDF_LoadDocument("nonexistent_document.pdf", "");
+  ASSERT_FALSE(doc);
+  EXPECT_EQ(static_cast<int>(FPDF_GetLastError()), FPDF_ERR_FILE);
 }
 
 // See bug 465.
@@ -64,12 +97,28 @@ TEST_F(FPDFViewEmbeddertest, EmptyDocument) {
   EXPECT_EQ(0u, FPDF_CountNamedDests(document()));
 }
 
+TEST_F(FPDFViewEmbeddertest, LinearizedDocument) {
+  EXPECT_TRUE(OpenDocumentLinearized("feature_linearized_loading.pdf"));
+  int version;
+  EXPECT_TRUE(FPDF_GetFileVersion(document(), &version));
+  EXPECT_EQ(16, version);
+}
+
 TEST_F(FPDFViewEmbeddertest, Page) {
   EXPECT_TRUE(OpenDocument("about_blank.pdf"));
   FPDF_PAGE page = LoadPage(0);
   EXPECT_NE(nullptr, page);
+
   EXPECT_EQ(612.0, FPDF_GetPageWidth(page));
   EXPECT_EQ(792.0, FPDF_GetPageHeight(page));
+
+  FS_RECTF rect;
+  EXPECT_TRUE(FPDF_GetPageBoundingBox(page, &rect));
+  EXPECT_EQ(0.0, rect.left);
+  EXPECT_EQ(0.0, rect.bottom);
+  EXPECT_EQ(612.0, rect.right);
+  EXPECT_EQ(792.0, rect.top);
+
   UnloadPage(page);
   EXPECT_EQ(nullptr, LoadPage(1));
 }
@@ -299,12 +348,24 @@ TEST_F(FPDFViewEmbeddertest, Hang_298) {
   EXPECT_FALSE(OpenDocument("bug_298.pdf"));
 }
 
+TEST_F(FPDFViewEmbeddertest, Crasher_773229) {
+  EXPECT_TRUE(OpenDocument("bug_773229.pdf"));
+}
+
 // Test if the document opens without infinite looping.
 // Previously this test will hang in a loop inside LoadAllCrossRefV4. After
 // the fix, LoadAllCrossRefV4 will return false after detecting a cross
 // reference loop. Cross references will be rebuilt successfully.
 TEST_F(FPDFViewEmbeddertest, CrossRefV4Loop) {
   EXPECT_TRUE(OpenDocument("bug_xrefv4_loop.pdf"));
+  MockDownloadHints hints;
+
+  // Make sure calling FPDFAvail_IsDocAvail() on this file does not infinite
+  // loop either. See bug 875.
+  int ret = PDF_DATA_NOTAVAIL;
+  while (ret == PDF_DATA_NOTAVAIL)
+    ret = FPDFAvail_IsDocAvail(avail_, &hints);
+  EXPECT_EQ(PDF_DATA_AVAIL, ret);
 }
 
 // The test should pass when circular references to ParseIndirectObject will not
@@ -329,53 +390,176 @@ TEST_F(FPDFViewEmbeddertest, Hang_360) {
   EXPECT_FALSE(OpenDocument("bug_360.pdf"));
 }
 
-TEST_F(FPDFViewEmbeddertest, FPDF_RenderPageBitmapWithMatrix) {
-  const char kAllBlackMd5sum[] = "5708fc5c4a8bd0abde99c8e8f0390615";
-  const char kTopLeftQuarterBlackMd5sum[] = "24e4d1ec06fa0258af758cfc8b2ad50a";
-
-  EXPECT_TRUE(OpenDocument("black.pdf"));
-  FPDF_PAGE page = LoadPage(0);
-  EXPECT_NE(nullptr, page);
-  const int width = static_cast<int>(FPDF_GetPageWidth(page));
-  const int height = static_cast<int>(FPDF_GetPageHeight(page));
-  EXPECT_EQ(612, width);
-  EXPECT_EQ(792, height);
-
-  FPDF_BITMAP bitmap = RenderPage(page);
-  CompareBitmap(bitmap, width, height, kAllBlackMd5sum);
+void FPDFViewEmbeddertest::TestRenderPageBitmapWithMatrix(
+    FPDF_PAGE page,
+    const int bitmap_width,
+    const int bitmap_height,
+    const FS_MATRIX& matrix,
+    const FS_RECTF& rect,
+    const char* expected_md5) {
+  FPDF_BITMAP bitmap = FPDFBitmap_Create(bitmap_width, bitmap_height, 0);
+  FPDFBitmap_FillRect(bitmap, 0, 0, bitmap_width, bitmap_height, 0xFFFFFFFF);
+  FPDF_RenderPageBitmapWithMatrix(bitmap, page, &matrix, &rect, 0);
+  CompareBitmap(bitmap, bitmap_width, bitmap_height, expected_md5);
   FPDFBitmap_Destroy(bitmap);
+}
+
+TEST_F(FPDFViewEmbeddertest, FPDF_RenderPageBitmapWithMatrix) {
+  const char kOriginalMD5[] = "0a90de37f52127619c3dfb642b5fa2fe";
+  const char kClippedMD5[] = "a84cab93c102b9b9290fba3047ba702c";
+  const char kTopLeftQuarterMD5[] = "f11a11137c8834389e31cf555a4a6979";
+  const char kHoriStretchedMD5[] = "48ef9205941ed19691ccfa00d717187e";
+  const char kRotated90ClockwiseMD5[] = "d8da2c7bf77521550d0f2752b9cf3482";
+  const char kRotated180ClockwiseMD5[] = "0113386bb0bd45125bacc6dee78bfe78";
+  const char kRotated270ClockwiseMD5[] = "a287e0f74ce203699cda89f9cc97a240";
+  const char kMirrorHoriMD5[] = "6e8d7a6fde39d8e720fb9e620102918c";
+  const char kMirrorVertMD5[] = "8f3a555ef9c0d5031831ae3715273707";
+  const char kLargerTopLeftQuarterMD5[] = "172a2f4adafbadbe98017b1c025b9e27";
+  const char kLargerMD5[] = "c806145641c3e6fc4e022c7065343749";
+  const char kLargerClippedMD5[] = "091d3b1c7933c8f6945eb2cb41e588e9";
+  const char kLargerRotatedMD5[] = "115f13353ebfc82ddb392d1f0059eb12";
+  const char kLargerRotatedLandscapeMD5[] = "c901239d17d84ac84cb6f2124da71b0d";
+  const char kLargerRotatedDiagonalMD5[] = "3d62417468bdaff0eb14391a0c30a3b1";
+  const char kTileMD5[] = "0a190003c97220bf8877684c8d7e89cf";
+
+  EXPECT_TRUE(OpenDocument("rectangles.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+  const int page_width = static_cast<int>(FPDF_GetPageWidth(page));
+  const int page_height = static_cast<int>(FPDF_GetPageHeight(page));
+  EXPECT_EQ(200, page_width);
+  EXPECT_EQ(300, page_height);
+
+  std::unique_ptr<void, FPDFBitmapDeleter> bitmap = RenderLoadedPage(page);
+  CompareBitmap(bitmap.get(), page_width, page_height, kOriginalMD5);
+
+  FS_RECTF page_rect{0, 0, page_width, page_height};
 
   // Try rendering with an identity matrix. The output should be the same as
-  // the RenderPage() output.
-  FS_MATRIX matrix;
-  matrix.a = 1;
-  matrix.b = 0;
-  matrix.c = 0;
-  matrix.d = 1;
-  matrix.e = 0;
-  matrix.f = 0;
+  // the RenderLoadedPage() output.
+  FS_MATRIX identity_matrix{1, 0, 0, 1, 0, 0};
+  TestRenderPageBitmapWithMatrix(page, page_width, page_height, identity_matrix,
+                                 page_rect, kOriginalMD5);
 
-  FS_RECTF rect;
-  rect.left = 0;
-  rect.top = 0;
-  rect.right = width;
-  rect.bottom = height;
+  // Again render with an identity matrix but with a smaller clipping rect.
+  FS_RECTF middle_of_page_rect{page_width / 4, page_height / 4,
+                               page_width * 3 / 4, page_height * 3 / 4};
+  TestRenderPageBitmapWithMatrix(page, page_width, page_height, identity_matrix,
+                                 middle_of_page_rect, kClippedMD5);
 
-  bitmap = FPDFBitmap_Create(width, height, 0);
-  FPDFBitmap_FillRect(bitmap, 0, 0, width, height, 0xFFFFFFFF);
-  FPDF_RenderPageBitmapWithMatrix(bitmap, page, &matrix, &rect, 0);
-  CompareBitmap(bitmap, width, height, kAllBlackMd5sum);
-  FPDFBitmap_Destroy(bitmap);
+  // Now render again with the image scaled smaller.
+  FS_MATRIX half_scale_matrix{0.5, 0, 0, 0.5, 0, 0};
+  TestRenderPageBitmapWithMatrix(page, page_width, page_height,
+                                 half_scale_matrix, page_rect,
+                                 kTopLeftQuarterMD5);
 
-  // Now render again with the image scaled.
-  matrix.a = 0.5;
-  matrix.d = 0.5;
+  // Now render again with the image scaled larger horizontally (the right half
+  // will be clipped).
+  FS_MATRIX stretch_x_matrix{2, 0, 0, 1, 0, 0};
+  TestRenderPageBitmapWithMatrix(page, page_width, page_height,
+                                 stretch_x_matrix, page_rect,
+                                 kHoriStretchedMD5);
 
-  bitmap = FPDFBitmap_Create(width, height, 0);
-  FPDFBitmap_FillRect(bitmap, 0, 0, width, height, 0xFFFFFFFF);
-  FPDF_RenderPageBitmapWithMatrix(bitmap, page, &matrix, &rect, 0);
-  CompareBitmap(bitmap, width, height, kTopLeftQuarterBlackMd5sum);
-  FPDFBitmap_Destroy(bitmap);
+  // Try a 90 degree rotation clockwise but with the same bitmap size, so part
+  // will be clipped.
+  FS_MATRIX rotate_90_matrix{0, 1, -1, 0, page_width, 0};
+  TestRenderPageBitmapWithMatrix(page, page_width, page_height,
+                                 rotate_90_matrix, page_rect,
+                                 kRotated90ClockwiseMD5);
+
+  // 180 degree rotation clockwise.
+  FS_MATRIX rotate_180_matrix{-1, 0, 0, -1, page_width, page_height};
+  TestRenderPageBitmapWithMatrix(page, page_width, page_height,
+                                 rotate_180_matrix, page_rect,
+                                 kRotated180ClockwiseMD5);
+
+  // 270 degree rotation clockwise.
+  FS_MATRIX rotate_270_matrix{0, -1, 1, 0, 0, page_width};
+  TestRenderPageBitmapWithMatrix(page, page_width, page_height,
+                                 rotate_270_matrix, page_rect,
+                                 kRotated270ClockwiseMD5);
+
+  // Mirror horizontally.
+  FS_MATRIX mirror_hori_matrix{-1, 0, 0, 1, page_width, 0};
+  TestRenderPageBitmapWithMatrix(page, page_width, page_height,
+                                 mirror_hori_matrix, page_rect, kMirrorHoriMD5);
+
+  // Mirror vertically.
+  FS_MATRIX mirror_vert_matrix{1, 0, 0, -1, 0, page_height};
+  TestRenderPageBitmapWithMatrix(page, page_width, page_height,
+                                 mirror_vert_matrix, page_rect, kMirrorVertMD5);
+
+  // Tests rendering to a larger bitmap
+  const int bitmap_width = page_width * 2;
+  const int bitmap_height = page_height * 2;
+
+  // Render using an identity matrix and the whole bitmap area as clipping rect.
+  FS_RECTF bitmap_rect{0, 0, bitmap_width, bitmap_height};
+  TestRenderPageBitmapWithMatrix(page, bitmap_width, bitmap_height,
+                                 identity_matrix, bitmap_rect,
+                                 kLargerTopLeftQuarterMD5);
+
+  // Render using a scaling matrix to fill the larger bitmap.
+  FS_MATRIX double_scale_matrix{2, 0, 0, 2, 0, 0};
+  TestRenderPageBitmapWithMatrix(page, bitmap_width, bitmap_height,
+                                 double_scale_matrix, bitmap_rect, kLargerMD5);
+
+  // Render the larger image again but with clipping.
+  FS_RECTF middle_of_bitmap_rect{bitmap_width / 4, bitmap_height / 4,
+                                 bitmap_width * 3 / 4, bitmap_height * 3 / 4};
+  TestRenderPageBitmapWithMatrix(page, bitmap_width, bitmap_height,
+                                 double_scale_matrix, middle_of_bitmap_rect,
+                                 kLargerClippedMD5);
+
+  // On the larger bitmap, try a 90 degree rotation but with the same bitmap
+  // size, so part will be clipped.
+  FS_MATRIX rotate_90_scale_2_matrix{0, 2, -2, 0, bitmap_width, 0};
+  TestRenderPageBitmapWithMatrix(page, bitmap_width, bitmap_height,
+                                 rotate_90_scale_2_matrix, bitmap_rect,
+                                 kLargerRotatedMD5);
+
+  // On the larger bitmap, apply 90 degree rotation to a bitmap with the
+  // appropriate dimensions.
+  const int landscape_bitmap_width = bitmap_height;
+  const int landscape_bitmap_height = bitmap_width;
+  FS_RECTF landscape_bitmap_rect{0, 0, landscape_bitmap_width,
+                                 landscape_bitmap_height};
+  FS_MATRIX landscape_rotate_90_scale_2_matrix{
+      0, 2, -2, 0, landscape_bitmap_width, 0};
+  TestRenderPageBitmapWithMatrix(
+      page, landscape_bitmap_width, landscape_bitmap_height,
+      landscape_rotate_90_scale_2_matrix, landscape_bitmap_rect,
+      kLargerRotatedLandscapeMD5);
+
+  // On the larger bitmap, apply 45 degree rotation to a bitmap with the
+  // appropriate dimensions.
+  const float sqrt2 = 1.41421356f;
+  const int diagonal_bitmap_size = ceil((bitmap_width + bitmap_height) / sqrt2);
+  FS_RECTF diagonal_bitmap_rect{0, 0, diagonal_bitmap_size,
+                                diagonal_bitmap_size};
+  FS_MATRIX rotate_45_scale_2_matrix{
+      sqrt2, sqrt2, -sqrt2, sqrt2, bitmap_height / sqrt2, 0};
+  TestRenderPageBitmapWithMatrix(page, diagonal_bitmap_size,
+                                 diagonal_bitmap_size, rotate_45_scale_2_matrix,
+                                 diagonal_bitmap_rect,
+                                 kLargerRotatedDiagonalMD5);
+
+  // Render the (2, 1) tile of the page (third column, second row) when the page
+  // is divided in 50x50 pixel tiles. The tile is scaled by a factor of 7.
+  const float scale = 7.0;
+  const int tile_size = 50;
+  const int tile_x = 2;
+  const int tile_y = 1;
+  int tile_bitmap_size = scale * tile_size;
+  FS_RECTF tile_bitmap_rect{0, 0, tile_bitmap_size, tile_bitmap_size};
+  FS_MATRIX tile_2_1_matrix{scale,
+                            0,
+                            0,
+                            scale,
+                            -tile_x * tile_bitmap_size,
+                            -tile_y * tile_bitmap_size};
+  TestRenderPageBitmapWithMatrix(page, tile_bitmap_size, tile_bitmap_size,
+                                 tile_2_1_matrix, tile_bitmap_rect, kTileMD5);
 
   UnloadPage(page);
 }

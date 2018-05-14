@@ -89,17 +89,28 @@ class HardwareDisplayPlaneManager {
   virtual bool Commit(HardwareDisplayPlaneList* plane_list,
                       bool test_only) = 0;
 
+  // Disable all the overlay planes previously submitted and now stored in
+  // plane_list->old_plane_list.
+  virtual bool DisableOverlayPlanes(HardwareDisplayPlaneList* plane_list) = 0;
+
+  // Check that the primary plane is valid for this
+  // PlaneManager. Specifically, legacy can't support primary planes
+  // that don't have the same size as the current mode of the crtc.
+  virtual bool ValidatePrimarySize(const OverlayPlane& primary,
+                                   const drmModeModeInfo& mode) = 0;
+
   const std::vector<std::unique_ptr<HardwareDisplayPlane>>& planes() {
     return planes_;
   }
 
-  // Returns all formats which can be scanned out by this PlaneManager. Use
-  // IsFormatSupported to find if a given format is supported on a particular
-  // plane for a given crtc.
+  // Request a callback to be called when the planes are ready to be displayed.
+  // The callback will be invoked in the caller's execution context (same
+  // sequence or thread).
+  virtual void RequestPlanesReadyCallback(const OverlayPlaneList& planes,
+                                          base::OnceClosure callback) = 0;
+
+  // Returns all formats which can be scanned out by this PlaneManager.
   const std::vector<uint32_t>& GetSupportedFormats() const;
-  bool IsFormatSupported(uint32_t fourcc_format,
-                         uint32_t z_order,
-                         uint32_t crtc_id) const;
 
   std::vector<uint64_t> GetFormatModifiers(uint32_t crtc_id, uint32_t format);
 

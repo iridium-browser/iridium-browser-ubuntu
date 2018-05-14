@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//third_party/WebKit/Source/modules/modules.gni")
+import("//tools/grit/grit_rule.gni")
 
 blink_modules_sources("media_controls") {
   sources = [
@@ -12,10 +13,18 @@ blink_modules_sources("media_controls") {
     "MediaControlsMediaEventListener.h",
     "MediaControlsOrientationLockDelegate.cpp",
     "MediaControlsOrientationLockDelegate.h",
+    "MediaControlsResourceLoader.cpp",
+    "MediaControlsResourceLoader.h",
     "MediaControlsRotateToFullscreenDelegate.cpp",
     "MediaControlsRotateToFullscreenDelegate.h",
     "MediaControlsWindowEventListener.cpp",
     "MediaControlsWindowEventListener.h",
+    "MediaDownloadInProductHelpManager.cpp",
+    "MediaDownloadInProductHelpManager.h",
+    "elements/MediaControlAnimationEventListener.cpp",
+    "elements/MediaControlAnimationEventListener.h",
+    "elements/MediaControlButtonPanelElement.cpp",
+    "elements/MediaControlButtonPanelElement.h",
     "elements/MediaControlCastButtonElement.cpp",
     "elements/MediaControlCastButtonElement.h",
     "elements/MediaControlCurrentTimeDisplayElement.cpp",
@@ -33,6 +42,8 @@ blink_modules_sources("media_controls") {
     "elements/MediaControlFullscreenButtonElement.h",
     "elements/MediaControlInputElement.cpp",
     "elements/MediaControlInputElement.h",
+    "elements/MediaControlLoadingPanelElement.cpp",
+    "elements/MediaControlLoadingPanelElement.h",
     "elements/MediaControlMuteButtonElement.cpp",
     "elements/MediaControlMuteButtonElement.h",
     "elements/MediaControlOverflowMenuButtonElement.cpp",
@@ -47,10 +58,16 @@ blink_modules_sources("media_controls") {
     "elements/MediaControlPanelElement.h",
     "elements/MediaControlPanelEnclosureElement.cpp",
     "elements/MediaControlPanelEnclosureElement.h",
+    "elements/MediaControlPictureInPictureButtonElement.cpp",
+    "elements/MediaControlPictureInPictureButtonElement.h",
     "elements/MediaControlPlayButtonElement.cpp",
     "elements/MediaControlPlayButtonElement.h",
     "elements/MediaControlRemainingTimeDisplayElement.cpp",
     "elements/MediaControlRemainingTimeDisplayElement.h",
+    "elements/MediaControlScrubbingMessageElement.cpp",
+    "elements/MediaControlScrubbingMessageElement.h",
+    "elements/MediaControlSliderElement.cpp",
+    "elements/MediaControlSliderElement.h",
     "elements/MediaControlTextTrackListElement.cpp",
     "elements/MediaControlTextTrackListElement.h",
     "elements/MediaControlTimeDisplayElement.cpp",
@@ -66,8 +83,17 @@ blink_modules_sources("media_controls") {
   ]
 
   deps = [
-    "//device/screen_orientation/public/interfaces:interfaces_blink",
-    "//services/device/public/interfaces:constants_blink",
     "//services/service_manager/public/cpp",
+    "//third_party/WebKit/public:media_controls_resources_header",
+  ]
+}
+
+grit("media_controls_resources") {
+  output_dir = "$blink_modules_output_dir/media_controls/resources/"
+  source = "resources/media_controls_resources.grd"
+  outputs = [
+    "grit/media_controls_resources.h",
+    "media_controls_resources_100_percent.pak",
+    "media_controls_resources_200_percent.pak",
   ]
 }

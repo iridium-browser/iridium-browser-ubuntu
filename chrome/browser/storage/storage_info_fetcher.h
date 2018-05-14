@@ -7,6 +7,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "storage/browser/quota/quota_callbacks.h"
+#include "third_party/WebKit/public/mojom/quota/quota_types.mojom.h"
 
 namespace storage {
 class QuotaManager;
@@ -21,7 +22,7 @@ class StorageInfoFetcher :
   using FetchCallback =
       base::Callback<void(const storage::UsageInfoEntries&)>;
   using ClearCallback =
-      base::Callback<void(storage::QuotaStatusCode code)>;
+      base::Callback<void(blink::mojom::QuotaStatusCode code)>;
 
   explicit StorageInfoFetcher(Profile* profile);
 
@@ -29,10 +30,9 @@ class StorageInfoFetcher :
   void FetchStorageInfo(const FetchCallback& fetch_callback);
 
   // Asynchronously clears storage for the given host.
-  void ClearStorage(
-      const std::string& host,
-      storage::StorageType type,
-      const ClearCallback& clear_callback);
+  void ClearStorage(const std::string& host,
+                    blink::mojom::StorageType type,
+                    const ClearCallback& clear_callback);
 
  private:
   virtual ~StorageInfoFetcher();
@@ -40,7 +40,7 @@ class StorageInfoFetcher :
   friend class base::RefCountedThreadSafe<StorageInfoFetcher>;
 
   // Fetches the usage information.
-  void GetUsageInfo(const storage::GetUsageInfoCallback& callback);
+  void GetUsageInfo(storage::GetUsageInfoCallback callback);
 
   // Called when usage information is available.
   void OnGetUsageInfoInternal(const storage::UsageInfoEntries& entries);
@@ -49,10 +49,10 @@ class StorageInfoFetcher :
   void OnFetchCompleted();
 
   // Called when usage has been cleared.
-  void OnUsageClearedInternal(storage::QuotaStatusCode code);
+  void OnUsageClearedInternal(blink::mojom::QuotaStatusCode code);
 
   // Reports back to all observers that storage has been deleted.
-  void OnClearCompleted(storage::QuotaStatusCode code);
+  void OnClearCompleted(blink::mojom::QuotaStatusCode code);
 
   // The quota manager to use to calculate the storage usage.
   storage::QuotaManager* quota_manager_;
@@ -61,7 +61,7 @@ class StorageInfoFetcher :
   storage::UsageInfoEntries entries_;
 
   // The storage type to delete.
-  storage::StorageType type_to_delete_;
+  blink::mojom::StorageType type_to_delete_;
 
   // The callback to use when fetching is complete.
   FetchCallback fetch_callback_;

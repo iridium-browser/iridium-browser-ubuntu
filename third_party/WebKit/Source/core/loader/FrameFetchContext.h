@@ -31,6 +31,7 @@
 #ifndef FrameFetchContext_h
 #define FrameFetchContext_h
 
+#include "base/single_thread_task_runner.h"
 #include "core/CoreExport.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/loader/BaseFetchContext.h"
@@ -53,29 +54,31 @@ class LocalFrameClient;
 class ResourceError;
 class ResourceResponse;
 class Settings;
-class WebTaskRunner;
+struct WebEnabledClientHints;
 
 class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
  public:
   static ResourceFetcher* CreateFetcherFromDocumentLoader(
       DocumentLoader* loader) {
-    auto* context = new FrameFetchContext(loader, nullptr);
-    return ResourceFetcher::Create(context, context->GetTaskRunner());
+    return CreateFetcher(loader, nullptr);
   }
+  // Used for creating a FrameFetchContext for an imported Document.
+  // |document_loader_| will be set to nullptr.
   static ResourceFetcher* CreateFetcherFromDocument(Document* document) {
-    auto* context = new FrameFetchContext(nullptr, document);
-    return ResourceFetcher::Create(context, context->GetTaskRunner());
+    return CreateFetcher(nullptr, document);
   }
 
   static void ProvideDocumentToContext(FetchContext&, Document*);
 
   ~FrameFetchContext() override;
 
-  bool IsFrameFetchContext() { return true; }
+  bool IsFrameFetchContext() override { return true; }
+
+  void RecordDataUriWithOctothorpe() override;
 
   void AddAdditionalRequestHeaders(ResourceRequest&,
                                    FetchResourceType) override;
-  WebCachePolicy ResourceRequestCachePolicy(
+  mojom::FetchCacheMode ResourceRequestCachePolicy(
       const ResourceRequest&,
       Resource::Type,
       FetchParameters::DeferOption) const override;
@@ -87,13 +90,14 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
       unsigned long identifier,
       ResourceRequest&,
       const ResourceResponse& redirect_response,
+      Resource::Type,
       const FetchInitiatorInfo& = FetchInitiatorInfo()) override;
   void DispatchDidLoadResourceFromMemoryCache(unsigned long identifier,
                                               const ResourceRequest&,
                                               const ResourceResponse&) override;
   void DispatchDidReceiveResponse(unsigned long identifier,
                                   const ResourceResponse&,
-                                  WebURLRequest::FrameType,
+                                  network::mojom::RequestContextFrameType,
                                   WebURLRequest::RequestContext,
                                   Resource*,
                                   ResourceResponseType) override;
@@ -108,15 +112,16 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
   void DispatchDidFinishLoading(unsigned long identifier,
                                 double finish_time,
                                 int64_t encoded_data_length,
-                                int64_t decoded_body_length) override;
-  void DispatchDidFail(unsigned long identifier,
+                                int64_t decoded_body_length,
+                                bool blocked_cross_site_document) override;
+  void DispatchDidFail(const KURL&,
+                       unsigned long identifier,
                        const ResourceError&,
                        int64_t encoded_data_length,
                        bool is_internal_request) override;
 
   bool ShouldLoadNewResource(Resource::Type) const override;
-  void RecordLoadingActivity(unsigned long identifier,
-                             const ResourceRequest&,
+  void RecordLoadingActivity(const ResourceRequest&,
                              Resource::Type,
                              const AtomicString& fetch_initiator_name) override;
   void DidLoadResource(Resource*) override;
@@ -130,73 +135,83 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
   bool IsMainFrame() const override;
   bool DefersLoading() const override;
   bool IsLoadComplete() const override;
-  bool PageDismissalEventBeingDispatched() const override;
   bool UpdateTimingInfoForIFrameNavigation(ResourceTimingInfo*) override;
-  void SendImagePing(const KURL&) override;
-  void AddConsoleMessage(const String&,
-                         LogMessageType = kLogErrorMessage) const override;
-  SecurityOrigin* GetSecurityOrigin() const override;
 
-  void PopulateResourceRequest(const KURL&,
-                               Resource::Type,
+  const SecurityOrigin* GetSecurityOrigin() const override;
+
+  void PopulateResourceRequest(Resource::Type,
                                const ClientHintsPreferences&,
                                const FetchParameters::ResourceWidth&,
-                               const ResourceLoaderOptions&,
-                               SecurityViolationReportingPolicy,
                                ResourceRequest&) override;
-  void SetFirstPartyCookieAndRequestorOrigin(ResourceRequest&) override;
 
   // Exposed for testing.
   void ModifyRequestForCSP(ResourceRequest&);
   void AddClientHintsIfNecessary(const ClientHintsPreferences&,
                                  const FetchParameters::ResourceWidth&,
                                  ResourceRequest&);
-  static float ClientHintsDeviceMemory(int64_t physical_memory_mb);
 
   MHTMLArchive* Archive() const override;
 
   std::unique_ptr<WebURLLoader> CreateURLLoader(
-      const ResourceRequest&) override;
+      const ResourceRequest&,
+      scoped_refptr<base::SingleThreadTaskRunner>,
+      const ResourceLoaderOptions&) override;
+
+  ResourceLoadScheduler::ThrottlingPolicy InitialLoadThrottlingPolicy()
+      const override {
+    // Frame loading should normally start with |kTight| throttling, as the
+    // frame will be in layout-blocking state until the <body> tag is inserted.
+    return ResourceLoadScheduler::ThrottlingPolicy::kTight;
+  }
 
   bool IsDetached() const override { return frozen_state_; }
 
   FetchContext* Detach() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
+
+  ResourceLoadPriority ModifyPriorityForExperiments(
+      ResourceLoadPriority) const override;
 
  private:
+  friend class FrameFetchContextTest;
+
   struct FrozenState;
+
+  static ResourceFetcher* CreateFetcher(DocumentLoader*, Document*);
 
   FrameFetchContext(DocumentLoader*, Document*);
 
-  // m_documentLoader is null when loading resources from an HTML import
-  // and in such cases we use the document loader of the importing frame.
   // Convenient accessors below can be used to transparently access the
   // relevant document loader or frame in either cases without null-checks.
+  //
   // TODO(kinuko): Remove constness, these return non-const members.
   DocumentLoader* MasterDocumentLoader() const;
   LocalFrame* GetFrame() const;
   LocalFrameClient* GetLocalFrameClient() const;
   LocalFrame* FrameOfImportsController() const;
-  RefPtr<WebTaskRunner> GetTaskRunner() const;
 
   // FetchContext overrides:
-  WebFrameScheduler* GetFrameScheduler() override;
+  WebFrameScheduler* GetFrameScheduler() const override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetLoadingTaskRunner() override;
 
   // BaseFetchContext overrides:
-  KURL GetFirstPartyForCookies() const override;
+  KURL GetSiteForCookies() const override;
   bool AllowScriptFromSource(const KURL&) const override;
   SubresourceFilter* GetSubresourceFilter() const override;
-  bool ShouldBlockRequestByInspector(const ResourceRequest&) const override;
+  bool ShouldBlockRequestByInspector(const KURL&) const override;
   void DispatchDidBlockRequest(const ResourceRequest&,
                                const FetchInitiatorInfo&,
-                               ResourceRequestBlockedReason) const override;
+                               ResourceRequestBlockedReason,
+                               Resource::Type) const override;
   bool ShouldBypassMainWorldCSP() const override;
   bool IsSVGImageChromeClient() const override;
   void CountUsage(WebFeature) const override;
   void CountDeprecation(WebFeature) const override;
   bool ShouldBlockFetchByMixedContentCheck(
-      const ResourceRequest&,
+      WebURLRequest::RequestContext,
+      network::mojom::RequestContextFrameType,
+      ResourceRequest::RedirectStatus,
       const KURL&,
       SecurityViolationReportingPolicy) const override;
   bool ShouldBlockFetchAsCredentialedSubresource(const ResourceRequest&,
@@ -206,22 +221,32 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext {
   String GetOutgoingReferrer() const override;
   const KURL& Url() const override;
   const SecurityOrigin* GetParentSecurityOrigin() const override;
-  Optional<WebAddressSpace> GetAddressSpace() const override;
+  Optional<mojom::IPAddressSpace> GetAddressSpace() const override;
   const ContentSecurityPolicy* GetContentSecurityPolicy() const override;
   void AddConsoleMessage(ConsoleMessage*) const override;
 
   ContentSettingsClient* GetContentSettingsClient() const;
   Settings* GetSettings() const;
   String GetUserAgent() const;
-  RefPtr<SecurityOrigin> GetRequestorOrigin();
-  RefPtr<SecurityOrigin> GetRequestorOriginForFrameLoading();
+  scoped_refptr<const SecurityOrigin> GetRequestorOrigin();
   ClientHintsPreferences GetClientHintsPreferences() const;
   float GetDevicePixelRatio() const;
-  bool ShouldSendClientHint(WebClientHintsType,
-                            const ClientHintsPreferences&) const;
+  bool ShouldSendClientHint(mojom::WebClientHintsType,
+                            const ClientHintsPreferences&,
+                            const WebEnabledClientHints&) const;
+  // Checks if the origin requested persisting the client hints, and notifies
+  // the |ContentSettingsClient| with the list of client hints and the
+  // persistence duration.
+  void ParseAndPersistClientHints(const ResourceResponse&);
+  void SetFirstPartyCookieAndRequestorOrigin(ResourceRequest&);
 
   Member<DocumentLoader> document_loader_;
   Member<Document> document_;
+
+  // The value of |save_data_enabled_| is read once per frame from
+  // NetworkStateNotifier, which is guarded by a mutex lock, and cached locally
+  // here for performance.
+  const bool save_data_enabled_;
 
   // Non-null only when detached.
   Member<const FrozenState> frozen_state_;

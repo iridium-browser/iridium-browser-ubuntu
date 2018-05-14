@@ -10,7 +10,6 @@
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/default_clock.h"
@@ -39,12 +38,10 @@ void AffiliationService::Initialize(
     const base::FilePath& db_path) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!backend_);
-  backend_ =
-      new AffiliationBackend(request_context_getter, backend_task_runner_,
-                             base::WrapUnique(new base::DefaultClock),
-                             base::WrapUnique(new base::DefaultTickClock));
+  backend_ = new AffiliationBackend(
+      request_context_getter, backend_task_runner_,
+      base::DefaultClock::GetInstance(), base::DefaultTickClock::GetInstance());
 
-  std::unique_ptr<base::TickClock> tick_clock(new base::DefaultTickClock);
   backend_task_runner_->PostTask(
       FROM_HERE, base::Bind(&AffiliationBackend::Initialize,
                             base::Unretained(backend_), db_path));

@@ -24,6 +24,10 @@ bool MockSpecialStoragePolicy::IsStorageSessionOnly(const GURL& origin) {
   return base::ContainsKey(session_only_, origin);
 }
 
+bool MockSpecialStoragePolicy::ShouldDeleteCookieOnExit(const GURL& origin) {
+  return base::ContainsKey(session_only_, origin);
+}
+
 bool MockSpecialStoragePolicy::HasIsolatedStorage(const GURL& origin) {
   return base::ContainsKey(isolated_, origin);
 }
@@ -36,6 +40,6 @@ bool MockSpecialStoragePolicy::IsStorageDurable(const GURL& origin) {
   return base::ContainsKey(durable_, origin);
 }
 
-MockSpecialStoragePolicy::~MockSpecialStoragePolicy() {}
+MockSpecialStoragePolicy::~MockSpecialStoragePolicy() = default;
 
 }  // namespace content

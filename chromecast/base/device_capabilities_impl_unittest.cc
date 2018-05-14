@@ -153,7 +153,7 @@ void GetSampleDefaultCapability(std::string* key,
   DCHECK(key);
   DCHECK(init_value);
   *key = DeviceCapabilities::kKeyBluetoothSupported;
-  *init_value = base::MakeUnique<base::Value>(true);
+  *init_value = std::make_unique<base::Value>(true);
 }
 
 // For test fixtures that test dynamic capabilities, gets a sample key
@@ -163,21 +163,21 @@ void GetSampleDynamicCapability(std::string* key,
   DCHECK(key);
   DCHECK(init_value);
   *key = "dummy_dynamic_key";
-  *init_value = base::MakeUnique<base::Value>(99);
+  *init_value = std::make_unique<base::Value>(99);
 }
 
 // Gets a value for sample default capability different from |init_value|
 // returned in GetSampleDefaultCapability(). Must be of same type as
 // |init_value| of course.
 std::unique_ptr<base::Value> GetSampleDefaultCapabilityNewValue() {
-  return base::MakeUnique<base::Value>(false);
+  return std::make_unique<base::Value>(false);
 }
 
 // Gets a value for sample dynamic capability different from |init_value|
 // returned in GetSampleDynamicCapability(). Must be of same type as
 // |init_value| of course.
 std::unique_ptr<base::Value> GetSampleDynamicCapabilityNewValue() {
-  return base::MakeUnique<base::Value>(100);
+  return std::make_unique<base::Value>(100);
 }
 
 // Tests that |json| string matches contents of a DictionaryValue with one entry
@@ -211,8 +211,7 @@ void TestBasicOperations(DeviceCapabilities* capabilities) {
   // Read Validator
   EXPECT_EQ(capabilities->GetValidator(key), manager);
   // Read Capability
-  EXPECT_TRUE(base::Value::Equals(capabilities->GetCapability(key).get(),
-                                  init_value.get()));
+  EXPECT_EQ(*capabilities->GetCapability(key), *init_value);
   // Unregister
   delete manager;
 
@@ -231,7 +230,7 @@ void AssertBasicOperationsSuccessful(const DeviceCapabilities* capabilities) {
   std::unique_ptr<base::Value> value = capabilities->GetCapability(key);
   ASSERT_TRUE(value);
   std::unique_ptr<base::Value> new_value = GetSampleDefaultCapabilityNewValue();
-  EXPECT_TRUE(base::Value::Equals(value.get(), new_value.get()));
+  EXPECT_EQ(*value, *new_value);
 }
 
 }  // namespace
@@ -324,14 +323,12 @@ TEST_F(DeviceCapabilitiesImplTest, GetCapabilityAndSetCapability) {
   FakeCapabilityManagerSimple manager(
       capabilities(), key, init_value->CreateDeepCopy(), true, false);
 
-  EXPECT_TRUE(base::Value::Equals(capabilities()->GetCapability(key).get(),
-                                  init_value.get()));
+  EXPECT_EQ(*capabilities()->GetCapability(key), *init_value);
 
   std::unique_ptr<base::Value> new_value = GetSampleDefaultCapabilityNewValue();
   capabilities()->SetCapability(key, new_value->CreateDeepCopy());
   base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(base::Value::Equals(capabilities()->GetCapability(key).get(),
-                                  new_value.get()));
+  EXPECT_EQ(*capabilities()->GetCapability(key), *new_value);
 }
 
 // Tests BluetoothSupported() and updating this value through SetCapability().
@@ -398,8 +395,7 @@ TEST_F(DeviceCapabilitiesImplTest, SetCapabilityInvalid) {
   capabilities()->SetCapability(key, GetSampleDefaultCapabilityNewValue());
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_TRUE(base::Value::Equals(capabilities()->GetCapability(key).get(),
-                                  init_value.get()));
+  EXPECT_EQ(*capabilities()->GetCapability(key), *init_value);
 }
 
 // Test that SetCapability() updates the capabilities string correctly
@@ -529,16 +525,14 @@ TEST_F(DeviceCapabilitiesImplTest, SetCapabilityDynamic) {
   capabilities()->SetCapability(key, init_value->CreateDeepCopy());
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_TRUE(base::Value::Equals(capabilities()->GetCapability(key).get(),
-                                  init_value.get()));
+  EXPECT_EQ(*capabilities()->GetCapability(key), *init_value);
   EXPECT_TRUE(JsonStringEquals(capabilities()->GetAllData()->json_string(), key,
                                *init_value));
 
   std::unique_ptr<base::Value> new_value = GetSampleDynamicCapabilityNewValue();
   capabilities()->SetCapability(key, new_value->CreateDeepCopy());
   base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(base::Value::Equals(capabilities()->GetCapability(key).get(),
-                                  new_value.get()));
+  EXPECT_EQ(*capabilities()->GetCapability(key), *new_value);
   EXPECT_TRUE(JsonStringEquals(capabilities()->GetAllData()->json_string(), key,
                                *new_value));
 }

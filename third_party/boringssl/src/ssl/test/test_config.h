@@ -26,7 +26,6 @@ struct TestConfig {
   int resume_count = 0;
   std::string write_settings;
   bool fallback_scsv = false;
-  std::string digest_prefs;
   std::vector<int> signing_prefs;
   std::vector<int> verify_prefs;
   std::string key_file;
@@ -50,6 +49,8 @@ struct TestConfig {
   std::string expected_channel_id;
   bool enable_channel_id = false;
   std::string send_channel_id;
+  int expected_token_binding_param = -1;
+  std::string send_token_binding_params;
   bool shim_writes_first = false;
   std::string host_name;
   std::string advertise_alpn;
@@ -58,6 +59,8 @@ struct TestConfig {
   std::string expected_advertised_alpn;
   std::string select_alpn;
   bool decline_alpn = false;
+  std::string quic_transport_params;
+  std::string expected_quic_transport_params;
   bool expect_session_miss = false;
   bool expect_extended_master_secret = false;
   std::string psk;
@@ -80,6 +83,7 @@ struct TestConfig {
   bool fail_cert_callback = false;
   std::string cipher;
   bool handshake_never_done = false;
+  int export_early_keying_material = 0;
   int export_keying_material = 0;
   std::string export_label;
   std::string export_context;
@@ -87,9 +91,10 @@ struct TestConfig {
   bool tls_unique = false;
   bool expect_ticket_renewal = false;
   bool expect_no_session = false;
-  bool expect_early_data_info = false;
+  bool expect_ticket_supports_early_data = false;
   bool expect_accept_early_data = false;
   bool expect_reject_early_data = false;
+  bool expect_no_offer_early_data = false;
   bool use_ticket_callback = false;
   bool renew_ticket = false;
   bool enable_early_data = false;
@@ -128,10 +133,8 @@ struct TestConfig {
   int expect_cipher_no_aes = 0;
   std::string expect_peer_cert_file;
   int resumption_delay = 0;
-  bool retain_only_sha256_client_cert_initial = false;
-  bool retain_only_sha256_client_cert_resume = false;
-  bool expect_sha256_client_cert_initial = false;
-  bool expect_sha256_client_cert_resume = false;
+  bool retain_only_sha256_client_cert = false;
+  bool expect_sha256_client_cert = false;
   bool read_with_unfinished_write = false;
   bool expect_secure_renegotiation = false;
   bool expect_no_secure_renegotiation = false;
@@ -145,6 +148,12 @@ struct TestConfig {
   bool allow_unknown_alpn_protos = false;
   bool enable_ed25519 = false;
   bool use_custom_verify_callback = false;
+  std::string expect_msg_callback;
+  bool allow_false_start_without_alpn = false;
+  bool expect_draft_downgrade = false;
+  int dummy_pq_padding_len = 0;
+  bool handoff = false;
+  bool expect_dummy_pq_padding = false;
 };
 
 bool ParseConfig(int argc, char **argv, TestConfig *out_initial,

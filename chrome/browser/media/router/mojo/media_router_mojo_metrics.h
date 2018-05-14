@@ -7,6 +7,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/time/time.h"
+#include "chrome/common/media_router/media_route_provider_helper.h"
 #include "chrome/common/media_router/route_request_result.h"
 
 namespace base {
@@ -21,7 +22,7 @@ namespace media_router {
 
 // NOTE: Do not renumber enums as that would confuse interpretation of
 // previously logged data. When making changes, also update the enum lists
-// in tools/metrics/histograms/histograms.xml to keep it in sync.
+// in tools/metrics/histograms/enums.xml to keep it in sync.
 
 // Why the Media Route Provider process was woken up.
 enum class MediaRouteProviderWakeReason {
@@ -45,9 +46,10 @@ enum class MediaRouteProviderWakeReason {
   SEARCH_SINKS = 17,
   PROVIDE_SINKS = 18,
   CREATE_MEDIA_ROUTE_CONTROLLER = 19,
+  ROUTE_CONTROLLER_COMMAND = 20,
 
   // NOTE: Add entries only immediately above this line.
-  TOTAL_COUNT = 20
+  TOTAL_COUNT = 21
 };
 
 // The install status of the Media Router component extension.
@@ -77,6 +79,18 @@ enum class MediaRouteProviderWakeup {
 
 class MediaRouterMojoMetrics {
  public:
+  // UMA histogram names.
+  static const char kHistogramProviderCreateRouteResult[];
+  static const char kHistogramProviderCreateRouteResultWiredDisplay[];
+  static const char kHistogramProviderJoinRouteResult[];
+  static const char kHistogramProviderJoinRouteResultWiredDisplay[];
+  static const char kHistogramProviderRouteControllerCreationOutcome[];
+  static const char kHistogramProviderTerminateRouteResult[];
+  static const char kHistogramProviderTerminateRouteResultWiredDisplay[];
+  static const char kHistogramProviderVersion[];
+  static const char kHistogramProviderWakeReason[];
+  static const char kHistogramProviderWakeup[];
+
   // Records the installed version of the Media Router component extension.
   static void RecordMediaRouteProviderVersion(
       const extensions::Extension& extension);
@@ -89,19 +103,22 @@ class MediaRouterMojoMetrics {
   // page.
   static void RecordMediaRouteProviderWakeup(MediaRouteProviderWakeup wakeup);
 
-  // Records the outcome of a create route request to the Media Route Provider
-  // Manager.
+  // Records the outcome of a create route request to a Media Route Provider.
+  // This and the following methods that record ResultCode use per-provider
+  // histograms.
   static void RecordCreateRouteResultCode(
+      MediaRouteProviderId provider_id,
       RouteRequestResult::ResultCode result_code);
 
-  // Records the outcome of a join route request to the Media Route Provider
-  // Manager.
+  // Records the outcome of a join route request to a Media Route Provider.
   static void RecordJoinRouteResultCode(
+      MediaRouteProviderId provider_id,
       RouteRequestResult::ResultCode result_code);
 
-  // Records the outcome of a call to terminateRoute() on the Media Route
-  // Provider Manager.
+  // Records the outcome of a call to terminateRoute() on a Media Route
+  // Provider.
   static void RecordMediaRouteProviderTerminateRoute(
+      MediaRouteProviderId provider_id,
       RouteRequestResult::ResultCode result_code);
 
   // Records whether the Media Route Provider succeeded or failed to create a

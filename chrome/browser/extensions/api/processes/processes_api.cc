@@ -7,6 +7,9 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
+#include <set>
+#include <utility>
 
 #include "base/lazy_instance.h"
 #include "base/metrics/histogram_macros.h"
@@ -20,6 +23,7 @@
 #include "chrome/common/extensions/api/processes.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/child_process_data.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/child_process_host.h"
@@ -137,8 +141,8 @@ void FillProcessData(
   if (!include_optional)
     return;
 
-  out_process->cpu.reset(new double(task_manager->GetCpuUsage(id)));
-
+  out_process->cpu.reset(
+      new double(task_manager->GetPlatformIndependentCPUUsage(id)));
   out_process->network.reset(new double(static_cast<double>(
       task_manager->GetProcessTotalNetworkUsage(id))));
 
@@ -368,11 +372,12 @@ void ProcessesEventRouter::UpdateRefreshTypesFlagsBasedOnListeners() {
     refresh_types |= GetRefreshTypesFlagOnlyEssentialData();
   }
 
+  const int64_t on_updated_types = GetRefreshTypesForProcessOptionalData();
   if (HasEventListeners(api::processes::OnUpdated::kEventName))
-    refresh_types |= GetRefreshTypesForProcessOptionalData();
+    refresh_types |= on_updated_types;
 
   if (HasEventListeners(api::processes::OnUpdatedWithMemory::kEventName))
-    refresh_types |= task_manager::REFRESH_TYPE_MEMORY;
+    refresh_types |= (on_updated_types | task_manager::REFRESH_TYPE_MEMORY);
 
   SetRefreshTypesFlags(refresh_types);
 }
@@ -459,7 +464,9 @@ ExtensionFunction::ResponseAction ProcessesGetProcessIdForTabFunction::Run() {
                             base::IntToString(tab_id)));
   }
 
-  const int process_id = contents->GetRenderProcessHost()->GetID();
+  // TODO(https://crbug.com/767563): chrome.processes.getProcessIdForTab API
+  // incorrectly assumes a *single* renderer process per tab.
+  const int process_id = contents->GetMainFrame()->GetProcess()->GetID();
   return RespondNow(ArgumentList(
       api::processes::GetProcessIdForTab::Results::Create(process_id)));
 }

@@ -42,9 +42,9 @@ Expression::Expression()
       is_context_position_sensitive_(false),
       is_context_size_sensitive_(false) {}
 
-Expression::~Expression() {}
+Expression::~Expression() = default;
 
-DEFINE_TRACE(Expression) {
+void Expression::Trace(blink::Visitor* visitor) {
   visitor->Trace(sub_expressions_);
   ParseNode::Trace(visitor);
 }

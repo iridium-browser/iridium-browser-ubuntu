@@ -10,6 +10,7 @@
 #include "core/fpdfapi/parser/cpdf_hint_tables.h"
 #include "core/fpdfapi/parser/cpdf_linearized_header.h"
 #include "core/fpdfapi/parser/cpdf_number.h"
+#include "core/fxcrt/cfx_bitstream.h"
 #include "third_party/base/ptr_util.h"
 
 int32_t GetData(const int32_t** data32, const uint8_t** data, size_t* size) {
@@ -35,8 +36,7 @@ class HintTableForFuzzing : public CPDF_HintTables {
     if (size < static_cast<size_t>(shared_hint_table_offset_))
       return;
 
-    CFX_BitStream bs;
-    bs.Init(data, size);
+    CFX_BitStream bs(data, size);
     if (!ReadPageHintTable(&bs))
       return;
     ReadSharedObjHintTable(&bs, shared_hint_table_offset_);
@@ -49,7 +49,7 @@ class HintTableForFuzzing : public CPDF_HintTables {
 class FakeLinearized : public CPDF_LinearizedHeader {
  public:
   explicit FakeLinearized(CPDF_Dictionary* linearized_dict)
-      : CPDF_LinearizedHeader(linearized_dict) {}
+      : CPDF_LinearizedHeader(linearized_dict, 0) {}
 };
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {

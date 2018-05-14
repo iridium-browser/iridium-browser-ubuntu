@@ -6,62 +6,66 @@
 
 #include <fontconfig/fontconfig.h>
 
+#include "base/base_paths.h"
+#include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 
 namespace gfx {
 
 const char* const kSystemFontsForFontconfig[] = {
-  "/usr/share/fonts/truetype/kochi/kochi-gothic.ttf",
-  "/usr/share/fonts/truetype/kochi/kochi-mincho.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Arial_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Comic_Sans_MS.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Comic_Sans_MS_Bold.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Courier_New.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Bold.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Bold_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Georgia.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Georgia_Bold.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Georgia_Bold_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Georgia_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Impact.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Bold.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Bold_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Bold.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Bold_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Verdana.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold_Italic.ttf",
-  "/usr/share/fonts/truetype/msttcorefonts/Verdana_Italic.ttf",
-  // The DejaVuSans font is used by the css2.1 tests.
-  "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf",
-  "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_hi.ttf",
-  "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_ta.ttf",
-  "/usr/share/fonts/truetype/ttf-indic-fonts-core/MuktiNarrow.ttf",
+    "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+    "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
+    "/usr/share/fonts/opentype/ipafont-mincho/ipam.ttf",
+    "/usr/share/fonts/opentype/ipafont-mincho/ipamp.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Arial_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Comic_Sans_MS.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Comic_Sans_MS_Bold.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Courier_New.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Bold.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Bold_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Georgia.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Georgia_Bold.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Georgia_Bold_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Georgia_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Impact.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Bold.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Bold_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Bold.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Bold_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Verdana.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold_Italic.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Verdana_Italic.ttf",
 };
 
 const size_t kNumSystemFontsForFontconfig =
     arraysize(kSystemFontsForFontconfig);
 
-const char kFontconfigFileHeader[] =
-    "<?xml version=\"1.0\"?>\n"
-    "<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n"
-    "<fontconfig>\n";
-const char kFontconfigFileFooter[] = "</fontconfig>";
-const char kFontconfigMatchFontHeader[] = "  <match target=\"font\">\n";
-const char kFontconfigMatchPatternHeader[] = "  <match target=\"pattern\">\n";
-const char kFontconfigMatchFooter[] = "  </match>\n";
+const char* const kCloudStorageSyncedFonts[] = {
+    // The DejaVuSans font is used by the css2.1 tests.
+    "DejaVuSans.ttf",
+    "Garuda.ttf",
+    "Lohit-Devanagari.ttf",
+    "Lohit-Tamil.ttf",
+    "Lohit-Gurmukhi.ttf",
+    "MuktiNarrow.ttf",
+    "NotoSansCJKjp-Regular.otf",
+    "NotoSansKhmer-Regular.ttf"};
+
+const size_t kNumCloudStorageSyncedFonts = arraysize(kCloudStorageSyncedFonts);
 
 void SetUpFontconfig() {
   FcInit();
@@ -86,8 +90,13 @@ void TearDownFontconfig() {
 bool LoadFontIntoFontconfig(const base::FilePath& path) {
   if (!base::PathExists(path)) {
     LOG(ERROR) << "You are missing " << path.value() << ". Try re-running "
-               << "build/install-build-deps.sh. Also see "
-               << "https://chromium.googlesource.com/chromium/src/+/master/docs/layout_tests_linux.md";
+               << "build/install-build-deps.sh. "
+               << "Please make sure that "
+               << "third_party/content_shell_fonts/ has downloaded "
+               << "and extracted the content_shell_test_fonts."
+               << "Also see "
+               << "https://chromium.googlesource.com/chromium/src/+/master/"
+               << "docs/layout_tests_linux.md";
     return false;
   }
 
@@ -108,6 +117,20 @@ bool LoadSystemFontIntoFontconfig(const std::string& basename) {
   }
   LOG(ERROR) << "Unable to find system font named " << basename;
   return false;
+}
+
+bool LoadCloudStorageSyncedFontIntoFontConfig(const std::string& fontfilename) {
+  base::FilePath content_shell_test_fonts_path;
+  PathService::Get(base::DIR_MODULE, &content_shell_test_fonts_path);
+  // See third_party/content_shell_test_fonts/ for information how these fonts
+  // are synced. Target directory out/<buildDir>/content_shell_test_fonts needs
+  // to match what is specified as the target in
+  // third_party/content_shell_test_fonts/BUILD.gn as output directory.
+  base::FilePath font_file_path =
+      content_shell_test_fonts_path
+          .Append(FILE_PATH_LITERAL("content_shell_test_fonts"))
+          .Append(FILE_PATH_LITERAL(fontfilename));
+  return LoadFontIntoFontconfig(font_file_path);
 }
 
 bool LoadConfigFileIntoFontconfig(const base::FilePath& path) {

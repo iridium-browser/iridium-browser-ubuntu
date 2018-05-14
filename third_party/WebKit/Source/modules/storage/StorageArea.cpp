@@ -35,7 +35,6 @@
 #include "modules/storage/DOMWindowStorage.h"
 #include "modules/storage/InspectorDOMStorageAgent.h"
 #include "modules/storage/Storage.h"
-#include "modules/storage/StorageClient.h"
 #include "modules/storage/StorageEvent.h"
 #include "modules/storage/StorageNamespace.h"
 #include "modules/storage/StorageNamespaceController.h"
@@ -59,9 +58,9 @@ StorageArea::StorageArea(std::unique_ptr<WebStorageArea> storage_area,
       frame_used_for_can_access_storage_(nullptr),
       can_access_storage_cached_result_(false) {}
 
-StorageArea::~StorageArea() {}
+StorageArea::~StorageArea() = default;
 
-DEFINE_TRACE(StorageArea) {
+void StorageArea::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_used_for_can_access_storage_);
 }
 
@@ -150,8 +149,7 @@ bool StorageArea::CanAccessStorage(LocalFrame* frame) {
       StorageNamespaceController::From(frame->GetPage());
   if (!controller)
     return false;
-  bool result =
-      controller->GetStorageClient()->CanAccessStorage(frame, storage_type_);
+  bool result = controller->CanAccessStorage(frame, storage_type_);
   // Move attention to the new LocalFrame.
   frame_used_for_can_access_storage_ = frame;
   can_access_storage_cached_result_ = result;
@@ -162,7 +160,7 @@ void StorageArea::DispatchLocalStorageEvent(
     const String& key,
     const String& old_value,
     const String& new_value,
-    SecurityOrigin* security_origin,
+    const SecurityOrigin* security_origin,
     const KURL& page_url,
     WebStorageArea* source_area_instance) {
   // Iterate over all pages that have a StorageNamespaceController supplement.
@@ -178,7 +176,7 @@ void StorageArea::DispatchLocalStorageEvent(
       Storage* storage =
           DOMWindowStorage::From(*local_window).OptionalLocalStorage();
       if (storage &&
-          local_frame->GetDocument()->GetSecurityOrigin()->CanAccess(
+          local_frame->GetDocument()->GetSecurityOrigin()->IsSameSchemeHostPort(
               security_origin) &&
           !IsEventSource(storage, source_area_instance))
         local_frame->DomWindow()->EnqueueWindowEvent(
@@ -211,7 +209,7 @@ void StorageArea::DispatchSessionStorageEvent(
     const String& key,
     const String& old_value,
     const String& new_value,
-    SecurityOrigin* security_origin,
+    const SecurityOrigin* security_origin,
     const KURL& page_url,
     const WebStorageNamespace& session_namespace,
     WebStorageArea* source_area_instance) {
@@ -230,7 +228,7 @@ void StorageArea::DispatchSessionStorageEvent(
     Storage* storage =
         DOMWindowStorage::From(*local_window).OptionalSessionStorage();
     if (storage &&
-        local_frame->GetDocument()->GetSecurityOrigin()->CanAccess(
+        local_frame->GetDocument()->GetSecurityOrigin()->IsSameSchemeHostPort(
             security_origin) &&
         !IsEventSource(storage, source_area_instance))
       local_frame->DomWindow()->EnqueueWindowEvent(

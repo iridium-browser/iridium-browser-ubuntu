@@ -144,29 +144,28 @@ Handle<ScopeInfo> ScopeInfo::Create(Isolate* isolate, Zone* zone, Scope* scope,
 
   bool has_simple_parameters = false;
   bool asm_module = false;
-  bool asm_function = false;
+  bool calls_sloppy_eval = false;
   if (scope->is_function_scope()) {
     DeclarationScope* function_scope = scope->AsDeclarationScope();
     has_simple_parameters = function_scope->has_simple_parameters();
     asm_module = function_scope->asm_module();
-    asm_function = function_scope->asm_function();
   }
   FunctionKind function_kind = kNormalFunction;
   if (scope->is_declaration_scope()) {
     function_kind = scope->AsDeclarationScope()->function_kind();
+    calls_sloppy_eval = scope->AsDeclarationScope()->calls_sloppy_eval();
   }
 
   // Encode the flags.
   int flags =
       ScopeTypeField::encode(scope->scope_type()) |
-      CallsEvalField::encode(scope->calls_eval()) |
+      CallsSloppyEvalField::encode(calls_sloppy_eval) |
       LanguageModeField::encode(scope->language_mode()) |
       DeclarationScopeField::encode(scope->is_declaration_scope()) |
       ReceiverVariableField::encode(receiver_info) |
       HasNewTargetField::encode(has_new_target) |
       FunctionVariableField::encode(function_name_info) |
       AsmModuleField::encode(asm_module) |
-      AsmFunctionField::encode(asm_function) |
       HasSimpleParametersField::encode(has_simple_parameters) |
       FunctionKindField::encode(function_kind) |
       HasOuterScopeInfoField::encode(has_outer_scope_info) |
@@ -299,11 +298,12 @@ Handle<ScopeInfo> ScopeInfo::CreateForWithScope(
 
   // Encode the flags.
   int flags =
-      ScopeTypeField::encode(WITH_SCOPE) | CallsEvalField::encode(false) |
-      LanguageModeField::encode(SLOPPY) | DeclarationScopeField::encode(false) |
+      ScopeTypeField::encode(WITH_SCOPE) | CallsSloppyEvalField::encode(false) |
+      LanguageModeField::encode(LanguageMode::kSloppy) |
+      DeclarationScopeField::encode(false) |
       ReceiverVariableField::encode(NONE) | HasNewTargetField::encode(false) |
       FunctionVariableField::encode(NONE) | AsmModuleField::encode(false) |
-      AsmFunctionField::encode(false) | HasSimpleParametersField::encode(true) |
+      HasSimpleParametersField::encode(true) |
       FunctionKindField::encode(kNormalFunction) |
       HasOuterScopeInfoField::encode(has_outer_scope_info) |
       IsDebugEvaluateScopeField::encode(false);
@@ -351,16 +351,17 @@ Handle<ScopeInfo> ScopeInfo::CreateGlobalThisBinding(Isolate* isolate) {
   Handle<ScopeInfo> scope_info = factory->NewScopeInfo(length);
 
   // Encode the flags.
-  int flags =
-      ScopeTypeField::encode(SCRIPT_SCOPE) | CallsEvalField::encode(false) |
-      LanguageModeField::encode(SLOPPY) | DeclarationScopeField::encode(true) |
-      ReceiverVariableField::encode(receiver_info) |
-      FunctionVariableField::encode(function_name_info) |
-      AsmModuleField::encode(false) | AsmFunctionField::encode(false) |
-      HasSimpleParametersField::encode(has_simple_parameters) |
-      FunctionKindField::encode(FunctionKind::kNormalFunction) |
-      HasOuterScopeInfoField::encode(has_outer_scope_info) |
-      IsDebugEvaluateScopeField::encode(false);
+  int flags = ScopeTypeField::encode(SCRIPT_SCOPE) |
+              CallsSloppyEvalField::encode(false) |
+              LanguageModeField::encode(LanguageMode::kSloppy) |
+              DeclarationScopeField::encode(true) |
+              ReceiverVariableField::encode(receiver_info) |
+              FunctionVariableField::encode(function_name_info) |
+              AsmModuleField::encode(false) |
+              HasSimpleParametersField::encode(has_simple_parameters) |
+              FunctionKindField::encode(FunctionKind::kNormalFunction) |
+              HasOuterScopeInfoField::encode(has_outer_scope_info) |
+              IsDebugEvaluateScopeField::encode(false);
   scope_info->SetFlags(flags);
   scope_info->SetParameterCount(parameter_count);
   scope_info->SetStackLocalCount(stack_local_count);
@@ -404,12 +405,17 @@ ScopeType ScopeInfo::scope_type() {
   return ScopeTypeField::decode(Flags());
 }
 
-bool ScopeInfo::CallsEval() {
-  return length() > 0 && CallsEvalField::decode(Flags());
+bool ScopeInfo::CallsSloppyEval() {
+  bool calls_sloppy_eval =
+      length() > 0 && CallsSloppyEvalField::decode(Flags());
+  DCHECK_IMPLIES(calls_sloppy_eval, is_sloppy(language_mode()));
+  DCHECK_IMPLIES(calls_sloppy_eval, is_declaration_scope());
+  return calls_sloppy_eval;
 }
 
 LanguageMode ScopeInfo::language_mode() {
-  return length() > 0 ? LanguageModeField::decode(Flags()) : SLOPPY;
+  return length() > 0 ? LanguageModeField::decode(Flags())
+                      : LanguageMode::kSloppy;
 }
 
 bool ScopeInfo::is_declaration_scope() {
@@ -775,47 +781,6 @@ void ScopeInfo::ModuleVariable(int i, String** name, int* index,
   }
 }
 
-#ifdef DEBUG
-
-static void PrintList(const char* list_name, int nof_internal_slots, int start,
-                      int end, ScopeInfo* scope_info) {
-  if (start < end) {
-    PrintF("\n  // %s\n", list_name);
-    if (nof_internal_slots > 0) {
-      PrintF("  %2d - %2d [internal slots]\n", 0, nof_internal_slots - 1);
-    }
-    for (int i = nof_internal_slots; start < end; ++i, ++start) {
-      PrintF("  %2d ", i);
-      String::cast(scope_info->get(start))->ShortPrint();
-      PrintF("\n");
-    }
-  }
-}
-
-void ScopeInfo::Print() {
-  PrintF("ScopeInfo ");
-  if (HasFunctionName()) {
-    FunctionName()->ShortPrint();
-  } else {
-    PrintF("/* no function name */");
-  }
-  PrintF("{");
-
-  if (length() > 0) {
-    PrintList("parameters", 0, ParameterNamesIndex(),
-              ParameterNamesIndex() + ParameterCount(), this);
-    PrintList("stack slots", 0, StackLocalNamesIndex(),
-              StackLocalNamesIndex() + StackLocalCount(), this);
-    PrintList("context slots", Context::MIN_CONTEXT_SLOTS,
-              ContextLocalNamesIndex(),
-              ContextLocalNamesIndex() + ContextLocalCount(), this);
-    // TODO(neis): Print module stuff if present.
-  }
-
-  PrintF("}\n");
-}
-#endif  // DEBUG
-
 Handle<ModuleInfoEntry> ModuleInfoEntry::New(Isolate* isolate,
                                              Handle<Object> export_name,
                                              Handle<Object> local_name,
@@ -823,7 +788,7 @@ Handle<ModuleInfoEntry> ModuleInfoEntry::New(Isolate* isolate,
                                              int module_request, int cell_index,
                                              int beg_pos, int end_pos) {
   Handle<ModuleInfoEntry> result = Handle<ModuleInfoEntry>::cast(
-      isolate->factory()->NewStruct(MODULE_INFO_ENTRY_TYPE));
+      isolate->factory()->NewStruct(MODULE_INFO_ENTRY_TYPE, TENURED));
   result->set_export_name(*export_name);
   result->set_local_name(*local_name);
   result->set_import_name(*import_name);
@@ -848,8 +813,8 @@ Handle<ModuleInfo> ModuleInfo::New(Isolate* isolate, Zone* zone,
   }
 
   // Serialize special exports.
-  Handle<FixedArray> special_exports =
-      isolate->factory()->NewFixedArray(descr->special_exports().length());
+  Handle<FixedArray> special_exports = isolate->factory()->NewFixedArray(
+      static_cast<int>(descr->special_exports().size()));
   {
     int i = 0;
     for (auto entry : descr->special_exports()) {
@@ -859,8 +824,8 @@ Handle<ModuleInfo> ModuleInfo::New(Isolate* isolate, Zone* zone,
   }
 
   // Serialize namespace imports.
-  Handle<FixedArray> namespace_imports =
-      isolate->factory()->NewFixedArray(descr->namespace_imports().length());
+  Handle<FixedArray> namespace_imports = isolate->factory()->NewFixedArray(
+      static_cast<int>(descr->namespace_imports().size()));
   {
     int i = 0;
     for (auto entry : descr->namespace_imports()) {

@@ -12,12 +12,6 @@ using content::SSLHostStateDelegate;
 namespace android_webview {
 
 namespace internal {
-net::SHA256HashValue getChainFingerprint256(const net::X509Certificate& cert) {
-  net::SHA256HashValue fingerprint =
-      net::X509Certificate::CalculateChainFingerprint256(
-          cert.os_cert_handle(), cert.GetIntermediateCertificates());
-  return fingerprint;
-}
 
 CertPolicy::CertPolicy() {
 }
@@ -29,10 +23,8 @@ CertPolicy::~CertPolicy() {
 // in the saved CertStatus.
 bool CertPolicy::Check(const net::X509Certificate& cert,
                        net::CertStatus error) const {
-  net::SHA256HashValue fingerprint = getChainFingerprint256(cert);
-  std::map<net::SHA256HashValue, net::CertStatus,
-           net::SHA256HashValueLessThan>::const_iterator allowed_iter =
-      allowed_.find(fingerprint);
+  net::SHA256HashValue fingerprint = cert.CalculateChainFingerprint256();
+  auto allowed_iter = allowed_.find(fingerprint);
   if ((allowed_iter != allowed_.end()) && (allowed_iter->second & error) &&
       ((allowed_iter->second & error) == error)) {
     return true;
@@ -44,7 +36,7 @@ void CertPolicy::Allow(const net::X509Certificate& cert,
                        net::CertStatus error) {
   // If this same cert had already been saved with a different error status,
   // this will replace it with the new error status.
-  net::SHA256HashValue fingerprint = getChainFingerprint256(cert);
+  net::SHA256HashValue fingerprint = cert.CalculateChainFingerprint256();
   allowed_[fingerprint] = error;
 }
 

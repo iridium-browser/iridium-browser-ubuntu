@@ -5,15 +5,26 @@ import functools
 import logging
 
 from google.appengine.api import oauth
-from google.appengine.api import users
 
 from dashboard.common import datastore_hooks
 from dashboard.common import utils
 
 
 OAUTH_CLIENT_ID_WHITELIST = [
+    # This oauth client id is from Pinpoint.
+    '62121018386-aqdfougp0ddn93knqj6g79vvn42ajmrg.apps.googleusercontent.com',
     # This oauth client id is from the 'chromeperf' API console.
     '62121018386-h08uiaftreu4dr3c4alh3l7mogskvb7i.apps.googleusercontent.com',
+    # This oauth client id is from chromiumdash-staging.
+    '377415874083-slpqb5ur4h9sdfk8anlq4qct9imivnmt.apps.googleusercontent.com',
+    # This oauth client id is from chromiumdash.
+    '975044924533-p122oecs8h6eibv5j5a8fmj82b0ct0nk.apps.googleusercontent.com',
+    # This oauth client id is used to upload histograms from the perf waterfall.
+    '113172445342431053212',
+    'chromeperf@webrtc-perf-test.google.com.iam.gserviceaccount.com',
+    'catapult-uploader@fuchsia-infra.iam.gserviceaccount.com',
+    # This oauth client id used to upload histograms from cronet bots.
+    '113172445342431053212'
 ]
 OAUTH_SCOPES = (
     'https://www.googleapis.com/auth/userinfo.email',
@@ -62,27 +73,10 @@ def _AuthorizeOauthUser():
     datastore_hooks.SetPrivilegedRequest()
 
 
-def _AuthorizeAppEngineUser():
-  user = users.get_current_user()
-  if not user:
-    raise NotLoggedInError
-
-  # For now we only allow internal users access to the API.
-  if not datastore_hooks.IsUnalteredQueryPermitted():
-    raise InternalOnlyError
-
-
-def TryAuthorize():
-  try:
-    _AuthorizeAppEngineUser()
-  except NotLoggedInError:
-    _AuthorizeOauthUser()
-
-
 def Authorize(function_to_wrap):
   @functools.wraps(function_to_wrap)
   def Wrapper(*args, **kwargs):
-    TryAuthorize()
+    _AuthorizeOauthUser()
 
     return function_to_wrap(*args, **kwargs)
   return Wrapper

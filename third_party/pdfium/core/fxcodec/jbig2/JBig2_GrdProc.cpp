@@ -13,6 +13,7 @@
 #include "core/fxcodec/jbig2/JBig2_ArithDecoder.h"
 #include "core/fxcodec/jbig2/JBig2_BitStream.h"
 #include "core/fxcodec/jbig2/JBig2_Image.h"
+#include "core/fxcrt/ifx_pauseindicator.h"
 #include "third_party/base/ptr_util.h"
 
 CJBig2_GRDProc::CJBig2_GRDProc()
@@ -45,8 +46,10 @@ bool CJBig2_GRDProc::UseTemplate23Opt3() const {
 std::unique_ptr<CJBig2_Image> CJBig2_GRDProc::decode_Arith(
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext) {
-  if (GBW == 0 || GBH == 0)
+  if (GBW == 0 || GBW > JBIG2_MAX_IMAGE_SIZE || GBH == 0 ||
+      GBH > JBIG2_MAX_IMAGE_SIZE) {
     return pdfium::MakeUnique<CJBig2_Image>(GBW, GBH);
+  }
 
   if (GBTEMPLATE == 0) {
     if (UseTemplate0Opt3())
@@ -71,11 +74,11 @@ std::unique_ptr<CJBig2_Image> CJBig2_GRDProc::decode_Arith_Template0_opt3(
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext) {
   auto GBREG = pdfium::MakeUnique<CJBig2_Image>(GBW, GBH);
-  if (!GBREG->m_pData)
+  if (!GBREG->data())
     return nullptr;
 
   int LTP = 0;
-  uint8_t* pLine = GBREG->m_pData;
+  uint8_t* pLine = GBREG->data();
   int32_t nStride = GBREG->stride();
   int32_t nStride2 = nStride << 1;
   int32_t nLineBytes = ((GBW + 7) >> 3) - 1;
@@ -220,11 +223,11 @@ std::unique_ptr<CJBig2_Image> CJBig2_GRDProc::decode_Arith_Template1_opt3(
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext) {
   auto GBREG = pdfium::MakeUnique<CJBig2_Image>(GBW, GBH);
-  if (!GBREG->m_pData)
+  if (!GBREG->data())
     return nullptr;
 
   int LTP = 0;
-  uint8_t* pLine = GBREG->m_pData;
+  uint8_t* pLine = GBREG->data();
   int32_t nStride = GBREG->stride();
   int32_t nStride2 = nStride << 1;
   int32_t nLineBytes = ((GBW + 7) >> 3) - 1;
@@ -366,11 +369,11 @@ std::unique_ptr<CJBig2_Image> CJBig2_GRDProc::decode_Arith_Template2_opt3(
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext) {
   auto GBREG = pdfium::MakeUnique<CJBig2_Image>(GBW, GBH);
-  if (!GBREG->m_pData)
+  if (!GBREG->data())
     return nullptr;
 
   int LTP = 0;
-  uint8_t* pLine = GBREG->m_pData;
+  uint8_t* pLine = GBREG->data();
   int32_t nStride = GBREG->stride();
   int32_t nStride2 = nStride << 1;
   int32_t nLineBytes = ((GBW + 7) >> 3) - 1;
@@ -510,11 +513,11 @@ std::unique_ptr<CJBig2_Image> CJBig2_GRDProc::decode_Arith_Template3_opt3(
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext) {
   auto GBREG = pdfium::MakeUnique<CJBig2_Image>(GBW, GBH);
-  if (!GBREG->m_pData)
+  if (!GBREG->data())
     return nullptr;
 
   int LTP = 0;
-  uint8_t* pLine = GBREG->m_pData;
+  uint8_t* pLine = GBREG->data();
   int32_t nStride = GBREG->stride();
   int32_t nLineBytes = ((GBW + 7) >> 3) - 1;
   int32_t nBitsLeft = GBW - (nLineBytes << 3);
@@ -638,15 +641,16 @@ FXCODEC_STATUS CJBig2_GRDProc::Start_decode_Arith(
     std::unique_ptr<CJBig2_Image>* pImage,
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext,
-    IFX_Pause* pPause) {
-  if (GBW == 0 || GBH == 0) {
+    IFX_PauseIndicator* pPause) {
+  if (GBW == 0 || GBW > JBIG2_MAX_IMAGE_SIZE || GBH == 0 ||
+      GBH > JBIG2_MAX_IMAGE_SIZE) {
     m_ProssiveStatus = FXCODEC_STATUS_DECODE_FINISH;
     return FXCODEC_STATUS_DECODE_FINISH;
   }
   m_ProssiveStatus = FXCODEC_STATUS_DECODE_READY;
   if (!*pImage)
     *pImage = pdfium::MakeUnique<CJBig2_Image>(GBW, GBH);
-  if (!(*pImage)->m_pData) {
+  if (!(*pImage)->data()) {
     *pImage = nullptr;
     m_ProssiveStatus = FXCODEC_STATUS_ERROR;
     return FXCODEC_STATUS_ERROR;
@@ -662,7 +666,7 @@ FXCODEC_STATUS CJBig2_GRDProc::Start_decode_Arith(
 }
 
 FXCODEC_STATUS CJBig2_GRDProc::decode_Arith(
-    IFX_Pause* pPause,
+    IFX_PauseIndicator* pPause,
     CJBig2_ArithDecoder* pArithDecoder) {
   int iline = m_loopIndex;
   if (GBTEMPLATE == 0) {
@@ -713,24 +717,24 @@ FXCODEC_STATUS CJBig2_GRDProc::Start_decode_MMR(
     CJBig2_BitStream* pStream) {
   int bitpos, i;
   auto image = pdfium::MakeUnique<CJBig2_Image>(GBW, GBH);
-  if (!image->m_pData) {
+  if (!image->data()) {
     *pImage = nullptr;
     m_ProssiveStatus = FXCODEC_STATUS_ERROR;
     return m_ProssiveStatus;
   }
   bitpos = static_cast<int>(pStream->getBitPos());
-  FaxG4Decode(pStream->getBuf(), pStream->getLength(), &bitpos, image->m_pData,
+  FaxG4Decode(pStream->getBuf(), pStream->getLength(), &bitpos, image->data(),
               GBW, GBH, image->stride());
   pStream->setBitPos(bitpos);
   for (i = 0; (uint32_t)i < image->stride() * GBH; ++i)
-    image->m_pData[i] = ~image->m_pData[i];
+    image->data()[i] = ~image->data()[i];
   m_ProssiveStatus = FXCODEC_STATUS_DECODE_FINISH;
   *pImage = std::move(image);
   return m_ProssiveStatus;
 }
 
 FXCODEC_STATUS CJBig2_GRDProc::Continue_decode(
-    IFX_Pause* pPause,
+    IFX_PauseIndicator* pPause,
     CJBig2_ArithDecoder* pArithDecoder) {
   if (m_ProssiveStatus != FXCODEC_STATUS_DECODE_TOBECONTINUE)
     return m_ProssiveStatus;
@@ -746,10 +750,9 @@ FXCODEC_STATUS CJBig2_GRDProc::decode_Arith_Template0_opt3(
     CJBig2_Image* pImage,
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext,
-    IFX_Pause* pPause) {
-  if (!m_pLine) {
-    m_pLine = pImage->m_pData;
-  }
+    IFX_PauseIndicator* pPause) {
+  if (!m_pLine)
+    m_pLine = pImage->data();
   int32_t nStride = pImage->stride();
   int32_t nStride2 = nStride << 1;
   int32_t nLineBytes = ((GBW + 7) >> 3) - 1;
@@ -850,7 +853,7 @@ FXCODEC_STATUS CJBig2_GRDProc::decode_Arith_Template0_unopt(
     CJBig2_Image* pImage,
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext,
-    IFX_Pause* pPause) {
+    IFX_PauseIndicator* pPause) {
   for (; m_loopIndex < GBH; m_loopIndex++) {
     if (TPGDON) {
       if (pArithDecoder->IsComplete())
@@ -908,10 +911,9 @@ FXCODEC_STATUS CJBig2_GRDProc::decode_Arith_Template1_opt3(
     CJBig2_Image* pImage,
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext,
-    IFX_Pause* pPause) {
-  if (!m_pLine) {
-    m_pLine = pImage->m_pData;
-  }
+    IFX_PauseIndicator* pPause) {
+  if (!m_pLine)
+    m_pLine = pImage->data();
   int32_t nStride = pImage->stride();
   int32_t nStride2 = nStride << 1;
   int32_t nLineBytes = ((GBW + 7) >> 3) - 1;
@@ -1010,7 +1012,7 @@ FXCODEC_STATUS CJBig2_GRDProc::decode_Arith_Template1_unopt(
     CJBig2_Image* pImage,
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext,
-    IFX_Pause* pPause) {
+    IFX_PauseIndicator* pPause) {
   for (uint32_t h = 0; h < GBH; h++) {
     if (TPGDON) {
       if (pArithDecoder->IsComplete())
@@ -1064,10 +1066,9 @@ FXCODEC_STATUS CJBig2_GRDProc::decode_Arith_Template2_opt3(
     CJBig2_Image* pImage,
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext,
-    IFX_Pause* pPause) {
-  if (!m_pLine) {
-    m_pLine = pImage->m_pData;
-  }
+    IFX_PauseIndicator* pPause) {
+  if (!m_pLine)
+    m_pLine = pImage->data();
   int32_t nStride = pImage->stride();
   int32_t nStride2 = nStride << 1;
   int32_t nLineBytes = ((GBW + 7) >> 3) - 1;
@@ -1166,7 +1167,7 @@ FXCODEC_STATUS CJBig2_GRDProc::decode_Arith_Template2_unopt(
     CJBig2_Image* pImage,
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext,
-    IFX_Pause* pPause) {
+    IFX_PauseIndicator* pPause) {
   for (; m_loopIndex < GBH; m_loopIndex++) {
     if (TPGDON) {
       if (pArithDecoder->IsComplete())
@@ -1220,10 +1221,9 @@ FXCODEC_STATUS CJBig2_GRDProc::decode_Arith_Template3_opt3(
     CJBig2_Image* pImage,
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext,
-    IFX_Pause* pPause) {
+    IFX_PauseIndicator* pPause) {
   if (!m_pLine)
-    m_pLine = pImage->m_pData;
-
+    m_pLine = pImage->data();
   int32_t nStride = pImage->stride();
   int32_t nLineBytes = ((GBW + 7) >> 3) - 1;
   int32_t nBitsLeft = GBW - (nLineBytes << 3);
@@ -1308,7 +1308,7 @@ FXCODEC_STATUS CJBig2_GRDProc::decode_Arith_Template3_unopt(
     CJBig2_Image* pImage,
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* gbContext,
-    IFX_Pause* pPause) {
+    IFX_PauseIndicator* pPause) {
   for (; m_loopIndex < GBH; m_loopIndex++) {
     if (TPGDON) {
       if (pArithDecoder->IsComplete())

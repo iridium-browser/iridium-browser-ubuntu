@@ -44,7 +44,6 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/proximity_auth/logging/logging.h"
 #include "components/proximity_auth/promotion_manager.h"
-#include "components/proximity_auth/proximity_auth_pref_manager.h"
 #include "components/proximity_auth/proximity_auth_pref_names.h"
 #include "components/proximity_auth/proximity_auth_profile_pref_manager.h"
 #include "components/proximity_auth/proximity_auth_system.h"
@@ -62,7 +61,6 @@
 
 #if defined(OS_CHROMEOS)
 #include "apps/app_lifetime_monitor_factory.h"
-#include "ash/shell.h"
 #include "base/linux_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
@@ -94,6 +92,7 @@ EasyUnlockServiceRegular::EasyUnlockServiceRegular(
     std::unique_ptr<EasyUnlockNotificationController> notification_controller)
     : EasyUnlockService(profile),
       turn_off_flow_status_(EasyUnlockService::IDLE),
+      scoped_crypt_auth_device_manager_observer_(this),
       will_unlock_using_easy_unlock_(false),
       lock_screen_last_shown_timestamp_(base::TimeTicks::Now()),
       deferring_device_load_(false),
@@ -218,8 +217,7 @@ void EasyUnlockServiceRegular::StartPromotionManager() {
   promotion_manager_.reset(new proximity_auth::PromotionManager(
       local_device_data_provider_.get(), notification_controller_.get(),
       pref_manager_.get(), service->CreateCryptAuthClientFactory(),
-      base::MakeUnique<base::DefaultClock>(),
-      base::ThreadTaskRunnerHandle::Get()));
+      base::DefaultClock::GetInstance(), base::ThreadTaskRunnerHandle::Get()));
   promotion_manager_->Start();
 }
 
@@ -332,8 +330,7 @@ void EasyUnlockServiceRegular::SetPermitAccess(
     const base::DictionaryValue& permit) {
   DictionaryPrefUpdate pairing_update(profile()->GetPrefs(),
                                       prefs::kEasyUnlockPairing);
-  pairing_update->SetWithoutPathExpansion(
-      kKeyPermitAccess, base::MakeUnique<base::Value>(permit));
+  pairing_update->SetKey(kKeyPermitAccess, permit.Clone());
 }
 
 void EasyUnlockServiceRegular::ClearPermitAccess() {
@@ -363,8 +360,7 @@ void EasyUnlockServiceRegular::SetRemoteDevices(
   if (devices.empty())
     pairing_update->RemoveWithoutPathExpansion(kKeyDevices, NULL);
   else
-    pairing_update->SetWithoutPathExpansion(
-        kKeyDevices, base::MakeUnique<base::Value>(devices));
+    pairing_update->SetKey(kKeyDevices, devices.Clone());
 
   RefreshCryptohomeKeysIfPossible();
 }
@@ -510,7 +506,7 @@ void EasyUnlockServiceRegular::InitializeInternal() {
                                               GetAccountId());
     }
 
-    GetCryptAuthDeviceManager()->AddObserver(this);
+    scoped_crypt_auth_device_manager_observer_.Add(GetCryptAuthDeviceManager());
     LoadRemoteDevices();
     StartPromotionManager();
   }
@@ -530,8 +526,7 @@ void EasyUnlockServiceRegular::ShutdownInternal() {
 
   turn_off_flow_status_ = EasyUnlockService::IDLE;
   proximity_auth::ScreenlockBridge::Get()->RemoveObserver(this);
-  if (GetCryptAuthDeviceManager())
-    GetCryptAuthDeviceManager()->RemoveObserver(this);
+  scoped_crypt_auth_device_manager_observer_.RemoveAll();
 }
 
 bool EasyUnlockServiceRegular::IsAllowedInternal() const {

@@ -7,11 +7,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <X11/extensions/shape.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
 
 #include "base/cancelable_callback.h"
+#include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -22,6 +20,7 @@
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/x/x11.h"
 #include "ui/views/views_export.h"
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host.h"
 
@@ -32,6 +31,7 @@ class ImageSkiaRep;
 
 namespace ui {
 class EventHandler;
+class KeyboardHook;
 class XScopedEventSelector;
 }
 
@@ -92,7 +92,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
             const Widget::InitParams& params) override;
   void OnNativeWidgetCreated(const Widget::InitParams& params) override;
   void OnWidgetInitDone() override;
-  void OnNativeWidgetActivationChanged(bool active) override;
+  void OnActiveWindowChanged(bool active) override;
   std::unique_ptr<corewm::Tooltip> CreateTooltip() override;
   std::unique_ptr<aura::client::DragDropClient> CreateDragDropClient(
       DesktopNativeCursorManager* cursor_manager) override;
@@ -113,7 +113,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   gfx::Rect GetRestoredBounds() const override;
   std::string GetWorkspace() const override;
   gfx::Rect GetWorkAreaBoundsInScreen() const override;
-  void SetShape(std::unique_ptr<SkRegion> native_region) override;
+  void SetShape(std::unique_ptr<Widget::ShapeRects> native_shape) override;
   void Activate() override;
   void Deactivate() override;
   bool IsActive() const override;
@@ -164,6 +164,9 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   gfx::Point GetLocationOnScreenInPixels() const override;
   void SetCapture() override;
   void ReleaseCapture() override;
+  bool CaptureSystemKeyEventsImpl(
+      base::Optional<base::flat_set<int>> keys_codes) override;
+  void ReleaseSystemKeyEventCapture() override;
   void SetCursorNative(gfx::NativeCursor cursor) override;
   void MoveCursorToScreenLocationInPixels(
       const gfx::Point& location_in_pixels) override;
@@ -172,6 +175,12 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   // Overridden from display::DisplayObserver via aura::WindowTreeHost:
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t changed_metrics) override;
+
+  // Called after the window is maximized or restored.
+  virtual void OnMaximizedStateChanged();
+
+  // Called after the window is fullscreened or unfullscreened.
+  virtual void OnFullscreenStateChanged();
 
  private:
   friend class DesktopWindowTreeHostX11HighDPITest;
@@ -221,13 +230,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   // Updates |xwindow_|'s _NET_WM_USER_TIME if |xwindow_| is active.
   void UpdateWMUserTime(const ui::PlatformEvent& event);
 
-  // Sends a message to the x11 window manager, enabling or disabling the
-  // states |state1| and |state2|.
-  void SetWMSpecState(bool enabled, ::Atom state1, ::Atom state2);
-
-  // Checks if the window manager has set a specific state.
-  bool HasWMSpecProperty(const char* property) const;
-
   // Sets whether the window's borders are provided by the window manager.
   void SetUseNativeFrame(bool use_native_frame);
 
@@ -243,11 +245,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
 
   // Dispatches a key event.
   void DispatchKeyEvent(ui::KeyEvent* event);
-
-  // Updates the location of |located_event| to be in |host|'s coordinate system
-  // so that it can be dispatched to |host|.
-  void ConvertEventToDifferentHost(ui::LocatedEvent* located_event,
-                                   DesktopWindowTreeHostX11* host);
 
   // Resets the window region for the current widget bounds if necessary.
   void ResetWindowRegion();
@@ -327,7 +324,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   std::string workspace_;
 
   // The window manager state bits.
-  std::set< ::Atom> window_properties_;
+  base::flat_set<::Atom> window_properties_;
 
   // Whether |xwindow_| was requested to be fullscreen via SetFullscreen().
   bool is_fullscreen_;
@@ -424,6 +421,9 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   bool had_pointer_;
   bool had_pointer_grab_;
   bool had_window_focus_;
+
+  // Captures system key events when keyboard lock is requested.
+  std::unique_ptr<ui::KeyboardHook> keyboard_hook_;
 
   base::CancelableCallback<void()> delayed_resize_task_;
 

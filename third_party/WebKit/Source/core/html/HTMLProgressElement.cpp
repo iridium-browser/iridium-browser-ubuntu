@@ -22,13 +22,12 @@
 
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/shadow/ProgressShadowElement.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutProgress.h"
-#include "core/layout/api/LayoutProgressItem.h"
 
 namespace blink {
 
@@ -42,7 +41,7 @@ HTMLProgressElement::HTMLProgressElement(Document& document)
   UseCounter::Count(document, WebFeature::kProgressElement);
 }
 
-HTMLProgressElement::~HTMLProgressElement() {}
+HTMLProgressElement::~HTMLProgressElement() = default;
 
 HTMLProgressElement* HTMLProgressElement::Create(Document& document) {
   HTMLProgressElement* progress = new HTMLProgressElement(document);
@@ -83,8 +82,8 @@ void HTMLProgressElement::ParseAttribute(
 
 void HTMLProgressElement::AttachLayoutTree(AttachContext& context) {
   LabelableElement::AttachLayoutTree(context);
-  if (LayoutProgressItem layout_item = LayoutProgressItem(GetLayoutProgress()))
-    layout_item.UpdateFromElement();
+  if (LayoutProgress* layout_progress = GetLayoutProgress())
+    layout_progress->UpdateFromElement();
 }
 
 double HTMLProgressElement::value() const {
@@ -127,8 +126,8 @@ bool HTMLProgressElement::IsDeterminate() const {
 
 void HTMLProgressElement::DidElementStateChange() {
   SetValueWidthPercentage(position() * 100);
-  if (LayoutProgressItem layout_item = LayoutProgressItem(GetLayoutProgress()))
-    layout_item.UpdateFromElement();
+  if (LayoutProgress* layout_progress = GetLayoutProgress())
+    layout_progress->UpdateFromElement();
 }
 
 void HTMLProgressElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
@@ -152,7 +151,7 @@ bool HTMLProgressElement::ShouldAppearIndeterminate() const {
   return !IsDeterminate();
 }
 
-DEFINE_TRACE(HTMLProgressElement) {
+void HTMLProgressElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(value_);
   LabelableElement::Trace(visitor);
 }

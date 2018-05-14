@@ -51,11 +51,13 @@ class MEDIA_EXPORT DemuxerStream {
   //                  when this status is returned.
   //                  This will only be returned if SupportsConfigChanges()
   //                  returns 'true' for this DemuxerStream.
+  // kError : Unexpected fatal error happened. Playback should fail.
   enum Status {
     kOk,
     kAborted,
     kConfigChanged,
-    kStatusMax = kConfigChanged,
+    kError,
+    kStatusMax = kError,
   };
 
   // Request a buffer to returned via the provided callback.
@@ -91,8 +93,6 @@ class MEDIA_EXPORT DemuxerStream {
   // guaranteed to remain constant, and the client may make optimizations based
   // on this.
   virtual bool SupportsConfigChanges() = 0;
-
-  virtual VideoRotation video_rotation() = 0;
 
  protected:
   // Only allow concrete implementations to get deleted.

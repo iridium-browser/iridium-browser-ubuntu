@@ -39,6 +39,8 @@ namespace blink {
 
 PlainTextRange::PlainTextRange() : start_(kNotFound), end_(kNotFound) {}
 
+PlainTextRange::PlainTextRange(const PlainTextRange&) = default;
+
 PlainTextRange::PlainTextRange(int location)
     : start_(location), end_(location) {
   DCHECK_GE(location, 0);
@@ -51,16 +53,37 @@ PlainTextRange::PlainTextRange(int start, int end) : start_(start), end_(end) {
 }
 
 EphemeralRange PlainTextRange::CreateRange(const ContainerNode& scope) const {
-  return CreateRangeFor(scope, kForGeneric);
+  const TextIteratorBehavior& behavior =
+      TextIteratorBehavior::Builder()
+          .SetEmitsObjectReplacementCharacter(true)
+          .Build();
+  return CreateRangeFor(scope, behavior);
 }
 
 EphemeralRange PlainTextRange::CreateRangeForSelection(
     const ContainerNode& scope) const {
-  return CreateRangeFor(scope, kForSelection);
+  const TextIteratorBehavior& behavior =
+      TextIteratorBehavior::Builder()
+          .SetEmitsObjectReplacementCharacter(true)
+          .SetEmitsCharactersBetweenAllVisiblePositions(true)
+          .Build();
+  return CreateRangeFor(scope, behavior);
 }
 
-EphemeralRange PlainTextRange::CreateRangeFor(const ContainerNode& scope,
-                                              GetRangeFor get_range_for) const {
+EphemeralRange PlainTextRange::CreateRangeForSelectionIndexing(
+    const ContainerNode& scope) const {
+  const TextIteratorBehavior& behavior =
+      TextIteratorBehavior::Builder()
+          .SetEmitsObjectReplacementCharacter(true)
+          .SetEmitsCharactersBetweenAllVisiblePositions(true)
+          .SetSuppressesExtraNewlineEmission(true)
+          .Build();
+  return CreateRangeFor(scope, behavior);
+}
+
+EphemeralRange PlainTextRange::CreateRangeFor(
+    const ContainerNode& scope,
+    const TextIteratorBehavior& behavior) const {
   DCHECK(IsNotNull());
 
   size_t doc_text_position = 0;
@@ -68,13 +91,6 @@ EphemeralRange PlainTextRange::CreateRangeFor(const ContainerNode& scope,
 
   Position text_run_start_position;
   Position text_run_end_position;
-
-  const TextIteratorBehavior& behavior =
-      TextIteratorBehavior::Builder()
-          .SetEmitsObjectReplacementCharacter(true)
-          .SetEmitsCharactersBetweenAllVisiblePositions(get_range_for ==
-                                                        kForSelection)
-          .Build();
 
   auto range = EphemeralRange::RangeOfContents(scope);
 

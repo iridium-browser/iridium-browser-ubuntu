@@ -43,11 +43,11 @@ SharedWorkerThread::SharedWorkerThread(
     ThreadableLoadingContext* loading_context,
     WorkerReportingProxy& worker_reporting_proxy)
     : WorkerThread(loading_context, worker_reporting_proxy),
-      worker_backing_thread_(
-          WorkerBackingThread::Create("SharedWorker Thread")),
+      worker_backing_thread_(WorkerBackingThread::Create(
+          WebThreadCreationParams(GetThreadType()))),
       name_(name.IsolatedCopy()) {}
 
-SharedWorkerThread::~SharedWorkerThread() {}
+SharedWorkerThread::~SharedWorkerThread() = default;
 
 void SharedWorkerThread::ClearWorkerBackingThread() {
   worker_backing_thread_ = nullptr;
@@ -55,8 +55,8 @@ void SharedWorkerThread::ClearWorkerBackingThread() {
 
 WorkerOrWorkletGlobalScope* SharedWorkerThread::CreateWorkerGlobalScope(
     std::unique_ptr<GlobalScopeCreationParams> creation_params) {
-  return SharedWorkerGlobalScope::Create(
-      name_, this, std::move(creation_params), time_origin_);
+  return new SharedWorkerGlobalScope(name_, std::move(creation_params), this,
+                                     time_origin_);
 }
 
 }  // namespace blink

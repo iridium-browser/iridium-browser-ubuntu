@@ -8,7 +8,8 @@
 
 namespace blink {
 
-PresentationConnectionAvailableEvent::~PresentationConnectionAvailableEvent() {}
+PresentationConnectionAvailableEvent::~PresentationConnectionAvailableEvent() =
+    default;
 
 PresentationConnectionAvailableEvent::PresentationConnectionAvailableEvent(
     const AtomicString& event_type,
@@ -26,7 +27,7 @@ const AtomicString& PresentationConnectionAvailableEvent::InterfaceName()
   return EventNames::PresentationConnectionAvailableEvent;
 }
 
-DEFINE_TRACE(PresentationConnectionAvailableEvent) {
+void PresentationConnectionAvailableEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(connection_);
   Event::Trace(visitor);
 }

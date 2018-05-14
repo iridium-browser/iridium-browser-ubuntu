@@ -34,21 +34,32 @@ const int kTargetMaxPoolUtilizationPercent = 60;
 
 }  // namespace
 
+struct ThreadSafeCaptureOracle::InFlightFrameCapture {
+  int frame_number;
+  VideoCaptureDevice::Client::Buffer buffer;
+  std::unique_ptr<VideoCaptureBufferHandle> buffer_access;
+  base::TimeTicks begin_time;
+  base::TimeDelta frame_duration;
+};
+
 ThreadSafeCaptureOracle::ThreadSafeCaptureOracle(
     std::unique_ptr<VideoCaptureDevice::Client> client,
     const VideoCaptureParams& params,
     bool enable_auto_throttling)
     : client_(std::move(client)),
-      oracle_(base::TimeDelta::FromMicroseconds(static_cast<int64_t>(
-                  1000000.0 / params.requested_format.frame_rate +
-                  0.5 /* to round to nearest int */)),
-              params.requested_format.frame_size,
-              params.resolution_change_policy,
-              enable_auto_throttling),
-      params_(params) {}
-
-ThreadSafeCaptureOracle::~ThreadSafeCaptureOracle() {
+      oracle_(enable_auto_throttling),
+      params_(params) {
+  DCHECK_GE(params.requested_format.frame_rate, 1e-6f);
+  oracle_.SetMinCapturePeriod(base::TimeDelta::FromMicroseconds(
+      static_cast<int64_t>(1000000.0 / params.requested_format.frame_rate +
+                           0.5 /* to round to nearest int */)));
+  const auto constraints = params.SuggestConstraints();
+  oracle_.SetCaptureSizeConstraints(constraints.min_frame_size,
+                                    constraints.max_frame_size,
+                                    constraints.fixed_aspect_ratio);
 }
+
+ThreadSafeCaptureOracle::~ThreadSafeCaptureOracle() = default;
 
 bool ThreadSafeCaptureOracle::ObserveEventAndDecideCapture(
     VideoCaptureOracle::Event event,
@@ -89,20 +100,9 @@ bool ThreadSafeCaptureOracle::ObserveEventAndDecideCapture(
     coded_size.SetSize(base::bits::Align(visible_size.width(), 16),
                        base::bits::Align(visible_size.height(), 16));
 
-    if (event == VideoCaptureOracle::kPassiveRefreshRequest) {
-      output_buffer = client_->ResurrectLastOutputBuffer(
-          coded_size, params_.requested_format.pixel_format,
-          params_.requested_format.pixel_storage, frame_number);
-      if (!output_buffer.is_valid()) {
-        TRACE_EVENT_INSTANT0("gpu.capture", "ResurrectionFailed",
-                             TRACE_EVENT_SCOPE_THREAD);
-        return false;
-      }
-    } else {
-      output_buffer = client_->ReserveOutputBuffer(
-          coded_size, params_.requested_format.pixel_format,
-          params_.requested_format.pixel_storage, frame_number);
-    }
+    output_buffer = client_->ReserveOutputBuffer(
+        coded_size, params_.requested_format.pixel_format,
+        params_.requested_format.pixel_storage, frame_number);
 
     // Get the current buffer pool utilization and attenuate it: The utilization
     // reported to the oracle is in terms of a maximum sustainable amount (not
@@ -135,42 +135,45 @@ bool ThreadSafeCaptureOracle::ObserveEventAndDecideCapture(
                            "frame_number", frame_number, "trigger",
                            VideoCaptureOracle::EventAsString(event));
 
-  auto output_buffer_access =
+  std::unique_ptr<VideoCaptureBufferHandle> output_buffer_access =
       output_buffer.handle_provider->GetHandleForInProcessAccess();
-  DCHECK_EQ(media::PIXEL_STORAGE_CPU, params_.requested_format.pixel_storage);
+  DCHECK_EQ(media::VideoPixelStorage::CPU,
+            params_.requested_format.pixel_storage);
   *storage = VideoFrame::WrapExternalSharedMemory(
       params_.requested_format.pixel_format, coded_size,
       gfx::Rect(visible_size), visible_size, output_buffer_access->data(),
       output_buffer_access->mapped_size(), base::SharedMemoryHandle(), 0u,
       base::TimeDelta());
+
+  // Note: Passing the |output_buffer_access| in the callback is a bit of a
+  // hack. Really, the access should be owned by the VideoFrame so that access
+  // is released (unpinning the shared memory) when the VideoFrame goes
+  // out-of-scope. However, there is an an issue where, at browser shutdown, the
+  // callback below may never be run, and instead it self-deletes: If this
+  // happens, the VideoFrame will release access *after* the Buffer goes
+  // out-of-scope, which is an invalid sequence of steps. This could be fixed in
+  // upstream implementation, but it's not worth spending time tracking it down
+  // because all of this code (and upstream code) is about to be replaced.
+  // http://crbug.com/754872
+  //
+  // To be clear, this solution allows |output_buffer_access| to be deleted
+  // before |output_buffer| if the callback self-deletes rather than ever being
+  // run. The InFlightFrameCapture destructor ensures this.
+  std::unique_ptr<InFlightFrameCapture> capture(new InFlightFrameCapture{
+      frame_number, std::move(output_buffer), std::move(output_buffer_access),
+      capture_begin_time, estimated_frame_duration});
+
   // If creating the VideoFrame wrapper failed, call DidCaptureFrame() with
   // !success to execute the required post-capture steps (tracing, notification
   // of failure to VideoCaptureOracle, etc.).
   if (!(*storage)) {
-    DidCaptureFrame(frame_number, std::move(output_buffer), capture_begin_time,
-                    estimated_frame_duration, *storage, event_time, false);
+    DidCaptureFrame(std::move(capture), *storage, event_time, false);
     return false;
   }
 
   *callback = base::Bind(&ThreadSafeCaptureOracle::DidCaptureFrame, this,
-                         frame_number, base::Passed(&output_buffer),
-                         capture_begin_time, estimated_frame_duration);
+                         base::Passed(&capture));
 
-  return true;
-}
-
-bool ThreadSafeCaptureOracle::AttemptPassiveRefresh() {
-  const base::TimeTicks refresh_time = base::TimeTicks::Now();
-
-  scoped_refptr<VideoFrame> frame;
-  CaptureFrameCallback capture_callback;
-  if (!ObserveEventAndDecideCapture(VideoCaptureOracle::kPassiveRefreshRequest,
-                                    gfx::Rect(), refresh_time, &frame,
-                                    &capture_callback)) {
-    return false;
-  }
-
-  capture_callback.Run(std::move(frame), refresh_time, true);
   return true;
 }
 
@@ -190,9 +193,8 @@ void ThreadSafeCaptureOracle::Stop() {
   client_.reset();
 }
 
-void ThreadSafeCaptureOracle::ReportError(
-    const tracked_objects::Location& from_here,
-    const std::string& reason) {
+void ThreadSafeCaptureOracle::ReportError(const base::Location& from_here,
+                                          const std::string& reason) {
   base::AutoLock guard(lock_);
   if (client_)
     client_->OnError(from_here, reason);
@@ -205,23 +207,24 @@ void ThreadSafeCaptureOracle::ReportStarted() {
 }
 
 void ThreadSafeCaptureOracle::DidCaptureFrame(
-    int frame_number,
-    VideoCaptureDevice::Client::Buffer buffer,
-    base::TimeTicks capture_begin_time,
-    base::TimeDelta estimated_frame_duration,
+    std::unique_ptr<InFlightFrameCapture> capture,
     scoped_refptr<VideoFrame> frame,
     base::TimeTicks reference_time,
     bool success) {
+  // Release |buffer_access| now that nothing is accessing the memory via the
+  // VideoFrame data pointers anymore.
+  capture->buffer_access.reset();
+
   base::AutoLock guard(lock_);
 
   const bool should_deliver_frame =
-      oracle_.CompleteCapture(frame_number, success, &reference_time);
+      oracle_.CompleteCapture(capture->frame_number, success, &reference_time);
 
   // The following is used by
   // chrome/browser/extension/api/cast_streaming/performance_test.cc, in
   // addition to the usual runtime tracing.
-  TRACE_EVENT_ASYNC_END2("gpu.capture", "Capture", buffer.id, "success",
-                         should_deliver_frame, "timestamp",
+  TRACE_EVENT_ASYNC_END2("gpu.capture", "Capture", capture->buffer.id,
+                         "success", should_deliver_frame, "timestamp",
                          (reference_time - base::TimeTicks()).InMicroseconds());
 
   if (!should_deliver_frame || !client_)
@@ -230,20 +233,19 @@ void ThreadSafeCaptureOracle::DidCaptureFrame(
   frame->metadata()->SetDouble(VideoFrameMetadata::FRAME_RATE,
                                params_.requested_format.frame_rate);
   frame->metadata()->SetTimeTicks(VideoFrameMetadata::CAPTURE_BEGIN_TIME,
-                                  capture_begin_time);
+                                  capture->begin_time);
   frame->metadata()->SetTimeTicks(VideoFrameMetadata::CAPTURE_END_TIME,
                                   base::TimeTicks::Now());
   frame->metadata()->SetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
-                                  estimated_frame_duration);
+                                  capture->frame_duration);
   frame->metadata()->SetTimeTicks(VideoFrameMetadata::REFERENCE_TIME,
                                   reference_time);
 
-  DCHECK(frame->IsMappable());
-  media::VideoCaptureFormat format(frame->coded_size(),
-                                   params_.requested_format.frame_rate,
-                                   frame->format(), media::PIXEL_STORAGE_CPU);
+  media::VideoCaptureFormat format(
+      frame->coded_size(), params_.requested_format.frame_rate, frame->format(),
+      media::VideoPixelStorage::CPU);
   client_->OnIncomingCapturedBufferExt(
-      std::move(buffer), format, reference_time, frame->timestamp(),
+      std::move(capture->buffer), format, reference_time, frame->timestamp(),
       frame->visible_rect(), *frame->metadata());
 }
 

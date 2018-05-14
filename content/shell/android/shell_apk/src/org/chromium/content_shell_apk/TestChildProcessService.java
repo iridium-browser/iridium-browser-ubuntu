@@ -13,12 +13,15 @@ import android.os.RemoteException;
 import android.util.SparseArray;
 
 import org.chromium.base.CommandLine;
+import org.chromium.base.JNIUtils;
 import org.chromium.base.Log;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.process_launcher.ChildProcessService;
 import org.chromium.base.process_launcher.ChildProcessServiceDelegate;
+
+import java.util.List;
 
 import javax.annotation.concurrent.GuardedBy;
 
@@ -51,9 +54,9 @@ public class TestChildProcessService extends ChildProcessService {
         }
 
         @Override
-        public void onConnectionSetup(Bundle connectionBundle, IBinder callback) {
-            if (callback != null) {
-                mIChildProcessTest = IChildProcessTest.Stub.asInterface(callback);
+        public void onConnectionSetup(Bundle connectionBundle, List<IBinder> clientInterfaces) {
+            if (clientInterfaces != null && !clientInterfaces.isEmpty()) {
+                mIChildProcessTest = IChildProcessTest.Stub.asInterface(clientInterfaces.get(0));
             }
             if (mIChildProcessTest != null) {
                 try {
@@ -80,10 +83,22 @@ public class TestChildProcessService extends ChildProcessService {
         }
 
         @Override
+        public void preloadNativeLibrary(Context hostContext) {
+            try {
+                LibraryLoader.get(LibraryProcessType.PROCESS_CHILD).preloadNow();
+            } catch (ProcessInitException e) {
+                Log.e(TAG, "Failed to preload native library.", e);
+            }
+        }
+
+        @Override
         public boolean loadNativeLibrary(Context hostContext) {
             // Store the command line before loading the library to avoid an assert in CommandLine.
             mCommandLine = CommandLine.getJavaSwitchesOrNull();
 
+            // Non-main processes are launched for testing. Mark them as such so that the JNI
+            // in the seconary dex won't be registered. See https://crbug.com/810720.
+            JNIUtils.enableSelectiveJniRegistration();
             LibraryLoader libraryLoader = null;
             boolean isLoaded = false;
             try {

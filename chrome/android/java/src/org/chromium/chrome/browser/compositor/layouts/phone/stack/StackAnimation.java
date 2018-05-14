@@ -14,6 +14,7 @@ import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation;
 import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animatable;
 import org.chromium.chrome.browser.compositor.layouts.Layout.Orientation;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
+import org.chromium.chrome.browser.compositor.layouts.phone.StackLayout;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
 
@@ -153,14 +154,12 @@ public abstract class StackAnimation {
      * @param focusIndex    The index of the tab that is the focus of this animation.
      * @param sourceIndex   The index of the tab that triggered this animation.
      * @param spacing       The default spacing between the tabs.
-     * @param scrollOffset  The scroll offset in the current orientation.
      * @param warpSize      The warp size of the transform from scroll space to screen space.
      * @param discardRange  The range of the discard amount value.
      * @return              The resulting TabSwitcherAnimation that will animate the tabs.
      */
     public ChromeAnimation<?> createAnimatorSetForType(OverviewAnimationType type, StackTab[] tabs,
-            int focusIndex, int sourceIndex, int spacing, float scrollOffset, float warpSize,
-            float discardRange) {
+            int focusIndex, int sourceIndex, int spacing, float warpSize, float discardRange) {
         ChromeAnimation<?> set = null;
 
         if (tabs != null) {
@@ -206,12 +205,6 @@ public abstract class StackAnimation {
 
     protected abstract void addTiltScrollAnimation(ChromeAnimation<Animatable<?>> set,
             LayoutTab tab, float end, int duration, int startTime);
-
-    /**
-     * @return The direction the tab should come from as it is created.  -1 means top/right, 1 means
-     *         bottom/left.
-     */
-    protected abstract int getTabCreationDirection();
 
     /**
      * Responsible for generating the animations that shows the stack
@@ -434,10 +427,12 @@ public abstract class StackAnimation {
      */
     protected float getStaticTabPosition() {
         // The y position of the tab will depend on whether or not the toolbar is at the top or
-        // bottom of the screen.
+        // bottom of the screen. All values are in DP.
         float yPos = -mBorderTopHeight;
         if (!FeatureUtilities.isChromeHomeEnabled()) {
             yPos += mHeight - mHeightMinusBrowserControls;
+        } else {
+            yPos -= StackLayout.MODERN_TOP_MARGIN_DP;
         }
         return yPos;
     }

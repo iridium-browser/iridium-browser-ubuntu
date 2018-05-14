@@ -4,14 +4,15 @@
 
 #include "core/editing/FrameCaret.h"
 
-#include "core/editing/EditingTestBase.h"
 #include "core/editing/FrameSelection.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/commands/TypingCommand.h"
+#include "core/editing/testing/EditingTestBase.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/page/FocusController.h"
 #include "platform/LayoutTestSupport.h"
-#include "platform/scheduler/test/fake_web_task_runner.h"
+#include "platform/scheduler/test/fake_task_runner.h"
 
 namespace blink {
 
@@ -37,15 +38,16 @@ class FrameCaretTest : public EditingTestBase {
 
 TEST_F(FrameCaretTest, BlinkAfterTyping) {
   FrameCaret& caret = Selection().FrameCaretForTesting();
-  RefPtr<scheduler::FakeWebTaskRunner> task_runner =
-      AdoptRef(new scheduler::FakeWebTaskRunner);
+  scoped_refptr<scheduler::FakeTaskRunner> task_runner =
+      base::MakeRefCounted<scheduler::FakeTaskRunner>();
   task_runner->SetTime(0);
-  caret.RecreateCaretBlinkTimerForTesting(task_runner.Get());
+  caret.RecreateCaretBlinkTimerForTesting(task_runner.get());
   const double kInterval = 10;
-  LayoutTheme::GetTheme().SetCaretBlinkInterval(kInterval);
+  LayoutTheme::GetTheme().SetCaretBlinkInterval(
+      TimeDelta::FromSecondsD(kInterval));
   GetDocument().GetPage()->GetFocusController().SetActive(true);
   GetDocument().GetPage()->GetFocusController().SetFocused(true);
-  GetDocument().body()->setInnerHTML("<textarea>");
+  GetDocument().body()->SetInnerHTMLFromString("<textarea>");
   Element* editor = ToElement(GetDocument().body()->firstChild());
   editor->focus();
   GetDocument().View()->UpdateAllLifecyclePhases();
@@ -79,7 +81,7 @@ TEST_F(FrameCaretTest, ShouldNotBlinkWhenSelectionLooseFocus) {
   FrameCaret& caret = Selection().FrameCaretForTesting();
   GetDocument().GetPage()->GetFocusController().SetActive(true);
   GetDocument().GetPage()->GetFocusController().SetFocused(true);
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLFromString(
       "<div id='outer' tabindex='-1'>"
       "<div id='input' contenteditable>foo</div>"
       "</div>");

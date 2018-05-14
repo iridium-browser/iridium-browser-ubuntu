@@ -35,10 +35,9 @@ void StorageInfoFetcher::FetchStorageInfo(const FetchCallback& fetch_callback) {
           base::Bind(&StorageInfoFetcher::OnGetUsageInfoInternal, this)));
 }
 
-void StorageInfoFetcher::ClearStorage(
-    const std::string& host,
-    storage::StorageType type,
-    const ClearCallback& clear_callback) {
+void StorageInfoFetcher::ClearStorage(const std::string& host,
+                                      blink::mojom::StorageType type,
+                                      const ClearCallback& clear_callback) {
   // Balanced in OnUsageCleared.
   AddRef();
 
@@ -56,10 +55,9 @@ void StorageInfoFetcher::ClearStorage(
                             this)));
 }
 
-void StorageInfoFetcher::GetUsageInfo(
-    const storage::GetUsageInfoCallback& callback) {
+void StorageInfoFetcher::GetUsageInfo(storage::GetUsageInfoCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  quota_manager_->GetUsageInfo(callback);
+  quota_manager_->GetUsageInfo(std::move(callback));
 }
 
 void StorageInfoFetcher::OnGetUsageInfoInternal(
@@ -80,7 +78,8 @@ void StorageInfoFetcher::OnFetchCompleted() {
   Release();
 }
 
-void StorageInfoFetcher::OnUsageClearedInternal(storage::QuotaStatusCode code) {
+void StorageInfoFetcher::OnUsageClearedInternal(
+    blink::mojom::QuotaStatusCode code) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   quota_manager_->ResetUsageTracker(type_to_delete_);
@@ -90,7 +89,7 @@ void StorageInfoFetcher::OnUsageClearedInternal(storage::QuotaStatusCode code) {
       base::Bind(&StorageInfoFetcher::OnClearCompleted, this, code));
 }
 
-void StorageInfoFetcher::OnClearCompleted(storage::QuotaStatusCode code) {
+void StorageInfoFetcher::OnClearCompleted(blink::mojom::QuotaStatusCode code) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   clear_callback_.Run(code);

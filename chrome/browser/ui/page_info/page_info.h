@@ -7,11 +7,13 @@
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
+#include "build/build_config.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/security_state/core/security_state.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "ui/gfx/vector_icon_types.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -22,11 +24,16 @@ namespace net {
 class X509Certificate;
 }
 
+namespace safe_browsing {
+class ChromePasswordProtectionService;
+}
+
 class ChromeSSLHostStateDelegate;
 class ChooserContextBase;
 class HostContentSettingsMap;
 class Profile;
 class PageInfoUI;
+class PageInfoBubbleViewBrowserTest;
 
 // The |PageInfo| provides information about a website's permissions,
 // connection state and its identity. It owns a UI that displays the
@@ -79,10 +86,20 @@ class PageInfo : public TabSpecificContentSettings::SiteDataObserver,
     // is using a deprecated signature algorithm.
     SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM,
     // The website has been flagged by Safe Browsing as dangerous for
-    // containing malware, social engineering, or unwanted software.
+    // containing malware, social engineering, unwanted software, or password
+    // reuse on a low reputation site.
     SITE_IDENTITY_STATUS_MALWARE,
     SITE_IDENTITY_STATUS_SOCIAL_ENGINEERING,
     SITE_IDENTITY_STATUS_UNWANTED_SOFTWARE,
+    SITE_IDENTITY_STATUS_PASSWORD_REUSE,
+  };
+
+  // Events for UMA. Do not reorder or change! Exposed in header so enum is
+  // accessible from test.
+  enum SSLCertificateDecisionsDidRevoke {
+    USER_CERT_DECISIONS_NOT_REVOKED = 0,
+    USER_CERT_DECISIONS_REVOKED = 1,
+    END_OF_SSL_CERTIFICATE_DECISIONS_DID_REVOKE_ENUM
   };
 
   // UMA statistics for PageInfo. Do not reorder or remove existing
@@ -109,9 +126,8 @@ class PageInfo : public TabSpecificContentSettings::SiteDataObserver,
   struct ChooserUIInfo {
     ContentSettingsType content_settings_type;
     ChooserContextBase* (*get_context)(Profile*);
-    int blocked_icon_id;
-    int allowed_icon_id;
     int label_string_id;
+    int secondary_label_string_id;
     int delete_tooltip_string_id;
     const char* ui_name_key;
   };
@@ -145,6 +161,13 @@ class PageInfo : public TabSpecificContentSettings::SiteDataObserver,
   // Handles opening the link to show more site settings and records the event.
   void OpenSiteSettingsView();
 
+  // This method is called when the user pressed "Change password" button.
+  void OnChangePasswordButtonPressed(content::WebContents* web_contents);
+
+  // This method is called when the user pressed "Mark as legitimate" button.
+  void OnWhitelistPasswordReuseButtonPressed(
+      content::WebContents* web_contents);
+
   // Accessors.
   SiteConnectionStatus site_connection_status() const {
     return site_connection_status_;
@@ -162,6 +185,9 @@ class PageInfo : public TabSpecificContentSettings::SiteDataObserver,
   void OnSiteDataAccessed() override;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(PageInfoTest,
+                           NonFactoryDefaultAndRecentlyChangedPermissionsShown);
+  friend class PageInfoBubbleViewBrowserTest;
   // Initializes the |PageInfo|.
   void Init(const GURL& url, const security_state::SecurityInfo& security_info);
 
@@ -174,6 +200,10 @@ class PageInfo : public TabSpecificContentSettings::SiteDataObserver,
   // Sets (presents) the information about the site's identity and connection
   // in the |ui_|.
   void PresentSiteIdentity();
+
+  // Retrieves all the permissions that are shown in Page Info.
+  // Exposed for testing.
+  static std::vector<ContentSettingsType> GetAllPermissionsForTesting();
 
   // The page info UI displays information and controls for site-
   // specific data (local stored objects like cookies), site-specific
@@ -239,6 +269,17 @@ class PageInfo : public TabSpecificContentSettings::SiteDataObserver,
   Profile* profile_;
 
   security_state::SecurityLevel security_level_;
+
+#if defined(SAFE_BROWSING_DB_LOCAL)
+  // Used to handle changing password, and whitelisting site.
+  safe_browsing::ChromePasswordProtectionService* password_protection_service_;
+#endif
+
+  // Set when the user ignored the password reuse modal warning dialog. When
+  // |show_change_password_buttons_| is true, the page identity area of the page
+  // info will include buttons to change corresponding password, and to
+  // whitelist current site.
+  bool show_change_password_buttons_;
 
   DISALLOW_COPY_AND_ASSIGN(PageInfo);
 };

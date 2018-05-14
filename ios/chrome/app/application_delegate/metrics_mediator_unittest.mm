@@ -8,7 +8,6 @@
 #import <Foundation/Foundation.h>
 
 #include "base/mac/scoped_block.h"
-#import "breakpad/src/client/ios/BreakpadController.h"
 #include "components/metrics/metrics_service.h"
 #import "ios/chrome/app/application_delegate/startup_information.h"
 #include "ios/chrome/browser/application_context.h"
@@ -20,6 +19,7 @@
 #import "ios/chrome/test/ocmock/OCMockObject+BreakpadControllerTesting.h"
 #include "net/base/network_change_notifier.h"
 #include "testing/platform_test.h"
+#import "third_party/breakpad/breakpad/src/client/ios/BreakpadController.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #include "third_party/ocmock/gtest_support.h"
 
@@ -92,9 +92,11 @@ int getExpectedValue(int number) {
   return 1;
 }
 
+using MetricsMediatorTest = PlatformTest;
+
 // Verifies that connectionTypeChanged correctly enables or disables the
 // uploading in the breakpad and in the metrics service.
-TEST(MetricsMediatorTest, connectionTypeChanged) {
+TEST_F(MetricsMediatorTest, connectionTypeChanged) {
   [[PreviousSessionInfo sharedInstance] setIsFirstSessionAfterUpgrade:NO];
   MetricsMediatorMock* mock_metrics_helper = [[MetricsMediatorMock alloc] init];
 
@@ -216,8 +218,10 @@ TEST_F(MetricsMediatorLogLaunchTest, logLaunchMetricsNoBackgroundDate) {
   verifySwizzleHasBeenCalled();
 }
 
+using MetricsMediatorNoFixtureTest = PlatformTest;
+
 // Tests that +logDateInUserDefaults logs the date in UserDefaults.
-TEST(MetricsMediatorNoFixtureTest, logDateInUserDefaultsTest) {
+TEST_F(MetricsMediatorNoFixtureTest, logDateInUserDefaultsTest) {
   // Setup.
   [[NSUserDefaults standardUserDefaults]
       removeObjectForKey:metrics_mediator::kAppEnteredBackgroundDateKey];
@@ -236,42 +240,3 @@ TEST(MetricsMediatorNoFixtureTest, logDateInUserDefaultsTest) {
   EXPECT_NE(nil, lastAppClose);
 }
 
-#pragma mark - processCrashReportsPresentAtStartup tests.
-
-class MetricsMediatorShutdownTypeTest : public testing::TestWithParam<int> {};
-
-// Verifies that the Breakpad controller gets called appropriately when
-// processCrashReportsPresentAtStartup is invoked.
-//
-// This parameterized test receives an int parameter that is the crash log
-// count waiting to be processed.
-TEST_P(MetricsMediatorShutdownTypeTest, ProcessCrashReportsPresentAtStartup) {
-  // Create a MainController.
-  MetricsMediator* metric_helper = [[MetricsMediator alloc] init];
-
-  // Create a mock for BreakpadController and swizzle
-  // +[BreakpadController sharedInstance] to return the mock instead of the
-  // normal singleton instance.
-  id mock_breakpad_controller =
-      [OCMockObject mockForClass:[BreakpadController class]];
-
-  id implementation_block = ^BreakpadController*(id self) {
-    return mock_breakpad_controller;
-  };
-  ScopedBlockSwizzler breakpad_controller_shared_instance_swizzler(
-      [BreakpadController class], @selector(sharedInstance),
-      implementation_block);
-
-  // Create the mock expectation for calling
-  // -[BreakpadController getCrashReportCount].
-  [mock_breakpad_controller cr_expectGetCrashReportCount:GetParam()];
-
-  // Now call the method under test and verify that the Breakpad controller got
-  // called appropriately.
-  [metric_helper processCrashReportsPresentAtStartup];
-  EXPECT_OCMOCK_VERIFY(mock_breakpad_controller);
-}
-
-INSTANTIATE_TEST_CASE_P(/* No InstantiationName */,
-                        MetricsMediatorShutdownTypeTest,
-                        ::testing::Values(0, 1, 42));

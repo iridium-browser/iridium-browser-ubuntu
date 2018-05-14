@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.AsyncTask;
+import android.text.TextUtils;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.VisibleForTesting;
@@ -17,9 +18,11 @@ import org.chromium.chrome.browser.browsing_data.UrlFilter;
 import org.chromium.chrome.browser.browsing_data.UrlFilterBridge;
 import org.chromium.webapk.lib.common.WebApkConstants;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -117,7 +120,7 @@ public class WebappRegistry {
                 // Access the WebappDataStorage to force it to finish loading. A strict mode
                 // exception is thrown if the WebappDataStorage is accessed on the UI thread prior
                 // to the storage being fully loaded.
-                storage.getLastUsedTime();
+                storage.getLastUsedTimeMs();
                 return storage;
             }
 
@@ -148,6 +151,7 @@ public class WebappRegistry {
      * Returns the WebappDataStorage object whose scope most closely matches the provided URL, or
      * null if a matching web app cannot be found. The most closely matching scope is the longest
      * scope which has the same prefix as the URL to open.
+     * Note: this function skips any storage object associated with WebAPKs.
      * @param url The URL to search for.
      * @return The storage object for the web app, or null if one cannot be found.
      */
@@ -156,6 +160,8 @@ public class WebappRegistry {
         int largestOverlap = 0;
         for (HashMap.Entry<String, WebappDataStorage> entry : mStorages.entrySet()) {
             WebappDataStorage storage = entry.getValue();
+            if (storage.getId().startsWith(WebApkConstants.WEBAPK_ID_PREFIX)) continue;
+
             String scope = storage.getScope();
             if (url.startsWith(scope) && scope.length() > largestOverlap) {
                 bestMatch = storage;
@@ -166,6 +172,24 @@ public class WebappRegistry {
     }
 
     /**
+     * Returns the list of WebAPK IDs with pending updates. Filters out WebAPKs which have been
+     * uninstalled.
+     * */
+    public List<String> findWebApksWithPendingUpdate() {
+        ArrayList<String> webApkIdsWithPendingUpdate = new ArrayList<String>();
+        PackageManager packageManager = ContextUtils.getApplicationContext().getPackageManager();
+        for (HashMap.Entry<String, WebappDataStorage> entry : mStorages.entrySet()) {
+            WebappDataStorage storage = entry.getValue();
+            if (!TextUtils.isEmpty(storage.getPendingUpdateRequestPath())
+                    && InstallerDelegate.isInstalled(
+                               packageManager, storage.getWebApkPackageName())) {
+                webApkIdsWithPendingUpdate.add(entry.getKey());
+            }
+        }
+        return webApkIdsWithPendingUpdate;
+    }
+
+    /**
      * Returns the list of web app IDs which are written to SharedPreferences.
      */
     @VisibleForTesting
@@ -173,6 +197,16 @@ public class WebappRegistry {
         // Wrap with unmodifiableSet to ensure it's never modified. See crbug.com/568369.
         return Collections.unmodifiableSet(openSharedPreferences().getStringSet(
                 KEY_WEBAPP_SET, Collections.<String>emptySet()));
+    }
+
+    @VisibleForTesting
+    void clearForTesting() {
+        Iterator<HashMap.Entry<String, WebappDataStorage>> it = mStorages.entrySet().iterator();
+        while (it.hasNext()) {
+            it.next().getValue().delete();
+            it.remove();
+        }
+        mPreferences.edit().putStringSet(KEY_WEBAPP_SET, mStorages.keySet()).apply();
     }
 
     /**
@@ -201,7 +235,7 @@ public class WebappRegistry {
                         && isWebApkInstalled(webApkPackage)) {
                     continue;
                 }
-            } else if ((currentTime - storage.getLastUsedTime())
+            } else if ((currentTime - storage.getLastUsedTimeMs())
                     < WEBAPP_UNOPENED_CLEANUP_DURATION) {
                 continue;
             }

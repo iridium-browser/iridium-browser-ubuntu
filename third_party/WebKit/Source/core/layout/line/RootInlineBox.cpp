@@ -19,8 +19,8 @@
 
 #include "core/layout/line/RootInlineBox.h"
 
+#include "core/css/StyleEngine.h"
 #include "core/dom/Document.h"
-#include "core/dom/StyleEngine.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/VerticalPositionCache.h"
@@ -78,7 +78,7 @@ void RootInlineBox::ClearTruncation() {
   }
 }
 
-int RootInlineBox::BaselinePosition(FontBaseline baseline_type) const {
+LayoutUnit RootInlineBox::BaselinePosition(FontBaseline baseline_type) const {
   return BoxModelObject().BaselinePosition(
       baseline_type, IsFirstLineStyle(),
       IsHorizontal() ? kHorizontalLine : kVerticalLine,
@@ -213,22 +213,22 @@ void RootInlineBox::Move(const LayoutSize& delta) {
 
 void RootInlineBox::ChildRemoved(InlineBox* box) {
   if (box->GetLineLayoutItem() == line_break_obj_)
-    SetLineBreakInfo(0, 0, BidiStatus());
+    SetLineBreakInfo(nullptr, 0, BidiStatus());
 
   for (RootInlineBox* prev = PrevRootBox();
        prev && prev->LineBreakObj() == box->GetLineLayoutItem();
        prev = prev->PrevRootBox()) {
-    prev->SetLineBreakInfo(0, 0, BidiStatus());
+    prev->SetLineBreakInfo(nullptr, 0, BidiStatus());
     prev->MarkDirty();
   }
 }
 
 static inline void ApplyLineHeightStep(uint8_t line_height_step,
-                                       int& max_ascent,
-                                       int& max_descent) {
+                                       LayoutUnit& max_ascent,
+                                       LayoutUnit& max_descent) {
   // Round up to the multiple of units, by adding spaces to over/under equally.
   // https://drafts.csswg.org/css-rhythm/#line-height-step
-  int remainder = (max_ascent + max_descent) % line_height_step;
+  int remainder = (max_ascent + max_descent).ToInt() % line_height_step;
   if (!remainder)
     return;
   DCHECK_GT(remainder, 0);
@@ -247,8 +247,8 @@ LayoutUnit RootInlineBox::AlignBoxesInBlockDirection(
 
   LayoutUnit max_position_top;
   LayoutUnit max_position_bottom;
-  int max_ascent = 0;
-  int max_descent = 0;
+  LayoutUnit max_ascent;
+  LayoutUnit max_descent;
   bool set_max_ascent = false;
   bool set_max_descent = false;
 
@@ -437,7 +437,7 @@ static bool IsEditableLeaf(InlineBox* leaf) {
 
 InlineBox* RootInlineBox::ClosestLeafChildForPoint(
     const LayoutPoint& point_in_contents,
-    bool only_editable_leaves) {
+    bool only_editable_leaves) const {
   return ClosestLeafChildForLogicalLeftPosition(
       Block().IsHorizontalWritingMode() ? point_in_contents.X()
                                         : point_in_contents.Y(),
@@ -446,7 +446,7 @@ InlineBox* RootInlineBox::ClosestLeafChildForPoint(
 
 InlineBox* RootInlineBox::ClosestLeafChildForLogicalLeftPosition(
     LayoutUnit left_position,
-    bool only_editable_leaves) {
+    bool only_editable_leaves) const {
   InlineBox* first_leaf = FirstLeafChild();
   InlineBox* last_leaf = LastLeafChild();
 
@@ -567,10 +567,10 @@ LayoutRect RootInlineBox::PaddedLayoutOverflowRect(
   return line_layout_overflow;
 }
 
-static void SetAscentAndDescent(int& ascent,
-                                int& descent,
-                                int new_ascent,
-                                int new_descent,
+static void SetAscentAndDescent(LayoutUnit& ascent,
+                                LayoutUnit& descent,
+                                LayoutUnit new_ascent,
+                                LayoutUnit new_descent,
                                 bool& ascent_descent_set) {
   if (!ascent_descent_set) {
     ascent_descent_set = true;
@@ -585,15 +585,15 @@ static void SetAscentAndDescent(int& ascent,
 void RootInlineBox::AscentAndDescentForBox(
     InlineBox* box,
     GlyphOverflowAndFallbackFontsMap& text_box_data_map,
-    int& ascent,
-    int& descent,
+    LayoutUnit& ascent,
+    LayoutUnit& descent,
     bool& affects_ascent,
     bool& affects_descent) const {
   bool ascent_descent_set = false;
 
   if (box->GetLineLayoutItem().IsAtomicInlineLevel()) {
     ascent = box->BaselinePosition(BaselineType());
-    descent = RoundToInt(box->LineHeight() - ascent);
+    descent = box->LineHeight() - ascent;
 
     // Replaced elements always affect both the ascent and descent.
     affects_ascent = true;
@@ -605,7 +605,7 @@ void RootInlineBox::AscentAndDescentForBox(
   if (box->IsText()) {
     GlyphOverflowAndFallbackFontsMap::iterator it =
         text_box_data_map.find(ToInlineTextBox(box));
-    used_fonts = it == text_box_data_map.end() ? 0 : &it->value.first;
+    used_fonts = it == text_box_data_map.end() ? nullptr : &it->value.first;
   }
 
   bool include_leading = IncludeLeadingForBox(box);
@@ -617,18 +617,20 @@ void RootInlineBox::AscentAndDescentForBox(
            ->LineHeight()
            .IsNegative() &&
        include_leading)) {
-    used_fonts->push_back(box->GetLineLayoutItem()
-                              .Style(IsFirstLineStyle())
-                              ->GetFont()
-                              .PrimaryFont());
+    const SimpleFontData* primary_font = box->GetLineLayoutItem()
+                                             .Style(IsFirstLineStyle())
+                                             ->GetFont()
+                                             .PrimaryFont();
+    if (primary_font)
+      used_fonts->push_back(primary_font);
     for (size_t i = 0; i < used_fonts->size(); ++i) {
       const FontMetrics& font_metrics = used_fonts->at(i)->GetFontMetrics();
-      int used_font_ascent = font_metrics.Ascent(BaselineType());
-      int used_font_descent = font_metrics.Descent(BaselineType());
-      int half_leading =
-          (font_metrics.LineSpacing() - font_metrics.Height()) / 2;
-      int used_font_ascent_and_leading = used_font_ascent + half_leading;
-      int used_font_descent_and_leading =
+      LayoutUnit used_font_ascent(font_metrics.Ascent(BaselineType()));
+      LayoutUnit used_font_descent(font_metrics.Descent(BaselineType()));
+      LayoutUnit half_leading(
+          (font_metrics.LineSpacing() - font_metrics.Height()) / 2);
+      LayoutUnit used_font_ascent_and_leading = used_font_ascent + half_leading;
+      LayoutUnit used_font_descent_and_leading =
           font_metrics.LineSpacing() - used_font_ascent_and_leading;
       if (include_leading) {
         SetAscentAndDescent(ascent, descent, used_font_ascent_and_leading,
@@ -644,9 +646,8 @@ void RootInlineBox::AscentAndDescentForBox(
 
   // If leading is included for the box, then we compute that box.
   if (include_leading && !set_used_font_with_leading) {
-    int ascent_with_leading = box->BaselinePosition(BaselineType());
-    int descent_with_leading =
-        (box->LineHeight() - ascent_with_leading).ToInt();
+    LayoutUnit ascent_with_leading = box->BaselinePosition(BaselineType());
+    LayoutUnit descent_with_leading = box->LineHeight() - ascent_with_leading;
     SetAscentAndDescent(ascent, descent, ascent_with_leading,
                         descent_with_leading, ascent_descent_set);
 

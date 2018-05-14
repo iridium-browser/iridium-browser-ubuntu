@@ -6,11 +6,25 @@
 
 namespace media {
 
-CdmContext::CdmContext() {}
+CdmContext::CdmContext() = default;
 
-CdmContext::~CdmContext() {}
+CdmContext::~CdmContext() = default;
 
 void IgnoreCdmAttached(bool /* success */) {}
+
+Decryptor* CdmContext::GetDecryptor() {
+  return nullptr;
+}
+
+int CdmContext::GetCdmId() const {
+  return kInvalidCdmId;
+}
+
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
+CdmProxyContext* CdmContext::GetCdmProxyContext() {
+  return nullptr;
+}
+#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
 void* CdmContext::GetClassIdentifier() const {
   return nullptr;

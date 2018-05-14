@@ -13,15 +13,14 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
@@ -34,6 +33,7 @@
 #include "components/search_engines/template_url_service.h"
 #include "components/search_engines/template_url_service_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 
 static std::ostream& operator<<(std::ostream& os,
                                 const AutocompleteResult::const_iterator& it) {
@@ -49,7 +49,7 @@ class TestingSchemeClassifier : public AutocompleteSchemeClassifier {
  public:
   TestingSchemeClassifier() {}
 
-  metrics::OmniboxInputType::Type GetInputTypeForScheme(
+  metrics::OmniboxInputType GetInputTypeForScheme(
       const std::string& scheme) const override {
     return net::URLRequest::IsHandledProtocol(scheme)
                ? metrics::OmniboxInputType::URL
@@ -75,7 +75,7 @@ class AutocompleteProviderClientWithClosure
     if (!closure_.is_null())
       closure_.Run();
     if (base::RunLoop::IsRunningOnCurrentThread())
-      base::MessageLoop::current()->QuitWhenIdle();
+      base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
   base::Closure closure_;
@@ -273,7 +273,7 @@ class AutocompleteProviderTest : public testing::Test {
   // platform, flags, etc.) be instantiated.
   void ResetControllerWithType(int type);
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<AutocompleteController> controller_;
   // Owned by |controller_|.
   AutocompleteProviderClientWithClosure* client_;
@@ -288,7 +288,7 @@ AutocompleteProviderTest::AutocompleteProviderTest()
     : client_(new AutocompleteProviderClientWithClosure()),
       client_owned_(false) {
   client_->set_template_url_service(
-      base::MakeUnique<TemplateURLService>(nullptr, 0));
+      std::make_unique<TemplateURLService>(nullptr, 0));
 }
 
 AutocompleteProviderTest::~AutocompleteProviderTest() {
@@ -304,7 +304,7 @@ void AutocompleteProviderTest::RegisterTemplateURL(
   data.SetKeyword(keyword);
   TemplateURLService* turl_model = client_->GetTemplateURLService();
   TemplateURL* default_turl =
-      turl_model->Add(base::MakeUnique<TemplateURL>(data));
+      turl_model->Add(std::make_unique<TemplateURL>(data));
   turl_model->SetUserSelectedDefaultSearchProvider(default_turl);
   turl_model->Load();
   TemplateURLID default_provider_id = default_turl->id();
@@ -369,7 +369,7 @@ void AutocompleteProviderTest::ResetControllerWithKeywordAndSearchProviders() {
   data.SetURL("http://defaultturl/{searchTerms}");
   TemplateURLService* turl_model = client_->GetTemplateURLService();
   TemplateURL* default_turl =
-      turl_model->Add(base::MakeUnique<TemplateURL>(data));
+      turl_model->Add(std::make_unique<TemplateURL>(data));
   turl_model->SetUserSelectedDefaultSearchProvider(default_turl);
   TemplateURLID default_provider_id = default_turl->id();
   ASSERT_NE(0, default_provider_id);
@@ -380,7 +380,7 @@ void AutocompleteProviderTest::ResetControllerWithKeywordAndSearchProviders() {
   data2.SetKeyword(base::ASCIIToUTF16("k"));
   data2.SetURL("http://keyword/{searchTerms}");
   TemplateURL* keyword_turl =
-      turl_model->Add(base::MakeUnique<TemplateURL>(data2));
+      turl_model->Add(std::make_unique<TemplateURL>(data2));
   ASSERT_NE(0, keyword_turl->id());
 
   ResetControllerWithType(AutocompleteProvider::TYPE_KEYWORD |
@@ -396,7 +396,7 @@ void AutocompleteProviderTest::ResetControllerWithKeywordProvider() {
   data.SetKeyword(base::ASCIIToUTF16("foo.com"));
   data.SetURL("http://foo.com/{searchTerms}");
   TemplateURL* keyword_turl =
-      turl_model->Add(base::MakeUnique<TemplateURL>(data));
+      turl_model->Add(std::make_unique<TemplateURL>(data));
   ASSERT_NE(0, keyword_turl->id());
 
   // Make a TemplateURL for KeywordProvider that a shorter version of the
@@ -404,14 +404,14 @@ void AutocompleteProviderTest::ResetControllerWithKeywordProvider() {
   data.SetShortName(base::ASCIIToUTF16("f"));
   data.SetKeyword(base::ASCIIToUTF16("f"));
   data.SetURL("http://f.com/{searchTerms}");
-  keyword_turl = turl_model->Add(base::MakeUnique<TemplateURL>(data));
+  keyword_turl = turl_model->Add(std::make_unique<TemplateURL>(data));
   ASSERT_NE(0, keyword_turl->id());
 
   // Create another TemplateURL for KeywordProvider.
   data.SetShortName(base::ASCIIToUTF16("bar.com"));
   data.SetKeyword(base::ASCIIToUTF16("bar.com"));
   data.SetURL("http://bar.com/{searchTerms}");
-  keyword_turl = turl_model->Add(base::MakeUnique<TemplateURL>(data));
+  keyword_turl = turl_model->Add(std::make_unique<TemplateURL>(data));
   ASSERT_NE(0, keyword_turl->id());
 
   ResetControllerWithType(AutocompleteProvider::TYPE_KEYWORD);
@@ -442,10 +442,12 @@ void AutocompleteProviderTest::RunKeywordTest(const base::string16& input,
     matches.push_back(match);
   }
 
-  controller_->input_ = AutocompleteInput(
-      input, base::string16::npos, std::string(), GURL(), base::string16(),
+  AutocompleteInput autocomplete_input(
+      input,
       metrics::OmniboxEventProto::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS,
-      false, true, true, true, false, TestingSchemeClassifier());
+      TestingSchemeClassifier());
+  autocomplete_input.set_prefer_keyword(true);
+  controller_->input_ = autocomplete_input;
   AutocompleteResult result;
   result.AppendMatches(controller_->input_, matches);
   controller_->UpdateAssociatedKeywords(&result);
@@ -488,10 +490,12 @@ void AutocompleteProviderTest::RunAssistedQueryStatsTest(
 void AutocompleteProviderTest::RunQuery(const std::string& query,
                                         bool allow_exact_keyword_match) {
   result_.Reset();
-  controller_->Start(AutocompleteInput(
-      base::ASCIIToUTF16(query), base::string16::npos, std::string(), GURL(),
-      base::string16(), metrics::OmniboxEventProto::INVALID_SPEC, true, false,
-      allow_exact_keyword_match, true, false, TestingSchemeClassifier()));
+  AutocompleteInput input(base::ASCIIToUTF16(query),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestingSchemeClassifier());
+  input.set_prevent_inline_autocomplete(true);
+  input.set_allow_exact_keyword_match(allow_exact_keyword_match);
+  controller_->Start(input);
 
   if (!controller_->done())
     // The message loop will terminate when all autocomplete input has been

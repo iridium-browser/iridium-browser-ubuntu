@@ -20,7 +20,7 @@ class PLATFORM_EXPORT DoubleRect {
   STACK_ALLOCATED();
 
  public:
-  DoubleRect() {}
+  DoubleRect() = default;
   DoubleRect(const DoublePoint& location, const DoubleSize& size)
       : location_(location), size_(size) {}
   DoubleRect(double x, double y, double width, double height)
@@ -84,6 +84,8 @@ PLATFORM_EXPORT IntRect EnclosingIntRect(const DoubleRect&);
 PLATFORM_EXPORT IntRect EnclosedIntRect(const DoubleRect&);
 
 PLATFORM_EXPORT IntRect RoundedIntRect(const DoubleRect&);
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, const DoubleRect&);
 
 // Redeclared here to avoid ODR issues.
 // See platform/testing/GeometryPrinters.h.

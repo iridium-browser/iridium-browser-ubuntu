@@ -6,15 +6,14 @@
 #import <UIKit/UIKit.h>
 #import <XCTest/XCTest.h>
 #include <map>
+#include <memory>
 
 #include "base/bind.h"
 #import "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/browsing_data/core/pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
-#include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
@@ -22,18 +21,16 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "ios/chrome/browser/pref_names.h"
+#import "ios/chrome/browser/ui/authentication/signin_promo_view.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
-#import "ios/chrome/browser/ui/settings/clear_browsing_data_collection_view_controller.h"
-#import "ios/chrome/browser/ui/settings/settings_collection_view_controller.h"
-#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_popup_controller.h"
+#include "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #include "ios/chrome/test/app/navigation_test_util.h"
 #import "ios/chrome/test/app/tab_test_util.h"
-#include "ios/chrome/test/app/web_view_interaction_test_util.h"
+#import "ios/chrome/test/app/web_view_interaction_test_util.h"
 #include "ios/chrome/test/earl_grey/accessibility_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
@@ -58,10 +55,16 @@
 
 using chrome_test_util::ButtonWithAccessibilityLabelId;
 using chrome_test_util::ClearBrowsingDataCollectionView;
+using chrome_test_util::ClearBrowsingHistoryButton;
+using chrome_test_util::ClearCacheButton;
+using chrome_test_util::ClearCookiesButton;
+using chrome_test_util::ClearSavedPasswordsButton;
 using chrome_test_util::ContentSettingsButton;
 using chrome_test_util::NavigationBarDoneButton;
+using chrome_test_util::SettingsCollectionView;
 using chrome_test_util::SettingsMenuBackButton;
 using chrome_test_util::SettingsMenuPrivacyButton;
+using chrome_test_util::VoiceSearchButton;
 
 namespace {
 
@@ -80,25 +83,6 @@ enum MetricsServiceType {
   kBreakpadFirstLaunch,
 };
 
-// Matcher for the clear browsing history cell on the clear browsing data panel.
-id<GREYMatcher> ClearBrowsingHistoryButton() {
-  return grey_allOf(grey_accessibilityID(kClearBrowsingHistoryCellId),
-                    grey_sufficientlyVisible(), nil);
-}
-// Matcher for the clear cookies cell on the clear browsing data panel.
-id<GREYMatcher> ClearCookiesButton() {
-  return grey_accessibilityID(kClearCookiesCellId);
-}
-// Matcher for the clear cache cell on the clear browsing data panel.
-id<GREYMatcher> ClearCacheButton() {
-  return grey_allOf(grey_accessibilityID(kClearCacheCellId),
-                    grey_sufficientlyVisible(), nil);
-}
-// Matcher for the clear saved passwords cell on the clear browsing data panel.
-id<GREYMatcher> ClearSavedPasswordsButton() {
-  return grey_allOf(grey_accessibilityID(kClearSavedPasswordsCellId),
-                    grey_sufficientlyVisible(), nil);
-}
 // Matcher for the clear browsing data button on the clear browsing data panel.
 id<GREYMatcher> ClearBrowsingDataButton() {
   return ButtonWithAccessibilityLabelId(IDS_IOS_CLEAR_BUTTON);
@@ -106,10 +90,6 @@ id<GREYMatcher> ClearBrowsingDataButton() {
 // Matcher for the clear browsing data action sheet item.
 id<GREYMatcher> ConfirmClearBrowsingDataButton() {
   return ButtonWithAccessibilityLabelId(IDS_IOS_CONFIRM_CLEAR_BUTTON);
-}
-// Matcher for the Save Passwords cell on the main Settings screen.
-id<GREYMatcher> PasswordsButton() {
-  return ButtonWithAccessibilityLabelId(IDS_IOS_SAVE_PASSWORDS);
 }
 // Matcher for the Send Usage Data cell on the Privacy screen.
 id<GREYMatcher> SendUsageDataButton() {
@@ -131,11 +111,7 @@ id<GREYMatcher> AutofillButton() {
 id<GREYMatcher> GoogleChromeButton() {
   return ButtonWithAccessibilityLabelId(IDS_IOS_PRODUCT_NAME);
 }
-// Matcher for the Google Chrome cell on the main Settings screen.
-id<GREYMatcher> VoiceSearchButton() {
-  return grey_allOf(grey_accessibilityID(kSettingsVoiceSearchCellId),
-                    grey_accessibilityTrait(UIAccessibilityTraitButton), nil);
-}
+
 // Matcher for the Preload Webpages button on the bandwidth UI.
 id<GREYMatcher> BandwidthPreloadWebpagesButton() {
   return ButtonWithAccessibilityLabelId(IDS_IOS_OPTIONS_PRELOAD_WEBPAGES);
@@ -152,10 +128,6 @@ id<GREYMatcher> BlockPopupsButton() {
 // Matcher for the Privacy Translate Settings button on the privacy UI.
 id<GREYMatcher> TranslateSettingsButton() {
   return ButtonWithAccessibilityLabelId(IDS_IOS_TRANSLATE_SETTING);
-}
-// Matcher for the save button in the save password bar.
-id<GREYMatcher> SavePasswordButton() {
-  return ButtonWithAccessibilityLabelId(IDS_IOS_PASSWORD_MANAGER_SAVE_BUTTON);
 }
 // Matcher for the Bandwidth Settings button on the main Settings screen.
 id<GREYMatcher> BandwidthSettingsButton() {
@@ -195,7 +167,7 @@ void SetCertificate() {
             channel_id_service->GetChannelIDStore();
         base::Time now = base::Time::Now();
         channel_id_store->SetChannelID(
-            base::MakeUnique<net::ChannelIDStore::ChannelID>(
+            std::make_unique<net::ChannelIDStore::ChannelID>(
                 kTestOrigin1, now, crypto::ECPrivateKey::Create()));
       }));
 
@@ -345,33 +317,6 @@ bool IsCertificateCleared() {
       performAction:grey_tap()];
 }
 
-// Enable password management.
-- (void)enablePasswordManagement {
-  ios::ChromeBrowserState* browserState =
-      chrome_test_util::GetOriginalBrowserState();
-  PrefService* preferences = browserState->GetPrefs();
-  preferences->SetBoolean(password_manager::prefs::kCredentialsEnableService,
-                          true);
-}
-
-// Return pref for password management back to default and restore the Clear
-// Browsing Data checkmarks prefs to their default state.
-- (void)passwordsTearDown:(BOOL)defaultPasswordManagementSetting {
-  ios::ChromeBrowserState* browserState =
-      chrome_test_util::GetOriginalBrowserState();
-  PrefService* preferences = browserState->GetPrefs();
-  preferences->SetBoolean(password_manager::prefs::kCredentialsEnableService,
-                          true);
-  [self clearPasswords];
-
-  // Restore the password management pref state.
-  preferences->SetBoolean(password_manager::prefs::kCredentialsEnableService,
-                          defaultPasswordManagementSetting);
-
-  // Restore the Clear Browsing Data checkmarks prefs to their default state.
-  [self restoreClearBrowsingDataCheckmarksToDefault];
-}
-
 // Restore the Clear Browsing Data checkmarks prefs to their default state.
 - (void)restoreClearBrowsingDataCheckmarksToDefault {
   ios::ChromeBrowserState* browserState =
@@ -382,70 +327,6 @@ bool IsCertificateCleared() {
   preferences->SetBoolean(browsing_data::prefs::kDeleteCookies, true);
   preferences->SetBoolean(browsing_data::prefs::kDeletePasswords, false);
   preferences->SetBoolean(browsing_data::prefs::kDeleteFormData, false);
-}
-
-// Checks the presence (or absence) of saved passwords.
-// If |saved| is YES, it checks that there is a Saved Passwords section.
-// If |saved| is NO, it checks that there is no Saved Passwords section.
-- (void)checkIfPasswordsSaved:(BOOL)saved {
-  [ChromeEarlGreyUI openSettingsMenu];
-  [ChromeEarlGreyUI tapSettingsMenuButton:PasswordsButton()];
-
-  id<GREYMatcher> visibilityMatcher =
-      saved ? grey_sufficientlyVisible() : grey_notVisible();
-  [[EarlGrey
-      selectElementWithMatcher:grey_text(l10n_util::GetNSString(
-                                   IDS_IOS_SETTINGS_PASSWORDS_SAVED_HEADING))]
-      assertWithMatcher:visibilityMatcher];
-
-  // Close the Settings.
-  [self closeSubSettingsMenu];
-}
-
-// Loads a page with a login and submits it.
-- (void)loadFormAndLogin {
-  std::map<GURL, std::string> responses;
-  const GURL URL = web::test::HttpServer::MakeUrl("http://testClearPasswords");
-
-  // TODO(crbug.com/432596): There looks to be a bug where the save password
-  // infobar is not displayed if the action is about:blank.
-  responses[URL] =
-      "<form method=\"POST\" action=\"dest\">"
-      "Username:<input type=\"text\" name=\"username\" value=\"name\" /><br />"
-      "Password:<input type=\"password\""
-      "name=\"password\" value=\"pass\"/><br />"
-      "<input type=\"submit\" value=\"Login\" id=\"Login\"/>"
-      "</form>";
-  const GURL destinationURL =
-      web::test::HttpServer::MakeUrl("http://testClearPasswords/dest");
-  responses[destinationURL] = "Logged in!";
-  web::test::SetUpSimpleHttpServer(responses);
-
-  // Login to page and click to save password and check that its saved.
-  [ChromeEarlGrey loadURL:URL];
-  chrome_test_util::TapWebViewElementWithId("Login");
-
-  GREYCondition* condition = [GREYCondition
-      conditionWithName:@"Wait for save button"
-                  block:^BOOL {
-                    NSError* error = nil;
-                    [[EarlGrey selectElementWithMatcher:SavePasswordButton()]
-                        assertWithMatcher:grey_notNil()
-                                    error:&error];
-                    return !error;
-                  }];
-  GREYAssert([condition waitWithTimeout:testing::kWaitForUIElementTimeout],
-             @"Failed waiting for save button");
-  [[EarlGrey selectElementWithMatcher:SavePasswordButton()]
-      performAction:grey_tap()];
-}
-
-// Opens the passwords page from the NTP. It requires no menus to be open.
-- (void)openPasswordSettings {
-  // Open settings and verify data in the view controller.
-  [ChromeEarlGreyUI openSettingsMenu];
-  [[EarlGrey selectElementWithMatcher:PasswordsButton()]
-      performAction:grey_tap()];
 }
 
 - (void)setMetricsReportingEnabled:(BOOL)reportingEnabled
@@ -617,7 +498,6 @@ bool IsCertificateCleared() {
 // Tests that clearing the cookies through the UI does clear all of them. Use a
 // local server to navigate to a page that sets then tests a cookie, and then
 // clears the cookie and tests it is not set.
-// TODO(crbug.com/638674): Evaluate if this can move to shared code.
 - (void)testClearCookies {
   // Creates a map of canned responses and set up the test HTML server.
   std::map<GURL, std::pair<std::string, std::string>> response;
@@ -670,30 +550,6 @@ bool IsCertificateCleared() {
   GREYAssertEqual(0U, cookies.count, @"No cookie should be found.");
 
   chrome_test_util::CloseAllTabs();
-}
-
-// Verifies that logging into a form on a web page allows the user to save and
-// then clear a password.
-- (void)testClearPasswords {
-  ios::ChromeBrowserState* browserState =
-      chrome_test_util::GetOriginalBrowserState();
-  PrefService* preferences = browserState->GetPrefs();
-  bool defaultPasswordManagerSavingPref = preferences->GetBoolean(
-      password_manager::prefs::kCredentialsEnableService);
-
-  [self enablePasswordManagement];
-  __weak SettingsTestCase* weakSelf = self;
-  [self setTearDownHandler:^{
-    [weakSelf passwordsTearDown:defaultPasswordManagerSavingPref];
-  }];
-
-  // Clear passwords and check that none are saved.
-  [self clearPasswords];
-  [self checkIfPasswordsSaved:NO];
-
-  // Login to page and click to save password and check that its saved.
-  [self loadFormAndLogin];
-  [self checkIfPasswordsSaved:YES];
 }
 
 // Verifies that metrics reporting works properly under possible settings of the
@@ -754,13 +610,12 @@ bool IsCertificateCleared() {
   chrome_test_util::OpenNewIncognitoTab();
 
   [ChromeEarlGreyUI openSettingsMenu];
-  [[EarlGrey
-      selectElementWithMatcher:grey_accessibilityID(kSettingsCollectionViewId)]
+  [[EarlGrey selectElementWithMatcher:SettingsCollectionView()]
       assertWithMatcher:grey_notNil()];
 
   [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
       performAction:grey_tap()];
-  chrome_test_util::CloseAllIncognitoTabs();
+  GREYAssert(chrome_test_util::CloseAllIncognitoTabs(), @"Tabs did not close");
 }
 
 // Verifies the UI elements are accessible on the Settings page.
@@ -850,15 +705,6 @@ bool IsCertificateCleared() {
   [self closeSubSettingsMenu];
 }
 
-// Verifies the UI elements are accessible on the Save Passwords page.
-- (void)testAccessibilityOnSavePasswords {
-  [ChromeEarlGreyUI openSettingsMenu];
-  [[EarlGrey selectElementWithMatcher:PasswordsButton()]
-      performAction:grey_tap()];
-  chrome_test_util::VerifyAccessibilityForCurrentScreen();
-  [self closeSubSettingsMenu];
-}
-
 // Verifies the UI elements are accessible on the Search engine page.
 - (void)testAccessibilityOnSearchEngine {
   [ChromeEarlGreyUI openSettingsMenu];
@@ -892,48 +738,11 @@ bool IsCertificateCleared() {
   [self closeSubSettingsMenu];
 }
 
-// Verifies the UI elements are accessible on the Passwords page.
-- (void)testAccessibilityOnPasswords {
-  [self openPasswordSettings];
-  chrome_test_util::VerifyAccessibilityForCurrentScreen();
-  [self closeSubSettingsMenu];
-}
-
-// Verifies that saved passwords are accessible in Passwords page.
-- (void)testAccessibilityOnPasswordEditing {
-  [self clearPasswords];
-  [self checkIfPasswordsSaved:NO];
-
-  ios::ChromeBrowserState* browserState =
-      chrome_test_util::GetOriginalBrowserState();
-  PrefService* preferences = browserState->GetPrefs();
-  bool defaultPasswordManagerSavingPref = preferences->GetBoolean(
-      password_manager::prefs::kCredentialsEnableService);
-
-  [self enablePasswordManagement];
-  __weak SettingsTestCase* weakSelf = self;
-  [self setTearDownHandler:^{
-    [weakSelf passwordsTearDown:defaultPasswordManagerSavingPref];
-  }];
-
-  [self loadFormAndLogin];
-  [self openPasswordSettings];
-
-  // Switch on edit mode.
-  [[EarlGrey selectElementWithMatcher:ButtonWithAccessibilityLabelId(
-                                          IDS_IOS_NAVIGATION_BAR_EDIT_BUTTON)]
-      performAction:grey_tap()];
-  chrome_test_util::VerifyAccessibilityForCurrentScreen();
-
-  [self closeSubSettingsMenu];
-}
-
 // Verifies that the Settings UI registers keyboard commands when presented, but
 // not when it itslef presents something.
 - (void)testSettingsKeyboardCommands {
   [ChromeEarlGreyUI openSettingsMenu];
-  [[EarlGrey
-      selectElementWithMatcher:grey_accessibilityID(kSettingsCollectionViewId)]
+  [[EarlGrey selectElementWithMatcher:SettingsCollectionView()]
       assertWithMatcher:grey_notNil()];
 
   // Verify that the Settings register keyboard commands.
@@ -945,9 +754,8 @@ bool IsCertificateCleared() {
                    @"Settings should register key commands when presented.");
 
   // Present the Sign-in UI.
-  id<GREYMatcher> matcher =
-      grey_allOf(grey_accessibilityID(kSettingsSignInCellId),
-                 grey_sufficientlyVisible(), nil);
+  id<GREYMatcher> matcher = grey_allOf(chrome_test_util::PrimarySignInButton(),
+                                       grey_sufficientlyVisible(), nil);
   [[EarlGrey selectElementWithMatcher:matcher] performAction:grey_tap()];
   // Wait for UI to finish loading the Sign-in screen.
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];

@@ -4,7 +4,8 @@
 
 #import <EarlGrey/EarlGrey.h>
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "ios/chrome/browser/ui/ui_util.h"
@@ -30,6 +31,7 @@ namespace {
 const char kPageText[] = "Navigation testing page";
 
 // Response provider that serves the page which never finishes loading.
+// TODO(crbug.com/708307): Convert this to Embedded Test Server.
 class InfinitePendingResponseProvider : public HtmlResponseProvider {
  public:
   explicit InfinitePendingResponseProvider(const GURL& url) : url_(url) {}
@@ -57,7 +59,7 @@ class InfinitePendingResponseProvider : public HtmlResponseProvider {
   }
 
  private:
-  // Returns a url for which this responce provider will never reply.
+  // Returns a url for which this response provider will never reply.
   GURL GetInfinitePendingResponseUrl() const {
     GURL::Replacements replacements;
     replacements.SetPathStr("resource");
@@ -90,7 +92,7 @@ class InfinitePendingResponseProvider : public HtmlResponseProvider {
   // Load a page which never finishes loading.
   GURL infinitePendingURL = web::test::HttpServer::MakeUrl("http://infinite");
   web::test::SetUpHttpServer(
-      base::MakeUnique<InfinitePendingResponseProvider>(infinitePendingURL));
+      std::make_unique<InfinitePendingResponseProvider>(infinitePendingURL));
 
   // The page being loaded never completes, so call the LoadUrl helper that
   // does not wait for the page to complete loading.

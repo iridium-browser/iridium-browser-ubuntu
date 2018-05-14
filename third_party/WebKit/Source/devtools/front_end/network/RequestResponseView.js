@@ -47,11 +47,17 @@ Network.RequestResponseView = class extends UI.VBox {
    * @return {boolean}
    */
   static _hasTextContent(request, contentData) {
-    if (request.resourceType().isTextType())
+    const mimeType = request.mimeType;
+    let resourceType = Common.ResourceType.fromMimeType(mimeType);
+    if (resourceType === Common.resourceTypes.Other)
+      resourceType = request.contentType();
+    if (resourceType === Common.resourceTypes.Image)
+      return mimeType.startsWith('image/svg');
+    if (resourceType.isTextType())
       return true;
     if (contentData.error)
       return false;
-    if (request.resourceType() === Common.resourceTypes.Other)
+    if (resourceType === Common.resourceTypes.Other)
       return !!contentData.content && !contentData.encoded;
     return false;
   }
@@ -62,18 +68,18 @@ Network.RequestResponseView = class extends UI.VBox {
    * @return {!Promise<?UI.SearchableView>}
    */
   static async sourceViewForRequest(request) {
-    var sourceView = request[Network.RequestResponseView._sourceViewSymbol];
+    let sourceView = request[Network.RequestResponseView._sourceViewSymbol];
     if (sourceView !== undefined)
       return sourceView;
 
-    var contentData = await request.contentData();
+    const contentData = await request.contentData();
     if (!Network.RequestResponseView._hasTextContent(request, contentData)) {
       request[Network.RequestResponseView._sourceViewSymbol] = null;
       return null;
     }
 
-    var contentProvider = new Network.DecodingContentProvider(request);
-    var highlighterType = request.resourceType().canonicalMimeType() || request.mimeType;
+    const contentProvider = new Network.DecodingContentProvider(request);
+    const highlighterType = request.resourceType().canonicalMimeType() || request.mimeType;
     sourceView = SourceFrame.ResourceSourceFrame.createSearchableView(contentProvider, highlighterType);
     request[Network.RequestResponseView._sourceViewSymbol] = sourceView;
     return sourceView;
@@ -94,7 +100,7 @@ Network.RequestResponseView = class extends UI.VBox {
   async showPreview() {
     if (!this._contentViewPromise)
       this._contentViewPromise = this.createPreview();
-    var responseView = await this._contentViewPromise;
+    const responseView = await this._contentViewPromise;
     if (this.element.contains(responseView.element))
       return null;
 
@@ -106,8 +112,8 @@ Network.RequestResponseView = class extends UI.VBox {
    * @return {!Promise<!UI.Widget>}
    */
   async createPreview() {
-    var contentData = await this.request.contentData();
-    var sourceView = await Network.RequestResponseView.sourceViewForRequest(this.request);
+    const contentData = await this.request.contentData();
+    const sourceView = await Network.RequestResponseView.sourceViewForRequest(this.request);
     if ((!contentData.content || !sourceView) && !contentData.error)
       return new UI.EmptyWidget(Common.UIString('This request has no response data available.'));
     if (contentData.content && sourceView)
@@ -147,10 +153,18 @@ Network.DecodingContentProvider = class {
 
   /**
    * @override
+   * @return {!Promise<boolean>}
+   */
+  contentEncoded() {
+    return Promise.resolve(false);
+  }
+
+  /**
+   * @override
    * @return {!Promise<?string>}
    */
   async requestContent() {
-    var contentData = await this._request.contentData();
+    const contentData = await this._request.contentData();
     return contentData.encoded ? window.atob(contentData.content || '') : contentData.content;
   }
 

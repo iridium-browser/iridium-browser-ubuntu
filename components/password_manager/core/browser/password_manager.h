@@ -33,6 +33,7 @@ class FormStructure;
 
 namespace password_manager {
 
+class BrowserSavePasswordProgressLogger;
 class PasswordManagerClient;
 class PasswordManagerDriver;
 class PasswordFormManager;
@@ -43,6 +44,10 @@ class PasswordFormManager;
 // for purposes of supporting HTTP authentication dialogs.
 class PasswordManager : public LoginModel {
  public:
+  // Expresses which navigation entry to use to check whether password manager
+  // is enabled.
+  enum class NavigationEntryToCheck { LAST_COMMITTED, VISIBLE };
+
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 #if defined(OS_WIN)
   static void RegisterLocalPrefs(PrefRegistrySimple* registry);
@@ -148,16 +153,32 @@ class PasswordManager : public LoginModel {
       password_manager::PasswordManagerDriver* driver,
       const autofill::PasswordForm& password_form);
 
+  // Handles a password form being submitted, assumes that submission is
+  // successful and does not do any checks on success of submission.
+  void OnPasswordFormSubmittedNoChecks(
+      password_manager::PasswordManagerDriver* driver,
+      const autofill::PasswordForm& password_form);
+
   // Handles a manual request to save password.
   void OnPasswordFormForceSaveRequested(
       password_manager::PasswordManagerDriver* driver,
       const autofill::PasswordForm& password_form);
 
+  // Handles a request to show manual fallback for password saving, i.e. the
+  // omnibox icon with the anchored hidden prompt.
+  void ShowManualFallbackForSaving(
+      password_manager::PasswordManagerDriver* driver,
+      const autofill::PasswordForm& password_form);
+
+  // Handles a request to hide manual fallback for password saving.
+  void HideManualFallbackForSaving();
+
   // Called if |password_form| was filled upon in-page navigation. This often
   // means history.pushState being called from JavaScript. If this causes false
   // positive in password saving, update http://crbug.com/357696.
-  void OnInPageNavigation(password_manager::PasswordManagerDriver* driver,
-                          const autofill::PasswordForm& password_form);
+  // TODO(https://crbug.com/795462): find better name for this function.
+  void OnSameDocumentNavigation(password_manager::PasswordManagerDriver* driver,
+                                const autofill::PasswordForm& password_form);
 
   void ProcessAutofillPredictions(
       password_manager::PasswordManagerDriver* driver,
@@ -185,6 +206,8 @@ class PasswordManager : public LoginModel {
   }
 #endif
 
+  NavigationEntryToCheck entry_to_check() const { return entry_to_check_; }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(
       PasswordManagerTest,
@@ -193,6 +216,12 @@ class PasswordManager : public LoginModel {
   // Returns true if we can show possible usernames to users in cases where
   // the username for the form is ambigious.
   bool OtherPossibleUsernamesEnabled() const;
+
+  // Clones |matched_manager| and keeps it as |provisional_save_manager_|.
+  // |form| is saved provisionally to |provisional_save_manager_|.
+  void ProvisionallySaveManager(const autofill::PasswordForm& form,
+                                PasswordFormManager* matched_manager,
+                                BrowserSavePasswordProgressLogger* logger);
 
   // Returns true if |provisional_save_manager_| is ready for saving and
   // non-blacklisted.
@@ -270,6 +299,12 @@ class PasswordManager : public LoginModel {
 
   // The user-visible URL from the last time a password was provisionally saved.
   GURL main_frame_url_;
+
+  // |entry_to_check_| specifies which navigation entry is relevant for
+  // determining if password manager is enabled. The last commited one is
+  // relevant for HTML forms, the visible one is for HTTP auth.
+  NavigationEntryToCheck entry_to_check_ =
+      NavigationEntryToCheck::LAST_COMMITTED;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordManager);
 };

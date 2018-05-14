@@ -9,16 +9,14 @@
 
 namespace blink {
 
-NGInlineItemResult::NGInlineItemResult() {}
+NGInlineItemResult::NGInlineItemResult()
+    : item(nullptr), item_index(0), start_offset(0), end_offset(0) {}
 
-NGInlineItemResult::NGInlineItemResult(unsigned index,
+NGInlineItemResult::NGInlineItemResult(const NGInlineItem* item,
+                                       unsigned index,
                                        unsigned start,
                                        unsigned end)
-    : item_index(index),
-      start_offset(start),
-      end_offset(end),
-      no_break_opportunities_inside(false),
-      prohibit_break_after(false) {}
+    : item(item), item_index(index), start_offset(start), end_offset(end) {}
 
 void NGLineInfo::SetLineStyle(const NGInlineNode& node,
                               const NGConstraintSpace& constraint_space,
@@ -36,25 +34,42 @@ void NGLineInfo::SetLineStyle(const NGInlineNode& node,
     // https://drafts.csswg.org/css-text-3/#valdef-text-indent-percentage
     // In our constraint space tree, parent constraint space is of its
     // containing block.
-    // TODO(kojii): ComputeMinMaxContentSize does not know parent constraint
+    // TODO(kojii): ComputeMinMaxSize does not know parent constraint
     // space that we cannot compute percent for text-indent.
     const Length& length = line_style_->TextIndent();
     LayoutUnit maximum_value;
-    if (length.IsPercentOrCalc() &&
-        constraint_space.ParentPercentageResolutionInlineSize().has_value())
-      maximum_value = *constraint_space.ParentPercentageResolutionInlineSize();
+    if (length.IsPercentOrCalc())
+      maximum_value = constraint_space.ParentPercentageResolutionInlineSize();
     text_indent_ = MinimumValueForLength(length, maximum_value);
   } else {
     text_indent_ = LayoutUnit();
   }
 }
 
-void NGLineInfo::SetLineLocation(LayoutUnit line_left,
-                                 LayoutUnit available_width,
-                                 LayoutUnit line_top) {
-  line_left_ = line_left;
+#if DCHECK_IS_ON()
+void NGInlineItemResult::CheckConsistency() const {
+  DCHECK(item);
+  if (item->Type() == NGInlineItem::kText) {
+    DCHECK(shape_result);
+    DCHECK_LT(start_offset, end_offset);
+    DCHECK_EQ(end_offset - start_offset, shape_result->NumCharacters());
+    DCHECK_EQ(start_offset, shape_result->StartIndexForResult());
+    DCHECK_EQ(end_offset, shape_result->EndIndexForResult());
+  }
+}
+#endif
+
+void NGLineInfo::SetLineBfcOffset(NGBfcOffset line_bfc_offset,
+                                  LayoutUnit available_width,
+                                  LayoutUnit width) {
+  line_bfc_offset_ = line_bfc_offset;
   available_width_ = available_width;
-  line_top_ = line_top;
+  width_ = width;
+}
+
+void NGLineInfo::SetLineEndFragment(
+    scoped_refptr<NGPhysicalTextFragment> fragment) {
+  line_end_fragment_ = std::move(fragment);
 }
 
 }  // namespace blink

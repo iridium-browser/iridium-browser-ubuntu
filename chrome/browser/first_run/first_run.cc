@@ -9,18 +9,15 @@
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -37,7 +34,6 @@
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -46,21 +42,16 @@
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/locale_settings.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/search_engines/template_url_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/browser/signin_tracker.h"
-#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -69,7 +60,6 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/one_shot_event.h"
 #include "google_apis/gaia/gaia_auth_util.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -273,119 +263,6 @@ void ConvertStringVectorToGURLVector(
   std::transform(src.begin(), src.end(), ret->begin(), &UrlFromString);
 }
 
-// Show the first run search engine bubble at the first appropriate opportunity.
-// This bubble may be delayed by other UI, like global errors and sync promos.
-class FirstRunBubbleLauncher : public content::NotificationObserver {
- public:
-  // Show the bubble at the first appropriate opportunity. This function
-  // instantiates a FirstRunBubbleLauncher, which manages its own lifetime.
-  static void ShowFirstRunBubbleSoon();
-
- private:
-  FirstRunBubbleLauncher();
-  ~FirstRunBubbleLauncher() override;
-
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
-
-  content::NotificationRegistrar registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(FirstRunBubbleLauncher);
-};
-
-// static
-void FirstRunBubbleLauncher::ShowFirstRunBubbleSoon() {
-  SetShowFirstRunBubblePref(first_run::FIRST_RUN_BUBBLE_SHOW);
-  // This FirstRunBubbleLauncher instance will manage its own lifetime.
-  new FirstRunBubbleLauncher();
-}
-
-FirstRunBubbleLauncher::FirstRunBubbleLauncher() {
-  registrar_.Add(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-                 content::NotificationService::AllSources());
-
-  // This notification is required to observe the switch between the sync setup
-  // page and the general settings page.
-  registrar_.Add(this, chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
-                 content::NotificationService::AllSources());
-}
-
-FirstRunBubbleLauncher::~FirstRunBubbleLauncher() {}
-
-void FirstRunBubbleLauncher::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK(type == content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME ||
-         type == chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED);
-
-  Browser* browser = chrome::FindBrowserWithWebContents(
-      content::Source<content::WebContents>(source).ptr());
-  if (!browser || !browser->is_type_tabbed())
-    return;
-
-  // Check the preference to determine if the bubble should be shown.
-  PrefService* prefs = g_browser_process->local_state();
-  if (!prefs || prefs->GetInteger(prefs::kShowFirstRunBubbleOption) !=
-      first_run::FIRST_RUN_BUBBLE_SHOW) {
-    delete this;
-    return;
-  }
-
-  content::WebContents* contents =
-      browser->tab_strip_model()->GetActiveWebContents();
-
-  // Suppress the first run bubble if a Gaia sign in page or the sync setup
-  // page is showing.
-  if (contents && (contents->GetURL().GetOrigin().spec() ==
-                       chrome::kChromeUIChromeSigninURL ||
-                   gaia::IsGaiaSignonRealm(contents->GetURL().GetOrigin()) ||
-                   contents->GetURL() ==
-                       chrome::GetSettingsUrl(chrome::kSyncSetupSubPage) ||
-                   first_run::IsOnWelcomePage(contents))) {
-    return;
-  }
-
-  if (contents && contents->GetURL().SchemeIs(content::kChromeUIScheme)) {
-#if defined(OS_WIN)
-    // Suppress the first run bubble if 'make chrome metro' flow is showing.
-    if (contents->GetURL().host_piece() == chrome::kChromeUIMetroFlowHost)
-      return;
-#endif
-
-    // Suppress the first run bubble if the NTP sync promo bubble is showing
-    // or if sign in is in progress.
-    if (contents->GetURL().host_piece() == chrome::kChromeUINewTabHost) {
-      Profile* profile =
-          Profile::FromBrowserContext(contents->GetBrowserContext());
-      SigninManagerBase* manager =
-          SigninManagerFactory::GetForProfile(profile);
-      bool signin_in_progress = manager && manager->AuthInProgress();
-      bool is_promo_bubble_visible =
-          profile->GetPrefs()->GetBoolean(prefs::kSignInPromoShowNTPBubble);
-
-      if (is_promo_bubble_visible || signin_in_progress)
-        return;
-    }
-  }
-
-  // Suppress the first run bubble if a global error bubble is pending.
-  GlobalErrorService* global_error_service =
-      GlobalErrorServiceFactory::GetForProfile(browser->profile());
-  if (global_error_service->GetFirstGlobalErrorWithBubbleView() != NULL)
-    return;
-
-  // Reset the preference and notifications to avoid showing the bubble again.
-  prefs->SetInteger(prefs::kShowFirstRunBubbleOption,
-                    first_run::FIRST_RUN_BUBBLE_DONT_SHOW);
-
-  // Show the bubble now and destroy this bubble launcher.
-  browser->ShowFirstRunBubble();
-  delete this;
-}
-
 static base::LazyInstance<base::FilePath>::DestructorAtExit
     master_prefs_path_for_testing = LAZY_INSTANCE_INITIALIZER;
 
@@ -431,6 +308,19 @@ void ProcessDefaultBrowserPolicy(bool make_chrome_default_for_user) {
   }
 }
 
+// Reads the creation time of the first run sentinel file. If the first run
+// sentinel file does not exist, it will return base::Time().
+base::Time ReadFirstRunSentinelCreationTime() {
+  base::Time first_run_sentinel_creation_time = base::Time();
+  base::FilePath first_run_sentinel;
+  if (first_run::internal::GetFirstRunSentinelFilePath(&first_run_sentinel)) {
+    base::File::Info info;
+    if (base::GetFileInfo(first_run_sentinel, &info))
+      first_run_sentinel_creation_time = info.creation_time;
+  }
+  return first_run_sentinel_creation_time;
+}
+
 }  // namespace
 
 namespace first_run {
@@ -442,18 +332,7 @@ void SetupMasterPrefsFromInstallPrefs(
   ConvertStringVectorToGURLVector(
       install_prefs.GetFirstRunTabs(), &out_prefs->new_tabs);
 
-  // If we're suppressing the first-run bubble, set that preference now.
-  // Otherwise, wait until the user has completed first run to set it, so the
-  // user is guaranteed to see the bubble iff they have completed the first run
-  // process.
   bool value = false;
-  if (install_prefs.GetBool(
-          installer::master_preferences::kDistroSuppressFirstRunBubble,
-          &value) &&
-      value) {
-    SetShowFirstRunBubblePref(FIRST_RUN_BUBBLE_SUPPRESS);
-  }
-
   if (install_prefs.GetBool(
           installer::master_preferences::kMakeChromeDefaultForUser,
           &value) && value) {
@@ -563,20 +442,15 @@ bool IsMetricsReportingOptIn() {
 void CreateSentinelIfNeeded() {
   if (IsChromeFirstRun())
     internal::CreateSentinel();
+
+  // Causes the first run sentinel creation time to be read and cached, while
+  // I/O is still allowed.
+  ignore_result(GetFirstRunSentinelCreationTime());
 }
 
-bool SetShowFirstRunBubblePref(FirstRunBubbleOptions show_bubble_option) {
-  PrefService* local_state = g_browser_process->local_state();
-  if (!local_state)
-    return false;
-  if (local_state->GetInteger(
-          prefs::kShowFirstRunBubbleOption) != FIRST_RUN_BUBBLE_SUPPRESS) {
-    // Set the new state as long as the bubble wasn't explicitly suppressed
-    // already.
-    local_state->SetInteger(prefs::kShowFirstRunBubbleOption,
-                            show_bubble_option);
-  }
-  return true;
+base::Time GetFirstRunSentinelCreationTime() {
+  static const base::Time cached_time = ReadFirstRunSentinelCreationTime();
+  return cached_time;
 }
 
 void SetShouldShowWelcomePage() {
@@ -590,20 +464,6 @@ bool ShouldShowWelcomePage() {
 }
 
 bool IsOnWelcomePage(content::WebContents* contents) {
-  // We have to check both the GetURL() similar to the other checks below, but
-  // also the original request url because the welcome page we use is a
-  // redirect.
-  // TODO(crbug.com/651465): Remove this once kUseConsolidatedStartupFlow is on
-  // by default.
-  const GURL deprecated_welcome_page(
-      l10n_util::GetStringUTF8(IDS_WELCOME_PAGE_URL));
-  if (contents->GetURL() == deprecated_welcome_page ||
-      (contents->GetController().GetVisibleEntry() &&
-       contents->GetController().GetVisibleEntry()->GetOriginalRequestURL() ==
-           deprecated_welcome_page)) {
-    return true;
-  }
-
   const GURL welcome_page(chrome::kChromeUIWelcomeURL);
   const GURL welcome_page_win10(chrome::kChromeUIWelcomeWin10URL);
   const GURL current = contents->GetURL().GetWithEmptyPath();
@@ -618,11 +478,6 @@ bool ShouldDoPersonalDataManagerFirstRun() {
   bool retval = g_should_do_autofill_personal_data_manager_first_run;
   g_should_do_autofill_personal_data_manager_first_run = false;
   return retval;
-}
-
-void LogFirstRunMetric(FirstRunBubbleMetric metric) {
-  UMA_HISTOGRAM_ENUMERATION("FirstRun.SearchEngineBubble", metric,
-                            NUM_FIRST_RUN_BUBBLE_METRICS);
 }
 
 void SetMasterPrefsPathForTesting(const base::FilePath& master_prefs) {
@@ -698,7 +553,7 @@ void AutoImport(
     // It may be possible to do the if block below asynchronously. In which
     // case, get rid of this RunLoop. http://crbug.com/366116.
     base::RunLoop run_loop;
-    auto importer_list = base::MakeUnique<ImporterList>();
+    auto importer_list = std::make_unique<ImporterList>();
     importer_list->DetectSourceProfiles(
         g_browser_process->GetApplicationLocale(),
         false,  // include_interactive_profiles?
@@ -722,11 +577,6 @@ void DoPostImportTasks(Profile* profile, bool make_chrome_default_for_user) {
   // default browser to know what to import from.
   ProcessDefaultBrowserPolicy(make_chrome_default_for_user);
 
-  // Display the first run bubble if there is a default search provider.
-  TemplateURLService* template_url =
-      TemplateURLServiceFactory::GetForProfile(profile);
-  if (template_url && template_url->GetDefaultSearchProvider())
-    FirstRunBubbleLauncher::ShowFirstRunBubbleSoon();
   SetShouldShowWelcomePage();
   SetShouldDoPersonalDataManagerFirstRun();
 

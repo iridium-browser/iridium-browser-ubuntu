@@ -17,9 +17,9 @@ GrGLTextureRenderTarget::GrGLTextureRenderTarget(GrGLGpu* gpu,
                                                  const GrSurfaceDesc& desc,
                                                  const GrGLTexture::IDDesc& texIDDesc,
                                                  const GrGLRenderTarget::IDDesc& rtIDDesc,
-                                                 bool wasMipMapDataProvided)
+                                                 GrMipMapsStatus mipMapsStatus)
         : GrSurface(gpu, desc)
-        , GrGLTexture(gpu, desc, texIDDesc, wasMipMapDataProvided)
+        , GrGLTexture(gpu, desc, texIDDesc, mipMapsStatus)
         , GrGLRenderTarget(gpu, desc, rtIDDesc) {
     this->registerWithCache(budgeted);
 }
@@ -28,9 +28,9 @@ GrGLTextureRenderTarget::GrGLTextureRenderTarget(GrGLGpu* gpu,
                                                  const GrSurfaceDesc& desc,
                                                  const GrGLTexture::IDDesc& texIDDesc,
                                                  const GrGLRenderTarget::IDDesc& rtIDDesc,
-                                                 bool wasMipMapDataProvided)
+                                                 GrMipMapsStatus mipMapsStatus)
         : GrSurface(gpu, desc)
-        , GrGLTexture(gpu, desc, texIDDesc, wasMipMapDataProvided)
+        , GrGLTexture(gpu, desc, texIDDesc, mipMapsStatus)
         , GrGLRenderTarget(gpu, desc, rtIDDesc) {
     this->registerWithCacheWrapped();
 }
@@ -71,15 +71,15 @@ bool GrGLTextureRenderTarget::canAttemptStencilAttachment() const {
 }
 
 sk_sp<GrGLTextureRenderTarget> GrGLTextureRenderTarget::MakeWrapped(
-    GrGLGpu* gpu, const GrSurfaceDesc& desc,
-    const GrGLTexture::IDDesc& texIDDesc, const GrGLRenderTarget::IDDesc& rtIDDesc)
+    GrGLGpu* gpu, const GrSurfaceDesc& desc, const GrGLTexture::IDDesc& texIDDesc,
+    const GrGLRenderTarget::IDDesc& rtIDDesc, GrMipMapsStatus mipMapsStatus)
 {
     return sk_sp<GrGLTextureRenderTarget>(
-        new GrGLTextureRenderTarget(gpu, desc, texIDDesc, rtIDDesc, false));
+        new GrGLTextureRenderTarget(gpu, desc, texIDDesc, rtIDDesc, mipMapsStatus));
 }
 
 size_t GrGLTextureRenderTarget::onGpuMemorySize() const {
     return GrSurface::ComputeSize(this->config(), this->width(), this->height(),
                                     this->numSamplesOwnedPerPixel(),
-                                    this->texturePriv().hasMipMaps());
+                                    this->texturePriv().mipMapped());
 }

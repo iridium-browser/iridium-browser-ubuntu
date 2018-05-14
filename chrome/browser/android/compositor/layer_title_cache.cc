@@ -8,7 +8,6 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/ui_resource_layer.h"
 #include "chrome/browser/android/compositor/decoration_title.h"
@@ -20,12 +19,13 @@
 #include "ui/gfx/geometry/size.h"
 
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 
 namespace android {
 
 // static
-LayerTitleCache* LayerTitleCache::FromJavaObject(jobject jobj) {
-  if (!jobj)
+LayerTitleCache* LayerTitleCache::FromJavaObject(const JavaRef<jobject>& jobj) {
+  if (jobj.is_null())
     return nullptr;
   return reinterpret_cast<LayerTitleCache*>(Java_LayerTitleCache_getNativePtr(
       base::android::AttachCurrentThread(), jobj));
@@ -69,7 +69,7 @@ void LayerTitleCache::UpdateLayer(JNIEnv* env,
     }
   } else {
     layer_cache_.AddWithID(
-        base::MakeUnique<DecorationTitle>(
+        std::make_unique<DecorationTitle>(
             resource_manager_, title_resource_id, favicon_resource_id,
             spinner_resource_id_, spinner_incognito_resource_id_, fade_width_,
             favicon_start_padding_, favicon_end_padding_, is_incognito, is_rtl),
@@ -82,7 +82,7 @@ void LayerTitleCache::UpdateFavicon(JNIEnv* env,
                                     jint tab_id,
                                     jint favicon_resource_id) {
   DecorationTitle* title_layer = layer_cache_.Lookup(tab_id);
-  if (title_layer == nullptr && favicon_resource_id != -1) {
+  if (title_layer && favicon_resource_id != -1) {
     title_layer->SetFaviconResourceId(favicon_resource_id);
   }
 }
@@ -90,7 +90,7 @@ void LayerTitleCache::UpdateFavicon(JNIEnv* env,
 void LayerTitleCache::ClearExcept(JNIEnv* env,
                                   const JavaParamRef<jobject>& obj,
                                   jint except_id) {
-  IDMap<std::unique_ptr<DecorationTitle>>::iterator iter(&layer_cache_);
+  base::IDMap<std::unique_ptr<DecorationTitle>>::iterator iter(&layer_cache_);
   for (; !iter.IsAtEnd(); iter.Advance()) {
     const int id = iter.GetCurrentKey();
     if (id != except_id)
@@ -112,7 +112,7 @@ void LayerTitleCache::SetResourceManager(
     ui::ResourceManager* resource_manager) {
   resource_manager_ = resource_manager;
 
-  IDMap<std::unique_ptr<DecorationTitle>>::iterator iter(&layer_cache_);
+  base::IDMap<std::unique_ptr<DecorationTitle>>::iterator iter(&layer_cache_);
   for (; !iter.IsAtEnd(); iter.Advance()) {
     iter.GetCurrentValue()->SetResourceManager(resource_manager_);
   }
@@ -125,13 +125,13 @@ LayerTitleCache::~LayerTitleCache() {
 // Native JNI methods
 // ----------------------------------------------------------------------------
 
-jlong Init(JNIEnv* env,
-           const JavaParamRef<jobject>& obj,
-           jint fade_width,
-           jint favicon_start_padding,
-           jint favicon_end_padding,
-           jint spinner_resource_id,
-           jint spinner_incognito_resource_id) {
+jlong JNI_LayerTitleCache_Init(JNIEnv* env,
+                               const JavaParamRef<jobject>& obj,
+                               jint fade_width,
+                               jint favicon_start_padding,
+                               jint favicon_end_padding,
+                               jint spinner_resource_id,
+                               jint spinner_incognito_resource_id) {
   LayerTitleCache* cache = new LayerTitleCache(
       env, obj, fade_width, favicon_start_padding, favicon_end_padding,
       spinner_resource_id, spinner_incognito_resource_id);

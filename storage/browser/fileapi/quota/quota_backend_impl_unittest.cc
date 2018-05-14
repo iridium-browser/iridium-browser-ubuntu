@@ -18,8 +18,7 @@
 #include "storage/browser/fileapi/obfuscated_file_util.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/leveldatabase/src/helpers/memenv/memenv.h"
-#include "third_party/leveldatabase/src/include/leveldb/env.h"
+#include "third_party/leveldatabase/leveldb_chrome.h"
 
 using storage::FileSystemUsageCache;
 using storage::ObfuscatedFileUtil;
@@ -53,16 +52,16 @@ class MockQuotaManagerProxy : public storage::QuotaManagerProxy {
         quota_(0) {}
 
   // We don't mock them.
-  void NotifyOriginInUse(const GURL& origin) override {}
-  void NotifyOriginNoLongerInUse(const GURL& origin) override {}
+  void NotifyOriginInUse(const url::Origin& origin) override {}
+  void NotifyOriginNoLongerInUse(const url::Origin& origin) override {}
   void SetUsageCacheEnabled(storage::QuotaClient::ID client_id,
-                            const GURL& origin,
-                            storage::StorageType type,
+                            const url::Origin& origin,
+                            blink::mojom::StorageType type,
                             bool enabled) override {}
 
   void NotifyStorageModified(storage::QuotaClient::ID client_id,
-                             const GURL& origin,
-                             storage::StorageType type,
+                             const url::Origin& origin,
+                             blink::mojom::StorageType type,
                              int64_t delta) override {
     ++storage_modified_count_;
     usage_ += delta;
@@ -70,10 +69,10 @@ class MockQuotaManagerProxy : public storage::QuotaManagerProxy {
   }
 
   void GetUsageAndQuota(base::SequencedTaskRunner* original_task_runner,
-                        const GURL& origin,
-                        storage::StorageType type,
-                        const UsageAndQuotaCallback& callback) override {
-    callback.Run(storage::kQuotaStatusOk, usage_, quota_);
+                        const url::Origin& origin,
+                        blink::mojom::StorageType type,
+                        UsageAndQuotaCallback callback) override {
+    std::move(callback).Run(blink::mojom::QuotaStatusCode::kOk, usage_, quota_);
   }
 
   int storage_modified_count() { return storage_modified_count_; }
@@ -82,7 +81,7 @@ class MockQuotaManagerProxy : public storage::QuotaManagerProxy {
   void set_quota(int64_t quota) { quota_ = quota; }
 
  protected:
-  ~MockQuotaManagerProxy() override {}
+  ~MockQuotaManagerProxy() override = default;
 
  private:
   int storage_modified_count_;
@@ -102,7 +101,7 @@ class QuotaBackendImplTest : public testing::Test {
 
   void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
-    in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
+    in_memory_env_.reset(leveldb_chrome::NewMemEnv(leveldb::Env::Default()));
     file_util_.reset(ObfuscatedFileUtil::CreateForTesting(
         NULL, data_dir_.GetPath(), in_memory_env_.get(), file_task_runner()));
     backend_.reset(new QuotaBackendImpl(file_task_runner(), file_util_.get(),

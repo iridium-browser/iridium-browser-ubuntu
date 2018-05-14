@@ -15,7 +15,7 @@
  */
 
 /**
- * Possible values of the proximity threshould displayed to the user.
+ * Possible values of the proximity threshold displayed to the user.
  * This should be kept in sync with the enum defined here:
  * components/proximity_auth/proximity_monitor_impl.cc
  */
@@ -75,6 +75,18 @@ Polymer({
       type: Boolean,
       value: function() {
         return loadTimeData.getBoolean('quickUnlockEnabled');
+      },
+      readOnly: true,
+    },
+
+    /**
+     * True if quick unlock settings are disabled by policy.
+     * @private
+     */
+    quickUnlockDisabledByPolicy_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('quickUnlockDisabledByPolicy');
       },
       readOnly: true,
     },
@@ -196,12 +208,14 @@ Polymer({
    * @protected
    */
   currentRouteChanged: function(newRoute, oldRoute) {
-    if (newRoute == settings.routes.LOCK_SCREEN &&
-        this.fingerprintUnlockEnabled_ && this.fingerprintBrowserProxy_) {
-      this.fingerprintBrowserProxy_.getNumFingerprints().then(
-          function(numFingerprints) {
-            this.numFingerprints_ = numFingerprints;
-          }.bind(this));
+    if (newRoute == settings.routes.LOCK_SCREEN) {
+      this.updateUnlockType();
+      if (this.fingerprintUnlockEnabled_ && this.fingerprintBrowserProxy_) {
+        this.fingerprintBrowserProxy_.getNumFingerprints().then(
+            numFingerprints => {
+              this.numFingerprints_ = numFingerprints;
+            });
+      }
     }
 
     if (this.shouldAskForPassword_(newRoute)) {
@@ -250,8 +264,10 @@ Polymer({
     this.showPasswordPromptDialog_ = false;
     if (!this.setModes_)
       settings.navigateToPreviousRoute();
-    else
+    else if (!this.$$('#unlockType').disabled)
       cr.ui.focusWithoutInk(assert(this.$$('#unlockType')));
+    else
+      cr.ui.focusWithoutInk(assert(this.$$('#screenLockDiv')));
   },
 
   /**

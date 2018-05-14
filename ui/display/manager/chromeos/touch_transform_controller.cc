@@ -10,7 +10,7 @@
 #include "third_party/skia/include/core/SkMatrix44.h"
 #include "ui/display/display_layout.h"
 #include "ui/display/manager/chromeos/display_configurator.h"
-#include "ui/display/manager/chromeos/touch_device_transform.h"
+#include "ui/display/manager/chromeos/touch_device_manager.h"
 #include "ui/display/manager/chromeos/touch_transform_setter.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/manager/managed_display_info.h"
@@ -18,16 +18,18 @@
 #include "ui/display/types/display_constants.h"
 #include "ui/display/types/display_snapshot.h"
 #include "ui/events/devices/input_device_manager.h"
+#include "ui/events/devices/touch_device_transform.h"
 
 namespace display {
 
 namespace {
 
-ui::TouchscreenDevice FindTouchscreenById(int id) {
+ui::TouchscreenDevice FindTouchscreenByIdentifier(
+    const TouchDeviceIdentifier& identifier) {
   const std::vector<ui::TouchscreenDevice>& touchscreens =
       ui::InputDeviceManager::GetInstance()->GetTouchscreenDevices();
   for (const auto& touchscreen : touchscreens) {
-    if (touchscreen.id == id)
+    if (TouchDeviceIdentifier::FromDevice(touchscreen) == identifier)
       return touchscreen;
   }
 
@@ -197,16 +199,10 @@ double TouchTransformController::GetTouchResolutionScale(
 gfx::Transform TouchTransformController::GetTouchTransform(
     const ManagedDisplayInfo& display,
     const ManagedDisplayInfo& touch_display,
-    const ui::TouchscreenDevice& touchscreen,
-    const gfx::Size& framebuffer_size) const {
+    const ui::TouchscreenDevice& touchscreen) const {
   auto current_size = gfx::SizeF(display.bounds_in_native().size());
   auto touch_native_size = gfx::SizeF(touch_display.GetNativeModeSize());
-#if defined(USE_OZONE)
   auto touch_area = gfx::SizeF(touchscreen.size);
-#elif defined(USE_X11)
-  // On X11 touches are reported in the framebuffer coordinate space.
-  auto touch_area = gfx::SizeF(framebuffer_size);
-#endif
 
   gfx::Transform ctm;
 
@@ -214,28 +210,29 @@ gfx::Transform TouchTransformController::GetTouchTransform(
       touch_area.IsEmpty() || touchscreen.id == ui::InputDevice::kInvalidId)
     return ctm;
 
-#if defined(USE_OZONE)
   // Translate the touch so that it falls within the display bounds. This
   // should not be performed if the displays are mirrored.
   if (display.id() == touch_display.id()) {
     ctm.Translate(display.bounds_in_native().x(),
                   display.bounds_in_native().y());
   }
-#endif
 
   // If the device is currently under calibration, then do not return any
   // transform as we want to use the raw native touch input data for calibration
   if (is_calibrating_)
     return ctm;
 
+  TouchCalibrationData calibration_data =
+      display_manager_->touch_device_manager()->GetCalibrationData(
+          touchscreen, touch_display.id());
   // If touch calibration data is unavailable, use naive approach.
-  if (!touch_display.has_touch_calibration_data()) {
+  if (calibration_data.IsEmpty()) {
     return GetUncalibratedTransform(ctm, display, touch_display, touch_area,
                                     touch_native_size);
   }
 
   // The resolution at which the touch calibration was performed.
-  gfx::SizeF touch_calib_size(touch_display.GetTouchCalibrationData().bounds);
+  gfx::SizeF touch_calib_size(calibration_data.bounds);
 
   // Any additional transfomration that needs to be applied to the display
   // points, before we solve for the final transform.
@@ -268,15 +265,11 @@ gfx::Transform TouchTransformController::GetTouchTransform(
   }
   // Solve for coefficients and compute transform matrix.
   gfx::Transform stored_ctm;
-  if (!GetCalibratedTransform(
-          touch_display.GetTouchCalibrationData().point_pairs, pre_transform,
-          &stored_ctm)) {
+  if (!GetCalibratedTransform(calibration_data.point_pairs, pre_transform,
+                              &stored_ctm)) {
     // TODO(malaykeshav): This can be checked at the calibration step before
     // storing the calibration associated data. This will allow us to explicitly
     // inform the user with proper UX.
-
-    // Clear stored calibration data.
-    display_manager_->ClearTouchCalibrationData(touch_display.id());
 
     // Return uncalibrated transform.
     return GetUncalibratedTransform(ctm, display, touch_display, touch_area,
@@ -293,24 +286,27 @@ TouchTransformController::TouchTransformController(
     std::unique_ptr<TouchTransformSetter> setter)
     : display_configurator_(display_configurator),
       display_manager_(display_manager),
-      setter_(std::move(setter)) {}
+      touch_transform_setter_(std::move(setter)) {}
 
 TouchTransformController::~TouchTransformController() {}
 
 void TouchTransformController::UpdateTouchTransforms() const {
   UpdateData update_data;
   UpdateTouchTransforms(&update_data);
-  setter_->ConfigureTouchDevices(update_data.device_to_scale,
-                                 update_data.touch_device_transforms);
+  touch_transform_setter_->ConfigureTouchDevices(
+      update_data.touch_device_transforms);
 }
 
 void TouchTransformController::UpdateTouchRadius(
     const ManagedDisplayInfo& display,
     UpdateData* update_data) const {
-  for (const auto& device_id : display.input_devices()) {
-    DCHECK_EQ(0u, update_data->device_to_scale.count(device_id));
-    update_data->device_to_scale[device_id] =
-        GetTouchResolutionScale(display, FindTouchscreenById(device_id));
+  for (const auto& identifier :
+       display_manager_->touch_device_manager()
+           ->GetAssociatedTouchDevicesForDisplay(display.id())) {
+    DCHECK_EQ(0u, update_data->device_to_scale.count(identifier));
+    update_data->device_to_scale.emplace(
+        identifier, GetTouchResolutionScale(
+                        display, FindTouchscreenByIdentifier(identifier)));
   }
 }
 
@@ -319,13 +315,18 @@ void TouchTransformController::UpdateTouchTransform(
     const ManagedDisplayInfo& touch_display,
     const ManagedDisplayInfo& target_display,
     UpdateData* update_data) const {
-  TouchDeviceTransform touch_device_transform;
+  ui::TouchDeviceTransform touch_device_transform;
   touch_device_transform.display_id = target_display_id;
-  gfx::Size fb_size = display_configurator_->framebuffer_size();
-  for (const auto& device_id : touch_display.input_devices()) {
-    touch_device_transform.device_id = device_id;
-    touch_device_transform.transform = GetTouchTransform(
-        target_display, touch_display, FindTouchscreenById(device_id), fb_size);
+  for (const auto& identifier :
+       display_manager_->touch_device_manager()
+           ->GetAssociatedTouchDevicesForDisplay(touch_display.id())) {
+    ui::TouchscreenDevice device = FindTouchscreenByIdentifier(identifier);
+    touch_device_transform.device_id = device.id;
+    touch_device_transform.transform =
+        GetTouchTransform(target_display, touch_display, device);
+    auto device_to_scale_iter = update_data->device_to_scale.find(identifier);
+    if (device_to_scale_iter != update_data->device_to_scale.end())
+      touch_device_transform.radius_scale = device_to_scale_iter->second;
     update_data->touch_device_transforms.push_back(touch_device_transform);
   }
 }

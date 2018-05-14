@@ -69,8 +69,8 @@ class PLATFORM_EXPORT IntPoint {
     y_ += dy;
   }
   void SaturatedMove(int dx, int dy) {
-    x_ = SaturatedAddition(x_, dx);
-    y_ = SaturatedAddition(y_, dy);
+    x_ = ClampAdd(x_, dx);
+    y_ = ClampAdd(y_, dy);
   }
 
   void Scale(float sx, float sy) {
@@ -151,6 +151,8 @@ inline IntSize ToIntSize(const IntPoint& a) {
 inline int IntPoint::DistanceSquaredToPoint(const IntPoint& point) const {
   return ((*this) - point).DiagonalLengthSquared();
 }
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, const IntPoint&);
 
 // Redeclared here to avoid ODR issues.
 // See platform/testing/GeometryPrinters.h.

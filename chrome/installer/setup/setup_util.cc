@@ -8,6 +8,7 @@
 
 #include <windows.h>
 
+#include <objbase.h>
 #include <stddef.h>
 #include <wtsapi32.h>
 
@@ -29,13 +30,13 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/version.h"
 #include "base/win/registry.h"
+#include "base/win/windows_version.h"
 #include "chrome/install_static/install_details.h"
 #include "chrome/install_static/install_modes.h"
 #include "chrome/install_static/install_util.h"
@@ -52,6 +53,8 @@
 #include "chrome/installer/util/non_updating_app_registration_data.h"
 #include "chrome/installer/util/updating_app_registration_data.h"
 #include "chrome/installer/util/util_constants.h"
+#include "chrome/installer/zucchini/zucchini.h"
+#include "chrome/installer/zucchini/zucchini_integration.h"
 #include "courgette/courgette.h"
 #include "courgette/third_party/bsdiff/bsdiff.h"
 
@@ -317,6 +320,29 @@ int BsdiffPatchFiles(const base::FilePath& src,
       << "Failed to apply bsdiff patch " << patch.value()
       << " to file " << src.value() << " and generating file " << dest.value()
       << ". err=" << exit_code;
+
+  return exit_code;
+}
+
+int ZucchiniPatchFiles(const base::FilePath& src,
+                       const base::FilePath& patch,
+                       const base::FilePath& dest) {
+  VLOG(1) << "Applying Zucchini patch " << patch.value() << " to file "
+          << src.value() << " and generating file " << dest.value();
+
+  if (src.empty() || patch.empty() || dest.empty())
+    return installer::PATCH_INVALID_ARGUMENTS;
+
+  const zucchini::status::Code patch_status = zucchini::Apply(src, patch, dest);
+  const int exit_code =
+      (patch_status != zucchini::status::kStatusSuccess)
+          ? static_cast<int>(patch_status) + kZucchiniErrorOffset
+          : 0;
+
+  LOG_IF(ERROR, exit_code) << "Failed to apply Zucchini patch " << patch.value()
+                           << " to file " << src.value()
+                           << " and generating file " << dest.value()
+                           << ". err=" << exit_code;
 
   return exit_code;
 }
@@ -780,10 +806,10 @@ void DeRegisterEventLogProvider() {
 
 std::unique_ptr<AppRegistrationData> MakeBinariesRegistrationData() {
   if (install_static::kUseGoogleUpdateIntegration) {
-    return base::MakeUnique<UpdatingAppRegistrationData>(
+    return std::make_unique<UpdatingAppRegistrationData>(
         install_static::kBinariesAppGuid);
   }
-  return base::MakeUnique<NonUpdatingAppRegistrationData>(
+  return std::make_unique<NonUpdatingAppRegistrationData>(
       base::string16(L"Software\\").append(install_static::kBinariesPathName));
 }
 
@@ -845,6 +871,26 @@ base::Time GetConsoleSessionStartTime() {
   FILETIME filetime = {wts_info->LogonTime.u.LowPart,
                        wts_info->LogonTime.u.HighPart};
   return base::Time::FromFileTime(filetime);
+}
+
+bool OsSupportsDarkTextTiles() {
+  auto windows_version = base::win::GetVersion();
+  return windows_version == base::win::VERSION_WIN8_1 ||
+         windows_version >= base::win::VERSION_WIN10_RS1;
+}
+
+base::string16 GetToastActivatorRegistryPath() {
+  // CLSID has a string format of "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}",
+  // which contains 38 characters. The length is 39 to make space for the null
+  // string terminator.
+  constexpr int kGuidLength = 39;
+  base::string16 guid_string;
+  if (::StringFromGUID2(install_static::GetToastActivatorClsid(),
+                        base::WriteInto(&guid_string, kGuidLength),
+                        kGuidLength) != kGuidLength) {
+    return base::string16();
+  }
+  return L"Software\\Classes\\CLSID\\" + guid_string;
 }
 
 }  // namespace installer

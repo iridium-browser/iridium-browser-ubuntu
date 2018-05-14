@@ -21,6 +21,8 @@ v8::ExtensionConfiguration* APIBindingTest::GetV8ExtensionConfiguration() {
 }
 
 void APIBindingTest::SetUp() {
+  test_js_runner_ = CreateTestJSRunner();
+
   // Much of this initialization is stolen from the somewhat-similar
   // gin::V8Test.
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
@@ -33,14 +35,14 @@ void APIBindingTest::SetUp() {
                                  gin::ArrayBufferAllocator::SharedInstance());
 
   isolate_holder_ =
-      base::MakeUnique<gin::IsolateHolder>(base::ThreadTaskRunnerHandle::Get());
+      std::make_unique<gin::IsolateHolder>(base::ThreadTaskRunnerHandle::Get());
   isolate()->Enter();
 
   v8::HandleScope handle_scope(isolate());
   v8::Local<v8::Context> context =
       v8::Context::New(isolate(), GetV8ExtensionConfiguration());
   context->Enter();
-  main_context_holder_ = base::MakeUnique<gin::ContextHolder>(isolate());
+  main_context_holder_ = std::make_unique<gin::ContextHolder>(isolate());
   main_context_holder_->SetContext(context);
 }
 
@@ -55,6 +57,8 @@ void APIBindingTest::TearDown() {
 
   isolate()->Exit();
   isolate_holder_.reset();
+
+  test_js_runner_.reset();
 }
 
 void APIBindingTest::DisposeAllContexts() {
@@ -93,7 +97,7 @@ void APIBindingTest::DisposeAllContexts() {
 }
 
 v8::Local<v8::Context> APIBindingTest::AddContext() {
-  auto holder = base::MakeUnique<gin::ContextHolder>(isolate());
+  auto holder = std::make_unique<gin::ContextHolder>(isolate());
   v8::Local<v8::Context> context =
       v8::Context::New(isolate(), GetV8ExtensionConfiguration());
   holder->SetContext(context);
@@ -107,6 +111,7 @@ v8::Local<v8::Context> APIBindingTest::MainContext() {
 
 void APIBindingTest::DisposeContext(v8::Local<v8::Context> context) {
   if (main_context_holder_ && context == main_context_holder_->context()) {
+    context->Exit();
     OnWillDisposeContext(context);
     main_context_holder_.reset();
     return;
@@ -123,10 +128,6 @@ void APIBindingTest::DisposeContext(v8::Local<v8::Context> context) {
   additional_context_holders_.erase(iter);
 }
 
-v8::Isolate* APIBindingTest::isolate() {
-  return isolate_holder_->isolate();
-}
-
 void APIBindingTest::RunGarbageCollection() {
   // '5' is a magic number stolen from Blink; arbitrarily large enough to
   // hopefully clean up all the various paths.
@@ -134,6 +135,15 @@ void APIBindingTest::RunGarbageCollection() {
     isolate()->RequestGarbageCollectionForTesting(
         v8::Isolate::kFullGarbageCollection);
   }
+}
+
+std::unique_ptr<TestJSRunner::Scope> APIBindingTest::CreateTestJSRunner() {
+  return std::make_unique<TestJSRunner::Scope>(
+      std::make_unique<TestJSRunner>());
+}
+
+v8::Isolate* APIBindingTest::isolate() {
+  return isolate_holder_->isolate();
 }
 
 }  // namespace extensions

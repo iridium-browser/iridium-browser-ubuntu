@@ -8,6 +8,21 @@
 #include "EGLWindow.h"
 #include "random_utils.h"
 
+#include "angle_gl.h"
+
+#include <iostream>
+#include <string.h>
+
+namespace
+{
+using DisplayTypeInfo = std::pair<const char *, EGLint>;
+
+const DisplayTypeInfo kDisplayTypes[] = {
+    {"d3d9", EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE}, {"d3d11", EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE},
+    {"gl", EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE}, {"gles", EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE},
+    {"null", EGL_PLATFORM_ANGLE_TYPE_NULL_ANGLE}, {"vulkan", EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE}};
+}  // anonymous namespace
+
 SampleApplication::SampleApplication(const std::string &name,
                                      size_t width,
                                      size_t height,
@@ -155,4 +170,18 @@ void SampleApplication::exit()
 bool SampleApplication::popEvent(Event *event)
 {
     return mOSWindow->popEvent(event);
+}
+
+EGLint GetDisplayTypeFromArg(const char *displayTypeArg)
+{
+    for (const auto &displayTypeInfo : kDisplayTypes)
+    {
+        if (strcmp(displayTypeInfo.first, displayTypeArg) == 0)
+        {
+            return displayTypeInfo.second;
+        }
+    }
+
+    std::cout << "Unknown ANGLE back-end API: " << displayTypeArg << std::endl;
+    return EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE;
 }

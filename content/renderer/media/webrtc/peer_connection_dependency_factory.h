@@ -46,7 +46,7 @@ class WebRtcAudioDeviceImpl;
 
 // Object factory for RTC PeerConnections.
 class CONTENT_EXPORT PeerConnectionDependencyFactory
-    : NON_EXPORTED_BASE(base::MessageLoop::DestructionObserver) {
+    : base::MessageLoop::DestructionObserver {
  public:
   PeerConnectionDependencyFactory(
       P2PSocketDispatcher* p2p_socket_dispatcher);
@@ -56,7 +56,8 @@ class CONTENT_EXPORT PeerConnectionDependencyFactory
   // WebKit WebRTCPeerConnectionHandler interface.
   std::unique_ptr<blink::WebRTCPeerConnectionHandler>
   CreateRTCPeerConnectionHandler(
-      blink::WebRTCPeerConnectionHandlerClient* client);
+      blink::WebRTCPeerConnectionHandlerClient* client,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   // Create a proxy object for a VideoTrackSource that makes sure it's called on
   // the correct threads.

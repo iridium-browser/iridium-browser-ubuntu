@@ -17,12 +17,11 @@
 #include <libaddressinput/callback.h>
 #include <libaddressinput/null_storage.h>
 #include <libaddressinput/supplier.h>
-#include <libaddressinput/util/basictypes.h>
-#include <libaddressinput/util/scoped_ptr.h>
 
 #include <cstddef>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -32,6 +31,7 @@
 #include "mock_source.h"
 #include "retriever.h"
 #include "rule.h"
+#include "util/size.h"
 
 namespace {
 
@@ -42,10 +42,13 @@ using i18n::addressinput::NullStorage;
 using i18n::addressinput::OndemandSupplyTask;
 using i18n::addressinput::Retriever;
 using i18n::addressinput::Rule;
-using i18n::addressinput::scoped_ptr;
 using i18n::addressinput::Supplier;
 
 class OndemandSupplyTaskTest : public testing::Test {
+ public:
+  OndemandSupplyTaskTest(const OndemandSupplyTaskTest&) = delete;
+  OndemandSupplyTaskTest& operator=(const OndemandSupplyTaskTest&) = delete;
+
  protected:
   OndemandSupplyTaskTest()
       : success_(true),
@@ -58,7 +61,7 @@ class OndemandSupplyTaskTest : public testing::Test {
         supplied_(BuildCallback(this, &OndemandSupplyTaskTest::Supplied)),
         task_(new OndemandSupplyTask(lookup_key_, &rule_cache_, *supplied_)) {}
 
-  virtual ~OndemandSupplyTaskTest() {
+  ~OndemandSupplyTaskTest() override {
     for (std::map<std::string, const Rule*>::const_iterator
          it = rule_cache_.begin(); it != rule_cache_.end(); ++it) {
       delete it->second;
@@ -71,7 +74,7 @@ class OndemandSupplyTaskTest : public testing::Test {
 
   bool success_;  // Expected status from MockSource.
   LookupKey lookup_key_;  // Stub.
-  const Rule* rule_[arraysize(LookupKey::kHierarchy)];
+  const Rule* rule_[size(LookupKey::kHierarchy)];
   bool called_;
   MockSource* const source_;
 
@@ -87,20 +90,18 @@ class OndemandSupplyTaskTest : public testing::Test {
   }
 
   std::map<std::string, const Rule*> rule_cache_;
-  const scoped_ptr<Retriever> retriever_;
-  const scoped_ptr<const Supplier::Callback> supplied_;
+  const std::unique_ptr<Retriever> retriever_;
+  const std::unique_ptr<const Supplier::Callback> supplied_;
   OndemandSupplyTask* const task_;
-
-  DISALLOW_COPY_AND_ASSIGN(OndemandSupplyTaskTest);
 };
 
 TEST_F(OndemandSupplyTaskTest, Empty) {
   ASSERT_NO_FATAL_FAILURE(Retrieve());
   ASSERT_TRUE(called_);
-  EXPECT_TRUE(rule_[0] == NULL);
-  EXPECT_TRUE(rule_[1] == NULL);
-  EXPECT_TRUE(rule_[2] == NULL);
-  EXPECT_TRUE(rule_[3] == NULL);
+  EXPECT_TRUE(rule_[0] == nullptr);
+  EXPECT_TRUE(rule_[1] == nullptr);
+  EXPECT_TRUE(rule_[2] == nullptr);
+  EXPECT_TRUE(rule_[3] == nullptr);
 }
 
 TEST_F(OndemandSupplyTaskTest, Invalid) {
@@ -113,34 +114,34 @@ TEST_F(OndemandSupplyTaskTest, Invalid) {
 }
 
 TEST_F(OndemandSupplyTaskTest, Valid) {
-  source_->data_.insert(std::make_pair("data/XA", "{\"id\":\"data/XA\"}"));
+  source_->data_.insert(std::make_pair("data/XA", R"({"id":"data/XA"})"));
 
   Queue("data/XA");
 
   ASSERT_NO_FATAL_FAILURE(Retrieve());
   ASSERT_TRUE(called_);
-  EXPECT_TRUE(rule_[0] != NULL);
-  EXPECT_TRUE(rule_[1] == NULL);
-  EXPECT_TRUE(rule_[2] == NULL);
-  EXPECT_TRUE(rule_[3] == NULL);
+  EXPECT_TRUE(rule_[0] != nullptr);
+  EXPECT_TRUE(rule_[1] == nullptr);
+  EXPECT_TRUE(rule_[2] == nullptr);
+  EXPECT_TRUE(rule_[3] == nullptr);
 
   EXPECT_EQ("data/XA", rule_[0]->GetId());
 
   // All rules on the COUNTRY level inherit from the default rule.
   EXPECT_FALSE(rule_[0]->GetFormat().empty());
   EXPECT_FALSE(rule_[0]->GetRequired().empty());
-  EXPECT_TRUE(rule_[0]->GetPostalCodeMatcher() == NULL);
+  EXPECT_TRUE(rule_[0]->GetPostalCodeMatcher() == nullptr);
 }
 
 TEST_F(OndemandSupplyTaskTest, ValidHierarchy) {
   source_->data_.insert(
-      std::make_pair("data/XA", "{\"id\":\"data/XA\"}"));
+      std::make_pair("data/XA", R"({"id":"data/XA"})"));
   source_->data_.insert(
-      std::make_pair("data/XA/aa", "{\"id\":\"data/XA/aa\"}"));
+      std::make_pair("data/XA/aa", R"({"id":"data/XA/aa"})"));
   source_->data_.insert(
-      std::make_pair("data/XA/aa/bb", "{\"id\":\"data/XA/aa/bb\"}"));
+      std::make_pair("data/XA/aa/bb", R"({"id":"data/XA/aa/bb"})"));
   source_->data_.insert(
-      std::make_pair("data/XA/aa/bb/cc", "{\"id\":\"data/XA/aa/bb/cc\"}"));
+      std::make_pair("data/XA/aa/bb/cc", R"({"id":"data/XA/aa/bb/cc"})"));
 
   Queue("data/XA");
   Queue("data/XA/aa");
@@ -149,10 +150,10 @@ TEST_F(OndemandSupplyTaskTest, ValidHierarchy) {
 
   ASSERT_NO_FATAL_FAILURE(Retrieve());
   ASSERT_TRUE(called_);
-  EXPECT_TRUE(rule_[0] != NULL);
-  EXPECT_TRUE(rule_[1] != NULL);
-  EXPECT_TRUE(rule_[2] != NULL);
-  EXPECT_TRUE(rule_[3] != NULL);
+  EXPECT_TRUE(rule_[0] != nullptr);
+  EXPECT_TRUE(rule_[1] != nullptr);
+  EXPECT_TRUE(rule_[2] != nullptr);
+  EXPECT_TRUE(rule_[3] != nullptr);
 
   EXPECT_EQ("data/XA", rule_[0]->GetId());
   EXPECT_EQ("data/XA/aa", rule_[1]->GetId());
@@ -184,7 +185,7 @@ TEST_F(OndemandSupplyTaskTest, InvalidJson1) {
 }
 
 TEST_F(OndemandSupplyTaskTest, InvalidJson2) {
-  source_->data_.insert(std::make_pair("data/XA", "{\"id\":\"data/XA\"}"));
+  source_->data_.insert(std::make_pair("data/XA", R"({"id":"data/XA"})"));
   source_->data_.insert(std::make_pair("data/XA/aa", ":"));
 
   success_ = false;
@@ -197,7 +198,7 @@ TEST_F(OndemandSupplyTaskTest, InvalidJson2) {
 }
 
 TEST_F(OndemandSupplyTaskTest, EmptyJsonJustMeansServerKnowsNothingAboutKey) {
-  source_->data_.insert(std::make_pair("data/XA", "{\"id\":\"data/XA\"}"));
+  source_->data_.insert(std::make_pair("data/XA", R"({"id":"data/XA"})"));
   source_->data_.insert(std::make_pair("data/XA/aa", "{}"));
 
   Queue("data/XA");
@@ -205,17 +206,16 @@ TEST_F(OndemandSupplyTaskTest, EmptyJsonJustMeansServerKnowsNothingAboutKey) {
 
   ASSERT_NO_FATAL_FAILURE(Retrieve());
   ASSERT_TRUE(called_);
-  EXPECT_TRUE(rule_[0] != NULL);
-  EXPECT_TRUE(rule_[1] == NULL);
-  EXPECT_TRUE(rule_[2] == NULL);
-  EXPECT_TRUE(rule_[3] == NULL);
+  EXPECT_TRUE(rule_[0] != nullptr);
+  EXPECT_TRUE(rule_[1] == nullptr);
+  EXPECT_TRUE(rule_[2] == nullptr);
+  EXPECT_TRUE(rule_[3] == nullptr);
 
   EXPECT_EQ("data/XA", rule_[0]->GetId());
 }
 
 TEST_F(OndemandSupplyTaskTest, IfCountryFailsAllFails) {
-  source_->data_.insert(
-      std::make_pair("data/XA/aa", "{\"id\":\"data/XA/aa\"}"));
+  source_->data_.insert(std::make_pair("data/XA/aa", R"({"id":"data/XA/aa"})"));
 
   success_ = false;
 

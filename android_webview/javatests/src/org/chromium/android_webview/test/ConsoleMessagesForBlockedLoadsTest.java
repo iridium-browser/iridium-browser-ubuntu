@@ -4,15 +4,26 @@
 
 package org.chromium.android_webview.test;
 
+import static org.junit.Assert.assertNotEquals;
+
 import android.support.test.filters.SmallTest;
 import android.util.Pair;
-import android.webkit.ConsoleMessage;
 import android.webkit.WebSettings;
 
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
+import org.chromium.android_webview.AwConsoleMessage;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.util.CommonResources;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
+import org.chromium.content.common.ContentSwitches;
 import org.chromium.net.test.util.TestWebServer;
 
 import java.util.ArrayList;
@@ -22,7 +33,13 @@ import java.util.List;
  * Verify that content loading blocks initiated by renderer can be detected
  * by the embedder via WebChromeClient.onConsoleMessage.
  */
-public class ConsoleMessagesForBlockedLoadsTest extends AwTestBase {
+@RunWith(AwJUnit4ClassRunner.class)
+@CommandLineFlags.Add(ContentSwitches.HOST_RESOLVER_RULES + "=MAP * 127.0.0.1")
+public class ConsoleMessagesForBlockedLoadsTest {
+    public static final String SERVER_HOSTNAME = "example.test";
+
+    @Rule
+    public AwActivityTestRule mActivityTestRule = new AwActivityTestRule();
 
     private TestAwContentsClient mContentsClient;
     private AwTestContainerView mTestContainerView;
@@ -30,37 +47,37 @@ public class ConsoleMessagesForBlockedLoadsTest extends AwTestBase {
     private AwContents mAwContents;
     private TestWebServer mWebServer;
 
-    @Override
+    @Before
     public void setUp() throws Exception {
-        super.setUp();
         mContentsClient = new TestAwContentsClient();
-        mTestContainerView = createAwTestContainerViewOnMainSync(mContentsClient);
+        mTestContainerView = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
         mAwContents = mTestContainerView.getAwContents();
         mOnConsoleMessageHelper = mContentsClient.getAddMessageToConsoleHelper();
     }
 
-    @Override
-    protected void tearDown() throws Exception {
+    @After
+    public void tearDown() throws Exception {
         if (mWebServer != null) mWebServer.shutdown();
-        super.tearDown();
     }
 
     private void startWebServer() throws Exception {
         mWebServer = TestWebServer.start();
+        mWebServer.setServerHost(SERVER_HOSTNAME);
     }
 
-    private ConsoleMessage getSingleErrorMessage() {
-        ConsoleMessage result = null;
-        for (ConsoleMessage m : mOnConsoleMessageHelper.getMessages()) {
-            if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
-                assertNull(result);
+    private AwConsoleMessage getSingleErrorMessage() {
+        AwConsoleMessage result = null;
+        for (AwConsoleMessage m : mOnConsoleMessageHelper.getMessages()) {
+            if (m.messageLevel() == AwConsoleMessage.MESSAGE_LEVEL_ERROR) {
+                Assert.assertNull(result);
                 result = m;
             }
         }
-        assertNotNull(result);
+        Assert.assertNotNull(result);
         return result;
     }
 
+    @Test
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testXFrameOptionsDenial() throws Throwable {
@@ -73,17 +90,19 @@ public class ConsoleMessagesForBlockedLoadsTest extends AwTestBase {
                 "", "<iframe src='" + iframeUrl + "' />");
         final String pageUrl = mWebServer.setResponse("/page.html", pageHtml, null);
         mOnConsoleMessageHelper.clearMessages();
-        loadUrlSync(mAwContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
-        ConsoleMessage errorMessage = getSingleErrorMessage();
-        assertTrue(errorMessage.message().indexOf(iframeUrl) != -1);
+        mActivityTestRule.loadUrlSync(
+                mAwContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+        AwConsoleMessage errorMessage = getSingleErrorMessage();
+        assertNotEquals(errorMessage.message().indexOf(iframeUrl), -1);
     }
 
+    @Test
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testMixedContentDenial() throws Throwable {
         startWebServer();
         TestWebServer httpsServer = null;
-        AwSettings settings = getAwSettingsOnUiThread(mAwContents);
+        AwSettings settings = mActivityTestRule.getAwSettingsOnUiThread(mAwContents);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         try {
             httpsServer = TestWebServer.startSsl();
@@ -93,10 +112,11 @@ public class ConsoleMessagesForBlockedLoadsTest extends AwTestBase {
                     "", "<img src='" + imageUrl + "' />");
             String secureUrl = httpsServer.setResponse("/secure.html", secureHtml, null);
             mOnConsoleMessageHelper.clearMessages();
-            loadUrlSync(mAwContents, mContentsClient.getOnPageFinishedHelper(), secureUrl);
-            ConsoleMessage errorMessage = getSingleErrorMessage();
-            assertTrue(errorMessage.message().indexOf(imageUrl) != -1);
-            assertTrue(errorMessage.message().indexOf(secureUrl) != -1);
+            mActivityTestRule.loadUrlSync(
+                    mAwContents, mContentsClient.getOnPageFinishedHelper(), secureUrl);
+            AwConsoleMessage errorMessage = getSingleErrorMessage();
+            assertNotEquals(errorMessage.message().indexOf(imageUrl), -1);
+            assertNotEquals(errorMessage.message().indexOf(secureUrl), -1);
         } finally {
             if (httpsServer != null) {
                 httpsServer.shutdown();
@@ -104,6 +124,7 @@ public class ConsoleMessagesForBlockedLoadsTest extends AwTestBase {
         }
     }
 
+    @Test
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testCrossOriginDenial() throws Throwable {
@@ -116,7 +137,7 @@ public class ConsoleMessagesForBlockedLoadsTest extends AwTestBase {
                 + "</xsl:template>"
                 + "</xsl:stylesheet>";
         final String iframeXslUrl = mWebServer.setResponse(
-                "/iframe.xsl", iframeXsl, null).replace("localhost", "127.0.0.1");
+                "/iframe.xsl", iframeXsl, null).replace(SERVER_HOSTNAME, "127.0.0.1");
         final String iframeXml =
                 "<?xml version='1.0' encoding='UTF-8'?>"
                 + "<?xml-stylesheet type='text/xsl' href='" + iframeXslUrl + "'?>"
@@ -127,9 +148,10 @@ public class ConsoleMessagesForBlockedLoadsTest extends AwTestBase {
                 "", "<iframe src='" + iframeXmlUrl + "' />");
         final String pageUrl = mWebServer.setResponse("/page.html", pageHtml, null);
         mOnConsoleMessageHelper.clearMessages();
-        loadUrlSync(mAwContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
-        ConsoleMessage errorMessage = getSingleErrorMessage();
-        assertTrue(errorMessage.message().indexOf(iframeXslUrl) != -1);
-        assertTrue(errorMessage.message().indexOf(iframeXmlUrl) != -1);
+        mActivityTestRule.loadUrlSync(
+                mAwContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+        AwConsoleMessage errorMessage = getSingleErrorMessage();
+        assertNotEquals(errorMessage.message().indexOf(iframeXslUrl), -1);
+        assertNotEquals(errorMessage.message().indexOf(iframeXmlUrl), -1);
     }
 }

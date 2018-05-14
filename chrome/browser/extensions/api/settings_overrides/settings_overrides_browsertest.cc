@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -30,17 +32,15 @@ const int kTestExtensionPrepopulatedId = 1;
 // TemplateURLData with search engines settings from test extension manifest.
 // chrome/test/data/extensions/settings_override/manifest.json
 std::unique_ptr<TemplateURLData> TestExtensionSearchEngine(PrefService* prefs) {
-  auto result = base::MakeUnique<TemplateURLData>();
+  auto result = std::make_unique<TemplateURLData>();
   result->SetShortName(base::ASCIIToUTF16("name.de"));
   result->SetKeyword(base::ASCIIToUTF16("keyword.de"));
   result->SetURL("http://www.foo.de/s?q={searchTerms}&id=10");
   result->favicon_url = GURL("http://www.foo.de/favicon.ico?id=10");
   result->suggestions_url = "http://www.foo.de/suggest?q={searchTerms}&id=10";
-  result->instant_url = "http://www.foo.de/instant?q={searchTerms}&id=10";
   result->image_url = "http://www.foo.de/image?q={searchTerms}&id=10";
   result->search_url_post_params = "search_lang=de";
   result->suggestions_url_post_params = "suggest_lang=de";
-  result->instant_url_post_params = "instant_lang=de";
   result->image_url_post_params = "image_lang=de";
   result->alternate_urls.push_back("http://www.moo.de/s?q={searchTerms}&id=10");
   result->alternate_urls.push_back("http://www.noo.de/s?q={searchTerms}&id=10");
@@ -51,8 +51,6 @@ std::unique_ptr<TemplateURLData> TestExtensionSearchEngine(PrefService* prefs) {
           prefs, kTestExtensionPrepopulatedId);
   // Values below do not exist in extension manifest and are taken from
   // prepopulated engine with prepopulated_id set in extension manifest.
-  result->search_terms_replacement_key =
-      prepopulated->search_terms_replacement_key;
   result->contextual_search_url = prepopulated->contextual_search_url;
   result->new_tab_url = prepopulated->new_tab_url;
   return result;

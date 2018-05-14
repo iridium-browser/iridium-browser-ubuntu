@@ -23,8 +23,9 @@ class GlslangWrapper : public gl::RefCountObjectNoID
     static GlslangWrapper *GetReference();
     static void ReleaseReference();
 
-    gl::LinkResult linkProgram(const std::string &vertexSource,
-                               const std::string &fragmentSource,
+    gl::LinkResult linkProgram(const gl::Context *glContext,
+                               const gl::ProgramState &programState,
+                               const gl::ProgramLinkedResources &resources,
                                std::vector<uint32_t> *vertexCodeOut,
                                std::vector<uint32_t> *fragmentCodeOut);
 

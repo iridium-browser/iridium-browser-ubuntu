@@ -21,14 +21,15 @@
 #define SVGResources_h
 
 #include <memory>
+#include "base/macros.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
 class ComputedStyle;
+class Element;
 class LayoutObject;
 class LayoutSVGResourceClipper;
 class LayoutSVGResourceContainer;
@@ -40,14 +41,17 @@ class SVGElement;
 
 // Holds a set of resources associated with a LayoutObject
 class SVGResources {
-  WTF_MAKE_NONCOPYABLE(SVGResources);
   USING_FAST_MALLOC(SVGResources);
 
  public:
   SVGResources();
 
-  static std::unique_ptr<SVGResources> BuildResources(const LayoutObject*,
+  static std::unique_ptr<SVGResources> BuildResources(const LayoutObject&,
                                                       const ComputedStyle&);
+
+  static void RemoveWatchesForElement(Element&);
+  static void RemoveUnreferencedResources(const LayoutObject&);
+
   void LayoutIfNeeded();
 
   static bool SupportsMarkers(const SVGElement&);
@@ -55,20 +59,20 @@ class SVGResources {
   // Ordinary resources
   LayoutSVGResourceClipper* Clipper() const {
     return clipper_filter_masker_data_ ? clipper_filter_masker_data_->clipper
-                                       : 0;
+                                       : nullptr;
   }
   LayoutSVGResourceMarker* MarkerStart() const {
-    return marker_data_ ? marker_data_->marker_start : 0;
+    return marker_data_ ? marker_data_->marker_start : nullptr;
   }
   LayoutSVGResourceMarker* MarkerMid() const {
-    return marker_data_ ? marker_data_->marker_mid : 0;
+    return marker_data_ ? marker_data_->marker_mid : nullptr;
   }
   LayoutSVGResourceMarker* MarkerEnd() const {
-    return marker_data_ ? marker_data_->marker_end : 0;
+    return marker_data_ ? marker_data_->marker_end : nullptr;
   }
   LayoutSVGResourceMasker* Masker() const {
     return clipper_filter_masker_data_ ? clipper_filter_masker_data_->masker
-                                       : 0;
+                                       : nullptr;
   }
 
   LayoutSVGResourceFilter* Filter() const {
@@ -79,10 +83,10 @@ class SVGResources {
 
   // Paint servers
   LayoutSVGResourcePaintServer* Fill() const {
-    return fill_stroke_data_ ? fill_stroke_data_->fill : 0;
+    return fill_stroke_data_ ? fill_stroke_data_->fill : nullptr;
   }
   LayoutSVGResourcePaintServer* Stroke() const {
-    return fill_stroke_data_ ? fill_stroke_data_->stroke : 0;
+    return fill_stroke_data_ ? fill_stroke_data_->stroke : nullptr;
   }
 
   // Chainable resources - linked through xlink:href
@@ -93,11 +97,9 @@ class SVGResources {
   void BuildSetOfResources(HashSet<LayoutSVGResourceContainer*>&);
 
   // Methods operating on all cached resources
-  void RemoveClientFromCache(LayoutObject*,
+  void RemoveClientFromCache(LayoutObject&,
                              bool mark_for_invalidation = true) const;
-  void RemoveClientFromCacheAffectingObjectBounds(
-      LayoutObject*,
-      bool mark_for_invalidation = true) const;
+  unsigned RemoveClientFromCacheAffectingObjectBounds(LayoutObject&) const;
   void ResourceDestroyed(LayoutSVGResourceContainer*);
   void ClearReferencesTo(LayoutSVGResourceContainer*);
 
@@ -182,6 +184,7 @@ class SVGResources {
   std::unique_ptr<MarkerData> marker_data_;
   std::unique_ptr<FillStrokeData> fill_stroke_data_;
   LayoutSVGResourceContainer* linked_resource_;
+  DISALLOW_COPY_AND_ASSIGN(SVGResources);
 };
 
 }  // namespace blink

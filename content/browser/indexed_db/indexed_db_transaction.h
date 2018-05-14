@@ -8,10 +8,10 @@
 #include <stdint.h>
 
 #include <memory>
-#include <queue>
 #include <set>
-#include <stack>
 
+#include "base/containers/queue.h"
+#include "base/containers/stack.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -31,6 +31,19 @@ namespace content {
 class BlobWriteCallbackImpl;
 class IndexedDBCursor;
 class IndexedDBDatabaseCallbacks;
+
+namespace indexed_db_transaction_unittest {
+class IndexedDBTransactionTestMode;
+class IndexedDBTransactionTest;
+FORWARD_DECLARE_TEST(IndexedDBTransactionTestMode, AbortPreemptive);
+FORWARD_DECLARE_TEST(IndexedDBTransactionTestMode, AbortTasks);
+FORWARD_DECLARE_TEST(IndexedDBTransactionTest, NoTimeoutReadOnly);
+FORWARD_DECLARE_TEST(IndexedDBTransactionTest, SchedulePreemptiveTask);
+FORWARD_DECLARE_TEST(IndexedDBTransactionTestMode, ScheduleNormalTask);
+FORWARD_DECLARE_TEST(IndexedDBTransactionTestMode, TaskFails);
+FORWARD_DECLARE_TEST(IndexedDBTransactionTest, Timeout);
+FORWARD_DECLARE_TEST(IndexedDBTransactionTest, IndexedDBObserver);
+}  // namespace indexed_db_transaction_unittest
 
 class CONTENT_EXPORT IndexedDBTransaction {
  public:
@@ -130,16 +143,30 @@ class CONTENT_EXPORT IndexedDBTransaction {
   friend class IndexedDBConnection;
   friend class base::RefCounted<IndexedDBTransaction>;
 
-  FRIEND_TEST_ALL_PREFIXES(IndexedDBTransactionTestMode, AbortPreemptive);
-  FRIEND_TEST_ALL_PREFIXES(IndexedDBTransactionTestMode, AbortTasks);
-  FRIEND_TEST_ALL_PREFIXES(IndexedDBTransactionTest, NoTimeoutReadOnly);
-  FRIEND_TEST_ALL_PREFIXES(IndexedDBTransactionTest,
-                           SchedulePreemptiveTask);
-  FRIEND_TEST_ALL_PREFIXES(IndexedDBTransactionTestMode,
-                           ScheduleNormalTask);
-  FRIEND_TEST_ALL_PREFIXES(IndexedDBTransactionTestMode, TaskFails);
-  FRIEND_TEST_ALL_PREFIXES(IndexedDBTransactionTest, Timeout);
-  FRIEND_TEST_ALL_PREFIXES(IndexedDBTransactionTest, IndexedDBObserver);
+  FRIEND_TEST_ALL_PREFIXES(
+      indexed_db_transaction_unittest::IndexedDBTransactionTestMode,
+      AbortPreemptive);
+  FRIEND_TEST_ALL_PREFIXES(
+      indexed_db_transaction_unittest::IndexedDBTransactionTestMode,
+      AbortTasks);
+  FRIEND_TEST_ALL_PREFIXES(
+      indexed_db_transaction_unittest::IndexedDBTransactionTest,
+      NoTimeoutReadOnly);
+  FRIEND_TEST_ALL_PREFIXES(
+      indexed_db_transaction_unittest::IndexedDBTransactionTest,
+      SchedulePreemptiveTask);
+  FRIEND_TEST_ALL_PREFIXES(
+      indexed_db_transaction_unittest::IndexedDBTransactionTestMode,
+      ScheduleNormalTask);
+  FRIEND_TEST_ALL_PREFIXES(
+      indexed_db_transaction_unittest::IndexedDBTransactionTestMode,
+      TaskFails);
+  FRIEND_TEST_ALL_PREFIXES(
+      indexed_db_transaction_unittest::IndexedDBTransactionTest,
+      Timeout);
+  FRIEND_TEST_ALL_PREFIXES(
+      indexed_db_transaction_unittest::IndexedDBTransactionTest,
+      IndexedDBObserver);
 
   void RunTasksIfStarted();
 
@@ -183,7 +210,7 @@ class CONTENT_EXPORT IndexedDBTransaction {
     void clear();
 
    private:
-    std::queue<Operation> queue_;
+    base::queue<Operation> queue_;
 
     DISALLOW_COPY_AND_ASSIGN(TaskQueue);
   };
@@ -198,7 +225,7 @@ class CONTENT_EXPORT IndexedDBTransaction {
     void clear();
 
    private:
-    std::stack<AbortOperation> stack_;
+    base::stack<AbortOperation> stack_;
 
     DISALLOW_COPY_AND_ASSIGN(TaskStack);
   };

@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/nullsocketserver.h"
-#include "webrtc/rtc_base/gunit.h"
+#include "rtc_base/nullsocketserver.h"
+#include "rtc_base/gunit.h"
 
 namespace rtc {
 
@@ -18,12 +18,9 @@ static const uint32_t kTimeout = 5000U;
 class NullSocketServerTest
     : public testing::Test,
       public MessageHandler {
- public:
-  NullSocketServerTest() {}
  protected:
-  virtual void OnMessage(Message* message) {
-    ss_.WakeUp();
-  }
+  void OnMessage(Message* message) override { ss_.WakeUp(); }
+
   NullSocketServer ss_;
 };
 

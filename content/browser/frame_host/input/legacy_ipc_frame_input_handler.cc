@@ -7,6 +7,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/renderer_host/input/legacy_input_router_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/common/input/ime_text_span_conversions.h"
 #include "content/common/input_messages.h"
 
 namespace content {
@@ -20,41 +21,44 @@ LegacyIPCFrameInputHandler::~LegacyIPCFrameInputHandler() {}
 void LegacyIPCFrameInputHandler::SetCompositionFromExistingText(
     int32_t start,
     int32_t end,
-    const std::vector<ui::CompositionUnderline>& ui_underlines) {
-  std::vector<blink::WebCompositionUnderline> underlines;
-  for (const auto& underline : ui_underlines) {
-    blink::WebCompositionUnderline blink_underline(
-        underline.start_offset, underline.end_offset, underline.color,
-        underline.thick, underline.background_color);
-    underlines.push_back(blink_underline);
+    const std::vector<ui::ImeTextSpan>& ui_ime_text_spans) {
+  std::vector<blink::WebImeTextSpan> ime_text_spans;
+  for (const auto& ime_text_span : ui_ime_text_spans) {
+    blink::WebImeTextSpan blink_ime_text_span(
+        ConvertUiImeTextSpanTypeToWebType(ime_text_span.type),
+        ime_text_span.start_offset, ime_text_span.end_offset,
+        ime_text_span.underline_color, ime_text_span.thick,
+        ime_text_span.background_color,
+        ime_text_span.suggestion_highlight_color, ime_text_span.suggestions);
+    ime_text_spans.push_back(blink_ime_text_span);
   }
 
-  SendInput(base::MakeUnique<InputMsg_SetCompositionFromExistingText>(
-      routing_id_, start, end, underlines));
+  SendInput(std::make_unique<InputMsg_SetCompositionFromExistingText>(
+      routing_id_, start, end, ime_text_spans));
 }
 
 void LegacyIPCFrameInputHandler::ExtendSelectionAndDelete(int32_t before,
                                                           int32_t after) {
-  SendInput(base::MakeUnique<InputMsg_ExtendSelectionAndDelete>(routing_id_,
+  SendInput(std::make_unique<InputMsg_ExtendSelectionAndDelete>(routing_id_,
                                                                 before, after));
 }
 
 void LegacyIPCFrameInputHandler::DeleteSurroundingText(int32_t before,
                                                        int32_t after) {
-  SendInput(base::MakeUnique<InputMsg_DeleteSurroundingText>(routing_id_,
+  SendInput(std::make_unique<InputMsg_DeleteSurroundingText>(routing_id_,
                                                              before, after));
 }
 
 void LegacyIPCFrameInputHandler::DeleteSurroundingTextInCodePoints(
     int32_t before,
     int32_t after) {
-  SendInput(base::MakeUnique<InputMsg_DeleteSurroundingTextInCodePoints>(
+  SendInput(std::make_unique<InputMsg_DeleteSurroundingTextInCodePoints>(
       routing_id_, before, after));
 }
 
 void LegacyIPCFrameInputHandler::SetEditableSelectionOffsets(int32_t start,
                                                              int32_t end) {
-  SendInput(base::MakeUnique<InputMsg_SetEditableSelectionOffsets>(routing_id_,
+  SendInput(std::make_unique<InputMsg_SetEditableSelectionOffsets>(routing_id_,
                                                                    start, end));
 }
 
@@ -62,87 +66,96 @@ void LegacyIPCFrameInputHandler::ExecuteEditCommand(
     const std::string& command,
     const base::Optional<base::string16>& value) {
   if (!value) {
-    SendInput(base::MakeUnique<InputMsg_ExecuteNoValueEditCommand>(routing_id_,
+    SendInput(std::make_unique<InputMsg_ExecuteNoValueEditCommand>(routing_id_,
                                                                    command));
   }
 }
 
 void LegacyIPCFrameInputHandler::Undo() {
-  SendInput(base::MakeUnique<InputMsg_Undo>(routing_id_));
+  SendInput(std::make_unique<InputMsg_Undo>(routing_id_));
 }
 
 void LegacyIPCFrameInputHandler::Redo() {
-  SendInput(base::MakeUnique<InputMsg_Redo>(routing_id_));
+  SendInput(std::make_unique<InputMsg_Redo>(routing_id_));
 }
 
 void LegacyIPCFrameInputHandler::Cut() {
-  SendInput(base::MakeUnique<InputMsg_Cut>(routing_id_));
+  SendInput(std::make_unique<InputMsg_Cut>(routing_id_));
 }
 
 void LegacyIPCFrameInputHandler::Copy() {
-  SendInput(base::MakeUnique<InputMsg_Copy>(routing_id_));
+  SendInput(std::make_unique<InputMsg_Copy>(routing_id_));
 }
 
 void LegacyIPCFrameInputHandler::CopyToFindPboard() {
 #if defined(OS_MACOSX)
-  SendInput(base::MakeUnique<InputMsg_CopyToFindPboard>(routing_id_));
+  SendInput(std::make_unique<InputMsg_CopyToFindPboard>(routing_id_));
 #endif
 }
 
 void LegacyIPCFrameInputHandler::Paste() {
-  SendInput(base::MakeUnique<InputMsg_Paste>(routing_id_));
+  SendInput(std::make_unique<InputMsg_Paste>(routing_id_));
 }
 
 void LegacyIPCFrameInputHandler::PasteAndMatchStyle() {
-  SendInput(base::MakeUnique<InputMsg_PasteAndMatchStyle>(routing_id_));
+  SendInput(std::make_unique<InputMsg_PasteAndMatchStyle>(routing_id_));
 }
 
 void LegacyIPCFrameInputHandler::Replace(const base::string16& word) {
-  SendInput(base::MakeUnique<InputMsg_Replace>(routing_id_, word));
+  SendInput(std::make_unique<InputMsg_Replace>(routing_id_, word));
 }
 
 void LegacyIPCFrameInputHandler::ReplaceMisspelling(
     const base::string16& word) {
-  SendInput(base::MakeUnique<InputMsg_ReplaceMisspelling>(routing_id_, word));
+  SendInput(std::make_unique<InputMsg_ReplaceMisspelling>(routing_id_, word));
 }
 
 void LegacyIPCFrameInputHandler::Delete() {
-  SendInput(base::MakeUnique<InputMsg_Delete>(routing_id_));
+  SendInput(std::make_unique<InputMsg_Delete>(routing_id_));
 }
 
 void LegacyIPCFrameInputHandler::SelectAll() {
-  SendInput(base::MakeUnique<InputMsg_SelectAll>(routing_id_));
+  SendInput(std::make_unique<InputMsg_SelectAll>(routing_id_));
 }
 
 void LegacyIPCFrameInputHandler::CollapseSelection() {
-  SendInput(base::MakeUnique<InputMsg_CollapseSelection>(routing_id_));
+  SendInput(std::make_unique<InputMsg_CollapseSelection>(routing_id_));
 }
 
 void LegacyIPCFrameInputHandler::SelectRange(const gfx::Point& point,
                                              const gfx::Point& extent) {
-  SendInput(base::MakeUnique<InputMsg_SelectRange>(routing_id_, point, extent));
+  SendInput(std::make_unique<InputMsg_SelectRange>(routing_id_, point, extent));
 }
 
-void LegacyIPCFrameInputHandler::AdjustSelectionByCharacterOffset(int32_t start,
-                                                                  int32_t end) {
-  SendInput(base::MakeUnique<InputMsg_AdjustSelectionByCharacterOffset>(
-      routing_id_, start, end));
+void LegacyIPCFrameInputHandler::AdjustSelectionByCharacterOffset(
+    int32_t start,
+    int32_t end,
+    blink::mojom::SelectionMenuBehavior selection_menu_behavior) {
+  SendInput(std::make_unique<InputMsg_AdjustSelectionByCharacterOffset>(
+      routing_id_, start, end,
+      selection_menu_behavior == blink::mojom::SelectionMenuBehavior::kShow));
 }
 
 void LegacyIPCFrameInputHandler::MoveRangeSelectionExtent(
     const gfx::Point& extent) {
   SendInput(
-      base::MakeUnique<InputMsg_MoveRangeSelectionExtent>(routing_id_, extent));
+      std::make_unique<InputMsg_MoveRangeSelectionExtent>(routing_id_, extent));
 }
 
 void LegacyIPCFrameInputHandler::ScrollFocusedEditableNodeIntoRect(
     const gfx::Rect& rect) {
-  SendInput(base::MakeUnique<InputMsg_ScrollFocusedEditableNodeIntoRect>(
+  SendInput(std::make_unique<InputMsg_ScrollFocusedEditableNodeIntoRect>(
       routing_id_, rect));
 }
 
 void LegacyIPCFrameInputHandler::MoveCaret(const gfx::Point& point) {
-  SendInput(base::MakeUnique<InputMsg_MoveCaret>(routing_id_, point));
+  SendInput(std::make_unique<InputMsg_MoveCaret>(routing_id_, point));
+}
+
+void LegacyIPCFrameInputHandler::GetWidgetInputHandler(
+    mojom::WidgetInputHandlerAssociatedRequest interface_request,
+    mojom::WidgetInputHandlerHostPtr host) {
+  NOTREACHED();
 }
 
 void LegacyIPCFrameInputHandler::SendInput(

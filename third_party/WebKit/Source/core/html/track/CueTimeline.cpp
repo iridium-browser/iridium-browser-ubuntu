@@ -4,9 +4,9 @@
 
 #include "core/html/track/CueTimeline.h"
 
-#include "core/events/Event.h"
-#include "core/html/HTMLMediaElement.h"
-#include "core/html/HTMLTrackElement.h"
+#include "core/dom/events/Event.h"
+#include "core/html/media/HTMLMediaElement.h"
+#include "core/html/track/HTMLTrackElement.h"
 #include "core/html/track/LoadableTextTrack.h"
 #include "core/html/track/TextTrack.h"
 #include "core/html/track/TextTrackCue.h"
@@ -67,7 +67,7 @@ void CueTimeline::RemoveCueInternal(TextTrackCue* cue) {
   size_t index = currently_active_cues_.Find(interval);
   if (index != kNotFound) {
     DCHECK(cue->IsActive());
-    currently_active_cues_.erase(index);
+    currently_active_cues_.EraseAt(index);
     cue->SetIsActive(false);
     // Since the cue will be removed from the media element and likely the
     // TextTrack might also be destructed, notifying the region of the cue
@@ -120,7 +120,7 @@ void CueTimeline::UpdateActiveCues(double movie_time) {
   if (IgnoreUpdateRequests())
     return;
 
-  HTMLMediaElement& media_element = this->MediaElement();
+  HTMLMediaElement& media_element = MediaElement();
 
   // Don't run the "time marches on" algorithm if the document has been
   // detached. This primarily guards against dispatch of events w/
@@ -141,9 +141,10 @@ void CueTimeline::UpdateActiveCues(double movie_time) {
   // whenever ... the media element's readyState is changed back to
   // kHaveNothing.
   if (media_element.getReadyState() != HTMLMediaElement::kHaveNothing &&
-      media_element.GetWebMediaPlayer())
+      media_element.GetWebMediaPlayer()) {
     current_cues =
         cue_tree_.AllOverlaps(cue_tree_.CreateInterval(movie_time, movie_time));
+  }
 
   CueList previous_cues;
   CueList missed_cues;
@@ -181,14 +182,9 @@ void CueTimeline::UpdateActiveCues(double movie_time) {
 
   // 5 - If the time was reached through the usual monotonic increase of the
   // current playback position during normal playback, and if the user agent
-  // has not fired a timeupdate event at the element in the past 15 to 250ms
-  // and is not still running event handlers for such an event, then the user
-  // agent must queue a task to fire a simple event named timeupdate at the
-  // element. (In the other cases, such as explicit seeks, relevant events get
-  // fired as part of the overall process of changing the current playback
-  // position.)
-  if (!media_element.seeking() && last_seek_time < last_time)
-    media_element.ScheduleTimeupdateEvent(true);
+  // has not fired a timeupdate event at the element in the past 15 to 250ms...
+  // NOTE: periodic 'timeupdate' scheduling is handled by HTMLMediaElement in
+  // PlaybackProgressTimerFired().
 
   // Explicitly cache vector sizes, as their content is constant from here.
   size_t missed_cues_size = missed_cues.size();
@@ -366,7 +362,7 @@ void CueTimeline::EndIgnoringUpdateRequests() {
     UpdateActiveCues(MediaElement().currentTime());
 }
 
-DEFINE_TRACE(CueTimeline) {
+void CueTimeline::Trace(blink::Visitor* visitor) {
   visitor->Trace(media_element_);
 }
 

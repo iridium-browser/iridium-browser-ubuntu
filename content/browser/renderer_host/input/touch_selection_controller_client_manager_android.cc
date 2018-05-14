@@ -43,6 +43,10 @@ gfx::SelectionBound ScaleSelectionBound(const gfx::SelectionBound& bound,
 }  // namespace
 
 // TouchSelectionControllerClientManager implementation.
+void TouchSelectionControllerClientManagerAndroid::DidStopFlinging() {
+  // TODO(wjmaclean): determine what, if anything, needs to happen here.
+}
+
 void TouchSelectionControllerClientManagerAndroid::UpdateClientSelectionBounds(
     const gfx::SelectionBound& start,
     const gfx::SelectionBound& end,
@@ -135,9 +139,18 @@ void TouchSelectionControllerClientManagerAndroid::OnSelectionEvent(
   rwhv_->OnSelectionEvent(event);
 }
 
+void TouchSelectionControllerClientManagerAndroid::OnDragUpdate(
+    const gfx::PointF& position) {
+  rwhv_->OnDragUpdate(position);
+}
+
 std::unique_ptr<ui::TouchHandleDrawable>
 TouchSelectionControllerClientManagerAndroid::CreateDrawable() {
   return rwhv_->CreateDrawable();
+}
+
+void TouchSelectionControllerClientManagerAndroid::DidScroll() {
+  // Nothing needs to be done here.
 }
 
 }  // namespace content

@@ -27,12 +27,12 @@
 #ifndef ElementShadow_h
 #define ElementShadow_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/ShadowRoot.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
@@ -40,8 +40,6 @@ class ElementShadowV0;
 
 class CORE_EXPORT ElementShadow final : public GarbageCollected<ElementShadow>,
                                         public TraceWrapperBase {
-  WTF_MAKE_NONCOPYABLE(ElementShadow);
-
  public:
   static ElementShadow* Create();
 
@@ -50,59 +48,61 @@ class CORE_EXPORT ElementShadow final : public GarbageCollected<ElementShadow>,
     return shadow_root_->host();
   }
 
-  // TODO(hayato): Remove youngestShadowRoot() and oldestShadowRoot() from
-  // ElementShadow
-  ShadowRoot& YoungestShadowRoot() const;
-  ShadowRoot& OldestShadowRoot() const {
+  ShadowRoot& GetShadowRoot() const {
     DCHECK(shadow_root_);
     return *shadow_root_;
   }
-
   ElementShadow* ContainingShadow() const;
 
   ShadowRoot& AddShadowRoot(Element& shadow_host, ShadowRootType);
-
-  bool HasSameStyles(const ElementShadow&) const;
 
   void Attach(const Node::AttachContext&);
   void Detach(const Node::AttachContext&);
 
   void DistributeIfNeeded();
 
+  void SetNeedsDistributionRecalcWillBeSetNeedsAssignmentRecalc();
   void SetNeedsDistributionRecalc();
   bool NeedsDistributionRecalc() const { return needs_distribution_recalc_; }
 
-  bool IsV1() const { return YoungestShadowRoot().IsV1(); }
-  bool IsOpenOrV0() const { return YoungestShadowRoot().IsOpenOrV0(); }
+  bool IsV1() const { return GetShadowRoot().IsV1(); }
+  bool IsOpenOrV0() const { return GetShadowRoot().IsOpenOrV0(); }
 
   ElementShadowV0& V0() const {
     DCHECK(element_shadow_v0_);
     return *element_shadow_v0_;
   }
 
-  DECLARE_TRACE();
-  DECLARE_TRACE_WRAPPERS();
+  void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   ElementShadow();
 
-  void AppendShadowRoot(ShadowRoot&);
   void Distribute();
 
   TraceWrapperMember<ElementShadowV0> element_shadow_v0_;
   TraceWrapperMember<ShadowRoot> shadow_root_;
   bool needs_distribution_recalc_;
+  DISALLOW_COPY_AND_ASSIGN(ElementShadow);
 };
 
-inline ShadowRoot* Node::YoungestShadowRoot() const {
+inline ShadowRoot* Node::GetShadowRoot() const {
   if (!IsElementNode())
     return nullptr;
-  return ToElement(this)->YoungestShadowRoot();
+  return ToElement(this)->GetShadowRoot();
 }
 
-inline ShadowRoot* Element::YoungestShadowRoot() const {
-  if (ElementShadow* shadow = this->Shadow())
-    return &shadow->YoungestShadowRoot();
+inline ShadowRoot* Element::GetShadowRoot() const {
+  if (ElementShadow* shadow = Shadow())
+    return &shadow->GetShadowRoot();
+  return nullptr;
+}
+
+inline ShadowRoot* Element::ShadowRootIfV1() const {
+  ShadowRoot* root = GetShadowRoot();
+  if (root && root->IsV1())
+    return root;
   return nullptr;
 }
 

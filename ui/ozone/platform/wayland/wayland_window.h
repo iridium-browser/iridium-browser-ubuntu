@@ -5,16 +5,24 @@
 #ifndef UI_OZONE_PLATFORM_WAYLAND_WAYLAND_WINDOW_H_
 #define UI_OZONE_PLATFORM_WAYLAND_WAYLAND_WINDOW_H_
 
+#include "base/memory/ref_counted.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/ozone/platform/wayland/wayland_object.h"
 #include "ui/platform_window/platform_window.h"
+#include "ui/platform_window/platform_window_delegate.h"
 
 namespace ui {
 
+class BitmapCursorOzone;
 class PlatformWindowDelegate;
 class WaylandConnection;
+class XDGSurfaceWrapper;
+
+namespace {
+class XDGShellObjectFactory;
+}  // namespace
 
 class WaylandWindow : public PlatformWindow, public PlatformEventDispatcher {
  public:
@@ -27,7 +35,7 @@ class WaylandWindow : public PlatformWindow, public PlatformEventDispatcher {
 
   bool Initialize();
 
-  wl_surface* surface() { return surface_.get(); }
+  wl_surface* surface() const { return surface_.get(); }
 
   // Apply the bounds specified in the most recent configure event. This should
   // be called after processing all pending events in the wayland connection.
@@ -38,6 +46,9 @@ class WaylandWindow : public PlatformWindow, public PlatformEventDispatcher {
 
   // Set whether this window has keyboard focus and should dispatch key events.
   void set_keyboard_focus(bool focus) { has_keyboard_focus_ = focus; }
+
+  // Set whether this window has touch focus and should dispatch touch events.
+  void set_touch_focus(bool focus) { has_touch_focus_ = focus; }
 
   // PlatformWindow
   void Show() override;
@@ -62,27 +73,49 @@ class WaylandWindow : public PlatformWindow, public PlatformEventDispatcher {
   bool CanDispatchEvent(const PlatformEvent& event) override;
   uint32_t DispatchEvent(const PlatformEvent& event) override;
 
-  // xdg_surface_listener
-  static void Configure(void* data,
-                        xdg_surface* obj,
-                        int32_t width,
-                        int32_t height,
-                        wl_array* states,
-                        uint32_t serial);
-  static void Close(void* data, xdg_surface* obj);
+  void HandleSurfaceConfigure(int32_t widht,
+                              int32_t height,
+                              bool is_maximized,
+                              bool is_fullscreen,
+                              bool is_activated);
+
+  void OnCloseRequest();
 
  private:
+  bool IsMinimized() const;
+  bool IsMaximized() const;
+  bool IsFullscreen() const;
+
+  void SetPendingBounds(int32_t width, int32_t height);
+
+  // Creates a surface window, which is visible as a main window.
+  void CreateXdgSurface();
+
   PlatformWindowDelegate* delegate_;
   WaylandConnection* connection_;
 
+  // Creates xdg objects based on xdg shell version.
+  std::unique_ptr<XDGShellObjectFactory> xdg_shell_objects_factory_;
+
   wl::Object<wl_surface> surface_;
-  wl::Object<xdg_surface> xdg_surface_;
+
+  // Wrapper around xdg v5 and xdg v6 objects. WaylandWindow doesn't
+  // know anything about the version.
+  std::unique_ptr<XDGSurfaceWrapper> xdg_surface_;
+
+  // The current cursor bitmap (immutable).
+  scoped_refptr<BitmapCursorOzone> bitmap_;
 
   gfx::Rect bounds_;
   gfx::Rect pending_bounds_;
-  uint32_t pending_configure_serial_;
+  // The bounds of our window before we were maximized or fullscreen.
+  gfx::Rect restored_bounds_;
   bool has_pointer_focus_ = false;
   bool has_keyboard_focus_ = false;
+  bool has_touch_focus_ = false;
+
+  // Stores current states of the window.
+  ui::PlatformWindowState state_;
 
   DISALLOW_COPY_AND_ASSIGN(WaylandWindow);
 };

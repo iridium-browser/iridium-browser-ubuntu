@@ -5,9 +5,8 @@
 #include "components/browser_sync/profile_sync_service.h"
 
 #include "base/files/file_util.h"
-#include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/browser_sync/profile_sync_test_util.h"
 #include "components/prefs/pref_service.h"
@@ -15,7 +14,7 @@
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/browser/signin_pref_names.h"
 #include "components/sync/base/pref_names.h"
 #include "components/sync/driver/data_type_manager_mock.h"
 #include "components/sync/driver/fake_data_type_controller.h"
@@ -92,9 +91,9 @@ class ProfileSyncServiceStartupTest : public testing::Test {
                                                            builder.Build());
 
     sync_service_ =
-        base::MakeUnique<ProfileSyncService>(std::move(init_params));
+        std::make_unique<ProfileSyncService>(std::move(init_params));
     sync_service_->RegisterDataTypeController(
-        base::MakeUnique<syncer::FakeDataTypeController>(syncer::BOOKMARKS));
+        std::make_unique<syncer::FakeDataTypeController>(syncer::BOOKMARKS));
     sync_service_->AddObserver(&observer_);
   }
 
@@ -148,7 +147,7 @@ class ProfileSyncServiceStartupTest : public testing::Test {
     return profile_sync_service_bundle_.pref_service();
   }
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   ProfileSyncServiceBundle profile_sync_service_bundle_;
   std::unique_ptr<ProfileSyncService> sync_service_;
   SyncServiceObserverMock observer_;

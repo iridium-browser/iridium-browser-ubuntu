@@ -9,7 +9,6 @@
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/GarbageCollected.h"
 #include "platform/wtf/text/WTFString.h"
-#include "public/platform/WebCString.h"
 #include "public/platform/WebRTCStats.h"
 
 #include <map>
@@ -17,8 +16,7 @@
 namespace blink {
 
 // https://w3c.github.io/webrtc-pc/#rtcstatsreport-object
-class RTCStatsReport final : public GarbageCollectedFinalized<RTCStatsReport>,
-                             public ScriptWrappable,
+class RTCStatsReport final : public ScriptWrappable,
                              public Maplike<String, v8::Local<v8::Value>> {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -35,8 +33,6 @@ class RTCStatsReport final : public GarbageCollectedFinalized<RTCStatsReport>,
                    const String& key,
                    v8::Local<v8::Value>&,
                    ExceptionState&) override;
-
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
 
  private:
   std::unique_ptr<WebRTCStatsReport> report_;

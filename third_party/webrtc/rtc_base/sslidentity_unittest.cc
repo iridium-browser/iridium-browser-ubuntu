@@ -11,13 +11,13 @@
 #include <memory>
 #include <string>
 
-#include "webrtc/rtc_base/fakesslidentity.h"
-#include "webrtc/rtc_base/gunit.h"
-#include "webrtc/rtc_base/helpers.h"
-#include "webrtc/rtc_base/ssladapter.h"
-#include "webrtc/rtc_base/sslfingerprint.h"
-#include "webrtc/rtc_base/sslidentity.h"
-#include "webrtc/rtc_base/stringutils.h"
+#include "rtc_base/fakesslidentity.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/helpers.h"
+#include "rtc_base/ssladapter.h"
+#include "rtc_base/sslfingerprint.h"
+#include "rtc_base/sslidentity.h"
+#include "rtc_base/stringutils.h"
 
 using rtc::SSLIdentity;
 
@@ -175,8 +175,7 @@ IdentityAndInfo CreateFakeIdentityAndInfoFromDers(
         reinterpret_cast<const unsigned char*>(der.c_str()),
         der.length()));
   }
-  info.identity.reset(
-      new rtc::FakeSSLIdentity(rtc::FakeSSLCertificate(info.pems)));
+  info.identity.reset(new rtc::FakeSSLIdentity(info.pems));
   // Strip header/footer and newline characters of PEM strings.
   for (size_t i = 0; i < info.pems.size(); ++i) {
     rtc::replace_substrs("-----BEGIN CERTIFICATE-----", 27,
@@ -186,20 +185,14 @@ IdentityAndInfo CreateFakeIdentityAndInfoFromDers(
     rtc::replace_substrs("\n", 1,
                          "", 0, &info.pems[i]);
   }
-  // Fingerprint of leaf certificate.
-  std::unique_ptr<rtc::SSLFingerprint> fp(
-      rtc::SSLFingerprint::Create("sha-1", &info.identity->certificate()));
-  EXPECT_TRUE(fp);
-  info.fingerprints.push_back(fp->GetRfc4572Fingerprint());
-  // Fingerprints of the rest of the chain.
-  std::unique_ptr<rtc::SSLCertChain> chain =
-      info.identity->certificate().GetChain();
-  if (chain) {
-    for (size_t i = 0; i < chain->GetSize(); i++) {
-      fp.reset(rtc::SSLFingerprint::Create("sha-1", &chain->Get(i)));
-      EXPECT_TRUE(fp);
-      info.fingerprints.push_back(fp->GetRfc4572Fingerprint());
-    }
+  // Fingerprints for the whole certificate chain, starting with leaf
+  // certificate.
+  const rtc::SSLCertChain& chain = info.identity->cert_chain();
+  std::unique_ptr<rtc::SSLFingerprint> fp;
+  for (size_t i = 0; i < chain.GetSize(); i++) {
+    fp.reset(rtc::SSLFingerprint::Create("sha-1", &chain.Get(i)));
+    EXPECT_TRUE(fp);
+    info.fingerprints.push_back(fp->GetRfc4572Fingerprint());
   }
   EXPECT_EQ(info.ders.size(), info.fingerprints.size());
   return info;
@@ -207,12 +200,7 @@ IdentityAndInfo CreateFakeIdentityAndInfoFromDers(
 
 class SSLIdentityTest : public testing::Test {
  public:
-  SSLIdentityTest() {}
-
-  ~SSLIdentityTest() {
-  }
-
-  virtual void SetUp() {
+  void SetUp() override {
     identity_rsa1_.reset(SSLIdentity::Generate("test1", rtc::KT_RSA));
     identity_rsa2_.reset(SSLIdentity::Generate("test2", rtc::KT_RSA));
     identity_ecdsa1_.reset(SSLIdentity::Generate("test3", rtc::KT_ECDSA));
@@ -482,7 +470,7 @@ TEST_F(SSLIdentityTest, SSLCertificateGetStatsWithChain) {
   EXPECT_EQ(info.fingerprints.size(), info.ders.size());
 
   std::unique_ptr<rtc::SSLCertificateStats> first_stats =
-      info.identity->certificate().GetStats();
+      info.identity->cert_chain().GetStats();
   rtc::SSLCertificateStats* cert_stats = first_stats.get();
   for (size_t i = 0; i < info.ders.size(); ++i) {
     EXPECT_EQ(cert_stats->fingerprint, info.fingerprints[i]);
@@ -499,7 +487,7 @@ class SSLIdentityExpirationTest : public testing::Test {
     // Set use of the test RNG to get deterministic expiration timestamp.
     rtc::SetRandomTestMode(true);
   }
-  ~SSLIdentityExpirationTest() {
+  ~SSLIdentityExpirationTest() override {
     // Put it back for the next test.
     rtc::SetRandomTestMode(false);
   }
@@ -568,7 +556,7 @@ class SSLIdentityExpirationTest : public testing::Test {
       memcpy(buf, entry.string, length);    // Copy the ASN1 string...
       buf[length] = rtc::CreateRandomId();  // ...and terminate it with junk.
       int64_t res = rtc::ASN1TimeToSec(buf, length, entry.long_format);
-      LOG(LS_VERBOSE) << entry.string;
+      RTC_LOG(LS_VERBOSE) << entry.string;
       ASSERT_EQ(entry.want, res);
     }
     // Run all examples again, but with an invalid length.
@@ -577,7 +565,7 @@ class SSLIdentityExpirationTest : public testing::Test {
       memcpy(buf, entry.string, length);    // Copy the ASN1 string...
       buf[length] = rtc::CreateRandomId();  // ...and terminate it with junk.
       int64_t res = rtc::ASN1TimeToSec(buf, length - 1, entry.long_format);
-      LOG(LS_VERBOSE) << entry.string;
+      RTC_LOG(LS_VERBOSE) << entry.string;
       ASSERT_EQ(-1, res);
     }
   }

@@ -25,6 +25,12 @@ const char* GetComponentName(ui::LatencyComponentType type) {
   switch (type) {
     CASE_TYPE(INPUT_EVENT_LATENCY_BEGIN_RWH_COMPONENT);
     CASE_TYPE(LATENCY_BEGIN_SCROLL_LISTENER_UPDATE_MAIN_COMPONENT);
+    CASE_TYPE(LATENCY_BEGIN_FRAME_RENDERER_MAIN_COMPONENT);
+    CASE_TYPE(LATENCY_BEGIN_FRAME_RENDERER_INVALIDATE_COMPONENT);
+    CASE_TYPE(LATENCY_BEGIN_FRAME_RENDERER_COMPOSITOR_COMPONENT);
+    CASE_TYPE(LATENCY_BEGIN_FRAME_UI_MAIN_COMPONENT);
+    CASE_TYPE(LATENCY_BEGIN_FRAME_UI_COMPOSITOR_COMPONENT);
+    CASE_TYPE(LATENCY_BEGIN_FRAME_DISPLAY_COMPOSITOR_COMPONENT);
     CASE_TYPE(INPUT_EVENT_LATENCY_SCROLL_UPDATE_ORIGINAL_COMPONENT);
     CASE_TYPE(INPUT_EVENT_LATENCY_FIRST_SCROLL_UPDATE_ORIGINAL_COMPONENT);
     CASE_TYPE(INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT);
@@ -53,7 +59,16 @@ const char* GetComponentName(ui::LatencyComponentType type) {
   return "unknown";
 }
 
-bool IsTerminalComponent(ui::LatencyComponentType type) {
+bool IsInputLatencyBeginComponent(ui::LatencyComponentType type) {
+  return type == ui::INPUT_EVENT_LATENCY_BEGIN_RWH_COMPONENT;
+}
+
+bool IsTraceBeginComponent(ui::LatencyComponentType type) {
+  return (IsInputLatencyBeginComponent(type) ||
+          type == ui::LATENCY_BEGIN_SCROLL_LISTENER_UPDATE_MAIN_COMPONENT);
+}
+
+bool IsTraceEndComponent(ui::LatencyComponentType type) {
   switch (type) {
     case ui::INPUT_EVENT_LATENCY_TERMINATED_NO_SWAP_COMPONENT:
     case ui::INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT:
@@ -64,15 +79,6 @@ bool IsTerminalComponent(ui::LatencyComponentType type) {
     default:
       return false;
   }
-}
-
-bool IsBeginComponent(ui::LatencyComponentType type) {
-  return (type == ui::INPUT_EVENT_LATENCY_BEGIN_RWH_COMPONENT ||
-          type == ui::LATENCY_BEGIN_SCROLL_LISTENER_UPDATE_MAIN_COMPONENT);
-}
-
-bool IsInputLatencyBeginComponent(ui::LatencyComponentType type) {
-  return type == ui::INPUT_EVENT_LATENCY_BEGIN_RWH_COMPONENT;
 }
 
 // This class is for converting latency info to trace buffer friendly format.
@@ -134,6 +140,7 @@ LatencyInfo::LatencyInfo() : LatencyInfo(SourceEventType::UNKNOWN) {}
 
 LatencyInfo::LatencyInfo(SourceEventType type)
     : trace_id_(-1),
+      ukm_source_id_(ukm::kInvalidSourceId),
       coalesced_(false),
       began_(false),
       terminated_(false),
@@ -145,6 +152,8 @@ LatencyInfo::~LatencyInfo() {}
 
 LatencyInfo::LatencyInfo(int64_t trace_id, bool terminated)
     : trace_id_(trace_id),
+      ukm_source_id_(ukm::kInvalidSourceId),
+      coalesced_(false),
       began_(false),
       terminated_(terminated),
       source_event_type_(SourceEventType::UNKNOWN) {}
@@ -162,8 +171,31 @@ bool LatencyInfo::Verify(const std::vector<LatencyInfo>& latency_info,
   return true;
 }
 
+void LatencyInfo::TraceIntermediateFlowEvents(
+    const std::vector<LatencyInfo>& latency_info,
+    const char* event_name) {
+  for (auto& latency : latency_info) {
+    if (latency.trace_id() == -1)
+      continue;
+    TRACE_EVENT_WITH_FLOW1("input,benchmark", "LatencyInfo.Flow",
+                           TRACE_ID_DONT_MANGLE(latency.trace_id()),
+                           TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT,
+                           "step", event_name);
+  }
+}
+
 void LatencyInfo::CopyLatencyFrom(const LatencyInfo& other,
                                   LatencyComponentType type) {
+  // Don't clobber an existing trace_id_ or ukm_source_id_.
+  if (trace_id_ == -1) {
+    DCHECK_EQ(ukm_source_id_, ukm::kInvalidSourceId);
+    DCHECK(latency_components().empty());
+    trace_id_ = other.trace_id();
+    ukm_source_id_ = other.ukm_source_id();
+  } else {
+    DCHECK_NE(ukm_source_id_, ukm::kInvalidSourceId);
+  }
+
   for (const auto& lc : other.latency_components()) {
     if (lc.first.first == type) {
       AddLatencyNumberWithTimestamp(lc.first.first,
@@ -177,15 +209,23 @@ void LatencyInfo::CopyLatencyFrom(const LatencyInfo& other,
   expected_queueing_time_on_dispatch_ =
       other.expected_queueing_time_on_dispatch_;
 
-  trace_id_ = other.trace_id();
   coalesced_ = other.coalesced();
-  // TODO(tdresser): Ideally we'd copy |began_| here as well, but |began_| isn't
-  // very intuitive, and we can actually begin multiple times across copied
-  // events.
+  // TODO(tdresser): Ideally we'd copy |began_| here as well, but |began_|
+  // isn't very intuitive, and we can actually begin multiple times across
+  // copied events.
   terminated_ = other.terminated();
 }
 
 void LatencyInfo::AddNewLatencyFrom(const LatencyInfo& other) {
+  // Don't clobber an existing trace_id_ or ukm_source_id_.
+  if (trace_id_ == -1) {
+    trace_id_ = other.trace_id();
+  }
+
+  if (ukm_source_id_ == ukm::kInvalidSourceId) {
+    ukm_source_id_ = other.ukm_source_id();
+  }
+
   for (const auto& lc : other.latency_components()) {
     if (!FindLatency(lc.first.first, lc.first.second, NULL)) {
       AddLatencyNumberWithTimestamp(lc.first.first,
@@ -199,7 +239,6 @@ void LatencyInfo::AddNewLatencyFrom(const LatencyInfo& other) {
   expected_queueing_time_on_dispatch_ =
       other.expected_queueing_time_on_dispatch_;
 
-  trace_id_ = other.trace_id();
   coalesced_ = other.coalesced();
   // TODO(tdresser): Ideally we'd copy |began_| here as well, but |began_| isn't
   // very intuitive, and we can actually begin multiple times across copied
@@ -243,7 +282,7 @@ void LatencyInfo::AddLatencyNumberWithTimestampImpl(
   const unsigned char* latency_info_enabled =
       g_latency_info_enabled.Get().latency_info_enabled;
 
-  if (IsBeginComponent(component)) {
+  if (IsTraceBeginComponent(component)) {
     // Should only ever add begin component once.
     CHECK(!began_);
     began_ = true;
@@ -258,12 +297,9 @@ void LatencyInfo::AddLatencyNumberWithTimestampImpl(
       // not when we actually issue the ASYNC_BEGIN trace event.
       LatencyComponent begin_component;
       base::TimeTicks ts;
-      if (FindLatency(INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT,
-                      0,
+      if (FindLatency(INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT, 0,
                       &begin_component) ||
-          FindLatency(INPUT_EVENT_LATENCY_UI_COMPONENT,
-                      0,
-                      &begin_component)) {
+          FindLatency(INPUT_EVENT_LATENCY_UI_COMPONENT, 0, &begin_component)) {
         ts = begin_component.event_time;
       } else {
         ts = base::TimeTicks::Now();
@@ -311,7 +347,7 @@ void LatencyInfo::AddLatencyNumberWithTimestampImpl(
     }
   }
 
-  if (IsTerminalComponent(component) && began_) {
+  if (IsTraceEndComponent(component) && began_) {
     // Should only ever add terminal component once.
     CHECK(!terminated_);
     terminated_ = true;
@@ -338,8 +374,8 @@ LatencyInfo::AsTraceableData() {
         new base::DictionaryValue());
     component_info->SetDouble("comp_id", static_cast<double>(lc.first.second));
     component_info->SetDouble(
-        "time",
-        static_cast<double>(lc.second.event_time.ToInternalValue()));
+        "time", static_cast<double>(
+                    lc.second.event_time.since_origin().InMicroseconds()));
     component_info->SetDouble("count", lc.second.event_count);
     component_info->SetDouble("sequence_number",
                               lc.second.sequence_number);

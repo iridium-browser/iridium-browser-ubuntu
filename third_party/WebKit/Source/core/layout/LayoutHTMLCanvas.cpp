@@ -27,7 +27,7 @@
 
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
-#include "core/html/HTMLCanvasElement.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
 #include "core/layout/LayoutView.h"
 #include "core/page/Page.h"
 #include "core/paint/HTMLCanvasPaintInvalidator.h"
@@ -52,7 +52,7 @@ void LayoutHTMLCanvas::PaintReplaced(const PaintInfo& paint_info,
 }
 
 void LayoutHTMLCanvas::CanvasSizeChanged() {
-  IntSize canvas_size = toHTMLCanvasElement(GetNode())->Size();
+  IntSize canvas_size = ToHTMLCanvasElement(GetNode())->Size();
   LayoutSize zoomed_size(canvas_size.Width() * Style()->EffectiveZoom(),
                          canvas_size.Height() * Style()->EffectiveZoom());
 
@@ -89,15 +89,15 @@ PaintInvalidationReason LayoutHTMLCanvas::InvalidatePaint(
 }
 
 CompositingReasons LayoutHTMLCanvas::AdditionalCompositingReasons() const {
-  if (toHTMLCanvasElement(GetNode())->ShouldBeDirectComposited())
-    return kCompositingReasonCanvas;
-  return kCompositingReasonNone;
+  if (ToHTMLCanvasElement(GetNode())->ShouldBeDirectComposited())
+    return CompositingReason::kCanvas;
+  return CompositingReason::kNone;
 }
 
 void LayoutHTMLCanvas::StyleDidChange(StyleDifference diff,
                                       const ComputedStyle* old_style) {
   LayoutReplaced::StyleDidChange(diff, old_style);
-  toHTMLCanvasElement(GetNode())->StyleDidChange(old_style, StyleRef());
+  ToHTMLCanvasElement(GetNode())->StyleDidChange(old_style, StyleRef());
 }
 
 }  // namespace blink

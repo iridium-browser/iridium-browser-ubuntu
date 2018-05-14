@@ -31,13 +31,14 @@ WebGLExtensionScopedContext::WebGLExtensionScopedContext(
     WebGLExtension* extension)
     : context_(extension->context_) {}
 
-WebGLExtensionScopedContext::~WebGLExtensionScopedContext() {}
+WebGLExtensionScopedContext::~WebGLExtensionScopedContext() = default;
 
 WebGLExtension::WebGLExtension(WebGLRenderingContextBase* context)
     : context_(context) {}
 
-DEFINE_TRACE(WebGLExtension) {
+void WebGLExtension::Trace(blink::Visitor* visitor) {
   visitor->Trace(context_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

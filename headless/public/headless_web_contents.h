@@ -84,16 +84,16 @@ class HEADLESS_EXPORT HeadlessWebContents {
   // sockets are not allowed.
   virtual HeadlessTabSocket* GetHeadlessTabSocket() const = 0;
 
-  // Returns the devtools frame id corresponding to the |frame_tree_node_id|, if
-  // any. Note this relies on an IPC sent from blink during navigation.
-  virtual std::string GetUntrustedDevToolsFrameIdForFrameTreeNodeId(
-      int process_id,
-      int frame_tree_node_id) const = 0;
-
+  // Returns the main frame's process id or -1 if there's no main frame.
   virtual int GetMainFrameRenderProcessId() const = 0;
 
- private:
-  friend class HeadlessWebContentsImpl;
+  // Returns the main frame's node id or -1 if there's no main frame.
+  virtual int GetMainFrameTreeNodeId() const = 0;
+
+  // Returns the main frame's devtools id or "" if there's no main frame.
+  virtual std::string GetMainFrameDevToolsId() const = 0;
+
+ protected:
   HeadlessWebContents() {}
 
   DISALLOW_COPY_AND_ASSIGN(HeadlessWebContents);
@@ -115,6 +115,9 @@ class HEADLESS_EXPORT HeadlessWebContents::Builder {
 
   // Specify whether or not TabSockets are allowed.
   Builder& SetAllowTabSockets(bool tab_sockets_allowed);
+
+  // Specify whether BeginFrames should be controlled via DevTools commands.
+  Builder& SetEnableBeginFrameControl(bool enable_begin_frame_control);
 
   // The returned object is owned by HeadlessBrowser. Call
   // HeadlessWebContents::Close() to dispose it.
@@ -148,6 +151,7 @@ class HEADLESS_EXPORT HeadlessWebContents::Builder {
   gfx::Size window_size_;
   std::list<MojoService> mojo_services_;
   bool tab_sockets_allowed_ = false;
+  bool enable_begin_frame_control_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(Builder);
 };

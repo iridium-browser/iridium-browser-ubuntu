@@ -5,12 +5,13 @@
 #ifndef WebFormElementObserverImpl_h
 #define WebFormElementObserverImpl_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/heap/HeapAllocator.h"
 #include "platform/heap/Member.h"
 #include "platform/heap/SelfKeepAlive.h"
 #include "platform/wtf/Compiler.h"
-#include "public/web/modules/password_manager/WebFormElementObserver.h"
+#include "public/web/modules/autofill/WebFormElementObserver.h"
 
 namespace blink {
 
@@ -19,9 +20,7 @@ class WebFormElementObserverCallback;
 
 class CORE_EXPORT WebFormElementObserverImpl final
     : public GarbageCollectedFinalized<WebFormElementObserverImpl>,
-      NON_EXPORTED_BASE(public WebFormElementObserver) {
-  WTF_MAKE_NONCOPYABLE(WebFormElementObserverImpl);
-
+      public WebFormElementObserver {
  public:
   WebFormElementObserverImpl(HTMLElement&,
                              std::unique_ptr<WebFormElementObserverCallback>);
@@ -30,7 +29,7 @@ class CORE_EXPORT WebFormElementObserverImpl final
   // WebFormElementObserver implementation.
   void Disconnect() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   class ObserverCallback;
@@ -39,6 +38,8 @@ class CORE_EXPORT WebFormElementObserverImpl final
 
   // WebFormElementObserverImpl must remain alive until Disconnect() is called.
   SelfKeepAlive<WebFormElementObserverImpl> self_keep_alive_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebFormElementObserverImpl);
 };
 
 }  // namespace blink

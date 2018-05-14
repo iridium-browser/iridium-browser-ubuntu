@@ -27,8 +27,9 @@ namespace {
 
 const char kGlobalCookieSetURL[] = "chrome://cookieset";
 
-void OnFetchComplete(const BrowsingDataCookieHelper::FetchCallback& callback,
-                     const net::CookieList& cookies) {
+void OnCookieFetchComplete(
+    const BrowsingDataCookieHelper::FetchCallback& callback,
+    const net::CookieList& cookies) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!callback.is_null());
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
@@ -70,7 +71,7 @@ void BrowsingDataCookieHelper::FetchCookiesOnIOThread(
   DCHECK(!callback.is_null());
   request_context_getter_->GetURLRequestContext()
       ->cookie_store()
-      ->GetAllCookiesAsync(base::BindOnce(&OnFetchComplete, callback));
+      ->GetAllCookiesAsync(base::BindOnce(&OnCookieFetchComplete, callback));
 }
 
 void BrowsingDataCookieHelper::DeleteCookieOnIOThread(
@@ -101,12 +102,8 @@ void CannedBrowsingDataCookieHelper::AddReadCookies(
 void CannedBrowsingDataCookieHelper::AddChangedCookie(
     const GURL& frame_url,
     const GURL& url,
-    const std::string& cookie_line,
-    const net::CookieOptions& options) {
-  std::unique_ptr<net::CanonicalCookie> cookie(net::CanonicalCookie::Create(
-      url, cookie_line, base::Time::Now(), options));
-  if (cookie.get())
-    AddCookie(frame_url, *cookie);
+    const net::CanonicalCookie& cookie) {
+  AddCookie(frame_url, cookie);
 }
 
 void CannedBrowsingDataCookieHelper::Reset() {
@@ -160,7 +157,7 @@ canonical_cookie::CookieHashSet* CannedBrowsingDataCookieHelper::GetCookiesFor(
   if (entry)
     return entry.get();
 
-  entry = base::MakeUnique<canonical_cookie::CookieHashSet>();
+  entry = std::make_unique<canonical_cookie::CookieHashSet>();
   return entry.get();
 }
 

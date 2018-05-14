@@ -7,8 +7,8 @@
 namespace android_webview {
 
 AwContentGpuClient::AwContentGpuClient(
-    const GetSyncPointManagerCallback& callback)
-    : sync_point_manager_callback_(callback) {}
+    const GetSyncPointManagerCallback& sync_point_manager_callback)
+    : sync_point_manager_callback_(sync_point_manager_callback) {}
 
 AwContentGpuClient::~AwContentGpuClient() {}
 

@@ -15,13 +15,13 @@
 
 namespace cc {
 
-class AnimationPlayer;
 class AnimationHost;
 class AnimationTimeline;
+class SingleKeyframeEffectAnimation;
 
-// Contains an AnimationTimeline and its AnimationPlayer that owns the impl
+// Contains an AnimationTimeline and its Animation that owns the impl
 // only scroll offset animations running on a particular CC Layer.
-// We have just one player for impl-only scroll offset animations. I.e. only
+// We have just one animation for impl-only scroll offset animations. I.e. only
 // one element can have an impl-only scroll offset animation at any given time.
 // Note that this class only exists on the compositor thread.
 class CC_ANIMATION_EXPORT ScrollOffsetAnimationsImpl
@@ -55,30 +55,30 @@ class CC_ANIMATION_EXPORT ScrollOffsetAnimationsImpl
 
   // AnimationDelegate implementation.
   void NotifyAnimationStarted(base::TimeTicks monotonic_time,
-                              TargetProperty::Type target_property,
+                              int target_property,
                               int group) override {}
   void NotifyAnimationFinished(base::TimeTicks monotonic_time,
-                               TargetProperty::Type target_property,
+                               int target_property,
                                int group) override;
   void NotifyAnimationAborted(base::TimeTicks monotonic_time,
-                              TargetProperty::Type target_property,
+                              int target_property,
                               int group) override {}
   void NotifyAnimationTakeover(base::TimeTicks monotonic_time,
-                               TargetProperty::Type target_property,
-                               double animation_start_time,
+                               int target_property,
+                               base::TimeTicks animation_start_time,
                                std::unique_ptr<AnimationCurve> curve) override {
   }
 
  private:
-  void ReattachScrollOffsetPlayerIfNeeded(ElementId element_id);
+  void ReattachScrollOffsetAnimationIfNeeded(ElementId element_id);
 
   AnimationHost* animation_host_;
   scoped_refptr<AnimationTimeline> scroll_offset_timeline_;
 
-  // We have just one player for impl-only scroll offset animations.
+  // We have just one animation for impl-only scroll offset animations.
   // I.e. only one element can have an impl-only scroll offset animation at
   // any given time.
-  scoped_refptr<AnimationPlayer> scroll_offset_animation_player_;
+  scoped_refptr<SingleKeyframeEffectAnimation> scroll_offset_animation_;
 
   DISALLOW_COPY_AND_ASSIGN(ScrollOffsetAnimationsImpl);
 };

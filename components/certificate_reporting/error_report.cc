@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/stl_util.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "components/network_time/network_time_tracker.h"
@@ -46,6 +47,7 @@ void AddCertStatusToReportErrors(net::CertStatus cert_status,
   COPY_CERT_STATUS(NO_REVOCATION_MECHANISM)
   RENAME_CERT_STATUS(CERTIFICATE_TRANSPARENCY_REQUIRED,
                      CERTIFICATE_TRANSPARENCY_REQUIRED)
+  COPY_CERT_STATUS(SYMANTEC_LEGACY)
 
 #undef RENAME_CERT_STATUS
 #undef COPY_CERT_STATUS
@@ -57,7 +59,7 @@ bool CertificateChainToString(scoped_refptr<net::X509Certificate> cert,
   if (!cert->GetPEMEncodedChain(&pem_encoded_chain))
     return false;
 
-  *result = base::JoinString(pem_encoded_chain, "");
+  *result = base::StrCat(pem_encoded_chain);
   return true;
 }
 
@@ -130,6 +132,10 @@ void ErrorReport::SetInterstitialInfo(
     case INTERSTITIAL_SUPERFISH:
       interstitial_info->set_interstitial_reason(
           CertLoggerInterstitialInfo::INTERSTITIAL_SUPERFISH);
+      break;
+    case INTERSTITIAL_MITM_SOFTWARE:
+      interstitial_info->set_interstitial_reason(
+          CertLoggerInterstitialInfo::INTERSTITIAL_MITM_SOFTWARE);
       break;
   }
 

@@ -33,7 +33,10 @@ class HTMLOListElement final : public HTMLElement {
  public:
   DECLARE_NODE_FACTORY(HTMLOListElement);
 
-  int start() const;
+  int StartConsideringItemCount() const {
+    return has_explicit_start_ ? start_ : (is_reversed_ ? ItemCount() : 1);
+  }
+  int start() const { return has_explicit_start_ ? start_ : 1; }
   void setStart(int);
 
   bool IsReversed() const { return is_reversed_; }
@@ -55,9 +58,10 @@ class HTMLOListElement final : public HTMLElement {
 
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 
   int start_;
   unsigned item_count_;

@@ -27,7 +27,7 @@ class MemoryBufferBacking : public BufferBacking {
  public:
   explicit MemoryBufferBacking(size_t size)
       : memory_(new char[size]), size_(size) {}
-  ~MemoryBufferBacking() override {}
+  ~MemoryBufferBacking() override = default;
   void* GetMemory() const override { return memory_.get(); }
   size_t GetSize() const override { return size_; }
 
@@ -48,7 +48,7 @@ CommandBufferService::CommandBufferService(
   state_.token = 0;
 }
 
-CommandBufferService::~CommandBufferService() {}
+CommandBufferService::~CommandBufferService() = default;
 
 void CommandBufferService::UpdateState() {
   ++state_.generation;
@@ -117,7 +117,8 @@ void CommandBufferService::Flush(int32_t put_offset,
 }
 
 void CommandBufferService::SetGetBuffer(int32_t transfer_buffer_id) {
-  DCHECK_EQ(put_offset_, state_.get_offset);  // Only if it's empty.
+  DCHECK((put_offset_ == state_.get_offset) ||
+         (state_.error != error::kNoError));
   put_offset_ = 0;
   state_.get_offset = 0;
   ++state_.set_get_buffer_count;
@@ -125,7 +126,6 @@ void CommandBufferService::SetGetBuffer(int32_t transfer_buffer_id) {
   // If the buffer is invalid we handle it gracefully.
   // This means ring_buffer_ can be NULL.
   ring_buffer_ = GetTransferBuffer(transfer_buffer_id);
-  ring_buffer_id_ = transfer_buffer_id;
   if (ring_buffer_) {
     int32_t size = ring_buffer_->size();
     volatile void* memory = ring_buffer_->memory();
@@ -178,14 +178,6 @@ scoped_refptr<Buffer> CommandBufferService::CreateTransferBuffer(size_t size,
 
 void CommandBufferService::DestroyTransferBuffer(int32_t id) {
   transfer_buffer_manager_->DestroyTransferBuffer(id);
-  if (id == ring_buffer_id_) {
-    ring_buffer_id_ = -1;
-    ring_buffer_ = nullptr;
-    buffer_ = nullptr;
-    num_entries_ = 0;
-    state_.get_offset = 0;
-    put_offset_ = 0;
-  }
 }
 
 scoped_refptr<Buffer> CommandBufferService::GetTransferBuffer(int32_t id) {
@@ -203,7 +195,7 @@ scoped_refptr<Buffer> CommandBufferService::CreateTransferBufferWithId(
     size_t size,
     int32_t id) {
   if (!RegisterTransferBuffer(id,
-                              base::MakeUnique<MemoryBufferBacking>(size))) {
+                              std::make_unique<MemoryBufferBacking>(size))) {
     SetParseError(gpu::error::kOutOfBounds);
     return nullptr;
   }

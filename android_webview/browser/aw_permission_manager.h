@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/callback_forward.h"
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/permission_manager.h"
@@ -39,7 +39,6 @@ class AwPermissionManager : public content::PermissionManager {
       const base::Callback<
           void(const std::vector<blink::mojom::PermissionStatus>&)>& callback)
       override;
-  void CancelPermissionRequest(int request_id) override;
   void ResetPermission(content::PermissionType permission,
                        const GURL& requesting_origin,
                        const GURL& embedding_origin) override;
@@ -56,11 +55,12 @@ class AwPermissionManager : public content::PermissionManager {
   void UnsubscribePermissionStatusChange(int subscription_id) override;
 
  protected:
+  void CancelPermissionRequest(int request_id);
   void CancelPermissionRequests();
 
  private:
   class PendingRequest;
-  using PendingRequestsMap = IDMap<std::unique_ptr<PendingRequest>>;
+  using PendingRequestsMap = base::IDMap<std::unique_ptr<PendingRequest>>;
 
   virtual int GetRenderProcessID(content::RenderFrameHost* render_frame_host);
   virtual int GetRenderFrameID(content::RenderFrameHost* render_frame_host);

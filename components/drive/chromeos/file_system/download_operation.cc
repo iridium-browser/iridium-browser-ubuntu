@@ -250,7 +250,7 @@ FileError UpdateLocalStateForDownloadFile(
                        internal::FileCache::FILE_OPERATION_MOVE);
   if (error != FILE_ERROR_OK)
     return error;
-  base::Closure unused_file_deleter_closure = file_deleter.Release();
+  base::OnceClosure unused_file_deleter_closure = file_deleter.Release();
 
   error = metadata->GetResourceEntryById(local_id, entry_after_update);
   if (error != FILE_ERROR_OK)
@@ -284,7 +284,7 @@ class DownloadOperation::DownloadParams {
   void OnCacheFileFound(const base::FilePath& cache_file_path) {
     if (!initialized_callback_.is_null()) {
       initialized_callback_.Run(FILE_ERROR_OK, cache_file_path,
-                                base::MakeUnique<ResourceEntry>(*entry_));
+                                std::make_unique<ResourceEntry>(*entry_));
     }
     completion_callback_.Run(FILE_ERROR_OK, cache_file_path, std::move(entry_));
   }
@@ -297,7 +297,7 @@ class DownloadOperation::DownloadParams {
 
     DCHECK(entry_);
     initialized_callback_.Run(FILE_ERROR_OK, base::FilePath(),
-                              base::MakeUnique<ResourceEntry>(*entry_));
+                              std::make_unique<ResourceEntry>(*entry_));
   }
 
   void OnError(FileError error) const {
@@ -378,22 +378,15 @@ base::Closure DownloadOperation::EnsureFileDownloadedByLocalId(
                          completion_callback, base::WrapUnique(entry)));
   base::Closure cancel_closure = download_params->GetCancelClosure();
   base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(),
-      FROM_HERE,
-      base::Bind(&CheckPreConditionForEnsureFileDownloadedByLocalId,
-                 params,
-                 local_id,
-                 drive_file_path,
-                 cache_file_path,
-                 temp_download_file_path,
-                 entry),
-      base::Bind(&DownloadOperation::EnsureFileDownloadedAfterCheckPreCondition,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&download_params),
-                 context,
-                 base::Owned(drive_file_path),
-                 base::Owned(cache_file_path),
-                 base::Owned(temp_download_file_path)));
+      blocking_task_runner_.get(), FROM_HERE,
+      base::BindOnce(&CheckPreConditionForEnsureFileDownloadedByLocalId, params,
+                     local_id, drive_file_path, cache_file_path,
+                     temp_download_file_path, entry),
+      base::BindOnce(
+          &DownloadOperation::EnsureFileDownloadedAfterCheckPreCondition,
+          weak_ptr_factory_.GetWeakPtr(), std::move(download_params), context,
+          base::Owned(drive_file_path), base::Owned(cache_file_path),
+          base::Owned(temp_download_file_path)));
   return cancel_closure;
 }
 
@@ -419,21 +412,15 @@ base::Closure DownloadOperation::EnsureFileDownloadedByPath(
                          completion_callback, base::WrapUnique(entry)));
   base::Closure cancel_closure = download_params->GetCancelClosure();
   base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(),
-      FROM_HERE,
-      base::Bind(&CheckPreConditionForEnsureFileDownloadedByPath,
-                 params,
-                 file_path,
-                 cache_file_path,
-                 temp_download_file_path,
-                 entry),
-      base::Bind(&DownloadOperation::EnsureFileDownloadedAfterCheckPreCondition,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&download_params),
-                 context,
-                 base::Owned(drive_file_path),
-                 base::Owned(cache_file_path),
-                 base::Owned(temp_download_file_path)));
+      blocking_task_runner_.get(), FROM_HERE,
+      base::BindOnce(&CheckPreConditionForEnsureFileDownloadedByPath, params,
+                     file_path, cache_file_path, temp_download_file_path,
+                     entry),
+      base::BindOnce(
+          &DownloadOperation::EnsureFileDownloadedAfterCheckPreCondition,
+          weak_ptr_factory_.GetWeakPtr(), std::move(download_params), context,
+          base::Owned(drive_file_path), base::Owned(cache_file_path),
+          base::Owned(temp_download_file_path)));
   return cancel_closure;
 }
 
@@ -498,14 +485,13 @@ void DownloadOperation::EnsureFileDownloadedAfterDownloadFile(
   base::FilePath* cache_file_path = new base::FilePath;
   base::PostTaskAndReplyWithResult(
       blocking_task_runner_.get(), FROM_HERE,
-      base::Bind(&UpdateLocalStateForDownloadFile, metadata_, cache_,
-                 params_ptr->entry(), gdata_error, downloaded_file_path,
-                 entry_after_update, cache_file_path),
-      base::Bind(&DownloadOperation::EnsureFileDownloadedAfterUpdateLocalState,
-                 weak_ptr_factory_.GetWeakPtr(), drive_file_path,
-                 base::Passed(&params),
-                 base::Passed(base::WrapUnique(entry_after_update)),
-                 base::Owned(cache_file_path)));
+      base::BindOnce(&UpdateLocalStateForDownloadFile, metadata_, cache_,
+                     params_ptr->entry(), gdata_error, downloaded_file_path,
+                     entry_after_update, cache_file_path),
+      base::BindOnce(
+          &DownloadOperation::EnsureFileDownloadedAfterUpdateLocalState,
+          weak_ptr_factory_.GetWeakPtr(), drive_file_path, std::move(params),
+          base::WrapUnique(entry_after_update), base::Owned(cache_file_path)));
 }
 
 void DownloadOperation::EnsureFileDownloadedAfterUpdateLocalState(

@@ -15,7 +15,7 @@
 #include "modules/shapedetection/Landmark.h"
 #include "public/platform/Platform.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
-#include "services/shape_detection/public/interfaces/facedetection_provider.mojom-blink.h"
+#include "services/shape_detection/public/mojom/facedetection_provider.mojom-blink.h"
 
 namespace blink {
 
@@ -34,23 +34,18 @@ FaceDetector::FaceDetector(ExecutionContext* context,
 
   shape_detection::mojom::blink::FaceDetectionProviderPtr provider;
   auto request = mojo::MakeRequest(&provider);
-  if (context->IsDocument()) {
-    LocalFrame* frame = ToDocument(context)->GetFrame();
-    if (frame)
-      frame->GetInterfaceProvider().GetInterface(std::move(request));
-  } else {
-    WorkerThread* thread = ToWorkerGlobalScope(context)->GetThread();
-    thread->GetInterfaceProvider().GetInterface(std::move(request));
+  if (auto* interface_provider = context->GetInterfaceProvider()) {
+    interface_provider->GetInterface(std::move(request));
   }
   provider->CreateFaceDetection(mojo::MakeRequest(&face_service_),
                                 std::move(face_detector_options));
 
-  face_service_.set_connection_error_handler(ConvertToBaseCallback(WTF::Bind(
-      &FaceDetector::OnFaceServiceConnectionError, WrapWeakPersistent(this))));
+  face_service_.set_connection_error_handler(WTF::Bind(
+      &FaceDetector::OnFaceServiceConnectionError, WrapWeakPersistent(this)));
 }
 
 ScriptPromise FaceDetector::DoDetect(ScriptPromiseResolver* resolver,
-                                     skia::mojom::blink::BitmapPtr bitmap) {
+                                     SkBitmap bitmap) {
   ScriptPromise promise = resolver->Promise();
   if (!face_service_) {
     resolver->Reject(DOMException::Create(
@@ -58,10 +53,10 @@ ScriptPromise FaceDetector::DoDetect(ScriptPromiseResolver* resolver,
     return promise;
   }
   face_service_requests_.insert(resolver);
-  face_service_->Detect(std::move(bitmap),
-                        ConvertToBaseCallback(WTF::Bind(
-                            &FaceDetector::OnDetectFaces, WrapPersistent(this),
-                            WrapPersistent(resolver))));
+  face_service_->Detect(
+      std::move(bitmap),
+      WTF::Bind(&FaceDetector::OnDetectFaces, WrapPersistent(this),
+                WrapPersistent(resolver)));
   return promise;
 }
 
@@ -108,7 +103,7 @@ void FaceDetector::OnFaceServiceConnectionError() {
   face_service_.reset();
 }
 
-DEFINE_TRACE(FaceDetector) {
+void FaceDetector::Trace(blink::Visitor* visitor) {
   ShapeDetector::Trace(visitor);
   visitor->Trace(face_service_requests_);
 }

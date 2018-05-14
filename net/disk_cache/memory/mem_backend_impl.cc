@@ -6,11 +6,13 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <utility>
 
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/trace_event/memory_usage_estimator.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "net/base/net_errors.h"
@@ -38,6 +40,19 @@ bool CheckLRUListOrder(const base::LinkedList<MemEntryImpl>& lru_list) {
   return true;
 }
 
+// Returns the next entry after |node| in |lru_list| that's not a child
+// of |node|.  This is useful when dooming, since dooming a parent entry
+// will also doom its children.
+base::LinkNode<MemEntryImpl>* NextSkippingChildren(
+    const base::LinkedList<MemEntryImpl>& lru_list,
+    base::LinkNode<MemEntryImpl>* node) {
+  MemEntryImpl* cur = node->value();
+  do {
+    node = node->next();
+  } while (node != lru_list.end() && node->value()->parent() == cur);
+  return node;
+}
+
 }  // namespace
 
 MemBackendImpl::MemBackendImpl(net::NetLog* net_log)
@@ -48,16 +63,21 @@ MemBackendImpl::~MemBackendImpl() {
   DCHECK(CheckLRUListOrder(lru_list_));
   while (!entries_.empty())
     entries_.begin()->second->Doom();
-  DCHECK_EQ(0, current_size_);
+
+  if (!post_cleanup_callback_.is_null())
+    base::SequencedTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, std::move(post_cleanup_callback_));
 }
 
 // static
-std::unique_ptr<Backend> MemBackendImpl::CreateBackend(int max_bytes,
-                                                       net::NetLog* net_log) {
-  std::unique_ptr<MemBackendImpl> cache(new MemBackendImpl(net_log));
+std::unique_ptr<MemBackendImpl> MemBackendImpl::CreateBackend(
+    int max_bytes,
+    net::NetLog* net_log) {
+  std::unique_ptr<MemBackendImpl> cache(
+      std::make_unique<MemBackendImpl>(net_log));
   cache->SetMaxSize(max_bytes);
   if (cache->Init())
-    return std::move(cache);
+    return cache;
 
   LOG(ERROR) << "Unable to create cache";
   return nullptr;
@@ -132,6 +152,11 @@ bool MemBackendImpl::HasExceededStorageSize() const {
   return current_size_ > max_size_;
 }
 
+void MemBackendImpl::SetPostCleanupCallback(base::OnceClosure cb) {
+  DCHECK(post_cleanup_callback_.is_null());
+  post_cleanup_callback_ = std::move(cb);
+}
+
 net::CacheType MemBackendImpl::GetCacheType() const {
   return net::MEMORY_CACHE;
 }
@@ -162,7 +187,8 @@ int MemBackendImpl::CreateEntry(const std::string& key,
   if (!did_insert)
     return net::ERR_FAILED;
 
-  MemEntryImpl* cache_entry = new MemEntryImpl(this, key, net_log_);
+  MemEntryImpl* cache_entry =
+      new MemEntryImpl(weak_factory_.GetWeakPtr(), key, net_log_);
   create_result.first->second = cache_entry;
   *entry = cache_entry;
   return net::OK;
@@ -194,7 +220,7 @@ int MemBackendImpl::DoomEntriesBetween(Time initial_time,
     node = node->next();
   while (node != lru_list_.end() && node->value()->GetLastUsed() < end_time) {
     MemEntryImpl* to_doom = node->value();
-    node = node->next();
+    node = NextSkippingChildren(lru_list_, node);
     to_doom->Doom();
   }
 
@@ -242,7 +268,7 @@ class MemBackendImpl::MemIterator final : public Backend::Iterator {
       return net::ERR_FAILED;
 
     if (!backend_keys_) {
-      backend_keys_ = base::MakeUnique<Strings>(backend_->entries_.size());
+      backend_keys_ = std::make_unique<Strings>(backend_->entries_.size());
       for (const auto& iter : backend_->entries_)
         backend_keys_->push_back(iter.first);
       current_ = backend_keys_->begin();
@@ -319,7 +345,8 @@ void MemBackendImpl::EvictIfNeeded() {
   base::LinkNode<MemEntryImpl>* entry = lru_list_.head();
   while (current_size_ > target_size && entry != lru_list_.end()) {
     MemEntryImpl* to_doom = entry->value();
-    entry = entry->next();
+    entry = NextSkippingChildren(lru_list_, entry);
+
     if (!to_doom->InUse())
       to_doom->Doom();
   }

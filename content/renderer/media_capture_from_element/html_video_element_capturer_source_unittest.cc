@@ -13,6 +13,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayer.h"
 #include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 
 using ::testing::_;
 using ::testing::InSequence;
@@ -35,10 +36,10 @@ class MockWebMediaPlayer : public blink::WebMediaPlayer,
   void Load(LoadType, const blink::WebMediaPlayerSource&, CORSMode) override {}
   void Play() override {}
   void Pause() override {}
-  bool SupportsSave() const override { return true; }
   void Seek(double seconds) override {}
   void SetRate(double) override {}
   void SetVolume(double) override {}
+  void EnterPictureInPicture() override {}
   blink::WebTimeRanges Buffered() const override {
     return blink::WebTimeRanges();
   }
@@ -51,6 +52,7 @@ class MockWebMediaPlayer : public blink::WebMediaPlayer,
   bool HasVideo() const override { return true; }
   bool HasAudio() const override { return false; }
   blink::WebSize NaturalSize() const override { return blink::WebSize(16, 10); }
+  blink::WebSize VisibleRect() const override { return blink::WebSize(16, 10); }
   bool Paused() const override { return false; }
   bool Seeking() const override { return false; }
   double Duration() const override { return 0.0; }
@@ -62,6 +64,7 @@ class MockWebMediaPlayer : public blink::WebMediaPlayer,
   }
 
   bool DidLoadingProgress() override { return true; }
+  bool DidGetOpaqueResponseFromServiceWorker() const override { return false; }
   bool HasSingleSecurityOrigin() const override { return true; }
   bool DidPassCORSAccessCheck() const override { return true; }
   double MediaTimeForTimeValue(double timeValue) const override { return 0.0; }
@@ -73,7 +76,9 @@ class MockWebMediaPlayer : public blink::WebMediaPlayer,
 
   void Paint(blink::WebCanvas* canvas,
              const blink::WebRect& paint_rectangle,
-             cc::PaintFlags&) override {
+             cc::PaintFlags&,
+             int already_uploaded_id,
+             VideoFrameUploadMetadata* out_metadata) override {
     // We could fill in |canvas| with a meaningful pattern in ARGB and verify
     // that is correctly captured (as I420) by HTMLVideoElementCapturerSource
     // but I don't think that'll be easy/useful/robust, so just let go here.
@@ -89,7 +94,8 @@ class HTMLVideoElementCapturerSourceTest : public testing::Test {
         web_media_player_(new MockWebMediaPlayer()),
         html_video_capturer_(new HtmlVideoElementCapturerSource(
             web_media_player_->AsWeakPtr(),
-            base::ThreadTaskRunnerHandle::Get())) {}
+            blink::scheduler::GetSingleThreadTaskRunnerForTesting(),
+            blink::scheduler::GetSingleThreadTaskRunnerForTesting())) {}
 
   // Necessary callbacks and MOCK_METHODS for them.
   MOCK_METHOD2(DoOnDeliverFrame,
@@ -115,7 +121,7 @@ class HTMLVideoElementCapturerSourceTest : public testing::Test {
 // and its inner object(s). This is a non trivial sequence.
 TEST_F(HTMLVideoElementCapturerSourceTest, ConstructAndDestruct) {}
 
-// Checks that the usual sequence of GetCurrentSupportedFormats() ->
+// Checks that the usual sequence of GetPreferredFormats() ->
 // StartCapture() -> StopCapture() works as expected and let it capture two
 // frames.
 TEST_F(HTMLVideoElementCapturerSourceTest, GetFormatsAndStartAndStop) {
@@ -135,10 +141,12 @@ TEST_F(HTMLVideoElementCapturerSourceTest, GetFormatsAndStartAndStop) {
 
   base::RunLoop run_loop;
   base::Closure quit_closure = run_loop.QuitClosure();
-  EXPECT_CALL(*this, DoOnDeliverFrame(_, _)).Times(1);
+  scoped_refptr<media::VideoFrame> first_frame;
+  scoped_refptr<media::VideoFrame> second_frame;
+  EXPECT_CALL(*this, DoOnDeliverFrame(_, _)).WillOnce(SaveArg<0>(&first_frame));
   EXPECT_CALL(*this, DoOnDeliverFrame(_, _))
       .Times(1)
-      .WillOnce(RunClosure(quit_closure));
+      .WillOnce(DoAll(SaveArg<0>(&second_frame), RunClosure(quit_closure)));
 
   html_video_capturer_->StartCapture(
       params, base::Bind(&HTMLVideoElementCapturerSourceTest::OnDeliverFrame,
@@ -148,7 +156,41 @@ TEST_F(HTMLVideoElementCapturerSourceTest, GetFormatsAndStartAndStop) {
 
   run_loop.Run();
 
+  EXPECT_EQ(0u, first_frame->timestamp().InMilliseconds());
+  EXPECT_GT(second_frame->timestamp().InMilliseconds(), 30u);
   html_video_capturer_->StopCapture();
+  Mock::VerifyAndClearExpectations(this);
+}
+
+// When a new source is created and started, it is stopped in the same task
+// when cross-origin data is detected. This test checks that no data is
+// delivered in this case.
+TEST_F(HTMLVideoElementCapturerSourceTest,
+       StartAndStopInSameTaskCaptureZeroFrames) {
+  InSequence s;
+  media::VideoCaptureFormats formats =
+      html_video_capturer_->GetPreferredFormats();
+  ASSERT_EQ(1u, formats.size());
+  EXPECT_EQ(web_media_player_->NaturalSize().width,
+            formats[0].frame_size.width());
+  EXPECT_EQ(web_media_player_->NaturalSize().height,
+            formats[0].frame_size.height());
+
+  media::VideoCaptureParams params;
+  params.requested_format = formats[0];
+
+  EXPECT_CALL(*this, DoOnRunning(true));
+  EXPECT_CALL(*this, DoOnDeliverFrame(_, _)).Times(0);
+
+  html_video_capturer_->StartCapture(
+      params,
+      base::Bind(&HTMLVideoElementCapturerSourceTest::OnDeliverFrame,
+                 base::Unretained(this)),
+      base::Bind(&HTMLVideoElementCapturerSourceTest::OnRunning,
+                 base::Unretained(this)));
+  html_video_capturer_->StopCapture();
+  base::RunLoop().RunUntilIdle();
+
   Mock::VerifyAndClearExpectations(this);
 }
 

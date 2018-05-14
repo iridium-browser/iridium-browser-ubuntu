@@ -10,6 +10,7 @@ import unittest
 from tracing.value import histogram
 from tracing.value.diagnostics import diagnostic
 from tracing.value.diagnostics import diagnostic_ref
+from tracing.value.diagnostics import generic_set
 from tracing.value.diagnostics import reserved_infos
 
 # pylint: disable=too-many-lines
@@ -151,6 +152,40 @@ class HistogramUnittest(unittest.TestCase):
   def assertDeepEqual(self, a, b):
     self.assertEqual(ToJSON(a), ToJSON(b))
 
+  def testDefaultBoundaries(self):
+    hist = histogram.Histogram('', 'ms')
+    self.assertEqual(len(hist.bins), 102)
+
+    hist = histogram.Histogram('', 'tsMs')
+    self.assertEqual(len(hist.bins), 1002)
+
+    hist = histogram.Histogram('', 'n%')
+    self.assertEqual(len(hist.bins), 22)
+
+    hist = histogram.Histogram('', 'sizeInBytes')
+    self.assertEqual(len(hist.bins), 102)
+
+    hist = histogram.Histogram('', 'J')
+    self.assertEqual(len(hist.bins), 52)
+
+    hist = histogram.Histogram('', 'W')
+    self.assertEqual(len(hist.bins), 52)
+
+    hist = histogram.Histogram('', 'unitless')
+    self.assertEqual(len(hist.bins), 52)
+
+    hist = histogram.Histogram('', 'count')
+    self.assertEqual(len(hist.bins), 22)
+
+    hist = histogram.Histogram('', 'sigma')
+    self.assertEqual(len(hist.bins), 52)
+
+    hist = histogram.Histogram('', 'sigma_smallerIsBetter')
+    self.assertEqual(len(hist.bins), 52)
+
+    hist = histogram.Histogram('', 'sigma_biggerIsBetter')
+    self.assertEqual(len(hist.bins), 52)
+
   def testSerializationSize(self):
     hist = histogram.Histogram('', 'unitless', self.TEST_BOUNDARIES)
     d = hist.AsDict()
@@ -171,7 +206,7 @@ class HistogramUnittest(unittest.TestCase):
     self.assertIsInstance(d['allBins'], dict)
     self.assertDeepEqual(d, histogram.Histogram.FromDict(d).AsDict())
 
-    hist.AddSample(271, {'foo': histogram.GenericSet(['bar'])})
+    hist.AddSample(271, {'foo': generic_set.GenericSet(['bar'])})
     d = hist.AsDict()
     self.assertEqual(268, len(ToJSON(d)))
     self.assertIsInstance(d['allBins'], dict)
@@ -533,95 +568,34 @@ class HistogramUnittest(unittest.TestCase):
     self.assertEqual(3, hist.GetApproximatePercentile(0.9))
     self.assertEqual(4, hist.GetApproximatePercentile(1))
 
-class OwnershipUnittest(unittest.TestCase):
-
-  def testInitRequiresEmailsAsIterable(self):
-    with self.assertRaises(TypeError):
-      _ = histogram.Ownership(123)
-
-  def testInitEmailsDefaultValue(self):
-    owner_empty_emails = histogram.Ownership(None)
-    self.assertEqual(owner_empty_emails.emails, [])
-    self.assertIsNone(owner_empty_emails.component)
-
-  def testInitRequiredComponentAsStr(self):
-    with self.assertRaises(TypeError):
-      _ = histogram.Ownership([], ['foo'])
-
-  def testEmails(self):
-    ownership = histogram.Ownership([])
-    self.assertEqual(ownership.emails, [])
-
-    ownership = histogram.Ownership(['alice@chromium.org'])
-    self.assertEqual(ownership.emails, ['alice@chromium.org'])
-
-  def testComponent(self):
-    ownership = histogram.Ownership([])
-    self.assertIsNone(ownership.component)
-
-    ownership = histogram.Ownership([], 'fooBar')
-    self.assertEqual(ownership.component, 'fooBar')
-
-  def testFromDict(self):
-    sample_emails = ['alice@chromium.org', 'bob@chromium.org']
-
-    ownership_dict = {'emails': sample_emails}
-    ownership_no_component = histogram.Ownership.FromDict(ownership_dict)
-    self.assertEqual(ownership_no_component.emails, sample_emails)
-    self.assertIsNone(ownership_no_component.component)
-
-    ownership_dict['component'] = 'fooBar'
-    ownership_with_component = histogram.Ownership.FromDict(ownership_dict)
-    self.assertEqual(ownership_with_component.emails, sample_emails)
-    self.assertEqual(ownership_with_component.component, 'fooBar')
-
-  def testAsDict(self):
-    sample_emails = ['alice@chromium.org']
-
-    ownership_no_component = histogram.Ownership(sample_emails)
-    ownership_dict_no_component = ownership_no_component.AsDict()
-
-    sample_emails.append('bob@chromium.org')
-
-    ownership_with_component = histogram.Ownership(sample_emails, 'fooBar')
-
-    self.assertEqual(ownership_dict_no_component['emails'],
-                     ['alice@chromium.org'])
-    self.assertNotIn('component', ownership_dict_no_component)
-    self.assertEqual(ownership_with_component.AsDict()['component'], 'fooBar')
-
-  def testEquality(self):
-    ownership0 = histogram.Ownership(['alice@chromium.org'], 'foo')
-    ownership1 = histogram.Ownership(['alice@chromium.org'], 'foo')
-
-    self.assertEqual(ownership0, ownership1)
-
-  def testInequality(self):
-    ownership0 = histogram.Ownership(['alice@chromium.org'], 'foo')
-    ownership1 = histogram.Ownership(['alice@chromium.org'], 'bar')
-
-    self.assertNotEqual(ownership0, ownership1)
-
-class BreakdownUnittest(unittest.TestCase):
-
-  def testRoundtrip(self):
-    bd = histogram.Breakdown()
-    bd.Set('one', 1)
-    bd.Set('m1', -1)
-    bd.Set('inf', float('inf'))
-    bd.Set('nun', float('nan'))
-    bd.Set('ninf', float('-inf'))
-    d = bd.AsDict()
-    clone = diagnostic.Diagnostic.FromDict(d)
-    self.assertEqual(ToJSON(d), ToJSON(clone.AsDict()))
-    self.assertEqual(clone.Get('one'), 1)
-    self.assertEqual(clone.Get('m1'), -1)
-    self.assertEqual(clone.Get('inf'), float('inf'))
-    self.assertTrue(math.isnan(clone.Get('nun')))
-    self.assertEqual(clone.Get('ninf'), float('-inf'))
-
 
 class TagMapUnittest(unittest.TestCase):
+
+  def testEquality(self):
+    tags0 = {
+        'tag1': ['path1', 'path2'],
+        'tag2': ['path1', 'path2', 'path3']
+    }
+    tags1 = {
+        'tag1': ['path1', 'path2'],
+        'tag2': ['path1', 'path2', 'path3']
+    }
+    info0 = histogram.TagMap({'tagsToStoryNames': tags0})
+    info1 = histogram.TagMap({'tagsToStoryNames': tags1})
+    self.assertEqual(info0, info1)
+
+  def testInequality(self):
+    tags0 = {
+        'tag1': ['path1', 'path2'],
+        'tag2': ['path1', 'path2', 'path3']
+    }
+    tags1 = {
+        'tag1': ['path1', 'path2']
+    }
+    info0 = histogram.TagMap({'tagsToStoryNames': tags0})
+    info1 = histogram.TagMap({'tagsToStoryNames': tags1})
+    self.assertNotEqual(info0, info1)
+
   def testRoundtrip(self):
     tags = {
         'tag1': ['path1', 'path2', 'path3'],
@@ -665,21 +639,20 @@ class TagMapUnittest(unittest.TestCase):
             'android': ['story3', 'story4', 'story5']
         }})
 
-    self.assertFalse(t0.CanAddDiagnostic(
-        histogram.GenericSet([]), None, None, None))
-    self.assertTrue(t0.CanAddDiagnostic(t1, None, None, None))
+    self.assertFalse(t0.CanAddDiagnostic(generic_set.GenericSet([])))
+    self.assertTrue(t0.CanAddDiagnostic(t1))
 
     m0 = diagnostic.Diagnostic.FromDict(t0.AsDict())
 
     self.assertTrue(isinstance(m0, histogram.TagMap))
     self.assertFalse(
-        m0.CanAddDiagnostic(histogram.GenericSet([]), None, None, None))
-    self.assertTrue(m0.CanAddDiagnostic(t1, None, None, None))
+        m0.CanAddDiagnostic(generic_set.GenericSet([])))
+    self.assertTrue(m0.CanAddDiagnostic(t1))
 
-    m0.AddDiagnostic(t1, None, None, None)
+    m0.AddDiagnostic(t1)
 
     m1 = diagnostic.Diagnostic.FromDict(t1.AsDict())
-    m1.AddDiagnostic(t0, None, None, None)
+    m1.AddDiagnostic(t0)
 
     self.assertDictEqual(m0.AsDict(), m1.AsDict())
 
@@ -704,226 +677,6 @@ class TagMapUnittest(unittest.TestCase):
         set(['story3', 'story4', 'story5']))
 
 
-class BuildbotInfoUnittest(unittest.TestCase):
-  def testRoundtrip(self):
-    info = histogram.BuildbotInfo({
-        'displayMasterName': 'dmn',
-        'displayBotName': 'dbn',
-        'buildbotMasterName': 'bbmn',
-        'buildbotName': 'bbn',
-        'buildNumber': 42,
-        'logUri': 'uri',
-    })
-    d = info.AsDict()
-    clone = diagnostic.Diagnostic.FromDict(d)
-    self.assertEqual(ToJSON(d), ToJSON(clone.AsDict()))
-    self.assertEqual(clone.display_master_name, 'dmn')
-    self.assertEqual(clone.display_bot_name, 'dbn')
-    self.assertEqual(clone.buildbot_master_name, 'bbmn')
-    self.assertEqual(clone.buildbot_name, 'bbn')
-    self.assertEqual(clone.build_number, 42)
-    self.assertEqual(clone.log_uri, 'uri')
-
-  def testEquality(self):
-    info0 = histogram.BuildbotInfo({
-        'displayMasterName': 'dmn',
-        'displayBotName': 'dbn',
-        'buildbotMasterName': 'bbmn',
-        'buildbotName': 'bbn',
-        'buildNumber': 42,
-        'logUri': 'uri',
-        'guid': 'abc'
-    })
-    info1 = histogram.BuildbotInfo({
-        'displayMasterName': 'dmn',
-        'displayBotName': 'dbn',
-        'buildbotMasterName': 'bbmn',
-        'buildbotName': 'bbn',
-        'buildNumber': 42,
-        'logUri': 'uri',
-        'guid': 'def'
-    })
-    self.assertEqual(info0, info1)
-
-  def testInequality(self):
-    info0 = histogram.BuildbotInfo({
-        'displayMasterName': 'dmn0',
-        'displayBotName': 'dbn',
-        'buildbotMasterName': 'bbmn',
-        'buildbotName': 'bbn',
-        'buildNumber': 42,
-        'logUri': 'uri',
-        'guid': 'abc'
-    })
-    info1 = histogram.BuildbotInfo({
-        'displayMasterName': 'dmn1',
-        'displayBotName': 'dbn',
-        'buildbotMasterName': 'bbmn',
-        'buildbotName': 'bbn',
-        'buildNumber': 42,
-        'logUri': 'uri',
-        'guid': 'def'
-    })
-    self.assertNotEqual(info0, info1)
-
-
-class RevisionInfoUnittest(unittest.TestCase):
-  def testRoundtrip(self):
-    info = histogram.RevisionInfo({
-        'chromiumCommitPosition': 42,
-        'v8CommitPosition': 57,
-        'chromium': ['b10563e'],
-        'v8': ['0a12a6'],
-        'catapult': ['e6e086'],
-        'angle': ['d7b1ab', 'da9fb0'],
-        'skia': ['966bb3', 'db402c'],
-        'webrtc': ['277b25', 'f8b262'],
-    })
-    d = info.AsDict()
-    clone = diagnostic.Diagnostic.FromDict(d)
-    self.assertEqual(ToJSON(d), ToJSON(clone.AsDict()))
-    self.assertEqual(clone.chromium_commit_position, 42)
-    self.assertEqual(clone.v8_commit_position, 57)
-    self.assertEqual(clone.chromium[0], 'b10563e')
-    self.assertEqual(clone.v8[0], '0a12a6')
-    self.assertEqual(clone.catapult[0], 'e6e086')
-    self.assertEqual(clone.angle[1], 'da9fb0')
-    self.assertEqual(clone.skia[1], 'db402c')
-    self.assertEqual(clone.webrtc[1], 'f8b262')
-
-
-class TelemetryInfoUnittest(unittest.TestCase):
-  def testRoundtrip(self):
-    info = histogram.TelemetryInfo()
-    info.AddInfo({
-        'benchmarkName': 'foo',
-        'benchmarkStartMs': 42,
-        'label': 'lbl',
-        'storyDisplayName': 'story',
-        'storyGroupingKeys': {'a': 'b'},
-        'storysetRepeatCounter': 1,
-        'legacyTIRLabel': 'tir',
-    })
-    d = info.AsDict()
-    clone = diagnostic.Diagnostic.FromDict(d)
-    self.assertEqual(ToJSON(d), ToJSON(clone.AsDict()))
-    self.assertEqual(clone.benchmark_name, 'foo')
-    self.assertEqual(clone.benchmark_start, 42)
-    self.assertEqual(clone.label, 'lbl')
-    self.assertEqual(clone.story_display_name, 'story')
-    self.assertEqual(clone.story_grouping_keys['a'], 'b')
-    self.assertEqual(clone.storyset_repeat_counter, 1)
-    self.assertEqual(clone.legacy_tir_label, 'tir')
-
-  def testEquality(self):
-    info0 = histogram.TelemetryInfo()
-    info0.AddInfo({
-        'benchmarkName': 'foo',
-        'benchmarkStartMs': 42,
-        'label': 'lbl',
-        'storyDisplayName': 'story',
-        'storyGroupingKeys': {'a': 'b'},
-        'storysetRepeatCounter': 1,
-        'legacyTIRLabel': 'tir',
-    })
-    info0.guid = 'abc'
-    info1 = histogram.TelemetryInfo()
-    info1.AddInfo({
-        'benchmarkName': 'foo',
-        'benchmarkStartMs': 42,
-        'label': 'lbl',
-        'storyDisplayName': 'story',
-        'storyGroupingKeys': {'a': 'b'},
-        'storysetRepeatCounter': 1,
-        'legacyTIRLabel': 'tir',
-    })
-    info1.guid = 'def'
-    self.assertEqual(info0, info1)
-
-  def testInequality(self):
-    info0 = histogram.TelemetryInfo()
-    info0.AddInfo({
-        'benchmarkName': 'foo',
-        'benchmarkStartMs': 42,
-        'label': 'lbl',
-        'storyDisplayName': 'story',
-        'storyGroupingKeys': {'a': 'b'},
-        'storysetRepeatCounter': 1,
-        'legacyTIRLabel': 'tir',
-    })
-    info0.guid = 'abc'
-    info1 = histogram.TelemetryInfo()
-    info1.AddInfo({
-        'benchmarkName': 'baz',
-        'benchmarkStartMs': 42,
-        'label': 'lbl',
-        'storyDisplayName': 'story',
-        'storyGroupingKeys': {'a': 'b'},
-        'storysetRepeatCounter': 1,
-        'legacyTIRLabel': 'tir',
-    })
-    info1.guid = 'def'
-    self.assertNotEqual(info0, info1)
-
-
-class DeviceInfoUnittest(unittest.TestCase):
-  def testRoundtrip(self):
-    info = histogram.DeviceInfo()
-    info.chrome_version = '1.2.3.4'
-    info.os_name = 'linux'
-    info.os_version = '5.6.7'
-    info.gpu_info = {'some': 'stuff'}
-    info.arch = {'more': 'stuff'}
-    info.ram = 42
-    d = info.AsDict()
-    clone = diagnostic.Diagnostic.FromDict(d)
-    self.assertEqual(ToJSON(d), ToJSON(clone.AsDict()))
-    self.assertEqual(clone.chrome_version, '1.2.3.4')
-    self.assertEqual(clone.os_name, 'linux')
-    self.assertEqual(clone.os_version, '5.6.7')
-    self.assertEqual(clone.gpu_info['some'], 'stuff')
-    self.assertEqual(clone.arch['more'], 'stuff')
-    self.assertEqual(clone.ram, 42)
-
-  def testEquality(self):
-    info0 = histogram.DeviceInfo()
-    info0.chrome_version = '1.2.3.4'
-    info0.os_name = 'linux'
-    info0.os_version = '5.6.7'
-    info0.gpu_info = {'some': 'stuff'}
-    info0.arch = {'more': 'stuff'}
-    info0.ram = 42
-    info0.guid = 'abc'
-    info1 = histogram.DeviceInfo()
-    info1.chrome_version = '1.2.3.4'
-    info1.os_name = 'linux'
-    info1.os_version = '5.6.7'
-    info1.gpu_info = {'some': 'stuff'}
-    info1.arch = {'more': 'stuff'}
-    info1.ram = 42
-    info1.guid = 'def'
-    self.assertEqual(info0, info1)
-
-  def testInequality(self):
-    info0 = histogram.DeviceInfo()
-    info0.chrome_version = '1.2.3.4'
-    info0.os_name = 'linux'
-    info0.os_version = '5.6.7'
-    info0.gpu_info = {'some': 'stuff'}
-    info0.arch = {'more': 'stuff'}
-    info0.ram = 42
-    info0.guid = 'abc'
-    info1 = histogram.DeviceInfo()
-    info1.chrome_version = '1.2.3.4'
-    info1.os_name = 'mac'
-    info1.os_version = '5.6.7'
-    info1.gpu_info = {'some': 'stuff'}
-    info1.arch = {'more': 'stuff'}
-    info1.ram = 42
-    info1.guid = 'def'
-    self.assertNotEqual(info0, info1)
-
-
 class RelatedEventSetUnittest(unittest.TestCase):
   def testRoundtrip(self):
     events = histogram.RelatedEventSet()
@@ -942,6 +695,45 @@ class RelatedEventSetUnittest(unittest.TestCase):
     self.assertEqual(event['title'], 'foo')
     self.assertEqual(event['start'], 0)
     self.assertEqual(event['duration'], 1)
+
+
+class RelatedNameMapUnittest(unittest.TestCase):
+  def testRoundtrip(self):
+    names = histogram.RelatedNameMap()
+    names.Set('a', 'A')
+    d = names.AsDict()
+    clone = diagnostic.Diagnostic.FromDict(d)
+    self.assertEqual(ToJSON(d), ToJSON(clone.AsDict()))
+    self.assertEqual(clone.Get('a'), 'A')
+
+  def testMerge(self):
+    a_names = histogram.RelatedNameMap()
+    a_names.Set('a', 'A')
+    b_names = histogram.RelatedNameMap()
+    b_names.Set('b', 'B')
+    self.assertTrue(a_names.CanAddDiagnostic(b_names))
+    self.assertTrue(b_names.CanAddDiagnostic(a_names))
+    self.assertFalse(a_names.CanAddDiagnostic(generic_set.GenericSet([])))
+
+    a_names.AddDiagnostic(b_names)
+    self.assertEqual(a_names.Get('b'), 'B')
+    a_names.AddDiagnostic(b_names)
+    self.assertEqual(a_names.Get('b'), 'B')
+
+    b_names.Set('a', 'C')
+    with self.assertRaises(ValueError):
+      a_names.AddDiagnostic(b_names)
+
+  def testEquals(self):
+    a_names = histogram.RelatedNameMap()
+    a_names.Set('a', 'A')
+    self.assertNotEqual(a_names, generic_set.GenericSet([]))
+    b_names = histogram.RelatedNameMap()
+    self.assertNotEqual(a_names, b_names)
+    b_names.Set('a', 'B')
+    self.assertNotEqual(a_names, b_names)
+    b_names.Set('a', 'A')
+    self.assertEqual(a_names, b_names)
 
 
 class RelatedHistogramBreakdownUnittest(unittest.TestCase):
@@ -969,106 +761,30 @@ class DateRangeUnittest(unittest.TestCase):
     self.assertEqual(clone.max_date, dr.max_date)
 
 
-class GenericSetUnittest(unittest.TestCase):
-  def testRoundtrip(self):
-    a_set = histogram.GenericSet([
-        None,
-        True,
-        False,
-        0,
-        1,
-        42,
-        [],
-        {},
-        [0, False],
-        {'a': 1, 'b': True},
-    ])
-    self.assertEqual(a_set, diagnostic.Diagnostic.FromDict(a_set.AsDict()))
-
-  def testEq(self):
-    a_set = histogram.GenericSet([
-        None,
-        True,
-        False,
-        0,
-        1,
-        42,
-        [],
-        {},
-        [0, False],
-        {'a': 1, 'b': True},
-    ])
-    b_set = histogram.GenericSet([
-        {'b': True, 'a': 1},
-        [0, False],
-        {},
-        [],
-        42,
-        1,
-        0,
-        False,
-        True,
-        None,
-    ])
-    self.assertEqual(a_set, b_set)
-
-  def testMerge(self):
-    a_set = histogram.GenericSet([
-        None,
-        True,
-        False,
-        0,
-        1,
-        42,
-        [],
-        {},
-        [0, False],
-        {'a': 1, 'b': True},
-    ])
-    b_set = histogram.GenericSet([
-        {'b': True, 'a': 1},
-        [0, False],
-        {},
-        [],
-        42,
-        1,
-        0,
-        False,
-        True,
-        None,
-    ])
-    self.assertTrue(a_set.CanAddDiagnostic(b_set))
-    self.assertTrue(b_set.CanAddDiagnostic(a_set))
-    a_set.AddDiagnostic(b_set)
-    self.assertEqual(a_set, b_set)
-    b_set.AddDiagnostic(a_set)
-    self.assertEqual(a_set, b_set)
-
-    c_dict = {'a': 1, 'b': 1}
-    c_set = histogram.GenericSet([c_dict])
-    a_set.AddDiagnostic(c_set)
-    self.assertEqual(len(a_set), 1 + len(b_set))
-    self.assertIn(c_dict, a_set)
-
-
 class DiagnosticMapUnittest(unittest.TestCase):
   def testDisallowReservedNames(self):
     diagnostics = histogram.DiagnosticMap()
     with self.assertRaises(TypeError):
-      diagnostics[None] = histogram.GenericSet(())
+      diagnostics[None] = generic_set.GenericSet(())
     with self.assertRaises(TypeError):
       diagnostics['generic'] = None
     diagnostics[reserved_infos.TRACE_URLS.name] = histogram.DateRange(0)
     diagnostics.DisallowReservedNames()
-    diagnostics[reserved_infos.TRACE_URLS.name] = histogram.GenericSet(())
+    diagnostics[reserved_infos.TRACE_URLS.name] = generic_set.GenericSet(())
     with self.assertRaises(TypeError):
       diagnostics[reserved_infos.TRACE_URLS.name] = histogram.DateRange(0)
 
+  def testResetGuid(self):
+    generic = generic_set.GenericSet(['generic diagnostic'])
+    guid1 = generic.guid
+    generic.ResetGuid()
+    guid2 = generic.guid
+    self.assertNotEqual(guid1, guid2)
 
   # TODO(eakuefner): Find a better place for these non-map tests once we
   # break up the Python implementation more.
   def testInlineSharedDiagnostic(self):
-    generic = histogram.GenericSet(['generic diagnostic'])
+    generic = generic_set.GenericSet(['generic diagnostic'])
     hist = histogram.Histogram('', 'count')
     _ = generic.guid  # First access sets guid
     hist.diagnostics['foo'] = generic
@@ -1104,11 +820,10 @@ class DiagnosticMapUnittest(unittest.TestCase):
         'start': 0,
         'duration': 1,
     })
-    generic = histogram.GenericSet(['generic diagnostic'])
-    generic2 = histogram.GenericSet(['generic diagnostic 2'])
-    related_set = histogram.RelatedHistogramSet([
-        histogram.Histogram('histogram', 'count'),
-    ])
+    generic = generic_set.GenericSet(['generic diagnostic'])
+    generic2 = generic_set.GenericSet(['generic diagnostic 2'])
+    related_map = histogram.RelatedHistogramMap()
+    related_map.Set('a', histogram.Histogram('histogram', 'count'))
 
     hist = histogram.Histogram('', 'count')
 
@@ -1116,36 +831,36 @@ class DiagnosticMapUnittest(unittest.TestCase):
     # DiagnosticMap.
     hist2 = histogram.Histogram('', 'count')
     hist2.diagnostics['a'] = generic
-    hist.diagnostics.Merge(hist2.diagnostics, hist, hist2)
+    hist.diagnostics.Merge(hist2.diagnostics)
     self.assertIs(generic, hist.diagnostics['a'])
 
     # Separate keys are not merged.
     hist3 = histogram.Histogram('', 'count')
     hist3.diagnostics['b'] = generic2
-    hist.diagnostics.Merge(hist3.diagnostics, hist, hist3)
+    hist.diagnostics.Merge(hist3.diagnostics)
     self.assertIs(generic, hist.diagnostics['a'])
     self.assertIs(generic2, hist.diagnostics['b'])
 
     # Merging unmergeable diagnostics should produce an
     # UnmergeableDiagnosticSet.
     hist4 = histogram.Histogram('', 'count')
-    hist4.diagnostics['a'] = related_set
-    hist.diagnostics.Merge(hist4.diagnostics, hist, hist4)
+    hist4.diagnostics['a'] = related_map
+    hist.diagnostics.Merge(hist4.diagnostics)
     self.assertIsInstance(
         hist.diagnostics['a'], histogram.UnmergeableDiagnosticSet)
     diagnostics = list(hist.diagnostics['a'])
     self.assertIs(generic, diagnostics[0])
-    self.assertIs(related_set, diagnostics[1])
+    self.assertIs(related_map, diagnostics[1])
 
     # UnmergeableDiagnosticSets are mergeable.
     hist5 = histogram.Histogram('', 'count')
     hist5.diagnostics['a'] = histogram.UnmergeableDiagnosticSet(
         [events, generic2])
-    hist.diagnostics.Merge(hist5.diagnostics, hist, hist5)
+    hist.diagnostics.Merge(hist5.diagnostics)
     self.assertIsInstance(
         hist.diagnostics['a'], histogram.UnmergeableDiagnosticSet)
     diagnostics = list(hist.diagnostics['a'])
     self.assertIs(generic, diagnostics[0])
-    self.assertIs(related_set, diagnostics[1])
+    self.assertIs(related_map, diagnostics[1])
     self.assertIs(events, diagnostics[2])
     self.assertIs(generic2, diagnostics[3])

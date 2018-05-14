@@ -4,6 +4,7 @@
 
 #include "chrome/browser/task_manager/providers/web_contents/renderer_task.h"
 
+#include <string>
 #include <utility>
 
 #include "base/i18n/rtl.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/task_manager/task_manager_observer.h"
 #include "chrome/grit/generated_resources.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -31,7 +33,7 @@ namespace {
 // |render_process_host|.
 ProcessResourceUsage* CreateRendererResourcesSampler(
     content::RenderProcessHost* render_process_host) {
-  chrome::mojom::ResourceUsageReporterPtr service;
+  content::mojom::ResourceUsageReporterPtr service;
   BindInterface(render_process_host, &service);
   return new ProcessResourceUsage(std::move(service));
 }
@@ -57,6 +59,22 @@ std::string GetRapporSampleName(content::WebContents* web_contents) {
 
 RendererTask::RendererTask(const base::string16& title,
                            const gfx::ImageSkia* icon,
+                           content::WebContents* web_contents)
+    : RendererTask(title,
+                   icon,
+                   web_contents,
+                   web_contents->GetMainFrame()->GetProcess()) {}
+
+RendererTask::RendererTask(const base::string16& title,
+                           const gfx::ImageSkia* icon,
+                           content::RenderFrameHost* subframe)
+    : RendererTask(title,
+                   icon,
+                   content::WebContents::FromRenderFrameHost(subframe),
+                   subframe->GetProcess()) {}
+
+RendererTask::RendererTask(const base::string16& title,
+                           const gfx::ImageSkia* icon,
                            content::WebContents* web_contents,
                            content::RenderProcessHost* render_process_host)
     : Task(title,
@@ -74,8 +92,6 @@ RendererTask::RendererTask(const base::string16& title,
       profile_name_(GetRendererProfileName(render_process_host_)),
       termination_status_(base::TERMINATION_STATUS_STILL_RUNNING),
       termination_error_code_(0) {
-  // All renderer tasks are capable of reporting network usage, so the default
-  // invalid value of -1 doesn't apply here.
   OnNetworkBytesRead(0);
 
   // Tag the web_contents with a |ContentFaviconDriver| (if needed) so that

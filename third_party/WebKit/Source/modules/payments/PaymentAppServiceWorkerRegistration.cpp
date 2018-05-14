@@ -11,19 +11,19 @@
 
 namespace blink {
 
-PaymentAppServiceWorkerRegistration::~PaymentAppServiceWorkerRegistration() {}
+PaymentAppServiceWorkerRegistration::~PaymentAppServiceWorkerRegistration() =
+    default;
 
 // static
 PaymentAppServiceWorkerRegistration& PaymentAppServiceWorkerRegistration::From(
     ServiceWorkerRegistration& registration) {
   PaymentAppServiceWorkerRegistration* supplement =
-      static_cast<PaymentAppServiceWorkerRegistration*>(
-          Supplement<ServiceWorkerRegistration>::From(registration,
-                                                      SupplementName()));
+      Supplement<ServiceWorkerRegistration>::From<
+          PaymentAppServiceWorkerRegistration>(registration);
 
   if (!supplement) {
     supplement = new PaymentAppServiceWorkerRegistration(&registration);
-    ProvideTo(registration, SupplementName(), supplement);
+    ProvideTo(registration, supplement);
   }
 
   return *supplement;
@@ -45,7 +45,7 @@ PaymentManager* PaymentAppServiceWorkerRegistration::paymentManager(
   return payment_manager_.Get();
 }
 
-DEFINE_TRACE(PaymentAppServiceWorkerRegistration) {
+void PaymentAppServiceWorkerRegistration::Trace(blink::Visitor* visitor) {
   visitor->Trace(registration_);
   visitor->Trace(payment_manager_);
   Supplement<ServiceWorkerRegistration>::Trace(visitor);
@@ -56,8 +56,7 @@ PaymentAppServiceWorkerRegistration::PaymentAppServiceWorkerRegistration(
     : registration_(registration) {}
 
 // static
-const char* PaymentAppServiceWorkerRegistration::SupplementName() {
-  return "PaymentAppServiceWorkerRegistration";
-}
+const char PaymentAppServiceWorkerRegistration::kSupplementName[] =
+    "PaymentAppServiceWorkerRegistration";
 
 }  // namespace blink

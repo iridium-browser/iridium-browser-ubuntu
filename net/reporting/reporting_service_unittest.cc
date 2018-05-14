@@ -24,13 +24,14 @@ namespace {
 class ReportingServiceTest : public ::testing::Test {
  protected:
   const GURL kUrl_ = GURL("https://origin/path");
-  const url::Origin kOrigin_ = url::Origin(kUrl_);
+  const url::Origin kOrigin_ = url::Origin::Create(kUrl_);
   const GURL kEndpoint_ = GURL("https://endpoint/");
   const std::string kGroup_ = "group";
   const std::string kType_ = "type";
 
   ReportingServiceTest()
-      : context_(new TestReportingContext(ReportingPolicy())),
+      : context_(
+            new TestReportingContext(&clock_, &tick_clock_, ReportingPolicy())),
         service_(
             ReportingService::CreateForTesting(base::WrapUnique(context_))) {}
 
@@ -38,13 +39,16 @@ class ReportingServiceTest : public ::testing::Test {
   ReportingService* service() { return service_.get(); }
 
  private:
+  base::SimpleTestClock clock_;
+  base::SimpleTestTickClock tick_clock_;
+
   TestReportingContext* context_;
   std::unique_ptr<ReportingService> service_;
 };
 
 TEST_F(ReportingServiceTest, QueueReport) {
   service()->QueueReport(kUrl_, kGroup_, kType_,
-                         base::MakeUnique<base::DictionaryValue>());
+                         std::make_unique<base::DictionaryValue>());
 
   std::vector<const ReportingReport*> reports;
   context()->cache()->GetReports(&reports);
@@ -55,8 +59,9 @@ TEST_F(ReportingServiceTest, QueueReport) {
 }
 
 TEST_F(ReportingServiceTest, ProcessHeader) {
-  service()->ProcessHeader(kUrl_, "{\"url\":\"" + kEndpoint_.spec() +
-                                      "\","
+  service()->ProcessHeader(kUrl_, "{\"endpoints\":[{\"url\":\"" +
+                                      kEndpoint_.spec() +
+                                      "\"}],"
                                       "\"group\":\"" +
                                       kGroup_ +
                                       "\","

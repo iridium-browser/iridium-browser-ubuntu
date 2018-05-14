@@ -7,68 +7,27 @@ from core import perf_benchmark
 from measurements import power
 import page_sets
 from telemetry import benchmark
+from telemetry import story
 from telemetry.timeline import chrome_trace_category_filter
 from telemetry.web_perf import timeline_based_measurement
 
 
-@benchmark.Enabled('android')
 @benchmark.Owner(emails=['perezju@chromium.org'])
 class PowerTypical10Mobile(perf_benchmark.PerfBenchmark):
   """Android typical 10 mobile power test."""
   test = power.Power
   page_set = page_sets.Typical10MobilePageSet
+  SUPPORTED_PLATFORMS = [story.expectations.ALL_MOBILE]
 
   def SetExtraBrowserOptions(self, options):
     options.full_performance_mode = False
 
   @classmethod
-  def ShouldDisable(cls, possible_browser):
-    # http://crbug.com/597656
-    if (possible_browser.browser_type == 'reference' and
-        possible_browser.platform.GetDeviceTypeName() == 'Nexus 5X'):
-      return True
-
-    # crbug.com/671631
-    return possible_browser.platform.GetDeviceTypeName() == 'Nexus 9'
-
-  @classmethod
   def Name(cls):
     return 'power.typical_10_mobile'
 
-  def GetExpectations(self):
-    return page_sets.Typical10MobileStoryExpectations()
 
-
-@benchmark.Enabled('mac')
-@benchmark.Owner(emails=['erikchen@chromium.org'])
-class PowerScrollingTrivialPage(perf_benchmark.PerfBenchmark):
-  """Measure power consumption for some very simple pages."""
-  test = power.QuiescentPower
-  page_set = page_sets.TrivialSitesStorySet
-
-  @classmethod
-  def Name(cls):
-    return 'power.trivial_pages'
-
-  def GetExpectations(self):
-    return page_sets.TrivialStoryExpectations()
-
-
-@benchmark.Enabled('mac')
-class PowerSteadyStatePages(perf_benchmark.PerfBenchmark):
-  """Measure power consumption for real web sites in steady state (no user
-  interactions)."""
-  test = power.QuiescentPower
-  page_set = page_sets.IdleAfterLoadingStories
-
-  @classmethod
-  def Name(cls):
-    return 'power.steady_state'
-
-  def GetExpectations(self):
-    return page_sets.IdleAfterLoadingStoryExpectations()
-
-
+@benchmark.Owner(emails=['charliea@chromium.org', 'rnephew@chromium.org'])
 class IdlePlatformBenchmark(perf_benchmark.PerfBenchmark):
   """Idle platform benchmark.
 
@@ -91,20 +50,9 @@ class IdlePlatformBenchmark(perf_benchmark.PerfBenchmark):
     ])
     return options
 
-  @classmethod
-  def ShouldDisable(cls, possible_browser):
-    return not possible_browser.platform.HasBattOrConnected()
-
   def CreateStorySet(self, options):
     return page_sets.IdleStorySet()
 
   @classmethod
-  def ShouldTearDownStateAfterEachStoryRun(cls):
-    return True
-
-  @classmethod
   def Name(cls):
     return 'power.idle_platform'
-
-  def GetExpectations(self):
-    return page_sets.IdleStoryExpectations()

@@ -7,12 +7,14 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "content/common/service_worker/service_worker_types.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/common/push_messaging_status.mojom.h"
 #include "content/public/common/push_subscription_options.h"
 #include "content/shell/browser/layout_test/layout_test_browser_context.h"
 #include "content/shell/browser/layout_test/layout_test_content_browser_client.h"
 #include "content/shell/browser/layout_test/layout_test_permission_manager.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
 
@@ -28,8 +30,6 @@ const uint8_t kTestP256Key[] = {
   0x7F, 0xF2, 0x76, 0xB6, 0x01, 0x20, 0xD8, 0x35, 0xA5, 0xD9, 0x3C, 0x43, 0xFD
 };
 
-const int64_t kInvalidServiceWorkerRegistrationId = -1LL;
-
 static_assert(sizeof(kTestP256Key) == 65,
               "The fake public key must be a valid P-256 uncompressed point.");
 
@@ -41,26 +41,11 @@ const uint8_t kAuthentication[] = {
 static_assert(sizeof(kAuthentication) == 12,
               "The fake authentication key must be at least 12 bytes in size.");
 
-blink::WebPushPermissionStatus ToWebPushPermissionStatus(
-    blink::mojom::PermissionStatus status) {
-  switch (status) {
-    case blink::mojom::PermissionStatus::GRANTED:
-      return blink::kWebPushPermissionStatusGranted;
-    case blink::mojom::PermissionStatus::DENIED:
-      return blink::kWebPushPermissionStatusDenied;
-    case blink::mojom::PermissionStatus::ASK:
-      return blink::kWebPushPermissionStatusPrompt;
-  }
-
-  NOTREACHED();
-  return blink::kWebPushPermissionStatusLast;
-}
-
 }  // anonymous namespace
 
 LayoutTestPushMessagingService::LayoutTestPushMessagingService()
     : subscribed_service_worker_registration_(
-          kInvalidServiceWorkerRegistrationId) {}
+          blink::mojom::kInvalidServiceWorkerRegistrationId) {}
 
 LayoutTestPushMessagingService::~LayoutTestPushMessagingService() {
 }
@@ -87,8 +72,18 @@ void LayoutTestPushMessagingService::SubscribeFromWorker(
     int64_t service_worker_registration_id,
     const PushSubscriptionOptions& options,
     const RegisterCallback& callback) {
-  if (GetPermissionStatus(requesting_origin, options.user_visible_only) ==
-      blink::kWebPushPermissionStatusGranted) {
+  blink::mojom::PermissionStatus permission_status =
+      LayoutTestContentBrowserClient::Get()
+          ->browser_context()
+          ->GetPermissionManager()
+          ->GetPermissionStatus(PermissionType::NOTIFICATIONS,
+                                requesting_origin, requesting_origin);
+
+  // The `userVisibleOnly` option is still required when subscribing.
+  if (!options.user_visible_only)
+    permission_status = blink::mojom::PermissionStatus::DENIED;
+
+  if (permission_status == blink::mojom::PermissionStatus::GRANTED) {
     std::vector<uint8_t> p256dh(
         kTestP256Key, kTestP256Key + arraysize(kTestP256Key));
     std::vector<uint8_t> auth(
@@ -118,15 +113,6 @@ void LayoutTestPushMessagingService::GetSubscriptionInfo(
   callback.Run(true /* is_valid */, p256dh, auth);
 }
 
-blink::WebPushPermissionStatus
-LayoutTestPushMessagingService::GetPermissionStatus(const GURL& origin,
-                                                    bool user_visible) {
-  return ToWebPushPermissionStatus(LayoutTestContentBrowserClient::Get()
-      ->browser_context()
-      ->GetPermissionManager()
-      ->GetPermissionStatus(PermissionType::PUSH_MESSAGING, origin, origin));
-}
-
 bool LayoutTestPushMessagingService::SupportNonVisibleMessages() {
   return false;
 }
@@ -149,7 +135,7 @@ void LayoutTestPushMessagingService::Unsubscribe(
   if (service_worker_registration_id ==
       subscribed_service_worker_registration_) {
     subscribed_service_worker_registration_ =
-        kInvalidServiceWorkerRegistrationId;
+        blink::mojom::kInvalidServiceWorkerRegistrationId;
   }
 }
 
@@ -159,12 +145,13 @@ void LayoutTestPushMessagingService::DidDeleteServiceWorkerRegistration(
   if (service_worker_registration_id ==
       subscribed_service_worker_registration_) {
     subscribed_service_worker_registration_ =
-        kInvalidServiceWorkerRegistrationId;
+        blink::mojom::kInvalidServiceWorkerRegistrationId;
   }
 }
 
 void LayoutTestPushMessagingService::DidDeleteServiceWorkerDatabase() {
-  subscribed_service_worker_registration_ = kInvalidServiceWorkerRegistrationId;
+  subscribed_service_worker_registration_ =
+      blink::mojom::kInvalidServiceWorkerRegistrationId;
 }
 
 }  // namespace content

@@ -35,18 +35,21 @@
 #include "WebPrivatePtr.h"
 
 #if INSIDE_BLINK
-#include "platform/wtf/PassRefPtr.h"
+#include "base/memory/scoped_refptr.h"
 #endif
 
 namespace blink {
 
 class ResourceLoadTiming;
 
+// The browser-side equivalent to this struct is content::ResourceLoadTiming.
+// TODO(dcheng): Migrate this struct over to Mojo so it doesn't need to be
+// duplicated in //content and //third_party/WebKit.
 class WebURLLoadTiming {
  public:
   ~WebURLLoadTiming() { Reset(); }
 
-  WebURLLoadTiming() {}
+  WebURLLoadTiming() = default;
   WebURLLoadTiming(const WebURLLoadTiming& d) { Assign(d); }
   WebURLLoadTiming& operator=(const WebURLLoadTiming& d) {
     Assign(d);
@@ -108,10 +111,10 @@ class WebURLLoadTiming {
   BLINK_PLATFORM_EXPORT void SetPushEnd(double);
 
 #if INSIDE_BLINK
-  BLINK_PLATFORM_EXPORT WebURLLoadTiming(WTF::PassRefPtr<ResourceLoadTiming>);
+  BLINK_PLATFORM_EXPORT WebURLLoadTiming(scoped_refptr<ResourceLoadTiming>);
   BLINK_PLATFORM_EXPORT WebURLLoadTiming& operator=(
-      WTF::PassRefPtr<ResourceLoadTiming>);
-  BLINK_PLATFORM_EXPORT operator WTF::PassRefPtr<ResourceLoadTiming>() const;
+      scoped_refptr<ResourceLoadTiming>);
+  BLINK_PLATFORM_EXPORT operator scoped_refptr<ResourceLoadTiming>() const;
 #endif
 
  private:

@@ -34,7 +34,6 @@
 #include "platform/text/WebEntities.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/Vector.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "platform/wtf/text/StringHash.h"
 #include "platform/wtf/text/WTFString.h"
@@ -53,7 +52,7 @@ class Document;
 class Element;
 class Node;
 class WebLocalFrame;
-class WebLocalFrameBase;
+class WebLocalFrameImpl;
 
 // Responsible for serializing the specified frame into html
 // (replacing links with paths to local files).
@@ -81,7 +80,7 @@ class WebFrameSerializerImpl {
 
  private:
   // Specified frame which need to be serialized;
-  Member<WebLocalFrameBase> specified_web_local_frame_impl_;
+  Member<WebLocalFrameImpl> specified_web_local_frame_impl_;
   // Pointer of WebFrameSerializerClient
   WebFrameSerializerClient* client_;
   // Pointer of WebFrameSerializer::LinkRewritingDelegate

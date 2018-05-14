@@ -11,7 +11,7 @@ namespace blink {
 
 class LayoutThemeWin final : public LayoutThemeDefault {
  public:
-  static PassRefPtr<LayoutTheme> Create();
+  static scoped_refptr<LayoutTheme> Create();
 };
 
 }  // namespace blink

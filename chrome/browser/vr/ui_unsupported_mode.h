@@ -13,10 +13,12 @@ namespace vr {
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.vr_shell
 enum class UiUnsupportedMode : int {
   kUnhandledCodePoint = 0,
-  kCouldNotElideURL,
-  kUnhandledPageInfo,
-  kURLWithStrongRTLChars,
-
+  // kCouldNotElideURL = 1,  // Obsolete.
+  kUnhandledPageInfo = 2,
+  // kURLWithStrongRTLChars = 3,  // Obsolete.
+  kVoiceSearchNeedsRecordAudioOsPermission = 4,  // TODO(ddorwin): Android only.
+  kGenericUnsupportedFeature = 5,
+  kNeedsKeyboardUpdate = 6,
   // This must be last.
   kCount,
 };

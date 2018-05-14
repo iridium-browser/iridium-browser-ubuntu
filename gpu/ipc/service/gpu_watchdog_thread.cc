@@ -29,8 +29,7 @@
 #endif
 
 #if defined(USE_X11)
-#include <X11/Xatom.h>
-#include <X11/Xlib.h>
+#include "ui/gfx/x/x11.h"
 #endif
 
 namespace gpu {
@@ -70,7 +69,7 @@ GpuWatchdogThread::GpuWatchdogThread()
 #if defined(USE_X11)
       display_(NULL),
       window_(0),
-      atom_(None),
+      atom_(x11::None),
       host_tty_(-1),
 #endif
       weak_factory_(this) {
@@ -134,7 +133,8 @@ GpuWatchdogThread::GpuWatchdogTaskObserver::GpuWatchdogTaskObserver(
     GpuWatchdogThread* watchdog)
     : watchdog_(watchdog) {}
 
-GpuWatchdogThread::GpuWatchdogTaskObserver::~GpuWatchdogTaskObserver() {}
+GpuWatchdogThread::GpuWatchdogTaskObserver::~GpuWatchdogTaskObserver() =
+    default;
 
 void GpuWatchdogThread::GpuWatchdogTaskObserver::WillProcessTask(
     const base::PendingTask& pending_task) {
@@ -158,8 +158,11 @@ GpuWatchdogThread::~GpuWatchdogThread() {
 #if defined(USE_X11)
   if (tty_file_)
     fclose(tty_file_);
-  XDestroyWindow(display_, window_);
-  XCloseDisplay(display_);
+  if (display_) {
+    DCHECK(window_);
+    XDestroyWindow(display_, window_);
+    XCloseDisplay(display_);
+  }
 #endif
 
   watched_message_loop_->RemoveTaskObserver(&task_observer_);
@@ -243,8 +246,7 @@ void GpuWatchdogThread::OnCheck(bool after_suspend) {
   // Post a task to the monitored thread that does nothing but wake up the
   // TaskObserver. Any other tasks that are pending on the watched thread will
   // also wake up the observer. This simply ensures there is at least one.
-  watched_message_loop_->task_runner()->PostTask(FROM_HERE,
-                                                 base::Bind(&base::DoNothing));
+  watched_message_loop_->task_runner()->PostTask(FROM_HERE, base::DoNothing());
 
   // Post a task to the watchdog thread to exit if the monitored thread does
   // not respond in time.
@@ -283,8 +285,8 @@ void GpuWatchdogThread::OnCheckTimeout() {
 
     // Post a task that does nothing on the watched thread to bump its priority
     // and make it more likely to get scheduled.
-    watched_message_loop_->task_runner()->PostTask(
-        FROM_HERE, base::Bind(&base::DoNothing));
+    watched_message_loop_->task_runner()->PostTask(FROM_HERE,
+                                                   base::DoNothing());
     return;
   }
 
@@ -312,46 +314,48 @@ void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
 #endif
 
 #if defined(USE_X11)
-  XWindowAttributes attributes;
-  XGetWindowAttributes(display_, window_, &attributes);
+  if (display_) {
+    DCHECK(window_);
+    XWindowAttributes attributes;
+    XGetWindowAttributes(display_, window_, &attributes);
 
-  XSelectInput(display_, window_, PropertyChangeMask);
-  SetupXChangeProp();
+    XSelectInput(display_, window_, PropertyChangeMask);
+    SetupXChangeProp();
 
-  XFlush(display_);
+    XFlush(display_);
 
-  // We wait for the property change event with a timeout. If it arrives we know
-  // that X is responsive and is not the cause of the watchdog trigger, so we
-  // should
-  // terminate. If it times out, it may be due to X taking a long time, but
-  // terminating won't help, so ignore the watchdog trigger.
-  XEvent event_return;
-  base::TimeTicks deadline = base::TimeTicks::Now() + timeout_;
-  while (true) {
-    base::TimeDelta delta = deadline - base::TimeTicks::Now();
-    if (delta < base::TimeDelta()) {
-      return;
-    } else {
-      while (XCheckWindowEvent(display_, window_, PropertyChangeMask,
-                               &event_return)) {
-        if (MatchXEventAtom(&event_return))
-          break;
-      }
-      struct pollfd fds[1];
-      fds[0].fd = XConnectionNumber(display_);
-      fds[0].events = POLLIN;
-      int status = poll(fds, 1, delta.InMilliseconds());
-      if (status == -1) {
-        if (errno == EINTR) {
-          continue;
-        } else {
-          LOG(FATAL) << "Lost X connection, aborting.";
-          break;
-        }
-      } else if (status == 0) {
+    // We wait for the property change event with a timeout. If it arrives we
+    // know that X is responsive and is not the cause of the watchdog trigger,
+    // so we should terminate. If it times out, it may be due to X taking a long
+    // time, but terminating won't help, so ignore the watchdog trigger.
+    XEvent event_return;
+    base::TimeTicks deadline = base::TimeTicks::Now() + timeout_;
+    while (true) {
+      base::TimeDelta delta = deadline - base::TimeTicks::Now();
+      if (delta < base::TimeDelta()) {
         return;
       } else {
-        continue;
+        while (XCheckWindowEvent(display_, window_, PropertyChangeMask,
+                                 &event_return)) {
+          if (MatchXEventAtom(&event_return))
+            break;
+        }
+        struct pollfd fds[1];
+        fds[0].fd = XConnectionNumber(display_);
+        fds[0].events = POLLIN;
+        int status = poll(fds, 1, delta.InMilliseconds());
+        if (status == -1) {
+          if (errno == EINTR) {
+            continue;
+          } else {
+            LOG(FATAL) << "Lost X connection, aborting.";
+            break;
+          }
+        } else if (status == 0) {
+          return;
+        } else {
+          continue;
+        }
       }
     }
   }
@@ -394,7 +398,7 @@ void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
   bool using_thread_ticks = base::ThreadTicks::IsSupported();
   base::debug::Alias(&using_thread_ticks);
 
-  bool using_high_res_timer = base::Time::IsHighResolutionTimerInUse();
+  bool using_high_res_timer = base::TimeTicks::IsHighResolution();
   base::debug::Alias(&using_high_res_timer);
 #endif
 
@@ -426,13 +430,17 @@ void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
 #if defined(USE_X11)
 void GpuWatchdogThread::SetupXServer() {
   display_ = XOpenDisplay(NULL);
-  window_ = XCreateWindow(display_, DefaultRootWindow(display_), 0, 0, 1, 1, 0,
-                          CopyFromParent, InputOutput, CopyFromParent, 0, NULL);
-  atom_ = XInternAtom(display_, "CHECK", False);
+  if (display_) {
+    window_ =
+        XCreateWindow(display_, DefaultRootWindow(display_), 0, 0, 1, 1, 0,
+                      CopyFromParent, InputOutput, CopyFromParent, 0, NULL);
+    atom_ = XInternAtom(display_, "CHECK", x11::False);
+  }
   host_tty_ = GetActiveTTY();
 }
 
 void GpuWatchdogThread::SetupXChangeProp() {
+  DCHECK(display_);
   XChangeProperty(display_, window_, atom_, XA_STRING, 8, PropModeReplace, text,
                   (arraysize(text) - 1));
 }

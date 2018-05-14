@@ -58,6 +58,7 @@ String16 consoleAPITypeValue(ConsoleAPIType type) {
   return protocol::Runtime::ConsoleAPICalled::TypeEnum::Log;
 }
 
+const char kGlobalConsoleMessageHandleLabel[] = "DevTools console";
 const unsigned maxConsoleMessageCount = 1000;
 const int maxConsoleMessageV8Size = 10 * 1024 * 1024;
 const unsigned maxArrayItemsLimit = 10000;
@@ -204,7 +205,7 @@ void V8ConsoleMessage::setLocation(const String16& url, unsigned lineNumber,
 
 void V8ConsoleMessage::reportToFrontend(
     protocol::Console::Frontend* frontend) const {
-  DCHECK(m_origin == V8MessageOrigin::kConsole);
+  DCHECK_EQ(V8MessageOrigin::kConsole, m_origin);
   String16 level = protocol::Console::ConsoleMessage::LevelEnum::Log;
   if (m_type == ConsoleAPIType::kDebug || m_type == ConsoleAPIType::kCount ||
       m_type == ConsoleAPIType::kTimeEnd)
@@ -295,8 +296,10 @@ void V8ConsoleMessage::reportToFrontend(protocol::Runtime::Frontend* frontend,
     if (m_scriptId)
       exceptionDetails->setScriptId(String16::fromInteger(m_scriptId));
     if (!m_url.isEmpty()) exceptionDetails->setUrl(m_url);
-    if (m_stackTrace)
-      exceptionDetails->setStackTrace(m_stackTrace->buildInspectorObjectImpl());
+    if (m_stackTrace) {
+      exceptionDetails->setStackTrace(
+          m_stackTrace->buildInspectorObjectImpl(inspector->debugger()));
+    }
     if (m_contextId) exceptionDetails->setExecutionContextId(m_contextId);
     if (exception) exceptionDetails->setException(std::move(exception));
     frontend->exceptionThrown(m_timestamp, std::move(exceptionDetails));
@@ -326,7 +329,9 @@ void V8ConsoleMessage::reportToFrontend(protocol::Runtime::Frontend* frontend,
     frontend->consoleAPICalled(
         consoleAPITypeValue(m_type), std::move(arguments), m_contextId,
         m_timestamp,
-        m_stackTrace ? m_stackTrace->buildInspectorObjectImpl() : nullptr,
+        m_stackTrace
+            ? m_stackTrace->buildInspectorObjectImpl(inspector->debugger())
+            : nullptr,
         std::move(consoleContext));
     return;
   }
@@ -375,8 +380,10 @@ std::unique_ptr<V8ConsoleMessage> V8ConsoleMessage::createForConsoleAPI(
   message->m_type = type;
   message->m_contextId = contextId;
   for (size_t i = 0; i < arguments.size(); ++i) {
-    message->m_arguments.push_back(std::unique_ptr<v8::Global<v8::Value>>(
-        new v8::Global<v8::Value>(isolate, arguments.at(i))));
+    std::unique_ptr<v8::Global<v8::Value>> argument(
+        new v8::Global<v8::Value>(isolate, arguments.at(i)));
+    argument->AnnotateStrongRetainer(kGlobalConsoleMessageHandleLabel);
+    message->m_arguments.push_back(std::move(argument));
     message->m_v8Size +=
         v8::debug::EstimatedValueSize(isolate, arguments.at(i));
   }
@@ -522,6 +529,11 @@ double V8ConsoleMessageStorage::timeEnd(int contextId, const String16& id) {
   double elapsed = m_inspector->client()->currentTimeMS() - it->second;
   time.erase(it);
   return elapsed;
+}
+
+bool V8ConsoleMessageStorage::hasTimer(int contextId, const String16& id) {
+  const std::map<String16, double>& time = m_data[contextId].m_time;
+  return time.find(id) != time.end();
 }
 
 void V8ConsoleMessageStorage::contextDestroyed(int contextId) {

@@ -80,6 +80,11 @@ class MockSyntheticPointerActionTarget : public SyntheticGestureTarget {
     return 0.0f;
   }
 
+  int GetMouseWheelMinimumGranularity() const override {
+    NOTIMPLEMENTED();
+    return 0.0f;
+  }
+
   WebInputEvent::Type type() const { return type_; }
 
  protected:
@@ -702,6 +707,15 @@ TEST_F(SyntheticPointerActionTest, PointerPenAction) {
   EXPECT_EQ(0, num_failure_);
   EXPECT_TRUE(pointer_pen_target->SyntheticMouseActionDispatchedCorrectly(
       param3, 1, buttons, SyntheticGestureParams::PEN_INPUT));
+}
+
+TEST_F(SyntheticPointerActionTest, EmptyParams) {
+  CreateSyntheticPointerActionTarget<MockSyntheticPointerPenActionTarget>();
+  pointer_action_.reset(new SyntheticPointerAction(params_));
+
+  ForwardSyntheticPointerAction();
+  EXPECT_EQ(1, num_success_);
+  EXPECT_EQ(0, num_failure_);
 }
 
 }  // namespace

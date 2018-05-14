@@ -1,5 +1,6 @@
 include_rules = [
   "+cc/paint",
+  "+components/crash/core/common/crash_key.h",
   "+components/vector_icons",
   "+services/ui/public/interfaces",
   "+skia/ext",
@@ -31,10 +32,16 @@ specific_include_rules = {
   "run_all_unittests_main\.cc": [
     "+mojo/edk/embedder",
   ],
+  "views_perftests\.cc": [
+    "+mojo/edk/embedder",
+  ],
   "view_unittest\.cc": [
     "+cc/playback"
   ],
   "views_test_suite\.cc": [
     "+gpu/ipc/service",
+  ],
+  ".*test\.cc": [
+    "+cc/base",
   ]
 }

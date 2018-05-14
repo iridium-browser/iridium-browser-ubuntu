@@ -23,7 +23,8 @@ class VertexBinding final : angle::NonCopyable
 {
   public:
     VertexBinding();
-    explicit VertexBinding(VertexBinding &&binding);
+    VertexBinding(VertexBinding &&binding);
+    ~VertexBinding();
     VertexBinding &operator=(VertexBinding &&binding);
 
     GLuint getStride() const { return mStride; }
@@ -76,9 +77,7 @@ size_t ComputeVertexAttributeStride(const VertexAttribute &attrib, const VertexB
 // Warning: you should ensure binding really matches attrib.bindingIndex before using this function.
 GLintptr ComputeVertexAttributeOffset(const VertexAttribute &attrib, const VertexBinding &binding);
 
-size_t ComputeVertexBindingElementCount(const VertexBinding &binding,
-                                        size_t drawCount,
-                                        size_t instanceCount);
+size_t ComputeVertexBindingElementCount(GLuint divisor, size_t drawCount, size_t instanceCount);
 
 GLenum GetVertexAttributeBaseType(const VertexAttribute &attrib);
 

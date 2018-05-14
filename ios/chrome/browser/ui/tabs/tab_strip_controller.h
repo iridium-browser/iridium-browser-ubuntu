@@ -7,55 +7,41 @@
 
 #import <UIKit/UIKit.h>
 
+#import "ios/chrome/browser/ui/bubble/bubble_view_anchor_point_provider.h"
+#import "ios/chrome/browser/ui/tabs/requirements/tab_strip_constants.h"
+
 @protocol ApplicationCommands;
 @protocol BrowserCommands;
-@protocol FullScreenControllerDelegate;
 @class TabModel;
-@class TabView;
-
-namespace TabStrip {
-enum Style { kStyleDark, kStyleIncognito };
-
-// Returns the background color of the tabstrip view.
-UIColor* BackgroundColor();
-
-}  // namespace TabStrip
-
-// Notification when the tab strip will start an animation.
-extern NSString* const kWillStartTabStripTabAnimation;
-
-// Notifications when the user starts and ends a drag operation.
-extern NSString* const kTabStripDragStarted;
-extern NSString* const kTabStripDragEnded;
+@protocol TabStripPresentation;
 
 // Controller class for the tabstrip.  Manages displaying tabs and keeping the
 // display in sync with the TabModel.  This controller is only instantiated on
 // tablet.  The tab strip view itself is a subclass of UIScrollView, which
 // manages scroll offsets and scroll animations.
-@interface TabStripController : NSObject
+@interface TabStripController : NSObject<BubbleViewAnchorPointProvider>
 
 @property(nonatomic, assign) BOOL highlightsSelectedTab;
 @property(nonatomic, readonly, retain) UIView* view;
 
-@property(nonatomic, readonly, weak) id<BrowserCommands> dispatcher;
+@property(nonatomic, readonly, weak) id<BrowserCommands, ApplicationCommands>
+    dispatcher;
+
+// The duration to wait before starting tab strip animations. Used to
+// synchronize animations.
+@property(nonatomic, assign) NSTimeInterval animationWaitDuration;
 
 // Used to check if the tabstrip is visible before starting an animation.
-@property(nonatomic, assign) id<FullScreenControllerDelegate>
-    fullscreenDelegate;
+@property(nonatomic, assign) id<TabStripPresentation> presentationProvider;
 
-// Designated initializer.
+// Designated initializer, |dispatcher| is not retained.
 - (instancetype)initWithTabModel:(TabModel*)tabModel
-                           style:(TabStrip::Style)style
-                      dispatcher:(id<BrowserCommands>)dispatcher
+                           style:(TabStripStyle)style
+                      dispatcher:
+                          (id<ApplicationCommands, BrowserCommands>)dispatcher
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
-
-// Called when a tab is tapped.  |sender| should be a TabView.
-- (IBAction)tabTapped:(id)sender;
-
-// Records metrics for the given action.
-- (IBAction)recordUserMetrics:(id)sender;
 
 @end
 

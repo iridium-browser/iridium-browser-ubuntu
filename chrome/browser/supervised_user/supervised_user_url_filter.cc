@@ -10,12 +10,15 @@
 #include <set>
 #include <utility>
 
+#include "base/containers/flat_set.h"
 #include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/no_destructor.h"
 #include "base/sha1.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/task_runner_util.h"
@@ -84,21 +87,17 @@ namespace {
 
 // URL schemes not in this list (e.g., file:// and chrome://) will always be
 // allowed.
-const char* kFilteredSchemes[] = {
-  "http",
-  "https",
-  "ftp",
-  "gopher",
-  "ws",
-  "wss"
-};
+const char* const kFilteredSchemes[] = {"http",   "https", "ftp",
+                                        "gopher", "ws",    "wss"};
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-const char* kCrxDownloadUrls[] = {
+const char* const kCrxDownloadUrls[] = {
     "https://clients2.googleusercontent.com/crx/blobs/",
-    "https://chrome.google.com/webstore/download/"
-};
+    "https://chrome.google.com/webstore/download/"};
 #endif
+
+// Whitelisted origins:
+const char kFamiliesUrl[] = "https://families.google.com/";
 
 // This class encapsulates all the state that is required during construction of
 // a new SupervisedUserURLFilter::Contents.
@@ -367,6 +366,12 @@ SupervisedUserURLFilter::GetFilteringBehaviorForURL(
   }
 #endif
 
+  // Allow navigations to whitelisted origins (currently families.google.com).
+  static const base::NoDestructor<base::flat_set<GURL>> kWhitelistedOrigins(
+      base::flat_set<GURL>({GURL(kFamiliesUrl).GetOrigin()}));
+  if (base::ContainsKey(*kWhitelistedOrigins, effective_url.GetOrigin()))
+    return ALLOW;
+
   // Check manual overrides for the exact URL.
   auto url_it = url_map_.find(Normalize(effective_url));
   if (url_it != url_map_.end())
@@ -416,7 +421,7 @@ SupervisedUserURLFilter::GetFilteringBehaviorForURL(
 
 bool SupervisedUserURLFilter::GetFilteringBehaviorForURLWithAsyncChecks(
     const GURL& url,
-    const FilteringBehaviorCallback& callback) const {
+    FilteringBehaviorCallback callback) const {
   supervised_user_error_page::FilteringBehaviorReason reason =
       supervised_user_error_page::DEFAULT;
   FilteringBehavior behavior = GetFilteringBehaviorForURL(url, false, &reason);
@@ -424,7 +429,7 @@ bool SupervisedUserURLFilter::GetFilteringBehaviorForURLWithAsyncChecks(
   // Also, if we're blocking anyway, then there's no need to check it.
   if (reason != supervised_user_error_page::DEFAULT || behavior == BLOCK ||
       !async_url_checker_) {
-    callback.Run(behavior, reason, false);
+    std::move(callback).Run(behavior, reason, false);
     for (Observer& observer : observers_)
       observer.OnURLChecked(url, behavior, reason, false);
     return true;
@@ -432,9 +437,8 @@ bool SupervisedUserURLFilter::GetFilteringBehaviorForURLWithAsyncChecks(
 
   return async_url_checker_->CheckURL(
       Normalize(url),
-      base::Bind(&SupervisedUserURLFilter::CheckCallback,
-                 base::Unretained(this),
-                 callback));
+      base::BindOnce(&SupervisedUserURLFilter::CheckCallback,
+                     base::Unretained(this), std::move(callback)));
 }
 
 std::map<std::string, base::string16>
@@ -540,7 +544,7 @@ void SupervisedUserURLFilter::InitAsyncURLChecker(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "This feature is only used in child accounts and cannot be "
             "disabled by settings. Parent accounts can disable it in the "
@@ -561,7 +565,7 @@ bool SupervisedUserURLFilter::HasAsyncURLChecker() const {
 
 void SupervisedUserURLFilter::Clear() {
   default_behavior_ = ALLOW;
-  SetContents(base::MakeUnique<Contents>());
+  SetContents(std::make_unique<Contents>());
   url_map_.clear();
   host_map_.clear();
   blacklist_ = nullptr;
@@ -667,7 +671,7 @@ void SupervisedUserURLFilter::SetContents(std::unique_ptr<Contents> contents) {
 }
 
 void SupervisedUserURLFilter::CheckCallback(
-    const FilteringBehaviorCallback& callback,
+    FilteringBehaviorCallback callback,
     const GURL& url,
     SafeSearchURLChecker::Classification classification,
     bool uncertain) const {
@@ -676,7 +680,8 @@ void SupervisedUserURLFilter::CheckCallback(
   FilteringBehavior behavior =
       GetBehaviorFromSafeSearchClassification(classification);
 
-  callback.Run(behavior, supervised_user_error_page::ASYNC_CHECKER, uncertain);
+  std::move(callback).Run(behavior, supervised_user_error_page::ASYNC_CHECKER,
+                          uncertain);
   for (Observer& observer : observers_) {
     observer.OnURLChecked(url, behavior,
                           supervised_user_error_page::ASYNC_CHECKER, uncertain);

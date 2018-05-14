@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -119,7 +120,10 @@ Examples:
     update.add_argument(
         '--disable-rootfs-verification', default=False, action='store_true',
         help='Disable rootfs verification after update is completed.')
-
+    update.add_argument(
+        '--send-payload-in-parallel', default=False, action='store_true',
+        help=('To speed up transfer payload files for long haul, chop '
+              'payload in chunks and transfer them in parallel'))
     usb = parser.add_argument_group('USB specific options')
     usb.add_argument(
         '--install', default=False, action='store_true',
@@ -147,7 +151,8 @@ Examples:
           clear_cache=self.options.clear_cache,
           yes=self.options.yes,
           force=self.options.force,
-          debug=self.options.debug)
+          debug=self.options.debug,
+          send_payload_in_parallel=self.options.send_payload_in_parallel)
       logging.notice('cros flash completed successfully.')
     except dev_server_wrapper.ImagePathError:
       logging.error('To get the latest remote image, please run:\n'

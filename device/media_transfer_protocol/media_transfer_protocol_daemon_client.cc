@@ -13,8 +13,8 @@
 #include "dbus/message.h"
 #include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
-#include "device/media_transfer_protocol/mtp_file_entry.pb.h"
 #include "device/media_transfer_protocol/mtp_storage_info.pb.h"
+#include "device/media_transfer_protocol/mtp_file_entry.pb.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace device {
@@ -23,6 +23,36 @@ namespace {
 
 const char kInvalidResponseMsg[] = "Invalid Response: ";
 uint32_t kMaxChunkSize = 1024 * 1024;  // D-Bus has message size limits.
+
+mojom::MtpFileEntry GetMojoMtpFileEntryFromProtobuf(
+    const MtpFileEntry& entry) {
+  return mojom::MtpFileEntry(
+      entry.item_id(),
+      entry.parent_id(),
+      entry.file_name(),
+      entry.file_size(),
+      entry.modification_time(),
+      static_cast<mojom::MtpFileEntry::FileType>(entry.file_type()));
+}
+
+mojom::MtpStorageInfo GetMojoMtpStorageInfoFromProtobuf(
+    const MtpStorageInfo& protobuf) {
+  return mojom::MtpStorageInfo(
+        protobuf.storage_name(),
+        protobuf.vendor(),
+        protobuf.vendor_id(),
+        protobuf.product(),
+        protobuf.product_id(),
+        protobuf.device_flags(),
+        protobuf.storage_type(),
+        protobuf.filesystem_type(),
+        protobuf.access_capability(),
+        protobuf.max_capacity(),
+        protobuf.free_space_in_bytes(),
+        protobuf.free_space_in_objects(),
+        protobuf.storage_description(),
+        protobuf.volume_identifier());
+}
 
 // The MediaTransferProtocolDaemonClient implementation.
 class MediaTransferProtocolDaemonClientImpl
@@ -161,7 +191,7 @@ class MediaTransferProtocolDaemonClientImpl
     dbus::MessageWriter writer(&method_call);
     writer.AppendString(handle);
     {
-      dbus::MessageWriter array_writer(NULL);
+      dbus::MessageWriter array_writer(nullptr);
       writer.OpenArray("u", &array_writer);
 
       size_t end_offset = file_ids.size();
@@ -260,16 +290,11 @@ class MediaTransferProtocolDaemonClientImpl
       { mtpd::kMTPStorageAttached, true },
       { mtpd::kMTPStorageDetached, false },
     };
-    const size_t kNumSignalEventTuples = arraysize(kSignalEventTuples);
-
-    for (size_t i = 0; i < kNumSignalEventTuples; ++i) {
+    for (const auto& event : kSignalEventTuples) {
       proxy_->ConnectToSignal(
-          mtpd::kMtpdInterface,
-          kSignalEventTuples[i].signal_name,
+          mtpd::kMtpdInterface, event.signal_name,
           base::Bind(&MediaTransferProtocolDaemonClientImpl::OnMTPStorageSignal,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     handler,
-                     kSignalEventTuples[i].is_attach),
+                     weak_ptr_factory_.GetWeakPtr(), handler, event.is_attach),
           base::Bind(&MediaTransferProtocolDaemonClientImpl::OnSignalConnected,
                      weak_ptr_factory_.GetWeakPtr()));
     }
@@ -320,7 +345,7 @@ class MediaTransferProtocolDaemonClientImpl
       error_callback.Run();
       return;
     }
-    callback.Run(protobuf);
+    callback.Run(GetMojoMtpStorageInfoFromProtobuf(protobuf));
   }
 
   // Handles the result of OpenStorage and calls |callback| or |error_callback|.
@@ -373,24 +398,23 @@ class MediaTransferProtocolDaemonClientImpl
       return;
     }
 
-    std::vector<uint32_t> file_ids;
     dbus::MessageReader reader(response);
-    dbus::MessageReader array_reader(NULL);
+    dbus::MessageReader array_reader(nullptr);
     if (!reader.PopArray(&array_reader) || reader.HasMoreData()) {
       LOG(ERROR) << kInvalidResponseMsg << response->ToString();
       error_callback.Run();
       return;
     }
 
+    std::vector<uint32_t> file_ids;
     while (array_reader.HasMoreData()) {
       uint32_t file_id;
-      if (array_reader.PopUint32(&file_id)) {
-        file_ids.push_back(file_id);
-      } else {
+      if (!array_reader.PopUint32(&file_id)) {
         LOG(ERROR) << kInvalidResponseMsg << response->ToString();
         error_callback.Run();
         return;
       }
+      file_ids.push_back(file_id);
     }
     callback.Run(file_ids);
   }
@@ -404,7 +428,6 @@ class MediaTransferProtocolDaemonClientImpl
       return;
     }
 
-    std::vector<MtpFileEntry> file_entries;
     dbus::MessageReader reader(response);
     MtpFileEntries entries_protobuf;
     if (!reader.PopArrayOfBytesAsProto(&entries_protobuf)) {
@@ -413,8 +436,13 @@ class MediaTransferProtocolDaemonClientImpl
       return;
     }
 
-    for (int i = 0; i < entries_protobuf.file_entries_size(); ++i)
-      file_entries.push_back(entries_protobuf.file_entries(i));
+    std::vector<mojom::MtpFileEntry> file_entries;
+    file_entries.reserve(entries_protobuf.file_entries_size());
+    for (int i = 0; i < entries_protobuf.file_entries_size(); ++i) {
+      const auto& entry = entries_protobuf.file_entries(i);
+      file_entries.push_back(
+          GetMojoMtpFileEntryFromProtobuf(entry));
+    }
     callback.Run(file_entries);
   }
 
@@ -428,7 +456,7 @@ class MediaTransferProtocolDaemonClientImpl
       return;
     }
 
-    const uint8_t* data_bytes = NULL;
+    const uint8_t* data_bytes = nullptr;
     size_t data_length = 0;
     dbus::MessageReader reader(response);
     if (!reader.PopArrayOfBytes(&data_bytes, &data_length)) {
@@ -495,7 +523,7 @@ class MediaTransferProtocolDaemonClientImpl
                               << signal << " failed.";
   }
 
-  dbus::ObjectProxy* proxy_;
+  dbus::ObjectProxy* const proxy_;
 
   bool listen_for_changes_called_;
 
@@ -511,14 +539,16 @@ class MediaTransferProtocolDaemonClientImpl
 ////////////////////////////////////////////////////////////////////////////////
 // MediaTransferProtocolDaemonClient
 
-MediaTransferProtocolDaemonClient::MediaTransferProtocolDaemonClient() {}
+MediaTransferProtocolDaemonClient::MediaTransferProtocolDaemonClient() =
+    default;
 
-MediaTransferProtocolDaemonClient::~MediaTransferProtocolDaemonClient() {}
+MediaTransferProtocolDaemonClient::~MediaTransferProtocolDaemonClient() =
+    default;
 
 // static
-MediaTransferProtocolDaemonClient* MediaTransferProtocolDaemonClient::Create(
-    dbus::Bus* bus) {
-  return new MediaTransferProtocolDaemonClientImpl(bus);
+std::unique_ptr<MediaTransferProtocolDaemonClient>
+MediaTransferProtocolDaemonClient::Create(dbus::Bus* bus) {
+  return std::make_unique<MediaTransferProtocolDaemonClientImpl>(bus);
 }
 
 }  // namespace device

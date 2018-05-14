@@ -31,21 +31,25 @@ class PasswordsModelDelegateMock
       const std::vector<std::unique_ptr<autofill::PasswordForm>>&());
   MOCK_CONST_METHOD0(GetCurrentInteractionStats,
                      password_manager::InteractionsStats*());
+  MOCK_CONST_METHOD0(BubbleIsManualFallbackForSaving, bool());
   MOCK_METHOD0(OnBubbleShown, void());
   MOCK_METHOD0(OnBubbleHidden, void());
   MOCK_METHOD0(OnNoInteraction, void());
   MOCK_METHOD0(OnNopeUpdateClicked, void());
   MOCK_METHOD0(NeverSavePassword, void());
-  MOCK_METHOD1(SavePassword, void(const base::string16&));
   MOCK_METHOD1(UpdatePassword, void(const autofill::PasswordForm&));
+  MOCK_METHOD2(SavePassword,
+               void(const base::string16&, const base::string16&));
   MOCK_METHOD2(ChooseCredential, void(const autofill::PasswordForm&,
                                       password_manager::CredentialType));
   MOCK_METHOD0(NavigateToSmartLockPage, void());
   MOCK_METHOD0(NavigateToSmartLockHelpPage, void());
   MOCK_METHOD0(NavigateToPasswordManagerAccountDashboard, void());
   MOCK_METHOD0(NavigateToPasswordManagerSettingsPage, void());
-  MOCK_METHOD0(NavigateToChromeSignIn, void());
+  MOCK_METHOD1(EnableSync, void(const AccountInfo& account));
   MOCK_METHOD0(OnDialogHidden, void());
+  MOCK_METHOD0(AuthenticateUser, bool());
+  MOCK_CONST_METHOD0(ArePasswordsRevealedWhenBubbleIsOpened, bool());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordsModelDelegateMock);

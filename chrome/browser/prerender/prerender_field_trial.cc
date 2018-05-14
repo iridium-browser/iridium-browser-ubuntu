@@ -56,7 +56,6 @@ const char kNoStatePrefetchFeatureModeParameterName[] = "mode";
 
 // The origins can have prerendering overridden differently than the rest of the
 // experiment.
-const char kNoStatePrefetchFeatureInstantModeParameterName[] = "instant_mode";
 const char kNoStatePrefetchFeatureOmniboxModeParameterName[] = "omnibox_mode";
 
 // Mode values.
@@ -71,11 +70,9 @@ const base::Feature kNoStatePrefetchFeature{"NoStatePrefetch",
 void ConfigurePrerender() {
   PrerenderManager::PrerenderManagerMode overall_mode =
       ParsePrerenderMode(kNoStatePrefetchFeatureModeParameterName,
-                         PrerenderManager::PRERENDER_MODE_ENABLED);
+                         PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
 
   PrerenderManager::SetMode(overall_mode);
-  PrerenderManager::SetInstantMode(ParsePrerenderMode(
-      kNoStatePrefetchFeatureInstantModeParameterName, overall_mode));
   PrerenderManager::SetOmniboxMode(ParsePrerenderMode(
       kNoStatePrefetchFeatureOmniboxModeParameterName, overall_mode));
 }
@@ -87,24 +84,7 @@ bool IsOmniboxEnabled(Profile* profile) {
   if (!PrerenderManager::IsAnyPrerenderingPossible())
     return false;
 
-  // Override any field trial groups if the user has set a command line flag.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kPrerenderFromOmnibox)) {
-    const std::string switch_value =
-        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            switches::kPrerenderFromOmnibox);
-
-    if (switch_value == switches::kPrerenderFromOmniboxSwitchValueEnabled)
-      return true;
-
-    if (switch_value == switches::kPrerenderFromOmniboxSwitchValueDisabled)
-      return false;
-
-    DCHECK_EQ(switches::kPrerenderFromOmniboxSwitchValueAuto, switch_value);
-  }
-
-  return (base::FieldTrialList::FindFullName("PrerenderFromOmnibox") !=
-          "OmniboxPrerenderDisabled");
+  return true;
 }
 
 }  // namespace prerender

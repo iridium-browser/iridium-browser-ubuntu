@@ -36,7 +36,6 @@ enum VideoCaptureApi {
   ANDROID_API2_LEGACY,
   ANDROID_API2_FULL,
   ANDROID_API2_LIMITED,
-  ANDROID_TANGO,
   UNKNOWN
 };
 
@@ -68,12 +67,20 @@ struct VideoFrameInfo{
   gfx.mojom.Rect visible_rect;
 };
 
+struct VideoCaptureDeviceDescriptorCameraCalibration {
+  double focal_length_x;
+  double focal_length_y;
+  double depth_near;
+  double depth_far;
+};
+
 struct VideoCaptureDeviceDescriptor {
   string display_name;
   string device_id;
   string model_id;
   VideoCaptureApi capture_api;
   VideoCaptureTransportType transport_type;
+  VideoCaptureDeviceDescriptorCameraCalibration? camera_calibration;
 };
 
 struct VideoCaptureDeviceInfo {

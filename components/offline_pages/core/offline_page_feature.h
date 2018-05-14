@@ -16,12 +16,18 @@ extern const base::Feature kOfflinePagesSvelteConcurrentLoadingFeature;
 extern const base::Feature kOfflinePagesCTFeature;
 extern const base::Feature kOfflinePagesSharingFeature;
 extern const base::Feature kBackgroundLoaderForDownloadsFeature;
-extern const base::Feature kOfflinePagesAsyncDownloadFeature;
 extern const base::Feature kPrefetchingOfflinePagesFeature;
-extern const base::Feature kNewBackgroundLoaderFeature;
 extern const base::Feature kOfflinePagesLoadSignalCollectingFeature;
 extern const base::Feature kOfflinePagesCTV2Feature;
 extern const base::Feature kOfflinePagesRenovationsFeature;
+extern const base::Feature kOfflinePagesResourceBasedSnapshotFeature;
+extern const base::Feature kOfflinePagesPrefetchingUIFeature;
+extern const base::Feature kOfflinePagesLimitlessPrefetchingFeature;
+extern const base::Feature kOfflinePagesDescriptivePendingStatusFeature;
+
+// The parameter name used to find the experiment tag for prefetching offline
+// pages.
+extern const char kPrefetchingOfflinePagesExperimentsOption[];
 
 // Returns true if saving bookmarked pages for offline viewing is enabled.
 bool IsOfflineBookmarksEnabled();
@@ -42,11 +48,15 @@ bool IsBackgroundLoaderForDownloadsEnabled();
 // Returns true if concurrent background loading is enabled for svelte.
 bool IsOfflinePagesSvelteConcurrentLoadingEnabled();
 
-// Returns true if downloading a page asynchonously is enabled.
-bool IsOfflinePagesAsyncDownloadEnabled();
-
 // Returns true if prefetching offline pages is enabled.
 bool IsPrefetchingOfflinePagesEnabled();
+
+// Returns true if we should show UI for prefetched pages.
+bool IsOfflinePagesPrefetchingUIEnabled();
+
+// Returns true if prefetching offline pages should ignore its normal resource
+// usage limits.
+bool IsLimitlessPrefetchingEnabled();
 
 // Returns true if we enable load timing signals to be collected.
 bool IsOfflinePagesLoadSignalCollectingEnabled();
@@ -55,9 +65,10 @@ bool IsOfflinePagesLoadSignalCollectingEnabled();
 // the BackgroundLoaderOffliner.
 bool IsOfflinePagesRenovationsEnabled();
 
-// Returns true if we should use background loader rather than prerenderer
-// to offline pages.
-bool ShouldUseNewBackgroundLoader();
+// Returns true if we should use the "Resource percentage signal" for taking
+// snapshots instead of a time delay after the document is loaded in the main
+// frame.
+bool IsOfflinePagesResourceBasedSnapshotEnabled();
 
 // Returns true if a command line for test has been set that shortens the
 // snapshot delay.
@@ -65,6 +76,16 @@ bool ShouldUseTestingSnapshotDelay();
 
 // Returns true if we should record request origin as part of custom tabs V2.
 bool IsOfflinePagesCTV2Enabled();
+
+// Returns true if descriptive pending download status texts should be used in
+// notifications and Downloads Home.
+bool IsOfflinePagesDescriptivePendingStatusEnabled();
+
+// Returns an experiment tag provided by the field trial. This experiment tag
+// will be included in a custom header in all requests sent to Offline Prefetch
+// Server. The server will use this this optional tag to decide how to process
+// the request.
+std::string GetPrefetchingOfflinePagesExperimentTag();
 
 }  // namespace offline_pages
 

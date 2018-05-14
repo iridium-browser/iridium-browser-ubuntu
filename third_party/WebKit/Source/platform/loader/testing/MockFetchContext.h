@@ -10,9 +10,11 @@
 #include "platform/loader/fetch/FetchContext.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/ResourceTimingInfo.h"
-#include "platform/scheduler/test/fake_web_task_runner.h"
+#include "platform/scheduler/test/fake_task_runner.h"
+#include "platform/scheduler/test/fake_web_frame_scheduler.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
+#include "public/platform/WebURLLoaderFactory.h"
 
 #include <memory>
 
@@ -20,7 +22,6 @@ namespace blink {
 
 class KURL;
 class ResourceRequest;
-class WebTaskRunner;
 struct ResourceLoaderOptions;
 
 // Mocked FetchContext for testing.
@@ -30,20 +31,22 @@ class MockFetchContext : public FetchContext {
     kShouldLoadNewResource,
     kShouldNotLoadNewResource,
   };
-  static MockFetchContext* Create(LoadPolicy load_policy) {
-    return new MockFetchContext(load_policy);
+  static MockFetchContext* Create(LoadPolicy load_policy,
+                                  scoped_refptr<base::SingleThreadTaskRunner>
+                                      loading_task_runner = nullptr) {
+    return new MockFetchContext(load_policy, std::move(loading_task_runner));
   }
 
-  ~MockFetchContext() override {}
+  ~MockFetchContext() override = default;
 
   void SetLoadComplete(bool complete) { complete_ = complete; }
   long long GetTransferSize() const { return transfer_size_; }
 
-  SecurityOrigin* GetSecurityOrigin() const override {
-    return security_origin_.Get();
+  const SecurityOrigin* GetSecurityOrigin() const override {
+    return security_origin_.get();
   }
 
-  void SetSecurityOrigin(RefPtr<SecurityOrigin> security_origin) {
+  void SetSecurityOrigin(scoped_refptr<const SecurityOrigin> security_origin) {
     security_origin_ = security_origin;
   }
 
@@ -57,18 +60,22 @@ class MockFetchContext : public FetchContext {
       const KURL&,
       const ResourceLoaderOptions&,
       SecurityViolationReportingPolicy,
-      FetchParameters::OriginRestriction) const override {
+      FetchParameters::OriginRestriction,
+      ResourceRequest::RedirectStatus redirect_status) const override {
     return ResourceRequestBlockedReason::kNone;
   }
-  ResourceRequestBlockedReason CanFollowRedirect(
-      Resource::Type type,
-      const ResourceRequest& request,
+  ResourceRequestBlockedReason CheckCSPForRequest(
+      WebURLRequest::RequestContext,
       const KURL& url,
       const ResourceLoaderOptions& options,
       SecurityViolationReportingPolicy reporting_policy,
-      FetchParameters::OriginRestriction origin_restriction) const override {
-    return CanRequest(type, request, url, options, reporting_policy,
-                      origin_restriction);
+      ResourceRequest::RedirectStatus redirect_status) const override {
+    return ResourceRequestBlockedReason::kNone;
+  }
+  virtual ResourceRequestBlockedReason CheckResponseNosniff(
+      WebURLRequest::RequestContext,
+      const ResourceResponse&) const {
+    return ResourceRequestBlockedReason::kNone;
   }
   bool ShouldLoadNewResource(Resource::Type) const override {
     return load_policy_ == kShouldLoadNewResource;
@@ -80,47 +87,61 @@ class MockFetchContext : public FetchContext {
   }
 
   std::unique_ptr<WebURLLoader> CreateURLLoader(
-      const ResourceRequest& request) override {
+      const ResourceRequest& request,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      const ResourceLoaderOptions&) override {
+    if (!url_loader_factory_) {
+      url_loader_factory_ =
+          Platform::Current()->CreateDefaultURLLoaderFactory();
+    }
     WrappedResourceRequest wrapped(request);
-    return Platform::Current()->CreateURLLoader(
-        wrapped, runner_->ToSingleThreadTaskRunner());
+    return url_loader_factory_->CreateURLLoader(wrapped, task_runner);
   }
 
-  WebFrameScheduler* GetFrameScheduler() override {
+  ResourceLoadScheduler::ThrottlingPolicy InitialLoadThrottlingPolicy()
+      const override {
+    return ResourceLoadScheduler::ThrottlingPolicy::kTight;
+  }
+
+  WebFrameScheduler* GetFrameScheduler() const override {
     return frame_scheduler_.get();
   }
 
+  scoped_refptr<base::SingleThreadTaskRunner> GetLoadingTaskRunner() override {
+    return frame_scheduler_->GetTaskRunner(TaskType::kInternalTest);
+  }
+
  private:
-  class MockFrameScheduler final : public WebFrameScheduler {
+  class MockFrameScheduler final : public scheduler::FakeWebFrameScheduler {
    public:
-    MockFrameScheduler(RefPtr<WebTaskRunner> runner)
+    MockFrameScheduler(scoped_refptr<base::SingleThreadTaskRunner> runner)
         : runner_(std::move(runner)) {}
-    void AddThrottlingObserver(ObserverType, Observer*) override {}
-    void RemoveThrottlingObserver(ObserverType, Observer*) override {}
-    RefPtr<WebTaskRunner> TimerTaskRunner() override { return runner_; }
-    RefPtr<WebTaskRunner> LoadingTaskRunner() override { return runner_; }
-    RefPtr<WebTaskRunner> SuspendableTaskRunner() override { return runner_; }
-    RefPtr<WebTaskRunner> UnthrottledTaskRunner() override { return runner_; }
-    RefPtr<WebTaskRunner> UnthrottledButBlockableTaskRunner() override {
+    scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(
+        TaskType) override {
       return runner_;
     }
 
    private:
-    RefPtr<WebTaskRunner> runner_;
+    scoped_refptr<base::SingleThreadTaskRunner> runner_;
   };
 
-  MockFetchContext(LoadPolicy load_policy)
+  MockFetchContext(
+      LoadPolicy load_policy,
+      scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner)
       : load_policy_(load_policy),
-        runner_(AdoptRef(new scheduler::FakeWebTaskRunner)),
+        runner_(loading_task_runner
+                    ? std::move(loading_task_runner)
+                    : base::MakeRefCounted<scheduler::FakeTaskRunner>()),
         security_origin_(SecurityOrigin::CreateUnique()),
         frame_scheduler_(new MockFrameScheduler(runner_)),
         complete_(false),
         transfer_size_(-1) {}
 
   enum LoadPolicy load_policy_;
-  RefPtr<WebTaskRunner> runner_;
-  RefPtr<SecurityOrigin> security_origin_;
+  scoped_refptr<base::SingleThreadTaskRunner> runner_;
+  scoped_refptr<const SecurityOrigin> security_origin_;
   std::unique_ptr<WebFrameScheduler> frame_scheduler_;
+  std::unique_ptr<WebURLLoaderFactory> url_loader_factory_;
   bool complete_;
   long long transfer_size_;
 };

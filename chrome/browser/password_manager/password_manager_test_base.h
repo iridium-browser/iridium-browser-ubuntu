@@ -9,10 +9,10 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "chrome/browser/ssl/cert_verifier_browser_test.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "net/cert/mock_cert_verifier.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 namespace autofill {
@@ -65,18 +65,30 @@ class BubbleObserver {
  public:
   explicit BubbleObserver(content::WebContents* web_contents);
 
-  // Checks if the save prompt is being currently shown.
-  bool IsShowingSavePrompt() const;
+  // Checks if the save prompt is being currently available due to either manual
+  // fallback or successful login.
+  bool IsSavePromptAvailable() const;
 
-  // Checks if the update prompt is being currently shown.
-  bool IsShowingUpdatePrompt() const;
+  // Checks if the update prompt is being currently available due to either
+  // manual fallback or successful login.
+  bool IsUpdatePromptAvailable() const;
+
+  // Checks if the save prompt was shown automatically.
+  // |web_contents| must be the custom one returned by
+  // PasswordManagerBrowserTestBase.
+  bool IsSavePromptShownAutomatically() const;
+
+  // Checks if the update prompt was shown automatically.
+  // |web_contents| must be the custom one returned by
+  // PasswordManagerBrowserTestBase.
+  bool IsUpdatePromptShownAutomatically() const;
 
   // Dismisses the prompt currently open and moves the controller to the
   // inactive state.
   void Dismiss() const;
 
-  // Expecting that the prompt is shown, saves the password. Checks that the
-  // prompt is no longer visible afterwards.
+  // Expecting that the prompt is available, saves the password. At the end,
+  // checks that the prompt is no longer available afterwards.
   void AcceptSavePrompt() const;
 
   // Expecting that the prompt is shown, update |form| with the password from
@@ -88,6 +100,11 @@ class BubbleObserver {
   // PasswordManagerBrowserTestBase.
   void WaitForAccountChooser() const;
 
+  // Returns once the UI controller is in inactive state.
+  // |web_contents| must be the custom one returned by
+  // PasswordManagerBrowserTestBase.
+  void WaitForInactiveState() const;
+
   // Returns once the UI controller is in the management state due to matching
   // credentials autofilled.
   // |web_contents| must be the custom one returned by
@@ -97,7 +114,12 @@ class BubbleObserver {
   // Returns once the save prompt pops up or it's already shown.
   // |web_contents| must be the custom one returned by
   // PasswordManagerBrowserTestBase.
-  void WaitForSavePrompt() const;
+  void WaitForAutomaticSavePrompt() const;
+
+  // Returns once the fallback for saving becomes available.
+  // |web_contents| must be the custom one returned by
+  // PasswordManagerBrowserTestBase.
+  void WaitForFallbackForSaving() const;
 
  private:
   ManagePasswordsUIController* const passwords_ui_controller_;
@@ -105,7 +127,7 @@ class BubbleObserver {
   DISALLOW_COPY_AND_ASSIGN(BubbleObserver);
 };
 
-class PasswordManagerBrowserTestBase : public InProcessBrowserTest {
+class PasswordManagerBrowserTestBase : public CertVerifierBrowserTest {
  public:
   PasswordManagerBrowserTestBase();
   ~PasswordManagerBrowserTestBase() override;
@@ -113,7 +135,6 @@ class PasswordManagerBrowserTestBase : public InProcessBrowserTest {
   // InProcessBrowserTest:
   void SetUpOnMainThread() override;
   void TearDownOnMainThread() override;
-  void SetUpInProcessBrowserTestFixture() override;
   void TearDownInProcessBrowserTestFixture() override;
 
  protected:
@@ -147,6 +168,13 @@ class PasswordManagerBrowserTestBase : public InProcessBrowserTest {
   void WaitForElementValue(const std::string& iframe_id,
                            const std::string& element_id,
                            const std::string& expected_value);
+
+  // Same as above except the element has index |element_index| in elements() of
+  // the form |form_id|.
+  void WaitForElementValue(const std::string& form_id,
+                           size_t element_index,
+                           const std::string& expected_value);
+
   // Make sure that the password store processed all the previous calls which
   // are executed on another thread.
   void WaitForPasswordStore();
@@ -162,17 +190,20 @@ class PasswordManagerBrowserTestBase : public InProcessBrowserTest {
   // Synchronoulsy adds the given host to the list of valid HSTS hosts.
   void AddHSTSHost(const std::string& host);
 
+  // Checks that |password_store| stores only one credential with |username| and
+  // |password|.
+  void CheckThatCredentialsStored(const base::string16& username,
+                                  const base::string16& password);
+
   // Accessors
   // Return the first created tab with a custom ManagePasswordsUIController.
-  content::WebContents* WebContents();
-  content::RenderViewHost* RenderViewHost();
-  content::RenderFrameHost* RenderFrameHost();
+  content::WebContents* WebContents() const;
+  content::RenderViewHost* RenderViewHost() const;
+  content::RenderFrameHost* RenderFrameHost() const;
   net::EmbeddedTestServer& https_test_server() { return https_test_server_; }
-  net::MockCertVerifier& mock_cert_verifier() { return mock_cert_verifier_; }
 
  private:
   net::EmbeddedTestServer https_test_server_;
-  net::MockCertVerifier mock_cert_verifier_;
   // A tab with some hooks injected.
   content::WebContents* web_contents_;
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerBrowserTestBase);

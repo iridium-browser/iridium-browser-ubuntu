@@ -19,6 +19,7 @@ class DictionaryValue;
 
 namespace content {
 
+class DevToolsAgentHostClient;
 class WebContents;
 
 class CONTENT_EXPORT DevToolsManagerDelegate {
@@ -42,22 +43,40 @@ class CONTENT_EXPORT DevToolsManagerDelegate {
   // Creates new inspectable target given the |url|.
   virtual scoped_refptr<DevToolsAgentHost> CreateNewTarget(const GURL& url);
 
-  // Result ownership is passed to the caller.
-  virtual base::DictionaryValue* HandleCommand(
-      DevToolsAgentHost* agent_host,
-      base::DictionaryValue* command);
+  // Called when a new client is attached/detached.
+  virtual void ClientAttached(DevToolsAgentHost* agent_host,
+                              DevToolsAgentHostClient* client);
+  virtual void ClientDetached(DevToolsAgentHost* agent_host,
+                              DevToolsAgentHostClient* client);
 
+  // Returns true if the command has been handled, false otherwise.
+  virtual bool HandleCommand(DevToolsAgentHost* agent_host,
+                             DevToolsAgentHostClient* client,
+                             base::DictionaryValue* command);
+
+  // Returns true if the command has been handled, false otherwise.
   using CommandCallback =
       base::Callback<void(std::unique_ptr<base::DictionaryValue> response)>;
   virtual bool HandleAsyncCommand(DevToolsAgentHost* agent_host,
+                                  DevToolsAgentHostClient* client,
                                   base::DictionaryValue* command,
                                   const CommandCallback& callback);
+
   // Should return discovery page HTML that should list available tabs
   // and provide attach links.
   virtual std::string GetDiscoveryPageHTML();
 
-  // Returns frontend resource data by |path|.
-  virtual std::string GetFrontendResource(const std::string& path);
+  // Returns whether frontend resources are bundled within the binary.
+  virtual bool HasBundledFrontendResources();
+
+  // Makes browser target easily discoverable for remote debugging.
+  // This should only return true when remote debugging endpoint is not
+  // accessible by the web (for example in Chrome for Android where it is
+  // exposed via UNIX named socket) or when content/ embedder is built for
+  // running in the controlled environment (for example a special build for
+  // the Lab testing). If you want to return true here, please get security
+  // clearance from the devtools owners.
+  virtual bool IsBrowserTargetDiscoverable();
 
   virtual ~DevToolsManagerDelegate();
 };

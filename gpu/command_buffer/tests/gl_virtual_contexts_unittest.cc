@@ -7,6 +7,7 @@
 #include <GLES2/gl2extchromium.h>
 #include <stdint.h>
 
+#include "build/build_config.h"
 #include "gpu/command_buffer/tests/gl_manager.h"
 #include "gpu/command_buffer/tests/gl_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -16,27 +17,31 @@
 
 namespace gpu {
 
-class GLVirtualContextsTest : public testing::Test {
+class GLVirtualContextsTest
+    : public testing::TestWithParam<GpuDriverBugWorkarounds> {
  protected:
   static const int kSize0 = 4;
   static const int kSize1 = 8;
   static const int kSize2 = 16;
 
-  static const GLfloat kFloatRed[4];
-  static const GLfloat kFloatGreen[4];
-  static const uint8_t kExpectedRed[4];
-  static const uint8_t kExpectedGreen[4];
-
   void SetUp() override {
+    GpuDriverBugWorkarounds workarounds = GetParam();
     GLManager::Options options;
+    options.context_type = CONTEXT_TYPE_OPENGLES3;
     options.size = gfx::Size(kSize0, kSize0);
-    gl_real_.Initialize(options);
-    gl_real_shared_.Initialize(options);
+    gl_real_.InitializeWithWorkarounds(options, workarounds);
+    // If the gl_real context is not initialised, switch to ES2 context type
+    // and re-initialise
+    if (!gl_real_.IsInitialized()) {
+      options.context_type = CONTEXT_TYPE_OPENGLES2;
+      gl_real_.InitializeWithWorkarounds(options, workarounds);
+    }
+    gl_real_shared_.InitializeWithWorkarounds(options, workarounds);
     options.virtual_manager = &gl_real_shared_;
     options.size = gfx::Size(kSize1, kSize1);
-    gl1_.Initialize(options);
+    gl1_.InitializeWithWorkarounds(options, workarounds);
     options.size = gfx::Size(kSize2, kSize2);
-    gl2_.Initialize(options);
+    gl2_.InitializeWithWorkarounds(options, workarounds);
   }
 
   void TearDown() override {
@@ -86,16 +91,16 @@ class GLVirtualContextsTest : public testing::Test {
   GLManager gl2_;
 };
 
-const GLfloat GLVirtualContextsTest::kFloatRed[4] = {
+constexpr GLfloat kFloatRed[4] = {
     1.0f, 0.0f, 0.0f, 1.0f,
 };
-const GLfloat GLVirtualContextsTest::kFloatGreen[4] = {
+constexpr GLfloat kFloatGreen[4] = {
     0.0f, 1.0f, 0.0f, 1.0f,
 };
-const uint8_t GLVirtualContextsTest::kExpectedRed[4] = {
+constexpr uint8_t kExpectedRed[4] = {
     255, 0, 0, 255,
 };
-const uint8_t GLVirtualContextsTest::kExpectedGreen[4] = {
+constexpr uint8_t kExpectedGreen[4] = {
     0, 255, 0, 255,
 };
 
@@ -149,7 +154,7 @@ void TestDraw(int size) {
 }  // anonymous namespace
 
 // http://crbug.com/281565
-TEST_F(GLVirtualContextsTest, Basic) {
+TEST_P(GLVirtualContextsTest, Basic) {
   struct TestInfo {
     int size;
     uint8_t color[4];
@@ -193,7 +198,7 @@ TEST_F(GLVirtualContextsTest, Basic) {
 }
 
 // http://crbug.com/363407
-TEST_F(GLVirtualContextsTest, VertexArrayObjectRestore) {
+TEST_P(GLVirtualContextsTest, VertexArrayObjectRestore) {
   GLuint vao1 = 0, vao2 = 0;
 
   gl1_.MakeCurrent();
@@ -228,7 +233,7 @@ TEST_F(GLVirtualContextsTest, VertexArrayObjectRestore) {
 }
 
 // http://crbug.com/363407
-TEST_F(GLVirtualContextsTest, VertexArrayObjectRestoreRebind) {
+TEST_P(GLVirtualContextsTest, VertexArrayObjectRestoreRebind) {
   GLuint vao1 = 0, vao2 = 0;
 
   gl1_.MakeCurrent();
@@ -270,7 +275,7 @@ TEST_F(GLVirtualContextsTest, VertexArrayObjectRestoreRebind) {
 }
 
 // http://crbug.com/363407
-TEST_F(GLVirtualContextsTest, VertexArrayObjectRestoreDefault) {
+TEST_P(GLVirtualContextsTest, VertexArrayObjectRestoreDefault) {
   gl1_.MakeCurrent();
   // Set up red quad in default VAO.
   SetUpColoredUnitQuad(kFloatRed);
@@ -307,7 +312,7 @@ TEST_F(GLVirtualContextsTest, VertexArrayObjectRestoreDefault) {
   GLTestHelper::CheckGLError("no errors", __LINE__);
 }
 
-TEST_F(GLVirtualContextsTest, VirtualQueries) {
+TEST_P(GLVirtualContextsTest, VirtualQueries) {
   const GLenum query_targets[] = {
     GL_ANY_SAMPLES_PASSED_EXT,
     GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT,
@@ -364,6 +369,78 @@ TEST_F(GLVirtualContextsTest, VirtualQueries) {
     GLTestHelper::CheckGLError("no errors", __LINE__);
   }
 }
+
+// http://crbug.com/930327
+TEST_P(GLVirtualContextsTest, Texture2DArrayAnd3DRestore) {
+  // This test should only be run for ES3 or higher context
+  // So if the current version is ES2, do not run this test
+  if (gl1_.GetContextType() == CONTEXT_TYPE_OPENGLES2)
+    return;
+
+  // Context 1
+  gl1_.MakeCurrent();
+  GLuint tex1_2d_array = 0, tex1_3d = 0;
+  glActiveTexture(GL_TEXTURE0);
+  // 2d array texture
+  glGenTextures(1, &tex1_2d_array);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, tex1_2d_array);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  // 3d texture
+  glGenTextures(1, &tex1_3d);
+  glBindTexture(GL_TEXTURE_3D, tex1_3d);
+  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER,
+                  GL_NEAREST_MIPMAP_NEAREST);
+  glFinish();
+
+  // switch to context 2
+  gl2_.MakeCurrent();
+  GLuint tex2_2d_array = 0, tex2_3d = 0;
+  glActiveTexture(GL_TEXTURE0);
+  // 2d array texture
+  glGenTextures(1, &tex2_2d_array);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, tex2_2d_array);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  // 3d texture
+  glGenTextures(1, &tex2_3d);
+  glBindTexture(GL_TEXTURE_3D, tex2_3d);
+  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER,
+                  GL_LINEAR_MIPMAP_LINEAR);
+  glFinish();
+
+  // switch back to context1
+  gl1_.MakeCurrent();
+
+  // get the texture parameters which were programmed earlier for context1
+  GLint tex_2d_array_params = 0, tex_3d_params = 0;
+  glGetTexParameteriv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER,
+                      &tex_2d_array_params);
+  glGetTexParameteriv(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, &tex_3d_params);
+  // Do checks to make sure texture params are restored correctly after context
+  // switching
+  EXPECT_EQ(GL_NEAREST, tex_2d_array_params);
+  EXPECT_EQ(GL_NEAREST_MIPMAP_NEAREST, tex_3d_params);
+  GLTestHelper::CheckGLError("no errors", __LINE__);
+}
+static const GpuDriverBugWorkarounds workarounds_cases[] = {
+    // No extra workarounds.
+    GpuDriverBugWorkarounds(),
+
+#if defined(OS_ANDROID)
+    // Regression tests for https://crbug.com/768324
+    //
+    // TODO(kainino): The #if is added because this case does not pass on Mac
+    // or Linux. My guess is that this workaround requires the backing context
+    // to be OpenGL ES (not OpenGL Core Profile).
+    GpuDriverBugWorkarounds({
+        USE_CLIENT_SIDE_ARRAYS_FOR_STREAM_BUFFERS,
+    }),
+#endif
+
+};
+
+INSTANTIATE_TEST_CASE_P(WithWorkarounds,
+                        GLVirtualContextsTest,
+                        ::testing::ValuesIn(workarounds_cases));
 
 }  // namespace gpu
 

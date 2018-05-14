@@ -5,6 +5,7 @@
 #include "remoting/protocol/spake2_authenticator.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "remoting/base/rsa_key_pair.h"
@@ -37,8 +38,8 @@ const char kTestSharedSecretBad[] = "0000-0000-0001";
 
 class Spake2AuthenticatorTest : public AuthenticatorTestBase {
  public:
-  Spake2AuthenticatorTest() {}
-  ~Spake2AuthenticatorTest() override {}
+  Spake2AuthenticatorTest() = default;
+  ~Spake2AuthenticatorTest() override = default;
 
  protected:
   void InitAuthenticators(const std::string& client_secret,
@@ -90,7 +91,7 @@ TEST_F(Spake2AuthenticatorTest, InvalidSecret) {
   ASSERT_TRUE(message.get());
 
   ASSERT_EQ(Authenticator::WAITING_MESSAGE, client_->state());
-  host_->ProcessMessage(message.get(), base::Bind(&base::DoNothing));
+  host_->ProcessMessage(message.get(), base::DoNothing());
   // This assumes that Spake2Authenticator::ProcessMessage runs synchronously.
   ASSERT_EQ(Authenticator::REJECTED, host_->state());
 }

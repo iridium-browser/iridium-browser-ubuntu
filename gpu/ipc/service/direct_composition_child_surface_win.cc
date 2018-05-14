@@ -7,6 +7,8 @@
 #include <d3d11_1.h>
 #include <dcomptypes.h>
 
+#include "base/debug/alias.h"
+#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/synchronization/waitable_event.h"
@@ -40,10 +42,12 @@ IDCompositionSurface* g_current_surface;
 
 DirectCompositionChildSurfaceWin::DirectCompositionChildSurfaceWin(
     const gfx::Size& size,
+    bool is_hdr,
     bool has_alpha,
     bool enable_dc_layers)
     : gl::GLSurfaceEGL(),
       size_(size),
+      is_hdr_(is_hdr),
       has_alpha_(has_alpha),
       enable_dc_layers_(enable_dc_layers) {}
 
@@ -52,6 +56,7 @@ DirectCompositionChildSurfaceWin::~DirectCompositionChildSurfaceWin() {
 }
 
 bool DirectCompositionChildSurfaceWin::Initialize(gl::GLSurfaceFormat format) {
+  ui::ScopedReleaseCurrent release_current;
   d3d11_device_ = gl::QueryD3D11DeviceObjectFromANGLE();
   dcomp_device_ = gl::QueryDirectCompositionDevice(d3d11_device_);
   if (!dcomp_device_)
@@ -70,7 +75,7 @@ bool DirectCompositionChildSurfaceWin::Initialize(gl::GLSurfaceFormat format) {
       eglCreatePbufferSurface(display, GetConfig(), &pbuffer_attribs[0]);
   CHECK(!!default_surface_);
 
-  return true;
+  return release_current.Restore();
 }
 
 void DirectCompositionChildSurfaceWin::ReleaseCurrentSurface() {
@@ -79,15 +84,13 @@ void DirectCompositionChildSurfaceWin::ReleaseCurrentSurface() {
   swap_chain_.Reset();
 }
 
-void DirectCompositionChildSurfaceWin::InitializeSurface() {
+bool DirectCompositionChildSurfaceWin::InitializeSurface() {
   TRACE_EVENT1("gpu", "DirectCompositionChildSurfaceWin::InitializeSurface()",
                "enable_dc_layers_", enable_dc_layers_);
   DCHECK(!dcomp_surface_);
   DCHECK(!swap_chain_);
   DXGI_FORMAT output_format =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableHDR)
-          ? DXGI_FORMAT_R16G16B16A16_FLOAT
-          : DXGI_FORMAT_B8G8R8A8_UNORM;
+      is_hdr_ ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM;
   if (enable_dc_layers_) {
     // Always treat as premultiplied, because an underlay could cause it to
     // become transparent.
@@ -99,11 +102,11 @@ void DirectCompositionChildSurfaceWin::InitializeSurface() {
   } else {
     DXGI_ALPHA_MODE alpha_mode =
         has_alpha_ ? DXGI_ALPHA_MODE_PREMULTIPLIED : DXGI_ALPHA_MODE_IGNORE;
-    base::win::ScopedComPtr<IDXGIDevice> dxgi_device;
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device;
     d3d11_device_.CopyTo(dxgi_device.GetAddressOf());
-    base::win::ScopedComPtr<IDXGIAdapter> dxgi_adapter;
+    Microsoft::WRL::ComPtr<IDXGIAdapter> dxgi_adapter;
     dxgi_device->GetAdapter(dxgi_adapter.GetAddressOf());
-    base::win::ScopedComPtr<IDXGIFactory2> dxgi_factory;
+    Microsoft::WRL::ComPtr<IDXGIFactory2> dxgi_factory;
     dxgi_adapter->GetParent(IID_PPV_ARGS(dxgi_factory.GetAddressOf()));
 
     DXGI_SWAP_CHAIN_DESC1 desc = {};
@@ -122,11 +125,13 @@ void DirectCompositionChildSurfaceWin::InitializeSurface() {
         d3d11_device_.Get(), &desc, nullptr, swap_chain_.GetAddressOf());
     has_been_rendered_to_ = false;
     first_swap_ = true;
-    CHECK(SUCCEEDED(hr));
+    return SUCCEEDED(hr);
   }
+  return true;
 }
 
 void DirectCompositionChildSurfaceWin::ReleaseDrawTexture(bool will_discard) {
+  DCHECK(!gl::GLContext::GetCurrent());
   if (real_surface_) {
     eglDestroySurface(GetDisplay(), real_surface_);
     real_surface_ = nullptr;
@@ -136,9 +141,14 @@ void DirectCompositionChildSurfaceWin::ReleaseDrawTexture(bool will_discard) {
     if (dcomp_surface_) {
       HRESULT hr = dcomp_surface_->EndDraw();
       CHECK(SUCCEEDED(hr));
+      dcomp_surface_serial_++;
     } else if (!will_discard) {
       DXGI_PRESENT_PARAMETERS params = {};
       RECT dirty_rect = swap_rect_.ToRECT();
+      // TODO(sunnyps): Remove Alias calls once crbug.com/776403 is fixed.
+      base::debug::Alias(&dirty_rect);
+      gfx::Size surface_size = size_;
+      base::debug::Alias(&surface_size);
       params.DirtyRectsCount = 1;
       params.pDirtyRects = &dirty_rect;
       swap_chain_->Present1(first_swap_ ? 0 : 1, 0, &params);
@@ -146,7 +156,7 @@ void DirectCompositionChildSurfaceWin::ReleaseDrawTexture(bool will_discard) {
         // Wait for the GPU to finish executing its commands before
         // committing the DirectComposition tree, or else the swapchain
         // may flicker black when it's first presented.
-        base::win::ScopedComPtr<IDXGIDevice2> dxgi_device2;
+        Microsoft::WRL::ComPtr<IDXGIDevice2> dxgi_device2;
         HRESULT hr = d3d11_device_.CopyTo(dxgi_device2.GetAddressOf());
         DCHECK(SUCCEEDED(hr));
         base::WaitableEvent event(
@@ -158,7 +168,7 @@ void DirectCompositionChildSurfaceWin::ReleaseDrawTexture(bool will_discard) {
       }
     }
   }
-  if (dcomp_surface_ == g_current_surface)
+  if (dcomp_surface_.Get() == g_current_surface)
     g_current_surface = nullptr;
 }
 
@@ -177,7 +187,7 @@ void DirectCompositionChildSurfaceWin::Destroy() {
     }
     real_surface_ = nullptr;
   }
-  if (dcomp_surface_ && (dcomp_surface_ == g_current_surface)) {
+  if (dcomp_surface_ && (dcomp_surface_.Get() == g_current_surface)) {
     HRESULT hr = dcomp_surface_->EndDraw();
     CHECK(SUCCEEDED(hr));
     g_current_surface = nullptr;
@@ -198,7 +208,11 @@ void* DirectCompositionChildSurfaceWin::GetHandle() {
   return real_surface_ ? real_surface_ : default_surface_;
 }
 
-gfx::SwapResult DirectCompositionChildSurfaceWin::SwapBuffers() {
+gfx::SwapResult DirectCompositionChildSurfaceWin::SwapBuffers(
+    const PresentationCallback& callback) {
+  // PresentationCallback is handled by DirectCompositionSurfaceWin. The child
+  // surface doesn't need provide presentation feedback.
+  DCHECK(!callback);
   ReleaseDrawTexture(false);
   return gfx::SwapResult::SWAP_ACK;
 }
@@ -212,7 +226,7 @@ bool DirectCompositionChildSurfaceWin::SupportsPostSubBuffer() {
 }
 
 bool DirectCompositionChildSurfaceWin::OnMakeCurrent(gl::GLContext* context) {
-  if (g_current_surface != dcomp_surface_) {
+  if (g_current_surface != dcomp_surface_.Get()) {
     if (g_current_surface) {
       HRESULT hr = g_current_surface->SuspendDraw();
       CHECK(SUCCEEDED(hr));
@@ -233,21 +247,33 @@ bool DirectCompositionChildSurfaceWin::SupportsDCLayers() const {
 
 bool DirectCompositionChildSurfaceWin::SetDrawRectangle(
     const gfx::Rect& rectangle) {
-  if (draw_texture_)
-    return false;
-  DCHECK(!real_surface_);
-  ui::ScopedReleaseCurrent release_current(this);
-
-  if ((enable_dc_layers_ && !dcomp_surface_) ||
-      (!enable_dc_layers_ && !swap_chain_)) {
-    ReleaseCurrentSurface();
-    InitializeSurface();
-  }
-
   if (!gfx::Rect(size_).Contains(rectangle)) {
     DLOG(ERROR) << "Draw rectangle must be contained within size of surface";
     return false;
   }
+
+  if (draw_texture_) {
+    DLOG(ERROR) << "SetDrawRectangle must be called only once per swap buffers";
+    return false;
+  }
+
+  DCHECK(!real_surface_);
+
+  ui::ScopedReleaseCurrent release_current;
+
+  if ((enable_dc_layers_ && !dcomp_surface_) ||
+      (!enable_dc_layers_ && !swap_chain_)) {
+    ReleaseCurrentSurface();
+    if (!InitializeSurface()) {
+      DLOG(ERROR) << "InitializeSurface failed";
+      // It is likely that restoring the context will fail, so call Restore here
+      // to avoid the assert during ScopedReleaseCurrent destruction.
+      ignore_result(release_current.Restore());
+      return false;
+    }
+  }
+
+  // Check this after reinitializing the surface because we reset state there.
   if (gfx::Rect(size_) != rectangle && !has_been_rendered_to_) {
     DLOG(ERROR) << "First draw to surface must draw to everything";
     return false;
@@ -287,6 +313,11 @@ bool DirectCompositionChildSurfaceWin::SetDrawRectangle(
   real_surface_ = eglCreatePbufferFromClientBuffer(
       GetDisplay(), EGL_D3D_TEXTURE_ANGLE, buffer, GetConfig(),
       &pbuffer_attribs[0]);
+
+  if (!release_current.Restore()) {
+    DLOG(ERROR) << "Failed to restore context";
+    return false;
+  }
 
   return true;
 }

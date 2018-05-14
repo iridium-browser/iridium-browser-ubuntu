@@ -13,21 +13,19 @@ ServiceWorkerRegistrationPush::ServiceWorkerRegistrationPush(
     ServiceWorkerRegistration* registration)
     : registration_(registration) {}
 
-ServiceWorkerRegistrationPush::~ServiceWorkerRegistrationPush() {}
+ServiceWorkerRegistrationPush::~ServiceWorkerRegistrationPush() = default;
 
-const char* ServiceWorkerRegistrationPush::SupplementName() {
-  return "ServiceWorkerRegistrationPush";
-}
+const char ServiceWorkerRegistrationPush::kSupplementName[] =
+    "ServiceWorkerRegistrationPush";
 
 ServiceWorkerRegistrationPush& ServiceWorkerRegistrationPush::From(
     ServiceWorkerRegistration& registration) {
   ServiceWorkerRegistrationPush* supplement =
-      static_cast<ServiceWorkerRegistrationPush*>(
-          Supplement<ServiceWorkerRegistration>::From(registration,
-                                                      SupplementName()));
+      Supplement<ServiceWorkerRegistration>::From<
+          ServiceWorkerRegistrationPush>(registration);
   if (!supplement) {
     supplement = new ServiceWorkerRegistrationPush(&registration);
-    ProvideTo(registration, SupplementName(), supplement);
+    ProvideTo(registration, supplement);
   }
   return *supplement;
 }
@@ -43,7 +41,7 @@ PushManager* ServiceWorkerRegistrationPush::pushManager() {
   return push_manager_.Get();
 }
 
-DEFINE_TRACE(ServiceWorkerRegistrationPush) {
+void ServiceWorkerRegistrationPush::Trace(blink::Visitor* visitor) {
   visitor->Trace(registration_);
   visitor->Trace(push_manager_);
   Supplement<ServiceWorkerRegistration>::Trace(visitor);

@@ -24,12 +24,12 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -38,22 +38,28 @@ import java.net.HttpURLConnection;
 /**
  * Tests for VariationsSeedFetcher
  */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class VariationsSeedFetcherTest {
     private HttpURLConnection mConnection;
     private VariationsSeedFetcher mFetcher;
     private SharedPreferences mPrefs;
 
+    private static final String sRestrict = "restricted";
+    private static final String sMilestone = "64";
+    private static final String sChannel = "dev";
+
     @Before
     public void setUp() throws IOException {
-        ContextUtils.initApplicationContextForTests(RuntimeEnvironment.application);
         // Pretend we are not on the UI thread, since the class we are testing is supposed to run
         // only on a background thread.
         ThreadUtils.setUiThread(mock(Looper.class));
         mFetcher = spy(VariationsSeedFetcher.get());
         mConnection = mock(HttpURLConnection.class);
-        doReturn(mConnection).when(mFetcher).getServerConnection("");
+        doReturn(mConnection)
+                .when(mFetcher)
+                .getServerConnection(VariationsSeedFetcher.VariationsPlatform.ANDROID, sRestrict,
+                        sMilestone, sChannel);
         mPrefs = ContextUtils.getAppSharedPreferences();
         mPrefs.edit().clear().apply();
     }
@@ -78,9 +84,10 @@ public class VariationsSeedFetcherTest {
         when(mConnection.getHeaderField("X-Country")).thenReturn("Nowhere Land");
         when(mConnection.getHeaderField("Date")).thenReturn("A date");
         when(mConnection.getHeaderField("IM")).thenReturn("gzip");
-        when(mConnection.getInputStream()).thenReturn(new ByteArrayInputStream("1234".getBytes()));
+        when(mConnection.getInputStream())
+                .thenReturn(new ByteArrayInputStream(ApiCompatibilityUtils.getBytesUtf8("1234")));
 
-        mFetcher.fetchSeed("");
+        mFetcher.fetchSeed(sRestrict, sMilestone, sChannel);
 
         assertThat(mPrefs.getString(VariationsSeedBridge.VARIATIONS_FIRST_RUN_SEED_SIGNATURE, ""),
                 equalTo("signature"));
@@ -91,44 +98,86 @@ public class VariationsSeedFetcherTest {
         assertTrue(mPrefs.getBoolean(
                 VariationsSeedBridge.VARIATIONS_FIRST_RUN_SEED_IS_GZIP_COMPRESSED, false));
         assertThat(mPrefs.getString(VariationsSeedBridge.VARIATIONS_FIRST_RUN_SEED_BASE64, ""),
-                equalTo(Base64.encodeToString("1234".getBytes(), Base64.NO_WRAP)));
+                equalTo(Base64.encodeToString(
+                        ApiCompatibilityUtils.getBytesUtf8("1234"), Base64.NO_WRAP)));
     }
 
     /**
-    * Test method for {@link VariationsSeedFetcher#fetchSeed()} when no fetch is needed
-    */
+     * Test method for {@link VariationsSeedFetcher#fetchSeed()} when no fetch is needed
+     */
     @Test
     public void testFetchSeed_noFetchNeeded() throws IOException {
         mPrefs.edit().putBoolean(VariationsSeedFetcher.VARIATIONS_INITIALIZED_PREF, true).apply();
 
-        mFetcher.fetchSeed("");
+        mFetcher.fetchSeed(sRestrict, sMilestone, sChannel);
 
         verify(mConnection, never()).connect();
     }
 
     /**
-    * Test method for {@link VariationsSeedFetcher#fetchSeed()} with a bad response
-    */
+     * Test method for {@link VariationsSeedFetcher#fetchSeed()} with a bad response
+     */
     @Test
     public void testFetchSeed_badResponse() throws IOException {
         when(mConnection.getResponseCode()).thenReturn(HttpURLConnection.HTTP_NOT_FOUND);
 
-        mFetcher.fetchSeed("");
+        mFetcher.fetchSeed(sRestrict, sMilestone, sChannel);
 
         assertTrue(mPrefs.getBoolean(VariationsSeedFetcher.VARIATIONS_INITIALIZED_PREF, false));
         assertFalse(VariationsSeedBridge.hasJavaPref());
     }
 
     /**
-    * Test method for {@link VariationsSeedFetcher#fetchSeed()} with an exception when connecting
-    */
+     * Test method for {@link VariationsSeedFetcher#fetchSeed()} with an exception when connecting
+     */
     @Test
     public void testFetchSeed_IOException() throws IOException {
         doThrow(new IOException()).when(mConnection).connect();
 
-        mFetcher.fetchSeed("");
+        mFetcher.fetchSeed(sRestrict, sMilestone, sChannel);
 
         assertTrue(mPrefs.getBoolean(VariationsSeedFetcher.VARIATIONS_INITIALIZED_PREF, false));
         assertFalse(VariationsSeedBridge.hasJavaPref());
+    }
+
+    /**
+     * Test method for {@link VariationsSeedFetcher#getConnectionString()} has URl params.
+     */
+    @Test
+    public void testGetConnectionString_HasParams() throws IOException {
+        String urlString = mFetcher.getConnectionString(
+                VariationsSeedFetcher.VariationsPlatform.ANDROID, sRestrict, sMilestone, sChannel);
+
+        // Has the params.
+        assertTrue(urlString, urlString.contains("restrict"));
+        assertTrue(urlString, urlString.contains("osname"));
+        assertTrue(urlString, urlString.contains("milestone"));
+        assertTrue(urlString, urlString.contains("channel"));
+
+        // Has the param values.
+        assertTrue(urlString, urlString.contains(sRestrict));
+        assertTrue(urlString, urlString.contains(sMilestone));
+        assertTrue(urlString, urlString.contains(sChannel));
+
+        urlString = mFetcher.getConnectionString(
+                VariationsSeedFetcher.VariationsPlatform.ANDROID, "", sMilestone, sChannel);
+        assertFalse(urlString.contains("restrict"));
+        assertTrue(urlString.contains("osname"));
+        assertTrue(urlString.contains("milestone"));
+        assertTrue(urlString.contains("channel"));
+
+        urlString = mFetcher.getConnectionString(
+                VariationsSeedFetcher.VariationsPlatform.ANDROID, sRestrict, "", sChannel);
+        assertTrue(urlString.contains("restrict"));
+        assertTrue(urlString.contains("osname"));
+        assertFalse(urlString.contains("milestone"));
+        assertTrue(urlString.contains("channel"));
+
+        urlString = mFetcher.getConnectionString(
+                VariationsSeedFetcher.VariationsPlatform.ANDROID, sRestrict, sMilestone, "");
+        assertTrue(urlString.contains("restrict"));
+        assertTrue(urlString.contains("osname"));
+        assertTrue(urlString.contains("milestone"));
+        assertFalse(urlString.contains("channel"));
     }
 }

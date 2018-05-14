@@ -24,8 +24,7 @@ BinaryTargetGenerator::BinaryTargetGenerator(
       output_type_(type) {
 }
 
-BinaryTargetGenerator::~BinaryTargetGenerator() {
-}
+BinaryTargetGenerator::~BinaryTargetGenerator() = default;
 
 void BinaryTargetGenerator::DoRun() {
   target_->set_output_type(output_type_);
@@ -49,9 +48,6 @@ void BinaryTargetGenerator::DoRun() {
     return;
 
   if (!FillCheckIncludes())
-    return;
-
-  if (!FillInputs())
     return;
 
   if (!FillConfigs())

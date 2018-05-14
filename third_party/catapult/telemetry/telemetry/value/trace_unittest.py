@@ -4,6 +4,7 @@
 
 import codecs
 import json
+import mock
 import os
 import shutil
 import tempfile
@@ -11,7 +12,6 @@ import unittest
 
 from telemetry import story
 from telemetry import page as page_module
-from telemetry.testing import system_stub
 from telemetry.value import trace
 from tracing_build import html2trace
 from tracing.trace_data import trace_data
@@ -31,13 +31,6 @@ class TestBase(unittest.TestCase):
         page_module.Page('http://www.foo.com/', story_set, story_set.base_dir,
                          name='http://www.foo.com/'))
     self.story_set = story_set
-
-    self._cloud_storage_stub = system_stub.Override(trace, ['cloud_storage'])
-
-  def tearDown(self):
-    if self._cloud_storage_stub:
-      self._cloud_storage_stub.Restore()
-      self._cloud_storage_stub = None
 
   @property
   def pages(self):
@@ -73,52 +66,49 @@ class ValueTest(TestBase):
   def testRepr(self):
     v = trace.TraceValue(
         self.pages[0], trace_data.CreateTraceDataFromRawData([{'test': 1}]),
-                         important=True, description='desc')
+        important=True, description='desc')
 
     self.assertEquals('TraceValue(http://www.bar.com/, trace)', str(v))
 
-  def testTraceSerializationContainStoryName(self):
+  @mock.patch('telemetry.value.trace.cloud_storage.Insert')
+  def testAsDictWhenTraceSerializedAndUploaded(self, insert_mock):
     tempdir = tempfile.mkdtemp()
     try:
-      v = trace.TraceValue(self.pages[0],
-                           trace_data.CreateTraceDataFromRawData([{'test': 1}]))
-      fh = v.Serialize(tempdir)
-      self.assertTrue(os.path.basename(fh.GetAbsPath()).startswith(
-          'http___www_bar_com'))
-    finally:
-      shutil.rmtree(tempdir)
-
-  def testAsDictWhenTraceSerializedAndUploaded(self):
-    tempdir = tempfile.mkdtemp()
-    try:
-      v = trace.TraceValue(None,
-                           trace_data.CreateTraceDataFromRawData([{'test': 1}]))
-      fh = v.Serialize(tempdir)
-      # pylint: disable=no-member
-      trace.cloud_storage.SetCalculatedHashesForTesting(
-          {fh.GetAbsPath(): 123})
-      # pylint: enable=no-member
-      bucket = trace.cloud_storage.PUBLIC_BUCKET
-      cloud_url = v.UploadToCloud(bucket)
+      file_path = os.path.join(tempdir, 'test.html')
+      v = trace.TraceValue(
+          None, trace_data.CreateTraceDataFromRawData([{'test': 1}]),
+          file_path=file_path,
+          upload_bucket=trace.cloud_storage.PUBLIC_BUCKET,
+          remote_path='a.html',
+          cloud_url='http://example.com/a.html')
+      fh = v.Serialize()
+      cloud_url = v.UploadToCloud()
       d = v.AsDict()
       self.assertEqual(d['file_id'], fh.id)
       self.assertEqual(d['cloud_url'], cloud_url)
+      insert_mock.assert_called_with(
+          trace.cloud_storage.PUBLIC_BUCKET,
+          'a.html',
+          file_path)
     finally:
       shutil.rmtree(tempdir)
 
-  def testAsDictWhenTraceIsNotSerializedAndUploaded(self):
+  @mock.patch('telemetry.value.trace.cloud_storage.Insert')
+  def testAsDictWhenTraceIsNotSerializedAndUploaded(self, insert_mock):
     test_temp_file = tempfile.NamedTemporaryFile(delete=False)
     try:
-      v = trace.TraceValue(None,
-                           trace_data.CreateTraceDataFromRawData([{'test': 1}]))
-      # pylint: disable=no-member
-      trace.cloud_storage.SetCalculatedHashesForTesting(
-          TestDefaultDict(123))
-      # pylint: enable=no-member
-      bucket = trace.cloud_storage.PUBLIC_BUCKET
-      cloud_url = v.UploadToCloud(bucket)
+      v = trace.TraceValue(
+          None, trace_data.CreateTraceDataFromRawData([{'test': 1}]),
+          upload_bucket=trace.cloud_storage.PUBLIC_BUCKET,
+          remote_path='a.html',
+          cloud_url='http://example.com/a.html')
+      cloud_url = v.UploadToCloud()
       d = v.AsDict()
       self.assertEqual(d['cloud_url'], cloud_url)
+      insert_mock.assert_called_with(
+          trace.cloud_storage.PUBLIC_BUCKET,
+          'a.html',
+          v.filename)
     finally:
       if os.path.exists(test_temp_file.name):
         test_temp_file.close()
@@ -126,9 +116,9 @@ class ValueTest(TestBase):
 
   def testFindTraceParts(self):
     raw_data = {
-      'powerTraceAsString': 'BattOr Data',
-      'traceEvents': [{'trace': 1}],
-      'tabIds': 'Tab Data',
+        'powerTraceAsString': 'BattOr Data',
+        'traceEvents': [{'trace': 1}],
+        'tabIds': 'Tab Data',
     }
     data = trace_data.CreateTraceDataFromRawData(raw_data)
     v = trace.TraceValue(None, data)

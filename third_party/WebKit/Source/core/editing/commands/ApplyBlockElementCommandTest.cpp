@@ -3,17 +3,17 @@
 // found in the LICENSE file.
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/QualifiedName.h"
-#include "core/editing/EditingTestBase.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/Position.h"
 #include "core/editing/SelectionTemplate.h"
 #include "core/editing/VisibleSelection.h"
 #include "core/editing/commands/FormatBlockCommand.h"
 #include "core/editing/commands/IndentOutdentCommand.h"
+#include "core/editing/testing/EditingTestBase.h"
 #include "core/html/HTMLHeadElement.h"
+#include "core/html_names.h"
 
 #include <memory>
 
@@ -37,7 +37,7 @@ TEST_F(ApplyBlockElementCommandTest, selectionCrossingOverBody) {
   GetDocument().body()->setContentEditable("false", ASSERT_NO_EXCEPTION);
   GetDocument().setDesignMode("on");
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(
               Position(GetDocument().documentElement(), 1),
@@ -51,7 +51,7 @@ TEST_F(ApplyBlockElementCommandTest, selectionCrossingOverBody) {
   EXPECT_EQ(
       "<body contenteditable=\"false\">\n"
       "<pre><var id=\"va\" class=\"CLASS13\">\nC\n</var></pre><input></body>",
-      GetDocument().documentElement()->innerHTML());
+      GetDocument().documentElement()->InnerHTMLAsString());
 }
 
 // This is a regression test for https://crbug.com/660801
@@ -63,7 +63,7 @@ TEST_F(ApplyBlockElementCommandTest, visibilityChangeDuringCommand) {
   GetDocument().setDesignMode("on");
 
   UpdateAllLifecyclePhases();
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .Collapse(Position(GetDocument().QuerySelector("li"), 0))
           .Build());
@@ -75,7 +75,7 @@ TEST_F(ApplyBlockElementCommandTest, visibilityChangeDuringCommand) {
   EXPECT_EQ(
       "<head><style>li:first-child { visibility:visible; }</style></head>"
       "<body><ul style=\"visibility:hidden\"><ul></ul><li>xyz</li></ul></body>",
-      GetDocument().documentElement()->innerHTML());
+      GetDocument().documentElement()->InnerHTMLAsString());
 }
 
 // This is a regression test for https://crbug.com/712510
@@ -87,10 +87,10 @@ TEST_F(ApplyBlockElementCommandTest, IndentHeadingIntoBlockquote) {
       "</div>");
   Element* button = GetDocument().QuerySelector("button");
   Element* object = GetDocument().QuerySelector("object");
-  Selection().SetSelection(SelectionInDOMTree::Builder()
-                               .Collapse(Position(button, 0))
-                               .Extend(Position(object, 0))
-                               .Build());
+  Selection().SetSelectionAndEndTyping(SelectionInDOMTree::Builder()
+                                           .Collapse(Position(button, 0))
+                                           .Extend(Position(object, 0))
+                                           .Build());
 
   IndentOutdentCommand* command = IndentOutdentCommand::Create(
       GetDocument(), IndentOutdentCommand::kIndent);
@@ -106,7 +106,22 @@ TEST_F(ApplyBlockElementCommandTest, IndentHeadingIntoBlockquote) {
       "<h6><button></button></h6><br>"
       "<object></object>"
       "</div>",
-      GetDocument().body()->innerHTML());
+      GetDocument().body()->InnerHTMLAsString());
+}
+
+// This is a regression test for https://crbug.com/806525
+TEST_F(ApplyBlockElementCommandTest, InsertPlaceHolderAtDisconnectedPosition) {
+  GetDocument().setDesignMode("on");
+  InsertStyleElement(".input:nth-of-type(2n+1) { visibility:collapse; }");
+  Selection().SetSelectionAndEndTyping(SetSelectionTextToBody(
+      "^<input><input class=\"input\" style=\"position:absolute\">|"));
+  FormatBlockCommand* command =
+      FormatBlockCommand::Create(GetDocument(), HTMLNames::preTag);
+  // Crash happens here.
+  EXPECT_FALSE(command->Apply());
+  EXPECT_EQ(
+      "<pre>|<input></pre><input class=\"input\" style=\"position:absolute\">",
+      GetSelectionTextFromBody(Selection().GetSelectionInDOMTree()));
 }
 
 }  // namespace blink

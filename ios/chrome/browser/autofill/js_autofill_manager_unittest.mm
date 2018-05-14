@@ -9,6 +9,8 @@
 #include "base/ios/ios_util.h"
 #import "base/test/ios/wait_util.h"
 #include "components/autofill/core/common/autofill_constants.h"
+#import "components/autofill/ios/browser/js_autofill_manager.h"
+#include "ios/chrome/browser/web/chrome_web_client.h"
 #import "ios/chrome/browser/web/chrome_web_test.h"
 #import "ios/web/public/test/js_test_util.h"
 #import "ios/web/public/web_state/js/crw_js_injection_receiver.h"
@@ -25,19 +27,20 @@ namespace {
 // with the specification ( https://bugs.webkit.org/show_bug.cgi?id=154906 ).
 // Add support for old and new default maxLength value until we dropped Xcode 7.
 NSNumber* GetDefaultMaxLength() {
-  return base::ios::IsRunningOnIOS10OrLater() ? @-1 : @524288;
+  return @524288;
 }
 
 // Text fixture to test JsAutofillManager.
 class JsAutofillManagerTest : public ChromeWebTest {
  protected:
+  JsAutofillManagerTest()
+      : ChromeWebTest(std::make_unique<ChromeWebClient>()) {}
+
   // Loads the given HTML and initializes the Autofill JS scripts.
   void LoadHtml(NSString* html) {
     ChromeWebTest::LoadHtml(html);
-    CRWJSInjectionManager* manager = [web_state()->GetJSInjectionReceiver()
-        instanceOfClass:[JsAutofillManager class]];
-    manager_ = static_cast<JsAutofillManager*>(manager);
-    [manager_ inject];
+    manager_ = [[JsAutofillManager alloc]
+        initWithReceiver:web_state()->GetJSInjectionReceiver()];
   }
   // Testable autofill manager.
   JsAutofillManager* manager_;
@@ -46,21 +49,21 @@ class JsAutofillManagerTest : public ChromeWebTest {
 // Tests that |hasBeenInjected| returns YES after |inject| call.
 TEST_F(JsAutofillManagerTest, InitAndInject) {
   LoadHtml(@"<html></html>");
-  EXPECT_TRUE([manager_ hasBeenInjected]);
+  EXPECT_NSEQ(@"object", ExecuteJavaScript(@"typeof __gCrWeb.autofill"));
 }
 
 // Tests forms extraction method
 // (fetchFormsWithRequirements:minimumRequiredFieldsCount:completionHandler:).
 TEST_F(JsAutofillManagerTest, ExtractForms) {
-  LoadHtml(@"<html><body><form name='testform' method='post'>"
-            "<input type='text' name='firstname'/>"
-            "<input type='text' name='lastname'/>"
-            "<input type='email' name='email'/>"
-            "</form></body></html>");
+  LoadHtml(
+      @"<html><body><form name='testform'>"
+       "<input type='text' name='firstname'/>"
+       "<input type='text' name='lastname'/>"
+       "<input type='email' name='email'/>"
+       "</form></body></html>");
 
   NSDictionary* expected = @{
     @"name" : @"testform",
-    @"method" : @"post",
     @"fields" : @[
       @{
         @"name" : @"firstname",
@@ -98,7 +101,7 @@ TEST_F(JsAutofillManagerTest, ExtractForms) {
   __block BOOL block_was_called = NO;
   __block NSString* result;
   [manager_ fetchFormsWithMinimumRequiredFieldsCount:
-                autofill::kRequiredFieldsForPredictionRoutines
+                autofill::MinRequiredFieldsForHeuristics()
                                    completionHandler:^(NSString* actualResult) {
                                      block_was_called = YES;
                                      result = [actualResult copy];
@@ -107,28 +110,29 @@ TEST_F(JsAutofillManagerTest, ExtractForms) {
     return block_was_called;
   });
 
-  NSDictionary* resultDict = [NSJSONSerialization
+  NSArray* resultArray = [NSJSONSerialization
       JSONObjectWithData:[result dataUsingEncoding:NSUTF8StringEncoding]
                  options:0
                    error:nil];
-  EXPECT_NSNE(nil, resultDict);
+  EXPECT_NSNE(nil, resultArray);
 
-  NSDictionary* forms = [resultDict[@"forms"] firstObject];
+  NSDictionary* form = [resultArray firstObject];
   [expected enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL* stop) {
-    EXPECT_NSEQ(forms[key], obj);
+    EXPECT_NSEQ(form[key], obj);
   }];
 }
 
 // Tests form filling (fillActiveFormField:completionHandler:) method.
 TEST_F(JsAutofillManagerTest, FillActiveFormField) {
-  LoadHtml(@"<html><body><form name='testform' method='post'>"
-            "<input type='email' name='email'/>"
-            "</form></body></html>");
+  LoadHtml(
+      @"<html><body><form name='testform'>"
+       "<input type='email' name='email'/>"
+       "</form></body></html>");
 
   NSString* get_element_javascript = @"document.getElementsByName('email')[0]";
   NSString* focus_element_javascript =
       [NSString stringWithFormat:@"%@.focus()", get_element_javascript];
-  [manager_ executeJavaScript:focus_element_javascript completionHandler:nil];
+  ExecuteJavaScript(focus_element_javascript);
   [manager_
       fillActiveFormField:@"{\"name\":\"email\",\"value\":\"newemail@com\"}"
         completionHandler:^{
@@ -136,8 +140,7 @@ TEST_F(JsAutofillManagerTest, FillActiveFormField) {
 
   NSString* element_value_javascript =
       [NSString stringWithFormat:@"%@.value", get_element_javascript];
-  EXPECT_NSEQ(@"newemail@com",
-              web::ExecuteJavaScript(manager_, element_value_javascript));
+  EXPECT_NSEQ(@"newemail@com", ExecuteJavaScript(element_value_javascript));
 }
 
 }  // namespace

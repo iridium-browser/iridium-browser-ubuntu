@@ -21,21 +21,21 @@
 
 #include "core/layout/LayoutBR.h"
 
+#include "core/css/StyleEngine.h"
 #include "core/dom/Document.h"
-#include "core/dom/StyleEngine.h"
 #include "core/editing/PositionWithAffinity.h"
 #include "core/layout/LayoutObjectInlines.h"
 
 namespace blink {
 
-static PassRefPtr<StringImpl> NewlineString() {
+static scoped_refptr<StringImpl> NewlineString() {
   DEFINE_STATIC_LOCAL(const String, string, ("\n"));
   return string.Impl();
 }
 
 LayoutBR::LayoutBR(Node* node) : LayoutText(node, NewlineString()) {}
 
-LayoutBR::~LayoutBR() {}
+LayoutBR::~LayoutBR() = default;
 
 int LayoutBR::LineHeight(bool first_line) const {
   const ComputedStyle& style = StyleRef(
@@ -56,7 +56,7 @@ int LayoutBR::CaretMaxOffset() const {
   return 1;
 }
 
-PositionWithAffinity LayoutBR::PositionForPoint(const LayoutPoint&) {
+PositionWithAffinity LayoutBR::PositionForPoint(const LayoutPoint&) const {
   return CreatePositionWithAffinity(0);
 }
 

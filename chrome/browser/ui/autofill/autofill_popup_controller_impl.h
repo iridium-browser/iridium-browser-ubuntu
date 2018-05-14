@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
 #include "chrome/browser/ui/autofill/autofill_popup_layout_model.h"
 #include "chrome/browser/ui/autofill/popup_controller_common.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/native_theme/native_theme.h"
@@ -49,11 +49,11 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
       base::i18n::TextDirection text_direction);
 
   // Shows the popup, or updates the existing popup with the given values.
-  void Show(const std::vector<autofill::Suggestion>& suggestions);
+  virtual void Show(const std::vector<autofill::Suggestion>& suggestions);
 
   // Updates the data list values currently shown with the popup.
-  void UpdateDataListValues(const std::vector<base::string16>& values,
-                            const std::vector<base::string16>& labels);
+  virtual void UpdateDataListValues(const std::vector<base::string16>& values,
+                                    const std::vector<base::string16>& labels);
 
   // Hides the popup and destroys the controller. This also invalidates
   // |delegate_|.
@@ -85,9 +85,11 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   gfx::Rect popup_bounds() const override;
   gfx::NativeView container_view() override;
   const gfx::RectF& element_bounds() const override;
+  void SetElementBounds(const gfx::RectF& bounds);
   bool IsRTL() const override;
   const std::vector<autofill::Suggestion> GetSuggestions() override;
 #if !defined(OS_ANDROID)
+  void SetTypesetter(gfx::Typesetter typesetter) override;
   int GetElidedValueWidthForRow(int row) override;
   int GetElidedLabelWidthForRow(int row) override;
 #endif
@@ -104,11 +106,9 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
                                   base::string16* body) override;
   bool RemoveSuggestion(int list_index) override;
   ui::NativeTheme::ColorId GetBackgroundColorIDForRow(int index) const override;
+  void SetSelectedLine(base::Optional<int> selected_line) override;
   base::Optional<int> selected_line() const override;
   const AutofillPopupLayoutModel& layout_model() const override;
-
-  // Change which line is currently selected by the user.
-  void SetSelectedLine(base::Optional<int> selected_line);
 
   // Increase the selected line by 1, properly handling wrapping.
   void SelectNextLine();
@@ -135,7 +135,7 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
 
   // Contains common popup functionality such as popup layout. Protected for
   // testing.
-  const PopupControllerCommon controller_common_;
+  PopupControllerCommon controller_common_;
 
  private:
 #if !defined(OS_ANDROID)
@@ -149,6 +149,9 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   // Clear the internal state of the controller. This is needed to ensure that
   // when the popup is reused it doesn't leak values between uses.
   void ClearState();
+
+  // Hides |view_| unless it is null and then deletes |this|.
+  void HideViewAndDie();
 
   friend class AutofillPopupControllerUnitTest;
   void SetViewForTesting(AutofillPopupView* view) { view_ = view; }
@@ -172,7 +175,13 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   // line is currently selected.
   base::Optional<int> selected_line_;
 
+  // The typesetter to use when eliding text. This must be BROWSER when the UI
+  // is drawn by Cocoa on macOS.
+  gfx::Typesetter typesetter_ = gfx::Typesetter::HARFBUZZ;
+
   base::WeakPtrFactory<AutofillPopupControllerImpl> weak_ptr_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(AutofillPopupControllerImpl);
 };
 
 }  // namespace autofill

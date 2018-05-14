@@ -45,11 +45,28 @@ h2 {
     background-color: #fff;
     border: 1px solid #ddd;
     font-size: 13px;
-    line-height: 60px;
     min-height: 60px;
     padding: 0 20px;
     vertical-align: middle;
     width: 646px;
+}
+
+.sub-option {
+    font-size: 13px;
+    max-height: 60px;
+    opacity: 1;
+    overflow: hidden;
+    padding: 0 24px;
+    transition: max-height 150ms ease-in;
+    vertical-align: middle;
+    width: 622px;
+}
+
+.sub-option.hidden {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height 150ms ease-out;
 }
 
 .option input[type='checkbox'] {
@@ -74,9 +91,9 @@ h2 {
     background-color: #fff;
     border-color: #ddd;
     border-width: 0 0 1px 0;
-    height: 20px;
     line-height: 60px;
     margin: 20px 0;
+    min-height: 20px;
     padding: 0;
 }
 
@@ -98,4 +115,37 @@ h2 {
     height: 30px;
     margin-left: 20px;
     padding: 0 20px;
+}
+
+label {
+    line-height: 60px;
+    vertical-align: middle;
+}
+
+.example {
+    display: inline-block;
+    float: right;
+    font-size: 1em;
+    height: 60px;
+    line-height: 60px;
+    padding: 0 3px;
+    vertical-align: middle;
+}
+
+.dark {
+    background: black;
+    color: white;
+}
+
+.light {
+    background: white;
+}
+
+.highlight {
+    opacity: .3;
+    z-index: 10;
+    top: -40px;
+    position: relative;
+    height: 20px;
+    width: 100%;
 }

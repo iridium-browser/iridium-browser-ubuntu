@@ -24,7 +24,9 @@ class EmulationHandler : public DevToolsDomainHandler,
   ~EmulationHandler() override;
 
   void Wire(UberDispatcher* dispatcher) override;
-  void SetRenderFrameHost(RenderFrameHostImpl* host) override;
+  void SetRenderer(int process_host_id,
+                   RenderFrameHostImpl* frame_host) override;
+
   Response Disable() override;
 
   Response SetGeolocationOverride(Maybe<double> latitude,
@@ -32,8 +34,9 @@ class EmulationHandler : public DevToolsDomainHandler,
                                   Maybe<double> accuracy) override;
   Response ClearGeolocationOverride() override;
 
-  Response SetTouchEmulationEnabled(bool enabled,
-                                    Maybe<std::string> configuration) override;
+  Response SetEmitTouchEventsForMouse(
+      bool enabled,
+      Maybe<std::string> configuration) override;
 
   Response CanEmulate(bool* result) override;
   Response SetDeviceMetricsOverride(
@@ -47,7 +50,8 @@ class EmulationHandler : public DevToolsDomainHandler,
       Maybe<int> position_x,
       Maybe<int> position_y,
       Maybe<bool> dont_set_visible_size,
-      Maybe<Emulation::ScreenOrientation> screen_orientation) override;
+      Maybe<Emulation::ScreenOrientation> screen_orientation,
+      Maybe<protocol::Page::Viewport> viewport) override;
   Response ClearDeviceMetricsOverride() override;
 
   Response SetVisibleSize(int width, int height) override;
@@ -66,7 +70,6 @@ class EmulationHandler : public DevToolsDomainHandler,
   std::string touch_emulation_configuration_;
 
   bool device_emulation_enabled_;
-  gfx::Size original_view_size_;
   blink::WebDeviceEmulationParams device_emulation_params_;
 
   RenderFrameHostImpl* host_;

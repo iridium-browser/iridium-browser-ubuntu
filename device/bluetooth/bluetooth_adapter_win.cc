@@ -282,10 +282,17 @@ void BluetoothAdapterWin::DevicesPolled(
       // (primary services of BLE device) are the same. However, in BLE tests,
       // we may simulate characteristic, descriptor and secondary GATT service
       // after device has been initialized.
-      if (force_update_device_for_test_)
+      if (force_update_device_for_test_) {
         device_win->Update(*device_state);
+      }
     }
   }
+}
+
+// BluetoothAdapterWin should override SetPowered() instead.
+bool BluetoothAdapterWin::SetPoweredImpl(bool powered) {
+  NOTREACHED();
+  return false;
 }
 
 // If the method is called when |discovery_status_| is DISCOVERY_STOPPING,
@@ -334,7 +341,7 @@ void BluetoothAdapterWin::Init() {
 }
 
 void BluetoothAdapterWin::InitForTest(
-    scoped_refptr<base::SequencedTaskRunner> ui_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
     scoped_refptr<base::SequencedTaskRunner> bluetooth_task_runner) {
   ui_task_runner_ = ui_task_runner;
   if (!ui_task_runner_)

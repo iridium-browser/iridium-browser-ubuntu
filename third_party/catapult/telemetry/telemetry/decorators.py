@@ -73,7 +73,7 @@ class Deprecated(object):
     if isinstance(target, types.FunctionType):
 
       @functools.wraps(target)
-      def wrapper(*args, **kwargs):
+      def wrapper(*args, **kwargs): # pylint: disable=invalid-name
         self._DisplayWarningMessage(target)
         return target(*args, **kwargs)
 
@@ -86,13 +86,13 @@ class Deprecated(object):
       # cause functools.wraps() to raise exception.
       if original_ctor == object.__init__:
 
-        def new_ctor(*args, **kwargs):
+        def new_ctor(*args, **kwargs): # pylint: disable=invalid-name
           self._DisplayWarningMessage(target)
           return original_ctor(*args, **kwargs)
       else:
 
         @functools.wraps(original_ctor)
-        def new_ctor(*args, **kwargs):
+        def new_ctor(*args, **kwargs): # pylint: disable=invalid-name
           self._DisplayWarningMessage(target)
           return original_ctor(*args, **kwargs)
 
@@ -204,7 +204,7 @@ def Isolated(*args):
       return func
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args, **kwargs): # pylint: disable=invalid-name
       func(*args, **kwargs)
 
     wrapper._isolated_strings = isolated_strings
@@ -233,11 +233,6 @@ def IsEnabled(test, possible_browser):
   """
   should_skip, msg = ShouldSkip(test, possible_browser)
   return (not should_skip, msg)
-
-
-def IsBenchmarkEnabled(benchmark, possible_browser):
-  return (not benchmark.ShouldDisable(possible_browser) and
-          IsEnabled(benchmark, possible_browser)[0])
 
 
 def _TestName(test):

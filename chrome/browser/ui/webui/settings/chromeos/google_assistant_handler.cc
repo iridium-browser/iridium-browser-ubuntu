@@ -11,6 +11,7 @@
 #include "chrome/browser/chromeos/arc/voice_interaction/arc_voice_interaction_framework_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/arc/arc_service_manager.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace chromeos {
 namespace settings {
@@ -37,6 +38,10 @@ void GoogleAssistantHandler::RegisterMessages() {
       "showGoogleAssistantSettings",
       base::Bind(&GoogleAssistantHandler::HandleShowGoogleAssistantSettings,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "turnOnGoogleAssistant",
+      base::Bind(&GoogleAssistantHandler::HandleTurnOnGoogleAssistant,
+                 base::Unretained(this)));
 }
 
 void GoogleAssistantHandler::HandleSetGoogleAssistantEnabled(
@@ -48,7 +53,7 @@ void GoogleAssistantHandler::HandleSetGoogleAssistantEnabled(
   auto* service =
       arc::ArcVoiceInteractionFrameworkService::GetForBrowserContext(profile_);
   if (service)
-    service->SetVoiceInteractionEnabled(enabled);
+    service->SetVoiceInteractionEnabled(enabled, base::BindOnce([](bool) {}));
 }
 
 void GoogleAssistantHandler::HandleSetGoogleAssistantContextEnabled(
@@ -69,6 +74,14 @@ void GoogleAssistantHandler::HandleShowGoogleAssistantSettings(
       arc::ArcVoiceInteractionFrameworkService::GetForBrowserContext(profile_);
   if (service)
     service->ShowVoiceInteractionSettings();
+}
+
+void GoogleAssistantHandler::HandleTurnOnGoogleAssistant(
+    const base::ListValue* args) {
+  auto* service =
+      arc::ArcVoiceInteractionFrameworkService::GetForBrowserContext(profile_);
+  if (service)
+    service->StartSessionFromUserInteraction(gfx::Rect());
 }
 
 }  // namespace settings

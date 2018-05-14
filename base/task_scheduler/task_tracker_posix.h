@@ -5,6 +5,7 @@
 #ifndef BASE_TASK_SCHEDULER_TASK_TRACKER_POSIX_H_
 #define BASE_TASK_SCHEDULER_TASK_TRACKER_POSIX_H_
 
+#include <limits>
 #include <memory>
 
 #include "base/base_export.h"
@@ -27,8 +28,11 @@ struct Task;
 // TaskTracker can run tasks.
 class BASE_EXPORT TaskTrackerPosix : public TaskTracker {
  public:
-  TaskTrackerPosix();
-  ~TaskTrackerPosix();
+  // This must match the signature of TaskTracker() to allow interchangeability.
+  TaskTrackerPosix(StringPiece name,
+                   int max_num_scheduled_background_sequences =
+                       std::numeric_limits<int>::max());
+  ~TaskTrackerPosix() override;
 
   // Sets the MessageLoopForIO with which to setup FileDescriptorWatcher in the
   // scope in which tasks run. Must be called before starting to run tasks.
@@ -52,7 +56,7 @@ class BASE_EXPORT TaskTrackerPosix : public TaskTracker {
 
  protected:
   // TaskTracker:
-  void PerformRunTask(std::unique_ptr<Task> task, Sequence* sequence) override;
+  void RunOrSkipTask(Task task, Sequence* sequence, bool can_run_task) override;
 
  private:
 #if DCHECK_IS_ON()

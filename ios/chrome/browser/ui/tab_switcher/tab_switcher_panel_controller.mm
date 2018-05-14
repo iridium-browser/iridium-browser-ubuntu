@@ -56,16 +56,19 @@ void FillVectorWithHashesUsingDistantSession(
 
 @synthesize delegate = _delegate;
 @synthesize sessionType = _sessionType;
+@synthesize presenter = _presenter;
 @synthesize dispatcher = _dispatcher;
 
 - (instancetype)initWithModel:(TabSwitcherModel*)model
      forDistantSessionWithTag:(std::string const&)sessionTag
                  browserState:(ios::ChromeBrowserState*)browserState
+                    presenter:(id<SigninPresenter, SyncPresenter>)presenter
                    dispatcher:
                        (id<ApplicationCommands, BrowserCommands>)dispatcher {
   self = [super init];
   if (self) {
     DCHECK(model);
+    _presenter = presenter;
     _dispatcher = dispatcher;
     _sessionType = TabSwitcherSessionType::DISTANT_SESSION;
     _model = model;
@@ -81,11 +84,13 @@ void FillVectorWithHashesUsingDistantSession(
         forLocalSessionOfType:(TabSwitcherSessionType)sessionType
                     withCache:(TabSwitcherCache*)cache
                  browserState:(ios::ChromeBrowserState*)browserState
+                    presenter:(id<SigninPresenter, SyncPresenter>)presenter
                    dispatcher:
                        (id<ApplicationCommands, BrowserCommands>)dispatcher {
   self = [super init];
   if (self) {
     DCHECK(model);
+    _presenter = presenter;
     _dispatcher = dispatcher;
     _sessionType = sessionType;
     _model = model;
@@ -244,7 +249,7 @@ void FillVectorWithHashesUsingDistantSession(
         << " _distantSession->tabs.size() == " << distantSessionTabCount;
     synced_sessions::DistantTab* tab = _distantSession->tabs[tabIndex].get();
     CHECK(tab);
-    [panelCell setTitle:SysUTF16ToNSString(tab->title)];
+    [panelCell setTitle:base::SysUTF16ToNSString(tab->title)];
     [panelCell setSessionGURL:tab->virtual_url
              withBrowserState:[_model browserState]];
     [panelCell setDelegate:self];
@@ -321,10 +326,11 @@ void FillVectorWithHashesUsingDistantSession(
   DCHECK(TabSwitcherSessionTypeIsLocalSession(_sessionType));
 
   if (!_overlayView) {
-    _overlayView =
-        [[TabSwitcherPanelOverlayView alloc] initWithFrame:[_panelView bounds]
-                                              browserState:_browserState
-                                                dispatcher:self.dispatcher];
+    _overlayView = [[TabSwitcherPanelOverlayView alloc]
+        initWithFrame:[_panelView bounds]
+         browserState:_browserState
+            presenter:self.presenter /* id<SigninPresenter, SyncPresenter> */
+           dispatcher:self.dispatcher];
     [_overlayView
         setOverlayType:
             (_sessionType == TabSwitcherSessionType::OFF_THE_RECORD_SESSION)

@@ -39,19 +39,21 @@ class AppBannerManagerDesktop
   void DidFinishCreatingBookmarkApp(
       const extensions::Extension* extension,
       const WebApplicationInfo& web_app_info) override;
-  bool IsWebAppInstalled(content::BrowserContext* browser_context,
-                         const GURL& start_url,
-                         const GURL& manifest_url) override;
-  void ShowBannerUi() override;
+  bool IsWebAppConsideredInstalled(content::WebContents* web_contents,
+                                   const GURL& validated_url,
+                                   const GURL& start_url,
+                                   const GURL& manifest_url) override;
+  void ShowBannerUi(WebappInstallSource install_source) override;
 
   // content::WebContentsObserver override.
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
 
   // SiteEngagementObserver override.
-  void OnEngagementIncreased(content::WebContents* web_contents,
-                             const GURL& url,
-                             double score) override;
+  void OnEngagementEvent(content::WebContents* web_contents,
+                         const GURL& url,
+                         double score,
+                         SiteEngagementService::EngagementType type) override;
 
   std::unique_ptr<extensions::BookmarkAppHelper> bookmark_app_helper_;
 

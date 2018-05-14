@@ -7,7 +7,6 @@
 #include <memory>
 #include <string>
 
-#import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
 #import "ios/web/public/test/http_server/http_server.h"
@@ -17,6 +16,10 @@
 #include "net/http/http_response_headers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 // A test fixture for verifying the behavior of web::test::HttpServer.
 typedef web::WebIntTest HttpServerTest;
@@ -32,11 +35,11 @@ TEST_F(HttpServerTest, StartAndInterfaceWithResponseProvider) {
   ASSERT_TRUE(server.IsRunning());
   server.AddResponseProvider(std::move(provider));
 
-  __block base::scoped_nsobject<NSString> page_result;
+  __block NSString* page_result;
   id completion_handler =
       ^(NSData* data, NSURLResponse* response, NSError* error) {
-          page_result.reset([[NSString alloc]
-              initWithData:data encoding:NSUTF8StringEncoding]);
+        page_result =
+            [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
       };
   NSURL* url = net::NSURLWithGURL(server.MakeUrl("http://whatever"));
   NSURLSessionDataTask* data_task =

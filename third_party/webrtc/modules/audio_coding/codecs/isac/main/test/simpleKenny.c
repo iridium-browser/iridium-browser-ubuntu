@@ -26,9 +26,9 @@
 #include <math.h>
 
 /* include API */
-#include "isac.h"
-#include "utility.h"
-#include "webrtc/rtc_base/format_macros.h"
+#include "modules/audio_coding/codecs/isac/main/include/isac.h"
+#include "modules/audio_coding/codecs/isac/main/util/utility.h"
+#include "rtc_base/format_macros.h"
 
 /* max number of samples per frame (= 60 ms frame) */
 #define MAX_FRAMESAMPLES_SWB 1920

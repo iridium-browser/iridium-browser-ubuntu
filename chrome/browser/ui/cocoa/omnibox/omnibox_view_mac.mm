@@ -46,9 +46,6 @@
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/geometry/rect.h"
 
-// TODO(ellyjones): Remove this when the deployment target is 10.9 or later.
-extern NSString* const NSAccessibilityPriorityKey;
-
 using content::WebContents;
 
 // Focus-handling between |field_| and model() is a bit subtle.
@@ -87,11 +84,6 @@ NSColor* HostTextColor(bool in_dark_mode) {
 NSColor* SecureSchemeColor(bool in_dark_mode) {
   return in_dark_mode ? skia::SkColorToSRGBNSColor(SK_ColorWHITE)
                       : skia::SkColorToSRGBNSColor(gfx::kGoogleGreen700);
-}
-NSColor* SecurityWarningSchemeColor(bool in_dark_mode) {
-  return in_dark_mode
-      ? skia::SkColorToSRGBNSColor(SkColorSetA(SK_ColorWHITE, 0x7F))
-      : skia::SkColorToSRGBNSColor(gfx::kGoogleYellow700);
 }
 NSColor* SecurityErrorSchemeColor(bool in_dark_mode) {
   return in_dark_mode
@@ -161,11 +153,8 @@ NSColor* OmniboxViewMac::GetSecureTextColor(
     return SecureSchemeColor(in_dark_mode);
   }
 
-  if (security_level == security_state::DANGEROUS)
-    return SecurityErrorSchemeColor(in_dark_mode);
-
-  DCHECK_EQ(security_state::SECURITY_WARNING, security_level);
-  return SecurityWarningSchemeColor(in_dark_mode);
+  DCHECK_EQ(security_state::DANGEROUS, security_level);
+  return SecurityErrorSchemeColor(in_dark_mode);
 }
 
 OmniboxViewMac::OmniboxViewMac(OmniboxEditController* controller,
@@ -220,7 +209,7 @@ void OmniboxViewMac::SaveStateToTab(WebContents* tab) {
     range = NSMakeRange(0, GetTextLength());
   }
 
-  StoreStateToTab(tab, base::MakeUnique<OmniboxViewMacState>(
+  StoreStateToTab(tab, std::make_unique<OmniboxViewMacState>(
                            model()->GetStateForTabSwitch(), hasFocus, range));
 }
 
@@ -247,26 +236,15 @@ void OmniboxViewMac::ResetTabState(WebContents* web_contents) {
 }
 
 void OmniboxViewMac::Update() {
-  if (model()->UpdatePermanentText()) {
-    const bool was_select_all = IsSelectAll();
-    NSTextView* text_view =
-        base::mac::ObjCCastStrict<NSTextView>([field_ currentEditor]);
-    const bool was_reversed =
-        [text_view selectionAffinity] == NSSelectionAffinityUpstream;
-
+  if (model()->ResetDisplayUrls()) {
     // Restore everything to the baseline look.
     RevertAll();
 
-    // Only select all when we have focus.  If we don't have focus, selecting
-    // all is unnecessary since the selection will change on regaining focus,
-    // and can in fact cause artifacts, e.g. if the user is on the NTP and
-    // clicks a link to navigate, causing |was_select_all| to be vacuously true
-    // for the empty omnibox, and we then select all here, leading to the
-    // trailing portion of a long URL being scrolled into view.  We could try
-    // and address cases like this, but it seems better to just not muck with
-    // things when the omnibox isn't focused to begin with.
-    if (was_select_all && model()->has_focus())
-      SelectAll(was_reversed);
+    // Only select all when we have focus. It's incorrect to have the
+    // Omnibox text selected while unfocused, and we'll re-select it
+    // when focus returns.
+    if (model()->has_focus())
+      SelectAll(true);
   } else {
     // TODO(shess): This corresponds to _win and _gtk, except those
     // guard it with a test for whether the security level changed.
@@ -417,10 +395,6 @@ void OmniboxViewMac::RevertAll() {
 }
 
 void OmniboxViewMac::UpdatePopup() {
-  model()->SetInputInProgress(true);
-  if (!model()->has_focus())
-    return;
-
   // Comment copied from OmniboxViewWin::UpdatePopup():
   // Don't inline autocomplete when:
   //   * The user is deleting text
@@ -434,8 +408,8 @@ void OmniboxViewMac::UpdatePopup() {
       prevent_inline_autocomplete = true;
   }
 
-  model()->StartAutocomplete([editor selectedRange].length != 0,
-                            prevent_inline_autocomplete);
+  model()->UpdateInput([editor selectedRange].length != 0,
+                       prevent_inline_autocomplete);
 }
 
 void OmniboxViewMac::CloseOmniboxPopup() {
@@ -541,6 +515,8 @@ void OmniboxViewMac::ApplyTextStyle(
   [paragraph_style setAlignment:cocoa_l10n_util::ShouldDoExperimentalRTLLayout()
                                     ? NSRightTextAlignment
                                     : NSLeftTextAlignment];
+  if (@available(macOS 10.11, *))
+    [paragraph_style setAllowsDefaultTighteningForTruncation:NO];
   // If this is a URL, set the top-level paragraph direction to LTR (avoids RTL
   // characters from making the URL render from right to left, as per RFC 3987
   // Section 4.1).
@@ -613,11 +589,13 @@ void OmniboxViewMac::ApplyTextAttributes(
   DCHECK(attributing_display_string_ == nil);
   base::AutoReset<NSMutableAttributedString*> resetter(
       &attributing_display_string_, attributed_string);
-  UpdateTextStyle(display_text, ChromeAutocompleteSchemeClassifier(profile_));
+  UpdateTextStyle(display_text, model()->CurrentTextIsURL(),
+                  ChromeAutocompleteSchemeClassifier(profile_));
 }
 
 void OmniboxViewMac::OnTemporaryTextMaybeChanged(
     const base::string16& display_text,
+    const AutocompleteMatch& match,
     bool save_original_selection,
     bool notify_text_changed) {
   if (save_original_selection)
@@ -627,6 +605,12 @@ void OmniboxViewMac::OnTemporaryTextMaybeChanged(
   if (notify_text_changed)
     model()->OnChanged();
   [field_ clearUndoChain];
+
+  // Get friendly accessibility label.
+  AnnounceAutocompleteForScreenReader(
+      AutocompleteMatchType::ToAccessibilityLabel(
+          match, display_text, model()->popup_model()->selected_line(),
+          model()->result().size()));
 }
 
 bool OmniboxViewMac::OnInlineAutocompleteTextMaybeChanged(
@@ -755,6 +739,10 @@ void OmniboxViewMac::OnInsertText() {
 }
 
 void OmniboxViewMac::OnBeforeDrawRect() {
+  if (!insert_char_time_.is_null()) {
+    UMA_HISTOGRAM_TIMES("Omnibox.CharTypedToRepaintLatency.ToPaint",
+                        base::TimeTicks::Now() - insert_char_time_);
+  }
   draw_rect_start_time_ = base::TimeTicks::Now();
 }
 
@@ -825,6 +813,11 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
   // |-noop:| is sent when the user presses Cmd+Return. Override the no-op
   // behavior with the proper WindowOpenDisposition.
   NSEvent* event = [NSApp currentEvent];
+  if (([event type] == NSKeyDown || [event type] == NSKeyUp) &&
+      [event keyCode] == kVK_Shift) {
+    OnShiftKeyChanged([event type] == NSKeyDown);
+    return true;
+  }
   if (cmd == @selector(insertNewline:) ||
      (cmd == @selector(noop:) &&
       ([event type] == NSKeyDown || [event type] == NSKeyUp) &&
@@ -889,6 +882,7 @@ void OmniboxViewMac::OnSetFocus(bool control_down) {
 }
 
 void OmniboxViewMac::OnKillFocus() {
+  OnShiftKeyChanged(false);
   // Tell the model to reset itself.
   model()->OnWillKillFocus();
   model()->OnKillFocus();
@@ -1094,13 +1088,11 @@ bool OmniboxViewMac::IsCaretAtEnd() const {
 
 void OmniboxViewMac::AnnounceAutocompleteForScreenReader(
     const base::string16& display_text) {
-  NSString* announcement =
-      l10n_util::GetNSStringF(IDS_ANNOUNCEMENT_COMPLETION_AVAILABLE_MAC,
-                              display_text);
   NSDictionary* notification_info = @{
-      NSAccessibilityAnnouncementKey : announcement,
-      NSAccessibilityPriorityKey :     @(NSAccessibilityPriorityHigh)
+    NSAccessibilityAnnouncementKey : base::SysUTF16ToNSString(display_text),
+    NSAccessibilityPriorityKey : @(NSAccessibilityPriorityHigh)
   };
+  // We direct the screen reader to announce the friendly text.
   NSAccessibilityPostNotificationWithUserInfo(
       [field_ window],
       NSAccessibilityAnnouncementRequestedNotification,

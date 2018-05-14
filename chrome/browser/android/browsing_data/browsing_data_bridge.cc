@@ -17,12 +17,13 @@
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/scoped_observer.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/browsing_data/browsing_data_important_sites_util.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/engagement/important_sites_util.h"
 #include "chrome/browser/history/web_history_service_factory.h"
-#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_features.h"
@@ -44,10 +45,6 @@ using content::BrowsingDataRemover;
 
 namespace {
 
-Profile* GetOriginalProfile() {
-  return ProfileManager::GetActiveUserProfile()->GetOriginalProfile();
-}
-
 void OnBrowsingDataRemoverDone(
     JavaObjectWeakGlobalRef weak_chrome_native_preferences) {
   JNIEnv* env = AttachCurrentThread();
@@ -60,17 +57,21 @@ void OnBrowsingDataRemoverDone(
 
 }  // namespace
 
-static void ClearBrowsingData(
+static void JNI_BrowsingDataBridge_ClearBrowsingData(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& jprofile,
     const JavaParamRef<jintArray>& data_types,
     jint time_period,
     const JavaParamRef<jobjectArray>& jexcluding_domains,
     const JavaParamRef<jintArray>& jexcluding_domain_reasons,
     const JavaParamRef<jobjectArray>& jignoring_domains,
     const JavaParamRef<jintArray>& jignoring_domain_reasons) {
+  TRACE_EVENT0("browsing_data", "BrowsingDataBridge_ClearBrowsingData");
+
+  Profile* profile = ProfileAndroid::FromProfileAndroid(jprofile);
   BrowsingDataRemover* browsing_data_remover =
-      content::BrowserContext::GetBrowsingDataRemover(GetOriginalProfile());
+      content::BrowserContext::GetBrowsingDataRemover(profile);
 
   std::vector<int> data_types_vector;
   base::android::JavaIntArrayToIntVector(env, data_types, &data_types_vector);
@@ -102,6 +103,14 @@ static void ClearBrowsingData(
         remove_mask |=
             ChromeBrowsingDataRemoverDelegate::DATA_TYPE_CONTENT_SETTINGS;
         break;
+      case browsing_data::BrowsingDataType::MEDIA_LICENSES:
+        remove_mask |= BrowsingDataRemover::DATA_TYPE_MEDIA_LICENSES;
+        break;
+      case browsing_data::BrowsingDataType::DOWNLOADS:
+      case browsing_data::BrowsingDataType::HOSTED_APPS_DATA:
+        // Only implemented on Desktop.
+        NOTREACHED();
+        FALLTHROUGH;
       case browsing_data::BrowsingDataType::NUM_TYPES:
         NOTREACHED();
     }
@@ -127,8 +136,8 @@ static void ClearBrowsingData(
 
   if (!excluding_domains.empty() || !ignoring_domains.empty()) {
     ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
-        GetOriginalProfile(), excluding_domains, excluding_domain_reasons,
-        ignoring_domains, ignoring_domain_reasons);
+        profile, excluding_domains, excluding_domain_reasons, ignoring_domains,
+        ignoring_domain_reasons);
   }
 
   base::OnceClosure callback = base::BindOnce(
@@ -142,18 +151,6 @@ static void ClearBrowsingData(
       std::move(filter_builder), browsing_data_remover, std::move(callback));
 }
 
-static void ShowNoticeAboutOtherFormsOfBrowsingHistory(
-    const JavaRef<jobject>& listener,
-    bool show) {
-  JNIEnv* env = AttachCurrentThread();
-  UMA_HISTOGRAM_BOOLEAN(
-      "History.ClearBrowsingData.HistoryNoticeShownInFooterWhenUpdated", show);
-  if (!show)
-    return;
-  Java_OtherFormsOfBrowsingHistoryListener_showNoticeAboutOtherFormsOfBrowsingHistory(
-      env, listener);
-}
-
 static void EnableDialogAboutOtherFormsOfBrowsingHistory(
     const JavaRef<jobject>& listener,
     bool enabled) {
@@ -164,30 +161,30 @@ static void EnableDialogAboutOtherFormsOfBrowsingHistory(
       env, listener);
 }
 
-static void RequestInfoAboutOtherFormsOfBrowsingHistory(
+static void JNI_BrowsingDataBridge_RequestInfoAboutOtherFormsOfBrowsingHistory(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& jprofile,
     const JavaParamRef<jobject>& listener) {
-  // The permanent notice in the footer.
-  browsing_data::ShouldShowNoticeAboutOtherFormsOfBrowsingHistory(
-      ProfileSyncServiceFactory::GetForProfile(GetOriginalProfile()),
-      WebHistoryServiceFactory::GetForProfile(GetOriginalProfile()),
-      base::Bind(&ShowNoticeAboutOtherFormsOfBrowsingHistory,
-                 ScopedJavaGlobalRef<jobject>(env, listener)));
-
+  TRACE_EVENT0(
+      "browsing_data",
+      "BrowsingDataBridge_RequestInfoAboutOtherFormsOfBrowsingHistory");
   // The one-time notice in the dialog.
+  Profile* profile = ProfileAndroid::FromProfileAndroid(jprofile);
   browsing_data::ShouldPopupDialogAboutOtherFormsOfBrowsingHistory(
-      ProfileSyncServiceFactory::GetForProfile(GetOriginalProfile()),
-      WebHistoryServiceFactory::GetForProfile(GetOriginalProfile()),
-      chrome::GetChannel(),
+      ProfileSyncServiceFactory::GetForProfile(profile),
+      WebHistoryServiceFactory::GetForProfile(profile), chrome::GetChannel(),
       base::Bind(&EnableDialogAboutOtherFormsOfBrowsingHistory,
                  ScopedJavaGlobalRef<jobject>(env, listener)));
 }
 
-static void FetchImportantSites(JNIEnv* env,
-                                const JavaParamRef<jclass>& clazz,
-                                const JavaParamRef<jobject>& java_callback) {
-  Profile* profile = GetOriginalProfile();
+static void JNI_BrowsingDataBridge_FetchImportantSites(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& jprofile,
+    const JavaParamRef<jobject>& java_callback) {
+  TRACE_EVENT0("browsing_data", "BrowsingDataBridge_FetchImportantSites");
+  Profile* profile = ProfileAndroid::FromProfileAndroid(jprofile);
   std::vector<ImportantSitesUtil::ImportantDomainInfo> important_sites =
       ImportantSitesUtil::GetImportantRegisterableDomains(
           profile, ImportantSitesUtil::kMaxImportantSites);
@@ -210,22 +207,24 @@ static void FetchImportantSites(JNIEnv* env,
       base::android::ToJavaArrayOfStrings(env, important_domain_examples);
 
   Java_ImportantSitesCallback_onImportantRegisterableDomainsReady(
-      env, java_callback.obj(), java_domains.obj(), java_origins.obj(),
-      java_reasons.obj(), dialog_disabled);
+      env, java_callback, java_domains, java_origins, java_reasons,
+      dialog_disabled);
 }
 
 // This value should not change during a sessions, as it's used for UMA metrics.
-static jint GetMaxImportantSites(JNIEnv* env,
-                                 const JavaParamRef<jclass>& clazz) {
+static jint JNI_BrowsingDataBridge_GetMaxImportantSites(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz) {
   return ImportantSitesUtil::kMaxImportantSites;
 }
 
-static void MarkOriginAsImportantForTesting(
+static void JNI_BrowsingDataBridge_MarkOriginAsImportantForTesting(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& jprofile,
     const JavaParamRef<jstring>& jorigin) {
   GURL origin(base::android::ConvertJavaStringToUTF8(jorigin));
   CHECK(origin.is_valid());
-  ImportantSitesUtil::MarkOriginAsImportantForTesting(GetOriginalProfile(),
-                                                      origin);
+  ImportantSitesUtil::MarkOriginAsImportantForTesting(
+      ProfileAndroid::FromProfileAndroid(jprofile), origin);
 }

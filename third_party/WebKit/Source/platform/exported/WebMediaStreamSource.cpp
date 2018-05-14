@@ -141,7 +141,7 @@ WebMediaStreamSource::ExtraData* WebMediaStreamSource::GetExtraData() const {
   DCHECK(!private_.IsNull());
   MediaStreamSource::ExtraData* data = private_->GetExtraData();
   if (!data)
-    return 0;
+    return nullptr;
   return static_cast<MediaStreamSourceExtraDataContainer*>(data)
       ->GetExtraData();
 }
@@ -164,6 +164,12 @@ void WebMediaStreamSource::SetEchoCancellation(bool echo_cancellation) {
 WebMediaConstraints WebMediaStreamSource::Constraints() {
   DCHECK(!private_.IsNull());
   return private_->Constraints();
+}
+
+void WebMediaStreamSource::SetCapabilities(
+    const WebMediaStreamSource::Capabilities& capabilities) {
+  DCHECK(!private_.IsNull());
+  private_->SetCapabilities(capabilities);
 }
 
 bool WebMediaStreamSource::RequiresAudioConsumer() const {

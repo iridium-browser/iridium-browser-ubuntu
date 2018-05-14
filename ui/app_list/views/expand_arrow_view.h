@@ -8,7 +8,6 @@
 #include "base/memory/weak_ptr.h"
 #include "ui/app_list/app_list_export.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/button/custom_button.h"
 
 namespace gfx {
 class SlideAnimation;
@@ -27,16 +26,13 @@ class AppListView;
 class ContentsView;
 
 // A tile item for the expand arrow on the start page.
-class APP_LIST_EXPORT ExpandArrowView : public views::CustomButton,
+class APP_LIST_EXPORT ExpandArrowView : public views::Button,
                                         public views::ButtonListener {
  public:
   ExpandArrowView(ContentsView* contents_view, AppListView* app_list_view);
   ~ExpandArrowView() override;
 
-  bool selected() { return selected_; }
-  void SetSelected(bool selected);
-
-  // Overridden from views::CustomButton:
+  // Overridden from views::Button:
   void PaintButtonContents(gfx::Canvas* canvas) override;
 
   // Overridden from views::ButtonListener:
@@ -46,6 +42,8 @@ class APP_LIST_EXPORT ExpandArrowView : public views::CustomButton,
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
+  void OnFocus() override;
+  void OnBlur() override;
 
   // Overridden from views::InkDropHost:
   std::unique_ptr<views::InkDrop> CreateInkDrop() override;
@@ -76,8 +74,6 @@ class APP_LIST_EXPORT ExpandArrowView : public views::CustomButton,
   // Properties for pulse opacity and size used in animation.
   float pulse_opacity_;
   int pulse_radius_;
-
-  bool selected_ = false;
 
   std::unique_ptr<gfx::SlideAnimation> animation_;
 

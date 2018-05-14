@@ -4,9 +4,6 @@
 
 #include "modules/accessibility/AXEnums.h"
 
-#include "core/HTMLElementTypeHelpers.h"
-#include "core/dom/Element.h"
-#include "core/dom/Node.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/HashSet.h"
 #include "platform/wtf/text/StringHash.h"
@@ -25,7 +22,6 @@ STATIC_ASSERT_ENUM(kWebAXRoleArticle, kArticleRole);
 STATIC_ASSERT_ENUM(kWebAXRoleAudio, kAudioRole);
 STATIC_ASSERT_ENUM(kWebAXRoleBanner, kBannerRole);
 STATIC_ASSERT_ENUM(kWebAXRoleBlockquote, kBlockquoteRole);
-STATIC_ASSERT_ENUM(kWebAXRoleBusyIndicator, kBusyIndicatorRole);
 STATIC_ASSERT_ENUM(kWebAXRoleButton, kButtonRole);
 STATIC_ASSERT_ENUM(kWebAXRoleCanvas, kCanvasRole);
 STATIC_ASSERT_ENUM(kWebAXRoleCaption, kCaptionRole);
@@ -34,7 +30,8 @@ STATIC_ASSERT_ENUM(kWebAXRoleCheckBox, kCheckBoxRole);
 STATIC_ASSERT_ENUM(kWebAXRoleColorWell, kColorWellRole);
 STATIC_ASSERT_ENUM(kWebAXRoleColumnHeader, kColumnHeaderRole);
 STATIC_ASSERT_ENUM(kWebAXRoleColumn, kColumnRole);
-STATIC_ASSERT_ENUM(kWebAXRoleComboBox, kComboBoxRole);
+STATIC_ASSERT_ENUM(kWebAXRoleComboBoxGrouping, kComboBoxGroupingRole);
+STATIC_ASSERT_ENUM(kWebAXRoleComboBoxMenuButton, kComboBoxMenuButtonRole);
 STATIC_ASSERT_ENUM(kWebAXRoleComplementary, kComplementaryRole);
 STATIC_ASSERT_ENUM(kWebAXRoleContentInfo, kContentInfoRole);
 STATIC_ASSERT_ENUM(kWebAXRoleDate, kDateRole);
@@ -61,12 +58,15 @@ STATIC_ASSERT_ENUM(kWebAXRoleHeading, kHeadingRole);
 STATIC_ASSERT_ENUM(kWebAXRoleIframe, kIframeRole);
 STATIC_ASSERT_ENUM(kWebAXRoleIframePresentational, kIframePresentationalRole);
 STATIC_ASSERT_ENUM(kWebAXRoleIgnored, kIgnoredRole);
-STATIC_ASSERT_ENUM(kWebAXRoleImageMapLink, kImageMapLinkRole);
 STATIC_ASSERT_ENUM(kWebAXRoleImageMap, kImageMapRole);
 STATIC_ASSERT_ENUM(kWebAXRoleImage, kImageRole);
 STATIC_ASSERT_ENUM(kWebAXRoleInlineTextBox, kInlineTextBoxRole);
 STATIC_ASSERT_ENUM(kWebAXRoleInputTime, kInputTimeRole);
 STATIC_ASSERT_ENUM(kWebAXRoleLabel, kLabelRole);
+STATIC_ASSERT_ENUM(kWebAXRoleLayoutTable, kLayoutTableRole);
+STATIC_ASSERT_ENUM(kWebAXRoleLayoutTableCell, kLayoutTableCellRole);
+STATIC_ASSERT_ENUM(kWebAXRoleLayoutTableColumn, kLayoutTableColumnRole);
+STATIC_ASSERT_ENUM(kWebAXRoleLayoutTableRow, kLayoutTableRowRole);
 STATIC_ASSERT_ENUM(kWebAXRoleLegend, kLegendRole);
 STATIC_ASSERT_ENUM(kWebAXRoleLineBreak, kLineBreakRole);
 STATIC_ASSERT_ENUM(kWebAXRoleLink, kLinkRole);
@@ -92,7 +92,6 @@ STATIC_ASSERT_ENUM(kWebAXRoleMeter, kMeterRole);
 STATIC_ASSERT_ENUM(kWebAXRoleNavigation, kNavigationRole);
 STATIC_ASSERT_ENUM(kWebAXRoleNone, kNoneRole);
 STATIC_ASSERT_ENUM(kWebAXRoleNote, kNoteRole);
-STATIC_ASSERT_ENUM(kWebAXRoleOutline, kOutlineRole);
 STATIC_ASSERT_ENUM(kWebAXRoleParagraph, kParagraphRole);
 STATIC_ASSERT_ENUM(kWebAXRolePopUpButton, kPopUpButtonRole);
 STATIC_ASSERT_ENUM(kWebAXRolePre, kPreRole);
@@ -101,15 +100,11 @@ STATIC_ASSERT_ENUM(kWebAXRoleProgressIndicator, kProgressIndicatorRole);
 STATIC_ASSERT_ENUM(kWebAXRoleRadioButton, kRadioButtonRole);
 STATIC_ASSERT_ENUM(kWebAXRoleRadioGroup, kRadioGroupRole);
 STATIC_ASSERT_ENUM(kWebAXRoleRegion, kRegionRole);
-STATIC_ASSERT_ENUM(kWebAXRoleRootWebArea, kRootWebAreaRole);
 STATIC_ASSERT_ENUM(kWebAXRoleRowHeader, kRowHeaderRole);
 STATIC_ASSERT_ENUM(kWebAXRoleRow, kRowRole);
 STATIC_ASSERT_ENUM(kWebAXRoleRuby, kRubyRole);
-STATIC_ASSERT_ENUM(kWebAXRoleRuler, kRulerRole);
 STATIC_ASSERT_ENUM(kWebAXRoleSVGRoot, kSVGRootRole);
-STATIC_ASSERT_ENUM(kWebAXRoleScrollArea, kScrollAreaRole);
 STATIC_ASSERT_ENUM(kWebAXRoleScrollBar, kScrollBarRole);
-STATIC_ASSERT_ENUM(kWebAXRoleSeamlessWebArea, kSeamlessWebAreaRole);
 STATIC_ASSERT_ENUM(kWebAXRoleSearch, kSearchRole);
 STATIC_ASSERT_ENUM(kWebAXRoleSearchBox, kSearchBoxRole);
 STATIC_ASSERT_ENUM(kWebAXRoleSlider, kSliderRole);
@@ -120,7 +115,6 @@ STATIC_ASSERT_ENUM(kWebAXRoleSplitter, kSplitterRole);
 STATIC_ASSERT_ENUM(kWebAXRoleStaticText, kStaticTextRole);
 STATIC_ASSERT_ENUM(kWebAXRoleStatus, kStatusRole);
 STATIC_ASSERT_ENUM(kWebAXRoleSwitch, kSwitchRole);
-STATIC_ASSERT_ENUM(kWebAXRoleTabGroup, kTabGroupRole);
 STATIC_ASSERT_ENUM(kWebAXRoleTabList, kTabListRole);
 STATIC_ASSERT_ENUM(kWebAXRoleTabPanel, kTabPanelRole);
 STATIC_ASSERT_ENUM(kWebAXRoleTab, kTabRole);
@@ -128,6 +122,7 @@ STATIC_ASSERT_ENUM(kWebAXRoleTableHeaderContainer, kTableHeaderContainerRole);
 STATIC_ASSERT_ENUM(kWebAXRoleTable, kTableRole);
 STATIC_ASSERT_ENUM(kWebAXRoleTerm, kTermRole);
 STATIC_ASSERT_ENUM(kWebAXRoleTextField, kTextFieldRole);
+STATIC_ASSERT_ENUM(kWebAXRoleTextFieldWithComboBox, kTextFieldWithComboBoxRole);
 STATIC_ASSERT_ENUM(kWebAXRoleTime, kTimeRole);
 STATIC_ASSERT_ENUM(kWebAXRoleTimer, kTimerRole);
 STATIC_ASSERT_ENUM(kWebAXRoleToggleButton, kToggleButtonRole);
@@ -139,31 +134,13 @@ STATIC_ASSERT_ENUM(kWebAXRoleUnknown, kUnknownRole);
 STATIC_ASSERT_ENUM(kWebAXRoleUserInterfaceTooltip, kUserInterfaceTooltipRole);
 STATIC_ASSERT_ENUM(kWebAXRoleVideo, kVideoRole);
 STATIC_ASSERT_ENUM(kWebAXRoleWebArea, kWebAreaRole);
-STATIC_ASSERT_ENUM(kWebAXRoleWindow, kWindowRole);
 
-STATIC_ASSERT_ENUM(kWebAXStateBusy, kAXBusyState);
-STATIC_ASSERT_ENUM(kWebAXStateExpanded, kAXExpandedState);
-STATIC_ASSERT_ENUM(kWebAXStateFocusable, kAXFocusableState);
-STATIC_ASSERT_ENUM(kWebAXStateFocused, kAXFocusedState);
-STATIC_ASSERT_ENUM(kWebAXStateHaspopup, kAXHaspopupState);
-STATIC_ASSERT_ENUM(kWebAXStateHovered, kAXHoveredState);
-STATIC_ASSERT_ENUM(kWebAXStateInvisible, kAXInvisibleState);
-STATIC_ASSERT_ENUM(kWebAXStateLinked, kAXLinkedState);
-STATIC_ASSERT_ENUM(kWebAXStateMultiline, kAXMultilineState);
-STATIC_ASSERT_ENUM(kWebAXStateMultiselectable, kAXMultiselectableState);
-STATIC_ASSERT_ENUM(kWebAXStateOffscreen, kAXOffscreenState);
-STATIC_ASSERT_ENUM(kWebAXStateProtected, kAXProtectedState);
-STATIC_ASSERT_ENUM(kWebAXStateRequired, kAXRequiredState);
-STATIC_ASSERT_ENUM(kWebAXStateSelectable, kAXSelectableState);
-STATIC_ASSERT_ENUM(kWebAXStateSelected, kAXSelectedState);
-STATIC_ASSERT_ENUM(kWebAXStateVertical, kAXVerticalState);
-STATIC_ASSERT_ENUM(kWebAXStateVisited, kAXVisitedState);
-
-STATIC_ASSERT_ENUM(WebAXDefaultActionVerb::kNone, AXDefaultActionVerb::kNone);
 STATIC_ASSERT_ENUM(WebAXDefaultActionVerb::kActivate,
                    AXDefaultActionVerb::kActivate);
 STATIC_ASSERT_ENUM(WebAXDefaultActionVerb::kCheck, AXDefaultActionVerb::kCheck);
 STATIC_ASSERT_ENUM(WebAXDefaultActionVerb::kClick, AXDefaultActionVerb::kClick);
+STATIC_ASSERT_ENUM(WebAXDefaultActionVerb::kClickAncestor,
+                   AXDefaultActionVerb::kClickAncestor);
 STATIC_ASSERT_ENUM(WebAXDefaultActionVerb::kJump, AXDefaultActionVerb::kJump);
 STATIC_ASSERT_ENUM(WebAXDefaultActionVerb::kOpen, AXDefaultActionVerb::kOpen);
 STATIC_ASSERT_ENUM(WebAXDefaultActionVerb::kPress, AXDefaultActionVerb::kPress);
@@ -248,5 +225,4 @@ STATIC_ASSERT_ENUM(WebAXObjectAttribute::kAriaDetails,
                    AXObjectAttribute::kAriaDetails);
 STATIC_ASSERT_ENUM(WebAXObjectVectorAttribute::kAriaFlowTo,
                    AXObjectVectorAttribute::kAriaFlowTo);
-#undef STATIC_ASSERT_ENUM
 }  // namespace blink

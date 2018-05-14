@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
 #include "ui/base/ui_base_switches.h"
 
 namespace switches {
@@ -23,13 +22,8 @@ const char kDisableRemoteCoreAnimation[] = "disable-remote-core-animation";
 const char kShowMacOverlayBorders[] = "show-mac-overlay-borders";
 #endif
 
-#if defined(OS_WIN)
-// Disables merging the key event (WM_KEY*) with the char event (WM_CHAR).
-const char kDisableMergeKeyCharEvents[]     = "disable-merge-key-char-events";
-
-// Enables merging the key event (WM_KEY*) with the char event (WM_CHAR).
-const char kEnableMergeKeyCharEvents[]     = "enable-merge-key-char-events";
-#endif
+// Disables layer-edge anti-aliasing in the compositor.
+const char kDisableCompositedAntialiasing[] = "disable-composited-antialiasing";
 
 // Disables use of DWM composition for top level windows.
 const char kDisableDwmComposition[] = "disable-dwm-composition";
@@ -42,6 +36,15 @@ const char kDisableTouchDragDrop[] = "disable-touch-drag-drop";
 
 // Enables touch event based drag and drop.
 const char kEnableTouchDragDrop[] = "enable-touch-drag-drop";
+
+// Enables touchable app context menus and notification indicators.
+const char kEnableTouchableAppContextMenu[] =
+    "enable-touchable-app-context-menus";
+
+// Forces high-contrast mode in native UI drawing, regardless of system
+// settings. Note that this has limited effect on Windows: only Aura colors will
+// be switched to high contrast, not other system colors.
+const char kForceHighContrast[] = "force-high-contrast";
 
 // The language file that we want to try to open. Of the form
 // language[-country] where language is the 2 letter code from ISO-639.
@@ -63,20 +66,55 @@ const char kTopChromeMD[] = "top-chrome-md";
 // Material design mode for the |kTopChromeMD| switch.
 const char kTopChromeMDMaterial[] = "material";
 
+// Auto-switching mode |kTopChromeMD| switch. This mode toggles between
+// material and material-hybrid depending on device.
+const char kTopChromeMDMaterialAuto[] = "material-auto";
+
 // Material design hybrid mode for the |kTopChromeMD| switch. Targeted for
 // mouse/touch hybrid devices.
 const char kTopChromeMDMaterialHybrid[] = "material-hybrid";
 
+// Material design mode that is more optimized for touch devices for the
+// |kTopChromeMD| switch.
+const char kTopChromeMDMaterialTouchOptimized[] = "material-touch-optimized";
+
 // Classic, non-material, mode for the |kTopChromeMD| switch.
 const char kTopChromeMDNonMaterial[] = "non-material";
 
-// Disable new window behavior for virtual keyboard (do not change work area in
-// non-sticky mode).
-const char kDisableNewVirtualKeyboardBehavior[] =
-    "disable-new-virtual-keyboard-behavior";
+// Disable partial swap which is needed for some OpenGL drivers / emulators.
+const char kUIDisablePartialSwap[] = "ui-disable-partial-swap";
 
-// Applies the material design mode passed via --top-chrome-md to elements
-// throughout Chrome (not just top Chrome).
-const char kExtendMdToSecondaryUi[] = "secondary-ui-md";
+// Visualize overdraw by color-coding elements based on if they have other
+// elements drawn underneath. This is good for showing where the UI might be
+// doing more rendering work than necessary. The colors are hinting at the
+// amount of overdraw on your screen for each pixel, as follows:
+//
+// True color: No overdraw.
+// Blue: Overdrawn once.
+// Green: Overdrawn twice.
+// Pink: Overdrawn three times.
+// Red: Overdrawn four or more times.
+const char kShowOverdrawFeedback[] = "show-overdraw-feedback";
+
+// Use SkiaRenderer instead of GLRenderer for direct rendering.
+const char kUseSkiaRenderer[] = "use-skia-renderer";
+
+// Disable re-use of non-exact resources to fulfill ResourcePool requests.
+// Intended only for use in layout or pixel tests to reduce noise.
+const char kDisallowNonExactResourceReuse[] =
+    "disallow-non-exact-resource-reuse";
+
+// Transform localized strings to be longer, with beginning and end markers to
+// make truncation visually apparent.
+const char kMangleLocalizedStrings[] = "mangle-localized-strings";
+
+// Re-draw everything multiple times to simulate a much slower machine.
+// Give a slow down factor to cause renderer to take that many times longer to
+// complete, such as --slow-down-compositing-scale-factor=2.
+const char kSlowDownCompositingScaleFactor[] =
+    "slow-down-compositing-scale-factor";
+
+// Tint GL-composited color.
+const char kTintGlCompositedContent[] = "tint-gl-composited-content";
 
 }  // namespace switches

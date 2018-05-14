@@ -4,7 +4,8 @@
 
 #include "net/url_request/view_cache_helper.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/pickle.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -36,7 +37,7 @@ class TestURLRequestContext : public URLRequestContext {
 };
 
 TestURLRequestContext::TestURLRequestContext()
-    : cache_(base::MakeUnique<MockNetworkLayer>(),
+    : cache_(std::make_unique<MockNetworkLayer>(),
              HttpCache::DefaultBackend::InMemory(0),
              false /* is_main_cache */) {
   set_http_transaction_factory(&cache_);
@@ -48,10 +49,12 @@ void WriteHeaders(disk_cache::Entry* entry, int flags,
     return;
 
   base::Pickle pickle;
-  pickle.WriteInt(flags | 1);  // Version 1.
+  pickle.WriteInt(flags | 3);  // Version 3.
   pickle.WriteInt64(0);
   pickle.WriteInt64(0);
   pickle.WriteString(data);
+  pickle.WriteString("example.com");
+  pickle.WriteUInt16(80);
 
   scoped_refptr<WrappedIOBuffer> buf(new WrappedIOBuffer(
       reinterpret_cast<const char*>(pickle.data())));

@@ -7,6 +7,9 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted_memory.h"
+#include "base/memory/weak_ptr.h"
+#include "components/printing/service/public/interfaces/pdf_compositor.mojom.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -61,14 +64,37 @@ class PrintPreviewMessageHandler
                                  bool has_custom_page_size_style);
   void OnDidGetPreviewPageCount(
       const PrintHostMsg_DidGetPreviewPageCount_Params& params);
-  void OnDidPreviewPage(const PrintHostMsg_DidPreviewPage_Params& params);
+  void OnDidPreviewPage(content::RenderFrameHost* render_frame_host,
+                        const PrintHostMsg_DidPreviewPage_Params& params);
   void OnMetafileReadyForPrinting(
+      content::RenderFrameHost* render_frame_host,
       const PrintHostMsg_DidPreviewDocument_Params& params);
   void OnPrintPreviewFailed(int document_cookie);
   void OnPrintPreviewCancelled(int document_cookie);
   void OnInvalidPrinterSettings(int document_cookie);
   void OnSetOptionsFromDocument(
       const PrintHostMsg_SetOptionsFromDocument_Params& params);
+
+  void NotifyUIPreviewPageReady(
+      int page_number,
+      int request_id,
+      scoped_refptr<base::RefCountedBytes> data_bytes);
+  void NotifyUIPreviewDocumentReady(
+      int page_count,
+      int request_id,
+      scoped_refptr<base::RefCountedBytes> data_bytes);
+
+  // Callbacks for pdf compositor client.
+  void OnCompositePdfPageDone(int page_number,
+                              int request_id,
+                              mojom::PdfCompositor::Status status,
+                              mojo::ScopedSharedBufferHandle handle);
+  void OnCompositePdfDocumentDone(int page_count,
+                                  int request_id,
+                                  mojom::PdfCompositor::Status status,
+                                  mojo::ScopedSharedBufferHandle handle);
+
+  base::WeakPtrFactory<PrintPreviewMessageHandler> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintPreviewMessageHandler);
 };

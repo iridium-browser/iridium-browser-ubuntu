@@ -18,6 +18,10 @@ namespace gfx {
 struct VectorIcon;
 }
 
+namespace test {
+class LocationBarDecorationTestApi;
+}
+
 // Base class for decorations at the left and right of the location
 // bar.  For instance, the location icon.
 
@@ -31,6 +35,14 @@ struct VectorIcon;
 // This enum class represents the state of the decoration's interactions
 // with the mouse.
 enum class DecorationMouseState { NONE, HOVER, PRESSED };
+
+// Return values to indicate when subclasses should receive a press event.
+enum class AcceptsPress {
+  NEVER,           // Decoration is not clickable (decorative only).
+  ALWAYS,          // Receives a press whether the button is active or not.
+  WHEN_ACTIVATED,  // Receives a press only if the button was inactive before
+                   // the press began.
+};
 
 class LocationBarDecoration {
  public:
@@ -67,6 +79,14 @@ class LocationBarDecoration {
   // the result of |GetTooltip()| as a fallback.
   virtual NSString* GetAccessibilityLabel();
 
+  // Returns whether this decoration is a visual decoration only. Any decoration
+  // that is purely visual must have its state reflected elsewhere to make it
+  // available to screenreader users.
+  virtual bool IsAccessibilityIgnored();
+
+  // Returns a NSRect derived from |frame| to set up the tracking area.
+  virtual NSRect GetTrackingFrame(NSRect frame);
+
   // Methods to set up and remove the tracking area from the |control_view|.
   CrTrackingArea* SetupTrackingArea(NSRect frame, NSView* control_view);
   void RemoveTrackingArea();
@@ -76,7 +96,7 @@ class LocationBarDecoration {
   // decorations are adjacent to the text area, they will show the
   // I-beam cursor.  Decorations which do accept mouse events will get
   // an arrow cursor when the mouse is over them.
-  virtual bool AcceptsMousePress();
+  virtual AcceptsPress AcceptsMousePress();
 
   // Returns true if the decoration should display a background if it's
   // hovered or pressed. The default value is equivalent to the value returned
@@ -98,9 +118,13 @@ class LocationBarDecoration {
   // The pasteboard to drag.
   virtual NSPasteboard* GetDragPasteboard();
 
-  // Called on mouse down, when the decoration isn't being dragged. Return
-  // |false| to indicate that the press was not processed and should be
-  // handled by the cell.
+  // Called on mouse down. Or, for draggable buttons, on mouse up when a drag
+  // did not occur. Returns |false| to indicate that the press was not processed
+  // and should be handled by the cell.
+  bool HandleMousePressed(NSRect frame, NSPoint location);
+
+  // Hook for subclasses to react to calls to HandleMousePressed(). Not invoked
+  // if the button was already active and AcceptsMousePress() is WHEN_ACTIVATED.
   virtual bool OnMousePressed(NSRect frame, NSPoint location);
 
   // Mouse events called on mouse down/up.
@@ -190,6 +214,8 @@ class LocationBarDecoration {
                    CGFloat alpha) const;
 
  private:
+  friend class test::LocationBarDecorationTestApi;
+
   // Called when the state of the decoration is updated.
   void UpdateDecorationState();
 
@@ -197,6 +223,9 @@ class LocationBarDecoration {
 
   // True if the decoration is active.
   bool active_ = false;
+
+  // True if the decoration was active when the last mouse down was received.
+  bool was_active_in_last_mouse_down_ = false;
 
   base::scoped_nsobject<NSControl> accessibility_view_;
 

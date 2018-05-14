@@ -9,12 +9,10 @@
 
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
-namespace chrome {
-
 ChromeKeySystemsProvider::ChromeKeySystemsProvider()
     : has_updated_(false),
       is_update_needed_(true),
-      tick_clock_(new base::DefaultTickClock()) {}
+      tick_clock_(base::DefaultTickClock::GetInstance()) {}
 
 ChromeKeySystemsProvider::~ChromeKeySystemsProvider() {}
 
@@ -71,13 +69,11 @@ bool ChromeKeySystemsProvider::IsKeySystemsUpdateNeeded() {
 }
 
 void ChromeKeySystemsProvider::SetTickClockForTesting(
-    std::unique_ptr<base::TickClock> tick_clock) {
-  tick_clock_.swap(tick_clock);
+    base::TickClock* tick_clock) {
+  tick_clock_ = tick_clock;
 }
 
 void ChromeKeySystemsProvider::SetProviderDelegateForTesting(
     const KeySystemsProviderDelegate& test_provider) {
   test_provider_ = test_provider;
 }
-
-}  // namespace chrome

@@ -148,7 +148,7 @@ void UnregistrationRequest::Start() {
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "Support for interacting with Google Cloud Messaging is enabled by "
             "default, and there is no configuration option to completely "
@@ -181,11 +181,10 @@ void UnregistrationRequest::Start() {
 
 void UnregistrationRequest::BuildRequestHeaders(std::string* extra_headers) {
   net::HttpRequestHeaders headers;
-  headers.SetHeader(
-      net::HttpRequestHeaders::kAuthorization,
-      std::string(kLoginHeader) + " " +
-          base::Uint64ToString(request_info_.android_id) + ":" +
-          base::Uint64ToString(request_info_.security_token));
+  headers.SetHeader(net::HttpRequestHeaders::kAuthorization,
+                    std::string(kLoginHeader) + " " +
+                        base::NumberToString(request_info_.android_id) + ":" +
+                        base::NumberToString(request_info_.security_token));
   *extra_headers = headers.ToString();
 }
 
@@ -195,8 +194,7 @@ void UnregistrationRequest::BuildRequestBody(std::string* body) {
     BuildFormEncoding(kSubtypeKey, request_info_.subtype, body);
 
   BuildFormEncoding(kDeviceIdKey,
-                    base::Uint64ToString(request_info_.android_id),
-                    body);
+                    base::NumberToString(request_info_.android_id), body);
   BuildFormEncoding(kDeleteKey, kDeleteValue, body);
 
   DCHECK(custom_request_handler_.get());

@@ -6,11 +6,20 @@
 #define CONTENT_RENDERER_DOM_STORAGE_LOCAL_STORAGE_CACHED_AREAS_H_
 
 #include <map>
+#include <string>
 
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
+#include "content/common/storage_partition_service.mojom.h"
 #include "url/origin.h"
+
+namespace blink {
+namespace scheduler {
+class RendererScheduler;
+}
+}  // namespace blink
 
 namespace content {
 class LocalStorageCachedArea;
@@ -23,25 +32,61 @@ class StoragePartitionService;
 // needed because we can have n LocalStorageArea objects for the same origin but
 // we want just one LocalStorageCachedArea to service them (no point in having
 // multiple caches of the same data in the same process).
+// TODO(dmurph): Rename to remove LocalStorage.
 class CONTENT_EXPORT LocalStorageCachedAreas {
  public:
-  explicit LocalStorageCachedAreas(
-      mojom::StoragePartitionService* storage_partition_service);
+  LocalStorageCachedAreas(
+      mojom::StoragePartitionService* storage_partition_service,
+      blink::scheduler::RendererScheduler* renderer_schedule);
   ~LocalStorageCachedAreas();
 
   // Returns, creating if necessary, a cached storage area for the given origin.
   scoped_refptr<LocalStorageCachedArea>
       GetCachedArea(const url::Origin& origin);
 
-  // Called by LocalStorageCachedArea on destruction.
-  void CacheAreaClosed(LocalStorageCachedArea* cached_area);
+  scoped_refptr<LocalStorageCachedArea> GetSessionStorageArea(
+      const std::string& namespace_id,
+      const url::Origin& origin);
+
+  void CloneNamespace(const std::string& source_namespace,
+                      const std::string& destination_namespace);
+
+  size_t TotalCacheSize() const;
+
+  void set_cache_limit_for_testing(size_t limit) { total_cache_limit_ = limit; }
 
  private:
+  void ClearAreasIfNeeded();
+
+  scoped_refptr<LocalStorageCachedArea> GetCachedArea(
+      const std::string& namespace_id,
+      const url::Origin& origin,
+      blink::scheduler::RendererScheduler* scheduler);
+
   mojom::StoragePartitionService* const storage_partition_service_;
 
-  // Maps from an origin to its LocalStorageCachedArea object. The object owns
-  // itself.
-  std::map<url::Origin, LocalStorageCachedArea*> cached_areas_;
+  struct DOMStorageNamespace {
+   public:
+    DOMStorageNamespace();
+    ~DOMStorageNamespace();
+    DOMStorageNamespace(DOMStorageNamespace&& other);
+    DOMStorageNamespace& operator=(DOMStorageNamespace&&) = default;
+
+    size_t TotalCacheSize() const;
+    // Returns true if this namespace is totally unused and can be deleted.
+    bool CleanUpUnusedAreas();
+
+    mojom::SessionStorageNamespacePtr session_storage_namespace;
+    base::flat_map<url::Origin, scoped_refptr<LocalStorageCachedArea>>
+        cached_areas;
+
+    DISALLOW_COPY_AND_ASSIGN(DOMStorageNamespace);
+  };
+
+  base::flat_map<std::string, DOMStorageNamespace> cached_namespaces_;
+  size_t total_cache_limit_;
+
+  blink::scheduler::RendererScheduler* renderer_scheduler_;  // NOT OWNED
 
   DISALLOW_COPY_AND_ASSIGN(LocalStorageCachedAreas);
 };

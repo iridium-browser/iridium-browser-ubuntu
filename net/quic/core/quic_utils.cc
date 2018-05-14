@@ -6,15 +6,13 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <vector>
 
-#include "base/containers/adapters.h"
-#include "base/logging.h"
 #include "net/quic/core/quic_constants.h"
+#include "net/quic/platform/api/quic_aligned.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
 #include "net/quic/platform/api/quic_flags.h"
-
-using std::string;
+#include "net/quic/platform/api/quic_prefetch.h"
+#include "net/quic/platform/api/quic_string.h"
 
 namespace net {
 namespace {
@@ -159,11 +157,12 @@ const char* QuicUtils::TransmissionTypeToString(TransmissionType type) {
     RETURN_STRING_LITERAL(ALL_INITIAL_RETRANSMISSION);
     RETURN_STRING_LITERAL(RTO_RETRANSMISSION);
     RETURN_STRING_LITERAL(TLP_RETRANSMISSION);
+    RETURN_STRING_LITERAL(PROBING_RETRANSMISSION);
   }
   return "INVALID_TRANSMISSION_TYPE";
 }
 
-string QuicUtils::PeerAddressChangeTypeToString(PeerAddressChangeType type) {
+QuicString QuicUtils::AddressChangeTypeToString(AddressChangeType type) {
   switch (type) {
     RETURN_STRING_LITERAL(NO_CHANGE);
     RETURN_STRING_LITERAL(PORT_CHANGE);
@@ -173,11 +172,11 @@ string QuicUtils::PeerAddressChangeTypeToString(PeerAddressChangeType type) {
     RETURN_STRING_LITERAL(IPV6_TO_IPV6_CHANGE);
     RETURN_STRING_LITERAL(IPV4_TO_IPV4_CHANGE);
   }
-  return "INVALID_PEER_ADDRESS_CHANGE_TYPE";
+  return "INVALID_ADDRESS_CHANGE_TYPE";
 }
 
 // static
-PeerAddressChangeType QuicUtils::DetermineAddressChangeType(
+AddressChangeType QuicUtils::DetermineAddressChangeType(
     const QuicSocketAddress& old_address,
     const QuicSocketAddress& new_address) {
   if (!old_address.IsInitialized() || !new_address.IsInitialized() ||
@@ -210,56 +209,82 @@ PeerAddressChangeType QuicUtils::DetermineAddressChangeType(
 }
 
 // static
-void QuicUtils::CopyToBuffer(QuicIOVector iov,
+void QuicUtils::CopyToBuffer(const struct iovec* iov,
+                             int iov_count,
                              size_t iov_offset,
-                             size_t length,
+                             size_t buffer_length,
                              char* buffer) {
   int iovnum = 0;
-  while (iovnum < iov.iov_count && iov_offset >= iov.iov[iovnum].iov_len) {
-    iov_offset -= iov.iov[iovnum].iov_len;
+  while (iovnum < iov_count && iov_offset >= iov[iovnum].iov_len) {
+    iov_offset -= iov[iovnum].iov_len;
     ++iovnum;
   }
-  DCHECK_LE(iovnum, iov.iov_count);
-  DCHECK_LE(iov_offset, iov.iov[iovnum].iov_len);
-  if (iovnum >= iov.iov_count || length == 0) {
+  DCHECK_LE(iovnum, iov_count);
+  DCHECK_LE(iov_offset, iov[iovnum].iov_len);
+  if (iovnum >= iov_count || buffer_length == 0) {
     return;
   }
 
   // Unroll the first iteration that handles iov_offset.
-  const size_t iov_available = iov.iov[iovnum].iov_len - iov_offset;
-  size_t copy_len = std::min(length, iov_available);
+  const size_t iov_available = iov[iovnum].iov_len - iov_offset;
+  size_t copy_len = std::min(buffer_length, iov_available);
 
   // Try to prefetch the next iov if there is at least one more after the
   // current. Otherwise, it looks like an irregular access that the hardware
   // prefetcher won't speculatively prefetch. Only prefetch one iov because
   // generally, the iov_offset is not 0, input iov consists of 2K buffers and
   // the output buffer is ~1.4K.
-  if (copy_len == iov_available && iovnum + 1 < iov.iov_count) {
-    // TODO(ckrasic) - this is unused without prefetch()
-    // char* next_base = static_cast<char*>(iov.iov[iovnum + 1].iov_base);
-    // char* next_base = static_cast<char*>(iov.iov[iovnum + 1].iov_base);
+  if (copy_len == iov_available && iovnum + 1 < iov_count) {
+    char* next_base = static_cast<char*>(iov[iovnum + 1].iov_base);
     // Prefetch 2 cachelines worth of data to get the prefetcher started; leave
     // it to the hardware prefetcher after that.
-    // TODO(ckrasic) - investigate what to do about prefetch directives.
-    // prefetch(next_base, PREFETCH_HINT_T0);
-    if (iov.iov[iovnum + 1].iov_len >= 64) {
-      // TODO(ckrasic) - investigate what to do about prefetch directives.
-      // prefetch(next_base + CACHELINE_SIZE, PREFETCH_HINT_T0);
+    QuicPrefetchT0(next_base);
+    if (iov[iovnum + 1].iov_len >= 64) {
+      QuicPrefetchT0(next_base + QUIC_CACHELINE_SIZE);
     }
   }
 
-  const char* src = static_cast<char*>(iov.iov[iovnum].iov_base) + iov_offset;
+  const char* src = static_cast<char*>(iov[iovnum].iov_base) + iov_offset;
   while (true) {
     memcpy(buffer, src, copy_len);
-    length -= copy_len;
+    buffer_length -= copy_len;
     buffer += copy_len;
-    if (length == 0 || ++iovnum >= iov.iov_count) {
+    if (buffer_length == 0 || ++iovnum >= iov_count) {
       break;
     }
-    src = static_cast<char*>(iov.iov[iovnum].iov_base);
-    copy_len = std::min(length, iov.iov[iovnum].iov_len);
+    src = static_cast<char*>(iov[iovnum].iov_base);
+    copy_len = std::min(buffer_length, iov[iovnum].iov_len);
   }
-  QUIC_BUG_IF(length > 0) << "Failed to copy entire length to buffer.";
+  QUIC_BUG_IF(buffer_length > 0) << "Failed to copy entire length to buffer.";
+}
+
+// static
+bool QuicUtils::IsAckable(SentPacketState state) {
+  return state != NEVER_SENT && state != ACKED && state != UNACKABLE;
+}
+
+// static
+SentPacketState QuicUtils::RetransmissionTypeToPacketState(
+    TransmissionType retransmission_type) {
+  switch (retransmission_type) {
+    case ALL_UNACKED_RETRANSMISSION:
+    case ALL_INITIAL_RETRANSMISSION:
+      return UNACKABLE;
+    case HANDSHAKE_RETRANSMISSION:
+      return HANDSHAKE_RETRANSMITTED;
+    case LOSS_RETRANSMISSION:
+      return LOST;
+    case TLP_RETRANSMISSION:
+      return TLP_RETRANSMITTED;
+    case RTO_RETRANSMISSION:
+      return RTO_RETRANSMITTED;
+    case PROBING_RETRANSMISSION:
+      return PROBE_RETRANSMITTED;
+    default:
+      QUIC_BUG << QuicUtils::TransmissionTypeToString(retransmission_type)
+               << " is not a retransmission_type";
+      return UNACKABLE;
+  }
 }
 
 }  // namespace net

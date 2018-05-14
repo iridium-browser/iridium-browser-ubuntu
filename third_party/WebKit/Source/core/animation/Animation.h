@@ -32,27 +32,30 @@
 #define Animation_h
 
 #include <memory>
+
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseProperty.h"
 #include "core/CSSPropertyNames.h"
 #include "core/CoreExport.h"
+#include "core/animation/AnimationEffectOwner.h"
 #include "core/animation/AnimationEffectReadOnly.h"
 #include "core/animation/CompositorAnimations.h"
 #include "core/animation/DocumentTimeline.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/DOMException.h"
-#include "core/events/EventTarget.h"
+#include "core/dom/events/EventTarget.h"
+#include "platform/animation/CompositorAnimationClient.h"
 #include "platform/animation/CompositorAnimationDelegate.h"
-#include "platform/animation/CompositorAnimationPlayerClient.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/graphics/CompositorElementId.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
-class CompositorAnimationPlayer;
+class CompositorAnimation;
 class Element;
 class ExceptionState;
 class TreeScope;
@@ -61,7 +64,8 @@ class CORE_EXPORT Animation final : public EventTargetWithInlineData,
                                     public ActiveScriptWrappable<Animation>,
                                     public ContextLifecycleObserver,
                                     public CompositorAnimationDelegate,
-                                    public CompositorAnimationPlayerClient {
+                                    public CompositorAnimationClient,
+                                    public AnimationEffectOwner {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(Animation);
 
@@ -86,11 +90,17 @@ class CORE_EXPORT Animation final : public EventTargetWithInlineData,
                            AnimationTimeline*,
                            ExceptionState&);
 
-  ~Animation();
+  ~Animation() override;
   void Dispose();
 
   // Returns whether the animation is finished.
   bool Update(TimingUpdateReason);
+
+  // AnimationEffectOwner:
+  void UpdateIfNecessary() override;
+  void SpecifiedTimingChanged() override;
+  bool IsEventDispatchAllowed() const override;
+  Animation* GetAnimation() override { return this; }
 
   // timeToEffectChange returns:
   //  infinity  - if this animation is no longer in effect
@@ -182,12 +192,13 @@ class CORE_EXPORT Animation final : public EventTargetWithInlineData,
   void SetCompositorPending(bool effect_changed = false);
   void NotifyCompositorStartTime(double timeline_time);
   void NotifyStartTime(double timeline_time);
-  // CompositorAnimationPlayerClient implementation.
-  CompositorAnimationPlayer* CompositorPlayer() const override {
-    return compositor_player_ ? compositor_player_->Player() : nullptr;
+  // CompositorAnimationClient implementation.
+  CompositorAnimation* GetCompositorAnimation() const override {
+    return compositor_animation_ ? compositor_animation_->GetAnimation()
+                                 : nullptr;
   }
 
-  bool Affects(const Element&, CSSPropertyID) const;
+  bool Affects(const Element&, const CSSProperty&) const;
 
   // Returns whether we should continue with the commit for this animation or
   // wait until next commit.
@@ -204,12 +215,16 @@ class CORE_EXPORT Animation final : public EventTargetWithInlineData,
     return animation1->SequenceNumber() < animation2->SequenceNumber();
   }
 
-  bool EffectSuppressed() const { return effect_suppressed_; }
+  bool EffectSuppressed() const override { return effect_suppressed_; }
   void SetEffectSuppressed(bool);
 
   void InvalidateKeyframeEffect(const TreeScope&);
 
-  DECLARE_VIRTUAL_TRACE();
+  bool IsNonCompositedCompositable() const {
+    return is_non_composited_compositable_;
+  }
+
+  void Trace(blink::Visitor*) override;
 
  protected:
   DispatchEventResult DispatchEventInternal(Event*) override;
@@ -237,8 +252,8 @@ class CORE_EXPORT Animation final : public EventTargetWithInlineData,
 
   CompositorAnimations::FailureCode CheckCanStartAnimationOnCompositorInternal(
       const Optional<CompositorElementIdSet>&) const;
-  void CreateCompositorPlayer();
-  void DestroyCompositorPlayer();
+  void CreateCompositorAnimation();
+  void DestroyCompositorAnimation();
   void AttachCompositorTimeline();
   void DetachCompositorTimeline();
   void AttachCompositedLayers();
@@ -292,10 +307,9 @@ class CORE_EXPORT Animation final : public EventTargetWithInlineData,
 
   class CompositorState {
     USING_FAST_MALLOC(CompositorState);
-    WTF_MAKE_NONCOPYABLE(CompositorState);
 
    public:
-    CompositorState(Animation& animation)
+    explicit CompositorState(Animation& animation)
         : start_time(animation.start_time_),
           hold_time(animation.hold_time_),
           playback_rate(animation.playback_rate_),
@@ -306,6 +320,7 @@ class CORE_EXPORT Animation final : public EventTargetWithInlineData,
     double playback_rate;
     bool effect_changed;
     CompositorAction pending_action;
+    DISALLOW_COPY_AND_ASSIGN(CompositorState);
   };
 
   enum CompositorPendingChange {
@@ -329,30 +344,30 @@ class CORE_EXPORT Animation final : public EventTargetWithInlineData,
     CompositorPendingChange compositor_pending_change_;
   };
 
-  // CompositorAnimationPlayer objects need to eagerly sever
-  // their connection to their Animation delegate; use a separate
-  // 'holder' on-heap object to accomplish that.
-  class CompositorAnimationPlayerHolder
-      : public GarbageCollectedFinalized<CompositorAnimationPlayerHolder> {
-    USING_PRE_FINALIZER(CompositorAnimationPlayerHolder, Dispose);
+  // CompositorAnimation objects need to eagerly sever their connection to their
+  // Animation delegate; use a separate 'holder' on-heap object to accomplish
+  // that.
+  class CompositorAnimationHolder
+      : public GarbageCollectedFinalized<CompositorAnimationHolder> {
+    USING_PRE_FINALIZER(CompositorAnimationHolder, Dispose);
 
    public:
-    static CompositorAnimationPlayerHolder* Create(Animation*);
+    static CompositorAnimationHolder* Create(Animation*);
 
     void Detach();
 
-    DEFINE_INLINE_TRACE() { visitor->Trace(animation_); }
+    void Trace(blink::Visitor* visitor) { visitor->Trace(animation_); }
 
-    CompositorAnimationPlayer* Player() const {
-      return compositor_player_.get();
+    CompositorAnimation* GetAnimation() const {
+      return compositor_animation_.get();
     }
 
    private:
-    explicit CompositorAnimationPlayerHolder(Animation*);
+    explicit CompositorAnimationHolder(Animation*);
 
     void Dispose();
 
-    std::unique_ptr<CompositorAnimationPlayer> compositor_player_;
+    std::unique_ptr<CompositorAnimation> compositor_animation_;
     Member<Animation> animation_;
   };
 
@@ -363,12 +378,21 @@ class CORE_EXPORT Animation final : public EventTargetWithInlineData,
   bool compositor_pending_;
   int compositor_group_;
 
-  Member<CompositorAnimationPlayerHolder> compositor_player_;
+  Member<CompositorAnimationHolder> compositor_animation_;
 
   bool current_time_pending_;
   bool state_is_being_updated_;
 
   bool effect_suppressed_;
+
+  // crbug.com/758439: In order to have better animation targeting metrics, we'd
+  // like to track whether there are main-thread animations which could be
+  // composited, but is not due to running experiment. This variable is
+  // initially false, it is set to be true after the call to
+  // "CheckCanStartAnimationOnCompositor" according to its return value. In
+  // other words, this bit is true only for an animation that hits the
+  // "Experiment group" for the experiment described in crbug.com/754471.
+  bool is_non_composited_compositable_ = false;
 
   FRIEND_TEST_ALL_PREFIXES(AnimationAnimationTest,
                            NoCompositeWithoutCompositedElementId);

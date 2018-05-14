@@ -7,8 +7,8 @@
 #include "content/browser/service_manager/service_manager_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "services/device/public/interfaces/constants.mojom.h"
-#include "services/device/public/interfaces/wake_lock_provider.mojom.h"
+#include "services/device/public/mojom/constants.mojom.h"
+#include "services/device/public/mojom/wake_lock_provider.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 
 namespace content {
@@ -59,9 +59,9 @@ void WakeLockResourceThrottle::RequestWakeLock() {
     connector->BindInterface(device::mojom::kServiceName,
                              mojo::MakeRequest(&wake_lock_provider));
     wake_lock_provider->GetWakeLockWithoutContext(
-        device::mojom::WakeLockType::PreventAppSuspension,
-        device::mojom::WakeLockReason::ReasonOther,
-        "Uploading data to " + host_, mojo::MakeRequest(&wake_lock_));
+        device::mojom::WakeLockType::kPreventAppSuspension,
+        device::mojom::WakeLockReason::kOther, "Uploading data to " + host_,
+        mojo::MakeRequest(&wake_lock_));
 
     wake_lock_->RequestWakeLock();
   }

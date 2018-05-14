@@ -13,7 +13,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/policy/fake_affiliated_invalidation_service_provider.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/policy/cloud/cloud_policy_invalidator.h"
 #include "components/invalidation/impl/fake_invalidation_service.h"
 #include "components/invalidation/public/invalidation.h"
@@ -22,6 +21,7 @@
 #include "components/policy/core/common/cloud/cloud_policy_core.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "google/cacheinvalidation/include/types.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -87,9 +87,12 @@ TEST(AffiliatedCloudPolicyInvalidatorTest, CreateUseDestroy) {
   std::unique_ptr<MockCloudPolicyClient> policy_client_owner(
       new MockCloudPolicyClient);
   MockCloudPolicyClient* policy_client = policy_client_owner.get();
-  EXPECT_CALL(*policy_client, SetupRegistration("token", "device-id"))
-      .WillOnce(WithArgs<1>(Invoke(policy_client,
-                                   &MockCloudPolicyClient::SetDMToken)));
+  EXPECT_CALL(
+      *policy_client,
+      SetupRegistration(PolicyBuilder::kFakeToken, PolicyBuilder::kFakeDeviceId,
+                        PolicyBuilder::GetUserAffiliationIds()))
+      .WillOnce(WithArgs<1>(
+          Invoke(policy_client, &MockCloudPolicyClient::SetDMToken)));
   core.Connect(std::move(policy_client_owner));
   Mock::VerifyAndClearExpectations(&policy_client);
   core.StartRefreshScheduler();

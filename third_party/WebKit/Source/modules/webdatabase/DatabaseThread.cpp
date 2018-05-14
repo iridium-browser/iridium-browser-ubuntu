@@ -37,13 +37,12 @@
 #include "platform/CrossThreadFunctional.h"
 #include "platform/WaitableEvent.h"
 #include "platform/WebThreadSupportingGC.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
 
 namespace blink {
 
 DatabaseThread::DatabaseThread()
-    : transaction_client_(WTF::MakeUnique<SQLTransactionClient>()),
+    : transaction_client_(std::make_unique<SQLTransactionClient>()),
       cleanup_sync_(nullptr),
       termination_requested_(false) {
   DCHECK(IsMainThread());
@@ -54,14 +53,15 @@ DatabaseThread::~DatabaseThread() {
   DCHECK(!thread_);
 }
 
-DEFINE_TRACE(DatabaseThread) {}
+void DatabaseThread::Trace(blink::Visitor* visitor) {}
 
 void DatabaseThread::Start() {
   DCHECK(IsMainThread());
   if (thread_)
     return;
-  thread_ = WebThreadSupportingGC::Create("WebCore: Database");
-  thread_->PostTask(BLINK_FROM_HERE,
+  thread_ = WebThreadSupportingGC::Create(
+      WebThreadCreationParams(WebThreadType::kDatabaseThread));
+  thread_->PostTask(FROM_HERE,
                     CrossThreadBind(&DatabaseThread::SetupDatabaseThread,
                                     WrapCrossThreadPersistent(this)));
 }
@@ -81,7 +81,7 @@ void DatabaseThread::Terminate() {
     termination_requested_ = true;
     cleanup_sync_ = &sync;
     STORAGE_DVLOG(1) << "DatabaseThread " << this << " was asked to terminate";
-    thread_->PostTask(BLINK_FROM_HERE,
+    thread_->PostTask(FROM_HERE,
                       CrossThreadBind(&DatabaseThread::CleanupDatabaseThread,
                                       WrapCrossThreadPersistent(this)));
   }
@@ -117,7 +117,7 @@ void DatabaseThread::CleanupDatabaseThread() {
   }
   open_database_set_.clear();
 
-  thread_->PostTask(BLINK_FROM_HERE,
+  thread_->PostTask(FROM_HERE,
                     WTF::Bind(&DatabaseThread::CleanupDatabaseThreadCompleted,
                               WrapCrossThreadPersistent(this)));
 }
@@ -172,7 +172,7 @@ void DatabaseThread::ScheduleTask(std::unique_ptr<DatabaseTask> task) {
   }
 #endif
   // WebThread takes ownership of the task.
-  thread_->PostTask(BLINK_FROM_HERE,
+  thread_->PostTask(FROM_HERE,
                     CrossThreadBind(&DatabaseTask::Run, std::move(task)));
 }
 

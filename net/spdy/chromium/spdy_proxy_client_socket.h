@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/completion_callback.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_export.h"
@@ -31,6 +32,7 @@
 #include "net/spdy/chromium/spdy_stream.h"
 #include "net/spdy/core/spdy_protocol.h"
 #include "net/spdy/platform/api/spdy_string.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
 
@@ -48,7 +50,6 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   SpdyProxyClientSocket(const base::WeakPtr<SpdyStream>& spdy_stream,
                         const SpdyString& user_agent,
                         const HostPortPair& endpoint,
-                        const HostPortPair& proxy_server,
                         const NetLogWithSource& source_net_log,
                         HttpAuthController* auth_controller);
 
@@ -59,7 +60,7 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   const HttpResponseInfo* GetConnectResponseInfo() const override;
   std::unique_ptr<HttpStream> CreateConnectResponseStream() override;
   const scoped_refptr<HttpAuthController>& GetAuthController() const override;
-  int RestartWithAuth(const CompletionCallback& callback) override;
+  int RestartWithAuth(CompletionOnceCallback callback) override;
   bool IsUsingSpdy() const override;
   NextProto GetProxyNegotiatedProtocol() const override;
 
@@ -79,6 +80,7 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   void ClearConnectionAttempts() override {}
   void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
   int64_t GetTotalReceivedBytes() const override;
+  void ApplySocketTag(const SocketTag& tag) override;
 
   // Socket implementation.
   int Read(IOBuffer* buf,
@@ -86,7 +88,8 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
            const CompletionCallback& callback) override;
   int Write(IOBuffer* buf,
             int buf_len,
-            const CompletionCallback& callback) override;
+            const CompletionCallback& callback,
+            const NetworkTrafficAnnotationTag& traffic_annotation) override;
   int SetReceiveBufferSize(int32_t size) override;
   int SetSendBufferSize(int32_t size) override;
   int GetPeerAddress(IPEndPoint* address) const override;
@@ -117,7 +120,7 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
 
   // Calls |callback.Run(result)|. Used to run a callback posted to the
   // message loop.
-  void RunCallback(const CompletionCallback& callback, int result) const;
+  void RunCallback(CompletionOnceCallback callback, int result) const;
 
   void OnIOComplete(int result);
 
@@ -139,9 +142,9 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
 
   // Stores the callback to the layer above, called on completing Read() or
   // Connect().
-  CompletionCallback read_callback_;
+  CompletionOnceCallback read_callback_;
   // Stores the callback to the layer above, called on completing Write().
-  CompletionCallback write_callback_;
+  CompletionOnceCallback write_callback_;
 
   // CONNECT request and response.
   HttpRequestInfo request_;

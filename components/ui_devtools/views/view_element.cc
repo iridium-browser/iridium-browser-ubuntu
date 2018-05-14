@@ -4,6 +4,8 @@
 
 #include "components/ui_devtools/views/view_element.h"
 
+#include "base/strings/utf_string_conversions.h"
+#include "components/ui_devtools/Protocol.h"
 #include "components/ui_devtools/views/ui_element_delegate.h"
 #include "ui/views/widget/widget.h"
 
@@ -56,6 +58,16 @@ void ViewElement::OnViewBoundsChanged(views::View* view) {
   delegate()->OnUIElementBoundsChanged(this);
 }
 
+std::vector<std::pair<std::string, std::string>>
+ViewElement::GetCustomProperties() const {
+  base::string16 description;
+  if (view_->GetTooltipText(gfx::Point(), &description)) {
+    return {std::make_pair<std::string, std::string>(
+        "tooltip", base::UTF16ToUTF8(description))};
+  }
+  return {};
+}
+
 void ViewElement::GetBounds(gfx::Rect* bounds) const {
   *bounds = view_->bounds();
 }
@@ -72,16 +84,25 @@ void ViewElement::SetVisible(bool visible) {
   view_->SetVisible(visible);
 }
 
-std::pair<aura::Window*, gfx::Rect> ViewElement::GetNodeWindowAndBounds()
+std::unique_ptr<protocol::Array<std::string>> ViewElement::GetAttributes()
+    const {
+  auto attributes = protocol::Array<std::string>::create();
+  // TODO(lgrey): Change name to class after updating tests.
+  attributes->addItem("name");
+  attributes->addItem(view_->GetClassName());
+  return attributes;
+}
+
+std::pair<gfx::NativeWindow, gfx::Rect> ViewElement::GetNodeWindowAndBounds()
     const {
   return std::make_pair(view_->GetWidget()->GetNativeWindow(),
                         view_->GetBoundsInScreen());
 }
 
 // static
-views::View* ViewElement::From(UIElement* element) {
+views::View* ViewElement::From(const UIElement* element) {
   DCHECK_EQ(UIElementType::VIEW, element->type());
-  return static_cast<ViewElement*>(element)->view_;
+  return static_cast<const ViewElement*>(element)->view_;
 }
 
 }  // namespace ui_devtools

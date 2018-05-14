@@ -5,7 +5,7 @@
 #include "modules/storage/DOMWindowStorageController.h"
 
 #include "core/dom/Document.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/page/Page.h"
 #include "modules/storage/DOMWindowStorage.h"
 
@@ -16,24 +16,22 @@ DOMWindowStorageController::DOMWindowStorageController(Document& document)
   document.domWindow()->RegisterEventListenerObserver(this);
 }
 
-DEFINE_TRACE(DOMWindowStorageController) {
+void DOMWindowStorageController::Trace(blink::Visitor* visitor) {
   Supplement<Document>::Trace(visitor);
 }
 
 // static
-const char* DOMWindowStorageController::SupplementName() {
-  return "DOMWindowStorageController";
-}
+const char DOMWindowStorageController::kSupplementName[] =
+    "DOMWindowStorageController";
 
 // static
 DOMWindowStorageController& DOMWindowStorageController::From(
     Document& document) {
   DOMWindowStorageController* controller =
-      static_cast<DOMWindowStorageController*>(
-          Supplement<Document>::From(document, SupplementName()));
+      Supplement<Document>::From<DOMWindowStorageController>(document);
   if (!controller) {
     controller = new DOMWindowStorageController(document);
-    Supplement<Document>::ProvideTo(document, SupplementName(), controller);
+    ProvideTo(document, controller);
   }
   return *controller;
 }

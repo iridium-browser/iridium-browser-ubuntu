@@ -3,6 +3,8 @@
 # found in the LICENSE file.
 
 import("//build/config/features.gni")
+import("//build/config/jumbo.gni")
+import("//components/nacl/features.gni")
 import("//extensions/features/features.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 
@@ -22,7 +24,6 @@ if (enable_extensions) {
   mojom("mojo") {
     sources = [
       "extension_unpacker.mojom",
-      "manifest_parser.mojom",
       "mojo/app_window.mojom",
       "mojo/keep_alive.mojom",
     ]
@@ -33,17 +34,14 @@ if (enable_extensions) {
 
     public_deps = [
       "//mojo/common:common_custom_types",
-      "//url/mojo:url_mojom_gurl",
+      "//url/mojom:url_mojom_gurl",
     ]
-
-    # TODO(crbug.com/699569): Convert to use the new JS bindings.
-    use_new_js_bindings = false
   }
 
   # This must be a static library because extensions common depends on
   # GetTrustedICAPublicKey in extensions/browser which isn't always linked
   # in. TODO(brettw): This reverse dependency should be fixed.
-  static_library("common") {
+  jumbo_static_library("common") {
     sources = [
       "alias.h",
       "api/bluetooth/bluetooth_manifest_data.cc",
@@ -58,6 +56,14 @@ if (enable_extensions) {
       "api/declarative/declarative_manifest_data.h",
       "api/declarative/declarative_manifest_handler.cc",
       "api/declarative/declarative_manifest_handler.h",
+      "api/declarative_net_request/constants.cc",
+      "api/declarative_net_request/constants.h",
+      "api/declarative_net_request/dnr_manifest_data.cc",
+      "api/declarative_net_request/dnr_manifest_data.h",
+      "api/declarative_net_request/dnr_manifest_handler.cc",
+      "api/declarative_net_request/dnr_manifest_handler.h",
+      "api/declarative_net_request/utils.cc",
+      "api/declarative_net_request/utils.h",
       "api/messaging/message.h",
       "api/messaging/port_id.cc",
       "api/messaging/port_id.h",
@@ -91,6 +97,8 @@ if (enable_extensions) {
       "extension.h",
       "extension_api.cc",
       "extension_api.h",
+      "extension_features.cc",
+      "extension_features.h",
       "extension_icon_set.cc",
       "extension_icon_set.h",
       "extension_id.h",
@@ -104,8 +112,11 @@ if (enable_extensions) {
       "extension_paths.h",
       "extension_resource.cc",
       "extension_resource.h",
+      "extension_resource_path_normalizer.cc",
+      "extension_resource_path_normalizer.h",
       "extension_set.cc",
       "extension_set.h",
+      "extension_updater_uma.h",
       "extension_urls.cc",
       "extension_urls.h",
       "extension_utility_types.h",
@@ -140,6 +151,8 @@ if (enable_extensions) {
       "file_util.cc",
       "file_util.h",
       "guest_view/extensions_guest_view_messages.h",
+      "hashed_extension_id.cc",
+      "hashed_extension_id.h",
       "host_id.cc",
       "host_id.h",
       "image_util.cc",
@@ -174,8 +187,6 @@ if (enable_extensions) {
       "manifest_handlers/incognito_info.h",
       "manifest_handlers/kiosk_mode_info.cc",
       "manifest_handlers/kiosk_mode_info.h",
-      "manifest_handlers/launcher_page_info.cc",
-      "manifest_handlers/launcher_page_info.h",
       "manifest_handlers/mime_types_handler.cc",
       "manifest_handlers/mime_types_handler.h",
       "manifest_handlers/oauth2_manifest_handler.cc",
@@ -186,8 +197,6 @@ if (enable_extensions) {
       "manifest_handlers/options_page_info.h",
       "manifest_handlers/permissions_parser.cc",
       "manifest_handlers/permissions_parser.h",
-      "manifest_handlers/plugins_handler.cc",
-      "manifest_handlers/plugins_handler.h",
       "manifest_handlers/requirements_info.cc",
       "manifest_handlers/requirements_info.h",
       "manifest_handlers/sandboxed_page_info.cc",
@@ -249,8 +258,6 @@ if (enable_extensions) {
       "stack_frame.h",
       "switches.cc",
       "switches.h",
-      "update_manifest.cc",
-      "update_manifest.h",
       "url_pattern.cc",
       "url_pattern.h",
       "url_pattern_set.cc",
@@ -288,6 +295,7 @@ if (enable_extensions) {
       # http://crbug.com/162530
       "//chrome:resources",
       "//components/crx_file",
+      "//components/nacl/common:buildflags",
       "//components/url_matcher",
       "//crypto",
       "//device/bluetooth",
@@ -299,7 +307,6 @@ if (enable_extensions) {
       "//net",
       "//third_party/boringssl",
       "//third_party/icu",
-      "//third_party/libxml",
       "//third_party/re2",
       "//ui/base",
       "//ui/gfx/geometry",
@@ -324,17 +331,34 @@ if (enable_extensions) {
     }
   }
 
+  source_set("test_support") {
+    testonly = true
+
+    sources = [
+      "api/declarative_net_request/test_utils.cc",
+      "api/declarative_net_request/test_utils.h",
+    ]
+
+    deps = [
+      ":common",
+      "//base",
+    ]
+  }
+
   source_set("unit_tests") {
     testonly = true
     sources = [
       "api/declarative/declarative_manifest_unittest.cc",
+      "api/declarative_net_request/dnr_manifest_unittest.cc",
       "api/printer_provider/usb_printer_manifest_unittest.cc",
       "api/sockets/sockets_manifest_permission_unittest.cc",
       "csp_validator_unittest.cc",
       "event_filter_unittest.cc",
+      "extension_builder_unittest.cc",
       "extension_icon_set_unittest.cc",
       "extension_l10n_util_unittest.cc",
       "extension_messages_unittest.cc",
+      "extension_resource_path_normalizer_unittest.cc",
       "extension_resource_unittest.cc",
       "extension_set_unittest.cc",
       "features/complex_feature_unittest.cc",
@@ -360,7 +384,6 @@ if (enable_extensions) {
       "permissions/socket_permission_unittest.cc",
       "permissions/usb_device_permission_unittest.cc",
       "stack_frame_unittest.cc",
-      "update_manifest_unittest.cc",
       "url_pattern_set_unittest.cc",
       "url_pattern_unittest.cc",
       "user_script_unittest.cc",
@@ -370,6 +393,7 @@ if (enable_extensions) {
 
     deps = [
       ":common",
+      ":test_support",
       "//base",
       "//base:i18n",
       "//base/test:test_support",

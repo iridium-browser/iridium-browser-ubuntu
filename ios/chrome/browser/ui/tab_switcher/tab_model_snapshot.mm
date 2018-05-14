@@ -5,33 +5,32 @@
 #import "ios/chrome/browser/ui/tab_switcher/tab_model_snapshot.h"
 
 #include "base/strings/sys_string_conversions.h"
+#import "ios/chrome/browser/tabs/legacy_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-TabModelSnapshot::TabModelSnapshot(TabModel* tabModel) {
-  for (Tab* tab in tabModel) {
-    _hashes.push_back(hashOfTheVisiblePropertiesOfATab(tab));
-    _tabs.push_back(base::WeakNSObject<Tab>(tab));
+TabModelSnapshot::TabModelSnapshot(TabModel* tab_model) {
+  if (tab_model) {
+    DCHECK(tab_model.webStateList);
+    WebStateList* web_state_list = tab_model.webStateList;
+    for (int index = 0; index < web_state_list->count(); ++index) {
+      web::WebState* web_state = web_state_list->GetWebStateAt(index);
+      Tab* tab = LegacyTabHelper::GetTabForWebState(web_state);
+      hashes_.push_back(HashOfTheVisiblePropertiesOfATab(tab));
+      tabs_.push_back(tab);
+    }
   }
 }
 
 TabModelSnapshot::~TabModelSnapshot() {}
 
-std::vector<size_t> const& TabModelSnapshot::hashes() const {
-  DCHECK_EQ(_tabs.size(), _hashes.size());
-  return _hashes;
-}
-
-std::vector<base::WeakNSObject<Tab>> const& TabModelSnapshot::tabs() const {
-  DCHECK_EQ(_tabs.size(), _hashes.size());
-  return _tabs;
-}
-
-size_t TabModelSnapshot::hashOfTheVisiblePropertiesOfATab(Tab* tab) {
+// static
+size_t TabModelSnapshot::HashOfTheVisiblePropertiesOfATab(Tab* tab) {
   DCHECK(tab);
   std::stringstream ss;
   // lastVisitedTimestamp is used as an approximation for whether the tab's

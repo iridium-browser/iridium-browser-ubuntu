@@ -11,7 +11,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
@@ -36,7 +35,7 @@ void ForwardJobFinished(
     ExternalPolicyDataFetcher::Result result,
     std::unique_ptr<std::string> data) {
   task_runner->PostTask(FROM_HERE,
-                        base::Bind(callback, job, result, base::Passed(&data)));
+                        base::BindOnce(callback, job, result, std::move(data)));
 }
 
 // Helper that forwards a job cancelation confirmation from the thread that the
@@ -46,14 +45,6 @@ void ForwardJobCanceled(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
     const base::Closure& callback) {
   task_runner->PostTask(FROM_HERE, callback);
-}
-
-// Helper invoked when a job cancelation confirmation has been forwarded to the
-// thread which canceled the job. The helper itself does nothing. It exists so
-// that the |job| can be passed as base::Owned(), allowing it to be deleted on
-// the correct thread and after any pending callbacks for the |job| have been
-// processed.
-void DoNothing(ExternalPolicyDataFetcher::Job* job) {
 }
 
 }  // namespace
@@ -124,12 +115,10 @@ void ExternalPolicyDataFetcher::CancelJob(Job* job) {
   // still be pending for the canceled |job|.
   io_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&ExternalPolicyDataFetcherBackend::CancelJob,
-                 backend_,
-                 job,
-                 base::Bind(&ForwardJobCanceled,
-                            task_runner_,
-                            base::Bind(&DoNothing, base::Owned(job)))));
+      base::Bind(&ExternalPolicyDataFetcherBackend::CancelJob, backend_, job,
+                 base::Bind(&ForwardJobCanceled, task_runner_,
+                            base::Bind(base::DoNothing::Repeatedly<Job*>(),
+                                       base::Owned(job)))));
 }
 
 void ExternalPolicyDataFetcher::OnJobFinished(
@@ -171,7 +160,7 @@ ExternalPolicyDataFetcherBackend::~ExternalPolicyDataFetcherBackend() {
 std::unique_ptr<ExternalPolicyDataFetcher>
 ExternalPolicyDataFetcherBackend::CreateFrontend(
     scoped_refptr<base::SequencedTaskRunner> task_runner) {
-  return base::MakeUnique<ExternalPolicyDataFetcher>(
+  return std::make_unique<ExternalPolicyDataFetcher>(
       task_runner, io_task_runner_, weak_factory_.GetWeakPtr());
 }
 
@@ -193,7 +182,7 @@ void ExternalPolicyDataFetcherBackend::StartJob(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "This feature cannot be controlled by Chrome settings, but users "
             "can sign out of Chrome to disable it."
@@ -245,7 +234,8 @@ void ExternalPolicyDataFetcherBackend::OnURLFetchComplete(
 
   const net::URLRequestStatus status = it->first->GetStatus();
   if (status.error() == net::ERR_CONNECTION_RESET ||
-      status.error() == net::ERR_TEMPORARILY_THROTTLED) {
+      status.error() == net::ERR_TEMPORARILY_THROTTLED ||
+      status.error() == net::ERR_CONNECTION_CLOSED) {
     // The connection was interrupted.
     result = ExternalPolicyDataFetcher::CONNECTION_INTERRUPTED;
   } else if (status.status() != net::URLRequestStatus::SUCCESS) {

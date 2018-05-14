@@ -5,12 +5,7 @@ found in the LICENSE file.
 -->
 <tabpanel id="info-view">
   <div>
-    <span>
-      <i>
-        Note: To properly save this page, select the "Webpage, Complete" option
-        in the Save File dialog.
-      </i>
-    </span>
+    <input type="button" id="copy-to-clipboard" value="Copy Report to Clipboard">
   </div>
   <div>
     <h3>Graphics Feature Status</h3>
@@ -48,6 +43,16 @@ found in the LICENSE file.
   <div>
     <h3>GpuMemoryBuffers Status</h3>
     <div id="gpu-memory-buffer-info"></div>
+  </div>
+
+  <div>
+    <h3>Display(s) Information</h3>
+    <div id="display-info"></div>
+  </div>
+
+  <div>
+    <h3>Video Acceleration Information</h3>
+    <div id="video-acceleration-info"></div>
   </div>
 
   <div class="diagnostics">

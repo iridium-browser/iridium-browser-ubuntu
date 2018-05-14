@@ -5,6 +5,7 @@
 #include "remoting/protocol/v2_authenticator.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "net/base/net_errors.h"
@@ -35,9 +36,8 @@ const char kTestSharedSecretBad[] = "0000-0000-0001";
 
 class V2AuthenticatorTest : public AuthenticatorTestBase {
  public:
-  V2AuthenticatorTest() {
-  }
-  ~V2AuthenticatorTest() override {}
+  V2AuthenticatorTest() = default;
+  ~V2AuthenticatorTest() override = default;
 
  protected:
   void InitAuthenticators(const std::string& client_secret,
@@ -88,7 +88,7 @@ TEST_F(V2AuthenticatorTest, InvalidSecret) {
   ASSERT_TRUE(message.get());
 
   ASSERT_EQ(Authenticator::WAITING_MESSAGE, client_->state());
-  host_->ProcessMessage(message.get(), base::Bind(&base::DoNothing));
+  host_->ProcessMessage(message.get(), base::DoNothing());
   // This assumes that V2Authenticator::ProcessMessage runs synchronously.
   ASSERT_EQ(Authenticator::REJECTED, host_->state());
 }

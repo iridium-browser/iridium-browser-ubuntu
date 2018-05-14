@@ -5,6 +5,7 @@
 #ifndef InspectorAnimationAgent_h
 #define InspectorAnimationAgent_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/animation/Animation.h"
 #include "core/css/CSSKeyframesRule.h"
@@ -21,8 +22,6 @@ class InspectorCSSAgent;
 
 class CORE_EXPORT InspectorAnimationAgent final
     : public InspectorBaseAgent<protocol::Animation::Metainfo> {
-  WTF_MAKE_NONCOPYABLE(InspectorAnimationAgent);
-
  public:
   InspectorAnimationAgent(InspectedFrames*,
                           InspectorCSSAgent*,
@@ -66,7 +65,7 @@ class CORE_EXPORT InspectorAnimationAgent final
   protocol::Response AssertAnimation(const String& id,
                                      blink::Animation*& result);
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   using AnimationType = protocol::Animation::Animation::TypeEnum;
@@ -91,6 +90,7 @@ class CORE_EXPORT InspectorAnimationAgent final
   HashMap<String, String> id_to_animation_type_;
   bool is_cloning_;
   HashSet<String> cleared_animations_;
+  DISALLOW_COPY_AND_ASSIGN(InspectorAnimationAgent);
 };
 
 }  // namespace blink

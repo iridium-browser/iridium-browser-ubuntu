@@ -28,6 +28,8 @@
 #define HTMLPreloadScanner_h
 
 #include <memory>
+
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/css/MediaValuesCached.h"
 #include "core/dom/ViewportDescription.h"
@@ -66,7 +68,6 @@ struct CORE_EXPORT CachedDocumentParameters {
   }
 
   bool do_html_preload_scanning;
-  bool do_document_write_preload_scanning;
   Length default_viewport_min_width;
   bool viewport_meta_zero_values_quirk;
   bool viewport_meta_enabled;
@@ -78,7 +79,6 @@ struct CORE_EXPORT CachedDocumentParameters {
 };
 
 class TokenPreloadScanner {
-  WTF_MAKE_NONCOPYABLE(TokenPreloadScanner);
   USING_FAST_MALLOC(TokenPreloadScanner);
 
  public:
@@ -99,8 +99,7 @@ class TokenPreloadScanner {
             const SegmentedString&,
             PreloadRequestStream& requests,
             ViewportDescriptionWrapper*,
-            bool* is_csp_meta_tag,
-            bool* likely_document_write_script);
+            bool* is_csp_meta_tag);
 
   void SetPredictedBaseElementURL(const KURL& url) {
     predicted_base_element_url_ = url;
@@ -114,18 +113,12 @@ class TokenPreloadScanner {
  private:
   class StartTagScanner;
 
-  bool ShouldEvaluateForDocumentWrite(const String& source);
-  bool ShouldEvaluateForDocumentWrite(const HTMLToken::DataVector& source) {
-    return false;
-  }
-
   template <typename Token>
   inline void ScanCommon(const Token&,
                          const SegmentedString&,
                          PreloadRequestStream& requests,
                          ViewportDescriptionWrapper*,
-                         bool* is_csp_meta_tag,
-                         bool* likely_document_write_script);
+                         bool* is_csp_meta_tag);
 
   template <typename Token>
   void UpdatePredictedBaseURL(const Token&);
@@ -170,10 +163,11 @@ class TokenPreloadScanner {
   bool did_rewind_ = false;
 
   Vector<Checkpoint> checkpoints_;
+
+  DISALLOW_COPY_AND_ASSIGN(TokenPreloadScanner);
 };
 
 class CORE_EXPORT HTMLPreloadScanner {
-  WTF_MAKE_NONCOPYABLE(HTMLPreloadScanner);
   USING_FAST_MALLOC(HTMLPreloadScanner);
 
  public:
@@ -205,6 +199,8 @@ class CORE_EXPORT HTMLPreloadScanner {
   SegmentedString source_;
   HTMLToken token_;
   std::unique_ptr<HTMLTokenizer> tokenizer_;
+
+  DISALLOW_COPY_AND_ASSIGN(HTMLPreloadScanner);
 };
 
 }  // namespace blink

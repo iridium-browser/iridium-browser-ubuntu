@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/containers/flat_set.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
@@ -21,13 +22,12 @@ namespace base {
 class FilePath;
 }
 
-namespace chrome {
 class BrowserListObserver;
-}
 
 // Maintains a list of Browser objects.
 class BrowserList {
  public:
+  using BrowserSet = base::flat_set<Browser*>;
   using BrowserVector = std::vector<Browser*>;
   using CloseCallback = base::Callback<void(const base::FilePath&)>;
   using const_iterator = BrowserVector::const_iterator;
@@ -36,8 +36,6 @@ class BrowserList {
   // Returns the last active browser for this list.
   Browser* GetLastActive() const;
 
-  // Browsers are added to the list before they have constructed windows,
-  // so the |window()| member function may return NULL.
   const_iterator begin() const { return browsers_.begin(); }
   const_iterator end() const { return browsers_.end(); }
 
@@ -57,6 +55,11 @@ class BrowserList {
     return last_active_browsers_.rend();
   }
 
+  // Returns the set of browsers that are currently in the closing state.
+  const BrowserSet& currently_closing_browsers() const {
+    return currently_closing_browsers_;
+  }
+
   static BrowserList* GetInstance();
 
   // Adds or removes |browser| from the list it is associated with. The browser
@@ -68,8 +71,8 @@ class BrowserList {
   // Adds and removes |observer| from the observer list for all desktops.
   // Observers are responsible for making sure the notifying browser is relevant
   // to them (e.g., on the specific desktop they care about if any).
-  static void AddObserver(chrome::BrowserListObserver* observer);
-  static void RemoveObserver(chrome::BrowserListObserver* observer);
+  static void AddObserver(BrowserListObserver* observer);
+  static void RemoveObserver(BrowserListObserver* observer);
 
   // Moves all the browsers that show on workspace |new_workspace| to the end of
   // the browser list (i.e. the browsers that were "activated" most recently).
@@ -153,11 +156,13 @@ class BrowserList {
   // A vector of the browsers in this list that have been activated, in the
   // reverse order in which they were last activated.
   BrowserVector last_active_browsers_;
+  // A vector of the browsers that are currently in the closing state.
+  BrowserSet currently_closing_browsers_;
 
   // A list of observers which will be notified of every browser addition and
   // removal across all BrowserLists.
-  static base::LazyInstance<
-      base::ObserverList<chrome::BrowserListObserver>>::Leaky observers_;
+  static base::LazyInstance<base::ObserverList<BrowserListObserver>>::Leaky
+      observers_;
 
   static BrowserList* instance_;
 

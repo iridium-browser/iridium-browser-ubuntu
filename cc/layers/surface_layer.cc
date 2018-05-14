@@ -8,86 +8,54 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/single_thread_task_runner.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/layers/surface_layer_impl.h"
-#include "cc/output/swap_promise.h"
 #include "cc/trees/layer_tree_host.h"
-#include "cc/trees/swap_promise_manager.h"
-#include "cc/trees/task_runner_provider.h"
-#include "components/viz/common/surfaces/surface_sequence_generator.h"
 
 namespace cc {
 
-class SatisfySwapPromise : public SwapPromise {
- public:
-  SatisfySwapPromise(
-      base::Closure reference_returner,
-      scoped_refptr<base::SingleThreadTaskRunner> main_task_runner)
-      : reference_returner_(reference_returner),
-        main_task_runner_(std::move(main_task_runner)) {}
-
-  ~SatisfySwapPromise() override {}
-
- private:
-  void DidActivate() override {}
-
-  void WillSwap(CompositorFrameMetadata* metadata) override {}
-
-  void DidSwap() override {
-    main_task_runner_->PostTask(FROM_HERE, reference_returner_);
-  }
-
-  DidNotSwapAction DidNotSwap(DidNotSwapReason reason) override {
-    main_task_runner_->PostTask(FROM_HERE, reference_returner_);
-    return DidNotSwapAction::BREAK_PROMISE;
-  }
-
-  int64_t TraceId() const override { return 0; }
-
-  base::Closure reference_returner_;
-  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(SatisfySwapPromise);
-};
-
-scoped_refptr<SurfaceLayer> SurfaceLayer::Create(
-    scoped_refptr<viz::SurfaceReferenceFactory> ref_factory) {
-  return make_scoped_refptr(new SurfaceLayer(std::move(ref_factory)));
+scoped_refptr<SurfaceLayer> SurfaceLayer::Create() {
+  return base::WrapRefCounted(new SurfaceLayer());
 }
 
-SurfaceLayer::SurfaceLayer(
-    scoped_refptr<viz::SurfaceReferenceFactory> ref_factory)
-    : ref_factory_(std::move(ref_factory)) {}
+SurfaceLayer::SurfaceLayer() = default;
 
 SurfaceLayer::~SurfaceLayer() {
   DCHECK(!layer_tree_host());
 }
 
-void SurfaceLayer::SetPrimarySurfaceInfo(const viz::SurfaceInfo& surface_info) {
-  primary_surface_info_ = surface_info;
+void SurfaceLayer::SetPrimarySurfaceId(const viz::SurfaceId& surface_id,
+                                       const DeadlinePolicy& deadline_policy) {
+  if (primary_surface_id_ == surface_id &&
+      deadline_policy.use_existing_deadline()) {
+    return;
+  }
+  primary_surface_id_ = surface_id;
+  if (!deadline_policy.use_existing_deadline())
+    deadline_in_frames_ = deadline_policy.deadline_in_frames();
   UpdateDrawsContent(HasDrawableContent());
   SetNeedsCommit();
 }
 
-void SurfaceLayer::SetFallbackSurfaceInfo(
-    const viz::SurfaceInfo& surface_info) {
-  RemoveReference(std::move(fallback_reference_returner_));
+void SurfaceLayer::SetFallbackSurfaceId(const viz::SurfaceId& surface_id) {
+  if (fallback_surface_id_ == surface_id)
+    return;
+
   if (layer_tree_host())
-    layer_tree_host()->RemoveSurfaceLayerId(fallback_surface_info_.id());
+    layer_tree_host()->RemoveSurfaceLayerId(fallback_surface_id_);
 
-  fallback_surface_info_ = surface_info;
+  fallback_surface_id_ = surface_id;
 
-  if (layer_tree_host() && fallback_surface_info_.is_valid()) {
-    fallback_reference_returner_ = ref_factory_->CreateReference(
-        layer_tree_host(), fallback_surface_info_.id());
-    layer_tree_host()->AddSurfaceLayerId(fallback_surface_info_.id());
-  }
+  if (layer_tree_host() && fallback_surface_id_.is_valid())
+    layer_tree_host()->AddSurfaceLayerId(fallback_surface_id_);
+
   SetNeedsCommit();
 }
 
 void SurfaceLayer::SetStretchContentToFillBounds(
     bool stretch_content_to_fill_bounds) {
+  if (stretch_content_to_fill_bounds_ == stretch_content_to_fill_bounds)
+    return;
   stretch_content_to_fill_bounds_ = stretch_content_to_fill_bounds;
   SetNeedsPushProperties();
 }
@@ -98,7 +66,7 @@ std::unique_ptr<LayerImpl> SurfaceLayer::CreateLayerImpl(
 }
 
 bool SurfaceLayer::HasDrawableContent() const {
-  return primary_surface_info_.is_valid() && Layer::HasDrawableContent();
+  return primary_surface_id_.is_valid() && Layer::HasDrawableContent();
 }
 
 void SurfaceLayer::SetLayerTreeHost(LayerTreeHost* host) {
@@ -106,36 +74,26 @@ void SurfaceLayer::SetLayerTreeHost(LayerTreeHost* host) {
     return;
   }
 
-  if (layer_tree_host() && fallback_surface_info_.is_valid())
-    layer_tree_host()->RemoveSurfaceLayerId(fallback_surface_info_.id());
+  if (layer_tree_host() && fallback_surface_id_.is_valid())
+    layer_tree_host()->RemoveSurfaceLayerId(fallback_surface_id_);
 
-  RemoveReference(std::move(fallback_reference_returner_));
   Layer::SetLayerTreeHost(host);
 
-  if (layer_tree_host() && fallback_surface_info_.is_valid()) {
-    fallback_reference_returner_ = ref_factory_->CreateReference(
-        layer_tree_host(), fallback_surface_info_.id());
-    layer_tree_host()->AddSurfaceLayerId(fallback_surface_info_.id());
-  }
+  if (layer_tree_host() && fallback_surface_id_.is_valid())
+    layer_tree_host()->AddSurfaceLayerId(fallback_surface_id_);
 }
 
 void SurfaceLayer::PushPropertiesTo(LayerImpl* layer) {
   Layer::PushPropertiesTo(layer);
   TRACE_EVENT0("cc", "SurfaceLayer::PushPropertiesTo");
   SurfaceLayerImpl* layer_impl = static_cast<SurfaceLayerImpl*>(layer);
-  layer_impl->SetPrimarySurfaceInfo(primary_surface_info_);
-  layer_impl->SetFallbackSurfaceInfo(fallback_surface_info_);
+  layer_impl->SetPrimarySurfaceId(primary_surface_id_,
+                                  std::move(deadline_in_frames_));
+  // Unless the client explicitly calls SetPrimarySurfaceId again after this
+  // commit, don't block on |primary_surface_id_| again.
+  deadline_in_frames_ = 0u;
+  layer_impl->SetFallbackSurfaceId(fallback_surface_id_);
   layer_impl->SetStretchContentToFillBounds(stretch_content_to_fill_bounds_);
-}
-
-void SurfaceLayer::RemoveReference(base::Closure reference_returner) {
-  if (!reference_returner)
-    return;
-  auto swap_promise = base::MakeUnique<SatisfySwapPromise>(
-      std::move(reference_returner),
-      layer_tree_host()->GetTaskRunnerProvider()->MainThreadTaskRunner());
-  layer_tree_host()->GetSwapPromiseManager()->QueueSwapPromise(
-      std::move(swap_promise));
 }
 
 }  // namespace cc

@@ -13,8 +13,6 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
@@ -107,7 +105,7 @@ void BroadcastEvent(Profile* profile,
                     const std::string& event_name,
                     std::unique_ptr<base::ListValue> event_args) {
   extensions::EventRouter::Get(profile)->BroadcastEvent(
-      base::MakeUnique<extensions::Event>(histogram_value, event_name,
+      std::make_unique<extensions::Event>(histogram_value, event_name,
                                           std::move(event_args)));
 }
 
@@ -120,7 +118,7 @@ void DispatchEventToExtension(
     const std::string& event_name,
     std::unique_ptr<base::ListValue> event_args) {
   extensions::EventRouter::Get(profile)->DispatchEventToExtension(
-      extension_id, base::MakeUnique<extensions::Event>(
+      extension_id, std::make_unique<extensions::Event>(
                         histogram_value, event_name, std::move(event_args)));
 }
 
@@ -997,6 +995,18 @@ void EventRouter::OnFormatStarted(const std::string& device_path,
 }
 
 void EventRouter::OnFormatCompleted(const std::string& device_path,
+                                    bool success) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  // Do nothing.
+}
+
+void EventRouter::OnRenameStarted(const std::string& device_path,
+                                  bool success) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  // Do nothing.
+}
+
+void EventRouter::OnRenameCompleted(const std::string& device_path,
                                     bool success) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Do nothing.

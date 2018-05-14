@@ -13,9 +13,10 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/extensions/chrome_zipfile_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/load_error_reporter.h"
 #include "chrome/browser/extensions/test_extension_system.h"
-#include "chrome/browser/extensions/zipfile_installer.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -37,23 +38,47 @@ namespace extensions {
 namespace {
 
 struct MockExtensionRegistryObserver : public ExtensionRegistryObserver {
-  void WaitForInstall() {
-    scoped_refptr<content::MessageLoopRunner> runner =
-        new content::MessageLoopRunner;
-    quit_closure_ = runner->QuitClosure();
-    runner->Run();
+  void WaitForInstall(bool expect_error) {
+    extensions::LoadErrorReporter* error_reporter =
+        extensions::LoadErrorReporter::GetInstance();
+    error_reporter->ClearErrors();
+    while (true) {
+      base::RunLoop run_loop;
+      // We do not get a notification if installation fails. Make sure to wake
+      // up and check for errors to get an error better than the test
+      // timing-out.
+      // TODO(jcivelli): make LoadErrorReporter::Observer report installation
+      // failures for packaged extensions so we don't have to poll.
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE, run_loop.QuitClosure(),
+          base::TimeDelta::FromMilliseconds(100));
+      quit_closure = run_loop.QuitClosure();
+      run_loop.Run();
+      const std::vector<base::string16>* errors = error_reporter->GetErrors();
+      if (!errors->empty()) {
+        if (!expect_error) {
+          FAIL() << "Error(s) happened when unzipping extension: "
+                 << (*errors)[0];
+        }
+        break;
+      }
+      if (!last_extension_installed.empty()) {
+        // Extension install succeeded.
+        EXPECT_FALSE(expect_error);
+        break;
+      }
+    }
   }
 
-  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
-                                  const Extension* extension,
-                                  bool is_update,
-                                  const std::string& old_name) override {
+  void OnExtensionInstalled(content::BrowserContext* browser_context,
+                            const Extension* extension,
+                            bool is_update) override {
     last_extension_installed = extension->id();
-    quit_closure_.Run();
+    quit_closure.Run();
   }
 
   std::string last_extension_installed;
-  base::Closure quit_closure_;
+  base::Closure quit_closure;
 };
 
 }  // namespace
@@ -64,6 +89,8 @@ class ZipFileInstallerTest : public testing::Test {
       : browser_threads_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
 
   void SetUp() override {
+    extensions::LoadErrorReporter::Init(/*enable_noisy_errors=*/false);
+
     in_process_utility_thread_helper_.reset(
         new content::InProcessUtilityThreadHelper);
 
@@ -87,7 +114,7 @@ class ZipFileInstallerTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
-  void RunInstaller(const std::string& zip_name) {
+  void RunInstaller(const std::string& zip_name, bool expect_error) {
     base::FilePath original_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &original_path));
     original_path = original_path.AppendASCII("extensions")
@@ -95,12 +122,13 @@ class ZipFileInstallerTest : public testing::Test {
                         .AppendASCII(zip_name);
     ASSERT_TRUE(base::PathExists(original_path)) << original_path.value();
 
-    zipfile_installer_ = ZipFileInstaller::Create(extension_service_);
+    zipfile_installer_ = ZipFileInstaller::Create(
+        MakeRegisterInExtensionServiceCallback(extension_service_));
 
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(&ZipFileInstaller::LoadFromZipFile,
                                   zipfile_installer_, original_path));
-    observer_.WaitForInstall();
+    observer_.WaitForInstall(expect_error);
   }
 
  protected:
@@ -123,11 +151,16 @@ class ZipFileInstallerTest : public testing::Test {
 };
 
 TEST_F(ZipFileInstallerTest, GoodZip) {
-  RunInstaller("good.zip");
+  RunInstaller("good.zip", /*expect_error=*/false);
+}
+
+TEST_F(ZipFileInstallerTest, BadZip) {
+  // Manifestless archive.
+  RunInstaller("bad.zip", /*expect_error=*/true);
 }
 
 TEST_F(ZipFileInstallerTest, ZipWithPublicKey) {
-  RunInstaller("public_key.zip");
+  RunInstaller("public_key.zip", /*expect_error=*/false);
   const char kIdForPublicKey[] = "ikppjpenhoddphklkpdfdfdabbakkpal";
   EXPECT_EQ(observer_.last_extension_installed, kIdForPublicKey);
 }

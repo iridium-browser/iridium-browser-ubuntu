@@ -30,20 +30,23 @@
 #include "core/loader/resource/ImageResourceContent.h"
 #include "core/loader/resource/ImageResourceInfo.h"
 #include "platform/Histogram.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/InstanceCounters.h"
 #include "platform/SharedBuffer.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/MemoryCache.h"
 #include "platform/loader/fetch/ResourceClient.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceLoader.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/loader/fetch/ResourceLoadingLog.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/network/HTTPParsers.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityViolationReportingPolicy.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/StdLibExtras.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/Platform.h"
 #include "v8/include/v8.h"
 
@@ -75,7 +78,7 @@ class ImageResource::ImageResourceInfoImpl final
   ImageResourceInfoImpl(ImageResource* resource) : resource_(resource) {
     DCHECK(resource_);
   }
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(resource_);
     ImageResourceInfo::Trace(visitor);
   }
@@ -84,12 +87,6 @@ class ImageResource::ImageResourceInfoImpl final
   const KURL& Url() const override { return resource_->Url(); }
   bool IsSchedulingReload() const override {
     return resource_->is_scheduling_reload_;
-  }
-  bool HasDevicePixelRatioHeaderValue() const override {
-    return resource_->has_device_pixel_ratio_header_value_;
-  }
-  float DevicePixelRatioHeaderValue() const override {
-    return resource_->device_pixel_ratio_header_value_;
   }
   const ResourceResponse& GetResponse() const override {
     return resource_->GetResponse();
@@ -105,7 +102,7 @@ class ImageResource::ImageResourceInfoImpl final
            resource_->ShouldReloadBrokenPlaceholder();
   }
   bool IsAccessAllowed(
-      SecurityOrigin* security_origin,
+      const SecurityOrigin* security_origin,
       DoesCurrentFrameHaveSingleSecurityOrigin
           does_current_frame_has_single_security_origin) const override {
     return resource_->IsAccessAllowed(
@@ -114,8 +111,10 @@ class ImageResource::ImageResourceInfoImpl final
   bool HasCacheControlNoStoreHeader() const override {
     return resource_->HasCacheControlNoStoreHeader();
   }
-  const ResourceError& GetResourceError() const override {
-    return resource_->GetResourceError();
+  Optional<ResourceError> GetResourceError() const override {
+    if (resource_->LoadFailedOrCanceled())
+      return resource_->GetResourceError();
+    return WTF::nullopt;
   }
 
   void SetDecodedSize(size_t size) override { resource_->SetDecodedSize(size); }
@@ -164,28 +163,20 @@ ImageResource* ImageResource::Fetch(FetchParameters& params,
       WebURLRequest::kRequestContextUnspecified) {
     params.SetRequestContext(WebURLRequest::kRequestContextImage);
   }
-  if (fetcher->Context().PageDismissalEventBeingDispatched()) {
-    KURL request_url = params.GetResourceRequest().Url();
-    if (request_url.IsValid()) {
-      ResourceRequestBlockedReason block_reason = fetcher->Context().CanRequest(
-          Resource::kImage, params.GetResourceRequest(), request_url,
-          params.Options(),
-          /* Don't send security violation reports for speculative preloads */
-          params.IsSpeculativePreload()
-              ? SecurityViolationReportingPolicy::kSuppressReporting
-              : SecurityViolationReportingPolicy::kReport,
-          params.GetOriginRestriction());
-      if (block_reason == ResourceRequestBlockedReason::kNone)
-        fetcher->Context().SendImagePing(request_url);
-    }
-    return nullptr;
-  }
 
-  return ToImageResource(
-      fetcher->RequestResource(params, ImageResourceFactory(params)));
+  ImageResource* resource = ToImageResource(
+      fetcher->RequestResource(params, ImageResourceFactory(params), nullptr));
+
+  // If the fetch originated from user agent CSS we should mark it as a user
+  // agent resource.
+  if (params.Options().initiator_info.name == FetchInitiatorTypeNames::uacss)
+    resource->FlagAsUserAgentResource();
+  return resource;
 }
 
-bool ImageResource::CanReuse(const FetchParameters& params) const {
+bool ImageResource::CanReuse(
+    const FetchParameters& params,
+    scoped_refptr<const SecurityOrigin> new_source_origin) const {
   // If the image is a placeholder, but this fetch doesn't allow a
   // placeholder, then do not reuse this resource.
   if (params.GetPlaceholderImageRequestType() !=
@@ -193,7 +184,7 @@ bool ImageResource::CanReuse(const FetchParameters& params) const {
       placeholder_option_ != PlaceholderOption::kDoNotReloadPlaceholder)
     return false;
 
-  return Resource::CanReuse(params);
+  return Resource::CanReuse(params, std::move(new_source_origin));
 }
 
 bool ImageResource::CanUseCacheValidator() const {
@@ -223,13 +214,10 @@ ImageResource::ImageResource(const ResourceRequest& resource_request,
                              bool is_placeholder)
     : Resource(resource_request, kImage, options),
       content_(content),
-      device_pixel_ratio_header_value_(1.0),
-      has_device_pixel_ratio_header_value_(false),
       is_scheduling_reload_(false),
       placeholder_option_(
           is_placeholder ? PlaceholderOption::kShowAndReloadPlaceholderAlways
-                         : PlaceholderOption::kDoNotReloadPlaceholder),
-      flush_timer_(this, &ImageResource::FlushImageIfNeeded) {
+                         : PlaceholderOption::kDoNotReloadPlaceholder) {
   DCHECK(GetContent());
   RESOURCE_LOADING_DVLOG(1) << "new ImageResource(ResourceRequest) " << this;
   GetContent()->SetImageResourceInfo(new ImageResourceInfoImpl(this));
@@ -237,22 +225,35 @@ ImageResource::ImageResource(const ResourceRequest& resource_request,
 
 ImageResource::~ImageResource() {
   RESOURCE_LOADING_DVLOG(1) << "~ImageResource " << this;
+
+  if (is_referenced_from_ua_stylesheet_)
+    InstanceCounters::DecrementCounter(InstanceCounters::kUACSSResourceCounter);
 }
 
-DEFINE_TRACE(ImageResource) {
+void ImageResource::OnMemoryDump(WebMemoryDumpLevelOfDetail level_of_detail,
+                                 WebProcessMemoryDump* memory_dump) const {
+  Resource::OnMemoryDump(level_of_detail, memory_dump);
+  const String name = GetMemoryDumpName() + "/image_content";
+  auto* dump = memory_dump->CreateMemoryAllocatorDump(name);
+  size_t encoded_size =
+      content_->HasImage() ? content_->GetImage()->Data()->size() : 0;
+  dump->AddScalar("size", "bytes", encoded_size);
+}
+
+void ImageResource::Trace(blink::Visitor* visitor) {
   visitor->Trace(multipart_parser_);
   visitor->Trace(content_);
   Resource::Trace(visitor);
   MultipartImageResourceParser::Client::Trace(visitor);
 }
 
-void ImageResource::CheckNotify() {
+void ImageResource::NotifyFinished() {
   // Don't notify clients of completion if this ImageResource is
   // about to be reloaded.
   if (is_scheduling_reload_ || ShouldReloadBrokenPlaceholder())
     return;
 
-  Resource::CheckNotify();
+  Resource::NotifyFinished();
 }
 
 bool ImageResource::HasClientsOrObservers() const {
@@ -300,9 +301,9 @@ void ImageResource::AllClientsAndObserversRemoved() {
   // after a conservative GC prevents resetAnimation() from upsetting ongoing
   // animation updates (crbug.com/613709)
   if (!ThreadHeap::WillObjectBeLazilySwept(this)) {
-    Platform::Current()->CurrentThread()->GetWebTaskRunner()->PostTask(
-        BLINK_FROM_HERE, WTF::Bind(&ImageResourceContent::DoResetAnimation,
-                                   WrapWeakPersistent(GetContent())));
+    Platform::Current()->CurrentThread()->GetTaskRunner()->PostTask(
+        FROM_HERE, WTF::Bind(&ImageResourceContent::DoResetAnimation,
+                             WrapWeakPersistent(GetContent())));
   } else {
     GetContent()->DoResetAnimation();
   }
@@ -311,7 +312,7 @@ void ImageResource::AllClientsAndObserversRemoved() {
   Resource::AllClientsAndObserversRemoved();
 }
 
-RefPtr<const SharedBuffer> ImageResource::ResourceBuffer() const {
+scoped_refptr<const SharedBuffer> ImageResource::ResourceBuffer() const {
   if (Data())
     return Data();
   return GetContent()->ResourceBuffer();
@@ -326,7 +327,7 @@ void ImageResource::AppendData(const char* data, size_t length) {
 
     // Update the image immediately if needed.
     if (GetContent()->ShouldUpdateImageImmediately()) {
-      UpdateImage(this->Data(), ImageResourceContent::kUpdateImage, false);
+      UpdateImage(Data(), ImageResourceContent::kUpdateImage, false);
       return;
     }
 
@@ -335,8 +336,10 @@ void ImageResource::AppendData(const char* data, size_t length) {
     // inform the clients which causes an invalidation of this image. In other
     // words, we only invalidate this image every |kFlushDelaySeconds| seconds
     // while loading.
-    if (!flush_timer_.IsActive()) {
-      double now = WTF::MonotonicallyIncreasingTime();
+    if (Loader() && !is_pending_flushing_) {
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+          Loader()->GetLoadingTaskRunner();
+      double now = WTF::CurrentTimeTicksInSeconds();
       if (!last_flush_time_)
         last_flush_time_ = now;
 
@@ -344,18 +347,23 @@ void ImageResource::AppendData(const char* data, size_t length) {
       double flush_delay = last_flush_time_ - now + kFlushDelaySeconds;
       if (flush_delay < 0.)
         flush_delay = 0.;
-      flush_timer_.StartOneShot(flush_delay, BLINK_FROM_HERE);
+      task_runner->PostDelayedTask(FROM_HERE,
+                                   WTF::Bind(&ImageResource::FlushImageIfNeeded,
+                                             WrapWeakPersistent(this)),
+                                   TimeDelta::FromSecondsD(flush_delay));
+      is_pending_flushing_ = true;
     }
   }
 }
 
-void ImageResource::FlushImageIfNeeded(TimerBase*) {
+void ImageResource::FlushImageIfNeeded() {
   // We might have already loaded the image fully, in which case we don't need
   // to call |updateImage()|.
   if (IsLoading()) {
-    last_flush_time_ = WTF::MonotonicallyIncreasingTime();
-    UpdateImage(this->Data(), ImageResourceContent::kUpdateImage, false);
+    last_flush_time_ = WTF::CurrentTimeTicksInSeconds();
+    UpdateImage(Data(), ImageResourceContent::kUpdateImage, false);
   }
+  is_pending_flushing_ = false;
 }
 
 void ImageResource::DecodeError(bool all_data_received) {
@@ -366,12 +374,16 @@ void ImageResource::DecodeError(bool all_data_received) {
   if (!ErrorOccurred())
     SetStatus(ResourceStatus::kDecodeError);
 
+  if (multipart_parser_)
+    multipart_parser_->Cancel();
+
   bool is_multipart = !!multipart_parser_;
   // Finishes loading if needed, and notifies observers.
   if (!all_data_received && Loader()) {
     // Observers are notified via ImageResource::finish().
     // TODO(hiroshige): Do not call didFinishLoading() directly.
-    Loader()->DidFinishLoading(MonotonicallyIncreasingTime(), size, size, size);
+    Loader()->DidFinishLoading(CurrentTimeTicksInSeconds(), size, size, size,
+                               false);
   } else {
     auto result = GetContent()->UpdateImage(
         nullptr, GetStatus(),
@@ -393,9 +405,11 @@ void ImageResource::NotifyStartLoad() {
   GetContent()->NotifyStartLoad();
 }
 
-void ImageResource::Finish(double load_finish_time) {
+void ImageResource::Finish(double load_finish_time,
+                           base::SingleThreadTaskRunner* task_runner) {
   if (multipart_parser_) {
-    multipart_parser_->Finish();
+    if (!ErrorOccurred())
+      multipart_parser_->Finish();
     if (Data())
       UpdateImageAndClearBuffer();
   } else {
@@ -407,17 +421,18 @@ void ImageResource::Finish(double load_finish_time) {
     // https://docs.google.com/document/d/1v0yTAZ6wkqX2U_M6BNIGUJpM1s0TIw1VsqpxoL7aciY/edit?usp=sharing
     ClearData();
   }
-  Resource::Finish(load_finish_time);
+  Resource::Finish(load_finish_time, task_runner);
 }
 
-void ImageResource::FinishAsError(const ResourceError& error) {
+void ImageResource::FinishAsError(const ResourceError& error,
+                                  base::SingleThreadTaskRunner* task_runner) {
   if (multipart_parser_)
     multipart_parser_->Cancel();
   // TODO(hiroshige): Move setEncodedSize() call to Resource::error() if it
   // is really needed, or remove it otherwise.
   SetEncodedSize(0);
   is_during_finish_as_error_ = true;
-  Resource::FinishAsError(error);
+  Resource::FinishAsError(error, task_runner);
   is_during_finish_as_error_ = false;
   UpdateImage(nullptr, ImageResourceContent::kClearImageAndNotifyObservers,
               true);
@@ -456,18 +471,6 @@ void ImageResource::ResponseReceived(
   // (e.g. a 304) with a partial set of updated headers that were folded into
   // the cached response.
   Resource::ResponseReceived(response, std::move(handle));
-
-  if (RuntimeEnabledFeatures::ClientHintsEnabled()) {
-    device_pixel_ratio_header_value_ =
-        GetResponse()
-            .HttpHeaderField(HTTPNames::Content_DPR)
-            .ToFloat(&has_device_pixel_ratio_header_value_);
-    if (!has_device_pixel_ratio_header_value_ ||
-        device_pixel_ratio_header_value_ <= 0.0) {
-      device_pixel_ratio_header_value_ = 1.0;
-      has_device_pixel_ratio_header_value_ = false;
-    }
-  }
 
   if (placeholder_option_ ==
           PlaceholderOption::kShowAndReloadPlaceholderAlways &&
@@ -625,6 +628,13 @@ void ImageResource::OnePartInMultipartReceived(
     const ResourceResponse& response) {
   DCHECK(multipart_parser_);
 
+  if (!GetResponse().IsNull()) {
+    CHECK_EQ(GetResponse().WasFetchedViaServiceWorker(),
+             response.WasFetchedViaServiceWorker());
+    CHECK_EQ(GetResponse().ResponseTypeViaServiceWorker(),
+             response.ResponseTypeViaServiceWorker());
+  }
+
   SetResponse(response);
   if (multipart_parsing_state_ == MultipartParsingState::kWaitingForFirstPart) {
     // We have nothing to do because we don't have any data.
@@ -641,7 +651,7 @@ void ImageResource::OnePartInMultipartReceived(
     // We notify clients and observers of finish in checkNotify() and
     // updateImageAndClearBuffer(), respectively, and they will not be
     // notified again in Resource::finish()/error().
-    CheckNotify();
+    NotifyFinished();
     if (Loader())
       Loader()->DidFinishLoadingFirstPartInMultipart();
   }
@@ -653,17 +663,18 @@ void ImageResource::MultipartDataReceived(const char* bytes, size_t size) {
 }
 
 bool ImageResource::IsAccessAllowed(
-    SecurityOrigin* security_origin,
+    const SecurityOrigin* security_origin,
     ImageResourceInfo::DoesCurrentFrameHaveSingleSecurityOrigin
         does_current_frame_has_single_security_origin) const {
-  if (GetCORSStatus() == CORSStatus::kServiceWorkerOpaque)
-    return false;
+  if (GetResponse().WasFetchedViaServiceWorker())
+    return GetCORSStatus() != CORSStatus::kServiceWorkerOpaque;
 
   if (does_current_frame_has_single_security_origin !=
       ImageResourceInfo::kHasSingleSecurityOrigin)
     return false;
 
-  if (IsSameOriginOrCORSSuccessful())
+  DCHECK(security_origin);
+  if (PassesAccessControlCheck(*security_origin))
     return true;
 
   return !security_origin->TaintsCanvas(GetResponse().Url());
@@ -682,7 +693,7 @@ ResourcePriority ImageResource::PriorityFromObservers() {
 }
 
 void ImageResource::UpdateImage(
-    PassRefPtr<SharedBuffer> shared_buffer,
+    scoped_refptr<SharedBuffer> shared_buffer,
     ImageResourceContent::UpdateImageOption update_image_option,
     bool all_data_received) {
   bool is_multipart = !!multipart_parser_;
@@ -706,6 +717,14 @@ void ImageResource::UpdateImage(
     //    (b) after returning ImageResource::updateImage().
     DecodeError(all_data_received);
   }
+}
+
+void ImageResource::FlagAsUserAgentResource() {
+  if (is_referenced_from_ua_stylesheet_)
+    return;
+
+  InstanceCounters::IncrementCounter(InstanceCounters::kUACSSResourceCounter);
+  is_referenced_from_ua_stylesheet_ = true;
 }
 
 }  // namespace blink

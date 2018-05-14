@@ -32,8 +32,10 @@
 #include "platform/scheduler/child/web_scheduler.h"
 #include "platform/scroll/ScrollAnimatorBase.h"
 #include "platform/scroll/ScrollableArea.h"
+#include "platform/scroll/ScrollbarTheme.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
+#include "public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -51,16 +53,18 @@ static double GetMockedTime() {
 
 namespace {
 
-class MockScrollableArea : public GarbageCollectedFinalized<MockScrollableArea>,
-                           public ScrollableArea {
-  USING_GARBAGE_COLLECTED_MIXIN(MockScrollableArea);
+class MockScrollableAreaForAnimatorTest
+    : public GarbageCollectedFinalized<MockScrollableAreaForAnimatorTest>,
+      public ScrollableArea {
+  USING_GARBAGE_COLLECTED_MIXIN(MockScrollableAreaForAnimatorTest);
 
  public:
-  static MockScrollableArea* Create(bool scroll_animator_enabled,
-                                    const ScrollOffset& min_offset,
-                                    const ScrollOffset& max_offset) {
-    return new MockScrollableArea(scroll_animator_enabled, min_offset,
-                                  max_offset);
+  static MockScrollableAreaForAnimatorTest* Create(
+      bool scroll_animator_enabled,
+      const ScrollOffset& min_offset,
+      const ScrollOffset& max_offset) {
+    return new MockScrollableAreaForAnimatorTest(scroll_animator_enabled,
+                                                 min_offset, max_offset);
   }
 
   MOCK_CONST_METHOD0(VisualRectForScrollbarParts, LayoutRect());
@@ -83,6 +87,9 @@ class MockScrollableArea : public GarbageCollectedFinalized<MockScrollableArea>,
   IntSize ScrollOffsetInt() const override { return IntSize(); }
   int VisibleHeight() const override { return 768; }
   int VisibleWidth() const override { return 1024; }
+  CompositorElementId GetCompositorElementId() const override {
+    return CompositorElementId();
+  }
   bool ScrollAnimatorEnabled() const override {
     return scroll_animator_enabled_;
   }
@@ -112,19 +119,27 @@ class MockScrollableArea : public GarbageCollectedFinalized<MockScrollableArea>,
     ScrollableArea::SetScrollOffset(offset, type, behavior);
   }
 
-  RefPtr<WebTaskRunner> GetTimerTaskRunner() const final {
-    return Platform::Current()->CurrentThread()->Scheduler()->TimerTaskRunner();
+  scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() const final {
+    if (!timer_task_runner_) {
+      timer_task_runner_ =
+          blink::scheduler::GetSingleThreadTaskRunnerForTesting();
+    }
+    return timer_task_runner_;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  ScrollbarTheme& GetPageScrollbarTheme() const override {
+    return ScrollbarTheme::DeprecatedStaticGetTheme();
+  }
+
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(animator);
     ScrollableArea::Trace(visitor);
   }
 
  private:
-  explicit MockScrollableArea(bool scroll_animator_enabled,
-                              const ScrollOffset& min_offset,
-                              const ScrollOffset& max_offset)
+  explicit MockScrollableAreaForAnimatorTest(bool scroll_animator_enabled,
+                                             const ScrollOffset& min_offset,
+                                             const ScrollOffset& max_offset)
       : scroll_animator_enabled_(scroll_animator_enabled),
         min_offset_(min_offset),
         max_offset_(max_offset) {}
@@ -133,6 +148,7 @@ class MockScrollableArea : public GarbageCollectedFinalized<MockScrollableArea>,
   ScrollOffset min_offset_;
   ScrollOffset max_offset_;
   Member<ScrollAnimator> animator;
+  mutable scoped_refptr<base::SingleThreadTaskRunner> timer_task_runner_;
 };
 
 class TestScrollAnimator : public ScrollAnimator {
@@ -140,7 +156,7 @@ class TestScrollAnimator : public ScrollAnimator {
   TestScrollAnimator(ScrollableArea* scrollable_area,
                      WTF::TimeFunction timing_function)
       : ScrollAnimator(scrollable_area, timing_function) {}
-  ~TestScrollAnimator() override {}
+  ~TestScrollAnimator() override = default;
 
   void SetShouldSendToCompositor(bool send) {
     should_send_to_compositor_ = send;
@@ -172,8 +188,9 @@ static void Reset(ScrollAnimator& scroll_animator) {
 // TODO(skobes): Add unit tests for composited scrolling paths.
 
 TEST(ScrollAnimatorTest, MainThreadStates) {
-  MockScrollableArea* scrollable_area = MockScrollableArea::Create(
-      true, ScrollOffset(), ScrollOffset(1000, 1000));
+  MockScrollableAreaForAnimatorTest* scrollable_area =
+      MockScrollableAreaForAnimatorTest::Create(true, ScrollOffset(),
+                                                ScrollOffset(1000, 1000));
   ScrollAnimator* scroll_animator =
       new ScrollAnimator(scrollable_area, GetMockedTime);
 
@@ -225,8 +242,9 @@ TEST(ScrollAnimatorTest, MainThreadStates) {
 }
 
 TEST(ScrollAnimatorTest, MainThreadEnabled) {
-  MockScrollableArea* scrollable_area = MockScrollableArea::Create(
-      true, ScrollOffset(), ScrollOffset(1000, 1000));
+  MockScrollableAreaForAnimatorTest* scrollable_area =
+      MockScrollableAreaForAnimatorTest::Create(true, ScrollOffset(),
+                                                ScrollOffset(1000, 1000));
   ScrollAnimator* scroll_animator =
       new ScrollAnimator(scrollable_area, GetMockedTime);
 
@@ -304,8 +322,9 @@ TEST(ScrollAnimatorTest, MainThreadEnabled) {
 // Test that a smooth scroll offset animation is aborted when followed by a
 // non-smooth scroll offset animation.
 TEST(ScrollAnimatorTest, AnimatedScrollAborted) {
-  MockScrollableArea* scrollable_area = MockScrollableArea::Create(
-      true, ScrollOffset(), ScrollOffset(1000, 1000));
+  MockScrollableAreaForAnimatorTest* scrollable_area =
+      MockScrollableAreaForAnimatorTest::Create(true, ScrollOffset(),
+                                                ScrollOffset(1000, 1000));
   ScrollAnimator* scroll_animator =
       new ScrollAnimator(scrollable_area, GetMockedTime);
 
@@ -351,8 +370,9 @@ TEST(ScrollAnimatorTest, AnimatedScrollAborted) {
 // Test that a smooth scroll offset animation running on the compositor is
 // completed on the main thread.
 TEST(ScrollAnimatorTest, AnimatedScrollTakeover) {
-  MockScrollableArea* scrollable_area = MockScrollableArea::Create(
-      true, ScrollOffset(), ScrollOffset(1000, 1000));
+  MockScrollableAreaForAnimatorTest* scrollable_area =
+      MockScrollableAreaForAnimatorTest::Create(true, ScrollOffset(),
+                                                ScrollOffset(1000, 1000));
   TestScrollAnimator* scroll_animator =
       new TestScrollAnimator(scrollable_area, GetMockedTime);
 
@@ -402,8 +422,9 @@ TEST(ScrollAnimatorTest, AnimatedScrollTakeover) {
 }
 
 TEST(ScrollAnimatorTest, Disabled) {
-  MockScrollableArea* scrollable_area = MockScrollableArea::Create(
-      false, ScrollOffset(), ScrollOffset(1000, 1000));
+  MockScrollableAreaForAnimatorTest* scrollable_area =
+      MockScrollableAreaForAnimatorTest::Create(false, ScrollOffset(),
+                                                ScrollOffset(1000, 1000));
   ScrollAnimator* scroll_animator =
       new ScrollAnimator(scrollable_area, GetMockedTime);
 
@@ -434,8 +455,9 @@ TEST(ScrollAnimatorTest, Disabled) {
 // Test that cancelling an animation resets the animation state.
 // See crbug.com/598548.
 TEST(ScrollAnimatorTest, CancellingAnimationResetsState) {
-  MockScrollableArea* scrollable_area = MockScrollableArea::Create(
-      true, ScrollOffset(), ScrollOffset(1000, 1000));
+  MockScrollableAreaForAnimatorTest* scrollable_area =
+      MockScrollableAreaForAnimatorTest::Create(true, ScrollOffset(),
+                                                ScrollOffset(1000, 1000));
   ScrollAnimator* scroll_animator =
       new ScrollAnimator(scrollable_area, GetMockedTime);
 
@@ -499,8 +521,9 @@ TEST(ScrollAnimatorTest, CancellingAnimationResetsState) {
 // Test the behavior when in WaitingToCancelOnCompositor and a new user scroll
 // happens.
 TEST(ScrollAnimatorTest, CancellingCompositorAnimation) {
-  MockScrollableArea* scrollable_area = MockScrollableArea::Create(
-      true, ScrollOffset(), ScrollOffset(1000, 1000));
+  MockScrollableAreaForAnimatorTest* scrollable_area =
+      MockScrollableAreaForAnimatorTest::Create(true, ScrollOffset(),
+                                                ScrollOffset(1000, 1000));
   TestScrollAnimator* scroll_animator =
       new TestScrollAnimator(scrollable_area, GetMockedTime);
 
@@ -578,8 +601,9 @@ TEST(ScrollAnimatorTest, CancellingCompositorAnimation) {
 // This test verifies that impl only animation updates get cleared once they
 // are pushed to compositor animation host.
 TEST(ScrollAnimatorTest, ImplOnlyAnimationUpdatesCleared) {
-  MockScrollableArea* scrollable_area = MockScrollableArea::Create(
-      true, ScrollOffset(), ScrollOffset(1000, 1000));
+  MockScrollableAreaForAnimatorTest* scrollable_area =
+      MockScrollableAreaForAnimatorTest::Create(true, ScrollOffset(),
+                                                ScrollOffset(1000, 1000));
   TestScrollAnimator* animator =
       new TestScrollAnimator(scrollable_area, GetMockedTime);
 
@@ -615,8 +639,9 @@ TEST(ScrollAnimatorTest, ImplOnlyAnimationUpdatesCleared) {
 }
 
 TEST(ScrollAnimatorTest, MainThreadAnimationTargetAdjustment) {
-  MockScrollableArea* scrollable_area = MockScrollableArea::Create(
-      true, ScrollOffset(-100, -100), ScrollOffset(1000, 1000));
+  MockScrollableAreaForAnimatorTest* scrollable_area =
+      MockScrollableAreaForAnimatorTest::Create(true, ScrollOffset(-100, -100),
+                                                ScrollOffset(1000, 1000));
   ScrollAnimator* animator = new ScrollAnimator(scrollable_area, GetMockedTime);
   scrollable_area->SetScrollAnimator(animator);
 

@@ -12,18 +12,20 @@
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "content/common/frame_messages.h"
+#include "content/common/frame_owner_properties.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
-#include "third_party/WebKit/public/web/WebSandboxFlags.h"
+#include "third_party/WebKit/public/common/frame/frame_policy.h"
 
 namespace content {
 
@@ -46,7 +48,7 @@ TEST_F(RenderProcessHostUnitTest, GuestsAreNotSuitableHosts) {
       RenderProcessHost::GetExistingProcessHost(browser_context(), test_url));
 }
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
 TEST_F(RenderProcessHostUnitTest, RendererProcessLimit) {
   // This test shouldn't run with --site-per-process mode, which prohibits
   // the renderer process reuse this test explicitly exercises.
@@ -65,7 +67,7 @@ TEST_F(RenderProcessHostUnitTest, RendererProcessLimit) {
   ASSERT_NE(0u, kMaxRendererProcessCount);
   std::vector<std::unique_ptr<MockRenderProcessHost>> hosts;
   for (size_t i = 0; i < kMaxRendererProcessCount; ++i) {
-    hosts.push_back(base::MakeUnique<MockRenderProcessHost>(browser_context()));
+    hosts.push_back(std::make_unique<MockRenderProcessHost>(browser_context()));
   }
 
   // Verify that the renderer sharing will happen.
@@ -75,8 +77,8 @@ TEST_F(RenderProcessHostUnitTest, RendererProcessLimit) {
 }
 #endif
 
-#if defined(OS_ANDROID)
-TEST_F(RenderProcessHostUnitTest, NoRendererProcessLimitOnAndroid) {
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+TEST_F(RenderProcessHostUnitTest, NoRendererProcessLimitOnAndroidOrChromeOS) {
   // Disable any overrides.
   RenderProcessHostImpl::SetMaxRendererProcessCount(0);
 
@@ -84,7 +86,7 @@ TEST_F(RenderProcessHostUnitTest, NoRendererProcessLimitOnAndroid) {
   ASSERT_NE(0u, kMaxRendererProcessCount);
   std::vector<std::unique_ptr<MockRenderProcessHost>> hosts;
   for (size_t i = 0; i < kMaxRendererProcessCount; ++i) {
-    hosts.push_back(base::MakeUnique<MockRenderProcessHost>(browser_context()));
+    hosts.push_back(std::make_unique<MockRenderProcessHost>(browser_context()));
   }
 
   // Verify that the renderer sharing still won't happen.
@@ -123,32 +125,20 @@ TEST_F(RenderProcessHostUnitTest, ReuseCommittedSite) {
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
   EXPECT_NE(main_test_rfh()->GetProcess(), site_instance->GetProcess());
-
   // Now add a subframe that navigates to kUrl1. Getting a RenderProcessHost
   // with the REUSE_PENDING_OR_COMMITTED_SITE policy for kUrl1 should now
   // return the process of the subframe RFH.
   std::string unique_name("uniqueName0");
   main_test_rfh()->OnCreateChildFrame(
-      process()->GetNextRoutingID(), blink::WebTreeScopeType::kDocument,
-      std::string(), unique_name, blink::WebSandboxFlags::kNone,
-      ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+      process()->GetNextRoutingID(),
+      TestRenderFrameHost::CreateStubInterfaceProviderRequest(),
+      blink::WebTreeScopeType::kDocument, std::string(), unique_name, false,
+      base::UnguessableToken::Create(), blink::FramePolicy(),
+      FrameOwnerProperties());
   TestRenderFrameHost* subframe = static_cast<TestRenderFrameHost*>(
       contents()->GetFrameTree()->root()->child_at(0)->current_frame_host());
-  {
-    FrameHostMsg_DidCommitProvisionalLoad_Params params;
-    params.nav_entry_id = 0;
-    params.frame_unique_name = unique_name;
-    params.did_create_new_entry = false;
-    params.url = kUrl1;
-    params.transition = ui::PAGE_TRANSITION_AUTO_SUBFRAME;
-    params.should_update_history = false;
-    params.gesture = NavigationGestureUser;
-    params.method = "GET";
-    params.page_state = PageState::CreateFromURL(kUrl1);
-    subframe->SendRendererInitiatedNavigationRequest(kUrl1, false);
-    subframe->PrepareForCommit();
-    subframe->SendNavigateWithParams(&params);
-  }
+  subframe = static_cast<TestRenderFrameHost*>(
+      NavigationSimulator::NavigateAndCommitFromDocument(kUrl1, subframe));
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl1);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
@@ -223,6 +213,50 @@ TEST_F(RenderProcessHostUnitTest, ReuseUnmatchedServiceWorkerProcess) {
       SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   EXPECT_NE(sw_host1, site_instance3->GetProcess());
   EXPECT_NE(sw_host2, site_instance3->GetProcess());
+}
+
+class UnsuitableHostContentBrowserClient : public ContentBrowserClient {
+ public:
+  UnsuitableHostContentBrowserClient() {}
+  ~UnsuitableHostContentBrowserClient() override {}
+
+ private:
+  bool IsSuitableHost(RenderProcessHost* process_host,
+                      const GURL& site_url) override {
+    return false;
+  }
+};
+
+// Check that an unmatched ServiceWorker process is not reused when it's not a
+// suitable host for the destination URL.  See https://crbug.com/782349.
+TEST_F(RenderProcessHostUnitTest,
+       DontReuseUnsuitableUnmatchedServiceWorkerProcess) {
+  const GURL kUrl("https://foo.com");
+
+  // Gets a RenderProcessHost for an unmatched service worker.
+  scoped_refptr<SiteInstanceImpl> sw_site_instance =
+      SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
+  sw_site_instance->set_is_for_service_worker();
+  RenderProcessHost* sw_host = sw_site_instance->GetProcess();
+
+  // Simulate a situation where |sw_host| won't be considered suitable for
+  // future navigations to |kUrl|.  In https://crbug.com/782349, this happened
+  // when |kUrl| corresponded to a nonexistent extension, but
+  // chrome-extension:// URLs can't be tested inside content/.  Instead,
+  // install a ContentBrowserClient which will return false when IsSuitableHost
+  // is consulted.
+  UnsuitableHostContentBrowserClient modified_client;
+  ContentBrowserClient* regular_client =
+      SetBrowserClientForTesting(&modified_client);
+
+  // Now, getting a RenderProcessHost for a navigation to the same site should
+  // not reuse the unmatched service worker's process (i.e., |sw_host|), as
+  // it's unsuitable.
+  scoped_refptr<SiteInstanceImpl> site_instance =
+      SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
+  EXPECT_NE(sw_host, site_instance->GetProcess());
+
+  SetBrowserClientForTesting(regular_client);
 }
 
 TEST_F(RenderProcessHostUnitTest, ReuseServiceWorkerProcessForServiceWorker) {
@@ -371,13 +405,21 @@ TEST_F(RenderProcessHostUnitTest, DoNotReuseError) {
 
   // Navigate back and simulate an error. Getting a RenderProcessHost with the
   // REUSE_PENDING_OR_COMMITTED_SITE policy should return a new process.
-  web_contents()->GetController().GoBack();
-  TestRenderFrameHost* pending_rfh = contents()->GetPendingMainFrame();
-  if (!IsBrowserSideNavigationEnabled())
-    pending_rfh->SimulateNavigationStart(kUrl1);
-  pending_rfh->SimulateNavigationError(kUrl1, net::ERR_TIMED_OUT);
-  pending_rfh->SimulateNavigationErrorPageCommit();
+  NavigationSimulator::GoBackAndFail(contents(), net::ERR_TIMED_OUT);
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl1);
+  site_instance->set_process_reuse_policy(
+      SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
+  EXPECT_NE(main_test_rfh()->GetProcess(), site_instance->GetProcess());
+}
+
+// Tests that RenderProcessHost will not consider reusing a process that is
+// marked as never suitable for reuse, according to MayReuseHost().
+TEST_F(RenderProcessHostUnitTest, DoNotReuseHostThatIsNeverSuitableForReuse) {
+  const GURL kUrl("http://foo.com");
+  NavigateAndCommit(kUrl);
+  main_test_rfh()->GetProcess()->SetIsNeverSuitableForReuse();
+  scoped_refptr<SiteInstanceImpl> site_instance =
+      SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
   EXPECT_NE(main_test_rfh()->GetProcess(), site_instance->GetProcess());
@@ -385,10 +427,6 @@ TEST_F(RenderProcessHostUnitTest, DoNotReuseError) {
 
 // Tests that RenderProcessHost reuse considers navigations correctly.
 TEST_F(RenderProcessHostUnitTest, ReuseNavigationProcess) {
-  // This is only applicable to PlzNavigate.
-  if (!IsBrowserSideNavigationEnabled())
-    return;
-
   const GURL kUrl1("http://foo.com");
   const GURL kUrl2("http://bar.com");
 
@@ -402,7 +440,9 @@ TEST_F(RenderProcessHostUnitTest, ReuseNavigationProcess) {
 
   // Start a navigation. Now Getting RenderProcessHost with the
   // REUSE_PENDING_OR_COMMITTED_SITE policy should return the current process.
-  main_test_rfh()->SimulateNavigationStart(kUrl1);
+  auto navigation =
+      NavigationSimulator::CreateRendererInitiated(kUrl1, main_test_rfh());
+  navigation->Start();
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl1);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
@@ -411,8 +451,7 @@ TEST_F(RenderProcessHostUnitTest, ReuseNavigationProcess) {
   // Finish the navigation and start a new cross-site one. Getting
   // RenderProcessHost with the REUSE_PENDING_OR_COMMITTED_SITE policy should
   // return the process of the speculative RenderFrameHost.
-  main_test_rfh()->PrepareForCommit();
-  main_test_rfh()->SendNavigate(0, true, kUrl1);
+  navigation->Commit();
   contents()->GetController().LoadURL(kUrl2, Referrer(),
                                       ui::PAGE_TRANSITION_TYPED, std::string());
   main_test_rfh()->SendBeforeUnloadACK(true);
@@ -436,13 +475,11 @@ TEST_F(RenderProcessHostUnitTest, ReuseNavigationProcess) {
 }
 
 // Tests that RenderProcessHost reuse considers navigations correctly during
-// redirects in a renderer-initiated navigation.
+// redirects in a renderer-initiated navigation.    Also ensures that with
+// --site-per-process, there's no mismatch in origin locks for
+// https://crbug.com/773809.
 TEST_F(RenderProcessHostUnitTest,
        ReuseNavigationProcessRedirectsRendererInitiated) {
-  // This is only applicable to PlzNavigate.
-  if (!IsBrowserSideNavigationEnabled())
-    return;
-
   const GURL kUrl("http://foo.com");
   const GURL kRedirectUrl1("http://foo.com/redirect");
   const GURL kRedirectUrl2("http://bar.com");
@@ -457,28 +494,31 @@ TEST_F(RenderProcessHostUnitTest,
 
   // Start a navigation. Now getting RenderProcessHost with the
   // REUSE_PENDING_OR_COMMITTED_SITE policy should return the current process.
-  main_test_rfh()->SimulateNavigationStart(kUrl);
+  auto simulator =
+      NavigationSimulator::CreateRendererInitiated(kUrl, main_test_rfh());
+  simulator->Start();
+
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
+  // Note that with --site-per-process, the GetProcess() call on
+  // |site_instance| will also lock the current process to http://foo.com.
   EXPECT_EQ(main_test_rfh()->GetProcess(), site_instance->GetProcess());
 
   // Simulate a same-site redirect. Getting RenderProcessHost with the
   // REUSE_PENDING_OR_COMMITTED_SITE policy should return the current process.
-  main_test_rfh()->SimulateRedirect(kRedirectUrl1);
+  simulator->Redirect(kRedirectUrl1);
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
   EXPECT_EQ(main_test_rfh()->GetProcess(), site_instance->GetProcess());
 
-  // Simulate a cross-site redirect. Getting a RenderProcessHost with the
-  // REUSE_PENDING_OR_COMMITTED_SITE policy should return the current
-  // process for the new site since this is a renderer-intiated navigation which
-  // does not swap processes on cross-site redirects. However, getting a
-  // RenderProcessHost with the REUSE_PENDING_OR_COMMITTED_SITE policy should no
-  // longer return the current process for the initial site we were trying to
-  // navigate to.
-  main_test_rfh()->SimulateRedirect(kRedirectUrl2);
+  // Simulate a cross-site redirect.  Getting a RenderProcessHost with the
+  // REUSE_PENDING_OR_COMMITTED_SITE policy for the initial foo.com site should
+  // no longer return the original process.  Getting a RenderProcessHost with
+  // the REUSE_PENDING_OR_COMMITTED_SITE policy for the new bar.com site should
+  // return the the original process, unless we're in --site-per-process mode.
+  simulator->Redirect(kRedirectUrl2);
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
@@ -487,31 +527,43 @@ TEST_F(RenderProcessHostUnitTest,
       SiteInstanceImpl::CreateForURL(browser_context(), kRedirectUrl2);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
-  EXPECT_EQ(main_test_rfh()->GetProcess(), site_instance->GetProcess());
+  if (AreAllSitesIsolatedForTesting()) {
+    // In --site-per-process, we should've recognized that we will need to swap
+    // to a new process; however, the new process won't be created until
+    // ready-to-commit time, when the final response comes from bar.com.  Thus,
+    // we should have neither foo.com nor bar.com in the original process's
+    // list of pending sites, and |site_instance| should create a brand new
+    // process that does not match any existing one.  In
+    // https://crbug.com/773809, the site_instance->GetProcess() call tried to
+    // reuse the original process (already locked to foo.com), leading to
+    // origin lock mismatch.
+    EXPECT_NE(main_test_rfh()->GetProcess(), site_instance->GetProcess());
+  } else {
+    EXPECT_EQ(main_test_rfh()->GetProcess(), site_instance->GetProcess());
+  }
 
-  // Once the navigation is ready to commit, Getting RenderProcessHost with the
+  // Once the navigation is ready to commit, getting RenderProcessHost with the
   // REUSE_PENDING_OR_COMMITTED_SITE policy should return the current
   // process for the final site, but not the initial one.
-  main_test_rfh()->PrepareForCommit();
+  simulator->ReadyToCommit();
+  RenderProcessHost* post_redirect_process =
+      simulator->GetFinalRenderFrameHost()->GetProcess();
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
   EXPECT_NE(main_test_rfh()->GetProcess(), site_instance->GetProcess());
+  EXPECT_NE(post_redirect_process, site_instance->GetProcess());
   site_instance =
       SiteInstanceImpl::CreateForURL(browser_context(), kRedirectUrl2);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
-  EXPECT_EQ(main_test_rfh()->GetProcess(), site_instance->GetProcess());
+  EXPECT_EQ(post_redirect_process, site_instance->GetProcess());
 }
 
 // Tests that RenderProcessHost reuse considers navigations correctly during
 // redirects in a browser-initiated navigation.
 TEST_F(RenderProcessHostUnitTest,
        ReuseNavigationProcessRedirectsBrowserInitiated) {
-  // This is only applicable to PlzNavigate.
-  if (!IsBrowserSideNavigationEnabled())
-    return;
-
   const GURL kInitialUrl("http://google.com");
   const GURL kUrl("http://foo.com");
   const GURL kRedirectUrl1("http://foo.com/redirect");
@@ -585,25 +637,6 @@ TEST_F(RenderProcessHostUnitTest,
   EXPECT_EQ(speculative_process_host_id, site_instance->GetProcess()->GetID());
 }
 
-class EffectiveURLContentBrowserClient : public ContentBrowserClient {
- public:
-  EffectiveURLContentBrowserClient(const GURL& url_to_modify,
-                                   const GURL& url_to_return)
-      : url_to_modify_(url_to_modify), url_to_return_(url_to_return) {}
-  ~EffectiveURLContentBrowserClient() override {}
-
- private:
-  GURL GetEffectiveURL(BrowserContext* browser_context,
-                       const GURL& url) override {
-    if (url == url_to_modify_)
-      return url_to_return_;
-    return url;
-  }
-
-  GURL url_to_modify_;
-  GURL url_to_return_;
-};
-
 // Tests that RenderProcessHost reuse works correctly even if the site URL of a
 // URL changes.
 TEST_F(RenderProcessHostUnitTest, ReuseSiteURLChanges) {
@@ -643,12 +676,17 @@ TEST_F(RenderProcessHostUnitTest, ReuseSiteURLChanges) {
   // REUSE_PENDING_OR_COMMITTED_SITE policy should now return the process of the
   // main RFH, as it is now registered with the modified site URL.
   contents()->GetController().Reload(ReloadType::NORMAL, false);
-  main_test_rfh()->PrepareForCommit();
-  main_test_rfh()->SendNavigate(0, true, kUrl);
+  TestRenderFrameHost* rfh = main_test_rfh();
+  // In --site-per-process, the reload will use the pending/speculative RFH
+  // instead of the current one.
+  if (contents()->GetPendingMainFrame())
+    rfh = contents()->GetPendingMainFrame();
+  rfh->PrepareForCommit();
+  rfh->SendNavigate(0, true, kUrl);
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
-  EXPECT_EQ(main_test_rfh()->GetProcess(), site_instance->GetProcess());
+  EXPECT_EQ(rfh->GetProcess(), site_instance->GetProcess());
 
   // Remove the custom ContentBrowserClient. Site URLs are back to normal.
   // Getting a RenderProcessHost with the REUSE_PENDING_OR_COMMITTED_SITE policy
@@ -658,25 +696,26 @@ TEST_F(RenderProcessHostUnitTest, ReuseSiteURLChanges) {
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
-  EXPECT_NE(main_test_rfh()->GetProcess(), site_instance->GetProcess());
+  EXPECT_NE(rfh->GetProcess(), site_instance->GetProcess());
 
   // Reload. Getting a RenderProcessHost with the
   // REUSE_PENDING_OR_COMMITTED_SITE policy should now return the process of the
   // main RFH, as it is now registered with the regular site URL.
   contents()->GetController().Reload(ReloadType::NORMAL, false);
-  main_test_rfh()->PrepareForCommit();
-  main_test_rfh()->SendNavigate(0, true, kUrl);
+  rfh = contents()->GetPendingMainFrame() ? contents()->GetPendingMainFrame()
+                                          : main_test_rfh();
+  rfh->PrepareForCommit();
+  rfh->SendNavigate(0, true, kUrl);
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
-  EXPECT_EQ(main_test_rfh()->GetProcess(), site_instance->GetProcess());
+  EXPECT_EQ(rfh->GetProcess(), site_instance->GetProcess());
 }
 
 // Tests that RenderProcessHost reuse works correctly even if the site URL of a
 // URL we're navigating to changes.
 TEST_F(RenderProcessHostUnitTest, ReuseExpectedSiteURLChanges) {
-  // This is only applicable to PlzNavigate.
-  if (!IsBrowserSideNavigationEnabled())
+  if (AreAllSitesIsolatedForTesting())
     return;
 
   const GURL kUrl("http://foo.com");
@@ -693,7 +732,9 @@ TEST_F(RenderProcessHostUnitTest, ReuseExpectedSiteURLChanges) {
   // Start a navigation. Getting a RenderProcessHost with the
   // REUSE_PENDING_OR_COMMITTED_SITE policy should now return the process of the
   // main RFH.
-  main_test_rfh()->SimulateNavigationStart(kUrl);
+  auto navigation =
+      NavigationSimulator::CreateRendererInitiated(kUrl, main_test_rfh());
+  navigation->Start();
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
@@ -714,8 +755,7 @@ TEST_F(RenderProcessHostUnitTest, ReuseExpectedSiteURLChanges) {
   // Have the navigation commit. Getting a RenderProcessHost with the
   // REUSE_PENDING_OR_COMMITTED_SITE policy should now return the process of the
   // main RFH, as it was registered with the modified site URL at commit time.
-  main_test_rfh()->PrepareForCommit();
-  main_test_rfh()->SendNavigate(0, true, kUrl);
+  navigation->Commit();
   site_instance = SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
       SiteInstanceImpl::ProcessReusePolicy::REUSE_PENDING_OR_COMMITTED_SITE);
@@ -800,7 +840,7 @@ TEST_F(RenderProcessHostUnitTest,
 
   // Create a foo.com SiteInstance and check that its process does not
   // reuse the foo process from the first navigation, since it's now in a
-  // different StoragePartiiton.
+  // different StoragePartition.
   scoped_refptr<SiteInstanceImpl> site_instance =
       SiteInstanceImpl::CreateForURL(browser_context(), kUrl);
   site_instance->set_process_reuse_policy(
@@ -847,7 +887,7 @@ class SpareRenderProcessHostUnitTest : public RenderViewHostImplTestHarness {
   void SetUp() override {
     SetRenderProcessHostFactory(&rph_factory_);
     RenderViewHostImplTestHarness::SetUp();
-    SetContents(NULL);  // Start with no renderers.
+    SetContents(nullptr);  // Start with no renderers.
     while (!rph_factory_.GetProcesses()->empty()) {
       rph_factory_.Remove(rph_factory_.GetProcesses()->back().get());
     }

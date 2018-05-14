@@ -4,7 +4,6 @@
 
 #include "ash/wm/workspace/workspace_event_handler.h"
 
-#include "ash/public/cpp/config.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -13,6 +12,7 @@
 #include "ash/wm/wm_event.h"
 #include "ash/wm/workspace_controller.h"
 #include "ash/wm/workspace_controller_test_api.h"
+#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "ui/aura/client/aura_constants.h"
@@ -48,8 +48,8 @@ void ClickButtonWithFlags(ui::test::EventGenerator* generator,
 
 class WorkspaceEventHandlerTest : public AshTestBase {
  public:
-  WorkspaceEventHandlerTest() {}
-  ~WorkspaceEventHandlerTest() override {}
+  WorkspaceEventHandlerTest() = default;
+  ~WorkspaceEventHandlerTest() override = default;
 
  protected:
   aura::Window* CreateTestWindow(aura::WindowDelegate* delegate,
@@ -77,8 +77,7 @@ class WindowPropertyObserver : public aura::WindowObserver {
   ~WindowPropertyObserver() override { window_->RemoveObserver(this); }
 
   bool DidPropertyChange(const void* property) const {
-    return std::find(properties_changed_.begin(), properties_changed_.end(),
-                     property) != properties_changed_.end();
+    return base::ContainsValue(properties_changed_, property);
   }
 
  private:
@@ -95,10 +94,6 @@ class WindowPropertyObserver : public aura::WindowObserver {
 };
 
 TEST_F(WorkspaceEventHandlerTest, DoubleClickSingleAxisResizeEdge) {
-  // TODO: investigate failure. http://crbug.com/699175.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   // Double clicking the vertical resize edge of a window should maximize it
   // vertically.
   gfx::Rect restored_bounds(10, 10, 50, 50);
@@ -205,10 +200,6 @@ TEST_F(WorkspaceEventHandlerTest, DoubleClickSingleAxisResizeEdge) {
 
 // Tests the behavior when double clicking the border of a side snapped window.
 TEST_F(WorkspaceEventHandlerTest, DoubleClickSingleAxisWhenSideSnapped) {
-  // TODO: investigate failure. http://crbug.com/699175.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   gfx::Rect restored_bounds(10, 10, 50, 50);
   aura::test::TestWindowDelegate delegate;
   std::unique_ptr<aura::Window> window(
@@ -235,7 +226,7 @@ TEST_F(WorkspaceEventHandlerTest, DoubleClickSingleAxisWhenSideSnapped) {
                                      window.get());
   delegate.set_window_component(HTTOP);
   generator.DoubleClickLeftButton();
-  EXPECT_EQ(wm::WINDOW_STATE_TYPE_LEFT_SNAPPED, window_state->GetStateType());
+  EXPECT_EQ(mojom::WindowStateType::LEFT_SNAPPED, window_state->GetStateType());
   EXPECT_EQ(snapped_bounds_in_screen.ToString(),
             window->GetBoundsInScreen().ToString());
 
@@ -324,10 +315,6 @@ TEST_F(WorkspaceEventHandlerTest,
 
 // Test the behavior as a result of double clicking the window header.
 TEST_F(WorkspaceEventHandlerTest, DoubleClickCaptionTogglesMaximize) {
-  // TODO: investigate failure. http://crbug.com/699175.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   aura::test::TestWindowDelegate delegate;
   std::unique_ptr<aura::Window> window(
       CreateTestWindow(&delegate, gfx::Rect(1, 2, 30, 40)));
@@ -337,7 +324,7 @@ TEST_F(WorkspaceEventHandlerTest, DoubleClickCaptionTogglesMaximize) {
   wm::WindowState* window_state = wm::GetWindowState(window.get());
   gfx::Rect restore_bounds = window->bounds();
   gfx::Rect work_area_in_parent =
-      ScreenUtil::GetDisplayWorkAreaBoundsInParent(window.get());
+      screen_util::GetDisplayWorkAreaBoundsInParent(window.get());
 
   EXPECT_FALSE(window_state->IsMaximized());
 
@@ -407,10 +394,6 @@ TEST_F(WorkspaceEventHandlerTest,
 }
 
 TEST_F(WorkspaceEventHandlerTest, DoubleTapCaptionTogglesMaximize) {
-  // TODO: investigate failure. http://crbug.com/699175.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   aura::test::TestWindowDelegate delegate;
   gfx::Rect bounds(10, 20, 30, 40);
   std::unique_ptr<aura::Window> window(CreateTestWindow(&delegate, bounds));

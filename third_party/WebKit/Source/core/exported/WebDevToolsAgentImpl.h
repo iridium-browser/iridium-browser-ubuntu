@@ -34,53 +34,54 @@
 #include <memory>
 
 #include "core/CoreExport.h"
-#include "core/inspector/InspectorEmulationAgent.h"
 #include "core/inspector/InspectorLayerTreeAgent.h"
 #include "core/inspector/InspectorPageAgent.h"
-#include "core/inspector/InspectorSession.h"
 #include "core/inspector/InspectorTracingAgent.h"
+#include "mojo/public/cpp/bindings/associated_binding.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/Vector.h"
 #include "public/platform/WebSize.h"
 #include "public/platform/WebThread.h"
-#include "public/web/WebDevToolsAgent.h"
+#include "public/web/devtools_agent.mojom-blink.h"
 
 namespace blink {
 
+class ClientMessageLoopAdapter;
 class GraphicsLayer;
 class InspectedFrames;
-class InspectorOverlayAgent;
 class InspectorResourceContainer;
 class InspectorResourceContentLoader;
-class InspectorTraceEvents;
 class LocalFrame;
-class WebDevToolsAgentClient;
 class WebLayerTreeView;
-class WebLocalFrameBase;
-class WebString;
+class WebLocalFrameImpl;
 
 class CORE_EXPORT WebDevToolsAgentImpl final
     : public GarbageCollectedFinalized<WebDevToolsAgentImpl>,
-      public NON_EXPORTED_BASE(WebDevToolsAgent),
-      public NON_EXPORTED_BASE(InspectorEmulationAgent::Client),
-      public NON_EXPORTED_BASE(InspectorTracingAgent::Client),
-      public NON_EXPORTED_BASE(InspectorPageAgent::Client),
-      public NON_EXPORTED_BASE(InspectorSession::Client),
-      public NON_EXPORTED_BASE(InspectorLayerTreeAgent::Client),
+      public mojom::blink::DevToolsAgent,
+      public InspectorTracingAgent::Client,
+      public InspectorPageAgent::Client,
+      public InspectorLayerTreeAgent::Client,
       private WebThread::TaskObserver {
  public:
-  static WebDevToolsAgentImpl* Create(WebLocalFrameBase*,
-                                      WebDevToolsAgentClient*);
+  class WorkerClient {
+   public:
+    virtual ~WorkerClient() {}
+    virtual void ResumeStartup() = 0;
+  };
+
+  static WebDevToolsAgentImpl* CreateForFrame(WebLocalFrameImpl*);
+  static WebDevToolsAgentImpl* CreateForWorker(WebLocalFrameImpl*,
+                                               WorkerClient*);
   ~WebDevToolsAgentImpl() override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   void WillBeDestroyed();
-  WebDevToolsAgentClient* Client() { return client_; }
   void FlushProtocolNotifications();
   void PaintOverlay();
   void LayoutOverlay();
   bool HandleInputEvent(const WebInputEvent&);
+  void DispatchBufferedTouchEvents();
+  void BindRequest(mojom::blink::DevToolsAgentAssociatedRequest);
 
   // Instrumentation from web/ layer.
   void DidCommitLoadForLocalFrame(LocalFrame*);
@@ -88,84 +89,50 @@ class CORE_EXPORT WebDevToolsAgentImpl final
   bool ScreencastEnabled();
   void LayerTreeViewChanged(WebLayerTreeView*);
   void RootLayerCleared();
-  bool CacheDisabled() override;
-
-  // WebDevToolsAgent implementation.
-  void Attach(const WebString& host_id, int session_id) override;
-  void Reattach(const WebString& host_id,
-                int session_id,
-                const WebString& saved_state) override;
-  void Detach(int session_id) override;
-  void ContinueProgram() override;
-  void DispatchOnInspectorBackend(int session_id,
-                                  int call_id,
-                                  const WebString& method,
-                                  const WebString& message) override;
-  void InspectElementAt(int session_id, const WebPoint&) override;
-  void FailedToRequestDevTools() override;
-  WebString EvaluateInWebInspectorOverlay(const WebString& script) override;
+  String NavigationInitiatorInfo(LocalFrame*);
+  String EvaluateInOverlayForTesting(const String& script);
 
  private:
-  WebDevToolsAgentImpl(WebLocalFrameBase*,
-                       WebDevToolsAgentClient*,
-                       bool include_view_agents);
+  friend class ClientMessageLoopAdapter;
+  class Session;
+
+  WebDevToolsAgentImpl(WebLocalFrameImpl*,
+                       bool include_view_agents,
+                       WorkerClient*);
+
+  // mojom::blink::DevToolsAgent implementation.
+  void AttachDevToolsSession(
+      mojom::blink::DevToolsSessionHostAssociatedPtrInfo,
+      mojom::blink::DevToolsSessionAssociatedRequest main_session,
+      mojom::blink::DevToolsSessionRequest io_session,
+      const String& reattach_state) override;
+  void InspectElement(const WebPoint& point_in_local_root) override;
 
   // InspectorTracingAgent::Client implementation.
-  void EnableTracing(const WTF::String& category_filter) override;
-  void DisableTracing() override;
   void ShowReloadingBlanket() override;
   void HideReloadingBlanket() override;
 
-  // InspectorEmulationAgent::Client implementation.
-  void SetCPUThrottlingRate(double) override;
-
   // InspectorPageAgent::Client implementation.
   void PageLayoutInvalidated(bool resized) override;
-  void WaitForCreateWindow(LocalFrame*) override;
 
   // InspectorLayerTreeAgent::Client implementation.
   bool IsInspectorLayer(GraphicsLayer*) override;
-
-  // InspectorSession::Client implementation.
-  void SendProtocolMessage(int session_id,
-                           int call_id,
-                           const String& response,
-                           const String& state) override;
 
   // WebThread::TaskObserver implementation.
   void WillProcessTask() override;
   void DidProcessTask() override;
 
-  InspectorSession* InitializeSession(int session_id,
-                                      const String& host_id,
-                                      String* state);
-  void DestroySession(int session_id);
-  void DispatchMessageFromFrontend(int session_id,
-                                   const String& method,
-                                   const String& message);
+  void DetachSession(Session*);
 
-  friend class WebDevToolsAgent;
-  static void RunDebuggerTask(
-      int session_id,
-      std::unique_ptr<WebDevToolsAgent::MessageDescriptor>);
-
-  bool Attached() const { return !!sessions_.size(); }
-
-  WebDevToolsAgentClient* client_;
-  Member<WebLocalFrameBase> web_local_frame_impl_;
-
+  mojo::AssociatedBinding<mojom::blink::DevToolsAgent> binding_;
+  HeapHashSet<Member<Session>> sessions_;
+  WorkerClient* worker_client_;
+  Member<WebLocalFrameImpl> web_local_frame_impl_;
   Member<CoreProbeSink> probe_sink_;
   Member<InspectorResourceContentLoader> resource_content_loader_;
   Member<InspectedFrames> inspected_frames_;
   Member<InspectorResourceContainer> resource_container_;
-  Member<InspectorTraceEvents> trace_events_;
-
-  HeapHashMap<int, Member<InspectorPageAgent>> page_agents_;
-  HeapHashMap<int, Member<InspectorNetworkAgent>> network_agents_;
-  HeapHashMap<int, Member<InspectorTracingAgent>> tracing_agents_;
-  HeapHashMap<int, Member<InspectorOverlayAgent>> overlay_agents_;
-
-  HeapHashMap<int, Member<InspectorSession>> sessions_;
+  Member<Node> node_to_inspect_;
   bool include_view_agents_;
   int layer_tree_id_;
 };

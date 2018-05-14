@@ -5,11 +5,13 @@
 #ifndef MediaControlsRotateToFullscreenDelegate_h
 #define MediaControlsRotateToFullscreenDelegate_h
 
-#include "core/events/EventListener.h"
+#include "core/dom/events/EventListener.h"
 #include "modules/ModulesExport.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
+class DeviceOrientationEvent;
 class HTMLVideoElement;
 class ElementVisibilityObserver;
 
@@ -33,7 +35,7 @@ class MediaControlsRotateToFullscreenDelegate final : public EventListener {
   // EventListener implementation.
   bool operator==(const EventListener&) const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   friend class MediaControlsRotateToFullscreenDelegateTest;
@@ -46,10 +48,13 @@ class MediaControlsRotateToFullscreenDelegate final : public EventListener {
 
   void OnStateChange();
   void OnVisibilityChange(bool is_visible);
+  void OnDeviceOrientationAvailable(DeviceOrientationEvent*);
   void OnScreenOrientationChange();
 
   MODULES_EXPORT SimpleOrientation ComputeVideoOrientation() const;
   SimpleOrientation ComputeScreenOrientation() const;
+
+  WTF::Optional<bool> device_orientation_supported_;
 
   SimpleOrientation current_screen_orientation_ = SimpleOrientation::kUnknown;
 

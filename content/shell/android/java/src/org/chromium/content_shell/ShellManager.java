@@ -12,8 +12,8 @@ import android.widget.FrameLayout;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.ContentViewRenderView;
+import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -86,15 +86,6 @@ public class ShellManager extends FrameLayout {
         Shell previousShell = mActiveShell;
         nativeLaunchShell(url);
         if (previousShell != null) previousShell.close();
-    }
-
-    /**
-     * Enter or leave overlay video mode.
-     * @param enabled Whether overlay mode is enabled.
-     */
-    public void setOverlayVideoMode(boolean enabled) {
-        if (mContentViewRenderView == null) return;
-        mContentViewRenderView.setOverlayVideoMode(enabled);
     }
 
     @SuppressWarnings("unused")

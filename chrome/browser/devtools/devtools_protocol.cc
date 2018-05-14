@@ -48,7 +48,7 @@ DevToolsProtocol::CreateInvalidParamsResponse(int command_id,
                                               const std::string& param) {
   std::unique_ptr<base::DictionaryValue> response(new base::DictionaryValue());
   response->SetInteger(kIdParam, command_id);
-  auto error_object = base::MakeUnique<base::DictionaryValue>();
+  auto error_object = std::make_unique<base::DictionaryValue>();
   error_object->SetInteger(kErrorCodeParam, kErrorInvalidParams);
   error_object->SetString(kErrorMessageParam,
       base::StringPrintf("Missing or invalid '%s' parameter", param.c_str()));
@@ -63,7 +63,7 @@ std::unique_ptr<base::DictionaryValue> DevToolsProtocol::CreateErrorResponse(
     const std::string& error_message) {
   std::unique_ptr<base::DictionaryValue> response(new base::DictionaryValue());
   response->SetInteger(kIdParam, command_id);
-  auto error_object = base::MakeUnique<base::DictionaryValue>();
+  auto error_object = std::make_unique<base::DictionaryValue>();
   error_object->SetInteger(kErrorCodeParam, kErrorServerError);
   error_object->SetString(kErrorMessageParam, error_message);
   response->Set(kErrorParam, std::move(error_object));
@@ -79,7 +79,7 @@ std::unique_ptr<base::DictionaryValue> DevToolsProtocol::CreateSuccessResponse(
   response->SetInteger(kIdParam, command_id);
   response->Set(kResultParam, result
                                   ? std::move(result)
-                                  : base::MakeUnique<base::DictionaryValue>());
+                                  : std::make_unique<base::DictionaryValue>());
 
   return response;
 }
@@ -110,7 +110,7 @@ bool DevToolsProtocol::ParseNotification(
     std::string* method,
     std::unique_ptr<base::DictionaryValue>* params) {
   std::unique_ptr<base::Value> value = base::JSONReader::Read(json);
-  if (!value || !value->IsType(base::Value::Type::DICTIONARY))
+  if (!value || !value->is_dict())
     return false;
 
   std::unique_ptr<base::DictionaryValue> dict(
@@ -121,7 +121,7 @@ bool DevToolsProtocol::ParseNotification(
 
   std::unique_ptr<base::Value> params_value;
   dict->Remove(kParamsParam, &params_value);
-  if (params_value && params_value->IsType(base::Value::Type::DICTIONARY))
+  if (params_value && params_value->is_dict())
     params->reset(static_cast<base::DictionaryValue*>(params_value.release()));
 
   return true;
@@ -132,7 +132,7 @@ bool DevToolsProtocol::ParseResponse(const std::string& json,
                                      int* command_id,
                                      int* error_code) {
   std::unique_ptr<base::Value> value = base::JSONReader::Read(json);
-  if (!value || !value->IsType(base::Value::Type::DICTIONARY))
+  if (!value || !value->is_dict())
     return false;
 
   std::unique_ptr<base::DictionaryValue> dict(

@@ -24,7 +24,7 @@ using views::AXAuraObjCache;
 using views::AXAuraObjWrapper;
 
 AXTreeSourceAura::AXTreeSourceAura() {
-  root_.reset(new AXRootObjWrapper(AXAuraObjCache::GetInstance()->GetNextID()));
+  root_.reset(new AXRootObjWrapper());
 }
 
 AXTreeSourceAura::~AXTreeSourceAura() {
@@ -36,7 +36,7 @@ bool AXTreeSourceAura::HandleAccessibleAction(const ui::AXActionData& action) {
 
   // In Views, we only support setting the selection within a single node,
   // not across multiple nodes like on the web.
-  if (action.action == ui::AX_ACTION_SET_SELECTION) {
+  if (action.action == ax::mojom::Action::kSetSelection) {
     if (action.anchor_node_id != action.focus_node_id) {
       NOTREACHED();
       return false;
@@ -57,7 +57,7 @@ bool AXTreeSourceAura::GetTreeData(ui::AXTreeData* tree_data) const {
   tree_data->loading_progress = 1.0;
   AXAuraObjWrapper* focus = AXAuraObjCache::GetInstance()->GetFocus();
   if (focus)
-    tree_data->focus_id = focus->GetID();
+    tree_data->focus_id = focus->GetUniqueId().Get();
   return true;
 }
 
@@ -66,13 +66,13 @@ AXAuraObjWrapper* AXTreeSourceAura::GetRoot() const {
 }
 
 AXAuraObjWrapper* AXTreeSourceAura::GetFromId(int32_t id) const {
-  if (id == root_->GetID())
+  if (id == root_->GetUniqueId().Get())
     return root_.get();
   return AXAuraObjCache::GetInstance()->Get(id);
 }
 
 int32_t AXTreeSourceAura::GetId(AXAuraObjWrapper* node) const {
-  return node->GetID();
+  return node->GetUniqueId().Get();
 }
 
 void AXTreeSourceAura::GetChildren(
@@ -83,13 +83,13 @@ void AXTreeSourceAura::GetChildren(
 
 AXAuraObjWrapper* AXTreeSourceAura::GetParent(AXAuraObjWrapper* node) const {
   AXAuraObjWrapper* parent = node->GetParent();
-  if (!parent && node->GetID() != root_->GetID())
+  if (!parent && node->GetUniqueId() != root_->GetUniqueId())
     parent = root_.get();
   return parent;
 }
 
 bool AXTreeSourceAura::IsValid(AXAuraObjWrapper* node) const {
-  return node && node->GetID() != -1;
+  return node != nullptr;
 }
 
 bool AXTreeSourceAura::IsEqual(AXAuraObjWrapper* node1,
@@ -97,7 +97,7 @@ bool AXTreeSourceAura::IsEqual(AXAuraObjWrapper* node1,
   if (!node1 || !node2)
     return false;
 
-  return node1->GetID() == node2->GetID() && node1->GetID() != -1;
+  return node1->GetUniqueId() == node2->GetUniqueId();
 }
 
 AXAuraObjWrapper* AXTreeSourceAura::GetNull() const {
@@ -108,15 +108,33 @@ void AXTreeSourceAura::SerializeNode(AXAuraObjWrapper* node,
                                      ui::AXNodeData* out_data) const {
   node->Serialize(out_data);
 
-  if (out_data->role == ui::AX_ROLE_WEB_VIEW) {
+  // Convert the global coordinates reported by each AXAuraObjWrapper
+  // into parent-relative coordinates to be used in the accessibility
+  // tree. That way when any Window, Widget, or View moves (and fires
+  // a location changed event), its descendants all move relative to
+  // it by default.
+  AXAuraObjWrapper* parent = node->GetParent();
+  if (parent) {
+    ui::AXNodeData parent_data;
+    parent->Serialize(&parent_data);
+    out_data->location.Offset(-parent_data.location.OffsetFromOrigin());
+    out_data->offset_container_id = parent->GetUniqueId().Get();
+  }
+
+  if (out_data->role == ax::mojom::Role::kWebView) {
     views::View* view = static_cast<views::AXViewObjWrapper*>(node)->view();
     content::WebContents* contents =
         static_cast<views::WebView*>(view)->GetWebContents();
     content::RenderFrameHost* rfh = contents->GetMainFrame();
     if (rfh) {
       int ax_tree_id = rfh->GetAXTreeID();
-      out_data->AddIntAttribute(ui::AX_ATTR_CHILD_TREE_ID, ax_tree_id);
+      out_data->AddIntAttribute(ax::mojom::IntAttribute::kChildTreeId,
+                                ax_tree_id);
     }
+  } else if (out_data->role == ax::mojom::Role::kWindow ||
+             out_data->role == ax::mojom::Role::kDialog) {
+    // Add clips children flag by default to these roles.
+    out_data->AddBoolAttribute(ax::mojom::BoolAttribute::kClipsChildren, true);
   }
 }
 

@@ -182,8 +182,7 @@ class TZRequest {
   DISALLOW_COPY_AND_ASSIGN(TZRequest);
 };
 
-TZRequest::~TZRequest() {
-}
+TZRequest::~TZRequest() = default;
 
 void TZRequest::StartRequestOnNetworkAvailable() {
   resolver_->RecordAttempt();
@@ -226,7 +225,7 @@ void TZRequest::OnLocationResolved(const Geoposition& position,
       base::Bind(&TZRequest::OnTimezoneResolved, AsWeakPtr()));
 
   // Prevent |on_request_finished| from firing here.
-  base::Closure unused = on_request_finished.Release();
+  base::OnceClosure unused = on_request_finished.Release();
 }
 
 void TZRequest::OnTimezoneResolved(
@@ -390,8 +389,8 @@ TimeZoneResolver::TimeZoneResolverImpl::AsWeakPtr() {
 
 // ------------------------------------------------------------------------
 // TimeZoneResolver::Delegate implementation
-TimeZoneResolver::Delegate::Delegate() {}
-TimeZoneResolver::Delegate::~Delegate() {}
+TimeZoneResolver::Delegate::Delegate() = default;
+TimeZoneResolver::Delegate::~Delegate() = default;
 
 // ------------------------------------------------------------------------
 // TimeZoneResolver implementation

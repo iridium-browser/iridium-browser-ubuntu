@@ -4,13 +4,15 @@
 
 #include "chrome/browser/ui/javascript_dialogs/javascript_dialog.h"
 
-#include "chrome/browser/ui/blocked_content/app_modal_dialog_helper.h"
+#include <utility>
+
+#include "chrome/browser/ui/blocked_content/popunder_preventer.h"
 #include "chrome/browser/ui/javascript_dialogs/javascript_dialog_views.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 
 JavaScriptDialog::JavaScriptDialog(content::WebContents* parent_web_contents) {
-  dialog_helper_.reset(new AppModalDialogHelper(parent_web_contents));
+  popunder_preventer_.reset(new PopunderPreventer(parent_web_contents));
   parent_web_contents->GetDelegate()->ActivateContents(parent_web_contents);
 }
 
@@ -23,9 +25,8 @@ base::WeakPtr<JavaScriptDialog> JavaScriptDialog::Create(
     content::JavaScriptDialogType dialog_type,
     const base::string16& message_text,
     const base::string16& default_prompt_text,
-    const content::JavaScriptDialogManager::DialogClosedCallback&
-        dialog_callback) {
+    content::JavaScriptDialogManager::DialogClosedCallback dialog_callback) {
   return JavaScriptDialogViews::Create(
       parent_web_contents, alerting_web_contents, title, dialog_type,
-      message_text, default_prompt_text, dialog_callback);
+      message_text, default_prompt_text, std::move(dialog_callback));
 }

@@ -41,8 +41,8 @@ class MockCallback : public base::RefCountedThreadSafe<MockCallback> {
   DISALLOW_COPY_AND_ASSIGN(MockCallback);
 };
 
-MockCallback::MockCallback() {}
-MockCallback::~MockCallback() {}
+MockCallback::MockCallback() = default;
+MockCallback::~MockCallback() = default;
 
 base::Closure NewExpectedClosure() {
   StrictMock<MockCallback>* callback = new StrictMock<MockCallback>();
@@ -126,14 +126,15 @@ void WaitableMessageLoopEvent::OnTimeout() {
 }
 
 static VideoDecoderConfig GetTestConfig(VideoCodec codec,
+                                        VideoRotation rotation,
                                         gfx::Size coded_size,
                                         bool is_encrypted) {
   gfx::Rect visible_rect(coded_size.width(), coded_size.height());
   gfx::Size natural_size = coded_size;
 
   return VideoDecoderConfig(
-      codec, VIDEO_CODEC_PROFILE_UNKNOWN, PIXEL_FORMAT_YV12, COLOR_SPACE_JPEG,
-      coded_size, visible_rect, natural_size, EmptyExtraData(),
+      codec, VIDEO_CODEC_PROFILE_UNKNOWN, PIXEL_FORMAT_I420, COLOR_SPACE_JPEG,
+      rotation, coded_size, visible_rect, natural_size, EmptyExtraData(),
       is_encrypted ? AesCtrEncryptionScheme() : Unencrypted());
 }
 
@@ -142,32 +143,38 @@ static const gfx::Size kLargeSize(640, 480);
 
 // static
 VideoDecoderConfig TestVideoConfig::Invalid() {
-  return GetTestConfig(kUnknownVideoCodec, kNormalSize, false);
+  return GetTestConfig(kUnknownVideoCodec, VIDEO_ROTATION_0, kNormalSize,
+                       false);
 }
 
 // static
 VideoDecoderConfig TestVideoConfig::Normal(VideoCodec codec) {
-  return GetTestConfig(codec, kNormalSize, false);
+  return GetTestConfig(codec, VIDEO_ROTATION_0, kNormalSize, false);
 }
 
 // static
 VideoDecoderConfig TestVideoConfig::NormalH264() {
-  return GetTestConfig(kCodecH264, kNormalSize, false);
+  return GetTestConfig(kCodecH264, VIDEO_ROTATION_0, kNormalSize, false);
 }
 
 // static
-VideoDecoderConfig TestVideoConfig::NormalEncrypted() {
-  return GetTestConfig(kCodecVP8, kNormalSize, true);
+VideoDecoderConfig TestVideoConfig::NormalEncrypted(VideoCodec codec) {
+  return GetTestConfig(codec, VIDEO_ROTATION_0, kNormalSize, true);
+}
+
+// static
+VideoDecoderConfig TestVideoConfig::NormalRotated(VideoRotation rotation) {
+  return GetTestConfig(kCodecVP8, rotation, kNormalSize, false);
 }
 
 // static
 VideoDecoderConfig TestVideoConfig::Large(VideoCodec codec) {
-  return GetTestConfig(codec, kLargeSize, false);
+  return GetTestConfig(codec, VIDEO_ROTATION_0, kLargeSize, false);
 }
 
 // static
-VideoDecoderConfig TestVideoConfig::LargeEncrypted() {
-  return GetTestConfig(kCodecVP8, kLargeSize, true);
+VideoDecoderConfig TestVideoConfig::LargeEncrypted(VideoCodec codec) {
+  return GetTestConfig(codec, VIDEO_ROTATION_0, kLargeSize, true);
 }
 
 // static
@@ -231,6 +238,49 @@ scoped_refptr<AudioBuffer> MakeAudioBuffer(SampleFormat format,
     }
   }
   return output;
+}
+
+scoped_refptr<AudioBuffer> MakeBitstreamAudioBuffer(
+    SampleFormat format,
+    ChannelLayout channel_layout,
+    size_t channel_count,
+    int sample_rate,
+    uint8_t start,
+    uint8_t increment,
+    size_t frames,
+    size_t data_size,
+    base::TimeDelta timestamp) {
+  scoped_refptr<AudioBuffer> output = AudioBuffer::CreateBitstreamBuffer(
+      format, channel_layout, static_cast<int>(channel_count), sample_rate,
+      static_cast<int>(frames), data_size);
+  output->set_timestamp(timestamp);
+
+  // Values in channel 0 will be:
+  //   start
+  //   start + increment
+  //   start + 2 * increment, ...
+  uint8_t* buffer = reinterpret_cast<uint8_t*>(output->channel_data()[0]);
+  for (size_t i = 0; i < data_size; ++i) {
+    buffer[i] = static_cast<uint8_t>(start + i * increment);
+  }
+
+  return output;
+}
+
+void VerifyBitstreamAudioBus(AudioBus* bus,
+                             size_t data_size,
+                             uint8_t start,
+                             uint8_t increment) {
+  ASSERT_TRUE(bus->is_bitstream_format());
+
+  // Values in channel 0 will be:
+  //   start
+  //   start + increment
+  //   start + 2 * increment, ...
+  uint8_t* buffer = reinterpret_cast<uint8_t*>(bus->channel(0));
+  for (size_t i = 0; i < data_size; ++i) {
+    ASSERT_EQ(buffer[i], static_cast<uint8_t>(start + i * increment));
+  }
 }
 
 // Instantiate all the types of MakeAudioBuffer() and

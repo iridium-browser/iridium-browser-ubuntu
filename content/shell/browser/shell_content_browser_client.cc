@@ -22,6 +22,7 @@
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
+#include "content/public/browser/resource_dispatcher_host_delegate.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/service_names.mojom.h"
@@ -32,18 +33,18 @@
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_browser_main_parts.h"
 #include "content/shell/browser/shell_devtools_manager_delegate.h"
+#include "content/shell/browser/shell_login_dialog.h"
 #include "content/shell/browser/shell_net_log.h"
 #include "content/shell/browser/shell_quota_permission_context.h"
-#include "content/shell/browser/shell_resource_dispatcher_host_delegate.h"
 #include "content/shell/browser/shell_web_contents_view_delegate_creator.h"
 #include "content/shell/common/shell_messages.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/grit/shell_resources.h"
-#include "content/test/data/mojo_layouttest_test.mojom.h"
 #include "media/mojo/features.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "net/ssl/client_cert_identity.h"
+#include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/test/echo/public/mojom/echo.mojom.h"
 #include "storage/browser/quota/quota_settings.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
@@ -52,11 +53,11 @@
 #if defined(OS_ANDROID)
 #include "base/android/apk_assets.h"
 #include "base/android/path_utils.h"
-#include "components/crash/content/browser/crash_dump_manager_android.h"
+#include "components/crash/content/browser/crash_dump_observer_android.h"
 #include "content/shell/android/shell_descriptors.h"
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_LINUX)
 #include "base/debug/leak_annotations.h"
 #include "components/crash/content/app/breakpad_linux.h"
 #include "components/crash/content/browser/crash_handler_host_linux.h"
@@ -64,8 +65,8 @@
 #endif
 
 #if defined(OS_WIN)
-#include "content/common/sandbox_win.h"
 #include "sandbox/win/src/sandbox.h"
+#include "services/service_manager/sandbox/win/sandbox_win.h"
 #endif
 
 #if BUILDFLAG(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
@@ -78,9 +79,8 @@ namespace content {
 namespace {
 
 ShellContentBrowserClient* g_browser_client;
-bool g_swap_processes_for_redirect = false;
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if defined(OS_LINUX)
 breakpad::CrashHandlerHostLinux* CreateCrashHandlerHost(
     const std::string& process_type) {
   base::FilePath dumps_path =
@@ -104,21 +104,21 @@ int GetCrashSignalFD(const base::CommandLine& command_line) {
       command_line.GetSwitchValueASCII(switches::kProcessType);
 
   if (process_type == switches::kRendererProcess) {
-    static breakpad::CrashHandlerHostLinux* crash_handler = NULL;
+    static breakpad::CrashHandlerHostLinux* crash_handler = nullptr;
     if (!crash_handler)
       crash_handler = CreateCrashHandlerHost(process_type);
     return crash_handler->GetDeathSignalSocket();
   }
 
   if (process_type == switches::kPpapiPluginProcess) {
-    static breakpad::CrashHandlerHostLinux* crash_handler = NULL;
+    static breakpad::CrashHandlerHostLinux* crash_handler = nullptr;
     if (!crash_handler)
       crash_handler = CreateCrashHandlerHost(process_type);
     return crash_handler->GetDeathSignalSocket();
   }
 
   if (process_type == switches::kGpuProcess) {
-    static breakpad::CrashHandlerHostLinux* crash_handler = NULL;
+    static breakpad::CrashHandlerHostLinux* crash_handler = nullptr;
     if (!crash_handler)
       crash_handler = CreateCrashHandlerHost(process_type);
     return crash_handler->GetDeathSignalSocket();
@@ -126,27 +126,7 @@ int GetCrashSignalFD(const base::CommandLine& command_line) {
 
   return -1;
 }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
-
-class MojoLayoutTestHelper : public mojom::MojoLayoutTestHelper {
- public:
-  MojoLayoutTestHelper() {}
-  ~MojoLayoutTestHelper() override {}
-
-  // mojom::MojoLayoutTestHelper:
-  void Reverse(const std::string& message, ReverseCallback callback) override {
-    std::move(callback).Run(std::string(message.rbegin(), message.rend()));
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MojoLayoutTestHelper);
-};
-
-void BindLayoutTestHelper(mojom::MojoLayoutTestHelperRequest request,
-                          RenderFrameHost* render_frame_host) {
-  mojo::MakeStrongBinding(base::MakeUnique<MojoLayoutTestHelper>(),
-                          std::move(request));
-}
+#endif  // defined(OS_LINUX)
 
 }  // namespace
 
@@ -154,19 +134,14 @@ ShellContentBrowserClient* ShellContentBrowserClient::Get() {
   return g_browser_client;
 }
 
-void ShellContentBrowserClient::SetSwapProcessesForRedirect(bool swap) {
-  g_swap_processes_for_redirect = swap;
-}
-
 ShellContentBrowserClient::ShellContentBrowserClient()
-    : shell_browser_main_parts_(NULL) {
+    : shell_browser_main_parts_(nullptr) {
   DCHECK(!g_browser_client);
   g_browser_client = this;
-  frame_interfaces_.AddInterface(base::Bind(&BindLayoutTestHelper));
 }
 
 ShellContentBrowserClient::~ShellContentBrowserClient() {
-  g_browser_client = NULL;
+  g_browser_client = nullptr;
 }
 
 BrowserMainParts* ShellContentBrowserClient::CreateBrowserMainParts(
@@ -184,7 +159,7 @@ bool ShellContentBrowserClient::DoesSiteRequireDedicatedProcess(
   std::string pattern =
       command_line->GetSwitchValueASCII(switches::kIsolateSitesForTesting);
 
-  url::Origin origin(effective_site_url);
+  url::Origin origin = url::Origin::Create(effective_site_url);
 
   if (!origin.unique()) {
     // Schemes like blob or filesystem, which have an embedded origin, should
@@ -216,15 +191,21 @@ bool ShellContentBrowserClient::IsHandledURL(const GURL& url) {
     if (url.scheme() == kProtocolList[i])
       return true;
   }
-  return false;
+  return net::URLRequest::IsHandledProtocol(url.scheme());
 }
 
 void ShellContentBrowserClient::BindInterfaceRequestFromFrame(
     RenderFrameHost* render_frame_host,
     const std::string& interface_name,
     mojo::ScopedMessagePipeHandle interface_pipe) {
-  frame_interfaces_.TryBindInterface(interface_name, &interface_pipe,
-                                     render_frame_host);
+  if (!frame_interfaces_) {
+    frame_interfaces_ = std::make_unique<
+        service_manager::BinderRegistryWithArgs<content::RenderFrameHost*>>();
+    ExposeInterfacesToFrame(frame_interfaces_.get());
+  }
+
+  frame_interfaces_->TryBindInterface(interface_name, &interface_pipe,
+                                      render_frame_host);
 }
 
 void ShellContentBrowserClient::RegisterInProcessServices(
@@ -239,9 +220,16 @@ void ShellContentBrowserClient::RegisterInProcessServices(
 }
 
 void ShellContentBrowserClient::RegisterOutOfProcessServices(
-      OutOfProcessServiceMap* services) {
-  (*services)[kTestServiceUrl] = {base::UTF8ToUTF16("Test Service"),
-                                  SANDBOX_TYPE_UTILITY};
+    OutOfProcessServiceMap* services) {
+  (*services)[kTestServiceUrl] = base::UTF8ToUTF16("Test Service");
+  (*services)[echo::mojom::kServiceName] = base::UTF8ToUTF16("Echo Service");
+}
+
+bool ShellContentBrowserClient::ShouldTerminateOnServiceQuit(
+    const service_manager::Identity& id) {
+  if (should_terminate_on_service_quit_callback_)
+    return should_terminate_on_service_quit_callback_.Run(id);
+  return false;
 }
 
 std::unique_ptr<base::Value>
@@ -249,6 +237,8 @@ ShellContentBrowserClient::GetServiceManifestOverlay(base::StringPiece name) {
   int id = -1;
   if (name == content::mojom::kBrowserServiceName)
     id = IDR_CONTENT_SHELL_BROWSER_MANIFEST_OVERLAY;
+  else if (name == content::mojom::kPackagedServicesServiceName)
+    id = IDR_CONTENT_SHELL_PACKAGED_SERVICES_MANIFEST_OVERLAY;
   else if (name == content::mojom::kGpuServiceName)
     id = IDR_CONTENT_SHELL_GPU_MANIFEST_OVERLAY;
   else if (name == content::mojom::kRendererServiceName)
@@ -300,7 +290,7 @@ void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
 
 void ShellContentBrowserClient::ResourceDispatcherHostCreated() {
   resource_dispatcher_host_delegate_.reset(
-      new ShellResourceDispatcherHostDelegate);
+      new ResourceDispatcherHostDelegate());
   ResourceDispatcherHost::Get()->SetDelegate(
       resource_dispatcher_host_delegate_.get());
 }
@@ -344,13 +334,6 @@ net::NetLog* ShellContentBrowserClient::GetNetLog() {
   return shell_browser_main_parts_->net_log();
 }
 
-bool ShellContentBrowserClient::ShouldSwapProcessesForRedirect(
-    BrowserContext* browser_context,
-    const GURL& current_url,
-    const GURL& new_url) {
-  return g_swap_processes_for_redirect;
-}
-
 DevToolsManagerDelegate*
 ShellContentBrowserClient::GetDevToolsManagerDelegate() {
   return new ShellDevToolsManagerDelegate(browser_context());
@@ -366,11 +349,33 @@ void ShellContentBrowserClient::OpenURL(
                                       gfx::Size())->web_contents());
 }
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+ResourceDispatcherHostLoginDelegate*
+ShellContentBrowserClient::CreateLoginDelegate(
+    net::AuthChallengeInfo* auth_info,
+    content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    bool is_main_frame,
+    const GURL& url,
+    bool first_auth_attempt,
+    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
+        auth_required_callback) {
+  if (!login_request_callback_.is_null()) {
+    std::move(login_request_callback_).Run();
+    return nullptr;
+  }
+
+#if !defined(OS_MACOSX)
+  // TODO: implement ShellLoginDialog for other platforms, drop this #if
+  return nullptr;
+#else
+  return new ShellLoginDialog(auth_info, auth_required_callback);
+#endif
+}
+
+#if defined(OS_LINUX) || defined(OS_ANDROID)
 void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const base::CommandLine& command_line,
     int child_process_id,
-    content::FileDescriptorInfo* mappings) {
+    content::PosixFileDescriptorInfo* mappings) {
 #if defined(OS_ANDROID)
   mappings->ShareWithRegion(
       kShellPakDescriptor,
@@ -384,9 +389,9 @@ void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
   if (crash_signal_fd >= 0) {
     mappings->Share(kCrashDumpSignal, crash_signal_fd);
   }
-#endif  // defined(OS_ANDROID)
+#endif  // !defined(OS_ANDROID)
 }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+#endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
 #if defined(OS_WIN)
 bool ShellContentBrowserClient::PreSpawnRenderer(
@@ -413,5 +418,9 @@ ShellBrowserContext*
     ShellContentBrowserClient::off_the_record_browser_context() {
   return shell_browser_main_parts_->off_the_record_browser_context();
 }
+
+void ShellContentBrowserClient::ExposeInterfacesToFrame(
+    service_manager::BinderRegistryWithArgs<content::RenderFrameHost*>*
+        registry) {}
 
 }  // namespace content

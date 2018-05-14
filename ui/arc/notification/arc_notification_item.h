@@ -65,14 +65,18 @@ class ArcNotificationItem {
   // is sent when |window_ref_count_| goes from one to zero.
   virtual void DecrementWindowRefCount() = 0;
 
-  // Returns the current pinned state.
-  virtual bool GetPinned() const = 0;
   // Returns the current snapshot.
   virtual const gfx::ImageSkia& GetSnapshot() const = 0;
   // Returns the current expand state.
   virtual mojom::ArcNotificationExpandState GetExpandState() const = 0;
+
+  virtual bool IsManuallyExpandedOrCollapsed() const = 0;
+
   // Returns the current type of shown contents.
   virtual mojom::ArcNotificationShownContents GetShownContents() const = 0;
+  // Returns the rect for which Android wants to handle all swipe events.
+  // Defaults to the empty rectangle.
+  virtual gfx::Rect GetSwipeInputRect() const = 0;
   // Returns the notification key passed from Android-side.
   virtual const std::string& GetNotificationKey() const = 0;
   // Returns the notification ID used in the Chrome message center.

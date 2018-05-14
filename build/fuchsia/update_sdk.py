@@ -13,6 +13,8 @@ import sys
 import tarfile
 import tempfile
 
+SDK_HASH = '9d4016533477903c796470e7ab46c2e1dad31761'
+
 REPOSITORY_ROOT = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', '..'))
 sys.path.append(os.path.join(REPOSITORY_ROOT, 'build'))
@@ -27,36 +29,40 @@ def EnsureDirExists(path):
 
 
 def main():
-  if len(sys.argv) != 2:
-    print >>sys.stderr, 'usage: %s <sdk_hash>' % sys.argv[0]
+  if len(sys.argv) != 1:
+    print >>sys.stderr, 'usage: %s' % sys.argv[0]
     return 1
 
-  sdk_hash = sys.argv[1]
   output_dir = os.path.join(REPOSITORY_ROOT, 'third_party', 'fuchsia-sdk')
 
   hash_filename = os.path.join(output_dir, '.hash')
   if os.path.exists(hash_filename):
     with open(hash_filename, 'r') as f:
-      if f.read().strip() == sdk_hash:
+      if f.read().strip() == SDK_HASH:
         # Nothing to do.
         return 0
 
-  print 'Downloading SDK %s...' % sdk_hash
+  print 'Downloading SDK %s...' % SDK_HASH
 
   if os.path.isdir(output_dir):
     shutil.rmtree(output_dir)
 
-  bucket = 'gs://fuchsia-build/fuchsia/sdk/linux64/'
-  with tempfile.NamedTemporaryFile() as f:
+  fd, tmp = tempfile.mkstemp()
+  os.close(fd)
+
+  try:
+    bucket = 'gs://fuchsia/sdk/linux-amd64/'
     cmd = [os.path.join(find_depot_tools.DEPOT_TOOLS_PATH, 'gsutil.py'),
-           'cp', bucket + sdk_hash, f.name]
+           'cp', bucket + SDK_HASH, tmp]
     subprocess.check_call(cmd)
-    f.seek(0)
-    EnsureDirExists(output_dir)
-    tarfile.open(mode='r:gz', fileobj=f).extractall(path=output_dir)
+    with open(tmp, 'rb') as f:
+      EnsureDirExists(output_dir)
+      tarfile.open(mode='r:gz', fileobj=f).extractall(path=output_dir)
+  finally:
+    os.remove(tmp)
 
   with open(hash_filename, 'w') as f:
-    f.write(sdk_hash)
+    f.write(SDK_HASH)
 
   return 0
 

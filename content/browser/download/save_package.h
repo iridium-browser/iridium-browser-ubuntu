@@ -8,7 +8,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <map>
 #include <memory>
 #include <set>
@@ -16,15 +15,16 @@
 #include <unordered_map>
 #include <vector>
 
+#include "base/containers/circular_deque.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "components/download/public/common/download_item.h"
 #include "content/browser/download/save_types.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/save_page_type.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -91,8 +91,8 @@ class CONTENT_EXPORT SavePackage
   // Initialize the SavePackage. Returns true if it initializes properly.  Need
   // to make sure that this method must be called in the UI thread because using
   // g_browser_process on a non-UI thread can cause crashes during shutdown.
-  // |cb| will be called when the DownloadItem is created, before data is
-  // written to disk.
+  // |cb| will be called when the download::DownloadItem is created, before data
+  // is written to disk.
   bool Init(const SavePackageDownloadCreatedCallback& cb);
 
   // Cancel all in progress request, might be called by user or internal error.
@@ -100,7 +100,7 @@ class CONTENT_EXPORT SavePackage
 
   void Finish();
 
-  // Notifications sent from the FILE thread to the UI thread.
+  // Notifications sent from the download sequence to the UI thread.
   void StartSave(const SaveFileCreateInfo* info);
   bool UpdateSaveProgress(SaveItemId save_item_id,
                           int64_t size,
@@ -152,14 +152,14 @@ class CONTENT_EXPORT SavePackage
               const base::FilePath& file_full_path,
               const base::FilePath& directory_full_path);
 
+  ~SavePackage() override;
+
   void InitWithDownloadItem(
       const SavePackageDownloadCreatedCallback& download_created_callback,
       DownloadItemImpl* item);
 
   // Callback for WebContents::GenerateMHTML().
   void OnMHTMLGenerated(int64_t size);
-
-  ~SavePackage() override;
 
   // Notes from Init() above applies here as well.
   void InternalInit();
@@ -246,7 +246,7 @@ class CONTENT_EXPORT SavePackage
 
   // Helper for finding a SaveItem with the given url, or falling back to
   // creating a SaveItem with the given parameters.
-  SaveItem* CreatePendingSaveItemDeduplicatingByUrl(
+  void CreatePendingSaveItemDeduplicatingByUrl(
       int container_frame_tree_node_id,
       int save_item_frame_tree_node_id,
       const GURL& url,
@@ -323,36 +323,14 @@ class CONTENT_EXPORT SavePackage
   }
 
   // The current speed in files per second. This is used to update the
-  // DownloadItem associated to this SavePackage. The files per second is
-  // presented by the DownloadItem to the UI as bytes per second, which is
-  // not correct but matches the way the total and received number of files is
-  // presented as the total and received bytes.
+  // download::DownloadItem associated to this SavePackage. The files per second
+  // is presented by the download::DownloadItem to the UI as bytes per second,
+  // which is not correct but matches the way the total and received number of
+  // files is presented as the total and received bytes.
   int64_t CurrentSpeed() const;
 
-  // Helper function for preparing suggested name for the SaveAs Dialog. The
-  // suggested name is determined by the web document's title.
-  static base::FilePath GetSuggestedNameForSaveAs(
-      const base::string16& title,
-      const GURL& page_url,
-      bool can_save_as_complete,
-      const std::string& contents_mime_type);
-
-  // Ensures that the file name has a proper extension for HTML by adding ".htm"
-  // if necessary.
-  static base::FilePath EnsureHtmlExtension(const base::FilePath& name);
-
-  // Ensures that the file name has a proper extension for supported formats
-  // if necessary.
-  static base::FilePath EnsureMimeExtension(const base::FilePath& name,
-      const std::string& contents_mime_type);
-
-  // Returns extension for supported MIME types (for example, for "text/plain"
-  // it returns "txt").
-  static const base::FilePath::CharType* ExtensionForMimeType(
-      const std::string& contents_mime_type);
-
   // A queue for items we are about to start saving.
-  std::deque<std::unique_ptr<SaveItem>> waiting_item_queue_;
+  base::circular_deque<std::unique_ptr<SaveItem>> waiting_item_queue_;
 
   // Map of all saving job in in-progress state.
   SaveItemIdMap in_progress_items_;
@@ -386,20 +364,20 @@ class CONTENT_EXPORT SavePackage
   // Map of all saving job which are successfully saved.
   SaveItemIdMap saved_success_items_;
 
-  // Non-owning pointer for handling file writing on the FILE thread.
+  // Non-owning pointer for handling file writing on the download sequence.
   SaveFileManager* file_manager_ = nullptr;
 
-  // DownloadManager owns the DownloadItem and handles history and UI.
+  // DownloadManager owns the download::DownloadItem and handles history and UI.
   DownloadManagerImpl* download_manager_ = nullptr;
   DownloadItemImpl* download_ = nullptr;
 
   // The URL of the page the user wants to save.
-  GURL page_url_;
+  const GURL page_url_;
   base::FilePath saved_main_file_path_;
   base::FilePath saved_main_directory_path_;
 
   // The title of the page the user wants to save.
-  base::string16 title_;
+  const base::string16 title_;
 
   // Used to calculate package download speed (in files per second).
   const base::TimeTicks start_tick_;

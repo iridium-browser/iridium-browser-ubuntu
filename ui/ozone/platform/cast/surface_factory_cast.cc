@@ -29,8 +29,8 @@ class DummySurface : public SurfaceOzoneCanvas {
   sk_sp<SkSurface> GetSurface() override { return surface_; }
 
   void ResizeCanvas(const gfx::Size& viewport_size) override {
-    surface_ = SkSurface::MakeRaster(SkImageInfo::MakeN32Premul(
-        viewport_size.width(), viewport_size.height()));
+    surface_ =
+        SkSurface::MakeNull(viewport_size.width(), viewport_size.height());
   }
 
   void PresentCanvas(const gfx::Rect& damage) override {}
@@ -63,6 +63,7 @@ class CastPixmap : public gfx::NativePixmap {
     return gfx::BufferFormat::BGRA_8888;
   }
   gfx::Size GetBufferSize() const override { return gfx::Size(); }
+  uint32_t GetUniqueId() const override { return 0; }
 
   bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
                             int plane_z_order,
@@ -90,10 +91,10 @@ SurfaceFactoryCast::SurfaceFactoryCast() : SurfaceFactoryCast(nullptr) {}
 
 SurfaceFactoryCast::SurfaceFactoryCast(
     std::unique_ptr<chromecast::CastEglPlatform> egl_platform)
-    : osmesa_implementation_(base::MakeUnique<GLOzoneOSMesa>()) {
+    : osmesa_implementation_(std::make_unique<GLOzoneOSMesa>()) {
   if (egl_platform) {
     egl_implementation_ =
-        base::MakeUnique<GLOzoneEglCast>(std::move(egl_platform));
+        std::make_unique<GLOzoneEglCast>(std::move(egl_platform));
   }
 }
 
@@ -132,7 +133,7 @@ scoped_refptr<gfx::NativePixmap> SurfaceFactoryCast::CreateNativePixmap(
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage) {
-  return make_scoped_refptr(new CastPixmap(egl_implementation_.get()));
+  return base::MakeRefCounted<CastPixmap>(egl_implementation_.get());
 }
 
 }  // namespace ui

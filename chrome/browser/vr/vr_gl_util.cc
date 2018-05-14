@@ -4,7 +4,9 @@
 
 #include "chrome/browser/vr/vr_gl_util.h"
 
+#include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/transform.h"
 
 namespace vr {
@@ -90,6 +92,50 @@ GLuint CreateAndLinkProgram(GLuint vertext_shader_handle,
   }
 
   return program_handle;
+}
+
+gfx::SizeF CalculateScreenSize(const gfx::Transform& proj_matrix,
+                               float distance,
+                               const gfx::SizeF& size) {
+  // View matrix is the identity, thus, not needed in the calculation.
+  gfx::Transform scale_transform;
+  scale_transform.Scale(size.width(), size.height());
+
+  gfx::Transform translate_transform;
+  translate_transform.Translate3d(0, 0, -distance);
+
+  gfx::Transform model_view_proj_matrix =
+      proj_matrix * translate_transform * scale_transform;
+
+  gfx::Point3F projected_upper_right_corner(0.5f, 0.5f, 0.0f);
+  model_view_proj_matrix.TransformPoint(&projected_upper_right_corner);
+  gfx::Point3F projected_lower_left_corner(-0.5f, -0.5f, 0.0f);
+  model_view_proj_matrix.TransformPoint(&projected_lower_left_corner);
+
+  // Calculate and return the normalized size in screen space.
+  return gfx::SizeF((std::abs(projected_upper_right_corner.x()) +
+                     std::abs(projected_lower_left_corner.x())) /
+                        2.0f,
+                    (std::abs(projected_upper_right_corner.y()) +
+                     std::abs(projected_lower_left_corner.y())) /
+                        2.0f);
+}
+
+void SetTexParameters(GLenum texture_type) {
+  glTexParameteri(texture_type, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(texture_type, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(texture_type, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(texture_type, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+}
+
+void SetColorUniform(GLuint handle, SkColor c) {
+  glUniform4f(handle, SkColorGetR(c) / 255.0, SkColorGetG(c) / 255.0,
+              SkColorGetB(c) / 255.0, SkColorGetA(c) / 255.0);
+}
+
+void SetOpaqueColorUniform(GLuint handle, SkColor c) {
+  glUniform3f(handle, SkColorGetR(c) / 255.0, SkColorGetG(c) / 255.0,
+              SkColorGetB(c) / 255.0);
 }
 
 }  // namespace vr

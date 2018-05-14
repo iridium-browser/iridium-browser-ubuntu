@@ -5,7 +5,9 @@
 #include "tools/gn/setup.h"
 
 #include <stdlib.h>
+
 #include <algorithm>
+#include <memory>
 #include <sstream>
 #include <utility>
 
@@ -40,7 +42,7 @@
 #include <windows.h>
 #endif
 
-extern const char kDotfile_Help[] =
+const char kDotfile_Help[] =
     R"(.gn file
 
   When gn starts, it will search the current directory and parent directories
@@ -281,7 +283,7 @@ Setup::Setup()
       root_build_file_("//BUILD.gn"),
       check_public_headers_(false),
       dotfile_settings_(&build_settings_, std::string()),
-      dotfile_scope_(&dotfile_settings_, {}),
+      dotfile_scope_(&dotfile_settings_),
       default_args_(nullptr),
       fill_arguments_(true) {
   dotfile_settings_.set_toolchain_label(Label());
@@ -295,8 +297,7 @@ Setup::Setup()
   loader_->set_task_runner(scheduler_.task_runner());
 }
 
-Setup::~Setup() {
-}
+Setup::~Setup() = default;
 
 bool Setup::DoSetup(const std::string& build_dir, bool force_create) {
   base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
@@ -324,7 +325,7 @@ bool Setup::DoSetup(const std::string& build_dir, bool force_create) {
   if (default_args_) {
     Scope::KeyValueMap overrides;
     default_args_->GetCurrentScopeValues(&overrides);
-    build_settings_.build_args().AddArgOverrides(overrides);
+    build_settings_.build_args().AddDefaultArgOverrides(overrides);
   }
 
   if (fill_arguments_) {
@@ -371,13 +372,14 @@ bool Setup::RunPostMessageLoop() {
   }
 
   if (!build_settings_.build_args().VerifyAllOverridesUsed(&err)) {
-    // TODO(brettw) implement a system to have a different marker for
-    // warnings. Until we have a better system, print the error but don't
-    // return failure unless requested on the command line.
-    err.PrintToStdout();
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kFailOnUnusedArgs))
+            switches::kFailOnUnusedArgs)) {
+      err.PrintToStdout();
       return false;
+    }
+    err.PrintNonfatalToStdout();
+    OutputString("\nThe build continued as if that argument was "
+                 "unspecified.\n\n");
     return true;
   }
 
@@ -422,7 +424,7 @@ bool Setup::FillArguments(const base::CommandLine& cmdline) {
 }
 
 bool Setup::FillArgsFromCommandLine(const std::string& args) {
-  args_input_file_.reset(new InputFile(SourceFile()));
+  args_input_file_ = std::make_unique<InputFile>(SourceFile());
   args_input_file_->SetContents(args);
   args_input_file_->set_friendly_name("the command-line \"--args\"");
   return FillArgsFromArgsInputFile();
@@ -446,7 +448,7 @@ bool Setup::FillArgsFromFile() {
   if (contents.empty())
     return true;  // Empty file, do nothing.
 
-  args_input_file_.reset(new InputFile(build_arg_source_file));
+  args_input_file_ = std::make_unique<InputFile>(build_arg_source_file);
   args_input_file_->SetContents(contents);
   args_input_file_->set_friendly_name(
       "build arg file (use \"gn args <out_dir>\" to edit)");
@@ -471,7 +473,7 @@ bool Setup::FillArgsFromArgsInputFile() {
     return false;
   }
 
-  Scope arg_scope(&dotfile_settings_, {args_input_file_.get()});
+  Scope arg_scope(&dotfile_settings_);
   // Set soure dir so relative imports in args work.
   SourceDir root_source_dir =
       SourceDirForCurrentDirectory(build_settings_.root_path());
@@ -486,6 +488,8 @@ bool Setup::FillArgsFromArgsInputFile() {
   Scope::KeyValueMap overrides;
   arg_scope.GetCurrentScopeValues(&overrides);
   build_settings_.build_args().AddArgOverrides(overrides);
+  build_settings_.build_args().set_build_args_dependency_files(
+      arg_scope.build_dependency_files());
   return true;
 }
 
@@ -667,8 +671,7 @@ bool Setup::RunConfigFile() {
   if (scheduler_.verbose_logging())
     scheduler_.Log("Got dotfile", FilePathToUTF8(dotfile_name_));
 
-  dotfile_input_file_.reset(new InputFile(SourceFile("//.gn")));
-  dotfile_scope_.AddInputFile(dotfile_input_file_.get());
+  dotfile_input_file_ = std::make_unique<InputFile>(SourceFile("//.gn"));
   if (!dotfile_input_file_->Load(dotfile_name_)) {
     Err(Location(), "Could not load dotfile.",
         "The file \"" + FilePathToUTF8(dotfile_name_) + "\" couldn't be loaded")
@@ -689,6 +692,7 @@ bool Setup::RunConfigFile() {
     return false;
   }
 
+  dotfile_scope_.AddBuildDependencyFile(SourceFile("//.gn"));
   dotfile_root_->Execute(&dotfile_scope_, &err);
   if (err.has_error()) {
     err.PrintToStdout();
@@ -771,7 +775,8 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline) {
       err.PrintToStdout();
       return false;
     }
-    std::unique_ptr<std::set<SourceFile>> whitelist(new std::set<SourceFile>);
+    std::unique_ptr<std::set<SourceFile>> whitelist =
+        std::make_unique<std::set<SourceFile>>();
     for (const auto& item : exec_script_whitelist_value->list_value()) {
       if (!item.VerifyTypeIs(Value::STRING, &err)) {
         err.PrintToStdout();

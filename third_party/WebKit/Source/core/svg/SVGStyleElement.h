@@ -21,8 +21,7 @@
 #ifndef SVGStyleElement_h
 #define SVGStyleElement_h
 
-#include "core/SVGNames.h"
-#include "core/dom/StyleElement.h"
+#include "core/css/StyleElement.h"
 #include "core/svg/SVGElement.h"
 #include "platform/heap/Handle.h"
 
@@ -33,7 +32,7 @@ class SVGStyleElement final : public SVGElement, public StyleElement {
   USING_GARBAGE_COLLECTED_MIXIN(SVGStyleElement);
 
  public:
-  static SVGStyleElement* Create(Document&, bool created_by_parser);
+  static SVGStyleElement* Create(Document&, const CreateElementFlags);
   ~SVGStyleElement() override;
 
   using StyleElement::sheet;
@@ -52,10 +51,10 @@ class SVGStyleElement final : public SVGElement, public StyleElement {
 
   void DispatchPendingEvent();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
-  SVGStyleElement(Document&, bool created_by_parser);
+  SVGStyleElement(Document&, const CreateElementFlags);
 
   void ParseAttribute(const AttributeModificationParams&) override;
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;

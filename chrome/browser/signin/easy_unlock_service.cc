@@ -160,8 +160,7 @@ class EasyUnlockService::BluetoothDetector
 
   void TurnOffBluetoothDiscoverability() {
     if (adapter_) {
-      adapter_->SetDiscoverable(
-          false, base::Bind(&base::DoNothing), base::Bind(&base::DoNothing));
+      adapter_->SetDiscoverable(false, base::DoNothing(), base::DoNothing());
     }
   }
 
@@ -206,7 +205,9 @@ class EasyUnlockService::PowerMonitor
 
  private:
   // chromeos::PowerManagerClient::Observer:
-  void SuspendImminent() override { service_->PrepareForSuspend(); }
+  void SuspendImminent(power_manager::SuspendImminent::Reason reason) override {
+    service_->PrepareForSuspend();
+  }
 
   void SuspendDone(const base::TimeDelta& sleep_duration) override {
     waking_up_ = true;
@@ -251,7 +252,7 @@ EasyUnlockService::~EasyUnlockService() {
 void EasyUnlockService::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterDictionaryPref(prefs::kEasyUnlockPairing,
-                                   base::MakeUnique<base::DictionaryValue>());
+                                   std::make_unique<base::DictionaryValue>());
 
   proximity_auth::ProximityAuthProfilePrefManager::RegisterPrefs(registry);
 }
@@ -704,8 +705,8 @@ void EasyUnlockService::SetHardlockStateForUser(
   }
 
   DictionaryPrefUpdate update(local_state, prefs::kEasyUnlockHardlockState);
-  update->SetIntegerWithoutPathExpansion(account_id.GetUserEmail(),
-                                         static_cast<int>(state));
+  update->SetKey(account_id.GetUserEmail(),
+                 base::Value(static_cast<int>(state)));
 
   if (GetAccountId() == account_id)
     SetScreenlockHardlockedState(state);

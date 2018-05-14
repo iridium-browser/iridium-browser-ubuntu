@@ -14,10 +14,10 @@
 
 #include <vector>
 
-#include "webrtc/examples/peerconnection/server/data_socket.h"
-#include "webrtc/examples/peerconnection/server/peer_channel.h"
-#include "webrtc/examples/peerconnection/server/utils.h"
-#include "webrtc/rtc_tools/simple_command_line_parser.h"
+#include "examples/peerconnection/server/data_socket.h"
+#include "examples/peerconnection/server/peer_channel.h"
+#include "examples/peerconnection/server/utils.h"
+#include "rtc_tools/simple_command_line_parser.h"
 
 static const size_t kMaxConnections = (FD_SETSIZE - 2);
 
@@ -46,7 +46,7 @@ void HandleBrowserRequest(DataSocket* ds, bool* quit) {
   }
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char* argv[]) {
   std::string program_name = argv[0];
   std::string usage = "Example usage: " + program_name + " --port=8888";
   webrtc::test::CommandLineParser parser;

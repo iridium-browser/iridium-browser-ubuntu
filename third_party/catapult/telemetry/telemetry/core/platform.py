@@ -15,14 +15,14 @@ from telemetry.internal.platform import (platform_backend as
 
 from py_utils import discover
 
-_host_platform = None
+_HOST_PLATFORM = None
 # Remote platform is a dictionary from device ids to remote platform instances.
-_remote_platforms = {}
+_REMOTE_PLATFORMS = {}
 
 
 def _InitHostPlatformIfNeeded():
-  global _host_platform
-  if _host_platform:
+  global _HOST_PLATFORM # pylint: disable=global-statement
+  if _HOST_PLATFORM:
     return
   backend = None
   backends = _IterAllPlatformBackendClasses()
@@ -32,12 +32,12 @@ def _InitHostPlatformIfNeeded():
       break
   if not backend:
     raise NotImplementedError()
-  _host_platform = Platform(backend)
+  _HOST_PLATFORM = Platform(backend)
 
 
 def GetHostPlatform():
   _InitHostPlatformIfNeeded()
-  return _host_platform
+  return _HOST_PLATFORM
 
 
 def _IterAllPlatformBackendClasses():
@@ -53,15 +53,15 @@ def GetPlatformForDevice(device, finder_options, logging=real_logging):
     Args:
       device: a device.Device instance.
   """
-  if device.guid in _remote_platforms:
-    return _remote_platforms[device.guid]
+  if device.guid in _REMOTE_PLATFORMS:
+    return _REMOTE_PLATFORMS[device.guid]
   try:
     for platform_backend_class in _IterAllPlatformBackendClasses():
       if platform_backend_class.SupportsDevice(device):
-        _remote_platforms[device.guid] = (
+        _REMOTE_PLATFORMS[device.guid] = (
             platform_backend_class.CreatePlatformForDevice(device,
                                                            finder_options))
-        return _remote_platforms[device.guid]
+        return _REMOTE_PLATFORMS[device.guid]
     return None
   except Exception:
     current_exception = sys.exc_info()
@@ -88,6 +88,7 @@ class Platform(object):
     self._local_server_controller = local_server.LocalServerController(
         self._platform_backend)
     self._is_monitoring_power = False
+    self._forwarder = None
 
   @property
   def is_host_platform(self):
@@ -142,6 +143,12 @@ class Platform(object):
 
     Examples: WIN, MAC, LINUX, CHROMEOS"""
     return self._platform_backend.GetOSName()
+
+  def GetDeviceId(self):
+    """Returns a string identifying the device.
+
+    Examples: 0123456789abcdef"""
+    return self._platform_backend.GetDeviceId()
 
   def GetOSVersionName(self):
     """Returns a logically sortable, string-like description of the Platform OS
@@ -207,6 +214,10 @@ class Platform(object):
         application,
         parameters,
         elevate_privilege=elevate_privilege)
+
+  def StartActivity(self, intent, blocking=False):
+    """Starts an activity for the given intent on the device."""
+    return self._platform_backend.StartActivity(intent, blocking)
 
   def IsApplicationRunning(self, application):
     """Returns whether an application is currently running."""
@@ -372,6 +383,13 @@ class Platform(object):
     """
     return self._platform_backend.TakeScreenshot(file_path)
 
+  def SetFullPerformanceModeEnabled(self, enabled):
+    """ Set full performance mode on the platform.
+
+    Note: this can be no-op on certain platforms.
+    """
+    return self._platform_backend.SetFullPerformanceModeEnabled(enabled)
+
   def StartLocalServer(self, server):
     """Starts a LocalServer and associates it with this platform.
     |server.Close()| should be called manually to close the started server.
@@ -380,6 +398,8 @@ class Platform(object):
 
   @property
   def http_server(self):
+    # TODO(crbug.com/799490): Ownership of the local server should be moved
+    # to the network_controller.
     return self._local_server_controller.GetRunningServer(
         memory_cache_http_server.MemoryCacheHTTPServer, None)
 
@@ -410,10 +430,21 @@ class Platform(object):
 
     server = memory_cache_http_server.MemoryCacheHTTPServer(paths)
     self.StartLocalServer(server)
+
+    # Requires port forwarding if platform is on ChromeOS, and
+    # replaces the http_server port number with the one resolved by
+    # remote machine with ssh/adb remote port forwarding.
+    if (self.GetOSName() == 'chromeos' and
+        self._platform_backend.IsRemoteDevice()):
+      self._forwarder = self._platform_backend.forwarder_factory.Create(
+          local_port=self.http_server.port, remote_port=0)
+      self.http_server.port = self._forwarder.remote_port
     return True
 
   def StopAllLocalServers(self):
     self._local_server_controller.Close()
+    if self._forwarder:
+      self._forwarder.Close()
 
   @property
   def local_servers(self):

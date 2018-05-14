@@ -10,7 +10,6 @@
 #include <list>
 #include <memory>
 #include <ostream>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -34,11 +33,11 @@ class QuicPacket;
 struct QuicPacketHeader;
 
 // Size in bytes of the data packet header.
-QUIC_EXPORT_PRIVATE size_t GetPacketHeaderSize(QuicVersion version,
+QUIC_EXPORT_PRIVATE size_t GetPacketHeaderSize(QuicTransportVersion version,
                                                const QuicPacketHeader& header);
 
 QUIC_EXPORT_PRIVATE size_t
-GetPacketHeaderSize(QuicVersion version,
+GetPacketHeaderSize(QuicTransportVersion version,
                     QuicConnectionIdLength connection_id_length,
                     bool include_version,
                     bool include_diversification_nonce,
@@ -46,19 +45,24 @@ GetPacketHeaderSize(QuicVersion version,
 
 // Index of the first byte in a QUIC packet of encrypted data.
 QUIC_EXPORT_PRIVATE size_t
-GetStartOfEncryptedData(QuicVersion version, const QuicPacketHeader& header);
+GetStartOfEncryptedData(QuicTransportVersion version,
+                        const QuicPacketHeader& header);
 
 QUIC_EXPORT_PRIVATE size_t
-GetStartOfEncryptedData(QuicVersion version,
+GetStartOfEncryptedData(QuicTransportVersion version,
                         QuicConnectionIdLength connection_id_length,
                         bool include_version,
                         bool include_diversification_nonce,
                         QuicPacketNumberLength packet_number_length);
 
-struct QUIC_EXPORT_PRIVATE QuicPacketPublicHeader {
-  QuicPacketPublicHeader();
-  QuicPacketPublicHeader(const QuicPacketPublicHeader& other);
-  ~QuicPacketPublicHeader();
+struct QUIC_EXPORT_PRIVATE QuicPacketHeader {
+  QuicPacketHeader();
+  QuicPacketHeader(const QuicPacketHeader& other);
+  ~QuicPacketHeader();
+
+  QUIC_EXPORT_PRIVATE friend std::ostream& operator<<(
+      std::ostream& os,
+      const QuicPacketHeader& header);
 
   // Universal header. All QuicPacket headers will have a connection_id and
   // public flags.
@@ -67,36 +71,31 @@ struct QUIC_EXPORT_PRIVATE QuicPacketPublicHeader {
   bool reset_flag;
   bool version_flag;
   QuicPacketNumberLength packet_number_length;
-  QuicVersionVector versions;
+  ParsedQuicVersion version;
   // nonce contains an optional, 32-byte nonce value. If not included in the
   // packet, |nonce| will be empty.
   DiversificationNonce* nonce;
-};
-
-// Header for Data packets.
-struct QUIC_EXPORT_PRIVATE QuicPacketHeader {
-  QuicPacketHeader();
-  explicit QuicPacketHeader(const QuicPacketPublicHeader& header);
-  QuicPacketHeader(const QuicPacketHeader& other);
-
-  QUIC_EXPORT_PRIVATE friend std::ostream& operator<<(
-      std::ostream& os,
-      const QuicPacketHeader& s);
-
-  QuicPacketPublicHeader public_header;
   QuicPacketNumber packet_number;
 };
 
 struct QUIC_EXPORT_PRIVATE QuicPublicResetPacket {
   QuicPublicResetPacket();
-  explicit QuicPublicResetPacket(const QuicPacketPublicHeader& header);
+  explicit QuicPublicResetPacket(QuicConnectionId connection_id);
 
-  QuicPacketPublicHeader public_header;
+  QuicConnectionId connection_id;
   QuicPublicResetNonceProof nonce_proof;
   QuicSocketAddress client_address;
 };
 
-typedef QuicPacketPublicHeader QuicVersionNegotiationPacket;
+struct QUIC_EXPORT_PRIVATE QuicVersionNegotiationPacket {
+  QuicVersionNegotiationPacket();
+  explicit QuicVersionNegotiationPacket(QuicConnectionId connection_id);
+  QuicVersionNegotiationPacket(const QuicVersionNegotiationPacket& other);
+  ~QuicVersionNegotiationPacket();
+
+  QuicConnectionId connection_id;
+  ParsedQuicVersionVector versions;
+};
 
 class QUIC_EXPORT_PRIVATE QuicData {
  public:
@@ -121,9 +120,9 @@ class QUIC_EXPORT_PRIVATE QuicData {
 
 class QUIC_EXPORT_PRIVATE QuicPacket : public QuicData {
  public:
-  // TODO(fayang): 3 fields from public header are passed in as arguments.
+  // TODO(fayang): 3 fields from header are passed in as arguments.
   // Consider to add a convenience method which directly accepts the entire
-  // public header.
+  // header.
   QuicPacket(char* buffer,
              size_t length,
              bool owns_buffer,
@@ -132,8 +131,8 @@ class QUIC_EXPORT_PRIVATE QuicPacket : public QuicData {
              bool includes_diversification_nonce,
              QuicPacketNumberLength packet_number_length);
 
-  QuicStringPiece AssociatedData(QuicVersion version) const;
-  QuicStringPiece Plaintext(QuicVersion version) const;
+  QuicStringPiece AssociatedData(QuicTransportVersion version) const;
+  QuicStringPiece Plaintext(QuicTransportVersion version) const;
 
   char* mutable_data() { return buffer_; }
 
@@ -214,6 +213,8 @@ struct QUIC_EXPORT_PRIVATE SerializedPacket {
                    bool has_ack,
                    bool has_stop_waiting);
   SerializedPacket(const SerializedPacket& other);
+  SerializedPacket& operator=(const SerializedPacket& other);
+  SerializedPacket(SerializedPacket&& other);
   ~SerializedPacket();
 
   // Not owned.
@@ -235,9 +236,6 @@ struct QUIC_EXPORT_PRIVATE SerializedPacket {
   // The largest acked of the AckFrame in this packet if has_ack is true,
   // 0 otherwise.
   QuicPacketNumber largest_acked;
-
-  // Optional notifiers which will be informed when this packet has been ACKed.
-  std::list<AckListenerWrapper> listeners;
 };
 
 // Deletes and clears all the frames and the packet from serialized packet.
@@ -247,6 +245,21 @@ QUIC_EXPORT_PRIVATE void ClearSerializedPacket(
 // Allocates a new char[] of size |packet.encrypted_length| and copies in
 // |packet.encrypted_buffer|.
 QUIC_EXPORT_PRIVATE char* CopyBuffer(const SerializedPacket& packet);
+
+struct QUIC_EXPORT_PRIVATE SerializedPacketDeleter {
+  void operator()(SerializedPacket* packet) {
+    if (packet->encrypted_buffer != nullptr) {
+      delete[] packet->encrypted_buffer;
+    }
+    delete packet;
+  }
+};
+
+// On destruction, OwningSerializedPacketPointer deletes a packet's (on-heap)
+// encrypted_buffer before deleting the (also on-heap) packet itself.
+// TODO(wub): Maybe delete retransmittable_frames too?
+typedef std::unique_ptr<SerializedPacket, SerializedPacketDeleter>
+    OwningSerializedPacketPointer;
 
 }  // namespace net
 

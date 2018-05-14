@@ -4,23 +4,15 @@
 
 #include "chrome/browser/ui/browser_commands_chromeos.h"
 
-#include "ash/accelerators/accelerator_controller_delegate_classic.h"
-#include "ash/metrics/user_metrics_recorder.h"
-#include "ash/screenshot_delegate.h"
-#include "ash/shell_port_classic.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
+#include "chrome/browser/ui/ash/chrome_screenshot_grabber.h"
 
 using base::UserMetricsAction;
 
 void TakeScreenshot() {
   base::RecordAction(UserMetricsAction("Menu_Take_Screenshot"));
-  ash::ScreenshotDelegate* screenshot_delegate =
-      ash::ShellPortClassic::Get()
-          ->accelerator_controller_delegate()
-          ->screenshot_delegate();
-  if (screenshot_delegate &&
-      screenshot_delegate->CanTakeScreenshot()) {
-    screenshot_delegate->HandleTakeScreenshotForAllRootWindows();
-  }
+  ChromeScreenshotGrabber* grabber = ChromeScreenshotGrabber::Get();
+  if (grabber->CanTakeScreenshot())
+    grabber->HandleTakeScreenshotForAllRootWindows();
 }

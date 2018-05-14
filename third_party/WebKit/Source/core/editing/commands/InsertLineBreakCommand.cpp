@@ -25,18 +25,21 @@
 
 #include "core/editing/commands/InsertLineBreakCommand.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/Text.h"
 #include "core/editing/EditingStyle.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleUnits.h"
+#include "core/editing/commands/DeleteSelectionOptions.h"
+#include "core/editing/commands/EditingCommandsUtilities.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLBRElement.h"
 #include "core/html/HTMLElement.h"
-#include "core/html/TextControlElement.h"
+#include "core/html/forms/TextControlElement.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutText.h"
 
@@ -63,17 +66,18 @@ bool InsertLineBreakCommand::ShouldUseBreakElement(
 }
 
 void InsertLineBreakCommand::DoApply(EditingState* editing_state) {
-  DeleteSelection(editing_state);
-  if (editing_state->IsAborted())
+  if (!DeleteSelection(editing_state, DeleteSelectionOptions::NormalDelete()))
     return;
 
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
 
-  VisibleSelection selection = EndingSelection();
-  if (!selection.IsNonOrphanedCaretOrRange())
+  VisibleSelection selection = EndingVisibleSelection();
+  if (selection.IsNone() || selection.Start().IsOrphan() ||
+      selection.End().IsOrphan())
     return;
 
-  // TODO(xiaochengh): Stop storing VisiblePositions through mutations.
+  // TODO(editing-dev): Stop storing VisiblePositions through mutations.
+  // See crbug.com/648949 for details.
   VisiblePosition caret(selection.VisibleStart());
   // FIXME: If the node is hidden, we should still be able to insert text. For
   // now, we return to avoid a crash.
@@ -101,8 +105,8 @@ void InsertLineBreakCommand::DoApply(EditingState* editing_state) {
 
   if (IsEndOfParagraph(CreateVisiblePosition(caret.ToPositionWithAffinity())) &&
       !LineBreakExistsAtVisiblePosition(caret)) {
-    bool need_extra_line_break = !isHTMLHRElement(*pos.AnchorNode()) &&
-                                 !isHTMLTableElement(*pos.AnchorNode());
+    bool need_extra_line_break = !IsHTMLHRElement(*pos.AnchorNode()) &&
+                                 !IsHTMLTableElement(*pos.AnchorNode());
 
     InsertNodeAt(node_to_insert, pos, editing_state);
     if (editing_state->IsAborted())
@@ -126,10 +130,10 @@ void InsertLineBreakCommand::DoApply(EditingState* editing_state) {
       node_to_insert = extra_node;
     }
 
-    SetEndingSelection(SelectionInDOMTree::Builder()
-                           .Collapse(Position::BeforeNode(*node_to_insert))
-                           .SetIsDirectional(EndingSelection().IsDirectional())
-                           .Build());
+    SetEndingSelection(SelectionForUndoStep::From(
+        SelectionInDOMTree::Builder()
+            .Collapse(Position::BeforeNode(*node_to_insert))
+            .Build()));
   } else if (pos.ComputeEditingOffset() <= CaretMinOffset(pos.AnchorNode())) {
     InsertNodeAt(node_to_insert, pos, editing_state);
     if (editing_state->IsAborted())
@@ -144,11 +148,10 @@ void InsertLineBreakCommand::DoApply(EditingState* editing_state) {
         return;
     }
 
-    SetEndingSelection(
+    SetEndingSelection(SelectionForUndoStep::From(
         SelectionInDOMTree::Builder()
             .Collapse(Position::InParentAfterNode(*node_to_insert))
-            .SetIsDirectional(EndingSelection().IsDirectional())
-            .Build());
+            .Build()));
     // If we're inserting after all of the rendered text in a text node, or into
     // a non-text node, a simple insertion is sufficient.
   } else if (!pos.AnchorNode()->IsTextNode() ||
@@ -157,11 +160,10 @@ void InsertLineBreakCommand::DoApply(EditingState* editing_state) {
     InsertNodeAt(node_to_insert, pos, editing_state);
     if (editing_state->IsAborted())
       return;
-    SetEndingSelection(
+    SetEndingSelection(SelectionForUndoStep::From(
         SelectionInDOMTree::Builder()
             .Collapse(Position::InParentAfterNode(*node_to_insert))
-            .SetIsDirectional(EndingSelection().IsDirectional())
-            .Build());
+            .Build()));
   } else if (pos.AnchorNode()->IsTextNode()) {
     // Split a text node
     Text* text_node = ToText(pos.AnchorNode());
@@ -173,8 +175,6 @@ void InsertLineBreakCommand::DoApply(EditingState* editing_state) {
 
     // Handle whitespace that occurs after the split
     GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
-    // TODO(yosin) |isRenderedCharacter()| should be removed, and we should
-    // use |VisiblePosition::characterAfter()|.
     if (!IsRenderedCharacter(ending_position)) {
       Position position_before_text_node(
           Position::InParentBeforeNode(*text_node));
@@ -194,10 +194,10 @@ void InsertLineBreakCommand::DoApply(EditingState* editing_state) {
       }
     }
 
-    SetEndingSelection(SelectionInDOMTree::Builder()
-                           .Collapse(ending_position)
-                           .SetIsDirectional(EndingSelection().IsDirectional())
-                           .Build());
+    SetEndingSelection(SelectionForUndoStep::From(
+        SelectionInDOMTree::Builder()
+            .Collapse(ending_position)
+            .Build()));
   }
 
   // Handle the case where there is a typing style.
@@ -206,13 +206,14 @@ void InsertLineBreakCommand::DoApply(EditingState* editing_state) {
       GetDocument().GetFrame()->GetEditor().TypingStyle();
 
   if (typing_style && !typing_style->IsEmpty()) {
+    DCHECK(node_to_insert);
     // Apply the typing style to the inserted line break, so that if the
     // selection leaves and then comes back, new input will have the right
     // style.
     // FIXME: We shouldn't always apply the typing style to the line break here,
     // see <rdar://problem/5794462>.
-    ApplyStyle(typing_style, FirstPositionInOrBeforeNode(node_to_insert),
-               LastPositionInOrAfterNode(node_to_insert), editing_state);
+    ApplyStyle(typing_style, FirstPositionInOrBeforeNode(*node_to_insert),
+               LastPositionInOrAfterNode(*node_to_insert), editing_state);
     if (editing_state->IsAborted())
       return;
     // Even though this applyStyle operates on a Range, it still sets an
@@ -224,9 +225,10 @@ void InsertLineBreakCommand::DoApply(EditingState* editing_state) {
     // So, this next call sets the endingSelection() to a caret just after the
     // line break that we inserted, or just before it if it's at the end of a
     // block.
-    SetEndingSelection(SelectionInDOMTree::Builder()
-                           .Collapse(EndingSelection().End())
-                           .Build());
+    SetEndingSelection(
+        SelectionForUndoStep::From(SelectionInDOMTree::Builder()
+                                       .Collapse(EndingVisibleSelection().End())
+                                       .Build()));
   }
 
   RebalanceWhitespace();

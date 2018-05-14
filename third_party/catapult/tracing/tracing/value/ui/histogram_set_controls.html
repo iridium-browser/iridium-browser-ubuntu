@@ -7,7 +7,9 @@ found in the LICENSE file.
 
 <link rel="import" href="/tracing/base/timing.html">
 <link rel="import" href="/tracing/ui/base/dom_helpers.html">
+<link rel="import" href="/tracing/ui/base/dropdown.html">
 <link rel="import" href="/tracing/ui/base/grouping_table_groupby_picker.html">
+<link rel="import" href="/tracing/value/ui/histogram_set_controls_export.html">
 <link rel="import" href="/tracing/value/ui/histogram_set_view_state.html">
 
 <dom-module id="tr-v-ui-histogram-set-controls">
@@ -22,9 +24,24 @@ found in the LICENSE file.
       margin-left: 20px;
     }
 
-    #search {
-      max-width: 20em;
+    #search_container {
+      display: inline-flex;
       margin-right: 20px;
+      padding-bottom: 1px;
+      border-bottom: 1px solid darkgrey;
+    }
+
+    #search {
+      border: 0;
+      max-width: 20em;
+      outline: none;
+    }
+
+    #clear_search {
+      visibility: hidden;
+      height: 1em;
+      stroke: black;
+      stroke-width: 16;
     }
 
     #controls {
@@ -91,31 +108,46 @@ found in the LICENSE file.
       margin-right: 20px;
     }
 
-    #download_csv {
+    #export {
       margin-right: 20px;
     }
     </style>
 
     <div id="controls">
-      <input id="search" value="{{searchQuery::keyup}}" placeholder="Find Histogram name">
+      <span id="search_container">
+        <input id="search" value="{{searchQuery::keyup}}" placeholder="Find Histogram name">
+        <svg viewbox="0 0 128 128" id="clear_search" on-tap="clearSearch_">
+          <g>
+          <title>Clear search</title>
+          <line x1="28" y1="28" x2="100" y2="100"/>
+          <line x1="28" y1="100" x2="100" y2="28"/>
+          </g>
+        </svg>
+      </span>
 
       <svg viewbox="0 0 128 128" id="show_overview"
-        on-click="toggleOverviewLineCharts_">
+        on-tap="toggleOverviewLineCharts_">
+        <g>
+        <title>Show overview charts</title>
         <line x1="19" y1="109" x2="49" y2="49"/>
         <line x1="49" y1="49" x2="79" y2="79"/>
         <line x1="79" y1="79" x2="109" y2="19"/>
+        </g>
       </svg>
       <svg viewbox="0 0 128 128" id="hide_overview"
-        on-click="toggleOverviewLineCharts_">
+        on-tap="toggleOverviewLineCharts_">
+        <g>
+        <title>Hide overview charts</title>
         <line x1="28" y1="28" x2="100" y2="100"/>
         <line x1="28" y1="100" x2="100" y2="28"/>
+        </g>
       </svg>
 
       <select id="reference_display_label" value="{{referenceDisplayLabel::change}}">
         <option value="">Select a reference column</option>
       </select>
 
-      <button id="alpha" on-click="openAlphaSlider_">&#945;=[[alphaString]]</button>
+      <button id="alpha" on-tap="openAlphaSlider_">&#945;=[[alphaString]]</button>
       <div id="alpha_slider_container">
         <input type="range" id="alpha_slider" value="{{alphaIndex::change}}" min="0" max="18" on-blur="closeAlphaSlider_" on-input="updateAlpha_">
       </div>
@@ -123,7 +155,10 @@ found in the LICENSE file.
       <select id="statistic" value="{{displayStatisticName::change}}">
       </select>
 
-      <button id="download_csv" on-click="downloadCSV_">&#11015; CSV</button>
+      <tr-ui-b-dropdown label="Export">
+        <tr-v-ui-histogram-set-controls-export>
+        </tr-v-ui-histogram-set-controls-export>
+      </tr-ui-b-dropdown>
 
       <input type="checkbox" id="show_all" checked="{{showAll::change}}" title="When unchecked, less important histograms are hidden.">
       <label for="show_all" title="When unchecked, less important histograms are hidden.">Show all</label>
@@ -143,7 +178,7 @@ tr.exportTo('tr.v.ui', function() {
   const ALPHA_OPTIONS = [];
   for (let i = 1; i < 10; ++i) ALPHA_OPTIONS.push(i * 1e-3);
   for (let i = 1; i < 10; ++i) ALPHA_OPTIONS.push(i * 1e-2);
-  ALPHA_OPTIONS.push(0.01);
+  ALPHA_OPTIONS.push(0.1);
 
   Polymer({
     is: 'tr-v-ui-histogram-set-controls',
@@ -233,12 +268,15 @@ tr.exportTo('tr.v.ui', function() {
         marks.push(tr.b.Timing.mark('histogram-set-controls', 'alpha'));
       }
 
+      this.$.clear_search.style.visibility =
+        this.searchQuery ? 'visible' : 'hidden';
+
       let displayStatisticName = this.displayStatisticName;
       if (this.viewState.referenceDisplayLabel === '' &&
           this.referenceDisplayLabel !== '' &&
           this.baseStatisticNames.length) {
         // The user selected a reference display label.
-        displayStatisticName = `${tr.v.DELTA}${this.displayStatisticName}`;
+        displayStatisticName = `%${tr.v.DELTA}${this.displayStatisticName}`;
         // Can't set this.displayStatisticName before updating viewState -- that
         // would cause an infinite loop of onUserChange_().
       }
@@ -456,8 +494,9 @@ tr.exportTo('tr.v.ui', function() {
       this.$.feedback.style.display = 'inline';
     },
 
-    downloadCSV_(event) {
-      this.dispatchEvent(new tr.b.Event('download-csv'));
+    clearSearch_() {
+      this.set('searchQuery', '');
+      this.$.search.focus();
     },
 
     getAlphaString_(alphaIndex) {

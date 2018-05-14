@@ -24,8 +24,6 @@
 #include "components/sessions/core/base_session_service_delegate.h"
 #include "components/sessions/core/session_service_commands.h"
 #include "components/sessions/core/tab_restore_service_client.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "ui/base/ui_base_types.h"
 
 class Profile;
@@ -62,8 +60,7 @@ struct SessionWindow;
 // browser.
 class SessionService : public sessions::BaseSessionServiceDelegate,
                        public KeyedService,
-                       public content::NotificationObserver,
-                       public chrome::BrowserListObserver {
+                       public BrowserListObserver {
   friend class SessionServiceTestHelper;
  public:
   // Used to distinguish an application from a ordinary content window.
@@ -177,6 +174,11 @@ class SessionService : public sessions::BaseSessionServiceDelegate,
                                         const SessionID& tab_id,
                                         int count);
 
+  // Invoked when the NavigationController has deleted entries because of a
+  // history deletion.
+  void TabNavigationPathEntriesDeleted(const SessionID& window_id,
+                                       const SessionID& tab_id);
+
   // Updates the navigation entry for the specified tab.
   void UpdateTabNavigation(
       const SessionID& window_id,
@@ -219,9 +221,8 @@ class SessionService : public sessions::BaseSessionServiceDelegate,
       base::CancelableTaskTracker* tracker);
 
   // BaseSessionServiceDelegate:
-  base::SequencedWorkerPool* GetBlockingPool() override;
   bool ShouldUseDelayedSave() override;
-  void OnSavedCommands() override;
+  void OnWillSaveCommands() override;
 
  private:
   // Allow tests to access our innards for testing purposes.
@@ -249,11 +250,7 @@ class SessionService : public sessions::BaseSessionServiceDelegate,
   bool RestoreIfNecessary(const std::vector<GURL>& urls_to_open,
                           Browser* browser);
 
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
-
-  // chrome::BrowserListObserver
+  // BrowserListObserver
   void OnBrowserAdded(Browser* browser) override {}
   void OnBrowserRemoved(Browser* browser) override {}
   void OnBrowserSetLastActive(Browser* browser) override;
@@ -317,6 +314,9 @@ class SessionService : public sessions::BaseSessionServiceDelegate,
   // Returns true if we track changes to the specified browser.
   bool ShouldTrackBrowser(Browser* browser) const;
 
+  // Will rebuild session commands if rebuild_on_next_save_ is true.
+  void RebuildCommandsIfRequired();
+
   // Call when certain session relevant notifications
   // (tab_closed, nav_list_pruned) occur.  In addition, this is
   // currently called when Save() is called to compare how often the
@@ -340,8 +340,6 @@ class SessionService : public sessions::BaseSessionServiceDelegate,
 
   // The owned BaseSessionService.
   std::unique_ptr<sessions::BaseSessionService> base_session_service_;
-
-  content::NotificationRegistrar registrar_;
 
   // Maps from session tab id to the range of navigation entries that has
   // been written to disk.
@@ -384,6 +382,9 @@ class SessionService : public sessions::BaseSessionServiceDelegate,
   // For browser_tests, since we want to simulate the browser shutting down
   // without quitting.
   bool force_browser_not_alive_with_no_windows_;
+
+  // Force session commands to be rebuild before next save event.
+  bool rebuild_on_next_save_;
 
   base::WeakPtrFactory<SessionService> weak_factory_;
 

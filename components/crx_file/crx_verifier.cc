@@ -15,10 +15,9 @@
 #include "base/callback.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "components/crx_file/crx2_file.h"
 #include "components/crx_file/crx3.pb.h"
+#include "components/crx_file/crx_file.h"
 #include "components/crx_file/id_util.h"
 #include "crypto/secure_hash.h"
 #include "crypto/secure_util.h"
@@ -38,9 +37,6 @@ constexpr uint32_t kMaxSignatureSize = 1 << 16;
 // The maximum size the Crx3 parser will tolerate for a header.
 constexpr uint32_t kMaxHeaderSize = 1 << 18;
 
-// The context for Crx3 signing, encoded in UTF8.
-constexpr unsigned char kSignatureContext[] = u8"CRX3 SignedData";
-
 // The SHA256 hash of the "ecdsa_2017_public" Crx3 key.
 constexpr uint8_t kPublisherKeyHash[] = {
     0x61, 0xf7, 0xf2, 0xa6, 0xbf, 0xcf, 0x74, 0xcd, 0x0b, 0xc1, 0xfe,
@@ -57,7 +53,8 @@ int ReadAndHashBuffer(uint8_t* buffer,
                       crypto::SecureHash* hash) {
   static_assert(sizeof(char) == sizeof(uint8_t), "Unsupported char size.");
   int read = file->ReadAtCurrentPos(reinterpret_cast<char*>(buffer), length);
-  hash->Update(buffer, read);
+  if (read > 0)
+    hash->Update(buffer, read);
   return read;
 }
 
@@ -85,7 +82,7 @@ bool ReadHashAndVerifyArchive(base::File* file,
     if (!verifier->VerifyFinal())
       return false;
   }
-  return true;
+  return len == 0;
 }
 
 // The remaining contents of a Crx3 file are [header-size][header][archive].
@@ -163,7 +160,7 @@ VerifierResult VerifyCrx3(
       std::vector<uint8_t> key_hash(crypto::kSHA256Length);
       crypto::SHA256HashString(key, key_hash.data(), key_hash.size());
       required_key_set.erase(key_hash);
-      auto v = base::MakeUnique<crypto::SignatureVerifier>();
+      auto v = std::make_unique<crypto::SignatureVerifier>();
       static_assert(sizeof(unsigned char) == sizeof(uint8_t),
                     "Unsupported char size.");
       if (!v->VerifyInit(
@@ -223,7 +220,7 @@ VerifierResult VerifyCrx2(
       static_cast<int>(sig_size))
     return VerifierResult::ERROR_HEADER_INVALID;
   std::vector<std::unique_ptr<crypto::SignatureVerifier>> verifiers;
-  verifiers.push_back(base::MakeUnique<crypto::SignatureVerifier>());
+  verifiers.push_back(std::make_unique<crypto::SignatureVerifier>());
   if (!verifiers[0]->VerifyInit(crypto::SignatureVerifier::RSA_PKCS1_SHA1,
                                 sig.data(), sig.size(), key.data(),
                                 key.size())) {
@@ -259,13 +256,13 @@ VerifierResult Verify(
 
   // Magic number.
   bool diff = false;
-  char buffer[kCrx2FileHeaderMagicSize] = {};
-  if (file.ReadAtCurrentPos(buffer, kCrx2FileHeaderMagicSize) !=
-      kCrx2FileHeaderMagicSize)
+  char buffer[kCrxFileHeaderMagicSize] = {};
+  if (file.ReadAtCurrentPos(buffer, kCrxFileHeaderMagicSize) !=
+      kCrxFileHeaderMagicSize)
     return VerifierResult::ERROR_HEADER_INVALID;
-  if (!strncmp(buffer, kCrxDiffFileHeaderMagic, kCrx2FileHeaderMagicSize))
+  if (!strncmp(buffer, kCrxDiffFileHeaderMagic, kCrxFileHeaderMagicSize))
     diff = true;
-  else if (strncmp(buffer, kCrx2FileHeaderMagic, kCrx2FileHeaderMagicSize))
+  else if (strncmp(buffer, kCrxFileHeaderMagic, kCrxFileHeaderMagicSize))
     return VerifierResult::ERROR_HEADER_INVALID;
   file_hash->Update(buffer, sizeof(buffer));
 

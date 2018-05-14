@@ -20,11 +20,11 @@
 
 #include "core/layout/LayoutProgress.h"
 
-#include "core/dom/TaskRunnerHelper.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/html/HTMLProgressElement.h"
 #include "core/layout/LayoutTheme.h"
-#include "platform/wtf/CurrentTime.h"
-#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/Time.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -35,12 +35,12 @@ LayoutProgress::LayoutProgress(HTMLProgressElement* element)
       animation_repeat_interval_(0),
       animation_duration_(0),
       animating_(false),
-      animation_timer_(TaskRunnerHelper::Get(TaskType::kUnspecedTimer,
-                                             &element->GetDocument()),
-                       this,
-                       &LayoutProgress::AnimationTimerFired) {}
+      animation_timer_(
+          element->GetDocument().GetTaskRunner(TaskType::kUnspecedTimer),
+          this,
+          &LayoutProgress::AnimationTimerFired) {}
 
-LayoutProgress::~LayoutProgress() {}
+LayoutProgress::~LayoutProgress() = default;
 
 void LayoutProgress::WillBeDestroyed() {
   if (animating_) {
@@ -84,7 +84,7 @@ bool LayoutProgress::IsAnimating() const {
 void LayoutProgress::AnimationTimerFired(TimerBase*) {
   SetShouldDoFullPaintInvalidation();
   if (!animation_timer_.IsActive() && animating_)
-    animation_timer_.StartOneShot(animation_repeat_interval_, BLINK_FROM_HERE);
+    animation_timer_.StartOneShot(animation_repeat_interval_, FROM_HERE);
 }
 
 void LayoutProgress::UpdateAnimationState() {
@@ -101,14 +101,14 @@ void LayoutProgress::UpdateAnimationState() {
   animating_ = animating;
   if (animating_) {
     animation_start_time_ = CurrentTime();
-    animation_timer_.StartOneShot(animation_repeat_interval_, BLINK_FROM_HERE);
+    animation_timer_.StartOneShot(animation_repeat_interval_, FROM_HERE);
   } else {
     animation_timer_.Stop();
   }
 }
 
 HTMLProgressElement* LayoutProgress::ProgressElement() const {
-  return toHTMLProgressElement(GetNode());
+  return ToHTMLProgressElement(GetNode());
 }
 
 }  // namespace blink

@@ -15,6 +15,8 @@
 #include "services/ui/common/types.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
 #include "ui/gfx/geometry/mojo/geometry.mojom.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point_f.h"
 
 namespace ui {
 
@@ -73,7 +75,6 @@ struct Change {
   ~Change();
 
   ChangeType type;
-  ClientSpecificId client_id;
   std::vector<TestWindow> windows;
   Id window_id;
   Id window_id2;
@@ -98,6 +99,9 @@ struct Change {
   gfx::Transform transform;
   // Set in OnWindowInputEvent() if the event is a KeyEvent.
   std::unordered_map<std::string, std::vector<uint8_t>> key_event_properties;
+  int64_t display_id;
+  gfx::Point location1;
+  gfx::PointF location2;
 };
 
 // Converts Changes to string descriptions.
@@ -144,9 +148,7 @@ class TestChangeTracker {
 
   // Each of these functions generate a Change. There is one per
   // WindowTreeClient function.
-  void OnEmbed(ClientSpecificId client_id,
-               mojom::WindowDataPtr root,
-               bool drawn);
+  void OnEmbed(mojom::WindowDataPtr root, bool drawn);
   void OnEmbeddedAppDisconnected(Id window_id);
   void OnUnembed(Id window_id);
   void OnCaptureChanged(Id new_capture_window_id, Id old_capture_window_id);
@@ -171,11 +173,13 @@ class TestChangeTracker {
   void OnWindowVisibilityChanged(Id window_id, bool visible);
   void OnWindowOpacityChanged(Id window_id, float opacity);
   void OnWindowParentDrawnStateChanged(Id window_id, bool drawn);
-  void OnWindowInputEvent(Id window_id,
-                          const ui::Event& event,
-                          bool matches_pointer_watcher);
-  void OnPointerEventObserved(const ui::Event& event,
-                              uint32_t window_id);
+  void OnWindowInputEvent(
+      Id window_id,
+      const ui::Event& event,
+      int64_t display_id,
+      const gfx::PointF& event_location_in_screen_pixel_layout,
+      bool matches_pointer_watcher);
+  void OnPointerEventObserved(const ui::Event& event, Id window_id);
   void OnWindowSharedPropertyChanged(
       Id window_id,
       const std::string& name,

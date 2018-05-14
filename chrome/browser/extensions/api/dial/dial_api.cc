@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/dial/dial_api_factory.h"
 #include "chrome/browser/media/router/discovery/dial/device_description_fetcher.h"
 #include "chrome/browser/media/router/discovery/dial/dial_registry.h"
@@ -19,6 +19,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_system.h"
+#include "net/url_request/url_request_context.h"
 #include "url/gurl.h"
 
 using base::TimeDelta;
@@ -34,24 +35,28 @@ DialAPI::DialAPI(Profile* profile)
     : RefcountedKeyedService(
           BrowserThread::GetTaskRunnerForThread(BrowserThread::IO)),
       profile_(profile),
-      dial_registry_(nullptr) {
+      system_request_context_(g_browser_process->system_request_context()),
+      dial_registry_(nullptr),
+      num_on_device_list_listeners_(0) {
   EventRouter::Get(profile)->RegisterObserver(
       this, api::dial::OnDeviceList::kEventName);
 }
 
 DialAPI::~DialAPI() {
-  // TODO(zhaobin): Call dial_registry_->UnregisterObserver() instead. In
-  // current implementation, UnregistryObserver() does not StopDiscovery() and
-  // causes crash in ~DialRegistry(). May keep a listener count and
-  // Register/UnregisterObserver as needed.
-  if (dial_registry_)
-    dial_registry_->StopPeriodicDiscovery();
+  if (!dial_registry_)
+    return;
+
+  // Remove pending listeners from dial registry.
+  for (int i = 0; i < num_on_device_list_listeners_; i++)
+    dial_registry_->OnListenerRemoved();
 }
 
 DialRegistry* DialAPI::dial_registry() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!dial_registry_) {
     dial_registry_ = media_router::DialRegistry::GetInstance();
+    dial_registry_->SetNetLog(
+        system_request_context_->GetURLRequestContext()->net_log());
     dial_registry_->RegisterObserver(this);
     if (test_device_data_) {
       dial_registry_->AddDeviceForTest(*test_device_data_);
@@ -77,12 +82,14 @@ void DialAPI::OnListenerRemoved(const EventListenerInfo& details) {
 void DialAPI::NotifyListenerAddedOnIOThread() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   VLOG(2) << "DIAL device event listener added.";
+  ++num_on_device_list_listeners_;
   dial_registry()->OnListenerAdded();
 }
 
 void DialAPI::NotifyListenerRemovedOnIOThread() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   VLOG(2) << "DIAL device event listener removed";
+  --num_on_device_list_listeners_;
   dial_registry()->OnListenerRemoved();
 }
 
@@ -161,14 +168,24 @@ void DialAPI::SendErrorOnUIThread(const DialRegistry::DialErrorCode code) {
   EventRouter::Get(profile_)->BroadcastEvent(std::move(event));
 }
 
-void DialAPI::ShutdownOnUIThread() {}
+void DialAPI::ShutdownOnUIThread() {
+  EventRouter::Get(profile_)->UnregisterObserver(this);
+
+  if (!dial_registry_)
+    return;
+
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::BindOnce(&DialRegistry::UnregisterObserver,
+                                         base::Unretained(dial_registry_),
+                                         base::RetainedRef(this)));
+}
 
 void DialAPI::SetDeviceForTest(
     const media_router::DialDeviceData& device_data,
     const media_router::DialDeviceDescriptionData& device_description) {
-  test_device_data_ = base::MakeUnique<DialDeviceData>(device_data);
+  test_device_data_ = std::make_unique<DialDeviceData>(device_data);
   test_device_description_ =
-      base::MakeUnique<DialDeviceDescriptionData>(device_description);
+      std::make_unique<DialDeviceDescriptionData>(device_description);
 }
 
 DialDiscoverNowFunction::DialDiscoverNowFunction()
@@ -189,7 +206,7 @@ void DialDiscoverNowFunction::Work() {
 
 bool DialDiscoverNowFunction::Respond() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  SetResult(base::MakeUnique<base::Value>(result_));
+  SetResult(std::make_unique<base::Value>(result_));
   return true;
 }
 
@@ -237,8 +254,8 @@ void DialFetchDeviceDescriptionFunction::MaybeStartFetch(const GURL& url) {
     return;
   }
 
-  device_description_fetcher_ = base::MakeUnique<DeviceDescriptionFetcher>(
-      url, Profile::FromBrowserContext(browser_context())->GetRequestContext(),
+  device_description_fetcher_ = std::make_unique<DeviceDescriptionFetcher>(
+      url,
       base::BindOnce(&DialFetchDeviceDescriptionFunction::OnFetchComplete,
                      this),
       base::BindOnce(&DialFetchDeviceDescriptionFunction::OnFetchError, this));

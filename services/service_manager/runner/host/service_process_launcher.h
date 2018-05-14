@@ -11,18 +11,17 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
 #include "base/synchronization/waitable_event.h"
 #include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
-#include "services/service_manager/public/interfaces/service_factory.mojom.h"
+#include "services/service_manager/public/mojom/service_factory.mojom.h"
 #include "services/service_manager/runner/host/service_process_launcher_delegate.h"
+#include "services/service_manager/sandbox/sandbox_type.h"
 
 namespace base {
 class CommandLine;
-class TaskRunner;
 }
 
 namespace service_manager {
@@ -40,32 +39,30 @@ class Identity;
 // Note: Does not currently work on Windows before Vista.
 class ServiceProcessLauncher {
  public:
-  using ProcessReadyCallback = base::Callback<void(base::ProcessId)>;
+  using ProcessReadyCallback = base::OnceCallback<void(base::ProcessId)>;
 
   // |name| is just for debugging ease. We will spawn off a process so that it
   // can be sandboxed if |start_sandboxed| is true. |service_path| is a path to
   // the service executable we wish to start.
-  ServiceProcessLauncher(base::TaskRunner* launch_process_runner,
-                         ServiceProcessLauncherDelegate* delegate,
+  ServiceProcessLauncher(ServiceProcessLauncherDelegate* delegate,
                          const base::FilePath& service_path);
   ~ServiceProcessLauncher();
 
   // |Start()|s the child process; calls |DidStart()| (on the thread on which
   // |Start()| was called) when the child has been started (or failed to start).
   mojom::ServicePtr Start(const Identity& target,
-                          bool start_sandboxed,
-                          const ProcessReadyCallback& callback);
+                          SandboxType sandbox_type,
+                          ProcessReadyCallback callback);
 
   // Waits for the child process to terminate.
   void Join();
 
  private:
-  void DidStart(const ProcessReadyCallback& callback);
+  void DidStart(ProcessReadyCallback callback);
   void DoLaunch(std::unique_ptr<base::CommandLine> child_command_line);
 
-  scoped_refptr<base::TaskRunner> launch_process_runner_;
   ServiceProcessLauncherDelegate* delegate_ = nullptr;
-  bool start_sandboxed_ = false;
+  SandboxType sandbox_type_ = SANDBOX_TYPE_NO_SANDBOX;
   Identity target_;
   base::FilePath service_path_;
   base::Process child_process_;

@@ -48,7 +48,7 @@ class HTMLImport : public GarbageCollectedFinalized<HTMLImport>,
  public:
   enum SyncMode { kSync = 0, kAsync = 1 };
 
-  virtual ~HTMLImport() {}
+  virtual ~HTMLImport() = default;
 
   // FIXME: Consider returning HTMLImportTreeRoot.
   HTMLImport* Root();
@@ -66,7 +66,7 @@ class HTMLImport : public GarbageCollectedFinalized<HTMLImport>,
   virtual void StateWillChange() {}
   virtual void StateDidChange();
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
 
  protected:
   // Stating from most conservative state.
@@ -74,12 +74,6 @@ class HTMLImport : public GarbageCollectedFinalized<HTMLImport>,
   explicit HTMLImport(SyncMode sync) : sync_(sync) {}
 
   static void RecalcTreeState(HTMLImport* root);
-
-#if !defined(NDEBUG)
-  void Show();
-  void ShowTree(HTMLImport* highlight, unsigned depth);
-  virtual void ShowThis();
-#endif
 
  private:
   HTMLImportState state_;

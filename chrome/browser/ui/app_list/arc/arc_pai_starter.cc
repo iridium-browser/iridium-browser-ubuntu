@@ -8,7 +8,7 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
-#include "chrome/common/pref_names.h"
+#include "components/arc/arc_prefs.h"
 #include "components/prefs/pref_service.h"
 #include "ui/events/event_constants.h"
 
@@ -38,7 +38,7 @@ std::unique_ptr<ArcPaiStarter> ArcPaiStarter::CreateIfNeeded(
     PrefService* pref_service) {
   if (pref_service->GetBoolean(prefs::kArcPaiStarted))
     return std::unique_ptr<ArcPaiStarter>();
-  return base::MakeUnique<ArcPaiStarter>(context, pref_service);
+  return std::make_unique<ArcPaiStarter>(context, pref_service);
 }
 
 void ArcPaiStarter::AcquireLock() {
@@ -50,6 +50,15 @@ void ArcPaiStarter::ReleaseLock() {
   DCHECK(locked_);
   locked_ = false;
   MaybeStartPai();
+}
+
+void ArcPaiStarter::AddOnStartCallback(base::OnceClosure callback) {
+  if (started_) {
+    std::move(callback).Run();
+    return;
+  }
+
+  onstart_callbacks_.push_back(std::move(callback));
 }
 
 void ArcPaiStarter::MaybeStartPai() {
@@ -71,6 +80,15 @@ void ArcPaiStarter::MaybeStartPai() {
   pref_service_->SetBoolean(prefs::kArcPaiStarted, true);
 
   prefs->RemoveObserver(this);
+
+  for (auto& callback : onstart_callbacks_)
+    std::move(callback).Run();
+  onstart_callbacks_.clear();
+}
+
+void ArcPaiStarter::OnAppRegistered(const std::string& app_id,
+                                    const ArcAppListPrefs::AppInfo& app_info) {
+  OnAppReadyChanged(app_id, app_info.ready);
 }
 
 void ArcPaiStarter::OnAppReadyChanged(const std::string& app_id, bool ready) {

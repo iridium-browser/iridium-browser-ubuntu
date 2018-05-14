@@ -33,7 +33,7 @@ std::unique_ptr<LayerImpl> PaintedOverlayScrollbarLayer::CreateLayerImpl(
 scoped_refptr<PaintedOverlayScrollbarLayer>
 PaintedOverlayScrollbarLayer::Create(std::unique_ptr<Scrollbar> scrollbar,
                                      ElementId scroll_element_id) {
-  return make_scoped_refptr(new PaintedOverlayScrollbarLayer(
+  return base::WrapRefCounted(new PaintedOverlayScrollbarLayer(
       std::move(scrollbar), scroll_element_id));
 }
 
@@ -47,14 +47,14 @@ PaintedOverlayScrollbarLayer::PaintedOverlayScrollbarLayer(
   DCHECK(scrollbar_->UsesNinePatchThumbResource());
 }
 
-PaintedOverlayScrollbarLayer::~PaintedOverlayScrollbarLayer() {}
+PaintedOverlayScrollbarLayer::~PaintedOverlayScrollbarLayer() = default;
 
 void PaintedOverlayScrollbarLayer::SetScrollElementId(ElementId element_id) {
   if (element_id == scroll_element_id_)
     return;
 
   scroll_element_id_ = element_id;
-  SetNeedsFullTreeSync();
+  SetNeedsCommit();
 }
 
 bool PaintedOverlayScrollbarLayer::OpacityCanAnimateOnImplThread() const {

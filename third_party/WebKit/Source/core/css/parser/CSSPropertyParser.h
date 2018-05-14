@@ -25,6 +25,7 @@
 #ifndef CSSPropertyParser_h
 #define CSSPropertyParser_h
 
+#include "base/macros.h"
 #include "core/css/StyleRule.h"
 #include "core/css/parser/CSSParserContext.h"
 #include "core/css/parser/CSSParserTokenRange.h"
@@ -32,15 +33,13 @@
 
 namespace blink {
 
-class CSSProperty;
+class CSSPropertyValue;
 class CSSValue;
-class StylePropertyShorthand;
 
 // Inputs: PropertyID, isImportant bool, CSSParserTokenRange.
 // Outputs: Vector of CSSProperties
 
 class CSSPropertyParser {
-  WTF_MAKE_NONCOPYABLE(CSSPropertyParser);
   STACK_ALLOCATED();
 
  public:
@@ -48,7 +47,7 @@ class CSSPropertyParser {
                          bool important,
                          const CSSParserTokenRange&,
                          const CSSParserContext*,
-                         HeapVector<CSSProperty, 256>&,
+                         HeapVector<CSSPropertyValue, 256>&,
                          StyleRule::RuleType);
 
   // Parses a non-shorthand CSS property
@@ -59,58 +58,22 @@ class CSSPropertyParser {
  private:
   CSSPropertyParser(const CSSParserTokenRange&,
                     const CSSParserContext*,
-                    HeapVector<CSSProperty, 256>*);
+                    HeapVector<CSSPropertyValue, 256>*);
 
   // TODO(timloh): Rename once the CSSParserValue-based parseValue is removed
   bool ParseValueStart(CSSPropertyID unresolved_property, bool important);
   bool ConsumeCSSWideKeyword(CSSPropertyID unresolved_property, bool important);
-  const CSSValue* ParseSingleValue(CSSPropertyID,
-                                   CSSPropertyID = CSSPropertyInvalid);
-
-  bool InQuirksMode() const { return IsQuirksModeBehavior(context_->Mode()); }
 
   bool ParseViewportDescriptor(CSSPropertyID prop_id, bool important);
   bool ParseFontFaceDescriptor(CSSPropertyID);
-
-  void AddParsedProperty(CSSPropertyID resolved_property,
-                         CSSPropertyID current_shorthand,
-                         const CSSValue&,
-                         bool important,
-                         bool implicit = false);
-  void AddExpandedPropertyForValue(CSSPropertyID prop_id,
-                                   const CSSValue&,
-                                   bool);
-
-  bool ConsumeBorder(bool important);
-
-  bool ParseShorthand(CSSPropertyID, bool important);
-  bool Consume2Values(const StylePropertyShorthand&, bool important);
-
-  // Legacy parsing allows <string>s for animation-name
-  bool ConsumeAnimationShorthand(const StylePropertyShorthand&,
-                                 bool use_legacy_parsing,
-                                 bool important);
-  bool ConsumeBackgroundShorthand(const StylePropertyShorthand&,
-                                  bool important);
-
-  bool ConsumeGridItemPositionShorthand(CSSPropertyID, bool important);
-  bool ConsumeGridTemplateRowsAndAreasAndColumns(CSSPropertyID, bool important);
-  bool ConsumeGridTemplateShorthand(CSSPropertyID, bool important);
-  bool ConsumeGridShorthand(bool important);
-  bool ConsumeGridAreaShorthand(bool important);
-
-  bool ConsumePlaceContentShorthand(bool important);
-  bool ConsumePlaceItemsShorthand(bool important);
-  bool ConsumePlaceSelfShorthand(bool important);
-
-  bool ConsumeLegacyBreakProperty(CSSPropertyID, bool important);
 
  private:
   // Inputs:
   CSSParserTokenRange range_;
   Member<const CSSParserContext> context_;
   // Outputs:
-  HeapVector<CSSProperty, 256>* parsed_properties_;
+  HeapVector<CSSPropertyValue, 256>* parsed_properties_;
+  DISALLOW_COPY_AND_ASSIGN(CSSPropertyParser);
 };
 
 CSSPropertyID UnresolvedCSSPropertyID(StringView);

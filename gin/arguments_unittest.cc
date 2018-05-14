@@ -47,7 +47,8 @@ TEST_F(ArgumentsTest, TestArgumentsHolderCreationContext) {
         v8::Script::Compile(context, StringToV8(isolate, kCallFunction))
             .ToLocalChecked();
     v8::Local<v8::Function> function;
-    ASSERT_TRUE(ConvertFromV8(isolate, script->Run(), &function));
+    ASSERT_TRUE(ConvertFromV8(isolate, script->Run(context).ToLocalChecked(),
+                              &function));
     v8::Local<v8::Value> args[] = {object};
     function->Call(v8::Undefined(isolate), arraysize(args), args);
   };
@@ -73,8 +74,7 @@ TEST_F(ArgumentsTest, TestGetAll) {
 
   V8List list1 = {
       gin::ConvertToV8(isolate, 1), gin::StringToV8(isolate, "some string"),
-      gin::ConvertToV8(context, std::vector<double>({2.0, 3.0}))
-          .ToLocalChecked(),
+      gin::ConvertToV8(isolate, std::vector<double>({2.0, 3.0})),
   };
   bool called1 = false;
 

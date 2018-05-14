@@ -31,17 +31,19 @@
 #include "core/inspector/InspectorNetworkAgent.h"
 
 #include <memory>
+#include <utility>
+
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/SourceLocation.h"
+#include "build/build_config.h"
 #include "core/dom/Document.h"
 #include "core/dom/ScriptableDocumentParser.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/fileapi/FileReaderLoader.h"
 #include "core/fileapi/FileReaderLoaderClient.h"
-#include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLFrameOwnerElement.h"
-#include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectedFrames.h"
 #include "core/inspector/NetworkResourcesData.h"
@@ -53,10 +55,8 @@
 #include "core/probe/CoreProbes.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/xmlhttprequest/XMLHttpRequest.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/blob/BlobData.h"
 #include "platform/loader/fetch/FetchInitiatorInfo.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/MemoryCache.h"
 #include "platform/loader/fetch/Resource.h"
 #include "platform/loader/fetch/ResourceError.h"
@@ -65,23 +65,28 @@
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/loader/fetch/UniqueIdentifier.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/network/HTTPHeaderMap.h"
 #include "platform/network/NetworkStateNotifier.h"
 #include "platform/network/WebSocketHandshakeRequest.h"
 #include "platform/network/WebSocketHandshakeResponse.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/ReferrerPolicy.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "platform/wtf/CurrentTime.h"
-#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/Base64.h"
-#include "public/platform/WebCachePolicy.h"
+#include "public/platform/TaskType.h"
+#include "public/platform/WebEffectiveConnectionType.h"
 #include "public/platform/WebMixedContentContextType.h"
 #include "public/platform/WebURLLoaderClient.h"
 #include "public/platform/WebURLRequest.h"
+#include "services/network/public/mojom/request_context_frame_type.mojom-shared.h"
 
 namespace blink {
 
+using GetRequestPostDataCallback =
+    protocol::Network::Backend::GetRequestPostDataCallback;
 using GetResponseBodyCallback =
     protocol::Network::Backend::GetResponseBodyCallback;
 using protocol::Response;
@@ -95,14 +100,22 @@ static const char kUserAgentOverride[] = "userAgentOverride";
 static const char kBlockedURLs[] = "blockedURLs";
 static const char kTotalBufferSize[] = "totalBufferSize";
 static const char kResourceBufferSize[] = "resourceBufferSize";
+static const char kMaxPostDataSize[] = "maxPostBodySize";
 }
 
 namespace {
+
+#if defined(OS_ANDROID)
+// 10MB
+static size_t g_maximum_total_buffer_size = 10 * 1000 * 1000;
+// 5MB
+static size_t g_maximum_resource_buffer_size = 5 * 1000 * 1000;
+#else
 // 100MB
 static size_t g_maximum_total_buffer_size = 100 * 1000 * 1000;
-
 // 10MB
 static size_t g_maximum_resource_buffer_size = 10 * 1000 * 1000;
+#endif
 
 // Pattern may contain stars ('*') which match to any (possibly empty) string.
 // Stars implicitly assumed at the begin/end of pattern.
@@ -120,15 +133,16 @@ bool Matches(const String& url, const String& pattern) {
 }
 
 bool LoadsFromCacheOnly(const ResourceRequest& request) {
-  switch (request.GetCachePolicy()) {
-    case WebCachePolicy::kUseProtocolCachePolicy:
-    case WebCachePolicy::kValidatingCacheData:
-    case WebCachePolicy::kBypassingCache:
-    case WebCachePolicy::kReturnCacheDataElseLoad:
+  switch (request.GetCacheMode()) {
+    case mojom::FetchCacheMode::kDefault:
+    case mojom::FetchCacheMode::kNoStore:
+    case mojom::FetchCacheMode::kValidateCache:
+    case mojom::FetchCacheMode::kBypassCache:
+    case mojom::FetchCacheMode::kForceCache:
       return false;
-    case WebCachePolicy::kReturnCacheDataDontLoad:
-    case WebCachePolicy::kReturnCacheDataIfValid:
-    case WebCachePolicy::kBypassCacheLoadOnlyFromCache:
+    case mojom::FetchCacheMode::kOnlyIfCached:
+    case mojom::FetchCacheMode::kUnspecifiedOnlyIfCachedStrict:
+    case mojom::FetchCacheMode::kUnspecifiedForceCacheMiss:
       return true;
   }
   NOTREACHED();
@@ -146,65 +160,136 @@ static std::unique_ptr<protocol::Network::Headers> BuildObjectForHeaders(
 }
 
 class InspectorFileReaderLoaderClient final : public FileReaderLoaderClient {
-  WTF_MAKE_NONCOPYABLE(InspectorFileReaderLoaderClient);
-
  public:
   InspectorFileReaderLoaderClient(
-      PassRefPtr<BlobDataHandle> blob,
-      const String& mime_type,
-      const String& text_encoding_name,
-      std::unique_ptr<GetResponseBodyCallback> callback)
-      : blob_(std::move(blob)),
-        mime_type_(mime_type),
-        text_encoding_name_(text_encoding_name),
-        callback_(std::move(callback)) {
+      scoped_refptr<BlobDataHandle> blob,
+      base::OnceCallback<void(scoped_refptr<SharedBuffer>)> callback)
+      : blob_(std::move(blob)), callback_(std::move(callback)) {
     loader_ = FileReaderLoader::Create(FileReaderLoader::kReadByClient, this);
   }
 
-  ~InspectorFileReaderLoaderClient() override {}
+  ~InspectorFileReaderLoaderClient() override = default;
 
   void Start(ExecutionContext* execution_context) {
     raw_data_ = SharedBuffer::Create();
     loader_->Start(execution_context, blob_);
   }
 
-  virtual void DidStartLoading() {}
+  void DidStartLoading() override {}
 
-  virtual void DidReceiveDataForClient(const char* data, unsigned data_length) {
+  void DidReceiveDataForClient(const char* data,
+                               unsigned data_length) override {
     if (!data_length)
       return;
     raw_data_->Append(data, data_length);
   }
 
-  virtual void DidFinishLoading() {
-    String result;
-    bool base64_encoded;
-    if (InspectorPageAgent::SharedBufferContent(raw_data_, mime_type_,
-                                                text_encoding_name_, &result,
-                                                &base64_encoded))
-      callback_->sendSuccess(result, base64_encoded);
-    else
-      callback_->sendFailure(Response::Error("Couldn't encode data"));
-    Dispose();
-  }
+  void DidFinishLoading() override { Done(raw_data_); }
 
-  virtual void DidFail(FileError::ErrorCode) {
-    callback_->sendFailure(Response::Error("Couldn't read BLOB"));
-    Dispose();
-  }
+  void DidFail(FileError::ErrorCode) override { Done(nullptr); }
 
  private:
-  void Dispose() {
-    raw_data_.Clear();
+  void Done(scoped_refptr<SharedBuffer> output) {
+    std::move(callback_).Run(output);
     delete this;
   }
 
-  RefPtr<BlobDataHandle> blob_;
+  scoped_refptr<BlobDataHandle> blob_;
   String mime_type_;
   String text_encoding_name_;
-  std::unique_ptr<GetResponseBodyCallback> callback_;
+  base::OnceCallback<void(scoped_refptr<SharedBuffer>)> callback_;
   std::unique_ptr<FileReaderLoader> loader_;
-  RefPtr<SharedBuffer> raw_data_;
+  scoped_refptr<SharedBuffer> raw_data_;
+  DISALLOW_COPY_AND_ASSIGN(InspectorFileReaderLoaderClient);
+};
+
+static void ResponseBodyFileReaderLoaderDone(
+    const String& mime_type,
+    const String& text_encoding_name,
+    std::unique_ptr<GetResponseBodyCallback> callback,
+    scoped_refptr<SharedBuffer> raw_data) {
+  if (!raw_data) {
+    callback->sendFailure(Response::Error("Couldn't read BLOB"));
+    return;
+  }
+  String result;
+  bool base64_encoded;
+  if (InspectorPageAgent::SharedBufferContent(
+          raw_data, mime_type, text_encoding_name, &result, &base64_encoded)) {
+    callback->sendSuccess(result, base64_encoded);
+  } else {
+    callback->sendFailure(Response::Error("Couldn't encode data"));
+  }
+}
+
+class InspectorPostBodyParser
+    : public WTF::RefCounted<InspectorPostBodyParser> {
+ public:
+  explicit InspectorPostBodyParser(
+      std::unique_ptr<GetRequestPostDataCallback> callback)
+      : callback_(std::move(callback)), error_(false) {}
+
+  void Parse(ExecutionContext* context, EncodedFormData* request_body) {
+    if (!request_body || request_body->IsEmpty())
+      return;
+
+    parts_.Grow(request_body->Elements().size());
+    for (size_t i = 0; i < request_body->Elements().size(); i++) {
+      const FormDataElement& data = request_body->Elements()[i];
+      switch (data.type_) {
+        case FormDataElement::kData:
+          parts_[i] = String::FromUTF8WithLatin1Fallback(data.data_.data(),
+                                                         data.data_.size());
+          break;
+        case FormDataElement::kEncodedBlob:
+          ReadDataBlob(context, data.optional_blob_data_handle_, &parts_[i]);
+          break;
+        case FormDataElement::kEncodedFile:
+        case FormDataElement::kDataPipe:
+          // Do nothing, not supported
+          break;
+      }
+    }
+  }
+
+ private:
+  friend class WTF::RefCounted<InspectorPostBodyParser>;
+
+  ~InspectorPostBodyParser() {
+    if (error_)
+      return;
+    String result;
+    for (const auto& part : parts_)
+      result.append(part);
+    callback_->sendSuccess(result);
+  }
+
+  void BlobReadCallback(String* destination,
+                        scoped_refptr<SharedBuffer> raw_data) {
+    if (raw_data) {
+      *destination = String::FromUTF8WithLatin1Fallback(raw_data->Data(),
+                                                        raw_data->size());
+    } else {
+      error_ = true;
+    }
+  }
+
+  void ReadDataBlob(ExecutionContext* context,
+                    scoped_refptr<blink::BlobDataHandle> blob_handle,
+                    String* destination) {
+    if (!blob_handle)
+      return;
+    auto* reader = new InspectorFileReaderLoaderClient(
+        blob_handle,
+        WTF::Bind(&InspectorPostBodyParser::BlobReadCallback,
+                  WTF::RetainedRef(this), WTF::Unretained(destination)));
+    reader->Start(context);
+  }
+
+  std::unique_ptr<GetRequestPostDataCallback> callback_;
+  bool error_;
+  Vector<String> parts_;
+  DISALLOW_COPY_AND_ASSIGN(InspectorPostBodyParser);
 };
 
 KURL UrlWithoutFragment(const KURL& url) {
@@ -229,17 +314,17 @@ String MixedContentTypeForContextType(WebMixedContentContextType context_type) {
 
 String ResourcePriorityJSON(ResourceLoadPriority priority) {
   switch (priority) {
-    case kResourceLoadPriorityVeryLow:
+    case ResourceLoadPriority::kVeryLow:
       return protocol::Network::ResourcePriorityEnum::VeryLow;
-    case kResourceLoadPriorityLow:
+    case ResourceLoadPriority::kLow:
       return protocol::Network::ResourcePriorityEnum::Low;
-    case kResourceLoadPriorityMedium:
+    case ResourceLoadPriority::kMedium:
       return protocol::Network::ResourcePriorityEnum::Medium;
-    case kResourceLoadPriorityHigh:
+    case ResourceLoadPriority::kHigh:
       return protocol::Network::ResourcePriorityEnum::High;
-    case kResourceLoadPriorityVeryHigh:
+    case ResourceLoadPriority::kVeryHigh:
       return protocol::Network::ResourcePriorityEnum::VeryHigh;
-    case kResourceLoadPriorityUnresolved:
+    case ResourceLoadPriority::kUnresolved:
       break;
   }
   NOTREACHED();
@@ -323,7 +408,6 @@ String GetReferrerPolicy(ReferrerPolicy policy) {
   return protocol::Network::Request::ReferrerPolicyEnum::
       NoReferrerWhenDowngrade;
 }
-
 }  // namespace
 
 void InspectorNetworkAgent::Restore() {
@@ -331,14 +415,15 @@ void InspectorNetworkAgent::Restore() {
     Enable(state_->integerProperty(NetworkAgentState::kTotalBufferSize,
                                    g_maximum_total_buffer_size),
            state_->integerProperty(NetworkAgentState::kResourceBufferSize,
-                                   g_maximum_resource_buffer_size));
+                                   g_maximum_resource_buffer_size),
+           state_->integerProperty(NetworkAgentState::kMaxPostDataSize, 0));
   }
 }
 
 static std::unique_ptr<protocol::Network::ResourceTiming> BuildObjectForTiming(
     const ResourceLoadTiming& timing) {
   return protocol::Network::ResourceTiming::create()
-      .setRequestTime(timing.RequestTime())
+      .setRequestTime(TimeTicksInSeconds(timing.RequestTime()))
       .setProxyStart(timing.CalculateMillisecondDelta(timing.ProxyStart()))
       .setProxyEnd(timing.CalculateMillisecondDelta(timing.ProxyEnd()))
       .setDnsStart(timing.CalculateMillisecondDelta(timing.DnsStart()))
@@ -353,14 +438,37 @@ static std::unique_ptr<protocol::Network::ResourceTiming> BuildObjectForTiming(
       .setSendEnd(timing.CalculateMillisecondDelta(timing.SendEnd()))
       .setReceiveHeadersEnd(
           timing.CalculateMillisecondDelta(timing.ReceiveHeadersEnd()))
-      .setPushStart(timing.PushStart())
-      .setPushEnd(timing.PushEnd())
+      .setPushStart(TimeTicksInSeconds(timing.PushStart()))
+      .setPushEnd(TimeTicksInSeconds(timing.PushEnd()))
       .build();
 }
 
+static bool FormDataToString(scoped_refptr<EncodedFormData> body,
+                             size_t max_body_size,
+                             String* content) {
+  *content = "";
+  if (!body || body->IsEmpty())
+    return false;
+  if (max_body_size != 0 && body->SizeInBytes() > max_body_size)
+    return true;
+
+  for (const auto& element : body->Elements()) {
+    if (element.type_ != FormDataElement::kData)
+      return true;
+  }
+  Vector<char> bytes;
+  body->Flatten(bytes);
+  *content = String::FromUTF8WithLatin1Fallback(bytes.data(), bytes.size());
+  return true;
+}
+
 static std::unique_ptr<protocol::Network::Request>
-BuildObjectForResourceRequest(const ResourceRequest& request) {
-  std::unique_ptr<protocol::Network::Request> request_object =
+BuildObjectForResourceRequest(const ResourceRequest& request,
+                              size_t max_body_size) {
+  String postData;
+  bool hasPostData =
+      FormDataToString(request.HttpBody(), max_body_size, &postData);
+  std::unique_ptr<protocol::Network::Request> result =
       protocol::Network::Request::create()
           .setUrl(UrlWithoutFragment(request.Url()).GetString())
           .setMethod(request.HttpMethod())
@@ -368,13 +476,11 @@ BuildObjectForResourceRequest(const ResourceRequest& request) {
           .setInitialPriority(ResourcePriorityJSON(request.Priority()))
           .setReferrerPolicy(GetReferrerPolicy(request.GetReferrerPolicy()))
           .build();
-  if (request.HttpBody() && !request.HttpBody()->IsEmpty()) {
-    Vector<char> bytes;
-    request.HttpBody()->Flatten(bytes);
-    request_object->setPostData(
-        String::FromUTF8WithLatin1Fallback(bytes.data(), bytes.size()));
-  }
-  return request_object;
+  if (!postData.IsEmpty())
+    result->setPostData(postData);
+  if (hasPostData)
+    result->setHasPostData(true);
+  return result;
 }
 
 static std::unique_ptr<protocol::Network::Response>
@@ -384,7 +490,7 @@ BuildObjectForResourceResponse(const ResourceResponse& response,
   if (response.IsNull())
     return nullptr;
 
-  double status;
+  int status;
   String status_text;
   if (response.GetResourceLoadInfo() &&
       response.GetResourceLoadInfo()->http_status_code) {
@@ -413,9 +519,6 @@ BuildObjectForResourceResponse(const ResourceResponse& response,
       break;
     case ResourceResponse::kSecurityStyleAuthenticationBroken:
       security_state = protocol::Security::SecurityStateEnum::Insecure;
-      break;
-    case ResourceResponse::kSecurityStyleWarning:
-      security_state = protocol::Security::SecurityStateEnum::Warning;
       break;
     case ResourceResponse::kSecurityStyleAuthenticated:
       security_state = protocol::Security::SecurityStateEnum::Secure;
@@ -450,15 +553,18 @@ BuildObjectForResourceResponse(const ResourceResponse& response,
         BuildObjectForTiming(*response.GetResourceLoadTiming()));
 
   if (response.GetResourceLoadInfo()) {
-    if (!response.GetResourceLoadInfo()->response_headers_text.IsEmpty())
+    if (!response.GetResourceLoadInfo()->response_headers_text.IsEmpty()) {
       response_object->setHeadersText(
           response.GetResourceLoadInfo()->response_headers_text);
-    if (response.GetResourceLoadInfo()->request_headers.size())
+    }
+    if (response.GetResourceLoadInfo()->request_headers.size()) {
       response_object->setRequestHeaders(BuildObjectForHeaders(
           response.GetResourceLoadInfo()->request_headers));
-    if (!response.GetResourceLoadInfo()->request_headers_text.IsEmpty())
+    }
+    if (!response.GetResourceLoadInfo()->request_headers_text.IsEmpty()) {
       response_object->setRequestHeadersText(
           response.GetResourceLoadInfo()->request_headers_text);
+    }
   }
 
   String remote_ip_address = response.RemoteIPAddress();
@@ -548,9 +654,9 @@ BuildObjectForResourceResponse(const ResourceResponse& response,
   return response_object;
 }
 
-InspectorNetworkAgent::~InspectorNetworkAgent() {}
+InspectorNetworkAgent::~InspectorNetworkAgent() = default;
 
-DEFINE_TRACE(InspectorNetworkAgent) {
+void InspectorNetworkAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(inspected_frames_);
   visitor->Trace(worker_global_scope_);
   visitor->Trace(resources_data_);
@@ -560,17 +666,16 @@ DEFINE_TRACE(InspectorNetworkAgent) {
   InspectorBaseAgent::Trace(visitor);
 }
 
-void InspectorNetworkAgent::ShouldBlockRequest(const ResourceRequest& request,
-                                               bool* result) {
+void InspectorNetworkAgent::ShouldBlockRequest(const KURL& url, bool* result) {
   protocol::DictionaryValue* blocked_urls =
       state_->getObject(NetworkAgentState::kBlockedURLs);
   if (!blocked_urls)
     return;
 
-  String url = request.Url().GetString();
+  String url_string = url.GetString();
   for (size_t i = 0; i < blocked_urls->size(); ++i) {
     auto entry = blocked_urls->at(i);
-    if (Matches(url, entry.first)) {
+    if (Matches(url_string, entry.first)) {
       *result = true;
       return;
     }
@@ -578,32 +683,42 @@ void InspectorNetworkAgent::ShouldBlockRequest(const ResourceRequest& request,
   return;
 }
 
+void InspectorNetworkAgent::ShouldBypassServiceWorker(bool* result) {
+  *result =
+      state_->booleanProperty(NetworkAgentState::kBypassServiceWorker, false);
+}
+
 void InspectorNetworkAgent::DidBlockRequest(
     ExecutionContext* execution_context,
     const ResourceRequest& request,
     DocumentLoader* loader,
     const FetchInitiatorInfo& initiator_info,
-    ResourceRequestBlockedReason reason) {
+    ResourceRequestBlockedReason reason,
+    Resource::Type resource_type) {
   unsigned long identifier = CreateUniqueIdentifier();
-  WillSendRequestInternal(execution_context, identifier, loader, request,
-                          ResourceResponse(), initiator_info);
+  InspectorPageAgent::ResourceType type =
+      InspectorPageAgent::ToResourceType(resource_type);
 
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  WillSendRequestInternal(execution_context, identifier, loader, request,
+                          ResourceResponse(), initiator_info, type);
+
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
   String protocol_reason = BuildBlockedReason(reason);
   GetFrontend()->loadingFailed(
-      request_id, MonotonicallyIncreasingTime(),
+      request_id, CurrentTimeTicksInSeconds(),
       InspectorPageAgent::ResourceTypeJson(
           resources_data_->GetResourceType(request_id)),
       String(), false, protocol_reason);
 }
 
 void InspectorNetworkAgent::DidChangeResourcePriority(
+    DocumentLoader* loader,
     unsigned long identifier,
     ResourceLoadPriority load_priority) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
   GetFrontend()->resourceChangedPriority(request_id,
                                          ResourcePriorityJSON(load_priority),
-                                         MonotonicallyIncreasingTime());
+                                         CurrentTimeTicksInSeconds());
 }
 
 void InspectorNetworkAgent::WillSendRequestInternal(
@@ -612,19 +727,35 @@ void InspectorNetworkAgent::WillSendRequestInternal(
     DocumentLoader* loader,
     const ResourceRequest& request,
     const ResourceResponse& redirect_response,
-    const FetchInitiatorInfo& initiator_info) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
-  String loader_id = loader ? IdentifiersFactory::LoaderId(loader) : "";
-  resources_data_->ResourceCreated(request_id, loader_id, request.Url());
+    const FetchInitiatorInfo& initiator_info,
+    InspectorPageAgent::ResourceType type) {
+  String loader_id = IdentifiersFactory::LoaderId(loader);
+  // DocumentLoader doesn't have main resource set at the point, so RequestId()
+  // won't properly detect main resource. Workaround this by checking the
+  // frame type and manually setting request id to loader id.
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
+  bool is_navigation =
+      request.GetFrameType() != network::mojom::RequestContextFrameType::kNone;
+  if (is_navigation)
+    request_id = loader_id;
+  NetworkResourcesData::ResourceData const* data =
+      resources_data_->Data(request_id);
+  // Support for POST request redirect
+  scoped_refptr<EncodedFormData> post_data;
+  if (data)
+    post_data = data->PostData();
+  else if (request.HttpBody())
+    post_data = request.HttpBody()->DeepCopy();
 
-  InspectorPageAgent::ResourceType type = InspectorPageAgent::kOtherResource;
-  if (initiator_info.name == FetchInitiatorTypeNames::xmlhttprequest) {
+  resources_data_->ResourceCreated(execution_context, request_id, loader_id,
+                                   request.Url(), post_data);
+  if (initiator_info.name == FetchInitiatorTypeNames::xmlhttprequest)
     type = InspectorPageAgent::kXHRResource;
-    resources_data_->SetResourceType(request_id, type);
-  } else if (initiator_info.name == FetchInitiatorTypeNames::document) {
-    type = InspectorPageAgent::kDocumentResource;
-    resources_data_->SetResourceType(request_id, type);
-  }
+
+  resources_data_->SetResourceType(request_id, type);
+
+  if (is_navigation)
+    return;
 
   String frame_id = loader && loader->GetFrame()
                         ? IdentifiersFactory::FrameId(loader->GetFrame())
@@ -634,19 +765,13 @@ void InspectorNetworkAgent::WillSendRequestInternal(
                                ? loader->GetFrame()->GetDocument()
                                : nullptr,
                            initiator_info);
-  if (initiator_info.name == FetchInitiatorTypeNames::document) {
-    FrameNavigationInitiatorMap::iterator it =
-        frame_navigation_initiator_map_.find(frame_id);
-    if (it != frame_navigation_initiator_map_.end())
-      initiator_object = it->value->clone();
-  }
 
   std::unique_ptr<protocol::Network::Request> request_info(
-      BuildObjectForResourceRequest(request));
+      BuildObjectForResourceRequest(request, max_post_data_size_));
 
-  // |loader| is null while inspecting worker if off-main-thread-fetch is
-  // enabled. TODO(horo): Refactor MixedContentChecker and set mixed content
-  // type even if |loader| is null.
+  // |loader| is null while inspecting worker.
+  // TODO(horo): Refactor MixedContentChecker and set mixed content type even if
+  // |loader| is null.
   if (loader) {
     request_info->setMixedContentType(MixedContentTypeForContextType(
         MixedContentChecker::ContextTypeForInspector(loader->GetFrame(),
@@ -667,7 +792,7 @@ void InspectorNetworkAgent::WillSendRequestInternal(
     maybe_frame_id = frame_id;
   GetFrontend()->requestWillBeSent(
       request_id, loader_id, documentURL, std::move(request_info),
-      MonotonicallyIncreasingTime(), CurrentTime(), std::move(initiator_object),
+      CurrentTimeTicksInSeconds(), CurrentTime(), std::move(initiator_object),
       BuildObjectForResourceResponse(redirect_response), resource_type,
       std::move(maybe_frame_id));
   if (pending_xhr_replay_data_ && !pending_xhr_replay_data_->Async())
@@ -680,7 +805,8 @@ void InspectorNetworkAgent::WillSendRequest(
     DocumentLoader* loader,
     ResourceRequest& request,
     const ResourceResponse& redirect_response,
-    const FetchInitiatorInfo& initiator_info) {
+    const FetchInitiatorInfo& initiator_info,
+    Resource::Type resource_type) {
   // Ignore the request initiated internally.
   if (initiator_info.name == FetchInitiatorTypeNames::internal)
     return;
@@ -694,10 +820,16 @@ void InspectorNetworkAgent::WillSendRequest(
   if (headers) {
     for (size_t i = 0; i < headers->size(); ++i) {
       auto header = headers->at(i);
+      AtomicString header_name = AtomicString(header.first);
       String value;
-      if (header.second->asString(&value))
-        request.SetHTTPHeaderField(AtomicString(header.first),
-                                   AtomicString(value));
+      if (!header.second->asString(&value))
+        continue;
+      // When overriding referer, also override referrer policy
+      // for this request to assure the request will be allowed.
+      if (header_name.LowerASCII() == HTTPNames::Referer.LowerASCII())
+        request.SetHTTPReferrer(Referrer(value, kReferrerPolicyAlways));
+      else
+        request.SetHTTPHeaderField(header_name, AtomicString(value));
     }
   }
 
@@ -706,27 +838,32 @@ void InspectorNetworkAgent::WillSendRequest(
   if (state_->booleanProperty(NetworkAgentState::kCacheDisabled, false)) {
     if (LoadsFromCacheOnly(request) &&
         request.GetRequestContext() != WebURLRequest::kRequestContextInternal) {
-      request.SetCachePolicy(WebCachePolicy::kBypassCacheLoadOnlyFromCache);
+      request.SetCacheMode(mojom::FetchCacheMode::kUnspecifiedForceCacheMiss);
     } else {
-      request.SetCachePolicy(WebCachePolicy::kBypassingCache);
+      request.SetCacheMode(mojom::FetchCacheMode::kBypassCache);
     }
     request.SetShouldResetAppCache(true);
   }
   if (state_->booleanProperty(NetworkAgentState::kBypassServiceWorker, false))
-    request.SetServiceWorkerMode(WebURLRequest::ServiceWorkerMode::kNone);
+    request.SetSkipServiceWorker(true);
+
+  InspectorPageAgent::ResourceType type =
+      InspectorPageAgent::ToResourceType(resource_type);
 
   WillSendRequestInternal(execution_context, identifier, loader, request,
-                          redirect_response, initiator_info);
+                          redirect_response, initiator_info, type);
 
-  if (!host_id_.IsEmpty())
+  if (!conditions_token_.IsEmpty()) {
     request.AddHTTPHeaderField(
         HTTPNames::X_DevTools_Emulate_Network_Conditions_Client_Id,
-        AtomicString(host_id_));
+        AtomicString(conditions_token_));
+  }
 }
 
-void InspectorNetworkAgent::MarkResourceAsCached(unsigned long identifier) {
+void InspectorNetworkAgent::MarkResourceAsCached(DocumentLoader* loader,
+                                                 unsigned long identifier) {
   GetFrontend()->requestServedFromCache(
-      IdentifiersFactory::RequestId(identifier));
+      IdentifiersFactory::RequestId(loader, identifier));
 }
 
 void InspectorNetworkAgent::DidReceiveResourceResponse(
@@ -734,7 +871,7 @@ void InspectorNetworkAgent::DidReceiveResourceResponse(
     DocumentLoader* loader,
     const ResourceResponse& response,
     Resource* cached_resource) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
   bool is_not_modified = response.HttpStatusCode() == 304;
 
   bool resource_is_empty = true;
@@ -743,8 +880,9 @@ void InspectorNetworkAgent::DidReceiveResourceResponse(
                                      &resource_is_empty);
 
   InspectorPageAgent::ResourceType type =
-      cached_resource ? InspectorPageAgent::CachedResourceType(*cached_resource)
-                      : InspectorPageAgent::kOtherResource;
+      cached_resource
+          ? InspectorPageAgent::ToResourceType(cached_resource->GetType())
+          : InspectorPageAgent::kOtherResource;
   // Override with already discovered resource type.
   InspectorPageAgent::ResourceType saved_type =
       resources_data_->GetResourceType(request_id);
@@ -768,7 +906,7 @@ void InspectorNetworkAgent::DidReceiveResourceResponse(
   String frame_id = loader && loader->GetFrame()
                         ? IdentifiersFactory::FrameId(loader->GetFrame())
                         : "";
-  String loader_id = loader ? IdentifiersFactory::LoaderId(loader) : "";
+  String loader_id = IdentifiersFactory::LoaderId(loader);
   resources_data_->ResponseReceived(request_id, frame_id, response);
   resources_data_->SetResourceType(request_id, type);
 
@@ -781,12 +919,14 @@ void InspectorNetworkAgent::DidReceiveResourceResponse(
                                     response_security_details->certificate);
   }
 
+  if (IsNavigation(loader, identifier))
+    return;
   if (resource_response && !resource_is_empty) {
     Maybe<String> maybe_frame_id;
     if (!frame_id.IsEmpty())
       maybe_frame_id = frame_id;
     GetFrontend()->responseReceived(
-        request_id, loader_id, MonotonicallyIncreasingTime(),
+        request_id, loader_id, CurrentTimeTicksInSeconds(),
         InspectorPageAgent::ResourceTypeJson(type),
         std::move(resource_response), std::move(maybe_frame_id));
   }
@@ -794,7 +934,7 @@ void InspectorNetworkAgent::DidReceiveResourceResponse(
   // following didReceiveResponse as there will be no calls to didReceiveData
   // from the network stack.
   if (is_not_modified && cached_resource && cached_resource->EncodedSize())
-    DidReceiveData(identifier, loader, 0, cached_resource->EncodedSize());
+    DidReceiveData(identifier, loader, nullptr, cached_resource->EncodedSize());
 }
 
 static bool IsErrorStatusCode(int status_code) {
@@ -805,7 +945,7 @@ void InspectorNetworkAgent::DidReceiveData(unsigned long identifier,
                                            DocumentLoader* loader,
                                            const char* data,
                                            int data_length) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
 
   if (data) {
     NetworkResourcesData::ResourceData const* resource_data =
@@ -819,30 +959,32 @@ void InspectorNetworkAgent::DidReceiveData(unsigned long identifier,
   }
 
   GetFrontend()->dataReceived(
-      request_id, MonotonicallyIncreasingTime(), data_length,
+      request_id, CurrentTimeTicksInSeconds(), data_length,
       resources_data_->GetAndClearPendingEncodedDataLength(request_id));
 }
 
 void InspectorNetworkAgent::DidReceiveEncodedDataLength(
+    DocumentLoader* loader,
     unsigned long identifier,
     int encoded_data_length) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
   resources_data_->AddPendingEncodedDataLength(request_id, encoded_data_length);
 }
 
 void InspectorNetworkAgent::DidFinishLoading(unsigned long identifier,
-                                             DocumentLoader*,
+                                             DocumentLoader* loader,
                                              double monotonic_finish_time,
                                              int64_t encoded_data_length,
-                                             int64_t decoded_body_length) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+                                             int64_t decoded_body_length,
+                                             bool blocked_cross_site_document) {
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
   NetworkResourcesData::ResourceData const* resource_data =
       resources_data_->Data(request_id);
 
   int pending_encoded_data_length =
       resources_data_->GetAndClearPendingEncodedDataLength(request_id);
   if (pending_encoded_data_length > 0) {
-    GetFrontend()->dataReceived(request_id, MonotonicallyIncreasingTime(), 0,
+    GetFrontend()->dataReceived(request_id, CurrentTimeTicksInSeconds(), 0,
                                 pending_encoded_data_length);
   }
 
@@ -856,13 +998,14 @@ void InspectorNetworkAgent::DidFinishLoading(unsigned long identifier,
 
   resources_data_->MaybeDecodeDataToContent(request_id);
   if (!monotonic_finish_time)
-    monotonic_finish_time = MonotonicallyIncreasingTime();
+    monotonic_finish_time = CurrentTimeTicksInSeconds();
+
   GetFrontend()->loadingFinished(request_id, monotonic_finish_time,
-                                 encoded_data_length);
+                                 encoded_data_length,
+                                 blocked_cross_site_document);
 }
 
 void InspectorNetworkAgent::DidReceiveCORSRedirectResponse(
-    LocalFrame* frame,
     unsigned long identifier,
     DocumentLoader* loader,
     const ResourceResponse& response,
@@ -870,15 +1013,16 @@ void InspectorNetworkAgent::DidReceiveCORSRedirectResponse(
   // Update the response and finish loading
   DidReceiveResourceResponse(identifier, loader, response, resource);
   DidFinishLoading(identifier, loader, 0,
-                   WebURLLoaderClient::kUnknownEncodedDataLength, 0);
+                   WebURLLoaderClient::kUnknownEncodedDataLength, 0, false);
 }
 
 void InspectorNetworkAgent::DidFailLoading(unsigned long identifier,
+                                           DocumentLoader* loader,
                                            const ResourceError& error) {
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
   bool canceled = error.IsCancellation();
   GetFrontend()->loadingFailed(
-      request_id, MonotonicallyIncreasingTime(),
+      request_id, CurrentTimeTicksInSeconds(),
       InspectorPageAgent::ResourceTypeJson(
           resources_data_->GetResourceType(request_id)),
       error.LocalizedDescription(), canceled);
@@ -886,19 +1030,26 @@ void InspectorNetworkAgent::DidFailLoading(unsigned long identifier,
 
 void InspectorNetworkAgent::ScriptImported(unsigned long identifier,
                                            const String& source_string) {
-  resources_data_->SetResourceContent(IdentifiersFactory::RequestId(identifier),
-                                      source_string);
+  resources_data_->SetResourceContent(
+      IdentifiersFactory::SubresourceRequestId(identifier), source_string);
 }
 
 void InspectorNetworkAgent::DidReceiveScriptResponse(unsigned long identifier) {
-  resources_data_->SetResourceType(IdentifiersFactory::RequestId(identifier),
-                                   InspectorPageAgent::kScriptResource);
+  resources_data_->SetResourceType(
+      IdentifiersFactory::SubresourceRequestId(identifier),
+      InspectorPageAgent::kScriptResource);
 }
 
 void InspectorNetworkAgent::ClearPendingRequestData() {
   if (pending_request_type_ == InspectorPageAgent::kXHRResource)
     pending_xhr_replay_data_.Clear();
   pending_request_ = nullptr;
+}
+
+// static
+bool InspectorNetworkAgent::IsNavigation(DocumentLoader* loader,
+                                         unsigned long identifier) {
+  return loader && loader->MainResourceIdentifier() == identifier;
 }
 
 void InspectorNetworkAgent::DocumentThreadableLoaderStartedLoadingForClient(
@@ -912,7 +1063,7 @@ void InspectorNetworkAgent::DocumentThreadableLoaderStartedLoadingForClient(
   }
 
   known_request_id_map_.Set(client, identifier);
-  String request_id = IdentifiersFactory::RequestId(identifier);
+  String request_id = IdentifiersFactory::SubresourceRequestId(identifier);
   resources_data_->SetResourceType(request_id, pending_request_type_);
   if (pending_request_type_ == InspectorPageAgent::kXHRResource) {
     resources_data_->SetXHRReplayData(request_id,
@@ -935,21 +1086,20 @@ void InspectorNetworkAgent::
   ClearPendingRequestData();
 }
 
-void InspectorNetworkAgent::WillLoadXHR(XMLHttpRequest* xhr,
-                                        ThreadableLoaderClient* client,
-                                        const AtomicString& method,
-                                        const KURL& url,
-                                        bool async,
-                                        PassRefPtr<EncodedFormData> form_data,
-                                        const HTTPHeaderMap& headers,
-                                        bool include_credentials) {
+void InspectorNetworkAgent::WillLoadXHR(
+    XMLHttpRequest* xhr,
+    ThreadableLoaderClient* client,
+    const AtomicString& method,
+    const KURL& url,
+    bool async,
+    const HTTPHeaderMap& headers,
+    bool include_credentials) {
   DCHECK(xhr);
   DCHECK(!pending_request_);
   pending_request_ = client;
   pending_request_type_ = InspectorPageAgent::kXHRResource;
   pending_xhr_replay_data_ = XHRReplayData::Create(
-      xhr->GetExecutionContext(), method, UrlWithoutFragment(url), async,
-      form_data.Get(), include_credentials);
+      method, UrlWithoutFragment(url), async, include_credentials);
   for (const auto& header : headers)
     pending_xhr_replay_data_->AddHeader(header.key, header.value);
 }
@@ -959,7 +1109,7 @@ void InspectorNetworkAgent::DelayedRemoveReplayXHR(XMLHttpRequest* xhr) {
     return;
   replay_xhrs_to_be_deleted_.insert(xhr);
   replay_xhrs_.erase(xhr);
-  remove_finished_replay_xhr_timer_.StartOneShot(0, BLINK_FROM_HERE);
+  remove_finished_replay_xhr_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void InspectorNetworkAgent::DidFailXHRLoading(ExecutionContext* context,
@@ -1035,8 +1185,9 @@ void InspectorNetworkAgent::WillDispatchEventSourceEvent(
   if (it == known_request_id_map_.end())
     return;
   GetFrontend()->eventSourceMessageReceived(
-      IdentifiersFactory::RequestId(it->value), MonotonicallyIncreasingTime(),
-      event_name.GetString(), event_id.GetString(), data);
+      IdentifiersFactory::SubresourceRequestId(it->value),
+      CurrentTimeTicksInSeconds(), event_name.GetString(), event_id.GetString(),
+      data);
 }
 
 void InspectorNetworkAgent::DidFinishEventSourceRequest(
@@ -1126,7 +1277,7 @@ void InspectorNetworkAgent::DidCreateWebSocket(Document* document,
           SourceLocation::Capture(document)->BuildInspectorObject();
   if (!current_stack_trace) {
     GetFrontend()->webSocketCreated(
-        IdentifiersFactory::RequestId(identifier),
+        IdentifiersFactory::SubresourceRequestId(identifier),
         UrlWithoutFragment(request_url).GetString());
     return;
   }
@@ -1136,9 +1287,9 @@ void InspectorNetworkAgent::DidCreateWebSocket(Document* document,
           .setType(protocol::Network::Initiator::TypeEnum::Script)
           .build();
   initiator_object->setStack(std::move(current_stack_trace));
-  GetFrontend()->webSocketCreated(IdentifiersFactory::RequestId(identifier),
-                                  UrlWithoutFragment(request_url).GetString(),
-                                  std::move(initiator_object));
+  GetFrontend()->webSocketCreated(
+      IdentifiersFactory::SubresourceRequestId(identifier),
+      UrlWithoutFragment(request_url).GetString(), std::move(initiator_object));
 }
 
 void InspectorNetworkAgent::WillSendWebSocketHandshakeRequest(
@@ -1151,8 +1302,8 @@ void InspectorNetworkAgent::WillSendWebSocketHandshakeRequest(
           .setHeaders(BuildObjectForHeaders(request->HeaderFields()))
           .build();
   GetFrontend()->webSocketWillSendHandshakeRequest(
-      IdentifiersFactory::RequestId(identifier), MonotonicallyIncreasingTime(),
-      CurrentTime(), std::move(request_object));
+      IdentifiersFactory::SubresourceRequestId(identifier),
+      CurrentTimeTicksInSeconds(), CurrentTime(), std::move(request_object));
 }
 
 void InspectorNetworkAgent::DidReceiveWebSocketHandshakeResponse(
@@ -1177,14 +1328,15 @@ void InspectorNetworkAgent::DidReceiveWebSocketHandshakeResponse(
       response_object->setRequestHeadersText(request->HeadersText());
   }
   GetFrontend()->webSocketHandshakeResponseReceived(
-      IdentifiersFactory::RequestId(identifier), MonotonicallyIncreasingTime(),
-      std::move(response_object));
+      IdentifiersFactory::SubresourceRequestId(identifier),
+      CurrentTimeTicksInSeconds(), std::move(response_object));
 }
 
 void InspectorNetworkAgent::DidCloseWebSocket(Document*,
                                               unsigned long identifier) {
-  GetFrontend()->webSocketClosed(IdentifiersFactory::RequestId(identifier),
-                                 MonotonicallyIncreasingTime());
+  GetFrontend()->webSocketClosed(
+      IdentifiersFactory::SubresourceRequestId(identifier),
+      CurrentTimeTicksInSeconds());
 }
 
 void InspectorNetworkAgent::DidReceiveWebSocketFrame(unsigned long identifier,
@@ -1200,8 +1352,8 @@ void InspectorNetworkAgent::DidReceiveWebSocketFrame(unsigned long identifier,
               String::FromUTF8WithLatin1Fallback(payload, payload_length))
           .build();
   GetFrontend()->webSocketFrameReceived(
-      IdentifiersFactory::RequestId(identifier), MonotonicallyIncreasingTime(),
-      std::move(frame_object));
+      IdentifiersFactory::SubresourceRequestId(identifier),
+      CurrentTimeTicksInSeconds(), std::move(frame_object));
 }
 
 void InspectorNetworkAgent::DidSendWebSocketFrame(unsigned long identifier,
@@ -1216,28 +1368,31 @@ void InspectorNetworkAgent::DidSendWebSocketFrame(unsigned long identifier,
           .setPayloadData(
               String::FromUTF8WithLatin1Fallback(payload, payload_length))
           .build();
-  GetFrontend()->webSocketFrameSent(IdentifiersFactory::RequestId(identifier),
-                                    MonotonicallyIncreasingTime(),
-                                    std::move(frame_object));
+  GetFrontend()->webSocketFrameSent(
+      IdentifiersFactory::RequestId(nullptr, identifier),
+      CurrentTimeTicksInSeconds(), std::move(frame_object));
 }
 
 void InspectorNetworkAgent::DidReceiveWebSocketFrameError(
     unsigned long identifier,
     const String& error_message) {
-  GetFrontend()->webSocketFrameError(IdentifiersFactory::RequestId(identifier),
-                                     MonotonicallyIncreasingTime(),
-                                     error_message);
+  GetFrontend()->webSocketFrameError(
+      IdentifiersFactory::RequestId(nullptr, identifier),
+      CurrentTimeTicksInSeconds(), error_message);
 }
 
 Response InspectorNetworkAgent::enable(Maybe<int> total_buffer_size,
-                                       Maybe<int> resource_buffer_size) {
+                                       Maybe<int> resource_buffer_size,
+                                       Maybe<int> max_post_data_size) {
   Enable(total_buffer_size.fromMaybe(g_maximum_total_buffer_size),
-         resource_buffer_size.fromMaybe(g_maximum_resource_buffer_size));
+         resource_buffer_size.fromMaybe(g_maximum_resource_buffer_size),
+         max_post_data_size.fromMaybe(0));
   return Response::OK();
 }
 
 void InspectorNetworkAgent::Enable(int total_buffer_size,
-                                   int resource_buffer_size) {
+                                   int resource_buffer_size,
+                                   int max_post_data_size) {
   if (!GetFrontend())
     return;
   resources_data_->SetResourcesDataSizeLimits(total_buffer_size,
@@ -1246,6 +1401,8 @@ void InspectorNetworkAgent::Enable(int total_buffer_size,
   state_->setInteger(NetworkAgentState::kTotalBufferSize, total_buffer_size);
   state_->setInteger(NetworkAgentState::kResourceBufferSize,
                      resource_buffer_size);
+  state_->setInteger(NetworkAgentState::kMaxPostDataSize, max_post_data_size);
+  max_post_data_size_ = max_post_data_size;
   instrumenting_agents_->addInspectorNetworkAgent(this);
 }
 
@@ -1269,7 +1426,7 @@ Response InspectorNetworkAgent::setUserAgentOverride(const String& user_agent) {
 }
 
 Response InspectorNetworkAgent::setExtraHTTPHeaders(
-    const std::unique_ptr<protocol::Network::Headers> headers) {
+    std::unique_ptr<protocol::Network::Headers> headers) {
   state_->setObject(NetworkAgentState::kExtraRequestHeaders,
                     headers->toValue());
   return Response::OK();
@@ -1296,13 +1453,14 @@ void InspectorNetworkAgent::GetResponseBodyBlob(
       resources_data_->Data(request_id);
   BlobDataHandle* blob = resource_data->DownloadedFileBlob();
   InspectorFileReaderLoaderClient* client = new InspectorFileReaderLoaderClient(
-      blob, resource_data->MimeType(), resource_data->TextEncodingName(),
-      std::move(callback));
+      blob,
+      WTF::Bind(ResponseBodyFileReaderLoaderDone, resource_data->MimeType(),
+                resource_data->TextEncodingName(),
+                WTF::Passed(std::move(callback))));
   if (worker_global_scope_) {
     client->Start(worker_global_scope_);
     return;
   }
-  DCHECK(inspected_frames_);
   LocalFrame* frame = IdentifiersFactory::FrameById(inspected_frames_,
                                                     resource_data->FrameId());
   Document* document = frame->GetDocument();
@@ -1311,56 +1469,20 @@ void InspectorNetworkAgent::GetResponseBodyBlob(
 
 void InspectorNetworkAgent::getResponseBody(
     const String& request_id,
-    std::unique_ptr<GetResponseBodyCallback> pass_callback) {
-  std::unique_ptr<GetResponseBodyCallback> callback = std::move(pass_callback);
-  NetworkResourcesData::ResourceData const* resource_data =
-      resources_data_->Data(request_id);
-  if (!resource_data) {
-    callback->sendFailure(
-        Response::Error("No resource with given identifier found"));
-    return;
-  }
-
+    std::unique_ptr<GetResponseBodyCallback> callback) {
   if (CanGetResponseBodyBlob(request_id)) {
     GetResponseBodyBlob(request_id, std::move(callback));
     return;
   }
 
-  if (resource_data->HasContent()) {
-    callback->sendSuccess(resource_data->Content(),
-                          resource_data->Base64Encoded());
-    return;
+  String content;
+  bool base64_encoded;
+  Response response = GetResponseBody(request_id, &content, &base64_encoded);
+  if (response.isSuccess()) {
+    callback->sendSuccess(content, base64_encoded);
+  } else {
+    callback->sendFailure(response);
   }
-
-  if (resource_data->IsContentEvicted()) {
-    callback->sendFailure(
-        Response::Error("Request content was evicted from inspector cache"));
-    return;
-  }
-
-  if (resource_data->Buffer() && !resource_data->TextEncodingName().IsNull()) {
-    String result;
-    bool base64_encoded;
-    bool success = InspectorPageAgent::SharedBufferContent(
-        resource_data->Buffer(), resource_data->MimeType(),
-        resource_data->TextEncodingName(), &result, &base64_encoded);
-    DCHECK(success);
-    callback->sendSuccess(result, base64_encoded);
-    return;
-  }
-
-  if (resource_data->CachedResource()) {
-    String content;
-    bool base64_encoded = false;
-    if (InspectorPageAgent::CachedResourceContent(
-            resource_data->CachedResource(), &content, &base64_encoded)) {
-      callback->sendSuccess(content, base64_encoded);
-      return;
-    }
-  }
-
-  callback->sendFailure(
-      Response::Error("No data found for resource with given identifier"));
 }
 
 Response InspectorNetworkAgent::setBlockedURLs(
@@ -1377,12 +1499,13 @@ Response InspectorNetworkAgent::replayXHR(const String& request_id) {
   String actual_request_id = request_id;
 
   XHRReplayData* xhr_replay_data = resources_data_->XhrReplayData(request_id);
-  if (!xhr_replay_data)
+  auto data = resources_data_->Data(request_id);
+  if (!xhr_replay_data || !data)
     return Response::Error("Given id does not correspond to XHR");
 
-  ExecutionContext* execution_context = xhr_replay_data->GetExecutionContext();
+  ExecutionContext* execution_context = data->GetExecutionContext();
   if (execution_context->IsContextDestroyed()) {
-    resources_data_->SetXHRReplayData(request_id, 0);
+    resources_data_->SetXHRReplayData(request_id, nullptr);
     return Response::Error("Document is already detached");
   }
 
@@ -1398,7 +1521,7 @@ Response InspectorNetworkAgent::replayXHR(const String& request_id) {
     xhr->setRequestHeader(header.key, header.value,
                           IGNORE_EXCEPTION_FOR_TESTING);
   }
-  xhr->SendForInspectorXHRReplay(xhr_replay_data->FormData(),
+  xhr->SendForInspectorXHRReplay(data ? data->PostData() : nullptr,
                                  IGNORE_EXCEPTION_FOR_TESTING);
 
   replay_xhrs_.insert(xhr);
@@ -1432,11 +1555,13 @@ Response InspectorNetworkAgent::emulateNetworkConditions(
   }
   // TODO(dgozman): networkStateNotifier is per-process. It would be nice to
   // have per-frame override instead.
-  if (offline || latency || download_throughput || upload_throughput)
+  if (offline || latency || download_throughput || upload_throughput) {
     GetNetworkStateNotifier().SetNetworkConnectionInfoOverride(
-        !offline, type, download_throughput / (1024 * 1024 / 8));
-  else
+        !offline, type, base::nullopt, latency,
+        download_throughput / (1024 * 1024 / 8));
+  } else {
     GetNetworkStateNotifier().ClearOverride();
+  }
   return Response::OK();
 }
 
@@ -1465,12 +1590,12 @@ Response InspectorNetworkAgent::getCertificate(
     const String& origin,
     std::unique_ptr<protocol::Array<String>>* certificate) {
   *certificate = protocol::Array<String>::create();
-  RefPtr<SecurityOrigin> security_origin =
+  scoped_refptr<const SecurityOrigin> security_origin =
       SecurityOrigin::CreateFromString(origin);
   for (auto& resource : resources_data_->Resources()) {
-    RefPtr<SecurityOrigin> resource_origin =
+    scoped_refptr<const SecurityOrigin> resource_origin =
         SecurityOrigin::Create(resource->RequestedURL());
-    if (resource_origin->IsSameSchemeHostPort(security_origin.Get()) &&
+    if (resource_origin->IsSameSchemeHostPort(security_origin.get()) &&
         resource->Certificate().size()) {
       for (auto& cert : resource->Certificate())
         certificate->get()->addItem(Base64Encode(cert.Latin1()));
@@ -1482,7 +1607,6 @@ Response InspectorNetworkAgent::getCertificate(
 
 void InspectorNetworkAgent::DidCommitLoad(LocalFrame* frame,
                                           DocumentLoader* loader) {
-  DCHECK(inspected_frames_);
   DCHECK(IsMainThread());
   if (loader->GetFrame() != inspected_frames_->Root())
     return;
@@ -1494,7 +1618,7 @@ void InspectorNetworkAgent::DidCommitLoad(LocalFrame* frame,
 }
 
 void InspectorNetworkAgent::FrameScheduledNavigation(LocalFrame* frame,
-                                                     double) {
+                                                     ScheduledNavigation*) {
   String frame_id = IdentifiersFactory::FrameId(frame);
   frames_with_scheduled_navigation_.insert(frame_id);
   if (!frames_with_scheduled_client_navigation_.Contains(frame_id)) {
@@ -1529,8 +1653,64 @@ void InspectorNetworkAgent::FrameClearedScheduledClientNavigation(
     frame_navigation_initiator_map_.erase(frame_id);
 }
 
-void InspectorNetworkAgent::SetHostId(const String& host_id) {
-  host_id_ = host_id;
+Response InspectorNetworkAgent::GetResponseBody(const String& request_id,
+                                                String* content,
+                                                bool* base64_encoded) {
+  NetworkResourcesData::ResourceData const* resource_data =
+      resources_data_->Data(request_id);
+  if (!resource_data) {
+    return Response::Error("No resource with given identifier found");
+  }
+
+  if (resource_data->HasContent()) {
+    *content = resource_data->Content();
+    *base64_encoded = resource_data->Base64Encoded();
+    return Response::OK();
+  }
+
+  if (resource_data->IsContentEvicted()) {
+    return Response::Error("Request content was evicted from inspector cache");
+  }
+
+  if (resource_data->Buffer() && !resource_data->TextEncodingName().IsNull()) {
+    bool success = InspectorPageAgent::SharedBufferContent(
+        resource_data->Buffer(), resource_data->MimeType(),
+        resource_data->TextEncodingName(), content, base64_encoded);
+    DCHECK(success);
+    return Response::OK();
+  }
+
+  if (resource_data->CachedResource() &&
+      InspectorPageAgent::CachedResourceContent(resource_data->CachedResource(),
+                                                content, base64_encoded)) {
+    return Response::OK();
+  }
+
+  return Response::Error("No data found for resource with given identifier");
+}
+
+Response InspectorNetworkAgent::searchInResponseBody(
+    const String& request_id,
+    const String& query,
+    Maybe<bool> case_sensitive,
+    Maybe<bool> is_regex,
+    std::unique_ptr<
+        protocol::Array<v8_inspector::protocol::Debugger::API::SearchMatch>>*
+        matches) {
+  String content;
+  bool base64_encoded;
+  Response response = GetResponseBody(request_id, &content, &base64_encoded);
+  if (!response.isSuccess())
+    return response;
+
+  auto results = v8_session_->searchInTextByLines(
+      ToV8InspectorStringView(content), ToV8InspectorStringView(query),
+      case_sensitive.fromMaybe(false), is_regex.fromMaybe(false));
+  *matches = protocol::Array<
+      v8_inspector::protocol::Debugger::API::SearchMatch>::create();
+  for (size_t i = 0; i < results.size(); ++i)
+    matches->get()->addItem(std::move(results[i]));
+  return Response::OK();
 }
 
 bool InspectorNetworkAgent::FetchResourceContent(Document* document,
@@ -1560,10 +1740,15 @@ bool InspectorNetworkAgent::FetchResourceContent(Document* document,
   return false;
 }
 
-bool InspectorNetworkAgent::CacheDisabled() {
-  return state_->booleanProperty(NetworkAgentState::kNetworkAgentEnabled,
-                                 false) &&
-         state_->booleanProperty(NetworkAgentState::kCacheDisabled, false);
+String InspectorNetworkAgent::NavigationInitiatorInfo(LocalFrame* frame) {
+  if (!state_->booleanProperty(NetworkAgentState::kNetworkAgentEnabled, false))
+    return String();
+  FrameNavigationInitiatorMap::iterator it =
+      frame_navigation_initiator_map_.find(IdentifiersFactory::FrameId(frame));
+  if (it != frame_navigation_initiator_map_.end())
+    return it->value->serialize();
+  return BuildInitiatorObject(frame->GetDocument(), FetchInitiatorInfo())
+      ->serialize();
 }
 
 void InspectorNetworkAgent::RemoveFinishedReplayXHRFired(TimerBase*) {
@@ -1572,27 +1757,56 @@ void InspectorNetworkAgent::RemoveFinishedReplayXHRFired(TimerBase*) {
 
 InspectorNetworkAgent::InspectorNetworkAgent(
     InspectedFrames* inspected_frames,
-    WorkerGlobalScope* worker_global_scope)
+    WorkerGlobalScope* worker_global_scope,
+    v8_inspector::V8InspectorSession* v8_session)
     : inspected_frames_(inspected_frames),
       worker_global_scope_(worker_global_scope),
+      v8_session_(v8_session),
       resources_data_(
           NetworkResourcesData::Create(g_maximum_total_buffer_size,
                                        g_maximum_resource_buffer_size)),
       pending_request_(nullptr),
       remove_finished_replay_xhr_timer_(
-          inspected_frames ? TaskRunnerHelper::Get(TaskType::kUnspecedLoading,
-                                                   inspected_frames->Root())
-                           : TaskRunnerHelper::Get(TaskType::kUnspecedLoading,
-                                                   worker_global_scope),
+          worker_global_scope_
+              ? worker_global_scope->GetTaskRunner(TaskType::kUnspecedLoading)
+              : inspected_frames->Root()->GetTaskRunner(
+                    TaskType::kUnspecedLoading),
           this,
-          &InspectorNetworkAgent::RemoveFinishedReplayXHRFired) {
-  DCHECK((IsMainThread() && inspected_frames_ && !worker_global_scope_) ||
-         (!IsMainThread() && !inspected_frames_ && worker_global_scope_));
+          &InspectorNetworkAgent::RemoveFinishedReplayXHRFired),
+      max_post_data_size_(0) {
+  DCHECK((IsMainThread() && !worker_global_scope_) ||
+         (!IsMainThread() && worker_global_scope_));
+  conditions_token_ = IdentifiersFactory::IdFromToken(
+      worker_global_scope_ ? worker_global_scope_->GetParentDevToolsToken()
+                           : inspected_frames->Root()->GetDevToolsFrameToken());
 }
 
 void InspectorNetworkAgent::ShouldForceCORSPreflight(bool* result) {
   if (state_->booleanProperty(NetworkAgentState::kCacheDisabled, false))
     *result = true;
+}
+
+void InspectorNetworkAgent::getRequestPostData(
+    const String& request_id,
+    std::unique_ptr<GetRequestPostDataCallback> callback) {
+  NetworkResourcesData::ResourceData const* resource_data =
+      resources_data_->Data(request_id);
+  if (!resource_data) {
+    callback->sendFailure(
+        Response::Error("No resource with given id was found"));
+    return;
+  }
+  scoped_refptr<EncodedFormData> post_data = resource_data->PostData();
+  if (!post_data || post_data->IsEmpty()) {
+    callback->sendFailure(
+        Response::Error("No post data available for the request"));
+    return;
+  }
+
+  scoped_refptr<InspectorPostBodyParser> parser =
+      base::MakeRefCounted<InspectorPostBodyParser>(std::move(callback));
+  // TODO(crbug.com/810554): Extend protocol to fetch body parts separately
+  parser->Parse(resource_data->GetExecutionContext(), post_data.get());
 }
 
 }  // namespace blink

@@ -25,8 +25,8 @@ class RejectedPromises final : public RefCounted<RejectedPromises> {
   USING_FAST_MALLOC(RejectedPromises);
 
  public:
-  static PassRefPtr<RejectedPromises> Create() {
-    return AdoptRef(new RejectedPromises());
+  static scoped_refptr<RejectedPromises> Create() {
+    return base::AdoptRef(new RejectedPromises());
   }
 
   ~RejectedPromises();
@@ -47,7 +47,6 @@ class RejectedPromises final : public RefCounted<RejectedPromises> {
   RejectedPromises();
 
   using MessageQueue = Deque<std::unique_ptr<Message>>;
-  std::unique_ptr<MessageQueue> CreateMessageQueue();
 
   void ProcessQueueNow(std::unique_ptr<MessageQueue>);
   void RevokeNow(std::unique_ptr<Message>);

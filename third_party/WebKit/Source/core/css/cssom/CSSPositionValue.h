@@ -5,6 +5,7 @@
 #ifndef CSSPositionValue_h
 #define CSSPositionValue_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/css/cssom/CSSStyleValue.h"
 #include "platform/bindings/ScriptWrappable.h"
@@ -15,7 +16,6 @@ class CSSNumericValue;
 class ExceptionState;
 
 class CORE_EXPORT CSSPositionValue final : public CSSStyleValue {
-  WTF_MAKE_NONCOPYABLE(CSSPositionValue);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -23,6 +23,11 @@ class CORE_EXPORT CSSPositionValue final : public CSSStyleValue {
   static CSSPositionValue* Create(CSSNumericValue* x,
                                   CSSNumericValue* y,
                                   ExceptionState&);
+
+  // Blink-internal constructor
+  static CSSPositionValue* Create(CSSNumericValue* x, CSSNumericValue* y);
+
+  static CSSPositionValue* FromCSSValue(const CSSValue&);
 
   // Getters and setters defined in the IDL.
   CSSNumericValue* x() { return x_.Get(); }
@@ -33,19 +38,23 @@ class CORE_EXPORT CSSPositionValue final : public CSSStyleValue {
   // Internal methods - from CSSStyleValue.
   StyleValueType GetType() const final { return kPositionType; }
 
-  CSSValue* ToCSSValue() const final;
+  const CSSValue* ToCSSValue() const final;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(x_);
     visitor->Trace(y_);
     CSSStyleValue::Trace(visitor);
   }
+
+ private:
+  static bool IsValidCoordinate(CSSNumericValue* coord);
 
  protected:
   CSSPositionValue(CSSNumericValue* x, CSSNumericValue* y) : x_(x), y_(y) {}
 
   Member<CSSNumericValue> x_;
   Member<CSSNumericValue> y_;
+  DISALLOW_COPY_AND_ASSIGN(CSSPositionValue);
 };
 
 }  // namespace blink

@@ -29,28 +29,27 @@
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLIFrameElement.h"
+#include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
+#include "core/layout/LayoutCounter.h"
 #include "core/layout/LayoutEmbeddedContent.h"
 #include "core/layout/LayoutGeometryMap.h"
+#include "core/layout/LayoutView.h"
 #include "core/layout/ViewFragmentationContext.h"
-#include "core/layout/api/LayoutAPIShim.h"
-#include "core/layout/api/LayoutEmbeddedContentItem.h"
-#include "core/layout/api/LayoutViewItem.h"
-#include "core/layout/compositing/PaintLayerCompositor.h"
 #include "core/layout/svg/LayoutSVGRoot.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/paint/PaintLayer.h"
-#include "core/paint/ViewPaintInvalidator.h"
 #include "core/paint/ViewPainter.h"
+#include "core/paint/compositing/PaintLayerCompositor.h"
 #include "core/svg/SVGDocumentExtensions.h"
 #include "platform/Histogram.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/geometry/FloatQuad.h"
 #include "platform/geometry/TransformState.h"
 #include "platform/graphics/paint/PaintController.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/instrumentation/tracing/TracedValue.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
 
@@ -61,12 +60,12 @@ namespace {
 class HitTestLatencyRecorder {
  public:
   HitTestLatencyRecorder(bool allows_child_frame_content)
-      : start_(WTF::MonotonicallyIncreasingTime()),
+      : start_(WTF::CurrentTimeTicksInSeconds()),
         allows_child_frame_content_(allows_child_frame_content) {}
 
   ~HitTestLatencyRecorder() {
-    int duration = static_cast<int>(
-        (WTF::MonotonicallyIncreasingTime() - start_) * 1000000);
+    int duration =
+        static_cast<int>((WTF::CurrentTimeTicksInSeconds() - start_) * 1000000);
 
     if (allows_child_frame_content_) {
       DEFINE_STATIC_LOCAL(CustomCountHistogram, recursive_latency_histogram,
@@ -106,7 +105,7 @@ LayoutView::LayoutView(Document* document)
   SetPositionState(EPosition::kAbsolute);  // to 0,0 :)
 }
 
-LayoutView::~LayoutView() {}
+LayoutView::~LayoutView() = default;
 
 bool LayoutView::HitTest(HitTestResult& result) {
   // We have to recursively update layout/style here because otherwise, when the
@@ -117,7 +116,8 @@ bool LayoutView::HitTest(HitTestResult& result) {
   // Note that if an iframe has its render pipeline throttled, it will not
   // update layout here, and it will also not propagate the hit test into the
   // iframe's inner document.
-  GetFrameView()->UpdateLifecycleToCompositingCleanPlusScrolling();
+  if (!GetFrameView()->UpdateLifecycleToPrePaintClean())
+    return false;
   HitTestLatencyRecorder hit_test_latency_recorder(
       result.GetHitTestRequest().AllowsChildFrameContent());
   return HitTestNoLifecycleUpdate(result);
@@ -148,8 +148,10 @@ bool LayoutView::HitTestNoLifecycleUpdate(HitTestResult& result) {
     IntPoint frame_point = GetFrameView()->ContentsToFrame(
         result.GetHitTestLocation().RoundedPoint());
     if (Scrollbar* frame_scrollbar =
-            GetFrameView()->ScrollbarAtFramePoint(frame_point))
+            GetFrameView()->ScrollbarAtFramePoint(frame_point)) {
       result.SetScrollbar(frame_scrollbar);
+      hit_layer = true;
+    }
 
     // If hitTestResult include scrollbar, innerNode should be the parent of the
     // scrollbar.
@@ -188,9 +190,9 @@ bool LayoutView::HitTestNoLifecycleUpdate(HitTestResult& result) {
 
 void LayoutView::ClearHitTestCache() {
   hit_test_cache_->Clear();
-  LayoutEmbeddedContentItem frame_layout_item = GetFrame()->OwnerLayoutItem();
-  if (!frame_layout_item.IsNull())
-    frame_layout_item.View().ClearHitTestCache();
+  auto* object = GetFrame()->OwnerLayoutObject();
+  if (object)
+    object->View()->ClearHitTestCache();
 }
 
 void LayoutView::ComputeLogicalHeight(
@@ -215,17 +217,18 @@ bool LayoutView::CanHaveChildren() const {
     return true;
   if (!RuntimeEnabledFeatures::DisplayNoneIFrameCreatesNoLayoutObjectEnabled())
     return true;
+  // Although it is not spec compliant, many websites intentionally call
+  // Window.print() on display:none iframes. https://crbug.com/819327.
+  if (GetDocument().Printing())
+    return true;
+  // A PluginDocument needs a layout tree during loading, even if it is inside a
+  // display: none iframe.  This is because WebLocalFrameImpl::DidFinish expects
+  // the PluginDocument's <embed> element to have an EmbeddedContentView, which
+  // it acquires during LocalFrameView::UpdatePlugins, which operates on the
+  // <embed> element's layout object (LayoutEmbeddedObject).
+  if (GetDocument().IsPluginDocument())
+    return true;
   return !owner->IsDisplayNone();
-}
-
-void LayoutView::LayoutContent() {
-  DCHECK(NeedsLayout());
-
-  LayoutBlockFlow::UpdateLayout();
-
-#if DCHECK_IS_ON()
-  CheckLayoutState();
-#endif
 }
 
 #if DCHECK_IS_ON()
@@ -243,13 +246,49 @@ void LayoutView::SetShouldDoFullPaintInvalidationOnResizeIfNeeded(
   // composited and needs full paint invalidation on background positioning area
   // resize.
   if (Style()->HasFixedBackgroundImage() &&
-      (!compositor_ || !compositor_->NeedsFixedRootBackgroundLayer(Layer()))) {
+      (!compositor_ || !compositor_->NeedsFixedRootBackgroundLayer())) {
     if ((width_changed && MustInvalidateFillLayersPaintOnWidthChange(
                               Style()->BackgroundLayers())) ||
         (height_changed && MustInvalidateFillLayersPaintOnHeightChange(
                                Style()->BackgroundLayers())))
       SetShouldDoFullPaintInvalidation(PaintInvalidationReason::kBackground);
   }
+}
+
+void LayoutView::UpdateBlockLayout(bool relayout_children) {
+  SubtreeLayoutScope layout_scope(*this);
+
+  // Use calcWidth/Height to get the new width/height, since this will take the
+  // full page zoom factor into account.
+  relayout_children |=
+      !ShouldUsePrintingLayout() &&
+      (!frame_view_ || LogicalWidth() != ViewLogicalWidthForBoxSizing() ||
+       LogicalHeight() != ViewLogicalHeightForBoxSizing());
+
+  if (relayout_children) {
+    layout_scope.SetChildNeedsLayout(this);
+    for (LayoutObject* child = FirstChild(); child;
+         child = child->NextSibling()) {
+      if (child->IsSVGRoot())
+        continue;
+
+      if ((child->IsBox() && ToLayoutBox(child)->HasRelativeLogicalHeight()) ||
+          child->Style()->LogicalHeight().IsPercentOrCalc() ||
+          child->Style()->LogicalMinHeight().IsPercentOrCalc() ||
+          child->Style()->LogicalMaxHeight().IsPercentOrCalc())
+        layout_scope.SetChildNeedsLayout(child);
+    }
+
+    if (GetDocument().SvgExtensions())
+      GetDocument()
+          .AccessSVGExtensions()
+          .InvalidateSVGRootsWithRelativeLengthDescendents(&layout_scope);
+  }
+
+  if (!NeedsLayout())
+    return;
+
+  LayoutBlockFlow::UpdateBlockLayout(relayout_children);
 }
 
 void LayoutView::UpdateLayout() {
@@ -278,42 +317,10 @@ void LayoutView::UpdateLayout() {
     pagination_state_changed_ = true;
   }
 
-  SubtreeLayoutScope layout_scope(*this);
-
-  // Use calcWidth/Height to get the new width/height, since this will take the
-  // full page zoom factor into account.
-  bool relayout_children =
-      !ShouldUsePrintingLayout() &&
-      (!frame_view_ || LogicalWidth() != ViewLogicalWidthForBoxSizing() ||
-       LogicalHeight() != ViewLogicalHeightForBoxSizing());
-
-  if (relayout_children) {
-    layout_scope.SetChildNeedsLayout(this);
-    for (LayoutObject* child = FirstChild(); child;
-         child = child->NextSibling()) {
-      if (child->IsSVGRoot())
-        continue;
-
-      if ((child->IsBox() && ToLayoutBox(child)->HasRelativeLogicalHeight()) ||
-          child->Style()->LogicalHeight().IsPercentOrCalc() ||
-          child->Style()->LogicalMinHeight().IsPercentOrCalc() ||
-          child->Style()->LogicalMaxHeight().IsPercentOrCalc())
-        layout_scope.SetChildNeedsLayout(child);
-    }
-
-    if (GetDocument().SvgExtensions())
-      GetDocument()
-          .AccessSVGExtensions()
-          .InvalidateSVGRootsWithRelativeLengthDescendents(&layout_scope);
-  }
-
   DCHECK(!layout_state_);
-  if (!NeedsLayout())
-    return;
-
   LayoutState root_layout_state(*this);
 
-  LayoutContent();
+  LayoutBlockFlow::UpdateLayout();
 
 #if DCHECK_IS_ON()
   CheckLayoutState();
@@ -333,7 +340,7 @@ LayoutRect LayoutView::VisualOverflowRect() const {
   return LayoutOverflowRect();
 }
 
-LayoutRect LayoutView::LocalVisualRect() const {
+LayoutRect LayoutView::LocalVisualRectIgnoringVisibility() const {
   // TODO(wangxianzhu): This is only required without rootLayerScrolls (though
   // it is also correct but unnecessary with rootLayerScrolls) because of the
   // special LayoutView overflow model.
@@ -346,9 +353,9 @@ void LayoutView::MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
                                     TransformState& transform_state,
                                     MapCoordinatesFlags mode) const {
   if (!ancestor && mode & kUseTransforms &&
-      ShouldUseTransformFromContainer(0)) {
+      ShouldUseTransformFromContainer(nullptr)) {
     TransformationMatrix t;
-    GetTransformFromContainer(0, LayoutSize(), t);
+    GetTransformFromContainer(nullptr, LayoutSize(), t);
     transform_state.ApplyTransform(t);
   }
 
@@ -362,9 +369,8 @@ void LayoutView::MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
     return;
 
   if (mode & kTraverseDocumentBoundaries) {
-    LayoutEmbeddedContentItem parent_doc_layout_item =
-        GetFrame()->OwnerLayoutItem();
-    if (!parent_doc_layout_item.IsNull()) {
+    auto* parent_doc_layout_object = GetFrame()->OwnerLayoutObject();
+    if (parent_doc_layout_object) {
       if (!(mode & kInputIsInFrameCoordinates)) {
         transform_state.Move(
             LayoutSize(-GetFrame()->View()->GetScrollOffset()));
@@ -373,10 +379,10 @@ void LayoutView::MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
         mode &= ~kInputIsInFrameCoordinates;
       }
 
-      transform_state.Move(parent_doc_layout_item.ContentBoxOffset());
+      transform_state.Move(parent_doc_layout_object->ContentBoxOffset());
 
-      parent_doc_layout_item.MapLocalToAncestor(ancestor, transform_state,
-                                                mode);
+      parent_doc_layout_object->MapLocalToAncestor(ancestor, transform_state,
+                                                   mode);
     } else {
       GetFrameView()->ApplyTransformForTopFrameSpace(transform_state);
     }
@@ -390,9 +396,7 @@ const LayoutObject* LayoutView::PushMappingToContainer(
   LayoutObject* container = nullptr;
 
   if (geometry_map.GetMapCoordinatesFlags() & kTraverseDocumentBoundaries) {
-    if (LayoutEmbeddedContent* parent_doc_layout_object =
-            ToLayoutEmbeddedContent(LayoutAPIShim::LayoutObjectFrom(
-                GetFrame()->OwnerLayoutItem()))) {
+    if (auto* parent_doc_layout_object = GetFrame()->OwnerLayoutObject()) {
       offset = -LayoutSize(frame_view_->GetScrollOffset());
       offset += parent_doc_layout_object->ContentBoxOffset();
       container = parent_doc_layout_object;
@@ -420,9 +424,7 @@ void LayoutView::MapAncestorToLocal(const LayoutBoxModelObject* ancestor,
                                     TransformState& transform_state,
                                     MapCoordinatesFlags mode) const {
   if (this != ancestor && (mode & kTraverseDocumentBoundaries)) {
-    if (LayoutEmbeddedContent* parent_doc_layout_object =
-            ToLayoutEmbeddedContent(LayoutAPIShim::LayoutObjectFrom(
-                GetFrame()->OwnerLayoutItem()))) {
+    if (auto* parent_doc_layout_object = GetFrame()->OwnerLayoutObject()) {
       // A LayoutView is a containing block for fixed-position elements, so
       // don't carry this state across frames.
       parent_doc_layout_object->MapAncestorToLocal(ancestor, transform_state,
@@ -447,11 +449,6 @@ void LayoutView::ComputeSelfHitTestRects(Vector<LayoutRect>& rects,
   // explicitly).
   rects.push_back(LayoutRect(LayoutPoint::Zero(),
                              LayoutSize(GetFrameView()->ContentsSize())));
-}
-
-PaintInvalidationReason LayoutView::InvalidatePaint(
-    const PaintInvalidatorContext& context) const {
-  return ViewPaintInvalidator(*this, context).InvalidatePaint();
 }
 
 void LayoutView::Paint(const PaintInfo& paint_info,
@@ -601,13 +598,13 @@ LayoutSize LayoutView::OffsetForFixedPosition(
 void LayoutView::AbsoluteRects(Vector<IntRect>& rects,
                                const LayoutPoint& accumulated_offset) const {
   rects.push_back(
-      PixelSnappedIntRect(accumulated_offset, LayoutSize(Layer()->size())));
+      PixelSnappedIntRect(accumulated_offset, LayoutSize(Layer()->Size())));
 }
 
 void LayoutView::AbsoluteQuads(Vector<FloatQuad>& quads,
                                MapCoordinatesFlags mode) const {
   quads.push_back(LocalToAbsoluteQuad(
-      FloatRect(FloatPoint(), FloatSize(Layer()->size())), mode));
+      FloatRect(FloatPoint(), FloatSize(Layer()->Size())), mode));
 }
 
 void LayoutView::ClearSelection() {
@@ -670,8 +667,15 @@ void LayoutView::CalculateScrollbarModes(ScrollbarMode& h_mode,
   Document& document = GetDocument();
   if (Node* body = document.body()) {
     // Framesets can't scroll.
-    if (isHTMLFrameSetElement(body) && body->GetLayoutObject())
+    if (IsHTMLFrameSetElement(body) && body->GetLayoutObject())
       RETURN_SCROLLBAR_MODE(kScrollbarAlwaysOff);
+  }
+
+  if (document.Printing()) {
+    // When printing, frame-level scrollbars are never displayed.
+    // TODO(szager): Figure out the right behavior when printing an overflowing
+    // iframe.  https://bugs.chromium.org/p/chromium/issues/detail?id=777528
+    RETURN_SCROLLBAR_MODE(kScrollbarAlwaysOff);
   }
 
   if (LocalFrameView* frameView = GetFrameView()) {
@@ -728,6 +732,11 @@ void LayoutView::CalculateScrollbarModes(ScrollbarMode& h_mode,
     v_mode = kScrollbarAlwaysOn;
 
 #undef RETURN_SCROLLBAR_MODE
+}
+
+void LayoutView::DispatchFakeMouseMoveEventSoon(EventHandler& event_handler) {
+  event_handler.DispatchFakeMouseMoveEventSoon(
+      MouseEventManager::FakeMouseMoveReason::kDuringScroll);
 }
 
 IntRect LayoutView::DocumentRect() const {
@@ -805,13 +814,13 @@ void LayoutView::UpdateAfterLayout() {
   // factor.  The call to ResizeAfterLayout() will calculate the layout viewport
   // size based on the page minimum scale factor, and then update the
   // LocalFrameView with the new size.
-  if (HasOverflowClip())
-    GetScrollableArea()->ClampScrollOffsetAfterOverflowChange();
   LocalFrame& frame = GetFrameView()->GetFrame();
   if (!GetDocument().Printing())
     GetFrameView()->AdjustViewSize();
   if (frame.IsMainFrame())
     frame.GetChromeClient().ResizeAfterLayout();
+  if (HasOverflowClip())
+    GetScrollableArea()->ClampScrollOffsetAfterOverflowChange();
   LayoutBlockFlow::UpdateAfterLayout();
 }
 
@@ -847,7 +856,7 @@ void LayoutView::SetIsInWindow(bool is_in_window) {
 IntervalArena* LayoutView::GetIntervalArena() {
   if (!interval_arena_)
     interval_arena_ = IntervalArena::Create();
-  return interval_arena_.Get();
+  return interval_arena_.get();
 }
 
 bool LayoutView::BackgroundIsKnownToBeOpaqueInRect(const LayoutRect&) const {
@@ -866,7 +875,7 @@ FloatSize LayoutView::ViewportSizeForViewportUnits() const {
 void LayoutView::WillBeDestroyed() {
   // TODO(wangxianzhu): This is a workaround of crbug.com/570706.
   // Should find and fix the root cause.
-  if (PaintLayer* layer = this->Layer())
+  if (PaintLayer* layer = Layer())
     layer->SetNeedsRepaint();
   LayoutBlockFlow::WillBeDestroyed();
   compositor_.reset();
@@ -925,6 +934,23 @@ bool LayoutView::PaintedOutputOfObjectHasNoEffectRegardlessOfSize() const {
     return false;
 
   return LayoutBlockFlow::PaintedOutputOfObjectHasNoEffectRegardlessOfSize();
+}
+
+void LayoutView::UpdateCounters() {
+  if (!needs_counter_update_)
+    return;
+
+  needs_counter_update_ = false;
+  if (!HasLayoutCounters())
+    return;
+
+  for (LayoutObject* layout_object = this; layout_object;
+       layout_object = layout_object->NextInPreOrder()) {
+    if (!layout_object->IsCounter())
+      continue;
+
+    ToLayoutCounter(layout_object)->UpdateCounter();
+  }
 }
 
 }  // namespace blink

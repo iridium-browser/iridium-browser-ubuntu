@@ -39,13 +39,11 @@
 namespace blink {
 
 class ScriptState;
-class StorageErrorCallback;
-class StorageQuotaCallback;
-class StorageUsageCallback;
+class V8StorageErrorCallback;
+class V8StorageQuotaCallback;
+class V8StorageUsageCallback;
 
-class DeprecatedStorageInfo final
-    : public GarbageCollected<DeprecatedStorageInfo>,
-      public ScriptWrappable {
+class DeprecatedStorageInfo final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -58,16 +56,16 @@ class DeprecatedStorageInfo final
 
   void queryUsageAndQuota(ScriptState*,
                           int storage_type,
-                          StorageUsageCallback*,
-                          StorageErrorCallback*);
+                          V8StorageUsageCallback* = nullptr,
+                          V8StorageErrorCallback* = nullptr);
 
   void requestQuota(ScriptState*,
                     int storage_type,
                     unsigned long long new_quota_in_bytes,
-                    StorageQuotaCallback*,
-                    StorageErrorCallback*);
+                    V8StorageQuotaCallback* = nullptr,
+                    V8StorageErrorCallback* = nullptr);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   DeprecatedStorageInfo();

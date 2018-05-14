@@ -28,6 +28,7 @@
 #include "core/editing/iterators/SearchBuffer.h"
 
 #include "core/dom/Document.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/iterators/CharacterIterator.h"
 #include "core/editing/iterators/SimplifiedBackwardsTextIterator.h"
 #include "core/editing/iterators/TextSearcherICU.h"
@@ -83,7 +84,7 @@ inline SearchBuffer::SearchBuffer(const String& target, FindOptions options)
     }
   }
 
-  text_searcher_ = WTF::MakeUnique<TextSearcherICU>();
+  text_searcher_ = std::make_unique<TextSearcherICU>();
   text_searcher_->SetPattern(StringView(target_.data(), target_.size()),
                              !(options_ & kCaseInsensitive));
 
@@ -93,7 +94,7 @@ inline SearchBuffer::SearchBuffer(const String& target, FindOptions options)
                                    normalized_target_);
 }
 
-inline SearchBuffer::~SearchBuffer() {}
+inline SearchBuffer::~SearchBuffer() = default;
 
 template <typename CharType>
 inline void SearchBuffer::Append(const CharType* characters, size_t length) {
@@ -226,10 +227,10 @@ inline bool SearchBuffer::IsWordStartMatch(size_t start, size_t length) const {
     return true;
 
   size_t word_break_search_start = start + length;
-  while (word_break_search_start > start)
-    word_break_search_start =
-        FindNextWordFromIndex(buffer_.data(), buffer_.size(),
-                              word_break_search_start, false /* backwards */);
+  while (word_break_search_start > start) {
+    word_break_search_start = FindNextWordBackward(
+        buffer_.data(), buffer_.size(), word_break_search_start);
+  }
   if (word_break_search_start != start)
     return false;
   if (options_ & kWholeWord)
@@ -331,10 +332,11 @@ static size_t FindPlainTextInternal(CharacterIteratorAlgorithm<Strategy>& it,
 
   if (buffer.NeedsMoreContext()) {
     for (SimplifiedBackwardsTextIteratorAlgorithm<Strategy> backwards_iterator(
-             PositionTemplate<Strategy>::FirstPositionInNode(
-                 *it.OwnerDocument()),
-             PositionTemplate<Strategy>(it.CurrentContainer(),
-                                        it.StartOffset()));
+             EphemeralRangeTemplate<Strategy>(
+                 PositionTemplate<Strategy>::FirstPositionInNode(
+                     *it.OwnerDocument()),
+                 PositionTemplate<Strategy>(it.CurrentContainer(),
+                                            it.StartOffset())));
          !backwards_iterator.AtEnd(); backwards_iterator.Advance()) {
       BackwardsTextBuffer characters;
       backwards_iterator.CopyTextTo(&characters);
@@ -345,7 +347,6 @@ static size_t FindPlainTextInternal(CharacterIteratorAlgorithm<Strategy>& it,
   }
 
   while (!it.AtEnd()) {
-    // TODO(xiaochengh): Should allow copying text to SearchBuffer directly
     ForwardsTextBuffer characters;
     it.CopyTextTo(&characters);
     buffer.Append(characters.Data(), characters.Size());

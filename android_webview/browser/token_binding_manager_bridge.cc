@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "android_webview/browser/token_binding_manager_bridge.h"
-
 #include "android_webview/browser/net/token_binding_manager.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
@@ -62,16 +60,19 @@ void OnDeletionComplete(const ScopedJavaGlobalRef<jobject>& callback) {
 
 }  // namespace
 
-static void EnableTokenBinding(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+static void JNI_AwTokenBindingManager_EnableTokenBinding(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   // This needs to be called before starting chromium engine, so no thread
   // checks for UI.
   TokenBindingManager::GetInstance()->enable_token_binding();
 }
 
-static void GetTokenBindingKey(JNIEnv* env,
-                               const JavaParamRef<jobject>& obj,
-                               const JavaParamRef<jstring>& host,
-                               const JavaParamRef<jobject>& callback) {
+static void JNI_AwTokenBindingManager_GetTokenBindingKey(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& host,
+    const JavaParamRef<jobject>& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Store the Java callback in a scoped object and give the ownership to
   // base::Callback
@@ -84,10 +85,11 @@ static void GetTokenBindingKey(JNIEnv* env,
                                              key_callback);
 }
 
-static void DeleteTokenBindingKey(JNIEnv* env,
-                                  const JavaParamRef<jobject>& obj,
-                                  const JavaParamRef<jstring>& host,
-                                  const JavaParamRef<jobject>& callback) {
+static void JNI_AwTokenBindingManager_DeleteTokenBindingKey(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& host,
+    const JavaParamRef<jobject>& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Store the Java callback in a scoped object and give the ownership to
   // base::Callback
@@ -99,9 +101,10 @@ static void DeleteTokenBindingKey(JNIEnv* env,
       ConvertJavaStringToUTF8(env, host), complete_callback);
 }
 
-static void DeleteAllTokenBindingKeys(JNIEnv* env,
-                                      const JavaParamRef<jobject>& obj,
-                                      const JavaParamRef<jobject>& callback) {
+static void JNI_AwTokenBindingManager_DeleteAllTokenBindingKeys(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Store the Java callback in a scoped object and give the ownership to
   // base::Callback
@@ -110,10 +113,6 @@ static void DeleteAllTokenBindingKeys(JNIEnv* env,
   TokenBindingManager::DeletionCompleteCallback complete_callback =
       base::Bind(&OnDeletionComplete, j_callback);
   TokenBindingManager::GetInstance()->DeleteAllKeys(complete_callback);
-}
-
-bool RegisterTokenBindingManager(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace android_webview

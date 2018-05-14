@@ -7,7 +7,9 @@
 
 #include "platform/graphics/paint/FloatClipRect.h"
 #include "platform/graphics/paint/PropertyTreeState.h"
+#include "platform/scroll/ScrollTypes.h"
 #include "platform/wtf/HashMap.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
@@ -46,50 +48,56 @@ class PLATFORM_EXPORT GeometryMapper {
       const TransformPaintPropertyNode* source,
       const TransformPaintPropertyNode* destination);
 
-  // Same as sourceToDestinationVisualRect() except that only transforms are
+  // Same as SourceToDestinationVisualRect() except that only transforms are
   // applied.
   //
-  // |mappingRect| is both input and output.
+  // |mapping_rect| is both input and output.
   static void SourceToDestinationRect(
       const TransformPaintPropertyNode* source_transform_node,
       const TransformPaintPropertyNode* destination_transform_node,
       FloatRect& mapping_rect);
 
-  // Returns the "clip visual rect" between |localTransformState| and
-  // |ancestorState|. See above for the definition of "clip visual rect".
+  // Returns the clip rect between |local_state| and |ancestor_state|. The clip
+  // rect is the total clip rect that should be applied when painting contents
+  // of |local_state| in |ancestor_state| space. Because this clip rect applies
+  // on contents of |local_state|, it's not affected by any effect nodes between
+  // |local_state| and |ancestor_state|.
+  //
+  // Note that the clip of |ancestor_state| is *not* applied.
   //
   // The output FloatClipRect may contain false positives for rounded-ness
   // if a rounded clip is clipped out, and overly conservative results
   // in the presences of transforms.
-  static const FloatClipRect& LocalToAncestorClipRect(
-      const PropertyTreeState& local_transform_state,
-      const PropertyTreeState& ancestor_state);
-
-  // Maps from a rect in |localTransformSpace| to its visual rect in
-  // |ancestorState|. This is computed by multiplying the rect by its combined
-  // transform between |localTransformSpace| and |ancestorSpace|, then
-  // flattening into 2D space, then intersecting by the "clip visual rect" for
-  // |localTransformState|'s clips. See above for the definition of "clip visual
-  // rect".
-  //
-  // Note that the clip of |ancestorState| is *not* applied.
-  //
-  // DCHECK fails if any of the paint property tree nodes in
-  // |localTransformState| are not equal to or a descendant of that in
-  // |ancestorState|.
-  //
-  // |mappingRect| is both input and output.
-  //
-  // The output FloatClipRect may contain false positives for rounded-ness
-  // if a rounded clip is clipped out, and overly conservative results
-  // in the presences of transforms.
-  //
-  // TODO(chrishtr): we should provide a variant of these methods that
-  // guarantees a tight result, or else signals an error. crbug.com/708741
-  static void LocalToAncestorVisualRect(
-      const PropertyTreeState& local_transform_state,
+  static FloatClipRect LocalToAncestorClipRect(
+      const PropertyTreeState& local_state,
       const PropertyTreeState& ancestor_state,
-      FloatClipRect& mapping_rect);
+      OverlayScrollbarClipBehavior = kIgnorePlatformOverlayScrollbarSize);
+
+  // Maps from a rect in |local_state| to its visual rect in |ancestor_state|.
+  // If there is no effect node between |local_state| (included) and
+  // |ancestor_state| (not included), the result is computed by multiplying the
+  // rect by its combined transform between |local_state| and |ancestor_space|,
+  // then flattening into 2D space, then intersecting by the clip for
+  // |local_state|'s clips. If there are any pixel-moving effect nodes between
+  // |local_state| and |ancestor_state|, for each segment of states separated
+  // by the effect nodes, we'll execute the above process and map the result
+  // rect with the effect.
+  //
+  // Note that the clip of |ancestor_state| is *not* applied.
+  //
+  // DCHECK fails if any of the paint property tree nodes in |local_state| are
+  // not equal to or a descendant of that in |ancestor_state|.
+  //
+  // |mapping_rect| is both input and output.
+  //
+  // The output FloatClipRect may contain false positives for rounded-ness
+  // if a rounded clip is clipped out, and overly conservative results
+  // in the presences of transforms.
+  static void LocalToAncestorVisualRect(
+      const PropertyTreeState& local_state,
+      const PropertyTreeState& ancestor_state,
+      FloatClipRect& mapping_rect,
+      OverlayScrollbarClipBehavior = kIgnorePlatformOverlayScrollbarSize);
 
   static void ClearCache();
 
@@ -104,22 +112,25 @@ class PLATFORM_EXPORT GeometryMapper {
       const TransformPaintPropertyNode* destination,
       bool& success);
 
-  static const FloatClipRect& LocalToAncestorClipRectInternal(
+  static FloatClipRect LocalToAncestorClipRectInternal(
       const ClipPaintPropertyNode* descendant,
       const ClipPaintPropertyNode* ancestor_clip,
       const TransformPaintPropertyNode* ancestor_transform,
+      OverlayScrollbarClipBehavior,
       bool& success);
 
   static void LocalToAncestorVisualRectInternal(
-      const PropertyTreeState& local_transform_state,
+      const PropertyTreeState& local_state,
       const PropertyTreeState& ancestor_state,
       FloatClipRect& mapping_rect,
+      OverlayScrollbarClipBehavior,
       bool& success);
 
   static void SlowLocalToAncestorVisualRectWithEffects(
       const PropertyTreeState& local_state,
       const PropertyTreeState& ancestor_state,
       FloatClipRect& mapping_rect,
+      OverlayScrollbarClipBehavior,
       bool& success);
 
   friend class GeometryMapperTest;

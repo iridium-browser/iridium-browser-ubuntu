@@ -49,28 +49,28 @@ class SyncSchedulerImpl : public SyncScheduler {
   void ScheduleConfiguration(const ConfigurationParams& params) override;
   void ScheduleClearServerData(const ClearParams& params) override;
   void Stop() override;
-  void ScheduleLocalNudge(
-      ModelTypeSet types,
-      const tracked_objects::Location& nudge_location) override;
+  void ScheduleLocalNudge(ModelTypeSet types,
+                          const base::Location& nudge_location) override;
   void ScheduleLocalRefreshRequest(
       ModelTypeSet types,
-      const tracked_objects::Location& nudge_location) override;
+      const base::Location& nudge_location) override;
   void ScheduleInvalidationNudge(
       ModelType type,
       std::unique_ptr<InvalidationInterface> invalidation,
-      const tracked_objects::Location& nudge_location) override;
+      const base::Location& nudge_location) override;
   void ScheduleInitialSyncNudge(ModelType model_type) override;
   void SetNotificationsEnabled(bool notifications_enabled) override;
 
   void OnCredentialsUpdated() override;
-  void OnConnectionStatusChange() override;
+  void OnConnectionStatusChange(
+      net::NetworkChangeNotifier::ConnectionType type) override;
 
   // SyncCycle::Delegate implementation.
   void OnThrottled(const base::TimeDelta& throttle_duration) override;
   void OnTypesThrottled(ModelTypeSet types,
                         const base::TimeDelta& throttle_duration) override;
   void OnTypesBackedOff(ModelTypeSet types) override;
-  bool IsCurrentlyThrottled() override;
+  bool IsAnyThrottleOrBackoff() override;
   void OnReceivedShortPollIntervalUpdate(
       const base::TimeDelta& new_interval) override;
   void OnReceivedLongPollIntervalUpdate(
@@ -83,8 +83,8 @@ class SyncSchedulerImpl : public SyncScheduler {
   void OnReceivedGuRetryDelay(const base::TimeDelta& delay) override;
   void OnReceivedMigrationRequest(ModelTypeSet types) override;
 
-  // Returns true if the client is currently in exponential backoff.
-  bool IsBackingOff() const;
+  bool IsGlobalThrottle() const;
+  bool IsGlobalBackoff() const;
 
   // Changes the default delay between nudge cycles. Model-type specific
   // overrides will still apply. This is made public so that nudge cycles can be
@@ -168,13 +168,13 @@ class SyncSchedulerImpl : public SyncScheduler {
   // then post a delayed task to run it.  It may also choose to drop the job or
   // save it for later, depending on the scheduler's current state.
   void ScheduleNudgeImpl(const base::TimeDelta& delay,
-                         const tracked_objects::Location& nudge_location);
+                         const base::Location& nudge_location);
 
   // Helper to signal listeners about changed retry time.
   void NotifyRetryTime(base::Time retry_time);
 
   // Helper to signal listeners about changed throttled or backed off types.
-  void NotifyBlockedTypesChanged(ModelTypeSet types);
+  void NotifyBlockedTypesChanged();
 
   // Looks for pending work and, if it finds any, run this work at "canary"
   // priority.

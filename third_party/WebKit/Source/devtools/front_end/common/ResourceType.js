@@ -49,17 +49,24 @@ Common.ResourceType = class {
    * @return {!Common.ResourceType}
    */
   static fromMimeType(mimeType) {
-    var contentTypeAndTopLevelType = mimeType.match(/(\w*)\/\w*/);
-    if (!contentTypeAndTopLevelType)
+    if (mimeType.startsWith('text/html'))
+      return Common.resourceTypes.Document;
+    if (mimeType.startsWith('text/css'))
+      return Common.resourceTypes.Stylesheet;
+    if (mimeType.startsWith('image/'))
+      return Common.resourceTypes.Image;
+    if (mimeType.startsWith('text/'))
+      return Common.resourceTypes.Script;
+
+    if (mimeType.includes('font'))
+      return Common.resourceTypes.Font;
+    if (mimeType.includes('script'))
+      return Common.resourceTypes.Script;
+    if (mimeType.includes('octet'))
       return Common.resourceTypes.Other;
+    if (mimeType.includes('application'))
+      return Common.resourceTypes.Script;
 
-    var resourceType = Common.ResourceType._resourceTypeByMimeType.get(contentTypeAndTopLevelType[0]);
-    if (resourceType)
-      return resourceType;
-
-    resourceType = Common.ResourceType._resourceTypeByMimeType.get(contentTypeAndTopLevelType[1]);
-    if (resourceType)
-      return resourceType;
     return Common.resourceTypes.Other;
   }
 
@@ -76,11 +83,11 @@ Common.ResourceType = class {
    * @return {string|undefined}
    */
   static mimeFromURL(url) {
-    var name = Common.ParsedURL.extractName(url);
+    const name = Common.ParsedURL.extractName(url);
     if (Common.ResourceType._mimeTypeByName.has(name))
       return Common.ResourceType._mimeTypeByName.get(name);
 
-    var ext = Common.ParsedURL.extractExtension(url).toLowerCase();
+    const ext = Common.ParsedURL.extractExtension(url).toLowerCase();
     return Common.ResourceType._mimeTypeByExtension.get(ext);
   }
 
@@ -221,9 +228,9 @@ Common.resourceTypes = {
   TextTrack: new Common.ResourceType('texttrack', 'TextTrack', Common.resourceCategories.Other, true),
   WebSocket: new Common.ResourceType('websocket', 'WebSocket', Common.resourceCategories.WebSocket, false),
   Other: new Common.ResourceType('other', 'Other', Common.resourceCategories.Other, false),
-  SourceMapScript: new Common.ResourceType('sm-script', 'Script', Common.resourceCategories.Script, false),
+  SourceMapScript: new Common.ResourceType('sm-script', 'Script', Common.resourceCategories.Script, true),
   SourceMapStyleSheet:
-      new Common.ResourceType('sm-stylesheet', 'Stylesheet', Common.resourceCategories.Stylesheet, false),
+      new Common.ResourceType('sm-stylesheet', 'Stylesheet', Common.resourceCategories.Stylesheet, true),
   Manifest: new Common.ResourceType('manifest', 'Manifest', Common.resourceCategories.Manifest, true),
 };
 
@@ -251,7 +258,7 @@ Common.ResourceType._resourceTypeByExtension = new Map([
 Common.ResourceType._mimeTypeByExtension = new Map([
   // Web extensions
   ['js', 'text/javascript'], ['css', 'text/css'], ['html', 'text/html'], ['htm', 'text/html'],
-  ['xml', 'application/xml'], ['xsl', 'application/xml'],
+  ['mjs', 'text/javascript'], ['xml', 'application/xml'], ['xsl', 'application/xml'],
 
   // HTML Embedded Scripts, ASP], JSP
   ['asp', 'application/x-aspx'], ['aspx', 'application/x-aspx'], ['jsp', 'application/x-jsp'],
@@ -299,6 +306,9 @@ Common.ResourceType._mimeTypeByExtension = new Map([
   // LiveScript
   ['ls', 'text/x-livescript'],
 
+  // Markdown
+  ['md', 'text/markdown'],
+
   // ClojureScript
   ['cljs', 'text/x-clojure'], ['cljc', 'text/x-clojure'], ['cljx', 'text/x-clojure'],
 
@@ -309,21 +319,9 @@ Common.ResourceType._mimeTypeByExtension = new Map([
   ['jsx', 'text/jsx'],
 
   // Image
-  ['jpeg', 'image/jpeg'], ['jpg', 'image/jpeg'], ['svg', 'image/svg'], ['gif', 'image/gif'], ['webp', 'image/webp'],
+  ['jpeg', 'image/jpeg'], ['jpg', 'image/jpeg'], ['svg', 'image/svg+xml'], ['gif', 'image/gif'], ['webp', 'image/webp'],
   ['png', 'image/png'], ['ico', 'image/ico'], ['tiff', 'image/tiff'], ['tif', 'image/tif'], ['bmp', 'image/bmp'],
 
   // Font
   ['ttf', 'font/opentype'], ['otf', 'font/opentype'], ['ttc', 'font/opentype'], ['woff', 'application/font-woff']
-]);
-
-Common.ResourceType._resourceTypeByMimeType = new Map([
-  // Web types
-  ['text/javascript', Common.resourceTypes.Script], ['text/css', Common.resourceTypes.Stylesheet],
-  ['text/html', Common.resourceTypes.Document],
-
-  // Image
-  ['image', Common.resourceTypes.Image],
-
-  // Font
-  ['font', Common.resourceTypes.Font], ['application/font-woff', Common.resourceTypes.Font]
 ]);

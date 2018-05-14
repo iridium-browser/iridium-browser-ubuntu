@@ -9,19 +9,17 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
 #include "base/task_runner_util.h"
 #include "base/task_scheduler/post_task.h"
-#include "base/threading/sequenced_worker_pool.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
+#include "base/task_scheduler/task_traits.h"
 #include "chrome/browser/net/nss_context.h"
 #include "components/ownership/owner_key_util.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
-#include "content/public/browser/browser_thread.h"
 #include "crypto/rsa_private_key.h"
 #include "crypto/signature_creator.h"
 
@@ -137,38 +135,36 @@ void SessionManagerOperation::StorePublicKey(const base::Closure& callback,
 
 void SessionManagerOperation::RetrieveDeviceSettings() {
   session_manager_client()->RetrieveDevicePolicy(
-      base::Bind(&SessionManagerOperation::ValidateDeviceSettings,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&SessionManagerOperation::ValidateDeviceSettings,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void SessionManagerOperation::BlockingRetrieveDeviceSettings() {
   std::string policy_blob;
   RetrievePolicyResponseType response =
       session_manager_client()->BlockingRetrieveDevicePolicy(&policy_blob);
-  ValidateDeviceSettings(policy_blob, response);
+  ValidateDeviceSettings(response, policy_blob);
 }
 
 void SessionManagerOperation::ValidateDeviceSettings(
-    const std::string& policy_blob,
-    RetrievePolicyResponseType response_type) {
+    RetrievePolicyResponseType response_type,
+    const std::string& policy_blob) {
   if (policy_blob.empty()) {
     ReportResult(DeviceSettingsService::STORE_NO_POLICY);
     return;
   }
 
   std::unique_ptr<em::PolicyFetchResponse> policy =
-      base::MakeUnique<em::PolicyFetchResponse>();
+      std::make_unique<em::PolicyFetchResponse>();
   if (!policy->ParseFromString(policy_blob) || !policy->IsInitialized()) {
     ReportResult(DeviceSettingsService::STORE_INVALID_POLICY);
     return;
   }
 
-  base::SequencedWorkerPool* pool =
-      content::BrowserThread::GetBlockingPool();
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
-      pool->GetSequencedTaskRunnerWithShutdownBehavior(
-          pool->GetSequenceToken(),
-          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
+           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 
   std::unique_ptr<policy::DeviceCloudPolicyValidator> validator =
       policy::DeviceCloudPolicyValidator::Create(std::move(policy),

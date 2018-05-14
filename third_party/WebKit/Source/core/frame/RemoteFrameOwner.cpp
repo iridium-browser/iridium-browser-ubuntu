@@ -5,14 +5,17 @@
 #include "core/frame/RemoteFrameOwner.h"
 
 #include "core/frame/LocalFrame.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/LocalFrameClient.h"
+#include "core/frame/WebLocalFrameImpl.h"
+#include "core/timing/Performance.h"
+#include "public/platform/WebResourceTimingInfo.h"
 #include "public/web/WebFrameClient.h"
 
 namespace blink {
 
 RemoteFrameOwner::RemoteFrameOwner(
     SandboxFlags flags,
-    const WebParsedFeaturePolicy& container_policy,
+    const ParsedFeaturePolicy& container_policy,
     const WebFrameOwnerProperties& frame_owner_properties)
     : sandbox_flags_(flags),
       browsing_context_container_name_(
@@ -24,10 +27,10 @@ RemoteFrameOwner::RemoteFrameOwner(
       allow_fullscreen_(frame_owner_properties.allow_fullscreen),
       allow_payment_request_(frame_owner_properties.allow_payment_request),
       is_display_none_(frame_owner_properties.is_display_none),
-      csp_(frame_owner_properties.required_csp),
+      required_csp_(frame_owner_properties.required_csp),
       container_policy_(container_policy) {}
 
-DEFINE_TRACE(RemoteFrameOwner) {
+void RemoteFrameOwner::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   FrameOwner::Trace(visitor);
 }
@@ -46,9 +49,17 @@ void RemoteFrameOwner::ClearContentFrame() {
   frame_ = nullptr;
 }
 
+void RemoteFrameOwner::AddResourceTiming(const ResourceTimingInfo& info) {
+  LocalFrame* frame = ToLocalFrame(frame_);
+  WebResourceTimingInfo resource_timing = Performance::GenerateResourceTiming(
+      *frame->Tree().Parent()->GetSecurityContext()->GetSecurityOrigin(), info,
+      *frame->GetDocument());
+  frame->Client()->ForwardResourceTimingToParent(resource_timing);
+}
+
 void RemoteFrameOwner::DispatchLoad() {
-  WebLocalFrameBase* web_frame =
-      WebLocalFrameBase::FromFrame(ToLocalFrame(*frame_));
+  WebLocalFrameImpl* web_frame =
+      WebLocalFrameImpl::FromFrame(ToLocalFrame(*frame_));
   web_frame->Client()->DispatchLoad();
 }
 

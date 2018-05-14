@@ -47,7 +47,7 @@ class ColorInputType final : public InputType,
  public:
   static InputType* Create(HTMLInputElement&);
   ~ColorInputType() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
   using InputType::GetElement;
 
   // ColorChooserClient implementation.
@@ -57,7 +57,7 @@ class ColorInputType final : public InputType,
   IntRect ElementRectRelativeToViewport() const override;
   Color CurrentColor() override;
   bool ShouldShowSuggestions() const override;
-  Vector<ColorSuggestion> Suggestions() const override;
+  Vector<mojom::blink::ColorSuggestionPtr> Suggestions() const override;
   ColorChooserClient* GetColorChooserClient() override;
 
  private:

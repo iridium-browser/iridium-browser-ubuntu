@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/files/file_path.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/time/default_clock.h"
 #include "components/browser_sync/profile_sync_service.h"
@@ -61,19 +60,19 @@ std::unique_ptr<KeyedService> ReadingListModelFactory::BuildServiceInstanceFor(
   ios::ChromeBrowserState* chrome_browser_state =
       ios::ChromeBrowserState::FromBrowserState(context);
 
-  const syncer::ModelTypeStoreFactory& store_factory =
+  syncer::OnceModelTypeStoreFactory store_factory =
       browser_sync::ProfileSyncService::GetModelTypeStoreFactory(
-          syncer::READING_LIST, chrome_browser_state->GetStatePath());
-  std::unique_ptr<ReadingListStore> store = base::MakeUnique<ReadingListStore>(
-      store_factory,
+          chrome_browser_state->GetStatePath());
+  std::unique_ptr<ReadingListStore> store = std::make_unique<ReadingListStore>(
+      std::move(store_factory),
       base::Bind(&syncer::ModelTypeChangeProcessor::Create,
                  base::BindRepeating(&syncer::ReportUnrecoverableError,
                                      GetChannel())));
 
   std::unique_ptr<KeyedService> reading_list_model =
-      base::MakeUnique<ReadingListModelImpl>(
+      std::make_unique<ReadingListModelImpl>(
           std::move(store), chrome_browser_state->GetPrefs(),
-          base::MakeUnique<base::DefaultClock>());
+          std::make_unique<base::DefaultClock>());
   return reading_list_model;
 }
 

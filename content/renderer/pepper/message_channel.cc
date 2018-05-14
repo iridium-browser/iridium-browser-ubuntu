@@ -98,7 +98,7 @@ MessageChannel::~MessageChannel() {
 
 void MessageChannel::InstanceDeleted() {
   UnregisterSyncMessageStatusObserver();
-  instance_ = NULL;
+  instance_ = nullptr;
 }
 
 void MessageChannel::PostMessageToJavaScript(PP_Var message_data) {
@@ -447,8 +447,8 @@ void MessageChannel::DrainJSMessageQueueSoon() {
     return;
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&MessageChannel::DrainJSMessageQueue,
-                            weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&MessageChannel::DrainJSMessageQueue,
+                                weak_ptr_factory_.GetWeakPtr()));
   drain_js_message_queue_scheduled_ = true;
 }
 

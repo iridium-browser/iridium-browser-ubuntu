@@ -35,12 +35,6 @@ class PushPromisePayloadDecoderPeer {
   static constexpr uint8_t FlagsAffectingPayloadDecoding() {
     return Http2FrameFlag::PADDED;
   }
-
-  static void Randomize(PushPromisePayloadDecoder* p, RandomBase* rng) {
-    VLOG(1) << "PushPromisePayloadDecoderPeer::Randomize";
-    CorruptEnum(&p->payload_state_, rng);
-    test::Randomize(&p->push_promise_fields_, rng);
-  }
 };
 
 namespace {
@@ -114,7 +108,7 @@ TEST_P(PushPromisePayloadDecoderTest, VariousHpackPayloadSizes) {
                                   RandStreamId());
     set_frame_header(frame_header);
     FrameParts expected(frame_header, hpack_payload, total_pad_length_);
-    expected.opt_push_promise = push_promise;
+    expected.SetOptPushPromise(push_promise);
     EXPECT_TRUE(
         DecodePayloadAndValidateSeveralWays(frame_builder_.buffer(), expected));
   }

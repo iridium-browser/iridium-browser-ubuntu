@@ -15,9 +15,11 @@
 // See http://dev.chromium.org/developers/testing/threadsanitizer-tsan-v2
 // for the instructions on writing suppressions.
 char kTSanDefaultSuppressions[] =
-    // False positives in libflashplayer.so and libglib.so. Since we don't
-    // instrument them, we cannot reason about the synchronization in them.
+    // False positives in libflashplayer.so, libgio.so and libglib.so.
+    // Since we don't instrument them, we cannot reason about the
+    // synchronization in them.
     "race:libflashplayer.so\n"
+    "race:libgio*.so\n"
     "race:libglib*.so\n"
 
     // Intentional race in ToolsSanityTest.DataRace in base_unittests.
@@ -33,10 +35,6 @@ char kTSanDefaultSuppressions[] =
     "race:sqlite3StatusSet\n"
     "race:pcache1EnforceMaxPage\n"
     "race:pcache1AllocPage\n"
-
-    // http://crbug.com/102327.
-    // Test-only race, won't fix.
-    "race:tracked_objects::ThreadData::ShutdownSingleThreadedCleanup\n"
 
     // http://crbug.com/120808
     "race:base/threading/watchdog.cc\n"
@@ -88,13 +86,10 @@ char kTSanDefaultSuppressions[] =
     "race:*trace_event_unique_catstatic*\n"
 
     // http://crbug.com/244856
-    "race:AutoPulseLock\n"
+    "race:libpulsecommon*.so\n"
 
     // http://crbug.com/246968
     "race:webrtc::VideoCodingModuleImpl::RegisterPacketRequestCallback\n"
-
-    // http://crbug.com/246974
-    "race:content::GpuWatchdogThread::CheckArmed\n"
 
     // http://crbug.com/257396
     "race:base::trace_event::"
@@ -125,10 +120,6 @@ char kTSanDefaultSuppressions[] =
 
     // http://crbug.com/310851
     "race:net::ProxyResolverV8Tracing::Job::~Job\n"
-
-    // http://crbug.com/327330
-    "race:PrepareTextureMailbox\n"
-    "race:cc::LayerTreeHost::PaintLayerContents\n"
 
     // http://crbug.com/476529
     "deadlock:cc::VideoLayerImpl::WillDraw\n"
@@ -245,8 +236,10 @@ char kTSanDefaultSuppressions[] =
 
     // http://crbug.com/587199
     "race:base::TimerTest_OneShotTimer_CustomTaskRunner_Test::TestBody\n"
-    "race:base::TimerSequenceTest_OneShotTimerTaskOnPoolThread_Test::TestBody\n"
-    "race:base::TimerSequenceTest_OneShotTimerUsedAndTaskedOnDifferentPools\n"
+    "race:base::TimerSequenceTest_OneShotTimerTaskOnPoolSequence_Test::"
+    "TestBody\n"
+    "race:base::TimerSequenceTest_"
+    "OneShotTimerUsedAndTaskedOnDifferentSequences\n"
 
     // http://crbug.com/v8/6065
     "race:net::(anonymous namespace)::ProxyResolverV8TracingImpl::RequestImpl"
@@ -261,6 +254,12 @@ char kTSanDefaultSuppressions[] =
     // http://crbug.com/695929
     "race:base::i18n::IsRTL\n"
     "race:base::i18n::SetICUDefaultLocale\n"
+
+    // http://crbug.com/795110
+    "race:third_party/fontconfig/*\n"
+
+    // http://crbug.com/797998
+    "race:content::SandboxIPCHandler::HandleLocaltime\n"
 
     //
     "race:third_party/harfbuzz-ng/src/*\n"

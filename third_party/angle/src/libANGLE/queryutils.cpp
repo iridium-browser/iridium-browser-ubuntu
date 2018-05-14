@@ -19,15 +19,18 @@
 #include "libANGLE/Renderbuffer.h"
 #include "libANGLE/Sampler.h"
 #include "libANGLE/Shader.h"
+#include "libANGLE/Surface.h"
 #include "libANGLE/Texture.h"
 #include "libANGLE/Uniform.h"
 #include "libANGLE/VertexAttribute.h"
+#include "libANGLE/queryconversions.h"
 
 namespace gl
 {
 
 namespace
 {
+
 template <typename ParamType>
 void QueryTexLevelParameterBase(const Texture *texture,
                                 GLenum target,
@@ -41,66 +44,71 @@ void QueryTexLevelParameterBase(const Texture *texture,
     switch (pname)
     {
         case GL_TEXTURE_RED_TYPE:
-            *params = ConvertFromGLenum<ParamType>(info->redBits ? info->componentType : GL_NONE);
+            *params = CastFromGLintStateValue<ParamType>(
+                pname, info->redBits ? info->componentType : GL_NONE);
             break;
         case GL_TEXTURE_GREEN_TYPE:
-            *params = ConvertFromGLenum<ParamType>(info->greenBits ? info->componentType : GL_NONE);
+            *params = CastFromGLintStateValue<ParamType>(
+                pname, info->greenBits ? info->componentType : GL_NONE);
             break;
         case GL_TEXTURE_BLUE_TYPE:
-            *params = ConvertFromGLenum<ParamType>(info->blueBits ? info->componentType : GL_NONE);
+            *params = CastFromGLintStateValue<ParamType>(
+                pname, info->blueBits ? info->componentType : GL_NONE);
             break;
         case GL_TEXTURE_ALPHA_TYPE:
-            *params = ConvertFromGLenum<ParamType>(info->alphaBits ? info->componentType : GL_NONE);
+            *params = CastFromGLintStateValue<ParamType>(
+                pname, info->alphaBits ? info->componentType : GL_NONE);
             break;
         case GL_TEXTURE_DEPTH_TYPE:
-            *params = ConvertFromGLenum<ParamType>(info->depthBits ? info->componentType : GL_NONE);
+            *params = CastFromGLintStateValue<ParamType>(
+                pname, info->depthBits ? info->componentType : GL_NONE);
             break;
         case GL_TEXTURE_RED_SIZE:
-            *params = ConvertFromGLuint<ParamType>(info->redBits);
+            *params = CastFromGLintStateValue<ParamType>(pname, info->redBits);
             break;
         case GL_TEXTURE_GREEN_SIZE:
-            *params = ConvertFromGLuint<ParamType>(info->greenBits);
+            *params = CastFromGLintStateValue<ParamType>(pname, info->greenBits);
             break;
         case GL_TEXTURE_BLUE_SIZE:
-            *params = ConvertFromGLuint<ParamType>(info->blueBits);
+            *params = CastFromGLintStateValue<ParamType>(pname, info->blueBits);
             break;
         case GL_TEXTURE_ALPHA_SIZE:
-            *params = ConvertFromGLuint<ParamType>(info->alphaBits);
+            *params = CastFromGLintStateValue<ParamType>(pname, info->alphaBits);
             break;
         case GL_TEXTURE_DEPTH_SIZE:
-            *params = ConvertFromGLuint<ParamType>(info->depthBits);
+            *params = CastFromGLintStateValue<ParamType>(pname, info->depthBits);
             break;
         case GL_TEXTURE_STENCIL_SIZE:
-            *params = ConvertFromGLuint<ParamType>(info->stencilBits);
+            *params = CastFromGLintStateValue<ParamType>(pname, info->stencilBits);
             break;
         case GL_TEXTURE_SHARED_SIZE:
-            *params = ConvertFromGLuint<ParamType>(info->sharedBits);
+            *params = CastFromGLintStateValue<ParamType>(pname, info->sharedBits);
             break;
         case GL_TEXTURE_INTERNAL_FORMAT:
-            *params =
-                ConvertFromGLenum<ParamType>(info->internalFormat ? info->internalFormat : GL_RGBA);
+            *params = CastFromGLintStateValue<ParamType>(
+                pname, info->internalFormat ? info->internalFormat : GL_RGBA);
             break;
         case GL_TEXTURE_WIDTH:
-            *params =
-                ConvertFromGLint<ParamType>(static_cast<GLint>(texture->getWidth(target, level)));
+            *params = CastFromGLintStateValue<ParamType>(
+                pname, static_cast<uint32_t>(texture->getWidth(target, level)));
             break;
         case GL_TEXTURE_HEIGHT:
-            *params =
-                ConvertFromGLint<ParamType>(static_cast<GLint>(texture->getHeight(target, level)));
+            *params = CastFromGLintStateValue<ParamType>(
+                pname, static_cast<uint32_t>(texture->getHeight(target, level)));
             break;
         case GL_TEXTURE_DEPTH:
-            *params =
-                ConvertFromGLint<ParamType>(static_cast<GLint>(texture->getDepth(target, level)));
+            *params = CastFromGLintStateValue<ParamType>(
+                pname, static_cast<uint32_t>(texture->getDepth(target, level)));
             break;
         case GL_TEXTURE_SAMPLES:
-            *params = ConvertFromGLint<ParamType>(texture->getSamples(target, level));
+            *params = CastFromStateValue<ParamType>(pname, texture->getSamples(target, level));
             break;
         case GL_TEXTURE_FIXED_SAMPLE_LOCATIONS:
-            *params =
-                ConvertFromGLboolean<ParamType>(texture->getFixedSampleLocations(target, level));
+            *params = CastFromStateValue<ParamType>(
+                pname, static_cast<GLint>(texture->getFixedSampleLocations(target, level)));
             break;
         case GL_TEXTURE_COMPRESSED:
-            *params = ConvertFromGLboolean<ParamType>(info->compressed);
+            *params = CastFromStateValue<ParamType>(pname, static_cast<GLint>(info->compressed));
             break;
         default:
             UNREACHABLE();
@@ -116,64 +124,68 @@ void QueryTexParameterBase(const Texture *texture, GLenum pname, ParamType *para
     switch (pname)
     {
         case GL_TEXTURE_MAG_FILTER:
-            *params = ConvertFromGLenum<ParamType>(texture->getMagFilter());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getMagFilter());
             break;
         case GL_TEXTURE_MIN_FILTER:
-            *params = ConvertFromGLenum<ParamType>(texture->getMinFilter());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getMinFilter());
             break;
         case GL_TEXTURE_WRAP_S:
-            *params = ConvertFromGLenum<ParamType>(texture->getWrapS());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getWrapS());
             break;
         case GL_TEXTURE_WRAP_T:
-            *params = ConvertFromGLenum<ParamType>(texture->getWrapT());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getWrapT());
             break;
         case GL_TEXTURE_WRAP_R:
-            *params = ConvertFromGLenum<ParamType>(texture->getWrapR());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getWrapR());
             break;
         case GL_TEXTURE_IMMUTABLE_FORMAT:
-            *params = ConvertFromGLboolean<ParamType>(texture->getImmutableFormat());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getImmutableFormat());
             break;
         case GL_TEXTURE_IMMUTABLE_LEVELS:
-            *params = ConvertFromGLuint<ParamType>(texture->getImmutableLevels());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getImmutableLevels());
             break;
         case GL_TEXTURE_USAGE_ANGLE:
-            *params = ConvertFromGLenum<ParamType>(texture->getUsage());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getUsage());
             break;
         case GL_TEXTURE_MAX_ANISOTROPY_EXT:
-            *params = ConvertFromGLfloat<ParamType>(texture->getMaxAnisotropy());
+            *params = CastFromStateValue<ParamType>(pname, texture->getMaxAnisotropy());
             break;
         case GL_TEXTURE_SWIZZLE_R:
-            *params = ConvertFromGLenum<ParamType>(texture->getSwizzleRed());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getSwizzleRed());
             break;
         case GL_TEXTURE_SWIZZLE_G:
-            *params = ConvertFromGLenum<ParamType>(texture->getSwizzleGreen());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getSwizzleGreen());
             break;
         case GL_TEXTURE_SWIZZLE_B:
-            *params = ConvertFromGLenum<ParamType>(texture->getSwizzleBlue());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getSwizzleBlue());
             break;
         case GL_TEXTURE_SWIZZLE_A:
-            *params = ConvertFromGLenum<ParamType>(texture->getSwizzleAlpha());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getSwizzleAlpha());
             break;
         case GL_TEXTURE_BASE_LEVEL:
-            *params = ConvertFromGLuint<ParamType>(texture->getBaseLevel());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getBaseLevel());
             break;
         case GL_TEXTURE_MAX_LEVEL:
-            *params = ConvertFromGLuint<ParamType>(texture->getMaxLevel());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getMaxLevel());
             break;
         case GL_TEXTURE_MIN_LOD:
-            *params = ConvertFromGLfloat<ParamType>(texture->getSamplerState().minLod);
+            *params = CastFromStateValue<ParamType>(pname, texture->getSamplerState().minLod);
             break;
         case GL_TEXTURE_MAX_LOD:
-            *params = ConvertFromGLfloat<ParamType>(texture->getSamplerState().maxLod);
+            *params = CastFromStateValue<ParamType>(pname, texture->getSamplerState().maxLod);
             break;
         case GL_TEXTURE_COMPARE_MODE:
-            *params = ConvertFromGLenum<ParamType>(texture->getCompareMode());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getCompareMode());
             break;
         case GL_TEXTURE_COMPARE_FUNC:
-            *params = ConvertFromGLenum<ParamType>(texture->getCompareFunc());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getCompareFunc());
             break;
         case GL_TEXTURE_SRGB_DECODE_EXT:
-            *params = ConvertFromGLenum<ParamType>(texture->getSRGBDecode());
+            *params = CastFromGLintStateValue<ParamType>(pname, texture->getSRGBDecode());
+            break;
+        case GL_DEPTH_STENCIL_TEXTURE_MODE:
+            *params =
+                CastFromGLintStateValue<ParamType>(pname, texture->getDepthStencilTextureMode());
             break;
         default:
             UNREACHABLE();
@@ -189,63 +201,64 @@ void SetTexParameterBase(Context *context, Texture *texture, GLenum pname, const
     switch (pname)
     {
         case GL_TEXTURE_WRAP_S:
-            texture->setWrapS(ConvertToGLenum(params[0]));
+            texture->setWrapS(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_WRAP_T:
-            texture->setWrapT(ConvertToGLenum(params[0]));
+            texture->setWrapT(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_WRAP_R:
-            texture->setWrapR(ConvertToGLenum(params[0]));
+            texture->setWrapR(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_MIN_FILTER:
-            texture->setMinFilter(ConvertToGLenum(params[0]));
+            texture->setMinFilter(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_MAG_FILTER:
-            texture->setMagFilter(ConvertToGLenum(params[0]));
+            texture->setMagFilter(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_USAGE_ANGLE:
-            texture->setUsage(ConvertToGLenum(params[0]));
+            texture->setUsage(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_MAX_ANISOTROPY_EXT:
-            texture->setMaxAnisotropy(ConvertToGLfloat(params[0]));
+            texture->setMaxAnisotropy(CastQueryValueTo<GLfloat>(pname, params[0]));
             break;
         case GL_TEXTURE_COMPARE_MODE:
-            texture->setCompareMode(ConvertToGLenum(params[0]));
+            texture->setCompareMode(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_COMPARE_FUNC:
-            texture->setCompareFunc(ConvertToGLenum(params[0]));
+            texture->setCompareFunc(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_SWIZZLE_R:
-            texture->setSwizzleRed(ConvertToGLenum(params[0]));
+            texture->setSwizzleRed(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_SWIZZLE_G:
-            texture->setSwizzleGreen(ConvertToGLenum(params[0]));
+            texture->setSwizzleGreen(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_SWIZZLE_B:
-            texture->setSwizzleBlue(ConvertToGLenum(params[0]));
+            texture->setSwizzleBlue(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_SWIZZLE_A:
-            texture->setSwizzleAlpha(ConvertToGLenum(params[0]));
+            texture->setSwizzleAlpha(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_BASE_LEVEL:
         {
-            context->handleError(texture->setBaseLevel(context, ConvertToGLuint(params[0])));
+            context->handleError(texture->setBaseLevel(
+                context, clampCast<GLuint>(CastQueryValueTo<GLint>(pname, params[0]))));
             break;
         }
         case GL_TEXTURE_MAX_LEVEL:
-            texture->setMaxLevel(ConvertToGLuint(params[0]));
+            texture->setMaxLevel(clampCast<GLuint>(CastQueryValueTo<GLint>(pname, params[0])));
             break;
         case GL_TEXTURE_MIN_LOD:
-            texture->setMinLod(ConvertToGLfloat(params[0]));
+            texture->setMinLod(CastQueryValueTo<GLfloat>(pname, params[0]));
             break;
         case GL_TEXTURE_MAX_LOD:
-            texture->setMaxLod(ConvertToGLfloat(params[0]));
+            texture->setMaxLod(CastQueryValueTo<GLfloat>(pname, params[0]));
             break;
         case GL_DEPTH_STENCIL_TEXTURE_MODE:
-            texture->setDepthStencilTextureMode(ConvertToGLenum(params[0]));
+            texture->setDepthStencilTextureMode(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_SRGB_DECODE_EXT:
-            texture->setSRGBDecode(ConvertToGLenum(params[0]));
+            texture->setSRGBDecode(ConvertToGLenum(pname, params[0]));
             break;
         default:
             UNREACHABLE();
@@ -259,37 +272,37 @@ void QuerySamplerParameterBase(const Sampler *sampler, GLenum pname, ParamType *
     switch (pname)
     {
         case GL_TEXTURE_MIN_FILTER:
-            *params = ConvertFromGLenum<ParamType>(sampler->getMinFilter());
+            *params = CastFromGLintStateValue<ParamType>(pname, sampler->getMinFilter());
             break;
         case GL_TEXTURE_MAG_FILTER:
-            *params = ConvertFromGLenum<ParamType>(sampler->getMagFilter());
+            *params = CastFromGLintStateValue<ParamType>(pname, sampler->getMagFilter());
             break;
         case GL_TEXTURE_WRAP_S:
-            *params = ConvertFromGLenum<ParamType>(sampler->getWrapS());
+            *params = CastFromGLintStateValue<ParamType>(pname, sampler->getWrapS());
             break;
         case GL_TEXTURE_WRAP_T:
-            *params = ConvertFromGLenum<ParamType>(sampler->getWrapT());
+            *params = CastFromGLintStateValue<ParamType>(pname, sampler->getWrapT());
             break;
         case GL_TEXTURE_WRAP_R:
-            *params = ConvertFromGLenum<ParamType>(sampler->getWrapR());
+            *params = CastFromGLintStateValue<ParamType>(pname, sampler->getWrapR());
             break;
         case GL_TEXTURE_MAX_ANISOTROPY_EXT:
-            *params = ConvertFromGLfloat<ParamType>(sampler->getMaxAnisotropy());
+            *params = CastFromStateValue<ParamType>(pname, sampler->getMaxAnisotropy());
             break;
         case GL_TEXTURE_MIN_LOD:
-            *params = ConvertFromGLfloat<ParamType>(sampler->getMinLod());
+            *params = CastFromStateValue<ParamType>(pname, sampler->getMinLod());
             break;
         case GL_TEXTURE_MAX_LOD:
-            *params = ConvertFromGLfloat<ParamType>(sampler->getMaxLod());
+            *params = CastFromStateValue<ParamType>(pname, sampler->getMaxLod());
             break;
         case GL_TEXTURE_COMPARE_MODE:
-            *params = ConvertFromGLenum<ParamType>(sampler->getCompareMode());
+            *params = CastFromGLintStateValue<ParamType>(pname, sampler->getCompareMode());
             break;
         case GL_TEXTURE_COMPARE_FUNC:
-            *params = ConvertFromGLenum<ParamType>(sampler->getCompareFunc());
+            *params = CastFromGLintStateValue<ParamType>(pname, sampler->getCompareFunc());
             break;
         case GL_TEXTURE_SRGB_DECODE_EXT:
-            *params = ConvertFromGLenum<ParamType>(sampler->getSRGBDecode());
+            *params = CastFromGLintStateValue<ParamType>(pname, sampler->getSRGBDecode());
             break;
         default:
             UNREACHABLE();
@@ -303,54 +316,42 @@ void SetSamplerParameterBase(Sampler *sampler, GLenum pname, const ParamType *pa
     switch (pname)
     {
         case GL_TEXTURE_WRAP_S:
-            sampler->setWrapS(ConvertToGLenum(params[0]));
+            sampler->setWrapS(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_WRAP_T:
-            sampler->setWrapT(ConvertToGLenum(params[0]));
+            sampler->setWrapT(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_WRAP_R:
-            sampler->setWrapR(ConvertToGLenum(params[0]));
+            sampler->setWrapR(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_MIN_FILTER:
-            sampler->setMinFilter(ConvertToGLenum(params[0]));
+            sampler->setMinFilter(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_MAG_FILTER:
-            sampler->setMagFilter(ConvertToGLenum(params[0]));
+            sampler->setMagFilter(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_MAX_ANISOTROPY_EXT:
-            sampler->setMaxAnisotropy(ConvertToGLfloat(params[0]));
+            sampler->setMaxAnisotropy(CastQueryValueTo<GLfloat>(pname, params[0]));
             break;
         case GL_TEXTURE_COMPARE_MODE:
-            sampler->setCompareMode(ConvertToGLenum(params[0]));
+            sampler->setCompareMode(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_COMPARE_FUNC:
-            sampler->setCompareFunc(ConvertToGLenum(params[0]));
+            sampler->setCompareFunc(ConvertToGLenum(pname, params[0]));
             break;
         case GL_TEXTURE_MIN_LOD:
-            sampler->setMinLod(ConvertToGLfloat(params[0]));
+            sampler->setMinLod(CastQueryValueTo<GLfloat>(pname, params[0]));
             break;
         case GL_TEXTURE_MAX_LOD:
-            sampler->setMaxLod(ConvertToGLfloat(params[0]));
+            sampler->setMaxLod(CastQueryValueTo<GLfloat>(pname, params[0]));
             break;
         case GL_TEXTURE_SRGB_DECODE_EXT:
-            sampler->setSRGBDecode(ConvertToGLenum(params[0]));
+            sampler->setSRGBDecode(ConvertToGLenum(pname, params[0]));
             break;
         default:
             UNREACHABLE();
             break;
     }
-}
-
-template <typename ParamType, typename CurrentDataType>
-ParamType ConvertCurrentValue(CurrentDataType currentValue)
-{
-    return static_cast<ParamType>(currentValue);
-}
-
-template <>
-GLint ConvertCurrentValue(GLfloat currentValue)
-{
-    return iround<GLint>(currentValue);
 }
 
 // Warning: you should ensure binding really matches attrib.bindingIndex before using this function.
@@ -366,38 +367,38 @@ void QueryVertexAttribBase(const VertexAttribute &attrib,
         case GL_CURRENT_VERTEX_ATTRIB:
             for (size_t i = 0; i < CurrentValueCount; ++i)
             {
-                params[i] = ConvertCurrentValue<ParamType>(currentValueData[i]);
+                params[i] = CastFromStateValue<ParamType>(pname, currentValueData[i]);
             }
             break;
         case GL_VERTEX_ATTRIB_ARRAY_ENABLED:
-            *params = ConvertFromGLboolean<ParamType>(attrib.enabled);
+            *params = CastFromStateValue<ParamType>(pname, static_cast<GLint>(attrib.enabled));
             break;
         case GL_VERTEX_ATTRIB_ARRAY_SIZE:
-            *params = ConvertFromGLuint<ParamType>(attrib.size);
+            *params = CastFromGLintStateValue<ParamType>(pname, attrib.size);
             break;
         case GL_VERTEX_ATTRIB_ARRAY_STRIDE:
-            *params = ConvertFromGLuint<ParamType>(attrib.vertexAttribArrayStride);
+            *params = CastFromGLintStateValue<ParamType>(pname, attrib.vertexAttribArrayStride);
             break;
         case GL_VERTEX_ATTRIB_ARRAY_TYPE:
-            *params = ConvertFromGLenum<ParamType>(attrib.type);
+            *params = CastFromGLintStateValue<ParamType>(pname, attrib.type);
             break;
         case GL_VERTEX_ATTRIB_ARRAY_NORMALIZED:
-            *params = ConvertFromGLboolean<ParamType>(attrib.normalized);
+            *params = CastFromStateValue<ParamType>(pname, static_cast<GLint>(attrib.normalized));
             break;
         case GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING:
-            *params = ConvertFromGLuint<ParamType>(binding.getBuffer().id());
+            *params = CastFromGLintStateValue<ParamType>(pname, binding.getBuffer().id());
             break;
         case GL_VERTEX_ATTRIB_ARRAY_DIVISOR:
-            *params = ConvertFromGLuint<ParamType>(binding.getDivisor());
+            *params = CastFromGLintStateValue<ParamType>(pname, binding.getDivisor());
             break;
         case GL_VERTEX_ATTRIB_ARRAY_INTEGER:
-            *params = ConvertFromGLboolean<ParamType>(attrib.pureInteger);
+            *params = CastFromGLintStateValue<ParamType>(pname, attrib.pureInteger);
             break;
         case GL_VERTEX_ATTRIB_BINDING:
-            *params = ConvertFromGLuint<ParamType>(attrib.bindingIndex);
+            *params = CastFromGLintStateValue<ParamType>(pname, attrib.bindingIndex);
             break;
         case GL_VERTEX_ATTRIB_RELATIVE_OFFSET:
-            *params = ConvertFromGLuint<ParamType>(attrib.relativeOffset);
+            *params = CastFromGLintStateValue<ParamType>(pname, attrib.relativeOffset);
             break;
         default:
             UNREACHABLE();
@@ -413,25 +414,25 @@ void QueryBufferParameterBase(const Buffer *buffer, GLenum pname, ParamType *par
     switch (pname)
     {
         case GL_BUFFER_USAGE:
-            *params = ConvertFromGLenum<ParamType>(buffer->getUsage());
+            *params = CastFromGLintStateValue<ParamType>(pname, ToGLenum(buffer->getUsage()));
             break;
         case GL_BUFFER_SIZE:
-            *params = ConvertFromGLint64<ParamType>(buffer->getSize());
+            *params = CastFromStateValue<ParamType>(pname, buffer->getSize());
             break;
         case GL_BUFFER_ACCESS_FLAGS:
-            *params = ConvertFromGLuint<ParamType>(buffer->getAccessFlags());
+            *params = CastFromGLintStateValue<ParamType>(pname, buffer->getAccessFlags());
             break;
         case GL_BUFFER_ACCESS_OES:
-            *params = ConvertFromGLenum<ParamType>(buffer->getAccess());
+            *params = CastFromGLintStateValue<ParamType>(pname, buffer->getAccess());
             break;
         case GL_BUFFER_MAPPED:
-            *params = ConvertFromGLboolean<ParamType>(buffer->isMapped());
+            *params = CastFromStateValue<ParamType>(pname, buffer->isMapped());
             break;
         case GL_BUFFER_MAP_OFFSET:
-            *params = ConvertFromGLint64<ParamType>(buffer->getMapOffset());
+            *params = CastFromStateValue<ParamType>(pname, buffer->getMapOffset());
             break;
         case GL_BUFFER_MAP_LENGTH:
-            *params = ConvertFromGLint64<ParamType>(buffer->getMapLength());
+            *params = CastFromStateValue<ParamType>(pname, buffer->getMapLength());
             break;
         default:
             UNREACHABLE();
@@ -439,16 +440,372 @@ void QueryBufferParameterBase(const Buffer *buffer, GLenum pname, ParamType *par
     }
 }
 
+GLint GetCommonVariableProperty(const sh::ShaderVariable &var, GLenum prop)
+{
+    switch (prop)
+    {
+        case GL_TYPE:
+            return clampCast<GLint>(var.type);
+
+        case GL_ARRAY_SIZE:
+            // Queryable variables are guaranteed not to be arrays of arrays or arrays of structs,
+            // see GLES 3.1 spec section 7.3.1.1 page 77.
+            return clampCast<GLint>(var.getBasicTypeElementCount());
+
+        case GL_NAME_LENGTH:
+            // ES31 spec p84: This counts the terminating null char.
+            return clampCast<GLint>(var.name.size() + 1u);
+
+        default:
+            UNREACHABLE();
+            return GL_INVALID_VALUE;
+    }
+}
+
+GLint GetInputResourceProperty(const Program *program, GLuint index, GLenum prop)
+{
+    const auto &attribute = program->getInputResource(index);
+    switch (prop)
+    {
+        case GL_TYPE:
+        case GL_ARRAY_SIZE:
+        case GL_NAME_LENGTH:
+            return GetCommonVariableProperty(attribute, prop);
+
+        case GL_LOCATION:
+            return program->getAttributeLocation(attribute.name);
+
+        case GL_REFERENCED_BY_VERTEX_SHADER:
+            return 1;
+
+        case GL_REFERENCED_BY_FRAGMENT_SHADER:
+        case GL_REFERENCED_BY_COMPUTE_SHADER:
+            return 0;
+
+        default:
+            UNREACHABLE();
+            return GL_INVALID_VALUE;
+    }
+}
+
+GLint GetOutputResourceProperty(const Program *program, GLuint index, const GLenum prop)
+{
+    const auto &outputVariable = program->getOutputResource(index);
+    switch (prop)
+    {
+        case GL_TYPE:
+        case GL_ARRAY_SIZE:
+        case GL_NAME_LENGTH:
+            return GetCommonVariableProperty(outputVariable, prop);
+
+        case GL_LOCATION:
+            return program->getFragDataLocation(outputVariable.name);
+
+        case GL_REFERENCED_BY_VERTEX_SHADER:
+            return 0;
+
+        case GL_REFERENCED_BY_FRAGMENT_SHADER:
+            return 1;
+
+        case GL_REFERENCED_BY_COMPUTE_SHADER:
+            return 0;
+
+        default:
+            UNREACHABLE();
+            return GL_INVALID_VALUE;
+    }
+}
+
+GLint GetTransformFeedbackVaryingResourceProperty(const Program *program,
+                                                  GLuint index,
+                                                  const GLenum prop)
+{
+    const auto &tfVariable = program->getTransformFeedbackVaryingResource(index);
+    switch (prop)
+    {
+        case GL_TYPE:
+            return clampCast<GLint>(tfVariable.type);
+
+        case GL_ARRAY_SIZE:
+            return clampCast<GLint>(tfVariable.size());
+
+        case GL_NAME_LENGTH:
+            return clampCast<GLint>(tfVariable.nameWithArrayIndex().size() + 1);
+
+        default:
+            UNREACHABLE();
+            return GL_INVALID_VALUE;
+    }
+}
+
+GLint QueryProgramInterfaceActiveResources(const Program *program, GLenum programInterface)
+{
+    switch (programInterface)
+    {
+        case GL_PROGRAM_INPUT:
+            return clampCast<GLint>(program->getAttributes().size());
+
+        case GL_PROGRAM_OUTPUT:
+            return clampCast<GLint>(program->getState().getOutputVariables().size());
+
+        case GL_UNIFORM:
+            return clampCast<GLint>(program->getState().getUniforms().size());
+
+        case GL_UNIFORM_BLOCK:
+            return clampCast<GLint>(program->getState().getUniformBlocks().size());
+
+        case GL_ATOMIC_COUNTER_BUFFER:
+            return clampCast<GLint>(program->getState().getAtomicCounterBuffers().size());
+
+        case GL_BUFFER_VARIABLE:
+            return clampCast<GLint>(program->getState().getBufferVariables().size());
+
+        case GL_SHADER_STORAGE_BLOCK:
+            return clampCast<GLint>(program->getState().getShaderStorageBlocks().size());
+
+        case GL_TRANSFORM_FEEDBACK_VARYING:
+            return clampCast<GLint>(program->getTransformFeedbackVaryingCount());
+
+        default:
+            UNREACHABLE();
+            return 0;
+    }
+}
+
+template <typename T, typename M>
+GLint FindMaxSize(const std::vector<T> &resources, M member)
+{
+    GLint max = 0;
+    for (const T &resource : resources)
+    {
+        max = std::max(max, clampCast<GLint>((resource.*member).size()));
+    }
+    return max;
+}
+
+GLint QueryProgramInterfaceMaxNameLength(const Program *program, GLenum programInterface)
+{
+    GLint maxNameLength = 0;
+    switch (programInterface)
+    {
+        case GL_PROGRAM_INPUT:
+            maxNameLength = FindMaxSize(program->getAttributes(), &sh::Attribute::name);
+            break;
+
+        case GL_PROGRAM_OUTPUT:
+            maxNameLength =
+                FindMaxSize(program->getState().getOutputVariables(), &sh::OutputVariable::name);
+            break;
+
+        case GL_UNIFORM:
+            maxNameLength = FindMaxSize(program->getState().getUniforms(), &LinkedUniform::name);
+            break;
+
+        case GL_UNIFORM_BLOCK:
+            return program->getActiveUniformBlockMaxNameLength();
+
+        case GL_BUFFER_VARIABLE:
+            maxNameLength =
+                FindMaxSize(program->getState().getBufferVariables(), &BufferVariable::name);
+            break;
+
+        case GL_SHADER_STORAGE_BLOCK:
+            return program->getActiveShaderStorageBlockMaxNameLength();
+
+        case GL_TRANSFORM_FEEDBACK_VARYING:
+            return clampCast<GLint>(program->getTransformFeedbackVaryingMaxLength());
+
+        default:
+            UNREACHABLE();
+            return 0;
+    }
+    // This length includes an extra character for the null terminator.
+    return (maxNameLength == 0 ? 0 : maxNameLength + 1);
+}
+
+GLint QueryProgramInterfaceMaxNumActiveVariables(const Program *program, GLenum programInterface)
+{
+    switch (programInterface)
+    {
+        case GL_UNIFORM_BLOCK:
+            return FindMaxSize(program->getState().getUniformBlocks(),
+                               &InterfaceBlock::memberIndexes);
+        case GL_ATOMIC_COUNTER_BUFFER:
+            return FindMaxSize(program->getState().getAtomicCounterBuffers(),
+                               &AtomicCounterBuffer::memberIndexes);
+
+        case GL_SHADER_STORAGE_BLOCK:
+            return FindMaxSize(program->getState().getShaderStorageBlocks(),
+                               &InterfaceBlock::memberIndexes);
+
+        default:
+            UNREACHABLE();
+            return 0;
+    }
+}
+
+GLenum GetUniformPropertyEnum(GLenum prop)
+{
+    switch (prop)
+    {
+        case GL_UNIFORM_TYPE:
+            return GL_TYPE;
+        case GL_UNIFORM_SIZE:
+            return GL_ARRAY_SIZE;
+        case GL_UNIFORM_NAME_LENGTH:
+            return GL_NAME_LENGTH;
+        case GL_UNIFORM_BLOCK_INDEX:
+            return GL_BLOCK_INDEX;
+        case GL_UNIFORM_OFFSET:
+            return GL_OFFSET;
+        case GL_UNIFORM_ARRAY_STRIDE:
+            return GL_ARRAY_STRIDE;
+        case GL_UNIFORM_MATRIX_STRIDE:
+            return GL_MATRIX_STRIDE;
+        case GL_UNIFORM_IS_ROW_MAJOR:
+            return GL_IS_ROW_MAJOR;
+
+        default:
+            return prop;
+    }
+}
+
+GLenum GetUniformBlockPropertyEnum(GLenum prop)
+{
+    switch (prop)
+    {
+        case GL_UNIFORM_BLOCK_BINDING:
+            return GL_BUFFER_BINDING;
+
+        case GL_UNIFORM_BLOCK_DATA_SIZE:
+            return GL_BUFFER_DATA_SIZE;
+
+        case GL_UNIFORM_BLOCK_NAME_LENGTH:
+            return GL_NAME_LENGTH;
+
+        case GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS:
+            return GL_NUM_ACTIVE_VARIABLES;
+
+        case GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES:
+            return GL_ACTIVE_VARIABLES;
+
+        case GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER:
+            return GL_REFERENCED_BY_VERTEX_SHADER;
+
+        case GL_UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER:
+            return GL_REFERENCED_BY_FRAGMENT_SHADER;
+
+        default:
+            return prop;
+    }
+}
+
+void GetShaderVariableBufferResourceProperty(const ShaderVariableBuffer &buffer,
+                                             GLenum pname,
+                                             GLint *params,
+                                             GLsizei bufSize,
+                                             GLsizei *outputPosition)
+
+{
+    switch (pname)
+    {
+        case GL_BUFFER_BINDING:
+            params[(*outputPosition)++] = buffer.binding;
+            break;
+        case GL_BUFFER_DATA_SIZE:
+            params[(*outputPosition)++] = clampCast<GLint>(buffer.dataSize);
+            break;
+        case GL_NUM_ACTIVE_VARIABLES:
+            params[(*outputPosition)++] = buffer.numActiveVariables();
+            break;
+        case GL_ACTIVE_VARIABLES:
+            for (size_t memberIndex = 0;
+                 memberIndex < buffer.memberIndexes.size() && *outputPosition < bufSize;
+                 ++memberIndex)
+            {
+                params[(*outputPosition)++] = clampCast<GLint>(buffer.memberIndexes[memberIndex]);
+            }
+            break;
+        case GL_REFERENCED_BY_VERTEX_SHADER:
+            params[(*outputPosition)++] = static_cast<GLint>(buffer.vertexStaticUse);
+            break;
+        case GL_REFERENCED_BY_FRAGMENT_SHADER:
+            params[(*outputPosition)++] = static_cast<GLint>(buffer.fragmentStaticUse);
+            break;
+        case GL_REFERENCED_BY_COMPUTE_SHADER:
+            params[(*outputPosition)++] = static_cast<GLint>(buffer.computeStaticUse);
+            break;
+        default:
+            UNREACHABLE();
+            break;
+    }
+}
+
+void GetInterfaceBlockResourceProperty(const InterfaceBlock &block,
+                                       GLenum pname,
+                                       GLint *params,
+                                       GLsizei bufSize,
+                                       GLsizei *outputPosition)
+{
+    if (pname == GL_NAME_LENGTH)
+    {
+        params[(*outputPosition)++] = clampCast<GLint>(block.nameWithArrayIndex().size() + 1);
+        return;
+    }
+    GetShaderVariableBufferResourceProperty(block, pname, params, bufSize, outputPosition);
+}
+
+void GetUniformBlockResourceProperty(const Program *program,
+                                     GLuint blockIndex,
+                                     GLenum pname,
+                                     GLint *params,
+                                     GLsizei bufSize,
+                                     GLsizei *outputPosition)
+
+{
+    ASSERT(*outputPosition < bufSize);
+    const auto &block = program->getUniformBlockByIndex(blockIndex);
+    GetInterfaceBlockResourceProperty(block, pname, params, bufSize, outputPosition);
+}
+
+void GetShaderStorageBlockResourceProperty(const Program *program,
+                                           GLuint blockIndex,
+                                           GLenum pname,
+                                           GLint *params,
+                                           GLsizei bufSize,
+                                           GLsizei *outputPosition)
+
+{
+    ASSERT(*outputPosition < bufSize);
+    const auto &block = program->getShaderStorageBlockByIndex(blockIndex);
+    GetInterfaceBlockResourceProperty(block, pname, params, bufSize, outputPosition);
+}
+
+void GetAtomicCounterBufferResourceProperty(const Program *program,
+                                            GLuint index,
+                                            GLenum pname,
+                                            GLint *params,
+                                            GLsizei bufSize,
+                                            GLsizei *outputPosition)
+
+{
+    ASSERT(*outputPosition < bufSize);
+    const auto &buffer = program->getState().getAtomicCounterBuffers()[index];
+    GetShaderVariableBufferResourceProperty(buffer, pname, params, bufSize, outputPosition);
+}
+
 }  // anonymous namespace
 
-void QueryFramebufferAttachmentParameteriv(const Framebuffer *framebuffer,
+void QueryFramebufferAttachmentParameteriv(const Context *context,
+                                           const Framebuffer *framebuffer,
                                            GLenum attachment,
                                            GLenum pname,
                                            GLint *params)
 {
     ASSERT(framebuffer);
 
-    const FramebufferAttachment *attachmentObject = framebuffer->getAttachment(attachment);
+    const FramebufferAttachment *attachmentObject = framebuffer->getAttachment(context, attachment);
+
     if (attachmentObject == nullptr)
     {
         // ES 2.0.25 spec pg 127 states that if the value of FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE
@@ -623,13 +980,13 @@ void QueryProgramiv(const Context *context, const Program *program, GLenum pname
             *params = program->getActiveUniformBlockCount();
             return;
         case GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH:
-            *params = program->getActiveUniformBlockMaxLength();
+            *params = program->getActiveUniformBlockMaxNameLength();
             break;
         case GL_TRANSFORM_FEEDBACK_BUFFER_MODE:
             *params = program->getTransformFeedbackBufferMode();
             break;
         case GL_TRANSFORM_FEEDBACK_VARYINGS:
-            *params = program->getTransformFeedbackVaryingCount();
+            *params = clampCast<GLint>(program->getTransformFeedbackVaryingCount());
             break;
         case GL_TRANSFORM_FEEDBACK_VARYING_MAX_LENGTH:
             *params = program->getTransformFeedbackVaryingMaxLength();
@@ -639,6 +996,17 @@ void QueryProgramiv(const Context *context, const Program *program, GLenum pname
             break;
         case GL_PROGRAM_SEPARABLE:
             *params = program->isSeparable();
+            break;
+        case GL_COMPUTE_WORK_GROUP_SIZE:
+        {
+            const sh::WorkGroupSize &localSize = program->getComputeShaderLocalSize();
+            params[0]                          = localSize[0];
+            params[1]                          = localSize[1];
+            params[2]                          = localSize[2];
+        }
+        break;
+        case GL_ACTIVE_ATOMIC_COUNTER_BUFFERS:
+            *params = program->getActiveAtomicCounterBufferCount();
             break;
         default:
             UNREACHABLE();
@@ -823,39 +1191,9 @@ void QueryActiveUniformBlockiv(const Program *program,
                                GLenum pname,
                                GLint *params)
 {
-    const UniformBlock &uniformBlock = program->getUniformBlockByIndex(uniformBlockIndex);
-    switch (pname)
-    {
-        case GL_UNIFORM_BLOCK_BINDING:
-            *params = ConvertToGLint(program->getUniformBlockBinding(uniformBlockIndex));
-            break;
-        case GL_UNIFORM_BLOCK_DATA_SIZE:
-            *params = ConvertToGLint(uniformBlock.dataSize);
-            break;
-        case GL_UNIFORM_BLOCK_NAME_LENGTH:
-            *params = ConvertToGLint(uniformBlock.nameWithArrayIndex().size() + 1);
-            break;
-        case GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS:
-            *params = ConvertToGLint(uniformBlock.memberIndexes.size());
-            break;
-        case GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES:
-            for (size_t blockMemberIndex = 0; blockMemberIndex < uniformBlock.memberIndexes.size();
-                 blockMemberIndex++)
-            {
-                params[blockMemberIndex] =
-                    ConvertToGLint(uniformBlock.memberIndexes[blockMemberIndex]);
-            }
-            break;
-        case GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER:
-            *params = ConvertToGLint(uniformBlock.vertexStaticUse);
-            break;
-        case GL_UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER:
-            *params = ConvertToGLint(uniformBlock.fragmentStaticUse);
-            break;
-        default:
-            UNREACHABLE();
-            break;
-    }
+    GLenum prop = GetUniformBlockPropertyEnum(pname);
+    QueryProgramResourceiv(program, GL_UNIFORM_BLOCK, uniformBlockIndex, 1, &prop,
+                           std::numeric_limits<GLsizei>::max(), nullptr, params);
 }
 
 void QueryInternalFormativ(const TextureCaps &format, GLenum pname, GLsizei bufSize, GLint *params)
@@ -865,7 +1203,7 @@ void QueryInternalFormativ(const TextureCaps &format, GLenum pname, GLsizei bufS
         case GL_NUM_SAMPLE_COUNTS:
             if (bufSize != 0)
             {
-                *params = static_cast<GLint>(format.sampleCounts.size());
+                *params = clampCast<GLint>(format.sampleCounts.size());
             }
             break;
 
@@ -902,7 +1240,7 @@ void QueryFramebufferParameteriv(const Framebuffer *framebuffer, GLenum pname, G
             *params = framebuffer->getDefaultSamples();
             break;
         case GL_FRAMEBUFFER_DEFAULT_FIXED_SAMPLE_LOCATIONS:
-            *params = framebuffer->getDefaultFixedSampleLocations();
+            *params = ConvertToGLBoolean(framebuffer->getDefaultFixedSampleLocations());
             break;
         default:
             UNREACHABLE();
@@ -910,11 +1248,7 @@ void QueryFramebufferParameteriv(const Framebuffer *framebuffer, GLenum pname, G
     }
 }
 
-Error QuerySynciv(const FenceSync *sync,
-                  GLenum pname,
-                  GLsizei bufSize,
-                  GLsizei *length,
-                  GLint *values)
+Error QuerySynciv(const Sync *sync, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values)
 {
     ASSERT(sync);
 
@@ -931,13 +1265,13 @@ Error QuerySynciv(const FenceSync *sync,
     switch (pname)
     {
         case GL_OBJECT_TYPE:
-            *values = ConvertToGLint(GL_SYNC_FENCE);
+            *values = clampCast<GLint>(GL_SYNC_FENCE);
             break;
         case GL_SYNC_CONDITION:
-            *values = ConvertToGLint(sync->getCondition());
+            *values = clampCast<GLint>(sync->getCondition());
             break;
         case GL_SYNC_FLAGS:
-            *values = ConvertToGLint(sync->getFlags());
+            *values = clampCast<GLint>(sync->getFlags());
             break;
         case GL_SYNC_STATUS:
             ANGLE_TRY(sync->getStatus(values));
@@ -1012,7 +1346,7 @@ void SetFramebufferParameteri(Framebuffer *framebuffer, GLenum pname, GLint para
             framebuffer->setDefaultSamples(param);
             break;
         case GL_FRAMEBUFFER_DEFAULT_FIXED_SAMPLE_LOCATIONS:
-            framebuffer->setDefaultFixedSampleLocations(static_cast<GLboolean>(param));
+            framebuffer->setDefaultFixedSampleLocations(ConvertToBool(param));
             break;
         default:
             UNREACHABLE();
@@ -1027,14 +1361,107 @@ void SetProgramParameteri(Program *program, GLenum pname, GLint value)
     switch (pname)
     {
         case GL_PROGRAM_BINARY_RETRIEVABLE_HINT:
-            program->setBinaryRetrievableHint(value != GL_FALSE);
+            program->setBinaryRetrievableHint(ConvertToBool(value));
             break;
         case GL_PROGRAM_SEPARABLE:
-            program->setSeparable(value != GL_FALSE);
+            program->setSeparable(ConvertToBool(value));
             break;
         default:
             UNREACHABLE();
             break;
+    }
+}
+
+GLint GetUniformResourceProperty(const Program *program, GLuint index, const GLenum prop)
+{
+    const auto &uniform = program->getUniformByIndex(index);
+    GLenum resourceProp = GetUniformPropertyEnum(prop);
+    switch (resourceProp)
+    {
+        case GL_TYPE:
+        case GL_ARRAY_SIZE:
+        case GL_NAME_LENGTH:
+            return GetCommonVariableProperty(uniform, resourceProp);
+
+        case GL_LOCATION:
+            return program->getUniformLocation(uniform.name);
+
+        case GL_BLOCK_INDEX:
+            return (uniform.isAtomicCounter() ? -1 : uniform.bufferIndex);
+
+        case GL_OFFSET:
+            return uniform.blockInfo.offset;
+
+        case GL_ARRAY_STRIDE:
+            return uniform.blockInfo.arrayStride;
+
+        case GL_MATRIX_STRIDE:
+            return uniform.blockInfo.matrixStride;
+
+        case GL_IS_ROW_MAJOR:
+            return static_cast<GLint>(uniform.blockInfo.isRowMajorMatrix);
+
+        case GL_REFERENCED_BY_VERTEX_SHADER:
+            return uniform.vertexStaticUse;
+
+        case GL_REFERENCED_BY_FRAGMENT_SHADER:
+            return uniform.fragmentStaticUse;
+
+        case GL_REFERENCED_BY_COMPUTE_SHADER:
+            return uniform.computeStaticUse;
+
+        case GL_ATOMIC_COUNTER_BUFFER_INDEX:
+            return (uniform.isAtomicCounter() ? uniform.bufferIndex : -1);
+
+        default:
+            UNREACHABLE();
+            return 0;
+    }
+}
+
+GLint GetBufferVariableResourceProperty(const Program *program, GLuint index, const GLenum prop)
+{
+    const auto &bufferVariable = program->getBufferVariableByIndex(index);
+    switch (prop)
+    {
+        case GL_TYPE:
+        case GL_ARRAY_SIZE:
+        case GL_NAME_LENGTH:
+            return GetCommonVariableProperty(bufferVariable, prop);
+
+        case GL_BLOCK_INDEX:
+            return bufferVariable.bufferIndex;
+
+        case GL_OFFSET:
+            return bufferVariable.blockInfo.offset;
+
+        case GL_ARRAY_STRIDE:
+            return bufferVariable.blockInfo.arrayStride;
+
+        case GL_MATRIX_STRIDE:
+            return bufferVariable.blockInfo.matrixStride;
+
+        case GL_IS_ROW_MAJOR:
+            return static_cast<GLint>(bufferVariable.blockInfo.isRowMajorMatrix);
+
+        case GL_REFERENCED_BY_VERTEX_SHADER:
+            return bufferVariable.vertexStaticUse;
+
+        case GL_REFERENCED_BY_FRAGMENT_SHADER:
+            return bufferVariable.fragmentStaticUse;
+
+        case GL_REFERENCED_BY_COMPUTE_SHADER:
+            return bufferVariable.computeStaticUse;
+
+        case GL_TOP_LEVEL_ARRAY_SIZE:
+            return bufferVariable.topLevelArraySize;
+
+        case GL_TOP_LEVEL_ARRAY_STRIDE:
+            return bufferVariable.blockInfo.topLevelArrayStride;
+
+        default:
+            UNREACHABLE();
+            return 0;
     }
 }
 
@@ -1050,14 +1477,20 @@ GLuint QueryProgramResourceIndex(const Program *program,
         case GL_PROGRAM_OUTPUT:
             return program->getOutputResourceIndex(name);
 
-        // TODO(jie.a.chen@intel.com): more interfaces.
         case GL_UNIFORM:
-        case GL_UNIFORM_BLOCK:
-        case GL_TRANSFORM_FEEDBACK_VARYING:
+            return program->getState().getUniformIndexFromName(name);
+
         case GL_BUFFER_VARIABLE:
+            return program->getState().getBufferVariableIndexFromName(name);
+
         case GL_SHADER_STORAGE_BLOCK:
-            UNIMPLEMENTED();
-            return GL_INVALID_INDEX;
+            return program->getShaderStorageBlockIndex(name);
+
+        case GL_UNIFORM_BLOCK:
+            return program->getUniformBlockIndex(name);
+
+        case GL_TRANSFORM_FEEDBACK_VARYING:
+            return program->getTransformFeedbackVaryingResourceIndex(name);
 
         default:
             UNREACHABLE();
@@ -1082,13 +1515,24 @@ void QueryProgramResourceName(const Program *program,
             program->getOutputResourceName(index, bufSize, length, name);
             break;
 
-        // TODO(jie.a.chen@intel.com): more interfaces.
         case GL_UNIFORM:
-        case GL_UNIFORM_BLOCK:
-        case GL_TRANSFORM_FEEDBACK_VARYING:
+            program->getUniformResourceName(index, bufSize, length, name);
+            break;
+
         case GL_BUFFER_VARIABLE:
+            program->getBufferVariableResourceName(index, bufSize, length, name);
+            break;
+
         case GL_SHADER_STORAGE_BLOCK:
-            UNIMPLEMENTED();
+            program->getActiveShaderStorageBlockName(index, bufSize, length, name);
+            break;
+
+        case GL_UNIFORM_BLOCK:
+            program->getActiveUniformBlockName(index, bufSize, length, name);
+            break;
+
+        case GL_TRANSFORM_FEEDBACK_VARYING:
+            program->getTransformFeedbackVarying(index, bufSize, length, nullptr, nullptr, name);
             break;
 
         default:
@@ -1108,18 +1552,116 @@ GLint QueryProgramResourceLocation(const Program *program,
         case GL_PROGRAM_OUTPUT:
             return program->getFragDataLocation(name);
 
-        // TODO(jie.a.chen@intel.com): more interfaces.
         case GL_UNIFORM:
-        case GL_UNIFORM_BLOCK:
-        case GL_TRANSFORM_FEEDBACK_VARYING:
-        case GL_BUFFER_VARIABLE:
-        case GL_SHADER_STORAGE_BLOCK:
-            UNIMPLEMENTED();
-            return -1;
+            return program->getUniformLocation(name);
 
         default:
             UNREACHABLE();
             return -1;
+    }
+}
+
+void QueryProgramResourceiv(const Program *program,
+                            GLenum programInterface,
+                            GLuint index,
+                            GLsizei propCount,
+                            const GLenum *props,
+                            GLsizei bufSize,
+                            GLsizei *length,
+                            GLint *params)
+{
+    if (!program->isLinked())
+    {
+        if (length != nullptr)
+        {
+            *length = 0;
+        }
+        return;
+    }
+
+    GLsizei pos = 0;
+    for (GLsizei i = 0; i < propCount; i++)
+    {
+        switch (programInterface)
+        {
+            case GL_PROGRAM_INPUT:
+                params[i] = GetInputResourceProperty(program, index, props[i]);
+                ++pos;
+                break;
+
+            case GL_PROGRAM_OUTPUT:
+                params[i] = GetOutputResourceProperty(program, index, props[i]);
+                ++pos;
+                break;
+
+            case GL_UNIFORM:
+                params[i] = GetUniformResourceProperty(program, index, props[i]);
+                ++pos;
+                break;
+
+            case GL_BUFFER_VARIABLE:
+                params[i] = GetBufferVariableResourceProperty(program, index, props[i]);
+                ++pos;
+                break;
+
+            case GL_UNIFORM_BLOCK:
+                GetUniformBlockResourceProperty(program, index, props[i], params, bufSize, &pos);
+                break;
+
+            case GL_SHADER_STORAGE_BLOCK:
+                GetShaderStorageBlockResourceProperty(program, index, props[i], params, bufSize,
+                                                      &pos);
+                break;
+
+            case GL_ATOMIC_COUNTER_BUFFER:
+                GetAtomicCounterBufferResourceProperty(program, index, props[i], params, bufSize,
+                                                       &pos);
+                break;
+
+            case GL_TRANSFORM_FEEDBACK_VARYING:
+                params[i] = GetTransformFeedbackVaryingResourceProperty(program, index, props[i]);
+                ++pos;
+                break;
+
+            default:
+                UNREACHABLE();
+                params[i] = GL_INVALID_VALUE;
+        }
+        if (pos == bufSize)
+        {
+            // Most properties return one value, but GL_ACTIVE_VARIABLES returns an array of values.
+            // This checks not to break buffer bounds for such case.
+            break;
+        }
+    }
+
+    if (length != nullptr)
+    {
+        *length = pos;
+    }
+}
+
+void QueryProgramInterfaceiv(const Program *program,
+                             GLenum programInterface,
+                             GLenum pname,
+                             GLint *params)
+{
+    switch (pname)
+    {
+        case GL_ACTIVE_RESOURCES:
+            *params = QueryProgramInterfaceActiveResources(program, programInterface);
+            break;
+
+        case GL_MAX_NAME_LENGTH:
+            *params = QueryProgramInterfaceMaxNameLength(program, programInterface);
+            break;
+
+        case GL_MAX_NUM_ACTIVE_VARIABLES:
+            *params = QueryProgramInterfaceMaxNumActiveVariables(program, programInterface);
+            break;
+
+        default:
+            UNREACHABLE();
     }
 }
 
@@ -1238,6 +1780,149 @@ void QueryConfigAttrib(const Config *config, EGLint attribute, EGLint *value)
             break;
         case EGL_COLOR_COMPONENT_TYPE_EXT:
             *value = config->colorComponentType;
+            break;
+        default:
+            UNREACHABLE();
+            break;
+    }
+}
+
+void QueryContextAttrib(const gl::Context *context, EGLint attribute, EGLint *value)
+{
+    switch (attribute)
+    {
+        case EGL_CONFIG_ID:
+            *value = context->getConfig()->configID;
+            break;
+        case EGL_CONTEXT_CLIENT_TYPE:
+            *value = context->getClientType();
+            break;
+        case EGL_CONTEXT_CLIENT_VERSION:
+            *value = context->getClientMajorVersion();
+            break;
+        case EGL_RENDER_BUFFER:
+            *value = context->getRenderBuffer();
+            break;
+        case EGL_ROBUST_RESOURCE_INITIALIZATION_ANGLE:
+            *value = context->isRobustResourceInitEnabled();
+            break;
+        default:
+            UNREACHABLE();
+            break;
+    }
+}
+
+void QuerySurfaceAttrib(const Surface *surface, EGLint attribute, EGLint *value)
+{
+    switch (attribute)
+    {
+        case EGL_GL_COLORSPACE:
+            *value = surface->getGLColorspace();
+            break;
+        case EGL_VG_ALPHA_FORMAT:
+            *value = surface->getVGAlphaFormat();
+            break;
+        case EGL_VG_COLORSPACE:
+            *value = surface->getVGColorspace();
+            break;
+        case EGL_CONFIG_ID:
+            *value = surface->getConfig()->configID;
+            break;
+        case EGL_HEIGHT:
+            *value = surface->getHeight();
+            break;
+        case EGL_HORIZONTAL_RESOLUTION:
+            *value = surface->getHorizontalResolution();
+            break;
+        case EGL_LARGEST_PBUFFER:
+            // The EGL spec states that value is not written if the surface is not a pbuffer
+            if (surface->getType() == EGL_PBUFFER_BIT)
+            {
+                *value = surface->getLargestPbuffer();
+            }
+            break;
+        case EGL_MIPMAP_TEXTURE:
+            // The EGL spec states that value is not written if the surface is not a pbuffer
+            if (surface->getType() == EGL_PBUFFER_BIT)
+            {
+                *value = surface->getMipmapTexture();
+            }
+            break;
+        case EGL_MIPMAP_LEVEL:
+            // The EGL spec states that value is not written if the surface is not a pbuffer
+            if (surface->getType() == EGL_PBUFFER_BIT)
+            {
+                *value = surface->getMipmapLevel();
+            }
+            break;
+        case EGL_MULTISAMPLE_RESOLVE:
+            *value = surface->getMultisampleResolve();
+            break;
+        case EGL_PIXEL_ASPECT_RATIO:
+            *value = surface->getPixelAspectRatio();
+            break;
+        case EGL_RENDER_BUFFER:
+            *value = surface->getRenderBuffer();
+            break;
+        case EGL_SWAP_BEHAVIOR:
+            *value = surface->getSwapBehavior();
+            break;
+        case EGL_TEXTURE_FORMAT:
+            // The EGL spec states that value is not written if the surface is not a pbuffer
+            if (surface->getType() == EGL_PBUFFER_BIT)
+            {
+                *value = surface->getTextureFormat();
+            }
+            break;
+        case EGL_TEXTURE_TARGET:
+            // The EGL spec states that value is not written if the surface is not a pbuffer
+            if (surface->getType() == EGL_PBUFFER_BIT)
+            {
+                *value = surface->getTextureTarget();
+            }
+            break;
+        case EGL_VERTICAL_RESOLUTION:
+            *value = surface->getVerticalResolution();
+            break;
+        case EGL_WIDTH:
+            *value = surface->getWidth();
+            break;
+        case EGL_POST_SUB_BUFFER_SUPPORTED_NV:
+            *value = surface->isPostSubBufferSupported();
+            break;
+        case EGL_FIXED_SIZE_ANGLE:
+            *value = surface->isFixedSize();
+            break;
+        case EGL_FLEXIBLE_SURFACE_COMPATIBILITY_SUPPORTED_ANGLE:
+            *value = surface->flexibleSurfaceCompatibilityRequested();
+            break;
+        case EGL_SURFACE_ORIENTATION_ANGLE:
+            *value = surface->getOrientation();
+            break;
+        case EGL_DIRECT_COMPOSITION_ANGLE:
+            *value = surface->directComposition();
+            break;
+        case EGL_ROBUST_RESOURCE_INITIALIZATION_ANGLE:
+            *value = surface->isRobustResourceInitEnabled();
+            break;
+        default:
+            UNREACHABLE();
+            break;
+    }
+}
+
+void SetSurfaceAttrib(Surface *surface, EGLint attribute, EGLint value)
+{
+    switch (attribute)
+    {
+        case EGL_MIPMAP_LEVEL:
+            surface->setMipmapLevel(value);
+            break;
+        case EGL_MULTISAMPLE_RESOLVE:
+            surface->setMultisampleResolve(value);
+            break;
+        case EGL_SWAP_BEHAVIOR:
+            surface->setSwapBehavior(value);
             break;
         default:
             UNREACHABLE();

@@ -173,6 +173,9 @@ ${argHint}
       this[testFixture].prototype.testGenCppIncludes();
     if (this[testFixture].prototype.commandLineSwitches)
       output('#include "base/command_line.h"');
+    if (this[testFixture].prototype.featureList ||
+        this[testFixture].prototype.featureWithParameters)
+      output('#include "base/test/scoped_feature_list.h"');
   }
   output();
 }
@@ -391,7 +394,12 @@ function TEST_F(testFixture, testFunction, testBody) {
 
   if (typedefCppFixture && !(testFixture in typedeffedCppFixtures)) {
     var switches = this[testFixture].prototype.commandLineSwitches;
-    if (!switches || !switches.length || typedefCppFixture == 'V8UnitTest') {
+    var hasSwitches = switches && switches.length;
+    var featureList = this[testFixture].prototype.featureList;
+    var featureWithParameters =
+        this[testFixture].prototype.featureWithParameters;
+    if ((!hasSwitches && !featureList && !featureWithParameters) ||
+        typedefCppFixture == 'V8UnitTest') {
       output(`
 typedef ${typedefCppFixture} ${testFixture};
 `);
@@ -399,7 +407,40 @@ typedef ${typedefCppFixture} ${testFixture};
       // Make the testFixture a class inheriting from the base fixture.
       output(`
 class ${testFixture} : public ${typedefCppFixture} {
+ protected:`);
+      if (featureList || featureWithParameters) {
+        output(`
+  ${testFixture}() {`);
+        if (featureList) {
+          output(`
+    scoped_feature_list_.InitWithFeatures({${featureList[0]}},
+                                          {${featureList[1]}});`);
+        }
+        if (featureWithParameters) {
+          var feature = featureWithParameters[0];
+          var parameters = featureWithParameters[1];
+          output(`
+    scoped_feature_list_.InitAndEnableFeatureWithParameters(
+        ${feature}, {`);
+          for (var parameter of parameters) {
+            var parameterName = parameter[0];
+            var parameterValue = parameter[1];
+            output(`
+            {"${parameterName}", "${parameterValue}"},`);
+          }
+          output(`
+    });`);
+        }
+        output(`
+  }`);
+      } else {
+        output(`
+  ${testFixture}() {}`);
+      }
+      output(`
+  ~${testFixture}() override {}
  private:`);
+      if (hasSwitches) {
       // Override SetUpCommandLine and add each switch.
       output(`
   void SetUpCommandLine(base::CommandLine* command_line) override {`);
@@ -410,7 +451,13 @@ class ${testFixture} : public ${typedefCppFixture} {
         "${(switches[i].switchValue || '')}");`);
       }
       output(`
-  }
+  }`);
+      }
+      if (featureList || featureWithParameters) {
+        output(`
+  base::test::ScopedFeatureList scoped_feature_list_;`);
+      }
+      output(`
 };
 `);
     }

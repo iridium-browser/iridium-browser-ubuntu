@@ -9,16 +9,6 @@
 namespace mojo {
 
 // static
-bool StructTraits<common::mojom::String16DataView, base::string16>::Read(
-    common::mojom::String16DataView data,
-    base::string16* out) {
-  ArrayDataView<uint16_t> view;
-  data.GetDataDataView(&view);
-  out->assign(reinterpret_cast<const base::char16*>(view.data()), view.size());
-  return true;
-}
-
-// static
 const std::vector<uint32_t>&
 StructTraits<common::mojom::VersionDataView, base::Version>::components(
     const base::Version& version) {
@@ -100,6 +90,45 @@ bool EnumTraits<common::mojom::TextDirection, base::i18n::TextDirection>::
       return true;
     case common::mojom::TextDirection::LEFT_TO_RIGHT:
       *out = base::i18n::LEFT_TO_RIGHT;
+      return true;
+  }
+  return false;
+}
+
+// static
+common::mojom::ThreadPriority
+EnumTraits<common::mojom::ThreadPriority, base::ThreadPriority>::ToMojom(
+    base::ThreadPriority thread_priority) {
+  switch (thread_priority) {
+    case base::ThreadPriority::BACKGROUND:
+      return common::mojom::ThreadPriority::BACKGROUND;
+    case base::ThreadPriority::NORMAL:
+      return common::mojom::ThreadPriority::NORMAL;
+    case base::ThreadPriority::DISPLAY:
+      return common::mojom::ThreadPriority::DISPLAY;
+    case base::ThreadPriority::REALTIME_AUDIO:
+      return common::mojom::ThreadPriority::REALTIME_AUDIO;
+  }
+  NOTREACHED();
+  return common::mojom::ThreadPriority::BACKGROUND;
+}
+
+// static
+bool EnumTraits<common::mojom::ThreadPriority, base::ThreadPriority>::FromMojom(
+    common::mojom::ThreadPriority input,
+    base::ThreadPriority* out) {
+  switch (input) {
+    case common::mojom::ThreadPriority::BACKGROUND:
+      *out = base::ThreadPriority::BACKGROUND;
+      return true;
+    case common::mojom::ThreadPriority::NORMAL:
+      *out = base::ThreadPriority::NORMAL;
+      return true;
+    case common::mojom::ThreadPriority::DISPLAY:
+      *out = base::ThreadPriority::DISPLAY;
+      return true;
+    case common::mojom::ThreadPriority::REALTIME_AUDIO:
+      *out = base::ThreadPriority::REALTIME_AUDIO;
       return true;
   }
   return false;

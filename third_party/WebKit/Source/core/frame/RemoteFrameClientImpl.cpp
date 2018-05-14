@@ -9,12 +9,11 @@
 #include "core/events/MouseEvent.h"
 #include "core/events/WebInputEventConversion.h"
 #include "core/events/WheelEvent.h"
+#include "core/exported/WebRemoteFrameImpl.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/RemoteFrameView.h"
-#include "core/frame/WebLocalFrameBase.h"
-#include "core/frame/WebRemoteFrameBase.h"
-#include "core/layout/api/LayoutEmbeddedContentItem.h"
-#include "core/layout/api/LayoutItem.h"
+#include "core/frame/WebLocalFrameImpl.h"
+#include "core/layout/LayoutEmbeddedContent.h"
 #include "platform/exported/WrappedResourceRequest.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/weborigin/SecurityOrigin.h"
@@ -38,15 +37,15 @@ Frame* ToCoreFrame(WebFrame* frame) {
 
 }  // namespace
 
-RemoteFrameClientImpl::RemoteFrameClientImpl(WebRemoteFrameBase* web_frame)
+RemoteFrameClientImpl::RemoteFrameClientImpl(WebRemoteFrameImpl* web_frame)
     : web_frame_(web_frame) {}
 
 RemoteFrameClientImpl* RemoteFrameClientImpl::Create(
-    WebRemoteFrameBase* web_frame) {
+    WebRemoteFrameImpl* web_frame) {
   return new RemoteFrameClientImpl(web_frame);
 }
 
-DEFINE_TRACE(RemoteFrameClientImpl) {
+void RemoteFrameClientImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(web_frame_);
   RemoteFrameClient::Trace(visitor);
 }
@@ -54,8 +53,6 @@ DEFINE_TRACE(RemoteFrameClientImpl) {
 bool RemoteFrameClientImpl::InShadowTree() const {
   return web_frame_->InShadowTree();
 }
-
-void RemoteFrameClientImpl::WillBeDetached() {}
 
 void RemoteFrameClientImpl::Detached(FrameDetachType type) {
   // Alert the client that the frame is being detached.
@@ -105,6 +102,13 @@ void RemoteFrameClientImpl::FrameFocused() const {
     web_frame_->Client()->FrameFocused();
 }
 
+base::UnguessableToken RemoteFrameClientImpl::GetDevToolsFrameToken() const {
+  if (web_frame_->Client()) {
+    return web_frame_->Client()->GetDevToolsFrameToken();
+  }
+  return base::UnguessableToken::Create();
+}
+
 void RemoteFrameClientImpl::Navigate(const ResourceRequest& request,
                                      bool should_replace_current_entry) {
   if (web_frame_->Client()) {
@@ -118,9 +122,8 @@ void RemoteFrameClientImpl::Reload(
     ClientRedirectPolicy client_redirect_policy) {
   DCHECK(IsReloadLoadType(load_type));
   if (web_frame_->Client()) {
-    web_frame_->Client()->Reload(
-        static_cast<WebFrameLoadType>(load_type),
-        static_cast<WebClientRedirectPolicy>(client_redirect_policy));
+    web_frame_->Client()->Reload(static_cast<WebFrameLoadType>(load_type),
+                                 client_redirect_policy);
   }
 }
 
@@ -132,19 +135,36 @@ unsigned RemoteFrameClientImpl::BackForwardLength() {
   return 2;
 }
 
+void RemoteFrameClientImpl::CheckCompleted() {
+  web_frame_->Client()->CheckCompleted();
+}
+
 void RemoteFrameClientImpl::ForwardPostMessage(
     MessageEvent* event,
-    PassRefPtr<SecurityOrigin> target,
+    scoped_refptr<const SecurityOrigin> target,
     LocalFrame* source_frame) const {
+  // Restrict the user gesture to be forwarded cross-process at most once. This
+  // helps avoid unbounded usage of the same user gesture by issuing multiple
+  // postMessages to OOPIFs from this process.  A complementary restriction on
+  // the receiver side prevents unbounded chaining of user gestures across
+  // processes.
+  bool has_user_gesture = UserGestureIndicator::ProcessingUserGesture() &&
+                          !UserGestureIndicator::WasForwardedCrossProcess();
+  if (has_user_gesture)
+    UserGestureIndicator::SetWasForwardedCrossProcess();
+
   if (web_frame_->Client()) {
     web_frame_->Client()->ForwardPostMessage(
-        WebLocalFrameBase::FromFrame(source_frame), web_frame_,
-        WebSecurityOrigin(std::move(target)), WebDOMMessageEvent(event));
+        WebLocalFrameImpl::FromFrame(source_frame), web_frame_,
+        WebSecurityOrigin(std::move(target)), WebDOMMessageEvent(event),
+        has_user_gesture);
   }
 }
 
-void RemoteFrameClientImpl::FrameRectsChanged(const IntRect& frame_rect) {
-  web_frame_->Client()->FrameRectsChanged(frame_rect);
+void RemoteFrameClientImpl::FrameRectsChanged(
+    const IntRect& local_frame_rect,
+    const IntRect& screen_space_rect) {
+  web_frame_->Client()->FrameRectsChanged(local_frame_rect, screen_space_rect);
 }
 
 void RemoteFrameClientImpl::UpdateRemoteViewportIntersection(
@@ -155,7 +175,7 @@ void RemoteFrameClientImpl::UpdateRemoteViewportIntersection(
 void RemoteFrameClientImpl::AdvanceFocus(WebFocusType type,
                                          LocalFrame* source) {
   web_frame_->Client()->AdvanceFocus(type,
-                                     WebLocalFrameBase::FromFrame(source));
+                                     WebLocalFrameImpl::FromFrame(source));
 }
 
 void RemoteFrameClientImpl::VisibilityChanged(bool visible) {
@@ -164,6 +184,18 @@ void RemoteFrameClientImpl::VisibilityChanged(bool visible) {
 
 void RemoteFrameClientImpl::SetIsInert(bool inert) {
   web_frame_->Client()->SetIsInert(inert);
+}
+
+void RemoteFrameClientImpl::UpdateRenderThrottlingStatus(
+    bool is_throttled,
+    bool subtree_throttled) {
+  web_frame_->Client()->UpdateRenderThrottlingStatus(is_throttled,
+                                                     subtree_throttled);
+}
+
+uint32_t RemoteFrameClientImpl::Print(const IntRect& rect,
+                                      WebCanvas* canvas) const {
+  return web_frame_->Client()->Print(rect, canvas);
 }
 
 }  // namespace blink

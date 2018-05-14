@@ -4,9 +4,9 @@
 
 #include "core/html/HTMLLinkElement.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/DOMTokenList.h"
 #include "core/dom/Document.h"
+#include "core/html_names.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
@@ -15,9 +15,8 @@ class HTMLLinkElementSizesAttributeTest : public ::testing::Test {};
 
 TEST(HTMLLinkElementSizesAttributeTest,
      setSizesPropertyValue_updatesAttribute) {
-  Document* document = Document::Create();
-  HTMLLinkElement* link =
-      HTMLLinkElement::Create(*document, /* createdByParser: */ false);
+  Document* document = Document::CreateForTest();
+  auto* link = HTMLLinkElement::Create(*document, CreateElementFlags());
   DOMTokenList* sizes = link->sizes();
   EXPECT_EQ(g_null_atom, sizes->value());
   sizes->setValue("   a b  c ");
@@ -27,9 +26,9 @@ TEST(HTMLLinkElementSizesAttributeTest,
 
 TEST(HTMLLinkElementSizesAttributeTest,
      setSizesAttribute_updatesSizesPropertyValue) {
-  Document* document = Document::Create();
+  Document* document = Document::CreateForTest();
   HTMLLinkElement* link =
-      HTMLLinkElement::Create(*document, /* createdByParser: */ false);
+      HTMLLinkElement::Create(*document, CreateElementFlags());
   DOMTokenList* sizes = link->sizes();
   EXPECT_EQ(g_null_atom, sizes->value());
   link->setAttribute(HTMLNames::sizesAttr, "y  x ");

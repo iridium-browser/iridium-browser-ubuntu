@@ -19,41 +19,39 @@ import org.junit.runner.RunWith;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.metrics.WebappUma;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 /**
  * Tests for splash screens with an icon registered in WebappRegistry.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
-@RetryOnFailure
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class WebappSplashScreenIconTest {
     @Rule
     public final WebappActivityTestRule mActivityTestRule = new WebappActivityTestRule();
+
+    private ViewGroup mSplashScreen;
 
     @Before
     public void setUp() throws Exception {
         WebappRegistry.getInstance()
                 .getWebappDataStorage(WebappActivityTestRule.WEBAPP_ID)
                 .updateSplashScreenImage(WebappActivityTestRule.TEST_SPLASH_ICON);
-        mActivityTestRule.startWebappActivity(mActivityTestRule.createIntent().putExtra(
-                ShortcutHelper.EXTRA_ICON, WebappActivityTestRule.TEST_ICON));
+        mSplashScreen = mActivityTestRule.startWebappActivityAndWaitForSplashScreen(
+                mActivityTestRule.createIntent().putExtra(
+                        ShortcutHelper.EXTRA_ICON, WebappActivityTestRule.TEST_ICON));
     }
 
     @Test
     @SmallTest
     @Feature({"Webapps"})
     public void testShowSplashIcon() {
-        ViewGroup splashScreen = mActivityTestRule.waitUntilSplashScreenAppears();
-        ImageView splashImage = (ImageView) splashScreen.findViewById(
-                R.id.webapp_splash_screen_icon);
+        ImageView splashImage =
+                (ImageView) mSplashScreen.findViewById(R.id.webapp_splash_screen_icon);
         BitmapDrawable drawable = (BitmapDrawable) splashImage.getDrawable();
 
         Assert.assertEquals(512, drawable.getBitmap().getWidth());

@@ -32,9 +32,11 @@
 #define MIDIOutput_h
 
 #include <utility>
+#include "base/time/time.h"
 #include "core/typed_arrays/ArrayBufferViewHelpers.h"
 #include "core/typed_arrays/DOMTypedArray.h"
 #include "modules/webmidi/MIDIPort.h"
+#include "platform/heap/HeapAllocator.h"
 
 namespace blink {
 
@@ -61,7 +63,7 @@ class MIDIOutput final : public MIDIPort {
   void send(NotShared<DOMUint8Array>, ExceptionState&);
   void send(Vector<unsigned>, ExceptionState&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   MIDIOutput(MIDIAccess*,
@@ -73,9 +75,10 @@ class MIDIOutput final : public MIDIPort {
              midi::mojom::PortState);
 
   void DidOpen(bool opened) override;
+  void SendInternal(DOMUint8Array*, base::TimeTicks timestamp, ExceptionState&);
 
   unsigned port_index_;
-  Deque<std::pair<Vector<uint8_t>, double>> pending_data_;
+  HeapDeque<std::pair<Member<DOMUint8Array>, base::TimeTicks>> pending_data_;
 };
 
 }  // namespace blink

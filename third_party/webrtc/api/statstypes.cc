@@ -8,11 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/api/statstypes.h"
+#include "api/statstypes.h"
 
 #include <string.h>
 
-#include "webrtc/rtc_base/checks.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/refcountedobject.h"
 
 // TODO(tommi): Could we have a static map of value name -> expected type
 // and use this to RTC_DCHECK on correct usage (somewhat strongly typed values)?
@@ -371,6 +372,10 @@ const char* StatsReport::Value::display_name() const {
       return "audioInputLevel";
     case kStatsValueNameBytesSent:
       return "bytesSent";
+    case kStatsValueNameConcealedSamples:
+      return "concealedSamples";
+    case kStatsValueNameConcealmentEvents:
+      return "concealmentEvents";
     case kStatsValueNamePacketsSent:
       return "packetsSent";
     case kStatsValueNameBytesReceived:
@@ -383,6 +388,8 @@ const char* StatsReport::Value::display_name() const {
       return "packetsLost";
     case kStatsValueNameProtocol:
       return "protocol";
+    case kStatsValueNameTotalSamplesReceived:
+      return "totalSamplesReceived";
     case kStatsValueNameTransportId:
       return "transportId";
     case kStatsValueNameSelectedCandidatePairId:
@@ -397,6 +404,8 @@ const char* StatsReport::Value::display_name() const {
       return "framesDecoded";
     case kStatsValueNameFramesEncoded:
       return "framesEncoded";
+    case kStatsValueNameJitterBufferDelay:
+      return "jitterBufferDelay";
     case kStatsValueNameCodecImplementationName:
       return "codecImplementationName";
     case kStatsValueNameMediaType:
@@ -421,7 +430,9 @@ const char* StatsReport::Value::display_name() const {
     case kStatsValueNameBandwidthLimitedResolution:
       return "googBandwidthLimitedResolution";
     // STUN ping related attributes.
+    //
     // TODO(zhihuang) Rename these stats to follow the standards.
+    // Connectivity checks.
     case kStatsValueNameSentPingRequestsTotal:
       return "requestsSent";
     case kStatsValueNameSentPingRequestsBeforeFirstResponse:
@@ -432,6 +443,15 @@ const char* StatsReport::Value::display_name() const {
       return "requestsReceived";
     case kStatsValueNameRecvPingResponses:
       return "responsesReceived";
+    // STUN Keepalive pings.
+    case kStatsValueNameSentStunKeepaliveRequests:
+      return "stunKeepaliveRequestsSent";
+    case kStatsValueNameRecvStunKeepaliveResponses:
+      return "stunKeepaliveResponsesReceived";
+    case kStatsValueNameStunKeepaliveRttTotal:
+      return "stunKeepaliveRttTotal";
+    case kStatsValueNameStunKeepaliveRttSquaredTotal:
+      return "stunKeepaliveRttSquaredTotal";
 
     // Candidate related attributes. Values are taken from
     // http://w3c.github.io/webrtc-stats/#rtcstatstype-enum*.
@@ -456,6 +476,8 @@ const char* StatsReport::Value::display_name() const {
       return "googComponent";
     case kStatsValueNameContentName:
       return "googContentName";
+    case kStatsValueNameContentType:
+      return "googContentType";
     case kStatsValueNameCpuLimitedResolution:
       return "googCpuLimitedResolution";
     case kStatsValueNameDecodingCTSG:
@@ -476,8 +498,6 @@ const char* StatsReport::Value::display_name() const {
       return "googDerBase64";
     case kStatsValueNameDtlsCipher:
       return "dtlsCipher";
-    case kStatsValueNameEchoCancellationQualityMin:
-      return "googEchoCancellationQualityMin";
     case kStatsValueNameEchoDelayMedian:
       return "googEchoCancellationEchoDelayMedian";
     case kStatsValueNameEchoDelayStdDev:
@@ -536,10 +556,14 @@ const char* StatsReport::Value::display_name() const {
       return "googFrameWidthReceived";
     case kStatsValueNameFrameWidthSent:
       return "googFrameWidthSent";
+    case kStatsValueNameHasEnteredLowResolution:
+      return "googHasEnteredLowResolution";
+    case kStatsValueNameHugeFramesSent:
+      return "hugeFramesSent";
     case kStatsValueNameInitiator:
       return "googInitiator";
-    case kStatsValueNameInterframeDelaySumMs:
-      return "googInterframeDelaySum";
+    case kStatsValueNameInterframeDelayMaxMs:
+      return "googInterframeDelayMax";
     case kStatsValueNameIssuerId:
       return "googIssuerId";
     case kStatsValueNameJitterReceived:
@@ -580,12 +604,28 @@ const char* StatsReport::Value::display_name() const {
       return "googResidualEchoLikelihood";
     case kStatsValueNameResidualEchoLikelihoodRecentMax:
       return "googResidualEchoLikelihoodRecentMax";
+    case kStatsValueNameAnaBitrateActionCounter:
+      return "googAnaBitrateActionCounter";
+    case kStatsValueNameAnaChannelActionCounter:
+      return "googAnaChannelActionCounter";
+    case kStatsValueNameAnaDtxActionCounter:
+      return "googAnaDtxActionCounter";
+    case kStatsValueNameAnaFecActionCounter:
+      return "googAnaFecActionCounter";
+    case kStatsValueNameAnaFrameLengthIncreaseCounter:
+      return "googAnaFrameLengthIncreaseCounter";
+    case kStatsValueNameAnaFrameLengthDecreaseCounter:
+      return "googAnaFrameLengthDecreaseCounter";
+    case kStatsValueNameAnaUplinkPacketLossFraction:
+      return "googAnaUplinkPacketLossFraction";
     case kStatsValueNameRetransmitBitrate:
       return "googRetransmitBitrate";
     case kStatsValueNameRtt:
       return "googRtt";
     case kStatsValueNameSecondaryDecodedRate:
       return "googSecondaryDecodedRate";
+    case kStatsValueNameSecondaryDiscardedRate:
+      return "googSecondaryDiscardedRate";
     case kStatsValueNameSendPacketsDiscarded:
       return "packetsDiscardedOnSend";
     case kStatsValueNameSpeechExpandRate:

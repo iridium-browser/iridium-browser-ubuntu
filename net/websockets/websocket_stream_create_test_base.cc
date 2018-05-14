@@ -23,26 +23,6 @@ namespace net {
 
 using HeaderKeyValuePair = WebSocketStreamCreateTestBase::HeaderKeyValuePair;
 
-// A sub-class of WebSocketHandshakeStreamCreateHelper which always sets a
-// deterministic key to use in the WebSocket handshake.
-class DeterministicKeyWebSocketHandshakeStreamCreateHelper
-    : public WebSocketHandshakeStreamCreateHelper {
- public:
-  DeterministicKeyWebSocketHandshakeStreamCreateHelper(
-      WebSocketStream::ConnectDelegate* connect_delegate,
-      const std::vector<std::string>& requested_subprotocols)
-      : WebSocketHandshakeStreamCreateHelper(connect_delegate,
-                                             requested_subprotocols) {}
-
-  void OnBasicStreamCreated(WebSocketBasicHandshakeStream* stream) override {
-    stream->SetWebSocketKeyForTesting("dGhlIHNhbXBsZSBub25jZQ==");
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(
-      DeterministicKeyWebSocketHandshakeStreamCreateHelper);
-};
-
 class WebSocketStreamCreateTestBase::TestConnectDelegate
     : public WebSocketStream::ConnectDelegate {
  public:
@@ -98,14 +78,13 @@ class WebSocketStreamCreateTestBase::TestConnectDelegate
 WebSocketStreamCreateTestBase::WebSocketStreamCreateTestBase()
     : has_failed_(false), ssl_fatal_(false), url_request_(nullptr) {}
 
-WebSocketStreamCreateTestBase::~WebSocketStreamCreateTestBase() {
-}
+WebSocketStreamCreateTestBase::~WebSocketStreamCreateTestBase() = default;
 
 void WebSocketStreamCreateTestBase::CreateAndConnectStream(
     const GURL& socket_url,
     const std::vector<std::string>& sub_protocols,
     const url::Origin& origin,
-    const GURL& first_party_for_cookies,
+    const GURL& site_for_cookies,
     const std::string& additional_headers,
     std::unique_ptr<base::Timer> timer) {
   for (size_t i = 0; i < ssl_data_.size(); ++i) {
@@ -115,11 +94,11 @@ void WebSocketStreamCreateTestBase::CreateAndConnectStream(
   std::unique_ptr<WebSocketStream::ConnectDelegate> connect_delegate(
       new TestConnectDelegate(this, connect_run_loop_.QuitClosure()));
   WebSocketStream::ConnectDelegate* delegate = connect_delegate.get();
-  std::unique_ptr<WebSocketHandshakeStreamCreateHelper> create_helper(
-      new DeterministicKeyWebSocketHandshakeStreamCreateHelper(delegate,
-                                                               sub_protocols));
+  auto create_helper =
+      std::make_unique<TestWebSocketHandshakeStreamCreateHelper>(delegate,
+                                                                 sub_protocols);
   stream_request_ = WebSocketStream::CreateAndConnectStreamForTesting(
-      socket_url, std::move(create_helper), origin, first_party_for_cookies,
+      socket_url, std::move(create_helper), origin, site_for_cookies,
       additional_headers, url_request_context_host_.GetURLRequestContext(),
       NetLogWithSource(), std::move(connect_delegate),
       timer ? std::move(timer)

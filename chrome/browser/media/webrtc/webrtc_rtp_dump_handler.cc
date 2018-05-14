@@ -113,7 +113,7 @@ bool WebRtcRtpDumpHandler::StartDump(RtpDumpType type,
     static const char kSendDumpFilePrefix[] = "rtpdump_send_";
     static const size_t kMaxDumpSize = 5 * 1024 * 1024;  // 5MB
 
-    std::string dump_id = base::DoubleToString(base::Time::Now().ToDoubleT());
+    std::string dump_id = base::NumberToString(base::Time::Now().ToDoubleT());
     incoming_dump_path_ =
         dump_dir_.AppendASCII(std::string(kRecvDumpFilePrefix) + dump_id)
             .AddExtension(FILE_PATH_LITERAL(".gz"));
@@ -236,7 +236,7 @@ void WebRtcRtpDumpHandler::StopOngoingDumps(const base::Closure& callback) {
   // to complete and then check the states again.
   if (incoming_state_ == STATE_STOPPING || outgoing_state_ == STATE_STOPPING) {
     dump_writer_->background_task_runner()->PostTaskAndReply(
-        FROM_HERE, base::BindOnce(&base::DoNothing),
+        FROM_HERE, base::DoNothing(),
         base::BindOnce(&WebRtcRtpDumpHandler::StopOngoingDumps,
                        weak_ptr_factory_.GetWeakPtr(), callback));
     return;

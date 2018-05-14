@@ -22,6 +22,7 @@ To use this script, you need to
 import argparse
 import collections
 import filecmp
+import logging
 import os
 import pprint
 import re
@@ -32,11 +33,21 @@ import zipfile
 
 SRC_DIR = os.path.join(os.path.dirname(__file__), '..', '..')
 SRC_DIR = os.path.abspath(SRC_DIR)
-BUILD_ANDROID_GYP_DIR = os.path.join(SRC_DIR, 'build/android/gyp')
+BUILD_ANDROID_DIR = os.path.join(SRC_DIR, 'build', 'android')
+BUILD_ANDROID_GYP_DIR = os.path.join(BUILD_ANDROID_DIR, 'gyp')
 sys.path.append(BUILD_ANDROID_GYP_DIR)
 
 import finalize_apk # pylint: disable=import-error
 from util import build_utils # pylint: disable=import-error
+
+sys.path.append(BUILD_ANDROID_DIR)
+
+from pylib import constants  # pylint: disable=import-error
+
+DEFAULT_ZIPALIGN_PATH = os.path.join(
+    SRC_DIR, 'third_party', 'android_tools', 'sdk', 'build-tools',
+    constants.ANDROID_SDK_BUILD_TOOLS_VERSION, 'zipalign')
+
 
 class ApkMergeFailure(Exception):
   pass
@@ -134,25 +145,6 @@ def AddDiffFiles(diff_files, tmp_dir_32, out_zip, expected_files,
                                  compress=compress)
 
 
-def SignAndAlignApk(tmp_apk, signed_tmp_apk, new_apk, zipalign_path,
-                    keystore_path, key_name, key_password):
-  try:
-    finalize_apk.JarSigner(
-        keystore_path,
-        key_name,
-        key_password,
-        tmp_apk,
-        signed_tmp_apk)
-  except build_utils.CalledProcessError as e:
-    raise ApkMergeFailure('Failed to sign APK: ' + e.output)
-
-  try:
-    finalize_apk.AlignApk(zipalign_path,
-                          signed_tmp_apk,
-                          new_apk)
-  except build_utils.CalledProcessError as e:
-    raise ApkMergeFailure('Failed to align APK: ' + e.output)
-
 def GetSecondaryAbi(apk_zipfile, shared_library):
   ret = ''
   for name in apk_zipfile.namelist():
@@ -215,43 +207,48 @@ def main():
   parser.add_argument('--apk_32bit', required=True, type=os.path.abspath)
   parser.add_argument('--apk_64bit', required=True, type=os.path.abspath)
   parser.add_argument('--out_apk', required=True, type=os.path.abspath)
-  parser.add_argument('--zipalign_path', required=True, type=os.path.abspath)
+  parser.add_argument('--zipalign_path', type=os.path.abspath)
   parser.add_argument('--keystore_path', required=True, type=os.path.abspath)
   parser.add_argument('--key_name', required=True)
   parser.add_argument('--key_password', required=True)
-  parser.add_argument('--shared_library')
+  group = parser.add_mutually_exclusive_group(required=True)
+  group.add_argument('--component-build', action='store_true')
+  group.add_argument('--shared_library')
   parser.add_argument('--page-align-shared-libraries', action='store_true',
                       help='Obsolete, but remains for backwards compatibility')
   parser.add_argument('--uncompress-shared-libraries', action='store_true')
   parser.add_argument('--debug', action='store_true')
   # This option shall only used in debug build, see http://crbug.com/631494.
   parser.add_argument('--ignore-classes-dex', action='store_true')
-  parser.add_argument('--component-build', action='store_true')
   args = parser.parse_args()
+
+  if (args.zipalign_path is not None and
+      not os.path.isfile(args.zipalign_path)):
+    # If given an invalid path, fall back to try the default.
+    logging.warning('zipalign path not found: %s', args.zipalign_path)
+    logging.warning('falling back to: %s', DEFAULT_ZIPALIGN_PATH)
+    args.zipalign_path = None
+
+  if args.zipalign_path is None:
+    # When no path given, try the default.
+    if not os.path.isfile(DEFAULT_ZIPALIGN_PATH):
+      return 'ERROR: zipalign path not found: %s' % DEFAULT_ZIPALIGN_PATH
+    args.zipalign_path = DEFAULT_ZIPALIGN_PATH
 
   tmp_dir = tempfile.mkdtemp()
   tmp_dir_64 = os.path.join(tmp_dir, '64_bit')
   tmp_dir_32 = os.path.join(tmp_dir, '32_bit')
   tmp_apk = os.path.join(tmp_dir, 'tmp.apk')
-  signed_tmp_apk = os.path.join(tmp_dir, 'signed.apk')
   new_apk = args.out_apk
 
   try:
-    if args.component_build and args.shared_library:
-      raise ApkMergeFailure('--component-build and shared-library shouldn\'t'
-                            ' be specified at same time.')
-    if not args.component_build and not args.shared_library:
-      raise ApkMergeFailure('Either --component-build or shared-library should'
-                            ' be specified.')
-
     MergeApk(args, tmp_apk, tmp_dir_32, tmp_dir_64)
 
-    SignAndAlignApk(tmp_apk, signed_tmp_apk, new_apk, args.zipalign_path,
-                    args.keystore_path, args.key_name, args.key_password)
-
-  except ApkMergeFailure as e:
-    print e
-    return 1
+    apksigner_path = os.path.join(
+        os.path.dirname(args.zipalign_path), 'apksigner')
+    finalize_apk.FinalizeApk(apksigner_path, args.zipalign_path,
+                             tmp_apk, new_apk, args.keystore_path,
+                             args.key_password, args.key_name)
   finally:
     shutil.rmtree(tmp_dir)
   return 0

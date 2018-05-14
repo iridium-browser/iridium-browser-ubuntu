@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -19,7 +20,9 @@ from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
+from chromite.lib import parallel
 from chromite.lib import timeout_util
+from chromite.lib.workqueue import throttle
 
 
 _path = os.path.dirname(os.path.realpath(__file__))
@@ -27,6 +30,8 @@ TEST_PRIVATE_KEY = os.path.normpath(
     os.path.join(_path, '../ssh_keys/testing_rsa'))
 del _path
 
+CHUNK_SIZE = 50 * 1024 * 1024
+DEGREE_OF_PARALLELISM = 8
 LOCALHOST = 'localhost'
 LOCALHOST_IP = '127.0.0.1'
 ROOT_ACCOUNT = 'root'
@@ -329,7 +334,10 @@ class RemoteAccess(object):
         ssh_cmd.append('sudo')
 
       if isinstance(cmd, basestring):
-        ssh_cmd += [cmd]
+        if kwargs.get('shell'):
+          ssh_cmd = '%s %s' % (' '.join(ssh_cmd), cmd)
+        else:
+          ssh_cmd += [cmd]
       else:
         ssh_cmd += cmd
 
@@ -376,7 +384,7 @@ class RemoteAccess(object):
       return result.output.rstrip()
 
 
-  def _CheckIfRebooted(self, old_boot_id):
+  def CheckIfRebooted(self, old_boot_id):
     """Checks if the remote device has successfully rebooted
 
     This compares the remote device old and current boot IDs.  If
@@ -385,25 +393,48 @@ class RemoteAccess(object):
     device has rebooted.  May throw exceptions.
 
     Returns:
-       True if the device has successfully rebooted, false otherwise.
+       True if the device has successfully rebooted, False otherwise.
     """
     new_boot_id = self._GetBootId(rebooting=True)
-    return new_boot_id and new_boot_id != old_boot_id
+    if new_boot_id is None:
+      logging.warn('Unable to get new boot_id after reboot from boot_id %s',
+                   old_boot_id)
+      return False
+    elif new_boot_id == old_boot_id:
+      logging.warn('Checking if rebooted from boot_id %s, still running %s',
+                   old_boot_id, new_boot_id)
+      return False
+    else:
+      logging.debug('Checking if rebooted from boot_id %s, now running %s',
+                    old_boot_id, new_boot_id)
+      return True
 
+  def AwaitReboot(self, old_boot_id, timeout_sec=REBOOT_MAX_WAIT):
+    """Await reboot away from old_boot_id.
+
+    Args:
+      old_boot_id: The boot_id that must be transitioned away from for success.
+      timeout_sec: How long to wait for reboot.
+
+    Returns:
+      True if the device has successfully rebooted.
+    """
+    try:
+      timeout_util.WaitForReturnTrue(lambda: self.CheckIfRebooted(old_boot_id),
+                                     timeout_sec, period=CHECK_INTERVAL)
+    except timeout_util.TimeoutError:
+      return False
+    return True
 
   def RemoteReboot(self, timeout_sec=REBOOT_MAX_WAIT):
     """Reboot the remote device."""
     logging.info('Rebooting %s...', self.remote_host)
     old_boot_id = self._GetBootId()
-    reboot_cmd = 'reboot' if self.username == ROOT_ACCOUNT else 'sudo reboot'
     # Use ssh_error_ok=True in the remote shell invocations because the reboot
     # might kill sshd before the connection completes normally.
-    self.RemoteSh(reboot_cmd, ssh_error_ok=True)
+    self.RemoteSh(['reboot'], ssh_error_ok=True, remote_sudo=True)
     time.sleep(CHECK_INTERVAL)
-    try:
-      timeout_util.WaitForReturnTrue(lambda: self._CheckIfRebooted(old_boot_id),
-                                     timeout_sec, period=CHECK_INTERVAL)
-    except timeout_util.TimeoutError:
+    if not self.AwaitReboot(old_boot_id, timeout_sec):
       cros_build_lib.Die('Reboot has not completed after %s seconds; giving up.'
                          % (timeout_sec,))
 
@@ -622,8 +653,24 @@ class RemoteDevice(object):
     Returns:
       True if the device responded to the ping before |timeout|.
     """
+    try:
+      addrlist = socket.getaddrinfo(self.hostname, 22)
+    except socket.gaierror:
+      # If the hostname is the name of a "Host" entry in ~/.ssh/config,
+      # it might be ssh-able but not pingable.
+      # If the hostname is truly bogus, ssh will fail immediately, so
+      # we can safely skip the ping step.
+      logging.info('Hostname "%s" not found, falling through to ssh',
+                   self.hostname)
+      return True
+
+    if addrlist[0][0] == socket.AF_INET6:
+      ping_command = 'ping6'
+    else:
+      ping_command = 'ping'
+
     result = cros_build_lib.RunCommand(
-        ['ping', '-c', '1', '-w', str(timeout), self.hostname],
+        [ping_command, '-c', '1', '-w', str(timeout), self.hostname],
         error_code_ok=True,
         capture_output=True)
     return result.returncode == 0
@@ -692,9 +739,47 @@ class RemoteDevice(object):
     for cmd, kwargs in self.cleanup_cmds:
       # We want to run through all cleanup commands even if there are errors.
       kwargs.setdefault('error_code_ok', True)
-      self.BaseRunCommand(cmd, **kwargs)
+      try:
+        self.BaseRunCommand(cmd, **kwargs)
+      except SSHConnectionError:
+        logging.error('Failed to connect to host in Cleanup, so '
+                      'SSHConnectionError will not be raised.')
 
     self.tempdir.Cleanup()
+
+  def _CopyToDeviceInParallel(self, src, dest):
+    """Chop source file in chunks, send them to destination in parallel.
+
+    Transfer chunks of file in parallel and assemble in destination if the
+    file size is larger than chunk size. Fall back to scp mode otherwise.
+
+    Args:
+      src: Local path as a string.
+      dest: rsync/scp path of the form <host>:/<path> as a string.
+    """
+    src_filename = os.path.basename(src)
+    chunk_prefix = src_filename + '_'
+    with osutils.TempDir() as tempdir:
+      chunk_path = os.path.join(tempdir, chunk_prefix)
+      try:
+        cmd = ['split', '-b', str(CHUNK_SIZE), src, chunk_path]
+        cros_build_lib.RunCommand(cmd)
+        input_list = [[chunk_file, dest, 'scp']
+                      for chunk_file in glob.glob(chunk_path + '*')]
+        parallel.RunTasksInProcessPool(self.CopyToDevice,
+                                       input_list,
+                                       processes=DEGREE_OF_PARALLELISM)
+        logging.info('Assembling these chunks now.....')
+        chunks = '%s/%s*' % (dest, chunk_prefix)
+        final_dest = '%s/%s' % (dest, src_filename)
+        assemble_cmd = ['cat', chunks, '>', final_dest]
+        self.RunCommand(assemble_cmd)
+        cleanup_cmd = ['rm', '-f', chunks]
+        self.RunCommand(cleanup_cmd)
+      except IOError:
+        logging.err('Could not complete the payload transfer...')
+        raise
+    logging.info('Successfully copy %s to %s in chunks in parallel', src, dest)
 
   def CopyToDevice(self, src, dest, mode, **kwargs):
     """Copy path to device.
@@ -702,7 +787,7 @@ class RemoteDevice(object):
     Args:
       src: Local path as a string.
       dest: rsync/scp path of the form <host>:/<path> as a string.
-      mode: can be either 'rsync' or 'scp'.
+      mode: can be either 'rsync' or 'scp', 'throttled', 'parallel'.
         * Use rsync --compress when copying compressible (factor > 2, text/log)
         files. This uses a quite a bit of CPU but preserves bandwidth.
         * Use rsync without compression when delta transfering a whole directory
@@ -712,13 +797,29 @@ class RemoteDevice(object):
         copy (which must exist at the destination) needing minor updates.
         * Use scp when we have incompressible files (say already compressed),
         especially if we know no previous version exist at the destination.
+        * Use throttled when we want to transfer files from devserver in lab
+        with centralized throttling mode.
+        * Use parallel when we want to transfer a large file with chunks
+        and transfer them in degree of parallelism for speed especially for
+        slow network (congested, long haul, worse SNR).
     """
-    assert mode in ['rsync', 'scp']
+    assert mode in ['rsync', 'scp', 'throttled', 'parallel']
+    logging.info('[mode:%s] copy: %s -> %s:%s', mode, src, self.hostname, dest)
+    if mode == 'throttled':
+      throttle.ThrottledCopy(self.hostname, src, dest, **kwargs)
+      return
+    if mode == 'parallel':
+      # Chop and send chunks in parallel only if the file size is larger than
+      # CHUNK_SIZE.
+      if os.stat(src).st_size > CHUNK_SIZE:
+        self._CopyToDeviceInParallel(src, dest)
+        return
+      else:
+        logging.info('%s is too small for parallelism, fall back to scp', src)
+        mode = 'scp'
     msg = 'Could not copy %s to device.' % src
     # Fall back to scp if device has no rsync. Happens when stateful is cleaned.
-    if not self.HasRsync():
-      mode = 'scp'
-    if mode == 'scp':
+    if mode == 'scp' or not self.HasRsync():
       # scp always follow symlinks
       kwargs.pop('follow_symlinks', None)
       func = self.GetAgent().Scp
@@ -739,11 +840,7 @@ class RemoteDevice(object):
     """
     msg = 'Could not copy %s from device.' % src
     # Fall back to scp if device has no rsync. Happens when stateful is cleaned.
-    if not self.HasRsync():
-      # Use rsync by default if it exists.
-      mode = 'scp'
-
-    if mode == 'scp':
+    if mode == 'scp' or not self.HasRsync():
       # scp always follow symlinks
       kwargs.pop('follow_symlinks', None)
       func = self.GetAgent().ScpToLocal
@@ -941,6 +1038,29 @@ class RemoteDevice(object):
 
     return self.BaseRunCommand(cmd, **kwargs)
 
+  def CheckIfRebooted(self, old_boot_id):
+    """Checks if the remote device has successfully rebooted
+
+    This compares the remote device old and current boot IDs.  If
+    ssh errors occur, the device has likely not booted and False is
+    returned.  Basically only returns True if it is proven that the
+    device has rebooted.  May throw exceptions.
+
+    Returns:
+       True if the device has successfully rebooted, false otherwise.
+    """
+    return self.GetAgent().CheckIfRebooted(old_boot_id)
+
+  def AwaitReboot(self, old_boot_id):
+    """Await reboot away from old_boot_id.
+
+    Args:
+      old_boot_id: The boot_id that must be transitioned away from for success.
+
+    Returns:
+      True if the device has successfully rebooted.
+    """
+    return self.GetAgent().AwaitReboot(old_boot_id)
 
 class ChromiumOSDevice(RemoteDevice):
   """Basic commands to interact with a ChromiumOS device over SSH connection."""

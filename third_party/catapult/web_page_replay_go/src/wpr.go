@@ -19,8 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codegangsta/cli"
-	"webpagereplay"
+	"github.com/catapult-project/catapult/web_page_replay_go/src/webpagereplay"
+	"github.com/urfave/cli"
+	"golang.org/x/net/http2"
 )
 
 const longUsage = `
@@ -82,6 +83,7 @@ type ReplayCommand struct {
 
 type RootCACommand struct {
 	certConfig CertConfig
+	installer  webpagereplay.Installer
 	cmd        cli.Command
 }
 
@@ -106,8 +108,8 @@ func (common *CommonConfig) Flags() []cli.Flag {
 	return append(common.certConfig.Flags(),
 		cli.StringFlag{
 			Name:        "host",
-			Value:       "",
-			Usage:       "IP address to bind all servers to. Defaults to 127.0.0.1 if not specified.",
+			Value:       "localhost",
+			Usage:       "IP address to bind all servers to. Defaults to localhost if not specified.",
 			Destination: &common.host,
 		},
 		cli.IntFlag{
@@ -159,16 +161,18 @@ func (common *CommonConfig) CheckArgs(c *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("error opening cert or key files: %v", err)
 	}
-	for _, scriptFile := range strings.Split(common.injectScripts, ",") {
-		log.Printf("Loading script from %v\n", scriptFile)
-		// Replace {{WPR_TIME_SEED_TIMESTAMP}} with current timestamp.
-		current_time_ms := time.Now().Unix() * 1000
-		replacements := map[string]string{"{{WPR_TIME_SEED_TIMESTAMP}}": strconv.FormatInt(current_time_ms, 10)}
-		si, err := webpagereplay.NewScriptInjectorFromFile(scriptFile, replacements)
-		if err != nil {
-			return fmt.Errorf("error opening script %s: %v", scriptFile, err)
+	if common.injectScripts != "" {
+		for _, scriptFile := range strings.Split(common.injectScripts, ",") {
+			log.Printf("Loading script from %v\n", scriptFile)
+			// Replace {{WPR_TIME_SEED_TIMESTAMP}} with current timestamp.
+			current_time_ms := time.Now().Unix() * 1000
+			replacements := map[string]string{"{{WPR_TIME_SEED_TIMESTAMP}}": strconv.FormatInt(current_time_ms, 10)}
+			si, err := webpagereplay.NewScriptInjectorFromFile(scriptFile, replacements)
+			if err != nil {
+				return fmt.Errorf("error opening script %s: %v", scriptFile, err)
+			}
+			common.transformers = append(common.transformers, si)
 		}
-		common.transformers = append(common.transformers, si)
 	}
 
 	return nil
@@ -188,33 +192,61 @@ func (r *ReplayCommand) Flags() []cli.Flag {
 		})
 }
 
-func getAvailablePort() int {
-	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
+func (r *RootCACommand) Flags() []cli.Flag {
+	return append(r.certConfig.Flags(),
+		cli.StringFlag{
+			Name:        "android_device_id",
+			Value:       "",
+			Usage:       "Device id of an android device. Only relevant for Android",
+			Destination: &r.installer.AndroidDeviceId,
+		},
+		cli.StringFlag{
+			Name:        "adb_binary_path",
+			Value:       "adb",
+			Usage:       "Path to adb binary. Only relevant for Android",
+			Destination: &r.installer.AdbBinaryPath,
+		})
+}
+
+func getListener(host string, port int) (net.Listener, error) {
+	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%v:%d", host, port))
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	listener, err := net.ListenTCP("tcp", addr)
+	return net.ListenTCP("tcp", addr)
+}
+
+// Copied from https://golang.org/src/net/http/server.go.
+// This is to make dead TCP connections to eventually go away.
+type tcpKeepAliveListener struct {
+	*net.TCPListener
+}
+
+func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
+	tc, err := ln.AcceptTCP()
 	if err != nil {
-		panic(err)
+		return
 	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port
+	tc.SetKeepAlive(true)
+	tc.SetKeepAlivePeriod(3 * time.Minute)
+	return tc, nil
 }
 
 func startServers(tlsconfig *tls.Config, httpHandler, httpsHandler http.Handler, common *CommonConfig) {
 	type Server struct {
 		Scheme string
+		Host   string
+		Port   int
 		*http.Server
 	}
 
 	servers := []*Server{}
 
 	if common.httpPort > -1 {
-		if common.httpPort == 0 {
-			common.httpPort = getAvailablePort()
-		}
 		servers = append(servers, &Server{
 			Scheme: "http",
+			Host:   common.host,
+			Port:   common.httpPort,
 			Server: &http.Server{
 				Addr:    fmt.Sprintf("%v:%v", common.host, common.httpPort),
 				Handler: httpHandler,
@@ -222,11 +254,10 @@ func startServers(tlsconfig *tls.Config, httpHandler, httpsHandler http.Handler,
 		})
 	}
 	if common.httpsPort > -1 {
-		if common.httpsPort == 0 {
-			common.httpsPort = getAvailablePort()
-		}
 		servers = append(servers, &Server{
 			Scheme: "https",
+			Host:   common.host,
+			Port:   common.httpsPort,
 			Server: &http.Server{
 				Addr:      fmt.Sprintf("%v:%v", common.host, common.httpsPort),
 				Handler:   httpsHandler,
@@ -235,11 +266,10 @@ func startServers(tlsconfig *tls.Config, httpHandler, httpsHandler http.Handler,
 		})
 	}
 	if common.httpSecureProxyPort > -1 {
-		if common.httpSecureProxyPort == 0 {
-			common.httpSecureProxyPort = getAvailablePort()
-		}
 		servers = append(servers, &Server{
 			Scheme: "https",
+			Host:   common.host,
+			Port:   common.httpSecureProxyPort,
 			Server: &http.Server{
 				Addr:      fmt.Sprintf("%v:%v", common.host, common.httpSecureProxyPort),
 				Handler:   httpHandler, // this server proxies HTTP requests over an HTTPS connection
@@ -249,15 +279,27 @@ func startServers(tlsconfig *tls.Config, httpHandler, httpsHandler http.Handler,
 	}
 
 	for _, s := range servers {
-		log.Printf("Starting server on %s://%s", s.Scheme, s.Addr)
 		s := s
 		go func() {
+			var ln net.Listener
 			var err error
 			switch s.Scheme {
 			case "http":
-				err = s.ListenAndServe()
+				ln, err = getListener(s.Host, s.Port)
+				if err != nil {
+					break
+				}
+				logServeStarted(s.Scheme, ln)
+				err = s.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
 			case "https":
-				err = s.ListenAndServeTLS(common.certConfig.certFile, common.certConfig.keyFile)
+				ln, err = getListener(s.Host, s.Port)
+				if err != nil {
+					break
+				}
+				logServeStarted(s.Scheme, ln)
+				http2.ConfigureServer(s.Server, &http2.Server{})
+				tlsListener := tls.NewListener(tcpKeepAliveListener{ln.(*net.TCPListener)}, s.TLSConfig)
+				err = s.Serve(tlsListener)
 			default:
 				panic(fmt.Sprintf("unknown s.Scheme: %s", s.Scheme))
 			}
@@ -269,6 +311,10 @@ func startServers(tlsconfig *tls.Config, httpHandler, httpsHandler http.Handler,
 
 	log.Printf("Use Ctrl-C to exit.")
 	select {}
+}
+
+func logServeStarted(scheme string, ln net.Listener) {
+	log.Printf("Starting server on %s://%s", scheme, ln.Addr().String())
 }
 
 func (r *RecordCommand) Run(c *cli.Context) {
@@ -306,9 +352,10 @@ func (r *RecordCommand) Run(c *cli.Context) {
 
 func (r *ReplayCommand) Run(c *cli.Context) {
 	archiveFileName := c.Args().First()
+	log.Printf("Loading archive file from %s\n", archiveFileName)
 	archive, err := webpagereplay.OpenArchive(archiveFileName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error openining archive file: %v", err)
+		fmt.Fprintf(os.Stderr, "Error opening archive file: %v", err)
 		os.Exit(1)
 	}
 	log.Printf("Opened archive %s", archiveFileName)
@@ -334,21 +381,14 @@ func (r *ReplayCommand) Run(c *cli.Context) {
 }
 
 func (r *RootCACommand) Install(c *cli.Context) {
-	log.Printf("Loading cert from %v\n", r.certConfig.certFile)
-	log.Printf("Loading key from %v\n", r.certConfig.keyFile)
-	root_cert, err := tls.LoadX509KeyPair(r.certConfig.certFile, r.certConfig.keyFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error opening cert or key files: %v", err)
-		os.Exit(1)
-	}
-	err = webpagereplay.InstallRoot(root_cert.Certificate[0])
-	if err != nil {
+	if err := r.installer.InstallRoot(r.certConfig.certFile, r.certConfig.keyFile); err != nil {
 		fmt.Fprintf(os.Stderr, "Install root failed: %v", err)
+		os.Exit(1)
 	}
 }
 
 func (r *RootCACommand) Remove(c *cli.Context) {
-	webpagereplay.RemoveRoot()
+	r.installer.RemoveRoot()
 }
 
 func main() {
@@ -378,18 +418,32 @@ func main() {
 	installroot.cmd = cli.Command{
 		Name:   "installroot",
 		Usage:  "Install a test root CA",
-		Flags:  installroot.certConfig.Flags(),
+		Flags:  installroot.Flags(),
 		Action: installroot.Install,
 	}
 
 	removeroot.cmd = cli.Command{
 		Name:   "removeroot",
 		Usage:  "Remove a test root CA",
+		Flags:  removeroot.Flags(),
 		Action: removeroot.Remove,
 	}
 
+	// TODO(xunjieli): Remove ConvertorCommand once crbug.com/730036 is done.
+	type ConvertorCommand struct {
+		cfg webpagereplay.ConvertorConfig
+		cmd cli.Command
+	}
+	var convert ConvertorCommand
+	convert.cmd = cli.Command{
+		Name:   "convert",
+		Flags:  convert.cfg.Flags(),
+		Usage:  "Convert a legacy format to the new format",
+		Action: convert.cfg.Convert,
+	}
+
 	app := cli.NewApp()
-	app.Commands = []cli.Command{record.cmd, replay.cmd, installroot.cmd, removeroot.cmd}
+	app.Commands = []cli.Command{record.cmd, replay.cmd, installroot.cmd, removeroot.cmd, convert.cmd}
 	app.Usage = "Web Page Replay"
 	app.UsageText = fmt.Sprintf(longUsage, progName, progName)
 	app.HideVersion = true

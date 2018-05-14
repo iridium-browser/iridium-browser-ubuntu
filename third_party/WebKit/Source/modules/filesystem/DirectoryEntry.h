@@ -40,10 +40,10 @@ namespace blink {
 
 class DOMFileSystemBase;
 class DirectoryReader;
-class EntryCallback;
-class ErrorCallback;
 class FileSystemFlags;
-class VoidCallback;
+class V8EntryCallback;
+class V8ErrorCallback;
+class V8VoidCallback;
 
 class MODULES_EXPORT DirectoryEntry final : public Entry {
   DEFINE_WRAPPERTYPEINFO();
@@ -58,16 +58,16 @@ class MODULES_EXPORT DirectoryEntry final : public Entry {
   DirectoryReader* createReader();
   void getFile(const String& path,
                const FileSystemFlags&,
-               EntryCallback* = nullptr,
-               ErrorCallback* = nullptr);
+               V8EntryCallback* = nullptr,
+               V8ErrorCallback* = nullptr);
   void getDirectory(const String& path,
                     const FileSystemFlags&,
-                    EntryCallback* = nullptr,
-                    ErrorCallback* = nullptr);
-  void removeRecursively(VoidCallback* success_callback = nullptr,
-                         ErrorCallback* = nullptr) const;
+                    V8EntryCallback* = nullptr,
+                    V8ErrorCallback* = nullptr);
+  void removeRecursively(V8VoidCallback* success_callback = nullptr,
+                         V8ErrorCallback* = nullptr) const;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   DirectoryEntry(DOMFileSystemBase*, const String& full_path);

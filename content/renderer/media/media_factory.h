@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/memory/linked_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/buildflag.h"
 #include "media/base/renderer_factory_selector.h"
@@ -20,15 +19,23 @@
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/platform/WebSetSinkIdCallbacks.h"
 #include "third_party/WebKit/public/platform/WebString.h"
-#include "url/gurl.h"
+
+#if BUILDFLAG(ENABLE_MOJO_MEDIA)
+#include "media/mojo/interfaces/interface_factory.mojom.h"  // nogncheck
+#endif
 
 namespace blink {
 class WebContentDecryptionModule;
 class WebEncryptedMediaClient;
+class WebLayerTreeView;
 class WebLocalFrame;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebMediaPlayerEncryptedMediaClient;
+}
+
+namespace cc {
+class LayerTreeSettings;
 }
 
 namespace media {
@@ -57,7 +64,7 @@ class InterfaceProvider;
 namespace content {
 
 class RenderFrameImpl;
-class MediaInterfaceProvider;
+class MediaInterfaceFactory;
 class MediaStreamRendererFactory;
 
 #if defined(OS_ANDROID)
@@ -87,12 +94,16 @@ class MediaFactory {
   // to a ContentDecryptionModule if MediaKeys have been provided to the
   // |encrypted_client| (otherwise null). |sink_id|, when not empty, identifies
   // the audio sink to use for this player (see HTMLMediaElement.sinkId).
+  // The |layer_tree_view| will be used to generate the correct FrameSinkId for
+  // the Surface containing the corresponding HTMLMediaElement.
   blink::WebMediaPlayer* CreateMediaPlayer(
       const blink::WebMediaPlayerSource& source,
       blink::WebMediaPlayerClient* client,
       blink::WebMediaPlayerEncryptedMediaClient* encrypted_client,
       blink::WebContentDecryptionModule* initial_cdm,
-      const blink::WebString& sink_id);
+      const blink::WebString& sink_id,
+      blink::WebLayerTreeView* layer_tree_view,
+      const cc::LayerTreeSettings& settings);
 
   // Provides an EncryptedMediaClient to connect blink's EME layer to media's
   // implementation of requestMediaKeySystemAccess. Will always return the same
@@ -134,10 +145,10 @@ class MediaFactory {
   media::CdmFactory* GetCdmFactory();
 
 #if BUILDFLAG(ENABLE_MOJO_MEDIA)
-  service_manager::mojom::InterfaceProvider* GetMediaInterfaceProvider();
+  media::mojom::InterfaceFactory* GetMediaInterfaceFactory();
 
   // The media interface provider attached to this frame, lazily initialized.
-  std::unique_ptr<MediaInterfaceProvider> media_interface_provider_;
+  std::unique_ptr<MediaInterfaceFactory> media_interface_factory_;
 #endif
 
   // The render frame we're helping. RenderFrameImpl owns this factory, so the
@@ -175,7 +186,8 @@ class MediaFactory {
   std::unique_ptr<media::CdmFactory> cdm_factory_;
 
   // Media resource cache, lazily initialized.
-  linked_ptr<media::UrlIndex> url_index_;
+  std::unique_ptr<media::ResourceFetchContext> fetch_context_;
+  std::unique_ptr<media::UrlIndex> url_index_;
 
   // EncryptedMediaClient attached to this frame; lazily initialized.
   std::unique_ptr<media::WebEncryptedMediaClientImpl>

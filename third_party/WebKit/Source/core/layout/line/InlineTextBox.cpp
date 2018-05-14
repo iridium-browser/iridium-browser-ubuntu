@@ -23,6 +23,9 @@
 
 #include "core/layout/line/InlineTextBox.h"
 
+#include "core/dom/Document.h"
+#include "core/editing/FrameSelection.h"
+#include "core/frame/LocalFrame.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/api/LineLayoutBR.h"
 #include "core/layout/api/LineLayoutBox.h"
@@ -31,8 +34,10 @@
 #include "core/layout/line/AbstractInlineTextBox.h"
 #include "core/layout/line/EllipsisBox.h"
 #include "core/paint/InlineTextBoxPainter.h"
+#include "core/paint/PaintInfo.h"
 #include "platform/fonts/CharacterRange.h"
 #include "platform/fonts/FontCache.h"
+#include "platform/graphics/paint/PaintController.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/StringBuilder.h"
 
@@ -100,9 +105,9 @@ void InlineTextBox::Move(const LayoutSize& delta) {
   }
 }
 
-int InlineTextBox::BaselinePosition(FontBaseline baseline_type) const {
+LayoutUnit InlineTextBox::BaselinePosition(FontBaseline baseline_type) const {
   if (!IsText() || !Parent())
-    return 0;
+    return LayoutUnit();
   if (Parent()->GetLineLayoutItem() == GetLineLayoutItem().Parent())
     return Parent()->BaselinePosition(baseline_type);
   return LineLayoutBoxModel(GetLineLayoutItem().Parent())
@@ -114,9 +119,10 @@ int InlineTextBox::BaselinePosition(FontBaseline baseline_type) const {
 LayoutUnit InlineTextBox::LineHeight() const {
   if (!IsText() || !GetLineLayoutItem().Parent())
     return LayoutUnit();
-  if (GetLineLayoutItem().IsBR())
+  if (GetLineLayoutItem().IsBR()) {
     return LayoutUnit(
         LineLayoutBR(GetLineLayoutItem()).LineHeight(IsFirstLineStyle()));
+  }
   if (Parent()->GetLineLayoutItem() == GetLineLayoutItem().Parent())
     return Parent()->LineHeight();
   return LineLayoutBoxModel(GetLineLayoutItem().Parent())
@@ -125,32 +131,23 @@ LayoutUnit InlineTextBox::LineHeight() const {
                   kPositionOnContainingLine);
 }
 
-LayoutUnit InlineTextBox::OffsetTo(LineVerticalPositionType position_type,
+LayoutUnit InlineTextBox::OffsetTo(FontVerticalPositionType position_type,
                                    FontBaseline baseline_type) const {
   if (IsText() &&
-      (position_type == LineVerticalPositionType::TopOfEmHeight ||
-       position_type == LineVerticalPositionType::BottomOfEmHeight)) {
+      (position_type == FontVerticalPositionType::TopOfEmHeight ||
+       position_type == FontVerticalPositionType::BottomOfEmHeight)) {
     const Font& font = GetLineLayoutItem().Style(IsFirstLineStyle())->GetFont();
     if (const SimpleFontData* font_data = font.PrimaryFont()) {
-      const FontMetrics& metrics = font_data->GetFontMetrics();
-      if (position_type == LineVerticalPositionType::TopOfEmHeight) {
-        // Use Ascent, not FixedAscent, to match to how InlineTextBoxPainter
-        // computes the baseline position.
-        return metrics.Ascent(baseline_type) -
-               font_data->EmHeightAscent(baseline_type);
-      }
-      if (position_type == LineVerticalPositionType::BottomOfEmHeight) {
-        return metrics.Ascent(baseline_type) +
-               font_data->EmHeightDescent(baseline_type);
-      }
+      return font_data->GetFontMetrics().Ascent(baseline_type) -
+             font_data->VerticalPosition(position_type, baseline_type);
     }
   }
   switch (position_type) {
-    case LineVerticalPositionType::TextTop:
-    case LineVerticalPositionType::TopOfEmHeight:
+    case FontVerticalPositionType::TextTop:
+    case FontVerticalPositionType::TopOfEmHeight:
       return LayoutUnit();
-    case LineVerticalPositionType::TextBottom:
-    case LineVerticalPositionType::BottomOfEmHeight:
+    case FontVerticalPositionType::TextBottom:
+    case FontVerticalPositionType::BottomOfEmHeight:
       return LogicalHeight();
   }
   NOTREACHED();
@@ -158,7 +155,7 @@ LayoutUnit InlineTextBox::OffsetTo(LineVerticalPositionType position_type,
 }
 
 LayoutUnit InlineTextBox::VerticalPosition(
-    LineVerticalPositionType position_type,
+    FontVerticalPositionType position_type,
     FontBaseline baseline_type) const {
   return LogicalTop() + OffsetTo(position_type, baseline_type);
 }
@@ -175,8 +172,6 @@ SelectionState InlineTextBox::GetSelectionState() const {
   SelectionState state = GetLineLayoutItem().GetSelectionState();
   if (state == SelectionState::kStart || state == SelectionState::kEnd ||
       state == SelectionState::kStartAndEnd) {
-    int start_pos, end_pos;
-    std::tie(start_pos, end_pos) = GetLineLayoutItem().SelectionStartEnd();
     // The position after a hard line break is considered to be past its end.
     // See the corresponding code in InlineTextBox::isSelected.
     int last_selectable = Start() + Len() - (IsLineBreak() ? 1 : 0);
@@ -187,27 +182,42 @@ SelectionState InlineTextBox::GetSelectionState() const {
                 LineBreak::kAfterWhiteSpace
             ? -1
             : 0;
-    bool start = (state != SelectionState::kEnd && start_pos >= start_ &&
-                  start_pos <= start_ + len_ +
-                                   end_of_line_adjustment_for_css_line_break);
-    bool end = (state != SelectionState::kStart && end_pos > start_ &&
-                end_pos <= last_selectable);
+    const FrameSelection& selection =
+        GetLineLayoutItem().GetDocument().GetFrame()->Selection();
+    // TODO(yoichio): |value_or()| is used to prevent use uininitialized
+    // value on release build. It should be value() because calling
+    // LayoutSelectionStart() if SelectionState is neigher kStart nor
+    // kStartAndEnd is invalid operation.
+    bool start =
+        (state != SelectionState::kEnd &&
+         static_cast<int>(selection.LayoutSelectionStart().value_or(0)) >=
+             start_ &&
+         static_cast<int>(selection.LayoutSelectionStart().value_or(0)) <=
+             start_ + len_ + end_of_line_adjustment_for_css_line_break);
+    bool end = (state != SelectionState::kStart &&
+                static_cast<int>(selection.LayoutSelectionEnd().value_or(0)) >
+                    start_ &&
+                static_cast<int>(selection.LayoutSelectionEnd().value_or(0)) <=
+                    last_selectable);
     if (start && end)
       state = SelectionState::kStartAndEnd;
     else if (start)
       state = SelectionState::kStart;
     else if (end)
       state = SelectionState::kEnd;
-    else if ((state == SelectionState::kEnd || start_pos < start_) &&
-             (state == SelectionState::kStart || end_pos > last_selectable))
+    else if ((state == SelectionState::kEnd ||
+              static_cast<int>(selection.LayoutSelectionStart().value_or(0)) <
+                  start_) &&
+             (state == SelectionState::kStart ||
+              static_cast<int>(selection.LayoutSelectionEnd().value_or(0)) >
+                  last_selectable))
       state = SelectionState::kInside;
     else if (state == SelectionState::kStartAndEnd)
       state = SelectionState::kNone;
   }
 
   // If there are ellipsis following, make sure their selection is updated.
-  if (truncation_ != kCNoTruncation && Root().GetEllipsisBox()) {
-    EllipsisBox* ellipsis = Root().GetEllipsisBox();
+  if (EllipsisBox* ellipsis = Root().GetEllipsisBox()) {
     if (state != SelectionState::kNone) {
       int start, end;
       SelectionStartEnd(start, end);
@@ -290,7 +300,7 @@ LayoutRect InlineTextBox::LocalSelectionRect(
   StringBuilder characters_with_hyphen;
   bool respect_hyphen = e_pos == len_ && HasHyphen();
   TextRun text_run = ConstructTextRun(
-      style_to_use, respect_hyphen ? &characters_with_hyphen : 0);
+      style_to_use, respect_hyphen ? &characters_with_hyphen : nullptr);
 
   LayoutPoint starting_point = LayoutPoint(LogicalLeft(), sel_top);
   LayoutRect r;
@@ -499,7 +509,7 @@ bool InlineTextBox::GetEmphasisMarkPosition(
 
   emphasis_position = style.GetTextEmphasisPosition();
   // Ruby text is always over, so it cannot suppress emphasis marks under.
-  if (emphasis_position == TextEmphasisPosition::kUnder)
+  if (style.GetTextEmphasisLineLogicalSide() != LineLogicalSide::kOver)
     return true;
 
   LineLayoutBox containing_block = GetLineLayoutItem().ContainingBlock();
@@ -524,6 +534,10 @@ void InlineTextBox::Paint(const PaintInfo& paint_info,
                           LayoutUnit /*lineTop*/,
                           LayoutUnit /*lineBottom*/) const {
   InlineTextBoxPainter(*this).Paint(paint_info, paint_offset);
+  if (GetLineLayoutItem().ContainsOnlyWhitespaceOrNbsp() !=
+      OnlyWhitespaceOrNbsp::kYes) {
+    paint_info.context.GetPaintController().SetTextPainted();
+  }
 }
 
 void InlineTextBox::SelectionStartEnd(int& s_pos, int& e_pos) const {
@@ -532,11 +546,25 @@ void InlineTextBox::SelectionStartEnd(int& s_pos, int& e_pos) const {
     start_pos = 0;
     end_pos = GetLineLayoutItem().TextLength();
   } else {
-    std::tie(start_pos, end_pos) = GetLineLayoutItem().SelectionStartEnd();
-    if (GetLineLayoutItem().GetSelectionState() == SelectionState::kStart)
+    const FrameSelection& selection =
+        GetLineLayoutItem().GetDocument().GetFrame()->Selection();
+    // TODO(yoichio): |value_or()| is used to prevent use uininitialized
+    // value on release build. It should be |value()| because calling
+    // LayoutSelectionStart() if SelectionState is neigher kStart nor
+    // kStartAndEnd is invalid operation.
+    if (GetLineLayoutItem().GetSelectionState() == SelectionState::kStart) {
+      start_pos = selection.LayoutSelectionStart().value_or(0);
       end_pos = GetLineLayoutItem().TextLength();
-    else if (GetLineLayoutItem().GetSelectionState() == SelectionState::kEnd)
+    } else if (GetLineLayoutItem().GetSelectionState() ==
+               SelectionState::kEnd) {
       start_pos = 0;
+      end_pos = selection.LayoutSelectionEnd().value_or(0);
+    } else {
+      DCHECK(GetLineLayoutItem().GetSelectionState() ==
+             SelectionState::kStartAndEnd);
+      start_pos = selection.LayoutSelectionStart().value_or(0);
+      end_pos = selection.LayoutSelectionEnd().value_or(0);
+    }
   }
 
   s_pos = std::max(start_pos - start_, 0);
@@ -561,6 +589,10 @@ void InlineTextBox::PaintTextMatchMarkerForeground(
     const Font& font) const {
   InlineTextBoxPainter(*this).PaintTextMatchMarkerForeground(
       paint_info, box_origin, marker, style, font);
+  if (GetLineLayoutItem().ContainsOnlyWhitespaceOrNbsp() !=
+      OnlyWhitespaceOrNbsp::kYes) {
+    paint_info.context.GetPaintController().SetTextPainted();
+  }
 }
 
 void InlineTextBox::PaintTextMatchMarkerBackground(
@@ -738,22 +770,21 @@ String InlineTextBox::GetText() const {
 
 #ifndef NDEBUG
 
-void InlineTextBox::ShowBox(int printed_characters) const {
+void InlineTextBox::DumpBox(StringBuilder& string_inlinetextbox) const {
   String value = GetText();
   value.Replace('\\', "\\\\");
   value.Replace('\n', "\\n");
-  printed_characters += fprintf(stderr, "%s %p", BoxName(), this);
-  for (; printed_characters < kShowTreeCharacterOffset; printed_characters++)
-    fputc(' ', stderr);
+  string_inlinetextbox.Append(String::Format("%s %p", BoxName(), this));
+  while (string_inlinetextbox.length() < kShowTreeCharacterOffset)
+    string_inlinetextbox.Append(" ");
   const LineLayoutText obj = GetLineLayoutItem();
-  printed_characters =
-      fprintf(stderr, "\t%s %p", obj.GetName(), obj.DebugPointer());
+  string_inlinetextbox.Append(
+      String::Format("\t%s %p", obj.GetName(), obj.DebugPointer()));
   const int kLayoutObjectCharacterOffset = 75;
-  for (; printed_characters < kLayoutObjectCharacterOffset;
-       printed_characters++)
-    fputc(' ', stderr);
-  fprintf(stderr, "(%d,%d) \"%s\"\n", Start(), Start() + Len(),
-          value.Utf8().data());
+  while (string_inlinetextbox.length() < kLayoutObjectCharacterOffset)
+    string_inlinetextbox.Append(" ");
+  string_inlinetextbox.Append(String::Format(
+      "(%d,%d) \"%s\"", Start(), Start() + Len(), value.Utf8().data()));
 }
 
 #endif

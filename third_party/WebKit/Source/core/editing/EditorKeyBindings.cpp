@@ -27,9 +27,10 @@
 #include "core/editing/Editor.h"
 
 #include "core/editing/EditingUtilities.h"
+#include "core/editing/FrameSelection.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/frame/LocalFrame.h"
-#include "core/page/EditorClient.h"
+#include "core/frame/LocalFrameClient.h"
 #include "public/platform/WebInputEvent.h"
 
 namespace blink {
@@ -81,8 +82,10 @@ bool Editor::HandleEditingKeyboardEvent(KeyboardEvent* evt) {
 
 void Editor::HandleKeyboardEvent(KeyboardEvent* evt) {
   // Give the embedder a chance to handle the keyboard event.
-  if (Client().HandleKeyboardEvent(frame_) || HandleEditingKeyboardEvent(evt))
+  if (frame_->Client()->HandleCurrentKeyboardEvent() ||
+      HandleEditingKeyboardEvent(evt)) {
     evt->SetDefaultHandled();
+  }
 }
 
 }  // namespace blink

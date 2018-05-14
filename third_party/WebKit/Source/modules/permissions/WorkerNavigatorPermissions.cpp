@@ -9,23 +9,21 @@
 
 namespace blink {
 
-WorkerNavigatorPermissions::WorkerNavigatorPermissions() {}
+WorkerNavigatorPermissions::WorkerNavigatorPermissions() = default;
 
 // static
-const char* WorkerNavigatorPermissions::SupplementName() {
-  return "WorkerNavigatorPermissions";
-}
+const char WorkerNavigatorPermissions::kSupplementName[] =
+    "WorkerNavigatorPermissions";
 
 // static
 WorkerNavigatorPermissions& WorkerNavigatorPermissions::From(
     WorkerNavigator& worker_navigator) {
   WorkerNavigatorPermissions* supplement =
-      static_cast<WorkerNavigatorPermissions*>(
-          Supplement<WorkerNavigator>::From(worker_navigator,
-                                            SupplementName()));
+      Supplement<WorkerNavigator>::From<WorkerNavigatorPermissions>(
+          worker_navigator);
   if (!supplement) {
     supplement = new WorkerNavigatorPermissions();
-    ProvideTo(worker_navigator, SupplementName(), supplement);
+    ProvideTo(worker_navigator, supplement);
   }
   return *supplement;
 }
@@ -40,7 +38,7 @@ Permissions* WorkerNavigatorPermissions::permissions(
   return self.permissions_;
 }
 
-DEFINE_TRACE(WorkerNavigatorPermissions) {
+void WorkerNavigatorPermissions::Trace(blink::Visitor* visitor) {
   visitor->Trace(permissions_);
   Supplement<WorkerNavigator>::Trace(visitor);
 }

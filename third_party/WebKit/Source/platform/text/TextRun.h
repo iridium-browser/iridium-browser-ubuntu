@@ -32,6 +32,7 @@
 #include "platform/text/TextDirection.h"
 #include "platform/text/TextJustify.h"
 #include "platform/wtf/Allocator.h"
+#include "platform/wtf/Optional.h"
 #include "platform/wtf/text/StringView.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -66,7 +67,6 @@ class PLATFORM_EXPORT TextRun final {
       : characters_length_(len),
         len_(len),
         xpos_(xpos),
-        horizontal_glyph_stretch_(1),
         expansion_(expansion),
         expansion_behavior_(expansion_behavior),
         is8_bit_(true),
@@ -91,7 +91,6 @@ class PLATFORM_EXPORT TextRun final {
       : characters_length_(len),
         len_(len),
         xpos_(xpos),
-        horizontal_glyph_stretch_(1),
         expansion_(expansion),
         expansion_behavior_(expansion_behavior),
         is8_bit_(false),
@@ -115,7 +114,6 @@ class PLATFORM_EXPORT TextRun final {
       : characters_length_(string.length()),
         len_(string.length()),
         xpos_(xpos),
-        horizontal_glyph_stretch_(1),
         expansion_(expansion),
         expansion_behavior_(expansion_behavior),
         allow_tabs_(false),
@@ -127,7 +125,7 @@ class PLATFORM_EXPORT TextRun final {
         tab_size_(0) {
     if (!characters_length_) {
       is8_bit_ = true;
-      data_.characters8 = 0;
+      data_.characters8 = nullptr;
     } else if (string.Is8Bit()) {
       data_.characters8 = string.Characters8();
       is8_bit_ = true;
@@ -149,6 +147,10 @@ class PLATFORM_EXPORT TextRun final {
     result.SetText(Data16(start_offset), length);
     return result;
   }
+
+  // Returns the start index of a sub run if it was created by |SubRun|.
+  // std::numeric_limits<unsigned>::max() if not a sub run.
+  unsigned IndexOfSubRun(const TextRun&) const;
 
   UChar operator[](unsigned i) const {
     SECURITY_DCHECK(i < len_);
@@ -221,10 +223,6 @@ class PLATFORM_EXPORT TextRun final {
   void SetExpansionBehavior(ExpansionBehavior behavior) {
     expansion_behavior_ = behavior;
   }
-  float HorizontalGlyphStretch() const { return horizontal_glyph_stretch_; }
-  void SetHorizontalGlyphStretch(float scale) {
-    horizontal_glyph_stretch_ = scale;
-  }
 
   bool AllowTabs() const { return allow_tabs_; }
   TabSize GetTabSize() const { return tab_size_; }
@@ -283,7 +281,6 @@ class PLATFORM_EXPORT TextRun final {
   // alignment or center alignment, left start of the text line is not the same
   // as left start of the containing block.
   float xpos_;
-  float horizontal_glyph_stretch_;
 
   float expansion_;
   ExpansionBehavior expansion_behavior_ : 2;

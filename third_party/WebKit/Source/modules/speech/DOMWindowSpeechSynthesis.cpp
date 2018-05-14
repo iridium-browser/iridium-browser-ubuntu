@@ -30,29 +30,28 @@
 
 #include "modules/speech/DOMWindowSpeechSynthesis.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/wtf/PassRefPtr.h"
 
 namespace blink {
 
 DOMWindowSpeechSynthesis::DOMWindowSpeechSynthesis(LocalDOMWindow& window)
     : Supplement<LocalDOMWindow>(window) {}
 
-const char* DOMWindowSpeechSynthesis::SupplementName() {
-  return "DOMWindowSpeechSynthesis";
-}
+const char DOMWindowSpeechSynthesis::kSupplementName[] =
+    "DOMWindowSpeechSynthesis";
 
 // static
 DOMWindowSpeechSynthesis& DOMWindowSpeechSynthesis::From(
     LocalDOMWindow& window) {
-  DOMWindowSpeechSynthesis* supplement = static_cast<DOMWindowSpeechSynthesis*>(
-      Supplement<LocalDOMWindow>::From(window, SupplementName()));
+  DOMWindowSpeechSynthesis* supplement =
+      Supplement<LocalDOMWindow>::From<DOMWindowSpeechSynthesis>(window);
   if (!supplement) {
     supplement = new DOMWindowSpeechSynthesis(window);
-    ProvideTo(window, SupplementName(), supplement);
+    ProvideTo(window, supplement);
   }
   return *supplement;
 }
@@ -73,7 +72,7 @@ SpeechSynthesis* DOMWindowSpeechSynthesis::speechSynthesis(
   return speech_synthesis_;
 }
 
-DEFINE_TRACE(DOMWindowSpeechSynthesis) {
+void DOMWindowSpeechSynthesis::Trace(blink::Visitor* visitor) {
   visitor->Trace(speech_synthesis_);
   Supplement<LocalDOMWindow>::Trace(visitor);
 }

@@ -37,9 +37,9 @@ Polymer({
    * @private
    */
   fetchUsbDevices_: function() {
-    this.browserProxy.fetchUsbDevices().then(function(deviceList) {
+    this.browserProxy.fetchUsbDevices().then(deviceList => {
       this.devices_ = deviceList;
-    }.bind(this));
+    });
   },
 
   /**
@@ -57,7 +57,7 @@ Polymer({
   onRemoveTap_: function() {
     this.$$('dialog[is=cr-action-menu]').close();
 
-    var item = this.actionMenuModel_;
+    const item = this.actionMenuModel_;
     this.browserProxy.removeUsbDevice(
         item.origin, item.embeddingOrigin, item.object);
     this.actionMenuModel_ = null;

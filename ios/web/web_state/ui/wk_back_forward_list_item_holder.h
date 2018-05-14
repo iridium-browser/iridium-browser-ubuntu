@@ -7,8 +7,6 @@
 
 #import <WebKit/WebKit.h>
 
-#import "base/ios/weak_nsobject.h"
-#import "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "base/supports_user_data.h"
 
@@ -35,9 +33,7 @@ class WKBackForwardListItemHolder : public base::SupportsUserData::Data {
   // |back_forward_list_item| may return nil (f.e. when the
   // parent WKBackForwardList is deallocated).
   WKBackForwardListItem* back_forward_list_item() const { return item_; }
-  void set_back_forward_list_item(WKBackForwardListItem* item) {
-    item_.reset(item);
-  }
+  void set_back_forward_list_item(WKBackForwardListItem* item) { item_ = item; }
 
   // Accessors for |navigation_type_|. Use these to get/set the association
   // between a NavigationItem and a WKNavigationType.
@@ -45,32 +41,30 @@ class WKBackForwardListItemHolder : public base::SupportsUserData::Data {
   void set_navigation_type(WKNavigationType type) { navigation_type_ = type; }
 
   // Gets/sets HTTP request method for this item.
-  NSString* http_method() const { return http_method_.get(); }
+  NSString* http_method() const { return http_method_; }
   void set_http_method(NSString* http_method) {
-    http_method_.reset([http_method copy]);
+    http_method_ = [http_method copy];
   }
 
   // Gets/sets the MIME type of the page corresponding to this item.
-  NSString* mime_type() const { return mime_type_.get(); }
-  void set_mime_type(NSString* mime_type) {
-    mime_type_.reset([mime_type copy]);
-  }
+  NSString* mime_type() const { return mime_type_; }
+  void set_mime_type(NSString* mime_type) { mime_type_ = [mime_type copy]; }
 
  private:
   WKBackForwardListItemHolder();
 
   // Weak pointer to a WKBackForwardListItem. Becomes nil if the parent
   // WKBackForwardList is deallocated.
-  base::WeakNSObject<WKBackForwardListItem> item_;
+  __weak WKBackForwardListItem* item_ = nil;
 
   // The navigation type for the associated NavigationItem.
   WKNavigationType navigation_type_;
 
   // HTTP request method.
-  base::scoped_nsobject<NSString> http_method_;
+  NSString* http_method_;
 
   // The MIME type of the page content.
-  base::scoped_nsobject<NSString> mime_type_;
+  NSString* mime_type_;
 
   DISALLOW_COPY_AND_ASSIGN(WKBackForwardListItemHolder);
 };

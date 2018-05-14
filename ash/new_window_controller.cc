@@ -8,13 +8,25 @@
 
 namespace ash {
 
-NewWindowController::NewWindowController() {}
+NewWindowController::NewWindowController() = default;
 
-NewWindowController::~NewWindowController() {}
+NewWindowController::~NewWindowController() = default;
 
 void NewWindowController::BindRequest(
     mojom::NewWindowControllerRequest request) {
   bindings_.AddBinding(this, std::move(request));
+}
+
+void NewWindowController::SetClient(
+    mojom::NewWindowClientAssociatedPtrInfo client) {
+  client_.Bind(std::move(client));
+}
+
+// TODO(crbug.com/755448): Remove this when the new shortcut viewer is enabled.
+void NewWindowController::ShowKeyboardOverlay() {
+  // TODO(estade): implement this here rather than passing off to |client_|.
+  if (client_)
+    client_->ShowKeyboardOverlay();
 }
 
 void NewWindowController::NewTab() {
@@ -47,9 +59,9 @@ void NewWindowController::RestoreTab() {
     client_->RestoreTab();
 }
 
-void NewWindowController::ShowKeyboardOverlay() {
+void NewWindowController::ShowKeyboardShortcutViewer() {
   if (client_)
-    client_->ShowKeyboardOverlay();
+    client_->ShowKeyboardShortcutViewer();
 }
 
 void NewWindowController::ShowTaskManager() {
@@ -60,11 +72,6 @@ void NewWindowController::ShowTaskManager() {
 void NewWindowController::OpenFeedbackPage() {
   if (client_)
     client_->OpenFeedbackPage();
-}
-
-void NewWindowController::SetClient(
-    mojom::NewWindowClientAssociatedPtrInfo client) {
-  client_.Bind(std::move(client));
 }
 
 }  // namespace ash

@@ -35,23 +35,21 @@
 #include "core/dom/DocumentParserClient.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/RawResource.h"
-#include "platform/loader/fetch/ResourceOwner.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
 
 class V0CustomElementSyncMicrotaskQueue;
 class Document;
-class DocumentWriter;
 class HTMLImportChild;
 class HTMLImportsController;
 
-// Owning imported Document lifetime. It also implements ResourceClient through
-// ResourceOwner to feed fetched bytes to the DocumentWriter of the imported
+// Owning imported Document lifetime. It also implements RawResourceClient
+// to feed fetched bytes to the DocumentParser of the imported
 // document.  HTMLImportLoader is owned by HTMLImportsController.
 class HTMLImportLoader final
     : public GarbageCollectedFinalized<HTMLImportLoader>,
-      public ResourceOwner<RawResource>,
+      public RawResourceClient,
       public DocumentParserClient {
   USING_GARBAGE_COLLECTED_MIXIN(HTMLImportLoader);
 
@@ -87,8 +85,6 @@ class HTMLImportLoader final
   bool HasError() const { return state_ == kStateError; }
   bool ShouldBlockScriptExecution() const;
 
-  void StartLoading(RawResource*);
-
   // Tells the loader that all of the import's stylesheets finished
   // loading.
   // Called by Document::didRemoveAllPendingStylesheet.
@@ -96,7 +92,7 @@ class HTMLImportLoader final
 
   V0CustomElementSyncMicrotaskQueue* MicrotaskQueue() const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   HTMLImportLoader(HTMLImportsController*);
@@ -128,7 +124,6 @@ class HTMLImportLoader final
   HeapVector<Member<HTMLImportChild>> imports_;
   State state_;
   Member<Document> document_;
-  Member<DocumentWriter> writer_;
   Member<V0CustomElementSyncMicrotaskQueue> microtask_queue_;
 };
 

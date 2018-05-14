@@ -15,10 +15,12 @@
 #include "ui/gfx/transform.h"
 
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 
 namespace android {
 
-TabStripSceneLayer::TabStripSceneLayer(JNIEnv* env, jobject jobj)
+TabStripSceneLayer::TabStripSceneLayer(JNIEnv* env,
+                                       const JavaRef<jobject>& jobj)
     : SceneLayer(env, jobj),
       tab_strip_layer_(cc::SolidColorLayer::Create()),
       scrollable_strip_layer_(cc::Layer::Create()),
@@ -325,7 +327,8 @@ SkColor TabStripSceneLayer::GetBackgroundColor() {
   return SceneLayer::GetBackgroundColor();
 }
 
-static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
+static jlong JNI_TabStripSceneLayer_Init(JNIEnv* env,
+                                         const JavaParamRef<jobject>& jobj) {
   // This will automatically bind to the Java object and pass ownership there.
   TabStripSceneLayer* scene_layer = new TabStripSceneLayer(env, jobj);
   return reinterpret_cast<intptr_t>(scene_layer);

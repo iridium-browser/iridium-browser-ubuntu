@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/single_thread_task_runner.h"
@@ -65,12 +66,12 @@ void BluetoothConnection::Disconnect() {
   // this connection is not reused.
   SetStatus(DISCONNECTED);
   if (socket_.get()) {
-    socket_->Disconnect(base::Bind(&base::DoNothing));
-    socket_ = NULL;
+    socket_->Disconnect(base::DoNothing());
+    socket_ = nullptr;
   }
   if (adapter_.get()) {
     adapter_->RemoveObserver(this);
-    adapter_ = NULL;
+    adapter_ = nullptr;
   }
 }
 
@@ -129,7 +130,7 @@ void BluetoothConnection::OnAdapterInitialized(
   if (!bluetooth_device) {
     PA_LOG(WARNING) << "Device with address " << address
                     << " is not known to the system Bluetooth daemon.";
-    // TOOD(isherman): Optimistically attempt to seek the device and connect
+    // TODO(isherman): Optimistically attempt to seek the device and connect
     // anyway, as was previously implemented in BluetoothConnectionFinder.
     Disconnect();
     return;

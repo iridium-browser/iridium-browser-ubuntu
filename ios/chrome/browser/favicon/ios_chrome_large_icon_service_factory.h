@@ -35,6 +35,10 @@ class IOSChromeLargeIconServiceFactory
 
   static IOSChromeLargeIconServiceFactory* GetInstance();
 
+  // Returns the default factory used to build LargeIconServices. Can be
+  // registered with SetTestingFactory to use real instances during testing.
+  static TestingFactoryFunction GetDefaultFactory();
+
  private:
   friend struct base::DefaultSingletonTraits<IOSChromeLargeIconServiceFactory>;
 

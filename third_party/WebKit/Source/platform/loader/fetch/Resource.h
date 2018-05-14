@@ -25,17 +25,21 @@
 #define Resource_h
 
 #include <memory>
+#include "base/single_thread_task_runner.h"
 #include "platform/MemoryCoordinator.h"
 #include "platform/PlatformExport.h"
 #include "platform/SharedBuffer.h"
 #include "platform/Timer.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/instrumentation/tracing/web_process_memory_dump.h"
+#include "platform/loader/SubresourceIntegrity.h"
+#include "platform/loader/cors/CORSStatus.h"
 #include "platform/loader/fetch/CachedMetadataHandler.h"
 #include "platform/loader/fetch/IntegrityMetadata.h"
 #include "platform/loader/fetch/ResourceError.h"
 #include "platform/loader/fetch/ResourceLoadPriority.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/ResourcePriority.h"
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/loader/fetch/ResourceStatus.h"
@@ -44,11 +48,12 @@
 #include "platform/wtf/AutoReset.h"
 #include "platform/wtf/HashCountedSet.h"
 #include "platform/wtf/HashSet.h"
+#include "platform/wtf/Optional.h"
 #include "platform/wtf/text/AtomicString.h"
 #include "platform/wtf/text/TextEncoding.h"
 #include "platform/wtf/text/WTFString.h"
-#include "public/platform/CORSStatus.h"
 #include "public/platform/WebDataConsumerHandle.h"
+#include "public/platform/WebScopedVirtualTimePauser.h"
 
 namespace blink {
 
@@ -85,7 +90,8 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
     kLinkPrefetch,
     kTextTrack,
     kImportResource,
-    kMedia,  // Audio or video file requested by a HTML5 media element
+    kAudio,
+    kVideo,
     kManifest,
     kMock  // Only for testing
   };
@@ -97,17 +103,14 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
     kReloadAlways,
   };
 
-  virtual ~Resource();
+  ~Resource() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   virtual WTF::TextEncoding Encoding() const { return WTF::TextEncoding(); }
   virtual void AppendData(const char*, size_t);
-  virtual void FinishAsError(const ResourceError&);
-
-  void SetNeedsSynchronousCacheHit(bool needs_synchronous_cache_hit) {
-    needs_synchronous_cache_hit_ = needs_synchronous_cache_hit;
-  }
+  virtual void FinishAsError(const ResourceError&,
+                             base::SingleThreadTaskRunner*);
 
   void SetLinkPreload(bool is_link_preload) { link_preload_ = is_link_preload; }
   bool IsLinkPreload() const { return link_preload_; }
@@ -116,7 +119,10 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
     preload_discovery_time_ = preload_discovery_time;
   }
 
-  const ResourceError& GetResourceError() const { return error_; }
+  const ResourceError& GetResourceError() const {
+    DCHECK(error_);
+    return *error_;
+  }
 
   void SetIdentifier(unsigned long identifier) { identifier_ = identifier; }
   unsigned long Identifier() const { return identifier_; }
@@ -130,7 +136,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
 
   virtual void SetRevalidatingRequest(const ResourceRequest&);
 
-  void SetFetcherSecurityOrigin(SecurityOrigin* origin) {
+  void SetFetcherSecurityOrigin(const SecurityOrigin* origin) {
     fetcher_security_origin_ = origin;
   }
 
@@ -146,10 +152,22 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
     return ResourcePriority();
   }
 
-  void AddClient(ResourceClient*);
+  // If this Resource is already finished when AddClient is called, the
+  // ResourceClient will be notified asynchronously by a task scheduled
+  // on the given base::SingleThreadTaskRunner. Otherwise, the given
+  // base::SingleThreadTaskRunner is unused.
+  void AddClient(ResourceClient*, base::SingleThreadTaskRunner*);
   void RemoveClient(ResourceClient*);
+  // Once called, this resource will not be canceled until load finishes
+  // even if associated with no client.
+  void SetDetachable() { detachable_ = true; }
 
-  void AddFinishObserver(ResourceFinishObserver*);
+  // If this Resource is already finished when AddFinishObserver is called, the
+  // ResourceFinishObserver will be notified asynchronously by a task scheduled
+  // on the given base::SingleThreadTaskRunner. Otherwise, the given
+  // base::SingleThreadTaskRunner is unused.
+  void AddFinishObserver(ResourceFinishObserver*,
+                         base::SingleThreadTaskRunner*);
   void RemoveFinishObserver(ResourceFinishObserver*);
 
   bool IsUnusedPreload() const { return is_unused_preload_; }
@@ -192,11 +210,15 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
 
   // Computes the status of an object after loading. Updates the expire date on
   // the cache entry file
-  virtual void Finish(double finish_time);
-  void Finish() { Finish(0.0); }
+  virtual void Finish(double finish_time, base::SingleThreadTaskRunner*);
+  void FinishForTest() { Finish(0.0, nullptr); }
 
-  virtual RefPtr<const SharedBuffer> ResourceBuffer() const { return data_; }
-  void SetResourceBuffer(RefPtr<SharedBuffer>);
+  bool PassesAccessControlCheck(const SecurityOrigin&) const;
+
+  virtual scoped_refptr<const SharedBuffer> ResourceBuffer() const {
+    return data_;
+  }
+  void SetResourceBuffer(scoped_refptr<SharedBuffer>);
 
   virtual bool WillFollowRedirect(const ResourceRequest&,
                                   const ResourceResponse&);
@@ -220,12 +242,12 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
 
   AtomicString HttpContentType() const;
 
-  bool WasCanceled() const { return error_.IsCancellation(); }
+  bool WasCanceled() const { return error_ && error_->IsCancellation(); }
   bool ErrorOccurred() const {
     return status_ == ResourceStatus::kLoadError ||
            status_ == ResourceStatus::kDecodeError;
   }
-  bool LoadFailedOrCanceled() const { return !error_.IsNull(); }
+  bool LoadFailedOrCanceled() const { return !!error_; }
 
   DataBufferingPolicy GetDataBufferingPolicy() const {
     return options_.data_buffering_policy;
@@ -233,7 +255,9 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   void SetDataBufferingPolicy(DataBufferingPolicy);
 
   void MarkAsPreload();
-  void MatchPreload();
+  // Returns true if |this| resource is matched with the given parameters.
+  virtual bool MatchPreload(const FetchParameters&,
+                            base::SingleThreadTaskRunner*);
 
   bool CanReuseRedirectChain() const;
   bool MustRevalidateDueToCacheHeaders() const;
@@ -242,16 +266,14 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   bool HasCacheControlNoStoreHeader() const;
   bool MustReloadDueToVaryHeader(const ResourceRequest& new_request) const;
 
-  void SetIntegrityMetadata(const IntegrityMetadataSet& metadata) {
-    integrity_metadata_ = metadata;
-  }
   const IntegrityMetadataSet& IntegrityMetadata() const {
-    return integrity_metadata_;
+    return options_.integrity_metadata;
   }
-  // The argument must never be |NotChecked|.
-  void SetIntegrityDisposition(ResourceIntegrityDisposition);
   ResourceIntegrityDisposition IntegrityDisposition() const {
     return integrity_disposition_;
+  }
+  const SubresourceIntegrity::ReportInfo& IntegrityReportInfo() const {
+    return integrity_report_info_;
   }
   bool MustRefetchDueToIntegrityMetadata(const FetchParameters&) const;
 
@@ -270,6 +292,10 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   }
   String CacheIdentifier() const { return cache_identifier_; }
 
+  void SetSourceOrigin(scoped_refptr<const SecurityOrigin> source_origin) {
+    source_origin_ = source_origin;
+  }
+
   virtual void DidSendData(unsigned long long /* bytesSent */,
                            unsigned long long /* totalBytesToBeSent */) {}
   virtual void DidDownloadData(int) {}
@@ -286,7 +312,9 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
     response_.SetDecodedBodyLength(value);
   }
 
-  virtual bool CanReuse(const FetchParameters&) const;
+  virtual bool CanReuse(
+      const FetchParameters&,
+      scoped_refptr<const SecurityOrigin> new_source_origin) const;
 
   // If cache-aware loading is activated, this callback is called when the first
   // disk-cache-only request failed due to cache miss. After this callback,
@@ -334,10 +362,14 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
         : AutoReset(&resource->is_revalidation_start_forbidden_, true) {}
   };
 
+  WebScopedVirtualTimePauser& VirtualTimePauser() {
+    return virtual_time_pauser_;
+  }
+
  protected:
   Resource(const ResourceRequest&, Type, const ResourceLoaderOptions&);
 
-  virtual void CheckNotify();
+  virtual void NotifyFinished();
 
   void MarkClientFinished(ResourceClient*);
 
@@ -390,10 +422,8 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   void SetPreviewsState(WebURLRequest::PreviewsState);
   void ClearRangeRequestHeader();
 
-  SharedBuffer* Data() const { return data_.Get(); }
+  SharedBuffer* Data() const { return data_.get(); }
   void ClearData();
-
-  void TriggerNotificationForFinishObservers();
 
   virtual void SetEncoding(const String&) {}
 
@@ -404,8 +434,6 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
 
   class CachedMetadataHandlerImpl;
   class ServiceWorkerResponseCachedMetadataHandler;
-
-  void CancelTimerFired(TimerBase*);
 
   void RevalidationSucceeded(const ResourceResponse&);
   void RevalidationFailed();
@@ -421,14 +449,42 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   // MemoryCoordinatorClient overrides:
   void OnPurgeMemory() override;
 
+  void CheckResourceIntegrity();
+  void TriggerNotificationForFinishObservers(base::SingleThreadTaskRunner*);
+
   Type type_;
   ResourceStatus status_;
+
+  // A SecurityOrigin representing the origin from which the loading of the
+  // Resource was initiated. This is calculated and set by ResourceFetcher at
+  // the beginning of the loading.
+  //
+  // Unlike |security_origin| on |options_|, which:
+  // - holds a SecurityOrigin to override the FetchContext's SecurityOrigin
+  //   (in case of e.g. that the script initiated the loading is in an isolated
+  //   world)
+  // - may be modified during redirect as required by the CORS protocol
+  // this variable is stable after the loading has started.
+  //
+  // Used and should be used only for isolating resources for different origins
+  // in the MemoryCache.
+  //
+  // TODO(crbug.com/811669): Merge with some of the other SecurityOrigin
+  // variables.
+  scoped_refptr<const SecurityOrigin> source_origin_;
+
   CORSStatus cors_status_;
 
   Member<CachedMetadataHandlerImpl> cache_handler_;
-  RefPtr<SecurityOrigin> fetcher_security_origin_;
 
-  ResourceError error_;
+  // Holds the SecurityOrigin obtained from the associated FetchContext.
+  // ResourceFetcher sets this at the beginning of loading. The override by
+  // specifying a SecurityOrigin in ResourceLoaderOptions doesn't affect this.
+  //
+  // TODO(crbug.com/811669): Merge this with |source_origin_|.
+  scoped_refptr<const SecurityOrigin> fetcher_security_origin_;
+
+  Optional<ResourceError> error_;
 
   double load_finish_time_;
 
@@ -448,16 +504,16 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
 
   String cache_identifier_;
 
-  bool needs_synchronous_cache_hit_;
   bool link_preload_;
   bool is_revalidating_;
   bool is_alive_;
   bool is_add_remove_client_prohibited_;
   bool is_revalidation_start_forbidden_ = false;
   bool is_unused_preload_ = false;
+  bool detachable_ = false;
 
   ResourceIntegrityDisposition integrity_disposition_;
-  IntegrityMetadataSet integrity_metadata_;
+  SubresourceIntegrity::ReportInfo integrity_report_info_;
 
   // Ordered list of all redirects followed while fetching this resource.
   Vector<RedirectPair> redirect_chain_;
@@ -471,14 +527,15 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
 
   double response_timestamp_;
 
-  TaskRunnerTimer<Resource> cancel_timer_;
   TaskHandle async_finish_pending_clients_task_;
 
   ResourceRequest resource_request_;
   Member<ResourceLoader> loader_;
   ResourceResponse response_;
 
-  RefPtr<SharedBuffer> data_;
+  scoped_refptr<SharedBuffer> data_;
+
+  WebScopedVirtualTimePauser virtual_time_pauser_;
 };
 
 class ResourceFactory {

@@ -6,18 +6,22 @@
 
 namespace syncer {
 
-ModelError::ModelError(const tracked_objects::Location& location,
+ModelError::ModelError(const base::Location& location,
                        const std::string& message)
     : location_(location), message_(message) {}
 
 ModelError::~ModelError() = default;
 
-const tracked_objects::Location& ModelError::location() const {
+const base::Location& ModelError::location() const {
   return location_;
 }
 
 const std::string& ModelError::message() const {
   return message_;
+}
+
+std::string ModelError::ToString() const {
+  return location_.ToString() + std::string(": ") + message_;
 }
 
 }  // namespace syncer

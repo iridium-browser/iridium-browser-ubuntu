@@ -5,13 +5,16 @@
 #ifndef CHROME_BROWSER_SEARCH_MOST_VISITED_IFRAME_SOURCE_H_
 #define CHROME_BROWSER_SEARCH_MOST_VISITED_IFRAME_SOURCE_H_
 
-#include "base/compiler_specific.h"
-#include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/browser/search/iframe_source.h"
 
+#if defined(OS_ANDROID)
+#error "Instant is only used on desktop";
+#endif
+
 // Serves HTML for displaying suggestions using iframes, e.g.
-// chrome-search://suggestion/loader.html
+// chrome-search://most-visited/single.html
 class MostVisitedIframeSource : public IframeSource {
  public:
   MostVisitedIframeSource();
@@ -23,15 +26,11 @@ class MostVisitedIframeSource : public IframeSource {
       const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const content::URLDataSource::GotDataCallback& callback) override;
 
- protected:
+ private:
   // Overridden from IframeSource:
   std::string GetSource() const override;
 
   bool ServesPath(const std::string& path) const override;
-
- private:
-  FRIEND_TEST_ALL_PREFIXES(MostVisitedIframeSourceTest,
-                           LogEndpointIsValidWithProvider);
 
   DISALLOW_COPY_AND_ASSIGN(MostVisitedIframeSource);
 };

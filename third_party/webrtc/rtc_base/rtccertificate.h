@@ -8,16 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_BASE_RTCCERTIFICATE_H_
-#define WEBRTC_RTC_BASE_RTCCERTIFICATE_H_
+#ifndef RTC_BASE_RTCCERTIFICATE_H_
+#define RTC_BASE_RTCCERTIFICATE_H_
 
 #include <stdint.h>
 
 #include <memory>
 
-#include "webrtc/rtc_base/refcount.h"
-#include "webrtc/rtc_base/scoped_ref_ptr.h"
-#include "webrtc/rtc_base/sslidentity.h"
+#include "rtc_base/refcount.h"
+#include "rtc_base/scoped_ref_ptr.h"
+#include "rtc_base/sslidentity.h"
 
 namespace rtc {
 
@@ -58,6 +58,7 @@ class RTCCertificate : public RefCountInterface {
   // relative to epoch, 1970-01-01T00:00:00Z.
   bool HasExpired(uint64_t now) const;
   const SSLCertificate& ssl_certificate() const;
+  const SSLCertChain& ssl_cert_chain() const;
 
   // TODO(hbos): If possible, remove once RTCCertificate and its
   // ssl_certificate() is used in all relevant places. Should not pass around
@@ -84,4 +85,4 @@ class RTCCertificate : public RefCountInterface {
 
 }  // namespace rtc
 
-#endif  // WEBRTC_RTC_BASE_RTCCERTIFICATE_H_
+#endif  // RTC_BASE_RTCCERTIFICATE_H_

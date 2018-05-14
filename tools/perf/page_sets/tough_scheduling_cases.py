@@ -10,10 +10,9 @@ class ToughSchedulingCasesPage(page_module.Page):
 
   def __init__(self, url, page_set):
     super(ToughSchedulingCasesPage, self).__init__(
-        url=url, page_set=page_set, credentials_path='data/credentials.json',
+        url=url, page_set=page_set,
         shared_page_state_class=shared_page_state.SharedMobilePageState,
         name=url.split('/')[-1])
-    self.archive_data_file = 'data/tough_scheduling_cases.json'
 
   def RunPageInteractions(self, action_runner):
     with action_runner.CreateGestureInteraction('ScrollAction'):
@@ -87,7 +86,6 @@ class ToughSchedulingCasesPageSet(story.StorySet):
 
   def __init__(self):
     super(ToughSchedulingCasesPageSet, self).__init__(
-        archive_data_file='data/tough_scheduling_cases.json',
         cloud_storage_bucket=story.INTERNAL_BUCKET)
 
     # Why: Simple scrolling baseline

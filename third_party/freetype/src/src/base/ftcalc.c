@@ -4,7 +4,7 @@
 /*                                                                         */
 /*    Arithmetic computations (body).                                      */
 /*                                                                         */
-/*  Copyright 1996-2017 by                                                 */
+/*  Copyright 1996-2018 by                                                 */
 /*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
 /*                                                                         */
 /*  This file is part of the FreeType project, and may only be used,       */
@@ -74,7 +74,7 @@
   FT_BEGIN_STMNT                         \
     if ( x < 0 )                         \
     {                                    \
-      x_unsigned = 0u - (x_unsigned);    \
+      x_unsigned = 0U - (x_unsigned);    \
       s          = -s;                   \
     }                                    \
   FT_END_STMNT

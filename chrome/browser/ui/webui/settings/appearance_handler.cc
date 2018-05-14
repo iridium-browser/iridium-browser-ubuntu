@@ -13,14 +13,13 @@
 #include "content/public/browser/web_ui.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
+#include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #endif
 
 namespace settings {
 
 AppearanceHandler::AppearanceHandler(content::WebUI* webui)
-    : profile_(Profile::FromWebUI(webui)) {
-}
+    : profile_(Profile::FromWebUI(webui)), weak_ptr_factory_(this) {}
 
 AppearanceHandler::~AppearanceHandler() {}
 
@@ -43,6 +42,16 @@ void AppearanceHandler::RegisterMessages() {
       "openWallpaperManager",
       base::Bind(&AppearanceHandler::HandleOpenWallpaperManager,
                  base::Unretained(this)));
+
+  web_ui()->RegisterMessageCallback(
+      "isWallpaperSettingVisible",
+      base::Bind(&AppearanceHandler::IsWallpaperSettingVisible,
+                 base::Unretained(this)));
+
+  web_ui()->RegisterMessageCallback(
+      "isWallpaperPolicyControlled",
+      base::Bind(&AppearanceHandler::IsWallpaperPolicyControlled,
+                 base::Unretained(this)));
 #endif
 }
 
@@ -60,9 +69,30 @@ void AppearanceHandler::HandleUseSystemTheme(const base::ListValue* args) {
 #endif
 
 #if defined(OS_CHROMEOS)
+void AppearanceHandler::IsWallpaperSettingVisible(const base::ListValue* args) {
+  CHECK_EQ(args->GetSize(), 1U);
+  WallpaperControllerClient::Get()->ShouldShowWallpaperSetting(
+      base::Bind(&AppearanceHandler::ResolveCallback,
+                 weak_ptr_factory_.GetWeakPtr(), args->GetList()[0].Clone()));
+}
+
+void AppearanceHandler::IsWallpaperPolicyControlled(
+    const base::ListValue* args) {
+  CHECK_EQ(args->GetSize(), 1U);
+  WallpaperControllerClient::Get()->IsActiveUserWallpaperControlledByPolicy(
+      base::Bind(&AppearanceHandler::ResolveCallback,
+                 weak_ptr_factory_.GetWeakPtr(), args->GetList()[0].Clone()));
+}
+
 void AppearanceHandler::HandleOpenWallpaperManager(
-    const base::ListValue* /*args*/) {
-  chromeos::WallpaperManager::Get()->Open();
+    const base::ListValue* args) {
+  WallpaperControllerClient::Get()->OpenWallpaperPickerIfAllowed();
+}
+
+void AppearanceHandler::ResolveCallback(const base::Value& callback_id,
+                                        bool result) {
+  AllowJavascript();
+  ResolveJavascriptCallback(callback_id, base::Value(result));
 }
 #endif
 

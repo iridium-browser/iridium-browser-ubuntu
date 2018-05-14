@@ -4,7 +4,6 @@
 
 #include "core/dom/MutationObserver.h"
 
-#include "core/dom/MutationCallback.h"
 #include "core/dom/MutationObserverInit.h"
 #include "core/dom/MutationObserverRegistration.h"
 #include "core/html/HTMLDocument.h"
@@ -15,28 +14,30 @@ namespace blink {
 
 namespace {
 
-class EmptyMutationCallback : public MutationCallback {
+class EmptyMutationCallback : public MutationObserver::Delegate {
  public:
   explicit EmptyMutationCallback(Document& document) : document_(document) {}
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+
+  ExecutionContext* GetExecutionContext() const override { return document_; }
+
+  void Deliver(const MutationRecordVector&, MutationObserver&) override {}
+
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(document_);
-    MutationCallback::Trace(visitor);
+    MutationObserver::Delegate::Trace(visitor);
   }
 
  private:
-  void Call(const HeapVector<Member<MutationRecord>>&,
-            MutationObserver*) override {}
-  ExecutionContext* GetExecutionContext() const override { return document_; }
-
   Member<Document> document_;
 };
-}
+
+}  // namespace
 
 TEST(MutationObserverTest, DisconnectCrash) {
-  Persistent<Document> document = HTMLDocument::Create();
-  HTMLElement* root = ToHTMLElement(document->createElement("html"));
+  Persistent<Document> document = HTMLDocument::CreateForTest();
+  auto* root = ToHTMLElement(document->CreateRawElement(HTMLNames::htmlTag));
   document->AppendChild(root);
-  root->setInnerHTML("<head><title>\n</title></head><body></body>");
+  root->SetInnerHTMLFromString("<head><title>\n</title></head><body></body>");
   Node* head = root->firstChild()->firstChild();
   DCHECK(head);
   Persistent<MutationObserver> observer =

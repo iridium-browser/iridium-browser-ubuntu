@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef V8_INSPECTOR_V8PROFILERAGENTIMPL_H_
-#define V8_INSPECTOR_V8PROFILERAGENTIMPL_H_
+#ifndef V8_INSPECTOR_V8_PROFILER_AGENT_IMPL_H_
+#define V8_INSPECTOR_V8_PROFILER_AGENT_IMPL_H_
 
 #include <vector>
 
@@ -38,13 +38,20 @@ class V8ProfilerAgentImpl : public protocol::Profiler::Backend {
   Response start() override;
   Response stop(std::unique_ptr<protocol::Profiler::Profile>*) override;
 
-  Response startPreciseCoverage(Maybe<bool> binary) override;
+  Response startPreciseCoverage(Maybe<bool> binary,
+                                Maybe<bool> detailed) override;
   Response stopPreciseCoverage() override;
   Response takePreciseCoverage(
       std::unique_ptr<protocol::Array<protocol::Profiler::ScriptCoverage>>*
           out_result) override;
   Response getBestEffortCoverage(
       std::unique_ptr<protocol::Array<protocol::Profiler::ScriptCoverage>>*
+          out_result) override;
+
+  Response startTypeProfile() override;
+  Response stopTypeProfile() override;
+  Response takeTypeProfile(
+      std::unique_ptr<protocol::Array<protocol::Profiler::ScriptTypeProfile>>*
           out_result) override;
 
   void consoleProfile(const String16& title);
@@ -78,4 +85,4 @@ class V8ProfilerAgentImpl : public protocol::Profiler::Backend {
 
 }  // namespace v8_inspector
 
-#endif  // V8_INSPECTOR_V8PROFILERAGENTIMPL_H_
+#endif  // V8_INSPECTOR_V8_PROFILER_AGENT_IMPL_H_

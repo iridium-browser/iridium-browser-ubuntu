@@ -4,22 +4,34 @@
 
 #include "modules/storage/StorageNamespaceController.h"
 
+#include <memory>
+
+#include "core/frame/ContentSettingsClient.h"
 #include "modules/storage/InspectorDOMStorageAgent.h"
-#include "modules/storage/StorageClient.h"
 #include "modules/storage/StorageNamespace.h"
+#include "public/platform/Platform.h"
+#include "public/platform/WebStorageNamespace.h"
+#include "public/web/WebViewClient.h"
 
 namespace blink {
 
-const char* StorageNamespaceController::SupplementName() {
-  return "StorageNamespaceController";
-}
+#define STATIC_ASSERT_MATCHING_ENUM(enum_name1, enum_name2)                   \
+  static_assert(static_cast<int>(enum_name1) == static_cast<int>(enum_name2), \
+                "mismatching enums: " #enum_name1)
+STATIC_ASSERT_MATCHING_ENUM(StorageArea::kLocalStorage,
+                            ContentSettingsClient::StorageType::kLocal);
+STATIC_ASSERT_MATCHING_ENUM(StorageArea::kSessionStorage,
+                            ContentSettingsClient::StorageType::kSession);
 
-StorageNamespaceController::StorageNamespaceController(StorageClient* client)
-    : client_(client), inspector_agent_(nullptr) {}
+const char StorageNamespaceController::kSupplementName[] =
+    "StorageNamespaceController";
 
-StorageNamespaceController::~StorageNamespaceController() {}
+StorageNamespaceController::StorageNamespaceController(WebViewClient* client)
+    : inspector_agent_(nullptr), web_view_client_(client) {}
 
-DEFINE_TRACE(StorageNamespaceController) {
+StorageNamespaceController::~StorageNamespaceController() = default;
+
+void StorageNamespaceController::Trace(blink::Visitor* visitor) {
   Supplement<Page>::Trace(visitor);
   visitor->Trace(inspector_agent_);
 }
@@ -27,15 +39,32 @@ DEFINE_TRACE(StorageNamespaceController) {
 StorageNamespace* StorageNamespaceController::SessionStorage(
     bool optional_create) {
   if (!session_storage_ && optional_create)
-    session_storage_ = client_->CreateSessionStorageNamespace();
+    session_storage_ = CreateSessionStorageNamespace();
   return session_storage_.get();
 }
 
 void StorageNamespaceController::ProvideStorageNamespaceTo(
     Page& page,
-    StorageClient* client) {
-  StorageNamespaceController::ProvideTo(page, SupplementName(),
-                                        new StorageNamespaceController(client));
+    WebViewClient* client) {
+  ProvideTo(page, new StorageNamespaceController(client));
+}
+
+std::unique_ptr<StorageNamespace>
+StorageNamespaceController::CreateSessionStorageNamespace() {
+  if (!web_view_client_)
+    return nullptr;
+
+  return std::make_unique<StorageNamespace>(
+      Platform::Current()->CreateSessionStorageNamespace(
+          web_view_client_->GetSessionStorageNamespaceId()));
+}
+
+bool StorageNamespaceController::CanAccessStorage(
+    LocalFrame* frame,
+    StorageArea::StorageType type) const {
+  DCHECK(frame->GetContentSettingsClient());
+  return frame->GetContentSettingsClient()->AllowStorage(
+      static_cast<ContentSettingsClient::StorageType>(type));
 }
 
 }  // namespace blink

@@ -13,7 +13,6 @@
 #include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -124,7 +123,7 @@ void It2MeNativeMessagingHost::OnMessage(const std::string& message) {
 
   std::unique_ptr<base::DictionaryValue> response(new base::DictionaryValue());
   std::unique_ptr<base::Value> message_value = base::JSONReader::Read(message);
-  if (!message_value->IsType(base::Value::Type::DICTIONARY)) {
+  if (!message_value->is_dict()) {
     LOG(ERROR) << "Received a message that's not a dictionary.";
     client_->CloseChannel(std::string());
     return;
@@ -137,7 +136,7 @@ void It2MeNativeMessagingHost::OnMessage(const std::string& message) {
   // might be a string or a number, so cope with both.
   const base::Value* id;
   if (message_dict->Get("id", &id))
-    response->Set("id", base::MakeUnique<base::Value>(*id));
+    response->SetKey("id", id->Clone());
 
   std::string type;
   if (!message_dict->GetString("type", &type)) {
@@ -186,10 +185,12 @@ void It2MeNativeMessagingHost::ProcessHello(
     std::unique_ptr<base::DictionaryValue> response) const {
   DCHECK(task_runner()->BelongsToCurrentThread());
 
+  // No need to forward to the elevated process since no internal state is set.
+
   response->SetString("version", STRINGIZE(VERSION));
 
   // This list will be populated when new features are added.
-  response->Set("supportedFeatures", base::MakeUnique<base::ListValue>());
+  response->Set("supportedFeatures", std::make_unique<base::ListValue>());
 
   SendMessageToClient(std::move(response));
 }
@@ -305,7 +306,7 @@ void It2MeNativeMessagingHost::ProcessConnect(
     }
 
     auto delegating_signal_strategy =
-        base::MakeUnique<DelegatingSignalStrategy>(
+        std::make_unique<DelegatingSignalStrategy>(
             SignalingAddress(local_jid), host_context_->network_task_runner(),
             base::Bind(&It2MeNativeMessagingHost::SendOutgoingIq,
                        weak_factory_.GetWeakPtr()));
@@ -344,7 +345,7 @@ void It2MeNativeMessagingHost::ProcessConnect(
   // Create the It2Me host and start connecting.
   it2me_host_ = factory_->CreateIt2MeHost();
   it2me_host_->Connect(host_context_->Copy(), std::move(policies),
-                       base::MakeUnique<It2MeConfirmationDialogFactory>(),
+                       std::make_unique<It2MeConfirmationDialogFactory>(),
                        weak_ptr_, std::move(signal_strategy), username,
                        directory_bot_jid, ice_config);
 
@@ -380,6 +381,19 @@ void It2MeNativeMessagingHost::ProcessDisconnect(
 void It2MeNativeMessagingHost::ProcessIncomingIq(
     std::unique_ptr<base::DictionaryValue> message,
     std::unique_ptr<base::DictionaryValue> response) {
+  if (needs_elevation_) {
+    // Attempt to pass the current message to the elevated process.  This method
+    // will spin up the elevated process if it is not already running.  On
+    // success, the elevated process will process the message and respond.
+    // If the process cannot be started or message passing fails, then return an
+    // error to the message sender.
+    if (!DelegateToElevatedHost(std::move(message))) {
+      LOG(ERROR) << "Failed to send message to elevated host.";
+      SendErrorAndExit(std::move(response), ErrorCode::ELEVATION_ERROR);
+    }
+    return;
+  }
+
   std::string iq;
   if (!message->GetString("iq", &iq)) {
     LOG(ERROR) << "Invalid incomingIq() data.";
@@ -414,7 +428,7 @@ void It2MeNativeMessagingHost::SendErrorAndExit(
 void It2MeNativeMessagingHost::SendPolicyErrorAndExit() const {
   DCHECK(task_runner()->BelongsToCurrentThread());
 
-  auto message = base::MakeUnique<base::DictionaryValue>();
+  auto message = std::make_unique<base::DictionaryValue>();
   message->SetString("type", "policyError");
   SendMessageToClient(std::move(message));
   client_->CloseChannel(std::string());

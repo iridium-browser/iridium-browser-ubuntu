@@ -4,7 +4,6 @@
 
 #include "modules/device_orientation/DeviceMotionController.h"
 
-#include "core/dom/Document.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/HostsUsingFeatures.h"
 #include "core/frame/Settings.h"
@@ -12,6 +11,7 @@
 #include "modules/device_orientation/DeviceMotionData.h"
 #include "modules/device_orientation/DeviceMotionDispatcher.h"
 #include "modules/device_orientation/DeviceMotionEvent.h"
+#include "modules/device_orientation/DeviceOrientationController.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/Platform.h"
 
@@ -21,18 +21,16 @@ DeviceMotionController::DeviceMotionController(Document& document)
     : DeviceSingleWindowEventController(document),
       Supplement<Document>(document) {}
 
-DeviceMotionController::~DeviceMotionController() {}
+DeviceMotionController::~DeviceMotionController() = default;
 
-const char* DeviceMotionController::SupplementName() {
-  return "DeviceMotionController";
-}
+const char DeviceMotionController::kSupplementName[] = "DeviceMotionController";
 
 DeviceMotionController& DeviceMotionController::From(Document& document) {
-  DeviceMotionController* controller = static_cast<DeviceMotionController*>(
-      Supplement<Document>::From(document, SupplementName()));
+  DeviceMotionController* controller =
+      Supplement<Document>::From<DeviceMotionController>(document);
   if (!controller) {
     controller = new DeviceMotionController(document);
-    Supplement<Document>::ProvideTo(document, SupplementName(), controller);
+    ProvideTo(document, controller);
   }
   return *controller;
 }
@@ -43,20 +41,17 @@ void DeviceMotionController::DidAddEventListener(
   if (event_type != EventTypeName())
     return;
 
-  if (GetDocument().GetFrame()) {
+  LocalFrame* frame = GetDocument().GetFrame();
+  if (frame) {
     if (GetDocument().IsSecureContext()) {
-      UseCounter::Count(GetDocument().GetFrame(),
-                        WebFeature::kDeviceMotionSecureOrigin);
+      UseCounter::Count(frame, WebFeature::kDeviceMotionSecureOrigin);
     } else {
-      Deprecation::CountDeprecation(GetDocument().GetFrame(),
+      Deprecation::CountDeprecation(frame,
                                     WebFeature::kDeviceMotionInsecureOrigin);
       HostsUsingFeatures::CountAnyWorld(
           GetDocument(),
           HostsUsingFeatures::Feature::kDeviceMotionInsecureHost);
-      if (GetDocument()
-              .GetFrame()
-              ->GetSettings()
-              ->GetStrictPowerfulFeatureRestrictions())
+      if (frame->GetSettings()->GetStrictPowerfulFeatureRestrictions())
         return;
     }
   }
@@ -68,6 +63,13 @@ void DeviceMotionController::DidAddEventListener(
     if (!IsSameSecurityOriginAsMainFrame()) {
       Platform::Current()->RecordRapporURL(
           "DeviceSensors.DeviceMotionCrossOrigin", WebURL(GetDocument().Url()));
+    }
+
+    if (!CheckPolicyFeatures({mojom::FeaturePolicyFeature::kAccelerometer,
+                              mojom::FeaturePolicyFeature::kGyroscope})) {
+      DeviceOrientationController::LogToConsolePolicyFeaturesDisabled(
+          frame, EventTypeName());
+      return;
     }
   }
 
@@ -101,7 +103,7 @@ const AtomicString& DeviceMotionController::EventTypeName() const {
   return EventTypeNames::devicemotion;
 }
 
-DEFINE_TRACE(DeviceMotionController) {
+void DeviceMotionController::Trace(blink::Visitor* visitor) {
   DeviceSingleWindowEventController::Trace(visitor);
   Supplement<Document>::Trace(visitor);
 }

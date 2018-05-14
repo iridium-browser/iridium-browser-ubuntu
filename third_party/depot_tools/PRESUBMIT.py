@@ -12,6 +12,16 @@ import fnmatch
 import os
 
 
+ENSURE_FILE_TEMPLATE = r'''
+$VerifiedPlatform linux-386 linux-amd64 linux-arm64 linux-armv6l linux-mips64
+$VerifiedPlatform linux-ppc64 linux-ppc64le linux-s390x
+$VerifiedPlatform mac-amd64
+$VerifiedPlatform windows-386 windows-amd64
+
+%s %s
+'''
+
+
 def DepotToolsPylint(input_api, output_api):
   """Gather all the pylint logic into one place to make it self-contained."""
   white_list = [
@@ -59,55 +69,35 @@ def CommonChecks(input_api, output_api, tests_to_black_list):
     tests.extend(unit_tests)
   else:
     print('Warning: not running unit tests on Windows')
+
+  # Validate CIPD manifests.
+  root = input_api.os_path.normpath(
+    input_api.os_path.abspath(input_api.PresubmitLocalPath()))
+  rel_file = lambda rel: input_api.os_path.join(root, rel)
+  cipd_manifests = set(rel_file(input_api.os_path.join(*x)) for x in (
+    ('cipd_manifest.txt',),
+    ('bootstrap', 'win', 'manifest.txt'),
+    ('bootstrap', 'win', 'manifest_bleeding_edge.txt'),
+
+    # Also generate a file for the cipd client itself.
+    ('cipd_client_version',),
+  ))
+  affected_manifests = input_api.AffectedFiles(
+    include_deletes=False,
+    file_filter=lambda x:
+      input_api.os_path.normpath(x.AbsoluteLocalPath()) in cipd_manifests)
+  for path in affected_manifests:
+    path = path.AbsoluteLocalPath()
+    if path.endswith('.txt'):
+      tests.append(input_api.canned_checks.CheckCIPDManifest(
+          input_api, output_api, path=path))
+    else:
+      pkg = 'infra/tools/cipd/${platform}'
+      ver = input_api.ReadFile(path)
+      tests.append(input_api.canned_checks.CheckCIPDManifest(
+          input_api, output_api, content=ENSURE_FILE_TEMPLATE % (pkg, ver)))
+
   results.extend(input_api.RunTests(tests))
-  return results
-
-
-def RunGitClTests(input_api, output_api):
-  """Run all the shells scripts in the directory test.
-  """
-  if input_api.platform == 'win32':
-    # Skip for now as long as the test scripts are bash scripts.
-    return []
-
-  # First loads a local Rietveld instance.
-  import sys
-  old_sys_path = sys.path
-  try:
-    sys.path = [input_api.PresubmitLocalPath()] + sys.path
-    from testing_support import local_rietveld
-    server = local_rietveld.LocalRietveld()
-  finally:
-    sys.path = old_sys_path
-
-  results = []
-  try:
-    # Start a local rietveld instance to test against.
-    server.start_server()
-    test_path = input_api.os_path.abspath(
-        input_api.os_path.join(input_api.PresubmitLocalPath(), 'tests'))
-
-    # test-lib.sh is not an actual test so it should not be run.
-    NON_TEST_FILES = ('test-lib.sh')
-    for test in input_api.os_listdir(test_path):
-      if test in NON_TEST_FILES or not test.endswith('.sh'):
-        continue
-
-      print('Running %s' % test)
-      try:
-        if input_api.verbose:
-          input_api.subprocess.check_call(
-              [input_api.os_path.join(test_path, test)], cwd=test_path)
-        else:
-          input_api.subprocess.check_output(
-              [input_api.os_path.join(test_path, test)], cwd=test_path,
-              stderr=input_api.subprocess.STDOUT)
-      except (OSError, input_api.subprocess.CalledProcessError), e:
-        results.append(output_api.PresubmitError('%s failed\n%s' % (test, e)))
-  except local_rietveld.Failure, e:
-    results.append(output_api.PresubmitError('\n'.join(str(i) for i in e.args)))
-  finally:
-    server.stop_server()
   return results
 
 
@@ -128,5 +118,4 @@ def CheckChangeOnCommit(input_api, output_api):
   output.extend(input_api.canned_checks.CheckDoNotSubmit(
       input_api,
       output_api))
-  output.extend(RunGitClTests(input_api, output_api))
   return output

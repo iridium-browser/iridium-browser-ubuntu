@@ -4,18 +4,18 @@
 
 #include "ash/drag_drop/drag_drop_controller.h"
 
+#include <memory>
 #include <utility>
 
 #include "ash/drag_drop/drag_drop_tracker.h"
 #include "ash/drag_drop/drag_image_view.h"
 #include "ash/shell.h"
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/aura/client/capture_client.h"
+#include "ui/aura/client/drag_drop_client_observer.h"
 #include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -83,7 +83,7 @@ class DragDropTrackerDelegate : public aura::WindowDelegate {
  public:
   explicit DragDropTrackerDelegate(DragDropController* controller)
       : drag_drop_controller_(controller) {}
-  ~DragDropTrackerDelegate() override {}
+  ~DragDropTrackerDelegate() override = default;
 
   // Overridden from WindowDelegate:
   gfx::Size GetMinimumSize() const override { return gfx::Size(); }
@@ -109,7 +109,8 @@ class DragDropTrackerDelegate : public aura::WindowDelegate {
       drag_drop_controller_->DragCancel();
   }
   void OnPaint(const ui::PaintContext& context) override {}
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
+  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                  float new_device_scale_factor) override {}
   void OnWindowDestroying(aura::Window* window) override {}
   void OnWindowDestroyed(aura::Window* window) override {}
   void OnWindowTargetVisibilityChanged(bool visible) override {}
@@ -205,7 +206,7 @@ int DragDropController::StartDragAndDrop(
       gfx::Rect(start_location - provider->GetDragImageOffset(),
                 provider->GetDragImage().size());
   drag_image_ =
-      base::MakeUnique<DragImageView>(source_window->GetRootWindow(), source);
+      std::make_unique<DragImageView>(source_window->GetRootWindow(), source);
   drag_image_->SetImage(provider->GetDragImage());
   drag_image_offset_ = provider->GetDragImageOffset();
   gfx::Rect drag_image_bounds(start_location, drag_image_->GetPreferredSize());
@@ -226,11 +227,12 @@ int DragDropController::StartDragAndDrop(
   if (cancel_animation_)
     cancel_animation_->End();
 
+  for (aura::client::DragDropClientObserver& observer : observers_)
+    observer.OnDragStarted();
+
   if (should_block_during_drag_drop_) {
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     quit_closure_ = run_loop.QuitClosure();
-    base::MessageLoop* loop = base::MessageLoop::current();
-    base::MessageLoop::ScopedNestableTaskAllower allow_nested(loop);
     run_loop.Run();
   }
 
@@ -260,6 +262,16 @@ void DragDropController::DragCancel() {
 
 bool DragDropController::IsDragDropInProgress() {
   return !!drag_drop_tracker_.get();
+}
+
+void DragDropController::AddObserver(
+    aura::client::DragDropClientObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void DragDropController::RemoveObserver(
+    aura::client::DragDropClientObserver* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 void DragDropController::OnKeyEvent(ui::KeyEvent* event) {
@@ -577,6 +589,8 @@ void DragDropController::ForwardPendingLongTap() {
 }
 
 void DragDropController::Cleanup() {
+  for (aura::client::DragDropClientObserver& observer : observers_)
+    observer.OnDragEnded();
   if (drag_window_)
     drag_window_->RemoveObserver(this);
   drag_window_ = NULL;

@@ -27,6 +27,19 @@ cr.define('gpu', function() {
                                      this.refresh.bind(this));
       browserBridge.addEventListener('clientInfoChange',
                                      this.refresh.bind(this));
+
+      // Add handler to 'copy to clipboard' button
+      document.getElementById('copy-to-clipboard').onclick = function() {
+        // Make sure nothing is selected
+        window.getSelection().removeAllRanges();
+
+        document.execCommand('selectAll');
+        document.execCommand('copy');
+
+        // And deselect everything at the end.
+        window.getSelection().removeAllRanges();
+      }
+
       this.refresh();
     },
 
@@ -34,6 +47,15 @@ cr.define('gpu', function() {
     * Updates the view based on its currently known data
     */
     refresh: function(data) {
+      function createSourcePermalink(revisionIdentifier, filepath) {
+        if (revisionIdentifier.length !== 40) {
+          // If the revision id isn't a hash, just use the 0.0.0.0 version
+          // from the Chrome version string "Chrome/0.0.0.0".
+          revisionIdentifier = clientInfo.version.split('/')[1];
+        }
+        return `https://chromium.googlesource.com/chromium/src/+/${revisionIdentifier}/${filepath}`;
+      }
+
       // Client info
       if (browserBridge.clientInfo) {
         var clientInfo = browserBridge.clientInfo;
@@ -41,7 +63,7 @@ cr.define('gpu', function() {
         this.setTable_('client-info', [
           {
             description: 'Data exported',
-            value: (new Date()).toLocaleString()
+            value: (new Date()).toISOString()
           },
           {
             description: 'Chrome version',
@@ -52,12 +74,14 @@ cr.define('gpu', function() {
             value: clientInfo.operating_system
           },
           {
-            description: 'Software rendering list version',
-            value: clientInfo.blacklist_version
+            description: 'Software rendering list URL',
+            value: createSourcePermalink(clientInfo.revision_identifier,
+              'gpu/config/software_rendering_list.json')
           },
           {
-            description: 'Driver bug list version',
-            value: clientInfo.driver_bug_list_version
+            description: 'Driver bug list URL',
+            value: createSourcePermalink(clientInfo.revision_identifier,
+              'gpu/config/gpu_driver_bug_list.json')
           },
           {
             description: 'ANGLE commit id',
@@ -86,11 +110,10 @@ cr.define('gpu', function() {
         'flash_stage3d_baseline': 'Flash Stage3D Baseline profile',
         'texture_sharing': 'Texture Sharing',
         'video_decode': 'Video Decode',
-        'video_encode': 'Video Encode',
-        'panel_fitting': 'Panel Fitting',
         'rasterization': 'Rasterization',
         'multiple_raster_threads': 'Multiple Raster Threads',
         'native_gpu_memory_buffers': 'Native GpuMemoryBuffers',
+        'surface_synchronization': 'Surface Synchronization',
         'vpx_decode': 'VPx Video Decode',
         'webgl2': 'WebGL2',
         'checker_imaging': 'CheckerImaging',
@@ -231,6 +254,18 @@ cr.define('gpu', function() {
           this.setTable_('gpu-memory-buffer-info', gpuInfo.gpuMemoryBufferInfo);
         else
           this.setTable_('gpu-memory-buffer-info', []);
+
+        if (gpuInfo.displayInfo)
+          this.setTable_('display-info', gpuInfo.displayInfo);
+        else
+          this.setTable_('display-info', []);
+
+        if (gpuInfo.videoAcceleratorsInfo) {
+          this.setTable_(
+              'video-acceleration-info', gpuInfo.videoAcceleratorsInfo);
+        } else {
+          this.setTable_('video-acceleration-info', []);
+        }
 
         if (gpuInfo.diagnostics) {
           diagnosticsDiv.hidden = false;

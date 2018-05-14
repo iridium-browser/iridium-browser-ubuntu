@@ -30,7 +30,7 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/html/PublicURLManager.h"
+#include "core/fileapi/PublicURLManager.h"
 #include "core/url/URLSearchParams.h"
 #include "platform/loader/fetch/MemoryCache.h"
 #include "platform/wtf/AutoReset.h"
@@ -50,10 +50,11 @@ DOMURL::DOMURL(const String& url,
     exception_state.ThrowTypeError("Invalid URL");
 }
 
-DOMURL::~DOMURL() {}
+DOMURL::~DOMURL() = default;
 
-DEFINE_TRACE(DOMURL) {
+void DOMURL::Trace(blink::Visitor* visitor) {
   visitor->Trace(search_params_);
+  ScriptWrappable::Trace(visitor);
 }
 
 void DOMURL::SetInput(const String& value) {
@@ -77,18 +78,8 @@ void DOMURL::setSearch(const String& value) {
 }
 
 String DOMURL::CreatePublicURL(ExecutionContext* execution_context,
-                               URLRegistrable* registrable,
-                               const String& uuid) {
-  return execution_context->GetPublicURLManager().RegisterURL(
-      execution_context, registrable, uuid);
-}
-
-void DOMURL::RevokeObjectUUID(ExecutionContext* execution_context,
-                              const String& uuid) {
-  if (!execution_context)
-    return;
-
-  execution_context->GetPublicURLManager().Revoke(uuid);
+                               URLRegistrable* registrable) {
+  return execution_context->GetPublicURLManager().RegisterURL(registrable);
 }
 
 URLSearchParams* DOMURL::searchParams() {
@@ -110,7 +101,7 @@ void DOMURL::UpdateSearchParams(const String& query_string) {
 #if DCHECK_IS_ON()
   DCHECK_EQ(search_params_->UrlObject(), this);
 #endif
-  search_params_->SetInput(query_string);
+  search_params_->SetInputWithoutUpdate(query_string);
 }
 
 }  // namespace blink

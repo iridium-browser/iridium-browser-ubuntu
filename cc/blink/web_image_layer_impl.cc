@@ -15,19 +15,21 @@ WebImageLayerImpl::WebImageLayerImpl() {
   layer_.reset(new WebLayerImplFixedBounds(cc::PictureImageLayer::Create()));
 }
 
-WebImageLayerImpl::~WebImageLayerImpl() {
-}
+WebImageLayerImpl::~WebImageLayerImpl() = default;
 
 blink::WebLayer* WebImageLayerImpl::Layer() {
   return layer_.get();
 }
 
-void WebImageLayerImpl::SetImage(cc::PaintImage image) {
-  static_cast<WebLayerImplFixedBounds*>(layer_.get())
-      ->SetFixedBounds(
-          gfx::Size(image.sk_image()->width(), image.sk_image()->height()));
+void WebImageLayerImpl::SetImage(cc::PaintImage image,
+                                 const SkMatrix& matrix,
+                                 bool uses_width_as_height) {
+  gfx::Size size = uses_width_as_height
+                       ? gfx::Size(image.height(), image.width())
+                       : gfx::Size(image.width(), image.height());
+  static_cast<WebLayerImplFixedBounds*>(layer_.get())->SetFixedBounds(size);
   static_cast<cc::PictureImageLayer*>(layer_->layer())
-      ->SetImage(std::move(image));
+      ->SetImage(std::move(image), matrix, uses_width_as_height);
 }
 
 void WebImageLayerImpl::SetNearestNeighbor(bool nearest_neighbor) {

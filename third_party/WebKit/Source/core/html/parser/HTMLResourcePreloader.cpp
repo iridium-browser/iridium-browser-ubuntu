@@ -30,10 +30,8 @@
 #include "core/frame/Settings.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/resource/CSSStyleSheetResource.h"
-#include "platform/Histogram.h"
 #include "platform/loader/fetch/Resource.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
-#include "public/platform/Platform.h"
 #include <memory>
 
 namespace blink {
@@ -45,7 +43,7 @@ HTMLResourcePreloader* HTMLResourcePreloader::Create(Document& document) {
   return new HTMLResourcePreloader(document);
 }
 
-DEFINE_TRACE(HTMLResourcePreloader) {
+void HTMLResourcePreloader::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
   visitor->Trace(css_preloaders_);
 }
@@ -78,21 +76,19 @@ void HTMLResourcePreloader::Preload(
   if (!document_->Loader())
     return;
 
-  int duration = static_cast<int>(
-      1000 * (MonotonicallyIncreasingTime() - preload->DiscoveryTime()));
-  DEFINE_STATIC_LOCAL(CustomCountHistogram, preload_delay_histogram,
-                      ("WebCore.PreloadDelayMs", 0, 2000, 20));
-  preload_delay_histogram.Count(duration);
-
-  Resource* resource = preload->Start(document_);
-
-  if (resource && !resource->IsLoaded() &&
+  CSSPreloaderResourceClient* client = nullptr;
+  // Don't scan a Resource more than once, to avoid a self-referencing
+  // stlyesheet causing infinite recursion.
+  if (!css_preloaders_.Contains(preload->ResourceURL()) &&
       preload->ResourceType() == Resource::kCSSStyleSheet) {
     Settings* settings = document_->GetSettings();
     if (settings && (settings->GetCSSExternalScannerNoPreload() ||
-                     settings->GetCSSExternalScannerPreload()))
-      css_preloaders_.insert(new CSSPreloaderResourceClient(resource, this));
+                     settings->GetCSSExternalScannerPreload())) {
+      client = new CSSPreloaderResourceClient(this);
+      css_preloaders_.insert(preload->ResourceURL(), client);
+    }
   }
+  preload->Start(document_, client);
 }
 
 }  // namespace blink

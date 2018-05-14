@@ -10,10 +10,12 @@
 #include "net/quic/core/crypto/crypto_handshake_message.h"
 #include "net/quic/core/crypto/proof_source.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/core/tls_server_handshaker.h"
 #include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_string_piece.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
@@ -21,7 +23,6 @@
 #include "net/quic/test_tools/quic_crypto_server_config_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 
-using std::string;
 
 namespace net {
 namespace test {
@@ -51,11 +52,11 @@ const char* FlagsModeToString(FlagsMode mode) {
 
 // Test various combinations of QUIC version and flag state.
 struct TestParams {
-  QuicVersion version;
+  QuicTransportVersion version;
   FlagsMode flags;
 };
 
-string TestParamToString(const testing::TestParamInfo<TestParams>& params) {
+QuicString TestParamToString(const testing::TestParamInfo<TestParams>& params) {
   return QuicStrCat("v", params.param.version, "_",
                     FlagsModeToString(params.param.flags));
 }
@@ -64,7 +65,7 @@ std::vector<TestParams> GetTestParams() {
   std::vector<TestParams> params;
   for (FlagsMode flags :
        {ENABLED, STATELESS_DISABLED, CHEAP_DISABLED, BOTH_DISABLED}) {
-    for (QuicVersion version : AllSupportedVersions()) {
+    for (QuicTransportVersion version : AllSupportedTransportVersions()) {
       TestParams param;
       param.version = version;
       param.flags = flags;
@@ -80,13 +81,14 @@ class StatelessRejectorTest : public QuicTestWithParam<TestParams> {
       : proof_source_(crypto_test_utils::ProofSourceForTesting()),
         config_(QuicCryptoServerConfig::TESTING,
                 QuicRandom::GetInstance(),
-                crypto_test_utils::ProofSourceForTesting()),
+                crypto_test_utils::ProofSourceForTesting(),
+                TlsServerHandshaker::CreateSslCtx()),
         config_peer_(&config_),
         compressed_certs_cache_(
             QuicCompressedCertsCache::kQuicCompressedCertsCacheSize),
         rejector_(QuicMakeUnique<StatelessRejector>(
             GetParam().version,
-            AllSupportedVersions(),
+            AllSupportedTransportVersions(),
             &config_,
             &compressed_certs_cache_,
             &clock_,
@@ -94,10 +96,12 @@ class StatelessRejectorTest : public QuicTestWithParam<TestParams> {
             kDefaultMaxPacketSize,
             QuicSocketAddress(QuicIpAddress::Loopback4(), 12345),
             QuicSocketAddress(QuicIpAddress::Loopback4(), 443))) {
-    FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support =
-        GetParam().flags == ENABLED || GetParam().flags == CHEAP_DISABLED;
-    FLAGS_quic_reloadable_flag_quic_use_cheap_stateless_rejects =
-        GetParam().flags == ENABLED || GetParam().flags == STATELESS_DISABLED;
+    SetQuicReloadableFlag(
+        enable_quic_stateless_reject_support,
+        GetParam().flags == ENABLED || GetParam().flags == CHEAP_DISABLED);
+    SetQuicReloadableFlag(
+        quic_use_cheap_stateless_rejects,
+        GetParam().flags == ENABLED || GetParam().flags == STATELESS_DISABLED);
 
     // Add a new primary config.
     std::unique_ptr<CryptoHandshakeMessage> msg(config_.AddDefaultConfig(
@@ -108,7 +112,8 @@ class StatelessRejectorTest : public QuicTestWithParam<TestParams> {
         "#" + QuicTextUtils::HexEncode(config_peer_.GetPrimaryConfig()->id);
 
     // Encode the QUIC version.
-    ver_hex_ = QuicTagToString(QuicVersionToQuicTag(GetParam().version));
+    ver_hex_ = QuicVersionLabelToString(
+        QuicVersionToQuicVersionLabel(GetParam().version));
 
     // Generate a public value.
     char public_value[32];
@@ -117,7 +122,7 @@ class StatelessRejectorTest : public QuicTestWithParam<TestParams> {
         "#" + QuicTextUtils::HexEncode(public_value, sizeof(public_value));
 
     // Generate a client nonce.
-    string nonce;
+    QuicString nonce;
     CryptoUtils::GenerateNonce(
         clock_.WallNow(), QuicRandom::GetInstance(),
         QuicStringPiece(
@@ -130,7 +135,7 @@ class StatelessRejectorTest : public QuicTestWithParam<TestParams> {
     SourceAddressTokens previous_tokens;
     QuicIpAddress ip = QuicIpAddress::Loopback4();
     MockRandom rand;
-    string stk = config_peer_.NewSourceAddressToken(
+    QuicString stk = config_peer_.NewSourceAddressToken(
         config_peer_.GetPrimaryConfig()->id, previous_tokens, ip, &rand,
         clock_.WallNow(), nullptr);
     stk_hex_ = "#" + QuicTextUtils::HexEncode(stk);
@@ -157,11 +162,11 @@ class StatelessRejectorTest : public QuicTestWithParam<TestParams> {
   std::unique_ptr<StatelessRejector> rejector_;
 
   // Values used in CHLO messages
-  string scid_hex_;
-  string nonc_hex_;
-  string pubs_hex_;
-  string ver_hex_;
-  string stk_hex_;
+  QuicString scid_hex_;
+  QuicString nonc_hex_;
+  QuicString pubs_hex_;
+  QuicString ver_hex_;
+  QuicString stk_hex_;
 };
 
 INSTANTIATE_TEST_CASE_P(Flags,
@@ -248,7 +253,7 @@ TEST_P(StatelessRejectorTest, RejectChlo) {
 
 TEST_P(StatelessRejectorTest, AcceptChlo) {
   const uint64_t xlct = crypto_test_utils::LeafCertHashForTesting();
-  const string xlct_hex =
+  const QuicString xlct_hex =
       "#" + QuicTextUtils::HexEncode(reinterpret_cast<const char*>(&xlct),
                                      sizeof(xlct));
   // clang-format off

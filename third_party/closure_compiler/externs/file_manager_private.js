@@ -16,8 +16,17 @@ var FileTask;
 
 /**
  * @typedef {{
+ *   icon16x16Url: (string|undefined),
+ *   icon32x32Url: (string|undefined)
+ * }}
+ */
+var IconSet;
+
+/**
+ * @typedef {{
  *   size: (number|undefined),
  *   modificationTime: (number|undefined),
+ *   modificationByMeTime: (number|undefined),
  *   thumbnailUrl: (string|undefined),
  *   croppedThumbnailUrl: (string|undefined),
  *   externalFileUrl: (string|undefined),
@@ -59,7 +68,7 @@ var ProfileInfo;
  * @typedef {{
  *   volumeId: string,
  *   fileSystemId: (string|undefined),
- *   extensionId: (string|undefined),
+ *   iconSet: IconSet,
  *   source: string,
  *   volumeLabel: (string|undefined),
  *   profile: ProfileInfo,
@@ -74,7 +83,8 @@ var ProfileInfo;
  *   configurable: boolean,
  *   watchable: boolean,
  *   mountCondition: (string|undefined),
- *   mountContext: (string|undefined)
+ *   mountContext: (string|undefined),
+ *   diskFileSystemType: (string|undefined)
  * }}
  */
 var VolumeMetadata;
@@ -201,7 +211,8 @@ var DeviceEvent;
 
 /**
  * @typedef {{
- *   extensionId: string,
+ *   providerId: string,
+ *   iconSet: IconSet,
  *   name: string,
  *   configurable: boolean,
  *   watchable: boolean,
@@ -209,7 +220,7 @@ var DeviceEvent;
  *   source: string
  * }}
  */
-var ProvidingExtension;
+var Provider;
 
 /**
  * @typedef {{
@@ -439,6 +450,14 @@ chrome.fileManagerPrivate.getSizeStats = function(volumeId, callback) {};
 chrome.fileManagerPrivate.formatVolume = function(volumeId) {};
 
 /**
+ * Renames a mounted volume. |volumeId| ID of the volume to be renamed to
+ * |newName|.
+ * @param {string} volumeId
+ * @param {string} newName
+ */
+chrome.fileManagerPrivate.renameVolume = function(volumeId, newName) {};
+
+/**
  * Retrieves file manager preferences. |callback|
  * @param {function((!Preferences|undefined))} callback
  */
@@ -620,19 +639,19 @@ chrome.fileManagerPrivate.setEntryTag = function(entry, visibility, key,
 chrome.fileManagerPrivate.isPiexLoaderEnabled = function(callback) {};
 
 /**
- * Returns list of available providing extensions.
- * @param {function((!Array<!ProvidingExtension>|undefined))} callback
+ * Returns list of available providers.
+ * @param {function((!Array<!Provider>|undefined))} callback
  */
-chrome.fileManagerPrivate.getProvidingExtensions = function(callback) {};
+chrome.fileManagerPrivate.getProviders = function(callback) {};
 
 /**
  * Requests adding a new provided file system. If not possible, then an error
  * via chrome.runtime.lastError is returned.
- * @param {string} extensionId
+ * @param {string} providerId
  * @param {function()} callback
  */
 chrome.fileManagerPrivate.addProvidedFileSystem =
-    function(extensionId, callback) {};
+    function(providerId, callback) {};
 
 /**
  * Requests configuring an existing file system. If not possible, then returns

@@ -42,15 +42,10 @@
     'checks_only',
     'chrome_pass',
     'polymer_pass',
-
-    'source_map_format=V3',
   ],
 
   'default_disabled_closure_args': [
     # TODO(dbeam): happens when the same file is <include>d multiple times.
     'jscomp_off=duplicate',
-    # TODO(fukino): happens when cr.defineProperty() has a type annotation.
-    # Avoiding parse-time warnings needs 2 pass compiling. crbug.com/421562.
-    'jscomp_off=misplacedTypeAnnotation',
   ],
 }

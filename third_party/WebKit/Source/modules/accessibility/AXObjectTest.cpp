@@ -1,73 +1,39 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "modules/accessibility/AXObject.h"
-
-#include "core/dom/Document.h"
-#include "core/dom/Element.h"
-#include "core/testing/DummyPageHolder.h"
+#include "modules/accessibility/testing/AccessibilityTest.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <memory>
 
 namespace blink {
 
-class AXObjectTest : public ::testing::Test {
- protected:
-  Document& GetDocument() { return page_holder_->GetDocument(); }
+TEST_F(AccessibilityTest, IsDescendantOf) {
+  SetBodyInnerHTML(R"HTML(<button id='button'>button</button>)HTML");
 
- private:
-  void SetUp() override;
+  const AXObject* root = GetAXRootObject();
+  ASSERT_NE(nullptr, root);
+  const AXObject* button = GetAXObjectByElementId("button");
+  ASSERT_NE(nullptr, button);
 
-  std::unique_ptr<DummyPageHolder> page_holder_;
-};
-
-void AXObjectTest::SetUp() {
-  page_holder_ = DummyPageHolder::Create(IntSize(800, 600));
+  EXPECT_TRUE(button->IsDescendantOf(*root));
+  EXPECT_FALSE(root->IsDescendantOf(*root));
+  EXPECT_FALSE(button->IsDescendantOf(*button));
+  EXPECT_FALSE(root->IsDescendantOf(*button));
 }
 
-TEST_F(AXObjectTest, IsARIAWidget) {
-  String test_content =
-      "<body>"
-      "<span id=\"plain\">plain</span><br>"
-      "<span id=\"button\" role=\"button\">button</span><br>"
-      "<span id=\"button-parent\" "
-      "role=\"button\"><span>button-parent</span></span><br>"
-      "<span id=\"button-caps\" role=\"BUTTON\">button-caps</span><br>"
-      "<span id=\"button-second\" role=\"another-role "
-      "button\">button-second</span><br>"
-      "<span id=\"aria-bogus\" aria-bogus=\"bogus\">aria-bogus</span><br>"
-      "<span id=\"aria-selected\" aria-selected>aria-selected</span><br>"
-      "<span id=\"haspopup\" "
-      "aria-haspopup=\"true\">aria-haspopup-true</span><br>"
-      "<div id=\"focusable\" tabindex=\"1\">focusable</div><br>"
-      "<div tabindex=\"2\"><div "
-      "id=\"focusable-parent\">focusable-parent</div></div><br>"
-      "</body>";
+TEST_F(AccessibilityTest, IsAncestorOf) {
+  SetBodyInnerHTML(R"HTML(<button id='button'>button</button>)HTML");
 
-  GetDocument().documentElement()->setInnerHTML(test_content);
-  GetDocument().UpdateStyleAndLayout();
-  Element* root(GetDocument().documentElement());
-  EXPECT_FALSE(AXObjectCache::IsInsideFocusableElementOrARIAWidget(
-      *root->getElementById("plain")));
-  EXPECT_TRUE(AXObjectCache::IsInsideFocusableElementOrARIAWidget(
-      *root->getElementById("button")));
-  EXPECT_TRUE(AXObjectCache::IsInsideFocusableElementOrARIAWidget(
-      *root->getElementById("button-parent")));
-  EXPECT_TRUE(AXObjectCache::IsInsideFocusableElementOrARIAWidget(
-      *root->getElementById("button-caps")));
-  EXPECT_TRUE(AXObjectCache::IsInsideFocusableElementOrARIAWidget(
-      *root->getElementById("button-second")));
-  EXPECT_FALSE(AXObjectCache::IsInsideFocusableElementOrARIAWidget(
-      *root->getElementById("aria-bogus")));
-  EXPECT_TRUE(AXObjectCache::IsInsideFocusableElementOrARIAWidget(
-      *root->getElementById("aria-selected")));
-  EXPECT_TRUE(AXObjectCache::IsInsideFocusableElementOrARIAWidget(
-      *root->getElementById("haspopup")));
-  EXPECT_TRUE(AXObjectCache::IsInsideFocusableElementOrARIAWidget(
-      *root->getElementById("focusable")));
-  EXPECT_TRUE(AXObjectCache::IsInsideFocusableElementOrARIAWidget(
-      *root->getElementById("focusable-parent")));
+  const AXObject* root = GetAXRootObject();
+  ASSERT_NE(nullptr, root);
+  const AXObject* button = GetAXObjectByElementId("button");
+  ASSERT_NE(nullptr, button);
+
+  EXPECT_TRUE(root->IsAncestorOf(*button));
+  EXPECT_FALSE(root->IsAncestorOf(*root));
+  EXPECT_FALSE(button->IsAncestorOf(*button));
+  EXPECT_FALSE(button->IsAncestorOf(*root));
 }
 
 }  // namespace blink

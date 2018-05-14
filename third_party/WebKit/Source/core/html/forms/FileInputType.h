@@ -32,12 +32,12 @@
 #ifndef FileInputType_h
 #define FileInputType_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
+#include "core/html/forms/FileChooser.h"
 #include "core/html/forms/InputType.h"
 #include "core/html/forms/KeyboardClickableInputTypeView.h"
-#include "platform/FileChooser.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -51,7 +51,7 @@ class CORE_EXPORT FileInputType final : public InputType,
 
  public:
   static InputType* Create(HTMLInputElement&);
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
   using InputType::GetElement;
   static Vector<FileChooserFileInfo> FilesFromFormControlState(
       const FormControlState&);
@@ -90,6 +90,10 @@ class CORE_EXPORT FileInputType final : public InputType,
   void MultipleAttributeChanged() override;
   String DefaultToolTip(const InputTypeView&) const override;
   void CopyNonAttributeProperties(const HTMLInputElement&) override;
+
+  // KeyboardClickableInputTypeView overrides.
+  void HandleKeypressEvent(KeyboardEvent*) override;
+  void HandleKeyupEvent(KeyboardEvent*) override;
 
   // FileChooserClient implementation.
   void FilesChosen(const Vector<FileChooserFileInfo>&) override;

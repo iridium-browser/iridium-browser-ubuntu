@@ -5,7 +5,8 @@
 #include "core/editing/PositionIterator.h"
 
 #include "core/dom/FlatTreeTraversal.h"
-#include "core/editing/EditingTestBase.h"
+#include "core/editing/Position.h"
+#include "core/editing/testing/EditingTestBase.h"
 
 namespace blink {
 
@@ -80,11 +81,6 @@ TEST_F(PositionIteratorTest, decrementWithSelectElement) {
   flat_iterator.Decrement();
   EXPECT_EQ(PositionInFlatTree::AfterNode(*select),
             flat_iterator.ComputePosition());
-  flat_iterator.Decrement();
-  EXPECT_EQ(PositionInFlatTree::AfterNode(*select),
-            flat_iterator.ComputePosition())
-      << "This is redundant result, we should not have. see "
-         "http://crbug.com/697283";
   flat_iterator.Decrement();
   EXPECT_EQ(PositionInFlatTree::BeforeNode(*select),
             flat_iterator.ComputePosition());
@@ -203,11 +199,6 @@ TEST_F(PositionIteratorTest, incrementWithSelectElement) {
   flat_iterator.Increment();
   EXPECT_EQ(PositionInFlatTree::AfterNode(*select),
             flat_iterator.ComputePosition());
-  flat_iterator.Increment();
-  EXPECT_EQ(PositionInFlatTree::AfterNode(*select),
-            flat_iterator.ComputePosition())
-      << "This is redundant result, we should not have. see "
-         "http://crbug.com/697283";
   flat_iterator.Increment();
   EXPECT_EQ(PositionInFlatTree(GetDocument().body(), 1),
             flat_iterator.ComputePosition());

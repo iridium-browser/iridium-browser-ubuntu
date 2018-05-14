@@ -128,13 +128,13 @@ bool WebserviceCache::PayloadFromDict(const base::DictionaryValue* dict,
 
 std::unique_ptr<base::DictionaryValue> WebserviceCache::DictFromPayload(
     const Payload& payload) {
-  auto dict = base::MakeUnique<base::DictionaryValue>();
+  auto dict = std::make_unique<base::DictionaryValue>();
   dict->SetString(kKeyResultTime, base::Int64ToString(
       payload.time.ToInternalValue()));
   // The payload will still keep ownership of it's result dict, hence put a
   // a copy of the result dictionary here. This dictionary will be owned by
   // data_store_->cached_dict().
-  dict->Set(kKeyResult, base::MakeUnique<base::Value>(*payload.result));
+  dict->SetKey(kKeyResult, payload.result->Clone());
 
   return dict;
 }

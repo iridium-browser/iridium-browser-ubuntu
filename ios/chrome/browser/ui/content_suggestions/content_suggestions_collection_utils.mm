@@ -7,9 +7,9 @@
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "components/strings/grit/components_strings.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_most_visited_cell.h"
-#import "ios/chrome/browser/ui/toolbar/web_toolbar_controller.h"
+#import "ios/chrome/browser/ui/location_bar/location_bar_constants.h"
+#import "ios/chrome/browser/ui/ntp/new_tab_page_header_constants.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
@@ -31,12 +31,11 @@ const CGFloat kSearchHintVerticalOffset = 0.5;
 
 const CGFloat kMaxSearchFieldFrameMargin = 200;
 const CGFloat kDoodleTopMarginIPad = 82;
-const CGFloat kDoodleTopMarginIPhone = 56;
-const CGFloat kSearchFieldTopMarginIPhone = 16;
+const CGFloat kSearchFieldTopMarginIPhone = 32;
+const CGFloat kSearchFieldTopMarginIPad = 82;
 const CGFloat kNTPSearchFieldBottomPadding = 16;
 
-const CGFloat kTopSpacingMaterialPortrait = 56;
-const CGFloat kTopSpacingMaterialLandscape = 32;
+const CGFloat kTopSpacingMaterial = 24;
 
 const CGFloat kVoiceSearchButtonWidth = 48;
 
@@ -59,7 +58,13 @@ namespace content_suggestions {
 
 const CGFloat kSearchFieldHeight = 50;
 
+const NSUInteger kMostVisitedItemsPerLine = 4;
+
 NSUInteger numberOfTilesForWidth(CGFloat availableWidth) {
+  if (IsUIRefreshPhase1Enabled()) {
+    return kMostVisitedItemsPerLine;
+  }
+
   if (availableWidth > widthForNumberOfItem(4))
     return 4;
   if (availableWidth > widthForNumberOfItem(3))
@@ -80,7 +85,15 @@ CGFloat centeredTilesMarginForWidth(CGFloat width) {
       width - columns * [ContentSuggestionsMostVisitedCell defaultSize].width -
       (columns - 1) * spacingBetweenTiles();
   CGFloat margin = AlignValueToPixel(whitespace / 2);
-  DCHECK(margin >= spacingBetweenTiles());
+  if (IsUIRefreshPhase1Enabled()) {
+    // Allow for less spacing as an edge case on smaller devices.
+    if (margin < spacingBetweenTiles()) {
+      DCHECK(width < 400);  // For now this is only expected on small widths.
+      return fmaxf(margin, 0);
+    }
+  } else {
+    DCHECK(margin >= spacingBetweenTiles());
+  }
   return margin;
 }
 
@@ -90,15 +103,15 @@ CGFloat doodleHeight(BOOL logoIsShowing) {
   return kGoogleSearchDoodleHeight;
 }
 
-CGFloat doodleTopMargin() {
+CGFloat doodleTopMargin(BOOL toolbarPresent) {
   if (IsIPadIdiom())
     return kDoodleTopMarginIPad;
-  return kDoodleTopMarginIPhone;
+  return toolbarPresent ? ntp_header::kToolbarHeight : 0;
 }
 
 CGFloat searchFieldTopMargin() {
   if (IsIPadIdiom())
-    return kDoodleTopMarginIPad;
+    return kSearchFieldTopMarginIPad;
   return kSearchFieldTopMarginIPhone;
 }
 
@@ -109,10 +122,12 @@ CGFloat searchFieldWidth(CGFloat superviewWidth) {
   return fmax(superviewWidth - 2 * margin, kMinSearchFieldWidth);
 }
 
-CGFloat heightForLogoHeader(BOOL logoIsShowing, BOOL promoCanShow) {
-  CGFloat headerHeight = doodleTopMargin() + doodleHeight(logoIsShowing) +
-                         searchFieldTopMargin() + kSearchFieldHeight +
-                         kNTPSearchFieldBottomPadding;
+CGFloat heightForLogoHeader(BOOL logoIsShowing,
+                            BOOL promoCanShow,
+                            BOOL toolbarPresent) {
+  CGFloat headerHeight = doodleTopMargin(toolbarPresent) +
+                         doodleHeight(logoIsShowing) + searchFieldTopMargin() +
+                         kSearchFieldHeight + kNTPSearchFieldBottomPadding;
   if (!IsIPadIdiom()) {
     return headerHeight;
   }
@@ -120,11 +135,7 @@ CGFloat heightForLogoHeader(BOOL logoIsShowing, BOOL promoCanShow) {
     return kNonGoogleSearchHeaderHeightIPad;
   }
   if (!promoCanShow) {
-    UIInterfaceOrientation orient =
-        [[UIApplication sharedApplication] statusBarOrientation];
-    headerHeight += UIInterfaceOrientationIsPortrait(orient)
-                        ? kTopSpacingMaterialPortrait
-                        : kTopSpacingMaterialLandscape;
+    headerHeight += kTopSpacingMaterial;
   }
 
   return headerHeight;
@@ -149,9 +160,9 @@ void configureSearchHintLabel(UILabel* searchHintLabel,
     [searchHintLabel setTextAlignment:NSTextAlignmentRight];
   }
   [searchHintLabel
-      setTextColor:[UIColor
-                       colorWithWhite:kiPhoneOmniboxPlaceholderColorBrightness
-                                alpha:1.0]];
+      setTextColor:
+          [UIColor colorWithWhite:kiPhoneLocationBarPlaceholderColorBrightness
+                            alpha:1.0]];
   [searchHintLabel setFont:[MDCTypography subheadFont]];
 }
 
@@ -172,7 +183,6 @@ void configureVoiceSearchButton(UIButton* voiceSearchButton,
 
   [voiceSearchButton setAdjustsImageWhenHighlighted:NO];
   [voiceSearchButton setImage:micImage forState:UIControlStateNormal];
-  [voiceSearchButton setTag:IDC_VOICE_SEARCH];
   [voiceSearchButton setAccessibilityLabel:l10n_util::GetNSString(
                                                IDS_IOS_ACCNAME_VOICE_SEARCH)];
   [voiceSearchButton setAccessibilityIdentifier:@"Voice Search"];

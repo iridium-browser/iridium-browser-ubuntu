@@ -30,15 +30,16 @@
 #ifndef CSSBasicShapeValues_h
 #define CSSBasicShapeValues_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSValue.h"
 #include "core/css/CSSValuePair.h"
 #include "platform/graphics/GraphicsTypes.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
+namespace cssvalue {
 
 class CSSBasicShapeCircleValue final : public CSSValue {
  public:
@@ -58,7 +59,7 @@ class CSSBasicShapeCircleValue final : public CSSValue {
   void SetCenterY(CSSValue* center_y) { center_y_ = center_y; }
   void SetRadius(CSSValue* radius) { radius_ = radius; }
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
  private:
   CSSBasicShapeCircleValue() : CSSValue(kBasicShapeCircleClass) {}
@@ -88,7 +89,7 @@ class CSSBasicShapeEllipseValue final : public CSSValue {
   void SetRadiusX(CSSValue* radius_x) { radius_x_ = radius_x; }
   void SetRadiusY(CSSValue* radius_y) { radius_y_ = radius_y; }
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
  private:
   CSSBasicShapeEllipseValue() : CSSValue(kBasicShapeEllipseClass) {}
@@ -123,7 +124,7 @@ class CSSBasicShapePolygonValue final : public CSSValue {
   String CustomCSSText() const;
   bool Equals(const CSSBasicShapePolygonValue&) const;
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
  private:
   CSSBasicShapePolygonValue()
@@ -192,7 +193,7 @@ class CSSBasicShapeInsetValue final : public CSSValue {
   String CustomCSSText() const;
   bool Equals(const CSSBasicShapeInsetValue&) const;
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
  private:
   CSSBasicShapeInsetValue() : CSSValue(kBasicShapeInsetClass) {}
@@ -216,6 +217,7 @@ DEFINE_CSS_VALUE_TYPE_CASTS(CSSBasicShapePolygonValue,
                             IsBasicShapePolygonValue());
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSBasicShapeInsetValue, IsBasicShapeInsetValue());
 
+}  // namespace cssvalue
 }  // namespace blink
 
 #endif  // CSSBasicShapeValues_h

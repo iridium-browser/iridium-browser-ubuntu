@@ -50,14 +50,9 @@ AppBannerInfoBarDelegateDesktop::~AppBannerInfoBarDelegateDesktop() {
     TrackUserResponse(USER_RESPONSE_WEB_APP_IGNORED);
 }
 
-infobars::InfoBarDelegate::Type
-AppBannerInfoBarDelegateDesktop::GetInfoBarType() const {
-  return PAGE_ACTION_TYPE;
-}
-
 infobars::InfoBarDelegate::InfoBarIdentifier
 AppBannerInfoBarDelegateDesktop::GetIdentifier() const {
-  return APP_BANNER_INFOBAR_DELEGATE_DESKTOP;
+  return APP_BANNER_INFOBAR_DELEGATE;
 }
 
 const gfx::VectorIcon& AppBannerInfoBarDelegateDesktop::GetVectorIcon() const {
@@ -96,10 +91,8 @@ bool AppBannerInfoBarDelegateDesktop::Accept() {
   TrackUserResponse(USER_RESPONSE_WEB_APP_ACCEPTED);
   has_user_interaction_ = true;
 
-  bookmark_app_helper_->CreateFromAppBanner(
-      base::Bind(&AppBannerManager::DidFinishCreatingBookmarkApp,
-                 weak_manager_),
-      manifest_);
+  bookmark_app_helper_->Create(base::Bind(
+      &AppBannerManager::DidFinishCreatingBookmarkApp, weak_manager_));
   return true;
 }
 

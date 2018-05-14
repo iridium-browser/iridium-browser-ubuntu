@@ -4,10 +4,11 @@
 
 #import <XCTest/XCTest.h>
 
+#include "base/ios/ios_util.h"
 #import "base/mac/bind_objc_block.h"
-#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
+#include "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
 #include "ios/chrome/grit/ios_strings.h"
-#include "ios/chrome/test/app/web_view_interaction_test_util.h"
+#import "ios/chrome/test/app/web_view_interaction_test_util.h"
 #include "ios/chrome/test/earl_grey/accessibility_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
@@ -25,6 +26,7 @@ using chrome_test_util::ButtonWithAccessibilityLabel;
 using chrome_test_util::ButtonWithAccessibilityLabelId;
 using chrome_test_util::NavigationBarDoneButton;
 using chrome_test_util::SettingsMenuBackButton;
+using chrome_test_util::TapWebViewElementWithId;
 
 namespace {
 
@@ -77,40 +79,6 @@ NSString* GetTextFieldForID(int categoryId) {
       stringWithFormat:@"%@_textField", l10n_util::GetNSString(categoryId)];
 }
 
-// Call this in the "Edit Address" view to clear the Country value. The case
-// of the value being empty is handled gracefully.
-void ClearCountryValue() {
-  // Switch on edit mode.
-  [[EarlGrey selectElementWithMatcher:ButtonWithAccessibilityLabelId(
-                                          IDS_IOS_NAVIGATION_BAR_EDIT_BUTTON)]
-      performAction:grey_tap()];
-
-  // The test only can tap "Select All" if there is a text to select. Type "a"
-  // to ensure that.
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(GetTextFieldForID(
-                                          IDS_IOS_AUTOFILL_COUNTRY))]
-      performAction:grey_typeText(@"a")];
-  // Remove the country value by select all + cut.
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(GetTextFieldForID(
-                                          IDS_IOS_AUTOFILL_COUNTRY))]
-      performAction:grey_longPress()];
-  [[EarlGrey
-      selectElementWithMatcher:grey_allOf(
-                                   grey_accessibilityLabel(@"Select All"),
-                                   grey_accessibilityTrait(
-                                       UIAccessibilityTraitStaticText),
-                                   nil)] performAction:grey_tap()];
-  [[EarlGrey
-      selectElementWithMatcher:grey_allOf(grey_accessibilityLabel(@"Cut"),
-                                          grey_accessibilityTrait(
-                                              UIAccessibilityTraitStaticText),
-                                          nil)] performAction:grey_tap()];
-
-  // Switch off edit mode.
-  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
-      performAction:grey_tap()];
-}
-
 }  // namespace
 
 // Various tests for the Autofill section of the settings.
@@ -128,8 +96,10 @@ void ClearCountryValue() {
   [ChromeEarlGrey loadURL:URL];
 
   // Autofill one of the forms.
-  chrome_test_util::TapWebViewElementWithId("fill_profile_president");
-  chrome_test_util::TapWebViewElementWithId("submit_profile");
+  GREYAssert(TapWebViewElementWithId("fill_profile_president"),
+             @"Failed to tap \"fill_profile_president\"");
+  GREYAssert(TapWebViewElementWithId("submit_profile"),
+             @"Failed to tap \"submit_profile\"");
 }
 
 // Helper to open the settings page for the record with |address|.
@@ -183,17 +153,15 @@ void ClearCountryValue() {
 
   // Keep editing the Country field and verify that validation works.
   for (const UserTypedCountryExpectedResultPair& expectation : kCountryTests) {
-    ClearCountryValue();
-
     // Switch on edit mode.
     [[EarlGrey selectElementWithMatcher:ButtonWithAccessibilityLabelId(
                                             IDS_IOS_NAVIGATION_BAR_EDIT_BUTTON)]
         performAction:grey_tap()];
 
-    // Type the user-version of the country.
+    // Replace the text field with the user-version of the country.
     [[EarlGrey selectElementWithMatcher:grey_accessibilityID(GetTextFieldForID(
                                             IDS_IOS_AUTOFILL_COUNTRY))]
-        performAction:grey_typeText(expectation.user_typed_country)];
+        performAction:grey_replaceText(expectation.user_typed_country)];
 
     // Switch off edit mode.
     [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
@@ -232,6 +200,34 @@ void ClearCountryValue() {
   chrome_test_util::VerifyAccessibilityForCurrentScreen();
 
   [self exitSettingsMenu];
+}
+
+// Checks that if the autofill profiles and credit cards list view is in edit
+// mode, the "autofill" and "wallet" switch items are disabled.
+- (void)testListViewEditMode {
+  [self loadAndSubmitTheForm];
+
+  [ChromeEarlGreyUI openSettingsMenu];
+  [[EarlGrey
+      selectElementWithMatcher:ButtonWithAccessibilityLabel(
+                                   l10n_util::GetNSString(IDS_IOS_AUTOFILL))]
+      performAction:grey_tap()];
+
+  // Switch on edit mode.
+  [[EarlGrey selectElementWithMatcher:ButtonWithAccessibilityLabelId(
+                                          IDS_IOS_NAVIGATION_BAR_EDIT_BUTTON)]
+      performAction:grey_tap()];
+
+  // Check the "autofill" and "wallet" switches are disabled. Disabled switches
+  // are toggled off.
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::CollectionViewSwitchCell(
+                                   @"autofillItem_switch", NO, NO)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::CollectionViewSwitchCell(
+                                   @"walletItem_switch", NO, NO)]
+      assertWithMatcher:grey_notNil()];
 }
 
 @end

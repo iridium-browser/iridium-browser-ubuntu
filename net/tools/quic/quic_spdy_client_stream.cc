@@ -11,14 +11,14 @@
 #include "net/quic/core/spdy_utils.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/spdy/core/spdy_protocol.h"
-#include "net/tools/quic/quic_client_session.h"
+#include "net/tools/quic/quic_spdy_client_session.h"
 
 using std::string;
 
 namespace net {
 
 QuicSpdyClientStream::QuicSpdyClientStream(QuicStreamId id,
-                                           QuicClientSession* session)
+                                           QuicSpdyClientSession* session)
     : QuicSpdyStream(id, session),
       content_length_(-1),
       response_code_(0),
@@ -27,7 +27,7 @@ QuicSpdyClientStream::QuicSpdyClientStream(QuicStreamId id,
       session_(session),
       has_preliminary_headers_(false) {}
 
-QuicSpdyClientStream::~QuicSpdyClientStream() {}
+QuicSpdyClientStream::~QuicSpdyClientStream() = default;
 
 void QuicSpdyClientStream::OnInitialHeadersComplete(
     bool fin,
@@ -130,7 +130,7 @@ void QuicSpdyClientStream::OnDataAvailable() {
 size_t QuicSpdyClientStream::SendRequest(SpdyHeaderBlock headers,
                                          QuicStringPiece body,
                                          bool fin) {
-  QuicConnection::ScopedPacketBundler bundler(
+  QuicConnection::ScopedPacketFlusher flusher(
       session_->connection(), QuicConnection::SEND_ACK_IF_QUEUED);
   bool send_fin_with_headers = fin && body.empty();
   size_t bytes_sent = body.size();

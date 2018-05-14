@@ -22,6 +22,7 @@
 <translation id="158809615184981282">Tastatură feroeză</translation>
 <translation id="1646136617204068573">Tastatură maghiară</translation>
 <translation id="164729547906544836">Tastatură tamilă (itrans)</translation>
+<translation id="164969095109328410">Dispozitiv Chrome</translation>
 <translation id="1829129547161959350">Pinguin</translation>
 <translation id="184633654410729720">Tastatură thailandeză (Kedmanee)</translation>
 <translation id="1921986354447415460">Tastatură turcă-F</translation>
@@ -114,6 +115,7 @@
 <translation id="4694604912444486114">Maimuță</translation>
 <translation id="4711094779914110278">Turcă</translation>
 <translation id="4725511304875193254">Corgi</translation>
+<translation id="4737050008115666127">Aterizare</translation>
 <translation id="4747271164117300400">Macedoneană</translation>
 <translation id="4749157430980974800">Tastatură georgiană</translation>
 <translation id="4755240240651974342">Tastatură finlandeză</translation>
@@ -125,6 +127,7 @@
 <translation id="4943368462779413526">Minge de fotbal</translation>
 <translation id="497244430928947428">Tastatură malayalam (Fonetică)</translation>
 <translation id="498902553138568924">Fluture roșu</translation>
+<translation id="5011233892417813670">Chromebook</translation>
 <translation id="5068919226082848014">Pizza</translation>
 <translation id="5098629044894065541">Ebraică</translation>
 <translation id="5123433949759960244">Baschet</translation>
@@ -146,6 +149,7 @@
 <translation id="5465122519792752163">Tastatură nepaleză (InScript)</translation>
 <translation id="5469868506864199649">Italiană</translation>
 <translation id="5500122897333236901">Islandeză</translation>
+<translation id="5508696409934741614">Puncte</translation>
 <translation id="5533555070048896610">Transliterație (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">S.U.A. Dvorak</translation>
 <translation id="5640179856859982418">Tastatură elvețiană</translation>
@@ -157,7 +161,9 @@
 <translation id="5819442873484330149">Hangul setul 3 (Final)</translation>
 <translation id="5838825566232597749">Tastatură S.U.A. Workman internațională</translation>
 <translation id="5892290200158927959">Tastatură franceză BÉPO</translation>
+<translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">Tastatură America Latină</translation>
+<translation id="6012987430370760224">Tastatură marathi (Fonetică)</translation>
 <translation id="60357267506638014">Cehă QWERTY</translation>
 <translation id="6054173164583630569">Tastatură franceză</translation>
 <translation id="6111770213269631447">Transliterație (namaskar → নমস্কার)</translation>
@@ -183,17 +189,20 @@
 <translation id="6876155724392614295">Bicicletă</translation>
 <translation id="6878261347041253038">Tastatură devanagari (Fonetică)</translation>
 <translation id="6885780034956018177">Melc</translation>
+<translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">S.U.A. Workman</translation>
 <translation id="6935521024859866267">Răsturnat</translation>
 <translation id="6937152069980083337">Metoda de introducere Google pentru japoneză (la tastatura americană)</translation>
 <translation id="6939777852457331078">Tastatură S.U.A. Workman</translation>
 <translation id="6970230597523682626">Bulgară</translation>
+<translation id="714034171374937760">Chromebase</translation>
 <translation id="7170467426996704624">Transliterație (salam → ሰላም)</translation>
 <translation id="7172053773111046550">Tastatură estonă</translation>
 <translation id="719009910964971313">Tastatura pentru programatori S.U.A Dvorak</translation>
 <translation id="7222624196722476520">Tastatură bulgară fonetică</translation>
 <translation id="7348749398828259943">Tastatură S.U.A. Workman internațională</translation>
 <translation id="7389722738210761877">Tastatură thailandeză (TIS 820-2531)</translation>
+<translation id="7396038720194014279">Tastatură hindi (Fonetică)</translation>
 <translation id="7417453074306512035">Tastatură etiopiană</translation>
 <translation id="7419631653042041064">Tastatură catalană</translation>
 <translation id="7434823369735508263">Tastatură UK Dvorak</translation>
@@ -201,12 +210,14 @@
 <translation id="7474889694310679759">Tastatură engleză canadiană</translation>
 <translation id="751507702149411736">Belarusă</translation>
 <translation id="7547811415869834682">Neerlandeză</translation>
+<translation id="7603724359189955920">Grile</translation>
 <translation id="770015031906360009">Greacă</translation>
 <translation id="7706319470528945664">Tastatură portugheză</translation>
 <translation id="7774365994322694683">Pasăre</translation>
 <translation id="7825423931463735974">Tastatură tamilă (Tamil99)</translation>
 <translation id="7853966320808728790">Franceză BÉPO</translation>
 <translation id="7896906914454843592">Tastatură S.U.A. extinsă</translation>
+<translation id="7898607018410277265">Tastatură gujarati (Fonetică nouă)</translation>
 <translation id="7917972308273378936">Tastatură lituaniană</translation>
 <translation id="7943385054491506837">S.U.A. Colemak</translation>
 <translation id="7969525169268594403">Slovenă</translation>
@@ -230,6 +241,7 @@
 <translation id="8432745813735585631">Tastatură S.U.A. Colemak</translation>
 <translation id="8437209419043462667">S.U.A.</translation>
 <translation id="8467473010914675605">Metoda de introducere a textului în coreeană</translation>
+<translation id="8477649328507734757">Cercuri</translation>
 <translation id="8521441079177373948">UK</translation>
 <translation id="8551494947769799688">Letonă</translation>
 <translation id="8561206103590473338">Elefant</translation>
@@ -248,4 +260,5 @@
 <translation id="913758436357682283">Tastatură birmană Myansan</translation>
 <translation id="9153744823707037316">Metoda de introducere a textului Array</translation>
 <translation id="9206487995878691001">Metoda de introducere a textului Cangjie</translation>
+<translation id="9219908252191632183">Peisaj lunar</translation>
 </translationbundle>

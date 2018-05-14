@@ -5,12 +5,12 @@
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 
 #include <stddef.h>
+#include <memory>
 #include <utility>
 
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -91,36 +91,36 @@ ExtensionActionAPI::Observer::~Observer() {
 //
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<ExtensionActionAPI>>::
-    DestructorAtExit g_factory = LAZY_INSTANCE_INITIALIZER;
+    DestructorAtExit g_extension_action_api_factory = LAZY_INSTANCE_INITIALIZER;
 
 ExtensionActionAPI::ExtensionActionAPI(content::BrowserContext* context)
     : browser_context_(context),
       extension_prefs_(nullptr) {
-  ExtensionFunctionRegistry* registry =
+  ExtensionFunctionRegistry& registry =
       ExtensionFunctionRegistry::GetInstance();
 
   // Browser Actions
-  registry->RegisterFunction<BrowserActionSetIconFunction>();
-  registry->RegisterFunction<BrowserActionSetTitleFunction>();
-  registry->RegisterFunction<BrowserActionSetBadgeTextFunction>();
-  registry->RegisterFunction<BrowserActionSetBadgeBackgroundColorFunction>();
-  registry->RegisterFunction<BrowserActionSetPopupFunction>();
-  registry->RegisterFunction<BrowserActionGetTitleFunction>();
-  registry->RegisterFunction<BrowserActionGetBadgeTextFunction>();
-  registry->RegisterFunction<BrowserActionGetBadgeBackgroundColorFunction>();
-  registry->RegisterFunction<BrowserActionGetPopupFunction>();
-  registry->RegisterFunction<BrowserActionEnableFunction>();
-  registry->RegisterFunction<BrowserActionDisableFunction>();
-  registry->RegisterFunction<BrowserActionOpenPopupFunction>();
+  registry.RegisterFunction<BrowserActionSetIconFunction>();
+  registry.RegisterFunction<BrowserActionSetTitleFunction>();
+  registry.RegisterFunction<BrowserActionSetBadgeTextFunction>();
+  registry.RegisterFunction<BrowserActionSetBadgeBackgroundColorFunction>();
+  registry.RegisterFunction<BrowserActionSetPopupFunction>();
+  registry.RegisterFunction<BrowserActionGetTitleFunction>();
+  registry.RegisterFunction<BrowserActionGetBadgeTextFunction>();
+  registry.RegisterFunction<BrowserActionGetBadgeBackgroundColorFunction>();
+  registry.RegisterFunction<BrowserActionGetPopupFunction>();
+  registry.RegisterFunction<BrowserActionEnableFunction>();
+  registry.RegisterFunction<BrowserActionDisableFunction>();
+  registry.RegisterFunction<BrowserActionOpenPopupFunction>();
 
   // Page Actions
-  registry->RegisterFunction<PageActionShowFunction>();
-  registry->RegisterFunction<PageActionHideFunction>();
-  registry->RegisterFunction<PageActionSetIconFunction>();
-  registry->RegisterFunction<PageActionSetTitleFunction>();
-  registry->RegisterFunction<PageActionSetPopupFunction>();
-  registry->RegisterFunction<PageActionGetTitleFunction>();
-  registry->RegisterFunction<PageActionGetPopupFunction>();
+  registry.RegisterFunction<PageActionShowFunction>();
+  registry.RegisterFunction<PageActionHideFunction>();
+  registry.RegisterFunction<PageActionSetIconFunction>();
+  registry.RegisterFunction<PageActionSetTitleFunction>();
+  registry.RegisterFunction<PageActionSetPopupFunction>();
+  registry.RegisterFunction<PageActionGetTitleFunction>();
+  registry.RegisterFunction<PageActionGetPopupFunction>();
 }
 
 ExtensionActionAPI::~ExtensionActionAPI() {
@@ -129,7 +129,7 @@ ExtensionActionAPI::~ExtensionActionAPI() {
 // static
 BrowserContextKeyedAPIFactory<ExtensionActionAPI>*
 ExtensionActionAPI::GetFactoryInstance() {
-  return g_factory.Pointer();
+  return g_extension_action_api_factory.Pointer();
 }
 
 // static
@@ -165,7 +165,7 @@ void ExtensionActionAPI::SetBrowserActionVisibility(
 
   GetExtensionPrefs()->UpdateExtensionPref(
       extension_id, kBrowserActionVisible,
-      base::MakeUnique<base::Value>(visible));
+      std::make_unique<base::Value>(visible));
   for (auto& observer : observers_)
     observer.OnExtensionActionVisibilityChanged(extension_id, visible);
 }
@@ -226,8 +226,9 @@ void ExtensionActionAPI::DispatchExtensionActionClicked(
 
   if (event_name) {
     std::unique_ptr<base::ListValue> args(new base::ListValue());
-    args->Append(
-        ExtensionTabUtil::CreateTabObject(web_contents, extension)->ToValue());
+    args->Append(ExtensionTabUtil::CreateTabObject(
+                     web_contents, ExtensionTabUtil::kScrubTab, extension)
+                     ->ToValue());
 
     DispatchEventToExtension(web_contents->GetBrowserContext(),
                              extension_action.extension_id(), histogram_value,
@@ -274,7 +275,7 @@ void ExtensionActionAPI::DispatchEventToExtension(
   if (!EventRouter::Get(context))
     return;
 
-  auto event = base::MakeUnique<Event>(histogram_value, event_name,
+  auto event = std::make_unique<Event>(histogram_value, event_name,
                                        std::move(event_args), context);
   event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
   EventRouter::Get(context)
@@ -358,7 +359,7 @@ bool ExtensionActionFunction::ExtractDataFromArguments() {
   if (!args_->Get(0, &first_arg))
     return true;
 
-  switch (first_arg->GetType()) {
+  switch (first_arg->type()) {
     case base::Value::Type::INTEGER:
       CHECK(first_arg->GetAsInteger(&tab_id_));
       break;
@@ -369,7 +370,7 @@ bool ExtensionActionFunction::ExtractDataFromArguments() {
       // Still need to check for the tabId within details.
       base::Value* tab_id_value = NULL;
       if (details_->Get("tabId", &tab_id_value)) {
-        switch (tab_id_value->GetType()) {
+        switch (tab_id_value->type()) {
           case base::Value::Type::NONE:
             // OK; tabId is optional, leave it default.
             return true;
@@ -489,7 +490,7 @@ ExtensionActionSetBadgeBackgroundColorFunction::RunExtensionAction() {
   base::Value* color_value = NULL;
   EXTENSION_FUNCTION_VALIDATE(details_->Get("color", &color_value));
   SkColor color = 0;
-  if (color_value->IsType(base::Value::Type::LIST)) {
+  if (color_value->is_list()) {
     base::ListValue* list = NULL;
     EXTENSION_FUNCTION_VALIDATE(details_->GetList("color", &list));
     EXTENSION_FUNCTION_VALIDATE(list->GetSize() == 4);
@@ -501,7 +502,7 @@ ExtensionActionSetBadgeBackgroundColorFunction::RunExtensionAction() {
 
     color = SkColorSetARGB(color_array[3], color_array[0],
                            color_array[1], color_array[2]);
-  } else if (color_value->IsType(base::Value::Type::STRING)) {
+  } else if (color_value->is_string()) {
     std::string color_string;
     EXTENSION_FUNCTION_VALIDATE(details_->GetString("color", &color_string));
     if (!image_util::ParseCssColorString(color_string, &color))
@@ -516,19 +517,19 @@ ExtensionActionSetBadgeBackgroundColorFunction::RunExtensionAction() {
 ExtensionFunction::ResponseAction
 ExtensionActionGetTitleFunction::RunExtensionAction() {
   return RespondNow(OneArgument(
-      base::MakeUnique<base::Value>(extension_action_->GetTitle(tab_id_))));
+      std::make_unique<base::Value>(extension_action_->GetTitle(tab_id_))));
 }
 
 ExtensionFunction::ResponseAction
 ExtensionActionGetPopupFunction::RunExtensionAction() {
-  return RespondNow(OneArgument(base::MakeUnique<base::Value>(
+  return RespondNow(OneArgument(std::make_unique<base::Value>(
       extension_action_->GetPopupUrl(tab_id_).spec())));
 }
 
 ExtensionFunction::ResponseAction
 ExtensionActionGetBadgeTextFunction::RunExtensionAction() {
   return RespondNow(OneArgument(
-      base::MakeUnique<base::Value>(extension_action_->GetBadgeText(tab_id_))));
+      std::make_unique<base::Value>(extension_action_->GetBadgeText(tab_id_))));
 }
 
 ExtensionFunction::ResponseAction

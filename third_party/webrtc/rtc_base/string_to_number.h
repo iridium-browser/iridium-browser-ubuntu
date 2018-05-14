@@ -8,13 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_BASE_STRING_TO_NUMBER_H_
-#define WEBRTC_RTC_BASE_STRING_TO_NUMBER_H_
+#ifndef RTC_BASE_STRING_TO_NUMBER_H_
+#define RTC_BASE_STRING_TO_NUMBER_H_
 
 #include <string>
 #include <limits>
 
-#include "webrtc/rtc_base/optional.h"
+#include "api/optional.h"
 
 namespace rtc {
 
@@ -65,9 +65,9 @@ StringToNumber(const char* str, int base = 10) {
       string_to_number_internal::ParseSigned(str, base);
   if (value && *value >= std::numeric_limits<T>::lowest() &&
       *value <= std::numeric_limits<T>::max()) {
-    return rtc::Optional<T>(static_cast<T>(*value));
+    return static_cast<T>(*value);
   }
-  return rtc::Optional<T>();
+  return rtc::nullopt;
 }
 
 template <typename T>
@@ -83,9 +83,9 @@ StringToNumber(const char* str, int base = 10) {
   rtc::Optional<unsigned_type> value =
       string_to_number_internal::ParseUnsigned(str, base);
   if (value && *value <= std::numeric_limits<T>::max()) {
-    return rtc::Optional<T>(static_cast<T>(*value));
+    return static_cast<T>(*value);
   }
-  return rtc::Optional<T>();
+  return rtc::nullopt;
 }
 
 // The std::string overloads only exists if there is a matching const char*
@@ -98,4 +98,4 @@ auto StringToNumber(const std::string& str, int base = 10)
 
 }  // namespace rtc
 
-#endif  // WEBRTC_RTC_BASE_STRING_TO_NUMBER_H_
+#endif  // RTC_BASE_STRING_TO_NUMBER_H_

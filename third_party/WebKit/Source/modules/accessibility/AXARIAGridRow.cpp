@@ -37,19 +37,20 @@ AXARIAGridRow::AXARIAGridRow(LayoutObject* layout_object,
                              AXObjectCacheImpl& ax_object_cache)
     : AXTableRow(layout_object, ax_object_cache) {}
 
-AXARIAGridRow::~AXARIAGridRow() {}
+AXARIAGridRow::~AXARIAGridRow() = default;
 
 AXARIAGridRow* AXARIAGridRow::Create(LayoutObject* layout_object,
                                      AXObjectCacheImpl& ax_object_cache) {
   return new AXARIAGridRow(layout_object, ax_object_cache);
 }
 
-bool AXARIAGridRow::IsARIATreeGridRow() const {
+bool AXARIAGridRow::IsARIARow() const {
   AXObject* parent = ParentTable();
   if (!parent)
     return false;
 
-  return parent->AriaRoleAttribute() == kTreeGridRole;
+  AccessibilityRole parent_role = parent->AriaRoleAttribute();
+  return parent_role == kTreeGridRole || parent_role == kGridRole;
 }
 
 void AXARIAGridRow::HeaderObjectsForRow(AXObjectVector& headers) {
@@ -57,6 +58,59 @@ void AXARIAGridRow::HeaderObjectsForRow(AXObjectVector& headers) {
     if (cell->RoleValue() == kRowHeaderRole)
       headers.push_back(cell);
   }
+}
+
+bool AXARIAGridRow::AddCell(AXObject* possible_cell) {
+  if (!possible_cell)
+    return false;
+
+  AccessibilityRole role = possible_cell->RoleValue();
+  if (role != kCellRole && role != kRowHeaderRole && role != kColumnHeaderRole)
+    return false;
+
+  cells_.push_back(possible_cell);
+  return true;
+}
+
+void AXARIAGridRow::ComputeCells(AXObjectVector possible_cells) {
+  // Only add children that are actually rows.
+  for (const auto& possible_cell : possible_cells) {
+    if (!AddCell(possible_cell)) {
+      // Normally with good authoring practices, the cells should be children of
+      // the row. However, if this is not the case, recursively look for cells
+      // in the descendants of the non-row child.
+      if (!possible_cell->HasChildren())
+        possible_cell->AddChildren();
+
+      ComputeCells(possible_cell->Children());
+    }
+  }
+}
+
+void AXARIAGridRow::AddChildren() {
+  DCHECK(!IsDetached());
+  DCHECK(!have_children_);
+
+  AXTableRow::AddChildren();
+
+  if (IsTableRow() && layout_object_) {
+    ComputeCells(children_);
+  }
+}
+
+AXObject* AXARIAGridRow::ParentTable() const {
+  // A poorly-authored ARIA grid row could be nested within wrapper elements.
+  AXObject* ancestor = static_cast<AXObject*>(const_cast<AXARIAGridRow*>(this));
+  do {
+    ancestor = ancestor->ParentObjectUnignored();
+  } while (ancestor && !ancestor->IsAXTable());
+
+  return ancestor;
+}
+
+void AXARIAGridRow::Trace(blink::Visitor* visitor) {
+  visitor->Trace(cells_);
+  AXTableRow::Trace(visitor);
 }
 
 }  // namespace blink

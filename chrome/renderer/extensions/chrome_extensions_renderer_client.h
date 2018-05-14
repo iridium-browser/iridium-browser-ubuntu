@@ -10,12 +10,13 @@
 
 #include "base/macros.h"
 #include "extensions/renderer/extensions_renderer_client.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "ui/base/page_transition_types.h"
 
-class ChromeExtensionsDispatcherDelegate;
 class GURL;
 
 namespace blink {
+class WebFrame;
 class WebLocalFrame;
 struct WebPluginParams;
 class WebURL;
@@ -24,7 +25,6 @@ class WebURL;
 namespace content {
 class BrowserPluginDelegate;
 class RenderFrame;
-class RenderView;
 }
 
 namespace extensions {
@@ -53,8 +53,8 @@ class ChromeExtensionsRendererClient
 
   // See ChromeContentRendererClient methods with the same names.
   void RenderThreadStarted();
-  void RenderFrameCreated(content::RenderFrame* render_frame);
-  void RenderViewCreated(content::RenderView* render_view);
+  void RenderFrameCreated(content::RenderFrame* render_frame,
+                          service_manager::BinderRegistry* registry);
   bool OverrideCreatePlugin(content::RenderFrame* render_frame,
                             const blink::WebPluginParams& params);
   bool AllowPopup();
@@ -75,6 +75,8 @@ class ChromeExtensionsRendererClient
       content::RenderFrame* render_frame,
       const std::string& mime_type,
       const GURL& original_url);
+  static blink::WebFrame* FindFrame(blink::WebLocalFrame* relative_to_frame,
+                                    const std::string& name);
 
   void RunScriptsAtDocumentStart(content::RenderFrame* render_frame);
   void RunScriptsAtDocumentEnd(content::RenderFrame* render_frame);
@@ -85,8 +87,6 @@ class ChromeExtensionsRendererClient
   }
 
  private:
-  std::unique_ptr<ChromeExtensionsDispatcherDelegate>
-      extension_dispatcher_delegate_;
   std::unique_ptr<extensions::Dispatcher> extension_dispatcher_;
   std::unique_ptr<extensions::RendererPermissionsPolicyDelegate>
       permissions_policy_delegate_;

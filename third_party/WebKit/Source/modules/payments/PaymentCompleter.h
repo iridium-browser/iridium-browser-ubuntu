@@ -15,12 +15,12 @@ class ScriptState;
 
 class MODULES_EXPORT PaymentCompleter : public GarbageCollectedMixin {
  public:
-  enum PaymentComplete { kSuccess, kFail, kUnknown };
+  enum PaymentComplete { kFail, kSuccess, kUnknown };
 
   virtual ScriptPromise Complete(ScriptState*, PaymentComplete result) = 0;
 
  protected:
-  virtual ~PaymentCompleter() {}
+  virtual ~PaymentCompleter() = default;
 };
 
 }  // namespace blink

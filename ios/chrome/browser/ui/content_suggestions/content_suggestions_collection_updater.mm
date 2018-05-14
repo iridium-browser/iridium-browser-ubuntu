@@ -9,10 +9,10 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/time/time.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/ui/collection_view/cells/collection_view_item+collection_view_controller.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_text_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
+#import "ios/chrome/browser/ui/commands/snackbar_commands.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_footer_item.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_header_item.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_text_item.h"
@@ -20,11 +20,15 @@
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_collection_utils.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_data_sink.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_data_source.h"
+#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_metrics_recording.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_view_controller.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_view_controller_audience.h"
 #import "ios/chrome/browser/ui/content_suggestions/identifier/content_suggestion_identifier.h"
 #import "ios/chrome/browser/ui/content_suggestions/identifier/content_suggestions_section_information.h"
+#import "ios/chrome/browser/ui/list_model/list_item+Controller.h"
+#import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
+#import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -45,6 +49,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeReadingList,
   ItemTypeMostVisited,
   ItemTypePromo,
+  ItemTypeLearnMore,
   ItemTypeUnknown,
 };
 
@@ -55,6 +60,8 @@ typedef NS_ENUM(NSInteger, SectionIdentifier) {
   SectionIdentifierReadingList,
   SectionIdentifierMostVisited,
   SectionIdentifierLogo,
+  SectionIdentifierPromo,
+  SectionIdentifierLearnMore,
   SectionIdentifierDefault,
 };
 
@@ -70,6 +77,8 @@ ContentSuggestionType ContentSuggestionTypeForItemType(NSInteger type) {
     return ContentSuggestionTypeMostVisited;
   if (type == ItemTypePromo)
     return ContentSuggestionTypePromo;
+  if (type == ItemTypeLearnMore)
+    return ContentSuggestionTypeLearnMore;
   // Add new type here
 
   // Default type.
@@ -85,9 +94,12 @@ ItemType ItemTypeForInfo(ContentSuggestionsSectionInformation* info) {
       return ItemTypeReadingList;
     case ContentSuggestionsSectionMostVisited:
       return ItemTypeMostVisited;
-    case ContentSuggestionsSectionLogo:
+    case ContentSuggestionsSectionPromo:
       return ItemTypePromo;
+    case ContentSuggestionsSectionLearnMore:
+      return ItemTypeLearnMore;
 
+    case ContentSuggestionsSectionLogo:
     case ContentSuggestionsSectionUnknown:
       return ItemTypeUnknown;
   }
@@ -105,19 +117,31 @@ SectionIdentifier SectionIdentifierForInfo(
       return SectionIdentifierMostVisited;
     case ContentSuggestionsSectionLogo:
       return SectionIdentifierLogo;
+    case ContentSuggestionsSectionPromo:
+      return SectionIdentifierPromo;
+    case ContentSuggestionsSectionLearnMore:
+      return SectionIdentifierLearnMore;
 
     case ContentSuggestionsSectionUnknown:
       return SectionIdentifierDefault;
   }
 }
 
+// Returns whether this |sectionIdentifier| comes from ContentSuggestions.
+BOOL IsFromContentSuggestionsService(NSInteger sectionIdentifier) {
+  return sectionIdentifier == SectionIdentifierArticles ||
+         sectionIdentifier == SectionIdentifierReadingList;
+}
+
 const CGFloat kNumberOfMostVisitedLines = 2;
+
+NSString* const kContentSuggestionsCollectionUpdaterSnackbarCategory =
+    @"ContentSuggestionsCollectionUpdaterSnackbarCategory";
 
 }  // namespace
 
 @interface ContentSuggestionsCollectionUpdater ()<ContentSuggestionsDataSink>
 
-@property(nonatomic, weak) id<ContentSuggestionsDataSource> dataSource;
 @property(nonatomic, strong)
     NSMutableDictionary<NSNumber*, ContentSuggestionsSectionInformation*>*
         sectionInfoBySectionIdentifier;
@@ -125,6 +149,9 @@ const CGFloat kNumberOfMostVisitedLines = 2;
 @property(nonatomic, assign) CGFloat collectionWidth;
 // Whether an item of type ItemTypePromo has already been added to the model.
 @property(nonatomic, assign) BOOL promoAdded;
+// All SectionIdentifier from ContentSuggestions.
+@property(nonatomic, strong)
+    NSMutableSet<NSNumber*>* sectionIdentifiersFromContentSuggestions;
 
 @end
 
@@ -135,14 +162,14 @@ const CGFloat kNumberOfMostVisitedLines = 2;
 @synthesize sectionInfoBySectionIdentifier = _sectionInfoBySectionIdentifier;
 @synthesize collectionWidth = _collectionWidth;
 @synthesize promoAdded = _promoAdded;
+@synthesize sectionIdentifiersFromContentSuggestions =
+    _sectionIdentifiersFromContentSuggestions;
+@synthesize dispatcher = _dispatcher;
 
-- (instancetype)initWithDataSource:
-    (id<ContentSuggestionsDataSource>)dataSource {
+- (instancetype)init {
   self = [super init];
   if (self) {
     _promoAdded = NO;
-    _dataSource = dataSource;
-    _dataSource.dataSink = self;
   }
   return self;
 }
@@ -155,17 +182,46 @@ const CGFloat kNumberOfMostVisitedLines = 2;
   self.collectionWidth =
       collectionViewController.collectionView.bounds.size.width;
 
-  [self reloadAllData];
+  if (self.dataSource)
+    [self reloadAllData];
+}
+
+- (void)setDataSource:(id<ContentSuggestionsDataSource>)dataSource {
+  _dataSource = dataSource;
+  dataSource.dataSink = self;
+
+  if (self.collectionViewController)
+    [self reloadAllData];
 }
 
 #pragma mark - ContentSuggestionsDataSink
 
 - (void)dataAvailableForSection:
-    (ContentSuggestionsSectionInformation*)sectionInfo {
+            (ContentSuggestionsSectionInformation*)sectionInfo
+                    forceReload:(BOOL)forceReload {
   SectionIdentifier sectionIdentifier = SectionIdentifierForInfo(sectionInfo);
-
   CSCollectionViewModel* model =
       self.collectionViewController.collectionViewModel;
+
+  if (forceReload && [model hasSectionForSectionIdentifier:sectionIdentifier]) {
+    NSInteger section = [model sectionForSectionIdentifier:sectionIdentifier];
+    NSInteger numberOfItems = [model numberOfItemsInSection:section];
+    NSMutableArray<NSIndexPath*>* indexesToDelete = [NSMutableArray array];
+    for (NSInteger i = 0; i < numberOfItems; i++) {
+      [indexesToDelete
+          addObject:[NSIndexPath indexPathForItem:i inSection:section]];
+    }
+
+    UICollectionView* collection = self.collectionViewController.collectionView;
+    // Delete all the items manually to avoid adding an empty item.
+    [collection performBatchUpdates:^{
+      [self.collectionViewController collectionView:collection
+                        willDeleteItemsAtIndexPaths:indexesToDelete];
+      [collection deleteItemsAtIndexPaths:indexesToDelete];
+    }
+                         completion:nil];
+  }
+
   if ([model hasSectionForSectionIdentifier:sectionIdentifier]) {
     NSArray<CSCollectionViewItem*>* items =
         [model itemsInSectionWithIdentifier:sectionIdentifier];
@@ -178,6 +234,29 @@ const CGFloat kNumberOfMostVisitedLines = 2;
   [self.collectionViewController
       addSuggestions:[self.dataSource itemsForSectionInfo:sectionInfo]
        toSectionInfo:sectionInfo];
+}
+
+- (void)section:(ContentSuggestionsSectionInformation*)sectionInfo
+      isLoading:(BOOL)isLoading {
+  SectionIdentifier sectionIdentifier = SectionIdentifierForInfo(sectionInfo);
+  CSCollectionViewModel* model =
+      self.collectionViewController.collectionViewModel;
+  if (![model hasSectionForSectionIdentifier:sectionIdentifier] ||
+      ![model footerForSectionWithIdentifier:sectionIdentifier])
+    return;
+
+  CollectionViewItem* footerItem =
+      [model footerForSectionWithIdentifier:sectionIdentifier];
+  ContentSuggestionsFooterItem* footer =
+      base::mac::ObjCCastStrict<ContentSuggestionsFooterItem>(footerItem);
+
+  if (footer.loading != isLoading) {
+    footer.loading = isLoading;
+    if (footer.configuredCell.delegate == footer) {
+      // The cell associated with this footer is probably still on screen.
+      [footer configureCell:footer.configuredCell];
+    }
+  }
 }
 
 - (void)clearSuggestion:(ContentSuggestionIdentifier*)suggestionIdentifier {
@@ -226,8 +305,13 @@ const CGFloat kNumberOfMostVisitedLines = 2;
 
 - (void)clearSection:(ContentSuggestionsSectionInformation*)sectionInfo {
   SectionIdentifier sectionIdentifier = SectionIdentifierForInfo(sectionInfo);
-  NSInteger section = [self.collectionViewController.collectionViewModel
-      sectionIdentifierForSection:sectionIdentifier];
+  CSCollectionViewModel* model =
+      self.collectionViewController.collectionViewModel;
+
+  if (![model hasSectionForSectionIdentifier:sectionIdentifier])
+    return;
+
+  NSInteger section = [model sectionForSectionIdentifier:sectionIdentifier];
 
   [self.collectionViewController dismissSection:section];
 }
@@ -290,6 +374,9 @@ const CGFloat kNumberOfMostVisitedLines = 2;
       self.collectionViewController.collectionViewModel;
   NSInteger sectionIdentifier = SectionIdentifierForInfo(sectionInfo);
 
+  if (![model hasSectionForSectionIdentifier:sectionIdentifier])
+    return nil;
+
   NSArray<CSCollectionViewItem*>* existingItems =
       [model itemsInSectionWithIdentifier:sectionIdentifier];
   if (existingItems.count == 1 && existingItems[0].type == ItemTypeEmpty) {
@@ -311,6 +398,8 @@ addSuggestionsToModel:(NSArray<CSCollectionViewItem*>*)suggestions
   NSInteger sectionIdentifier = SectionIdentifierForInfo(sectionInfo);
 
   if (suggestions.count == 0) {
+    // No suggestions for this section. Add the item signaling this section is
+    // empty if there is currently no item in it.
     if ([model hasSectionForSectionIdentifier:sectionIdentifier] &&
         [model numberOfItemsInSection:[model sectionForSectionIdentifier:
                                                  sectionIdentifier]] == 0) {
@@ -324,6 +413,35 @@ addSuggestionsToModel:(NSArray<CSCollectionViewItem*>*)suggestions
     return indexPaths;
   }
 
+  if (sectionIdentifier == SectionIdentifierLearnMore) {
+    // The "Learn more" items should only be displayed if there is at least one
+    // ContentSuggestions section.
+    if ((![model hasSectionForSectionIdentifier:SectionIdentifierArticles] &&
+         !
+         [model hasSectionForSectionIdentifier:SectionIdentifierReadingList]) ||
+        [model itemsInSectionWithIdentifier:sectionIdentifier].count > 0) {
+      return @[];
+    }
+  } else if (IsFromContentSuggestionsService(sectionIdentifier)) {
+    // If the section is a ContentSuggestions section, add the "Learn more"
+    // items if they are not already present.
+    if ([model hasSectionForSectionIdentifier:SectionIdentifierLearnMore] &&
+        [model itemsInSectionWithIdentifier:SectionIdentifierLearnMore].count ==
+            0) {
+      ContentSuggestionsSectionInformation* learnMoreSectionInfo =
+          self.sectionInfoBySectionIdentifier[@(SectionIdentifierLearnMore)];
+      for (CSCollectionViewItem* item in
+           [self.dataSource itemsForSectionInfo:learnMoreSectionInfo]) {
+        item.type = ItemTypeForInfo(learnMoreSectionInfo);
+        NSIndexPath* addedIndexPath = [self addItem:item
+                            toSectionWithIdentifier:SectionIdentifierLearnMore];
+
+        [indexPaths addObject:addedIndexPath];
+      }
+    }
+  }
+
+  // Add the items from this section.
   [suggestions enumerateObjectsUsingBlock:^(CSCollectionViewItem* item,
                                             NSUInteger index, BOOL* stop) {
     NSInteger section = [model sectionForSectionIdentifier:sectionIdentifier];
@@ -423,6 +541,17 @@ addSuggestionsToModel:(NSArray<CSCollectionViewItem*>*)suggestions
              sectionIdentifierForSection:section] == SectionIdentifierLogo;
 }
 
+- (BOOL)isPromoSection:(NSInteger)section {
+  return [self.collectionViewController.collectionViewModel
+             sectionIdentifierForSection:section] == SectionIdentifierPromo;
+}
+
+- (BOOL)isContentSuggestionsSection:(NSInteger)section {
+  return IsFromContentSuggestionsService(
+      [self.collectionViewController.collectionViewModel
+          sectionIdentifierForSection:section]);
+}
+
 - (void)updateMostVisitedForSize:(CGSize)size {
   self.collectionWidth = size.width;
 
@@ -480,9 +609,12 @@ addSuggestionsToModel:(NSArray<CSCollectionViewItem*>*)suggestions
     ContentSuggestionsFooterItem* footer = [[ContentSuggestionsFooterItem alloc]
         initWithType:ItemTypeFooter
                title:sectionInfo.footerTitle
-               block:^{
-                 [weakSelf runAdditionalActionForSection:sectionInfo];
-               }];
+            callback:^(ContentSuggestionsFooterItem* item,
+                       ContentSuggestionsFooterCell* cell) {
+              [weakSelf runAdditionalActionForSection:sectionInfo
+                                             withItem:item
+                                                 cell:cell];
+            }];
 
     [self.collectionViewController.collectionViewModel
                        setFooter:footer
@@ -492,20 +624,56 @@ addSuggestionsToModel:(NSArray<CSCollectionViewItem*>*)suggestions
 
 // Adds the header corresponding to |sectionInfo| to the section if there is
 // none present and the section info contains a title.
+// In addition to that, if the section is for a content suggestion, only show a
+// title if there are more than 1 occurence of a content suggestion section.
 - (void)addHeaderIfNeeded:(ContentSuggestionsSectionInformation*)sectionInfo {
   NSInteger sectionIdentifier = SectionIdentifierForInfo(sectionInfo);
 
-  if (![self.collectionViewController.collectionViewModel
-          headerForSectionWithIdentifier:sectionIdentifier] &&
+  CSCollectionViewModel* model =
+      self.collectionViewController.collectionViewModel;
+
+  if (![model headerForSectionWithIdentifier:sectionIdentifier] &&
       sectionInfo.title) {
-    CollectionViewTextItem* header =
-        [[CollectionViewTextItem alloc] initWithType:ItemTypeHeader];
-    header.text = sectionInfo.title;
-    header.textColor = [[MDCPalette greyPalette] tint500];
-    [self.collectionViewController.collectionViewModel
-                       setHeader:header
-        forSectionWithIdentifier:sectionIdentifier];
+    BOOL addHeader = YES;
+
+    if (IsFromContentSuggestionsService(sectionIdentifier)) {
+      addHeader = NO;
+
+      if ([self.sectionIdentifiersFromContentSuggestions
+              containsObject:@(sectionIdentifier)]) {
+        return;
+      }
+      if ([self.sectionIdentifiersFromContentSuggestions count] == 1) {
+        NSNumber* existingSectionIdentifier =
+            [self.sectionIdentifiersFromContentSuggestions anyObject];
+        ContentSuggestionsSectionInformation* existingSectionInfo =
+            self.sectionInfoBySectionIdentifier[existingSectionIdentifier];
+        [model setHeader:[self headerForSectionInfo:existingSectionInfo]
+            forSectionWithIdentifier:[existingSectionIdentifier integerValue]];
+        addHeader = YES;
+      } else if ([self.sectionIdentifiersFromContentSuggestions count] > 1) {
+        addHeader = YES;
+      }
+
+      [self.sectionIdentifiersFromContentSuggestions
+          addObject:@(sectionIdentifier)];
+    }
+
+    if (addHeader) {
+      [model setHeader:[self headerForSectionInfo:sectionInfo]
+          forSectionWithIdentifier:sectionIdentifier];
+    }
   }
+}
+
+// Returns the header for this |sectionInfo|.
+- (CollectionViewItem*)headerForSectionInfo:
+    (ContentSuggestionsSectionInformation*)sectionInfo {
+  CollectionViewTextItem* header =
+      [[CollectionViewTextItem alloc] initWithType:ItemTypeHeader];
+  header.text = sectionInfo.title;
+  header.textColor = [[MDCPalette greyPalette] tint500];
+  return header;
 }
 
 // Adds the header for the first section, containing the logo and the omnibox,
@@ -527,21 +695,37 @@ addSuggestionsToModel:(NSArray<CSCollectionViewItem*>*)suggestions
 - (void)resetModels {
   [self.collectionViewController loadModel];
   self.sectionInfoBySectionIdentifier = [[NSMutableDictionary alloc] init];
+  self.sectionIdentifiersFromContentSuggestions = [[NSMutableSet alloc] init];
 }
 
 // Runs the additional action for the section identified by |sectionInfo|.
 - (void)runAdditionalActionForSection:
-    (ContentSuggestionsSectionInformation*)sectionInfo {
+            (ContentSuggestionsSectionInformation*)sectionInfo
+                             withItem:(ContentSuggestionsFooterItem*)item
+                                 cell:(ContentSuggestionsFooterCell*)cell {
   SectionIdentifier sectionIdentifier = SectionIdentifierForInfo(sectionInfo);
 
-  // TODO(crbug.com/721229): Start spinner.
+  CSCollectionViewModel* model =
+      self.collectionViewController.collectionViewModel;
+  if (![model hasSectionForSectionIdentifier:sectionIdentifier])
+    return;
+
+  // The more button is the footer of the section. So its position is the number
+  // of items in the section.
+  [self.collectionViewController.metricsRecorder
+      onMoreButtonTappedAtPosition:
+          [model numberOfItemsInSection:
+                     [model sectionForSectionIdentifier:sectionIdentifier]]
+                         inSection:sectionInfo];
+
+  item.loading = YES;
+  [item configureCell:cell];
 
   NSMutableArray<ContentSuggestionIdentifier*>* knownSuggestionIdentifiers =
       [NSMutableArray array];
 
   NSArray<CSCollectionViewItem*>* knownSuggestions =
-      [self.collectionViewController.collectionViewModel
-          itemsInSectionWithIdentifier:sectionIdentifier];
+      [model itemsInSectionWithIdentifier:sectionIdentifier];
   for (CSCollectionViewItem* suggestion in knownSuggestions) {
     if (suggestion.type != ItemTypeEmpty) {
       [knownSuggestionIdentifiers addObject:suggestion.suggestionIdentifier];
@@ -549,26 +733,66 @@ addSuggestionsToModel:(NSArray<CSCollectionViewItem*>*)suggestions
   }
 
   __weak ContentSuggestionsCollectionUpdater* weakSelf = self;
+  __weak ContentSuggestionsFooterItem* weakItem = item;
+  __weak ContentSuggestionsFooterCell* weakCell = cell;
   [self.dataSource
       fetchMoreSuggestionsKnowing:knownSuggestionIdentifiers
                   fromSectionInfo:sectionInfo
-                         callback:^(
-                             NSArray<CSCollectionViewItem*>* suggestions) {
+                         callback:^(NSArray<CSCollectionViewItem*>* suggestions,
+                                    content_suggestions::StatusCode status) {
                            [weakSelf moreSuggestionsFetched:suggestions
-                                              inSectionInfo:sectionInfo];
+                                              inSectionInfo:sectionInfo
+                                                   withItem:weakItem
+                                                       cell:weakCell
+                                                     status:status];
                          }];
 }
 
 // Adds the |suggestions| to the collection view. All the suggestions must have
-// the same sectionInfo.
+// the same |sectionInfo|. The fetch has been started by tapping the |cell| and
+// its associated |item|. |status| gives the status of the fetch result.
 - (void)moreSuggestionsFetched:(NSArray<CSCollectionViewItem*>*)suggestions
                  inSectionInfo:
-                     (ContentSuggestionsSectionInformation*)sectionInfo {
+                     (ContentSuggestionsSectionInformation*)sectionInfo
+                      withItem:(ContentSuggestionsFooterItem*)item
+                          cell:(ContentSuggestionsFooterCell*)cell
+                        status:(content_suggestions::StatusCode)status {
+  SectionIdentifier sectionIdentifier = SectionIdentifierForInfo(sectionInfo);
+  item.loading = NO;
+  if (cell && item && cell.delegate == item) {
+    // The cell has not been reconfigured by another item. It should be safe to
+    // update it.
+    [item configureCell:cell];
+  }
+
   if (suggestions) {
     [self.collectionViewController addSuggestions:suggestions
                                     toSectionInfo:sectionInfo];
+
+  } else if (status == content_suggestions::StatusCodeSuccess ||
+             status == content_suggestions::StatusCodePermanentError) {
+    // No more suggestions.
+    UICollectionView* collectionView =
+        self.collectionViewController.collectionView;
+
+    [self.collectionViewController.collectionViewModel
+                       setFooter:nil
+        forSectionWithIdentifier:sectionIdentifier];
+
+    [collectionView performBatchUpdates:^{
+      [collectionView.collectionViewLayout invalidateLayout];
+    }
+                             completion:nil];
+
+  } else if (status == content_suggestions::StatusCodeError) {
+    NSString* text =
+        l10n_util::GetNSString(IDS_NTP_ARTICLE_SUGGESTIONS_NOT_AVAILABLE);
+    MDCSnackbarMessage* message = [MDCSnackbarMessage messageWithText:text];
+    message.accessibilityLabel = text;
+    message.category = kContentSuggestionsCollectionUpdaterSnackbarCategory;
+    [self.dispatcher showSnackbarMessage:message];
+    TriggerHapticFeedbackForNotification(UINotificationFeedbackTypeError);
   }
-  // TODO(crbug.com/721229):Stop spinner.
 }
 
 // Returns a item to be displayed when the section identified by |sectionInfo|

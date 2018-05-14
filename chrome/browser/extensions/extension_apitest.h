@@ -5,10 +5,10 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_APITEST_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_APITEST_H_
 
-#include <deque>
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "base/strings/string_piece_forward.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "content/public/browser/notification_registrar.h"
@@ -58,6 +58,10 @@ class ExtensionApiTest : public ExtensionBrowserTest {
     // Allow manifest versions older that Extension::kModernManifestVersion.
     // Used to test old manifest features.
     kFlagAllowOldManifestVersions = 1 << 6,
+
+    // Load the extension using //extensions/test/data/ as the root path instead
+    // of loading from //chrome/test/data/extensions/api_test/.
+    kFlagUseRootExtensionsDir = 1 << 7,
   };
 
   ExtensionApiTest();
@@ -68,9 +72,13 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   void SetUpOnMainThread() override;
   void TearDownOnMainThread() override;
 
-  // Load |extension_name| and wait for pass / fail notification.
-  // |extension_name| is a directory in "test/data/extensions/api_test".
+  // Loads |extension_name| and waits for pass / fail notification.
+  // |extension_name| is a directory in "chrome/test/data/extensions/api_test".
   bool RunExtensionTest(const std::string& extension_name);
+
+  // Same as RunExtensionTest, except run with the specific |flags| (as defined
+  // in the Flags enum).
+  bool RunExtensionTestWithFlags(const std::string& extension_name, int flags);
 
   // Similar to RunExtensionTest, except sets an additional string argument
   // |customArg| to the test config object.
@@ -119,6 +127,18 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   bool RunExtensionSubtest(const std::string& extension_name,
                            const std::string& page_url,
                            int flags);
+
+  // As above but with support for injecting a custom argument into the test
+  // config.
+  bool RunExtensionSubtestWithArg(const std::string& extension_name,
+                                  const std::string& page_url,
+                                  const char* custom_arg);
+
+  // As above but with support for custom flags defined in Flags above.
+  bool RunExtensionSubtestWithArgAndFlags(const std::string& extension_name,
+                                          const std::string& page_url,
+                                          const char* custom_arg,
+                                          int flags);
 
   // Load |page_url| and wait for pass / fail notification from the extension
   // API on the page.
@@ -181,12 +201,20 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   // chrome.test.getConfig().
   bool StartFTPServer(const base::FilePath& root_directory);
 
+  // Sets the additional string argument |customArg| to the test config object,
+  // which is available to javascript tests using chrome.test.getConfig().
+  void SetCustomArg(base::StringPiece custom_arg);
+
   // Test that exactly one extension loaded.  If so, return a pointer to
   // the extension.  If not, return NULL and set message_.
   const extensions::Extension* GetSingleLoadedExtension();
 
   // All extensions tested by ExtensionApiTest are in the "api_test" dir.
   void SetUpCommandLine(base::CommandLine* command_line) override;
+
+  const base::FilePath& shared_test_data_dir() const {
+    return shared_test_data_dir_;
+  }
 
   // If it failed, what was the error message?
   std::string message_;
@@ -206,6 +234,9 @@ class ExtensionApiTest : public ExtensionBrowserTest {
 
   // Hold the test FTP server.
   std::unique_ptr<net::SpawnedTestServer> ftp_server_;
+
+  // Test data directory shared with //extensions.
+  base::FilePath shared_test_data_dir_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_APITEST_H_

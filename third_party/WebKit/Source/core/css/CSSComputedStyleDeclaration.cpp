@@ -30,16 +30,16 @@
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSPrimitiveValueMappings.h"
 #include "core/css/CSSPropertyIDTemplates.h"
-#include "core/css/CSSPropertyMetadata.h"
 #include "core/css/CSSSelector.h"
 #include "core/css/CSSVariableData.h"
 #include "core/css/ComputedStyleCSSValueMapping.h"
+#include "core/css/StyleEngine.h"
+#include "core/css/ZoomAdjustedPixelValue.h"
 #include "core/css/parser/CSSParser.h"
-#include "core/css/zoomAdjustedPixelValue.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/PseudoElement.h"
-#include "core/dom/StyleEngine.h"
+#include "core/frame/UseCounter.h"
 #include "core/layout/LayoutObject.h"
 #include "core/style/ComputedStyle.h"
 #include "platform/wtf/text/StringBuilder.h"
@@ -81,11 +81,11 @@ const CSSPropertyID kComputedPropertyArray[] = {
     CSSPropertyFontSize, CSSPropertyFontSizeAdjust, CSSPropertyFontStretch,
     CSSPropertyFontStyle, CSSPropertyFontVariant,
     CSSPropertyFontVariantLigatures, CSSPropertyFontVariantCaps,
-    CSSPropertyFontVariantNumeric, CSSPropertyFontWeight, CSSPropertyHeight,
-    CSSPropertyImageOrientation, CSSPropertyImageRendering,
-    CSSPropertyIsolation, CSSPropertyJustifyItems, CSSPropertyJustifySelf,
-    CSSPropertyLeft, CSSPropertyLetterSpacing, CSSPropertyLineHeight,
-    CSSPropertyLineHeightStep, CSSPropertyListStyleImage,
+    CSSPropertyFontVariantNumeric, CSSPropertyFontVariantEastAsian,
+    CSSPropertyFontWeight, CSSPropertyHeight, CSSPropertyImageOrientation,
+    CSSPropertyImageRendering, CSSPropertyIsolation, CSSPropertyJustifyItems,
+    CSSPropertyJustifySelf, CSSPropertyLeft, CSSPropertyLetterSpacing,
+    CSSPropertyLineHeight, CSSPropertyLineHeightStep, CSSPropertyListStyleImage,
     CSSPropertyListStylePosition, CSSPropertyListStyleType,
     CSSPropertyMarginBottom, CSSPropertyMarginLeft, CSSPropertyMarginRight,
     CSSPropertyMarginTop, CSSPropertyMaxHeight, CSSPropertyMaxWidth,
@@ -98,11 +98,11 @@ const CSSPropertyID kComputedPropertyArray[] = {
     CSSPropertyOverflowX, CSSPropertyOverflowY, CSSPropertyPaddingBottom,
     CSSPropertyPaddingLeft, CSSPropertyPaddingRight, CSSPropertyPaddingTop,
     CSSPropertyPointerEvents, CSSPropertyPosition, CSSPropertyResize,
-    CSSPropertyRight, CSSPropertyScrollBehavior, CSSPropertySpeak,
-    CSSPropertyTableLayout, CSSPropertyTabSize, CSSPropertyTextAlign,
-    CSSPropertyTextAlignLast, CSSPropertyTextDecoration,
+    CSSPropertyRight, CSSPropertyScrollBehavior, CSSPropertyScrollCustomization,
+    CSSPropertySpeak, CSSPropertyTableLayout, CSSPropertyTabSize,
+    CSSPropertyTextAlign, CSSPropertyTextAlignLast, CSSPropertyTextDecoration,
     CSSPropertyTextDecorationLine, CSSPropertyTextDecorationStyle,
-    CSSPropertyTextDecorationColor, CSSPropertyTextDecorationSkip,
+    CSSPropertyTextDecorationColor, CSSPropertyTextDecorationSkipInk,
     CSSPropertyTextJustify, CSSPropertyTextUnderlinePosition,
     CSSPropertyTextIndent, CSSPropertyTextRendering, CSSPropertyTextShadow,
     CSSPropertyTextSizeAdjust, CSSPropertyTextOverflow,
@@ -115,7 +115,6 @@ const CSSPropertyID kComputedPropertyArray[] = {
     CSSPropertyWordWrap, CSSPropertyZIndex, CSSPropertyZoom,
 
     CSSPropertyWebkitAppearance, CSSPropertyBackfaceVisibility,
-    CSSPropertyWebkitBackgroundClip, CSSPropertyWebkitBackgroundOrigin,
     CSSPropertyWebkitBorderHorizontalSpacing, CSSPropertyWebkitBorderImage,
     CSSPropertyWebkitBorderVerticalSpacing, CSSPropertyWebkitBoxAlign,
     CSSPropertyWebkitBoxDecorationBreak, CSSPropertyWebkitBoxDirection,
@@ -133,8 +132,8 @@ const CSSPropertyID kComputedPropertyArray[] = {
     CSSPropertyGridAutoRows, CSSPropertyGridColumnEnd,
     CSSPropertyGridColumnStart, CSSPropertyGridTemplateAreas,
     CSSPropertyGridTemplateColumns, CSSPropertyGridTemplateRows,
-    CSSPropertyGridRowEnd, CSSPropertyGridRowStart, CSSPropertyGridColumnGap,
-    CSSPropertyGridRowGap, CSSPropertyWebkitHighlight, CSSPropertyHyphens,
+    CSSPropertyGridRowEnd, CSSPropertyGridRowStart, CSSPropertyRowGap,
+    CSSPropertyWebkitHighlight, CSSPropertyHyphens,
     CSSPropertyWebkitHyphenateCharacter, CSSPropertyWebkitLineBreak,
     CSSPropertyWebkitLineClamp, CSSPropertyWebkitLocale,
     CSSPropertyWebkitMarginBeforeCollapse, CSSPropertyWebkitMarginAfterCollapse,
@@ -182,90 +181,22 @@ CSSValueID CssIdentifierForFontSizeKeyword(int keyword_size) {
   return static_cast<CSSValueID>(CSSValueXxSmall + keyword_size - 1);
 }
 
-void LogUnimplementedPropertyID(CSSPropertyID property_id) {
+void LogUnimplementedPropertyID(const CSSProperty& property) {
   DEFINE_STATIC_LOCAL(HashSet<CSSPropertyID>, property_id_set, ());
-  if (!property_id_set.insert(property_id).is_new_entry)
+  if (!property_id_set.insert(property.PropertyID()).is_new_entry)
     return;
 
   DLOG(ERROR) << "Blink does not yet implement getComputedStyle for '"
-              << getPropertyName(property_id) << "'.";
-}
-
-bool IsLayoutDependent(CSSPropertyID property_id,
-                       const ComputedStyle* style,
-                       LayoutObject* layout_object) {
-  if (!layout_object)
-    return false;
-
-  // Some properties only depend on layout in certain conditions which
-  // are specified in the main switch statement below. So we can avoid
-  // forcing layout in those conditions. The conditions in this switch
-  // statement must remain in sync with the conditions in the main switch.
-  // FIXME: Some of these cases could be narrowed down or optimized better.
-  switch (property_id) {
-    case CSSPropertyBottom:
-    case CSSPropertyHeight:
-    case CSSPropertyLeft:
-    case CSSPropertyRight:
-    case CSSPropertyTop:
-    case CSSPropertyPerspectiveOrigin:
-    case CSSPropertyTransform:
-    case CSSPropertyTranslate:
-    case CSSPropertyTransformOrigin:
-    case CSSPropertyWidth:
-      return layout_object->IsBox();
-    case CSSPropertyMargin:
-      return layout_object->IsBox() &&
-             (!style || !style->MarginBottom().IsFixed() ||
-              !style->MarginTop().IsFixed() || !style->MarginLeft().IsFixed() ||
-              !style->MarginRight().IsFixed());
-    case CSSPropertyMarginLeft:
-      return layout_object->IsBox() &&
-             (!style || !style->MarginLeft().IsFixed());
-    case CSSPropertyMarginRight:
-      return layout_object->IsBox() &&
-             (!style || !style->MarginRight().IsFixed());
-    case CSSPropertyMarginTop:
-      return layout_object->IsBox() &&
-             (!style || !style->MarginTop().IsFixed());
-    case CSSPropertyMarginBottom:
-      return layout_object->IsBox() &&
-             (!style || !style->MarginBottom().IsFixed());
-    case CSSPropertyPadding:
-      return layout_object->IsBox() &&
-             (!style || !style->PaddingBottom().IsFixed() ||
-              !style->PaddingTop().IsFixed() ||
-              !style->PaddingLeft().IsFixed() ||
-              !style->PaddingRight().IsFixed());
-    case CSSPropertyPaddingBottom:
-      return layout_object->IsBox() &&
-             (!style || !style->PaddingBottom().IsFixed());
-    case CSSPropertyPaddingLeft:
-      return layout_object->IsBox() &&
-             (!style || !style->PaddingLeft().IsFixed());
-    case CSSPropertyPaddingRight:
-      return layout_object->IsBox() &&
-             (!style || !style->PaddingRight().IsFixed());
-    case CSSPropertyPaddingTop:
-      return layout_object->IsBox() &&
-             (!style || !style->PaddingTop().IsFixed());
-    case CSSPropertyGridTemplateColumns:
-    case CSSPropertyGridTemplateRows:
-    case CSSPropertyGridTemplate:
-    case CSSPropertyGrid:
-      return layout_object->IsLayoutGrid();
-    default:
-      return false;
-  }
+              << property.GetPropertyName() << "'.";
 }
 
 }  // namespace
 
-const Vector<CSSPropertyID>&
+const Vector<const CSSProperty*>&
 CSSComputedStyleDeclaration::ComputableProperties() {
-  DEFINE_STATIC_LOCAL(Vector<CSSPropertyID>, properties, ());
+  DEFINE_STATIC_LOCAL(Vector<const CSSProperty*>, properties, ());
   if (properties.IsEmpty()) {
-    CSSPropertyMetadata::FilterEnabledCSSPropertiesIntoVector(
+    CSSProperty::FilterEnabledCSSPropertiesIntoVector(
         kComputedPropertyArray, WTF_ARRAY_LENGTH(kComputedPropertyArray),
         properties);
   }
@@ -281,25 +212,26 @@ CSSComputedStyleDeclaration::CSSComputedStyleDeclaration(
           CSSSelector::ParsePseudoId(pseudo_element_name)),
       allow_visited_style_(allow_visited_style) {}
 
-CSSComputedStyleDeclaration::~CSSComputedStyleDeclaration() {}
+CSSComputedStyleDeclaration::~CSSComputedStyleDeclaration() = default;
 
 String CSSComputedStyleDeclaration::cssText() const {
   StringBuilder result;
-  const Vector<CSSPropertyID>& properties = ComputableProperties();
+  static const Vector<const CSSProperty*>& properties = ComputableProperties();
 
   for (unsigned i = 0; i < properties.size(); i++) {
     if (i)
       result.Append(' ');
-    result.Append(getPropertyName(properties[i]));
+    result.Append(properties[i]->GetPropertyName());
     result.Append(": ");
-    result.Append(GetPropertyValue(properties[i]));
+    result.Append(GetPropertyValue(properties[i]->PropertyID()));
     result.Append(';');
   }
 
   return result.ToString();
 }
 
-void CSSComputedStyleDeclaration::setCSSText(const String&,
+void CSSComputedStyleDeclaration::setCSSText(const ExecutionContext*,
+                                             const String&,
                                              ExceptionState& exception_state) {
   exception_state.ThrowDOMException(
       kNoModificationAllowedError,
@@ -357,6 +289,17 @@ Node* CSSComputedStyleDeclaration::StyledNode() const {
   return node_.Get();
 }
 
+LayoutObject* CSSComputedStyleDeclaration::StyledLayoutObject() const {
+  auto* node = StyledNode();
+  if (!node)
+    return nullptr;
+
+  if (pseudo_element_specifier_ != kPseudoIdNone && node == node_.Get())
+    return nullptr;
+
+  return node->GetLayoutObject();
+}
+
 const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
     AtomicString custom_property_name) const {
   Node* styled_node = StyledNode();
@@ -375,7 +318,7 @@ const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
       StyledNode()->GetDocument().GetPropertyRegistry());
 }
 
-std::unique_ptr<HashMap<AtomicString, RefPtr<CSSVariableData>>>
+std::unique_ptr<HashMap<AtomicString, scoped_refptr<CSSVariableData>>>
 CSSComputedStyleDeclaration::GetVariables() const {
   const ComputedStyle* style = ComputeComputedStyle();
   if (!style)
@@ -384,7 +327,7 @@ CSSComputedStyleDeclaration::GetVariables() const {
 }
 
 const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
-    CSSPropertyID property_id) const {
+    const CSSProperty& property_class) const {
   Node* styled_node = StyledNode();
   if (!styled_node)
     return nullptr;
@@ -395,12 +338,12 @@ const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
   // The style recalc could have caused the styled node to be discarded or
   // replaced if it was a PseudoElement so we need to update it.
   styled_node = StyledNode();
-  LayoutObject* layout_object = styled_node->GetLayoutObject();
+  LayoutObject* layout_object = StyledLayoutObject();
 
   const ComputedStyle* style = ComputeComputedStyle();
 
   bool force_full_layout =
-      IsLayoutDependent(property_id, style, layout_object) ||
+      property_class.IsLayoutDependent(style, layout_object) ||
       styled_node->IsInShadowTree() ||
       (document.LocalOwner() &&
        document.GetStyleEngine().HasViewportDependentMediaQueries());
@@ -409,24 +352,24 @@ const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
     document.UpdateStyleAndLayoutIgnorePendingStylesheetsForNode(styled_node);
     styled_node = StyledNode();
     style = ComputeComputedStyle();
-    layout_object = styled_node->GetLayoutObject();
+    layout_object = StyledLayoutObject();
   }
 
   if (!style)
     return nullptr;
 
-  const CSSValue* value = ComputedStyleCSSValueMapping::Get(
-      property_id, *style, layout_object, styled_node, allow_visited_style_);
+  const CSSValue* value = property_class.CSSValueFromComputedStyle(
+      *style, layout_object, styled_node, allow_visited_style_);
   if (value)
     return value;
 
-  LogUnimplementedPropertyID(property_id);
+  LogUnimplementedPropertyID(property_class);
   return nullptr;
 }
 
 String CSSComputedStyleDeclaration::GetPropertyValue(
     CSSPropertyID property_id) const {
-  const CSSValue* value = GetPropertyCSSValue(property_id);
+  const CSSValue* value = GetPropertyCSSValue(CSSProperty::Get(property_id));
   if (value)
     return value->CssText();
   return "";
@@ -442,15 +385,15 @@ String CSSComputedStyleDeclaration::item(unsigned i) const {
   if (i >= length())
     return "";
 
-  return getPropertyNameString(ComputableProperties()[i]);
+  return ComputableProperties()[i]->GetPropertyNameString();
 }
 
 bool CSSComputedStyleDeclaration::CssPropertyMatches(
     CSSPropertyID property_id,
-    const CSSValue* property_value) const {
+    const CSSValue& property_value) const {
   if (property_id == CSSPropertyFontSize &&
-      (property_value->IsPrimitiveValue() ||
-       property_value->IsIdentifierValue()) &&
+      (property_value.IsPrimitiveValue() ||
+       property_value.IsIdentifierValue()) &&
       node_) {
     node_->GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
     const ComputedStyle* style =
@@ -458,29 +401,31 @@ bool CSSComputedStyleDeclaration::CssPropertyMatches(
     if (style && style->GetFontDescription().KeywordSize()) {
       CSSValueID size_value = CssIdentifierForFontSizeKeyword(
           style->GetFontDescription().KeywordSize());
-      if (property_value->IsIdentifierValue() &&
-          ToCSSIdentifierValue(property_value)->GetValueID() == size_value)
+      if (property_value.IsIdentifierValue() &&
+          ToCSSIdentifierValue(property_value).GetValueID() == size_value)
         return true;
     }
   }
-  const CSSValue* value = GetPropertyCSSValue(property_id);
-  return DataEquivalent(value, property_value);
+  const CSSValue* value = GetPropertyCSSValue(CSSProperty::Get(property_id));
+  return DataEquivalent(value, &property_value);
 }
 
-MutableStylePropertySet* CSSComputedStyleDeclaration::CopyProperties() const {
+MutableCSSPropertyValueSet* CSSComputedStyleDeclaration::CopyProperties()
+    const {
   return CopyPropertiesInSet(ComputableProperties());
 }
 
-MutableStylePropertySet* CSSComputedStyleDeclaration::CopyPropertiesInSet(
-    const Vector<CSSPropertyID>& properties) const {
-  HeapVector<CSSProperty, 256> list;
+MutableCSSPropertyValueSet* CSSComputedStyleDeclaration::CopyPropertiesInSet(
+    const Vector<const CSSProperty*>& properties) const {
+  HeapVector<CSSPropertyValue, 256> list;
   list.ReserveInitialCapacity(properties.size());
   for (unsigned i = 0; i < properties.size(); ++i) {
-    const CSSValue* value = GetPropertyCSSValue(properties[i]);
+    const CSSProperty& property = *properties[i];
+    const CSSValue* value = GetPropertyCSSValue(property);
     if (value)
-      list.push_back(CSSProperty(properties[i], *value, false));
+      list.push_back(CSSPropertyValue(property, *value, false));
   }
-  return MutableStylePropertySet::Create(list.data(), list.size());
+  return MutableCSSPropertyValueSet::Create(list.data(), list.size());
 }
 
 CSSRule* CSSComputedStyleDeclaration::parentRule() const {
@@ -498,7 +443,9 @@ String CSSComputedStyleDeclaration::getPropertyValue(
       return value->CssText();
     return String();
   }
-  DCHECK(CSSPropertyMetadata::IsEnabledProperty(property_id));
+#if DCHECK_IS_ON
+  DCHECK(CSSProperty::Get(property_id).IsEnabled());
+#endif
   return GetPropertyValue(property_id);
 }
 
@@ -515,7 +462,8 @@ bool CSSComputedStyleDeclaration::IsPropertyImplicit(const String&) {
   return false;
 }
 
-void CSSComputedStyleDeclaration::setProperty(const String& name,
+void CSSComputedStyleDeclaration::setProperty(const ExecutionContext*,
+                                              const String& name,
                                               const String&,
                                               const String&,
                                               ExceptionState& exception_state) {
@@ -537,7 +485,11 @@ String CSSComputedStyleDeclaration::removeProperty(
 
 const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValueInternal(
     CSSPropertyID property_id) {
-  return GetPropertyCSSValue(property_id);
+  if (property_id == CSSPropertyWebkitAppearance && node_) {
+    UseCounter::Count(node_->GetDocument(),
+                      WebFeature::kGetComputedStyleWebkitAppearance);
+  }
+  return GetPropertyCSSValue(CSSProperty::Get(property_id));
 }
 
 const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValueInternal(
@@ -555,15 +507,17 @@ void CSSComputedStyleDeclaration::SetPropertyInternal(
     const String&,
     const String&,
     bool,
+    SecureContextMode,
     ExceptionState& exception_state) {
   // TODO(leviw): This code is currently unreachable, but shouldn't be.
   exception_state.ThrowDOMException(
       kNoModificationAllowedError,
       "These styles are computed, and therefore the '" +
-          getPropertyNameString(id) + "' property is read-only.");
+          CSSProperty::Get(id).GetPropertyNameString() +
+          "' property is read-only.");
 }
 
-DEFINE_TRACE(CSSComputedStyleDeclaration) {
+void CSSComputedStyleDeclaration::Trace(blink::Visitor* visitor) {
   visitor->Trace(node_);
   CSSStyleDeclaration::Trace(visitor);
 }

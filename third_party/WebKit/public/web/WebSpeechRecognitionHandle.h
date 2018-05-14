@@ -39,7 +39,7 @@ class SpeechRecognition;
 class WebSpeechRecognitionHandle {
  public:
   ~WebSpeechRecognitionHandle() { Reset(); }
-  WebSpeechRecognitionHandle() {}
+  WebSpeechRecognitionHandle() = default;
 
   WebSpeechRecognitionHandle(const WebSpeechRecognitionHandle& other) {
     Assign(other);
@@ -58,7 +58,7 @@ class WebSpeechRecognitionHandle {
   BLINK_EXPORT bool Equals(const WebSpeechRecognitionHandle&) const;
   BLINK_EXPORT bool LessThan(const WebSpeechRecognitionHandle&) const;
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebSpeechRecognitionHandle(SpeechRecognition*);
   operator SpeechRecognition*() const;
 #endif

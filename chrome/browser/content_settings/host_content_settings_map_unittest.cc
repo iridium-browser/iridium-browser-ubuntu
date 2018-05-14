@@ -11,18 +11,18 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/memory/ptr_util.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_clock.h"
+#include "base/time/time.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/mock_settings_observer.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/content_settings_details.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/browser/user_modifiable_provider.h"
 #include "components/content_settings/core/browser/website_settings_info.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
 #include "components/content_settings/core/common/pref_names.h"
@@ -31,11 +31,13 @@
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/static_cookie_policy.h"
-#include "ppapi/features/features.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
 using ::testing::_;
+using ::testing::MockFunction;
+using ::testing::Return;
 
 namespace {
 
@@ -46,6 +48,34 @@ bool MatchPrimaryPattern(const ContentSettingsPattern& expected_primary,
 }
 
 }  // namespace
+
+class MockUserModifiableProvider
+    : public content_settings::UserModifiableProvider {
+ public:
+  ~MockUserModifiableProvider() = default;
+  MOCK_CONST_METHOD3(GetRuleIterator,
+                     std::unique_ptr<content_settings::RuleIterator>(
+                         ContentSettingsType,
+                         const content_settings::ResourceIdentifier&,
+                         bool));
+
+  MOCK_METHOD5(SetWebsiteSetting,
+               bool(const ContentSettingsPattern&,
+                    const ContentSettingsPattern&,
+                    ContentSettingsType,
+                    const content_settings::ResourceIdentifier&,
+                    base::Value*));
+
+  MOCK_METHOD1(ClearAllContentSettingsRules, void(ContentSettingsType));
+
+  MOCK_METHOD0(ShutdownOnUIThread, void());
+
+  MOCK_METHOD4(GetWebsiteSettingLastModified,
+               base::Time(const ContentSettingsPattern&,
+                          const ContentSettingsPattern&,
+                          ContentSettingsType,
+                          const content_settings::ResourceIdentifier&));
+};
 
 class HostContentSettingsMapTest : public testing::Test {
  public:
@@ -77,6 +107,9 @@ class TesterForType {
       case CONTENT_SETTINGS_TYPE_POPUPS:
         policy_default_setting_ = prefs::kManagedDefaultPopupsSetting;
         break;
+      case CONTENT_SETTINGS_TYPE_ADS:
+        policy_default_setting_ = prefs::kManagedDefaultAdsSetting;
+        break;
       default:
         // Add support as needed.
         NOTREACHED();
@@ -89,7 +122,7 @@ class TesterForType {
 
   void SetPolicyDefault(ContentSetting setting) {
     prefs_->SetManagedPref(policy_default_setting_,
-                           base::MakeUnique<base::Value>(setting));
+                           std::make_unique<base::Value>(setting));
   }
 
   void AddUserException(std::string exception,
@@ -251,6 +284,85 @@ TEST_F(HostContentSettingsMapTest, IndividualSettings) {
       CONTENT_SETTINGS_TYPE_POPUPS, std::string(), &host_settings);
   // |host_settings| contains only the default setting.
   EXPECT_EQ(1U, host_settings.size());
+}
+
+TEST_F(HostContentSettingsMapTest, GetWebsiteSettingsForOneType) {
+  TestingProfile profile;
+  GURL hosts[] = {GURL("https://example1.com/"), GURL("https://example2.com/")};
+  ContentSettingsForOneType client_hints_settings;
+  HostContentSettingsMap* host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+      &client_hints_settings);
+  EXPECT_EQ(0U, client_hints_settings.size());
+
+  // Add setting for hosts[0].
+  const double expiration_time =
+      (base::Time::Now() + base::TimeDelta::FromDays(1)).ToDoubleT();
+  std::unique_ptr<base::ListValue> expiration_times_list =
+      std::make_unique<base::ListValue>();
+  expiration_times_list->AppendInteger(42 /* client hint  value */);
+  auto expiration_times_dictionary = std::make_unique<base::DictionaryValue>();
+  expiration_times_dictionary->SetList("client_hints",
+                                       std::move(expiration_times_list));
+  expiration_times_dictionary->SetDouble("expiration_time", expiration_time);
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      hosts[0], GURL(), CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+      std::make_unique<base::Value>(expiration_times_dictionary->Clone()));
+
+  // Reading the settings should now return one setting.
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+      &client_hints_settings);
+  EXPECT_EQ(1U, client_hints_settings.size());
+  for (size_t i = 0; i < client_hints_settings.size(); ++i) {
+    EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(hosts[i]),
+              client_hints_settings.at(i).primary_pattern);
+    EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+              client_hints_settings.at(i).secondary_pattern);
+    EXPECT_EQ(*expiration_times_dictionary,
+              *client_hints_settings.at(i).setting_value);
+  }
+
+  // Add setting for hosts[1].
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      hosts[1], GURL(), CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+      std::make_unique<base::Value>(expiration_times_dictionary->Clone()));
+
+  // Reading the settings should now return two settings.
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+      &client_hints_settings);
+  EXPECT_EQ(2U, client_hints_settings.size());
+  for (size_t i = 0; i < client_hints_settings.size(); ++i) {
+    EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(hosts[i]),
+              client_hints_settings.at(i).primary_pattern);
+    EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+              client_hints_settings.at(i).secondary_pattern);
+    EXPECT_EQ(*expiration_times_dictionary,
+              *client_hints_settings.at(i).setting_value);
+  }
+
+  // Add settings again for hosts[0].
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      hosts[0], GURL(), CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+      std::make_unique<base::Value>(expiration_times_dictionary->Clone()));
+
+  // Reading the settings should still return two settings.
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+      &client_hints_settings);
+  EXPECT_EQ(2U, client_hints_settings.size());
+  for (size_t i = 0; i < client_hints_settings.size(); ++i) {
+    EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(hosts[i]),
+              client_hints_settings.at(i).primary_pattern);
+    EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+              client_hints_settings.at(i).secondary_pattern);
+    EXPECT_EQ(*expiration_times_dictionary,
+              *client_hints_settings.at(i).setting_value);
+  }
 }
 
 TEST_F(HostContentSettingsMapTest, Clear) {
@@ -736,8 +848,8 @@ TEST_F(HostContentSettingsMapTest, IncognitoInheritInitialAllow) {
 }
 
 TEST_F(HostContentSettingsMapTest, IncognitoInheritPopups) {
-  // The popup setting has an initial value of BLOCK, so  popup doesn't inherit
-  // settings to incognito
+  // The popup setting has an initial value of BLOCK, but it is allowed
+  // to inherit ALLOW settings because it doesn't provide access to user data.
   TestingProfile profile;
   Profile* otr_profile = profile.GetOffTheRecordProfile();
   HostContentSettingsMap* host_content_settings_map =
@@ -754,7 +866,7 @@ TEST_F(HostContentSettingsMapTest, IncognitoInheritPopups) {
             otr_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
 
-  // Changing content settings on the main map should not affect the
+  // Changing content settings on the main map should affect the
   // incognito map.
   host_content_settings_map->SetContentSettingDefaultScope(
       host, GURL(), CONTENT_SETTINGS_TYPE_POPUPS, std::string(),
@@ -762,9 +874,9 @@ TEST_F(HostContentSettingsMapTest, IncognitoInheritPopups) {
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            otr_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            otr_map->GetContentSetting(host, host, CONTENT_SETTINGS_TYPE_POPUPS,
+                                       std::string()));
 
   // Changing content settings on the incognito map should NOT affect the
   // main map.
@@ -798,38 +910,38 @@ TEST_F(HostContentSettingsMapTest, IncognitoPartialInheritPref) {
   EXPECT_EQ(
       CONTENT_SETTING_ASK,
       host_content_settings_map->GetContentSetting(
-          host, host, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string()));
+          host, host, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string()));
   EXPECT_EQ(
       CONTENT_SETTING_ASK,
       otr_map->GetContentSetting(
-          host, host, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string()));
+          host, host, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string()));
 
   // BLOCK should be inherited from the main map to the incognito map.
   host_content_settings_map->SetContentSettingDefaultScope(
-      host, GURL(), CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string(),
+      host, GURL(), CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string(),
       CONTENT_SETTING_BLOCK);
   EXPECT_EQ(
       CONTENT_SETTING_BLOCK,
       host_content_settings_map->GetContentSetting(
-          host, host, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string()));
+          host, host, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string()));
   EXPECT_EQ(
       CONTENT_SETTING_BLOCK,
       otr_map->GetContentSetting(
-          host, host, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string()));
+          host, host, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string()));
 
   // ALLOW should not be inherited from the main map to the incognito map (but
   // it still overwrites the BLOCK, hence incognito reverts to ASK).
   host_content_settings_map->SetContentSettingDefaultScope(
-      host, GURL(), CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string(),
+      host, GURL(), CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string(),
       CONTENT_SETTING_ALLOW);
   EXPECT_EQ(
       CONTENT_SETTING_ALLOW,
       host_content_settings_map->GetContentSetting(
-          host, host, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string()));
+          host, host, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string()));
   EXPECT_EQ(
       CONTENT_SETTING_ASK,
       otr_map->GetContentSetting(
-          host, host, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string()));
+          host, host, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string()));
 }
 
 TEST_F(HostContentSettingsMapTest, IncognitoPartialInheritDefault) {
@@ -971,6 +1083,28 @@ TEST_F(HostContentSettingsMapTest, PrefExceptionsOperation) {
   EXPECT_EQ(SETTING_SOURCE_POLICY, tester.GetSettingSourceForURL(kUrl3));
 }
 
+TEST_F(HostContentSettingsMapTest, GetUserModifiableContentSetting) {
+  GURL url("http://user_exception_allow.com");
+
+  TestingProfile profile;
+  // Arbitrarily using cookies as content type to test.
+  profile.GetTestingPrefService()->SetManagedPref(
+      prefs::kManagedDefaultCookiesSetting,
+      std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
+
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+  map->SetContentSettingDefaultScope(url, url, CONTENT_SETTINGS_TYPE_COOKIES,
+                                     std::string(), CONTENT_SETTING_ALLOW);
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            map->GetUserModifiableContentSetting(
+                url, url, CONTENT_SETTINGS_TYPE_COOKIES, std::string()));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            map->GetContentSetting(url, url, CONTENT_SETTINGS_TYPE_COOKIES,
+                                   std::string()));
+}
+
 // For a single Unicode encoded pattern, check if it gets converted to punycode
 // and old pattern gets deleted.
 TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeOnly) {
@@ -984,7 +1118,7 @@ TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeOnly) {
     base::DictionaryValue* all_settings_dictionary = update.Get();
     ASSERT_TRUE(NULL != all_settings_dictionary);
 
-    auto dummy_payload = base::MakeUnique<base::DictionaryValue>();
+    auto dummy_payload = std::make_unique<base::DictionaryValue>();
     dummy_payload->SetInteger("setting", CONTENT_SETTING_ALLOW);
     all_settings_dictionary->SetWithoutPathExpansion("[*.]\xC4\x87ira.com,*",
                                                      std::move(dummy_payload));
@@ -1043,7 +1177,7 @@ TEST_F(HostContentSettingsMapTest, ManagedDefaultContentSetting) {
 
   // Set managed-default-content-setting through the coresponding preferences.
   prefs->SetManagedPref(prefs::kManagedDefaultJavaScriptSetting,
-                        base::MakeUnique<base::Value>(CONTENT_SETTING_BLOCK));
+                        std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             host_content_settings_map->GetDefaultContentSetting(
                 CONTENT_SETTINGS_TYPE_JAVASCRIPT, NULL));
@@ -1057,7 +1191,7 @@ TEST_F(HostContentSettingsMapTest, ManagedDefaultContentSetting) {
 #if BUILDFLAG(ENABLE_PLUGINS)
   // Set preference to manage the default-content-setting for Plugins.
   prefs->SetManagedPref(prefs::kManagedDefaultPluginsSetting,
-                        base::MakeUnique<base::Value>(CONTENT_SETTING_BLOCK));
+                        std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             host_content_settings_map->GetDefaultContentSetting(
                 CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
@@ -1068,6 +1202,22 @@ TEST_F(HostContentSettingsMapTest, ManagedDefaultContentSetting) {
             host_content_settings_map->GetDefaultContentSetting(
                 CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
 #endif
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_ADS, NULL));
+
+  // Set managed-default-content-setting through the coresponding preferences.
+  prefs->SetManagedPref(prefs::kManagedDefaultAdsSetting,
+                        std::make_unique<base::Value>(CONTENT_SETTING_ALLOW));
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_ADS, NULL));
+
+  // Remove managed-default-content-settings-preferences.
+  prefs->RemoveManagedPref(prefs::kManagedDefaultAdsSetting);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_ADS, NULL));
 }
 
 TEST_F(HostContentSettingsMapTest,
@@ -1094,7 +1244,7 @@ TEST_F(HostContentSettingsMapTest,
 
   // Set managed-default-content-setting for content-settings-type JavaScript.
   prefs->SetManagedPref(prefs::kManagedDefaultJavaScriptSetting,
-                        base::MakeUnique<base::Value>(CONTENT_SETTING_ALLOW));
+                        std::make_unique<base::Value>(CONTENT_SETTING_ALLOW));
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string()));
@@ -1131,7 +1281,7 @@ TEST_F(HostContentSettingsMapTest,
 
   // Set managed-default-content-settings-preferences.
   prefs->SetManagedPref(prefs::kManagedDefaultJavaScriptSetting,
-                        base::MakeUnique<base::Value>(CONTENT_SETTING_BLOCK));
+                        std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string()));
@@ -1161,7 +1311,7 @@ TEST_F(HostContentSettingsMapTest, OverwrittenDefaultContentSetting) {
 
   // Set preference to manage the default-content-setting for Cookies.
   prefs->SetManagedPref(prefs::kManagedDefaultCookiesSetting,
-                        base::MakeUnique<base::Value>(CONTENT_SETTING_ALLOW));
+                        std::make_unique<base::Value>(CONTENT_SETTING_ALLOW));
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetDefaultContentSetting(
                 CONTENT_SETTINGS_TYPE_COOKIES, NULL));
@@ -1184,7 +1334,7 @@ TEST_F(HostContentSettingsMapTest, SettingDefaultContentSettingsWhenManaged) {
       profile.GetTestingPrefService();
 
   prefs->SetManagedPref(prefs::kManagedDefaultCookiesSetting,
-                        base::MakeUnique<base::Value>(CONTENT_SETTING_ALLOW));
+                        std::make_unique<base::Value>(CONTENT_SETTING_ALLOW));
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetDefaultContentSetting(
                 CONTENT_SETTINGS_TYPE_COOKIES, NULL));
@@ -1317,318 +1467,6 @@ TEST_F(HostContentSettingsMapTest, GuestProfileMigration) {
 }
 #endif  // !defined(OS_ANDROID)
 
-TEST_F(HostContentSettingsMapTest, MigrateDomainScopedSettings) {
-  TestingProfile profile;
-  HostContentSettingsMap* host_content_settings_map =
-      HostContentSettingsMapFactory::GetForProfile(&profile);
-  PrefService* prefs = profile.GetPrefs();
-  // Set the pref to its initial state so that migration can be done later in
-  // the test (normally it is done on construction of HostContentSettingsMap).
-  int default_value;
-  prefs->GetDefaultPrefValue(prefs::kDomainToOriginMigrationStatus)
-      ->GetAsInteger(&default_value);
-  prefs->SetInteger(prefs::kDomainToOriginMigrationStatus, default_value);
-
-  // Set old formatted http settings.
-  GURL http_host("http://example.com/");
-  GURL http_host_narrower("http://a.example.com/");
-
-  // Change default setting to BLOCK.
-  host_content_settings_map->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_POPUPS, CONTENT_SETTING_BLOCK);
-  EXPECT_EQ(
-      CONTENT_SETTING_BLOCK,
-      host_content_settings_map->GetContentSetting(
-          http_host, http_host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-  // Patterns generated for cookies used to be domain scoped.
-  host_content_settings_map->SetContentSettingCustomScope(
-      ContentSettingsPattern::FromURL(http_host),
-      ContentSettingsPattern::Wildcard(), CONTENT_SETTINGS_TYPE_POPUPS,
-      std::string(), CONTENT_SETTING_ALLOW);
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
-      host_content_settings_map->GetContentSetting(
-          http_host, http_host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-  // Settings also apply to subdomains.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                http_host_narrower, http_host_narrower,
-                CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-
-  ContentSettingsForOneType settings;
-  host_content_settings_map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_POPUPS,
-                                                   std::string(), &settings);
-  // |host_content_settings_map| contains default setting and a domain scoped
-  // setting.
-  EXPECT_EQ(2U, settings.size());
-  EXPECT_TRUE(settings[0].primary_pattern.ToString() == "[*.]example.com");
-  EXPECT_TRUE(settings[1].primary_pattern.ToString() == "*");
-
-  // Set old formatted https settings.
-  GURL https_host("https://example.com/");
-  GURL https_host_narrower("https://a.example.com/");
-
-  // Change default setting to BLOCK.
-  host_content_settings_map->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_JAVASCRIPT, CONTENT_SETTING_BLOCK);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                https_host, https_host, CONTENT_SETTINGS_TYPE_JAVASCRIPT,
-                std::string()));
-  // Patterns generated for popups used to be domain scoped.
-  host_content_settings_map->SetContentSettingCustomScope(
-      ContentSettingsPattern::FromURL(https_host),
-      ContentSettingsPattern::Wildcard(), CONTENT_SETTINGS_TYPE_JAVASCRIPT,
-      std::string(), CONTENT_SETTING_ALLOW);
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                https_host, https_host, CONTENT_SETTINGS_TYPE_JAVASCRIPT,
-                std::string()));
-  // Settings also apply to subdomains.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                https_host_narrower, https_host_narrower,
-                CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string()));
-
-  host_content_settings_map->GetSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string(), &settings);
-  // |host_content_settings_map| contains default setting and a domain scoped
-  // setting.
-  EXPECT_EQ(2U, settings.size());
-  EXPECT_TRUE(settings[0].primary_pattern.ToString() ==
-              "https://[*.]example.com:443");
-  EXPECT_TRUE(settings[1].primary_pattern.ToString() == "*");
-
-  // Set domain scoped settings for cookies.
-  host_content_settings_map->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_BLOCK);
-  EXPECT_EQ(
-      CONTENT_SETTING_BLOCK,
-      host_content_settings_map->GetContentSetting(
-          http_host, http_host, CONTENT_SETTINGS_TYPE_COOKIES, std::string()));
-  host_content_settings_map->SetContentSettingCustomScope(
-      ContentSettingsPattern::FromURL(http_host),
-      ContentSettingsPattern::Wildcard(), CONTENT_SETTINGS_TYPE_COOKIES,
-      std::string(), CONTENT_SETTING_ALLOW);
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
-      host_content_settings_map->GetContentSetting(
-          http_host, http_host, CONTENT_SETTINGS_TYPE_COOKIES, std::string()));
-  host_content_settings_map->SetContentSettingCustomScope(
-      ContentSettingsPattern::FromURL(https_host),
-      ContentSettingsPattern::Wildcard(), CONTENT_SETTINGS_TYPE_COOKIES,
-      std::string(), CONTENT_SETTING_ALLOW);
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                https_host, https_host, CONTENT_SETTINGS_TYPE_COOKIES,
-                std::string()));
-  // Settings also apply to subdomains.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                http_host_narrower, http_host_narrower,
-                CONTENT_SETTINGS_TYPE_COOKIES, std::string()));
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                https_host_narrower, https_host_narrower,
-                CONTENT_SETTINGS_TYPE_COOKIES, std::string()));
-
-  host_content_settings_map->MigrateDomainScopedSettings(false);
-
-  // After migration, settings only affect origins.
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
-      host_content_settings_map->GetContentSetting(
-          http_host, http_host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                http_host_narrower, http_host_narrower,
-                CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-  host_content_settings_map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_POPUPS,
-                                                   std::string(), &settings);
-  // |host_content_settings_map| contains default setting and a origin scoped
-  // setting.
-  EXPECT_EQ(2U, settings.size());
-  EXPECT_TRUE(settings[0].primary_pattern.ToString() ==
-              "http://example.com:80");
-  EXPECT_TRUE(settings[1].primary_pattern.ToString() == "*");
-
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                https_host, https_host, CONTENT_SETTINGS_TYPE_JAVASCRIPT,
-                std::string()));
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                https_host_narrower, https_host_narrower,
-                CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string()));
-  host_content_settings_map->GetSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string(), &settings);
-  // |host_content_settings_map| contains default setting and a origin scoped
-  // setting.
-  EXPECT_EQ(2U, settings.size());
-  EXPECT_TRUE(settings[0].primary_pattern.ToString() ==
-              "https://example.com:443");
-  EXPECT_TRUE(settings[1].primary_pattern.ToString() == "*");
-
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
-      host_content_settings_map->GetContentSetting(
-          http_host, http_host, CONTENT_SETTINGS_TYPE_COOKIES, std::string()));
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                https_host, https_host, CONTENT_SETTINGS_TYPE_COOKIES,
-                std::string()));
-  // Settings still apply to subdomains. Cookie settings didn't get migrated.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                http_host_narrower, http_host_narrower,
-                CONTENT_SETTINGS_TYPE_COOKIES, std::string()));
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                https_host_narrower, https_host_narrower,
-                CONTENT_SETTINGS_TYPE_COOKIES, std::string()));
-}
-
-// Ensure that migration only happens once upon construction of the HCSM and
-// once after syncing (even when these events occur multiple times).
-TEST_F(HostContentSettingsMapTest, DomainToOriginMigrationStatus) {
-  TestingProfile profile;
-
-  // Construct the map now to make the various platforms equivalent. On Android
-  // the map is created with the profile (due to dependencies), while on other
-  // platforms it is created lazily. Note, migration should be run here.
-  HostContentSettingsMap* host_content_settings_map =
-      HostContentSettingsMapFactory::GetForProfile(&profile);
-
-  PrefService* prefs = profile.GetPrefs();
-
-  GURL http_host("http://example.com/");
-  GURL http_host_narrower("http://a.example.com/");
-  std::string host_pattern_string =
-      ContentSettingsPattern::FromURL(http_host).ToString();
-
-  {
-    DictionaryPrefUpdate update(prefs,
-                                GetPrefName(CONTENT_SETTINGS_TYPE_POPUPS));
-    base::DictionaryValue* all_settings_dictionary = update.Get();
-    ASSERT_TRUE(NULL != all_settings_dictionary);
-
-    auto domain_setting = base::MakeUnique<base::DictionaryValue>();
-    domain_setting->SetInteger("setting", CONTENT_SETTING_ALLOW);
-    all_settings_dictionary->SetWithoutPathExpansion(host_pattern_string + ",*",
-                                                     std::move(domain_setting));
-  }
-
-  const base::DictionaryValue* all_settings_dictionary =
-      prefs->GetDictionary(GetPrefName(CONTENT_SETTINGS_TYPE_POPUPS));
-  const base::DictionaryValue* result = NULL;
-  EXPECT_TRUE(all_settings_dictionary->GetDictionaryWithoutPathExpansion(
-      "[*.]example.com,*", &result));
-
-  // Migration is done on construction of HostContentSettingsMap. Try to run it
-  // again. This should not do anything as it has already ran.
-  host_content_settings_map->MigrateDomainScopedSettings(
-      false /* after_sync */);
-
-  // Change default setting to BLOCK.
-  host_content_settings_map->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_POPUPS, CONTENT_SETTING_BLOCK);
-
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
-      host_content_settings_map->GetContentSetting(
-          http_host, http_host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-
-  // The setting should still be allow as it hasn't been migrated.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                http_host_narrower, http_host_narrower,
-                CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-
-  // Set the pref to its initial state so that migration can be triggered again,
-  // just for the sake of testing.
-  int default_value;
-  prefs->GetDefaultPrefValue(prefs::kDomainToOriginMigrationStatus)
-      ->GetAsInteger(&default_value);
-  prefs->SetInteger(prefs::kDomainToOriginMigrationStatus, default_value);
-
-  // Now, do the migration. This should work as we've cleared the pref back to
-  // its default value.
-  host_content_settings_map->MigrateDomainScopedSettings(false);
-
-  // Now the settings should be migrated.
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
-      host_content_settings_map->GetContentSetting(
-          http_host, http_host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-  // Settings only apply to origins. Migration got executed.
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                http_host_narrower, http_host_narrower,
-                CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-
-  GURL https_host("https://example.com/");
-  GURL https_host_narrower("https://a.example.com/");
-
-  host_content_settings_map->SetContentSettingCustomScope(
-      ContentSettingsPattern::FromURL(https_host),
-      ContentSettingsPattern::Wildcard(), CONTENT_SETTINGS_TYPE_POPUPS,
-      std::string(), CONTENT_SETTING_ALLOW);
-
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
-      host_content_settings_map->GetContentSetting(
-          https_host, https_host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-  // Settings apply to subdomains.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                https_host_narrower, https_host_narrower,
-                CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-
-  // Try to do migration again before sync.
-  host_content_settings_map->MigrateDomainScopedSettings(false);
-
-  // Settings still apply to subdomains. Migration didn't get executed.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                https_host_narrower, https_host_narrower,
-                CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-
-  // Do migration after sync.
-  host_content_settings_map->MigrateDomainScopedSettings(true);
-
-  // Settings only apply to origins. Migration got executed.
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                https_host_narrower, https_host_narrower,
-                CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-
-  GURL http1_host("http://google.com/");
-  GURL http1_host_narrower("http://a.google.com/");
-
-  host_content_settings_map->SetContentSettingCustomScope(
-      ContentSettingsPattern::FromURL(http1_host),
-      ContentSettingsPattern::Wildcard(), CONTENT_SETTINGS_TYPE_POPUPS,
-      std::string(), CONTENT_SETTING_ALLOW);
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
-      host_content_settings_map->GetContentSetting(
-          http1_host, http1_host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-  // Settings apply to subdomains.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                http1_host_narrower, http1_host_narrower,
-                CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-
-  // Try to do migration again after sync.
-  host_content_settings_map->MigrateDomainScopedSettings(true);
-
-  // Settings still apply to subdomains. Migration didn't get executed.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                http1_host_narrower, http1_host_narrower,
-                CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-}
-
 TEST_F(HostContentSettingsMapTest, InvalidPattern) {
   // This is a regression test for crbug.com/618529, which fixed a memory leak
   // when a website setting was set under a URL that mapped to an invalid
@@ -1735,17 +1573,12 @@ TEST_F(HostContentSettingsMapTest, ClearSettingsForOneTypeWithPredicate) {
 }
 
 TEST_F(HostContentSettingsMapTest, ClearSettingsWithTimePredicate) {
-  base::test::ScopedFeatureList feature_list;
-  // Enable kTabsInCbd to activate last_modified timestmap recording.
-  feature_list.InitAndEnableFeature(features::kTabsInCbd);
-
   TestingProfile profile;
   auto* map = HostContentSettingsMapFactory::GetForProfile(&profile);
 
-  auto test_clock = base::MakeUnique<base::SimpleTestClock>();
-  test_clock->SetNow(base::Time::Now());
-  base::SimpleTestClock* clock = test_clock.get();
-  map->SetClockForTesting(std::move(test_clock));
+  base::SimpleTestClock test_clock;
+  test_clock.SetNow(base::Time::Now());
+  map->SetClockForTesting(&test_clock);
 
   ContentSettingsForOneType host_settings;
 
@@ -1757,8 +1590,8 @@ TEST_F(HostContentSettingsMapTest, ClearSettingsWithTimePredicate) {
                                      std::string(), CONTENT_SETTING_BLOCK);
 
   // Make sure that the timestamp for url1 is different from |t|.
-  clock->Advance(base::TimeDelta::FromSeconds(1));
-  base::Time t = clock->Now();
+  test_clock.Advance(base::TimeDelta::FromSeconds(1));
+  base::Time t = test_clock.Now();
 
   // Add setting for url2.
   map->SetContentSettingDefaultScope(url2, GURL(), CONTENT_SETTINGS_TYPE_POPUPS,
@@ -1795,16 +1628,12 @@ TEST_F(HostContentSettingsMapTest, ClearSettingsWithTimePredicate) {
 }
 
 TEST_F(HostContentSettingsMapTest, GetSettingLastModified) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kTabsInCbd);
-
   TestingProfile profile;
   auto* map = HostContentSettingsMapFactory::GetForProfile(&profile);
 
-  auto test_clock = base::MakeUnique<base::SimpleTestClock>();
-  test_clock->SetNow(base::Time::Now());
-  base::SimpleTestClock* clock = test_clock.get();
-  map->SetClockForTesting(std::move(test_clock));
+  base::SimpleTestClock test_clock;
+  test_clock.SetNow(base::Time::Now());
+  map->SetClockForTesting(&test_clock);
 
   ContentSettingsForOneType host_settings;
 
@@ -1824,9 +1653,9 @@ TEST_F(HostContentSettingsMapTest, GetSettingLastModified) {
   t = map->GetSettingLastModifiedDate(pattern,
                                       ContentSettingsPattern::Wildcard(),
                                       CONTENT_SETTINGS_TYPE_POPUPS);
-  EXPECT_EQ(t, clock->Now());
+  EXPECT_EQ(t, test_clock.Now());
 
-  clock->Advance(base::TimeDelta::FromSeconds(1));
+  test_clock.Advance(base::TimeDelta::FromSeconds(1));
   // Modify setting.
   map->SetContentSettingDefaultScope(url, GURL(), CONTENT_SETTINGS_TYPE_POPUPS,
                                      std::string(), CONTENT_SETTING_ALLOW);
@@ -1834,29 +1663,64 @@ TEST_F(HostContentSettingsMapTest, GetSettingLastModified) {
   t = map->GetSettingLastModifiedDate(pattern,
                                       ContentSettingsPattern::Wildcard(),
                                       CONTENT_SETTINGS_TYPE_POPUPS);
-  EXPECT_EQ(t, clock->Now());
+  EXPECT_EQ(t, test_clock.Now());
 }
 
-TEST_F(HostContentSettingsMapTest, LastModifiedIsNotRecordedWhenDisabled) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(features::kTabsInCbd);
-
+TEST_F(HostContentSettingsMapTest, LastModifiedMultipleModifiableProviders) {
   TestingProfile profile;
   auto* map = HostContentSettingsMapFactory::GetForProfile(&profile);
-  ContentSettingsForOneType host_settings;
-
   GURL url("https://www.google.com/");
   ContentSettingsPattern pattern =
       ContentSettingsPattern::FromURLNoWildcard(url);
 
-  // Add setting for url.
-  map->SetContentSettingDefaultScope(url, GURL(), CONTENT_SETTINGS_TYPE_POPUPS,
-                                     std::string(), CONTENT_SETTING_BLOCK);
+  base::Time t1 = base::Time::Now();
+  auto test_clock = std::make_unique<base::SimpleTestClock>();
+  test_clock->SetNow(t1);
 
-  base::Time t = map->GetSettingLastModifiedDate(
-      pattern, ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_POPUPS);
-  EXPECT_EQ(base::Time(), t);
+  base::SimpleTestClock* clock = test_clock.get();
+  clock->Advance(base::TimeDelta::FromSeconds(1));
+  base::Time t2 = clock->Now();
+
+  // Register a provider which reports a modification time of t1.
+  std::unique_ptr<MockUserModifiableProvider> provider =
+      std::make_unique<MockUserModifiableProvider>();
+  EXPECT_CALL(*provider, GetWebsiteSettingLastModified(
+                             _, _, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, _))
+      .WillOnce(Return(t1));
+  MockUserModifiableProvider* weak_provider = provider.get();
+  map->RegisterUserModifiableProvider(
+      HostContentSettingsMap::PROVIDER_FOR_TESTS, std::move(provider));
+
+  // Register another provider which reports a modification time of t2.
+  std::unique_ptr<MockUserModifiableProvider> other_provider =
+      std::make_unique<MockUserModifiableProvider>();
+  EXPECT_CALL(*other_provider,
+              GetWebsiteSettingLastModified(
+                  _, _, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, _))
+      .WillRepeatedly(Return(t2));
+  MockUserModifiableProvider* weak_other_provider = other_provider.get();
+  map->RegisterUserModifiableProvider(
+      HostContentSettingsMap::OTHER_PROVIDER_FOR_TESTS,
+      std::move(other_provider));
+
+  // Expect the more recent modification time to be reported.
+  EXPECT_EQ(t2, map->GetSettingLastModifiedDate(
+                    pattern, ContentSettingsPattern::Wildcard(),
+                    CONTENT_SETTINGS_TYPE_NOTIFICATIONS));
+
+  // Now have original provider report a more recent modification time.
+  clock->Advance(base::TimeDelta::FromSeconds(1));
+  base::Time t3 = clock->Now();
+  EXPECT_CALL(*weak_provider, GetWebsiteSettingLastModified(
+                                  _, _, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, _))
+      .WillOnce(Return(t3));
+
+  // Expect the timestamp from the registered provider to be reported now.
+  EXPECT_EQ(t3, map->GetSettingLastModifiedDate(
+                    pattern, ContentSettingsPattern::Wildcard(),
+                    CONTENT_SETTINGS_TYPE_NOTIFICATIONS));
+  weak_provider->RemoveObserver(map);
+  weak_other_provider->RemoveObserver(map);
 }
 
 TEST_F(HostContentSettingsMapTest, CanSetNarrowestSetting) {
@@ -1873,3 +1737,68 @@ TEST_F(HostContentSettingsMapTest, CanSetNarrowestSetting) {
       invalid_url, invalid_url,
       CONTENT_SETTINGS_TYPE_POPUPS));
 }
+
+#if BUILDFLAG(ENABLE_PLUGINS)
+// Test that existing Flash preferences should get copied into the
+// |CONTENT_SETTINGS_TYPE_PLUGINS_DATA| setting on the creation of a new
+// |HostContentSettingsMap|.
+TEST_F(HostContentSettingsMapTest, PluginDataMigration) {
+  TestingProfile profile;
+  // Set a website-specific Flash preference and a pattern exception.
+  std::unique_ptr<base::Value> value = base::JSONReader::Read(
+      "{\"https://urlwithflashchanged.com:443,*\":{\"setting\":1}, "
+      "\"[*.]patternurl.com:443,*\":{\"setting\":1}}");
+  profile.GetPrefs()->Set(GetPrefName(CONTENT_SETTINGS_TYPE_PLUGINS), *value);
+
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+
+  // Check it was copied successfully.
+  const GURL url1("https://urlwithflashchanged.com");
+  EXPECT_NE(nullptr, map->GetWebsiteSetting(url1, url1,
+                                            CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+                                            std::string(), nullptr));
+  // Check other urls were not affected.
+  const GURL url2("https://urlwithflashdefault.com");
+  EXPECT_EQ(nullptr, map->GetWebsiteSetting(url2, url2,
+                                            CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+                                            std::string(), nullptr));
+  // Check patterns are also unaffected.
+  const GURL pattern("[*.]patternurl.com");
+  EXPECT_EQ(nullptr, map->GetWebsiteSetting(pattern, pattern,
+                                            CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+                                            std::string(), nullptr));
+}
+
+// If there are existing |CONTENT_SETTINGS_TYPE_PLUGINS_DATA| preferences
+// stored, check we skip the migration.
+TEST_F(HostContentSettingsMapTest, PluginDataMigrated) {
+  TestingProfile profile;
+  // Set a website-specific Flash preference and another preference indicating
+  // that the Flash setting has changed for a different website.
+  std::unique_ptr<base::Value> value = base::JSONReader::Read(
+      "{\"https://unmigratedurl.com:443,*\":{\"setting\":1}}");
+  profile.GetPrefs()->Set(GetPrefName(CONTENT_SETTINGS_TYPE_PLUGINS), *value);
+  value = base::JSONReader::Read(
+      "{\"https://"
+      "example.com:443,*\":{\"setting\":{\"flashPreviouslyChanged\":true}}}");
+  profile.GetPrefs()->Set(GetPrefName(CONTENT_SETTINGS_TYPE_PLUGINS_DATA),
+                          *value);
+
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+
+  // Check it was copied successfully.
+  const GURL flash_data_url("https://example.com");
+  EXPECT_NE(nullptr, map->GetWebsiteSetting(flash_data_url, flash_data_url,
+                                            CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+                                            std::string(), nullptr));
+  // Check the migration code was not run (i.e. the other Flash preference set
+  // above was not migrated). Theoretically this should never happen, but this
+  // scenario is useful for testing.
+  const GURL unmigrated_url("https://unmigratedurl.com");
+  EXPECT_EQ(nullptr, map->GetWebsiteSetting(unmigrated_url, unmigrated_url,
+                                            CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+                                            std::string(), nullptr));
+}
+#endif

@@ -31,13 +31,14 @@
 #ifndef UserMediaRequest_h
 #define UserMediaRequest_h
 
-#include "core/dom/SuspendableObject.h"
+#include "bindings/modules/v8/v8_navigator_user_media_error_callback.h"
+#include "bindings/modules/v8/v8_navigator_user_media_success_callback.h"
+#include "core/dom/PausableObject.h"
 #include "modules/ModulesExport.h"
-#include "modules/mediastream/NavigatorUserMediaErrorCallback.h"
-#include "modules/mediastream/NavigatorUserMediaSuccessCallback.h"
 #include "platform/mediastream/MediaStreamSource.h"
 #include "platform/wtf/Forward.h"
 #include "public/platform/WebMediaConstraints.h"
+#include "public/web/WebUserMediaRequest.h"
 
 namespace blink {
 
@@ -53,37 +54,56 @@ class MODULES_EXPORT UserMediaRequest final
   USING_GARBAGE_COLLECTED_MIXIN(UserMediaRequest);
 
  public:
+  class Callbacks : public GarbageCollectedFinalized<Callbacks> {
+   public:
+    virtual ~Callbacks() = default;
+
+    virtual void OnSuccess(ScriptWrappable* callback_this_value,
+                           MediaStream*) = 0;
+    virtual void OnError(ScriptWrappable* callback_this_value,
+                         DOMExceptionOrOverconstrainedError) = 0;
+
+    virtual void Trace(blink::Visitor*) {}
+
+   protected:
+    Callbacks() = default;
+  };
+
+  class V8Callbacks;
+
   static UserMediaRequest* Create(ExecutionContext*,
                                   UserMediaController*,
                                   const MediaStreamConstraints& options,
-                                  NavigatorUserMediaSuccessCallback*,
-                                  NavigatorUserMediaErrorCallback*,
+                                  Callbacks*,
+                                  MediaErrorState&);
+  static UserMediaRequest* Create(ExecutionContext*,
+                                  UserMediaController*,
+                                  const MediaStreamConstraints& options,
+                                  V8NavigatorUserMediaSuccessCallback*,
+                                  V8NavigatorUserMediaErrorCallback*,
                                   MediaErrorState&);
   static UserMediaRequest* CreateForTesting(const WebMediaConstraints& audio,
                                             const WebMediaConstraints& video);
   virtual ~UserMediaRequest();
 
-  NavigatorUserMediaSuccessCallback* SuccessCallback() const {
-    return success_callback_.Get();
-  }
-  NavigatorUserMediaErrorCallback* ErrorCallback() const {
-    return error_callback_.Get();
-  }
   Document* OwnerDocument();
 
   void Start();
 
   void Succeed(MediaStreamDescriptor*);
-  void FailPermissionDenied(const String& message);
   void FailConstraint(const String& constraint_name, const String& message);
-  void FailUASpecific(const String& name,
-                      const String& message,
-                      const String& constraint_name);
+  void Fail(WebUserMediaRequest::Error name, const String& message);
 
   bool Audio() const;
   bool Video() const;
   WebMediaConstraints AudioConstraints() const;
   WebMediaConstraints VideoConstraints() const;
+
+  // Flag tied to whether or not the similarly named Origin Trial is
+  // enabled. Will be removed at end of trial. See: http://crbug.com/789152.
+  bool ShouldDisableHardwareNoiseSuppression() const;
+
+  bool ShouldEnableExperimentalHardwareEchoCancellation() const;
 
   // errorMessage is only set if requestIsPrivilegedContext() returns |false|.
   // Caller is responsible for properly setting errors and canceling request.
@@ -92,23 +112,23 @@ class MODULES_EXPORT UserMediaRequest final
   // ContextLifecycleObserver
   void ContextDestroyed(ExecutionContext*) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   UserMediaRequest(ExecutionContext*,
                    UserMediaController*,
                    WebMediaConstraints audio,
                    WebMediaConstraints video,
-                   NavigatorUserMediaSuccessCallback*,
-                   NavigatorUserMediaErrorCallback*);
+                   Callbacks*);
 
   WebMediaConstraints audio_;
   WebMediaConstraints video_;
+  bool should_disable_hardware_noise_suppression_;
+  bool should_enable_experimental_hw_echo_cancellation_;
 
   Member<UserMediaController> controller_;
 
-  Member<NavigatorUserMediaSuccessCallback> success_callback_;
-  Member<NavigatorUserMediaErrorCallback> error_callback_;
+  Member<Callbacks> callbacks_;
 };
 
 }  // namespace blink

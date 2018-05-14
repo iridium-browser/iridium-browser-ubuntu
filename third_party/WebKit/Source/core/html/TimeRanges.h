@@ -39,9 +39,7 @@ namespace blink {
 
 class ExceptionState;
 
-class CORE_EXPORT TimeRanges final
-    : public GarbageCollectedFinalized<TimeRanges>,
-      public ScriptWrappable {
+class CORE_EXPORT TimeRanges final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -50,7 +48,7 @@ class CORE_EXPORT TimeRanges final
     DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
    public:
-    Range() {}
+    Range() = default;
     Range(double start, double end) {
       start_ = start;
       end_ = end;
@@ -107,10 +105,8 @@ class CORE_EXPORT TimeRanges final
   double Nearest(double new_playback_position,
                  double current_playback_position) const;
 
-  DEFINE_INLINE_TRACE() {}
-
  private:
-  TimeRanges() {}
+  TimeRanges() = default;
 
   TimeRanges(double start, double end);
 

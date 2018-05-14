@@ -13,12 +13,15 @@
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/history/content/browser/history_context_helper.h"
+#include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_service.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/frame_navigate_params.h"
+#include "ui/base/page_transition_types.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/background_tab_manager.h"
@@ -45,9 +48,7 @@ const char kChromeContentSuggestionsReferrer[] =
 }  // namespace
 
 HistoryTabHelper::HistoryTabHelper(WebContents* web_contents)
-    : content::WebContentsObserver(web_contents),
-      received_page_title_(false) {
-}
+    : content::WebContentsObserver(web_contents) {}
 
 HistoryTabHelper::~HistoryTabHelper() {
 }
@@ -57,12 +58,6 @@ void HistoryTabHelper::UpdateHistoryForNavigation(
   history::HistoryService* hs = GetHistoryService();
   if (hs)
     GetHistoryService()->AddPage(add_page_args);
-}
-
-void HistoryTabHelper::UpdateHistoryPageTitle(const NavigationEntry& entry) {
-  history::HistoryService* hs = GetHistoryService();
-  if (hs)
-    hs->SetPageTitle(entry.GetVirtualURL(), entry.GetTitleForDisplay());
 }
 
 history::HistoryAddPageArgs
@@ -76,12 +71,25 @@ HistoryTabHelper::CreateHistoryAddPageArgs(
   const bool consider_for_ntp_most_visited =
       navigation_handle->GetReferrer().url != kChromeContentSuggestionsReferrer;
 
+  const bool status_code_is_error =
+      navigation_handle->GetResponseHeaders() &&
+      (navigation_handle->GetResponseHeaders()->response_code() >= 400) &&
+      (navigation_handle->GetResponseHeaders()->response_code() < 600);
+  // Top-level frame navigations are visible; everything else is hidden.
+  // Also hide top-level navigations that result in an error in order to
+  // prevent the omnibox from suggesting URLs that have never been navigated
+  // to successfully.  (If a top-level navigation to the URL succeeds at some
+  // point, the URL will be unhidden and thus eligible to be suggested by the
+  // omnibox.)
+  const bool hidden =
+      !ui::PageTransitionIsMainFrame(navigation_handle->GetPageTransition()) ||
+      status_code_is_error;
   history::HistoryAddPageArgs add_page_args(
       navigation_handle->GetURL(), timestamp,
-      history::ContextIDForWebContents(web_contents()),
-      nav_entry_id, navigation_handle->GetReferrer().url,
+      history::ContextIDForWebContents(web_contents()), nav_entry_id,
+      navigation_handle->GetReferrer().url,
       navigation_handle->GetRedirectChain(),
-      navigation_handle->GetPageTransition(), history::SOURCE_BROWSED,
+      navigation_handle->GetPageTransition(), hidden, history::SOURCE_BROWSED,
       navigation_handle->DidReplaceEntry(), consider_for_ntp_most_visited);
   if (ui::PageTransitionIsMainFrame(navigation_handle->GetPageTransition()) &&
       virtual_url != navigation_handle->GetURL()) {
@@ -104,8 +112,7 @@ void HistoryTabHelper::DidFinishNavigation(
     return;
 
   if (navigation_handle->IsInMainFrame()) {
-    // Allow the new page to set the title again.
-    received_page_title_ = false;
+    is_loading_ = true;
   } else if (!navigation_handle->HasSubframeNavigationEntryCommitted()) {
     // Filter out unwanted URLs. We don't add auto-subframe URLs that don't
     // change which NavigationEntry is current. They are a large part of history
@@ -152,7 +159,7 @@ void HistoryTabHelper::DidFinishNavigation(
     return;
   }
 #else
-  // Don't update history if this web contents isn't associatd with a tab.
+  // Don't update history if this web contents isn't associated with a tab.
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
   if (!browser || browser->is_app())
     return;
@@ -161,13 +168,29 @@ void HistoryTabHelper::DidFinishNavigation(
   UpdateHistoryForNavigation(add_page_args);
 }
 
-void HistoryTabHelper::TitleWasSet(NavigationEntry* entry, bool explicit_set) {
-  if (received_page_title_)
+void HistoryTabHelper::DidFinishLoad(
+    content::RenderFrameHost* render_frame_host,
+    const GURL& validated_url) {
+  if (render_frame_host->GetParent())
     return;
 
-  if (entry) {
-    UpdateHistoryPageTitle(*entry);
-    received_page_title_ = explicit_set;
+  is_loading_ = false;
+  last_load_completion_ = base::TimeTicks::Now();
+}
+
+void HistoryTabHelper::TitleWasSet(NavigationEntry* entry) {
+  if (!entry)
+    return;
+
+  // Only store page titles into history if they were set while the page was
+  // loading or during a brief span after load is complete. This fixes the case
+  // where a page uses a title change to alert a user of a situation but that
+  // title change ends up saved in history.
+  if (is_loading_ || (base::TimeTicks::Now() - last_load_completion_ <
+                      history::GetTitleSettingWindow())) {
+    history::HistoryService* hs = GetHistoryService();
+    if (hs)
+      hs->SetPageTitle(entry->GetVirtualURL(), entry->GetTitleForDisplay());
   }
 }
 

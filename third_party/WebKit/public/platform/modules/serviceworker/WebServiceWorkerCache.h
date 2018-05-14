@@ -5,15 +5,15 @@
 #ifndef WebServiceWorkerCache_h
 #define WebServiceWorkerCache_h
 
+#include <memory>
+#include <utility>
 #include "public/platform/WebCallbacks.h"
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebVector.h"
-#include "public/platform/modules/serviceworker/WebServiceWorkerCacheError.h"
+#include "public/platform/modules/cache_storage/cache_storage.mojom-shared.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerRequest.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponse.h"
-#include <memory>
-#include <utility>
 
 namespace blink {
 
@@ -23,17 +23,18 @@ namespace blink {
 // longer in use.
 class WebServiceWorkerCache {
  public:
-  using CacheMatchCallbacks =
-      WebCallbacks<const WebServiceWorkerResponse&, WebServiceWorkerCacheError>;
+  using CacheMatchCallbacks = WebCallbacks<const WebServiceWorkerResponse&,
+                                           blink::mojom::CacheStorageError>;
   using CacheWithResponsesCallbacks =
       WebCallbacks<const WebVector<WebServiceWorkerResponse>&,
-                   WebServiceWorkerCacheError>;
+                   blink::mojom::CacheStorageError>;
   using CacheWithRequestsCallbacks =
       WebCallbacks<const WebVector<WebServiceWorkerRequest>&,
-                   WebServiceWorkerCacheError>;
-  using CacheBatchCallbacks = WebCallbacks<void, WebServiceWorkerCacheError>;
+                   blink::mojom::CacheStorageError>;
+  using CacheBatchCallbacks =
+      WebCallbacks<void, blink::mojom::CacheStorageError>;
 
-  virtual ~WebServiceWorkerCache() {}
+  virtual ~WebServiceWorkerCache() = default;
 
   // Options that affect the scope of searches.
   struct QueryParams {
@@ -62,7 +63,7 @@ class WebServiceWorkerCache {
     QueryParams match_params;
   };
 
-  WebServiceWorkerCache() {}
+  WebServiceWorkerCache() = default;
 
   // Ownership of the Cache*Callbacks methods passes to the
   // WebServiceWorkerCache instance, which will delete it after calling

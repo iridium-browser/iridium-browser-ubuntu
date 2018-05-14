@@ -6,14 +6,15 @@
 
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "build/build_config.h"
 #include "public/platform/WebThread.h"
 
 namespace blink {
 namespace scheduler {
 
-FakeRendererScheduler::FakeRendererScheduler() {}
+FakeRendererScheduler::FakeRendererScheduler() = default;
 
-FakeRendererScheduler::~FakeRendererScheduler() {}
+FakeRendererScheduler::~FakeRendererScheduler() = default;
 
 std::unique_ptr<blink::WebThread> FakeRendererScheduler::CreateMainThread() {
   return nullptr;
@@ -30,7 +31,7 @@ FakeRendererScheduler::CompositorTaskRunner() {
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
-FakeRendererScheduler::LoadingTaskRunner() {
+FakeRendererScheduler::InputTaskRunner() {
   return nullptr;
 }
 
@@ -40,7 +41,7 @@ FakeRendererScheduler::IdleTaskRunner() {
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
-FakeRendererScheduler::TimerTaskRunner() {
+FakeRendererScheduler::IPCTaskRunner() {
   return nullptr;
 }
 
@@ -49,7 +50,7 @@ FakeRendererScheduler::NewRenderWidgetSchedulingState() {
   return nullptr;
 }
 
-void FakeRendererScheduler::WillBeginFrame(const cc::BeginFrameArgs& args) {}
+void FakeRendererScheduler::WillBeginFrame(const viz::BeginFrameArgs& args) {}
 
 void FakeRendererScheduler::BeginFrameNotExpectedSoon() {}
 
@@ -80,15 +81,22 @@ void FakeRendererScheduler::SetRendererHidden(bool hidden) {}
 
 void FakeRendererScheduler::SetRendererBackgrounded(bool backgrounded) {}
 
-void FakeRendererScheduler::SuspendRenderer() {}
+void FakeRendererScheduler::SetSchedulerKeepActive(bool keep_active) {}
 
-void FakeRendererScheduler::ResumeRenderer() {}
+std::unique_ptr<FakeRendererScheduler::RendererPauseHandle>
+FakeRendererScheduler::PauseRenderer() {
+  return nullptr;
+}
+
+#if defined(OS_ANDROID)
+void FakeRendererScheduler::PauseTimersForAndroidWebView() {}
+
+void FakeRendererScheduler::ResumeTimersForAndroidWebView() {}
+#endif
 
 void FakeRendererScheduler::AddPendingNavigation(NavigatingFrameType type) {}
 
 void FakeRendererScheduler::RemovePendingNavigation(NavigatingFrameType type) {}
-
-void FakeRendererScheduler::OnNavigate() {}
 
 bool FakeRendererScheduler::ShouldYieldForHighPriorityWork() {
   return false;
@@ -106,16 +114,7 @@ void FakeRendererScheduler::RemoveTaskObserver(
 
 void FakeRendererScheduler::Shutdown() {}
 
-void FakeRendererScheduler::SuspendTimerQueue() {}
-
-void FakeRendererScheduler::ResumeTimerQueue() {}
-
-void FakeRendererScheduler::VirtualTimePaused() {}
-
-void FakeRendererScheduler::VirtualTimeResumed() {}
-
-void FakeRendererScheduler::SetTimerQueueSuspensionWhenBackgroundedEnabled(
-    bool enabled) {}
+void FakeRendererScheduler::SetStoppingWhenBackgroundedEnabled(bool enabled) {}
 
 void FakeRendererScheduler::SetTopLevelBlameContext(
     base::trace_event::BlameContext* blame_context) {}
@@ -125,6 +124,14 @@ void FakeRendererScheduler::SetRAILModeObserver(RAILModeObserver* observer) {}
 bool FakeRendererScheduler::MainThreadSeemsUnresponsive(
     base::TimeDelta main_thread_responsiveness_threshold) {
   return false;
+}
+
+void FakeRendererScheduler::SetRendererProcessType(RendererProcessType type) {}
+
+WebScopedVirtualTimePauser
+FakeRendererScheduler::CreateWebScopedVirtualTimePauser(
+    WebScopedVirtualTimePauser::VirtualTaskDuration duration) {
+  return WebScopedVirtualTimePauser(nullptr, duration);
 }
 
 }  // namespace scheduler

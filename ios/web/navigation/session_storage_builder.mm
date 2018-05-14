@@ -8,9 +8,6 @@
 
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
-#include "base/memory/ptr_util.h"
-#import "ios/web/navigation/crw_session_controller+private_constructors.h"
-#import "ios/web/navigation/crw_session_controller.h"
 #import "ios/web/navigation/legacy_navigation_manager_impl.h"
 #import "ios/web/navigation/navigation_item_impl.h"
 #import "ios/web/navigation/navigation_item_storage_builder.h"
@@ -24,14 +21,6 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-// CRWSessionController's readonly properties redefined as readwrite.  These
-// will be removed and NavigationManagerImpl's ivars will be written directly
-// as this functionality moves from CRWSessionController to
-// NavigationManagerImpl;
-@interface CRWSessionController (ExposedForSerialization)
-@property(nonatomic, readwrite, assign) NSInteger previousItemIndex;
-@end
 
 namespace web {
 
@@ -54,7 +43,6 @@ CRWSessionStorage* SessionStorageBuilder::BuildStorage(
        ++index) {
     web::NavigationItemImpl* item =
         navigation_manager->GetNavigationItemImplAtIndex(index);
-    ;
     [item_storages addObject:item_storage_builder.BuildStorage(item)];
   }
   session_storage.itemStorages = item_storages;
@@ -82,22 +70,17 @@ void SessionStorageBuilder::ExtractSessionState(
         item_storage_builder.BuildNavigationItemImpl(item_storages[index]);
     items[index] = std::move(item_impl);
   }
-  NSUInteger last_committed_item_index = storage.lastCommittedItemIndex;
-  base::scoped_nsobject<CRWSessionController> session_controller(
-      [[CRWSessionController alloc]
-            initWithBrowserState:nullptr
-                 navigationItems:std::move(items)
-          lastCommittedItemIndex:last_committed_item_index]);
-  [session_controller setPreviousItemIndex:storage.previousItemIndex];
-
-  web_state->navigation_manager_->SetSessionController(session_controller);
+  web_state->navigation_manager_->Restore(storage.lastCommittedItemIndex,
+                                          std::move(items));
+  web_state->navigation_manager_->SetPreviousItemIndex(
+      storage.previousItemIndex);
 
   SessionCertificatePolicyCacheStorageBuilder cert_builder;
   std::unique_ptr<SessionCertificatePolicyCacheImpl> cert_policy_cache =
       cert_builder.BuildSessionCertificatePolicyCache(
           storage.certPolicyCacheStorage);
   if (!cert_policy_cache)
-    cert_policy_cache = base::MakeUnique<SessionCertificatePolicyCacheImpl>();
+    cert_policy_cache = std::make_unique<SessionCertificatePolicyCacheImpl>();
   web_state->certificate_policy_cache_ = std::move(cert_policy_cache);
   web::SerializableUserDataManager::FromWebState(web_state)
       ->AddSerializableUserData(storage.userData);

@@ -8,18 +8,36 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/flags.h"
+#include "rtc_base/flags.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "webrtc/rtc_base/checks.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/stringutils.h"
 
 #if defined(WEBRTC_WIN)
-#include "webrtc/rtc_base/win32.h"
+#include <windows.h>
 #include <shellapi.h>
 #endif
+
+
+namespace {
+bool FlagEq(const char* arg, const char* flag) {
+  // Compare two flags for equality.
+  // 'arg' is the name of a flag passed via the command line and 'flag' is the
+  // name of a flag defined with the DEFINE_* macros.
+  // We compare the flags for equality, considering hyphens (-) and
+  // underscores (_) to be equivalent, so that --flag-name and --flag_name both
+  // match with --flag_name.
+  while (*arg != '\0' && (*arg == *flag || (*arg == '-' && *flag == '_'))) {
+    ++arg;
+    ++flag;
+  }
+  return *arg == '\0' && *flag == '\0';
+}
+}  // namespace
 
 namespace rtc {
 // -----------------------------------------------------------------------------
@@ -130,7 +148,7 @@ void FlagList::Print(const char* file, bool print_current_value) {
 
 Flag* FlagList::Lookup(const char* name) {
   Flag* f = list_;
-  while (f != nullptr && strcmp(name, f->name()) != 0)
+  while (f != nullptr && !FlagEq(name, f->name()))
     f = f->next();
   return f;
 }
@@ -149,7 +167,7 @@ void FlagList::SplitArgument(const char* arg,
     arg++;  // remove 1st '-'
     if (*arg == '-')
       arg++;  // remove 2nd '-'
-    if (arg[0] == 'n' && arg[1] == 'o') {
+    if (arg[0] == 'n' && arg[1] == 'o' && Lookup(arg + 2)) {
       arg += 2;  // remove "no"
       *is_bool = true;
     }

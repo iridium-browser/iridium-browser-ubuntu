@@ -62,15 +62,16 @@ class BluetoothTestBase : public testing::Test {
     INDICATE,
   };
 
-  static const std::string kTestAdapterName;
-  static const std::string kTestAdapterAddress;
+  static const char kTestAdapterName[];
+  static const char kTestAdapterAddress[];
 
-  static const std::string kTestDeviceName;
-  static const std::string kTestDeviceNameEmpty;
+  static const char kTestDeviceName[];
+  static const char kTestDeviceNameEmpty[];
+  static const char kTestDeviceNameU2f[];
 
-  static const std::string kTestDeviceAddress1;
-  static const std::string kTestDeviceAddress2;
-  static const std::string kTestDeviceAddress3;
+  static const char kTestDeviceAddress1[];
+  static const char kTestDeviceAddress2[];
+  static const char kTestDeviceAddress3[];
 
   // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.device.bluetooth.test
   enum class TestRSSI {
@@ -88,23 +89,28 @@ class BluetoothTestBase : public testing::Test {
   };
 
   // Services
-  static const std::string kTestUUIDGenericAccess;
-  static const std::string kTestUUIDGenericAttribute;
-  static const std::string kTestUUIDImmediateAlert;
-  static const std::string kTestUUIDLinkLoss;
-  static const std::string kTestUUIDHeartRate;
+  static const char kTestUUIDGenericAccess[];
+  static const char kTestUUIDGenericAttribute[];
+  static const char kTestUUIDImmediateAlert[];
+  static const char kTestUUIDLinkLoss[];
+  static const char kTestUUIDHeartRate[];
+  static const char kTestUUIDU2f[];
   // Characteristics
   // The following three characteristics are for kTestUUIDGenericAccess.
-  static const std::string kTestUUIDDeviceName;
-  static const std::string kTestUUIDAppearance;
-  static const std::string kTestUUIDReconnectionAddress;
+  static const char kTestUUIDDeviceName[];
+  static const char kTestUUIDAppearance[];
+  static const char kTestUUIDReconnectionAddress[];
   // This characteristic is for kTestUUIDHeartRate.
-  static const std::string kTestUUIDHeartRateMeasurement;
+  static const char kTestUUIDHeartRateMeasurement[];
+  // This characteristic is for kTestUUIDU2f.
+  static const char kTestUUIDU2fControlPointLength[];
   // Descriptors
-  static const std::string kTestUUIDCharacteristicUserDescription;
-  static const std::string kTestUUIDClientCharacteristicConfiguration;
-  static const std::string kTestUUIDServerCharacteristicConfiguration;
-  static const std::string kTestUUIDCharacteristicPresentationFormat;
+  static const char kTestUUIDCharacteristicUserDescription[];
+  static const char kTestUUIDClientCharacteristicConfiguration[];
+  static const char kTestUUIDServerCharacteristicConfiguration[];
+  static const char kTestUUIDCharacteristicPresentationFormat[];
+  // Manufacturer data
+  static const unsigned short kTestManufacturerId;
 
   BluetoothTestBase();
   ~BluetoothTestBase() override;
@@ -160,6 +166,7 @@ class BluetoothTestBase : public testing::Test {
   //      RSSI:              kTestRSSI1
   //      Advertised UUIDs: {kTestUUIDGenericAccess, kTestUUIDGenericAttribute}
   //      Service Data:     {kTestUUIDHeartRate: [1]}
+  //      ManufacturerData: {kTestManufacturerId: [1, 2, 3, 4]}
   //      Tx Power:          kTestTxPower1
   //   2: Name: kTestDeviceName
   //      Address:           kTestDeviceAddress1
@@ -167,18 +174,21 @@ class BluetoothTestBase : public testing::Test {
   //      Advertised UUIDs: {kTestUUIDImmediateAlert, kTestUUIDLinkLoss}
   //      Service Data:     {kTestUUIDHeartRate: [],
   //                         kTestUUIDImmediateAlert: [0, 2]}
+  //      ManufacturerData: {kTestManufacturerId: []}
   //      Tx Power:          kTestTxPower2
   //   3: Name:    kTestDeviceNameEmpty
   //      Address: kTestDeviceAddress1
   //      RSSI:    kTestRSSI3
   //      No Advertised UUIDs
   //      No Service Data
+  //      No Manufacturer Data
   //      No Tx Power
   //   4: Name:    kTestDeviceNameEmpty
   //      Address: kTestDeviceAddress2
   //      RSSI:    kTestRSSI4
   //      No Advertised UUIDs
   //      No Service Data
+  //      No Manufacturer Data
   //      No Tx Power
   //   5: No name device
   //      Address: kTestDeviceAddress1
@@ -191,8 +201,17 @@ class BluetoothTestBase : public testing::Test {
   //      RSSI:    kTestRSSI1,
   //      No Advertised UUIDs
   //      No Service Data
+  //      No Manufacturer Data
   //      No Tx Power
   //      Supports BR/EDR and LE.
+  //   7: Name:    kTestDeviceNameU2f
+  //      Address: kTestDeviceAddress1
+  //      RSSI:    kTestRSSI1,
+  //      Advertised UUIDs: {kTestUUIDU2fControlPointLength}
+  //      Service Data:     {kTestUUIDU2fControlPointLength: [0, 20]}
+  //      No Manufacturer Data
+  //      No Tx Power
+  //      Supports LE.
   virtual BluetoothDevice* SimulateLowEnergyDevice(int device_ordinal);
 
   // Simulates a connected low energy device. Used before starting a low energy

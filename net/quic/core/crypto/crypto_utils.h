@@ -9,7 +9,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 
 #include "base/macros.h"
 #include "net/quic/core/crypto/crypto_handshake.h"
@@ -18,7 +17,9 @@
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_time.h"
 #include "net/quic/platform/api/quic_export.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_string_piece.h"
+#include "third_party/boringssl/src/include/openssl/evp.h"
 
 namespace net {
 
@@ -68,6 +69,22 @@ class QUIC_EXPORT_PRIVATE CryptoUtils {
     DiversificationNonce* nonce_;
   };
 
+  // Implements the HKDF-Expand-Label function as defined in section 7.1 of TLS
+  // 1.3. The HKDF-Expand-Label definition assumes that the TLS connection's PRF
+  // will be used as the Hash function for HKDF; in this function it is
+  // explicitly passed in as |prf|. The inputs to HKDF-Expand-Label are as
+  // follows:
+  //
+  // Secret: |secret|
+  // Label: |label|
+  // Context: zero-length context
+  // Length: |out_len|
+  static std::vector<uint8_t> HkdfExpandLabel(
+      const EVP_MD* prf,
+      const std::vector<uint8_t>& secret,
+      const QuicString& label,
+      size_t out_len);
+
   // Generates the connection nonce. The nonce is formed as:
   //   <4 bytes> current time
   //   <8 bytes> |orbit| (or random if |orbit| is empty)
@@ -75,7 +92,7 @@ class QUIC_EXPORT_PRIVATE CryptoUtils {
   static void GenerateNonce(QuicWallTime now,
                             QuicRandom* random_generator,
                             QuicStringPiece orbit,
-                            std::string* nonce);
+                            QuicString* nonce);
 
   // DeriveKeys populates |crypters->encrypter|, |crypters->decrypter|, and
   // |subkey_secret| (optional -- may be null) given the contents of
@@ -97,11 +114,11 @@ class QUIC_EXPORT_PRIVATE CryptoUtils {
                          QuicTag aead,
                          QuicStringPiece client_nonce,
                          QuicStringPiece server_nonce,
-                         const std::string& hkdf_input,
+                         const QuicString& hkdf_input,
                          Perspective perspective,
                          Diversification diversification,
                          CrypterPair* crypters,
-                         std::string* subkey_secret);
+                         QuicString* subkey_secret);
 
   // Performs key extraction to derive a new secret of |result_len| bytes
   // dependent on |subkey_secret|, |label|, and |context|. Returns false if the
@@ -111,7 +128,7 @@ class QUIC_EXPORT_PRIVATE CryptoUtils {
                                    QuicStringPiece label,
                                    QuicStringPiece context,
                                    size_t result_len,
-                                   std::string* result);
+                                   QuicString* result);
 
   // Computes the FNV-1a hash of the provided DER-encoded cert for use in the
   // XLCT tag.
@@ -124,8 +141,8 @@ class QUIC_EXPORT_PRIVATE CryptoUtils {
   // code and sets |error_details|.
   static QuicErrorCode ValidateServerHello(
       const CryptoHandshakeMessage& server_hello,
-      const QuicVersionVector& negotiated_versions,
-      std::string* error_details);
+      const QuicTransportVersionVector& negotiated_versions,
+      QuicString* error_details);
 
   // Validates that |client_hello| is actually a CHLO and that this is not part
   // of a downgrade attack.
@@ -135,9 +152,9 @@ class QUIC_EXPORT_PRIVATE CryptoUtils {
   // code and sets |error_details|.
   static QuicErrorCode ValidateClientHello(
       const CryptoHandshakeMessage& client_hello,
-      QuicVersion version,
-      const QuicVersionVector& supported_versions,
-      std::string* error_details);
+      QuicTransportVersion version,
+      const QuicTransportVersionVector& supported_versions,
+      QuicString* error_details);
 
   // Returns the name of the HandshakeFailureReason as a char*
   static const char* HandshakeFailureReasonToString(
@@ -145,7 +162,7 @@ class QUIC_EXPORT_PRIVATE CryptoUtils {
 
   // Writes a hash of the serialized |message| into |output|.
   static void HashHandshakeMessage(const CryptoHandshakeMessage& message,
-                                   std::string* output,
+                                   QuicString* output,
                                    Perspective perspective);
 
  private:

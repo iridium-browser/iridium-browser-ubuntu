@@ -25,7 +25,8 @@ class ZoomLevelDelegate;
 
 class TestBrowserContext : public BrowserContext {
  public:
-  TestBrowserContext();
+  explicit TestBrowserContext(
+      base::FilePath browser_context_dir_path = base::FilePath());
   ~TestBrowserContext() override;
 
   // Takes ownership of the temporary directory so that it's not deleted when
@@ -56,6 +57,7 @@ class TestBrowserContext : public BrowserContext {
   PushMessagingService* GetPushMessagingService() override;
   SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   PermissionManager* GetPermissionManager() override;
+  BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   BackgroundSyncController* GetBackgroundSyncController() override;
   BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate() override;
   net::URLRequestContextGetter* CreateRequestContext(
@@ -72,6 +74,8 @@ class TestBrowserContext : public BrowserContext {
       bool in_memory) override;
 
  private:
+  // Hold a reference here because BrowserContext owns lifetime.
+  URLRequestInterceptorScopedVector request_interceptors_;
   base::ScopedTempDir browser_context_dir_;
   scoped_refptr<net::URLRequestContextGetter> request_context_;
   std::unique_ptr<MockResourceContext> resource_context_;

@@ -10,7 +10,7 @@
 #include "base/cancelable_callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "components/download/public/task_scheduler.h"
+#include "components/download/public/background_service/task_scheduler.h"
 
 namespace content {
 class BrowserContext;
@@ -28,6 +28,7 @@ class DownloadTaskSchedulerImpl : public download::TaskScheduler {
   void ScheduleTask(download::DownloadTaskType task_type,
                     bool require_unmetered_network,
                     bool require_charging,
+                    int optimal_battery_percentage,
                     long window_start_time_seconds,
                     long window_end_time_seconds) override;
   void CancelTask(download::DownloadTaskType task_type) override;

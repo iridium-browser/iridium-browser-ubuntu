@@ -37,4 +37,35 @@ void CompositorAnimationHost::TakeOverImplOnlyScrollOffsetAnimation(
   animation_host_->scroll_offset_animations().AddTakeoverUpdate(element_id);
 }
 
+void CompositorAnimationHost::SetAnimationCounts(
+    size_t total_animations_count,
+    size_t main_thread_compositable_animations_count,
+    bool current_frame_had_raf,
+    bool next_frame_has_pending_raf) {
+  animation_host_->SetAnimationCounts(
+      total_animations_count, main_thread_compositable_animations_count,
+      current_frame_had_raf, next_frame_has_pending_raf);
+}
+
+size_t CompositorAnimationHost::GetMainThreadAnimationsCountForTesting() {
+  return animation_host_->MainThreadAnimationsCount();
+}
+
+size_t
+CompositorAnimationHost::GetMainThreadCompositableAnimationsCountForTesting() {
+  return animation_host_->MainThreadCompositableAnimationsCount();
+}
+
+size_t CompositorAnimationHost::GetCompositedAnimationsCountForTesting() {
+  return animation_host_->CompositedAnimationsCount();
+}
+
+bool CompositorAnimationHost::CurrentFrameHadRAFForTesting() {
+  return animation_host_->CurrentFrameHadRAF();
+}
+
+bool CompositorAnimationHost::NextFrameHasPendingRAFForTesting() {
+  return animation_host_->NextFrameHasPendingRAF();
+}
+
 }  // namespace blink

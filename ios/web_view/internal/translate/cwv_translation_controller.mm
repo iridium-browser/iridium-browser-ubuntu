@@ -14,6 +14,7 @@
 #import "ios/web_view/internal/cwv_web_view_configuration_internal.h"
 #import "ios/web_view/internal/translate/cwv_translation_language_internal.h"
 #import "ios/web_view/internal/translate/web_view_translate_client.h"
+#include "ios/web_view/internal/web_view_browser_state.h"
 #import "ios/web_view/public/cwv_translation_controller_delegate.h"
 #import "ios/web_view/public/cwv_translation_policy.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -64,20 +65,19 @@ const NSInteger CWVTranslationErrorScriptLoadError =
 
 @synthesize delegate = _delegate;
 @synthesize supportedLanguagesByCode = _supportedLanguagesByCode;
-@synthesize webState = _webState;
 
 #pragma mark - Internal Methods
 
-- (void)setWebState:(web::WebState*)webState {
-  _webState = webState;
+- (instancetype)initWithTranslateClient:
+    (ios_web_view::WebViewTranslateClient*)translateClient {
+  self = [super init];
+  if (self) {
+    _translateClient = translateClient;
+    _translateClient->set_translation_controller(self);
 
-  ios_web_view::WebViewTranslateClient::CreateForWebState(_webState);
-  _translateClient =
-      ios_web_view::WebViewTranslateClient::FromWebState(_webState);
-  _translateClient->set_translation_controller(self);
-  _translatePrefs = _translateClient->translate_manager()
-                        ->translate_client()
-                        ->GetTranslatePrefs();
+    _translatePrefs = _translateClient->GetTranslatePrefs();
+  }
+  return self;
 }
 
 - (void)updateTranslateStep:(translate::TranslateStep)step
@@ -165,7 +165,8 @@ const NSInteger CWVTranslationErrorScriptLoadError =
       break;
     }
     case CWVTranslationPolicyNever: {
-      _translatePrefs->BlockLanguage(languageCode);
+      _translatePrefs->AddToLanguageList(languageCode,
+                                         /*force_blocked=*/true);
       break;
     }
     case CWVTranslationPolicyAuto: {
@@ -235,7 +236,8 @@ const NSInteger CWVTranslationErrorScriptLoadError =
     NSMutableDictionary<NSString*, CWVTranslationLanguage*>*
         supportedLanguagesByCode = [NSMutableDictionary dictionary];
     std::vector<std::string> languageCodes;
-    translate::TranslateDownloadManager::GetSupportedLanguages(&languageCodes);
+    translate::TranslateDownloadManager::GetSupportedLanguages(
+        _translatePrefs->IsTranslateAllowedByPolicy(), &languageCodes);
     std::string locale = translate::TranslateDownloadManager::GetInstance()
                              ->application_locale();
     for (const std::string& languageCode : languageCodes) {

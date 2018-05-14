@@ -24,7 +24,6 @@
 #include "base/win/shortcut.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration_win.h"
-#include "chrome/browser/web_applications/update_shortcut_worker_win.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/shell_util.h"
@@ -53,7 +52,8 @@ void GetImageCheckSum(const gfx::ImageFamily& image, base::MD5Digest* digest) {
     SkBitmap bitmap = it->AsBitmap();
 
     base::StringPiece image_data(
-        reinterpret_cast<const char*>(bitmap.getPixels()), bitmap.getSize());
+        reinterpret_cast<const char*>(bitmap.getPixels()),
+        bitmap.computeByteSize());
     base::MD5Update(&md5_context, image_data);
   }
 
@@ -286,7 +286,7 @@ void GetShortcutLocationsAndDeleteShortcuts(
     const base::string16& title,
     bool* was_pinned_to_taskbar,
     std::vector<base::FilePath>* shortcut_paths) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   // Get all possible locations for shortcuts.
   web_app::ShortcutLocations all_shortcut_locations;
@@ -442,7 +442,7 @@ bool CreatePlatformShortcuts(const base::FilePath& web_app_path,
                              const ShortcutLocations& creation_locations,
                              ShortcutCreationReason creation_reason,
                              const ShortcutInfo& shortcut_info) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   // Nothing to do on Windows for hidden apps.
   if (creation_locations.applications_menu_location == APP_MENU_LOCATION_HIDDEN)
@@ -485,7 +485,7 @@ bool CreatePlatformShortcuts(const base::FilePath& web_app_path,
 void UpdatePlatformShortcuts(const base::FilePath& web_app_path,
                              const base::string16& old_app_title,
                              const ShortcutInfo& shortcut_info) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   // Generates file name to use with persisted ico and shortcut file.
   base::FilePath file_name =
@@ -539,7 +539,7 @@ void DeletePlatformShortcuts(const base::FilePath& web_app_path,
 }
 
 void DeleteAllShortcutsForProfile(const base::FilePath& profile_path) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   GetShortcutLocationsAndDeleteShortcuts(base::FilePath(), profile_path, L"",
                                          NULL, NULL);
 
@@ -605,11 +605,5 @@ base::FilePath GetIconFilePath(const base::FilePath& web_app_path,
 }
 
 }  // namespace internals
-
-void UpdateShortcutForTabContents(content::WebContents* web_contents) {
-  // UpdateShortcutWorker will delete itself when it's done.
-  UpdateShortcutWorker* worker = new UpdateShortcutWorker(web_contents);
-  worker->Run();
-}
 
 }  // namespace web_app

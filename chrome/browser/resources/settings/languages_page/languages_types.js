@@ -14,9 +14,19 @@
  *   removable: boolean,
  *   spellCheckEnabled: boolean,
  *   translateEnabled: boolean,
+ *   isManaged: boolean,
  * }}
  */
-var LanguageState;
+let LanguageState;
+
+/**
+ * Settings and state for a policy-enforced spellcheck language.
+ * @typedef {{
+ *   language: !chrome.languageSettingsPrivate.Language,
+ *   isManaged: boolean,
+ * }}
+ */
+let ForcedLanguageState;
 
 /**
  * Input method data to expose to consumers (Chrome OS only).
@@ -29,7 +39,7 @@ var LanguageState;
  *   currentId: string,
  * }}
  */
-var InputMethodsModel;
+let InputMethodsModel;
 
 /**
  * Languages data to expose to consumers.
@@ -43,21 +53,24 @@ var InputMethodsModel;
  *     from the actually used language (navigator.language). Chrome OS and
  *     Windows only.
  * inputMethods: the InputMethodsModel (Chrome OS only).
+ * forcedSpellCheckLanguages: an array of spellcheck languages that are not in
+ *     |enabled|.
  * @typedef {{
  *   supported: !Array<!chrome.languageSettingsPrivate.Language>,
  *   enabled: !Array<!LanguageState>,
  *   translateTarget: string,
  *   prospectiveUILanguage: (string|undefined),
  *   inputMethods: (!InputMethodsModel|undefined),
+ *   forcedSpellCheckLanguages: !Array<!chrome.languageSettingsPrivate.Language>
  * }}
  */
-var LanguagesModel;
+let LanguagesModel;
 
 /**
  * Helper methods for reading and writing language settings.
  * @interface
  */
-var LanguageHelper = function() {};
+const LanguageHelper = function() {};
 
 LanguageHelper.prototype = {
 
@@ -106,8 +119,8 @@ LanguageHelper.prototype = {
   /**
    * Moves the language in the list of enabled languages by the given offset.
    * @param {string} languageCode
-   * @param {number} offset Negative offset moves the language toward the front
-   *     of the list. A Positive one moves the language toward the back.
+   * @param {boolean} upDirection True if we need to move toward the front,
+   *     false if we need to move toward the back.
    */
   moveLanguage: assertNotReached,
 

@@ -32,13 +32,13 @@
 
 #include "core/CoreExport.h"
 #include "core/layout/LayoutBlockFlow.h"
-#include "platform/wtf/ListHashSet.h"
+#include "platform/wtf/LinkedHashSet.h"
 
 namespace blink {
 
 class LayoutMultiColumnSet;
 
-typedef ListHashSet<LayoutMultiColumnSet*> LayoutMultiColumnSetList;
+typedef LinkedHashSet<LayoutMultiColumnSet*> LayoutMultiColumnSetList;
 
 // Layout state for multicol. To be stored when laying out a block child, so
 // that we can roll back to the initial state if we need to re-lay out said
@@ -65,7 +65,7 @@ class MultiColumnLayoutState {
 class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
  public:
   LayoutFlowThread();
-  ~LayoutFlowThread() override {}
+  ~LayoutFlowThread() override = default;
 
   bool IsLayoutFlowThread() const final { return true; }
   virtual bool IsLayoutMultiColumnFlowThread() const { return false; }
@@ -140,8 +140,9 @@ class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
       TransformState&,
       VisualRectFlags = kDefaultVisualRectFlags) const override;
 
-  LayoutUnit PageLogicalHeightForOffset(LayoutUnit);
-  LayoutUnit PageRemainingLogicalHeightForOffset(LayoutUnit, PageBoundaryRule);
+  LayoutUnit PageLogicalHeightForOffset(LayoutUnit) const;
+  LayoutUnit PageRemainingLogicalHeightForOffset(LayoutUnit,
+                                                 PageBoundaryRule) const;
 
   virtual void ContentWasLaidOut(
       LayoutUnit logical_bottom_in_flow_thread_after_pagination) = 0;
@@ -183,7 +184,7 @@ class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
       LayoutUnit,
       PageBoundaryRule) const = 0;
 
-  virtual const char* GetName() const = 0;
+  const char* GetName() const override = 0;
 
  protected:
   void GenerateColumnSetIntervalTree();

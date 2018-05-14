@@ -20,7 +20,7 @@ FakeNotificationPresenter::FakeNotificationPresenter()
       is_setup_required_notification_shown_(false),
       is_connection_failed_notification_shown_(false) {}
 
-FakeNotificationPresenter::~FakeNotificationPresenter() {}
+FakeNotificationPresenter::~FakeNotificationPresenter() = default;
 
 cryptauth::RemoteDevice&
 FakeNotificationPresenter::GetPotentialHotspotRemoteDevice() {
@@ -54,7 +54,8 @@ void FakeNotificationPresenter::RemovePotentialHotspotNotification() {
 }
 
 void FakeNotificationPresenter::NotifySetupRequired(
-    const std::string& device_name) {
+    const std::string& device_name,
+    int signal_strength) {
   is_setup_required_notification_shown_ = true;
 }
 

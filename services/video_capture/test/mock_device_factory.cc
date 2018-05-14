@@ -11,7 +11,7 @@ namespace {
 media::VideoCaptureFormat kSupportedFormat(gfx::Size(640, 480),
                                            25.0f,
                                            media::PIXEL_FORMAT_I420,
-                                           media::PIXEL_STORAGE_CPU);
+                                           media::VideoPixelStorage::CPU);
 
 // Wraps a raw pointer to a media::VideoCaptureDevice and allows us to
 // create a std::unique_ptr<media::VideoCaptureDevice> that delegates to it.
@@ -63,7 +63,7 @@ std::unique_ptr<media::VideoCaptureDevice> MockDeviceFactory::CreateDevice(
     const media::VideoCaptureDeviceDescriptor& device_descriptor) {
   if (devices_.find(device_descriptor) == devices_.end())
     return nullptr;
-  return base::MakeUnique<RawPointerVideoCaptureDevice>(
+  return std::make_unique<RawPointerVideoCaptureDevice>(
       devices_[device_descriptor]);
 }
 

@@ -20,9 +20,9 @@
 #ifndef NavigatorMediaStream_h
 #define NavigatorMediaStream_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
@@ -30,8 +30,8 @@ namespace blink {
 class ExceptionState;
 class MediaStreamConstraints;
 class Navigator;
-class NavigatorUserMediaErrorCallback;
-class NavigatorUserMediaSuccessCallback;
+class V8NavigatorUserMediaErrorCallback;
+class V8NavigatorUserMediaSuccessCallback;
 
 class NavigatorMediaStream {
   STATIC_ONLY(NavigatorMediaStream);
@@ -39,8 +39,8 @@ class NavigatorMediaStream {
  public:
   static void getUserMedia(Navigator&,
                            const MediaStreamConstraints&,
-                           NavigatorUserMediaSuccessCallback*,
-                           NavigatorUserMediaErrorCallback*,
+                           V8NavigatorUserMediaSuccessCallback*,
+                           V8NavigatorUserMediaErrorCallback*,
                            ExceptionState&);
 };
 

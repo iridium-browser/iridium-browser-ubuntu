@@ -13,26 +13,44 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/win/scoped_comptr.h"
 #include "base/win/windows_version.h"
 #include "third_party/iaccessible2/ia2_api_all.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_text_utils.h"
+#include "ui/aura/window.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/base/layout.h"
 #include "ui/base/win/accessibility_misc_utils.h"
 #include "ui/base/win/atl_module.h"
-#include "ui/views/controls/button/custom_button.h"
+#include "ui/display/win/screen_win.h"
+#include "ui/views/controls/button/button.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/win/hwnd_util.h"
+#include "ui/wm/core/window_util.h"
 
 namespace views {
 
+namespace {
+
+// Return the parent of |window|, first checking to see if it has a
+// transient parent. This allows us to walk up the aura::Window
+// hierarchy when it spans multiple window tree hosts, each with
+// their own HWND.
+aura::Window* GetWindowParentIncludingTransient(aura::Window* window) {
+  aura::Window* transient_parent = wm::GetTransientParent(window);
+  if (transient_parent)
+    return transient_parent;
+
+  return window->parent();
+}
+
+}  // namespace
+
 // static
-std::unique_ptr<NativeViewAccessibility> NativeViewAccessibility::Create(
-    View* view) {
-  return base::MakeUnique<NativeViewAccessibilityWin>(view);
+std::unique_ptr<ViewAccessibility> ViewAccessibility::Create(View* view) {
+  return std::make_unique<NativeViewAccessibilityWin>(view);
 }
 
 NativeViewAccessibilityWin::NativeViewAccessibilityWin(View* view)
@@ -41,34 +59,57 @@ NativeViewAccessibilityWin::NativeViewAccessibilityWin(View* view)
 NativeViewAccessibilityWin::~NativeViewAccessibilityWin() {}
 
 gfx::NativeViewAccessible NativeViewAccessibilityWin::GetParent() {
-  IAccessible* parent = NativeViewAccessibilityBase::GetParent();
-  if (parent)
-    return parent;
+  // If the View has a parent View, return that View's IAccessible.
+  if (view()->parent())
+    return view()->parent()->GetNativeViewAccessible();
 
-  HWND hwnd = HWNDForView(view_);
+  // Otherwise we must be the RootView, get the corresponding Widget
+  // and Window.
+  Widget* widget = view()->GetWidget();
+  if (!widget)
+    return nullptr;
+
+  aura::Window* window = widget->GetNativeWindow();
+  if (!window)
+    return nullptr;
+
+  // Look for an ancestor window with a Widget, and if found, return
+  // the NativeViewAccessible for its RootView.
+  aura::Window* ancestor_window = GetWindowParentIncludingTransient(window);
+  while (ancestor_window) {
+    Widget* ancestor_widget = Widget::GetWidgetForNativeView(ancestor_window);
+    if (ancestor_widget && ancestor_widget->GetRootView())
+      return ancestor_widget->GetRootView()->GetNativeViewAccessible();
+    ancestor_window = GetWindowParentIncludingTransient(ancestor_window);
+  }
+
+  // If that fails, return the NativeViewAccessible for our owning HWND.
+  HWND hwnd = HWNDForView(view());
   if (!hwnd)
-    return NULL;
+    return nullptr;
 
-  HRESULT hr = ::AccessibleObjectFromWindow(
-      hwnd, OBJID_WINDOW, IID_IAccessible,
-      reinterpret_cast<void**>(&parent));
-  if (SUCCEEDED(hr))
+  IAccessible* parent;
+  if (SUCCEEDED(
+          ::AccessibleObjectFromWindow(hwnd, OBJID_WINDOW, IID_IAccessible,
+                                       reinterpret_cast<void**>(&parent))))
     return parent;
 
-  return NULL;
+  return nullptr;
 }
 
 gfx::AcceleratedWidget
 NativeViewAccessibilityWin::GetTargetForNativeAccessibilityEvent() {
-  return HWNDForView(view_);
+  return HWNDForView(view());
 }
 
-gfx::RectF NativeViewAccessibilityWin::GetBoundsInScreen() const {
-  gfx::RectF bounds = gfx::RectF(view_->GetBoundsInScreen());
-  gfx::NativeView native_view = view_->GetWidget()->GetNativeView();
-  float device_scale = ui::GetScaleFactorForNativeView(native_view);
-  bounds.Scale(device_scale);
-  return bounds;
+gfx::Rect NativeViewAccessibilityWin::GetClippedScreenBoundsRect() const {
+  // We could optionally add clipping here if ever needed.
+  return GetUnclippedScreenBoundsRect();
+}
+
+gfx::Rect NativeViewAccessibilityWin::GetUnclippedScreenBoundsRect() const {
+  gfx::Rect bounds = view()->GetBoundsInScreen();
+  return display::win::ScreenWin::DIPToScreenRect(HWNDForView(view()), bounds);
 }
 
 }  // namespace views

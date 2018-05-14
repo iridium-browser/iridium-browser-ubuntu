@@ -10,7 +10,7 @@
  * @struct
  * @implements {importer.MediaScanner}
  *
- * @param {function(!FileEntry): !Promise.<string>} hashGenerator
+ * @param {function(!FileEntry): !Promise<string>} hashGenerator
  * @param {function(!FileEntry, !importer.Destination,
  *                  !importer.ScanMode):
  *     !Promise<!importer.Disposition>} dispositionChecker
@@ -69,11 +69,11 @@ importer.DefaultMediaScanner.prototype.scanDirectory = function(directory,
   console.info(scan.name + ': Scanning directory ' + directory.fullPath);
 
   var watcher = this.watcherFactory_(
-      /** @this {importer.DefaultMediaScanner} */
+      (/** @this {importer.DefaultMediaScanner} */
       function() {
         scan.cancel();
         this.notify_(importer.ScanEvent.INVALIDATED, scan);
-      }.bind(this));
+      }).bind(this));
 
   this.crawlDirectory_(directory, watcher)
       .then(this.scanMediaFiles_.bind(this, scan))
@@ -82,13 +82,13 @@ importer.DefaultMediaScanner.prototype.scanDirectory = function(directory,
 
   scan.whenFinal()
       .then(
-          /** @this {importer.DefaultMediaScanner} */
+          (/** @this {importer.DefaultMediaScanner} */
           function() {
             console.info(
                 scan.name + ': Finished directory scan. Details: ' +
                 JSON.stringify(scan.getStatistics()));
             this.notify_(importer.ScanEvent.FINALIZED, scan);
-          }.bind(this));
+          }).bind(this));
 
   return scan;
 };
@@ -105,10 +105,10 @@ importer.DefaultMediaScanner.prototype.scanFiles = function(entries, mode) {
 
   var watcher = this.watcherFactory_(
       /** @this {importer.DefaultMediaScanner} */
-      function() {
+      (function() {
         scan.cancel();
         this.notify_(importer.ScanEvent.INVALIDATED, scan);
-      }.bind(this));
+      }).bind(this));
 
   scan.setCandidateCount(entries.length);
   var scanPromises = entries.map(this.onFileEntryFound_.bind(this, scan));
@@ -119,13 +119,13 @@ importer.DefaultMediaScanner.prototype.scanFiles = function(entries, mode) {
 
   scan.whenFinal()
       .then(
-          /** @this {importer.DefaultMediaScanner} */
+          (/** @this {importer.DefaultMediaScanner} */
           function() {
             console.info(
                 scan.name + ': Finished file-selection scan. Details: ' +
                 JSON.stringify(scan.getStatistics()));
             this.notify_(importer.ScanEvent.FINALIZED, scan);
-          }.bind(this));
+          }).bind(this));
 
   return scan;
 };
@@ -242,7 +242,7 @@ importer.DefaultMediaScanner.prototype.onFileEntryFound_ =
   return this.getDisposition_(entry, importer.Destination.GOOGLE_DRIVE,
                               scan.mode)
       .then(
-          /**
+          (/**
            * @param {!importer.Disposition} disposition The disposition
            *     of the entry. Either some sort of dupe, or an original.
            * @return {!Promise}
@@ -252,7 +252,7 @@ importer.DefaultMediaScanner.prototype.onFileEntryFound_ =
             return disposition === importer.Disposition.ORIGINAL ?
                 this.onUniqueFileFound_(scan, entry) :
                 this.onDuplicateFileFound_(scan, entry, disposition);
-          }.bind(this));
+          }).bind(this));
 };
 
 /**
@@ -274,7 +274,7 @@ importer.DefaultMediaScanner.prototype.onUniqueFileFound_ =
 
   return scan.addFileEntry(entry)
       .then(
-          /**
+          (/**
            * @param {boolean} added
            * @this {importer.DefaultMediaScanner}
            */
@@ -282,7 +282,7 @@ importer.DefaultMediaScanner.prototype.onUniqueFileFound_ =
             if (added) {
               this.notify_(importer.ScanEvent.UPDATED, scan);
             }
-          }.bind(this));
+          }).bind(this));
 };
 
 /**
@@ -318,7 +318,7 @@ importer.DefaultMediaScanner.prototype.onDuplicateFileFound_ =
  * @implements {importer.ScanResult}
  *
  * @param {importer.ScanMode} mode The scan mode applied for finding new files.
- * @param {function(!FileEntry): !Promise.<string>} hashGenerator Hash-code
+ * @param {function(!FileEntry): !Promise<string>} hashGenerator Hash-code
  *     generator used to dedupe within the scan results itself.
  */
 importer.DefaultScanResult = function(mode, hashGenerator) {
@@ -331,7 +331,7 @@ importer.DefaultScanResult = function(mode, hashGenerator) {
   /** @private {number} */
   this.scanId_ = importer.generateId();
 
-  /** @private {function(!FileEntry): !Promise.<string>} */
+  /** @private {function(!FileEntry): !Promise<string>} */
   this.createHashcode_ = hashGenerator;
 
   /** @private {number} */
@@ -396,13 +396,19 @@ importer.DefaultScanResult = function(mode, hashGenerator) {
 /** @struct */
 importer.DefaultScanResult.prototype = {
   /** @return {string} */
-  get name() { return 'ScanResult(' + this.scanId_ + ')' },
+  get name() {
+    return 'ScanResult(' + this.scanId_ + ')';
+  },
 
   /** @return {function()} */
-  get resolve() { return this.resolver_.resolve.bind(null, this); },
+  get resolve() {
+    return this.resolver_.resolve.bind(null, this);
+  },
 
   /** @return {function(*=)} */
-  get reject() { return this.resolver_.reject; }
+  get reject() {
+    return this.resolver_.reject;
+  }
 };
 
 /** @override */
@@ -450,12 +456,12 @@ importer.DefaultScanResult.prototype.canceled = function() {
  * Adds a file to results.
  *
  * @param {!FileEntry} entry
- * @return {!Promise.<boolean>} True if the file as added, false if it was
+ * @return {!Promise<boolean>} True if the file as added, false if it was
  *     rejected as a dupe.
  */
 importer.DefaultScanResult.prototype.addFileEntry = function(entry) {
   return metadataProxy.getEntryMetadata(entry).then(
-      /**
+      (/**
        * @param {!Metadata} metadata
        * @this {importer.DefaultScanResult}
        */
@@ -466,7 +472,7 @@ importer.DefaultScanResult.prototype.addFileEntry = function(entry) {
 
         return this.createHashcode_(entry)
             .then(
-                /**
+                (/**
                  * @param {string} hashcode
                  * @this {importer.DefaultScanResult}
                  */
@@ -485,9 +491,9 @@ importer.DefaultScanResult.prototype.addFileEntry = function(entry) {
                   this.fileHashcodes_[hashcode] = entry;
                   this.fileEntries_.push(entry);
                   return true;
-                }.bind(this));
+                }).bind(this));
 
-      }.bind(this));
+      }).bind(this));
 };
 
 /**

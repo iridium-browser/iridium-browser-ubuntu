@@ -9,17 +9,17 @@
  */
 
 #include <memory>
+#include <utility>
 
-#include "webrtc/logging/rtc_event_log/rtc_event_log.h"
-#include "webrtc/media/base/fakemediaengine.h"
-#include "webrtc/media/base/fakevideocapturer.h"
-#include "webrtc/media/base/testutils.h"
-#include "webrtc/media/engine/fakewebrtccall.h"
-#include "webrtc/p2p/base/faketransportcontroller.h"
-#include "webrtc/pc/channelmanager.h"
-#include "webrtc/rtc_base/gunit.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/thread.h"
+#include "media/base/fakemediaengine.h"
+#include "media/base/fakevideocapturer.h"
+#include "media/base/testutils.h"
+#include "media/engine/fakewebrtccall.h"
+#include "pc/channelmanager.h"
+#include "pc/test/faketransportcontroller.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/thread.h"
 
 namespace {
 const bool kDefaultSrtpRequired = true;
@@ -45,15 +45,15 @@ class ChannelManagerTest : public testing::Test {
         cm_(new cricket::ChannelManager(
             std::unique_ptr<MediaEngineInterface>(fme_),
             std::unique_ptr<DataEngineInterface>(fdme_),
+            rtc::Thread::Current(),
             rtc::Thread::Current())),
-        fake_call_(webrtc::Call::Config(&event_log_)),
+        fake_call_(),
         transport_controller_(
             new cricket::FakeTransportController(ICEROLE_CONTROLLING)) {
     fme_->SetAudioCodecs(MAKE_VECTOR(kAudioCodecs));
     fme_->SetVideoCodecs(MAKE_VECTOR(kVideoCodecs));
   }
 
-  webrtc::RtcEventLogNullImpl event_log_;
   std::unique_ptr<rtc::Thread> network_;
   std::unique_ptr<rtc::Thread> worker_;
   // |fme_| and |fdme_| are actually owned by |cm_|.
@@ -185,4 +185,89 @@ TEST_F(ChannelManagerTest, SetVideoRtxEnabled) {
   EXPECT_TRUE(ContainsMatchingCodec(codecs, rtx_codec));
 }
 
+enum class RTPTransportType { kRtp, kSrtp, kDtlsSrtp };
+
+class ChannelManagerTestWithRtpTransport
+    : public ChannelManagerTest,
+      public ::testing::WithParamInterface<RTPTransportType> {
+ public:
+  std::unique_ptr<webrtc::RtpTransportInternal> CreateRtpTransport() {
+    RTPTransportType type = GetParam();
+    switch (type) {
+      case RTPTransportType::kRtp:
+        return CreatePlainRtpTransport();
+      case RTPTransportType::kSrtp:
+        return CreateSrtpTransport();
+      case RTPTransportType::kDtlsSrtp:
+        return CreateDtlsSrtpTransport();
+    }
+    return nullptr;
+  }
+
+  void TestCreateDestroyChannels(webrtc::RtpTransportInternal* rtp_transport) {
+    cricket::VoiceChannel* voice_channel = cm_->CreateVoiceChannel(
+        &fake_call_, cricket::MediaConfig(), rtp_transport,
+        rtc::Thread::Current(), cricket::CN_AUDIO, kDefaultSrtpRequired,
+        AudioOptions());
+    EXPECT_TRUE(voice_channel != nullptr);
+    cricket::VideoChannel* video_channel = cm_->CreateVideoChannel(
+        &fake_call_, cricket::MediaConfig(), rtp_transport,
+        rtc::Thread::Current(), cricket::CN_VIDEO, kDefaultSrtpRequired,
+        VideoOptions());
+    EXPECT_TRUE(video_channel != nullptr);
+    cricket::RtpDataChannel* rtp_data_channel = cm_->CreateRtpDataChannel(
+        cricket::MediaConfig(), rtp_transport, rtc::Thread::Current(),
+        cricket::CN_DATA, kDefaultSrtpRequired);
+    EXPECT_TRUE(rtp_data_channel != nullptr);
+    cm_->DestroyVideoChannel(video_channel);
+    cm_->DestroyVoiceChannel(voice_channel);
+    cm_->DestroyRtpDataChannel(rtp_data_channel);
+    cm_->Terminate();
+  }
+
+ private:
+  std::unique_ptr<webrtc::RtpTransportInternal> CreatePlainRtpTransport() {
+    return rtc::MakeUnique<webrtc::RtpTransport>(/*rtcp_mux_required=*/true);
+  }
+
+  std::unique_ptr<webrtc::RtpTransportInternal> CreateSrtpTransport() {
+    auto rtp_transport =
+        rtc::MakeUnique<webrtc::RtpTransport>(/*rtcp_mux_required=*/true);
+    auto srtp_transport =
+        rtc::MakeUnique<webrtc::SrtpTransport>(std::move(rtp_transport));
+    return srtp_transport;
+  }
+
+  std::unique_ptr<webrtc::RtpTransportInternal> CreateDtlsSrtpTransport() {
+    auto rtp_transport =
+        rtc::MakeUnique<webrtc::RtpTransport>(/*rtcp_mux_required=*/true);
+    auto srtp_transport =
+        rtc::MakeUnique<webrtc::SrtpTransport>(std::move(rtp_transport));
+    auto dtls_srtp_transport_ =
+        rtc::MakeUnique<webrtc::DtlsSrtpTransport>(std::move(srtp_transport));
+    return dtls_srtp_transport_;
+  }
+};
+
+TEST_P(ChannelManagerTestWithRtpTransport, CreateDestroyChannels) {
+  EXPECT_TRUE(cm_->Init());
+  auto rtp_transport = CreateRtpTransport();
+  TestCreateDestroyChannels(rtp_transport.get());
+}
+
+TEST_P(ChannelManagerTestWithRtpTransport, CreateDestroyChannelsOnThread) {
+  network_->Start();
+  worker_->Start();
+  EXPECT_TRUE(cm_->set_worker_thread(worker_.get()));
+  EXPECT_TRUE(cm_->set_network_thread(network_.get()));
+  EXPECT_TRUE(cm_->Init());
+  auto rtp_transport = CreateRtpTransport();
+  TestCreateDestroyChannels(rtp_transport.get());
+}
+
+INSTANTIATE_TEST_CASE_P(ChannelManagerTest,
+                        ChannelManagerTestWithRtpTransport,
+                        ::testing::Values(RTPTransportType::kRtp,
+                                          RTPTransportType::kSrtp,
+                                          RTPTransportType::kDtlsSrtp));
 }  // namespace cricket

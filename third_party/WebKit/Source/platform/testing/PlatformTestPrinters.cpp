@@ -13,17 +13,14 @@
 namespace blink {
 
 std::ostream& operator<<(std::ostream& os, const ResourceError& error) {
-  return os << "domain = " << error.Domain()
-            << ", errorCode = " << error.ErrorCode()
-            << ", failingURL = " << error.FailingURL()
-            << ", localizedDescription = " << error.LocalizedDescription()
-            << ", isNull = " << error.IsNull()
-            << ", isCancellation = " << error.IsCancellation()
-            << ", isAccessCheck = " << error.IsAccessCheck()
-            << ", isTimeout = " << error.IsTimeout()
-            << ", staleCopyInCache = " << error.StaleCopyInCache()
-            << ", wasIgnoredByHandler = " << error.WasIgnoredByHandler()
-            << ", isCacheMiss = " << error.IsCacheMiss();
+  return os << ", ErrorCode = " << error.ErrorCode()
+            << ", FailingURL = " << error.FailingURL()
+            << ", LocalizedDescription = " << error.LocalizedDescription()
+            << ", IsCancellation = " << error.IsCancellation()
+            << ", IsAccessCheck = " << error.IsAccessCheck()
+            << ", IsTimeout = " << error.IsTimeout()
+            << ", HasCopyInCache = " << error.HasCopyInCache()
+            << ", IsCacheMiss = " << error.IsCacheMiss();
 }
 
 }  // namespace blink

@@ -36,8 +36,8 @@ Host.UserMetrics = class {
    * @param {string} panelName
    */
   panelShown(panelName) {
-    var code = Host.UserMetrics._PanelCodes[panelName] || 0;
-    var size = Object.keys(Host.UserMetrics._PanelCodes).length + 1;
+    const code = Host.UserMetrics._PanelCodes[panelName] || 0;
+    const size = Object.keys(Host.UserMetrics._PanelCodes).length + 1;
     InspectorFrontendHost.recordEnumeratedHistogram('DevTools.PanelShown', code, size);
   }
 
@@ -52,7 +52,7 @@ Host.UserMetrics = class {
    * @param {!Host.UserMetrics.Action} action
    */
   actionTaken(action) {
-    var size = Object.keys(Host.UserMetrics.Action).length + 1;
+    const size = Object.keys(Host.UserMetrics.Action).length + 1;
     InspectorFrontendHost.recordEnumeratedHistogram('DevTools.ActionTaken', action, size);
   }
 };
@@ -91,6 +91,9 @@ Host.UserMetrics.Action = {
   ChangeInspectedNodeInElementsPanel: 26,
   StyleRuleCopied: 27,
   CoverageStarted: 28,
+  Audits2Started: 29,
+  Audits2Finished: 30,
+  ShowedThirdPartyBadges: 31,
 };
 
 Host.UserMetrics._PanelCodes = {
@@ -103,7 +106,7 @@ Host.UserMetrics._PanelCodes = {
   audits: 7,
   console: 8,
   layers: 9,
-  'drawer-console': 10,
+  'drawer-console-view': 10,
   'drawer-animations': 11,
   'drawer-network.config': 12,
   'drawer-rendering': 13,

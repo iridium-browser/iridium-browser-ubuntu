@@ -5,6 +5,7 @@
 #include "chrome/browser/translate/translate_service.h"
 
 #include "build/build_config.h"
+#include "chrome/common/url_constants.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/translate/core/browser/translate_download_manager.h"
@@ -46,39 +47,12 @@ TEST(TranslateServiceTest, CheckTranslatableURL) {
   EXPECT_TRUE(TranslateService::IsTranslatableURL(right_url));
 }
 
-// Test selection of translation target language.
-TEST(TranslateServiceTest, GetTargetLanguage) {
+// Tests that download and history URLs are not translatable.
+TEST(TranslateServiceTest, DownloadsAndHistoryNotTranslated) {
   TranslateService::InitializeForTesting();
-
-  translate::TranslateDownloadManager* const download_manager =
-      translate::TranslateDownloadManager::GetInstance();
-  download_manager->ResetForTesting();
-
-#if defined(OS_CHROMEOS)
-  const char kLanguagePrefName[] = "settings.language.preferred_languages";
-#else
-  const char kLanguagePrefName[] = "intl.accept_languages";
-#endif
-  // Setup the accept / preferred languages preferences.
-  TestingPrefServiceSimple prefs;
-  prefs.registry()->RegisterStringPref(kLanguagePrefName, std::string());
-  prefs.SetString(kLanguagePrefName, "fr");
-
-  // Test valid application locale.
-  download_manager->set_application_locale("en");
-  EXPECT_EQ("en", TranslateService::GetTargetLanguage(&prefs));
-
-  download_manager->set_application_locale("es");
-  EXPECT_EQ("es", TranslateService::GetTargetLanguage(&prefs));
-
-  // No valid application locale, so fall back to accept language.
-  download_manager->set_application_locale("");
-  EXPECT_EQ("fr", TranslateService::GetTargetLanguage(&prefs));
-
-  // Ensure unsupported language is ignored.
-  prefs.SetString(kLanguagePrefName, "xx,fr");
-  EXPECT_EQ("fr", TranslateService::GetTargetLanguage(&prefs));
-
-  download_manager->ResetForTesting();
+  EXPECT_FALSE(
+      TranslateService::IsTranslatableURL(GURL(chrome::kChromeUIDownloadsURL)));
+  EXPECT_FALSE(
+      TranslateService::IsTranslatableURL(GURL(chrome::kChromeUIHistoryURL)));
   TranslateService::ShutdownForTesting();
 }

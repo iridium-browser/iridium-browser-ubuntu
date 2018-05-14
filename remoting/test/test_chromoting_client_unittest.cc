@@ -58,8 +58,8 @@ class TestChromotingClientTest : public ::testing::Test,
   DISALLOW_COPY_AND_ASSIGN(TestChromotingClientTest);
 };
 
-TestChromotingClientTest::TestChromotingClientTest() {}
-TestChromotingClientTest::~TestChromotingClientTest() {}
+TestChromotingClientTest::TestChromotingClientTest() = default;
+TestChromotingClientTest::~TestChromotingClientTest() = default;
 
 void TestChromotingClientTest::SetUp() {
   test_chromoting_client_.reset(new TestChromotingClient());
@@ -70,7 +70,7 @@ void TestChromotingClientTest::SetUp() {
   // remain valid until |test_chromoting_client_| is destroyed.
   fake_connection_to_host_ = new FakeConnectionToHost();
   test_chromoting_client_->SetSignalStrategyForTests(
-      base::MakeUnique<FakeSignalStrategy>(
+      std::make_unique<FakeSignalStrategy>(
           SignalingAddress("test_user@faux_address.com/123")));
   test_chromoting_client_->SetConnectionToHostForTests(
       base::WrapUnique(fake_connection_to_host_));

@@ -6,6 +6,7 @@
 
 #include "platform/CrossThreadFunctional.h"
 #include "platform/WebTaskRunner.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -67,15 +68,19 @@ TEST(ResourceResponseTest, SignedCertificateTimestampIsolatedCopy) {
   EXPECT_NE(src.signature_data_.Impl(), dest.signature_data_.Impl());
 }
 
+// This test checks that AtomicStrings in ResourceResponse doesn't cause the
+// failure of ThreadRestrictionVerifier check.
 TEST(ResourceResponseTest, CrossThreadAtomicStrings) {
-  // This test checks that AtomicStrings in ResourceResponse doesn't cause the
-  // failure of ThreadRestrictionVerifier check.
+  ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
+      platform;
+
   ResourceResponse response(CreateTestResponse());
   RunHeaderRelatedTest(response);
-  std::unique_ptr<WebThread> thread =
-      Platform::Current()->CreateThread("WorkerThread");
-  thread->GetWebTaskRunner()->PostTask(BLINK_FROM_HERE,
-                                       CrossThreadBind(&RunInThread));
+  std::unique_ptr<WebThread> thread = Platform::Current()->CreateThread(
+      WebThreadCreationParams(WebThreadType::kTestThread)
+          .SetThreadName("WorkerThread"));
+  PostCrossThreadTask(*thread->GetTaskRunner(), FROM_HERE,
+                      CrossThreadBind(&RunInThread));
   thread.reset();
 }
 

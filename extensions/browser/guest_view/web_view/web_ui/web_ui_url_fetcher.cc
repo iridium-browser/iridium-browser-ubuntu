@@ -39,7 +39,7 @@ void WebUIURLFetcher::Start() {
           destination: LOCAL
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting: "It is not possible to disable this feature from settings."
           policy_exception_justification:
             "Not Implemented, considered not useful as the request doesn't "
@@ -50,10 +50,12 @@ void WebUIURLFetcher::Start() {
   fetcher_->SetRequestContext(
       content::BrowserContext::GetDefaultStoragePartition(context_)->
           GetURLRequestContext());
-  fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
+  fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
+                         net::LOAD_DO_NOT_SEND_COOKIES);
 
   content::AssociateURLFetcherWithRenderFrame(
-      fetcher_.get(), url::Origin(url_), render_process_id_, render_frame_id_);
+      fetcher_.get(), url::Origin::Create(url_), render_process_id_,
+      render_frame_id_);
   fetcher_->Start();
 }
 

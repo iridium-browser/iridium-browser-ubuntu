@@ -10,6 +10,8 @@
 
 #include "test_utils/ANGLETest.h"
 
+#include "common/string_utils.h"
+
 using namespace angle;
 
 namespace
@@ -28,10 +30,10 @@ class RendererTest : public ANGLETest
 TEST_P(RendererTest, RequestedRendererCreated)
 {
     std::string rendererString = std::string(reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
-    std::transform(rendererString.begin(), rendererString.end(), rendererString.begin(), ::tolower);
+    angle::ToLower(&rendererString);
 
     std::string versionString = std::string(reinterpret_cast<const char*>(glGetString(GL_VERSION)));
-    std::transform(versionString.begin(), versionString.end(), versionString.begin(), ::tolower);
+    angle::ToLower(&versionString);
 
     const EGLPlatformParameters &platform = GetParam().eglParameters;
 
@@ -51,7 +53,7 @@ TEST_P(RendererTest, RequestedRendererCreated)
     if (platform.renderer == EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE)
     {
         // Ensure that the renderer uses WARP, if we requested it.
-        if (platform.deviceType == EGL_PLATFORM_ANGLE_DEVICE_TYPE_WARP_ANGLE)
+        if (platform.deviceType == EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_WARP_ANGLE)
         {
             auto basicRenderPos = rendererString.find(std::string("microsoft basic render"));
             auto softwareAdapterPos = rendererString.find(std::string("software adapter"));

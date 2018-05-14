@@ -16,7 +16,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/browser/signin_pref_names.h"
 #include "components/strings/grit/components_strings.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
@@ -24,13 +24,13 @@
 #include "ios/chrome/browser/signin/account_tracker_service_factory.h"
 #include "ios/chrome/browser/signin/authentication_service.h"
 #include "ios/chrome/browser/signin/authentication_service_factory.h"
-#import "ios/chrome/browser/signin/browser_state_data_remover.h"
 #import "ios/chrome/browser/signin/constants.h"
 #include "ios/chrome/browser/signin/signin_manager_factory.h"
 #include "ios/chrome/browser/sync/sync_setup_service.h"
 #include "ios/chrome/browser/sync/sync_setup_service_factory.h"
 #include "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
 #import "ios/chrome/browser/ui/authentication/authentication_ui_util.h"
+#import "ios/chrome/browser/ui/commands/browsing_data_commands.h"
 #import "ios/chrome/browser/ui/settings/import_data_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
@@ -134,10 +134,6 @@ const int64_t kAuthenticationFlowTimeoutSeconds = 10;
 
 - (void)fetchManagedStatus:(ios::ChromeBrowserState*)browserState
                forIdentity:(ChromeIdentity*)identity {
-  if (!experimental_flags::IsMDMIntegrationEnabled()) {
-    [_delegate didFetchManagedStatus:nil];
-    return;
-  }
   if (gaia::ExtractDomainName(gaia::CanonicalizeEmail(
           base::SysNSStringToUTF8(identity.userEmail))) == "gmail.com") {
     // Do nothing for @gmail.com addresses as they can't have a hosted domain.
@@ -279,12 +275,18 @@ const int64_t kAuthenticationFlowTimeoutSeconds = 10;
                  completion:nil];
 }
 
-- (void)clearData:(ios::ChromeBrowserState*)browserState {
+- (void)clearData:(ios::ChromeBrowserState*)browserState
+       dispatcher:(id<BrowsingDataCommands>)dispatcher {
   DCHECK(!AuthenticationServiceFactory::GetForBrowserState(browserState)
               ->GetAuthenticatedUserEmail());
-  BrowserStateDataRemover::ClearData(browserState, ^{
-    [_delegate didClearData];
-  });
+
+  [dispatcher
+      removeBrowsingDataForBrowserState:browserState
+                             timePeriod:browsing_data::TimePeriod::ALL_TIME
+                             removeMask:BrowsingDataRemoveMask::REMOVE_ALL
+                        completionBlock:^{
+                          [_delegate didClearData];
+                        }];
 }
 
 - (BOOL)shouldHandleMergeCaseForIdentity:(ChromeIdentity*)identity
@@ -361,8 +363,7 @@ const int64_t kAuthenticationFlowTimeoutSeconds = 10;
                  viewController:(UIViewController*)viewController {
   DCHECK(!_alertCoordinator);
 
-  _alertCoordinator =
-      ios_internal::ErrorCoordinatorNoItem(error, viewController);
+  _alertCoordinator = ErrorCoordinatorNoItem(error, viewController);
 
   __weak AuthenticationFlowPerformer* weakSelf = self;
   __weak AlertCoordinator* weakAlert = _alertCoordinator;
@@ -435,14 +436,6 @@ const int64_t kAuthenticationFlowTimeoutSeconds = 10;
   [_navigationController settingsWillBeDismissed];
   [[_delegate presentingViewController] dismissViewControllerAnimated:YES
                                                            completion:block];
-}
-
-- (void)closeSettingsAndOpenNewIncognitoTab {
-  NOTREACHED();
-}
-
-- (void)closeSettingsAndOpenUrl:(OpenUrlCommand*)command {
-  NOTREACHED();
 }
 
 - (id<ApplicationCommands, BrowserCommands>)dispatcherForSettings {

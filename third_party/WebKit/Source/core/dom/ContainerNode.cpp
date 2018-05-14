@@ -24,6 +24,9 @@
 #include "core/dom/ContainerNode.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "core/css/SelectorQuery.h"
+#include "core/css/StyleChangeReason.h"
+#include "core/css/StyleEngine.h"
 #include "core/dom/ChildFrameDisconnector.h"
 #include "core/dom/ChildListMutationScope.h"
 #include "core/dom/ClassCollection.h"
@@ -35,27 +38,25 @@
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/NodeRareData.h"
 #include "core/dom/NodeTraversal.h"
-#include "core/dom/SelectorQuery.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/dom/StaticNodeList.h"
-#include "core/dom/StyleChangeReason.h"
-#include "core/dom/StyleEngine.h"
 #include "core/dom/WhitespaceAttacher.h"
 #include "core/events/MutationEvent.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/html/HTMLCollection.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/HTMLTagCollection.h"
-#include "core/html/RadioNodeList.h"
+#include "core/html/forms/RadioNodeList.h"
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutText.h"
-#include "core/layout/LayoutTheme.h"
 #include "core/layout/line/InlineTextBox.h"
 #include "core/layout/line/RootInlineBox.h"
 #include "core/probe/CoreProbes.h"
 #include "platform/EventDispatchForbiddenScope.h"
-#include "platform/ScriptForbiddenScope.h"
+#include "platform/bindings/RuntimeCallStats.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
+#include "platform/bindings/V8PerIsolateData.h"
 
 namespace blink {
 
@@ -182,10 +183,17 @@ bool ContainerNode::IsHostIncludingInclusiveAncestorOfThis(
     return false;
 
   bool child_contains_parent = false;
-  if (IsInShadowTree() || GetDocument().IsTemplateDocument())
+  if (IsInShadowTree() || GetDocument().IsTemplateDocument()) {
     child_contains_parent = new_child.ContainsIncludingHostElements(*this);
-  else
-    child_contains_parent = new_child.contains(this);
+  } else {
+    const Node& root = TreeRoot();
+    if (root.IsDocumentFragment() &&
+        ToDocumentFragment(root).IsTemplateContent()) {
+      child_contains_parent = new_child.ContainsIncludingHostElements(*this);
+    } else {
+      child_contains_parent = new_child.contains(this);
+    }
+  }
   if (child_contains_parent) {
     exception_state.ThrowDOMException(
         kHierarchyRequestError, "The new child element contains the parent.");
@@ -402,6 +410,10 @@ Node* ContainerNode::InsertBefore(Node* new_child,
   return new_child;
 }
 
+Node* ContainerNode::InsertBefore(Node* new_child, Node* ref_child) {
+  return InsertBefore(new_child, ref_child, ASSERT_NO_EXCEPTION);
+}
+
 void ContainerNode::InsertBeforeCommon(Node& next_child, Node& new_child) {
 #if DCHECK_IS_ON()
   DCHECK(EventDispatchForbiddenScope::IsEventDispatchForbidden());
@@ -459,7 +471,7 @@ void ContainerNode::ParserInsertBefore(Node* new_child, Node& next_child) {
   DCHECK(new_child);
   DCHECK_EQ(next_child.parentNode(), this);
   DCHECK(!new_child->IsDocumentFragment());
-  DCHECK(!isHTMLTemplateElement(this));
+  DCHECK(!IsHTMLTemplateElement(this));
 
   if (next_child.previousSibling() == new_child ||
       &next_child == new_child)  // nothing to do
@@ -582,6 +594,10 @@ Node* ContainerNode::ReplaceChild(Node* new_child,
   return old_child;
 }
 
+Node* ContainerNode::ReplaceChild(Node* new_child, Node* old_child) {
+  return ReplaceChild(new_child, old_child, ASSERT_NO_EXCEPTION);
+}
+
 void ContainerNode::WillRemoveChild(Node& child) {
   DCHECK_EQ(child.parentNode(), this);
   ChildListMutationScope(*this).WillRemoveChild(child);
@@ -619,15 +635,15 @@ void ContainerNode::WillRemoveChildren() {
       ChildFrameDisconnector::kDescendantsOnly);
 }
 
-DEFINE_TRACE(ContainerNode) {
+void ContainerNode::Trace(blink::Visitor* visitor) {
   visitor->Trace(first_child_);
   visitor->Trace(last_child_);
   Node::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(ContainerNode) {
-  visitor->TraceWrappersWithManualWriteBarrier(first_child_);
-  visitor->TraceWrappersWithManualWriteBarrier(last_child_);
+void ContainerNode::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
+  visitor->TraceWrappers(first_child_);
+  visitor->TraceWrappers(last_child_);
   Node::TraceWrappers(visitor);
 }
 
@@ -684,6 +700,10 @@ Node* ContainerNode::RemoveChild(Node* old_child,
   }
   DispatchSubtreeModifiedEvent();
   return child;
+}
+
+Node* ContainerNode::RemoveChild(Node* old_child) {
+  return RemoveChild(old_child, ASSERT_NO_EXCEPTION);
 }
 
 void ContainerNode::RemoveBetween(Node* previous_child,
@@ -773,7 +793,7 @@ void ContainerNode::RemoveChildren(SubtreeModificationAction action) {
       ScriptForbiddenScope forbid_script;
 
       while (Node* child = first_child_) {
-        RemoveBetween(0, child->nextSibling(), *child);
+        RemoveBetween(nullptr, child->nextSibling(), *child);
         NotifyNodeRemoved(*child);
       }
     }
@@ -816,10 +836,17 @@ Node* ContainerNode::AppendChild(Node* new_child,
   return new_child;
 }
 
+Node* ContainerNode::AppendChild(Node* new_child) {
+  return AppendChild(new_child, ASSERT_NO_EXCEPTION);
+}
+
 void ContainerNode::ParserAppendChild(Node* new_child) {
   DCHECK(new_child);
   DCHECK(!new_child->IsDocumentFragment());
-  DCHECK(!isHTMLTemplateElement(this));
+  DCHECK(!IsHTMLTemplateElement(this));
+
+  RUNTIME_CALL_TIMER_SCOPE(V8PerIsolateData::MainThreadIsolate(),
+                           RuntimeCallStats::CounterId::kParserAppendChild);
 
   if (!CheckParserAcceptChild(*new_child))
     return;
@@ -885,8 +912,7 @@ void ContainerNode::NotifyNodeInsertedInternal(
     if (Node::kInsertionShouldCallDidNotifySubtreeInsertions ==
         node.InsertedInto(this))
       post_insertion_notification_targets.push_back(&node);
-    for (ShadowRoot* shadow_root = node.YoungestShadowRoot(); shadow_root;
-         shadow_root = shadow_root->OlderShadowRoot())
+    if (ShadowRoot* shadow_root = node.GetShadowRoot())
       NotifyNodeInsertedInternal(*shadow_root,
                                  post_insertion_notification_targets);
   }
@@ -903,32 +929,21 @@ void ContainerNode::NotifyNodeRemoved(Node& root) {
     if (!node.IsContainerNode() && !node.IsInTreeScope())
       continue;
     node.RemovedFrom(this);
-    for (ShadowRoot* shadow_root = node.YoungestShadowRoot(); shadow_root;
-         shadow_root = shadow_root->OlderShadowRoot())
+    if (ShadowRoot* shadow_root = node.GetShadowRoot())
       NotifyNodeRemoved(*shadow_root);
   }
 }
 
 DISABLE_CFI_PERF
 void ContainerNode::AttachLayoutTree(AttachContext& context) {
-  AttachContext children_context(context);
-  children_context.resolved_style = nullptr;
-  bool clear_previous_in_flow = !!GetLayoutObject();
-  if (clear_previous_in_flow)
-    children_context.previous_in_flow = nullptr;
-  children_context.use_previous_in_flow = true;
-
   for (Node* child = firstChild(); child; child = child->nextSibling()) {
 #if DCHECK_IS_ON()
     DCHECK(child->NeedsAttach() ||
            ChildAttachedAllowedWhenAttachingChildren(this));
 #endif
     if (child->NeedsAttach())
-      child->AttachLayoutTree(children_context);
+      child->AttachLayoutTree(context);
   }
-
-  if (children_context.previous_in_flow && !clear_previous_in_flow)
-    context.previous_in_flow = children_context.previous_in_flow;
 
   ClearChildNeedsStyleRecalc();
   ClearChildNeedsReattachLayoutTree();
@@ -937,7 +952,6 @@ void ContainerNode::AttachLayoutTree(AttachContext& context) {
 
 void ContainerNode::DetachLayoutTree(const AttachContext& context) {
   AttachContext children_context(context);
-  children_context.resolved_style = nullptr;
   children_context.clear_invalidation = true;
 
   for (Node* child = firstChild(); child; child = child->nextSibling())
@@ -950,7 +964,7 @@ void ContainerNode::DetachLayoutTree(const AttachContext& context) {
 void ContainerNode::ChildrenChanged(const ChildrenChange& change) {
   GetDocument().IncDOMTreeVersion();
   GetDocument().NotifyChangeChildren(*this);
-  InvalidateNodeListCachesInAncestors();
+  InvalidateNodeListCachesInAncestors(nullptr, nullptr, &change);
   if (change.IsChildInsertion()) {
     if (!ChildNeedsStyleRecalc()) {
       SetChildNeedsStyleRecalc();
@@ -959,191 +973,15 @@ void ContainerNode::ChildrenChanged(const ChildrenChange& change) {
   }
 }
 
-void ContainerNode::CloneChildNodes(ContainerNode* clone) {
-  DummyExceptionStateForTesting exception_state;
-  for (Node* n = firstChild(); n && !exception_state.HadException();
-       n = n->nextSibling())
-    clone->AppendChild(n->cloneNode(true), exception_state);
+void ContainerNode::CloneChildNodesFrom(const ContainerNode& node) {
+  for (const Node& child : NodeTraversal::ChildrenOf(node))
+    AppendChild(child.Clone(GetDocument(), CloneChildrenFlag::kClone));
 }
 
-bool ContainerNode::GetUpperLeftCorner(FloatPoint& point) const {
-  if (!GetLayoutObject())
-    return false;
-
-  // FIXME: What is this code really trying to do?
-  LayoutObject* o = GetLayoutObject();
-  if (!o->IsInline() || o->IsAtomicInlineLevel()) {
-    point = o->LocalToAbsolute(FloatPoint(), kUseTransforms);
-    return true;
-  }
-
-  // Find the next text/image child, to get a position.
-  while (o) {
-    LayoutObject* p = o;
-    if (LayoutObject* o_first_child = o->SlowFirstChild()) {
-      o = o_first_child;
-    } else if (o->NextSibling()) {
-      o = o->NextSibling();
-    } else {
-      LayoutObject* next = nullptr;
-      while (!next && o->Parent()) {
-        o = o->Parent();
-        next = o->NextSibling();
-      }
-      o = next;
-
-      if (!o)
-        break;
-    }
-    DCHECK(o);
-
-    if (!o->IsInline() || o->IsAtomicInlineLevel()) {
-      point = o->LocalToAbsolute(FloatPoint(), kUseTransforms);
-      return true;
-    }
-
-    if (p->GetNode() && p->GetNode() == this && o->IsText() && !o->IsBR() &&
-        !ToLayoutText(o)->HasTextBoxes()) {
-      // Do nothing - skip unrendered whitespace that is a child or next sibling
-      // of the anchor.
-      // FIXME: This fails to skip a whitespace sibling when there was also a
-      // whitespace child (because p has moved).
-    } else if ((o->IsText() && !o->IsBR()) || o->IsAtomicInlineLevel()) {
-      point = FloatPoint();
-      if (o->IsText()) {
-        if (ToLayoutText(o)->FirstTextBox())
-          point.Move(
-              ToLayoutText(o)->LinesBoundingBox().X(),
-              ToLayoutText(o)->FirstTextBox()->Root().LineTop().ToFloat());
-        point = o->LocalToAbsolute(point, kUseTransforms);
-      } else {
-        DCHECK(o->IsBox());
-        LayoutBox* box = ToLayoutBox(o);
-        point.MoveBy(box->Location());
-        point = o->Container()->LocalToAbsolute(point, kUseTransforms);
-      }
-      return true;
-    }
-  }
-
-  // If the target doesn't have any children or siblings that could be used to
-  // calculate the scroll position, we must be at the end of the
-  // document. Scroll to the bottom.
-  // FIXME: who said anything about scrolling?
-  if (!o && GetDocument().View()) {
-    point = FloatPoint(0, GetDocument().View()->ContentsHeight());
-    return true;
-  }
-  return false;
-}
-
-static inline LayoutObject* EndOfContinuations(LayoutObject* layout_object) {
-  LayoutObject* prev = nullptr;
-  LayoutObject* cur = layout_object;
-
-  if (!cur->IsLayoutInline() && !cur->IsLayoutBlockFlow())
-    return nullptr;
-
-  while (cur) {
-    prev = cur;
-    if (cur->IsLayoutInline())
-      cur = ToLayoutInline(cur)->Continuation();
-    else
-      cur = ToLayoutBlockFlow(cur)->Continuation();
-  }
-
-  return prev;
-}
-
-bool ContainerNode::GetLowerRightCorner(FloatPoint& point) const {
-  if (!GetLayoutObject())
-    return false;
-
-  LayoutObject* o = GetLayoutObject();
-  if (!o->IsInline() || o->IsAtomicInlineLevel()) {
-    LayoutBox* box = ToLayoutBox(o);
-    point = o->LocalToAbsolute(FloatPoint(box->Size()), kUseTransforms);
-    return true;
-  }
-
-  LayoutObject* start_continuation = nullptr;
-  // Find the last text/image child, to get a position.
-  while (o) {
-    if (LayoutObject* o_last_child = o->SlowLastChild()) {
-      o = o_last_child;
-    } else if (o != GetLayoutObject() && o->PreviousSibling()) {
-      o = o->PreviousSibling();
-    } else {
-      LayoutObject* prev = nullptr;
-      while (!prev) {
-        // Check if the current layoutObject has contiunation and move the
-        // location for finding the layoutObject to the end of continuations if
-        // there is the continuation.  Skip to check the contiunation on
-        // contiunations section
-        if (start_continuation == o) {
-          start_continuation = nullptr;
-        } else if (!start_continuation) {
-          if (LayoutObject* continuation = EndOfContinuations(o)) {
-            start_continuation = o;
-            prev = continuation;
-            break;
-          }
-        }
-        // Prevent to overrun out of own layout tree
-        if (o == GetLayoutObject()) {
-          return false;
-        }
-        o = o->Parent();
-        if (!o)
-          return false;
-        prev = o->PreviousSibling();
-      }
-      o = prev;
-    }
-    DCHECK(o);
-    if (o->IsText() || o->IsAtomicInlineLevel()) {
-      point = FloatPoint();
-      if (o->IsText()) {
-        LayoutText* text = ToLayoutText(o);
-        IntRect lines_box = EnclosingIntRect(text->LinesBoundingBox());
-        if (!lines_box.MaxX() && !lines_box.MaxY())
-          continue;
-        point.MoveBy(lines_box.MaxXMaxYCorner());
-        point = o->LocalToAbsolute(point, kUseTransforms);
-      } else {
-        LayoutBox* box = ToLayoutBox(o);
-        point.MoveBy(box->FrameRect().MaxXMaxYCorner());
-        point = o->Container()->LocalToAbsolute(point, kUseTransforms);
-      }
-      return true;
-    }
-  }
-  return true;
-}
-
-// FIXME: This override is only needed for inline anchors without an
-// InlineBox and it does not belong in ContainerNode as it reaches into
-// the layout and line box trees.
-// https://code.google.com/p/chromium/issues/detail?id=248354
 LayoutRect ContainerNode::BoundingBox() const {
-  FloatPoint upper_left, lower_right;
-  bool found_upper_left = GetUpperLeftCorner(upper_left);
-  bool found_lower_right = GetLowerRightCorner(lower_right);
-
-  // If we've found one corner, but not the other,
-  // then we should just return a point at the corner that we did find.
-  if (found_upper_left != found_lower_right) {
-    if (found_upper_left)
-      lower_right = upper_left;
-    else
-      upper_left = lower_right;
-  }
-
-  FloatSize size = lower_right.ExpandedTo(upper_left) - upper_left;
-  if (std::isnan(size.Width()) || std::isnan(size.Height()))
+  if (!GetLayoutObject())
     return LayoutRect();
-
-  return EnclosingLayoutRect(FloatRect(upper_left, size));
+  return GetLayoutObject()->AbsoluteBoundingBoxRectHandlingEmptyAnchor();
 }
 
 // This is used by FrameSelection to denote when the active-state of the page
@@ -1166,8 +1004,7 @@ void ContainerNode::FocusStateChanged() {
   if (IsElementNode() && ToElement(this)->ChildrenOrSiblingsAffectedByFocus())
     ToElement(this)->PseudoStateChanged(CSSSelector::kPseudoFocus);
 
-  LayoutTheme::GetTheme().ControlStateChanged(*GetLayoutObject(),
-                                              kFocusControlState);
+  GetLayoutObject()->InvalidateIfControlStateChanged(kFocusControlState);
   FocusWithinStateChanged();
 }
 
@@ -1192,7 +1029,7 @@ void ContainerNode::SetFocused(bool received, WebFocusType focus_type) {
   // TODO(kochi): Handle UA shadows which marks multiple nodes as focused such
   // as <input type="date"> the same way as author shadow.
   if (ShadowRoot* root = ContainingShadowRoot()) {
-    if (root->GetType() != ShadowRootType::kUserAgent)
+    if (!root->IsUserAgent())
       OwnerShadowHost()->SetFocused(received, focus_type);
   }
 
@@ -1275,8 +1112,7 @@ void ContainerNode::SetActive(bool down) {
   if (IsElementNode() && ToElement(this)->ChildrenOrSiblingsAffectedByActive())
     ToElement(this)->PseudoStateChanged(CSSSelector::kPseudoActive);
 
-  LayoutTheme::GetTheme().ControlStateChanged(*GetLayoutObject(),
-                                              kPressedControlState);
+  GetLayoutObject()->InvalidateIfControlStateChanged(kPressedControlState);
 }
 
 void ContainerNode::SetDragged(bool new_value) {
@@ -1333,10 +1169,8 @@ void ContainerNode::SetHovered(bool over) {
   if (IsElementNode() && ToElement(this)->ChildrenOrSiblingsAffectedByHover())
     ToElement(this)->PseudoStateChanged(CSSSelector::kPseudoHover);
 
-  if (GetLayoutObject()) {
-    LayoutTheme::GetTheme().ControlStateChanged(*GetLayoutObject(),
-                                                kHoverControlState);
-  }
+  if (LayoutObject* o = GetLayoutObject())
+    o->InvalidateIfControlStateChanged(kHoverControlState);
 }
 
 HTMLCollection* ContainerNode::Children() {
@@ -1359,6 +1193,10 @@ Element* ContainerNode::QuerySelector(const AtomicString& selectors,
   return selector_query->QueryFirst(*this);
 }
 
+Element* ContainerNode::QuerySelector(const AtomicString& selectors) {
+  return QuerySelector(selectors, ASSERT_NO_EXCEPTION);
+}
+
 StaticElementList* ContainerNode::QuerySelectorAll(
     const AtomicString& selectors,
     ExceptionState& exception_state) {
@@ -1367,6 +1205,11 @@ StaticElementList* ContainerNode::QuerySelectorAll(
   if (!selector_query)
     return nullptr;
   return selector_query->QueryAll(*this);
+}
+
+StaticElementList* ContainerNode::QuerySelectorAll(
+    const AtomicString& selectors) {
+  return QuerySelectorAll(selectors, ASSERT_NO_EXCEPTION);
 }
 
 static void DispatchChildInsertionEvents(Node& child) {
@@ -1445,7 +1288,6 @@ void ContainerNode::RecalcDescendantStyles(StyleRecalcChange change) {
   DCHECK(change >= kUpdatePseudoElements || ChildNeedsStyleRecalc());
   DCHECK(!NeedsStyleRecalc());
 
-  StyleResolver& style_resolver = GetDocument().EnsureStyleResolver();
   for (Node* child = lastChild(); child; child = child->previousSibling()) {
     if (child->IsTextNode()) {
       ToText(child)->RecalcTextStyle(change);
@@ -1453,9 +1295,14 @@ void ContainerNode::RecalcDescendantStyles(StyleRecalcChange change) {
       Element* element = ToElement(child);
       if (element->ShouldCallRecalcStyle(change))
         element->RecalcStyle(change);
-      else if (element->SupportsStyleSharing())
-        style_resolver.AddToStyleSharingList(*element);
     }
+  }
+}
+
+void ContainerNode::RecalcDescendantStylesForReattach() {
+  for (Node* child = lastChild(); child; child = child->previousSibling()) {
+    if (child->IsElementNode())
+      ToElement(child)->RecalcStyleForReattach();
   }
 }
 
@@ -1481,18 +1328,38 @@ void ContainerNode::RebuildLayoutTreeForChild(
     whitespace_attacher.DidVisitElement(element);
 }
 
+void ContainerNode::RebuildNonDistributedChildren() {
+  // Non-distributed children are:
+  // 1. Children of shadow hosts which are not slotted (v1) or distributed to an
+  //    insertion point (v0).
+  // 2. Children of <slot> (v1) and <content> (v0) elements which are not used
+  //    as fallback content when no nodes are slotted/distributed.
+  //
+  // These children will not take part in the flat tree, but we need to walk
+  // them in order to clear dirtiness flags during layout tree rebuild. We
+  // need to use a separate WhitespaceAttacher so that DidVisitText does not
+  // mess up the WhitespaceAttacher for the layout tree rebuild of the nodes
+  // which take part in the flat tree.
+  WhitespaceAttacher whitespace_attacher;
+  for (Node* child = lastChild(); child; child = child->previousSibling())
+    RebuildLayoutTreeForChild(child, whitespace_attacher);
+  ClearChildNeedsStyleRecalc();
+  ClearChildNeedsReattachLayoutTree();
+}
+
 void ContainerNode::RebuildChildrenLayoutTrees(
     WhitespaceAttacher& whitespace_attacher) {
   DCHECK(!NeedsReattachLayoutTree());
 
   if (IsActiveSlotOrActiveV0InsertionPoint()) {
-    if (isHTMLSlotElement(this)) {
-      toHTMLSlotElement(this)->RebuildDistributedChildrenLayoutTrees(
-          whitespace_attacher);
+    if (auto* slot = ToHTMLSlotElementOrNull(this)) {
+      slot->RebuildDistributedChildrenLayoutTrees(whitespace_attacher);
     } else {
       ToV0InsertionPoint(this)->RebuildDistributedChildrenLayoutTrees(
           whitespace_attacher);
     }
+    RebuildNonDistributedChildren();
+    return;
   }
 
   // This loop is deliberately backwards because we use insertBefore in the
@@ -1529,7 +1396,7 @@ void ContainerNode::CheckForSiblingStyleChanges(SiblingCheckType change_type,
           ? ToElement(node_before_change)
           : ElementTraversal::PreviousSibling(*node_before_change);
 
-  // TODO(rune@opera.com): move this code into StyleEngine and collect the
+  // TODO(futhark@chromium.org): move this code into StyleEngine and collect the
   // various invalidation sets into a single InvalidationLists object and
   // schedule with a single scheduleInvalidationSetsForNode for efficiency.
 
@@ -1579,11 +1446,22 @@ void ContainerNode::CheckForSiblingStyleChanges(SiblingCheckType change_type,
 
 void ContainerNode::InvalidateNodeListCachesInAncestors(
     const QualifiedName* attr_name,
-    Element* attribute_owner_element) {
+    Element* attribute_owner_element,
+    const ChildrenChange* change) {
+  // This is a performance optimization, NodeList cache invalidation is
+  // not necessary for a text change.
+  if (change && change->type == kTextChanged)
+    return;
+
   if (HasRareData() && (!attr_name || IsAttributeNode())) {
     if (NodeListsNodeData* lists = RareData()->NodeLists()) {
-      if (ChildNodeList* child_node_list = lists->GetChildNodeList(*this))
-        child_node_list->InvalidateCache();
+      if (ChildNodeList* child_node_list = lists->GetChildNodeList(*this)) {
+        if (change) {
+          child_node_list->ChildrenChanged(*change);
+        } else {
+          child_node_list->InvalidateCache();
+        }
+      }
     }
   }
 
@@ -1642,7 +1520,7 @@ ClassCollection* ContainerNode::getElementsByClassName(
 
 RadioNodeList* ContainerNode::GetRadioNodeList(const AtomicString& name,
                                                bool only_match_img_elements) {
-  DCHECK(isHTMLFormElement(this) || isHTMLFieldSetElement(this));
+  DCHECK(IsHTMLFormElement(this) || IsHTMLFieldSetElement(this));
   CollectionType type =
       only_match_img_elements ? kRadioImgNodeListType : kRadioNodeListType;
   return EnsureCachedCollection<RadioNodeList>(type, name);
@@ -1680,7 +1558,7 @@ bool ChildAttachedAllowedWhenAttachingChildren(ContainerNode* node) {
   if (node->IsV0InsertionPoint())
     return true;
 
-  if (isHTMLSlotElement(node))
+  if (IsHTMLSlotElement(node))
     return true;
 
   if (node->IsElementNode() && ToElement(node)->Shadow())

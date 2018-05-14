@@ -48,7 +48,8 @@ class RootWindowController;
 //
 // The constructor takes a |panel_container| argument which is expected to set
 // its layout manager to this instance, e.g.:
-// panel_container->SetLayoutManager(new PanelLayoutManager(panel_container));
+// panel_container->SetLayoutManager(
+//     std::make_unique<PanelLayoutManager>(panel_container));
 
 class ASH_EXPORT PanelLayoutManager
     : public aura::LayoutManager,
@@ -107,7 +108,7 @@ class ASH_EXPORT PanelLayoutManager
 
   // wm::WindowStateObserver:
   void OnPostWindowStateTypeChange(wm::WindowState* window_state,
-                                   wm::WindowStateType old_type) override;
+                                   mojom::WindowStateType old_type) override;
 
   // wm::ActivationChangeObserver:
   void OnWindowActivated(
@@ -170,7 +171,8 @@ class ASH_EXPORT PanelLayoutManager
   void UpdateCallouts();
 
   // Overridden from keyboard::KeyboardControllerObserver:
-  void OnKeyboardBoundsChanging(const gfx::Rect& keyboard_bounds) override;
+  void OnKeyboardWorkspaceOccludedBoundsChanged(
+      const gfx::Rect& keyboard_bounds) override;
   void OnKeyboardClosed() override;
 
   // Parent window associated with this layout manager.

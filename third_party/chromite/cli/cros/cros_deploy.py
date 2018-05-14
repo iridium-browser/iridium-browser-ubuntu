@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2014 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -80,7 +81,7 @@ For more information of cros build usage:
         '--dry-run', '-n', action='store_true',
         help='Output deployment plan but do not deploy anything.')
 
-    advanced = parser.add_option_group('Advanced options')
+    advanced = parser.add_argument_group('Advanced options')
     advanced.add_argument(
         '--force', action='store_true',
         help='Ignore sanity checks, just do it.')

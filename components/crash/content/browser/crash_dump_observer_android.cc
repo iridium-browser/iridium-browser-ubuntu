@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/notification_service.h"
@@ -31,13 +30,13 @@ void CrashDumpObserver::Create() {
   // If this DCHECK fails in a unit test then a previously executing
   // test that makes use of CrashDumpObserver forgot to create a
   // ShadowingAtExitManager.
-  DCHECK(g_instance == nullptr);
+  DCHECK(!g_instance.IsCreated());
   g_instance.Get();
 }
 
 // static
 CrashDumpObserver* CrashDumpObserver::GetInstance() {
-  DCHECK(!(g_instance == nullptr));
+  DCHECK(g_instance.IsCreated());
   return g_instance.Pointer();
 }
 
@@ -64,7 +63,7 @@ void CrashDumpObserver::RegisterClient(std::unique_ptr<Client> client) {
   registered_clients_.push_back(std::move(client));
 }
 
-void CrashDumpObserver::OnChildExit(int child_process_id,
+void CrashDumpObserver::OnChildExit(int process_host_id,
                                     base::ProcessHandle pid,
                                     content::ProcessType process_type,
                                     base::TerminationStatus termination_status,
@@ -77,14 +76,14 @@ void CrashDumpObserver::OnChildExit(int child_process_id,
       registered_clients_copy.push_back(client.get());
   }
   for (auto* client : registered_clients_copy) {
-    client->OnChildExit(child_process_id, pid, process_type, termination_status,
+    client->OnChildExit(process_host_id, pid, process_type, termination_status,
                         app_state);
   }
 }
 
 void CrashDumpObserver::BrowserChildProcessStarted(
-    int child_process_id,
-    content::FileDescriptorInfo* mappings) {
+    int process_host_id,
+    content::PosixFileDescriptorInfo* mappings) {
   std::vector<Client*> registered_clients_copy;
   {
     base::AutoLock auto_lock(registered_clients_lock_);
@@ -92,7 +91,7 @@ void CrashDumpObserver::BrowserChildProcessStarted(
       registered_clients_copy.push_back(client.get());
   }
   for (auto* client : registered_clients_copy) {
-    client->OnChildStart(child_process_id, mappings);
+    client->OnChildStart(process_host_id, mappings);
   }
 }
 
@@ -147,8 +146,8 @@ void CrashDumpObserver::Observe(int type,
     }
     case content::NOTIFICATION_RENDERER_PROCESS_CREATED: {
       // The child process pid isn't available when process is gone, keep a
-      // mapping between child_process_id and pid, so we can find it later.
-      child_process_id_to_pid_[rph->GetID()] = rph->GetHandle();
+      // mapping between process_host_id and pid, so we can find it later.
+      process_host_id_to_pid_[rph->GetID()] = rph->GetHandle();
       return;
     }
     default:
@@ -156,12 +155,12 @@ void CrashDumpObserver::Observe(int type,
       return;
   }
   base::ProcessHandle pid = rph->GetHandle();
-  const auto& iter = child_process_id_to_pid_.find(rph->GetID());
-  if (iter != child_process_id_to_pid_.end()) {
+  const auto& iter = process_host_id_to_pid_.find(rph->GetID());
+  if (iter != process_host_id_to_pid_.end()) {
     if (pid == base::kNullProcessHandle) {
       pid = iter->second;
     }
-    child_process_id_to_pid_.erase(iter);
+    process_host_id_to_pid_.erase(iter);
   }
   OnChildExit(rph->GetID(), pid, content::PROCESS_TYPE_RENDERER, term_status,
               app_state);

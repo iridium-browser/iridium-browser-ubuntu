@@ -40,19 +40,17 @@ class WebURL;
 class WebCookieJar {
  public:
   virtual void SetCookie(const WebURL&,
-                         const WebURL& first_party_for_cookies,
+                         const WebURL& site_for_cookies,
                          const WebString& cookie) {}
-  virtual WebString Cookies(const WebURL&,
-                            const WebURL& first_party_for_cookies) {
+  virtual WebString Cookies(const WebURL&, const WebURL& site_for_cookies) {
     return WebString();
   }
-  virtual bool CookiesEnabled(const WebURL&,
-                              const WebURL& first_party_for_cookies) {
+  virtual bool CookiesEnabled(const WebURL&, const WebURL& site_for_cookies) {
     return true;
   }
 
  protected:
-  ~WebCookieJar() {}
+  ~WebCookieJar() = default;
 };
 
 }  // namespace blink

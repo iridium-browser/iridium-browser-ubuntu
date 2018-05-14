@@ -23,12 +23,6 @@ class LayoutTestContentRendererClient : public ShellContentRendererClient {
   void RenderThreadStarted() override;
   void RenderFrameCreated(RenderFrame* render_frame) override;
   void RenderViewCreated(RenderView* render_view) override;
-  std::unique_ptr<blink::WebMediaStreamCenter>
-  OverrideCreateWebMediaStreamCenter(
-      blink::WebMediaStreamCenterClient* client) override;
-  std::unique_ptr<blink::WebRTCPeerConnectionHandler>
-  OverrideCreateWebRTCPeerConnectionHandler(
-      blink::WebRTCPeerConnectionHandlerClient* client) override;
   std::unique_ptr<blink::WebMIDIAccessor> OverrideCreateMIDIAccessor(
       blink::WebMIDIAccessorClient* client) override;
   std::unique_ptr<blink::WebAudioDevice> OverrideCreateAudioDevice(
@@ -37,9 +31,12 @@ class LayoutTestContentRendererClient : public ShellContentRendererClient {
   blink::WebThemeEngine* OverrideThemeEngine() override;
   std::unique_ptr<MediaStreamRendererFactory> CreateMediaStreamRendererFactory()
       override;
+  std::unique_ptr<blink::WebSocketHandshakeThrottle>
+  CreateWebSocketHandshakeThrottle() override;
   void DidInitializeWorkerContextOnWorkerThread(
       v8::Local<v8::Context> context) override;
   void SetRuntimeFeaturesDefaultsBeforeBlinkInitialization() override;
+  bool AllowIdleMediaSuspend() override;
 
  private:
   std::unique_ptr<LayoutTestRenderThreadObserver> shell_observer_;

@@ -14,6 +14,7 @@ found in the LICENSE file.
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.BLUETOOTH"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
+    <uses-permission android:name="android.permission.CHANGE_CONFIGURATION"/>
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
@@ -23,7 +24,7 @@ found in the LICENSE file.
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
 
     <application android:label="NativeTests"
-            android:name="org.chromium.base.BaseChromiumApplication">
+            android:name="org.chromium.native_test.NativeTestApplication">
         <uses-library android:name="android.test.runner"/>
         {% if use_native_activity == 'true' %}
         <activity android:name=".NativeUnitTestNativeActivity"
@@ -54,8 +55,6 @@ found in the LICENSE file.
         {% set num_test_client_services = 5 %}
         <meta-data android:name="org.chromium.native_test.NUM_TEST_CLIENT_SERVICES"
                    android:value="{{ num_test_client_services }}"/>
-        <meta-data android:name="org.chromium.native_test.TEST_CLIENT_SERVICE_NAME"
-                   android:value="org.chromium.base.MultiprocessTestClientService"/>
         {% for i in range(num_test_client_services) %}
         <service android:name="org.chromium.base.MultiprocessTestClientService{{ i }}"
                  android:process=":test_client_process{{ i }}"

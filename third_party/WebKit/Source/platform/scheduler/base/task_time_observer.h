@@ -14,8 +14,8 @@ namespace scheduler {
 // TaskTimeObserver provides an API for observing completion of renderer tasks.
 class PLATFORM_EXPORT TaskTimeObserver {
  public:
-  TaskTimeObserver() {}
-  virtual ~TaskTimeObserver() {}
+  TaskTimeObserver() = default;
+  virtual ~TaskTimeObserver() = default;
 
   // Callback to be called when task is about to start.
   // |start_time| - time in seconds when task started to run,
@@ -25,9 +25,6 @@ class PLATFORM_EXPORT TaskTimeObserver {
   // |start_time| - time in seconds when task started to run,
   // |end_time| - time in seconds when task was completed.
   virtual void DidProcessTask(double start_time, double end_time) = 0;
-
-  // Callback to be called when we enter a nested run loop.
-  virtual void OnBeginNestedRunLoop() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TaskTimeObserver);

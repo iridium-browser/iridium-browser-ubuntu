@@ -13,13 +13,14 @@
 #include "chrome/browser/previews/previews_service.h"
 #include "chrome/browser/previews/previews_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
-#include "components/offline_pages/features/features.h"
+#include "components/offline_pages/buildflags/buildflags.h"
+#include "components/offline_pages/core/offline_page_item.h"
+#include "components/previews/content/previews_content_util.h"
+#include "components/previews/content/previews_ui_service.h"
 #include "components/previews/core/previews_experiments.h"
-#include "components/previews/core/previews_ui_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
@@ -38,12 +39,13 @@ namespace {
 void AddPreviewNavigationCallback(content::BrowserContext* browser_context,
                                   const GURL& url,
                                   previews::PreviewsType type,
+                                  uint64_t page_id,
                                   bool opt_out) {
   PreviewsService* previews_service = PreviewsServiceFactory::GetForProfile(
       Profile::FromBrowserContext(browser_context));
   if (previews_service && previews_service->previews_ui_service()) {
-    previews_service->previews_ui_service()->AddPreviewNavigation(url, type,
-                                                                  opt_out);
+    previews_service->previews_ui_service()->AddPreviewNavigation(
+        url, type, opt_out, page_id);
   }
 }
 
@@ -51,14 +53,11 @@ void AddPreviewNavigationCallback(content::BrowserContext* browser_context,
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(PreviewsInfoBarTabHelper);
 
-PreviewsInfoBarTabHelper::~PreviewsInfoBarTabHelper() {
-  ClearLastNavigationAsync();
-}
+PreviewsInfoBarTabHelper::~PreviewsInfoBarTabHelper() {}
 
 PreviewsInfoBarTabHelper::PreviewsInfoBarTabHelper(
     content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      browser_context_(web_contents->GetBrowserContext()),
       displayed_preview_infobar_(false),
       displayed_preview_timestamp_(false) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
@@ -70,6 +69,17 @@ void PreviewsInfoBarTabHelper::DidFinishNavigation(
   if (!navigation_handle->IsInMainFrame() ||
       !navigation_handle->HasCommitted() || navigation_handle->IsSameDocument())
     return;
+
+  previews_user_data_.reset();
+  // Store Previews information for this navigation.
+  ChromeNavigationData* nav_data = static_cast<ChromeNavigationData*>(
+      navigation_handle->GetNavigationData());
+  if (nav_data && nav_data->previews_user_data()) {
+    previews_user_data_ = nav_data->previews_user_data()->DeepCopy();
+  }
+
+  uint64_t page_id = (previews_user_data_) ? previews_user_data_->page_id() : 0;
+
   // The infobar should only be told if the page was a reload if the previous
   // page displayed a timestamp.
   bool is_reload =
@@ -78,32 +88,18 @@ void PreviewsInfoBarTabHelper::DidFinishNavigation(
           : false;
   displayed_preview_infobar_ = false;
   displayed_preview_timestamp_ = false;
-  ClearLastNavigationAsync();
-  committed_data_saver_navigation_id_.reset();
 
-  // As documented in content/public/browser/navigation_handle.h, this
-  // NavigationData is a clone of the NavigationData instance returned from
-  // ResourceDispatcherHostDelegate::GetNavigationData during commit.
-  // Because ChromeResourceDispatcherHostDelegate always returns a
-  // ChromeNavigationData, it is safe to static_cast here.
-  ChromeNavigationData* chrome_navigation_data =
-      static_cast<ChromeNavigationData*>(
-          navigation_handle->GetNavigationData());
-  if (chrome_navigation_data) {
-    data_reduction_proxy::DataReductionProxyData* data =
-        chrome_navigation_data->GetDataReductionProxyData();
-
-    if (data && data->page_id()) {
-      committed_data_saver_navigation_id_ = data_reduction_proxy::NavigationID(
-          data->page_id().value(), data->session_key());
-    }
-  }
+  // Retrieve PreviewsUIService* from |web_contents| if available.
+  PreviewsService* previews_service = PreviewsServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
+  previews::PreviewsUIService* previews_ui_service =
+      previews_service ? previews_service->previews_ui_service() : nullptr;
 
 #if BUILDFLAG(ENABLE_OFFLINE_PAGES)
   offline_pages::OfflinePageTabHelper* tab_helper =
       offline_pages::OfflinePageTabHelper::FromWebContents(web_contents());
 
-  if (tab_helper && tab_helper->IsShowingOfflinePreview()) {
+  if (tab_helper && tab_helper->GetOfflinePreviewItem()) {
     if (navigation_handle->IsErrorPage()) {
       // TODO(ryansturm): Add UMA for errors.
       return;
@@ -112,44 +108,63 @@ void PreviewsInfoBarTabHelper::DidFinishNavigation(
         data_reduction_proxy_settings =
             DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
                 web_contents()->GetBrowserContext());
+
+    const offline_pages::OfflinePageItem* offline_page =
+        tab_helper->GetOfflinePreviewItem();
+    // From UMA, the median percent of network body bytes loaded out of total
+    // body bytes on a page load. See PageLoad.Experimental.Bytes.Network and
+    // PageLoad.Experimental.Bytes.Total.
+    int64_t uncached_size = offline_page->file_size * 0.55;
+
+    bool data_saver_enabled =
+        data_reduction_proxy_settings->IsDataReductionProxyEnabled();
+
+    data_reduction_proxy_settings->data_reduction_proxy_service()
+        ->UpdateDataUseForHost(0, uncached_size,
+                               navigation_handle->GetRedirectChain()[0].host());
+
+    data_reduction_proxy_settings->data_reduction_proxy_service()
+        ->UpdateContentLengths(0, uncached_size, data_saver_enabled,
+                               data_reduction_proxy::HTTPS,
+                               "multipart/related");
+
     PreviewsInfoBarDelegate::Create(
         web_contents(), previews::PreviewsType::OFFLINE,
-        base::Time() /* previews_freshness */, false /* is_reload */,
-        data_reduction_proxy_settings &&
-            data_reduction_proxy_settings->IsDataReductionProxyEnabled(),
-        base::Bind(&AddPreviewNavigationCallback, browser_context_,
-                   navigation_handle->GetRedirectChain()[0],
-                   previews::PreviewsType::OFFLINE));
+        base::Time() /* previews_freshness */,
+        data_reduction_proxy_settings && data_saver_enabled,
+        false /* is_reload */,
+        base::BindOnce(&AddPreviewNavigationCallback,
+                       web_contents()->GetBrowserContext(),
+                       navigation_handle->GetRedirectChain()[0],
+                       previews::PreviewsType::OFFLINE, page_id),
+        previews_ui_service);
     // Don't try to show other infobars if this is an offline preview.
     return;
   }
 #endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 
-  const net::HttpResponseHeaders* headers =
-      navigation_handle->GetResponseHeaders();
-  if (headers && data_reduction_proxy::IsLitePagePreview(*headers)) {
-    base::Time previews_freshness;
-    headers->GetDateValue(&previews_freshness);
-    PreviewsInfoBarDelegate::Create(
-        web_contents(), previews::PreviewsType::LITE_PAGE, previews_freshness,
-        true /* is_data_saver_user */, is_reload,
-        base::Bind(&AddPreviewNavigationCallback, browser_context_,
-                   navigation_handle->GetRedirectChain()[0],
-                   previews::PreviewsType::LITE_PAGE));
-  }
-}
+  // Check for committed main frame preview.
+  if (previews_user_data_ && previews_user_data_->HasCommittedPreviewsType()) {
+    previews::PreviewsType main_frame_preview =
+        previews_user_data_->committed_previews_type();
+    if (main_frame_preview != previews::PreviewsType::NONE &&
+        main_frame_preview != previews::PreviewsType::LOFI) {
+      base::Time previews_freshness;
+      if (main_frame_preview == previews::PreviewsType::LITE_PAGE) {
+        const net::HttpResponseHeaders* headers =
+            navigation_handle->GetResponseHeaders();
+        if (headers)
+          headers->GetDateValue(&previews_freshness);
+      }
 
-void PreviewsInfoBarTabHelper::ClearLastNavigationAsync() const {
-  if (!committed_data_saver_navigation_id_)
-    return;
-  auto* data_reduction_proxy_settings =
-      DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
-          browser_context_);
-  if (!data_reduction_proxy_settings ||
-      !data_reduction_proxy_settings->data_reduction_proxy_service()) {
-    return;
+      PreviewsInfoBarDelegate::Create(
+          web_contents(), main_frame_preview, previews_freshness,
+          true /* is_data_saver_user */, is_reload,
+          base::BindOnce(&AddPreviewNavigationCallback,
+                         web_contents()->GetBrowserContext(),
+                         navigation_handle->GetRedirectChain()[0],
+                         main_frame_preview, page_id),
+          previews_ui_service);
+    }
   }
-  data_reduction_proxy_settings->data_reduction_proxy_service()
-      ->pingback_client()
-      ->ClearNavigationKeyAsync(committed_data_saver_navigation_id_.value());
 }

@@ -79,12 +79,6 @@ class ProfileSyncComponentsFactoryImpl
       const base::FilePath& sync_data_folder) override;
   std::unique_ptr<syncer::LocalDeviceInfoProvider>
   CreateLocalDeviceInfoProvider() override;
-  std::unique_ptr<syncer::AttachmentService> CreateAttachmentService(
-      std::unique_ptr<syncer::AttachmentStoreForSync> attachment_store,
-      const syncer::UserShare& user_share,
-      const std::string& store_birthday,
-      syncer::ModelType model_type,
-      syncer::AttachmentService::Delegate* delegate) override;
   syncer::SyncApiComponentFactory::SyncComponents CreateBookmarkSyncComponents(
       syncer::SyncService* sync_service,
       std::unique_ptr<syncer::DataTypeErrorHandler> error_handler) override;
@@ -102,7 +96,7 @@ class ProfileSyncComponentsFactoryImpl
                                syncer::ModelTypeSet enabled_types);
 
   void DisableBrokenType(syncer::ModelType type,
-                         const tracked_objects::Location& from_here,
+                         const base::Location& from_here,
                          const std::string& message);
 
   // Client/platform specific members.

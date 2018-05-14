@@ -78,10 +78,6 @@ namespace base {
 class BaseTimerTaskInternal;
 class TickClock;
 
-// TODO(gab): Removing this fwd-decl causes IWYU failures in other headers,
-// remove it in a follow- up CL.
-class SingleThreadTaskRunner;
-
 //-----------------------------------------------------------------------------
 // This class wraps TaskRunner::PostDelayedTask to manage delayed and repeating
 // tasks. See meta comment above for thread-safety requirements.
@@ -97,11 +93,11 @@ class BASE_EXPORT Timer {
 
   // Construct a timer with retained task info. If |tick_clock| is provided, it
   // is used instead of TimeTicks::Now() to get TimeTicks when scheduling tasks.
-  Timer(const tracked_objects::Location& posted_from,
+  Timer(const Location& posted_from,
         TimeDelta delay,
         const base::Closure& user_task,
         bool is_repeating);
-  Timer(const tracked_objects::Location& posted_from,
+  Timer(const Location& posted_from,
         TimeDelta delay,
         const base::Closure& user_task,
         bool is_repeating,
@@ -124,9 +120,21 @@ class BASE_EXPORT Timer {
 
   // Start the timer to run at the given |delay| from now. If the timer is
   // already running, it will be replaced to call the given |user_task|.
-  virtual void Start(const tracked_objects::Location& posted_from,
+  virtual void Start(const Location& posted_from,
                      TimeDelta delay,
                      const base::Closure& user_task);
+
+  // Start the timer to run at the given |delay| from now. If the timer is
+  // already running, it will be replaced to call a task formed from
+  // |reviewer->*method|.
+  template <class Receiver>
+  void Start(const Location& posted_from,
+             TimeDelta delay,
+             Receiver* receiver,
+             void (Receiver::*method)()) {
+    Timer::Start(posted_from, delay,
+                 base::Bind(method, base::Unretained(receiver)));
+  }
 
   // Call this method to stop and cancel the timer.  It is a no-op if the timer
   // is not running.
@@ -155,7 +163,7 @@ class BASE_EXPORT Timer {
   void set_desired_run_time(TimeTicks desired) { desired_run_time_ = desired; }
   void set_is_running(bool running) { is_running_ = running; }
 
-  const tracked_objects::Location& posted_from() const { return posted_from_; }
+  const Location& posted_from() const { return posted_from_; }
   bool retain_user_task() const { return retain_user_task_; }
   bool is_repeating() const { return is_repeating_; }
   bool is_running() const { return is_running_; }
@@ -189,7 +197,7 @@ class BASE_EXPORT Timer {
   scoped_refptr<SequencedTaskRunner> task_runner_;
 
   // Location in user code.
-  tracked_objects::Location posted_from_;
+  Location posted_from_;
   // Delay requested by user.
   TimeDelta delay_;
   // |user_task_| is what the user wants to be run at |desired_run_time_|.
@@ -230,50 +238,21 @@ class BASE_EXPORT Timer {
 };
 
 //-----------------------------------------------------------------------------
-// This class is an implementation detail of OneShotTimer and RepeatingTimer.
-// Please do not use this class directly.
-class BaseTimerMethodPointer : public Timer {
- public:
-  // This is here to work around the fact that Timer::Start is "hidden" by the
-  // Start definition below, rather than being overloaded.
-  // TODO(tim): We should remove uses of BaseTimerMethodPointer::Start below
-  // and convert callers to use the base::Closure version in Timer::Start,
-  // see bug 148832.
-  using Timer::Start;
-
-  enum RepeatMode { ONE_SHOT, REPEATING };
-  BaseTimerMethodPointer(RepeatMode mode, TickClock* tick_clock)
-      : Timer(mode == REPEATING, mode == REPEATING, tick_clock) {}
-
-  // Start the timer to run at the given |delay| from now. If the timer is
-  // already running, it will be replaced to call a task formed from
-  // |reviewer->*method|.
-  template <class Receiver>
-  void Start(const tracked_objects::Location& posted_from,
-             TimeDelta delay,
-             Receiver* receiver,
-             void (Receiver::*method)()) {
-    Timer::Start(posted_from, delay,
-                 base::Bind(method, base::Unretained(receiver)));
-  }
-};
-
-//-----------------------------------------------------------------------------
 // A simple, one-shot timer.  See usage notes at the top of the file.
-class OneShotTimer : public BaseTimerMethodPointer {
+class OneShotTimer : public Timer {
  public:
   OneShotTimer() : OneShotTimer(nullptr) {}
   explicit OneShotTimer(TickClock* tick_clock)
-      : BaseTimerMethodPointer(ONE_SHOT, tick_clock) {}
+      : Timer(false, false, tick_clock) {}
 };
 
 //-----------------------------------------------------------------------------
 // A simple, repeating timer.  See usage notes at the top of the file.
-class RepeatingTimer : public BaseTimerMethodPointer {
+class RepeatingTimer : public Timer {
  public:
   RepeatingTimer() : RepeatingTimer(nullptr) {}
   explicit RepeatingTimer(TickClock* tick_clock)
-      : BaseTimerMethodPointer(REPEATING, tick_clock) {}
+      : Timer(true, true, tick_clock) {}
 };
 
 //-----------------------------------------------------------------------------
@@ -290,14 +269,14 @@ class RepeatingTimer : public BaseTimerMethodPointer {
 class DelayTimer : protected Timer {
  public:
   template <class Receiver>
-  DelayTimer(const tracked_objects::Location& posted_from,
+  DelayTimer(const Location& posted_from,
              TimeDelta delay,
              Receiver* receiver,
              void (Receiver::*method)())
       : DelayTimer(posted_from, delay, receiver, method, nullptr) {}
 
   template <class Receiver>
-  DelayTimer(const tracked_objects::Location& posted_from,
+  DelayTimer(const Location& posted_from,
              TimeDelta delay,
              Receiver* receiver,
              void (Receiver::*method)(),
@@ -308,16 +287,8 @@ class DelayTimer : protected Timer {
               false,
               tick_clock) {}
 
-  void Reset() override;
+  using Timer::Reset;
 };
-
-// This class has a templated method so it can not be exported without failing
-// to link in MSVC. But clang-plugin does not allow inline definitions of
-// virtual methods, so the inline definition lives in the header file here
-// to satisfy both.
-inline void DelayTimer::Reset() {
-  Timer::Reset();
-}
 
 }  // namespace base
 

@@ -25,7 +25,7 @@ class PartitionAllocatorDummyVisitor {
 class WTF_EXPORT PartitionAllocator {
  public:
   typedef PartitionAllocatorDummyVisitor Visitor;
-  static const bool kIsGarbageCollected = false;
+  static constexpr bool kIsGarbageCollected = false;
 
   template <typename T>
   static size_t MaxElementCountInBackingStore() {
@@ -35,8 +35,7 @@ class WTF_EXPORT PartitionAllocator {
   template <typename T>
   static size_t QuantizedSize(size_t count) {
     CHECK_LE(count, MaxElementCountInBackingStore<T>());
-    return PartitionAllocActualSize(WTF::Partitions::BufferPartition(),
-                                    count * sizeof(T));
+    return WTF::Partitions::BufferPartition()->ActualSize(count * sizeof(T));
   }
   template <typename T>
   static T* AllocateVectorBacking(size_t size) {
@@ -83,7 +82,7 @@ class WTF_EXPORT PartitionAllocator {
     memset(result, 0, size);
     return reinterpret_cast<T*>(result);
   }
-  static void FreeHashTableBacking(void* address);
+  static void FreeHashTableBacking(void* address, bool is_weak_table);
 
   template <typename Return, typename Metadata>
   static Return Malloc(size_t size, const char* type_name) {
@@ -101,11 +100,19 @@ class WTF_EXPORT PartitionAllocator {
     Free(ptr);  // Not the system free, the one from this class.
   }
 
+  static void BackingWriteBarrier(void*) {}
+
   static bool IsAllocationAllowed() { return true; }
   static bool IsObjectResurrectionForbidden() { return false; }
 
   static void EnterGCForbiddenScope() {}
   static void LeaveGCForbiddenScope() {}
+
+  template <typename T, typename Traits>
+  static void NotifyNewObject(T* object) {}
+
+  template <typename T, typename Traits>
+  static void NotifyNewObjects(T* array, size_t len) {}
 
  private:
   static void* AllocateBacking(size_t, const char* type_name);

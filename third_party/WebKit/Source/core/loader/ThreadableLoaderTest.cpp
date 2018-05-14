@@ -5,10 +5,11 @@
 #include "core/loader/ThreadableLoader.h"
 
 #include <memory>
-#include "core/dom/TaskRunnerHelper.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/loader/DocumentThreadableLoader.h"
 #include "core/loader/ThreadableLoaderClient.h"
 #include "core/loader/ThreadableLoadingContext.h"
+#include "core/loader/WorkerFetchContext.h"
 #include "core/loader/WorkerThreadableLoader.h"
 #include "core/testing/DummyPageHolder.h"
 #include "core/workers/WorkerReportingProxy.h"
@@ -21,6 +22,7 @@
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/loader/fetch/ResourceTimingInfo.h"
+#include "platform/loader/testing/WebURLLoaderFactoryWithMock.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/weborigin/KURL.h"
@@ -28,12 +30,14 @@
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/Functional.h"
 #include "platform/wtf/PtrUtil.h"
-#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/text/WTFString.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebURLLoadTiming.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebURLResponse.h"
+#include "public/platform/WebWorkerFetchContext.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -87,16 +91,76 @@ bool IsNotCancellation(const ResourceError& error) {
 }
 
 KURL SuccessURL() {
-  return KURL(NullURL(), "http://example.com/success");
+  return KURL("http://example.com/success").Copy();
 }
 KURL ErrorURL() {
-  return KURL(NullURL(), "http://example.com/error");
+  return KURL("http://example.com/error").Copy();
 }
 KURL RedirectURL() {
-  return KURL(NullURL(), "http://example.com/redirect");
+  return KURL("http://example.com/redirect").Copy();
 }
 KURL RedirectLoopURL() {
-  return KURL(NullURL(), "http://example.com/loop");
+  return KURL("http://example.com/loop").Copy();
+}
+
+void ServeAsynchronousRequests() {
+  Platform::Current()->GetURLLoaderMockFactory()->ServeAsynchronousRequests();
+}
+
+void UnregisterAllURLsAndClearMemoryCache() {
+  Platform::Current()
+      ->GetURLLoaderMockFactory()
+      ->UnregisterAllURLsAndClearMemoryCache();
+}
+
+void SetUpSuccessURL() {
+  URLTestHelpers::RegisterMockedURLLoad(
+      SuccessURL(), testing::CoreTestDataPath(kFileName), "text/html");
+}
+
+void SetUpErrorURL() {
+  URLTestHelpers::RegisterMockedErrorURLLoad(ErrorURL());
+}
+
+void SetUpRedirectURL() {
+  KURL url = RedirectURL();
+
+  WebURLLoadTiming timing;
+  timing.Initialize();
+
+  WebURLResponse response;
+  response.SetURL(url);
+  response.SetHTTPStatusCode(301);
+  response.SetLoadTiming(timing);
+  response.AddHTTPHeaderField("Location", SuccessURL().GetString());
+  response.AddHTTPHeaderField("Access-Control-Allow-Origin", "null");
+
+  URLTestHelpers::RegisterMockedURLLoadWithCustomResponse(
+      url, testing::CoreTestDataPath(kFileName), response);
+}
+
+void SetUpRedirectLoopURL() {
+  KURL url = RedirectLoopURL();
+
+  WebURLLoadTiming timing;
+  timing.Initialize();
+
+  WebURLResponse response;
+  response.SetURL(url);
+  response.SetHTTPStatusCode(301);
+  response.SetLoadTiming(timing);
+  response.AddHTTPHeaderField("Location", RedirectLoopURL().GetString());
+  response.AddHTTPHeaderField("Access-Control-Allow-Origin", "null");
+
+  URLTestHelpers::RegisterMockedURLLoadWithCustomResponse(
+      url, testing::CoreTestDataPath(kFileName), response);
+}
+
+void SetUpMockURLs() {
+  SetUpSuccessURL();
+  SetUpErrorURL();
+  SetUpRedirectURL();
+  SetUpRedirectLoopURL();
 }
 
 enum ThreadableLoaderToTest {
@@ -106,7 +170,7 @@ enum ThreadableLoaderToTest {
 
 class ThreadableLoaderTestHelper {
  public:
-  virtual ~ThreadableLoaderTestHelper() {}
+  virtual ~ThreadableLoaderTestHelper() = default;
 
   virtual void CreateLoader(ThreadableLoaderClient*) = 0;
   virtual void StartLoader(const ResourceRequest&) = 0;
@@ -146,15 +210,16 @@ class DocumentThreadableLoaderTestHelper : public ThreadableLoaderTestHelper {
   Checkpoint& GetCheckpoint() override { return checkpoint_; }
   void CallCheckpoint(int n) override { checkpoint_.Call(n); }
 
-  void OnSetUp() override {}
+  void OnSetUp() override { SetUpMockURLs(); }
 
-  void OnServeRequests() override {}
+  void OnServeRequests() override { ServeAsynchronousRequests(); }
 
   void OnTearDown() override {
     if (loader_) {
       loader_->Cancel();
       loader_ = nullptr;
     }
+    UnregisterAllURLsAndClearMemoryCache();
   }
 
  private:
@@ -165,6 +230,32 @@ class DocumentThreadableLoaderTestHelper : public ThreadableLoaderTestHelper {
   Persistent<DocumentThreadableLoader> loader_;
 };
 
+class WebWorkerFetchContextForTest : public WebWorkerFetchContext {
+ public:
+  WebWorkerFetchContextForTest(KURL site_for_cookies)
+      : site_for_cookies_(site_for_cookies.Copy()) {}
+  void InitializeOnWorkerThread() override {}
+
+  std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() override {
+    return std::make_unique<WebURLLoaderFactoryWithMock>(
+        Platform::Current()->GetURLLoaderMockFactory());
+  }
+  std::unique_ptr<WebURLLoaderFactory> WrapURLLoaderFactory(
+      mojo::ScopedMessagePipeHandle) override {
+    return std::make_unique<WebURLLoaderFactoryWithMock>(
+        Platform::Current()->GetURLLoaderMockFactory());
+  }
+
+  void WillSendRequest(WebURLRequest&) override {}
+  bool IsControlledByServiceWorker() const override { return false; }
+  WebURL SiteForCookies() const override { return site_for_cookies_; }
+
+ private:
+  WebURL site_for_cookies_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebWorkerFetchContextForTest);
+};
+
 class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper {
  public:
   WorkerThreadableLoaderTestHelper()
@@ -172,9 +263,9 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper {
 
   void CreateLoader(ThreadableLoaderClient* client) override {
     std::unique_ptr<WaitableEvent> completion_event =
-        WTF::MakeUnique<WaitableEvent>();
-    worker_loading_task_runner_->PostTask(
-        BLINK_FROM_HERE,
+        std::make_unique<WaitableEvent>();
+    PostCrossThreadTask(
+        *worker_loading_task_runner_, FROM_HERE,
         CrossThreadBind(&WorkerThreadableLoaderTestHelper::WorkerCreateLoader,
                         CrossThreadUnretained(this),
                         CrossThreadUnretained(client),
@@ -184,9 +275,9 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper {
 
   void StartLoader(const ResourceRequest& request) override {
     std::unique_ptr<WaitableEvent> completion_event =
-        WTF::MakeUnique<WaitableEvent>();
-    worker_loading_task_runner_->PostTask(
-        BLINK_FROM_HERE,
+        std::make_unique<WaitableEvent>();
+    PostCrossThreadTask(
+        *worker_loading_task_runner_, FROM_HERE,
         CrossThreadBind(&WorkerThreadableLoaderTestHelper::WorkerStartLoader,
                         CrossThreadUnretained(this),
                         CrossThreadUnretained(completion_event.get()),
@@ -221,9 +312,9 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper {
     testing::RunPendingTasks();
 
     std::unique_ptr<WaitableEvent> completion_event =
-        WTF::MakeUnique<WaitableEvent>();
-    worker_loading_task_runner_->PostTask(
-        BLINK_FROM_HERE,
+        std::make_unique<WaitableEvent>();
+    PostCrossThreadTask(
+        *worker_loading_task_runner_, FROM_HERE,
         CrossThreadBind(&WorkerThreadableLoaderTestHelper::WorkerCallCheckpoint,
                         CrossThreadUnretained(this),
                         CrossThreadUnretained(completion_event.get()), n));
@@ -231,33 +322,46 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper {
   }
 
   void OnSetUp() override {
-    reporting_proxy_ = WTF::MakeUnique<WorkerReportingProxy>();
+    reporting_proxy_ = std::make_unique<WorkerReportingProxy>();
     security_origin_ = GetDocument().GetSecurityOrigin();
     parent_frame_task_runners_ =
         ParentFrameTaskRunners::Create(dummy_page_holder_->GetFrame());
-    worker_thread_ = WTF::MakeUnique<WorkerThreadForTest>(
+    worker_thread_ = std::make_unique<WorkerThreadForTest>(
         ThreadableLoadingContext::Create(GetDocument()), *reporting_proxy_);
+    WorkerClients* worker_clients = WorkerClients::Create();
 
-    worker_thread_->StartWithSourceCode(security_origin_.Get(),
-                                        "//fake source code",
-                                        parent_frame_task_runners_.Get());
+    ProvideWorkerFetchContextToWorker(
+        worker_clients, std::make_unique<WebWorkerFetchContextForTest>(
+                            GetDocument().SiteForCookies()));
+    worker_thread_->StartWithSourceCode(
+        security_origin_.get(), "//fake source code",
+        parent_frame_task_runners_.Get(), GetDocument().Url(), worker_clients);
     worker_thread_->WaitForInit();
     worker_loading_task_runner_ =
-        TaskRunnerHelper::Get(TaskType::kUnspecedLoading, worker_thread_.get());
+        worker_thread_->GetTaskRunner(TaskType::kInternalTest);
+
+    PostCrossThreadTask(*worker_loading_task_runner_, FROM_HERE,
+                        CrossThreadBind(&SetUpMockURLs));
+    WaitForWorkerThreadSignal();
   }
 
-  void OnServeRequests() override { testing::RunPendingTasks(); }
+  void OnServeRequests() override {
+    testing::RunPendingTasks();
+    PostCrossThreadTask(*worker_loading_task_runner_, FROM_HERE,
+                        CrossThreadBind(&ServeAsynchronousRequests));
+    WaitForWorkerThreadSignal();
+  }
 
   void OnTearDown() override {
-    worker_loading_task_runner_->PostTask(
-        BLINK_FROM_HERE,
+    PostCrossThreadTask(
+        *worker_loading_task_runner_, FROM_HERE,
         CrossThreadBind(&WorkerThreadableLoaderTestHelper::ClearLoader,
                         CrossThreadUnretained(this)));
-    WaitableEvent event;
-    worker_loading_task_runner_->PostTask(
-        BLINK_FROM_HERE,
-        CrossThreadBind(&WaitableEvent::Signal, CrossThreadUnretained(&event)));
-    event.Wait();
+    WaitForWorkerThreadSignal();
+    PostCrossThreadTask(*worker_loading_task_runner_, FROM_HERE,
+                        CrossThreadBind(&UnregisterAllURLsAndClearMemoryCache));
+    WaitForWorkerThreadSignal();
+
     worker_thread_->Terminate();
     worker_thread_->WaitForShutdownForTesting();
 
@@ -296,7 +400,8 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper {
     DCHECK(worker_thread_->IsCurrentThread());
 
     ResourceRequest request(request_data.get());
-    request.SetFetchCredentialsMode(WebURLRequest::kFetchCredentialsModeOmit);
+    request.SetFetchCredentialsMode(
+        network::mojom::FetchCredentialsMode::kOmit);
     loader_->Start(request);
     event->Signal();
   }
@@ -308,14 +413,22 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper {
     event->Signal();
   }
 
-  RefPtr<SecurityOrigin> security_origin_;
+  void WaitForWorkerThreadSignal() {
+    WaitableEvent event;
+    PostCrossThreadTask(
+        *worker_loading_task_runner_, FROM_HERE,
+        CrossThreadBind(&WaitableEvent::Signal, CrossThreadUnretained(&event)));
+    event.Wait();
+  }
+
+  scoped_refptr<const SecurityOrigin> security_origin_;
   std::unique_ptr<WorkerReportingProxy> reporting_proxy_;
   std::unique_ptr<WorkerThreadForTest> worker_thread_;
 
   std::unique_ptr<DummyPageHolder> dummy_page_holder_;
   // Accessed cross-thread when worker thread posts tasks to the parent.
   CrossThreadPersistent<ParentFrameTaskRunners> parent_frame_task_runners_;
-  RefPtr<WebTaskRunner> worker_loading_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> worker_loading_task_runner_;
   Checkpoint checkpoint_;
   // |m_loader| must be touched only from the worker thread only.
   CrossThreadPersistent<ThreadableLoader> loader_;
@@ -336,12 +449,13 @@ class ThreadableLoaderTest
   }
 
   void StartLoader(const KURL& url,
-                   WebURLRequest::FetchRequestMode fetch_request_mode =
-                       WebURLRequest::kFetchRequestModeNoCORS) {
+                   network::mojom::FetchRequestMode fetch_request_mode =
+                       network::mojom::FetchRequestMode::kNoCORS) {
     ResourceRequest request(url);
     request.SetRequestContext(WebURLRequest::kRequestContextObject);
     request.SetFetchRequestMode(fetch_request_mode);
-    request.SetFetchCredentialsMode(WebURLRequest::kFetchCredentialsModeOmit);
+    request.SetFetchCredentialsMode(
+        network::mojom::FetchCredentialsMode::kOmit);
     helper_->StartLoader(request);
   }
 
@@ -353,7 +467,6 @@ class ThreadableLoaderTest
 
   void ServeRequests() {
     helper_->OnServeRequests();
-    Platform::Current()->GetURLLoaderMockFactory()->ServeAsynchronousRequests();
   }
 
   void CreateLoader() { helper_->CreateLoader(Client()); }
@@ -362,66 +475,14 @@ class ThreadableLoaderTest
 
  private:
   void SetUp() override {
-    SetUpSuccessURL();
-    SetUpErrorURL();
-    SetUpRedirectURL();
-    SetUpRedirectLoopURL();
-
     client_ = MockThreadableLoaderClient::Create();
     helper_->OnSetUp();
   }
 
   void TearDown() override {
     helper_->OnTearDown();
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
     client_.reset();
   }
-
-  void SetUpSuccessURL() {
-    URLTestHelpers::RegisterMockedURLLoad(
-        SuccessURL(), testing::CoreTestDataPath(kFileName), "text/html");
-  }
-
-  void SetUpErrorURL() {
-    URLTestHelpers::RegisterMockedErrorURLLoad(ErrorURL());
-  }
-
-  void SetUpRedirectURL() {
-    KURL url = RedirectURL();
-
-    WebURLLoadTiming timing;
-    timing.Initialize();
-
-    WebURLResponse response;
-    response.SetURL(url);
-    response.SetHTTPStatusCode(301);
-    response.SetLoadTiming(timing);
-    response.AddHTTPHeaderField("Location", SuccessURL().GetString());
-    response.AddHTTPHeaderField("Access-Control-Allow-Origin", "null");
-
-    URLTestHelpers::RegisterMockedURLLoadWithCustomResponse(
-        url, testing::CoreTestDataPath(kFileName), response);
-  }
-
-  void SetUpRedirectLoopURL() {
-    KURL url = RedirectLoopURL();
-
-    WebURLLoadTiming timing;
-    timing.Initialize();
-
-    WebURLResponse response;
-    response.SetURL(url);
-    response.SetHTTPStatusCode(301);
-    response.SetLoadTiming(timing);
-    response.AddHTTPHeaderField("Location", RedirectLoopURL().GetString());
-    response.AddHTTPHeaderField("Access-Control-Allow-Origin", "null");
-
-    URLTestHelpers::RegisterMockedURLLoadWithCustomResponse(
-        url, testing::CoreTestDataPath(kFileName), response);
-  }
-
   std::unique_ptr<MockThreadableLoaderClient> client_;
   std::unique_ptr<ThreadableLoaderTestHelper> helper_;
 };
@@ -648,12 +709,16 @@ TEST_P(ThreadableLoaderTest, DidFailInStart) {
   CreateLoader();
   CallCheckpoint(1);
 
-  EXPECT_CALL(*Client(), DidFail(ResourceError(
-                             kErrorDomainBlinkInternal, 0, ErrorURL(),
-                             "Cross origin requests are not supported.")));
+  String error_message = String::Format(
+      "Failed to load '%s': Cross origin requests are not allowed by request "
+      "mode.",
+      ErrorURL().GetString().Utf8().data());
+  EXPECT_CALL(*Client(), DidFail(ResourceError::CancelledDueToAccessCheckError(
+                             ErrorURL(), ResourceRequestBlockedReason::kOther,
+                             error_message)));
   EXPECT_CALL(GetCheckpoint(), Call(2));
 
-  StartLoader(ErrorURL(), WebURLRequest::kFetchRequestModeSameOrigin);
+  StartLoader(ErrorURL(), network::mojom::FetchRequestMode::kSameOrigin);
   CallCheckpoint(2);
   ServeRequests();
 }
@@ -668,7 +733,7 @@ TEST_P(ThreadableLoaderTest, CancelInDidFailInStart) {
       .WillOnce(InvokeWithoutArgs(this, &ThreadableLoaderTest::CancelLoader));
   EXPECT_CALL(GetCheckpoint(), Call(2));
 
-  StartLoader(ErrorURL(), WebURLRequest::kFetchRequestModeSameOrigin);
+  StartLoader(ErrorURL(), network::mojom::FetchRequestMode::kSameOrigin);
   CallCheckpoint(2);
   ServeRequests();
 }
@@ -683,7 +748,7 @@ TEST_P(ThreadableLoaderTest, ClearInDidFailInStart) {
       .WillOnce(InvokeWithoutArgs(this, &ThreadableLoaderTest::ClearLoader));
   EXPECT_CALL(GetCheckpoint(), Call(2));
 
-  StartLoader(ErrorURL(), WebURLRequest::kFetchRequestModeSameOrigin);
+  StartLoader(ErrorURL(), network::mojom::FetchRequestMode::kSameOrigin);
   CallCheckpoint(2);
   ServeRequests();
 }
@@ -702,7 +767,7 @@ TEST_P(ThreadableLoaderTest, DidFailAccessControlCheck) {
           "No 'Access-Control-Allow-Origin' header is present on the requested "
           "resource. Origin 'null' is therefore not allowed access.")));
 
-  StartLoader(SuccessURL(), WebURLRequest::kFetchRequestModeCORS);
+  StartLoader(SuccessURL(), network::mojom::FetchRequestMode::kCORS);
   CallCheckpoint(2);
   ServeRequests();
 }
@@ -769,7 +834,7 @@ TEST_P(ThreadableLoaderTest, DidFailRedirectCheck) {
   EXPECT_CALL(GetCheckpoint(), Call(2));
   EXPECT_CALL(*Client(), DidFailRedirectCheck());
 
-  StartLoader(RedirectLoopURL(), WebURLRequest::kFetchRequestModeCORS);
+  StartLoader(RedirectLoopURL(), network::mojom::FetchRequestMode::kCORS);
   CallCheckpoint(2);
   ServeRequests();
 }
@@ -784,7 +849,7 @@ TEST_P(ThreadableLoaderTest, CancelInDidFailRedirectCheck) {
   EXPECT_CALL(*Client(), DidFailRedirectCheck())
       .WillOnce(InvokeWithoutArgs(this, &ThreadableLoaderTest::CancelLoader));
 
-  StartLoader(RedirectLoopURL(), WebURLRequest::kFetchRequestModeCORS);
+  StartLoader(RedirectLoopURL(), network::mojom::FetchRequestMode::kCORS);
   CallCheckpoint(2);
   ServeRequests();
 }
@@ -799,7 +864,7 @@ TEST_P(ThreadableLoaderTest, ClearInDidFailRedirectCheck) {
   EXPECT_CALL(*Client(), DidFailRedirectCheck())
       .WillOnce(InvokeWithoutArgs(this, &ThreadableLoaderTest::ClearLoader));
 
-  StartLoader(RedirectLoopURL(), WebURLRequest::kFetchRequestModeCORS);
+  StartLoader(RedirectLoopURL(), network::mojom::FetchRequestMode::kCORS);
   CallCheckpoint(2);
   ServeRequests();
 }
@@ -819,8 +884,7 @@ TEST_P(ThreadableLoaderTest, GetResponseSynchronously) {
   // test is not saying that didFailAccessControlCheck should be dispatched
   // synchronously, but is saying that even when a response is served
   // synchronously it should not lead to a crash.
-  StartLoader(KURL(NullURL(), "about:blank"),
-              WebURLRequest::kFetchRequestModeCORS);
+  StartLoader(KURL("about:blank"), network::mojom::FetchRequestMode::kCORS);
   CallCheckpoint(2);
 }
 

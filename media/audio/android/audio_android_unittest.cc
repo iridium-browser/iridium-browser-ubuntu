@@ -160,12 +160,11 @@ std::ostream& operator<<(std::ostream& os, const AudioParameters& params) {
 // Gmock implementation of AudioInputStream::AudioInputCallback.
 class MockAudioInputCallback : public AudioInputStream::AudioInputCallback {
  public:
-  MOCK_METHOD4(OnData,
-               void(AudioInputStream* stream,
-                    const AudioBus* src,
-                    uint32_t hardware_delay_bytes,
+  MOCK_METHOD3(OnData,
+               void(const AudioBus* src,
+                    base::TimeTicks capture_time,
                     double volume));
-  MOCK_METHOD1(OnError, void(AudioInputStream* stream));
+  MOCK_METHOD0(OnError, void());
 };
 
 // Implements AudioOutputStream::AudioSourceCallback and provides audio data
@@ -275,9 +274,8 @@ class FileAudioSink : public AudioInputStream::AudioInputCallback {
   }
 
   // AudioInputStream::AudioInputCallback implementation.
-  void OnData(AudioInputStream* stream,
-              const AudioBus* src,
-              uint32_t hardware_delay_bytes,
+  void OnData(const AudioBus* src,
+              base::TimeTicks capture_time,
               double volume) override {
     const int num_samples = src->frames() * src->channels();
     std::unique_ptr<int16_t> interleaved(new int16_t[num_samples]);
@@ -292,7 +290,7 @@ class FileAudioSink : public AudioInputStream::AudioInputCallback {
       event_->Signal();
   }
 
-  void OnError(AudioInputStream* stream) override {}
+  void OnError() override {}
 
  private:
   base::WaitableEvent* event_;
@@ -323,9 +321,8 @@ class FullDuplexAudioSinkSource
   ~FullDuplexAudioSinkSource() override {}
 
   // AudioInputStream::AudioInputCallback implementation
-  void OnData(AudioInputStream* stream,
-              const AudioBus* src,
-              uint32_t hardware_delay_bytes,
+  void OnData(const AudioBus* src,
+              base::TimeTicks capture_time,
               double volume) override {
     const base::TimeTicks now_time = base::TimeTicks::Now();
     const int diff = (now_time - previous_time_).InMilliseconds();
@@ -363,7 +360,7 @@ class FullDuplexAudioSinkSource
     }
   }
 
-  void OnError(AudioInputStream* stream) override {}
+  void OnError() override {}
 
   // AudioOutputStream::AudioSourceCallback implementation
   int OnMoreData(base::TimeDelta /* delay */,
@@ -397,8 +394,6 @@ class FullDuplexAudioSinkSource
     return dest->frames();
   }
 
-  void OnError() override {}
-
  private:
   // Converts from bytes to milliseconds given number of bytes and existing
   // audio parameters.
@@ -425,7 +420,7 @@ class AudioAndroidOutputTest : public testing::Test {
   AudioAndroidOutputTest()
       : loop_(new base::MessageLoopForUI()),
         audio_manager_(AudioManager::CreateForTesting(
-            base::MakeUnique<TestAudioThread>())),
+            std::make_unique<TestAudioThread>())),
         audio_manager_device_info_(audio_manager_.get()),
         audio_output_stream_(NULL) {
     // Flush the message loop to ensure that AudioManager is fully initialized.
@@ -665,12 +660,12 @@ class AudioAndroidInputTest : public AudioAndroidOutputTest,
     MockAudioInputCallback sink;
 
     base::RunLoop run_loop;
-    EXPECT_CALL(sink, OnData(audio_input_stream_, NotNull(), _, _))
+    EXPECT_CALL(sink, OnData(NotNull(), _, _))
         .Times(AtLeast(num_callbacks))
         .WillRepeatedly(CheckCountAndPostQuitTask(
             &count, num_callbacks, base::ThreadTaskRunnerHandle::Get(),
             run_loop.QuitWhenIdleClosure()));
-    EXPECT_CALL(sink, OnError(audio_input_stream_)).Times(0);
+    EXPECT_CALL(sink, OnError()).Times(0);
 
     OpenAndStartAudioInputStreamOnAudioThread(&sink);
 

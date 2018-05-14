@@ -9,13 +9,12 @@
 #include <stdint.h>
 
 #include <list>
-#include <queue>
 #include <vector>
 
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/bitstream_buffer.h"
-#include "media/base/media_export.h"
 #include "media/video/video_encode_accelerator.h"
 
 namespace base {
@@ -28,7 +27,7 @@ namespace media {
 
 static const size_t kMinimumOutputBufferSize = 123456;
 
-class MEDIA_EXPORT FakeVideoEncodeAccelerator : public VideoEncodeAccelerator {
+class FakeVideoEncodeAccelerator : public VideoEncodeAccelerator {
  public:
   explicit FakeVideoEncodeAccelerator(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
@@ -77,7 +76,7 @@ class MEDIA_EXPORT FakeVideoEncodeAccelerator : public VideoEncodeAccelerator {
 
   // A queue containing the necessary data for incoming frames. The boolean
   // represent whether the queued frame should force a key frame.
-  std::queue<bool> queued_frames_;
+  base::queue<bool> queued_frames_;
 
   // A list of buffers available for putting fake encoded frames in.
   std::list<BitstreamBuffer> available_buffers_;

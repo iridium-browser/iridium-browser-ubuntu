@@ -24,7 +24,7 @@ Common.StaticContentProvider = class {
    * @return {!Common.StaticContentProvider}
    */
   static fromString(contentURL, contentType, content) {
-    var lazyContent = () => Promise.resolve(content);
+    const lazyContent = () => Promise.resolve(content);
     return new Common.StaticContentProvider(contentURL, contentType, lazyContent);
   }
 
@@ -46,6 +46,14 @@ Common.StaticContentProvider = class {
 
   /**
    * @override
+   * @return {!Promise<boolean>}
+   */
+  contentEncoded() {
+    return Promise.resolve(false);
+  }
+
+  /**
+   * @override
    * @return {!Promise<?string>}
    */
   requestContent() {
@@ -60,7 +68,7 @@ Common.StaticContentProvider = class {
    * @return {!Promise<!Array<!Common.ContentProvider.SearchMatch>>}
    */
   async searchInContent(query, caseSensitive, isRegex) {
-    var content = await this._lazyContent();
+    const content = await this._lazyContent();
     return content ? Common.ContentProvider.performSearchInContent(content, query, caseSensitive, isRegex) : [];
   }
 };

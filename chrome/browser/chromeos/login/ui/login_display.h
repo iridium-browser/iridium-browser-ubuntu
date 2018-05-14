@@ -59,15 +59,8 @@ class LoginDisplay {
     // Used when the lock screen is being displayed.
     virtual void Signout() = 0;
 
-    // Complete sign process with specified |user_context|.
-    // Used for new users authenticated through an extension.
-    virtual void CompleteLogin(const UserContext& user_context) = 0;
-
     // Notify the delegate when the sign-in UI is finished loading.
     virtual void OnSigninScreenReady() = 0;
-
-    // Notify the delegate when the GAIA UI is finished loading.
-    virtual void OnGaiaScreenReady() = 0;
 
     // Called when the user requests enterprise enrollment.
     virtual void OnStartEnterpriseEnrollment() = 0;
@@ -81,17 +74,11 @@ class LoginDisplay {
     // Called when the owner permission for kiosk app auto launch is requested.
     virtual void OnStartKioskAutolaunchScreen() = 0;
 
+    // Shows update required screen.
+    virtual void ShowUpdateRequiredScreen() = 0;
+
     // Shows wrong HWID screen.
     virtual void ShowWrongHWIDScreen() = 0;
-
-    // Sets the displayed email for the next login attempt with |CompleteLogin|.
-    // If it succeeds, user's displayed email value will be updated to |email|.
-    virtual void SetDisplayEmail(const std::string& email) = 0;
-    // Sets the displayed name and given name for the next login attempt with
-    // |CompleteLogin|. If it succeeds, user's displayed name and give name
-    // values will be updated to |display_name| and |given_name|.
-    virtual void SetDisplayAndGivenName(const std::string& display_name,
-                                        const std::string& given_name) = 0;
 
     // Returns name of the currently connected network, for error message,
     virtual base::string16 GetConnectedNetworkName() = 0;
@@ -99,15 +86,11 @@ class LoginDisplay {
     // Restarts the auto-login timer if it is running.
     virtual void ResetAutoLoginTimer() = 0;
 
-    // Returns true if user is allowed to log in by domain policy.
-    virtual bool IsUserWhitelisted(const AccountId& account_id) = 0;
-
    protected:
     virtual ~Delegate();
   };
 
-  // |background_bounds| determines the bounds of login UI background.
-  LoginDisplay(Delegate* delegate, const gfx::Rect& background_bounds);
+  explicit LoginDisplay(Delegate* delegate);
   virtual ~LoginDisplay();
 
   // Clears and enables fields on user pod or GAIA frame.
@@ -152,11 +135,6 @@ class LoginDisplay {
   // Show unrecoverable cryptohome error dialog.
   virtual void ShowUnrecoverableCrypthomeErrorDialog() = 0;
 
-  gfx::Rect background_bounds() const { return background_bounds_; }
-  void set_background_bounds(const gfx::Rect& background_bounds) {
-    background_bounds_ = background_bounds;
-  }
-
   Delegate* delegate() { return delegate_; }
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
@@ -166,23 +144,18 @@ class LoginDisplay {
   bool is_signin_completed() const { return is_signin_completed_; }
   void set_signin_completed(bool value) { is_signin_completed_ = value; }
 
-  int width() const { return background_bounds_.width(); }
-
  protected:
   // Login UI delegate (controller).
   Delegate* delegate_;
 
   // Parent window, might be used to create dialog windows.
-  gfx::NativeWindow parent_window_;
-
-  // Bounds of the login UI background.
-  gfx::Rect background_bounds_;
+  gfx::NativeWindow parent_window_ = nullptr;
 
   // True if signin for user has completed.
   // TODO(nkostylev): Find a better place to store this state
   // in redesigned login stack.
   // Login stack (and this object) will be recreated for next user sign in.
-  bool is_signin_completed_;
+  bool is_signin_completed_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(LoginDisplay);
 };

@@ -27,9 +27,9 @@ This is only an estimate. The **gitiles** view may differ.
 
 ### Review changes online with gerrit's links to gitiles:
 
-1.  Upload a patch to gerrit, or receive a review request.  
+1.  Upload a patch to gerrit, or receive a review request.
     e.g. https://chromium-review.googlesource.com/c/572236
-2.  View a specific .md file.  
+2.  View a specific .md file.
     e.g. https://chromium-review.googlesource.com/c/572236/2/docs/README.md
 3.  Click on **gitiles** link at top of page.
 
@@ -100,6 +100,12 @@ used when committed.
 
 ### General Development
 *   [Code Reviews](code_reviews.md) - Code review requirements and guidelines
+*   [Respectful Code Reviews](cr_respect.md) - A guide for code reviewers
+*   [Respectful Changes](cl_respect.md) - A guide for code authors
+*   [LUCI Migration FAQ](luci_migration_faq.md) - FAQ on Buildbot-to-LUCI
+    builder migration for Chromium
+*   [Tour of Continuous Integration UI](tour_of_luci_ui.md) - A tour of our
+    the user interface for LUCI, our continuous integration system
 *   [Closure Compilation](closure_compilation.md) - The _Closure_ JavaScript
     compiler
 *   [Threading and Tasks in Chrome](threading_and_tasks.md) - How to run tasks
@@ -131,6 +137,11 @@ used when committed.
     more performant
 *   [ES6 Support in Chromium](es6_chromium.md) - Implementation of ECMAScript6
     features in Chromium
+*   [Adding a new feature flag in chrome://flags](how_to_add_your_feature_flag.md) - Quick
+    guide to add a new feature flag to experiment your feature.
+*   [Guidelines for considering branch dates in project planning](release_branch_guidance.md) -
+    What to do (and not to do) around branch dates when scheduling your project
+    work.
 
 ### Testing
 *   [Running and Debugging Layout Tests](testing/layout_tests.md)
@@ -147,8 +158,7 @@ used when committed.
     Diagnosing and fixing layout test flakiness due to ordering dependencies.
 *   [Running Layout Tests using `content_shell`](testing/layout_tests_in_content_shell.md) -
     Running layout tests by hand.
-*   [Testing Browser Dialogs](testing/test_browser_dialog.md) - Using
-    TestBrowserDialog
+*   [Testing Browser UI](testing/test_browser_ui.md) - Using TestBrowserUi
 *   [Web Platform Tests](testing/web_platform_tests.md) - Shared tests across
     browser vendors
 *   [Using Breakpad with `content_shell`](testing/using_breakpad_with_content_shell.md) -
@@ -200,8 +210,6 @@ used when committed.
 *   [Running Layout Tests on Linux](layout_tests_linux.md) - Linux-specific
     instructions for running layout tests.
 *   [Linux Sysroot Images](linux_sysroot.md) - How builds use libraries on Linux
-*   [`msttcorefonts` on Mandriva](mandriva_msttcorefonts.md) - Getting fonts
-    needed to build Chrome that are not available for Mandriva
 *   [Linux Hardware Video Decoding](linux_hw_video_decode.md) - Enabling
     hardware video decode codepaths on Linux
 
@@ -230,8 +238,6 @@ used when committed.
     Setting up profiling for `content_shell` on Android
 *   [Working Remotely with Android](working_remotely_with_android.md) - Building
     on a remote machine for an Android device connected to your local machine
-*   [Using FindBugs for Android](use_find_bugs_for_android.md) - Using the open
-    source static analysis tool findbugs on the Java code.
 *   [Android Test Instructions](android_test_instructions.md) - Running a build
     on an Android device or emulator.
 *   [Android Debugging](android_debugging_instructions.md) - Tools and tips for
@@ -247,6 +253,10 @@ used when committed.
     iOS app open links in Chrome.
 *   [User Agent in Chrome for iOS](ios/user_agent.md) - Notes on User Agent
     strings using Chrome for iOS.
+*   [Running iOS test suites locally](ios/testing.md)
+
+### Misc Chrome-OS-Specific Docs
+*   [Chrome Logging on Chrome OS](chrome_os_logging.md)
 
 ### Media
 *   [Audio Focus Handling](media/audio_focus.md) - How multiple MediaSession
@@ -303,7 +313,7 @@ used when committed.
     directories are determined on all platforms.
 
 ### Probably Obsolete
-*   [Old ChromeOS build instructions](old_chromeos_build_instructions.md)
+*   [Old Chrome OS build instructions](old_chromeos_build_instructions.md)
 *   [TPM Quick Reference](tpm_quick_ref.md) - Trusted Platform Module notes.
 *   [System Hardening Features](system_hardening_features.md) - A list of
     current and planned Chrome OS security features.

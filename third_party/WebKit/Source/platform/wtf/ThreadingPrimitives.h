@@ -31,11 +31,12 @@
 #ifndef ThreadingPrimitives_h
 #define ThreadingPrimitives_h
 
+#include "base/macros.h"
+#include "base/thread_annotations.h"
 #include "build/build_config.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/Locker.h"
-#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/WTFExport.h"
 
 #if defined(OS_WIN)
@@ -61,24 +62,13 @@ struct PlatformMutex {
   CRITICAL_SECTION internal_mutex_;
   size_t recursion_count_;
 };
-struct PlatformCondition {
-  size_t waiters_gone_;
-  size_t waiters_blocked_;
-  size_t waiters_to_unblock_;
-  HANDLE block_lock_;
-  HANDLE block_queue_;
-  HANDLE unblock_lock_;
-
-  bool TimedWait(PlatformMutex&, DWORD duration_milliseconds);
-  void Signal(bool unblock_all);
-};
+typedef CONDITION_VARIABLE PlatformCondition;
 #else
 typedef void* PlatformMutex;
 typedef void* PlatformCondition;
 #endif
 
 class WTF_EXPORT MutexBase {
-  WTF_MAKE_NONCOPYABLE(MutexBase);
   USING_FAST_MALLOC(MutexBase);
 
  public:
@@ -97,12 +87,19 @@ class WTF_EXPORT MutexBase {
   MutexBase(bool recursive);
 
   PlatformMutex mutex_;
+
+  DISALLOW_COPY_AND_ASSIGN(MutexBase);
 };
 
-class WTF_EXPORT Mutex : public MutexBase {
+class LOCKABLE WTF_EXPORT Mutex : public MutexBase {
  public:
   Mutex() : MutexBase(false) {}
-  bool TryLock();
+  bool TryLock() EXCLUSIVE_TRYLOCK_FUNCTION(true);
+
+  // lock() and unlock() are overridden solely for the purpose of annotating
+  // them. The compiler is expected to optimize the calls away.
+  void lock() EXCLUSIVE_LOCK_FUNCTION() { MutexBase::lock(); }
+  void unlock() UNLOCK_FUNCTION() { MutexBase::unlock(); }
 };
 
 class WTF_EXPORT RecursiveMutex : public MutexBase {
@@ -111,11 +108,25 @@ class WTF_EXPORT RecursiveMutex : public MutexBase {
   bool TryLock();
 };
 
-typedef Locker<MutexBase> MutexLocker;
+class SCOPED_LOCKABLE MutexLocker final {
+  STACK_ALLOCATED();
+
+ public:
+  MutexLocker(Mutex& mutex) EXCLUSIVE_LOCK_FUNCTION(mutex) : mutex_(mutex) {
+    mutex_.lock();
+  }
+  ~MutexLocker() UNLOCK_FUNCTION() { mutex_.unlock(); }
+
+ private:
+  Mutex& mutex_;
+
+  DISALLOW_COPY_AND_ASSIGN(MutexLocker);
+};
+
+using RecursiveMutexLocker = Locker<RecursiveMutex>;
 
 class MutexTryLocker final {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(MutexTryLocker);
 
  public:
   MutexTryLocker(Mutex& mutex) : mutex_(mutex), locked_(mutex.TryLock()) {}
@@ -129,27 +140,30 @@ class MutexTryLocker final {
  private:
   Mutex& mutex_;
   bool locked_;
+
+  DISALLOW_COPY_AND_ASSIGN(MutexTryLocker);
 };
 
 class WTF_EXPORT ThreadCondition final {
   USING_FAST_MALLOC(ThreadCondition);  // Only HeapTest.cpp requires.
-  WTF_MAKE_NONCOPYABLE(ThreadCondition);
 
  public:
   ThreadCondition();
   ~ThreadCondition();
 
-  void Wait(MutexBase&);
+  void Wait(Mutex&);
   // Returns true if the condition was signaled before absoluteTime, false if
   // the absoluteTime was reached or is in the past.
   // The absoluteTime is in seconds, starting on January 1, 1970. The time is
   // assumed to use the same time zone as WTF::currentTime().
-  bool TimedWait(MutexBase&, double absolute_time);
+  bool TimedWait(Mutex&, double absolute_time);
   void Signal();
   void Broadcast();
 
  private:
   PlatformCondition condition_;
+
+  DISALLOW_COPY_AND_ASSIGN(ThreadCondition);
 };
 
 #if defined(OS_WIN)
@@ -167,6 +181,7 @@ using WTF::Mutex;
 using WTF::RecursiveMutex;
 using WTF::MutexLocker;
 using WTF::MutexTryLocker;
+using WTF::RecursiveMutexLocker;
 using WTF::ThreadCondition;
 
 #if defined(OS_WIN)

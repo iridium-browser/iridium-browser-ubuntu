@@ -7,16 +7,11 @@
 
 #import <UIKit/UIKit.h>
 
+// TODO(crbug.com/809785): Rename this or merge it into another protocol.
 @protocol OmniboxPopupPositioner
 
-// Returns the view the popup is anchored next to. Callers are responsible for
-// adding the popup as a sibling either above or below this view.
-- (UIView*)popupAnchorView;
-
-// Returns the popup's frame, in the coordinate system of the view returned by
-// |popupView|'s superview.  If |height| is too large for the screen, the frame
-// may be shortened.
-- (CGRect)popupFrame:(CGFloat)height;
+// View to which the popup view should be added as subview.
+- (UIView*)popupParentView;
 
 @end
 

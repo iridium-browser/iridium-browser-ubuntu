@@ -20,8 +20,7 @@ enum AccessibilityRole {
   kArticleRole,
   kAudioRole,  // No mapping to ARIA role.
   kBannerRole,
-  kBlockquoteRole,     // No mapping to ARIA role.
-  kBusyIndicatorRole,  // No mapping to ARIA role.
+  kBlockquoteRole,  // No mapping to ARIA role.
   kButtonRole,
   kCanvasRole,   // No mapping to ARIA role.
   kCaptionRole,  // No mapping to ARIA role.
@@ -30,7 +29,8 @@ enum AccessibilityRole {
   kColorWellRole,  // No mapping to ARIA role.
   kColumnHeaderRole,
   kColumnRole,  // No mapping to ARIA role.
-  kComboBoxRole,
+  kComboBoxGroupingRole,
+  kComboBoxMenuButtonRole,
   kComplementaryRole,
   kContentInfoRole,
   kDateRole,      // No mapping to ARIA role.
@@ -57,12 +57,15 @@ enum AccessibilityRole {
   kIframePresentationalRole,  // No mapping to ARIA role.
   kIframeRole,                // No mapping to ARIA role.
   kIgnoredRole,               // No mapping to ARIA role.
-  kImageMapLinkRole,          // No mapping to ARIA role.
   kImageMapRole,              // No mapping to ARIA role.
   kImageRole,
   kInlineTextBoxRole,  // No mapping to ARIA role.
   kInputTimeRole,      // No mapping to ARIA role.
   kLabelRole,
+  kLayoutTableRole,
+  kLayoutTableCellRole,
+  kLayoutTableColumnRole,
+  kLayoutTableRowRole,
   kLegendRole,     // No mapping to ARIA role.
   kLineBreakRole,  // No mapping to ARIA role.
   kLinkRole,
@@ -88,7 +91,6 @@ enum AccessibilityRole {
   kNavigationRole,
   kNoneRole,  // ARIA role of "none"
   kNoteRole,
-  kOutlineRole,    // No mapping to ARIA role.
   kParagraphRole,  // No mapping to ARIA role.
   kPopUpButtonRole,
   kPreRole,  // No mapping to ARIA role.
@@ -97,15 +99,11 @@ enum AccessibilityRole {
   kRadioButtonRole,
   kRadioGroupRole,
   kRegionRole,
-  kRootWebAreaRole,  // No mapping to ARIA role.
   kRowHeaderRole,
   kRowRole,
-  kRubyRole,        // No mapping to ARIA role.
-  kRulerRole,       // No mapping to ARIA role.
-  kSVGRootRole,     // No mapping to ARIA role.
-  kScrollAreaRole,  // No mapping to ARIA role.
+  kRubyRole,     // No mapping to ARIA role.
+  kSVGRootRole,  // No mapping to ARIA role.
   kScrollBarRole,
-  kSeamlessWebAreaRole,  // No mapping to ARIA role.
   kSearchRole,
   kSearchBoxRole,
   kSliderRole,
@@ -116,7 +114,6 @@ enum AccessibilityRole {
   kStaticTextRole,  // No mapping to ARIA role.
   kStatusRole,
   kSwitchRole,
-  kTabGroupRole,  // No mapping to ARIA role.
   kTabListRole,
   kTabPanelRole,
   kTabRole,
@@ -124,6 +121,7 @@ enum AccessibilityRole {
   kTableRole,
   kTermRole,
   kTextFieldRole,
+  kTextFieldWithComboBoxRole,
   kTimeRole,  // No mapping to ARIA role.
   kTimerRole,
   kToggleButtonRole,
@@ -134,28 +132,7 @@ enum AccessibilityRole {
   kUserInterfaceTooltipRole,
   kVideoRole,    // No mapping to ARIA role.
   kWebAreaRole,  // No mapping to ARIA role.
-  kWindowRole,   // No mapping to ARIA role.
   kNumRoles
-};
-
-enum AccessibilityState {
-  kAXBusyState,
-  kAXExpandedState,
-  kAXFocusableState,
-  kAXFocusedState,
-  kAXHaspopupState,
-  kAXHoveredState,
-  kAXInvisibleState,
-  kAXLinkedState,
-  kAXMultilineState,
-  kAXMultiselectableState,
-  kAXOffscreenState,
-  kAXProtectedState,
-  kAXRequiredState,
-  kAXSelectableState,
-  kAXSelectedState,
-  kAXVerticalState,
-  kAXVisitedState
 };
 
 enum AccessibilityOrientation {
@@ -169,6 +146,13 @@ enum class AXDefaultActionVerb {
   kActivate,
   kCheck,
   kClick,
+
+  // A click will be performed on one of the object's ancestors.
+  // This happens when the object itself is not clickable, but one of its
+  // ancestors has click handlers attached which are able to capture the click
+  // as it bubbles up.
+  kClickAncestor,
+
   kJump,
   kOpen,
   kPress,
@@ -216,6 +200,12 @@ enum AccessibilityExpanded {
   kExpandedExpanded,
 };
 
+enum AccessibilitySelectedState {
+  kSelectedStateUndefined = 0,
+  kSelectedStateFalse,
+  kSelectedStateTrue,
+};
+
 enum AriaCurrentState {
   kAriaCurrentStateUndefined = 0,
   kAriaCurrentStateFalse,
@@ -242,6 +232,10 @@ enum TextStyle {
   kTextStyleItalic = 1 << 1,
   kTextStyleUnderline = 1 << 2,
   kTextStyleLineThrough = 1 << 3
+};
+
+enum class AXBoolAttribute {
+  kAriaBusy,
 };
 
 enum class AXStringAttribute {
@@ -283,6 +277,59 @@ enum AXDescriptionFrom {
   kAXDescriptionFromAttribute = 0,
   kAXDescriptionFromContents,
   kAXDescriptionFromRelatedElement,
+};
+
+enum AXObjectInclusion {
+  kIncludeObject,
+  kIgnoreObject,
+  kDefaultBehavior,
+};
+
+enum AccessibilityCheckedState {
+  kCheckedStateUndefined = 0,
+  kCheckedStateFalse,
+  kCheckedStateTrue,
+  kCheckedStateMixed
+};
+
+enum AccessibilityOptionalBool {
+  kOptionalBoolUndefined = 0,
+  kOptionalBoolTrue,
+  kOptionalBoolFalse
+};
+
+// The potential native HTML-based text (name, description or placeholder)
+// sources for an element.  See
+// http://rawgit.com/w3c/aria/master/html-aam/html-aam.html#accessible-name-and-description-calculation
+enum AXTextFromNativeHTML {
+  kAXTextFromNativeHTMLUninitialized = -1,
+  kAXTextFromNativeHTMLFigcaption,
+  kAXTextFromNativeHTMLLabel,
+  kAXTextFromNativeHTMLLabelFor,
+  kAXTextFromNativeHTMLLabelWrapped,
+  kAXTextFromNativeHTMLLegend,
+  kAXTextFromNativeHTMLTableCaption,
+  kAXTextFromNativeHTMLTitleElement,
+};
+
+enum AXIgnoredReason {
+  kAXActiveModalDialog,
+  kAXAncestorIsLeafNode,
+  kAXAriaHiddenElement,
+  kAXAriaHiddenSubtree,
+  kAXEmptyAlt,
+  kAXEmptyText,
+  kAXInertElement,
+  kAXInertSubtree,
+  kAXInheritsPresentation,
+  kAXLabelContainer,
+  kAXLabelFor,
+  kAXNotRendered,
+  kAXNotVisible,
+  kAXPresentationalRole,
+  kAXProbablyPresentational,
+  kAXStaticTextUsedAsNameFor,
+  kAXUninteresting
 };
 
 }  // namespace blink

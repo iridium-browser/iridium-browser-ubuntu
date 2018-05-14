@@ -19,15 +19,16 @@
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/app_list/app_list_view_delegate.h"
 #include "chrome/browser/ui/app_list/profile_loader.h"
 #include "chrome/browser/ui/app_list/profile_store.h"
+#include "chrome/browser/ui/ash/session_util.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_switches.h"
 
 namespace {
@@ -280,9 +281,10 @@ AppListServiceImpl::AppListServiceImpl(
 
 AppListServiceImpl::~AppListServiceImpl() {}
 
-AppListViewDelegate* AppListServiceImpl::GetViewDelegate(Profile* profile) {
+AppListViewDelegate* AppListServiceImpl::GetViewDelegate() {
   if (!view_delegate_)
     view_delegate_.reset(new AppListViewDelegate(GetControllerDelegate()));
+  Profile* profile = Profile::FromBrowserContext(GetActiveBrowserContext());
   view_delegate_->SetProfile(profile);
   return view_delegate_.get();
 }
@@ -360,13 +362,6 @@ void AppListServiceImpl::Show() {
                  weak_factory_.GetWeakPtr()));
 }
 
-void AppListServiceImpl::ShowForVoiceSearch(
-    Profile* profile,
-    const scoped_refptr<content::SpeechRecognitionSessionPreamble>& preamble) {
-  ShowForProfile(profile);
-  view_delegate_->StartSpeechRecognitionForHotword(preamble);
-}
-
 void AppListServiceImpl::ShowForAppInstall(Profile* profile,
                                            const std::string& extension_id,
                                            bool start_discovery_tracking) {
@@ -388,10 +383,8 @@ void AppListServiceImpl::ShowForAppInstall(Profile* profile,
   // The only way an install can happen is with the profile already loaded. So,
   // ShowForProfile() can never be asynchronous, and the model is guaranteed to
   // exist after a show.
-  DCHECK(view_delegate_->GetModel());
-  view_delegate_->GetModel()
-      ->top_level_item_list()
-      ->HighlightItemInstalledFromUI(extension_id);
+  DCHECK(view_delegate_->GetModelUpdater());
+  view_delegate_->GetModelUpdater()->HighlightItemInstalledFromUI(extension_id);
 }
 
 void AppListServiceImpl::EnableAppList(Profile* initial_profile,

@@ -7,22 +7,18 @@
 //   Helper functions for gpu_test_config that have to be compiled in ObjectiveC++
 //
 
-#ifndef GPU_TEST_EXPECTATIONS_GPU_TEST_CONFIG_MAC_H_
-#define GPU_TEST_EXPECTATIONS_GPU_TEST_CONFIG_MAC_H_
+#ifndef ANGLE_GPU_TEST_EXPECTATIONS_GPU_TEST_CONFIG_MAC_H_
+#define ANGLE_GPU_TEST_EXPECTATIONS_GPU_TEST_CONFIG_MAC_H_
 
 #include "gpu_info.h"
 
-namespace base {
-
-class SysInfo
+namespace angle
 {
-  public:
-    static void OperatingSystemVersionNumbers(
-        int32 *major_version, int32 *minor_version, int32 *bugfix_version);
-};
 
-} // namespace base
+void GetOperatingSystemVersionNumbers(int32_t *major_version,
+                                      int32_t *minor_version,
+                                      int32_t *bugfix_version);
 
-gpu::GPUInfo::GPUDevice GetActiveGPU();
+} // namespace angle
 
-#endif // GPU_TEST_EXPECTATIONS_GPU_TEST_CONFIG_MAC_H_
+#endif // ANGLE_GPU_TEST_EXPECTATIONS_GPU_TEST_CONFIG_MAC_H_

@@ -10,7 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
-#include "content/common/input/input_event_ack_state.h"
+#include "content/public/common/input_event_ack_state.h"
 #include "content/renderer/render_view_impl.h"
 #include "ui/events/blink/input_handler_proxy.h"
 
@@ -43,6 +43,9 @@ class InputHandlerWrapper;
 class InputHandlerManagerClient;
 class MainThreadEventQueue;
 class SynchronousInputHandlerProxyClient;
+
+InputEventAckState InputEventDispositionToAck(
+    ui::InputHandlerProxy::EventDisposition disposition);
 
 // InputHandlerManager class manages InputHandlerProxy instances for
 // the WebViews in this renderer.
@@ -113,7 +116,11 @@ class CONTENT_EXPORT InputHandlerManager {
       const ui::LatencyInfo& latency_info);
 
   // Called from the compositor's thread.
-  void SetWhiteListedTouchAction(int routing_id, cc::TouchAction touch_action);
+  void SetWhiteListedTouchAction(
+      int routing_id,
+      cc::TouchAction touch_action,
+      uint32_t unique_touch_event_id,
+      ui::InputHandlerProxy::EventDisposition event_disposition);
 
  private:
   // Called from the compositor's thread.

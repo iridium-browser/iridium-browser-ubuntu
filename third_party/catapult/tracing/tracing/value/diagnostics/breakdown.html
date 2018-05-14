@@ -65,6 +65,10 @@ tr.exportTo('tr.v.d', function() {
       }
     }
 
+    get size() {
+      return this.values_.size;
+    }
+
     asDictInto_(d) {
       d.values = {};
       for (const [name, value] of this) {
@@ -73,6 +77,14 @@ tr.exportTo('tr.v.d', function() {
       if (this.colorScheme) {
         d.colorScheme = this.colorScheme;
       }
+    }
+
+    static fromEntries(entries) {
+      const breakdown = new Breakdown();
+      for (const [name, value] of entries) {
+        breakdown.set(name, value);
+      }
+      return breakdown;
     }
 
     static fromDict(d) {

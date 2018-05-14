@@ -11,7 +11,6 @@
 #include <memory>
 #include <utility>
 
-#import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/referrer.h"
@@ -59,6 +58,14 @@ using web::NavigationManager;
   return self;
 }
 
+- (void)dealloc {
+  if (_webState) {
+    _webState->RemoveObserver(_webStateObserver.get());
+    _webStateObserver.reset();
+    _webState.reset();
+  }
+}
+
 - (void)viewDidLoad {
   [super viewDidLoad];
 
@@ -98,9 +105,9 @@ using web::NavigationManager;
              action:@selector(forward)];
   [forward setAccessibilityLabel:kWebShellForwardButtonAccessibilityLabel];
 
-  base::scoped_nsobject<UITextField> field([[UITextField alloc]
+  UITextField* field = [[UITextField alloc]
       initWithFrame:CGRectMake(88, 6, CGRectGetWidth([_toolbarView frame]) - 98,
-                               31)]);
+                               31)];
   [field setDelegate:self];
   [field setBackground:[[UIImage imageNamed:@"textfield_background"]
                            resizableImageWithCapInsets:UIEdgeInsetsMake(
@@ -118,11 +125,11 @@ using web::NavigationManager;
 
   web::WebState::CreateParams webStateCreateParams(_browserState);
   _webState = web::WebState::Create(webStateCreateParams);
-  _webState->SetWebUsageEnabled(true);
 
-  _webStateObserver.reset(
-      new web::WebStateObserverBridge(_webState.get(), self));
-  _webStateDelegate.reset(new web::WebStateDelegateBridge(self));
+  _webStateObserver = std::make_unique<web::WebStateObserverBridge>(self);
+  _webState->AddObserver(_webStateObserver.get());
+
+  _webStateDelegate = std::make_unique<web::WebStateDelegateBridge>(self);
   _webState->SetDelegate(_webStateDelegate.get());
 
   UIView* view = _webState->GetView();
@@ -261,11 +268,11 @@ using web::NavigationManager;
 // -----------------------------------------------------------------------
 // WebStateDelegate implementation.
 
-- (BOOL)webState:(web::WebState*)webState
+- (void)webState:(web::WebState*)webState
     handleContextMenu:(const web::ContextMenuParams&)params {
   GURL link = params.link_url;
   if (!link.is_valid()) {
-    return NO;
+    return;
   }
 
   UIAlertController* alert = [UIAlertController
@@ -293,8 +300,13 @@ using web::NavigationManager;
                                           handler:nil]];
 
   [self presentViewController:alert animated:YES completion:nil];
+}
 
-  return YES;
+- (void)webStateDestroyed:(web::WebState*)webState {
+  // The WebState is owned by the current instance, and the observer bridge
+  // is unregistered before the WebState is destroyed, so this event should
+  // never happen.
+  NOTREACHED();
 }
 
 @end

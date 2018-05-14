@@ -13,7 +13,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/apps/app_info_dialog.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
@@ -275,9 +275,8 @@ void ExtensionSettingsHandler::GetLocalizedValues(
   source->AddString("ok", l10n_util::GetStringUTF16(IDS_OK));
 
   // 'Bubble' text for the controlled-setting-indicator
-  source->AddString(
-      "extensionControlledSettingPolicy",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTING_POLICY));
+  source->AddString("extensionControlledSettingPolicy",
+                    l10n_util::GetStringUTF16(IDS_CONTROLLED_SETTING_POLICY));
 }
 
 void ExtensionSettingsHandler::DidStartNavigation(

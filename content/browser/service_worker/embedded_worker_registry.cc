@@ -22,7 +22,7 @@ namespace content {
 // static
 scoped_refptr<EmbeddedWorkerRegistry> EmbeddedWorkerRegistry::Create(
     const base::WeakPtr<ServiceWorkerContextCore>& context) {
-  return make_scoped_refptr(new EmbeddedWorkerRegistry(context, 0));
+  return base::WrapRefCounted(new EmbeddedWorkerRegistry(context, 0));
 }
 
 // static
@@ -36,9 +36,10 @@ scoped_refptr<EmbeddedWorkerRegistry> EmbeddedWorkerRegistry::Create(
   return registry;
 }
 
-std::unique_ptr<EmbeddedWorkerInstance> EmbeddedWorkerRegistry::CreateWorker() {
-  std::unique_ptr<EmbeddedWorkerInstance> worker(
-      new EmbeddedWorkerInstance(context_, next_embedded_worker_id_));
+std::unique_ptr<EmbeddedWorkerInstance> EmbeddedWorkerRegistry::CreateWorker(
+    ServiceWorkerVersion* owner_version) {
+  std::unique_ptr<EmbeddedWorkerInstance> worker(new EmbeddedWorkerInstance(
+      context_, owner_version, next_embedded_worker_id_));
   worker_map_[next_embedded_worker_id_++] = worker.get();
   return worker;
 }
@@ -94,29 +95,6 @@ void EmbeddedWorkerRegistry::OnDevToolsAttached(int embedded_worker_id) {
   lifetime_tracker_.AbortTiming(embedded_worker_id);
 }
 
-void EmbeddedWorkerRegistry::RemoveProcess(int process_id) {
-  std::map<int, std::set<int> >::iterator found =
-      worker_process_map_.find(process_id);
-  if (found != worker_process_map_.end()) {
-    const std::set<int>& worker_set = worker_process_map_[process_id];
-    for (std::set<int>::const_iterator it = worker_set.begin();
-         it != worker_set.end();
-         ++it) {
-      int embedded_worker_id = *it;
-      DCHECK(base::ContainsKey(worker_map_, embedded_worker_id));
-      // RemoveProcess is typically called after the running workers on the
-      // process have been stopped, so if there is a running worker at this
-      // point somehow the worker thread has lost contact with the browser
-      // process.
-      // Set the worker's status to STOPPED so a new thread can be created for
-      // this version. Use OnDetached rather than OnStopped so UMA doesn't
-      // record it as a normal stoppage.
-      worker_map_[embedded_worker_id]->OnDetached();
-    }
-    worker_process_map_.erase(found);
-  }
-}
-
 EmbeddedWorkerInstance* EmbeddedWorkerRegistry::GetWorker(
     int embedded_worker_id) {
   WorkerInstanceMap::iterator found = worker_map_.find(embedded_worker_id);
@@ -154,19 +132,6 @@ void EmbeddedWorkerRegistry::BindWorkerToProcess(int process_id,
       !base::ContainsKey(worker_process_map_[process_id], embedded_worker_id));
 
   worker_process_map_[process_id].insert(embedded_worker_id);
-}
-
-ServiceWorkerStatusCode EmbeddedWorkerRegistry::Send(
-    int process_id, IPC::Message* message_ptr) {
-  std::unique_ptr<IPC::Message> message(message_ptr);
-  if (!context_)
-    return SERVICE_WORKER_ERROR_ABORT;
-  IPC::Sender* sender = context_->GetDispatcherHost(process_id);
-  if (!sender)
-    return SERVICE_WORKER_ERROR_PROCESS_NOT_FOUND;
-  if (!sender->Send(message.release()))
-    return SERVICE_WORKER_ERROR_IPC_FAILED;
-  return SERVICE_WORKER_OK;
 }
 
 void EmbeddedWorkerRegistry::RemoveWorker(int process_id,

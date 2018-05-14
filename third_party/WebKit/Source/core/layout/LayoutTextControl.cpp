@@ -22,9 +22,10 @@
 
 #include "core/layout/LayoutTextControl.h"
 
-#include "core/dom/StyleChangeReason.h"
-#include "core/html/TextControlElement.h"
+#include "core/css/StyleChangeReason.h"
+#include "core/html/forms/TextControlElement.h"
 #include "core/layout/HitTestResult.h"
+#include "core/page/Page.h"
 #include "platform/scroll/ScrollbarTheme.h"
 
 namespace blink {
@@ -34,7 +35,7 @@ LayoutTextControl::LayoutTextControl(TextControlElement* element)
   DCHECK(element);
 }
 
-LayoutTextControl::~LayoutTextControl() {}
+LayoutTextControl::~LayoutTextControl() = default;
 
 TextControlElement* LayoutTextControl::GetTextControlElement() const {
   return ToTextControlElement(GetNode());
@@ -61,6 +62,15 @@ void LayoutTextControl::StyleDidChange(StyleDifference diff,
     inner_editor->SetNeedsStyleRecalc(
         kSubtreeStyleChange,
         StyleChangeReasonForTracing::Create(StyleChangeReason::kControl));
+
+    // The inner editor element uses the LayoutTextControl's ::selection style
+    // (see: GetUncachedSelectionStyle in SelectionPaintingUtils.cpp) so ensure
+    // the inner editor selection is invalidated anytime style changes and a
+    // ::selection style is or was present on LayoutTextControl.
+    if (StyleRef().HasPseudoStyle(kPseudoIdSelection) ||
+        (old_style && old_style->HasPseudoStyle(kPseudoIdSelection))) {
+      inner_editor_layout_object->InvalidateSelectionOfSelectedChildren();
+    }
   }
   GetTextControlElement()->UpdatePlaceholderVisibility();
 }
@@ -79,6 +89,7 @@ void LayoutTextControl::AdjustInnerEditorStyle(
   // element.
   text_block_style.SetDirection(Style()->Direction());
   text_block_style.SetUnicodeBidi(Style()->GetUnicodeBidi());
+  text_block_style.SetUserSelect(EUserSelect::kText);
 
   UpdateUserModifyProperty(*GetTextControlElement(), text_block_style);
 }
@@ -110,7 +121,7 @@ void LayoutTextControl::UpdateFromElement() {
 int LayoutTextControl::ScrollbarThickness() const {
   // FIXME: We should get the size of the scrollbar from the LayoutTheme
   // instead.
-  return ScrollbarTheme::GetTheme().ScrollbarThickness();
+  return GetDocument().GetPage()->GetScrollbarTheme().ScrollbarThickness();
 }
 
 void LayoutTextControl::ComputeLogicalHeight(
@@ -342,8 +353,8 @@ LayoutObject* LayoutTextControl::LayoutSpecialExcludedChild(
   return placeholder_layout_object;
 }
 
-int LayoutTextControl::FirstLineBoxBaseline() const {
-  int result = LayoutBlock::FirstLineBoxBaseline();
+LayoutUnit LayoutTextControl::FirstLineBoxBaseline() const {
+  LayoutUnit result = LayoutBlock::FirstLineBoxBaseline();
   if (result != -1)
     return result;
 
@@ -351,7 +362,7 @@ int LayoutTextControl::FirstLineBoxBaseline() const {
   // compute the baseline because lineboxes do not exist.
   Element* inner_editor = InnerEditorElement();
   if (!inner_editor || !inner_editor->GetLayoutObject())
-    return -1;
+    return LayoutUnit(-1);
 
   LayoutBlock* inner_editor_layout_object =
       ToLayoutBlock(inner_editor->GetLayoutObject());
@@ -359,7 +370,7 @@ int LayoutTextControl::FirstLineBoxBaseline() const {
       inner_editor_layout_object->Style(true)->GetFont().PrimaryFont();
   DCHECK(font_data);
   if (!font_data)
-    return -1;
+    return LayoutUnit(-1);
 
   LayoutUnit baseline(font_data->GetFontMetrics().Ascent(kAlphabeticBaseline));
   for (LayoutObject* box = inner_editor_layout_object; box && box != this;
@@ -367,7 +378,7 @@ int LayoutTextControl::FirstLineBoxBaseline() const {
     if (box->IsBox())
       baseline += ToLayoutBox(box)->LogicalTop();
   }
-  return baseline.ToInt();
+  return baseline;
 }
 
 }  // namespace blink

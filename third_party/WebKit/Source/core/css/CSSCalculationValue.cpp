@@ -53,6 +53,7 @@ static CalculationCategory UnitCategory(CSSPrimitiveValue::UnitType type) {
     case CSSPrimitiveValue::UnitType::kPixels:
     case CSSPrimitiveValue::UnitType::kCentimeters:
     case CSSPrimitiveValue::UnitType::kMillimeters:
+    case CSSPrimitiveValue::UnitType::kQuarterMillimeters:
     case CSSPrimitiveValue::UnitType::kInches:
     case CSSPrimitiveValue::UnitType::kPoints:
     case CSSPrimitiveValue::UnitType::kPicas:
@@ -91,6 +92,7 @@ static bool HasDoubleValue(CSSPrimitiveValue::UnitType type) {
     case CSSPrimitiveValue::UnitType::kPixels:
     case CSSPrimitiveValue::UnitType::kCentimeters:
     case CSSPrimitiveValue::UnitType::kMillimeters:
+    case CSSPrimitiveValue::UnitType::kQuarterMillimeters:
     case CSSPrimitiveValue::UnitType::kInches:
     case CSSPrimitiveValue::UnitType::kPoints:
     case CSSPrimitiveValue::UnitType::kPicas:
@@ -270,7 +272,7 @@ class CSSCalcPrimitiveValue final : public CSSCalcExpressionNode {
     return kCalcAdd;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(value_);
     CSSCalcExpressionNode::Trace(visitor);
   }
@@ -616,7 +618,7 @@ class CSSCalcBinaryOperation final : public CSSCalcExpressionNode {
     return CSSPrimitiveValue::UnitType::kUnknown;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(left_side_);
     visitor->Trace(right_side_);
     CSSCalcExpressionNode::Trace(visitor);
@@ -683,6 +685,8 @@ class CSSCalcExpressionNodeParser {
   STACK_ALLOCATED();
 
  public:
+  CSSCalcExpressionNodeParser() {}
+
   CSSCalcExpressionNode* ParseCalc(CSSParserTokenRange tokens) {
     Value result;
     tokens.ConsumeWhitespace();
@@ -733,7 +737,10 @@ class CSSCalcExpressionNodeParser {
       CSSParserTokenRange inner_range = tokens.ConsumeBlock();
       tokens.ConsumeWhitespace();
       inner_range.ConsumeWhitespace();
-      return ParseValueExpression(inner_range, depth, result);
+      if (!ParseValueExpression(inner_range, depth, result))
+        return false;
+      result->value->SetIsNestedCalc();
+      return true;
     }
 
     return ParseValue(tokens, result);
@@ -762,6 +769,7 @@ class CSSCalcExpressionNodeParser {
       result->value = CSSCalcBinaryOperation::CreateSimplified(
           result->value, rhs.value,
           static_cast<CalcOperator>(operator_character));
+
       if (!result->value)
         return false;
     }
@@ -796,6 +804,7 @@ class CSSCalcExpressionNodeParser {
       result->value = CSSCalcBinaryOperation::CreateSimplified(
           result->value, rhs.value,
           static_cast<CalcOperator>(operator_character));
+
       if (!result->value)
         return false;
     }

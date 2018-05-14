@@ -8,7 +8,7 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "core/CoreExport.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/events/PromiseRejectionEventInit.h"
 #include "platform/bindings/DOMWrapperWorld.h"
 #include "platform/bindings/ScriptState.h"
@@ -37,9 +37,9 @@ class CORE_EXPORT PromiseRejectionEvent final : public Event {
   // observed across different worlds.
   bool CanBeDispatchedInWorld(const DOMWrapperWorld&) const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   PromiseRejectionEvent(ScriptState*,
@@ -48,7 +48,7 @@ class CORE_EXPORT PromiseRejectionEvent final : public Event {
   ~PromiseRejectionEvent() override;
   void Dispose();
 
-  RefPtr<DOMWrapperWorld> world_;
+  scoped_refptr<DOMWrapperWorld> world_;
   TraceWrapperV8Reference<v8::Value> promise_;
   TraceWrapperV8Reference<v8::Value> reason_;
 };

@@ -42,7 +42,7 @@ class BlinkPerfTest(page_test_test_case.PageTestTestCase):
     results = self.RunMeasurement(measurement=self._measurement,
         ps=self._CreateStorySetForTestFile('append-child-measure-time.html'),
         options=self._options)
-    self.assertFalse(results.failures)
+    self.assertFalse(results.had_failures)
     self.assertEquals(len(results.FindAllTraceValues()), 1)
 
     frame_view_layouts = results.FindAllPageSpecificValuesNamed(
@@ -65,7 +65,7 @@ class BlinkPerfTest(page_test_test_case.PageTestTestCase):
         ps=self._CreateStorySetForTestFile(
             'color-changes-measure-frame-time.html'),
         options=self._options)
-    self.assertFalse(results.failures)
+    self.assertFalse(results.had_failures)
     self.assertEquals(len(results.FindAllTraceValues()), 1)
 
     frame_view_prepaints = results.FindAllPageSpecificValuesNamed(
@@ -89,7 +89,7 @@ class BlinkPerfTest(page_test_test_case.PageTestTestCase):
         ps=self._CreateStorySetForTestFile(
             'simple-html-measure-page-load-time.html'),
         options=self._options)
-    self.assertFalse(results.failures)
+    self.assertFalse(results.had_failures)
     self.assertEquals(len(results.FindAllTraceValues()), 1)
 
     create_child_frame = results.FindAllPageSpecificValuesNamed(
@@ -117,30 +117,49 @@ class BlinkPerfTest(page_test_test_case.PageTestTestCase):
 
     blob_requests = results.FindAllPageSpecificValuesNamed(
         'BlobRequest')
+    blob_readers = results.FindAllPageSpecificValuesNamed(
+        'BlobReader')
     self.assertEquals(len(blob_requests), 1)
+    self.assertEquals(len(blob_readers), 1)
     # simple-blob-measure-async.html specifies 6 iterationCount.
     self.assertEquals(len(blob_requests[0].values), 6)
-    self.assertGreater(blob_requests[0].GetRepresentativeNumber(), 0.001)
+    self.assertEquals(len(blob_readers[0].values), 6)
 
-    blob_request_read_raw_data = results.FindAllPageSpecificValuesNamed(
-        'BlobRequest::ReadRawData')
-    self.assertEquals(len(blob_request_read_raw_data), 1)
+    # TODO(mek): Delete non-mojo code paths when blobs are always using mojo.
+    using_mojo = blob_readers[0].GetRepresentativeNumber() > 0.001
+    if using_mojo:
+      self.assertEquals(blob_requests[0].GetRepresentativeNumber(), 0)
+      self.assertGreater(blob_readers[0].GetRepresentativeNumber(), 0.001)
+    else:
+      self.assertGreater(blob_requests[0].GetRepresentativeNumber(), 0.001)
+      self.assertEquals(blob_readers[0].GetRepresentativeNumber(), 0)
+
+    if using_mojo:
+      read_data = results.FindAllPageSpecificValuesNamed(
+          'BlobReader::ReadMore')
+    else:
+      read_data = results.FindAllPageSpecificValuesNamed(
+          'BlobRequest::ReadRawData')
+    self.assertEquals(len(read_data), 1)
     # simple-blob-measure-async.html specifies 6 iterationCount.
-    self.assertEquals(len(blob_request_read_raw_data[0].values), 6)
-    self.assertGreater(
-        blob_request_read_raw_data[0].GetRepresentativeNumber(), 0.001)
+    self.assertEquals(len(read_data[0].values), 6)
+    self.assertGreater(read_data[0].GetRepresentativeNumber(), 0.001)
 
 
 # pylint: disable=protected-access
 # This is needed for testing _ComputeTraceEventsThreadTimeForBlinkPerf method.
 class ComputeTraceEventsMetricsForBlinkPerfTest(unittest.TestCase):
 
-  def _AddBlinkTestSlice(self, renderer_thread, start, end):
+  def _AddAsyncSlice(self, renderer_thread, category, name, start, end):
     s = async_slice.AsyncSlice(
-        'blink', 'blink_perf.runTest',
+        category, name,
         timestamp=start, duration=end - start, start_thread=renderer_thread,
         end_thread=renderer_thread)
     renderer_thread.AddAsyncSlice(s)
+
+  def _AddBlinkTestSlice(self, renderer_thread, start, end):
+    self._AddAsyncSlice(
+        renderer_thread, 'blink', 'blink_perf.runTest', start, end)
 
   def testTraceEventMetricsSingleBlinkTest(self):
     model = model_module.TimelineModel()
@@ -341,3 +360,53 @@ class ComputeTraceEventsMetricsForBlinkPerfTest(unittest.TestCase):
         blink_perf._ComputeTraceEventsThreadTimeForBlinkPerf(
             model, renderer_main, ['foo', 'bar']),
             {'foo': [300], 'bar': [320]})
+
+  def testAsyncTraceEventMetricsOverlapping(self):
+    model = model_module.TimelineModel()
+    renderer_main = model.GetOrCreateProcess(1).GetOrCreateThread(2)
+    renderer_main.name = 'CrRendererMain'
+
+    # Set up a main thread model that looks like:
+    #   [           blink_perf.run_test                ]
+    #   |       [  foo  ]        [ bar ]               |
+    #   |   [  foo  ]   |        |     |               |
+    #   |   |   |   |   |        |     |               |
+    #   100 110 120 130 140      400   420             550
+    # CPU dur: None for all.
+    #
+    self._AddBlinkTestSlice(renderer_main, 100, 550)
+
+    self._AddAsyncSlice(renderer_main, 'blink', 'foo', 110, 130)
+    self._AddAsyncSlice(renderer_main, 'blink', 'foo', 120, 140)
+    self._AddAsyncSlice(renderer_main, 'blink', 'bar', 400, 420)
+
+    self.assertEquals(
+        blink_perf._ComputeTraceEventsThreadTimeForBlinkPerf(
+            model, renderer_main, ['foo', 'bar']),
+        {'foo': [30], 'bar': [20]})
+
+  def testAsyncTraceEventMetricsMultipleTests(self):
+    model = model_module.TimelineModel()
+    renderer_main = model.GetOrCreateProcess(1).GetOrCreateThread(2)
+    renderer_main.name = 'CrRendererMain'
+
+    # Set up a main model that looks like:
+    #        [ blink_perf.run_test ]   [ blink_perf.run_test ]
+    #        |                     |   |                     |
+    #  [                        foo                              ]
+    #  |  [                        foo                               ]
+    #  |  |  |                     |   |                     |   |   |
+    #  80 90 100                   200 300                   400 500 510
+    # CPU dur: None for all
+    #
+    self._AddBlinkTestSlice(renderer_main, 100, 200)
+    self._AddBlinkTestSlice(renderer_main, 300, 400)
+
+    # Both events totally intersect both tests.
+    self._AddAsyncSlice(renderer_main, 'blink', 'foo', 80, 500)
+    self._AddAsyncSlice(renderer_main, 'blink', 'bar', 90, 510)
+
+    self.assertEquals(
+        blink_perf._ComputeTraceEventsThreadTimeForBlinkPerf(
+            model, renderer_main, ['foo', 'bar']),
+        {'foo': [100, 100], 'bar': [100, 100]})

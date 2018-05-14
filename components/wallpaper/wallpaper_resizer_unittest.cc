@@ -71,8 +71,11 @@ class WallpaperResizerTest : public testing::Test,
                         const gfx::Size& target_size,
                         WallpaperLayout layout) {
     std::unique_ptr<WallpaperResizer> resizer;
-    resizer.reset(
-        new WallpaperResizer(image, target_size, layout, task_runner()));
+    resizer.reset(new WallpaperResizer(
+        image, target_size,
+        wallpaper::WallpaperInfo("", layout, DEFAULT,
+                                 base::Time::Now().LocalMidnight()),
+        task_runner()));
     resizer->AddObserver(this);
     resizer->StartResize();
     WaitForResize();
@@ -84,12 +87,16 @@ class WallpaperResizerTest : public testing::Test,
     return worker_thread_.task_runner();
   }
 
-  void WaitForResize() { base::RunLoop().Run(); }
+  void WaitForResize() {
+    active_runloop_ = std::make_unique<base::RunLoop>();
+    active_runloop_->Run();
+  }
 
-  void OnWallpaperResized() override { message_loop_.QuitWhenIdle(); }
+  void OnWallpaperResized() override { active_runloop_->Quit(); }
 
  private:
   base::MessageLoop message_loop_;
+  std::unique_ptr<base::RunLoop> active_runloop_;
   base::Thread worker_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(WallpaperResizerTest);
@@ -150,7 +157,9 @@ TEST_F(WallpaperResizerTest, ImageId) {
 
   // Create a WallpaperResizer and check that it reports an original image ID
   // both pre- and post-resize that matches the ID returned by GetImageId().
-  WallpaperResizer resizer(image, gfx::Size(10, 20), WALLPAPER_LAYOUT_STRETCH,
+  WallpaperResizer resizer(image, gfx::Size(10, 20),
+                           WallpaperInfo("", WALLPAPER_LAYOUT_STRETCH, DEFAULT,
+                                         base::Time::Now().LocalMidnight()),
                            task_runner());
   EXPECT_EQ(WallpaperResizer::GetImageId(image), resizer.original_image_id());
   resizer.AddObserver(this);

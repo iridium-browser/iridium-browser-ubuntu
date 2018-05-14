@@ -15,7 +15,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -199,11 +198,11 @@ void ComponentCloudPolicyService::Backend::InitIfNeeded() {
   updater_.reset(new ComponentCloudPolicyUpdater(
       task_runner_, std::move(external_policy_data_fetcher_), &store_));
 
-  std::unique_ptr<PolicyBundle> bundle(base::MakeUnique<PolicyBundle>());
+  std::unique_ptr<PolicyBundle> bundle(std::make_unique<PolicyBundle>());
   bundle->CopyFrom(store_.policy());
   service_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ComponentCloudPolicyService::SetPolicy, service_,
-                            base::Passed(&bundle)));
+      FROM_HERE, base::BindOnce(&ComponentCloudPolicyService::SetPolicy,
+                                service_, std::move(bundle)));
 
   initialized_ = true;
 
@@ -230,11 +229,11 @@ void ComponentCloudPolicyService::Backend::
   }
   DVLOG(2) << "Installing updated policy from the component policy store";
 
-  std::unique_ptr<PolicyBundle> bundle(base::MakeUnique<PolicyBundle>());
+  std::unique_ptr<PolicyBundle> bundle(std::make_unique<PolicyBundle>());
   bundle->CopyFrom(store_.policy());
   service_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ComponentCloudPolicyService::SetPolicy, service_,
-                            base::Passed(&bundle)));
+      FROM_HERE, base::BindOnce(&ComponentCloudPolicyService::SetPolicy,
+                                service_, std::move(bundle)));
 }
 
 void ComponentCloudPolicyService::Backend::UpdateWithLastFetchedPolicy() {
@@ -261,7 +260,7 @@ void ComponentCloudPolicyService::Backend::UpdateWithLastFetchedPolicy() {
   for (auto it = last_fetched_policy_->begin();
        it != last_fetched_policy_->end(); ++it) {
     updater_->UpdateExternalPolicy(
-        it->first, base::MakeUnique<em::PolicyFetchResponse>(*it->second));
+        it->first, std::make_unique<em::PolicyFetchResponse>(*it->second));
   }
 }
 
@@ -451,7 +450,7 @@ void ComponentCloudPolicyService::UpdateFromClient() {
   DVLOG(2) << "Obtaining fetched policies from the policy client";
 
   std::unique_ptr<ScopedResponseMap> valid_responses =
-      base::MakeUnique<ScopedResponseMap>();
+      std::make_unique<ScopedResponseMap>();
   for (const auto& response : core_->client()->responses()) {
     PolicyNamespace ns;
     if (!ToPolicyNamespace(response.first, &ns)) {
@@ -459,13 +458,13 @@ void ComponentCloudPolicyService::UpdateFromClient() {
       continue;
     }
     (*valid_responses)[ns] =
-        base::MakeUnique<em::PolicyFetchResponse>(*response.second);
+        std::make_unique<em::PolicyFetchResponse>(*response.second);
   }
 
   backend_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&Backend::SetFetchedPolicy, base::Unretained(backend_.get()),
-                 base::Passed(&valid_responses)));
+      FROM_HERE, base::BindOnce(&Backend::SetFetchedPolicy,
+                                base::Unretained(backend_.get()),
+                                std::move(valid_responses)));
 }
 
 void ComponentCloudPolicyService::UpdateFromSchemaRegistry() {

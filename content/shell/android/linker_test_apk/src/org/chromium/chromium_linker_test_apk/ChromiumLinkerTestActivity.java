@@ -11,16 +11,14 @@ import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 
-import org.chromium.base.BaseSwitches;
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.Linker;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.browser.BrowserStartupController;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_shell.Shell;
 import org.chromium.content_shell.ShellManager;
 import org.chromium.ui.base.ActivityWindowAndroid;
@@ -41,16 +39,9 @@ public class ChromiumLinkerTestActivity extends Activity {
     // target device running the test really is.
     private static final String LOW_MEMORY_DEVICE = "--low-memory-device";
 
-    // Use one of these on the command-line to force a specific Linker
-    // implementation. Passed from the main process to sub-processes so that
-    // everything that participates in a test uses a consistent implementation.
-    private static final String USE_MODERN_LINKER = "--use-linker=modern";
-    private static final String USE_LEGACY_LINKER = "--use-linker=legacy";
-
     private ShellManager mShellManager;
     private ActivityWindowAndroid mWindowAndroid;
 
-    @SuppressFBWarnings("DMI_HARDCODED_ABSOLUTE_FILENAME")
     @Override
     public void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -63,13 +54,10 @@ public class ChromiumLinkerTestActivity extends Activity {
                 CommandLine.getInstance().appendSwitchesAndArguments(commandLineParams);
             }
         }
-        waitForDebuggerIfNeeded();
 
         // CommandLine.getInstance().hasSwitch() doesn't work here for some funky
         // reason, so parse the command-line differently here:
         boolean hasLowMemoryDeviceSwitch = false;
-        boolean hasModernLinkerSwitch = false;
-        boolean hasLegacyLinkerSwitch = false;
         String[] commandLine = CommandLine.getJavaSwitchesOrNull();
         if (commandLine == null) {
             Log.i(TAG, "Command line is null");
@@ -80,30 +68,8 @@ public class ChromiumLinkerTestActivity extends Activity {
                 Log.i(TAG, "  '" + option + "'");
                 if (option.equals(LOW_MEMORY_DEVICE)) {
                     hasLowMemoryDeviceSwitch = true;
-                } else if (option.equals(USE_MODERN_LINKER)) {
-                    hasModernLinkerSwitch = true;
-                } else if (option.equals(USE_LEGACY_LINKER)) {
-                    hasLegacyLinkerSwitch = true;
                 }
             }
-        }
-
-        if (!(hasModernLinkerSwitch || hasLegacyLinkerSwitch)) {
-            Log.e(TAG, "Missing --use-linker command line argument.");
-            finish();
-        } else if (hasModernLinkerSwitch && hasLegacyLinkerSwitch) {
-            Log.e(TAG, "Conflicting --use-linker command line arguments.");
-            finish();
-        }
-
-        // Set the requested Linker implementation from the command-line, and
-        // register the test runner class by name.
-        if (hasModernLinkerSwitch) {
-            Linker.setupForTesting(Linker.LINKER_IMPLEMENTATION_MODERN,
-                                   LinkerTests.class.getName());
-        } else {
-            Linker.setupForTesting(Linker.LINKER_IMPLEMENTATION_LEGACY,
-                                   LinkerTests.class.getName());
         }
 
         // Determine which kind of device to simulate from the command-line.
@@ -175,14 +141,6 @@ public class ChromiumLinkerTestActivity extends Activity {
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         mWindowAndroid.saveInstanceState(outState);
-    }
-
-    private void waitForDebuggerIfNeeded() {
-        if (CommandLine.getInstance().hasSwitch(BaseSwitches.WAIT_FOR_JAVA_DEBUGGER)) {
-            Log.e(TAG, "Waiting for Java debugger to connect...");
-            android.os.Debug.waitForDebugger();
-            Log.e(TAG, "Java debugger connected. Resuming execution.");
-        }
     }
 
     @Override

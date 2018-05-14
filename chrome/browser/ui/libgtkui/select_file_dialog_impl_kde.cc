@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <gdk/gdkx.h>
+#include <gtk/gtk.h>
 #include <stddef.h>
-#include <X11/Xlib.h>
 
 #include <memory>
 #include <set>
@@ -13,7 +14,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/nix/mime_util_xdg.h"
 #include "base/nix/xdg_util.h"
 #include "base/process/launch.h"
@@ -28,11 +28,9 @@
 #include "content/public/browser/browser_thread.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/x/x11.h"
 #include "ui/strings/grit/ui_strings.h"
 
-// These conflict with base/tracked_objects.h, so need to come last.
-#include <gdk/gdkx.h>
-#include <gtk/gtk.h>
 
 using content::BrowserThread;
 
@@ -53,7 +51,7 @@ namespace libgtkui {
 class SelectFileDialogImplKDE : public SelectFileDialogImpl {
  public:
   SelectFileDialogImplKDE(Listener* listener,
-                          ui::SelectFilePolicy* policy,
+                          std::unique_ptr<ui::SelectFilePolicy> policy,
                           base::nix::DesktopEnvironment desktop);
 
  protected:
@@ -198,16 +196,16 @@ bool SelectFileDialogImpl::CheckKDEDialogWorksOnUIThread() {
 // static
 SelectFileDialogImpl* SelectFileDialogImpl::NewSelectFileDialogImplKDE(
     Listener* listener,
-    ui::SelectFilePolicy* policy,
+    std::unique_ptr<ui::SelectFilePolicy> policy,
     base::nix::DesktopEnvironment desktop) {
-  return new SelectFileDialogImplKDE(listener, policy, desktop);
+  return new SelectFileDialogImplKDE(listener, std::move(policy), desktop);
 }
 
 SelectFileDialogImplKDE::SelectFileDialogImplKDE(
     Listener* listener,
-    ui::SelectFilePolicy* policy,
+    std::unique_ptr<ui::SelectFilePolicy> policy,
     base::nix::DesktopEnvironment desktop)
-    : SelectFileDialogImpl(listener, policy),
+    : SelectFileDialogImpl(listener, std::move(policy)),
       desktop_(desktop),
       pipe_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
           {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
@@ -243,7 +241,7 @@ void SelectFileDialogImplKDE::SelectFileImpl(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   type_ = type;
 
-  XID window_xid = None;
+  XID window_xid = x11::None;
   if (owning_window && owning_window->GetHost()) {
     // |owning_window| can be null when user right-clicks on a downloadable item
     // and chooses 'Open Link in New Tab' when 'Ask where to save each file
@@ -287,7 +285,6 @@ bool SelectFileDialogImplKDE::HasMultipleFileTypeChoicesImpl() {
 
 std::string SelectFileDialogImplKDE::GetMimeTypeFilterString() {
   DCHECK(pipe_task_runner_->RunsTasksInCurrentSequence());
-  std::string filter_string;
   // We need a filter set because the same mime type can appear multiple times.
   std::set<std::string> filter_set;
   for (size_t i = 0; i < file_types_.extensions.size(); ++i) {
@@ -299,17 +296,16 @@ std::string SelectFileDialogImplKDE::GetMimeTypeFilterString() {
       }
     }
   }
+  std::vector<std::string> filter_vector(filter_set.cbegin(),
+                                         filter_set.cend());
   // Add the *.* filter, but only if we have added other filters (otherwise it
-  // is implied).
-  if (file_types_.include_all_files && !file_types_.extensions.empty())
-    filter_set.insert("application/octet-stream");
-  // Create the final output string.
-  filter_string.clear();
-  for (std::set<std::string>::iterator it = filter_set.begin();
-       it != filter_set.end(); ++it) {
-    filter_string.append(*it + " ");
+  // is implied). It needs to be added last to avoid being picked as the default
+  // filter.
+  if (file_types_.include_all_files && !file_types_.extensions.empty()) {
+    DCHECK(filter_set.find("application/octet-stream") == filter_set.end());
+    filter_vector.push_back("application/octet-stream");
   }
-  return filter_string;
+  return base::JoinString(filter_vector, " ");
 }
 
 std::unique_ptr<SelectFileDialogImplKDE::KDialogOutputParams>
@@ -322,7 +318,7 @@ SelectFileDialogImplKDE::CallKDialogOutput(const KDialogParams& params) {
                         params.parent, params.file_operation,
                         params.multiple_selection, &command_line);
 
-  auto results = base::MakeUnique<KDialogOutputParams>();
+  auto results = std::make_unique<KDialogOutputParams>();
   // Get output from KDialog
   base::GetAppOutputWithExitCode(command_line, &results->output,
                                  &results->exit_code);
@@ -342,11 +338,11 @@ void SelectFileDialogImplKDE::GetKDialogCommandLine(
   CHECK(command_line);
 
   // Attach to the current Chrome window.
-  if (parent != None) {
+  if (parent != x11::None) {
     command_line->AppendSwitchNative(
-        desktop_ == base::nix::DESKTOP_ENVIRONMENT_KDE3 ?
-            "--embed" : "--attach",
-        base::Uint64ToString(parent));
+        desktop_ == base::nix::DESKTOP_ENVIRONMENT_KDE3 ? "--embed"
+                                                        : "--attach",
+        base::NumberToString(parent));
   }
 
   // Set the correct title for the dialog.

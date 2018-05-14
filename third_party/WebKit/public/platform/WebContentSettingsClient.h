@@ -5,6 +5,8 @@
 #ifndef WebContentSettingsClient_h
 #define WebContentSettingsClient_h
 
+#include "base/time/time.h"
+#include "public/platform/WebClientHintsType.h"
 #include "public/platform/WebContentSettingCallbacks.h"
 
 namespace blink {
@@ -56,6 +58,11 @@ class WebContentSettingsClient {
     return enabled_per_settings;
   }
 
+  // Retrieves the client hints that should be attached to the request for the
+  // given URL.
+  virtual void GetAllowedClientHintsFromSource(const blink::WebURL& url,
+                                               WebEnabledClientHints*) const {}
+
   // Controls whether insecure scripts are allowed to execute for this frame.
   virtual bool AllowRunningInsecureContent(bool enabled_per_settings,
                                            const WebSecurityOrigin&,
@@ -101,7 +108,14 @@ class WebContentSettingsClient {
   // were enabled.
   virtual void DidNotAllowScript() {}
 
-  virtual ~WebContentSettingsClient() {}
+  // Called to persist the received client hint preferences when |url| was
+  // fetched. The preferences should be persisted for |duration|.
+  virtual void PersistClientHints(
+      const WebEnabledClientHints& enabled_client_hints,
+      base::TimeDelta duration,
+      const blink::WebURL& url) {}
+
+  virtual ~WebContentSettingsClient() = default;
 };
 
 }  // namespace blink

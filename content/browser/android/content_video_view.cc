@@ -22,17 +22,14 @@ ContentVideoView* g_content_video_view = NULL;
 
 }  // namespace
 
-static ScopedJavaLocalRef<jobject> GetSingletonJavaContentVideoView(
+static ScopedJavaLocalRef<jobject>
+JNI_ContentVideoView_GetSingletonJavaContentVideoView(
     JNIEnv* env,
     const JavaParamRef<jclass>&) {
   if (g_content_video_view)
     return g_content_video_view->GetJavaObject(env);
   else
     return ScopedJavaLocalRef<jobject>();
-}
-
-bool ContentVideoView::RegisterContentVideoView(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 ContentVideoView* ContentVideoView::GetInstance() {

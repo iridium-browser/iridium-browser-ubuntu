@@ -26,15 +26,15 @@
 
 #include "core/dom/ElementShadow.h"
 
+#include "core/css/StyleChangeReason.h"
 #include "core/css/StyleSheetList.h"
 #include "core/css/resolver/ScopedStyleResolver.h"
 #include "core/dom/ElementShadowV0.h"
 #include "core/dom/NodeTraversal.h"
-#include "core/dom/StyleChangeReason.h"
 #include "core/frame/Deprecation.h"
 #include "core/probe/CoreProbes.h"
 #include "platform/EventDispatchForbiddenScope.h"
-#include "platform/ScriptForbiddenScope.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 
 namespace blink {
 
@@ -42,44 +42,22 @@ ElementShadow* ElementShadow::Create() {
   return new ElementShadow();
 }
 
-ElementShadow::ElementShadow()
-    : element_shadow_v0_(this, nullptr),
-      shadow_root_(this, nullptr),
-      needs_distribution_recalc_(false) {}
-
-ShadowRoot& ElementShadow::YoungestShadowRoot() const {
-  ShadowRoot* current = shadow_root_;
-  DCHECK(current);
-  while (current->YoungerShadowRoot())
-    current = current->YoungerShadowRoot();
-  return *current;
-}
+ElementShadow::ElementShadow() : needs_distribution_recalc_(false) {}
 
 ShadowRoot& ElementShadow::AddShadowRoot(Element& shadow_host,
                                          ShadowRootType type) {
   EventDispatchForbiddenScope assert_no_event_dispatch;
   ScriptForbiddenScope forbid_script;
 
-  if (type == ShadowRootType::V0 && shadow_root_) {
-    DCHECK_EQ(shadow_root_->GetType(), ShadowRootType::V0);
-    Deprecation::CountDeprecation(shadow_host.GetDocument(),
-                                  WebFeature::kElementCreateShadowRootMultiple);
-  }
-
-  if (shadow_root_) {
-    // TODO(hayato): Is the order, from the youngest to the oldest, important?
-    for (ShadowRoot* root = &YoungestShadowRoot(); root;
-         root = root->OlderShadowRoot())
-      root->LazyReattachIfAttached();
-  } else if (type == ShadowRootType::V0 || type == ShadowRootType::kUserAgent) {
+  DCHECK(!shadow_root_);
+  if (type == ShadowRootType::V0) {
     DCHECK(!element_shadow_v0_);
     element_shadow_v0_ = ElementShadowV0::Create(*this);
   }
 
-  ShadowRoot* shadow_root = ShadowRoot::Create(shadow_host.GetDocument(), type);
-  shadow_root->SetParentOrShadowHostNode(&shadow_host);
-  shadow_root->SetParentTreeScope(shadow_host.GetTreeScope());
-  AppendShadowRoot(*shadow_root);
+  shadow_root_ = ShadowRoot::Create(shadow_host.GetDocument(), type);
+  shadow_root_->SetParentOrShadowHostNode(&shadow_host);
+  shadow_root_->SetParentTreeScope(shadow_host.GetTreeScope());
   if (type == ShadowRootType::V0) {
     SetNeedsDistributionRecalc();
   } else {
@@ -87,50 +65,39 @@ ShadowRoot& ElementShadow::AddShadowRoot(Element& shadow_host,
       child.LazyReattachIfAttached();
   }
 
-  shadow_root->InsertedInto(&shadow_host);
+  shadow_root_->InsertedInto(&shadow_host);
   shadow_host.SetChildNeedsStyleRecalc();
   shadow_host.SetNeedsStyleRecalc(
       kSubtreeStyleChange,
       StyleChangeReasonForTracing::Create(StyleChangeReason::kShadow));
 
-  probe::didPushShadowRoot(&shadow_host, shadow_root);
+  probe::didPushShadowRoot(&shadow_host, shadow_root_);
 
-  return *shadow_root;
-}
-
-void ElementShadow::AppendShadowRoot(ShadowRoot& shadow_root) {
-  if (!shadow_root_) {
-    shadow_root_ = &shadow_root;
-    return;
-  }
-  ShadowRoot& youngest = YoungestShadowRoot();
-  DCHECK(shadow_root.GetType() == ShadowRootType::V0);
-  DCHECK(youngest.GetType() == ShadowRootType::V0);
-  youngest.SetYoungerShadowRoot(shadow_root);
-  shadow_root.SetOlderShadowRoot(youngest);
+  return *shadow_root_;
 }
 
 void ElementShadow::Attach(const Node::AttachContext& context) {
   Node::AttachContext children_context(context);
-  children_context.resolved_style = 0;
-
-  for (ShadowRoot* root = &YoungestShadowRoot(); root;
-       root = root->OlderShadowRoot()) {
-    if (root->NeedsAttach())
-      root->AttachLayoutTree(children_context);
-  }
+  ShadowRoot& root = GetShadowRoot();
+  if (root.NeedsAttach())
+    root.AttachLayoutTree(children_context);
 }
 
 void ElementShadow::Detach(const Node::AttachContext& context) {
   Node::AttachContext children_context(context);
-  children_context.resolved_style = 0;
+  children_context.clear_invalidation = true;
+  GetShadowRoot().DetachLayoutTree(children_context);
+}
 
-  for (ShadowRoot* root = &YoungestShadowRoot(); root;
-       root = root->OlderShadowRoot())
-    root->DetachLayoutTree(children_context);
+void ElementShadow::SetNeedsDistributionRecalcWillBeSetNeedsAssignmentRecalc() {
+  if (RuntimeEnabledFeatures::IncrementalShadowDOMEnabled() && IsV1())
+    GetShadowRoot().SetNeedsAssignmentRecalc();
+  else
+    SetNeedsDistributionRecalc();
 }
 
 void ElementShadow::SetNeedsDistributionRecalc() {
+  DCHECK(!(RuntimeEnabledFeatures::IncrementalShadowDOMEnabled() && IsV1()));
   if (needs_distribution_recalc_)
     return;
   needs_distribution_recalc_ = true;
@@ -139,39 +106,19 @@ void ElementShadow::SetNeedsDistributionRecalc() {
     V0().ClearDistribution();
 }
 
-bool ElementShadow::HasSameStyles(const ElementShadow& other) const {
-  ShadowRoot* root = &YoungestShadowRoot();
-  ShadowRoot* other_root = &other.YoungestShadowRoot();
-  while (root || other_root) {
-    if (!root || !other_root)
-      return false;
-
-    if (!ScopedStyleResolver::HaveSameStyles(
-            root->GetScopedStyleResolver(),
-            other_root->GetScopedStyleResolver())) {
-      return false;
-    }
-
-    root = root->OlderShadowRoot();
-    other_root = other_root->OlderShadowRoot();
-  }
-
-  return true;
-}
-
 void ElementShadow::Distribute() {
   if (IsV1())
-    YoungestShadowRoot().DistributeV1();
+    GetShadowRoot().DistributeV1();
   else
     V0().Distribute();
 }
 
-DEFINE_TRACE(ElementShadow) {
+void ElementShadow::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_shadow_v0_);
   visitor->Trace(shadow_root_);
 }
 
-DEFINE_TRACE_WRAPPERS(ElementShadow) {
+void ElementShadow::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(element_shadow_v0_);
   visitor->TraceWrappers(shadow_root_);
 }

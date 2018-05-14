@@ -4,6 +4,8 @@
 
 #include "components/payments/content/android/payment_manifest_downloader_android.h"
 
+#include <memory>
+
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/ptr_util.h"
@@ -19,7 +21,8 @@ namespace {
 
 class DownloadCallback {
  public:
-  DownloadCallback(const base::android::JavaParamRef<jobject>& jcallback)
+  explicit DownloadCallback(
+      const base::android::JavaParamRef<jobject>& jcallback)
       : jcallback_(jcallback) {}
 
   ~DownloadCallback() {}
@@ -71,7 +74,7 @@ void PaymentManifestDownloaderAndroid::DownloadPaymentMethodManifest(
       GURL(base::android::ConvertJavaStringToUTF8(
           env, Java_PaymentManifestDownloader_getUriString(env, juri))),
       base::BindOnce(&DownloadCallback::OnPaymentMethodManifestDownload,
-                     base::MakeUnique<DownloadCallback>(jcallback)));
+                     std::make_unique<DownloadCallback>(jcallback)));
 }
 
 void PaymentManifestDownloaderAndroid::DownloadWebAppManifest(
@@ -83,7 +86,7 @@ void PaymentManifestDownloaderAndroid::DownloadWebAppManifest(
       GURL(base::android::ConvertJavaStringToUTF8(
           env, Java_PaymentManifestDownloader_getUriString(env, juri))),
       base::BindOnce(&DownloadCallback::OnWebAppManifestDownload,
-                     base::MakeUnique<DownloadCallback>(jcallback)));
+                     std::make_unique<DownloadCallback>(jcallback)));
 }
 
 void PaymentManifestDownloaderAndroid::Destroy(
@@ -92,17 +95,12 @@ void PaymentManifestDownloaderAndroid::Destroy(
   delete this;
 }
 
-void PaymentManifestDownloaderAndroid::AllowHttpForTest(
-    JNIEnv* env,
-    const base::android::JavaParamRef<jobject>& jcaller) {
-  downloader_.AllowHttpForTest();
-}
-
 // Static free function declared and called directly from java.
 // Caller owns the result. Returns 0 on error.
-static jlong Init(JNIEnv* env,
-                  const base::android::JavaParamRef<jclass>& jcaller,
-                  const base::android::JavaParamRef<jobject>& jweb_contents) {
+static jlong JNI_PaymentManifestDownloader_Init(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jclass>& jcaller,
+    const base::android::JavaParamRef<jobject>& jweb_contents) {
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(jweb_contents);
   if (!web_contents)

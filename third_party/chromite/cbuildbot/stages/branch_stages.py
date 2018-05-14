@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -52,7 +53,7 @@ class BranchUtilStage(generic_stages.BuilderStage):
   def __init__(self, builder_run, **kwargs):
     super(BranchUtilStage, self).__init__(builder_run, **kwargs)
     self.skip_remote_push = (self._run.options.skip_remote_push or
-                             self._run.options.debug_forced)
+                             self._run.options.debug)
     self.branch_name = self._run.options.branch_name
     self.rename_to = self._run.options.rename_to
 

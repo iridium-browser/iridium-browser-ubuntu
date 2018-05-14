@@ -14,6 +14,7 @@
 
 #include "test/multiprocess_exec.h"
 
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -48,20 +49,54 @@ class TestMultiprocessExec final : public MultiprocessExec {
 
 TEST(MultiprocessExec, MultiprocessExec) {
   TestMultiprocessExec multiprocess_exec;
-  base::FilePath test_executable = TestPaths::Executable();
-#if defined(OS_POSIX)
-  std::string child_test_executable = test_executable.value();
-#elif defined(OS_WIN)
-  std::string child_test_executable =
-      base::UTF16ToUTF8(test_executable.RemoveFinalExtension().value());
-#endif  // OS_POSIX
-  child_test_executable += "_multiprocess_exec_test_child";
-#if defined(OS_WIN)
-  child_test_executable += ".exe";
-#endif
+  base::FilePath child_test_executable = TestPaths::BuildArtifact(
+      FILE_PATH_LITERAL("test"),
+      FILE_PATH_LITERAL("multiprocess_exec_test_child"),
+      TestPaths::FileType::kExecutable);
   multiprocess_exec.SetChildCommand(child_test_executable, nullptr);
   multiprocess_exec.Run();
 }
+
+
+CRASHPAD_CHILD_TEST_MAIN(SimpleMultiprocess) {
+  char c;
+  CheckedReadFileExactly(StdioFileHandle(StdioStream::kStandardInput), &c, 1);
+  LOG_IF(FATAL, c != 'z');
+
+  c = 'Z';
+  CheckedWriteFile(StdioFileHandle(StdioStream::kStandardOutput), &c, 1);
+  return 0;
+}
+
+TEST(MultiprocessExec, MultiprocessExecSimpleChild) {
+  TestMultiprocessExec exec;
+  exec.SetChildTestMainFunction("SimpleMultiprocess");
+  exec.Run();
+};
+
+
+CRASHPAD_CHILD_TEST_MAIN(SimpleMultiprocessReturnsNonZero) {
+  return 123;
+}
+
+class TestMultiprocessExecEmpty final : public MultiprocessExec {
+ public:
+  TestMultiprocessExecEmpty() = default;
+  ~TestMultiprocessExecEmpty() = default;
+
+ private:
+  void MultiprocessParent() override {}
+
+  DISALLOW_COPY_AND_ASSIGN(TestMultiprocessExecEmpty);
+};
+
+TEST(MultiprocessExec, MultiprocessExecSimpleChildReturnsNonZero) {
+  TestMultiprocessExecEmpty exec;
+  exec.SetChildTestMainFunction("SimpleMultiprocessReturnsNonZero");
+  exec.SetExpectedChildTermination(
+      Multiprocess::TerminationReason::kTerminationNormal, 123);
+  exec.Run();
+};
 
 }  // namespace
 }  // namespace test

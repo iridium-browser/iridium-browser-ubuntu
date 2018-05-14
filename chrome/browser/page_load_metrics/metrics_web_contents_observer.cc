@@ -67,7 +67,8 @@ MetricsWebContentsObserver::MetricsWebContentsObserver(
     content::WebContents* web_contents,
     std::unique_ptr<PageLoadMetricsEmbedderInterface> embedder_interface)
     : content::WebContentsObserver(web_contents),
-      in_foreground_(web_contents->IsVisible()),
+      in_foreground_(web_contents->GetVisibility() !=
+                     content::Visibility::HIDDEN),
       embedder_interface_(std::move(embedder_interface)),
       has_navigated_(false),
       page_load_metrics_binding_(web_contents, this) {
@@ -198,12 +199,16 @@ void MetricsWebContentsObserver::WillStartNavigationRequest(
   // the MetricsWebContentsObserver owns them both list and they are torn down
   // after the PageLoadTracker. The PageLoadTracker does not hold on to
   // committed_load_ or navigation_handle beyond the scope of the constructor.
-  provisional_loads_.insert(std::make_pair(
+  auto insertion_result = provisional_loads_.insert(std::make_pair(
       navigation_handle,
-      base::MakeUnique<PageLoadTracker>(
+      std::make_unique<PageLoadTracker>(
           in_foreground_, embedder_interface_.get(), currently_committed_url,
           navigation_handle, user_initiated_info, chain_size,
           chain_size_same_url)));
+  DCHECK(insertion_result.second)
+      << "provisional_loads_ already contains NavigationHandle.";
+  for (auto& observer : testing_observers_)
+    observer.OnTrackerCreated(insertion_result.first->second.get());
 }
 
 void MetricsWebContentsObserver::WillProcessNavigationResponse(
@@ -283,7 +288,8 @@ void MetricsWebContentsObserver::OnRequestComplete(
     int64_t raw_body_bytes,
     int64_t original_content_length,
     base::TimeTicks creation_time,
-    int net_error) {
+    int net_error,
+    std::unique_ptr<net::LoadTimingInfo> load_timing_info) {
   // Ignore non-HTTP(S) resources (blobs, data uris, etc).
   if (!url.SchemeIsHTTPOrHTTPS())
     return;
@@ -294,7 +300,8 @@ void MetricsWebContentsObserver::OnRequestComplete(
     ExtraRequestCompleteInfo extra_request_complete_info(
         url, host_port_pair, frame_tree_node_id, was_cached, raw_body_bytes,
         was_cached ? 0 : original_content_length,
-        std::move(data_reduction_proxy_data), resource_type, net_error);
+        std::move(data_reduction_proxy_data), resource_type, net_error,
+        std::move(load_timing_info));
     tracker->OnLoadedResource(extra_request_complete_info);
   }
 }
@@ -474,25 +481,26 @@ void MetricsWebContentsObserver::DidRedirectNavigation(
   it->second->Redirect(navigation_handle);
 }
 
-void MetricsWebContentsObserver::WasShown() {
-  if (in_foreground_)
+void MetricsWebContentsObserver::OnVisibilityChanged(
+    content::Visibility visibility) {
+  // TODO(bmcquade): Consider handling an OCCLUDED tab as not in foreground.
+  bool was_in_foreground = in_foreground_;
+  in_foreground_ = visibility != content::Visibility::HIDDEN;
+  if (in_foreground_ == was_in_foreground)
     return;
-  in_foreground_ = true;
-  if (committed_load_)
-    committed_load_->WebContentsShown();
-  for (const auto& kv : provisional_loads_) {
-    kv.second->WebContentsShown();
-  }
-}
 
-void MetricsWebContentsObserver::WasHidden() {
-  if (!in_foreground_)
-    return;
-  in_foreground_ = false;
-  if (committed_load_)
-    committed_load_->WebContentsHidden();
-  for (const auto& kv : provisional_loads_) {
-    kv.second->WebContentsHidden();
+  if (in_foreground_) {
+    if (committed_load_)
+      committed_load_->WebContentsShown();
+    for (const auto& kv : provisional_loads_) {
+      kv.second->WebContentsShown();
+    }
+  } else {
+    if (committed_load_)
+      committed_load_->WebContentsHidden();
+    for (const auto& kv : provisional_loads_) {
+      kv.second->WebContentsHidden();
+    }
   }
 }
 
@@ -584,7 +592,8 @@ MetricsWebContentsObserver::NotifyAbortedProvisionalLoadsNewNavigation(
 void MetricsWebContentsObserver::OnTimingUpdated(
     content::RenderFrameHost* render_frame_host,
     const mojom::PageLoadTiming& timing,
-    const mojom::PageLoadMetadata& metadata) {
+    const mojom::PageLoadMetadata& metadata,
+    const mojom::PageLoadFeatures& new_features) {
   // We may receive notifications from frames that have been navigated away
   // from. We simply ignore them.
   if (GetMainFrame(render_frame_host) != web_contents()->GetMainFrame()) {
@@ -611,20 +620,23 @@ void MetricsWebContentsObserver::OnTimingUpdated(
 
     if (error)
       return;
+  } else if (!committed_load_) {
+    RecordInternalError(ERR_SUBFRAME_IPC_WITH_NO_RELEVANT_LOAD);
   }
 
   if (committed_load_) {
     committed_load_->metrics_update_dispatcher()->UpdateMetrics(
-        render_frame_host, timing, metadata);
+        render_frame_host, timing, metadata, new_features);
   }
 }
 
 void MetricsWebContentsObserver::UpdateTiming(
     const mojom::PageLoadTimingPtr timing,
-    const mojom::PageLoadMetadataPtr metadata) {
+    const mojom::PageLoadMetadataPtr metadata,
+    const mojom::PageLoadFeaturesPtr new_features) {
   content::RenderFrameHost* render_frame_host =
       page_load_metrics_binding_.GetCurrentTargetFrame();
-  OnTimingUpdated(render_frame_host, *timing, *metadata);
+  OnTimingUpdated(render_frame_host, *timing, *metadata, *new_features);
 }
 
 bool MetricsWebContentsObserver::ShouldTrackNavigation(
@@ -633,8 +645,8 @@ bool MetricsWebContentsObserver::ShouldTrackNavigation(
   DCHECK(!navigation_handle->HasCommitted() ||
          !navigation_handle->IsSameDocument());
 
-  return BrowserPageTrackDecider(embedder_interface_.get(), web_contents(),
-                                 navigation_handle).ShouldTrack();
+  return BrowserPageTrackDecider(embedder_interface_.get(), navigation_handle)
+      .ShouldTrack();
 }
 
 void MetricsWebContentsObserver::AddTestingObserver(TestingObserver* observer) {

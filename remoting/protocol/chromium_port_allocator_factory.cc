@@ -12,13 +12,13 @@
 namespace remoting {
 namespace protocol {
 
-ChromiumPortAllocatorFactory::ChromiumPortAllocatorFactory() {}
-ChromiumPortAllocatorFactory::~ChromiumPortAllocatorFactory() {}
+ChromiumPortAllocatorFactory::ChromiumPortAllocatorFactory() = default;
+ChromiumPortAllocatorFactory::~ChromiumPortAllocatorFactory() = default;
 
 std::unique_ptr<cricket::PortAllocator>
 ChromiumPortAllocatorFactory::CreatePortAllocator(
     scoped_refptr<TransportContext> transport_context) {
-  return base::MakeUnique<PortAllocator>(
+  return std::make_unique<PortAllocator>(
       base::WrapUnique(new rtc::BasicNetworkManager()),
       base::WrapUnique(new ChromiumPacketSocketFactory()), transport_context);
 }

@@ -20,7 +20,7 @@ class MODULES_EXPORT BlobEvent final : public Event {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  ~BlobEvent() override {}
+  ~BlobEvent() override = default;
 
   static BlobEvent* Create(const AtomicString& type,
                            const BlobEventInit& initializer);
@@ -32,7 +32,7 @@ class MODULES_EXPORT BlobEvent final : public Event {
   // Event
   const AtomicString& InterfaceName() const final;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   BlobEvent(const AtomicString& type, const BlobEventInit& initializer);

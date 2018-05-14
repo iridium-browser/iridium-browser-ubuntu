@@ -5,8 +5,8 @@
 #include <set>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/devtools/devtools_file_system_indexer.h"
@@ -18,7 +18,7 @@ class DevToolsFileSystemIndexerTest : public testing::Test {
  public:
   void SetDone() {
     indexing_done_ = true;
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
   void SearchCallback(const std::vector<std::string>& results) {
@@ -27,7 +27,7 @@ class DevToolsFileSystemIndexerTest : public testing::Test {
       search_results_.insert(
           base::FilePath::FromUTF8Unsafe(result).BaseName().AsUTF8Unsafe());
     }
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
  protected:
@@ -50,8 +50,8 @@ TEST_F(DevToolsFileSystemIndexerTest, BasicUsage) {
           .Append(FILE_PATH_LITERAL("indexer"));
 
   scoped_refptr<DevToolsFileSystemIndexer::FileSystemIndexingJob> job =
-      indexer_->IndexPath(index_path.AsUTF8Unsafe(), base::Bind([](int) {}),
-                          base::Bind([](int) {}),
+      indexer_->IndexPath(index_path.AsUTF8Unsafe(), base::DoNothing(),
+                          base::DoNothing(),
                           base::Bind(&DevToolsFileSystemIndexerTest::SetDone,
                                      base::Unretained(this)));
 

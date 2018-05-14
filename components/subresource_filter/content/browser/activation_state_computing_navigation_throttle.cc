@@ -79,7 +79,7 @@ ActivationStateComputingNavigationThrottle::WillProcessResponse() {
       parent_activation_state_->activation_level == ActivationLevel::DISABLED) {
     DCHECK(navigation_handle()->IsInMainFrame());
     DCHECK(!ruleset_handle_);
-    return content::NavigationThrottle::ThrottleCheckResult::PROCEED;
+    return content::NavigationThrottle::PROCEED;
   }
 
   DCHECK(ruleset_handle_);
@@ -92,14 +92,14 @@ ActivationStateComputingNavigationThrottle::WillProcessResponse() {
     params.parent_document_origin = parent->GetLastCommittedOrigin();
   }
 
-  async_filter_ = base::MakeUnique<AsyncDocumentSubresourceFilter>(
+  async_filter_ = std::make_unique<AsyncDocumentSubresourceFilter>(
       ruleset_handle_, std::move(params),
       base::Bind(&ActivationStateComputingNavigationThrottle::
                      OnActivationStateComputed,
                  weak_ptr_factory_.GetWeakPtr()));
 
   defer_timestamp_ = base::TimeTicks::Now();
-  return content::NavigationThrottle::ThrottleCheckResult::DEFER;
+  return content::NavigationThrottle::DEFER;
 }
 
 const char* ActivationStateComputingNavigationThrottle::GetNameForLogging() {
@@ -138,14 +138,13 @@ ActivationStateComputingNavigationThrottle::filter() const {
 // when activation IPCs are not sent to the render process.
 std::unique_ptr<AsyncDocumentSubresourceFilter>
 ActivationStateComputingNavigationThrottle::ReleaseFilter() {
-  return could_send_activation_to_renderer_ ? std::move(async_filter_)
-                                            : nullptr;
+  return will_send_activation_to_renderer_ ? std::move(async_filter_) : nullptr;
 }
 
 void ActivationStateComputingNavigationThrottle::
-    CouldSendActivationToRenderer() {
+    WillSendActivationToRenderer() {
   DCHECK(async_filter_);
-  could_send_activation_to_renderer_ = true;
+  will_send_activation_to_renderer_ = true;
 }
 
 }  // namespace subresource_filter

@@ -61,6 +61,7 @@ class AttributeCollectionGeneric {
   unsigned size() const { return attributes_.size(); }
   bool IsEmpty() const { return !size(); }
 
+  // Find() returns nullptr if the specified name is not found.
   iterator Find(const QualifiedName&) const;
   iterator Find(const AtomicString& name) const;
   size_t FindIndex(const QualifiedName&) const;
@@ -120,7 +121,7 @@ inline void MutableAttributeCollection::Append(const QualifiedName& name,
 }
 
 inline void MutableAttributeCollection::Remove(unsigned index) {
-  attributes_.erase(index);
+  attributes_.EraseAt(index);
 }
 
 template <typename Container, typename ContainerMemberType>

@@ -22,7 +22,7 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/socket_test_util.h"
 #include "net/test/cert_test_util.h"
@@ -62,7 +62,7 @@ std::unique_ptr<SequencedSocketData> BuildSocketData(
 // Builder for a SequencedSocketData that expects nothing. This does not
 // set the connect data, so the calling code must do that explicitly.
 std::unique_ptr<SequencedSocketData> BuildNullSocketData() {
-  return base::WrapUnique(new SequencedSocketData(NULL, 0, NULL, 0));
+  return std::make_unique<SequencedSocketData>(nullptr, 0, nullptr, 0);
 }
 
 class MockWeakTimer : public base::MockTimer,
@@ -73,7 +73,7 @@ class MockWeakTimer : public base::MockTimer,
 };
 
 static url::Origin LocalhostOrigin() {
-  return url::Origin(GURL("http://localhost/"));
+  return url::Origin::Create(GURL("http://localhost/"));
 }
 
 static GURL LocalhostUrl() {
@@ -81,7 +81,7 @@ static GURL LocalhostUrl() {
 }
 
 static url::Origin GoogleOrigin() {
-  return url::Origin(GURL("http://google.com/"));
+  return url::Origin::Create(GURL("http://google.com/"));
 }
 
 static GURL GoogleUrl() {
@@ -104,7 +104,7 @@ class WebSocketStreamCreateTest : public ::testing::Test,
       const std::string& socket_path,
       const std::vector<std::string>& sub_protocols,
       const url::Origin& origin,
-      const GURL& first_party_for_cookies,
+      const GURL& site_for_cookies,
       const std::string& send_additional_request_headers,
       const std::string& extra_request_headers,
       const std::string& response_body,
@@ -115,8 +115,8 @@ class WebSocketStreamCreateTest : public ::testing::Test,
                                  extra_request_headers),
         response_body);
     CreateAndConnectStream(GURL(socket_url), sub_protocols, origin,
-                           first_party_for_cookies,
-                           send_additional_request_headers, std::move(timer));
+                           site_for_cookies, send_additional_request_headers,
+                           std::move(timer));
   }
 
   // |extra_request_headers| and |extra_response_headers| must end in "\r\n" or
@@ -127,14 +127,14 @@ class WebSocketStreamCreateTest : public ::testing::Test,
       const std::string& socket_path,
       const std::vector<std::string>& sub_protocols,
       const url::Origin& origin,
-      const GURL& first_party_for_cookies,
+      const GURL& site_for_cookies,
       const std::string& send_additional_request_headers,
       const std::string& extra_request_headers,
       const std::string& extra_response_headers,
       std::unique_ptr<base::Timer> timer = std::unique_ptr<base::Timer>()) {
     CreateAndConnectCustomResponse(
         socket_url, socket_host, socket_path, sub_protocols, origin,
-        first_party_for_cookies, send_additional_request_headers,
+        site_for_cookies, send_additional_request_headers,
         extra_request_headers,
         WebSocketStandardResponse(extra_response_headers), std::move(timer));
   }
@@ -143,14 +143,14 @@ class WebSocketStreamCreateTest : public ::testing::Test,
       const std::string& socket_url,
       const std::vector<std::string>& sub_protocols,
       const url::Origin& origin,
-      const GURL& first_party_for_cookies,
+      const GURL& site_for_cookies,
       const std::string& send_additional_request_headers,
       std::unique_ptr<SequencedSocketData> socket_data,
       std::unique_ptr<base::Timer> timer = std::unique_ptr<base::Timer>()) {
     AddRawExpectations(std::move(socket_data));
     CreateAndConnectStream(GURL(socket_url), sub_protocols, origin,
-                           first_party_for_cookies,
-                           send_additional_request_headers, std::move(timer));
+                           site_for_cookies, send_additional_request_headers,
+                           std::move(timer));
   }
 
   // Add additional raw expectations for sockets created before the final one.
@@ -1052,11 +1052,11 @@ TEST_F(WebSocketStreamCreateTest, NoResponse) {
 }
 
 TEST_F(WebSocketStreamCreateTest, SelfSignedCertificateFailure) {
-  ssl_data_.push_back(base::MakeUnique<SSLSocketDataProvider>(
+  ssl_data_.push_back(std::make_unique<SSLSocketDataProvider>(
       ASYNC, ERR_CERT_AUTHORITY_INVALID));
-  ssl_data_[0]->cert =
+  ssl_data_[0]->ssl_info.cert =
       ImportCertFromFile(GetTestCertsDirectory(), "unittest.selfsigned.der");
-  ASSERT_TRUE(ssl_data_[0]->cert.get());
+  ASSERT_TRUE(ssl_data_[0]->ssl_info.cert.get());
   std::unique_ptr<SequencedSocketData> raw_socket_data(BuildNullSocketData());
   CreateAndConnectRawExpectations("wss://localhost/", NoSubProtocols(),
                                   LocalhostOrigin(), LocalhostUrl(), "",
@@ -1074,9 +1074,9 @@ TEST_F(WebSocketStreamCreateTest, SelfSignedCertificateFailure) {
 TEST_F(WebSocketStreamCreateTest, SelfSignedCertificateSuccess) {
   std::unique_ptr<SSLSocketDataProvider> ssl_data(
       new SSLSocketDataProvider(ASYNC, ERR_CERT_AUTHORITY_INVALID));
-  ssl_data->cert =
+  ssl_data->ssl_info.cert =
       ImportCertFromFile(GetTestCertsDirectory(), "unittest.selfsigned.der");
-  ASSERT_TRUE(ssl_data->cert.get());
+  ASSERT_TRUE(ssl_data->ssl_info.cert.get());
   ssl_data_.push_back(std::move(ssl_data));
   ssl_data.reset(new SSLSocketDataProvider(ASYNC, OK));
   ssl_data_.push_back(std::move(ssl_data));

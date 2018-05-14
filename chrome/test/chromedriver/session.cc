@@ -31,6 +31,8 @@ FrameInfo::FrameInfo(const std::string& parent_frame_id,
 
 const base::TimeDelta Session::kDefaultPageLoadTimeout =
     base::TimeDelta::FromMinutes(5);
+const base::TimeDelta Session::kDefaultScriptTimeout =
+    base::TimeDelta::FromMilliseconds(30000);
 
 Session::Session(const std::string& id)
     : id(id),
@@ -40,7 +42,9 @@ Session::Session(const std::string& id)
       force_devtools_screenshot(false),
       sticky_modifiers(0),
       mouse_position(0, 0),
+      pressed_mouse_button(kNoneMouseButton),
       page_load_timeout(kDefaultPageLoadTimeout),
+      script_timeout(kDefaultScriptTimeout),
       auto_reporting_enabled(false) {}
 
 Session::Session(const std::string& id, std::unique_ptr<Chrome> chrome)
@@ -52,7 +56,9 @@ Session::Session(const std::string& id, std::unique_ptr<Chrome> chrome)
       chrome(std::move(chrome)),
       sticky_modifiers(0),
       mouse_position(0, 0),
+      pressed_mouse_button(kNoneMouseButton),
       page_load_timeout(kDefaultPageLoadTimeout),
+      script_timeout(kDefaultScriptTimeout),
       auto_reporting_enabled(false) {}
 
 Session::~Session() {}

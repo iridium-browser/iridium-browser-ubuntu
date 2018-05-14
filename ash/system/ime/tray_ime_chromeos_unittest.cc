@@ -7,33 +7,27 @@
 #include <memory>
 #include <vector>
 
-#include "ash/accessibility_delegate.h"
-#include "ash/accessibility_types.h"
+#include "ash/accessibility/accessibility_controller.h"
 #include "ash/ime/ime_controller.h"
-#include "ash/public/cpp/config.h"
 #include "ash/shell.h"
 #include "ash/system/ime_menu/ime_list_view.h"
-#include "ash/system/tray/system_tray_notifier.h"
 #include "ash/test/ash_test_base.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "ui/events/devices/device_data_manager.h"
+#include "services/ui/public/cpp/input_devices/input_device_client_test_api.h"
+#include "ui/events/devices/input_device_manager.h"
 #include "ui/keyboard/keyboard_util.h"
 
 namespace ash {
 
 class TrayIMETest : public AshTestBase {
  public:
-  TrayIMETest() {}
-  ~TrayIMETest() override {}
+  TrayIMETest() = default;
+  ~TrayIMETest() override = default;
 
   views::View* default_view() const { return default_view_.get(); }
 
   views::View* detailed_view() const { return detailed_view_.get(); }
-
-  // Mocks enabling the a11y virtual keyboard since the actual a11y manager
-  // is not created in ash tests.
-  void SetAccessibilityKeyboardEnabled(bool enabled);
 
   // Creates |count| simulated active IMEs.
   void SetActiveImeCount(int count);
@@ -74,15 +68,6 @@ class TrayIMETest : public AshTestBase {
   DISALLOW_COPY_AND_ASSIGN(TrayIMETest);
 };
 
-void TrayIMETest::SetAccessibilityKeyboardEnabled(bool enabled) {
-  Shell::Get()->accessibility_delegate()->SetVirtualKeyboardEnabled(enabled);
-  keyboard::SetAccessibilityKeyboardEnabled(enabled);
-  AccessibilityNotificationVisibility notification =
-      enabled ? A11Y_NOTIFICATION_SHOW : A11Y_NOTIFICATION_NONE;
-  Shell::Get()->system_tray_notifier()->NotifyAccessibilityModeChanged(
-      notification);
-}
-
 void TrayIMETest::SetActiveImeCount(int count) {
   available_imes_.resize(count);
   for (int i = 0; i < count; ++i)
@@ -113,30 +98,28 @@ void TrayIMETest::SuppressKeyboard() {
   DCHECK(!keyboard_suppressed_);
   keyboard_suppressed_ = true;
 
-  ui::DeviceDataManager* device_manager = ui::DeviceDataManager::GetInstance();
-  touchscreen_devices_to_restore_ = device_manager->GetTouchscreenDevices();
-  keyboard_devices_to_restore_ = device_manager->GetKeyboardDevices();
+  ui::InputDeviceManager* manager = ui::InputDeviceManager::GetInstance();
+  touchscreen_devices_to_restore_ = manager->GetTouchscreenDevices();
+  keyboard_devices_to_restore_ = manager->GetKeyboardDevices();
 
-  ui::DeviceHotplugEventObserver* manager =
-      ui::DeviceDataManager::GetInstance();
   std::vector<ui::TouchscreenDevice> screens;
-  screens.push_back(
-      ui::TouchscreenDevice(1, ui::InputDeviceType::INPUT_DEVICE_INTERNAL,
-                            "Touchscreen", gfx::Size(1024, 768), 0));
-  manager->OnTouchscreenDevicesUpdated(screens);
+  screens.emplace_back(1, ui::InputDeviceType::INPUT_DEVICE_INTERNAL,
+                       "Touchscreen", gfx::Size(1024, 768), 0);
+  ui::InputDeviceClientTestApi input_device_client_test_api;
+  input_device_client_test_api.SetTouchscreenDevices(screens);
 
   std::vector<ui::InputDevice> keyboards;
   keyboards.push_back(ui::InputDevice(
       2, ui::InputDeviceType::INPUT_DEVICE_EXTERNAL, "keyboard"));
-  manager->OnKeyboardDevicesUpdated(keyboards);
+  input_device_client_test_api.SetKeyboardDevices(keyboards);
 }
 
 void TrayIMETest::RestoreKeyboard() {
   DCHECK(keyboard_suppressed_);
-  ui::DeviceHotplugEventObserver* manager =
-      ui::DeviceDataManager::GetInstance();
-  manager->OnTouchscreenDevicesUpdated(touchscreen_devices_to_restore_);
-  manager->OnKeyboardDevicesUpdated(keyboard_devices_to_restore_);
+  ui::InputDeviceClientTestApi().SetTouchscreenDevices(
+      touchscreen_devices_to_restore_);
+  ui::InputDeviceClientTestApi().SetKeyboardDevices(
+      keyboard_devices_to_restore_);
 }
 
 void TrayIMETest::SetUp() {
@@ -163,7 +146,7 @@ void TrayIMETest::RefreshImeController() {
 void TrayIMETest::TearDown() {
   if (keyboard_suppressed_)
     RestoreKeyboard();
-  SetAccessibilityKeyboardEnabled(false);
+  Shell::Get()->accessibility_controller()->SetVirtualKeyboardEnabled(false);
   tray_.reset();
   default_view_.reset();
   detailed_view_.reset();
@@ -231,11 +214,9 @@ TEST_F(TrayIMETest, HidesOnA11yEnabled) {
   SetActiveImeCount(0);
   SuppressKeyboard();
   EXPECT_TRUE(default_view()->visible());
-  // Enable a11y keyboard.
-  SetAccessibilityKeyboardEnabled(true);
+  Shell::Get()->accessibility_controller()->SetVirtualKeyboardEnabled(true);
   EXPECT_FALSE(default_view()->visible());
-  // Disable the a11y keyboard.
-  SetAccessibilityKeyboardEnabled(false);
+  Shell::Get()->accessibility_controller()->SetVirtualKeyboardEnabled(false);
   EXPECT_TRUE(default_view()->visible());
 }
 

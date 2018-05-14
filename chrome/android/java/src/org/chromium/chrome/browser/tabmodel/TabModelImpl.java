@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
-import org.chromium.base.ContextUtils;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
@@ -68,11 +67,6 @@ public class TabModelImpl extends TabModelJniBridge {
      */
     private boolean mIsUndoSupported = true;
 
-    /**
-     * Whether a tab is currently pending addition to this model.
-     */
-    private boolean mIsPendingTabAdd;
-
     public TabModelImpl(boolean incognito, boolean isTabbedActivity, TabCreator regularTabCreator,
             TabCreator incognitoTabCreator, TabModelSelectorUma uma,
             TabModelOrderController orderController, TabContentManager tabContentManager,
@@ -129,8 +123,6 @@ public class TabModelImpl extends TabModelJniBridge {
     public void addTab(Tab tab, int index, TabLaunchType type) {
         try {
             TraceEvent.begin("TabModelImpl.addTab");
-
-            mIsPendingTabAdd = false;
 
             for (TabModelObserver obs : mObservers) obs.willAddTab(tab, type);
 
@@ -398,7 +390,7 @@ public class TabModelImpl extends TabModelJniBridge {
 
         if (allowDelegation && mModelDelegate.closeAllTabsRequest(isIncognito())) return;
 
-        if (HomepageManager.isHomepageEnabled(ContextUtils.getApplicationContext())) {
+        if (HomepageManager.isHomepageEnabled()) {
             commitAllTabClosures();
 
             for (int i = 0; i < getCount(); i++) getTabAt(i).setClosing(true);
@@ -744,7 +736,7 @@ public class TabModelImpl extends TabModelJniBridge {
 
     @Override
     public int index() {
-        return mIsPendingTabAdd ? INVALID_TAB_INDEX : mIndex;
+        return mIndex;
     }
 
     @Override
@@ -767,16 +759,5 @@ public class TabModelImpl extends TabModelJniBridge {
         mRecentlyClosedBridge.openRecentlyClosedTab();
         // If there is only one tab, select it.
         if (getCount() == 1) setIndex(0, TabSelectionType.FROM_NEW);
-    }
-
-    @Override
-    public void setIsPendingTabAdd(boolean isPendingTabAdd) {
-        mIsPendingTabAdd = isPendingTabAdd;
-        for (TabModelObserver obs : mObservers) obs.pendingTabAdd(isPendingTabAdd);
-    }
-
-    @Override
-    public boolean isPendingTabAdd() {
-        return mIsPendingTabAdd;
     }
 }

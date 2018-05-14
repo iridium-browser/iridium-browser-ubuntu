@@ -39,19 +39,17 @@ class LayoutSVGResourceMasker final : public LayoutSVGResourceContainer {
   const char* GetName() const override { return "LayoutSVGResourceMasker"; }
 
   void RemoveAllClientsFromCache(bool mark_for_invalidation = true) override;
-  void RemoveClientFromCache(LayoutObject*,
-                             bool mark_for_invalidation = true) override;
 
   FloatRect ResourceBoundingBox(const LayoutObject*);
 
   SVGUnitTypes::SVGUnitType MaskUnits() const {
-    return toSVGMaskElement(GetElement())
+    return ToSVGMaskElement(GetElement())
         ->maskUnits()
         ->CurrentValue()
         ->EnumValue();
   }
   SVGUnitTypes::SVGUnitType MaskContentUnits() const {
-    return toSVGMaskElement(GetElement())
+    return ToSVGMaskElement(GetElement())
         ->maskContentUnits()
         ->CurrentValue()
         ->EnumValue();

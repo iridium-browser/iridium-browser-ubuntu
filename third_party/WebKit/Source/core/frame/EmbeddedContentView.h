@@ -6,6 +6,7 @@
 #define EmbeddedContentView_h
 
 #include "core/CoreExport.h"
+#include "core/paint/PaintPhase.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -15,11 +16,12 @@ class GraphicsContext;
 class IntRect;
 
 // EmbeddedContentView is a pure virtual class which is implemented by
-// LocalFrameView, RemoteFrameView, and PluginView.
+// LocalFrameView, RemoteFrameView, and WebPluginContainerImpl.
 class CORE_EXPORT EmbeddedContentView : public GarbageCollectedMixin {
  public:
-  virtual ~EmbeddedContentView() {}
+  virtual ~EmbeddedContentView() = default;
 
+  virtual bool IsFrameView() const { return false; }
   virtual bool IsLocalFrameView() const { return false; }
   virtual bool IsPluginView() const { return false; }
 
@@ -29,8 +31,10 @@ class CORE_EXPORT EmbeddedContentView : public GarbageCollectedMixin {
   virtual void SetParentVisible(bool) = 0;
   virtual void SetFrameRect(const IntRect&) = 0;
   virtual void FrameRectsChanged() = 0;
-  virtual const IntRect& FrameRect() const = 0;
-  virtual void Paint(GraphicsContext&, const CullRect&) const = 0;
+  virtual IntRect FrameRect() const = 0;
+  virtual void Paint(GraphicsContext&,
+                     const GlobalPaintFlags,
+                     const CullRect&) const = 0;
   // Called when the size of the view changes.  Implementations of
   // EmbeddedContentView should call LayoutEmbeddedContent::UpdateGeometry in
   // addition to any internal logic.

@@ -20,6 +20,8 @@ class NavigatorPlugins final : public GarbageCollected<NavigatorPlugins>,
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorPlugins);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorPlugins& From(Navigator&);
   static NavigatorPlugins* ToNavigatorPlugins(Navigator&);
 
@@ -27,12 +29,10 @@ class NavigatorPlugins final : public GarbageCollected<NavigatorPlugins>,
   static DOMMimeTypeArray* mimeTypes(Navigator&);
   static bool javaEnabled(Navigator&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit NavigatorPlugins(Navigator&);
-
-  static const char* SupplementName();
 
   DOMPluginArray* plugins(LocalFrame*) const;
   DOMMimeTypeArray* mimeTypes(LocalFrame*) const;

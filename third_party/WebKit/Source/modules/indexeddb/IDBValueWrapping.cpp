@@ -4,12 +4,12 @@
 
 #include "modules/indexeddb/IDBValueWrapping.h"
 
+#include <memory>
 #include <utility>
 
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/serialization/SerializationTag.h"
 #include "bindings/modules/v8/V8BindingForModules.h"
-#include "core/fileapi/Blob.h"
 #include "modules/indexeddb/IDBRequest.h"
 #include "modules/indexeddb/IDBValue.h"
 #include "platform/blob/BlobData.h"
@@ -41,16 +41,15 @@ namespace {
 // The SSV format version whose encoding hole is (ab)used for wrapping.
 const static uint8_t kRequiresProcessingSSVPseudoVersion = 17;
 
-// Identifies IndexedDB values that were wrapped in Blobs. The wrapper has the
-// following format:
+// SSV processing command replacing the SSV data bytes with a Blob's contents.
 //
 // 1) 0xFF - kVersionTag
 // 2) 0x11 - kRequiresProcessingSSVPseudoVersion
-// 3) 0x01 - kBlobWrappedValue
+// 3) 0x01 - kReplaceWithBlob
 // 4) varint - Blob size
 // 5) varint - the offset of the SSV-wrapping Blob in the IDBValue list of Blobs
 //             (should always be the last Blob)
-const static uint8_t kBlobWrappedValue = 1;
+const static uint8_t kReplaceWithBlob = 1;
 
 }  // namespace
 
@@ -67,8 +66,9 @@ IDBValueWrapper::IDBValueWrapper(
 
   serialized_value_ = SerializedScriptValue::Serialize(isolate, value, options,
                                                        exception_state);
-  if (serialized_value_)
+  if (serialized_value_) {
     original_data_length_ = serialized_value_->DataLengthInBytes();
+  }
 #if DCHECK_IS_ON()
   if (exception_state.HadException())
     had_exception_ = true;
@@ -77,19 +77,25 @@ IDBValueWrapper::IDBValueWrapper(
 
 // Explicit destructor in the .cpp file, to move the dependency on the
 // BlobDataHandle definition away from the header file.
-IDBValueWrapper::~IDBValueWrapper() {}
+IDBValueWrapper::~IDBValueWrapper() = default;
 
 void IDBValueWrapper::Clone(ScriptState* script_state, ScriptValue* clone) {
 #if DCHECK_IS_ON()
-  DCHECK(!had_exception_) << __FUNCTION__
+  DCHECK(!had_exception_) << __func__
                           << " called on wrapper with serialization exception";
-  DCHECK(!wrap_called_) << "Clone() called after WrapIfBiggerThan()";
+  DCHECK(!done_cloning_) << __func__ << " called after DoneCloning()";
 #endif  // DCHECK_IS_ON()
-  *clone = DeserializeScriptValue(script_state, serialized_value_.Get(),
-                                  &blob_info_);
+
+  bool read_wasm_from_stream = true;
+  // It is safe to unconditionally enable WASM module decoding because the
+  // relevant checks were already performed in SerializedScriptValue::Serialize,
+  // called by the IDBValueWrapper constructor.
+  *clone = DeserializeScriptValue(script_state, serialized_value_.get(),
+                                  &blob_info_, read_wasm_from_stream);
 }
 
-void IDBValueWrapper::WriteVarint(unsigned value, Vector<char>& output) {
+// static
+void IDBValueWrapper::WriteVarInt(unsigned value, Vector<char>& output) {
   // Writes an unsigned integer as a base-128 varint.
   // The number is written, 7 bits at a time, from the least significant to
   // the most significant 7 bits. Each byte, except the last, has the MSB set.
@@ -101,62 +107,91 @@ void IDBValueWrapper::WriteVarint(unsigned value, Vector<char>& output) {
   output.back() &= 0x7F;
 }
 
-bool IDBValueWrapper::WrapIfBiggerThan(unsigned max_bytes) {
+// static
+void IDBValueWrapper::WriteBytes(const Vector<uint8_t>& bytes,
+                                 Vector<char>& output) {
+  IDBValueWrapper::WriteVarInt(bytes.size(), output);
+  output.Append(bytes.data(), bytes.size());
+}
+
+void IDBValueWrapper::DoneCloning() {
 #if DCHECK_IS_ON()
-  DCHECK(!had_exception_) << __FUNCTION__
+  DCHECK(!had_exception_) << __func__
                           << " called on wrapper with serialization exception";
-  DCHECK(!wrap_called_) << __FUNCTION__ << " called twice on the same wrapper";
-  wrap_called_ = true;
+  DCHECK(!done_cloning_) << __func__ << " called twice";
+  done_cloning_ = true;
 #endif  // DCHECK_IS_ON()
 
-  serialized_value_->ToWireBytes(wire_bytes_);
-  if (wire_bytes_.size() <= max_bytes)
+  wire_data_ = serialized_value_->GetWireData();
+  for (const auto& kvp : serialized_value_->BlobDataHandles())
+    blob_handles_.push_back(std::move(kvp.value));
+}
+
+bool IDBValueWrapper::WrapIfBiggerThan(unsigned max_bytes) {
+#if DCHECK_IS_ON()
+  DCHECK(done_cloning_) << __func__ << " called before DoneCloning()";
+  DCHECK(owns_blob_handles_)
+      << __func__ << " called after TakeBlobDataHandles()";
+  DCHECK(owns_blob_info_) << __func__ << " called after TakeBlobInfo()";
+  DCHECK(owns_wire_bytes_) << __func__ << " called after TakeWireBytes()";
+#endif  // DCHECK_IS_ON()
+
+  unsigned wire_data_size = wire_data_.length();
+  if (wire_data_size <= max_bytes)
     return false;
 
   // TODO(pwnall): The MIME type should probably be an atomic string.
   String mime_type(kWrapMimeType);
-  // TODO(crbug.com/721516): Use WebBlobRegistry::CreateBuilder instead of
-  //                         Blob::Create to avoid a buffer copy.
-  Blob* wrapper =
-      Blob::Create(reinterpret_cast<unsigned char*>(wire_bytes_.data()),
-                   wire_bytes_.size(), mime_type);
+  std::unique_ptr<BlobData> wrapper_blob_data = BlobData::Create();
+  wrapper_blob_data->SetContentType(String(kWrapMimeType));
+  wrapper_blob_data->AppendBytes(wire_data_.data(), wire_data_size);
+  scoped_refptr<BlobDataHandle> wrapper_handle =
+      BlobDataHandle::Create(std::move(wrapper_blob_data), wire_data_size);
+  blob_info_.emplace_back(wrapper_handle);
+  blob_handles_.push_back(std::move(wrapper_handle));
 
-  wrapper_handle_ = wrapper->GetBlobDataHandle();
-  blob_info_.emplace_back(wrapper_handle_->Uuid(), wrapper_handle_->GetType(),
-                          wrapper->size());
+  wire_data_buffer_.clear();
+  wire_data_buffer_.push_back(kVersionTag);
+  wire_data_buffer_.push_back(kRequiresProcessingSSVPseudoVersion);
+  wire_data_buffer_.push_back(kReplaceWithBlob);
+  IDBValueWrapper::WriteVarInt(wire_data_size, wire_data_buffer_);
+  IDBValueWrapper::WriteVarInt(serialized_value_->BlobDataHandles().size(),
+                               wire_data_buffer_);
 
-  wire_bytes_.clear();
-
-  wire_bytes_.push_back(kVersionTag);
-  wire_bytes_.push_back(kRequiresProcessingSSVPseudoVersion);
-  wire_bytes_.push_back(kBlobWrappedValue);
-  IDBValueWrapper::WriteVarint(wrapper->size(), wire_bytes_);
-  IDBValueWrapper::WriteVarint(serialized_value_->BlobDataHandles().size(),
-                               wire_bytes_);
+  wire_data_ = base::make_span(
+      reinterpret_cast<const uint8_t*>(wire_data_buffer_.data()),
+      wire_data_buffer_.size());
+  DCHECK(!wire_data_buffer_.IsEmpty());
   return true;
 }
 
-void IDBValueWrapper::ExtractBlobDataHandles(
-    Vector<RefPtr<BlobDataHandle>>* blob_data_handles) {
-  for (const auto& kvp : serialized_value_->BlobDataHandles())
-    blob_data_handles->push_back(kvp.value);
-  if (wrapper_handle_)
-    blob_data_handles->push_back(std::move(wrapper_handle_));
-}
-
-RefPtr<SharedBuffer> IDBValueWrapper::ExtractWireBytes() {
+scoped_refptr<SharedBuffer> IDBValueWrapper::TakeWireBytes() {
 #if DCHECK_IS_ON()
-  DCHECK(!had_exception_) << __FUNCTION__
-                          << " called on wrapper with serialization exception";
+  DCHECK(done_cloning_) << __func__ << " called before DoneCloning()";
+  DCHECK(owns_wire_bytes_) << __func__ << " called twice";
+  owns_wire_bytes_ = false;
 #endif  // DCHECK_IS_ON()
 
-  return SharedBuffer::AdoptVector(wire_bytes_);
+  if (wire_data_buffer_.IsEmpty()) {
+    // The wire bytes are coming directly from the SSV's GetWireData() call.
+    DCHECK_EQ(wire_data_.data(), serialized_value_->GetWireData().data());
+    DCHECK_EQ(wire_data_.length(), serialized_value_->GetWireData().length());
+    return SharedBuffer::Create(wire_data_.data(),
+                                static_cast<size_t>(wire_data_.length()));
+  }
+
+  // The wire bytes are coming from wire_data_buffer_, so we can avoid a copy.
+  DCHECK_EQ(wire_data_buffer_.data(),
+            reinterpret_cast<const char*>(wire_data_.data()));
+  DCHECK_EQ(wire_data_buffer_.size(), wire_data_.length());
+  return SharedBuffer::AdoptVector(wire_data_buffer_);
 }
 
 IDBValueUnwrapper::IDBValueUnwrapper() {
   Reset();
 }
 
+// static
 bool IDBValueUnwrapper::IsWrapped(IDBValue* value) {
   DCHECK(value);
 
@@ -166,43 +201,28 @@ bool IDBValueUnwrapper::IsWrapped(IDBValue* value) {
 
   return header[0] == kVersionTag &&
          header[1] == kRequiresProcessingSSVPseudoVersion &&
-         header[2] == kBlobWrappedValue;
+         header[2] == kReplaceWithBlob;
 }
 
-bool IDBValueUnwrapper::IsWrapped(const Vector<RefPtr<IDBValue>>& values) {
+// static
+bool IDBValueUnwrapper::IsWrapped(
+    const Vector<std::unique_ptr<IDBValue>>& values) {
   for (const auto& value : values) {
-    if (IsWrapped(value.Get()))
+    if (IsWrapped(value.get()))
       return true;
   }
   return false;
 }
 
-RefPtr<IDBValue> IDBValueUnwrapper::Unwrap(
-    IDBValue* wrapped_value,
-    RefPtr<SharedBuffer>&& wrapper_blob_content) {
+// static
+void IDBValueUnwrapper::Unwrap(
+    scoped_refptr<SharedBuffer>&& wrapper_blob_content,
+    IDBValue* wrapped_value) {
   DCHECK(wrapped_value);
   DCHECK(wrapped_value->data_);
-  DCHECK_GT(wrapped_value->blob_info_->size(), 0U);
-  DCHECK_EQ(wrapped_value->blob_info_->size(),
-            wrapped_value->blob_data_->size());
 
-  // Create an IDBValue with the same blob information, minus the last blob.
-  unsigned blob_count = wrapped_value->BlobInfo()->size() - 1;
-  std::unique_ptr<Vector<RefPtr<BlobDataHandle>>> blob_data =
-      WTF::MakeUnique<Vector<RefPtr<BlobDataHandle>>>();
-  blob_data->ReserveCapacity(blob_count);
-  std::unique_ptr<Vector<WebBlobInfo>> blob_info =
-      WTF::MakeUnique<Vector<WebBlobInfo>>();
-  blob_info->ReserveCapacity(blob_count);
-
-  for (unsigned i = 0; i < blob_count; ++i) {
-    blob_data->push_back((*wrapped_value->blob_data_)[i]);
-    blob_info->push_back((*wrapped_value->blob_info_)[i]);
-  }
-
-  return IDBValue::Create(std::move(wrapper_blob_content), std::move(blob_data),
-                          std::move(blob_info), wrapped_value->PrimaryKey(),
-                          wrapped_value->KeyPath());
+  wrapped_value->SetData(wrapper_blob_content);
+  wrapped_value->TakeLastBlob();
 }
 
 bool IDBValueUnwrapper::Parse(IDBValue* value) {
@@ -214,31 +234,31 @@ bool IDBValueUnwrapper::Parse(IDBValue* value) {
   end_ = data + value->data_->size();
   current_ = data + 3;
 
-  if (!ReadVarint(blob_size_))
+  if (!ReadVarInt(blob_size_))
     return Reset();
 
   unsigned blob_offset;
-  if (!ReadVarint(blob_offset))
+  if (!ReadVarInt(blob_offset))
     return Reset();
 
-  size_t value_blob_count = value->blob_data_->size();
+  size_t value_blob_count = value->blob_info_.size();
   if (!value_blob_count || blob_offset != value_blob_count - 1)
     return Reset();
 
-  blob_handle_ = value->blob_data_->back();
+  blob_handle_ = value->blob_info_.back().GetBlobHandle();
   if (blob_handle_->size() != blob_size_)
     return Reset();
 
   return true;
 }
 
-RefPtr<BlobDataHandle> IDBValueUnwrapper::WrapperBlobHandle() {
+scoped_refptr<BlobDataHandle> IDBValueUnwrapper::WrapperBlobHandle() {
   DCHECK(blob_handle_);
 
   return std::move(blob_handle_);
 }
 
-bool IDBValueUnwrapper::ReadVarint(unsigned& value) {
+bool IDBValueUnwrapper::ReadVarInt(unsigned& value) {
   value = 0;
   unsigned shift = 0;
   bool has_another_byte;
@@ -258,9 +278,25 @@ bool IDBValueUnwrapper::ReadVarint(unsigned& value) {
   return true;
 }
 
+bool IDBValueUnwrapper::ReadBytes(Vector<uint8_t>& value) {
+  unsigned length;
+  if (!ReadVarInt(length))
+    return false;
+
+  DCHECK_LE(current_, end_);
+  if (end_ - current_ < static_cast<ptrdiff_t>(length))
+    return false;
+  Vector<uint8_t> result;
+  result.ReserveInitialCapacity(length);
+  result.Append(current_, length);
+  value = std::move(result);
+  current_ += length;
+  return true;
+}
+
 bool IDBValueUnwrapper::Reset() {
 #if DCHECK_IS_ON()
-  blob_handle_.Clear();
+  blob_handle_ = nullptr;
   current_ = nullptr;
   end_ = nullptr;
 #endif  // DCHECK_IS_ON()

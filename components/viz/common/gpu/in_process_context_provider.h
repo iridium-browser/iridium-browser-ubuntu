@@ -14,7 +14,7 @@
 #include "components/viz/common/gpu/context_cache_controller.h"
 #include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/viz_common_export.h"
-#include "gpu/command_buffer/common/gles2_cmd_utils.h"
+#include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/ipc/in_process_command_buffer.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -22,6 +22,7 @@ class GrContext;
 
 namespace gpu {
 class GLInProcessContext;
+class GpuChannelManagerDelegate;
 class GpuMemoryBufferManager;
 class ImageFactory;
 struct SharedMemoryLimits;
@@ -33,27 +34,37 @@ class GrContextForGLES2Interface;
 
 namespace viz {
 
+// A ContextProvider used in the viz process to setup command buffers between
+// the compositor and gpu thread.
+// TODO(kylechar): Rename VizProcessContextProvider and move to
+// components/viz/service.
 class VIZ_COMMON_EXPORT InProcessContextProvider
-    : public NON_EXPORTED_BASE(ContextProvider) {
+    : public base::RefCountedThreadSafe<InProcessContextProvider>,
+      public ContextProvider {
  public:
   InProcessContextProvider(
       scoped_refptr<gpu::InProcessCommandBuffer::Service> service,
-      gpu::SurfaceHandle widget,
+      gpu::SurfaceHandle surface_handle,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       gpu::ImageFactory* image_factory,
+      gpu::GpuChannelManagerDelegate* gpu_channel_manager_delegate,
       const gpu::SharedMemoryLimits& limits,
       InProcessContextProvider* shared_context);
 
-  bool BindToCurrentThread() override;
+  // ContextProvider implementation.
+  void AddRef() const override;
+  void Release() const override;
+  gpu::ContextResult BindToCurrentThread() override;
   gpu::gles2::GLES2Interface* ContextGL() override;
   gpu::ContextSupport* ContextSupport() override;
   class GrContext* GrContext() override;
   ContextCacheController* CacheController() override;
   void InvalidateGrContext(uint32_t state) override;
   base::Lock* GetLock() override;
-  gpu::Capabilities ContextCapabilities() override;
-  void SetLostContextCallback(
-      const LostContextCallback& lost_context_callback) override;
+  const gpu::Capabilities& ContextCapabilities() const override;
+  const gpu::GpuFeatureInfo& GetGpuFeatureInfo() const override;
+  void AddObserver(ContextLostObserver* obs) override;
+  void RemoveObserver(ContextLostObserver* obs) override;
 
   uint32_t GetCopyTextureInternalFormat();
 
@@ -65,15 +76,19 @@ class VIZ_COMMON_EXPORT InProcessContextProvider
       const gpu::InProcessCommandBuffer::UpdateVSyncParametersCallback&
           callback);
 
+  void SetPresentationCallback(
+      const gpu::InProcessCommandBuffer::PresentationCallback& callback);
+
  protected:
   friend class base::RefCountedThreadSafe<InProcessContextProvider>;
   ~InProcessContextProvider() override;
 
  private:
-  const gpu::gles2::ContextCreationAttribHelper attributes_;
+  const gpu::ContextCreationAttribs attributes_;
 
   base::Lock context_lock_;
   std::unique_ptr<gpu::GLInProcessContext> context_;
+  gpu::ContextResult context_result_;
   std::unique_ptr<skia_bindings::GrContextForGLES2Interface> gr_context_;
   std::unique_ptr<ContextCacheController> cache_controller_;
 };

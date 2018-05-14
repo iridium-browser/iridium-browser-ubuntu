@@ -240,37 +240,39 @@ TEST(VTTScannerTest, ExtractRestAsString) {
 void ScanDigits1(const String& input) {
   VTTScanner scanner(input);
   EXPECT_TRUE(scanner.Scan("foo"));
-  int number;
+  unsigned number;
+
   EXPECT_EQ(scanner.ScanDigits(number), 0u);
-  EXPECT_EQ(number, 0);
+  EXPECT_EQ(number, 0u);
+
   EXPECT_TRUE(scanner.Scan(' '));
   EXPECT_EQ(scanner.ScanDigits(number), 3u);
   EXPECT_TRUE(scanner.Match(' '));
-  EXPECT_EQ(number, 123);
+  EXPECT_EQ(number, 123u);
 
   EXPECT_TRUE(scanner.Scan(' '));
   EXPECT_TRUE(scanner.Scan("bar"));
   EXPECT_TRUE(scanner.Scan(' '));
 
   EXPECT_EQ(scanner.ScanDigits(number), 5u);
-  EXPECT_EQ(number, 45678);
+  EXPECT_EQ(number, 45678u);
 
   EXPECT_TRUE(scanner.IsAtEnd());
 }
 
 void ScanDigits2(const String& input) {
   VTTScanner scanner(input);
-  int number;
+  unsigned number;
   EXPECT_EQ(scanner.ScanDigits(number), 0u);
-  EXPECT_EQ(number, 0);
+  EXPECT_EQ(number, 0u);
   EXPECT_TRUE(scanner.Scan('-'));
   EXPECT_EQ(scanner.ScanDigits(number), 3u);
-  EXPECT_EQ(number, 654);
+  EXPECT_EQ(number, 654u);
 
   EXPECT_TRUE(scanner.Scan(' '));
 
   EXPECT_EQ(scanner.ScanDigits(number), 19u);
-  EXPECT_EQ(number, std::numeric_limits<int>::max());
+  EXPECT_EQ(number, std::numeric_limits<unsigned>::max());
 
   EXPECT_TRUE(scanner.IsAtEnd());
 }
@@ -281,45 +283,45 @@ TEST(VTTScannerTest, ScanDigits) {
   TEST_WITH(ScanDigits2, "-654 1000000000000000000");
 }
 
-void ScanFloatValue(const String& input) {
+void ScanDoubleValue(const String& input) {
   VTTScanner scanner(input);
-  float value;
+  double value;
   // "1."
-  EXPECT_TRUE(scanner.ScanFloat(value));
-  EXPECT_EQ(value, 1.0f);
+  EXPECT_TRUE(scanner.ScanDouble(value));
+  EXPECT_EQ(value, 1.0);
   EXPECT_TRUE(scanner.Scan(' '));
 
   // "1.0"
-  EXPECT_TRUE(scanner.ScanFloat(value));
-  EXPECT_EQ(value, 1.0f);
+  EXPECT_TRUE(scanner.ScanDouble(value));
+  EXPECT_EQ(value, 1.0);
   EXPECT_TRUE(scanner.Scan(' '));
 
   // ".0"
-  EXPECT_TRUE(scanner.ScanFloat(value));
-  EXPECT_EQ(value, 0.0f);
+  EXPECT_TRUE(scanner.ScanDouble(value));
+  EXPECT_EQ(value, 0.0);
   EXPECT_TRUE(scanner.Scan(' '));
 
   // "." (invalid)
-  EXPECT_FALSE(scanner.ScanFloat(value));
+  EXPECT_FALSE(scanner.ScanDouble(value));
   EXPECT_TRUE(scanner.Match('.'));
   EXPECT_TRUE(scanner.Scan('.'));
   EXPECT_TRUE(scanner.Scan(' '));
 
   // "1.0000"
-  EXPECT_TRUE(scanner.ScanFloat(value));
-  EXPECT_EQ(value, 1.0f);
+  EXPECT_TRUE(scanner.ScanDouble(value));
+  EXPECT_EQ(value, 1.0);
   EXPECT_TRUE(scanner.Scan(' '));
 
   // "01.000"
-  EXPECT_TRUE(scanner.ScanFloat(value));
-  EXPECT_EQ(value, 1.0f);
+  EXPECT_TRUE(scanner.ScanDouble(value));
+  EXPECT_EQ(value, 1.0);
 
   EXPECT_TRUE(scanner.IsAtEnd());
 }
 
-// Tests scanFloat().
-TEST(VTTScannerTest, ScanFloat) {
-  TEST_WITH(ScanFloatValue, "1. 1.0 .0 . 1.0000 01.000");
+// Tests ScanDouble().
+TEST(VTTScannerTest, ScanDouble) {
+  TEST_WITH(ScanDoubleValue, "1. 1.0 .0 . 1.0000 01.000");
 }
 
 #undef TEST_WITH

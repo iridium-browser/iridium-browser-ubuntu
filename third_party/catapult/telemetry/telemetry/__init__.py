@@ -59,8 +59,8 @@ _AddDirToPythonPath(_CATAPULT_DIR, 'systrace')
 _AddDirToPythonPath(_CATAPULT_DIR, 'tracing')
 _AddDirToPythonPath(_CATAPULT_DIR, 'common', 'py_trace_event')
 _AddDirToPythonPath(_CATAPULT_DIR, 'common', 'battor')
+_AddDirToPythonPath(_CATAPULT_DIR, 'common', 'py_vulcanize')
 _AddDirToPythonPath(_CATAPULT_DIR, 'tracing', 'tracing_build')
-_AddDirToPythonPath(_CATAPULT_DIR, 'third_party', 'py_vulcanize')
 
 from telemetry.core import util
 from telemetry.internal.util import global_hooks
@@ -78,10 +78,11 @@ _AddDirToPythonPath(util.GetTelemetryThirdPartyDir(), 'modulegraph')
 _AddDirToPythonPath(util.GetTelemetryThirdPartyDir(), 'mox3')
 _AddDirToPythonPath(util.GetTelemetryThirdPartyDir(), 'png')
 _AddDirToPythonPath(util.GetTelemetryThirdPartyDir(), 'pyfakefs')
-_AddDirToPythonPath(util.GetTelemetryThirdPartyDir(), 'web-page-replay')
 _AddDirToPythonPath(util.GetTelemetryThirdPartyDir(), 'websocket-client')
-_AddOptionalSingleGlobToPythonPath(_TELEMETRY_3P, 'cv2', 'lib', 'cv2_*')
-_AddOptionalSingleGlobToPythonPath(_TELEMETRY_3P, 'numpy', 'lib', 'numpy_*')
+# Chromium's vpython environment already provides these modules as wheels.
+if not os.getenv('VIRTUAL_ENV'):
+  _AddOptionalSingleGlobToPythonPath(_TELEMETRY_3P, 'cv2', 'lib', 'cv2_*')
+  _AddOptionalSingleGlobToPythonPath(_TELEMETRY_3P, 'numpy', 'lib', 'numpy_*')
 
 # Install Telemtry global hooks.
 global_hooks.InstallHooks()

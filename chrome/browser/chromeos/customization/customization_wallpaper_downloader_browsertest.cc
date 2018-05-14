@@ -8,16 +8,13 @@
 
 #include "ash/shell.h"
 #include "ash/wallpaper/wallpaper_controller.h"
+#include "ash/wallpaper/wallpaper_controller_observer.h"
 #include "base/command_line.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
 #include "chrome/browser/chromeos/customization/customization_wallpaper_downloader.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/chromeos_switches.h"
@@ -57,32 +54,75 @@ const char kServicesManifest[] =
 // Expected minimal wallpaper download retry interval in milliseconds.
 const int kDownloadRetryIntervalMS = 100;
 
-class TestWallpaperObserver : public WallpaperManager::Observer {
+// Dimension used for width and height of default wallpaper images. A small
+// value is used to minimize the amount of time spent compressing and writing
+// images.
+const int kWallpaperSize = 2;
+
+const SkColor kCustomizedDefaultWallpaperColor = SK_ColorDKGRAY;
+
+// Returns true if the color at the center of |image| is close to
+// |expected_color|. (The center is used so small wallpaper images can be
+// used.)
+bool ImageIsNearColor(gfx::ImageSkia image, SkColor expected_color) {
+  if (image.size().IsEmpty()) {
+    LOG(ERROR) << "Image is empty";
+    return false;
+  }
+
+  const SkBitmap* bitmap = image.bitmap();
+  if (!bitmap) {
+    LOG(ERROR) << "Unable to get bitmap from image";
+    return false;
+  }
+
+  gfx::Point center = gfx::Rect(image.size()).CenterPoint();
+  SkColor image_color = bitmap->getColor(center.x(), center.y());
+
+  const int kDiff = 3;
+  if (std::abs(static_cast<int>(SkColorGetA(image_color)) -
+               static_cast<int>(SkColorGetA(expected_color))) > kDiff ||
+      std::abs(static_cast<int>(SkColorGetR(image_color)) -
+               static_cast<int>(SkColorGetR(expected_color))) > kDiff ||
+      std::abs(static_cast<int>(SkColorGetG(image_color)) -
+               static_cast<int>(SkColorGetG(expected_color))) > kDiff ||
+      std::abs(static_cast<int>(SkColorGetB(image_color)) -
+               static_cast<int>(SkColorGetB(expected_color))) > kDiff) {
+    LOG(ERROR) << "Expected color near 0x" << std::hex << expected_color
+               << " but got 0x" << image_color;
+    return false;
+  }
+
+  return true;
+}
+
+class TestWallpaperObserver : public ash::WallpaperControllerObserver {
  public:
-  explicit TestWallpaperObserver(WallpaperManager* wallpaper_manager)
-      : finished_(false),
-        wallpaper_manager_(wallpaper_manager) {
-    DCHECK(wallpaper_manager_);
-    wallpaper_manager_->AddObserver(this);
+  explicit TestWallpaperObserver(ash::WallpaperController* wallpaper_controller)
+      : finished_(false), wallpaper_controller_(wallpaper_controller) {
+    wallpaper_controller_->AddObserver(this);
   }
 
   ~TestWallpaperObserver() override {
-    wallpaper_manager_->RemoveObserver(this);
+    wallpaper_controller_->RemoveObserver(this);
   }
 
-  void OnWallpaperAnimationFinished(const AccountId&) override {
+  void OnWallpaperDataChanged() override {
     finished_ = true;
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
-  void WaitForWallpaperAnimationFinished() {
+  // Wait until the wallpaper update is completed.
+  void WaitForWallpaperDataChanged() {
     while (!finished_)
       base::RunLoop().Run();
   }
 
+  void Reset() { finished_ = false; }
+
  private:
   bool finished_;
-  WallpaperManager* wallpaper_manager_;
+  ash::WallpaperController* wallpaper_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWallpaperObserver);
 };
@@ -192,7 +232,7 @@ class WallpaperImageFetcherFactory {
                   SkColor color,
                   const size_t require_retries) {
     std::vector<unsigned char> oem_wallpaper_;
-    ASSERT_TRUE(wallpaper_manager_test_utils::CreateJPEGImage(
+    ASSERT_TRUE(ash::WallpaperController::CreateJPEGImageForTesting(
         width, height, color, &oem_wallpaper_));
 
     url_callback_.reset(new TestWallpaperImageURLFetcherCallback(
@@ -227,79 +267,59 @@ class CustomizationWallpaperDownloaderBrowserTest
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "user");
   }
 
- protected:
-  void CreateCmdlineWallpapers() {
-    cmdline_wallpaper_dir_.reset(new base::ScopedTempDir);
-    ASSERT_TRUE(cmdline_wallpaper_dir_->CreateUniqueTempDir());
-    wallpaper_manager_test_utils::CreateCmdlineWallpapers(
-        *cmdline_wallpaper_dir_, &wallpaper_manager_command_line_);
-  }
-
-  std::unique_ptr<base::CommandLine> wallpaper_manager_command_line_;
-
-  // Directory created by CreateCmdlineWallpapersAndSetFlags() to store default
-  // wallpaper images.
-  std::unique_ptr<base::ScopedTempDir> cmdline_wallpaper_dir_;
-
  private:
   DISALLOW_COPY_AND_ASSIGN(CustomizationWallpaperDownloaderBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(CustomizationWallpaperDownloaderBrowserTest,
                        OEMWallpaperIsPresent) {
-  CreateCmdlineWallpapers();
-  WallpaperManager::Get()->SetDefaultWallpaperNow(EmptyAccountId());
-  wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
-  EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
-      ash::Shell::Get()->wallpaper_controller()->GetWallpaper(),
-      wallpaper_manager_test_utils::kSmallDefaultWallpaperColor));
+  ash::WallpaperController* wallpaper_controller =
+      ash::Shell::Get()->wallpaper_controller();
+  TestWallpaperObserver observer(wallpaper_controller);
+  wallpaper_controller->ShowDefaultWallpaperForTesting();
+  observer.WaitForWallpaperDataChanged();
+  observer.Reset();
 
   WallpaperImageFetcherFactory url_factory(
-      GURL(kOEMWallpaperURL),
-      wallpaper_manager_test_utils::kWallpaperSize,
-      wallpaper_manager_test_utils::kWallpaperSize,
-      wallpaper_manager_test_utils::kCustomWallpaperColor,
-      0 /* require_retries */);
+      GURL(kOEMWallpaperURL), kWallpaperSize, kWallpaperSize,
+      kCustomizedDefaultWallpaperColor, 0 /* require_retries */);
 
-  TestWallpaperObserver observer(WallpaperManager::Get());
   chromeos::ServicesCustomizationDocument* customization =
       chromeos::ServicesCustomizationDocument::GetInstance();
   EXPECT_TRUE(
       customization->LoadManifestFromString(std::string(kServicesManifest)));
 
-  observer.WaitForWallpaperAnimationFinished();
-  EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
-      ash::Shell::Get()->wallpaper_controller()->GetWallpaper(),
-      wallpaper_manager_test_utils::kCustomWallpaperColor));
+  observer.WaitForWallpaperDataChanged();
+  observer.Reset();
+
+  EXPECT_TRUE(ImageIsNearColor(wallpaper_controller->GetWallpaper(),
+                               kCustomizedDefaultWallpaperColor));
   EXPECT_EQ(1U, url_factory.num_attempts());
 }
 
 IN_PROC_BROWSER_TEST_F(CustomizationWallpaperDownloaderBrowserTest,
                        OEMWallpaperRetryFetch) {
-  CreateCmdlineWallpapers();
-  WallpaperManager::Get()->SetDefaultWallpaperNow(EmptyAccountId());
-  wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
-  EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
-      ash::Shell::Get()->wallpaper_controller()->GetWallpaper(),
-      wallpaper_manager_test_utils::kSmallDefaultWallpaperColor));
+  ash::WallpaperController* wallpaper_controller =
+      ash::Shell::Get()->wallpaper_controller();
+  TestWallpaperObserver observer(wallpaper_controller);
+  wallpaper_controller->ShowDefaultWallpaperForTesting();
+  observer.WaitForWallpaperDataChanged();
+  observer.Reset();
 
   WallpaperImageFetcherFactory url_factory(
-      GURL(kOEMWallpaperURL),
-      wallpaper_manager_test_utils::kWallpaperSize,
-      wallpaper_manager_test_utils::kWallpaperSize,
-      wallpaper_manager_test_utils::kCustomWallpaperColor,
-      1 /* require_retries */);
+      GURL(kOEMWallpaperURL), kWallpaperSize, kWallpaperSize,
+      kCustomizedDefaultWallpaperColor, 1 /* require_retries */);
 
-  TestWallpaperObserver observer(WallpaperManager::Get());
   chromeos::ServicesCustomizationDocument* customization =
       chromeos::ServicesCustomizationDocument::GetInstance();
   EXPECT_TRUE(
       customization->LoadManifestFromString(std::string(kServicesManifest)));
 
-  observer.WaitForWallpaperAnimationFinished();
-  EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
-      ash::Shell::Get()->wallpaper_controller()->GetWallpaper(),
-      wallpaper_manager_test_utils::kCustomWallpaperColor));
+  observer.WaitForWallpaperDataChanged();
+  observer.Reset();
+
+  EXPECT_TRUE(ImageIsNearColor(wallpaper_controller->GetWallpaper(),
+                               kCustomizedDefaultWallpaperColor));
 
   EXPECT_EQ(2U, url_factory.num_attempts());
 }

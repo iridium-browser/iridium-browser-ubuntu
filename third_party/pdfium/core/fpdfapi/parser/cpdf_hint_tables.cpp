@@ -13,8 +13,10 @@
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfapi/parser/cpdf_linearized_header.h"
+#include "core/fpdfapi/parser/cpdf_read_validator.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfapi/parser/cpdf_stream_acc.h"
+#include "core/fxcrt/cfx_bitstream.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "third_party/base/numerics/safe_conversions.h"
 
@@ -34,9 +36,9 @@ bool IsValidPageOffsetHintTableBitCount(uint32_t bits) {
 
 }  // namespace
 
-CPDF_HintTables::CPDF_HintTables(CPDF_DataAvail* pDataAvail,
+CPDF_HintTables::CPDF_HintTables(CPDF_ReadValidator* pValidator,
                                  CPDF_LinearizedHeader* pLinearized)
-    : m_pDataAvail(pDataAvail),
+    : m_pValidator(pValidator),
       m_pLinearized(pLinearized),
       m_nFirstPageSharedObjs(0),
       m_szFirstPageObjOffset(0) {
@@ -47,7 +49,7 @@ CPDF_HintTables::~CPDF_HintTables() {}
 
 uint32_t CPDF_HintTables::GetItemLength(
     uint32_t index,
-    const std::vector<FX_FILESIZE>& szArray) {
+    const std::vector<FX_FILESIZE>& szArray) const {
   if (szArray.size() < 2 || index > szArray.size() - 2 ||
       szArray[index] > szArray[index + 1]) {
     return 0;
@@ -371,7 +373,10 @@ bool CPDF_HintTables::ReadSharedObjHintTable(CFX_BitStream* hStream,
 bool CPDF_HintTables::GetPagePos(uint32_t index,
                                  FX_FILESIZE* szPageStartPos,
                                  FX_FILESIZE* szPageLength,
-                                 uint32_t* dwObjNum) {
+                                 uint32_t* dwObjNum) const {
+  if (index >= m_pLinearized->GetPageCount())
+    return false;
+
   *szPageStartPos = m_szPageOffsetArray[index];
   *szPageLength = GetItemLength(index, m_szPageOffsetArray);
 
@@ -399,12 +404,7 @@ bool CPDF_HintTables::GetPagePos(uint32_t index,
   return true;
 }
 
-CPDF_DataAvail::DocAvailStatus CPDF_HintTables::CheckPage(
-    uint32_t index,
-    CPDF_DataAvail::DownloadHints* pHints) {
-  if (!pHints)
-    return CPDF_DataAvail::DataError;
-
+CPDF_DataAvail::DocAvailStatus CPDF_HintTables::CheckPage(uint32_t index) {
   int nFirstPageNum = GetFirstPageNumber();
   if (!pdfium::base::IsValueInRangeForNumericType<uint32_t>(nFirstPageNum))
     return CPDF_DataAvail::DataError;
@@ -417,7 +417,8 @@ CPDF_DataAvail::DocAvailStatus CPDF_HintTables::CheckPage(
   if (!dwLength)
     return CPDF_DataAvail::DataError;
 
-  if (!m_pDataAvail->IsDataAvail(m_szPageOffsetArray[index], dwLength, pHints))
+  if (!m_pValidator->CheckDataRangeAndRequestIfUnavailable(
+          m_szPageOffsetArray[index], dwLength))
     return CPDF_DataAvail::DataNotAvailable;
 
   // Download data of shared objects in the page.
@@ -448,8 +449,8 @@ CPDF_DataAvail::DocAvailStatus CPDF_HintTables::CheckPage(
     if (!dwLength)
       return CPDF_DataAvail::DataError;
 
-    if (!m_pDataAvail->IsDataAvail(m_szSharedObjOffsetArray[dwIndex], dwLength,
-                                   pHints)) {
+    if (!m_pValidator->CheckDataRangeAndRequestIfUnavailable(
+            m_szSharedObjOffsetArray[dwIndex], dwLength)) {
       return CPDF_DataAvail::DataNotAvailable;
     }
   }
@@ -470,7 +471,7 @@ bool CPDF_HintTables::LoadHintStream(CPDF_Stream* pHintStream) {
     return false;
 
   auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(pHintStream);
-  pAcc->LoadAllData();
+  pAcc->LoadAllDataFiltered();
 
   uint32_t size = pAcc->GetSize();
   // The header section of page offset hint table is 36 bytes.
@@ -486,8 +487,7 @@ bool CPDF_HintTables::LoadHintStream(CPDF_Stream* pHintStream) {
     return false;
   }
 
-  CFX_BitStream bs;
-  bs.Init(pAcc->GetData(), size);
+  CFX_BitStream bs(pAcc->GetData(), size);
   return ReadPageHintTable(&bs) &&
          ReadSharedObjHintTable(&bs, shared_hint_table_offset);
 }

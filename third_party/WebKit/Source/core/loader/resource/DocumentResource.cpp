@@ -28,16 +28,18 @@
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/TextResourceDecoderOptions.h"
 #include "platform/wtf/text/StringBuilder.h"
+#include "services/network/public/mojom/request_context_frame_type.mojom-blink.h"
 
 namespace blink {
 
 DocumentResource* DocumentResource::FetchSVGDocument(FetchParameters& params,
-                                                     ResourceFetcher* fetcher) {
+                                                     ResourceFetcher* fetcher,
+                                                     ResourceClient* client) {
   DCHECK_EQ(params.GetResourceRequest().GetFrameType(),
-            WebURLRequest::kFrameTypeNone);
+            network::mojom::RequestContextFrameType::kNone);
   params.SetRequestContext(WebURLRequest::kRequestContextImage);
   return ToDocumentResource(
-      fetcher->RequestResource(params, SVGDocumentResourceFactory()));
+      fetcher->RequestResource(params, SVGDocumentResourceFactory(), client));
 }
 
 DocumentResource::DocumentResource(
@@ -50,21 +52,21 @@ DocumentResource::DocumentResource(
   DCHECK_EQ(type, kSVGDocument);
 }
 
-DocumentResource::~DocumentResource() {}
+DocumentResource::~DocumentResource() = default;
 
-DEFINE_TRACE(DocumentResource) {
+void DocumentResource::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
   Resource::Trace(visitor);
 }
 
-void DocumentResource::CheckNotify() {
+void DocumentResource::NotifyFinished() {
   if (Data() && MimeTypeAllowed()) {
     // We don't need to create a new frame because the new document belongs to
     // the parent UseElement.
     document_ = CreateDocument(GetResponse().Url());
     document_->SetContent(DecodedText());
   }
-  Resource::CheckNotify();
+  Resource::NotifyFinished();
 }
 
 bool DocumentResource::MimeTypeAllowed() const {
@@ -79,7 +81,7 @@ bool DocumentResource::MimeTypeAllowed() const {
 Document* DocumentResource::CreateDocument(const KURL& url) {
   switch (GetType()) {
     case kSVGDocument:
-      return XMLDocument::CreateSVG(DocumentInit(url));
+      return XMLDocument::CreateSVG(DocumentInit::Create().WithURL(url));
     default:
       // FIXME: We'll add more types to support HTMLImports.
       NOTREACHED();

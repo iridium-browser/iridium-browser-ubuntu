@@ -12,16 +12,18 @@
 #include "net/quic/core/spdy_utils.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_string_piece.h"
 #include "net/quic/platform/api/quic_text_utils.h"
+#include "net/spdy/core/spdy_protocol.h"
 
 using base::IntToString;
-using std::string;
 
 namespace net {
-#define ENDPOINT                                                               \
-  (session()->perspective() == Perspective::IS_SERVER ? "Server: " : "Client:" \
-                                                                     " ")
+#define ENDPOINT                                                   \
+  (session()->perspective() == Perspective::IS_SERVER ? "Server: " \
+                                                      : "Client:"  \
+                                                        " ")
 
 QuicSpdyStream::QuicSpdyStream(QuicStreamId id, QuicSpdySession* spdy_session)
     : QuicStream(id, spdy_session),
@@ -59,7 +61,7 @@ size_t QuicSpdyStream::WriteHeaders(
 }
 
 void QuicSpdyStream::WriteOrBufferBody(
-    const string& data,
+    const QuicString& data,
     bool fin,
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
   WriteOrBufferData(data, fin, std::move(ack_listener));
@@ -76,11 +78,11 @@ size_t QuicSpdyStream::WriteTrailers(
   // The header block must contain the final offset for this stream, as the
   // trailers may be processed out of order at the peer.
   QUIC_DLOG(INFO) << "Inserting trailer: (" << kFinalOffsetHeaderKey << ", "
-                  << stream_bytes_written() + queued_data_bytes() << ")";
+                  << stream_bytes_written() + BufferedDataBytes() << ")";
   trailer_block.insert(
       std::make_pair(kFinalOffsetHeaderKey,
                      QuicTextUtils::Uint64ToString(stream_bytes_written() +
-                                                   queued_data_bytes())));
+                                                   BufferedDataBytes())));
 
   // Write the trailing headers with a FIN, and close stream for writing:
   // trailers are the last thing to be sent on a stream.
@@ -91,7 +93,7 @@ size_t QuicSpdyStream::WriteTrailers(
 
   // Trailers are the last thing to be sent on a stream, but if there is still
   // queued data then CloseWriteSide() will cause it never to be sent.
-  if (queued_data_bytes() == 0) {
+  if (BufferedDataBytes() == 0) {
     CloseWriteSide();
   }
 
@@ -137,8 +139,8 @@ void QuicSpdyStream::ConsumeHeaderList() {
 
 void QuicSpdyStream::SetPriority(SpdyPriority priority) {
   DCHECK_EQ(0u, stream_bytes_written());
-  spdy_session_->UpdateStreamPriority(id(), priority);
   priority_ = priority;
+  spdy_session_->UpdateStreamPriority(id(), priority);
 }
 
 void QuicSpdyStream::OnStreamHeadersPriority(SpdyPriority priority) {
@@ -195,7 +197,6 @@ void QuicSpdyStream::OnPromiseHeaderList(
   session()->connection()->CloseConnection(
       QUIC_INVALID_HEADERS_STREAM_DATA, "Promise headers received by server",
       ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
-  return;
 }
 
 void QuicSpdyStream::OnTrailingHeadersComplete(
@@ -230,6 +231,11 @@ void QuicSpdyStream::OnTrailingHeadersComplete(
   trailers_decompressed_ = true;
   OnStreamFrame(
       QuicStreamFrame(id(), fin, final_byte_offset, QuicStringPiece()));
+}
+
+void QuicSpdyStream::OnPriorityFrame(SpdyPriority priority) {
+  DCHECK_EQ(Perspective::IS_SERVER, session()->connection()->perspective());
+  SetPriority(priority);
 }
 
 void QuicSpdyStream::OnStreamReset(const QuicRstStreamFrame& frame) {
@@ -271,7 +277,7 @@ bool QuicSpdyStream::FinishedReadingHeaders() const {
 
 bool QuicSpdyStream::ParseHeaderStatusCode(const SpdyHeaderBlock& header,
                                            int* status_code) const {
-  SpdyHeaderBlock::const_iterator it = header.find(":status");
+  SpdyHeaderBlock::const_iterator it = header.find(kHttp2StatusHeader);
   if (it == header.end()) {
     return false;
   }
@@ -308,19 +314,6 @@ SpdyPriority QuicSpdyStream::priority() const {
 
 void QuicSpdyStream::ClearSession() {
   spdy_session_ = nullptr;
-}
-
-QuicConsumedData QuicSpdyStream::WritevDataInner(
-    QuicIOVector iov,
-    QuicStreamOffset offset,
-    bool fin,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
-  if (spdy_session_->headers_stream() != nullptr &&
-      spdy_session_->force_hol_blocking()) {
-    return spdy_session_->WritevStreamData(id(), iov, offset, fin,
-                                           std::move(ack_listener));
-  }
-  return QuicStream::WritevDataInner(iov, offset, fin, std::move(ack_listener));
 }
 
 }  // namespace net

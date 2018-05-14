@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.customtabs;
 
-import android.app.Activity;
 import android.app.PendingIntent;
 import android.app.PendingIntent.CanceledException;
 import android.content.Context;
@@ -14,11 +13,9 @@ import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.support.annotation.IntDef;
 import android.support.customtabs.CustomTabsIntent;
-import android.support.customtabs.CustomTabsSessionToken;
 import android.text.TextUtils;
 import android.util.Pair;
 import android.view.View;
@@ -30,7 +27,9 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.browserservices.BrowserSessionDataProvider;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 
@@ -40,34 +39,29 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A model class that parses intent from third-party apps and provides results to
- * {@link CustomTabActivity}.
+ * A model class that parses the incoming intent for Custom Tabs specific customization data.
  */
-public class CustomTabIntentDataProvider {
+public class CustomTabIntentDataProvider extends BrowserSessionDataProvider {
     private static final String TAG = "CustomTabIntentData";
 
     // The type of UI for Custom Tab to use.
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({
-        CUSTOM_TABS_UI_TYPE_DEFAULT,
-        CUSTOM_TABS_UI_TYPE_MEDIA_VIEWER,
-        CUSTOM_TABS_UI_TYPE_PAYMENT_REQUEST,
-        CUSTOM_TABS_UI_TYPE_INFO_PAGE,
+            CUSTOM_TABS_UI_TYPE_DEFAULT, CUSTOM_TABS_UI_TYPE_MEDIA_VIEWER,
+            CUSTOM_TABS_UI_TYPE_PAYMENT_REQUEST, CUSTOM_TABS_UI_TYPE_INFO_PAGE,
+            CUSTOM_TABS_UI_TYPE_READER_MODE, CUSTOM_TABS_UI_TYPE_MINIMAL_UI_WEBAPP,
     })
     public @interface CustomTabsUiType {}
     public static final int CUSTOM_TABS_UI_TYPE_DEFAULT = 0;
     public static final int CUSTOM_TABS_UI_TYPE_MEDIA_VIEWER = 1;
     public static final int CUSTOM_TABS_UI_TYPE_PAYMENT_REQUEST = 2;
     public static final int CUSTOM_TABS_UI_TYPE_INFO_PAGE = 3;
+    public static final int CUSTOM_TABS_UI_TYPE_READER_MODE = 4;
+    public static final int CUSTOM_TABS_UI_TYPE_MINIMAL_UI_WEBAPP = 5;
 
     /**
-     * Extra used to keep the caller alive. Its value is an Intent.
-     */
-    public static final String EXTRA_KEEP_ALIVE = "android.support.customtabs.extra.KEEP_ALIVE";
-
-    /**
-     * Herb: Extra that indicates whether or not the Custom Tab is being launched by an Intent fired
-     * by Chrome itself.
+     * Extra that indicates whether or not the Custom Tab is being launched by an Intent fired by
+     * Chrome itself.
      */
     public static final String EXTRA_IS_OPENED_BY_CHROME =
             "org.chromium.chrome.browser.customtabs.IS_OPENED_BY_CHROME";
@@ -96,23 +90,28 @@ public class CustomTabIntentDataProvider {
     public static final String EXTRA_DISABLE_DOWNLOAD_BUTTON =
             "org.chromium.chrome.browser.customtabs.EXTRA_DISABLE_DOWNLOAD_BUTTON";
 
-    //TODO(yusufo): Move this to CustomTabsIntent.
+    /**
+     * Indicates the source where the Custom Tab is launched. This is only used for
+     * WebApp/WebAPK/TrustedWebActivity. The value is defined as
+     * {@link WebappActivity.ActivityType#WebappActivity}.
+     */
+    public static final String EXTRA_BROWSER_LAUNCH_SOURCE =
+            "org.chromium.chrome.browser.customtabs.EXTRA_BROWSER_LAUNCH_SOURCE";
+
+    // TODO(yusufo): Move this to CustomTabsIntent.
     /** Signals custom tabs to favor sending initial urls to external handler apps if possible. */
     public static final String EXTRA_SEND_TO_EXTERNAL_DEFAULT_HANDLER =
             "android.support.customtabs.extra.SEND_TO_EXTERNAL_HANDLER";
 
     private static final int MAX_CUSTOM_MENU_ITEMS = 5;
-    private static final String ANIMATION_BUNDLE_PREFIX =
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? "android:activity." : "android:";
-    private static final String BUNDLE_PACKAGE_NAME = ANIMATION_BUNDLE_PREFIX + "packageName";
-    private static final String BUNDLE_ENTER_ANIMATION_RESOURCE =
-            ANIMATION_BUNDLE_PREFIX + "animEnterRes";
-    private static final String BUNDLE_EXIT_ANIMATION_RESOURCE =
-            ANIMATION_BUNDLE_PREFIX + "animExitRes";
 
-    private final CustomTabsSessionToken mSession;
-    private final boolean mIsTrustedIntent;
-    private final Intent mKeepAliveServiceIntent;
+    private static final int MAX_CUSTOM_TOOLBAR_ITEMS = 2;
+
+    private static final String FIRST_PARTY_PITFALL_MSG =
+            "The intent contains a non-default UI type, but it is not from a first-party app. "
+            + "To make locally-built Chrome a first-party app, sign with release-test "
+            + "signing keys and run on userdebug devices. See use_signing_keys GN arg.";
+
     private final int mUiType;
     private final int mTitleVisibilityState;
     private final String mMediaViewerUrl;
@@ -127,9 +126,8 @@ public class CustomTabIntentDataProvider {
     private List<CustomButtonParams> mCustomButtonParams;
     private Drawable mCloseButtonIcon;
     private List<Pair<String, PendingIntent>> mMenuEntries = new ArrayList<>();
-    private Bundle mAnimationBundle;
     private boolean mShowShareItem;
-    private CustomButtonParams mToolbarButton;
+    private List<CustomButtonParams> mToolbarButtons = new ArrayList<>(1);
     private List<CustomButtonParams> mBottombarButtons = new ArrayList<>(2);
     private RemoteViews mRemoteViews;
     private int[] mClickableViewIds;
@@ -137,11 +135,10 @@ public class CustomTabIntentDataProvider {
     // OnFinished listener for PendingIntents. Used for testing only.
     private PendingIntent.OnFinished mOnFinished;
 
-    /** Herb: Whether this CustomTabActivity was explicitly started by another Chrome Activity. */
+    /** Whether this CustomTabActivity was explicitly started by another Chrome Activity. */
     private boolean mIsOpenedByChrome;
-
     /**
-     * Add extras to customize menu items for openning payment request UI custom tab from Chrome.
+     * Add extras to customize menu items for opening payment request UI custom tab from Chrome.
      */
     public static void addPaymentRequestUIExtras(Intent intent) {
         intent.putExtra(EXTRA_UI_TYPE, CUSTOM_TABS_UI_TYPE_PAYMENT_REQUEST);
@@ -150,12 +147,20 @@ public class CustomTabIntentDataProvider {
     }
 
     /**
+     * Add extras to customize menu items for opening Reader Mode UI custom tab from Chrome.
+     */
+    public static void addReaderModeUIExtras(Intent intent) {
+        intent.putExtra(EXTRA_UI_TYPE, CUSTOM_TABS_UI_TYPE_READER_MODE);
+        intent.putExtra(EXTRA_IS_OPENED_BY_CHROME, true);
+        IntentHandler.addTrustedIntentExtras(intent);
+    }
+
+    /**
      * Constructs a {@link CustomTabIntentDataProvider}.
      */
     public CustomTabIntentDataProvider(Intent intent, Context context) {
+        super(intent);
         if (intent == null) assert false;
-        mSession = CustomTabsSessionToken.getSessionTokenFromIntent(intent);
-        mIsTrustedIntent = IntentHandler.isIntentChromeOrFirstParty(intent);
 
         retrieveCustomButtons(intent, context);
         retrieveToolbarColor(intent, context);
@@ -164,18 +169,17 @@ public class CustomTabIntentDataProvider {
 
         mEnableUrlBarHiding = IntentUtils.safeGetBooleanExtra(
                 intent, CustomTabsIntent.EXTRA_ENABLE_URLBAR_HIDING, true);
-        mKeepAliveServiceIntent = IntentUtils.safeGetParcelableExtra(intent, EXTRA_KEEP_ALIVE);
 
-        Bitmap bitmap = IntentUtils.safeGetParcelableExtra(intent,
-                CustomTabsIntent.EXTRA_CLOSE_BUTTON_ICON);
+        Bitmap bitmap = IntentUtils.safeGetParcelableExtra(
+                intent, CustomTabsIntent.EXTRA_CLOSE_BUTTON_ICON);
         if (bitmap != null && !checkCloseButtonSize(context, bitmap)) {
             IntentUtils.safeRemoveExtra(intent, CustomTabsIntent.EXTRA_CLOSE_BUTTON_ICON);
             bitmap.recycle();
             bitmap = null;
         }
         if (bitmap == null) {
-            mCloseButtonIcon = TintedDrawable.constructTintedDrawable(context.getResources(),
-                    R.drawable.btn_close);
+            mCloseButtonIcon = TintedDrawable.constructTintedDrawable(
+                    context.getResources(), R.drawable.btn_close);
         } else {
             mCloseButtonIcon = new BitmapDrawable(context.getResources(), bitmap);
         }
@@ -199,51 +203,64 @@ public class CustomTabIntentDataProvider {
 
         final int requestedUiType =
                 IntentUtils.safeGetIntExtra(intent, EXTRA_UI_TYPE, CUSTOM_TABS_UI_TYPE_DEFAULT);
-        if (requestedUiType == CUSTOM_TABS_UI_TYPE_MEDIA_VIEWER && mIsTrustedIntent) {
-            mUiType = CUSTOM_TABS_UI_TYPE_MEDIA_VIEWER;
-        } else if (requestedUiType == CUSTOM_TABS_UI_TYPE_PAYMENT_REQUEST && mIsTrustedIntent
-                && mIsOpenedByChrome) {
-            mUiType = CUSTOM_TABS_UI_TYPE_PAYMENT_REQUEST;
-        } else if (requestedUiType == CUSTOM_TABS_UI_TYPE_INFO_PAGE && mIsTrustedIntent) {
-            mUiType = CUSTOM_TABS_UI_TYPE_INFO_PAGE;
-        } else {
-            mUiType = CUSTOM_TABS_UI_TYPE_DEFAULT;
-        }
-        mAnimationBundle = IntentUtils.safeGetBundleExtra(
-                intent, CustomTabsIntent.EXTRA_EXIT_ANIMATION_BUNDLE);
-        mTitleVisibilityState = IntentUtils.safeGetIntExtra(intent,
-                CustomTabsIntent.EXTRA_TITLE_VISIBILITY_STATE, CustomTabsIntent.NO_TITLE);
-        mShowShareItem = IntentUtils.safeGetBooleanExtra(intent,
-                CustomTabsIntent.EXTRA_DEFAULT_SHARE_MENU_ITEM, false);
-        mRemoteViews = IntentUtils.safeGetParcelableExtra(intent,
-                CustomTabsIntent.EXTRA_REMOTEVIEWS);
-        mClickableViewIds = IntentUtils.safeGetIntArrayExtra(intent,
-                CustomTabsIntent.EXTRA_REMOTEVIEWS_VIEW_IDS);
-        mRemoteViewsPendingIntent = IntentUtils.safeGetParcelableExtra(intent,
-                CustomTabsIntent.EXTRA_REMOTEVIEWS_PENDINGINTENT);
+        mUiType = verifiedUiType(requestedUiType);
+
+        mTitleVisibilityState = IntentUtils.safeGetIntExtra(
+                intent, CustomTabsIntent.EXTRA_TITLE_VISIBILITY_STATE, CustomTabsIntent.NO_TITLE);
+        mShowShareItem = IntentUtils.safeGetBooleanExtra(
+                intent, CustomTabsIntent.EXTRA_DEFAULT_SHARE_MENU_ITEM, false);
+        mRemoteViews =
+                IntentUtils.safeGetParcelableExtra(intent, CustomTabsIntent.EXTRA_REMOTEVIEWS);
+        mClickableViewIds = IntentUtils.safeGetIntArrayExtra(
+                intent, CustomTabsIntent.EXTRA_REMOTEVIEWS_VIEW_IDS);
+        mRemoteViewsPendingIntent = IntentUtils.safeGetParcelableExtra(
+                intent, CustomTabsIntent.EXTRA_REMOTEVIEWS_PENDINGINTENT);
         mMediaViewerUrl = isMediaViewer()
                 ? IntentUtils.safeGetStringExtra(intent, EXTRA_MEDIA_VIEWER_URL)
                 : null;
-        mEnableEmbeddedMediaExperience = mIsTrustedIntent
+        mEnableEmbeddedMediaExperience = isTrustedIntent()
                 && IntentUtils.safeGetBooleanExtra(
                            intent, EXTRA_ENABLE_EMBEDDED_MEDIA_EXPERIENCE, false);
         mDisableStar = IntentUtils.safeGetBooleanExtra(intent, EXTRA_DISABLE_STAR_BUTTON, false);
-        mDisableDownload = IntentUtils.safeGetBooleanExtra(intent, EXTRA_DISABLE_DOWNLOAD_BUTTON,
-                false);
+        mDisableDownload =
+                IntentUtils.safeGetBooleanExtra(intent, EXTRA_DISABLE_DOWNLOAD_BUTTON, false);
+    }
+
+    /**
+     * Get the verified UI type, according to the intent extras, and whether the intent is trusted.
+     * @param requestedUiType requested UI type in the intent, unqualified
+     * @return verified UI type
+     */
+    private int verifiedUiType(int requestedUiType) {
+        if (!isTrustedIntent()) {
+            if (ChromeVersionInfo.isLocalBuild()) Log.w(TAG, FIRST_PARTY_PITFALL_MSG);
+            return CUSTOM_TABS_UI_TYPE_DEFAULT;
+        }
+
+        if (requestedUiType == CUSTOM_TABS_UI_TYPE_PAYMENT_REQUEST) {
+            if (!mIsOpenedByChrome) {
+                return CUSTOM_TABS_UI_TYPE_DEFAULT;
+            }
+        }
+
+        return requestedUiType;
     }
 
     /**
      * Gets custom buttons from the intent and updates {@link #mCustomButtonParams},
-     * {@link #mBottombarButtons} and {@link #mToolbarButton}.
+     * {@link #mBottombarButtons} and {@link #mToolbarButtons}.
      */
     private void retrieveCustomButtons(Intent intent, Context context) {
-        mCustomButtonParams = CustomButtonParams.fromIntent(context, intent);
+        mCustomButtonParams = CustomButtonParams.fromIntent(context, intent, isTrustedIntent());
         if (mCustomButtonParams != null) {
             for (CustomButtonParams params : mCustomButtonParams) {
-                if (params.showOnToolbar()) {
-                    mToolbarButton = params;
-                } else {
+                if (!params.showOnToolbar()) {
                     mBottombarButtons.add(params);
+                } else if (mToolbarButtons.size() < MAX_CUSTOM_TOOLBAR_ITEMS) {
+                    mToolbarButtons.add(params);
+                } else {
+                    Log.w(TAG, "Only %d items are allowed in the toolbar",
+                            MAX_CUSTOM_TOOLBAR_ITEMS);
                 }
             }
         }
@@ -253,10 +270,10 @@ public class CustomTabIntentDataProvider {
      * Processes the color passed from the client app and updates {@link #mToolbarColor}.
      */
     private void retrieveToolbarColor(Intent intent, Context context) {
-        int defaultColor = ApiCompatibilityUtils.getColor(context.getResources(),
-                R.color.default_primary_color);
-        int color = IntentUtils.safeGetIntExtra(intent, CustomTabsIntent.EXTRA_TOOLBAR_COLOR,
-                defaultColor);
+        int defaultColor = ApiCompatibilityUtils.getColor(
+                context.getResources(), R.color.default_primary_color);
+        int color = IntentUtils.safeGetIntExtra(
+                intent, CustomTabsIntent.EXTRA_TOOLBAR_COLOR, defaultColor);
         mToolbarColor = removeTransparencyFromColor(color);
     }
 
@@ -265,8 +282,8 @@ public class CustomTabIntentDataProvider {
      */
     private void retrieveBottomBarColor(Intent intent) {
         int defaultColor = mToolbarColor;
-        int color = IntentUtils.safeGetIntExtra(intent,
-                CustomTabsIntent.EXTRA_SECONDARY_TOOLBAR_COLOR, defaultColor);
+        int color = IntentUtils.safeGetIntExtra(
+                intent, CustomTabsIntent.EXTRA_SECONDARY_TOOLBAR_COLOR, defaultColor);
         mBottomBarColor = removeTransparencyFromColor(color);
     }
 
@@ -276,8 +293,8 @@ public class CustomTabIntentDataProvider {
      */
     private int retrieveInitialBackgroundColor(Intent intent) {
         int defaultColor = Color.TRANSPARENT;
-        int color = IntentUtils.safeGetIntExtra(
-                intent, EXTRA_INITIAL_BACKGROUND_COLOR, defaultColor);
+        int color =
+                IntentUtils.safeGetIntExtra(intent, EXTRA_INITIAL_BACKGROUND_COLOR, defaultColor);
         return color == Color.TRANSPARENT ? color : removeTransparencyFromColor(color);
     }
 
@@ -286,20 +303,6 @@ public class CustomTabIntentDataProvider {
      */
     private int removeTransparencyFromColor(int color) {
         return color | 0xFF000000;
-    }
-
-    /**
-     * @return The session specified in the intent, or null.
-     */
-    public CustomTabsSessionToken getSession() {
-        return mSession;
-    }
-
-    /**
-     * @return The keep alive service intent specified in the intent, or null.
-     */
-    public Intent getKeepAliveServiceIntent() {
-        return mKeepAliveServiceIntent;
     }
 
     /**
@@ -342,11 +345,10 @@ public class CustomTabIntentDataProvider {
     }
 
     /**
-     * @return The params for the custom button that shows on the toolbar. If there is no applicable
-     *         buttons, returns null.
+     * @return The params for the custom buttons that show on the toolbar.
      */
-    public CustomButtonParams getCustomButtonOnToolbar() {
-        return mToolbarButton;
+    public List<CustomButtonParams> getCustomButtonsOnToolbar() {
+        return mToolbarButtons;
     }
 
     /**
@@ -395,15 +397,28 @@ public class CustomTabIntentDataProvider {
 
     /**
      * Gets params for all custom buttons, which is the combination of
-     * {@link #getCustomButtonsOnBottombar()} and {@link #getCustomButtonOnToolbar()}.
+     * {@link #getCustomButtonsOnBottombar()} and {@link #getCustomButtonsOnToolbar()}.
      */
     public List<CustomButtonParams> getAllCustomButtons() {
         return mCustomButtonParams;
     }
 
     /**
-     * @return The {@link CustomButtonParams} having the given id. Returns null if no such params
+     * Searches for the toolbar button with the given {@code id} and returns its index.
+     * @param id The ID of a toolbar button to search for.
+     * @return The index of the toolbar button with the given {@code id}, or -1 if no such button
      *         can be found.
+     */
+    public int getCustomToolbarButtonIndexForId(int id) {
+        for (int i = 0; i < mToolbarButtons.size(); i++) {
+            if (mToolbarButtons.get(i).getId() == id) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * @return The {@link CustomButtonParams} (either on the toolbar or bottom bar) with the given
+     *         {@code id}, or null if no such button can be found.
      */
     public CustomButtonParams getButtonParamsForId(int id) {
         for (CustomButtonParams params : mCustomButtonParams) {
@@ -427,22 +442,27 @@ public class CustomTabIntentDataProvider {
 
     /**
      * Triggers the client-defined action when the user clicks a custom menu item.
+     * @param activity The {@link ChromeActivity} to use for sending the {@link PendingIntent}.
      * @param menuIndex The index that the menu item is shown in the result of
-     *                  {@link #getMenuTitles()}
+     *                  {@link #getMenuTitles()}.
+     * @param url The URL to attach as additional data to the {@link PendingIntent}.
+     * @param title The title to attach as additional data to the {@link PendingIntent}.
      */
-    public void clickMenuItemWithUrl(ChromeActivity activity, int menuIndex, String url) {
+    public void clickMenuItemWithUrlAndTitle(
+            ChromeActivity activity, int menuIndex, String url, String title) {
         Intent addedIntent = new Intent();
         addedIntent.setData(Uri.parse(url));
+        addedIntent.putExtra(Intent.EXTRA_SUBJECT, title);
         try {
             // Media viewers pass in PendingIntents that contain CHOOSER Intents.  Setting the data
             // in these cases prevents the Intent from firing correctly.
-            String title = mMenuEntries.get(menuIndex).first;
+            String menuTitle = mMenuEntries.get(menuIndex).first;
             PendingIntent pendingIntent = mMenuEntries.get(menuIndex).second;
             pendingIntent.send(
                     activity, 0, isMediaViewer() ? null : addedIntent, mOnFinished, null);
             if (shouldEnableEmbeddedMediaExperience()
-                    && TextUtils.equals(
-                               title, activity.getString(R.string.download_manager_open_with))) {
+                    && TextUtils.equals(menuTitle,
+                               activity.getString(R.string.download_manager_open_with))) {
                 RecordUserAction.record("CustomTabsMenuCustomMenuItem.DownloadsUI.OpenWith");
             }
         } catch (CanceledException e) {
@@ -451,51 +471,20 @@ public class CustomTabIntentDataProvider {
     }
 
     /**
-     * @return Whether chrome should animate when it finishes. We show animations only if the client
-     *         app has supplied the correct animation resources via intent extra.
-     */
-    public boolean shouldAnimateOnFinish() {
-        return mAnimationBundle != null && getClientPackageName() != null;
-    }
-
-    /**
-     * @return The package name of the client app. This is used for a workaround in order to
-     *         retrieve the client's animation resources.
-     */
-    public String getClientPackageName() {
-        if (mAnimationBundle == null) return null;
-        return mAnimationBundle.getString(BUNDLE_PACKAGE_NAME);
-    }
-
-    /**
-     * @return The resource id for enter animation, which is used in
-     *         {@link Activity#overridePendingTransition(int, int)}.
-     */
-    public int getAnimationEnterRes() {
-        return shouldAnimateOnFinish() ? mAnimationBundle.getInt(BUNDLE_ENTER_ANIMATION_RESOURCE)
-                : 0;
-    }
-
-    /**
-     * @return The resource id for exit animation, which is used in
-     *         {@link Activity#overridePendingTransition(int, int)}.
-     */
-    public int getAnimationExitRes() {
-        return shouldAnimateOnFinish() ? mAnimationBundle.getInt(BUNDLE_EXIT_ANIMATION_RESOURCE)
-                : 0;
-    }
-
-    /**
-     * Sends the pending intent for the custom button on toolbar with the given url as data.
+     * Sends the pending intent for the custom button on the toolbar with the given {@code params},
+     *         with the given {@code url} as data.
      * @param context The context to use for sending the {@link PendingIntent}.
-     * @param url The url to attach as additional data to the {@link PendingIntent}.
+     * @param params The parameters for the custom button.
+     * @param url The URL to attach as additional data to the {@link PendingIntent}.
+     * @param title The title to attach as additional data to the {@link PendingIntent}.
      */
-    public void sendButtonPendingIntentWithUrl(Context context, String url) {
+    public void sendButtonPendingIntentWithUrlAndTitle(
+            Context context, CustomButtonParams params, String url, String title) {
         Intent addedIntent = new Intent();
         addedIntent.setData(Uri.parse(url));
+        addedIntent.putExtra(Intent.EXTRA_SUBJECT, title);
         try {
-            getCustomButtonOnToolbar().getPendingIntent().send(context, 0, addedIntent, mOnFinished,
-                    null);
+            params.getPendingIntent().send(context, 0, addedIntent, mOnFinished, null);
         } catch (CanceledException e) {
             Log.e(TAG, "CanceledException while sending pending intent in custom tab");
         }
@@ -521,13 +510,6 @@ public class CustomTabIntentDataProvider {
      */
     boolean isOpenedByChrome() {
         return mIsOpenedByChrome;
-    }
-
-    /**
-     * Checks whether or not the Intent is from Chrome or other trusted first party.
-     */
-    boolean isTrustedIntent() {
-        return mIsTrustedIntent;
     }
 
     /**

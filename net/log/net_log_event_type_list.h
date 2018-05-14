@@ -238,7 +238,7 @@ EVENT_TYPE(PROXY_SCRIPT_DECIDER_HAS_NO_FETCHER)
 EVENT_TYPE(PROXY_SCRIPT_DECIDER_FALLING_BACK_TO_NEXT_PAC_SOURCE)
 
 // ------------------------------------------------------------------------
-// ProxyService
+// ProxyResolutionService
 // ------------------------------------------------------------------------
 
 // The start/end of a proxy resolve request.
@@ -246,7 +246,7 @@ EVENT_TYPE(PROXY_SERVICE)
 
 // The time while a request is waiting on InitProxyResolver to configure
 // against either WPAD or custom PAC URL. The specifics on this time
-// are found from ProxyService::init_proxy_resolver_log().
+// are found from ProxyResolutionService::init_proxy_resolver_log().
 EVENT_TYPE(PROXY_SERVICE_WAITING_FOR_INIT_PAC)
 
 // This event is emitted to show what the PAC script returned. It can contain
@@ -269,8 +269,8 @@ EVENT_TYPE(PROXY_SERVICE_RESOLVED_PROXY_LIST)
 //   }
 EVENT_TYPE(PROXY_SERVICE_DEPRIORITIZED_BAD_PROXIES)
 
-// This event is emitted whenever the proxy settings used by ProxyService
-// change.
+// This event is emitted whenever the proxy settings used by
+// ProxyResolutionService change.
 //
 // It contains these parameters:
 //  {
@@ -2005,7 +2005,11 @@ EVENT_TYPE(QUIC_CHROMIUM_CLIENT_STREAM_READ_RESPONSE_TRAILERS)
 // ------------------------------------------------------------------------
 // QuicConnectionMigration
 // ------------------------------------------------------------------------
-
+// Records the QUIC connection migration mode.
+//  {
+//     "connection_migration_mode": <The connection migration mode>
+//  }
+EVENT_TYPE(QUIC_CONNECTION_MIGRATION_MODE)
 // Records that QUIC connection migration has been triggered.
 //  {
 //     "trigger": <The reason for the migration attempt>
@@ -2027,6 +2031,76 @@ EVENT_TYPE(QUIC_CONNECTION_MIGRATION_FAILURE)
 //  }
 EVENT_TYPE(QUIC_CONNECTION_MIGRATION_SUCCESS)
 
+// Records that QUIC connectivity probing is triggered.
+// Identified by network id.
+//  {
+//     "network": <ID of the network being probed>
+//     "initial_timeout_ms": <Initial timeout in milliseconds>
+//  }
+EVENT_TYPE(QUIC_CONNECTION_CONNECTIVITY_PROBING_TRIGGERED)
+
+// Records that QUIC connectivity probing succeeds.
+//  {
+//     "network": <ID of the network being probed>
+//  }
+EVENT_TYPE(QUIC_CONNECTION_CONNECTIVITY_PROBING_SUCCEEDED)
+
+// Records that QUIC connectivity probing fails.
+//  {
+//     "network": <ID of the network being probed>
+//  }
+EVENT_TYPE(QUIC_CONNECTION_CONNECTIVITY_PROBING_FAILED)
+
+// Records that QUIC connectivity probing fails.
+//  {
+//     "network": <ID of the network being probed>
+//  }
+EVENT_TYPE(QUIC_CONNECTION_CONNECTIVITY_PROBING_CANCELLED)
+
+// Records that a QUIC connectivity probing packet has been sent.
+//  {
+//     "network": <ID of the network being probed>
+//     "retry_count": <Number of trials>
+//  }
+EVENT_TYPE(QUIC_CONNECTION_CONNECTIVITY_PROBING_PACKET_SENT)
+
+// Records that a QUIC connectivity probing packet has been received.
+//  {
+//     "network": <ID of the network being probed>
+//     "self_address": <Self address on the probed path>
+//     "peer_address": <Peer address on the probed path>
+//  }
+EVENT_TYPE(QUIC_CONNECTION_CONNECTIVITY_PROBING_PACKET_RECEIVED)
+
+// Records that a QUIC connection migration attempt due to new network
+// being connected.
+EVENT_TYPE(QUIC_CONNECTION_MIGRATION_ON_NETWORK_CONNECTED)
+
+// Records that a QUIC connection migration attempt due to new network
+// being marked as default network.
+EVENT_TYPE(QUIC_CONNECTION_MIGRATION_ON_NETWORK_MADE_DEFAULT)
+
+// Records that a QUIC connection migration attempt due to old network
+// being disconnected.
+EVENT_TYPE(QUIC_CONNECTION_MIGRATION_ON_NETWORK_DISCONNECTED)
+
+// Records that a QUIC connection migration attempt due to encountering
+// packet write error on the current network.
+EVENT_TYPE(QUIC_CONNECTION_MIGRATION_ON_WRITE_ERROR)
+
+// Records that a QUIC connection migration attempt due to path
+// degrading on the current network.
+EVENT_TYPE(QUIC_CONNECTION_MIGRATION_ON_PATH_DEGRADING)
+
+// Records that a QUIC connection migration attempt due to efforts to
+// migrate back to the default network.
+EVENT_TYPE(QUIC_CONNECTION_MIGRATION_ON_MIGRATE_BACK)
+
+// Records a QUIC connection migration failure after probing.
+EVENT_TYPE(QUIC_CONNECTION_MIGRATION_FAILURE_AFTER_PROBING)
+
+// Records a QUIC connection migration success after probing.
+EVENT_TYPE(QUIC_CONNECTION_MIGRATION_SUCCESS_AFTER_PROBING)
 // ------------------------------------------------------------------------
 // HttpStreamParser
 // ------------------------------------------------------------------------
@@ -2173,9 +2247,7 @@ EVENT_TYPE(SERVICE_WORKER_ERROR_REQUEST_BODY_BLOB_FAILED)
 //
 // The BEGIN phase consists of the following parameters:
 // {
-//   "event_type": A string indicating the type of fetch event. Generally it is
-//   either a fetch or foreignfetch event; fetch events are additionally
-//   categorized by resource type.
+//   "event_type": A string indicating the resource type being fetched.
 // }
 //
 // For the END phase, the following parameters are attached. No parameters are
@@ -2468,10 +2540,6 @@ EVENT_TYPE(CERT_VERIFIER_REQUEST)
 //   {
 //     "cert_status": <Bitmask of CERT_STATUS_*
 //                     from net/base/cert_status_flags.h>
-//     "common_name_fallback_used": <True if a fallback to the common name
-//                                   was used when matching the host
-//                                   name, rather than using the
-//                                   subjectAltName.>
 //     "has_md2": <True if a certificate in the certificate chain is signed with
 //                 a MD2 signature.>
 //     "has_md4": <True if a certificate in the certificate chain is signed with
@@ -2685,42 +2753,6 @@ EVENT_TYPE(DOWNLOAD_FILE_ERROR)
 // This event is created when a download file is annotating with source
 // information (for Mark Of The Web and anti-virus integration).
 EVENT_TYPE(DOWNLOAD_FILE_ANNOTATED)
-
-// ------------------------------------------------------------------------
-// FileStream events.
-// ------------------------------------------------------------------------
-
-// This event lasts the lifetime of a file stream.
-EVENT_TYPE(FILE_STREAM_ALIVE)
-
-// This event is created when a file stream is associated with a NetLog source.
-// It indicates what file stream event source is used.
-//   {
-//     "source_dependency": <Source id of the file stream>,
-//   }
-EVENT_TYPE(FILE_STREAM_SOURCE)
-
-// This event is created when a file stream is associated with a NetLog source.
-// It indicates what event source owns the file stream source.
-//   {
-//     "source_dependency": <Source id of the owner of the file stream>,
-//   }
-EVENT_TYPE(FILE_STREAM_BOUND_TO_OWNER)
-
-// Mark the opening/closing of a file stream.
-// The BEGIN event has the following parameters:
-//   {
-//     "file_name".
-//   }
-EVENT_TYPE(FILE_STREAM_OPEN)
-
-// This event is created when a file stream operation has an error.
-//   {
-//     "operation": <open, write, close, etc>,
-//     "os_error": <OS-dependent error code>,
-//     "net_error": <net::Error code>,
-//   }
-EVENT_TYPE(FILE_STREAM_ERROR)
 
 // -----------------------------------------------------------------------------
 // FTP events.
@@ -2965,49 +2997,6 @@ EVENT_TYPE(SIMPLE_CACHE_ENTRY_CLOSE_BEGIN)
 // This event is created when the Simple Cache finishes a CloseEntry call.  It
 // contains no parameters.
 EVENT_TYPE(SIMPLE_CACHE_ENTRY_CLOSE_END)
-
-// ------------------------------------------------------------------------
-// SDCH
-// ------------------------------------------------------------------------
-
-// This event is created when some problem occurs during sdch-encoded resource
-// handling. It contains the following parameters:
-//   {
-//     "sdch_problem_code": <SDCH problem code>,
-//     "net_error": <Always ERR_FAILED, present just to indicate this is a
-//                   failure>,
-//   }
-EVENT_TYPE(SDCH_DECODING_ERROR)
-
-// This event is created when SdchFilter initialization fails due to the
-// response corruption. It contains the following parameters:
-//   {
-//     "cause": <Response corruption detection cause>,
-//     "cached": <True if response was read from cache>,
-//   }
-EVENT_TYPE(SDCH_RESPONSE_CORRUPTION_DETECTION)
-
-// This event is created when some problem occurs during sdch dictionary fetch.
-// It contains the following parameters:
-//   {
-//     "dictionary_url": <Dictionary url>,
-//     "sdch_problem_code": <SDCH problem code>,
-//     "net_error": <Only present on unexpected errors. Always ERR_FAILED when
-//                   present. Used to indicate this is a real failure>,
-//   }
-EVENT_TYPE(SDCH_DICTIONARY_ERROR)
-
-// This event is created when SdchDictionaryFetcher starts fetch.  It contains
-// no parameters.
-EVENT_TYPE(SDCH_DICTIONARY_FETCH)
-
-// This event is created if the SdchDictionaryFetcher URLRequest returns
-// no error, but signals an error through bytes_read < 0.
-// It contains the following parameters:
-//   {
-//     "net_error": <error created>
-//   }
-EVENT_TYPE(SDCH_DICTIONARY_FETCH_IMPLIED_ERROR)
 
 // -----------------------------------------------------------------------------
 // Data Reduction Proxy events.

@@ -56,17 +56,17 @@ UI.Toolbar = class {
    * @return {!UI.ToolbarToggle}
    */
   static createActionButton(action, toggledOptions, untoggledOptions) {
-    var button = new UI.ToolbarToggle(action.title(), action.icon(), action.toggledIcon());
+    const button = new UI.ToolbarToggle(action.title(), action.icon(), action.toggledIcon());
     button.setToggleWithRedColor(action.toggleWithRedColor());
     button.addEventListener(UI.ToolbarButton.Events.Click, action.execute, action);
     action.addEventListener(UI.Action.Events.Enabled, enabledChanged);
     action.addEventListener(UI.Action.Events.Toggled, toggled);
     /** @type {?UI.LongClickController} */
-    var longClickController = null;
+    let longClickController = null;
     /** @type {?Array<!UI.ToolbarButton>} */
-    var longClickButtons = null;
+    let longClickButtons = null;
     /** @type {?Element} */
-    var longClickGlyph = null;
+    let longClickGlyph = null;
     toggled();
     button.setEnabled(action.enabled());
     return button;
@@ -86,7 +86,7 @@ UI.Toolbar = class {
     }
 
     function updateOptions() {
-      var buttons = action.toggled() ? (toggledOptions || null) : (untoggledOptions || null);
+      const buttons = action.toggled() ? (toggledOptions || null) : (untoggledOptions || null);
 
       if (buttons && buttons.length) {
         if (!longClickController) {
@@ -107,8 +107,8 @@ UI.Toolbar = class {
     }
 
     function showOptions() {
-      var buttons = longClickButtons.slice();
-      var mainButtonClone = new UI.ToolbarToggle(action.title(), action.icon(), action.toggledIcon());
+      let buttons = longClickButtons.slice();
+      const mainButtonClone = new UI.ToolbarToggle(action.title(), action.icon(), action.toggledIcon());
       mainButtonClone.addEventListener(UI.ToolbarButton.Events.Click, clicked);
 
       /**
@@ -121,19 +121,19 @@ UI.Toolbar = class {
       mainButtonClone.setToggled(action.toggled());
       buttons.push(mainButtonClone);
 
-      var document = button.element.ownerDocument;
+      const document = button.element.ownerDocument;
       document.documentElement.addEventListener('mouseup', mouseUp, false);
 
-      var optionsGlassPane = new UI.GlassPane();
+      const optionsGlassPane = new UI.GlassPane();
       optionsGlassPane.setPointerEventsBehavior(UI.GlassPane.PointerEventsBehavior.BlockedByGlassPane);
       optionsGlassPane.show(document);
-      var optionsBar = new UI.Toolbar('fill', optionsGlassPane.contentElement);
+      const optionsBar = new UI.Toolbar('fill', optionsGlassPane.contentElement);
       optionsBar._contentElement.classList.add('floating');
       const buttonHeight = 26;
 
-      var hostButtonPosition = button.element.boxInWindow().relativeToElement(UI.GlassPane.container(document));
+      const hostButtonPosition = button.element.boxInWindow().relativeToElement(UI.GlassPane.container(document));
 
-      var topNotBottom = hostButtonPosition.y + buttonHeight * buttons.length < document.documentElement.offsetHeight;
+      const topNotBottom = hostButtonPosition.y + buttonHeight * buttons.length < document.documentElement.offsetHeight;
 
       if (topNotBottom)
         buttons = buttons.reverse();
@@ -145,25 +145,25 @@ UI.Toolbar = class {
         optionsBar.element.style.top = (hostButtonPosition.y - (buttonHeight * (buttons.length - 1)) - 6) + 'px';
       optionsBar.element.style.left = (hostButtonPosition.x - 5) + 'px';
 
-      for (var i = 0; i < buttons.length; ++i) {
+      for (let i = 0; i < buttons.length; ++i) {
         buttons[i].element.addEventListener('mousemove', mouseOver, false);
         buttons[i].element.addEventListener('mouseout', mouseOut, false);
         optionsBar.appendToolbarItem(buttons[i]);
       }
-      var hostButtonIndex = topNotBottom ? 0 : buttons.length - 1;
+      const hostButtonIndex = topNotBottom ? 0 : buttons.length - 1;
       buttons[hostButtonIndex].element.classList.add('emulate-active');
 
       function mouseOver(e) {
         if (e.which !== 1)
           return;
-        var buttonElement = e.target.enclosingNodeOrSelfWithClass('toolbar-item');
+        const buttonElement = e.target.enclosingNodeOrSelfWithClass('toolbar-item');
         buttonElement.classList.add('emulate-active');
       }
 
       function mouseOut(e) {
         if (e.which !== 1)
           return;
-        var buttonElement = e.target.enclosingNodeOrSelfWithClass('toolbar-item');
+        const buttonElement = e.target.enclosingNodeOrSelfWithClass('toolbar-item');
         buttonElement.classList.remove('emulate-active');
       }
 
@@ -173,7 +173,7 @@ UI.Toolbar = class {
         optionsGlassPane.hide();
         document.documentElement.removeEventListener('mouseup', mouseUp, false);
 
-        for (var i = 0; i < buttons.length; ++i) {
+        for (let i = 0; i < buttons.length; ++i) {
           if (buttons[i].element.classList.contains('emulate-active')) {
             buttons[i].element.classList.remove('emulate-active');
             buttons[i]._clicked(e);
@@ -234,7 +234,7 @@ UI.Toolbar = class {
    */
   setEnabled(enabled) {
     this._enabled = enabled;
-    for (var item of this._items)
+    for (const item of this._items)
       item._applyEnabledState(this._enabled && item._enabled);
   }
 
@@ -269,7 +269,7 @@ UI.Toolbar = class {
   }
 
   removeToolbarItems() {
-    for (var item of this._items)
+    for (const item of this._items)
       delete item._toolbar;
     this._items = [];
     this._contentElement.removeChildren();
@@ -280,7 +280,7 @@ UI.Toolbar = class {
    * @param {string} color
    */
   setColor(color) {
-    var style = createElement('style');
+    const style = createElement('style');
     style.textContent = '.toolbar-glyph { background-color: ' + color + ' !important }';
     this._shadowRoot.appendChild(style);
   }
@@ -289,7 +289,7 @@ UI.Toolbar = class {
    * @param {string} color
    */
   setToggledColor(color) {
-    var style = createElement('style');
+    const style = createElement('style');
     style.textContent =
         '.toolbar-button.toolbar-state-on .toolbar-glyph { background-color: ' + color + ' !important }';
     this._shadowRoot.appendChild(style);
@@ -299,10 +299,10 @@ UI.Toolbar = class {
     if (!this._items.length)
       return;
     // Don't hide first and last separators if they were added explicitly.
-    var previousIsSeparator = false;
-    var lastSeparator;
-    var nonSeparatorVisible = false;
-    for (var i = 0; i < this._items.length; ++i) {
+    let previousIsSeparator = false;
+    let lastSeparator;
+    let nonSeparatorVisible = false;
+    for (let i = 0; i < this._items.length; ++i) {
       if (this._items[i] instanceof UI.ToolbarSeparator) {
         this._items[i].setVisible(!previousIsSeparator);
         previousIsSeparator = true;
@@ -325,9 +325,9 @@ UI.Toolbar = class {
    * @param {string} location
    */
   appendLocationItems(location) {
-    var extensions = self.runtime.extensions(UI.ToolbarItem.Provider);
-    var promises = [];
-    for (var i = 0; i < extensions.length; ++i) {
+    const extensions = self.runtime.extensions(UI.ToolbarItem.Provider);
+    const promises = [];
+    for (let i = 0; i < extensions.length; ++i) {
       if (extensions[i].descriptor()['location'] === location)
         promises.push(resolveItem(extensions[i]));
     }
@@ -338,7 +338,7 @@ UI.Toolbar = class {
      * @return {!Promise<?UI.ToolbarItem>}
      */
     function resolveItem(extension) {
-      var descriptor = extension.descriptor();
+      const descriptor = extension.descriptor();
       if (descriptor['separator'])
         return Promise.resolve(/** @type {?UI.ToolbarItem} */ (new UI.ToolbarSeparator()));
       if (descriptor['actionId']) {
@@ -361,8 +361,8 @@ UI.Toolbar = class {
      * @this {UI.Toolbar}
      */
     function appendItemsInOrder(items) {
-      for (var i = 0; i < items.length; ++i) {
-        var item = items[i];
+      for (let i = 0; i < items.length; ++i) {
+        const item = items[i];
         if (item)
           this.appendToolbarItem(item);
       }
@@ -383,8 +383,6 @@ UI.ToolbarItem = class extends Common.Object {
     this.element.classList.add('toolbar-item');
     this._visible = true;
     this._enabled = true;
-    this.element.addEventListener('mouseenter', this._mouseEnter.bind(this), false);
-    this.element.addEventListener('mouseleave', this._mouseLeave.bind(this), false);
   }
 
   /**
@@ -395,14 +393,6 @@ UI.ToolbarItem = class extends Common.Object {
       return;
     this._title = title;
     UI.Tooltip.install(this.element, title);
-  }
-
-  _mouseEnter() {
-    this.element.classList.add('hover');
-  }
-
-  _mouseLeave() {
-    this.element.classList.remove('hover');
   }
 
   /**
@@ -530,12 +520,16 @@ UI.ToolbarButton = class extends UI.ToolbarItem {
     this.element.style.backgroundImage = 'url(' + iconURL + ')';
   }
 
+  setDarkText() {
+    this.element.classList.add('dark-text');
+  }
+
   /**
    * @param {number=} width
    */
   turnIntoSelect(width) {
     this.element.classList.add('toolbar-has-dropdown');
-    var dropdownArrowIcon = UI.Icon.create('smallicon-triangle-down', 'toolbar-dropdown-arrow');
+    const dropdownArrowIcon = UI.Icon.create('smallicon-triangle-down', 'toolbar-dropdown-arrow');
     this.element.appendChild(dropdownArrowIcon);
     if (width)
       this.element.style.width = width + 'px';
@@ -545,6 +539,8 @@ UI.ToolbarButton = class extends UI.ToolbarItem {
    * @param {!Event} event
    */
   _clicked(event) {
+    if (!this._enabled)
+      return;
     this.dispatchEventToListeners(UI.ToolbarButton.Events.Click, event);
     event.consume();
   }
@@ -553,6 +549,8 @@ UI.ToolbarButton = class extends UI.ToolbarItem {
    * @param {!Event} event
    */
   _mouseDown(event) {
+    if (!this._enabled)
+      return;
     this.dispatchEventToListeners(UI.ToolbarButton.Events.MouseDown, event);
   }
 
@@ -560,6 +558,8 @@ UI.ToolbarButton = class extends UI.ToolbarItem {
    * @param {!Event} event
    */
   _mouseUp(event) {
+    if (!this._enabled)
+      return;
     this.dispatchEventToListeners(UI.ToolbarButton.Events.MouseUp, event);
   }
 };
@@ -575,25 +575,34 @@ UI.ToolbarInput = class extends UI.ToolbarItem {
    * @param {string} placeholder
    * @param {number=} growFactor
    * @param {number=} shrinkFactor
-   * @param {boolean=} isSearchField
+   * @param {string=} tooltip
+   * @param {(function(string, string, boolean=):!Promise<!UI.SuggestBox.Suggestions>)=} completions
    */
-  constructor(placeholder, growFactor, shrinkFactor, isSearchField) {
+  constructor(placeholder, growFactor, shrinkFactor, tooltip, completions) {
     super(createElementWithClass('div', 'toolbar-input'));
 
-    this.input = this.element.createChild('input');
-    this.input.addEventListener('focus', () => this.element.classList.add('focused'));
-    this.input.addEventListener('blur', () => this.element.classList.remove('focused'));
-    this.input.addEventListener('input', () => this._onChangeCallback(), false);
-    this._isSearchField = !!isSearchField;
+    const internalPromptElement = this.element.createChild('div', 'toolbar-input-prompt');
+    internalPromptElement.addEventListener('focus', () => this.element.classList.add('focused'));
+    internalPromptElement.addEventListener('blur', () => this.element.classList.remove('focused'));
+
+    this._prompt = new UI.TextPrompt();
+    this._proxyElement = this._prompt.attach(internalPromptElement);
+    this._proxyElement.classList.add('toolbar-prompt-proxy');
+    this._proxyElement.addEventListener('keydown', event => this._onKeydownCallback(event));
+    this._prompt.initialize(completions || (() => Promise.resolve([])), ' ');
+    if (tooltip)
+      this._prompt.setTitle(tooltip);
+    this._prompt.setPlaceholder(placeholder);
+    this._prompt.addEventListener(UI.TextPrompt.Events.TextChanged, this._onChangeCallback.bind(this));
+
     if (growFactor)
       this.element.style.flexGrow = growFactor;
     if (shrinkFactor)
       this.element.style.flexShrink = shrinkFactor;
-    if (placeholder)
-      this.input.setAttribute('placeholder', placeholder);
 
-    if (isSearchField)
-      this._setupSearchControls();
+    const clearButton = this.element.createChild('div', 'toolbar-input-clear-button');
+    clearButton.appendChild(UI.Icon.create('mediumicon-gray-cross-hover', 'search-cancel-button'));
+    clearButton.addEventListener('click', () => this._internalSetValue('', true));
 
     this._updateEmptyStyles();
   }
@@ -603,14 +612,7 @@ UI.ToolbarInput = class extends UI.ToolbarItem {
    * @param {boolean} enabled
    */
   _applyEnabledState(enabled) {
-    this.input.disabled = !enabled;
-  }
-
-  _setupSearchControls() {
-    var clearButton = this.element.createChild('div', 'toolbar-input-clear-button');
-    clearButton.appendChild(UI.Icon.create('mediumicon-gray-cross-hover', 'search-cancel-button'));
-    clearButton.addEventListener('click', () => this._internalSetValue('', true));
-    this.input.addEventListener('keydown', event => this._onKeydownCallback(event));
+    this._prompt.setEnabled(enabled);
   }
 
   /**
@@ -625,7 +627,7 @@ UI.ToolbarInput = class extends UI.ToolbarItem {
    * @param {boolean} notify
    */
   _internalSetValue(value, notify) {
-    this.input.value = value;
+    this._prompt.setText(value);
     if (notify)
       this._onChangeCallback();
     this._updateEmptyStyles();
@@ -635,14 +637,14 @@ UI.ToolbarInput = class extends UI.ToolbarItem {
    * @return {string}
    */
   value() {
-    return this.input.value;
+    return this._prompt.textWithCurrentSuggestion();
   }
 
   /**
    * @param {!Event} event
    */
   _onKeydownCallback(event) {
-    if (!this._isSearchField || !isEscKey(event) || !this.input.value)
+    if (!isEscKey(event) || !this._prompt.text())
       return;
     this._internalSetValue('', true);
     event.consume(true);
@@ -650,11 +652,11 @@ UI.ToolbarInput = class extends UI.ToolbarItem {
 
   _onChangeCallback() {
     this._updateEmptyStyles();
-    this.dispatchEventToListeners(UI.ToolbarInput.Event.TextChanged, this.input.value);
+    this.dispatchEventToListeners(UI.ToolbarInput.Event.TextChanged, this._prompt.text());
   }
 
   _updateEmptyStyles() {
-    this.element.classList.toggle('toolbar-input-empty', !this.input.value);
+    this.element.classList.toggle('toolbar-input-empty', !this._prompt.text());
   }
 };
 
@@ -755,7 +757,7 @@ UI.ToolbarMenuButton = class extends UI.ToolbarButton {
     // after the window gains focus. See crbug.com/655556
     if (this._lastTriggerTime && Date.now() - this._lastTriggerTime < 300)
       return;
-    var contextMenu = new UI.ContextMenu(
+    const contextMenu = new UI.ContextMenu(
         event, this._useSoftMenu, this.element.totalOffsetLeft(),
         this.element.totalOffsetTop() + this.element.offsetHeight);
     this._contextMenuHandler(contextMenu);
@@ -794,7 +796,7 @@ UI.ToolbarSettingToggle = class extends UI.ToolbarToggle {
   }
 
   _settingChanged() {
-    var toggled = this._setting.get();
+    const toggled = this._setting.get();
     this.setToggled(toggled);
     this.setTitle(toggled ? this._toggledTitle : this._defaultTitle);
   }
@@ -857,7 +859,7 @@ UI.ToolbarComboBox = class extends UI.ToolbarItem {
     super(createElementWithClass('span', 'toolbar-select-container'));
 
     this._selectElement = this.element.createChild('select', 'toolbar-item');
-    var dropdownArrowIcon = UI.Icon.create('smallicon-triangle-down', 'toolbar-dropdown-arrow');
+    const dropdownArrowIcon = UI.Icon.create('smallicon-triangle-down', 'toolbar-dropdown-arrow');
     this.element.appendChild(dropdownArrowIcon);
     if (changeHandler)
       this._selectElement.addEventListener('change', changeHandler, false);
@@ -900,7 +902,7 @@ UI.ToolbarComboBox = class extends UI.ToolbarItem {
    * @return {!Element}
    */
   createOption(label, title, value) {
-    var option = this._selectElement.createChild('option');
+    const option = this._selectElement.createChild('option');
     option.text = label;
     if (title)
       option.title = title;
@@ -988,15 +990,15 @@ UI.ToolbarSettingComboBox = class extends UI.ToolbarComboBox {
     this._setting = setting;
     this._options = options;
     this._selectElement.addEventListener('change', this._valueChanged.bind(this), false);
-    var optionContainer = this._selectElement;
-    var optGroupElement = optGroup ? this._selectElement.createChild('optgroup') : null;
+    let optionContainer = this._selectElement;
+    const optGroupElement = optGroup ? this._selectElement.createChild('optgroup') : null;
     if (optGroupElement) {
       optGroupElement.label = optGroup;
       optionContainer = optGroupElement;
     }
-    for (var i = 0; i < options.length; ++i) {
-      var dataOption = options[i];
-      var option = this.createOption(dataOption.label, dataOption.title, dataOption.value);
+    for (let i = 0; i < options.length; ++i) {
+      const dataOption = options[i];
+      const option = this.createOption(dataOption.label, dataOption.title, dataOption.value);
       optionContainer.appendChild(option);
       if (setting.get() === dataOption.value)
         this.setSelectedIndex(i);
@@ -1016,8 +1018,8 @@ UI.ToolbarSettingComboBox = class extends UI.ToolbarComboBox {
     if (this._muteSettingListener)
       return;
 
-    var value = this._setting.get();
-    for (var i = 0; i < this._options.length; ++i) {
+    const value = this._setting.get();
+    for (let i = 0; i < this._options.length; ++i) {
       if (value === this._options[i].value) {
         this.setSelectedIndex(i);
         break;
@@ -1029,7 +1031,7 @@ UI.ToolbarSettingComboBox = class extends UI.ToolbarComboBox {
    * @param {!Event} event
    */
   _valueChanged(event) {
-    var option = this._options[this.selectedIndex()];
+    const option = this._options[this.selectedIndex()];
     this._muteSettingListener = true;
     this._setting.set(option.value);
     this._muteSettingListener = false;

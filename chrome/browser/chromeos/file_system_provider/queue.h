@@ -7,10 +7,10 @@
 
 #include <stddef.h>
 
-#include <deque>
 #include <map>
 
 #include "base/callback.h"
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -37,7 +37,7 @@ namespace file_system_provider {
 // saying, just call Complete() from the completion callback of the task.
 class Queue {
  public:
-  typedef base::Callback<AbortCallback(void)> AbortableCallback;
+  using AbortableCallback = base::OnceCallback<AbortCallback(void)>;
 
   // Creates a queue with a maximum number of tasks running in parallel.
   explicit Queue(size_t max_in_parallel);
@@ -52,7 +52,7 @@ class Queue {
   // until another task is finished. Once the task is finished, Complete() must
   // be called. The callback's abort callback may be NULL. In such case, Abort()
   // must not be called.
-  void Enqueue(size_t token, const AbortableCallback& callback);
+  void Enqueue(size_t token, AbortableCallback callback);
 
   // Forcibly aborts a previously enqueued task. May be called at any time as
   // long as the task is still in the queue and is not marked as completed.
@@ -67,9 +67,11 @@ class Queue {
   // Information about an enqueued task which hasn't been removed, nor aborted.
   struct Task {
     Task();
-    Task(size_t token, const AbortableCallback& callback);
-    Task(const Task& other);
+    Task(size_t token, AbortableCallback callback);
+    Task(Task&& other);
     ~Task();
+
+    Task& operator=(Task&& other);
 
     size_t token;
     AbortableCallback callback;
@@ -82,7 +84,7 @@ class Queue {
 
   const size_t max_in_parallel_;
   size_t next_token_;
-  std::deque<Task> pending_;
+  base::circular_deque<Task> pending_;
   std::map<int, Task> executed_;
 
   base::WeakPtrFactory<Queue> weak_ptr_factory_;

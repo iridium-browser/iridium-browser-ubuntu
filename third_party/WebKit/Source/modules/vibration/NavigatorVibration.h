@@ -53,6 +53,8 @@ class MODULES_EXPORT NavigatorVibration final
   WTF_MAKE_NONCOPYABLE(NavigatorVibration);
 
  public:
+  static const char kSupplementName[];
+
   using VibrationPattern = Vector<unsigned>;
 
   virtual ~NavigatorVibration();
@@ -62,13 +64,11 @@ class MODULES_EXPORT NavigatorVibration final
   static bool vibrate(Navigator&, unsigned time);
   static bool vibrate(Navigator&, const VibrationPattern&);
 
-  VibrationController* Controller(const LocalFrame&);
+  VibrationController* Controller(LocalFrame&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
-  static const char* SupplementName();
-
   explicit NavigatorVibration(Navigator&);
 
   // Inherited from ContextLifecycleObserver.

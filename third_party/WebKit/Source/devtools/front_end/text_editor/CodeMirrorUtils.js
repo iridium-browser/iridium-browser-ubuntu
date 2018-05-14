@@ -54,9 +54,9 @@ TextEditor.CodeMirrorUtils.toRange = function(start, end) {
  * @return {{oldRange: !TextUtils.TextRange, newRange: !TextUtils.TextRange}}
  */
 TextEditor.CodeMirrorUtils.changeObjectToEditOperation = function(changeObject) {
-  var oldRange = TextEditor.CodeMirrorUtils.toRange(changeObject.from, changeObject.to);
-  var newRange = oldRange.clone();
-  var linesAdded = changeObject.text.length;
+  const oldRange = TextEditor.CodeMirrorUtils.toRange(changeObject.from, changeObject.to);
+  const newRange = oldRange.clone();
+  const linesAdded = changeObject.text.length;
   if (linesAdded === 0) {
     newRange.endLine = newRange.startLine;
     newRange.endColumn = newRange.startColumn;
@@ -76,7 +76,7 @@ TextEditor.CodeMirrorUtils.changeObjectToEditOperation = function(changeObject) 
  * @return {!Array.<string>}
  */
 TextEditor.CodeMirrorUtils.pullLines = function(codeMirror, linesCount) {
-  var lines = [];
+  const lines = [];
   codeMirror.eachLine(0, linesCount, onLineHandle);
   return lines;
 
@@ -94,22 +94,36 @@ TextEditor.CodeMirrorUtils.pullLines = function(codeMirror, linesCount) {
 TextEditor.CodeMirrorUtils.appendThemeStyle = function(element) {
   if (UI.themeSupport.hasTheme())
     return;
-  var backgroundColor = InspectorFrontendHost.getSelectionBackgroundColor();
-  var backgroundColorRule =
-      backgroundColor ? '.CodeMirror .CodeMirror-selected { background-color: ' + backgroundColor + ';}' : '';
-  var foregroundColor = InspectorFrontendHost.getSelectionForegroundColor();
-  var foregroundColorRule = foregroundColor ?
-      '.CodeMirror .CodeMirror-selectedtext:not(.CodeMirror-persist-highlight) { color: ' + foregroundColor +
-          '!important;}' :
-      '';
 
-  var selectionRule = (foregroundColor && backgroundColor) ?
-      '.CodeMirror-line::selection, .CodeMirror-line > span::selection, .CodeMirror-line > span > span::selection { background: ' +
-          backgroundColor + '; color: ' + foregroundColor + ' !important }' :
-      '';
-  var style = createElement('style');
-  if (foregroundColorRule || backgroundColorRule)
-    style.textContent = backgroundColorRule + foregroundColorRule + selectionRule;
+  const backgroundColor = InspectorFrontendHost.getSelectionBackgroundColor();
+  const foregroundColor = InspectorFrontendHost.getSelectionForegroundColor();
+  const inactiveBackgroundColor = InspectorFrontendHost.getInactiveSelectionBackgroundColor();
+  const inactiveForegroundColor = InspectorFrontendHost.getInactiveSelectionForegroundColor();
+  const style = createElement('style');
+  style.textContent = `
+    .CodeMirror .CodeMirror-selected {
+      background-color: ${inactiveBackgroundColor};
+    }
+
+    .CodeMirror .CodeMirror-selectedtext:not(.CodeMirror-persist-highlight) {
+      color: ${inactiveForegroundColor} !important;
+    }
+
+    .CodeMirror-focused .CodeMirror-selected {
+      background-color: ${backgroundColor};
+    }
+
+    .CodeMirror-focused .CodeMirror-selectedtext:not(.CodeMirror-persist-highlight) {
+      color: ${foregroundColor} !important;
+    }
+
+    .CodeMirror .CodeMirror-line::selection,
+    .CodeMirror .CodeMirror-line > span::selection,
+    .CodeMirror .CodeMirror-line > span > span::selection {
+      background: ${backgroundColor};
+      color: ${foregroundColor} !important;
+    }
+  `;
   element.appendChild(style);
 };
 
@@ -125,13 +139,13 @@ TextEditor.CodeMirrorUtils.TokenizerFactory = class {
    * @return {function(string, function(string, ?string, number, number))}
    */
   createTokenizer(mimeType) {
-    var mode = CodeMirror.getMode({indentUnit: 2}, mimeType);
-    var state = CodeMirror.startState(mode);
+    const mode = CodeMirror.getMode({indentUnit: 2}, mimeType);
+    const state = CodeMirror.startState(mode);
     function tokenize(line, callback) {
-      var stream = new CodeMirror.StringStream(line);
+      const stream = new CodeMirror.StringStream(line);
       while (!stream.eol()) {
-        var style = mode.token(stream, state);
-        var value = stream.current();
+        const style = mode.token(stream, state);
+        const value = stream.current();
         callback(value, style, stream.start, stream.start + value.length);
         stream.start = stream.pos;
       }

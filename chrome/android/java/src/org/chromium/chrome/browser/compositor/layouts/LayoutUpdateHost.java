@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.compositor.layouts;
 
+import org.chromium.chrome.browser.compositor.animation.CompositorAnimationHandler;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
 import org.chromium.chrome.browser.tab.Tab;
 
@@ -79,4 +80,18 @@ public interface LayoutUpdateHost {
      *           {@link org.chromium.chrome.browser.tabmodel.TabModel}.
      */
     void releaseTabLayout(int id);
+
+    /**
+     * Releases the cached title textures associated with the {@link LayoutTab}.
+     *
+     * @param tabId The id of the reference tab in the
+     *              {@link org.chromium.chrome.browser.tabmodel.TabModel}.
+     */
+    void releaseResourcesForTab(int tabId);
+
+    /**
+     * Get the handler responsible for running the compositor's animations.
+     * @return The {@link CompositorAnimationHandler}.
+     */
+    CompositorAnimationHandler getAnimationHandler();
 }

@@ -30,8 +30,11 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/Deprecation.h"
+#include "core/frame/Frame.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
+#include "core/frame/Settings.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/page/Page.h"
 #include "core/workers/WorkerOrWorkletGlobalScope.h"
@@ -46,15 +49,15 @@ int totalPagesMeasuredCSSSampleId() {
 }
 
 // Make sure update_use_counter_css.py was run which updates histograms.xml.
-constexpr int kMaximumCSSSampleId = 587;
+constexpr int kMaximumCSSSampleId = 592;
 
 }  // namespace
 
 namespace blink {
 
 int UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(
-    CSSPropertyID css_property_id) {
-  switch (css_property_id) {
+    CSSPropertyID unresolved_property) {
+  switch (unresolved_property) {
     // Begin at 2, because 1 is reserved for totalPagesMeasuredCSSSampleId.
     case CSSPropertyColor:
       return 2;
@@ -380,10 +383,10 @@ int UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(
     // CSSPropertyWebkitAspectRatio was 176
     case CSSPropertyAliasWebkitBackfaceVisibility:
       return 177;
-    case CSSPropertyWebkitBackgroundClip:
+    case CSSPropertyAliasWebkitBackgroundClip:
       return 178;
     // case CSSPropertyWebkitBackgroundComposite: return 179;
-    case CSSPropertyWebkitBackgroundOrigin:
+    case CSSPropertyAliasWebkitBackgroundOrigin:
       return 180;
     case CSSPropertyAliasWebkitBackgroundSize:
       return 181;
@@ -1023,8 +1026,7 @@ int UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(
       return 530;
     case CSSPropertyColumns:
       return 531;
-    case CSSPropertyApplyAtRule:
-      return 532;
+    // CSSPropertyApplyAtRule was 532.
     case CSSPropertyFontVariantCaps:
       return 533;
     case CSSPropertyHyphens:
@@ -1050,8 +1052,7 @@ int UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(
       return 544;
     case CSSPropertyOffsetPosition:
       return 545;
-    case CSSPropertyTextDecorationSkip:
-      return 546;
+    // CSSPropertyTextDecorationSkip was 546.
     case CSSPropertyCaretColor:
       return 547;
     case CSSPropertyOffsetRotate:
@@ -1104,42 +1105,51 @@ int UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(
       return 571;
     case CSSPropertyScrollPaddingInlineEnd:
       return 572;
-    case CSSPropertyScrollSnapMargin:
+    case CSSPropertyScrollMargin:
       return 573;
-    case CSSPropertyScrollSnapMarginTop:
+    case CSSPropertyScrollMarginTop:
       return 574;
-    case CSSPropertyScrollSnapMarginRight:
+    case CSSPropertyScrollMarginRight:
       return 575;
-    case CSSPropertyScrollSnapMarginBottom:
+    case CSSPropertyScrollMarginBottom:
       return 576;
-    case CSSPropertyScrollSnapMarginLeft:
+    case CSSPropertyScrollMarginLeft:
       return 577;
-    case CSSPropertyScrollSnapMarginBlock:
+    case CSSPropertyScrollMarginBlock:
       return 578;
-    case CSSPropertyScrollSnapMarginBlockStart:
+    case CSSPropertyScrollMarginBlockStart:
       return 579;
-    case CSSPropertyScrollSnapMarginBlockEnd:
+    case CSSPropertyScrollMarginBlockEnd:
       return 580;
-    case CSSPropertyScrollSnapMarginInline:
+    case CSSPropertyScrollMarginInline:
       return 581;
-    case CSSPropertyScrollSnapMarginInlineStart:
+    case CSSPropertyScrollMarginInlineStart:
       return 582;
-    case CSSPropertyScrollSnapMarginInlineEnd:
+    case CSSPropertyScrollMarginInlineEnd:
       return 583;
     case CSSPropertyScrollSnapStop:
       return 584;
-    case CSSPropertyScrollBoundaryBehavior:
+    case CSSPropertyOverscrollBehavior:
       return 585;
-    case CSSPropertyScrollBoundaryBehaviorX:
+    case CSSPropertyOverscrollBehaviorX:
       return 586;
-    case CSSPropertyScrollBoundaryBehaviorY:
+    case CSSPropertyOverscrollBehaviorY:
       return 587;
+    case CSSPropertyFontVariantEastAsian:
+      return 588;
+    case CSSPropertyTextDecorationSkipInk:
+      return 589;
+    case CSSPropertyScrollCustomization:
+      return 590;
+    case CSSPropertyRowGap:
+      return 591;
+    case CSSPropertyGap:
+      return 592;
     // 1. Add new features above this line (don't change the assigned numbers of
     // the existing items).
     // 2. Update kMaximumCSSSampleId with the new maximum value.
     // 3. Run the update_use_counter_css.py script in
     // chromium/src/tools/metrics/histograms to update the UMA histogram names.
-
     case CSSPropertyInvalid:
       NOTREACHED();
       return 0;
@@ -1164,7 +1174,8 @@ void UseCounter::UnmuteForInspector() {
   mute_count_--;
 }
 
-void UseCounter::RecordMeasurement(WebFeature feature) {
+void UseCounter::RecordMeasurement(WebFeature feature,
+                                   const LocalFrame& source_frame) {
   if (mute_count_)
     return;
 
@@ -1175,17 +1186,18 @@ void UseCounter::RecordMeasurement(WebFeature feature) {
 
   int feature_id = static_cast<int>(feature);
   if (!features_recorded_.QuickGet(feature_id)) {
-    // Note that HTTPArchive tooling looks specifically for this event - see
-    // https://github.com/HTTPArchive/httparchive/issues/59
     if (context_ != kDisabledContext) {
+      // Note that HTTPArchive tooling looks specifically for this event - see
+      // https://github.com/HTTPArchive/httparchive/issues/59
       TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("blink.feature_usage"),
                    "FeatureFirstUsed", "feature", feature_id);
       FeaturesHistogram().Count(feature_id);
+      if (LocalFrameClient* client = source_frame.Client())
+        client->DidObserveNewFeatureUsage(feature);
       NotifyFeatureCounted(feature);
     }
     features_recorded_.QuickSet(feature_id);
   }
-  legacy_counter_.CountFeature(feature);
 }
 
 bool UseCounter::HasRecordedMeasurement(WebFeature feature) const {
@@ -1200,20 +1212,68 @@ bool UseCounter::HasRecordedMeasurement(WebFeature feature) const {
   return features_recorded_.QuickGet(static_cast<int>(feature));
 }
 
-DEFINE_TRACE(UseCounter) {
+// Static
+void UseCounter::CountIfFeatureWouldBeBlockedByFeaturePolicy(
+    const LocalFrame& frame,
+    WebFeature blocked_cross_origin,
+    WebFeature blocked_same_origin) {
+  // Get the origin of the top-level document
+  const SecurityOrigin* topOrigin =
+      frame.Tree().Top().GetSecurityContext()->GetSecurityOrigin();
+
+  // Check if this frame is same-origin with the top-level
+  if (!frame.GetSecurityContext()->GetSecurityOrigin()->CanAccess(topOrigin)) {
+    // This frame is cross-origin with the top-level frame, and so would be
+    // blocked without a feature policy.
+    UseCounter::Count(&frame, blocked_cross_origin);
+    return;
+  }
+
+  // Walk up the frame tree looking for any cross-origin embeds. Even if this
+  // frame is same-origin with the top-level, if it is embedded by a cross-
+  // origin frame (like A->B->A) it would be blocked without a feature policy.
+  const Frame* f = &frame;
+  while (!f->IsMainFrame()) {
+    if (!f->GetSecurityContext()->GetSecurityOrigin()->CanAccess(topOrigin)) {
+      UseCounter::Count(&frame, blocked_same_origin);
+      return;
+    }
+    f = f->Tree().Parent();
+  }
+}
+
+void UseCounter::Trace(blink::Visitor* visitor) {
   visitor->Trace(observers_);
 }
 
-void UseCounter::DidCommitLoad(const KURL& url) {
-  legacy_counter_.UpdateMeasurements();
-
+void UseCounter::DidCommitLoad(const LocalFrame* frame) {
+  // When frame is detatched (i.e. GetDocument() is null), no feature usage
+  // should be measured.
+  if (!frame->GetDocument()) {
+    context_ = kDisabledContext;
+    return;
+  }
+  const KURL url = frame->GetDocument()->Url();
   // Reset state from previous load.
   // Use the protocol of the document being loaded into the main frame to
   // decide whether this page is interesting from a metrics perspective.
+  // Drop usage tracking on view source and new-tab pages. This matches the
+  // policy of page_load_metrics.
   // Note that SVGImage cases always have an about:blank URL
   if (context_ != kSVGImageContext) {
     if (url.ProtocolIs("chrome-extension"))
       context_ = kExtensionContext;
+    else if (frame->GetDocument()->IsViewSource())
+      context_ = kDisabledContext;
+    else if (!frame->Client() || !frame->Client()->ShouldTrackUseCounter(url))
+      context_ = kDisabledContext;
+    else if (frame->GetDocument()->IsPrefetchOnly())
+      context_ = kDisabledContext;
+    // TODO(lunalu): Service worker and shared worker count feature usage on the
+    // blink side use counter. Once the blink side use counter is removed
+    // (crbug.com/811948), the checker for shadow pages should be removed.
+    else if (frame->GetSettings()->IsShadowPage())
+      context_ = kDisabledContext;
     else if (SchemeRegistry::ShouldTrackUsageMetricsForScheme(url.Protocol()))
       context_ = kDefaultContext;
     else
@@ -1309,13 +1369,10 @@ void UseCounter::Count(CSSParserMode css_parser_mode, CSSPropertyID property) {
     }
     css_recorded_.QuickSet(property);
   }
-  legacy_counter_.CountCSS(property);
 }
 
 void UseCounter::Count(WebFeature feature, const LocalFrame* source_frame) {
-  // TODO(rbyers): Report UseCounter to browser process along with page
-  // load metrics for sourceFrame  crbug.com/716565
-  RecordMeasurement(feature);
+  RecordMeasurement(feature, *source_frame);
 }
 
 bool UseCounter::IsCountedAnimatedCSS(CSSPropertyID unresolved_property) {
@@ -1421,72 +1478,6 @@ EnumerationHistogram& UseCounter::AnimatedCSSHistogram() const {
       ("Blink.UseCounter.SVGImage.AnimatedCSSProperties", kMaximumCSSSampleId));
 
   return context_ == kSVGImageContext ? svg_histogram : histogram;
-}
-
-/*
- *
- * LEGACY metrics support - WebCore.FeatureObserver is to be superceded by
- * WebCore.UseCounter
- *
- */
-
-static EnumerationHistogram& FeatureObserverHistogram() {
-  DEFINE_STATIC_LOCAL(EnumerationHistogram, histogram,
-                      ("WebCore.FeatureObserver",
-                       static_cast<int32_t>(WebFeature::kNumberOfFeatures)));
-  return histogram;
-}
-
-UseCounter::LegacyCounter::LegacyCounter()
-    : feature_bits_(static_cast<int>(WebFeature::kNumberOfFeatures)),
-      css_bits_(numCSSPropertyIDs) {}
-
-UseCounter::LegacyCounter::~LegacyCounter() {
-  // PageDestruction was intended to be used as a scale, but it's broken (due to
-  // fast shutdown).  See https://crbug.com/597963.
-  FeatureObserverHistogram().Count(
-      static_cast<int>(WebFeature::kOBSOLETE_PageDestruction));
-  UpdateMeasurements();
-}
-
-void UseCounter::LegacyCounter::CountFeature(WebFeature feature) {
-  feature_bits_.QuickSet(static_cast<int>(feature));
-}
-
-void UseCounter::LegacyCounter::CountCSS(CSSPropertyID property) {
-  css_bits_.QuickSet(property);
-}
-
-void UseCounter::LegacyCounter::UpdateMeasurements() {
-  EnumerationHistogram& feature_histogram = FeatureObserverHistogram();
-  feature_histogram.Count(static_cast<int>(WebFeature::kPageVisits));
-  for (size_t i = 0; i < static_cast<int>(WebFeature::kNumberOfFeatures); ++i) {
-    if (feature_bits_.QuickGet(i))
-      feature_histogram.Count(i);
-  }
-  // Clearing count bits is timing sensitive.
-  feature_bits_.ClearAll();
-
-  // FIXME: Sometimes this function is called more than once per page. The
-  // following bool guards against incrementing the page count when there are no
-  // CSS bits set. https://crbug.com/236262.
-  DEFINE_STATIC_LOCAL(
-      EnumerationHistogram, css_properties_histogram,
-      ("WebCore.FeatureObserver.CSSProperties", kMaximumCSSSampleId));
-  bool needs_pages_measured_update = false;
-  for (size_t i = firstCSSProperty; i < numCSSPropertyIDs; ++i) {
-    if (css_bits_.QuickGet(i)) {
-      int css_sample_id = MapCSSPropertyIdToCSSSampleIdForHistogram(
-          static_cast<CSSPropertyID>(i));
-      css_properties_histogram.Count(css_sample_id);
-      needs_pages_measured_update = true;
-    }
-  }
-
-  if (needs_pages_measured_update)
-    css_properties_histogram.Count(totalPagesMeasuredCSSSampleId());
-
-  css_bits_.ClearAll();
 }
 
 }  // namespace blink

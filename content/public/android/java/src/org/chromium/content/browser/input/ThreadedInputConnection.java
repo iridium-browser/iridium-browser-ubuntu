@@ -79,7 +79,7 @@ class ThreadedInputConnection extends BaseInputConnection implements ChromiumBas
         }
     };
 
-    private final ImeAdapter mImeAdapter;
+    private final ImeAdapterImpl mImeAdapter;
     private final Handler mHandler;
     private int mNumNestedBatchEdits;
 
@@ -91,7 +91,7 @@ class ThreadedInputConnection extends BaseInputConnection implements ChromiumBas
     private int mCurrentExtractedTextRequestToken;
     private boolean mShouldUpdateExtractedText;
 
-    ThreadedInputConnection(View view, ImeAdapter imeAdapter, Handler handler) {
+    ThreadedInputConnection(View view, ImeAdapterImpl imeAdapter, Handler handler) {
         super(view, true);
         if (DEBUG_LOGS) Log.i(TAG, "constructor");
         ImeUtils.checkOnUiThread();
@@ -323,15 +323,36 @@ class ThreadedInputConnection extends BaseInputConnection implements ChromiumBas
     public boolean commitText(final CharSequence text, final int newCursorPosition) {
         if (DEBUG_LOGS) Log.i(TAG, "commitText [%s] [%d]", text, newCursorPosition);
         if (text == null) return false;
+
+        // One WebView app detects Enter in JS by looking at KeyDown (http://crbug/577967).
+        if (TextUtils.equals(text, "\n")) {
+            beginBatchEdit();
+            // Clear the current composition range (the keypress alone wouldn't do this).
+            commitText("", 1);
+            ThreadUtils.postOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    mImeAdapter.sendSyntheticKeyPress(KeyEvent.KEYCODE_ENTER,
+                            KeyEvent.FLAG_SOFT_KEYBOARD | KeyEvent.FLAG_KEEP_TOUCH_MODE);
+                }
+            });
+            endBatchEdit();
+            return true;
+        }
+
         ThreadUtils.postOnUiThread(new Runnable() {
             @Override
             public void run() {
-                cancelCombiningAccentOnUiThread();
-                mImeAdapter.sendCompositionToNative(text, newCursorPosition, true, 0);
+                commitTextOnUiThread(text, newCursorPosition);
             }
         });
         notifyUserAction();
         return true;
+    }
+
+    private void commitTextOnUiThread(final CharSequence text, final int newCursorPosition) {
+        cancelCombiningAccentOnUiThread();
+        mImeAdapter.sendCompositionToNative(text, newCursorPosition, true, 0);
     }
 
     /**
@@ -476,6 +497,14 @@ class ThreadedInputConnection extends BaseInputConnection implements ChromiumBas
         return true;
     }
 
+    private void commitCodePointOnUiThread(int codePoint, int pendingAccentToSet) {
+        StringBuilder builder = new StringBuilder();
+        builder.appendCodePoint(codePoint);
+        String text = builder.toString();
+        mImeAdapter.sendCompositionToNative(text, 1, true, 0);
+        setCombiningAccentOnUiThread(pendingAccentToSet);
+    }
+
     private boolean handleCombiningAccentOnUiThread(final KeyEvent event) {
         // TODO(changwan): this will break the current composition. check if we can
         // implement it in the renderer instead.
@@ -483,24 +512,40 @@ class ThreadedInputConnection extends BaseInputConnection implements ChromiumBas
         int unicodeChar = event.getUnicodeChar();
 
         if (action != KeyEvent.ACTION_DOWN) return false;
+
+        if (event.getKeyCode() == KeyEvent.KEYCODE_DEL) {
+            // We clear the pending accent on receiving a backspace key event (and also delete the
+            // preceding character).
+            setCombiningAccentOnUiThread(0);
+            return false;
+        }
+
         if ((unicodeChar & KeyCharacterMap.COMBINING_ACCENT) != 0) {
-            int pendingAccent = unicodeChar & KeyCharacterMap.COMBINING_ACCENT_MASK;
-            StringBuilder builder = new StringBuilder();
-            builder.appendCodePoint(pendingAccent);
-            updateComposingTextOnUiThread(builder.toString(), 1, true);
-            setCombiningAccentOnUiThread(pendingAccent);
+            int newPendingAccent = unicodeChar & KeyCharacterMap.COMBINING_ACCENT_MASK;
+            if (mPendingAccent != 0) {
+                // Already have an accent pending. Commit the previous accent. If the newly-typed
+                // accent is not the same as the previous one, set it as pending.
+                if (newPendingAccent == mPendingAccent) {
+                    commitCodePointOnUiThread(mPendingAccent, 0);
+                } else {
+                    commitCodePointOnUiThread(mPendingAccent, newPendingAccent);
+                }
+                return true;
+            }
+
+            // No accent currently pending. Just set the new accent as the pending accent and
+            // return.
+            setCombiningAccentOnUiThread(newPendingAccent);
             return true;
         } else if (mPendingAccent != 0 && unicodeChar != 0) {
             int combined = KeyEvent.getDeadChar(mPendingAccent, unicodeChar);
             if (combined != 0) {
-                StringBuilder builder = new StringBuilder();
-                builder.appendCodePoint(combined);
-                String text = builder.toString();
-                mImeAdapter.sendCompositionToNative(text, 1, text.length() > 0, 0);
+                commitCodePointOnUiThread(combined, 0);
                 return true;
             }
             // Noncombinable character; commit the accent character and fall through to sending
             // the key event for the character afterwards.
+            commitCodePointOnUiThread(mPendingAccent, 0);
             finishComposingTextOnUiThread();
         }
         return false;
@@ -528,7 +573,6 @@ class ThreadedInputConnection extends BaseInputConnection implements ChromiumBas
     }
 
     private void finishComposingTextOnUiThread() {
-        cancelCombiningAccentOnUiThread();
         mImeAdapter.finishComposingText();
     }
 

@@ -54,7 +54,7 @@ display log messages to the `LogCat` pane.
 <classpathentry kind="src" path="components/cronet/android/sample/src"/>
 <classpathentry kind="src" path="components/cronet/android/sample/javatests/src"/>
 <classpathentry kind="src" path="components/autofill/core/browser/android/java/src"/>
-<classpathentry kind="src" path="components/web_contents_delegate_android/android/java/src"/>
+<classpathentry kind="src" path="components/web_contents_delegate_android/java/src"/>
 <classpathentry kind="src" path="components/dom_distiller/android/java/src"/>
 <classpathentry kind="src" path="components/navigation_interception/android/java/src"/>
 <classpathentry kind="src" path="ui/android/java/src"/>
@@ -76,8 +76,6 @@ display log messages to the `LogCat` pane.
 <classpathentry kind="src" path="printing/android/java/src"/>
 <classpathentry kind="src" path="tools/binary_size/java/src"/>
 <classpathentry kind="src" path="tools/android/memconsumer/java/src"/>
-<classpathentry kind="src" path="tools/android/findbugs_plugin/test/java/src"/>
-<classpathentry kind="src" path="tools/android/findbugs_plugin/src"/>
 <classpathentry kind="src" path="remoting/android/java/src"/>
 <classpathentry kind="src" path="remoting/android/apk/src"/>
 <classpathentry kind="src" path="remoting/android/javatests/src"/>

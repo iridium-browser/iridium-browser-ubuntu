@@ -71,6 +71,9 @@ class BookmarkContextMenuDelegateBridge :
     parent = bookmarkNode_->parent();
   }
 
+  // Close old menu if it's open.
+  // crbug.com/749213
+  [menuController_ cancel];
   Browser* browser = [bookmarkBarController_ browser];
   bookmarkContextMenuController_.reset(
       new BookmarkContextMenuController([bookmarkBarController_ browserWindow],
@@ -79,8 +82,8 @@ class BookmarkContextMenuDelegateBridge :
                                         nodes));
   ui::SimpleMenuModel* menuModel =
       bookmarkContextMenuController_->menu_model();
-  menuController_.reset([[MenuController alloc] initWithModel:menuModel
-                                       useWithPopUpButtonCell:NO]);
+  menuController_.reset([[MenuControllerCocoa alloc] initWithModel:menuModel
+                                            useWithPopUpButtonCell:NO]);
 }
 
 - (BookmarkModel*)bookmarkModel {

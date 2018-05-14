@@ -5,8 +5,9 @@
 #include <chrome/browser/android/contextualsearch/contextual_search_context.h>
 
 #include "base/android/jni_string.h"
+#include "components/translate/core/common/translate_constants.h"
+#include "components/translate/core/language_detection/language_detection_util.h"
 #include "content/public/browser/browser_thread.h"
-
 #include "jni/ContextualSearchContext_jni.h"
 
 ContextualSearchContext::ContextualSearchContext(JNIEnv* env, jobject obj)
@@ -125,6 +126,25 @@ int ContextualSearchContext::GetEndOffset() const {
   return end_offset;
 }
 
+base::android::ScopedJavaLocalRef<jstring>
+ContextualSearchContext::DetectLanguage(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
+  std::string content_language;
+  std::string html_lang;
+  std::string cld_language;
+  bool is_cld_reliable;
+  std::string language = translate::DeterminePageLanguage(
+      content_language, html_lang, this->surrounding_text, &cld_language,
+      &is_cld_reliable);
+  // Make sure we return an empty string when unreliable or an unknown result.
+  if (!is_cld_reliable || language == translate::kUnknownLanguageCode)
+    language = "";
+  base::android::ScopedJavaLocalRef<jstring> j_language =
+      base::android::ConvertUTF8ToJavaString(env, language);
+  return j_language;
+}
+
 base::WeakPtr<ContextualSearchContext> ContextualSearchContext::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
@@ -137,7 +157,9 @@ void ContextualSearchContext::Destroy(
   delete this;
 }
 
-jlong Init(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj) {
+jlong JNI_ContextualSearchContext_Init(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
   ContextualSearchContext* context = new ContextualSearchContext(env, obj);
   return reinterpret_cast<intptr_t>(context);
 }

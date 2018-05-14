@@ -40,8 +40,7 @@ import java.util.concurrent.ExecutionException;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class SupervisedUserContentProviderTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -65,9 +64,7 @@ public class SupervisedUserContentProviderTest {
                             .getTargetContext()
                             .getContentResolver();
         Assert.assertNotNull(mResolver);
-        mAuthority =
-                InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageName()
-                + AUTHORITY_SUFFIX;
+        mAuthority = InstrumentationRegistry.getTargetContext().getPackageName() + AUTHORITY_SUFFIX;
         mUri = new Uri.Builder()
                        .scheme(ContentResolver.SCHEME_CONTENT)
                        .authority(mAuthority)

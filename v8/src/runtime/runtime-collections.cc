@@ -11,48 +11,23 @@
 namespace v8 {
 namespace internal {
 
-
-RUNTIME_FUNCTION(Runtime_StringGetRawHashField) {
-  HandleScope scope(isolate);
+RUNTIME_FUNCTION(Runtime_IsJSMapIterator) {
+  SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(String, string, 0);
-  return *isolate->factory()->NewNumberFromUint(string->hash_field());
+  return isolate->heap()->ToBoolean(args[0]->IsJSMapIterator());
 }
 
+RUNTIME_FUNCTION(Runtime_IsJSSetIterator) {
+  SealHandleScope shs(isolate);
+  DCHECK_EQ(1, args.length());
+  return isolate->heap()->ToBoolean(args[0]->IsJSSetIterator());
+}
 
 RUNTIME_FUNCTION(Runtime_TheHole) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(0, args.length());
   return isolate->heap()->the_hole_value();
 }
-
-
-RUNTIME_FUNCTION(Runtime_JSCollectionGetTable) {
-  SealHandleScope shs(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_CHECKED(JSObject, object, 0);
-  CHECK(object->IsJSSet() || object->IsJSMap());
-  return static_cast<JSCollection*>(object)->table();
-}
-
-
-RUNTIME_FUNCTION(Runtime_GenericHash) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(Object, object, 0);
-  Smi* hash = Object::GetOrCreateHash(isolate, object);
-  return hash;
-}
-
-
-RUNTIME_FUNCTION(Runtime_SetInitialize) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSSet, holder, 0);
-  JSSet::Initialize(holder, isolate);
-  return *holder;
-}
-
 
 RUNTIME_FUNCTION(Runtime_SetGrow) {
   HandleScope scope(isolate);
@@ -84,16 +59,6 @@ RUNTIME_FUNCTION(Runtime_SetIteratorClone) {
       handle(OrderedHashSet::cast(holder->table()), isolate),
       Smi::ToInt(holder->index()));
 }
-
-
-RUNTIME_FUNCTION(Runtime_MapInitialize) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSMap, holder, 0);
-  JSMap::Initialize(holder, isolate);
-  return *holder;
-}
-
 
 RUNTIME_FUNCTION(Runtime_MapShrink) {
   HandleScope scope(isolate);
@@ -130,18 +95,9 @@ RUNTIME_FUNCTION(Runtime_GetWeakMapEntries) {
   DCHECK_EQ(2, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSWeakCollection, holder, 0);
   CONVERT_NUMBER_CHECKED(int, max_entries, Int32, args[1]);
-  CHECK(max_entries >= 0);
+  CHECK_GE(max_entries, 0);
   return *JSWeakCollection::GetEntries(holder, max_entries);
 }
-
-RUNTIME_FUNCTION(Runtime_WeakCollectionInitialize) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSWeakCollection, weak_collection, 0);
-  JSWeakCollection::Initialize(weak_collection, isolate);
-  return *weak_collection;
-}
-
 
 RUNTIME_FUNCTION(Runtime_WeakCollectionDelete) {
   HandleScope scope(isolate);
@@ -149,10 +105,18 @@ RUNTIME_FUNCTION(Runtime_WeakCollectionDelete) {
   CONVERT_ARG_HANDLE_CHECKED(JSWeakCollection, weak_collection, 0);
   CONVERT_ARG_HANDLE_CHECKED(Object, key, 1);
   CONVERT_SMI_ARG_CHECKED(hash, 2)
-  CHECK(key->IsJSReceiver() || key->IsSymbol());
+
+#ifdef DEBUG
+  DCHECK(key->IsJSReceiver());
+  DCHECK(ObjectHashTableShape::IsLive(isolate, *key));
   Handle<ObjectHashTable> table(
       ObjectHashTable::cast(weak_collection->table()));
-  CHECK(table->IsKey(isolate, *key));
+  // Should only be called when shrinking the table is necessary. See
+  // HashTable::Shrink().
+  DCHECK(table->NumberOfElements() - 1 <= (table->Capacity() >> 2) &&
+         table->NumberOfElements() - 1 >= 16);
+#endif
+
   bool was_present = JSWeakCollection::Delete(weak_collection, key, hash);
   return isolate->heap()->ToBoolean(was_present);
 }
@@ -163,12 +127,20 @@ RUNTIME_FUNCTION(Runtime_WeakCollectionSet) {
   DCHECK_EQ(4, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSWeakCollection, weak_collection, 0);
   CONVERT_ARG_HANDLE_CHECKED(Object, key, 1);
-  CHECK(key->IsJSReceiver() || key->IsSymbol());
   CONVERT_ARG_HANDLE_CHECKED(Object, value, 2);
   CONVERT_SMI_ARG_CHECKED(hash, 3)
+
+#ifdef DEBUG
+  DCHECK(key->IsJSReceiver());
+  DCHECK(ObjectHashTableShape::IsLive(isolate, *key));
   Handle<ObjectHashTable> table(
       ObjectHashTable::cast(weak_collection->table()));
-  CHECK(table->IsKey(isolate, *key));
+  // Should only be called when rehashing or resizing the table is necessary.
+  // See ObjectHashTable::Put() and HashTable::HasSufficientCapacityToAdd().
+  DCHECK((table->NumberOfDeletedElements() << 1) > table->NumberOfElements() ||
+         !table->HasSufficientCapacityToAdd(1));
+#endif
+
   JSWeakCollection::Set(weak_collection, key, value, hash);
   return *weak_collection;
 }
@@ -179,7 +151,7 @@ RUNTIME_FUNCTION(Runtime_GetWeakSetValues) {
   DCHECK_EQ(2, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSWeakCollection, holder, 0);
   CONVERT_NUMBER_CHECKED(int, max_values, Int32, args[1]);
-  CHECK(max_values >= 0);
+  CHECK_GE(max_values, 0);
   return *JSWeakCollection::GetEntries(holder, max_values);
 }
 

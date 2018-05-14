@@ -7,9 +7,9 @@
 
 #include <stdint.h>
 
-#include <queue>
 #include <utility>
 
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/sequence_checker.h"
 #include "base/time/default_tick_clock.h"
@@ -49,13 +49,12 @@ class RateCounter {
   const base::TimeDelta time_window_;
 
   // Queue containing data points in the order in which they were recorded.
-  std::queue<DataPoint> data_points_;
+  base::queue<DataPoint> data_points_;
 
   // Sum of values in |data_points_|.
   int64_t sum_;
 
-  base::DefaultTickClock default_tick_clock_;
-  base::TickClock* tick_clock_ = &default_tick_clock_;
+  base::TickClock* tick_clock_ = base::DefaultTickClock::GetInstance();
 
   SEQUENCE_CHECKER(sequence_checker_);
 

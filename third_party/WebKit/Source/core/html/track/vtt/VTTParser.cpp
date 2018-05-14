@@ -36,9 +36,10 @@
 #include "core/html/track/vtt/VTTElement.h"
 #include "core/html/track/vtt/VTTRegion.h"
 #include "core/html/track/vtt/VTTScanner.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/loader/fetch/TextResourceDecoderOptions.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/text/SegmentedString.h"
+#include "platform/wtf/DateMath.h"
 #include "platform/wtf/text/CharacterNames.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -47,11 +48,12 @@ namespace blink {
 using namespace HTMLNames;
 
 const unsigned kFileIdentifierLength = 6;
+const unsigned kRegionIdentifierLength = 6;
 
-bool VTTParser::ParseFloatPercentageValue(VTTScanner& value_scanner,
-                                          float& percentage) {
-  float number;
-  if (!value_scanner.ScanFloat(number))
+bool VTTParser::ParsePercentageValue(VTTScanner& value_scanner,
+                                     double& percentage) {
+  double number;
+  if (!value_scanner.ScanDouble(number))
     return false;
   // '%' must be present and at the end of the setting value.
   if (!value_scanner.Scan('%'))
@@ -62,21 +64,21 @@ bool VTTParser::ParseFloatPercentageValue(VTTScanner& value_scanner,
   return true;
 }
 
-bool VTTParser::ParseFloatPercentageValuePair(VTTScanner& value_scanner,
-                                              char delimiter,
-                                              FloatPoint& value_pair) {
-  float first_coord;
-  if (!ParseFloatPercentageValue(value_scanner, first_coord))
+bool VTTParser::ParsePercentageValuePair(VTTScanner& value_scanner,
+                                         char delimiter,
+                                         DoublePoint& value_pair) {
+  double first_coord;
+  if (!ParsePercentageValue(value_scanner, first_coord))
     return false;
 
   if (!value_scanner.Scan(delimiter))
     return false;
 
-  float second_coord;
-  if (!ParseFloatPercentageValue(value_scanner, second_coord))
+  double second_coord;
+  if (!ParsePercentageValue(value_scanner, second_coord))
     return false;
 
-  value_pair = FloatPoint(first_coord, second_coord);
+  value_pair = DoublePoint(first_coord, second_coord);
   return true;
 }
 
@@ -88,6 +90,7 @@ VTTParser::VTTParser(VTTParserClient* client, Document& document)
           UTF8Encoding()))),
       current_start_time_(0),
       current_end_time_(0),
+      current_region_(nullptr),
       client_(client) {}
 
 void VTTParser::GetNewCues(HeapVector<Member<TextTrackCue>>& output_cues) {
@@ -129,20 +132,13 @@ void VTTParser::Parse() {
         break;
 
       case kHeader:
-        // Steps 10 - 14 - Allow a header (comment area) under the WEBVTT line.
-        CollectMetadataHeader(line);
+        // Steps 11 - 14 - Collect WebVTT block
+        state_ = CollectWebVTTBlock(line);
+        break;
 
-        if (line.IsEmpty()) {
-          state_ = kId;
-          break;
-        }
-
-        // Step 15 - Break out of header loop if the line could be a timestamp
-        // line.
-        if (line.Contains("-->"))
-          state_ = RecoverCue(line);
-
-        // Step 16 - Line is not the empty string and does not contain "-->".
+      case kRegion:
+        // Collect Region settings
+        state_ = CollectRegionSettings(line);
         break;
 
       case kId:
@@ -212,29 +208,74 @@ bool VTTParser::HasRequiredFileIdentifier(const String& line) {
   return true;
 }
 
-void VTTParser::CollectMetadataHeader(const String& line) {
-  // WebVTT header parsing (WebVTT parser algorithm step 12)
+VTTParser::ParseState VTTParser::CollectRegionSettings(const String& line) {
+  // End of region block
+  if (CheckAndStoreRegion(line))
+    return CheckAndRecoverCue(line);
 
-  // The only currently supported header is the "Region" header.
-  if (!RuntimeEnabledFeatures::WebVTTRegionsEnabled())
-    return;
+  current_region_->SetRegionSettings(line);
+  return kRegion;
+}
 
-  // Step 12.4 If line contains the character ":" (A U+003A COLON), then set
-  // metadata's name to the substring of line before the first ":" character and
-  // metadata's value to the substring after this character.
-  size_t colon_position = line.find(':');
-  if (colon_position == kNotFound)
-    return;
+VTTParser::ParseState VTTParser::CollectWebVTTBlock(const String& line) {
+  // collect a WebVTT block parsing. (WebVTT parser algorithm step 14)
 
-  String header_name = line.Substring(0, colon_position);
+  // If Region support is enabled.
+  if (RuntimeEnabledFeatures::WebVTTRegionsEnabled() &&
+      CheckAndCreateRegion(line))
+    return kRegion;
 
-  // Steps 12.5 If metadata's name equals "Region":
-  if (header_name == "Region") {
-    String header_value = line.Substring(colon_position + 1);
-    // Steps 12.5.1 - 12.5.11 Region creation: Let region be a new text track
-    // region [...]
-    CreateNewRegion(header_value);
+  // Handle cue block.
+  ParseState state = CheckAndRecoverCue(line);
+  if (state != kHeader) {
+    if (!previous_line_.IsEmpty() && !previous_line_.Contains("-->"))
+      current_id_ = AtomicString(previous_line_);
+
+    return state;
   }
+
+  // store previous line for cue id.
+  // length is more than 1 line clear previous_line_ and ignore line.
+  if (previous_line_.IsEmpty())
+    previous_line_ = line;
+  else
+    previous_line_ = g_empty_string;
+  return state;
+}
+
+VTTParser::ParseState VTTParser::CheckAndRecoverCue(const String& line) {
+  // parse cue timings and settings
+  if (line.Contains("-->")) {
+    ParseState state = RecoverCue(line);
+    if (state != kBadCue) {
+      return state;
+    }
+  }
+  return kHeader;
+}
+
+bool VTTParser::CheckAndCreateRegion(const String& line) {
+  if (previous_line_.Contains("-->"))
+    return false;
+  // line starts with the substring "REGION" and remaining characters
+  // zero or more U+0020 SPACE characters or U+0009 CHARACTER TABULATION
+  // (tab) characters expected other than these charecters it is invalid.
+  if (line.StartsWith("REGION") && StringView(line, kRegionIdentifierLength)
+                                       .IsAllSpecialCharacters<IsASpace>()) {
+    current_region_ = VTTRegion::Create();
+    return true;
+  }
+  return false;
+}
+
+bool VTTParser::CheckAndStoreRegion(const String& line) {
+  if (!line.IsEmpty() && !line.Contains("-->"))
+    return false;
+
+  if (!current_region_->id().IsEmpty())
+    region_map_.Set(current_region_->id(), current_region_);
+  current_region_ = nullptr;
+  return true;
 }
 
 VTTParser::ParseState VTTParser::CollectCueId(const String& line) {
@@ -384,22 +425,21 @@ void VTTParser::ResetCueValues() {
   current_content_.Clear();
 }
 
-void VTTParser::CreateNewRegion(const String& header_value) {
-  if (header_value.IsEmpty())
-    return;
-
-  // Steps 12.5.1 - 12.5.9 - Construct and initialize a WebVTT Region object.
-  VTTRegion* region = VTTRegion::Create();
-  region->SetRegionSettings(header_value);
-
-  if (region->Id().IsEmpty())
-    return;
-  region_map_.Set(region->Id(), region);
-}
-
 bool VTTParser::CollectTimeStamp(const String& line, double& time_stamp) {
   VTTScanner input(line);
   return CollectTimeStamp(input, time_stamp);
+}
+
+static String SerializeTimeStamp(double time_stamp) {
+  uint64_t value = clampTo<uint64_t>(time_stamp * 1000);
+  unsigned milliseconds = value % 1000;
+  value /= 1000;
+  unsigned seconds = value % 60;
+  value /= 60;
+  unsigned minutes = value % 60;
+  unsigned hours = value / 60;
+  return String::Format("%02u:%02u:%02u.%03u", hours, minutes, seconds,
+                        milliseconds);
 }
 
 bool VTTParser::CollectTimeStamp(VTTScanner& input, double& time_stamp) {
@@ -410,7 +450,7 @@ bool VTTParser::CollectTimeStamp(VTTScanner& input, double& time_stamp) {
 
   // Steps 5 - 7 - Collect a sequence of characters that are 0-9.
   // If not 2 characters or value is greater than 59, interpret as hours.
-  int value1;
+  unsigned value1;
   unsigned value1_digits = input.ScanDigits(value1);
   if (!value1_digits)
     return false;
@@ -419,12 +459,12 @@ bool VTTParser::CollectTimeStamp(VTTScanner& input, double& time_stamp) {
 
   // Steps 8 - 11 - Collect the next sequence of 0-9 after ':' (must be 2
   // chars).
-  int value2;
+  unsigned value2;
   if (!input.Scan(':') || input.ScanDigits(value2) != 2)
     return false;
 
   // Step 12 - Detect whether this timestamp includes hours.
-  int value3;
+  unsigned value3;
   if (mode == kHours || input.Match(':')) {
     if (!input.Scan(':') || input.ScanDigits(value3) != 2)
       return false;
@@ -435,18 +475,16 @@ bool VTTParser::CollectTimeStamp(VTTScanner& input, double& time_stamp) {
   }
 
   // Steps 13 - 17 - Collect next sequence of 0-9 after '.' (must be 3 chars).
-  int value4;
+  unsigned value4;
   if (!input.Scan('.') || input.ScanDigits(value4) != 3)
     return false;
   if (value2 > 59 || value3 > 59)
     return false;
 
   // Steps 18 - 19 - Calculate result.
-  const double kSecondsPerHour = 3600;
-  const double kSecondsPerMinute = 60;
-  const double kSecondsPerMillisecond = 0.001;
-  time_stamp = (value1 * kSecondsPerHour) + (value2 * kSecondsPerMinute) +
-               value3 + (value4 * kSecondsPerMillisecond);
+  time_stamp = (value1 * kMinutesPerHour * kSecondsPerMinute) +
+               (value2 * kSecondsPerMinute) + value3 +
+               (value4 * (1 / kMsPerSecond));
   return true;
 }
 
@@ -550,11 +588,11 @@ void VTTTreeBuilder::ConstructTreeFromToken(Document& document) {
       break;
     }
     case VTTTokenTypes::kTimestampTag: {
-      String characters_string = token_.Characters();
       double parsed_time_stamp;
-      if (VTTParser::CollectTimeStamp(characters_string, parsed_time_stamp))
+      if (VTTParser::CollectTimeStamp(token_.Characters(), parsed_time_stamp)) {
         current_node_->ParserAppendChild(ProcessingInstruction::Create(
-            document, "timestamp", characters_string));
+            document, "timestamp", SerializeTimeStamp(parsed_time_stamp)));
+      }
       break;
     }
     default:
@@ -562,8 +600,9 @@ void VTTTreeBuilder::ConstructTreeFromToken(Document& document) {
   }
 }
 
-DEFINE_TRACE(VTTParser) {
+void VTTParser::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
+  visitor->Trace(current_region_);
   visitor->Trace(client_);
   visitor->Trace(cue_list_);
   visitor->Trace(region_map_);

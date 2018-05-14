@@ -30,11 +30,13 @@
 
 #include "platform/graphics/LoggingCanvas.h"
 
+#include <unicode/unistr.h>
+#include "build/build_config.h"
 #include "platform/geometry/IntSize.h"
-#include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/skia/ImagePixelLocker.h"
 #include "platform/graphics/skia/SkiaUtils.h"
 #include "platform/image-encoders/ImageEncoder.h"
+#include "platform/wtf/ByteSwap.h"
 #include "platform/wtf/HexNumber.h"
 #include "platform/wtf/text/Base64.h"
 #include "platform/wtf/text/TextEncoding.h"
@@ -220,7 +222,7 @@ std::unique_ptr<JSONObject> ObjectForSkPath(const SkPath& path) {
   std::unique_ptr<JSONObject> path_item = JSONObject::Create();
   path_item->SetString("fillType", FillTypeName(path.getFillType()));
   path_item->SetString("convexity", ConvexityName(path.getConvexity()));
-  path_item->SetBoolean("isRect", path.isRect(0));
+  path_item->SetBoolean("isRect", path.isRect(nullptr));
   SkPath::Iter iter(path, false);
   SkPoint points[4];
   std::unique_ptr<JSONArray> path_points_array = JSONArray::Create();
@@ -479,6 +481,13 @@ std::unique_ptr<JSONObject> ObjectForSkPaint(const SkPaint& paint) {
   paint_item->SetString("textEncoding",
                         TextEncodingName(paint.getTextEncoding()));
   paint_item->SetString("hinting", HintingName(paint.getHinting()));
+  if (paint.getBlendMode() != SkBlendMode::kSrcOver)
+    paint_item->SetString("blendMode", SkBlendMode_Name(paint.getBlendMode()));
+  if (const auto* filter = paint.getImageFilter()) {
+    SkString str;
+    filter->toString(&str);
+    paint_item->SetString("imageFilter", str.c_str());
+  }
   return paint_item;
 }
 
@@ -503,26 +512,27 @@ String ClipOpName(SkClipOp op) {
 
 String SaveLayerFlagsToString(SkCanvas::SaveLayerFlags flags) {
   String flags_string = "";
-  if (flags & SkCanvas::kIsOpaque_SaveLayerFlag)
-    flags_string.append("kIsOpaque_SaveLayerFlag ");
   if (flags & SkCanvas::kPreserveLCDText_SaveLayerFlag)
     flags_string.append("kPreserveLCDText_SaveLayerFlag ");
   return flags_string;
 }
 
-String TextEncodingCanonicalName(SkPaint::TextEncoding encoding) {
-  String name = TextEncodingName(encoding);
-  if (encoding == SkPaint::kUTF16_TextEncoding ||
-      encoding == SkPaint::kUTF32_TextEncoding)
-    name.append("LE");
-  return name;
-}
-
-String StringForUTFText(const void* text,
-                        size_t length,
-                        SkPaint::TextEncoding encoding) {
-  return WTF::TextEncoding(TextEncodingCanonicalName(encoding))
-      .Decode((const char*)text, length);
+String StringForUTF32LEText(const void* text, size_t byte_length) {
+  icu::UnicodeString utf16;
+#if defined(ARCH_CPU_BIG_ENDIAN)
+  // Swap LE to BE
+  size_t char_length = length / sizeof(UChar32);
+  WTF::Vector<UChar32> utf32be(char_length);
+  for (size_t i = 0; i < char_length; ++i)
+    utf32be[i] = WTF::Bswap32(static_cast<UChar32*>(text)[i]);
+  utf16 = icu::UnicodeString::fromUTF32(utf32be.data(),
+                                        static_cast<int32_t>(byte_length));
+#else
+  utf16 = icu::UnicodeString::fromUTF32(reinterpret_cast<const UChar32*>(text),
+                                        static_cast<int32_t>(byte_length));
+#endif
+  return String(icu::toUCharPtr(utf16.getBuffer()),
+                static_cast<unsigned>(utf16.length()));
 }
 
 String StringForText(const void* text,
@@ -531,16 +541,19 @@ String StringForText(const void* text,
   SkPaint::TextEncoding encoding = paint.getTextEncoding();
   switch (encoding) {
     case SkPaint::kUTF8_TextEncoding:
+      return WTF::TextEncoding("UTF-8").Decode(
+          reinterpret_cast<const char*>(text), byte_length);
     case SkPaint::kUTF16_TextEncoding:
+      return WTF::TextEncoding("UTF-16LE")
+          .Decode(reinterpret_cast<const char*>(text), byte_length);
     case SkPaint::kUTF32_TextEncoding:
-      return StringForUTFText(text, byte_length, encoding);
+      return StringForUTF32LEText(text, byte_length);
     case SkPaint::kGlyphID_TextEncoding: {
       WTF::Vector<SkUnichar> data_vector(byte_length / 2);
       SkUnichar* text_data = data_vector.data();
       paint.glyphsToUnichars(static_cast<const uint16_t*>(text),
                              byte_length / 2, text_data);
-      return WTF::UTF32LittleEndianEncoding().Decode(
-          reinterpret_cast<const char*>(text_data), byte_length * 2);
+      return StringForUTF32LEText(text, byte_length);
     }
     default:
       NOTREACHED();
@@ -581,8 +594,8 @@ JSONObject* AutoLogger::LogItemWithParams(const String& name) {
   return item->GetJSONObject("params");
 }
 
-LoggingCanvas::LoggingCanvas(int width, int height)
-    : InterceptingCanvasBase(width, height), log_(JSONArray::Create()) {}
+LoggingCanvas::LoggingCanvas()
+    : InterceptingCanvasBase(0, 0), log_(JSONArray::Create()) {}
 
 void LoggingCanvas::onDrawPaint(const SkPaint& paint) {
   AutoLogger logger(this);
@@ -904,20 +917,32 @@ std::unique_ptr<JSONArray> LoggingCanvas::Log() {
   return JSONArray::From(log_->Clone());
 }
 
-#ifndef NDEBUG
-String RecordAsDebugString(const PaintRecord* record, const SkRect& bounds) {
-  const SkIRect enclosing_bounds = bounds.roundOut();
-  LoggingCanvas canvas(enclosing_bounds.width(), enclosing_bounds.height());
-  record->Playback(&canvas);
-  std::unique_ptr<JSONObject> record_as_json = JSONObject::Create();
-  record_as_json->SetObject("cullRect", ObjectForSkRect(bounds));
-  record_as_json->SetArray("operations", canvas.Log());
-  return record_as_json->ToPrettyJSONString();
+std::unique_ptr<JSONArray> RecordAsJSON(const PaintRecord& record) {
+  LoggingCanvas canvas;
+  record.Playback(&canvas);
+  return canvas.Log();
 }
 
-void ShowPaintRecord(const PaintRecord* record, const SkRect& bounds) {
-  WTFLogAlways("%s\n", RecordAsDebugString(record, bounds).Utf8().data());
+String RecordAsDebugString(const PaintRecord& record) {
+  return RecordAsJSON(record)->ToPrettyJSONString();
 }
-#endif
+
+void ShowPaintRecord(const PaintRecord& record) {
+  DLOG(INFO) << RecordAsDebugString(record).Utf8().data();
+}
+
+std::unique_ptr<JSONArray> SkPictureAsJSON(const SkPicture& picture) {
+  LoggingCanvas canvas;
+  picture.playback(&canvas);
+  return canvas.Log();
+}
+
+String SkPictureAsDebugString(const SkPicture& picture) {
+  return SkPictureAsJSON(picture)->ToPrettyJSONString();
+}
+
+void ShowSkPicture(const SkPicture& picture) {
+  DLOG(INFO) << SkPictureAsDebugString(picture).Utf8().data();
+}
 
 }  // namespace blink

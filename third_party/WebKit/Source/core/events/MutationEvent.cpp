@@ -41,7 +41,7 @@ MutationEvent::MutationEvent(const AtomicString& type,
       attr_name_(attr_name),
       attr_change_(attr_change) {}
 
-MutationEvent::~MutationEvent() {}
+MutationEvent::~MutationEvent() = default;
 
 void MutationEvent::initMutationEvent(const AtomicString& type,
                                       bool can_bubble,
@@ -67,7 +67,7 @@ const AtomicString& MutationEvent::InterfaceName() const {
   return EventNames::MutationEvent;
 }
 
-DEFINE_TRACE(MutationEvent) {
+void MutationEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(related_node_);
   Event::Trace(visitor);
 }

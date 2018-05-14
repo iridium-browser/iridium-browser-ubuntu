@@ -32,12 +32,12 @@
 #define ServiceWorker_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/serialization/SerializedScriptValue.h"
 #include "core/workers/AbstractWorker.h"
 #include "modules/ModulesExport.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "public/platform/modules/serviceworker/WebServiceWorker.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProxy.h"
 
@@ -48,7 +48,7 @@ class ScriptState;
 class MODULES_EXPORT ServiceWorker final
     : public AbstractWorker,
       public ActiveScriptWrappable<ServiceWorker>,
-      NON_EXPORTED_BASE(public WebServiceWorkerProxy) {
+      public WebServiceWorkerProxy {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(ServiceWorker);
 
@@ -57,13 +57,13 @@ class MODULES_EXPORT ServiceWorker final
                              std::unique_ptr<WebServiceWorker::Handle>);
 
   ~ServiceWorker() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   // Eager finalization needed to promptly release owned WebServiceWorker.
   EAGERLY_FINALIZE();
 
   void postMessage(ScriptState*,
-                   PassRefPtr<SerializedScriptValue> message,
+                   scoped_refptr<SerializedScriptValue> message,
                    const MessagePortArray&,
                    ExceptionState&);
   static bool CanTransferArrayBuffersAndImageBitmaps() { return false; }
@@ -83,14 +83,14 @@ class MODULES_EXPORT ServiceWorker final
   // AbstractWorker overrides.
   const AtomicString& InterfaceName() const override;
 
-  void InternalsTerminate();
+  ScriptPromise InternalsTerminate(ScriptState*);
 
  private:
   static ServiceWorker* GetOrCreate(ExecutionContext*,
                                     std::unique_ptr<WebServiceWorker::Handle>);
   ServiceWorker(ExecutionContext*, std::unique_ptr<WebServiceWorker::Handle>);
 
-  // SuspendableObject overrides.
+  // PausableObject overrides.
   void ContextDestroyed(ExecutionContext*) override;
 
   // A handle to the service worker representation in the embedder.

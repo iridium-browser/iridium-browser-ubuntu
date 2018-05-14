@@ -9,9 +9,12 @@
 
 #include "ash/ash_export.h"
 #include "ash/public/interfaces/window_style.mojom.h"
+#include "ash/shell_observer.h"
+#include "ash/wm/splitview/split_view_controller.h"
 #include "base/macros.h"
 #include "base/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/aura/window_observer.h"
 #include "ui/views/window/non_client_view.h"
 
 namespace views {
@@ -25,13 +28,22 @@ class HeaderView;
 class ImmersiveFullscreenController;
 class ImmersiveFullscreenControllerDelegate;
 
+enum class FrameBackButtonState {
+  kInvisible,
+  kVisibleEnabled,
+  kVisibleDisabled,
+};
+
 // A NonClientFrameView used for packaged apps, dialogs and other non-browser
 // windows. It supports immersive fullscreen. When in immersive fullscreen, the
 // client view takes up the entire widget and the window header is an overlay.
 // The window header overlay slides onscreen when the user hovers the mouse at
 // the top of the screen. See also views::CustomFrameView and
 // BrowserNonClientFrameViewAsh.
-class ASH_EXPORT CustomFrameViewAsh : public views::NonClientFrameView {
+class ASH_EXPORT CustomFrameViewAsh : public views::NonClientFrameView,
+                                      public ShellObserver,
+                                      public SplitViewController::Observer,
+                                      public aura::WindowObserver {
  public:
   // Internal class name.
   static const char kViewClassName[];
@@ -60,6 +72,10 @@ class ASH_EXPORT CustomFrameViewAsh : public views::NonClientFrameView {
   // will have some transparency added when the frame is drawn.
   void SetFrameColors(SkColor active_frame_color, SkColor inactive_frame_color);
 
+  // Set the back buttons status. If |show| is true, the button becomes visible.
+  // |enabled| controls the enabled/disabled state of the back button.
+  void SetBackButtonState(FrameBackButtonState state);
+
   // Sets the height of the header. If |height| has no value (the default), the
   // preferred height is used.
   void SetHeaderHeight(base::Optional<int> height);
@@ -86,8 +102,31 @@ class ASH_EXPORT CustomFrameViewAsh : public views::NonClientFrameView {
   gfx::Size GetMinimumSize() const override;
   gfx::Size GetMaximumSize() const override;
   void SchedulePaintInRect(const gfx::Rect& r) override;
+  void SetVisible(bool visible) override;
+
+  // aura::WindowObserver:
+  void OnWindowDestroying(aura::Window* window) override;
+  void OnWindowPropertyChanged(aura::Window* window,
+                               const void* key,
+                               intptr_t old) override;
+
+  // If |paint| is false, we should not paint the header. Used for overview mode
+  // with OnOverviewModeStarting() and OnOverviewModeEnded() to hide/show the
+  // header of v2 and ARC apps.
+  virtual void SetShouldPaintHeader(bool paint);
+
+  // ShellObserver:
+  void OnOverviewModeStarting() override;
+  void OnOverviewModeEnded() override;
+
+  // SplitViewController::Observer:
+  void OnSplitViewStateChanged(SplitViewController::State previous_state,
+                               SplitViewController::State state) override;
 
   const views::View* GetAvatarIconViewForTest() const;
+
+  SkColor GetActiveFrameColorForTest() const;
+  SkColor GetInactiveFrameColorForTest() const;
 
  private:
   class AvatarObserver;
@@ -107,6 +146,12 @@ class ASH_EXPORT CustomFrameViewAsh : public views::NonClientFrameView {
   // Height from top of window to top of client area.
   int NonClientTopBorderHeight() const;
 
+  // Called when overview mode or split view state changed. If overview mode and
+  // split view mode are both active at the same time, the header of the window
+  // in split view should be visible, but the headers of other windows in
+  // overview are not.
+  void OnOverviewOrSplitViewModeChanged();
+
   // Not owned.
   views::Widget* frame_;
 
@@ -121,6 +166,13 @@ class ASH_EXPORT CustomFrameViewAsh : public views::NonClientFrameView {
   std::unique_ptr<AvatarObserver> avatar_observer_;
 
   static bool use_empty_minimum_size_for_test_;
+
+  // Track whether the device is in overview mode. Set this to true when
+  // overview mode started and false when overview mode finished. Use this to
+  // check whether we should paint when splitview state changes instead of
+  // Shell::Get()->window_selector_controller()->IsSelecting() because the later
+  // actually may be still be false after overview mode has started.
+  bool in_overview_mode_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(CustomFrameViewAsh);
 };

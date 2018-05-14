@@ -10,6 +10,7 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 
+#include <memory>
 #include <set>
 
 #include "base/command_line.h"
@@ -18,16 +19,14 @@
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/pickle.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/global_descriptors.h"
-#include "base/posix/unix_domain_socket_linux.h"
+#include "base/posix/unix_domain_socket.h"
 #include "base/process/kill.h"
 #include "base/process/launch.h"
 #include "base/strings/string_split.h"
-#include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "build/build_config.h"
 #include "components/nacl/common/nacl_nonsfi_util.h"
 #include "components/nacl/common/nacl_paths.h"
@@ -39,6 +38,7 @@
 #include "sandbox/linux/suid/client/setuid_sandbox_client.h"
 #include "sandbox/linux/suid/client/setuid_sandbox_host.h"
 #include "sandbox/linux/suid/common/sandbox.h"
+#include "services/service_manager/sandbox/switches.h"
 
 namespace {
 
@@ -132,9 +132,9 @@ namespace nacl {
 void AddNaClZygoteForkDelegates(
     std::vector<std::unique_ptr<content::ZygoteForkDelegate>>* delegates) {
   delegates->push_back(
-      base::MakeUnique<NaClForkDelegate>(false /* nonsfi_mode */));
+      std::make_unique<NaClForkDelegate>(false /* nonsfi_mode */));
   delegates->push_back(
-      base::MakeUnique<NaClForkDelegate>(true /* nonsfi_mode */));
+      std::make_unique<NaClForkDelegate>(true /* nonsfi_mode */));
 }
 
 NaClForkDelegate::NaClForkDelegate(bool nonsfi_mode)
@@ -174,9 +174,6 @@ void NaClForkDelegate::Init(const int sandboxdesc,
 
   int fds[2];
   PCHECK(0 == socketpair(PF_UNIX, SOCK_SEQPACKET, 0, fds));
-  base::FileHandleMappingVector fds_to_map;
-  fds_to_map.push_back(std::make_pair(fds[1], kNaClZygoteDescriptor));
-  fds_to_map.push_back(std::make_pair(sandboxdesc, nacl_sandbox_descriptor));
 
   bool use_nacl_bootstrap = false;
   // For non-SFI mode, we do not use fixed address space.
@@ -212,8 +209,6 @@ void NaClForkDelegate::Init(const int sandboxdesc,
              !PathService::Get(nacl::FILE_NACL_HELPER_BOOTSTRAP,
                                &helper_bootstrap_exe)) {
     status_ = kNaClHelperBootstrapMissing;
-  } else if (RunningOnValgrind()) {
-    status_ = kNaClHelperValgrind;
   } else {
     base::CommandLine::StringVector argv_to_launch;
     {
@@ -224,12 +219,12 @@ void NaClForkDelegate::Init(const int sandboxdesc,
         cmd_line.SetProgram(helper_exe);
 
       // Append any switches that need to be forwarded to the NaCl helper.
-      static const char* kForwardSwitches[] = {
-        switches::kAllowSandboxDebugging,
-        switches::kDisableSeccompFilterSandbox,
-        switches::kEnableNaClDebug,
-        switches::kNaClDangerousNoSandboxNonSfi,
-        switches::kNoSandbox,
+      static constexpr const char* kForwardSwitches[] = {
+          service_manager::switches::kAllowSandboxDebugging,
+          service_manager::switches::kDisableSeccompFilterSandbox,
+          switches::kEnableNaClDebug,
+          switches::kNaClDangerousNoSandboxNonSfi,
+          switches::kNoSandbox,
       };
       const base::CommandLine& current_cmd_line =
           *base::CommandLine::ForCurrentProcess();
@@ -254,6 +249,10 @@ void NaClForkDelegate::Init(const int sandboxdesc,
     }
 
     base::LaunchOptions options;
+    options.fds_to_remap.push_back(
+        std::make_pair(fds[1], kNaClZygoteDescriptor));
+    options.fds_to_remap.push_back(
+        std::make_pair(sandboxdesc, nacl_sandbox_descriptor));
 
     base::ScopedFD dummy_fd;
     if (using_setuid_sandbox) {
@@ -261,11 +260,9 @@ void NaClForkDelegate::Init(const int sandboxdesc,
       // setuid sandbox wrapper manually.
       base::FilePath sandbox_path = setuid_sandbox_host->GetSandboxBinaryPath();
       argv_to_launch.insert(argv_to_launch.begin(), sandbox_path.value());
-      setuid_sandbox_host->SetupLaunchOptions(&options, &fds_to_map, &dummy_fd);
+      setuid_sandbox_host->SetupLaunchOptions(&options, &dummy_fd);
       setuid_sandbox_host->SetupLaunchEnvironment();
     }
-
-    options.fds_to_remap = &fds_to_map;
 
     // The NaCl processes spawned may need to exceed the ambient soft limit
     // on RLIMIT_AS to allocate the untrusted address space and its guard

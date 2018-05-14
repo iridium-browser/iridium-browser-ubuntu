@@ -4,8 +4,10 @@
 
 package org.chromium.content_shell;
 
+import android.graphics.Bitmap;
 import android.view.ViewGroup;
 
+import org.chromium.blink_public.web.WebCursorInfoType;
 import org.chromium.ui.base.ViewAndroidDelegate;
 
 /**
@@ -13,7 +15,20 @@ import org.chromium.ui.base.ViewAndroidDelegate;
  * Extended for testing.
  */
 public class ShellViewAndroidDelegate extends ViewAndroidDelegate {
+    /**
+     * An interface delegates a {@link CallbackHelper} for cursor update. see more in {@link
+     * ContentViewPointerTypeTest.OnCursorUpdateHelperImpl}.
+     */
+    public interface OnCursorUpdateHelper {
+        /**
+         * Record the last notifyCalled pointer type, see more {@link CallbackHelper#notifyCalled}.
+         * @param type The pointer type of the notifyCalled.
+         */
+        void notifyCalled(int type);
+    }
+
     private final ViewGroup mContainerView;
+    private OnCursorUpdateHelper mOnCursorUpdateHelper;
 
     public ShellViewAndroidDelegate(ViewGroup containerView) {
         mContainerView = containerView;
@@ -22,5 +37,29 @@ public class ShellViewAndroidDelegate extends ViewAndroidDelegate {
     @Override
     public ViewGroup getContainerView() {
         return mContainerView;
+    }
+
+    public void setOnCursorUpdateHelper(OnCursorUpdateHelper helper) {
+        mOnCursorUpdateHelper = helper;
+    }
+
+    public OnCursorUpdateHelper getOnCursorUpdateHelper() {
+        return mOnCursorUpdateHelper;
+    }
+
+    @Override
+    public void onCursorChangedToCustom(Bitmap customCursorBitmap, int hotspotX, int hotspotY) {
+        super.onCursorChangedToCustom(customCursorBitmap, hotspotX, hotspotY);
+        if (mOnCursorUpdateHelper != null) {
+            mOnCursorUpdateHelper.notifyCalled(WebCursorInfoType.CUSTOM);
+        }
+    }
+
+    @Override
+    public void onCursorChanged(int cursorType) {
+        super.onCursorChanged(cursorType);
+        if (mOnCursorUpdateHelper != null) {
+            mOnCursorUpdateHelper.notifyCalled(cursorType);
+        }
     }
 }

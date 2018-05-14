@@ -4,14 +4,14 @@
 
 #include "core/css/resolver/FontBuilder.h"
 
+#include <memory>
 #include "core/css/CSSFontSelector.h"
+#include "core/css/StyleEngine.h"
 #include "core/dom/Document.h"
-#include "core/dom/StyleEngine.h"
 #include "core/frame/Settings.h"
 #include "core/style/ComputedStyle.h"
 #include "core/testing/DummyPageHolder.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <memory>
 
 namespace blink {
 
@@ -45,11 +45,12 @@ class FontBuilderAdditiveTest : public FontBuilderTest,
 };
 
 TEST_F(FontBuilderInitTest, InitialFontSizeNotScaled) {
-  RefPtr<ComputedStyle> initial = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> initial = ComputedStyle::Create();
 
   FontBuilder builder(&GetDocument());
   builder.SetInitial(1.0f);  // FIXME: Remove unused param.
-  builder.CreateFont(GetDocument().GetStyleEngine().FontSelector(), *initial);
+  builder.CreateFont(GetDocument().GetStyleEngine().GetFontSelector(),
+                     *initial);
 
   EXPECT_EQ(16.0f, initial->GetFontDescription().ComputedSize());
 }
@@ -68,12 +69,12 @@ TEST_P(FontBuilderAdditiveTest, OnlySetValueIsModified) {
   FontDescription parent_description;
   funcs.set_base_value(parent_description);
 
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   style->SetFontDescription(parent_description);
 
   FontBuilder font_builder(&GetDocument());
   funcs.set_value(font_builder);
-  font_builder.CreateFont(GetDocument().GetStyleEngine().FontSelector(),
+  font_builder.CreateFont(GetDocument().GetStyleEngine().GetFontSelector(),
                           *style);
 
   FontDescription output_description = style->GetFontDescription();
@@ -92,17 +93,17 @@ TEST_P(FontBuilderAdditiveTest, OnlySetValueIsModified) {
 }
 
 static void FontWeightBase(FontDescription& d) {
-  d.SetWeight(kFontWeight900);
+  d.SetWeight(FontSelectionValue(900));
 }
 static void FontWeightValue(FontBuilder& b) {
-  b.SetWeight(kFontWeightNormal);
+  b.SetWeight(NormalWeightValue());
 }
 
 static void FontStretchBase(FontDescription& d) {
-  d.SetStretch(kFontStretchUltraExpanded);
+  d.SetStretch(UltraExpandedWidthValue());
 }
 static void FontStretchValue(FontBuilder& b) {
-  b.SetStretch(kFontStretchExtraCondensed);
+  b.SetStretch(ExtraCondensedWidthValue());
 }
 
 static void FontFamilyBase(FontDescription& d) {
@@ -121,10 +122,10 @@ static void FontFeatureSettingsValue(FontBuilder& b) {
 }
 
 static void FontStyleBase(FontDescription& d) {
-  d.SetStyle(kFontStyleItalic);
+  d.SetStyle(ItalicSlopeValue());
 }
 static void FontStyleValue(FontBuilder& b) {
-  b.SetStyle(kFontStyleNormal);
+  b.SetStyle(NormalSlopeValue());
 }
 
 static void FontVariantCapsBase(FontDescription& d) {

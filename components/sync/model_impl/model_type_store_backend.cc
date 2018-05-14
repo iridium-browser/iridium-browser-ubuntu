@@ -13,9 +13,8 @@
 #include "base/synchronization/lock.h"
 #include "components/sync/protocol/model_type_store_schema_descriptor.pb.h"
 #include "third_party/leveldatabase/env_chromium.h"
-#include "third_party/leveldatabase/src/helpers/memenv/memenv.h"
+#include "third_party/leveldatabase/leveldb_chrome.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
-#include "third_party/leveldatabase/src/include/leveldb/env.h"
 #include "third_party/leveldatabase/src/include/leveldb/iterator.h"
 #include "third_party/leveldatabase/src/include/leveldb/options.h"
 #include "third_party/leveldatabase/src/include/leveldb/slice.h"
@@ -107,26 +106,26 @@ ModelTypeStoreBackend::~ModelTypeStoreBackend() {
 }
 
 std::unique_ptr<leveldb::Env> ModelTypeStoreBackend::CreateInMemoryEnv() {
-  return base::WrapUnique(leveldb::NewMemEnv(leveldb::Env::Default()));
+  return base::WrapUnique(leveldb_chrome::NewMemEnv(leveldb::Env::Default()));
 }
 
 // static
 scoped_refptr<ModelTypeStoreBackend> ModelTypeStoreBackend::GetOrCreateBackend(
     const std::string& path,
     std::unique_ptr<leveldb::Env> env,
-    ModelTypeStore::Result* result) {
+    base::Optional<ModelError>* error) {
+  error->reset();
   scoped_refptr<ModelTypeStoreBackend> backend =
       backend_map.Get().GetBackend(path);
   if (backend) {
-    *result = ModelTypeStore::Result::SUCCESS;
     return backend;
   }
 
   backend = new ModelTypeStoreBackend(path);
 
-  *result = backend->Init(path, std::move(env));
+  *error = backend->Init(path, std::move(env));
 
-  if (*result == ModelTypeStore::Result::SUCCESS) {
+  if (!error->has_value()) {
     backend_map.Get().SetBackend(path, backend.get());
   } else {
     backend = nullptr;
@@ -135,7 +134,7 @@ scoped_refptr<ModelTypeStoreBackend> ModelTypeStoreBackend::GetOrCreateBackend(
   return backend;
 }
 
-ModelTypeStore::Result ModelTypeStoreBackend::Init(
+base::Optional<ModelError> ModelTypeStoreBackend::Init(
     const std::string& path,
     std::unique_ptr<leveldb::Env> env) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
@@ -155,32 +154,31 @@ ModelTypeStore::Result ModelTypeStoreBackend::Init(
   if (!status.ok()) {
     DCHECK(db_ == nullptr);
     RecordStoreInitResultHistogram(LevelDbStatusToStoreInitResult(status));
-    return ModelTypeStore::Result::UNSPECIFIED_ERROR;
+    return ModelError(FROM_HERE, status.ToString());
   }
 
   int64_t current_version = GetStoreVersion();
   if (current_version == kInvalidSchemaVersion) {
     RecordStoreInitResultHistogram(STORE_INIT_RESULT_SCHEMA_DESCRIPTOR_ISSUE);
-    return ModelTypeStore::Result::UNSPECIFIED_ERROR;
+    return ModelError(FROM_HERE, "Invalid schema descriptor");
   }
 
   if (current_version != kLatestSchemaVersion) {
-    ModelTypeStore::Result result =
+    base::Optional<ModelError> error =
         Migrate(current_version, kLatestSchemaVersion);
-    if (result != ModelTypeStore::Result::SUCCESS) {
+    if (error) {
       RecordStoreInitResultHistogram(STORE_INIT_RESULT_MIGRATION);
-      return result;
+      return error;
     }
   }
   RecordStoreInitResultHistogram(STORE_INIT_RESULT_SUCCESS);
-  return ModelTypeStore::Result::SUCCESS;
+  return base::nullopt;
 }
 
 leveldb::Status ModelTypeStoreBackend::OpenDatabase(const std::string& path,
                                                     leveldb::Env* env) {
-  leveldb::Options options;
+  leveldb_env::Options options;
   options.create_if_missing = true;
-  options.reuse_logs = leveldb_env::kDefaultLogReuseOptionValue;
   options.paranoid_checks = true;
   if (env)
     options.env = env;
@@ -190,13 +188,13 @@ leveldb::Status ModelTypeStoreBackend::OpenDatabase(const std::string& path,
 
 leveldb::Status ModelTypeStoreBackend::DestroyDatabase(const std::string& path,
                                                        leveldb::Env* env) {
-  leveldb::Options options;
+  leveldb_env::Options options;
   if (env)
     options.env = env;
   return leveldb::DestroyDB(path, options);
 }
 
-ModelTypeStore::Result ModelTypeStoreBackend::ReadRecordsWithPrefix(
+base::Optional<ModelError> ModelTypeStoreBackend::ReadRecordsWithPrefix(
     const std::string& prefix,
     const ModelTypeStore::IdList& id_list,
     ModelTypeStore::RecordList* record_list,
@@ -216,13 +214,13 @@ ModelTypeStore::Result ModelTypeStoreBackend::ReadRecordsWithPrefix(
     } else if (status.IsNotFound()) {
       missing_id_list->push_back(id);
     } else {
-      return ModelTypeStore::Result::UNSPECIFIED_ERROR;
+      return ModelError(FROM_HERE, status.ToString());
     }
   }
-  return ModelTypeStore::Result::SUCCESS;
+  return base::nullopt;
 }
 
-ModelTypeStore::Result ModelTypeStoreBackend::ReadAllRecordsWithPrefix(
+base::Optional<ModelError> ModelTypeStoreBackend::ReadAllRecordsWithPrefix(
     const std::string& prefix,
     ModelTypeStore::RecordList* record_list) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
@@ -238,18 +236,20 @@ ModelTypeStore::Result ModelTypeStoreBackend::ReadAllRecordsWithPrefix(
     key.remove_prefix(prefix_slice.size());
     record_list->emplace_back(key.ToString(), iter->value().ToString());
   }
-  return iter->status().ok() ? ModelTypeStore::Result::SUCCESS
-                             : ModelTypeStore::Result::UNSPECIFIED_ERROR;
+  return iter->status().ok() ? base::nullopt
+                             : base::Optional<ModelError>(
+                                   {FROM_HERE, iter->status().ToString()});
 }
 
-ModelTypeStore::Result ModelTypeStoreBackend::WriteModifications(
+base::Optional<ModelError> ModelTypeStoreBackend::WriteModifications(
     std::unique_ptr<leveldb::WriteBatch> write_batch) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
   DCHECK(db_);
   leveldb::Status status =
       db_->Write(leveldb::WriteOptions(), write_batch.get());
-  return status.ok() ? ModelTypeStore::Result::SUCCESS
-                     : ModelTypeStore::Result::UNSPECIFIED_ERROR;
+  return status.ok()
+             ? base::nullopt
+             : base::Optional<ModelError>({FROM_HERE, status.ToString()});
 }
 
 int64_t ModelTypeStoreBackend::GetStoreVersion() {
@@ -268,8 +268,9 @@ int64_t ModelTypeStoreBackend::GetStoreVersion() {
   return schema_descriptor.version_number();
 }
 
-ModelTypeStore::Result ModelTypeStoreBackend::Migrate(int64_t current_version,
-                                                      int64_t desired_version) {
+base::Optional<ModelError> ModelTypeStoreBackend::Migrate(
+    int64_t current_version,
+    int64_t desired_version) {
   DCHECK(db_);
   if (current_version == 0) {
     if (Migrate0To1()) {
@@ -277,11 +278,11 @@ ModelTypeStore::Result ModelTypeStoreBackend::Migrate(int64_t current_version,
     }
   }
   if (current_version == desired_version) {
-    return ModelTypeStore::Result::SUCCESS;
+    return base::nullopt;
   } else if (current_version > desired_version) {
-    return ModelTypeStore::Result::SCHEMA_VERSION_TOO_HIGH;
+    return ModelError(FROM_HERE, "Schema version too high");
   } else {
-    return ModelTypeStore::Result::UNSPECIFIED_ERROR;
+    return ModelError(FROM_HERE, "Schema upgrade failed");
   }
 }
 

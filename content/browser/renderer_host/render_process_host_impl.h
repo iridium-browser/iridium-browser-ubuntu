@@ -27,18 +27,18 @@
 #include "content/browser/renderer_host/frame_sink_provider_impl.h"
 #include "content/browser/renderer_host/media/renderer_audio_output_stream_factory_context_impl.h"
 #include "content/browser/renderer_host/offscreen_canvas_provider_impl.h"
-#include "content/browser/webrtc/webrtc_eventlog_host.h"
 #include "content/common/associated_interface_registry_impl.h"
 #include "content/common/associated_interfaces.mojom.h"
+#include "content/common/child_control.mojom.h"
 #include "content/common/content_export.h"
 #include "content/common/indexed_db/indexed_db.mojom.h"
+#include "content/common/media/media_stream.mojom.h"
 #include "content/common/media/renderer_audio_output_stream_factory.mojom.h"
 #include "content/common/renderer.mojom.h"
 #include "content/common/renderer_host.mojom.h"
 #include "content/common/storage_partition_service.mojom.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/service_manager_connection.h"
-#include "content/public/common/url_loader_factory.mojom.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_platform_file.h"
 #include "media/media_features.h"
@@ -46,14 +46,17 @@
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/bindings/associated_binding_set.h"
 #include "mojo/public/cpp/bindings/interface_ptr.h"
+#include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
-#include "services/service_manager/public/interfaces/service.mojom.h"
+#include "services/service_manager/public/mojom/service.mojom.h"
 #include "services/ui/public/interfaces/gpu.mojom.h"
+#include "services/viz/public/interfaces/compositing/compositing_mode_watcher.mojom.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gl/gpu_switching_observer.h"
 
 #if defined(OS_ANDROID)
 #include "content/browser/android/synchronous_compositor_browser_filter.h"
+#include "content/public/browser/android/child_process_importance.h"
 #endif
 
 namespace base {
@@ -63,15 +66,11 @@ class SharedPersistentMemoryAllocator;
 }
 
 namespace content {
-class AudioInputRendererHost;
 class ChildConnection;
 class GpuClient;
 class IndexedDBDispatcherHost;
 class InProcessChildThreadParams;
 class NotificationMessageFilter;
-#if BUILDFLAG(ENABLE_WEBRTC)
-class P2PSocketDispatcherHost;
-#endif
 class PermissionServiceContext;
 class PeerConnectionTrackerHost;
 class PushMessagingManager;
@@ -85,6 +84,10 @@ class SiteInstance;
 class SiteInstanceImpl;
 class StoragePartition;
 class StoragePartitionImpl;
+
+#if BUILDFLAG(ENABLE_WEBRTC)
+class P2PSocketDispatcherHost;
+#endif
 
 typedef base::Thread* (*RendererMainThreadFactoryFunction)(
     const InProcessChildThreadParams& params);
@@ -112,9 +115,9 @@ class CONTENT_EXPORT RenderProcessHostImpl
     : public RenderProcessHost,
       public ChildProcessLauncher::Client,
       public ui::GpuSwitchingObserver,
-      public NON_EXPORTED_BASE(mojom::RouteProvider),
-      public NON_EXPORTED_BASE(mojom::AssociatedInterfaceProvider),
-      public NON_EXPORTED_BASE(mojom::RendererHost) {
+      public mojom::RouteProvider,
+      public mojom::AssociatedInterfaceProvider,
+      public mojom::RendererHost {
  public:
   // Use the spare RenderProcessHost if it exists, or create a new one. This
   // should be the usual way to get a new RenderProcessHost.
@@ -171,6 +174,11 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void RemovePendingView() override;
   void AddWidget(RenderWidgetHost* widget) override;
   void RemoveWidget(RenderWidgetHost* widget) override;
+#if defined(OS_ANDROID)
+  void UpdateWidgetImportance(ChildProcessImportance old_value,
+                              ChildProcessImportance new_value) override;
+  ChildProcessImportance ComputeEffectiveImportance() override;
+#endif
   void SetSuddenTerminationAllowed(bool enabled) override;
   bool SuddenTerminationAllowed() const override;
   IPC::ChannelProxy* GetChannel() override;
@@ -181,12 +189,9 @@ class CONTENT_EXPORT RenderProcessHostImpl
 #if BUILDFLAG(ENABLE_WEBRTC)
   void EnableAudioDebugRecordings(const base::FilePath& file) override;
   void DisableAudioDebugRecordings() override;
-  bool StartWebRTCEventLog(const base::FilePath& file_path) override;
-  bool StopWebRTCEventLog() override;
-  void SetEchoCanceller3(bool enable) override;
-  void SetWebRtcLogMessageCallback(
-      base::Callback<void(const std::string&)> callback) override;
-  void ClearWebRtcLogMessageCallback() override;
+  void SetEchoCanceller3(
+      bool enable,
+      base::OnceCallback<void(bool, const std::string&)> callback) override;
   WebRtcStopRtpDumpCallback StartRtpDump(
       bool incoming,
       bool outgoing,
@@ -200,17 +205,14 @@ class CONTENT_EXPORT RenderProcessHostImpl
       override;
   const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
   bool IsProcessBackgrounded() const override;
-  size_t GetWorkerRefCount() const override;
-  void IncrementServiceWorkerRefCount() override;
-  void DecrementServiceWorkerRefCount() override;
-  void IncrementSharedWorkerRefCount() override;
-  void DecrementSharedWorkerRefCount() override;
-  void ForceReleaseWorkerRefCounts() override;
-  bool IsWorkerRefCountDisabled() override;
+  void IncrementKeepAliveRefCount() override;
+  void DecrementKeepAliveRefCount() override;
+  void DisableKeepAliveRefCount() override;
+  bool IsKeepAliveRefCountDisabled() override;
   void PurgeAndSuspend() override;
   void Resume() override;
   mojom::Renderer* GetRendererInterface() override;
-  resource_coordinator::ResourceCoordinatorInterface*
+  resource_coordinator::ProcessResourceCoordinator*
   GetProcessResourceCoordinator() override;
 
   void SetIsNeverSuitableForReuse() override;
@@ -306,6 +308,15 @@ class CONTENT_EXPORT RenderProcessHostImpl
   static void RegisterRendererMainThreadFactory(
       RendererMainThreadFactoryFunction create);
 
+  // Allows external code to supply a function which creates a
+  // StoragePartitionService. Used for supplying test versions of the
+  // service.
+  using CreateStoragePartitionServiceFunction =
+      void (*)(RenderProcessHostImpl* rph,
+               mojom::StoragePartitionServiceRequest request);
+  static void SetCreateStoragePartitionServiceFunction(
+      CreateStoragePartitionServiceFunction function);
+
   RenderFrameMessageFilter* render_frame_message_filter_for_testing() const {
     return render_frame_message_filter_.get();
   }
@@ -373,6 +384,10 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // globally-used spare RenderProcessHost at any time.
   static RenderProcessHost* GetSpareRenderProcessHostForTesting();
 
+  PermissionServiceContext& permission_service_context() {
+    return *permission_service_context_;
+  }
+
  protected:
   // A proxy for our IPC::Channel that lives on the IO thread.
   std::unique_ptr<IPC::ChannelProxy> channel_;
@@ -396,6 +411,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
  private:
   friend class ChildProcessLauncherBrowserTest_ChildSpawnFail_Test;
   friend class VisitRelayingRenderProcessHost;
+  friend class StoragePartitonInterceptor;
+  friend class SecurityExploitBrowserTest;
   class ConnectionFilterController;
   class ConnectionFilterImpl;
 
@@ -430,24 +447,30 @@ class CONTENT_EXPORT RenderProcessHostImpl
       mojom::AssociatedInterfaceAssociatedRequest request) override;
 
   // mojom::RendererHost
-  void GetBlobURLLoaderFactory(mojom::URLLoaderFactoryRequest request) override;
+  void GetBlobURLLoaderFactory(
+      network::mojom::URLLoaderFactoryRequest request) override;
+  using BrowserHistogramCallback =
+      mojom::RendererHost::GetBrowserHistogramCallback;
+  void GetBrowserHistogram(const std::string& name,
+                           BrowserHistogramCallback callback) override;
+  void SuddenTerminationChanged(bool enabled) override;
+  void ShutdownRequest() override;
 
   void BindRouteProvider(mojom::RouteProviderAssociatedRequest request);
 
-  void CreateMusGpuRequest(ui::mojom::GpuRequest request);
   void CreateOffscreenCanvasProvider(
       blink::mojom::OffscreenCanvasProviderRequest request);
   void BindFrameSinkProvider(mojom::FrameSinkProviderRequest request);
+  void BindCompositingModeReporter(
+      viz::mojom::CompositingModeReporterRequest request);
   void BindSharedBitmapAllocationNotifier(
-      cc::mojom::SharedBitmapAllocationNotifierRequest request);
+      viz::mojom::SharedBitmapAllocationNotifierRequest request);
   void CreateStoragePartitionService(
       mojom::StoragePartitionServiceRequest request);
-  void CreateRendererHost(mojom::RendererHostRequest request);
-  void CreateURLLoaderFactory(mojom::URLLoaderFactoryRequest request);
+  void CreateRendererHost(mojom::RendererHostAssociatedRequest request);
+  void CreateURLLoaderFactory(network::mojom::URLLoaderFactoryRequest request);
 
   // Control message handlers.
-  void OnShutdownRequest();
-  void SuddenTerminationChanged(bool enabled);
   void OnUserMetricsRecordAction(const std::string& action);
   void OnCloseACK(int old_route_id);
 
@@ -492,6 +515,9 @@ class CONTENT_EXPORT RenderProcessHostImpl
       const GURL& site_url);
 
 #if BUILDFLAG(ENABLE_WEBRTC)
+  void CreateMediaStreamDispatcherHost(
+      MediaStreamManager* media_stream_manager,
+      mojom::MediaStreamDispatcherHostRequest request);
   void OnRegisterAecDumpConsumer(int id);
   void OnUnregisterAecDumpConsumer(int id);
   void RegisterAecDumpConsumerOnUIThread(int id);
@@ -503,6 +529,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void SendDisableAecDumpToRenderer();
   base::FilePath GetAecDumpFilePathWithExtensions(const base::FilePath& file);
   base::SequencedTaskRunner& GetAecDumpFileTaskRunner();
+  void OnAec3Enabled();
 #endif
 
   static void OnMojoError(int render_process_id, const std::string& error);
@@ -547,16 +574,11 @@ class CONTENT_EXPORT RenderProcessHostImpl
   scoped_refptr<ConnectionFilterController> connection_filter_controller_;
   service_manager::mojom::ServicePtr test_service_;
 
-  // The number of service workers running in this process.
-  size_t service_worker_ref_count_;
-  // See comments for IncrementSharedWorkerRefCount() and
-  // DecrementSharedWorkerRefCount(). This is more like a boolean flag and not
-  // actually the number of shared workers running in this process.
-  size_t shared_worker_ref_count_;
+  size_t keep_alive_ref_count_;
 
-  // Set in ForceReleaseWorkerRefCounts. When true, worker ref counts must no
-  // longer be modified.
-  bool is_worker_ref_count_disabled_;
+  // Set in DisableKeepAliveRefCount(). When true, |keep_alive_ref_count_| must
+  // no longer be modified.
+  bool is_keep_alive_ref_count_disabled_;
 
   // Whether this host is never suitable for reuse as determined in the
   // MayReuseHost() function.
@@ -564,7 +586,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   // The registered IPC listener objects. When this list is empty, we should
   // delete ourselves.
-  IDMap<IPC::Listener*> listeners_;
+  base::IDMap<IPC::Listener*> listeners_;
 
   // Mojo interfaces provided to the child process are registered here if they
   // need consistent delivery ordering with legacy IPC, and are process-wide in
@@ -580,16 +602,18 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // backgrounded.
   int32_t visible_widgets_;
 
+#if defined(OS_ANDROID)
+  // Track count of number of widgets with each possible ChildProcessImportance
+  // value.
+  int32_t widget_importance_counts_[static_cast<size_t>(
+      ChildProcessImportance::COUNT)] = {0};
+
+#endif
+
   // The set of widgets in this RenderProcessHostImpl.
   std::set<RenderWidgetHostImpl*> widgets_;
 
-  // Whether this process currently has backgrounded priority. Tracked so that
-  // UpdateProcessPriority() can avoid redundantly setting the priority.
-  bool is_process_backgrounded_;
-  // Same as |pending_views_| but keep this in sync with value passed to
-  // |child_process_launcher_|, so need a separate state. This is used to
-  // compute process priority on some platforms.
-  bool boost_priority_for_pending_views_;
+  ChildProcessLauncherPriority priority_;
 
   // Used to allow a RenderWidgetHost to intercept various messages on the
   // IO thread.
@@ -679,18 +703,14 @@ class CONTENT_EXPORT RenderProcessHostImpl
                   BrowserThread::DeleteOnIOThread>
       audio_output_stream_factory_context_;
 
-  scoped_refptr<AudioInputRendererHost> audio_input_renderer_host_;
-
 #if BUILDFLAG(ENABLE_WEBRTC)
   scoped_refptr<P2PSocketDispatcherHost> p2p_socket_dispatcher_host_;
 
   // Must be accessed on UI thread.
   std::vector<int> aec_dump_consumers_;
-  base::Optional<bool> override_aec3_;
+  base::OnceCallback<void(bool, const std::string&)> aec3_set_callback_;
 
   WebRtcStopRtpDumpCallback stop_rtp_dump_callback_;
-
-  WebRTCEventLogHost webrtc_eventlog_host_;
 
   scoped_refptr<base::SequencedTaskRunner>
       audio_debug_recordings_file_task_runner_;
@@ -703,7 +723,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   scoped_refptr<PeerConnectionTrackerHost> peer_connection_tracker_host_;
 
   // Records the time when the process starts surviving for workers for UMA.
-  base::TimeTicks survive_for_worker_start_time_;
+  base::TimeTicks keep_alive_start_time_;
 
   // Context shared for each mojom::PermissionService instance created for this
   // RPH.
@@ -734,15 +754,16 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   std::unique_ptr<OffscreenCanvasProviderImpl> offscreen_canvas_provider_;
 
+  mojom::ChildControlPtr child_control_interface_;
   mojom::RouteProviderAssociatedPtr remote_route_provider_;
   mojom::RendererAssociatedPtr renderer_interface_;
-  mojo::Binding<mojom::RendererHost> renderer_host_binding_;
+  mojo::AssociatedBinding<mojom::RendererHost> renderer_host_binding_;
 
   // Tracks active audio and video streams within the render process; used to
   // determine if if a process should be backgrounded.
   int media_stream_count_ = 0;
 
-  std::unique_ptr<resource_coordinator::ResourceCoordinatorInterface>
+  std::unique_ptr<resource_coordinator::ProcessResourceCoordinator>
       process_resource_coordinator_;
 
   // A WeakPtrFactory which is reset every time Cleanup() runs. Used to vend
@@ -751,6 +772,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
       instance_weak_factory_;
 
   FrameSinkProviderImpl frame_sink_provider_;
+  std::unique_ptr<mojo::Binding<viz::mojom::CompositingModeReporter>>
+      compositing_mode_reporter_;
 
   viz::SharedBitmapAllocationNotifierImpl
       shared_bitmap_allocation_notifier_impl_;

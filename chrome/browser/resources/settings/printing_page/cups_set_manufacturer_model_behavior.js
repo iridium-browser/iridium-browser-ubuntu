@@ -8,7 +8,7 @@
  */
 
 /** @polymerBehavior */
-var SetManufacturerModelBehavior = {
+const SetManufacturerModelBehavior = {
   properties: {
     /** @type {!CupsPrinterInfo} */
     activePrinter: {
@@ -16,15 +16,16 @@ var SetManufacturerModelBehavior = {
       notify: true,
     },
 
-    /** @type {?Array<string>} */
-    manufacturerList: {
-      type: Array,
+    invalidPPD: {
+      type: Boolean,
+      value: false,
     },
 
     /** @type {?Array<string>} */
-    modelList: {
-      type: Array,
-    },
+    manufacturerList: Array,
+
+    /** @type {?Array<string>} */
+    modelList: Array,
   },
 
   observers: [
@@ -86,11 +87,12 @@ var SetManufacturerModelBehavior = {
   },
 
   /**
-   * @param {string} path
+   * @param {string} path The full path to the selected PPD file
    * @private
    */
   printerPPDPathChanged_: function(path) {
     this.set('activePrinter.printerPPDPath', path);
+    this.invalidPPD = !path;
   },
 
   /**

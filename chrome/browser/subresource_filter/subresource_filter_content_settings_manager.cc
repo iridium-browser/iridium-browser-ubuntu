@@ -46,7 +46,7 @@ SubresourceFilterContentSettingsManager::
     SubresourceFilterContentSettingsManager(Profile* profile)
     : history_observer_(this),
       settings_map_(HostContentSettingsMapFactory::GetForProfile(profile)),
-      clock_(base::MakeUnique<base::DefaultClock>(base::DefaultClock())),
+      clock_(std::make_unique<base::DefaultClock>(base::DefaultClock())),
       should_use_smart_ui_(ShouldUseSmartUI()) {
   DCHECK(profile);
   DCHECK(settings_map_);
@@ -86,7 +86,7 @@ void SubresourceFilterContentSettingsManager::WhitelistSite(const GURL& url) {
 }
 
 void SubresourceFilterContentSettingsManager::OnDidShowUI(const GURL& url) {
-  auto dict = base::MakeUnique<base::DictionaryValue>();
+  auto dict = std::make_unique<base::DictionaryValue>();
   double now = clock_->Now().ToDoubleT();
   dict->SetDouble(kInfobarLastShownTimeKey, now);
   SetSiteMetadata(url, std::move(dict));
@@ -110,9 +110,13 @@ bool SubresourceFilterContentSettingsManager::ShouldShowUIForSite(
   return true;
 }
 
-void SubresourceFilterContentSettingsManager::ClearSiteMetadata(
-    const GURL& url) {
-  SetSiteMetadata(url, nullptr);
+void SubresourceFilterContentSettingsManager::
+    ResetSiteMetadataBasedOnActivation(const GURL& url, bool is_activated) {
+  if (!is_activated) {
+    SetSiteMetadata(url, nullptr);
+  } else if (!GetSiteMetadata(url)) {
+    SetSiteMetadata(url, std::make_unique<base::DictionaryValue>());
+  }
 }
 
 std::unique_ptr<base::DictionaryValue>
@@ -194,14 +198,6 @@ void SubresourceFilterContentSettingsManager::OnContentSettingChanged(
     ChromeSubresourceFilterClient::LogAction(
         kActionContentSettingsAllowedWhileUISuppressed);
   }
-  // Reset the smart UI here. Be careful not to delete the metadata (as
-  // ClearSiteMetadata would do), just remove the timestamp.
-  //
-  // This is to allow the UI appear again after a user has made a manual setting
-  // change in the settings UI. Deleting the metadata would affect how the
-  // permission behaves in Site Details / Page Info.
-  SetSiteMetadata(url, base::MakeUnique<base::DictionaryValue>());
-  DCHECK(ShouldShowUIForSite(url));
 }
 
 // When history URLs are deleted, clear the metadata for the smart UI.

@@ -10,11 +10,11 @@
 #include "base/strings/string_util.h"
 #include "chrome/common/extensions/api/webstore/webstore_api_constants.h"
 #include "components/crx_file/id_util.h"
-#include "content/public/common/associated_interface_provider.h"
 #include "content/public/renderer/render_frame.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/renderer/script_context.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -52,8 +52,6 @@ int g_next_install_id = 0;
 
 WebstoreBindings::WebstoreBindings(ScriptContext* context)
     : ObjectBackedNativeHandler(context) {
-  RouteFunction("Install", "webstore",
-                base::Bind(&WebstoreBindings::Install, base::Unretained(this)));
   content::RenderFrame* render_frame = context->GetRenderFrame();
   if (render_frame)
     render_frame->GetRemoteAssociatedInterfaces()->GetInterface(
@@ -61,6 +59,12 @@ WebstoreBindings::WebstoreBindings(ScriptContext* context)
 }
 
 WebstoreBindings::~WebstoreBindings() {}
+
+void WebstoreBindings::AddRoutes() {
+  RouteHandlerFunction(
+      "Install", "webstore",
+      base::Bind(&WebstoreBindings::Install, base::Unretained(this)));
+}
 
 void WebstoreBindings::InlineInstallResponse(int install_id,
                                              bool success,
@@ -128,7 +132,8 @@ void WebstoreBindings::Install(
   std::string preferred_store_link_url;
   if (!args[2]->IsUndefined()) {
     CHECK(args[2]->IsString());
-    preferred_store_link_url = std::string(*v8::String::Utf8Value(args[2]));
+    preferred_store_link_url =
+        std::string(*v8::String::Utf8Value(args.GetIsolate(), args[2]));
   }
 
   std::string webstore_item_id;
@@ -166,7 +171,7 @@ bool WebstoreBindings::GetWebstoreItemIdFromFrame(
     return false;
   }
 
-  if (!WebUserGestureIndicator::IsProcessingUserGesture()) {
+  if (!WebUserGestureIndicator::IsProcessingUserGesture(frame)) {
     *error = kNotUserGestureError;
     return false;
   }
@@ -241,6 +246,16 @@ bool WebstoreBindings::GetWebstoreItemIdFromFrame(
 
   *error = kNoWebstoreItemLinkFoundError;
   return false;
+}
+
+void WebstoreBindings::Invalidate() {
+  // We should close all mojo pipes when we invalidate the WebstoreBindings
+  // object and before its associated v8::context is destroyed. This is to
+  // ensure there are no mojo calls that try to access the v8::context after its
+  // destruction.
+  inline_installer_.reset();
+  install_progress_listener_bindings_.CloseAllBindings();
+  ObjectBackedNativeHandler::Invalidate();
 }
 
 }  // namespace extensions

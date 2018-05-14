@@ -25,17 +25,16 @@
 #include "core/layout/LayoutEmbeddedObject.h"
 
 #include "core/CSSValueKeywords.h"
-#include "core/HTMLNames.h"
+#include "core/exported/WebPluginContainerImpl.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
-#include "core/html/HTMLIFrameElement.h"
 #include "core/html/HTMLPlugInElement.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutView.h"
 #include "core/page/Page.h"
 #include "core/paint/EmbeddedObjectPaintInvalidator.h"
 #include "core/paint/EmbeddedObjectPainter.h"
-#include "core/plugins/PluginView.h"
 #include "platform/text/PlatformLocale.h"
 
 namespace blink {
@@ -47,7 +46,7 @@ LayoutEmbeddedObject::LayoutEmbeddedObject(Element* element)
   View()->GetFrameView()->SetIsVisuallyNonEmpty();
 }
 
-LayoutEmbeddedObject::~LayoutEmbeddedObject() {}
+LayoutEmbeddedObject::~LayoutEmbeddedObject() = default;
 
 PaintLayerType LayoutEmbeddedObject::LayerTypeRequired() const {
   // This can't just use LayoutEmbeddedContent::layerTypeRequired, because
@@ -150,14 +149,22 @@ ScrollResult LayoutEmbeddedObject::Scroll(ScrollGranularity granularity,
 
 CompositingReasons LayoutEmbeddedObject::AdditionalCompositingReasons() const {
   if (RequiresAcceleratedCompositing())
-    return kCompositingReasonPlugin;
-  return kCompositingReasonNone;
+    return CompositingReason::kPlugin;
+  return CompositingReason::kNone;
 }
 
-LayoutReplaced* LayoutEmbeddedObject::EmbeddedReplacedContent() const {
-  if (LocalFrameView* frame_view = ChildFrameView())
-    return frame_view->EmbeddedReplacedContent();
-  return nullptr;
+bool LayoutEmbeddedObject::NeedsPreferredWidthsRecalculation() const {
+  if (LayoutEmbeddedContent::NeedsPreferredWidthsRecalculation())
+    return true;
+  FrameView* frame_view = ChildFrameView();
+  return frame_view && frame_view->HasIntrinsicSizingInfo();
+}
+
+bool LayoutEmbeddedObject::GetNestedIntrinsicSizingInfo(
+    IntrinsicSizingInfo& intrinsic_sizing_info) const {
+  if (FrameView* frame_view = ChildFrameView())
+    return frame_view->GetIntrinsicSizingInfo(intrinsic_sizing_info);
+  return false;
 }
 
 }  // namespace blink

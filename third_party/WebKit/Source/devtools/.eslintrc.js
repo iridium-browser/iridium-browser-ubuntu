@@ -59,7 +59,7 @@ module.exports = {
         "no-shadow-restricted-names": 2,
         "no-cond-assign": 2,
         "no-debugger": 2,
-        "no-console": [2, { "allow": ["warn", "error", "assert", "timeStamp", "time", "timeEnd"] }],
+        "no-console": [2, { "allow": ["assert", "context", "error", "timeStamp", "time", "timeEnd", "warn"] }],
         "no-dupe-keys": 2,
         "no-duplicate-case": 2,
         "no-empty-character-class": 2,
@@ -67,6 +67,8 @@ module.exports = {
         "no-unsafe-negation": 2,
         "radix": 2,
         "valid-typeof": 2,
+        "no-var": 2,
+        "prefer-const": 2,
         "no-unused-vars": [2, { "args": "none", "vars": "local" }],
 
         // es2015 features
@@ -76,7 +78,11 @@ module.exports = {
         // spacing details
         "space-infix-ops": 2,
         "space-in-parens": [2, "never"],
-        "space-before-function-paren": [2, "never"],
+        "space-before-function-paren": [2, {
+            "anonymous": "never",
+            "named": "never",
+            "asyncArrow": "always"
+        }],
         "no-whitespace-before-property": 2,
         "keyword-spacing": [2, {
             "overrides": {

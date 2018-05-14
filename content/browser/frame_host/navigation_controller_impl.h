@@ -32,8 +32,7 @@ class NavigationEntryScreenshotManager;
 class SiteInstance;
 struct LoadCommittedDetails;
 
-class CONTENT_EXPORT NavigationControllerImpl
-    : public NON_EXPORTED_BASE(NavigationController) {
+class CONTENT_EXPORT NavigationControllerImpl : public NavigationController {
  public:
   NavigationControllerImpl(
       NavigationControllerDelegate* delegate,
@@ -91,6 +90,9 @@ class CONTENT_EXPORT NavigationControllerImpl
                              bool replace_entry) override;
   bool CanPruneAllButLastCommitted() override;
   void PruneAllButLastCommitted() override;
+  void DeleteNavigationEntries(
+      const DeletionPredicate& deletionPredicate) override;
+
   void ClearAllScreenshots() override;
 
   // Whether this is the initial navigation in an unmodified new tab.  In this
@@ -143,27 +145,27 @@ class CONTENT_EXPORT NavigationControllerImpl
   // so that we know to load URLs that were pending as "lazy" loads.
   void SetActive(bool is_active);
 
-  // Returns true if the given URL would be an in-page navigation (e.g., if the
-  // reference fragment is different, or after a pushState) from the last
+  // Returns true if the given URL would be a same-document navigation (e.g., if
+  // the reference fragment is different, or after a pushState) from the last
   // committed URL in the specified frame. If there is no last committed entry,
-  // then nothing will be in-page.
+  // then nothing will be same-document.
   //
   // Special note: if the URLs are the same, it does NOT automatically count as
-  // an in-page navigation. Neither does an input URL that has no ref, even if
-  // the rest is the same. This may seem weird, but when we're considering
+  // a same-document navigation. Neither does an input URL that has no ref, even
+  // if the rest is the same. This may seem weird, but when we're considering
   // whether a navigation happened without loading anything, the same URL could
   // be a reload, while only a different ref would be in-page (pages can't clear
   // refs without reload, only change to "#" which we don't count as empty).
   //
   // The situation is made murkier by history.replaceState(), which could
-  // provide the same URL as part of an in-page navigation, not a reload. So
-  // we need to let the (untrustworthy) renderer resolve the ambiguity, but
+  // provide the same URL as part of a same-document navigation, not a reload.
+  // So we need to let the (untrustworthy) renderer resolve the ambiguity, but
   // only when the URLs are on the same origin. We rely on |origin|, which
   // matters in cases like about:blank that otherwise look cross-origin.
-  bool IsURLInPageNavigation(const GURL& url,
-                             const url::Origin& origin,
-                             bool renderer_says_in_page,
-                             RenderFrameHost* rfh) const;
+  bool IsURLSameDocumentNavigation(const GURL& url,
+                                   const url::Origin& origin,
+                                   bool renderer_says_same_document,
+                                   RenderFrameHost* rfh) const;
 
   // Sets the SessionStorageNamespace for the given |partition_id|. This is
   // used during initialization of a new NavigationController to allow
@@ -237,12 +239,15 @@ class CONTENT_EXPORT NavigationControllerImpl
   // Causes the controller to load the specified entry. The function assumes
   // ownership of the pointer since it is put in the navigation list.
   // NOTE: Do not pass an entry that the controller already owns!
-  void LoadEntry(std::unique_ptr<NavigationEntryImpl> entry);
+  void LoadEntry(std::unique_ptr<NavigationEntryImpl> entry,
+                 std::unique_ptr<NavigationUIData> navigation_ui_data);
 
   // Identifies which frames need to be navigated for the pending
   // NavigationEntry and instructs their Navigator to navigate them.  Returns
   // whether any frame successfully started a navigation.
-  bool NavigateToPendingEntryInternal(ReloadType reload_type);
+  bool NavigateToPendingEntryInternal(
+      ReloadType reload_type,
+      std::unique_ptr<NavigationUIData> navigation_ui_data);
 
   // Recursively identifies which frames need to be navigated for the pending
   // NavigationEntry, starting at |frame| and exploring its children.  Only used
@@ -300,7 +305,9 @@ class CONTENT_EXPORT NavigationControllerImpl
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params);
 
   // Actually issues the navigation held in pending_entry.
-  void NavigateToPendingEntry(ReloadType reload_type);
+  void NavigateToPendingEntry(
+      ReloadType reload_type,
+      std::unique_ptr<NavigationUIData> navigation_ui_data);
 
   // Allows the derived class to issue notifications that a load has been
   // committed. This will fill in the active entry to the details structure.
@@ -368,10 +375,6 @@ class CONTENT_EXPORT NavigationControllerImpl
   // the memory management.
   NavigationEntryImpl* pending_entry_;
 
-  // Navigations could occur in succession. This field holds the last pending
-  // entry for which we haven't received a response yet.
-  NavigationEntryImpl* last_pending_entry_;
-
   // If a new entry fails loading, details about it are temporarily held here
   // until the error page is shown (or 0 otherwise).
   //
@@ -395,13 +398,6 @@ class CONTENT_EXPORT NavigationControllerImpl
   // temporarily (until the next navigation).  Any index pointing to an entry
   // after the transient entry will become invalid if you navigate forward.
   int transient_entry_index_;
-
-  // The index of the last pending entry if it is in entries, or -1 if it was
-  // created by LoadURL.
-  int last_pending_entry_index_;
-
-  // The index of the last transient entry. Defaults to -1.
-  int last_transient_entry_index_;
 
   // The delegate associated with the controller. Possibly NULL during
   // setup.

@@ -4,7 +4,6 @@
 
 #include <stddef.h>
 
-#include "base/command_line.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -22,9 +21,6 @@
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
-#include "ui/app_list/app_list_item.h"
-#include "ui/app_list/app_list_model.h"
-#include "ui/app_list/app_list_switches.h"
 
 using apps_helper::DisableApp;
 using apps_helper::EnableApp;
@@ -64,11 +60,6 @@ class TwoClientAppListSyncTest : public SyncTest {
   ~TwoClientAppListSyncTest() override {}
 
   // SyncTest
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    SyncTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(app_list::switches::kEnableSyncAppList);
-  }
-
   bool SetupClients() override {
     if (!SyncTest::SetupClients())
       return false;
@@ -137,9 +128,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, StartWithSameApps) {
 // Install some apps on both clients, some on only one client, some on only the
 // other, and sync.  Both clients should end up with all apps, and the app and
 // page ordinals should be identical.
-// Disabled, see http://crbug.com/434438 for details.
-IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest,
-                       DISABLED_StartWithDifferentApps) {
+IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, StartWithDifferentApps) {
   ASSERT_TRUE(SetupClients());
 
   int i = 0;
@@ -378,14 +367,6 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, Move) {
   AwaitQuiescenceAndInstallAppsPendingForSync();
 
   ASSERT_TRUE(AllProfilesHaveSameAppList());
-
-  size_t first = kNumDefaultApps;
-  SyncAppListHelper::GetInstance()->MoveApp(
-      GetProfile(0), first + 1, first + 2);
-
-  ASSERT_TRUE(AwaitQuiescence());
-
-  ASSERT_TRUE(AllProfilesHaveSameAppList());
 }
 
 // Install a Default App on both clients, then sync. Remove the app on one
@@ -409,7 +390,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, RemoveDefault) {
   // Flag Default app in Profile 1.
   extensions::ExtensionPrefs::Get(GetProfile(1))
       ->UpdateExtensionPref(default_app_id, "was_installed_by_default",
-                            base::MakeUnique<base::Value>(true));
+                            std::make_unique<base::Value>(true));
 
   // Remove the default app in Profile 0 and verifier, ensure it was removed
   // in Profile 1.
@@ -449,8 +430,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, MoveToFolder) {
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
   const int kNumApps = 5;
+  std::vector<std::string> app_ids;
   for (int i = 0; i < kNumApps; ++i) {
-    InstallApp(GetProfile(0), i);
+    app_ids.push_back(InstallApp(GetProfile(0), i));
     InstallApp(GetProfile(1), i);
   }
   ASSERT_TRUE(AwaitQuiescence());
@@ -458,8 +440,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, MoveToFolder) {
 
   size_t index = 2u;
   std::string folder_id = "Folder 0";
-  SyncAppListHelper::GetInstance()->MoveAppToFolder(
-      GetProfile(0), index, folder_id);
+  SyncAppListHelper::GetInstance()->MoveAppToFolder(GetProfile(0),
+                                                    app_ids[index], folder_id);
 
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppList());
@@ -470,8 +452,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, FolderAddRemove) {
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
   const int kNumApps = 10;
+  std::vector<std::string> app_ids;
   for (int i = 0; i < kNumApps; ++i) {
-    InstallApp(GetProfile(0), i);
+    app_ids.push_back(InstallApp(GetProfile(0), i));
     InstallApp(GetProfile(1), i);
   }
   ASSERT_TRUE(AwaitQuiescence());
@@ -485,22 +468,22 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, FolderAddRemove) {
   size_t item_index = kNumDefaultApps;
   for (size_t i = 0; i < kNumAppsToMove; ++i) {
     SyncAppListHelper::GetInstance()->MoveAppToFolder(
-        GetProfile(0), item_index, folder_id);
+        GetProfile(0), app_ids[item_index], folder_id);
   }
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
   // Remove one app from the folder.
-  SyncAppListHelper::GetInstance()->MoveAppFromFolder(
-      GetProfile(0), 0, folder_id);
+  SyncAppListHelper::GetInstance()->MoveAppFromFolder(GetProfile(0), app_ids[0],
+                                                      folder_id);
 
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
   // Remove remaining apps from the folder (deletes folder).
   for (size_t i = 1; i < kNumAppsToMove; ++i) {
-    SyncAppListHelper::GetInstance()->MoveAppFromFolder(
-        GetProfile(0), 0, folder_id);
+    SyncAppListHelper::GetInstance()->MoveAppFromFolder(GetProfile(0),
+                                                        app_ids[0], folder_id);
   }
 
   ASSERT_TRUE(AwaitQuiescence());
@@ -509,7 +492,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, FolderAddRemove) {
   // Move apps back to a (new) folder.
   for (size_t i = 0; i < kNumAppsToMove; ++i) {
     SyncAppListHelper::GetInstance()->MoveAppToFolder(
-        GetProfile(0), item_index, folder_id);
+        GetProfile(0), app_ids[item_index], folder_id);
   }
 
   ASSERT_TRUE(AwaitQuiescence());

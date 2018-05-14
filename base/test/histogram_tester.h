@@ -25,12 +25,15 @@ class HistogramSamples;
 // HistogramTester provides a simple interface for examining histograms, UMA
 // or otherwise. Tests can use this interface to verify that histogram data is
 // getting logged as intended.
+//
+// Note: When using this class from a browser test, one might have to call
+// SubprocessMetricsProvider::MergeHistogramDeltasForTesting() to sync the
+// histogram data between the renderer and browser processes.
 class HistogramTester {
  public:
   using CountsMap = std::map<std::string, HistogramBase::Count>;
 
-  // The constructor will call StatisticsRecorder::Initialize() for you. Also,
-  // this takes a snapshot of all current histograms counts.
+  // Takes a snapshot of all current histograms counts.
   HistogramTester();
   ~HistogramTester();
 
@@ -40,6 +43,13 @@ class HistogramTester {
   void ExpectUniqueSample(const std::string& name,
                           HistogramBase::Sample sample,
                           HistogramBase::Count expected_count) const;
+  template <typename T>
+  void ExpectUniqueSample(const std::string& name,
+                          T sample,
+                          HistogramBase::Count expected_count) const {
+    ExpectUniqueSample(name, static_cast<HistogramBase::Sample>(sample),
+                       expected_count);
+  }
 
   // We know the exact number of samples in a bucket, but other buckets may
   // have samples as well. Measures the diff from the snapshot taken when this

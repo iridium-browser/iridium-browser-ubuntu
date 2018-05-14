@@ -28,6 +28,7 @@
 #define SelectionModifier_h
 
 #include "base/macros.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/VisibleSelection.h"
 #include "platform/LayoutUnit.h"
 #include "platform/wtf/Allocator.h"
@@ -38,6 +39,7 @@ class LocalFrame;
 
 enum class SelectionModifyAlteration { kMove, kExtend };
 enum class SelectionModifyVerticalDirection { kUp, kDown };
+enum class SelectionModifyDirection { kBackward, kForward, kLeft, kRight };
 
 class SelectionModifier {
   STACK_ALLOCATED();
@@ -45,37 +47,54 @@ class SelectionModifier {
  public:
   // |frame| is used for providing settings.
   SelectionModifier(const LocalFrame& /* frame */,
-                    const VisibleSelection&,
+                    const SelectionInDOMTree&,
                     LayoutUnit);
-  SelectionModifier(const LocalFrame&, const VisibleSelection&);
+  SelectionModifier(const LocalFrame&, const SelectionInDOMTree&);
 
   LayoutUnit XPosForVerticalArrowNavigation() const {
     return x_pos_for_vertical_arrow_navigation_;
   }
-  const VisibleSelection& Selection() const { return selection_; }
 
-  bool Modify(SelectionModifyAlteration, SelectionDirection, TextGranularity);
+  // TODO(editing-dev): We should rename |Selection()| to
+  // |ComputeVisibleSelectionDeprecated()| and introduce |GetSelection()|
+  // to return |current_selection_|.
+  VisibleSelection Selection() const;
+
+  bool Modify(SelectionModifyAlteration,
+              SelectionModifyDirection,
+              TextGranularity);
   bool ModifyWithPageGranularity(SelectionModifyAlteration,
                                  unsigned vertical_distance,
                                  SelectionModifyVerticalDirection);
+  void SetSelectionIsDirectional(bool selection_is_directional) {
+    selection_is_directional_ = selection_is_directional;
+  }
 
  private:
-  LocalFrame* GetFrame() const { return frame_; }
+  const LocalFrame& GetFrame() const { return *frame_; }
 
-  static bool ShouldAlwaysUseDirectionalSelection(LocalFrame*);
+  static bool ShouldAlwaysUseDirectionalSelection(const LocalFrame&);
+  VisibleSelection PrepareToModifySelection(SelectionModifyAlteration,
+                                            SelectionModifyDirection) const;
   TextDirection DirectionOfEnclosingBlock() const;
   TextDirection DirectionOfSelection() const;
   VisiblePosition PositionForPlatform(bool is_get_start) const;
   VisiblePosition StartForPlatform() const;
   VisiblePosition EndForPlatform() const;
   LayoutUnit LineDirectionPointForBlockDirectionNavigation(const Position&);
+  VisiblePosition ComputeModifyPosition(SelectionModifyAlteration,
+                                        SelectionModifyDirection,
+                                        TextGranularity);
   VisiblePosition ModifyExtendingRight(TextGranularity);
+  VisiblePosition ModifyExtendingRightInternal(TextGranularity);
   VisiblePosition ModifyExtendingForward(TextGranularity);
   VisiblePosition ModifyExtendingForwardInternal(TextGranularity);
   VisiblePosition ModifyMovingRight(TextGranularity);
   VisiblePosition ModifyMovingForward(TextGranularity);
   VisiblePosition ModifyExtendingLeft(TextGranularity);
+  VisiblePosition ModifyExtendingLeftInternal(TextGranularity);
   VisiblePosition ModifyExtendingBackward(TextGranularity);
+  VisiblePosition ModifyExtendingBackwardInternal(TextGranularity);
   VisiblePosition ModifyMovingLeft(TextGranularity);
   VisiblePosition ModifyMovingBackward(TextGranularity);
   VisiblePosition NextWordPositionForPlatform(const VisiblePosition&);
@@ -87,9 +106,17 @@ class SelectionModifier {
   static VisiblePosition RightWordPosition(const VisiblePosition&,
                                            bool skips_space_when_moving_right);
 
-  Member<LocalFrame> frame_;
+  Member<const LocalFrame> frame_;
+  // TODO(editing-dev): We should get rid of |selection_| once we change
+  // all member functions not to use |selection_|.
+  // |selection_| is used as implicit parameter or a cache instead of pass it.
   VisibleSelection selection_;
+  // TODO(editing-dev): We should introduce |GetSelection()| to return
+  // |result_| to replace |Selection().AsSelection()|.
+  // |current_selection_| holds initial value and result of |Modify()|.
+  SelectionInDOMTree current_selection_;
   LayoutUnit x_pos_for_vertical_arrow_navigation_;
+  bool selection_is_directional_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(SelectionModifier);
 };

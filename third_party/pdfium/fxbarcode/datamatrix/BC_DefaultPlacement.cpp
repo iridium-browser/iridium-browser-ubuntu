@@ -23,7 +23,7 @@
 #include "fxbarcode/datamatrix/BC_DefaultPlacement.h"
 #include "fxbarcode/datamatrix/BC_Encoder.h"
 
-CBC_DefaultPlacement::CBC_DefaultPlacement(CFX_WideString codewords,
+CBC_DefaultPlacement::CBC_DefaultPlacement(WideString codewords,
                                            int32_t numcols,
                                            int32_t numrows) {
   m_codewords = codewords;
@@ -107,7 +107,7 @@ void CBC_DefaultPlacement::module(int32_t row,
     col += m_numcols;
     row += 4 - ((m_numcols + 4) % 8);
   }
-  int32_t v = m_codewords.GetAt(pos);
+  int32_t v = m_codewords[pos];
   v &= 1 << (8 - bit);
   setBit(col, row, v != 0);
 }

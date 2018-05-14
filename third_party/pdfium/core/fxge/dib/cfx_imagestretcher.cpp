@@ -42,13 +42,12 @@ std::tuple<int, int, int, int> CmykDecode(const uint32_t cmyk) {
 
 }  // namespace
 
-CFX_ImageStretcher::CFX_ImageStretcher(
-    IFX_ScanlineComposer* pDest,
-    const CFX_RetainPtr<CFX_DIBSource>& pSource,
-    int dest_width,
-    int dest_height,
-    const FX_RECT& bitmap_rect,
-    uint32_t flags)
+CFX_ImageStretcher::CFX_ImageStretcher(IFX_ScanlineComposer* pDest,
+                                       const RetainPtr<CFX_DIBSource>& pSource,
+                                       int dest_width,
+                                       int dest_height,
+                                       const FX_RECT& bitmap_rect,
+                                       uint32_t flags)
     : m_pDest(pDest),
       m_pSource(pSource),
       m_Flags(flags),
@@ -125,7 +124,7 @@ bool CFX_ImageStretcher::Start() {
   return StartStretch();
 }
 
-bool CFX_ImageStretcher::Continue(IFX_Pause* pPause) {
+bool CFX_ImageStretcher::Continue(IFX_PauseIndicator* pPause) {
   if (m_Flags & FXDIB_DOWNSAMPLE)
     return ContinueQuickStretch(pPause);
   return ContinueStretch(pPause);
@@ -143,7 +142,7 @@ bool CFX_ImageStretcher::StartStretch() {
   return true;
 }
 
-bool CFX_ImageStretcher::ContinueStretch(IFX_Pause* pPause) {
+bool CFX_ImageStretcher::ContinueStretch(IFX_PauseIndicator* pPause) {
   return m_pStretchEngine && m_pStretchEngine->Continue(pPause);
 }
 
@@ -172,7 +171,7 @@ bool CFX_ImageStretcher::StartQuickStretch() {
   return true;
 }
 
-bool CFX_ImageStretcher::ContinueQuickStretch(IFX_Pause* pPause) {
+bool CFX_ImageStretcher::ContinueQuickStretch(IFX_PauseIndicator* pPause) {
   if (!m_pScanline)
     return false;
 

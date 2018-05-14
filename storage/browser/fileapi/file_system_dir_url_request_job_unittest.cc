@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <stdint.h>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -11,7 +12,6 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -58,7 +58,7 @@ bool TestAutoMountForURLRequest(
     const net::URLRequest* /*url_request*/,
     const storage::FileSystemURL& filesystem_url,
     const std::string& storage_domain,
-    const base::Callback<void(base::File::Error result)>& callback) {
+    base::OnceCallback<void(base::File::Error result)> callback) {
   if (storage_domain != "automount")
     return false;
 
@@ -72,9 +72,9 @@ bool TestAutoMountForURLRequest(
         storage::kFileSystemTypeTest,
         storage::FileSystemMountOption(),
         base::FilePath());
-    callback.Run(base::File::FILE_OK);
+    std::move(callback).Run(base::File::FILE_OK);
   } else {
-    callback.Run(base::File::FILE_ERROR_NOT_FOUND);
+    std::move(callback).Run(base::File::FILE_ERROR_NOT_FOUND);
   }
   return true;
 }
@@ -137,11 +137,10 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
         CreateFileSystemContextForTesting(NULL, temp_dir_.GetPath());
 
     file_system_context_->OpenFileSystem(
-        GURL("http://remote/"),
-        storage::kFileSystemTypeTemporary,
+        GURL("http://remote/"), storage::kFileSystemTypeTemporary,
         storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
-        base::Bind(&FileSystemDirURLRequestJobTest::OnOpenFileSystem,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&FileSystemDirURLRequestJobTest::OnOpenFileSystem,
+                       weak_factory_.GetWeakPtr()));
     base::RunLoop().RunUntilIdle();
   }
 
@@ -157,7 +156,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
 
     std::vector<std::unique_ptr<storage::FileSystemBackend>>
         additional_providers;
-    additional_providers.push_back(base::MakeUnique<TestFileSystemBackend>(
+    additional_providers.push_back(std::make_unique<TestFileSystemBackend>(
         base::ThreadTaskRunnerHandle::Get().get(), *mnt_point));
 
     std::vector<storage::URLRequestAutoMountHandler> handlers;

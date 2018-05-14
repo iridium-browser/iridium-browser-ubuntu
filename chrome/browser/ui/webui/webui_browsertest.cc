@@ -3,20 +3,26 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/child_process_security_policy.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -44,7 +50,7 @@ IN_PROC_BROWSER_TEST_F(WebUIImplBrowserTest, ForceSwapOnDifferenteWebUITypes) {
   ui_test_utils::NavigateToURL(browser(), web_ui_url);
   EXPECT_TRUE(
       content::ChildProcessSecurityPolicy::GetInstance()->HasWebUIBindings(
-          web_contents->GetRenderProcessHost()->GetID()));
+          web_contents->GetMainFrame()->GetProcess()->GetID()));
 
   // Capture the SiteInstance before navigating for later comparison.
   scoped_refptr<content::SiteInstance> orig_site_instance(
@@ -60,10 +66,10 @@ IN_PROC_BROWSER_TEST_F(WebUIImplBrowserTest, ForceSwapOnDifferenteWebUITypes) {
   EXPECT_NE(orig_site_instance, web_contents->GetSiteInstance());
   EXPECT_TRUE(
       content::ChildProcessSecurityPolicy::GetInstance()->HasWebUIBindings(
-          web_contents->GetRenderProcessHost()->GetID()));
+          web_contents->GetMainFrame()->GetProcess()->GetID()));
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIImplBrowserTest, InPageNavigationsAndReload) {
+IN_PROC_BROWSER_TEST_F(WebUIImplBrowserTest, SameDocumentNavigationsAndReload) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUITermsURL));
 
   content::WebUIMessageHandler* test_handler = new TestWebUIMessageHandler;
@@ -91,4 +97,19 @@ IN_PROC_BROWSER_TEST_F(WebUIImplBrowserTest, InPageNavigationsAndReload) {
 
   // Verify that after a reload, the test handler has been disallowed.
   EXPECT_FALSE(test_handler->IsJavascriptAllowed());
+}
+
+// Tests that navigating to chrome://connection-help displays the proper help
+// page.
+IN_PROC_BROWSER_TEST_F(WebUIImplBrowserTest, ConnectionHelpUI) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kBundledConnectionHelpFeature);
+  ui_test_utils::NavigateToURL(browser(),
+                               GURL(chrome::kChromeUIConnectionHelpURL));
+  content::WaitForLoadStop(
+      browser()->tab_strip_model()->GetActiveWebContents());
+  base::string16 tab_title;
+  ui_test_utils::GetCurrentTabTitle(browser(), &tab_title);
+  EXPECT_EQ(base::UTF16ToUTF8(tab_title),
+            l10n_util::GetStringUTF8(IDS_CONNECTION_HELP_TITLE));
 }

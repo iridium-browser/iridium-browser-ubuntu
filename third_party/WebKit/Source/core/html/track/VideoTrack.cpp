@@ -4,7 +4,7 @@
 
 #include "core/html/track/VideoTrack.h"
 
-#include "core/html/HTMLMediaElement.h"
+#include "core/html/media/HTMLMediaElement.h"
 
 namespace blink {
 
@@ -16,9 +16,10 @@ VideoTrack::VideoTrack(const String& id,
     : TrackBase(WebMediaPlayer::kVideoTrack, kind, label, language, id),
       selected_(selected) {}
 
-VideoTrack::~VideoTrack() {}
+VideoTrack::~VideoTrack() = default;
 
-DEFINE_TRACE(VideoTrack) {
+void VideoTrack::Trace(blink::Visitor* visitor) {
+  ScriptWrappable::Trace(visitor);
   TrackBase::Trace(visitor);
 }
 

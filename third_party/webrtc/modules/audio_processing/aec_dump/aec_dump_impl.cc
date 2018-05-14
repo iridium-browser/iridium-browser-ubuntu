@@ -10,12 +10,12 @@
 
 #include <utility>
 
-#include "webrtc/modules/audio_processing/aec_dump/aec_dump_impl.h"
+#include "modules/audio_processing/aec_dump/aec_dump_impl.h"
 
-#include "webrtc/modules/audio_processing/aec_dump/aec_dump_factory.h"
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/event.h"
-#include "webrtc/rtc_base/ptr_util.h"
+#include "modules/audio_processing/aec_dump/aec_dump_factory.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/event.h"
+#include "rtc_base/ptr_util.h"
 
 namespace webrtc {
 
@@ -94,11 +94,13 @@ void AecDumpImpl::WriteInitMessage(
   worker_queue_->PostTask(std::unique_ptr<rtc::QueuedTask>(std::move(task)));
 }
 
-void AecDumpImpl::AddCaptureStreamInput(const FloatAudioFrame& src) {
+void AecDumpImpl::AddCaptureStreamInput(
+    const AudioFrameView<const float>& src) {
   capture_stream_info_.AddInput(src);
 }
 
-void AecDumpImpl::AddCaptureStreamOutput(const FloatAudioFrame& src) {
+void AecDumpImpl::AddCaptureStreamOutput(
+    const AudioFrameView<const float>& src) {
   capture_stream_info_.AddOutput(src);
 }
 
@@ -117,7 +119,6 @@ void AecDumpImpl::AddAudioProcessingState(const AudioProcessingState& state) {
 void AecDumpImpl::WriteCaptureStreamMessage() {
   auto task = capture_stream_info_.GetTask();
   RTC_DCHECK(task);
-  std::move(task);
   worker_queue_->PostTask(std::unique_ptr<rtc::QueuedTask>(std::move(task)));
   capture_stream_info_.SetTask(CreateWriteToFileTask());
 }
@@ -135,7 +136,8 @@ void AecDumpImpl::WriteRenderStreamMessage(const AudioFrame& frame) {
   worker_queue_->PostTask(std::unique_ptr<rtc::QueuedTask>(std::move(task)));
 }
 
-void AecDumpImpl::WriteRenderStreamMessage(const FloatAudioFrame& src) {
+void AecDumpImpl::WriteRenderStreamMessage(
+    const AudioFrameView<const float>& src) {
   auto task = CreateWriteToFileTask();
   auto* event = task->GetEvent();
 

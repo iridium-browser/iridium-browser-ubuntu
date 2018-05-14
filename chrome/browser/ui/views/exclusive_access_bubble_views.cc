@@ -41,12 +41,14 @@
 ExclusiveAccessBubbleViews::ExclusiveAccessBubbleViews(
     ExclusiveAccessBubbleViewsContext* context,
     const GURL& url,
-    ExclusiveAccessBubbleType bubble_type)
+    ExclusiveAccessBubbleType bubble_type,
+    ExclusiveAccessBubbleHideCallback bubble_first_hide_callback)
     : ExclusiveAccessBubble(context->GetExclusiveAccessManager(),
                             url,
                             bubble_type),
       bubble_view_context_(context),
       popup_(nullptr),
+      bubble_first_hide_callback_(std::move(bubble_first_hide_callback)),
       animation_(new gfx::SlideAnimation(this)) {
   // With the simplified fullscreen UI flag, initially hide the bubble;
   // otherwise, initially show it.
@@ -89,6 +91,8 @@ ExclusiveAccessBubbleViews::ExclusiveAccessBubbleViews(
 }
 
 ExclusiveAccessBubbleViews::~ExclusiveAccessBubbleViews() {
+  RunHideCallbackIfNeeded(ExclusiveAccessBubbleHideReason::kInterrupted);
+
   popup_->RemoveObserver(this);
 
   // This is tricky.  We may be in an ATL message handler stack, in which case
@@ -106,10 +110,16 @@ ExclusiveAccessBubbleViews::~ExclusiveAccessBubbleViews() {
 
 void ExclusiveAccessBubbleViews::UpdateContent(
     const GURL& url,
-    ExclusiveAccessBubbleType bubble_type) {
+    ExclusiveAccessBubbleType bubble_type,
+    ExclusiveAccessBubbleHideCallback bubble_first_hide_callback) {
   DCHECK_NE(EXCLUSIVE_ACCESS_BUBBLE_TYPE_NONE, bubble_type);
   if (bubble_type_ == bubble_type && url_ == url)
     return;
+
+  // Bubble maybe be re-used after timeout.
+  RunHideCallbackIfNeeded(ExclusiveAccessBubbleHideReason::kInterrupted);
+
+  bubble_first_hide_callback_ = std::move(bubble_first_hide_callback);
 
   url_ = url;
   bubble_type_ = bubble_type;
@@ -133,12 +143,22 @@ void ExclusiveAccessBubbleViews::RepositionIfVisible() {
     UpdateBounds();
 }
 
+void ExclusiveAccessBubbleViews::HideImmediately() {
+  if (!popup_->IsVisible())
+    return;
+
+  RunHideCallbackIfNeeded(ExclusiveAccessBubbleHideReason::kInterrupted);
+
+  animation_->SetSlideDuration(kQuickSlideOutDurationMs);
+  animation_->Hide();
+}
+
 views::View* ExclusiveAccessBubbleViews::GetView() {
   return view_;
 }
 
 void ExclusiveAccessBubbleViews::UpdateMouseWatcher() {
-  bool should_watch_mouse = popup_->IsVisible() || CanMouseTriggerSlideIn();
+  bool should_watch_mouse = popup_->IsVisible() || CanTriggerOnMouse();
 
   if (should_watch_mouse == IsWatchingMouse())
     return;
@@ -257,6 +277,12 @@ bool ExclusiveAccessBubbleViews::IsWindowActive() {
 }
 
 void ExclusiveAccessBubbleViews::Hide() {
+  // This function is guarded by the |ExclusiveAccessBubble::hide_timeout_|
+  // timer, so the bubble has been displayed for at least
+  // |ExclusiveAccessBubble::kInitialDelayMs|.
+  DCHECK(!IsHideTimeoutRunning());
+  RunHideCallbackIfNeeded(ExclusiveAccessBubbleHideReason::kTimeout);
+
   animation_->SetSlideDuration(kSlideOutDurationMs);
   animation_->Hide();
 }
@@ -270,8 +296,8 @@ bool ExclusiveAccessBubbleViews::IsAnimating() {
   return animation_->is_animating();
 }
 
-bool ExclusiveAccessBubbleViews::CanMouseTriggerSlideIn() const {
-  return !bubble_view_context_->IsImmersiveModeEnabled();
+bool ExclusiveAccessBubbleViews::CanTriggerOnMouse() const {
+  return bubble_view_context_->CanTriggerOnMouse();
 }
 
 void ExclusiveAccessBubbleViews::Observe(
@@ -308,4 +334,10 @@ void ExclusiveAccessBubbleViews::OnWidgetVisibilityChanged(
 void ExclusiveAccessBubbleViews::LinkClicked(views::Link* link,
                                              int event_flags) {
   ExitExclusiveAccess();
+}
+
+void ExclusiveAccessBubbleViews::RunHideCallbackIfNeeded(
+    ExclusiveAccessBubbleHideReason reason) {
+  if (bubble_first_hide_callback_)
+    std::move(bubble_first_hide_callback_).Run(reason);
 }

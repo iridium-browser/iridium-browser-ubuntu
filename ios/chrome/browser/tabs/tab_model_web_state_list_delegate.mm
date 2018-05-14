@@ -21,14 +21,14 @@ TabModelWebStateListDelegate::TabModelWebStateListDelegate(TabModel* tab_model)
 TabModelWebStateListDelegate::~TabModelWebStateListDelegate() = default;
 
 void TabModelWebStateListDelegate::WillAddWebState(web::WebState* web_state) {
-  // Some Tab objects are created outside of TabModel, avoid recreating the
-  // tab helpers for those Tab objects.
-  if (!LegacyTabHelper::FromWebState(web_state))
-    AttachTabHelpers(web_state);
+  // Unconditionally call AttachTabHelper even for pre-rendered WebState as
+  // the method is idempotent and this ensure that any WebState in a TabModel
+  // has all the expected tab helpers.
+  AttachTabHelpers(web_state, /*for_prerender=*/false);
 
   DCHECK(LegacyTabHelper::FromWebState(web_state));
   Tab* tab = LegacyTabHelper::GetTabForWebState(web_state);
-  [tab setParentTabModel:tab_model_.get()];
+  [tab setParentTabModel:tab_model_];
 }
 
 void TabModelWebStateListDelegate::WebStateDetached(web::WebState* web_state) {

@@ -7,8 +7,8 @@
 
 // QuicStreamSequencerBuffer is a circular stream buffer with random write and
 // in-sequence read. It consists of a vector of pointers pointing
-// to memory blocks created as needed and a list of Gaps to indicate
-// the missing data between the data already written into the buffer.
+// to memory blocks created as needed and an interval set recording received
+// data.
 // - Data are written in with offset indicating where it should be in the
 // stream, and the buffer grown as needed (up to the maximum buffer capacity),
 // without expensive copying (extra blocks are allocated).
@@ -67,6 +67,7 @@
 #include "base/macros.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/platform/api/quic_export.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
@@ -121,14 +122,14 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
                              QuicStringPiece data,
                              QuicTime timestamp,
                              size_t* bytes_buffered,
-                             std::string* error_details);
+                             QuicString* error_details);
 
   // Reads from this buffer into given iovec array, up to number of iov_len
   // iovec objects and returns the number of bytes read.
   QuicErrorCode Readv(const struct iovec* dest_iov,
                       size_t dest_count,
                       size_t* bytes_read,
-                      std::string* error_details);
+                      QuicString* error_details);
 
   // Returns the readable region of valid data in iovec format. The readable
   // region is the buffer region where there is valid data not yet read by
@@ -167,8 +168,18 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
   // Count how many bytes are in buffer at this moment.
   size_t BytesBuffered() const;
 
+  // Returns number of bytes available to be read out.
+  size_t ReadableBytes() const;
+
  private:
   friend class test::QuicStreamSequencerBufferPeer;
+
+  // Copies |data| to blocks_, sets |bytes_copy|. Returns true if the copy is
+  // successful. Otherwise, sets |error_details| and returns false.
+  bool CopyStreamData(QuicStreamOffset offset,
+                      QuicStringPiece data,
+                      size_t* bytes_copy,
+                      QuicString* error_details);
 
   // Dispose the given buffer block.
   // After calling this method, blocks_[index] is set to nullptr
@@ -177,17 +188,11 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
   bool RetireBlock(size_t index);
 
   // Should only be called after the indexed block is read till the end of the
-  // block or a gap has been reached.
+  // block or missing data has been reached.
   // If the block at |block_index| contains no buffered data, the block
   // should be retired.
   // Return false on success, or false otherwise.
   bool RetireBlockIfEmpty(size_t block_index);
-
-  // Called within OnStreamData() to update the gap OnStreamData() writes into
-  // (remove, split or change begin/end offset).
-  void UpdateGapList(std::list<Gap>::iterator gap_with_new_data_written,
-                     QuicStreamOffset start_offset,
-                     size_t bytes_written);
 
   // Calculate the capacity of block at specified index.
   // Return value should be either kBlockSizeBytes for non-trailing blocks and
@@ -207,8 +212,11 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
   // Get the index of the logical 1st block to start next read.
   size_t NextBlockToRead() const;
 
-  // Returns number of bytes available to be read out.
-  size_t ReadableBytes() const;
+  // Returns offset of first missing byte.
+  QuicStreamOffset FirstMissingByte() const;
+
+  // Returns offset of highest received byte + 1.
+  QuicStreamOffset NextExpectedByte() const;
 
   // Called after Readv() and MarkConsumed() to keep frame_arrival_time_map_
   // up to date.
@@ -217,10 +225,10 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
   void UpdateFrameArrivalMap(QuicStreamOffset offset);
 
   // Return |gaps_| as a string: [1024, 1500) [1800, 2048)... for debugging.
-  std::string GapsDebugString();
+  QuicString GapsDebugString();
 
   // Return all received frames as a string in same format as GapsDebugString();
-  std::string ReceivedFramesDebugString();
+  QuicString ReceivedFramesDebugString();
 
   // The maximum total capacity of this buffer in byte, as constructed.
   const size_t max_buffer_capacity_bytes_;
@@ -231,9 +239,6 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
   // Number of bytes read out of buffer.
   QuicStreamOffset total_bytes_read_;
 
-  // Contains Gaps which represents currently missing data.
-  std::list<Gap> gaps_;
-
   // An ordered, variable-length list of blocks, with the length limited
   // such that the number of blocks never exceeds blocks_count_.
   // Each list entry can hold up to kBlockSizeBytes bytes.
@@ -243,12 +248,16 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
   size_t num_bytes_buffered_;
 
   // Stores all the buffered frames' start offset, length and arrival time.
+  // TODO(fayang): Remove this as it is obsolete.
   std::map<QuicStreamOffset, FrameInfo> frame_arrival_time_map_;
 
   // For debugging use after free, assigned to 123456 in constructor and 654321
   // in destructor. As long as it's not 123456, this means either use after free
   // or memory corruption.
   int32_t destruction_indicator_;
+
+  // Currently received data.
+  QuicIntervalSet<QuicStreamOffset> bytes_received_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicStreamSequencerBuffer);
 };

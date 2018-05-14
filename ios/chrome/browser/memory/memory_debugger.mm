@@ -44,10 +44,10 @@ const CGFloat kPadding = 10;
   UITextField* _refreshField;
   UITextField* _continuousMemoryWarningField;
 
-  // A place to store the artifical memory bloat.
+  // A place to store the artificial memory bloat.
   std::unique_ptr<uint8_t> _bloat;
 
-  // Distance the view was pushed up to accomodate the keyboard.
+  // Distance the view was pushed up to accommodate the keyboard.
   CGFloat _keyboardOffset;
 
   // The current orientation of the device.
@@ -73,10 +73,6 @@ const CGFloat kPadding = 10;
 - (void)invalidateTimers {
   [_refreshTimer invalidate];
   [_memoryWarningTimer invalidate];
-}
-
-- (void)dealloc {
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 #pragma mark UIView methods

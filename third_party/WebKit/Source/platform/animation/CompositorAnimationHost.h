@@ -31,6 +31,15 @@ class PLATFORM_EXPORT CompositorAnimationHost {
   void AdjustImplOnlyScrollOffsetAnimation(CompositorElementId,
                                            const gfx::Vector2dF& adjustment);
   void TakeOverImplOnlyScrollOffsetAnimation(CompositorElementId);
+  void SetAnimationCounts(size_t total_animations_count,
+                          size_t main_thread_compositable_animations_count,
+                          bool current_frame_had_raf,
+                          bool next_frame_has_pending_raf);
+  size_t GetMainThreadAnimationsCountForTesting();
+  size_t GetMainThreadCompositableAnimationsCountForTesting();
+  size_t GetCompositedAnimationsCountForTesting();
+  bool CurrentFrameHadRAFForTesting();
+  bool NextFrameHasPendingRAFForTesting();
 
  private:
   cc::AnimationHost* animation_host_;

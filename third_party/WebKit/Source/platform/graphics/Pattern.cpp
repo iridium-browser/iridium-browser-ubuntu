@@ -37,12 +37,13 @@
 
 namespace blink {
 
-PassRefPtr<Pattern> Pattern::CreateImagePattern(PassRefPtr<Image> tile_image,
-                                                RepeatMode repeat_mode) {
+scoped_refptr<Pattern> Pattern::CreateImagePattern(
+    scoped_refptr<Image> tile_image,
+    RepeatMode repeat_mode) {
   return ImagePattern::Create(std::move(tile_image), repeat_mode);
 }
 
-PassRefPtr<Pattern> Pattern::CreatePaintRecordPattern(
+scoped_refptr<Pattern> Pattern::CreatePaintRecordPattern(
     sk_sp<PaintRecord> record,
     const FloatRect& record_bounds,
     RepeatMode repeat_mode) {
@@ -52,8 +53,7 @@ PassRefPtr<Pattern> Pattern::CreatePaintRecordPattern(
 
 Pattern::Pattern(RepeatMode repeat_mode) : repeat_mode_(repeat_mode) {}
 
-Pattern::~Pattern() {
-}
+Pattern::~Pattern() = default;
 
 void Pattern::ApplyToFlags(PaintFlags& flags, const SkMatrix& local_matrix) {
   if (!cached_shader_ || IsLocalMatrixChanged(local_matrix))

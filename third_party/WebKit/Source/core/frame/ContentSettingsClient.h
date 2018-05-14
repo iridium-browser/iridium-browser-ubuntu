@@ -10,6 +10,8 @@
 #include "core/CoreExport.h"
 #include "platform/heap/Heap.h"
 #include "platform/wtf/Forward.h"
+#include "platform/wtf/Time.h"
+#include "public/platform/WebClientHintsType.h"
 
 namespace blink {
 
@@ -17,6 +19,7 @@ class ContentSettingCallbacks;
 class KURL;
 class SecurityOrigin;
 class WebContentSettingsClient;
+struct WebEnabledClientHints;
 
 // This class provides the content settings information which tells
 // whether each feature is allowed. Most of the methods return the
@@ -40,7 +43,7 @@ class CORE_EXPORT ContentSettingsClient {
   void RequestFileSystemAccessAsync(std::unique_ptr<ContentSettingCallbacks>);
 
   // Controls whether access to File System is allowed.
-  bool AllowIndexedDB(const String& name, SecurityOrigin*);
+  bool AllowIndexedDB(const String& name, const SecurityOrigin*);
 
   // Controls whether scripts are allowed to execute.
   bool AllowScript(bool enabled_per_settings);
@@ -48,12 +51,15 @@ class CORE_EXPORT ContentSettingsClient {
   // Controls whether scripts loaded from the given URL are allowed to execute.
   bool AllowScriptFromSource(bool enabled_per_settings, const KURL&);
 
+  // Retrieves the client hints that should be attached to the request for the
+  // given URL.
+  void GetAllowedClientHintsFromSource(const KURL&, WebEnabledClientHints*);
   // Controls whether images are allowed.
   bool AllowImage(bool enabled_per_settings, const KURL&);
 
   // Controls whether insecure scripts are allowed to execute for this frame.
   bool AllowRunningInsecureContent(bool enabled_per_settings,
-                                   SecurityOrigin*,
+                                   const SecurityOrigin*,
                                    const KURL&);
 
   // Controls whether HTML5 Web Storage is allowed for this frame.
@@ -89,6 +95,12 @@ class CORE_EXPORT ContentSettingsClient {
 
   // This callback is similar, but for plugins.
   void DidNotAllowPlugins();
+
+  // Called to persist the client hint preferences received when |url| was
+  // fetched. The preferences should be persisted for |duration|.
+  void PersistClientHints(const WebEnabledClientHints&,
+                          TimeDelta duration,
+                          const KURL&);
 
  private:
   WebContentSettingsClient* client_ = nullptr;

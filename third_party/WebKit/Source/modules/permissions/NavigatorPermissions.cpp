@@ -9,20 +9,18 @@
 
 namespace blink {
 
-NavigatorPermissions::NavigatorPermissions() {}
+NavigatorPermissions::NavigatorPermissions() = default;
 
 // static
-const char* NavigatorPermissions::SupplementName() {
-  return "NavigatorPermissions";
-}
+const char NavigatorPermissions::kSupplementName[] = "NavigatorPermissions";
 
 // static
 NavigatorPermissions& NavigatorPermissions::From(Navigator& navigator) {
-  NavigatorPermissions* supplement = static_cast<NavigatorPermissions*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  NavigatorPermissions* supplement =
+      Supplement<Navigator>::From<NavigatorPermissions>(navigator);
   if (!supplement) {
     supplement = new NavigatorPermissions();
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
 }
@@ -35,7 +33,7 @@ Permissions* NavigatorPermissions::permissions(Navigator& navigator) {
   return self.permissions_.Get();
 }
 
-DEFINE_TRACE(NavigatorPermissions) {
+void NavigatorPermissions::Trace(blink::Visitor* visitor) {
   visitor->Trace(permissions_);
   Supplement<Navigator>::Trace(visitor);
 }

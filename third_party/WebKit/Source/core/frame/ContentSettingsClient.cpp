@@ -24,8 +24,9 @@ bool ContentSettingsClient::AllowDatabase(const String& name,
   return true;
 }
 
-bool ContentSettingsClient::AllowIndexedDB(const String& name,
-                                           SecurityOrigin* security_origin) {
+bool ContentSettingsClient::AllowIndexedDB(
+    const String& name,
+    const SecurityOrigin* security_origin) {
   if (client_)
     return client_->AllowIndexedDB(name, WebSecurityOrigin(security_origin));
   return true;
@@ -58,6 +59,13 @@ bool ContentSettingsClient::AllowScriptFromSource(bool enabled_per_settings,
   return enabled_per_settings;
 }
 
+void ContentSettingsClient::GetAllowedClientHintsFromSource(
+    const KURL& url,
+    WebEnabledClientHints* client_hints) {
+  if (client_)
+    client_->GetAllowedClientHintsFromSource(url, client_hints);
+}
+
 bool ContentSettingsClient::AllowImage(bool enabled_per_settings,
                                        const KURL& image_url) {
   if (client_)
@@ -85,7 +93,7 @@ bool ContentSettingsClient::AllowStorage(StorageType type) {
 
 bool ContentSettingsClient::AllowRunningInsecureContent(
     bool enabled_per_settings,
-    SecurityOrigin* origin,
+    const SecurityOrigin* origin,
     const KURL& url) {
   if (client_) {
     return client_->AllowRunningInsecureContent(enabled_per_settings,
@@ -119,6 +127,15 @@ void ContentSettingsClient::DidNotAllowScript() {
 void ContentSettingsClient::DidNotAllowPlugins() {
   if (client_)
     client_->DidNotAllowPlugins();
+}
+
+void ContentSettingsClient::PersistClientHints(
+    const WebEnabledClientHints& enabled_client_hints,
+    TimeDelta duration,
+    const KURL& url) {
+  if (client_) {
+    return client_->PersistClientHints(enabled_client_hints, duration, url);
+  }
 }
 
 }  // namespace blink

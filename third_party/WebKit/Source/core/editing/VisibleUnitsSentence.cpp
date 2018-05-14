@@ -30,6 +30,8 @@
 
 #include "core/editing/VisibleUnits.h"
 
+#include "core/editing/EphemeralRange.h"
+#include "core/editing/VisiblePosition.h"
 #include "platform/text/TextBreakIterator.h"
 
 namespace blink {
@@ -85,7 +87,7 @@ static VisiblePositionTemplate<Strategy> EndOfSentenceAlgorithm(
     const VisiblePositionTemplate<Strategy>& c) {
   DCHECK(c.IsValid()) << c;
   return CreateVisiblePosition(NextBoundary(c, EndSentenceBoundary),
-                               VP_UPSTREAM_IF_POSSIBLE);
+                               TextAffinity::kUpstreamIfPossible);
 }
 
 template <typename Strategy>
@@ -111,7 +113,7 @@ EphemeralRange ExpandEndToSentenceBoundary(const EphemeralRange& range) {
       CreateVisiblePosition(range.EndPosition());
   DCHECK(visible_end.IsNotNull());
   const Position& sentence_end = EndOfSentence(visible_end).DeepEquivalent();
-  // TODO(xiaochengh): |sentenceEnd < range.endPosition()| is possible,
+  // TODO(editing-dev): |sentenceEnd < range.endPosition()| is possible,
   // which would trigger a DCHECK in EphemeralRange's constructor if we return
   // it directly. However, this shouldn't happen and needs to be fixed.
   return EphemeralRange(
@@ -128,7 +130,7 @@ EphemeralRange ExpandRangeToSentenceBoundary(const EphemeralRange& range) {
   DCHECK(visible_start.IsNotNull());
   const Position& sentence_start =
       StartOfSentence(visible_start).DeepEquivalent();
-  // TODO(xiaochengh): |sentenceStart > range.startPosition()| is possible,
+  // TODO(editing-dev): |sentenceStart > range.startPosition()| is possible,
   // which would trigger a DCHECK in EphemeralRange's constructor if we return
   // it directly. However, this shouldn't happen and needs to be fixed.
   return ExpandEndToSentenceBoundary(EphemeralRange(
@@ -140,8 +142,9 @@ EphemeralRange ExpandRangeToSentenceBoundary(const EphemeralRange& range) {
 
 VisiblePosition NextSentencePosition(const VisiblePosition& c) {
   DCHECK(c.IsValid()) << c;
-  VisiblePosition next = CreateVisiblePosition(
-      NextBoundary(c, NextSentencePositionBoundary), VP_UPSTREAM_IF_POSSIBLE);
+  VisiblePosition next =
+      CreateVisiblePosition(NextBoundary(c, NextSentencePositionBoundary),
+                            TextAffinity::kUpstreamIfPossible);
   return HonorEditingBoundaryAtOrAfter(next, c.DeepEquivalent());
 }
 

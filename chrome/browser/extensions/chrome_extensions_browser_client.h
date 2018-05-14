@@ -71,10 +71,26 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
       const base::FilePath& directory_path,
       const std::string& content_security_policy,
       bool send_cors_header) override;
-  bool AllowCrossRendererResourceLoad(net::URLRequest* request,
+  base::FilePath GetBundleResourcePath(
+      const network::ResourceRequest& request,
+      const base::FilePath& extension_resources_path,
+      int* resource_id) const override;
+  void LoadResourceFromResourceBundle(
+      const network::ResourceRequest& request,
+      network::mojom::URLLoaderRequest loader,
+      const base::FilePath& resource_relative_path,
+      int resource_id,
+      const std::string& content_security_policy,
+      network::mojom::URLLoaderClientPtr client,
+      bool send_cors_header) override;
+  bool AllowCrossRendererResourceLoad(const GURL& url,
+                                      content::ResourceType resource_type,
+                                      ui::PageTransition page_transition,
+                                      int child_id,
                                       bool is_incognito,
                                       const Extension* extension,
-                                      InfoMap* extension_info_map) override;
+                                      const ExtensionSet& extensions,
+                                      const ProcessMap& process_map) override;
   PrefService* GetPrefServiceForContext(
       content::BrowserContext* context) override;
   void GetEarlyExtensionPrefsObservers(
@@ -85,12 +101,15 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   bool DidVersionUpdate(content::BrowserContext* context) override;
   void PermitExternalProtocolHandler() override;
   bool IsRunningInForcedAppMode() override;
+  bool IsAppModeForcedForApp(const ExtensionId& extension_id) override;
   bool IsLoggedInAsPublicAccount() override;
   ExtensionSystemProvider* GetExtensionSystemFactory() override;
   void RegisterExtensionFunctions(
       ExtensionFunctionRegistry* registry) const override;
-  void RegisterMojoServices(content::RenderFrameHost* render_frame_host,
-                            const Extension* extension) const override;
+  void RegisterExtensionInterfaces(service_manager::BinderRegistryWithArgs<
+                                       content::RenderFrameHost*>* registry,
+                                   content::RenderFrameHost* render_frame_host,
+                                   const Extension* extension) const override;
   std::unique_ptr<RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
       content::BrowserContext* context) const override;
   const ComponentExtensionResourceManager*
@@ -123,8 +142,14 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   bool IsActivityLoggingEnabled(content::BrowserContext* context) override;
   extensions::ExtensionNavigationUIData* GetExtensionNavigationUIData(
       net::URLRequest* request) override;
+  void GetTabAndWindowIdForWebContents(content::WebContents* web_contents,
+                                       int* tab_id,
+                                       int* window_id) override;
   KioskDelegate* GetKioskDelegate() override;
   bool IsLockScreenContext(content::BrowserContext* context) override;
+  std::string GetApplicationLocale() override;
+  bool IsExtensionEnabled(const std::string& extension_id,
+                          content::BrowserContext* context) const override;
 
   static void set_did_chrome_update_for_testing(bool did_update);
 

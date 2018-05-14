@@ -8,14 +8,17 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "media/base/decoder_factory.h"
-#include "services/service_manager/public/interfaces/interface_provider.mojom.h"
 
 namespace media {
+
+namespace mojom {
+class InterfaceFactory;
+}
 
 class MojoDecoderFactory : public DecoderFactory {
  public:
   explicit MojoDecoderFactory(
-      service_manager::mojom::InterfaceProvider* interface_provider);
+      media::mojom::InterfaceFactory* interface_factory);
   ~MojoDecoderFactory() final;
 
   void CreateAudioDecoders(
@@ -26,10 +29,11 @@ class MojoDecoderFactory : public DecoderFactory {
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       GpuVideoAcceleratorFactories* gpu_factories,
       MediaLog* media_log,
+      const RequestOverlayInfoCB& request_overlay_info_cb,
       std::vector<std::unique_ptr<VideoDecoder>>* video_decoders) final;
 
  private:
-  service_manager::mojom::InterfaceProvider* interface_provider_;
+  media::mojom::InterfaceFactory* interface_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MojoDecoderFactory);
 };

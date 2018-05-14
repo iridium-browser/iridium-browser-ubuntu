@@ -2,7 +2,6 @@ include_rules = [
   "+components/nacl",
   "+content/public/app/sandbox_helper_win.h",
   "+content/public/common",
-  "+content/public/child",
   "+crypto",
   "+sandbox/linux/bpf_dsl",
   "+sandbox/linux/seccomp-bpf",
@@ -12,6 +11,7 @@ include_rules = [
   "+sandbox/linux/system_headers",
   "+sandbox/sandbox_features.h",
   "+sandbox/win/src",
+  "+services/service_manager/sandbox",
   "+ppapi/c",  # header files only
 
   "+mojo/edk/embedder",

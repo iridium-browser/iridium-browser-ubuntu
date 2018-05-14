@@ -33,13 +33,6 @@ class HeadersPayloadDecoderPeer {
   static constexpr uint8_t FlagsAffectingPayloadDecoding() {
     return Http2FrameFlag::PADDED | Http2FrameFlag::PRIORITY;
   }
-
-  static void Randomize(HeadersPayloadDecoder* p, RandomBase* rng) {
-    CorruptEnum(&p->payload_state_, rng);
-    test::Randomize(&p->priority_fields_, rng);
-    VLOG(1) << "HeadersPayloadDecoderPeer::Randomize priority_fields_: "
-            << p->priority_fields_;
-  }
 };
 
 namespace {
@@ -133,7 +126,7 @@ TEST_P(HeadersPayloadDecoderTest, VariousHpackPayloadSizes) {
       ScrubFlagsOfHeader(&frame_header);
       FrameParts expected(frame_header, hpack_payload, total_pad_length_);
       if (has_priority) {
-        expected.opt_priority = priority;
+        expected.SetOptPriority(priority);
       }
       EXPECT_TRUE(DecodePayloadAndValidateSeveralWays(frame_builder_.buffer(),
                                                       expected));

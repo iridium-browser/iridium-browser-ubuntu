@@ -4,6 +4,8 @@
 
 #include "components/update_client/updater_state.h"
 
+#include <windows.h>
+
 #include <string>
 #include <utility>
 

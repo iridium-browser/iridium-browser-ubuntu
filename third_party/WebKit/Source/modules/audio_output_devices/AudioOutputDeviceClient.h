@@ -18,8 +18,10 @@ class WebString;
 
 class MODULES_EXPORT AudioOutputDeviceClient : public Supplement<LocalFrame> {
  public:
+  static const char kSupplementName[];
+
   explicit AudioOutputDeviceClient(LocalFrame&);
-  virtual ~AudioOutputDeviceClient() {}
+  virtual ~AudioOutputDeviceClient() = default;
 
   // Checks that a given sink exists and has permissions to be used from the
   // origin of the current frame.
@@ -28,11 +30,10 @@ class MODULES_EXPORT AudioOutputDeviceClient : public Supplement<LocalFrame> {
       const WebString& sink_id,
       std::unique_ptr<WebSetSinkIdCallbacks>) = 0;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   // Supplement requirements.
   static AudioOutputDeviceClient* From(ExecutionContext*);
-  static const char* SupplementName();
 };
 
 MODULES_EXPORT void ProvideAudioOutputDeviceClientTo(LocalFrame&,

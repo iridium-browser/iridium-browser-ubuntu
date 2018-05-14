@@ -6,6 +6,7 @@ package org.chromium.base.metrics;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.MainDex;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -24,6 +25,7 @@ import java.util.concurrent.TimeUnit;
  * code.
  */
 @JNINamespace("base::android")
+@MainDex
 public class RecordHistogram {
     private static Throwable sDisabledBy;
     private static Map<String, Long> sCache =
@@ -161,11 +163,11 @@ public class RecordHistogram {
     }
 
     /**
-    * Records a sparse histogram. This is the Java equivalent of UMA_HISTOGRAM_SPARSE_SLOWLY.
-    * @param name name of the histogram
-    * @param sample sample to be recorded. All values of |sample| are valid, including negative
-    *        values.
-    */
+     * Records a sparse histogram. This is the Java equivalent of UmaHistogramSparse.
+     * @param name name of the histogram
+     * @param sample sample to be recorded. All values of |sample| are valid, including negative
+     *        values.
+     */
     public static void recordSparseSlowlyHistogram(String name, int sample) {
         if (sDisabledBy != null) return;
         long key = getCachedHistogramKey(name);
@@ -207,6 +209,18 @@ public class RecordHistogram {
     public static void recordLongTimesHistogram(String name, long duration, TimeUnit timeUnit) {
         recordCustomTimesHistogramMilliseconds(
                 name, timeUnit.toMillis(duration), 1, TimeUnit.HOURS.toMillis(1), 50);
+    }
+
+    /**
+     * Records a sample in a histogram of times. Useful for recording long durations. This is the
+     * Java equivalent of the UMA_HISTOGRAM_LONG_TIMES_100 C++ macro.
+     * @param name name of the histogram
+     * @param duration duration to be recorded
+     * @param timeUnit the unit of the duration argument
+     */
+    public static void recordLongTimesHistogram100(String name, long duration, TimeUnit timeUnit) {
+        recordCustomTimesHistogramMilliseconds(
+                name, timeUnit.toMillis(duration), 1, TimeUnit.HOURS.toMillis(1), 100);
     }
 
     /**
@@ -254,6 +268,7 @@ public class RecordHistogram {
         // the native histograms API. Callers of these functions still pass longs because that's
         // the types returned by TimeUnit and System.currentTimeMillis() APIs, from which these
         // values come.
+        assert max == clampToInt(max);
         long result = nativeRecordCustomTimesHistogramMilliseconds(
                 name, key, clampToInt(duration), clampToInt(min), clampToInt(max), numBuckets);
         if (result != key) sCache.put(name, result);
@@ -278,14 +293,6 @@ public class RecordHistogram {
         return nativeGetHistogramTotalCountForTesting(name);
     }
 
-    /**
-     * Initializes the metrics system.
-     */
-    public static void initialize() {
-        if (sDisabledBy != null) return;
-        nativeInitialize();
-    }
-
     private static native long nativeRecordCustomTimesHistogramMilliseconds(
             String name, long key, int duration, int min, int max, int numBuckets);
 
@@ -300,5 +307,4 @@ public class RecordHistogram {
 
     private static native int nativeGetHistogramValueCountForTesting(String name, int sample);
     private static native int nativeGetHistogramTotalCountForTesting(String name);
-    private static native void nativeInitialize();
 }

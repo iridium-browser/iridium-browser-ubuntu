@@ -4,12 +4,14 @@
 
 #include "chrome/browser/predictors/loading_stats_collector.h"
 
-#include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
+#include <vector>
+
 #include "base/test/histogram_tester.h"
 #include "chrome/browser/predictors/loading_test_util.h"
+#include "chrome/browser/predictors/preconnect_manager.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
@@ -22,21 +24,17 @@ namespace predictors {
 
 namespace {
 const char kInitialUrl[] = "http://www.google.com/cats";
-const char kRedirectedUrl[] = "http://www.google.com/dogs";
-const char kRedirectedUrl2[] = "http://www.google.com/raccoons";
+const char kRedirectedUrl[] = "http://www.google.fr/chats";
+const char kRedirectedUrl2[] = "http://www.google.de/katzen";
 }
 
-using Prediction = ResourcePrefetchPredictor::Prediction;
 using RedirectStatus = ResourcePrefetchPredictor::RedirectStatus;
-using PrefetchedRequestStats = ResourcePrefetcher::PrefetchedRequestStats;
-using PrefetcherStats = ResourcePrefetcher::PrefetcherStats;
 
 class LoadingStatsCollectorTest : public testing::Test {
  public:
   LoadingStatsCollectorTest();
   ~LoadingStatsCollectorTest() override;
   void SetUp() override;
-  void TearDown() override;
 
   void TestRedirectStatusHistogram(const std::string& initial_url,
                                    const std::string& prediction_url,
@@ -52,29 +50,20 @@ class LoadingStatsCollectorTest : public testing::Test {
 };
 
 LoadingStatsCollectorTest::LoadingStatsCollectorTest()
-    : profile_(base::MakeUnique<TestingProfile>()) {}
+    : profile_(std::make_unique<TestingProfile>()) {}
 
-LoadingStatsCollectorTest::~LoadingStatsCollectorTest() {
-  profile_ = nullptr;
-  base::RunLoop().RunUntilIdle();
-}
+LoadingStatsCollectorTest::~LoadingStatsCollectorTest() = default;
 
 void LoadingStatsCollectorTest::SetUp() {
   LoadingPredictorConfig config;
   PopulateTestConfig(&config);
-  profile_ = base::MakeUnique<TestingProfile>();
-  mock_predictor_ = base::MakeUnique<StrictMock<MockResourcePrefetchPredictor>>(
+  profile_ = std::make_unique<TestingProfile>();
+  mock_predictor_ = std::make_unique<StrictMock<MockResourcePrefetchPredictor>>(
       config, profile_.get());
   stats_collector_ =
-      base::MakeUnique<LoadingStatsCollector>(mock_predictor_.get(), config);
-  histogram_tester_ = base::MakeUnique<base::HistogramTester>();
-  base::RunLoop().RunUntilIdle();
-}
-
-void LoadingStatsCollectorTest::TearDown() {
-  stats_collector_ = nullptr;
-  mock_predictor_ = nullptr;
-  histogram_tester_ = nullptr;
+      std::make_unique<LoadingStatsCollector>(mock_predictor_.get(), config);
+  histogram_tester_ = std::make_unique<base::HistogramTester>();
+  content::RunAllTasksUntilIdle();
 }
 
 void LoadingStatsCollectorTest::TestRedirectStatusHistogram(
@@ -85,10 +74,10 @@ void LoadingStatsCollectorTest::TestRedirectStatusHistogram(
   // Prediction setting.
   // We need at least one resource for prediction.
   const std::string& script_url = "https://cdn.google.com/script.js";
-  Prediction prediction = CreatePrediction(prediction_url, {GURL(script_url)});
-  prediction.is_host = false;
-  prediction.is_redirected = initial_url != prediction_url;
-  EXPECT_CALL(*mock_predictor_, GetPrefetchData(GURL(initial_url), _))
+  PreconnectPrediction prediction = CreatePreconnectPrediction(
+      GURL(prediction_url).host(), initial_url != prediction_url,
+      {{GURL(script_url).GetOrigin(), 1}});
+  EXPECT_CALL(*mock_predictor_, PredictPreconnectOrigins(GURL(initial_url), _))
       .WillOnce(DoAll(SetArgPointee<1>(prediction), Return(true)));
 
   // Navigation simulation.
@@ -101,37 +90,44 @@ void LoadingStatsCollectorTest::TestRedirectStatusHistogram(
 
   // Histogram check.
   histogram_tester_->ExpectUniqueSample(
-      internal::kResourcePrefetchPredictorRedirectStatusHistogram,
+      internal::kLoadingPredictorPreconnectLearningRedirectStatus,
       static_cast<int>(expected_status), 1);
 }
 
-TEST_F(LoadingStatsCollectorTest, TestPrecisionRecallHistograms) {
+TEST_F(LoadingStatsCollectorTest, TestPreconnectPrecisionRecallHistograms) {
   const std::string main_frame_url = "http://google.com/?query=cats";
-  const std::string script_url = "https://cdn.google.com/script.js";
+  auto gen = [](int index) {
+    return base::StringPrintf("http://cdn%d.google.com/script.js", index);
+  };
 
-  // Predicts 3 resources: 1 useful, 2 useless.
-  Prediction prediction = CreatePrediction(
-      main_frame_url,
-      {GURL(script_url), GURL(script_url + "foo"), GURL(script_url + "bar")});
-  EXPECT_CALL(*mock_predictor_, GetPrefetchData(GURL(main_frame_url), _))
+  // Predicts 4 origins: 2 useful, 2 useless.
+  PreconnectPrediction prediction =
+      CreatePreconnectPrediction(GURL(main_frame_url).host(), false,
+                                 {{GURL(main_frame_url).GetOrigin(), 1},
+                                  {GURL(gen(1)).GetOrigin(), 1},
+                                  {GURL(gen(2)).GetOrigin(), 1},
+                                  {GURL(gen(3)).GetOrigin(), 0}});
+  EXPECT_CALL(*mock_predictor_,
+              PredictPreconnectOrigins(GURL(main_frame_url), _))
       .WillOnce(DoAll(SetArgPointee<1>(prediction), Return(true)));
 
-  // Simulate a page load with 2 resources, one we know, one we don't.
+  // Simulate a page load with 2 resources, one we know, one we don't, plus we
+  // know the main frame origin.
   URLRequestSummary script = CreateURLRequestSummary(
-      1, main_frame_url, script_url, content::RESOURCE_TYPE_SCRIPT);
+      1, main_frame_url, gen(1), content::RESOURCE_TYPE_SCRIPT);
   URLRequestSummary new_script = CreateURLRequestSummary(
-      1, main_frame_url, script_url + "2", content::RESOURCE_TYPE_SCRIPT);
+      1, main_frame_url, gen(100), content::RESOURCE_TYPE_SCRIPT);
   PageRequestSummary summary = CreatePageRequestSummary(
       main_frame_url, main_frame_url, {script, new_script});
 
   stats_collector_->RecordPageRequestSummary(summary);
 
   histogram_tester_->ExpectUniqueSample(
-      internal::kResourcePrefetchPredictorRecallHistogram, 50, 1);
+      internal::kLoadingPredictorPreconnectLearningRecall, 66, 1);
   histogram_tester_->ExpectUniqueSample(
-      internal::kResourcePrefetchPredictorPrecisionHistogram, 33, 1);
+      internal::kLoadingPredictorPreconnectLearningPrecision, 50, 1);
   histogram_tester_->ExpectUniqueSample(
-      internal::kResourcePrefetchPredictorCountHistogram, 3, 1);
+      internal::kLoadingPredictorPreconnectLearningCount, 4, 1);
 }
 
 TEST_F(LoadingStatsCollectorTest, TestRedirectStatusNoRedirect) {
@@ -160,50 +156,134 @@ TEST_F(LoadingStatsCollectorTest,
                               RedirectStatus::REDIRECT_CORRECTLY_PREDICTED);
 }
 
-TEST_F(LoadingStatsCollectorTest, TestPrefetchHitsMissesHistograms) {
-  const std::string main_frame_url = "http://google.com/?query=cats";
-  const std::string& script_url = "https://cdn.google.com/script.js";
-  EXPECT_CALL(*mock_predictor_, GetPrefetchData(GURL(main_frame_url), _))
+TEST_F(LoadingStatsCollectorTest, TestPreconnectHistograms) {
+  const std::string main_frame_url("http://google.com/?query=cats");
+  auto gen = [](int index) {
+    return base::StringPrintf("http://cdn%d.google.com/script.js", index);
+  };
+  EXPECT_CALL(*mock_predictor_,
+              PredictPreconnectOrigins(GURL(main_frame_url), _))
       .WillOnce(Return(false));
 
   {
-    // Initialize PrefetcherStats.
-    PrefetchedRequestStats script1(GURL(script_url + "1"), false, 42 * 1024);
-    PrefetchedRequestStats script2(GURL(script_url + "2"), true, 8 * 1024);
-    PrefetchedRequestStats script3(GURL(script_url + "3"), false, 2 * 1024);
-    PrefetchedRequestStats script4(GURL(script_url + "4"), true, 3 * 1024);
-    auto stats = base::MakeUnique<PrefetcherStats>(GURL(main_frame_url));
-    stats->requests_stats = {script1, script2, script3, script4};
+    // Initialize PreconnectStats.
 
-    stats_collector_->RecordPrefetcherStats(std::move(stats));
+    // These two are hits.
+    PreconnectedRequestStats origin1(GURL(gen(1)).GetOrigin(), false, true);
+    PreconnectedRequestStats origin2(GURL(gen(2)).GetOrigin(), true, false);
+    // And these two are misses.
+    PreconnectedRequestStats origin3(GURL(gen(3)).GetOrigin(), false, false);
+    PreconnectedRequestStats origin4(GURL(gen(4)).GetOrigin(), true, true);
+
+    auto stats = std::make_unique<PreconnectStats>(GURL(main_frame_url));
+    stats->requests_stats = {origin1, origin2, origin3, origin4};
+
+    stats_collector_->RecordPreconnectStats(std::move(stats));
   }
 
   {
-    // Simulate a page load with 3 resources, two we prefetched, one we didn't.
+    // Simulate a page load with 3 origins.
     URLRequestSummary script1 = CreateURLRequestSummary(
-        1, main_frame_url, script_url + "1", content::RESOURCE_TYPE_SCRIPT);
+        1, main_frame_url, gen(1), content::RESOURCE_TYPE_SCRIPT);
     URLRequestSummary script2 = CreateURLRequestSummary(
-        1, main_frame_url, script_url + "2", content::RESOURCE_TYPE_SCRIPT);
-    URLRequestSummary new_script = CreateURLRequestSummary(
-        1, main_frame_url, script_url + "new", content::RESOURCE_TYPE_SCRIPT);
+        1, main_frame_url, gen(2), content::RESOURCE_TYPE_SCRIPT);
+    URLRequestSummary script100 = CreateURLRequestSummary(
+        1, main_frame_url, gen(100), content::RESOURCE_TYPE_SCRIPT);
     PageRequestSummary summary = CreatePageRequestSummary(
-        main_frame_url, main_frame_url, {script1, script2, new_script});
+        main_frame_url, main_frame_url, {script1, script2, script100});
 
     stats_collector_->RecordPageRequestSummary(summary);
   }
 
   histogram_tester_->ExpectUniqueSample(
-      internal::kResourcePrefetchPredictorPrefetchMissesCountCached, 1, 1);
+      internal::kLoadingPredictorPreresolveHitsPercentage, 50, 1);
   histogram_tester_->ExpectUniqueSample(
-      internal::kResourcePrefetchPredictorPrefetchMissesCountNotCached, 1, 1);
+      internal::kLoadingPredictorPreconnectHitsPercentage, 50, 1);
   histogram_tester_->ExpectUniqueSample(
-      internal::kResourcePrefetchPredictorPrefetchHitsCountCached, 1, 1);
+      internal::kLoadingPredictorPreresolveCount, 4, 1);
   histogram_tester_->ExpectUniqueSample(
-      internal::kResourcePrefetchPredictorPrefetchHitsCountNotCached, 1, 1);
+      internal::kLoadingPredictorPreconnectCount, 2, 1);
+}
+
+// Tests that preconnect histograms won't be recorded if preconnect stats are
+// empty.
+TEST_F(LoadingStatsCollectorTest, TestPreconnectHistogramsEmpty) {
+  const std::string main_frame_url = "http://google.com";
+  auto stats = std::make_unique<PreconnectStats>(GURL(main_frame_url));
+  stats_collector_->RecordPreconnectStats(std::move(stats));
+
+  EXPECT_CALL(*mock_predictor_,
+              PredictPreconnectOrigins(GURL(main_frame_url), _))
+      .WillOnce(Return(false));
+
+  URLRequestSummary script = CreateURLRequestSummary(
+      1, main_frame_url, "http://cdn.google.com/script.js",
+      content::RESOURCE_TYPE_SCRIPT);
+  PageRequestSummary summary =
+      CreatePageRequestSummary(main_frame_url, main_frame_url, {script});
+  stats_collector_->RecordPageRequestSummary(summary);
+
+  // No histograms should be recorded.
+  histogram_tester_->ExpectTotalCount(
+      internal::kLoadingPredictorPreresolveHitsPercentage, 0);
+  histogram_tester_->ExpectTotalCount(
+      internal::kLoadingPredictorPreconnectHitsPercentage, 0);
+  histogram_tester_->ExpectTotalCount(
+      internal::kLoadingPredictorPreresolveCount, 0);
+  histogram_tester_->ExpectTotalCount(
+      internal::kLoadingPredictorPreconnectCount, 0);
+}
+
+// Tests that the preconnect won't divide by zero if preconnect stats contain
+// preresolve attempts only.
+TEST_F(LoadingStatsCollectorTest, TestPreconnectHistogramsPreresolvesOnly) {
+  const std::string main_frame_url("http://google.com/?query=cats");
+  auto gen = [](int index) {
+    return base::StringPrintf("http://cdn%d.google.com/script.js", index);
+  };
+  EXPECT_CALL(*mock_predictor_,
+              PredictPreconnectOrigins(GURL(main_frame_url), _))
+      .WillOnce(Return(false));
+
+  {
+    // Initialize PreconnectStats.
+
+    // These two are hits.
+    PreconnectedRequestStats origin1(GURL(gen(1)).GetOrigin(), false, false);
+    PreconnectedRequestStats origin2(GURL(gen(2)).GetOrigin(), true, false);
+    // And these two are misses.
+    PreconnectedRequestStats origin3(GURL(gen(3)).GetOrigin(), false, false);
+    PreconnectedRequestStats origin4(GURL(gen(4)).GetOrigin(), true, false);
+
+    auto stats = std::make_unique<PreconnectStats>(GURL(main_frame_url));
+    stats->requests_stats = {origin1, origin2, origin3, origin4};
+
+    stats_collector_->RecordPreconnectStats(std::move(stats));
+  }
+
+  {
+    // Simulate a page load with 3 origins.
+    URLRequestSummary script1 = CreateURLRequestSummary(
+        1, main_frame_url, gen(1), content::RESOURCE_TYPE_SCRIPT);
+    URLRequestSummary script2 = CreateURLRequestSummary(
+        1, main_frame_url, gen(2), content::RESOURCE_TYPE_SCRIPT);
+    URLRequestSummary script100 = CreateURLRequestSummary(
+        1, main_frame_url, gen(100), content::RESOURCE_TYPE_SCRIPT);
+    PageRequestSummary summary = CreatePageRequestSummary(
+        main_frame_url, main_frame_url, {script1, script2, script100});
+
+    stats_collector_->RecordPageRequestSummary(summary);
+  }
+
   histogram_tester_->ExpectUniqueSample(
-      internal::kResourcePrefetchPredictorPrefetchHitsSize, 50, 1);
+      internal::kLoadingPredictorPreresolveHitsPercentage, 50, 1);
+  // Can't really report a hits percentage if there were no events.
+  histogram_tester_->ExpectTotalCount(
+      internal::kLoadingPredictorPreconnectHitsPercentage, 0);
   histogram_tester_->ExpectUniqueSample(
-      internal::kResourcePrefetchPredictorPrefetchMissesSize, 5, 1);
+      internal::kLoadingPredictorPreresolveCount, 4, 1);
+  histogram_tester_->ExpectUniqueSample(
+      internal::kLoadingPredictorPreconnectCount, 0, 1);
 }
 
 }  // namespace predictors

@@ -12,7 +12,7 @@
 #include "chrome/browser/extensions/install_signer.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_reporting_service.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_prefs_factory.h"
 #include "extensions/browser/extension_registry.h"
@@ -34,7 +34,7 @@ void PopulateExtensionInfo(
     ClientIncidentReport_ExtensionData_ExtensionInfo* extension_info) {
   std::string extension_id = extension.id();
   extension_info->set_id(extension_id);
-  extension_info->set_version(extension.version()->GetString());
+  extension_info->set_version(extension.version().GetString());
   extension_info->set_name(extension.name());
   extension_info->set_description(extension.description());
 

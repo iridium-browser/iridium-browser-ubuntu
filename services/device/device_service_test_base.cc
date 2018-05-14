@@ -8,18 +8,36 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "device/geolocation/public/cpp/location_provider.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
+#include "net/url_request/url_request_test_util.h"
 #include "services/device/device_service.h"
-#include "services/device/public/interfaces/constants.mojom.h"
+#include "services/device/public/mojom/constants.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service_context.h"
-#include "services/service_manager/public/interfaces/service_factory.mojom.h"
+#include "services/service_manager/public/mojom/service_factory.mojom.h"
 
 namespace device {
 
 namespace {
 
 const char kTestServiceName[] = "device_unittests";
+
+// Simple request context producer that immediately produces a
+// TestURLRequestContextGetter.
+void TestRequestContextProducer(
+    const scoped_refptr<base::SingleThreadTaskRunner>& network_task_runner,
+    base::OnceCallback<void(scoped_refptr<net::URLRequestContextGetter>)>
+        response_callback) {
+  std::move(response_callback)
+      .Run(base::MakeRefCounted<net::TestURLRequestContextGetter>(
+          network_task_runner));
+}
+
+// Simply return a nullptr which means no CustomLocationProvider from embedder.
+std::unique_ptr<LocationProvider> GetCustomLocationProviderForTest() {
+  return nullptr;
+}
 
 // The test service responsible to package Device Service.
 class ServiceTestClient : public service_manager::test::ServiceTestClient,
@@ -44,17 +62,26 @@ class ServiceTestClient : public service_manager::test::ServiceTestClient,
     registry_.BindInterface(interface_name, std::move(interface_pipe));
   }
 
-  void CreateService(service_manager::mojom::ServiceRequest request,
-                     const std::string& name) override {
+  void CreateService(
+      service_manager::mojom::ServiceRequest request,
+      const std::string& name,
+      service_manager::mojom::PIDReceiverPtr pid_receiver) override {
     if (name == device::mojom::kServiceName) {
 #if defined(OS_ANDROID)
       device_service_context_.reset(new service_manager::ServiceContext(
-          CreateDeviceService(file_task_runner_, io_task_runner_,
-                              wake_lock_context_callback_, nullptr),
+          CreateDeviceService(
+              file_task_runner_, io_task_runner_,
+              base::Bind(&TestRequestContextProducer, io_task_runner_),
+              kTestGeolocationApiKey, wake_lock_context_callback_,
+              base::Bind(&GetCustomLocationProviderForTest), nullptr),
           std::move(request)));
 #else
       device_service_context_.reset(new service_manager::ServiceContext(
-          CreateDeviceService(file_task_runner_, io_task_runner_),
+          CreateDeviceService(
+              file_task_runner_, io_task_runner_,
+              base::Bind(&TestRequestContextProducer, io_task_runner_),
+              kTestGeolocationApiKey,
+              base::Bind(&GetCustomLocationProviderForTest)),
           std::move(request)));
 #endif
     }
@@ -82,14 +109,15 @@ DeviceServiceTestBase::DeviceServiceTestBase()
       file_thread_("DeviceServiceTestFileThread"),
       io_thread_("DeviceServiceTestIOThread") {
   file_thread_.Start();
-  io_thread_.Start();
+  io_thread_.StartWithOptions(
+      base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
 }
 
 DeviceServiceTestBase::~DeviceServiceTestBase() {}
 
 std::unique_ptr<service_manager::Service>
 DeviceServiceTestBase::CreateService() {
-  return base::MakeUnique<ServiceTestClient>(this, file_thread_.task_runner(),
+  return std::make_unique<ServiceTestClient>(this, file_thread_.task_runner(),
                                              io_thread_.task_runner());
 }
 

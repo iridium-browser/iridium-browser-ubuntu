@@ -10,15 +10,15 @@
 
 #include <memory>
 
-#include "webrtc/rtc_base/asyncinvoker.h"
-#include "webrtc/rtc_base/asyncudpsocket.h"
-#include "webrtc/rtc_base/event.h"
-#include "webrtc/rtc_base/gunit.h"
-#include "webrtc/rtc_base/nullsocketserver.h"
-#include "webrtc/rtc_base/physicalsocketserver.h"
-#include "webrtc/rtc_base/sigslot.h"
-#include "webrtc/rtc_base/socketaddress.h"
-#include "webrtc/rtc_base/thread.h"
+#include "rtc_base/asyncinvoker.h"
+#include "rtc_base/asyncudpsocket.h"
+#include "rtc_base/event.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/nullsocketserver.h"
+#include "rtc_base/physicalsocketserver.h"
+#include "rtc_base/sigslot.h"
+#include "rtc_base/socketaddress.h"
+#include "rtc_base/thread.h"
 
 #if defined(WEBRTC_WIN)
 #include <comdef.h>  // NOLINT
@@ -44,7 +44,6 @@ class TestGenerator {
 
 struct TestMessage : public MessageData {
   explicit TestMessage(int v) : value(v) {}
-  virtual ~TestMessage() {}
 
   int value;
 };
@@ -60,9 +59,7 @@ class SocketClient : public TestGenerator, public sigslot::has_slots<> {
     socket_->SignalReadPacket.connect(this, &SocketClient::OnPacket);
   }
 
-  ~SocketClient() {
-    delete socket_;
-  }
+  ~SocketClient() override { delete socket_; }
 
   SocketAddress address() const { return socket_->GetLocalAddress(); }
 
@@ -90,11 +87,9 @@ class MessageClient : public MessageHandler, public TestGenerator {
       : socket_(socket) {
   }
 
-  virtual ~MessageClient() {
-    delete socket_;
-  }
+  ~MessageClient() override { delete socket_; }
 
-  virtual void OnMessage(Message *pmsg) {
+  void OnMessage(Message* pmsg) override {
     TestMessage* msg = static_cast<TestMessage*>(pmsg->pdata);
     int result = Next(msg->value);
     EXPECT_GE(socket_->Send(&result, sizeof(result)), 0);
@@ -109,7 +104,7 @@ class CustomThread : public rtc::Thread {
  public:
   CustomThread()
       : Thread(std::unique_ptr<SocketServer>(new rtc::NullSocketServer())) {}
-  virtual ~CustomThread() { Stop(); }
+  ~CustomThread() override { Stop(); }
   bool Start() { return false; }
 
   bool WrapCurrent() {
@@ -129,12 +124,12 @@ class SignalWhenDestroyedThread : public Thread {
       : Thread(std::unique_ptr<SocketServer>(new NullSocketServer())),
         event_(event) {}
 
-  virtual ~SignalWhenDestroyedThread() {
+  ~SignalWhenDestroyedThread() override {
     Stop();
     event_->Set();
   }
 
-  virtual void Run() {
+  void Run() override {
     // Do nothing.
   }
 
@@ -336,7 +331,7 @@ TEST(ThreadTest, ThreeThreadsInvoke) {
 
    private:
     CriticalSection crit_;
-    bool value_ GUARDED_BY(crit_);
+    bool value_ RTC_GUARDED_BY(crit_);
   };
 
   struct LocalFuncs {
@@ -458,19 +453,20 @@ TEST_F(AsyncInvokeTest, KillInvokerDuringExecute) {
   thread->Start();
   volatile bool invoker_destroyed = false;
   {
+    auto functor = [&functor_started, &functor_continue, &functor_finished,
+                    &invoker_destroyed] {
+      functor_started.Set();
+      functor_continue.Wait(Event::kForever);
+      rtc::Thread::Current()->SleepMs(kWaitTimeout);
+      EXPECT_FALSE(invoker_destroyed);
+      functor_finished.Set();
+    };
     AsyncInvoker invoker;
-    invoker.AsyncInvoke<void>(RTC_FROM_HERE, thread.get(),
-                              [&functor_started, &functor_continue,
-                               &functor_finished, &invoker_destroyed] {
-                                functor_started.Set();
-                                functor_continue.Wait(Event::kForever);
-                                rtc::Thread::Current()->SleepMs(kWaitTimeout);
-                                EXPECT_FALSE(invoker_destroyed);
-                                functor_finished.Set();
-                              });
+    invoker.AsyncInvoke<void>(RTC_FROM_HERE, thread.get(), functor);
     functor_started.Wait(Event::kForever);
 
-    // Allow the functor to continue and immediately destroy the invoker.
+    // Destroy the invoker while the functor is still executing (doing
+    // SleepMs).
     functor_continue.Set();
   }
 
@@ -479,6 +475,37 @@ TEST_F(AsyncInvokeTest, KillInvokerDuringExecute) {
   // second.
   invoker_destroyed = true;
   functor_finished.Wait(Event::kForever);
+}
+
+// Variant of the above test where the async-invoked task calls AsyncInvoke
+// *again*, for the thread on which the AsyncInvoker is currently being
+// destroyed. This shouldn't deadlock or crash; this second invocation should
+// just be ignored.
+TEST_F(AsyncInvokeTest, KillInvokerDuringExecuteWithReentrantInvoke) {
+  Event functor_started(false, false);
+  // Flag used to verify that the recursively invoked task never actually runs.
+  bool reentrant_functor_run = false;
+
+  Thread* main = Thread::Current();
+  Thread thread;
+  thread.Start();
+  {
+    AsyncInvoker invoker;
+    auto reentrant_functor = [&reentrant_functor_run] {
+      reentrant_functor_run = true;
+    };
+    auto functor = [&functor_started, &invoker, main, reentrant_functor] {
+      functor_started.Set();
+      Thread::Current()->SleepMs(kWaitTimeout);
+      invoker.AsyncInvoke<void>(RTC_FROM_HERE, main, reentrant_functor);
+    };
+    // This queues a task on |thread| to sleep for |kWaitTimeout| then queue a
+    // task on |main|. But this second queued task should never run, since the
+    // destructor will be entered before it's even invoked.
+    invoker.AsyncInvoke<void>(RTC_FROM_HERE, &thread, functor);
+    functor_started.Wait(Event::kForever);
+  }
+  EXPECT_FALSE(reentrant_functor_run);
 }
 
 TEST_F(AsyncInvokeTest, Flush) {

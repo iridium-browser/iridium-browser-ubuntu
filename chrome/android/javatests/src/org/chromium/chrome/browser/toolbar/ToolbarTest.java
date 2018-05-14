@@ -26,20 +26,19 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.widget.findinpage.FindToolbar;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.MenuUtils;
 import org.chromium.chrome.test.util.OmniboxTestUtils;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.net.test.EmbeddedTestServer;
+import org.chromium.ui.test.util.UiRestriction;
 
 /**
  * Tests for toolbar manager behavior.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ToolbarTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -87,8 +86,8 @@ public class ToolbarTest {
     @Test
     @MediumTest
     public void testNTPNavigatesToErrorPageOnDisconnectedNetwork() throws Exception {
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL(TEST_PAGE);
 
         Tab tab = mActivityTestRule.getActivity().getActivityTab();
@@ -114,7 +113,7 @@ public class ToolbarTest {
 
     @Test
     @MediumTest
-    @Restriction(ChromeRestriction.RESTRICTION_TYPE_TABLET)
+    @Restriction(UiRestriction.RESTRICTION_TYPE_TABLET)
     @Feature({"Omnibox"})
     public void testFindInPageDismissedOnOmniboxFocus() {
         findInPageFromMenu();

@@ -7,14 +7,14 @@ package org.chromium.android_webview;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.webkit.ValueCallback;
+import android.support.annotation.IntDef;
+import android.support.annotation.Nullable;
 
+import org.chromium.base.Callback;
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.JNINamespace;
-
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import org.chromium.base.metrics.RecordHistogram;
 
 /**
  * Helper class for getting the configuration settings related to safebrowsing in WebView.
@@ -24,48 +24,71 @@ public class AwSafeBrowsingConfigHelper {
     private static final String TAG = "AwSafeBrowsingConfi-";
 
     private static final String OPT_IN_META_DATA_STR = "android.webkit.WebView.EnableSafeBrowsing";
+    private static final boolean DEFAULT_USER_OPT_IN = false;
 
     private static Boolean sSafeBrowsingUserOptIn;
 
-    public static void maybeInitSafeBrowsingFromSettings(final Context appContext) {
-        AwContentsStatics.setSafeBrowsingEnabledByManifest(
-                CommandLine.getInstance().hasSwitch(AwSwitches.WEBVIEW_ENABLE_SAFEBROWSING_SUPPORT)
-                || appHasOptedIn(appContext));
-        // If GMS is available, we will figure out if the user has opted-in to Safe Browsing and set
-        // the correct value for sSafeBrowsingUserOptIn.
-        final String getUserOptInPreferenceMethodName = "getUserOptInPreference";
-        try {
-            Class awSafeBrowsingApiHelperClass =
-                    Class.forName("com.android.webview.chromium.AwSafeBrowsingApiHandler");
-            Method getUserOptInPreference = awSafeBrowsingApiHelperClass.getDeclaredMethod(
-                    getUserOptInPreferenceMethodName, Context.class, ValueCallback.class);
-            getUserOptInPreference.invoke(null, appContext, new ValueCallback<Boolean>() {
-                @Override
-                public void onReceiveValue(Boolean optin) {
-                    setSafeBrowsingUserOptIn(optin == null ? false : optin);
-                }
-            });
-        } catch (ClassNotFoundException e) {
-            // This is not an error; it just means this device doesn't have specialized services.
-        } catch (IllegalAccessException | IllegalArgumentException | NoSuchMethodException e) {
-            Log.e(TAG, "Failed to invoke " + getUserOptInPreferenceMethodName + ": " + e);
-        } catch (InvocationTargetException e) {
-            Log.e(TAG, "Failed invocation for " + getUserOptInPreferenceMethodName + ": ",
-                    e.getCause());
-        }
+    // Used to record the UMA histogram SafeBrowsing.WebView.AppOptIn. Since these values are
+    // persisted to logs, they should never be renumbered nor reused.
+    @IntDef({AppOptIn.NO_PREFERENCE, AppOptIn.OPT_IN, AppOptIn.OPT_OUT})
+    @interface AppOptIn {
+        int NO_PREFERENCE = 0;
+        int OPT_IN = 1;
+        int OPT_OUT = 2;
+
+        int COUNT = 3;
     }
 
-    private static boolean appHasOptedIn(Context appContext) {
+    private static void recordAppOptIn(@AppOptIn int value) {
+        RecordHistogram.recordEnumeratedHistogram(
+                "SafeBrowsing.WebView.AppOptIn", value, AppOptIn.COUNT);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static void maybeEnableSafeBrowsingFromManifest(final Context appContext) {
+        Boolean appOptIn = getAppOptInPreference(appContext);
+        if (appOptIn == null) {
+            recordAppOptIn(AppOptIn.NO_PREFERENCE);
+        } else if (appOptIn) {
+            recordAppOptIn(AppOptIn.OPT_IN);
+        } else {
+            recordAppOptIn(AppOptIn.OPT_OUT);
+        }
+
+        // If the app specifies something, fallback to the app's preference, otherwise check for the
+        // existence of the CLI switch.
+        AwContentsStatics.setSafeBrowsingEnabledByManifest(
+                appOptIn == null ? !isDisabledByCommandLine() : appOptIn);
+
+        Callback<Boolean> cb =
+                optin -> setSafeBrowsingUserOptIn(optin == null ? DEFAULT_USER_OPT_IN : optin);
+        PlatformServiceBridge.getInstance().querySafeBrowsingUserConsent(appContext, cb);
+    }
+
+    private static boolean isDisabledByCommandLine() {
+        CommandLine cli = CommandLine.getInstance();
+        // Disable flag has higher precedence than the default
+        return cli.hasSwitch(AwSwitches.WEBVIEW_DISABLE_SAFEBROWSING_SUPPORT);
+    }
+
+    /**
+     * Checks the application manifest for Safe Browsing opt-in preference.
+     *
+     * @param appContext application context.
+     * @return true if app has opted in, false if opted out, and null if no preference specified.
+     */
+    @Nullable
+    private static Boolean getAppOptInPreference(Context appContext) {
         try {
             ApplicationInfo info = appContext.getPackageManager().getApplicationInfo(
                     appContext.getPackageName(), PackageManager.GET_META_DATA);
             if (info.metaData == null) {
-                // null means no such tag was found.
-                return false;
+                // No <meta-data> tag was found.
+                return null;
             }
             return info.metaData.containsKey(OPT_IN_META_DATA_STR)
                     ? info.metaData.getBoolean(OPT_IN_META_DATA_STR)
-                    : false;
+                    : null;
         } catch (PackageManager.NameNotFoundException e) {
             // This should never happen.
             Log.e(TAG, "App could not find itself by package name!");
@@ -79,8 +102,12 @@ public class AwSafeBrowsingConfigHelper {
         return sSafeBrowsingUserOptIn;
     }
 
+    // Should only be called once during startup after we receive the result of the underlying GMS
+    // API.
     public static void setSafeBrowsingUserOptIn(boolean optin) {
         sSafeBrowsingUserOptIn = optin;
+
+        RecordHistogram.recordBooleanHistogram("SafeBrowsing.WebView.UserOptIn", optin);
     }
 
     // Not meant to be instantiated.

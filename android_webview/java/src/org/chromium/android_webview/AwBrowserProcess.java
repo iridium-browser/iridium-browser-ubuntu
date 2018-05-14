@@ -9,16 +9,17 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.os.StrictMode;
-import android.webkit.ValueCallback;
 
 import org.chromium.android_webview.command_line.CommandLineUtil;
-import org.chromium.android_webview.crash.CrashReceiverService;
-import org.chromium.android_webview.crash.ICrashReceiverService;
 import org.chromium.android_webview.policy.AwPolicyProvider;
+import org.chromium.android_webview.services.CrashReceiverService;
+import org.chromium.android_webview.services.ICrashReceiverService;
+import org.chromium.base.BuildInfo;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
@@ -46,7 +47,7 @@ import java.nio.channels.FileLock;
  */
 @JNINamespace("android_webview")
 public final class AwBrowserProcess {
-    public static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "webview";
+    public static final String WEBVIEW_DIR_BASENAME = "webview";
 
     private static final String TAG = "AwBrowserProcess";
     private static final String EXCLUSIVE_LOCK_FILE = "webview_data.lock";
@@ -58,9 +59,18 @@ public final class AwBrowserProcess {
      * Loads the native library, and performs basic static construction of objects needed
      * to run webview in this process. Does not create threads; safe to call from zygote.
      * Note: it is up to the caller to ensure this is only called once.
+     *
+     * @param processDataDirSuffix The suffix to use when setting the data directory for this
+     *                             process; null to use no suffix.
      */
-    public static void loadLibrary() {
-        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
+    public static void loadLibrary(String processDataDirSuffix) {
+        if (processDataDirSuffix == null) {
+            PathUtils.setPrivateDataDirectorySuffix(WEBVIEW_DIR_BASENAME, null);
+        } else {
+            String processDataDirName = WEBVIEW_DIR_BASENAME + "_" + processDataDirSuffix;
+            PathUtils.setPrivateDataDirectorySuffix(processDataDirName, processDataDirName);
+        }
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
         try {
             LibraryLoader libraryLoader = LibraryLoader.get(LibraryProcessType.PROCESS_WEBVIEW);
             libraryLoader.loadNow();
@@ -70,6 +80,8 @@ public final class AwBrowserProcess {
             libraryLoader.switchCommandLineForWebView();
         } catch (ProcessInitException e) {
             throw new RuntimeException("Cannot load WebView", e);
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
         }
     }
 
@@ -80,8 +92,10 @@ public final class AwBrowserProcess {
     public static void configureChildProcessLauncher(String packageName,
             boolean isExternalService) {
         final boolean bindToCaller = true;
-        ChildProcessCreationParams.registerDefault(new ChildProcessCreationParams(packageName,
-                isExternalService, LibraryProcessType.PROCESS_WEBVIEW_CHILD, bindToCaller));
+        final boolean ignoreVisibilityForImportance = true;
+        ChildProcessCreationParams.set(new ChildProcessCreationParams(packageName,
+                isExternalService, LibraryProcessType.PROCESS_WEBVIEW_CHILD, bindToCaller,
+                ignoreVisibilityForImportance));
     }
 
     /**
@@ -91,40 +105,52 @@ public final class AwBrowserProcess {
      */
     public static void start() {
         final Context appContext = ContextUtils.getApplicationContext();
-        tryObtainingDataDirLock(appContext);
+        tryObtainingDataDirLock();
         // We must post to the UI thread to cover the case that the user
         // has invoked Chromium startup by using the (thread-safe)
         // CookieManager rather than creating a WebView.
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                boolean multiProcess = CommandLine.getInstance().hasSwitch(
-                        AwSwitches.WEBVIEW_SANDBOXED_RENDERER);
-                if (multiProcess) {
-                    ChildProcessLauncherHelper.warmUp(appContext);
-                }
-                // The policies are used by browser startup, so we need to register the policy
-                // providers before starting the browser process. This only registers java objects
-                // and doesn't need the native library.
-                CombinedPolicyProvider.get().registerProvider(new AwPolicyProvider(appContext));
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            boolean multiProcess = CommandLine.getInstance().hasSwitch(
+                    AwSwitches.WEBVIEW_SANDBOXED_RENDERER);
+            if (multiProcess) {
+                ChildProcessLauncherHelper.warmUp(appContext);
+            }
+            // The policies are used by browser startup, so we need to register the policy
+            // providers before starting the browser process. This only registers java objects
+            // and doesn't need the native library.
+            CombinedPolicyProvider.get().registerProvider(new AwPolicyProvider(appContext));
 
-                // Check android settings but only when safebrowsing is enabled.
-                AwSafeBrowsingConfigHelper.maybeInitSafeBrowsingFromSettings(appContext);
+            // Check android settings but only when safebrowsing is enabled.
+            AwSafeBrowsingConfigHelper.maybeEnableSafeBrowsingFromManifest(appContext);
 
-                try {
-                    BrowserStartupController.get(LibraryProcessType.PROCESS_WEBVIEW)
-                            .startBrowserProcessesSync(!multiProcess);
-                } catch (ProcessInitException e) {
-                    throw new RuntimeException("Cannot initialize WebView", e);
-                }
+            try {
+                BrowserStartupController.get(LibraryProcessType.PROCESS_WEBVIEW)
+                        .startBrowserProcessesSync(!multiProcess);
+            } catch (ProcessInitException e) {
+                throw new RuntimeException("Cannot initialize WebView", e);
             }
         });
+
+        // Only run cleanup task on N+ since on earlier versions there are no extra pak files.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // Cleanup task to remove unnecessary extra pak files (crbug.com/752510).
+            // TODO(zpeng): Remove cleanup code after at least M64 (crbug.com/756580).
+            AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
+                File extraPaksDir = new File(PathUtils.getDataDirectory(), "paks");
+                if (extraPaksDir.exists()) {
+                    for (File pakFile: extraPaksDir.listFiles()) {
+                        pakFile.delete();
+                    }
+                    extraPaksDir.delete();
+                }
+            });
+        }
     }
 
-    private static void tryObtainingDataDirLock(Context context) {
-        // Too many apps rely on this at present to make this fatal,
-        // even though it's known to be unsafe.
-        boolean dieOnFailure = false;
+    private static void tryObtainingDataDirLock() {
+        // Many existing apps rely on this even though it's known to be unsafe.
+        // Make it fatal when on P for apps that target P or higher
+        boolean dieOnFailure = BuildInfo.isAtLeastP() && BuildInfo.targetsAtLeastP();
 
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
         try {
@@ -140,8 +166,8 @@ public final class AwBrowserProcess {
                 Log.w(TAG, "Failed to create lock file " + lockFile, e);
             }
             if (!success) {
-                final String error = "Using WebView from more than one process at once in a single "
-                        + "app is not supported. https://crbug.com/558377";
+                final String error = "Using WebView from more than one process at once with the "
+                        + "same data directory is not supported. https://crbug.com/558377";
                 if (dieOnFailure) {
                     throw new RuntimeException(error);
                 } else {
@@ -185,18 +211,15 @@ public final class AwBrowserProcess {
             AwBrowserProcess.handleMinidumps(webViewPackageName, true /* enabled */);
         }
 
-        PlatformServiceBridge.getInstance().queryMetricsSetting(new ValueCallback<Boolean>() {
-            // Actions conditioned on whether the Android Checkbox is toggled on
-            public void onReceiveValue(Boolean enabled) {
-                ThreadUtils.assertOnUiThread();
-                if (updateMetricsConsent) {
-                    AwMetricsServiceClient.setConsentSetting(
-                            ContextUtils.getApplicationContext(), enabled);
-                }
+        PlatformServiceBridge.getInstance().queryMetricsSetting(enabled -> {
+            ThreadUtils.assertOnUiThread();
+            if (updateMetricsConsent) {
+                AwMetricsServiceClient.setConsentSetting(
+                        ContextUtils.getApplicationContext(), enabled);
+            }
 
-                if (!enableMinidumpUploadingForTesting) {
-                    AwBrowserProcess.handleMinidumps(webViewPackageName, enabled);
-                }
+            if (!enableMinidumpUploadingForTesting) {
+                AwBrowserProcess.handleMinidumps(webViewPackageName, enabled);
             }
         });
     }

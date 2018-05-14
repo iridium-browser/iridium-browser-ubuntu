@@ -4,13 +4,17 @@
 
 #include "platform/blob/BlobBytesProvider.h"
 
+#include <algorithm>
+#include <memory>
+#include <utility>
+
 #include "base/files/file.h"
 #include "base/files/file_util.h"
+#include "base/run_loop.h"
 #include "base/test/scoped_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
-namespace {
 
 class BlobBytesProviderTest : public ::testing::Test {
  public:
@@ -39,17 +43,39 @@ class BlobBytesProviderTest : public ::testing::Test {
  protected:
   base::test::ScopedTaskEnvironment scoped_task_environment_;
 
-  RefPtr<RawData> test_data1_;
+  scoped_refptr<RawData> test_data1_;
   Vector<uint8_t> test_bytes1_;
-  RefPtr<RawData> test_data2_;
+  scoped_refptr<RawData> test_data2_;
   Vector<uint8_t> test_bytes2_;
-  RefPtr<RawData> test_data3_;
+  scoped_refptr<RawData> test_data3_;
   Vector<uint8_t> test_bytes3_;
   Vector<uint8_t> combined_bytes_;
 };
 
+TEST_F(BlobBytesProviderTest, Consolidation) {
+  BlobBytesProvider data;
+  data.AppendData(base::make_span("abc", 3));
+  data.AppendData(base::make_span("def", 3));
+  data.AppendData(base::make_span("ps1", 3));
+  data.AppendData(base::make_span("ps2", 3));
+
+  EXPECT_EQ(1u, data.data_.size());
+  EXPECT_EQ(12u, data.data_[0]->length());
+  EXPECT_EQ(0, memcmp(data.data_[0]->data(), "abcdefps1ps2", 12));
+
+  auto large_data = std::make_unique<char[]>(
+      BlobBytesProvider::kMaxConsolidatedItemSizeInBytes);
+  data.AppendData(base::make_span(
+      large_data.get(), BlobBytesProvider::kMaxConsolidatedItemSizeInBytes));
+
+  EXPECT_EQ(2u, data.data_.size());
+  EXPECT_EQ(12u, data.data_[0]->length());
+  EXPECT_EQ(BlobBytesProvider::kMaxConsolidatedItemSizeInBytes,
+            data.data_[1]->length());
+}
+
 TEST_F(BlobBytesProviderTest, RequestAsReply) {
-  auto provider = WTF::MakeUnique<BlobBytesProvider>(test_data1_);
+  auto provider = std::make_unique<BlobBytesProvider>(test_data1_);
   Vector<uint8_t> received_bytes;
   provider->RequestAsReply(
       base::Bind([](Vector<uint8_t>* bytes_out,
@@ -58,7 +84,7 @@ TEST_F(BlobBytesProviderTest, RequestAsReply) {
   EXPECT_EQ(test_bytes1_, received_bytes);
 
   received_bytes.clear();
-  provider = WTF::MakeUnique<BlobBytesProvider>(test_data1_);
+  provider = std::make_unique<BlobBytesProvider>(test_data1_);
   provider->AppendData(test_data2_);
   provider->AppendData(test_data3_);
   provider->RequestAsReply(
@@ -67,6 +93,8 @@ TEST_F(BlobBytesProviderTest, RequestAsReply) {
                  &received_bytes));
   EXPECT_EQ(combined_bytes_, received_bytes);
 }
+
+namespace {
 
 struct FileTestData {
   uint64_t offset;
@@ -82,7 +110,7 @@ class RequestAsFile : public BlobBytesProviderTest,
  public:
   void SetUp() override {
     BlobBytesProviderTest::SetUp();
-    test_provider_ = WTF::MakeUnique<BlobBytesProvider>(test_data1_);
+    test_provider_ = std::make_unique<BlobBytesProvider>(test_data1_);
     test_provider_->AppendData(test_data2_);
     test_provider_->AppendData(test_data3_);
 
@@ -212,7 +240,7 @@ INSTANTIATE_TEST_CASE_P(BlobBytesProviderTest,
                         ::testing::ValuesIn(file_tests));
 
 TEST_F(BlobBytesProviderTest, RequestAsFile_MultipleChunks) {
-  auto provider = WTF::MakeUnique<BlobBytesProvider>(test_data1_);
+  auto provider = std::make_unique<BlobBytesProvider>(test_data1_);
   provider->AppendData(test_data2_);
   provider->AppendData(test_data3_);
 
@@ -244,7 +272,7 @@ TEST_F(BlobBytesProviderTest, RequestAsFile_MultipleChunks) {
 }
 
 TEST_F(BlobBytesProviderTest, RequestAsFile_InvaldFile) {
-  auto provider = WTF::MakeUnique<BlobBytesProvider>(test_data1_);
+  auto provider = std::make_unique<BlobBytesProvider>(test_data1_);
 
   provider->RequestAsFile(
       0, 16, base::File(), 0,
@@ -254,7 +282,7 @@ TEST_F(BlobBytesProviderTest, RequestAsFile_InvaldFile) {
 }
 
 TEST_F(BlobBytesProviderTest, RequestAsFile_UnwritableFile) {
-  auto provider = WTF::MakeUnique<BlobBytesProvider>(test_data1_);
+  auto provider = std::make_unique<BlobBytesProvider>(test_data1_);
 
   base::FilePath path;
   base::CreateTemporaryFile(&path);
@@ -272,7 +300,7 @@ TEST_F(BlobBytesProviderTest, RequestAsFile_UnwritableFile) {
 }
 
 TEST_F(BlobBytesProviderTest, RequestAsStream) {
-  auto provider = WTF::MakeUnique<BlobBytesProvider>(test_data1_);
+  auto provider = std::make_unique<BlobBytesProvider>(test_data1_);
   provider->AppendData(test_data2_);
   provider->AppendData(test_data3_);
 
@@ -295,16 +323,16 @@ TEST_F(BlobBytesProviderTest, RequestAsStream) {
             }
 
             uint32_t num_bytes = 0;
-            MojoResult query_result = mojo::ReadDataRaw(
-                pipe, nullptr, &num_bytes, MOJO_READ_DATA_FLAG_QUERY);
+            MojoResult query_result =
+                pipe.ReadData(nullptr, &num_bytes, MOJO_READ_DATA_FLAG_QUERY);
             if (query_result == MOJO_RESULT_SHOULD_WAIT)
               return;
             EXPECT_EQ(MOJO_RESULT_OK, query_result);
 
             Vector<uint8_t> bytes(num_bytes);
             EXPECT_EQ(MOJO_RESULT_OK,
-                      mojo::ReadDataRaw(pipe, bytes.data(), &num_bytes,
-                                        MOJO_READ_DATA_FLAG_ALL_OR_NONE));
+                      pipe.ReadData(bytes.data(), &num_bytes,
+                                    MOJO_READ_DATA_FLAG_ALL_OR_NONE));
             bytes_out->AppendVector(bytes);
           },
           pipe.consumer_handle.get(), loop.QuitClosure(), &received_data));

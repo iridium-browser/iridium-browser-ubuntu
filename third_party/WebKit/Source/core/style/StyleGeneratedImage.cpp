@@ -24,7 +24,8 @@
 #include "core/style/StyleGeneratedImage.h"
 
 #include "core/css/CSSImageGeneratorValue.h"
-#include "core/css/resolver/StyleResolver.h"
+#include "platform/geometry/FloatSize.h"
+#include "platform/geometry/LayoutSize.h"
 
 namespace blink {
 
@@ -44,35 +45,36 @@ CSSValue* StyleGeneratedImage::ComputedCSSValue() const {
   return image_generator_value_->ValueWithURLsMadeAbsolute();
 }
 
-LayoutSize StyleGeneratedImage::ImageSize(
+FloatSize StyleGeneratedImage::ImageSize(
     const Document& document,
     float multiplier,
     const LayoutSize& default_object_size) const {
   if (fixed_size_) {
     FloatSize unzoomed_default_object_size(default_object_size);
     unzoomed_default_object_size.Scale(1 / multiplier);
-    return ApplyZoom(LayoutSize(image_generator_value_->FixedSize(
+    return ApplyZoom(FloatSize(image_generator_value_->FixedSize(
                          document, unzoomed_default_object_size)),
                      multiplier);
   }
 
-  return default_object_size;
+  return FloatSize(default_object_size);
 }
 
 void StyleGeneratedImage::AddClient(ImageResourceObserver* observer) {
-  image_generator_value_->AddClient(observer, IntSize());
+  image_generator_value_->AddClient(observer);
 }
 
 void StyleGeneratedImage::RemoveClient(ImageResourceObserver* observer) {
   image_generator_value_->RemoveClient(observer);
 }
 
-PassRefPtr<Image> StyleGeneratedImage::GetImage(
+scoped_refptr<Image> StyleGeneratedImage::GetImage(
     const ImageResourceObserver& observer,
     const Document& document,
     const ComputedStyle& style,
-    const IntSize& size) const {
-  return image_generator_value_->GetImage(observer, document, style, size);
+    const FloatSize& target_size) const {
+  return image_generator_value_->GetImage(observer, document, style,
+                                          target_size);
 }
 
 bool StyleGeneratedImage::KnownToBeOpaque(const Document& document,
@@ -80,7 +82,7 @@ bool StyleGeneratedImage::KnownToBeOpaque(const Document& document,
   return image_generator_value_->KnownToBeOpaque(document, style);
 }
 
-DEFINE_TRACE(StyleGeneratedImage) {
+void StyleGeneratedImage::Trace(blink::Visitor* visitor) {
   visitor->Trace(image_generator_value_);
   StyleImage::Trace(visitor);
 }

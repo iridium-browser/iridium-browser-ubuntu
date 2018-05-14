@@ -4,7 +4,6 @@
 
 #include "chrome/browser/extensions/external_install_error.h"
 
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -36,7 +35,7 @@ IN_PROC_BROWSER_TEST_F(ExternalInstallErrorTest, TestShutdown) {
     content::WindowedNotificationObserver install_observer(
         NOTIFICATION_CRX_INSTALLER_DONE,
         content::NotificationService::AllSources());
-    auto provider = base::MakeUnique<MockExternalProvider>(
+    auto provider = std::make_unique<MockExternalProvider>(
         extension_service(), Manifest::EXTERNAL_PREF);
     provider->UpdateOrAddExtension(kId, "1.0.0.0",
                                    test_data_dir_.AppendASCII("good.crx"));
@@ -52,7 +51,7 @@ IN_PROC_BROWSER_TEST_F(ExternalInstallErrorTest, TestShutdown) {
   EXPECT_FALSE(registry->enabled_extensions().Contains(kId));
   ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
   EXPECT_FALSE(prefs->IsExternalExtensionAcknowledged(kId));
-  EXPECT_EQ(Extension::DISABLE_EXTERNAL_EXTENSION,
+  EXPECT_EQ(disable_reason::DISABLE_EXTERNAL_EXTENSION,
             prefs->GetDisableReasons(kId));
 
   // Verify the external error.

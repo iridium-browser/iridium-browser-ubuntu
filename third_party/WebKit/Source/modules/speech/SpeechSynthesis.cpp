@@ -28,7 +28,7 @@
 #include "core/dom/ExecutionContext.h"
 #include "modules/speech/SpeechSynthesisEvent.h"
 #include "platform/speech/PlatformSpeechSynthesisVoice.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
 
 namespace blink {
 
@@ -58,8 +58,8 @@ const HeapVector<Member<SpeechSynthesisVoice>>& SpeechSynthesis::getVoices() {
 
   // If the voiceList is empty, that's the cue to get the voices from the
   // platform again.
-  const Vector<RefPtr<PlatformSpeechSynthesisVoice>>& platform_voices =
-      platform_speech_synthesizer_->VoiceList();
+  const Vector<scoped_refptr<PlatformSpeechSynthesisVoice>>& platform_voices =
+      platform_speech_synthesizer_->GetVoiceList();
   size_t voice_count = platform_voices.size();
   for (size_t k = 0; k < voice_count; k++)
     voice_list_.push_back(SpeechSynthesisVoice::Create(platform_voices[k]));
@@ -88,7 +88,7 @@ void SpeechSynthesis::StartSpeakingImmediately() {
   SpeechSynthesisUtterance* utterance = CurrentSpeechUtterance();
   DCHECK(utterance);
 
-  utterance->SetStartTime(MonotonicallyIncreasingTime());
+  utterance->SetStartTime(CurrentTimeTicksInSeconds());
   is_paused_ = false;
   platform_speech_synthesizer_->Speak(utterance->PlatformUtterance());
 }
@@ -130,7 +130,7 @@ void SpeechSynthesis::FireEvent(const AtomicString& type,
     return;
 
   double elapsed_time_millis =
-      (MonotonicallyIncreasingTime() - utterance->StartTime()) * 1000.0;
+      (CurrentTimeTicksInSeconds() - utterance->StartTime()) * 1000.0;
   utterance->DispatchEvent(SpeechSynthesisEvent::Create(
       type, utterance, char_index, elapsed_time_millis, name));
 }
@@ -234,7 +234,7 @@ const AtomicString& SpeechSynthesis::InterfaceName() const {
   return EventTargetNames::SpeechSynthesis;
 }
 
-DEFINE_TRACE(SpeechSynthesis) {
+void SpeechSynthesis::Trace(blink::Visitor* visitor) {
   visitor->Trace(platform_speech_synthesizer_);
   visitor->Trace(voice_list_);
   visitor->Trace(utterance_queue_);

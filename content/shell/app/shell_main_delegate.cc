@@ -15,6 +15,7 @@
 #include "base/trace_event/trace_log.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
+#include "components/crash/core/common/crash_key.h"
 #include "content/common/content_constants_internal.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/content_switches.h"
@@ -38,9 +39,9 @@
 #include "gpu/config/gpu_switches.h"
 #include "ipc/ipc_features.h"
 #include "media/base/media_switches.h"
-#include "media/base/mime_util.h"
 #include "net/cookies/cookie_monster.h"
 #include "ppapi/features/features.h"
+#include "services/network/public/cpp/network_switches.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/ui_base_switches.h"
@@ -62,9 +63,11 @@
 #include "content/shell/android/shell_descriptors.h"
 #endif
 
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#include "components/crash/content/app/crashpad.h"  // nogncheck
+#endif
+
 #if defined(OS_MACOSX)
-#include "base/mac/os_crash_dumps.h"
-#include "components/crash/content/app/breakpad_mac.h"
 #include "content/shell/app/paths_mac.h"
 #include "content/shell/app/shell_main_delegate_mac.h"
 #endif  // OS_MACOSX
@@ -73,7 +76,6 @@
 #include <windows.h>
 #include <initguid.h>
 #include "base/logging_win.h"
-#include "components/crash/content/app/breakpad_win.h"
 #include "content/shell/common/v8_breakpad_support_win.h"
 #endif
 
@@ -81,10 +83,16 @@
 #include "components/crash/content/app/breakpad_linux.h"
 #endif
 
+#if defined(OS_FUCHSIA)
+#include "base/base_paths_fuchsia.h"
+#endif  // OS_FUCHSIA
+
 namespace {
 
+#if !defined(OS_FUCHSIA)
 base::LazyInstance<content::ShellCrashReporterClient>::Leaky
     g_shell_crash_client = LAZY_INSTANCE_INITIALIZER;
+#endif
 
 #if defined(OS_WIN)
 // If "Content Shell" doesn't show up in your list of trace providers in
@@ -103,16 +111,23 @@ const GUID kContentShellProviderName = {
         { 0x84, 0x13, 0xec, 0x94, 0xd8, 0xc2, 0xa4, 0xb6 } };
 #endif
 
-void InitLogging() {
+void InitLogging(const base::CommandLine& command_line) {
   base::FilePath log_filename;
-  PathService::Get(base::DIR_EXE, &log_filename);
-  log_filename = log_filename.AppendASCII("content_shell.log");
+  std::string filename = command_line.GetSwitchValueASCII(switches::kLogFile);
+  if (filename.empty()) {
+    PathService::Get(base::DIR_EXE, &log_filename);
+    log_filename = log_filename.AppendASCII("content_shell.log");
+  } else {
+    log_filename = base::FilePath::FromUTF8Unsafe(filename);
+  }
+
   logging::LoggingSettings settings;
   settings.logging_dest = logging::LOG_TO_ALL;
   settings.log_file = log_filename.value().c_str();
   settings.delete_old = logging::DELETE_OLD_LOG_FILE;
   logging::InitLogging(settings);
-  logging::SetLogItems(true, true, true, true);
+  logging::SetLogItems(true /* Process ID */, true /* Thread ID */,
+                       true /* Timestamp */, false /* Tick count */);
 }
 
 }  // namespace
@@ -137,15 +152,20 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
 
   v8_breakpad_support::SetUp();
 #endif
+#if defined(OS_LINUX)
+  breakpad::SetFirstChanceExceptionHandler(v8::V8::TryHandleSignal);
+#endif
 #if defined(OS_MACOSX)
   // Needs to happen before InitializeResourceBundle() and before
   // BlinkTestPlatformInitialize() are called.
   OverrideFrameworkBundlePath();
   OverrideChildProcessPath();
+  OverrideSourceRootPath();
   EnsureCorrectResolutionSettings();
 #endif  // OS_MACOSX
 
-  InitLogging();
+  InitLogging(command_line);
+
   if (command_line.HasSwitch(switches::kCheckLayoutTestSysDeps)) {
     // If CheckLayoutSystemDeps succeeds, we don't exit early. Instead we
     // continue and try to load the fonts in BlinkTestPlatformInitialize
@@ -165,6 +185,7 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
       return true;
     }
 #endif
+    command_line.AppendSwitch(switches::kDisableResizeLock);
     command_line.AppendSwitch(cc::switches::kEnableGpuBenchmarking);
     command_line.AppendSwitch(switches::kEnableLogging);
     command_line.AppendSwitch(switches::kAllowFileAccessFromFiles);
@@ -175,13 +196,17 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
           switches::kUseGL,
           gl::GetGLImplementationName(gl::GetSoftwareGLImplementation()));
     }
-    command_line.AppendSwitch(switches::kSkipGpuDataLoading);
     command_line.AppendSwitchASCII(
         switches::kTouchEventFeatureDetection,
         switches::kTouchEventFeatureDetectionEnabled);
     if (!command_line.HasSwitch(switches::kForceDeviceScaleFactor))
       command_line.AppendSwitchASCII(switches::kForceDeviceScaleFactor, "1.0");
-    command_line.AppendSwitch(switches::kIgnoreAutoplayRestrictionsForTests);
+
+    if (!command_line.HasSwitch(switches::kAutoplayPolicy)) {
+      command_line.AppendSwitchASCII(
+          switches::kAutoplayPolicy,
+          switches::autoplay::kNoUserGestureRequiredPolicy);
+    }
 
     if (!command_line.HasSwitch(switches::kStableReleaseMode)) {
       command_line.AppendSwitch(
@@ -193,16 +218,12 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
       command_line.AppendSwitch(cc::switches::kDisableThreadedAnimation);
     }
 
-    if (!command_line.HasSwitch(switches::kEnableDisplayList2dCanvas)) {
-      command_line.AppendSwitch(switches::kDisableDisplayList2dCanvas);
-    }
-
     command_line.AppendSwitch(switches::kEnableInbandTextTracks);
     command_line.AppendSwitch(switches::kMuteAudio);
 
     command_line.AppendSwitch(switches::kEnablePreciseMemoryInfo);
 
-    command_line.AppendSwitchASCII(switches::kHostResolverRules,
+    command_line.AppendSwitchASCII(network::switches::kHostResolverRules,
                                    "MAP *.test 127.0.0.1");
 
     command_line.AppendSwitch(switches::kEnablePartialRaster);
@@ -219,25 +240,16 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
     // We want stable/baseline results when running layout tests.
     command_line.AppendSwitch(switches::kDisableSkiaRuntimeOpts);
 
-    command_line.AppendSwitch(cc::switches::kDisallowNonExactResourceReuse);
+    command_line.AppendSwitch(switches::kDisallowNonExactResourceReuse);
 
-    // Unless/until WebM files are added to the media layout tests, we need to
-    // avoid removing MP4/H264/AAC so that layout tests can run on Android.
-#if !defined(OS_ANDROID)
-    media::RemoveProprietaryMediaTypesAndCodecsForTests();
-#endif
+    // Always run with fake media devices.
+    command_line.AppendSwitch(switches::kUseFakeUIForMediaStream);
+    command_line.AppendSwitch(switches::kUseFakeDeviceForMediaStream);
 
     if (!BlinkTestPlatformInitialize()) {
       *exit_code = 1;
       return true;
     }
-
-    // Enable additional base::Features. Note that there already may exist a
-    // list of enabled features from the virtual or physical test suite.
-    std::string enabled_features =
-        command_line.GetSwitchValueASCII(switches::kEnableFeatures);
-    enabled_features = "ColorCorrectRendering," + enabled_features;
-    command_line.AppendSwitchASCII(switches::kEnableFeatures, enabled_features);
   }
 
   content_client_.reset(base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -255,35 +267,33 @@ void ShellMainDelegate::PreSandboxStartup() {
   // cpu_brand info.
   base::CPU cpu_info;
 #endif
+
+// Disable platform crash handling and initialize the crash reporter, if
+// requested.
+// TODO(crbug.com/753619): Implement crash reporter integration for Fuchsia.
+#if !defined(OS_FUCHSIA)
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableCrashReporter)) {
     std::string process_type =
         base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kProcessType);
     crash_reporter::SetCrashReporterClient(g_shell_crash_client.Pointer());
-#if defined(OS_MACOSX)
-    base::mac::DisableOSCrashDumps();
-    breakpad::InitCrashReporter(process_type);
-    breakpad::InitCrashProcessInfo(process_type);
-#elif defined(OS_POSIX) && !defined(OS_MACOSX)
-    if (process_type != switches::kZygoteProcess) {
-#if defined(OS_ANDROID)
-      if (process_type.empty())
-        breakpad::InitCrashReporter(process_type);
-      else
-        breakpad::InitNonBrowserCrashReporterForAndroid(process_type);
-#else
+#if defined(OS_MACOSX) || defined(OS_WIN)
+    crash_reporter::InitializeCrashpad(process_type.empty(), process_type);
+#elif defined(OS_LINUX)
+    // Reporting for sub-processes will be initialized in ZygoteForked.
+    if (process_type != switches::kZygoteProcess)
       breakpad::InitCrashReporter(process_type);
-#endif
-    }
-#elif defined(OS_WIN)
-    UINT new_flags =
-        SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX;
-    UINT existing_flags = SetErrorMode(new_flags);
-    SetErrorMode(existing_flags | new_flags);
-    breakpad::InitCrashReporter(process_type);
-#endif
+#elif defined(OS_ANDROID)
+    if (process_type.empty())
+      breakpad::InitCrashReporter(process_type);
+    else
+      breakpad::InitNonBrowserCrashReporterForAndroid(process_type);
+#endif  // defined(OS_ANDROID)
   }
+#endif  // !defined(OS_FUCHSIA)
+
+  crash_reporter::InitializeCrashKeys();
 
   InitializeResourceBundle();
 }
@@ -300,7 +310,7 @@ int ShellMainDelegate::RunProcess(
   std::unique_ptr<BrowserMainRunner> browser_runner_;
 #endif
 
-  base::trace_event::TraceLog::GetInstance()->SetProcessName("Browser");
+  base::trace_event::TraceLog::GetInstance()->set_process_name("Browser");
   base::trace_event::TraceLog::GetInstance()->SetProcessSortIndex(
       kTraceEventBrowserProcessSortIndex);
 
@@ -312,7 +322,7 @@ int ShellMainDelegate::RunProcess(
              : ShellBrowserMain(main_function_params, browser_runner_);
 }
 
-#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
+#if defined(OS_LINUX)
 void ShellMainDelegate::ZygoteForked() {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableCrashReporter)) {
@@ -322,7 +332,7 @@ void ShellMainDelegate::ZygoteForked() {
     breakpad::InitCrashReporter(process_type);
   }
 }
-#endif
+#endif  // defined(OS_LINUX)
 
 void ShellMainDelegate::InitializeResourceBundle() {
 #if defined(OS_ANDROID)
@@ -355,17 +365,15 @@ void ShellMainDelegate::InitializeResourceBundle() {
                                                           pak_region);
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromFileRegion(
       base::File(pak_fd), pak_region, ui::SCALE_FACTOR_100P);
-#else  // defined(OS_ANDROID)
-#if defined(OS_MACOSX)
-  base::FilePath pak_file = GetResourcesPakFilePath();
+#elif defined(OS_MACOSX)
+  ui::ResourceBundle::InitSharedInstanceWithPakPath(GetResourcesPakFilePath());
 #else
   base::FilePath pak_file;
-  bool r = PathService::Get(base::DIR_MODULE, &pak_file);
+  bool r = PathService::Get(base::DIR_ASSETS, &pak_file);
   DCHECK(r);
   pak_file = pak_file.Append(FILE_PATH_LITERAL("content_shell.pak"));
-#endif  // defined(OS_MACOSX)
   ui::ResourceBundle::InitSharedInstanceWithPakPath(pak_file);
-#endif  // defined(OS_ANDROID)
+#endif
 }
 
 ContentBrowserClient* ShellMainDelegate::CreateContentBrowserClient() {

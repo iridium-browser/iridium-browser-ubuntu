@@ -4,10 +4,11 @@
 
 #include "headless/test/headless_browser_test.h"
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -138,18 +139,21 @@ HeadlessBrowserTest::HeadlessBrowserTest() {
 }
 
 void HeadlessBrowserTest::SetUp() {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   // Enable GPU usage (i.e., SwiftShader, hardware GL on macOS) in all tests
   // since that's the default configuration of --headless.
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kUseGpuInTests);
+  command_line->AppendSwitch(switches::kUseGpuInTests);
+  SetUpCommandLine(command_line);
   BrowserTestBase::SetUp();
 }
 
 void HeadlessBrowserTest::SetUpWithoutGPU() {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  SetUpCommandLine(command_line);
   BrowserTestBase::SetUp();
 }
 
-HeadlessBrowserTest::~HeadlessBrowserTest() {}
+HeadlessBrowserTest::~HeadlessBrowserTest() = default;
 
 void HeadlessBrowserTest::PreRunTestOnMainThread() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
@@ -196,8 +200,10 @@ void HeadlessBrowserTest::RunAsynchronousTest() {
   base::MessageLoop::ScopedNestableTaskAllower nestable_allower(
       base::MessageLoop::current());
   EXPECT_FALSE(run_loop_);
-  run_loop_ = base::MakeUnique<base::RunLoop>();
+  run_loop_ = std::make_unique<base::RunLoop>();
+  PreRunAsynchronousTest();
   run_loop_->Run();
+  PostRunAsynchronousTest();
   run_loop_ = nullptr;
 }
 
@@ -212,7 +218,8 @@ HeadlessAsyncDevTooledBrowserTest::HeadlessAsyncDevTooledBrowserTest()
       browser_devtools_client_(HeadlessDevToolsClient::Create()),
       render_process_exited_(false) {}
 
-HeadlessAsyncDevTooledBrowserTest::~HeadlessAsyncDevTooledBrowserTest() {}
+HeadlessAsyncDevTooledBrowserTest::~HeadlessAsyncDevTooledBrowserTest() =
+    default;
 
 void HeadlessAsyncDevTooledBrowserTest::DevToolsTargetReady() {
   EXPECT_TRUE(web_contents_->GetDevToolsTarget());
@@ -239,9 +246,7 @@ void HeadlessAsyncDevTooledBrowserTest::RunTest() {
     builder.EnableUnsafeNetworkAccessWithMojoBindings(true);
     builder.AddTabSocketMojoBindings();
   }
-  std::unique_ptr<net::ProxyConfig> proxy_config = GetProxyConfig();
-  if (proxy_config)
-    builder.SetProxyConfig(std::move(proxy_config));
+  CustomizeHeadlessBrowserContext(builder);
   browser_context_ = builder.Build();
 
   browser()->SetDefaultBrowserContext(browser_context_);
@@ -249,6 +254,7 @@ void HeadlessAsyncDevTooledBrowserTest::RunTest() {
 
   web_contents_ = browser_context_->CreateWebContentsBuilder()
                       .SetAllowTabSockets(GetAllowTabSockets())
+                      .SetEnableBeginFrameControl(GetEnableBeginFrameControl())
                       .Build();
   web_contents_->AddObserver(this);
 
@@ -272,14 +278,11 @@ bool HeadlessAsyncDevTooledBrowserTest::GetAllowTabSockets() {
   return false;
 }
 
-bool HeadlessAsyncDevTooledBrowserTest::
-    GetCreateTabSocketOnlyForIsolatedWorld() {
+bool HeadlessAsyncDevTooledBrowserTest::GetEnableBeginFrameControl() {
   return false;
 }
 
-std::unique_ptr<net::ProxyConfig>
-HeadlessAsyncDevTooledBrowserTest::GetProxyConfig() {
-  return nullptr;
-}
+void HeadlessAsyncDevTooledBrowserTest::CustomizeHeadlessBrowserContext(
+    HeadlessBrowserContext::Builder& builder) {}
 
 }  // namespace headless

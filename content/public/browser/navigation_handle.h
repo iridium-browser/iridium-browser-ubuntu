@@ -16,6 +16,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_info.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "ui/base/page_transition_types.h"
 
 class GURL;
@@ -28,6 +29,7 @@ namespace content {
 struct GlobalRequestID;
 class NavigationData;
 class NavigationThrottle;
+class NavigationUIData;
 class RenderFrameHost;
 class SiteInstance;
 class WebContents;
@@ -46,6 +48,9 @@ class CONTENT_EXPORT NavigationHandle {
   //
   // These parameters are always available during the navigation. Note that
   // some may change during navigation (e.g. due to server redirects).
+
+  // Get a unique ID for this navigation.
+  virtual int64_t GetNavigationId() const = 0;
 
   // The URL the frame is navigating to. This may change during the navigation
   // when encountering a server redirect.
@@ -114,13 +119,6 @@ class CONTENT_EXPORT NavigationHandle {
   // Used for specifying a base URL for pages loaded via data URLs.
   virtual const GURL& GetBaseURLForDataURL() = 0;
 
-  // Parameters available at network request start time ------------------------
-  //
-  // The following parameters are only available when the network request is
-  // made for the navigation (or at commit time if no network request is made).
-  // This corresponds to NavigationThrottle::WillSendRequest. They should not
-  // be queried before that.
-
   // Whether the navigation is done using HTTP POST method. This may change
   // during the navigation (e.g. after encountering a server redirect).
   //
@@ -129,6 +127,12 @@ class CONTENT_EXPORT NavigationHandle {
   // schemes like data: or file:).  Therefore //content public API exposes only
   // |bool IsPost()| as opposed to |const std::string& GetMethod()| method.
   virtual bool IsPost() = 0;
+
+  // Returns the POST body associated with this navigation. This will be null
+  // for GET and/or other non-POST requests (or if a response to a POST request
+  // was a redirect that changed the method to GET - for example 302).
+  virtual const scoped_refptr<network::ResourceRequestBody>&
+  GetResourceRequestBody() = 0;
 
   // Returns a sanitized version of the referrer for this request.
   virtual const Referrer& GetReferrer() = 0;
@@ -141,6 +145,9 @@ class CONTENT_EXPORT NavigationHandle {
 
   // Returns the page transition type.
   virtual ui::PageTransition GetPageTransition() = 0;
+
+  // Returns the NavigationUIData associated with the navigation.
+  virtual const NavigationUIData* GetNavigationUIData() = 0;
 
   // Whether the target URL cannot be handled by the browser's internal protocol
   // handlers.
@@ -228,6 +235,11 @@ class CONTENT_EXPORT NavigationHandle {
   // encountering a server redirect).
   virtual net::HttpResponseInfo::ConnectionInfo GetConnectionInfo() = 0;
 
+  // Returns the SSLInfo for a request that succeeded or failed due to a
+  // certificate error. In the case of other request failures or of a non-secure
+  // scheme, returns an empty object.
+  virtual const net::SSLInfo& GetSSLInfo() = 0;
+
   // Returns the ID of the URLRequest associated with this navigation. Can only
   // be called from NavigationThrottle::WillProcessResponse and
   // WebContentsObserver::ReadyToCommitNavigation.
@@ -235,6 +247,19 @@ class CONTENT_EXPORT NavigationHandle {
   // made. The transferred request's ID will not be tracked by the
   // NavigationHandle.
   virtual const GlobalRequestID& GetGlobalRequestID() = 0;
+
+  // Returns true if this navigation resulted in a download. Returns false if
+  // this navigation did not result in a download, or if download status is not
+  // yet known for this navigation.  Download status is determined for a
+  // navigation when processing final (post redirect) HTTP response headers.
+  virtual bool IsDownload() = 0;
+
+  // Returns true if this navigation was initiated by a form submission.
+  virtual bool IsFormSubmission() = 0;
+
+  // If this navigation was triggered by an anchor with a download attribute,
+  // this returns the (possibly empty) value of that attribute.
+  virtual const base::Optional<std::string>& GetSuggestedFilename() = 0;
 
   // Testing methods ----------------------------------------------------------
   //
@@ -245,7 +270,10 @@ class CONTENT_EXPORT NavigationHandle {
       RenderFrameHost* render_frame_host,
       bool committed = false,
       net::Error error = net::OK,
-      bool is_same_document = false);
+      bool is_same_document = false,
+      bool is_post = false,
+      ui::PageTransition transition = ui::PAGE_TRANSITION_LINK,
+      bool is_form_submission = false);
 
   // Registers a NavigationThrottle for tests. The throttle can
   // modify the request, pause the request or cancel the request. This will
@@ -259,11 +287,7 @@ class CONTENT_EXPORT NavigationHandle {
 
   // Simulates the network request starting.
   virtual NavigationThrottle::ThrottleCheckResult
-  CallWillStartRequestForTesting(bool is_post,
-                                 const Referrer& sanitized_referrer,
-                                 bool has_user_gesture,
-                                 ui::PageTransition transition,
-                                 bool is_external_protocol) = 0;
+  CallWillStartRequestForTesting() = 0;
 
   // Simulates the network request being redirected.
   virtual NavigationThrottle::ThrottleCheckResult
@@ -271,6 +295,10 @@ class CONTENT_EXPORT NavigationHandle {
                                     bool new_method_is_post,
                                     const GURL& new_referrer_url,
                                     bool new_is_external_protocol) = 0;
+
+  // Simulates the network request failing.
+  virtual NavigationThrottle::ThrottleCheckResult CallWillFailRequestForTesting(
+      base::Optional<net::SSLInfo> ssl_info) = 0;
 
   // Simulates the reception of the network response.
   virtual NavigationThrottle::ThrottleCheckResult

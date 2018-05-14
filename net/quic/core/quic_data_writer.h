@@ -7,7 +7,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 
 #include "base/macros.h"
 #include "net/base/int128.h"
@@ -28,7 +27,6 @@ class QUIC_EXPORT_PRIVATE QuicDataWriter {
   // Creates a QuicDataWriter where |buffer| is not owned.
   QuicDataWriter(size_t size,
                  char* buffer,
-                 Perspective perspective,
                  Endianness endianness);
 
   ~QuicDataWriter();
@@ -47,6 +45,18 @@ class QUIC_EXPORT_PRIVATE QuicDataWriter {
   bool WriteUInt16(uint16_t value);
   bool WriteUInt32(uint32_t value);
   bool WriteUInt64(uint64_t value);
+
+  // Write an unsigned-integer value per the IETF QUIC/Variable Length
+  // Integer encoding rules (see draft-ietf-quic-transport-08.txt).
+  // IETF Variable Length Integers have 62 significant bits, so the
+  // value to write must be in the range of 0...(2^62)-1. Returns
+  // false if the value is out of range or if there is no room in the
+  // buffer.
+  bool WriteVarInt62(uint64_t value);
+
+  // Writes |value| to the position |offset| from the start of the data.
+  // |offset| must be less than the current length of the writer.
+  bool WriteUInt8AtOffset(uint8_t value, size_t offset);
 
   // Writes least significant |num_bytes| of a 64-bit unsigned integer in the
   // correct byte order.
@@ -78,21 +88,19 @@ class QUIC_EXPORT_PRIVATE QuicDataWriter {
 
   size_t capacity() const { return capacity_; }
 
+  size_t remaining() const { return capacity_ - length_; }
+
  private:
   // Returns the location that the data should be written at, or nullptr if
   // there is not enough room. Call EndWrite with the returned offset and the
   // given length to pad out for the next write.
   char* BeginWrite(size_t length);
 
+  // TODO(fkastenholz, b/73004262) change buffer_, et al, to be uint8_t, not
+  // char.
   char* buffer_;
   size_t capacity_;  // Allocation size of payload (or -1 if buffer is const).
   size_t length_;    // Current length of the buffer.
-
-  // TODO(zhongyi): remove this field as it is no longer used.
-  // Perspective of this data writer. Please note, although client and server
-  // may have different in-memory representation of the same field, the on wire
-  // representation must be consistent.
-  Perspective perspective_;
 
   // The endianness to write integers and floating numbers.
   Endianness endianness_;

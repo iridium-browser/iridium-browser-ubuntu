@@ -25,6 +25,7 @@
 #include "ui/display/display.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/slider.h"
@@ -92,7 +93,7 @@ BrightnessView::BrightnessView(bool default_view, double initial_percent)
     : dragging_(false),
       is_default_view_(default_view),
       last_percent_(initial_percent) {
-  SetLayoutManager(new views::FillLayout);
+  SetLayoutManager(std::make_unique<views::FillLayout>());
   // Use CreateMultiTargetRowView() instead of CreateDefaultRowView() because
   // that's what the audio row uses and we want the two rows to layout with the
   // same insets.
@@ -107,7 +108,7 @@ BrightnessView::BrightnessView(bool default_view, double initial_percent)
 
   slider_ = TrayPopupUtils::CreateSlider(this);
   slider_->SetValue(static_cast<float>(initial_percent / 100.0));
-  slider_->SetAccessibleName(
+  slider_->GetViewAccessibility().OverrideName(
       rb.GetLocalizedString(IDS_ASH_STATUS_TRAY_BRIGHTNESS));
   tri_view->AddView(TriView::Container::CENTER, slider_);
 
@@ -199,13 +200,13 @@ void TrayBrightness::GetInitialBrightness() {
   if (!brightness_control_delegate)
     return;
   brightness_control_delegate->GetBrightnessPercent(
-      base::Bind(&TrayBrightness::HandleInitialBrightness,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&TrayBrightness::HandleInitialBrightness,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
-void TrayBrightness::HandleInitialBrightness(double percent) {
-  if (!got_current_percent_)
-    HandleBrightnessChanged(percent, false);
+void TrayBrightness::HandleInitialBrightness(base::Optional<double> percent) {
+  if (!got_current_percent_ && percent.has_value())
+    HandleBrightnessChanged(percent.value(), false);
 }
 
 views::View* TrayBrightness::CreateDefaultView(LoginStatus status) {
@@ -265,7 +266,7 @@ void TrayBrightness::HandleBrightnessChanged(double percent,
   if (brightness_view_ && brightness_view_->visible())
     SetDetailedViewCloseDelay(kTrayPopupAutoCloseDelayInSeconds);
   else
-    ShowDetailedView(kTrayPopupAutoCloseDelayInSeconds, false);
+    ShowDetailedView(kTrayPopupAutoCloseDelayInSeconds);
 }
 
 }  // namespace ash

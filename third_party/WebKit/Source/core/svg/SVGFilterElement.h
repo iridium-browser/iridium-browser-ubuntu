@@ -24,7 +24,6 @@
 #define SVGFilterElement_h
 
 #include "core/CoreExport.h"
-#include "core/SVGNames.h"
 #include "core/svg/SVGAnimatedEnumeration.h"
 #include "core/svg/SVGAnimatedLength.h"
 #include "core/svg/SVGElement.h"
@@ -34,6 +33,8 @@
 
 namespace blink {
 
+class SVGFilterPrimitiveStandardAttributes;
+
 class CORE_EXPORT SVGFilterElement final : public SVGElement,
                                            public SVGURIReference {
   DEFINE_WRAPPERTYPEINFO();
@@ -41,7 +42,7 @@ class CORE_EXPORT SVGFilterElement final : public SVGElement,
 
  public:
   DECLARE_NODE_FACTORY(SVGFilterElement);
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   ~SVGFilterElement() override;
 
@@ -56,10 +57,15 @@ class CORE_EXPORT SVGFilterElement final : public SVGElement,
     return primitive_units_.Get();
   }
 
+  // Fine-grained invalidation of a specific property on a specific primitive.
+  void PrimitiveAttributeChanged(SVGFilterPrimitiveStandardAttributes&,
+                                 const QualifiedName&);
+
+  // Invalidate the entire filter chain.
+  void InvalidateFilterChain();
+
  private:
   explicit SVGFilterElement(Document&);
-
-  bool NeedsPendingResourceHandling() const override { return false; }
 
   void SvgAttributeChanged(const QualifiedName&) override;
   void ChildrenChanged(const ChildrenChange&) override;

@@ -9,10 +9,12 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/optional.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/base/locale_util.h"
 #include "chrome/browser/chromeos/eol_notification.h"
@@ -21,6 +23,7 @@
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_notification_controller.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
 #include "chrome/browser/chromeos/login/signin/token_handle_util.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/login/auth/authenticator.h"
 #include "chromeos/login/auth/user_context.h"
@@ -32,8 +35,13 @@
 class AccountId;
 class GURL;
 class PrefRegistrySimple;
+class PrefService;
 class Profile;
 class TokenHandleFetcher;
+
+namespace base {
+class CommandLine;
+}
 
 namespace net {
 class URLRequestContextGetter;
@@ -58,8 +66,7 @@ class UserSessionManagerDelegate {
   // Called after profile is loaded and prepared for the session.
   // |browser_launched| will be true is browser has been launched, otherwise
   // it will return false and client is responsible on launching browser.
-  virtual void OnProfilePrepared(Profile* profile,
-                                 bool browser_launched) = 0;
+  virtual void OnProfilePrepared(Profile* profile, bool browser_launched) = 0;
 
  protected:
   virtual ~UserSessionManagerDelegate();
@@ -83,10 +90,11 @@ class UserSessionStateObserver {
 // load profile, restore OAuth authentication session etc.
 class UserSessionManager
     : public OAuth2LoginManager::Observer,
-      public net::NetworkChangeNotifier::ConnectionTypeObserver,
+      public net::NetworkChangeNotifier::NetworkChangeObserver,
       public base::SupportsWeakPtr<UserSessionManager>,
       public UserSessionManagerDelegate,
-      public user_manager::UserManager::UserSessionStateObserver {
+      public user_manager::UserManager::UserSessionStateObserver,
+      public user_manager::UserManager::Observer {
  public:
   // Context of StartSession calls.
   typedef enum {
@@ -103,6 +111,21 @@ class UserSessionManager
     SECONDARY_USER_SESSION_AFTER_CRASH,
   } StartSessionType;
 
+  // Types of command-line switches for a user session. The command-line
+  // switches of all types are combined.
+  enum class CommandLineSwitchesType {
+    // Switches for controlling session initialization, such as if the profile
+    // requires enterprise policy.
+    kSessionControl,
+    // Switches derived from user policy, from user-set flags and kiosk app
+    // control switches.
+    // TODO(pmarko): Split this into multiple categories, such as kPolicy,
+    // kFlags, kKioskControl. Consider also adding sentinels automatically and
+    // pre-filling these switches from the command-line if the chrome has been
+    // started with the --login-user flag (https://crbug.com/832857).
+    kPolicyAndFlagsAndKioskControl
+  };
+
   // Returns UserSessionManager instance.
   static UserSessionManager* GetInstance();
 
@@ -111,6 +134,11 @@ class UserSessionManager
 
   // Registers session related preferences.
   static void RegisterPrefs(PrefRegistrySimple* registry);
+
+  // Appends additional command switches to the given command line if
+  // SitePerProcess/IsolateOrigins policy is present.
+  static void MaybeAppendPolicySwitches(PrefService* user_profile_prefs,
+                                        base::CommandLine* user_flags);
 
   // Invoked after the tmpfs is successfully mounted.
   // Asks session_manager to restart Chrome in Guest session mode.
@@ -180,12 +208,10 @@ class UserSessionManager
 
   // Gets/sets Chrome OAuth client id and secret for kiosk app mode. The default
   // values can be overridden with kiosk auth file.
-  bool GetAppModeChromeClientOAuthInfo(
-      std::string* chrome_client_id,
-      std::string* chrome_client_secret);
-  void SetAppModeChromeClientOAuthInfo(
-      const std::string& chrome_client_id,
-      const std::string& chrome_client_secret);
+  bool GetAppModeChromeClientOAuthInfo(std::string* chrome_client_id,
+                                       std::string* chrome_client_secret);
+  void SetAppModeChromeClientOAuthInfo(const std::string& chrome_client_id,
+                                       const std::string& chrome_client_secret);
 
   // Thin wrapper around StartupBrowserCreator::LaunchBrowser().  Meant to be
   // used in a Task posted to the UI thread.  Once the browser is launched the
@@ -229,7 +255,8 @@ class UserSessionManager
   scoped_refptr<input_method::InputMethodManager::State> GetDefaultIMEState(
       Profile* profile);
 
-  // Check given profile's EndofLife Status and show notification accordingly.
+  // Check to see if given profile should show EndOfLife Notification
+  // and show the message accordingly.
   void CheckEolStatus(Profile* profile);
 
   // Note this could return NULL if not enabled.
@@ -253,6 +280,25 @@ class UserSessionManager
 
   void Shutdown();
 
+  // Sets the command-line switches to be set by session manager for a user
+  // session associated with |account_id| when chrome restarts. Overwrites
+  // switches for |switches_type| with |switches|. The resulting command-line
+  // switches will be the command-line switches for all types combined. Note:
+  // |account_id| is currently ignored, because session manager ignores the
+  // passed account id. For each type, only the last-set switches will be
+  // honored.
+  // TODO(pmarko): Introduce a CHECK making sure that |account_id| is the
+  // primary user (https://crbug.com/832857).
+  void SetSwitchesForUser(const AccountId& account_id,
+                          CommandLineSwitchesType switches_type,
+                          const std::vector<std::string>& switches);
+
+  // Called when the user network policy has been parsed. If |send_password| is
+  // true, the user's password will be sent over dbus to the session manager to
+  // save in a keyring. Before the function exits, it will clear the user
+  // password from the UserContext regardless of the value of |send_password|.
+  void OnUserNetworkPolicyParsed(bool send_password);
+
  private:
   friend class test::UserSessionManagerTestApi;
   friend struct base::DefaultSingletonTraits<UserSessionManager>;
@@ -267,13 +313,16 @@ class UserSessionManager
       Profile* user_profile,
       OAuth2LoginManager::SessionRestoreState state) override;
 
-  // net::NetworkChangeNotifier::ConnectionTypeObserver overrides:
-  void OnConnectionTypeChanged(
+  // net::NetworkChangeNotifier::NetworkChangeObserver overrides:
+  void OnNetworkChanged(
       net::NetworkChangeNotifier::ConnectionType type) override;
 
   // UserSessionManagerDelegate overrides:
   // Used when restoring user sessions after crash.
   void OnProfilePrepared(Profile* profile, bool browser_launched) override;
+
+  // user_manager::UserManager::Observer overrides:
+  void OnUsersSignInConstraintsChanged() override;
 
   void ChildAccountStatusReceivedCallback(Profile* profile);
 
@@ -319,8 +368,7 @@ class UserSessionManager
   void PrepareTpmDeviceAndFinalizeProfile(Profile* profile);
 
   // Called on UI thread once Cryptohome operation completes.
-  void OnCryptohomeOperationCompleted(Profile* profile,
-                                      DBusMethodCallStatus call_status);
+  void OnCryptohomeOperationCompleted(Profile* profile, bool result);
 
   // Finalized profile preparation.
   void FinalizePrepareProfile(Profile* profile);
@@ -342,8 +390,7 @@ class UserSessionManager
   void InitSessionRestoreStrategy();
 
   // Restores GAIA auth cookies for the created user profile from OAuth2 token.
-  void RestoreAuthSessionImpl(Profile* profile,
-                              bool restore_from_auth_cookies);
+  void RestoreAuthSessionImpl(Profile* profile, bool restore_from_auth_cookies);
 
   // Initializes RLZ. If |disabled| is true, RLZ pings are disabled.
   void InitRlzImpl(Profile* profile, bool disabled);
@@ -358,8 +405,7 @@ class UserSessionManager
 
   // Callback to process RetrieveActiveSessions() request results.
   void OnRestoreActiveSessions(
-      const SessionManagerClient::ActiveSessionsMap& sessions,
-      bool success);
+      base::Optional<SessionManagerClient::ActiveSessionsMap> sessions);
 
   // Called by OnRestoreActiveSessions() when there're user sessions in
   // |pending_user_sessions_| that has to be restored one by one.
@@ -370,13 +416,8 @@ class UserSessionManager
   // Notifies observers that user pending sessions restore has finished.
   void NotifyPendingUserSessionsRestoreFinished();
 
-  // Attempts restarting the browser process and esures that this does
-  // not happen while we are still fetching new OAuth refresh tokens.
-  void AttemptRestart(Profile* profile);
-
   // Callback invoked when Easy unlock key operations are finished.
-  void OnEasyUnlockKeyOpsFinished(const std::string& user_id,
-                                  bool success);
+  void OnEasyUnlockKeyOpsFinished(const std::string& user_id, bool success);
 
   // Internal implementation of DoBrowserLaunch. Initially should be called with
   // |locale_pref_checked| set to false which will result in postponing browser
@@ -399,10 +440,6 @@ class UserSessionManager
 
   void CreateTokenUtilIfMissing();
 
-  // Returns |true| if given profile show see EndofLife Notification when
-  // applicable.
-  bool ShouldShowEolNotification(Profile* profile);
-
   // Test API methods.
 
   // Injects |user_context| that will be used to create StubAuthenticator
@@ -417,6 +454,10 @@ class UserSessionManager
 
   // Controls whether token handle fetching is enabled (used in tests).
   void SetShouldObtainHandleInTests(bool should_obtain_handles);
+
+  // Sets the function which is used to request a chrome restart.
+  void SetAttemptRestartClosureInTests(
+      const base::RepeatingClosure& attempt_restart_closure);
 
   // The user pods display type for histogram.
   enum UserPodsDisplay {
@@ -471,9 +512,6 @@ class UserSessionManager
 
   // OAuth2 session related members.
 
-  // True if we should restart chrome right after session restore.
-  bool exit_after_session_restore_;
-
   // Sesion restore strategy.
   OAuth2LoginManager::SessionRestoreStrategy session_restore_strategy_;
 
@@ -487,8 +525,10 @@ class UserSessionManager
   std::string chrome_client_secret_;
 
   // Per-user-session Input Methods states.
-  std::map<Profile*, scoped_refptr<input_method::InputMethodManager::State>,
-      ProfileCompare> default_ime_states_;
+  std::map<Profile*,
+           scoped_refptr<input_method::InputMethodManager::State>,
+           ProfileCompare>
+      default_ime_states_;
 
   // Per-user-session EndofLife Notification
   std::map<Profile*, std::unique_ptr<EolNotification>, ProfileCompare>
@@ -505,6 +545,13 @@ class UserSessionManager
            scoped_refptr<quick_unlock::QuickUnlockNotificationController>,
            ProfileCompare>
       fingerprint_unlock_notification_handler_;
+
+  // Maps command-line switch types to the currently set command-line switches
+  // for that type. Note: This is not per Profile/AccountId, because session
+  // manager currently doesn't support setting command-line switches per
+  // AccountId.
+  base::flat_map<CommandLineSwitchesType, std::vector<std::string>>
+      command_line_switches_;
 
   // Manages Easy unlock cryptohome keys.
   std::unique_ptr<EasyUnlockKeyManager> easy_unlock_key_manager_;
@@ -530,6 +577,9 @@ class UserSessionManager
   bool easy_unlock_key_ops_finished_ = true;
 
   std::vector<base::OnceClosure> easy_unlock_key_ops_finished_callbacks_;
+
+  // Mapped to |chrome::AttemptRestart|, except in tests.
+  base::RepeatingClosure attempt_restart_closure_;
 
   base::WeakPtrFactory<UserSessionManager> weak_factory_;
 

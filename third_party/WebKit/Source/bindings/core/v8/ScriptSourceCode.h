@@ -31,9 +31,9 @@
 #ifndef ScriptSourceCode_h
 #define ScriptSourceCode_h
 
+#include "bindings/core/v8/ScriptSourceLocationType.h"
 #include "bindings/core/v8/ScriptStreamer.h"
 #include "core/CoreExport.h"
-#include "core/loader/resource/ScriptResource.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/text/TextPosition.h"
@@ -41,44 +41,61 @@
 
 namespace blink {
 
+class ScriptResource;
+class CachedMetadataHandler;
+
 class CORE_EXPORT ScriptSourceCode final {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
  public:
-  ScriptSourceCode();
-  // We lose the encoding information from ScriptResource.
-  // Not sure if that matters.
-  explicit ScriptSourceCode(ScriptResource*);
+  // For inline scripts.
   ScriptSourceCode(
-      const String&,
+      const String& source,
+      ScriptSourceLocationType = ScriptSourceLocationType::kUnknown,
+      CachedMetadataHandler* cache_handler = nullptr,
       const KURL& = KURL(),
       const TextPosition& start_position = TextPosition::MinimumPosition());
+
+  // For external scripts.
+  //
+  // We lose the encoding information from ScriptResource.
+  // Not sure if that matters.
   ScriptSourceCode(ScriptStreamer*, ScriptResource*);
 
   ~ScriptSourceCode();
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   // The null value represents a missing script, created by the nullary
   // constructor, and differs from the empty script.
   bool IsNull() const { return source_.IsNull(); }
 
   const String& Source() const { return source_; }
-  ScriptResource* GetResource() const { return resource_; }
-  const KURL& Url() const;
+  CachedMetadataHandler* CacheHandler() const { return cache_handler_; }
+  const KURL& Url() const { return url_; }
   int StartLine() const { return start_position_.line_.OneBasedInt(); }
   const TextPosition& StartPosition() const { return start_position_; }
-  String SourceMapUrl() const;
+  ScriptSourceLocationType SourceLocationType() const {
+    return source_location_type_;
+  }
+  const String& SourceMapUrl() const { return source_map_url_; }
 
   ScriptStreamer* Streamer() const { return streamer_; }
 
  private:
-  void TreatNullSourceAsEmpty();
-
-  String source_;
-  Member<ScriptResource> resource_;
+  const String source_;
+  Member<CachedMetadataHandler> cache_handler_;
   Member<ScriptStreamer> streamer_;
-  mutable KURL url_;
-  TextPosition start_position_;
+
+  // The URL of the source code, which is primarily intended for DevTools
+  // javascript debugger.
+  //
+  // Note that this can be different from the resulting script's base URL
+  // (#concept-script-base-url) for inline classic scripts.
+  const KURL url_;
+
+  const String source_map_url_;
+  const TextPosition start_position_;
+  const ScriptSourceLocationType source_location_type_;
 };
 
 }  // namespace blink

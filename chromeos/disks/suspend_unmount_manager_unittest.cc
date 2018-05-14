@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "chromeos/dbus/fake_power_manager_client.h"
+#include "chromeos/dbus/power_manager/suspend.pb.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "chromeos/disks/mock_disk_mount_manager.h"
 #include "chromeos/disks/suspend_unmount_manager.h"
@@ -20,6 +21,7 @@ const char kDeviceId[] = "device_id";
 const char kDeviceLabel[] = "device_label";
 const char kVendor[] = "vendor";
 const char kProduct[] = "product";
+const char kFileSystemType[] = "exfat";
 
 class FakeDiskMountManager : public MockDiskMountManager {
  public:
@@ -48,7 +50,7 @@ class SuspendUnmountManagerTest : public testing::Test {
  public:
   SuspendUnmountManagerTest()
       : suspend_unmount_manager_(&disk_mount_manager_, &fake_power_client_) {}
-  ~SuspendUnmountManagerTest() override {}
+  ~SuspendUnmountManagerTest() override = default;
 
  protected:
   FakeDiskMountManager disk_mount_manager_;
@@ -66,23 +68,27 @@ TEST_F(SuspendUnmountManagerTest, Basic) {
           chromeos::disks::MOUNT_CONDITION_NONE),
       kDeviceId, kDeviceLabel, kVendor, kProduct, chromeos::DEVICE_TYPE_USB,
       1024 * 1024, false /* is_parent */, false /* has_media */,
-      false /* on_boot_device */, true /* on_removable_device */);
+      false /* on_boot_device */, true /* on_removable_device */,
+      kFileSystemType);
   disk_mount_manager_.CreateDiskEntryForMountDevice(
       chromeos::disks::DiskMountManager::MountPointInfo(
           "/dummy/device/sd", kDummyMountPathSd, chromeos::MOUNT_TYPE_DEVICE,
           chromeos::disks::MOUNT_CONDITION_NONE),
       kDeviceId, kDeviceLabel, kVendor, kProduct, chromeos::DEVICE_TYPE_SD,
       1024 * 1024, false /* is_parent */, false /* has_media */,
-      false /* on_boot_device */, true /* on_removable_device */);
+      false /* on_boot_device */, true /* on_removable_device */,
+      kFileSystemType);
   disk_mount_manager_.CreateDiskEntryForMountDevice(
       chromeos::disks::DiskMountManager::MountPointInfo(
           "/dummy/device/unknown", kDummyMountPathUnknown,
           chromeos::MOUNT_TYPE_DEVICE, chromeos::disks::MOUNT_CONDITION_NONE),
       kDeviceId, kDeviceLabel, kVendor, kProduct, chromeos::DEVICE_TYPE_UNKNOWN,
       1024 * 1024, false /* is_parent */, false /* has_media */,
-      false /* on_boot_device */, true /* on_removable_device */);
+      false /* on_boot_device */, true /* on_removable_device */,
+      kFileSystemType);
   disk_mount_manager_.SetupDefaultReplies();
-  fake_power_client_.SendSuspendImminent();
+  fake_power_client_.SendSuspendImminent(
+      power_manager::SuspendImminent_Reason_OTHER);
 
   EXPECT_EQ(1, fake_power_client_.GetNumPendingSuspendReadinessCallbacks());
   EXPECT_EQ(2u, disk_mount_manager_.unmounting_mount_paths().size());
@@ -107,9 +113,11 @@ TEST_F(SuspendUnmountManagerTest, CancelAndSuspendAgain) {
           chromeos::disks::MOUNT_CONDITION_NONE),
       kDeviceId, kDeviceLabel, kVendor, kProduct, chromeos::DEVICE_TYPE_USB,
       1024 * 1024, false /* is_parent */, false /* has_media */,
-      false /* on_boot_device */, true /* on_removable_device */);
+      false /* on_boot_device */, true /* on_removable_device */,
+      kFileSystemType);
   disk_mount_manager_.SetupDefaultReplies();
-  fake_power_client_.SendSuspendImminent();
+  fake_power_client_.SendSuspendImminent(
+      power_manager::SuspendImminent_Reason_OTHER);
   EXPECT_EQ(1, fake_power_client_.GetNumPendingSuspendReadinessCallbacks());
   ASSERT_EQ(1u, disk_mount_manager_.unmounting_mount_paths().size());
   EXPECT_EQ(kDummyMountPath,
@@ -119,12 +127,13 @@ TEST_F(SuspendUnmountManagerTest, CancelAndSuspendAgain) {
   fake_power_client_.SendSuspendDone();
 
   // Suspend again.
-  fake_power_client_.SendSuspendImminent();
+  fake_power_client_.SendSuspendImminent(
+      power_manager::SuspendImminent_Reason_OTHER);
   ASSERT_EQ(2u, disk_mount_manager_.unmounting_mount_paths().size());
   EXPECT_EQ(kDummyMountPath,
             disk_mount_manager_.unmounting_mount_paths().front());
 }
 
 }  // namespace
-}  // namespace chromeos
 }  // namespace disks
+}  // namespace chromeos

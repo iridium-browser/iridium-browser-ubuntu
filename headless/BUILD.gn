@@ -7,10 +7,12 @@ import("//build/util/process_version.gni")
 import("//headless/headless.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//printing/features/features.gni")
+import("//services/service_manager/public/service_manifest.gni")
 import("//testing/test.gni")
 import("//third_party/closure_compiler/compile_js.gni")
 import("//tools/grit/grit_rule.gni")
 import("//tools/grit/repack.gni")
+import("//tools/v8_context_snapshot/v8_context_snapshot.gni")
 
 config("headless_implementation") {
   defines = [ "HEADLESS_IMPLEMENTATION" ]
@@ -28,8 +30,8 @@ group("headless_lib") {
 
 repack("pak") {
   sources = [
-    "$root_gen_dir/blink/public/resources/blink_image_resources_100_percent.pak",
     "$root_gen_dir/blink/public/resources/blink_resources.pak",
+    "$root_gen_dir/blink/public/resources/blink_scaled_resources_100_percent.pak",
     "$root_gen_dir/components/components_resources.pak",
     "$root_gen_dir/components/strings/components_strings_en-US.pak",
     "$root_gen_dir/content/app/resources/content_resources_100_percent.pak",
@@ -38,6 +40,7 @@ repack("pak") {
     "$root_gen_dir/content/browser/tracing/tracing_resources.pak",
     "$root_gen_dir/content/content_resources.pak",
     "$root_gen_dir/headless/headless_lib_resources.pak",
+    "$root_gen_dir/mojo/public/js/mojo_bindings_resources.pak",
     "$root_gen_dir/net/net_resources.pak",
     "$root_gen_dir/ui/resources/ui_resources_100_percent.pak",
     "$root_gen_dir/ui/resources/webui_resources.pak",
@@ -60,9 +63,10 @@ repack("pak") {
     "//content/app/strings",
     "//content/browser/devtools:resources",
     "//content/browser/tracing:resources",
+    "//mojo/public/js:resources",
     "//net:net_resources",
-    "//third_party/WebKit/public:image_resources",
     "//third_party/WebKit/public:resources",
+    "//third_party/WebKit/public:scaled_resources_100_percent",
     "//ui/resources",
     "//ui/strings",
   ]
@@ -115,17 +119,30 @@ mojom("headless_render_frame_controller") {
   ]
 }
 
+service_manifest("headless_browser_manifest_overlay") {
+  source = "lib/browser/headless_browser_manifest_overlay.json"
+}
+
+service_manifest("headless_packaged_services_manifest_overlay") {
+  source = "lib/browser/headless_packaged_services_manifest_overlay.json"
+  packaged_services =
+      [ "//components/printing/service:pdf_compositor_manifest" ]
+}
+
 grit("resources") {
   source = "lib/resources/headless_lib_resources.grd"
   outputs = [
     "grit/headless_lib_resources.h",
     "$root_gen_dir/headless/headless_lib_resources.pak",
   ]
+  source_is_generated = true
   grit_flags = [
     "-E",
     "mojom_root=" + rebase_path(root_gen_dir, root_build_dir),
   ]
   deps = [
+    ":headless_browser_manifest_overlay",
+    ":headless_packaged_services_manifest_overlay",
     ":headless_render_frame_controller_js",
     ":tab_socket_js",
   ]
@@ -147,6 +164,7 @@ devtools_domains = [
   "dom_snapshot",
   "dom_storage",
   "emulation",
+  "headless_experimental",
   "heap_profiler",
   "indexeddb",
   "input",
@@ -157,6 +175,7 @@ devtools_domains = [
   "memory",
   "network",
   "page",
+  "performance",
   "profiler",
   "runtime",
   "security",
@@ -223,7 +242,7 @@ js_library("js_devtools_bindings_lib") {
   extra_deps = [ ":gen_devtools_client_api" ]
 }
 
-if (headless_fontconfig_utils) {
+if (headless_fontconfig_utils && !is_fuchsia) {
   static_library("headless_fontconfig_utils") {
     sources = [
       "public/util/fontconfig.cc",
@@ -231,8 +250,8 @@ if (headless_fontconfig_utils) {
     ]
 
     deps = [
+      "//build/config/freetype",
       "//third_party/fontconfig",
-      "//third_party/freetype",
     ]
 
     configs += [ ":headless_implementation" ]
@@ -256,11 +275,12 @@ component("headless") {
     "lib/browser/headless_devtools.cc",
     "lib/browser/headless_devtools.h",
     "lib/browser/headless_devtools_client_impl.cc",
-    "lib/browser/headless_devtools_client_impl.h",
     "lib/browser/headless_devtools_manager_delegate.cc",
     "lib/browser/headless_devtools_manager_delegate.h",
     "lib/browser/headless_net_log.cc",
     "lib/browser/headless_net_log.h",
+    "lib/browser/headless_network_conditions.cc",
+    "lib/browser/headless_network_conditions.h",
     "lib/browser/headless_network_delegate.cc",
     "lib/browser/headless_network_delegate.h",
     "lib/browser/headless_permission_manager.cc",
@@ -280,8 +300,6 @@ component("headless") {
     "lib/browser/headless_window_tree_host.h",
     "lib/headless_content_client.cc",
     "lib/headless_content_client.h",
-    "lib/headless_crash_reporter_client.cc",
-    "lib/headless_crash_reporter_client.h",
     "public/headless_browser.cc",
     "public/headless_browser.h",
     "public/headless_browser_context.h",
@@ -289,10 +307,13 @@ component("headless") {
     "public/headless_devtools_target.h",
     "public/headless_export.h",
     "public/headless_web_contents.h",
+    "public/internal/headless_devtools_client_impl.h",
     "public/internal/message_dispatcher.h",
     "public/internal/value_conversions.h",
     "public/util/black_hole_protocol_handler.cc",
     "public/util/black_hole_protocol_handler.h",
+    "public/util/compositor_controller.cc",
+    "public/util/compositor_controller.h",
     "public/util/deterministic_dispatcher.cc",
     "public/util/deterministic_dispatcher.h",
     "public/util/deterministic_http_protocol_handler.cc",
@@ -312,8 +333,6 @@ component("headless") {
     "public/util/managed_dispatch_url_request_job.cc",
     "public/util/managed_dispatch_url_request_job.h",
     "public/util/navigation_request.h",
-    "public/util/testing/generic_url_request_mocks.cc",
-    "public/util/testing/generic_url_request_mocks.h",
     "public/util/throttled_dispatcher.cc",
     "public/util/throttled_dispatcher.h",
     "public/util/url_fetcher.cc",
@@ -321,7 +340,16 @@ component("headless") {
     "public/util/url_request_dispatcher.h",
     "public/util/user_agent.cc",
     "public/util/user_agent.h",
+    "public/util/virtual_time_controller.cc",
+    "public/util/virtual_time_controller.h",
   ]
+
+  if (!is_fuchsia) {
+    sources += [
+      "lib/headless_crash_reporter_client.cc",
+      "lib/headless_crash_reporter_client.h",
+    ]
+  }
 
   sources += generated_devtools_api
 
@@ -344,8 +372,8 @@ component("headless") {
     sources += [
       "lib/browser/headless_print_manager.cc",
       "lib/browser/headless_print_manager.h",
-      "lib/renderer/headless_print_web_view_helper_delegate.cc",
-      "lib/renderer/headless_print_web_view_helper_delegate.h",
+      "lib/renderer/headless_print_render_frame_helper_delegate.cc",
+      "lib/renderer/headless_print_render_frame_helper_delegate.h",
     ]
   }
 
@@ -363,6 +391,7 @@ component("headless") {
     ":headless_render_frame_controller",
     ":tab_socket",
     ":version_header",
+    "//components/cookie_config",
     "//components/security_state/core",
     "//content/public/common",
     "//content/public/common:service_names",
@@ -373,6 +402,10 @@ component("headless") {
     "//ui/events/devices",
     "//url",
   ]
+
+  if (is_linux && !is_chromeos) {
+    deps += [ "//components/os_crypt" ]
+  }
 
   if (is_component_build) {
     sources += [
@@ -388,19 +421,47 @@ component("headless") {
       "lib/renderer/headless_render_frame_controller_impl.h",
       "lib/renderer/headless_tab_socket_bindings.cc",
       "lib/renderer/headless_tab_socket_bindings.h",
+      "lib/utility/headless_content_utility_client.cc",
+      "lib/utility/headless_content_utility_client.h",
     ]
 
     deps += [
-      "//components/crash/content/browser",
+      "//components/crash/core/common:crash_key",
       "//components/security_state/content",
+      "//gin",
+      "//third_party/WebKit/public:blink",
       "//third_party/WebKit/public:blink_headers",
+      "//ui/gl",
+      "//v8",
     ]
+
+    if (!is_fuchsia) {
+      deps += [ "//components/crash/content/browser" ]
+    }
+    if (is_win) {
+      deps += [ "//components/crash/content/app:crash_export_thunks" ]
+    }
 
     if (enable_basic_printing) {
       deps += [
         "//components/printing/browser",
         "//components/printing/renderer",
+        "//components/printing/service/public/cpp:factory",
+        "//components/printing/service/public/interfaces",
       ]
+    }
+
+    # Normally set to false (see build/args/headless.gn), but we can optionally
+    # use external v8 startup data too.
+    if (v8_use_external_startup_data) {
+      sources += [ "$root_out_dir/natives_blob.bin" ]
+      public_deps += [ "//v8" ]
+      if (use_v8_context_snapshot) {
+        sources += [ "$root_out_dir/v8_context_snapshot.bin" ]
+        public_deps += [ "//tools/v8_context_snapshot" ]
+      } else {
+        sources += [ "$root_out_dir/snapshot_blob.bin" ]
+      }
     }
   }
 
@@ -424,7 +485,7 @@ component("headless") {
     deps += [ "//ui/ozone" ]
   }
 
-  if (headless_fontconfig_utils) {
+  if (headless_fontconfig_utils && !is_fuchsia) {
     deps += [ ":headless_fontconfig_utils" ]
   }
 
@@ -450,6 +511,7 @@ if (!is_component_build) {
 
     deps = [
       ":headless",
+      "//components/crash/core/common:crash_key",
       "//third_party/WebKit/public:blink_headers",
       "//ui/base",
       "//v8",
@@ -470,6 +532,43 @@ if (!is_component_build) {
   }
 }
 
+static_library("headless_url_mocks") {
+  testonly = true
+
+  sources = [
+    "public/util/testing/fake_managed_dispatch_url_request_job.cc",
+    "public/util/testing/fake_managed_dispatch_url_request_job.h",
+    "public/util/testing/generic_url_request_mocks.cc",
+    "public/util/testing/generic_url_request_mocks.h",
+  ]
+
+  public_deps = [
+    ":headless_renderer",
+    "//base",
+    "//net",
+  ]
+}
+
+static_library("headless_test_support") {
+  testonly = true
+
+  sources = [
+    "public/util/testing/mock_devtools_agent_host.cc",
+    "public/util/testing/mock_devtools_agent_host.h",
+  ]
+
+  public_deps = [
+    ":headless_renderer",
+    "//base",
+    "//net",
+  ]
+
+  deps = [
+    ":headless_url_mocks",
+    "//testing/gmock",
+  ]
+}
+
 group("headless_tests") {
   testonly = true
 
@@ -483,27 +582,32 @@ group("headless_tests") {
 test("headless_unittests") {
   sources = [
     "public/domains/types_unittest.cc",
+    "public/util/compositor_controller_unittest.cc",
     "public/util/deterministic_dispatcher_test.cc",
     "public/util/error_reporter_unittest.cc",
     "public/util/expedited_dispatcher_test.cc",
     "public/util/generic_url_request_job_test.cc",
-    "public/util/testing/fake_managed_dispatch_url_request_job.cc",
-    "public/util/testing/fake_managed_dispatch_url_request_job.h",
+    "public/util/testing/generic_url_request_mocks.cc",
+    "public/util/testing/generic_url_request_mocks.h",
+    "public/util/testing/test_in_memory_protocol_handler.cc",
+    "public/util/testing/test_in_memory_protocol_handler.h",
     "public/util/throttled_dispatcher_test.cc",
+    "public/util/virtual_time_controller_test.cc",
   ]
 
   if (!is_component_build) {
     sources += [
       "lib/browser/headless_content_browser_client.cc",
       "lib/browser/headless_content_browser_client.h",
+      "lib/utility/headless_content_utility_client.cc",
+      "lib/utility/headless_content_utility_client.h",
     ]
   }
 
   deps = [
-    ":headless_renderer",
+    ":headless_test_support",
     "//base/test:run_all_unittests",
     "//base/test:test_support",
-    "//components/crash/content/browser",
     "//components/security_state/content",
     "//content/public/app:both",
     "//content/public/child:child",
@@ -512,9 +616,21 @@ test("headless_unittests") {
     "//testing/gtest",
   ]
 
+  if (!is_fuchsia) {
+    deps += [ "//components/crash/content/browser" ]
+  }
+
+  if (is_win) {
+    deps += [ "//components/crash/content/app:crash_export_thunks" ]
+  }
+
   if (enable_basic_printing) {
     sources += [ "lib/browser/headless_printing_unittest.cc" ]
-    deps += [ "//components/printing/browser" ]
+    deps += [
+      "//components/printing/browser",
+      "//components/printing/service/public/cpp:factory",
+      "//third_party/WebKit/public:blink",
+    ]
   }
 }
 
@@ -577,7 +693,7 @@ if (is_linux) {
     ]
     grit_flags = [
       "-E",
-      "gen_root=" + rebase_path(root_gen_dir),
+      "gen_root=" + rebase_path(root_gen_dir, root_build_dir),
     ]
     deps = [
       ":js_devtools_bindings_test",
@@ -604,8 +720,18 @@ test("headless_browsertests") {
     "lib/headless_devtools_client_browsertest.cc",
     "lib/headless_web_contents_browsertest.cc",
     "lib/virtual_time_browsertest.cc",
+    "public/util/compositor_controller_browsertest.cc",
+    "public/util/testing/fake_managed_dispatch_url_request_job.cc",
+    "public/util/testing/fake_managed_dispatch_url_request_job.h",
+    "public/util/testing/generic_url_request_mocks.cc",
+    "public/util/testing/generic_url_request_mocks.h",
+    "public/util/testing/test_in_memory_protocol_handler.cc",
+    "public/util/testing/test_in_memory_protocol_handler.h",
     "test/headless_browser_test.cc",
     "test/headless_browser_test.h",
+    "test/headless_render_browsertest.cc",
+    "test/headless_render_test.cc",
+    "test/headless_render_test.h",
     "test/headless_test_launcher.cc",
     "test/tab_socket_test.cc",
     "test/tab_socket_test.h",
@@ -638,18 +764,26 @@ test("headless_browsertests") {
     sources += [
       "lib/browser/headless_content_browser_client.cc",
       "lib/browser/headless_content_browser_client.h",
+      "lib/utility/headless_content_utility_client.cc",
+      "lib/utility/headless_content_utility_client.h",
     ]
   }
 
   deps = [
     ":headless_renderer",
     "//base",
-    "//components/crash/content/browser",
     "//components/security_state/content",
     "//content/test:test_support",
     "//testing/gmock",
     "//testing/gtest",
   ]
+
+  if (!is_fuchsia) {
+    deps += [
+      "//components/crash/content/app:test_support",
+      "//components/crash/content/browser",
+    ]
+  }
 
   # Only include this if we built the js_binary
   if (is_linux) {
@@ -661,6 +795,7 @@ test("headless_browsertests") {
   if (enable_basic_printing) {
     deps += [
       "//components/printing/browser",
+      "//components/printing/service/public/cpp:factory",
       "//pdf",
     ]
   }
@@ -700,7 +835,10 @@ if (is_win) {
         "lib/headless_content_main_delegate.h",
         "lib/headless_content_main_delegate_win.cc",
       ]
-      deps += [ "//third_party/WebKit/public:blink_headers" ]
+      deps += [
+        "//components/crash/core/common:crash_key",
+        "//third_party/WebKit/public:blink_headers",
+      ]
     }
 
     configs += [ ":headless_implementation" ]
@@ -734,8 +872,13 @@ if (is_win) {
         "lib/headless_content_main_delegate.cc",
         "lib/headless_content_main_delegate.h",
         "lib/headless_content_main_delegate_win.cc",
+        "lib/utility/headless_content_utility_client.cc",
+        "lib/utility/headless_content_utility_client.h",
       ]
-      deps += [ "//third_party/WebKit/public:blink_headers" ]
+      deps += [
+        "//components/crash/core/common:crash_key",
+        "//third_party/WebKit/public:blink_headers",
+      ]
     }
 
     configs += [ ":headless_implementation" ]
@@ -754,12 +897,13 @@ static_library("headless_shell_lib") {
     "app/shell_navigation_request.h",
     "lib/browser/headless_content_browser_client.cc",
     "lib/browser/headless_content_browser_client.h",
+    "lib/utility/headless_content_utility_client.cc",
+    "lib/utility/headless_content_utility_client.h",
     "public/headless_shell.h",
   ]
 
   deps = [
     ":headless_renderer",
-    "//components/crash/content/browser",
     "//components/security_state/content",
     "//content/public/app:both",
     "//content/public/browser",
@@ -767,10 +911,15 @@ static_library("headless_shell_lib") {
     "//content/public/common",
   ]
 
+  if (!is_fuchsia) {
+    deps += [ "//components/crash/content/browser" ]
+  }
+
   if (enable_basic_printing) {
     deps += [
       "//components/printing/browser",
       "//components/printing/renderer",
+      "//components/printing/service/public/cpp:factory",
     ]
   }
 
@@ -778,10 +927,17 @@ static_library("headless_shell_lib") {
     defines = [ "HEADLESS_USE_CRASPHAD" ]
 
     deps += [
+      "//components/crash/content/app:crash_export_thunks",
       "//components/crash/content/app:run_as_crashpad_handler",
       "//content:sandbox_helper_win",
       "//sandbox",
     ]
+  }
+}
+
+if (is_fuchsia) {
+  fuchsia_executable_runner("headless_shell_fuchsia") {
+    exe_target = ":headless_shell"
   }
 }
 
@@ -794,6 +950,12 @@ executable("headless_shell") {
     ":headless_shell_lib",
     "//build/config:exe_and_shlib_deps",
   ]
+
+  if (!headless_use_embedded_resources) {
+    data = [
+      "$root_out_dir/headless_lib.pak",
+    ]
+  }
 
   if (is_win) {
     deps += [ "//build/win:default_exe_manifest" ]
@@ -817,5 +979,6 @@ executable("headless_example") {
   deps = [
     ":headless_shell_lib",
     "//build/config:exe_and_shlib_deps",
+    "//skia",  # we need this to override font render hinting in headless build
   ]
 }

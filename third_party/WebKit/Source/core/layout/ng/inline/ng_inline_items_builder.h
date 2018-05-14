@@ -7,7 +7,7 @@
 
 #include "core/CoreExport.h"
 #include "core/layout/ng/inline/empty_offset_mapping_builder.h"
-#include "core/layout/ng/inline/ng_inline_node.h"
+#include "core/layout/ng/inline/ng_inline_item.h"
 #include "core/layout/ng/inline/ng_offset_mapping_builder.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Vector.h"
@@ -18,6 +18,7 @@ namespace blink {
 
 class ComputedStyle;
 class LayoutObject;
+class LayoutText;
 class NGInlineItem;
 
 // NGInlineItemsBuilder builds a string and a list of NGInlineItem from inlines.
@@ -62,9 +63,71 @@ class CORE_TEMPLATE_CLASS_EXPORT NGInlineItemsBuilderTemplate {
   // @param style The style for the string.
   // If a nullptr, it should skip shaping. Atomic inlines and bidi controls use
   // this.
-  // @param LayoutObject The LayoutObject for the string.
+  // @param LayoutText The LayoutText for the string.
   // If a nullptr, it does not generate BidiRun. Bidi controls use this.
-  void Append(const String&, const ComputedStyle*, LayoutObject* = nullptr);
+  void Append(const String&, const ComputedStyle*, LayoutText* = nullptr);
+
+  // Append a break opportunity; e.g., <wbr> element.
+  void AppendBreakOpportunity(const ComputedStyle*, LayoutObject*);
+
+  // Append a unicode "object replacement character" for an atomic inline,
+  // signaling the presence of a non-text object to the unicode bidi algorithm.
+  void AppendAtomicInline(const ComputedStyle* = nullptr,
+                          LayoutObject* = nullptr);
+
+  // Append a character.
+  // The character is opaque to space collapsing; i.e., spaces before this
+  // character and after this character can collapse as if this character does
+  // not exist.
+  void AppendOpaque(NGInlineItem::NGInlineItemType,
+                    UChar,
+                    const ComputedStyle* = nullptr,
+                    LayoutObject* = nullptr);
+
+  // Append a non-character item that is opaque to space collapsing.
+  void AppendOpaque(NGInlineItem::NGInlineItemType,
+                    const ComputedStyle* = nullptr,
+                    LayoutObject* = nullptr);
+
+  // Append a Bidi control character, for LTR or RTL depends on the style.
+  void EnterBidiContext(LayoutObject*,
+                        const ComputedStyle*,
+                        UChar ltr_enter,
+                        UChar rtl_enter,
+                        UChar exit);
+  void EnterBidiContext(LayoutObject*, UChar enter, UChar exit);
+
+  void EnterBlock(const ComputedStyle*);
+  void ExitBlock();
+  void EnterInline(LayoutObject*);
+  void ExitInline(LayoutObject*);
+
+  OffsetMappingBuilder& GetOffsetMappingBuilder() { return mapping_builder_; }
+
+ private:
+  Vector<NGInlineItem>* items_;
+  StringBuilder text_;
+
+  // |mapping_builder_| builds the whitespace-collapsed offset mapping
+  // during inline collection. It is updated whenever |text_| is modified or a
+  // white space is collapsed.
+  OffsetMappingBuilder mapping_builder_;
+
+  struct BidiContext {
+    LayoutObject* node;
+    UChar enter;
+    UChar exit;
+  };
+  Vector<BidiContext> bidi_context_;
+
+  enum class CollapsibleSpace { kNone, kSpace, kNewline };
+
+  CollapsibleSpace last_collapsible_space_ = CollapsibleSpace::kSpace;
+  bool auto_wrap_ = true;
+  bool last_auto_wrap_ = false;
+  bool is_svgtext_ = false;
+  bool has_bidi_controls_ = false;
+  bool is_empty_inline_ = true;
 
   // Append a character.
   // Currently this function is for adding control characters such as
@@ -74,81 +137,24 @@ class CORE_TEMPLATE_CLASS_EXPORT NGInlineItemsBuilderTemplate {
   // LayoutObject.
   void Append(NGInlineItem::NGInlineItemType,
               UChar,
-              const ComputedStyle* = nullptr,
-              LayoutObject* = nullptr);
-
-  // Append a character.
-  // The character is opaque to space collapsing; i.e., spaces before this
-  // character and after this character can collapse as if this character does
-  // not exist.
-  void AppendOpaque(NGInlineItem::NGInlineItemType, UChar);
-
-  // Append a non-character item that is opaque to space collapsing.
-  void AppendOpaque(NGInlineItem::NGInlineItemType,
-                    const ComputedStyle* = nullptr,
-                    LayoutObject* = nullptr);
-
-  // Append a Bidi control character, for LTR or RTL depends on the style.
-  void AppendBidiControl(const ComputedStyle*, UChar ltr, UChar rtl);
-
-  void EnterBlock(const ComputedStyle*);
-  void ExitBlock();
-  void EnterInline(LayoutObject*);
-  void ExitInline(LayoutObject*);
-
-  OffsetMappingBuilder& GetOffsetMappingBuilder() { return mapping_builder_; }
-  OffsetMappingBuilder& GetConcatenatedOffsetMappingBuilder() {
-    return concatenated_mapping_builder_;
-  }
-
- private:
-  Vector<NGInlineItem>* items_;
-  StringBuilder text_;
-
-  // TODO(xiaochengh): Rename |mapping_builder_| to |collapsed_mapping_builder_|
-  // |collapsed_mapping_builder_| builds the whitespace-collapsed offset mapping
-  // during inline collection. It is updated whenever |text_| is modified or a
-  // white space is collapsed.
-  OffsetMappingBuilder mapping_builder_;
-
-  // |concatenated_mapping_builder_| builds the concatenated offset mapping
-  // during inline collection. It is updated whenever a non-text character is
-  // appended to |text_|. User of NGInlineItemsBuilder should also update
-  // |concatenated_mapping_builder_| whenever collecting a text node during
-  // inline collection, by appending the text-transformed offset mapping of the
-  // text node to |concatenated_mapping_builder_|.
-  OffsetMappingBuilder concatenated_mapping_builder_;
-
-  // Indicates whether we are appending a string not, to help updating
-  // |concatenated_mapping_builder_|.
-  bool is_appending_string_ = false;
-
-  typedef struct OnExitNode {
-    LayoutObject* node;
-    UChar character;
-  } OnExitNode;
-  Vector<OnExitNode> exits_;
-
-  enum class CollapsibleSpace { kNone, kSpace, kNewline };
-
-  CollapsibleSpace last_collapsible_space_ = CollapsibleSpace::kSpace;
-  bool is_svgtext_ = false;
-  bool has_bidi_controls_ = false;
-  bool is_empty_inline_ = true;
+              const ComputedStyle*,
+              LayoutObject*);
 
   void AppendWithWhiteSpaceCollapsing(const String&,
                                       unsigned start,
                                       unsigned end,
                                       const ComputedStyle*,
-                                      LayoutObject*);
+                                      LayoutText*);
   void AppendWithoutWhiteSpaceCollapsing(const String&,
                                          const ComputedStyle*,
-                                         LayoutObject*);
+                                         LayoutText*);
   void AppendWithPreservingNewlines(const String&,
                                     const ComputedStyle*,
-                                    LayoutObject*);
+                                    LayoutText*);
 
   void AppendForcedBreak(const ComputedStyle*, LayoutObject*);
+  void AppendForcedBreakWithoutWhiteSpaceCollapsing(const ComputedStyle*,
+                                                    LayoutObject*);
 
   void RemoveTrailingCollapsibleSpaceIfExists();
   void RemoveTrailingCollapsibleSpace(unsigned);
@@ -156,7 +162,6 @@ class CORE_TEMPLATE_CLASS_EXPORT NGInlineItemsBuilderTemplate {
                                                 unsigned,
                                                 const ComputedStyle*);
 
-  void Enter(LayoutObject*, UChar);
   void Exit(LayoutObject*);
 };
 

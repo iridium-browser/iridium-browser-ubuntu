@@ -4,6 +4,8 @@
 
 #include "modules/installedapp/NavigatorInstalledApp.h"
 
+#include <memory>
+
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
@@ -17,7 +19,6 @@
 #include "modules/installedapp/InstalledAppController.h"
 #include "modules/installedapp/RelatedApplication.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/modules/installedapp/WebRelatedApplication.h"
 
 namespace blink {
@@ -33,11 +34,11 @@ NavigatorInstalledApp* NavigatorInstalledApp::From(Document& document) {
 }
 
 NavigatorInstalledApp& NavigatorInstalledApp::From(Navigator& navigator) {
-  NavigatorInstalledApp* supplement = static_cast<NavigatorInstalledApp*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  NavigatorInstalledApp* supplement =
+      Supplement<Navigator>::From<NavigatorInstalledApp>(navigator);
   if (!supplement) {
     supplement = new NavigatorInstalledApp(navigator);
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
 }
@@ -91,8 +92,9 @@ ScriptPromise NavigatorInstalledApp::getInstalledRelatedApps(
     return promise;
   }
 
-  app_controller->GetInstalledRelatedApps(WTF::WrapUnique(
-      new CallbackPromiseAdapter<RelatedAppArray, void>(resolver)));
+  app_controller->GetInstalledRelatedApps(
+      std::make_unique<CallbackPromiseAdapter<RelatedAppArray, void>>(
+          resolver));
   return promise;
 }
 
@@ -103,11 +105,9 @@ InstalledAppController* NavigatorInstalledApp::Controller() {
   return InstalledAppController::From(*GetSupplementable()->GetFrame());
 }
 
-const char* NavigatorInstalledApp::SupplementName() {
-  return "NavigatorInstalledApp";
-}
+const char NavigatorInstalledApp::kSupplementName[] = "NavigatorInstalledApp";
 
-DEFINE_TRACE(NavigatorInstalledApp) {
+void NavigatorInstalledApp::Trace(blink::Visitor* visitor) {
   Supplement<Navigator>::Trace(visitor);
 }
 

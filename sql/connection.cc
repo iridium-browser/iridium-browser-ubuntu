@@ -11,28 +11,28 @@
 
 #include <utility>
 
-#include "base/bind.h"
 #include "base/debug/alias.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/json/json_file_value_serializer.h"
-#include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
+#include "base/no_destructor.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
 #include "sql/connection_memory_dump_provider.h"
+#include "sql/initialization.h"
 #include "sql/meta_table.h"
 #include "sql/statement.h"
 #include "sql/vfs_wrapper.h"
@@ -97,7 +97,7 @@ int BackupDatabase(sqlite3* src, sqlite3* dst, const char* db_name) {
   if (!backup) {
     // Since this call only sets things up, this indicates a gross
     // error in SQLite.
-    DLOG(FATAL) << "Unable to start sqlite3_backup(): " << sqlite3_errmsg(dst);
+    DLOG(DCHECK) << "Unable to start sqlite3_backup(): " << sqlite3_errmsg(dst);
     return sqlite3_errcode(dst);
   }
 
@@ -127,62 +127,6 @@ bool ValidAttachmentPoint(const char* attachment_point) {
     }
   }
   return true;
-}
-
-void RecordSqliteMemory10Min() {
-  const int64_t used = sqlite3_memory_used();
-  UMA_HISTOGRAM_COUNTS("Sqlite.MemoryKB.TenMinutes", used / 1024);
-}
-
-void RecordSqliteMemoryHour() {
-  const int64_t used = sqlite3_memory_used();
-  UMA_HISTOGRAM_COUNTS("Sqlite.MemoryKB.OneHour", used / 1024);
-}
-
-void RecordSqliteMemoryDay() {
-  const int64_t used = sqlite3_memory_used();
-  UMA_HISTOGRAM_COUNTS("Sqlite.MemoryKB.OneDay", used / 1024);
-}
-
-void RecordSqliteMemoryWeek() {
-  const int64_t used = sqlite3_memory_used();
-  UMA_HISTOGRAM_COUNTS("Sqlite.MemoryKB.OneWeek", used / 1024);
-}
-
-// SQLite automatically calls sqlite3_initialize() lazily, but
-// sqlite3_initialize() uses double-checked locking and thus can have
-// data races.
-//
-// TODO(shess): Another alternative would be to have
-// sqlite3_initialize() called as part of process bring-up.  If this
-// is changed, remove the dynamic_annotations dependency in sql.gyp.
-base::LazyInstance<base::Lock>::Leaky
-    g_sqlite_init_lock = LAZY_INSTANCE_INITIALIZER;
-void InitializeSqlite() {
-  base::AutoLock lock(g_sqlite_init_lock.Get());
-  static bool first_call = true;
-  if (first_call) {
-    sqlite3_initialize();
-
-    // Schedule callback to record memory footprint histograms at 10m, 1h, and
-    // 1d. There may not be a registered thread task runner in tests.
-    if (base::ThreadTaskRunnerHandle::IsSet()) {
-      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-          FROM_HERE, base::Bind(&RecordSqliteMemory10Min),
-          base::TimeDelta::FromMinutes(10));
-      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-          FROM_HERE, base::Bind(&RecordSqliteMemoryHour),
-          base::TimeDelta::FromHours(1));
-      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-          FROM_HERE, base::Bind(&RecordSqliteMemoryDay),
-          base::TimeDelta::FromDays(1));
-      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-          FROM_HERE, base::Bind(&RecordSqliteMemoryWeek),
-          base::TimeDelta::FromDays(7));
-    }
-
-    first_call = false;
-  }
 }
 
 // Helper to get the sqlite3_file* associated with the "main" database.
@@ -248,10 +192,7 @@ void Connection::ReportDiagnosticInfo(int extended_error, Statement* stmt) {
 
   std::string debug_info = GetDiagnosticInfo(extended_error, stmt);
   if (!debug_info.empty() && RegisterIntentToUpload()) {
-    char debug_buf[2000];
-    base::strlcpy(debug_buf, debug_info.c_str(), arraysize(debug_buf));
-    base::debug::Alias(&debug_buf);
-
+    DEBUG_ALIAS_FOR_CSTR(debug_buf, debug_info.c_str(), 2000);
     base::debug::DumpWithoutCrashing();
   }
 }
@@ -465,8 +406,8 @@ void Connection::CloseInternal(bool forced) {
 
     int rc = sqlite3_close(db_);
     if (rc != SQLITE_OK) {
-      UMA_HISTOGRAM_SPARSE_SLOWLY("Sqlite.CloseFailure", rc);
-      DLOG(FATAL) << "sqlite3_close failed: " << GetErrorMessage();
+      base::UmaHistogramSparse("Sqlite.CloseFailure", rc);
+      DLOG(DCHECK) << "sqlite3_close failed: " << GetErrorMessage();
     }
   }
   db_ = NULL;
@@ -488,7 +429,7 @@ void Connection::Preload() {
   AssertIOAllowed();
 
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Cannot preload null db";
+    DCHECK(poisoned_) << "Cannot preload null db";
     return;
   }
 
@@ -565,7 +506,7 @@ void Connection::ReleaseCacheMemoryIfNeeded(bool implicit_change_performed) {
   // The database could have been closed during a transaction as part of error
   // recovery.
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Illegal use of connection without a db";
+    DCHECK(poisoned_) << "Illegal use of connection without a db";
     return;
   }
 
@@ -644,7 +585,8 @@ bool Connection::RegisterIntentToUpload() const {
   // is _probably_ something systemic wrong with the user's system.  So the lock
   // should never be contended, but when it is the database experience is
   // already bad.
-  base::AutoLock lock(g_sqlite_init_lock.Get());
+  static base::NoDestructor<base::Lock> lock;
+  base::AutoLock auto_lock(*lock);
 
   std::unique_ptr<base::Value> root;
   if (!base::PathExists(breadcrumb_path)) {
@@ -953,7 +895,8 @@ size_t Connection::GetAppropriateMmapSize() {
     if (amount < 0)
       amount = 0;
     if (amount > 0) {
-      base::AutoLock lock(g_sqlite_init_lock.Get());
+      static base::NoDestructor<base::Lock> lock;
+      base::AutoLock auto_lock(*lock);
       static sqlite3_int64 g_reads_allowed = 20 * 1024 * 1024;
       if (g_reads_allowed < amount)
         amount = g_reads_allowed;
@@ -1054,18 +997,18 @@ bool Connection::Raze() {
   AssertIOAllowed();
 
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Cannot raze null db";
+    DCHECK(poisoned_) << "Cannot raze null db";
     return false;
   }
 
   if (transaction_nesting_ > 0) {
-    DLOG(FATAL) << "Cannot raze within a transaction";
+    DLOG(DCHECK) << "Cannot raze within a transaction";
     return false;
   }
 
   sql::Connection null_db;
   if (!null_db.OpenInMemory()) {
-    DLOG(FATAL) << "Unable to open in-memory database.";
+    DLOG(DCHECK) << "Unable to open in-memory database.";
     return false;
   }
 
@@ -1124,7 +1067,7 @@ bool Connection::Raze() {
 
   const char* kMain = "main";
   int rc = BackupDatabase(null_db.db_, db_, kMain);
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Sqlite.RazeDatabase",rc);
+  base::UmaHistogramSparse("Sqlite.RazeDatabase", rc);
 
   // The destination database was locked.
   if (rc == SQLITE_BUSY) {
@@ -1141,49 +1084,33 @@ bool Connection::Raze() {
     sqlite3_file* file = NULL;
     rc = GetSqlite3File(db_, &file);
     if (rc != SQLITE_OK) {
-      DLOG(FATAL) << "Failure getting file handle.";
+      DLOG(DCHECK) << "Failure getting file handle.";
       return false;
     }
 
     rc = file->pMethods->xTruncate(file, 0);
     if (rc != SQLITE_OK) {
-      UMA_HISTOGRAM_SPARSE_SLOWLY("Sqlite.RazeDatabaseTruncate",rc);
-      DLOG(FATAL) << "Failed to truncate file.";
+      base::UmaHistogramSparse("Sqlite.RazeDatabaseTruncate", rc);
+      DLOG(DCHECK) << "Failed to truncate file.";
       return false;
     }
 
     rc = BackupDatabase(null_db.db_, db_, kMain);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Sqlite.RazeDatabase2",rc);
+    base::UmaHistogramSparse("Sqlite.RazeDatabase2", rc);
 
-    if (rc != SQLITE_DONE) {
-      DLOG(FATAL) << "Failed retrying Raze().";
-    }
+    DCHECK_EQ(rc, SQLITE_DONE) << "Failed retrying Raze().";
   }
+
+  // TODO(shess): Figure out which other cases can happen.
+  DCHECK_EQ(rc, SQLITE_DONE) << "Unable to copy entire null database.";
 
   // The entire database should have been backed up.
-  if (rc != SQLITE_DONE) {
-    // TODO(shess): Figure out which other cases can happen.
-    DLOG(FATAL) << "Unable to copy entire null database.";
-    return false;
-  }
-
-  return true;
-}
-
-bool Connection::RazeWithTimout(base::TimeDelta timeout) {
-  if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Cannot raze null db";
-    return false;
-  }
-
-  ScopedBusyTimeout busy_timeout(db_);
-  busy_timeout.SetTimeout(timeout);
-  return Raze();
+  return rc == SQLITE_DONE;
 }
 
 bool Connection::RazeAndClose() {
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Cannot raze null db";
+    DCHECK(poisoned_) << "Cannot raze null db";
     return false;
   }
 
@@ -1204,7 +1131,7 @@ bool Connection::RazeAndClose() {
 
 void Connection::Poison() {
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Cannot poison null db";
+    DCHECK(poisoned_) << "Cannot poison null db";
     return;
   }
 
@@ -1229,7 +1156,7 @@ void Connection::Poison() {
 //
 // static
 bool Connection::Delete(const base::FilePath& path) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   base::FilePath journal_path(path.value() + FILE_PATH_LITERAL("-journal"));
   base::FilePath wal_path(path.value() + FILE_PATH_LITERAL("-wal"));
@@ -1238,8 +1165,7 @@ bool Connection::Delete(const base::FilePath& path) {
   std::string wal_str = AsUTF8ForSQL(wal_path);
   std::string path_str = AsUTF8ForSQL(path);
 
-  // Make sure sqlite3_initialize() is called before anything else.
-  InitializeSqlite();
+  EnsureSqliteInitialized();
 
   sqlite3_vfs* vfs = sqlite3_vfs_find(NULL);
   CHECK(vfs);
@@ -1295,7 +1221,7 @@ bool Connection::BeginTransaction() {
 
 void Connection::RollbackTransaction() {
   if (!transaction_nesting_) {
-    DLOG_IF(FATAL, !poisoned_) << "Rolling back a nonexistent transaction";
+    DCHECK(poisoned_) << "Rolling back a nonexistent transaction";
     return;
   }
 
@@ -1312,7 +1238,7 @@ void Connection::RollbackTransaction() {
 
 bool Connection::CommitTransaction() {
   if (!transaction_nesting_) {
-    DLOG_IF(FATAL, !poisoned_) << "Committing a nonexistent transaction";
+    DCHECK(poisoned_) << "Committing a nonexistent transaction";
     return false;
   }
   transaction_nesting_--;
@@ -1379,7 +1305,7 @@ bool Connection::DetachDatabase(const char* attachment_point) {
 int Connection::ExecuteAndReturnErrorCode(const char* sql) {
   AssertIOAllowed();
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Illegal use of connection without a db";
+    DCHECK(poisoned_) << "Illegal use of connection without a db";
     return SQLITE_ERROR;
   }
   DCHECK(sql);
@@ -1442,7 +1368,7 @@ int Connection::ExecuteAndReturnErrorCode(const char* sql) {
 
 bool Connection::Execute(const char* sql) {
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Illegal use of connection without a db";
+    DCHECK(poisoned_) << "Illegal use of connection without a db";
     return false;
   }
 
@@ -1454,14 +1380,14 @@ bool Connection::Execute(const char* sql) {
   // that there's a malformed SQL statement. This can arise in development if
   // a change alters the schema but not all queries adjust.  This can happen
   // in production if the schema is corrupted.
-  if (error == SQLITE_ERROR)
-    DLOG(FATAL) << "SQL Error in " << sql << ", " << GetErrorMessage();
+  DCHECK_NE(error, SQLITE_ERROR)
+      << "SQL Error in " << sql << ", " << GetErrorMessage();
   return error == SQLITE_OK;
 }
 
 bool Connection::ExecuteWithTimeout(const char* sql, base::TimeDelta timeout) {
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Illegal use of connection without a db";
+    DCHECK(poisoned_) << "Illegal use of connection without a db";
     return false;
   }
 
@@ -1513,8 +1439,7 @@ scoped_refptr<Connection::StatementRef> Connection::GetStatementImpl(
   int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     // This is evidence of a syntax error in the incoming SQL.
-    if (rc == SQLITE_ERROR)
-      DLOG(FATAL) << "SQL compile error " << GetErrorMessage();
+    DCHECK_NE(rc, SQLITE_ERROR) << "SQL compile error " << GetErrorMessage();
 
     // It could also be database corruption.
     OnSqliteError(rc, NULL, sql);
@@ -1554,7 +1479,7 @@ std::string Connection::GetSchema() const {
 bool Connection::IsSQLValid(const char* sql) {
   AssertIOAllowed();
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Illegal use of connection without a db";
+    DCHECK(poisoned_) << "Illegal use of connection without a db";
     return false;
   }
 
@@ -1618,7 +1543,7 @@ bool Connection::DoesColumnExist(const char* table_name,
 
 int64_t Connection::GetLastInsertRowId() const {
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Illegal use of connection without a db";
+    DCHECK(poisoned_) << "Illegal use of connection without a db";
     return 0;
   }
   return sqlite3_last_insert_rowid(db_);
@@ -1626,7 +1551,7 @@ int64_t Connection::GetLastInsertRowId() const {
 
 int Connection::GetLastChangeCount() const {
   if (!db_) {
-    DLOG_IF(FATAL, !poisoned_) << "Illegal use of connection without a db";
+    DCHECK(poisoned_) << "Illegal use of connection without a db";
     return 0;
   }
   return sqlite3_changes(db_);
@@ -1660,12 +1585,11 @@ bool Connection::OpenInternal(const std::string& file_name,
   AssertIOAllowed();
 
   if (db_) {
-    DLOG(FATAL) << "sql::Connection is already open.";
+    DLOG(DCHECK) << "sql::Connection is already open.";
     return false;
   }
 
-  // Make sure sqlite3_initialize() is called before anything else.
-  InitializeSqlite();
+  EnsureSqliteInitialized();
 
   // Setup the stats histograms immediately rather than allocating lazily.
   // Connections which won't exercise all of these probably shouldn't exist.
@@ -1699,7 +1623,7 @@ bool Connection::OpenInternal(const std::string& file_name,
   // only considers the sqlite3 handle's state.
   // TODO(shess): Revise is_open() to consider poisoned_, and review
   // to see if any non-testing code even depends on it.
-  DLOG_IF(FATAL, poisoned_) << "sql::Connection is already open.";
+  DCHECK(!poisoned_) << "sql::Connection is already open.";
   poisoned_ = false;
 
   // Custom memory-mapping VFS which reads pages using regular I/O on first hit.
@@ -1715,7 +1639,7 @@ bool Connection::OpenInternal(const std::string& file_name,
 
     // Histogram failures specific to initial open for debugging
     // purposes.
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Sqlite.OpenFailure", err);
+    base::UmaHistogramSparse("Sqlite.OpenFailure", err);
 
     OnSqliteError(err, NULL, "-- sqlite3_open()");
     bool was_poisoned = poisoned_;
@@ -1774,7 +1698,7 @@ bool Connection::OpenInternal(const std::string& file_name,
   // be razed.
   err = ExecuteAndReturnErrorCode("PRAGMA auto_vacuum");
   if (err != SQLITE_OK) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Sqlite.OpenProbeFailure", err);
+    base::UmaHistogramSparse("Sqlite.OpenProbeFailure", err);
     OnSqliteError(err, nullptr, "PRAGMA auto_vacuum");
 
     // Retry or bail out if the error handler poisoned the handle.
@@ -1919,7 +1843,7 @@ void Connection::StatementRefCreated(StatementRef* ref) {
 void Connection::StatementRefDeleted(StatementRef* ref) {
   StatementRefSet::iterator i = open_statements_.find(ref);
   if (i == open_statements_.end())
-    DLOG(FATAL) << "Could not find statement";
+    DLOG(DCHECK) << "Could not find statement";
   else
     open_statements_.erase(i);
 }
@@ -1949,7 +1873,7 @@ void Connection::AddTaggedHistogram(const std::string& name,
 
 int Connection::OnSqliteError(
     int err, sql::Statement *stmt, const char* sql) const {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Sqlite.Error", err);
+  base::UmaHistogramSparse("Sqlite.Error", err);
   AddTaggedHistogram("Sqlite.Error", err);
 
   // Always log the error.
@@ -1976,7 +1900,7 @@ int Connection::OnSqliteError(
 
   // The default handling is to assert on debug and to ignore on release.
   if (!IsExpectedSqliteError(err))
-    DLOG(FATAL) << GetErrorMessage();
+    DLOG(DCHECK) << GetErrorMessage();
   return err;
 }
 

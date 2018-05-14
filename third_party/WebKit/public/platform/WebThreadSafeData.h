@@ -35,7 +35,7 @@
 #include "WebPrivatePtr.h"
 
 #if INSIDE_BLINK
-#include "platform/wtf/PassRefPtr.h"
+#include "base/memory/scoped_refptr.h"
 #else
 #include <string>
 #endif
@@ -48,7 +48,7 @@ class RawData;
 // object.  It is safe to pass a WebThreadSafeData across threads.
 class WebThreadSafeData {
  public:
-  WebThreadSafeData() {}
+  WebThreadSafeData() = default;
   BLINK_PLATFORM_EXPORT WebThreadSafeData(const char* data, size_t length);
 
   ~WebThreadSafeData() { Reset(); }
@@ -65,9 +65,9 @@ class WebThreadSafeData {
   BLINK_PLATFORM_EXPORT WebThreadSafeData& operator=(const WebThreadSafeData&);
 
 #if INSIDE_BLINK
-  BLINK_PLATFORM_EXPORT WebThreadSafeData(WTF::PassRefPtr<RawData>);
-  BLINK_PLATFORM_EXPORT WebThreadSafeData(WTF::RefPtr<RawData>&&);
-  BLINK_PLATFORM_EXPORT WebThreadSafeData& operator=(WTF::PassRefPtr<RawData>);
+  BLINK_PLATFORM_EXPORT WebThreadSafeData(scoped_refptr<RawData>);
+  BLINK_PLATFORM_EXPORT WebThreadSafeData(scoped_refptr<RawData>&&);
+  BLINK_PLATFORM_EXPORT WebThreadSafeData& operator=(scoped_refptr<RawData>);
 #else
   operator std::string() const {
     size_t len = size();

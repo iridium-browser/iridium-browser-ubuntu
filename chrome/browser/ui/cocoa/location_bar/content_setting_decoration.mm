@@ -28,7 +28,6 @@
 #include "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/mac/coordinate_conversion.h"
@@ -229,6 +228,10 @@ bool ContentSettingDecoration::UpdateFromWebContents(
   return decoration_changed;
 }
 
+bool ContentSettingDecoration::IsShowingBubble() const {
+  return bubbleWindow_ && [bubbleWindow_ isVisible];
+}
+
 CGFloat ContentSettingDecoration::MeasureTextWidth() {
   return [animated_text_ size].width;
 }
@@ -271,8 +274,8 @@ NSPoint ContentSettingDecoration::GetBubblePointInFrame(NSRect frame) {
   return StarDecoration::GetStarBubblePointInFrame(GetDrawRectInFrame(frame));
 }
 
-bool ContentSettingDecoration::AcceptsMousePress() {
-  return true;
+AcceptsPress ContentSettingDecoration::AcceptsMousePress() {
+  return AcceptsPress::WHEN_ACTIVATED;
 }
 
 bool ContentSettingDecoration::OnMousePressed(NSRect frame, NSPoint location) {
@@ -293,25 +296,29 @@ bool ContentSettingDecoration::OnMousePressed(NSRect frame, NSPoint location) {
           web_contents,
           profile_);
 
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+  // If the bubble is already opened, close it. Otherwise, open a new bubble.
+  if (bubbleWindow_ && [bubbleWindow_ isVisible]) {
+    [bubbleWindow_ close];
+    bubbleWindow_.reset();
+    return true;
+  }
+
+  // The blocked Framebust bubble only has a toolkit-views implementation.
+  if (chrome::ShowAllDialogsWithViewsToolkit() ||
+      model->AsFramebustBlockBubbleModel()) {
     gfx::Point origin = gfx::ScreenPointFromNSPoint(anchor);
-    chrome::ContentSettingBubbleViewsBridge::Show(
+    NSWindow* bubble = chrome::ContentSettingBubbleViewsBridge::Show(
         [web_contents->GetTopLevelNativeWindow() contentView], model,
         web_contents, origin, this);
+    bubbleWindow_.reset([bubble retain]);
   } else {
-    // If the bubble is already opened, close it. Otherwise, open a new bubble.
-    if (bubbleWindow_ && [bubbleWindow_ isVisible]) {
-      [bubbleWindow_ close];
-      bubbleWindow_.reset();
-    } else {
-      ContentSettingBubbleController* bubbleController =
-          [ContentSettingBubbleController showForModel:model
-                                           webContents:web_contents
-                                          parentWindow:[field window]
-                                            decoration:this
-                                            anchoredAt:anchor];
-      bubbleWindow_.reset([[bubbleController window] retain]);
-    }
+    ContentSettingBubbleController* bubbleController =
+        [ContentSettingBubbleController showForModel:model
+                                         webContents:web_contents
+                                        parentWindow:[field window]
+                                          decoration:this
+                                          anchoredAt:anchor];
+    bubbleWindow_.reset([[bubbleController window] retain]);
   }
 
   return true;

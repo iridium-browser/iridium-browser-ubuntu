@@ -58,13 +58,14 @@
 #       include <d3dcompiler.h>
 #   endif
 
-#   if defined(ANGLE_ENABLE_D3D11)
-#       include <d3d10_1.h>
-#       include <d3d11.h>
-#       include <d3d11_1.h>
-#       include <dxgi.h>
-#       include <dxgi1_2.h>
-#       include <d3dcompiler.h>
+// Include D3D11 headers when OpenGL is enabled on Windows for interop extensions.
+#if defined(ANGLE_ENABLE_D3D11) || defined(ANGLE_ENABLE_OPENGL)
+#include <d3d10_1.h>
+#include <d3d11.h>
+#include <d3d11_3.h>
+#include <d3dcompiler.h>
+#include <dxgi.h>
+#include <dxgi1_2.h>
 #   endif
 
 #if defined(ANGLE_ENABLE_D3D9) || defined(ANGLE_ENABLE_D3D11)
@@ -89,6 +90,11 @@
 #elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 #include <x86intrin.h>
 #define ANGLE_USE_SSE
+#endif
+
+// Mips and arm devices need to include stddef for size_t.
+#if defined(__mips__) || defined(__arm__) || defined(__aarch64__)
+#include <stddef.h>
 #endif
 
 // The MemoryBarrier function name collides with a macro under Windows

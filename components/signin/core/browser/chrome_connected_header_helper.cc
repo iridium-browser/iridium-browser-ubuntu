@@ -11,7 +11,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "components/google/core/browser/google_util.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "url/gurl.h"
@@ -49,13 +48,18 @@ GAIAServiceType GetGAIAServiceTypeFromHeader(const std::string& header_value) {
 
 }  // namespace
 
+ChromeConnectedHeaderHelper::ChromeConnectedHeaderHelper(
+    AccountConsistencyMethod account_consistency)
+    : account_consistency_(account_consistency) {}
+
 // static
 std::string ChromeConnectedHeaderHelper::BuildRequestCookieIfPossible(
     const GURL& url,
     const std::string& account_id,
+    AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,
     int profile_mode_mask) {
-  ChromeConnectedHeaderHelper chrome_connected_helper;
+  ChromeConnectedHeaderHelper chrome_connected_helper(account_consistency);
   if (!chrome_connected_helper.ShouldBuildRequestHeader(url, cookie_settings))
     return "";
   return chrome_connected_helper.BuildRequestHeader(
@@ -131,16 +135,15 @@ bool ChromeConnectedHeaderHelper::IsUrlEligibleForRequestHeader(
     return false;
 
   GURL origin(url.GetOrigin());
-  bool is_enable_account_consistency =
-      switches::IsAccountConsistencyMirrorEnabled();
-  bool is_google_url = is_enable_account_consistency &&
-                       (google_util::IsGoogleDomainUrl(
-                            url, google_util::ALLOW_SUBDOMAIN,
-                            google_util::DISALLOW_NON_STANDARD_PORTS) ||
-                        google_util::IsYoutubeDomainUrl(
-                            url, google_util::ALLOW_SUBDOMAIN,
-                            google_util::DISALLOW_NON_STANDARD_PORTS));
-  return is_google_url || IsDriveOrigin(origin) ||
+  bool is_google_url =
+      google_util::IsGoogleDomainUrl(
+          url, google_util::ALLOW_SUBDOMAIN,
+          google_util::DISALLOW_NON_STANDARD_PORTS) ||
+      google_util::IsYoutubeDomainUrl(url, google_util::ALLOW_SUBDOMAIN,
+                                      google_util::DISALLOW_NON_STANDARD_PORTS);
+  bool is_mirror_enabled =
+      account_consistency_ == AccountConsistencyMethod::kMirror;
+  return (is_mirror_enabled && is_google_url) || IsDriveOrigin(origin) ||
          gaia::IsGaiaSignonRealm(origin);
 }
 
@@ -149,21 +152,32 @@ std::string ChromeConnectedHeaderHelper::BuildRequestHeader(
     const GURL& url,
     const std::string& account_id,
     int profile_mode_mask) {
+// If we are not on Chrome OS, an empty |account_id| corresponds to the user not
+// signed in to Chrome. Do NOT enforce account consistency otherwise users will
+// not be able to use Google services at all. Therefore, send an empty header.
+// On Chrome OS, an empty |account_id| corresponds to Public Sessions, Guest
+// Sessions and Active Directory logins. Guest Sessions have already been
+// filtered upstream and we want to enforce account consistency in Public
+// Sessions and Active Directory logins.
+#if !defined(OS_CHROMEOS)
   if (account_id.empty())
     return std::string();
+#endif
 
   std::vector<std::string> parts;
-  if (IsUrlEligibleToIncludeGaiaId(url, is_header_request)) {
-    // Only set the Gaia ID on domains that actually requires it.
+  if (!account_id.empty() &&
+      IsUrlEligibleToIncludeGaiaId(url, is_header_request)) {
+    // Only set the Gaia ID on domains that actually require it.
     parts.push_back(
         base::StringPrintf("%s=%s", kGaiaIdAttrName, account_id.c_str()));
   }
   parts.push_back(
       base::StringPrintf("%s=%s", kProfileModeAttrName,
                          base::IntToString(profile_mode_mask).c_str()));
-  parts.push_back(base::StringPrintf(
-      "%s=%s", kEnableAccountConsistencyAttrName,
-      switches::IsAccountConsistencyMirrorEnabled() ? "true" : "false"));
+  bool is_mirror_enabled =
+      account_consistency_ == AccountConsistencyMethod::kMirror;
+  parts.push_back(base::StringPrintf("%s=%s", kEnableAccountConsistencyAttrName,
+                                     is_mirror_enabled ? "true" : "false"));
 
   return base::JoinString(parts, is_header_request ? "," : ":");
 }

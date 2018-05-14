@@ -12,7 +12,7 @@
 #include "base/test/scoped_task_environment.h"
 #include "base/time/time.h"
 #include "content/child/child_process.h"
-#include "content/renderer/media/mock_media_stream_registry.h"
+#include "content/renderer/media/stream/mock_media_stream_registry.h"
 #include "content/renderer/media_recorder/media_recorder_handler.h"
 #include "media/audio/simple_sources.h"
 #include "media/base/audio_bus.h"
@@ -21,6 +21,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebMediaRecorderHandlerClient.h"
 #include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/WebKit/public/web/WebHeap.h"
 
 using ::testing::_;
@@ -67,7 +68,10 @@ static const MediaRecorderTestParams kMediaRecorderTestParams[] = {
 #if BUILDFLAG(RTC_USE_H264)
     {true, false, "video/webm", "h264", false},
 #endif
-    {false, true, "video/webm", "vp8", true}};
+    {false, true, "audio/webm", "opus", true},
+    {false, true, "audio/webm", "", true},  // Should default to opus.
+    {false, true, "audio/webm", "pcm", true},
+};
 
 class MediaRecorderHandlerTest : public TestWithParam<MediaRecorderTestParams>,
                                  public blink::WebMediaRecorderHandlerClient {
@@ -75,7 +79,8 @@ class MediaRecorderHandlerTest : public TestWithParam<MediaRecorderTestParams>,
   MediaRecorderHandlerTest()
       : scoped_task_environment_(
             base::test::ScopedTaskEnvironment::MainThreadType::UI),
-        media_recorder_handler_(new MediaRecorderHandler()),
+        media_recorder_handler_(new MediaRecorderHandler(
+            blink::scheduler::GetSingleThreadTaskRunnerForTesting())),
         audio_source_(kTestAudioChannels,
                       440 /* freq */,
                       kTestAudioSampleRate) {
@@ -188,6 +193,9 @@ TEST_F(MediaRecorderHandlerTest, CanSupportMimeType) {
   const WebString example_good_codecs_6(WebString::FromASCII("OpUs"));
   EXPECT_TRUE(media_recorder_handler_->CanSupportMimeType(
       mime_type_audio, example_good_codecs_6));
+  const WebString example_good_codecs_7(WebString::FromASCII("pcm"));
+  EXPECT_TRUE(media_recorder_handler_->CanSupportMimeType(
+      mime_type_audio, example_good_codecs_7));
 
   const WebString example_unsupported_codecs_2(WebString::FromASCII("vorbis"));
   EXPECT_FALSE(media_recorder_handler_->CanSupportMimeType(
@@ -258,7 +266,7 @@ TEST_P(MediaRecorderHandlerTest, EncodeVideoFrames) {
   Mock::VerifyAndClearExpectations(this);
 
   {
-    const size_t kEncodedSizeThreshold = 13;
+    const size_t kEncodedSizeThreshold = 12;
     base::RunLoop run_loop;
     base::Closure quit_closure = run_loop.QuitClosure();
     // The second time around writeData() is called a number of times to write
@@ -311,17 +319,19 @@ INSTANTIATE_TEST_CASE_P(,
                         MediaRecorderHandlerTest,
                         ValuesIn(kMediaRecorderTestParams));
 
-// Sends 2 frames and expect them as WebM contained encoded data in writeData().
-TEST_P(MediaRecorderHandlerTest, EncodeAudioFrames) {
+// Sends 2 frames and expect them as WebM (or MKV) contained encoded audio data
+// in writeData().
+TEST_P(MediaRecorderHandlerTest, OpusEncodeAudioFrames) {
   // Audio-only test.
   if (GetParam().has_video)
     return;
 
   AddTracks();
 
-  const WebString mime_type(WebString::FromASCII("audio/webm"));
-  EXPECT_TRUE(media_recorder_handler_->Initialize(
-      this, registry_.test_stream(), mime_type, WebString(), 0, 0));
+  const WebString mime_type(WebString::FromASCII(GetParam().mime_type));
+  const WebString codecs(WebString::FromASCII(GetParam().codecs));
+  EXPECT_TRUE(media_recorder_handler_->Initialize(this, registry_.test_stream(),
+                                                  mime_type, codecs, 0, 0));
   EXPECT_TRUE(media_recorder_handler_->Start(0));
 
   InSequence s;

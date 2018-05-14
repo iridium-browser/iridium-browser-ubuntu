@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -10,10 +11,9 @@ full and pre-flight-queue builds.
 
 from __future__ import print_function
 
-import distutils.version
+import distutils.version # pylint: disable=import-error,no-name-in-module
 import glob
 import json
-import mock
 import optparse  # pylint: disable=deprecated-module
 import os
 import pickle
@@ -21,12 +21,11 @@ import sys
 
 from chromite.cbuildbot import builders
 from chromite.cbuildbot import cbuildbot_run
-from chromite.cbuildbot import remote_try
 from chromite.cbuildbot import repository
 from chromite.cbuildbot import tee
 from chromite.cbuildbot import topology
-from chromite.cbuildbot import trybot_patch_pool
 from chromite.cbuildbot.stages import completion_stages
+from chromite.lib.const import waterfall
 from chromite.lib import builder_status_lib
 from chromite.lib import cidb
 from chromite.lib import cgroups
@@ -54,78 +53,6 @@ _DEFAULT_EXT_BUILDROOT = 'trybot'
 _DEFAULT_INT_BUILDROOT = 'trybot-internal'
 _BUILDBOT_REQUIRED_BINARIES = ('pbzip2',)
 _API_VERSION_ATTR = 'api_version'
-
-
-def _PrintValidConfigs(site_config, display_all=False):
-  """Print a list of valid buildbot configs.
-
-  Args:
-    site_config: config_lib.SiteConfig containing all config info.
-    display_all: Print all configs.  Otherwise, prints only configs with
-                 trybot_list=True.
-  """
-  def _GetSortKey(config_name):
-    config_dict = site_config[config_name]
-    return (not config_dict['trybot_list'], config_dict['description'],
-            config_name)
-
-  COLUMN_WIDTH = 45
-  if not display_all:
-    print('Note: This is the common list; for all configs, use --all.')
-  print('config'.ljust(COLUMN_WIDTH), 'description')
-  print('------'.ljust(COLUMN_WIDTH), '-----------')
-  config_names = site_config.keys()
-  config_names.sort(key=_GetSortKey)
-  for name in config_names:
-    if display_all or site_config[name]['trybot_list']:
-      desc = site_config[name].get('description')
-      desc = desc if desc else ''
-      print(name.ljust(COLUMN_WIDTH), desc)
-
-
-def _ConfirmBuildRoot(buildroot):
-  """Confirm with user the inferred buildroot, and mark it as confirmed."""
-  logging.warning('Using default directory %s as buildroot', buildroot)
-  if not cros_build_lib.BooleanPrompt(default=False):
-    print('Please specify a different buildroot via the --buildroot option.')
-    sys.exit(0)
-
-  if not os.path.exists(buildroot):
-    os.mkdir(buildroot)
-
-  repository.CreateTrybotMarker(buildroot)
-
-
-def _ConfirmRemoteBuildbotRun():
-  """Confirm user wants to run with --buildbot --remote."""
-  logging.warning(
-      'You are about to launch a PRODUCTION job!  This is *NOT* a '
-      'trybot run! Are you sure?')
-  if not cros_build_lib.BooleanPrompt(default=False):
-    print('Please specify --pass-through="--debug".')
-    sys.exit(0)
-
-
-def _DetermineDefaultBuildRoot(sourceroot, internal_build):
-  """Default buildroot to be under the directory that contains current checkout.
-
-  Args:
-    internal_build: Whether the build is an internal build
-    sourceroot: Use specified sourceroot.
-  """
-  if not repository.IsARepoRoot(sourceroot):
-    cros_build_lib.Die(
-        'Could not find root of local checkout at %s.  Please specify '
-        'using the --sourceroot option.' % sourceroot)
-
-  # Place trybot buildroot under the directory containing current checkout.
-  top_level = os.path.dirname(os.path.realpath(sourceroot))
-  if internal_build:
-    buildroot = os.path.join(top_level, _DEFAULT_INT_BUILDROOT)
-  else:
-    buildroot = os.path.join(top_level, _DEFAULT_EXT_BUILDROOT)
-
-  return buildroot
 
 
 def _BackupPreviousLog(log_file, backup_limit=25):
@@ -196,7 +123,7 @@ def _RunBuildStagesWrapper(options, site_config, build_config):
     options.managed_chrome = (
         chrome_rev != constants.CHROME_REV_LOCAL and
         (not build_config['usepkg_build_packages'] or chrome_rev or
-         build_config['profile'] or options.rietveld_patches))
+         build_config['profile']))
   else:
     options.managed_chrome = build_config['sync_chrome']
 
@@ -212,13 +139,6 @@ def _RunBuildStagesWrapper(options, site_config, build_config):
                                        target_name, chrome_src)
     # Create directory if in need
     osutils.SafeMakedirsNonRoot(options.chrome_root)
-  elif options.rietveld_patches:
-    cros_build_lib.Die('This builder does not support Rietveld patches.')
-
-  metadata_dump_dict = {}
-  if options.metadata_dump:
-    with open(options.metadata_dump, 'r') as metadata_file:
-      metadata_dump_dict = json.loads(metadata_file.read())
 
   # We are done munging options values, so freeze options object now to avoid
   # further abuse of it.
@@ -226,6 +146,14 @@ def _RunBuildStagesWrapper(options, site_config, build_config):
   # it can be handled another way.  Try to push this freeze closer and closer
   # to the start of the script (e.g. in or after _PostParseCheck).
   options.Freeze()
+
+  metadata_dump_dict = {
+      # A detected default has been set before now if it wasn't explicit.
+      'branch': options.branch,
+  }
+  if options.metadata_dump:
+    with open(options.metadata_dump, 'r') as metadata_file:
+      metadata_dump_dict = json.loads(metadata_file.read())
 
   with parallel.Manager() as manager:
     builder_run = cbuildbot_run.BuilderRun(
@@ -246,63 +174,6 @@ def _RunBuildStagesWrapper(options, site_config, build_config):
 
     if not builder.Run():
       sys.exit(1)
-
-
-# Parser related functions
-def _CheckLocalPatches(sourceroot, local_patches):
-  """Do an early quick check of the passed-in patches.
-
-  If the branch of a project is not specified we append the current branch the
-  project is on.
-
-  TODO(davidjames): The project:branch format isn't unique, so this means that
-  we can't differentiate what directory the user intended to apply patches to.
-  We should references by directory instead.
-
-  Args:
-    sourceroot: The checkout where patches are coming from.
-    local_patches: List of patches to check in project:branch format.
-
-  Returns:
-    A list of patches that have been verified, in project:branch format.
-  """
-  verified_patches = []
-  manifest = git.ManifestCheckout.Cached(sourceroot)
-  for patch in local_patches:
-    project, _, branch = patch.partition(':')
-
-    checkouts = manifest.FindCheckouts(project)
-    if not checkouts:
-      cros_build_lib.Die('Project %s does not exist.' % (project,))
-    if len(checkouts) > 1:
-      cros_build_lib.Die(
-          'We do not yet support local patching for projects that are checked '
-          'out to multiple directories. Try uploading your patch to gerrit '
-          'and referencing it via the -g option instead.'
-      )
-
-    ok = False
-    for checkout in checkouts:
-      project_dir = checkout.GetPath(absolute=True)
-
-      # If no branch was specified, we use the project's current branch.
-      if not branch:
-        local_branch = git.GetCurrentBranch(project_dir)
-      else:
-        local_branch = branch
-
-      if local_branch and git.DoesCommitExistInRepo(project_dir, local_branch):
-        verified_patches.append('%s:%s' % (project, local_branch))
-        ok = True
-
-    if not ok:
-      if branch:
-        cros_build_lib.Die('Project %s does not have branch %s'
-                           % (project, branch))
-      else:
-        cros_build_lib.Die('Project %s is not on a branch!' % (project,))
-
-  return verified_patches
 
 
 def _CheckChromeVersionOption(_option, _opt_str, value, parser):
@@ -340,31 +211,12 @@ class CustomGroup(optparse.OptionGroup):
 class CustomOption(commandline.FilteringOption):
   """Subclass FilteringOption class to implement pass-through and api."""
 
-  ACTIONS = commandline.FilteringOption.ACTIONS + ('extend',)
-  STORE_ACTIONS = commandline.FilteringOption.STORE_ACTIONS + ('extend',)
-  TYPED_ACTIONS = commandline.FilteringOption.TYPED_ACTIONS + ('extend',)
-  ALWAYS_TYPED_ACTIONS = (commandline.FilteringOption.ALWAYS_TYPED_ACTIONS +
-                          ('extend',))
-
   def __init__(self, *args, **kwargs):
     # The remote_pass_through argument specifies whether we should directly
     # pass the argument (with its value) onto the remote trybot.
     self.pass_through = kwargs.pop('remote_pass_through', False)
     self.api_version = int(kwargs.pop('api', '0'))
     commandline.FilteringOption.__init__(self, *args, **kwargs)
-
-  def take_action(self, action, dest, opt, value, values, parser):
-    if action == 'extend':
-      # If there is extra spaces between each argument, we get '' which later
-      # code barfs on, so skip those.  e.g. We see this with the forms:
-      #  cbuildbot -p 'proj:branch ' ...
-      #  cbuildbot -p ' proj:branch' ...
-      #  cbuildbot -p 'proj:branch  proj2:branch' ...
-      lvalue = value.split()
-      values.ensure_value(dest, []).extend(lvalue)
-
-    commandline.FilteringOption.take_action(
-        self, action, dest, opt, value, values, parser)
 
 
 class CustomParser(commandline.FilteringParser):
@@ -390,19 +242,6 @@ def _CreateParser():
   parser = CustomParser(usage=usage, caching=FindCacheDir)
 
   # Main options
-  parser.add_option('-l', '--list', action='store_true', dest='list',
-                    default=False,
-                    help='List the suggested trybot configs to use (see --all)')
-  parser.add_option('-a', '--all', action='store_true', dest='print_all',
-                    default=False,
-                    help='List all of the buildbot configs available w/--list')
-
-  parser.add_option('--local', action='store_true', default=False,
-                    help='Specifies that this tryjob should be run locally. '
-                         'Implies --debug.')
-  parser.add_option('--remote', action='store_true', default=False,
-                    help='Specifies that this tryjob should be run remotely.')
-
   parser.add_remote_option('-b', '--branch',
                            help='The manifest branch to test.  The branch to '
                                 'check the buildroot out to.')
@@ -426,8 +265,6 @@ def _CreateParser():
                                  % '|'.join(constants.VALID_CHROME_REVISIONS)))
   parser.add_remote_option('--profile',
                            help='Name of profile to sub-specify board variant.')
-  parser.add_option('-c', '--config_repo',
-                    help='Deprecated option. Do not use!')
   # TODO(crbug.com/279618): Running GOMA is under development. Following
   # flags are added for development purpose due to repository dependency,
   # but not officially supported yet.
@@ -440,6 +277,15 @@ def _CreateParser():
                     help='Specify a service-account-goma-client.json path. '
                          'The file is needed on bots to run GOMA.')
 
+  group = CustomGroup(
+      parser,
+      'Deprecated Options')
+
+  parser.add_option('--local', action='store_true', default=False,
+                    help='Deprecated. See cros tryjob.')
+  parser.add_option('--remote', action='store_true', default=False,
+                    help='Deprecated. See cros tryjob.')
+
   #
   # Patch selection options.
   #
@@ -448,26 +294,14 @@ def _CreateParser():
       parser,
       'Patch Options')
 
-  group.add_remote_option('-g', '--gerrit-patches', action='extend',
+  group.add_remote_option('-g', '--gerrit-patches', action='split_extend',
                           type='string', default=[],
                           metavar="'Id1 *int_Id2...IdN'",
                           help='Space-separated list of short-form Gerrit '
                                "Change-Id's or change numbers to patch. "
                                "Please prepend '*' to internal Change-Id's")
-  group.add_remote_option('-G', '--rietveld-patches', action='extend',
-                          type='string', default=[],
-                          metavar="'id1[:subdir1]...idN[:subdirN]'",
-                          help='Space-separated list of short-form Rietveld '
-                               'issue numbers to patch. If no subdir is '
-                               'specified, the src directory is used.')
-  group.add_option('-p', '--local-patches', action='extend', default=[],
-                   metavar="'<project1>[:<branch1>]...<projectN>[:<branchN>]'",
-                   help='Space-separated list of project branches with '
-                        'patches to apply.  Projects are specified by name. '
-                        'If no branch is specified the current branch of the '
-                        'project will be used.')
 
-  parser.add_option_group(group)
+  parser.add_argument_group(group)
 
   #
   # Remote trybot options.
@@ -475,39 +309,16 @@ def _CreateParser():
 
   group = CustomGroup(
       parser,
-      'Remote Trybot Options (--remote)')
-
-  # TODO(dgarrett): Remove after a reasonable delay.
-  group.add_option('--use-buildbucket', action='store_true',
-                   dest='deprecated_use_buildbucket',
-                   help='Deprecated option. Ignored.')
-
-  group.add_option('--do-not-use-buildbucket', action='store_false',
-                   dest='use_buildbucket', default=True,
-                   help='Use buildbucket instead of git to request'
-                        'the tryjob(s).')
-
+      'Options used to configure tryjob behavior.')
   group.add_remote_option('--hwtest', action='store_true', default=False,
                           help='Run the HWTest stage (tests on real hardware)')
-  group.add_option('--remote-description',
-                   help='Attach an optional description to a --remote run '
-                        'to make it easier to identify the results when it '
-                        'finishes')
-  group.add_option('--slaves', action='extend', default=[],
-                   help='Specify specific remote tryslaves to run on (e.g. '
-                        'build149-m2); if the bot is busy, it will be queued')
-  group.add_remote_option('--channel', action='extend', dest='channels',
+  group.add_remote_option('--channel', action='split_extend', dest='channels',
                           default=[],
                           help='Specify a channel for a payloads trybot. Can '
                                'be specified multiple times. No valid for '
                                'non-payloads configs.')
-  group.add_option('--test-tryjob', action='store_true', default=False,
-                   help='Submit a tryjob to the test repository.  Will not '
-                        'show up on the production trybot waterfall.')
-  group.add_option('--committer-email', type='string',
-                   help='Override default git committer email.')
 
-  parser.add_option_group(group)
+  parser.add_argument_group(group)
 
   #
   # Branch creation options.
@@ -530,7 +341,7 @@ def _CreateParser():
                           help='Do not actually push to remote git repos.  '
                                'Used for end-to-end testing branching.')
 
-  parser.add_option_group(group)
+  parser.add_argument_group(group)
 
   #
   # Advanced options.
@@ -662,8 +473,12 @@ def _CreateParser():
                                'tool. Bootstrap the projects based on the git '
                                'cache files instead of fetching them directly '
                                'from the GoB servers.')
+  group.add_remote_option('--sanity-check-build', action='store_true',
+                          default=False, dest='sanity_check_build',
+                          api=constants.REEXEC_API_SANITY_CHECK_BUILD,
+                          help='Run the build as a sanity check build.')
 
-  parser.add_option_group(group)
+  parser.add_argument_group(group)
 
   #
   # Internal options.
@@ -693,18 +508,19 @@ def _CreateParser():
   group.add_option('--remote-trybot', action='store_true', default=False,
                    help='Indicates this is running on a remote trybot machine')
   group.add_option('--buildbucket-id',
+                   api=constants.REEXEC_API_GOMA, # Approximate.
                    help='The unique ID in buildbucket of current build '
                         'generated by buildbucket.')
-  group.add_remote_option('--remote-patches', action='extend', default=[],
+  group.add_remote_option('--remote-patches', action='split_extend', default=[],
                           help='Patches uploaded by the trybot client when '
                                'run using the -p option')
   # Note the default here needs to be hardcoded to 3; that is the last version
   # that lacked this functionality.
   group.add_option('--remote-version', type='int', default=3,
-                   help='Used for compatibility checks w/tryjobs running in '
-                        'older chromite instances')
+                   help='Deprecated and ignored.')
   group.add_option('--sourceroot', type='path', default=constants.SOURCE_ROOT)
   group.add_option('--ts-mon-task-num', type='int', default=0,
+                   api=constants.REEXEC_API_TSMON_TASK_NUM,
                    help='The task number of this process. Defaults to 0. '
                         'This argument is useful for running multiple copies '
                         'of cbuildbot without their metrics colliding.')
@@ -730,6 +546,8 @@ def _CreateParser():
                                'in conjunction with --debug, the tree status '
                                'will not be ignored as it usually is in a '
                                '--debug run.')
+  # TODO(nxia): crbug.com/778838
+  # cbuildbot doesn't use pickle files anymore, remove this.
   group.add_remote_option('--mock-slave-status',
                           metavar='MOCK_SLAVE_STATUS_PICKLE_FILE',
                           help='Override the result of the _FetchSlaveStatuses '
@@ -737,7 +555,7 @@ def _CreateParser():
                                'specifying a file with a pickle of the result '
                                'to be returned.')
 
-  parser.add_option_group(group)
+  parser.add_argument_group(group)
 
   #
   # Debug options
@@ -754,7 +572,7 @@ def _CreateParser():
   return parser
 
 
-def _FinishParsing(options, args):
+def _FinishParsing(options):
   """Perform some parsing tasks that need to take place after optparse.
 
   This function needs to be easily testable!  Keep it free of
@@ -763,12 +581,17 @@ def _FinishParsing(options, args):
 
   Args:
     options: The options object returned by optparse
-    args: The args object returned by optparse
   """
   # Populate options.pass_through_args.
   accepted, _ = commandline.FilteringParser.FilterArgs(
       options.parsed_args, lambda x: x.opt_inst.pass_through)
   options.pass_through_args.extend(accepted)
+
+  if options.local or options.remote:
+    cros_build_lib.Die('Deprecated usage. Please use cros tryjob instead.')
+
+  if not options.buildroot:
+    cros_build_lib.Die('A buildroot is required to build.')
 
   if options.chrome_root:
     if options.chrome_rev != constants.CHROME_REV_LOCAL:
@@ -787,39 +610,12 @@ def _FinishParsing(options, args):
         'Chrome rev must not be %s if chrome_version is not set.'
         % constants.CHROME_REV_SPEC)
 
-  patches = bool(options.gerrit_patches or options.local_patches or
-                 options.rietveld_patches)
-  if options.remote:
-    if options.local:
-      cros_build_lib.Die('Cannot specify both --remote and --local')
-
-    # options.channels is a convenient way to detect payloads builds.
-    if (not options.list and not options.buildbot and not options.channels and
-        not patches):
-      prompt = ('No patches were provided; are you sure you want to just '
-                'run a remote build of %s?' % (
-                    options.branch if options.branch else 'ToT'))
-      if not cros_build_lib.BooleanPrompt(prompt=prompt, default=False):
-        cros_build_lib.Die('Must provide patches when running with --remote.')
-
-    # --debug needs to be explicitly passed through for remote invocations.
-    release_mode_with_patches = (options.buildbot and patches and
-                                 '--debug' not in options.pass_through_args)
-  else:
-    if len(args) > 1:
-      cros_build_lib.Die('Multiple configs not supported if not running with '
-                         '--remote.  Got %r', args)
-
-    if options.slaves:
-      cros_build_lib.Die('Cannot use --slaves if not running with --remote.')
-
-    release_mode_with_patches = (options.buildbot and patches and
-                                 not options.debug)
+  patches = bool(options.gerrit_patches)
 
   # When running in release mode, make sure we are running with checked-in code.
   # We want checked-in cbuildbot/scripts to prevent errors, and we want to build
   # a release image with checked-in code for CrOS packages.
-  if release_mode_with_patches:
+  if options.buildbot and patches and not options.debug:
     cros_build_lib.Die(
         'Cannot provide patches when running with --buildbot!')
 
@@ -828,33 +624,18 @@ def _FinishParsing(options, args):
         '--buildbot and --remote-trybot cannot be used together.')
 
   # Record whether --debug was set explicitly vs. it was inferred.
-  options.debug_forced = False
-  if options.debug:
-    options.debug_forced = True
-  if not options.debug:
-    # We don't set debug by default for
-    # 1. --buildbot invocations.
-    # 2. --remote invocations, because it needs to push changes to the tryjob
-    #    repo.
-    options.debug = not options.buildbot and not options.remote
+  options.debug_forced = options.debug
+  # We force --debug to be set for builds that are not 'official'.
+  options.debug = options.debug or not options.buildbot
 
-  # Record the configs targeted.
-  options.build_targets = args[:]
-
-  if constants.BRANCH_UTIL_CONFIG in options.build_targets:
-    if options.remote:
-      cros_build_lib.Die(
-          'Running %s as a remote tryjob is not yet supported.',
-          constants.BRANCH_UTIL_CONFIG)
-    if len(options.build_targets) > 1:
-      cros_build_lib.Die(
-          'Cannot run %s with any other configs.',
-          constants.BRANCH_UTIL_CONFIG)
+  if options.build_config_name in (constants.BRANCH_UTIL_CONFIG,
+                                   'branch-util-tryjob'):
     if not options.branch_name:
       cros_build_lib.Die(
           'Must specify --branch-name with the %s config.',
           constants.BRANCH_UTIL_CONFIG)
-    if options.branch and options.branch != options.branch_name:
+    if (options.branch and options.branch != 'master' and
+        options.branch != options.branch_name):
       cros_build_lib.Die(
           'If --branch is specified with the %s config, it must'
           ' have the same value as --branch-name.',
@@ -889,116 +670,85 @@ def _FinishParsing(options, args):
 
 
 # pylint: disable=W0613
-def _PostParseCheck(parser, options, args, site_config):
+def _PostParseCheck(parser, options, site_config):
   """Perform some usage validation after we've parsed the arguments
 
   Args:
     parser: Option parser that was used to parse arguments.
     options: The options returned by optparse.
-    args: The args returned by optparse.
     site_config: config_lib.SiteConfig containing all config info.
   """
-  if not args:
-    parser.error('Invalid usage: no configuration targets provided.'
-                 'Use -h to see usage.  Use -l to list supported configs.')
 
   if not options.branch:
     options.branch = git.GetChromiteTrackingBranch()
-
-  if not repository.IsARepoRoot(options.sourceroot):
-    if options.local_patches:
-      raise Exception('Could not find repo checkout at %s!'
-                      % options.sourceroot)
 
   # Because the default cache dir depends on other options, FindCacheDir
   # always returns None, and we setup the default here.
   if options.cache_dir is None:
     # Note, options.sourceroot is set regardless of the path
     # actually existing.
-    if options.buildroot is not None:
-      options.cache_dir = os.path.join(options.buildroot, '.cache')
-    elif os.path.exists(options.sourceroot):
-      options.cache_dir = os.path.join(options.sourceroot, '.cache')
-    else:
-      options.cache_dir = parser.FindCacheDir(parser, options)
+    options.cache_dir = os.path.join(options.buildroot, '.cache')
     options.cache_dir = os.path.abspath(options.cache_dir)
     parser.ConfigureCacheDir(options.cache_dir)
 
   osutils.SafeMakedirsNonRoot(options.cache_dir)
 
-  if options.local_patches:
-    options.local_patches = _CheckLocalPatches(
-        options.sourceroot, options.local_patches)
-
-  default = os.environ.get('CBUILDBOT_DEFAULT_MODE')
-  if (default and not any([options.local, options.buildbot,
-                           options.remote, options.remote_trybot])):
-    logging.info('CBUILDBOT_DEFAULT_MODE=%s env var detected, using it.'
-                 % default)
-    default = default.lower()
-    if default == 'local':
-      options.local = True
-    elif default == 'remote':
-      options.remote = True
-    elif default == 'buildbot':
-      options.buildbot = True
-    else:
-      cros_build_lib.Die("CBUILDBOT_DEFAULT_MODE value %s isn't supported. "
-                         % default)
-
   # Ensure that all args are legitimate config targets.
-  invalid_targets = []
-  for arg in args:
-    if arg not in site_config:
-      invalid_targets.append(arg)
-      logging.error('No such configuraton target: "%s".', arg)
-      continue
+  if options.build_config_name not in site_config:
+    cros_build_lib.Die('Unkonwn build config: "%s"' % options.build_config_name)
 
-    build_config = site_config[arg]
+  build_config = site_config[options.build_config_name]
+  is_payloads_build = build_config.build_type == constants.PAYLOADS_TYPE
 
-    is_payloads_build = build_config.build_type == constants.PAYLOADS_TYPE
+  if options.channels and not is_payloads_build:
+    cros_build_lib.Die('--channel must only be used with a payload config,'
+                       ' not target (%s).' % options.build_config_name)
 
-    if options.channels and not is_payloads_build:
-      cros_build_lib.Die('--channel must only be used with a payload config,'
-                         ' not target (%s).' % arg)
+  if not options.channels and is_payloads_build:
+    cros_build_lib.Die('payload configs (%s) require --channel to do anything'
+                       ' useful.' % options.build_config_name)
 
-    if not options.channels and is_payloads_build:
-      cros_build_lib.Die('payload configs (%s) require --channel to do anything'
-                         ' useful.' % arg)
+  # If the build config explicitly forces the debug flag, set the debug flag
+  # as if it was set from the command line.
+  if build_config.debug:
+    options.debug = True
 
-    # The --version option is not compatible with an external target unless the
-    # --buildbot option is specified.  More correctly, only "paladin versions"
-    # will work with external targets, and those are only used with --buildbot.
-    # If --buildbot is specified, then user should know what they are doing and
-    # only specify a version that will work.  See crbug.com/311648.
-    if (options.force_version and
-        not (options.buildbot or build_config.internal)):
-      cros_build_lib.Die('Cannot specify --version without --buildbot for an'
-                         ' external target (%s).' % arg)
+  if not (config_lib.isTryjobConfig(build_config) or options.buildbot):
+    cros_build_lib.Die(
+        'Refusing to run non-tryjob config as a tryjob.\n'
+        'Please "repo sync && cros tryjob --list %s" for alternatives.\n'
+        'See go/cros-explicit-tryjob-build-configs-psa.',
+        build_config.name)
 
-  if invalid_targets:
-    cros_build_lib.Die('One or more invalid configuration targets specified. '
-                       'You can check the available configs by running '
-                       '`cbuildbot --list --all`')
+  # The --version option is not compatible with an external target unless the
+  # --buildbot option is specified.  More correctly, only "paladin versions"
+  # will work with external targets, and those are only used with --buildbot.
+  # If --buildbot is specified, then user should know what they are doing and
+  # only specify a version that will work.  See crbug.com/311648.
+  if (options.force_version and
+      not (options.buildbot or build_config.internal)):
+    cros_build_lib.Die('Cannot specify --version without --buildbot for an'
+                       ' external target (%s).' % options.build_config_name)
 
 
 def ParseCommandLine(parser, argv):
   """Completely parse the commandline arguments"""
   (options, args) = parser.parse_args(argv)
 
-  # Strip out null arguments.
-  # TODO(rcui): Remove when buildbot is fixed
-  args = [arg for arg in args if arg]
-
-  if options.deprecated_use_buildbucket:
-    logging.warning('--use-buildbucket is deprecated, and ignored.')
-
+  # Handle the request for the reexec command line API version number.
   if options.output_api_version:
     print(constants.REEXEC_API_VERSION)
     sys.exit(0)
 
-  _FinishParsing(options, args)
-  return options, args
+  # Record the configs targeted. Strip out null arguments.
+  build_config_names = [x for x in args if x]
+  if len(build_config_names) != 1:
+    cros_build_lib.Die('Expected exactly one build config. Got: %r',
+                       build_config_names)
+  options.build_config_name = build_config_names[-1]
+
+  _FinishParsing(options)
+  return options
 
 
 _ENVIRONMENT_PROD = 'prod'
@@ -1008,12 +758,14 @@ _ENVIRONMENT_STANDALONE = 'standalone'
 
 def _GetRunEnvironment(options, build_config):
   """Determine whether this is a prod/debug/standalone run."""
-  # TODO(akeshet): This is a temporary workaround to make sure that the cidb
-  # is not used on waterfalls that the db schema does not support (in particular
-  # the chromeos.chrome waterfall).
-  # See crbug.com/406940
-  waterfall = os.environ.get('BUILDBOT_MASTERNAME', '')
-  if not waterfall in constants.CIDB_KNOWN_WATERFALLS:
+  # Look up the buildbot waterfall.
+  wfall = os.environ.get('BUILDBOT_MASTERNAME', '')
+
+  # Insert the override waterfall for swarming.
+  if os.environ.get('SWARMING_BOT_ID', ''):
+    wfall = waterfall.WATERFALL_SWARMING
+
+  if not wfall:
     return _ENVIRONMENT_STANDALONE
 
   # TODO(akeshet): Clean up this code once we have better defined flags to
@@ -1074,8 +826,49 @@ def _SetupConnections(options, build_config):
   return context
 
 
+class _MockMethodWithReturnValue(object):
+  """A method mocker which just returns the specific value."""
+  def __init__(self, return_value):
+    self.return_value = return_value
+
+  def __call__(self, *args, **kwargs):
+    return self.return_value
+
+
+class _ObjectMethodPatcher(object):
+  """A simplified mock.object.patch.
+
+  It is a context manager that patches an object's method with specified
+  return value.
+  """
+  def __init__(self, target, attr, return_value=None):
+    """Constructor.
+
+    Args:
+      target: object to patch.
+      attr: method name of the object to patch.
+      return_value: the return value when calling target.attr
+    """
+    self.target = target
+    self.attr = attr
+    self.return_value = return_value
+    self.original_attr = None
+    self.new_attr = _MockMethodWithReturnValue(self.return_value)
+
+  def __enter__(self):
+    self.original_attr = self.target.__dict__[self.attr]
+    setattr(self.target, self.attr, self.new_attr)
+
+  def __exit__(self, *args):
+    if self.target and self.original_attr:
+      setattr(self.target, self.attr, self.original_attr)
+
+
 # TODO(build): This function is too damn long.
 def main(argv):
+  # We get false positives with the options object.
+  # pylint: disable=attribute-defined-outside-init
+
   # Turn on strict sudo checks.
   cros_build_lib.STRICT_SUDO = True
 
@@ -1083,83 +876,28 @@ def main(argv):
   os.umask(0o22)
 
   parser = _CreateParser()
-  options, args = ParseCommandLine(parser, argv)
-
-  if options.config_repo:
-    cros_build_lib.Die('Deprecated usage. Ping crbug.com/735696 you need it.')
+  options = ParseCommandLine(parser, argv)
 
   # Fetch our site_config now, because we need it to do anything else.
   site_config = config_lib.GetConfig()
 
-  if options.list:
-    _PrintValidConfigs(site_config, options.print_all)
-    sys.exit(0)
-
-  _PostParseCheck(parser, options, args, site_config)
+  _PostParseCheck(parser, options, site_config)
 
   cros_build_lib.AssertOutsideChroot()
 
   if options.enable_buildbot_tags:
     logging.EnableBuildbotMarkers()
-  if options.remote:
-    logging.getLogger().setLevel(logging.WARNING)
 
-    # Verify configs are valid.
-    # If hwtest flag is enabled, post a warning that HWTest step may fail if the
-    # specified board is not a released platform or it is a generic overlay.
-    for bot in args:
-      build_config = site_config[bot]
-      if options.hwtest:
-        logging.warning(
-            'If %s is not a released platform or it is a generic overlay, '
-            'the HWTest step will most likely not run; please ask the lab '
-            'team for help if this is unexpected.' % build_config['boards'])
-
-    # Verify gerrit patches are valid.
-    print('Verifying patches...')
-    patch_pool = trybot_patch_pool.TrybotPatchPool.FromOptions(
-        gerrit_patches=options.gerrit_patches,
-        local_patches=options.local_patches,
-        sourceroot=options.sourceroot,
-        remote_patches=options.remote_patches)
-
-    # --debug need to be explicitly passed through for remote invocations.
-    if options.buildbot and '--debug' not in options.pass_through_args:
-      _ConfirmRemoteBuildbotRun()
-
-    print('Submitting tryjob...')
-    with _SetupConnections(options, build_config):
-      description = options.remote_description
-      if description is None:
-        description = remote_try.DefaultDescription(
-            options.branch,
-            options.gerrit_patches+options.local_patches)
-
-      tryjob = remote_try.RemoteTryJob(args, patch_pool.local_patches,
-                                       options.pass_through_args,
-                                       options.cache_dir,
-                                       description,
-                                       options.committer_email,
-                                       options.use_buildbucket,
-                                       options.slaves)
-      tryjob.Submit(testjob=options.test_tryjob, dryrun=False)
-    print('Tryjob submitted!')
-    print(('Go to %s to view the status of your job.'
-           % tryjob.GetTrybotWaterfallLink()))
-    sys.exit(0)
-
-  elif (not options.buildbot and not options.remote_trybot
-        and not options.resume and not options.local):
-    cros_build_lib.Die('Please use --remote or --local to run trybots')
-
-  elif options.buildbot and not options.debug:
-    if not cros_build_lib.HostIsCIBuilder():
-      # Cannot run --buildbot if both --debug and --remote aren't specified.
-      cros_build_lib.Die('This host isn\'t a continuous-integration builder.')
+  if (options.buildbot and
+      not options.debug and
+      not options.build_config_name == constants.BRANCH_UTIL_CONFIG and
+      not cros_build_lib.HostIsCIBuilder()):
+    # --buildbot can only be used on a real builder, unless it's debug, or
+    # 'branch-util'.
+    cros_build_lib.Die('This host is not a supported build machine.')
 
   # Only one config arg is allowed in this mode, which was confirmed earlier.
-  bot_id = args[-1]
-  build_config = site_config[bot_id]
+  build_config = site_config[options.build_config_name]
 
   # TODO: Re-enable this block when reference_repo support handles this
   #       properly. (see chromium:330775)
@@ -1197,24 +935,13 @@ def main(argv):
   if options.reference_repo:
     options.reference_repo = os.path.abspath(options.reference_repo)
 
-  if not options.buildroot:
-    if options.buildbot:
-      parser.error('Please specify a buildroot with the --buildroot option.')
-
-    options.buildroot = _DetermineDefaultBuildRoot(options.sourceroot,
-                                                   build_config['internal'])
-    # We use a marker file in the buildroot to indicate the user has
-    # consented to using this directory.
-    if not os.path.exists(repository.GetTrybotMarkerPath(options.buildroot)):
-      _ConfirmBuildRoot(options.buildroot)
-
   # Sanity check of buildroot- specifically that it's not pointing into the
   # midst of an existing repo since git-repo doesn't support nesting.
   if (not repository.IsARepoRoot(options.buildroot) and
       git.FindRepoDir(options.buildroot)):
-    parser.error('Configured buildroot %s points into a repository checkout, '
-                 'rather than the root of it.  This is not supported.'
-                 % options.buildroot)
+    cros_build_lib.Die(
+        'Configured buildroot %s is a subdir of an existing repo checkout.'
+        % options.buildroot)
 
   if not options.log_dir:
     options.log_dir = os.path.join(options.buildroot, _DEFAULT_LOG_DIR)
@@ -1258,7 +985,7 @@ def main(argv):
           build_config, options)
 
     if options.mock_tree_status is not None:
-      stack.Add(mock.patch.object, tree_status, '_GetStatus',
+      stack.Add(_ObjectMethodPatcher, tree_status, '_GetStatus',
                 return_value=options.mock_tree_status)
 
     if options.mock_slave_status is not None:
@@ -1266,7 +993,7 @@ def main(argv):
         mock_statuses = pickle.load(f)
         for key, value in mock_statuses.iteritems():
           mock_statuses[key] = builder_status_lib.BuilderStatus(**value)
-      stack.Add(mock.patch.object,
+      stack.Add(_ObjectMethodPatcher,
                 completion_stages.MasterSlaveSyncCompletionStage,
                 '_FetchSlaveStatuses',
                 return_value=mock_statuses)

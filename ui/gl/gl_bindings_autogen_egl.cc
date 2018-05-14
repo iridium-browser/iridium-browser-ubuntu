@@ -20,9 +20,14 @@
 
 namespace gl {
 
-DriverEGL g_driver_egl;
+DriverEGL g_driver_egl;  // Exists in .bss
 
 void DriverEGL::InitializeStaticBindings() {
+  // Ensure struct has been zero-initialized.
+  char* this_bytes = reinterpret_cast<char*>(this);
+  DCHECK(this_bytes[0] == 0);
+  DCHECK(memcmp(this_bytes, this_bytes + 1, sizeof(*this) - 1) == 0);
+
   fn.eglBindAPIFn =
       reinterpret_cast<eglBindAPIProc>(GetGLProcAddress("eglBindAPI"));
   fn.eglBindTexImageFn = reinterpret_cast<eglBindTexImageProc>(
@@ -35,7 +40,6 @@ void DriverEGL::InitializeStaticBindings() {
       reinterpret_cast<eglCopyBuffersProc>(GetGLProcAddress("eglCopyBuffers"));
   fn.eglCreateContextFn = reinterpret_cast<eglCreateContextProc>(
       GetGLProcAddress("eglCreateContext"));
-  fn.eglCreateImageKHRFn = 0;
   fn.eglCreatePbufferFromClientBufferFn =
       reinterpret_cast<eglCreatePbufferFromClientBufferProc>(
           GetGLProcAddress("eglCreatePbufferFromClientBuffer"));
@@ -43,20 +47,19 @@ void DriverEGL::InitializeStaticBindings() {
       GetGLProcAddress("eglCreatePbufferSurface"));
   fn.eglCreatePixmapSurfaceFn = reinterpret_cast<eglCreatePixmapSurfaceProc>(
       GetGLProcAddress("eglCreatePixmapSurface"));
-  fn.eglCreateStreamKHRFn = 0;
-  fn.eglCreateStreamProducerD3DTextureNV12ANGLEFn = 0;
   fn.eglCreateSyncKHRFn = reinterpret_cast<eglCreateSyncKHRProc>(
       GetGLProcAddress("eglCreateSyncKHR"));
   fn.eglCreateWindowSurfaceFn = reinterpret_cast<eglCreateWindowSurfaceProc>(
       GetGLProcAddress("eglCreateWindowSurface"));
   fn.eglDestroyContextFn = reinterpret_cast<eglDestroyContextProc>(
       GetGLProcAddress("eglDestroyContext"));
-  fn.eglDestroyImageKHRFn = 0;
-  fn.eglDestroyStreamKHRFn = 0;
   fn.eglDestroySurfaceFn = reinterpret_cast<eglDestroySurfaceProc>(
       GetGLProcAddress("eglDestroySurface"));
   fn.eglDestroySyncKHRFn = reinterpret_cast<eglDestroySyncKHRProc>(
       GetGLProcAddress("eglDestroySyncKHR"));
+  fn.eglDupNativeFenceFDANDROIDFn =
+      reinterpret_cast<eglDupNativeFenceFDANDROIDProc>(
+          GetGLProcAddress("eglDupNativeFenceFDANDROID"));
   fn.eglGetConfigAttribFn = reinterpret_cast<eglGetConfigAttribProc>(
       GetGLProcAddress("eglGetConfigAttrib"));
   fn.eglGetConfigsFn =
@@ -71,48 +74,30 @@ void DriverEGL::InitializeStaticBindings() {
       reinterpret_cast<eglGetDisplayProc>(GetGLProcAddress("eglGetDisplay"));
   fn.eglGetErrorFn =
       reinterpret_cast<eglGetErrorProc>(GetGLProcAddress("eglGetError"));
-  fn.eglGetPlatformDisplayEXTFn = 0;
   fn.eglGetProcAddressFn = reinterpret_cast<eglGetProcAddressProc>(
       GetGLProcAddress("eglGetProcAddress"));
   fn.eglGetSyncAttribKHRFn = reinterpret_cast<eglGetSyncAttribKHRProc>(
       GetGLProcAddress("eglGetSyncAttribKHR"));
-  fn.eglGetSyncValuesCHROMIUMFn = 0;
-  fn.eglImageFlushExternalEXTFn = 0;
   fn.eglInitializeFn =
       reinterpret_cast<eglInitializeProc>(GetGLProcAddress("eglInitialize"));
   fn.eglMakeCurrentFn =
       reinterpret_cast<eglMakeCurrentProc>(GetGLProcAddress("eglMakeCurrent"));
-  fn.eglPostSubBufferNVFn = 0;
-  fn.eglProgramCacheGetAttribANGLEFn = 0;
-  fn.eglProgramCachePopulateANGLEFn = 0;
-  fn.eglProgramCacheQueryANGLEFn = 0;
-  fn.eglProgramCacheResizeANGLEFn = 0;
   fn.eglQueryAPIFn =
       reinterpret_cast<eglQueryAPIProc>(GetGLProcAddress("eglQueryAPI"));
   fn.eglQueryContextFn = reinterpret_cast<eglQueryContextProc>(
       GetGLProcAddress("eglQueryContext"));
-  fn.eglQueryStreamKHRFn = 0;
-  fn.eglQueryStreamu64KHRFn = 0;
   fn.eglQueryStringFn =
       reinterpret_cast<eglQueryStringProc>(GetGLProcAddress("eglQueryString"));
   fn.eglQuerySurfaceFn = reinterpret_cast<eglQuerySurfaceProc>(
       GetGLProcAddress("eglQuerySurface"));
-  fn.eglQuerySurfacePointerANGLEFn = 0;
   fn.eglReleaseTexImageFn = reinterpret_cast<eglReleaseTexImageProc>(
       GetGLProcAddress("eglReleaseTexImage"));
   fn.eglReleaseThreadFn = reinterpret_cast<eglReleaseThreadProc>(
       GetGLProcAddress("eglReleaseThread"));
-  fn.eglStreamAttribKHRFn = 0;
-  fn.eglStreamConsumerAcquireKHRFn = 0;
-  fn.eglStreamConsumerGLTextureExternalAttribsNVFn = 0;
-  fn.eglStreamConsumerGLTextureExternalKHRFn = 0;
-  fn.eglStreamConsumerReleaseKHRFn = 0;
-  fn.eglStreamPostD3DTextureNV12ANGLEFn = 0;
   fn.eglSurfaceAttribFn = reinterpret_cast<eglSurfaceAttribProc>(
       GetGLProcAddress("eglSurfaceAttrib"));
   fn.eglSwapBuffersFn =
       reinterpret_cast<eglSwapBuffersProc>(GetGLProcAddress("eglSwapBuffers"));
-  fn.eglSwapBuffersWithDamageKHRFn = 0;
   fn.eglSwapIntervalFn = reinterpret_cast<eglSwapIntervalProc>(
       GetGLProcAddress("eglSwapInterval"));
   fn.eglTerminateFn =
@@ -123,16 +108,15 @@ void DriverEGL::InitializeStaticBindings() {
       reinterpret_cast<eglWaitGLProc>(GetGLProcAddress("eglWaitGL"));
   fn.eglWaitNativeFn =
       reinterpret_cast<eglWaitNativeProc>(GetGLProcAddress("eglWaitNative"));
-  fn.eglWaitSyncKHRFn = 0;
 }
 
 void DriverEGL::InitializeClientExtensionBindings() {
   std::string client_extensions(GetClientExtensions());
-  client_extensions += " ";
-  ALLOW_UNUSED_LOCAL(client_extensions);
+  ExtensionSet extensions(MakeExtensionSet(client_extensions));
+  ALLOW_UNUSED_LOCAL(extensions);
 
   ext.b_EGL_EXT_platform_base =
-      client_extensions.find("EGL_EXT_platform_base ") != std::string::npos;
+      HasExtension(extensions, "EGL_EXT_platform_base");
 
   if (ext.b_EGL_EXT_platform_base) {
     fn.eglGetPlatformDisplayEXTFn =
@@ -142,51 +126,51 @@ void DriverEGL::InitializeClientExtensionBindings() {
 }
 
 void DriverEGL::InitializeExtensionBindings() {
-  std::string extensions(GetPlatformExtensions());
-  extensions += " ";
+  std::string platform_extensions(GetPlatformExtensions());
+  ExtensionSet extensions(MakeExtensionSet(platform_extensions));
   ALLOW_UNUSED_LOCAL(extensions);
 
+  ext.b_EGL_ANDROID_get_frame_timestamps =
+      HasExtension(extensions, "EGL_ANDROID_get_frame_timestamps");
+  ext.b_EGL_ANDROID_get_native_client_buffer =
+      HasExtension(extensions, "EGL_ANDROID_get_native_client_buffer");
+  ext.b_EGL_ANDROID_native_fence_sync =
+      HasExtension(extensions, "EGL_ANDROID_native_fence_sync");
   ext.b_EGL_ANGLE_d3d_share_handle_client_buffer =
-      extensions.find("EGL_ANGLE_d3d_share_handle_client_buffer ") !=
-      std::string::npos;
+      HasExtension(extensions, "EGL_ANGLE_d3d_share_handle_client_buffer");
   ext.b_EGL_ANGLE_program_cache_control =
-      extensions.find("EGL_ANGLE_program_cache_control ") != std::string::npos;
+      HasExtension(extensions, "EGL_ANGLE_program_cache_control");
   ext.b_EGL_ANGLE_query_surface_pointer =
-      extensions.find("EGL_ANGLE_query_surface_pointer ") != std::string::npos;
-  ext.b_EGL_ANGLE_stream_producer_d3d_texture_nv12 =
-      extensions.find("EGL_ANGLE_stream_producer_d3d_texture_nv12 ") !=
-      std::string::npos;
+      HasExtension(extensions, "EGL_ANGLE_query_surface_pointer");
+  ext.b_EGL_ANGLE_stream_producer_d3d_texture =
+      HasExtension(extensions, "EGL_ANGLE_stream_producer_d3d_texture");
   ext.b_EGL_ANGLE_surface_d3d_texture_2d_share_handle =
-      extensions.find("EGL_ANGLE_surface_d3d_texture_2d_share_handle ") !=
-      std::string::npos;
+      HasExtension(extensions, "EGL_ANGLE_surface_d3d_texture_2d_share_handle");
   ext.b_EGL_CHROMIUM_sync_control =
-      extensions.find("EGL_CHROMIUM_sync_control ") != std::string::npos;
+      HasExtension(extensions, "EGL_CHROMIUM_sync_control");
   ext.b_EGL_EXT_image_flush_external =
-      extensions.find("EGL_EXT_image_flush_external ") != std::string::npos;
-  ext.b_EGL_KHR_fence_sync =
-      extensions.find("EGL_KHR_fence_sync ") != std::string::npos;
+      HasExtension(extensions, "EGL_EXT_image_flush_external");
+  ext.b_EGL_KHR_fence_sync = HasExtension(extensions, "EGL_KHR_fence_sync");
   ext.b_EGL_KHR_gl_texture_2D_image =
-      extensions.find("EGL_KHR_gl_texture_2D_image ") != std::string::npos;
-  ext.b_EGL_KHR_image = extensions.find("EGL_KHR_image ") != std::string::npos;
-  ext.b_EGL_KHR_image_base =
-      extensions.find("EGL_KHR_image_base ") != std::string::npos;
-  ext.b_EGL_KHR_stream =
-      extensions.find("EGL_KHR_stream ") != std::string::npos;
+      HasExtension(extensions, "EGL_KHR_gl_texture_2D_image");
+  ext.b_EGL_KHR_image = HasExtension(extensions, "EGL_KHR_image");
+  ext.b_EGL_KHR_image_base = HasExtension(extensions, "EGL_KHR_image_base");
+  ext.b_EGL_KHR_stream = HasExtension(extensions, "EGL_KHR_stream");
   ext.b_EGL_KHR_stream_consumer_gltexture =
-      extensions.find("EGL_KHR_stream_consumer_gltexture ") !=
-      std::string::npos;
+      HasExtension(extensions, "EGL_KHR_stream_consumer_gltexture");
   ext.b_EGL_KHR_swap_buffers_with_damage =
-      extensions.find("EGL_KHR_swap_buffers_with_damage ") != std::string::npos;
-  ext.b_EGL_KHR_wait_sync =
-      extensions.find("EGL_KHR_wait_sync ") != std::string::npos;
+      HasExtension(extensions, "EGL_KHR_swap_buffers_with_damage");
+  ext.b_EGL_KHR_wait_sync = HasExtension(extensions, "EGL_KHR_wait_sync");
+  ext.b_EGL_MESA_image_dma_buf_export =
+      HasExtension(extensions, "EGL_MESA_image_dma_buf_export");
   ext.b_EGL_NV_post_sub_buffer =
-      extensions.find("EGL_NV_post_sub_buffer ") != std::string::npos;
+      HasExtension(extensions, "EGL_NV_post_sub_buffer");
   ext.b_EGL_NV_stream_consumer_gltexture_yuv =
-      extensions.find("EGL_NV_stream_consumer_gltexture_yuv ") !=
-      std::string::npos;
+      HasExtension(extensions, "EGL_NV_stream_consumer_gltexture_yuv");
+  ext.b_GL_CHROMIUM_egl_android_native_fence_sync_hack = HasExtension(
+      extensions, "GL_CHROMIUM_egl_android_native_fence_sync_hack");
   ext.b_GL_CHROMIUM_egl_khr_fence_sync_hack =
-      extensions.find("GL_CHROMIUM_egl_khr_fence_sync_hack ") !=
-      std::string::npos;
+      HasExtension(extensions, "GL_CHROMIUM_egl_khr_fence_sync_hack");
 
   if (ext.b_EGL_KHR_image || ext.b_EGL_KHR_image_base ||
       ext.b_EGL_KHR_gl_texture_2D_image) {
@@ -199,10 +183,10 @@ void DriverEGL::InitializeExtensionBindings() {
         GetGLProcAddress("eglCreateStreamKHR"));
   }
 
-  if (ext.b_EGL_ANGLE_stream_producer_d3d_texture_nv12) {
-    fn.eglCreateStreamProducerD3DTextureNV12ANGLEFn =
-        reinterpret_cast<eglCreateStreamProducerD3DTextureNV12ANGLEProc>(
-            GetGLProcAddress("eglCreateStreamProducerD3DTextureNV12ANGLE"));
+  if (ext.b_EGL_ANGLE_stream_producer_d3d_texture) {
+    fn.eglCreateStreamProducerD3DTextureANGLEFn =
+        reinterpret_cast<eglCreateStreamProducerD3DTextureANGLEProc>(
+            GetGLProcAddress("eglCreateStreamProducerD3DTextureANGLE"));
   }
 
   if (ext.b_EGL_KHR_image || ext.b_EGL_KHR_image_base) {
@@ -213,6 +197,54 @@ void DriverEGL::InitializeExtensionBindings() {
   if (ext.b_EGL_KHR_stream) {
     fn.eglDestroyStreamKHRFn = reinterpret_cast<eglDestroyStreamKHRProc>(
         GetGLProcAddress("eglDestroyStreamKHR"));
+  }
+
+  if (ext.b_EGL_MESA_image_dma_buf_export) {
+    fn.eglExportDMABUFImageMESAFn =
+        reinterpret_cast<eglExportDMABUFImageMESAProc>(
+            GetGLProcAddress("eglExportDMABUFImageMESA"));
+  }
+
+  if (ext.b_EGL_MESA_image_dma_buf_export) {
+    fn.eglExportDMABUFImageQueryMESAFn =
+        reinterpret_cast<eglExportDMABUFImageQueryMESAProc>(
+            GetGLProcAddress("eglExportDMABUFImageQueryMESA"));
+  }
+
+  if (ext.b_EGL_ANDROID_get_frame_timestamps) {
+    fn.eglGetCompositorTimingANDROIDFn =
+        reinterpret_cast<eglGetCompositorTimingANDROIDProc>(
+            GetGLProcAddress("eglGetCompositorTimingANDROID"));
+  }
+
+  if (ext.b_EGL_ANDROID_get_frame_timestamps) {
+    fn.eglGetCompositorTimingSupportedANDROIDFn =
+        reinterpret_cast<eglGetCompositorTimingSupportedANDROIDProc>(
+            GetGLProcAddress("eglGetCompositorTimingSupportedANDROID"));
+  }
+
+  if (ext.b_EGL_ANDROID_get_frame_timestamps) {
+    fn.eglGetFrameTimestampsANDROIDFn =
+        reinterpret_cast<eglGetFrameTimestampsANDROIDProc>(
+            GetGLProcAddress("eglGetFrameTimestampsANDROID"));
+  }
+
+  if (ext.b_EGL_ANDROID_get_frame_timestamps) {
+    fn.eglGetFrameTimestampSupportedANDROIDFn =
+        reinterpret_cast<eglGetFrameTimestampSupportedANDROIDProc>(
+            GetGLProcAddress("eglGetFrameTimestampSupportedANDROID"));
+  }
+
+  if (ext.b_EGL_ANDROID_get_native_client_buffer) {
+    fn.eglGetNativeClientBufferANDROIDFn =
+        reinterpret_cast<eglGetNativeClientBufferANDROIDProc>(
+            GetGLProcAddress("eglGetNativeClientBufferANDROID"));
+  }
+
+  if (ext.b_EGL_ANDROID_get_frame_timestamps) {
+    fn.eglGetNextFrameIdANDROIDFn =
+        reinterpret_cast<eglGetNextFrameIdANDROIDProc>(
+            GetGLProcAddress("eglGetNextFrameIdANDROID"));
   }
 
   if (ext.b_EGL_CHROMIUM_sync_control) {
@@ -301,10 +333,10 @@ void DriverEGL::InitializeExtensionBindings() {
             GetGLProcAddress("eglStreamConsumerReleaseKHR"));
   }
 
-  if (ext.b_EGL_ANGLE_stream_producer_d3d_texture_nv12) {
-    fn.eglStreamPostD3DTextureNV12ANGLEFn =
-        reinterpret_cast<eglStreamPostD3DTextureNV12ANGLEProc>(
-            GetGLProcAddress("eglStreamPostD3DTextureNV12ANGLE"));
+  if (ext.b_EGL_ANGLE_stream_producer_d3d_texture) {
+    fn.eglStreamPostD3DTextureANGLEFn =
+        reinterpret_cast<eglStreamPostD3DTextureANGLEProc>(
+            GetGLProcAddress("eglStreamPostD3DTextureANGLE"));
   }
 
   if (ext.b_EGL_KHR_swap_buffers_with_damage) {
@@ -399,12 +431,12 @@ EGLStreamKHR EGLApiBase::eglCreateStreamKHRFn(EGLDisplay dpy,
   return driver_->fn.eglCreateStreamKHRFn(dpy, attrib_list);
 }
 
-EGLBoolean EGLApiBase::eglCreateStreamProducerD3DTextureNV12ANGLEFn(
+EGLBoolean EGLApiBase::eglCreateStreamProducerD3DTextureANGLEFn(
     EGLDisplay dpy,
     EGLStreamKHR stream,
     EGLAttrib* attrib_list) {
-  return driver_->fn.eglCreateStreamProducerD3DTextureNV12ANGLEFn(dpy, stream,
-                                                                  attrib_list);
+  return driver_->fn.eglCreateStreamProducerD3DTextureANGLEFn(dpy, stream,
+                                                              attrib_list);
 }
 
 EGLSyncKHR EGLApiBase::eglCreateSyncKHRFn(EGLDisplay dpy,
@@ -441,6 +473,48 @@ EGLBoolean EGLApiBase::eglDestroySyncKHRFn(EGLDisplay dpy, EGLSyncKHR sync) {
   return driver_->fn.eglDestroySyncKHRFn(dpy, sync);
 }
 
+EGLint EGLApiBase::eglDupNativeFenceFDANDROIDFn(EGLDisplay dpy,
+                                                EGLSyncKHR sync) {
+  return driver_->fn.eglDupNativeFenceFDANDROIDFn(dpy, sync);
+}
+
+EGLBoolean EGLApiBase::eglExportDMABUFImageMESAFn(EGLDisplay dpy,
+                                                  EGLImageKHR image,
+                                                  int* fds,
+                                                  EGLint* strides,
+                                                  EGLint* offsets) {
+  return driver_->fn.eglExportDMABUFImageMESAFn(dpy, image, fds, strides,
+                                                offsets);
+}
+
+EGLBoolean EGLApiBase::eglExportDMABUFImageQueryMESAFn(
+    EGLDisplay dpy,
+    EGLImageKHR image,
+    int* fourcc,
+    int* num_planes,
+    EGLuint64KHR* modifiers) {
+  return driver_->fn.eglExportDMABUFImageQueryMESAFn(dpy, image, fourcc,
+                                                     num_planes, modifiers);
+}
+
+EGLBoolean EGLApiBase::eglGetCompositorTimingANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLint numTimestamps,
+    EGLint* names,
+    EGLnsecsANDROID* values) {
+  return driver_->fn.eglGetCompositorTimingANDROIDFn(
+      dpy, surface, numTimestamps, names, values);
+}
+
+EGLBoolean EGLApiBase::eglGetCompositorTimingSupportedANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLint timestamp) {
+  return driver_->fn.eglGetCompositorTimingSupportedANDROIDFn(dpy, surface,
+                                                              timestamp);
+}
+
 EGLBoolean EGLApiBase::eglGetConfigAttribFn(EGLDisplay dpy,
                                             EGLConfig config,
                                             EGLint attribute,
@@ -473,6 +547,35 @@ EGLDisplay EGLApiBase::eglGetDisplayFn(EGLNativeDisplayType display_id) {
 
 EGLint EGLApiBase::eglGetErrorFn(void) {
   return driver_->fn.eglGetErrorFn();
+}
+
+EGLBoolean EGLApiBase::eglGetFrameTimestampsANDROIDFn(EGLDisplay dpy,
+                                                      EGLSurface surface,
+                                                      EGLuint64KHR frameId,
+                                                      EGLint numTimestamps,
+                                                      EGLint* timestamps,
+                                                      EGLnsecsANDROID* values) {
+  return driver_->fn.eglGetFrameTimestampsANDROIDFn(
+      dpy, surface, frameId, numTimestamps, timestamps, values);
+}
+
+EGLBoolean EGLApiBase::eglGetFrameTimestampSupportedANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLint timestamp) {
+  return driver_->fn.eglGetFrameTimestampSupportedANDROIDFn(dpy, surface,
+                                                            timestamp);
+}
+
+EGLClientBuffer EGLApiBase::eglGetNativeClientBufferANDROIDFn(
+    const struct AHardwareBuffer* ahardwarebuffer) {
+  return driver_->fn.eglGetNativeClientBufferANDROIDFn(ahardwarebuffer);
+}
+
+EGLBoolean EGLApiBase::eglGetNextFrameIdANDROIDFn(EGLDisplay dpy,
+                                                  EGLSurface surface,
+                                                  EGLuint64KHR* frameId) {
+  return driver_->fn.eglGetNextFrameIdANDROIDFn(dpy, surface, frameId);
 }
 
 EGLDisplay EGLApiBase::eglGetPlatformDisplayEXTFn(EGLenum platform,
@@ -646,13 +749,13 @@ EGLBoolean EGLApiBase::eglStreamConsumerReleaseKHRFn(EGLDisplay dpy,
   return driver_->fn.eglStreamConsumerReleaseKHRFn(dpy, stream);
 }
 
-EGLBoolean EGLApiBase::eglStreamPostD3DTextureNV12ANGLEFn(
+EGLBoolean EGLApiBase::eglStreamPostD3DTextureANGLEFn(
     EGLDisplay dpy,
     EGLStreamKHR stream,
     void* texture,
     const EGLAttrib* attrib_list) {
-  return driver_->fn.eglStreamPostD3DTextureNV12ANGLEFn(dpy, stream, texture,
-                                                        attrib_list);
+  return driver_->fn.eglStreamPostD3DTextureANGLEFn(dpy, stream, texture,
+                                                    attrib_list);
 }
 
 EGLBoolean EGLApiBase::eglSurfaceAttribFn(EGLDisplay dpy,
@@ -787,14 +890,14 @@ EGLStreamKHR TraceEGLApi::eglCreateStreamKHRFn(EGLDisplay dpy,
   return egl_api_->eglCreateStreamKHRFn(dpy, attrib_list);
 }
 
-EGLBoolean TraceEGLApi::eglCreateStreamProducerD3DTextureNV12ANGLEFn(
+EGLBoolean TraceEGLApi::eglCreateStreamProducerD3DTextureANGLEFn(
     EGLDisplay dpy,
     EGLStreamKHR stream,
     EGLAttrib* attrib_list) {
   TRACE_EVENT_BINARY_EFFICIENT0(
-      "gpu", "TraceGLAPI::eglCreateStreamProducerD3DTextureNV12ANGLE")
-  return egl_api_->eglCreateStreamProducerD3DTextureNV12ANGLEFn(dpy, stream,
-                                                                attrib_list);
+      "gpu", "TraceGLAPI::eglCreateStreamProducerD3DTextureANGLE")
+  return egl_api_->eglCreateStreamProducerD3DTextureANGLEFn(dpy, stream,
+                                                            attrib_list);
 }
 
 EGLSyncKHR TraceEGLApi::eglCreateSyncKHRFn(EGLDisplay dpy,
@@ -840,6 +943,56 @@ EGLBoolean TraceEGLApi::eglDestroySyncKHRFn(EGLDisplay dpy, EGLSyncKHR sync) {
   return egl_api_->eglDestroySyncKHRFn(dpy, sync);
 }
 
+EGLint TraceEGLApi::eglDupNativeFenceFDANDROIDFn(EGLDisplay dpy,
+                                                 EGLSyncKHR sync) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::eglDupNativeFenceFDANDROID")
+  return egl_api_->eglDupNativeFenceFDANDROIDFn(dpy, sync);
+}
+
+EGLBoolean TraceEGLApi::eglExportDMABUFImageMESAFn(EGLDisplay dpy,
+                                                   EGLImageKHR image,
+                                                   int* fds,
+                                                   EGLint* strides,
+                                                   EGLint* offsets) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::eglExportDMABUFImageMESA")
+  return egl_api_->eglExportDMABUFImageMESAFn(dpy, image, fds, strides,
+                                              offsets);
+}
+
+EGLBoolean TraceEGLApi::eglExportDMABUFImageQueryMESAFn(
+    EGLDisplay dpy,
+    EGLImageKHR image,
+    int* fourcc,
+    int* num_planes,
+    EGLuint64KHR* modifiers) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::eglExportDMABUFImageQueryMESA")
+  return egl_api_->eglExportDMABUFImageQueryMESAFn(dpy, image, fourcc,
+                                                   num_planes, modifiers);
+}
+
+EGLBoolean TraceEGLApi::eglGetCompositorTimingANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLint numTimestamps,
+    EGLint* names,
+    EGLnsecsANDROID* values) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::eglGetCompositorTimingANDROID")
+  return egl_api_->eglGetCompositorTimingANDROIDFn(dpy, surface, numTimestamps,
+                                                   names, values);
+}
+
+EGLBoolean TraceEGLApi::eglGetCompositorTimingSupportedANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLint timestamp) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::eglGetCompositorTimingSupportedANDROID")
+  return egl_api_->eglGetCompositorTimingSupportedANDROIDFn(dpy, surface,
+                                                            timestamp);
+}
+
 EGLBoolean TraceEGLApi::eglGetConfigAttribFn(EGLDisplay dpy,
                                              EGLConfig config,
                                              EGLint attribute,
@@ -879,6 +1032,43 @@ EGLDisplay TraceEGLApi::eglGetDisplayFn(EGLNativeDisplayType display_id) {
 EGLint TraceEGLApi::eglGetErrorFn(void) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::eglGetError")
   return egl_api_->eglGetErrorFn();
+}
+
+EGLBoolean TraceEGLApi::eglGetFrameTimestampsANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLuint64KHR frameId,
+    EGLint numTimestamps,
+    EGLint* timestamps,
+    EGLnsecsANDROID* values) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::eglGetFrameTimestampsANDROID")
+  return egl_api_->eglGetFrameTimestampsANDROIDFn(
+      dpy, surface, frameId, numTimestamps, timestamps, values);
+}
+
+EGLBoolean TraceEGLApi::eglGetFrameTimestampSupportedANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLint timestamp) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::eglGetFrameTimestampSupportedANDROID")
+  return egl_api_->eglGetFrameTimestampSupportedANDROIDFn(dpy, surface,
+                                                          timestamp);
+}
+
+EGLClientBuffer TraceEGLApi::eglGetNativeClientBufferANDROIDFn(
+    const struct AHardwareBuffer* ahardwarebuffer) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::eglGetNativeClientBufferANDROID")
+  return egl_api_->eglGetNativeClientBufferANDROIDFn(ahardwarebuffer);
+}
+
+EGLBoolean TraceEGLApi::eglGetNextFrameIdANDROIDFn(EGLDisplay dpy,
+                                                   EGLSurface surface,
+                                                   EGLuint64KHR* frameId) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::eglGetNextFrameIdANDROID")
+  return egl_api_->eglGetNextFrameIdANDROIDFn(dpy, surface, frameId);
 }
 
 EGLDisplay TraceEGLApi::eglGetPlatformDisplayEXTFn(EGLenum platform,
@@ -1085,15 +1275,15 @@ EGLBoolean TraceEGLApi::eglStreamConsumerReleaseKHRFn(EGLDisplay dpy,
   return egl_api_->eglStreamConsumerReleaseKHRFn(dpy, stream);
 }
 
-EGLBoolean TraceEGLApi::eglStreamPostD3DTextureNV12ANGLEFn(
+EGLBoolean TraceEGLApi::eglStreamPostD3DTextureANGLEFn(
     EGLDisplay dpy,
     EGLStreamKHR stream,
     void* texture,
     const EGLAttrib* attrib_list) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu",
-                                "TraceGLAPI::eglStreamPostD3DTextureNV12ANGLE")
-  return egl_api_->eglStreamPostD3DTextureNV12ANGLEFn(dpy, stream, texture,
-                                                      attrib_list);
+                                "TraceGLAPI::eglStreamPostD3DTextureANGLE")
+  return egl_api_->eglStreamPostD3DTextureANGLEFn(dpy, stream, texture,
+                                                  attrib_list);
 }
 
 EGLBoolean TraceEGLApi::eglSurfaceAttribFn(EGLDisplay dpy,
@@ -1285,14 +1475,14 @@ EGLStreamKHR DebugEGLApi::eglCreateStreamKHRFn(EGLDisplay dpy,
   return result;
 }
 
-EGLBoolean DebugEGLApi::eglCreateStreamProducerD3DTextureNV12ANGLEFn(
+EGLBoolean DebugEGLApi::eglCreateStreamProducerD3DTextureANGLEFn(
     EGLDisplay dpy,
     EGLStreamKHR stream,
     EGLAttrib* attrib_list) {
-  GL_SERVICE_LOG("eglCreateStreamProducerD3DTextureNV12ANGLE"
+  GL_SERVICE_LOG("eglCreateStreamProducerD3DTextureANGLE"
                  << "(" << dpy << ", " << stream << ", "
                  << static_cast<const void*>(attrib_list) << ")");
-  EGLBoolean result = egl_api_->eglCreateStreamProducerD3DTextureNV12ANGLEFn(
+  EGLBoolean result = egl_api_->eglCreateStreamProducerD3DTextureANGLEFn(
       dpy, stream, attrib_list);
   GL_SERVICE_LOG("GL_RESULT: " << result);
   return result;
@@ -1365,6 +1555,76 @@ EGLBoolean DebugEGLApi::eglDestroySyncKHRFn(EGLDisplay dpy, EGLSyncKHR sync) {
   return result;
 }
 
+EGLint DebugEGLApi::eglDupNativeFenceFDANDROIDFn(EGLDisplay dpy,
+                                                 EGLSyncKHR sync) {
+  GL_SERVICE_LOG("eglDupNativeFenceFDANDROID"
+                 << "(" << dpy << ", " << sync << ")");
+  EGLint result = egl_api_->eglDupNativeFenceFDANDROIDFn(dpy, sync);
+  GL_SERVICE_LOG("GL_RESULT: " << result);
+  return result;
+}
+
+EGLBoolean DebugEGLApi::eglExportDMABUFImageMESAFn(EGLDisplay dpy,
+                                                   EGLImageKHR image,
+                                                   int* fds,
+                                                   EGLint* strides,
+                                                   EGLint* offsets) {
+  GL_SERVICE_LOG("eglExportDMABUFImageMESA"
+                 << "(" << dpy << ", " << image << ", "
+                 << static_cast<const void*>(fds) << ", "
+                 << static_cast<const void*>(strides) << ", "
+                 << static_cast<const void*>(offsets) << ")");
+  EGLBoolean result =
+      egl_api_->eglExportDMABUFImageMESAFn(dpy, image, fds, strides, offsets);
+  GL_SERVICE_LOG("GL_RESULT: " << result);
+  return result;
+}
+
+EGLBoolean DebugEGLApi::eglExportDMABUFImageQueryMESAFn(
+    EGLDisplay dpy,
+    EGLImageKHR image,
+    int* fourcc,
+    int* num_planes,
+    EGLuint64KHR* modifiers) {
+  GL_SERVICE_LOG("eglExportDMABUFImageQueryMESA"
+                 << "(" << dpy << ", " << image << ", "
+                 << static_cast<const void*>(fourcc) << ", "
+                 << static_cast<const void*>(num_planes) << ", "
+                 << static_cast<const void*>(modifiers) << ")");
+  EGLBoolean result = egl_api_->eglExportDMABUFImageQueryMESAFn(
+      dpy, image, fourcc, num_planes, modifiers);
+  GL_SERVICE_LOG("GL_RESULT: " << result);
+  return result;
+}
+
+EGLBoolean DebugEGLApi::eglGetCompositorTimingANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLint numTimestamps,
+    EGLint* names,
+    EGLnsecsANDROID* values) {
+  GL_SERVICE_LOG("eglGetCompositorTimingANDROID"
+                 << "(" << dpy << ", " << surface << ", " << numTimestamps
+                 << ", " << static_cast<const void*>(names) << ", "
+                 << static_cast<const void*>(values) << ")");
+  EGLBoolean result = egl_api_->eglGetCompositorTimingANDROIDFn(
+      dpy, surface, numTimestamps, names, values);
+  GL_SERVICE_LOG("GL_RESULT: " << result);
+  return result;
+}
+
+EGLBoolean DebugEGLApi::eglGetCompositorTimingSupportedANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLint timestamp) {
+  GL_SERVICE_LOG("eglGetCompositorTimingSupportedANDROID"
+                 << "(" << dpy << ", " << surface << ", " << timestamp << ")");
+  EGLBoolean result = egl_api_->eglGetCompositorTimingSupportedANDROIDFn(
+      dpy, surface, timestamp);
+  GL_SERVICE_LOG("GL_RESULT: " << result);
+  return result;
+}
+
 EGLBoolean DebugEGLApi::eglGetConfigAttribFn(EGLDisplay dpy,
                                              EGLConfig config,
                                              EGLint attribute,
@@ -1431,6 +1691,58 @@ EGLint DebugEGLApi::eglGetErrorFn(void) {
                  << "("
                  << ")");
   EGLint result = egl_api_->eglGetErrorFn();
+  GL_SERVICE_LOG("GL_RESULT: " << result);
+  return result;
+}
+
+EGLBoolean DebugEGLApi::eglGetFrameTimestampsANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLuint64KHR frameId,
+    EGLint numTimestamps,
+    EGLint* timestamps,
+    EGLnsecsANDROID* values) {
+  GL_SERVICE_LOG("eglGetFrameTimestampsANDROID"
+                 << "(" << dpy << ", " << surface << ", " << frameId << ", "
+                 << numTimestamps << ", "
+                 << static_cast<const void*>(timestamps) << ", "
+                 << static_cast<const void*>(values) << ")");
+  EGLBoolean result = egl_api_->eglGetFrameTimestampsANDROIDFn(
+      dpy, surface, frameId, numTimestamps, timestamps, values);
+  GL_SERVICE_LOG("GL_RESULT: " << result);
+  return result;
+}
+
+EGLBoolean DebugEGLApi::eglGetFrameTimestampSupportedANDROIDFn(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLint timestamp) {
+  GL_SERVICE_LOG("eglGetFrameTimestampSupportedANDROID"
+                 << "(" << dpy << ", " << surface << ", " << timestamp << ")");
+  EGLBoolean result =
+      egl_api_->eglGetFrameTimestampSupportedANDROIDFn(dpy, surface, timestamp);
+  GL_SERVICE_LOG("GL_RESULT: " << result);
+  return result;
+}
+
+EGLClientBuffer DebugEGLApi::eglGetNativeClientBufferANDROIDFn(
+    const struct AHardwareBuffer* ahardwarebuffer) {
+  GL_SERVICE_LOG("eglGetNativeClientBufferANDROID"
+                 << "(" << static_cast<const void*>(ahardwarebuffer) << ")");
+  EGLClientBuffer result =
+      egl_api_->eglGetNativeClientBufferANDROIDFn(ahardwarebuffer);
+  GL_SERVICE_LOG("GL_RESULT: " << result);
+  return result;
+}
+
+EGLBoolean DebugEGLApi::eglGetNextFrameIdANDROIDFn(EGLDisplay dpy,
+                                                   EGLSurface surface,
+                                                   EGLuint64KHR* frameId) {
+  GL_SERVICE_LOG("eglGetNextFrameIdANDROID"
+                 << "(" << dpy << ", " << surface << ", "
+                 << static_cast<const void*>(frameId) << ")");
+  EGLBoolean result =
+      egl_api_->eglGetNextFrameIdANDROIDFn(dpy, surface, frameId);
   GL_SERVICE_LOG("GL_RESULT: " << result);
   return result;
 }
@@ -1741,16 +2053,16 @@ EGLBoolean DebugEGLApi::eglStreamConsumerReleaseKHRFn(EGLDisplay dpy,
   return result;
 }
 
-EGLBoolean DebugEGLApi::eglStreamPostD3DTextureNV12ANGLEFn(
+EGLBoolean DebugEGLApi::eglStreamPostD3DTextureANGLEFn(
     EGLDisplay dpy,
     EGLStreamKHR stream,
     void* texture,
     const EGLAttrib* attrib_list) {
-  GL_SERVICE_LOG("eglStreamPostD3DTextureNV12ANGLE"
+  GL_SERVICE_LOG("eglStreamPostD3DTextureANGLE"
                  << "(" << dpy << ", " << stream << ", "
                  << static_cast<const void*>(texture) << ", "
                  << static_cast<const void*>(attrib_list) << ")");
-  EGLBoolean result = egl_api_->eglStreamPostD3DTextureNV12ANGLEFn(
+  EGLBoolean result = egl_api_->eglStreamPostD3DTextureANGLEFn(
       dpy, stream, texture, attrib_list);
   GL_SERVICE_LOG("GL_RESULT: " << result);
   return result;

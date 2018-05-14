@@ -2,8 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import json
 import logging
 import subprocess
+import time
 
 class VrPerfTest(object):
   """Base class for all non-Telemetry VR perf tests.
@@ -15,6 +17,8 @@ class VrPerfTest(object):
     super(VrPerfTest, self).__init__()
     self._args = args
     self._test_urls = []
+    self._results_summary = {}
+    self._test_name = ''
 
   def RunTests(self):
     """Runs some test on all the URLs provided to the test on creation.
@@ -33,6 +37,7 @@ class VrPerfTest(object):
           # We always want to perform teardown even if an exception gets raised.
           self._Teardown()
       self._SaveResultsToFile()
+      self._SaveOutput()
     finally:
       self._OneTimeTeardown()
 
@@ -79,8 +84,35 @@ class VrPerfTest(object):
     raise NotImplementedError(
         'Command-line flag setting must be implemented in subclass')
 
-  def _SaveResultsToFile():
+  def _SaveResultsToFile(self):
     """Saves test results to a Chrome perf dashboard-compatible JSON file."""
     raise NotImplementedError(
         'Result saving must be implemented in subclass')
 
+  def _SaveOutput(self):
+    """Saves the failures and results validity if necessary."""
+    if not (hasattr(self._args, 'isolated_script_test_output') and
+            self._args.isolated_script_test_output):
+      logging.warning('Isolated script output file not specified, not saving')
+      return
+
+    results_summary = {
+        'interrupted': False,
+        'path_delimiter': '/',
+        'seconds_since_epoch': time.time(),
+        'version': 3,
+        'tests': {
+            self._test_name: self._results_summary
+        }
+    }
+
+    failure_counts = {}
+    for _, results in self._results_summary.iteritems():
+      if results['actual'] in failure_counts:
+        failure_counts[results['actual']] += 1
+      else:
+        failure_counts[results['actual']] = 1
+    results_summary['num_failures_by_type'] = failure_counts
+
+    with file(self._args.isolated_script_test_output, 'w') as outfile:
+      json.dump(results_summary, outfile)

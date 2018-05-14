@@ -9,22 +9,16 @@
 
 namespace blink {
 
-class ScriptWrappableVisitorVerifier : public WrapperVisitor {
- public:
-  void DispatchTraceWrappers(const TraceWrapperBase* t) const override {
-    t->TraceWrappers(this);
-  }
-
-  void TraceWrappers(const TraceWrapperV8Reference<v8::Value>&) const override {
-  }
-  void MarkWrapper(const v8::PersistentBase<v8::Value>*) const override {}
-
-  bool PushToMarkingDeque(
-      void (*trace_wrappers_callback)(const WrapperVisitor*, const void*),
-      HeapObjectHeader* (*heap_object_header_callback)(const void*),
-      void (*missed_write_barrier_callback)(void),
-      const void* object) const override {
-    if (!heap_object_header_callback(object)->IsWrapperHeaderMarked()) {
+// This visitor should be applied on wrapper members of each marked object
+// after marking is complete. The Visit method checks that the given wrapper
+// is also marked.
+class ScriptWrappableVisitorVerifier final : public ScriptWrappableVisitor {
+ protected:
+  void Visit(const TraceWrapperV8Reference<v8::Value>&) const final {}
+  void Visit(const WrapperDescriptor& wrapper_descriptor) const final {
+    HeapObjectHeader* header = wrapper_descriptor.heap_object_header_callback(
+        wrapper_descriptor.traceable);
+    if (!header->IsWrapperHeaderMarked()) {
       // If this branch is hit, it means that a white (not discovered by
       // traceWrappers) object was assigned as a member to a black object
       // (already processed by traceWrappers). Black object will not be
@@ -35,24 +29,12 @@ class ScriptWrappableVisitorVerifier : public WrapperVisitor {
       // This means there is a write barrier missing somewhere. Check the
       // backtrace to see which types are causing this and review all the
       // places where white object is set to a black object.
-      missed_write_barrier_callback();
+      wrapper_descriptor.missed_write_barrier_callback();
       NOTREACHED();
     }
-    trace_wrappers_callback(this, object);
-    return true;
   }
-
-  bool MarkWrapperHeader(HeapObjectHeader* header) const override {
-    if (!visited_headers_.Contains(header)) {
-      visited_headers_.insert(header);
-      return true;
-    }
-    return false;
-  }
-  void MarkWrappersInAllWorlds(const ScriptWrappable*) const override {}
-
- private:
-  mutable WTF::HashSet<HeapObjectHeader*> visited_headers_;
+  void Visit(DOMWrapperMap<ScriptWrappable>*,
+             const ScriptWrappable* key) const final {}
 };
 }
 #endif

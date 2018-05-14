@@ -11,24 +11,32 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/clock.h"
 #include "base/timer/timer.h"
 #include "chromeos/components/tether/ble_advertisement_device_queue.h"
 #include "chromeos/components/tether/ble_advertiser.h"
 #include "chromeos/components/tether/ble_scanner.h"
+#include "chromeos/components/tether/connection_priority.h"
+#include "chromeos/components/tether/connection_reason.h"
 #include "chromeos/components/tether/proto/tether.pb.h"
-#include "components/cryptauth/remote_device.h"
 #include "components/cryptauth/secure_channel.h"
 
 namespace cryptauth {
 class CryptAuthService;
 }  // namespace cryptauth
 
+namespace device {
+class BluetoothAdapter;
+class BluetoothDevice;
+}  // namespace device
+
 namespace chromeos {
 
 namespace tether {
 
+class AdHocBleAdvertiser;
 class TimerFactory;
 
 // Manages connections to remote devices. When a device is registered,
@@ -55,16 +63,26 @@ class TimerFactory;
 // been unregistered for the device.
 class BleConnectionManager : public BleScanner::Observer {
  public:
-  static std::string MessageTypeToString(const MessageType& reason);
+  // Extra data about a state change which is passed to observers in
+  // OnSecureChannelStatusChanged(). If no extra data applies to the state
+  // change, STATE_CHANGE_DETAIL_NONE is used.
+  enum class StateChangeDetail {
+    STATE_CHANGE_DETAIL_NONE,
+    STATE_CHANGE_DETAIL_COULD_NOT_ATTEMPT_CONNECTION,
+    STATE_CHANGE_DETAIL_GATT_CONNECTION_WAS_ATTEMPTED,
+    STATE_CHANGE_DETAIL_INTERRUPTED_BY_HIGHER_PRIORITY,
+    STATE_CHANGE_DETAIL_DEVICE_WAS_UNREGISTERED
+  };
 
   class Observer {
    public:
     virtual void OnSecureChannelStatusChanged(
-        const cryptauth::RemoteDevice& remote_device,
+        const std::string& device_id,
         const cryptauth::SecureChannel::Status& old_status,
-        const cryptauth::SecureChannel::Status& new_status) = 0;
+        const cryptauth::SecureChannel::Status& new_status,
+        StateChangeDetail state_change_detail) = 0;
 
-    virtual void OnMessageReceived(const cryptauth::RemoteDevice& remote_device,
+    virtual void OnMessageReceived(const std::string& device_id,
                                    const std::string& payload) = 0;
 
     // Called when a message has been sent successfully; |sequence_number|
@@ -77,36 +95,36 @@ class BleConnectionManager : public BleScanner::Observer {
       scoped_refptr<device::BluetoothAdapter> adapter,
       BleAdvertisementDeviceQueue* ble_advertisement_device_queue,
       BleAdvertiser* ble_advertiser,
-      BleScanner* ble_scanner);
+      BleScanner* ble_scanner,
+      AdHocBleAdvertiser* ad_hoc_ble_advertisement);
   virtual ~BleConnectionManager();
 
-  // Registers |remote_device| for |connection_reason|. Once registered, this
+  // Registers |device_id| for |connection_reason|. Once registered, this
   // instance will continue to attempt to connect and authenticate to that
   // device until the device is unregistered.
-  virtual void RegisterRemoteDevice(
-      const cryptauth::RemoteDevice& remote_device,
-      const MessageType& connection_reason);
+  virtual void RegisterRemoteDevice(const std::string& device_id,
+                                    const ConnectionReason& connection_reason);
 
-  // Unregisters |remote_device| for |connection_reason|. Once registered, a
-  // device will continue trying to connect until *ALL* of its
-  // MessageTypes have been unregistered.
+  // Unregisters |device_id| for |connection_reason|. Once registered, a device
+  // will continue trying to connect until *ALL* of its ConnectionReasons have
+  // been unregistered.
   virtual void UnregisterRemoteDevice(
-      const cryptauth::RemoteDevice& remote_device,
-      const MessageType& connection_reason);
+      const std::string& device_id,
+      const ConnectionReason& connection_reason);
 
-  // Sends |message| to |remote_device|. This function can only be called if the
-  // given device is authenticated. This function returns a sequence number for
-  // the message; if this message is sent successfully, observers will be
-  // notified and provided this number. Note that -1 is returned when the
-  // message cannot be sent.
-  virtual int SendMessage(const cryptauth::RemoteDevice& remote_device,
+  // Sends |message| to the device with ID |device_id|. This function can only
+  // be called if the given device is authenticated. This function returns a
+  // sequence number for the message; if this message is sent successfully,
+  // observers will be notified and provided this number. Note that -1 is
+  // returned when the message cannot be sent.
+  virtual int SendMessage(const std::string& device_id,
                           const std::string& message);
 
-  // Gets |remote_device|'s status and stores it to |status|, returning whether
-  // |remote_device| is registered. If this function returns |false|, no value
-  // is saved to |status|.
+  // Gets the device with ID |device_id|'s status and stores it to |status|,
+  // returning whether that device is registered. If this function returns
+  // |false|, no value is saved to |status|.
   virtual bool GetStatusForDevice(
-      const cryptauth::RemoteDevice& remote_device,
+      const std::string& device_id,
       cryptauth::SecureChannel::Status* status) const;
 
   void AddObserver(Observer* observer);
@@ -114,17 +132,17 @@ class BleConnectionManager : public BleScanner::Observer {
 
   // BleScanner::Observer:
   void OnReceivedAdvertisementFromDevice(
-      const std::string& device_address,
-      const cryptauth::RemoteDevice& remote_device) override;
+      const cryptauth::RemoteDevice& remote_device,
+      device::BluetoothDevice* bluetooth_device) override;
 
  protected:
-  void SendMessageReceivedEvent(cryptauth::RemoteDevice remote_device,
-                                std::string payload);
-  void SendSecureChannelStatusChangeEvent(
-      cryptauth::RemoteDevice remote_device,
+  void NotifyMessageReceived(std::string device_id, std::string payload);
+  void NotifySecureChannelStatusChanged(
+      std::string device_id,
       cryptauth::SecureChannel::Status old_status,
-      cryptauth::SecureChannel::Status new_status);
-  void SendMessageSentEvent(int sequence_number);
+      cryptauth::SecureChannel::Status new_status,
+      StateChangeDetail state_change_detail);
+  void NotifyMessageSent(int sequence_number);
 
  private:
   friend class BleConnectionManagerTest;
@@ -133,29 +151,32 @@ class BleConnectionManager : public BleScanner::Observer {
   static const int64_t kFailImmediatelyTimeoutMillis;
 
   // Data associated with a registered device. Each registered device has an
-  // associated |ConnectionMetadata| stored in |device_to_metadata_map_|, and
+  // associated |ConnectionMetadata| stored in |device_id_to_metadata_map_|, and
   // the |ConnectionMetadata| is removed when the device is unregistered. A
   // |ConnectionMetadata| stores the associated |SecureChannel| for registered
   // devices which have an active connection.
-  class ConnectionMetadata : public cryptauth::SecureChannel::Observer {
+  class ConnectionMetadata final : public cryptauth::SecureChannel::Observer {
    public:
-    ConnectionMetadata(const cryptauth::RemoteDevice remote_device,
+    ConnectionMetadata(const std::string& device_id,
                        std::unique_ptr<base::Timer> timer,
                        base::WeakPtr<BleConnectionManager> manager);
     ~ConnectionMetadata();
 
-    void RegisterConnectionReason(const MessageType& connection_reason);
-    void UnregisterConnectionReason(const MessageType& connection_reason);
+    void RegisterConnectionReason(const ConnectionReason& connection_reason);
+    void UnregisterConnectionReason(const ConnectionReason& connection_reason);
+    ConnectionPriority GetConnectionPriority();
     bool HasReasonForConnection() const;
 
     bool HasEstablishedConnection() const;
     cryptauth::SecureChannel::Status GetStatus() const;
 
     void StartConnectionAttemptTimer(bool use_short_error_timeout);
+    void StopConnectionAttemptTimer();
     bool HasSecureChannel();
     void SetSecureChannel(
         std::unique_ptr<cryptauth::SecureChannel> secure_channel);
     int SendMessage(const std::string& payload);
+    void Disconnect();
 
     // cryptauth::SecureChannel::Observer:
     void OnSecureChannelStatusChanged(
@@ -167,14 +188,15 @@ class BleConnectionManager : public BleScanner::Observer {
                            const std::string& payload) override;
     void OnMessageSent(cryptauth::SecureChannel* secure_channel,
                        int sequence_number) override;
+    void OnGattCharacteristicsNotAvailable() override;
 
    private:
     friend class BleConnectionManagerTest;
 
     void OnConnectionAttemptTimeout();
 
-    cryptauth::RemoteDevice remote_device_;
-    std::set<MessageType> active_connection_reasons_;
+    std::string device_id_;
+    std::set<ConnectionReason> active_connection_reasons_;
     std::unique_ptr<cryptauth::SecureChannel> secure_channel_;
     std::unique_ptr<base::Timer> connection_attempt_timeout_timer_;
     base::WeakPtr<BleConnectionManager> manager_;
@@ -182,25 +204,26 @@ class BleConnectionManager : public BleScanner::Observer {
     base::WeakPtrFactory<ConnectionMetadata> weak_ptr_factory_;
   };
 
-  ConnectionMetadata* GetConnectionMetadata(
-      const cryptauth::RemoteDevice& remote_device) const;
-  ConnectionMetadata* AddMetadataForDevice(
-      const cryptauth::RemoteDevice& remote_device);
+  ConnectionMetadata* GetConnectionMetadata(const std::string& device_id) const;
+  ConnectionMetadata* AddMetadataForDevice(const std::string& device_id);
 
   void UpdateConnectionAttempts();
   void UpdateAdvertisementQueue();
 
-  void StartConnectionAttempt(const cryptauth::RemoteDevice& remote_device);
-  void StopConnectionAttemptAndMoveToEndOfQueue(
-      const cryptauth::RemoteDevice& remote_device);
+  void StartConnectionAttempt(const std::string& device_id);
+  void EndUnsuccessfulAttempt(const std::string& device_id,
+                              StateChangeDetail state_change_detail);
+  void StopConnectionAttemptAndMoveToEndOfQueue(const std::string& device_id);
 
-  void OnConnectionAttemptTimeout(const cryptauth::RemoteDevice& remote_device);
+  void OnConnectionAttemptTimeout(const std::string& device_id);
   void OnSecureChannelStatusChanged(
-      const cryptauth::RemoteDevice& remote_device,
+      const std::string& device_id,
       const cryptauth::SecureChannel::Status& old_status,
-      const cryptauth::SecureChannel::Status& new_status);
+      const cryptauth::SecureChannel::Status& new_status,
+      StateChangeDetail state_change_detail);
+  void OnGattCharacteristicsNotAvailable(const std::string& device_id);
 
-  void SetTestDoubles(std::unique_ptr<base::Clock> test_clock,
+  void SetTestDoubles(base::Clock* test_clock,
                       std::unique_ptr<TimerFactory> test_timer_factory);
 
   // Record various operation durations. These need to be separate methods
@@ -214,13 +237,14 @@ class BleConnectionManager : public BleScanner::Observer {
   BleAdvertisementDeviceQueue* ble_advertisement_device_queue_;
   BleAdvertiser* ble_advertiser_;
   BleScanner* ble_scanner_;
+  AdHocBleAdvertiser* ad_hoc_ble_advertisement_;
 
   std::unique_ptr<TimerFactory> timer_factory_;
-  std::unique_ptr<base::Clock> clock_;
+  base::Clock* clock_;
 
   bool has_registered_observer_;
-  std::map<cryptauth::RemoteDevice, std::unique_ptr<ConnectionMetadata>>
-      device_to_metadata_map_;
+  std::map<std::string, std::unique_ptr<ConnectionMetadata>>
+      device_id_to_metadata_map_;
 
   std::map<std::string, base::Time> device_id_to_advertising_start_time_map_;
   std::map<std::string, base::Time> device_id_to_status_connected_time_map_;

@@ -70,6 +70,14 @@ bool StandardManagementPolicyProvider::UserMayLoad(
   if (extension->is_shared_module())
     return true;
 
+  // Always allow bookmark apps. The fact that bookmark apps are an extension is
+  // an internal implementation detail and hence they should not be controlled
+  // by extension management policies. See crbug.com/786061.
+  // TODO(calamity): This special case should be removed by removing bookmark
+  // apps from external sources. See crbug.com/788245.
+  if (extension->from_bookmark())
+    return true;
+
   ExtensionManagement::InstallationMode installation_mode =
       settings_->GetInstallationMode(extension);
 
@@ -124,12 +132,12 @@ bool StandardManagementPolicyProvider::MustRemainEnabled(
 
 bool StandardManagementPolicyProvider::MustRemainDisabled(
     const Extension* extension,
-    Extension::DisableReason* reason,
+    disable_reason::DisableReason* reason,
     base::string16* error) const {
   std::string required_version;
   if (!settings_->CheckMinimumVersion(extension, &required_version)) {
     if (reason)
-      *reason = Extension::DISABLE_UPDATE_REQUIRED_BY_POLICY;
+      *reason = disable_reason::DISABLE_UPDATE_REQUIRED_BY_POLICY;
     if (error) {
       *error = l10n_util::GetStringFUTF16(
           IDS_EXTENSION_DISABLED_UPDATE_REQUIRED_BY_POLICY,

@@ -8,6 +8,8 @@
 
 #include "remoting/host/win/unprivileged_process_delegate.h"
 
+#include <windows.h>  // Must be in front of other Windows header files.
+
 #include <sddl.h>
 
 #include <utility>
@@ -155,8 +157,7 @@ bool CreateWindowStationAndDesktop(ScopedSid logon_sid,
 
   // Generate a unique window station name.
   std::string window_station_name = base::StringPrintf(
-      "chromoting-%d-%d",
-      base::GetCurrentProcId(),
+      "chromoting-%" CrPRIdPid "-%d", base::GetCurrentProcId(),
       base::RandInt(1, std::numeric_limits<int>::max()));
 
   // Make sure that a new window station will be created instead of opening
@@ -288,7 +289,8 @@ void UnprivilegedProcessDelegate::LaunchProcess(
   std::string mojo_message_pipe_token = mojo::edk::GenerateRandomToken();
   std::unique_ptr<IPC::ChannelProxy> server = IPC::ChannelProxy::Create(
       invitation.AttachMessagePipe(mojo_message_pipe_token).release(),
-      IPC::Channel::MODE_SERVER, this, io_task_runner_);
+      IPC::Channel::MODE_SERVER, this, io_task_runner_,
+      base::ThreadTaskRunnerHandle::Get());
   base::CommandLine command_line(target_command_->argv());
   command_line.AppendSwitchASCII(kMojoPipeToken, mojo_message_pipe_token);
 

@@ -43,6 +43,8 @@ class MockModelTypeProcessor : public ModelTypeProcessor {
   // Implementation of ModelTypeProcessor.
   void ConnectSync(std::unique_ptr<CommitQueue> commit_queue) override;
   void DisconnectSync() override;
+  void GetLocalChanges(size_t max_entries,
+                       const GetLocalChangesCallback& callback) override;
   void OnCommitCompleted(const sync_pb::ModelTypeState& type_state,
                          const CommitResponseDataList& response_list) override;
   void OnUpdateReceived(const sync_pb::ModelTypeState& type_state,
@@ -93,6 +95,11 @@ class MockModelTypeProcessor : public ModelTypeProcessor {
   CommitResponseData GetCommitResponse(const std::string& tag_hash) const;
 
   void SetDisconnectCallback(const DisconnectCallback& callback);
+
+  // Sets commit request that will be returned by GetLocalChanges().
+  void SetCommitRequest(const CommitRequestDataList& commit_request);
+
+  int GetLocalChangesCallCount() const;
 
  private:
   // Process a received commit response.
@@ -147,6 +154,11 @@ class MockModelTypeProcessor : public ModelTypeProcessor {
 
   // Callback which will be call during disconnection
   DisconnectCallback disconnect_callback_;
+
+  // Commit request to return from GetLocalChanges().
+  CommitRequestDataList commit_request_;
+
+  int get_local_changes_call_count_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(MockModelTypeProcessor);
 };

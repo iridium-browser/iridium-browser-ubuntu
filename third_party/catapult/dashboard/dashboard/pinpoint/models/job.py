@@ -2,19 +2,18 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import collections
-import logging
-import numbers
+import datetime
 import os
+import traceback
+import uuid
 
+from google.appengine.api import datastore_errors
 from google.appengine.api import taskqueue
 from google.appengine.ext import ndb
+from google.appengine.runtime import apiproxy_errors
 
 from dashboard.common import utils
-from dashboard.pinpoint import mann_whitney_u
-from dashboard.pinpoint.models import attempt as attempt_module
-from dashboard.pinpoint.models import change as change_module
-from dashboard.pinpoint.models import quest as quest_module
+from dashboard.pinpoint.models import job_state
 from dashboard.services import issue_tracker_service
 
 
@@ -23,23 +22,21 @@ from dashboard.services import issue_tracker_service
 _TASK_INTERVAL = 10
 
 
-_DEFAULT_MAX_ATTEMPTS = 2
-_SIGNIFICANCE_LEVEL = 0.5
+_CRYING_CAT_FACE = u'\U0001f63f'
+_ROUND_PUSHPIN = u'\U0001f4cd'
 
 
-_DIFFERENT = 'different'
-_PENDING = 'pending'
-_SAME = 'same'
-_UNKNOWN = 'unknown'
+OPTION_STATE = 'STATE'
+OPTION_TAGS = 'TAGS'
 
 
 def JobFromId(job_id):
-  """Get a Job object from its ID. Its ID is just its urlsafe key.
+  """Get a Job object from its ID. Its ID is just its key as a hex string.
 
   Users of Job should not have to import ndb. This function maintains an
   abstraction layer that separates users from the Datastore details.
   """
-  job_key = ndb.Key(urlsafe=job_id)
+  job_key = ndb.Key('Job', int(job_id, 16))
   return job_key.get()
 
 
@@ -47,7 +44,9 @@ class Job(ndb.Model):
   """A Pinpoint job."""
 
   created = ndb.DateTimeProperty(required=True, auto_now_add=True)
-  updated = ndb.DateTimeProperty(required=True, auto_now=True)
+  # Don't use `auto_now` for `updated`. When we do data migration, we need
+  # to be able to modify the Job without changing the Job's completion time.
+  updated = ndb.DateTimeProperty(required=True, auto_now_add=True)
 
   # The name of the Task Queue task this job is running on. If it's present, the
   # job is running. The task is also None for Task Queue retries.
@@ -55,13 +54,10 @@ class Job(ndb.Model):
 
   # The string contents of any Exception that was thrown to the top level.
   # If it's present, the job failed.
-  exception = ndb.StringProperty()
+  exception = ndb.TextProperty()
 
   # Request parameters.
-  configuration = ndb.StringProperty(required=True)
-  test_suite = ndb.StringProperty()
-  test = ndb.StringProperty()
-  metric = ndb.StringProperty()
+  arguments = ndb.JsonProperty(required=True)
 
   # If True, the service should pick additional Changes to run (bisect).
   # If False, only run the Changes explicitly added by the user.
@@ -71,30 +67,23 @@ class Job(ndb.Model):
   # completes. This probably should not be the responsibility of Pinpoint.
   bug_id = ndb.IntegerProperty()
 
-  state = ndb.PickleProperty(required=True)
+  state = ndb.PickleProperty(required=True, compressed=True)
+
+  tags = ndb.JsonProperty()
 
   @classmethod
-  def New(cls, configuration, test_suite, test, metric, auto_explore, bug_id):
-    # Get list of quests.
-    quests = [quest_module.FindIsolate(configuration)]
-    if test_suite:
-      quests.append(quest_module.RunTest(configuration, test_suite, test))
-    if metric:
-      quests.append(quest_module.ReadValue(metric, test))
-
+  def New(cls, arguments, quests, auto_explore, bug_id=None, tags=None):
     # Create job.
     return cls(
-        configuration=configuration,
-        test_suite=test_suite,
-        test=test,
-        metric=metric,
+        arguments=arguments,
         auto_explore=auto_explore,
         bug_id=bug_id,
-        state=_JobState(quests, _DEFAULT_MAX_ATTEMPTS))
+        tags=tags,
+        state=job_state.JobState(quests))
 
   @property
   def job_id(self):
-    return self.key.urlsafe()
+    return '%x' % self.key.id()
 
   @property
   def status(self):
@@ -114,22 +103,82 @@ class Job(ndb.Model):
     self.state.AddChange(change)
 
   def Start(self):
-    self.Schedule()
+    self._Schedule()
 
-    comment = 'Pinpoint job started.\n' + self.url
-    issue_tracker = issue_tracker_service.IssueTrackerService(
-        utils.ServiceAccountHttp())
-    issue_tracker.AddBugComment(self.bug_id, comment, send_email=False)
+    title = _ROUND_PUSHPIN + ' Pinpoint job started.'
+    comment = '\n'.join((title, self.url))
+    self._PostBugComment(comment, send_email=False)
 
-  def Complete(self):
-    comment = 'Pinpoint job complete!\n' + self.url
-    issue_tracker = issue_tracker_service.IssueTrackerService(
-        utils.ServiceAccountHttp())
-    issue_tracker.AddBugComment(self.bug_id, comment, send_email=False)
+  def _Complete(self):
+    # Format bug comment.
+    differences = tuple(self.state.Differences())
 
-  def Schedule(self):
-    task = taskqueue.add(queue_name='job-queue', url='/api/run/' + self.job_id,
-                         countdown=_TASK_INTERVAL)
+    if not differences:
+      title = "<b>%s Couldn't reproduce a difference.</b>" % _ROUND_PUSHPIN
+      self._PostBugComment('\n'.join((title, self.url)))
+      return
+
+    # Include list of Changes.
+    owner = None
+    cc_list = set()
+    commit_details = []
+    for _, change in differences:
+      if change.patch:
+        commit_info = change.patch.AsDict()
+      else:
+        commit_info = change.last_commit.AsDict()
+
+      # TODO: Assign the largest difference, not the last one.
+      owner = commit_info['author']
+      cc_list.add(commit_info['author'])
+      if 'reviewers' in commit_info:
+        cc_list |= frozenset(commit_info['reviewers'])
+      commit_details.append(_FormatCommitForBug(commit_info))
+
+    # Header.
+    if len(differences) == 1:
+      status = 'Found a significant difference after 1 commit.'
+    else:
+      status = ('Found significant differences after each of %d commits.' %
+                len(differences))
+
+    title = '<b>%s %s</b>' % (_ROUND_PUSHPIN, status)
+    header = '\n'.join((title, self.url))
+
+    # Body.
+    body = '\n\n'.join(commit_details)
+
+    # Footer.
+    footer = ('Understanding performance regressions:\n'
+              '  http://g.co/ChromePerformanceRegressions')
+
+    # Bring it all together.
+    comment = '\n\n'.join((header, body, footer))
+    self._PostBugComment(comment, status='Assigned',
+                         cc_list=sorted(cc_list), owner=owner)
+
+  def Fail(self):
+    self.exception = traceback.format_exc()
+
+    title = _CRYING_CAT_FACE + ' Pinpoint job stopped with an error.'
+    comment = '\n'.join((title, self.url))
+    self._PostBugComment(comment)
+
+  def _Schedule(self):
+    # Set a task name to deduplicate retries. This adds some latency, but we're
+    # not latency-sensitive. If Job.Run() works asynchronously in the future,
+    # we don't need to worry about duplicate tasks.
+    # https://github.com/catapult-project/catapult/issues/3900
+    task_name = str(uuid.uuid4())
+    try:
+      task = taskqueue.add(
+          queue_name='job-queue', url='/api/run/' + self.job_id,
+          name=task_name, countdown=_TASK_INTERVAL)
+    except apiproxy_errors.DeadlineExceededError:
+      task = taskqueue.add(
+          queue_name='job-queue', url='/api/run/' + self.job_id,
+          name=task_name, countdown=_TASK_INTERVAL)
+
     self.task = task.name
 
   def Run(self):
@@ -137,217 +186,68 @@ class Job(ndb.Model):
     self.task = None  # In case an exception is thrown.
 
     try:
-      if self.auto_explore:
-        self.state.Explore()
+      self.state.Explore(self.auto_explore)
       work_left = self.state.ScheduleWork()
 
       # Schedule moar task.
       if work_left:
-        self.Schedule()
+        self._Schedule()
       else:
-        self.Complete()
-    except BaseException as e:
-      self.exception = str(e)
+        self._Complete()
+    except BaseException:
+      self.Fail()
       raise
+    finally:
+      # Don't use `auto_now` for `updated`. When we do data migration, we need
+      # to be able to modify the Job without changing the Job's completion time.
+      self.updated = datetime.datetime.now()
+      try:
+        self.put()
+      except datastore_errors.BadRequestError:
+        # The _JobState is too large to fit in an ndb property.
+        # Load the Job from before we updated it, and fail it.
+        job = self.key.get(use_cache=False)
+        job.task = None
+        job.Fail()
+        job.updated = datetime.datetime.now()
+        job.put()
+        raise
 
-  def AsDict(self):
-    return {
+  def AsDict(self, options=None):
+    d = {
         'job_id': self.job_id,
 
-        'configuration': self.configuration,
-        'test_suite': self.test_suite,
-        'test': self.test,
-        'metric': self.metric,
+        'arguments': self.arguments,
         'auto_explore': self.auto_explore,
+        'bug_id': self.bug_id,
 
-        'created': self.created.strftime('%Y-%m-%d %H:%M:%S %Z'),
-        'updated': self.updated.strftime('%Y-%m-%d %H:%M:%S %Z'),
+        'created': self.created.isoformat(),
+        'updated': self.updated.isoformat(),
+        'exception': self.exception,
         'status': self.status,
-
-        'state': self.state.AsDict(),
     }
+    if not options:
+      return d
+
+    if OPTION_STATE in options:
+      d.update(self.state.AsDict())
+    if OPTION_TAGS in options:
+      d['tags'] = {'tags': self.tags}
+    return d
+
+  def _PostBugComment(self, *args, **kwargs):
+    if not self.bug_id:
+      return
+
+    issue_tracker = issue_tracker_service.IssueTrackerService(
+        utils.ServiceAccountHttp())
+    issue_tracker.AddBugComment(self.bug_id, *args, **kwargs)
 
 
-class _JobState(object):
-  """The internal state of a Job.
-
-  Wrapping the entire internal state of a Job in a PickleProperty allows us to
-  use regular Python objects, with constructors, dicts, and object references.
-
-  We lose the ability to index and query the fields, but it's all internal
-  anyway. Everything queryable should be on the Job object.
-  """
-
-  def __init__(self, quests, max_attempts):
-    """Create a _JobState.
-
-    Args:
-      quests: A sequence of quests to run on each Change.
-      max_attempts: The max number of attempts to automatically run per Change.
-    """
-    # _quests is mutable. Any modification should mutate the existing list
-    # in-place rather than assign a new list, because every Attempt references
-    # this object and will be updated automatically if it's mutated.
-    self._quests = list(quests)
-
-    # _changes can be in arbitrary order. Client should not assume that the
-    # list of Changes is sorted in any particular order.
-    self._changes = []
-
-    # A mapping from a Change to a list of Attempts on that Change.
-    self._attempts = {}
-
-    self._max_attempts = max_attempts
-
-  def AddAttempt(self, change):
-    assert change in self._attempts
-    self._attempts[change].append(attempt_module.Attempt(self._quests, change))
-
-  def AddChange(self, change, index=None):
-    if index:
-      self._changes.insert(index, change)
-    else:
-      self._changes.append(change)
-    self._attempts[change] = []
-    self.AddAttempt(change)
-
-  def Explore(self):
-    """Compare Changes and bisect by adding additional Changes as needed.
-
-    For every pair of adjacent Changes, compare their results as probability
-    distributions. If more information is needed to establish statistical
-    confidence, add an additional Attempt. If the results are different, find
-    the midpoint of the Changes and add it to the Job.
-
-    The midpoint can only be added if the second Change represents a commit that
-    comes after the first Change. Otherwise, this method won't explore further.
-    For example, if Change A is repo@abc, and Change B is repo@abc + patch,
-    there's no way to pick additional Changes to try.
-    """
-    # Compare every pair of Changes.
-    # TODO: The list may Change while iterating through it.
-    for index in xrange(1, len(self._changes)):
-      change_a = self._changes[index - 1]
-      change_b = self._changes[index]
-
-      comparison_result = self._Compare(change_a, change_b)
-      if comparison_result == _DIFFERENT:
-        # Different: Bisect and add an additional Change to the job.
-        try:
-          midpoint = change_module.Change.Midpoint(change_a, change_b)
-        except change_module.NonLinearError:
-          midpoint = None
-        if midpoint:
-          logging.info('Adding Change %s.', midpoint)
-          self.AddChange(midpoint, index)
-      elif comparison_result == _SAME:
-        # The same: Do nothing.
-        continue
-      elif comparison_result == _UNKNOWN:
-        # Unknown: Add an Attempt to the Change with the fewest Attempts.
-        change = min(change_a, change_b, key=lambda c: len(self._attempts[c]))
-        self.AddAttempt(change)
-
-  def ScheduleWork(self):
-    work_left = False
-    for attempts in self._attempts.itervalues():
-      for attempt in attempts:
-        if attempt.completed:
-          continue
-
-        attempt.ScheduleWork()
-        work_left = True
-
-    return work_left
-
-  def AsDict(self):
-    comparisons = []
-    for index in xrange(1, len(self._changes)):
-      change_a = self._changes[index - 1]
-      change_b = self._changes[index]
-      comparisons.append(self._Compare(change_a, change_b))
-
-    # result_values is a 3D array. result_values[change][quest] is a list of
-    # all the result values for that Change and Quest.
-    result_values = []
-    for change in self._changes:
-      change_result_values = []
-
-      change_results_per_quest = _CombineResultsPerQuest(self._attempts[change])
-      for quest in self._quests:
-        change_result_values.append(map(str, change_results_per_quest[quest]))
-
-      result_values.append(change_result_values)
-
-    return {
-        'quests': map(str, self._quests),
-        'changes': map(str, self._changes),
-        'comparisons': comparisons,
-        'result_values': result_values,
-    }
-
-  def _Compare(self, change_a, change_b):
-    attempts_a = self._attempts[change_a]
-    attempts_b = self._attempts[change_b]
-
-    if any(not attempt.completed for attempt in attempts_a + attempts_b):
-      return _PENDING
-
-    results_a = _CombineResultsPerQuest(attempts_a)
-    results_b = _CombineResultsPerQuest(attempts_b)
-
-    if any(_CompareResults(results_a[quest], results_b[quest]) == _DIFFERENT
-           for quest in self._quests):
-      return _DIFFERENT
-
-    # Here, "the same" means that we fail to reject the null hypothesis. We can
-    # never be completely sure that the two Changes have the same results, but
-    # we've run everything that we planned to, and didn't detect any difference.
-    if (len(attempts_a) >= self._max_attempts and
-        len(attempts_b) >= self._max_attempts):
-      return _SAME
-
-    return _UNKNOWN
+def _FormatCommitForBug(commit_info):
+  subject = '<b>%s</b> by %s' % (commit_info['subject'], commit_info['author'])
+  return '\n'.join((subject, commit_info['url']))
 
 
-def _CombineResultsPerQuest(attempts):
-  aggregate_results = collections.defaultdict(list)
-  for attempt in attempts:
-    if not attempt.completed:
-      continue
-
-    for quest, results in attempt.result_values.iteritems():
-      aggregate_results[quest] += results
-
-  return aggregate_results
-
-
-def _CompareResults(results_a, results_b):
-  if len(results_a) == 0 or len(results_b) == 0:
-    return _UNKNOWN
-
-  results_a = map(_ConvertToNumber, results_a)
-  results_b = map(_ConvertToNumber, results_b)
-
-  try:
-    p_value = mann_whitney_u.MannWhitneyU(results_a, results_b)
-  except ValueError:
-    return _UNKNOWN
-
-  if p_value < _SIGNIFICANCE_LEVEL:
-    return _DIFFERENT
-  else:
-    return _UNKNOWN
-
-
-def _ConvertToNumber(obj):
-  # We want the results_values to provide both a message that can be shown to
-  # the user for why something failed, and also something comparable that can
-  # be used for bisect. Therefore, they contain the thrown Exceptions. This
-  # function then converts them into comparable numbers for bisect.
-  if isinstance(obj, numbers.Number):
-    return obj
-  elif isinstance(obj, Exception):
-    return hash(obj.__class__)
-  else:
-    return hash(obj)
+# TODO: Remove after data migration.
+_JobState = job_state.JobState

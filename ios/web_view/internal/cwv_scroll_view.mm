@@ -24,6 +24,7 @@
 @implementation CWVScrollView
 
 @synthesize contentSize = _contentSize;
+@synthesize contentOffset = _contentOffset;
 @synthesize delegate = _delegate;
 @synthesize proxy = _proxy;
 
@@ -31,15 +32,13 @@
   [_proxy removeObserver:self];
   _proxy = proxy;
   self.contentSize = _proxy.contentSize;
+  [self updateContentOffset];
   [_proxy addObserver:self];
-}
-
-- (CGPoint)contentOffset {
-  return _proxy.contentOffset;
 }
 
 - (void)setContentOffset:(CGPoint)contentOffset {
   _proxy.contentOffset = contentOffset;
+  [self updateContentOffset];
 }
 
 - (UIEdgeInsets)scrollIndicatorInsets {
@@ -62,6 +61,10 @@
   return _proxy.dragging;
 }
 
+- (BOOL)isTracking {
+  return _proxy.tracking;
+}
+
 - (BOOL)scrollsToTop {
   return _proxy.scrollsToTop;
 }
@@ -70,8 +73,23 @@
   _proxy.scrollsToTop = scrollsToTop;
 }
 
+- (UIScrollViewContentInsetAdjustmentBehavior)contentInsetAdjustmentBehavior
+    API_AVAILABLE(ios(11.0)) {
+  return _proxy.contentInsetAdjustmentBehavior;
+}
+
+- (void)setContentInsetAdjustmentBehavior:
+    (UIScrollViewContentInsetAdjustmentBehavior)contentInsetAdjustmentBehavior
+    API_AVAILABLE(ios(11.0)) {
+  _proxy.contentInsetAdjustmentBehavior = contentInsetAdjustmentBehavior;
+}
+
 - (UIPanGestureRecognizer*)panGestureRecognizer {
   return _proxy.panGestureRecognizer;
+}
+
+- (NSArray<__kindof UIView*>*)subviews {
+  return _proxy.subviews;
 }
 
 - (UIEdgeInsets)contentInset {
@@ -84,6 +102,7 @@
 
 - (void)setContentOffset:(CGPoint)contentOffset animated:(BOOL)animated {
   [_proxy setContentOffset:contentOffset animated:animated];
+  [self updateContentOffset];
 }
 
 - (void)addGestureRecognizer:(UIGestureRecognizer*)gestureRecognizer {
@@ -126,6 +145,7 @@
 
 - (void)webViewScrollViewDidScroll:
     (CRWWebViewScrollViewProxy*)webViewScrollViewProxy {
+  [self updateContentOffset];
   SEL selector = @selector(scrollViewDidScroll:);
   if ([_delegate respondsToSelector:selector]) {
     [_delegate scrollViewDidScroll:self];
@@ -151,6 +171,19 @@
 - (void)webViewScrollViewDidResetContentSize:
     (CRWWebViewScrollViewProxy*)webViewScrollViewProxy {
   self.contentSize = _proxy.contentSize;
+}
+
+- (void)updateContentOffset {
+  [self willChangeValueForKey:@"contentOffset"];
+  _contentOffset = _proxy.contentOffset;
+  [self didChangeValueForKey:@"contentOffset"];
+}
+
++ (BOOL)automaticallyNotifiesObserversForKey:(NSString*)key {
+  if ([key isEqualToString:@"contentOffset"]) {
+    return NO;
+  }
+  return [super automaticallyNotifiesObserversForKey:key];
 }
 
 @end

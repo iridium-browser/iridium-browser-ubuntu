@@ -7,7 +7,7 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "components/viz/common/quads/resource_format.h"
+#include "components/viz/common/resources/resource_format.h"
 #include "third_party/skia/include/core/SkTypes.h"
 
 namespace viz {
@@ -60,6 +60,7 @@ class PlatformColor {
       case RED_8:
       case LUMINANCE_F16:
       case RGBA_F16:
+      case R16_EXT:
         NOTREACHED();
         return false;
     }

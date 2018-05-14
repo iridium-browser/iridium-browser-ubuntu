@@ -30,8 +30,6 @@ using content::DevToolsAgentHost;
 
 namespace {
 
-const char kFrontEndURL[] =
-    "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/inspector.html";
 const char kSocketNameFormat[] = "webview_devtools_remote_%d";
 const char kTetheringSocketName[] = "webview_devtools_tethering_%d_%d";
 
@@ -96,8 +94,7 @@ void AwDevToolsServer::Start() {
           base::StringPrintf(kSocketNameFormat, getpid())));
   DevToolsAgentHost::StartRemoteDebuggingServer(
       std::move(factory),
-      base::StringPrintf(kFrontEndURL, content::GetWebKitRevision().c_str()),
-      base::FilePath(), base::FilePath(), GetProduct(), GetUserAgent());
+      base::FilePath(), base::FilePath());
 }
 
 void AwDevToolsServer::Stop() {
@@ -109,26 +106,25 @@ bool AwDevToolsServer::IsStarted() const {
   return is_started_;
 }
 
-bool RegisterAwDevToolsServer(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
-
-static jlong InitRemoteDebugging(JNIEnv* env,
-                                 const JavaParamRef<jobject>& obj) {
+static jlong JNI_AwDevToolsServer_InitRemoteDebugging(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   AwDevToolsServer* server = new AwDevToolsServer();
   return reinterpret_cast<intptr_t>(server);
 }
 
-static void DestroyRemoteDebugging(JNIEnv* env,
-                                   const JavaParamRef<jobject>& obj,
-                                   jlong server) {
+static void JNI_AwDevToolsServer_DestroyRemoteDebugging(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jlong server) {
   delete reinterpret_cast<AwDevToolsServer*>(server);
 }
 
-static void SetRemoteDebuggingEnabled(JNIEnv* env,
-                                      const JavaParamRef<jobject>& obj,
-                                      jlong server,
-                                      jboolean enabled) {
+static void JNI_AwDevToolsServer_SetRemoteDebuggingEnabled(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jlong server,
+    jboolean enabled) {
   AwDevToolsServer* devtools_server =
       reinterpret_cast<AwDevToolsServer*>(server);
   if (enabled) {

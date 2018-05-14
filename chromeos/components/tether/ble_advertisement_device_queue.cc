@@ -5,97 +5,144 @@
 #include "chromeos/components/tether/ble_advertisement_device_queue.h"
 
 #include <algorithm>
-#include <string>
 
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "chromeos/components/tether/ble_constants.h"
-#include "components/proximity_auth/logging/logging.h"
 
 namespace chromeos {
 
 namespace tether {
 
-BleAdvertisementDeviceQueue::BleAdvertisementDeviceQueue() {}
+BleAdvertisementDeviceQueue::PrioritizedDeviceId::PrioritizedDeviceId(
+    const std::string& device_id,
+    const ConnectionPriority& connection_priority)
+    : device_id(device_id), connection_priority(connection_priority) {}
 
-BleAdvertisementDeviceQueue::~BleAdvertisementDeviceQueue() {}
+BleAdvertisementDeviceQueue::PrioritizedDeviceId::~PrioritizedDeviceId() =
+    default;
 
-bool BleAdvertisementDeviceQueue::SetDevices(
-    std::vector<cryptauth::RemoteDevice> devices) {
-  // Determine which devices exist in |devices| but not in |device_queue_|, then
-  // add them to |device_queue_|.
-  std::vector<cryptauth::RemoteDevice> missing_from_queue;
-  for (auto& device : devices) {
-    if (std::find(device_queue_.begin(), device_queue_.end(), device) ==
-        device_queue_.end()) {
-      missing_from_queue.push_back(device);
-    }
-  }
-  if (!missing_from_queue.empty()) {
-    for (auto& device : missing_from_queue) {
-      device_queue_.push_back(device);
-    }
-  }
+BleAdvertisementDeviceQueue::BleAdvertisementDeviceQueue() = default;
 
-  // Determine which devices do not exist in |devices| but do exist in
-  // |device_queue_|, then remove them from |device_queue_|.
-  std::vector<cryptauth::RemoteDevice> to_remove_from_queue;
-  for (auto& device : device_queue_) {
-    if (std::find(devices.begin(), devices.end(), device) == devices.end()) {
-      to_remove_from_queue.push_back(device);
-    }
-  }
-  if (!to_remove_from_queue.empty()) {
-    for (auto& device : to_remove_from_queue) {
-      device_queue_.erase(
-          std::find(device_queue_.begin(), device_queue_.end(), device));
-    }
-  }
+BleAdvertisementDeviceQueue::~BleAdvertisementDeviceQueue() = default;
 
-  return !missing_from_queue.empty() || !to_remove_from_queue.empty();
+bool BleAdvertisementDeviceQueue::SetPrioritizedDeviceIds(
+    const std::vector<PrioritizedDeviceId>& prioritized_ids) {
+  bool devices_inserted =
+      InsertPrioritizedDeviceIdsIfNecessary(prioritized_ids);
+  bool devices_removed = RemoveMapEntriesIfNecessary(prioritized_ids);
+  return devices_inserted || devices_removed;
 }
 
-void BleAdvertisementDeviceQueue::MoveDeviceToEnd(std::string device_id) {
-  if (device_id.empty()) {
-    return;
-  }
+bool BleAdvertisementDeviceQueue::InsertPrioritizedDeviceIdsIfNecessary(
+    const std::vector<PrioritizedDeviceId>& prioritized_ids) {
+  bool updated = false;
 
-  int index = -1;
-  for (size_t i = 0; i < device_queue_.size(); i++) {
-    if (device_id == device_queue_[i].GetDeviceId()) {
-      index = i;
-      break;
+  // For each device provided, check to see if the device is already part of the
+  // queue. If it is not, add it to the end of the vector associated with the
+  // device's priority.
+  for (const auto& priotizied_id : prioritized_ids) {
+    std::vector<std::string>& device_ids_for_priority =
+        priority_to_device_ids_map_[priotizied_id.connection_priority];
+    if (!base::ContainsValue(device_ids_for_priority,
+                             priotizied_id.device_id)) {
+      device_ids_for_priority.push_back(priotizied_id.device_id);
+      updated = true;
     }
   }
 
-  if (index >= 0) {
-    cryptauth::RemoteDevice to_move = device_queue_[index];
-    device_queue_.erase(device_queue_.begin() + index);
-    device_queue_.push_back(to_move);
+  return updated;
+}
+
+bool BleAdvertisementDeviceQueue::RemoveMapEntriesIfNecessary(
+    const std::vector<PrioritizedDeviceId>& prioritized_ids) {
+  bool updated = false;
+
+  // Iterate through each priority's device IDs to see if any of the entries
+  // were not provided as part of the |prioritized_ids| parameter. If any such
+  // entries exist, remove them from the map.
+  for (auto& map_entry : priority_to_device_ids_map_) {
+    ConnectionPriority priority = map_entry.first;
+    std::vector<std::string>& device_ids_for_priority = map_entry.second;
+
+    auto device_ids_it = device_ids_for_priority.begin();
+    while (device_ids_it != device_ids_for_priority.end()) {
+      const std::string device_id = *device_ids_it;
+
+      // If the device ID in the map also exists in |prioritized_ids|, skip it.
+      if (std::find_if(prioritized_ids.begin(), prioritized_ids.end(),
+                       [priority, &device_id](auto prioritized_id) {
+                         return prioritized_id.device_id == device_id &&
+                                prioritized_id.connection_priority == priority;
+                       }) != prioritized_ids.end()) {
+        ++device_ids_it;
+        continue;
+      }
+
+      // The device ID in the map does not exist in |prioritized_ids|. Remove
+      // it.
+      device_ids_it = device_ids_for_priority.erase(device_ids_it);
+      updated = true;
+    }
+  }
+
+  return updated;
+}
+
+void BleAdvertisementDeviceQueue::MoveDeviceToEnd(
+    const std::string& device_id) {
+  DCHECK(!device_id.empty());
+
+  for (auto& map_entry : priority_to_device_ids_map_) {
+    std::vector<std::string>& device_ids_for_priority = map_entry.second;
+
+    auto device_id_it = std::find(device_ids_for_priority.begin(),
+                                  device_ids_for_priority.end(), device_id);
+    if (device_id_it == device_ids_for_priority.end())
+      continue;
+
+    // Move the element to the end of |device_ids_for_priority|.
+    std::rotate(device_id_it, device_id_it + 1, device_ids_for_priority.end());
   }
 }
 
-std::vector<cryptauth::RemoteDevice>
-BleAdvertisementDeviceQueue::GetDevicesToWhichToAdvertise() const {
-  std::vector<cryptauth::RemoteDevice> to_advertise;
-
-  if (device_queue_.empty()) {
-    return to_advertise;
-  }
-
-  for (auto& device : device_queue_) {
-    to_advertise.push_back(device);
-
-    if (to_advertise.size() ==
-        static_cast<size_t>(kMaxConcurrentAdvertisements)) {
-      break;
-    }
-  }
-
-  return to_advertise;
+std::vector<std::string>
+BleAdvertisementDeviceQueue::GetDeviceIdsToWhichToAdvertise() const {
+  std::vector<std::string> device_ids;
+  AddDevicesToVectorForPriority(ConnectionPriority::CONNECTION_PRIORITY_HIGH,
+                                &device_ids);
+  AddDevicesToVectorForPriority(ConnectionPriority::CONNECTION_PRIORITY_MEDIUM,
+                                &device_ids);
+  AddDevicesToVectorForPriority(ConnectionPriority::CONNECTION_PRIORITY_LOW,
+                                &device_ids);
+  DCHECK(device_ids.size() <= kMaxConcurrentAdvertisements);
+  return device_ids;
 }
 
 size_t BleAdvertisementDeviceQueue::GetSize() const {
-  return device_queue_.size();
+  size_t count = 0;
+  for (const auto& map_entry : priority_to_device_ids_map_)
+    count += map_entry.second.size();
+  return count;
+}
+
+void BleAdvertisementDeviceQueue::AddDevicesToVectorForPriority(
+    ConnectionPriority connection_priority,
+    std::vector<std::string>* device_ids_out) const {
+  if (priority_to_device_ids_map_.find(connection_priority) ==
+      priority_to_device_ids_map_.end()) {
+    // Nothing to do if there is no entry for this priority.
+    return;
+  }
+
+  const std::vector<std::string>& device_ids_for_priority =
+      priority_to_device_ids_map_.at(connection_priority);
+  size_t i = 0;
+  while (i < device_ids_for_priority.size() &&
+         device_ids_out->size() < kMaxConcurrentAdvertisements) {
+    device_ids_out->push_back(device_ids_for_priority[i]);
+    ++i;
+  }
 }
 
 }  // namespace tether

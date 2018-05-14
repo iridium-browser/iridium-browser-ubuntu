@@ -163,10 +163,13 @@ public class MediaCaptureNotificationService extends Service {
      * @param url Url of the current webrtc call.
      */
     private void createNotification(int notificationId, int mediaType, String url) {
+        final String channelId = mediaType == MEDIATYPE_SCREEN_CAPTURE
+                ? ChannelDefinitions.CHANNEL_ID_SCREEN_CAPTURE
+                : ChannelDefinitions.CHANNEL_ID_MEDIA;
+
         ChromeNotificationBuilder builder =
                 NotificationBuilderFactory
-                        .createChromeNotificationBuilder(
-                                true /* preferCompat */, ChannelDefinitions.CHANNEL_ID_MEDIA)
+                        .createChromeNotificationBuilder(true /* preferCompat */, channelId)
                         .setAutoCancel(false)
                         .setOngoing(true)
                         .setContentTitle(mContext.getString(R.string.app_name))
@@ -189,7 +192,7 @@ public class MediaCaptureNotificationService extends Service {
                         mContext.getResources().getString(R.string.accessibility_stop),
                         buildStopCapturePendingIntent(notificationId));
             } else {
-                contentText.append(mContext.getResources().getString(
+                contentText.append(" ").append(mContext.getResources().getString(
                         R.string.media_notification_link_text, url));
             }
         } else {
@@ -202,7 +205,7 @@ public class MediaCaptureNotificationService extends Service {
         mNotifications.put(notificationId, mediaType);
         updateSharedPreferencesEntry(notificationId, false);
         NotificationUmaTracker.getInstance().onNotificationShown(
-                NotificationUmaTracker.MEDIA_CAPTURE, ChannelDefinitions.CHANNEL_ID_MEDIA);
+                NotificationUmaTracker.MEDIA_CAPTURE, channelId);
     }
 
     /**

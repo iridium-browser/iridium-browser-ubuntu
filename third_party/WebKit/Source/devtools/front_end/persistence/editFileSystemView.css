@@ -13,7 +13,7 @@
 }
 
 .file-system-header-text {
-    flex: auto;
+    flex: 1 0 auto;
 }
 
 .add-button {
@@ -51,18 +51,6 @@
 
 .file-system-value {
     flex: 1 1 0px;
-}
-
-.file-system-separator {
-    flex: 0 0 1px;
-    background-color: rgb(231, 231, 231);
-    height: 30px;
-    margin: 0 4px;
-}
-
-.file-system-separator-invisible {
-    visibility: hidden;
-    height: 100% !important;
 }
 
 .file-system-edit-row {

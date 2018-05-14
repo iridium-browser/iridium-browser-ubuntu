@@ -411,7 +411,7 @@ public abstract class PaymentRequestSection extends LinearLayout implements View
     private ImageView createAndAddChevron(ViewGroup parent) {
         Resources resources = parent.getResources();
         TintedDrawable chevron = TintedDrawable.constructTintedDrawable(
-                resources, R.drawable.ic_expanded, R.color.payments_section_chevron);
+                resources, R.drawable.ic_expand_more_black_24dp, R.color.payments_section_chevron);
 
         ImageView view = new ImageView(parent.getContext());
         view.setImageDrawable(chevron);
@@ -1398,6 +1398,11 @@ public abstract class PaymentRequestSection extends LinearLayout implements View
             if (!TextUtils.isEmpty(item.getTertiaryLabel())) {
                 if (builder.length() > 0) builder.append(labelSeparator);
                 builder.append(item.getTertiaryLabel());
+            }
+
+            if (!TextUtils.isEmpty(item.getPromoMessage())) {
+                if (builder.length() > 0) builder.append(labelSeparator);
+                builder.append(item.getPromoMessage());
             }
 
             if (!item.isComplete() && !TextUtils.isEmpty(item.getEditMessage())) {

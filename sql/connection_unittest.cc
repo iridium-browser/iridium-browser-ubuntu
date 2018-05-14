@@ -14,20 +14,17 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/test/histogram_tester.h"
 #include "base/trace_event/process_memory_dump.h"
+#include "build/build_config.h"
 #include "sql/connection.h"
 #include "sql/connection_memory_dump_provider.h"
-#include "sql/correct_sql_test_base.h"
 #include "sql/meta_table.h"
 #include "sql/statement.h"
 #include "sql/test/error_callback_support.h"
 #include "sql/test/scoped_error_expecter.h"
+#include "sql/test/sql_test_base.h"
 #include "sql/test/test_helpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/sqlite/sqlite3.h"
-
-#if defined(OS_IOS) && defined(USE_SYSTEM_SQLITE)
-#include "base/ios/ios_util.h"
-#endif
 
 namespace sql {
 namespace test {
@@ -59,7 +56,7 @@ class ScopedMockTimeSource {
     MockTimeSource(ScopedMockTimeSource& owner)
         : owner_(owner) {
     }
-    ~MockTimeSource() override {}
+    ~MockTimeSource() override = default;
 
     base::TimeTicks Now() override {
       base::TimeTicks ret(owner_.current_time_);
@@ -228,7 +225,7 @@ class ScopedUmaskSetter {
   mode_t old_umask_;
   DISALLOW_IMPLICIT_CONSTRUCTORS(ScopedUmaskSetter);
 };
-#endif
+#endif  // defined(OS_POSIX)
 
 // SQLite function to adjust mock time by |argv[0]| milliseconds.
 void sqlite_adjust_millis(sql::test::ScopedMockTimeSource* time_mock,
@@ -606,8 +603,6 @@ TEST_F(SQLConnectionTest, RazeMultiple) {
   ASSERT_EQ(0, SqliteMasterCount(&other_db));
 }
 
-// TODO(erg): Enable this in the next patch once I add locking.
-#if !defined(MOJO_APPTEST_IMPL)
 TEST_F(SQLConnectionTest, RazeLocked) {
   const char* kCreateSql = "CREATE TABLE foo (id INTEGER PRIMARY KEY, value)";
   ASSERT_TRUE(db().Execute(kCreateSql));
@@ -642,7 +637,6 @@ TEST_F(SQLConnectionTest, RazeLocked) {
   ASSERT_FALSE(s.Step());
   ASSERT_TRUE(db().Raze());
 }
-#endif
 
 // Verify that Raze() can handle an empty file.  SQLite should treat
 // this as an empty database.
@@ -672,14 +666,11 @@ TEST_F(SQLConnectionTest, RazeNOTADB) {
   {
     sql::test::ScopedErrorExpecter expecter;
 
-    // Earlier versions of Chromium compiled against SQLite 3.6.7.3, which
-    // returned SQLITE_IOERR_SHORT_READ in this case.  Some platforms may still
-    // compile against an earlier SQLite via USE_SYSTEM_SQLITE.
-    if (expecter.SQLiteLibVersionNumber() < 3008005) {
-      expecter.ExpectError(SQLITE_IOERR_SHORT_READ);
-    } else {
-      expecter.ExpectError(SQLITE_NOTADB);
-    }
+    // Old SQLite versions returned a different error code.
+    ASSERT_GE(expecter.SQLiteLibVersionNumber(), 3014000)
+        << "Chrome ships with SQLite 3.22.0+. The system SQLite version is "
+        << "only supported on iOS 10+, which ships with SQLite 3.14.0+";
+    expecter.ExpectError(SQLITE_NOTADB);
 
     EXPECT_TRUE(db().Open(db_path()));
     ASSERT_TRUE(expecter.SawExpectedErrors());
@@ -837,8 +828,8 @@ TEST_F(SQLConnectionTest, RazeAndCloseDiagnostics) {
   // Close normally to reset the poisoned flag.
   db().Close();
 
-  // DEATH tests not supported on Android or iOS.
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  // DEATH tests not supported on Android, iOS, or Fuchsia.
+#if !defined(OS_ANDROID) && !defined(OS_IOS) && !defined(OS_FUCHSIA)
   // Once the real Close() has been called, various calls enforce API
   // usage by becoming fatal in debug mode.  Since DEATH tests are
   // expensive, just test one of them.
@@ -847,7 +838,7 @@ TEST_F(SQLConnectionTest, RazeAndCloseDiagnostics) {
         db().IsSQLValid(kSimpleSql);
       }, "Illegal use of connection without a db");
   }
-#endif
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS) && !defined(OS_FUCHSIA)
 }
 
 // TODO(shess): Spin up a background thread to hold other_db, to more
@@ -901,7 +892,7 @@ TEST_F(SQLConnectionTest, SetTempDirForSQL) {
   // database file'.
   ASSERT_TRUE(meta_table.Init(&db(), 4, 4));
 }
-#endif
+#endif  // defined(OS_ANDROID)
 
 TEST_F(SQLConnectionTest, Delete) {
   EXPECT_TRUE(db().Execute("CREATE TABLE x (x)"));
@@ -918,9 +909,8 @@ TEST_F(SQLConnectionTest, Delete) {
   EXPECT_FALSE(GetPathExists(journal));
 }
 
-// This test manually sets on disk permissions; this doesn't apply to the mojo
-// fork.
-#if defined(OS_POSIX) && !defined(MOJO_APPTEST_IMPL)
+// This test manually sets on disk permissions, these don't exist on Fuchsia.
+#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
 // Test that set_restrict_to_user() trims database permissions so that
 // only the owner (and root) can read.
 TEST_F(SQLConnectionTest, UserPermission) {
@@ -984,7 +974,7 @@ TEST_F(SQLConnectionTest, UserPermission) {
   EXPECT_TRUE(base::GetPosixFilePermissions(journal, &mode));
   ASSERT_EQ((mode & base::FILE_PERMISSION_USER_MASK), mode);
 }
-#endif  // defined(OS_POSIX)
+#endif  // defined(OS_POSIX) && !defined(OS_FUCHSIA)
 
 // Test that errors start happening once Poison() is called.
 TEST_F(SQLConnectionTest, Poison) {
@@ -1035,8 +1025,7 @@ TEST_F(SQLConnectionTest, Poison) {
   EXPECT_FALSE(db().CommitTransaction());
 }
 
-// Test attaching and detaching databases from the connection.
-TEST_F(SQLConnectionTest, Attach) {
+TEST_F(SQLConnectionTest, AttachDatabase) {
   EXPECT_TRUE(db().Execute("CREATE TABLE foo (a, b)"));
 
   // Create a database to attach to.
@@ -1053,21 +1042,10 @@ TEST_F(SQLConnectionTest, Attach) {
   // Cannot see the attached database, yet.
   EXPECT_FALSE(db().IsSQLValid("SELECT count(*) from other.bar"));
 
-  // Attach fails in a transaction.
-  EXPECT_TRUE(db().BeginTransaction());
-  {
-    sql::test::ScopedErrorExpecter expecter;
-    expecter.ExpectError(SQLITE_ERROR);
-    EXPECT_FALSE(db().AttachDatabase(attach_path, kAttachmentPoint));
-    ASSERT_TRUE(expecter.SawExpectedErrors());
-  }
-
-  // Attach succeeds when the transaction is closed.
-  db().RollbackTransaction();
   EXPECT_TRUE(db().AttachDatabase(attach_path, kAttachmentPoint));
   EXPECT_TRUE(db().IsSQLValid("SELECT count(*) from other.bar"));
 
-  // Queries can touch both databases.
+  // Queries can touch both databases after the ATTACH.
   EXPECT_TRUE(db().Execute("INSERT INTO foo SELECT a, b FROM other.bar"));
   {
     sql::Statement s(db().GetUniqueStatement("SELECT COUNT(*) FROM foo"));
@@ -1075,8 +1053,41 @@ TEST_F(SQLConnectionTest, Attach) {
     EXPECT_EQ(1, s.ColumnInt(0));
   }
 
-  // Detach also fails in a transaction.
+  EXPECT_TRUE(db().DetachDatabase(kAttachmentPoint));
+  EXPECT_FALSE(db().IsSQLValid("SELECT count(*) from other.bar"));
+}
+
+TEST_F(SQLConnectionTest, AttachDatabaseWithOpenTransaction) {
+  EXPECT_TRUE(db().Execute("CREATE TABLE foo (a, b)"));
+
+  // Create a database to attach to.
+  base::FilePath attach_path =
+      db_path().DirName().AppendASCII("SQLConnectionAttach.db");
+  const char kAttachmentPoint[] = "other";
+  {
+    sql::Connection other_db;
+    ASSERT_TRUE(other_db.Open(attach_path));
+    EXPECT_TRUE(other_db.Execute("CREATE TABLE bar (a, b)"));
+    EXPECT_TRUE(other_db.Execute("INSERT INTO bar VALUES ('hello', 'world')"));
+  }
+
+  // Cannot see the attached database, yet.
+  EXPECT_FALSE(db().IsSQLValid("SELECT count(*) from other.bar"));
+
+  // Attach succeeds in a transaction.
   EXPECT_TRUE(db().BeginTransaction());
+  EXPECT_TRUE(db().AttachDatabase(attach_path, kAttachmentPoint));
+  EXPECT_TRUE(db().IsSQLValid("SELECT count(*) from other.bar"));
+
+  // Queries can touch both databases after the ATTACH.
+  EXPECT_TRUE(db().Execute("INSERT INTO foo SELECT a, b FROM other.bar"));
+  {
+    sql::Statement s(db().GetUniqueStatement("SELECT COUNT(*) FROM foo"));
+    ASSERT_TRUE(s.Step());
+    EXPECT_EQ(1, s.ColumnInt(0));
+  }
+
+  // Detaching the same database fails, database is locked in the transaction.
   {
     sql::test::ScopedErrorExpecter expecter;
     expecter.ExpectError(SQLITE_ERROR);
@@ -1085,10 +1096,9 @@ TEST_F(SQLConnectionTest, Attach) {
     ASSERT_TRUE(expecter.SawExpectedErrors());
   }
 
-  // Detach succeeds outside of a transaction.
+  // Detach succeeds when the transaction is closed.
   db().RollbackTransaction();
   EXPECT_TRUE(db().DetachDatabase(kAttachmentPoint));
-
   EXPECT_FALSE(db().IsSQLValid("SELECT count(*) from other.bar"));
 }
 
@@ -1421,13 +1431,9 @@ TEST_F(SQLConnectionTest, OnMemoryDump) {
 // Test that the functions to collect diagnostic data run to completion, without
 // worrying too much about what they generate (since that will change).
 TEST_F(SQLConnectionTest, CollectDiagnosticInfo) {
-  // NOTE(shess): Mojo doesn't support everything CollectCorruptionInfo() uses,
-  // but it's not really clear if adding support would be useful.
-#if !defined(MOJO_APPTEST_IMPL)
   const std::string corruption_info = db().CollectCorruptionInfo();
   EXPECT_NE(std::string::npos, corruption_info.find("SQLITE_CORRUPT"));
   EXPECT_NE(std::string::npos, corruption_info.find("integrity_check"));
-#endif
 
   // A statement to see in the results.
   const char* kSimpleSql = "SELECT 'mountain'";
@@ -1455,7 +1461,6 @@ TEST_F(SQLConnectionTest, CollectDiagnosticInfo) {
   EXPECT_NE(std::string::npos, error_info.find("version: 4"));
 }
 
-#if !defined(MOJO_APPTEST_IMPL)
 TEST_F(SQLConnectionTest, RegisterIntentToUpload) {
   base::FilePath breadcrumb_path(
       db_path().DirName().Append(FILE_PATH_LITERAL("sqlite-diag")));
@@ -1489,17 +1494,14 @@ TEST_F(SQLConnectionTest, RegisterIntentToUpload) {
   ASSERT_TRUE(db().Open(db_path()));
   EXPECT_FALSE(db().RegisterIntentToUpload());
 }
-#endif  // !defined(MOJO_APPTEST_IMPL)
 
 // Test that a fresh database has mmap enabled by default, if mmap'ed I/O is
 // enabled by SQLite.
 TEST_F(SQLConnectionTest, MmapInitiallyEnabled) {
   {
     sql::Statement s(db().GetUniqueStatement("PRAGMA mmap_size"));
-
-    // SQLite doesn't have mmap support (perhaps an early iOS release).
-    if (!s.Step())
-      return;
+    ASSERT_TRUE(s.Step())
+        << "All supported SQLite versions should have mmap support";
 
     // If mmap I/O is not on, attempt to turn it on.  If that succeeds, then
     // Open() should have turned it on.  If mmap support is disabled, 0 is
@@ -1532,10 +1534,8 @@ TEST_F(SQLConnectionTest, MmapInitiallyEnabledAltStatus) {
 
   {
     sql::Statement s(db().GetUniqueStatement("PRAGMA mmap_size"));
-
-    // SQLite doesn't have mmap support (perhaps an early iOS release).
-    if (!s.Step())
-      return;
+    ASSERT_TRUE(s.Step())
+        << "All supported SQLite versions should have mmap support";
 
     // If mmap I/O is not on, attempt to turn it on.  If that succeeds, then
     // Open() should have turned it on.  If mmap support is disabled, 0 is
@@ -1558,14 +1558,6 @@ TEST_F(SQLConnectionTest, MmapInitiallyEnabledAltStatus) {
 }
 
 TEST_F(SQLConnectionTest, GetAppropriateMmapSize) {
-#if defined(OS_IOS) && defined(USE_SYSTEM_SQLITE)
-  // Mmap is not supported on iOS9.
-  if (!base::ios::IsRunningOnIOS10OrLater()) {
-    ASSERT_EQ(0UL, db().GetAppropriateMmapSize());
-    return;
-  }
-#endif
-
   const size_t kMmapAlot = 25 * 1024 * 1024;
   int64_t mmap_status = MetaTable::kMmapFailure;
 
@@ -1609,15 +1601,6 @@ TEST_F(SQLConnectionTest, GetAppropriateMmapSize) {
 }
 
 TEST_F(SQLConnectionTest, GetAppropriateMmapSizeAltStatus) {
-#if defined(OS_IOS) && defined(USE_SYSTEM_SQLITE)
-  // Mmap is not supported on iOS9.  Make sure that test takes precedence.
-  if (!base::ios::IsRunningOnIOS10OrLater()) {
-    db().set_mmap_alt_status();
-    ASSERT_EQ(0UL, db().GetAppropriateMmapSize());
-    return;
-  }
-#endif
-
   const size_t kMmapAlot = 25 * 1024 * 1024;
 
   // At this point, Connection still expects a future [meta] table.
@@ -1654,18 +1637,18 @@ TEST_F(SQLConnectionTest, GetAppropriateMmapSizeAltStatus) {
 }
 
 // To prevent invalid SQL from accidentally shipping to production, prepared
-// statements which fail to compile with SQLITE_ERROR call DLOG(FATAL).  This
+// statements which fail to compile with SQLITE_ERROR call DLOG(DCHECK).  This
 // case cannot be suppressed with an error callback.
 TEST_F(SQLConnectionTest, CompileError) {
-  // DEATH tests not supported on Android or iOS.
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  // DEATH tests not supported on Android, iOS, or Fuchsia.
+#if !defined(OS_ANDROID) && !defined(OS_IOS) && !defined(OS_FUCHSIA)
   if (DLOG_IS_ON(FATAL)) {
     db().set_error_callback(base::Bind(&IgnoreErrorCallback));
     ASSERT_DEATH({
         db().GetUniqueStatement("SELECT x");
       }, "SQL compile error no such column: x");
   }
-#endif
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS) && !defined(OS_FUCHSIA)
 }
 
 }  // namespace sql

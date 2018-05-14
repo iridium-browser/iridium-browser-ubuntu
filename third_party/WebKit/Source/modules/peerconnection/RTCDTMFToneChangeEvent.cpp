@@ -48,7 +48,7 @@ RTCDTMFToneChangeEvent::RTCDTMFToneChangeEvent(
     tone_ = initializer.tone();
 }
 
-RTCDTMFToneChangeEvent::~RTCDTMFToneChangeEvent() {}
+RTCDTMFToneChangeEvent::~RTCDTMFToneChangeEvent() = default;
 
 const String& RTCDTMFToneChangeEvent::tone() const {
   return tone_;
@@ -58,7 +58,7 @@ const AtomicString& RTCDTMFToneChangeEvent::InterfaceName() const {
   return EventNames::RTCDTMFToneChangeEvent;
 }
 
-DEFINE_TRACE(RTCDTMFToneChangeEvent) {
+void RTCDTMFToneChangeEvent::Trace(blink::Visitor* visitor) {
   Event::Trace(visitor);
 }
 

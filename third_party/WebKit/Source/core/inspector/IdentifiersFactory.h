@@ -26,6 +26,7 @@
 #ifndef IdentifiersFactory_h
 #define IdentifiersFactory_h
 
+#include "base/unguessable_token.h"
 #include "core/CoreExport.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/text/WTFString.h"
@@ -33,6 +34,7 @@
 namespace blink {
 
 class DocumentLoader;
+class Frame;
 class LocalFrame;
 class InspectedFrames;
 
@@ -42,13 +44,19 @@ class CORE_EXPORT IdentifiersFactory {
  public:
   static String CreateIdentifier();
 
-  static String RequestId(unsigned long identifier);
+  static String RequestId(DocumentLoader*, unsigned long identifier);
+  // Same as above, but can only be used on reuquests that are guaranteed
+  // to be subresources, not main resource.
+  static String SubresourceRequestId(unsigned long identifier);
 
-  static String FrameId(LocalFrame*);
+  // Returns embedder-provided frame token that is consistent across processes
+  // and can be used for request / call attribution to the context frame.
+  static String FrameId(Frame*);
   static LocalFrame* FrameById(InspectedFrames*, const String&);
 
   static String LoaderId(DocumentLoader*);
-  static DocumentLoader* LoaderById(InspectedFrames*, const String&);
+
+  static String IdFromToken(const base::UnguessableToken&);
 
  private:
   static String AddProcessIdPrefixTo(int id);

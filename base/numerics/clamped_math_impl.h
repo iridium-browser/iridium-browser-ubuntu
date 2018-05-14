@@ -22,6 +22,31 @@ namespace base {
 namespace internal {
 
 template <typename T,
+          typename std::enable_if<std::is_integral<T>::value &&
+                                  std::is_signed<T>::value>::type* = nullptr>
+constexpr T SaturatedNegWrapper(T value) {
+  return MustTreatAsConstexpr(value) || !ClampedNegFastOp<T>::is_supported
+             ? (NegateWrapper(value) != std::numeric_limits<T>::lowest()
+                    ? NegateWrapper(value)
+                    : std::numeric_limits<T>::max())
+             : ClampedNegFastOp<T>::Do(value);
+}
+
+template <typename T,
+          typename std::enable_if<std::is_integral<T>::value &&
+                                  !std::is_signed<T>::value>::type* = nullptr>
+constexpr T SaturatedNegWrapper(T value) {
+  return T(0);
+}
+
+template <
+    typename T,
+    typename std::enable_if<std::is_floating_point<T>::value>::type* = nullptr>
+constexpr T SaturatedNegWrapper(T value) {
+  return -value;
+}
+
+template <typename T,
           typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
 constexpr T SaturatedAbsWrapper(T value) {
   // The calculation below is a static identity for unsigned types, but for
@@ -32,10 +57,8 @@ constexpr T SaturatedAbsWrapper(T value) {
   // special case of numeric_limits<T>::min(), by evaluating the bit pattern as
   // a signed integer value. If it is the overflow case, we end up subtracting
   // one from the unsigned result, thus saturating to numeric_limits<T>::max().
-  return MustTreatAsConstexpr(value) && !ClampedAbsFastOp<T>::is_supported
-             ? static_cast<T>(SafeUnsignedAbs(value) -
-                              IsValueNegative<T>(SafeUnsignedAbs(value)))
-             : ClampedAbsFastOp<T>::Do(value);
+  return static_cast<T>(SafeUnsignedAbs(value) -
+                        IsValueNegative<T>(SafeUnsignedAbs(value)));
 }
 
 template <
@@ -55,17 +78,19 @@ struct ClampedAddOp<T,
                                             std::is_integral<U>::value>::type> {
   using result_type = typename MaxExponentPromotion<T, U>::type;
   template <typename V = result_type>
-  static V Do(T x, U y) {
-    // TODO(jschuh) Make this "constexpr if" once we're C++17.
+  static constexpr V Do(T x, U y) {
     if (ClampedAddFastOp<T, U>::is_supported)
       return ClampedAddFastOp<T, U>::template Do<V>(x, y);
 
-    V result;
-    return CheckedAddOp<T, U>::Do(x, y, &result)
+    static_assert(std::is_same<V, result_type>::value ||
+                      IsTypeInRangeForNumericType<U, V>::value,
+                  "The saturation result cannot be determined from the "
+                  "provided types.");
+    const V saturated = CommonMaxOrMin<V>(IsValueNegative(y));
+    V result = {};
+    return BASE_NUMERICS_LIKELY((CheckedAddOp<T, U>::Do(x, y, &result)))
                ? result
-               // Prefer a compile-time constant (if we have one).
-               : GetMaxOrMin<V>(IsCompileTimeConstant(x) ? IsValueNegative(x)
-                                                         : IsValueNegative(y));
+               : saturated;
   }
 };
 
@@ -79,17 +104,20 @@ struct ClampedSubOp<T,
                                             std::is_integral<U>::value>::type> {
   using result_type = typename MaxExponentPromotion<T, U>::type;
   template <typename V = result_type>
-  static V Do(T x, U y) {
+  static constexpr V Do(T x, U y) {
     // TODO(jschuh) Make this "constexpr if" once we're C++17.
     if (ClampedSubFastOp<T, U>::is_supported)
       return ClampedSubFastOp<T, U>::template Do<V>(x, y);
 
-    V result;
-    return CheckedSubOp<T, U>::Do(x, y, &result)
+    static_assert(std::is_same<V, result_type>::value ||
+                      IsTypeInRangeForNumericType<U, V>::value,
+                  "The saturation result cannot be determined from the "
+                  "provided types.");
+    const V saturated = CommonMaxOrMin<V>(!IsValueNegative(y));
+    V result = {};
+    return BASE_NUMERICS_LIKELY((CheckedSubOp<T, U>::Do(x, y, &result)))
                ? result
-               // Prefer a compile-time constant (if we have one).
-               : GetMaxOrMin<V>(IsCompileTimeConstant(x) ? IsValueNegative(x)
-                                                         : !IsValueNegative(y));
+               : saturated;
   }
 };
 
@@ -103,15 +131,17 @@ struct ClampedMulOp<T,
                                             std::is_integral<U>::value>::type> {
   using result_type = typename MaxExponentPromotion<T, U>::type;
   template <typename V = result_type>
-  static V Do(T x, U y) {
+  static constexpr V Do(T x, U y) {
     // TODO(jschuh) Make this "constexpr if" once we're C++17.
     if (ClampedMulFastOp<T, U>::is_supported)
       return ClampedMulFastOp<T, U>::template Do<V>(x, y);
 
-    V result;
-    return CheckedMulOp<T, U>::Do(x, y, &result)
+    V result = {};
+    const V saturated =
+        CommonMaxOrMin<V>(IsValueNegative(x) ^ IsValueNegative(y));
+    return BASE_NUMERICS_LIKELY((CheckedMulOp<T, U>::Do(x, y, &result)))
                ? result
-               : GetMaxOrMin<V>(IsValueNegative(x) ^ IsValueNegative(y));
+               : saturated;
   }
 };
 
@@ -125,11 +155,13 @@ struct ClampedDivOp<T,
                                             std::is_integral<U>::value>::type> {
   using result_type = typename MaxExponentPromotion<T, U>::type;
   template <typename V = result_type>
-  static V Do(T x, U y) {
-    V result = SaturationDefaultLimits<V>::NaN();
-    return !x || CheckedDivOp<T, U>::Do(x, y, &result)
-               ? result
-               : GetMaxOrMin<V>(IsValueNegative(x) ^ IsValueNegative(y));
+  static constexpr V Do(T x, U y) {
+    V result = {};
+    if (BASE_NUMERICS_LIKELY((CheckedDivOp<T, U>::Do(x, y, &result))))
+      return result;
+    // Saturation goes to max, min, or NaN (if x is zero).
+    return x ? CommonMaxOrMin<V>(IsValueNegative(x) ^ IsValueNegative(y))
+             : SaturationDefaultLimits<V>::NaN();
   }
 };
 
@@ -143,9 +175,11 @@ struct ClampedModOp<T,
                                             std::is_integral<U>::value>::type> {
   using result_type = typename MaxExponentPromotion<T, U>::type;
   template <typename V = result_type>
-  static V Do(T x, U y) {
-    V result;
-    return CheckedModOp<T, U>::Do(x, y, &result) ? result : x;
+  static constexpr V Do(T x, U y) {
+    V result = {};
+    return BASE_NUMERICS_LIKELY((CheckedModOp<T, U>::Do(x, y, &result)))
+               ? result
+               : x;
   }
 };
 
@@ -154,7 +188,6 @@ struct ClampedLshOp {};
 
 // Left shift. Non-zero values saturate in the direction of the sign. A zero
 // shifted by any value always results in zero.
-// Note: This class template supports left shifting negative values.
 template <typename T, typename U>
 struct ClampedLshOp<T,
                     U,
@@ -162,13 +195,16 @@ struct ClampedLshOp<T,
                                             std::is_integral<U>::value>::type> {
   using result_type = T;
   template <typename V = result_type>
-  static V Do(T x, U shift) {
+  static constexpr V Do(T x, U shift) {
     static_assert(!std::is_signed<U>::value, "Shift value must be unsigned.");
-    V result = x;
-    return (shift < std::numeric_limits<T>::digits &&
-            CheckedMulOp<T, T>::Do(x, T(1) << shift, &result))
-               ? result
-               : (x ? GetMaxOrMin<V>(IsValueNegative(x)) : 0);
+    if (BASE_NUMERICS_LIKELY(shift < std::numeric_limits<T>::digits)) {
+      // Shift as unsigned to avoid undefined behavior.
+      V result = static_cast<V>(as_unsigned(x) << shift);
+      // If the shift can be reversed, we know it was valid.
+      if (BASE_NUMERICS_LIKELY(result >> shift == x))
+        return result;
+    }
+    return x ? CommonMaxOrMin<V>(IsValueNegative(x)) : 0;
   }
 };
 
@@ -183,12 +219,13 @@ struct ClampedRshOp<T,
                                             std::is_integral<U>::value>::type> {
   using result_type = T;
   template <typename V = result_type>
-  static V Do(T x, U shift) {
+  static constexpr V Do(T x, U shift) {
     static_assert(!std::is_signed<U>::value, "Shift value must be unsigned.");
-    return shift < IntegerBitsPlusSign<T>::value
+    // Signed right shift is odd, because it saturates to -1 or 0.
+    const V saturated = as_unsigned(V(0)) - IsValueNegative(x);
+    return BASE_NUMERICS_LIKELY(shift < IntegerBitsPlusSign<T>::value)
                ? saturated_cast<V>(x >> shift)
-               // Signed right shift is odd, because it saturates to -1 or 0.
-               : as_unsigned(V(0)) - IsValueNegative(x);
+               : saturated;
   }
 };
 

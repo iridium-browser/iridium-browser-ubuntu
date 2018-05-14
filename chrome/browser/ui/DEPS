@@ -1,7 +1,6 @@
 include_rules = [
-  # TODO(mash): Remove. http://crbug.com/678705
-  "+ash",
   "+components/bubble",
+  "+components/crash/core/common/crash_keys.h",
   "+components/favicon/core",
   "+components/flags_ui",
   "+components/toolbar",
@@ -9,7 +8,14 @@ include_rules = [
   "+components/url_formatter",
   "+components/version_ui",
   "+components/webapks_ui",
+  "+components/feature_engagement/features.h",
   "-chrome/browser/ui/views",
-  "+mash/public/interfaces",
-  "+services/device/public/interfaces",
+  "+mash/public/mojom",
+  "+services/device/public/mojom",
 ]
+
+specific_include_rules = {
+  "browser_command_controller\.cc": [
+    "+ash/accelerators/accelerator_commands_classic.h",
+  ],
+}

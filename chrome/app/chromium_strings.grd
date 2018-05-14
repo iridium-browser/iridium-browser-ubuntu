@@ -155,7 +155,7 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
         </message>
       </if>
       <message name="IDS_SHORT_PRODUCT_LOGO_ALT_TEXT" desc="Alt text for the Chromium logo image.">
-        Chromium logo
+        Product logo
       </message>
       <if expr="is_win">
         <message name="IDS_SHORTCUT_NEW_WINDOW" desc="The text label of the New window shortcut context menu entry as of Windows 8">
@@ -183,6 +183,20 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
           Iridium - <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>
         </message>
       </if>
+      <!-- Accessible window title format - includes the channel, and the same
+           on all browser platforms rather than different on Chrome OS. -->
+      <message name="IDS_ACCESSIBLE_BROWSER_WINDOW_TITLE_FORMAT" desc="The format for the accessible name of a tabbed browser window">
+        <ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - Iridium
+      </message>
+      <message name="IDS_ACCESSIBLE_BETA_BROWSER_WINDOW_TITLE_FORMAT" desc="The format for the accessible name of a tabbed browser window for the beta channel version of the browser">
+        <ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - Iridium Beta
+      </message>
+      <message name="IDS_ACCESSIBLE_DEV_BROWSER_WINDOW_TITLE_FORMAT" desc="The format for the accessible name of a tabbed browser window for the developer (dev) channel version of the browser">
+        <ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - Iridium Dev
+      </message>
+      <message name="IDS_ACCESSIBLE_CANARY_BROWSER_WINDOW_TITLE_FORMAT" desc="The format for the accessible name of a tabbed browser window for the canary (nightly build) channel version of the browser">
+        <ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - Iridium Canary
+      </message>
       <if expr="not chromeos">
         <message name="IDS_GET_HELP_USING_CHROME" desc="Text of the button which takes the user to the Chrome help page.">
           Get help with using the browser
@@ -213,42 +227,18 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
       <message name="IDS_ABOUT_TERMS_OF_SERVICE" desc="The terms of service label in the About box." translateable="false">
         Not used in the browser. Placeholder to keep resource maps in sync. It expects one argument: <ph name="ARGUMENT">$1</ph>.
       </message>
-      <if expr="is_linux and not chromeos">
-        <!-- These messages are not actually used, but they are here as placeholders to match the Chrome messages. -->
-        <message name="IDS_LINUX_WHEEZY_PRECISE_OBSOLETE_SOON" desc="A message displayed on an at-launch infobar and about:help warning the user that the computer they are using is about to become unsupported.">
-          Future versions of the browser will no longer support this Linux system.
-        </message>
-        <message name="IDS_LINUX_WHEEZY_PRECISE_OBSOLETE_NOW" desc="A message displayed on an at-launch infobar and about:help warning the user that the computer they are using is no longer supported.">
-          The browser may not function correctly because it is no longer supported on this Linux system.
-        </message>
-        <message name="IDS_LINUX_WHEEZY_PRECISE_OBSOLETE_SOON_CAN_UPGRADE" desc="A message displayed on an at-launch infobar and about:help warning the user that the computer they are using is about to become unsupported, unless they upgrade to the 64-bit version.">
-          Future 32-bit versions of the browser will no longer support this Linux system, please upgrade to a 64-bit variant.
-        </message>
-        <message name="IDS_LINUX_WHEEZY_PRECISE_OBSOLETE_NOW_CAN_UPGRADE" desc="A message displayed on an at-launch infobar and about:help warning the user that the computer they are using is no longer supported, unless they upgrade to the 64-bit version.">
-          32-bit variants of the browser may not function correctly because it is no longer supported on this Linux system. Please upgrade to a 64-bit variant.
-        </message>
-      </if>
       <if expr="is_macosx">
-        <message name="IDS_MAC_10_678_OBSOLETE_SOON" desc="A message displayed on an at-launch infobar and About (Help) page warning the user that the OS version they are using is about to become unsupported.">
-          Future versions of the browser will no longer support Mac OS X 10.6, 10.7, or 10.8.
-        </message>
-        <message name="IDS_MAC_10_678_OBSOLETE_NOW" desc="A message displayed on an at-launch infobar and About (Help) page warning the user that the OS version they are using is no longer supported.">
-          The browser may not function correctly because it is no longer supported on Mac OS X 10.6, 10.7, or 10.8.
+        <message name="IDS_MAC_10_9_OBSOLETE_NOW" desc="A message displayed on an at-launch infobar and About (Help) page warning the user that the OS version they are using is no longer supported.">
+          The browser may not function correctly because it is no longer supported on Mac OS X 10.9.
         </message>
       </if>
       <if expr="is_win">
-        <message name="IDS_WIN_XP_VISTA_OBSOLETE_SOON" desc="A message displayed on an at-launch infobar and about:help warning the user that the computer they are using is about to become unsupported.">
-          Future versions of the browser will no longer support Windows XP or Windows Vista.
-        </message>
-        <message name="IDS_WIN_XP_VISTA_OBSOLETE_NOW" desc="A message displayed on an at-launch infobar and about:help warning the user that the computer they are using is no longer supported.">
-          The browser may not function correctly because it is no longer supported on Windows XP or Windows Vista.
+        <message name="IDS_WIN_XP_VISTA_OBSOLETE" desc="A message displayed on an at-launch infobar and about:help warning the user that the computer they are using is no longer supported.">
+          The browser may not function correctly because it is no longer supported on Windows XP or Windows Vista
         </message>
       </if>
       <message name="IDS_ACCNAME_APP" desc="The accessible name for the app menu.">
         Iridium
-      </message>
-      <message name="IDS_ACCNAME_TOOLBAR" desc="The accessible name for the application's toolbar.">
-        main
       </message>
       <!-- Hung Browser Detector -->
       <if expr="is_win">
@@ -256,19 +246,10 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
           The browser is unresponsive. Relaunch now?
         </message>
       </if>
-      <message name="IDS_IMPORT_FIND_YOUR_BOOKMARKS" desc="Helpful reminder for where to find imported bookmarks">
-        Find your bookmarks in the browser menu or on the bookmarks bar.
-      </message>
-      <message name="IDS_IMPORTER_LOCK_TEXT" desc="The message to be displayed on dialog">
-        Sadly, your Mozilla Firefox settings are not available while that browser is running. To import those settings, save your work and close all Firefox windows. Then click Continue.
-      </message>
       <!-- Uninstall messages -->
       <if expr="is_win">
         <message name="IDS_UNINSTALL_CLOSE_APP" desc="Message to user when uninstall detects other app instance running">
           Please close all browser windows and try again.
-        </message>
-        <message name="IDS_UNINSTALL_CLOSE_APP_IMMERSIVE" desc="Message to user when uninstall detects other app instance running, possibly in the Windows 8 immersive mode">
-          Please close all browser windows (including those in Windows 8 mode) and try again.
         </message>
         <message name="IDS_UNINSTALL_VERIFY" desc="Message to confirm user wants to uninstall">
           Confirm that you want to uninstall the browser.
@@ -289,7 +270,7 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
       <if expr="not chromeos">
         <message name="IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE"
                  desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show.">
-          Welcome to Iridium
+          Welcome to Chromium
         </message>
       </if>
       <if expr="chromeos">
@@ -299,7 +280,7 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
       </if>
       <if expr="not chromeos">
         <message name="IDS_OPTIONS_RELAUNCH_REQUIRED" desc="The message displayed for an option that requires a relaunch to take effect. This appears in a message box if an option is changed that requires a relaunch.">
-          Please close all browser windows and relaunch it for this change to take effect.
+          Please close all Chromium windows and relaunch Chromium for this change to take effect.
         </message>
       </if>
       <if expr="chromeos">
@@ -318,13 +299,13 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
         </message>
       </if>
       <message name="IDS_OPTIONS_SYSTEM_ENABLE_BACKGROUND_MODE" desc="The label of the check-box that enables background mode">
-        Continue running background apps when the browser is closed
+        Continue running background apps when Chromium is closed
       </message>
       <message name="IDS_OPTIONS_SYSTEM_ENABLE_HARDWARE_ACCELERATION_MODE" desc="The label of the check-box that enables hardware acceleration mode">
         Use hardware acceleration when available
       </message>
       <message name="IDS_OPTIONS_SYSTEM_ENABLE_HARDWARE_ACCELERATION_MODE_RESTART" desc="The restart string after changing hardware acceleration mode">
-        (requires a <ph name="BEGIN_BUTTON">&lt;a is="action-link" role="button" id="gpu-mode-reset-restart-button" class="standalone-action-link"&gt;</ph>restart<ph name="END_BUTTON">&lt;/a&gt;</ph>)
+        (requires Chromium <ph name="BEGIN_BUTTON">&lt;a is="action-link" role="button" id="gpu-mode-reset-restart-button" class="standalone-action-link"&gt;</ph>restart<ph name="END_BUTTON">&lt;/a&gt;</ph>)
       </message>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_SUMMARY" desc="Summary of problem displayed in dialog when we can't create a directory for this user.">
 Iridium cannot read and write to its data directory:
@@ -374,10 +355,16 @@ The browser is unable to recover your settings.
         <message name="IDS_PASSWORDS_PAGE_AUTHENTICATION_PROMPT" desc="Text for the dialog box that prompts the user for their OS account password before revealing plaintext passwords on the password page.">
           The browser is trying to show passwords.
         </message>
+        <message name="IDS_PASSWORDS_PAGE_EXPORT_AUTHENTICATION_PROMPT" desc="Text for the dialog box that prompts the user for their OS account password before exporting passwords to a file.">
+          The browser wants to export your passwords.
+        </message>
       </if>
       <if expr="is_win">
         <message name="IDS_PASSWORDS_PAGE_AUTHENTICATION_PROMPT" desc="Text for the dialog box that prompts the user for their OS account password before revealing plaintext passwords on the password page.">
           The browser is trying to show passwords. Type your Windows password to allow this.
+        </message>
+        <message name="IDS_PASSWORDS_PAGE_EXPORT_AUTHENTICATION_PROMPT" desc="Text for the dialog box that prompts the user for their OS account password before exporting passwords to a file.">
+          The browser wants to export your passwords. Type your Windows password to allow this.
         </message>
         <message name="IDS_INSTALL_HIGHER_VERSION" desc="Error displayed when higher version already exists.">
           This computer already has a more recent version of the browser. If the software is not working, please uninstall it and try again.
@@ -413,13 +400,10 @@ The browser is unable to recover your settings.
           You do not have appropriate rights for system-level install. Try running the installer again as Administrator.
         </message>
         <message name="IDS_INSTALL_EXISTING_VERSION_LAUNCHED" desc="A message shown to users who try to install Chrome in their user profile directory when their computer already has Chrome installed for all users. In this case, the installer silently launches the existing version of Chrome for all users rather than installing a second version of Chrome.">
-          Chromium is already installed for all users on your computer.
+          Iridium is already installed for all users on your computer.
         </message>
       </if>
       <!-- Options Dialog -->
-      <message name="IDS_OPTIONS_IMPROVE_BROWSING_EXPERIENCE" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
-        The browser may use web services to improve your browsing experience.
-      </message>
       <if expr="is_win">
         <message name="IDS_SHORTCUT_TOOLTIP" desc="Text for the hover-on tooltip for the Chromium shortcuts.">
           Access the Internet
@@ -434,20 +418,12 @@ The browser is unable to recover your settings.
           Uninstall
         </message>
       </if>
-      <message name="IDS_DEFAULT_BROWSER_INFOBAR_SHORT_TEXT" desc="More compact text to show in the default browser query infobar.">
-        Iridium is not your default browser.
+      <message name="IDS_DEFAULT_BROWSER_INFOBAR_TEXT" desc="Text to show in an infobar when Chromium is not the current default browser.">
+        Iridium is not your default browser
       </message>
       <if expr="chromeos">
         <message name="IDS_SYNC_OVERVIEW" desc="Chrome OS: The message that appears in the options dialog when sync has not been set up by the user.">
-          Set up Sync to save your personalized browser features to the web and access them from Chromium on any computer.
-        </message>
-        <message name="IDS_ABOUT_BUTTON" desc="The label for the button to open the about page.">
-          About Chromium OS
-        </message>
-      </if>
-      <if expr="not chromeos">
-        <message name="IDS_ABOUT_BUTTON" desc="The label for the button to open the about page.">
-          About Iridium
+          Set up Sync to save your personalized browser features to the web and access them from Iridium on any computer.
         </message>
       </if>
       <if expr="is_win">
@@ -466,15 +442,6 @@ The browser is unable to recover your settings.
         </message>
         <message name="IDS_TRY_TOAST_HEADING_SKYPE" desc="Top line of the try-chrome-again dialog">
           The browser lets you click a phone number on the web and call it with Skype! Massively evil!
-        </message>
-        <message name="IDS_TRY_TOAST_TRY_OPT" desc="First option radio button on the dialog to try chrome">
-          Try it out, it's already installed
-        </message>
-        <message name="IDS_TRY_TOAST_CANCEL" desc="Try chrome again dialog Cancel button">
-          Don't bug me
-        </message>
-        <message name="IDS_TRY_TOAST_WHY" desc="Text of the url link that explains why this dialog is being shown">
-          Why am I seeing this?
         </message>
         <!-- about:conflicts strings -->
         <message name="IDS_CONFLICTS_CHECK_PAGE_TITLE_LONG" desc="The long title on the compatibility page">
@@ -521,12 +488,17 @@ The browser is unable to recover your settings.
         This file may be dangerous, so the browser has blocked it.
       </message>
 
-      <!-- Remove in-progress downloads confirmation dialog -->
-      <message name="IDS_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION" desc="Explanation of the dialog asking for user confirmation to close the browser when one or more downloads are in progress. [ICU Syntax]">
-      {NUM_DOWNLOAD, plural,
-        =1 {A download is currently in progress. Do you want to cancel the download and exit the browser?}
-        other {# downloads are currently in progress. Do you want to cancel the downloads and exit the browser?}}
-      </message>
+      <!-- Abandon in-progress downloads confirmation dialog -->
+      <if expr="not is_macosx">
+        <message name="IDS_ABANDON_DOWNLOAD_DIALOG_BROWSER_MESSAGE" desc="Message on a dialog shown when the user closes the browser while one or more downloads are in progress. This string is shown on Windows, Chrome OS, and Linux, which all use 'Exit' to refer to closing a browser.">
+          Exit the browser anyway?
+        </message>
+      </if>
+      <if expr="is_macosx">
+        <message name="IDS_ABANDON_DOWNLOAD_DIALOG_BROWSER_MESSAGE" desc="Mac OSX Only: Message on a dialog shown when the user closes the browser while one or more downloads are in progress. This string is shown on Mac OSX only, which uses 'Quit' to refer to closing a browser.">
+          Quit the browser anyway?
+        </message>
+      </if>
 
       <!-- Quit all apps confirmation dialog -->
       <if expr="is_macosx">
@@ -534,11 +506,6 @@ The browser is unable to recover your settings.
           The browser is in background mode.
         </message>
       </if>
-
-      <!-- Obsolete System info bar -->
-      <message name="IDS_SYSTEM_OBSOLETE_MESSAGE" desc="Message shown when your OS is no longer supported. This message is followed by a 'Learn more' link.">
-         The browser has stopped updating and no longer supports this version of your operating system.
-      </message>
 
       <!-- Google API keys info bar -->
       <message name="IDS_MISSING_GOOGLE_API_KEYS" desc="Message shown when Google API keys are missing. This message is followed by a 'Learn more' link.">
@@ -594,14 +561,11 @@ The browser is unable to recover your settings.
 
       <if expr="enable_extensions">
         <!-- Extension installed bubble -->
-        <message name="IDS_EXTENSION_INSTALLED_HEADING" desc="First line in the content area of the extension installed bubble. Instructs that the extension was installed.">
-          <ph name="EXTENSION_NAME">$1<ex>Gmail Checker</ex></ph> has been added to the browser.
+        <message name="IDS_EXTENSION_INSTALLED_HEADING" desc="Title of the extension-installed bubble. Instructs that the extension was installed.">
+          <ph name="EXTENSION_NAME">$1<ex>Gmail Checker</ex></ph> has been added to the browser
         </message>
         <message name="IDS_EXTENSION_INSTALLED_SYNC_PROMO_LINK_NEW" desc="Text of the link to sign in to Chromium from the extension installed bubble. This will be converted to a link, with additional text around it.">
           sign in to browser/Google
-        </message>
-        <message name="IDS_EXTENSION_INSTALLED_SIGNIN_PROMO_LINK" desc="The first part of the sign-in promo paragraph. This part will be converted to a link and will get more text appended to it (see IDS_EXTENSION_INSTALLED_SIGNIN_PROMO). Keep this text short.">
-          Sign in to browser/Google
         </message>
 
         <!-- Extension context menu -->
@@ -624,7 +588,7 @@ The browser is unable to recover your settings.
 
       <!-- chrome://settings/extensions page -->
       <message name="IDS_EXTENSIONS_INCOGNITO_WARNING" desc="Warns the user that Chromium cannot prevent extensions from recording history in incognito mode. Displayed in extensions management UI after an extension is selected to be run in incognito mode.">
-        <ph name="BEGIN_BOLD">&lt;b&gt;</ph>Warning:<ph name="END_BOLD">&lt;/b&gt;</ph> The browser cannot prevent extensions from recording your browsing history. To disable this extension in incognito mode, unselect this option.
+        Warning: The browser cannot prevent extensions from recording your browsing history. To disable this extension in incognito mode, unselect this option.
       </message>
       <message name="IDS_EXTENSIONS_UNINSTALL" desc="The link for uninstalling extensions.">
         Remove from browser…
@@ -645,6 +609,14 @@ The browser is unable to recover your settings.
       <!-- Main Chrome menu -->
       <message name="IDS_APPMENU_TOOLTIP" desc="The tooltip to show for the browser menu">
         Customize and control the browser
+      </message>
+
+      <message name="IDS_APPMENU_TOOLTIP_UPDATE_AVAILABLE" desc="The tooltip to show for the browser menu when an update is available">
+        Customize and control the browser. Update is available.
+      </message>
+
+      <message name="IDS_OPEN_IN_CHROME" desc="The text label of the Open in Chrome menu item for the Hosted App app menu">
+        &amp;Open in browser
       </message>
 
       <if expr="use_titlecase and not chromeos">
@@ -689,6 +661,14 @@ The browser is unable to recover your settings.
         browser/Google
       </message>
 
+      <!-- DICE sign-in promo strings -->
+      <message name="IDS_PROFILES_DICE_SIGNIN_PROMO" desc="Text describing the benefits of signing in and turning on Sync.">
+        Sign in to sync and personalize Iridium across your devices
+      </message>
+      <message name="IDS_PROFILES_DICE_SYNC_PROMO" desc="Text describing the benefits of turning on Sync.">
+        Sync and personalize Iridium across your devices
+      </message>
+
       <!-- Tutorial card in the avatar menu bubble -->
       <message name="IDS_PROFILES_CONFIRM_SIGNIN_TUTORIAL_TITLE" desc="The title of the tutorial card in the avatar menu bubble view shown when a user signs in to Chromium.">
         You are now signed in to browser/Google
@@ -706,11 +686,6 @@ The browser is unable to recover your settings.
       </message>
       <message name="IDS_PROFILES_PRIMARY_ACCOUNT_REMOVAL_TEXT" desc="Main text of the account removal view when removing a primary account.">
         You are using <ph name="PROFILE_EMAIL">$1<ex>jessica@gmail.com</ex></ph> to sync your browser data. To update your sync preference or to use the browser without a Google account, visit <ph name="SETTINGS_LINK">$2<ex>settings</ex></ph>.
-      </message>
-
-      <!-- Switch user view in the avatar menu bubble -->
-      <message name="IDS_PROFILES_NOT_YOU_CONTENT_TEXT" desc="Main text of the switch user view. for an upgrade user">
-        If you share this computer with <ph name="PROFILE_NAME">$1<ex>Claire</ex></ph>, add yourself to Iridium to browse separately. Otherwise disconnect their Google Account.
       </message>
 
       <!-- One click sign-in infobar -->
@@ -739,7 +714,7 @@ Signing in anyway will merge browser information like bookmarks, history, and ot
       </if>
 
       <!-- Enterprise sign-in dialog -->
-      <if expr="toolkit_views or is_macosx">
+      <if expr="toolkit_views">
         <message name="IDS_ENTERPRISE_SIGNIN_TITLE" desc="The title of the dialog to confirm linking the browser profile with the signed-in enterprise account">
           Link your browser data to this account?
         </message>
@@ -753,10 +728,10 @@ Signing in anyway will merge browser information like bookmarks, history, and ot
 
       <if expr="toolkit_views">
         <message name="IDS_ENTERPRISE_FORCE_SIGNOUT_EXPLANATION" desc="Text of the reason to sign out">
-          Authentication certificate failed. Please sign in to Chromium again as <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph> or contact your administrator for more information. <ph name="ADDITIONAL_EXPLANATION">$2</ph>
+          Authentication certificate failed. Please sign in to Iridium again as <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph> or contact your administrator for more information. <ph name="ADDITIONAL_EXPLANATION">$2</ph>
         </message>
         <message name="IDS_ENTERPRISE_FORCE_SIGNOUT_EXPLANATION_WITHOUT_USER_NAME" desc="Text of the reason to sign out when there is no valid email address">
-          Authentication certificate failed. Please sign in to Chromium again or contact your administrator for more information. <ph name="ADDITIONAL_EXPLANATION">$2</ph>
+          Authentication certificate failed. Please sign in to Iridium again or contact your administrator for more information. <ph name="ADDITIONAL_EXPLANATION">$2</ph>
         </message>
       </if>
 
@@ -767,25 +742,12 @@ Signing in anyway will merge browser information like bookmarks, history, and ot
         </message>
       </if>
 
-      <!-- SRT bubble messages.
-           This string is for the old Chrome Cleanup version and should be
-           deleted as soon as all Chrome Cleanup UI is fully integrated into
-           Chrome. -->
-      <if expr="is_win">
-        <message name="IDS_SRT_BUBBLE_TITLE" desc="Text for the title of the software removal tool bubble view.">
-            Iridium has detected a disturbance in the force
-        </message>
-      </if>
-
-      <!-- Chrome Cleanup prompt and web UI.
+      <!-- Chrome Cleanup prompt.
            Note: these strings should only be used by Google Chrome, but
                  omitting them brings up a hash collision error. -->
       <if expr="is_win">
-        <message name="IDS_CHROME_CLEANUP_PROMPT_EXPLANATION" desc="Description in the Chrome Cleanup dialog that Chrome browser shows when unwanted software, like ad injectors or software that changes the user's settings without their knowledge, is found on the user's computer. Appears under the title asking 'Remove harmful software?' Actor is Chrome; we are asking, Do you want Chrome to remove harmful software? 'it' is harmful software. User has the option of clicking 'Remove' to proceed with a cleanup, or 'Details' to see more details. Preferrably, the translation for this string should have the same meaning as IDS_CHROME_CLEANUP_WEBUI_EXPLANATION.">
-          Chromium found harmful software on your computer. Chromium can remove it and restore your settings to make your browser work normally again.
-        </message>
-        <message name="IDS_CHROME_CLEANUP_WEBUI_EXPLANATION" desc="Description in the Chrome Cleanup web page that Chrome browser shows when unwanted software, like ad injectors or software that changes the user's settings without their knowledge, is found on the user's computer. Appears under the title asking 'Remove harmful software?' Actor is Chrome; we are asking, Do you want Chrome to remove harmful software? 'it' is harmful software. The user can click 'Remove' to proceed with a cleanup. Preferrably, the translation for this string should have the same meaning as IDS_CHROME_CLEANUP_PROMPT_EXPLANATION.">
-          Chromium found harmful software on your computer. Chromium can remove it and restore your settings to make your browser work normally again.
+        <message name="IDS_CHROME_CLEANUP_PROMPT_EXPLANATION" desc="Description in the Chrome Cleanup dialog that Chrome browser shows when unwanted software, like ad injectors or software that changes the user's settings without their knowledge, is found on the user's computer. Appears under the title asking 'Remove harmful software?' Actor is Chrome; we are asking, Do you want Chrome to remove harmful software? 'it' is harmful software. User has the option of clicking 'Remove' to proceed with a cleanup, or 'Details' to see more details. Preferrably, the translation for this string should have the same meaning as IDS_SETTINGS_RESET_CLEANUP_EXPLANATION.">
+          The browser found harmful software on your computer. The browser can remove it and restore your settings to make your browser work normally again.
         </message>
       </if>
 
@@ -821,10 +783,7 @@ Signing in anyway will merge browser information like bookmarks, history, and ot
 
       <if expr="is_macosx">
         <message name="IDS_OPTIONS_PASSWORDS_MAC_WARNING" desc="The warning for OS X that passwords are shared across profiles in the keychain.">
-          On Mac, passwords may be saved to your Keychain and accessed or synced by other browser users sharing this OS X account.
-        </message>
-        <message name="IDS_AUTOFILL_ADDRESS_BOOK_PROMPT_DESCRIPTION" desc="Text to show in dialog requesting permission to access the user's Address Book contents.">
-          Details from your contacts can help you fill out forms more quickly in the browser.
+          On Mac, passwords may be saved to your Keychain and accessed or synced by other Chromium users sharing this OS X account.
         </message>
       </if>
 
@@ -926,20 +885,6 @@ Signing in anyway will merge browser information like bookmarks, history, and ot
         </message>
       </if>
 
-      <!-- chrome://settings. Android uses native UI for settings -->
-      <if expr="not is_android">
-        <message name="IDS_OPTIONS_DEFAULTBROWSER_USEASDEFAULT" desc="The label of the 'Use Chromium as default' browser button">
-          Make Iridium the default browser
-        </message>
-      </if>
-
-      <!-- Toast experiment. -->
-      <if expr="is_win">
-        <message name="IDS_TRY_TOAST_SET_DEFAULT" desc="Text of the checkbox to make Chromium the default browser">
-          Make Iridium the default browser
-        </message>
-      </if>
-
       <!-- Material Design User Manager -->
       <if expr="not is_android and not chromeos">
         <!-- Supervised user create confirmation page -->
@@ -1032,30 +977,29 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@example.com</
         <message name="IDS_CONTENT_CONTEXT_SPELLING_BUBBLE_TEXT" desc="The text of a bubble that confirms users allows integrating the spelling service of Google to Chrome.">
           The browser could provide smarter spell-checking by sending what you type to Google servers, allowing you to use the same spell-checking technology used by Google search.
         </message>
+        <if expr="not use_titlecase">
+          <message name="IDS_CONTENT_CONTEXT_OPENLINKNEWTAB_INAPP" desc="The name of the command to open a link in a newly created browser tab when the user is in an app window">
+            Open link in new browser &amp;tab
+          </message>
+          <message name="IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD_INAPP" desc="The name of the command to open a link in an incognito browser window when the user is in an app window">
+            Open link in browser inco&amp;gnito window
+          </message>
+        </if>
+        <if expr="use_titlecase">
+          <message name="IDS_CONTENT_CONTEXT_OPENLINKNEWTAB_INAPP" desc="In Title Case: The name of the command to open a link in a newly created browser tab when the user is in an app window">
+            Open Link in New Browser &amp;tab
+          </message>
+          <message name="IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD_INAPP" desc="In Title Case: The name of the command to open a link in an incognito browser window when the user is in an app window">
+            Open Link in Browser Inco&amp;gnito Window
+          </message>
+        </if>
+      </if>
+
+      <if expr="not is_android">
         <message name="IDS_RESET_PROFILE_SETTINGS_FEEDBACK" desc="Feedback label in the Reset Profile Settings dialog">
           Help make the browser better by reporting the current settings
         </message>
       </if>
-
-      <!-- Contextual Search -->
-      <message name="IDS_CONTEXTUAL_SEARCH_HEADER" desc="Header shown at the top of the first run experience, to describe the Contextual Search feature.">
-        Search with one touch
-      </message>
-      <message name="IDS_CONTEXTUAL_SEARCH_PROMO_DESCRIPTION_1" desc="Part 1 of the description of the Contextual Search feature. Combined with FEATURE_NAME and DESCRIPTION_2 below, the whole should be a paragraph describing the feature. This line can be empty if it makes sense to start the sentence with FEATURE_NAME.">
-        Learn about topics on websites without leaving the page.
-      </message>
-      <message name="IDS_CONTEXTUAL_SEARCH_PROMO_FEATURE_NAME" desc="Name of the Contextual Search feature. See explanation in DESCRIPTION_1.">
-        Touch to Search
-      </message>
-      <message name="IDS_CONTEXTUAL_SEARCH_PROMO_DESCRIPTION_2" desc="Part 2 of the description of the Contextual Search feature. See explanation in DESCRIPTION_1.">
-        sends a word and its surrounding context to Google Search, returning definitions, pictures, and other search results.
-      </message>
-      <message name="IDS_CONTEXTUAL_SEARCH_PROMO_OPTIN" desc="Text for the button the user clicks to opt in.">
-        Accept &amp; Search
-      </message>
-      <message name="IDS_CONTEXTUAL_SEARCH_PROMO_OPTOUT" desc="Text for the button the user clicks to opt out.">
-        No Thanks
-      </message>
 
       <!-- Update Recommended dialog -->
       <if expr="not chromeos">
@@ -1093,13 +1037,10 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@example.com</
         </message>
       </if>
       <message name="IDS_UPGRADE_BUBBLE_TITLE" desc="Text for the title of the upgrade bubble view.">
-        The browser is out of date
+        Cannot update the browser
       </message>
       <message name="IDS_UPGRADE_BUBBLE_TEXT" desc="Text for the upgrade bubble view full description.">
-        The browser could not update itself to the latest version, so you are missing out on security fixes. You need to manually reinstall it.
-      </message>
-      <message name="IDS_UPGRADE_BUBBLE_REENABLE_TEXT" desc="Text for the upgrade bubble view full description.">
-        The browser could not update itself to the latest version, so you are missing out on security fixes. You need to update it.
+        The browser could not update to the latest version, so you are missing out on new features and security fixes.
       </message>
 
       <!-- User menu errors -->
@@ -1124,36 +1065,34 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@example.com</
       </if>
 
       <!-- Upgrade recovery bubble -->
-      <message name="IDS_RUN_RECOVERY" desc="Text for the button the user clicks to recover chromium and its updater.">
-        Update the browser
-      </message>
-      <message name="IDS_DECLINE_RECOVERY" desc="Text for the button the user clicks to decline recovery request.">
-        No, thanks
-      </message>
       <message name="IDS_RECOVERY_BUBBLE_TITLE" desc="Text for the title of the chrome recovery bubble view.">
         The browser is out of date
       </message>
+      <if expr="use_titlecase">
+        <message name="IDS_RUN_RECOVERY" desc="In Title Case: Text for the button the user clicks to recover chromium and its updater.">
+          Update Browser
+        </message>
+      </if>
+      <if expr="not use_titlecase">
+        <message name="IDS_RUN_RECOVERY" desc="Text for the button the user clicks to recover chromium and its updater.">
+          Update Browser
+        </message>
+      </if>
       <message name="IDS_RECOVERY_BUBBLE_TEXT" desc="Text for the chrome recovery bubble view full description.">
         Important security improvements and new features are available in the latest version.
       </message>
 
       <!-- Critical Notification bubble -->
-      <message name="IDS_CRITICAL_NOTIFICATION_HEADLINE" desc="The headline for the critical notification">
+      <message name="IDS_CRITICAL_NOTIFICATION_TITLE" desc="The title for a bubble that appears when there is a critical update and Chromium must restart to install it. It counts down from # seconds and then Chromium automatically restarts.">
         {SECONDS, plural,
-         =1 {The browser will restart in 1 second.}
-         other {The browser will restart in # seconds.}}
+         =1 {The browser will restart in 1 second}
+         other {The browser will restart in # seconds}}
       </message>
-      <message name="IDS_CRITICAL_NOTIFICATION_HEADLINE_ALTERNATE" desc="The headline for the critical notification when the countdown reaches 0 (will only be seen if an onbeforeunload handler on a web page cancels the shutdown sequence.">
+      <message name="IDS_CRITICAL_NOTIFICATION_TITLE_ALTERNATE" desc="The title for a bubble that appears when there is a critical update and Chromium must restart to install it. The title was previously countng down to an automatic restart and now it has finished. Will only be seen if a web page stops the shutdown process.">
         You should restart the browser now.
       </message>
-      <message name="IDS_CRITICAL_NOTIFICATION_TEXT" desc="The text of the critical update notification">
-        DEV-CANTHAPPEN A special security update for Chromium (wut) was just applied; you should restart now for it to take effect (we'll restore your tabs).
-      </message>
-      <message name="IDS_CRITICAL_NOTIFICATION_RESTART" desc="The restart button label">
-        OK - Restart now
-      </message>
-      <message name="IDS_CRITICAL_NOTIFICATION_DISMISS" desc="The dismiss button label">
-        Don't restart
+      <message name="IDS_CRITICAL_NOTIFICATION_TEXT" desc="Explanation text for the bubble that appears when there is a critical update and Chromium must restart to install it.">
+        A special security update for Iridium was just applied; you should restart now for it to take effect (we will restore your tabs).
       </message>
 
       <!-- Dialog that asks whether user wants to participate in Safe Browsing Extended Reporting -->
@@ -1199,19 +1138,26 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@example.com</
       <!-- Runtime permission strings -->
       <if expr="is_android">
         <message name="IDS_INFOBAR_MISSING_CAMERA_PERMISSION_TEXT" desc="Text shown in an infobar when a website has requested access to the camera capabilities, but Chrome is missing the Android camera permission.">
-          The browser needs permission to access your camera for this site.
+          The browser needs permission to access your camera for this site
         </message>
         <message name="IDS_INFOBAR_MISSING_MICROPHONE_PERMISSION_TEXT" desc="Text shown in an infobar when a website has requested access to the microphone capabilities, but Chrome is missing the Android microphone permission.">
-          The browser needs permission to access your microphone for this site.
+          The browser needs permission to access your microphone for this site
         </message>
         <message name="IDS_INFOBAR_MISSING_MICROPHONE_CAMERA_PERMISSIONS_TEXT" desc="Text shown in an infobar when a website has requested access to the microphone and camera capabilities, but Chrome is missing the Android microphone and camera permissions.">
-          The browser needs permission to access your camera and microphone for this site.
+          The browser needs permission to access your camera and microphone for this site
         </message>
         <message name="IDS_INFOBAR_MISSING_LOCATION_PERMISSION_TEXT" desc="Text shown in an infobar when a website has requested access to the location capabilities, but Chrome is missing the Android location permission.">
-          The browser needs access to your location to share your location with this site.
+          The browser needs access to your location to share your location with this site
         </message>
         <message name="IDS_MISSING_STORAGE_PERMISSION_DOWNLOAD_EDUCATION_TEXT" desc="Text shown educating the user that Chrome is missing the Android storage permission, which is required to download files.">
-          Iridium needs storage access to download files.
+          The browser needs storage access to download files
+        </message>
+      </if>
+
+      <!-- OOM intervention message -->
+      <if expr="is_android">
+        <message name="IDS_NEAR_OOM_INTERVENTION_MESSAGE" desc="The message stating that the browser intervened to stop the page using too much memory.">
+           This page uses too damn much memory, so the browser paused it.
         </message>
       </if>
 
@@ -1251,6 +1197,15 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@example.com</
         <message name="IDS_WELCOME_HEADER_AFTER_FIRST_RUN" desc="A message which will appear as the header on the Welcome UI if the user has run Chromium before.">
           Take the browser everywhere
         </message>
+        <message name="IDS_DICE_WELCOME_SECOND_HEADER" desc="A second message which will appear as the header on the Welcome UI if the user has never run Chrome before.">
+          Web browsing with Google smarts
+        </message>
+        <message name="IDS_DICE_WELCOME_DECLINE_BUTTON" desc="A button on the welcome page which declines the offer to sign in to Chrome.">
+          Not now
+        </message>
+        <message name="IDS_DICE_WELCOME_DESCRIPTION" desc="A message on the welcome page explaining the purpose of signing in.">
+          Sign in for a personalized browsing experience, synced across devices
+        </message>
       </if>
 
       <!-- Windows 10 Welcome page strings -->
@@ -1269,6 +1224,52 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@example.com</
         </message>
         <message name="IDS_WIN10_WELCOME_SELECT" desc="An instruction asking the user to select Chromium from an external list of apps.">
           Select <ph name="SMALL_PRODUCT_LOGO">&lt;div class="logo-small"&gt;&lt;/div&gt;</ph> <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>Iridium<ph name="END_BOLD">&lt;/strong&gt;</ph>
+        </message>
+        <message name="IDS_WIN10_WELCOME_CLICK_SWITCH_ANYWAY" desc="An instruction asking the user to click on the &quot;Switch anyway&quot; button. It's possible that the button doesn't appear for the user, hence the &quot;if it appears&quot;. The bold portion of this message must match IDS_WIN10_WELCOME_SWITCH_ANYWAY_LABEL.">
+          Click <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>Switch anyway<ph name="END_BOLD">&lt;/strong&gt;</ph>, if it appears
+        </message>
+      </if>
+
+      <!-- Native notifications for Windows 10 -->
+      <if expr="is_win">
+        <message name="IDS_WIN_NOTIFICATION_SETTINGS_CONTEXT_MENU_ITEM_NAME" desc="The name of the button in Windows Notification Center which leads to Chrome notification settings.">
+          Go to browser notification settings
+        </message>
+      </if>
+      <!-- Relaunch notification bubble and dialog. -->
+      <if expr="not is_android and not chromeos">
+        <message name="IDS_RELAUNCH_RECOMMENDED_TITLE" desc="The title of a dialog that tells users that a browser relaunch is recommended for an update available for some number of days.">
+          {0, plural,
+           =0 {A browser update is available}
+           =1 {A browser update is available}
+           other {A browser update has been available for # days}}
+        </message>
+        <message name="IDS_RELAUNCH_RECOMMENDED_BODY" desc="The body text of a dialog that tells users that a browser relaunch is recommended for an update.">
+          Your administrator asks that you relaunch the browser to apply this update
+        </message>
+        <message name="IDS_RELAUNCH_REQUIRED_TITLE_DAYS" desc="The title of a dialog that tells users the browser must be relaunched within two or more days.">
+          {0, plural,
+           =1 {Relaunch the browser within a day}
+           other {Relaunch the browser within # days}}
+        </message>
+        <message name="IDS_RELAUNCH_REQUIRED_TITLE_HOURS" desc="The title of a dialog that tells users the browser must be relaunched within one or more hours.">
+          {0, plural,
+           =1 {The browser will relaunch in an hour}
+           other {The browser will relaunch in # hours}}
+        </message>
+        <message name="IDS_RELAUNCH_REQUIRED_TITLE_MINUTES" desc="The title of a dialog that tells users the browser must be relaunched within one or more minutes.">
+          {0, plural,
+           =1 {The browser will relaunch in 1 minute}
+           other {The browser will relaunch in # minutes}}
+        </message>
+        <message name="IDS_RELAUNCH_REQUIRED_TITLE_SECONDS" desc="The title of a dialog that tells users the browser must be relaunched within some number of seconds.">
+          {0, plural,
+           =0 {The browser will relaunch now}
+           =1 {The browser will relaunch in 1 second}
+           other {The browser will relaunch in # seconds}}
+        </message>
+        <message name="IDS_RELAUNCH_REQUIRED_BODY" desc="The body text of a dialog that tells users the browser must be relaunched.">
+          Your administrator requires that you relaunch the browser to apply an update
         </message>
       </if>
     </messages>

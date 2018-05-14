@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.tab;
 
-import android.os.SystemClock;
 import android.support.annotation.IntDef;
 import android.view.View;
 
@@ -17,14 +16,12 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.media.MediaCaptureNotificationService;
-import org.chromium.chrome.browser.metrics.UmaSessionStats;
 import org.chromium.chrome.browser.metrics.UmaUtils;
 import org.chromium.chrome.browser.policy.PolicyAuditor;
 import org.chromium.chrome.browser.policy.PolicyAuditor.AuditEvent;
+import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
-
-import java.util.concurrent.TimeUnit;
 
 /**
  * WebContentsObserver used by Tab.
@@ -125,7 +122,7 @@ public class TabWebContentsObserver extends WebContentsObserver {
             rendererCrashStatus = TAB_RENDERER_CRASH_STATUS_SHOWN_IN_FOREGROUND_APP;
             mTab.showSadTab();
             // This is necessary to correlate histogram data with stability counts.
-            UmaSessionStats.logRendererCrash();
+            RecordHistogram.recordBooleanHistogram("Stability.Android.RendererCrash", true);
         }
         RecordHistogram.recordEnumeratedHistogram(
                 "Tab.RendererCrashStatus", rendererCrashStatus, TAB_RENDERER_CRASH_STATUS_MAX);
@@ -134,14 +131,10 @@ public class TabWebContentsObserver extends WebContentsObserver {
     }
 
     @Override
-    public void navigationEntryCommitted() {
+    public void didFinishLoad(long frameId, String validatedUrl, boolean isMainFrame) {
         if (mTab.getNativePage() != null) {
             mTab.pushNativePageStateToNavigationEntry();
         }
-    }
-
-    @Override
-    public void didFinishLoad(long frameId, String validatedUrl, boolean isMainFrame) {
         if (isMainFrame) mTab.didFinishPageLoad();
         PolicyAuditor auditor = AppHooks.get().getPolicyAuditor();
         auditor.notifyAuditEvent(
@@ -163,6 +156,8 @@ public class TabWebContentsObserver extends WebContentsObserver {
     }
 
     private void recordErrorInPolicyAuditor(String failingUrl, String description, int errorCode) {
+        assert description != null;
+
         PolicyAuditor auditor = AppHooks.get().getPolicyAuditor();
         auditor.notifyAuditEvent(mTab.getApplicationContext(), AuditEvent.OPEN_URL_FAILURE,
                 failingUrl, description);
@@ -209,22 +204,10 @@ public class TabWebContentsObserver extends WebContentsObserver {
             recordErrorInPolicyAuditor(url, errorDescription, errorCode);
         }
 
+        boolean isTrackedPage = hasCommitted && isInMainFrame && !isErrorPage && !isSameDocument
+                && !isFragmentNavigation && UrlUtilities.isHttpOrHttps(url);
+        UmaUtils.registerFinishNavigation(isTrackedPage);
         if (!hasCommitted) return;
-        if (isInMainFrame && UmaUtils.hasComeToForeground()) {
-            // Current median is 550ms, and long tail is very long. ZoomedIn gives good view of the
-            // median and ZoomedOut gives a good overview.
-            RecordHistogram.recordCustomTimesHistogram(
-                    "Startup.FirstCommitNavigationTime3.ZoomedIn",
-                    SystemClock.uptimeMillis() - UmaUtils.getForegroundStartTime(), 200, 1000,
-                    TimeUnit.MILLISECONDS, 100);
-            // For ZoomedOut very rarely is it under 50ms and this range matches
-            // CustomTabs.IntentToFirstCommitNavigationTime2.ZoomedOut.
-            RecordHistogram.recordCustomTimesHistogram(
-                    "Startup.FirstCommitNavigationTime3.ZoomedOut",
-                    SystemClock.uptimeMillis() - UmaUtils.getForegroundStartTime(), 50,
-                    TimeUnit.MINUTES.toMillis(10), TimeUnit.MILLISECONDS, 50);
-            UmaUtils.setRunningApplicationStart(false);
-        }
 
         if (isInMainFrame) {
             mTab.setIsTabStateDirty(true);
@@ -297,6 +280,11 @@ public class TabWebContentsObserver extends WebContentsObserver {
         if (!mTab.maybeShowNativePage(mTab.getUrl(), false)) {
             mTab.showRenderedPage();
         }
+    }
+
+    @Override
+    public void navigationEntriesDeleted() {
+        mTab.notifyNavigationEntriesDeleted();
     }
 
     @Override

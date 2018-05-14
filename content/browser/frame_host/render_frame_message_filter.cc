@@ -4,15 +4,21 @@
 
 #include "content/browser/frame_host/render_frame_message_filter.h"
 
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "base/command_line.h"
 #include "base/debug/alias.h"
 #include "base/macros.h"
 #include "base/strings/string_util.h"
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
+#include "components/download/public/common/download_url_parameters.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/download/download_stats.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
@@ -24,17 +30,22 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
-#include "content/public/browser/download_url_parameters.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_constants.h"
 #include "gpu/GLES2/gl2extchromium.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
 #include "net/cookies/cookie_store.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ppapi/features/features.h"
+#include "services/network/public/cpp/features.h"
+#include "services/service_manager/public/mojom/interface_provider.mojom.h"
 #include "storage/browser/blob/blob_storage_context.h"
+#include "third_party/WebKit/public/common/frame/frame_policy.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -57,15 +68,18 @@ namespace {
 const int kPluginsRefreshThresholdInSeconds = 3;
 #endif
 
-void CreateChildFrameOnUI(int process_id,
-                          int parent_routing_id,
-                          blink::WebTreeScopeType scope,
-                          const std::string& frame_name,
-                          const std::string& frame_unique_name,
-                          blink::WebSandboxFlags sandbox_flags,
-                          const ParsedFeaturePolicyHeader& container_policy,
-                          const FrameOwnerProperties& frame_owner_properties,
-                          int new_routing_id) {
+void CreateChildFrameOnUI(
+    int process_id,
+    int parent_routing_id,
+    blink::WebTreeScopeType scope,
+    const std::string& frame_name,
+    const std::string& frame_unique_name,
+    bool is_created_by_script,
+    const base::UnguessableToken& devtools_frame_token,
+    const blink::FramePolicy& frame_policy,
+    const FrameOwnerProperties& frame_owner_properties,
+    int new_routing_id,
+    mojo::ScopedMessagePipeHandle interface_provider_request_handle) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   RenderFrameHostImpl* render_frame_host =
       RenderFrameHostImpl::FromID(process_id, parent_routing_id);
@@ -73,12 +87,17 @@ void CreateChildFrameOnUI(int process_id,
   // processing a subframe creation message.
   if (render_frame_host) {
     render_frame_host->OnCreateChildFrame(
-        new_routing_id, scope, frame_name, frame_unique_name, sandbox_flags,
-        container_policy, frame_owner_properties);
+        new_routing_id,
+        service_manager::mojom::InterfaceProviderRequest(
+            std::move(interface_provider_request_handle)),
+        scope, frame_name, frame_unique_name, is_created_by_script,
+        devtools_frame_token, frame_policy, frame_owner_properties);
   }
 }
 
-void DownloadUrlOnUIThread(std::unique_ptr<DownloadUrlParameters> parameters) {
+void DownloadUrlOnUIThread(
+    std::unique_ptr<download::DownloadUrlParameters> parameters,
+    std::unique_ptr<storage::BlobDataHandle> blob_data_handle) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   RenderProcessHost* render_process_host =
@@ -89,8 +108,9 @@ void DownloadUrlOnUIThread(std::unique_ptr<DownloadUrlParameters> parameters) {
   BrowserContext* browser_context = render_process_host->GetBrowserContext();
   DownloadManager* download_manager =
       BrowserContext::GetDownloadManager(browser_context);
-  RecordDownloadSource(INITIATED_BY_RENDERER);
-  download_manager->DownloadUrl(std::move(parameters));
+  parameters->set_download_source(download::DownloadSource::FROM_RENDERER);
+  download_manager->DownloadUrl(std::move(parameters),
+                                std::move(blob_data_handle));
 }
 
 // Common functionality for converting a sync renderer message to a callback
@@ -173,11 +193,8 @@ class RenderFrameMessageFilter::OpenChannelToPpapiPluginCallback
       public PpapiPluginProcessHost::PluginClient {
  public:
   OpenChannelToPpapiPluginCallback(RenderFrameMessageFilter* filter,
-                                   ResourceContext* context,
                                    IPC::Message* reply_msg)
-      : RenderMessageCompletionCallback(filter, reply_msg),
-        context_(context) {
-  }
+      : RenderMessageCompletionCallback(filter, reply_msg) {}
 
   void GetPpapiChannelInfo(base::ProcessHandle* renderer_handle,
                            int* renderer_id) override {
@@ -197,11 +214,6 @@ class RenderFrameMessageFilter::OpenChannelToPpapiPluginCallback
   }
 
   bool Incognito() override { return filter()->incognito_; }
-
-  ResourceContext* GetResourceContext() override { return context_; }
-
- private:
-  ResourceContext* context_;
 };
 
 #endif  // ENABLE_PLUGINS
@@ -223,11 +235,30 @@ RenderFrameMessageFilter::RenderFrameMessageFilter(
       render_widget_helper_(render_widget_helper),
       incognito_(browser_context->IsOffTheRecord()),
       render_process_id_(render_process_id) {
+  network::mojom::CookieManagerPtr cookie_manager;
+  BrowserContext::GetDefaultStoragePartition(browser_context)
+      ->GetNetworkContext()
+      ->GetCookieManager(mojo::MakeRequest(&cookie_manager));
+
+  // The PostTask below could finish before the constructor returns which would
+  // lead to this object being destructed prematurely.
+  AddRef();
+  base::ThreadTaskRunnerHandle::Get()->ReleaseSoon(FROM_HERE, this);
+
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&RenderFrameMessageFilter::InitializeOnIO, this,
+                     cookie_manager.PassInterface()));
 }
 
 RenderFrameMessageFilter::~RenderFrameMessageFilter() {
   // This function should be called on the IO thread.
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
+}
+
+void RenderFrameMessageFilter::InitializeOnIO(
+    network::mojom::CookieManagerPtrInfo cookie_manager) {
+  cookie_manager_.Bind(std::move(cookie_manager));
 }
 
 bool RenderFrameMessageFilter::OnMessageReceived(const IPC::Message& message) {
@@ -291,7 +322,7 @@ void RenderFrameMessageFilter::DownloadUrl(int render_view_id,
           destination: WEBSITE
         }
         policy {
-          cookies_allowed: true
+          cookies_allowed: YES
           cookies_store: "user"
           setting: "This feature cannot be disabled by settings."
           chrome_policy {
@@ -300,69 +331,82 @@ void RenderFrameMessageFilter::DownloadUrl(int render_view_id,
             }
           }
         })");
-  std::unique_ptr<DownloadUrlParameters> parameters(new DownloadUrlParameters(
-      url, render_process_id_, render_view_id, render_frame_id,
-      request_context_.get(), traffic_annotation));
+  std::unique_ptr<download::DownloadUrlParameters> parameters(
+      new download::DownloadUrlParameters(
+          url, render_process_id_, render_view_id, render_frame_id,
+          request_context_.get(), traffic_annotation));
   parameters->set_content_initiated(true);
   parameters->set_suggested_name(suggested_name);
   parameters->set_prompt(use_prompt);
-  parameters->set_referrer(referrer);
+  parameters->set_referrer(referrer.url);
+  parameters->set_referrer_policy(
+      Referrer::ReferrerPolicyForUrlRequest(referrer.policy));
   parameters->set_initiator(initiator);
 
+  std::unique_ptr<storage::BlobDataHandle> blob_data_handle;
   if (url.SchemeIsBlob()) {
     ChromeBlobStorageContext* blob_context =
         GetChromeBlobStorageContextForResourceContext(resource_context_);
-    parameters->set_blob_data_handle(
-        blob_context->context()->GetBlobDataFromPublicURL(url));
+    blob_data_handle = blob_context->context()->GetBlobDataFromPublicURL(url);
     // Don't care if the above fails. We are going to let the download go
     // through and allow it to be interrupted so that the embedder can deal.
   }
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&DownloadUrlOnUIThread, base::Passed(&parameters)));
+      base::BindOnce(&DownloadUrlOnUIThread, std::move(parameters),
+                     std::move(blob_data_handle)));
 }
 
 void RenderFrameMessageFilter::OnCreateChildFrame(
     const FrameHostMsg_CreateChildFrame_Params& params,
-    int* new_routing_id) {
+    int* new_routing_id,
+    mojo::MessagePipeHandle* new_interface_provider,
+    base::UnguessableToken* devtools_frame_token) {
   *new_routing_id = render_widget_helper_->GetNextRoutingID();
+
+  service_manager::mojom::InterfaceProviderPtr interface_provider;
+  auto interface_provider_request(mojo::MakeRequest(&interface_provider));
+  *new_interface_provider =
+      interface_provider.PassInterface().PassHandle().release();
+
+  *devtools_frame_token = base::UnguessableToken::Create();
+
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&CreateChildFrameOnUI, render_process_id_,
-                 params.parent_routing_id, params.scope, params.frame_name,
-                 params.frame_unique_name, params.sandbox_flags,
-                 params.container_policy, params.frame_owner_properties,
-                 *new_routing_id));
+      base::BindOnce(&CreateChildFrameOnUI, render_process_id_,
+                     params.parent_routing_id, params.scope, params.frame_name,
+                     params.frame_unique_name, params.is_created_by_script,
+                     *devtools_frame_token, params.frame_policy,
+                     params.frame_owner_properties, *new_routing_id,
+                     interface_provider_request.PassMessagePipe()));
 }
 
-void RenderFrameMessageFilter::OnCookiesEnabled(
-    int render_frame_id,
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    bool* cookies_enabled) {
+void RenderFrameMessageFilter::OnCookiesEnabled(int render_frame_id,
+                                                const GURL& url,
+                                                const GURL& site_for_cookies,
+                                                bool* cookies_enabled) {
   // TODO(ananta): If this render frame is associated with an automation
   // channel, aka ChromeFrame then we need to retrieve cookie settings from the
   // external host.
   *cookies_enabled = GetContentClient()->browser()->AllowGetCookie(
-      url, first_party_for_cookies, net::CookieList(), resource_context_,
+      url, site_for_cookies, net::CookieList(), resource_context_,
       render_process_id_, render_frame_id);
 }
 
 void RenderFrameMessageFilter::CheckPolicyForCookies(
     int render_frame_id,
     const GURL& url,
-    const GURL& first_party_for_cookies,
+    const GURL& site_for_cookies,
     GetCookiesCallback callback,
     const net::CookieList& cookie_list) {
   net::URLRequestContext* context = GetRequestContextForURL(url);
   // Check the policy for get cookies, and pass cookie_list to the
   // TabSpecificContentSetting for logging purpose.
-  if (context &&
-      GetContentClient()->browser()->AllowGetCookie(
-          url, first_party_for_cookies, cookie_list, resource_context_,
-          render_process_id_, render_frame_id)) {
-    std::move(callback).Run(net::CookieStore::BuildCookieLine(cookie_list));
+  if (context && GetContentClient()->browser()->AllowGetCookie(
+                     url, site_for_cookies, cookie_list, resource_context_,
+                     render_process_id_, render_frame_id)) {
+    std::move(callback).Run(net::CanonicalCookie::BuildCookieLine(cookie_list));
   } else {
     std::move(callback).Run(std::string());
   }
@@ -410,8 +454,10 @@ void RenderFrameMessageFilter::OnRenderProcessGone() {
 
 void RenderFrameMessageFilter::SetCookie(int32_t render_frame_id,
                                          const GURL& url,
-                                         const GURL& first_party_for_cookies,
-                                         const std::string& cookie) {
+                                         const GURL& site_for_cookies,
+                                         const std::string& cookie_line,
+                                         SetCookieCallback callback) {
+  std::move(callback).Run();
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
   if (!policy->CanAccessDataForOrigin(render_process_id_, url)) {
@@ -421,19 +467,35 @@ void RenderFrameMessageFilter::SetCookie(int32_t render_frame_id,
   }
 
   net::CookieOptions options;
-  if (GetContentClient()->browser()->AllowSetCookie(
-          url, first_party_for_cookies, cookie, resource_context_,
-          render_process_id_, render_frame_id, options)) {
-    net::URLRequestContext* context = GetRequestContextForURL(url);
-    // Pass a null callback since we don't care about when the 'set' completes.
-    context->cookie_store()->SetCookieWithOptionsAsync(
-        url, cookie, options, net::CookieStore::SetCookiesCallback());
+  std::unique_ptr<net::CanonicalCookie> cookie = net::CanonicalCookie::Create(
+      url, cookie_line, base::Time::Now(), options);
+  if (!cookie)
+    return;
+
+  if (!GetContentClient()->browser()->AllowSetCookie(
+          url, site_for_cookies, *cookie, resource_context_, render_process_id_,
+          render_frame_id, options))
+    return;
+
+  if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+    // TODO(jam): modify GetRequestContextForURL to work with network service.
+    // Merge this with code path below for non-network service.
+    cookie_manager_->SetCanonicalCookie(*cookie, url.SchemeIsCryptographic(),
+                                        !options.exclude_httponly(),
+                                        net::CookieStore::SetCookiesCallback());
+    return;
   }
+
+  net::URLRequestContext* context = GetRequestContextForURL(url);
+  // Pass a null callback since we don't care about when the 'set' completes.
+  context->cookie_store()->SetCanonicalCookieAsync(
+      std::move(cookie), url.SchemeIsCryptographic(),
+      !options.exclude_httponly(), net::CookieStore::SetCookiesCallback());
 }
 
 void RenderFrameMessageFilter::GetCookies(int render_frame_id,
                                           const GURL& url,
-                                          const GURL& first_party_for_cookies,
+                                          const GURL& site_for_cookies,
                                           GetCookiesCallback callback) {
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
@@ -446,7 +508,7 @@ void RenderFrameMessageFilter::GetCookies(int render_frame_id,
 
   net::CookieOptions options;
   if (net::registry_controlled_domains::SameDomainOrHost(
-          url, first_party_for_cookies,
+          url, site_for_cookies,
           net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES)) {
     // TODO(mkwst): This check ought to further distinguish between frames
     // initiated in a strict or lax same-site context.
@@ -457,18 +519,27 @@ void RenderFrameMessageFilter::GetCookies(int render_frame_id,
         net::CookieOptions::SameSiteCookieMode::DO_NOT_INCLUDE);
   }
 
+  if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+    // TODO(jam): modify GetRequestContextForURL to work with network service.
+    // Merge this with code path below for non-network service.
+    cookie_manager_->GetCookieList(
+        url, options,
+        base::BindOnce(&RenderFrameMessageFilter::CheckPolicyForCookies, this,
+                       render_frame_id, url, site_for_cookies,
+                       std::move(callback)));
+    return;
+  }
+
   // If we crash here, figure out what URL the renderer was requesting.
   // http://crbug.com/99242
-  char url_buf[128];
-  base::strlcpy(url_buf, url.spec().c_str(), arraysize(url_buf));
-  base::debug::Alias(url_buf);
+  DEBUG_ALIAS_FOR_GURL(url_buf, url);
 
   net::URLRequestContext* context = GetRequestContextForURL(url);
   context->cookie_store()->GetCookieListWithOptionsAsync(
       url, options,
-      base::Bind(&RenderFrameMessageFilter::CheckPolicyForCookies, this,
-                 render_frame_id, url, first_party_for_cookies,
-                 base::Passed(&callback)));
+      base::BindOnce(&RenderFrameMessageFilter::CheckPolicyForCookies, this,
+                     render_frame_id, url, site_for_cookies,
+                     std::move(callback)));
 }
 
 #if BUILDFLAG(ENABLE_PLUGINS)
@@ -495,8 +566,8 @@ void RenderFrameMessageFilter::OnGetPlugins(
   }
 
   PluginServiceImpl::GetInstance()->GetPlugins(
-      base::Bind(&RenderFrameMessageFilter::GetPluginsCallback, this, reply_msg,
-                 main_frame_origin));
+      base::BindOnce(&RenderFrameMessageFilter::GetPluginsCallback, this,
+                     reply_msg, main_frame_origin));
 }
 
 void RenderFrameMessageFilter::GetPluginsCallback(
@@ -544,10 +615,8 @@ void RenderFrameMessageFilter::OnOpenChannelToPepperPlugin(
     const base::FilePath& path,
     IPC::Message* reply_msg) {
   plugin_service_->OpenChannelToPpapiPlugin(
-      render_process_id_,
-      path,
-      profile_data_directory_,
-      new OpenChannelToPpapiPluginCallback(this, resource_context_, reply_msg));
+      render_process_id_, path, profile_data_directory_,
+      new OpenChannelToPpapiPluginCallback(this, reply_msg));
 }
 
 void RenderFrameMessageFilter::OnDidCreateOutOfProcessPepperInstance(
@@ -597,8 +666,7 @@ void RenderFrameMessageFilter::OnOpenChannelToPpapiBroker(
     int routing_id,
     const base::FilePath& path) {
   plugin_service_->OpenChannelToPpapiBroker(
-      render_process_id_,
-      path,
+      render_process_id_, routing_id, path,
       new OpenChannelToPpapiBrokerCallback(this, routing_id));
 }
 

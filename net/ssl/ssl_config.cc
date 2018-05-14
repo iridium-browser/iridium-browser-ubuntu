@@ -12,21 +12,20 @@ const uint16_t kDefaultSSLVersionMin = SSL_PROTOCOL_VERSION_TLS1;
 
 const uint16_t kDefaultSSLVersionMax = SSL_PROTOCOL_VERSION_TLS1_2;
 
-const TLS13Variant kDefaultTLS13Variant = kTLS13VariantDraft;
+const TLS13Variant kDefaultTLS13Variant = kTLS13VariantDraft23;
 
 SSLConfig::CertAndStatus::CertAndStatus() = default;
 SSLConfig::CertAndStatus::CertAndStatus(scoped_refptr<X509Certificate> cert_arg,
                                         CertStatus status)
     : cert(std::move(cert_arg)), cert_status(status) {}
-SSLConfig::CertAndStatus::CertAndStatus(const CertAndStatus& other)
-    : cert(other.cert), cert_status(other.cert_status) {}
+SSLConfig::CertAndStatus::CertAndStatus(const CertAndStatus& other) = default;
 SSLConfig::CertAndStatus::~CertAndStatus() = default;
 
 SSLConfig::SSLConfig()
     : rev_checking_enabled(false),
       rev_checking_required_local_anchors(false),
       sha1_local_anchors_enabled(true),
-      common_name_fallback_local_anchors_enabled(true),
+      symantec_enforcement_disabled(false),
       version_min(kDefaultSSLVersionMin),
       version_max(kDefaultSSLVersionMax),
       tls13_variant(kDefaultTLS13Variant),
@@ -42,7 +41,7 @@ SSLConfig::SSLConfig()
 
 SSLConfig::SSLConfig(const SSLConfig& other) = default;
 
-SSLConfig::~SSLConfig() {}
+SSLConfig::~SSLConfig() = default;
 
 bool SSLConfig::IsAllowedBadCert(X509Certificate* cert,
                                  CertStatus* cert_status) const {
@@ -68,8 +67,9 @@ int SSLConfig::GetCertVerifyFlags() const {
     flags |= CertVerifier::VERIFY_REV_CHECKING_REQUIRED_LOCAL_ANCHORS;
   if (sha1_local_anchors_enabled)
     flags |= CertVerifier::VERIFY_ENABLE_SHA1_LOCAL_ANCHORS;
-  if (common_name_fallback_local_anchors_enabled)
-    flags |= CertVerifier::VERIFY_ENABLE_COMMON_NAME_FALLBACK_LOCAL_ANCHORS;
+  if (symantec_enforcement_disabled)
+    flags |= CertVerifier::VERIFY_DISABLE_SYMANTEC_ENFORCEMENT;
+
   return flags;
 }
 

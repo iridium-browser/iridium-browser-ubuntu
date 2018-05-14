@@ -17,6 +17,7 @@
 #include "components/invalidation/public/invalidation_util.h"
 #include "components/invalidation/public/object_id_invalidation_map.h"
 #include "jingle/notifier/listener/push_client.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace syncer {
 
@@ -114,7 +115,7 @@ std::string P2PNotificationData::ToString() const {
 
 bool P2PNotificationData::ResetFromString(const std::string& str) {
   std::unique_ptr<base::Value> data_value = base::JSONReader::Read(str);
-  const base::DictionaryValue* data_dict = NULL;
+  const base::DictionaryValue* data_dict = nullptr;
   if (!data_value.get() || !data_value->GetAsDictionary(&data_dict)) {
     LOG(WARNING) << "Could not parse " << str << " as a dictionary";
     return false;
@@ -128,7 +129,7 @@ bool P2PNotificationData::ResetFromString(const std::string& str) {
                  << kNotificationTypeKey;
   }
   target_ = P2PNotificationTargetFromString(target_str);
-  const base::ListValue* invalidation_map_list = NULL;
+  const base::ListValue* invalidation_map_list = nullptr;
   if (!data_dict->GetList(kInvalidationsKey, &invalidation_map_list) ||
       !invalidation_map_.ResetFromValue(*invalidation_map_list)) {
     LOG(WARNING) << "Could not parse " << kInvalidationsKey;
@@ -202,7 +203,9 @@ void P2PInvalidator::UpdateCredentials(
       notifier::SubscriptionList(1, subscription));
   // If already logged in, the new credentials will take effect on the
   // next reconnection.
-  push_client_->UpdateCredentials(email, token);
+  // TODO(https://crbug.com/656607): Add proper annotation here.
+  push_client_->UpdateCredentials(email, token,
+                                  NO_TRAFFIC_ANNOTATION_BUG_656607);
   logged_in_ = true;
 }
 

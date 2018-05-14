@@ -4,7 +4,9 @@
 
 #import <XCTest/XCTest.h>
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
+#include "base/ios/ios_util.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/browser_view_controller_dependency_factory.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
@@ -66,11 +68,17 @@ id<GREYMatcher> PrintButton() {
   EARL_GREY_TEST_DISABLED(@"Test disabled on device.");
 #endif
 
+  // TODO(crbug.com/747622): re-enable this test on iOS 11 once earl grey can
+  // interact with the share menu.
+  if (base::ios::IsRunningOnIOS11OrLater()) {
+    EARL_GREY_TEST_DISABLED(@"Disabled on iOS 11.");
+  }
+
   std::map<GURL, std::string> responses;
   const GURL regularPageURL = web::test::HttpServer::MakeUrl("http://choux");
   responses[regularPageURL] = "fleur";
   web::test::SetUpHttpServer(
-      base::MakeUnique<ErrorPageResponseProvider>(responses));
+      std::make_unique<ErrorPageResponseProvider>(responses));
 
   // Open a regular page and verify that you can share.
   [ChromeEarlGrey loadURL:regularPageURL];
@@ -89,12 +97,17 @@ id<GREYMatcher> PrintButton() {
                                           @"This page cannot be printed.")]
       assertWithMatcher:grey_interactable()];
 
-  // Dismiss the snackbar.
-  [MDCSnackbarManager dismissAndCallCompletionBlocksWithCategory:
-                          kBrowserViewControllerSnackbarCategory];
+  // Dismiss the snackbar (nil dismisses all snackbar messages).
+  [MDCSnackbarManager dismissAndCallCompletionBlocksWithCategory:nil];
 }
 
 - (void)testActivityServiceControllerCantPrintUnprintablePages {
+  // TODO(crbug.com/747622): re-enable this test on iOS 11 once earl grey can
+  // interact with the share menu.
+  if (base::ios::IsRunningOnIOS11OrLater()) {
+    EARL_GREY_TEST_DISABLED(@"Disabled on iOS 11.");
+  }
+
   std::unique_ptr<web::DataResponseProvider> provider(
       new ErrorPageResponseProvider());
   web::test::SetUpHttpServer(std::move(provider));
@@ -114,7 +127,7 @@ id<GREYMatcher> PrintButton() {
   GURL kURL("chrome://version");
   [ChromeEarlGrey loadURL:kURL];
   // Verify that the share button is disabled.
-  if (IsCompact()) {
+  if (IsCompactWidth()) {
     [ChromeEarlGreyUI openToolsMenu];
   }
   id<GREYMatcher> share_button = chrome_test_util::ShareButton();
@@ -124,6 +137,12 @@ id<GREYMatcher> PrintButton() {
 }
 
 - (void)testOpenActivityServiceControllerAndCopy {
+  // TODO(crbug.com/747622): re-enable this test on iOS 11 once earl grey can
+  // interact with the share menu.
+  if (base::ios::IsRunningOnIOS11OrLater()) {
+    EARL_GREY_TEST_DISABLED(@"Disabled on iOS 11.");
+  }
+
   // Set up mock http server.
   std::map<GURL, std::string> responses;
   GURL url = web::test::HttpServer::MakeUrl("http://potato");

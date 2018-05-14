@@ -32,13 +32,15 @@ AmbientLightSensor::AmbientLightSensor(ExecutionContext* execution_context,
     : Sensor(execution_context,
              options,
              exception_state,
-             SensorType::AMBIENT_LIGHT) {}
+             SensorType::AMBIENT_LIGHT,
+             {mojom::FeaturePolicyFeature::kAmbientLightSensor}) {}
 
 double AmbientLightSensor::illuminance(bool& is_null) const {
-  return ReadingValue(0, is_null);
+  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
+  return GetReading().als.value;
 }
 
-DEFINE_TRACE(AmbientLightSensor) {
+void AmbientLightSensor::Trace(blink::Visitor* visitor) {
   Sensor::Trace(visitor);
 }
 

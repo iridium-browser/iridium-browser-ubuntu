@@ -47,7 +47,7 @@ gfx::ImageSkia CreateImageSkiaWithColor(int width, int height, SkColor color) {
   return gfx::ImageSkia::CreateFrom1xBitmap(bitmap);
 }
 
-class TrayUserTest : public AshTestBase {
+class TrayUserTest : public NoSessionAshTestBase {
  public:
   TrayUserTest() = default;
 
@@ -86,20 +86,19 @@ void TrayUserTest::SetUp() {
 }
 
 void TrayUserTest::InitializeParameters(int users_logged_in,
-                                        bool multiprofile) {
+                                        bool can_add_users) {
   // Set our default assumptions. Note that it is sufficient to set these
   // after everything was created.
-  GetSessionControllerClient()->Reset();
+  TestSessionControllerClient* session = GetSessionControllerClient();
+  session->Reset();
   ASSERT_LE(users_logged_in,
             static_cast<int>(arraysize(kPredefinedUserEmails)));
   for (int i = 0; i < users_logged_in; ++i)
-    GetSessionControllerClient()->AddUserSession(kPredefinedUserEmails[i]);
-  GetSessionControllerClient()->SetSessionState(
-      session_manager::SessionState::ACTIVE);
+    SimulateUserLogin(kPredefinedUserEmails[i]);
 
-  TestShellDelegate* shell_delegate =
-      static_cast<TestShellDelegate*>(Shell::Get()->shell_delegate());
-  shell_delegate->set_multi_profiles_enabled(multiprofile);
+  session->SetAddUserSessionPolicy(
+      can_add_users ? AddUserSessionPolicy::ALLOWED
+                    : AddUserSessionPolicy::ERROR_NO_ELIGIBLE_USERS);
 
   // Instead of using the existing tray panels we create new ones which makes
   // the access easier.
@@ -171,8 +170,8 @@ TEST_F(TrayUserTest, AccessibleLabelContainsSingleUserInfo) {
   view->GetAccessibleNodeData(&node_data);
   EXPECT_EQ(
       base::UTF8ToUTF16("Über tray Über tray Über tray Über tray First@tray"),
-      node_data.GetString16Attribute(ui::AX_ATTR_NAME));
-  EXPECT_EQ(ui::AX_ROLE_STATIC_TEXT, node_data.role);
+      node_data.GetString16Attribute(ax::mojom::StringAttribute::kName));
+  EXPECT_EQ(ax::mojom::Role::kStaticText, node_data.role);
 }
 
 TEST_F(TrayUserTest, AccessibleLabelContainsMultiUserInfo) {
@@ -186,8 +185,8 @@ TEST_F(TrayUserTest, AccessibleLabelContainsMultiUserInfo) {
   view->GetAccessibleNodeData(&node_data);
   EXPECT_EQ(
       base::UTF8ToUTF16("Über tray Über tray Über tray Über tray First@tray"),
-      node_data.GetString16Attribute(ui::AX_ATTR_NAME));
-  EXPECT_EQ(ui::AX_ROLE_BUTTON, node_data.role);
+      node_data.GetString16Attribute(ax::mojom::StringAttribute::kName));
+  EXPECT_EQ(ax::mojom::Role::kButton, node_data.role);
 }
 
 // Make sure that in multi user mode the user panel can be activated and there
@@ -195,14 +194,12 @@ TEST_F(TrayUserTest, AccessibleLabelContainsMultiUserInfo) {
 // Note: the mouse watcher (for automatic closing upon leave) cannot be tested
 // here since it does not work with the event system in unit tests.
 TEST_F(TrayUserTest, MultiUserModeDoesNotAllowToAddUser) {
-  InitializeParameters(1, true);
+  // Sign in more than one user.
+  InitializeParameters(2, true);
 
   // Move the mouse over the status area and click to open the status menu.
   ui::test::EventGenerator& generator = GetEventGenerator();
   generator.set_async(false);
-
-  // Set the number of logged in users.
-  GetSessionControllerClient()->CreatePredefinedUserSessions(5);
 
   // Verify that nothing is shown.
   EXPECT_FALSE(tray()->IsSystemBubbleVisible());

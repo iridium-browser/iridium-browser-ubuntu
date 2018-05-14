@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
@@ -161,7 +162,6 @@ BluetoothDeviceBlueZ::BluetoothDeviceBlueZ(
     : BluetoothDevice(adapter),
       object_path_(object_path),
       num_connecting_calls_(0),
-      connection_monitor_started_(false),
       ui_task_runner_(ui_task_runner),
       socket_thread_(socket_thread),
       weak_ptr_factory_(this) {
@@ -276,7 +276,7 @@ void BluetoothDeviceBlueZ::DisconnectGatt() {
     return;
   }
 
-  Disconnect(base::Bind(&base::DoNothing), base::Bind(&base::DoNothing));
+  Disconnect(base::DoNothing(), base::DoNothing());
 }
 
 std::string BluetoothDeviceBlueZ::GetAddress() const {
@@ -577,7 +577,7 @@ void BluetoothDeviceBlueZ::CancelPairing() {
                          << ": No pairing context or callback. "
                          << "Sending explicit cancel";
     bluez::BluezDBusManager::Get()->GetBluetoothDeviceClient()->CancelPairing(
-        object_path_, base::Bind(&base::DoNothing),
+        object_path_, base::DoNothing(),
         base::Bind(&BluetoothDeviceBlueZ::OnCancelPairingError,
                    weak_ptr_factory_.GetWeakPtr()));
   }

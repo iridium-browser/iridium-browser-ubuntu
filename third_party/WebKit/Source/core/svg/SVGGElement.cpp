@@ -20,9 +20,9 @@
 
 #include "core/svg/SVGGElement.h"
 
-#include "core/SVGNames.h"
 #include "core/layout/svg/LayoutSVGHiddenContainer.h"
 #include "core/layout/svg/LayoutSVGTransformableContainer.h"
+#include "core/svg_names.h"
 
 namespace blink {
 
@@ -33,14 +33,15 @@ inline SVGGElement::SVGGElement(Document& document,
 DEFINE_NODE_FACTORY(SVGGElement)
 
 LayoutObject* SVGGElement::CreateLayoutObject(const ComputedStyle& style) {
-  // SVG 1.1 testsuite explicitely uses constructs like
+  // SVG 1.1 testsuite explicitly uses constructs like
   // <g display="none"><linearGradient>
   // We still have to create layoutObjects for the <g> & <linearGradient>
   // element, though the subtree may be hidden - we only want the resource
   // layoutObjects to exist so they can be referenced from somewhere else.
   if (style.Display() == EDisplay::kNone)
     return new LayoutSVGHiddenContainer(this);
-
+  if (style.Display() == EDisplay::kContents)
+    return nullptr;
   return new LayoutSVGTransformableContainer(this);
 }
 

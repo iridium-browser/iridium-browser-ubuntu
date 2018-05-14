@@ -4,11 +4,13 @@
 
 #include "chrome/browser/android/contextualsearch/contextual_search_manager.h"
 
+#include <memory>
 #include <set>
 
 #include "base/android/jni_string.h"
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "base/supports_user_data.h"
 #include "base/time/time.h"
 #include "chrome/browser/android/contextualsearch/contextual_search_delegate.h"
 #include "chrome/browser/android/contextualsearch/resolved_search_term.h"
@@ -16,12 +18,12 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "components/contextual_search/browser/contextual_search_js_api_service_impl.h"
-#include "components/contextual_search/common/overlay_page_notifier_service.mojom.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "jni/ContextualSearchManager_jni.h"
 #include "net/url_request/url_fetcher_impl.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
@@ -30,6 +32,47 @@
 using base::android::JavaParamRef;
 using base::android::JavaRef;
 using content::WebContents;
+
+namespace {
+
+const char kContextualSearchObserverKey[] = "contextual_search_observer";
+
+class ContextualSearchObserver : public content::WebContentsObserver,
+                                 public base::SupportsUserData::Data {
+ public:
+  ContextualSearchObserver(
+      content::WebContents* contents,
+      contextual_search::ContextualSearchJsApiHandler* api_handler)
+      : content::WebContentsObserver(contents) {
+    registry_.AddInterface(base::Bind(
+        &contextual_search::CreateContextualSearchJsApiService, api_handler));
+  }
+  ~ContextualSearchObserver() override = default;
+
+  static void EnsureForWebContents(
+      content::WebContents* contents,
+      contextual_search::ContextualSearchJsApiHandler* api_handler) {
+    // Clobber any prior registered observer.
+    contents->SetUserData(
+        kContextualSearchObserverKey,
+        std::make_unique<ContextualSearchObserver>(contents, api_handler));
+  }
+
+ private:
+  // content::WebContentsObserver:
+  void OnInterfaceRequestFromFrame(
+      content::RenderFrameHost* render_frame_host,
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle* interface_pipe) override {
+    registry_.TryBindInterface(interface_name, interface_pipe);
+  }
+
+  service_manager::BinderRegistry registry_;
+
+  DISALLOW_COPY_AND_ASSIGN(ContextualSearchObserver);
+};
+
+}  // namespace
 
 // This class manages the native behavior of the Contextual Search feature.
 // Instances of this class are owned by the Java ContextualSearchManager.
@@ -161,31 +204,31 @@ void ContextualSearchManager::OnTextSurroundingSelectionAvailable(
       end_offset);
 }
 
-void ContextualSearchManager::EnableContextualSearchJsApiForOverlay(
+void ContextualSearchManager::EnableContextualSearchJsApiForWebContents(
     JNIEnv* env,
     jobject obj,
     const JavaParamRef<jobject>& j_overlay_web_contents) {
+  DCHECK(j_overlay_web_contents);
   WebContents* overlay_web_contents =
       WebContents::FromJavaWebContents(j_overlay_web_contents);
   DCHECK(overlay_web_contents);
-  // Tell our Overlay Notifier Service that this is currently a CS page.
-  content::RenderFrameHost* render_frame_host =
-      overlay_web_contents->GetRenderViewHost()->GetMainFrame();
-  DCHECK(render_frame_host);
-  contextual_search::mojom::OverlayPageNotifierServicePtr page_notifier_service;
-  render_frame_host->GetRemoteInterfaces()->GetInterface(
-      &page_notifier_service);
-  DCHECK(page_notifier_service);
-  page_notifier_service->NotifyIsContextualSearchOverlay();
-
-  // Also set up the backchannel to call into this class from the JS API.
-  render_frame_host->GetInterfaceRegistry()->AddInterface(
-      base::Bind(&contextual_search::CreateContextualSearchJsApiService, this));
+  ContextualSearchObserver::EnsureForWebContents(overlay_web_contents, this);
 }
 
-jlong Init(JNIEnv* env, const JavaParamRef<jobject>& obj) {
-  ContextualSearchManager* manager = new ContextualSearchManager(env, obj);
-  return reinterpret_cast<intptr_t>(manager);
+void ContextualSearchManager::WhitelistContextualSearchJsApiUrl(
+    JNIEnv* env,
+    jobject obj,
+    const base::android::JavaParamRef<jstring>& j_url) {
+  DCHECK(j_url);
+  overlay_gurl_ = GURL(base::android::ConvertJavaStringToUTF8(env, j_url));
+}
+
+void ContextualSearchManager::ShouldEnableJsApi(
+    const GURL& gurl,
+    contextual_search::mojom::ContextualSearchJsApiService::
+        ShouldEnableJsApiCallback callback) {
+  bool should_enable = (gurl == overlay_gurl_);
+  std::move(callback).Run(should_enable);
 }
 
 void ContextualSearchManager::SetCaption(std::string caption,
@@ -195,4 +238,10 @@ void ContextualSearchManager::SetCaption(std::string caption,
       base::android::ConvertUTF8ToJavaString(env, caption.c_str());
   Java_ContextualSearchManager_onSetCaption(env, java_manager_, j_caption,
                                             does_answer);
+}
+
+jlong JNI_ContextualSearchManager_Init(JNIEnv* env,
+                                       const JavaParamRef<jobject>& obj) {
+  ContextualSearchManager* manager = new ContextualSearchManager(env, obj);
+  return reinterpret_cast<intptr_t>(manager);
 }

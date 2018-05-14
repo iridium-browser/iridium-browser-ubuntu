@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.notifications;
 
+import static org.junit.Assert.assertThat;
+
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import android.annotation.TargetApi;
@@ -21,6 +23,7 @@ import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.LargeTest;
 import android.support.test.filters.MediumTest;
 
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -28,12 +31,13 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.base.test.util.RetryOnFailure;
+import org.chromium.base.test.util.UserActionTester;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.engagement.SiteEngagementService;
@@ -43,7 +47,6 @@ import org.chromium.chrome.browser.preferences.website.ContentSetting;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.widget.RoundedIconGenerator;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.InfoBarUtil;
 import org.chromium.chrome.test.util.browser.TabTitleObserver;
@@ -53,6 +56,8 @@ import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -64,11 +69,7 @@ import java.util.concurrent.TimeoutException;
  * Web Notifications are only supported on Android JellyBean and beyond.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        // Preconnect causes issues with the single-threaded Java test server.
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class NotificationPlatformBridgeTest {
     @Rule
     public NotificationTestRule mNotificationTestRule = new NotificationTestRule();
@@ -248,7 +249,7 @@ public class NotificationPlatformBridgeTest {
     @RetryOnFailure
     public void testDefaultNotificationProperties() throws Exception {
         mNotificationTestRule.setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
 
         Notification notification =
                 mNotificationTestRule.showAndGetNotification("MyNotification", "{ body: 'Hello' }");
@@ -287,6 +288,9 @@ public class NotificationPlatformBridgeTest {
         // no significance, but needs to be high enough to not cause flakiness as it's set by the
         // renderer process on notification creation.
         Assert.assertTrue(Math.abs(System.currentTimeMillis() - notification.when) < 60 * 1000);
+
+        boolean timestampIsShown = NotificationTestUtil.getExtraShownWhen(notification);
+        Assert.assertTrue("Timestamp should be shown", timestampIsShown);
 
         Assert.assertNotNull(
                 NotificationTestUtil.getLargeIconFromNotification(context, notification));
@@ -338,10 +342,12 @@ public class NotificationPlatformBridgeTest {
     @Feature({"Browser", "Notifications"})
     public void testReplyToNotification() throws Exception {
         mNotificationTestRule.setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
 
-        // +5 engagement from notification permission and +0.5 from navigating to the test page.
-        Assert.assertEquals(5.5, getEngagementScoreBlocking(), 0);
+        UserActionTester actionTester = new UserActionTester();
+
+        // +0.5 engagement from navigating to the test page.
+        Assert.assertEquals(0.5, getEngagementScoreBlocking(), 0);
         Notification notification = mNotificationTestRule.showAndGetNotification("MyNotification",
                 "{ "
                         + " actions: [{action: 'myAction', title: 'reply', type: 'text'}],"
@@ -360,7 +366,12 @@ public class NotificationPlatformBridgeTest {
         // Check reply was received by the service worker (see android_test_worker.js).
         // Expect +1 engagement from interacting with the notification.
         waitForTitle("reply: My Reply");
-        Assert.assertEquals(6.5, getEngagementScoreBlocking(), 0);
+        Assert.assertEquals(1.5, getEngagementScoreBlocking(), 0);
+
+        // Replies are always delivered to an action button.
+        assertThat(actionTester.toString(), getNotificationActions(actionTester),
+                Matchers.contains("Notifications.Persistent.Shown",
+                        "Notifications.Persistent.ClickedActionButton"));
     }
 
     /**
@@ -377,10 +388,10 @@ public class NotificationPlatformBridgeTest {
     @Feature({"Browser", "Notifications"})
     public void testReplyToNotificationWithEmptyReply() throws Exception {
         mNotificationTestRule.setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
 
-        // +5 engagement from notification permission and +0.5 from navigating to the test page.
-        Assert.assertEquals(5.5, getEngagementScoreBlocking(), 0);
+        // +0.5 engagement from navigating to the test page.
+        Assert.assertEquals(0.5, getEngagementScoreBlocking(), 0);
         Notification notification = mNotificationTestRule.showAndGetNotification("MyNotification",
                 "{ "
                         + " actions: [{action: 'myAction', title: 'reply', type: 'text'}],"
@@ -399,7 +410,7 @@ public class NotificationPlatformBridgeTest {
         // Check empty reply was received by the service worker (see android_test_worker.js).
         // Expect +1 engagement from interacting with the notification.
         waitForTitle("reply:");
-        Assert.assertEquals(6.5, getEngagementScoreBlocking(), 0);
+        Assert.assertEquals(1.5, getEngagementScoreBlocking(), 0);
     }
 
     //TODO(yolandyan): remove this after supporting SdkSuppress annotation
@@ -436,8 +447,8 @@ public class NotificationPlatformBridgeTest {
     public void testReplyToNotificationWithNoRemoteInput() throws Exception {
         mNotificationTestRule.setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
 
-        // +5 engagement from notification permission and +0.5 from navigating to the test page.
-        Assert.assertEquals(5.5, getEngagementScoreBlocking(), 0);
+        // +0.5 engagement from navigating to the test page.
+        Assert.assertEquals(0.5, getEngagementScoreBlocking(), 0);
         Notification notification = mNotificationTestRule.showAndGetNotification("MyNotification",
                 "{ "
                         + " actions: [{action: 'myAction', title: 'reply', type: 'text'}],"
@@ -449,7 +460,7 @@ public class NotificationPlatformBridgeTest {
         // Check reply was received by the service worker (see android_test_worker.js).
         // Expect +1 engagement from interacting with the notification.
         waitForTitle("reply: null");
-        Assert.assertEquals(6.5, getEngagementScoreBlocking(), 0);
+        Assert.assertEquals(1.5, getEngagementScoreBlocking(), 0);
     }
 
     /**
@@ -580,7 +591,7 @@ public class NotificationPlatformBridgeTest {
 
         Assert.assertEquals("MyNotification", NotificationTestUtil.getExtraTitle(notification));
 
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
         Bitmap smallIcon = NotificationTestUtil.getSmallIconFromNotification(context, notification);
         Assert.assertNotNull(smallIcon);
 
@@ -633,7 +644,7 @@ public class NotificationPlatformBridgeTest {
 
         Assert.assertEquals("MyNotification", NotificationTestUtil.getExtraTitle(notification));
 
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
         Bitmap largeIcon = NotificationTestUtil.getLargeIconFromNotification(context, notification);
         Assert.assertNotNull(largeIcon);
         Assert.assertEquals(Color.RED, largeIcon.getPixel(0, 0));
@@ -656,7 +667,7 @@ public class NotificationPlatformBridgeTest {
 
         Assert.assertEquals("NoIconNotification", NotificationTestUtil.getExtraTitle(notification));
 
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
         Assert.assertNotNull(
                 NotificationTestUtil.getLargeIconFromNotification(context, notification));
 
@@ -686,8 +697,10 @@ public class NotificationPlatformBridgeTest {
     @RetryOnFailure
     public void testNotificationContentIntentClosesNotification() throws Exception {
         mNotificationTestRule.setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
-        // +5 engagement from notification permission and +0.5 from navigating to the test page.
-        Assert.assertEquals(5.5, getEngagementScoreBlocking(), 0);
+        // +0.5 engagement from navigating to the test page.
+        Assert.assertEquals(0.5, getEngagementScoreBlocking(), 0);
+
+        UserActionTester actionTester = new UserActionTester();
 
         Notification notification =
                 mNotificationTestRule.showAndGetNotification("MyNotification", "{}");
@@ -701,7 +714,19 @@ public class NotificationPlatformBridgeTest {
         // Expect +1 engagement from interacting with the notification.
         mNotificationTestRule.waitForNotificationManagerMutation();
         Assert.assertTrue(mNotificationTestRule.getNotificationEntries().isEmpty());
-        Assert.assertEquals(6.5, getEngagementScoreBlocking(), 0);
+        Assert.assertEquals(1.5, getEngagementScoreBlocking(), 0);
+
+        // This metric only applies on N+, where we schedule a job to handle the click.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            Assert.assertEquals(1,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            "Notifications.Android.JobStartDelay"));
+        }
+
+        // Clicking on a notification should record the right user metrics.
+        assertThat(actionTester.toString(), getNotificationActions(actionTester),
+                Matchers.contains(
+                        "Notifications.Persistent.Shown", "Notifications.Persistent.Clicked"));
     }
 
     /**
@@ -738,6 +763,12 @@ public class NotificationPlatformBridgeTest {
                 return 2 == mNotificationTestRule.getActivity().getCurrentTabModel().getCount();
             }
         });
+        // This metric only applies on N+, where we schedule a job to handle the click.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            Assert.assertEquals(1,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            "Notifications.Android.JobStartDelay"));
+        }
     }
 
     /**
@@ -745,13 +776,12 @@ public class NotificationPlatformBridgeTest {
      * notification with the same tag to be dismissed prior to being shown.
      */
     @Test
-    @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @MediumTest
     @Feature({"Browser", "Notifications"})
     public void testNotificationTagReplacement() throws Exception {
         mNotificationTestRule.setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
-        // +5 engagement from notification permission and +0.5 from navigating to the test page.
-        Assert.assertEquals(5.5, getEngagementScoreBlocking(), 0);
+        // +0.5 engagement from navigating to the test page.
+        Assert.assertEquals(0.5, getEngagementScoreBlocking(), 0);
 
         mNotificationTestRule.runJavaScriptCodeInCurrentTab(
                 "showNotification('MyNotification', {tag: 'myTag'});");
@@ -778,7 +808,7 @@ public class NotificationPlatformBridgeTest {
         Assert.assertEquals(NotificationPlatformBridge.PLATFORM_ID, notifications.get(0).id);
 
         // Engagement should not have changed since we didn't interact.
-        Assert.assertEquals(5.5, getEngagementScoreBlocking(), 0);
+        Assert.assertEquals(0.5, getEngagementScoreBlocking(), 0);
     }
 
     /**
@@ -790,8 +820,8 @@ public class NotificationPlatformBridgeTest {
     @Feature({"Browser", "Notifications"})
     public void testShowAndCloseMultipleNotifications() throws Exception {
         mNotificationTestRule.setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
-        // +5 engagement from notification permission and +0.5 from navigating to the test page.
-        Assert.assertEquals(5.5, getEngagementScoreBlocking(), 0);
+        // +0.5 engagement from navigating to the test page.
+        Assert.assertEquals(0.5, getEngagementScoreBlocking(), 0);
 
         // Open the first notification and verify it is displayed.
         mNotificationTestRule.runJavaScriptCodeInCurrentTab("showNotification('One');");
@@ -834,7 +864,7 @@ public class NotificationPlatformBridgeTest {
                 "Two", NotificationTestUtil.getExtraTitle(notifications.get(0).notification));
 
         // Expect +1 engagement from interacting with the notification.
-        Assert.assertEquals(6.5, getEngagementScoreBlocking(), 0);
+        Assert.assertEquals(1.5, getEngagementScoreBlocking(), 0);
 
         // Close the last notification and verify that none remain.
         notifications.get(0).notification.contentIntent.send();
@@ -842,6 +872,20 @@ public class NotificationPlatformBridgeTest {
         Assert.assertTrue(mNotificationTestRule.getNotificationEntries().isEmpty());
 
         // Expect +1 engagement from interacting with the notification.
-        Assert.assertEquals(7.5, getEngagementScoreBlocking(), 0);
+        Assert.assertEquals(2.5, getEngagementScoreBlocking(), 0);
+    }
+
+    /**
+     * Get Notification related actions, filter all other actions to avoid flakes.
+     */
+    private List<String> getNotificationActions(UserActionTester actionTester) {
+        List<String> actions = new ArrayList<>(actionTester.getActions());
+        Iterator<String> it = actions.iterator();
+        while (it.hasNext()) {
+            if (!it.next().startsWith("Notifications.")) {
+                it.remove();
+            }
+        }
+        return actions;
     }
 }

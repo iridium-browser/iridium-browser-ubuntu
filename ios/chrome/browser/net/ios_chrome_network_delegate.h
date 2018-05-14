@@ -61,14 +61,13 @@ class IOSChromeNetworkDelegate : public net::NetworkDelegateImpl {
   bool OnCanGetCookies(const net::URLRequest& request,
                        const net::CookieList& cookie_list) override;
   bool OnCanSetCookie(const net::URLRequest& request,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       net::CookieOptions* options) override;
   bool OnCanAccessFile(const net::URLRequest& request,
                        const base::FilePath& original_path,
                        const base::FilePath& absolute_path) const override;
-  bool OnCanEnablePrivacyMode(
-      const GURL& url,
-      const GURL& first_party_for_cookies) const override;
+  bool OnCanEnablePrivacyMode(const GURL& url,
+                              const GURL& site_for_cookies) const override;
   bool OnCancelURLRequestWithPolicyViolatingReferrerHeader(
       const net::URLRequest& request,
       const GURL& target_url,

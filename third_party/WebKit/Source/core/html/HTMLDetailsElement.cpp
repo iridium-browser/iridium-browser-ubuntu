@@ -23,49 +23,24 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
-#include "core/HTMLNames.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/Text.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/frame/UseCounter.h"
-#include "core/html/HTMLContentElement.h"
 #include "core/html/HTMLDivElement.h"
+#include "core/html/HTMLSlotElement.h"
 #include "core/html/HTMLSummaryElement.h"
 #include "core/html/shadow/DetailsMarkerControl.h"
 #include "core/html/shadow/ShadowElementNames.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutBlockFlow.h"
 #include "platform/text/PlatformLocale.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
 using namespace HTMLNames;
-
-class FirstSummarySelectFilter final : public HTMLContentSelectFilter {
- public:
-  virtual ~FirstSummarySelectFilter() {}
-
-  static FirstSummarySelectFilter* Create() {
-    return new FirstSummarySelectFilter();
-  }
-
-  bool CanSelectNode(const HeapVector<Member<Node>, 32>& siblings,
-                     int nth) const override {
-    if (!siblings[nth]->HasTagName(HTMLNames::summaryTag))
-      return false;
-    for (int i = nth - 1; i >= 0; --i) {
-      if (siblings[i]->HasTagName(HTMLNames::summaryTag))
-        return false;
-    }
-    return true;
-  }
-
-  DEFINE_INLINE_VIRTUAL_TRACE() { HTMLContentSelectFilter::Trace(visitor); }
-
- private:
-  FirstSummarySelectFilter() {}
-};
 
 HTMLDetailsElement* HTMLDetailsElement::Create(Document& document) {
   HTMLDetailsElement* details = new HTMLDetailsElement(document);
@@ -78,7 +53,17 @@ HTMLDetailsElement::HTMLDetailsElement(Document& document)
   UseCounter::Count(document, WebFeature::kDetailsElement);
 }
 
-HTMLDetailsElement::~HTMLDetailsElement() {}
+HTMLDetailsElement::~HTMLDetailsElement() = default;
+
+// static
+bool HTMLDetailsElement::IsFirstSummary(const Node& node) {
+  DCHECK(IsHTMLDetailsElement(node.parentElement()));
+  if (!IsHTMLSummaryElement(node))
+    return false;
+  return node.parentElement() &&
+         &node ==
+             Traversal<HTMLSummaryElement>::FirstChild(*node.parentElement());
+}
 
 void HTMLDetailsElement::DispatchPendingEvent() {
   DispatchEvent(Event::Create(EventTypeNames::toggle));
@@ -95,15 +80,16 @@ void HTMLDetailsElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
       Text::Create(GetDocument(),
                    GetLocale().QueryString(WebLocalizedString::kDetailsLabel)));
 
-  HTMLContentElement* summary = HTMLContentElement::Create(
-      GetDocument(), FirstSummarySelectFilter::Create());
-  summary->SetIdAttribute(ShadowElementNames::DetailsSummary());
-  summary->AppendChild(default_summary);
-  root.AppendChild(summary);
+  HTMLSlotElement* summary_slot =
+      HTMLSlotElement::CreateUserAgentCustomAssignSlot(GetDocument());
+  summary_slot->SetIdAttribute(ShadowElementNames::DetailsSummary());
+  summary_slot->AppendChild(default_summary);
+  root.AppendChild(summary_slot);
 
   HTMLDivElement* content = HTMLDivElement::Create(GetDocument());
   content->SetIdAttribute(ShadowElementNames::DetailsContent());
-  content->AppendChild(HTMLContentElement::Create(GetDocument()));
+  content->AppendChild(
+      HTMLSlotElement::CreateUserAgentDefaultSlot(GetDocument()));
   content->SetInlineStyleProperty(CSSPropertyDisplay, CSSValueNone);
   root.AppendChild(content);
 }
@@ -113,11 +99,11 @@ Element* HTMLDetailsElement::FindMainSummary() const {
           Traversal<HTMLSummaryElement>::FirstChild(*this))
     return summary;
 
-  HTMLContentElement* content =
-      toHTMLContentElementOrDie(UserAgentShadowRoot()->firstChild());
-  DCHECK(content->firstChild());
-  CHECK(isHTMLSummaryElement(*content->firstChild()));
-  return ToElement(content->firstChild());
+  HTMLSlotElement* slot =
+      ToHTMLSlotElementOrDie(UserAgentShadowRoot()->firstChild());
+  DCHECK(slot->firstChild());
+  CHECK(IsHTMLSummaryElement(*slot->firstChild()));
+  return ToElement(slot->firstChild());
 }
 
 void HTMLDetailsElement::ParseAttribute(
@@ -129,12 +115,10 @@ void HTMLDetailsElement::ParseAttribute(
       return;
 
     // Dispatch toggle event asynchronously.
-    pending_event_ =
-        TaskRunnerHelper::Get(TaskType::kDOMManipulation, &GetDocument())
-            ->PostCancellableTask(
-                BLINK_FROM_HERE,
-                WTF::Bind(&HTMLDetailsElement::DispatchPendingEvent,
-                          WrapPersistent(this)));
+    pending_event_ = PostCancellableTask(
+        *GetDocument().GetTaskRunner(TaskType::kDOMManipulation), FROM_HERE,
+        WTF::Bind(&HTMLDetailsElement::DispatchPendingEvent,
+                  WrapPersistent(this)));
 
     Element* content = EnsureUserAgentShadowRoot().getElementById(
         ShadowElementNames::DetailsContent());
@@ -149,7 +133,7 @@ void HTMLDetailsElement::ParseAttribute(
     Element* summary = FindMainSummary();
     DCHECK(summary);
 
-    Element* control = toHTMLSummaryElement(summary)->MarkerControl();
+    Element* control = ToHTMLSummaryElement(summary)->MarkerControl();
     if (control && control->GetLayoutObject())
       control->GetLayoutObject()->SetShouldDoFullPaintInvalidation();
 

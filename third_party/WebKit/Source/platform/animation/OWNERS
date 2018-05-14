@@ -1,8 +1,6 @@
-alancutter@chromium.org
-dstockwell@chromium.org
-loyso@chromium.org
-shans@chromium.org
-timloh@chromium.org
+file://third_party/WebKit/Source/core/animation/OWNERS
 
-# TEAM: style-dev@chromium.org
+loyso@chromium.org
+
+# TEAM: animations-dev@chromium.org
 # COMPONENT: Blink>Animation

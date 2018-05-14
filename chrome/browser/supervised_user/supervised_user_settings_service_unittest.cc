@@ -28,9 +28,8 @@ class MockSyncErrorFactory : public syncer::SyncErrorFactory {
   ~MockSyncErrorFactory() override;
 
   // SyncErrorFactory implementation:
-  syncer::SyncError CreateAndUploadError(
-      const tracked_objects::Location& location,
-      const std::string& message) override;
+  syncer::SyncError CreateAndUploadError(const base::Location& location,
+                                         const std::string& message) override;
 
  private:
   syncer::ModelType type_;
@@ -44,7 +43,7 @@ MockSyncErrorFactory::MockSyncErrorFactory(syncer::ModelType type)
 MockSyncErrorFactory::~MockSyncErrorFactory() {}
 
 syncer::SyncError MockSyncErrorFactory::CreateAndUploadError(
-    const tracked_objects::Location& location,
+    const base::Location& location,
     const std::string& message) {
   return syncer::SyncError(location,
                            syncer::SyncError::DATATYPE_ERROR,
@@ -82,7 +81,7 @@ class SupervisedUserSettingsServiceTest : public ::testing::Test {
   }
 
   void UploadSplitItem(const std::string& key, const std::string& value) {
-    split_items_.SetStringWithoutPathExpansion(key, value);
+    split_items_.SetKey(key, base::Value(value));
     settings_service_.UploadItem(
         SupervisedUserSettingsService::MakeSplitSettingKey(kSplitItemName, key),
         std::unique_ptr<base::Value>(new base::Value(value)));

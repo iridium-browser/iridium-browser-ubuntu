@@ -27,7 +27,7 @@ namespace {
 
 class MockAddressSorter : public AddressSorter {
  public:
-  ~MockAddressSorter() override {}
+  ~MockAddressSorter() override = default;
   void Sort(const AddressList& list,
             const CallbackType& callback) const override {
     // Do nothing.
@@ -42,11 +42,11 @@ class MockTransaction : public DnsTransaction,
   MockTransaction(const MockDnsClientRuleList& rules,
                   const std::string& hostname,
                   uint16_t qtype,
-                  const DnsTransactionFactory::CallbackType& callback)
+                  DnsTransactionFactory::CallbackType callback)
       : result_(MockDnsClientRule::FAIL),
         hostname_(hostname),
         qtype_(qtype),
-        callback_(callback),
+        callback_(std::move(callback)),
         started_(false),
         delayed_(false) {
     // Find the relevant rule which matches |qtype| and prefix of |hostname|.
@@ -134,19 +134,22 @@ class MockTransaction : public DnsTransaction,
           nbytes += answer_size;
         }
         EXPECT_TRUE(response.InitParse(nbytes, query));
-        callback_.Run(this, OK, &response);
+        std::move(callback_).Run(this, OK, &response);
       } break;
       case MockDnsClientRule::FAIL:
-        callback_.Run(this, ERR_NAME_NOT_RESOLVED, NULL);
+        std::move(callback_).Run(this, ERR_NAME_NOT_RESOLVED, NULL);
         break;
       case MockDnsClientRule::TIMEOUT:
-        callback_.Run(this, ERR_DNS_TIMED_OUT, NULL);
+        std::move(callback_).Run(this, ERR_DNS_TIMED_OUT, NULL);
         break;
       default:
         NOTREACHED();
         break;
     }
   }
+
+  void SetRequestContext(URLRequestContext*) override {}
+  void SetRequestPriority(RequestPriority priority) override {}
 
   MockDnsClientRule::Result result_;
   const std::string hostname_;
@@ -164,18 +167,23 @@ class MockTransactionFactory : public DnsTransactionFactory {
   explicit MockTransactionFactory(const MockDnsClientRuleList& rules)
       : rules_(rules) {}
 
-  ~MockTransactionFactory() override {}
+  ~MockTransactionFactory() override = default;
 
   std::unique_ptr<DnsTransaction> CreateTransaction(
       const std::string& hostname,
       uint16_t qtype,
-      const DnsTransactionFactory::CallbackType& callback,
+      DnsTransactionFactory::CallbackType callback,
       const NetLogWithSource&) override {
-    MockTransaction* transaction =
-        new MockTransaction(rules_, hostname, qtype, callback);
+    std::unique_ptr<MockTransaction> transaction =
+        std::make_unique<MockTransaction>(rules_, hostname, qtype,
+                                          std::move(callback));
     if (transaction->delayed())
       delayed_transactions_.push_back(transaction->AsWeakPtr());
-    return std::unique_ptr<DnsTransaction>(transaction);
+    return transaction;
+  }
+
+  void AddEDNSOption(const OptRecordRdata::Opt& opt) override {
+    NOTREACHED() << "Not implemented";
   }
 
   void CompleteDelayedTransactions() {
@@ -202,13 +210,17 @@ MockDnsClient::MockDnsClient(const DnsConfig& config,
         address_sorter_(new MockAddressSorter()) {
 }
 
-MockDnsClient::~MockDnsClient() {}
+MockDnsClient::~MockDnsClient() = default;
 
 void MockDnsClient::SetConfig(const DnsConfig& config) {
   config_ = config;
 }
 
 const DnsConfig* MockDnsClient::GetConfig() const {
+  if (!config_.IsValid())
+    printf("invalid config\n");
+  else
+    printf("valid config\n");
   return config_.IsValid() ? &config_ : NULL;
 }
 

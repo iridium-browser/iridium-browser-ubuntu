@@ -5,14 +5,13 @@
 #include "ash/system/cast/tray_cast_test_api.h"
 
 #include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_delegate.h"
 #include "ui/views/view.h"
 
 namespace ash {
 
 TrayCastTestAPI::TrayCastTestAPI(TrayCast* tray_cast) : tray_cast_(tray_cast) {}
 
-TrayCastTestAPI::~TrayCastTestAPI() {}
+TrayCastTestAPI::~TrayCastTestAPI() = default;
 
 bool TrayCastTestAPI::IsTrayInitialized() const {
   return tray_cast_->default_ != nullptr;

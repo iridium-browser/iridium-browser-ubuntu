@@ -14,7 +14,7 @@ class HTMLMetaElement;
 class WebMetaElement final : public WebElement {
  public:
   WebMetaElement() : WebElement() {}
-  WebMetaElement(const WebMetaElement& element) : WebElement(element) {}
+  WebMetaElement(const WebMetaElement& element) = default;
 
   WebMetaElement& operator=(const WebMetaElement& element) {
     WebElement::Assign(element);
@@ -24,7 +24,7 @@ class WebMetaElement final : public WebElement {
 
   BLINK_EXPORT WebString ComputeEncoding() const;
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebMetaElement(HTMLMetaElement*);
   WebMetaElement& operator=(HTMLMetaElement*);
   operator HTMLMetaElement*() const;

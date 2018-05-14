@@ -8,12 +8,14 @@
 #include <string>
 
 #include "base/callback.h"
+#include "build/buildflag.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ime/linux/linux_input_method_context_factory.h"
 #include "ui/base/ime/linux/text_edit_key_bindings_delegate_auralinux.h"
 #include "ui/gfx/linux_font_delegate.h"
 #include "ui/shell_dialogs/shell_dialog_linux.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/features.h"
 #include "ui/views/linux_ui/status_icon_linux.h"
 #include "ui/views/views_export.h"
 
@@ -22,6 +24,10 @@
 
 namespace aura {
 class Window;
+}
+
+namespace base {
+class TimeDelta;
 }
 
 namespace color_utils {
@@ -43,6 +49,10 @@ class LabelButton;
 class LabelButtonBorder;
 class WindowButtonOrderObserver;
 
+#if BUILDFLAG(ENABLE_NATIVE_WINDOW_NAV_BUTTONS)
+class NavButtonProvider;
+#endif
+
 // Adapter class with targets to render like different toolkits. Set by any
 // project that wants to do linux desktop native rendering.
 //
@@ -57,11 +67,21 @@ class VIEWS_EXPORT LinuxUI : public ui::LinuxInputMethodContextFactory,
  public:
   // Describes the window management actions that could be taken in response to
   // a middle click in the non client area.
-  enum NonClientMiddleClickAction {
-    MIDDLE_CLICK_ACTION_NONE,
-    MIDDLE_CLICK_ACTION_LOWER,
-    MIDDLE_CLICK_ACTION_MINIMIZE,
-    MIDDLE_CLICK_ACTION_TOGGLE_MAXIMIZE
+  enum NonClientWindowFrameAction {
+    WINDOW_FRAME_ACTION_NONE,
+    WINDOW_FRAME_ACTION_LOWER,
+    WINDOW_FRAME_ACTION_MINIMIZE,
+    WINDOW_FRAME_ACTION_TOGGLE_MAXIMIZE,
+    WINDOW_FRAME_ACTION_MENU,
+  };
+
+  // The types of clicks that might invoke a NonClientWindowFrameAction.
+  enum NonClientWindowFrameActionSourceType {
+    WINDOW_FRAME_ACTION_SOURCE_DOUBLE_CLICK = 0,
+    WINDOW_FRAME_ACTION_SOURCE_MIDDLE_CLICK,
+    WINDOW_FRAME_ACTION_SOURCE_RIGHT_CLICK,
+
+    WINDOW_FRAME_ACTION_SOURCE_LAST
   };
 
   typedef base::Callback<ui::NativeTheme*(aura::Window* window)>
@@ -92,7 +112,7 @@ class VIEWS_EXPORT LinuxUI : public ui::LinuxInputMethodContextFactory,
   virtual SkColor GetActiveSelectionFgColor() const = 0;
   virtual SkColor GetInactiveSelectionBgColor() const = 0;
   virtual SkColor GetInactiveSelectionFgColor() const = 0;
-  virtual double GetCursorBlinkInterval() const = 0;
+  virtual base::TimeDelta GetCursorBlinkInterval() const = 0;
 
   // Returns a NativeTheme that will provide system colors and draw system
   // style widgets.
@@ -139,12 +159,10 @@ class VIEWS_EXPORT LinuxUI : public ui::LinuxInputMethodContextFactory,
   virtual void RemoveWindowButtonOrderObserver(
       WindowButtonOrderObserver* observer) = 0;
 
-  // Determines whether the user's window manager is Unity.
-  virtual bool UnityIsRunning() = 0;
-
-  // What action we should take when the user middle clicks on non-client
-  // area. The default is lowering the window.
-  virtual NonClientMiddleClickAction GetNonClientMiddleClickAction() = 0;
+  // What action we should take when the user clicks on the non-client area.
+  // |source| describes the type of click.
+  virtual NonClientWindowFrameAction GetNonClientWindowFrameAction(
+      NonClientWindowFrameActionSourceType source) = 0;
 
   // Notifies the window manager that start up has completed.
   // Normally Chromium opens a new window on startup and GTK does this
@@ -168,6 +186,16 @@ class VIEWS_EXPORT LinuxUI : public ui::LinuxInputMethodContextFactory,
   // factor.
   virtual void RemoveDeviceScaleFactorObserver(
       DeviceScaleFactorObserver* observer) = 0;
+
+  // Only used on GTK to indicate if the dark GTK theme variant is
+  // preferred.
+  virtual bool PreferDarkTheme() const = 0;
+
+#if BUILDFLAG(ENABLE_NATIVE_WINDOW_NAV_BUTTONS)
+  // Returns a new NavButtonProvider, or nullptr if the underlying
+  // toolkit does not support drawing client-side navigation buttons.
+  virtual std::unique_ptr<NavButtonProvider> CreateNavButtonProvider() = 0;
+#endif
 };
 
 }  // namespace views

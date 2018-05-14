@@ -16,8 +16,6 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/widget.h"
 
-namespace chrome {
-
 ////////////////////////////////////////////////////////////////////////////////
 // CryptoModulePasswordDialogView, public:
 
@@ -27,6 +25,8 @@ CryptoModulePasswordDialogView::CryptoModulePasswordDialogView(
     const std::string& hostname,
     const CryptoModulePasswordCallback& callback)
     : callback_(callback) {
+  set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
+      views::TEXT, views::CONTROL));
   Init(hostname, slot_name, reason);
   chrome::RecordDialogCreation(chrome::DialogIdentifier::CRYPTO_PASSWORD);
 }
@@ -88,25 +88,25 @@ void CryptoModulePasswordDialogView::Init(const std::string& hostname,
   const base::string16& hostname16 = base::UTF8ToUTF16(hostname);
   const base::string16& slot16 = base::UTF8ToUTF16(slot_name);
   switch (reason) {
-    case chrome::kCryptoModulePasswordCertEnrollment:
+    case kCryptoModulePasswordCertEnrollment:
       text = l10n_util::GetStringFUTF8(
           IDS_CRYPTO_MODULE_AUTH_DIALOG_TEXT_CERT_ENROLLMENT,
           slot16,
           hostname16);
       break;
-    case chrome::kCryptoModulePasswordClientAuth:
+    case kCryptoModulePasswordClientAuth:
       text = l10n_util::GetStringFUTF8(
           IDS_CRYPTO_MODULE_AUTH_DIALOG_TEXT_CLIENT_AUTH, slot16, hostname16);
       break;
-    case chrome::kCryptoModulePasswordListCerts:
+    case kCryptoModulePasswordListCerts:
       text = l10n_util::GetStringFUTF8(
           IDS_CRYPTO_MODULE_AUTH_DIALOG_TEXT_LIST_CERTS, slot16);
       break;
-    case chrome::kCryptoModulePasswordCertImport:
+    case kCryptoModulePasswordCertImport:
       text = l10n_util::GetStringFUTF8(
           IDS_CRYPTO_MODULE_AUTH_DIALOG_TEXT_CERT_IMPORT, slot16);
       break;
-    case chrome::kCryptoModulePasswordCertExport:
+    case kCryptoModulePasswordCertExport:
       text = l10n_util::GetStringFUTF8(
           IDS_CRYPTO_MODULE_AUTH_DIALOG_TEXT_CERT_EXPORT, slot16);
       break;
@@ -125,7 +125,8 @@ void CryptoModulePasswordDialogView::Init(const std::string& hostname,
 
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
 
-  views::GridLayout* layout = views::GridLayout::CreatePanel(this);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   views::ColumnSet* reason_column_set = layout->AddColumnSet(0);
   reason_column_set->AddColumn(
@@ -163,5 +164,3 @@ void ShowCryptoModulePasswordDialog(
       new CryptoModulePasswordDialogView(slot_name, reason, hostname, callback);
   views::DialogDelegate::CreateDialogWidget(dialog, NULL, parent)->Show();
 }
-
-}  // namespace chrome

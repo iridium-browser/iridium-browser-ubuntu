@@ -26,6 +26,7 @@
 #ifndef Supplementable_h
 #define Supplementable_h
 
+#include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/HashMap.h"
@@ -52,26 +53,39 @@ namespace blink {
 // string as the key and not the characters themselves. Hence, 2 strings with
 // the same characters will be treated as 2 different keys.
 //
-// In practice, it is recommended that Supplements implements a static method
-// for returning its key to use. For example:
+// In practice, this is mostly hidden. Each Supplement must expose a static
+// const char array which provides a human-readable key. Access to supplements
+// requires passing the Supplement type, so these cannot collide for unequal
+// types.
 //
-//     class MyClass : public Supplement<MySupplementable> {
-//         ...
-//         static const char* supplementName();
+// Use extreme caution when deriving a supplementable class, as misuse can cause
+// type confusion.
+//
+// Typical use is expected to look like this:
+//
+//     class NavigatorFoo : public Supplement<Navigator> {
+//      public:
+//       static const char kSupplementName[];
+//
+//       NavigatorFoo& From(Navigator&);
 //     }
 //
-//     const char* MyClass::supplementName()
+//     // static
+//     const char NavigatorFoo::kSupplementName[] = "NavigatorFoo";
+//
+//     NavigatorFoo& NavigatorFoo::From(Navigator& navigator)
 //     {
-//         return "MyClass";
+//       NavigatorFoo* supplement =
+//           Supplement<Navigator>::From<NavigatorFoo>(navigator);
+//       if (!supplement) {
+//         supplement = new NavigatorFoo(navigator);
+//         ProvideTo(navigator, supplement);
+//       }
+//       return *supplement;
 //     }
 //
-// An example of the using the key:
-//
-//     MyClass* MyClass::from(MySupplementable* host)
-//     {
-//         return static_cast<MyClass*>(
-//             Supplement<MySupplementable>::from(host, supplementName()));
-//     }
+// The hash map key will automatically be determined from the supplement type
+// used.
 //
 // What you should know about thread checks
 // ========================================
@@ -87,16 +101,26 @@ namespace blink {
 // the method could easily cause racy condition.
 //
 // Note that reattachThread() does nothing if assertion is not enabled.
-//
 
 template <typename T>
 class Supplementable;
 
+// Supplement<T>-specific version of TraceWrapperBase class. In order to support
+// wrapper-tracing from Supplementable<T> to Supplement<T> (especially when
+// crossing core/modules boundary), Supplement<T> needs to be wrapper-traceable.
+// This class provides a common API for all subclasses of Supplement<T> to
+// support wrapper-tracing.
+class PLATFORM_EXPORT TraceWrapperBaseForSupplement {
+ public:
+  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {}
+};
+
 template <typename T>
-class Supplement : public GarbageCollectedMixin {
+class Supplement : public GarbageCollectedMixin,
+                   public TraceWrapperBaseForSupplement {
  public:
   // TODO(haraken): Remove the default constructor.
-  // All Supplement objects should be instantiated with m_host.
+  // All Supplement objects should be instantiated with |supplementable_|.
   Supplement() {}
 
   explicit Supplement(T& supplementable) : supplementable_(&supplementable) {}
@@ -106,54 +130,72 @@ class Supplement : public GarbageCollectedMixin {
   // is completely removed).
   T* GetSupplementable() const { return supplementable_; }
 
+  template <typename SupplementType>
   static void ProvideTo(Supplementable<T>& supplementable,
-                        const char* key,
-                        Supplement<T>* supplement) {
-    supplementable.ProvideSupplement(key, supplement);
+                        SupplementType* supplement) {
+    supplementable.ProvideSupplement(supplement);
   }
 
-  static Supplement<T>* From(Supplementable<T>& supplementable,
-                             const char* key) {
-    return supplementable.RequireSupplement(key);
+  template <typename SupplementType>
+  static SupplementType* From(const Supplementable<T>& supplementable) {
+    return supplementable.template RequireSupplement<SupplementType>();
   }
 
-  static Supplement<T>* From(Supplementable<T>* supplementable,
-                             const char* key) {
-    return supplementable ? supplementable->RequireSupplement(key) : 0;
+  template <typename SupplementType>
+  static SupplementType* From(const Supplementable<T>* supplementable) {
+    return supplementable
+               ? supplementable->template RequireSupplement<SupplementType>()
+               : nullptr;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { visitor->Trace(supplementable_); }
+  virtual void Trace(blink::Visitor* visitor) {
+    visitor->Trace(supplementable_);
+  }
 
  private:
   Member<T> supplementable_;
 };
 
-// Supplementable<T> inherits from GarbageCollectedMixin virtually
-// to allow ExecutionContext to derive from two GC mixin classes.
 template <typename T>
-class Supplementable : public virtual GarbageCollectedMixin {
+class Supplementable : public GarbageCollectedMixin {
   WTF_MAKE_NONCOPYABLE(Supplementable);
 
  public:
-  void ProvideSupplement(const char* key, Supplement<T>* supplement) {
+  template <typename SupplementType>
+  void ProvideSupplement(SupplementType* supplement) {
 #if DCHECK_IS_ON()
     DCHECK_EQ(creation_thread_id_, CurrentThread());
 #endif
-    this->supplements_.Set(key, supplement);
+    static_assert(
+        std::is_array<decltype(SupplementType::kSupplementName)>::value,
+        "Declare a const char array kSupplementName. See Supplementable.h for "
+        "details.");
+    this->supplements_.Set(SupplementType::kSupplementName, supplement);
   }
 
-  void RemoveSupplement(const char* key) {
+  template <typename SupplementType>
+  void RemoveSupplement() {
 #if DCHECK_IS_ON()
     DCHECK_EQ(creation_thread_id_, CurrentThread());
 #endif
-    this->supplements_.erase(key);
+    static_assert(
+        std::is_array<decltype(SupplementType::kSupplementName)>::value,
+        "Declare a const char array kSupplementName. See Supplementable.h for "
+        "details.");
+    this->supplements_.erase(SupplementType::kSupplementName);
   }
 
-  Supplement<T>* RequireSupplement(const char* key) {
+  template <typename SupplementType>
+  SupplementType* RequireSupplement() const {
 #if DCHECK_IS_ON()
     DCHECK_EQ(attached_thread_id_, CurrentThread());
 #endif
-    return this->supplements_.at(key);
+    static_assert(
+        std::is_array<decltype(SupplementType::kSupplementName)>::value,
+        "Declare a const char array kSupplementName. See Supplementable.h for "
+        "details.");
+    return static_cast<SupplementType*>(
+        this->supplements_.at(SupplementType::kSupplementName));
   }
 
   void ReattachThread() {
@@ -162,11 +204,16 @@ class Supplementable : public virtual GarbageCollectedMixin {
 #endif
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { visitor->Trace(supplements_); }
+  virtual void Trace(blink::Visitor* visitor) { visitor->Trace(supplements_); }
+  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
+    for (const auto& supplement : supplements_.Values())
+      visitor->TraceWrappers(supplement);
+  }
 
  protected:
-  using SupplementMap =
-      HeapHashMap<const char*, Member<Supplement<T>>, PtrHash<const char>>;
+  using SupplementMap = HeapHashMap<const char*,
+                                    TraceWrapperMember<Supplement<T>>,
+                                    PtrHash<const char>>;
   SupplementMap supplements_;
 
   Supplementable()

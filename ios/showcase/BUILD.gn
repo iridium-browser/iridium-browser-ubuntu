@@ -25,17 +25,13 @@ ios_app_bundle("showcase") {
 
 group("features") {
   deps = [
-    "//ios/clean/chrome/browser/ui/tools:tools_ui",
+    "//ios/showcase/bubble",
     "//ios/showcase/content_suggestions",
-    "//ios/showcase/ntp",
     "//ios/showcase/payments",
-    "//ios/showcase/root",
     "//ios/showcase/settings",
-    "//ios/showcase/tab",
     "//ios/showcase/tab_grid",
+    "//ios/showcase/table_view",
     "//ios/showcase/text_badge_view",
-    "//ios/showcase/toolbar",
-    "//ios/showcase/tools_menu",
     "//ios/showcase/uikit_table_view_cell",
     "//ios/showcase/widget",
   ]
@@ -56,14 +52,11 @@ ios_eg_test("ios_showcase_egtests") {
     "//ios/showcase/core:main",
 
     # Add all eg_tests targets below.
+    "//ios/showcase/bubble:eg_tests",
     "//ios/showcase/content_suggestions:eg_tests",
     "//ios/showcase/core:eg_tests",
     "//ios/showcase/payments:eg_tests",
-    "//ios/showcase/root:eg_tests",
-    "//ios/showcase/tab:eg_tests",
-    "//ios/showcase/tab_grid:eg_tests",
     "//ios/showcase/text_badge_view:eg_tests",
-    "//ios/showcase/toolbar:eg_tests",
 
     # All shared libraries must have the sanitizer deps to properly link in
     # asan mode (this target will be empty in other cases).

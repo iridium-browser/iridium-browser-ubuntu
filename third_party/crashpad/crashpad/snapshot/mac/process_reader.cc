@@ -19,6 +19,7 @@
 #include <mach-o/loader.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "base/logging.h"
 #include "base/mac/mach_logging.h"
@@ -112,13 +113,11 @@ ProcessReader::~ProcessReader() {
 bool ProcessReader::Initialize(task_t task) {
   INITIALIZATION_STATE_SET_INITIALIZING(initialized_);
 
-  if (!process_info_.InitializeFromTask(task)) {
+  if (!process_info_.InitializeWithTask(task)) {
     return false;
   }
 
-  if (!process_info_.Is64Bit(&is_64_bit_)) {
-    return false;
-  }
+  is_64_bit_ = process_info_.Is64Bit();
 
   task_memory_.reset(new TaskMemory(task));
   task_ = task;
@@ -459,7 +458,7 @@ void ProcessReader::InitializeModules() {
 
     uint32_t file_type = reader ? reader->FileType() : 0;
 
-    module_readers_.push_back(reader.release());
+    module_readers_.push_back(std::move(reader));
     modules_.push_back(module);
 
     if (all_image_infos.version >= 2 && all_image_infos.dyldImageLoadAddress &&
@@ -559,7 +558,7 @@ void ProcessReader::InitializeModules() {
     }
 
     // dyld is loaded in the process even if its path can’t be determined.
-    module_readers_.push_back(reader.release());
+    module_readers_.push_back(std::move(reader));
     modules_.push_back(module);
   }
 }
@@ -611,7 +610,7 @@ mach_vm_address_t ProcessReader::CalculateStackRegion(
     // Regardless of whether the ABI requires a red zone, capture up to
     // kExtraCaptureSize additional bytes of stack, but only if present in the
     // region that was already found.
-    const mach_vm_size_t kExtraCaptureSize = 128;
+    constexpr mach_vm_size_t kExtraCaptureSize = 128;
     start_address = std::max(start_address >= kExtraCaptureSize
                                  ? start_address - kExtraCaptureSize
                                  : start_address,
@@ -620,7 +619,7 @@ mach_vm_address_t ProcessReader::CalculateStackRegion(
     // Align start_address to a 16-byte boundary, which can help readers by
     // ensuring that data is aligned properly. This could page-align instead,
     // but that might be wasteful.
-    const mach_vm_size_t kDesiredAlignment = 16;
+    constexpr mach_vm_size_t kDesiredAlignment = 16;
     start_address &= ~(kDesiredAlignment - 1);
     DCHECK_GE(start_address, region_base);
   }
@@ -682,10 +681,10 @@ void ProcessReader::LocateRedZone(mach_vm_address_t* const start_address,
                                   const unsigned int user_tag) {
 #if defined(ARCH_CPU_X86_FAMILY)
   if (Is64Bit()) {
-    // x86_64 has a red zone. See AMD64 ABI 0.99.6,
-    // http://www.x86-64.org/documentation/abi.pdf, section 3.2.2, “The Stack
-    // Frame”.
-    const mach_vm_size_t kRedZoneSize = 128;
+    // x86_64 has a red zone. See AMD64 ABI 0.99.8,
+    // https://raw.githubusercontent.com/wiki/hjl-tools/x86-psABI/x86-64-psABI-r252.pdf#page=19,
+    // section 3.2.2, “The Stack Frame”.
+    constexpr mach_vm_size_t kRedZoneSize = 128;
     mach_vm_address_t red_zone_base =
         *start_address >= kRedZoneSize ? *start_address - kRedZoneSize : 0;
     bool red_zone_ok = false;

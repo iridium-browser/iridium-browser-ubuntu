@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -29,18 +30,20 @@ def ParseCommandLine(argv):
   parser.add_argument('--board', required=True,
                       help=('The board to generate the sysroot for.'))
   parser.add_argument('--package', required=True,
-                      help=('The package to generate the sysroot for.'))
+                      help=('The packages to generate the sysroot for.'))
+  parser.add_argument('--deps-only', action='store_true',
+                      default=False,
+                      help='Build dependencies only.')
   parser.add_argument('--out-dir', type='path', required=True,
                       help='Directory to place the generated tarball.')
-  parser.add_argument('--out-file',
-                      help=('The name to give to the tarball.  Defaults to %r.'
-                            % DEFAULT_NAME))
+  parser.add_argument('--out-file', default=DEFAULT_NAME,
+                      help='The name to give to the tarball. '
+                           'Defaults to %(default)s.')
   options = parser.parse_args(argv)
 
-  if not options.out_file:
-    options.out_file = DEFAULT_NAME % {
-        'package': options.package.replace(PACKAGE_SEPARATOR, '_')
-    }
+  options.out_file %= {
+      'package': options.package.split()[0].replace(PACKAGE_SEPARATOR, '_'),
+  }
 
   return options
 
@@ -82,19 +85,24 @@ class GenerateSysroot(object):
   def _InstallBuildDependencies(self):
     # Calculate buildtime deps that are not runtime deps.
     raw_sysroot = cros_build_lib.GetSysroot(board=self.options.board)
-    cmd = ['qdepends', '-q', '-C', self.options.package]
-    output = cros_build_lib.RunCommand(
-        cmd, extra_env={'ROOT': raw_sysroot}, capture_output=True).output
+    packages = []
+    if not self.options.deps_only:
+      packages = self.options.package.split()
+    else:
+      for pkg in self.options.package.split():
+        cmd = ['qdepends', '-q', '-C', pkg]
+        output = cros_build_lib.RunCommand(
+            cmd, extra_env={'ROOT': raw_sysroot}, capture_output=True).output
 
-    if output.count('\n') > 1:
-      raise AssertionError('Too many packages matched given package pattern')
+        if output.count('\n') > 1:
+          raise AssertionError('Too many packages matched for given pattern')
 
-    # qdepend outputs "package: deps", so only grab the deps.
-    atoms = output.partition(':')[2].split()
-
-    # Install the buildtime deps.
-    if atoms:
-      self._Emerge(*atoms)
+        # qdepend outputs "package: deps", so only grab the deps.
+        deps = output.partition(':')[2].split()
+        packages.extend(deps)
+    # Install the required packages.
+    if packages:
+      self._Emerge(*packages)
 
   def _CreateTarball(self):
     target = os.path.join(self.options.out_dir, self.options.out_file)

@@ -14,6 +14,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_export.h"
@@ -44,16 +45,17 @@ class NET_EXPORT_PRIVATE QuicHttpStream : public MultiplexedHttpStream {
 
   // HttpStream implementation.
   int InitializeStream(const HttpRequestInfo* request_info,
+                       bool can_send_early,
                        RequestPriority priority,
                        const NetLogWithSource& net_log,
-                       const CompletionCallback& callback) override;
+                       CompletionOnceCallback callback) override;
   int SendRequest(const HttpRequestHeaders& request_headers,
                   HttpResponseInfo* response,
-                  const CompletionCallback& callback) override;
-  int ReadResponseHeaders(const CompletionCallback& callback) override;
+                  CompletionOnceCallback callback) override;
+  int ReadResponseHeaders(CompletionOnceCallback callback) override;
   int ReadResponseBody(IOBuffer* buf,
                        int buf_len,
-                       const CompletionCallback& callback) override;
+                       CompletionOnceCallback callback) override;
   void Close(bool not_reusable) override;
   bool IsResponseBodyComplete() const override;
   bool IsConnectionReused() const override;
@@ -66,7 +68,7 @@ class NET_EXPORT_PRIVATE QuicHttpStream : public MultiplexedHttpStream {
   void SetPriority(RequestPriority priority) override;
 
   static HttpResponseInfo::ConnectionInfo ConnectionInfoFromQuicVersion(
-      QuicVersion quic_version);
+      QuicTransportVersion quic_version);
 
  private:
   friend class test::QuicHttpStreamPeer;
@@ -150,6 +152,9 @@ class NET_EXPORT_PRIVATE QuicHttpStream : public MultiplexedHttpStream {
   // Only valid before the response body is read.
   const HttpRequestInfo* request_info_;
 
+  // Whether this request can be sent without confirmation.
+  bool can_send_early_;
+
   // The request body to send, if any, owned by the caller.
   UploadDataStream* request_body_stream_;
   // Time the request was issued.
@@ -190,7 +195,7 @@ class NET_EXPORT_PRIVATE QuicHttpStream : public MultiplexedHttpStream {
   bool closed_is_first_stream_;
 
   // The caller's callback to be used for asynchronous operations.
-  CompletionCallback callback_;
+  CompletionOnceCallback callback_;
 
   // Caller provided buffer for the ReadResponseBody() response.
   scoped_refptr<IOBuffer> user_buffer_;

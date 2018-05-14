@@ -70,6 +70,8 @@ class FailingHttpTransaction : public HttpTransaction {
       const BeforeHeadersSentCallback& callback) override;
   int ResumeNetworkStart() override;
   void GetConnectionAttempts(ConnectionAttempts* out) const override;
+  void SetRequestHeadersCallback(RequestHeadersCallback) override {}
+  void SetResponseHeadersCallback(ResponseHeadersCallback) override {}
 
  private:
   Error error_;
@@ -80,7 +82,7 @@ FailingHttpTransaction::FailingHttpTransaction(Error error) : error_(error) {
   DCHECK_LT(error, OK);
 }
 
-FailingHttpTransaction::~FailingHttpTransaction() {}
+FailingHttpTransaction::~FailingHttpTransaction() = default;
 
 int FailingHttpTransaction::Start(const HttpRequestInfo* request_info,
                                   const CompletionCallback& callback,
@@ -195,7 +197,7 @@ FailingHttpTransactionFactory::FailingHttpTransactionFactory(
   DCHECK_LT(error, OK);
 }
 
-FailingHttpTransactionFactory::~FailingHttpTransactionFactory() {}
+FailingHttpTransactionFactory::~FailingHttpTransactionFactory() = default;
 
 // HttpTransactionFactory:
 int FailingHttpTransactionFactory::CreateTransaction(

@@ -20,6 +20,8 @@
 #import "testing/gtest_mac.h"
 #include "testing/platform_test.h"
 #include "ui/base/resource/resource_bundle.h"
+#import "ui/base/test/menu_test_observer.h"
+#import "ui/events/test/cocoa_test_event_utils.h"
 #include "ui/resources/grit/ui_resources.h"
 
 // Implements the target interface for the tab, which gets sent messages when
@@ -148,7 +150,9 @@ class TabControllerTest : public CocoaTest {
           // TabController state.
           [controller setPinned:(isPinnedTab ? YES : NO)];
           [controller setActive:(isActiveTab ? YES : NO)];
-          [controller setIconImage:favicon];
+          [controller setIconImage:favicon
+                   forLoadingState:kTabDone
+                          showIcon:YES];
           [controller setAlertState:alertState];
           [controller updateVisibility];
 
@@ -381,11 +385,15 @@ TEST_F(TabControllerTest, Loading) {
   [[window contentView] addSubview:[controller view]];
 
   EXPECT_EQ(kTabDone, [controller loadingState]);
-  [controller setLoadingState:kTabWaiting];
+  [controller setIconImage:nil forLoadingState:kTabWaiting showIcon:YES];
   EXPECT_EQ(kTabWaiting, [controller loadingState]);
-  [controller setLoadingState:kTabLoading];
+  [controller setIconImage:nil forLoadingState:kTabLoading showIcon:YES];
   EXPECT_EQ(kTabLoading, [controller loadingState]);
-  [controller setLoadingState:kTabDone];
+  // Create favicon.
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  base::scoped_nsobject<NSImage> favicon(
+      rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON).CopyNSImage());
+  [controller setIconImage:favicon forLoadingState:kTabDone showIcon:YES];
   EXPECT_EQ(kTabDone, [controller loadingState]);
 
   [[controller view] removeFromSuperview];
@@ -472,9 +480,10 @@ TEST_F(TabControllerTest, ShouldShowIcon) {
 
   // Setting the icon when tab is at min width should not show icon (bug 18359).
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  base::scoped_nsobject<NSImage> image(
+  base::scoped_nsobject<NSImage> favicon(
       rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON).CopyNSImage());
-  [controller setIconImage:image];
+  [controller setIconImage:favicon forLoadingState:kTabDone showIcon:YES];
+  [controller updateVisibility];
   NSView* newIcon = [controller iconView];
   EXPECT_TRUE([newIcon isHidden]);
 
@@ -520,6 +529,34 @@ TEST_F(TabControllerTest, Menu) {
   EXPECT_EQ(3, [menu numberOfItems]);
 }
 
+// Regression test for https://crbug.com/778776. An accessibility message can
+// cause -[TabController menu] to be called while the existing menu is open.
+// Test that this does not cause the running menu to be deleted.
+TEST_F(TabControllerTest, RecursiveMenu) {
+  base::scoped_nsobject<TabController> controller([[TabController alloc] init]);
+  base::scoped_nsobject<TabControllerTestTarget> target(
+      [[TabControllerTestTarget alloc] init]);
+  [controller setTarget:target];
+
+  NSMenu* menu = [controller menu];
+
+  base::scoped_nsobject<MenuTestObserver> menu_observer(
+      [[MenuTestObserver alloc] initWithMenu:menu]);
+  [menu_observer setCloseAfterOpening:YES];
+  [menu_observer setOpenCallback:^(MenuTestObserver*) {
+    NSMenu* open_menu = [controller menu];
+    EXPECT_TRUE(open_menu);
+    EXPECT_EQ(menu, open_menu);
+  }];
+
+  [NSMenu
+      popUpContextMenu:menu
+             withEvent:cocoa_test_event_utils::LeftMouseDownAtPoint(NSZeroPoint)
+               forView:[controller view]];
+
+  EXPECT_NE(menu, [controller menu]);
+}
+
 // Tests that the title field is correctly positioned and sized when the
 // view is resized.
 TEST_F(TabControllerTest, TitleViewLayout) {
@@ -530,6 +567,13 @@ TEST_F(TabControllerTest, TitleViewLayout) {
   NSRect tabFrame = [[controller view] frame];
   tabFrame.size.width = [TabController maxTabWidth];
   [[controller view] setFrame:tabFrame];
+
+  // Set up the favicon in the tabview.
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  base::scoped_nsobject<NSImage> favicon(
+      rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON).CopyNSImage());
+  [controller setIconImage:favicon forLoadingState:kTabDone showIcon:YES];
+  [controller updateVisibility];
 
   const NSRect originalTabFrame = [[controller view] frame];
   const NSRect originalIconFrame = [[controller iconView] frame];
@@ -547,7 +591,7 @@ TEST_F(TabControllerTest, TitleViewLayout) {
   [[controller view] setFrame:tabFrame];
 
   // The icon view and close button should be hidden and the title view should
-  // be resize to take up their space.
+  // resize to take up their space.
   EXPECT_TRUE([[controller iconView] isHidden]);
   EXPECT_TRUE([[controller closeButton] isHidden]);
   EXPECT_GT(NSWidth([[controller view] frame]),
@@ -585,6 +629,21 @@ TEST_F(TabControllerTest, LayoutAndVisibilityOfSubviewsRTL) {
   cocoa_l10n_util::ScopedForceRTLMac scoped_rtl;
 
   CheckLayoutAndVisibilityOfSubviewsForAllStates(true);
+}
+
+TEST_F(TabControllerTest, TabSelection) {
+  NSWindow* window = test_window();
+  base::scoped_nsobject<TabController> controller([[TabController alloc] init]);
+  [[window contentView] addSubview:[controller view]];
+
+  base::scoped_nsobject<TabControllerTestTarget> target(
+      [[TabControllerTestTarget alloc] init]);
+  [controller setTarget:target];
+  [controller setAction:@selector(selectTab:)];
+
+  EXPECT_FALSE([target selected]);
+  [controller performClick:controller];
+  EXPECT_TRUE([target selected]);
 }
 
 }  // namespace

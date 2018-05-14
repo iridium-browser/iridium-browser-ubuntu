@@ -53,6 +53,7 @@
 #include "crypto/rsa_private_key.h"
 #include "crypto/sha2.h"
 #include "third_party/zlib/google/zip.h"
+#include "url/gurl.h"
 
 #if defined(OS_POSIX)
 #include <fcntl.h>
@@ -64,6 +65,8 @@
 
 namespace {
 
+// TODO(eseckler): Remove --ignore-certificate-errors for newer Chrome versions
+// that support the Security DevTools domain on the browser target.
 const char* const kCommonSwitches[] = {
     "disable-popup-blocking", "enable-automation", "ignore-certificate-errors",
     "metrics-recording-only",
@@ -76,7 +79,6 @@ const char* const kDesktopSwitches[] = {
     "no-first-run",
     "disable-background-networking",
     "disable-web-resources",
-    "safebrowsing-disable-auto-update",
     "disable-client-side-phishing-detection",
     "disable-default-apps",
     "enable-logging",
@@ -144,6 +146,8 @@ Status PrepareCommandLine(uint16_t port,
   }
   switches.SetFromSwitches(capabilities.switches);
 
+  if (capabilities.exclude_switches.count("user-data-dir") > 0)
+    LOG(WARNING) << "excluding user-data-dir switch is not supported";
   base::FilePath user_data_dir_path;
   if (switches.HasSwitch("user-data-dir")) {
     user_data_dir_path = base::FilePath(
@@ -162,15 +166,22 @@ Status PrepareCommandLine(uint16_t port,
   if (status.IsError())
     return status;
 
-  if (!extension_dir->CreateUniqueTempDir()) {
-    return Status(kUnknownError,
-                  "cannot create temp dir for unpacking extensions");
+  if (capabilities.exclude_switches.count("load-extension") > 0) {
+    if (capabilities.extensions.size() > 0)
+      return Status(
+          kUnknownError,
+          "cannot exclude load-extension switch when extensions are specified");
+  } else {
+    if (!extension_dir->CreateUniqueTempDir()) {
+      return Status(kUnknownError,
+                    "cannot create temp dir for unpacking extensions");
+    }
+    status = internal::ProcessExtensions(
+        capabilities.extensions, extension_dir->GetPath(),
+        capabilities.use_automation_extension, &switches, extension_bg_pages);
+    if (status.IsError())
+      return status;
   }
-  status = internal::ProcessExtensions(
-      capabilities.extensions, extension_dir->GetPath(),
-      capabilities.use_automation_extension, &switches, extension_bg_pages);
-  if (status.IsError())
-    return status;
   switches.AppendToCommandLine(&command);
   *prepared_command = command;
   return Status(kOk);
@@ -251,11 +262,15 @@ Status CreateBrowserwideDevToolsClientAndConnect(
     const SyncWebSocketFactory& socket_factory,
     const std::vector<std::unique_ptr<DevToolsEventListener>>&
         devtools_event_listeners,
+    const std::string& web_socket_url,
     std::unique_ptr<DevToolsClient>* browser_client) {
+  std::string url(web_socket_url);
+  if (url.length() == 0) {
+    url = base::StringPrintf("ws://%s/devtools/browser/",
+                             address.ToString().c_str());
+  }
   std::unique_ptr<DevToolsClient> client(new DevToolsClientImpl(
-      socket_factory, base::StringPrintf("ws://%s/devtools/browser/",
-                                         address.ToString().c_str()),
-      DevToolsClientImpl::kBrowserwideDevToolsClientId));
+      socket_factory, url, DevToolsClientImpl::kBrowserwideDevToolsClientId));
   for (const auto& listener : devtools_event_listeners) {
     // Only add listeners that subscribe to the browser-wide |DevToolsClient|.
     // Otherwise, listeners will think this client is associated with a webview,
@@ -298,7 +313,9 @@ Status LaunchRemoteChromeSession(
   std::unique_ptr<DevToolsClient> devtools_websocket_client;
   status = CreateBrowserwideDevToolsClientAndConnect(
       capabilities.debugger_address, capabilities.perf_logging_prefs,
-      socket_factory, devtools_event_listeners, &devtools_websocket_client);
+      socket_factory, devtools_event_listeners,
+      devtools_http_client->browser_info()->web_socket_url,
+      &devtools_websocket_client);
   if (status.IsError()) {
     LOG(WARNING) << "Browser-wide DevTools client failed to connect: "
                  << status.message();
@@ -359,16 +376,17 @@ Status LaunchDesktopChrome(URLRequestContextGetter* context_getter,
 #endif
 
 #if defined(OS_POSIX)
-  base::FileHandleMappingVector no_stderr;
   base::ScopedFD devnull;
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch("verbose")) {
+  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (!cmd_line->HasSwitch("verbose") &&
+      cmd_line->GetSwitchValueASCII("log-level") != "ALL") {
     // Redirect stderr to /dev/null, so that Chrome log spew doesn't confuse
     // users.
     devnull.reset(HANDLE_EINTR(open("/dev/null", O_WRONLY)));
     if (!devnull.is_valid())
       return Status(kUnknownError, "couldn't open /dev/null");
-    no_stderr.push_back(std::make_pair(devnull.get(), STDERR_FILENO));
-    options.fds_to_remap = &no_stderr;
+    options.fds_to_remap.push_back(
+        std::make_pair(devnull.get(), STDERR_FILENO));
   }
 #elif defined(OS_WIN)
   if (!SwitchToUSKeyboardLayout())
@@ -435,7 +453,9 @@ Status LaunchDesktopChrome(URLRequestContextGetter* context_getter,
   std::unique_ptr<DevToolsClient> devtools_websocket_client;
   status = CreateBrowserwideDevToolsClientAndConnect(
       NetAddress(port), capabilities.perf_logging_prefs, socket_factory,
-      devtools_event_listeners, &devtools_websocket_client);
+      devtools_event_listeners,
+      devtools_http_client->browser_info()->web_socket_url,
+      &devtools_websocket_client);
   if (status.IsError()) {
     LOG(WARNING) << "Browser-wide DevTools client failed to connect: "
                  << status.message();
@@ -446,17 +466,20 @@ Status LaunchDesktopChrome(URLRequestContextGetter* context_getter,
       std::move(devtools_event_listeners), std::move(port_reservation),
       capabilities.page_load_strategy, std::move(process), command,
       &user_data_dir, &extension_dir, capabilities.network_emulation_enabled));
-  for (size_t i = 0; i < extension_bg_pages.size(); ++i) {
-    VLOG(0) << "Waiting for extension bg page load: " << extension_bg_pages[i];
-    std::unique_ptr<WebView> web_view;
-    Status status = chrome_desktop->WaitForPageToLoad(
-        extension_bg_pages[i], base::TimeDelta::FromSeconds(10),
-        &web_view, w3c_compliant);
-    if (status.IsError()) {
-      return Status(kUnknownError,
-                    "failed to wait for extension background page to load: " +
-                        extension_bg_pages[i],
-                    status);
+  if (!capabilities.extension_load_timeout.is_zero()) {
+    for (size_t i = 0; i < extension_bg_pages.size(); ++i) {
+      VLOG(0) << "Waiting for extension bg page load: "
+              << extension_bg_pages[i];
+      std::unique_ptr<WebView> web_view;
+      Status status = chrome_desktop->WaitForPageToLoad(
+          extension_bg_pages[i], capabilities.extension_load_timeout, &web_view,
+          w3c_compliant);
+      if (status.IsError()) {
+        return Status(kUnknownError,
+                      "failed to wait for extension background page to load: " +
+                          extension_bg_pages[i],
+                      status);
+      }
     }
   }
   *chrome = std::move(chrome_desktop);
@@ -490,12 +513,11 @@ Status LaunchAndroidChrome(URLRequestContextGetter* context_getter,
     switches.SetUnparsedSwitch(android_switch);
   for (auto excluded_switch : capabilities.exclude_switches)
     switches.RemoveSwitch(excluded_switch);
-  status = device->SetUp(capabilities.android_package,
-                         capabilities.android_activity,
-                         capabilities.android_process,
-                         switches.ToString(),
-                         capabilities.android_use_running_app,
-                         port);
+  status = device->SetUp(
+      capabilities.android_package, capabilities.android_activity,
+      capabilities.android_process, capabilities.android_device_socket,
+      capabilities.android_exec_name, switches.ToString(),
+      capabilities.android_use_running_app, port);
   if (status.IsError()) {
     device->TearDown();
     return status;
@@ -515,7 +537,9 @@ Status LaunchAndroidChrome(URLRequestContextGetter* context_getter,
   std::unique_ptr<DevToolsClient> devtools_websocket_client;
   status = CreateBrowserwideDevToolsClientAndConnect(
       NetAddress(port), capabilities.perf_logging_prefs, socket_factory,
-      devtools_event_listeners, &devtools_websocket_client);
+      devtools_event_listeners,
+      devtools_http_client->browser_info()->web_socket_url,
+      &devtools_websocket_client);
   if (status.IsError()) {
     LOG(WARNING) << "Browser-wide DevTools client failed to connect: "
                  << status.message();
@@ -613,7 +637,8 @@ Status GetExtensionBackgroundPage(const base::DictionaryValue* manifest,
   manifest->GetString("background_page", &bg_page_name);
   if (bg_page_name.empty() || !persistent)
     return Status(kOk);
-  *bg_page = "chrome-extension://" + id + "/" + bg_page_name;
+  GURL baseUrl("chrome-extension://" + id + "/");
+  *bg_page = baseUrl.Resolve(bg_page_name).spec();
   return Status(kOk);
 }
 
@@ -774,21 +799,8 @@ Status ProcessExtensions(const std::vector<std::string>& extensions,
     if (switches->HasSwitch("disable-extensions")) {
       UpdateExtensionSwitch(switches, "disable-extensions-except",
                             automation_extension.value());
-      // TODO(samuong): Stop using --load-component-extension when ChromeDriver
-      // stops supporting Chrome 56. For backwards compatibility, Chrome 57 and
-      // 58 interprets --load-component-extension as --load-extension.
-      UpdateExtensionSwitch(switches, "load-component-extension",
-                            automation_extension.value());
     } else {
-#if defined(OS_WIN) || defined(OS_MACOSX)
-      // On Chrome 56 for Windows and Mac, a "Disable developer
-      // mode extensions" dialog appears for the automation extension. Suppress
-      // this by loading it as a component extension.
-      UpdateExtensionSwitch(switches, "load-component-extension",
-                            automation_extension.value());
-#else
       extension_paths.push_back(automation_extension.value());
-#endif
     }
   }
 
@@ -819,7 +831,7 @@ Status WritePrefsFile(
   if (custom_prefs) {
     for (base::DictionaryValue::Iterator it(*custom_prefs); !it.IsAtEnd();
          it.Advance()) {
-      prefs->Set(it.key(), base::MakeUnique<base::Value>(it.value()));
+      prefs->Set(it.key(), std::make_unique<base::Value>(it.value().Clone()));
     }
   }
 

@@ -47,6 +47,12 @@ mojom("interfaces") {
 }
 ```
 
+Ensure that any target that needs this interface depends on it, e.g. with a line like:
+
+```
+   deps += [ '//services/db/public/interfaces' ]
+```
+
 If we then build this target:
 
 ```
@@ -305,9 +311,9 @@ class Logger {
 
   virtual void Log(const std::string& message) = 0;
 
-  using GetTailCallback = base::Callback<void(const std::string& message)>;
+  using GetTailCallback = base::OnceCallback<void(const std::string& message)>;
 
-  virtual void GetTail(const GetTailCallback& callback) = 0;
+  virtual void GetTail(GetTailCallback callback) = 0;
 }
 
 }  // namespace mojom
@@ -335,8 +341,8 @@ class LoggerImpl : public sample::mojom::Logger {
     lines_.push_back(message);
   }
 
-  void GetTail(const GetTailCallback& callback) override {
-    callback.Run(lines_.back());
+  void GetTail(GetTailCallback callback) override {
+    std::move(callback).Run(lines_.back());
   }
 
  private:
@@ -354,7 +360,7 @@ void OnGetTail(const std::string& message) {
   LOG(ERROR) << "Tail was: " << message;
 }
 
-logger->GetTail(base::Bind(&OnGetTail));
+logger->GetTail(base::BindOnce(&OnGetTail));
 ```
 
 Behind the scenes, the implementation-side callback is actually serializing the
@@ -426,6 +432,39 @@ void LoggerImpl::OnError() {
 The use of `base::Unretained` is *safe* because the error handler will never be
 invoked beyond the lifetime of `binding_`, and `this` owns `binding_`.
 
+### A Note About Endpoint Lifetime and Callbacks
+Once a `mojo::InterfacePtr<T>` is destroyed, it is guaranteed that pending
+callbacks as well as the connection error handler (if registered) won't be
+called.
+
+Once a `mojo::Binding<T>` is destroyed, it is guaranteed that no more method
+calls are dispatched to the implementation and the connection error handler (if
+registered) won't be called.
+
+### Best practices for dealing with process crashes and callbacks
+A common situation when calling mojo interface methods that take a callback is
+that the caller wants to know if the other endpoint is torn down (e.g. because
+of a crash). In that case, the consumer usually wants to know if the response
+callback won't be run. There are different solutions for this problem, depending
+on how the `InterfacePtr<T>` is held:
+1. The consumer owns the `InterfacePtr<T>`: `set_connection_error_handler`
+   should be used.
+2. The consumer doesn't own the `InterfacePtr<T>`: there are two helpers
+   depending on the behavior that the caller wants. If the caller wants to
+   ensure that an error handler is run, then
+   [**`mojo::WrapCallbackWithDropHandler`**](https://cs.chromium.org/chromium/src/mojo/public/cpp/bindings/callback_helpers.h?l=46)
+   should be used. If the caller wants the callback to always be run, then
+   [**`mojo::WrapCallbackWithDefaultInvokeIfNotRun`**](https://cs.chromium.org/chromium/src/mojo/public/cpp/bindings/callback_helpers.h?l=40)
+   helper should be used. With both of these helpers, usual callback care should
+   be followed to ensure that the callbacks don't run after the consumer is
+   destructed (e.g. because the owner of the `InterfacePtr<T>` outlives the
+   consumer). This includes using
+   [**`base::WeakPtr`**](https://cs.chromium.org/chromium/src/base/memory/weak_ptr.h?l=5)
+   or
+   [**`base::RefCounted`**](https://cs.chromium.org/chromium/src/base/memory/ref_counted.h?l=246).
+   It should also be noted that with these helpers, the callbacks could be run
+   synchronously while the InterfacePtr<T> is reset or destroyed.
+
 ### A Note About Ordering
 
 As mentioned in the previous section, closing one end of a pipe will eventually
@@ -455,6 +494,8 @@ When `logger` goes out of scope it immediately closes its end of the message
 pipe, but the impl-side won't notice this until it receives the sent `Log`
 message. Thus the `impl` above will first log our message and *then* see a
 connection error and break out of the run loop.
+
+## Types
 
 ### Enums
 
@@ -620,7 +661,7 @@ For example, consider the following Mojom definitions:
 ```cpp
 union Value {
   int64 int_value;
-  float32 float_vlaue;
+  float32 float_value;
   string string_value;
 };
 
@@ -753,7 +794,7 @@ class DatabaseImpl : public db::mojom::Database {
 
   // db::mojom::Database:
   void AddTable(db::mojom::TableRequest table) {
-    tables_.emplace_back(base::MakeUnique<TableImpl>(std::move(table)));
+    tables_.emplace_back(std::make_unique<TableImpl>(std::move(table)));
   }
 
  private:
@@ -828,7 +869,7 @@ pipes.
 A **strong binding** exists as a standalone object which owns its interface
 implementation and automatically cleans itself up when its bound interface
 endpoint detects an error. The
-[**`MakeStrongBinding`**](https://cs.chromim.org/chromium/src//mojo/public/cpp/bindings/strong_binding.h)
+[**`MakeStrongBinding`**](https://cs.chromium.org/chromium/src/mojo/public/cpp/bindings/strong_binding.h)
 function is used to create such a binding.
 .
 
@@ -848,7 +889,7 @@ class LoggerImpl : public sample::mojom::Logger {
 };
 
 db::mojom::LoggerPtr logger;
-mojo::MakeStrongBinding(base::MakeUnique<LoggerImpl>(),
+mojo::MakeStrongBinding(std::make_unique<LoggerImpl>(),
                         mojo::MakeRequest(&logger));
 
 logger->Log("NOM NOM NOM MESSAGES");
@@ -1118,7 +1159,10 @@ Let's place this `geometry.typemap` file alongside our Mojom file:
 mojom = "//ui/gfx/geometry/mojo/geometry.mojom"
 public_headers = [ "//ui/gfx/geometry/rect.h" ]
 traits_headers = [ "//ui/gfx/geometry/mojo/geometry_struct_traits.h" ]
-sources = [ "//ui/gfx/geometry/mojo/geometry_struct_traits.cc" ]
+sources = [
+  "//ui/gfx/geometry/mojo/geometry_struct_traits.cc",
+  "//ui/gfx/geometry/mojo/geometry_struct_traits.h",
+]
 public_deps = [ "//ui/gfx/geometry" ]
 type_mappings = [
   "gfx.mojom.Rect=gfx::Rect",
@@ -1136,8 +1180,9 @@ Let's look at each of the variables above:
   here.
 * `traits_headers`: Headers which contain the relevant `StructTraits`
   specialization(s) for any type mappings described by this file.
-* `sources`: Any private implementation sources needed for the `StructTraits`
-  definition.
+* `sources`: Any implementation sources and headers needed for the
+  `StructTraits` definition. These sources are compiled directly into the
+  generated C++ bindings target for a `mojom` file applying this typemap.
 * `public_deps`: Target dependencies exposed by the `public_headers` and
   `traits_headers`.
 * `deps`: Target dependencies exposed by `sources` but not already covered by
@@ -1160,6 +1205,10 @@ Let's look at each of the variables above:
       `StructTraits` definition for this type mapping must define additional
       `IsNull` and `SetToNull` methods. See
       [Specializing Nullability](#Specializing-Nullability) below.
+    * `force_serialize`: The typemap is incompatible with lazy serialization
+      (e.g. consider a typemap to a `base::StringPiece`, where retaining a
+      copy is unsafe). Any messages carrying the type will be forced down the
+      eager serailization path.
 
 
 Now that we have the typemap file we need to add it to a local list of typemaps
@@ -1432,6 +1481,10 @@ generates the function in the same namespace as the generated C++ enum type:
 ```cpp
 inline bool IsKnownEnumValue(Department value);
 ```
+
+### Using Mojo Bindings in Chrome
+
+See [Converting Legacy Chrome IPC To Mojo](/ipc).
 
 ### Additional Documentation
 

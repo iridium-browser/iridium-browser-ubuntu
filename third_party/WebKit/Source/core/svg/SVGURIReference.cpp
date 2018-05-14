@@ -20,12 +20,13 @@
 
 #include "core/svg/SVGURIReference.h"
 
-#include "core/XLinkNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/IdTargetObserver.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/svg/SVGElement.h"
+#include "core/xlink_names.h"
 #include "platform/weborigin/KURL.h"
+#include "platform/wtf/Functional.h"
 
 namespace blink {
 
@@ -35,13 +36,13 @@ class SVGElementReferenceObserver : public IdTargetObserver {
  public:
   SVGElementReferenceObserver(TreeScope& tree_scope,
                               const AtomicString& id,
-                              std::unique_ptr<WTF::Closure> closure)
+                              base::RepeatingClosure closure)
       : IdTargetObserver(tree_scope.GetIdTargetObserverRegistry(), id),
         closure_(std::move(closure)) {}
 
  private:
-  void IdTargetChanged() override { (*closure_)(); }
-  std::unique_ptr<WTF::Closure> closure_;
+  void IdTargetChanged() override { closure_.Run(); }
+  base::RepeatingClosure closure_;
 };
 }
 
@@ -51,7 +52,7 @@ SVGURIReference::SVGURIReference(SVGElement* element)
   href_->AddToPropertyMap(element);
 }
 
-DEFINE_TRACE(SVGURIReference) {
+void SVGURIReference::Trace(blink::Visitor* visitor) {
   visitor->Trace(href_);
 }
 
@@ -88,11 +89,10 @@ bool SVGURLReferenceResolver::IsLocal() const {
 }
 
 AtomicString SVGURLReferenceResolver::FragmentIdentifier() const {
-  // If this is a "fragment-only" URL, then the reference is always local, so
-  // just return what's after the '#' as the fragment.
-  if (is_local_)
-    return AtomicString(relative_url_.Substring(1));
-  return AtomicString(AbsoluteUrl().FragmentIdentifier());
+  // Use KURL's FragmentIdentifier to ensure that we're handling the
+  // fragment in a consistent manner.
+  return AtomicString(
+      DecodeURLEscapeSequences(AbsoluteUrl().FragmentIdentifier()));
 }
 
 AtomicString SVGURIReference::FragmentIdentifierFromIRIString(
@@ -126,15 +126,16 @@ Element* SVGURIReference::ObserveTarget(Member<IdTargetObserver>& observer,
                                         const String& href_string) {
   TreeScope& tree_scope = context_element.GetTreeScope();
   AtomicString id = FragmentIdentifierFromIRIString(href_string, tree_scope);
-  return ObserveTarget(observer, tree_scope, id,
-                       WTF::Bind(&SVGElement::BuildPendingResource,
-                                 WrapWeakPersistent(&context_element)));
+  return ObserveTarget(
+      observer, tree_scope, id,
+      WTF::BindRepeating(&SVGElement::BuildPendingResource,
+                         WrapWeakPersistent(&context_element)));
 }
 
 Element* SVGURIReference::ObserveTarget(Member<IdTargetObserver>& observer,
                                         TreeScope& tree_scope,
                                         const AtomicString& id,
-                                        std::unique_ptr<WTF::Closure> closure) {
+                                        base::RepeatingClosure closure) {
   DCHECK(!observer);
   if (id.IsEmpty())
     return nullptr;

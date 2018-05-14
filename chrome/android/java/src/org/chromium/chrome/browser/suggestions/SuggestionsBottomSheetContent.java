@@ -4,67 +4,60 @@
 
 package org.chromium.chrome.browser.suggestions;
 
-import android.annotation.SuppressLint;
 import android.content.res.Resources;
 import android.support.annotation.Nullable;
-import android.support.v7.widget.RecyclerView;
-import android.support.v7.widget.RecyclerView.OnScrollListener;
-import android.text.TextUtils;
 import android.view.LayoutInflater;
-import android.view.MotionEvent;
 import android.view.View;
 
-import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.Callback;
+import org.chromium.base.CollectionUtil;
+import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ntp.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.ContextMenuManager.TouchEnabledDelegate;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageAdapter;
-import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
-import org.chromium.chrome.browser.omnibox.LocationBar;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.widget.FadingShadow;
-import org.chromium.chrome.browser.widget.FadingShadowView;
+import org.chromium.chrome.browser.widget.LoadingView;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.StateChangeReason;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContentController;
 import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
-import org.chromium.ui.widget.Toast;
+import org.chromium.content.browser.BrowserStartupController;
 
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Provides content to be displayed inside of the Home tab of bottom sheet.
  */
 public class SuggestionsBottomSheetContent implements BottomSheet.BottomSheetContent {
     private final View mView;
-    private final FadingShadowView mShadowView;
     private final SuggestionsRecyclerView mRecyclerView;
-    private final ContextMenuManager mContextMenuManager;
-    private final SuggestionsUiDelegateImpl mSuggestionsUiDelegate;
-    private final TileGroup.Delegate mTileGroupDelegate;
-    @Nullable
-    private final SuggestionsCarousel mSuggestionsCarousel;
-    private final SuggestionsSheetVisibilityChangeObserver mBottomSheetObserver;
+    private final ChromeActivity mActivity;
     private final BottomSheet mSheet;
+
+    private NewTabPageAdapter mAdapter;
+    private ContextMenuManager mContextMenuManager;
+    private SuggestionsUiDelegateImpl mSuggestionsUiDelegate;
+    private TileGroup.Delegate mTileGroupDelegate;
+    private SuggestionsSheetVisibilityChangeObserver mBottomSheetObserver;
+
+    @Nullable
+    private SuggestionsCarousel mSuggestionsCarousel;
+    @Nullable
+    private ContextualSuggestionsSection mContextualSuggestions;
+
+    private boolean mSuggestionsInitialized;
+    private boolean mIsDestroyed;
 
     public SuggestionsBottomSheetContent(final ChromeActivity activity, final BottomSheet sheet,
             TabModelSelector tabModelSelector, SnackbarManager snackbarManager) {
-        SuggestionsDependencyFactory depsFactory = SuggestionsDependencyFactory.getInstance();
-        Profile profile = Profile.getLastUsedProfile();
-        SuggestionsNavigationDelegate navigationDelegate =
-                new SuggestionsNavigationDelegateImpl(activity, profile, sheet, tabModelSelector);
+        mActivity = activity;
         mSheet = sheet;
-        mTileGroupDelegate = new TileGroupDelegateImpl(
-                activity, profile, tabModelSelector, navigationDelegate, snackbarManager);
-        mSuggestionsUiDelegate = new SuggestionsUiDelegateImpl(
-                depsFactory.createSuggestionSource(profile), depsFactory.createEventReporter(),
-                navigationDelegate, profile, sheet, activity.getReferencePool());
 
         mView = LayoutInflater.from(activity).inflate(
                 R.layout.suggestions_bottom_sheet_content, null);
@@ -74,49 +67,103 @@ public class SuggestionsBottomSheetContent implements BottomSheet.BottomSheetCon
         mRecyclerView = mView.findViewById(R.id.recycler_view);
         mRecyclerView.setBackgroundColor(backgroundColor);
 
-        TouchEnabledDelegate touchEnabledDelegate = new TouchEnabledDelegate() {
-            @Override
-            public void setTouchEnabled(boolean enabled) {
-                activity.getBottomSheet().setTouchEnabled(enabled);
-            }
-        };
+        LoadingView loadingView = mView.findViewById(R.id.loading_view);
 
-        mContextMenuManager =
-                new ContextMenuManager(activity, navigationDelegate, touchEnabledDelegate);
-        activity.getWindowAndroid().addContextMenuCloseListener(mContextMenuManager);
-        mSuggestionsUiDelegate.addDestructionObserver(new DestructionObserver() {
-            @Override
-            public void onDestroy() {
-                activity.getWindowAndroid().removeContextMenuCloseListener(mContextMenuManager);
-            }
+        if (mActivity.didFinishNativeInitialization()) {
+            loadingView.setVisibility(View.GONE);
+            initializeWithNative(tabModelSelector, snackbarManager);
+        } else {
+            mRecyclerView.setVisibility(View.GONE);
+            loadingView.showLoadingUI();
+            // Only add a StartupCompletedObserver if native is not initialized to avoid
+            // #initializeWithNative() being called twice.
+            BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
+                    .addStartupCompletedObserver(new BrowserStartupController.StartupCallback() {
+                        @Override
+                        public void onSuccess(boolean alreadyStarted) {
+                            // If this is destroyed before native initialization is finished, don't
+                            // do anything. Otherwise this will be initialized based on out-of-date
+                            // #mSheet and #mActivity, which causes a crash.
+                            // See https://crbug.com/804296.
+                            if (mIsDestroyed) return;
+
+                            mRecyclerView.setVisibility(View.VISIBLE);
+                            loadingView.hideLoadingUI();
+                            initializeWithNative(tabModelSelector, snackbarManager);
+                        }
+
+                        @Override
+                        public void onFailure() {}
+                    });
+        }
+    }
+
+    private void initializeWithNative(
+            TabModelSelector tabModelSelector, SnackbarManager snackbarManager) {
+        assert !mSuggestionsInitialized;
+        mSuggestionsInitialized = true;
+
+        SuggestionsDependencyFactory depsFactory = SuggestionsDependencyFactory.getInstance();
+        Profile profile = Profile.getLastUsedProfile();
+        SuggestionsNavigationDelegate navigationDelegate =
+                new SuggestionsNavigationDelegateImpl(mActivity, profile, mSheet, tabModelSelector);
+
+        mTileGroupDelegate =
+                new TileGroupDelegateImpl(mActivity, profile, navigationDelegate, snackbarManager);
+        mSuggestionsUiDelegate = new SuggestionsUiDelegateImpl(
+                depsFactory.createSuggestionSource(profile), depsFactory.createEventReporter(),
+                navigationDelegate, profile, mSheet, mActivity.getReferencePool(), snackbarManager);
+
+        TouchEnabledDelegate touchEnabledDelegate = mActivity.getBottomSheet()::setTouchEnabled;
+        mContextMenuManager = new ContextMenuManager(
+                navigationDelegate, touchEnabledDelegate, mActivity::closeContextMenu);
+        mActivity.getWindowAndroid().addContextMenuCloseListener(mContextMenuManager);
+        mSuggestionsUiDelegate.addDestructionObserver(() -> {
+            mActivity.getWindowAndroid().removeContextMenuCloseListener(mContextMenuManager);
         });
 
         UiConfig uiConfig = new UiConfig(mRecyclerView);
+        mRecyclerView.init(uiConfig, mContextMenuManager);
 
-        mSuggestionsCarousel =
-                ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_CAROUSEL)
-                ? new SuggestionsCarousel(uiConfig, mSuggestionsUiDelegate)
-                : null;
+        OfflinePageBridge offlinePageBridge = depsFactory.getOfflinePageBridge(profile);
 
-        final NewTabPageAdapter adapter = new NewTabPageAdapter(mSuggestionsUiDelegate,
-                /* aboveTheFoldView = */ null, uiConfig, OfflinePageBridge.getForProfile(profile),
-                mContextMenuManager, mTileGroupDelegate, mSuggestionsCarousel);
-        mRecyclerView.init(uiConfig, mContextMenuManager, adapter);
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_CAROUSEL)) {
+            mSuggestionsCarousel = new SuggestionsCarousel(
+                    uiConfig, mSuggestionsUiDelegate, mContextMenuManager, offlinePageBridge);
+        }
 
-        mBottomSheetObserver = new SuggestionsSheetVisibilityChangeObserver(this, activity) {
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_ABOVE_ARTICLES)) {
+            mContextualSuggestions = new ContextualSuggestionsSection(mSuggestionsUiDelegate,
+                    offlinePageBridge, mActivity, mActivity.getTabModelSelector());
+        }
+
+        mAdapter = new NewTabPageAdapter(mSuggestionsUiDelegate,
+                /* aboveTheFoldView = */ null, /* logoView = */ null, uiConfig, offlinePageBridge,
+                mContextMenuManager, mTileGroupDelegate, mSuggestionsCarousel,
+                mContextualSuggestions);
+
+        mBottomSheetObserver = new SuggestionsSheetVisibilityChangeObserver(this, mActivity) {
             @Override
             public void onContentShown(boolean isFirstShown) {
-                if (isFirstShown) {
+                // TODO(dgn): Temporary workaround to trigger an event in the backend when the
+                // sheet is opened following inactivity. See https://crbug.com/760974. Should be
+                // moved back to the "new opening of the sheet" path once we are able to trigger it
+                // in that case.
+                mSuggestionsUiDelegate.getEventReporter().onSurfaceOpened();
+                SuggestionsMetrics.recordSurfaceVisible();
 
-                    mRecyclerView.scrollToPosition(0);
-                    adapter.refreshSuggestions();
-                    mSuggestionsUiDelegate.getEventReporter().onSurfaceOpened();
-                    mRecyclerView.getScrollEventReporter().reset();
+                if (isFirstShown) {
+                    mAdapter.refreshSuggestions();
 
                     maybeUpdateContextualSuggestions();
-                }
 
-                SuggestionsMetrics.recordSurfaceVisible();
+                    // Set the adapter on the RecyclerView after updating it, to avoid sending
+                    // notifications that might confuse its internal state.
+                    // See https://crbug.com/756514.
+                    mRecyclerView.setAdapter(mAdapter);
+                    mRecyclerView.scrollToPosition(0);
+                    mRecyclerView.getScrollEventReporter().reset();
+                }
             }
 
             @Override
@@ -128,42 +175,34 @@ public class SuggestionsBottomSheetContent implements BottomSheet.BottomSheetCon
             public void onContentStateChanged(@BottomSheet.SheetState int contentState) {
                 if (contentState == BottomSheet.SHEET_STATE_HALF) {
                     SuggestionsMetrics.recordSurfaceHalfVisible();
+                    mRecyclerView.setScrollEnabled(false);
                 } else if (contentState == BottomSheet.SHEET_STATE_FULL) {
                     SuggestionsMetrics.recordSurfaceFullyVisible();
+                    mRecyclerView.setScrollEnabled(true);
                 }
+            }
+
+            @Override
+            public void onSheetClosed(@StateChangeReason int reason) {
+                super.onSheetClosed(reason);
+
+                if (ChromeFeatureList.isEnabled(
+                            ChromeFeatureList.CHROME_HOME_DROP_ALL_BUT_FIRST_THUMBNAIL)) {
+                    mAdapter.dropAllButFirstNArticleThumbnails(1);
+                }
+                mRecyclerView.setAdapter(null);
             }
         };
-
-        mShadowView = (FadingShadowView) mView.findViewById(R.id.shadow);
-        mShadowView.init(ApiCompatibilityUtils.getColor(resources, R.color.toolbar_shadow_color),
-                FadingShadow.POSITION_TOP);
-
-        mRecyclerView.addOnScrollListener(new OnScrollListener() {
-            @Override
-            public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
-                boolean shadowVisible = mRecyclerView.canScrollVertically(-1);
-                mShadowView.setVisibility(shadowVisible ? View.VISIBLE : View.GONE);
-            }
-        });
-
-        final LocationBar locationBar = (LocationBar) sheet.findViewById(R.id.location_bar);
-        mRecyclerView.setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            @SuppressLint("ClickableViewAccessibility")
-            public boolean onTouch(View view, MotionEvent motionEvent) {
-                if (locationBar != null && locationBar.isUrlBarFocused()) {
-                    locationBar.setUrlBarFocus(false);
-                }
-
-                // Never intercept the touch event.
-                return false;
-            }
-        });
     }
 
     @Override
     public View getContentView() {
         return mView;
+    }
+
+    @Override
+    public List<View> getViewsForPadding() {
+        return CollectionUtil.newArrayList(mRecyclerView);
     }
 
     @Override
@@ -188,9 +227,15 @@ public class SuggestionsBottomSheetContent implements BottomSheet.BottomSheetCon
 
     @Override
     public void destroy() {
-        mBottomSheetObserver.onDestroy();
-        mSuggestionsUiDelegate.onDestroy();
-        mTileGroupDelegate.destroy();
+        mIsDestroyed = true;
+
+        if (mSuggestionsInitialized) {
+            mBottomSheetObserver.onDestroy();
+            mSuggestionsUiDelegate.onDestroy();
+            mTileGroupDelegate.destroy();
+
+            if (mContextualSuggestions != null) mContextualSuggestions.destroy();
+        }
     }
 
     @Override
@@ -198,29 +243,32 @@ public class SuggestionsBottomSheetContent implements BottomSheet.BottomSheetCon
         return BottomSheetContentController.TYPE_SUGGESTIONS;
     }
 
-    private void maybeUpdateContextualSuggestions() {
-        if (mSuggestionsCarousel == null) return;
-        assert ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_CAROUSEL);
+    @Override
+    public boolean applyDefaultTopPadding() {
+        return false;
+    }
 
-        if (mSheet.getActiveTab() == null) {
-            mSuggestionsCarousel.clearSuggestions();
-            return;
+    @Override
+    public void scrollToTop() {
+        mRecyclerView.smoothScrollToPosition(0);
+    }
+
+    private void maybeUpdateContextualSuggestions() {
+        if (mSuggestionsCarousel == null && mContextualSuggestions == null) return;
+
+        Tab activeTab = mSheet.getActiveTab();
+        final String currentUrl = activeTab == null ? null : activeTab.getUrl();
+
+        if (mSuggestionsCarousel != null) {
+            assert ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_CAROUSEL);
+            mSuggestionsCarousel.refresh(mSheet.getContext(), currentUrl);
         }
 
-        final String url = mSheet.getActiveTab().getUrl();
-
-        // Do nothing if there are already suggestions in the carousel for the current context.
-        if (TextUtils.equals(url, mSuggestionsCarousel.getCurrentCarouselContextUrl())) return;
-
-        String text = String.format(Locale.US, "Fetching contextual suggestions...");
-        Toast.makeText(mRecyclerView.getContext(), text, Toast.LENGTH_SHORT).show();
-        mSuggestionsUiDelegate.getSuggestionsSource().fetchContextualSuggestions(
-                url, new Callback<List<SnippetArticle>>() {
-                    @Override
-                    public void onResult(List<SnippetArticle> contextualSuggestions) {
-                        mSuggestionsCarousel.newContextualSuggestionsAvailable(
-                                url, contextualSuggestions);
-                    }
-                });
+        if (mContextualSuggestions != null) {
+            assert ChromeFeatureList.isEnabled(
+                    ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_ABOVE_ARTICLES);
+            mContextualSuggestions.setSectionVisiblity(true);
+            mContextualSuggestions.refresh(currentUrl);
+        }
     }
 }

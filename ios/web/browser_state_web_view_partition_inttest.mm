@@ -8,8 +8,6 @@
 #include <string>
 
 #include "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
-#include "base/memory/ptr_util.h"
 #import "base/test/ios/wait_util.h"
 #include "base/test/test_timeouts.h"
 #include "ios/web/public/browser_state.h"
@@ -21,6 +19,10 @@
 #import "net/base/mac/url_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 // A WKNavigationDelegate that is used to check if a WKWebView has finished
 // a navigation. Used for testing purposes.
@@ -54,7 +56,7 @@ class BrowserStateWebViewPartitionTest : public web::WebIntTest {
     ASSERT_TRUE(server.IsRunning());
 
     auto provider =
-        base::MakeUnique<web::StringResponseProvider>("Hello World");
+        std::make_unique<web::StringResponseProvider>("Hello World");
     provider_ = provider.get();  // Keep a weak copy to allow unregistration.
     server.AddResponseProvider(std::move(provider));
   }
@@ -88,7 +90,7 @@ class BrowserStateWebViewPartitionTest : public web::WebIntTest {
                            WKWebView* web_view) {
     NSString* set_local_storage_item = [NSString
         stringWithFormat:@"localStorage.setItem('%@', '%@')", key, value];
-    __unsafe_unretained NSError* unused_error = nil;
+    NSError* unused_error = nil;
     web::ExecuteJavaScript(web_view, set_local_storage_item, &unused_error);
   }
 
@@ -104,8 +106,8 @@ class BrowserStateWebViewPartitionTest : public web::WebIntTest {
   void LoadTestWebPage(WKWebView* web_view) {
     DCHECK(web_view);
 
-    base::scoped_nsobject<TestNavigationDelegate> navigation_delegate(
-        [[TestNavigationDelegate alloc] init]);
+    TestNavigationDelegate* navigation_delegate =
+        [[TestNavigationDelegate alloc] init];
 
     id old_navigation_delegate = web_view.navigationDelegate;
     web_view.navigationDelegate = navigation_delegate;
@@ -136,18 +138,17 @@ class BrowserStateWebViewPartitionTest : public web::WebIntTest {
 
 // Tests that cookies are partitioned between web views created with a
 // non-OTR BrowserState and an OTR BrowserState.
-// Flaky: crbug/684024
-TEST_F(BrowserStateWebViewPartitionTest, DISABLED_Cookies) {
+TEST_F(BrowserStateWebViewPartitionTest, Cookies) {
   WKWebView* web_view_1 = web::BuildWKWebView(CGRectZero, GetBrowserState());
   LoadTestWebPage(web_view_1);
   SetCookie(@"someCookieName1", @"someCookieValue1", web_view_1);
-  EXPECT_NSEQ(@"someCookieName1=someCookieValue1", GetCookies(web_view_1));
+  ASSERT_NSEQ(@"someCookieName1=someCookieValue1", GetCookies(web_view_1));
 
   WKWebView* web_view_2 = web::BuildWKWebView(CGRectZero, GetOtrBrowserState());
   LoadTestWebPage(web_view_2);
 
   // Test that the cookie has not leaked over to |web_view_2|.
-  EXPECT_NSEQ(@"", GetCookies(web_view_2));
+  ASSERT_NSEQ(@"", GetCookies(web_view_2));
 
   SetCookie(@"someCookieName2", @"someCookieValue2", web_view_2);
   EXPECT_NSEQ(@"someCookieName2=someCookieValue2", GetCookies(web_view_2));

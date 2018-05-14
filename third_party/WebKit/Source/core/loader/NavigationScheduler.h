@@ -33,28 +33,27 @@
 #define NavigationScheduler_h
 
 #include <memory>
+
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
+#include "core/dom/Document.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/scheduler/renderer/renderer_scheduler.h"
 
 namespace blink {
 
-class Document;
 class FormSubmission;
 class LocalFrame;
 class ScheduledNavigation;
 
 class CORE_EXPORT NavigationScheduler final
     : public GarbageCollectedFinalized<NavigationScheduler> {
-  WTF_MAKE_NONCOPYABLE(NavigationScheduler);
-
  public:
   static NavigationScheduler* Create(LocalFrame* frame) {
     return new NavigationScheduler(frame);
@@ -65,10 +64,10 @@ class CORE_EXPORT NavigationScheduler final
   bool LocationChangePending();
   bool IsNavigationScheduledWithin(double interval_in_seconds) const;
 
-  void ScheduleRedirect(double delay, const KURL&);
-  void ScheduleLocationChange(Document*,
-                              const KURL&,
-                              bool replaces_current_item = true);
+  void ScheduleRedirect(double delay, const KURL&, Document::HttpRefreshType);
+  void ScheduleFrameNavigation(Document*,
+                               const KURL&,
+                               bool replaces_current_item = true);
   void SchedulePageBlock(Document*, int reason);
   void ScheduleFormSubmission(Document*, FormSubmission*);
   void ScheduleReload();
@@ -76,7 +75,7 @@ class CORE_EXPORT NavigationScheduler final
   void StartTimer();
   void Cancel();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   explicit NavigationScheduler(LocalFrame*);
@@ -95,10 +94,12 @@ class CORE_EXPORT NavigationScheduler final
 
   // Exists because we can't deref m_frame in destructor.
   scheduler::RendererScheduler::NavigatingFrameType frame_type_;
+
+  DISALLOW_COPY_AND_ASSIGN(NavigationScheduler);
 };
 
 class NavigationDisablerForBeforeUnload {
-  WTF_MAKE_NONCOPYABLE(NavigationDisablerForBeforeUnload);
+  DISALLOW_COPY_AND_ASSIGN(NavigationDisablerForBeforeUnload);
   STACK_ALLOCATED();
 
  public:

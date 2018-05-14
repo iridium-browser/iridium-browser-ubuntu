@@ -56,10 +56,9 @@ const int kOpportunisticRenewalThresholdInDays = 30;
 // A callback method to handle DBus errors.
 void DBusCallback(const base::Callback<void(bool)>& on_success,
                   const base::Closure& on_failure,
-                  chromeos::DBusMethodCallStatus call_status,
-                  bool result) {
-  if (call_status == chromeos::DBUS_METHOD_CALL_SUCCESS) {
-    on_success.Run(result);
+                  base::Optional<bool> result) {
+  if (result.has_value()) {
+    on_success.Run(result.value());
   } else {
     LOG(ERROR) << "PlatformVerificationFlow: DBus call failed!";
     on_failure.Run();
@@ -229,13 +228,13 @@ void PlatformVerificationFlow::ChallengePlatformKey(
   }
 
   ChallengeContext context(web_contents, service_id, challenge, callback);
+
   // Check if the device has been prepared to use attestation.
-  BoolDBusMethodCallback dbus_callback =
-      base::Bind(&DBusCallback,
-                 base::Bind(&PlatformVerificationFlow::OnAttestationPrepared,
-                            this, context),
-                 base::Bind(&ReportError, callback, INTERNAL_ERROR));
-  cryptohome_client_->TpmAttestationIsPrepared(dbus_callback);
+  cryptohome_client_->TpmAttestationIsPrepared(base::BindOnce(
+      &DBusCallback,
+      base::Bind(&PlatformVerificationFlow::OnAttestationPrepared, this,
+                 context),
+      base::Bind(&ReportError, callback, INTERNAL_ERROR)));
 }
 
 void PlatformVerificationFlow::OnAttestationPrepared(
@@ -284,11 +283,11 @@ void PlatformVerificationFlow::OnCertificateReady(
     const ChallengeContext& context,
     const AccountId& account_id,
     std::unique_ptr<base::Timer> timer,
-    bool operation_success,
+    AttestationStatus operation_status,
     const std::string& certificate_chain) {
   // Log failure before checking the timer so all failures are logged, even if
   // they took too long.
-  if (!operation_success) {
+  if (operation_status != ATTESTATION_SUCCESS) {
     LOG(WARNING) << "PlatformVerificationFlow: Failed to certify platform.";
   }
   if (!timer->IsRunning()) {
@@ -297,7 +296,7 @@ void PlatformVerificationFlow::OnCertificateReady(
     return;
   }
   timer->Stop();
-  if (!operation_success) {
+  if (operation_status != ATTESTATION_SUCCESS) {
     ReportError(context.callback, PLATFORM_NOT_VERIFIED);
     return;
   }
@@ -423,10 +422,10 @@ PlatformVerificationFlow::ExpiryStatus PlatformVerificationFlow::CheckExpiry(
 
 void PlatformVerificationFlow::RenewCertificateCallback(
     const std::string& old_certificate_chain,
-    bool operation_success,
+    AttestationStatus operation_status,
     const std::string& certificate_chain) {
   renewals_in_progress_.erase(old_certificate_chain);
-  if (!operation_success) {
+  if (operation_status != ATTESTATION_SUCCESS) {
     LOG(WARNING) << "PlatformVerificationFlow: Failed to renew platform "
                     "certificate.";
     return;

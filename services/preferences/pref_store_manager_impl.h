@@ -16,7 +16,7 @@
 #include "components/prefs/pref_value_store.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "mojo/public/cpp/bindings/strong_binding_set.h"
-#include "services/preferences/public/interfaces/preferences.mojom.h"
+#include "services/preferences/public/mojom/preferences.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 
@@ -45,7 +45,8 @@ class PrefStoreManagerImpl : public service_manager::Service {
                        PersistentPrefStore* user_prefs,
                        PersistentPrefStore* incognito_user_prefs_underlay,
                        PrefStore* recommended_prefs,
-                       PrefRegistry* pref_registry);
+                       PrefRegistry* pref_registry,
+                       std::vector<const char*> overlay_pref_names);
   ~PrefStoreManagerImpl() override;
 
   base::OnceClosure ShutDownClosure();
@@ -79,6 +80,7 @@ class PrefStoreManagerImpl : public service_manager::Service {
   std::unique_ptr<PersistentPrefStoreImpl> persistent_pref_store_;
   std::unique_ptr<PersistentPrefStoreImpl>
       incognito_persistent_pref_store_underlay_;
+  std::vector<const char*> overlay_pref_names_;
 
   const std::unique_ptr<SharedPrefRegistry> shared_pref_registry_;
 

@@ -27,7 +27,7 @@
 #define PlainTextRange_h
 
 #include "core/CoreExport.h"
-#include "core/editing/EphemeralRange.h"
+#include "core/editing/Forward.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/NotFound.h"
@@ -36,6 +36,7 @@ namespace blink {
 
 class ContainerNode;
 class Range;
+class TextIteratorBehavior;
 
 class CORE_EXPORT PlainTextRange {
   STACK_ALLOCATED();
@@ -63,6 +64,8 @@ class CORE_EXPORT PlainTextRange {
 
   EphemeralRange CreateRange(const ContainerNode& scope) const;
   EphemeralRange CreateRangeForSelection(const ContainerNode& scope) const;
+  EphemeralRange CreateRangeForSelectionIndexing(
+      const ContainerNode& scope) const;
 
   static PlainTextRange Create(const ContainerNode& scope,
                                const EphemeralRange&);
@@ -71,8 +74,8 @@ class CORE_EXPORT PlainTextRange {
  private:
   PlainTextRange& operator=(const PlainTextRange&) = delete;
 
-  enum GetRangeFor { kForGeneric, kForSelection };
-  EphemeralRange CreateRangeFor(const ContainerNode& scope, GetRangeFor) const;
+  EphemeralRange CreateRangeFor(const ContainerNode& scope,
+                                const TextIteratorBehavior&) const;
 
   const size_t start_;
   const size_t end_;

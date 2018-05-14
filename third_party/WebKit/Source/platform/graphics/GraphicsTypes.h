@@ -28,13 +28,29 @@
 
 #include "platform/PlatformExport.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/build_config.h"
 #include "public/platform/WebBlendMode.h"
 #include "third_party/skia/include/core/SkFilterQuality.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 
 namespace blink {
+
+enum AlphaDisposition {
+  kPremultiplyAlpha,
+  kUnpremultiplyAlpha,
+  kDontChangeAlpha,
+};
+
+enum DataU8ColorType {
+  kRGBAColorType,
+  kN32ColorType,
+};
+
+enum ImageDataStorageFormat {
+  kUint8ClampedArrayStorageFormat,
+  kUint16ArrayStorageFormat,
+  kFloat32ArrayStorageFormat,
+};
 
 enum StrokeStyle {
   kNoStroke,
@@ -49,11 +65,10 @@ enum InterpolationQuality {
   kInterpolationNone = kNone_SkFilterQuality,
   kInterpolationLow = kLow_SkFilterQuality,
   kInterpolationMedium = kMedium_SkFilterQuality,
-  kInterpolationHigh = kHigh_SkFilterQuality,
 #if defined(WTF_USE_LOW_QUALITY_IMAGE_INTERPOLATION)
   kInterpolationDefault = kInterpolationLow,
 #else
-  kInterpolationDefault = kInterpolationHigh,
+  kInterpolationDefault = kInterpolationMedium,
 #endif
 };
 
@@ -85,27 +100,6 @@ enum AccelerationHint {
   kPreferNoAcceleration,
 };
 
-enum SnapshotReason {
-  kSnapshotReasonUnknown,
-  kSnapshotReasonGetImageData,
-  kSnapshotReasonWebGLTexImage2D,
-  kSnapshotReasonWebGLTexSubImage2D,
-  kSnapshotReasonWebGLTexImage3D,
-  kSnapshotReasonWebGLTexSubImage3D,
-  kSnapshotReasonPaint,
-  kSnapshotReasonToDataURL,
-  kSnapshotReasonToBlob,
-  kSnapshotReasonCanvasListenerCapture,
-  kSnapshotReasonDrawImage,
-  kSnapshotReasonCreatePattern,
-  kSnapshotReasonTransferToImageBitmap,
-  kSnapshotReasonUnitTests,
-  kSnapshotReasonGetCopiedImage,
-  kSnapshotReasonWebGLDrawImageIntoBuffer,
-  kSnapshotReasonCopyToClipboard,
-  kSnapshotReasonCreateImageBitmap,
-};
-
 // Note: enum used directly for histogram, values must not change
 enum DisableDeferralReason {
   kDisableDeferralReasonUnknown =
@@ -120,15 +114,16 @@ enum DisableDeferralReason {
   kDisableDeferralReasonCount,
 };
 
-enum FlushReason {
-  kFlushReasonUnknown,
-  kFlushReasonInitialClear,
-  kFlushReasonDrawImageOfWebGL,
+enum MailboxSyncMode {
+  kVerifiedSyncToken,
+  kUnverifiedSyncToken,
+  kOrderingBarrier,
 };
 
-enum ImageInitializationMode {
-  kInitializeImagePixels,
-  kDoNotInitializeImagePixels,
+enum HighContrastClassification {
+  kNotClassified,
+  kApplyHighContrastFilter,
+  kDoNotApplyHighContrastFilter,
 };
 
 // TODO(junov): crbug.com/453113 Relocate ShadowMode to

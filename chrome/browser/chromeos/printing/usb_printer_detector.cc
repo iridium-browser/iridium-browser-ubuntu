@@ -13,7 +13,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/scoped_observer.h"
 #include "base/strings/utf_string_conversions.h"
@@ -53,13 +52,11 @@ std::string GuessEffectiveMakeAndModel(const device::UsbDevice& device) {
 class UsbPrinterDetectorImpl : public UsbPrinterDetector,
                                public device::UsbService::Observer {
  public:
-  explicit UsbPrinterDetectorImpl(Profile* profile)
+  explicit UsbPrinterDetectorImpl(device::UsbService* usb_service)
       : usb_observer_(this),
         observer_list_(
             new base::ObserverListThreadSafe<UsbPrinterDetector::Observer>),
         weak_ptr_factory_(this) {
-    device::UsbService* usb_service =
-        device::DeviceClient::Get()->GetUsbService();
     if (usb_service) {
       usb_observer_.Add(usb_service);
       usb_service->GetDevices(base::Bind(&UsbPrinterDetectorImpl::OnGetDevices,
@@ -71,28 +68,6 @@ class UsbPrinterDetectorImpl : public UsbPrinterDetector,
   // PrinterDetector interface function.
   void AddObserver(UsbPrinterDetector::Observer* observer) override {
     observer_list_->AddObserver(observer);
-
-    // This is subtle.  We're scheduling a callback here, so we have to be
-    // careful about cancellation.  We can't just post the task to the sequence,
-    // because there's the possibility the observe will be deleted before the
-    // task executes.  We can't call the callbacks directly here because the
-    // common usage of observers involves having the observer object not be
-    // fully constructed when AddObserver is called.
-    //
-    // The easiest way to deal with this is to just let ThreadSafeObserverList
-    // sort it out.  It already handles the removed-before-callback-executes
-    // case, so makes things safe for us.  This means we may *over*-notify a
-    // bit, but since the number of observers is expected to be small (usually
-    // just 1) that's a price we're willing to pay.
-    //
-    observer_list_->Notify(
-        FROM_HERE, &PrinterDetector::Observer::OnPrintersFound, GetPrinters());
-
-    // In the case of the USB detector, we expect to always have up-to-date
-    // information, thus the scan is complete after the first OnPrintersFound
-    // callback.
-    observer_list_->Notify(FROM_HERE,
-                           &PrinterDetector::Observer::OnPrinterScanComplete);
   }
 
   // PrinterDetector interface function.
@@ -180,9 +155,15 @@ class UsbPrinterDetectorImpl : public UsbPrinterDetector,
 }  // namespace
 
 // static
-std::unique_ptr<UsbPrinterDetector> UsbPrinterDetector::Create(
-    Profile* profile) {
-  return base::MakeUnique<UsbPrinterDetectorImpl>(profile);
+std::unique_ptr<UsbPrinterDetector> UsbPrinterDetector::Create() {
+  device::UsbService* usb_service =
+      device::DeviceClient::Get()->GetUsbService();
+  return std::make_unique<UsbPrinterDetectorImpl>(usb_service);
+}
+
+std::unique_ptr<UsbPrinterDetector> UsbPrinterDetector::CreateForTesting(
+    device::UsbService* usb_service) {
+  return std::make_unique<UsbPrinterDetectorImpl>(usb_service);
 }
 
 }  // namespace chromeos

@@ -34,6 +34,7 @@
 #include "WebNavigationPolicy.h"
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebDragOperation.h"
+#include "public/platform/WebIntrinsicSizingInfo.h"
 #include "public/platform/WebLayerTreeView.h"
 #include "public/platform/WebPoint.h"
 #include "public/platform/WebRect.h"
@@ -48,8 +49,8 @@ namespace blink {
 class WebDragData;
 class WebGestureEvent;
 class WebImage;
-class WebNode;
 class WebString;
+class WebTappedInfo;
 class WebWidget;
 struct WebCursorInfo;
 struct WebFloatPoint;
@@ -58,7 +59,7 @@ struct WebFloatSize;
 
 class WebWidgetClient {
  public:
-  virtual ~WebWidgetClient() {}
+  virtual ~WebWidgetClient() = default;
 
   // Called when a region of the WebWidget needs to be re-painted.
   virtual void DidInvalidateRect(const WebRect&) {}
@@ -73,6 +74,10 @@ class WebWidgetClient {
 
   // Called when a call to WebWidget::animate is required
   virtual void ScheduleAnimation() {}
+
+  // A notification callback for when the intrinsic sizing of the
+  // widget changed. This is only called for SVG within a remote frame.
+  virtual void IntrinsicSizingInfoChanged(const WebIntrinsicSizingInfo&) {}
 
   // Called immediately following the first compositor-driven (frame-generating)
   // layout that happened after an interesting document lifecyle change (see
@@ -136,13 +141,18 @@ class WebWidgetClient {
   virtual void DidOverscroll(const WebFloatSize& overscroll_delta,
                              const WebFloatSize& accumulated_overscroll,
                              const WebFloatPoint& position_in_viewport,
-                             const WebFloatSize& velocity_in_viewport) {}
+                             const WebFloatSize& velocity_in_viewport,
+                             const WebOverscrollBehavior& behavior) {}
 
   // Called to update if touch events should be sent.
   virtual void HasTouchEventHandlers(bool) {}
 
   // Called to update whether low latency input mode is enabled or not.
   virtual void SetNeedsLowLatencyInput(bool) {}
+
+  // Requests unbuffered (ie. low latency) input until a pointerup
+  // event occurs.
+  virtual void RequestUnbufferedInputEvents() {}
 
   // Called during WebWidget::HandleInputEvent for a TouchStart event to inform
   // the embedder of the touch actions that are permitted for this touch.
@@ -154,18 +164,9 @@ class WebWidgetClient {
   // Request that the browser show a UI for an unhandled tap, if needed.
   // Invoked during the handling of a GestureTap input event whenever the
   // event is not consumed.
-  // |tappedPosition| is the point where the mouseDown occurred in client
-  // coordinates.
-  // |tappedNode| is the node that the mouseDown event hit, provided so the
-  // UI can be shown only on certain kinds of nodes in specific locations.
-  // |pageChanged| is true if and only if the DOM tree or style was
-  // modified during the dispatch of the mouse*, or click events associated
-  // with the tap.
-  // This provides a heuristic to help identify when a page is doing
-  // something as a result of a tap without explicitly consuming the event.
-  virtual void ShowUnhandledTapUIIfNeeded(const WebPoint& tapped_position,
-                                          const WebNode& tapped_node,
-                                          bool page_changed) {}
+  // |tappedInfo| has all the details about what was tapped and where the tap
+  // occurred.
+  virtual void ShowUnhandledTapUIIfNeeded(const WebTappedInfo& tappedInfo) {}
 
   // Converts the |rect| from Blink's Viewport coordinates to the
   // coordinates in the native window used to display the content, in

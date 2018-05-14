@@ -29,18 +29,17 @@ from telemetry.testing import fakes
 from telemetry.testing import options_for_unittests
 from telemetry.testing import system_stub
 import mock
-from telemetry.value import failure
 from telemetry.value import improvement_direction
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
-from telemetry.value import skip
 from telemetry.value import summary as summary_module
 from telemetry.web_perf import story_test
 from telemetry.web_perf import timeline_based_measurement
 from telemetry.wpr import archive_info
 from tracing.value import histogram as histogram_module
 from tracing.value import histogram_set
-
+from tracing.value.diagnostics import generic_set
+from tracing.value.diagnostics import reserved_infos
 
 # This linter complains if we define classes nested inside functions.
 # pylint: disable=bad-super-call
@@ -55,7 +54,23 @@ class FakePlatform(object):
     pass
 
   def GetDeviceTypeName(self):
-    return "GetDeviceTypeName"
+    return 'GetDeviceTypeName'
+
+  def GetArchName(self):
+    return 'amd64'
+
+  def GetOSName(self):
+    return 'win'
+
+  def GetOSVersionName(self):
+    return 'win10'
+
+  def GetSystemTotalPhysicalMemory(self):
+    return 8 * (1024 ** 3)
+
+  def GetDeviceId(self):
+    return None
+
 
 class TestSharedState(story_module.SharedState):
 
@@ -82,7 +97,7 @@ class TestSharedState(story_module.SharedState):
     return True
 
   def RunStory(self, results):
-    raise NotImplementedError
+    self._test.ValidateAndMeasurePage(self._current_story, None, results)
 
   def DidRunStory(self, results):
     pass
@@ -100,10 +115,6 @@ class TestSharedPageState(TestSharedState):
 
 
 class FooStoryState(TestSharedPageState):
-  pass
-
-
-class BarStoryState(TestSharedPageState):
   pass
 
 
@@ -139,27 +150,10 @@ class DummyLocalStory(story_module.Story):
     return 'data:,'
 
 
-class MixedStateStorySet(story_module.StorySet):
-  @property
-  def allow_mixed_story_states(self):
-    return True
-
-
-def SetupStorySet(allow_multiple_story_states, story_state_list):
-  if allow_multiple_story_states:
-    story_set = MixedStateStorySet()
-  else:
-    story_set = story_module.StorySet()
-  for i, story_state in enumerate(story_state_list):
-    story_set.AddStory(DummyLocalStory(story_state,
-                                       name='story%d' % i))
-  return story_set
-
 class _DisableBenchmarkExpectations(
     story_module.expectations.StoryExpectations):
   def SetExpectations(self):
-    self.PermanentlyDisableBenchmark(
-        [story_module.expectations.ALL], 'crbug.com/123')
+    self.DisableBenchmark([story_module.expectations.ALL], 'crbug.com/123')
 
 class _DisableStoryExpectations(story_module.expectations.StoryExpectations):
   def SetExpectations(self):
@@ -199,7 +193,8 @@ class FakeBenchmark(benchmark.Benchmark):
     assert isinstance(b, bool)
     self._story_disabled = b
 
-  def GetExpectations(self):
+  @property
+  def expectations(self):
     if self.story_disabled:
       return _DisableStoryExpectations()
     if self.disabled:
@@ -210,6 +205,7 @@ class FakeBenchmark(benchmark.Benchmark):
 def _GetOptionForUnittest():
   options = options_for_unittests.GetCopy()
   options.output_formats = ['none']
+  options.output_dir = tempfile.mkdtemp(prefix='story_runner_test')
   options.suppress_gtest_report = False
   parser = options.CreateParser()
   story_runner.AddCommandLineArgs(parser)
@@ -237,18 +233,12 @@ class TestOnlyException(Exception):
   pass
 
 
-class FailureValueMatcher(object):
-  def __init__(self, expected_exception_message):
-    self._expected_exception_message = expected_exception_message
+class ExcInfoMatcher(object):
+  def __init__(self, message):
+    self.message = message
 
   def __eq__(self, other):
-    return (isinstance(other, failure.FailureValue) and
-            other.exc_info[1].message == self._expected_exception_message)
-
-
-class SkipValueMatcher(object):
-  def __eq__(self, other):
-    return isinstance(other, skip.SkipValue)
+    return isinstance(other[1], Exception) and self.message == other[1].message
 
 
 class _Measurement(legacy_page_test.LegacyPageTest):
@@ -260,7 +250,10 @@ class _Measurement(legacy_page_test.LegacyPageTest):
         improvement_direction=improvement_direction.UP))
 
   def ValidateAndMeasurePage(self, page, tab, results):
-    pass
+    self.i += 1
+    results.AddValue(scalar.ScalarValue(
+        page, 'metric', 'unit', self.i,
+        improvement_direction=improvement_direction.UP))
 
 
 class StoryRunnerTest(unittest.TestCase):
@@ -277,7 +270,7 @@ class StoryRunnerTest(unittest.TestCase):
     """Fake out exception formatter to avoid spamming the unittest stdout."""
     story_runner.exception_formatter = FakeExceptionFormatterModule
     self._story_runner_logging_stub = system_stub.Override(
-      story_runner, ['logging'])
+        story_runner, ['logging'])
 
   def RestoreExceptionFormatter(self):
     story_runner.exception_formatter = ex_formatter_module
@@ -293,41 +286,19 @@ class StoryRunnerTest(unittest.TestCase):
       os.remove(results_file_path)
     self.RestoreExceptionFormatter()
 
-  def testStoriesGroupedByStateClass(self):
-    foo_states = [FooStoryState, FooStoryState, FooStoryState,
-                  FooStoryState, FooStoryState]
-    mixed_states = [FooStoryState, FooStoryState, FooStoryState,
-                    BarStoryState, FooStoryState]
-    # StorySet's are only allowed to have one SharedState.
-    story_set = SetupStorySet(False, foo_states)
-    story_groups = (
-        story_runner.StoriesGroupedByStateClass(
-            story_set, False))
-    self.assertEqual(len(story_groups), 1)
-    story_set = SetupStorySet(False, mixed_states)
-    self.assertRaises(
-        ValueError,
-        story_runner.StoriesGroupedByStateClass,
-        story_set, False)
-    # BaseStorySets are allowed to have multiple SharedStates.
-    mixed_story_set = SetupStorySet(True, mixed_states)
-    story_groups = (
-        story_runner.StoriesGroupedByStateClass(
-            mixed_story_set, True))
-    self.assertEqual(len(story_groups), 3)
-    self.assertEqual(story_groups[0].shared_state_class,
-                     FooStoryState)
-    self.assertEqual(story_groups[1].shared_state_class,
-                     BarStoryState)
-    self.assertEqual(story_groups[2].shared_state_class,
-                     FooStoryState)
+    shutil.rmtree(self.options.output_dir)
 
-  def RunStoryTest(self, s, expected_successes):
+  def testRunStorySet(self):
+    number_stories = 3
+    story_set = story_module.StorySet()
+    for i in xrange(number_stories):
+      story_set.AddStory(DummyLocalStory(FooStoryState, name='story_%d' % i))
     test = DummyTest()
     story_runner.Run(
-        test, s, self.options, self.results, metadata=EmptyMetadataForTest())
-    self.assertEquals(0, len(self.results.failures))
-    self.assertEquals(expected_successes,
+        test, story_set, self.options, self.results,
+        metadata=EmptyMetadataForTest())
+    self.assertFalse(self.results.had_failures)
+    self.assertEquals(number_stories,
                       GetNumberOfSuccessfulPageRuns(self.results))
 
   def testRunStoryWithMissingArchiveFile(self):
@@ -338,20 +309,6 @@ class StoryRunnerTest(unittest.TestCase):
     test = DummyTest()
     self.assertRaises(story_runner.ArchiveError, story_runner.Run, test,
                       story_set, self.options, self.results)
-
-  def testStoryTest(self):
-    all_foo = [FooStoryState, FooStoryState, FooStoryState]
-    one_bar = [FooStoryState, FooStoryState, BarStoryState]
-    story_set = SetupStorySet(True, one_bar)
-    self.RunStoryTest(story_set, 3)
-    story_set = SetupStorySet(True, all_foo)
-    self.RunStoryTest(story_set, 6)
-    story_set = SetupStorySet(False, all_foo)
-    self.RunStoryTest(story_set, 9)
-    story_set = SetupStorySet(False, one_bar)
-    test = DummyTest()
-    self.assertRaises(ValueError, story_runner.Run, test, story_set,
-                      self.options, self.results)
 
   def testRunStoryWithLongName(self):
     story_set = story_module.StorySet()
@@ -366,8 +323,8 @@ class StoryRunnerTest(unittest.TestCase):
                                         story_set, name='test'))
     test = DummyTest()
     story_runner.Run(test, story_set,
-                      self.options, self.results,
-                      metadata=EmptyMetadataForTest())
+                     self.options, self.results,
+                     metadata=EmptyMetadataForTest())
 
   def testSuccessfulTimelineBasedMeasurementTest(self):
     """Check that PageTest is not required for story_runner.Run.
@@ -405,7 +362,7 @@ class StoryRunnerTest(unittest.TestCase):
     story_runner.Run(
         test, story_set, self.options, self.results,
         metadata=EmptyMetadataForTest())
-    self.assertEquals(0, len(self.results.failures))
+    self.assertFalse(self.results.had_failures)
     self.assertEquals(3, GetNumberOfSuccessfulPageRuns(self.results))
 
     self.assertEquals(3*EXPECTED_CALLS_IN_ORDER,
@@ -461,92 +418,15 @@ class StoryRunnerTest(unittest.TestCase):
       test = TestStoryTest()
       story_set = story_module.StorySet()
       story_set.AddStory(DummyLocalStory(TestSharedStateForStoryTest))
-      story_runner.Run(test, story_set, self.options, self.results,
+      story_runner.Run(
+          test, story_set, self.options, self.results,
           metadata=EmptyMetadataForTest())
       return [call[0] for call in manager.mock_calls]
 
     calls_in_order = GetCallsInOrder() # pylint: disable=no-value-for-parameter
     self.assertEquals(EXPECTED_CALLS_IN_ORDER, calls_in_order)
 
-  def testTearDownStateAfterEachStoryOrStorySetRun(self):
-    class TestSharedStateForTearDown(TestSharedState):
-      num_of_tear_downs = 0
-
-      def RunStory(self, results):
-        pass
-
-      def TearDownState(self):
-        TestSharedStateForTearDown.num_of_tear_downs += 1
-
-    story_set = story_module.StorySet()
-    story_set.AddStory(DummyLocalStory(TestSharedStateForTearDown, name='foo'))
-    story_set.AddStory(DummyLocalStory(TestSharedStateForTearDown, name='bar'))
-    story_set.AddStory(DummyLocalStory(TestSharedStateForTearDown, name='baz'))
-
-    TestSharedStateForTearDown.num_of_tear_downs = 0
-    story_runner.Run(mock.MagicMock(), story_set, self.options, self.results,
-                     metadata=EmptyMetadataForTest())
-    self.assertEquals(TestSharedStateForTearDown.num_of_tear_downs, 1)
-
-    TestSharedStateForTearDown.num_of_tear_downs = 0
-    story_runner.Run(mock.MagicMock(), story_set, self.options, self.results,
-                     tear_down_after_story=True,
-                     metadata=EmptyMetadataForTest())
-    self.assertEquals(TestSharedStateForTearDown.num_of_tear_downs, 3)
-
-    self.options.pageset_repeat = 5
-    TestSharedStateForTearDown.num_of_tear_downs = 0
-    story_runner.Run(mock.MagicMock(), story_set, self.options, self.results,
-                     tear_down_after_story_set=True,
-                     metadata=EmptyMetadataForTest())
-    self.assertEquals(TestSharedStateForTearDown.num_of_tear_downs, 5)
-
-  def testTearDownIsCalledOnceForEachStoryGroupWithPageSetRepeat(self):
-    self.options.pageset_repeat = 3
-    fooz_init_call_counter = [0]
-    fooz_tear_down_call_counter = [0]
-    barz_init_call_counter = [0]
-    barz_tear_down_call_counter = [0]
-    class FoozStoryState(FooStoryState):
-      def __init__(self, test, options, storyz):
-        super(FoozStoryState, self).__init__(
-          test, options, storyz)
-        fooz_init_call_counter[0] += 1
-      def TearDownState(self):
-        fooz_tear_down_call_counter[0] += 1
-
-    class BarzStoryState(BarStoryState):
-      def __init__(self, test, options, storyz):
-        super(BarzStoryState, self).__init__(
-          test, options, storyz)
-        barz_init_call_counter[0] += 1
-      def TearDownState(self):
-        barz_tear_down_call_counter[0] += 1
-    def AssertAndCleanUpFoo():
-      self.assertEquals(1, fooz_init_call_counter[0])
-      self.assertEquals(1, fooz_tear_down_call_counter[0])
-      fooz_init_call_counter[0] = 0
-      fooz_tear_down_call_counter[0] = 0
-
-    story_set1_list = [FoozStoryState, FoozStoryState, FoozStoryState,
-                       BarzStoryState, BarzStoryState]
-    story_set1 = SetupStorySet(True, story_set1_list)
-    self.RunStoryTest(story_set1, 15)
-    AssertAndCleanUpFoo()
-    self.assertEquals(1, barz_init_call_counter[0])
-    self.assertEquals(1, barz_tear_down_call_counter[0])
-    barz_init_call_counter[0] = 0
-    barz_tear_down_call_counter[0] = 0
-
-    story_set2_list = [FoozStoryState, FoozStoryState, FoozStoryState,
-                       FoozStoryState]
-    story_set2 = SetupStorySet(False, story_set2_list)
-    self.RunStoryTest(story_set2, 27)
-    AssertAndCleanUpFoo()
-    self.assertEquals(0, barz_init_call_counter[0])
-    self.assertEquals(0, barz_tear_down_call_counter[0])
-
-  def testAppCrashExceptionCausesFailureValue(self):
+  def testAppCrashExceptionCausesFailure(self):
     self.SuppressExceptionFormatting()
     story_set = story_module.StorySet()
     class SharedStoryThatCausesAppCrash(TestSharedPageState):
@@ -554,11 +434,11 @@ class StoryRunnerTest(unittest.TestCase):
         raise exceptions.AppCrashException(msg='App Foo crashes')
 
     story_set.AddStory(DummyLocalStory(
-          SharedStoryThatCausesAppCrash))
+        SharedStoryThatCausesAppCrash))
     story_runner.Run(
         DummyTest(), story_set, self.options, self.results,
         metadata=EmptyMetadataForTest())
-    self.assertEquals(1, len(self.results.failures))
+    self.assertTrue(self.results.had_failures)
     self.assertEquals(0, GetNumberOfSuccessfulPageRuns(self.results))
     self.assertIn('App Foo crashes', self.fake_stdout.getvalue())
 
@@ -570,7 +450,7 @@ class StoryRunnerTest(unittest.TestCase):
         raise TestOnlyException()
 
     story_set.AddStory(DummyLocalStory(
-          SharedStoryThatCausesAppCrash))
+        SharedStoryThatCausesAppCrash))
     with self.assertRaises(TestOnlyException):
       story_runner.Run(
           DummyTest(), story_set, self.options, self.results,
@@ -638,7 +518,7 @@ class StoryRunnerTest(unittest.TestCase):
         test, story_set, self.options, self.results,
         metadata=EmptyMetadataForTest())
     self.assertEquals(2, test.run_count)
-    self.assertEquals(1, len(self.results.failures))
+    self.assertTrue(self.results.had_failures)
     self.assertEquals(1, GetNumberOfSuccessfulPageRuns(self.results))
 
   def testAppCrashThenRaiseInTearDownFatal(self):
@@ -684,7 +564,7 @@ class StoryRunnerTest(unittest.TestCase):
     self.assertEqual(['app-crash', 'dump-state', 'tear-down-state'],
                      unit_test_events)
     # The AppCrashException gets added as a failure.
-    self.assertEquals(1, len(self.results.failures))
+    self.assertTrue(self.results.had_failures)
 
   def testPagesetRepeat(self):
     story_set = story_module.StorySet()
@@ -698,10 +578,11 @@ class StoryRunnerTest(unittest.TestCase):
     self.options.pageset_repeat = 2
     self.options.output_formats = []
     results = results_options.CreateResults(
-      EmptyMetadataForTest(), self.options)
-    story_runner.Run(_Measurement(), story_set, self.options, results,
+        EmptyMetadataForTest(), self.options)
+    story_runner.Run(
+        _Measurement(), story_set, self.options, results,
         metadata=EmptyMetadataForTest())
-    summary = summary_module.Summary(results.all_page_specific_values)
+    summary = summary_module.Summary(results)
     values = summary.interleaved_computed_per_page_values_and_summaries
 
     blank_value = list_of_scalar_values.ListOfScalarValues(
@@ -716,7 +597,7 @@ class StoryRunnerTest(unittest.TestCase):
         improvement_direction=improvement_direction.UP)
 
     self.assertEquals(4, GetNumberOfSuccessfulPageRuns(results))
-    self.assertEquals(0, len(results.failures))
+    self.assertFalse(results.had_failures)
     self.assertEquals(3, len(values))
     self.assertIn(blank_value, values)
     self.assertIn(green_value, values)
@@ -732,12 +613,12 @@ class StoryRunnerTest(unittest.TestCase):
     story_runner.Run(_Measurement(), story_set, self.options, results,
                      expectations=_DisableStoryExpectations(),
                      metadata=EmptyMetadataForTest())
-    summary = summary_module.Summary(results.all_page_specific_values)
+    summary = summary_module.Summary(results)
     values = summary.interleaved_computed_per_page_values_and_summaries
 
     self.assertEquals(1, GetNumberOfSuccessfulPageRuns(results))
     self.assertEquals(1, GetNumberOfSkippedPageRuns(results))
-    self.assertEquals(0, len(results.failures))
+    self.assertFalse(results.had_failures)
     self.assertEquals(0, len(values))
 
   def testRunStoryOneDisabledOneNot(self):
@@ -752,12 +633,12 @@ class StoryRunnerTest(unittest.TestCase):
     story_runner.Run(_Measurement(), story_set, self.options, results,
                      expectations=_DisableStoryExpectations(),
                      metadata=EmptyMetadataForTest())
-    summary = summary_module.Summary(results.all_page_specific_values)
+    summary = summary_module.Summary(results)
     values = summary.interleaved_computed_per_page_values_and_summaries
 
     self.assertEquals(2, GetNumberOfSuccessfulPageRuns(results))
     self.assertEquals(1, GetNumberOfSkippedPageRuns(results))
-    self.assertEquals(0, len(results.failures))
+    self.assertFalse(results.had_failures)
     self.assertEquals(2, len(values))
 
   def testRunStoryDisabledOverriddenByFlag(self):
@@ -771,12 +652,12 @@ class StoryRunnerTest(unittest.TestCase):
     story_runner.Run(_Measurement(), story_set, self.options, results,
                      expectations=_DisableStoryExpectations(),
                      metadata=EmptyMetadataForTest())
-    summary = summary_module.Summary(results.all_page_specific_values)
+    summary = summary_module.Summary(results)
     values = summary.interleaved_computed_per_page_values_and_summaries
 
     self.assertEquals(1, GetNumberOfSuccessfulPageRuns(results))
     self.assertEquals(0, GetNumberOfSkippedPageRuns(results))
-    self.assertEquals(0, len(results.failures))
+    self.assertFalse(results.had_failures)
     self.assertEquals(2, len(values))
 
   def testRunStoryPopulatesHistograms(self):
@@ -789,8 +670,8 @@ class StoryRunnerTest(unittest.TestCase):
 
       # pylint: disable=unused-argument
       def RunPage(self, _, _2, results):
-        results.histograms.ImportDicts([
-            histogram_module.Histogram('hist', 'count').AsDict()])
+        results.AddHistogram(
+            histogram_module.Histogram('hist', 'count'))
 
       def ValidateAndMeasurePage(self, page, tab, results):
         pass
@@ -802,21 +683,125 @@ class StoryRunnerTest(unittest.TestCase):
         test, story_set, self.options, self.results,
         metadata=EmptyMetadataForTest())
 
-    hs = self.results.histograms
+    dicts = self.results.AsHistogramDicts()
+    hs = histogram_set.HistogramSet()
+    hs.ImportDicts(dicts)
 
     self.assertEqual(1, len(hs))
+    self.assertEqual('hist', hs.GetFirstHistogram().name)
 
-    h = hs.GetFirstHistogram()
+  def testRunStoryAddsDeviceInfo(self):
+    story_set = story_module.StorySet()
+    story_set.AddStory(DummyLocalStory(FooStoryState, 'foo', ['bar']))
+    story_runner.Run(DummyTest(), story_set, self.options, self.results,
+                     metadata=EmptyMetadataForTest())
 
-    self.assertEqual('hist', h.name)
+    hs = histogram_set.HistogramSet()
+    hs.ImportDicts(self.results.AsHistogramDicts())
+
+    generic_diagnostics = hs.GetSharedDiagnosticsOfType(
+        generic_set.GenericSet)
+
+    generic_diagnostics_values = [
+        list(diagnostic) for diagnostic in generic_diagnostics]
+
+    self.assertGreater(len(generic_diagnostics), 3)
+    self.assertIn(['win10'], generic_diagnostics_values)
+    self.assertIn(['win'], generic_diagnostics_values)
+    self.assertIn(['amd64'], generic_diagnostics_values)
+    self.assertIn([8 * (1024 ** 3)], generic_diagnostics_values)
+
+  def testRunStoryAddsDeviceInfo_EvenInErrors(self):
+    class ErrorRaisingDummyLocalStory(DummyLocalStory):
+      def __init__(self, shared_state_class, name='', tags=None):
+        if name == '':
+          name = 'dummy local story'
+        super(ErrorRaisingDummyLocalStory, self).__init__(
+            shared_state_class, name=name, tags=tags)
+
+      def Run(self, shared_state):
+        raise BaseException('foo')
+
+      @property
+      def is_local(self):
+        return True
+
+      @property
+      def url(self):
+        return 'data:,'
+
+    story_set = story_module.StorySet()
+    story_set.AddStory(ErrorRaisingDummyLocalStory(
+        FooStoryState, 'foo', ['bar']))
+    story_runner.Run(DummyTest(), story_set, self.options, self.results,
+                     metadata=EmptyMetadataForTest())
+
+    hs = histogram_set.HistogramSet()
+    hs.ImportDicts(self.results.AsHistogramDicts())
+
+    generic_diagnostics = hs.GetSharedDiagnosticsOfType(
+        generic_set.GenericSet)
+
+    generic_diagnostics_values = [
+        list(diagnostic) for diagnostic in generic_diagnostics]
+
+    self.assertGreater(len(generic_diagnostics), 3)
+    self.assertIn(['win10'], generic_diagnostics_values)
+    self.assertIn(['win'], generic_diagnostics_values)
+    self.assertIn(['amd64'], generic_diagnostics_values)
+    self.assertIn([8 * (1024 ** 3)], generic_diagnostics_values)
+
+  def testRunStoryAddsDeviceInfo_OnePerStorySet(self):
+    class Test(legacy_page_test.LegacyPageTest):
+      def __init__(self, *args):
+        super(Test, self).__init__(*args)
+
+      # pylint: disable=unused-argument
+      def RunPage(self, _, _2, results):
+        results.AddHistogram(
+            histogram_module.Histogram('hist', 'count'))
+
+      def ValidateAndMeasurePage(self, page, tab, results):
+        pass
+
+    story_set = story_module.StorySet()
+    story_set.AddStory(DummyLocalStory(FooStoryState, 'foo', ['bar']))
+    story_set.AddStory(DummyLocalStory(FooStoryState, 'abc', ['def']))
+    story_runner.Run(Test(), story_set, self.options, self.results,
+                     metadata=EmptyMetadataForTest())
+
+    hs = histogram_set.HistogramSet()
+    hs.ImportDicts(self.results.AsHistogramDicts())
+
+    generic_diagnostics = hs.GetSharedDiagnosticsOfType(
+        generic_set.GenericSet)
+
+    generic_diagnostics_values = [
+        list(diagnostic) for diagnostic in generic_diagnostics]
+
+    self.assertGreater(len(generic_diagnostics), 3)
+    self.assertIn(['win10'], generic_diagnostics_values)
+    self.assertIn(['win'], generic_diagnostics_values)
+    self.assertIn(['amd64'], generic_diagnostics_values)
+    self.assertIn([8 * (1024 ** 3)], generic_diagnostics_values)
+
+    self.assertEqual(1, len(
+        [value for value in generic_diagnostics_values if value == ['win']]))
+
+    first_histogram_diags = hs.GetFirstHistogram().diagnostics
+    self.assertIn(reserved_infos.ARCHITECTURES.name, first_histogram_diags)
+    self.assertIn(reserved_infos.MEMORY_AMOUNTS.name, first_histogram_diags)
+    self.assertIn(reserved_infos.OS_NAMES.name, first_histogram_diags)
+    self.assertIn(reserved_infos.OS_VERSIONS.name, first_histogram_diags)
 
   def testRunStoryAddsTagMap(self):
     story_set = story_module.StorySet()
     story_set.AddStory(DummyLocalStory(FooStoryState, 'foo', ['bar']))
     story_runner.Run(DummyTest(), story_set, self.options, self.results,
-        metadata=EmptyMetadataForTest())
+                     metadata=EmptyMetadataForTest())
 
-    hs = self.results.histograms
+    hs = histogram_set.HistogramSet()
+    hs.ImportDicts(self.results.AsHistogramDicts())
     tagmap = None
     for diagnostic in hs.shared_diagnostics:
       if type(diagnostic) == histogram_module.TagMap:
@@ -855,7 +840,8 @@ class StoryRunnerTest(unittest.TestCase):
           metadata=EmptyMetadataForTest())
     self.assertIn('FooBarzException', self.fake_stdout.getvalue())
 
-    hs = self.results.histograms
+    hs = histogram_set.HistogramSet()
+    hs.ImportDicts(self.results.AsHistogramDicts())
     tagmap = None
     for diagnostic in hs.shared_diagnostics:
       if type(diagnostic) == histogram_module.TagMap:
@@ -863,12 +849,10 @@ class StoryRunnerTest(unittest.TestCase):
         break
 
     self.assertIsNotNone(tagmap)
-    self.assertSetEqual(set(['footag', 'bartag']),
-        set(tagmap.tags_to_story_names.keys()))
-    self.assertSetEqual(set(['foo']),
-        tagmap.tags_to_story_names['footag'])
-    self.assertSetEqual(set(['bar']),
-        tagmap.tags_to_story_names['bartag'])
+    self.assertSetEqual(
+        set(['footag', 'bartag']), set(tagmap.tags_to_story_names.keys()))
+    self.assertSetEqual(set(['foo']), tagmap.tags_to_story_names['footag'])
+    self.assertSetEqual(set(['bar']), tagmap.tags_to_story_names['bartag'])
 
   @decorators.Disabled('chromeos')  # crbug.com/483212
   def testUpdateAndCheckArchives(self):
@@ -910,9 +894,10 @@ class StoryRunnerTest(unittest.TestCase):
           'http://www.testurl.com', story_set, story_set.base_dir,
           name='http://www.testurl.com'))
       # Page set with valid archive_data_file.
-      self.assertTrue(story_runner._UpdateAndCheckArchives(
-            story_set.archive_data_file, story_set.wpr_archive_info,
-            story_set.stories))
+      self.assertTrue(
+          story_runner._UpdateAndCheckArchives(
+              story_set.archive_data_file, story_set.wpr_archive_info,
+              story_set.stories))
       story_set.AddStory(page_module.Page(
           'http://www.google.com', story_set, story_set.base_dir,
           name='http://www.google.com'))
@@ -925,8 +910,8 @@ class StoryRunnerTest(unittest.TestCase):
           story_set.stories)
 
       story_set = story_module.StorySet(
-          archive_data_file=
-              os.path.join(archive_data_dir, 'test_missing_wpr_file.json'),
+          archive_data_file=os.path.join(
+              archive_data_dir, 'test_missing_wpr_file.json'),
           cloud_storage_bucket=cloud_storage.PUBLIC_BUCKET)
       story_set.AddStory(page_module.Page(
           'http://www.testurl.com', story_set, story_set.base_dir,
@@ -1009,7 +994,7 @@ class StoryRunnerTest(unittest.TestCase):
         results, max_failures=runner_max_failures,
         metadata=EmptyMetadataForTest())
     self.assertEquals(0, GetNumberOfSuccessfulPageRuns(results))
-    self.assertEquals(expected_num_failures, len(results.failures))
+    self.assertTrue(results.had_failures)
     for ii, story in enumerate(story_set.stories):
       self.assertEqual(story.was_run, ii < expected_num_failures)
 
@@ -1063,13 +1048,14 @@ class StoryRunnerTest(unittest.TestCase):
         root_mock.story, root_mock.results, root_mock.state, root_mock.test)
 
     self.assertEquals(root_mock.method_calls, [
-      mock.call.test.WillRunStory(root_mock.state.platform),
-      mock.call.state.WillRunStory(root_mock.story),
-      mock.call.state.CanRunStory(root_mock.story),
-      mock.call.state.RunStory(root_mock.results),
-      mock.call.test.Measure(root_mock.state.platform, root_mock.results),
-      mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
-      mock.call.state.DidRunStory(root_mock.results),
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.test.WillRunStory(root_mock.state.platform),
+        mock.call.state.WillRunStory(root_mock.story),
+        mock.call.state.CanRunStory(root_mock.story),
+        mock.call.state.RunStory(root_mock.results),
+        mock.call.test.Measure(root_mock.state.platform, root_mock.results),
+        mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
+        mock.call.state.DidRunStory(root_mock.results),
     ])
 
   def testRunStoryAndProcessErrorIfNeeded_successLegacy(self):
@@ -1079,33 +1065,73 @@ class StoryRunnerTest(unittest.TestCase):
         root_mock.story, root_mock.results, root_mock.state, root_mock.test)
 
     self.assertEquals(root_mock.method_calls, [
-      mock.call.state.WillRunStory(root_mock.story),
-      mock.call.state.CanRunStory(root_mock.story),
-      mock.call.state.RunStory(root_mock.results),
-      mock.call.test.DidRunPage(root_mock.state.platform),
-      mock.call.state.DidRunStory(root_mock.results),
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.state.WillRunStory(root_mock.story),
+        mock.call.state.CanRunStory(root_mock.story),
+        mock.call.state.RunStory(root_mock.results),
+        mock.call.test.DidRunPage(root_mock.state.platform),
+        mock.call.state.DidRunStory(root_mock.results),
     ])
 
   def testRunStoryAndProcessErrorIfNeeded_tryTimeout(self):
     root_mock = self._CreateErrorProcessingMock(method_exceptions={
-      'state.WillRunStory': exceptions.TimeoutException('foo')
+        'state.WillRunStory': exceptions.TimeoutException('foo')
     })
 
     story_runner._RunStoryAndProcessErrorIfNeeded(
         root_mock.story, root_mock.results, root_mock.state, root_mock.test)
 
     self.assertEquals(root_mock.method_calls, [
-      mock.call.test.WillRunStory(root_mock.state.platform),
-      mock.call.state.WillRunStory(root_mock.story),
-      mock.call.state.DumpStateUponFailure(root_mock.story, root_mock.results),
-      mock.call.results.AddValue(FailureValueMatcher('foo')),
-      mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
-      mock.call.state.DidRunStory(root_mock.results),
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.test.WillRunStory(root_mock.state.platform),
+        mock.call.state.WillRunStory(root_mock.story),
+        mock.call.state.DumpStateUponFailure(
+            root_mock.story, root_mock.results),
+        mock.call.results.Fail(ExcInfoMatcher('foo')),
+        mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
+        mock.call.state.DidRunStory(root_mock.results),
     ])
+
+  def AssertListEquals(self, list_1, list_2):
+    self.assertEquals(len(list_1), len(list_2))
+    for i in range(len(list_1)):
+      self.assertEqual(list_1[i], list_2[i])
+
+  def testRunStoryAndProcessErrorIfNeeded_tryAppCrash(self):
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    tmp.close()
+    temp_file_path = tmp.name
+    fake_app = fakes.FakeApp()
+    fake_app.recent_minidump_path = temp_file_path
+    try:
+      app_crash_exception = exceptions.AppCrashException(fake_app, msg='foo')
+      root_mock = self._CreateErrorProcessingMock(method_exceptions={
+          'state.WillRunStory': app_crash_exception
+      })
+
+      with self.assertRaises(exceptions.AppCrashException):
+        story_runner._RunStoryAndProcessErrorIfNeeded(
+            root_mock.story, root_mock.results, root_mock.state, root_mock.test)
+
+      self.AssertListEquals(root_mock.method_calls, [
+          mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+          mock.call.test.WillRunStory(root_mock.state.platform),
+          mock.call.state.WillRunStory(root_mock.story),
+          mock.call.state.DumpStateUponFailure(
+              root_mock.story, root_mock.results),
+          mock.call.results.AddArtifact(
+              root_mock.story.name, 'minidump', temp_file_path),
+          mock.call.results.Fail(ExcInfoMatcher('foo')),
+          mock.call.test.DidRunStory(
+              root_mock.state.platform, root_mock.results),
+          mock.call.state.DidRunStory(root_mock.results),
+      ])
+    finally:
+      os.remove(temp_file_path)
 
   def testRunStoryAndProcessErrorIfNeeded_tryError(self):
     root_mock = self._CreateErrorProcessingMock(method_exceptions={
-      'state.CanRunStory': exceptions.Error('foo')
+        'state.CanRunStory': exceptions.Error('foo')
     })
 
     with self.assertRaisesRegexp(exceptions.Error, 'foo'):
@@ -1113,36 +1139,38 @@ class StoryRunnerTest(unittest.TestCase):
           root_mock.story, root_mock.results, root_mock.state, root_mock.test)
 
     self.assertEquals(root_mock.method_calls, [
-      mock.call.test.WillRunStory(root_mock.state.platform),
-      mock.call.state.WillRunStory(root_mock.story),
-      mock.call.state.CanRunStory(root_mock.story),
-      mock.call.state.DumpStateUponFailure(root_mock.story, root_mock.results),
-      mock.call.results.AddValue(FailureValueMatcher('foo')),
-      mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
-      mock.call.state.DidRunStory(root_mock.results),
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.test.WillRunStory(root_mock.state.platform),
+        mock.call.state.WillRunStory(root_mock.story),
+        mock.call.state.CanRunStory(root_mock.story),
+        mock.call.state.DumpStateUponFailure(
+            root_mock.story, root_mock.results),
+        mock.call.results.Fail(ExcInfoMatcher('foo')),
+        mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
+        mock.call.state.DidRunStory(root_mock.results),
     ])
 
   def testRunStoryAndProcessErrorIfNeeded_tryUnsupportedAction(self):
     root_mock = self._CreateErrorProcessingMock(method_exceptions={
-      'state.RunStory': page_action.PageActionNotSupported('foo')
+        'state.RunStory': page_action.PageActionNotSupported('foo')
     })
 
     story_runner._RunStoryAndProcessErrorIfNeeded(
         root_mock.story, root_mock.results, root_mock.state, root_mock.test)
-
     self.assertEquals(root_mock.method_calls, [
-      mock.call.test.WillRunStory(root_mock.state.platform),
-      mock.call.state.WillRunStory(root_mock.story),
-      mock.call.state.CanRunStory(root_mock.story),
-      mock.call.state.RunStory(root_mock.results),
-      mock.call.results.AddValue(SkipValueMatcher()),
-      mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
-      mock.call.state.DidRunStory(root_mock.results),
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.test.WillRunStory(root_mock.state.platform),
+        mock.call.state.WillRunStory(root_mock.story),
+        mock.call.state.CanRunStory(root_mock.story),
+        mock.call.state.RunStory(root_mock.results),
+        mock.call.results.Skip('Unsupported page action: foo'),
+        mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
+        mock.call.state.DidRunStory(root_mock.results),
     ])
 
   def testRunStoryAndProcessErrorIfNeeded_tryUnhandlable(self):
     root_mock = self._CreateErrorProcessingMock(method_exceptions={
-      'test.WillRunStory': Exception('foo')
+        'test.WillRunStory': Exception('foo')
     })
 
     with self.assertRaisesRegexp(Exception, 'foo'):
@@ -1150,16 +1178,19 @@ class StoryRunnerTest(unittest.TestCase):
           root_mock.story, root_mock.results, root_mock.state, root_mock.test)
 
     self.assertEquals(root_mock.method_calls, [
-      mock.call.test.WillRunStory(root_mock.state.platform),
-      mock.call.state.DumpStateUponFailure(root_mock.story, root_mock.results),
-      mock.call.results.AddValue(FailureValueMatcher('foo')),
-      mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
-      mock.call.state.DidRunStory(root_mock.results),
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.test.WillRunStory(root_mock.state.platform),
+        mock.call.state.DumpStateUponFailure(
+            root_mock.story, root_mock.results),
+        mock.call.results.Fail(ExcInfoMatcher('foo')),
+        mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
+        mock.call.state.DidRunStory(root_mock.results),
     ])
 
   def testRunStoryAndProcessErrorIfNeeded_finallyException(self):
+    exc = Exception('bar')
     root_mock = self._CreateErrorProcessingMock(method_exceptions={
-      'state.DidRunStory': Exception('bar')
+        'state.DidRunStory': exc,
     })
 
     with self.assertRaisesRegexp(Exception, 'bar'):
@@ -1167,40 +1198,44 @@ class StoryRunnerTest(unittest.TestCase):
           root_mock.story, root_mock.results, root_mock.state, root_mock.test)
 
     self.assertEquals(root_mock.method_calls, [
-      mock.call.test.WillRunStory(root_mock.state.platform),
-      mock.call.state.WillRunStory(root_mock.story),
-      mock.call.state.CanRunStory(root_mock.story),
-      mock.call.state.RunStory(root_mock.results),
-      mock.call.test.Measure(root_mock.state.platform, root_mock.results),
-      mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
-      mock.call.state.DidRunStory(root_mock.results),
-      mock.call.state.DumpStateUponFailure(root_mock.story, root_mock.results)
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.test.WillRunStory(root_mock.state.platform),
+        mock.call.state.WillRunStory(root_mock.story),
+        mock.call.state.CanRunStory(root_mock.story),
+        mock.call.state.RunStory(root_mock.results),
+        mock.call.test.Measure(root_mock.state.platform, root_mock.results),
+        mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
+        mock.call.state.DidRunStory(root_mock.results),
+        mock.call.state.DumpStateUponFailure(
+            root_mock.story, root_mock.results),
     ])
 
   def testRunStoryAndProcessErrorIfNeeded_tryTimeout_finallyException(self):
     root_mock = self._CreateErrorProcessingMock(method_exceptions={
-      'state.RunStory': exceptions.TimeoutException('foo'),
-      'state.DidRunStory': Exception('bar')
+        'state.RunStory': exceptions.TimeoutException('foo'),
+        'state.DidRunStory': Exception('bar')
     })
 
     story_runner._RunStoryAndProcessErrorIfNeeded(
         root_mock.story, root_mock.results, root_mock.state, root_mock.test)
 
     self.assertEquals(root_mock.method_calls, [
-      mock.call.test.WillRunStory(root_mock.state.platform),
-      mock.call.state.WillRunStory(root_mock.story),
-      mock.call.state.CanRunStory(root_mock.story),
-      mock.call.state.RunStory(root_mock.results),
-      mock.call.state.DumpStateUponFailure(root_mock.story, root_mock.results),
-      mock.call.results.AddValue(FailureValueMatcher('foo')),
-      mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
-      mock.call.state.DidRunStory(root_mock.results)
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.test.WillRunStory(root_mock.state.platform),
+        mock.call.state.WillRunStory(root_mock.story),
+        mock.call.state.CanRunStory(root_mock.story),
+        mock.call.state.RunStory(root_mock.results),
+        mock.call.state.DumpStateUponFailure(
+            root_mock.story, root_mock.results),
+        mock.call.results.Fail(ExcInfoMatcher('foo')),
+        mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
+        mock.call.state.DidRunStory(root_mock.results),
     ])
 
   def testRunStoryAndProcessErrorIfNeeded_tryError_finallyException(self):
     root_mock = self._CreateErrorProcessingMock(method_exceptions={
-      'state.WillRunStory': exceptions.Error('foo'),
-      'test.DidRunStory': Exception('bar')
+        'state.WillRunStory': exceptions.Error('foo'),
+        'test.DidRunStory': Exception('bar')
     })
 
     with self.assertRaisesRegexp(exceptions.Error, 'foo'):
@@ -1208,34 +1243,38 @@ class StoryRunnerTest(unittest.TestCase):
           root_mock.story, root_mock.results, root_mock.state, root_mock.test)
 
     self.assertEquals(root_mock.method_calls, [
-      mock.call.test.WillRunStory(root_mock.state.platform),
-      mock.call.state.WillRunStory(root_mock.story),
-      mock.call.state.DumpStateUponFailure(root_mock.story, root_mock.results),
-      mock.call.results.AddValue(FailureValueMatcher('foo')),
-      mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results)
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.test.WillRunStory(root_mock.state.platform),
+        mock.call.state.WillRunStory(root_mock.story),
+        mock.call.state.DumpStateUponFailure(
+            root_mock.story, root_mock.results),
+        mock.call.results.Fail(ExcInfoMatcher('foo')),
+        mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
     ])
 
   def testRunStoryAndProcessErrorIfNeeded_tryUnsupportedAction_finallyException(
       self):
     root_mock = self._CreateErrorProcessingMock(method_exceptions={
-      'test.WillRunStory': page_action.PageActionNotSupported('foo'),
-      'state.DidRunStory': Exception('bar')
+        'test.WillRunStory': page_action.PageActionNotSupported('foo'),
+        'state.DidRunStory': Exception('bar')
     })
 
     story_runner._RunStoryAndProcessErrorIfNeeded(
         root_mock.story, root_mock.results, root_mock.state, root_mock.test)
 
     self.assertEquals(root_mock.method_calls, [
-      mock.call.test.WillRunStory(root_mock.state.platform),
-      mock.call.results.AddValue(SkipValueMatcher()),
-      mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
-      mock.call.state.DidRunStory(root_mock.results)
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.test.WillRunStory(root_mock.state.platform),
+        mock.call.results.Skip('Unsupported page action: foo'),
+        mock.call.test.DidRunStory(
+            root_mock.state.platform, root_mock.results),
+        mock.call.state.DidRunStory(root_mock.results),
     ])
 
   def testRunStoryAndProcessErrorIfNeeded_tryUnhandlable_finallyException(self):
     root_mock = self._CreateErrorProcessingMock(method_exceptions={
-      'test.Measure': Exception('foo'),
-      'test.DidRunStory': Exception('bar')
+        'test.Measure': Exception('foo'),
+        'test.DidRunStory': Exception('bar')
     })
 
     with self.assertRaisesRegexp(Exception, 'foo'):
@@ -1243,14 +1282,16 @@ class StoryRunnerTest(unittest.TestCase):
           root_mock.story, root_mock.results, root_mock.state, root_mock.test)
 
     self.assertEquals(root_mock.method_calls, [
-      mock.call.test.WillRunStory(root_mock.state.platform),
-      mock.call.state.WillRunStory(root_mock.story),
-      mock.call.state.CanRunStory(root_mock.story),
-      mock.call.state.RunStory(root_mock.results),
-      mock.call.test.Measure(root_mock.state.platform, root_mock.results),
-      mock.call.state.DumpStateUponFailure(root_mock.story, root_mock.results),
-      mock.call.results.AddValue(FailureValueMatcher('foo')),
-      mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results)
+        mock.call.results.CreateArtifact(root_mock.story.name, 'logs'),
+        mock.call.test.WillRunStory(root_mock.state.platform),
+        mock.call.state.WillRunStory(root_mock.story),
+        mock.call.state.CanRunStory(root_mock.story),
+        mock.call.state.RunStory(root_mock.results),
+        mock.call.test.Measure(root_mock.state.platform, root_mock.results),
+        mock.call.state.DumpStateUponFailure(
+            root_mock.story, root_mock.results),
+        mock.call.results.Fail(ExcInfoMatcher('foo')),
+        mock.call.test.DidRunStory(root_mock.state.platform, root_mock.results),
     ])
 
   def _GenerateBaseBrowserFinderOptions(self):
@@ -1267,6 +1308,20 @@ class StoryRunnerTest(unittest.TestCase):
     options.run_disabled_tests = False
     return options
 
+  def testRunBenchmarkDisabledBenchmarkViaCanRunonPlatform(self):
+    fake_benchmark = FakeBenchmark()
+    fake_benchmark.SUPPORTED_PLATFORMS = []
+    options = self._GenerateBaseBrowserFinderOptions()
+    tmp_path = tempfile.mkdtemp()
+    try:
+      options.output_dir = tmp_path
+      story_runner.RunBenchmark(fake_benchmark, options)
+      with open(os.path.join(tmp_path, 'results-chart.json')) as f:
+        data = json.load(f)
+      self.assertFalse(data['enabled'])
+    finally:
+      shutil.rmtree(tmp_path)
+
   def testRunBenchmarkDisabledBenchmark(self):
     fake_benchmark = FakeBenchmark()
     fake_benchmark.disabled = True
@@ -1281,7 +1336,7 @@ class StoryRunnerTest(unittest.TestCase):
     finally:
       shutil.rmtree(tmp_path)
 
-  def testRunBenchmarkDisabledBenchmarkCannotOverriddenByCommandLine(self):
+  def testRunBenchmarkDisabledBenchmarkCanOverriddenByCommandLine(self):
     fake_benchmark = FakeBenchmark()
     fake_benchmark.disabled = True
     options = self._GenerateBaseBrowserFinderOptions()
@@ -1292,11 +1347,11 @@ class StoryRunnerTest(unittest.TestCase):
       story_runner.RunBenchmark(fake_benchmark, options)
       with open(os.path.join(temp_path, 'results-chart.json')) as f:
         data = json.load(f)
-      self.assertFalse(data['enabled'])
+      self.assertTrue(data['enabled'])
     finally:
       shutil.rmtree(temp_path)
 
-  def testRunBenchmark_AddsOwnership_WithoutComponent(self):
+  def testRunBenchmark_AddsOwners_NoComponent(self):
     @benchmark.Owner(emails=['alice@chromium.org'])
     class FakeBenchmarkWithOwner(FakeBenchmark):
       def __init__(self):
@@ -1318,20 +1373,20 @@ class StoryRunnerTest(unittest.TestCase):
       hs = histogram_set.HistogramSet()
       hs.ImportDicts(data)
 
-      ownership_diagnostics = hs.GetSharedDiagnosticsOfType(
-        histogram_module.Ownership)
+      generic_diagnostics = hs.GetSharedDiagnosticsOfType(
+          generic_set.GenericSet)
 
-      self.assertGreater(len(ownership_diagnostics), 0)
+      self.assertGreater(len(generic_diagnostics), 0)
 
-      ownership_diagnostic = ownership_diagnostics[0]
+      generic_diagnostics_values = [
+          list(diagnostic) for diagnostic in generic_diagnostics]
 
-      self.assertIsInstance(ownership_diagnostic, histogram_module.Ownership)
-      self.assertIsNone(ownership_diagnostic.component)
-      self.assertItemsEqual(['alice@chromium.org'], ownership_diagnostic.emails)
+      self.assertIn(['alice@chromium.org'], generic_diagnostics_values)
+
     finally:
       shutil.rmtree(temp_path)
 
-  def testRunBenchmark_AddsOwnership_WithComponent(self):
+  def testRunBenchmark_AddsComponent(self):
     @benchmark.Owner(emails=['alice@chromium.org', 'bob@chromium.org'],
                      component='fooBar')
     class FakeBenchmarkWithOwner(FakeBenchmark):
@@ -1354,27 +1409,31 @@ class StoryRunnerTest(unittest.TestCase):
       hs = histogram_set.HistogramSet()
       hs.ImportDicts(data)
 
-      ownership_diagnostics = hs.GetSharedDiagnosticsOfType(
-        histogram_module.Ownership)
+      generic_diagnostics = hs.GetSharedDiagnosticsOfType(
+          generic_set.GenericSet)
 
-      self.assertGreater(len(ownership_diagnostics), 0)
+      self.assertGreater(len(generic_diagnostics), 0)
 
-      ownership_diagnostic = ownership_diagnostics[0]
+      generic_diagnostics_values = [
+          list(diagnostic) for diagnostic in generic_diagnostics]
 
-      self.assertIsInstance(ownership_diagnostic, histogram_module.Ownership)
-      self.assertEqual('fooBar', ownership_diagnostic.component)
-      self.assertItemsEqual(['alice@chromium.org', 'bob@chromium.org'],
-                            ownership_diagnostic.emails)
+      self.assertIn(['fooBar'], generic_diagnostics_values)
+      self.assertIn(['alice@chromium.org', 'bob@chromium.org'],
+                    generic_diagnostics_values)
+
     finally:
       shutil.rmtree(temp_path)
 
   def testRunBenchmarkTimeDuration(self):
     fake_benchmark = FakeBenchmark()
     options = self._GenerateBaseBrowserFinderOptions()
+    options.output_formats.append('histograms')
 
-    with mock.patch('telemetry.internal.story_runner.time.time') as time_patch:
-      # 3, because telemetry code asks for the time at some point
-      time_patch.side_effect = [1, 0, 61]
+    with mock.patch('telemetry.internal.story_runner.time') as time_patch:
+      # Note: we patch the time module loaded by story_runner, not methods
+      # within the time module itself. This prevents calls from any other
+      # clients of time.time() to interfere with the test.
+      time_patch.time.side_effect = [1, 61]
       tmp_path = tempfile.mkdtemp()
 
       try:
@@ -1382,6 +1441,11 @@ class StoryRunnerTest(unittest.TestCase):
         story_runner.RunBenchmark(fake_benchmark, options)
         with open(os.path.join(tmp_path, 'results-chart.json')) as f:
           data = json.load(f)
+        with open(os.path.join(tmp_path, 'histograms.json')) as f:
+          histogram_data = json.load(f)
+
+        histograms = histogram_set.HistogramSet()
+        histograms.ImportDicts(histogram_data)
 
         self.assertEqual(len(data['charts']), 1)
         charts = data['charts']
@@ -1391,6 +1455,12 @@ class StoryRunnerTest(unittest.TestCase):
         summary = duration['summary']
         duration = summary['value']
         self.assertAlmostEqual(duration, 1)
+
+        hists = histograms.GetHistogramsNamed('benchmark_total_duration')
+        self.assertEqual(len(hists), 1)
+        hist = hists[0]
+        self.assertEqual(hist.num_values, 1)
+        self.assertAlmostEqual(hist.sample_values[0], 60000)
       finally:
         shutil.rmtree(tmp_path)
 
@@ -1406,3 +1476,91 @@ class StoryRunnerTest(unittest.TestCase):
       self.assertEqual(rc, 0)
     finally:
       shutil.rmtree(tmp_path)
+
+  def testRunBenchmark_TooManyValues(self):
+    self.SuppressExceptionFormatting()
+    story_set = story_module.StorySet()
+    story_set.AddStory(DummyLocalStory(TestSharedPageState, name='story'))
+    story_runner.Run(
+        _Measurement(), story_set, self.options, self.results,
+        metadata=EmptyMetadataForTest(),
+        max_num_values=0)
+    self.assertTrue(self.results.had_failures)
+    self.assertEquals(0, GetNumberOfSuccessfulPageRuns(self.results))
+    self.assertIn('Too many values: 1 > 0', self.fake_stdout.getvalue())
+
+  def testRunBenchmarkReturnCodeSuccessfulRun(self):
+
+    class DoNothingSharedState(TestSharedState):
+      def RunStory(self, results):
+        pass
+
+    class TestBenchmark(benchmark.Benchmark):
+      test = DummyTest
+      def CreateStorySet(self, options):
+        story_set = story_module.StorySet()
+        story_set.AddStory(page_module.Page(
+            'http://foo', name='foo',
+            shared_page_state_class=DoNothingSharedState))
+        story_set.AddStory(page_module.Page(
+            'http://bar', name='bar',
+            shared_page_state_class=DoNothingSharedState))
+        return story_set
+
+    sucessful_benchmark = TestBenchmark()
+    options = self._GenerateBaseBrowserFinderOptions()
+    options.output_dir = '/does/not/exist'
+    options.output_formats = ['none']
+    return_code = story_runner.RunBenchmark(sucessful_benchmark, options)
+    self.assertEquals(0, return_code)
+
+  def testRunBenchmarkReturnCodeCaughtException(self):
+
+    class StoryFailureSharedState(TestSharedState):
+      def RunStory(self, results):
+        raise exceptions.AppCrashException()
+
+    class TestBenchmark(benchmark.Benchmark):
+      test = DummyTest
+      def CreateStorySet(self, options):
+        story_set = story_module.StorySet()
+        story_set.AddStory(page_module.Page(
+            'http://foo', name='foo',
+            shared_page_state_class=StoryFailureSharedState))
+        story_set.AddStory(page_module.Page(
+            'http://bar', name='bar',
+            shared_page_state_class=StoryFailureSharedState))
+        return story_set
+
+    story_failure_benchmark = TestBenchmark()
+    options = self._GenerateBaseBrowserFinderOptions()
+    options.output_dir = '/does/not/exist'
+    options.output_formats = ['none']
+    return_code = story_runner.RunBenchmark(story_failure_benchmark, options)
+    self.assertEquals(1, return_code)
+
+
+  def testRunBenchmarkReturnCodeUnCaughtException(self):
+    class UnhandledFailureSharedState(TestSharedState):
+      def RunStory(self, results):
+        raise Exception('Unexpected exception')
+
+    class TestBenchmark(benchmark.Benchmark):
+      test = DummyTest
+      def CreateStorySet(self, options):
+        story_set = story_module.StorySet()
+        story_set.AddStory(page_module.Page(
+            'http://foo', name='foo',
+            shared_page_state_class=UnhandledFailureSharedState))
+        story_set.AddStory(page_module.Page(
+            'http://bar', name='bar',
+            shared_page_state_class=UnhandledFailureSharedState))
+        return story_set
+
+    unhandled_failure_benchmark = TestBenchmark()
+    options = self._GenerateBaseBrowserFinderOptions()
+    options.output_dir = '/does/not/exist'
+    options.output_formats = ['none']
+    return_code = story_runner.RunBenchmark(
+        unhandled_failure_benchmark, options)
+    self.assertEquals(2, return_code)

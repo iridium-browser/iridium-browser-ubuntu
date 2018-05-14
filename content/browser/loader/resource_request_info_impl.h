@@ -13,17 +13,17 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "base/supports_user_data.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/loader/resource_requester_info.h"
-#include "content/public/browser/navigation_ui_data.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/common/previews_state.h"
 #include "content/public/common/referrer.h"
-#include "content/public/common/resource_request_body.h"
 #include "content/public/common/resource_type.h"
-#include "content/public/common/url_loader.mojom.h"
 #include "net/base/load_states.h"
+#include "services/network/public/cpp/resource_request_body.h"
+#include "services/network/public/mojom/url_loader.mojom.h"
 
 namespace content {
 class DetachableResourceHandler;
@@ -37,8 +37,8 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
                                 public base::SupportsUserData::Data {
  public:
   using TransferCallback =
-      base::Callback<void(mojom::URLLoaderAssociatedRequest,
-                          mojom::URLLoaderClientPtr)>;
+      base::Callback<void(network::mojom::URLLoaderRequest,
+                          network::mojom::URLLoaderClientPtr)>;
 
   // Returns the ResourceRequestInfoImpl associated with the given URLRequest.
   CONTENT_EXPORT static ResourceRequestInfoImpl* ForRequest(
@@ -52,11 +52,10 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
       scoped_refptr<ResourceRequesterInfo> requester_info,
       int route_id,
       int frame_tree_node_id,
-      int origin_pid,
+      int plugin_child_id,
       int request_id,
       int render_frame_id,
       bool is_main_frame,
-      bool parent_is_main_frame,
       ResourceType resource_type,
       ui::PageTransition transition_type,
       bool should_replace_current_entry,
@@ -67,14 +66,16 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
       bool enable_load_timing,
       bool enable_upload_progress,
       bool do_not_prompt_for_login,
+      bool keepalive,
       blink::WebReferrerPolicy referrer_policy,
-      blink::WebPageVisibilityState visibility_state,
+      bool is_prerendering,
       ResourceContext* context,
       bool report_raw_headers,
       bool is_async,
       PreviewsState previews_state,
-      const scoped_refptr<ResourceRequestBody> body,
-      bool initiated_in_secure_context);
+      const scoped_refptr<network::ResourceRequestBody> body,
+      bool initiated_in_secure_context,
+      const base::Optional<std::string>& suggested_filename);
   ~ResourceRequestInfoImpl() override;
 
   // ResourceRequestInfo implementation:
@@ -84,18 +85,16 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
   int GetChildID() const override;
   int GetRouteID() const override;
   GlobalRequestID GetGlobalRequestID() const override;
-  int GetOriginPID() const override;
+  int GetPluginChildID() const override;
   int GetRenderFrameID() const override;
   int GetFrameTreeNodeId() const override;
   bool IsMainFrame() const override;
-  bool ParentIsMainFrame() const override;
   ResourceType GetResourceType() const override;
   int GetProcessType() const override;
   blink::WebReferrerPolicy GetReferrerPolicy() const override;
-  blink::WebPageVisibilityState GetVisibilityState() const override;
+  bool IsPrerendering() const override;
   ui::PageTransition GetPageTransition() const override;
   bool HasUserGesture() const override;
-  bool WasIgnoredByHandler() const override;
   bool GetAssociatedRenderFrame(int* render_process_id,
                                 int* render_frame_id) const override;
   bool IsAsync() const override;
@@ -104,6 +103,8 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
   PreviewsState GetPreviewsState() const override;
   bool ShouldReportRawHeaders() const;
   NavigationUIData* GetNavigationUIData() const override;
+  bool CanceledByDevTools() const override;
+  base::StringPiece GetCustomCancelReason() const override;
 
   CONTENT_EXPORT void AssociateWithRequest(net::URLRequest* request);
 
@@ -125,11 +126,10 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
   // does not need to be updated.
   void UpdateForTransfer(int route_id,
                          int render_frame_id,
-                         int origin_pid,
                          int request_id,
                          ResourceRequesterInfo* requester_info,
-                         mojom::URLLoaderAssociatedRequest url_loader_request,
-                         mojom::URLLoaderClientPtr url_loader_client);
+                         network::mojom::URLLoaderRequest url_loader_request,
+                         network::mojom::URLLoaderClientPtr url_loader_client);
 
   // Whether this request is part of a navigation that should replace the
   // current session history entry. This state is shuffled up and down the stack
@@ -145,6 +145,7 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
   void set_detachable_handler(DetachableResourceHandler* h) {
     detachable_handler_ = h;
   }
+  bool keepalive() const { return keepalive_; }
 
   // Downloads are allowed only as a top level request.
   bool allow_download() const { return allow_download_; }
@@ -155,10 +156,6 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
   // Whether this is a stream.
   bool is_stream() const { return is_stream_; }
   void set_is_stream(bool stream) { is_stream_ = stream; }
-
-  void set_was_ignored_by_handler(bool value) {
-    was_ignored_by_handler_ = value;
-  }
 
   // Whether this request has been counted towards the number of in flight
   // requests, which is only true for requests that require a file descriptor
@@ -184,7 +181,9 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
     do_not_prompt_for_login_ = do_not_prompt;
   }
 
-  const scoped_refptr<ResourceRequestBody>& body() const { return body_; }
+  const scoped_refptr<network::ResourceRequestBody>& body() const {
+    return body_;
+  }
   void ResetBody();
 
   bool initiated_in_secure_context() const {
@@ -203,7 +202,32 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
     on_transfer_ = on_transfer;
   }
 
+  void set_canceled_by_devtools(bool canceled_by_devtools) {
+    canceled_by_devtools_ = canceled_by_devtools;
+  }
+
   void SetBlobHandles(BlobHandles blob_handles);
+
+  const base::Optional<std::string>& suggested_filename() const {
+    return suggested_filename_;
+  }
+
+  bool blocked_cross_site_document() const {
+    return blocked_cross_site_document_;
+  }
+  void set_blocked_cross_site_document(bool value) {
+    blocked_cross_site_document_ = value;
+  }
+
+  void set_custom_cancel_reason(base::StringPiece reason) {
+    custom_cancel_reason_ = reason.as_string();
+  }
+
+  bool first_auth_attempt() const { return first_auth_attempt_; }
+
+  void set_first_auth_attempt(bool first_auth_attempt) {
+    first_auth_attempt_ = first_auth_attempt;
+  }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest,
@@ -216,11 +240,10 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
   scoped_refptr<ResourceRequesterInfo> requester_info_;
   int route_id_;
   const int frame_tree_node_id_;
-  int origin_pid_;
+  int plugin_child_id_;
   int request_id_;
   int render_frame_id_;
   bool is_main_frame_;
-  bool parent_is_main_frame_;
   bool should_replace_current_entry_;
   bool is_download_;
   bool is_stream_;
@@ -229,20 +252,24 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
   bool enable_load_timing_;
   bool enable_upload_progress_;
   bool do_not_prompt_for_login_;
-  bool was_ignored_by_handler_;
+  bool keepalive_;
   bool counted_as_in_flight_request_;
   ResourceType resource_type_;
   ui::PageTransition transition_type_;
   int memory_cost_;
   blink::WebReferrerPolicy referrer_policy_;
-  blink::WebPageVisibilityState visibility_state_;
+  bool is_prerendering_;
   ResourceContext* context_;
   bool report_raw_headers_;
   bool is_async_;
+  bool canceled_by_devtools_;
   PreviewsState previews_state_;
-  scoped_refptr<ResourceRequestBody> body_;
+  scoped_refptr<network::ResourceRequestBody> body_;
   bool initiated_in_secure_context_;
   std::unique_ptr<NavigationUIData> navigation_ui_data_;
+  base::Optional<std::string> suggested_filename_;
+  bool blocked_cross_site_document_;
+  bool first_auth_attempt_;
 
   // Keeps upload body blobs alive for the duration of the request.
   BlobHandles blob_handles_;
@@ -251,6 +278,8 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
   // and remote endpoint. This callback will be removed once PlzNavigate is
   // shipped.
   TransferCallback on_transfer_;
+
+  std::string custom_cancel_reason_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceRequestInfoImpl);
 };

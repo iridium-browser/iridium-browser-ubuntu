@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "mojo/android/system/watcher_impl.h"
-
 #include <stddef.h>
 #include <stdint.h>
 
@@ -74,33 +72,31 @@ class WatcherImpl {
 
 }  // namespace
 
-static jlong CreateWatcher(JNIEnv* env, const JavaParamRef<jobject>& jcaller) {
+static jlong JNI_WatcherImpl_CreateWatcher(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller) {
   return reinterpret_cast<jlong>(new WatcherImpl);
 }
 
-static jint Start(JNIEnv* env,
-                  const JavaParamRef<jobject>& jcaller,
-                  jlong watcher_ptr,
-                  jint mojo_handle,
-                  jint signals) {
+static jint JNI_WatcherImpl_Start(JNIEnv* env,
+                                  const JavaParamRef<jobject>& jcaller,
+                                  jlong watcher_ptr,
+                                  jint mojo_handle,
+                                  jint signals) {
   auto* watcher = reinterpret_cast<WatcherImpl*>(watcher_ptr);
   return watcher->Start(env, jcaller, mojo_handle, signals);
 }
 
-static void Cancel(JNIEnv* env,
-                   const JavaParamRef<jobject>& jcaller,
-                   jlong watcher_ptr) {
+static void JNI_WatcherImpl_Cancel(JNIEnv* env,
+                                   const JavaParamRef<jobject>& jcaller,
+                                   jlong watcher_ptr) {
   reinterpret_cast<WatcherImpl*>(watcher_ptr)->Cancel();
 }
 
-static void Delete(JNIEnv* env,
-                   const JavaParamRef<jobject>& jcaller,
-                   jlong watcher_ptr) {
+static void JNI_WatcherImpl_Delete(JNIEnv* env,
+                                   const JavaParamRef<jobject>& jcaller,
+                                   jlong watcher_ptr) {
   delete reinterpret_cast<WatcherImpl*>(watcher_ptr);
-}
-
-bool RegisterWatcherImpl(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace android

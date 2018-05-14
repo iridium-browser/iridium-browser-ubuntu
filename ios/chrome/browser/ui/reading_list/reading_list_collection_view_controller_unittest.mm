@@ -4,13 +4,11 @@
 
 #import "ios/chrome/browser/ui/reading_list/reading_list_collection_view_controller.h"
 
+#include <memory>
 #include <unordered_set>
 
 #import "base/mac/foundation_util.h"
-#include "base/memory/ptr_util.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
 #include "components/favicon/core/large_icon_service.h"
 #include "components/favicon/core/test/mock_favicon_service.h"
@@ -39,7 +37,7 @@ using testing::_;
 
 #pragma mark - ReadingListCollectionViewControllerTest
 
-class ReadingListCollectionViewControllerTest : public testing::Test {
+class ReadingListCollectionViewControllerTest : public PlatformTest {
  public:
   ReadingListCollectionViewControllerTest() {}
   ~ReadingListCollectionViewControllerTest() override {}
@@ -53,17 +51,16 @@ class ReadingListCollectionViewControllerTest : public testing::Test {
   id mock_delegate_;
 
   void SetUp() override {
-    testing::Test::SetUp();
+    PlatformTest::SetUp();
 
     EXPECT_CALL(mock_favicon_service_,
                 GetLargestRawFaviconForPageURL(_, _, _, _, _))
         .WillRepeatedly(PostReply<5>(favicon_base::FaviconRawBitmapResult()));
 
     reading_list_model_.reset(new ReadingListModelImpl(
-        nullptr, nullptr, base::MakeUnique<base::DefaultClock>()));
+        nullptr, nullptr, std::make_unique<base::DefaultClock>()));
     large_icon_service_.reset(new favicon::LargeIconService(
-        &mock_favicon_service_, base::ThreadTaskRunnerHandle::Get(),
-        /*image_fetcher=*/nullptr));
+        &mock_favicon_service_, /*image_fetcher=*/nullptr));
     mediator_ =
         [[ReadingListMediator alloc] initWithModel:reading_list_model_.get()
                                   largeIconService:large_icon_service_.get()];

@@ -5,11 +5,11 @@
 #ifndef CC_RESOURCES_RESOURCE_H_
 #define CC_RESOURCES_RESOURCE_H_
 
-#include "base/logging.h"
 #include "base/macros.h"
 #include "cc/cc_export.h"
-#include "cc/resources/resource_provider.h"
-#include "cc/resources/resource_util.h"
+#include "components/viz/common/resources/resource_format.h"
+#include "components/viz/common/resources/resource_id.h"
+#include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace cc {
@@ -23,13 +23,13 @@ class CC_EXPORT Resource {
            const gfx::ColorSpace& color_space)
       : id_(id), size_(size), format_(format), color_space_(color_space) {}
 
-  ResourceId id() const { return id_; }
+  viz::ResourceId id() const { return id_; }
   const gfx::Size& size() const { return size_; }
   viz::ResourceFormat format() const { return format_; }
   const gfx::ColorSpace& color_space() const { return color_space_; }
 
  protected:
-  void set_id(ResourceId id) { id_ = id; }
+  void set_id(viz::ResourceId id) { id_ = id; }
   void set_dimensions(const gfx::Size& size, viz::ResourceFormat format) {
     size_ = size;
     format_ = format;
@@ -39,7 +39,7 @@ class CC_EXPORT Resource {
   }
 
  private:
-  ResourceId id_;
+  viz::ResourceId id_;
   gfx::Size size_;
   viz::ResourceFormat format_;
   gfx::ColorSpace color_space_;

@@ -456,6 +456,7 @@ remoting.ClientPluginImpl.prototype.connectWithExperiments_ = function(
 
   this.plugin_.postMessage(JSON.stringify(
       { method: 'delegateLargeCursors', data: {} }));
+
   this.credentials_ = credentialsProvider;
   this.useAsyncPinDialog_();
   this.plugin_.postMessage(JSON.stringify({

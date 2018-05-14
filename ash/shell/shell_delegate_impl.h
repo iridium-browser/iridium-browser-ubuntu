@@ -25,36 +25,17 @@ class ShellDelegateImpl : public ShellDelegate {
 
   // ShellDelegate:
   ::service_manager::Connector* GetShellConnector() const override;
-  bool IsIncognitoAllowed() const override;
-  bool IsMultiProfilesEnabled() const override;
   bool IsRunningInForcedAppMode() const override;
   bool CanShowWindowForUser(aura::Window* window) const override;
   bool IsForceMaximizeOnFirstRun() const override;
   void PreInit() override;
   void PreShutdown() override;
-  void Exit() override;
   std::unique_ptr<keyboard::KeyboardUI> CreateKeyboardUI() override;
   void OpenUrlFromArc(const GURL& url) override;
-  void ShelfInit() override;
-  void ShelfShutdown() override;
-  SystemTrayDelegate* CreateSystemTrayDelegate() override;
-  std::unique_ptr<WallpaperDelegate> CreateWallpaperDelegate() override;
+  NetworkingConfigDelegate* GetNetworkingConfigDelegate() override;
+  std::unique_ptr<ScreenshotDelegate> CreateScreenshotDelegate() override;
   AccessibilityDelegate* CreateAccessibilityDelegate() override;
-  std::unique_ptr<PaletteDelegate> CreatePaletteDelegate() override;
-  ui::MenuModel* CreateContextMenu(Shelf* shelf,
-                                   const ShelfItem* item) override;
-  GPUSupport* CreateGPUSupport() override;
-  base::string16 GetProductName() const override;
-  gfx::Image GetDeprecatedAcceleratorImage() const override;
-  PrefService* GetActiveUserPrefService() const override;
-  PrefService* GetLocalStatePrefService() const override;
-  bool IsTouchscreenEnabledInPrefs(bool use_local_state) const override;
-  void SetTouchscreenEnabledInPrefs(bool enabled,
-                                    bool use_local_state) override;
-  void UpdateTouchscreenStatusFromPrefs() override;
-#if defined(USE_OZONE)
   ui::InputDeviceControllerClient* GetInputDeviceControllerClient() override;
-#endif
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShellDelegateImpl);

@@ -20,6 +20,28 @@ bool StructTraits<gfx::mojom::RectFDataView, ::blink::WebFloatRect>::Read(
 }
 
 // static
+bool StructTraits<gfx::mojom::RectDataView, ::blink::WebRect>::Read(
+    gfx::mojom::RectDataView data,
+    ::blink::WebRect* out) {
+  if (data.width() < 0 || data.height() < 0)
+    return false;
+  out->x = data.x();
+  out->y = data.y();
+  out->width = data.width();
+  out->height = data.height();
+  return true;
+}
+
+// static
+bool StructTraits<gfx::mojom::PointDataView, ::blink::WebPoint>::Read(
+    gfx::mojom::PointDataView data,
+    ::blink::WebPoint* out) {
+  out->x = data.x();
+  out->y = data.y();
+  return true;
+}
+
+// static
 bool StructTraits<gfx::mojom::PointFDataView, ::blink::WebFloatPoint>::Read(
     gfx::mojom::PointFDataView data,
     ::blink::WebFloatPoint* out) {

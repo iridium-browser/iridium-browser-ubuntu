@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_UI_APP_LIST_SEARCH_APP_SEARCH_PROVIDER_H_
 
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "base/macros.h"
@@ -14,6 +16,7 @@
 #include "ui/app_list/search_provider.h"
 
 class AppListControllerDelegate;
+class AppListModelUpdater;
 class Profile;
 
 namespace base {
@@ -22,23 +25,24 @@ class Clock;
 
 namespace app_list {
 
-class AppListItemList;
-
 class AppSearchProvider : public SearchProvider {
  public:
   class App;
   class DataSource;
   using Apps = std::vector<std::unique_ptr<App>>;
 
+  // |clock| should be used by tests that needs to overrides the time.
+  // Otherwise, pass a base::DefaultClock instance. This doesn't take the
+  // ownership of the clock. |clock| must outlive the AppSearchProvider
+  // instance.
   AppSearchProvider(Profile* profile,
                     AppListControllerDelegate* list_controller,
-                    std::unique_ptr<base::Clock> clock,
-                    AppListItemList* top_level_item_list);
+                    base::Clock* clock,
+                    AppListModelUpdater* model_updater);
   ~AppSearchProvider() override;
 
   // SearchProvider overrides:
-  void Start(bool is_voice_query, const base::string16& query) override;
-  void Stop() override;
+  void Start(const base::string16& query) override;
 
   // Refresh indexed app data and update search results. When |force_inline| is
   // set to true, search results is updated before returning from the function.
@@ -49,12 +53,15 @@ class AppSearchProvider : public SearchProvider {
  private:
   void RefreshApps();
   void UpdateResults();
+  void UpdateRecommendedResults(
+      const std::unordered_map<std::string, size_t>& id_to_app_list_index);
+  void UpdateQueriedResults();
 
   AppListControllerDelegate* const list_controller_;
   base::string16 query_;
   Apps apps_;
-  AppListItemList* const top_level_item_list_;
-  std::unique_ptr<base::Clock> clock_;
+  AppListModelUpdater* const model_updater_;
+  base::Clock* clock_;
   std::vector<std::unique_ptr<DataSource>> data_sources_;
   base::WeakPtrFactory<AppSearchProvider> update_results_factory_;
 

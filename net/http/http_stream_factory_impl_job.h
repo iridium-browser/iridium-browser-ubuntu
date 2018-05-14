@@ -14,6 +14,7 @@
 #include "base/time/time.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
+#include "net/base/proxy_server.h"
 #include "net/base/request_priority.h"
 #include "net/http/bidirectional_stream_impl.h"
 #include "net/http/http_auth.h"
@@ -21,8 +22,7 @@
 #include "net/http/http_request_info.h"
 #include "net/http/http_stream_factory_impl.h"
 #include "net/log/net_log_with_source.h"
-#include "net/proxy/proxy_server.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/quic/chromium/quic_stream_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/client_socket_pool_manager.h"
@@ -117,8 +117,7 @@ class HttpStreamFactoryImpl::Job {
     // SPDY session.
     virtual void OnNewSpdySessionReady(
         Job* job,
-        const base::WeakPtr<SpdySession>& spdy_session,
-        bool direct) = 0;
+        const base::WeakPtr<SpdySession>& spdy_session) = 0;
 
     // Invoked when the |job| finishes pre-connecting sockets.
     virtual void OnPreconnectsComplete(Job* job) = 0;
@@ -152,8 +151,6 @@ class HttpStreamFactoryImpl::Job {
     websocket_handshake_stream_create_helper() = 0;
 
     virtual void MaybeSetWaitTimeForMainJob(const base::TimeDelta& delay) = 0;
-
-    virtual bool for_websockets() = 0;
   };
 
   // Job is owned by |delegate|, hence |delegate| is valid for the lifetime of
@@ -174,11 +171,11 @@ class HttpStreamFactoryImpl::Job {
   // HttpNetworkSession::Params::origins_to_force_quic_on.
   //
   // If |alternative_proxy_server| is a valid proxy server, then the Job will
-  // use that instead of using ProxyService for proxy resolution.  Further, if
-  // |alternative_proxy_server| is a valid but bad proxy, then fallback proxies
-  // are not used. It is illegal to call this constructor with a valid
-  // |alternative_proxy_server| and an |alternate_protocol| different from
-  // kProtoUnknown.
+  // use that instead of using ProxyResolutionService for proxy resolution.
+  // Further, if |alternative_proxy_server| is a valid but bad proxy, then
+  // fallback proxies are not used. It is illegal to call this constructor with
+  // a valid |alternative_proxy_server| and an |alternate_protocol| different
+  // from kProtoUnknown.
   Job(Delegate* delegate,
       JobType job_type,
       HttpNetworkSession* session,
@@ -190,8 +187,9 @@ class HttpStreamFactoryImpl::Job {
       HostPortPair destination,
       GURL origin_url,
       NextProto alternative_protocol,
-      QuicVersion quic_version,
+      QuicTransportVersion quic_version,
       const ProxyServer& alternative_proxy_server,
+      bool is_websocket,
       bool enable_ip_based_pooling,
       NetLog* net_log);
   virtual ~Job();
@@ -211,8 +209,8 @@ class HttpStreamFactoryImpl::Job {
   // connecting.
   virtual void Resume();
 
-  // Called to detach |this| Job. May resume the other Job, will disconnect
-  // the socket for |this| Job, and notify |delegate| upon completion.
+  // Called when |this| is orphaned by Delegate. This is valid for
+  // ALTERNATIVE job only.
   void Orphan();
 
   void SetPriority(RequestPriority priority);
@@ -254,9 +252,7 @@ class HttpStreamFactoryImpl::Job {
 
   bool should_reconsider_proxy() const { return should_reconsider_proxy_; }
 
-  // TODO(xunjieli): Added to investigate crbug.com/711721. Remove when no
-  // longer needed.
-  void LogHistograms() const;
+  NetErrorDetails* net_error_details() { return &net_error_details_; }
 
  private:
   friend class test::HttpStreamFactoryImplJobPeer;
@@ -316,6 +312,11 @@ class HttpStreamFactoryImpl::Job {
   int StartInternal();
   int DoInitConnectionImpl();
 
+  // If this is a QUIC alt job, then this function is called when host
+  // resolution completes. It's called with the next result after host
+  // resolution, not the result of host resolution itself.
+  void OnQuicHostResolution(int result);
+
   // Each of these methods corresponds to a State value.  Those with an input
   // argument receive the result from the previous state.  If a method returns
   // ERR_IO_PENDING, then the result from OnIOComplete will be passed to the
@@ -335,10 +336,9 @@ class HttpStreamFactoryImpl::Job {
   void ResumeInitConnection();
   // Creates a SpdyHttpStream or a BidirectionalStreamImpl from the given values
   // and sets to |stream_| or |bidirectional_stream_impl_| respectively. Does
-  // nothing if |stream_factory_| is for WebSockets.
+  // nothing if |stream_factory_| is for WebSocket.
   int SetSpdyHttpStreamOrBidirectionalStreamImpl(
-      base::WeakPtr<SpdySession> session,
-      bool direct);
+      base::WeakPtr<SpdySession> session);
 
   // Returns to STATE_INIT_CONNECTION and resets some state.
   void ReturnToStateInitConnection(bool close_connection);
@@ -364,7 +364,8 @@ class HttpStreamFactoryImpl::Job {
   static SpdySessionKey GetSpdySessionKey(bool spdy_session_direct,
                                           const ProxyServer& proxy_server,
                                           const GURL& origin_url,
-                                          PrivacyMode privacy_mode);
+                                          PrivacyMode privacy_mode,
+                                          const SocketTag& socket_tag);
 
   // Returns true if the current request can use an existing spdy session.
   bool CanUseExistingSpdySession() const;
@@ -398,8 +399,8 @@ class HttpStreamFactoryImpl::Job {
   // session is found, and OK otherwise.
   static int OnHostResolution(SpdySessionPool* spdy_session_pool,
                               const SpdySessionKey& spdy_session_key,
-                              const GURL& origin_url,
                               bool enable_ip_based_pooling,
+                              bool is_websocket,
                               const AddressList& addresses,
                               const NetLogWithSource& net_log);
 
@@ -414,9 +415,6 @@ class HttpStreamFactoryImpl::Job {
   std::unique_ptr<ClientSocketHandle> connection_;
   HttpNetworkSession* const session_;
 
-  // |state_| is only used for LogHistograms().
-  State state_;
-
   State next_state_;
 
   // The server we are trying to reach, could be that of the origin or of the
@@ -430,6 +428,14 @@ class HttpStreamFactoryImpl::Job {
   // Alternative proxy server that should be used by |this| to fetch the
   // request.
   const ProxyServer alternative_proxy_server_;
+
+  // True if request is for Websocket.
+  const bool is_websocket_;
+
+  // True if WebSocket request is allowed to use a WebSocket-capable existing
+  // HTTP/2 connection.  In this case FindAvailableSession() must be called with
+  // |enable_websocket = true|.
+  const bool try_websocket_over_http2_;
 
   // Enable pooling to a SpdySession with matching IP and certificate
   // even if the SpdySessionKey is different.
@@ -446,9 +452,9 @@ class HttpStreamFactoryImpl::Job {
   // True if Job uses QUIC.
   const bool using_quic_;
 
-  // QuicVersion that should be used to connect to the QUIC server if Job uses
-  // QUIC.
-  QuicVersion quic_version_;
+  // QuicTransportVersion that should be used to connect to the QUIC server if
+  // Job uses QUIC.
+  QuicTransportVersion quic_version_;
 
   // True if Alternative Service protocol field requires that HTTP/2 is used.
   // In this case, Job fails if it cannot pool to an existing SpdySession and
@@ -462,6 +468,10 @@ class HttpStreamFactoryImpl::Job {
   bool should_reconsider_proxy_;
 
   QuicStreamRequest quic_request_;
+
+  // Only valid for a QUIC job. Set when a QUIC connection is started. If true,
+  // then OnQuicHostResolution() is expected to be called in the future.
+  bool expect_on_quic_host_resolution_;
 
   // True if this job used an existing QUIC session.
   bool using_existing_quic_session_;
@@ -490,18 +500,24 @@ class HttpStreamFactoryImpl::Job {
   // Initialized when we have an existing SpdySession.
   base::WeakPtr<SpdySession> existing_spdy_session_;
 
+  // Once Job claims a pushed stream on a SpdySession, |pushed_stream_id_| is
+  // the ID of the claimed stream, and |existing_spdy_session_| points to that
+  // SpdySession.  Otherwise |pushed_stream_id_| is set to kNoPushedStreamFound
+  // (but |existing_spdy_session_| can still be non-null).
+  SpdyStreamId pushed_stream_id_;
+
   // True if not connecting to an Https proxy for an Http url.
   const bool spdy_session_direct_;
 
   const SpdySessionKey spdy_session_key_;
-
-  base::TimeTicks job_stream_ready_start_time_;
 
   // Type of stream that is requested.
   HttpStreamRequest::StreamType stream_type_;
 
   // Whether Job has continued to DoInitConnection().
   bool init_connection_already_resumed_;
+
+  NetErrorDetails net_error_details_;
 
   base::WeakPtrFactory<Job> ptr_factory_;
 
@@ -526,6 +542,7 @@ class HttpStreamFactoryImpl::JobFactory {
       const SSLConfig& proxy_ssl_config,
       HostPortPair destination,
       GURL origin_url,
+      bool is_websocket,
       bool enable_ip_based_pooling,
       NetLog* net_log);
 
@@ -541,7 +558,8 @@ class HttpStreamFactoryImpl::JobFactory {
       HostPortPair destination,
       GURL origin_url,
       NextProto alternative_protocol,
-      QuicVersion quic_version,
+      QuicTransportVersion quic_version,
+      bool is_websocket,
       bool enable_ip_based_pooling,
       NetLog* net_log);
 
@@ -557,6 +575,7 @@ class HttpStreamFactoryImpl::JobFactory {
       HostPortPair destination,
       GURL origin_url,
       const ProxyServer& alternative_proxy_server,
+      bool is_websocket,
       bool enable_ip_based_pooling,
       NetLog* net_log);
 };

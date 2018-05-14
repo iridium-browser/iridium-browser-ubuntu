@@ -13,10 +13,13 @@
 #include <memory>
 
 #include "src/handles.h"
-#include "src/list.h"
+#include "src/wasm/wasm-code-wrapper.h"
 
 namespace v8 {
 namespace internal {
+namespace wasm {
+class WasmCode;
+}
 
 // Forward declarations.
 class AbstractCode;
@@ -162,7 +165,7 @@ class WasmStackFrame : public StackFrameBase {
 
   Handle<WasmInstanceObject> wasm_instance_;
   uint32_t wasm_func_index_;
-  Handle<AbstractCode> code_;  // null handle for interpreted frames.
+  WasmCodeWrapper code_;  // null for interpreted frames.
   int offset_;
 
  private:
@@ -256,6 +259,7 @@ class ErrorUtils : public AllStatic {
   T(Debugger, "Debugger: %")                                                   \
   T(DebuggerLoading, "Error loading debugger")                                 \
   T(DefaultOptionsMissing, "Internal % error. Default options are missing.")   \
+  T(DeletePrivateField, "Private fields can not be deleted")                   \
   T(UncaughtException, "Uncaught %")                                           \
   T(Unsupported, "Not supported")                                              \
   T(WrongServiceType, "Internal error, wrong service type: %")                 \
@@ -264,13 +268,27 @@ class ErrorUtils : public AllStatic {
   T(ApplyNonFunction,                                                          \
     "Function.prototype.apply was called on %, which is a % and not a "        \
     "function")                                                                \
+  T(ArgumentsDisallowedInInitializer,                                          \
+    "'arguments' is not allowed in class field initializer")                   \
   T(ArrayBufferTooShort,                                                       \
     "Derived ArrayBuffer constructor created a buffer which was too small")    \
   T(ArrayBufferSpeciesThis,                                                    \
     "ArrayBuffer subclass returned this from species constructor")             \
   T(ArrayFunctionsOnFrozen, "Cannot modify frozen array elements")             \
   T(ArrayFunctionsOnSealed, "Cannot add/remove sealed array elements")         \
+  T(AwaitNotInAsyncFunction, "await is only valid in async function")          \
   T(AtomicsWaitNotAllowed, "Atomics.wait cannot be called in this context")    \
+  T(BadSortComparisonFunction,                                                 \
+    "The comparison function must be either a function or undefined")          \
+  T(BigIntFromNumber,                                                          \
+    "The number % is not a safe integer and thus cannot be converted to a "    \
+    "BigInt")                                                                  \
+  T(BigIntFromObject, "Cannot convert % to a BigInt")                          \
+  T(BigIntMixedTypes,                                                          \
+    "Cannot mix BigInt and other types, use explicit conversions")             \
+  T(BigIntSerializeJSON, "Do not know how to serialize a BigInt")              \
+  T(BigIntShr, "BigInts have no unsigned right shift, use >> instead")         \
+  T(BigIntToNumber, "Cannot convert a BigInt value to a number")               \
   T(CalledNonCallable, "% is not a function")                                  \
   T(CalledOnNonObject, "% called on non-object")                               \
   T(CalledOnNullOrUndefined, "% called on null or undefined")                  \
@@ -287,12 +305,13 @@ class ErrorUtils : public AllStatic {
   T(CircularStructure, "Converting circular structure to JSON")                \
   T(ConstructAbstractClass, "Abstract class % not directly constructable")     \
   T(ConstAssign, "Assignment to constant variable.")                           \
+  T(ConstructorClassField, "Classes may not have a field named 'constructor'") \
   T(ConstructorNonCallable,                                                    \
     "Class constructor % cannot be invoked without 'new'")                     \
   T(ConstructorNotFunction, "Constructor % requires 'new'")                    \
   T(ConstructorNotReceiver, "The .constructor property is not an object")      \
   T(CurrencyCode, "Currency code is required with currency style.")            \
-  T(CyclicModuleDependency, "Detected cycle while resolving name '%'")         \
+  T(CyclicModuleDependency, "Detected cycle while resolving name '%' in '%'")  \
   T(DataViewNotArrayBuffer,                                                    \
     "First argument to DataView constructor must be an ArrayBuffer")           \
   T(DateType, "this is not a Date object.")                                    \
@@ -312,6 +331,8 @@ class ErrorUtils : public AllStatic {
   T(ImmutablePrototypeSet,                                                     \
     "Immutable prototype object '%' cannot have their prototype set")          \
   T(ImportCallNotNewExpression, "Cannot use new with import")                  \
+  T(ImportMetaOutsideModule, "Cannot use 'import.meta' outside a module")      \
+  T(ImportMissingSpecifier, "import() requires a specifier")                   \
   T(IncompatibleMethodReceiver, "Method % called on incompatible receiver %")  \
   T(InstanceofNonobjectProto,                                                  \
     "Function has non-object prototype '%' in instanceof check")               \
@@ -320,6 +341,7 @@ class ErrorUtils : public AllStatic {
   T(InvalidRegExpExecResult,                                                   \
     "RegExp exec method returned something other than an Object or null")      \
   T(IteratorResultNotAnObject, "Iterator result % is not an object")           \
+  T(IteratorSymbolNonCallable, "Found non-callable @@iterator")                \
   T(IteratorValueNotAnObject, "Iterator value % is not an entry object")       \
   T(LanguageID, "Language ID should be string or object.")                     \
   T(MethodCalledOnWrongObject,                                                 \
@@ -344,6 +366,10 @@ class ErrorUtils : public AllStatic {
   T(NotConstructor, "% is not a constructor")                                  \
   T(NotDateObject, "this is not a Date object.")                               \
   T(NotGeneric, "% requires that 'this' be a %")                               \
+  T(NotCallableOrIterable,                                                     \
+    "% is not a function or its return value is not iterable")                 \
+  T(NotCallableOrAsyncIterable,                                                \
+    "% is not a function or its return value is not async iterable")           \
   T(NotIterable, "% is not iterable")                                          \
   T(NotAsyncIterable, "% is not async iterable")                               \
   T(NotPropertyName, "% is not a valid property name")                         \
@@ -460,7 +486,6 @@ class ErrorUtils : public AllStatic {
   T(ReduceNoInitial, "Reduce of empty array with no initial value")            \
   T(RegExpFlags,                                                               \
     "Cannot supply flags when constructing one RegExp from another")           \
-  T(RegExpInvalidReplaceString, "Invalid replacement string: '%'")             \
   T(RegExpNonObject, "% getter called on non-object %")                        \
   T(RegExpNonRegExp, "% getter called on non-RegExp object")                   \
   T(ResolverNotAFunction, "Promise resolver % is not a function")              \
@@ -470,8 +495,8 @@ class ErrorUtils : public AllStatic {
     "small")                                                                   \
   T(SharedArrayBufferSpeciesThis,                                              \
     "SharedArrayBuffer subclass returned this from species constructor")       \
-  T(StaticPrototype, "Classes may not have static property named prototype")   \
-  T(StrictCannotAssign, "Cannot assign to read only '%' in strict mode")       \
+  T(StaticPrototype,                                                           \
+    "Classes may not have a static property named 'prototype'")                \
   T(StrictDeleteProperty, "Cannot delete property '%' of %")                   \
   T(StrictPoisonPill,                                                          \
     "'caller', 'callee', and 'arguments' properties may not be accessed on "   \
@@ -498,6 +523,9 @@ class ErrorUtils : public AllStatic {
   T(SuperAlreadyCalled, "Super constructor may only be called once")           \
   T(UnsupportedSuper, "Unsupported reference to 'super'")                      \
   /* RangeError */                                                             \
+  T(BigIntDivZero, "Division by zero")                                         \
+  T(BigIntNegativeExponent, "Exponent must be positive")                       \
+  T(BigIntTooBig, "Maximum BigInt size exceeded")                              \
   T(DateRange, "Provided date is not in valid range.")                         \
   T(ExpectedTimezoneID,                                                        \
     "Expected Area/Location(/Location)* for time zone, got %")                 \
@@ -516,6 +544,7 @@ class ErrorUtils : public AllStatic {
   T(InvalidDataViewLength, "Invalid DataView length %")                        \
   T(InvalidOffset, "Start offset % is outside the bounds of the buffer")       \
   T(InvalidHint, "Invalid hint: %")                                            \
+  T(InvalidIndex, "Invalid value: not (convertible to) a safe integer")        \
   T(InvalidLanguageTag, "Invalid language tag: %")                             \
   T(InvalidWeakMapKey, "Invalid value used as weak map key")                   \
   T(InvalidWeakSetValue, "Invalid value used in weak set")                     \
@@ -527,20 +556,22 @@ class ErrorUtils : public AllStatic {
   T(LetInLexicalBinding, "let is disallowed as a lexically bound name")        \
   T(LocaleMatcher, "Illegal value for localeMatcher:%")                        \
   T(NormalizationForm, "The normalization form should be one of %.")           \
-  T(NumberFormatRange, "% argument must be between 0 and 20")                  \
+  T(NumberFormatRange, "% argument must be between 0 and 100")                 \
   T(PropertyValueOutOfRange, "% value is out of range.")                       \
   T(StackOverflow, "Maximum call stack size exceeded")                         \
-  T(ToPrecisionFormatRange, "toPrecision() argument must be between 1 and 21") \
+  T(ToPrecisionFormatRange,                                                    \
+    "toPrecision() argument must be between 1 and 100")                        \
   T(ToRadixFormatRange, "toString() radix argument must be between 2 and 36")  \
-  T(TypedArraySetNegativeOffset, "Start offset is negative")                   \
+  T(TypedArraySetOffsetOutOfBounds, "offset is out of bounds")                 \
   T(TypedArraySetSourceTooLarge, "Source is too large")                        \
   T(UnsupportedTimeZone, "Unsupported time zone specified %")                  \
   T(ValueOutOfRange, "Value % out of range for % options property %")          \
   /* SyntaxError */                                                            \
   T(AmbiguousExport,                                                           \
-    "The requested module contains conflicting star exports for name '%'")     \
+    "The requested module '%' contains conflicting star exports for name '%'") \
   T(BadGetterArity, "Getter must not have any formal parameters.")             \
   T(BadSetterArity, "Setter must have exactly one formal parameter.")          \
+  T(BigIntInvalidString, "Invalid BigInt string")                              \
   T(ConstructorIsAccessor, "Class constructor may not be an accessor")         \
   T(ConstructorIsGenerator, "Class constructor may not be a generator")        \
   T(ConstructorIsAsync, "Class constructor may not be an async method")        \
@@ -556,8 +587,11 @@ class ErrorUtils : public AllStatic {
     "% loop variable declaration may not have an initializer.")                \
   T(ForInOfLoopMultiBindings,                                                  \
     "Invalid left-hand side in % loop: Must have a single binding.")           \
-  T(GeneratorInLegacyContext,                                                  \
-    "Generator declarations are not allowed in legacy contexts.")              \
+  T(GeneratorInSingleStatementContext,                                         \
+    "Generators can only be declared at the top level or inside a block.")     \
+  T(AsyncFunctionInSingleStatementContext,                                     \
+    "Async functions can only be declared at the top level or inside a "       \
+    "block.")                                                                  \
   T(IllegalBreak, "Illegal break statement")                                   \
   T(NoIterationStatement,                                                      \
     "Illegal continue statement: no surrounding iteration statement")          \
@@ -566,6 +600,7 @@ class ErrorUtils : public AllStatic {
   T(IllegalLanguageModeDirective,                                              \
     "Illegal '%' directive in function with non-simple parameter list")        \
   T(IllegalReturn, "Illegal return statement")                                 \
+  T(IntrinsicWithSpread, "Intrinsic calls do not support spread arguments")    \
   T(InvalidRestBindingPattern,                                                 \
     "`...` must be followed by an identifier in declaration contexts")         \
   T(InvalidRestAssignmentPattern,                                              \
@@ -583,6 +618,7 @@ class ErrorUtils : public AllStatic {
     "Invalid left-hand side expression in prefix operation")                   \
   T(InvalidRegExpFlags, "Invalid flags supplied to RegExp constructor '%'")    \
   T(InvalidOrUnexpectedToken, "Invalid or unexpected token")                   \
+  T(InvalidPrivateFieldAccess, "Invalid private field '%'")                    \
   T(JsonParseUnexpectedEOS, "Unexpected end of JSON input")                    \
   T(JsonParseUnexpectedToken, "Unexpected token % in JSON at position %")      \
   T(JsonParseUnexpectedTokenNumber, "Unexpected number in JSON at position %") \
@@ -653,8 +689,6 @@ class ErrorUtils : public AllStatic {
   T(TypedArrayTooShort,                                                        \
     "Derived TypedArray constructor created an array which was too small")     \
   T(UnexpectedEOS, "Unexpected end of input")                                  \
-  T(UnexpectedFunctionSent,                                                    \
-    "function.sent expression is not allowed outside a generator")             \
   T(UnexpectedReserved, "Unexpected reserved word")                            \
   T(UnexpectedStrictReserved, "Unexpected strict mode reserved word")          \
   T(UnexpectedSuper, "'super' keyword unexpected here")                        \
@@ -669,7 +703,7 @@ class ErrorUtils : public AllStatic {
     "Lexical declaration cannot appear in a single-statement context")         \
   T(UnknownLabel, "Undefined label '%'")                                       \
   T(UnresolvableExport,                                                        \
-    "The requested module does not provide an export named '%'")               \
+    "The requested module '%' does not provide an export named '%'")           \
   T(UnterminatedArgList, "missing ) after argument list")                      \
   T(UnterminatedRegExp, "Invalid regular expression: missing /")               \
   T(UnterminatedTemplate, "Unterminated template literal")                     \
@@ -690,11 +724,11 @@ class ErrorUtils : public AllStatic {
   T(WasmTrapDivByZero, "divide by zero")                                       \
   T(WasmTrapDivUnrepresentable, "divide result unrepresentable")               \
   T(WasmTrapRemByZero, "remainder by zero")                                    \
-  T(WasmTrapFloatUnrepresentable, "integer result unrepresentable")            \
-  T(WasmTrapFuncInvalid, "invalid function")                                   \
+  T(WasmTrapFloatUnrepresentable, "float unrepresentable in integer range")    \
+  T(WasmTrapFuncInvalid, "invalid index into function table")                  \
   T(WasmTrapFuncSigMismatch, "function signature mismatch")                    \
-  T(WasmTrapInvalidIndex, "invalid index into function table")                 \
-  T(WasmTrapTypeError, "invalid type")                                         \
+  T(WasmTrapTypeError, "wasm function signature contains illegal type")        \
+  T(WasmExceptionError, "wasm exception")                                      \
   /* Asm.js validation related */                                              \
   T(AsmJsInvalid, "Invalid asm.js: %")                                         \
   T(AsmJsCompiled, "Converted asm.js to WebAssembly: %")                       \

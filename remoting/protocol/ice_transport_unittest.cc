@@ -4,12 +4,12 @@
 
 #include "remoting/protocol/ice_transport.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -56,8 +56,8 @@ class TestTransportEventHandler : public IceTransport::EventHandler {
  public:
   typedef base::Callback<void(ErrorCode error)> ErrorCallback;
 
-  TestTransportEventHandler() {}
-  ~TestTransportEventHandler() {}
+  TestTransportEventHandler() = default;
+  ~TestTransportEventHandler() = default;
 
   void set_error_callback(const ErrorCallback& callback) {
     error_callback_ = callback;
@@ -115,7 +115,7 @@ class IceTransportTest : public testing::Test {
 
     host_transport_.reset(new IceTransport(
         new TransportContext(nullptr,
-                             base::MakeUnique<ChromiumPortAllocatorFactory>(),
+                             std::make_unique<ChromiumPortAllocatorFactory>(),
                              nullptr, network_settings_, TransportRole::SERVER),
         &host_event_handler_));
     if (!host_authenticator_) {
@@ -125,7 +125,7 @@ class IceTransportTest : public testing::Test {
 
     client_transport_.reset(new IceTransport(
         new TransportContext(nullptr,
-                             base::MakeUnique<ChromiumPortAllocatorFactory>(),
+                             std::make_unique<ChromiumPortAllocatorFactory>(),
                              nullptr, network_settings_, TransportRole::CLIENT),
         &client_event_handler_));
     if (!client_authenticator_) {

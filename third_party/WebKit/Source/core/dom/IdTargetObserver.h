@@ -36,12 +36,14 @@ class IdTargetObserverRegistry;
 class IdTargetObserver : public GarbageCollectedFinalized<IdTargetObserver> {
  public:
   virtual ~IdTargetObserver();
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
   virtual void IdTargetChanged() = 0;
   virtual void Unregister();
 
  protected:
   IdTargetObserver(IdTargetObserverRegistry&, const AtomicString& id);
+
+  const AtomicString& Id() const { return id_; }
 
  private:
   IdTargetObserverRegistry& Registry() { return *registry_; }

@@ -35,7 +35,7 @@ namespace blink {
 LayoutSVGEllipse::LayoutSVGEllipse(SVGGeometryElement* node)
     : LayoutSVGShape(node), use_path_fallback_(false) {}
 
-LayoutSVGEllipse::~LayoutSVGEllipse() {}
+LayoutSVGEllipse::~LayoutSVGEllipse() = default;
 
 void LayoutSVGEllipse::UpdateShapeFromElement() {
   // Before creating a new object we need to clear the cached bounding box
@@ -56,44 +56,44 @@ void LayoutSVGEllipse::UpdateShapeFromElement() {
   if (!radii_.IsEmpty()) {
     // Fall back to LayoutSVGShape and path-based hit detection if the ellipse
     // has a non-scaling or discontinuous stroke.
-    if (HasNonScalingStroke() || !HasContinuousStroke()) {
+    // However, only use LayoutSVGShape bounding-box calculations for the
+    // non-scaling stroke case, since the computation below should be accurate
+    // for the other cases.
+    if (HasNonScalingStroke()) {
       LayoutSVGShape::UpdateShapeFromElement();
       use_path_fallback_ = true;
       return;
     }
+    if (!HasContinuousStroke()) {
+      CreatePath();
+      use_path_fallback_ = true;
+    }
   }
 
-  ClearPath();
+  if (!use_path_fallback_)
+    ClearPath();
 
-  fill_bounding_box_ =
-      FloatRect(center_.X() - radii_.Width(), center_.Y() - radii_.Height(),
-                2 * radii_.Width(), 2 * radii_.Height());
+  fill_bounding_box_ = FloatRect(center_ - radii_, radii_.ScaledBy(2));
   stroke_bounding_box_ = fill_bounding_box_;
   if (Style()->SvgStyle().HasStroke())
     stroke_bounding_box_.Inflate(StrokeWidth() / 2);
-  if (GetElement())
-    GetElement()->SetNeedsResizeObserverUpdate();
 }
 
 void LayoutSVGEllipse::CalculateRadiiAndCenter() {
   DCHECK(GetElement());
   SVGLengthContext length_context(GetElement());
-  center_ = FloatPoint(
-      length_context.ValueForLength(Style()->SvgStyle().Cx(), StyleRef(),
-                                    SVGLengthMode::kWidth),
-      length_context.ValueForLength(Style()->SvgStyle().Cy(), StyleRef(),
-                                    SVGLengthMode::kHeight));
+  const ComputedStyle& style = StyleRef();
+  const SVGComputedStyle& svg_style = style.SvgStyle();
+  center_ =
+      length_context.ResolveLengthPair(svg_style.Cx(), svg_style.Cy(), style);
 
-  if (isSVGCircleElement(*GetElement())) {
-    float radius = length_context.ValueForLength(
-        Style()->SvgStyle().R(), StyleRef(), SVGLengthMode::kOther);
+  if (IsSVGCircleElement(*GetElement())) {
+    float radius = length_context.ValueForLength(svg_style.R(), style,
+                                                 SVGLengthMode::kOther);
     radii_ = FloatSize(radius, radius);
   } else {
-    radii_ = FloatSize(
-        length_context.ValueForLength(Style()->SvgStyle().Rx(), StyleRef(),
-                                      SVGLengthMode::kWidth),
-        length_context.ValueForLength(Style()->SvgStyle().Ry(), StyleRef(),
-                                      SVGLengthMode::kHeight));
+    radii_ = ToFloatSize(length_context.ResolveLengthPair(
+        svg_style.Rx(), svg_style.Ry(), style));
   }
 }
 

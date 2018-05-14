@@ -7,8 +7,9 @@
 
 #import <Foundation/Foundation.h>
 
-#import "base/ios/weak_nsobject.h"
 #import "ios/web/public/web_state/web_state_delegate.h"
+
+@class UIViewController;
 
 // Objective-C interface for web::WebStateDelegate.
 @protocol CRWWebStateDelegate<NSObject>
@@ -34,10 +35,9 @@
          openURLWithParams:(const web::WebState::OpenURLParams&)params;
 
 // Called when the user triggers the context menu with the given
-// |ContextMenuParams|. Returns YES if the context menu operation was
-// handled by the delegate. If this method is not implemented, the system
-// context menu will be displayed.
-- (BOOL)webState:(web::WebState*)webState
+// |ContextMenuParams|. If this method is not implemented, no context menu will
+// be displayed.
+- (void)webState:(web::WebState*)webState
     handleContextMenu:(const web::ContextMenuParams&)params;
 
 // Requests the repost form confirmation dialog. Clients must call |handler|
@@ -60,6 +60,24 @@
                       proposedCredential:(NSURLCredential*)proposedCredential
                        completionHandler:(void (^)(NSString* username,
                                                    NSString* password))handler;
+
+// Determines whether the given link with |linkURL| should show a preview on
+// force touch.
+- (BOOL)webState:(web::WebState*)webState
+    shouldPreviewLinkWithURL:(const GURL&)linkURL;
+
+// Called when the user performs a peek action on a link with |linkURL| with
+// force touch. Returns a view controller shown as a pop-up. Uses Webkit's
+// default preview behavior when it returns nil.
+- (UIViewController*)webState:(web::WebState*)webState
+    previewingViewControllerForLinkWithURL:(const GURL&)linkURL;
+
+// Called when the user performs a pop action on the preview on force touch.
+// |previewing_view_controller| is the view controller that is popped.
+// It should display |previewingViewController| inside the app.
+- (void)webState:(web::WebState*)webState
+    commitPreviewingViewController:(UIViewController*)previewingViewController;
+
 @end
 
 namespace web {
@@ -78,7 +96,7 @@ class WebStateDelegateBridge : public web::WebStateDelegate {
   void CloseWebState(WebState* source) override;
   WebState* OpenURLFromWebState(WebState*,
                                 const WebState::OpenURLParams&) override;
-  bool HandleContextMenu(WebState* source,
+  void HandleContextMenu(WebState* source,
                          const ContextMenuParams& params) override;
   void ShowRepostFormWarningDialog(
       WebState* source,
@@ -89,10 +107,16 @@ class WebStateDelegateBridge : public web::WebStateDelegate {
                       NSURLProtectionSpace* protection_space,
                       NSURLCredential* proposed_credential,
                       const AuthCallback& callback) override;
+  bool ShouldPreviewLink(WebState* web_state, const GURL& link_url) override;
+  UIViewController* GetPreviewingViewController(WebState* source,
+                                                const GURL& link_url) override;
+  void CommitPreviewingViewController(
+      WebState* source,
+      UIViewController* previewing_view_controller) override;
 
  private:
   // CRWWebStateDelegate which receives forwarded calls.
-  base::WeakNSProtocol<id<CRWWebStateDelegate>> delegate_;
+  __weak id<CRWWebStateDelegate> delegate_ = nil;
   DISALLOW_COPY_AND_ASSIGN(WebStateDelegateBridge);
 };
 

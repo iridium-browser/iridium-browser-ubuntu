@@ -8,13 +8,12 @@
 #include <stdint.h>
 
 #include <memory>
-#include <queue>
 #include <tuple>
 
+#include "base/containers/queue.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
@@ -92,8 +91,8 @@ bool AllocateQuota(FileSystemOperationContext* context, int64_t growth) {
 void UpdateUsage(FileSystemOperationContext* context,
                  const FileSystemURL& url,
                  int64_t growth) {
-  context->update_observers()->Notify(
-      &FileUpdateObserver::OnUpdate, std::make_tuple(url, growth));
+  context->update_observers()->Notify(&FileUpdateObserver::OnUpdate, url,
+                                      growth);
 }
 
 void TouchDirectory(SandboxDirectoryDatabase* db, FileId dir_id) {
@@ -135,7 +134,7 @@ class ObfuscatedFileEnumerator final
     recurse_queue_.push(record);
   }
 
-  ~ObfuscatedFileEnumerator() override {}
+  ~ObfuscatedFileEnumerator() override = default;
 
   base::FilePath Next() override {
     FileInfo file_info;
@@ -200,7 +199,7 @@ class ObfuscatedFileEnumerator final
   FileSystemURL root_url_;
   bool recursive_;
 
-  std::queue<FileRecord> recurse_queue_;
+  base::queue<FileRecord> recurse_queue_;
   std::vector<FileId> display_stack_;
   base::FilePath current_parent_virtual_path_;
 
@@ -220,7 +219,7 @@ class ObfuscatedOriginEnumerator
       origin_database->ListAllOrigins(&origins_);
   }
 
-  ~ObfuscatedOriginEnumerator() override {}
+  ~ObfuscatedOriginEnumerator() override = default;
 
   // Returns the next origin.  Returns empty if there are no more origins.
   GURL Next() override {
@@ -230,7 +229,7 @@ class ObfuscatedOriginEnumerator
       origins_.pop_back();
     }
     current_ = record;
-    return storage::GetOriginFromIdentifier(record.origin);
+    return storage::GetOriginURLFromIdentifier(record.origin);
   }
 
   // Returns the current origin's information.
@@ -323,8 +322,7 @@ base::File::Error ObfuscatedFileUtil::EnsureFileExists(
   if (created && base::File::FILE_OK == error) {
     *created = true;
     UpdateUsage(context, url, growth);
-    context->change_observers()->Notify(
-        &FileChangeObserver::OnCreateFile, std::make_tuple(url));
+    context->change_observers()->Notify(&FileChangeObserver::OnCreateFile, url);
   }
   return error;
 }
@@ -382,8 +380,8 @@ base::File::Error ObfuscatedFileUtil::CreateDirectory(
     if (error != base::File::FILE_OK)
       return error;
     UpdateUsage(context, url, growth);
-    context->change_observers()->Notify(
-        &FileChangeObserver::OnCreateDirectory, std::make_tuple(url));
+    context->change_observers()->Notify(&FileChangeObserver::OnCreateDirectory,
+                                        url);
     if (first) {
       first = false;
       TouchDirectory(db, file_info.parent_id);
@@ -482,8 +480,7 @@ base::File::Error ObfuscatedFileUtil::Truncate(
   error = NativeFileUtil::Truncate(local_path, length);
   if (error == base::File::FILE_OK) {
     UpdateUsage(context, url, growth);
-    context->change_observers()->Notify(
-        &FileChangeObserver::OnModifyFile, std::make_tuple(url));
+    context->change_observers()->Notify(&FileChangeObserver::OnModifyFile, url);
   }
   return error;
 }
@@ -608,18 +605,16 @@ base::File::Error ObfuscatedFileUtil::CopyOrMoveFile(
     return error;
 
   if (overwrite) {
-    context->change_observers()->Notify(
-        &FileChangeObserver::OnModifyFile,
-        std::make_tuple(dest_url));
+    context->change_observers()->Notify(&FileChangeObserver::OnModifyFile,
+                                        dest_url);
   } else {
-    context->change_observers()->Notify(
-        &FileChangeObserver::OnCreateFileFrom,
-        std::make_tuple(dest_url, src_url));
+    context->change_observers()->Notify(&FileChangeObserver::OnCreateFileFrom,
+                                        dest_url, src_url);
   }
 
   if (!copy) {
-    context->change_observers()->Notify(
-        &FileChangeObserver::OnRemoveFile, std::make_tuple(src_url));
+    context->change_observers()->Notify(&FileChangeObserver::OnRemoveFile,
+                                        src_url);
     TouchDirectory(db, src_file_info.parent_id);
   }
 
@@ -697,11 +692,11 @@ base::File::Error ObfuscatedFileUtil::CopyInForeignFile(
     return error;
 
   if (overwrite) {
-    context->change_observers()->Notify(
-        &FileChangeObserver::OnModifyFile, std::make_tuple(dest_url));
+    context->change_observers()->Notify(&FileChangeObserver::OnModifyFile,
+                                        dest_url);
   } else {
-    context->change_observers()->Notify(
-        &FileChangeObserver::OnCreateFile, std::make_tuple(dest_url));
+    context->change_observers()->Notify(&FileChangeObserver::OnCreateFile,
+                                        dest_url);
   }
 
   UpdateUsage(context, dest_url, growth);
@@ -741,8 +736,7 @@ base::File::Error ObfuscatedFileUtil::DeleteFile(
   UpdateUsage(context, url, growth);
   TouchDirectory(db, file_info.parent_id);
 
-  context->change_observers()->Notify(
-      &FileChangeObserver::OnRemoveFile, std::make_tuple(url));
+  context->change_observers()->Notify(&FileChangeObserver::OnRemoveFile, url);
 
   if (error == base::File::FILE_ERROR_NOT_FOUND)
     return base::File::FILE_OK;
@@ -776,8 +770,8 @@ base::File::Error ObfuscatedFileUtil::DeleteDirectory(
   AllocateQuota(context, growth);
   UpdateUsage(context, url, growth);
   TouchDirectory(db, file_info.parent_id);
-  context->change_observers()->Notify(
-      &FileChangeObserver::OnRemoveDirectory, std::make_tuple(url));
+  context->change_observers()->Notify(&FileChangeObserver::OnRemoveDirectory,
+                                      url);
   return base::File::FILE_OK;
 }
 
@@ -862,6 +856,9 @@ bool ObfuscatedFileUtil::DeleteDirectoryForOriginAndType(
   DestroyDirectoryDatabase(origin, type_string);
 
   const base::FilePath origin_path = GetDirectoryForOrigin(origin, false, NULL);
+  if (origin_path.empty())
+    return true;
+
   if (!type_string.empty()) {
     // Delete the filesystem type directory.
     base::File::Error error = base::File::FILE_OK;
@@ -955,7 +952,7 @@ void ObfuscatedFileUtil::MaybePrepopulateDatabase(
   std::string origin_string = database.GetPrimaryOrigin();
   if (origin_string.empty() || !database.HasOriginPath(origin_string))
     return;
-  const GURL origin = storage::GetOriginFromIdentifier(origin_string);
+  const GURL origin = storage::GetOriginURLFromIdentifier(origin_string);
 
   // Prepopulate the directory database(s) if and only if this instance
   // has primary origin and the directory database is already there.
@@ -970,7 +967,7 @@ void ObfuscatedFileUtil::MaybePrepopulateDatabase(
     if (error != base::File::FILE_OK)
       continue;
     std::unique_ptr<SandboxDirectoryDatabase> db =
-        base::MakeUnique<SandboxDirectoryDatabase>(path, env_override_);
+        std::make_unique<SandboxDirectoryDatabase>(path, env_override_);
     if (db->Init(SandboxDirectoryDatabase::FAIL_ON_CORRUPTION)) {
       directories_[GetDirectoryDatabaseKey(origin, type_string)] =
           std::move(db);
@@ -1184,7 +1181,7 @@ SandboxDirectoryDatabase* ObfuscatedFileUtil::GetDirectoryDatabase(
   }
   MarkUsed();
   directories_[key] =
-      base::MakeUnique<SandboxDirectoryDatabase>(path, env_override_);
+      std::make_unique<SandboxDirectoryDatabase>(path, env_override_);
   return directories_[key].get();
 }
 
@@ -1369,8 +1366,8 @@ base::File ObfuscatedFileUtil::CreateOrOpenInternal(
     base::File file = CreateAndOpenFile(context, url, &file_info, file_flags);
     if (file.IsValid()) {
       UpdateUsage(context, url, growth);
-      context->change_observers()->Notify(
-          &FileChangeObserver::OnCreateFile, std::make_tuple(url));
+      context->change_observers()->Notify(&FileChangeObserver::OnCreateFile,
+                                          url);
     }
     return file;
   }
@@ -1412,8 +1409,7 @@ base::File ObfuscatedFileUtil::CreateOrOpenInternal(
   // If truncating we need to update the usage.
   if (delta) {
     UpdateUsage(context, url, delta);
-    context->change_observers()->Notify(
-        &FileChangeObserver::OnModifyFile, std::make_tuple(url));
+    context->change_observers()->Notify(&FileChangeObserver::OnModifyFile, url);
   }
   return file;
 }

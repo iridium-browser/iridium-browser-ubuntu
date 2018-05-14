@@ -26,29 +26,28 @@
 
 #include "modules/mediastream/MediaStreamTrack.h"
 #include "modules/peerconnection/RTCPeerConnection.h"
-#include "modules/peerconnection/RTCStatsCallback.h"
 
 namespace blink {
 
 RTCStatsRequestImpl* RTCStatsRequestImpl::Create(ExecutionContext* context,
                                                  RTCPeerConnection* requester,
-                                                 RTCStatsCallback* callback,
+                                                 V8RTCStatsCallback* callback,
                                                  MediaStreamTrack* selector) {
   return new RTCStatsRequestImpl(context, requester, callback, selector);
 }
 
 RTCStatsRequestImpl::RTCStatsRequestImpl(ExecutionContext* context,
                                          RTCPeerConnection* requester,
-                                         RTCStatsCallback* callback,
+                                         V8RTCStatsCallback* callback,
                                          MediaStreamTrack* selector)
     : ContextLifecycleObserver(context),
-      success_callback_(callback),
-      component_(selector ? selector->Component() : 0),
+      success_callback_(ToV8PersistentCallbackFunction(callback)),
+      component_(selector ? selector->Component() : nullptr),
       requester_(requester) {
   DCHECK(requester_);
 }
 
-RTCStatsRequestImpl::~RTCStatsRequestImpl() {}
+RTCStatsRequestImpl::~RTCStatsRequestImpl() = default;
 
 RTCStatsResponseBase* RTCStatsRequestImpl::CreateResponse() {
   return RTCStatsResponse::Create();
@@ -65,8 +64,10 @@ MediaStreamComponent* RTCStatsRequestImpl::Component() {
 void RTCStatsRequestImpl::RequestSucceeded(RTCStatsResponseBase* response) {
   bool should_fire_callback =
       requester_ ? requester_->ShouldFireGetStatsCallback() : false;
-  if (should_fire_callback && success_callback_)
-    success_callback_->handleEvent(static_cast<RTCStatsResponse*>(response));
+  if (should_fire_callback && success_callback_) {
+    success_callback_->InvokeAndReportException(
+        nullptr, static_cast<RTCStatsResponse*>(response));
+  }
   Clear();
 }
 
@@ -79,7 +80,7 @@ void RTCStatsRequestImpl::Clear() {
   requester_.Clear();
 }
 
-DEFINE_TRACE(RTCStatsRequestImpl) {
+void RTCStatsRequestImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(success_callback_);
   visitor->Trace(component_);
   visitor->Trace(requester_);

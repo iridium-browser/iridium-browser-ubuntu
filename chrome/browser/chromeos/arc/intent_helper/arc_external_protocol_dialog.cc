@@ -55,6 +55,16 @@ void CloseTabIfNeeded(int render_process_host_id, int routing_id) {
     web_contents->Close();
 }
 
+// Tells whether or not Chrome is an app candidate for the current navigation.
+bool IsChromeAnAppCandidate(
+    const std::vector<mojom::IntentHandlerInfoPtr>& handlers) {
+  for (const auto& handle : handlers) {
+    if (ArcIntentHelperBridge::IsIntentHelperPackage(handle->package_name))
+      return true;
+  }
+  return false;
+}
+
 // Shows |url| in the current tab.
 void OpenUrlInChrome(int render_process_host_id,
                      int routing_id,
@@ -264,10 +274,14 @@ void OnIntentPickerClosed(int render_process_host_id,
 
   if (!instance) {
     close_reason = ArcNavigationThrottle::CloseReason::ERROR;
-  } else if (close_reason ==
-                 ArcNavigationThrottle::CloseReason::JUST_ONCE_PRESSED ||
+  } else if (close_reason == ArcNavigationThrottle::CloseReason::
+                                 ARC_APP_PREFERRED_PRESSED ||
              close_reason ==
-                 ArcNavigationThrottle::CloseReason::ALWAYS_PRESSED) {
+                 ArcNavigationThrottle::CloseReason::ARC_APP_PRESSED ||
+             close_reason ==
+                 ArcNavigationThrottle::CloseReason::CHROME_PREFERRED_PRESSED ||
+             close_reason ==
+                 ArcNavigationThrottle::CloseReason::CHROME_PRESSED) {
     if (selected_app_index == handlers.size()) {
       close_reason = ArcNavigationThrottle::CloseReason::ERROR;
     } else {
@@ -278,7 +292,7 @@ void OnIntentPickerClosed(int render_process_host_id,
   }
 
   switch (close_reason) {
-    case ArcNavigationThrottle::CloseReason::ALWAYS_PRESSED: {
+    case ArcNavigationThrottle::CloseReason::ARC_APP_PREFERRED_PRESSED: {
       DCHECK(arc_service_manager);
       if (ARC_GET_INSTANCE_FOR_METHOD(
               arc_service_manager->arc_bridge_service()->intent_helper(),
@@ -286,14 +300,21 @@ void OnIntentPickerClosed(int render_process_host_id,
         instance->AddPreferredPackage(
             handlers[selected_app_index]->package_name);
       }
-      // fall through.
+      FALLTHROUGH;
     }
-    case ArcNavigationThrottle::CloseReason::JUST_ONCE_PRESSED: {
+    case ArcNavigationThrottle::CloseReason::ARC_APP_PRESSED: {
       // Launch the selected app.
       HandleUrl(render_process_host_id, routing_id, url, false, handlers,
                 selected_app_index, nullptr);
       break;
     }
+    case ArcNavigationThrottle::CloseReason::CHROME_PREFERRED_PRESSED:
+    case ArcNavigationThrottle::CloseReason::CHROME_PRESSED: {
+      LOG(ERROR) << "Chrome is not a valid option for external protocol URLs";
+      FALLTHROUGH;
+    }
+    case ArcNavigationThrottle::CloseReason::OBSOLETE_ALWAYS_PRESSED:
+    case ArcNavigationThrottle::CloseReason::OBSOLETE_JUST_ONCE_PRESSED:
     case ArcNavigationThrottle::CloseReason::PREFERRED_ACTIVITY_FOUND:
     case ArcNavigationThrottle::CloseReason::INVALID: {
       NOTREACHED();
@@ -304,7 +325,7 @@ void OnIntentPickerClosed(int render_process_host_id,
                  << "instance=" << instance
                  << ", selected_app_index=" << selected_app_index
                  << ", handlers.size=" << handlers.size();
-      // fall through.
+      FALLTHROUGH;
     }
     case ArcNavigationThrottle::CloseReason::DIALOG_DEACTIVATED: {
       // The user didn't select any ARC activity.
@@ -337,14 +358,15 @@ void OnAppIconsReceived(
                                                        handler->activity_name);
     const auto it = icons->find(activity);
     app_info.emplace_back(
-        AppInfo(it != icons->end() ? it->second.icon20 : gfx::Image(),
+        AppInfo(it != icons->end() ? it->second.icon16 : gfx::Image(),
                 handler->package_name, handler->name));
   }
 
   auto show_bubble_cb = base::Bind(ShowIntentPickerBubble());
   WebContents* web_contents =
       tab_util::GetWebContentsByID(render_process_host_id, routing_id);
-  show_bubble_cb.Run(web_contents, app_info,
+  show_bubble_cb.Run(nullptr /* anchor_view */, web_contents, app_info,
+                     !IsChromeAnAppCandidate(handlers),
                      base::Bind(OnIntentPickerClosed, render_process_host_id,
                                 routing_id, url, base::Passed(&handlers)));
 }
@@ -391,22 +413,16 @@ void OnUrlHandlerList(int render_process_host_id,
     return;  // the |url| has been handled.
   }
 
-  // Otherwise, retrieve icons of the activities. First, swap |handler| elements
-  // to ensure Chrome is visible in the UI by default. Since this function is
-  // for handling external protocols, Chrome is rarely in the list, but if the
-  // |url| is intent: with fallback or geo:, for example, it may be.
-  std::pair<size_t, size_t> indices;
-  if (ArcNavigationThrottle::IsSwapElementsNeeded(handlers, &indices))
-    std::swap(handlers[indices.first], handlers[indices.second]);
-
-  // Then request the icons.
+  // Otherwise, retrieve icons of the activities. Since this function is for
+  // handling external protocols, Chrome is rarely in the list, but if the |url|
+  // is intent: with fallback or geo:, for example, it may be.
   std::vector<ArcIntentHelperBridge::ActivityName> activities;
   for (const auto& handler : handlers) {
     activities.emplace_back(handler->package_name, handler->activity_name);
   }
   intent_helper_bridge->GetActivityIcons(
-      activities, base::Bind(OnAppIconsReceived, render_process_host_id,
-                             routing_id, url, base::Passed(&handlers)));
+      activities, base::BindOnce(OnAppIconsReceived, render_process_host_id,
+                                 routing_id, url, std::move(handlers)));
 }
 
 // Returns true if the |url| is safe to be forwarded to ARC without showing the
@@ -517,6 +533,11 @@ bool IsSafeToRedirectToArcWithoutUserConfirmationForTesting(
     ui::PageTransition last_page_transition) {
   return IsSafeToRedirectToArcWithoutUserConfirmation(
       url, page_transition, last_url, last_page_transition);
+}
+
+bool IsChromeAnAppCandidateForTesting(
+    const std::vector<mojom::IntentHandlerInfoPtr>& handlers) {
+  return IsChromeAnAppCandidate(handlers);
 }
 
 }  // namespace arc

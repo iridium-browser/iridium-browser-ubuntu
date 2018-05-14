@@ -27,9 +27,9 @@ import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.Context
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.SelectionClient;
-import org.chromium.content.browser.SelectionPopupController;
+import org.chromium.content.browser.test.util.TestSelectionPopupController;
+import org.chromium.content_public.browser.SelectionClient;
+import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
 import org.chromium.ui.touch_selection.SelectionEventType;
@@ -38,10 +38,7 @@ import org.chromium.ui.touch_selection.SelectionEventType;
  * Mock touch events with Contextual Search to test behavior of its panel and manager.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ContextualSearchTapEventTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -82,11 +79,10 @@ public class ContextualSearchTapEventTest {
         public ContextualSearchManagerWrapper(ChromeActivity activity) {
             super(activity, null);
             setSelectionController(new MockCSSelectionController(activity, this));
-            ContentViewCore contentView = getSelectionController().getBaseContentView();
             WebContents webContents = WebContentsFactory.createWebContents(false, false);
-            contentView.setSelectionPopupControllerForTesting(new SelectionPopupController(
-                    activity, null, webContents, null, contentView.getRenderCoordinates()));
-            contentView.setSelectionClient(this);
+            SelectionPopupController selectionPopupController =
+                    SelectionPopupController.createForTesting(activity, null, webContents, null);
+            selectionPopupController.setSelectionClient(this.getContextualSearchSelectionClient());
             MockContextualSearchPolicy policy = new MockContextualSearchPolicy();
             setContextualSearchPolicy(policy);
             mTranslateController = new MockedCSTranslateController(activity, policy, null);
@@ -105,10 +101,11 @@ public class ContextualSearchTapEventTest {
                 ContextualSearchContext contextualSearchContext, WebContents baseWebContents) {}
 
         /**
-         * @return A stubbed ContentViewCore for mocking text selection.
+         * @return A stubbed SelectionPopupController for mocking text selection.
          */
-        public StubbedContentViewCore getBaseContentView() {
-            return (StubbedContentViewCore) getSelectionController().getBaseContentView();
+        public StubbedSelectionPopupController getBaseSelectionPopupController() {
+            return (StubbedSelectionPopupController) getSelectionController()
+                    .getSelectionPopupController();
         }
     }
 
@@ -118,17 +115,17 @@ public class ContextualSearchTapEventTest {
      * Selection controller that mocks out anything to do with a ContentViewCore.
      */
     private static class MockCSSelectionController extends ContextualSearchSelectionController {
-        private StubbedContentViewCore mContentViewCore;
+        private StubbedSelectionPopupController mPopupController;
 
         public MockCSSelectionController(ChromeActivity activity,
                 ContextualSearchSelectionHandler handler) {
             super(activity, handler);
-            mContentViewCore = new StubbedContentViewCore(activity);
+            mPopupController = new StubbedSelectionPopupController();
         }
 
         @Override
-        StubbedContentViewCore getBaseContentView() {
-            return mContentViewCore;
+        protected SelectionPopupController getSelectionPopupController() {
+            return mPopupController;
         }
     }
 
@@ -160,14 +157,13 @@ public class ContextualSearchTapEventTest {
     // --------------------------------------------------------------------------------------------
 
     /**
-     * A ContentViewCore that has some methods stubbed out for testing.
+     * A SelectionPopupController that has some methods stubbed out for testing.
      */
-    private static final class StubbedContentViewCore extends ContentViewCore {
+    private static final class StubbedSelectionPopupController
+            extends TestSelectionPopupController {
         private String mCurrentText;
 
-        public StubbedContentViewCore(Context context) {
-            super(context, "");
-        }
+        public StubbedSelectionPopupController() {}
 
         @Override
         public String getSelectedText() {
@@ -185,7 +181,7 @@ public class ContextualSearchTapEventTest {
      * Trigger text selection on the contextual search manager.
      */
     private void mockLongpressText(String text) {
-        mContextualSearchManager.getBaseContentView().setSelectedText(text);
+        mContextualSearchManager.getBaseSelectionPopupController().setSelectedText(text);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
@@ -199,7 +195,7 @@ public class ContextualSearchTapEventTest {
      * Trigger text selection on the contextual search manager.
      */
     private void mockTapText(String text) {
-        mContextualSearchManager.getBaseContentView().setSelectedText(text);
+        mContextualSearchManager.getBaseSelectionPopupController().setSelectedText(text);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
@@ -248,7 +244,7 @@ public class ContextualSearchTapEventTest {
             public void run() {
                 // It only makes sense to send dummy data here because we can't easily control
                 // what's in the native context.
-                mContextualSearchManager.selectWordAroundCaretAck(true, 0, 0);
+                mContextualSearchClient.selectWordAroundCaretAck(true, 0, 0);
             }
         });
     }
@@ -268,17 +264,19 @@ public class ContextualSearchTapEventTest {
                 mPanelManager.setDynamicResourceLoader(new DynamicResourceLoader(0, null));
 
                 mContextualSearchManager = new ContextualSearchManagerWrapper(activity);
-                mPanel = new ContextualSearchPanelWrapper(activity, null, mPanelManager);
+                mPanel = new ContextualSearchPanelWrapper(activity,
+                        activity.getCompositorViewHolder().getLayoutManager(), mPanelManager);
                 mPanel.setManagementDelegate(mContextualSearchManager);
                 mContextualSearchManager.setContextualSearchPanel(mPanel);
 
-                mContextualSearchClient = mContextualSearchManager;
+                mContextualSearchClient =
+                        mContextualSearchManager.getContextualSearchSelectionClient();
             }
         });
     }
 
     /**
-     * Tests that a Tap gesture followed by tapping empty space closes the panel.
+     * Tests that a Long-press gesture followed by tapping empty space closes the panel.
      */
     @Test
     @SmallTest
@@ -352,5 +350,27 @@ public class ContextualSearchTapEventTest {
         generateSelectWordAroundCaretAck();
         Assert.assertEquals(mPanelManager.getRequestPanelShowCount(), 0);
         Assert.assertEquals(mPanelManager.getPanelHideCount(), 0);
+    }
+
+    /**
+     * Tests that a Long-press gesture suppresses the panel when Smart Selection is enabled.
+     */
+    @Test
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    @Restriction(Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    public void testLongpressWithSmartSelectionSuppresses() {
+        Assert.assertEquals(mPanelManager.getRequestPanelShowCount(), 0);
+
+        // Tell the ContextualSearchManager that Smart Selection is enabled.
+        mContextualSearchManager.suppressContextualSearchForSmartSelection(true);
+
+        // Fake a selection event.
+        mockLongpressText("text");
+        // Generate the surrounding-text-available callback.
+        // Surrounding text is gathered for longpress due to icing integration.
+        generateTextSurroundingSelectionAvailable();
+
+        Assert.assertEquals(mPanelManager.getRequestPanelShowCount(), 0);
     }
 }

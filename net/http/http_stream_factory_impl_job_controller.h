@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/cancelable_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/privacy_mode.h"
 #include "net/http/http_stream_factory_impl_job.h"
@@ -34,14 +35,13 @@ class HttpStreamFactoryImpl::JobController
                 JobFactory* job_factory,
                 const HttpRequestInfo& request_info,
                 bool is_preconnect,
+                bool is_websocket,
                 bool enable_ip_based_pooling,
                 bool enable_alternative_services,
                 const SSLConfig& server_ssl_config,
                 const SSLConfig& proxy_ssl_config);
 
   ~JobController() override;
-
-  bool for_websockets() override;
 
   // Used in tests only for verification purpose.
   const Job* main_job() const { return main_job_.get(); }
@@ -142,9 +142,9 @@ class HttpStreamFactoryImpl::JobController
 
   // Invoked to notify the Request and Factory of the readiness of new
   // SPDY session.
-  void OnNewSpdySessionReady(Job* job,
-                             const base::WeakPtr<SpdySession>& spdy_session,
-                             bool direct) override;
+  void OnNewSpdySessionReady(
+      Job* job,
+      const base::WeakPtr<SpdySession>& spdy_session) override;
 
   // Invoked when the |job| finishes pre-connecting sockets.
   void OnPreconnectsComplete(Job* job) override;
@@ -190,10 +190,6 @@ class HttpStreamFactoryImpl::JobController
 
   // Returns true if |this| has a pending alternative job that is not completed.
   bool HasPendingAltJob() const;
-
-  // TODO(xunjieli): Added to investigate crbug.com/711721. Remove when no
-  // longer needed.
-  void LogHistograms() const;
 
   // Returns the estimated memory usage in bytes.
   size_t EstimateMemoryUsage() const;
@@ -277,24 +273,25 @@ class HttpStreamFactoryImpl::JobController
       HttpStreamRequest::Delegate* delegate,
       HttpStreamRequest::StreamType stream_type);
 
-  // Returns a QuicVersion that has been advertised in |advertised_versions|
-  // and is supported.  If more than one QuicVersions are supported, the first
-  // matched in the supported versions will be returned.  If no mutually
-  // supported version is found, QUIC_VERSION_UNSUPPORTED_VERSION will be
-  // returned.
-  QuicVersion SelectQuicVersion(const QuicVersionVector& advertised_versions);
+  // Returns a QuicTransportVersion that has been advertised in
+  // |advertised_versions| and is supported.  If more than one
+  // QuicTransportVersions are supported, the first matched in the supported
+  // versions will be returned.  If no mutually supported version is found,
+  // QUIC_VERSION_UNSUPPORTED_VERSION will be returned.
+  QuicTransportVersion SelectQuicVersion(
+      const QuicTransportVersionVector& advertised_versions);
 
   // Remove session from the SpdySessionRequestMap.
   void RemoveRequestFromSpdySessionRequestMap();
 
   // Returns true if the |request_| can be fetched via an alternative
-  // proxy server, and sets |alternative_proxy_server| to the available
-  // alternative proxy server. |alternative_proxy_server| should not be null,
+  // proxy server, and sets |alternative_proxy_info| to the alternative proxy
+  // server configuration. |alternative_proxy_info| should not be null,
   // and is owned by the caller.
   bool ShouldCreateAlternativeProxyServerJob(
       const ProxyInfo& proxy_info_,
       const GURL& url,
-      ProxyServer* alternative_proxy_server) const;
+      ProxyInfo* alternative_proxy_info) const;
 
   // Records histogram metrics for the usage of alternative protocol. Must be
   // called when |job| has succeeded and the other job will be orphaned.
@@ -311,6 +308,9 @@ class HttpStreamFactoryImpl::JobController
   // given error code is simply returned.
   int ReconsiderProxyAfterError(Job* job, int error);
 
+  // Returns true if QUIC is whitelisted for |host|.
+  bool IsQuicWhitelistedForHost(const std::string& host);
+
   HttpStreamFactoryImpl* factory_;
   HttpNetworkSession* session_;
   JobFactory* job_factory_;
@@ -325,6 +325,9 @@ class HttpStreamFactoryImpl::JobController
 
   // True if this JobController is used to preconnect streams.
   const bool is_preconnect_;
+
+  // True if request is for Websocket.
+  const bool is_websocket_;
 
   // Enable pooling to a SpdySession with matching IP and certificate even if
   // the SpdySessionKey is different.
@@ -352,6 +355,8 @@ class HttpStreamFactoryImpl::JobController
   // job must not create a connection until it is resumed.
   bool main_job_is_blocked_;
 
+  // Handle for cancelling any posted delayed ResumeMainJob() task.
+  base::CancelableOnceClosure resume_main_job_callback_;
   // True if the main job was blocked and has been resumed in ResumeMainJob().
   bool main_job_is_resumed_;
 
@@ -366,7 +371,7 @@ class HttpStreamFactoryImpl::JobController
   bool can_start_alternative_proxy_job_;
 
   State next_state_;
-  ProxyService::PacRequest* pac_request_;
+  ProxyResolutionService::Request* proxy_resolve_request_;
   CompletionCallback io_callback_;
   const HttpRequestInfo request_info_;
   ProxyInfo proxy_info_;

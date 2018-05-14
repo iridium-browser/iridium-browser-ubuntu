@@ -29,12 +29,19 @@ Polymer({
     /** @type {!AndroidAppsInfo|undefined} */
     androidAppsInfo: Object,
 
+    // <if expr="_google_chrome and is_win">
     showChromeCleanup: {
       type: Boolean,
       value: function() {
-        return loadTimeData.valueExists('chromeCleanupEnabled') &&
-            loadTimeData.getBoolean('chromeCleanupEnabled');
+        return loadTimeData.getBoolean('chromeCleanupEnabled') &&
+            !loadTimeData.getBoolean('userInitiatedCleanupsEnabled');
       },
+    },
+    // </if>
+
+    showChangePassword: {
+      type: Boolean,
+      value: false,
     },
 
     /**
@@ -91,6 +98,10 @@ Polymer({
     currentRoute_: Object,
   },
 
+  hostAttributes: {
+    role: 'main',
+  },
+
   listeners: {
     'subpage-expand': 'onSubpageExpanded_',
   },
@@ -99,12 +110,23 @@ Polymer({
   attached: function() {
     this.currentRoute_ = settings.getCurrentRoute();
 
-    this.addEventListener('chrome-cleanup-dismissed', function(e) {
+    // <if expr="_google_chrome and is_win">
+    this.addEventListener('chrome-cleanup-dismissed', () => {
       this.showChromeCleanup = false;
-    }.bind(this));
+    });
+    // </if>
+
+    this.addWebUIListener('change-password-visibility', visibility => {
+      this.showChangePassword = visibility;
+    });
+
+    if (loadTimeData.getBoolean('passwordProtectionAvailable')) {
+      settings.ChangePasswordBrowserProxyImpl.getInstance()
+          .initializeChangePasswordHandler();
+    }
 
     if (settings.AndroidAppsBrowserProxyImpl) {
-      cr.addWebUIListener(
+      this.addWebUIListener(
           'android-apps-info-update', this.androidAppsInfoUpdate_.bind(this));
       settings.AndroidAppsBrowserProxyImpl.getInstance()
           .requestAndroidAppsInfo();
@@ -151,7 +173,7 @@ Polymer({
    *     searching finished.
    */
   searchContents: function(query) {
-    var whenSearchDone = [
+    const whenSearchDone = [
       settings.getSearchManager().search(query, assert(this.$$('#basicPage'))),
     ];
 
@@ -207,7 +229,7 @@ Polymer({
    * @private
    */
   shouldShowAndroidApps_: function() {
-    var visibility = /** @type {boolean|undefined} */ (
+    const visibility = /** @type {boolean|undefined} */ (
         this.get('pageVisibility.androidApps'));
     if (!this.showAndroidApps || !this.showPage_(visibility)) {
       return false;
@@ -228,7 +250,7 @@ Polymer({
    * @private
    */
   shouldShowMultidevice_: function() {
-    var visibility = /** @type {boolean|undefined} */ (
+    const visibility = /** @type {boolean|undefined} */ (
         this.get('pageVisibility.multidevice'));
     return this.showMultidevice && this.showPage_(visibility);
   },
@@ -247,9 +269,9 @@ Polymer({
    */
   advancedToggleExpandedChanged_: function() {
     if (this.advancedToggleExpanded) {
-      this.async(function() {
+      this.async(() => {
         this.$$('#advancedPageTemplate').get();
-      }.bind(this));
+      });
     }
   },
 

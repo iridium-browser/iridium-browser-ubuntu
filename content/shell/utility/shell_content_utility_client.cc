@@ -8,22 +8,21 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ptr_util.h"
 #include "base/process/process.h"
 #include "content/public/child/child_thread.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/service_manager_connection.h"
 #include "content/public/common/simple_connection_filter.h"
-#include "content/public/test/test_host_resolver.h"
 #include "content/public/test/test_service.h"
 #include "content/public/test/test_service.mojom.h"
 #include "content/shell/common/power_monitor_test_impl.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "mojo/public/cpp/system/buffer.h"
-#include "net/base/net_errors.h"
-#include "net/base/network_interfaces.h"
-#include "net/dns/mock_host_resolver.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
+#include "services/test/echo/echo_service.h"
 
 namespace content {
 
@@ -42,7 +41,7 @@ class TestServiceImpl : public mojom::TestService {
   }
 
   void DoTerminateProcess(DoTerminateProcessCallback callback) override {
-    base::Process::Current().Terminate(0, false);
+    base::Process::TerminateCurrentProcessImmediately(0);
   }
 
   void CreateFolder(CreateFolderCallback callback) override {
@@ -79,73 +78,49 @@ std::unique_ptr<service_manager::Service> CreateTestService() {
   return std::unique_ptr<service_manager::Service>(new TestService);
 }
 
-class NetworkServiceTestImpl : public mojom::NetworkServiceTest {
- public:
-  static void Create(mojom::NetworkServiceTestRequest request) {
-    // Leak this.
-    new NetworkServiceTestImpl(std::move(request));
-  }
-  explicit NetworkServiceTestImpl(mojom::NetworkServiceTestRequest request)
-      : binding_(this, std::move(request)) {}
-  ~NetworkServiceTestImpl() override = default;
-
-  // mojom::NetworkServiceTest implementation.
-  void AddRules(std::vector<mojom::RulePtr> rules,
-                AddRulesCallback callback) override {
-    for (const auto& rule : rules) {
-      test_host_resolver_.host_resolver()->AddRule(rule->host_pattern,
-                                                   rule->replacement);
-    }
-    std::move(callback).Run();
-  }
-
- private:
-  mojo::Binding<mojom::NetworkServiceTest> binding_;
-
-  TestHostResolver test_host_resolver_;
-
-  DISALLOW_COPY_AND_ASSIGN(NetworkServiceTestImpl);
-};
-
 }  // namespace
 
-ShellContentUtilityClient::ShellContentUtilityClient() {}
+ShellContentUtilityClient::ShellContentUtilityClient() {
+  if (base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kProcessType) == switches::kUtilityProcess)
+    network_service_test_helper_ = std::make_unique<NetworkServiceTestHelper>();
+}
 
 ShellContentUtilityClient::~ShellContentUtilityClient() {
 }
 
 void ShellContentUtilityClient::UtilityThreadStarted() {
-  auto registry = base::MakeUnique<service_manager::BinderRegistry>();
-  registry->AddInterface(base::Bind(&TestServiceImpl::Create),
+  auto registry = std::make_unique<service_manager::BinderRegistry>();
+  registry->AddInterface(base::BindRepeating(&TestServiceImpl::Create),
                          base::ThreadTaskRunnerHandle::Get());
   registry->AddInterface<mojom::PowerMonitorTest>(
-      base::Bind(&PowerMonitorTestImpl::MakeStrongBinding,
-                 base::Passed(base::MakeUnique<PowerMonitorTestImpl>())),
+      base::BindRepeating(
+          &PowerMonitorTestImpl::MakeStrongBinding,
+          base::Passed(std::make_unique<PowerMonitorTestImpl>())),
       base::ThreadTaskRunnerHandle::Get());
   content::ChildThread::Get()
       ->GetServiceManagerConnection()
       ->AddConnectionFilter(
-          base::MakeUnique<SimpleConnectionFilter>(std::move(registry)));
+          std::make_unique<SimpleConnectionFilter>(std::move(registry)));
 }
 
 void ShellContentUtilityClient::RegisterServices(StaticServiceMap* services) {
-  service_manager::EmbeddedServiceInfo info;
-  info.factory = base::Bind(&CreateTestService);
-  services->insert(std::make_pair(kTestServiceUrl, info));
+  {
+    service_manager::EmbeddedServiceInfo info;
+    info.factory = base::BindRepeating(&CreateTestService);
+    services->insert(std::make_pair(kTestServiceUrl, info));
+  }
+
+  {
+    service_manager::EmbeddedServiceInfo info;
+    info.factory = base::BindRepeating(&echo::CreateEchoService);
+    services->insert(std::make_pair(echo::mojom::kServiceName, info));
+  }
 }
 
 void ShellContentUtilityClient::RegisterNetworkBinders(
     service_manager::BinderRegistry* registry) {
-  registry->AddInterface<mojom::NetworkServiceTest>(
-      base::Bind(&ShellContentUtilityClient::BindNetworkServiceTestRequest,
-                 base::Unretained(this)));
-}
-
-void ShellContentUtilityClient::BindNetworkServiceTestRequest(
-    mojom::NetworkServiceTestRequest request) {
-  DCHECK(!network_service_test_);
-  network_service_test_ =
-      base::MakeUnique<NetworkServiceTestImpl>(std::move(request));
+  network_service_test_helper_->RegisterNetworkBinders(registry);
 }
 
 }  // namespace content

@@ -20,21 +20,18 @@ NavigatorPlugins& NavigatorPlugins::From(Navigator& navigator) {
   NavigatorPlugins* supplement = ToNavigatorPlugins(navigator);
   if (!supplement) {
     supplement = new NavigatorPlugins(navigator);
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
 }
 
 // static
 NavigatorPlugins* NavigatorPlugins::ToNavigatorPlugins(Navigator& navigator) {
-  return static_cast<NavigatorPlugins*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  return Supplement<Navigator>::From<NavigatorPlugins>(navigator);
 }
 
 // static
-const char* NavigatorPlugins::SupplementName() {
-  return "NavigatorPlugins";
-}
+const char NavigatorPlugins::kSupplementName[] = "NavigatorPlugins";
 
 // static
 DOMPluginArray* NavigatorPlugins::plugins(Navigator& navigator) {
@@ -63,7 +60,7 @@ DOMMimeTypeArray* NavigatorPlugins::mimeTypes(LocalFrame* frame) const {
   return mime_types_.Get();
 }
 
-DEFINE_TRACE(NavigatorPlugins) {
+void NavigatorPlugins::Trace(blink::Visitor* visitor) {
   visitor->Trace(plugins_);
   visitor->Trace(mime_types_);
   Supplement<Navigator>::Trace(visitor);

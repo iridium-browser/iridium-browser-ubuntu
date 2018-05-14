@@ -17,6 +17,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
+#include "chrome/browser/ui/ash/launcher/arc_app_shelf_id.h"
 #include "chrome/browser/ui/ash/launcher/arc_app_window_launcher_controller.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
@@ -24,6 +25,7 @@
 #include "chrome/browser/ui/extensions/extension_enable_flow.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
+#include "components/arc/arc_util.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
@@ -110,10 +112,10 @@ base::string16 LauncherControllerHelper::GetAppTitle(
     return base::string16();
 
   // Get the title if the app is an ARC app.
-  ArcAppListPrefs* arc_prefs = ArcAppListPrefs::Get(profile);
-  if (arc_prefs && arc_prefs->IsRegistered(app_id)) {
+  if (arc::IsArcItem(profile, app_id)) {
     std::unique_ptr<ArcAppListPrefs::AppInfo> app_info =
-        arc_prefs->GetApp(app_id);
+        ArcAppListPrefs::Get(profile)->GetApp(
+            arc::ArcAppShelfId::FromString(app_id).app_id());
     DCHECK(app_info.get());
     if (app_info)
       return base::UTF8ToUTF16(app_info->name);
@@ -149,10 +151,11 @@ bool LauncherControllerHelper::IsValidIDForCurrentUser(
   const ArcAppListPrefs* arc_prefs = GetArcAppListPrefs();
   if (arc_prefs && arc_prefs->IsRegistered(id))
     return true;
+
   if (!GetExtensionByID(profile_, id))
     return false;
   if (id == arc::kPlayStoreAppId) {
-    if (!arc::IsArcAllowedForProfile(profile()))
+    if (!arc::IsArcAllowedForProfile(profile()) || !arc::IsPlayStoreAvailable())
       return false;
     const arc::ArcSessionManager* arc_session_manager =
         arc::ArcSessionManager::Get();
@@ -174,7 +177,7 @@ void LauncherControllerHelper::LaunchApp(const ash::ShelfID& id,
   const std::string& app_id = id.app_id;
   const ArcAppListPrefs* arc_prefs = GetArcAppListPrefs();
   if (arc_prefs && arc_prefs->IsRegistered(app_id)) {
-    arc::LaunchApp(profile_, app_id, event_flags);
+    arc::LaunchApp(profile_, app_id, event_flags, display_id);
     return;
   }
 

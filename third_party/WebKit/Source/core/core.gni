@@ -30,10 +30,8 @@ if (is_win && is_official_build) {
   core_config_add += [ "//build/config/compiler:optimize_max" ]
 }
 
-if (remove_webcore_debug_symbols) {
-  core_config_remove += [ "//build/config/compiler:default_symbols" ]
-  core_config_add += remove_webcore_symbols_config
-}
+core_config_remove += [ "//build/config/compiler:default_symbols" ]
+core_config_add += blink_symbols_config
 
 # Use this target type to link core targets.
 if (is_component_build) {
@@ -52,7 +50,7 @@ if (is_component_build) {
 # "core". This will either be a source_set (component build), a static library
 # (split_count undefined) or a split static library (split_count defined).
 #
-# Special values. All unlisted values are forwarded to the underlying library.
+# Special values (all unlisted values are forwarded to the underlying library):
 #
 #   configs
 #      Normal meaning. The set_defaults call below will make the default value
@@ -69,7 +67,7 @@ if (is_component_build) {
 #
 #   deps
 #      Normal meaning but "core:prerequisites" target is always added. Callers
-#      shouldn'y list prerequisites as a dependency.
+#      shouldn't list prerequisites as a dependency.
 #
 #   visibility
 #      Normal meaning if defined. If undefined, defaults to everything in core.

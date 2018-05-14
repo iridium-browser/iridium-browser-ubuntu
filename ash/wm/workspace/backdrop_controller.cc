@@ -4,7 +4,10 @@
 
 #include "ash/wm/workspace/backdrop_controller.h"
 
-#include "ash/accessibility_delegate.h"
+#include <memory>
+
+#include "ash/accessibility/accessibility_controller.h"
+#include "ash/accessibility/accessibility_delegate.h"
 #include "ash/public/cpp/app_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
@@ -12,7 +15,6 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/backdrop_delegate.h"
 #include "base/auto_reset.h"
-#include "base/memory/ptr_util.h"
 #include "chromeos/audio/chromeos_sounds.h"
 #include "ui/app_list/app_list_features.h"
 #include "ui/aura/client/aura_constants.h"
@@ -46,7 +48,7 @@ class BackdropEventHandler : public ui::EventHandler {
         case ui::ET_GESTURE_BEGIN:
         case ui::ET_SCROLL:
         case ui::ET_SCROLL_FLING_START:
-          Shell::Get()->accessibility_delegate()->PlayEarcon(
+          Shell::Get()->accessibility_controller()->PlayEarcon(
               chromeos::SOUND_VOLUME_ADJUST);
           break;
         default:
@@ -95,7 +97,7 @@ void BackdropController::OnWindowStackingChanged(aura::Window* window) {
 
 void BackdropController::OnPostWindowStateTypeChange(
     wm::WindowState* window_state,
-    wm::WindowStateType old_type) {
+    mojom::WindowStateType old_type) {
   UpdateBackdrop();
 }
 
@@ -126,8 +128,7 @@ void BackdropController::UpdateBackdrop() {
   if (window->GetRootWindow() != backdrop_window_->GetRootWindow())
     return;
 
-  if (!backdrop_->IsVisible())
-    Show();
+  Show();
 
   // Since the backdrop needs to be immediately behind the window and the
   // stacking functions only guarantee a "it's above or below", we need
@@ -144,22 +145,10 @@ void BackdropController::OnOverviewModeEnded() {
   RemoveForceHidden();
 }
 
-void BackdropController::OnSplitViewModeStarting() {
-  AddForceHidden();
-}
-
-void BackdropController::OnSplitViewModeEnded() {
-  RemoveForceHidden();
-}
-
 void BackdropController::OnAppListVisibilityChanged(bool shown,
                                                     aura::Window* root_window) {
   // Ignore the notification if it is not for this display.
   if (container_->GetRootWindow() != root_window)
-    return;
-
-  // Hide or update backdrop only for fullscreen app list.
-  if (!app_list::features::IsFullscreenAppListEnabled())
     return;
 
   if (shown)
@@ -168,8 +157,26 @@ void BackdropController::OnAppListVisibilityChanged(bool shown,
     RemoveForceHidden();
 }
 
-void BackdropController::OnAccessibilityModeChanged(
+void BackdropController::OnSplitViewModeStarting() {
+  Shell::Get()->split_view_controller()->AddObserver(this);
+}
+
+void BackdropController::OnSplitViewModeEnded() {
+  Shell::Get()->split_view_controller()->RemoveObserver(this);
+}
+
+void BackdropController::OnAccessibilityStatusChanged(
     AccessibilityNotificationVisibility notify) {
+  UpdateBackdrop();
+}
+
+void BackdropController::OnSplitViewStateChanged(
+    SplitViewController::State previous_state,
+    SplitViewController::State state) {
+  UpdateBackdrop();
+}
+
+void BackdropController::OnSplitViewDividerPositionChanged() {
   UpdateBackdrop();
 }
 
@@ -201,10 +208,10 @@ void BackdropController::UpdateAccessibilityMode() {
     return;
 
   bool enabled =
-      Shell::Get()->accessibility_delegate()->IsSpokenFeedbackEnabled();
+      Shell::Get()->accessibility_controller()->IsSpokenFeedbackEnabled();
   if (enabled) {
     if (!backdrop_event_handler_) {
-      backdrop_event_handler_ = base::MakeUnique<BackdropEventHandler>();
+      backdrop_event_handler_ = std::make_unique<BackdropEventHandler>();
       original_event_handler_ =
           backdrop_window_->SetTargetHandler(backdrop_event_handler_.get());
     }
@@ -215,16 +222,6 @@ void BackdropController::UpdateAccessibilityMode() {
 }
 
 aura::Window* BackdropController::GetTopmostWindowWithBackdrop() {
-  // ARC app should always have a backdrop when spoken feedback is enabled.
-  if (Shell::Get()->accessibility_delegate()->IsSpokenFeedbackEnabled()) {
-    aura::Window* active_window = wm::GetActiveWindow();
-    if (active_window && active_window->parent() == container_ &&
-        active_window->GetProperty(aura::client::kAppType) ==
-            static_cast<int>(AppType::ARC_APP)) {
-      return active_window;
-    }
-  }
-
   const aura::Window::Windows windows = container_->children();
   for (auto window_iter = windows.rbegin(); window_iter != windows.rend();
        ++window_iter) {
@@ -243,12 +240,26 @@ bool BackdropController::WindowShouldHaveBackdrop(aura::Window* window) {
       window->GetProperty(aura::client::kHasBackdrop)) {
     return true;
   }
+
+  // If |window| is the current active window and is an ARC app window, |window|
+  // should have a backdrop when spoken feedback is enabled.
+  if (window->GetProperty(aura::client::kAppType) ==
+          static_cast<int>(AppType::ARC_APP) &&
+      wm::IsActiveWindow(window) &&
+      Shell::Get()->accessibility_controller()->IsSpokenFeedbackEnabled()) {
+    return true;
+  }
+
   return delegate_ ? delegate_->HasBackdrop(window) : false;
 }
 
 void BackdropController::Show() {
+  // Makes sure that the backdrop has the correct bounds if it should not be
+  // fullscreen size.
+  backdrop_->SetFullscreen(BackdropShouldFullscreen());
+  if (!BackdropShouldFullscreen())
+    backdrop_->SetBounds(GetBackdropBounds());
   backdrop_->Show();
-  backdrop_->SetFullscreen(true);
 }
 
 void BackdropController::Hide() {
@@ -277,6 +288,38 @@ void BackdropController::RemoveForceHidden() {
     Hide();
   else
     UpdateBackdrop();
+}
+
+bool BackdropController::BackdropShouldFullscreen() {
+  aura::Window* window = GetTopmostWindowWithBackdrop();
+  SplitViewController* split_view_controller =
+      Shell::Get()->split_view_controller();
+  SplitViewController::State state = split_view_controller->state();
+  if ((state == SplitViewController::LEFT_SNAPPED &&
+       window == split_view_controller->left_window()) ||
+      (state == SplitViewController::RIGHT_SNAPPED &&
+       window == split_view_controller->right_window())) {
+    return false;
+  }
+
+  return true;
+}
+
+gfx::Rect BackdropController::GetBackdropBounds() {
+  DCHECK(!BackdropShouldFullscreen());
+
+  SplitViewController* split_view_controller =
+      Shell::Get()->split_view_controller();
+  SplitViewController::State state = split_view_controller->state();
+  DCHECK(state == SplitViewController::LEFT_SNAPPED ||
+         state == SplitViewController::RIGHT_SNAPPED);
+  aura::Window* snapped_window =
+      split_view_controller->GetDefaultSnappedWindow();
+  SplitViewController::SnapPosition snap_position =
+      (state == SplitViewController::LEFT_SNAPPED) ? SplitViewController::LEFT
+                                                   : SplitViewController::RIGHT;
+  return split_view_controller->GetSnappedWindowBoundsInScreenUnadjusted(
+      snapped_window, snap_position);
 }
 
 }  // namespace ash

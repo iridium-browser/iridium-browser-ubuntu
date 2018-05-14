@@ -10,6 +10,7 @@
 #include <memory>
 
 struct wl_buffer;
+struct wl_callback;
 struct wl_compositor;
 struct wl_keyboard;
 struct wl_output;
@@ -19,8 +20,12 @@ struct wl_seat;
 struct wl_shm;
 struct wl_shm_pool;
 struct wl_surface;
+struct wl_touch;
 struct xdg_shell;
 struct xdg_surface;
+struct zxdg_shell_v6;
+struct zxdg_surface_v6;
+struct zxdg_toplevel_v6;
 
 namespace wl {
 
@@ -31,6 +36,12 @@ template <>
 struct ObjectTraits<wl_buffer> {
   static const wl_interface* interface;
   static void (*deleter)(wl_buffer*);
+};
+
+template <>
+struct ObjectTraits<wl_callback> {
+  static const wl_interface* interface;
+  static void (*deleter)(wl_callback*);
 };
 
 template <>
@@ -94,6 +105,12 @@ struct ObjectTraits<wl_surface> {
 };
 
 template <>
+struct ObjectTraits<wl_touch> {
+  static const wl_interface* interface;
+  static void (*deleter)(wl_touch*);
+};
+
+template <>
 struct ObjectTraits<xdg_shell> {
   static const wl_interface* interface;
   static void (*deleter)(xdg_shell*);
@@ -103,6 +120,24 @@ template <>
 struct ObjectTraits<xdg_surface> {
   static const wl_interface* interface;
   static void (*deleter)(xdg_surface*);
+};
+
+template <>
+struct ObjectTraits<zxdg_shell_v6> {
+  static const wl_interface* interface;
+  static void (*deleter)(zxdg_shell_v6*);
+};
+
+template <>
+struct ObjectTraits<zxdg_surface_v6> {
+  static const wl_interface* interface;
+  static void (*deleter)(zxdg_surface_v6*);
+};
+
+template <>
+struct ObjectTraits<zxdg_toplevel_v6> {
+  static const wl_interface* interface;
+  static void (*deleter)(zxdg_toplevel_v6*);
 };
 
 struct Deleter {

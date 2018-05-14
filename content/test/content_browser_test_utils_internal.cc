@@ -8,10 +8,11 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
+#include "base/containers/stack.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -21,11 +22,13 @@
 #include "content/browser/frame_host/render_frame_host_delegate.h"
 #include "content/browser/frame_host/render_frame_proxy_host.h"
 #include "content/browser/renderer_host/delegated_frame_host.h"
+#include "content/common/frame_messages.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/resource_throttle.h"
 #include "content/public/common/file_chooser_file_info.h"
+#include "content/public/common/use_zoom_for_dsf_policy.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_frame_navigation_observer.h"
@@ -44,11 +47,11 @@ void NavigateFrameToURL(FrameTreeNode* node, const GURL& url) {
   observer.Wait();
 }
 
-void SetShouldProceedOnBeforeUnload(Shell* shell, bool proceed) {
+void SetShouldProceedOnBeforeUnload(Shell* shell, bool proceed, bool success) {
   ShellJavaScriptDialogManager* manager =
       static_cast<ShellJavaScriptDialogManager*>(
           shell->GetJavaScriptDialogManager(shell->web_contents()));
-  manager->set_should_proceed_on_beforeunload(proceed);
+  manager->set_should_proceed_on_beforeunload(proceed, success);
 }
 
 RenderFrameHost* ConvertToRenderFrameHost(FrameTreeNode* frame_tree_node) {
@@ -68,7 +71,7 @@ std::string FrameTreeVisualizer::DepictFrameTree(FrameTreeNode* root) {
   // Traversal 1: Assign names to current frames. This ensures that the first
   // call to the pretty-printer will result in a naming of the site instances
   // that feels natural and stable.
-  std::stack<FrameTreeNode*> to_explore;
+  base::stack<FrameTreeNode*> to_explore;
   for (to_explore.push(root); !to_explore.empty();) {
     FrameTreeNode* node = to_explore.top();
     to_explore.pop();
@@ -90,10 +93,7 @@ std::string FrameTreeVisualizer::DepictFrameTree(FrameTreeNode* root) {
       to_explore.push(node->child_at(i));
     }
 
-    RenderFrameHost* pending = node->render_manager()->pending_frame_host();
     RenderFrameHost* spec = node->render_manager()->speculative_frame_host();
-    if (pending)
-      legend[GetName(pending->GetSiteInstance())] = pending->GetSiteInstance();
     if (spec)
       legend[GetName(spec->GetSiteInstance())] = spec->GetSiteInstance();
   }
@@ -168,14 +168,9 @@ std::string FrameTreeVisualizer::DepictFrameTree(FrameTreeNode* root) {
     // RenderFrameHost, and show any exceptional state of the node, like a
     // pending or speculative RenderFrameHost.
     RenderFrameHost* current = node->render_manager()->current_frame_host();
-    RenderFrameHost* pending = node->render_manager()->pending_frame_host();
     RenderFrameHost* spec = node->render_manager()->speculative_frame_host();
     base::StringAppendF(&line, "Site %s",
                         GetName(current->GetSiteInstance()).c_str());
-    if (pending) {
-      base::StringAppendF(&line, " (%s pending)",
-                          GetName(pending->GetSiteInstance()).c_str());
-    }
     if (spec) {
       base::StringAppendF(&line, " (%s speculative)",
                           GetName(spec->GetSiteInstance()).c_str());
@@ -295,7 +290,7 @@ void NavigationStallDelegate::RequestBeginning(
     std::vector<std::unique_ptr<content::ResourceThrottle>>* throttles) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   if (request->url() == url_)
-    throttles->push_back(base::MakeUnique<HttpRequestStallThrottle>());
+    throttles->push_back(std::make_unique<HttpRequestStallThrottle>());
 }
 
 FileChooserDelegate::FileChooserDelegate(const base::FilePath& file)
@@ -350,6 +345,126 @@ void UrlCommitObserver::DidFinishNavigation(
       navigation_handle->GetFrameTreeNodeId() == frame_tree_node_id_) {
     run_loop_.Quit();
   }
+}
+
+UpdateResizeParamsMessageFilter::UpdateResizeParamsMessageFilter()
+    : content::BrowserMessageFilter(FrameMsgStart),
+      screen_space_rect_run_loop_(std::make_unique<base::RunLoop>()),
+      screen_space_rect_received_(false) {}
+
+void UpdateResizeParamsMessageFilter::WaitForRect() {
+  screen_space_rect_run_loop_->Run();
+}
+
+void UpdateResizeParamsMessageFilter::ResetRectRunLoop() {
+  last_rect_ = gfx::Rect();
+  screen_space_rect_run_loop_.reset(new base::RunLoop);
+  screen_space_rect_received_ = false;
+}
+
+viz::FrameSinkId UpdateResizeParamsMessageFilter::GetOrWaitForId() {
+  // No-opt if already quit.
+  frame_sink_id_run_loop_.Run();
+  return frame_sink_id_;
+}
+
+UpdateResizeParamsMessageFilter::~UpdateResizeParamsMessageFilter() {}
+
+void UpdateResizeParamsMessageFilter::OnUpdateResizeParams(
+    const gfx::Rect& screen_space_rect,
+    const gfx::Size& local_frame_size,
+    const ScreenInfo& screen_info,
+    uint64_t sequence_number,
+    const viz::SurfaceId& surface_id) {
+  gfx::Rect screen_space_rect_in_dip = screen_space_rect;
+  if (IsUseZoomForDSFEnabled()) {
+    screen_space_rect_in_dip = gfx::Rect(
+        gfx::ScaleToFlooredPoint(screen_space_rect.origin(),
+                                 1.f / screen_info.device_scale_factor),
+        gfx::ScaleToCeiledSize(screen_space_rect.size(),
+                               1.f / screen_info.device_scale_factor));
+  }
+  // Track each rect updates.
+  content::BrowserThread::PostTask(
+      content::BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&UpdateResizeParamsMessageFilter::OnUpdatedFrameRectOnUI,
+                     this, screen_space_rect_in_dip));
+
+  // Record the received value. We cannot check the current state of the child
+  // frame, as it can only be processed on the UI thread, and we cannot block
+  // here.
+  frame_sink_id_ = surface_id.frame_sink_id();
+
+  // There can be several updates before a valid viz::FrameSinkId is ready. Do
+  // not quit |run_loop_| until after we receive a valid one.
+  if (!frame_sink_id_.is_valid())
+    return;
+
+  // We can't nest on the IO thread. So tests will wait on the UI thread, so
+  // post there to exit the nesting.
+  content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI)
+      ->PostTask(FROM_HERE,
+                 base::BindOnce(
+                     &UpdateResizeParamsMessageFilter::OnUpdatedFrameSinkIdOnUI,
+                     this));
+}
+
+void UpdateResizeParamsMessageFilter::OnUpdatedFrameRectOnUI(
+    const gfx::Rect& rect) {
+  last_rect_ = rect;
+  if (!screen_space_rect_received_) {
+    screen_space_rect_received_ = true;
+    // Tests looking at the rect currently expect all received input to finish
+    // processing before the test continutes.
+    screen_space_rect_run_loop_->QuitWhenIdle();
+  }
+}
+
+void UpdateResizeParamsMessageFilter::OnUpdatedFrameSinkIdOnUI() {
+  frame_sink_id_run_loop_.Quit();
+}
+
+bool UpdateResizeParamsMessageFilter::OnMessageReceived(
+    const IPC::Message& message) {
+  IPC_BEGIN_MESSAGE_MAP(UpdateResizeParamsMessageFilter, message)
+    IPC_MESSAGE_HANDLER(FrameHostMsg_UpdateResizeParams, OnUpdateResizeParams)
+  IPC_END_MESSAGE_MAP()
+
+  // We do not consume the message, so that we can verify the effects of it
+  // being processed.
+  return false;
+}
+
+RenderProcessHostKillWaiter::RenderProcessHostKillWaiter(
+    RenderProcessHost* render_process_host)
+    : exit_watcher_(render_process_host,
+                    RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT) {}
+
+base::Optional<bad_message::BadMessageReason>
+RenderProcessHostKillWaiter::Wait() {
+  base::Optional<bad_message::BadMessageReason> result;
+
+  // Wait for the renderer kill.
+  exit_watcher_.Wait();
+  if (exit_watcher_.did_exit_normally())
+    return result;
+
+  // Find the logged Stability.BadMessageTerminated.Content data (if present).
+  std::vector<base::Bucket> uma_samples =
+      histogram_tester_.GetAllSamples("Stability.BadMessageTerminated.Content");
+  // No UMA will be present if the kill was not trigerred by the //content layer
+  // (e.g. if it was trigerred by bad_message::ReceivedBadMessage from //chrome
+  // layer or from somewhere in the //components layer).
+  if (uma_samples.empty())
+    return result;
+  const base::Bucket& bucket = uma_samples.back();
+  // Assumming that user of RenderProcessHostKillWatcher makes sure that only
+  // one kill can happen while using the class.
+  DCHECK_EQ(1u, uma_samples.size())
+      << "Multiple renderer kills are unsupported";
+
+  // Translate contents of the bucket into bad_message::BadMessageReason.
+  return static_cast<bad_message::BadMessageReason>(bucket.min);
 }
 
 }  // namespace content

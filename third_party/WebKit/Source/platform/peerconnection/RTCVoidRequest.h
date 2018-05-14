@@ -38,15 +38,15 @@ namespace blink {
 
 class RTCVoidRequest : public GarbageCollectedFinalized<RTCVoidRequest> {
  public:
-  virtual ~RTCVoidRequest() {}
+  virtual ~RTCVoidRequest() = default;
 
   virtual void RequestSucceeded() = 0;
   virtual void RequestFailed(const String& error) = 0;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
 
  protected:
-  RTCVoidRequest() {}
+  RTCVoidRequest() = default;
 };
 
 }  // namespace blink

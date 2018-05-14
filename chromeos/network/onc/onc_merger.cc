@@ -57,7 +57,7 @@ void MarkRecommendedFieldnames(const base::DictionaryValue& policy,
        it != recommended_value->end(); ++it) {
     std::string entry;
     if (it->GetAsString(&entry))
-      result->SetBooleanWithoutPathExpansion(entry, true);
+      result->SetKey(entry, base::Value(true));
   }
 }
 
@@ -88,11 +88,9 @@ class MergeListOfDictionaries {
  public:
   typedef std::vector<const base::DictionaryValue*> DictPtrs;
 
-  MergeListOfDictionaries() {
-  }
+  MergeListOfDictionaries() = default;
 
-  virtual ~MergeListOfDictionaries() {
-  }
+  virtual ~MergeListOfDictionaries() = default;
 
   // For each path in any of the dictionaries |dicts|, the function
   // MergeListOfValues is called with the list of values that are located at
@@ -114,7 +112,7 @@ class MergeListOfDictionaries {
           continue;
 
         std::unique_ptr<base::Value> merged_value;
-        if (field.value().IsType(base::Value::Type::DICTIONARY)) {
+        if (field.value().is_dict()) {
           DictPtrs nested_dicts;
           for (DictPtrs::const_iterator it_inner = dicts.begin();
                it_inner != dicts.end(); ++it_inner) {
@@ -176,7 +174,7 @@ class MergeSettingsAndPolicies : public MergeListOfDictionaries {
     bool device_editable;
   };
 
-  MergeSettingsAndPolicies() {}
+  MergeSettingsAndPolicies() = default;
 
   // Merge the provided dictionaries. For each path in any of the dictionaries,
   // MergeValues is called. Its results are collected in a new dictionary which
@@ -273,7 +271,7 @@ class MergeSettingsAndPolicies : public MergeListOfDictionaries {
 // MergeSettingsAndPoliciesToEffective.
 class MergeToEffective : public MergeSettingsAndPolicies {
  public:
-  MergeToEffective() {}
+  MergeToEffective() = default;
 
  protected:
   // Merges |values| to the effective value (Mandatory policy overwrites user
@@ -352,7 +350,7 @@ bool AllPresentValuesEqual(const MergeSettingsAndPolicies::ValueParams& values,
 // dictionaries. See the description of MergeSettingsAndPoliciesToAugmented.
 class MergeToAugmented : public MergeToEffective {
  public:
-  MergeToAugmented() {}
+  MergeToAugmented() = default;
 
   DictionaryPtr MergeDictionaries(
       const OncValueSignature& signature,
@@ -414,14 +412,13 @@ class MergeToAugmented : public MergeToEffective {
         new base::DictionaryValue);
 
     if (values.active_setting) {
-      augmented_value->SetWithoutPathExpansion(
-          ::onc::kAugmentationActiveSetting,
-          base::MakeUnique<base::Value>(*values.active_setting));
+      augmented_value->SetKey(::onc::kAugmentationActiveSetting,
+                              values.active_setting->Clone());
     }
 
     if (!which_effective.empty()) {
-      augmented_value->SetStringWithoutPathExpansion(
-          ::onc::kAugmentationEffectiveSetting, which_effective);
+      augmented_value->SetKey(::onc::kAugmentationEffectiveSetting,
+                              base::Value(which_effective));
     }
 
     // Prevent credentials from being forwarded in cleartext to
@@ -430,33 +427,29 @@ class MergeToAugmented : public MergeToEffective {
     bool is_credential = onc::FieldIsCredential(*signature_, key);
     if (!is_credential) {
       if (values.user_policy) {
-        augmented_value->SetWithoutPathExpansion(
-            ::onc::kAugmentationUserPolicy,
-            base::MakeUnique<base::Value>(*values.user_policy));
+        augmented_value->SetKey(::onc::kAugmentationUserPolicy,
+                                values.user_policy->Clone());
       }
       if (values.device_policy) {
-        augmented_value->SetWithoutPathExpansion(
-            ::onc::kAugmentationDevicePolicy,
-            base::MakeUnique<base::Value>(*values.device_policy));
+        augmented_value->SetKey(::onc::kAugmentationDevicePolicy,
+                                values.device_policy->Clone());
       }
     }
     if (values.user_setting) {
-      augmented_value->SetWithoutPathExpansion(
-          ::onc::kAugmentationUserSetting,
-          base::MakeUnique<base::Value>(*values.user_setting));
+      augmented_value->SetKey(::onc::kAugmentationUserSetting,
+                              values.user_setting->Clone());
     }
     if (values.shared_setting) {
-      augmented_value->SetWithoutPathExpansion(
-          ::onc::kAugmentationSharedSetting,
-          base::MakeUnique<base::Value>(*values.shared_setting));
+      augmented_value->SetKey(::onc::kAugmentationSharedSetting,
+                              values.shared_setting->Clone());
     }
     if (HasUserPolicy() && values.user_editable) {
-      augmented_value->SetBooleanWithoutPathExpansion(
-          ::onc::kAugmentationUserEditable, true);
+      augmented_value->SetKey(::onc::kAugmentationUserEditable,
+                              base::Value(true));
     }
     if (HasDevicePolicy() && values.device_editable) {
-      augmented_value->SetBooleanWithoutPathExpansion(
-          ::onc::kAugmentationDeviceEditable, true);
+      augmented_value->SetKey(::onc::kAugmentationDeviceEditable,
+                              base::Value(true));
     }
     if (augmented_value->empty())
       augmented_value.reset();

@@ -3,14 +3,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+"""Generate data struct from GPU blacklist and driver bug workarounds json."""
+
 import json
 import os
 import platform
 import sys
 from optparse import OptionParser
 from subprocess import call
-
-"""Generate data struct from GPU blacklist and driver bug workarounds json."""
 
 _LICENSE = """// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -25,6 +25,15 @@ _DO_NOT_EDIT_WARNING = """// This file is auto-generated from
 // DO NOT EDIT!
 
 """
+
+_OS_TYPE_MAP = {
+    'win': 'kOsWin',
+    'macosx': 'kOsMacosx',
+    'android': 'kOsAndroid',
+    'linux': 'kOsLinux',
+    'chromeos': 'kOsChromeOS',
+    '': 'kOsAny',
+  }
 
 
 def load_software_rendering_list_features(feature_type_filename):
@@ -101,7 +110,7 @@ def get_feature_set(features, total_feature_set):
             assert exception in feature_set
             feature_set.remove(exception)
         else:
-          raise KeyException('only exceptions are allowed')
+          raise KeyError('only exceptions are allowed')
     else:
       assert feature in total_feature_set
       feature_set.add(feature)
@@ -118,21 +127,23 @@ def write_features(entry_id, feature_set, feature_name_prefix,
   data_helper_file.write('};\n\n')
 
 
-def write_disabled_extension_list(entry_id, data, data_file, data_helper_file):
+def write_disabled_extension_list(entry_kind, entry_id, data, data_file,
+                                  data_helper_file):
   if data:
-    var_name = 'kDisabledExtensionsForEntry' + str(entry_id)
+    var_name = 'k%sForEntry%d' % (entry_kind, entry_id)
     # define the list
-    data_helper_file.write('const char* %s[%d] = {\n' % (var_name, len(data)))
+    data_helper_file.write(
+        'const char* const %s[%d] = {\n' % (var_name, len(data)))
     for item in data:
       write_string(item, data_helper_file)
       data_helper_file.write(',\n')
     data_helper_file.write('};\n\n')
     # use the list
-    data_file.write('arraysize(%s),  // DisabledExtensions size\n' % var_name)
-    data_file.write('%s,  // DisabledExtensions\n' % var_name)
+    data_file.write('arraysize(%s),  // %s size\n' % (var_name, entry_kind))
+    data_file.write('%s,  // %s\n' % (var_name, entry_kind))
   else:
-    data_file.write('0,  // DisabledExtensions size\n')
-    data_file.write('nullptr,  // DisabledExtensions\n')
+    data_file.write('0,  // %s size\n' % entry_kind)
+    data_file.write('nullptr,  // %s\n' % entry_kind)
 
 
 def write_gl_strings(entry_id, is_exception, exception_id, data,
@@ -244,6 +255,8 @@ def write_string_value(string, name_tag, data_file):
 def write_boolean_value(value, name_tag, data_file):
   data_file.write('%s,  // %s\n' % (str(value).lower(), name_tag))
 
+def write_integer_value(value, name_tag, data_file):
+  data_file.write('%s,  // %s\n' % (str(value), name_tag))
 
 def write_machine_model_info(entry_id, is_exception, exception_id,
                              machine_model_name, machine_model_version,
@@ -253,7 +266,7 @@ def write_machine_model_info(entry_id, is_exception, exception_id,
     model_name_var_name = 'kMachineModelNameForEntry' + str(entry_id)
     if is_exception:
       model_name_var_name += 'Exception' + str(exception_id)
-    data_helper_file.write('const char* %s[%d] = {\n' %
+    data_helper_file.write('const char* const %s[%d] = {\n' %
                            (model_name_var_name, len(machine_model_name)))
     for item in machine_model_name:
       write_string(item, data_helper_file)
@@ -285,16 +298,8 @@ def write_machine_model_info(entry_id, is_exception, exception_id,
 
 
 def write_os_type(os_type, data_file):
-  map = {
-    'win': 'kOsWin',
-    'macosx': 'kOsMacosx',
-    'android': 'kOsAndroid',
-    'linux': 'kOsLinux',
-    'chromeos': 'kOsChromeOS',
-    '': 'kOsAny',
-  }
-  assert map.has_key(os_type)
-  data_file.write('GpuControlList::%s,  // os_type\n' % map[os_type])
+  assert _OS_TYPE_MAP.has_key(os_type)
+  data_file.write('GpuControlList::%s,  // os_type\n' % _OS_TYPE_MAP[os_type])
 
 
 def write_multi_gpu_category(multi_gpu_category, data_file):
@@ -337,7 +342,7 @@ def write_gl_type(gl_type, data_file):
 
 
 def write_conditions(entry_id, is_exception, exception_id, entry,
-                     data_file, data_helper_file, data_exception_file):
+                     data_file, data_helper_file, _data_exception_file):
   os_type = ''
   os_version = None
   vendor_id = 0
@@ -358,10 +363,10 @@ def write_conditions(entry_id, is_exception, exception_id, entry,
   gl_reset_notification_strategy = None
   direct_rendering = True
   gpu_count = None
+  test_group = 0
   machine_model_name = None
   machine_model_version = None
   exception_count = 0
-  exception_var = 'nullptr'
   # process the entry
   for key in entry:
     if key == 'id':
@@ -375,6 +380,9 @@ def write_conditions(entry_id, is_exception, exception_id, entry,
       assert not is_exception
       continue
     elif key == 'disabled_extensions':
+      assert not is_exception
+      continue
+    elif key == 'disabled_webgl_extensions':
       assert not is_exception
       continue
     elif key == 'comment':
@@ -428,6 +436,9 @@ def write_conditions(entry_id, is_exception, exception_id, entry,
       direct_rendering = False
     elif key == 'gpu_count':
       gpu_count = entry[key]
+    elif key == 'test_group':
+      assert entry[key] > 0
+      test_group = entry[key]
     elif key == 'machine_model_name':
       machine_model_name = entry[key]
     elif key == 'machine_model_version':
@@ -466,11 +477,11 @@ def write_conditions(entry_id, is_exception, exception_id, entry,
   # group a bunch of less used conditions
   if (gl_version != None or pixel_shader_version != None or in_process_gpu or
       gl_reset_notification_strategy != None or (not direct_rendering) or
-      gpu_count != None):
+      gpu_count != None or test_group != 0):
     write_entry_more_data(entry_id, is_exception, exception_id, gl_type,
                           gl_version, pixel_shader_version, in_process_gpu,
                           gl_reset_notification_strategy, direct_rendering,
-                          gpu_count, data_file, data_helper_file)
+                          gpu_count, test_group, data_file, data_helper_file)
   else:
     data_file.write('nullptr,  // more conditions\n')
 
@@ -478,7 +489,7 @@ def write_conditions(entry_id, is_exception, exception_id, entry,
 def write_entry_more_data(entry_id, is_exception, exception_id, gl_type,
                           gl_version, pixel_shader_version, in_process_gpu,
                           gl_reset_notification_strategy, direct_rendering,
-                          gpu_count, data_file, data_helper_file):
+                          gpu_count, test_group, data_file, data_helper_file):
   # write more data
   var_name = 'kMoreForEntry' + str(entry_id)
   if is_exception:
@@ -494,6 +505,7 @@ def write_entry_more_data(entry_id, is_exception, exception_id, gl_type,
                          gl_reset_notification_strategy)
   write_boolean_value(direct_rendering, 'direct_rendering', data_helper_file)
   write_version(gpu_count, 'gpu_count', data_helper_file)
+  write_integer_value(test_group, 'test_group', data_helper_file)
   data_helper_file.write('};\n\n')
   # reference more data in entry
   data_file.write('&%s,  // more data\n' % var_name)
@@ -518,10 +530,12 @@ def write_entry(entry, total_feature_set, feature_name_prefix,
     data_file.write('0,  // feature size\n')
     data_file.write('nullptr,  // features\n')
   # Disabled extensions
-  disabled_extensions = None
-  if 'disabled_extensions' in entry:
-    disabled_extensions = entry['disabled_extensions']
-  write_disabled_extension_list(entry_id, disabled_extensions,
+  write_disabled_extension_list('DisabledExtensions', entry_id,
+                                entry.get('disabled_extensions', None),
+                                data_file, data_helper_file)
+  # Disabled WebGL extensions
+  write_disabled_extension_list('DisabledWebGLExtensions', entry_id,
+                                entry.get('disabled_webgl_extensions', None),
                                 data_file, data_helper_file)
   # webkit_bugs are skipped because there is only one entry that has it.
   # cr_bugs
@@ -609,8 +623,6 @@ def process_json_file(json_filepath, list_tag,
                           True)
   data_exception_file.write('namespace gpu {\n')
   data_file.write('namespace gpu {\n\n')
-  data_file.write('const char k%sVersion[] = "%s";\n\n' %
-                  (list_tag, json_data['version']))
   data_file.write('const GpuControlList::Entry k%sEntries[] = {\n' % list_tag)
   ids = []
   entry_count = 0
@@ -619,8 +631,14 @@ def process_json_file(json_filepath, list_tag,
     entry_id = entry['id']
     assert entry_id not in ids
     ids.append(entry_id)
-    if os_filter != None and 'os' in entry and entry['os']['type'] != os_filter:
-      continue
+    if 'os' in entry:
+      os_type = entry['os']['type']
+      # Check for typos in the .json data
+      if not _OS_TYPE_MAP.has_key(os_type):
+        raise Exception('Unknown OS type "%s" for entry %d' %
+                        (os_type, entry_id))
+      if os_filter != None and os_type != os_filter:
+        continue
     entry_count += 1
     write_entry(entry, total_features, feature_tag,
                 data_file, data_helper_file, data_exception_file)
@@ -645,8 +663,6 @@ def process_json_file(json_filepath, list_tag,
   data_header_file.write('#include "gpu/config/gpu_control_list.h"\n\n')
   data_header_file.write('\n')
   data_header_file.write('namespace gpu {\n')
-  data_header_file.write('%sextern const char k%sVersion[];\n' %
-                         (export_tag, list_tag))
   data_header_file.write('%sextern const size_t k%sEntryCount;\n' %
                          (export_tag, list_tag))
   data_header_file.write(
@@ -779,7 +795,7 @@ def main(argv):
                     help="skip testing data generation.")
   parser.add_option("--os-filter",
                     help="only output entries applied to the specified os.")
-  (options, args) = parser.parse_args(args=argv)
+  (options, _) = parser.parse_args(args=argv)
 
   script_dir = os.path.dirname(os.path.realpath(__file__))
 

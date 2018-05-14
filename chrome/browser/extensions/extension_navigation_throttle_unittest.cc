@@ -2,16 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/memory/ptr_util.h"
+#include "extensions/browser/extension_navigation_throttle.h"
+
+#include <memory>
 #include "base/strings/stringprintf.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/common/content_client.h"
+#include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
-#include "extensions/browser/extension_navigation_throttle.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
@@ -40,7 +42,7 @@ class MockBrowserClient : public content::ContentBrowserClient {
   std::vector<std::unique_ptr<NavigationThrottle>> CreateThrottlesForNavigation(
       content::NavigationHandle* handle) override {
     std::vector<std::unique_ptr<NavigationThrottle>> throttles;
-    throttles.push_back(base::MakeUnique<ExtensionNavigationThrottle>(handle));
+    throttles.push_back(std::make_unique<ExtensionNavigationThrottle>(handle));
     return throttles;
   }
 };
@@ -69,16 +71,13 @@ class ExtensionNavigationThrottleUnitTest
   void CheckTestCase(
       content::RenderFrameHost* host,
       const GURL& extension_url,
-      NavigationThrottle::ThrottleCheckResult expected_will_start_result) {
+      NavigationThrottle::ThrottleAction expected_will_start_result) {
     // First subtest: direct navigation to |extension_url|.
     std::unique_ptr<content::NavigationHandle> handle =
         content::NavigationHandle::CreateNavigationHandleForTesting(
             extension_url, host);
     EXPECT_EQ(expected_will_start_result,
-              handle->CallWillStartRequestForTesting(
-                  /*is_post=*/false, content::Referrer(),
-                  /*has_user_gesture=*/false, ui::PAGE_TRANSITION_LINK,
-                  /*is_external_protocol=*/false))
+              handle->CallWillStartRequestForTesting())
         << extension_url;
 
     // Reset the handle for a second subtest: server redirect to
@@ -90,15 +89,12 @@ class ExtensionNavigationThrottleUnitTest
     // TODO(nick): https://crbug.com/695421 Once PlzNavigate is enabled 100%, it
     // should be possible to support return values other than PROCEED and CANCEL
     // from ExtensionNavigationThrottle::WillRedirectRequest.
-    NavigationThrottle::ThrottleCheckResult expected_will_redirect_result =
+    NavigationThrottle::ThrottleAction expected_will_redirect_result =
         (expected_will_start_result == NavigationThrottle::PROCEED)
             ? NavigationThrottle::PROCEED
             : NavigationThrottle::CANCEL;
     EXPECT_EQ(NavigationThrottle::PROCEED,
-              handle->CallWillStartRequestForTesting(
-                  /*is_post=*/false, content::Referrer(),
-                  /*has_user_gesture=*/false, ui::PAGE_TRANSITION_LINK,
-                  /*is_external_protocol=*/false))
+              handle->CallWillStartRequestForTesting())
         << http_url;
     EXPECT_EQ(expected_will_redirect_result,
               handle->CallWillRedirectRequestForTesting(
@@ -181,8 +177,8 @@ TEST_F(ExtensionNavigationThrottleUnitTest, WebPageAncestor) {
   content::RenderFrameHost* child =
       render_frame_host_tester(main_rfh())->AppendChild("subframe1");
   GURL url = extension()->GetResourceURL(kAccessible);
-  render_frame_host_tester(child)->SimulateNavigationStart(url);
-  render_frame_host_tester(child)->SimulateNavigationCommit(url);
+  child =
+      content::NavigationSimulator::NavigateAndCommitFromDocument(url, child);
   content::RenderFrameHost* grand_child =
       render_frame_host_tester(child)->AppendChild("grandchild");
 

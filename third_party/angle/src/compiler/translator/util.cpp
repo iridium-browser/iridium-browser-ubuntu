@@ -23,6 +23,24 @@ bool atoi_clamp(const char *str, unsigned int *value)
 namespace sh
 {
 
+namespace
+{
+
+bool IsInterpolationIn(TQualifier qualifier)
+{
+    switch (qualifier)
+    {
+        case EvqSmoothIn:
+        case EvqFlatIn:
+        case EvqCentroidIn:
+            return true;
+        default:
+            return false;
+    }
+}
+
+}  // anonymous namespace
+
 float NumericLexFloat32OutOfRangeToInfinity(const std::string &str)
 {
     // Parses a decimal string using scientific notation into a floating point number.
@@ -198,6 +216,9 @@ GLenum GLVariableType(const TType &type)
                     return GL_FLOAT_VEC4;
                 default:
                     UNREACHABLE();
+#if !UNREACHABLE_IS_NORETURN
+                    return GL_NONE;
+#endif
             }
         }
         else if (type.isMatrix())
@@ -215,6 +236,9 @@ GLenum GLVariableType(const TType &type)
                             return GL_FLOAT_MAT2x4;
                         default:
                             UNREACHABLE();
+#if !UNREACHABLE_IS_NORETURN
+                            return GL_NONE;
+#endif
                     }
 
                 case 3:
@@ -228,6 +252,9 @@ GLenum GLVariableType(const TType &type)
                             return GL_FLOAT_MAT3x4;
                         default:
                             UNREACHABLE();
+#if !UNREACHABLE_IS_NORETURN
+                            return GL_NONE;
+#endif
                     }
 
                 case 4:
@@ -241,10 +268,16 @@ GLenum GLVariableType(const TType &type)
                             return GL_FLOAT_MAT4;
                         default:
                             UNREACHABLE();
+#if !UNREACHABLE_IS_NORETURN
+                            return GL_NONE;
+#endif
                     }
 
                 default:
                     UNREACHABLE();
+#if !UNREACHABLE_IS_NORETURN
+                    return GL_NONE;
+#endif
             }
         }
         else
@@ -266,6 +299,9 @@ GLenum GLVariableType(const TType &type)
                     return GL_INT_VEC4;
                 default:
                     UNREACHABLE();
+#if !UNREACHABLE_IS_NORETURN
+                    return GL_NONE;
+#endif
             }
         }
         else
@@ -288,6 +324,9 @@ GLenum GLVariableType(const TType &type)
                     return GL_UNSIGNED_INT_VEC4;
                 default:
                     UNREACHABLE();
+#if !UNREACHABLE_IS_NORETURN
+                    return GL_NONE;
+#endif
             }
         }
         else
@@ -310,6 +349,9 @@ GLenum GLVariableType(const TType &type)
                     return GL_BOOL_VEC4;
                 default:
                     UNREACHABLE();
+#if !UNREACHABLE_IS_NORETURN
+                    return GL_NONE;
+#endif
             }
         }
         else
@@ -332,7 +374,7 @@ GLenum GLVariableType(const TType &type)
         case EbtSamplerExternal2DY2YEXT:
             return GL_SAMPLER_EXTERNAL_2D_Y2Y_EXT;
         case EbtSampler2DRect:
-            return GL_SAMPLER_2D_RECT_ARB;
+            return GL_SAMPLER_2D_RECT_ANGLE;
         case EbtSampler2DArray:
             return GL_SAMPLER_2D_ARRAY;
         case EbtSampler2DMS:
@@ -437,12 +479,30 @@ GLenum GLVariablePrecision(const TType &type)
 
 TString ArrayString(const TType &type)
 {
+    TStringStream arrayString;
     if (!type.isArray())
-    {
-        return "";
-    }
+        return arrayString.str();
 
-    return "[" + str(type.getArraySize()) + "]";
+    const TVector<unsigned int> &arraySizes = *type.getArraySizes();
+    for (auto arraySizeIter = arraySizes.rbegin(); arraySizeIter != arraySizes.rend();
+         ++arraySizeIter)
+    {
+        arrayString << "[";
+        if (*arraySizeIter > 0)
+        {
+            arrayString << (*arraySizeIter);
+        }
+        arrayString << "]";
+    }
+    return arrayString.str();
+}
+
+ImmutableString GetTypeName(const TType &type, ShHashFunction64 hashFunction, NameMap *nameMap)
+{
+    if (type.getBasicType() == EbtStruct)
+        return HashName(type.getStruct(), hashFunction, nameMap);
+    else
+        return ImmutableString(type.getBuiltInTypeNameString());
 }
 
 bool IsVaryingOut(TQualifier qualifier)
@@ -454,6 +514,7 @@ bool IsVaryingOut(TQualifier qualifier)
         case EvqFlatOut:
         case EvqCentroidOut:
         case EvqVertexOut:
+        case EvqGeometryOut:
             return true;
 
         default:
@@ -472,6 +533,7 @@ bool IsVaryingIn(TQualifier qualifier)
         case EvqFlatIn:
         case EvqCentroidIn:
         case EvqFragmentIn:
+        case EvqGeometryIn:
             return true;
 
         default:
@@ -484,6 +546,12 @@ bool IsVaryingIn(TQualifier qualifier)
 bool IsVarying(TQualifier qualifier)
 {
     return IsVaryingIn(qualifier) || IsVaryingOut(qualifier);
+}
+
+bool IsGeometryShaderInput(GLenum shaderType, TQualifier qualifier)
+{
+    return (qualifier == EvqGeometryIn) ||
+           ((shaderType == GL_GEOMETRY_SHADER_EXT) && IsInterpolationIn(qualifier));
 }
 
 InterpolationType GetInterpolationType(TQualifier qualifier)
@@ -500,6 +568,8 @@ InterpolationType GetInterpolationType(TQualifier qualifier)
         case EvqFragmentIn:
         case EvqVaryingIn:
         case EvqVaryingOut:
+        case EvqGeometryIn:
+        case EvqGeometryOut:
             return INTERPOLATION_SMOOTH;
 
         case EvqCentroidIn:
@@ -508,7 +578,9 @@ InterpolationType GetInterpolationType(TQualifier qualifier)
 
         default:
             UNREACHABLE();
+#if !UNREACHABLE_IS_NORETURN
             return INTERPOLATION_SMOOTH;
+#endif
     }
 }
 
@@ -568,7 +640,9 @@ TType GetShaderVariableBasicType(const sh::ShaderVariable &var)
             return TType(EbtUInt, 4);
         default:
             UNREACHABLE();
+#if !UNREACHABLE_IS_NORETURN
             return TType();
+#endif
     }
 }
 

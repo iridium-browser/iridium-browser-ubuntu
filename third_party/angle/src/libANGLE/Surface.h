@@ -14,6 +14,7 @@
 #include <EGL/egl.h>
 
 #include "common/angleutils.h"
+#include "libANGLE/AttributeMap.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/FramebufferAttachment.h"
 #include "libANGLE/RefCountObject.h"
@@ -33,16 +34,16 @@ class EGLImplFactory;
 
 namespace egl
 {
-class AttributeMap;
 class Display;
 struct Config;
 
 struct SurfaceState final : private angle::NonCopyable
 {
-    SurfaceState(const egl::Config *configIn);
+    SurfaceState(const egl::Config *configIn, const AttributeMap &attributesIn);
 
     gl::Framebuffer *defaultFramebuffer;
     const egl::Config *config;
+    AttributeMap attributes;
 };
 
 class Surface : public gl::FramebufferAttachmentObject
@@ -72,6 +73,10 @@ class Surface : public gl::FramebufferAttachmentObject
     Error setIsCurrent(const gl::Context *context, bool isCurrent);
     Error onDestroy(const Display *display);
 
+    void setMipmapLevel(EGLint level);
+    void setMultisampleResolve(EGLenum resolve);
+    void setSwapBehavior(EGLenum behavior);
+
     const Config *getConfig() const;
 
     // width and height can change with client window resizing
@@ -82,6 +87,15 @@ class Surface : public gl::FramebufferAttachmentObject
     EGLenum getSwapBehavior() const;
     EGLenum getTextureFormat() const;
     EGLenum getTextureTarget() const;
+    bool getLargestPbuffer() const;
+    EGLenum getGLColorspace() const;
+    EGLenum getVGAlphaFormat() const;
+    EGLenum getVGColorspace() const;
+    bool getMipmapTexture() const;
+    EGLint getMipmapLevel() const;
+    EGLint getHorizontalResolution() const;
+    EGLint getVerticalResolution() const;
+    EGLenum getMultisampleResolve() const;
 
     gl::Texture *getBoundTexture() const { return mTexture.get(); }
     gl::Framebuffer *getDefaultFramebuffer() { return mState.defaultFramebuffer; }
@@ -106,10 +120,20 @@ class Surface : public gl::FramebufferAttachmentObject
 
     bool directComposition() const { return mDirectComposition; }
 
+    gl::InitState initState(const gl::ImageIndex &imageIndex) const override;
+    void setInitState(const gl::ImageIndex &imageIndex, gl::InitState initState) override;
+
+    bool isRobustResourceInitEnabled() const { return mRobustResourceInitialization; }
+
+    const gl::Format &getBindTexImageFormat() const { return mColorFormat; }
+
   protected:
-    Surface(EGLint surfaceType, const egl::Config *config, const AttributeMap &attributes);
-    virtual ~Surface();
-    rx::FramebufferAttachmentObjectImpl *getAttachmentImpl() const override { return mImplementation; }
+    Surface(EGLint surfaceType,
+            const egl::Config *config,
+            const AttributeMap &attributes,
+            EGLenum buftype = EGL_NONE);
+    ~Surface() override;
+    rx::FramebufferAttachmentObjectImpl *getAttachmentImpl() const override;
 
     gl::Framebuffer *createDefaultFramebuffer(const Display *display);
 
@@ -123,15 +147,28 @@ class Surface : public gl::FramebufferAttachmentObject
     bool mDestroyed;
 
     EGLint mType;
+    EGLenum mBuftype;
 
     bool mPostSubBufferRequested;
     bool mFlexibleSurfaceCompatibilityRequested;
+
+    bool mLargestPbuffer;
+    EGLenum mGLColorspace;
+    EGLenum mVGAlphaFormat;
+    EGLenum mVGColorspace;
+    bool mMipmapTexture;
+    EGLint mMipmapLevel;
+    EGLint mHorizontalResolution;
+    EGLint mVerticalResolution;
+    EGLenum mMultisampleResolve;
 
     bool mFixedSize;
     size_t mFixedWidth;
     size_t mFixedHeight;
 
     bool mDirectComposition;
+
+    bool mRobustResourceInitialization;
 
     EGLenum mTextureFormat;
     EGLenum mTextureTarget;
@@ -144,11 +181,15 @@ class Surface : public gl::FramebufferAttachmentObject
 
     gl::BindingPointer<gl::Texture> mTexture;
 
-    gl::Format mBackFormat;
+    gl::Format mColorFormat;
     gl::Format mDSFormat;
 
   private:
     Error destroyImpl(const Display *display);
+
+    void postSwap(const gl::Context *context);
+
+    gl::InitState mInitState;
 };
 
 class WindowSurface final : public Surface
@@ -189,7 +230,18 @@ class PixmapSurface final : public Surface
     ~PixmapSurface() override;
 };
 
-using SurfacePointer = angle::UniqueObjectPointer<Surface, Display>;
+class SurfaceDeleter final
+{
+  public:
+    SurfaceDeleter(const Display *display);
+    ~SurfaceDeleter();
+    void operator()(Surface *surface);
+
+  private:
+    const Display *mDisplay;
+};
+
+using SurfacePointer = angle::UniqueObjectPointerBase<Surface, SurfaceDeleter>;
 
 }  // namespace egl
 

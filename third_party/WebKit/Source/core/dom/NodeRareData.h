@@ -22,6 +22,7 @@
 #ifndef NodeRareData_h
 #define NodeRareData_h
 
+#include "base/macros.h"
 #include "core/dom/MutationObserverRegistration.h"
 #include "core/dom/NodeListsNodeData.h"
 #include "platform/bindings/TraceWrapperMember.h"
@@ -32,8 +33,6 @@ namespace blink {
 
 class NodeMutationObserverData final
     : public GarbageCollected<NodeMutationObserverData> {
-  WTF_MAKE_NONCOPYABLE(NodeMutationObserverData);
-
  public:
   static NodeMutationObserverData* Create() {
     return new NodeMutationObserverData;
@@ -50,8 +49,7 @@ class NodeMutationObserverData final
   }
 
   void AddTransientRegistration(MutationObserverRegistration* registration) {
-    transient_registry_.insert(
-        TraceWrapperMember<MutationObserverRegistration>(this, registration));
+    transient_registry_.insert(registration);
   }
 
   void RemoveTransientRegistration(MutationObserverRegistration* registration) {
@@ -60,21 +58,20 @@ class NodeMutationObserverData final
   }
 
   void AddRegistration(MutationObserverRegistration* registration) {
-    registry_.push_back(
-        TraceWrapperMember<MutationObserverRegistration>(this, registration));
+    registry_.push_back(registration);
   }
 
   void RemoveRegistration(MutationObserverRegistration* registration) {
     DCHECK(registry_.Contains(registration));
-    registry_.erase(registry_.Find(registration));
+    registry_.EraseAt(registry_.Find(registration));
   }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(registry_);
     visitor->Trace(transient_registry_);
   }
 
-  DEFINE_INLINE_TRACE_WRAPPERS() {
+  void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
     for (auto registration : registry_) {
       visitor->TraceWrappers(registration);
     }
@@ -84,19 +81,18 @@ class NodeMutationObserverData final
   }
 
  private:
-  NodeMutationObserverData() {}
+  NodeMutationObserverData() = default;
 
   HeapVector<TraceWrapperMember<MutationObserverRegistration>> registry_;
   HeapHashSet<TraceWrapperMember<MutationObserverRegistration>>
       transient_registry_;
+  DISALLOW_COPY_AND_ASSIGN(NodeMutationObserverData);
 };
 
 DEFINE_TRAIT_FOR_TRACE_WRAPPERS(NodeMutationObserverData);
 
 class NodeRareData : public GarbageCollectedFinalized<NodeRareData>,
                      public NodeRareDataBase {
-  WTF_MAKE_NONCOPYABLE(NodeRareData);
-
  public:
   static NodeRareData* Create(NodeRenderingData* node_layout_data) {
     return new NodeRareData(node_layout_data);
@@ -111,7 +107,6 @@ class NodeRareData : public GarbageCollectedFinalized<NodeRareData>,
     DCHECK(ThreadState::Current()->IsGCForbidden());
     if (!node_lists_) {
       node_lists_ = NodeListsNodeData::Create();
-      ScriptWrappableVisitor::WriteBarrier(this, node_lists_);
     }
     return *node_lists_;
   }
@@ -122,7 +117,6 @@ class NodeRareData : public GarbageCollectedFinalized<NodeRareData>,
   NodeMutationObserverData& EnsureMutationObserverData() {
     if (!mutation_observer_data_) {
       mutation_observer_data_ = NodeMutationObserverData::Create();
-      ScriptWrappableVisitor::WriteBarrier(this, mutation_observer_data_);
     }
     return *mutation_observer_data_;
   }
@@ -154,13 +148,13 @@ class NodeRareData : public GarbageCollectedFinalized<NodeRareData>,
     kConnectedFrameCountBits = 10,  // Must fit Page::maxNumberOfFrames.
   };
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
   void FinalizeGarbageCollectedObject();
 
-  DECLARE_TRACE_WRAPPERS();
-  DECLARE_TRACE_WRAPPERS_AFTER_DISPATCH();
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void TraceWrappersAfterDispatch(const ScriptWrappableVisitor*) const;
 
  protected:
   explicit NodeRareData(NodeRenderingData* node_layout_data)
@@ -173,8 +167,8 @@ class NodeRareData : public GarbageCollectedFinalized<NodeRareData>,
   }
 
  private:
-  Member<NodeListsNodeData> node_lists_;
-  Member<NodeMutationObserverData> mutation_observer_data_;
+  TraceWrapperMember<NodeListsNodeData> node_lists_;
+  TraceWrapperMember<NodeMutationObserverData> mutation_observer_data_;
 
   unsigned connected_frame_count_ : kConnectedFrameCountBits;
   unsigned element_flags_ : kNumberOfElementFlags;
@@ -182,6 +176,7 @@ class NodeRareData : public GarbageCollectedFinalized<NodeRareData>,
 
  protected:
   unsigned is_element_rare_data_ : 1;
+  DISALLOW_COPY_AND_ASSIGN(NodeRareData);
 };
 
 DEFINE_TRAIT_FOR_TRACE_WRAPPERS(NodeRareData);

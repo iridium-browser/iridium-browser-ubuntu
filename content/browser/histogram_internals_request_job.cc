@@ -55,9 +55,8 @@ std::string HistogramInternalsRequestJob::GenerateHTML(const GURL& url) {
   data.append("</head><body>");
 
   // Display any stats for which we sent off requests the last time.
-  data.append("<p>Stats accumulated from browser startup to previous ");
-  data.append("page load; reload to get stats as of this page load.</p>\n");
-  data.append("<table width=\"100%\">\n");
+  data.append(
+      "<p>Stats accumulated since browser startup. Reload to refresh.</p>\n");
 
   base::StatisticsRecorder::WriteHTMLGraph(unescaped_query, &data);
   return data;
@@ -69,9 +68,9 @@ void HistogramInternalsRequestJob::Start() {
   // it ends up re-calling this method, so a small helper method is used.
   content::BrowserThread::PostTaskAndReply(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&base::StatisticsRecorder::ImportProvidedHistograms),
-      base::Bind(&HistogramInternalsRequestJob::StartUrlRequest,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&base::StatisticsRecorder::ImportProvidedHistograms),
+      base::BindOnce(&HistogramInternalsRequestJob::StartUrlRequest,
+                     weak_factory_.GetWeakPtr()));
 }
 
 int HistogramInternalsRequestJob::GetData(

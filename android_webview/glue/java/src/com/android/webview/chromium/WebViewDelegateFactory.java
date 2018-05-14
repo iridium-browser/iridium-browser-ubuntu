@@ -4,7 +4,6 @@
 
 package com.android.webview.chromium;
 
-import android.annotation.TargetApi;
 import android.app.Application;
 import android.content.Context;
 import android.content.ContextWrapper;
@@ -12,7 +11,6 @@ import android.content.pm.PackageInfo;
 import android.content.res.AssetManager;
 import android.content.res.Resources;
 import android.graphics.Canvas;
-import android.os.Build;
 import android.os.Trace;
 import android.util.SparseArray;
 import android.view.View;
@@ -85,6 +83,9 @@ class WebViewDelegateFactory {
 
         /** @see android.webkit.WebViewDelegate#isMultiProcessEnabled */
         boolean isMultiProcessEnabled();
+
+        /** @see android.webkit.WebViewDelegate#getDataDirectorySuffix */
+        String getDataDirectorySuffix();
     }
 
     /**
@@ -204,7 +205,12 @@ class WebViewDelegateFactory {
 
         @Override
         public boolean isMultiProcessEnabled() {
-            throw new UnsupportedOperationException();
+            return mDelegate.isMultiProcessEnabled();
+        }
+
+        @Override
+        public String getDataDirectorySuffix() {
+            return null;
         }
     }
 
@@ -219,7 +225,6 @@ class WebViewDelegateFactory {
      * reflection to call into hidden frameworks APIs released in the API-21 version of the
      * framework.
      */
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private static class Api21CompatibilityDelegate implements WebViewDelegate {
         /** Copy of Trace.TRACE_TAG_WEBVIEW */
         private static final long TRACE_TAG_WEBVIEW = 1L << 4;
@@ -395,6 +400,11 @@ class WebViewDelegateFactory {
         @Override
         public boolean isMultiProcessEnabled() {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String getDataDirectorySuffix() {
+            return null;
         }
     }
 }

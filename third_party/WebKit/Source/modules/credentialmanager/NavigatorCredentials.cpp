@@ -16,18 +16,16 @@ NavigatorCredentials::NavigatorCredentials(Navigator& navigator)
     : Supplement<Navigator>(navigator) {}
 
 NavigatorCredentials& NavigatorCredentials::From(Navigator& navigator) {
-  NavigatorCredentials* supplement = static_cast<NavigatorCredentials*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  NavigatorCredentials* supplement =
+      Supplement<Navigator>::From<NavigatorCredentials>(navigator);
   if (!supplement) {
     supplement = new NavigatorCredentials(navigator);
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
 }
 
-const char* NavigatorCredentials::SupplementName() {
-  return "NavigatorCredentials";
-}
+const char NavigatorCredentials::kSupplementName[] = "NavigatorCredentials";
 
 CredentialsContainer* NavigatorCredentials::credentials(Navigator& navigator) {
   return NavigatorCredentials::From(navigator).credentials();
@@ -39,7 +37,7 @@ CredentialsContainer* NavigatorCredentials::credentials() {
   return credentials_container_.Get();
 }
 
-DEFINE_TRACE(NavigatorCredentials) {
+void NavigatorCredentials::Trace(blink::Visitor* visitor) {
   visitor->Trace(credentials_container_);
   Supplement<Navigator>::Trace(visitor);
 }

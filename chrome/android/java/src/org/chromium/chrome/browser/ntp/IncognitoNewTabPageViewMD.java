@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.ntp;
 
+import static org.chromium.chrome.browser.util.ViewUtils.dpToPx;
+
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -26,6 +28,7 @@ import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.ui.text.NoUnderlineClickableSpan;
 import org.chromium.ui.text.SpanApplier;
 
@@ -50,6 +53,7 @@ public class IncognitoNewTabPageViewMD extends IncognitoNewTabPageView {
     private static final int BULLETPOINTS_HORIZONTAL_SPACING_DP = 40;
     private static final int CONTENT_WIDTH_DP = 600;
     private static final int WIDE_LAYOUT_THRESHOLD_DP = 720;
+    private static final int CHROME_HOME_LEARN_MORE_BOTTOM_PADDING_DP = 8;
 
     private static class IncognitoBulletSpan extends BulletSpan {
         public IncognitoBulletSpan() {
@@ -94,10 +98,6 @@ public class IncognitoNewTabPageViewMD extends IncognitoNewTabPageView {
 
     private int pxToDp(int px) {
         return (int) Math.ceil(px / mMetrics.density);
-    }
-
-    private int dpToPx(int dp) {
-        return (int) Math.ceil(dp * mMetrics.density);
     }
 
     private int spToPx(int sp) {
@@ -160,9 +160,9 @@ public class IncognitoNewTabPageViewMD extends IncognitoNewTabPageView {
         //   - Add the bulletpoint symbols (Unicode BULLET U+2022)
         //   - Remove leading whitespace (caused by formatting in the .grdp file)
         //   - Remove the trailing newline after the last bulletpoint.
-        text = text.replaceFirst(" +<li>([^<]*)</li>", "<li1>\u2022 $1</li1>");
-        text = text.replaceFirst(" +<li>([^<]*)</li>", "<li2>\u2022 $1</li2>");
-        text = text.replaceFirst(" +<li>([^<]*)</li>\n", "<li3>\u2022 $1</li3>");
+        text = text.replaceFirst(" +<li>([^<]*)</li>", "<li1>     \u2022     $1</li1>");
+        text = text.replaceFirst(" +<li>([^<]*)</li>", "<li2>     \u2022     $1</li2>");
+        text = text.replaceFirst(" +<li>([^<]*)</li>\n", "<li3>     \u2022     $1</li3>");
 
         // Remove the <ul></ul> tags which serve no purpose here, including the whitespace around
         // them.
@@ -203,27 +203,38 @@ public class IncognitoNewTabPageViewMD extends IncognitoNewTabPageView {
 
         boolean bulletpointsArrangedHorizontally;
 
-        if (mWidthDp <= WIDE_LAYOUT_THRESHOLD_DP) {
+        boolean usingChromeHome = FeatureUtilities.isChromeHomeEnabled();
+        if (mWidthDp <= WIDE_LAYOUT_THRESHOLD_DP || usingChromeHome) {
             // Small padding.
-            paddingHorizontalDp = mWidthDp <= 240 ? 24 : 32;
-            paddingVerticalDp = mHeightDp <= 600 ? 32 : 72;
+            // Set the padding to a default for Chrome Home, since we want less padding in this
+            // case.
+            if (usingChromeHome) {
+                paddingHorizontalDp = 16;
+                paddingVerticalDp = 0;
+            } else {
+                paddingHorizontalDp = mWidthDp <= 240 ? 24 : 32;
+                paddingVerticalDp = (mHeightDp <= 600) ? 32 : 72;
+            }
 
             // Align left.
             mContainer.setGravity(Gravity.START);
 
             // Decide the bulletpoints orientation.
+            // TODO (thildebr): This is never set to anything but false, check if we can remove
+            // related code.
             bulletpointsArrangedHorizontally = false;
 
             // The subtitle is sized automatically, but not wider than CONTENT_WIDTH_DP.
             mSubtitle.setLayoutParams(
                     new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                             LinearLayout.LayoutParams.WRAP_CONTENT));
-            mSubtitle.setMaxWidth(dpToPx(CONTENT_WIDTH_DP));
+            mSubtitle.setMaxWidth(dpToPx(mContext, CONTENT_WIDTH_DP));
 
             // The bulletpoints container takes the same width as subtitle. Since the width can
             // not be directly measured at this stage, we must calculate it manually.
             mBulletpointsContainer.setLayoutParams(new LinearLayout.LayoutParams(
-                    dpToPx(Math.min(CONTENT_WIDTH_DP, mWidthDp - 2 * paddingHorizontalDp)),
+                    dpToPx(mContext,
+                            Math.min(CONTENT_WIDTH_DP, mWidthDp - 2 * paddingHorizontalDp)),
                     LinearLayout.LayoutParams.WRAP_CONTENT));
         } else {
             // Large padding.
@@ -241,8 +252,9 @@ public class IncognitoNewTabPageViewMD extends IncognitoNewTabPageView {
 
             // The subtitle width is equal to the two sets of bulletpoints if they are arranged
             // horizontally. If not, use the default CONTENT_WIDTH_DP.
-            int contentWidthPx = bulletpointsArrangedHorizontally ? dpToPx(totalBulletpointsWidthDp)
-                                                                  : dpToPx(CONTENT_WIDTH_DP);
+            int contentWidthPx = bulletpointsArrangedHorizontally
+                    ? dpToPx(mContext, totalBulletpointsWidthDp)
+                    : dpToPx(mContext, CONTENT_WIDTH_DP);
             mSubtitle.setLayoutParams(new LinearLayout.LayoutParams(
                     contentWidthPx, LinearLayout.LayoutParams.WRAP_CONTENT));
             mBulletpointsContainer.setLayoutParams(new LinearLayout.LayoutParams(
@@ -257,8 +269,18 @@ public class IncognitoNewTabPageViewMD extends IncognitoNewTabPageView {
         }
 
         // Set up paddings and margins.
-        mContainer.setPadding(dpToPx(paddingHorizontalDp), dpToPx(paddingVerticalDp),
-                dpToPx(paddingHorizontalDp), dpToPx(paddingVerticalDp));
+        int paddingTop;
+        int paddingBottom;
+        if (usingChromeHome) {
+            // Preserve the intentional padding given to the new tab view in Chrome Home to
+            // accomodate the bottom navigation menu.
+            paddingTop = mContainer.getPaddingTop();
+            paddingBottom = mContainer.getPaddingBottom();
+        } else {
+            paddingTop = paddingBottom = dpToPx(mContext, paddingVerticalDp);
+        }
+        mContainer.setPadding(dpToPx(mContext, paddingHorizontalDp), paddingTop,
+                dpToPx(mContext, paddingHorizontalDp), paddingBottom);
 
         int spacingPx =
                 (int) Math.ceil(mParagraphs[0].getTextSize() * (mHeightDp <= 600 ? 1 : 1.5));
@@ -267,7 +289,7 @@ public class IncognitoNewTabPageViewMD extends IncognitoNewTabPageView {
             // If bulletpoints are arranged horizontally, there should be space between them.
             int rightMarginPx = (bulletpointsArrangedHorizontally
                                         && paragraph == mBulletpointsContainer.getChildAt(0))
-                    ? dpToPx(BULLETPOINTS_HORIZONTAL_SPACING_DP)
+                    ? dpToPx(mContext, BULLETPOINTS_HORIZONTAL_SPACING_DP)
                     : 0;
 
             ((LinearLayout.LayoutParams) paragraph.getLayoutParams())
@@ -292,8 +314,8 @@ public class IncognitoNewTabPageViewMD extends IncognitoNewTabPageView {
         }
 
         ImageView icon = (ImageView) findViewById(R.id.new_tab_incognito_icon);
-        icon.getLayoutParams().width = dpToPx(sizeDp);
-        icon.getLayoutParams().height = dpToPx(sizeDp);
+        icon.getLayoutParams().width = dpToPx(mContext, sizeDp);
+        icon.getLayoutParams().height = dpToPx(mContext, sizeDp);
     }
 
     /** Adjust the "Learn More" link. */
@@ -304,6 +326,14 @@ public class IncognitoNewTabPageViewMD extends IncognitoNewTabPageView {
 
         mSubtitle.setClickable(learnMoreInSubtitle);
         mLearnMore.setVisibility(learnMoreInSubtitle ? View.GONE : View.VISIBLE);
+
+        if (FeatureUtilities.isChromeHomeEnabled()) {
+            // Additional padding below "Learn More" helps keep distance from the bottom navigation
+            // menu making it easier to tap.
+            mLearnMore.setPadding(mLearnMore.getPaddingLeft(), mLearnMore.getPaddingTop(),
+                    mLearnMore.getPaddingBottom(),
+                    dpToPx(mContext, CHROME_HOME_LEARN_MORE_BOTTOM_PADDING_DP));
+        }
 
         if (!learnMoreInSubtitle) {
             // Revert to the original text.

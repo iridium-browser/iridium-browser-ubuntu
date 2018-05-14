@@ -128,7 +128,7 @@ class AutofillTableTest : public testing::Test {
 
  protected:
   void SetUp() override {
-    OSCryptMocker::SetUpWithSingleton();
+    OSCryptMocker::SetUp();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     file_ = temp_dir_.GetPath().AppendASCII("TestWebDatabase");
 
@@ -734,8 +734,46 @@ TEST_F(AutofillTableTest,
   EXPECT_EQ(base::Time::FromTimeT(90), date_last_used);
 }
 
+TEST_F(AutofillTableTest,
+       Autofill_RemoveFormElementsAddedBetween_OlderThan30Days) {
+  const base::Time kNow = base::Time::Now();
+  const base::Time k29DaysOld = kNow - base::TimeDelta::FromDays(29);
+  const base::Time k30DaysOld = kNow - base::TimeDelta::FromDays(30);
+  const base::Time k31DaysOld = kNow - base::TimeDelta::FromDays(31);
+
+  // Add some form field entries.
+  AutofillChangeList changes;
+  FormFieldData field;
+  field.name = ASCIIToUTF16("Name");
+  field.value = ASCIIToUTF16("Superman");
+  EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, kNow));
+  field.value = ASCIIToUTF16("Clark Kent");
+  EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, k29DaysOld));
+  field.value = ASCIIToUTF16("Clark Sutter");
+  EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, k31DaysOld));
+  EXPECT_EQ(3U, changes.size());
+
+  // Removing all elements added before 30days from the database.
+  changes.clear();
+  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(base::Time(), k30DaysOld,
+                                                     &changes));
+  ASSERT_EQ(1U, changes.size());
+  EXPECT_EQ(AutofillChange(AutofillChange::REMOVE,
+                           AutofillKey(ASCIIToUTF16("Name"),
+                                       ASCIIToUTF16("Clark Sutter"))),
+            changes[0]);
+  EXPECT_EQ(0, GetAutofillEntryCount(ASCIIToUTF16("Name"),
+                                     ASCIIToUTF16("Clark Sutter"), db_.get()));
+  EXPECT_EQ(1, GetAutofillEntryCount(ASCIIToUTF16("Name"),
+                                     ASCIIToUTF16("Superman"), db_.get()));
+  EXPECT_EQ(1, GetAutofillEntryCount(ASCIIToUTF16("Name"),
+                                     ASCIIToUTF16("Clark Kent"), db_.get()));
+  changes.clear();
+}
+
 TEST_F(AutofillTableTest, AutofillProfile) {
-  // Add a 'Home' profile.
+  // Add a 'Home' profile with non-default data. The specific values are not
+  // important.
   AutofillProfile home_profile;
   home_profile.set_origin(std::string());
   home_profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
@@ -754,6 +792,7 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   home_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("US"));
   home_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16("18181234567"));
   home_profile.set_language_code("en");
+  home_profile.SetValidityFromBitfieldValue(6);
 
   Time pre_creation_time = Time::Now();
   EXPECT_TRUE(table_->AddAutofillProfile(home_profile));
@@ -818,7 +857,8 @@ TEST_F(AutofillTableTest, AutofillProfile) {
             post_modification_time.ToTimeT());
   EXPECT_FALSE(s_billing_updated.Step());
 
-  // Update the 'Billing' profile.
+  // Update the 'Billing' profile with non-default data. The specific values are
+  // not important.
   billing_profile.set_origin(kSettingsOrigin);
   billing_profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Janice"));
   billing_profile.SetRawInfo(NAME_MIDDLE, ASCIIToUTF16("C."));
@@ -836,6 +876,7 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   billing_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("US"));
   billing_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER,
                              ASCIIToUTF16("18181230000"));
+  billing_profile.SetValidityFromBitfieldValue(54);
   Time pre_modification_time_2 = Time::Now();
   EXPECT_TRUE(table_->UpdateAutofillProfile(billing_profile));
   Time post_modification_time_2 = Time::Now();
@@ -1612,6 +1653,40 @@ TEST_F(AutofillTableTest, Autofill_GetAllAutofillEntries_TwoSame) {
   CompareAutofillEntrySets(entry_set, expected_entries);
 }
 
+TEST_F(AutofillTableTest, AutofillProfileValidityBitfield) {
+  // Add an autofill profile with a non default validity state. The value itself
+  // is insignificant for this test since only the serialization and
+  // deserialization are tested.
+  const int kValidityBitfieldValue = 1984;
+  AutofillProfile profile;
+  profile.set_origin(std::string());
+  profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
+  profile.SetRawInfo(NAME_LAST, ASCIIToUTF16("Smith"));
+  profile.SetValidityFromBitfieldValue(kValidityBitfieldValue);
+
+  // Add the profile to the table.
+  EXPECT_TRUE(table_->AddAutofillProfile(profile));
+
+  // Get the profile from the table and make sure the validity was set.
+  std::unique_ptr<AutofillProfile> db_profile =
+      table_->GetAutofillProfile(profile.guid());
+  ASSERT_TRUE(db_profile);
+  EXPECT_EQ(kValidityBitfieldValue, db_profile->GetValidityBitfieldValue());
+
+  // Modify the validity of the profile.
+  const int kOtherValidityBitfieldValue = 1999;
+  profile.SetValidityFromBitfieldValue(kOtherValidityBitfieldValue);
+
+  // Update the profile in the table.
+  EXPECT_TRUE(table_->UpdateAutofillProfile(profile));
+
+  // Get the profile from the table and make sure the validity was updated.
+  db_profile = table_->GetAutofillProfile(profile.guid());
+  ASSERT_TRUE(db_profile);
+  EXPECT_EQ(kOtherValidityBitfieldValue,
+            db_profile->GetValidityBitfieldValue());
+}
+
 TEST_F(AutofillTableTest, SetGetServerCards) {
   std::vector<CreditCard> inputs;
   inputs.push_back(CreditCard(CreditCard::FULL_SERVER_CARD, "a123"));
@@ -2009,7 +2084,7 @@ class GetFormValuesTest : public testing::TestWithParam<GetFormValuesTestCase> {
 
  protected:
   void SetUp() override {
-    OSCryptMocker::SetUpWithSingleton();
+    OSCryptMocker::SetUp();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     file_ = temp_dir_.GetPath().AppendASCII("TestWebDatabase");
 

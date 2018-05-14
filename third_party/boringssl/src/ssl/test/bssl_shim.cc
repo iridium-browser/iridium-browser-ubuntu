@@ -56,6 +56,7 @@ OPENSSL_MSVC_PRAGMA(comment(lib, "Ws2_32.lib"))
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -63,7 +64,7 @@ OPENSSL_MSVC_PRAGMA(comment(lib, "Ws2_32.lib"))
 #include "../../crypto/internal.h"
 #include "../internal.h"
 #include "async_bio.h"
-#include "fuzzer.h"
+#include "fuzzer_tags.h"
 #include "packeted_bio.h"
 #include "test_config.h"
 
@@ -113,6 +114,11 @@ struct TestState {
   bool is_resume = false;
   bool early_callback_ready = false;
   bool custom_verify_ready = false;
+  std::string msg_callback_text;
+  bool msg_callback_ok = true;
+  // cert_verified is true if certificate verification has been driven to
+  // completion. This tests that the callback is not called again after this.
+  bool cert_verified = false;
 };
 
 static void TestStateExFree(void *parent, void *ptr, CRYPTO_EX_DATA *ad,
@@ -142,6 +148,32 @@ static bool SetTestState(SSL *ssl, std::unique_ptr<TestState> state) {
 
 static TestState *GetTestState(const SSL *ssl) {
   return (TestState *)SSL_get_ex_data(ssl, g_state_index);
+}
+
+static bool MoveExData(SSL *dest, SSL *src) {
+  TestState *state = GetTestState(src);
+  const TestConfig *config = GetTestConfig(src);
+  if (!SSL_set_ex_data(src, g_state_index, nullptr) ||
+      !SSL_set_ex_data(dest, g_state_index, state) ||
+      !SSL_set_ex_data(src, g_config_index, nullptr) ||
+      !SSL_set_ex_data(dest, g_config_index, (void *) config)) {
+    return false;
+  }
+
+  return true;
+}
+
+static void MoveBIOs(SSL *dest, SSL *src) {
+  BIO *rbio = SSL_get_rbio(src);
+  BIO_up_ref(rbio);
+  SSL_set0_rbio(dest, rbio);
+
+  BIO *wbio = SSL_get_wbio(src);
+  BIO_up_ref(wbio);
+  SSL_set0_wbio(dest, wbio);
+
+  SSL_set0_rbio(src, nullptr);
+  SSL_set0_wbio(src, nullptr);
 }
 
 static bool LoadCertificate(bssl::UniquePtr<X509> *out_x509,
@@ -427,10 +459,7 @@ static ssl_private_key_result_t AsyncPrivateKeyComplete(
 }
 
 static const SSL_PRIVATE_KEY_METHOD g_async_private_key_method = {
-    nullptr /* type */,
-    nullptr /* max_signature_len */,
     AsyncPrivateKeySign,
-    nullptr /* sign_digest */,
     AsyncPrivateKeyDecrypt,
     AsyncPrivateKeyComplete,
 };
@@ -446,27 +475,6 @@ static bool GetCertificate(SSL *ssl, bssl::UniquePtr<X509> *out_x509,
                            bssl::UniquePtr<STACK_OF(X509)> *out_chain,
                            bssl::UniquePtr<EVP_PKEY> *out_pkey) {
   const TestConfig *config = GetTestConfig(ssl);
-
-  if (!config->digest_prefs.empty()) {
-    bssl::UniquePtr<char> digest_prefs(
-        OPENSSL_strdup(config->digest_prefs.c_str()));
-    std::vector<int> digest_list;
-
-    for (;;) {
-      char *token =
-          strtok(digest_list.empty() ? digest_prefs.get() : nullptr, ",");
-      if (token == nullptr) {
-        break;
-      }
-
-      digest_list.push_back(EVP_MD_type(EVP_get_digestbyname(token)));
-    }
-
-    if (!SSL_set_private_key_digest_prefs(ssl, digest_list.data(),
-                                          digest_list.size())) {
-      return false;
-    }
-  }
 
   if (!config->signing_prefs.empty()) {
     std::vector<uint16_t> u16s(config->signing_prefs.begin(),
@@ -697,6 +705,11 @@ static bool CheckVerifyCallback(SSL *ssl) {
     }
   }
 
+  if (GetTestState(ssl)->cert_verified) {
+    fprintf(stderr, "Certificate verified twice.\n");
+    return false;
+  }
+
   return true;
 }
 
@@ -708,6 +721,7 @@ static int CertVerifyCallback(X509_STORE_CTX *store_ctx, void *arg) {
     return 0;
   }
 
+  GetTestState(ssl)->cert_verified = true;
   if (config->verify_fail) {
     store_ctx->error = X509_V_ERR_APPLICATION_VERIFICATION;
     return 0;
@@ -726,6 +740,7 @@ static ssl_verify_result_t CustomVerifyCallback(SSL *ssl, uint8_t *out_alert) {
     return ssl_verify_retry;
   }
 
+  GetTestState(ssl)->cert_verified = true;
   if (config->verify_fail) {
     return ssl_verify_invalid;
   }
@@ -842,7 +857,7 @@ static void ChannelIdCallback(SSL *ssl, EVP_PKEY **out_pkey) {
   *out_pkey = GetTestState(ssl)->channel_id.release();
 }
 
-static SSL_SESSION *GetSessionCallback(SSL *ssl, uint8_t *data, int len,
+static SSL_SESSION *GetSessionCallback(SSL *ssl, const uint8_t *data, int len,
                                        int *copy) {
   TestState *async_state = GetTestState(ssl);
   if (async_state->session) {
@@ -875,6 +890,12 @@ static void InfoCallback(const SSL *ssl, int type, int val) {
       // test fails.
       abort();
     }
+    // This callback is called when the handshake completes. |SSL_get_session|
+    // must continue to work and |SSL_in_init| must return false.
+    if (SSL_in_init(ssl) || SSL_get_session(ssl) == nullptr) {
+      fprintf(stderr, "Invalid state for SSL_CB_HANDSHAKE_DONE.\n");
+      abort();
+    }
     GetTestState(ssl)->handshake_done = true;
 
     // Callbacks may be called again on a new handshake.
@@ -884,6 +905,14 @@ static void InfoCallback(const SSL *ssl, int type, int val) {
 }
 
 static int NewSessionCallback(SSL *ssl, SSL_SESSION *session) {
+  // This callback is called as the handshake completes. |SSL_get_session|
+  // must continue to work and, historically, |SSL_in_init| returned false at
+  // this point.
+  if (SSL_in_init(ssl) || SSL_get_session(ssl) == nullptr) {
+    fprintf(stderr, "Invalid state for NewSessionCallback.\n");
+    abort();
+  }
+
   GetTestState(ssl)->got_new_session = true;
   GetTestState(ssl)->new_session.reset(session);
   return 1;
@@ -993,10 +1022,87 @@ static int ServerNameCallback(SSL *ssl, int *out_alert, void *arg) {
   return SSL_TLSEXT_ERR_OK;
 }
 
+static void MessageCallback(int is_write, int version, int content_type,
+                            const void *buf, size_t len, SSL *ssl, void *arg) {
+  const uint8_t *buf_u8 = reinterpret_cast<const uint8_t *>(buf);
+  const TestConfig *config = GetTestConfig(ssl);
+  TestState *state = GetTestState(ssl);
+  if (!state->msg_callback_ok) {
+    return;
+  }
+
+  if (content_type == SSL3_RT_HEADER) {
+    if (len !=
+        (config->is_dtls ? DTLS1_RT_HEADER_LENGTH : SSL3_RT_HEADER_LENGTH)) {
+      fprintf(stderr, "Incorrect length for record header: %zu\n", len);
+      state->msg_callback_ok = false;
+    }
+    return;
+  }
+
+  state->msg_callback_text += is_write ? "write " : "read ";
+  switch (content_type) {
+    case 0:
+      if (version != SSL2_VERSION) {
+        fprintf(stderr, "Incorrect version for V2ClientHello: %x\n", version);
+        state->msg_callback_ok = false;
+        return;
+      }
+      state->msg_callback_text += "v2clienthello\n";
+      return;
+
+    case SSL3_RT_HANDSHAKE: {
+      CBS cbs;
+      CBS_init(&cbs, buf_u8, len);
+      uint8_t type;
+      uint32_t msg_len;
+      if (!CBS_get_u8(&cbs, &type) ||
+          // TODO(davidben): Reporting on entire messages would be more
+          // consistent than fragments.
+          (config->is_dtls &&
+           !CBS_skip(&cbs, 3 /* total */ + 2 /* seq */ + 3 /* frag_off */)) ||
+          !CBS_get_u24(&cbs, &msg_len) ||
+          !CBS_skip(&cbs, msg_len) ||
+          CBS_len(&cbs) != 0) {
+        fprintf(stderr, "Could not parse handshake message.\n");
+        state->msg_callback_ok = false;
+        return;
+      }
+      char text[16];
+      snprintf(text, sizeof(text), "hs %d\n", type);
+      state->msg_callback_text += text;
+      return;
+    }
+
+    case SSL3_RT_CHANGE_CIPHER_SPEC:
+      if (len != 1 || buf_u8[0] != 1) {
+        fprintf(stderr, "Invalid ChangeCipherSpec.\n");
+        state->msg_callback_ok = false;
+        return;
+      }
+      state->msg_callback_text += "ccs\n";
+      return;
+
+    case SSL3_RT_ALERT:
+      if (len != 2) {
+        fprintf(stderr, "Invalid alert.\n");
+        state->msg_callback_ok = false;
+        return;
+      }
+      char text[16];
+      snprintf(text, sizeof(text), "alert %d %d\n", buf_u8[0], buf_u8[1]);
+      state->msg_callback_text += text;
+      return;
+
+    default:
+      fprintf(stderr, "Invalid content_type: %d\n", content_type);
+      state->msg_callback_ok = false;
+  }
+}
+
 // Connect returns a new socket connected to localhost on |port| or -1 on
 // error.
 static int Connect(uint16_t port) {
-  time_t start_time = time(nullptr);
   for (int af : { AF_INET6, AF_INET }) {
     int sock = socket(af, SOCK_STREAM, 0);
     if (sock == -1) {
@@ -1043,11 +1149,6 @@ static int Connect(uint16_t port) {
   }
 
   PrintSocketError("connect");
-  // TODO(davidben): Remove this logging when https://crbug.com/boringssl/199 is
-  // resolved.
-  fprintf(stderr, "start_time = %lld, end_time = %lld\n",
-          static_cast<long long>(start_time),
-          static_cast<long long>(time(nullptr)));
   return -1;
 }
 
@@ -1077,12 +1178,12 @@ class SocketCloser {
 };
 
 static void ssl_ctx_add_session(SSL_SESSION *session, void *void_param) {
-  SSL_SESSION *new_session = SSL_SESSION_dup(
+  SSL_CTX *ctx = reinterpret_cast<SSL_CTX *>(void_param);
+  bssl::UniquePtr<SSL_SESSION> new_session = bssl::SSL_SESSION_dup(
       session, SSL_SESSION_INCLUDE_NONAUTH | SSL_SESSION_INCLUDE_TICKET);
   if (new_session != nullptr) {
-    SSL_CTX_add_session((SSL_CTX *)void_param, new_session);
+    SSL_CTX_add_session(ctx, new_session.get());
   }
-  SSL_SESSION_free(new_session);
 }
 
 static bssl::UniquePtr<SSL_CTX> SetupCtx(SSL_CTX *old_ctx,
@@ -1179,6 +1280,9 @@ static bssl::UniquePtr<SSL_CTX> SetupCtx(SSL_CTX *old_ctx,
   if (!config->use_client_ca_list.empty()) {
     if (config->use_client_ca_list == "<NULL>") {
       SSL_CTX_set_client_CA_list(ssl_ctx.get(), nullptr);
+    } else if (config->use_client_ca_list == "<EMPTY>") {
+      bssl::UniquePtr<STACK_OF(X509_NAME)> names;
+      SSL_CTX_set_client_CA_list(ssl_ctx.get(), names.release());
     } else {
       bssl::UniquePtr<STACK_OF(X509_NAME)> names =
           DecodeHexX509Names(config->use_client_ca_list);
@@ -1222,6 +1326,12 @@ static bssl::UniquePtr<SSL_CTX> SetupCtx(SSL_CTX *old_ctx,
                                             u16s.size())) {
       return nullptr;
     }
+  }
+
+  SSL_CTX_set_msg_callback(ssl_ctx.get(), MessageCallback);
+
+  if (config->allow_false_start_without_alpn) {
+    SSL_CTX_set_false_start_allowed_without_alpn(ssl_ctx.get(), 1);
   }
 
   if (old_ctx) {
@@ -1302,6 +1412,32 @@ static bool RetryAsync(SSL *ssl, int ret) {
   }
 }
 
+// CheckIdempotentError runs |func|, an operation on |ssl|, ensuring that
+// errors are idempotent.
+static int CheckIdempotentError(const char *name, SSL *ssl,
+                                std::function<int()> func) {
+  int ret = func();
+  int ssl_err = SSL_get_error(ssl, ret);
+  uint32_t err = ERR_peek_error();
+  if (ssl_err == SSL_ERROR_SSL || ssl_err == SSL_ERROR_ZERO_RETURN) {
+    int ret2 = func();
+    int ssl_err2 = SSL_get_error(ssl, ret2);
+    uint32_t err2 = ERR_peek_error();
+    if (ret != ret2 || ssl_err != ssl_err2 || err != err2) {
+      fprintf(stderr, "Repeating %s did not replay the error.\n", name);
+      char buf[256];
+      ERR_error_string_n(err, buf, sizeof(buf));
+      fprintf(stderr, "Wanted: %d %d %s\n", ret, ssl_err, buf);
+      ERR_error_string_n(err2, buf, sizeof(buf));
+      fprintf(stderr, "Got:    %d %d %s\n", ret2, ssl_err2, buf);
+      // runner treats exit code 90 as always failing. Otherwise, it may
+      // accidentally consider the result an expected protocol failure.
+      exit(90);
+    }
+  }
+  return ret;
+}
+
 // DoRead reads from |ssl|, resolving any asynchronous operations. It returns
 // the result value of the final |SSL_read| call.
 static int DoRead(SSL *ssl, uint8_t *out, size_t max_out) {
@@ -1315,8 +1451,10 @@ static int DoRead(SSL *ssl, uint8_t *out, size_t max_out) {
       // trigger a retransmit, so disconnect the write quota.
       AsyncBioEnforceWriteQuota(test_state->async_bio, false);
     }
-    ret = config->peek_then_read ? SSL_peek(ssl, out, max_out)
-                                 : SSL_read(ssl, out, max_out);
+    ret = CheckIdempotentError("SSL_peek/SSL_read", ssl, [&]() -> int {
+      return config->peek_then_read ? SSL_peek(ssl, out, max_out)
+                                    : SSL_read(ssl, out, max_out);
+    });
     if (config->async) {
       AsyncBioEnforceWriteQuota(test_state->async_bio, true);
     }
@@ -1401,11 +1539,111 @@ static uint16_t GetProtocolVersion(const SSL *ssl) {
   return 0x0201 + ~version;
 }
 
+// CheckAuthProperties checks, after the initial handshake is completed or
+// after a renegotiation, that authentication-related properties match |config|.
+static bool CheckAuthProperties(SSL *ssl, bool is_resume,
+                                const TestConfig *config) {
+  if (!config->expected_ocsp_response.empty()) {
+    const uint8_t *data;
+    size_t len;
+    SSL_get0_ocsp_response(ssl, &data, &len);
+    if (config->expected_ocsp_response.size() != len ||
+        OPENSSL_memcmp(config->expected_ocsp_response.data(), data, len) != 0) {
+      fprintf(stderr, "OCSP response mismatch\n");
+      return false;
+    }
+  }
+
+  if (!config->expected_signed_cert_timestamps.empty()) {
+    const uint8_t *data;
+    size_t len;
+    SSL_get0_signed_cert_timestamp_list(ssl, &data, &len);
+    if (config->expected_signed_cert_timestamps.size() != len ||
+        OPENSSL_memcmp(config->expected_signed_cert_timestamps.data(), data,
+                       len) != 0) {
+      fprintf(stderr, "SCT list mismatch\n");
+      return false;
+    }
+  }
+
+  if (config->expect_verify_result) {
+    int expected_verify_result = config->verify_fail ?
+      X509_V_ERR_APPLICATION_VERIFICATION :
+      X509_V_OK;
+
+    if (SSL_get_verify_result(ssl) != expected_verify_result) {
+      fprintf(stderr, "Wrong certificate verification result\n");
+      return false;
+    }
+  }
+
+  if (!config->expect_peer_cert_file.empty()) {
+    bssl::UniquePtr<X509> expect_leaf;
+    bssl::UniquePtr<STACK_OF(X509)> expect_chain;
+    if (!LoadCertificate(&expect_leaf, &expect_chain,
+                         config->expect_peer_cert_file)) {
+      return false;
+    }
+
+    // For historical reasons, clients report a chain with a leaf and servers
+    // without.
+    if (!config->is_server) {
+      if (!sk_X509_insert(expect_chain.get(), expect_leaf.get(), 0)) {
+        return false;
+      }
+      X509_up_ref(expect_leaf.get());  // sk_X509_push takes ownership.
+    }
+
+    bssl::UniquePtr<X509> leaf(SSL_get_peer_certificate(ssl));
+    STACK_OF(X509) *chain = SSL_get_peer_cert_chain(ssl);
+    if (X509_cmp(leaf.get(), expect_leaf.get()) != 0) {
+      fprintf(stderr, "Received a different leaf certificate than expected.\n");
+      return false;
+    }
+
+    if (sk_X509_num(chain) != sk_X509_num(expect_chain.get())) {
+      fprintf(stderr, "Received a chain of length %zu instead of %zu.\n",
+              sk_X509_num(chain), sk_X509_num(expect_chain.get()));
+      return false;
+    }
+
+    for (size_t i = 0; i < sk_X509_num(chain); i++) {
+      if (X509_cmp(sk_X509_value(chain, i),
+                   sk_X509_value(expect_chain.get(), i)) != 0) {
+        fprintf(stderr, "Chain certificate %zu did not match.\n",
+                i + 1);
+        return false;
+      }
+    }
+  }
+
+  if (SSL_get_session(ssl)->peer_sha256_valid !=
+      config->expect_sha256_client_cert) {
+    fprintf(stderr,
+            "Unexpected SHA-256 client cert state: expected:%d is_resume:%d.\n",
+            config->expect_sha256_client_cert, is_resume);
+    return false;
+  }
+
+  if (config->expect_sha256_client_cert &&
+      SSL_get_session(ssl)->certs != nullptr) {
+    fprintf(stderr, "Have both client cert and SHA-256 hash: is_resume:%d.\n",
+            is_resume);
+    return false;
+  }
+
+  return true;
+}
+
 // CheckHandshakeProperties checks, immediately after |ssl| completes its
 // initial handshake (or False Starts), whether all the properties are
 // consistent with the test configuration and invariants.
 static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
                                      const TestConfig *config) {
+  if (!CheckAuthProperties(ssl, is_resume, config)) {
+    return false;
+  }
+
   if (SSL_get_current_cipher(ssl) == nullptr) {
     fprintf(stderr, "null cipher after handshake\n");
     return false;
@@ -1499,6 +1737,19 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
     }
   }
 
+  if (!config->expected_quic_transport_params.empty()) {
+    const uint8_t *peer_params;
+    size_t peer_params_len;
+    SSL_get_peer_quic_transport_params(ssl, &peer_params, &peer_params_len);
+    if (peer_params_len != config->expected_quic_transport_params.size() ||
+        OPENSSL_memcmp(peer_params,
+                       config->expected_quic_transport_params.data(),
+                       peer_params_len) != 0) {
+      fprintf(stderr, "QUIC transport params mismatch\n");
+      return false;
+    }
+  }
+
   if (!config->expected_channel_id.empty()) {
     uint8_t channel_id[64];
     if (!SSL_get_tls_channel_id(ssl, channel_id, sizeof(channel_id))) {
@@ -1509,6 +1760,18 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
         OPENSSL_memcmp(config->expected_channel_id.data(), channel_id, 64) !=
             0) {
       fprintf(stderr, "channel id mismatch\n");
+      return false;
+    }
+  }
+
+  if (config->expected_token_binding_param != -1) {
+    if (!SSL_is_token_binding_negotiated(ssl)) {
+      fprintf(stderr, "no Token Binding negotiated\n");
+      return false;
+    }
+    if (SSL_get_negotiated_token_binding_param(ssl) !=
+        static_cast<uint8_t>(config->expected_token_binding_param)) {
+      fprintf(stderr, "Token Binding param mismatch\n");
       return false;
     }
   }
@@ -1529,40 +1792,6 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
     fprintf(stderr,
             "Secure renegotiation unexpectedly negotiated for connection\n");
     return false;
-  }
-
-  if (!config->expected_ocsp_response.empty()) {
-    const uint8_t *data;
-    size_t len;
-    SSL_get0_ocsp_response(ssl, &data, &len);
-    if (config->expected_ocsp_response.size() != len ||
-        OPENSSL_memcmp(config->expected_ocsp_response.data(), data, len) != 0) {
-      fprintf(stderr, "OCSP response mismatch\n");
-      return false;
-    }
-  }
-
-  if (!config->expected_signed_cert_timestamps.empty()) {
-    const uint8_t *data;
-    size_t len;
-    SSL_get0_signed_cert_timestamp_list(ssl, &data, &len);
-    if (config->expected_signed_cert_timestamps.size() != len ||
-        OPENSSL_memcmp(config->expected_signed_cert_timestamps.data(), data,
-                       len) != 0) {
-      fprintf(stderr, "SCT list mismatch\n");
-      return false;
-    }
-  }
-
-  if (config->expect_verify_result) {
-    int expected_verify_result = config->verify_fail ?
-      X509_V_ERR_APPLICATION_VERIFICATION :
-      X509_V_OK;
-
-    if (SSL_get_verify_result(ssl) != expected_verify_result) {
-      fprintf(stderr, "Wrong certificate verification result\n");
-      return false;
-    }
   }
 
   if (config->expect_peer_signature_algorithm != 0 &&
@@ -1623,69 +1852,24 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
     }
   }
 
-  if (!config->expect_peer_cert_file.empty()) {
-    bssl::UniquePtr<X509> expect_leaf;
-    bssl::UniquePtr<STACK_OF(X509)> expect_chain;
-    if (!LoadCertificate(&expect_leaf, &expect_chain,
-                         config->expect_peer_cert_file)) {
-      return false;
-    }
-
-    // For historical reasons, clients report a chain with a leaf and servers
-    // without.
-    if (!config->is_server) {
-      if (!sk_X509_insert(expect_chain.get(), expect_leaf.get(), 0)) {
-        return false;
-      }
-      X509_up_ref(expect_leaf.get());  // sk_X509_push takes ownership.
-    }
-
-    bssl::UniquePtr<X509> leaf(SSL_get_peer_certificate(ssl));
-    STACK_OF(X509) *chain = SSL_get_peer_cert_chain(ssl);
-    if (X509_cmp(leaf.get(), expect_leaf.get()) != 0) {
-      fprintf(stderr, "Received a different leaf certificate than expected.\n");
-      return false;
-    }
-
-    if (sk_X509_num(chain) != sk_X509_num(expect_chain.get())) {
-      fprintf(stderr, "Received a chain of length %zu instead of %zu.\n",
-              sk_X509_num(chain), sk_X509_num(expect_chain.get()));
-      return false;
-    }
-
-    for (size_t i = 0; i < sk_X509_num(chain); i++) {
-      if (X509_cmp(sk_X509_value(chain, i),
-                   sk_X509_value(expect_chain.get(), i)) != 0) {
-        fprintf(stderr, "Chain certificate %zu did not match.\n",
-                i + 1);
-        return false;
-      }
-    }
-  }
-
-  bool expected_sha256_client_cert = config->expect_sha256_client_cert_initial;
-  if (is_resume) {
-    expected_sha256_client_cert = config->expect_sha256_client_cert_resume;
-  }
-
-  if (SSL_get_session(ssl)->peer_sha256_valid != expected_sha256_client_cert) {
-    fprintf(stderr,
-            "Unexpected SHA-256 client cert state: expected:%d is_resume:%d.\n",
-            expected_sha256_client_cert, is_resume);
-    return false;
-  }
-
-  if (expected_sha256_client_cert &&
-      SSL_get_session(ssl)->certs != nullptr) {
-    fprintf(stderr, "Have both client cert and SHA-256 hash: is_resume:%d.\n",
-            is_resume);
-    return false;
-  }
-
   if (is_resume && config->expect_ticket_age_skew != 0 &&
       SSL_get_ticket_age_skew(ssl) != config->expect_ticket_age_skew) {
     fprintf(stderr, "Ticket age skew was %" PRId32 ", wanted %d\n",
             SSL_get_ticket_age_skew(ssl), config->expect_ticket_age_skew);
+    return false;
+  }
+
+  if (config->expect_draft_downgrade != !!SSL_is_draft_downgrade(ssl)) {
+    fprintf(stderr, "Got %sdraft downgrade signal, but wanted the opposite.\n",
+            SSL_is_draft_downgrade(ssl) ? "" : "no ");
+    return false;
+  }
+
+  const bool did_dummy_pq_padding = !!SSL_dummy_pq_padding_used(ssl);
+  if (config->expect_dummy_pq_padding != did_dummy_pq_padding) {
+    fprintf(stderr,
+            "Dummy PQ padding %s observed, but expected the opposite.\n",
+            did_dummy_pq_padding ? "was" : "was not");
     return false;
   }
 
@@ -1753,7 +1937,8 @@ static bool WriteSettings(int i, const TestConfig *config,
   return fwrite(settings, settings_len, 1, file.get()) == 1;
 }
 
-static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session, SSL *ssl,
+static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
+                       bssl::UniquePtr<SSL> *ssl_uniqueptr,
                        const TestConfig *config, bool is_resume, bool is_retry);
 
 // DoConnection tests an SSL connection against the peer. On success, it returns
@@ -1846,6 +2031,12 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
       }
     }
   }
+  if (!config->send_token_binding_params.empty()) {
+    SSL_set_token_binding_params(ssl.get(),
+                                 reinterpret_cast<const uint8_t *>(
+                                     config->send_token_binding_params.data()),
+                                 config->send_token_binding_params.length());
+  }
   if (!config->host_name.empty() &&
       !SSL_set_tlsext_host_name(ssl.get(), config->host_name.c_str())) {
     return false;
@@ -1924,14 +2115,24 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
   if (config->max_cert_list > 0) {
     SSL_set_max_cert_list(ssl.get(), config->max_cert_list);
   }
-  if (!is_resume && config->retain_only_sha256_client_cert_initial) {
-    SSL_set_retain_only_sha256_of_client_certs(ssl.get(), 1);
-  }
-  if (is_resume && config->retain_only_sha256_client_cert_resume) {
+  if (config->retain_only_sha256_client_cert) {
     SSL_set_retain_only_sha256_of_client_certs(ssl.get(), 1);
   }
   if (config->max_send_fragment > 0) {
     SSL_set_max_send_fragment(ssl.get(), config->max_send_fragment);
+  }
+  if (config->dummy_pq_padding_len > 0 &&
+      !SSL_set_dummy_pq_padding_size(ssl.get(), config->dummy_pq_padding_len)) {
+    return false;
+  }
+  if (!config->quic_transport_params.empty()) {
+    if (!SSL_set_quic_transport_params(
+            ssl.get(),
+            reinterpret_cast<const uint8_t *>(
+                config->quic_transport_params.data()),
+            config->quic_transport_params.size())) {
+      return false;
+    }
   }
 
   int sock = Connect(config->port);
@@ -1990,7 +2191,7 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
     SSL_set_connect_state(ssl.get());
   }
 
-  bool ret = DoExchange(out_session, ssl.get(), config, is_resume, false);
+  bool ret = DoExchange(out_session, &ssl, config, is_resume, false);
   if (!config->is_server && is_resume && config->expect_reject_early_data) {
     // We must have failed due to an early data rejection.
     if (ret) {
@@ -2024,21 +2225,137 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
       return false;
     }
 
-    ret = DoExchange(out_session, ssl.get(), retry_config, is_resume, true);
+    assert(!config->handoff);
+    ret = DoExchange(out_session, &ssl, retry_config, is_resume, true);
   }
-  return ret;
+
+  if (!ret) {
+    return false;
+  }
+
+  if (!GetTestState(ssl.get())->msg_callback_ok) {
+    return false;
+  }
+
+  if (!config->expect_msg_callback.empty() &&
+      GetTestState(ssl.get())->msg_callback_text !=
+          config->expect_msg_callback) {
+    fprintf(stderr, "Bad message callback trace. Wanted:\n%s\nGot:\n%s\n",
+            config->expect_msg_callback.c_str(),
+            GetTestState(ssl.get())->msg_callback_text.c_str());
+    return false;
+  }
+
+  return true;
 }
 
-static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session, SSL *ssl,
+static bool HandoffReady(SSL *ssl, int ret) {
+  return ret < 0 && SSL_get_error(ssl, ret) == SSL_ERROR_HANDOFF;
+}
+
+static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
+                       bssl::UniquePtr<SSL> *ssl_uniqueptr,
                        const TestConfig *config, bool is_resume,
                        bool is_retry) {
   int ret;
+  SSL *ssl = ssl_uniqueptr->get();
+
   if (!config->implicit_handshake) {
+    if (config->handoff) {
+      bssl::UniquePtr<SSL_CTX> ctx_handoff(SSL_CTX_new(TLSv1_method()));
+      if (!ctx_handoff) {
+        return false;
+      }
+      SSL_CTX_set_handoff_mode(ctx_handoff.get(), 1);
+
+      bssl::UniquePtr<SSL> ssl_handoff(SSL_new(ctx_handoff.get()));
+      if (!ssl_handoff) {
+        return false;
+      }
+      SSL_set_accept_state(ssl_handoff.get());
+      if (!MoveExData(ssl_handoff.get(), ssl)) {
+        return false;
+      }
+      MoveBIOs(ssl_handoff.get(), ssl);
+
+      do {
+        ret = CheckIdempotentError("SSL_do_handshake", ssl_handoff.get(),
+                                   [&]() -> int {
+          return SSL_do_handshake(ssl_handoff.get());
+        });
+      } while (!HandoffReady(ssl_handoff.get(), ret) &&
+               config->async &&
+               RetryAsync(ssl_handoff.get(), ret));
+
+      if (!HandoffReady(ssl_handoff.get(), ret)) {
+        fprintf(stderr, "Handshake failed while waiting for handoff.\n");
+        return false;
+      }
+
+      bssl::ScopedCBB cbb;
+      bssl::Array<uint8_t> handoff;
+      if (!CBB_init(cbb.get(), 512) ||
+          !SSL_serialize_handoff(ssl_handoff.get(), cbb.get()) ||
+          !CBBFinishArray(cbb.get(), &handoff)) {
+        fprintf(stderr, "Handoff serialisation failed.\n");
+        return false;
+      }
+
+      MoveBIOs(ssl, ssl_handoff.get());
+      if (!MoveExData(ssl, ssl_handoff.get())) {
+        return false;
+      }
+
+      if (!SSL_apply_handoff(ssl, handoff)) {
+        fprintf(stderr, "Handoff application failed.\n");
+        return false;
+      }
+    }
+
     do {
-      ret = SSL_do_handshake(ssl);
+      ret = CheckIdempotentError("SSL_do_handshake", ssl, [&]() -> int {
+        return SSL_do_handshake(ssl);
+      });
     } while (config->async && RetryAsync(ssl, ret));
+
     if (ret != 1 ||
         !CheckHandshakeProperties(ssl, is_resume, config)) {
+      return false;
+    }
+
+    if (config->handoff) {
+      bssl::ScopedCBB cbb;
+      bssl::Array<uint8_t> handback;
+      if (!CBB_init(cbb.get(), 512) ||
+          !SSL_serialize_handback(ssl, cbb.get()) ||
+          !CBBFinishArray(cbb.get(), &handback)) {
+        fprintf(stderr, "Handback serialisation failed.\n");
+        return false;
+      }
+
+      bssl::UniquePtr<SSL_CTX> ctx_handback(SSL_CTX_new(TLSv1_method()));
+      SSL_CTX_set_msg_callback(ctx_handback.get(), MessageCallback);
+      bssl::UniquePtr<SSL> ssl_handback(SSL_new(ctx_handback.get()));
+      if (!ssl_handback) {
+        return false;
+      }
+      if (!SSL_apply_handback(ssl_handback.get(), handback)) {
+        fprintf(stderr, "Applying handback failed.\n");
+        return false;
+      }
+
+      MoveBIOs(ssl_handback.get(), ssl);
+      if (!MoveExData(ssl_handback.get(), ssl)) {
+        return false;
+      }
+
+      *ssl_uniqueptr = std::move(ssl_handback);
+      ssl = ssl_uniqueptr->get();
+    }
+
+    if (is_resume && !is_retry && !config->is_server &&
+        config->expect_no_offer_early_data && SSL_in_early_data(ssl)) {
+      fprintf(stderr, "Client unexpectedly offered early data.\n");
       return false;
     }
 
@@ -2061,6 +2378,22 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session, SSL *ssl,
     // Reset the state to assert later that the callback isn't called in
     // renegotations.
     GetTestState(ssl)->got_new_session = false;
+  }
+
+  if (config->export_early_keying_material > 0) {
+    std::vector<uint8_t> result(
+        static_cast<size_t>(config->export_early_keying_material));
+    if (!SSL_export_early_keying_material(
+            ssl, result.data(), result.size(), config->export_label.data(),
+            config->export_label.size(),
+            reinterpret_cast<const uint8_t *>(config->export_context.data()),
+            config->export_context.size())) {
+      fprintf(stderr, "failed to export keying material\n");
+      return false;
+    }
+    if (WriteAll(ssl, result.data(), result.size()) < 0) {
+      return false;
+    }
   }
 
   if (config->export_keying_material > 0) {
@@ -2237,14 +2570,13 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session, SSL *ssl,
     }
 
     if (expect_new_session) {
-      bool got_early_data_info =
+      bool got_early_data =
           GetTestState(ssl)->new_session->ticket_max_early_data != 0;
-      if (config->expect_early_data_info != got_early_data_info) {
-        fprintf(
-            stderr,
-            "new session did%s include ticket_early_data_info, but we expected "
-            "the opposite\n",
-            got_early_data_info ? "" : " not");
+      if (config->expect_ticket_supports_early_data != got_early_data) {
+        fprintf(stderr,
+                "new session did%s support early data, but we expected the "
+                "opposite\n",
+                got_early_data ? "" : " not");
         return false;
       }
     }
@@ -2272,6 +2604,26 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session, SSL *ssl,
     return false;
   }
 
+  if (SSL_total_renegotiations(ssl) > 0) {
+    if (!SSL_get_session(ssl)->not_resumable) {
+      fprintf(stderr,
+              "Renegotiations should never produce resumable sessions.\n");
+      return false;
+    }
+
+    if (SSL_session_reused(ssl)) {
+      fprintf(stderr, "Renegotiations should never resume sessions.\n");
+      return false;
+    }
+
+    // Re-check authentication properties after a renegotiation. The reported
+    // values should remain unchanged even if the server sent different SCT
+    // lists.
+    if (!CheckAuthProperties(ssl, is_resume, config)) {
+      return false;
+    }
+  }
+
   if (SSL_total_renegotiations(ssl) != config->expect_total_renegotiations) {
     fprintf(stderr, "Expected %d renegotiations, got %d\n",
             config->expect_total_renegotiations, SSL_total_renegotiations(ssl));
@@ -2292,7 +2644,7 @@ int main(int argc, char **argv) {
   StderrDelimiter delimiter;
 
 #if defined(OPENSSL_WINDOWS)
-  /* Initialize Winsock. */
+  // Initialize Winsock.
   WORD wsa_version = MAKEWORD(2, 2);
   WSADATA wsa_data;
   int wsa_err = WSAStartup(wsa_version, &wsa_data);

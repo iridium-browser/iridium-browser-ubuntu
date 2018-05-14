@@ -31,8 +31,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/singleton_tabs.h"
-#include "chrome/browser/ui/user_manager.h"
-#include "chrome/browser/ui/webui/profile_helper.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/chrome_switches.h"
@@ -42,11 +40,11 @@
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/browser/signin_metrics.h"
-#include "components/signin/core/common/profile_management_switches.h"
-#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/browser/signin_pref_names.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/sync/base/passphrase_type.h"
 #include "components/sync/base/sync_prefs.h"
@@ -62,7 +60,16 @@
 #if defined(OS_CHROMEOS)
 #include "components/signin/core/browser/signin_manager_base.h"
 #else
+#include "chrome/browser/ui/user_manager.h"
+#include "chrome/browser/ui/webui/profile_helper.h"
 #include "components/signin/core/browser/signin_manager.h"
+#endif
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+#include "chrome/browser/profiles/profile_avatar_icon_util.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
+#include "components/signin/core/browser/account_tracker_service.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image.h"
 #endif
 
 using browser_sync::ProfileSyncService;
@@ -186,7 +193,14 @@ PeopleHandler::PeopleHandler(Profile* profile)
     : profile_(profile),
       configuring_sync_(false),
       signin_observer_(this),
-      sync_service_observer_(this) {}
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+      sync_service_observer_(this),
+      account_tracker_observer_(this) {
+}
+#else
+      sync_service_observer_(this) {
+}
+#endif
 
 PeopleHandler::~PeopleHandler() {
   // Early exit if running unit tests (no actual WebUI is attached).
@@ -231,6 +245,16 @@ void PeopleHandler::RegisterMessages() {
       "SyncSetupStartSignIn",
       base::Bind(&PeopleHandler::HandleStartSignin, base::Unretained(this)));
 #endif
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  web_ui()->RegisterMessageCallback(
+      "SyncSetupGetStoredAccounts",
+      base::BindRepeating(&PeopleHandler::HandleGetStoredAccounts,
+                          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "SyncSetupStartSyncingWithEmail",
+      base::BindRepeating(&PeopleHandler::HandleStartSyncingWithEmail,
+                          base::Unretained(this)));
+#endif
 }
 
 void PeopleHandler::OnJavascriptAllowed() {
@@ -249,12 +273,22 @@ void PeopleHandler::OnJavascriptAllowed() {
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_));
   if (sync_service)
     sync_service_observer_.Add(sync_service);
+
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  AccountTrackerService* account_tracker(
+      AccountTrackerServiceFactory::GetForProfile(profile_));
+  if (account_tracker)
+    account_tracker_observer_.Add(account_tracker);
+#endif
 }
 
 void PeopleHandler::OnJavascriptDisallowed() {
   profile_pref_registrar_.RemoveAll();
   signin_observer_.RemoveAll();
   sync_service_observer_.RemoveAll();
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  account_tracker_observer_.RemoveAll();
+#endif
 }
 
 #if !defined(OS_CHROMEOS)
@@ -297,7 +331,7 @@ void PeopleHandler::DisplayGaiaLoginInNewTabOrWindow(
           BrowserWindow::AVATAR_BUBBLE_MODE_REAUTH,
           signin::ManageAccountsParams(), access_point, false);
     } else {
-      url = signin::GetReauthURL(
+      url = signin::GetReauthURLForTab(
           access_point, signin_metrics::Reason::REASON_REAUTHENTICATION,
           browser->profile(), error_controller->error_account_id());
     }
@@ -307,14 +341,14 @@ void PeopleHandler::DisplayGaiaLoginInNewTabOrWindow(
           BrowserWindow::AVATAR_BUBBLE_MODE_SIGNIN,
           signin::ManageAccountsParams(), access_point, false);
     } else {
-      url = signin::GetPromoURL(
+      url = signin::GetPromoURLForTab(
           access_point, signin_metrics::Reason::REASON_SIGNIN_PRIMARY_ACCOUNT,
           true);
     }
   }
 
   if (url.is_valid())
-    chrome::ShowSingletonTab(browser, url);
+    ShowSingletonTab(browser, url);
 }
 #endif
 
@@ -406,6 +440,68 @@ void PeopleHandler::HandleSetDatatypes(const base::ListValue* args) {
   if (!configuration.sync_everything)
     ProfileMetrics::LogProfileSyncInfo(ProfileMetrics::SYNC_CHOOSE);
 }
+
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+void PeopleHandler::HandleGetStoredAccounts(const base::ListValue* args) {
+  CHECK_EQ(1U, args->GetSize());
+  const base::Value* callback_id;
+  CHECK(args->Get(0, &callback_id));
+
+  ResolveJavascriptCallback(*callback_id, *GetStoredAccountsList());
+}
+
+void PeopleHandler::OnAccountUpdated(const AccountInfo& info) {
+  FireWebUIListener("stored-accounts-updated", *GetStoredAccountsList());
+}
+
+void PeopleHandler::OnAccountRemoved(const AccountInfo& info) {
+  FireWebUIListener("stored-accounts-updated", *GetStoredAccountsList());
+}
+
+std::unique_ptr<base::ListValue> PeopleHandler::GetStoredAccountsList() {
+  std::vector<AccountInfo> accounts =
+      signin_ui_util::GetAccountsForDicePromos(profile_);
+
+  AccountTrackerService* account_tracker =
+      AccountTrackerServiceFactory::GetForProfile(profile_);
+  std::unique_ptr<base::ListValue> accounts_list(new base::ListValue);
+  accounts_list->Reserve(accounts.size());
+
+  for (auto const& account : accounts) {
+    accounts_list->GetList().push_back(
+        base::Value(base::Value::Type::DICTIONARY));
+    base::Value& acc = accounts_list->GetList().back();
+    acc.SetKey("email", base::Value(account.email));
+    acc.SetKey("fullName", base::Value(account.full_name));
+    acc.SetKey("givenName", base::Value(account.given_name));
+    const gfx::Image& account_image =
+        account_tracker->GetAccountImage(account.account_id);
+    if (!account_image.IsEmpty()) {
+      acc.SetKey(
+          "avatarImage",
+          base::Value(webui::GetBitmapDataUrl(account_image.AsBitmap())));
+    }
+  }
+
+  return accounts_list;
+}
+
+void PeopleHandler::HandleStartSyncingWithEmail(const base::ListValue* args) {
+  const base::Value* email;
+  CHECK(args->Get(0, &email));
+
+  Browser* browser =
+      chrome::FindBrowserWithWebContents(web_ui()->GetWebContents());
+
+  AccountTrackerService* account_tracker =
+      AccountTrackerServiceFactory::GetForProfile(profile_);
+  AccountInfo account =
+      account_tracker->FindAccountInfoByEmail(email->GetString());
+
+  signin_ui_util::EnableSync(
+      browser, account, signin_metrics::AccessPoint::ACCESS_POINT_SETTINGS);
+}
+#endif
 
 void PeopleHandler::HandleSetEncryption(const base::ListValue* args) {
   DCHECK(!sync_startup_tracker_);
@@ -545,7 +641,6 @@ void PeopleHandler::HandleStopSyncing(const base::ListValue* args) {
 
   if (delete_profile) {
     webui::DeleteProfileAtPath(profile_->GetPath(),
-                               web_ui(),
                                ProfileMetrics::DELETE_PROFILE_SETTINGS);
   }
 }
@@ -562,8 +657,10 @@ void PeopleHandler::HandleGetSyncStatus(const base::ListValue* args) {
 }
 
 void PeopleHandler::HandleManageOtherPeople(const base::ListValue* /* args */) {
+#if !defined(OS_CHROMEOS)
   UserManager::Show(base::FilePath(),
                     profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
+#endif  // !defined(OS_CHROMEOS)
 }
 
 void PeopleHandler::CloseSyncSetup() {
@@ -733,9 +830,6 @@ void PeopleHandler::OnStateChanged(syncer::SyncService* sync) {
 
 std::unique_ptr<base::DictionaryValue>
 PeopleHandler::GetSyncStatusDictionary() {
-  // The items which are to be written into |sync_status| are also described in
-  // chrome/browser/resources/options/browser_options.js in @typedef
-  // for SyncStatus. Please update it whenever you add or remove any keys here.
   std::unique_ptr<base::DictionaryValue> sync_status(new base::DictionaryValue);
   if (profile_->IsGuestSession()) {
     // Cannot display signin status when running in guest mode on chromeos
@@ -765,8 +859,6 @@ PeopleHandler::GetSyncStatusDictionary() {
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_);
   sync_status->SetBoolean("signinAllowed", signin->IsSigninAllowed());
   sync_status->SetBoolean("syncSystemEnabled", (service != nullptr));
-  sync_status->SetBoolean("setupCompleted",
-                          service && service->IsFirstSetupComplete());
   sync_status->SetBoolean(
       "setupInProgress",
       service && !service->IsManaged() && service->IsFirstSetupInProgress());
@@ -789,7 +881,6 @@ PeopleHandler::GetSyncStatusDictionary() {
                          signin_ui_util::GetAuthenticatedUsername(signin));
   sync_status->SetBoolean("hasUnrecoverableError",
                           service && service->HasUnrecoverableError());
-
   return sync_status;
 }
 

@@ -41,9 +41,7 @@ class ExecutionContext;
 class URLRegistrable;
 class URLSearchParams;
 
-class DOMURL final : public GarbageCollectedFinalized<DOMURL>,
-                     public ScriptWrappable,
-                     public DOMURLUtils {
+class DOMURL final : public ScriptWrappable, public DOMURLUtils {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -58,10 +56,7 @@ class DOMURL final : public GarbageCollectedFinalized<DOMURL>,
   }
   ~DOMURL();
 
-  CORE_EXPORT static String CreatePublicURL(ExecutionContext*,
-                                            URLRegistrable*,
-                                            const String& uuid = String());
-  static void RevokeObjectUUID(ExecutionContext*, const String&);
+  CORE_EXPORT static String CreatePublicURL(ExecutionContext*, URLRegistrable*);
 
   KURL Url() const override { return url_; }
   void SetURL(const KURL& url) override { url_ = url; }
@@ -73,7 +68,7 @@ class DOMURL final : public GarbageCollectedFinalized<DOMURL>,
 
   URLSearchParams* searchParams();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   friend class URLSearchParams;

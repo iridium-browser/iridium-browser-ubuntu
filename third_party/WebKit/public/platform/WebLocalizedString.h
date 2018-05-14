@@ -86,13 +86,17 @@ struct WebLocalizedString {
     kCalendarClear,
     kCalendarToday,
     kDetailsLabel,
-    kDownloadButtonLabel,
     kFileButtonChooseFileLabel,
     kFileButtonChooseMultipleFilesLabel,
     kFileButtonNoFileSelectedLabel,
     kInputElementAltText,
-    kMediaRemotingDisableText,
     kMediaRemotingCastText,
+    kMediaRemotingCastToUnknownDeviceText,
+    kMediaRemotingStopByErrorText,
+    kMediaRemotingStopByPlaybackQualityText,
+    kMediaRemotingStopNoText,
+    kMediaRemotingStopText,
+    kMediaScrubbingMessageText,
     kMissingPluginText,
     kMultipleFileUploadText,
     kOtherColorLabel,
@@ -100,24 +104,26 @@ struct WebLocalizedString {
     kOtherMonthLabel,
     kOtherWeekLabel,
     kOverflowMenuCaptions,
+    kOverflowMenuCaptionsSubmenuTitle,
     kOverflowMenuCast,
     kOverflowMenuEnterFullscreen,
     kOverflowMenuExitFullscreen,
-    kOverflowMenuStopCast,
     kOverflowMenuMute,
     kOverflowMenuUnmute,
     kOverflowMenuPlay,
     kOverflowMenuPause,
     kOverflowMenuDownload,
-    // PlaceholderForDayOfMonthField is for day placeholder text, e.g.
+    kOverflowMenuPictureInPicture,
+    kPictureInPictureInterstitialText,
+    // kPlaceholderForDayOfMonthField is for day placeholder text, e.g.
     // "dd", for date field used in multiple fields "date", "datetime", and
     // "datetime-local" input UI instead of "--".
     kPlaceholderForDayOfMonthField,
-    // PlaceholderForfMonthField is for month placeholder text, e.g.
+    // kPlaceholderForfMonthField is for month placeholder text, e.g.
     // "mm", for month field used in multiple fields "date", "datetime", and
     // "datetime-local" input UI instead of "--".
     kPlaceholderForMonthField,
-    // PlaceholderForYearField is for year placeholder text, e.g. "yyyy",
+    // kPlaceholderForYearField is for year placeholder text, e.g. "yyyy",
     // for year field used in multiple fields "date", "datetime", and
     // "datetime-local" input UI instead of "----".
     kPlaceholderForYearField,
@@ -128,6 +134,11 @@ struct WebLocalizedString {
     kTextTracksOff,
     kThisMonthButtonLabel,
     kThisWeekButtonLabel,
+    kUnitsKibibytes,
+    kUnitsMebibytes,
+    kUnitsGibibytes,
+    kUnitsTebibytes,
+    kUnitsPebibytes,
     kValidationBadInputForNumber,
     kValidationBadInputForDateTime,
     kValidationPatternMismatch,

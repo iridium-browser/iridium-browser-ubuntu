@@ -2,12 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This file provides defines needed by PaintVectorIcon and is implemented
-// by the generated file vector_icons.cc.
-
 #ifndef UI_GFX_VECTOR_ICON_TYPES_H_
 #define UI_GFX_VECTOR_ICON_TYPES_H_
 
+#include "base/macros.h"
 #include "third_party/skia/include/core/SkScalar.h"
 #include "ui/gfx/animation/tween.h"
 
@@ -21,6 +19,8 @@ const int kReferenceSizeDip = 48;
 enum CommandType {
   // A new <path> element. For the first path, this is assumed.
   NEW_PATH,
+  // Sets the alpha for the current path.
+  PATH_COLOR_ALPHA,
   // Sets the color for the current path.
   PATH_COLOR_ARGB,
   // Sets the path to clear mode (Skia's kClear_Mode).
@@ -63,7 +63,8 @@ enum CommandType {
   // Parameters are delay (ms), duration (ms), and tween type
   // (gfx::Tween::Type).
   TRANSITION_END,
-  // Marks the end of the list of commands.
+  // Marks the end of the list of commands. TODO(estade): remove this sentinel
+  // value and rely on VectorIcon::path_size.
   END
 };
 
@@ -79,10 +80,27 @@ struct PathElement {
 };
 
 struct VectorIcon {
+  VectorIcon() = default;
+
   bool is_empty() const { return !path; }
 
-  const gfx::PathElement* path;
-  const gfx::PathElement* path_1x;
+  const gfx::PathElement* path = nullptr;
+  // The length of |path|.
+  size_t path_size = 0u;
+
+  const gfx::PathElement* path_1x = nullptr;
+  // The length of |path_1x|.
+  size_t path_1x_size = 0u;
+
+  // A human-readable name, useful for debugging, derived from the name of the
+  // icon file. This can also be used as an identifier, but vector icon targets
+  // should be careful to ensure this is unique.
+  const char* name = nullptr;
+
+  bool operator<(const VectorIcon& other) const;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(VectorIcon);
 };
 
 }  // namespace gfx

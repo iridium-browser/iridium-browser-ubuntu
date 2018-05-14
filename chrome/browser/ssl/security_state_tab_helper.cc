@@ -5,6 +5,8 @@
 #include "chrome/browser/ssl/security_state_tab_helper.h"
 
 #include "base/bind.h"
+#include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -13,12 +15,15 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/features.h"
 #include "components/security_state/content/content_utils.h"
 #include "components/ssl_config/ssl_config_prefs.h"
+#include "components/toolbar/toolbar_field_trial.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/origin_util.h"
 #include "net/base/net_errors.h"
@@ -26,12 +31,31 @@
 #include "net/ssl/ssl_cipher_suite_names.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
-#include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/policy/policy_cert_service.h"
 #include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(SAFE_BROWSING_DB_LOCAL)
+#include "chrome/browser/safe_browsing/chrome_password_protection_service.h"
+#endif
+
+namespace {
+
+void RecordSecurityLevel(const security_state::SecurityInfo& security_info) {
+  if (security_info.scheme_is_cryptographic) {
+    UMA_HISTOGRAM_ENUMERATION("Security.SecurityLevel.CryptographicScheme",
+                              security_info.security_level,
+                              security_state::SECURITY_LEVEL_COUNT);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION("Security.SecurityLevel.NoncryptographicScheme",
+                              security_info.security_level,
+                              security_state::SECURITY_LEVEL_COUNT);
+  }
+}
+
+}  // namespace
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(SecurityStateTabHelper);
 
@@ -58,48 +82,15 @@ void SecurityStateTabHelper::GetSecurityInfo(
                                   base::Bind(&content::IsOriginSecure), result);
 }
 
-void SecurityStateTabHelper::VisibleSecurityStateChanged() {
-  if (logged_http_warning_on_current_navigation_)
-    return;
-
-  security_state::SecurityInfo security_info;
-  GetSecurityInfo(&security_info);
-  if (!security_info.displayed_password_field_on_http &&
-      !security_info.displayed_credit_card_field_on_http) {
-    return;
-  }
-
-  DCHECK(time_of_http_warning_on_current_navigation_.is_null());
-  time_of_http_warning_on_current_navigation_ = base::Time::Now();
-
-  logged_http_warning_on_current_navigation_ = true;
-  web_contents()->GetMainFrame()->AddMessageToConsole(
-      content::CONSOLE_MESSAGE_LEVEL_WARNING,
-      "This page includes a password or credit card input in a non-secure "
-      "context. A warning has been added to the URL bar. For more "
-      "information, see https://goo.gl/zmWq3m.");
-
-  // |warning_is_user_visible| will only be false if the user has set the flag
-  // for marking HTTP pages as Dangerous. In that case, the page will be
-  // flagged as Dangerous, but it isn't distinguished from other HTTP pages,
-  // which is why this code records it as not-user-visible.
-  bool warning_is_user_visible =
-      (security_info.security_level == security_state::HTTP_SHOW_WARNING);
-
-  if (security_info.displayed_credit_card_field_on_http) {
-    UMA_HISTOGRAM_BOOLEAN(
-        "Security.HTTPBad.UserWarnedAboutSensitiveInput.CreditCard",
-        warning_is_user_visible);
-  }
-  if (security_info.displayed_password_field_on_http) {
-    UMA_HISTOGRAM_BOOLEAN(
-        "Security.HTTPBad.UserWarnedAboutSensitiveInput.Password",
-        warning_is_user_visible);
-  }
-}
-
 void SecurityStateTabHelper::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
+  if (navigation_handle->IsFormSubmission()) {
+    security_state::SecurityInfo info;
+    GetSecurityInfo(&info);
+    UMA_HISTOGRAM_ENUMERATION("Security.SecurityLevel.FormSubmission",
+                              info.security_level,
+                              security_state::SECURITY_LEVEL_COUNT);
+  }
   if (time_of_http_warning_on_current_navigation_.is_null() ||
       !navigation_handle->IsInMainFrame() ||
       navigation_handle->IsSameDocument()) {
@@ -129,6 +120,15 @@ void SecurityStateTabHelper::DidFinishNavigation(
     return;
   }
 
+  content::NavigationEntry* entry =
+      web_contents()->GetController().GetLastCommittedEntry();
+  if (entry) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "Security.CertificateTransparency.MainFrameNavigationCompliance",
+        entry->GetSSL().ct_policy_compliance,
+        net::ct::CTPolicyCompliance::CT_POLICY_MAX);
+  }
+
   logged_http_warning_on_current_navigation_ = false;
 
   security_state::SecurityInfo security_info;
@@ -139,6 +139,85 @@ void SecurityStateTabHelper::DidFinishNavigation(
         "This page was loaded non-securely in an incognito mode browser. A "
         "warning has been added to the URL bar. For more information, see "
         "https://goo.gl/y8SRRv.");
+  }
+  if (net::IsCertStatusError(security_info.cert_status) &&
+      !net::IsCertStatusMinorError(security_info.cert_status)) {
+    // Record each time a user visits a site after having clicked through a
+    // certificate warning interstitial. This is used as a baseline for
+    // interstitial.ssl.did_user_revoke_decision2 in order to determine how
+    // many times the re-enable warnings button is clicked, as a fraction of
+    // the number of times it was available.
+    UMA_HISTOGRAM_BOOLEAN("interstitial.ssl.visited_site_after_warning", true);
+  }
+
+  // Security indicator UI study (https://crbug.com/803501): Show a message in
+  // the console to reduce developer confusion about the experimental UI
+  // treatments for HTTPS pages with EV certificates.
+  const std::string parameter =
+      base::FeatureList::IsEnabled(toolbar::features::kSimplifyHttpsIndicator)
+          ? base::GetFieldTrialParamValueByFeature(
+                toolbar::features::kSimplifyHttpsIndicator,
+                toolbar::features::kSimplifyHttpsIndicatorParameterName)
+          : std::string();
+  if (security_info.security_level == security_state::EV_SECURE) {
+    if (parameter ==
+        toolbar::features::kSimplifyHttpsIndicatorParameterEvToSecure) {
+      web_contents()->GetMainFrame()->AddMessageToConsole(
+          content::CONSOLE_MESSAGE_LEVEL_INFO,
+          "As part of an experiment, Chrome temporarily shows only the "
+          "\"Secure\" text in the address bar. Your SSL certificate with "
+          "Extended Validation is still valid.");
+    }
+    if (parameter ==
+        toolbar::features::kSimplifyHttpsIndicatorParameterBothToLock) {
+      web_contents()->GetMainFrame()->AddMessageToConsole(
+          content::CONSOLE_MESSAGE_LEVEL_INFO,
+          "As part of an experiment, Chrome temporarily shows only the lock "
+          "icon in the address bar. Your SSL certificate with Extended "
+          "Validation is still valid.");
+    }
+  }
+}
+
+void SecurityStateTabHelper::DidChangeVisibleSecurityState() {
+  security_state::SecurityInfo security_info;
+  GetSecurityInfo(&security_info);
+  RecordSecurityLevel(security_info);
+
+  if (logged_http_warning_on_current_navigation_)
+    return;
+
+  if (!security_info.insecure_input_events.password_field_shown &&
+      !security_info.insecure_input_events.credit_card_field_edited) {
+    return;
+  }
+
+  DCHECK(time_of_http_warning_on_current_navigation_.is_null());
+  time_of_http_warning_on_current_navigation_ = base::Time::Now();
+
+  logged_http_warning_on_current_navigation_ = true;
+  web_contents()->GetMainFrame()->AddMessageToConsole(
+      content::CONSOLE_MESSAGE_LEVEL_WARNING,
+      "This page includes a password or credit card input in a non-secure "
+      "context. A warning has been added to the URL bar. For more "
+      "information, see https://goo.gl/zmWq3m.");
+
+  // |warning_is_user_visible| will only be false if the user has set the flag
+  // for marking HTTP pages as Dangerous. In that case, the page will be
+  // flagged as Dangerous, but it isn't distinguished from other HTTP pages,
+  // which is why this code records it as not-user-visible.
+  bool warning_is_user_visible =
+      (security_info.security_level == security_state::HTTP_SHOW_WARNING);
+
+  if (security_info.insecure_input_events.credit_card_field_edited) {
+    UMA_HISTOGRAM_BOOLEAN(
+        "Security.HTTPBad.UserWarnedAboutSensitiveInput.CreditCard",
+        warning_is_user_visible);
+  }
+  if (security_info.insecure_input_events.password_field_shown) {
+    UMA_HISTOGRAM_BOOLEAN(
+        "Security.HTTPBad.UserWarnedAboutSensitiveInput.Password",
+        warning_is_user_visible);
   }
 }
 
@@ -185,22 +264,36 @@ SecurityStateTabHelper::GetMaliciousContentStatus() const {
         break;
       case safe_browsing::SB_THREAT_TYPE_URL_PHISHING:
       case safe_browsing::SB_THREAT_TYPE_URL_CLIENT_SIDE_PHISHING:
-      case safe_browsing::SB_THREAT_TYPE_URL_PASSWORD_PROTECTION_PHISHING:
         return security_state::MALICIOUS_CONTENT_STATUS_SOCIAL_ENGINEERING;
-        break;
       case safe_browsing::SB_THREAT_TYPE_URL_MALWARE:
       case safe_browsing::SB_THREAT_TYPE_URL_CLIENT_SIDE_MALWARE:
         return security_state::MALICIOUS_CONTENT_STATUS_MALWARE;
-        break;
       case safe_browsing::SB_THREAT_TYPE_URL_UNWANTED:
         return security_state::MALICIOUS_CONTENT_STATUS_UNWANTED_SOFTWARE;
+      case safe_browsing::SB_THREAT_TYPE_PASSWORD_REUSE:
+#if defined(SAFE_BROWSING_DB_LOCAL)
+        if (base::FeatureList::IsEnabled(
+                safe_browsing::kGoogleBrandedPhishingWarning)) {
+          if (safe_browsing::ChromePasswordProtectionService::
+                  ShouldShowChangePasswordSettingUI(Profile::FromBrowserContext(
+                      web_contents()->GetBrowserContext()))) {
+            return security_state::MALICIOUS_CONTENT_STATUS_PASSWORD_REUSE;
+          }
+          // If user has already changed Gaia password, returns the regular
+          // social engineering content status.
+          return security_state::MALICIOUS_CONTENT_STATUS_SOCIAL_ENGINEERING;
+        }
         break;
+#endif
+      case safe_browsing::
+          DEPRECATED_SB_THREAT_TYPE_URL_PASSWORD_PROTECTION_PHISHING:
       case safe_browsing::SB_THREAT_TYPE_URL_BINARY_MALWARE:
       case safe_browsing::SB_THREAT_TYPE_EXTENSION:
       case safe_browsing::SB_THREAT_TYPE_BLACKLISTED_RESOURCE:
       case safe_browsing::SB_THREAT_TYPE_API_ABUSE:
       case safe_browsing::SB_THREAT_TYPE_SUBRESOURCE_FILTER:
       case safe_browsing::SB_THREAT_TYPE_CSD_WHITELIST:
+      case safe_browsing::SB_THREAT_TYPE_AD_SAMPLE:
         // These threat types are not currently associated with
         // interstitials, and thus resources with these threat types are
         // not ever whitelisted or pending whitelisting.

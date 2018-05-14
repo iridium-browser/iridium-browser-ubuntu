@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_scheduler/post_task.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -23,24 +22,6 @@
 #include "storage/browser/fileapi/file_system_url.h"
 
 using content::BrowserThread;
-
-namespace google_apis {
-namespace internal {
-
-// Partial specialization of helper template from google_apis/drive/task_util.h
-// to enable google_apis::CreateRelayCallback to work with CreateOrOpenCallback.
-template<typename T2>
-struct ComposedCallback<void(base::File, T2)> {
-  static void Run(
-      const base::Callback<void(const base::Closure&)>& runner,
-      const base::Callback<void(base::File, T2)>& callback,
-      base::File arg1, T2 arg2) {
-    runner.Run(base::Bind(callback, Passed(&arg1), arg2));
-  }
-};
-
-}  // namespace internal
-}  // namespace google_apis
 
 namespace drive {
 namespace internal {

@@ -22,6 +22,7 @@ config("external_config") {
 config("internal_config") {
   visibility = [ ":*" ]  # Only targets in this file can depend on this.
   defines = [
+    "BORINGSSL_ALLOW_CXX_RUNTIME",
     "BORINGSSL_IMPLEMENTATION",
     "BORINGSSL_NO_STATIC_INITIALIZER",
     "OPENSSL_SMALL",
@@ -30,6 +31,7 @@ config("internal_config") {
     # TODO(davidben): Fix size_t truncations in BoringSSL.
     # https://crbug.com/boringssl/22
     "//build/config/compiler:no_size_t_to_int_warning",
+    "//build/config/sanitizers:cfi_icall_generalize_pointers",
   ]
   if (is_posix) {
     cflags_c = [ "-std=c99" ]
@@ -60,25 +62,9 @@ if (is_win && !is_msan) {
   source_set("boringssl_asm") {
     visibility = [ ":*" ]  # Only targets in this file can depend on this.
 
-    defines = [ "BORINGSSL_CLANG_SUPPORTS_DOT_ARCH" ]
     sources = []
     asmflags = []
     include_dirs = [ "src/include" ]
-
-    if ((current_cpu == "arm" || current_cpu == "arm64") && is_clang &&
-        !is_ios) {
-      if (current_cpu == "arm" && arm_version != 6) {
-        # TODO(hans) Enable integrated-as (crbug.com/124610).
-        asmflags += [ "-fno-integrated-as" ]
-      }
-      if (is_android) {
-        rebased_android_toolchain_root =
-            rebase_path(android_toolchain_root, root_build_dir)
-
-        # Else /usr/bin/as gets picked up.
-        asmflags += [ "-B${rebased_android_toolchain_root}/bin" ]
-      }
-    }
 
     if (is_msan) {
       public_configs = [ ":no_asm_config" ]
@@ -124,6 +110,7 @@ component("boringssl") {
   sources = all_sources
   deps = [
     ":boringssl_asm",
+    "//third_party/boringssl/src/third_party/fiat:fiat_license",
   ]
 
   public_configs = [ ":external_config" ]

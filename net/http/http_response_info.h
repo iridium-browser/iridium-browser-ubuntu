@@ -9,8 +9,8 @@
 
 #include "base/time/time.h"
 #include "net/base/net_export.h"
+#include "net/base/proxy_server.h"
 #include "net/http/http_vary_data.h"
-#include "net/proxy/proxy_server.h"
 #include "net/ssl/ssl_info.h"
 
 namespace base {
@@ -52,6 +52,10 @@ class NET_EXPORT HttpResponseInfo {
     CONNECTION_INFO_QUIC_38 = 16,
     CONNECTION_INFO_QUIC_39 = 17,
     CONNECTION_INFO_QUIC_40 = 18,
+    CONNECTION_INFO_QUIC_41 = 19,
+    CONNECTION_INFO_QUIC_42 = 20,
+    CONNECTION_INFO_QUIC_43 = 21,
+    CONNECTION_INFO_QUIC_99 = 22,
     NUM_OF_CONNECTION_INFOS,
   };
 
@@ -189,7 +193,7 @@ class NET_EXPORT HttpResponseInfo {
   // The "Vary" header data for this response.
   HttpVaryData vary_data;
 
-  // Any metadata asociated with this resource's cached data.
+  // Any metadata associated with this resource's cached data.
   scoped_refptr<IOBufferWithSize> metadata;
 
   static std::string ConnectionInfoToString(ConnectionInfo connection_info);

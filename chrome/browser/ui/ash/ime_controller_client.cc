@@ -13,6 +13,7 @@
 #include "content/public/common/service_manager_connection.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
+#include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_util.h"
 
@@ -23,7 +24,7 @@ using ui::ime::InputMethodMenuManager;
 
 namespace {
 
-ImeControllerClient* g_instance = nullptr;
+ImeControllerClient* g_ime_controller_client_instance = nullptr;
 
 }  // namespace
 
@@ -32,22 +33,26 @@ ImeControllerClient::ImeControllerClient(InputMethodManager* manager)
   DCHECK(input_method_manager_);
   input_method_manager_->AddObserver(this);
   input_method_manager_->AddImeMenuObserver(this);
+  if (input_method_manager_->GetImeKeyboard())
+    input_method_manager_->GetImeKeyboard()->AddObserver(this);
   InputMethodMenuManager::GetInstance()->AddObserver(this);
 
   // This does not need to send the initial state to ash because that happens
   // via observers when the InputMethodManager initializes its list of IMEs.
 
-  DCHECK(!g_instance);
-  g_instance = this;
+  DCHECK(!g_ime_controller_client_instance);
+  g_ime_controller_client_instance = this;
 }
 
 ImeControllerClient::~ImeControllerClient() {
-  DCHECK_EQ(this, g_instance);
-  g_instance = nullptr;
+  DCHECK_EQ(this, g_ime_controller_client_instance);
+  g_ime_controller_client_instance = nullptr;
 
   InputMethodMenuManager::GetInstance()->RemoveObserver(this);
   input_method_manager_->RemoveImeMenuObserver(this);
   input_method_manager_->RemoveObserver(this);
+  if (input_method_manager_->GetImeKeyboard())
+    input_method_manager_->GetImeKeyboard()->RemoveObserver(this);
 }
 
 void ImeControllerClient::Init() {
@@ -66,7 +71,7 @@ void ImeControllerClient::InitForTesting(
 
 // static
 ImeControllerClient* ImeControllerClient::Get() {
-  return g_instance;
+  return g_ime_controller_client_instance;
 }
 
 void ImeControllerClient::SetImesManagedByPolicy(bool managed) {
@@ -100,6 +105,13 @@ void ImeControllerClient::ActivateImeMenuItem(const std::string& key) {
   input_method_manager_->ActivateInputMethodMenuItem(key);
 }
 
+void ImeControllerClient::SetCapsLockFromTray(bool caps_enabled) {
+  chromeos::input_method::ImeKeyboard* keyboard =
+      chromeos::input_method::InputMethodManager::Get()->GetImeKeyboard();
+  if (keyboard)
+    keyboard->SetCapsLockEnabled(caps_enabled);
+}
+
 // chromeos::input_method::InputMethodManager::Observer:
 void ImeControllerClient::InputMethodChanged(InputMethodManager* manager,
                                              Profile* profile,
@@ -126,6 +138,13 @@ void ImeControllerClient::InputMethodMenuItemChanged(
   RefreshIme();
 }
 
+// chromeos::input_method::ImeKeyboard::Observer:
+void ImeControllerClient::OnCapsLockChanged(bool enabled) {
+  ime_controller_ptr_->SetCapsLockState(enabled);
+}
+
+void ImeControllerClient::OnLayoutChanging(const std::string& layout_name) {}
+
 void ImeControllerClient::FlushMojoForTesting() {
   ime_controller_ptr_.FlushForTesting();
 }
@@ -134,6 +153,10 @@ void ImeControllerClient::BindAndSetClient() {
   ash::mojom::ImeControllerClientPtr client;
   binding_.Bind(mojo::MakeRequest(&client));
   ime_controller_ptr_->SetClient(std::move(client));
+
+  // Now that the bridge is established, flush state from observed objects to
+  // the ImeController, now that it will hear it.
+  input_method_manager_->NotifyObserversImeExtraInputStateChange();
 }
 
 ash::mojom::ImeInfoPtr ImeControllerClient::GetAshImeInfo(
@@ -182,4 +205,16 @@ void ImeControllerClient::RefreshIme() {
   }
   ime_controller_ptr_->RefreshIme(current_ime_id, std::move(available_imes),
                                   std::move(ash_menu_items));
+}
+
+void ImeControllerClient::OnExtraInputEnabledStateChange(
+    bool is_extra_input_options_enabled,
+    bool is_emoji_enabled,
+    bool is_handwriting_enabled,
+    bool is_voice_enabled) {
+  if (ime_controller_ptr_) {
+    ime_controller_ptr_->SetExtraInputOptionsEnabledState(
+        is_extra_input_options_enabled, is_emoji_enabled,
+        is_handwriting_enabled, is_voice_enabled);
+  }
 }

@@ -25,7 +25,6 @@
 #include "core/html/HTMLObjectElement.h"
 
 #include "bindings/core/v8/ScriptEventListener.h"
-#include "core/HTMLNames.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
@@ -33,6 +32,7 @@
 #include "core/dom/SyncReattachContext.h"
 #include "core/dom/TagCollection.h"
 #include "core/dom/Text.h"
+#include "core/exported/WebPluginContainerImpl.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
 #include "core/frame/Settings.h"
@@ -40,8 +40,8 @@
 #include "core/html/HTMLMetaElement.h"
 #include "core/html/HTMLParamElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "core/layout/api/LayoutEmbeddedItem.h"
-#include "core/plugins/PluginView.h"
+#include "core/html_names.h"
+#include "core/layout/LayoutEmbeddedObject.h"
 #include "platform/network/mime/MIMETypeRegistry.h"
 
 namespace blink {
@@ -49,24 +49,23 @@ namespace blink {
 using namespace HTMLNames;
 
 inline HTMLObjectElement::HTMLObjectElement(Document& document,
-                                            bool created_by_parser)
+                                            const CreateElementFlags flags)
     : HTMLPlugInElement(objectTag,
                         document,
-                        created_by_parser,
+                        flags,
                         kShouldNotPreferPlugInsForImages),
       use_fallback_content_(false) {}
 
-inline HTMLObjectElement::~HTMLObjectElement() {}
+inline HTMLObjectElement::~HTMLObjectElement() = default;
 
 HTMLObjectElement* HTMLObjectElement::Create(Document& document,
-                                             bool created_by_parser) {
-  HTMLObjectElement* element =
-      new HTMLObjectElement(document, created_by_parser);
+                                             const CreateElementFlags flags) {
+  auto* element = new HTMLObjectElement(document, flags);
   element->EnsureUserAgentShadowRoot();
   return element;
 }
 
-DEFINE_TRACE(HTMLObjectElement) {
+void HTMLObjectElement::Trace(blink::Visitor* visitor) {
   ListedElement::Trace(visitor);
   HTMLPlugInElement::Trace(visitor);
 }
@@ -87,7 +86,7 @@ bool HTMLObjectElement::IsPresentationAttribute(
 void HTMLObjectElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == borderAttr)
     ApplyBorderAttributeToStyle(value, style);
   else
@@ -128,28 +127,21 @@ void HTMLObjectElement::ParseAttribute(
   }
 }
 
-static void MapDataParamToSrc(Vector<String>* param_names,
-                              Vector<String>* param_values) {
+static void MapDataParamToSrc(PluginParameters& plugin_params) {
   // Some plugins don't understand the "data" attribute of the OBJECT tag (i.e.
   // Real and WMP require "src" attribute).
-  int src_index = -1, data_index = -1;
-  for (unsigned i = 0; i < param_names->size(); ++i) {
-    if (DeprecatedEqualIgnoringCase((*param_names)[i], "src"))
-      src_index = i;
-    else if (DeprecatedEqualIgnoringCase((*param_names)[i], "data"))
-      data_index = i;
-  }
+  int src_index = plugin_params.FindStringInNames("src");
+  int data_index = plugin_params.FindStringInNames("data");
 
   if (src_index == -1 && data_index != -1) {
-    param_names->push_back("src");
-    param_values->push_back((*param_values)[data_index]);
+    plugin_params.AppendNameWithValue("src",
+                                      plugin_params.Values()[data_index]);
   }
 }
 
 // TODO(schenney): crbug.com/572908 This function should not deal with url or
 // serviceType!
-void HTMLObjectElement::ParametersForPlugin(Vector<String>& param_names,
-                                            Vector<String>& param_values) {
+void HTMLObjectElement::ParametersForPlugin(PluginParameters& plugin_params) {
   HashSet<StringImpl*, CaseFoldingHash> unique_param_names;
 
   // Scan the PARAM children and store their name/value pairs.
@@ -161,19 +153,17 @@ void HTMLObjectElement::ParametersForPlugin(Vector<String>& param_names,
       continue;
 
     unique_param_names.insert(name.Impl());
-    param_names.push_back(p->GetName());
-    param_values.push_back(p->Value());
+    plugin_params.AppendNameWithValue(p->GetName(), p->Value());
 
     // TODO(schenney): crbug.com/572908 url adjustment does not belong in this
     // function.
     // HTML5 says that an object resource's URL is specified by the object's
-    // data attribute, not by a param element. However, for compatibility, allow
-    // the resource's URL to be given by a param named "src", "movie", "code" or
-    // "url" if we know that resource points to a plugin.
-    if (url_.IsEmpty() && (DeprecatedEqualIgnoringCase(name, "src") ||
-                           DeprecatedEqualIgnoringCase(name, "movie") ||
-                           DeprecatedEqualIgnoringCase(name, "code") ||
-                           DeprecatedEqualIgnoringCase(name, "url"))) {
+    // data attribute, not by a param element with a name of "data". However,
+    // for compatibility, allow the resource's URL to be given by a param
+    // element with one of the common names if we know that resource points
+    // to a plugin.
+    if (url_.IsEmpty() && !DeprecatedEqualIgnoringCase(name, "data") &&
+        HTMLParamElement::IsURLParameter(name)) {
       url_ = StripLeadingAndTrailingHTMLSpaces(p->Value());
     }
     // TODO(schenney): crbug.com/572908 serviceType calculation does not belong
@@ -187,16 +177,14 @@ void HTMLObjectElement::ParametersForPlugin(Vector<String>& param_names,
 
   // Turn the attributes of the <object> element into arrays, but don't override
   // <param> values.
-  AttributeCollection attributes = this->Attributes();
+  AttributeCollection attributes = Attributes();
   for (const Attribute& attribute : attributes) {
     const AtomicString& name = attribute.GetName().LocalName();
-    if (!unique_param_names.Contains(name.Impl())) {
-      param_names.push_back(name.GetString());
-      param_values.push_back(attribute.Value().GetString());
-    }
+    if (!unique_param_names.Contains(name.Impl()))
+      plugin_params.AppendAttribute(attribute);
   }
 
-  MapDataParamToSrc(&param_names, &param_values);
+  MapDataParamToSrc(plugin_params);
 }
 
 bool HTMLObjectElement::HasFallbackContent() const {
@@ -206,7 +194,7 @@ bool HTMLObjectElement::HasFallbackContent() const {
     if (child->IsTextNode()) {
       if (!ToText(child)->ContainsOnlyWhitespace())
         return true;
-    } else if (!isHTMLParamElement(*child)) {
+    } else if (!IsHTMLParamElement(*child)) {
       return true;
     }
   }
@@ -251,7 +239,7 @@ void HTMLObjectElement::ReloadPluginOnAttributeChange(
 // TODO(schenney): crbug.com/572908 This should be unified with
 // HTMLEmbedElement::updatePlugin and moved down into HTMLPluginElement.cpp
 void HTMLObjectElement::UpdatePluginInternal() {
-  DCHECK(!GetLayoutEmbeddedItem().ShowsUnavailablePluginIndicator());
+  DCHECK(!GetLayoutEmbeddedObject()->ShowsUnavailablePluginIndicator());
   DCHECK(NeedsPluginUpdate());
   SetNeedsPluginUpdate(false);
   // TODO(schenney): crbug.com/572908 This should ASSERT
@@ -269,11 +257,8 @@ void HTMLObjectElement::UpdatePluginInternal() {
     return;
   }
 
-  // TODO(schenney): crbug.com/572908 These should be joined into a
-  // PluginParameters class.
-  Vector<String> param_names;
-  Vector<String> param_values;
-  ParametersForPlugin(param_names, param_values);
+  PluginParameters plugin_params;
+  ParametersForPlugin(plugin_params);
 
   // Note: url is modified above by parametersForPlugin.
   if (!AllowedToLoadFrameURL(url_)) {
@@ -295,7 +280,7 @@ void HTMLObjectElement::UpdatePluginInternal() {
     service_type_ = "text/html";
   }
 
-  if (!HasValidClassId() || !RequestObject(param_names, param_values)) {
+  if (!HasValidClassId() || !RequestObject(plugin_params)) {
     if (!url_.IsEmpty())
       DispatchErrorEvent();
     if (HasFallbackContent())
@@ -366,10 +351,10 @@ void HTMLObjectElement::RenderFallbackContent() {
 
   // Before we give up and use fallback content, check to see if this is a MIME
   // type issue.
-  if (image_loader_ && image_loader_->GetImage() &&
-      image_loader_->GetImage()->GetContentStatus() !=
+  if (image_loader_ && image_loader_->GetContent() &&
+      image_loader_->GetContent()->GetContentStatus() !=
           ResourceStatus::kLoadError) {
-    service_type_ = image_loader_->GetImage()->GetResponse().MimeType();
+    service_type_ = image_loader_->GetContent()->GetResponse().MimeType();
     if (!IsImageType()) {
       // If we don't think we have an image type anymore, then clear the image
       // from the loader.
@@ -396,7 +381,7 @@ bool HTMLObjectElement::IsExposed() const {
       return false;
   }
   for (HTMLElement& element : Traversal<HTMLElement>::DescendantsOf(*this)) {
-    if (isHTMLObjectElement(element) || isHTMLEmbedElement(element))
+    if (IsHTMLObjectElement(element) || IsHTMLEmbedElement(element))
       return false;
   }
   return true;
@@ -407,13 +392,13 @@ bool HTMLObjectElement::ContainsJavaApplet() const {
     return true;
 
   for (HTMLElement& child : Traversal<HTMLElement>::ChildrenOf(*this)) {
-    if (isHTMLParamElement(child) &&
+    if (IsHTMLParamElement(child) &&
         DeprecatedEqualIgnoringCase(child.GetNameAttribute(), "type") &&
         MIMETypeRegistry::IsJavaAppletMIMEType(
             child.getAttribute(valueAttr).GetString()))
       return true;
-    if (isHTMLObjectElement(child) &&
-        toHTMLObjectElement(child).ContainsJavaApplet())
+    if (IsHTMLObjectElement(child) &&
+        ToHTMLObjectElement(child).ContainsJavaApplet())
       return true;
   }
 

@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
+#include "chromeos/cryptohome/cryptohome_util.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/proximity_auth/logging/logging.h"
@@ -25,11 +26,9 @@ EasyUnlockGetKeysOperation::EasyUnlockGetKeysOperation(
     : user_context_(user_context),
       callback_(callback),
       key_index_(0),
-      weak_ptr_factory_(this) {
-}
+      weak_ptr_factory_(this) {}
 
-EasyUnlockGetKeysOperation::~EasyUnlockGetKeysOperation() {
-}
+EasyUnlockGetKeysOperation::~EasyUnlockGetKeysOperation() {}
 
 void EasyUnlockGetKeysOperation::Start() {
   // Register for asynchronous notification of cryptohome being ready.
@@ -53,20 +52,24 @@ void EasyUnlockGetKeysOperation::OnCryptohomeAvailable(bool available) {
 
 void EasyUnlockGetKeysOperation::GetKeyData() {
   const cryptohome::Identification id(user_context_.GetAccountId());
-  cryptohome::HomedirMethods::GetInstance()->GetKeyDataEx(
-      id,
-      EasyUnlockKeyManager::GetKeyLabel(key_index_),
-      base::Bind(&EasyUnlockGetKeysOperation::OnGetKeyData,
-                 weak_ptr_factory_.GetWeakPtr()));
+  cryptohome::GetKeyDataRequest request;
+  request.mutable_key()->mutable_data()->set_label(
+      EasyUnlockKeyManager::GetKeyLabel(key_index_));
+  DBusThreadManager::Get()->GetCryptohomeClient()->GetKeyDataEx(
+      id, cryptohome::AuthorizationRequest(), request,
+      base::BindOnce(&EasyUnlockGetKeysOperation::OnGetKeyData,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void EasyUnlockGetKeysOperation::OnGetKeyData(
-    bool success,
-    cryptohome::MountError return_code,
-    const std::vector<cryptohome::KeyDefinition>& key_definitions) {
-  if (!success || key_definitions.empty()) {
-    // MOUNT_ERROR_KEY_FAILURE is considered as success. Other error codes are
-    // treated as failures.
+    base::Optional<cryptohome::BaseReply> reply) {
+  cryptohome::MountError return_code =
+      cryptohome::GetKeyDataReplyToMountError(reply);
+  std::vector<cryptohome::KeyDefinition> key_definitions =
+      cryptohome::GetKeyDataReplyToKeyDefinitions(reply);
+  if (return_code != cryptohome::MOUNT_ERROR_NONE || key_definitions.empty()) {
+    // MOUNT_ERROR_KEY_FAILURE is considered as success.
+    // Other error codes are treated as failures.
     if (return_code == cryptohome::MOUNT_ERROR_NONE ||
         return_code == cryptohome::MOUNT_ERROR_KEY_FAILURE) {
       callback_.Run(true, devices_);

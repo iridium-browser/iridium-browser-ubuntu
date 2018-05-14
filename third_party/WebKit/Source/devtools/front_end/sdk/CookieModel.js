@@ -15,12 +15,12 @@ SDK.CookieModel = class extends SDK.SDKModel {
    * @return {!SDK.Cookie}
    */
   static _parseProtocolCookie(protocolCookie) {
-    var cookie = new SDK.Cookie(protocolCookie.name, protocolCookie.value, null);
+    const cookie = new SDK.Cookie(protocolCookie.name, protocolCookie.value, null);
     cookie.addAttribute('domain', protocolCookie['domain']);
     cookie.addAttribute('path', protocolCookie['path']);
     cookie.addAttribute('port', protocolCookie['port']);
     if (protocolCookie['expires'])
-      cookie.addAttribute('expires', protocolCookie['expires']);
+      cookie.addAttribute('expires', protocolCookie['expires'] * 1000);
     if (protocolCookie['httpOnly'])
       cookie.addAttribute('httpOnly');
     if (protocolCookie['secure'])
@@ -37,7 +37,7 @@ SDK.CookieModel = class extends SDK.SDKModel {
    * @return {boolean}
    */
   static cookieMatchesResourceURL(cookie, resourceURL) {
-    var url = resourceURL.asParsedURL();
+    const url = resourceURL.asParsedURL();
     if (!url || !SDK.CookieModel.cookieDomainMatchesResourceDomain(cookie.domain(), url.host))
       return false;
     return (
@@ -87,16 +87,16 @@ SDK.CookieModel = class extends SDK.SDKModel {
    * @return {!Promise<boolean>}
    */
   saveCookie(cookie) {
-    var domain = cookie.domain();
+    let domain = cookie.domain();
     if (!domain.startsWith('.'))
       domain = '';
-    var expires = undefined;
+    let expires = undefined;
     if (cookie.expires())
       expires = Math.floor(Date.parse(cookie.expires()) / 1000);
     return this.target()
         .networkAgent()
         .setCookie(
-            cookie.url(), cookie.name(), cookie.value(), domain, cookie.path(), cookie.secure(), cookie.httpOnly(),
+            cookie.name(), cookie.value(), cookie.url(), domain, cookie.path(), cookie.secure(), cookie.httpOnly(),
             cookie.sameSite(), expires)
         .then(success => !!success);
   }
@@ -106,16 +106,16 @@ SDK.CookieModel = class extends SDK.SDKModel {
    * @return {!Promise<!Array<!SDK.Cookie>>}
    */
   getCookiesForDomain(domain) {
-    var resourceURLs = [];
+    const resourceURLs = [];
     /**
      * @param {!SDK.Resource} resource
      */
     function populateResourceURLs(resource) {
-      var url = resource.documentURL.asParsedURL();
+      const url = resource.documentURL.asParsedURL();
       if (url && (!domain || url.securityOrigin() === domain))
         resourceURLs.push(resource.url);
     }
-    var resourceTreeModel = this.target().model(SDK.ResourceTreeModel);
+    const resourceTreeModel = this.target().model(SDK.ResourceTreeModel);
     if (resourceTreeModel)
       resourceTreeModel.forAllResources(populateResourceURLs);
     return this.getCookies(resourceURLs);
@@ -126,8 +126,10 @@ SDK.CookieModel = class extends SDK.SDKModel {
    * @param {function()=} callback
    */
   _deleteAll(cookies, callback) {
-    var networkAgent = this.target().networkAgent();
-    Promise.all(cookies.map(cookie => networkAgent.deleteCookie(cookie.name(), cookie.url())))
+    const networkAgent = this.target().networkAgent();
+    Promise
+        .all(
+            cookies.map(cookie => networkAgent.deleteCookies(cookie.name(), undefined, cookie.domain(), cookie.path())))
         .then(callback || function() {});
   }
 };

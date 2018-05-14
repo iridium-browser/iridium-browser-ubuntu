@@ -5,6 +5,7 @@
 #include "chromecast/media/cma/base/decoder_config_adapter.h"
 
 #include "base/logging.h"
+#include "build/build_config.h"
 #include "chromecast/media/base/media_codec_support.h"
 #include "media/base/channel_layout.h"
 
@@ -74,6 +75,8 @@ SampleFormat ToSampleFormat(const ::media::SampleFormat sample_format) {
       return ::media::ChannelLayout::CHANNEL_LAYOUT_MONO;
     case 2:
       return ::media::ChannelLayout::CHANNEL_LAYOUT_STEREO;
+    case 6:
+      return ::media::ChannelLayout::CHANNEL_LAYOUT_5_1;
     default:
       return ::media::ChannelLayout::CHANNEL_LAYOUT_UNSUPPORTED;
   }
@@ -209,6 +212,14 @@ AudioConfig DecoderConfigAdapter::ToCastAudioConfig(
   audio_config.extra_data = config.extra_data();
   audio_config.encryption_scheme = ToEncryptionScheme(
       config.encryption_scheme());
+
+#if defined(OS_ANDROID)
+  // On Android, Chromium's mp4 parser adds extra data for AAC, but we don't
+  // need this with CMA.
+  if (audio_config.codec == kCodecAAC)
+    audio_config.extra_data.clear();
+#endif  // defined(OS_ANDROID)
+
   return audio_config;
 }
 

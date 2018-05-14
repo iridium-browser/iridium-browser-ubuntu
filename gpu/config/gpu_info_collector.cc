@@ -12,7 +12,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -24,10 +24,15 @@
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
+#include "ui/gl/gl_switches.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/init/gl_factory.h"
 
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#if defined(OS_ANDROID)
+#include "ui/gl/gl_surface_egl.h"
+#endif  // OS_ANDROID
+
+#if defined(USE_X11)
 #include "ui/gl/gl_visual_picker_glx.h"
 #endif
 
@@ -45,8 +50,10 @@ scoped_refptr<gl::GLSurface> InitializeGLSurface() {
 }
 
 scoped_refptr<gl::GLContext> InitializeGLContext(gl::GLSurface* surface) {
+  gl::GLContextAttribs attribs;
+  attribs.client_major_es_version = 2;
   scoped_refptr<gl::GLContext> context(
-      gl::init::CreateGLContext(nullptr, surface, gl::GLContextAttribs()));
+      gl::init::CreateGLContext(nullptr, surface, attribs));
   if (!context.get()) {
     LOG(ERROR) << "gl::init::CreateGLContext failed";
     return NULL;
@@ -93,8 +100,9 @@ int StringContainsName(
       str, " .,()-_", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   for (size_t ii = 0; ii < tokens.size(); ++ii) {
     for (size_t name_index = 0; name_index < num_names; ++name_index) {
-      if (tokens[ii] == names[name_index])
-        return name_index;
+      if (tokens[ii] == names[name_index]) {
+        return base::checked_cast<int>(name_index);
+      }
     }
   }
   return -1;
@@ -104,63 +112,79 @@ int StringContainsName(
 
 namespace gpu {
 
-CollectInfoResult CollectGraphicsInfoGL(GPUInfo* gpu_info) {
+bool CollectBasicGraphicsInfo(const base::CommandLine* command_line,
+                              GPUInfo* gpu_info) {
+  const char* software_gl_impl_name =
+      gl::GetGLImplementationName(gl::GetSoftwareGLImplementation());
+  if ((command_line->GetSwitchValueASCII(switches::kUseGL) ==
+       software_gl_impl_name) ||
+      command_line->HasSwitch(switches::kOverrideUseSoftwareGLForTests)) {
+    // If using the software GL implementation, use fake vendor and
+    // device ids to make sure it never gets blacklisted. It allows us
+    // to proceed with loading the blacklist which may have non-device
+    // specific entries we want to apply anyways (e.g., OS version
+    // blacklisting).
+    gpu_info->gpu.vendor_id = 0xffff;
+    gpu_info->gpu.device_id = 0xffff;
+
+    // Also declare the driver_vendor to be <software GL> to be able to
+    // specify exceptions based on driver_vendor==<software GL> for some
+    // blacklist rules.
+    gpu_info->driver_vendor = software_gl_impl_name;
+
+    return true;
+  }
+
+  return CollectBasicGraphicsInfo(gpu_info);
+}
+
+bool CollectGraphicsInfoGL(GPUInfo* gpu_info) {
   TRACE_EVENT0("startup", "gpu_info_collector::CollectGraphicsInfoGL");
   DCHECK_NE(gl::GetGLImplementation(), gl::kGLImplementationNone);
 
   scoped_refptr<gl::GLSurface> surface(InitializeGLSurface());
   if (!surface.get()) {
     LOG(ERROR) << "Could not create surface for info collection.";
-    return kCollectInfoFatalFailure;
+    return false;
   }
 
   scoped_refptr<gl::GLContext> context(InitializeGLContext(surface.get()));
   if (!context.get()) {
     LOG(ERROR) << "Could not create context for info collection.";
-    return kCollectInfoFatalFailure;
+    return false;
   }
 
   gpu_info->gl_renderer = GetGLString(GL_RENDERER);
   gpu_info->gl_vendor = GetGLString(GL_VENDOR);
   gpu_info->gl_version = GetGLString(GL_VERSION);
-
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kGpuTestingGLVendor)) {
-    gpu_info->gl_vendor =
-        command_line->GetSwitchValueASCII(switches::kGpuTestingGLVendor);
-  }
-  if (command_line->HasSwitch(switches::kGpuTestingGLRenderer)) {
-    gpu_info->gl_renderer =
-        command_line->GetSwitchValueASCII(switches::kGpuTestingGLRenderer);
-  }
-  if (command_line->HasSwitch(switches::kGpuTestingGLVersion)) {
-    gpu_info->gl_version =
-        command_line->GetSwitchValueASCII(switches::kGpuTestingGLVersion);
-  }
-
-  gpu_info->gl_extensions = gl::GetGLExtensionsFromCurrentContext();
   std::string glsl_version_string = GetGLString(GL_SHADING_LANGUAGE_VERSION);
 
+  gpu_info->gl_extensions = gl::GetGLExtensionsFromCurrentContext();
+  gl::ExtensionSet extension_set =
+      gl::MakeExtensionSet(gpu_info->gl_extensions);
+
   gl::GLVersionInfo gl_info(gpu_info->gl_version.c_str(),
-                            gpu_info->gl_renderer.c_str(),
-                            gpu_info->gl_extensions.c_str());
+                            gpu_info->gl_renderer.c_str(), extension_set);
   GLint max_samples = 0;
   if (gl_info.IsAtLeastGL(3, 0) || gl_info.IsAtLeastGLES(3, 0) ||
-      gpu_info->gl_extensions.find("GL_ANGLE_framebuffer_multisample") !=
-          std::string::npos ||
-      gpu_info->gl_extensions.find("GL_APPLE_framebuffer_multisample") !=
-          std::string::npos ||
-      gpu_info->gl_extensions.find("GL_EXT_framebuffer_multisample") !=
-          std::string::npos ||
-      gpu_info->gl_extensions.find("GL_EXT_multisampled_render_to_texture") !=
-          std::string::npos ||
-      gpu_info->gl_extensions.find("GL_NV_framebuffer_multisample") !=
-          std::string::npos) {
+      gl::HasExtension(extension_set, "GL_ANGLE_framebuffer_multisample") ||
+      gl::HasExtension(extension_set, "GL_APPLE_framebuffer_multisample") ||
+      gl::HasExtension(extension_set, "GL_EXT_framebuffer_multisample") ||
+      gl::HasExtension(extension_set,
+                       "GL_EXT_multisampled_render_to_texture") ||
+      gl::HasExtension(extension_set, "GL_NV_framebuffer_multisample")) {
     glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
   }
   gpu_info->max_msaa_samples = base::IntToString(max_samples);
-  UMA_HISTOGRAM_SPARSE_SLOWLY("GPU.MaxMSAASampleCount", max_samples);
+  base::UmaHistogramSparse("GPU.MaxMSAASampleCount", max_samples);
 
+#if defined(OS_ANDROID)
+  gpu_info->can_support_threaded_texture_mailbox =
+      gl::GLSurfaceEGL::HasEGLExtension("EGL_KHR_fence_sync") &&
+      gl::GLSurfaceEGL::HasEGLExtension("EGL_KHR_image_base") &&
+      gl::GLSurfaceEGL::HasEGLExtension("EGL_KHR_gl_texture_2D_image") &&
+      gl::HasExtension(extension_set, "GL_OES_EGL_image");
+#else
   gl::GLWindowSystemBindingInfo window_system_binding_info;
   if (gl::init::GetGLWindowSystemBindingInfo(&window_system_binding_info)) {
     gpu_info->gl_ws_vendor = window_system_binding_info.vendor;
@@ -168,17 +192,18 @@ CollectInfoResult CollectGraphicsInfoGL(GPUInfo* gpu_info) {
     gpu_info->gl_ws_extensions = window_system_binding_info.extensions;
     gpu_info->direct_rendering = window_system_binding_info.direct_rendering;
   }
+#endif  // OS_ANDROID
 
   bool supports_robustness =
-      gpu_info->gl_extensions.find("GL_EXT_robustness") != std::string::npos ||
-      gpu_info->gl_extensions.find("GL_KHR_robustness") != std::string::npos ||
-      gpu_info->gl_extensions.find("GL_ARB_robustness") != std::string::npos;
+      gl::HasExtension(extension_set, "GL_EXT_robustness") ||
+      gl::HasExtension(extension_set, "GL_KHR_robustness") ||
+      gl::HasExtension(extension_set, "GL_ARB_robustness");
   if (supports_robustness) {
     glGetIntegerv(GL_RESET_NOTIFICATION_STRATEGY_ARB,
         reinterpret_cast<GLint*>(&gpu_info->gl_reset_notification_strategy));
   }
 
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#if defined(USE_X11)
   if (gl::GetGLImplementation() == gl::kGLImplementationDesktopGL) {
     gl::GLVisualPickerGLX* visual_picker = gl::GLVisualPickerGLX::GetInstance();
     gpu_info->system_visual = visual_picker->system_visual().visualid;
@@ -195,57 +220,8 @@ CollectInfoResult CollectGraphicsInfoGL(GPUInfo* gpu_info) {
   gpu_info->vertex_shader_version = glsl_version;
 
   IdentifyActiveGPU(gpu_info);
-  return CollectDriverInfoGL(gpu_info);
-}
-
-void MergeGPUInfoGL(GPUInfo* basic_gpu_info,
-                    const GPUInfo& context_gpu_info) {
-  DCHECK(basic_gpu_info);
-  // Copy over GPUs because which one is active could change.
-  basic_gpu_info->gpu = context_gpu_info.gpu;
-  basic_gpu_info->secondary_gpus = context_gpu_info.secondary_gpus;
-
-  basic_gpu_info->gl_renderer = context_gpu_info.gl_renderer;
-  basic_gpu_info->gl_vendor = context_gpu_info.gl_vendor;
-  basic_gpu_info->gl_version = context_gpu_info.gl_version;
-  basic_gpu_info->gl_extensions = context_gpu_info.gl_extensions;
-  basic_gpu_info->pixel_shader_version =
-      context_gpu_info.pixel_shader_version;
-  basic_gpu_info->vertex_shader_version =
-      context_gpu_info.vertex_shader_version;
-  basic_gpu_info->max_msaa_samples =
-      context_gpu_info.max_msaa_samples;
-  basic_gpu_info->gl_ws_vendor = context_gpu_info.gl_ws_vendor;
-  basic_gpu_info->gl_ws_version = context_gpu_info.gl_ws_version;
-  basic_gpu_info->gl_ws_extensions = context_gpu_info.gl_ws_extensions;
-  basic_gpu_info->gl_reset_notification_strategy =
-      context_gpu_info.gl_reset_notification_strategy;
-
-  if (!context_gpu_info.driver_vendor.empty())
-    basic_gpu_info->driver_vendor = context_gpu_info.driver_vendor;
-  if (!context_gpu_info.driver_version.empty())
-    basic_gpu_info->driver_version = context_gpu_info.driver_version;
-
-  basic_gpu_info->sandboxed = context_gpu_info.sandboxed;
-  basic_gpu_info->direct_rendering = context_gpu_info.direct_rendering;
-  basic_gpu_info->in_process_gpu = context_gpu_info.in_process_gpu;
-  basic_gpu_info->passthrough_cmd_decoder =
-      context_gpu_info.passthrough_cmd_decoder;
-  basic_gpu_info->supports_overlays = context_gpu_info.supports_overlays;
-  basic_gpu_info->hdr = context_gpu_info.hdr;
-  basic_gpu_info->context_info_state = context_gpu_info.context_info_state;
-  basic_gpu_info->initialization_time = context_gpu_info.initialization_time;
-  basic_gpu_info->video_decode_accelerator_capabilities =
-      context_gpu_info.video_decode_accelerator_capabilities;
-  basic_gpu_info->video_encode_accelerator_supported_profiles =
-      context_gpu_info.video_encode_accelerator_supported_profiles;
-  basic_gpu_info->jpeg_decode_accelerator_supported =
-      context_gpu_info.jpeg_decode_accelerator_supported;
-
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
-  basic_gpu_info->system_visual = context_gpu_info.system_visual;
-  basic_gpu_info->rgba_visual = context_gpu_info.rgba_visual;
-#endif
+  CollectDriverInfoGL(gpu_info);
+  return true;
 }
 
 void IdentifyActiveGPU(GPUInfo* gpu_info) {
@@ -265,8 +241,11 @@ void IdentifyActiveGPU(GPUInfo* gpu_info) {
                                  kATIID};
 
   DCHECK(gpu_info);
-  if (gpu_info->secondary_gpus.size() == 0)
+  if (gpu_info->secondary_gpus.size() == 0) {
+    // If there is only a single GPU, that GPU is active.
+    gpu_info->gpu.active = true;
     return;
+  }
 
   uint32_t active_vendor_id = 0;
   if (!gpu_info->gl_vendor.empty()) {
@@ -309,7 +288,15 @@ void IdentifyActiveGPU(GPUInfo* gpu_info) {
 
 void FillGPUInfoFromSystemInfo(GPUInfo* gpu_info,
                                angle::SystemInfo* system_info) {
-  DCHECK(system_info->primaryGPUIndex >= 0);
+  // We fill gpu_info even when angle::GetSystemInfo failed so that we can see
+  // partial information even when GPU info collection fails. Handle malformed
+  // angle::SystemInfo first.
+  if (system_info->gpus.empty()) {
+    return;
+  }
+  if (system_info->primaryGPUIndex < 0) {
+    system_info->primaryGPUIndex = 0;
+  }
 
   angle::GPUDeviceInfo* primary =
       &system_info->gpus[system_info->primaryGPUIndex];
@@ -344,6 +331,15 @@ void FillGPUInfoFromSystemInfo(GPUInfo* gpu_info,
 
   gpu_info->machine_model_name = system_info->machineModelName;
   gpu_info->machine_model_version = system_info->machineModelVersion;
+}
+
+void CollectGraphicsInfoForTesting(GPUInfo* gpu_info) {
+  DCHECK(gpu_info);
+#if defined(OS_ANDROID)
+  CollectContextGraphicsInfo(gpu_info);
+#else
+  CollectBasicGraphicsInfo(gpu_info);
+#endif  // OS_ANDROID
 }
 
 }  // namespace gpu

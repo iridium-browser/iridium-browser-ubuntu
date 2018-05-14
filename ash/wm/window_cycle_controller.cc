@@ -8,7 +8,6 @@
 #include "ash/metrics/task_switch_source.h"
 #include "ash/metrics/user_metrics_recorder.h"
 #include "ash/public/cpp/shell_window_ids.h"
-#include "ash/public/cpp/window_properties.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_port.h"
@@ -16,8 +15,8 @@
 #include "ash/wm/screen_pinning_controller.h"
 #include "ash/wm/window_cycle_event_filter.h"
 #include "ash/wm/window_cycle_list.h"
-#include "ash/wm/window_state.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 
 namespace ash {
 
@@ -34,15 +33,15 @@ aura::Window* GetActiveWindow(const WindowCycleList::WindowList& window_list) {
 //////////////////////////////////////////////////////////////////////////////
 // WindowCycleController, public:
 
-WindowCycleController::WindowCycleController() {}
+WindowCycleController::WindowCycleController() = default;
 
-WindowCycleController::~WindowCycleController() {}
+WindowCycleController::~WindowCycleController() = default;
 
 // static
 bool WindowCycleController::CanCycle() {
   // Prevent window cycling if the screen is locked or a modal dialog is open.
   return !Shell::Get()->session_controller()->IsScreenLocked() &&
-         !ShellPort::Get()->IsSystemModalWindowOpen() &&
+         !Shell::IsSystemModalWindowOpen() &&
          !Shell::Get()->screen_pinning_controller()->IsPinned();
 }
 
@@ -58,34 +57,14 @@ void WindowCycleController::HandleCycleWindow(Direction direction) {
 
 void WindowCycleController::StartCycling() {
   WindowCycleList::WindowList window_list =
-      Shell::Get()->mru_window_tracker()->BuildMruWindowList();
-  // Exclude windows:
-  // - non user positionable windows, such as extension popups.
-  // - windows being dragged
-  // - the AppList window, which will hide as soon as cycling starts
-  //   anyway. It doesn't make sense to count it as a "switchable" window, yet
-  //   a lot of code relies on the MRU list returning the app window. If we
-  //   don't manually remove it, the window cycling UI won't crash or misbehave,
-  //   but there will be a flicker as the target window changes. Also exclude
-  //   unselectable windows such as extension popups.
-  auto window_is_ineligible = [](aura::Window* window) {
-    wm::WindowState* state = wm::GetWindowState(window);
-    return !state->IsUserPositionable() || state->is_dragged() ||
-           window->GetRootWindow()
-               ->GetChildById(kShellWindowId_AppListContainer)
-               ->Contains(window) ||
-           !window->GetProperty(kShowInOverviewKey);
-  };
-  window_list.erase(std::remove_if(window_list.begin(), window_list.end(),
-                                   window_is_ineligible),
-                    window_list.end());
+      Shell::Get()->mru_window_tracker()->BuildWindowForCycleList();
 
   active_window_before_window_cycle_ = GetActiveWindow(window_list);
 
   window_cycle_list_.reset(new WindowCycleList(window_list));
   event_filter_ = ShellPort::Get()->CreateWindowCycleEventFilter();
   cycle_start_time_ = base::Time::Now();
-  Shell::Get()->metrics()->RecordUserMetricsAction(UMA_WINDOW_CYCLE);
+  base::RecordAction(base::UserMetricsAction("WindowCycleController_Cycle"));
   UMA_HISTOGRAM_COUNTS_100("Ash.WindowCycleController.Items",
                            window_list.size());
 }

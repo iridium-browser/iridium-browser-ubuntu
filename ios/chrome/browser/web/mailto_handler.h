@@ -11,7 +11,7 @@ class GURL;
 
 // MailtoHandler is the base class for Mail client apps that can handle
 // mailto: URLs via custom URL schemes. To add support for Mail clients,
-// subclass from this and add it to MailtoURLRewriter class.
+// subclass from this and add it to MailtoHandlerManager class.
 @interface MailtoHandler : NSObject
 
 // Name of Mail client. This is a name that a user can recognize, e.g. @"Gmail".
@@ -30,9 +30,6 @@ class GURL;
 // Returns the prefix to use with -rewriteMailtoURL:. This is usually the custom
 // URL scheme plus some operator prefix. Subclasses should override this method.
 - (NSString*)beginningScheme;
-
-// Returns a set of NSString for mailto: parameters supported by this handler.
-- (NSSet<NSString*>*)supportedHeaders;
 
 // Rewrites |gURL| into a URL with a different URL scheme that will cause a
 // native iOS app to be launched to handle the mailto: URL. Returns nil if

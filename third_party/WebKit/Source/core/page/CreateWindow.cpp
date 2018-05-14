@@ -28,14 +28,15 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
-#include "core/dom/UserGestureIndicator.h"
+#include "core/events/CurrentInputEvent.h"
 #include "core/events/UIEventWithKeyState.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/FrameClient.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/loader/FrameLoadRequest.h"
-#include "core/page/ChromeClient.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/probe/CoreProbes.h"
@@ -49,6 +50,7 @@
 #include "public/platform/WebMouseEvent.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/web/WebWindowFeatures.h"
+#include "services/network/public/mojom/request_context_frame_type.mojom-blink.h"
 
 namespace blink {
 
@@ -144,16 +146,14 @@ NavigationPolicy EffectiveNavigationPolicy(NavigationPolicy policy,
 // parsing window features.
 static bool IsWindowFeaturesSeparator(UChar c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '=' ||
-         c == ',' || c == '\0';
+         c == ',' || c == '\f';
 }
 
 WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string) {
   WebWindowFeatures window_features;
 
-  // The IE rule is: all features except for channelmode default
-  // to YES, but if the user specifies a feature string, all features default to
-  // NO. (There is no public standard that applies to this method.)
-  // <http://msdn.microsoft.com/workshop/author/dhtml/reference/methods/open_0.asp>
+  // This code follows the HTML spec, specifically
+  // https://html.spec.whatwg.org/#concept-window-open-features-tokenize
   if (feature_string.IsEmpty())
     return window_features;
 
@@ -162,55 +162,66 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string) {
   window_features.tool_bar_visible = false;
   window_features.scrollbars_visible = false;
 
-  // Tread lightly in this code -- it was specifically designed to mimic Win
-  // IE's parsing behavior.
   unsigned key_begin, key_end;
   unsigned value_begin, value_end;
 
   String buffer = feature_string.DeprecatedLower();
   unsigned length = buffer.length();
   for (unsigned i = 0; i < length;) {
-    // skip to first non-separator, but don't skip past the end of the string
+    // skip to first non-separator (start of key name), but don't skip
+    // past the end of the string
     while (i < length && IsWindowFeaturesSeparator(buffer[i]))
       i++;
     key_begin = i;
 
-    // skip to first separator
+    // skip to first separator (end of key name), but don't skip past
+    // the end of the string
     while (i < length && !IsWindowFeaturesSeparator(buffer[i]))
       i++;
     key_end = i;
 
     SECURITY_DCHECK(i <= length);
 
-    // skip to first '=', but don't skip past a ',' or the end of the string
+    // skip separators past the key name, except '=', and don't skip past
+    // the end of the string
     while (i < length && buffer[i] != '=') {
-      if (buffer[i] == ',')
+      if (buffer[i] == ',' || !IsWindowFeaturesSeparator(buffer[i]))
         break;
+
       i++;
     }
 
-    SECURITY_DCHECK(i <= length);
+    if (i < length && IsWindowFeaturesSeparator(buffer[i])) {
+      // skip to first non-separator (start of value), but don't skip
+      // past a ',' or the end of the string.
+      while (i < length && IsWindowFeaturesSeparator(buffer[i])) {
+        if (buffer[i] == ',')
+          break;
 
-    // Skip to first non-separator, but don't skip past a ',' or the end of the
-    // string.
-    while (i < length && IsWindowFeaturesSeparator(buffer[i])) {
-      if (buffer[i] == ',')
-        break;
-      i++;
+        i++;
+      }
+
+      value_begin = i;
+
+      SECURITY_DCHECK(i <= length);
+
+      // skip to first separator (end of value)
+      while (i < length && !IsWindowFeaturesSeparator(buffer[i]))
+        i++;
+
+      value_end = i;
+
+      SECURITY_DCHECK(i <= length);
+    } else {
+      // No value given.
+      value_begin = i;
+      value_end = i;
     }
-    value_begin = i;
 
-    SECURITY_DCHECK(i <= length);
-
-    // skip to first separator
-    while (i < length && !IsWindowFeaturesSeparator(buffer[i]))
-      i++;
-    value_end = i;
-
-    SECURITY_DCHECK(i <= length);
-
-    String key_string(buffer.Substring(key_begin, key_end - key_begin));
-    String value_string(buffer.Substring(value_begin, value_end - value_begin));
+    String key_string(
+        buffer.Substring(key_begin, key_end - key_begin).LowerASCII());
+    String value_string(
+        buffer.Substring(value_begin, value_end - value_begin).LowerASCII());
 
     // Listing a key with no value is shorthand for key=yes
     int value;
@@ -218,6 +229,9 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string) {
       value = 1;
     else
       value = value_string.ToInt();
+
+    if (key_string.IsEmpty())
+      continue;
 
     if (key_string == "left" || key_string == "screenx") {
       window_features.x_set = true;
@@ -256,17 +270,18 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string) {
 static Frame* ReuseExistingWindow(LocalFrame& active_frame,
                                   LocalFrame& lookup_frame,
                                   const AtomicString& frame_name,
-                                  NavigationPolicy policy) {
+                                  NavigationPolicy policy,
+                                  const KURL& destination_url) {
   if (!frame_name.IsEmpty() && !EqualIgnoringASCIICase(frame_name, "_blank") &&
       policy == kNavigationPolicyIgnore) {
-    if (Frame* frame =
-            lookup_frame.FindFrameForNavigation(frame_name, active_frame)) {
+    if (Frame* frame = lookup_frame.FindFrameForNavigation(
+            frame_name, active_frame, destination_url)) {
       if (!EqualIgnoringASCIICase(frame_name, "_self")) {
         if (Page* page = frame->GetPage()) {
           if (page == active_frame.GetPage())
             page->GetFocusController().SetFocusedFrame(frame);
           else
-            page->GetChromeClient().Focus();
+            page->GetChromeClient().Focus(&active_frame);
         }
       }
       return frame;
@@ -284,8 +299,8 @@ static Frame* CreateNewWindow(LocalFrame& opener_frame,
   if (!old_page)
     return nullptr;
 
-  policy = EffectiveNavigationPolicy(
-      policy, old_page->GetChromeClient().GetCurrentInputEvent(), features);
+  policy =
+      EffectiveNavigationPolicy(policy, CurrentInputEvent::Get(), features);
 
   const SandboxFlags sandbox_flags =
       opener_frame.GetDocument()->IsSandboxed(
@@ -298,8 +313,12 @@ static Frame* CreateNewWindow(LocalFrame& opener_frame,
   if (!page)
     return nullptr;
 
-  if (page == old_page)
-    return &opener_frame.Tree().Top();
+  if (page == old_page) {
+    Frame* frame = &opener_frame.Tree().Top();
+    if (request.GetShouldSetOpener() == kMaybeSetOpener)
+      frame->Client()->SetOpener(&opener_frame);
+    return frame;
+  }
 
   DCHECK(page->MainFrame());
   LocalFrame& frame = *ToLocalFrame(page->MainFrame());
@@ -329,8 +348,6 @@ static Frame* CreateNewWindow(LocalFrame& opener_frame,
   page->GetChromeClient().SetWindowRectWithAdjustment(window_rect, frame);
   page->GetChromeClient().Show(policy);
 
-  // This call may suspend the execution by running nested run loop.
-  probe::windowCreated(&opener_frame, &frame);
   created = true;
   return &frame;
 }
@@ -345,14 +362,17 @@ static Frame* CreateWindowHelper(LocalFrame& opener_frame,
   DCHECK(request.GetResourceRequest().RequestorOrigin() ||
          opener_frame.GetDocument()->Url().IsEmpty());
   DCHECK_EQ(request.GetResourceRequest().GetFrameType(),
-            WebURLRequest::kFrameTypeAuxiliary);
-
+            network::mojom::RequestContextFrameType::kAuxiliary);
+  probe::windowOpen(opener_frame.GetDocument(),
+                    request.GetResourceRequest().Url(), request.FrameName(),
+                    features, Frame::HasTransientUserActivation(&opener_frame));
   created = false;
 
-  Frame* window = features.noopener
-                      ? nullptr
-                      : ReuseExistingWindow(active_frame, lookup_frame,
-                                            request.FrameName(), policy);
+  Frame* window =
+      features.noopener
+          ? nullptr
+          : ReuseExistingWindow(active_frame, lookup_frame, request.FrameName(),
+                                policy, request.GetResourceRequest().Url());
 
   if (!window) {
     // Sandboxed frames cannot open new auxiliary browsing contexts.
@@ -393,7 +413,7 @@ DOMWindow* CreateWindow(const String& url_string,
   DCHECK(active_frame);
 
   KURL completed_url = url_string.IsEmpty()
-                           ? KURL(kParsedURLString, g_empty_string)
+                           ? KURL(g_empty_string)
                            : first_frame.GetDocument()->CompleteURL(url_string);
   if (!completed_url.IsEmpty() && !completed_url.IsValid()) {
     UseCounter::Count(active_frame, WebFeature::kWindowOpenWithInvalidURL);
@@ -401,6 +421,23 @@ DOMWindow* CreateWindow(const String& url_string,
         kSyntaxError, "Unable to open a window with invalid URL '" +
                           completed_url.GetString() + "'.\n");
     return nullptr;
+  }
+
+  if (completed_url.ProtocolIsJavaScript() &&
+      opener_frame.GetDocument()->GetContentSecurityPolicy() &&
+      !ContentSecurityPolicy::ShouldBypassMainWorld(
+          opener_frame.GetDocument())) {
+    const int kJavascriptSchemeLength = sizeof("javascript:") - 1;
+    String script_source = DecodeURLEscapeSequences(completed_url.GetString())
+                               .Substring(kJavascriptSchemeLength);
+
+    if (!opener_frame.GetDocument()
+             ->GetContentSecurityPolicy()
+             ->AllowJavaScriptURLs(nullptr, script_source,
+                                   opener_frame.GetDocument()->Url(),
+                                   OrdinalNumber())) {
+      return nullptr;
+    }
   }
 
   WebWindowFeatures window_features =
@@ -411,9 +448,7 @@ DOMWindow* CreateWindow(const String& url_string,
   frame_request.SetShouldSetOpener(window_features.noopener ? kNeverSetOpener
                                                             : kMaybeSetOpener);
   frame_request.GetResourceRequest().SetFrameType(
-      WebURLRequest::kFrameTypeAuxiliary);
-  frame_request.GetResourceRequest().SetRequestorOrigin(
-      SecurityOrigin::Create(active_frame->GetDocument()->Url()));
+      network::mojom::RequestContextFrameType::kAuxiliary);
 
   // Normally, FrameLoader would take care of setting the referrer for a
   // navigation that is triggered from javascript. However, creating a window
@@ -429,7 +464,7 @@ DOMWindow* CreateWindow(const String& url_string,
   // Records HasUserGesture before the value is invalidated inside
   // createWindow(LocalFrame& openerFrame, ...).
   // This value will be set in ResourceRequest loaded in a new LocalFrame.
-  bool has_user_gesture = UserGestureIndicator::ProcessingUserGesture();
+  bool has_user_gesture = Frame::HasTransientUserActivation(&opener_frame);
 
   // We pass the opener frame for the lookupFrame in case the active frame is
   // different from the opener frame, and the name references a frame relative
@@ -500,7 +535,7 @@ void CreateWindowForRequest(const FrameLoadRequest& request,
   }
 
   // TODO(japhet): Form submissions on RemoteFrames don't work yet.
-  FrameLoadRequest new_request(0, request.GetResourceRequest());
+  FrameLoadRequest new_request(nullptr, request.GetResourceRequest());
   new_request.SetForm(request.Form());
   if (new_frame->IsLocalFrame())
     ToLocalFrame(new_frame)->Loader().Load(new_request);

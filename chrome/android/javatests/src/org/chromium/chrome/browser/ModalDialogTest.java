@@ -31,11 +31,12 @@ import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
+import org.chromium.content.browser.test.util.TestCallbackHelperContainer
+        .OnEvaluateJavaScriptResultHelper;
 import org.chromium.content.browser.test.util.TouchCommon;
+import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.GestureStateListener;
 
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
@@ -44,8 +45,7 @@ import java.util.concurrent.TimeoutException;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ModalDialogTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -166,15 +166,12 @@ public class ModalDialogTest {
         Assert.assertNotNull("No dialog showing.", jsDialog);
 
         // Set the text in the prompt field of the dialog.
-        boolean result = ThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {
-            @Override
-            public Boolean call() {
-                EditText prompt = (EditText) jsDialog.getDialogForTest().findViewById(
-                        org.chromium.chrome.R.id.js_modal_dialog_prompt);
-                if (prompt == null) return false;
-                prompt.setText(promptText);
-                return true;
-            }
+        boolean result = ThreadUtils.runOnUiThreadBlocking(() -> {
+            EditText prompt = (EditText) jsDialog.getDialogForTest().findViewById(
+                    org.chromium.chrome.R.id.js_modal_dialog_prompt);
+            if (prompt == null) return false;
+            prompt.setText(promptText);
+            return true;
         });
         Assert.assertTrue("Failed to find prompt view in prompt dialog.", result);
 
@@ -228,7 +225,7 @@ public class ModalDialogTest {
                 scriptEvent.waitUntilHasValue());
     }
 
-    private static class TapGestureStateListener extends GestureStateListener {
+    private static class TapGestureStateListener implements GestureStateListener {
         private CallbackHelper mCallbackHelper = new CallbackHelper();
 
         public int getCallCount() {
@@ -245,14 +242,18 @@ public class ModalDialogTest {
         }
     }
 
+    private GestureListenerManager getGestureListenerManager() {
+        return GestureListenerManager.fromWebContents(
+                mActivityTestRule.getActivity().getCurrentContentViewCore().getWebContents());
+    }
+
     /**
      * Taps on a view and waits for a callback.
      */
     private void tapViewAndWait() throws InterruptedException, TimeoutException {
         final TapGestureStateListener tapGestureStateListener = new TapGestureStateListener();
         int callCount = tapGestureStateListener.getCallCount();
-        mActivityTestRule.getActivity().getCurrentContentViewCore().addGestureStateListener(
-                tapGestureStateListener);
+        getGestureListenerManager().addListener(tapGestureStateListener);
 
         TouchCommon.singleClickView(mActivityTestRule.getActivity().getActivityTab().getView());
         tapGestureStateListener.waitForTap(callCount);
@@ -345,18 +346,15 @@ public class ModalDialogTest {
         jsDialog = getCurrentDialog();
         Assert.assertNotNull("No dialog showing.", jsDialog);
         final AlertDialog dialog = jsDialog.getDialogForTest();
-        String errorMessage = ThreadUtils.runOnUiThreadBlocking(new Callable<String>() {
-            @Override
-            public String call() {
-                final CheckBox suppress = (CheckBox) dialog.findViewById(
-                        org.chromium.chrome.R.id.suppress_js_modal_dialogs);
-                if (suppress == null) return "Suppress checkbox not found.";
-                if (suppress.getVisibility() != View.VISIBLE) {
-                    return "Suppress checkbox is not visible.";
-                }
-                suppress.setChecked(true);
-                return null;
+        String errorMessage = ThreadUtils.runOnUiThreadBlocking(() -> {
+            final CheckBox suppress = (CheckBox) dialog.findViewById(
+                    org.chromium.chrome.R.id.suppress_js_modal_dialogs);
+            if (suppress == null) return "Suppress checkbox not found.";
+            if (suppress.getVisibility() != View.VISIBLE) {
+                return "Suppress checkbox is not visible.";
             }
+            suppress.setChecked(true);
+            return null;
         });
         Assert.assertNull(errorMessage, errorMessage);
         clickCancel(jsDialog);
@@ -380,12 +378,9 @@ public class ModalDialogTest {
     public void testDialogDismissedAfterClosingTab() {
         executeJavaScriptAndWaitForDialog("alert('Android')");
 
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                ChromeActivity activity = mActivityTestRule.getActivity();
-                activity.getCurrentTabModel().closeTab(activity.getActivityTab());
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            ChromeActivity activity = mActivityTestRule.getActivity();
+            activity.getCurrentTabModel().closeTab(activity.getActivityTab());
         });
 
         // Closing the tab should have dismissed the dialog.
@@ -421,15 +416,12 @@ public class ModalDialogTest {
      * can be null.
      */
     private Button[] getAlertDialogButtons(final AlertDialog dialog) throws ExecutionException {
-        return ThreadUtils.runOnUiThreadBlocking(new Callable<Button[]>() {
-            @Override
-            public Button[] call() {
-                final Button[] buttons = new Button[3];
-                buttons[0] = dialog.getButton(DialogInterface.BUTTON_NEGATIVE);
-                buttons[1] = dialog.getButton(DialogInterface.BUTTON_NEUTRAL);
-                buttons[2] = dialog.getButton(DialogInterface.BUTTON_POSITIVE);
-                return buttons;
-            }
+        return ThreadUtils.runOnUiThreadBlocking(() -> {
+            final Button[] buttons = new Button[3];
+            buttons[0] = dialog.getButton(DialogInterface.BUTTON_NEGATIVE);
+            buttons[1] = dialog.getButton(DialogInterface.BUTTON_NEUTRAL);
+            buttons[2] = dialog.getButton(DialogInterface.BUTTON_POSITIVE);
+            return buttons;
         });
     }
 
@@ -438,12 +430,8 @@ public class ModalDialogTest {
      * showing.
      */
     private JavascriptAppModalDialog getCurrentDialog() throws ExecutionException {
-        return ThreadUtils.runOnUiThreadBlocking(new Callable<JavascriptAppModalDialog>() {
-            @Override
-            public JavascriptAppModalDialog call() {
-                return JavascriptAppModalDialog.getCurrentDialogForTest();
-            }
-        });
+        return ThreadUtils.runOnUiThreadBlocking(
+                () -> JavascriptAppModalDialog.getCurrentDialogForTest());
     }
 
     private static class JavascriptAppModalDialogShownCriteria extends Criteria {
@@ -457,13 +445,10 @@ public class ModalDialogTest {
         @Override
         public boolean isSatisfied() {
             try {
-                return ThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {
-                    @Override
-                    public Boolean call() {
-                        final boolean isShown =
-                                JavascriptAppModalDialog.getCurrentDialogForTest() != null;
-                        return mShouldBeShown == isShown;
-                    }
+                return ThreadUtils.runOnUiThreadBlocking(() -> {
+                    final boolean isShown =
+                            JavascriptAppModalDialog.getCurrentDialogForTest() != null;
+                    return mShouldBeShown == isShown;
                 });
             } catch (ExecutionException e) {
                 Log.e(TAG, "Failed to getCurrentDialog", e);
@@ -487,12 +472,7 @@ public class ModalDialogTest {
     }
 
     private void clickButton(final JavascriptAppModalDialog dialog, final int whichButton) {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                dialog.onClick(null, whichButton);
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(() -> dialog.onClick(null, whichButton));
     }
 
     private void checkButtonPresenceVisibilityText(

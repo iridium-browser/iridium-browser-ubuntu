@@ -34,7 +34,9 @@ if (enable_java_templates) {
 
   java_prebuilt("sun_tools_java") {
     jar_path = sun_tools_jar_path
-    jar_dep = ":find_sun_tools_jar"
+    deps = [
+      ":find_sun_tools_jar",
+    ]
   }
 
   generate_interface_jar("android_ijar") {
@@ -99,7 +101,6 @@ action("cpplib_stripped") {
   _rebased_output_so = rebase_path(_output_so, root_build_dir)
   args = [
     _rebased_strip_bin,
-    "--strip-unneeded",
     "-o",
     _rebased_output_so,
     _rebased_input_so,
@@ -112,8 +113,8 @@ group("test_runner_py") {
   # Filter out comments.
   set_sources_assignment_filter([ "#*" ])
   sources = _py_files
-
   data = sources + [
+           "test_runner.pydeps",
            "devil_chromium.json",
            "pylib/gtest/filter/",
            "pylib/instrumentation/render_test.html.jinja",
@@ -135,20 +136,12 @@ group("logdog_wrapper_py") {
   # Filter out comments.
   set_sources_assignment_filter([ "#*" ])
   sources = _py_files
-
-  data = sources
+  data = sources + [ "test_wrapper/logdog_wrapper.pydeps" ]
 }
 
 # Create wrapper scripts in out/bin that takes care of setting the
 # --output-directory.
 _scripts_to_wrap = [
-  # TODO(agrieve): Once GYP is no more, delete the checked-in adb_gdb_* scripts
-  # and generated a script for each android_apk() that has a native library.
-  "adb_gdb_android_webview_shell",
-  "adb_gdb_chrome_public",
-  "adb_gdb_content_shell",
-  "adb_gdb_cronet_sample",
-  "adb_gdb_mojo_shell",
   "asan_symbolize.py",
   "tombstones.py",
 ]

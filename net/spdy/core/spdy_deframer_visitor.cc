@@ -13,7 +13,6 @@
 #include "base/logging.h"
 #include "net/spdy/core/hpack/hpack_constants.h"
 #include "net/spdy/core/mock_spdy_framer_visitor.h"
-#include "net/spdy/core/spdy_frame_builder.h"
 #include "net/spdy/core/spdy_frame_reader.h"
 #include "net/spdy/core/spdy_protocol.h"
 #include "net/spdy/core/spdy_test_utils.h"
@@ -127,7 +126,7 @@ class SpdyTestDeframerImpl : public SpdyTestDeframer,
       : listener_(std::move(listener)) {
     CHECK(listener_);
   }
-  ~SpdyTestDeframerImpl() override {}
+  ~SpdyTestDeframerImpl() override = default;
 
   bool AtFrameEnd() override;
 
@@ -145,7 +144,7 @@ class SpdyTestDeframerImpl : public SpdyTestDeframer,
   void OnDataFrameHeader(SpdyStreamId stream_id,
                          size_t length,
                          bool fin) override;
-  void OnError(SpdyFramer* framer) override;
+  void OnError(Http2DecoderAdapter::SpdyFramerError error) override;
   void OnGoAway(SpdyStreamId last_accepted_stream_id,
                 SpdyErrorCode error_code) override;
   bool OnGoAwayFrameData(const char* goaway_data, size_t len) override;
@@ -165,7 +164,7 @@ class SpdyTestDeframerImpl : public SpdyTestDeframer,
                      SpdyStreamId promised_stream_id,
                      bool end) override;
   void OnRstStream(SpdyStreamId stream_id, SpdyErrorCode error_code) override;
-  void OnSetting(SpdySettingsIds id, uint32_t value) override;
+  void OnSetting(SpdyKnownSettingsId id, uint32_t value) override;
   void OnSettings() override;
   void OnSettingsAck() override;
   void OnSettingsEnd() override;
@@ -173,6 +172,7 @@ class SpdyTestDeframerImpl : public SpdyTestDeframer,
                          const char* data,
                          size_t len) override;
   void OnStreamEnd(SpdyStreamId stream_id) override;
+  void OnStreamPadLength(SpdyStreamId stream_id, size_t value) override;
   void OnStreamPadding(SpdyStreamId stream_id, size_t len) override;
   bool OnUnknownFrame(SpdyStreamId stream_id, uint8_t frame_type) override;
   void OnWindowUpdate(SpdyStreamId stream_id, int delta_window_size) override;
@@ -458,11 +458,11 @@ void SpdyTestDeframerImpl::OnDataFrameHeader(SpdyStreamId stream_id,
 }
 
 // The SpdyFramer will not process any more data at this point.
-void SpdyTestDeframerImpl::OnError(SpdyFramer* framer) {
+void SpdyTestDeframerImpl::OnError(Http2DecoderAdapter::SpdyFramerError error) {
   DVLOG(1) << "SpdyFramer detected an error in the stream: "
-           << SpdyFramer::SpdyFramerErrorToString(framer->spdy_framer_error())
+           << Http2DecoderAdapter::SpdyFramerErrorToString(error)
            << "     frame_type_: " << Http2FrameTypeToString(frame_type_);
-  listener_->OnError(framer, this);
+  listener_->OnError(error, this);
 }
 
 // Received a GOAWAY frame from the peer. The last stream id it accepted from us
@@ -604,7 +604,7 @@ void SpdyTestDeframerImpl::OnRstStream(SpdyStreamId stream_id,
 
 // Called for an individual setting. There is no negotiation, the sender is
 // stating the value that the sender is using.
-void SpdyTestDeframerImpl::OnSetting(SpdySettingsIds id, uint32_t value) {
+void SpdyTestDeframerImpl::OnSetting(SpdyKnownSettingsId id, uint32_t value) {
   DVLOG(1) << "OnSetting id: " << id << std::hex << "    value: " << value;
   CHECK_EQ(frame_type_, SETTINGS) << "   frame_type_="
                                   << Http2FrameTypeToString(frame_type_);
@@ -677,8 +677,23 @@ void SpdyTestDeframerImpl::OnStreamFrameData(SpdyStreamId stream_id,
   data_->append(data, len);
 }
 
-// Called when padding is skipped over, including the padding length field at
-// the start of the frame payload, and the actual padding at the end. len will
+// Called when receiving the padding length field at the start of the DATA frame
+// payload. value will be in the range 0 to 255.
+void SpdyTestDeframerImpl::OnStreamPadLength(SpdyStreamId stream_id,
+                                             size_t value) {
+  DVLOG(1) << "OnStreamPadding stream_id: " << stream_id
+           << "    value: " << value;
+  CHECK(frame_type_ == DATA || frame_type_ == HEADERS ||
+        frame_type_ == PUSH_PROMISE)
+      << "   frame_type_=" << Http2FrameTypeToString(frame_type_);
+  CHECK_EQ(stream_id_, stream_id);
+  CHECK_GE(255u, value);
+  // Count the padding length byte against total padding.
+  padding_len_ += 1;
+  CHECK_EQ(1u, padding_len_);
+}
+
+// Called when padding is skipped over at the end of the DATA frame. len will
 // be in the range 1 to 255.
 void SpdyTestDeframerImpl::OnStreamPadding(SpdyStreamId stream_id, size_t len) {
   DVLOG(1) << "OnStreamPadding stream_id: " << stream_id << "    len: " << len;
@@ -766,7 +781,7 @@ class LoggingSpdyDeframerDelegate : public SpdyDeframerVisitorInterface {
       wrapped_ = SpdyMakeUnique<SpdyDeframerVisitorInterface>();
     }
   }
-  ~LoggingSpdyDeframerDelegate() override {}
+  ~LoggingSpdyDeframerDelegate() override = default;
 
   void OnAltSvc(std::unique_ptr<SpdyAltSvcIR> frame) override {
     DVLOG(1) << "LoggingSpdyDeframerDelegate::OnAltSvc";
@@ -840,9 +855,10 @@ class LoggingSpdyDeframerDelegate : public SpdyDeframerVisitorInterface {
   }
 
   // The SpdyFramer will not process any more data at this point.
-  void OnError(SpdyFramer* framer, SpdyTestDeframer* deframer) override {
+  void OnError(Http2DecoderAdapter::SpdyFramerError error,
+               SpdyTestDeframer* deframer) override {
     DVLOG(1) << "LoggingSpdyDeframerDelegate::OnError";
-    wrapped_->OnError(framer, deframer);
+    wrapped_->OnError(error, deframer);
   }
 
  private:
@@ -857,7 +873,7 @@ SpdyDeframerVisitorInterface::LogBeforeVisiting(
       std::move(wrapped_listener));
 }
 
-CollectedFrame::CollectedFrame() {}
+CollectedFrame::CollectedFrame() = default;
 
 CollectedFrame::CollectedFrame(CollectedFrame&& other)
     : frame_ir(std::move(other.frame_ir)),
@@ -865,7 +881,7 @@ CollectedFrame::CollectedFrame(CollectedFrame&& other)
       settings(std::move(other.settings)),
       error_reported(other.error_reported) {}
 
-CollectedFrame::~CollectedFrame() {}
+CollectedFrame::~CollectedFrame() = default;
 
 CollectedFrame& CollectedFrame::operator=(CollectedFrame&& other) {
   frame_ir = std::move(other.frame_ir);
@@ -1003,8 +1019,9 @@ void DeframerCallbackCollector::OnWindowUpdate(
 }
 
 // The SpdyFramer will not process any more data at this point.
-void DeframerCallbackCollector::OnError(SpdyFramer* framer,
-                                        SpdyTestDeframer* deframer) {
+void DeframerCallbackCollector::OnError(
+    Http2DecoderAdapter::SpdyFramerError error,
+    SpdyTestDeframer* deframer) {
   CollectedFrame cf;
   cf.error_reported = true;
   collected_frames_->push_back(std::move(cf));

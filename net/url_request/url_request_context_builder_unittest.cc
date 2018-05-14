@@ -4,9 +4,6 @@
 
 #include "net/url_request/url_request_context_builder.h"
 
-#include <memory>
-
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "net/base/request_priority.h"
@@ -23,8 +20,8 @@
 #include "testing/platform_test.h"
 
 #if defined(OS_LINUX) || defined(OS_ANDROID)
-#include "net/proxy/proxy_config.h"
-#include "net/proxy/proxy_config_service_fixed.h"
+#include "net/proxy_resolution/proxy_config.h"
+#include "net/proxy_resolution/proxy_config_service_fixed.h"
 #endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
 namespace net {
@@ -35,7 +32,7 @@ class MockHttpAuthHandlerFactory : public HttpAuthHandlerFactory {
  public:
   MockHttpAuthHandlerFactory(std::string supported_scheme, int return_code)
       : return_code_(return_code), supported_scheme_(supported_scheme) {}
-  ~MockHttpAuthHandlerFactory() override {}
+  ~MockHttpAuthHandlerFactory() override = default;
 
   int CreateAuthHandler(HttpAuthChallengeTokenizer* challenge,
                         HttpAuth::Target target,
@@ -64,7 +61,7 @@ class URLRequestContextBuilderTest : public PlatformTest {
         base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
 #if defined(OS_LINUX) || defined(OS_ANDROID)
     builder_.set_proxy_config_service(
-        base::MakeUnique<ProxyConfigServiceFixed>(ProxyConfig::CreateDirect()));
+        std::make_unique<ProxyConfigServiceFixed>(ProxyConfig::CreateDirect()));
 #endif  // defined(OS_LINUX) || defined(OS_ANDROID)
   }
 
@@ -120,7 +117,7 @@ TEST_F(URLRequestContextBuilderTest, CustomHttpAuthHandlerFactory) {
   const int kBasicReturnCode = OK;
   std::unique_ptr<HttpAuthHandler> handler;
   builder_.SetHttpAuthHandlerFactory(
-      base::MakeUnique<MockHttpAuthHandlerFactory>("ExtraScheme",
+      std::make_unique<MockHttpAuthHandlerFactory>("ExtraScheme",
                                                    kBasicReturnCode));
   std::unique_ptr<URLRequestContext> context(builder_.Build());
   SSLInfo null_ssl_info;

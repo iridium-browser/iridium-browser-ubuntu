@@ -23,14 +23,17 @@
 #define CSSParserSelector_h
 
 #include <memory>
+
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSSelector.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
+class CSSParserContext;
+
 class CORE_EXPORT CSSParserSelector {
-  WTF_MAKE_NONCOPYABLE(CSSParserSelector);
   USING_FAST_MALLOC(CSSParserSelector);
 
  public:
@@ -42,7 +45,7 @@ class CORE_EXPORT CSSParserSelector {
   }
   static std::unique_ptr<CSSParserSelector> Create(const QualifiedName& name,
                                                    bool is_implicit = false) {
-    return WTF::MakeUnique<CSSParserSelector>(name, is_implicit);
+    return std::make_unique<CSSParserSelector>(name, is_implicit);
   }
 
   ~CSSParserSelector();
@@ -74,9 +77,10 @@ class CORE_EXPORT CSSParserSelector {
   }
 
   void UpdatePseudoType(const AtomicString& value,
+                        const CSSParserContext& context,
                         bool has_arguments,
                         CSSParserMode mode) const {
-    selector_->UpdatePseudoType(value, has_arguments, mode);
+    selector_->UpdatePseudoType(value, context, has_arguments, mode);
   }
   void UpdatePseudoPage(const AtomicString& value) {
     selector_->UpdatePseudoPage(value);
@@ -120,6 +124,7 @@ class CORE_EXPORT CSSParserSelector {
  private:
   std::unique_ptr<CSSSelector> selector_;
   std::unique_ptr<CSSParserSelector> tag_history_;
+  DISALLOW_COPY_AND_ASSIGN(CSSParserSelector);
 };
 
 }  // namespace blink

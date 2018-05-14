@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -147,6 +148,22 @@ class Ignore(Comparator):
 
   def __repr__(self):
     return '<IgnoreArg>'
+
+
+class HasString(str):
+  """A substring matcher for mock assertion.
+
+  It overrides str's '==' operator so that
+  HasString('substring') == 'A sentence with substring'
+
+  It is used for mock.assert_called_with(). Note that it is not a Comparator.
+
+  Usage:
+    some_mock.assert_called_with(
+        partial_mock.HasString('need_this_keyword'))
+  """
+  def __eq__(self, target):
+    return self in target
 
 
 def _RecursiveCompare(lhs, rhs):
@@ -316,6 +333,12 @@ class MockedCallResults(object):
       return (DictContains(mc.params.kwargs, kwargs) and
               _RecursiveCompare(mc.params.args, args))
 
+    def is_exception(obj):
+      """Returns True if obj is an exception instance or class."""
+      return (
+          isinstance(obj, BaseException) or
+          isinstance(obj, type) and issubclass(obj, BaseException))
+
     self.AssertArgs(args, kwargs)
     if kwargs is None:
       kwargs = {}
@@ -333,6 +356,8 @@ class MockedCallResults(object):
     else:
       raise AssertionError('%s: %r not mocked!' % (self.name, params))
 
+    if is_exception(side_effect):
+      raise side_effect
     if side_effect:
       assert hook_args is not None
       assert hook_kwargs is not None

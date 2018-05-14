@@ -34,7 +34,7 @@ WebLayerTreeViewImplForTesting::WebLayerTreeViewImplForTesting(
   DCHECK(layer_tree_host_);
 }
 
-WebLayerTreeViewImplForTesting::~WebLayerTreeViewImplForTesting() {}
+WebLayerTreeViewImplForTesting::~WebLayerTreeViewImplForTesting() = default;
 
 // static
 cc::LayerTreeSettings
@@ -53,6 +53,16 @@ bool WebLayerTreeViewImplForTesting::HasLayer(const WebLayer& layer) {
          layer_tree_host_.get();
 }
 
+void WebLayerTreeViewImplForTesting::SetViewportSize(
+    const WebSize& device_viewport_size) {
+  gfx::Size gfx_size(std::max(0, device_viewport_size.width),
+                     std::max(0, device_viewport_size.height));
+  // TODO(ccameron): This likely causes surface invariant violations.
+  layer_tree_host_->SetViewportSizeAndScale(
+      gfx_size, layer_tree_host_->device_scale_factor(),
+      layer_tree_host_->local_surface_id());
+}
+
 void WebLayerTreeViewImplForTesting::SetRootLayer(const blink::WebLayer& root) {
   layer_tree_host_->SetRootLayer(
       static_cast<const cc_blink::WebLayerImpl*>(&root)->layer());
@@ -66,35 +76,13 @@ cc::AnimationHost* WebLayerTreeViewImplForTesting::CompositorAnimationHost() {
   return animation_host_.get();
 }
 
-void WebLayerTreeViewImplForTesting::SetViewportSize(
-    const WebSize& unused_deprecated,
-    const WebSize& device_viewport_size) {
-  gfx::Size gfx_size(std::max(0, device_viewport_size.width),
-                     std::max(0, device_viewport_size.height));
-  layer_tree_host_->SetViewportSize(gfx_size);
-}
-
-void WebLayerTreeViewImplForTesting::SetViewportSize(
-    const WebSize& device_viewport_size) {
-  gfx::Size gfx_size(std::max(0, device_viewport_size.width),
-                     std::max(0, device_viewport_size.height));
-  layer_tree_host_->SetViewportSize(gfx_size);
-}
-
 WebSize WebLayerTreeViewImplForTesting::GetViewportSize() const {
   return WebSize(layer_tree_host_->device_viewport_size().width(),
                  layer_tree_host_->device_viewport_size().height());
 }
 
-void WebLayerTreeViewImplForTesting::SetDeviceScaleFactor(
-    float device_scale_factor) {
-  layer_tree_host_->SetDeviceScaleFactor(device_scale_factor);
-}
-
 void WebLayerTreeViewImplForTesting::SetBackgroundColor(WebColor color) {
   layer_tree_host_->set_background_color(color);
-  layer_tree_host_->set_has_transparent_background(SkColorGetA(color) <
-                                                   SK_AlphaOPAQUE);
 }
 
 void WebLayerTreeViewImplForTesting::SetVisible(bool visible) {
@@ -125,7 +113,8 @@ void WebLayerTreeViewImplForTesting::SetDeferCommits(bool defer_commits) {
   layer_tree_host_->SetDeferCommits(defer_commits);
 }
 
-void WebLayerTreeViewImplForTesting::UpdateLayerTreeHost() {}
+void WebLayerTreeViewImplForTesting::UpdateLayerTreeHost(
+    VisualStateUpdate requested_update) {}
 
 void WebLayerTreeViewImplForTesting::ApplyViewportDeltas(
     const gfx::Vector2dF& inner_delta,

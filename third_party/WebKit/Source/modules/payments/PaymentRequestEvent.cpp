@@ -4,6 +4,9 @@
 
 #include "modules/payments/PaymentRequestEvent.h"
 
+#include <memory>
+#include <utility>
+
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
 #include "core/workers/WorkerGlobalScope.h"
@@ -12,7 +15,6 @@
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "modules/serviceworkers/ServiceWorkerWindowClientCallback.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
@@ -32,7 +34,7 @@ PaymentRequestEvent* PaymentRequestEvent::Create(
                                  wait_until_observer);
 }
 
-PaymentRequestEvent::~PaymentRequestEvent() {}
+PaymentRequestEvent::~PaymentRequestEvent() = default;
 
 const AtomicString& PaymentRequestEvent::InterfaceName() const {
   return EventNames::PaymentRequestEvent;
@@ -73,10 +75,6 @@ ScriptPromise PaymentRequestEvent::openWindow(ScriptState* script_state,
   ScriptPromise promise = resolver->Promise();
   ExecutionContext* context = ExecutionContext::From(script_state);
 
-  // TODO(gogerald): Check payment request state so as to reject promise with
-  // "InvalidStateError" appropriately (refer
-  // https://w3c.github.io/payment-handler/#dfn-open-window-algorithm).
-
   KURL parsed_url_to_open = context->CompleteURL(url);
   if (!parsed_url_to_open.IsValid()) {
     resolver->Reject(V8ThrowException::CreateTypeError(
@@ -84,18 +82,12 @@ ScriptPromise PaymentRequestEvent::openWindow(ScriptState* script_state,
     return promise;
   }
 
-  // TODO(gogerald): Once the issue of the spec is resolved, we should apply the
-  // changes. Refer https://github.com/w3c/payment-handler/issues/168.
-  if (!context->GetSecurityOrigin()->IsSameSchemeHostPortAndSuborigin(
-          SecurityOrigin::Create(parsed_url_to_open).Get())) {
-    resolver->Reject(DOMException::Create(
-        kSecurityError,
-        "'" + parsed_url_to_open.ElidedString() + "' is not allowed."));
+  if (!context->GetSecurityOrigin()->IsSameSchemeHostPort(
+          SecurityOrigin::Create(parsed_url_to_open).get())) {
+    resolver->Resolve(v8::Null(script_state->GetIsolate()));
     return promise;
   }
 
-  // TODO(gogerald): Once the issue of the spec is resolved, we should apply the
-  // changes. Refer https://github.com/w3c/payment-handler/issues/169.
   if (!context->IsWindowInteractionAllowed()) {
     resolver->Reject(DOMException::Create(kInvalidAccessError,
                                           "Not allowed to open a window."));
@@ -104,7 +96,7 @@ ScriptPromise PaymentRequestEvent::openWindow(ScriptState* script_state,
   context->ConsumeWindowInteraction();
 
   ServiceWorkerGlobalScopeClient::From(context)->OpenWindowForPaymentHandler(
-      parsed_url_to_open, WTF::MakeUnique<NavigateClientCallback>(resolver));
+      parsed_url_to_open, std::make_unique<NavigateClientCallback>(resolver));
   return promise;
 }
 
@@ -117,7 +109,7 @@ void PaymentRequestEvent::respondWith(ScriptState* script_state,
   }
 }
 
-DEFINE_TRACE(PaymentRequestEvent) {
+void PaymentRequestEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(method_data_);
   visitor->Trace(modifiers_);
   visitor->Trace(observer_);

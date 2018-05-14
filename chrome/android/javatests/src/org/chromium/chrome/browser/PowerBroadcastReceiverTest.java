@@ -21,21 +21,15 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ApplicationTestUtils;
-
-import java.util.concurrent.Callable;
 
 /**
  * Tests for the PowerBroadcastReceiver.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @RetryOnFailure
 public class PowerBroadcastReceiverTest {
     @Rule
@@ -99,13 +93,9 @@ public class PowerBroadcastReceiverTest {
     @Before
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityFromLauncher();
-        mReceiver = ThreadUtils.runOnUiThreadBlocking(new Callable<PowerBroadcastReceiver>() {
-            @Override
-            public PowerBroadcastReceiver call() throws Exception {
-                return ChromeActivitySessionTracker.getInstance()
-                        .getPowerBroadcastReceiverForTesting();
-            }
-        });
+        mReceiver = ThreadUtils.runOnUiThreadBlocking(
+                () -> ChromeActivitySessionTracker.getInstance()
+                        .getPowerBroadcastReceiverForTesting());
 
         // Set up our mock runnable.
         mRunnable = new MockServiceRunnable();
@@ -123,12 +113,10 @@ public class PowerBroadcastReceiverTest {
     @Feature({"Omaha", "Sync"})
     public void testRunnableRunsWithScreenOn() throws Exception {
         // Pause & resume to post the runnable.
-        ApplicationTestUtils.fireHomeScreenIntent(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        ApplicationTestUtils.fireHomeScreenIntent(InstrumentationRegistry.getTargetContext());
         int postCount = mRunnable.postHelper.getCallCount();
         int runCount = mRunnable.runHelper.getCallCount();
-        ApplicationTestUtils.launchChrome(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        ApplicationTestUtils.launchChrome(InstrumentationRegistry.getTargetContext());
 
         // Relaunching Chrome should cause the runnable to trigger.
         mRunnable.postHelper.waitForCallback(postCount, 1);
@@ -146,19 +134,16 @@ public class PowerBroadcastReceiverTest {
     @Feature({"Omaha", "Sync"})
     public void testRunnableGetsCanceled() throws Exception {
         // Pause & resume to post the runnable.
-        ApplicationTestUtils.fireHomeScreenIntent(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        ApplicationTestUtils.fireHomeScreenIntent(InstrumentationRegistry.getTargetContext());
         int postCount = mRunnable.postHelper.getCallCount();
-        ApplicationTestUtils.launchChrome(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        ApplicationTestUtils.launchChrome(InstrumentationRegistry.getTargetContext());
         mRunnable.postHelper.waitForCallback(postCount, 1);
         Assert.assertEquals(0, mRunnable.runHelper.getCallCount());
         Assert.assertEquals(0, mRunnable.cancelHelper.getCallCount());
 
         // Pause before the runnable has a chance to run.  Should cause the runnable to be canceled.
         int cancelCount = mRunnable.cancelHelper.getCallCount();
-        ApplicationTestUtils.fireHomeScreenIntent(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        ApplicationTestUtils.fireHomeScreenIntent(InstrumentationRegistry.getTargetContext());
         mRunnable.cancelHelper.waitForCallback(cancelCount, 1);
         Assert.assertEquals(0, mRunnable.runHelper.getCallCount());
         Assert.assertFalse("Still listening for power broadcasts.", mReceiver.isRegistered());
@@ -176,10 +161,8 @@ public class PowerBroadcastReceiverTest {
         mReceiver.setPowerManagerHelperForTests(sScreenOff);
 
         // Pause & resume.  Because the screen is off, nothing should happen.
-        ApplicationTestUtils.fireHomeScreenIntent(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
-        ApplicationTestUtils.launchChrome(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        ApplicationTestUtils.fireHomeScreenIntent(InstrumentationRegistry.getTargetContext());
+        ApplicationTestUtils.launchChrome(InstrumentationRegistry.getTargetContext());
         Assert.assertTrue("Isn't waiting for power broadcasts.", mReceiver.isRegistered());
         Assert.assertEquals(0, mRunnable.postHelper.getCallCount());
         Assert.assertEquals(0, mRunnable.runHelper.getCallCount());
@@ -190,8 +173,7 @@ public class PowerBroadcastReceiverTest {
         int runCount = mRunnable.runHelper.getCallCount();
         mReceiver.setPowerManagerHelperForTests(sScreenOn);
         Intent intent = new Intent(Intent.ACTION_SCREEN_ON);
-        mReceiver.onReceive(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(), intent);
+        mReceiver.onReceive(InstrumentationRegistry.getTargetContext(), intent);
 
         // The runnable should run now that the screen is on.
         mRunnable.postHelper.waitForCallback(postCount, 1);

@@ -8,8 +8,8 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "content/public/common/network_service_test.mojom.h"
 #include "content/public/gpu/content_gpu_client.h"
+#include "services/network/public/mojom/network_service_test.mojom.h"
 
 namespace content {
 
@@ -19,7 +19,7 @@ class ShellContentGpuClient : public ContentGpuClient {
   ~ShellContentGpuClient() override;
 
   // ContentGpuClient:
-  void Initialize(service_manager::BinderRegistry* registry) override;
+  void InitializeRegistry(service_manager::BinderRegistry* registry) override;
 
   DISALLOW_COPY_AND_ASSIGN(ShellContentGpuClient);
 };

@@ -4,16 +4,19 @@ class {{export_attribute}} {{union.name}} {
   using Data_ = internal::{{union.name}}_Data;
   using Tag = Data_::{{union.name}}_Tag;
 
+{%- set in_place_marker = "WTF::in_place"
+        if for_blink else "base::in_place" %}
+
   static {{union.name}}Ptr New() {
-    return {{union.name}}Ptr(base::in_place);
+    return {{union.name}}Ptr({{in_place_marker}});
   }
 
 {%-  for field in union.fields %}
   // Construct an instance holding |{{field.name}}|.
   static {{union.name}}Ptr
   New{{field.name|under_to_camel}}(
-      {{field.kind|cpp_wrapper_param_type}} {{field.name}}) {
-    auto result = {{union.name}}Ptr(base::in_place);
+      {{field.kind|cpp_wrapper_param_type_new}} {{field.name}}) {
+    auto result = {{union.name}}Ptr({{in_place_marker}});
     result->set_{{field.name}}(std::move({{field.name}}));
     return result;
   }
@@ -67,8 +70,23 @@ class {{export_attribute}} {{union.name}} {
 {%-   endif %}
   }
 
-  void set_{{field.name}}({{field.kind|cpp_wrapper_param_type}} {{field.name}});
+  void set_{{field.name}}(
+      {{field.kind|cpp_wrapper_param_type_new}} {{field.name}});
 {%- endfor %}
+
+  template <typename UserType>
+  static mojo::Message SerializeAsMessage(UserType* input) {
+    return mojo::internal::SerializeAsMessageImpl<
+        {{union.name}}::DataView>(input);
+  }
+
+  template <typename UserType>
+  static bool DeserializeFromMessage(mojo::Message input,
+                                     UserType* output) {
+    return mojo::internal::DeserializeImpl<{{union.name}}::DataView>(
+        input.payload(), input.payload_num_bytes(),
+        std::move(*input.mutable_handles()), output, Validate);
+  }
 
  private:
   union Union_ {
@@ -84,6 +102,10 @@ class {{export_attribute}} {{union.name}} {
 {%-   endif %}
 {%- endfor %}
   };
+
+  static bool Validate(const void* data,
+                       mojo::internal::ValidationContext* validation_context);
+
   void DestroyActive();
   Tag tag_;
   Union_ data_;

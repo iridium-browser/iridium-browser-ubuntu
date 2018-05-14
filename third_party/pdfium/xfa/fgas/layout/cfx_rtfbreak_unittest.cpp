@@ -18,17 +18,8 @@
 class CFX_RTFBreakTest : public testing::Test {
  public:
   void SetUp() override {
-    CFX_GEModule::Get()->GetFontMgr()->SetSystemFontInfo(
-        IFX_SystemFontInfo::CreateDefault(nullptr));
-
-#if _FXM_PLATFORM_ == _FXM_PLATFORM_WINDOWS_
-    font_mgr_ = CFGAS_FontMgr::Create(FX_GetDefFontEnumerator());
-#else
-    font_source_ = pdfium::MakeUnique<CFX_FontSourceEnum_File>();
-    font_mgr_ = CFGAS_FontMgr::Create(font_source_.get());
-#endif
-
-    font_ = CFGAS_GEFont::LoadFont(L"Arial Black", 0, 0, font_mgr_.get());
+    font_ =
+        CFGAS_GEFont::LoadFont(L"Arial Black", 0, 0, GetGlobalFontManager());
     ASSERT(font_.Get() != nullptr);
   }
 
@@ -39,12 +30,7 @@ class CFX_RTFBreakTest : public testing::Test {
   }
 
  private:
-  std::unique_ptr<CFGAS_FontMgr> font_mgr_;
-  CFX_RetainPtr<CFGAS_GEFont> font_;
-
-#if _FXM_PLATFORM_ != _FXM_PLATFORM_WINDOWS_
-  std::unique_ptr<CFX_FontSourceEnum_File> font_source_;
-#endif
+  RetainPtr<CFGAS_GEFont> font_;
 };
 
 // As soon as you get one of the control characters the break is complete
@@ -53,7 +39,7 @@ class CFX_RTFBreakTest : public testing::Test {
 TEST_F(CFX_RTFBreakTest, AddChars) {
   auto b = CreateBreak(FX_LAYOUTSTYLE_ExpandTab);
 
-  CFX_WideString str(L"Input String.");
+  WideString str(L"Input String.");
   for (const auto& c : str)
     EXPECT_EQ(CFX_BreakType::None, b->AppendChar(c));
 

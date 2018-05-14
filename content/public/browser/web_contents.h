@@ -9,6 +9,8 @@
 
 #include <memory>
 #include <set>
+#include <string>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/files/file_path.h"
@@ -23,10 +25,11 @@
 #include "content/public/browser/save_page_type.h"
 #include "content/public/browser/screen_orientation_delegate.h"
 #include "content/public/browser/site_instance.h"
+#include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/stop_find_action.h"
-#include "ipc/ipc_sender.h"
+#include "third_party/WebKit/public/common/frame/sandbox_flags.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/accessibility/ax_tree_update.h"
 #include "ui/base/window_open_disposition.h"
@@ -64,9 +67,7 @@ namespace content {
 class BrowserContext;
 class BrowserPluginGuestDelegate;
 class InterstitialPage;
-class PageState;
 class RenderFrameHost;
-class RenderProcessHost;
 class RenderViewHost;
 class RenderWidgetHost;
 class RenderWidgetHostView;
@@ -91,7 +92,7 @@ struct RendererPreferences;
 //
 // That's it; go to your kitchen, grab a scone, and chill. WebContents will do
 // all the multi-process stuff behind the scenes. More details are at
-// http://www.chromium.org/developers/design-documents/multi-process-architecture
+// https://www.chromium.org/developers/design-documents/multi-process-architecture
 // .
 //
 // Each WebContents has exactly one NavigationController; each
@@ -100,7 +101,6 @@ struct RendererPreferences;
 // WebContents, navigate it backwards/forwards, etc. See navigation_controller.h
 // for more details.
 class WebContents : public PageNavigator,
-                    public IPC::Sender,
                     public base::SupportsUserData {
  public:
   struct CONTENT_EXPORT CreateParams {
@@ -171,6 +171,9 @@ class WebContents : public PageNavigator,
     // Note that the pre-created renderer process may not be used if the first
     // navigation requires a dedicated or privileged process, such as a WebUI.
     bool initialize_renderer;
+
+    // Sandboxing flags set on the new WebContents.
+    blink::WebSandboxFlags starting_sandbox_flags;
   };
 
   // Creates a new WebContents.
@@ -241,12 +244,8 @@ class WebContents : public PageNavigator,
   // See also GetVisibleURL above, which may differ from this URL.
   virtual const GURL& GetLastCommittedURL() const = 0;
 
-  // Return the currently active RenderProcessHost and RenderViewHost. Each of
-  // these may change over time.
-  virtual RenderProcessHost* GetRenderProcessHost() const = 0;
-
   // Returns the main frame for the currently active view.
-  virtual RenderFrameHost* GetMainFrame() = 0;
+  virtual RenderFrameHost* GetMainFrame() const = 0;
 
   // Returns the focused frame for the currently active view.
   virtual RenderFrameHost* GetFocusedFrame() = 0;
@@ -273,10 +272,10 @@ class WebContents : public PageNavigator,
   // Calls |on_frame| for each frame in the currently active view.
   // Note: The RenderFrameHost parameter is not guaranteed to have a live
   // RenderFrame counterpart in the renderer process. Callbacks should check
-  // IsRenderFrameLive, as sending IPC messages to it in this case will fail
+  // IsRenderFrameLive(), as sending IPC messages to it in this case will fail
   // silently.
   virtual void ForEachFrame(
-      const base::Callback<void(RenderFrameHost*)>& on_frame) = 0;
+      const base::RepeatingCallback<void(RenderFrameHost*)>& on_frame) = 0;
 
   // Returns a vector of all RenderFrameHosts in the currently active view in
   // breadth-first traversal order.
@@ -317,15 +316,6 @@ class WebContents : public PageNavigator,
   // theme-color meta tag.
   virtual SkColor GetThemeColor() const = 0;
 
-  // Create a WebUI page for the given url. In most cases, this doesn't need to
-  // be called by embedders since content will create its own WebUI objects as
-  // necessary. However if the embedder wants to create its own WebUI object and
-  // keep track of it manually, it can use this. |frame_name| is used to
-  // identify the frame and cannot be empty.
-  virtual std::unique_ptr<WebUI> CreateSubframeWebUI(
-      const GURL& url,
-      const std::string& frame_name) = 0;
-
   // Returns the committed WebUI if one exists, otherwise the pending one.
   virtual WebUI* GetWebUI() const = 0;
   virtual WebUI* GetCommittedWebUI() const = 0;
@@ -364,10 +354,6 @@ class WebContents : public PageNavigator,
   // Returns the SiteInstance associated with the current page.
   virtual SiteInstance* GetSiteInstance() const = 0;
 
-  // Returns the SiteInstance for the pending navigation, if any.  Otherwise
-  // returns the current SiteInstance.
-  virtual SiteInstance* GetPendingSiteInstance() const = 0;
-
   // Returns whether this WebContents is loading a resource.
   virtual bool IsLoading() const = 0;
 
@@ -403,11 +389,14 @@ class WebContents : public PageNavigator,
   // returned by GetPreferredSize() until all captures have ended.
   virtual void IncrementCapturerCount(const gfx::Size& capture_size) = 0;
   virtual void DecrementCapturerCount() = 0;
-  virtual int GetCapturerCount() const = 0;
+  virtual bool IsBeingCaptured() const = 0;
 
   // Indicates/Sets whether all audio output from this WebContents is muted.
   virtual bool IsAudioMuted() const = 0;
   virtual void SetAudioMuted(bool mute) = 0;
+
+  // Returns true if the audio is currently audible.
+  virtual bool IsCurrentlyAudible() = 0;
 
   // Indicates whether any frame in the WebContents is connected to a Bluetooth
   // Device.
@@ -436,17 +425,19 @@ class WebContents : public PageNavigator,
   virtual base::TimeTicks GetLastActiveTime() const = 0;
   virtual void SetLastActiveTime(base::TimeTicks last_active_time) = 0;
 
-  // Get the last time that the WebContents was made hidden.
-  virtual base::TimeTicks GetLastHiddenTime() const = 0;
-
-  // Invoked when the WebContents becomes shown/hidden.
+  // Invoked when the WebContents becomes shown/hidden. A hidden WebContents
+  // isn't painted on the screen.
   virtual void WasShown() = 0;
   virtual void WasHidden() = 0;
 
-  // Whether the WebContents is visible. This can return true even if the page
-  // is still loading, as opposed to RenderWidgetHostView::IsShowing(), which
-  // always returns false when the page is still loading.
-  virtual bool IsVisible() const = 0;
+  // Invoked when the WebContents becomes occluded/unoccluded. An occluded
+  // WebContents isn't painted on the screen, except in a window switching
+  // feature (e.g. Alt-Tab).
+  virtual void WasOccluded() = 0;
+  virtual void WasUnOccluded() = 0;
+
+  // Returns the visibility of the WebContents' view.
+  virtual Visibility GetVisibility() const = 0;
 
   // Returns true if the before unload and unload listeners need to be
   // fired. The value of this changes over time. For example, if true and the
@@ -466,6 +457,10 @@ class WebContents : public PageNavigator,
   virtual void AttachToOuterWebContentsFrame(
       WebContents* outer_web_contents,
       RenderFrameHost* outer_contents_frame) = 0;
+
+  // Returns the outer WebContents of this WebContents if any.
+  // Otherwise, return nullptr.
+  virtual WebContents* GetOuterWebContents() = 0;
 
   // Invoked when visible security state changes.
   virtual void DidChangeVisibleSecurityState() = 0;
@@ -504,7 +499,8 @@ class WebContents : public PageNavigator,
   // beginning of the document, a positive amount moves the selection towards
   // the end of the document.
   virtual void AdjustSelectionByCharacterOffset(int start_adjust,
-                                                int end_adjust) = 0;
+                                                int end_adjust,
+                                                bool show_selection_menu) = 0;
 
   // Replaces the currently selected word or a word around the cursor.
   virtual void Replace(const base::string16& word) = 0;
@@ -642,12 +638,6 @@ class WebContents : public PageNavigator,
   virtual void SetClosedByUserGesture(bool value) = 0;
   virtual bool GetClosedByUserGesture() const = 0;
 
-  // Opens view-source tab for this contents.
-  virtual void ViewSource() = 0;
-
-  virtual void ViewFrameSource(const GURL& url,
-                               const PageState& page_state) = 0;
-
   // Gets the minimum/maximum zoom percent.
   virtual int GetMinimumZoomPercent() const = 0;
   virtual int GetMaximumZoomPercent() const = 0;
@@ -684,7 +674,9 @@ class WebContents : public PageNavigator,
   // Returns true if this WebContents was opened by another WebContents, even
   // if the opener was suppressed. In contrast to HasOpener/GetOpener, the
   // original opener doesn't reflect window.opener which can be suppressed or
-  // updated.
+  // updated. This traces all the way back, so if the original owner was closed,
+  // but _it_ had an original owner, this will return the original owner's
+  // original owner, etc.
   virtual bool HasOriginalOpener() const = 0;
 
   // Returns the original opener if HasOriginalOpener() is true, or nullptr
@@ -725,8 +717,9 @@ class WebContents : public PageNavigator,
 
   // Returns true if the WebContents is responsible for displaying a subframe
   // in a different process from its parent page.
-  // TODO: this doesn't really belong here. With site isolation, this should be
-  // removed since we can then embed iframes in different processes.
+  // TODO(lazyboy): https://crbug.com/542893: this doesn't really belong here.
+  // With site isolation, this should be removed since we can then embed iframes
+  // in different processes.
   virtual bool IsSubframe() const = 0;
 
   // Finds text on a page. |search_text| should not be empty.
@@ -740,6 +733,10 @@ class WebContents : public PageNavigator,
 
   // Returns true if audio has recently been audible from the WebContents.
   virtual bool WasRecentlyAudible() = 0;
+
+  // Returns true if audio has been audible from the WebContents since the last
+  // navigation.
+  virtual bool WasEverAudible() = 0;
 
   // The callback invoked when the renderer responds to a request for the main
   // frame document's manifest. The url will be empty if the document specifies
@@ -766,24 +763,6 @@ class WebContents : public PageNavigator,
   // as soon as they are ready.
   virtual void ResumeLoadingCreatedWebContents() = 0;
 
-  // Called when the WebContents has displayed a password field on an
-  // HTTP page. This method modifies the appropriate NavigationEntry's
-  // SSLStatus to record the sensitive input field, so that embedders
-  // can adjust the UI if desired.
-  virtual void OnPasswordInputShownOnHttp() = 0;
-
-  // Called when the WebContents has hidden all password fields on an
-  // HTTP page. This method modifies the appropriate NavigationEntry's
-  // SSLStatus to remove the presence of sensitive input fields, so that
-  // embedders can adjust the UI if desired.
-  virtual void OnAllPasswordInputsHiddenOnHttp() = 0;
-
-  // Called when the WebContents has displayed a credit card field on an
-  // HTTP page. This method modifies the appropriate NavigationEntry's
-  // SSLStatus to record the sensitive input field, so that embedders
-  // can adjust the UI if desired.
-  virtual void OnCreditCardInputShownOnHttp() = 0;
-
   // Sets whether the WebContents is for overlaying content on a page.
   virtual void SetIsOverlayContent(bool is_overlay_content) = 0;
 
@@ -792,7 +771,7 @@ class WebContents : public PageNavigator,
   // Returns a map containing the sizes of all currently playing videos.
   using VideoSizeMap =
       base::flat_map<WebContentsObserver::MediaPlayerId, gfx::Size>;
-  virtual const VideoSizeMap& GetCurrentlyPlayingVideoSizes() = 0;
+  virtual base::Optional<gfx::Size> GetFullscreenVideoSize() = 0;
   virtual bool IsFullscreen() = 0;
 
   // Tells the renderer to clear the focused element (if any).

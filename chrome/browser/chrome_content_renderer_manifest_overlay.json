@@ -1,11 +1,12 @@
 {
   "display_name": "Chrome Render Process",
+  "name": "content_renderer",
   "interface_provider_specs": {
     "service_manager:connector": {
       "provides": {
         "browser": [
-          "chrome::mojom::ResourceUsageReporter",
-          "spellcheck::mojom::SpellChecker"
+          "chrome::mojom::SearchBouncer",
+          "profiling::mojom::ProfilingClient"
         ]
       }
     },
@@ -16,11 +17,14 @@
           "autofill::mojom::PasswordAutofillAgent",
           "autofill::mojom::PasswordGenerationAgent",
           "blink::mojom::document_metadata::CopylessPaste",
-          "chrome::mojom::ImageContextMenuRenderer",
-          "chrome::mojom::InsecureContentRenderer",
-          "chrome::mojom::ThumbnailCapturer",
-          "contextual_search::mojom::OverlayPageNotifierService",
+          "chrome::mojom::ChromeRenderFrame",
+          "chrome::mojom::ContentSettingsRenderer",
+          "chrome::mojom::PrerenderDispatcher",
+          "chrome::mojom::SandboxStatusExtension",
           "dom_distiller::mojom::DistillerPageNotifierService",
+          "extensions::mojom::AppWindow",
+          "safe_browsing::mojom::ThreatReporter",
+          "safe_browsing::mojom::PhishingDetector",
           "spellcheck::mojom::SpellCheckPanel"
         ]
       }

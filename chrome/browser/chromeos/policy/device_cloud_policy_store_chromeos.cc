@@ -8,15 +8,14 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/policy/device_policy_decoder_chromeos.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/install_attributes.h"
 #include "components/ownership/owner_key_util.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 
 namespace em = enterprise_management;
@@ -117,7 +116,7 @@ DeviceCloudPolicyStoreChromeOS::CreateValidator(
     const em::PolicyFetchResponse& policy) {
   std::unique_ptr<DeviceCloudPolicyValidator> validator(
       DeviceCloudPolicyValidator::Create(
-          base::MakeUnique<em::PolicyFetchResponse>(policy),
+          std::make_unique<em::PolicyFetchResponse>(policy),
           background_task_runner_));
   validator->ValidateDomain(install_attributes_->GetDomain());
   validator->ValidatePolicyType(dm_protocol::kChromeDevicePolicyType);
@@ -157,7 +156,7 @@ void DeviceCloudPolicyStoreChromeOS::UpdateFromService() {
   const chromeos::DeviceSettingsService::Status service_status =
       device_settings_service_->status();
   if (service_status == chromeos::DeviceSettingsService::STORE_SUCCESS) {
-    policy_ = base::MakeUnique<em::PolicyData>();
+    policy_ = std::make_unique<em::PolicyData>();
     const em::PolicyData* policy_data = device_settings_service_->policy_data();
     if (policy_data)
       policy_->MergeFrom(*policy_data);
@@ -233,10 +232,10 @@ void DeviceCloudPolicyStoreChromeOS::CheckDMToken() {
     LOG(ERROR) << "Device policy read on enrolled device yields "
                << "no DM token! Status: " << service_status << ".";
 
-    // At the time LoginDisplayHostImpl decides whether enrollment flow is to be
-    // started, policy hasn't been read yet.  To work around this, once the need
-    // for recovery is detected upon policy load, a flag is stored in prefs
-    // which is accessed by LoginDisplayHostImpl early during (next) boot.
+    // At the time LoginDisplayHostWebUI decides whether enrollment flow is to
+    // be started, policy hasn't been read yet.  To work around this, once the
+    // need for recovery is detected upon policy load, a flag is stored in prefs
+    // which is accessed by LoginDisplayHostWebUI early during (next) boot.
     chromeos::StartupUtils::MarkEnrollmentRecoveryRequired();
   }
 }

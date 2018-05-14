@@ -15,6 +15,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
+#include "base/syslog_logging.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -24,7 +25,7 @@
 #include "chrome/browser/chromeos/app_mode/startup_app_launcher.h"
 #include "chrome/browser/chromeos/login/enterprise_user_session_metrics.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -98,7 +99,6 @@ void RecordKioskLaunchUMA(bool is_auto_launch) {
 
 }  // namespace
 
-
 ////////////////////////////////////////////////////////////////////////////////
 // AppLaunchController::AppWindowWatcher
 
@@ -132,9 +132,7 @@ class AppLaunchController::AppWindowWatcher
     }
   }
 
-  void NotifyAppWindowCreated() {
-    controller_->OnAppWindowCreated();
-  }
+  void NotifyAppWindowCreated() { controller_->OnAppWindowCreated(); }
 
   AppLaunchController* controller_;
   std::string app_id_;
@@ -163,7 +161,7 @@ AppLaunchController::~AppLaunchController() {
 }
 
 void AppLaunchController::StartAppLaunch(bool is_auto_launch) {
-  DVLOG(1) << "Starting kiosk mode...";
+  SYSLOG(INFO) << "Starting kiosk mode...";
 
   RecordKioskLaunchUMA(is_auto_launch);
 
@@ -266,10 +264,9 @@ void AppLaunchController::OnOwnerSigninSuccess() {
   signin_screen_.reset();
 }
 
-void AppLaunchController::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
+void AppLaunchController::Observe(int type,
+                                  const content::NotificationSource& source,
+                                  const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE, type);
   DCHECK(!webui_visible_);
   webui_visible_ = true;
@@ -307,7 +304,7 @@ void AppLaunchController::OnNetworkStateChanged(bool online) {
 }
 
 void AppLaunchController::OnProfileLoaded(Profile* profile) {
-  DVLOG(1) << "Profile loaded... Starting app launch.";
+  SYSLOG(INFO) << "Profile loaded... Starting app launch.";
   profile_ = profile;
 
   // This is needed to trigger input method extensions being loaded.
@@ -353,8 +350,8 @@ void AppLaunchController::CleanUp() {
 
 void AppLaunchController::OnNetworkWaitTimedout() {
   DCHECK(waiting_for_network_);
-  LOG(WARNING) << "OnNetworkWaitTimedout... connection = "
-               <<  net::NetworkChangeNotifier::GetConnectionType();
+  SYSLOG(WARNING) << "OnNetworkWaitTimedout... connection = "
+                  << net::NetworkChangeNotifier::GetConnectionType();
   network_wait_timedout_ = true;
 
   MaybeShowNetworkConfigureUI();
@@ -364,7 +361,7 @@ void AppLaunchController::OnNetworkWaitTimedout() {
 }
 
 void AppLaunchController::OnAppWindowCreated() {
-  DVLOG(1) << "App window created, closing splash screen.";
+  SYSLOG(INFO) << "App window created, closing splash screen.";
   CleanUp();
 }
 
@@ -444,16 +441,6 @@ bool AppLaunchController::ShouldSkipAppInstallation() {
   return false;
 }
 
-void AppLaunchController::OnLoadingOAuthFile() {
-  app_launch_splash_screen_view_->UpdateAppLaunchState(
-      AppLaunchSplashScreenView::APP_LAUNCH_STATE_LOADING_AUTH_FILE);
-}
-
-void AppLaunchController::OnInitializingTokenService() {
-  app_launch_splash_screen_view_->UpdateAppLaunchState(
-      AppLaunchSplashScreenView::APP_LAUNCH_STATE_LOADING_TOKEN_SERVICE);
-}
-
 void AppLaunchController::OnInstallingApp() {
   app_launch_splash_screen_view_->UpdateAppLaunchState(
       AppLaunchSplashScreenView::APP_LAUNCH_STATE_INSTALLING_APPLICATION);
@@ -497,10 +484,9 @@ void AppLaunchController::OnReadyToLaunch() {
   if (!skip_splash_wait && time_taken_ms < kAppInstallSplashScreenMinTimeMS) {
     splash_wait_timer_.Start(
         FROM_HERE,
-        base::TimeDelta::FromMilliseconds(
-            kAppInstallSplashScreenMinTimeMS - time_taken_ms),
-        this,
-        &AppLaunchController::OnReadyToLaunch);
+        base::TimeDelta::FromMilliseconds(kAppInstallSplashScreenMinTimeMS -
+                                          time_taken_ms),
+        this, &AppLaunchController::OnReadyToLaunch);
     return;
   }
 
@@ -508,7 +494,7 @@ void AppLaunchController::OnReadyToLaunch() {
 }
 
 void AppLaunchController::OnLaunchSucceeded() {
-  DVLOG(1) << "Kiosk launch succeeded, wait for app window.";
+  SYSLOG(INFO) << "Kiosk launch succeeded, wait for app window.";
   app_launch_splash_screen_view_->UpdateAppLaunchState(
       AppLaunchSplashScreenView::APP_LAUNCH_STATE_WAITING_APP_WINDOW);
 
@@ -518,7 +504,7 @@ void AppLaunchController::OnLaunchSucceeded() {
 
 void AppLaunchController::OnLaunchFailed(KioskAppLaunchError::Error error) {
   DCHECK_NE(KioskAppLaunchError::NONE, error);
-  LOG(ERROR) << "Kiosk launch failed, error=" << error;
+  SYSLOG(ERROR) << "Kiosk launch failed, error=" << error;
 
   // Reboot on the recoverable cryptohome errors.
   if (error == KioskAppLaunchError::CRYPTOHOMED_NOT_RUNNING ||
@@ -539,4 +525,4 @@ bool AppLaunchController::IsShowingNetworkConfigScreen() {
   return network_config_requested_;
 }
 
-}   // namespace chromeos
+}  // namespace chromeos

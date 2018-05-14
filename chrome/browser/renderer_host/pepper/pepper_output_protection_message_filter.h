@@ -26,8 +26,6 @@ struct HostMessageContext;
 }  // namespace host
 }  // namespace ppapi
 
-namespace chrome {
-
 class OutputProtectionProxy;
 
 class PepperOutputProtectionMessageFilter
@@ -81,7 +79,5 @@ class PepperOutputProtectionMessageFilter
 
   DISALLOW_COPY_AND_ASSIGN(PepperOutputProtectionMessageFilter);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_RENDERER_HOST_PEPPER_PEPPER_OUTPUT_PROTECTION_MESSAGE_FILTER_H_

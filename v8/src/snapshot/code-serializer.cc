@@ -11,15 +11,27 @@
 #include "src/log.h"
 #include "src/macro-assembler.h"
 #include "src/objects-inl.h"
-#include "src/snapshot/deserializer.h"
+#include "src/snapshot/object-deserializer.h"
 #include "src/snapshot/snapshot.h"
+#include "src/trap-handler/trap-handler.h"
 #include "src/version.h"
 #include "src/visitors.h"
 #include "src/wasm/wasm-module.h"
-#include "src/wasm/wasm-objects.h"
+#include "src/wasm/wasm-objects-inl.h"
 
 namespace v8 {
 namespace internal {
+
+ScriptData::ScriptData(const byte* data, int length)
+    : owns_data_(false), rejected_(false), data_(data), length_(length) {
+  if (!IsAligned(reinterpret_cast<intptr_t>(data), kPointerAlignment)) {
+    byte* copy = NewArray<byte>(length);
+    DCHECK(IsAligned(reinterpret_cast<intptr_t>(copy), kPointerAlignment));
+    CopyBytes(copy, data, length);
+    data_ = copy;
+    AcquireDataOwnership();
+  }
+}
 
 ScriptData* CodeSerializer::Serialize(Isolate* isolate,
                                       Handle<SharedFunctionInfo> info,
@@ -51,11 +63,12 @@ ScriptData* CodeSerializer::Serialize(Isolate* isolate,
 ScriptData* CodeSerializer::Serialize(Handle<HeapObject> obj) {
   DisallowHeapAllocation no_gc;
 
-  VisitRootPointer(Root::kHandleScope, Handle<Object>::cast(obj).location());
+  VisitRootPointer(Root::kHandleScope, nullptr,
+                   Handle<Object>::cast(obj).location());
   SerializeDeferredObjects();
   Pad();
 
-  SerializedCodeData data(sink()->data(), this);
+  SerializedCodeData data(sink_.data(), this);
 
   return data.GetScriptData();
 }
@@ -64,7 +77,7 @@ void CodeSerializer::SerializeObject(HeapObject* obj, HowToCode how_to_code,
                                      WhereToPoint where_to_point, int skip) {
   if (SerializeHotObject(obj, how_to_code, where_to_point, skip)) return;
 
-  int root_index = root_index_map_.Lookup(obj);
+  int root_index = root_index_map()->Lookup(obj);
   if (root_index != RootIndexMap::kInvalidRootIndex) {
     PutRoot(root_index, obj, how_to_code, where_to_point, skip);
     return;
@@ -78,29 +91,20 @@ void CodeSerializer::SerializeObject(HeapObject* obj, HowToCode how_to_code,
     Code* code_object = Code::cast(obj);
     switch (code_object->kind()) {
       case Code::OPTIMIZED_FUNCTION:  // No optimized code compiled yet.
-      case Code::HANDLER:             // No handlers patched in yet.
       case Code::REGEXP:              // No regexp literals initialized yet.
       case Code::NUMBER_OF_KINDS:     // Pseudo enum value.
       case Code::BYTECODE_HANDLER:    // No direct references to handlers.
-        CHECK(false);
+        break;                        // hit UNREACHABLE below.
       case Code::BUILTIN:
-        SerializeBuiltin(code_object->builtin_index(), how_to_code,
-                         where_to_point);
+        SerializeBuiltinReference(code_object, how_to_code, where_to_point, 0);
         return;
       case Code::STUB:
-#define IC_KIND_CASE(KIND) case Code::KIND:
-        IC_KIND_LIST(IC_KIND_CASE)
-#undef IC_KIND_CASE
         if (code_object->builtin_index() == -1) {
           SerializeCodeStub(code_object, how_to_code, where_to_point);
         } else {
-          SerializeBuiltin(code_object->builtin_index(), how_to_code,
-                           where_to_point);
+          SerializeBuiltinReference(code_object, how_to_code, where_to_point,
+                                    0);
         }
-        return;
-      case Code::FUNCTION:
-        DCHECK(code_object->has_reloc_info_for_serialization());
-        SerializeGeneric(code_object, how_to_code, where_to_point);
         return;
       default:
         return SerializeCodeObject(code_object, how_to_code, where_to_point);
@@ -114,16 +118,58 @@ void CodeSerializer::SerializeObject(HeapObject* obj, HowToCode how_to_code,
   }
 
   if (obj->IsScript()) {
+    Script* script_obj = Script::cast(obj);
+    DCHECK_NE(script_obj->compilation_type(), Script::COMPILATION_TYPE_EVAL);
     // Wrapper object is a context-dependent JSValue. Reset it here.
-    Script::cast(obj)->set_wrapper(isolate()->heap()->undefined_value());
+    script_obj->set_wrapper(isolate()->heap()->undefined_value());
+    // We want to differentiate between undefined and uninitialized_symbol for
+    // context_data for now. It is hack to allow debugging for scripts that are
+    // included as a part of custom snapshot. (see debug::Script::IsEmbedded())
+    Object* context_data = script_obj->context_data();
+    if (context_data != isolate()->heap()->undefined_value() &&
+        context_data != isolate()->heap()->uninitialized_symbol()) {
+      script_obj->set_context_data(isolate()->heap()->undefined_value());
+    }
+    // We don't want to serialize host options to avoid serializing unnecessary
+    // object graph.
+    FixedArray* host_options = script_obj->host_defined_options();
+    script_obj->set_host_defined_options(
+        isolate()->heap()->empty_fixed_array());
+    SerializeGeneric(obj, how_to_code, where_to_point);
+    script_obj->set_host_defined_options(host_options);
+    script_obj->set_context_data(context_data);
+    return;
+  }
+
+  if (obj->IsSharedFunctionInfo()) {
+    SharedFunctionInfo* sfi = SharedFunctionInfo::cast(obj);
+    // TODO(7110): Enable serializing of Asm modules once the AsmWasmData
+    // is context independent.
+    DCHECK(!sfi->IsApiFunction() && !sfi->HasAsmWasmData());
+    // Clear debug info.
+    Object* debug_info = sfi->debug_info();
+    sfi->set_debug_info(Smi::kZero);
+
+    // Mark SFI to indicate whether the code is cached.
+    bool was_deserialized = sfi->deserialized();
+    sfi->set_deserialized(sfi->is_compiled());
+    SerializeGeneric(obj, how_to_code, where_to_point);
+    sfi->set_deserialized(was_deserialized);
+    sfi->set_debug_info(debug_info);
+    return;
+  }
+
+  if (obj->IsBytecodeArray()) {
+    // Clear the stack frame cache if present
+    BytecodeArray::cast(obj)->ClearFrameCacheFromSourcePositionTable();
   }
 
   // Past this point we should not see any (context-specific) maps anymore.
   CHECK(!obj->IsMap());
   // There should be no references to the global object embedded.
   CHECK(!obj->IsJSGlobalProxy() && !obj->IsJSGlobalObject());
-  // There should be no hash table embedded. They would require rehashing.
-  CHECK(!obj->IsHashTable());
+  // Embedded FixedArrays that need rehashing must support rehashing.
+  CHECK_IMPLIES(obj->NeedsRehashing(), obj->CanBeRehashed());
   // We expect no instantiated function objects or contexts.
   CHECK(!obj->IsJSFunction() && !obj->IsContext());
 
@@ -139,23 +185,6 @@ void CodeSerializer::SerializeGeneric(HeapObject* heap_object,
   serializer.Serialize();
 }
 
-void CodeSerializer::SerializeBuiltin(int builtin_index, HowToCode how_to_code,
-                                      WhereToPoint where_to_point) {
-  DCHECK((how_to_code == kPlain && where_to_point == kStartOfObject) ||
-         (how_to_code == kPlain && where_to_point == kInnerPointer) ||
-         (how_to_code == kFromCode && where_to_point == kInnerPointer));
-  DCHECK_LT(builtin_index, Builtins::builtin_count);
-  DCHECK_LE(0, builtin_index);
-
-  if (FLAG_trace_serializer) {
-    PrintF(" Encoding builtin: %s\n",
-           isolate()->builtins()->name(builtin_index));
-  }
-
-  sink_.Put(kBuiltin + how_to_code + where_to_point, "Builtin");
-  sink_.PutInt(builtin_index, "builtin_index");
-}
-
 void CodeSerializer::SerializeCodeStub(Code* code_stub, HowToCode how_to_code,
                                        WhereToPoint where_to_point) {
   // We only arrive here if we have not encountered this code stub before.
@@ -163,7 +192,7 @@ void CodeSerializer::SerializeCodeStub(Code* code_stub, HowToCode how_to_code,
   uint32_t stub_key = code_stub->stub_key();
   DCHECK(CodeStub::MajorKeyFromKey(stub_key) != CodeStub::NoCache);
   DCHECK(!CodeStub::GetCode(isolate(), stub_key).is_null());
-  stub_keys_.Add(stub_key);
+  stub_keys_.push_back(stub_key);
 
   SerializerReference reference =
       reference_map()->AddAttachedReference(code_stub);
@@ -195,30 +224,22 @@ MaybeHandle<SharedFunctionInfo> CodeSerializer::Deserialize(
     return MaybeHandle<SharedFunctionInfo>();
   }
 
-  Deserializer deserializer(&scd);
-  deserializer.AddAttachedObject(source);
-  Vector<const uint32_t> code_stub_keys = scd.CodeStubKeys();
-  for (int i = 0; i < code_stub_keys.length(); i++) {
-    deserializer.AddAttachedObject(
-        CodeStub::GetCode(isolate, code_stub_keys[i]).ToHandleChecked());
-  }
-
   // Deserialize.
-  Handle<HeapObject> as_heap_object;
-  if (!deserializer.DeserializeObject(isolate).ToHandle(&as_heap_object)) {
+  MaybeHandle<SharedFunctionInfo> maybe_result =
+      ObjectDeserializer::DeserializeSharedFunctionInfo(isolate, &scd, source);
+
+  Handle<SharedFunctionInfo> result;
+  if (!maybe_result.ToHandle(&result)) {
     // Deserializing may fail if the reservations cannot be fulfilled.
     if (FLAG_profile_deserialization) PrintF("[Deserializing failed]\n");
     return MaybeHandle<SharedFunctionInfo>();
   }
 
-  Handle<SharedFunctionInfo> result =
-      Handle<SharedFunctionInfo>::cast(as_heap_object);
   if (FLAG_profile_deserialization) {
     double ms = timer.Elapsed().InMillisecondsF();
     int length = cached_data->length();
     PrintF("[Deserializing from %d bytes took %0.3f ms]\n", length, ms);
   }
-  result->set_deserialized(true);
 
   if (isolate->logger()->is_logging_code_events() || isolate->is_profiling()) {
     String* name = isolate->heap()->empty_string();
@@ -244,8 +265,9 @@ std::unique_ptr<ScriptData> WasmCompiledModuleSerializer::SerializeWasmModule(
     Isolate* isolate, Handle<FixedArray> input) {
   Handle<WasmCompiledModule> compiled_module =
       Handle<WasmCompiledModule>::cast(input);
-  WasmCompiledModuleSerializer wasm_cs(isolate, 0, isolate->native_context(),
-                                       handle(compiled_module->module_bytes()));
+  WasmCompiledModuleSerializer wasm_cs(
+      isolate, 0, isolate->native_context(),
+      handle(compiled_module->shared()->module_bytes()));
   ScriptData* data = wasm_cs.Serialize(compiled_module);
   return std::unique_ptr<ScriptData>(data);
 }
@@ -266,34 +288,18 @@ MaybeHandle<FixedArray> WasmCompiledModuleSerializer::DeserializeWasmModule(
     return nothing;
   }
 
-  Deserializer deserializer(&scd, true);
-  deserializer.AddAttachedObject(isolate->native_context());
+  // TODO(6792): No longer needed once WebAssembly code is off heap.
+  CodeSpaceMemoryModificationScope modification_scope(isolate->heap());
+  MaybeHandle<WasmCompiledModule> maybe_result =
+      ObjectDeserializer::DeserializeWasmCompiledModule(isolate, &scd,
+                                                        wire_bytes);
 
-  MaybeHandle<String> maybe_wire_bytes_as_string =
-      isolate->factory()->NewStringFromOneByte(wire_bytes, TENURED);
-  Handle<String> wire_bytes_as_string;
-  if (!maybe_wire_bytes_as_string.ToHandle(&wire_bytes_as_string)) {
-    return nothing;
-  }
-  deserializer.AddAttachedObject(
-      handle(SeqOneByteString::cast(*wire_bytes_as_string)));
+  Handle<WasmCompiledModule> result;
+  if (!maybe_result.ToHandle(&result)) return nothing;
 
-  Vector<const uint32_t> stub_keys = scd.CodeStubKeys();
-  for (int i = 0; i < stub_keys.length(); ++i) {
-    deserializer.AddAttachedObject(
-        CodeStub::GetCode(isolate, stub_keys[i]).ToHandleChecked());
-  }
-
-  MaybeHandle<HeapObject> obj = deserializer.DeserializeObject(isolate);
-  if (obj.is_null() || !obj.ToHandleChecked()->IsFixedArray()) return nothing;
-  // Cast without type checks, as the module wrapper is not there yet.
-  Handle<WasmCompiledModule> compiled_module(
-      static_cast<WasmCompiledModule*>(*obj.ToHandleChecked()), isolate);
-
-  WasmCompiledModule::ReinitializeAfterDeserialization(isolate,
-                                                       compiled_module);
-  DCHECK(WasmCompiledModule::IsWasmCompiledModule(*compiled_module));
-  return compiled_module;
+  WasmCompiledModule::ReinitializeAfterDeserialization(isolate, result);
+  DCHECK(WasmCompiledModule::IsWasmCompiledModule(*result));
+  return result;
 }
 
 void WasmCompiledModuleSerializer::SerializeCodeObject(
@@ -301,15 +307,30 @@ void WasmCompiledModuleSerializer::SerializeCodeObject(
   Code::Kind kind = code_object->kind();
   switch (kind) {
     case Code::WASM_FUNCTION:
-    case Code::JS_TO_WASM_FUNCTION:
+    case Code::JS_TO_WASM_FUNCTION: {
+      // TODO(6792): No longer needed once WebAssembly code is off heap.
+      CodeSpaceMemoryModificationScope modification_scope(isolate()->heap());
+      // Because the trap handler index is not meaningful across copies and
+      // serializations, we need to serialize it as kInvalidIndex. We do this by
+      // saving the old value, setting the index to kInvalidIndex and then
+      // restoring the old value.
+      const int old_trap_handler_index =
+          code_object->trap_handler_index()->value();
+      code_object->set_trap_handler_index(
+          Smi::FromInt(trap_handler::kInvalidIndex));
+
       // Just serialize the code_object.
       SerializeGeneric(code_object, how_to_code, where_to_point);
+      code_object->set_trap_handler_index(Smi::FromInt(old_trap_handler_index));
       break;
+    }
     case Code::WASM_INTERPRETER_ENTRY:
     case Code::WASM_TO_JS_FUNCTION:
+    case Code::WASM_TO_WASM_FUNCTION:
       // Serialize the illegal builtin instead. On instantiation of a
       // deserialized module, these will be replaced again.
-      SerializeBuiltin(Builtins::kIllegal, how_to_code, where_to_point);
+      SerializeBuiltinReference(*BUILTIN_CODE(isolate(), Illegal), how_to_code,
+                                where_to_point, 0);
       break;
     default:
       UNREACHABLE();
@@ -359,21 +380,21 @@ class Checksum {
   DISALLOW_COPY_AND_ASSIGN(Checksum);
 };
 
-SerializedCodeData::SerializedCodeData(const List<byte>* payload,
+SerializedCodeData::SerializedCodeData(const std::vector<byte>* payload,
                                        const CodeSerializer* cs) {
   DisallowHeapAllocation no_gc;
-  const List<uint32_t>* stub_keys = cs->stub_keys();
-
-  List<Reservation> reservations;
-  cs->EncodeReservations(&reservations);
+  const std::vector<uint32_t>* stub_keys = cs->stub_keys();
+  std::vector<Reservation> reservations = cs->EncodeReservations();
 
   // Calculate sizes.
-  int reservation_size = reservations.length() * kInt32Size;
-  int num_stub_keys = stub_keys->length();
-  int stub_keys_size = stub_keys->length() * kInt32Size;
-  int payload_offset = kHeaderSize + reservation_size + stub_keys_size;
-  int padded_payload_offset = POINTER_SIZE_ALIGN(payload_offset);
-  int size = padded_payload_offset + payload->length();
+  uint32_t reservation_size =
+      static_cast<uint32_t>(reservations.size()) * kUInt32Size;
+  uint32_t num_stub_keys = static_cast<uint32_t>(stub_keys->size());
+  uint32_t stub_keys_size = num_stub_keys * kUInt32Size;
+  uint32_t payload_offset = kHeaderSize + reservation_size + stub_keys_size;
+  uint32_t padded_payload_offset = POINTER_SIZE_ALIGN(payload_offset);
+  uint32_t size =
+      padded_payload_offset + static_cast<uint32_t>(payload->size());
 
   // Allocate backing store and create result data.
   AllocateData(size);
@@ -385,27 +406,29 @@ SerializedCodeData::SerializedCodeData(const List<byte>* payload,
   SetHeaderValue(kCpuFeaturesOffset,
                  static_cast<uint32_t>(CpuFeatures::SupportedFeatures()));
   SetHeaderValue(kFlagHashOffset, FlagList::Hash());
-  SetHeaderValue(kNumReservationsOffset, reservations.length());
+  SetHeaderValue(kNumReservationsOffset,
+                 static_cast<uint32_t>(reservations.size()));
   SetHeaderValue(kNumCodeStubKeysOffset, num_stub_keys);
-  SetHeaderValue(kPayloadLengthOffset, payload->length());
+  SetHeaderValue(kPayloadLengthOffset, static_cast<uint32_t>(payload->size()));
 
   // Zero out any padding in the header.
   memset(data_ + kUnalignedHeaderSize, 0, kHeaderSize - kUnalignedHeaderSize);
 
   // Copy reservation chunk sizes.
-  CopyBytes(data_ + kHeaderSize, reinterpret_cast<byte*>(reservations.begin()),
+  CopyBytes(data_ + kHeaderSize,
+            reinterpret_cast<const byte*>(reservations.data()),
             reservation_size);
 
   // Copy code stub keys.
   CopyBytes(data_ + kHeaderSize + reservation_size,
-            reinterpret_cast<byte*>(stub_keys->begin()), stub_keys_size);
+            reinterpret_cast<const byte*>(stub_keys->data()), stub_keys_size);
 
   // Zero out any padding before the payload.
   memset(data_ + payload_offset, 0, padded_payload_offset - payload_offset);
 
   // Copy serialized data.
-  CopyBytes(data_ + padded_payload_offset, payload->begin(),
-            static_cast<size_t>(payload->length()));
+  CopyBytes(data_ + padded_payload_offset, payload->data(),
+            static_cast<size_t>(payload->size()));
 
   Checksum checksum(DataWithoutHeader());
   SetHeaderValue(kChecksum1Offset, checksum.a());
@@ -417,9 +440,6 @@ SerializedCodeData::SanityCheckResult SerializedCodeData::SanityCheck(
   if (this->size_ < kHeaderSize) return INVALID_HEADER;
   uint32_t magic_number = GetMagicNumber();
   if (magic_number != ComputeMagicNumber(isolate)) return MAGIC_NUMBER_MISMATCH;
-  if (GetExtraReferences() > GetExtraReferences(isolate)) {
-    return MAGIC_NUMBER_MISMATCH;
-  }
   uint32_t version_hash = GetHeaderValue(kVersionHashOffset);
   uint32_t source_hash = GetHeaderValue(kSourceHashOffset);
   uint32_t cpu_features = GetHeaderValue(kCpuFeaturesOffset);
@@ -453,15 +473,17 @@ ScriptData* SerializedCodeData::GetScriptData() {
   ScriptData* result = new ScriptData(data_, size_);
   result->AcquireDataOwnership();
   owns_data_ = false;
-  data_ = NULL;
+  data_ = nullptr;
   return result;
 }
 
-Vector<const SerializedData::Reservation> SerializedCodeData::Reservations()
+std::vector<SerializedData::Reservation> SerializedCodeData::Reservations()
     const {
-  return Vector<const Reservation>(
-      reinterpret_cast<const Reservation*>(data_ + kHeaderSize),
-      GetHeaderValue(kNumReservationsOffset));
+  uint32_t size = GetHeaderValue(kNumReservationsOffset);
+  std::vector<Reservation> reservations(size);
+  memcpy(reservations.data(), data_ + kHeaderSize,
+         size * sizeof(SerializedData::Reservation));
+  return reservations;
 }
 
 Vector<const byte> SerializedCodeData::Payload() const {

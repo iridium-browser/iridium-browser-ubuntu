@@ -6,7 +6,9 @@
 #define REMOTING_PROTOCOL_FAKE_MESSAGE_PIPE_H_
 
 #include <memory>
+#include <string>
 
+#include "base/containers/queue.h"
 #include "remoting/protocol/message_pipe.h"
 
 namespace google {
@@ -48,6 +50,9 @@ class FakeMessagePipe final : public MessagePipe {
   // Simulates the operation to close the pipe.
   void ClosePipe();
 
+  // Returns all messages sent using Send().
+  const base::queue<std::string>& sent_messages() { return sent_messages_; }
+
  private:
   void SendImpl(google::protobuf::MessageLite* message,
                 const base::Closure& done);
@@ -58,6 +63,7 @@ class FakeMessagePipe final : public MessagePipe {
   const bool asynchronous_;
   bool pipe_opened_ = false;
   EventHandler* event_handler_ = nullptr;
+  base::queue<std::string> sent_messages_;
 };
 
 }  // namespace protocol

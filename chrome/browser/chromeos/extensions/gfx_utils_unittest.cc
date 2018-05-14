@@ -41,7 +41,10 @@ class DualBadgeMapTest : public ExtensionServiceTestBase {
     arc_test_.SetUp(profile_.get());
   }
 
-  void TearDown() override { arc_test_.TearDown(); }
+  void TearDown() override {
+    arc_test_.TearDown();
+    extensions::ExtensionServiceTestBase::TearDown();
+  }
 
   Profile* profile() { return profile_.get(); }
 
@@ -98,9 +101,8 @@ class DualBadgeMapTest : public ExtensionServiceTestBase {
   }
 
   void RemoveExtension(const Extension* extension) {
-    service()->UninstallExtension(extension->id(),
-                                  extensions::UNINSTALL_REASON_FOR_TESTING,
-                                  base::Bind(&base::DoNothing), NULL);
+    service()->UninstallExtension(
+        extension->id(), extensions::UNINSTALL_REASON_FOR_TESTING, NULL);
   }
 
  private:

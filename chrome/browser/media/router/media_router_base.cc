@@ -4,14 +4,17 @@
 
 #include "chrome/browser/media/router/media_router_base.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/guid.h"
-#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/media/router/mojo/media_route_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
+#if !defined(OS_ANDROID)
+#include "chrome/browser/media/router/mojo/media_route_controller.h"
+#endif  // !defined(OS_ANDROID)
 
 namespace media_router {
 
@@ -59,7 +62,7 @@ MediaRouterBase::AddPresentationConnectionStateChangedCallback(
 
   auto& callbacks = presentation_connection_state_callbacks_[route_id];
   if (!callbacks) {
-    callbacks = base::MakeUnique<PresentationConnectionStateChangedCallbacks>();
+    callbacks = std::make_unique<PresentationConnectionStateChangedCallbacks>();
     callbacks->set_removal_callback(base::Bind(
         &MediaRouterBase::OnPresentationConnectionStateCallbackRemoved,
         base::Unretained(this), route_id));
@@ -73,14 +76,20 @@ void MediaRouterBase::OnIncognitoProfileShutdown() {
     TerminateRoute(route_id);
 }
 
+IssueManager* MediaRouterBase::GetIssueManager() {
+  return &issue_manager_;
+}
+
 std::vector<MediaRoute> MediaRouterBase::GetCurrentRoutes() const {
   return internal_routes_observer_->current_routes;
 }
 
+#if !defined(OS_ANDROID)
 scoped_refptr<MediaRouteController> MediaRouterBase::GetRouteController(
     const MediaRoute::Id& route_id) {
   return nullptr;
 }
+#endif  // !defined(OS_ANDROID)
 
 MediaRouterBase::MediaRouterBase() : initialized_(false) {}
 
@@ -121,12 +130,14 @@ bool MediaRouterBase::HasJoinableRoute() const {
   return internal_routes_observer_->has_route;
 }
 
-bool MediaRouterBase::IsRouteKnown(const std::string& route_id) const {
+const MediaRoute* MediaRouterBase::GetRoute(
+    const MediaRoute::Id& route_id) const {
   const auto& routes = internal_routes_observer_->current_routes;
-  return std::find_if(routes.begin(), routes.end(),
-                      [&route_id](const MediaRoute& route) {
-                        return route.media_route_id() == route_id;
-                      }) != routes.end();
+  auto it = std::find_if(routes.begin(), routes.end(),
+                         [&route_id](const MediaRoute& route) {
+                           return route.media_route_id() == route_id;
+                         });
+  return it == routes.end() ? nullptr : &*it;
 }
 
 void MediaRouterBase::Initialize() {
@@ -152,8 +163,10 @@ void MediaRouterBase::Shutdown() {
   internal_routes_observer_.reset();
 }
 
+#if !defined(OS_ANDROID)
 void MediaRouterBase::DetachRouteController(const MediaRoute::Id& route_id,
                                             MediaRouteController* controller) {}
+#endif  // !defined(OS_ANDROID)
 
 void MediaRouterBase::RegisterRemotingSource(
     int32_t tab_id,

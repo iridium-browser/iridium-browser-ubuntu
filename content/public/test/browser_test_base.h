@@ -7,6 +7,7 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/metrics/field_trial.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "content/public/test/test_host_resolver.h"
@@ -20,6 +21,9 @@ class FilePath;
 }
 
 namespace content {
+
+class BrowserMainParts;
+class WebContents;
 
 class BrowserTestBase : public testing::Test {
  public:
@@ -63,6 +67,10 @@ class BrowserTestBase : public testing::Test {
 
   // Override this for things you would normally override TearDown for.
   virtual void TearDownInProcessBrowserTestFixture() {}
+
+  // Called after the BrowserMainParts have been created, and before
+  // PreEarlyInitialization() has been called.
+  virtual void CreatedBrowserMainParts(BrowserMainParts* browser_main_parts) {}
 
   // This is invoked from main after browser_init/browser_main have completed.
   // This prepares for the test by creating a new browser and doing any other
@@ -128,6 +136,12 @@ class BrowserTestBase : public testing::Test {
   // Returns true if the test will be using GL acceleration via a software GL.
   bool UsingSoftwareGL() const;
 
+  // Should be in PreRunTestOnMainThread, with the initial WebContents for the
+  // main window. This allows the test harness to watch it for navigations so
+  // that it can sync the host_resolver() rules to the out-of-process network
+  // code necessary.
+  void SetInitialWebContents(WebContents* web_contents);
+
   // Temporary
   // TODO(jam): remove this.
   void disable_io_checks() { disable_io_checks_ = true; }
@@ -148,6 +162,10 @@ class BrowserTestBase : public testing::Test {
   // Host resolver used during tests.
   std::unique_ptr<TestHostResolver> test_host_resolver_;
 
+  // A field trial list that's used to support field trials activated prior to
+  // browser start.
+  std::unique_ptr<base::FieldTrialList> field_trial_list_;
+
   // Expected exit code (default is 0).
   int expected_exit_code_;
 
@@ -158,6 +176,9 @@ class BrowserTestBase : public testing::Test {
   // When true, do compositing with the software backend instead of using GL.
   bool use_software_compositing_;
 
+  // Initial WebContents to watch for navigations during SetUpOnMainThread.
+  WebContents* initial_web_contents_ = nullptr;
+
   // Whether SetUp was called. This value is checked in the destructor of this
   // class to ensure that SetUp was called. If it's not called, the test will
   // not run and report a false positive result.
@@ -167,6 +188,8 @@ class BrowserTestBase : public testing::Test {
   // paths don't make file access. Keep this for now since src/chrome didn't
   // check this.
   bool disable_io_checks_;
+
+  bool initialized_network_process_ = false;
 
 #if defined(OS_POSIX)
   bool handle_sigterm_;

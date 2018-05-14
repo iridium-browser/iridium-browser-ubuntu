@@ -14,11 +14,11 @@
 
 namespace blink {
 
-IDBRequestLoader::IDBRequestLoader(IDBRequestQueueItem* queue_item,
-                                   Vector<RefPtr<IDBValue>>* result_values)
+IDBRequestLoader::IDBRequestLoader(
+    IDBRequestQueueItem* queue_item,
+    Vector<std::unique_ptr<IDBValue>>& result_values)
     : queue_item_(queue_item), values_(result_values) {
-  DCHECK(IDBValueUnwrapper::IsWrapped(*values_));
-  loader_ = FileReaderLoader::Create(FileReaderLoader::kReadByClient, this);
+  DCHECK(IDBValueUnwrapper::IsWrapped(values_));
 }
 
 IDBRequestLoader::~IDBRequestLoader() {
@@ -35,7 +35,7 @@ void IDBRequestLoader::Start() {
   //               Consider parallelizing. The main issue is that the Blob reads
   //               will have to be throttled somewhere, and the extra complexity
   //               only benefits applications that use getAll().
-  current_value_ = values_->begin();
+  current_value_ = values_.begin();
   StartNextValue();
 }
 
@@ -48,23 +48,24 @@ void IDBRequestLoader::Cancel() {
   DCHECK(file_reader_loading_);
   file_reader_loading_ = false;
 #endif  // DCHECK_IS_ON()
-  loader_->Cancel();
+  if (loader_)
+    loader_->Cancel();
 }
 
 void IDBRequestLoader::StartNextValue() {
   IDBValueUnwrapper unwrapper;
 
   while (true) {
-    if (current_value_ == values_->end()) {
+    if (current_value_ == values_.end()) {
       ReportSuccess();
       return;
     }
-    if (unwrapper.Parse(current_value_->Get()))
+    if (unwrapper.Parse(current_value_->get()))
       break;
     ++current_value_;
   }
 
-  DCHECK(current_value_ != values_->end());
+  DCHECK(current_value_ != values_.end());
 
   ExecutionContext* context = queue_item_->Request()->GetExecutionContext();
   if (!context) {
@@ -77,6 +78,7 @@ void IDBRequestLoader::StartNextValue() {
   DCHECK(!file_reader_loading_);
   file_reader_loading_ = true;
 #endif  // DCHECK_IS_ON()
+  loader_ = FileReaderLoader::Create(FileReaderLoader::kReadByClient, this);
   loader_->Start(context, unwrapper.WrapperBlobHandle());
 }
 
@@ -101,8 +103,8 @@ void IDBRequestLoader::DidFinishLoading() {
   file_reader_loading_ = false;
 #endif  // DCHECK_IS_ON()
 
-  *current_value_ = IDBValueUnwrapper::Unwrap(
-      current_value_->Get(), SharedBuffer::AdoptVector(wrapped_data_));
+  IDBValueUnwrapper::Unwrap(SharedBuffer::AdoptVector(wrapped_data_),
+                            current_value_->get());
   ++current_value_;
 
   StartNextValue();

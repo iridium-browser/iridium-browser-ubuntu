@@ -11,8 +11,8 @@
 #include <limits>
 #include <memory>
 
-#include "webrtc/modules/video_coding/utility/default_video_bitrate_allocator.h"
-#include "webrtc/test/gtest.h"
+#include "modules/video_coding/utility/default_video_bitrate_allocator.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 namespace {
@@ -42,6 +42,13 @@ class DefaultVideoBitrateAllocatorTest : public ::testing::Test {
 
 TEST_F(DefaultVideoBitrateAllocatorTest, ZeroIsOff) {
   BitrateAllocation allocation = allocator_->GetAllocation(0, kMaxFramerate);
+  EXPECT_EQ(0u, allocation.get_sum_bps());
+}
+
+TEST_F(DefaultVideoBitrateAllocatorTest, Inactive) {
+  codec_.active = false;
+  allocator_.reset(new DefaultVideoBitrateAllocator(codec_));
+  BitrateAllocation allocation = allocator_->GetAllocation(1, kMaxFramerate);
   EXPECT_EQ(0u, allocation.get_sum_bps());
 }
 

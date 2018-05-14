@@ -12,4 +12,19 @@ const base::Feature kBootCompletedBroadcastFeature {
     "ArcBootCompletedBroadcast", base::FEATURE_ENABLED_BY_DEFAULT
 };
 
+// Controls experimental native bridge feature for ARC.
+const base::Feature kNativeBridgeExperimentFeature {
+    "ArcNativeBridgeExperiment", base::FEATURE_ENABLED_BY_DEFAULT
+};
+
+// Controls ARC USB host integration.
+// When enabled, Android apps will be able to use usb host features.
+const base::Feature kUsbHostFeature{"ArcUsbHost",
+                                    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Controls ARC VPN integration.
+// When enabled, Chrome traffic will be routed through VPNs connected in
+// Android apps.
+const base::Feature kVpnFeature{"ArcVpn", base::FEATURE_ENABLED_BY_DEFAULT};
+
 }  // namespace arc

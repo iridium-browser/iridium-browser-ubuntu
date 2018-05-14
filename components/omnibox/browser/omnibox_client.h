@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_CLIENT_H_
 #define COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_CLIENT_H_
 
+#include <memory>
+
 #include "components/omnibox/browser/autocomplete_provider_client.h"
 #include "components/omnibox/browser/omnibox_navigation_observer.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
@@ -27,6 +29,8 @@ class Image;
 }
 
 typedef base::Callback<void(const SkBitmap& bitmap)> BitmapFetchedCallback;
+typedef base::OnceCallback<void(const gfx::Image& favicon)>
+    FaviconFetchedCallback;
 
 // Interface that allows the omnibox component to interact with its embedder
 // (e.g., getting information about the current page, retrieving objects
@@ -60,7 +64,7 @@ class OmniboxClient {
   // Returns the favicon of the current page.
   virtual gfx::Image GetFavicon() const;
 
-  // Returns true if the visible entry is a New Tab Page rendered by Instant.
+  // Returns true if the current page is a New Tab Page rendered by Instant.
   virtual bool IsInstantNTP() const;
 
   // Returns true if the committed entry is a search results page.
@@ -73,10 +77,10 @@ class OmniboxClient {
   virtual bool IsPasteAndGoEnabled() const;
 
   // Returns whether |url| corresponds to the new tab page.
-  virtual bool IsNewTabPage(const std::string& url) const;
+  virtual bool IsNewTabPage(const GURL& url) const;
 
   // Returns whether |url| corresponds to the user's home page.
-  virtual bool IsHomePage(const std::string& url) const;
+  virtual bool IsHomePage(const GURL& url) const;
 
   // Returns the session ID of the current page.
   virtual const SessionID& GetSessionID() const = 0;
@@ -117,13 +121,22 @@ class OmniboxClient {
                                const BitmapFetchedCallback& on_bitmap_fetched) {
   }
 
+  // Fetches the favicon for |page_url| if the embedder supports fetching
+  // favicons (not all embedders do). Returns the favicon if it is synchronously
+  // available. Otherwise, this method returns an empty gfx::Image and
+  // |on_favicon_fetched| may or may not be called asynchronously later.
+  // |on_favicon_fetched| will never be run synchronously.
+  virtual gfx::Image GetFaviconForPageUrl(
+      const GURL& page_url,
+      FaviconFetchedCallback on_favicon_fetched);
+
   // Called when the current autocomplete match has changed.
   virtual void OnCurrentMatchChanged(const AutocompleteMatch& match) {}
 
   // Called when the text may have changed in the edit.
   virtual void OnTextChanged(const AutocompleteMatch& current_match,
                              bool user_input_in_progress,
-                             base::string16& user_text,
+                             const base::string16& user_text,
                              const AutocompleteResult& result,
                              bool is_popup_open,
                              bool has_focus) {}

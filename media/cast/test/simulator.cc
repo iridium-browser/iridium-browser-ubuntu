@@ -37,11 +37,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <utility>
 
 #include "base/at_exit.h"
 #include "base/base_paths.h"
 #include "base/command_line.h"
+#include "base/containers/queue.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/memory_mapped_file.h"
@@ -211,7 +213,7 @@ class EncodedVideoFrameTracker : public RawEventSubscriber {
  private:
   FakeMediaSource* media_source_;
   CastLoggingEvent last_frame_event_type_;
-  std::queue<scoped_refptr<media::VideoFrame> > video_frames_;
+  base::queue<scoped_refptr<media::VideoFrame>> video_frames_;
 
   DISALLOW_COPY_AND_ASSIGN(EncodedVideoFrameTracker);
 };
@@ -338,14 +340,12 @@ void RunSimulation(const base::FilePath& source_path,
   base::ThreadTaskRunnerHandle task_runner_handle(task_runner);
 
   // CastEnvironments.
+  test::SkewedTickClock sender_clock(&testing_clock);
   scoped_refptr<CastEnvironment> sender_env =
-      new CastEnvironment(std::unique_ptr<base::TickClock>(
-                              new test::SkewedTickClock(&testing_clock)),
-                          task_runner, task_runner, task_runner);
-  scoped_refptr<CastEnvironment> receiver_env =
-      new CastEnvironment(std::unique_ptr<base::TickClock>(
-                              new test::SkewedTickClock(&testing_clock)),
-                          task_runner, task_runner, task_runner);
+      new CastEnvironment(&sender_clock, task_runner, task_runner, task_runner);
+  test::SkewedTickClock receiver_clock(&testing_clock);
+  scoped_refptr<CastEnvironment> receiver_env = new CastEnvironment(
+      &receiver_clock, task_runner, task_runner, task_runner);
 
   // Event subscriber. Store at most 1 hour of events.
   EncodingEventSubscriber audio_event_subscriber(AUDIO_EVENT,
@@ -392,7 +392,7 @@ void RunSimulation(const base::FilePath& source_path,
   // Cast receiver.
   std::unique_ptr<CastTransport> transport_receiver(new CastTransportImpl(
       &testing_clock, base::TimeDelta::FromSeconds(1),
-      base::MakeUnique<TransportClient>(receiver_env->logger(), &packet_proxy),
+      std::make_unique<TransportClient>(receiver_env->logger(), &packet_proxy),
       base::WrapUnique(receiver_to_sender), task_runner));
   std::unique_ptr<CastReceiver> cast_receiver(
       CastReceiver::Create(receiver_env, audio_receiver_config,
@@ -403,7 +403,7 @@ void RunSimulation(const base::FilePath& source_path,
   // Cast sender and transport sender.
   std::unique_ptr<CastTransport> transport_sender(new CastTransportImpl(
       &testing_clock, base::TimeDelta::FromSeconds(1),
-      base::MakeUnique<TransportClient>(sender_env->logger(), nullptr),
+      std::make_unique<TransportClient>(sender_env->logger(), nullptr),
       base::WrapUnique(sender_to_receiver), task_runner));
   std::unique_ptr<CastSender> cast_sender(
       CastSender::Create(sender_env, transport_sender.get()));

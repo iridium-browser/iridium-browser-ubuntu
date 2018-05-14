@@ -80,6 +80,7 @@
 #include "base/metrics/bucket_ranges.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_samples.h"
+#include "base/strings/string_piece.h"
 #include "base/time/time.h"
 
 namespace base {
@@ -140,7 +141,7 @@ class BASE_EXPORT Histogram : public HistogramBase {
 
   // Create a histogram using data in persistent storage.
   static std::unique_ptr<HistogramBase> PersistentCreate(
-      const std::string& name,
+      const char* name,
       Sample minimum,
       Sample maximum,
       const BucketRanges* ranges,
@@ -173,11 +174,11 @@ class BASE_EXPORT Histogram : public HistogramBase {
   //----------------------------------------------------------------------------
   // Accessors for factory construction, serialization and testing.
   //----------------------------------------------------------------------------
+  const BucketRanges* bucket_ranges() const;
   Sample declared_min() const;
   Sample declared_max() const;
   virtual Sample ranges(uint32_t i) const;
   virtual uint32_t bucket_count() const;
-  const BucketRanges* bucket_ranges() const { return bucket_ranges_; }
 
   // This function validates histogram construction arguments. It returns false
   // if some of the arguments are bad but also corrects them so they should
@@ -186,7 +187,7 @@ class BASE_EXPORT Histogram : public HistogramBase {
   // converts it to good input: 1.
   // TODO(bcwhite): Use false returns to create "sink" histograms so that bad
   // data doesn't create confusion on the servers.
-  static bool InspectConstructionArguments(const std::string& name,
+  static bool InspectConstructionArguments(StringPiece name,
                                            Sample* minimum,
                                            Sample* maximum,
                                            uint32_t* bucket_count);
@@ -207,8 +208,14 @@ class BASE_EXPORT Histogram : public HistogramBase {
   void WriteHTMLGraph(std::string* output) const override;
   void WriteAscii(std::string* output) const override;
 
+  // Validates the histogram contents. If |crash_if_invalid| is true and the
+  // histogram is invalid, this will trigger a CHECK. Otherwise, it will return
+  // a bool indicating if the histogram is valid. |corrupted_count| is extra
+  // information the caller can provide about the number of corrupt histograms
+  // if available.
   // TODO(bcwhite): Remove this after crbug/736675.
-  void ValidateHistogramContents() const override;
+  bool ValidateHistogramContents(bool crash_if_invalid,
+                                 int identifier) const override;
 
  protected:
   // This class, defined entirely within the .cc file, contains all the
@@ -220,7 +227,7 @@ class BASE_EXPORT Histogram : public HistogramBase {
 
   // |ranges| should contain the underflow and overflow buckets. See top
   // comments for example.
-  Histogram(const std::string& name,
+  Histogram(const char* name,
             Sample minimum,
             Sample maximum,
             const BucketRanges* ranges);
@@ -231,7 +238,7 @@ class BASE_EXPORT Histogram : public HistogramBase {
   // the life of this memory is managed externally and exceeds the lifetime
   // of this object. Practically, this memory is never released until the
   // process exits and the OS cleans it up.
-  Histogram(const std::string& name,
+  Histogram(const char* name,
             Sample minimum,
             Sample maximum,
             const BucketRanges* ranges,
@@ -241,7 +248,7 @@ class BASE_EXPORT Histogram : public HistogramBase {
             HistogramSamples::Metadata* logged_meta);
 
   // HistogramBase implementation:
-  bool SerializeInfoImpl(base::Pickle* pickle) const override;
+  void SerializeInfoImpl(base::Pickle* pickle) const override;
 
   // Method to override to skip the display of the i'th bucket if it's empty.
   virtual bool PrintEmptyBucket(uint32_t index) const;
@@ -305,21 +312,18 @@ class BASE_EXPORT Histogram : public HistogramBase {
                              int64_t* sum,
                              ListValue* buckets) const override;
 
+  // Samples that have not yet been logged with SnapshotDelta().
+  std::unique_ptr<SampleVectorBase> unlogged_samples_;
+
+  // Accumulation of all samples that have been logged with SnapshotDelta().
+  std::unique_ptr<SampleVectorBase> logged_samples_;
+
   // This is a dummy field placed where corruption is frequently seen on
   // current Android builds. The hope is that it will mitigate the problem
   // sufficiently to continue with the M61 beta branch while investigation
   // into the true problem continues.
   // TODO(bcwhite): Remove this once crbug/736675 is fixed.
   const uintptr_t dummy_;
-
-  // Does not own this object. Should get from StatisticsRecorder.
-  const BucketRanges* bucket_ranges_;
-
-  // Samples that have not yet been logged with SnapshotDelta().
-  std::unique_ptr<HistogramSamples> unlogged_samples_;
-
-  // Accumulation of all samples that have been logged with SnapshotDelta().
-  std::unique_ptr<HistogramSamples> logged_samples_;
 
 #if DCHECK_IS_ON()  // Don't waste memory if it won't be used.
   // Flag to indicate if PrepareFinalDelta has been previously called. It is
@@ -367,7 +371,7 @@ class BASE_EXPORT LinearHistogram : public Histogram {
 
   // Create a histogram using data in persistent storage.
   static std::unique_ptr<HistogramBase> PersistentCreate(
-      const std::string& name,
+      const char* name,
       Sample minimum,
       Sample maximum,
       const BucketRanges* ranges,
@@ -404,12 +408,12 @@ class BASE_EXPORT LinearHistogram : public Histogram {
  protected:
   class Factory;
 
-  LinearHistogram(const std::string& name,
+  LinearHistogram(const char* name,
                   Sample minimum,
                   Sample maximum,
                   const BucketRanges* ranges);
 
-  LinearHistogram(const std::string& name,
+  LinearHistogram(const char* name,
                   Sample minimum,
                   Sample maximum,
                   const BucketRanges* ranges,
@@ -456,7 +460,7 @@ class BASE_EXPORT BooleanHistogram : public LinearHistogram {
 
   // Create a histogram using data in persistent storage.
   static std::unique_ptr<HistogramBase> PersistentCreate(
-      const std::string& name,
+      const char* name,
       const BucketRanges* ranges,
       const DelayedPersistentAllocation& counts,
       const DelayedPersistentAllocation& logged_counts,
@@ -469,8 +473,8 @@ class BASE_EXPORT BooleanHistogram : public LinearHistogram {
   class Factory;
 
  private:
-  BooleanHistogram(const std::string& name, const BucketRanges* ranges);
-  BooleanHistogram(const std::string& name,
+  BooleanHistogram(const char* name, const BucketRanges* ranges);
+  BooleanHistogram(const char* name,
                    const BucketRanges* ranges,
                    const DelayedPersistentAllocation& counts,
                    const DelayedPersistentAllocation& logged_counts,
@@ -506,7 +510,7 @@ class BASE_EXPORT CustomHistogram : public Histogram {
 
   // Create a histogram using data in persistent storage.
   static std::unique_ptr<HistogramBase> PersistentCreate(
-      const std::string& name,
+      const char* name,
       const BucketRanges* ranges,
       const DelayedPersistentAllocation& counts,
       const DelayedPersistentAllocation& logged_counts,
@@ -527,10 +531,9 @@ class BASE_EXPORT CustomHistogram : public Histogram {
  protected:
   class Factory;
 
-  CustomHistogram(const std::string& name,
-                  const BucketRanges* ranges);
+  CustomHistogram(const char* name, const BucketRanges* ranges);
 
-  CustomHistogram(const std::string& name,
+  CustomHistogram(const char* name,
                   const BucketRanges* ranges,
                   const DelayedPersistentAllocation& counts,
                   const DelayedPersistentAllocation& logged_counts,
@@ -538,7 +541,7 @@ class BASE_EXPORT CustomHistogram : public Histogram {
                   HistogramSamples::Metadata* logged_meta);
 
   // HistogramBase implementation:
-  bool SerializeInfoImpl(base::Pickle* pickle) const override;
+  void SerializeInfoImpl(base::Pickle* pickle) const override;
 
   double GetBucketSize(Count current, uint32_t i) const override;
 

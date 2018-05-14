@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,7 +17,6 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
@@ -31,7 +31,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_byteorder.h"
 #include "base/task_scheduler/post_task.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/nacl/browser/nacl_browser.h"
@@ -55,6 +54,7 @@
 #include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+#include "content/public/common/zygote_features.h"
 #include "ipc/ipc_channel.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "net/socket/socket_descriptor.h"
@@ -64,6 +64,10 @@
 #include "ppapi/shared_impl/ppapi_constants.h"
 #include "ppapi/shared_impl/ppapi_nacl_plugin_args.h"
 
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+#include "content/public/common/zygote_handle.h"
+#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
+
 #if defined(OS_POSIX)
 
 #include <arpa/inet.h>
@@ -71,7 +75,6 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-#include "content/public/browser/zygote_handle_linux.h"
 #elif defined(OS_WIN)
 #include <windows.h>
 #include <winsock2.h>
@@ -165,8 +168,6 @@ class NaClSandboxedProcessLauncherDelegate
  public:
   NaClSandboxedProcessLauncherDelegate() {}
 
-  ~NaClSandboxedProcessLauncherDelegate() override {}
-
 #if defined(OS_WIN)
   void PostSpawnTarget(base::ProcessHandle process) override {
     // For Native Client sel_ldr processes on 32-bit Windows, reserve 1 GB of
@@ -180,11 +181,17 @@ class NaClSandboxedProcessLauncherDelegate
       DLOG(WARNING) << "Failed to reserve address space for Native Client";
     }
   }
-#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+#endif  // OS_WIN
+
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
   content::ZygoteHandle GetZygote() override {
     return content::GetGenericZygote();
   }
-#endif  // OS_WIN
+#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
+
+  service_manager::SandboxType GetSandboxType() override {
+    return service_manager::SANDBOX_TYPE_PPAPI;
+  }
 };
 
 void CloseFile(base::File file) {
@@ -267,14 +274,16 @@ NaClProcessHost::~NaClProcessHost() {
     // handles.
     base::File file(IPC::PlatformFileForTransitToFile(
         prefetched_resource_files_[i].file));
-    content::BrowserThread::GetBlockingPool()->PostTask(
-        FROM_HERE, base::Bind(&CloseFile, base::Passed(std::move(file))));
+    base::PostTaskWithTraits(FROM_HERE,
+                             {base::TaskPriority::BACKGROUND, base::MayBlock()},
+                             base::BindOnce(&CloseFile, std::move(file)));
   }
 #endif
   // Open files need to be closed on the blocking pool.
   if (nexe_file_.IsValid()) {
-    content::BrowserThread::GetBlockingPool()->PostTask(
-        FROM_HERE, base::Bind(&CloseFile, base::Passed(std::move(nexe_file_))));
+    base::PostTaskWithTraits(FROM_HERE,
+                             {base::TaskPriority::BACKGROUND, base::MayBlock()},
+                             base::BindOnce(&CloseFile, std::move(nexe_file_)));
   }
 
   if (reply_msg_) {
@@ -558,7 +567,7 @@ bool NaClProcessHost::LaunchSelLdr() {
     return true;
   }
 #endif
-  process_->Launch(base::MakeUnique<NaClSandboxedProcessLauncherDelegate>(),
+  process_->Launch(std::make_unique<NaClSandboxedProcessLauncherDelegate>(),
                    std::move(cmd_line), true);
   return true;
 }
@@ -725,9 +734,8 @@ net::SocketDescriptor NaClProcessHost::GetDebugStubSocketHandle() {
   if (s == net::kInvalidSocket) {
     LOG(ERROR) << "failed to open socket for debug stub";
     return net::kInvalidSocket;
-  } else {
-    LOG(WARNING) << "debug stub on port " << port;
   }
+  LOG(WARNING) << "debug stub on port " << port;
   if (listen(s, 1)) {
     LOG(ERROR) << "listen() failed on debug stub socket";
     if (IGNORE_EINTR(close(s)) < 0)
@@ -838,8 +846,9 @@ void NaClProcessHost::StartNaClFileResolved(
   if (checked_nexe_file.IsValid()) {
     // Release the file received from the renderer. This has to be done on a
     // thread where IO is permitted, though.
-    content::BrowserThread::GetBlockingPool()->PostTask(
-        FROM_HERE, base::Bind(&CloseFile, base::Passed(std::move(nexe_file_))));
+    base::PostTaskWithTraits(FROM_HERE,
+                             {base::TaskPriority::BACKGROUND, base::MayBlock()},
+                             base::BindOnce(&CloseFile, std::move(nexe_file_)));
     params.nexe_file_path_metadata = file_path;
     params.nexe_file =
         IPC::TakePlatformFileForTransit(std::move(checked_nexe_file));
@@ -896,6 +905,7 @@ bool NaClProcessHost::StartPPAPIProxy(
 
   ipc_proxy_channel_ = IPC::ChannelProxy::Create(
       channel_handle.release(), IPC::Channel::MODE_CLIENT, NULL,
+      base::ThreadTaskRunnerHandle::Get().get(),
       base::ThreadTaskRunnerHandle::Get().get());
   // Create the browser ppapi host and enable PPAPI message dispatching to the
   // browser process.
@@ -970,17 +980,16 @@ void NaClProcessHost::OnPpapiChannelsCreated(
 bool NaClProcessHost::StartWithLaunchedProcess() {
   NaClBrowser* nacl_browser = NaClBrowser::GetInstance();
 
-  if (nacl_browser->IsReady()) {
+  if (nacl_browser->IsReady())
     return StartNaClExecution();
-  } else if (nacl_browser->IsOk()) {
+  if (nacl_browser->IsOk()) {
     nacl_browser->WaitForResources(
         base::Bind(&NaClProcessHost::OnResourcesReady,
                    weak_factory_.GetWeakPtr()));
     return true;
-  } else {
-    SendErrorToRenderer("previously failed to acquire shared resources");
-    return false;
   }
+  SendErrorToRenderer("previously failed to acquire shared resources");
+  return false;
 }
 
 void NaClProcessHost::OnQueryKnownToValidate(const std::string& signature,
@@ -1121,13 +1130,12 @@ bool NaClProcessHost::AttachDebugExceptionHandler(const std::string& info,
     return NaClBrokerService::GetInstance()->LaunchDebugExceptionHandler(
                weak_factory_.GetWeakPtr(), nacl_pid, process.Handle(),
                info);
-  } else {
-    NaClStartDebugExceptionHandlerThread(
-        std::move(process), info, base::ThreadTaskRunnerHandle::Get(),
-        base::Bind(&NaClProcessHost::OnDebugExceptionHandlerLaunchedByBroker,
-                   weak_factory_.GetWeakPtr()));
-    return true;
   }
+  NaClStartDebugExceptionHandlerThread(
+      std::move(process), info, base::ThreadTaskRunnerHandle::Get(),
+      base::Bind(&NaClProcessHost::OnDebugExceptionHandlerLaunchedByBroker,
+                 weak_factory_.GetWeakPtr()));
+  return true;
 }
 #endif
 

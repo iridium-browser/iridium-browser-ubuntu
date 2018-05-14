@@ -25,7 +25,7 @@
 #define UIEventWithKeyState_h
 
 #include "core/CoreExport.h"
-#include "core/events/EventModifierInit.h"
+#include "core/dom/events/EventModifierInit.h"
 #include "core/events/UIEvent.h"
 #include "public/platform/WebInputEvent.h"
 
@@ -79,7 +79,7 @@ class CORE_EXPORT UIEventWithKeyState : public UIEvent {
                       TimeTicks platform_time_stamp);
   UIEventWithKeyState(const AtomicString& type,
                       const EventModifierInit& initializer)
-      : UIEventWithKeyState(type, initializer, TimeTicks::Now()) {}
+      : UIEventWithKeyState(type, initializer, CurrentTimeTicks()) {}
   void InitModifiers(bool ctrl_key,
                      bool alt_key,
                      bool shift_key,

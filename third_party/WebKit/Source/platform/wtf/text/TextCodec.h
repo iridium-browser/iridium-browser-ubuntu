@@ -27,11 +27,11 @@
 #ifndef TextCodec_h
 #define TextCodec_h
 
+#include <memory>
+#include "base/macros.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/text/Unicode.h"
 #include "platform/wtf/text/WTFString.h"
-#include <memory>
 
 namespace WTF {
 
@@ -40,9 +40,6 @@ class TextEncoding;
 // Specifies what will happen when a character is encountered that is
 // not encodable in the character set.
 enum UnencodableHandling {
-  // Substitutes the replacement character "?".
-  kQuestionMarksForUnencodables,
-
   // Encodes the character as an XML entity. For example, U+06DE
   // would be "&#1758;" (0x6DE = 1758 in octal).
   kEntitiesForUnencodables,
@@ -72,15 +69,14 @@ enum FlushBehavior {
 };
 
 static_assert(!kDoNotFlush, "DoNotFlush should be falsy");
-static_assert(kFetchEOF != 0, "FetchEOF should be truthy");
-static_assert(kDataEOF != 0, "DataEOF should be truthy");
+static_assert(kFetchEOF, "FetchEOF should be truthy");
+static_assert(kDataEOF, "DataEOF should be truthy");
 
 class WTF_EXPORT TextCodec {
-  WTF_MAKE_NONCOPYABLE(TextCodec);
   USING_FAST_MALLOC(TextCodec);
 
  public:
-  TextCodec() {}
+  TextCodec() = default;
   virtual ~TextCodec();
 
   String Decode(const char* str,
@@ -104,6 +100,8 @@ class WTF_EXPORT TextCodec {
   static int GetUnencodableReplacement(unsigned code_point,
                                        UnencodableHandling,
                                        UnencodableReplacementArray);
+
+  DISALLOW_COPY_AND_ASSIGN(TextCodec);
 };
 
 typedef void (*EncodingNameRegistrar)(const char* alias, const char* name);

@@ -26,6 +26,7 @@
 @property(nonatomic, assign) UIEdgeInsets contentInset;
 @property(nonatomic, readonly, getter=isDecelerating) BOOL decelerating;
 @property(nonatomic, readonly, getter=isDragging) BOOL dragging;
+@property(nonatomic, readonly, getter=isTracking) BOOL tracking;
 @property(nonatomic, readonly) BOOL isZooming;
 @property(nonatomic, readonly) CGFloat zoomScale;
 @property(nonatomic, assign) UIEdgeInsets scrollIndicatorInsets;
@@ -34,10 +35,15 @@
 @property(nonatomic, getter=isScrollEnabled) BOOL scrollEnabled;
 @property(nonatomic, assign) BOOL bounces;
 @property(nonatomic, assign) BOOL scrollsToTop;
+@property(nonatomic, assign) BOOL clipsToBounds;
+@property(nonatomic, assign)
+    UIScrollViewContentInsetAdjustmentBehavior contentInsetAdjustmentBehavior
+        API_AVAILABLE(ios(11.0));
 @property(weak, nonatomic, readonly)
     UIPanGestureRecognizer* panGestureRecognizer;
 // Returns the scrollview's gesture recognizers.
 @property(weak, nonatomic, readonly) NSArray* gestureRecognizers;
+@property(nonatomic, readonly, copy) NSArray<__kindof UIView*>* subviews;
 
 - (void)addGestureRecognizer:(UIGestureRecognizer*)gestureRecognizer;
 - (void)removeGestureRecognizer:(UIGestureRecognizer*)gestureRecognizer;
@@ -60,6 +66,8 @@
 // information look at the UIScrollViewDelegate documentation.
 @protocol CRWWebViewScrollViewObserver<NSObject>
 @optional
+- (void)webViewScrollViewFrameDidChange:
+    (CRWWebViewScrollViewProxy*)webViewScrollViewProxy;
 - (void)webViewScrollViewDidScroll:
     (CRWWebViewScrollViewProxy*)webViewScrollViewProxy;
 - (void)webViewScrollViewWillBeginDragging:
@@ -81,12 +89,18 @@
     (CRWWebViewScrollViewProxy*)webViewScrollViewProxy;
 - (void)webViewScrollViewDidResetContentSize:
     (CRWWebViewScrollViewProxy*)webViewScrollViewProxy;
+- (void)webViewScrollViewDidResetContentInset:
+    (CRWWebViewScrollViewProxy*)webViewScrollViewProxy;
 
 // The equivalent in UIScrollViewDelegate also takes a parameter (UIView*)view,
 // but CRWWebViewScrollViewObserver doesn't expose it for flexibility of future
 // implementation.
 - (void)webViewScrollViewWillBeginZooming:
     (CRWWebViewScrollViewProxy*)webViewScrollViewProxy;
+- (void)webViewScrollViewDidEndZooming:
+            (CRWWebViewScrollViewProxy*)webViewScrollViewProxy
+                               atScale:(CGFloat)scale;
+
 @end
 
 // A protocol to be implemented by objects to listen for changes to the

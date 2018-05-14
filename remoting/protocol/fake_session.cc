@@ -6,7 +6,6 @@
 
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "remoting/protocol/fake_authenticator.h"
 #include "remoting/protocol/session_plugin.h"
@@ -20,7 +19,7 @@ const char kTestAuthKey[] = "test_auth_key";
 
 FakeSession::FakeSession()
     : config_(SessionConfig::ForTest()), jid_(kTestJid), weak_factory_(this) {}
-FakeSession::~FakeSession() {}
+FakeSession::~FakeSession() = default;
 
 void FakeSession::SimulateConnection(FakeSession* peer) {
   peer_ = peer->weak_factory_.GetWeakPtr();
@@ -116,7 +115,7 @@ void FakeSession::AddPlugin(SessionPlugin* plugin) {
     if (message) {
       JingleMessage jingle_message;
       jingle_message.AddAttachment(
-          base::MakeUnique<buzz::XmlElement>(*message));
+          std::make_unique<buzz::XmlElement>(*message));
       plugin->OnIncomingMessage(*(jingle_message.attachments));
     }
   }

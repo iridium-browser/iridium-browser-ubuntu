@@ -30,8 +30,9 @@
 #define SQLError_h
 
 #include <memory>
+
+#include "base/memory/ptr_util.h"
 #include "platform/bindings/ScriptWrappable.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
@@ -42,7 +43,7 @@ class SQLErrorData {
  public:
   static std::unique_ptr<SQLErrorData> Create(unsigned code,
                                               const String& message) {
-    return WTF::WrapUnique(new SQLErrorData(code, message));
+    return base::WrapUnique(new SQLErrorData(code, message));
   }
 
   static std::unique_ptr<SQLErrorData> Create(unsigned code,
@@ -71,15 +72,13 @@ class SQLErrorData {
   String message_;
 };
 
-class SQLError final : public GarbageCollectedFinalized<SQLError>,
-                       public ScriptWrappable {
+class SQLError final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static SQLError* Create(const SQLErrorData& data) {
     return new SQLError(data);
   }
-  DEFINE_INLINE_TRACE() {}
 
   unsigned code() const { return data_.Code(); }
   String message() const { return data_.Message(); }

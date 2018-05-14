@@ -127,9 +127,8 @@ TEST_F(DesktopSessionAgentTest, StartProcessStatsReport) {
       base::Unretained(&proxy)));
   proxy = IPC::ChannelProxy::Create(
       agent_->Start(delegate->GetWeakPtr()).release(),
-      IPC::Channel::MODE_CLIENT,
-      &listener,
-      task_runner_);
+      IPC::Channel::MODE_CLIENT, &listener, task_runner_,
+      base::ThreadTaskRunnerHandle::Get());
   ASSERT_TRUE(proxy->Send(new ChromotingNetworkDesktopMsg_StartSessionAgent(
       "jid", ScreenResolution(), DesktopEnvironmentOptions())));
   ASSERT_TRUE(proxy->Send(new ChromotingNetworkToAnyMsg_StartProcessStatsReport(
@@ -140,12 +139,11 @@ TEST_F(DesktopSessionAgentTest, StartProcessStatsReport) {
 TEST_F(DesktopSessionAgentTest, StartProcessStatsReportWithInvalidInterval) {
   std::unique_ptr<FakeDelegate> delegate(new FakeDelegate(task_runner_));
   std::unique_ptr<IPC::ChannelProxy> proxy;
-  ProcessStatsListener listener(base::Bind([]() {}));
+  ProcessStatsListener listener{base::DoNothing()};
   proxy = IPC::ChannelProxy::Create(
       agent_->Start(delegate->GetWeakPtr()).release(),
-      IPC::Channel::MODE_CLIENT,
-      &listener,
-      task_runner_);
+      IPC::Channel::MODE_CLIENT, &listener, task_runner_,
+      base::ThreadTaskRunnerHandle::Get());
   ASSERT_TRUE(proxy->Send(new ChromotingNetworkDesktopMsg_StartSessionAgent(
       "jid", ScreenResolution(), DesktopEnvironmentOptions())));
   ASSERT_TRUE(proxy->Send(new ChromotingNetworkToAnyMsg_StartProcessStatsReport(
@@ -170,12 +168,11 @@ TEST_F(DesktopSessionAgentTest, StartProcessStatsReportWithInvalidInterval) {
 TEST_F(DesktopSessionAgentTest, StartThenStopProcessStatsReport) {
   std::unique_ptr<FakeDelegate> delegate(new FakeDelegate(task_runner_));
   std::unique_ptr<IPC::ChannelProxy> proxy;
-  ProcessStatsListener listener(base::Bind([]() {}));
+  ProcessStatsListener listener{base::DoNothing()};
   proxy = IPC::ChannelProxy::Create(
       agent_->Start(delegate->GetWeakPtr()).release(),
-      IPC::Channel::MODE_CLIENT,
-      &listener,
-      task_runner_);
+      IPC::Channel::MODE_CLIENT, &listener, task_runner_,
+      base::ThreadTaskRunnerHandle::Get());
   ASSERT_TRUE(proxy->Send(new ChromotingNetworkDesktopMsg_StartSessionAgent(
       "jid", ScreenResolution(), DesktopEnvironmentOptions())));
   ASSERT_TRUE(proxy->Send(new ChromotingNetworkToAnyMsg_StartProcessStatsReport(

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -76,9 +77,8 @@ class ArchiveStageTest(generic_stages_unittest.AbstractStageTestCase,
   # trybot flow.
   def testNoPushImagesForRemoteTrybot(self):
     """Test that remote trybot overrides work to disable push images."""
-    self._Prepare('x86-mario-release',
-                  cmd_args=['--remote-trybot', '-r', self.build_root,
-                            '--buildnumber=1234'])
+    self._Prepare(cmd_args=['--remote-trybot', '-r', self.build_root,
+                            '--buildnumber=1234', 'x86-mario-release'])
     self.RunStage()
     # pylint: disable=no-member
     self.assertEquals(commands.PushImages.call_count, 0)
@@ -161,13 +161,13 @@ class UploadPrebuiltsStageTest(
 
   def testFullPrebuiltsUpload(self):
     """Test uploading of full builder prebuilts."""
-    self._VerifyBoardMap('x86-generic-full', 0, {})
+    self._VerifyBoardMap('amd64-generic-full', 0, {})
     self.assertCommandContains([self.cmd, '--git-sync'])
 
   def testIncorrectCount(self):
     """Test that _VerifyBoardMap asserts when the count is wrong."""
-    self.assertRaises(AssertionError, self._VerifyBoardMap, 'x86-generic-full',
-                      1, {})
+    self.assertRaises(AssertionError, self._VerifyBoardMap,
+                      'amd64-generic-full', 1, {})
 
 
 class UploadDevInstallerPrebuiltsStageTest(
@@ -434,7 +434,7 @@ class UploadTestArtifactsStageTest(build_stages_unittest.AllConfigsTestCase,
 
       if not os.path.isdir(os.path.dirname(output)):
         os.makedirs(os.path.dirname(output))
-      self.assertFalse(os.path.exists(output))
+      self.assertNotExists(output)
 
       osutils.Touch(output)
 
@@ -454,7 +454,7 @@ class UploadTestArtifactsStageTest(build_stages_unittest.AllConfigsTestCase,
 
       output = os.path.join(output, commands.STATEFUL_FILE)
 
-      self.assertFalse(os.path.exists(output))
+      self.assertNotExists(output)
 
       osutils.Touch(output)
 
@@ -509,3 +509,30 @@ class ArchivingStageTest(generic_stages_unittest.AbstractStageTestCase,
         self._run, self._current_board)
     return artifact_stages.ArchivingStage(
         self._run, self._current_board, archive_stage)
+
+class GenerateSysrootStageTest(generic_stages_unittest.AbstractStageTestCase,
+                               cbuildbot_unittest.SimpleBuilderTestCase):
+  """Exercise GenerateSysrootStage functionality."""
+
+  RELEASE_TAG = ''
+
+  # pylint: disable=protected-access
+
+  def setUp(self):
+    self._Prepare()
+    self.rc_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    self.rc_mock.SetDefaultCmdResult()
+
+  def ConstructStage(self):
+    self._run.GetArchive().SetupArchivePath()
+    return artifact_stages.GenerateSysrootStage(self._run, self._current_board)
+
+  def testGenerateSysroot(self):
+    """Test that the sysroot generation was called correctly."""
+    stage = self.ConstructStage()
+    self.PatchObject(path_util, 'ToChrootPath', return_value='',
+                     autospec=True)
+    self.PatchObject(stage._upload_queue, 'put', autospec=True)
+    stage._GenerateSysroot()
+    sysroot_tarball = 'sysroot_%s.tar.xz' % ("virtual_target-os")
+    stage._upload_queue.put.assert_called_with([sysroot_tarball])

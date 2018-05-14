@@ -26,61 +26,52 @@
 #include "modules/peerconnection/RTCDTMFSender.h"
 
 #include <memory>
+
+#include "base/memory/ptr_util.h"
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "modules/mediastream/MediaStreamTrack.h"
 #include "modules/peerconnection/RTCDTMFToneChangeEvent.h"
-#include "platform/wtf/PtrUtil.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebMediaStreamTrack.h"
 #include "public/platform/WebRTCDTMFSenderHandler.h"
 #include "public/platform/WebRTCPeerConnectionHandler.h"
 
 namespace blink {
 
-static const int kMinToneDurationMs = 70;
+static const int kMinToneDurationMs = 40;
 static const int kDefaultToneDurationMs = 100;
 static const int kMaxToneDurationMs = 6000;
+// TODO(hta): Adjust kMinInterToneGapMs to 30 once WebRTC code has changed
+// CL in progress: https://webrtc-review.googlesource.com/c/src/+/55260
 static const int kMinInterToneGapMs = 50;
-static const int kDefaultInterToneGapMs = 50;
+static const int kMaxInterToneGapMs = 6000;
+static const int kDefaultInterToneGapMs = 70;
 
 RTCDTMFSender* RTCDTMFSender::Create(
     ExecutionContext* context,
-    WebRTCPeerConnectionHandler* peer_connection_handler,
-    MediaStreamTrack* track,
-    ExceptionState& exception_state) {
-  std::unique_ptr<WebRTCDTMFSenderHandler> handler = WTF::WrapUnique(
-      peer_connection_handler->CreateDTMFSender(track->Component()));
-  if (!handler) {
-    exception_state.ThrowDOMException(kNotSupportedError,
-                                      "The MediaStreamTrack provided is not an "
-                                      "element of a MediaStream that's "
-                                      "currently in the local streams set.");
-    return nullptr;
-  }
-
-  return new RTCDTMFSender(context, track, std::move(handler));
+    std::unique_ptr<WebRTCDTMFSenderHandler> dtmf_sender_handler) {
+  DCHECK(dtmf_sender_handler);
+  return new RTCDTMFSender(context, std::move(dtmf_sender_handler));
 }
 
 RTCDTMFSender::RTCDTMFSender(ExecutionContext* context,
-                             MediaStreamTrack* track,
                              std::unique_ptr<WebRTCDTMFSenderHandler> handler)
     : ContextLifecycleObserver(context),
-      track_(track),
+      track_(nullptr),
       duration_(kDefaultToneDurationMs),
       inter_tone_gap_(kDefaultInterToneGapMs),
       handler_(std::move(handler)),
       stopped_(false),
-      scheduled_event_timer_(
-          TaskRunnerHelper::Get(TaskType::kNetworking, context),
-          this,
-          &RTCDTMFSender::ScheduledEventTimerFired) {
+      scheduled_event_timer_(context->GetTaskRunner(TaskType::kNetworking),
+                             this,
+                             &RTCDTMFSender::ScheduledEventTimerFired) {
   handler_->SetClient(this);
 }
 
-RTCDTMFSender::~RTCDTMFSender() {}
+RTCDTMFSender::~RTCDTMFSender() = default;
 
 void RTCDTMFSender::Dispose() {
   // Promptly clears a raw reference from content/ to an on-heap object
@@ -95,6 +86,10 @@ bool RTCDTMFSender::canInsertDTMF() const {
 
 MediaStreamTrack* RTCDTMFSender::track() const {
   return track_.Get();
+}
+
+void RTCDTMFSender::SetTrack(MediaStreamTrack* track) {
+  track_ = track;
 }
 
 String RTCDTMFSender::toneBuffer() const {
@@ -117,34 +112,34 @@ void RTCDTMFSender::insertDTMF(const String& tones,
                                int duration,
                                int inter_tone_gap,
                                ExceptionState& exception_state) {
+  // https://w3c.github.io/webrtc-pc/#dom-rtcdtmfsender-insertdtmf
+  // TODO(hta): Add check on transceiver's "stopped" and "currentDirection"
+  // attributes
   if (!canInsertDTMF()) {
-    exception_state.ThrowDOMException(kNotSupportedError,
+    exception_state.ThrowDOMException(kInvalidStateError,
                                       "The 'canInsertDTMF' attribute is false: "
                                       "this sender cannot send DTMF.");
     return;
   }
-
-  if (duration > kMaxToneDurationMs || duration < kMinToneDurationMs) {
+  // Spec: Throw on illegal characters
+  if (strspn(tones.Ascii().data(), "0123456789abcdABCD#*,") != tones.length()) {
     exception_state.ThrowDOMException(
-        kSyntaxError,
-        ExceptionMessages::IndexOutsideRange(
-            "duration", duration, kMinToneDurationMs,
-            ExceptionMessages::kExclusiveBound, kMaxToneDurationMs,
-            ExceptionMessages::kExclusiveBound));
+        kInvalidCharacterError,
+        "Illegal characers in InsertDTMF tone argument");
     return;
   }
 
-  if (inter_tone_gap < kMinInterToneGapMs) {
-    exception_state.ThrowDOMException(
-        kSyntaxError, ExceptionMessages::IndexExceedsMinimumBound(
-                          "intertone gap", inter_tone_gap, kMinInterToneGapMs));
-    return;
-  }
+  // Spec: Clamp the duration to between 40 and 6000 ms
+  duration = std::max(duration, kMinToneDurationMs);
+  duration = std::min(duration, kMaxToneDurationMs);
+  // Spec: Clamp the inter-tone gap to between 30 and 6000 ms
+  inter_tone_gap = std::max(inter_tone_gap, kMinInterToneGapMs);
+  inter_tone_gap = std::min(inter_tone_gap, kMaxInterToneGapMs);
 
   duration_ = duration;
   inter_tone_gap_ = inter_tone_gap;
-
-  if (!handler_->InsertDTMF(tones, duration_, inter_tone_gap_))
+  // Spec: a-d should be represented in the tone buffer as A-D
+  if (!handler_->InsertDTMF(tones.UpperASCII(), duration_, inter_tone_gap_))
     exception_state.ThrowDOMException(
         kSyntaxError, "Could not send provided tones, '" + tones + "'.");
 }
@@ -170,7 +165,7 @@ void RTCDTMFSender::ScheduleDispatchEvent(Event* event) {
   scheduled_events_.push_back(event);
 
   if (!scheduled_event_timer_.IsActive())
-    scheduled_event_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    scheduled_event_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void RTCDTMFSender::ScheduledEventTimerFired(TimerBase*) {
@@ -185,7 +180,7 @@ void RTCDTMFSender::ScheduledEventTimerFired(TimerBase*) {
     DispatchEvent((*it).Release());
 }
 
-DEFINE_TRACE(RTCDTMFSender) {
+void RTCDTMFSender::Trace(blink::Visitor* visitor) {
   visitor->Trace(track_);
   visitor->Trace(scheduled_events_);
   EventTargetWithInlineData::Trace(visitor);

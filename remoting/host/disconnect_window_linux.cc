@@ -3,12 +3,13 @@
 // found in the LICENSE file.
 
 #include <gtk/gtk.h>
-#include <math.h>
+
+#include <memory>
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
+#include "base/numerics/math_constants.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "remoting/base/string_resources.h"
@@ -74,10 +75,14 @@ class DisconnectWindowGtk : public HostWindow {
 void AddRoundRectPath(cairo_t* cairo_context, int width, int height,
                       int radius) {
   cairo_new_sub_path(cairo_context);
-  cairo_arc(cairo_context, width - radius, radius, radius, -M_PI_2, 0);
-  cairo_arc(cairo_context, width - radius, height - radius, radius, 0, M_PI_2);
-  cairo_arc(cairo_context, radius, height - radius, radius, M_PI_2, 2 * M_PI_2);
-  cairo_arc(cairo_context, radius, radius, radius, 2 * M_PI_2, 3 * M_PI_2);
+  cairo_arc(cairo_context, width - radius, radius, radius, -base::kPiDouble / 2,
+            0);
+  cairo_arc(cairo_context, width - radius, height - radius, radius, 0,
+            base::kPiDouble / 2);
+  cairo_arc(cairo_context, radius, height - radius, radius, base::kPiDouble / 2,
+            base::kPiDouble);
+  cairo_arc(cairo_context, radius, radius, radius, base::kPiDouble,
+            3 * base::kPiDouble / 2);
   cairo_close_path(cairo_context);
 }
 
@@ -349,7 +354,7 @@ gboolean DisconnectWindowGtk::OnButtonPress(GtkWidget* widget,
 
 // static
 std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
-  return base::MakeUnique<DisconnectWindowGtk>();
+  return std::make_unique<DisconnectWindowGtk>();
 }
 
 }  // namespace remoting

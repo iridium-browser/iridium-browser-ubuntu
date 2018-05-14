@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "net/base/completion_callback.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
 #include "net/log/net_log_source.h"
 #include "net/spdy/chromium/multiplexed_http_stream.h"
@@ -36,7 +36,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   static const size_t kRequestBodyBufferSize;
   // |spdy_session| must not be NULL.
   SpdyHttpStream(const base::WeakPtr<SpdySession>& spdy_session,
-                 bool direct,
+                 SpdyStreamId pushed_stream_id,
                  NetLogSource source_dependency);
   ~SpdyHttpStream() override;
 
@@ -48,17 +48,18 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   // HttpStream implementation.
 
   int InitializeStream(const HttpRequestInfo* request_info,
+                       bool can_send_early,
                        RequestPriority priority,
                        const NetLogWithSource& net_log,
-                       const CompletionCallback& callback) override;
+                       CompletionOnceCallback callback) override;
 
   int SendRequest(const HttpRequestHeaders& headers,
                   HttpResponseInfo* response,
-                  const CompletionCallback& callback) override;
-  int ReadResponseHeaders(const CompletionCallback& callback) override;
+                  CompletionOnceCallback callback) override;
+  int ReadResponseHeaders(CompletionOnceCallback callback) override;
   int ReadResponseBody(IOBuffer* buf,
                        int buf_len,
-                       const CompletionCallback& callback) override;
+                       CompletionOnceCallback callback) override;
   void Close(bool not_reusable) override;
   bool IsResponseBodyComplete() const override;
 
@@ -102,7 +103,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   // Must be called only when |request_info_| is non-NULL.
   bool HasUploadData() const;
 
-  void OnStreamCreated(const CompletionCallback& callback, int rv);
+  void OnStreamCreated(CompletionOnceCallback callback, int rv);
 
   // Reads the remaining data (whether chunked or not) from the
   // request body stream and sends it if there's any. The read and
@@ -133,6 +134,12 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   bool ShouldWaitForMoreBufferedData() const;
 
   const base::WeakPtr<SpdySession> spdy_session_;
+
+  // The ID of the pushed stream if one is claimed by this request.
+  // In this case, the request fails if it cannot use that pushed stream.
+  // Otherwise set to kNoPushedStreamFound.
+  const SpdyStreamId pushed_stream_id_;
+
   bool is_reused_;
   SpdyStreamRequest stream_request_;
   const NetLogSource source_dependency_;
@@ -160,9 +167,10 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   int64_t closed_stream_sent_bytes_;
 
   // The request to send.
-  // Set to null when response body is starting to be read. This is to allow
-  // the stream to be shared for reading and to possibly outlive request_info_'s
-  // owner.
+  // Set to null before response body is starting to be read. This is to allow
+  // |this| to be shared for reading and to possibly outlive request_info_'s
+  // owner. Setting to null happens after headers are completely read or upload
+  // data stream is uploaded, whichever is later.
   const HttpRequestInfo* request_info_;
 
   // |response_info_| is the HTTP response data object which is filled in
@@ -174,11 +182,13 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
 
   bool response_headers_complete_;
 
+  bool upload_stream_in_progress_;
+
   // We buffer the response body as it arrives asynchronously from the stream.
   SpdyReadQueue response_body_queue_;
 
-  CompletionCallback request_callback_;
-  CompletionCallback response_callback_;
+  CompletionOnceCallback request_callback_;
+  CompletionOnceCallback response_callback_;
 
   // User provided buffer for the ReadResponseBody() response.
   scoped_refptr<IOBuffer> user_buffer_;
@@ -193,9 +203,6 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   // Has more data been received from the network during the wait for the
   // scheduled read callback.
   bool more_read_data_pending_;
-
-  // Is this spdy stream direct to the origin server (or to a proxy).
-  bool direct_;
 
   bool was_alpn_negotiated_;
 

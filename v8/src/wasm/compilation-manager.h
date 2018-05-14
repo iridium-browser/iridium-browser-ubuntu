@@ -9,11 +9,12 @@
 
 #include "src/handles.h"
 #include "src/isolate.h"
-#include "src/wasm/module-compiler.h"
 
 namespace v8 {
 namespace internal {
 namespace wasm {
+
+class AsyncCompileJob;
 
 // The CompilationManager manages a list of active WebAssembly compile jobs. The
 // manager owns the memory of the compile jobs and can trigger the abortion of
@@ -26,12 +27,26 @@ class CompilationManager {
                             std::unique_ptr<byte[]> bytes_copy, size_t length,
                             Handle<Context> context, Handle<JSPromise> promise);
 
-  // Removes {job} from the list of active compile jobs. This will delete {job}.
-  void RemoveJob(AsyncCompileJob* job);
+  std::shared_ptr<StreamingDecoder> StartStreamingCompilation(
+      Isolate* isolate, Handle<Context> context, Handle<JSPromise> promise);
 
+  // Remove {job} from the list of active compile jobs.
+  std::shared_ptr<AsyncCompileJob> RemoveJob(AsyncCompileJob* job);
+
+  // Cancel all AsyncCompileJobs and delete their state immediately.
   void TearDown();
 
+  // Cancel all AsyncCompileJobs so that they are not processed any further,
+  // but delay the deletion of their state until all tasks accessing the
+  // AsyncCompileJob finish their execution.
+  void AbortAllJobs();
+
  private:
+  AsyncCompileJob* CreateAsyncCompileJob(Isolate* isolate,
+                                         std::unique_ptr<byte[]> bytes_copy,
+                                         size_t length, Handle<Context> context,
+                                         Handle<JSPromise> promise);
+
   // We use an AsyncCompileJob as the key for itself so that we can delete the
   // job from the map when it is finished.
   std::unordered_map<AsyncCompileJob*, std::shared_ptr<AsyncCompileJob>> jobs_;

@@ -44,7 +44,7 @@ class AudioParamTimeline {
   DISALLOW_NEW();
 
  public:
-  AudioParamTimeline() {}
+  AudioParamTimeline() = default;
 
   void SetValueAtTime(float value, double time, ExceptionState&);
   void LinearRampToValueAtTime(float value,
@@ -93,8 +93,10 @@ class AudioParamTimeline {
                             float min_value,
                             float max_value);
 
-  // Returns true if this AudioParam has any events on it.
-  bool HasValues() const;
+  // Returns true if the AudioParam timeline needs to run in this
+  // rendering quantum.  This means some automation is already running
+  // or is scheduled to run in the current rendering quantuym.
+  bool HasValues(size_t current_frame, double sample_rate) const;
 
   float SmoothedValue() { return smoothed_value_; }
   void SetSmoothedValue(float v) { smoothed_value_ = v; }
@@ -110,6 +112,8 @@ class AudioParamTimeline {
       kSetValueCurve,
       // For cancelValuesAndHold
       kCancelValues,
+      // Special marker for the end of a |kSetValueCurve| event.
+      kSetValueCurveEnd,
       kLastType
     };
 
@@ -131,6 +135,8 @@ class AudioParamTimeline {
         const Vector<float>& curve,
         double time,
         double duration);
+    static std::unique_ptr<ParamEvent> CreateSetValueCurveEndEvent(float value,
+                                                                   double time);
     static std::unique_ptr<ParamEvent> CreateCancelValuesEvent(
         double time,
         std::unique_ptr<ParamEvent> saved_event);
@@ -165,8 +171,6 @@ class AudioParamTimeline {
     Vector<float>& Curve() { return curve_; }
     float InitialValue() const { return initial_value_; }
     double CallTime() const { return call_time_; }
-    bool NeedsTimeClampCheck() const { return needs_time_clamp_check_; }
-    void ClearTimeClampCheck() { needs_time_clamp_check_ = false; }
 
     double CurvePointsPerSecond() const { return curve_points_per_second_; }
     float CurveEndValue() const { return curve_end_value_; }
@@ -257,10 +261,6 @@ class AudioParamTimeline {
     // scheduled cancel time.
     std::unique_ptr<ParamEvent> saved_event_;
 
-    // True if the start time needs to be checked against current time
-    // to implement clamping.
-    bool needs_time_clamp_check_;
-
     // True if a default value has been assigned to the CancelValues event.
     bool has_default_cancelled_value_;
   };
@@ -305,7 +305,7 @@ class AudioParamTimeline {
                                 double control_rate);
 
   // Produce a nice string describing the event in human-readable form.
-  String EventToString(const ParamEvent&);
+  String EventToString(const ParamEvent&) const;
 
   // Automation functions that compute the vlaue of the specified
   // automation at the specified time.
@@ -348,19 +348,20 @@ class AudioParamTimeline {
   bool IsEventCurrent(const ParamEvent* current_event,
                       const ParamEvent* next_event,
                       size_t current_frame,
-                      double sample_rate);
+                      double sample_rate) const;
 
-  // Clamp event times to current time, if needed.
-  void ClampToCurrentTime(int number_of_events,
-                          size_t start_frame,
-                          double sample_rate);
+  // Clamp times to current time, if needed for any new events.  Note,
+  // this method can mutate |events_|, so do call this only in safe
+  // places.
+  void ClampNewEventsToCurrentTime(double current_time);
 
   // Handle the case where the last event in the timeline is in the
   // past.  Returns false if any event is not in the past. Otherwise,
   // return true and also fill in |values| with |defaultValue|.
+  // |defaultValue| may be updated with a new value.
   bool HandleAllEventsInThePast(double current_time,
                                 double sample_rate,
-                                float default_value,
+                                float& default_value,
                                 unsigned number_of_values,
                                 float* values);
 
@@ -444,9 +445,37 @@ class AudioParamTimeline {
                            size_t end_frame,
                            unsigned write_index);
 
+  // TODO(crbug.com/764396): Remove these two methods when the bug is fixed.
+
+  // |EventAtFrame| finds the current event that would run at the specified
+  // |frame|. The first return value is true if a setValueAtTime call would
+  // overlap some ongoing event.  The second return value is the index of the
+  // current event. The second value must be ignored if the first value is
+  // false.
+  std::tuple<bool, size_t> EventAtFrame(size_t frame, float sample_rate) const;
+
+  // Prints a console warning that a call to the AudioParam value setter
+  // overlaps the event at |event_index|.  |param_name| is the name of the
+  // AudioParam where the where this is happening.
+  void WarnSetterOverlapsEvent(String param_name,
+                               size_t event_index,
+                               BaseAudioContext&) const;
+
+  // When cancelling events, remove the items from |events_| starting
+  // at the given index.  Update |new_events_| too.
+  void RemoveCancelledEvents(size_t first_event_to_remove);
+
   // Vector of all automation events for the AudioParam.  Access must
   // be locked via m_eventsLock.
   Vector<std::unique_ptr<ParamEvent>> events_;
+
+  // Vector of raw pointers to the actual ParamEvent that was
+  // inserted.  As new events are added, |new_events_| is updated with
+  // tne new event.  When the timline is processed, these events are
+  // clamped to current time by |ClampNewEventsToCurrentTime|. Access
+  // must be locked via |events_lock_|.  Must be maintained together
+  // with |events_|.
+  HashSet<ParamEvent*> new_events_;
 
   mutable Mutex events_lock_;
 

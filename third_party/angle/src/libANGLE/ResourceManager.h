@@ -27,11 +27,12 @@ namespace gl
 class Buffer;
 struct Caps;
 class Context;
-class FenceSync;
+class Sync;
 class Framebuffer;
 struct Limitations;
 class Path;
 class Program;
+class ProgramPipeline;
 class Renderbuffer;
 class Sampler;
 class Shader;
@@ -125,6 +126,8 @@ class BufferManager : public TypedResourceManager<Buffer, HandleAllocator, Buffe
 class ShaderProgramManager : public ResourceManagerBase<HandleAllocator>
 {
   public:
+    ShaderProgramManager();
+
     GLuint createShader(rx::GLImplFactory *factory,
                         const Limitations &rendererLimitations,
                         GLenum type);
@@ -154,7 +157,7 @@ class TextureManager : public TypedResourceManager<Texture, HandleAllocator, Tex
     GLuint createTexture();
     Texture *getTexture(GLuint handle) const;
 
-    void invalidateTextureComplenessCache() const;
+    void signalAllTexturesDirty(const Context *context) const;
 
     Texture *checkTextureAllocation(rx::GLImplFactory *factory, GLuint handle, GLenum target)
     {
@@ -163,6 +166,8 @@ class TextureManager : public TypedResourceManager<Texture, HandleAllocator, Tex
 
     static Texture *AllocateNewObject(rx::GLImplFactory *factory, GLuint handle, GLenum target);
     static void DeleteObject(const Context *context, Texture *texture);
+
+    void enableHandleAllocatorLogging();
 
   protected:
     ~TextureManager() override {}
@@ -173,7 +178,7 @@ class RenderbufferManager
 {
   public:
     GLuint createRenderbuffer();
-    Renderbuffer *getRenderbuffer(GLuint handle);
+    Renderbuffer *getRenderbuffer(GLuint handle) const;
 
     Renderbuffer *checkRenderbufferAllocation(rx::GLImplFactory *factory, GLuint handle)
     {
@@ -191,8 +196,8 @@ class SamplerManager : public TypedResourceManager<Sampler, HandleAllocator, Sam
 {
   public:
     GLuint createSampler();
-    Sampler *getSampler(GLuint handle);
-    bool isSampler(GLuint sampler);
+    Sampler *getSampler(GLuint handle) const;
+    bool isSampler(GLuint sampler) const;
 
     Sampler *checkSamplerAllocation(rx::GLImplFactory *factory, GLuint handle)
     {
@@ -206,21 +211,23 @@ class SamplerManager : public TypedResourceManager<Sampler, HandleAllocator, Sam
     ~SamplerManager() override {}
 };
 
-class FenceSyncManager : public TypedResourceManager<FenceSync, HandleAllocator, FenceSyncManager>
+class SyncManager : public TypedResourceManager<Sync, HandleAllocator, SyncManager>
 {
   public:
-    GLuint createFenceSync(rx::GLImplFactory *factory);
-    FenceSync *getFenceSync(GLuint handle);
+    GLuint createSync(rx::GLImplFactory *factory);
+    Sync *getSync(GLuint handle) const;
 
-    static void DeleteObject(const Context *context, FenceSync *fenceSync);
+    static void DeleteObject(const Context *context, Sync *sync);
 
   protected:
-    ~FenceSyncManager() override {}
+    ~SyncManager() override {}
 };
 
 class PathManager : public ResourceManagerBase<HandleRangeAllocator>
 {
   public:
+    PathManager();
+
     ErrorOrResult<GLuint> createPaths(rx::GLImplFactory *factory, GLsizei range);
     void deletePaths(GLuint first, GLsizei range);
     Path *getPath(GLuint handle) const;
@@ -258,6 +265,25 @@ class FramebufferManager
 
   protected:
     ~FramebufferManager() override {}
+};
+
+class ProgramPipelineManager
+    : public TypedResourceManager<ProgramPipeline, HandleAllocator, ProgramPipelineManager>
+{
+  public:
+    GLuint createProgramPipeline();
+    ProgramPipeline *getProgramPipeline(GLuint handle) const;
+
+    ProgramPipeline *checkProgramPipelineAllocation(rx::GLImplFactory *factory, GLuint handle)
+    {
+        return checkObjectAllocation(factory, handle);
+    }
+
+    static ProgramPipeline *AllocateNewObject(rx::GLImplFactory *factory, GLuint handle);
+    static void DeleteObject(const Context *context, ProgramPipeline *pipeline);
+
+  protected:
+    ~ProgramPipelineManager() override {}
 };
 
 }  // namespace gl

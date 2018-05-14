@@ -27,13 +27,13 @@
 
 #include "core/css/MediaQueryListListener.h"
 #include "core/dom/Document.h"
-#include "core/dom/FrameRequestCallback.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/probe/CoreProbes.h"
+#include "platform/wtf/Time.h"
 
 namespace blink {
 
@@ -44,7 +44,7 @@ std::pair<EventTarget*, StringImpl*> EventTargetKey(const Event* event) {
 ScriptedAnimationController::ScriptedAnimationController(Document* document)
     : document_(document), callback_collection_(document), suspend_count_(0) {}
 
-DEFINE_TRACE(ScriptedAnimationController) {
+void ScriptedAnimationController::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
   visitor->Trace(callback_collection_);
   visitor->Trace(event_queue_);
@@ -52,11 +52,16 @@ DEFINE_TRACE(ScriptedAnimationController) {
   visitor->Trace(per_frame_events_);
 }
 
-void ScriptedAnimationController::Suspend() {
+void ScriptedAnimationController::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
+  visitor->TraceWrappers(callback_collection_);
+}
+
+void ScriptedAnimationController::Pause() {
   ++suspend_count_;
 }
 
-void ScriptedAnimationController::Resume() {
+void ScriptedAnimationController::Unpause() {
   // It would be nice to put an DCHECK(m_suspendCount > 0) here, but in WK1
   // resume() can be called even when suspend hasn't (if a tab was created in
   // the background).
@@ -71,7 +76,8 @@ void ScriptedAnimationController::DispatchEventsAndCallbacksForPrinting() {
 }
 
 ScriptedAnimationController::CallbackId
-ScriptedAnimationController::RegisterCallback(FrameRequestCallback* callback) {
+ScriptedAnimationController::RegisterCallback(
+    FrameRequestCallbackCollection::FrameCallback* callback) {
   CallbackId id = callback_collection_.RegisterCallback(callback);
   ScheduleAnimationIfNeeded();
   return id;
@@ -81,11 +87,15 @@ void ScriptedAnimationController::CancelCallback(CallbackId id) {
   callback_collection_.CancelCallback(id);
 }
 
+bool ScriptedAnimationController::HasCallback() const {
+  return !callback_collection_.IsEmpty();
+}
+
 void ScriptedAnimationController::RunTasks() {
-  Vector<std::unique_ptr<WTF::Closure>> tasks;
+  Vector<base::OnceClosure> tasks;
   tasks.swap(task_queue_);
   for (auto& task : tasks)
-    (*task)();
+    std::move(task).Run();
 }
 
 void ScriptedAnimationController::DispatchEvents(
@@ -126,13 +136,14 @@ void ScriptedAnimationController::ExecuteCallbacks(double monotonic_time_now) {
   if (!document_)
     return;
 
+  TimeTicks time = TimeTicksFromSeconds(monotonic_time_now);
   double high_res_now_ms =
       1000.0 *
       document_->Loader()->GetTiming().MonotonicTimeToZeroBasedDocumentTime(
-          monotonic_time_now);
+          time);
   double legacy_high_res_now_ms =
-      1000.0 * document_->Loader()->GetTiming().MonotonicTimeToPseudoWallTime(
-                   monotonic_time_now);
+      1000.0 *
+      document_->Loader()->GetTiming().MonotonicTimeToPseudoWallTime(time);
   callback_collection_.ExecuteCallbacks(high_res_now_ms,
                                         legacy_high_res_now_ms);
 }
@@ -156,6 +167,7 @@ bool ScriptedAnimationController::HasScheduledItems() const {
 
 void ScriptedAnimationController::ServiceScriptedAnimations(
     double monotonic_time_now) {
+  current_frame_had_raf_ = HasCallback();
   if (!HasScheduledItems())
     return;
 
@@ -163,12 +175,12 @@ void ScriptedAnimationController::ServiceScriptedAnimations(
   DispatchEvents();
   RunTasks();
   ExecuteCallbacks(monotonic_time_now);
+  next_frame_has_pending_raf_ = HasCallback();
 
   ScheduleAnimationIfNeeded();
 }
 
-void ScriptedAnimationController::EnqueueTask(
-    std::unique_ptr<WTF::Closure> task) {
+void ScriptedAnimationController::EnqueueTask(base::OnceClosure task) {
   task_queue_.push_back(std::move(task));
   ScheduleAnimationIfNeeded();
 }

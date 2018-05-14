@@ -35,27 +35,23 @@ class BufferDataTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        const char * vsSource = SHADER_SOURCE
-        (
-            attribute vec4 position;
+        const char *vsSource =
+            R"(attribute vec4 position;
             attribute float in_attrib;
             varying float v_attrib;
             void main()
             {
                 v_attrib = in_attrib;
                 gl_Position = position;
-            }
-        );
+            })";
 
-        const char * fsSource = SHADER_SOURCE
-        (
-            precision mediump float;
+        const char *fsSource =
+            R"(precision mediump float;
             varying float v_attrib;
             void main()
             {
                 gl_FragColor = vec4(v_attrib, 0, 0, 1);
-            }
-        );
+            })";
 
         glGenBuffers(1, &mBuffer);
         ASSERT_NE(mBuffer, 0U);
@@ -139,77 +135,6 @@ TEST_P(BufferDataTest, NULLResolvedData)
     drawQuad(mProgram, "position", 0.5f);
 }
 
-// Tests that a huge allocation returns GL_OUT_OF_MEMORY
-// TODO(jmadill): Figure out how to test this reliably on the Chromium bots
-TEST_P(BufferDataTest, DISABLED_HugeSetDataShouldNotCrash)
-{
-    glBindBuffer(GL_ARRAY_BUFFER, mBuffer);
-    EXPECT_GL_NO_ERROR();
-
-    GLsizei allocSize = std::numeric_limits<GLsizei>::max() >> 2;
-
-    uint8_t *data = nullptr;
-    while (data == nullptr && allocSize >= 4)
-    {
-        data = new (std::nothrow) uint8_t[allocSize];
-
-        if (data == nullptr)
-        {
-            allocSize >>= 1;
-        }
-    }
-
-    ASSERT_NE(static_cast<uint8_t *>(nullptr), data);
-    memset(data, 0, allocSize);
-
-    float * fValue = reinterpret_cast<float*>(data);
-    for (unsigned int f = 0; f < 6; f++)
-    {
-        fValue[f] = 1.0f;
-    }
-
-    glBufferData(GL_ARRAY_BUFFER, allocSize, data, GL_STATIC_DRAW);
-
-    GLenum error = glGetError();
-    if (error == GL_NO_ERROR)
-    {
-        // If we didn't fail because of an out of memory error, try drawing a quad
-        // using the large buffer
-
-        // DISABLED because it takes a long time, but left for posterity
-
-        //glUseProgram(mProgram);
-        // glVertexAttribPointer(mAttribLocation, 1, GL_FLOAT, GL_FALSE, 4, nullptr);
-        // glEnableVertexAttribArray(mAttribLocation);
-        // glBindBuffer(GL_ARRAY_BUFFER, 0);
-        // drawQuad(mProgram, "position", 0.5f);
-        // swapBuffers();
-
-        //// Draw operations can also generate out-of-memory, which is in-spec
-        //error = glGetError();
-        //if (error == GL_NO_ERROR)
-        //{
-        //    GLint viewportSize[4];
-        //    glGetIntegerv(GL_VIEWPORT, viewportSize);
-
-        //    GLint midPixelX = (viewportSize[0] + viewportSize[2]) / 2;
-        //    GLint midPixelY = (viewportSize[1] + viewportSize[3]) / 2;
-
-        //    EXPECT_PIXEL_EQ(midPixelX, midPixelY, 255, 0, 0, 255);
-        //}
-        //else
-        //{
-        //    EXPECT_EQ(GL_OUT_OF_MEMORY, error);
-        //}
-    }
-    else
-    {
-        EXPECT_GLENUM_EQ(GL_OUT_OF_MEMORY, error);
-    }
-
-    delete[] data;
-}
-
 // Internally in D3D, we promote dynamic data to static after many draw loops. This code tests
 // path.
 TEST_P(BufferDataTest, RepeatedDrawWithDynamic)
@@ -253,27 +178,23 @@ class IndexedBufferCopyTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        const char * vsSource = SHADER_SOURCE
-        (
-            attribute vec3 in_attrib;
+        const char *vsSource =
+            R"(attribute vec3 in_attrib;
             varying vec3 v_attrib;
             void main()
             {
                 v_attrib = in_attrib;
                 gl_Position = vec4(0.0, 0.0, 0.5, 1.0);
                 gl_PointSize = 100.0;
-            }
-        );
+            })";
 
-        const char * fsSource = SHADER_SOURCE
-        (
-            precision mediump float;
+        const char *fsSource =
+            R"(precision mediump float;
             varying vec3 v_attrib;
             void main()
             {
                 gl_FragColor = vec4(v_attrib, 1);
-            }
-        );
+            })";
 
         glGenBuffers(2, mBuffers);
         ASSERT_NE(mBuffers[0], 0U);
@@ -316,11 +237,7 @@ class IndexedBufferCopyTest : public ANGLETest
 TEST_P(IndexedBufferCopyTest, IndexRangeBug)
 {
     // TODO(geofflang): Figure out why this fails on AMD OpenGL (http://anglebug.com/1291)
-    if (IsAMD() && getPlatformRenderer() == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
-    {
-        std::cout << "Test disabled on AMD OpenGL." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL());
 
     unsigned char vertexData[] = { 255, 0, 0, 0, 0, 0 };
     unsigned int indexData[] = { 0, 1 };
@@ -481,6 +398,23 @@ TEST_P(BufferDataTest, MapBufferOES)
     glUnmapBufferOES(GL_ARRAY_BUFFER);
 
     EXPECT_EQ(data, actualData);
+}
+
+// Tests a bug where copying buffer data immediately after creation hit a nullptr in D3D11.
+TEST_P(BufferDataTestES3, NoBufferInitDataCopyBug)
+{
+    constexpr GLsizei size = 64;
+
+    GLBuffer sourceBuffer;
+    glBindBuffer(GL_COPY_READ_BUFFER, sourceBuffer);
+    glBufferData(GL_COPY_READ_BUFFER, size, nullptr, GL_STATIC_DRAW);
+
+    GLBuffer destBuffer;
+    glBindBuffer(GL_ARRAY_BUFFER, destBuffer);
+    glBufferData(GL_ARRAY_BUFFER, size, nullptr, GL_STATIC_DRAW);
+
+    glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_ARRAY_BUFFER, 0, 0, size);
+    ASSERT_GL_NO_ERROR();
 }
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.

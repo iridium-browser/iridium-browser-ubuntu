@@ -48,10 +48,22 @@
     [Replaceable, MeasureAs=BarPropStatusbar] readonly attribute BarProp statusbar;
     [Replaceable, MeasureAs=BarPropToolbar] readonly attribute BarProp toolbar;
     attribute DOMString status;
-    [CrossOrigin, CallWith=ExecutionContext] void close();
+    // https://html.spec.whatwg.org/multipage/window-object.html#dom-window-close
+    // TODO(yukishiino): Replace |CurrentWindow| with the incumbent window or
+    // something once the incumbent realm is implemented.  Currently,
+    // OriginSafeMethodGetter + CurrentWindow are used instead of the incumbent
+    // one.
+    [CrossOrigin, CallWith=CurrentWindow] void close();
     [CrossOrigin] readonly attribute boolean closed;
     void stop();
-    [CrossOrigin, CallWith=ExecutionContext] void focus();
+    // https://html.spec.whatwg.org/multipage/interaction.html#dom-window-focus
+    // https://html.spec.whatwg.org/multipage/interaction.html#focusing-steps
+    // TODO(yukishiino): Remove [CallWith=CurrentWindow] or clarify why
+    // we need it.  focus() is not supposed to use the incumbent realm.
+    // So, we shouldn't need to use CurrentWindow here, however, somehow
+    // DOMWindow::focus() is checking if the incumbent window is eligible to
+    // focus another window.
+    [CrossOrigin, CallWith=CurrentWindow] void focus();
     [CrossOrigin] void blur();
 
     // other browsing contexts
@@ -62,8 +74,7 @@
     [CrossOrigin, Custom=Setter] attribute Window opener;
     [Replaceable, CrossOrigin] readonly attribute Window? parent;
     [CheckSecurity=ReturnValue, Custom=Getter] readonly attribute Element? frameElement;
-    // FIXME: open() should have 4 optional arguments with defaults.
-    [Custom, RaisesException] Window? open(DOMString url, DOMString target, optional DOMString features);
+    [CallWith=(ExecutionContext,CurrentWindow,EnteredWindow), RaisesException] Window? open(optional [TreatNullAs=EmptyString] USVString url="", optional DOMString target = "_blank", optional [TreatNullAs=EmptyString] DOMString features = "");
 
     // indexed properties
     // https://html.spec.whatwg.org/C/browsers.html#windowproxy-getownproperty
@@ -103,12 +114,11 @@
     [Replaceable, SameObject] readonly attribute External external;
 
     // CSS Object Model (CSSOM)
-    // https://dev.w3.org/csswg/cssom/#extensions-to-the-window-interface
-    // FIXME: The optional pseudoElt argument should have no default.
-    [NewObject] CSSStyleDeclaration getComputedStyle(Element elt, optional DOMString? pseudoElt = null);
+    // https://drafts.csswg.org/cssom/#extensions-to-the-window-interface
+    [NewObject] CSSStyleDeclaration getComputedStyle(Element elt, optional DOMString? pseudoElt);
 
     // CSSOM View Module
-    // https://dev.w3.org/csswg/cssom-view/#extensions-to-the-window-interface
+    // https://drafts.csswg.org/cssom-view/#extensions-to-the-window-interface
     [NewObject] MediaQueryList matchMedia(DOMString query);
     [SameObject, Replaceable] readonly attribute Screen screen;
 
@@ -163,9 +173,13 @@
     //  90 is when rotated counter clockwise.
     [MeasureAs=WindowOrientation, RuntimeEnabled=OrientationEvent] readonly attribute long orientation;
 
+    // Accessibility Object Model
+    // https://github.com/WICG/aom/blob/HEAD/explainer.md
+    [RuntimeEnabled=AccessibilityObjectModel, CallWith=ScriptState] Promise<ComputedAccessibleNode> getComputedAccessibleNode(Element element);
+
     // Non-standard APIs
     [MeasureAs=WindowClientInformation, Replaceable] readonly attribute Navigator clientInformation;
-    [MeasureAs=WindowEvent, Custom, NotEnumerable] attribute Event event;
+    [Replaceable, MeasureAs=WindowEvent, Custom=Getter, NotEnumerable] readonly attribute Event event;
     [MeasureAs=WindowFind] boolean find([Default=Undefined] optional DOMString string,
                                         [Default=Undefined] optional boolean caseSensitive,
                                         [Default=Undefined] optional boolean backwards,
@@ -179,8 +193,8 @@
     [MeasureAs=WindowDefaultStatus] attribute DOMString defaultStatus;
     [MeasureAs=WindowDefaultstatus, ImplementedAs=defaultStatus] attribute DOMString defaultstatus;
     [MeasureAs=StyleMedia] readonly attribute StyleMedia styleMedia;
-    [DeprecateAs=GetMatchedCSSRules, LegacyInterfaceTypeChecking] CSSRuleList getMatchedCSSRules([Default=Undefined] optional Element element,
-                                                                                                 [Default=Undefined] optional DOMString? pseudoElement);
+    [RuntimeEnabled=GetMatchedCSSRules, DeprecateAs=GetMatchedCSSRules, LegacyInterfaceTypeChecking] CSSRuleList getMatchedCSSRules([Default=Undefined] optional Element element,
+                                                                                                                                    [Default=Undefined] optional DOMString? pseudoElement);
     [DeprecateAs=PrefixedRequestAnimationFrame] long webkitRequestAnimationFrame(FrameRequestCallback callback);
     [DeprecateAs=PrefixedCancelAnimationFrame, ImplementedAs=cancelAnimationFrame] void webkitCancelAnimationFrame(long id);
     [MeasureAs=PrefixedTransitionEventConstructor] attribute TransitionEventConstructor WebKitTransitionEvent;

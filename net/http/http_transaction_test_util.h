@@ -237,6 +237,9 @@ class MockNetworkTransaction
   void SetBeforeHeadersSentCallback(
       const BeforeHeadersSentCallback& callback) override;
 
+  void SetRequestHeadersCallback(RequestHeadersCallback callback) override {}
+  void SetResponseHeadersCallback(ResponseHeadersCallback) override {}
+
   int ResumeNetworkStart() override;
 
   void GetConnectionAttempts(ConnectionAttempts* out) const override;
@@ -283,6 +286,7 @@ class MockNetworkTransaction
   unsigned int socket_log_id_;
 
   bool done_reading_called_;
+  bool reading_;
 
   CompletionCallback resume_start_callback_;  // used for pause and restart.
 

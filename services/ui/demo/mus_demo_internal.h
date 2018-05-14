@@ -32,6 +32,9 @@ class MusDemoInternal : public MusDemo, public aura::WindowManagerDelegate {
 
   // aura::WindowManagerDelegate:
   void SetWindowManagerClient(aura::WindowManagerClient* client) final;
+  void OnWmAcceleratedWidgetAvailableForDisplay(
+      int64_t display_id,
+      gfx::AcceleratedWidget widget) final {}
   void OnWmSetBounds(aura::Window* window, const gfx::Rect& bounds) final;
   bool OnWmSetProperty(aura::Window* window,
                        const std::string& name,
@@ -58,6 +61,7 @@ class MusDemoInternal : public MusDemo, public aura::WindowManagerDelegate {
       uint32_t id,
       const ui::Event& event,
       std::unordered_map<std::string, std::vector<uint8_t>>* properties) final;
+  void OnCursorTouchVisibleChanged(bool enabled) final;
   void OnWmPerformMoveLoop(aura::Window* window,
                            ui::mojom::MoveLoopSource source,
                            const gfx::Point& cursor_location,

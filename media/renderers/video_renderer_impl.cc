@@ -25,8 +25,8 @@
 #include "media/base/pipeline_status.h"
 #include "media/base/renderer_client.h"
 #include "media/base/video_frame.h"
-#include "media/renderers/gpu_video_accelerator_factories.h"
 #include "media/video/gpu_memory_buffer_video_frame_pool.h"
+#include "media/video/gpu_video_accelerator_factories.h"
 
 namespace media {
 
@@ -130,12 +130,9 @@ VideoRendererImpl::VideoRendererImpl(
       pending_read_(false),
       drop_frames_(drop_frames),
       buffering_state_(BUFFERING_HAVE_NOTHING),
-      frames_decoded_(0),
-      frames_dropped_(0),
-      tick_clock_(new base::DefaultTickClock()),
+      tick_clock_(base::DefaultTickClock::GetInstance()),
       was_background_rendering_(false),
       time_progressing_(false),
-      last_video_memory_usage_(0),
       have_renderered_frames_(false),
       last_frame_opaque_(false),
       painted_first_frame_(false),
@@ -216,6 +213,7 @@ void VideoRendererImpl::StartPlayingFrom(base::TimeDelta timestamp) {
   start_timestamp_ = timestamp;
   painted_first_frame_ = false;
   has_playback_met_watch_time_duration_requirement_ = false;
+  last_render_time_ = last_frame_ready_time_ = base::TimeTicks();
   AttemptRead_Locked();
 }
 
@@ -281,8 +279,10 @@ scoped_refptr<VideoFrame> VideoRendererImpl::Render(
     base::TimeTicks deadline_min,
     base::TimeTicks deadline_max,
     bool background_rendering) {
+  TRACE_EVENT1("media", "VideoRendererImpl::Render", "id", media_log_->id());
   base::AutoLock auto_lock(lock_);
   DCHECK_EQ(state_, kPlaying);
+  last_render_time_ = tick_clock_->NowTicks();
 
   size_t frames_dropped = 0;
   scoped_refptr<VideoFrame> result =
@@ -314,8 +314,7 @@ scoped_refptr<VideoFrame> VideoRendererImpl::Render(
   // Just after resuming from background rendering, we also don't count the
   // dropped frames since they are likely just dropped due to being too old.
   if (!background_rendering && !was_background_rendering_)
-    frames_dropped_ += frames_dropped;
-  UpdateStats_Locked();
+    stats_.video_frames_dropped += frames_dropped;
   was_background_rendering_ = background_rendering;
 
   // Always post this task, it will acquire new frames if necessary and since it
@@ -396,9 +395,8 @@ void VideoRendererImpl::OnConfigChange(const VideoDecoderConfig& config) {
   }
 }
 
-void VideoRendererImpl::SetTickClockForTesting(
-    std::unique_ptr<base::TickClock> tick_clock) {
-  tick_clock_.swap(tick_clock);
+void VideoRendererImpl::SetTickClockForTesting(base::TickClock* tick_clock) {
+  tick_clock_ = tick_clock;
 }
 
 void VideoRendererImpl::SetGpuMemoryBufferVideoForTesting(
@@ -511,17 +509,22 @@ void VideoRendererImpl::FrameReady(base::TimeTicks read_time,
     return;
   }
 
-  read_durations_.AddSample(tick_clock_->NowTicks() - read_time);
+  last_frame_ready_time_ = tick_clock_->NowTicks();
+  read_durations_.AddSample(last_frame_ready_time_ - read_time);
 
   UMA_HISTOGRAM_ENUMERATION("Media.VideoFrame.ColorSpace",
                             ColorSpaceUMAHelper(frame->ColorSpace()),
                             static_cast<int>(VideoFrameColorSpaceUMA::MAX) + 1);
+  const bool is_eos =
+      frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM);
+  const bool is_before_start_time =
+      !is_eos && IsBeforeStartTime(frame->timestamp());
+  const bool cant_read = !video_frame_stream_->CanReadWithoutStalling();
 
-  if (frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM)) {
+  if (is_eos) {
     DCHECK(!received_end_of_stream_);
     received_end_of_stream_ = true;
-  } else if ((low_delay_ || !video_frame_stream_->CanReadWithoutStalling()) &&
-             IsBeforeStartTime(frame->timestamp())) {
+  } else if ((low_delay_ || cant_read) && is_before_start_time) {
     // Don't accumulate frames that are earlier than the start time if we
     // won't have a chance for a better frame, otherwise we could declare
     // HAVE_ENOUGH_DATA and start playback prematurely.
@@ -541,6 +544,16 @@ void VideoRendererImpl::FrameReady(base::TimeTicks read_time,
       has_playback_met_watch_time_duration_requirement_ = true;
     }
 
+    // Provide frame duration information so that even if we only have one frame
+    // in the queue we can properly estimate duration. This allows the call to
+    // RemoveFramesForUnderflowOrBackgroundRendering() below to actually expire
+    // this frame if it's too far behind the current media time. Without this,
+    // we may resume too soon after a track change in the low delay case.
+    if (!frame->metadata()->HasKey(VideoFrameMetadata::FRAME_DURATION)) {
+      frame->metadata()->SetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
+                                      video_frame_stream_->AverageDuration());
+    }
+
     AddReadyFrame_Locked(frame);
     UpdateMaxBufferedFrames();
   }
@@ -551,30 +564,26 @@ void VideoRendererImpl::FrameReady(base::TimeTicks read_time,
   // We may have removed all frames above and have reached end of stream.
   MaybeFireEndedCallback_Locked(time_progressing_);
 
-  // Update statistics here instead of during Render() when the sink is stopped.
-  if (!sink_started_)
-    UpdateStats_Locked();
+  // Update any statistics since the last call.
+  UpdateStats_Locked();
 
   // Paint the first frame if possible and necessary. Paint ahead of
   // HAVE_ENOUGH_DATA to ensure the user sees the frame as early as possible.
-  if (!sink_started_ && algorithm_->frames_queued() && !painted_first_frame_) {
-    // We want to paint the first frame under two conditions: Either (1) we have
-    // enough frames to know it's definitely the first frame or (2) there may be
-    // no more frames coming (sometimes unless we paint one of them).
-    //
-    // For the first condition, we need at least two frames or the first frame
-    // must have a timestamp >= |start_timestamp_|, since otherwise we may be
-    // prerolling frames before the actual start time that will be dropped.
-    if (algorithm_->frames_queued() > 1 || received_end_of_stream_ ||
-        frame->timestamp() >= start_timestamp_ || low_delay_ ||
-        !video_frame_stream_->CanReadWithoutStalling()) {
-      scoped_refptr<VideoFrame> first_frame =
-          algorithm_->Render(base::TimeTicks(), base::TimeTicks(), nullptr);
-      CheckForMetadataChanges(first_frame->format(),
-                              first_frame->natural_size());
-      sink_->PaintSingleFrame(first_frame);
-      painted_first_frame_ = true;
-    }
+  //
+  // We want to paint the first frame under two conditions: Either (1) we have
+  // enough frames to know it's definitely the first frame or (2) there may be
+  // no more frames coming (sometimes unless we paint one of them).
+  //
+  // We have to check both effective_frames_queued() and |is_before_start_time|
+  // since prior to the clock starting effective_frames_queued() is a guess.
+  if (!sink_started_ && !painted_first_frame_ && algorithm_->frames_queued() &&
+      (received_end_of_stream_ || cant_read ||
+       (algorithm_->effective_frames_queued() && !is_before_start_time))) {
+    scoped_refptr<VideoFrame> first_frame =
+        algorithm_->Render(base::TimeTicks(), base::TimeTicks(), nullptr);
+    CheckForMetadataChanges(first_frame->format(), first_frame->natural_size());
+    sink_->PaintSingleFrame(first_frame);
+    painted_first_frame_ = true;
   }
 
   // Signal buffering state if we've met our conditions.
@@ -585,7 +594,7 @@ void VideoRendererImpl::FrameReady(base::TimeTicks read_time,
   AttemptRead_Locked();
 }
 
-bool VideoRendererImpl::HaveEnoughData_Locked() {
+bool VideoRendererImpl::HaveEnoughData_Locked() const {
   DCHECK_EQ(state_, kPlaying);
   lock_.AssertAcquired();
 
@@ -599,13 +608,18 @@ bool VideoRendererImpl::HaveEnoughData_Locked() {
     return true;
   }
 
-  if (was_background_rendering_ && frames_decoded_)
+  // If we've decoded any frames since the last render, signal have enough to
+  // avoid underflowing when video is not visible unless we run out of frames.
+  if (was_background_rendering_ && last_frame_ready_time_ >= last_render_time_)
     return true;
 
   if (!low_delay_ && video_frame_stream_->CanReadWithoutStalling())
     return false;
 
-  return algorithm_->effective_frames_queued() > 0;
+  // Note: We still require an effective frame in the stalling case since this
+  // method is also used to inform TransitionToHaveNothing_Locked() and thus
+  // would never pause and rebuffer if we always return true here.
+  return algorithm_->effective_frames_queued() > 0u;
 }
 
 void VideoRendererImpl::TransitionToHaveEnough_Locked() {
@@ -648,7 +662,14 @@ void VideoRendererImpl::AddReadyFrame_Locked(
   lock_.AssertAcquired();
   DCHECK(!frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM));
 
-  frames_decoded_++;
+  ++stats_.video_frames_decoded;
+
+  bool power_efficient = false;
+  if (frame->metadata()->GetBoolean(VideoFrameMetadata::POWER_EFFICIENT,
+                                    &power_efficient) &&
+      power_efficient) {
+    ++stats_.video_frames_decoded_power_efficient;
+  }
 
   algorithm_->EnqueueFrame(frame);
 }
@@ -701,31 +722,32 @@ void VideoRendererImpl::OnVideoFrameStreamResetDone() {
 }
 
 void VideoRendererImpl::UpdateStats_Locked() {
+  DCHECK(task_runner_->BelongsToCurrentThread());
   lock_.AssertAcquired();
-  DCHECK_GE(frames_decoded_, 0);
-  DCHECK_GE(frames_dropped_, 0);
 
-  if (frames_decoded_ || frames_dropped_) {
-    PipelineStatistics statistics;
-    statistics.video_frames_decoded = frames_decoded_;
-    statistics.video_frames_dropped = frames_dropped_;
+  // No need to check for `stats_.video_frames_decoded_power_efficient` because
+  // if it is greater than 0, `stats_.video_frames_decoded` will too.
+  if (!stats_.video_frames_decoded && !stats_.video_frames_dropped)
+    return;
 
-    const size_t memory_usage = algorithm_->GetMemoryUsage();
-    statistics.video_memory_usage = memory_usage - last_video_memory_usage_;
-
-    statistics.video_frame_duration_average =
-        algorithm_->average_frame_duration();
-
-    task_runner_->PostTask(FROM_HERE,
-                           base::Bind(&VideoRendererImpl::OnStatisticsUpdate,
-                                      weak_factory_.GetWeakPtr(), statistics));
-    frames_decoded_ = 0;
-    frames_dropped_ = 0;
-    last_video_memory_usage_ = memory_usage;
+  if (stats_.video_frames_dropped) {
+    TRACE_EVENT_INSTANT2("media", "VideoFramesDropped",
+                         TRACE_EVENT_SCOPE_THREAD, "count",
+                         stats_.video_frames_dropped, "id", media_log_->id());
   }
+
+  const size_t memory_usage = algorithm_->GetMemoryUsage();
+  stats_.video_memory_usage = memory_usage - stats_.video_memory_usage;
+  stats_.video_frame_duration_average = algorithm_->average_frame_duration();
+  OnStatisticsUpdate(stats_);
+
+  stats_.video_frames_decoded = 0;
+  stats_.video_frames_dropped = 0;
+  stats_.video_frames_decoded_power_efficient = 0;
+  stats_.video_memory_usage = memory_usage;
 }
 
-bool VideoRendererImpl::HaveReachedBufferingCap() {
+bool VideoRendererImpl::HaveReachedBufferingCap() const {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
   if (use_complexity_based_buffering_)
@@ -825,7 +847,7 @@ void VideoRendererImpl::RemoveFramesForUnderflowOrBackgroundRendering() {
   // the entire queue.  Note: this may cause slight inaccuracies in the number
   // of dropped frames since the frame may have been rendered before.
   if (!sink_started_ && !algorithm_->effective_frames_queued()) {
-    frames_dropped_ += algorithm_->frames_queued();
+    stats_.video_frames_dropped += algorithm_->frames_queued();
     algorithm_->Reset(
         VideoRendererAlgorithm::ResetFlag::kPreserveNextFrameEstimates);
     painted_first_frame_ = false;
@@ -843,7 +865,7 @@ void VideoRendererImpl::RemoveFramesForUnderflowOrBackgroundRendering() {
   // subtract from the given value). It's important to always call this so
   // that frame statistics are updated correctly.
   if (buffering_state_ == BUFFERING_HAVE_NOTHING) {
-    frames_dropped_ += algorithm_->RemoveExpiredFrames(
+    stats_.video_frames_dropped += algorithm_->RemoveExpiredFrames(
         current_time + algorithm_->average_frame_duration());
     return;
   }
@@ -944,7 +966,8 @@ void VideoRendererImpl::UpdateMaxBufferedFrames() {
     MEDIA_LOG(INFO, media_log_)
         << "Updating max buffered frames to " << max_buffered_frames
         << ", average frame duration: " << frame_duration.InMillisecondsF()
-        << "ms, average read duration: " << read_durations_.Average()
+        << "ms, average read duration: "
+        << read_durations_.Average().InMillisecondsF()
         << "ms, max read duration: " << read_durations_.max().InMillisecondsF()
         << "ms. [" << min_buffered_frames_ << ", " << max_buffered_frames_
         << "]";

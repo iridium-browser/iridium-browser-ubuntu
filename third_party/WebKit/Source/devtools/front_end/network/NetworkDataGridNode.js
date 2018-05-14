@@ -51,9 +51,9 @@ Network.NetworkNode = class extends DataGrid.SortableDataGridNode {
   static _themedBackgroundColors() {
     if (Network.NetworkNode._themedBackgroundColorsCache)
       return Network.NetworkNode._themedBackgroundColorsCache;
-    var themedColors = {};
-    for (var name in Network.NetworkNode._backgroundColors) {
-      var color = Common.Color.fromRGBA(Network.NetworkNode._backgroundColors[name]);
+    const themedColors = {};
+    for (const name in Network.NetworkNode._backgroundColors) {
+      const color = Common.Color.fromRGBA(Network.NetworkNode._backgroundColors[name]);
       themedColors[name] = UI.themeSupport.patchColor(color, UI.ThemeSupport.ColorUsage.Background);
     }
     Network.NetworkNode._themedBackgroundColorsCache =
@@ -69,19 +69,12 @@ Network.NetworkNode = class extends DataGrid.SortableDataGridNode {
   }
 
   /**
-   * @return {boolean}
-   */
-  isFromFrame() {
-    return false;
-  }
-
-  /**
    * @override
    * @param {string} columnId
    * @return {!Element}
    */
   createCell(columnId) {
-    var cell = this.createTD(columnId);
+    const cell = this.createTD(columnId);
     this.renderCell(cell, columnId);
     return cell;
   }
@@ -98,10 +91,10 @@ Network.NetworkNode = class extends DataGrid.SortableDataGridNode {
    * @return {string}
    */
   backgroundColor() {
-    var bgColors = Network.NetworkNode._themedBackgroundColors();
+    const bgColors = Network.NetworkNode._themedBackgroundColors();
     if (this.selected)
       return /** @type {string} */ (bgColors.Selected.asString(Common.Color.Format.HEX));
-    var color = this.isStriped() ? bgColors.Stripe : bgColors.Default;
+    let color = this.isStriped() ? bgColors.Stripe : bgColors.Default;
     if (this.isNavigationRequest())
       color = color.blendWith(bgColors.Navigation);
     if (this.hovered())
@@ -115,7 +108,7 @@ Network.NetworkNode = class extends DataGrid.SortableDataGridNode {
   }
 
   _updateBackgroundColor() {
-    var element = this.existingElement();
+    const element = this.existingElement();
     if (!element)
       return;
     element.style.backgroundColor = this.backgroundColor();
@@ -229,15 +222,15 @@ Network.NetworkNode = class extends DataGrid.SortableDataGridNode {
   requestOrFirstKnownChildRequest() {
     if (this._requestOrFirstKnownChildRequest)
       return this._requestOrFirstKnownChildRequest;
-    var request = this.request();
+    let request = this.request();
     if (request || !this.hasChildren()) {
       this._requestOrFirstKnownChildRequest = request;
       return this._requestOrFirstKnownChildRequest;
     }
 
-    var firstChildRequest = null;
-    var flatChildren = this.flatChildren();
-    for (var i = 0; i < flatChildren.length; i++) {
+    let firstChildRequest = null;
+    const flatChildren = this.flatChildren();
+    for (let i = 0; i < flatChildren.length; i++) {
       request = flatChildren[i].request();
       if (!firstChildRequest || (request && request.issueTime() < firstChildRequest.issueTime()))
         firstChildRequest = request;
@@ -300,11 +293,6 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
     this.selectable = true;
     this._isOnInitiatorPath = false;
     this._isOnInitiatedPath = false;
-    this._isFromFrame = false;
-    if (!Runtime.experiments.isEnabled('networkGroupingRequests'))
-      return;
-    var frame = SDK.ResourceTreeModel.frameForRequest(request);
-    this._isFromFrame = frame ? !frame.isMainFrame() : false;
   }
 
 
@@ -314,11 +302,11 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    * @return {number}
    */
   static NameComparator(a, b) {
-    var aName = a.displayName().toLowerCase();
-    var bName = b.displayName().toLowerCase();
+    const aName = a.displayName().toLowerCase();
+    const bName = b.displayName().toLowerCase();
     if (aName === bName) {
-      var aRequest = a.requestOrFirstKnownChildRequest();
-      var bRequest = b.requestOrFirstKnownChildRequest();
+      const aRequest = a.requestOrFirstKnownChildRequest();
+      const bRequest = b.requestOrFirstKnownChildRequest();
       if (aRequest && bRequest)
         return aRequest.indentityCompare(bRequest);
       return aRequest ? -1 : 1;
@@ -333,12 +321,12 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    */
   static RemoteAddressComparator(a, b) {
     // TODO(allada) Handle this properly for group nodes.
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var aRemoteAddress = aRequest.remoteAddress();
-    var bRemoteAddress = bRequest.remoteAddress();
+    const aRemoteAddress = aRequest.remoteAddress();
+    const bRemoteAddress = bRequest.remoteAddress();
     if (aRemoteAddress > bRemoteAddress)
       return 1;
     if (bRemoteAddress > aRemoteAddress)
@@ -353,12 +341,12 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    * @return {number}
    */
   static ProductComparator(productRegistry, a, b) {
-    var aRequest = a.request();
-    var bRequest = b.request();
+    const aRequest = a.request();
+    const bRequest = b.request();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var aName = productRegistry.nameForUrl(aRequest.parsedURL) || '';
-    var bName = productRegistry.nameForUrl(bRequest.parsedURL) || '';
+    const aName = productRegistry.nameForUrl(aRequest.parsedURL) || '';
+    const bName = productRegistry.nameForUrl(bRequest.parsedURL) || '';
     return aName.localeCompare(bName) || aRequest.indentityCompare(bRequest);
   }
 
@@ -369,8 +357,8 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    */
   static SizeComparator(a, b) {
     // TODO(allada) Handle this properly for group nodes.
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
     if (bRequest.cached() && !aRequest.cached())
@@ -387,12 +375,12 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    */
   static TypeComparator(a, b) {
     // TODO(allada) Handle this properly for group nodes.
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var aSimpleType = a.displayType();
-    var bSimpleType = b.displayType();
+    const aSimpleType = a.displayType();
+    const bSimpleType = b.displayType();
 
     if (aSimpleType > bSimpleType)
       return 1;
@@ -408,39 +396,15 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    */
   static InitiatorComparator(a, b) {
     // TODO(allada) Handle this properly for group nodes.
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var aInitiator = NetworkLog.networkLog.initiatorInfoForRequest(aRequest);
-    var bInitiator = NetworkLog.networkLog.initiatorInfoForRequest(bRequest);
-
-    if (aInitiator.type < bInitiator.type)
-      return -1;
-    if (aInitiator.type > bInitiator.type)
-      return 1;
-
-    if (typeof aInitiator.__source === 'undefined')
-      aInitiator.__source = Bindings.displayNameForURL(aInitiator.url);
-    if (typeof bInitiator.__source === 'undefined')
-      bInitiator.__source = Bindings.displayNameForURL(bInitiator.url);
-
-    if (aInitiator.__source < bInitiator.__source)
-      return -1;
-    if (aInitiator.__source > bInitiator.__source)
-      return 1;
-
-    if (aInitiator.lineNumber < bInitiator.lineNumber)
-      return -1;
-    if (aInitiator.lineNumber > bInitiator.lineNumber)
-      return 1;
-
-    if (aInitiator.columnNumber < bInitiator.columnNumber)
-      return -1;
-    if (aInitiator.columnNumber > bInitiator.columnNumber)
-      return 1;
-
-    return aRequest.indentityCompare(bRequest);
+    if (!a._initiatorCell || !b._initiatorCell)
+      return !a._initiatorCell ? -1 : 1;
+    const aText = a._linkifiedInitiatorAnchor ? a._linkifiedInitiatorAnchor.textContent : a._initiatorCell.title;
+    const bText = b._linkifiedInitiatorAnchor ? b._linkifiedInitiatorAnchor.textContent : b._initiatorCell.title;
+    return aText.localeCompare(bText);
   }
 
   /**
@@ -450,12 +414,12 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    */
   static RequestCookiesCountComparator(a, b) {
     // TODO(allada) Handle this properly for group nodes.
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var aScore = aRequest.requestCookies ? aRequest.requestCookies.length : 0;
-    var bScore = bRequest.requestCookies ? bRequest.requestCookies.length : 0;
+    const aScore = aRequest.requestCookies ? aRequest.requestCookies.length : 0;
+    const bScore = bRequest.requestCookies ? bRequest.requestCookies.length : 0;
     return (aScore - bScore) || aRequest.indentityCompare(bRequest);
   }
 
@@ -467,12 +431,12 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    */
   static ResponseCookiesCountComparator(a, b) {
     // TODO(allada) Handle this properly for group nodes.
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var aScore = aRequest.responseCookies ? aRequest.responseCookies.length : 0;
-    var bScore = bRequest.responseCookies ? bRequest.responseCookies.length : 0;
+    const aScore = aRequest.responseCookies ? aRequest.responseCookies.length : 0;
+    const bScore = bRequest.responseCookies ? bRequest.responseCookies.length : 0;
     return (aScore - bScore) || aRequest.indentityCompare(bRequest);
   }
 
@@ -481,18 +445,17 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    * @param {!Network.NetworkNode} b
    * @return {number}
    */
-  static InitialPriorityComparator(a, b) {
+  static PriorityComparator(a, b) {
     // TODO(allada) Handle this properly for group nodes.
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var priorityMap = NetworkPriorities.prioritySymbolToNumericMap();
-    var aPriority = aRequest.initialPriority();
-    var aScore = aPriority ? priorityMap.get(aPriority) : 0;
+    const aPriority = aRequest.priority();
+    let aScore = aPriority ? PerfUI.networkPriorityWeight(aPriority) : 0;
     aScore = aScore || 0;
-    var bPriority = aRequest.initialPriority();
-    var bScore = bPriority ? priorityMap.get(bPriority) : 0;
+    const bPriority = bRequest.priority();
+    let bScore = bPriority ? PerfUI.networkPriorityWeight(bPriority) : 0;
     bScore = bScore || 0;
 
     return aScore - bScore || aRequest.indentityCompare(bRequest);
@@ -505,12 +468,12 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    * @return {number}
    */
   static RequestPropertyComparator(propertyName, a, b) {
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var aValue = aRequest[propertyName];
-    var bValue = bRequest[propertyName];
+    const aValue = aRequest[propertyName];
+    const bValue = bRequest[propertyName];
     if (aValue === bValue)
       return aRequest.indentityCompare(bRequest);
     return aValue > bValue ? 1 : -1;
@@ -524,12 +487,12 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    */
   static ResponseHeaderStringComparator(propertyName, a, b) {
     // TODO(allada) Handle this properly for group nodes.
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var aValue = String(aRequest.responseHeaderValue(propertyName) || '');
-    var bValue = String(bRequest.responseHeaderValue(propertyName) || '');
+    const aValue = String(aRequest.responseHeaderValue(propertyName) || '');
+    const bValue = String(bRequest.responseHeaderValue(propertyName) || '');
     return aValue.localeCompare(bValue) || aRequest.indentityCompare(bRequest);
   }
 
@@ -541,14 +504,14 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    */
   static ResponseHeaderNumberComparator(propertyName, a, b) {
     // TODO(allada) Handle this properly for group nodes.
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var aValue = (aRequest.responseHeaderValue(propertyName) !== undefined) ?
+    const aValue = (aRequest.responseHeaderValue(propertyName) !== undefined) ?
         parseFloat(aRequest.responseHeaderValue(propertyName)) :
         -Infinity;
-    var bValue = (bRequest.responseHeaderValue(propertyName) !== undefined) ?
+    const bValue = (bRequest.responseHeaderValue(propertyName) !== undefined) ?
         parseFloat(bRequest.responseHeaderValue(propertyName)) :
         -Infinity;
     if (aValue === bValue)
@@ -564,14 +527,14 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    */
   static ResponseHeaderDateComparator(propertyName, a, b) {
     // TODO(allada) Handle this properly for group nodes.
-    var aRequest = a.requestOrFirstKnownChildRequest();
-    var bRequest = b.requestOrFirstKnownChildRequest();
+    const aRequest = a.requestOrFirstKnownChildRequest();
+    const bRequest = b.requestOrFirstKnownChildRequest();
     if (!aRequest || !bRequest)
       return !aRequest ? -1 : 1;
-    var aHeader = aRequest.responseHeaderValue(propertyName);
-    var bHeader = bRequest.responseHeaderValue(propertyName);
-    var aValue = aHeader ? new Date(aHeader).getTime() : -Infinity;
-    var bValue = bHeader ? new Date(bHeader).getTime() : -Infinity;
+    const aHeader = aRequest.responseHeaderValue(propertyName);
+    const bHeader = bRequest.responseHeaderValue(propertyName);
+    const aValue = aHeader ? new Date(aHeader).getTime() : -Infinity;
+    const bValue = bHeader ? new Date(bHeader).getTime() : -Infinity;
     if (aValue === bValue)
       return aRequest.indentityCompare(bRequest);
     return aValue > bValue ? 1 : -1;
@@ -581,21 +544,21 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    * @override
    */
   showingInitiatorChainChanged() {
-    var showInitiatorChain = this.showingInitiatorChain();
+    const showInitiatorChain = this.showingInitiatorChain();
 
-    var initiatorGraph = NetworkLog.networkLog.initiatorGraphForRequest(this._request);
-    for (var request of initiatorGraph.initiators) {
+    const initiatorGraph = BrowserSDK.networkLog.initiatorGraphForRequest(this._request);
+    for (const request of initiatorGraph.initiators) {
       if (request === this._request)
         continue;
-      var node = this.parentView().nodeForRequest(request);
+      const node = this.parentView().nodeForRequest(request);
       if (!node)
         continue;
       node._setIsOnInitiatorPath(showInitiatorChain);
     }
-    for (var request of initiatorGraph.initiated) {
+    for (const request of initiatorGraph.initiated) {
       if (request === this._request)
         continue;
-      var node = this.parentView().nodeForRequest(request);
+      const node = this.parentView().nodeForRequest(request);
       if (!node)
         continue;
       node._setIsOnInitiatedPath(showInitiatorChain);
@@ -639,20 +602,12 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
   }
 
   /**
-   * @override
-   * @return {boolean}
-   */
-  isFromFrame() {
-    return this._isFromFrame;
-  }
-
-  /**
    * @return {string}
    */
   displayType() {
-    var mimeType = this._request.mimeType || this._request.requestContentType() || '';
-    var resourceType = this._request.resourceType();
-    var simpleType = resourceType.name();
+    const mimeType = this._request.mimeType || this._request.requestContentType() || '';
+    const resourceType = this._request.resourceType();
+    let simpleType = resourceType.name();
 
     if (resourceType === Common.resourceTypes.Other || resourceType === Common.resourceTypes.Image)
       simpleType = mimeType.replace(/^(application|image)\//, '');
@@ -681,7 +636,7 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    * @return {boolean}
    */
   isNavigationRequest() {
-    var pageLoad = NetworkLog.PageLoad.forRequest(this._request);
+    const pageLoad = BrowserSDK.PageLoad.forRequest(this._request);
     return pageLoad ? pageLoad.mainRequest === this._request : false;
   }
 
@@ -705,8 +660,6 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
     element.classList.toggle('network-navigation-row', this._isNavigationRequest);
     super.createCells(element);
     this._updateBackgroundColor();
-    if (!Runtime.experiments.isEnabled('networkGroupingRequests'))
-      return;
     ProductRegistry.instance().then(productRegistry => {
       if (productRegistry.entryForUrl(this._request.parsedURL)) {
         this._isProduct = true;
@@ -759,8 +712,8 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
         this._setTextAndTitle(cell, this._arrayLength(this._request.responseCookies));
         break;
       case 'priority':
-        var priority = this._request.initialPriority();
-        this._setTextAndTitle(cell, priority ? NetworkPriorities.uiLabelForPriority(priority) : '');
+        const priority = this._request.priority();
+        this._setTextAndTitle(cell, priority ? PerfUI.uiLabelForNetworkPriority(priority) : '');
         break;
       case 'connectionid':
         this._setTextAndTitle(cell, this._request.connectionId);
@@ -804,14 +757,16 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
   }
 
   /**
-   * @param {!RegExp=} regexp
+   * @param {?RegExp} regexp
    * @return {!Array.<!Object>}
    */
   highlightMatchedSubstring(regexp) {
+    if (!regexp)
+      return [];
     // Ensure element is created.
     this.element();
-    var domChanges = [];
-    var matchInfo = this._nameCell.textContent.match(regexp);
+    const domChanges = [];
+    const matchInfo = this._nameCell.textContent.match(regexp);
     if (matchInfo)
       UI.highlightSearchResult(this._nameCell, matchInfo.index, matchInfo[0].length, domChanges);
     return domChanges;
@@ -832,13 +787,13 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    * @param {!Element} cell
    */
   _renderNameCell(cell) {
-    var leftPadding = this.leftPadding ? this.leftPadding + 'px' : '';
+    const leftPadding = this.leftPadding ? this.leftPadding + 'px' : '';
     cell.style.setProperty('padding-left', leftPadding);
     this._nameCell = cell;
     cell.addEventListener('dblclick', this._openInNewTab.bind(this), false);
-    var iconElement;
+    let iconElement;
     if (this._request.resourceType() === Common.resourceTypes.Image) {
-      var previewImage = createElementWithClass('img', 'image-network-icon-preview');
+      const previewImage = createElementWithClass('img', 'image-network-icon-preview');
       this._request.populateImageSource(previewImage);
 
       iconElement = createElementWithClass('div', 'icon');
@@ -854,8 +809,8 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
       this._nameBadgeElement.classList.add('network-badge');
     }
     cell.appendChild(this._nameBadgeElement);
-    var name = this._request.name().trimMiddle(100);
-    var networkManager = SDK.NetworkManager.forRequest(this._request);
+    const name = this._request.name().trimMiddle(100);
+    const networkManager = SDK.NetworkManager.forRequest(this._request);
     cell.createTextChild(networkManager ? networkManager.target().decorateLabel(name) : name);
     this._appendSubtitle(cell, this._request.path());
     cell.title = this._request.url();
@@ -869,7 +824,7 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
         'network-dim-cell', !this._isFailed() && (this._request.cached() || !this._request.statusCode));
 
     if (this._request.failed && !this._request.canceled && !this._request.wasBlocked()) {
-      var failText = Common.UIString('(failed)');
+      const failText = Common.UIString('(failed)');
       if (this._request.localizedFailDescription) {
         cell.createTextChild(failText);
         this._appendSubtitle(cell, this._request.localizedFailDescription);
@@ -886,7 +841,7 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
     } else if (this._request.canceled) {
       this._setTextAndTitle(cell, Common.UIString('(canceled)'));
     } else if (this._request.wasBlocked()) {
-      var reason = Common.UIString('other');
+      let reason = Common.UIString('other');
       switch (this._request.blockedReason()) {
         case Protocol.Network.BlockedReason.Csp:
           reason = Common.UIString('csp');
@@ -917,16 +872,16 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    */
   _renderInitiatorCell(cell) {
     this._initiatorCell = cell;
-    var request = this._request;
-    var initiator = NetworkLog.networkLog.initiatorInfoForRequest(request);
+    const request = this._request;
+    const initiator = BrowserSDK.networkLog.initiatorInfoForRequest(request);
 
-    var timing = request.timing;
+    const timing = request.timing;
     if (timing && timing.pushStart)
       cell.appendChild(createTextNode(Common.UIString('Push / ')));
     switch (initiator.type) {
       case SDK.NetworkRequest.InitiatorType.Parser:
         cell.title = initiator.url + ':' + (initiator.lineNumber + 1);
-        var uiSourceCode = Workspace.workspace.uiSourceCodeForURL(initiator.url);
+        const uiSourceCode = Workspace.workspace.uiSourceCodeForURL(initiator.url);
         cell.appendChild(Components.Linkifier.linkifyURL(initiator.url, {
           text: uiSourceCode ? uiSourceCode.displayName() : undefined,
           lineNumber: initiator.lineNumber,
@@ -937,7 +892,7 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
 
       case SDK.NetworkRequest.InitiatorType.Redirect:
         cell.title = initiator.url;
-        var redirectSource = /** @type {!SDK.NetworkRequest} */ (request.redirectSource());
+        const redirectSource = /** @type {!SDK.NetworkRequest} */ (request.redirectSource());
         console.assert(redirectSource);
         if (this.parentView().nodeForRequest(redirectSource)) {
           cell.appendChild(
@@ -949,10 +904,15 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
         break;
 
       case SDK.NetworkRequest.InitiatorType.Script:
-        var networkManager = SDK.NetworkManager.forRequest(request);
-        this._linkifiedInitiatorAnchor = this.parentView().linkifier.linkifyScriptLocation(
-            networkManager ? networkManager.target() : null, initiator.scriptId, initiator.url, initiator.lineNumber,
-            initiator.columnNumber);
+        const networkManager = SDK.NetworkManager.forRequest(request);
+        if (initiator.stack) {
+          this._linkifiedInitiatorAnchor = this.parentView().linkifier.linkifyStackTraceTopFrame(
+              networkManager ? networkManager.target() : null, initiator.stack);
+        } else {
+          this._linkifiedInitiatorAnchor = this.parentView().linkifier.linkifyScriptLocation(
+              networkManager ? networkManager.target() : null, initiator.scriptId, initiator.url, initiator.lineNumber,
+              initiator.columnNumber);
+        }
         this._linkifiedInitiatorAnchor.title = '';
         cell.appendChild(this._linkifiedInitiatorAnchor);
         this._appendSubtitle(cell, Common.UIString('Script'));
@@ -987,8 +947,8 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
         this._setTextAndTitle(cell, Common.UIString('(from disk cache)'));
       cell.classList.add('network-dim-cell');
     } else {
-      var resourceSize = Number.bytesToString(this._request.resourceSize);
-      var transferSize = Number.bytesToString(this._request.transferSize);
+      const resourceSize = Number.bytesToString(this._request.resourceSize);
+      const transferSize = Number.bytesToString(this._request.transferSize);
       this._setTextAndTitle(cell, transferSize);
       this._appendSubtitle(cell, resourceSize);
     }
@@ -1012,7 +972,7 @@ Network.NetworkRequestNode = class extends Network.NetworkNode {
    * @param {string} subtitleText
    */
   _appendSubtitle(cellElement, subtitleText) {
-    var subtitleElement = createElement('div');
+    const subtitleElement = createElement('div');
     subtitleElement.className = 'network-cell-subtitle';
     subtitleElement.textContent = subtitleText;
     cellElement.appendChild(subtitleElement);
@@ -1027,7 +987,7 @@ Network.NetworkGroupNode = class extends Network.NetworkNode {
    */
   renderCell(cell, columnId) {
     if (columnId === 'name') {
-      var leftPadding = this.leftPadding ? this.leftPadding + 'px' : '';
+      const leftPadding = this.leftPadding ? this.leftPadding + 'px' : '';
       cell.style.setProperty('padding-left', leftPadding);
       cell.classList.add('disclosure');
     }

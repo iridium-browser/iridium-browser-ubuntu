@@ -4,7 +4,8 @@
 
 #include "content/common/service_worker/service_worker_types.h"
 
-#include "content/public/common/service_worker_modes.h"
+#include "net/base/load_flags.h"
+#include "storage/common/blob_storage/blob_handle.h"
 
 namespace content {
 
@@ -21,16 +22,7 @@ const char kServiceWorkerGetRegistrationsErrorPrefix[] =
 const char kFetchScriptError[] =
     "An unknown error occurred when fetching the script.";
 
-ServiceWorkerFetchRequest::ServiceWorkerFetchRequest()
-    : mode(FETCH_REQUEST_MODE_NO_CORS),
-      is_main_resource_load(false),
-      request_context_type(REQUEST_CONTEXT_TYPE_UNSPECIFIED),
-      frame_type(REQUEST_CONTEXT_FRAME_TYPE_NONE),
-      blob_size(0),
-      credentials_mode(FETCH_CREDENTIALS_MODE_OMIT),
-      redirect_mode(FetchRedirectMode::FOLLOW_MODE),
-      is_reload(false),
-      fetch_type(ServiceWorkerFetchType::FETCH) {}
+ServiceWorkerFetchRequest::ServiceWorkerFetchRequest() = default;
 
 ServiceWorkerFetchRequest::ServiceWorkerFetchRequest(
     const GURL& url,
@@ -38,21 +30,16 @@ ServiceWorkerFetchRequest::ServiceWorkerFetchRequest(
     const ServiceWorkerHeaderMap& headers,
     const Referrer& referrer,
     bool is_reload)
-    : mode(FETCH_REQUEST_MODE_NO_CORS),
-      is_main_resource_load(false),
-      request_context_type(REQUEST_CONTEXT_TYPE_UNSPECIFIED),
-      frame_type(REQUEST_CONTEXT_FRAME_TYPE_NONE),
-      url(url),
+    : url(url),
       method(method),
       headers(headers),
-      blob_size(0),
       referrer(referrer),
-      credentials_mode(FETCH_CREDENTIALS_MODE_OMIT),
-      redirect_mode(FetchRedirectMode::FOLLOW_MODE),
-      is_reload(is_reload),
-      fetch_type(ServiceWorkerFetchType::FETCH) {}
+      is_reload(is_reload) {}
 
 ServiceWorkerFetchRequest::ServiceWorkerFetchRequest(
+    const ServiceWorkerFetchRequest& other) = default;
+
+ServiceWorkerFetchRequest& ServiceWorkerFetchRequest::operator=(
     const ServiceWorkerFetchRequest& other) = default;
 
 ServiceWorkerFetchRequest::~ServiceWorkerFetchRequest() {}
@@ -60,7 +47,6 @@ ServiceWorkerFetchRequest::~ServiceWorkerFetchRequest() {}
 size_t ServiceWorkerFetchRequest::EstimatedStructSize() {
   size_t size = sizeof(ServiceWorkerFetchRequest);
   size += url.spec().size();
-  size += blob_uuid.size();
   size += client_id.size();
 
   for (const auto& key_and_value : headers) {
@@ -71,21 +57,51 @@ size_t ServiceWorkerFetchRequest::EstimatedStructSize() {
   return size;
 }
 
+// static
+blink::mojom::FetchCacheMode
+ServiceWorkerFetchRequest::GetCacheModeFromLoadFlags(int load_flags) {
+  if (load_flags & net::LOAD_DISABLE_CACHE)
+    return blink::mojom::FetchCacheMode::kNoStore;
+
+  if (load_flags & net::LOAD_VALIDATE_CACHE)
+    return blink::mojom::FetchCacheMode::kValidateCache;
+
+  if (load_flags & net::LOAD_BYPASS_CACHE) {
+    if (load_flags & net::LOAD_ONLY_FROM_CACHE)
+      return blink::mojom::FetchCacheMode::kUnspecifiedForceCacheMiss;
+    return blink::mojom::FetchCacheMode::kBypassCache;
+  }
+
+  if (load_flags & net::LOAD_SKIP_CACHE_VALIDATION) {
+    if (load_flags & net::LOAD_ONLY_FROM_CACHE)
+      return blink::mojom::FetchCacheMode::kOnlyIfCached;
+    return blink::mojom::FetchCacheMode::kForceCache;
+  }
+
+  if (load_flags & net::LOAD_ONLY_FROM_CACHE) {
+    DCHECK(!(load_flags & net::LOAD_SKIP_CACHE_VALIDATION));
+    DCHECK(!(load_flags & net::LOAD_BYPASS_CACHE));
+    return blink::mojom::FetchCacheMode::kUnspecifiedOnlyIfCachedStrict;
+  }
+  return blink::mojom::FetchCacheMode::kDefault;
+}
+
 ServiceWorkerResponse::ServiceWorkerResponse()
     : status_code(0),
-      response_type(blink::kWebServiceWorkerResponseTypeOpaque),
+      response_type(network::mojom::FetchResponseType::kOpaque),
       blob_size(0),
-      error(blink::kWebServiceWorkerResponseErrorUnknown) {}
+      error(blink::mojom::ServiceWorkerResponseError::kUnknown) {}
 
 ServiceWorkerResponse::ServiceWorkerResponse(
     std::unique_ptr<std::vector<GURL>> url_list,
     int status_code,
     const std::string& status_text,
-    blink::WebServiceWorkerResponseType response_type,
+    network::mojom::FetchResponseType response_type,
     std::unique_ptr<ServiceWorkerHeaderMap> headers,
     const std::string& blob_uuid,
     uint64_t blob_size,
-    blink::WebServiceWorkerResponseError error,
+    scoped_refptr<storage::BlobHandle> blob,
+    blink::mojom::ServiceWorkerResponseError error,
     base::Time response_time,
     bool is_in_cache_storage,
     const std::string& cache_storage_cache_name,
@@ -95,6 +111,7 @@ ServiceWorkerResponse::ServiceWorkerResponse(
       response_type(response_type),
       blob_uuid(blob_uuid),
       blob_size(blob_size),
+      blob(std::move(blob)),
       error(error),
       response_time(response_time),
       is_in_cache_storage(is_in_cache_storage),
@@ -105,6 +122,9 @@ ServiceWorkerResponse::ServiceWorkerResponse(
 }
 
 ServiceWorkerResponse::ServiceWorkerResponse(
+    const ServiceWorkerResponse& other) = default;
+
+ServiceWorkerResponse& ServiceWorkerResponse::operator=(
     const ServiceWorkerResponse& other) = default;
 
 ServiceWorkerResponse::~ServiceWorkerResponse() {}
@@ -121,49 +141,8 @@ size_t ServiceWorkerResponse::EstimatedStructSize() {
   }
   for (const auto& header : cors_exposed_header_names)
     size += header.size();
+  size += side_data_blob_uuid.size();
   return size;
 }
-
-ServiceWorkerObjectInfo::ServiceWorkerObjectInfo()
-    : handle_id(kInvalidServiceWorkerHandleId),
-      state(blink::kWebServiceWorkerStateUnknown),
-      version_id(kInvalidServiceWorkerVersionId) {}
-
-bool ServiceWorkerObjectInfo::IsValid() const {
-  return handle_id != kInvalidServiceWorkerHandleId &&
-         version_id != kInvalidServiceWorkerVersionId;
-}
-
-ServiceWorkerRegistrationOptions::ServiceWorkerRegistrationOptions(
-    const GURL& scope)
-    : scope(scope) {}
-
-ServiceWorkerRegistrationObjectInfo::ServiceWorkerRegistrationObjectInfo()
-    : handle_id(kInvalidServiceWorkerRegistrationHandleId),
-      registration_id(kInvalidServiceWorkerRegistrationId) {
-}
-
-ServiceWorkerClientQueryOptions::ServiceWorkerClientQueryOptions()
-    : client_type(blink::kWebServiceWorkerClientTypeWindow),
-      include_uncontrolled(false) {}
-
-ExtendableMessageEventSource::ExtendableMessageEventSource() {}
-
-ExtendableMessageEventSource::ExtendableMessageEventSource(
-    const ServiceWorkerClientInfo& client_info)
-    : client_info(client_info) {}
-
-ExtendableMessageEventSource::ExtendableMessageEventSource(
-    const ServiceWorkerObjectInfo& service_worker_info)
-    : service_worker_info(service_worker_info) {}
-
-NavigationPreloadState::NavigationPreloadState()
-    : enabled(false), header("true") {}
-
-NavigationPreloadState::NavigationPreloadState(bool enabled, std::string header)
-    : enabled(enabled), header(header) {}
-
-NavigationPreloadState::NavigationPreloadState(
-    const NavigationPreloadState& other) = default;
 
 }  // namespace content

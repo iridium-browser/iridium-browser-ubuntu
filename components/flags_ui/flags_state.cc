@@ -4,14 +4,15 @@
 
 #include "components/flags_ui/flags_state.h"
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
 #include "base/callback.h"
+#include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
@@ -41,6 +42,25 @@ base::CommandLine::StringType GetSwitchString(const std::string& flag) {
   return cmd_line.argv()[1];
 }
 
+// Return the span between the first occurrence of |begin_sentinel_switch| and
+// the last occurrence of |end_sentinel_switch|.
+base::span<const base::CommandLine::StringType> GetSwitchesBetweenSentinels(
+    const base::CommandLine::StringVector& switches,
+    const base::CommandLine::StringType& begin_sentinel_switch,
+    const base::CommandLine::StringType& end_sentinel_switch) {
+  const auto first =
+      std::find(switches.begin(), switches.end(), begin_sentinel_switch);
+  if (first == switches.end())
+    return {};
+  // Go backwards in order to find the last occurrence (as opposed to
+  // std::find() which would return the first one).
+  for (auto last = --switches.end(); last != first; --last) {
+    if (*last == end_sentinel_switch)
+      return base::make_span(&first[1], last - first - 1);
+  }
+  return {};
+}
+
 // Scoops flags from a command line.
 // Only switches between --flag-switches-begin and --flag-switches-end are
 // compared. The embedder may use |extra_flag_sentinel_begin_flag_name| and
@@ -53,24 +73,18 @@ std::set<base::CommandLine::StringType> ExtractFlagsFromCommandLine(
             !!extra_flag_sentinel_end_flag_name);
   std::set<base::CommandLine::StringType> flags;
   // First do the ones between --flag-switches-begin and --flag-switches-end.
-  base::CommandLine::StringVector::const_iterator first =
-      std::find(cmdline.argv().begin(), cmdline.argv().end(),
-                GetSwitchString(switches::kFlagSwitchesBegin));
-  base::CommandLine::StringVector::const_iterator last =
-      std::find(cmdline.argv().begin(), cmdline.argv().end(),
-                GetSwitchString(switches::kFlagSwitchesEnd));
-  if (first != cmdline.argv().end() && last != cmdline.argv().end())
-    flags.insert(first + 1, last);
+  const auto flags_span = GetSwitchesBetweenSentinels(
+      cmdline.argv(), GetSwitchString(switches::kFlagSwitchesBegin),
+      GetSwitchString(switches::kFlagSwitchesEnd));
+  flags.insert(flags_span.begin(), flags_span.end());
 
   // Then add those between the extra sentinels.
   if (extra_flag_sentinel_begin_flag_name &&
       extra_flag_sentinel_end_flag_name) {
-    first = std::find(cmdline.argv().begin(), cmdline.argv().end(),
-                      GetSwitchString(extra_flag_sentinel_begin_flag_name));
-    last = std::find(cmdline.argv().begin(), cmdline.argv().end(),
-                     GetSwitchString(extra_flag_sentinel_end_flag_name));
-    if (first != cmdline.argv().end() && last != cmdline.argv().end())
-      flags.insert(first + 1, last);
+    const auto extra_flags_span = GetSwitchesBetweenSentinels(
+        cmdline.argv(), GetSwitchString(extra_flag_sentinel_begin_flag_name),
+        GetSwitchString(extra_flag_sentinel_end_flag_name));
+    flags.insert(extra_flags_span.begin(), extra_flags_span.end());
   }
   return flags;
 }
@@ -183,9 +197,9 @@ std::unique_ptr<base::Value> CreateOptionsData(
          entry.type == FeatureEntry::ENABLE_DISABLE_VALUE ||
          entry.type == FeatureEntry::FEATURE_VALUE ||
          entry.type == FeatureEntry::FEATURE_WITH_PARAMS_VALUE);
-  auto result = base::MakeUnique<base::ListValue>();
+  auto result = std::make_unique<base::ListValue>();
   for (int i = 0; i < entry.num_options; ++i) {
-    auto value = base::MakeUnique<base::DictionaryValue>();
+    auto value = std::make_unique<base::DictionaryValue>();
     const std::string name = entry.NameForOption(i);
     value->SetString("internal_name", name);
     value->SetString("description", entry.DescriptionForOption(i));
@@ -374,7 +388,7 @@ void FlagsState::SetFeatureEntryEnabled(FlagsStorage* flags_storage,
 }
 
 void FlagsState::RemoveFlagsSwitches(
-    std::map<std::string, base::CommandLine::StringType>* switch_list) {
+    base::CommandLine::SwitchMap* switch_list) {
   for (const auto& entry : flags_switches_)
     switch_list->erase(entry.first);
 
@@ -517,7 +531,7 @@ void FlagsState::GetFlagFeatureEntries(
     data->SetString("description",
                     base::StringPiece(entry.visible_description));
 
-    auto supported_platforms = base::MakeUnique<base::ListValue>();
+    auto supported_platforms = std::make_unique<base::ListValue>();
     AddOsStrings(entry.supported_platforms, supported_platforms.get());
     data->Set("supported_platforms", std::move(supported_platforms));
     // True if the switch is not currently passed.

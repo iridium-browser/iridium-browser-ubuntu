@@ -9,8 +9,8 @@
 #include "xfa/fwl/cfwl_listbox.h"
 #include "xfa/fwl/cfwl_themebackground.h"
 #include "xfa/fwl/cfwl_widget.h"
-#include "xfa/fxgraphics/cxfa_color.h"
-#include "xfa/fxgraphics/cxfa_path.h"
+#include "xfa/fxgraphics/cxfa_gecolor.h"
+#include "xfa/fxgraphics/cxfa_gepath.h"
 
 CFWL_ListBoxTP::CFWL_ListBoxTP() {}
 
@@ -26,10 +26,10 @@ void CFWL_ListBoxTP::DrawBackground(CFWL_ThemeBackground* pParams) {
       break;
     }
     case CFWL_Part::Background: {
-      FillSoildRect(pParams->m_pGraphics, ArgbEncode(255, 255, 255, 255),
+      FillSolidRect(pParams->m_pGraphics, ArgbEncode(255, 255, 255, 255),
                     &pParams->m_rtPart, &pParams->m_matrix);
       if (pParams->m_pData) {
-        FillSoildRect(pParams->m_pGraphics, FWLTHEME_COLOR_Background,
+        FillSolidRect(pParams->m_pGraphics, FWLTHEME_COLOR_Background,
                       (CFX_RectF*)pParams->m_pData, &pParams->m_matrix);
       }
       break;
@@ -39,11 +39,6 @@ void CFWL_ListBoxTP::DrawBackground(CFWL_ThemeBackground* pParams) {
                       &pParams->m_rtPart, pParams->m_pData, &pParams->m_matrix);
       break;
     }
-    case CFWL_Part::Icon: {
-      pParams->m_pGraphics->StretchImage(pParams->m_pImage, pParams->m_rtPart,
-                                         &pParams->m_matrix);
-      break;
-    }
     case CFWL_Part::Check: {
       uint32_t color = 0xFF000000;
       if (pParams->m_dwStates == CFWL_PartState_Checked) {
@@ -51,8 +46,9 @@ void CFWL_ListBoxTP::DrawBackground(CFWL_ThemeBackground* pParams) {
       } else if (pParams->m_dwStates == CFWL_PartState_Normal) {
         color = 0xFF0000FF;
       }
-      FillSoildRect(pParams->m_pGraphics, color, &pParams->m_rtPart,
+      FillSolidRect(pParams->m_pGraphics, color, &pParams->m_rtPart,
                     &pParams->m_matrix);
+      break;
     }
     default:
       break;
@@ -66,11 +62,10 @@ void CFWL_ListBoxTP::DrawListBoxItem(CXFA_Graphics* pGraphics,
                                      CFX_Matrix* pMatrix) {
   if (dwStates & CFWL_PartState_Selected) {
     pGraphics->SaveGraphState();
-    CXFA_Color crFill(FWLTHEME_COLOR_BKSelected);
-    pGraphics->SetFillColor(&crFill);
+    pGraphics->SetFillColor(CXFA_GEColor(FWLTHEME_COLOR_BKSelected));
     CFX_RectF rt(*prtItem);
-    CXFA_Path path;
-#if (_FX_OS_ == _FX_MACOSX_)
+    CXFA_GEPath path;
+#if (_FX_OS_ == _FX_OS_MACOSX_)
     path.AddRectangle(rt.left, rt.top, rt.width - 1, rt.height - 1);
 #else
     path.AddRectangle(rt.left, rt.top, rt.width, rt.height);

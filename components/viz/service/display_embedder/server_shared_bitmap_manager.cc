@@ -10,11 +10,11 @@
 
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/process_memory_dump.h"
+#include "mojo/public/cpp/system/platform_handle.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace viz {
@@ -90,7 +90,7 @@ std::unique_ptr<SharedBitmap> ServerSharedBitmapManager::AllocateSharedBitmap(
 
   SharedBitmapId id = SharedBitmap::GenerateId();
   handle_map_[id] = data;
-  return base::MakeUnique<ServerSharedBitmap>(data->pixels.get(), data, id,
+  return std::make_unique<ServerSharedBitmap>(data->pixels.get(), data, id,
                                               this);
 }
 
@@ -110,15 +110,61 @@ std::unique_ptr<SharedBitmap> ServerSharedBitmapManager::GetSharedBitmapFromId(
     return nullptr;
 
   if (data->pixels) {
-    return base::MakeUnique<ServerSharedBitmap>(data->pixels.get(), data, id,
+    return std::make_unique<ServerSharedBitmap>(data->pixels.get(), data, id,
                                                 nullptr);
   }
   if (!data->memory->memory()) {
     return nullptr;
   }
 
-  return base::MakeUnique<ServerSharedBitmap>(
+  return std::make_unique<ServerSharedBitmap>(
       static_cast<uint8_t*>(data->memory->memory()), data, id, nullptr);
+}
+
+bool ServerSharedBitmapManager::ChildAllocatedSharedBitmap(
+    mojo::ScopedSharedBufferHandle buffer,
+    const SharedBitmapId& id) {
+  base::SharedMemoryHandle memory_handle;
+  size_t buffer_size;
+  MojoResult result = mojo::UnwrapSharedMemoryHandle(
+      std::move(buffer), &memory_handle, &buffer_size, nullptr);
+  DCHECK_EQ(result, MOJO_RESULT_OK);
+
+  auto data = base::MakeRefCounted<BitmapData>(buffer_size);
+  data->memory = std::make_unique<base::SharedMemory>(memory_handle, false);
+  // Map the memory to get a pointer to it, then close it to free up the fd so
+  // it can be reused. This doesn't unmap the memory. Some OS have a very
+  // limited number of fds and this avoids consuming them all.
+  data->memory->Map(data->buffer_size);
+  data->memory->Close();
+
+  base::AutoLock lock(lock_);
+  if (handle_map_.find(id) != handle_map_.end())
+    return false;
+  handle_map_[id] = std::move(data);
+  return true;
+}
+
+bool ServerSharedBitmapManager::ChildAllocatedSharedBitmapForTest(
+    size_t buffer_size,
+    const base::SharedMemoryHandle& memory_handle,
+    const SharedBitmapId& id) {
+  auto data = base::MakeRefCounted<BitmapData>(buffer_size);
+  data->memory = std::make_unique<base::SharedMemory>(memory_handle, false);
+  data->memory->Map(data->buffer_size);
+  data->memory->Close();
+
+  base::AutoLock lock(lock_);
+  if (handle_map_.find(id) != handle_map_.end())
+    return false;
+  handle_map_[id] = std::move(data);
+  return true;
+}
+
+void ServerSharedBitmapManager::ChildDeletedSharedBitmap(
+    const SharedBitmapId& id) {
+  base::AutoLock lock(lock_);
+  handle_map_.erase(id);
 }
 
 bool ServerSharedBitmapManager::OnMemoryDump(
@@ -139,44 +185,23 @@ bool ServerSharedBitmapManager::OnMemoryDump(
                     base::trace_event::MemoryAllocatorDump::kUnitsBytes,
                     bitmap.second->buffer_size);
 
-    // Generate a global GUID used to share this allocation with renderer
-    // processes.
-    auto guid = GetSharedBitmapGUIDForTracing(bitmap.first);
-    base::UnguessableToken shared_memory_guid;
     if (bitmap.second->memory) {
-      shared_memory_guid = bitmap.second->memory->mapped_id();
+      base::UnguessableToken shared_memory_guid =
+          bitmap.second->memory->mapped_id();
       if (!shared_memory_guid.is_empty()) {
-        pmd->CreateSharedMemoryOwnershipEdge(
-            dump->guid(), guid, shared_memory_guid, 0 /* importance*/);
+        pmd->CreateSharedMemoryOwnershipEdge(dump->guid(), shared_memory_guid,
+                                             0 /* importance*/);
       }
     } else {
+      // Generate a global GUID used to share this allocation with renderer
+      // processes.
+      auto guid = GetSharedBitmapGUIDForTracing(bitmap.first);
       pmd->CreateSharedGlobalAllocatorDump(guid);
       pmd->AddOwnershipEdge(dump->guid(), guid);
     }
   }
 
   return true;
-}
-
-bool ServerSharedBitmapManager::ChildAllocatedSharedBitmap(
-    size_t buffer_size,
-    const base::SharedMemoryHandle& handle,
-    const SharedBitmapId& id) {
-  base::AutoLock lock(lock_);
-  if (handle_map_.find(id) != handle_map_.end())
-    return false;
-  auto data = base::MakeRefCounted<BitmapData>(buffer_size);
-  data->memory = base::MakeUnique<base::SharedMemory>(handle, false);
-  data->memory->Map(data->buffer_size);
-  data->memory->Close();
-  handle_map_[id] = std::move(data);
-  return true;
-}
-
-void ServerSharedBitmapManager::ChildDeletedSharedBitmap(
-    const SharedBitmapId& id) {
-  base::AutoLock lock(lock_);
-  handle_map_.erase(id);
 }
 
 size_t ServerSharedBitmapManager::AllocatedBitmapCount() const {

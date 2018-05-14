@@ -10,7 +10,7 @@ namespace blink {
 
 // static
 Magnetometer* Magnetometer::Create(ExecutionContext* execution_context,
-                                   const SensorOptions& options,
+                                   const SpatialSensorOptions& options,
                                    ExceptionState& exception_state) {
   return new Magnetometer(execution_context, options, exception_state);
 }
@@ -18,30 +18,34 @@ Magnetometer* Magnetometer::Create(ExecutionContext* execution_context,
 // static
 Magnetometer* Magnetometer::Create(ExecutionContext* execution_context,
                                    ExceptionState& exception_state) {
-  return Create(execution_context, SensorOptions(), exception_state);
+  return Create(execution_context, SpatialSensorOptions(), exception_state);
 }
 
 Magnetometer::Magnetometer(ExecutionContext* execution_context,
-                           const SensorOptions& options,
+                           const SpatialSensorOptions& options,
                            ExceptionState& exception_state)
     : Sensor(execution_context,
              options,
              exception_state,
-             SensorType::MAGNETOMETER) {}
+             SensorType::MAGNETOMETER,
+             {mojom::FeaturePolicyFeature::kMagnetometer}) {}
 
 double Magnetometer::x(bool& is_null) const {
-  return ReadingValue(0, is_null);
+  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
+  return GetReading().magn.x;
 }
 
 double Magnetometer::y(bool& is_null) const {
-  return ReadingValue(1, is_null);
+  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
+  return GetReading().magn.y;
 }
 
 double Magnetometer::z(bool& is_null) const {
-  return ReadingValue(2, is_null);
+  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
+  return GetReading().magn.z;
 }
 
-DEFINE_TRACE(Magnetometer) {
+void Magnetometer::Trace(blink::Visitor* visitor) {
   Sensor::Trace(visitor);
 }
 

@@ -4,17 +4,18 @@
 
 #include "core/html/LinkStyle.h"
 
-#include "core/HTMLNames.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
-#include "core/frame/SubresourceIntegrity.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/CrossOriginAttribute.h"
 #include "core/html/HTMLLinkElement.h"
+#include "core/html_names.h"
+#include "core/loader/SubresourceIntegrityHelper.h"
 #include "core/loader/resource/CSSStyleSheetResource.h"
 #include "platform/Histogram.h"
+#include "platform/loader/SubresourceIntegrity.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/loader/fetch/ResourceRequest.h"
@@ -48,7 +49,7 @@ LinkStyle::LinkStyle(HTMLLinkElement* owner)
       loaded_sheet_(false),
       fetch_following_cors_(false) {}
 
-LinkStyle::~LinkStyle() {}
+LinkStyle::~LinkStyle() = default;
 
 enum StyleSheetCacheStatus {
   kStyleSheetNewEntry,
@@ -57,12 +58,7 @@ enum StyleSheetCacheStatus {
   kStyleSheetCacheStatusCount,
 };
 
-void LinkStyle::SetCSSStyleSheet(
-    const String& href,
-    const KURL& base_url,
-    ReferrerPolicy referrer_policy,
-    const WTF::TextEncoding& charset,
-    const CSSStyleSheetResource* cached_style_sheet) {
+void LinkStyle::NotifyFinished(Resource* resource) {
   if (!owner_->isConnected()) {
     // While the stylesheet is asynchronously loading, the owner can be
     // disconnected from a document.
@@ -74,6 +70,7 @@ void LinkStyle::SetCSSStyleSheet(
     return;
   }
 
+  CSSStyleSheetResource* cached_style_sheet = ToCSSStyleSheetResource(resource);
   // See the comment in PendingScript.cpp about why this check is necessary
   // here, instead of in the resource fetcher. https://crbug.com/500701.
   if (!cached_style_sheet->ErrorOccurred() &&
@@ -82,28 +79,8 @@ void LinkStyle::SetCSSStyleSheet(
     ResourceIntegrityDisposition disposition =
         cached_style_sheet->IntegrityDisposition();
 
-    if (disposition == ResourceIntegrityDisposition::kNotChecked &&
-        !cached_style_sheet->LoadFailedOrCanceled()) {
-      bool check_result;
-
-      // cachedStyleSheet->resourceBuffer() can be nullptr on load success.
-      // If response size == 0.
-      const char* data = nullptr;
-      size_t size = 0;
-      if (cached_style_sheet->ResourceBuffer()) {
-        data = cached_style_sheet->ResourceBuffer()->Data();
-        size = cached_style_sheet->ResourceBuffer()->size();
-      }
-      check_result = SubresourceIntegrity::CheckSubresourceIntegrity(
-          owner_->FastGetAttribute(integrityAttr), GetDocument(), data, size,
-          KURL(base_url, href), *cached_style_sheet);
-      disposition = check_result ? ResourceIntegrityDisposition::kPassed
-                                 : ResourceIntegrityDisposition::kFailed;
-
-      // TODO(kouhei): Remove this const_cast crbug.com/653502
-      const_cast<CSSStyleSheetResource*>(cached_style_sheet)
-          ->SetIntegrityDisposition(disposition);
-    }
+    SubresourceIntegrityHelper::DoReport(
+        GetDocument(), cached_style_sheet->IntegrityReportInfo());
 
     if (disposition == ResourceIntegrityDisposition::kFailed) {
       loading_ = false;
@@ -115,30 +92,27 @@ void LinkStyle::SetCSSStyleSheet(
   }
 
   CSSParserContext* parser_context = CSSParserContext::Create(
-      GetDocument(), base_url, referrer_policy, charset);
+      GetDocument(), cached_style_sheet->GetResponse().Url(),
+      cached_style_sheet->GetReferrerPolicy(), cached_style_sheet->Encoding());
 
-  if (StyleSheetContents* restored_sheet =
-          const_cast<CSSStyleSheetResource*>(cached_style_sheet)
-              ->RestoreParsedStyleSheet(parser_context)) {
-    DCHECK(restored_sheet->IsCacheableForResource());
-    DCHECK(!restored_sheet->IsLoading());
-
+  if (StyleSheetContents* parsed_sheet =
+          cached_style_sheet->CreateParsedStyleSheetFromCache(parser_context)) {
     if (sheet_)
       ClearSheet();
-    sheet_ = CSSStyleSheet::Create(restored_sheet, *owner_);
+    sheet_ = CSSStyleSheet::Create(parsed_sheet, *owner_);
     sheet_->SetMediaQueries(MediaQuerySet::Create(owner_->Media()));
     if (owner_->IsInDocumentTree())
       SetSheetTitle(owner_->title());
     SetCrossOriginStylesheetStatus(sheet_.Get());
 
     loading_ = false;
-    restored_sheet->CheckLoaded();
+    parsed_sheet->CheckLoaded();
 
     return;
   }
 
   StyleSheetContents* style_sheet =
-      StyleSheetContents::Create(href, parser_context);
+      StyleSheetContents::Create(cached_style_sheet->Url(), parser_context);
 
   if (sheet_)
     ClearSheet();
@@ -308,7 +282,7 @@ LinkStyle::LoadReturnValue LinkStyle::LoadStylesheetIfNeeded(
   bool media_query_matches = true;
   LocalFrame* frame = LoadingFrame();
   if (!owner_->Media().IsEmpty() && frame) {
-    RefPtr<MediaQuerySet> media = MediaQuerySet::Create(owner_->Media());
+    scoped_refptr<MediaQuerySet> media = MediaQuerySet::Create(owner_->Media());
     MediaQueryEvaluator evaluator(frame);
     media_query_matches = evaluator.Eval(*media);
   }
@@ -354,14 +328,13 @@ LinkStyle::LoadReturnValue LinkStyle::LoadStylesheetIfNeeded(
     params.SetIntegrityMetadata(metadata_set);
     params.MutableResourceRequest().SetFetchIntegrity(integrity_attr);
   }
-  SetResource(CSSStyleSheetResource::Fetch(params, GetDocument().Fetcher()));
+  CSSStyleSheetResource::Fetch(params, GetDocument().Fetcher(), this);
 
   if (loading_ && !GetResource()) {
+    // Fetch() synchronous failure case.
     // The request may have been denied if (for example) the stylesheet is
     // local and the document is remote, or if there was a Content Security
-    // Policy Failure.  setCSSStyleSheet() can be called synchronuosly in
-    // setResource() and thus resource() is null and |m_loading| is false in
-    // such cases even if the request succeeds.
+    // Policy Failure.
     loading_ = false;
     RemovePendingSheet();
     NotifyLoadedSheetAndAllCriticalSubresources(
@@ -372,20 +345,26 @@ LinkStyle::LoadReturnValue LinkStyle::LoadStylesheetIfNeeded(
 
 void LinkStyle::Process() {
   DCHECK(owner_->ShouldProcessStyle());
-  String type = owner_->TypeValue().DeprecatedLower();
-  String as = owner_->AsValue().DeprecatedLower();
-  String media = owner_->Media().DeprecatedLower();
+  const LinkLoadParameters params(
+      owner_->RelAttribute(),
+      GetCrossOriginAttributeValue(owner_->FastGetAttribute(crossoriginAttr)),
+      owner_->TypeValue().DeprecatedLower(),
+      owner_->AsValue().DeprecatedLower(), owner_->Media().DeprecatedLower(),
+      owner_->nonce(), owner_->IntegrityValue(), owner_->GetReferrerPolicy(),
+      owner_->GetNonEmptyURLAttribute(hrefAttr),
+      owner_->FastGetAttribute(srcsetAttr),
+      owner_->FastGetAttribute(imgsizesAttr));
 
-  const KURL& href = owner_->GetNonEmptyURLAttribute(hrefAttr);
   WTF::TextEncoding charset = GetCharset();
 
-  if (owner_->RelAttribute().GetIconType() != kInvalidIcon && href.IsValid() &&
-      !href.IsEmpty()) {
+  if (owner_->RelAttribute().GetIconType() != kInvalidIcon &&
+      params.href.IsValid() && !params.href.IsEmpty()) {
     if (!owner_->ShouldLoadLink())
       return;
-    if (!GetDocument().GetSecurityOrigin()->CanDisplay(href))
+    if (!GetDocument().GetSecurityOrigin()->CanDisplay(params.href))
       return;
-    if (!GetDocument().GetContentSecurityPolicy()->AllowImageFromSource(href))
+    if (!GetDocument().GetContentSecurityPolicy()->AllowImageFromSource(
+            params.href))
       return;
     if (GetDocument().GetFrame() && GetDocument().GetFrame()->Client()) {
       GetDocument().GetFrame()->Client()->DispatchDidChangeIcons(
@@ -393,10 +372,11 @@ void LinkStyle::Process() {
     }
   }
 
-  if (!owner_->LoadLink(type, as, media, owner_->GetReferrerPolicy(), href))
+  if (!owner_->LoadLink(params))
     return;
 
-  if (LoadStylesheetIfNeeded(href, charset, type) == kNotNeeded && sheet_) {
+  if (LoadStylesheetIfNeeded(params.href, charset, params.type) == kNotNeeded &&
+      sheet_) {
     // we no longer contain a stylesheet, e.g. perhaps rel or type was changed
     ClearSheet();
     GetDocument().GetStyleEngine().SetNeedsActiveStyleUpdate(
@@ -427,10 +407,10 @@ void LinkStyle::OwnerRemoved() {
     ClearSheet();
 }
 
-DEFINE_TRACE(LinkStyle) {
+void LinkStyle::Trace(blink::Visitor* visitor) {
   visitor->Trace(sheet_);
   LinkResource::Trace(visitor);
-  ResourceOwner<StyleSheetResource>::Trace(visitor);
+  ResourceClient::Trace(visitor);
 }
 
 }  // namespace blink

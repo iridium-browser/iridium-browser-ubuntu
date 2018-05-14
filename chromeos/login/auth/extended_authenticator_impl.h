@@ -11,7 +11,9 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "chromeos/chromeos_export.h"
+#include "chromeos/dbus/cryptohome/rpc.pb.h"
 #include "chromeos/login/auth/extended_authenticator.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -39,7 +41,7 @@ class CHROMEOS_EXPORT ExtendedAuthenticatorImpl : public ExtendedAuthenticator {
                    const ResultCallback& success_callback) override;
   void AddKey(const UserContext& context,
               const cryptohome::KeyDefinition& key,
-              bool replace_existing,
+              bool clobber_if_exists,
               const base::Closure& success_callback) override;
   void UpdateKeyAuthorized(const UserContext& context,
                            const cryptohome::KeyDefinition& key,
@@ -63,7 +65,7 @@ class CHROMEOS_EXPORT ExtendedAuthenticatorImpl : public ExtendedAuthenticator {
   void DoAuthenticateToCheck(const base::Closure& success_callback,
                              const UserContext& context);
   void DoAddKey(const cryptohome::KeyDefinition& key,
-                bool replace_existing,
+                bool clobber_if_exists,
                 const base::Closure& success_callback,
                 const UserContext& context);
   void DoUpdateKeyAuthorized(const cryptohome::KeyDefinition& key,
@@ -78,9 +80,7 @@ class CHROMEOS_EXPORT ExtendedAuthenticatorImpl : public ExtendedAuthenticator {
   void OnMountComplete(const std::string& time_marker,
                        const UserContext& context,
                        const ResultCallback& success_callback,
-                       bool success,
-                       cryptohome::MountError return_code,
-                       const std::string& mount_hash);
+                       base::Optional<cryptohome::BaseReply> reply);
   void OnOperationComplete(const std::string& time_marker,
                            const UserContext& context,
                            const base::Closure& success_callback,

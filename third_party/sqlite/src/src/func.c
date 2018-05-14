@@ -698,16 +698,20 @@ static int patternCompare(
       ** c or cx.
       */
       if( c<=0x80 ){
-        u32 cx;
+        char zStop[3];
         int bMatch;
         if( noCase ){
-          cx = sqlite3Toupper(c);
-          c = sqlite3Tolower(c);
+          zStop[0] = sqlite3Toupper(c);
+          zStop[1] = sqlite3Tolower(c);
+          zStop[2] = 0;
         }else{
-          cx = c;
+          zStop[0] = c;
+          zStop[1] = 0;
         }
-        while( (c2 = *(zString++))!=0 ){
-          if( c2!=c && c2!=cx ) continue;
+        while(1){
+          zString += strcspn((const char*)zString, zStop);
+          if( zString[0]==0 ) break;
+          zString++;
           bMatch = patternCompare(zPattern,zString,pInfo,matchOther);
           if( bMatch!=SQLITE_NOMATCH ) return bMatch;
         }
@@ -865,7 +869,8 @@ static void likeFunc(
 #ifdef SQLITE_TEST
     sqlite3_like_count++;
 #endif
-    sqlite3_result_int(context, patternCompare(zB, zA, pInfo, escape)==SQLITE_MATCH);
+    sqlite3_result_int(context,
+                      patternCompare(zB, zA, pInfo, escape)==SQLITE_MATCH);
   }
 }
 
@@ -1706,9 +1711,14 @@ void sqlite3RegisterLikeFunctions(sqlite3 *db, int caseSensitive){
 /*
 ** pExpr points to an expression which implements a function.  If
 ** it is appropriate to apply the LIKE optimization to that function
-** then set aWc[0] through aWc[2] to the wildcard characters and
-** return TRUE.  If the function is not a LIKE-style function then
-** return FALSE.
+** then set aWc[0] through aWc[2] to the wildcard characters and the
+** escape character and then return TRUE.  If the function is not a
+** LIKE-style function then return FALSE.
+**
+** The expression "a LIKE b ESCAPE c" is only considered a valid LIKE
+** operator if c is a string literal that is exactly one byte in length.
+** That one byte is stored in aWc[3].  aWc[3] is set to zero if there is
+** no ESCAPE clause.
 **
 ** *pIsNocase is set to true if uppercase and lowercase are equivalent for
 ** the function (default for LIKE).  If the function makes the distinction
@@ -1717,16 +1727,25 @@ void sqlite3RegisterLikeFunctions(sqlite3 *db, int caseSensitive){
 */
 int sqlite3IsLikeFunction(sqlite3 *db, Expr *pExpr, int *pIsNocase, char *aWc){
   FuncDef *pDef;
-  if( pExpr->op!=TK_FUNCTION
-   || !pExpr->x.pList
-   || pExpr->x.pList->nExpr!=2
-  ){
+  int nExpr;
+  if( pExpr->op!=TK_FUNCTION || !pExpr->x.pList ){
     return 0;
   }
   assert( !ExprHasProperty(pExpr, EP_xIsSelect) );
-  pDef = sqlite3FindFunction(db, pExpr->u.zToken, 2, SQLITE_UTF8, 0);
+  nExpr = pExpr->x.pList->nExpr;
+  pDef = sqlite3FindFunction(db, pExpr->u.zToken, nExpr, SQLITE_UTF8, 0);
   if( NEVER(pDef==0) || (pDef->funcFlags & SQLITE_FUNC_LIKE)==0 ){
     return 0;
+  }
+  if( nExpr<3 ){
+    aWc[3] = 0;
+  }else{
+    Expr *pEscape = pExpr->x.pList->a[2].pExpr;
+    char *zEscape;
+    if( pEscape->op!=TK_STRING ) return 0;
+    zEscape = pEscape->u.zToken;
+    if( zEscape[0]==0 || zEscape[1]!=0 ) return 0;
+    aWc[3] = zEscape[0];
   }
 
   /* The memcpy() statement assumes that the wildcard characters are
@@ -1779,6 +1798,10 @@ void sqlite3RegisterBuiltinFunctions(void){
     FUNCTION2(likely,            1, 0, 0, noopFunc,  SQLITE_FUNC_UNLIKELY),
 #ifdef SQLITE_DEBUG
     FUNCTION2(affinity,          1, 0, 0, noopFunc,  SQLITE_FUNC_AFFINITY),
+#endif
+#ifdef SQLITE_ENABLE_OFFSET_SQL_FUNC
+    FUNCTION2(sqlite_offset,     1, 0, 0, noopFunc,  SQLITE_FUNC_OFFSET|
+                                                     SQLITE_FUNC_TYPEOF),
 #endif
     FUNCTION(ltrim,              1, 1, 0, trimFunc         ),
     FUNCTION(ltrim,              2, 1, 0, trimFunc         ),

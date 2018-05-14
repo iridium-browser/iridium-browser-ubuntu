@@ -5,6 +5,8 @@
 #ifndef IOS_WEB_PUBLIC_BROWSER_STATE_H_
 #define IOS_WEB_PUBLIC_BROWSER_STATE_H_
 
+#include <memory>
+
 #include "base/supports_user_data.h"
 #include "services/service_manager/embedder/embedded_service_info.h"
 
@@ -16,12 +18,17 @@ namespace net {
 class URLRequestContextGetter;
 }
 
+namespace network {
+namespace mojom {
+class URLLoaderFactory;
+}
+}  // namespace network
+
 namespace service_manager {
 class Connector;
 }
 
 namespace web {
-class ActiveStateManager;
 class CertificatePolicyCache;
 class ServiceManagerConnection;
 class URLDataManagerIOS;
@@ -39,16 +46,6 @@ class BrowserState : public base::SupportsUserData {
   static scoped_refptr<CertificatePolicyCache> GetCertificatePolicyCache(
       BrowserState* browser_state);
 
-  // Returns whether |browser_state| has an associated ActiveStateManager.
-  // Must only be accessed from main thread.
-  static bool HasActiveStateManager(BrowserState* browser_state);
-
-  // Returns the ActiveStateManager associated with |browser_state.|
-  // Lazily creates one if an ActiveStateManager is not already associated with
-  // the |browser_state|. |browser_state| cannot be a nullptr.  Must be accessed
-  // only from the main thread.
-  static ActiveStateManager* GetActiveStateManager(BrowserState* browser_state);
-
   // Returns whether this BrowserState is incognito. Default is false.
   virtual bool IsOffTheRecord() const = 0;
 
@@ -61,6 +58,9 @@ class BrowserState : public base::SupportsUserData {
   // BrowserState.
   virtual net::URLRequestContextGetter* GetRequestContext() = 0;
 
+  // Returns a URLLoaderFactory that is backed by GetRequestContext.
+  network::mojom::URLLoaderFactory* GetURLLoaderFactory();
+
   // Safely cast a base::SupportsUserData to a BrowserState. Returns nullptr
   // if |supports_user_data| is not a BrowserState.
   static BrowserState* FromSupportsUserData(
@@ -68,7 +68,7 @@ class BrowserState : public base::SupportsUserData {
 
   // Returns a Service User ID associated with this BrowserState. This ID is
   // not persistent across runs. See
-  // services/service_manager/public/interfaces/connector.mojom. By default,
+  // services/service_manager/public/mojom/connector.mojom. By default,
   // this user id is randomly generated when Initialize() is called.
   static const std::string& GetServiceUserIdFor(BrowserState* browser_state);
 
@@ -98,6 +98,7 @@ class BrowserState : public base::SupportsUserData {
                          const base::FilePath& path);
 
  private:
+  class URLLoaderFactory;
   friend class URLDataManagerIOS;
   friend class URLRequestChromeJob;
 
@@ -106,6 +107,8 @@ class BrowserState : public base::SupportsUserData {
   // thread.
   // Not intended for usage outside of //web.
   URLDataManagerIOSBackend* GetURLDataManagerIOSBackendOnIOThread();
+
+  std::unique_ptr<URLLoaderFactory> url_loader_factory_;
 
   // The URLDataManagerIOSBackend instance associated with this BrowserState.
   // Created and destroyed on the IO thread, and should be accessed only from

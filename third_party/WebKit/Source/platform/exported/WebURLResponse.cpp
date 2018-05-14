@@ -31,12 +31,12 @@
 #include "public/platform/WebURLResponse.h"
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "platform/loader/fetch/ResourceLoadTiming.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/PtrUtil.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebHTTPHeaderVisitor.h"
 #include "public/platform/WebHTTPLoadInfo.h"
 #include "public/platform/WebString.h"
@@ -49,12 +49,12 @@ namespace {
 
 class URLResponseExtraDataContainer : public ResourceResponse::ExtraData {
  public:
-  static PassRefPtr<URLResponseExtraDataContainer> Create(
+  static scoped_refptr<URLResponseExtraDataContainer> Create(
       WebURLResponse::ExtraData* extra_data) {
-    return AdoptRef(new URLResponseExtraDataContainer(extra_data));
+    return base::AdoptRef(new URLResponseExtraDataContainer(extra_data));
   }
 
-  ~URLResponseExtraDataContainer() override {}
+  ~URLResponseExtraDataContainer() override = default;
 
   WebURLResponse::ExtraData* GetExtraData() const { return extra_data_.get(); }
 
@@ -71,7 +71,7 @@ class URLResponseExtraDataContainer : public ResourceResponse::ExtraData {
 // heap, which is otherwise disallowed by the DISALLOW_NEW_EXCEPT_PLACEMENT_NEW
 // annotation on ResourceResponse.
 struct WebURLResponse::ResourceResponseContainer {
-  ResourceResponseContainer() {}
+  ResourceResponseContainer() = default;
 
   explicit ResourceResponseContainer(const ResourceResponse& r)
       : resource_response(r) {}
@@ -79,7 +79,7 @@ struct WebURLResponse::ResourceResponseContainer {
   ResourceResponse resource_response;
 };
 
-WebURLResponse::~WebURLResponse() {}
+WebURLResponse::~WebURLResponse() = default;
 
 WebURLResponse::WebURLResponse()
     : owned_resource_response_(new ResourceResponseContainer()),
@@ -125,8 +125,8 @@ void WebURLResponse::SetConnectionReused(bool connection_reused) {
 }
 
 void WebURLResponse::SetLoadTiming(const WebURLLoadTiming& timing) {
-  RefPtr<ResourceLoadTiming> load_timing =
-      PassRefPtr<ResourceLoadTiming>(timing);
+  scoped_refptr<ResourceLoadTiming> load_timing =
+      scoped_refptr<ResourceLoadTiming>(timing);
   resource_response_->SetResourceLoadTiming(std::move(load_timing));
 }
 
@@ -232,6 +232,36 @@ void WebURLResponse::SetHasMajorCertificateErrors(bool value) {
   resource_response_->SetHasMajorCertificateErrors(value);
 }
 
+void WebURLResponse::SetCTPolicyCompliance(
+    net::ct::CTPolicyCompliance compliance) {
+  switch (compliance) {
+    case net::ct::CTPolicyCompliance::
+        CT_POLICY_COMPLIANCE_DETAILS_NOT_AVAILABLE:
+    case net::ct::CTPolicyCompliance::CT_POLICY_BUILD_NOT_TIMELY:
+      resource_response_->SetCTPolicyCompliance(
+          ResourceResponse::kCTPolicyComplianceDetailsNotAvailable);
+      break;
+    case net::ct::CTPolicyCompliance::CT_POLICY_NOT_ENOUGH_SCTS:
+    case net::ct::CTPolicyCompliance::CT_POLICY_NOT_DIVERSE_SCTS:
+      resource_response_->SetCTPolicyCompliance(
+          ResourceResponse::kCTPolicyDoesNotComply);
+      break;
+    case net::ct::CTPolicyCompliance::CT_POLICY_COMPLIES_VIA_SCTS:
+      resource_response_->SetCTPolicyCompliance(
+          ResourceResponse::kCTPolicyComplies);
+      break;
+    case net::ct::CTPolicyCompliance::CT_POLICY_MAX:
+      NOTREACHED();
+      resource_response_->SetCTPolicyCompliance(
+          ResourceResponse::kCTPolicyComplianceDetailsNotAvailable);
+      break;
+  };
+}
+
+void WebURLResponse::SetIsLegacySymantecCert(bool value) {
+  resource_response_->SetIsLegacySymantecCert(value);
+}
+
 void WebURLResponse::SetSecurityStyle(WebSecurityStyle security_style) {
   resource_response_->SetSecurityStyle(
       static_cast<ResourceResponse::SecurityStyle>(security_style));
@@ -262,6 +292,25 @@ void WebURLResponse::SetSecurityDetails(
       sct_list);
 }
 
+WebURLResponse::WebSecurityDetails WebURLResponse::SecurityDetailsForTesting() {
+  const blink::ResourceResponse::SecurityDetails* security_details =
+      resource_response_->GetSecurityDetails();
+  std::vector<SignedCertificateTimestamp> sct_list;
+  for (const auto& iter : security_details->sct_list) {
+    sct_list.push_back(SignedCertificateTimestamp(
+        iter.status_, iter.origin_, iter.log_description_, iter.log_id_,
+        iter.timestamp_, iter.hash_algorithm_, iter.signature_algorithm_,
+        iter.signature_data_));
+  }
+  return WebSecurityDetails(
+      security_details->protocol, security_details->key_exchange,
+      security_details->key_exchange_group, security_details->cipher,
+      security_details->mac, security_details->subject_name,
+      security_details->san_list, security_details->issuer,
+      security_details->valid_from, security_details->valid_to,
+      security_details->certificate, SignedCertificateTimestampList(sct_list));
+}
+
 const ResourceResponse& WebURLResponse::ToResourceResponse() const {
   return *resource_response_;
 }
@@ -282,17 +331,18 @@ void WebURLResponse::SetWasFetchedViaServiceWorker(bool value) {
   resource_response_->SetWasFetchedViaServiceWorker(value);
 }
 
-void WebURLResponse::SetWasFetchedViaForeignFetch(bool value) {
-  resource_response_->SetWasFetchedViaForeignFetch(value);
-}
-
 void WebURLResponse::SetWasFallbackRequiredByServiceWorker(bool value) {
   resource_response_->SetWasFallbackRequiredByServiceWorker(value);
 }
 
-void WebURLResponse::SetServiceWorkerResponseType(
-    WebServiceWorkerResponseType value) {
-  resource_response_->SetServiceWorkerResponseType(value);
+void WebURLResponse::SetResponseTypeViaServiceWorker(
+    network::mojom::FetchResponseType value) {
+  resource_response_->SetResponseTypeViaServiceWorker(value);
+}
+
+network::mojom::FetchResponseType WebURLResponse::ResponseTypeViaServiceWorker()
+    const {
+  return resource_response_->ResponseTypeViaServiceWorker();
 }
 
 void WebURLResponse::SetURLListViaServiceWorker(
@@ -315,6 +365,10 @@ void WebURLResponse::SetMultipartBoundary(const char* bytes, size_t size) {
 void WebURLResponse::SetCacheStorageCacheName(
     const WebString& cache_storage_cache_name) {
   resource_response_->SetCacheStorageCacheName(cache_storage_cache_name);
+}
+
+WebVector<WebString> WebURLResponse::CorsExposedHeaderNames() const {
+  return resource_response_->CorsExposedHeaderNames();
 }
 
 void WebURLResponse::SetCorsExposedHeaderNames(
@@ -357,10 +411,11 @@ void WebURLResponse::SetEncodedDataLength(long long length) {
 }
 
 WebURLResponse::ExtraData* WebURLResponse::GetExtraData() const {
-  RefPtr<ResourceResponse::ExtraData> data = resource_response_->GetExtraData();
+  scoped_refptr<ResourceResponse::ExtraData> data =
+      resource_response_->GetExtraData();
   if (!data)
-    return 0;
-  return static_cast<URLResponseExtraDataContainer*>(data.Get())
+    return nullptr;
+  return static_cast<URLResponseExtraDataContainer*>(data.get())
       ->GetExtraData();
 }
 

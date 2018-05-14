@@ -32,7 +32,6 @@
 #define WebRTCVoidRequest_h
 
 #include "WebCommon.h"
-#include "WebNonCopyable.h"
 #include "WebPrivatePtr.h"
 #include "WebString.h"
 
@@ -42,7 +41,7 @@ class RTCVoidRequest;
 
 class WebRTCVoidRequest {
  public:
-  WebRTCVoidRequest() {}
+  WebRTCVoidRequest() = default;
   WebRTCVoidRequest(const WebRTCVoidRequest& other) { Assign(other); }
   ~WebRTCVoidRequest() { Reset(); }
 

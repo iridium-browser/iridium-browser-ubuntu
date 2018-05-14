@@ -104,6 +104,19 @@ SubscriptionJsonRequest::Builder::SetAuthenticationHeader(
   return *this;
 }
 
+SubscriptionJsonRequest::Builder& SubscriptionJsonRequest::Builder::SetLocale(
+    const std::string& locale) {
+  locale_ = locale;
+  return *this;
+}
+
+SubscriptionJsonRequest::Builder&
+SubscriptionJsonRequest::Builder::SetCountryCode(
+    const std::string& country_code) {
+  country_code_ = country_code;
+  return *this;
+}
+
 std::string SubscriptionJsonRequest::Builder::BuildHeaders() const {
   HttpRequestHeaders headers;
   headers.SetHeader(HttpRequestHeaders::kContentType,
@@ -112,19 +125,19 @@ std::string SubscriptionJsonRequest::Builder::BuildHeaders() const {
     headers.SetHeader(HttpRequestHeaders::kAuthorization, auth_header_);
   }
   // Add X-Client-Data header with experiment IDs from field trials.
-  // Note: It's OK to pass |is_signed_in| false if it's unknown, as it does
-  // not affect transmission of experiments coming from the variations server.
-  variations::AppendVariationHeaders(url_,
-                                     false,  // incognito
-                                     false,  // uma_enabled
-                                     false,  // is_signed_in
-                                     &headers);
+  // Note: It's OK to pass SignedIn::kNo if it's unknown, as it does not affect
+  // transmission of experiments coming from the variations server.
+  variations::AppendVariationHeaders(url_, variations::InIncognito::kNo,
+                                     variations::SignedIn::kNo, &headers);
   return headers.ToString();
 }
 
 std::string SubscriptionJsonRequest::Builder::BuildBody() const {
   base::DictionaryValue request;
   request.SetString("token", token_);
+
+  request.SetString("locale", locale_);
+  request.SetString("country_code", country_code_);
 
   std::string request_json;
   bool success = base::JSONWriter::Write(request, &request_json);
@@ -150,7 +163,7 @@ std::unique_ptr<URLFetcher> SubscriptionJsonRequest::Builder::BuildURLFetcher(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "This feature cannot be disabled by settings now"
           chrome_policy {

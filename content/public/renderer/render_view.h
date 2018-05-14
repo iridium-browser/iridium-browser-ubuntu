@@ -38,7 +38,7 @@ struct WebPreferences;
 // New code should be added to RenderFrame instead.
 //
 // For context, please see https://crbug.com/467770 and
-// http://www.chromium.org/developers/design-documents/site-isolation.
+// https://www.chromium.org/developers/design-documents/site-isolation.
 class CONTENT_EXPORT RenderView : public IPC::Sender {
  public:
   // Returns the RenderView containing the given WebView.
@@ -69,6 +69,9 @@ class CONTENT_EXPORT RenderView : public IPC::Sender {
 
   // Returns the device scale factor of the display the render view is in.
   virtual float GetDeviceScaleFactor() const = 0;
+
+  // Returns the device scale factor of the display the render view is in.
+  virtual float GetZoomLevel() const = 0;
 
   // Gets WebKit related preferences associated with this view.
   virtual const WebPreferences& GetWebkitPreferences() = 0;

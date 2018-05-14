@@ -114,7 +114,7 @@ class NetworkReaderProxyTest : public ::testing::Test {
 };
 
 TEST_F(NetworkReaderProxyTest, EmptyFile) {
-  NetworkReaderProxy proxy(0, 0, 0, base::Bind(&base::DoNothing));
+  NetworkReaderProxy proxy(0, 0, 0, base::DoNothing());
 
   net::TestCompletionCallback callback;
   const int kBufferSize = 10;
@@ -179,7 +179,7 @@ TEST_F(NetworkReaderProxyTest, Read) {
 }
 
 TEST_F(NetworkReaderProxyTest, ReadWithLimit) {
-  NetworkReaderProxy proxy(10, 10, 10, base::Bind(&base::DoNothing));
+  NetworkReaderProxy proxy(10, 10, 10, base::DoNothing());
 
   net::TestCompletionCallback callback;
   const int kBufferSize = 3;
@@ -228,7 +228,7 @@ TEST_F(NetworkReaderProxyTest, ReadWithLimit) {
 }
 
 TEST_F(NetworkReaderProxyTest, ErrorWithPendingCallback) {
-  NetworkReaderProxy proxy(0, 10, 10, base::Bind(&base::DoNothing));
+  NetworkReaderProxy proxy(0, 10, 10, base::DoNothing());
 
   net::TestCompletionCallback callback;
   const int kBufferSize = 3;
@@ -249,7 +249,7 @@ TEST_F(NetworkReaderProxyTest, ErrorWithPendingCallback) {
 }
 
 TEST_F(NetworkReaderProxyTest, ErrorWithPendingData) {
-  NetworkReaderProxy proxy(0, 10, 10, base::Bind(&base::DoNothing));
+  NetworkReaderProxy proxy(0, 10, 10, base::DoNothing());
 
   net::TestCompletionCallback callback;
   const int kBufferSize = 3;
@@ -505,7 +505,7 @@ TEST_F(DriveFileStreamReaderTest, ZeroByteFileRead) {
         "EmptyFile.txt",
         false,  // shared_with_me
         google_apis::test_util::CreateCopyResultCallback(&error, &entry));
-    content::RunAllBlockingPoolTasksUntilIdle();
+    content::RunAllTasksUntilIdle();
     ASSERT_EQ(google_apis::HTTP_CREATED, error);
     ASSERT_TRUE(entry);
     ASSERT_EQ(0, entry->file_size());

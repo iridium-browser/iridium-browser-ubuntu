@@ -8,32 +8,32 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/video/encoder_rtcp_feedback.h"
+#include "video/encoder_rtcp_feedback.h"
 
 #include <memory>
 
-#include "webrtc/modules/utility/include/mock/mock_process_thread.h"
-#include "webrtc/test/gmock.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/video/send_statistics_proxy.h"
-#include "webrtc/video/vie_encoder.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
+#include "video/send_statistics_proxy.h"
+#include "video/video_stream_encoder.h"
 
 using ::testing::NiceMock;
 
 namespace webrtc {
 
-class MockVieEncoder : public ViEEncoder {
+class MockVideoStreamEncoder : public VideoStreamEncoder {
  public:
-  explicit MockVieEncoder(SendStatisticsProxy* send_stats_proxy)
-      : ViEEncoder(1,
-                   send_stats_proxy,
-                   VideoSendStream::Config::EncoderSettings("fake", 0, nullptr),
-                   nullptr,
-                   nullptr,
-                   std::unique_ptr<OveruseFrameDetector>()) {}
-  ~MockVieEncoder() { Stop(); }
+  explicit MockVideoStreamEncoder(SendStatisticsProxy* send_stats_proxy)
+      : VideoStreamEncoder(1,
+                           send_stats_proxy,
+                           VideoSendStream::Config::EncoderSettings("fake", 0,
+                                                                    nullptr),
+                           nullptr,
+                           rtc::MakeUnique<OveruseFrameDetector>(
+                               CpuOveruseOptions(), nullptr)) {}
+  ~MockVideoStreamEncoder() { Stop(); }
 
-  MOCK_METHOD1(OnReceivedIntraFrameRequest, void(size_t));
+  MOCK_METHOD0(SendKeyFrame, void());
 };
 
 class VieKeyRequestTest : public ::testing::Test {
@@ -54,23 +54,23 @@ class VieKeyRequestTest : public ::testing::Test {
 
   SimulatedClock simulated_clock_;
   SendStatisticsProxy send_stats_proxy_;
-  MockVieEncoder encoder_;
+  MockVideoStreamEncoder encoder_;
   EncoderRtcpFeedback encoder_rtcp_feedback_;
 };
 
 TEST_F(VieKeyRequestTest, CreateAndTriggerRequests) {
-  EXPECT_CALL(encoder_, OnReceivedIntraFrameRequest(0)).Times(1);
+  EXPECT_CALL(encoder_, SendKeyFrame()).Times(1);
   encoder_rtcp_feedback_.OnReceivedIntraFrameRequest(kSsrc);
 }
 
 TEST_F(VieKeyRequestTest, TooManyOnReceivedIntraFrameRequest) {
-  EXPECT_CALL(encoder_, OnReceivedIntraFrameRequest(0)).Times(1);
+  EXPECT_CALL(encoder_, SendKeyFrame()).Times(1);
   encoder_rtcp_feedback_.OnReceivedIntraFrameRequest(kSsrc);
   encoder_rtcp_feedback_.OnReceivedIntraFrameRequest(kSsrc);
   simulated_clock_.AdvanceTimeMilliseconds(10);
   encoder_rtcp_feedback_.OnReceivedIntraFrameRequest(kSsrc);
 
-  EXPECT_CALL(encoder_, OnReceivedIntraFrameRequest(0)).Times(1);
+  EXPECT_CALL(encoder_, SendKeyFrame()).Times(1);
   simulated_clock_.AdvanceTimeMilliseconds(300);
   encoder_rtcp_feedback_.OnReceivedIntraFrameRequest(kSsrc);
   encoder_rtcp_feedback_.OnReceivedIntraFrameRequest(kSsrc);

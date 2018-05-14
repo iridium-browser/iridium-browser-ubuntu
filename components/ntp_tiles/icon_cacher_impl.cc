@@ -40,8 +40,8 @@ constexpr char kTileIconMinSizePxFieldParam[] = "min_size";
 constexpr char kTileIconDesiredSizePxFieldParam[] = "desired_size";
 
 favicon_base::IconType IconType(const PopularSites::Site& site) {
-  return site.large_icon_url.is_valid() ? favicon_base::TOUCH_ICON
-                                        : favicon_base::FAVICON;
+  return site.large_icon_url.is_valid() ? favicon_base::IconType::kTouchIcon
+                                        : favicon_base::IconType::kFavicon;
 }
 
 const GURL& IconURL(const PopularSites::Site& site) {
@@ -133,7 +133,7 @@ void IconCacherImpl::OnGetFaviconImageForPageURLFinished(
           destination: WEBSITE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting: "This feature cannot be disabled in settings."
           policy_exception_justification: "Not implemented."
         })");
@@ -184,7 +184,7 @@ void IconCacherImpl::SaveIconForSite(const PopularSites::Site& site,
   gfx::Image img(image);
   favicon_base::SetFaviconColorSpace(&img);
 
-  favicon_service_->SetFavicons(site.url, IconURL(site), IconType(site),
+  favicon_service_->SetFavicons({site.url}, IconURL(site), IconType(site),
                                 std::move(img));
 }
 
@@ -200,7 +200,7 @@ IconCacherImpl::MaybeProvideDefaultIcon(
           &IconCacherImpl::SaveAndNotifyDefaultIconForSite,
           weak_ptr_factory_.GetWeakPtr(), site, preliminary_icon_available)));
   image_fetcher_->GetImageDecoder()->DecodeImage(
-      ResourceBundle::GetSharedInstance()
+      ui::ResourceBundle::GetSharedInstance()
           .GetRawDataResource(site.default_icon_resource)
           .as_string(),
       gfx::Size(kDesiredFrameSize, kDesiredFrameSize),
@@ -252,7 +252,7 @@ void IconCacherImpl::OnGetLargeIconOrFallbackStyleFinished(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "Users can disable this feature via 'History' setting under "
             "'Advanced sync settings'."

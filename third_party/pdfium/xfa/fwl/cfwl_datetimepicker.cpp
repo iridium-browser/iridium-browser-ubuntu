@@ -16,7 +16,6 @@
 #include "xfa/fwl/cfwl_messagemouse.h"
 #include "xfa/fwl/cfwl_messagesetfocus.h"
 #include "xfa/fwl/cfwl_notedriver.h"
-#include "xfa/fwl/cfwl_spinbutton.h"
 #include "xfa/fwl/cfwl_themebackground.h"
 #include "xfa/fwl/cfwl_widgetmgr.h"
 #include "xfa/fwl/ifwl_themeprovider.h"
@@ -115,7 +114,7 @@ FWL_WidgetHit CFWL_DateTimePicker::HitTest(const CFX_PointF& point) {
 }
 
 void CFWL_DateTimePicker::DrawWidget(CXFA_Graphics* pGraphics,
-                                     const CFX_Matrix* pMatrix) {
+                                     const CFX_Matrix& matrix) {
   if (!pGraphics)
     return;
   if (!m_pProperties->m_pThemeProvider)
@@ -123,11 +122,11 @@ void CFWL_DateTimePicker::DrawWidget(CXFA_Graphics* pGraphics,
 
   IFWL_ThemeProvider* pTheme = m_pProperties->m_pThemeProvider;
   if (HasBorder())
-    DrawBorder(pGraphics, CFWL_Part::Border, pTheme, pMatrix);
+    DrawBorder(pGraphics, CFWL_Part::Border, pTheme, matrix);
   if (!m_rtBtn.IsEmpty())
-    DrawDropDownButton(pGraphics, pTheme, pMatrix);
+    DrawDropDownButton(pGraphics, pTheme, &matrix);
   if (m_pWidgetMgr->IsFormDisabled()) {
-    DisForm_DrawWidget(pGraphics, pMatrix);
+    DisForm_DrawWidget(pGraphics, &matrix);
     return;
   }
 }
@@ -161,7 +160,7 @@ void CFWL_DateTimePicker::SetCurSel(int32_t iYear,
   m_pMonthCal->SetSelect(iYear, iMonth, iDay);
 }
 
-void CFWL_DateTimePicker::SetEditText(const CFX_WideString& wsText) {
+void CFWL_DateTimePicker::SetEditText(const WideString& wsText) {
   if (!m_pEdit)
     return;
 
@@ -172,7 +171,7 @@ void CFWL_DateTimePicker::SetEditText(const CFX_WideString& wsText) {
   DispatchEvent(&ev);
 }
 
-CFX_WideString CFWL_DateTimePicker::GetEditText() const {
+WideString CFWL_DateTimePicker::GetEditText() const {
   return m_pEdit ? m_pEdit->GetText() : L"";
 }
 
@@ -209,17 +208,20 @@ void CFWL_DateTimePicker::DrawDropDownButton(CXFA_Graphics* pGraphics,
   pTheme->DrawBackground(&param);
 }
 
-void CFWL_DateTimePicker::FormatDateString(int32_t iYear,
-                                           int32_t iMonth,
-                                           int32_t iDay,
-                                           CFX_WideString& wsText) {
+WideString CFWL_DateTimePicker::FormatDateString(int32_t iYear,
+                                                 int32_t iMonth,
+                                                 int32_t iDay) {
   if ((m_pProperties->m_dwStyleExes & FWL_STYLEEXT_DTP_ShortDateFormat) ==
       FWL_STYLEEXT_DTP_ShortDateFormat) {
-    wsText.Format(L"%d-%d-%d", iYear, iMonth, iDay);
-  } else if ((m_pProperties->m_dwStyleExes & FWL_STYLEEXT_DTP_LongDateFormat) ==
-             FWL_STYLEEXT_DTP_LongDateFormat) {
-    wsText.Format(L"%d Year %d Month %d Day", iYear, iMonth, iDay);
+    return WideString::Format(L"%d-%d-%d", iYear, iMonth, iDay);
   }
+
+  if ((m_pProperties->m_dwStyleExes & FWL_STYLEEXT_DTP_LongDateFormat) ==
+      FWL_STYLEEXT_DTP_LongDateFormat) {
+    return WideString::Format(L"%d Year %d Month %d Day", iYear, iMonth, iDay);
+  }
+
+  return WideString();
 }
 
 void CFWL_DateTimePicker::ShowMonthCalendar(bool bActivate) {
@@ -308,8 +310,7 @@ void CFWL_DateTimePicker::ProcessSelChanged(int32_t iYear,
   m_iMonth = iMonth;
   m_iDay = iDay;
 
-  CFX_WideString wsText;
-  FormatDateString(m_iYear, m_iMonth, m_iDay, wsText);
+  WideString wsText = FormatDateString(m_iYear, m_iMonth, m_iDay);
   m_pEdit->SetText(wsText);
   m_pEdit->Update();
   RepaintRect(m_rtClient);
@@ -453,7 +454,7 @@ void CFWL_DateTimePicker::DisForm_DrawWidget(CXFA_Graphics* pGraphics,
     CFX_Matrix mt(1, 0, 0, 1, rtEdit.left, rtEdit.top);
     if (pMatrix)
       mt.Concat(*pMatrix);
-    m_pEdit->DrawWidget(pGraphics, &mt);
+    m_pEdit->DrawWidget(pGraphics, mt);
   }
   if (!IsMonthCalendarVisible())
     return;
@@ -462,7 +463,7 @@ void CFWL_DateTimePicker::DisForm_DrawWidget(CXFA_Graphics* pGraphics,
   CFX_Matrix mt(1, 0, 0, 1, rtMonth.left, rtMonth.top);
   if (pMatrix)
     mt.Concat(*pMatrix);
-  m_pMonthCal->DrawWidget(pGraphics, &mt);
+  m_pMonthCal->DrawWidget(pGraphics, mt);
 }
 
 void CFWL_DateTimePicker::OnProcessMessage(CFWL_Message* pMessage) {
@@ -511,8 +512,8 @@ void CFWL_DateTimePicker::OnProcessMessage(CFWL_Message* pMessage) {
 }
 
 void CFWL_DateTimePicker::OnDrawWidget(CXFA_Graphics* pGraphics,
-                                       const CFX_Matrix* pMatrix) {
-  DrawWidget(pGraphics, pMatrix);
+                                       const CFX_Matrix& matrix) {
+  DrawWidget(pGraphics, matrix);
 }
 
 void CFWL_DateTimePicker::OnFocusChanged(CFWL_Message* pMsg, bool bSet) {

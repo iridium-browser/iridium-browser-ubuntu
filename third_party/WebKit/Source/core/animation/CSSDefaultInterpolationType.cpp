@@ -10,36 +10,23 @@
 
 namespace blink {
 
-class CSSDefaultNonInterpolableValue : public NonInterpolableValue {
- public:
-  ~CSSDefaultNonInterpolableValue() final {}
-
-  static PassRefPtr<CSSDefaultNonInterpolableValue> Create(
-      const CSSValue* css_value) {
-    return AdoptRef(new CSSDefaultNonInterpolableValue(css_value));
-  }
-
-  const CSSValue* CssValue() const { return css_value_.Get(); }
-
-  DECLARE_NON_INTERPOLABLE_VALUE_TYPE();
-
- private:
-  CSSDefaultNonInterpolableValue(const CSSValue* css_value)
-      : css_value_(css_value) {
-    DCHECK(css_value_);
-  }
-
-  Persistent<const CSSValue> css_value_;
-};
+CSSDefaultNonInterpolableValue::CSSDefaultNonInterpolableValue(
+    const CSSValue* css_value)
+    : css_value_(css_value) {
+  DCHECK(css_value_);
+}
 
 DEFINE_NON_INTERPOLABLE_VALUE_TYPE(CSSDefaultNonInterpolableValue);
-DEFINE_NON_INTERPOLABLE_VALUE_TYPE_CASTS(CSSDefaultNonInterpolableValue);
 
 InterpolationValue CSSDefaultInterpolationType::MaybeConvertSingle(
     const PropertySpecificKeyframe& keyframe,
     const InterpolationEnvironment&,
     const InterpolationValue&,
     ConversionCheckers&) const {
+  if (!ToCSSPropertySpecificKeyframe(keyframe).Value()) {
+    DCHECK(keyframe.IsNeutral());
+    return nullptr;
+  }
   return InterpolationValue(
       InterpolableList::Create(0),
       CSSDefaultNonInterpolableValue::Create(
@@ -50,8 +37,9 @@ void CSSDefaultInterpolationType::Apply(
     const InterpolableValue&,
     const NonInterpolableValue* non_interpolable_value,
     InterpolationEnvironment& environment) const {
+  DCHECK(ToCSSDefaultNonInterpolableValue(non_interpolable_value)->CssValue());
   StyleBuilder::ApplyProperty(
-      GetProperty().CssProperty(),
+      GetProperty().GetCSSProperty(),
       ToCSSInterpolationEnvironment(environment).GetState(),
       *ToCSSDefaultNonInterpolableValue(non_interpolable_value)->CssValue());
 }

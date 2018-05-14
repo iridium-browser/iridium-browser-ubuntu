@@ -4,10 +4,14 @@
 
 #include "content/shell/renderer/layout_test/layout_test_content_renderer_client.h"
 
+#include <string>
+#include <utility>
+
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/memory/ptr_util.h"
+#include "build/build_config.h"
 #include "components/web_cache/renderer/web_cache_impl.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
@@ -22,15 +26,15 @@
 #include "content/shell/renderer/layout_test/layout_test_render_frame_observer.h"
 #include "content/shell/renderer/layout_test/layout_test_render_thread_observer.h"
 #include "content/shell/renderer/layout_test/test_media_stream_renderer_factory.h"
+#include "content/shell/renderer/layout_test/test_websocket_handshake_throttle.h"
 #include "content/shell/renderer/shell_render_view_observer.h"
-#include "content/shell/test_runner/mock_credential_manager_client.h"
 #include "content/shell/test_runner/web_frame_test_proxy.h"
 #include "content/shell/test_runner/web_test_interfaces.h"
 #include "content/shell/test_runner/web_test_runner.h"
 #include "content/shell/test_runner/web_view_test_proxy.h"
 #include "content/test/mock_webclipboard_impl.h"
-#include "gin/modules/module_registry.h"
 #include "media/base/audio_latency.h"
+#include "media/base/mime_util.h"
 #include "media/media_features.h"
 #include "third_party/WebKit/public/platform/WebAudioLatencyHint.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamCenter.h"
@@ -158,35 +162,6 @@ void LayoutTestContentRendererClient::RenderViewCreated(
 
   BlinkTestRunner* test_runner = BlinkTestRunner::Get(render_view);
   test_runner->Reset(false /* for_new_test */);
-
-  LayoutTestRenderThreadObserver::GetInstance()
-      ->test_interfaces()
-      ->TestRunner()
-      ->InitializeWebViewWithMocks(render_view->GetWebView());
-}
-
-std::unique_ptr<WebMediaStreamCenter>
-LayoutTestContentRendererClient::OverrideCreateWebMediaStreamCenter(
-    WebMediaStreamCenterClient* client) {
-#if BUILDFLAG(ENABLE_WEBRTC)
-  test_runner::WebTestInterfaces* interfaces =
-      LayoutTestRenderThreadObserver::GetInstance()->test_interfaces();
-  return interfaces->CreateMediaStreamCenter(client);
-#else
-  return nullptr;
-#endif
-}
-
-std::unique_ptr<WebRTCPeerConnectionHandler>
-LayoutTestContentRendererClient::OverrideCreateWebRTCPeerConnectionHandler(
-    WebRTCPeerConnectionHandlerClient* client) {
-#if BUILDFLAG(ENABLE_WEBRTC)
-  test_runner::WebTestInterfaces* interfaces =
-      LayoutTestRenderThreadObserver::GetInstance()->test_interfaces();
-  return interfaces->CreateWebRTCPeerConnectionHandler(client);
-#else
-  return nullptr;
-#endif
 }
 
 std::unique_ptr<WebMIDIAccessor>
@@ -213,8 +188,8 @@ LayoutTestContentRendererClient::OverrideCreateAudioDevice(
           media::AudioLatency::GetRtcBufferSize(hw_sample_rate, hw_buffer_size);
       break;
     case blink::WebAudioLatencyHint::kCategoryPlayback:
-      buffer_size =
-          media::AudioLatency::GetHighLatencyBufferSize(hw_sample_rate, 0);
+      buffer_size = media::AudioLatency::GetHighLatencyBufferSize(
+          hw_sample_rate, hw_buffer_size);
       break;
     case blink::WebAudioLatencyHint::kCategoryExact:
       buffer_size = media::AudioLatency::GetExactBufferSize(
@@ -252,6 +227,11 @@ LayoutTestContentRendererClient::CreateMediaStreamRendererFactory() {
 #endif
 }
 
+std::unique_ptr<blink::WebSocketHandshakeThrottle>
+LayoutTestContentRendererClient::CreateWebSocketHandshakeThrottle() {
+  return std::make_unique<TestWebSocketHandshakeThrottle>();
+}
+
 void LayoutTestContentRendererClient::DidInitializeWorkerContextOnWorkerThread(
     v8::Local<v8::Context> context) {
   blink::WebTestingSupport::InjectInternalsObject(context);
@@ -270,6 +250,12 @@ void LayoutTestContentRendererClient::
           switches::kEnableFontAntialiasing)) {
     blink::SetFontAntialiasingEnabledForTest(true);
   }
+}
+
+bool LayoutTestContentRendererClient::AllowIdleMediaSuspend() {
+  // Disable idle media suspend to avoid layout tests getting into accidentally
+  // bad states if they take too long to run.
+  return false;
 }
 
 }  // namespace content

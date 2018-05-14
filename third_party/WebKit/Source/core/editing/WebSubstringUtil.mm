@@ -37,15 +37,19 @@
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/Node.h"
+#include "core/editing/Editor.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/PlainTextRange.h"
+#include "core/editing/SelectionTemplate.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/editing/iterators/TextIterator.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/VisualViewport.h"
 #include "core/frame/WebFrameWidgetBase.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "core/html/HTMLElement.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutObject.h"
@@ -62,8 +66,8 @@ namespace blink {
 
 namespace {
 
-NSAttributedString* attributedSubstringFromRange(const EphemeralRange& range,
-                                                 float fontScale) {
+NSAttributedString* AttributedSubstringFromRange(const EphemeralRange& range,
+                                                 float font_scale) {
   NSMutableAttributedString* string = [[NSMutableAttributedString alloc] init];
   NSMutableDictionary* attrs = [NSMutableDictionary dictionary];
   size_t length = range.EndPosition().ComputeOffsetInContainerNode() -
@@ -79,21 +83,21 @@ NSAttributedString* attributedSubstringFromRange(const EphemeralRange& range,
 
   for (TextIterator it(range.StartPosition(), range.EndPosition());
        !it.AtEnd() && [string length] < length; it.Advance()) {
-    unsigned numCharacters = it.length();
-    if (!numCharacters)
+    unsigned num_characters = it.length();
+    if (!num_characters)
       continue;
 
-    Node* container = it.CurrentContainer();
-    LayoutObject* layoutObject = container->GetLayoutObject();
-    DCHECK(layoutObject);
-    if (!layoutObject)
+    const Node* container = it.CurrentContainer();
+    LayoutObject* layout_object = container->GetLayoutObject();
+    DCHECK(layout_object);
+    if (!layout_object)
       continue;
 
-    const ComputedStyle* style = layoutObject->Style();
-    FontPlatformData fontPlatformData =
+    const ComputedStyle* style = layout_object->Style();
+    FontPlatformData font_platform_data =
         style->GetFont().PrimaryFont()->PlatformData();
-    fontPlatformData.text_size_ *= fontScale;
-    NSFont* font = toNSFont(fontPlatformData.CtFont());
+    font_platform_data.text_size_ *= font_scale;
+    NSFont* font = toNSFont(font_platform_data.CtFont());
     // If the platform font can't be loaded, or the size is incorrect comparing
     // to the computed style, it's likely that the site is using a web font.
     // For now, just use the default font instead.
@@ -101,23 +105,24 @@ NSAttributedString* attributedSubstringFromRange(const EphemeralRange& range,
     // to use the font.
     // TODO(shuchen): Support scaling the font as necessary according to CSS
     // transforms, not just pinch-zoom.
-    if (!font || floor(fontPlatformData.size()) !=
+    if (!font || floor(font_platform_data.size()) !=
                      floor([[font fontDescriptor] pointSize])) {
       font = [NSFont systemFontOfSize:style->GetFont()
                                           .GetFontDescription()
                                           .ComputedSize() *
-                                      fontScale];
+                                      font_scale];
     }
     [attrs setObject:font forKey:NSFontAttributeName];
 
-    if (style->VisitedDependentColor(CSSPropertyColor).Alpha())
-      [attrs setObject:NsColor(style->VisitedDependentColor(CSSPropertyColor))
-                forKey:NSForegroundColorAttributeName];
+    if (style->VisitedDependentColor(GetCSSPropertyColor()).Alpha())
+      [attrs
+          setObject:NsColor(style->VisitedDependentColor(GetCSSPropertyColor()))
+             forKey:NSForegroundColorAttributeName];
     else
       [attrs removeObjectForKey:NSForegroundColorAttributeName];
-    if (style->VisitedDependentColor(CSSPropertyBackgroundColor).Alpha())
+    if (style->VisitedDependentColor(GetCSSPropertyBackgroundColor()).Alpha())
       [attrs setObject:NsColor(style->VisitedDependentColor(
-                           CSSPropertyBackgroundColor))
+                           GetCSSPropertyBackgroundColor()))
                 forKey:NSBackgroundColorAttributeName];
     else
       [attrs removeObjectForKey:NSBackgroundColorAttributeName];
@@ -129,25 +134,25 @@ NSAttributedString* attributedSubstringFromRange(const EphemeralRange& range,
                                        length:characters.Size()] autorelease];
     [string replaceCharactersInRange:NSMakeRange(position, 0)
                           withString:substring];
-    [string setAttributes:attrs range:NSMakeRange(position, numCharacters)];
-    position += numCharacters;
+    [string setAttributes:attrs range:NSMakeRange(position, num_characters)];
+    position += num_characters;
   }
   return [string autorelease];
 }
 
-WebPoint getBaselinePoint(LocalFrameView* frameView,
+WebPoint GetBaselinePoint(LocalFrameView* frame_view,
                           const EphemeralRange& range,
                           NSAttributedString* string) {
-  IntRect stringRect = frameView->ContentsToViewport(ComputeTextRect(range));
-  IntPoint stringPoint = stringRect.MinXMaxYCorner();
+  IntRect string_rect = frame_view->ContentsToViewport(ComputeTextRect(range));
+  IntPoint string_point = string_rect.MinXMaxYCorner();
 
   // Adjust for the font's descender. AppKit wants the baseline point.
   if ([string length]) {
     NSDictionary* attributes = [string attributesAtIndex:0 effectiveRange:NULL];
     if (NSFont* font = [attributes objectForKey:NSFontAttributeName])
-      stringPoint.Move(0, ceil([font descender]));
+      string_point.Move(0, ceil([font descender]));
   }
-  return stringPoint;
+  return string_point;
 }
 
 }  // namespace
@@ -163,7 +168,7 @@ NSAttributedString* WebSubstringUtil::AttributedWordAtPoint(
     return nil;
   LocalFrame* frame = result.InnerNode()->GetDocument().GetFrame();
   EphemeralRange range =
-      frame->RangeForPoint(result.RoundedPointInInnerNodeFrame());
+      frame->GetEditor().RangeForPoint(result.RoundedPointInInnerNodeFrame());
   if (range.IsNull())
     return nil;
 
@@ -174,9 +179,9 @@ NSAttributedString* WebSubstringUtil::AttributedWordAtPoint(
   const EphemeralRange word_range = selection.ToNormalizedEphemeralRange();
 
   // Convert to NSAttributedString.
-  NSAttributedString* string = attributedSubstringFromRange(
+  NSAttributedString* string = AttributedSubstringFromRange(
       word_range, frame->GetPage()->GetVisualViewport().Scale());
-  baseline_point = getBaselinePoint(frame->View(), word_range, string);
+  baseline_point = GetBaselinePoint(frame->View(), word_range, string);
   return string;
 }
 
@@ -193,7 +198,7 @@ NSAttributedString* WebSubstringUtil::AttributedSubstringInRange(
     size_t location,
     size_t length,
     WebPoint* baseline_point) {
-  LocalFrame* frame = ToWebLocalFrameBase(web_frame)->GetFrame();
+  LocalFrame* frame = ToWebLocalFrameImpl(web_frame)->GetFrame();
   if (frame->View()->NeedsLayout())
     frame->View()->UpdateLayout();
 
@@ -205,10 +210,10 @@ NSAttributedString* WebSubstringUtil::AttributedSubstringInRange(
   if (ephemeral_range.IsNull())
     return nil;
 
-  NSAttributedString* result = attributedSubstringFromRange(
+  NSAttributedString* result = AttributedSubstringFromRange(
       ephemeral_range, frame->GetPage()->GetVisualViewport().Scale());
   if (baseline_point)
-    *baseline_point = getBaselinePoint(frame->View(), ephemeral_range, result);
+    *baseline_point = GetBaselinePoint(frame->View(), ephemeral_range, result);
   return result;
 }
 

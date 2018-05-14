@@ -8,11 +8,11 @@
 #include <windows.h>
 
 #include <algorithm>
-#include <deque>
 #include <limits>
 #include <memory>
 
 #include "base/bind.h"
+#include "base/containers/queue.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -20,7 +20,7 @@
 #include "base/synchronization/lock.h"
 #include "base/task_runner.h"
 #include "base/win/win_util.h"
-#include "mojo/edk/embedder/platform_handle_vector.h"
+#include "mojo/edk/embedder/scoped_platform_handle.h"
 
 namespace mojo {
 namespace edk {
@@ -105,7 +105,6 @@ class ChannelWin : public Channel,
 
       bool write_now = !delay_writes_ && outgoing_messages_.empty();
       outgoing_messages_.emplace_back(std::move(message), 0);
-
       if (write_now && !WriteNoLock(outgoing_messages_.front()))
         reject_writes_ = write_error = true;
     }
@@ -127,20 +126,20 @@ class ChannelWin : public Channel,
       size_t num_handles,
       const void* extra_header,
       size_t extra_header_size,
-      ScopedPlatformHandleVectorPtr* handles) override {
+      std::vector<ScopedPlatformHandle>* handles) override {
+    DCHECK(extra_header);
     if (num_handles > std::numeric_limits<uint16_t>::max())
       return false;
     using HandleEntry = Channel::Message::HandleEntry;
     size_t handles_size = sizeof(HandleEntry) * num_handles;
     if (handles_size > extra_header_size)
       return false;
-    DCHECK(extra_header);
-    handles->reset(new PlatformHandleVector(num_handles));
+    handles->reserve(num_handles);
     const HandleEntry* extra_header_handles =
         reinterpret_cast<const HandleEntry*>(extra_header);
     for (size_t i = 0; i < num_handles; i++) {
-      (*handles)->at(i).handle =
-          base::win::Uint32ToHandle(extra_header_handles[i].handle);
+      handles->emplace_back(ScopedPlatformHandle(PlatformHandle(
+          base::win::Uint32ToHandle(extra_header_handles[i].handle))));
     }
     return true;
   }
@@ -268,9 +267,9 @@ class ChannelWin : public Channel,
         outgoing_messages_.pop_front();
 
         // Clear any handles so they don't get closed on destruction.
-        ScopedPlatformHandleVectorPtr handles = message->TakeHandles();
-        if (handles)
-          handles->clear();
+        std::vector<ScopedPlatformHandle> handles = message->TakeHandles();
+        for (auto& handle : handles)
+          ignore_result(handle.release());
       }
 
       if (!WriteNextNoLock())
@@ -337,7 +336,7 @@ class ChannelWin : public Channel,
   bool delay_writes_ = true;
 
   bool reject_writes_ = false;
-  std::deque<MessageView> outgoing_messages_;
+  base::circular_deque<MessageView> outgoing_messages_;
 
   bool wait_for_connect_;
 

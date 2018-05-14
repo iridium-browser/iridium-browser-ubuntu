@@ -16,10 +16,10 @@
 
 ******************************************************************/
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_SIMPLE_LPC_ANALYSIS_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_SIMPLE_LPC_ANALYSIS_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_SIMPLE_LPC_ANALYSIS_H_
+#define MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_SIMPLE_LPC_ANALYSIS_H_
 
-#include "defines.h"
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  *  lpc analysis (subrutine to LPCencode)

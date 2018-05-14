@@ -11,47 +11,26 @@
 
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "chromecast/media/cma/backend/system_volume_control.h"
 #include "media/audio/alsa/alsa_wrapper.h"
 
 namespace chromecast {
 namespace media {
 
-// Handles setting the volume and mute state on the appropriate ALSA mixer
-// elements (based on command-line args); also detects changes to the mute state
-// or volume and informs a delegate.
-// Must be created on an IO thread, and all methods must be called on that
-// thread.
-class AlsaVolumeControl : public base::MessageLoopForIO::Watcher {
+// SystemVolumeControl implementation for ALSA.
+class AlsaVolumeControl : public SystemVolumeControl,
+                          public base::MessageLoopForIO::Watcher {
  public:
-  class Delegate {
-   public:
-    // Called whenever the ALSA volume or mute state have changed.
-    // Unfortunately it is not possible in all cases to differentiate between
-    // a volume change and a mute change, so the two events must be combined.
-    virtual void OnAlsaVolumeOrMuteChange(float new_volume, bool new_mute) = 0;
-
-   protected:
-    virtual ~Delegate() = default;
-  };
-
   explicit AlsaVolumeControl(Delegate* delegate);
   ~AlsaVolumeControl() override;
 
-  // Returns the value that you would get if you called GetVolume() after
-  // SetVolume(volume).
-  float VolumeThroughAlsa(float volume);
-
-  // Returns the current ALSA volume (0 <= volume <= 1).
-  float GetVolume();
-
-  // Sets the ALSA volume to |level|; (0 <= level <= 1);
-  void SetVolume(float level);
-
-  // Returns |true| if ALSA is currently muted.
-  bool IsMuted();
-
-  // Sets the ALSA mute state to |muted|.
-  void SetMuted(bool muted);
+  // SystemVolumeControl interface.
+  float GetRoundtripVolume(float volume) override;
+  float GetVolume() override;
+  void SetVolume(float level) override;
+  bool IsMuted() override;
+  void SetMuted(bool muted) override;
+  void SetPowerSave(bool power_save_on) override;
 
  private:
   class ScopedAlsaMixer;
@@ -63,9 +42,13 @@ class AlsaVolumeControl : public base::MessageLoopForIO::Watcher {
                                         const std::string& mixer_element_name,
                                         const std::string& mute_card_name);
   static std::string GetMuteDeviceName();
+  static std::string GetAmpElementName();
+  static std::string GetAmpDeviceName();
 
   static int VolumeOrMuteChangeCallback(snd_mixer_elem_t* elem,
                                         unsigned int mask);
+
+  bool SetElementMuted(ScopedAlsaMixer* mixer, bool muted);
 
   void RefreshMixerFds(ScopedAlsaMixer* mixer);
 
@@ -74,6 +57,7 @@ class AlsaVolumeControl : public base::MessageLoopForIO::Watcher {
   void OnFileCanWriteWithoutBlocking(int fd) override;
 
   void OnVolumeOrMuteChanged();
+
   Delegate* const delegate_;
 
   const std::unique_ptr<::media::AlsaWrapper> alsa_;
@@ -81,6 +65,8 @@ class AlsaVolumeControl : public base::MessageLoopForIO::Watcher {
   const std::string volume_mixer_element_name_;
   const std::string mute_mixer_device_name_;
   const std::string mute_mixer_element_name_;
+  const std::string amp_mixer_device_name_;
+  const std::string amp_mixer_element_name_;
 
   long volume_range_min_;  // NOLINT(runtime/int)
   long volume_range_max_;  // NOLINT(runtime/int)
@@ -88,6 +74,7 @@ class AlsaVolumeControl : public base::MessageLoopForIO::Watcher {
   std::unique_ptr<ScopedAlsaMixer> volume_mixer_;
   std::unique_ptr<ScopedAlsaMixer> mute_mixer_;
   ScopedAlsaMixer* mute_mixer_ptr_;
+  std::unique_ptr<ScopedAlsaMixer> amp_mixer_;
 
   std::vector<std::unique_ptr<base::MessageLoopForIO::FileDescriptorWatcher>>
       file_descriptor_watchers_;

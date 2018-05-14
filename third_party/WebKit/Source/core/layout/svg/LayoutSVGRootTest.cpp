@@ -14,11 +14,12 @@ namespace blink {
 using LayoutSVGRootTest = RenderingTest;
 
 TEST_F(LayoutSVGRootTest, VisualRectMappingWithoutViewportClipWithBorder) {
-  SetBodyInnerHTML(
-      "<svg id='root' style='border: 10px solid red; width: 200px; height: "
-      "100px; overflow: visible' viewBox='0 0 200 100'>"
-      "   <rect id='rect' x='80' y='80' width='100' height='100'/>"
-      "</svg>");
+  SetBodyInnerHTML(R"HTML(
+    <svg id='root' style='border: 10px solid red; width: 200px; height:
+    100px; overflow: visible' viewBox='0 0 200 100'>
+       <rect id='rect' x='80' y='80' width='100' height='100'/>
+    </svg>
+  )HTML");
 
   const LayoutSVGRoot& root =
       *ToLayoutSVGRoot(GetLayoutObjectByElementId("root"));
@@ -41,11 +42,12 @@ TEST_F(LayoutSVGRootTest, VisualRectMappingWithoutViewportClipWithBorder) {
 }
 
 TEST_F(LayoutSVGRootTest, VisualRectMappingWithViewportClipAndBorder) {
-  SetBodyInnerHTML(
-      "<svg id='root' style='border: 10px solid red; width: 200px; height: "
-      "100px; overflow: hidden' viewBox='0 0 200 100'>"
-      "   <rect id='rect' x='80' y='80' width='100' height='100'/>"
-      "</svg>");
+  SetBodyInnerHTML(R"HTML(
+    <svg id='root' style='border: 10px solid red; width: 200px; height:
+    100px; overflow: hidden' viewBox='0 0 200 100'>
+       <rect id='rect' x='80' y='80' width='100' height='100'/>
+    </svg>
+  )HTML");
 
   const LayoutSVGRoot& root =
       *ToLayoutSVGRoot(GetLayoutObjectByElementId("root"));
@@ -70,11 +72,12 @@ TEST_F(LayoutSVGRootTest, VisualRectMappingWithViewportClipAndBorder) {
 }
 
 TEST_F(LayoutSVGRootTest, VisualRectMappingWithViewportClipWithoutBorder) {
-  SetBodyInnerHTML(
-      "<svg id='root' style='width: 200px; height: 100px; overflow: hidden' "
-      "viewBox='0 0 200 100'>"
-      "   <rect id='rect' x='80' y='80' width='100' height='100'/>"
-      "</svg>");
+  SetBodyInnerHTML(R"HTML(
+    <svg id='root' style='width: 200px; height: 100px; overflow: hidden'
+    viewBox='0 0 200 100'>
+       <rect id='rect' x='80' y='80' width='100' height='100'/>
+    </svg>
+  )HTML");
 
   const LayoutSVGRoot& root =
       *ToLayoutSVGRoot(GetLayoutObjectByElementId("root"));
@@ -94,6 +97,39 @@ TEST_F(LayoutSVGRootTest, VisualRectMappingWithViewportClipWithoutBorder) {
   rect = root_visual_rect;
   EXPECT_TRUE(root.MapToVisualRectInAncestorSpace(&root, rect));
   EXPECT_EQ(LayoutRect(80, 80, 100, 20), rect);
+}
+
+TEST_F(LayoutSVGRootTest,
+       PaintedOutputOfObjectHasNoEffectRegardlessOfSizeEmpty) {
+  SetBodyInnerHTML(R"HTML(
+    <svg id="svg" width="100.1%" height="16">
+      <rect width="100%" height="16" fill="#fff"></rect>
+    </svg>
+  )HTML");
+
+  const LayoutSVGRoot& root =
+      *ToLayoutSVGRoot(GetLayoutObjectByElementId("svg"));
+  EXPECT_TRUE(root.PaintedOutputOfObjectHasNoEffectRegardlessOfSize());
+}
+
+TEST_F(LayoutSVGRootTest,
+       PaintedOutputOfObjectHasNoEffectRegardlessOfSizeMask) {
+  SetBodyInnerHTML(R"HTML(
+    <svg id="svg" width="16" height="16" mask="url(#test)">
+      <rect width="100%" height="16" fill="#fff"></rect>
+      <defs>
+        <mask id="test">
+          <g>
+            <rect width="100%" height="100%" fill="#ffffff" style=""></rect>
+          </g>
+        </mask>
+      </defs>
+    </svg>
+  )HTML");
+
+  const LayoutSVGRoot& root =
+      *ToLayoutSVGRoot(GetLayoutObjectByElementId("svg"));
+  EXPECT_FALSE(root.PaintedOutputOfObjectHasNoEffectRegardlessOfSize());
 }
 
 }  // namespace blink

@@ -9,11 +9,13 @@
 #include "base/bind.h"
 #include "base/cancelable_callback.h"
 #include "base/command_line.h"
+#include "base/debug/stack_trace.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_local.h"
+#include "components/crash/core/common/crash_key.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_gl_api_implementation.h"
 #include "ui/gl/gl_implementation.h"
@@ -32,6 +34,13 @@ base::LazyInstance<base::ThreadLocalPointer<GLContext>>::Leaky
     current_real_context_ = LAZY_INSTANCE_INITIALIZER;
 }  // namespace
 
+// static
+base::subtle::Atomic32 GLContext::total_gl_contexts_ = 0;
+// static
+bool GLContext::switchable_gpus_supported_ = false;
+// static
+GpuPreference GLContext::forced_gpu_preference_ = GpuPreferenceNone;
+
 GLContext::ScopedReleaseCurrent::ScopedReleaseCurrent() : canceled_(false) {}
 
 GLContext::ScopedReleaseCurrent::~ScopedReleaseCurrent() {
@@ -48,6 +57,7 @@ GLContext::GLContext(GLShareGroup* share_group) : share_group_(share_group) {
   if (!share_group_.get())
     share_group_ = new gl::GLShareGroup();
   share_group_->AddContext(this);
+  base::subtle::NoBarrier_AtomicIncrement(&total_gl_contexts_, 1);
 }
 
 GLContext::~GLContext() {
@@ -56,12 +66,53 @@ GLContext::~GLContext() {
     SetCurrent(nullptr);
     SetCurrentGL(nullptr);
   }
+  base::subtle::Atomic32 after_value =
+      base::subtle::NoBarrier_AtomicIncrement(&total_gl_contexts_, -1);
+  DCHECK(after_value >= 0);
+}
+
+// static
+int32_t GLContext::TotalGLContexts() {
+  return static_cast<int32_t>(
+      base::subtle::NoBarrier_Load(&total_gl_contexts_));
+}
+
+// static
+bool GLContext::SwitchableGPUsSupported() {
+  return switchable_gpus_supported_;
+}
+
+// static
+void GLContext::SetSwitchableGPUsSupported() {
+  DCHECK(!switchable_gpus_supported_);
+  switchable_gpus_supported_ = true;
+}
+
+// static
+void GLContext::SetForcedGpuPreference(GpuPreference gpu_preference) {
+  DCHECK_EQ(GpuPreferenceNone, forced_gpu_preference_);
+  forced_gpu_preference_ = gpu_preference;
+}
+
+// static
+GpuPreference GLContext::AdjustGpuPreference(GpuPreference gpu_preference) {
+  switch (forced_gpu_preference_) {
+    case GpuPreferenceNone:
+      return gpu_preference;
+    case PreferIntegratedGpu:
+    case PreferDiscreteGpu:
+      return forced_gpu_preference_;
+    default:
+      NOTREACHED();
+      return GpuPreferenceNone;
+  }
 }
 
 GLApi* GLContext::CreateGLApi(DriverGL* driver) {
   real_gl_api_ = new RealGLApi;
-  real_gl_api_->Initialize(driver);
   real_gl_api_->set_gl_workarounds(gl_workarounds_);
+  real_gl_api_->SetDisabledExtensions(disabled_gl_extensions_);
+  real_gl_api_->Initialize(driver);
   return real_gl_api_;
 }
 
@@ -74,11 +125,6 @@ bool GLContext::ForceGpuSwitchIfNeeded() {
 
 void GLContext::SetUnbindFboOnMakeCurrent() {
   NOTIMPLEMENTED();
-}
-
-std::string GLContext::GetExtensions() {
-  DCHECK(IsCurrent(nullptr));
-  return GetGLExtensionsFromCurrentContext(gl_api_.get());
 }
 
 std::string GLContext::GetGLVersion() {
@@ -97,7 +143,8 @@ std::string GLContext::GetGLRenderer() {
   return std::string(renderer ? renderer : "");
 }
 
-YUVToRGBConverter* GLContext::GetYUVToRGBConverter() {
+YUVToRGBConverter* GLContext::GetYUVToRGBConverter(
+    const gfx::ColorSpace& color_space) {
   return nullptr;
 }
 
@@ -134,6 +181,7 @@ CurrentGL* GLContext::GetCurrentGL() {
 void GLContext::ReinitializeDynamicBindings() {
   DCHECK(IsCurrent(nullptr));
   dynamic_bindings_initialized_ = false;
+  ResetExtensions();
   InitializeDynamicBindings();
 }
 
@@ -142,13 +190,7 @@ void GLContext::ForceReleaseVirtuallyCurrent() {
 }
 
 bool GLContext::HasExtension(const char* name) {
-  std::string extensions = GetExtensions();
-  extensions += " ";
-
-  std::string delimited_name(name);
-  delimited_name += " ";
-
-  return extensions.find(delimited_name) != std::string::npos;
+  return gl::HasExtension(GetExtensions(), name);
 }
 
 const GLVersionInfo* GLContext::GetVersionInfo() {
@@ -194,9 +236,13 @@ GLContext* GLContext::GetRealCurrent() {
   return current_real_context_.Pointer()->Get();
 }
 
+GLContext* GLContext::GetRealCurrentForDebugging() {
+  return GetRealCurrent();
+}
+
 std::unique_ptr<gl::GLVersionInfo> GLContext::GenerateGLVersionInfo() {
-  return base::MakeUnique<GLVersionInfo>(
-      GetGLVersion().c_str(), GetGLRenderer().c_str(), GetExtensions().c_str());
+  return std::make_unique<GLVersionInfo>(
+      GetGLVersion().c_str(), GetGLRenderer().c_str(), GetExtensions());
 }
 
 void GLContext::SetCurrent(GLSurface* surface) {
@@ -207,16 +253,24 @@ void GLContext::SetCurrent(GLSurface* surface) {
   // to create and make current a context.
   if (!surface && GetGLImplementation() != kGLImplementationMockGL &&
       GetGLImplementation() != kGLImplementationStubGL) {
+    // TODO(sunnyps): Remove after fixing crbug.com/724999.
+    static crash_reporter::CrashKeyString<1024> crash_key(
+        "gl-context-set-current-stack-trace");
+    crash_reporter::SetCrashKeyStringToStackTrace(&crash_key,
+                                                  base::debug::StackTrace());
     SetCurrentGL(nullptr);
   }
 }
 
 void GLContext::SetGLWorkarounds(const GLWorkarounds& workarounds) {
-  DCHECK(IsCurrent(nullptr));
+  DCHECK(!real_gl_api_);
   gl_workarounds_ = workarounds;
-  if (real_gl_api_) {
-    real_gl_api_->set_gl_workarounds(gl_workarounds_);
-  }
+}
+
+void GLContext::SetDisabledGLExtensions(
+    const std::string& disabled_extensions) {
+  DCHECK(!real_gl_api_);
+  disabled_gl_extensions_ = disabled_extensions;
 }
 
 GLStateRestorer* GLContext::GetGLStateRestorer() {
@@ -250,7 +304,11 @@ void GLContext::InitializeDynamicBindings() {
   DCHECK(static_bindings_initialized_);
   if (!dynamic_bindings_initialized_) {
     if (real_gl_api_) {
-      real_gl_api_->InitializeFilteredExtensions();
+      // This is called everytime DoRequestExtensionCHROMIUM() is called in
+      // passthrough command buffer. So the underlying ANGLE driver will have
+      // different GL extensions, therefore we need to clear the cache and
+      // recompute on demand later.
+      real_gl_api_->ClearCachedGLExtensions();
       real_gl_api_->set_version(GenerateGLVersionInfo());
     }
 
@@ -336,6 +394,14 @@ scoped_refptr<GPUTimingClient> GLContextReal::CreateGPUTimingClient() {
   return gpu_timing_->CreateGPUTimingClient();
 }
 
+const ExtensionSet& GLContextReal::GetExtensions() {
+  DCHECK(IsCurrent(nullptr));
+  if (!extensions_initialized_) {
+    SetExtensionsFromString(GetGLExtensionsFromCurrentContext(gl_api()));
+  }
+  return extensions_;
+}
+
 GLContextReal::~GLContextReal() {
   if (GetRealCurrent() == this)
     current_real_context_.Pointer()->Set(nullptr);
@@ -352,6 +418,18 @@ scoped_refptr<GLContext> InitializeGLContext(scoped_refptr<GLContext> context,
   if (!context->Initialize(compatible_surface, attribs))
     return nullptr;
   return context;
+}
+
+void GLContextReal::SetExtensionsFromString(std::string extensions) {
+  extensions_string_ = std::move(extensions);
+  extensions_ = MakeExtensionSet(extensions_string_);
+  extensions_initialized_ = true;
+}
+
+void GLContextReal::ResetExtensions() {
+  extensions_.clear();
+  extensions_string_.clear();
+  extensions_initialized_ = false;
 }
 
 }  // namespace gl

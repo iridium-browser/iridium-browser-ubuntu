@@ -16,7 +16,6 @@
 #include "base/command_line.h"
 #include "base/guid.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/clock.h"
@@ -89,9 +88,7 @@ bool ExpireAtSessionEnd() {
 std::string GetKey(const net::X509Certificate& cert, net::CertStatus error) {
   // Since a security decision will be made based on the fingerprint, Chrome
   // should use the SHA-256 fingerprint for the certificate.
-  net::SHA256HashValue fingerprint =
-      net::X509Certificate::CalculateChainFingerprint256(
-          cert.os_cert_handle(), cert.GetIntermediateCertificates());
+  net::SHA256HashValue fingerprint = cert.CalculateChainFingerprint256();
   std::string base64_fingerprint;
   base::Base64Encode(
       base::StringPiece(reinterpret_cast<const char*>(fingerprint.data),
@@ -266,7 +263,7 @@ base::DictionaryValue* ChromeSSLHostStateDelegate::GetValidCertDecisionsDict(
 
     cert_error_dict =
         dict->SetDictionary(kSSLCertDecisionCertErrorMapKey,
-                            base::MakeUnique<base::DictionaryValue>());
+                            std::make_unique<base::DictionaryValue>());
   }
 
   return cert_error_dict;
@@ -302,7 +299,7 @@ void ChromeSSLHostStateDelegate::AllowCert(const std::string& host,
   std::unique_ptr<base::Value> value(map->GetWebsiteSetting(
       url, url, CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), NULL));
 
-  if (!value.get() || !value->IsType(base::Value::Type::DICTIONARY))
+  if (!value.get() || !value->is_dict())
     value.reset(new base::DictionaryValue());
 
   base::DictionaryValue* dict;
@@ -318,9 +315,9 @@ void ChromeSSLHostStateDelegate::AllowCert(const std::string& host,
   if (!cert_dict)
     return;
 
-  dict->SetIntegerWithoutPathExpansion(kSSLCertDecisionVersionKey,
-                                       kDefaultSSLCertDecisionVersion);
-  cert_dict->SetIntegerWithoutPathExpansion(GetKey(cert, error), ALLOWED);
+  dict->SetKey(kSSLCertDecisionVersionKey,
+               base::Value(kDefaultSSLCertDecisionVersion));
+  cert_dict->SetKey(GetKey(cert, error), base::Value(ALLOWED));
 
   // The map takes ownership of the value, so it is released in the call to
   // SetWebsiteSettingDefaultScope.
@@ -366,10 +363,10 @@ ChromeSSLHostStateDelegate::QueryPolicy(const std::string& host,
   // are unlikely to indicate actual security problems.
   bool allow_localhost = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kAllowInsecureLocalhost);
-  if (allow_localhost && net::IsLocalhost(url.host()))
+  if (allow_localhost && net::IsLocalhost(url))
     return ALLOWED;
 
-  if (!value.get() || !value->IsType(base::Value::Type::DICTIONARY))
+  if (!value.get() || !value->is_dict())
     return DENIED;
 
   base::DictionaryValue* dict;  // Owned by value
@@ -445,7 +442,7 @@ bool ChromeSSLHostStateDelegate::HasAllowException(
   std::unique_ptr<base::Value> value(map->GetWebsiteSetting(
       url, url, CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), NULL));
 
-  if (!value.get() || !value->IsType(base::Value::Type::DICTIONARY))
+  if (!value.get() || !value->is_dict())
     return false;
 
   base::DictionaryValue* dict;  // Owned by value

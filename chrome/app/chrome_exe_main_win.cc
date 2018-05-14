@@ -4,7 +4,6 @@
 
 #include <windows.h>
 #include <malloc.h>
-#include <shellscalingapi.h>
 #include <stddef.h>
 #include <tchar.h>
 
@@ -22,6 +21,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/win/registry.h"
+#include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "chrome/app/main_dll_loader_win.h"
 #include "chrome/browser/policy/policy_path_parser.h"
@@ -30,6 +30,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/install_static/initialize_from_primary_module.h"
 #include "chrome/install_static/install_util.h"
+#include "chrome/install_static/user_data_dir.h"
 #include "chrome_elf/chrome_elf_main.h"
 #include "components/crash/content/app/crash_switches.h"
 #include "components/crash/content/app/crashpad.h"
@@ -84,51 +85,6 @@ bool AttemptFastNotify(const base::CommandLine& command_line) {
     return false;
   return chrome::AttemptToNotifyRunningChrome(chrome, true) ==
       chrome::NOTIFY_SUCCESS;
-}
-
-// Win8.1 supports monitor-specific DPI scaling.
-bool SetProcessDpiAwarenessWrapper(PROCESS_DPI_AWARENESS value) {
-  typedef HRESULT(WINAPI *SetProcessDpiAwarenessPtr)(PROCESS_DPI_AWARENESS);
-  SetProcessDpiAwarenessPtr set_process_dpi_awareness_func =
-      reinterpret_cast<SetProcessDpiAwarenessPtr>(
-          GetProcAddress(GetModuleHandleA("user32.dll"),
-                         "SetProcessDpiAwarenessInternal"));
-  if (set_process_dpi_awareness_func) {
-    HRESULT hr = set_process_dpi_awareness_func(value);
-    if (SUCCEEDED(hr)) {
-      VLOG(1) << "SetProcessDpiAwareness succeeded.";
-      return true;
-    } else if (hr == E_ACCESSDENIED) {
-      LOG(ERROR) << "Access denied error from SetProcessDpiAwareness. "
-          "Function called twice, or manifest was used.";
-    }
-  }
-  return false;
-}
-
-// This function works for Windows Vista through Win8. Win8.1 must use
-// SetProcessDpiAwareness[Wrapper].
-BOOL SetProcessDPIAwareWrapper() {
-  typedef BOOL(WINAPI *SetProcessDPIAwarePtr)(VOID);
-  SetProcessDPIAwarePtr set_process_dpi_aware_func =
-      reinterpret_cast<SetProcessDPIAwarePtr>(
-      GetProcAddress(GetModuleHandleA("user32.dll"),
-                      "SetProcessDPIAware"));
-  return set_process_dpi_aware_func &&
-    set_process_dpi_aware_func();
-}
-
-void EnableHighDPISupport() {
-  // Enable per-monitor DPI for Win10 or above instead of Win8.1 since Win8.1
-  // does not have EnableChildWindowDpiMessage, necessary for correct non-client
-  // area scaling across monitors.
-  bool allowed_platform = base::win::GetVersion() >= base::win::VERSION_WIN10;
-  PROCESS_DPI_AWARENESS process_dpi_awareness =
-      allowed_platform ? PROCESS_PER_MONITOR_DPI_AWARE
-                       : PROCESS_SYSTEM_DPI_AWARE;
-  if (!SetProcessDpiAwarenessWrapper(process_dpi_awareness)) {
-    SetProcessDPIAwareWrapper();
-  }
 }
 
 // Returns true if |command_line| contains a /prefetch:# argument where # is in
@@ -239,8 +195,16 @@ int main() {
 
   if (process_type == crash_reporter::switches::kCrashpadHandler) {
     crash_reporter::SetupFallbackCrashHandling(*command_line);
+
+    // The handler process must always be passed the user data dir on the
+    // command line.
+    DCHECK(command_line->HasSwitch(switches::kUserDataDir));
+
+    base::FilePath user_data_dir =
+        command_line->GetSwitchValuePath(switches::kUserDataDir);
     return crash_reporter::RunAsCrashpadHandler(
-        *base::CommandLine::ForCurrentProcess(), switches::kProcessType);
+        *base::CommandLine::ForCurrentProcess(), user_data_dir,
+        switches::kProcessType, switches::kUserDataDir);
   } else if (process_type == crash_reporter::switches::kFallbackCrashHandler) {
     return RunFallbackCrashHandler(*command_line);
   }
@@ -253,7 +217,7 @@ int main() {
   // The exit manager is in charge of calling the dtors of singletons.
   base::AtExitManager exit_manager;
 
-  EnableHighDPISupport();
+  base::win::EnableHighDPISupport();
 
   if (AttemptFastNotify(*command_line))
     return 0;

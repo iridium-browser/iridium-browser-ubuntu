@@ -28,6 +28,7 @@ import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content_shell_apk.ChildProcessLauncherTestUtils;
 import org.chromium.content_shell_apk.IChildProcessTest;
 
+import java.util.Arrays;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 
@@ -39,8 +40,8 @@ public class ChildProcessLauncherTest {
     private static final long CONDITION_WAIT_TIMEOUT_MS = 5000;
 
     private static final String SERVICE_PACKAGE_NAME = "org.chromium.content_shell_apk";
-    private static final String SERVICE_NAME_META_DATA_KEY =
-            "org.chromium.content.browser.TEST_SERVICES_NAME";
+    private static final String SERVICE_NAME =
+            "org.chromium.content_shell_apk.TestChildProcessService";
     private static final String SERVICE_COUNT_META_DATA_KEY =
             "org.chromium.content.browser.NUM_TEST_SERVICES";
 
@@ -71,9 +72,9 @@ public class ChildProcessLauncherTest {
         }
 
         @Override
-        public void onChildStartFailed() {
+        public void onChildStartFailed(ChildProcessConnection connection) {
             if (mServiceCallback != null) {
-                mServiceCallback.onChildStartFailed();
+                mServiceCallback.onChildStartFailed(connection);
             }
         }
 
@@ -104,12 +105,11 @@ public class ChildProcessLauncherTest {
                 new Callable<ChildConnectionAllocator>() {
                     @Override
                     public ChildConnectionAllocator call() {
-                        Context context =
-                                InstrumentationRegistry.getInstrumentation().getTargetContext();
+                        Context context = InstrumentationRegistry.getTargetContext();
                         return ChildConnectionAllocator.create(context, LauncherThread.getHandler(),
-                                SERVICE_PACKAGE_NAME, SERVICE_NAME_META_DATA_KEY,
-                                SERVICE_COUNT_META_DATA_KEY, false /* bindToCaller */,
-                                false /* bindAsExternalService */, false /* useStrongBinding */);
+                                SERVICE_PACKAGE_NAME, SERVICE_NAME, SERVICE_COUNT_META_DATA_KEY,
+                                false /* bindToCaller */, false /* bindAsExternalService */,
+                                false /* useStrongBinding */);
                     }
                 });
     }
@@ -256,7 +256,8 @@ public class ChildProcessLauncherTest {
                             public ChildProcessLauncher call() {
                                 ChildProcessLauncher processLauncher = new ChildProcessLauncher(
                                         LauncherThread.getHandler(), delegate, commandLine,
-                                        filesToBeMapped, mConnectionAllocator, childProcessBinder);
+                                        filesToBeMapped, mConnectionAllocator,
+                                        Arrays.asList(childProcessBinder));
                                 processLauncher.start(true /* setupConnection */,
                                         false /*queueIfNoFreeConnection */);
                                 return processLauncher;
@@ -330,8 +331,7 @@ public class ChildProcessLauncherTest {
                         ChildProcessConnection>() {
                     @Override
                     public ChildProcessConnection call() {
-                        Context context =
-                                InstrumentationRegistry.getInstrumentation().getTargetContext();
+                        Context context = InstrumentationRegistry.getTargetContext();
                         return mConnectionAllocator.allocate(context,
                                 new Bundle() /* serviceBundle */, serviceCallbackForwarder);
                     }

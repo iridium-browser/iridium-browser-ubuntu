@@ -27,15 +27,14 @@
 #define AudioNode_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "modules/EventTargetModules.h"
 #include "modules/ModulesExport.h"
 #include "platform/audio/AudioBus.h"
 #include "platform/audio/AudioUtilities.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/ThreadSafeRefCounted.h"
 #include "platform/wtf/Vector.h"
-#include "platform/wtf/build_config.h"
 
 #define DEBUG_AUDIONODE_REFERENCES 0
 
@@ -221,7 +220,7 @@ class MODULES_EXPORT AudioHandler : public ThreadSafeRefCounted<AudioHandler> {
   virtual void SetChannelCountMode(const String&, ExceptionState&);
 
   String ChannelInterpretation();
-  void SetChannelInterpretation(const String&, ExceptionState&);
+  virtual void SetChannelInterpretation(const String&, ExceptionState&);
 
   ChannelCountMode InternalChannelCountMode() const {
     return channel_count_mode_;
@@ -310,7 +309,7 @@ class MODULES_EXPORT AudioNode : public EventTargetWithInlineData {
   USING_PRE_FINALIZER(AudioNode, Dispose);
 
  public:
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
   AudioHandler& Handler() const;
 
   void HandleChannelOptions(const AudioNodeOptions&, ExceptionState&);
@@ -353,7 +352,7 @@ class MODULES_EXPORT AudioNode : public EventTargetWithInlineData {
  protected:
   explicit AudioNode(BaseAudioContext&);
   // This should be called in a constructor.
-  void SetHandler(PassRefPtr<AudioHandler>);
+  void SetHandler(scoped_refptr<AudioHandler>);
 
  private:
   void Dispose();
@@ -366,7 +365,7 @@ class MODULES_EXPORT AudioNode : public EventTargetWithInlineData {
   bool DisconnectFromOutputIfConnected(unsigned output_index, AudioParam&);
 
   Member<BaseAudioContext> context_;
-  RefPtr<AudioHandler> handler_;
+  scoped_refptr<AudioHandler> handler_;
   // Represents audio node graph with Oilpan references. N-th HeapHashSet
   // represents a set of AudioNode objects connected to this AudioNode's N-th
   // output.

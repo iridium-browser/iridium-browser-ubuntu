@@ -35,11 +35,11 @@
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/proxy_delegate.h"
+#include "net/base/proxy_server.h"
 #include "net/base/request_priority.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
-#include "net/proxy/proxy_server.h"
 #include "net/socket/socket_test_util.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
@@ -103,13 +103,13 @@ class DataReductionProxyBypassStatsTest : public testing::Test {
     fake_request->Start();
     test_context_->RunUntilIdle();
 
-    EXPECT_TRUE(fake_request->response_headers() != NULL);
+    EXPECT_TRUE(fake_request->response_headers() != nullptr);
     return fake_request;
   }
 
  protected:
   std::unique_ptr<DataReductionProxyBypassStats> BuildBypassStats() {
-    return base::MakeUnique<DataReductionProxyBypassStats>(
+    return std::make_unique<DataReductionProxyBypassStats>(
         test_context_->config(), test_context_->unreachable_callback());
   }
 
@@ -395,8 +395,8 @@ class DataReductionProxyBypassStatsEndToEndTest : public testing::Test {
     return request;
   }
 
-  void set_proxy_service(net::ProxyService* proxy_service) {
-    context_.set_proxy_service(proxy_service);
+  void set_proxy_resolution_service(net::ProxyResolutionService* proxy_resolution_service) {
+    context_.set_proxy_resolution_service(proxy_resolution_service);
   }
 
   void set_host_resolver(net::HostResolver* host_resolver) {
@@ -416,11 +416,12 @@ class DataReductionProxyBypassStatsEndToEndTest : public testing::Test {
   }
 
   void ClearBadProxies() {
-    context_.proxy_service()->ClearBadProxiesCache();
+    context_.proxy_resolution_service()->ClearBadProxiesCache();
   }
 
   void InitializeContext() {
     context_.Init();
+    drp_test_context_->DisableWarmupURLFetch();
     drp_test_context_->EnableDataReductionProxyWithSecureProxyCheckSuccess();
   }
 
@@ -596,9 +597,9 @@ TEST_F(DataReductionProxyBypassStatsEndToEndTest, URLRedirectCycle) {
 
 TEST_F(DataReductionProxyBypassStatsEndToEndTest,
        BypassedBytesProxyOverridden) {
-  std::unique_ptr<net::ProxyService> proxy_service(
-      net::ProxyService::CreateFixed("http://test.com:80"));
-  set_proxy_service(proxy_service.get());
+  std::unique_ptr<net::ProxyResolutionService> proxy_resolution_service(
+      net::ProxyResolutionService::CreateFixed("http://test.com:80"));
+  set_proxy_resolution_service(proxy_resolution_service.get());
   InitializeContext();
 
   base::HistogramTester histogram_tester;

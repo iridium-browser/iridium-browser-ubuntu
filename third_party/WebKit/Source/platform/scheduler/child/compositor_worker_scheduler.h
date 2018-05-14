@@ -9,7 +9,10 @@
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "platform/PlatformExport.h"
+#include "platform/scheduler/child/compositor_metrics_helper.h"
 #include "platform/scheduler/child/worker_scheduler.h"
+#include "platform/scheduler/util/task_duration_metric_reporter.h"
+#include "public/platform/WebThreadType.h"
 #include "public/platform/scheduler/child/single_thread_idle_task_runner.h"
 
 namespace base {
@@ -19,25 +22,31 @@ class Thread;
 namespace blink {
 namespace scheduler {
 
-class SchedulerTqmDelegate;
-
 class PLATFORM_EXPORT CompositorWorkerScheduler
     : public WorkerScheduler,
       public SingleThreadIdleTaskRunner::Delegate {
  public:
   CompositorWorkerScheduler(
       base::Thread* thread,
-      scoped_refptr<SchedulerTqmDelegate> main_task_runner);
+      std::unique_ptr<TaskQueueManager> task_queue_manager);
+
   ~CompositorWorkerScheduler() override;
 
   // WorkerScheduler:
-  void Init() override;
   scoped_refptr<WorkerTaskQueue> DefaultTaskQueue() override;
+  void Init() override;
+  void OnTaskCompleted(WorkerTaskQueue* worker_task_queue,
+                       const TaskQueue::Task& task,
+                       base::TimeTicks start,
+                       base::TimeTicks end,
+                       base::Optional<base::TimeDelta> thread_time) override;
+  void SetThreadType(WebThreadType thread_type) override;
 
   // ChildScheduler:
   scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() override;
   scoped_refptr<scheduler::SingleThreadIdleTaskRunner> IdleTaskRunner()
       override;
+  scoped_refptr<base::SingleThreadTaskRunner> IPCTaskRunner() override;
   bool ShouldYieldForHighPriorityWork() override;
   bool CanExceedIdleDeadlineIfRequired() const override;
   void AddTaskObserver(base::MessageLoop::TaskObserver* task_observer) override;
@@ -53,6 +62,8 @@ class PLATFORM_EXPORT CompositorWorkerScheduler
 
  private:
   base::Thread* thread_;
+
+  CompositorMetricsHelper compositor_metrics_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(CompositorWorkerScheduler);
 };

@@ -33,8 +33,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "platform/wtf/PtrUtil.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -45,13 +45,13 @@ TEST(SharedBufferTest, getAsBytes) {
   char test_data1[] = "World";
   char test_data2[] = "Goodbye";
 
-  RefPtr<SharedBuffer> shared_buffer =
+  scoped_refptr<SharedBuffer> shared_buffer =
       SharedBuffer::Create(test_data0, strlen(test_data0));
   shared_buffer->Append(test_data1, strlen(test_data1));
   shared_buffer->Append(test_data2, strlen(test_data2));
 
   const size_t size = shared_buffer->size();
-  std::unique_ptr<char[]> data = WrapArrayUnique(new char[size]);
+  auto data = std::make_unique<char[]>(size);
   ASSERT_TRUE(shared_buffer->GetBytes(data.get(), size));
 
   char expected_concatenation[] = "HelloWorldGoodbye";
@@ -65,7 +65,7 @@ TEST(SharedBufferTest, getPartAsBytes) {
   char test_data1[] = "World";
   char test_data2[] = "Goodbye";
 
-  RefPtr<SharedBuffer> shared_buffer =
+  scoped_refptr<SharedBuffer> shared_buffer =
       SharedBuffer::Create(test_data0, strlen(test_data0));
   shared_buffer->Append(test_data1, strlen(test_data1));
   shared_buffer->Append(test_data2, strlen(test_data2));
@@ -77,7 +77,7 @@ TEST(SharedBufferTest, getPartAsBytes) {
       {17, "HelloWorldGoodbye"}, {7, "HelloWo"}, {3, "Hel"},
   };
   for (TestData& test : test_data) {
-    std::unique_ptr<char[]> data = WrapArrayUnique(new char[test.size]);
+    auto data = std::make_unique<char[]>(test.size);
     ASSERT_TRUE(shared_buffer->GetBytes(data.get(), test.size));
     EXPECT_EQ(0, memcmp(test.expected, data.get(), test.size));
   }
@@ -94,12 +94,13 @@ TEST(SharedBufferTest, getAsBytesLargeSegments) {
   for (size_t i = 0; i < vector2.size(); ++i)
     vector2[i] = 'c';
 
-  RefPtr<SharedBuffer> shared_buffer = SharedBuffer::AdoptVector(vector0);
+  scoped_refptr<SharedBuffer> shared_buffer =
+      SharedBuffer::AdoptVector(vector0);
   shared_buffer->Append(vector1);
   shared_buffer->Append(vector2);
 
   const size_t size = shared_buffer->size();
-  std::unique_ptr<char[]> data = WrapArrayUnique(new char[size]);
+  auto data = std::make_unique<char[]>(size);
   ASSERT_TRUE(shared_buffer->GetBytes(data.get(), size));
 
   ASSERT_EQ(0x4000U + 0x4000U + 0x4000U, size);
@@ -123,7 +124,7 @@ TEST(SharedBufferTest, copy) {
   std::generate(test_data.begin(), test_data.end(), &std::rand);
 
   size_t length = test_data.size();
-  RefPtr<SharedBuffer> shared_buffer =
+  scoped_refptr<SharedBuffer> shared_buffer =
       SharedBuffer::Create(test_data.data(), length);
   shared_buffer->Append(test_data.data(), length);
   shared_buffer->Append(test_data.data(), length);
@@ -144,7 +145,7 @@ TEST(SharedBufferTest, copy) {
 
 TEST(SharedBufferTest, constructorWithSizeOnly) {
   size_t length = 10000;
-  RefPtr<SharedBuffer> shared_buffer = SharedBuffer::Create(length);
+  scoped_refptr<SharedBuffer> shared_buffer = SharedBuffer::Create(length);
   ASSERT_EQ(length, shared_buffer->size());
 
   // The internal flat buffer should have been resized to |length| therefore
@@ -154,7 +155,7 @@ TEST(SharedBufferTest, constructorWithSizeOnly) {
 }
 
 TEST(SharedBufferTest, FlatData) {
-  auto check_flat_data = [](RefPtr<const SharedBuffer> shared_buffer) {
+  auto check_flat_data = [](scoped_refptr<const SharedBuffer> shared_buffer) {
     const SharedBuffer::DeprecatedFlatData flat_buffer(shared_buffer);
 
     EXPECT_EQ(shared_buffer->size(), flat_buffer.size());
@@ -172,7 +173,7 @@ TEST(SharedBufferTest, FlatData) {
     });
   };
 
-  RefPtr<SharedBuffer> shared_buffer = SharedBuffer::Create();
+  scoped_refptr<SharedBuffer> shared_buffer = SharedBuffer::Create();
 
   // Add enough data to hit a couple of segments.
   while (shared_buffer->size() < 10000) {

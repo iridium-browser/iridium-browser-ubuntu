@@ -15,8 +15,10 @@
 #include "content/public/test/test_content_client_initializer.h"
 #include "gpu/config/gpu_info_collector.h"
 #include "gpu/config/gpu_util.h"
+#include "gpu/ipc/in_process_command_buffer.h"
 #include "media/base/media.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gl/init/gl_factory.h"
 #include "ui/gl/test/gl_surface_test_support.h"
 
 #if defined(OS_WIN)
@@ -37,8 +39,7 @@ namespace {
 
 class TestInitializationListener : public testing::EmptyTestEventListener {
  public:
-  TestInitializationListener() : test_content_client_initializer_(NULL) {
-  }
+  TestInitializationListener() : test_content_client_initializer_(nullptr) {}
 
   void OnTestStart(const testing::TestInfo& test_info) override {
     test_content_client_initializer_ =
@@ -83,14 +84,23 @@ void ContentTestSuite::Initialize() {
   media::InitializeMediaLibrary();
   // When running in a child process for Mac sandbox tests, the sandbox exists
   // to initialize GL, so don't do it here.
-  bool is_child_process = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kTestChildProcess);
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  bool is_child_process = command_line->HasSwitch(switches::kTestChildProcess);
   if (!is_child_process) {
+    gl::GLSurfaceTestSupport::InitializeNoExtensionsOneOff();
     gpu::GPUInfo gpu_info;
-    gpu::CollectBasicGraphicsInfo(&gpu_info);
-    gpu::ApplyGpuDriverBugWorkarounds(gpu_info,
-                                      base::CommandLine::ForCurrentProcess());
-    gl::GLSurfaceTestSupport::InitializeOneOff();
+    gpu::CollectGraphicsInfoForTesting(&gpu_info);
+    gpu::GpuFeatureInfo gpu_feature_info =
+        gpu::ComputeGpuFeatureInfo(gpu_info,
+                                   false,  // ignore_gpu_blacklist
+                                   false,  // disable_gpu_driver_bug_workarounds
+                                   false,  // log_gpu_control_list_decisions
+                                   command_line, nullptr);
+    gpu::InProcessCommandBuffer::InitializeDefaultServiceForTesting(
+        gpu_feature_info);
+    gl::init::SetDisabledExtensionsPlatform(
+        gpu_feature_info.disabled_extensions);
+    gl::init::InitializeExtensionSettingsOneOffPlatform();
   }
   testing::TestEventListeners& listeners =
       testing::UnitTest::GetInstance()->listeners();

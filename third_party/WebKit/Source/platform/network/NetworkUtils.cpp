@@ -4,7 +4,6 @@
 
 #include "platform/network/NetworkUtils.h"
 
-#include "components/mime_util/mime_util.h"
 #include "net/base/data_url.h"
 #include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
@@ -19,6 +18,7 @@
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/URLConversion.h"
 #include "public/platform/WebString.h"
+#include "third_party/WebKit/public/common/mime_util/mime_util.h"
 #include "url/gurl.h"
 
 namespace {
@@ -64,7 +64,7 @@ String GetDomainAndRegistry(const String& host, PrivateRegistryFilter filter) {
   return String(domain.data(), domain.length());
 }
 
-PassRefPtr<SharedBuffer> ParseDataURLAndPopulateResponse(
+scoped_refptr<SharedBuffer> ParseDataURLAndPopulateResponse(
     const KURL& url,
     ResourceResponse& response) {
   // The following code contains duplication of GetInfoFromDataURL() and
@@ -83,10 +83,10 @@ PassRefPtr<SharedBuffer> ParseDataURLAndPopulateResponse(
   if (result != net::OK)
     return nullptr;
 
-  if (!mime_util::IsSupportedMimeType(utf8_mime_type))
+  if (!blink::IsSupportedMimeType(utf8_mime_type))
     return nullptr;
 
-  RefPtr<SharedBuffer> data =
+  scoped_refptr<SharedBuffer> data =
       SharedBuffer::Create(data_string.data(), data_string.size());
   response.SetHTTPStatusCode(200);
   response.SetHTTPStatusText("OK");
@@ -110,13 +110,21 @@ bool IsDataURLMimeTypeSupported(const KURL& url) {
   std::string utf8_charset;
   if (net::DataURL::Parse(WebStringToGURL(url.GetString()), &utf8_mime_type,
                           &utf8_charset, nullptr)) {
-    return mime_util::IsSupportedMimeType(utf8_mime_type);
+    return blink::IsSupportedMimeType(utf8_mime_type);
   }
   return false;
 }
 
 bool IsRedirectResponseCode(int response_code) {
   return net::HttpResponseHeaders::IsRedirectResponseCode(response_code);
+}
+
+bool IsCertificateTransparencyRequiredError(int error_code) {
+  return error_code == net::ERR_CERTIFICATE_TRANSPARENCY_REQUIRED;
+}
+
+bool IsLegacySymantecCertError(int error_code) {
+  return error_code == net::ERR_CERT_SYMANTEC_LEGACY;
 }
 
 }  // NetworkUtils

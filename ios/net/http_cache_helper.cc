@@ -12,7 +12,6 @@
 #include "base/location.h"
 #include "base/task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "net/base/sdch_manager.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
@@ -40,9 +39,13 @@ void DoomHttpCache(std::unique_ptr<disk_cache::Backend*> backend,
                    int error) {
   // |*backend| may be null in case of error.
   if (*backend) {
-    (*backend)->DoomEntriesBetween(
+    const int rv = (*backend)->DoomEntriesBetween(
         delete_begin, delete_end,
         base::Bind(&PostCallback, client_task_runner, callback));
+    // DoomEntriesBetween does not invoke callback unless rv is ERR_IO_PENDING.
+    if (rv != net::ERR_IO_PENDING) {
+      client_task_runner->PostTask(FROM_HERE, base::BindOnce(callback, rv));
+    }
   } else {
     client_task_runner->PostTask(FROM_HERE, base::Bind(callback, error));
   }
@@ -64,15 +67,6 @@ void ClearHttpCacheOnIOThread(
       ->quic_stream_factory()
       ->ClearCachedStatesInCryptoConfig(base::Callback<bool(const GURL&)>());
 
-  // Clear SDCH dictionary state.
-  net::SdchManager* sdch_manager =
-      getter->GetURLRequestContext()->sdch_manager();
-  // The test is probably overkill, since chrome should always have an
-  // SdchManager.  But in general the URLRequestContext  is *not*
-  // guaranteed to have an SdchManager, so checking is wise.
-  if (sdch_manager)
-    sdch_manager->ClearData();
-
   std::unique_ptr<disk_cache::Backend*> backend(
       new disk_cache::Backend*(nullptr));
   disk_cache::Backend** backend_ptr = backend.get();
@@ -80,8 +74,7 @@ void ClearHttpCacheOnIOThread(
       base::Bind(&DoomHttpCache, base::Passed(std::move(backend)),
                  client_task_runner, delete_begin, delete_end, callback);
 
-  int rv = http_cache->GetBackend(backend_ptr, doom_callback);
-
+  const int rv = http_cache->GetBackend(backend_ptr, doom_callback);
   if (rv != net::ERR_IO_PENDING) {
     // GetBackend doesn't call the callback if it completes synchronously, so
     // call it directly here.

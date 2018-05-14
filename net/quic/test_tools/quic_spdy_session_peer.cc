@@ -19,13 +19,9 @@ QuicHeadersStream* QuicSpdySessionPeer::GetHeadersStream(
 void QuicSpdySessionPeer::SetHeadersStream(QuicSpdySession* session,
                                            QuicHeadersStream* headers_stream) {
   session->headers_stream_.reset(headers_stream);
-  session->static_streams()[headers_stream->id()] = headers_stream;
-}
-
-// static
-void QuicSpdySessionPeer::SetForceHolBlocking(QuicSpdySession* session,
-                                              bool value) {
-  session->force_hol_blocking_ = value;
+  if (headers_stream != nullptr) {
+    session->static_streams()[headers_stream->id()] = headers_stream;
+  }
 }
 
 // static
@@ -58,9 +54,12 @@ size_t QuicSpdySessionPeer::WriteHeadersImpl(
     QuicStreamId id,
     SpdyHeaderBlock headers,
     bool fin,
-    SpdyPriority priority,
+    int weight,
+    QuicStreamId parent_stream_id,
+    bool exclusive,
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
-  return session->WriteHeadersImpl(id, std::move(headers), fin, priority,
+  return session->WriteHeadersImpl(id, std::move(headers), fin, weight,
+                                   parent_stream_id, exclusive,
                                    std::move(ack_listener));
 }
 

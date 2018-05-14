@@ -25,19 +25,19 @@ import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.autofill.AutofillPopup;
-import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.input.ChromiumBaseInputConnection;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content.browser.test.util.TestInputMethodManagerWrapper;
 import org.chromium.content.browser.test.util.TouchCommon;
+import org.chromium.content_public.browser.ContentViewCore;
+import org.chromium.content_public.browser.ImeAdapter;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.R;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
@@ -46,8 +46,7 @@ import java.util.concurrent.TimeoutException;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class AutofillPopupTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -141,12 +140,7 @@ public class AutofillPopupTest {
     public void setUp() throws Exception {
         mAutofillLoggedEntries = new ArrayList<AutofillLogger.LogEntry>();
         AutofillLogger.setLoggerForTesting(
-                new AutofillLogger.Logger() {
-                    @Override
-                    public void didFillField(AutofillLogger.LogEntry logEntry) {
-                        mAutofillLoggedEntries.add(logEntry);
-                    }
-                }
+                logEntry -> mAutofillLoggedEntries.add(logEntry)
         );
     }
 
@@ -162,9 +156,9 @@ public class AutofillPopupTest {
                 mActivityTestRule.getActivity().getCurrentContentViewCore();
         final WebContents webContents = viewCore.getWebContents();
         final ViewGroup view = viewCore.getContainerView();
-        final TestInputMethodManagerWrapper immw =
-                new TestInputMethodManagerWrapper(viewCore);
-        viewCore.getImeAdapterForTest().setInputMethodManagerWrapperForTest(immw);
+        final ImeAdapter imeAdapter = ImeAdapter.fromWebContents(webContents);
+        TestInputMethodManagerWrapper immw = TestInputMethodManagerWrapper.create(imeAdapter);
+        imeAdapter.setInputMethodManagerWrapper(immw);
 
         // Add an Autofill profile.
         AutofillProfile profile = new AutofillProfile(
@@ -183,13 +177,8 @@ public class AutofillPopupTest {
         waitForKeyboardShowRequest(immw, 1);
 
         final ChromiumBaseInputConnection inputConnection =
-                viewCore.getImeAdapterForTest().getInputConnectionForTest();
-        inputConnection.getHandler().post(new Runnable() {
-            @Override
-            public void run() {
-                inputConnection.setComposingText(inputText, 1);
-            }
-        });
+                (ChromiumBaseInputConnection) imeAdapter.getInputConnectionForTest();
+        inputConnection.getHandler().post(() -> inputConnection.setComposingText(inputText, 1));
 
         waitForAnchorViewAdd(view);
         View anchorView = view.findViewById(R.id.dropdown_popup_window);
@@ -317,12 +306,7 @@ public class AutofillPopupTest {
     private void waitForKeyboardShowRequest(final TestInputMethodManagerWrapper immw,
             final int count) {
         CriteriaHelper.pollUiThread(
-                Criteria.equals(count, new Callable<Integer>() {
-                    @Override
-                    public Integer call() {
-                        return immw.getShowSoftInputCounter();
-                    }
-                }));
+                Criteria.equals(count, () -> immw.getShowSoftInputCounter()));
     }
 
     private void waitForAnchorViewAdd(final ViewGroup view) {

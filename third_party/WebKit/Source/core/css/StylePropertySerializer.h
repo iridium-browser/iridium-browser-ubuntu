@@ -24,20 +24,20 @@
 #ifndef StylePropertySerializer_h
 #define StylePropertySerializer_h
 
-#include "core/css/CSSValueList.h"
-#include "core/css/StylePropertySet.h"
 #include <bitset>
+#include "core/css/CSSPropertyValueSet.h"
+#include "core/css/CSSValueList.h"
 
 namespace blink {
 
-class StylePropertySet;
+class CSSPropertyValueSet;
 class StylePropertyShorthand;
 
 class StylePropertySerializer {
   STACK_ALLOCATED();
 
  public:
-  explicit StylePropertySerializer(const StylePropertySet&);
+  explicit StylePropertySerializer(const CSSPropertyValueSet&);
 
   String AsText() const;
   String GetPropertyValue(CSSPropertyID) const;
@@ -54,11 +54,11 @@ class StylePropertySerializer {
                            String separator = " ") const;
   String FontValue() const;
   String FontVariantValue() const;
-  void AppendFontLonghandValueIfNotNormal(CSSPropertyID,
+  void AppendFontLonghandValueIfNotNormal(const CSSProperty&,
                                           StringBuilder& result) const;
   String OffsetValue() const;
   String BackgroundRepeatPropertyValue() const;
-  String GetPropertyText(CSSPropertyID,
+  String GetPropertyText(const CSSProperty&,
                          const String& value,
                          bool is_important,
                          bool is_not_first_decl) const;
@@ -82,22 +82,22 @@ class StylePropertySerializer {
 
    public:
     explicit PropertyValueForSerializer(
-        StylePropertySet::PropertyReference property)
+        CSSPropertyValueSet::PropertyReference property)
         : value_(property.Value()),
-          id_(property.Id()),
+          property_(property.Property()),
           is_important_(property.IsImportant()),
           is_inherited_(property.IsInherited()) {}
 
     // TODO(sashab): Make this take a const CSSValue&.
-    PropertyValueForSerializer(CSSPropertyID id,
+    PropertyValueForSerializer(const CSSProperty& property,
                                const CSSValue* value,
                                bool is_important)
         : value_(value),
-          id_(id),
+          property_(property),
           is_important_(is_important),
           is_inherited_(value->IsInheritedValue()) {}
 
-    CSSPropertyID Id() const { return id_; }
+    const CSSProperty& Property() const { return property_; }
     const CSSValue* Value() const { return value_; }
     bool IsImportant() const { return is_important_; }
     bool IsInherited() const { return is_inherited_; }
@@ -105,7 +105,7 @@ class StylePropertySerializer {
 
    private:
     Member<const CSSValue> value_;
-    CSSPropertyID id_;
+    const CSSProperty& property_;
     bool is_important_;
     bool is_inherited_;
   };
@@ -113,20 +113,20 @@ class StylePropertySerializer {
   String GetCustomPropertyText(const PropertyValueForSerializer&,
                                bool is_not_first_decl) const;
 
-  class StylePropertySetForSerializer final {
+  class CSSPropertyValueSetForSerializer final {
     DISALLOW_NEW();
 
    public:
-    explicit StylePropertySetForSerializer(const StylePropertySet&);
+    explicit CSSPropertyValueSetForSerializer(const CSSPropertyValueSet&);
 
     unsigned PropertyCount() const;
     PropertyValueForSerializer PropertyAt(unsigned index) const;
     bool ShouldProcessPropertyAt(unsigned index) const;
-    int FindPropertyIndex(CSSPropertyID) const;
-    const CSSValue* GetPropertyCSSValue(CSSPropertyID) const;
+    int FindPropertyIndex(const CSSProperty&) const;
+    const CSSValue* GetPropertyCSSValue(const CSSProperty&) const;
     bool IsDescriptorContext() const;
 
-    DECLARE_TRACE();
+    void Trace(blink::Visitor*);
 
    private:
     bool HasExpandedAllProperty() const {
@@ -134,13 +134,13 @@ class StylePropertySerializer {
     }
     bool HasAllProperty() const { return all_index_ != -1; }
 
-    Member<const StylePropertySet> property_set_;
+    Member<const CSSPropertyValueSet> property_set_;
     int all_index_;
     std::bitset<numCSSProperties> longhand_property_used_;
     bool need_to_expand_all_;
   };
 
-  const StylePropertySetForSerializer property_set_;
+  const CSSPropertyValueSetForSerializer property_set_;
 };
 
 }  // namespace blink

@@ -9,9 +9,11 @@
 #include "platform/scroll/ScrollbarTestSuite.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "platform/scroll/ScrollbarThemeMock.h"
+#include "platform/scroll/ScrollbarThemeOverlayMock.h"
 #include "platform/testing/FakeGraphicsLayer.h"
 #include "platform/testing/FakeGraphicsLayerClient.h"
-#include "platform/testing/TestingPlatformSupport.h"
+#include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 #include "public/platform/Platform.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -32,7 +34,10 @@ class ScrollbarThemeWithMockInvalidation : public ScrollbarThemeMock {
 
 }  // namespace
 
-using ScrollableAreaTest = ::testing::Test;
+class ScrollableAreaTest : public ::testing::Test {
+ private:
+  base::MessageLoop message_loop_;
+};
 
 TEST_F(ScrollableAreaTest, ScrollAnimatorCurrentPositionShouldBeSync) {
   ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
@@ -96,7 +101,7 @@ TEST_F(ScrollableAreaTest, ScrollbarGraphicsLayerInvalidation) {
       MockScrollableArea::Create(ScrollOffset(0, 100));
   FakeGraphicsLayerClient graphics_layer_client;
   graphics_layer_client.SetIsTrackingRasterInvalidations(true);
-  FakeGraphicsLayer graphics_layer(&graphics_layer_client);
+  FakeGraphicsLayer graphics_layer(graphics_layer_client);
   graphics_layer.SetDrawsContent(true);
   graphics_layer.SetSize(FloatSize(111, 222));
 
@@ -180,10 +185,10 @@ TEST_F(ScrollableAreaTest, InvalidatesCompositedScrollbarsIfPartsNeedRepaint) {
   // (e.g. if the track changes appearance when the thumb reaches the end).
   FakeGraphicsLayerClient graphics_layer_client;
   graphics_layer_client.SetIsTrackingRasterInvalidations(true);
-  FakeGraphicsLayer layer_for_horizontal_scrollbar(&graphics_layer_client);
+  FakeGraphicsLayer layer_for_horizontal_scrollbar(graphics_layer_client);
   layer_for_horizontal_scrollbar.SetDrawsContent(true);
   layer_for_horizontal_scrollbar.SetSize(FloatSize(10, 10));
-  FakeGraphicsLayer layer_for_vertical_scrollbar(&graphics_layer_client);
+  FakeGraphicsLayer layer_for_vertical_scrollbar(graphics_layer_client);
   layer_for_vertical_scrollbar.SetDrawsContent(true);
   layer_for_vertical_scrollbar.SetSize(FloatSize(10, 10));
   EXPECT_CALL(*scrollable_area, LayerForHorizontalScrollbar())
@@ -266,6 +271,38 @@ TEST_F(ScrollableAreaTest, ScrollableAreaDidScroll) {
   // After calling didScroll, the new offset should account for scroll origin.
   EXPECT_EQ(20, scrollable_area->ScrollOffsetInt().Width());
   EXPECT_EQ(21, scrollable_area->ScrollOffsetInt().Height());
+}
+
+// Scrollbars in popups shouldn't fade out since they aren't composited and thus
+// they don't appear on hover so users without a wheel can't scroll if they fade
+// out.
+TEST_F(ScrollableAreaTest, PopupOverlayScrollbarShouldNotFadeOut) {
+  ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
+      platform;
+
+  ScopedOverlayScrollbarsForTest overlay_scrollbars(true);
+  ScrollbarTheme::SetMockScrollbarsEnabled(true);
+
+  MockScrollableArea* scrollable_area =
+      MockScrollableArea::Create(ScrollOffset(0, 100));
+  scrollable_area->SetIsPopup();
+
+  ScrollbarThemeOverlayMock& theme =
+      (ScrollbarThemeOverlayMock&)scrollable_area->GetPageScrollbarTheme();
+  theme.SetOverlayScrollbarFadeOutDelay(1);
+  Scrollbar* scrollbar = Scrollbar::CreateForTesting(
+      scrollable_area, kHorizontalScrollbar, kRegularScrollbar, &theme);
+
+  DCHECK(scrollbar->IsOverlayScrollbar());
+  DCHECK(scrollbar->Enabled());
+
+  scrollable_area->ShowOverlayScrollbars();
+
+  // No fade out animation should be posted.
+  EXPECT_FALSE(scrollable_area->fade_overlay_scrollbars_timer_);
+
+  // Forced GC in order to finalize objects depending on the mock object.
+  ThreadState::Current()->CollectAllGarbage();
 }
 
 }  // namespace blink

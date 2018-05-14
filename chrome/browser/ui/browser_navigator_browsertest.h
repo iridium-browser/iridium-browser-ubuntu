@@ -16,10 +16,6 @@
 
 class Profile;
 
-namespace base {
-class CommandLine;
-}
-
 namespace content {
 class WebContents;
 }
@@ -30,8 +26,8 @@ class WebContents;
 class BrowserNavigatorTest : public InProcessBrowserTest,
                              public content::NotificationObserver {
  protected:
-  chrome::NavigateParams MakeNavigateParams() const;
-  chrome::NavigateParams MakeNavigateParams(Browser* browser) const;
+  NavigateParams MakeNavigateParams() const;
+  NavigateParams MakeNavigateParams(Browser* browser) const;
 
   Browser* CreateEmptyBrowserForType(Browser::Type type, Profile* profile);
   Browser* CreateEmptyBrowserForApp(Profile* profile);
@@ -42,9 +38,6 @@ class BrowserNavigatorTest : public InProcessBrowserTest,
   void RunUseNonIncognitoWindowTest(const GURL& url);
   void RunDoNothingIfIncognitoIsForcedTest(const GURL& url);
 
-  // InProcessBrowserTest:
-  void SetUpCommandLine(base::CommandLine* command_line) override;
-
   // content::NotificationObserver:
   void Observe(int type,
                const content::NotificationSource& source,
@@ -54,6 +47,10 @@ class BrowserNavigatorTest : public InProcessBrowserTest,
                                                 const std::string& post_data,
                                                 bool is_browser_initiated,
                                                 base::string16* title);
+
+  Browser* NavigateHelper(const GURL& url,
+                          Browser* browser,
+                          WindowOpenDisposition disposition);
 
   size_t created_tab_contents_count_;
 };

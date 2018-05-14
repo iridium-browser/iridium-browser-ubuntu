@@ -112,7 +112,7 @@ TEST_P(HistogramTest, BasicTest) {
       "TestCustomHistogram", custom_ranges, HistogramBase::kNoFlags);
   EXPECT_TRUE(custom_histogram);
 
-  // Macros that create hitograms have an internal static variable which will
+  // Macros that create histograms have an internal static variable which will
   // continue to point to those from the very first run of this method even
   // during subsequent runs.
   static bool already_run = false;
@@ -130,7 +130,7 @@ TEST_P(HistogramTest, BasicTest) {
 // Check that the macro correctly matches histograms by name and records their
 // data together.
 TEST_P(HistogramTest, NameMatchTest) {
-  // Macros that create hitograms have an internal static variable which will
+  // Macros that create histograms have an internal static variable which will
   // continue to point to those from the very first run of this method even
   // during subsequent runs.
   static bool already_run = false;
@@ -642,10 +642,10 @@ TEST_P(HistogramTest, BadConstruction) {
   // Try to get the same histogram name with different arguments.
   HistogramBase* bad_histogram = Histogram::FactoryGet(
       "BadConstruction", 0, 100, 7, HistogramBase::kNoFlags);
-  EXPECT_EQ(NULL, bad_histogram);
+  EXPECT_EQ(nullptr, bad_histogram);
   bad_histogram = Histogram::FactoryGet(
       "BadConstruction", 0, 99, 8, HistogramBase::kNoFlags);
-  EXPECT_EQ(NULL, bad_histogram);
+  EXPECT_EQ(nullptr, bad_histogram);
 
   HistogramBase* linear_histogram = LinearHistogram::FactoryGet(
       "BadConstructionLinear", 0, 100, 8, HistogramBase::kNoFlags);
@@ -654,10 +654,10 @@ TEST_P(HistogramTest, BadConstruction) {
   // Try to get the same histogram name with different arguments.
   bad_histogram = LinearHistogram::FactoryGet(
       "BadConstructionLinear", 0, 100, 7, HistogramBase::kNoFlags);
-  EXPECT_EQ(NULL, bad_histogram);
+  EXPECT_EQ(nullptr, bad_histogram);
   bad_histogram = LinearHistogram::FactoryGet(
       "BadConstructionLinear", 10, 100, 8, HistogramBase::kNoFlags);
-  EXPECT_EQ(NULL, bad_histogram);
+  EXPECT_EQ(nullptr, bad_histogram);
 }
 
 TEST_P(HistogramTest, FactoryTime) {

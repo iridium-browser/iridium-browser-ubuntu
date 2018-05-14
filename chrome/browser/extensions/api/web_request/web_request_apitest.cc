@@ -2,34 +2,43 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/devtools/url_constants.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_with_management_policy_apitest.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/extensions/test_extension_dir.h"
+#include "chrome/browser/net/profile_network_context_service.h"
+#include "chrome/browser/net/profile_network_context_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/login/login_handler.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/extensions/extension_process_policy.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/search_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/login/scoped_test_public_session_login_state.h"
+#include "components/prefs/pref_service.h"
+#include "components/proxy_config/proxy_config_dictionary.h"
+#include "components/proxy_config/proxy_config_pref_names.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
@@ -38,6 +47,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_type.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/url_loader_interceptor.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
 #include "extensions/browser/blocked_action_type.h"
 #include "extensions/browser/extension_system.h"
@@ -45,15 +55,22 @@
 #include "extensions/common/features/feature.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
+#include "extensions/test/test_extension_dir.h"
+#include "google_apis/gaia/gaia_switches.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/http/http_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/test_data_directory.h"
+#include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "net/url_request/url_request_filter.h"
+#include "net/url_request/url_request_interceptor.h"
+#include "services/network/public/cpp/features.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 
 #if defined(OS_CHROMEOS)
@@ -103,6 +120,10 @@ const char kPerformXhrJs[] =
     "  window.domAutomationController.send(false);\n"
     "};\n"
     "xhr.send();\n";
+
+// Header values set by the server and by the extension.
+const char kHeaderValueFromExtension[] = "ValueFromExtension";
+const char kHeaderValueFromServer[] = "ValueFromServer";
 
 // Performs an XHR in the given |frame|, replying when complete.
 void PerformXhrInFrame(content::RenderFrameHost* frame,
@@ -195,13 +216,58 @@ class TestURLFetcherDelegate : public net::URLFetcherDelegate {
   DISALLOW_COPY_AND_ASSIGN(TestURLFetcherDelegate);
 };
 
+// The DevTool's remote front-end is hardcoded to a URL with a fixed port.
+// Redirect all responses to a URL with port.
+class DevToolsFrontendInterceptor : public net::URLRequestInterceptor {
+ public:
+  DevToolsFrontendInterceptor(int port, const base::FilePath& root_dir)
+      : port_(port), test_root_dir_(root_dir) {}
+
+  net::URLRequestJob* MaybeInterceptRequest(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const override {
+    // The DevTools front-end has a hard-coded scheme (and implicit port 443).
+    // We simulate a response for it.
+    // net::URLRequestRedirectJob cannot be used because DevToolsUIBindings
+    // rejects URLs whose base URL is not the hard-coded URL.
+    if (request->url().EffectiveIntPort() != port_) {
+      return new net::URLRequestMockHTTPJob(
+          request, network_delegate,
+          test_root_dir_.AppendASCII(request->url().path().substr(1)));
+    }
+    return nullptr;
+  }
+
+ private:
+  int port_;
+  base::FilePath test_root_dir_;
+};
+
+void SetUpDevToolsFrontendInterceptorOnIO(int port,
+                                          const base::FilePath& root_dir) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  net::URLRequestFilter::GetInstance()->AddHostnameInterceptor(
+      "https", kRemoteFrontendDomain,
+      std::make_unique<DevToolsFrontendInterceptor>(port, root_dir));
+}
+
+void TearDownDevToolsFrontendInterceptorOnIO() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  net::URLRequestFilter::GetInstance()->ClearHandlers();
+}
+
 }  // namespace
 
 class ExtensionWebRequestApiTest : public ExtensionApiTest {
  public:
-  void SetUpInProcessBrowserTestFixture() override {
-    ExtensionApiTest::SetUpInProcessBrowserTestFixture();
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ExtensionApiTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(switches::kGaiaUrl, "http://gaia.com");
   }
 
   void RunPermissionTest(
@@ -210,6 +276,103 @@ class ExtensionWebRequestApiTest : public ExtensionApiTest {
       bool wait_for_extension_loaded_in_incognito,
       const char* expected_content_regular_window,
       const char* exptected_content_incognito_window);
+};
+
+class DevToolsFrontendInWebRequestApiTest : public ExtensionApiTest {
+ public:
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
+
+    int port = embedded_test_server()->port();
+
+    if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+      url_loader_interceptor_ = std::make_unique<content::URLLoaderInterceptor>(
+          base::BindRepeating(&DevToolsFrontendInWebRequestApiTest::OnIntercept,
+                              base::Unretained(this), port));
+    } else {
+      base::RunLoop run_loop;
+      content::BrowserThread::PostTaskAndReply(
+          content::BrowserThread::IO, FROM_HERE,
+          base::BindOnce(&SetUpDevToolsFrontendInterceptorOnIO, port,
+                         test_root_dir_),
+          run_loop.QuitClosure());
+      run_loop.Run();
+    }
+  }
+
+  void TearDownOnMainThread() override {
+    if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+      url_loader_interceptor_.reset();
+    } else {
+      base::RunLoop run_loop;
+      content::BrowserThread::PostTaskAndReply(
+          content::BrowserThread::IO, FROM_HERE,
+          base::BindOnce(&TearDownDevToolsFrontendInterceptorOnIO),
+          run_loop.QuitClosure());
+      run_loop.Run();
+    }
+    ExtensionApiTest::TearDownOnMainThread();
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ExtensionApiTest::SetUpCommandLine(command_line);
+
+    test_root_dir_ = test_data_dir_.AppendASCII("webrequest");
+
+    embedded_test_server()->ServeFilesFromDirectory(test_root_dir_);
+    ASSERT_TRUE(StartEmbeddedTestServer());
+    command_line->AppendSwitchASCII(
+        switches::kCustomDevtoolsFrontend,
+        embedded_test_server()
+            ->GetURL("customfrontend.example.com", "/devtoolsfrontend/")
+            .spec());
+  }
+
+ private:
+  bool OnIntercept(int test_server_port,
+                   content::URLLoaderInterceptor::RequestParams* params) {
+    // See comments in DevToolsFrontendInterceptor above. The devtools remote
+    // frontend URLs are hardcoded into Chrome and are requested by some of the
+    // tests here to exercise their behavior with respect to WebRequest.
+    //
+    // We treat any URL request not targeting the test server as targeting the
+    // remote frontend, and we intercept them to fulfill from test data rather
+    // than hitting the network.
+    if (params->url_request.url.EffectiveIntPort() == test_server_port)
+      return false;
+
+    std::string status_line;
+    std::string contents;
+    GetFileContents(
+        test_root_dir_.AppendASCII(params->url_request.url.path().substr(1)),
+        &status_line, &contents);
+    content::URLLoaderInterceptor::WriteResponse(status_line, contents,
+                                                 params->client.get());
+    return true;
+  }
+
+  static void GetFileContents(const base::FilePath& path,
+                              std::string* status_line,
+                              std::string* contents) {
+    base::ScopedAllowBlockingForTesting allow_io;
+    if (!base::ReadFileToString(path, contents)) {
+      *status_line = "HTTP/1.0 404 Not Found\n\n";
+      return;
+    }
+
+    std::string content_type;
+    if (path.Extension() == FILE_PATH_LITERAL(".html"))
+      content_type = "Content-type: text/html\n";
+    else if (path.Extension() == FILE_PATH_LITERAL(".js"))
+      content_type = "Content-type: application/javascript\n";
+
+    *status_line =
+        base::StringPrintf("HTTP/1.0 200 OK\n%s\n", content_type.c_str());
+  }
+
+  base::FilePath test_root_dir_;
+  std::unique_ptr<content::URLLoaderInterceptor> url_loader_interceptor_;
 };
 
 IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestApi) {
@@ -292,8 +455,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
 
 // Test that the webRequest events are dispatched with the expected details when
 // a frame or tab is immediately removed after starting a request.
+// Flaky on Linux/Mac. See crbug.com/780369 for detail.
+#if defined(OS_MACOSX) || defined(OS_LINUX)
+#define MAYBE_WebRequestUnloadImmediately DISABLED_WebRequestUnloadImmediately
+#else
+#define MAYBE_WebRequestUnloadImmediately WebRequestUnloadImmediately
+#endif
 IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
-                       WebRequestUnloadImmediately) {
+                       MAYBE_WebRequestUnloadImmediately) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_unload.html?5")) <<
       message_;
@@ -353,9 +522,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, MAYBE_WebRequestNewTab) {
 
   // There's a link on a.html with target=_blank. Click on it to open it in a
   // new tab.
-  blink::WebMouseEvent mouse_event(blink::WebInputEvent::kMouseDown,
-                                   blink::WebInputEvent::kNoModifiers,
-                                   blink::WebInputEvent::kTimeStampForTesting);
+  blink::WebMouseEvent mouse_event(
+      blink::WebInputEvent::kMouseDown, blink::WebInputEvent::kNoModifiers,
+      blink::WebInputEvent::GetStaticTimeStampForTests());
   mouse_event.button = blink::WebMouseEvent::Button::kLeft;
   mouse_event.SetPositionInWidget(7, 7);
   mouse_event.click_count = 1;
@@ -643,7 +812,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
   ASSERT_TRUE(embedded_test_server()->Start());
 
   // Load an extension that registers a listener for webRequest events, and
-  // wait 'til it's initialized.
+  // wait until it's initialized.
   ExtensionTestMessageListener listener("ready", false);
   const Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("webrequest_activetab"));
@@ -651,10 +820,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
   EXPECT_TRUE(listener.WaitUntilSatisfied());
 
   // Navigate the browser to a page in a new tab.
-  GURL url = embedded_test_server()->GetURL(
-                 "/cross-site/a.com/iframe_cross_site.html");
   const std::string kHost = "a.com";
-  chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
+  GURL url = embedded_test_server()->GetURL(kHost, "/iframe_cross_site.html");
+  NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   ui_test_utils::NavigateToURL(&params);
 
@@ -747,7 +915,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
   int port = embedded_test_server()->port();
 
   // Load an extension that registers a listener for webRequest events, and
-  // wait 'til it's initialized.
+  // wait until it's initialized.
   ExtensionTestMessageListener listener("ready", false);
   const Extension* extension = LoadExtension(
       test_data_dir_.AppendASCII("webrequest_clients_google_com"));
@@ -780,7 +948,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
                                     testcase.main_frame_url, port));
     }
 
-    chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_TYPED);
+    NavigateParams params(browser(), url, ui::PAGE_TRANSITION_TYPED);
     ui_test_utils::NavigateToURL(&params);
 
     EXPECT_EQ(expected_requests_observed,
@@ -844,6 +1012,159 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
   // This request should not be observed by the extension.
   EXPECT_EQ(expected_requests_observed,
             GetWebRequestCountFromBackgroundPage(extension, profile()));
+}
+
+// Verify that requests for PAC scripts are protected properly.
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
+                       WebRequestPacRequestProtection) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Load an extension that registers a listener for webRequest events, and
+  // wait until it's initialized.
+  ExtensionTestMessageListener listener("ready", false);
+  const Extension* extension =
+      LoadExtension(test_data_dir_.AppendASCII("webrequest_pac_request"));
+  ASSERT_TRUE(extension) << message_;
+  EXPECT_TRUE(listener.WaitUntilSatisfied());
+
+  // Configure a PAC script. Need to do this after the extension is loaded, so
+  // that the PAC isn't already loaded by the time the extension starts
+  // affecting requests.
+  PrefService* pref_service = browser()->profile()->GetPrefs();
+  pref_service->Set(proxy_config::prefs::kProxy,
+                    *ProxyConfigDictionary::CreatePacScript(
+                        embedded_test_server()->GetURL("/self.pac").spec(),
+                        true /* pac_mandatory */));
+  // Flush the proxy configuration change over the Mojo pipe to avoid any races.
+  ProfileNetworkContextServiceFactory::GetForContext(browser()->profile())
+      ->FlushProxyConfigMonitorForTesting();
+
+  // Navigate to a page. The URL doesn't matter.
+  ui_test_utils::NavigateToURL(browser(),
+                               embedded_test_server()->GetURL("/title2.html"));
+
+  // The extension should not have seen the PAC request.
+  EXPECT_EQ(0, GetCountFromBackgroundPage(extension, profile(),
+                                          "window.pacRequestCount"));
+
+  // The extension should have seen the request for the main frame.
+  EXPECT_EQ(1, GetCountFromBackgroundPage(extension, profile(),
+                                          "window.title2RequestCount"));
+
+  // The PAC request should have succeeded, as should the subsequent URL
+  // request.
+  EXPECT_EQ(content::PAGE_TYPE_NORMAL, browser()
+                                           ->tab_strip_model()
+                                           ->GetActiveWebContents()
+                                           ->GetController()
+                                           .GetLastCommittedEntry()
+                                           ->GetPageType());
+}
+
+// Checks that the Dice response header is protected for Gaia URLs, but not
+// other URLs.
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
+                       WebRequestDiceHeaderProtection) {
+  // Load an extension that registers a listener for webRequest events, and
+  // wait until it is initialized.
+  ExtensionTestMessageListener listener("ready", false);
+  const Extension* extension =
+      LoadExtension(test_data_dir_.AppendASCII("webrequest_dice_header"));
+  ASSERT_TRUE(extension) << message_;
+  EXPECT_TRUE(listener.WaitUntilSatisfied());
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Setup a web contents observer to inspect the response headers after the
+  // extension was run.
+  class TestWebContentsObserver : public content::WebContentsObserver {
+   public:
+    explicit TestWebContentsObserver(content::WebContents* contents)
+        : WebContentsObserver(contents) {}
+
+    void DidFinishNavigation(
+        content::NavigationHandle* navigation_handle) override {
+      // Check that the extension cannot add a Dice header.
+      const net::HttpResponseHeaders* headers =
+          navigation_handle->GetResponseHeaders();
+      EXPECT_TRUE(headers->GetNormalizedHeader(
+          "X-Chrome-ID-Consistency-Response", &dice_header_value_));
+      EXPECT_TRUE(
+          headers->GetNormalizedHeader("X-New-Header", &new_header_value_));
+      EXPECT_TRUE(
+          headers->GetNormalizedHeader("X-Control", &control_header_value_));
+      did_finish_navigation_called_ = true;
+    }
+
+    bool did_finish_navigation_called() const {
+      return did_finish_navigation_called_;
+    }
+
+    const std::string& dice_header_value() const { return dice_header_value_; }
+
+    const std::string& new_header_value() const { return new_header_value_; }
+
+    const std::string& control_header_value() const {
+      return control_header_value_;
+    }
+
+    void Clear() {
+      did_finish_navigation_called_ = false;
+      dice_header_value_.clear();
+      new_header_value_.clear();
+      control_header_value_.clear();
+    }
+
+   private:
+    bool did_finish_navigation_called_ = false;
+    std::string dice_header_value_;
+    std::string new_header_value_;
+    std::string control_header_value_;
+  };
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  TestWebContentsObserver test_webcontents_observer(web_contents);
+
+  // Navigate to the Gaia URL intercepted by the extension.
+  GURL url =
+      embedded_test_server()->GetURL("gaia.com", "/extensions/dice.html");
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  // Check that the Dice header was not changed by the extension.
+  EXPECT_TRUE(test_webcontents_observer.did_finish_navigation_called());
+  EXPECT_EQ(kHeaderValueFromServer,
+            test_webcontents_observer.dice_header_value());
+  EXPECT_EQ(kHeaderValueFromExtension,
+            test_webcontents_observer.new_header_value());
+  EXPECT_EQ(kHeaderValueFromExtension,
+            test_webcontents_observer.control_header_value());
+
+  // Check that the Dice header cannot be read by the extension.
+  EXPECT_EQ(0, GetCountFromBackgroundPage(extension, profile(),
+                                          "window.diceResponseHeaderCount"));
+  EXPECT_EQ(1, GetCountFromBackgroundPage(extension, profile(),
+                                          "window.controlResponseHeaderCount"));
+
+  // Navigate to a non-Gaia URL intercepted by the extension.
+  test_webcontents_observer.Clear();
+  url = embedded_test_server()->GetURL("example.com", "/extensions/dice.html");
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  // Check that the Dice header was changed by the extension.
+  EXPECT_TRUE(test_webcontents_observer.did_finish_navigation_called());
+  EXPECT_EQ(kHeaderValueFromExtension,
+            test_webcontents_observer.dice_header_value());
+  EXPECT_EQ(kHeaderValueFromExtension,
+            test_webcontents_observer.new_header_value());
+  EXPECT_EQ(kHeaderValueFromExtension,
+            test_webcontents_observer.control_header_value());
+
+  // Check that the Dice header can be read by the extension.
+  EXPECT_EQ(1, GetCountFromBackgroundPage(extension, profile(),
+                                          "window.diceResponseHeaderCount"));
+  EXPECT_EQ(2, GetCountFromBackgroundPage(extension, profile(),
+                                          "window.controlResponseHeaderCount"));
 }
 
 // Test that the webRequest events are dispatched for the WebSocket handshake
@@ -982,6 +1303,71 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
     url_fetcher.SetExpectedResponse(kExampleFullContent);
     url_fetcher.WaitForCompletion();
   }
+}
+
+// Test that initiator is only included as part of event details when the
+// extension has a permission matching the initiator.
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, MinimumAccessInitiator) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  ExtensionTestMessageListener listener("ready", false);
+  const Extension* extension = LoadExtension(
+      test_data_dir_.AppendASCII("webrequest_permissions/initiator"));
+  ASSERT_TRUE(extension) << message_;
+  EXPECT_TRUE(listener.WaitUntilSatisfied());
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(web_contents);
+
+  struct TestCase {
+    std::string navigate_before_start;
+    std::string xhr_domain;
+    std::string expected_initiator;
+  } testcases[] = {{"example.com", "example.com", "example.com"},
+                   {"example2.com", "example3.com", "example2.com"},
+                   {"no-permission.com", "example4.com", ""}};
+
+  int port = embedded_test_server()->port();
+  for (const auto& testcase : testcases) {
+    SCOPED_TRACE(testcase.navigate_before_start + ":" + testcase.xhr_domain +
+                 ":" + testcase.expected_initiator);
+    ExtensionTestMessageListener initiator_listener(false);
+    initiator_listener.set_extension_id(extension->id());
+    ui_test_utils::NavigateToURL(browser(), embedded_test_server()->GetURL(
+                                                testcase.navigate_before_start,
+                                                "/extensions/body1.html"));
+    PerformXhrInFrame(web_contents->GetMainFrame(), testcase.xhr_domain, port,
+                      "extensions/api_test/webrequest/xhr/data.json");
+    EXPECT_TRUE(initiator_listener.WaitUntilSatisfied());
+    if (testcase.expected_initiator.empty()) {
+      ASSERT_EQ("NO_INITIATOR", initiator_listener.message());
+    } else {
+      ASSERT_EQ(
+          "http://" + testcase.expected_initiator + ":" + std::to_string(port),
+          initiator_listener.message());
+    }
+  }
+}
+
+// Ensure that devtools frontend requests are hidden from the webRequest API.
+IN_PROC_BROWSER_TEST_F(DevToolsFrontendInWebRequestApiTest, HiddenRequests) {
+  // Test expectations differ with the Network Service because of the way
+  // request interception is done for the test. In the legacy networking path a
+  // URLRequestMockHTTPJob is used, which does not generate
+  // |onBeforeHeadersSent| events. With the Network Service enabled, requests
+  // issued to HTTP URLs by these tests look like real HTTP requests and
+  // therefore do generate |onBeforeHeadersSent| events.
+  //
+  // These tests adjust their expectations accordingly based on whether or not
+  // the Network Service is enabled.
+  const char* network_service_arg =
+      base::FeatureList::IsEnabled(network::features::kNetworkService)
+          ? "NetworkServiceEnabled"
+          : "NetworkServiceDisabled";
+  ASSERT_TRUE(RunExtensionSubtestWithArg("webrequest", "test_devtools.html",
+                                         network_service_arg))
+      << message_;
 }
 
 // Tests that the webRequest events aren't dispatched when the request initiator
@@ -1141,7 +1527,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTestWithManagementPolicy,
 
   // Navigate the browser to a page in a new tab.
   GURL url = embedded_test_server()->GetURL(protected_domain, "/empty.html");
-  chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
+  NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   ui_test_utils::NavigateToURL(&params);
 

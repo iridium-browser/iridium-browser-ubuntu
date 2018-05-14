@@ -37,6 +37,8 @@ message CertLoggerInterstitialInfo {
     // An interstitial telling the user to remove the Superfish software from
     // their system.
     INTERSTITIAL_SUPERFISH = 4;
+    // An interstitial telling the user to fix misconfigured MITM software.
+    INTERSTITIAL_MITM_SOFTWARE = 5;
   }
 
   // The type of interstitial that was shown
@@ -119,6 +121,7 @@ message CertLoggerRequest {
     ERR_CERT_NO_REVOCATION_MECHANISM = 12;
     ERR_CERT_NON_UNIQUE_NAME = 13;
     ERR_CERTIFICATE_TRANSPARENCY_REQUIRED = 14;
+    ERR_CERT_SYMANTEC_LEGACY = 15;
   };
 
   // Certificate errors encountered (if any) when validating this

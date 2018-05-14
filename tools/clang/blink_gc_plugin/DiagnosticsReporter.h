@@ -30,6 +30,9 @@ class DiagnosticsReporter {
   void BaseRequiresTracing(RecordInfo* derived,
                            clang::CXXMethodDecl* trace,
                            clang::CXXRecordDecl* base);
+  void BaseRequiresWrapperTracing(RecordInfo* derived,
+                                  clang::CXXMethodDecl* trace,
+                                  clang::CXXRecordDecl* base);
   void FieldsImproperlyTraced(RecordInfo* info,
                               clang::CXXMethodDecl* trace);
   void ClassContainsInvalidFields(
@@ -79,6 +82,14 @@ class DiagnosticsReporter {
   void NoteField(clang::FieldDecl* field, unsigned note);
   void NoteOverriddenNonVirtualTrace(clang::CXXMethodDecl* overridden);
 
+  // Used by FindBadPatterns.
+  void UniquePtrUsedWithGC(const clang::Expr* expr,
+                           const clang::FunctionDecl* bad_function,
+                           const clang::CXXRecordDecl* gc_type);
+  void OptionalUsedWithGC(const clang::Expr* expr,
+                          const clang::CXXRecordDecl* optional,
+                          const clang::CXXRecordDecl* gc_type);
+
  private:
   clang::DiagnosticBuilder ReportDiagnostic(
       clang::SourceLocation location,
@@ -95,6 +106,7 @@ class DiagnosticsReporter {
   unsigned diag_class_must_left_mostly_derive_gc_;
   unsigned diag_class_requires_trace_method_;
   unsigned diag_base_requires_tracing_;
+  unsigned diag_base_requires_wrapper_tracing_;
   unsigned diag_fields_require_tracing_;
   unsigned diag_fields_improperly_traced_;
   unsigned diag_class_contains_invalid_fields_;
@@ -139,6 +151,9 @@ class DiagnosticsReporter {
   unsigned diag_manual_dispatch_method_note_;
   unsigned diag_iterator_to_gc_managed_collection_note_;
   unsigned diag_trace_method_of_stack_allocated_parent_;
+
+  unsigned diag_unique_ptr_used_with_gc_;
+  unsigned diag_optional_used_with_gc_;
 };
 
 #endif // TOOLS_BLINK_GC_PLUGIN_DIAGNOSTICS_REPORTER_H_

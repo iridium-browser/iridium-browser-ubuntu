@@ -14,7 +14,7 @@
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/identity.h"
-#include "services/service_manager/public/interfaces/service.mojom.h"
+#include "services/service_manager/public/mojom/service.mojom.h"
 
 namespace content {
 
@@ -34,25 +34,23 @@ class ChildConnection::IOThreadContext
       connector_ = connector->Clone();
     child_identity_ = child_identity;
     io_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&IOThreadContext::InitializeOnIOThread, this,
-                   child_identity,
-                   base::Passed(&service_pipe)));
+        FROM_HERE, base::BindOnce(&IOThreadContext::InitializeOnIOThread, this,
+                                  child_identity, std::move(service_pipe)));
   }
 
   void BindInterface(const std::string& interface_name,
                      mojo::ScopedMessagePipeHandle interface_pipe) {
     io_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&IOThreadContext::BindInterfaceOnIOThread, this,
-                              interface_name, base::Passed(&interface_pipe)));
+        FROM_HERE,
+        base::BindOnce(&IOThreadContext::BindInterfaceOnIOThread, this,
+                       interface_name, std::move(interface_pipe)));
   }
 
   void ShutDown() {
     if (!io_task_runner_)
       return;
     bool posted = io_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&IOThreadContext::ShutDownOnIOThread, this));
+        FROM_HERE, base::BindOnce(&IOThreadContext::ShutDownOnIOThread, this));
     DCHECK(posted);
   }
 
@@ -67,8 +65,8 @@ class ChildConnection::IOThreadContext
   void SetProcessHandle(base::ProcessHandle handle) {
     DCHECK(io_task_runner_);
     io_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&IOThreadContext::SetProcessHandleOnIOThread, this, handle));
+        FROM_HERE, base::BindOnce(&IOThreadContext::SetProcessHandleOnIOThread,
+                                  this, handle));
   }
 
  private:

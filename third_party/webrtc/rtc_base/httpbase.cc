@@ -11,17 +11,18 @@
 #include <memory>
 
 #if defined(WEBRTC_WIN)
-#include "webrtc/rtc_base/win32.h"
+#include "rtc_base/win32.h"
 #else  // !WEBRTC_WIN
 #define SEC_E_CERT_EXPIRED (-2146893016)
 #endif  // !WEBRTC_WIN
 
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/httpbase.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/socket.h"
-#include "webrtc/rtc_base/stringutils.h"
-#include "webrtc/rtc_base/thread.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/httpbase.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/socket.h"
+#include "rtc_base/stringutils.h"
+#include "rtc_base/system/fallthrough.h"
+#include "rtc_base/thread.h"
 
 namespace rtc {
 
@@ -84,7 +85,7 @@ HttpParser::Process(const char* buffer, size_t len, size_t* processed,
         len -= 1;
       }
       ProcessResult result = ProcessLine(line, len, error);
-      LOG(LS_VERBOSE) << "Processed line, result=" << result;
+      RTC_LOG(LS_VERBOSE) << "Processed line, result=" << result;
 
       if (PR_CONTINUE != result) {
         return result;
@@ -106,8 +107,8 @@ HttpParser::Process(const char* buffer, size_t len, size_t* processed,
       size_t read = 0;
       ProcessResult result = ProcessData(buffer + *processed, available, read,
                                          error);
-      LOG(LS_VERBOSE) << "Processed data, result: " << result << " read: "
-                      << read << " err: " << error;
+      RTC_LOG(LS_VERBOSE) << "Processed data, result: " << result
+                          << " read: " << read << " err: " << error;
 
       if (PR_CONTINUE != result) {
         return result;
@@ -124,9 +125,9 @@ HttpParser::Process(const char* buffer, size_t len, size_t* processed,
 
 HttpParser::ProcessResult
 HttpParser::ProcessLine(const char* line, size_t len, HttpError* error) {
-  LOG_F(LS_VERBOSE) << " state: " << state_ << " line: "
-                    << std::string(line, len) << " len: " << len << " err: "
-                    << error;
+  RTC_LOG_F(LS_VERBOSE) << " state: " << state_
+                        << " line: " << std::string(line, len)
+                        << " len: " << len << " err: " << error;
 
   switch (state_) {
   case ST_LEADER:
@@ -494,7 +495,7 @@ HttpError HttpBase::HandleStreamClose(int error) {
   } else if (error == SEC_E_CERT_EXPIRED) {
     return HE_CERTIFICATE_EXPIRED;
   }
-  LOG_F(LS_ERROR) << "(" << error << ")";
+  RTC_LOG_F(LS_ERROR) << "(" << error << ")";
   return (HM_CONNECT == mode_) ? HE_CONNECT_FAILED : HE_SOCKET_ERROR;
 }
 
@@ -537,7 +538,7 @@ bool HttpBase::DoReceiveLoop(HttpError* error) {
       case SR_EOS:
         // Clean close, with no error.
         read_error = 0;
-        FALLTHROUGH();  // Fall through to HandleStreamClose.
+        RTC_FALLTHROUGH();  // Fall through to HandleStreamClose.
       case SR_ERROR:
         *error = HandleStreamClose(read_error);
         return true;
@@ -576,7 +577,7 @@ bool HttpBase::DoReceiveLoop(HttpError* error) {
     }
   } while (++loop_count <= kMaxReadCount);
 
-  LOG_F(LS_WARNING) << "danger of starvation";
+  RTC_LOG_F(LS_WARNING) << "danger of starvation";
   return false;
 }
 
@@ -668,7 +669,7 @@ HttpBase::flush_data() {
           // to be flushed to the network.
           send_required = true;
         } else {
-          LOG_F(LS_ERROR) << "Read error: " << error;
+          RTC_LOG_F(LS_ERROR) << "Read error: " << error;
           do_complete(HE_STREAM);
           return;
         }
@@ -699,7 +700,7 @@ HttpBase::flush_data() {
       }
     } else {
       RTC_DCHECK(result == SR_ERROR);
-      LOG_F(LS_ERROR) << "error";
+      RTC_LOG_F(LS_ERROR) << "error";
       OnHttpStreamEvent(http_stream_, SE_CLOSE, error);
       return;
     }
@@ -720,7 +721,8 @@ HttpBase::queue_headers() {
       len_ += len;
       ++header_;
     } else if (len_ == 0) {
-      LOG(WARNING) << "discarding header that is too long: " << header_->first;
+      RTC_LOG(WARNING) << "discarding header that is too long: "
+                       << header_->first;
       ++header_;
     } else {
       // Not enough room for the next header, write to network first.
@@ -806,7 +808,7 @@ HttpBase::OnDocumentEvent(StreamInterface* stream, int events, int error) {
   }
 
   if (events & SE_CLOSE) {
-    LOG_F(LS_ERROR) << "Read error: " << error;
+    RTC_LOG_F(LS_ERROR) << "Read error: " << error;
     do_complete(HE_STREAM);
     return;
   }
@@ -866,12 +868,12 @@ HttpBase::ProcessData(const char* data, size_t len, size_t& read,
   case SR_BLOCK:
     return PR_BLOCK;
   case SR_EOS:
-    LOG_F(LS_ERROR) << "Unexpected EOS";
+    RTC_LOG_F(LS_ERROR) << "Unexpected EOS";
     *error = HE_STREAM;
     return PR_COMPLETE;
   case SR_ERROR:
   default:
-    LOG_F(LS_ERROR) << "Write error: " << write_error;
+    RTC_LOG_F(LS_ERROR) << "Write error: " << write_error;
     *error = HE_STREAM;
     return PR_COMPLETE;
   }
@@ -879,7 +881,7 @@ HttpBase::ProcessData(const char* data, size_t len, size_t& read,
 
 void
 HttpBase::OnComplete(HttpError err) {
-  LOG_F(LS_VERBOSE);
+  RTC_LOG_F(LS_VERBOSE);
   do_complete(err);
 }
 

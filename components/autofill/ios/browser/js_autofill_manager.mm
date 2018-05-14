@@ -4,16 +4,48 @@
 
 #import "components/autofill/ios/browser/js_autofill_manager.h"
 
+#include "base/command_line.h"
 #include "base/format_macros.h"
 #include "base/json/string_escape.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "components/autofill/ios/browser/autofill_switches.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-@implementation JsAutofillManager
+@implementation JsAutofillManager {
+  // The injection receiver used to evaluate JavaScript.
+  CRWJSInjectionReceiver* _receiver;
+}
+
+- (instancetype)initWithReceiver:(CRWJSInjectionReceiver*)receiver {
+  DCHECK(receiver);
+  self = [super init];
+  if (self) {
+    _receiver = receiver;
+  }
+  return self;
+}
+
+- (void)addJSDelay {
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(
+          autofill::switches::kAutofillIOSDelayBetweenFields)) {
+    std::string delayString = command_line->GetSwitchValueASCII(
+        autofill::switches::kAutofillIOSDelayBetweenFields);
+    int commandLineDelay = 0;
+    if (base::StringToInt(delayString, &commandLineDelay)) {
+      NSString* setDelayJS =
+          [NSString stringWithFormat:@"__gCrWeb.autofill.setDelay(%d);",
+                                     commandLineDelay];
+      [_receiver executeJavaScript:setDelayJS completionHandler:nil];
+    }
+  }
+}
 
 - (void)fetchFormsWithMinimumRequiredFieldsCount:(NSUInteger)requiredFieldsCount
                                completionHandler:
@@ -22,27 +54,24 @@
   NSString* extractFormsJS = [NSString
       stringWithFormat:@"__gCrWeb.autofill.extractForms(%" PRIuNS ");",
                        requiredFieldsCount];
-  [self executeJavaScript:extractFormsJS
-        completionHandler:^(id result, NSError*) {
-          completionHandler(base::mac::ObjCCastStrict<NSString>(result));
-        }];
+  [_receiver executeJavaScript:extractFormsJS
+             completionHandler:^(id result, NSError*) {
+               completionHandler(base::mac::ObjCCastStrict<NSString>(result));
+             }];
 }
 
 #pragma mark -
 #pragma mark ProtectedMethods
-
-- (NSString*)scriptPath {
-  return @"autofill_controller";
-}
 
 - (void)fillActiveFormField:(NSString*)dataString
           completionHandler:(ProceduralBlock)completionHandler {
   NSString* script =
       [NSString stringWithFormat:@"__gCrWeb.autofill.fillActiveFormField(%@);",
                                  dataString];
-  [self executeJavaScript:script completionHandler:^(id, NSError*) {
-    completionHandler();
-  }];
+  [_receiver executeJavaScript:script
+             completionHandler:^(id, NSError*) {
+               completionHandler();
+             }];
 }
 
 - (void)fillForm:(NSString*)dataString
@@ -56,9 +85,10 @@
   NSString* fillFormJS =
       [NSString stringWithFormat:@"__gCrWeb.autofill.fillForm(%@, %s);",
                                  dataString, fieldName.c_str()];
-  [self executeJavaScript:fillFormJS completionHandler:^(id, NSError*) {
-    completionHandler();
-  }];
+  [_receiver executeJavaScript:fillFormJS
+             completionHandler:^(id, NSError*) {
+               completionHandler();
+             }];
 }
 
 - (void)clearAutofilledFieldsForFormNamed:(NSString*)formName
@@ -68,16 +98,17 @@
       [NSString stringWithFormat:
                     @"__gCrWeb.autofill.clearAutofilledFields(%s);",
                     base::GetQuotedJSONString([formName UTF8String]).c_str()];
-  [self executeJavaScript:script completionHandler:^(id, NSError*) {
-    completionHandler();
-  }];
+  [_receiver executeJavaScript:script
+             completionHandler:^(id, NSError*) {
+               completionHandler();
+             }];
 }
 
 - (void)fillPredictionData:(NSString*)dataString {
   NSString* script =
       [NSString stringWithFormat:@"__gCrWeb.autofill.fillPredictionData(%@);",
                                  dataString];
-  [self executeJavaScript:script completionHandler:nil];
+  [_receiver executeJavaScript:script completionHandler:nil];
 }
 
 @end

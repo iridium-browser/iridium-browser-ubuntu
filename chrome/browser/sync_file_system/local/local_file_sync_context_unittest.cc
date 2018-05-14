@@ -33,8 +33,7 @@
 #include "storage/browser/fileapi/isolated_context.h"
 #include "storage/browser/test/mock_blob_url_request_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/leveldatabase/src/helpers/memenv/memenv.h"
-#include "third_party/leveldatabase/src/include/leveldb/env.h"
+#include "third_party/leveldatabase/leveldb_chrome.h"
 
 #define FPL FILE_PATH_LITERAL
 
@@ -68,7 +67,7 @@ class LocalFileSyncContextTest : public testing::Test {
   void SetUp() override {
     RegisterSyncableFileSystem();
     ASSERT_TRUE(dir_.CreateUniqueTempDir());
-    in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
+    in_memory_env_.reset(leveldb_chrome::NewMemEnv(leveldb::Env::Default()));
 
     ui_task_runner_ = base::ThreadTaskRunnerHandle::Get();
     io_task_runner_ = BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
@@ -134,7 +133,7 @@ class LocalFileSyncContextTest : public testing::Test {
     *changes_out = sync_file_info.changes;
     if (snapshot_out)
       *snapshot_out = std::move(snapshot);
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
   SyncStatusCode ApplyRemoteChange(FileSystemContext* file_system_context,
@@ -217,14 +216,13 @@ class LocalFileSyncContextTest : public testing::Test {
                           SyncStatusCode status,
                           LocalFileSyncContext::SyncMode sync_mode) {
     if (sync_mode == LocalFileSyncContext::SYNC_SNAPSHOT) {
-      sync_context_->FinalizeSnapshotSync(
-          file_system_context, url, status,
-          base::Bind(&base::DoNothing));
+      sync_context_->FinalizeSnapshotSync(file_system_context, url, status,
+                                          base::DoNothing());
     } else {
       sync_context_->FinalizeExclusiveSync(
           file_system_context, url,
           status == SYNC_STATUS_OK /* clear_local_changes */,
-          base::Bind(&base::DoNothing));
+          base::DoNothing());
     }
   }
 
@@ -612,7 +610,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForDeletion) {
   // Record the initial usage (likely 0).
   int64_t initial_usage = -1;
   int64_t quota = -1;
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system.GetUsageAndQuota(&initial_usage, &quota));
 
   // Create a file and directory in the file_system.
@@ -638,7 +636,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForDeletion) {
 
   // At this point the usage must be greater than the initial usage.
   int64_t new_usage = -1;
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system.GetUsageAndQuota(&new_usage, &quota));
   EXPECT_GT(new_usage, initial_usage);
 
@@ -674,7 +672,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForDeletion) {
   EXPECT_TRUE(urls.empty());
 
   // The quota usage data must have reflected the deletion.
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system.GetUsageAndQuota(&new_usage, &quota));
   EXPECT_EQ(new_usage, initial_usage);
 
@@ -700,7 +698,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForDeletion_ForRoot) {
   // Record the initial usage (likely 0).
   int64_t initial_usage = -1;
   int64_t quota = -1;
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system.GetUsageAndQuota(&initial_usage, &quota));
 
   // Create a file and directory in the file_system.
@@ -714,7 +712,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForDeletion_ForRoot) {
 
   // At this point the usage must be greater than the initial usage.
   int64_t new_usage = -1;
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system.GetUsageAndQuota(&new_usage, &quota));
   EXPECT_GT(new_usage, initial_usage);
 
@@ -741,7 +739,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForDeletion_ForRoot) {
   EXPECT_TRUE(urls.empty());
 
   // The quota usage data must have reflected the deletion.
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system.GetUsageAndQuota(&new_usage, &quota));
   EXPECT_EQ(new_usage, initial_usage);
 
@@ -807,7 +805,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForAddOrUpdate) {
   // Record the usage.
   int64_t usage = -1, new_usage = -1;
   int64_t quota = -1;
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system.GetUsageAndQuota(&usage, &quota));
 
   // Here in the local filesystem we have:
@@ -834,7 +832,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForAddOrUpdate) {
   // Check if the usage has been increased by (kTestFileData1 - kTestFileData0).
   const int updated_size =
       arraysize(kTestFileData1) - arraysize(kTestFileData0);
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system.GetUsageAndQuota(&new_usage, &quota));
   EXPECT_EQ(updated_size, new_usage - usage);
 
@@ -881,7 +879,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForAddOrUpdate) {
   // Creating a file/directory must have increased the usage more than
   // the size of kTestFileData2.
   new_usage = usage;
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system.GetUsageAndQuota(&new_usage, &quota));
   EXPECT_GT(new_usage,
             static_cast<int64_t>(usage + arraysize(kTestFileData2) - 1));

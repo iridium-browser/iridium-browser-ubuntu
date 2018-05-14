@@ -128,8 +128,8 @@ void EasyUnlockAppManagerImpl::DisableAppIfLoaded() {
   if (!extension_service->component_loader()->Exists(app_id_))
     return;
 
-  extension_service->DisableExtension(app_id_,
-                                      extensions::Extension::DISABLE_RELOAD);
+  extension_service->DisableExtension(
+      app_id_, extensions::disable_reason::DISABLE_RELOAD);
 }
 
 void EasyUnlockAppManagerImpl::ReloadApp() {
@@ -184,11 +184,15 @@ bool EasyUnlockAppManagerImpl::SendAuthAttemptEvent() {
     return false;
 
   // TODO(tbarzic): Restrict this to EasyUnlock app.
+#if defined(OS_CHROMEOS)
   extensions::ScreenlockPrivateEventRouter* screenlock_router =
       extensions::ScreenlockPrivateEventRouter::GetFactoryInstance()->Get(
           extension_service->profile());
   return screenlock_router->OnAuthAttempted(
       proximity_auth::mojom::AuthType::USER_CLICK, std::string());
+#else
+  return false;
+#endif  // defined(OS_CHROMEOS)
 }
 
 }  // namespace

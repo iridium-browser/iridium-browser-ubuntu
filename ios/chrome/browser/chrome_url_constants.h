@@ -17,11 +17,9 @@
 // kChromeUIScheme defined in content/public/common/url_constants.h until Chrome
 // on iOS stops depending on //content downstream.
 extern const char kChromeUIScheme[];
-extern const char kDummyExtensionScheme[];
 
 // chrome: URLs (including schemes). Should be kept in sync with the
 // URL components below.
-extern const char kChromeUIBookmarksURL[];
 extern const char kChromeUIChromeURLsURL[];
 extern const char kChromeUICreditsURL[];
 extern const char kChromeUIFlagsURL[];
@@ -29,7 +27,6 @@ extern const char kChromeUIHistoryURL[];
 extern const char kChromeUINewTabURL[];
 extern const char kChromeUINTPTilesInternalsURL[];
 extern const char kChromeUIOfflineURL[];
-extern const char kChromeUIPhysicalWebURL[];
 extern const char kChromeUIPopularSitesInternalsURL[];
 extern const char kChromeUISettingsURL[];
 extern const char kChromeUISuggestionsURL[];
@@ -37,7 +34,6 @@ extern const char kChromeUITermsURL[];
 extern const char kChromeUIVersionURL[];
 
 // URL components for Chrome on iOS.
-extern const char kChromeUIBookmarksHost[];
 extern const char kChromeUIBrowserCrashHost[];
 extern const char kChromeUIChromeURLsHost[];
 extern const char kChromeUICrashesHost[];
@@ -53,7 +49,7 @@ extern const char kChromeUINewTabHost[];
 extern const char kChromeUINTPTilesInternalsHost[];
 extern const char kChromeUIOfflineHost[];
 extern const char kChromeUIOmahaHost[];
-extern const char kChromeUIPhysicalWebHost[];
+extern const char kChromeUIPasswordManagerInternalsHost[];
 extern const char kChromeUIPopularSitesInternalsHost[];
 extern const char kChromeUIPolicyHost[];
 extern const char kChromeUISignInInternalsHost[];
@@ -61,6 +57,7 @@ extern const char kChromeUISuggestionsHost[];
 extern const char kChromeUISyncInternalsHost[];
 extern const char kChromeUITermsHost[];
 extern const char kChromeUIVersionHost[];
+extern const char kChromeUIURLKeyedMetricsHost[];
 
 // Gets the hosts/domains that are shown in chrome://chrome-urls.
 extern const char* const kChromeHostURLs[];
@@ -80,9 +77,6 @@ extern const char kPrivacyLearnMoreURL[];
 
 // "Learn more" URL for the "Do not track" setting in the privacy section.
 extern const char kDoNotTrackLearnMoreURL[];
-
-// "Learn more" URL for the Physical Web setting in the privacy section.
-extern const char kPhysicalWebLearnMoreURL[];
 
 // The URL for the "Learn more" page on sync encryption.
 extern const char kSyncEncryptionHelpURL[];
@@ -108,5 +102,13 @@ extern const char kGoogleHistoryURL[];
 
 // Google my account URL for the sign-in confirmation screen.
 extern const char kGoogleMyAccountURL[];
+
+// URL used in referrer to signal that the navigation originates from the New
+// Tab page and thus should not be considered for Most Visited.
+extern const char kNewTabPageReferrerURL[];
+
+// URL used in referrer to signal that the navigation originates from Reading
+// List page and thus should not be considered for Most Visited.
+extern const char kReadingListReferrerURL[];
 
 #endif  // IOS_CHROME_BROWSER_CHROME_URL_CONSTANTS_H_

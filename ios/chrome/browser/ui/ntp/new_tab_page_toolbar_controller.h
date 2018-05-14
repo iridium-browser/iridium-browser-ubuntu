@@ -5,14 +5,14 @@
 #ifndef IOS_CHROME_BROWSER_UI_NTP_NEW_TAB_PAGE_TOOLBAR_CONTROLLER_H_
 #define IOS_CHROME_BROWSER_UI_NTP_NEW_TAB_PAGE_TOOLBAR_CONTROLLER_H_
 
-#import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
+#import "ios/chrome/browser/ui/toolbar/legacy/toolbar_controller.h"
 
 @protocol ApplicationCommands;
 @protocol BrowserCommands;
 @protocol GoogleLandingDataSource;
 @protocol OmniboxFocuser;
+@protocol FakeboxFocuser;
 @protocol UrlLoader;
-@protocol WebToolbarDelegate;
 
 // New tab page specific toolbar. The background view is hidden and the
 // navigation buttons are also hidden if there is no forward history. Does not
@@ -25,14 +25,16 @@
 - (instancetype)initWithDispatcher:(id<ApplicationCommands,
                                        BrowserCommands,
                                        OmniboxFocuser,
-                                       UrlLoader,
-                                       WebToolbarDelegate>)dispatcher;
+                                       FakeboxFocuser,
+                                       ToolbarCommands,
+                                       UrlLoader>)dispatcher;
 
 @property(nonatomic, readonly, weak) id<ApplicationCommands,
                                         BrowserCommands,
                                         OmniboxFocuser,
-                                        UrlLoader,
-                                        WebToolbarDelegate>
+                                        FakeboxFocuser,
+                                        ToolbarCommands,
+                                        UrlLoader>
     dispatcher;
 
 // |YES| if the toolbar can show the forward arrow.

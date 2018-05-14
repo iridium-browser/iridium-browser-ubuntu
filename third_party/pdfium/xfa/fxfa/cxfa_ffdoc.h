@@ -10,12 +10,15 @@
 #include <map>
 #include <memory>
 
-#include "core/fxcrt/cfx_unowned_ptr.h"
+#include "core/fxcrt/unowned_ptr.h"
 #include "xfa/fxfa/fxfa.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
 #include "xfa/fxfa/parser/cxfa_document_parser.h"
 
+class CFGAS_PDFFontMgr;
 class CFX_ChecksumContext;
+class CFX_DIBitmap;
+class CPDF_Document;
 class CXFA_FFApp;
 class CXFA_FFNotify;
 class CXFA_FFDocView;
@@ -23,12 +26,12 @@ class CXFA_FFDocView;
 struct FX_IMAGEDIB_AND_DPI {
   FX_IMAGEDIB_AND_DPI();
   FX_IMAGEDIB_AND_DPI(const FX_IMAGEDIB_AND_DPI& that);
-  FX_IMAGEDIB_AND_DPI(const CFX_RetainPtr<CFX_DIBSource>& pDib,
+  FX_IMAGEDIB_AND_DPI(const RetainPtr<CFX_DIBSource>& pDib,
                       int32_t xDpi,
                       int32_t yDpi);
   ~FX_IMAGEDIB_AND_DPI();
 
-  CFX_RetainPtr<CFX_DIBSource> pDibSource;
+  RetainPtr<CFX_DIBSource> pDibSource;
   int32_t iImageXDpi;
   int32_t iImageYDpi;
 };
@@ -38,7 +41,7 @@ inline FX_IMAGEDIB_AND_DPI::FX_IMAGEDIB_AND_DPI(
     const FX_IMAGEDIB_AND_DPI& that) = default;
 
 inline FX_IMAGEDIB_AND_DPI::FX_IMAGEDIB_AND_DPI(
-    const CFX_RetainPtr<CFX_DIBSource>& pDib,
+    const RetainPtr<CFX_DIBSource>& pDib,
     int32_t xDpi,
     int32_t yDpi)
     : pDibSource(pDib), iImageXDpi(xDpi), iImageYDpi(yDpi) {}
@@ -53,7 +56,7 @@ class CXFA_FFDoc {
   IXFA_DocEnvironment* GetDocEnvironment() const {
     return m_pDocEnvironment.Get();
   }
-  XFA_DocType GetDocType() const { return m_dwDocType; }
+  FormType GetFormType() const { return m_FormType; }
 
   int32_t StartLoad();
   int32_t DoLoad();
@@ -61,7 +64,6 @@ class CXFA_FFDoc {
 
   CXFA_FFDocView* CreateDocView();
 
-  bool OpenDoc(const CFX_RetainPtr<IFX_SeekableStream>& pStream);
   bool OpenDoc(CPDF_Document* pPDFDoc);
   void CloseDoc();
 
@@ -70,26 +72,28 @@ class CXFA_FFDoc {
   CPDF_Document* GetPDFDoc() const { return m_pPDFDoc.Get(); }
   CXFA_FFDocView* GetDocView(CXFA_LayoutProcessor* pLayout);
   CXFA_FFDocView* GetDocView();
-  CFX_RetainPtr<CFX_DIBitmap> GetPDFNamedImage(const CFX_WideStringC& wsName,
-                                               int32_t& iImageXDpi,
-                                               int32_t& iImageYDpi);
+  RetainPtr<CFX_DIBitmap> GetPDFNamedImage(const WideStringView& wsName,
+                                           int32_t& iImageXDpi,
+                                           int32_t& iImageYDpi);
+  CFGAS_PDFFontMgr* GetPDFFontMgr() const { return m_pPDFFontMgr.get(); }
 
-  bool SavePackage(XFA_HashCode code,
-                   const CFX_RetainPtr<IFX_SeekableStream>& pFile,
+  bool SavePackage(CXFA_Node* pNode,
+                   const RetainPtr<IFX_SeekableStream>& pFile,
                    CFX_ChecksumContext* pCSContext);
-  bool ImportData(const CFX_RetainPtr<IFX_SeekableStream>& pStream,
+  bool ImportData(const RetainPtr<IFX_SeekableStream>& pStream,
                   bool bXDP = true);
 
  private:
-  CFX_UnownedPtr<IXFA_DocEnvironment> const m_pDocEnvironment;
+  UnownedPtr<IXFA_DocEnvironment> const m_pDocEnvironment;
   std::unique_ptr<CXFA_DocumentParser> m_pDocumentParser;
-  CFX_RetainPtr<IFX_SeekableStream> m_pStream;
-  CFX_UnownedPtr<CXFA_FFApp> m_pApp;
+  RetainPtr<IFX_SeekableStream> m_pStream;
+  UnownedPtr<CXFA_FFApp> const m_pApp;
   std::unique_ptr<CXFA_FFNotify> m_pNotify;
-  CFX_UnownedPtr<CPDF_Document> m_pPDFDoc;
+  UnownedPtr<CPDF_Document> m_pPDFDoc;
   std::map<uint32_t, FX_IMAGEDIB_AND_DPI> m_HashToDibDpiMap;
   std::unique_ptr<CXFA_FFDocView> m_DocView;
-  XFA_DocType m_dwDocType;
+  std::unique_ptr<CFGAS_PDFFontMgr> m_pPDFFontMgr;
+  FormType m_FormType = FormType::kXFAForeground;
 };
 
 #endif  // XFA_FXFA_CXFA_FFDOC_H_

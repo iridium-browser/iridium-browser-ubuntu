@@ -31,7 +31,7 @@ namespace blink {
 SVGDocumentExtensions::SVGDocumentExtensions(Document* document)
     : document_(document) {}
 
-SVGDocumentExtensions::~SVGDocumentExtensions() {}
+SVGDocumentExtensions::~SVGDocumentExtensions() = default;
 
 void SVGDocumentExtensions::AddTimeContainer(SVGSVGElement* element) {
   time_containers_.insert(element);
@@ -163,8 +163,7 @@ void SVGDocumentExtensions::UpdatePan(const FloatPoint& pos) const {
 }
 
 SVGSVGElement* SVGDocumentExtensions::rootElement(const Document& document) {
-  Element* elem = document.documentElement();
-  return isSVGSVGElement(elem) ? toSVGSVGElement(elem) : 0;
+  return ToSVGSVGElementOrNull(document.documentElement());
 }
 
 SVGSVGElement* SVGDocumentExtensions::rootElement() const {
@@ -172,7 +171,7 @@ SVGSVGElement* SVGDocumentExtensions::rootElement() const {
   return rootElement(*document_);
 }
 
-DEFINE_TRACE(SVGDocumentExtensions) {
+void SVGDocumentExtensions::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
   visitor->Trace(time_containers_);
   visitor->Trace(web_animations_pending_svg_elements_);

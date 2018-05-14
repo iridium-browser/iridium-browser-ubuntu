@@ -10,18 +10,10 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/scoped_observer.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/external_loader.h"
-#include "components/browser_sync/profile_sync_service.h"
-#include "components/sync/driver/sync_service_observer.h"
-#include "components/sync_preferences/pref_service_syncable_observer.h"
 
 class Profile;
-
-namespace sync_preferences {
-class PrefServiceSyncable;
-}
 
 namespace extensions {
 
@@ -29,9 +21,7 @@ namespace extensions {
 // look up which external extensions are registered.
 // Instances of this class are expected to be created and destroyed on the UI
 // thread and they are expecting public method calls from the UI thread.
-class ExternalPrefLoader : public ExternalLoader,
-                           public sync_preferences::PrefServiceSyncableObserver,
-                           public syncer::SyncServiceObserver {
+class ExternalPrefLoader : public ExternalLoader {
  public:
   enum Options {
     NONE = 0,
@@ -70,12 +60,18 @@ class ExternalPrefLoader : public ExternalLoader,
 
  private:
   friend class base::RefCountedThreadSafe<ExternalLoader>;
+  friend class ExternalTestingLoader;
+  friend class TestExternalPrefLoader;
 
-  // sync_preferences::PrefServiceSyncableObserver:
-  void OnIsSyncingChanged() override;
+  class PrioritySyncReadyWaiter;
 
-  // syncer::SyncServiceObserver
-  void OnStateChanged(syncer::SyncService* sync) override;
+  // Extracts extension information from a json file serialized by |serializer|.
+  // |path| is only used for informational purposes (outputted when an error
+  // occurs). An empty dictionary is returned in case of failure (e.g. invalid
+  // path or json content).
+  static std::unique_ptr<base::DictionaryValue> ExtractExtensionPrefs(
+      base::ValueDeserializer* deserializer,
+      const base::FilePath& path);
 
   // If priority sync ready posts LoadOnFileThread and return true.
   bool PostLoadIfPrioritySyncReady();
@@ -86,7 +82,8 @@ class ExternalPrefLoader : public ExternalLoader,
   // Actually searches for and loads candidate standalone extension preference
   // files in the path corresponding to |base_path_id|.
   // Must be called on the file thread.
-  void LoadOnFileThread();
+  // Note: Overridden in tests.
+  virtual void LoadOnFileThread();
 
   // Extracts the information contained in an external_extension.json file
   // regarding which extensions to install. |prefs| will be modified to
@@ -101,6 +98,8 @@ class ExternalPrefLoader : public ExternalLoader,
   // Must be called from the File thread.
   void ReadStandaloneExtensionPrefFiles(base::DictionaryValue* prefs);
 
+  void OnPrioritySyncReady(PrioritySyncReadyWaiter* waiter);
+
   // The path (coresponding to |base_path_id_| containing the json files
   // describing which extensions to load.
   base::FilePath base_path_;
@@ -109,35 +108,9 @@ class ExternalPrefLoader : public ExternalLoader,
   // Needed for waiting for waiting priority sync.
   Profile* profile_;
 
-  // Used for registering observer for sync_preferences::PrefServiceSyncable.
-  ScopedObserver<sync_preferences::PrefServiceSyncable,
-                 sync_preferences::PrefServiceSyncableObserver>
-      syncable_pref_observer_;
+  std::vector<std::unique_ptr<PrioritySyncReadyWaiter>> pending_waiter_list_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalPrefLoader);
-};
-
-// A simplified version of ExternalPrefLoader that loads the dictionary
-// from json data specified in a string.
-class ExternalTestingLoader : public ExternalLoader {
- public:
-  ExternalTestingLoader(const std::string& json_data,
-                        const base::FilePath& fake_base_path);
-
-  const base::FilePath GetBaseCrxFilePath() override;
-
- protected:
-  void StartLoading() override;
-
- private:
-  friend class base::RefCountedThreadSafe<ExternalLoader>;
-
-  ~ExternalTestingLoader() override;
-
-  base::FilePath fake_base_path_;
-  std::unique_ptr<base::DictionaryValue> testing_prefs_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExternalTestingLoader);
 };
 
 }  // namespace extensions

@@ -4,7 +4,7 @@
 
 #include "net/quic/core/crypto/chacha20_poly1305_decrypter.h"
 
-#include "third_party/boringssl/src/include/openssl/evp.h"
+#include "third_party/boringssl/src/include/openssl/aead.h"
 #include "third_party/boringssl/src/include/openssl/tls1.h"
 
 namespace net {
@@ -12,7 +12,7 @@ namespace net {
 namespace {
 
 const size_t kKeySize = 32;
-const size_t kNoncePrefixSize = 4;
+const size_t kNonceSize = 12;
 
 }  // namespace
 
@@ -20,20 +20,16 @@ ChaCha20Poly1305Decrypter::ChaCha20Poly1305Decrypter()
     : AeadBaseDecrypter(EVP_aead_chacha20_poly1305(),
                         kKeySize,
                         kAuthTagSize,
-                        kNoncePrefixSize) {
+                        kNonceSize,
+                        /* use_ietf_nonce_construction */ false) {
   static_assert(kKeySize <= kMaxKeySize, "key size too big");
-  static_assert(kNoncePrefixSize <= kMaxNoncePrefixSize,
-                "nonce prefix size too big");
+  static_assert(kNonceSize <= kMaxNonceSize, "nonce size too big");
 }
 
 ChaCha20Poly1305Decrypter::~ChaCha20Poly1305Decrypter() {}
 
-const char* ChaCha20Poly1305Decrypter::cipher_name() const {
-  return TLS1_TXT_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256;
-}
-
 uint32_t ChaCha20Poly1305Decrypter::cipher_id() const {
-  return TLS1_CK_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256;
+  return TLS1_CK_CHACHA20_POLY1305_SHA256;
 }
 
 }  // namespace net

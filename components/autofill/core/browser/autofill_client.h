@@ -18,7 +18,6 @@
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
-class IdentityProvider;
 class PrefService;
 
 namespace content {
@@ -29,8 +28,8 @@ namespace gfx {
 class RectF;
 }
 
-namespace rappor {
-class RapporServiceImpl;
+namespace identity {
+class IdentityManager;
 }
 
 namespace syncer {
@@ -43,6 +42,7 @@ class UkmRecorder;
 
 namespace autofill {
 
+class AddressNormalizer;
 class AutofillPopupDelegate;
 class AutofillWebDataService;
 class CardUnmaskDelegate;
@@ -105,14 +105,14 @@ class AutofillClient : public RiskDataLoader {
   // Gets the sync service associated with the client.
   virtual syncer::SyncService* GetSyncService() = 0;
 
-  // Gets the IdentityProvider associated with the client (for OAuth2).
-  virtual IdentityProvider* GetIdentityProvider() = 0;
-
-  // Gets the RapporServiceImpl associated with the client (for metrics).
-  virtual rappor::RapporServiceImpl* GetRapporServiceImpl() = 0;
+  // Gets the IdentityManager associated with the client.
+  virtual identity::IdentityManager* GetIdentityManager() = 0;
 
   // Gets the UKM service associated with this client (for metrics).
   virtual ukm::UkmRecorder* GetUkmRecorder() = 0;
+
+  // Gets an AddressNormalizer instance (can be null).
+  virtual AddressNormalizer* GetAddressNormalizer() = 0;
 
   // Gets the SaveCardBubbleController instance associated with the client.
   // May return nullptr if the save card bubble has not been shown yet.
@@ -187,22 +187,22 @@ class AutofillClient : public RiskDataLoader {
       const base::string16& autofilled_value,
       const base::string16& profile_full_name) = 0;
 
+  // Inform the client that the user interacted with a non-secure credit card
+  // field.
+  virtual void DidInteractWithNonsecureCreditCardInput() = 0;
+
   // If the context is secure.
   virtual bool IsContextSecure() = 0;
 
   // Whether it is appropriate to show a signin promo for this user.
   virtual bool ShouldShowSigninPromo() = 0;
 
-  // Starts the signin flow. Should not be called if ShouldShowSigninPromo()
-  // returns false.
-  virtual void StartSigninFlow() = 0;
-
-  // Shows the explanation of http not secure warning message.
-  virtual void ShowHttpNotSecureExplanation() = 0;
-
   // Whether Autofill is currently supported by the client. If false, all
   // features of Autofill are disabled, including Autocomplete.
   virtual bool IsAutofillSupported() = 0;
+
+  // Handles simple actions for the autofill popups.
+  virtual void ExecuteCommand(int id) = 0;
 };
 
 }  // namespace autofill

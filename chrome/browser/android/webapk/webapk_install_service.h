@@ -15,11 +15,18 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
+#include "chrome/browser/installable/installable_metrics.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "url/gurl.h"
+
+namespace base {
+class FilePath;
+}
 
 namespace content {
 class BrowserContext;
+class WebContents;
 }
 
 struct ShortcutInfo;
@@ -57,30 +64,50 @@ class WebApkInstallService : public KeyedService {
   // Returns whether an install for |web_manifest_url| is in progress.
   bool IsInstallInProgress(const GURL& web_manifest_url);
 
-  // Talks to the Chrome WebAPK server to generate a WebAPK on the server and to
-  // Google Play to install the downloaded WebAPK. Calls |callback| once the
-  // install completed or failed.
-  void InstallAsync(const ShortcutInfo& shortcut_info,
+  // Installs WebAPK and adds shortcut to the launcher. It talks to the Chrome
+  // WebAPK server to generate a WebAPK on the server and to Google Play to
+  // install the downloaded WebAPK.
+  void InstallAsync(content::WebContents* web_contents,
+                    const ShortcutInfo& shortcut_info,
                     const SkBitmap& primary_icon,
                     const SkBitmap& badge_icon,
-                    const FinishCallback& finish_callback);
+                    WebappInstallSource install_source);
 
   // Talks to the Chrome WebAPK server to update a WebAPK on the server and to
-  // the Google Play server to install the downloaded WebAPK. Calls
-  // |finish_callback| once the update completed or failed.
-  void UpdateAsync(const std::string& webapk_package,
-                   const GURL& start_url,
-                   const base::string16& short_name,
-                   std::unique_ptr<std::vector<uint8_t>> serialized_proto,
+  // the Google Play server to install the downloaded WebAPK.
+  // |update_request_path| is the path of the file with the update request.
+  // Calls |finish_callback| once the update completed or failed.
+  void UpdateAsync(const base::FilePath& update_request_path,
                    const FinishCallback& finish_callback);
 
  private:
+  // Observes the lifetime of a WebContents.
+  class LifetimeObserver : public content::WebContentsObserver {
+   public:
+    explicit LifetimeObserver(content::WebContents* web_contents)
+        : WebContentsObserver(web_contents) {}
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(LifetimeObserver);
+  };
+
   // Called once the install/update completed or failed.
-  void OnFinishedInstall(const GURL& web_manifest_url,
-                         const FinishCallback& finish_callback,
+  void OnFinishedInstall(std::unique_ptr<LifetimeObserver> observer,
+                         const ShortcutInfo& shortcut_info,
+                         const SkBitmap& primary_icon,
                          WebApkInstallResult result,
                          bool relax_updates,
                          const std::string& webapk_package_name);
+
+  // Shows a notification that an install is in progress.
+  static void ShowInstallInProgressNotification(
+      const ShortcutInfo& shortcut_info,
+      const SkBitmap& primary_icon);
+
+  // Shows a notification that an install is completed.
+  static void ShowInstalledNotification(const ShortcutInfo& shortcut_info,
+                                        const SkBitmap& primary_icon,
+                                        const std::string& webapk_package_name);
 
   content::BrowserContext* browser_context_;
 

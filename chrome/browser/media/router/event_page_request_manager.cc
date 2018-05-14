@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/circular_deque.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "extensions/browser/event_page_tracker.h"
@@ -50,9 +51,15 @@ void EventPageRequestManager::OnMojoConnectionsReady() {
   }
 
   mojo_connections_ready_ = true;
-  for (auto& next_request : pending_requests_)
-    std::move(next_request).Run();
-  pending_requests_.clear();
+
+  base::circular_deque<base::OnceClosure> requests;
+  requests.swap(pending_requests_);
+  for (base::OnceClosure& request : requests) {
+    DCHECK(mojo_connections_ready_);
+    // The requests should not queue additional requests when executed.
+    std::move(request).Run();
+  }
+  DCHECK(pending_requests_.empty());
   wakeup_attempt_count_ = 0;
 }
 

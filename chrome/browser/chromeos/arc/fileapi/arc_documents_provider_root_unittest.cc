@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "base/files/file_path.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_root.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_util.h"
@@ -18,6 +17,7 @@
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/common/file_system.mojom.h"
+#include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_file_system_instance.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -111,7 +111,7 @@ void ExpectMatchesSpec(const base::File::Info& info, const DocumentSpec& spec) {
 std::unique_ptr<KeyedService> CreateFileSystemOperationRunnerForTesting(
     content::BrowserContext* context) {
   return ArcFileSystemOperationRunner::CreateForTesting(
-      ArcServiceManager::Get()->arc_bridge_service());
+      context, ArcServiceManager::Get()->arc_bridge_service());
 }
 
 class ArcDocumentsProviderRootTest : public testing::Test {
@@ -124,25 +124,29 @@ class ArcDocumentsProviderRootTest : public testing::Test {
       fake_file_system_.AddDocument(ToDocument(spec));
     }
 
-    arc_service_manager_ = base::MakeUnique<ArcServiceManager>();
-    profile_ = base::MakeUnique<TestingProfile>();
+    arc_service_manager_ = std::make_unique<ArcServiceManager>();
+    profile_ = std::make_unique<TestingProfile>();
     arc_service_manager_->set_browser_context(profile_.get());
     ArcFileSystemOperationRunner::GetFactory()->SetTestingFactoryAndUse(
         profile_.get(), &CreateFileSystemOperationRunnerForTesting);
     arc_service_manager_->arc_bridge_service()->file_system()->SetInstance(
         &fake_file_system_);
+    WaitForInstanceReady(
+        arc_service_manager_->arc_bridge_service()->file_system());
 
     // Run the message loop until FileSystemInstance::Init() is called.
-    base::RunLoop().RunUntilIdle();
     ASSERT_TRUE(fake_file_system_.InitCalled());
 
-    root_ = base::MakeUnique<ArcDocumentsProviderRoot>(
+    root_ = std::make_unique<ArcDocumentsProviderRoot>(
         ArcFileSystemOperationRunner::GetForBrowserContext(profile_.get()),
         kAuthority, kRootSpec.document_id);
   }
 
   void TearDown() override {
     root_.reset();
+    arc_service_manager_->arc_bridge_service()->file_system()->CloseInstance(
+        &fake_file_system_);
+
     // Run all pending tasks before destroying testing profile.
     base::RunLoop().RunUntilIdle();
   }

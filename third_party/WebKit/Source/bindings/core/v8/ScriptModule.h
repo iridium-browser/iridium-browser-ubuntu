@@ -9,21 +9,18 @@
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/SharedPersistent.h"
 #include "platform/loader/fetch/AccessControlStatus.h"
+#include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/ScriptFetchOptions.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/TextPosition.h"
 #include "platform/wtf/text/WTFString.h"
+#include "public/platform/WebURLRequest.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
 class ExceptionState;
-
-// Correspond to TC39 ModuleRecord.[[Status]]
-// TODO(kouhei): Add URL after https://github.com/tc39/ecma262/pull/916 is
-// merged.
-using ScriptModuleState = v8::Module::Status;
-const char* ScriptModuleStateToString(ScriptModuleState);
 
 // ScriptModule wraps a handle to a v8::Module for use in core.
 //
@@ -38,65 +35,42 @@ class CORE_EXPORT ScriptModule final {
  public:
   static ScriptModule Compile(v8::Isolate*,
                               const String& source,
-                              const String& file_name,
+                              const KURL& source_url,
+                              const KURL& base_url,
+                              const ScriptFetchOptions&,
                               AccessControlStatus,
-                              const TextPosition& start_position,
+                              const TextPosition&,
                               ExceptionState&);
 
   // TODO(kouhei): Remove copy ctor
   ScriptModule();
-  ScriptModule(WTF::HashTableDeletedValueType);
   ~ScriptModule();
+
+  ScriptModule(v8::Isolate*, v8::Local<v8::Module>);
 
   // Returns exception, if any.
   ScriptValue Instantiate(ScriptState*);
 
-  void Evaluate(ScriptState*) const;
-  static void ReportException(ScriptState*,
-                              v8::Local<v8::Value> exception,
-                              const String& file_name,
-                              const TextPosition& start_position);
+  // Returns exception, if any.
+  ScriptValue Evaluate(ScriptState*) const;
+  static void ReportException(ScriptState*, v8::Local<v8::Value> exception);
 
   Vector<String> ModuleRequests(ScriptState*);
   Vector<TextPosition> ModuleRequestPositions(ScriptState*);
-  ScriptModuleState Status(ScriptState*);
 
-  // Returns record's [[ErrorCompletion]] field's [[Value]].
-  // Should only be used via ModulatorImpl::GetError()
-  v8::Local<v8::Value> ErrorCompletion(ScriptState*);
-
-  bool IsHashTableDeletedValue() const {
-    return module_.IsHashTableDeletedValue();
-  }
-
-  bool operator==(const blink::ScriptModule& other) const {
-    if (IsHashTableDeletedValue() && other.IsHashTableDeletedValue())
-      return true;
-
-    if (IsHashTableDeletedValue() || other.IsHashTableDeletedValue())
-      return false;
-
-    blink::SharedPersistent<v8::Module>* left = module_.Get();
-    blink::SharedPersistent<v8::Module>* right = other.module_.Get();
-    if (left == right)
-      return true;
-    if (!left || !right)
-      return false;
-    return *left == *right;
-  }
-
+  inline bool operator==(const blink::ScriptModule& other) const;
   bool operator!=(const blink::ScriptModule& other) const {
     return !(*this == other);
   }
 
   bool IsNull() const { return !module_ || module_->IsEmpty(); }
 
+  v8::Local<v8::Value> V8Namespace(v8::Isolate*);
+
  private:
   // ModuleScript instances store their record as
   // TraceWrapperV8Reference<v8::Module>, and reconstructs ScriptModule from it.
   friend class ModuleScript;
-
-  ScriptModule(v8::Isolate*, v8::Local<v8::Module>);
 
   v8::Local<v8::Module> NewLocal(v8::Isolate* isolate) {
     return module_->NewLocal(isolate);
@@ -107,10 +81,11 @@ class CORE_EXPORT ScriptModule final {
       v8::Local<v8::String> specifier,
       v8::Local<v8::Module> referrer);
 
-  RefPtr<SharedPersistent<v8::Module>> module_;
+  scoped_refptr<SharedPersistent<v8::Module>> module_;
   unsigned identity_hash_ = 0;
 
   friend struct ScriptModuleHash;
+  friend struct WTF::HashTraits<blink::ScriptModule>;
 };
 
 struct ScriptModuleHash {
@@ -140,8 +115,41 @@ struct DefaultHash<blink::ScriptModule> {
 
 template <>
 struct HashTraits<blink::ScriptModule>
-    : public SimpleClassHashTraits<blink::ScriptModule> {};
+    : public SimpleClassHashTraits<blink::ScriptModule> {
+  static bool IsDeletedValue(const blink::ScriptModule& value) {
+    return HashTraits<scoped_refptr<blink::SharedPersistent<v8::Module>>>::
+        IsDeletedValue(value.module_);
+  }
+
+  static void ConstructDeletedValue(blink::ScriptModule& slot,
+                                    bool zero_value) {
+    HashTraits<scoped_refptr<blink::SharedPersistent<v8::Module>>>::
+        ConstructDeletedValue(slot.module_, zero_value);
+  }
+};
 
 }  // namespace WTF
+
+namespace blink {
+
+inline bool ScriptModule::operator==(const ScriptModule& other) const {
+  if (HashTraits<ScriptModule>::IsDeletedValue(*this) &&
+      HashTraits<ScriptModule>::IsDeletedValue(other))
+    return true;
+
+  if (HashTraits<ScriptModule>::IsDeletedValue(*this) ||
+      HashTraits<ScriptModule>::IsDeletedValue(other))
+    return false;
+
+  blink::SharedPersistent<v8::Module>* left = module_.get();
+  blink::SharedPersistent<v8::Module>* right = other.module_.get();
+  if (left == right)
+    return true;
+  if (!left || !right)
+    return false;
+  return *left == *right;
+}
+
+}  // namespace blink
 
 #endif  // ScriptModule_h

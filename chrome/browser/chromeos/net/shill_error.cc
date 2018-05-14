@@ -38,8 +38,10 @@ base::string16 GetShillErrorString(const std::string& error,
     return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_DHCP_FAILED);
   if (error == shill::kErrorConnectFailed)
     return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_CONNECT_FAILED);
-  if (error == shill::kErrorBadPassphrase)
+  if (error == shill::kErrorBadPassphrase ||
+      error == shill::kErrorResultInvalidPassphrase) {
     return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_BAD_PASSPHRASE);
+  }
   if (error == shill::kErrorBadWEPKey)
     return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_BAD_WEPKEY);
   if (error == shill::kErrorActivationFailed) {
@@ -75,7 +77,8 @@ base::string16 GetShillErrorString(const std::string& error,
         IDS_CHROMEOS_NETWORK_ERROR_CERT_AUTH_FAILED);
   }
   if (error == shill::kErrorEapAuthenticationFailed) {
-    const NetworkState* network = GetNetworkState(network_id);
+    const NetworkState* network =
+        network_id.empty() ? nullptr : GetNetworkState(network_id);
     // TLS always requires a client certificate, so show a cert auth
     // failed message for TLS. Other EAP methods do not generally require
     // a client certicate.
@@ -105,6 +108,15 @@ base::string16 GetShillErrorString(const std::string& error,
   }
   return l10n_util::GetStringFUTF16(IDS_NETWORK_UNRECOGNIZED_ERROR,
                                     base::UTF8ToUTF16(error));
+}
+
+bool IsConfigurationError(const std::string& error) {
+  if (error.empty())
+    return false;
+  return error == shill::kErrorPinMissing ||
+         error == shill::kErrorBadPassphrase ||
+         error == shill::kErrorResultInvalidPassphrase ||
+         error == shill::kErrorBadWEPKey;
 }
 
 }  // namespace shill_error

@@ -59,14 +59,9 @@ class TestingAppListServiceImpl : public AppListServiceImpl {
     RecordAppListLaunch();
   }
 
-  void ShowForCustomLauncherPage(Profile* profile) override {}
-  void HideCustomLauncherPage() override {}
-
   void DismissAppList() override { showing_for_profile_ = NULL; }
 
   bool IsAppListVisible() const override { return !!showing_for_profile_; }
-
-  gfx::NativeWindow GetAppListWindow() override { return NULL; }
 
   AppListControllerDelegate* GetControllerDelegate() override { return NULL; }
 
@@ -101,7 +96,7 @@ class AppListServiceUnitTest : public testing::Test {
     profiles::RegisterPrefs(pref_registry);
 
     PrefServiceFactory factory;
-    factory.set_user_prefs(make_scoped_refptr(new TestingPrefStore));
+    factory.set_user_prefs(base::MakeRefCounted<TestingPrefStore>());
     local_state_ = factory.Create(pref_registry);
 
     profile_store_ = new FakeProfileStore(user_data_dir_, local_state_.get());

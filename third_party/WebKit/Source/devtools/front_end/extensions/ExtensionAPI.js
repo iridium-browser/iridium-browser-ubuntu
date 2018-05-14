@@ -31,10 +31,6 @@
 /* eslint-disable indent */
 
 function defineCommonExtensionSymbols(apiPrivate) {
-  if (!apiPrivate.audits)
-    apiPrivate.audits = {};
-  apiPrivate.audits.Severity = {Info: 'info', Warning: 'warning', Severe: 'severe'};
-
   if (!apiPrivate.panels)
     apiPrivate.panels = {};
   apiPrivate.panels.SearchAction = {
@@ -46,7 +42,6 @@ function defineCommonExtensionSymbols(apiPrivate) {
 
   /** @enum {string} */
   apiPrivate.Events = {
-    AuditStarted: 'audit-started-',
     ButtonClicked: 'button-clicked-',
     PanelObjectSelected: 'panel-objectSelected-',
     NetworkRequestFinished: 'network-request-finished',
@@ -62,8 +57,6 @@ function defineCommonExtensionSymbols(apiPrivate) {
 
   /** @enum {string} */
   apiPrivate.Commands = {
-    AddAuditCategory: 'addAuditCategory',
-    AddAuditResult: 'addAuditResult',
     AddRequestHeaders: 'addRequestHeaders',
     AddTraceProvider: 'addTraceProvider',
     ApplyStyleSheet: 'applyStyleSheet',
@@ -87,9 +80,7 @@ function defineCommonExtensionSymbols(apiPrivate) {
     SetSidebarHeight: 'setSidebarHeight',
     SetSidebarPage: 'setSidebarPage',
     ShowPanel: 'showPanel',
-    StopAuditCategoryRun: 'stopAuditCategoryRun',
     Unsubscribe: 'unsubscribe',
-    UpdateAuditProgress: 'updateAuditProgress',
     UpdateButton: 'updateButton'
   };
 }
@@ -103,13 +94,18 @@ function defineCommonExtensionSymbols(apiPrivate) {
  * @suppressGlobalPropertiesCheck
  */
 function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook, injectedScriptId) {
-  var apiPrivate = {};
+  const chrome = window.chrome || {};
+  const devtools_descriptor = Object.getOwnPropertyDescriptor(chrome, 'devtools');
+  if (devtools_descriptor)
+    return;
+
+  const apiPrivate = {};
 
   defineCommonExtensionSymbols(apiPrivate);
 
-  var commands = apiPrivate.Commands;
-  var events = apiPrivate.Events;
-  var userAction = false;
+  const commands = apiPrivate.Commands;
+  const events = apiPrivate.Events;
+  let userAction = false;
 
   // Here and below, all constructors are private to API implementation.
   // For a public type Foo, if internal fields are present, these are on
@@ -137,9 +133,9 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
     },
 
     removeListener: function(callback) {
-      var listeners = this._listeners;
+      const listeners = this._listeners;
 
-      for (var i = 0; i < listeners.length; ++i) {
+      for (let i = 0; i < listeners.length; ++i) {
         if (listeners[i] === callback) {
           listeners.splice(i, 1);
           break;
@@ -153,8 +149,8 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
      * @param {...} vararg
      */
     _fire: function(vararg) {
-      var listeners = this._listeners.slice();
-      for (var i = 0; i < listeners.length; ++i)
+      const listeners = this._listeners.slice();
+      for (let i = 0; i < listeners.length; ++i)
         listeners[i].apply(null, arguments);
     },
 
@@ -170,7 +166,6 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
    * @constructor
    */
   function InspectorExtensionAPI() {
-    this.audits = new Audits();
     this.inspectedWindow = new InspectedWindow();
     this.panels = new Panels();
     this.network = new Network();
@@ -186,7 +181,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
      * @this {EventSinkImpl}
      */
     function dispatchRequestEvent(message) {
-      var request = message.arguments[1];
+      const request = message.arguments[1];
       request.__proto__ = new Request(message.arguments[0]);
       this._fire(request);
     }
@@ -198,8 +193,8 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
   Network.prototype = {
     getHAR: function(callback) {
       function callbackWrapper(result) {
-        var entries = (result && result.entries) || [];
-        for (var i = 0; i < entries.length; ++i) {
+        const entries = (result && result.entries) || [];
+        for (let i = 0; i < entries.length; ++i) {
           entries[i].__proto__ = new Request(entries[i]._requestId);
           delete entries[i]._requestId;
         }
@@ -234,7 +229,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
    * @constructor
    */
   function Panels() {
-    var panels = {
+    const panels = {
       elements: new ElementsPanel(),
       sources: new SourcesPanel(),
     };
@@ -242,7 +237,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
     function panelGetter(name) {
       return panels[name];
     }
-    for (var panel in panels)
+    for (const panel in panels)
       this.__defineGetter__(panel, panelGetter.bind(null, panel));
     this.applyStyleSheet = function(styleSheet) {
       extensionServer.sendRequest({command: commands.ApplyStyleSheet, styleSheet: styleSheet});
@@ -251,13 +246,13 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
 
   Panels.prototype = {
     create: function(title, icon, page, callback) {
-      var id = 'extension-panel-' + extensionServer.nextObjectId();
-      var request = {command: commands.CreatePanel, id: id, title: title, icon: icon, page: page};
+      const id = 'extension-panel-' + extensionServer.nextObjectId();
+      const request = {command: commands.CreatePanel, id: id, title: title, icon: icon, page: page};
       extensionServer.sendRequest(request, callback && callback.bind(this, new ExtensionPanel(id)));
     },
 
     setOpenResourceHandler: function(callback) {
-      var hadHandler = extensionServer.hasHandler(events.OpenResource);
+      const hadHandler = extensionServer.hasHandler(events.OpenResource);
 
       function callbackWrapper(message) {
         // Allow the panel to show itself when handling the event.
@@ -298,7 +293,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
      * @this {EventSinkImpl}
      */
     function dispatchShowEvent(message) {
-      var frameIndex = message.arguments[0];
+      const frameIndex = message.arguments[0];
       if (typeof frameIndex === 'number')
         this._fire(window.parent.frames[frameIndex]);
       else
@@ -324,8 +319,8 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
 
   PanelWithSidebarImpl.prototype = {
     createSidebarPane: function(title, callback) {
-      var id = 'extension-sidebar-' + extensionServer.nextObjectId();
-      var request = {command: commands.CreateSidebarPane, panel: this._hostPanelName, id: id, title: title};
+      const id = 'extension-sidebar-' + extensionServer.nextObjectId();
+      const request = {command: commands.CreateSidebarPane, panel: this._hostPanelName, id: id, title: title};
       function callbackWrapper() {
         callback(new ExtensionSidebarPane(id));
       }
@@ -337,14 +332,14 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
 
   function declareInterfaceClass(implConstructor) {
     return function() {
-      var impl = {__proto__: implConstructor.prototype};
+      const impl = {__proto__: implConstructor.prototype};
       implConstructor.apply(impl, arguments);
       populateInterfaceClass(this, impl);
     };
   }
 
   function defineDeprecatedProperty(object, className, oldName, newName) {
-    var warningGiven = false;
+    let warningGiven = false;
     function getter() {
       if (!warningGiven) {
         console.warn(className + '.' + oldName + ' is deprecated. Use ' + className + '.' + newName + ' instead');
@@ -356,20 +351,18 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
   }
 
   function extractCallbackArgument(args) {
-    var lastArgument = args[args.length - 1];
+    const lastArgument = args[args.length - 1];
     return typeof lastArgument === 'function' ? lastArgument : undefined;
   }
 
-  var AuditCategory = declareInterfaceClass(AuditCategoryImpl);
-  var AuditResult = declareInterfaceClass(AuditResultImpl);
-  var Button = declareInterfaceClass(ButtonImpl);
-  var EventSink = declareInterfaceClass(EventSinkImpl);
-  var ExtensionPanel = declareInterfaceClass(ExtensionPanelImpl);
-  var ExtensionSidebarPane = declareInterfaceClass(ExtensionSidebarPaneImpl);
-  var PanelWithSidebar = declareInterfaceClass(PanelWithSidebarImpl);
-  var Request = declareInterfaceClass(RequestImpl);
-  var Resource = declareInterfaceClass(ResourceImpl);
-  var TraceSession = declareInterfaceClass(TraceSessionImpl);
+  const Button = declareInterfaceClass(ButtonImpl);
+  const EventSink = declareInterfaceClass(EventSinkImpl);
+  const ExtensionPanel = declareInterfaceClass(ExtensionPanelImpl);
+  const ExtensionSidebarPane = declareInterfaceClass(ExtensionSidebarPaneImpl);
+  const PanelWithSidebar = declareInterfaceClass(PanelWithSidebarImpl);
+  const Request = declareInterfaceClass(RequestImpl);
+  const Resource = declareInterfaceClass(ResourceImpl);
+  const TraceSession = declareInterfaceClass(TraceSessionImpl);
 
   /**
    * @constructor
@@ -405,8 +398,8 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
      * @return {!Object}
      */
     createStatusBarButton: function(iconPath, tooltipText, disabled) {
-      var id = 'button-' + extensionServer.nextObjectId();
-      var request = {
+      const id = 'button-' + extensionServer.nextObjectId();
+      const request = {
         command: commands.CreateToolbarButton,
         panel: this._id,
         id: id,
@@ -422,7 +415,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
       if (!userAction)
         return;
 
-      var request = {command: commands.ShowPanel, id: this._id};
+      const request = {command: commands.ShowPanel, id: this._id};
       extensionServer.sendRequest(request);
     },
 
@@ -443,7 +436,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
     },
 
     setExpression: function(expression, rootTitle, evaluateOptions) {
-      var request = {
+      const request = {
         command: commands.SetSidebarContent,
         id: this._id,
         expression: expression,
@@ -477,7 +470,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
 
   ButtonImpl.prototype = {
     update: function(iconPath, tooltipText, disabled) {
-      var request =
+      const request =
           {command: commands.UpdateButton, id: this._id, icon: iconPath, tooltip: tooltipText, disabled: !!disabled};
       extensionServer.sendRequest(request);
     }
@@ -496,7 +489,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
      * @return {!TraceProvider}
      */
     addTraceProvider: function(categoryName, categoryTooltip) {
-      var id = 'extension-trace-provider-' + extensionServer.nextObjectId();
+      const id = 'extension-trace-provider-' + extensionServer.nextObjectId();
       extensionServer.sendRequest(
           {command: commands.AddTraceProvider, id: id, categoryName: categoryName, categoryTooltip: categoryTooltip});
       return new TraceProvider(id);
@@ -511,14 +504,14 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
     this._id = id;
   }
 
-  TraceSessionImpl.prototype =
-  {
+  TraceSessionImpl.prototype = {
     /**
      * @param {string=} url
      * @param {number=} timeOffset
      */
     complete: function(url, timeOffset) {
-      var request = {command: commands.CompleteTraceSession, id: this._id, url: url || '', timeOffset: timeOffset || 0};
+      const request =
+          {command: commands.CompleteTraceSession, id: this._id, url: url || '', timeOffset: timeOffset || 0};
       extensionServer.sendRequest(request);
     }
   };
@@ -532,142 +525,13 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
      * @this {EventSinkImpl}
      */
     function dispatchRecordingStarted(message) {
-      var sessionId = message.arguments[0];
+      const sessionId = message.arguments[0];
       this._fire(new TraceSession(sessionId));
     }
 
     this.onRecordingStarted = new EventSink(events.RecordingStarted + id, dispatchRecordingStarted);
     this.onRecordingStopped = new EventSink(events.RecordingStopped + id);
   }
-
-  /**
-   * @constructor
-   */
-  function Audits() {}
-
-  Audits.prototype = {
-    /**
-     * @return {!AuditCategory}
-     */
-    addCategory: function(displayName, resultCount) {
-      var id = 'extension-audit-category-' + extensionServer.nextObjectId();
-      if (typeof resultCount !== 'undefined') {
-        console.warn(
-            'Passing resultCount to audits.addCategory() is deprecated. Use AuditResult.updateProgress() instead.');
-      }
-      extensionServer.sendRequest(
-          {command: commands.AddAuditCategory, id: id, displayName: displayName, resultCount: resultCount});
-      return new AuditCategory(id);
-    }
-  };
-
-  /**
-   * @constructor
-   */
-  function AuditCategoryImpl(id) {
-    /**
-     * @this {EventSinkImpl}
-     */
-    function dispatchAuditEvent(request) {
-      var auditResult = new AuditResult(request.arguments[0]);
-      try {
-        this._fire(auditResult);
-      } catch (e) {
-        console.error('Uncaught exception in extension audit event handler: ' + e);
-        auditResult.done();
-      }
-    }
-    this._id = id;
-    this.onAuditStarted = new EventSink(events.AuditStarted + id, dispatchAuditEvent);
-  }
-
-  /**
-   * @constructor
-   */
-  function AuditResultImpl(id) {
-    this._id = id;
-
-    this.createURL = this._nodeFactory.bind(this, 'url');
-    this.createSnippet = this._nodeFactory.bind(this, 'snippet');
-    this.createText = this._nodeFactory.bind(this, 'text');
-    this.createObject = this._nodeFactory.bind(this, 'object');
-    this.createNode = this._nodeFactory.bind(this, 'node');
-  }
-
-  AuditResultImpl.prototype = {
-    addResult: function(displayName, description, severity, details) {
-      // shorthand for specifying details directly in addResult().
-      if (details && !(details instanceof AuditResultNode))
-        details = new AuditResultNode(Array.isArray(details) ? details : [details]);
-
-      var request = {
-        command: commands.AddAuditResult,
-        resultId: this._id,
-        displayName: displayName,
-        description: description,
-        severity: severity,
-        details: details
-      };
-      extensionServer.sendRequest(request);
-    },
-
-    /**
-     * @return {!Object}
-     */
-    createResult: function() {
-      return new AuditResultNode(Array.prototype.slice.call(arguments));
-    },
-
-    updateProgress: function(worked, totalWork) {
-      extensionServer.sendRequest(
-          {command: commands.UpdateAuditProgress, resultId: this._id, progress: worked / totalWork});
-    },
-
-    done: function() {
-      extensionServer.sendRequest({command: commands.StopAuditCategoryRun, resultId: this._id});
-    },
-
-    /**
-     * @type {!Object.<string, string>}
-     */
-    get Severity() {
-      return apiPrivate.audits.Severity;
-    },
-
-    /**
-     * @return {!{type: string, arguments: !Array.<string|number>}}
-     */
-    createResourceLink: function(url, lineNumber) {
-      return {type: 'resourceLink', arguments: [url, lineNumber && lineNumber - 1]};
-    },
-
-    /**
-     * @return {!{type: string, arguments: !Array.<string|number>}}
-     */
-    _nodeFactory: function(type) {
-      return {type: type, arguments: Array.prototype.slice.call(arguments, 1)};
-    }
-  };
-
-  /**
-   * @constructor
-   */
-  function AuditResultNode(contents) {
-    this.contents = contents;
-    this.children = [];
-    this.expanded = false;
-  }
-
-  AuditResultNode.prototype = {
-    /**
-     * @return {!Object}
-     */
-    addChild: function() {
-      var node = new AuditResultNode(Array.prototype.slice.call(arguments));
-      this.children.push(node);
-      return node;
-    }
-  };
 
   /**
    * @constructor
@@ -693,7 +557,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
 
   InspectedWindow.prototype = {
     reload: function(optionsOrUserAgent) {
-      var options = null;
+      let options = null;
       if (typeof optionsOrUserAgent === 'object') {
         options = optionsOrUserAgent;
       } else if (typeof optionsOrUserAgent === 'string') {
@@ -709,14 +573,14 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
      * @return {?Object}
      */
     eval: function(expression, evaluateOptions) {
-      var callback = extractCallbackArgument(arguments);
+      const callback = extractCallbackArgument(arguments);
       function callbackWrapper(result) {
         if (result.isError || result.isException)
           callback(undefined, result);
         else
           callback(result.value);
       }
-      var request = {command: commands.EvaluateOnInspectedPage, expression: expression};
+      const request = {command: commands.EvaluateOnInspectedPage, expression: expression};
       if (typeof evaluateOptions === 'object')
         request.evaluateOptions = evaluateOptions;
       extensionServer.sendRequest(request, callback && callbackWrapper);
@@ -769,14 +633,14 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
     return inspectedTabId;
   }
 
-  var keyboardEventRequestQueue = [];
-  var forwardTimer = null;
+  let keyboardEventRequestQueue = [];
+  let forwardTimer = null;
 
   function forwardKeyboardEvent(event) {
     // We only care about global hotkeys, not about random text
     if (!event.ctrlKey && !event.altKey && !event.metaKey && !/^F\d+$/.test(event.key) && event.key !== 'Escape')
       return;
-    var requestPayload = {
+    const requestPayload = {
       eventType: event.type,
       ctrlKey: event.ctrlKey,
       altKey: event.altKey,
@@ -794,7 +658,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
 
   function forwardEventQueue() {
     forwardTimer = null;
-    var request = {command: commands.ForwardKeyboardEvent, entries: keyboardEventRequestQueue};
+    const request = {command: commands.ForwardKeyboardEvent, entries: keyboardEventRequestQueue};
     extensionServer.sendRequest(request);
     keyboardEventRequestQueue = [];
   }
@@ -813,7 +677,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
 
     this.registerHandler('callback', this._onCallback.bind(this));
 
-    var channel = new MessageChannel();
+    const channel = new MessageChannel();
     this._port = channel.port1;
     this._port.addEventListener('message', this._onMessage.bind(this), false);
     this._port.start();
@@ -855,34 +719,34 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
     },
 
     _registerCallback: function(callback) {
-      var id = ++this._lastRequestId;
+      const id = ++this._lastRequestId;
       this._callbacks[id] = callback;
       return id;
     },
 
     _onCallback: function(request) {
       if (request.requestId in this._callbacks) {
-        var callback = this._callbacks[request.requestId];
+        const callback = this._callbacks[request.requestId];
         delete this._callbacks[request.requestId];
         callback(request.result);
       }
     },
 
     _onMessage: function(event) {
-      var request = event.data;
-      var handler = this._handlers[request.command];
+      const request = event.data;
+      const handler = this._handlers[request.command];
       if (handler)
         handler.call(this, request);
     }
   };
 
   function populateInterfaceClass(interfaze, implementation) {
-    for (var member in implementation) {
+    for (const member in implementation) {
       if (member.charAt(0) === '_')
         continue;
-      var descriptor = null;
+      let descriptor = null;
       // Traverse prototype chain until we find the owner.
-      for (var owner = implementation; owner && !descriptor; owner = owner.__proto__)
+      for (let owner = implementation; owner && !descriptor; owner = owner.__proto__)
         descriptor = Object.getOwnPropertyDescriptor(owner, member);
       if (!descriptor)
         continue;
@@ -895,16 +759,10 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
     }
   }
 
-  var extensionServer = new ExtensionServerClient();
-  var coreAPI = new InspectorExtensionAPI();
+  const extensionServer = new ExtensionServerClient();
+  const coreAPI = new InspectorExtensionAPI();
 
-  var chrome = window.chrome || {};
-  // Override chrome.devtools as a workaround for a error-throwing getter being exposed
-  // in extension pages loaded into a non-extension process (only happens for remote client
-  // extensions)
-  var devtools_descriptor = Object.getOwnPropertyDescriptor(chrome, 'devtools');
-  if (!devtools_descriptor || devtools_descriptor.get)
-    Object.defineProperty(chrome, 'devtools', {value: {}, enumerable: true});
+  Object.defineProperty(chrome, 'devtools', {value: {}, enumerable: true});
 
   // Only expose tabId on chrome.devtools.inspectedWindow, not webInspector.inspectedWindow.
   chrome.devtools.inspectedWindow = {};
@@ -919,9 +777,9 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
     chrome.experimental = chrome.experimental || {};
     chrome.experimental.devtools = chrome.experimental.devtools || {};
 
-    var properties = Object.getOwnPropertyNames(coreAPI);
-    for (var i = 0; i < properties.length; ++i) {
-      var descriptor = Object.getOwnPropertyDescriptor(coreAPI, properties[i]);
+    const properties = Object.getOwnPropertyNames(coreAPI);
+    for (let i = 0; i < properties.length; ++i) {
+      const descriptor = Object.getOwnPropertyDescriptor(coreAPI, properties[i]);
       if (descriptor)
         Object.defineProperty(chrome.experimental.devtools, properties[i], descriptor);
     }
@@ -941,7 +799,7 @@ function injectedExtensionAPI(extensionInfo, inspectedTabId, themeName, testHook
  * @return {string}
  */
 function buildExtensionAPIInjectedScript(extensionInfo, inspectedTabId, themeName, testHook) {
-  var argumentsJSON = [extensionInfo, inspectedTabId || null, themeName].map(_ => JSON.stringify(_)).join(',');
+  const argumentsJSON = [extensionInfo, inspectedTabId || null, themeName].map(_ => JSON.stringify(_)).join(',');
   if (!testHook)
     testHook = () => {};
   return '(function(injectedScriptId){ ' + defineCommonExtensionSymbols.toString() + ';' +

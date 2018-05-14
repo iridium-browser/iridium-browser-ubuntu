@@ -67,6 +67,8 @@ namespace compiler {
   V(Arm64Mov32)                    \
   V(Arm64Sxtb32)                   \
   V(Arm64Sxth32)                   \
+  V(Arm64Sxtb)                     \
+  V(Arm64Sxth)                     \
   V(Arm64Sxtw)                     \
   V(Arm64Sbfx32)                   \
   V(Arm64Ubfx)                     \
@@ -79,11 +81,10 @@ namespace compiler {
   V(Arm64TestAndBranch)            \
   V(Arm64CompareAndBranch32)       \
   V(Arm64CompareAndBranch)         \
-  V(Arm64ClaimCSP)                 \
-  V(Arm64ClaimJSSP)                \
-  V(Arm64PokeCSP)                  \
-  V(Arm64PokeJSSP)                 \
+  V(Arm64Claim)                    \
+  V(Arm64Poke)                     \
   V(Arm64PokePair)                 \
+  V(Arm64Peek)                     \
   V(Arm64Float32Cmp)               \
   V(Arm64Float32Add)               \
   V(Arm64Float32Sub)               \
@@ -156,6 +157,7 @@ namespace compiler {
   V(Arm64StrW)                     \
   V(Arm64Ldr)                      \
   V(Arm64Str)                      \
+  V(Arm64DsbIsb)                   \
   V(Arm64F32x4Splat)               \
   V(Arm64F32x4ExtractLane)         \
   V(Arm64F32x4ReplaceLane)         \
@@ -260,6 +262,7 @@ namespace compiler {
   V(Arm64I8x16GtU)                 \
   V(Arm64I8x16GeU)                 \
   V(Arm64S128Zero)                 \
+  V(Arm64S128Dup)                  \
   V(Arm64S128And)                  \
   V(Arm64S128Or)                   \
   V(Arm64S128Xor)                  \
@@ -324,8 +327,6 @@ namespace compiler {
   V(Operand2_R_SXTB)  /* %r0 SXTB (signed extend byte) */       \
   V(Operand2_R_SXTH)  /* %r0 SXTH (signed extend halfword) */   \
   V(Operand2_R_SXTW)  /* %r0 SXTW (signed extend word) */
-
-enum ResetJSSPAfterCall { kNoResetJSSP, kResetJSSP };
 
 }  // namespace compiler
 }  // namespace internal

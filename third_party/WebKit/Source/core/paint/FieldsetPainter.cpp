@@ -9,9 +9,9 @@
 #include "core/paint/BoxDecorationData.h"
 #include "core/paint/BoxModelObjectPainter.h"
 #include "core/paint/BoxPainter.h"
-#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/PaintInfo.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
+#include "platform/graphics/paint/DrawingRecorder.h"
 
 namespace blink {
 
@@ -24,7 +24,7 @@ void FieldsetPainter::PaintBoxDecorationBackground(
     return BoxPainter(layout_fieldset_)
         .PaintBoxDecorationBackground(paint_info, paint_offset);
 
-  if (LayoutObjectDrawingRecorder::UseCachedDrawingIfPossible(
+  if (DrawingRecorder::UseCachedDrawingIfPossible(
           paint_info.context, layout_fieldset_, paint_info.phase))
     return;
 
@@ -47,19 +47,19 @@ void FieldsetPainter::PaintBoxDecorationBackground(
     paint_rect.SetX(paint_rect.X() + x_off);
   }
 
-  LayoutObjectDrawingRecorder recorder(paint_info.context, layout_fieldset_,
-                                       paint_info.phase, paint_rect);
+  DrawingRecorder recorder(paint_info.context, layout_fieldset_,
+                           paint_info.phase);
   BoxDecorationData box_decoration_data(layout_fieldset_);
 
-  BoxPainter::PaintNormalBoxShadow(paint_info, paint_rect,
-                                   layout_fieldset_.StyleRef());
+  BoxPainterBase::PaintNormalBoxShadow(paint_info, paint_rect,
+                                       layout_fieldset_.StyleRef());
   BackgroundImageGeometry geometry(layout_fieldset_);
   BoxModelObjectPainter(layout_fieldset_)
       .PaintFillLayers(paint_info, box_decoration_data.background_color,
                        layout_fieldset_.Style()->BackgroundLayers(), paint_rect,
                        geometry);
-  BoxPainter::PaintInsetBoxShadow(paint_info, paint_rect,
-                                  layout_fieldset_.StyleRef());
+  BoxPainterBase::PaintInsetBoxShadowWithBorderRect(
+      paint_info, paint_rect, layout_fieldset_.StyleRef());
 
   if (!box_decoration_data.has_border_decoration)
     return;
@@ -94,15 +94,15 @@ void FieldsetPainter::PaintBoxDecorationBackground(
   const LayoutObject* layout_object = &layout_fieldset_;
   for (; layout_object && !node; layout_object = layout_object->Parent())
     node = layout_object->GeneratingNode();
-  BoxPainter::PaintBorder(layout_fieldset_, layout_fieldset_.GetDocument(),
-                          node, paint_info, paint_rect,
-                          layout_fieldset_.StyleRef());
+  BoxPainterBase::PaintBorder(layout_fieldset_, layout_fieldset_.GetDocument(),
+                              node, paint_info, paint_rect,
+                              layout_fieldset_.StyleRef());
 }
 
 void FieldsetPainter::PaintMask(const PaintInfo& paint_info,
                                 const LayoutPoint& paint_offset) {
   if (layout_fieldset_.Style()->Visibility() != EVisibility::kVisible ||
-      paint_info.phase != kPaintPhaseMask)
+      paint_info.phase != PaintPhase::kMask)
     return;
 
   LayoutRect paint_rect = LayoutRect(paint_offset, layout_fieldset_.Size());
@@ -110,7 +110,7 @@ void FieldsetPainter::PaintMask(const PaintInfo& paint_info,
   if (!legend)
     return BoxPainter(layout_fieldset_).PaintMask(paint_info, paint_offset);
 
-  if (LayoutObjectDrawingRecorder::UseCachedDrawingIfPossible(
+  if (DrawingRecorder::UseCachedDrawingIfPossible(
           paint_info.context, layout_fieldset_, paint_info.phase))
     return;
 
@@ -133,8 +133,8 @@ void FieldsetPainter::PaintMask(const PaintInfo& paint_info,
     paint_rect.Move(x_off, LayoutUnit());
   }
 
-  LayoutObjectDrawingRecorder recorder(paint_info.context, layout_fieldset_,
-                                       paint_info.phase, paint_rect);
+  DrawingRecorder recorder(paint_info.context, layout_fieldset_,
+                           paint_info.phase);
   BoxPainter(layout_fieldset_).PaintMaskImages(paint_info, paint_rect);
 }
 

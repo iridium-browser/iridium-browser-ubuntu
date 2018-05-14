@@ -5,6 +5,7 @@
 #include "public/platform/modules/serviceworker/WebServiceWorkerRequest.h"
 
 #include "platform/blob/BlobData.h"
+#include "platform/network/EncodedFormData.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/RefCounted.h"
 #include "public/platform/WebHTTPHeaderVisitor.h"
@@ -16,35 +17,32 @@ namespace blink {
 class WebServiceWorkerRequestPrivate
     : public RefCounted<WebServiceWorkerRequestPrivate> {
  public:
-  WebServiceWorkerRequestPrivate()
-      : mode_(WebURLRequest::kFetchRequestModeNoCORS),
-        is_main_resource_load_(false),
-        credentials_mode_(WebURLRequest::kFetchCredentialsModeOmit),
-        cache_mode_(WebURLRequest::kFetchRequestCacheModeDefault),
-        redirect_mode_(WebURLRequest::kFetchRedirectModeFollow),
-        request_context_(WebURLRequest::kRequestContextUnspecified),
-        frame_type_(WebURLRequest::kFrameTypeNone),
-        client_id_(WebString()),
-        is_reload_(false) {}
   WebURL url_;
   WebString method_;
   HTTPHeaderMap headers_;
-  RefPtr<BlobDataHandle> blob_data_handle;
+  scoped_refptr<EncodedFormData> http_body;
+  scoped_refptr<BlobDataHandle> blob_data_handle;
   Referrer referrer_;
-  WebURLRequest::FetchRequestMode mode_;
-  bool is_main_resource_load_;
-  WebURLRequest::FetchCredentialsMode credentials_mode_;
-  WebURLRequest::FetchRequestCacheMode cache_mode_;
-  WebURLRequest::FetchRedirectMode redirect_mode_;
-  WebURLRequest::RequestContext request_context_;
-  WebURLRequest::FrameType frame_type_;
+  network::mojom::FetchRequestMode mode_ =
+      network::mojom::FetchRequestMode::kNoCORS;
+  bool is_main_resource_load_ = false;
+  network::mojom::FetchCredentialsMode credentials_mode_ =
+      network::mojom::FetchCredentialsMode::kOmit;
+  mojom::FetchCacheMode cache_mode_ = mojom::FetchCacheMode::kDefault;
+  network::mojom::FetchRedirectMode redirect_mode_ =
+      network::mojom::FetchRedirectMode::kFollow;
+  WebURLRequest::RequestContext request_context_ =
+      WebURLRequest::kRequestContextUnspecified;
+  network::mojom::RequestContextFrameType frame_type_ =
+      network::mojom::RequestContextFrameType::kNone;
   WebString integrity_;
+  bool keepalive_ = false;
   WebString client_id_;
-  bool is_reload_;
+  bool is_reload_ = false;
 };
 
 WebServiceWorkerRequest::WebServiceWorkerRequest()
-    : private_(AdoptRef(new WebServiceWorkerRequestPrivate)) {}
+    : private_(base::AdoptRef(new WebServiceWorkerRequestPrivate)) {}
 
 void WebServiceWorkerRequest::Reset() {
   private_.Reset();
@@ -60,6 +58,10 @@ void WebServiceWorkerRequest::SetURL(const WebURL& url) {
 
 const WebString& WebServiceWorkerRequest::Integrity() const {
   return private_->integrity_;
+}
+
+bool WebServiceWorkerRequest::Keepalive() const {
+  return private_->keepalive_;
 }
 
 const WebURL& WebServiceWorkerRequest::Url() const {
@@ -103,11 +105,31 @@ const HTTPHeaderMap& WebServiceWorkerRequest::Headers() const {
   return private_->headers_;
 }
 
-void WebServiceWorkerRequest::SetBlob(const WebString& uuid, long long size) {
-  private_->blob_data_handle = BlobDataHandle::Create(uuid, String(), size);
+void WebServiceWorkerRequest::SetBody(const WebHTTPBody& body) {
+  private_->http_body = body;
 }
 
-PassRefPtr<BlobDataHandle> WebServiceWorkerRequest::GetBlobDataHandle() const {
+WebHTTPBody WebServiceWorkerRequest::Body() const {
+  return private_->http_body;
+}
+
+void WebServiceWorkerRequest::SetBlob(const WebString& uuid,
+                                      long long size,
+                                      mojo::ScopedMessagePipeHandle blob_pipe) {
+  SetBlob(uuid, size,
+          mojom::blink::BlobPtrInfo(std::move(blob_pipe),
+                                    mojom::blink::Blob::Version_));
+}
+
+void WebServiceWorkerRequest::SetBlob(const WebString& uuid,
+                                      long long size,
+                                      mojom::blink::BlobPtrInfo blob_info) {
+  private_->blob_data_handle =
+      BlobDataHandle::Create(uuid, String(), size, std::move(blob_info));
+}
+
+scoped_refptr<BlobDataHandle> WebServiceWorkerRequest::GetBlobDataHandle()
+    const {
   return private_->blob_data_handle;
 }
 
@@ -123,7 +145,7 @@ void WebServiceWorkerRequest::SetReferrer(const WebString& web_referrer,
 }
 
 WebURL WebServiceWorkerRequest::ReferrerUrl() const {
-  return KURL(kParsedURLString, private_->referrer_.referrer);
+  return KURL(private_->referrer_.referrer);
 }
 
 WebReferrerPolicy WebServiceWorkerRequest::GetReferrerPolicy() const {
@@ -134,11 +156,11 @@ const Referrer& WebServiceWorkerRequest::GetReferrer() const {
   return private_->referrer_;
 }
 
-void WebServiceWorkerRequest::SetMode(WebURLRequest::FetchRequestMode mode) {
+void WebServiceWorkerRequest::SetMode(network::mojom::FetchRequestMode mode) {
   private_->mode_ = mode;
 }
 
-WebURLRequest::FetchRequestMode WebServiceWorkerRequest::Mode() const {
+network::mojom::FetchRequestMode WebServiceWorkerRequest::Mode() const {
   return private_->mode_;
 }
 
@@ -152,7 +174,7 @@ bool WebServiceWorkerRequest::IsMainResourceLoad() const {
 }
 
 void WebServiceWorkerRequest::SetCredentialsMode(
-    WebURLRequest::FetchCredentialsMode credentials_mode) {
+    network::mojom::FetchCredentialsMode credentials_mode) {
   private_->credentials_mode_ = credentials_mode;
 }
 
@@ -160,27 +182,30 @@ void WebServiceWorkerRequest::SetIntegrity(const WebString& integrity) {
   private_->integrity_ = integrity;
 }
 
-WebURLRequest::FetchCredentialsMode WebServiceWorkerRequest::CredentialsMode()
+void WebServiceWorkerRequest::SetKeepalive(bool keepalive) {
+  private_->keepalive_ = keepalive;
+}
+
+network::mojom::FetchCredentialsMode WebServiceWorkerRequest::CredentialsMode()
     const {
   return private_->credentials_mode_;
 }
 
-void WebServiceWorkerRequest::SetCacheMode(
-    WebURLRequest::FetchRequestCacheMode cache_mode) {
+void WebServiceWorkerRequest::SetCacheMode(mojom::FetchCacheMode cache_mode) {
   private_->cache_mode_ = cache_mode;
 }
 
-WebURLRequest::FetchRequestCacheMode WebServiceWorkerRequest::CacheMode()
-    const {
+mojom::FetchCacheMode WebServiceWorkerRequest::CacheMode() const {
   return private_->cache_mode_;
 }
 
 void WebServiceWorkerRequest::SetRedirectMode(
-    WebURLRequest::FetchRedirectMode redirect_mode) {
+    network::mojom::FetchRedirectMode redirect_mode) {
   private_->redirect_mode_ = redirect_mode;
 }
 
-WebURLRequest::FetchRedirectMode WebServiceWorkerRequest::RedirectMode() const {
+network::mojom::FetchRedirectMode WebServiceWorkerRequest::RedirectMode()
+    const {
   return private_->redirect_mode_;
 }
 
@@ -195,11 +220,12 @@ WebURLRequest::RequestContext WebServiceWorkerRequest::GetRequestContext()
 }
 
 void WebServiceWorkerRequest::SetFrameType(
-    WebURLRequest::FrameType frame_type) {
+    network::mojom::RequestContextFrameType frame_type) {
   private_->frame_type_ = frame_type;
 }
 
-WebURLRequest::FrameType WebServiceWorkerRequest::GetFrameType() const {
+network::mojom::RequestContextFrameType WebServiceWorkerRequest::GetFrameType()
+    const {
   return private_->frame_type_;
 }
 

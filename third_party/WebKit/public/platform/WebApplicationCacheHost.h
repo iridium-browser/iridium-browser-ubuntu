@@ -37,12 +37,12 @@
 
 namespace blink {
 
+class WebString;
 class WebURL;
-class WebURLRequest;
 class WebURLResponse;
 
 // This interface is used by webkit to call out to the embedder. Webkit uses
-// the WebFrameClient::createApplicationCacheHost method to create instances,
+// the WebFrameClient::CreateApplicationCacheHost method to create instances,
 // and calls delete when the instance is no longer needed.
 class WebApplicationCacheHost {
  public:
@@ -81,13 +81,13 @@ class WebApplicationCacheHost {
 
   static const int kAppCacheNoHostId = 0;
 
-  virtual ~WebApplicationCacheHost() {}
+  virtual ~WebApplicationCacheHost() = default;
 
   // Called for every request made within the context.
   virtual void WillStartMainResourceRequest(
-      WebURLRequest& r,
+      const WebURL& url,
+      const WebString& method,
       const WebApplicationCacheHost* spawning_host) {}
-  virtual void WillStartSubResourceRequest(WebURLRequest&) {}
 
   // One or the other selectCache methods is called after having parsed the
   // <html> tag.  The latter returns false if the current document has been

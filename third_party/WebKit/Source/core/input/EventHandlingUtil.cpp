@@ -7,7 +7,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/layout/LayoutEmbeddedContent.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/paint/PaintLayer.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "public/platform/WebMouseEvent.h"
@@ -21,14 +21,14 @@ HitTestResult HitTestResultInFrame(
     HitTestRequest::HitTestRequestType hit_type) {
   HitTestResult result(HitTestRequest(hit_type), point);
 
-  if (!frame || frame->ContentLayoutItem().IsNull())
+  if (!frame || !frame->ContentLayoutObject())
     return result;
   if (frame->View()) {
     IntRect rect = frame->View()->VisibleContentRect(kIncludeScrollbars);
     if (!rect.Contains(RoundedIntPoint(point)))
       return result;
   }
-  frame->ContentLayoutItem().HitTest(result);
+  frame->ContentLayoutObject()->HitTest(result);
   return result;
 }
 
@@ -137,12 +137,14 @@ LocalFrame* SubframeForTargetNode(Node* node) {
   if (!layout_object || !layout_object->IsLayoutEmbeddedContent())
     return nullptr;
 
-  LocalFrameView* frame_view =
+  FrameView* frame_view =
       ToLayoutEmbeddedContent(layout_object)->ChildFrameView();
   if (!frame_view)
     return nullptr;
+  if (!frame_view->IsLocalFrameView())
+    return nullptr;
 
-  return &frame_view->GetFrame();
+  return &ToLocalFrameView(frame_view)->GetFrame();
 }
 
 LocalFrame* SubframeForHitTestResult(

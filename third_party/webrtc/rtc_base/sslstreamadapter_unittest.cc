@@ -14,14 +14,14 @@
 #include <set>
 #include <string>
 
-#include "webrtc/rtc_base/bufferqueue.h"
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/gunit.h"
-#include "webrtc/rtc_base/helpers.h"
-#include "webrtc/rtc_base/ssladapter.h"
-#include "webrtc/rtc_base/sslidentity.h"
-#include "webrtc/rtc_base/sslstreamadapter.h"
-#include "webrtc/rtc_base/stream.h"
+#include "rtc_base/bufferqueue.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/helpers.h"
+#include "rtc_base/ssladapter.h"
+#include "rtc_base/sslidentity.h"
+#include "rtc_base/sslstreamadapter.h"
+#include "rtc_base/stream.h"
 
 using ::testing::WithParamInterface;
 using ::testing::Values;
@@ -62,6 +62,71 @@ static const char kCERT_PEM[] =
     "VUe5Krqf5RVa5C3u/UTAOAUJBiDS3VANTCLBxjuMsvqOG0WvaYWP3HYPgrz0jXK2\n"
     "LJE/mGw3MyFHEqi81jh95J+ypl6xKW6Rm8jKLR87gUvCaVYn/Z4/P3AqcQTB7wOv\n"
     "UD0A8qfhfDM+LK6rPAnCsVN0NRDY3jvd6rzix9M=\n"
+    "-----END CERTIFICATE-----\n";
+
+static const char kIntCert1[] =
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIIEUjCCAjqgAwIBAgIBAjANBgkqhkiG9w0BAQsFADCBljELMAkGA1UEBhMCVVMx\n"
+    "EzARBgNVBAgMCkNhbGlmb3JuaWExFjAUBgNVBAcMDU1vdW50YWluIFZpZXcxFDAS\n"
+    "BgNVBAoMC0dvb2dsZSwgSW5jMQwwCgYDVQQLDANHVFAxFzAVBgNVBAMMDnRlbGVw\n"
+    "aG9ueS5nb29nMR0wGwYJKoZIhvcNAQkBFg5ndHBAZ29vZ2xlLmNvbTAeFw0xNzA5\n"
+    "MjYwNDA5MDNaFw0yMDA2MjIwNDA5MDNaMGQxCzAJBgNVBAYTAlVTMQswCQYDVQQI\n"
+    "DAJDQTEWMBQGA1UEBwwNTW91bnRhaW4gVmlldzEXMBUGA1UECgwOdGVsZXBob255\n"
+    "Lmdvb2cxFzAVBgNVBAMMDnRlbGVwaG9ueS5nb29nMIGfMA0GCSqGSIb3DQEBAQUA\n"
+    "A4GNADCBiQKBgQDJXWeeU1v1+wlqkVobzI3aN7Uh2iVQA9YCdq5suuabtiD/qoOD\n"
+    "NKpmQqsx7WZGGWSZTDFEBaUpvIK7Hb+nzRqk6iioPCFOFuarm6GxO1xVneImMuE6\n"
+    "tuWb3YZPr+ikChJbl11y5UcSbg0QsbeUc+jHl5umNvrL85Y+z8SP0rxbBwIDAQAB\n"
+    "o2AwXjAdBgNVHQ4EFgQU7tdZobqlN8R8V72FQnRxmqq8tKswHwYDVR0jBBgwFoAU\n"
+    "5GgKMUtcxkQ2dJrtNR5YOlIAPDswDwYDVR0TAQH/BAUwAwEB/zALBgNVHQ8EBAMC\n"
+    "AQYwDQYJKoZIhvcNAQELBQADggIBADObh9Z+z14FmP9zSenhFtq7hFnmNrSkklk8\n"
+    "eyYWXKfOuIriEQQBZsz76ZcnzStih8Rj+yQ0AXydk4fJ5LOwC2cUqQBar17g6Pd2\n"
+    "8g4SIL4azR9WvtiSvpuGlwp25b+yunaacDne6ebnf/MUiiKT5w61Xo3cEPVfl38e\n"
+    "/Up2l0bioid5enUTmg6LY6RxDO6tnZQkz3XD+nNSwT4ehtkqFpHYWjErj0BbkDM2\n"
+    "hiVc/JsYOZn3DmuOlHVHU6sKwqh3JEyvHO/d7DGzMGWHpHwv2mCTJq6l/sR95Tc2\n"
+    "GaQZgGDVNs9pdEouJCDm9e/PbQWRYhnat82PTkXx/6mDAAwdZlIi/pACzq8K4p7e\n"
+    "6hF0t8uKGnXJubHPXxlnJU6yxZ0yWmivAGjwWK4ur832gKlho4jeMDhiI/T3QPpl\n"
+    "iMNsIvxRhdD+GxJkQP1ezayw8s+Uc9KwKglrkBSRRDLCJUfPOvMmXLUDSTMX7kp4\n"
+    "/Ak1CA8dVLJIlfEjLBUuvAttlP7+7lsKNgxAjCxZkWLXIyGULzNPQwVWkGfCbrQs\n"
+    "XyMvSbFsSIb7blV7eLlmf9a+2RprUUkc2ALXLLCI9YQXmxm2beBfMyNmmebwBJzT\n"
+    "B0OR+5pFFNTJPoNlqpdrDsGrDu7JlUtk0ZLZzYyKXbgy2qXxfd4OWzXXjxpLMszZ\n"
+    "LDIpOAkj\n"
+    "-----END CERTIFICATE-----\n";
+
+static const char kCACert[] =
+    "-----BEGIN CERTIFICATE-----\n"
+    "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\n"
+    "dGaXBy+qbVXVyGXaeEbIRjtJ6m92\n"
     "-----END CERTIFICATE-----\n";
 
 class SSLStreamAdapterTestBase;
@@ -107,8 +172,8 @@ class SSLDummyStreamBase : public rtc::StreamInterface,
     int mask = (rtc::SE_READ | rtc::SE_CLOSE);
 
     if (sig & mask) {
-      LOG(LS_VERBOSE) << "SSLDummyStreamBase::OnEvent side=" << side_
-                      << " sig=" << sig << " forwarding upward";
+      RTC_LOG(LS_VERBOSE) << "SSLDummyStreamBase::OnEvent side=" << side_
+                          << " sig=" << sig << " forwarding upward";
       PostEvent(sig & mask, 0);
     }
   }
@@ -116,8 +181,8 @@ class SSLDummyStreamBase : public rtc::StreamInterface,
   // Catch writeability events on out and pass them up.
   void OnEventOut(rtc::StreamInterface* stream, int sig, int err) {
     if (sig & rtc::SE_WRITE) {
-      LOG(LS_VERBOSE) << "SSLDummyStreamBase::OnEvent side=" << side_
-                      << " sig=" << sig << " forwarding upward";
+      RTC_LOG(LS_VERBOSE) << "SSLDummyStreamBase::OnEvent side=" << side_
+                          << " sig=" << sig << " forwarding upward";
 
       PostEvent(sig & rtc::SE_WRITE, 0);
     }
@@ -133,7 +198,7 @@ class SSLDummyStreamBase : public rtc::StreamInterface,
                           size_t* written, int* error) override;
 
   void Close() override {
-    LOG(LS_INFO) << "Closing outbound stream";
+    RTC_LOG(LS_INFO) << "Closing outbound stream";
     out_->Close();
   }
 
@@ -241,7 +306,7 @@ class SSLStreamAdapterTestBase : public testing::Test,
     rtc::SetRandomTestMode(true);
   }
 
-  ~SSLStreamAdapterTestBase() {
+  ~SSLStreamAdapterTestBase() override {
     // Put it back for the next test.
     rtc::SetRandomTestMode(false);
   }
@@ -308,7 +373,7 @@ class SSLStreamAdapterTestBase : public testing::Test,
   }
 
   virtual void OnEvent(rtc::StreamInterface *stream, int sig, int err) {
-    LOG(LS_VERBOSE) << "SSLStreamAdapterTestBase::OnEvent sig=" << sig;
+    RTC_LOG(LS_VERBOSE) << "SSLStreamAdapterTestBase::OnEvent sig=" << sig;
 
     if (sig & rtc::SE_READ) {
       ReadData(stream);
@@ -331,7 +396,7 @@ class SSLStreamAdapterTestBase : public testing::Test,
             ? rtc::SSLPeerCertificateDigestError::NONE
             : rtc::SSLPeerCertificateDigestError::VERIFICATION_FAILED;
 
-    LOG(LS_INFO) << "Setting peer identities by digest";
+    RTC_LOG(LS_INFO) << "Setting peer identities by digest";
 
     rv = server_identity_->certificate().ComputeDigest(
         rtc::DIGEST_SHA_1, server_digest, 20, &server_digest_len);
@@ -341,7 +406,7 @@ class SSLStreamAdapterTestBase : public testing::Test,
     ASSERT_TRUE(rv);
 
     if (!correct) {
-      LOG(LS_INFO) << "Setting bogus digest for server cert";
+      RTC_LOG(LS_INFO) << "Setting bogus digest for server cert";
       server_digest[0]++;
     }
     rv = client_ssl_->SetPeerCertificateDigest(rtc::DIGEST_SHA_1, server_digest,
@@ -350,7 +415,7 @@ class SSLStreamAdapterTestBase : public testing::Test,
     EXPECT_EQ(expect_success, rv);
 
     if (!correct) {
-      LOG(LS_INFO) << "Setting bogus digest for client cert";
+      RTC_LOG(LS_INFO) << "Setting bogus digest for client cert";
       client_digest[0]++;
     }
     rv = server_ssl_->SetPeerCertificateDigest(rtc::DIGEST_SHA_1, client_digest,
@@ -464,12 +529,12 @@ class SSLStreamAdapterTestBase : public testing::Test,
                                 int *error) {
     // Randomly drop loss_ percent of packets
     if (rtc::CreateRandomId() % 100 < static_cast<uint32_t>(loss_)) {
-      LOG(LS_VERBOSE) << "Randomly dropping packet, size=" << data_len;
+      RTC_LOG(LS_VERBOSE) << "Randomly dropping packet, size=" << data_len;
       *written = data_len;
       return rtc::SR_SUCCESS;
     }
     if (dtls_ && (data_len > mtu_)) {
-      LOG(LS_VERBOSE) << "Dropping packet > mtu, size=" << data_len;
+      RTC_LOG(LS_VERBOSE) << "Dropping packet > mtu, size=" << data_len;
       *written = data_len;
       return rtc::SR_SUCCESS;
     }
@@ -480,7 +545,7 @@ class SSLStreamAdapterTestBase : public testing::Test,
     if (damage_ && (*static_cast<const unsigned char *>(data) == 23)) {
       std::vector<char> buf(data_len);
 
-      LOG(LS_VERBOSE) << "Damaging packet";
+      RTC_LOG(LS_VERBOSE) << "Damaging packet";
 
       memcpy(&buf[0], data, data_len);
       buf[data_len - 1]++;
@@ -532,10 +597,13 @@ class SSLStreamAdapterTestBase : public testing::Test,
   }
 
   std::unique_ptr<rtc::SSLCertificate> GetPeerCertificate(bool client) {
+    std::unique_ptr<rtc::SSLCertChain> chain;
     if (client)
-      return client_ssl_->GetPeerCertificate();
+      chain = client_ssl_->GetPeerSSLCertChain();
     else
-      return server_ssl_->GetPeerCertificate();
+      chain = server_ssl_->GetPeerSSLCertChain();
+    return (chain && chain->GetSize()) ? chain->Get(0).GetUniqueReference()
+                                       : nullptr;
   }
 
   bool GetSslCipherSuite(bool client, int* retval) {
@@ -620,7 +688,7 @@ class SSLStreamAdapterTestTLS
 
   // Test data transfer for TLS
   void TestTransfer(int size) override {
-    LOG(LS_INFO) << "Starting transfer test with " << size << " bytes";
+    RTC_LOG(LS_INFO) << "Starting transfer test with " << size << " bytes";
     // Create some dummy data to send.
     size_t received;
 
@@ -666,9 +734,9 @@ class SSLStreamAdapterTestTLS
 
         if (rv == rtc::SR_SUCCESS) {
           send_stream_.SetPosition(position + sent);
-          LOG(LS_VERBOSE) << "Sent: " << position + sent;
+          RTC_LOG(LS_VERBOSE) << "Sent: " << position + sent;
         } else if (rv == rtc::SR_BLOCK) {
-          LOG(LS_VERBOSE) << "Blocked...";
+          RTC_LOG(LS_VERBOSE) << "Blocked...";
           send_stream_.SetPosition(position);
           break;
         } else {
@@ -677,7 +745,7 @@ class SSLStreamAdapterTestTLS
         }
       } else {
         // Now close
-        LOG(LS_INFO) << "Wrote " << position << " bytes. Closing";
+        RTC_LOG(LS_INFO) << "Wrote " << position << " bytes. Closing";
         client_ssl_->Close();
         break;
       }
@@ -704,7 +772,7 @@ class SSLStreamAdapterTestTLS
         break;
 
       ASSERT_EQ(rtc::SR_SUCCESS, r);
-      LOG(LS_VERBOSE) << "Read " << bread;
+      RTC_LOG(LS_VERBOSE) << "Read " << bread;
 
       recv_stream_.Write(buffer, bread, nullptr, nullptr);
     }
@@ -763,10 +831,10 @@ class SSLStreamAdapterTestDTLS
       size_t sent;
       rtc::StreamResult rv = client_ssl_->Write(packet, packet_size_, &sent, 0);
       if (rv == rtc::SR_SUCCESS) {
-        LOG(LS_VERBOSE) << "Sent: " << sent_;
+        RTC_LOG(LS_VERBOSE) << "Sent: " << sent_;
         sent_++;
       } else if (rv == rtc::SR_BLOCK) {
-        LOG(LS_VERBOSE) << "Blocked...";
+        RTC_LOG(LS_VERBOSE) << "Blocked...";
         break;
       } else {
         ADD_FAILURE();
@@ -797,7 +865,7 @@ class SSLStreamAdapterTestDTLS
         break;
 
       ASSERT_EQ(rtc::SR_SUCCESS, r);
-      LOG(LS_VERBOSE) << "Read " << bread;
+      RTC_LOG(LS_VERBOSE) << "Read " << bread;
 
       // Now parse the datagram
       ASSERT_EQ(packet_size_, bread);
@@ -819,7 +887,7 @@ class SSLStreamAdapterTestDTLS
     WriteData();
 
     EXPECT_TRUE_WAIT(sent_ == count_, 10000);
-    LOG(LS_INFO) << "sent_ == " << sent_;
+    RTC_LOG(LS_INFO) << "sent_ == " << sent_;
 
     if (damage_) {
       WAIT(false, 2000);
@@ -827,8 +895,8 @@ class SSLStreamAdapterTestDTLS
     } else if (loss_ == 0) {
         EXPECT_EQ_WAIT(static_cast<size_t>(sent_), received_.size(), 1000);
     } else {
-      LOG(LS_INFO) << "Sent " << sent_ << " packets; received " <<
-          received_.size();
+      RTC_LOG(LS_INFO) << "Sent " << sent_ << " packets; received "
+                       << received_.size();
     }
   };
 
@@ -844,12 +912,12 @@ class SSLStreamAdapterTestDTLS
 
 rtc::StreamResult SSLDummyStreamBase::Write(const void* data, size_t data_len,
                                               size_t* written, int* error) {
-  LOG(LS_VERBOSE) << "Writing to loopback " << data_len;
+  RTC_LOG(LS_VERBOSE) << "Writing to loopback " << data_len;
 
   if (first_packet_) {
     first_packet_ = false;
     if (test_base_->GetLoseFirstPacket()) {
-      LOG(LS_INFO) << "Losing initial packet of length " << data_len;
+      RTC_LOG(LS_INFO) << "Losing initial packet of length " << data_len;
       *written = data_len;  // Fake successful writing also to writer.
       return rtc::SR_SUCCESS;
     }
@@ -865,12 +933,94 @@ class SSLStreamAdapterTestDTLSFromPEMStrings : public SSLStreamAdapterTestDTLS {
   }
 };
 
+// Test fixture for certificate chaining. Server will push more than one
+// certificate.
+class SSLStreamAdapterTestDTLSCertChain : public SSLStreamAdapterTestDTLS {
+ public:
+  SSLStreamAdapterTestDTLSCertChain() : SSLStreamAdapterTestDTLS("", ""){};
+  void SetUp() override {
+    CreateStreams();
+
+    client_ssl_.reset(rtc::SSLStreamAdapter::Create(client_stream_));
+    server_ssl_.reset(rtc::SSLStreamAdapter::Create(server_stream_));
+
+    // Set up the slots
+    client_ssl_->SignalEvent.connect(
+        reinterpret_cast<SSLStreamAdapterTestBase*>(this),
+        &SSLStreamAdapterTestBase::OnEvent);
+    server_ssl_->SignalEvent.connect(
+        reinterpret_cast<SSLStreamAdapterTestBase*>(this),
+        &SSLStreamAdapterTestBase::OnEvent);
+
+    if (!client_cert_pem_.empty() && !client_private_key_pem_.empty()) {
+      client_identity_ = rtc::SSLIdentity::FromPEMStrings(
+          client_private_key_pem_, client_cert_pem_);
+    } else {
+      client_identity_ = rtc::SSLIdentity::Generate("client", client_key_type_);
+    }
+
+    client_ssl_->SetIdentity(client_identity_);
+  }
+};
+
 // Basic tests: TLS
 
 // Test that we can make a handshake work
 TEST_P(SSLStreamAdapterTestTLS, TestTLSConnect) {
   TestHandshake();
 };
+
+TEST_P(SSLStreamAdapterTestTLS, GetPeerCertChainWithOneCertificate) {
+  TestHandshake();
+  std::unique_ptr<rtc::SSLCertChain> cert_chain =
+      client_ssl_->GetPeerSSLCertChain();
+  ASSERT_NE(nullptr, cert_chain);
+  EXPECT_EQ(1u, cert_chain->GetSize());
+  EXPECT_EQ(cert_chain->Get(0).ToPEMString(),
+            server_identity_->certificate().ToPEMString());
+}
+
+TEST_F(SSLStreamAdapterTestDTLSCertChain, TwoCertHandshake) {
+  server_identity_ = rtc::SSLIdentity::FromPEMChainStrings(
+      kRSA_PRIVATE_KEY_PEM, std::string(kCERT_PEM) + kCACert);
+  server_ssl_->SetIdentity(server_identity_);
+  TestHandshake();
+  std::unique_ptr<rtc::SSLCertChain> peer_cert_chain =
+      client_ssl_->GetPeerSSLCertChain();
+  ASSERT_NE(nullptr, peer_cert_chain);
+  ASSERT_EQ(2u, peer_cert_chain->GetSize());
+  EXPECT_EQ(kCERT_PEM, peer_cert_chain->Get(0).ToPEMString());
+  EXPECT_EQ(kCACert, peer_cert_chain->Get(1).ToPEMString());
+}
+
+TEST_F(SSLStreamAdapterTestDTLSCertChain, TwoCertHandshakeWithCopy) {
+  std::unique_ptr<rtc::SSLIdentity> identity(
+      rtc::SSLIdentity::FromPEMChainStrings(kRSA_PRIVATE_KEY_PEM,
+                                            std::string(kCERT_PEM) + kCACert));
+  server_identity_ = identity->GetReference();
+  server_ssl_->SetIdentity(server_identity_);
+  TestHandshake();
+  std::unique_ptr<rtc::SSLCertChain> peer_cert_chain =
+      client_ssl_->GetPeerSSLCertChain();
+  ASSERT_NE(nullptr, peer_cert_chain);
+  ASSERT_EQ(2u, peer_cert_chain->GetSize());
+  EXPECT_EQ(kCERT_PEM, peer_cert_chain->Get(0).ToPEMString());
+  EXPECT_EQ(kCACert, peer_cert_chain->Get(1).ToPEMString());
+}
+
+TEST_F(SSLStreamAdapterTestDTLSCertChain, ThreeCertHandshake) {
+  server_identity_ = rtc::SSLIdentity::FromPEMChainStrings(
+      kRSA_PRIVATE_KEY_PEM, std::string(kCERT_PEM) + kIntCert1 + kCACert);
+  server_ssl_->SetIdentity(server_identity_);
+  TestHandshake();
+  std::unique_ptr<rtc::SSLCertChain> peer_cert_chain =
+      client_ssl_->GetPeerSSLCertChain();
+  ASSERT_NE(nullptr, peer_cert_chain);
+  ASSERT_EQ(3u, peer_cert_chain->GetSize());
+  EXPECT_EQ(kCERT_PEM, peer_cert_chain->Get(0).ToPEMString());
+  EXPECT_EQ(kIntCert1, peer_cert_chain->Get(1).ToPEMString());
+  EXPECT_EQ(kCACert, peer_cert_chain->Get(2).ToPEMString());
+}
 
 // Test that closing the connection on one side updates the other side.
 TEST_P(SSLStreamAdapterTestTLS, TestTLSClose) {
@@ -1240,9 +1390,6 @@ TEST_F(SSLStreamAdapterTestDTLSFromPEMStrings, TestDTLSGetPeerCertificate) {
   std::string client_peer_string = client_peer_cert->ToPEMString();
   ASSERT_NE(kCERT_PEM, client_peer_string);
 
-  // It must not have a chain, because the test certs are self-signed.
-  ASSERT_FALSE(client_peer_cert->GetChain());
-
   // The server should have a peer certificate after the handshake.
   std::unique_ptr<rtc::SSLCertificate> server_peer_cert =
       GetPeerCertificate(false);
@@ -1250,9 +1397,6 @@ TEST_F(SSLStreamAdapterTestDTLSFromPEMStrings, TestDTLSGetPeerCertificate) {
 
   // It's kCERT_PEM
   ASSERT_EQ(kCERT_PEM, server_peer_cert->ToPEMString());
-
-  // It must not have a chain, because the test certs are self-signed.
-  ASSERT_FALSE(server_peer_cert->GetChain());
 }
 
 // Test getting the used DTLS ciphers.

@@ -17,6 +17,12 @@
 #include "ui/aura/mus/window_tree_client_delegate.h"
 #include "ui/aura/test/aura_test_helper.h"
 
+namespace base {
+namespace test {
+class ScopedFeatureList;
+}
+}  // namespace base
+
 namespace ui {
 namespace mojom {
 class WindowTreeClient;
@@ -29,9 +35,15 @@ class WindowDelegate;
 class WindowManagerDelegate;
 class WindowTreeClientDelegate;
 
+namespace client {
+class FocusClient;
+}
+
 namespace test {
 
-enum class BackendType { CLASSIC, MUS };
+class AuraTestContextFactory;
+
+enum class BackendType { CLASSIC, MUS, MASH };
 
 // A base class for aura unit tests.
 // TODO(beng): Instances of this test will create and own a RootWindow.
@@ -85,12 +97,17 @@ class AuraTestBase : public testing::Test,
   WindowTreeHost* host() { return helper_->host(); }
   ui::EventSink* event_sink() { return helper_->event_sink(); }
   TestScreen* test_screen() { return helper_->test_screen(); }
+  client::FocusClient* focus_client() { return helper_->focus_client(); }
 
   TestWindowTree* window_tree() { return helper_->window_tree(); }
   WindowTreeClient* window_tree_client_impl() {
     return helper_->window_tree_client();
   }
   ui::mojom::WindowTreeClient* window_tree_client();
+
+  std::vector<std::unique_ptr<ui::PointerEvent>>& observed_pointer_events() {
+    return observed_pointer_events_;
+  }
 
   // WindowTreeClientDelegate:
   void OnEmbed(std::unique_ptr<WindowTreeHostMus> window_tree_host) override;
@@ -103,6 +120,9 @@ class AuraTestBase : public testing::Test,
   // WindowManagerDelegate:
   void SetWindowManagerClient(WindowManagerClient* client) override;
   void OnWmConnected() override;
+  void OnWmAcceleratedWidgetAvailableForDisplay(
+      int64_t display_id,
+      gfx::AcceleratedWidget widget) override {}
   void OnWmSetBounds(Window* window, const gfx::Rect& bounds) override;
   bool OnWmSetProperty(
       Window* window,
@@ -131,6 +151,7 @@ class AuraTestBase : public testing::Test,
       const ui::Event& event,
       std::unordered_map<std::string, std::vector<uint8_t>>* properties)
       override;
+  void OnCursorTouchVisibleChanged(bool enabled) override;
   void OnWmPerformMoveLoop(Window* window,
                            ui::mojom::MoveLoopSource source,
                            const gfx::Point& cursor_location,
@@ -147,6 +168,8 @@ class AuraTestBase : public testing::Test,
  private:
   base::test::ScopedTaskEnvironment scoped_task_environment_;
 
+  std::unique_ptr<base::test::ScopedFeatureList> feature_list_;
+
   // Only used for mus. Both are are initialized to this, but may be reset.
   WindowManagerDelegate* window_manager_delegate_;
   WindowTreeClientDelegate* window_tree_client_delegate_;
@@ -156,7 +179,9 @@ class AuraTestBase : public testing::Test,
   bool teardown_called_ = false;
   PropertyConverter property_converter_;
   std::unique_ptr<AuraTestHelper> helper_;
+  std::unique_ptr<AuraTestContextFactory> mus_context_factory_;
   std::vector<std::unique_ptr<WindowTreeHostMus>> window_tree_hosts_;
+  std::vector<std::unique_ptr<ui::PointerEvent>> observed_pointer_events_;
 
   DISALLOW_COPY_AND_ASSIGN(AuraTestBase);
 };

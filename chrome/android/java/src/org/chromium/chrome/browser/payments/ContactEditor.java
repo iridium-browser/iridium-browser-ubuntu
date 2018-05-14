@@ -19,6 +19,7 @@ import org.chromium.chrome.browser.payments.ui.EditorModel;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
 
 import javax.annotation.Nullable;
 
@@ -39,6 +40,7 @@ public class ContactEditor extends EditorBase<AutofillContact> {
     private final boolean mRequestPayerName;
     private final boolean mRequestPayerPhone;
     private final boolean mRequestPayerEmail;
+    private final boolean mSaveToDisk;
     private final Set<CharSequence> mPayerNames;
     private final Set<CharSequence> mPhoneNumbers;
     private final Set<CharSequence> mEmailAddresses;
@@ -48,16 +50,18 @@ public class ContactEditor extends EditorBase<AutofillContact> {
     /**
      * Builds a contact information editor.
      *
-     * @param requestPayerName Whether to request the user's name.
+     * @param requestPayerName  Whether to request the user's name.
      * @param requestPayerPhone Whether to request the user's phone number.
      * @param requestPayerEmail Whether to request the user's email address.
+     * @param saveToDisk        Whether to save changes to disk.
      */
-    public ContactEditor(boolean requestPayerName,
-            boolean requestPayerPhone, boolean requestPayerEmail) {
+    public ContactEditor(boolean requestPayerName, boolean requestPayerPhone,
+            boolean requestPayerEmail, boolean saveToDisk) {
         assert requestPayerName || requestPayerPhone || requestPayerEmail;
         mRequestPayerName = requestPayerName;
         mRequestPayerPhone = requestPayerPhone;
         mRequestPayerEmail = requestPayerEmail;
+        mSaveToDisk = saveToDisk;
         mPayerNames = new HashSet<>();
         mPhoneNumbers = new HashSet<>();
         mEmailAddresses = new HashSet<>();
@@ -188,41 +192,43 @@ public class ContactEditor extends EditorBase<AutofillContact> {
 
         // If the user clicks [Cancel], send |toEdit| contact back to the caller, which was the
         // original state (could be null, a complete contact, a partial contact).
-        editor.setCancelCallback(new Runnable() {
-            @Override
-            public void run() {
-                callback.onResult(toEdit);
+        editor.setCancelCallback(() -> callback.onResult(toEdit));
+
+        editor.setDoneCallback(() -> {
+            String name = null;
+            String phone = null;
+            String email = null;
+            AutofillProfile profile = contact.getProfile();
+
+            if (nameField != null) {
+                name = nameField.getValue().toString();
+                profile.setFullName(name);
             }
-        });
 
-        editor.setDoneCallback(new Runnable() {
-            @Override
-            public void run() {
-                String name = null;
-                String phone = null;
-                String email = null;
-                AutofillProfile profile = contact.getProfile();
+            if (phoneField != null) {
+                phone = phoneField.getValue().toString();
+                profile.setPhoneNumber(phone);
+            }
 
-                if (nameField != null) {
-                    name = nameField.getValue().toString();
-                    profile.setFullName(name);
-                }
+            if (emailField != null) {
+                email = emailField.getValue().toString();
+                profile.setEmailAddress(email);
+            }
 
-                if (phoneField != null) {
-                    phone = phoneField.getValue().toString();
-                    profile.setPhoneNumber(phone);
-                }
-
-                if (emailField != null) {
-                    email = emailField.getValue().toString();
-                    profile.setEmailAddress(email);
-                }
-
+            if (mSaveToDisk) {
                 profile.setGUID(PersonalDataManager.getInstance().setProfileToLocal(profile));
-                profile.setIsLocal(true);
-                contact.completeContact(profile.getGUID(), name, phone, email);
-                callback.onResult(contact);
             }
+
+            if (profile.getGUID().isEmpty()) {
+                assert !mSaveToDisk;
+
+                // Set a fake guid for a new temp AutofillProfile.
+                profile.setGUID(UUID.randomUUID().toString());
+            }
+
+            profile.setIsLocal(true);
+            contact.completeContact(profile.getGUID(), name, phone, email);
+            callback.onResult(contact);
         });
 
         mEditorDialog.show(editor);

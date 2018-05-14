@@ -6,9 +6,9 @@
 
 namespace ash {
 
-MediaController::MediaController() {}
+MediaController::MediaController() = default;
 
-MediaController::~MediaController() {}
+MediaController::~MediaController() = default;
 
 void MediaController::BindRequest(mojom::MediaControllerRequest request) {
   bindings_.AddBinding(this, std::move(request));
@@ -20,6 +20,16 @@ void MediaController::AddObserver(MediaCaptureObserver* observer) {
 
 void MediaController::RemoveObserver(MediaCaptureObserver* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void MediaController::SetClient(mojom::MediaClientAssociatedPtrInfo client) {
+  client_.Bind(std::move(client));
+}
+
+void MediaController::NotifyCaptureState(
+    const std::vector<mojom::MediaCaptureState>& capture_states) {
+  for (auto& observer : observers_)
+    observer.OnMediaCaptureChanged(capture_states);
 }
 
 void MediaController::HandleMediaNextTrack() {
@@ -42,14 +52,9 @@ void MediaController::RequestCaptureState() {
     client_->RequestCaptureState();
 }
 
-void MediaController::SetClient(mojom::MediaClientAssociatedPtrInfo client) {
-  client_.Bind(std::move(client));
-}
-
-void MediaController::NotifyCaptureState(
-    const std::vector<mojom::MediaCaptureState>& capture_states) {
-  for (auto& observer : observers_)
-    observer.OnMediaCaptureChanged(capture_states);
+void MediaController::SuspendMediaSessions() {
+  if (client_)
+    client_->SuspendMediaSessions();
 }
 
 }  // namespace ash

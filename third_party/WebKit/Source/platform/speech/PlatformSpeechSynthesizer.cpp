@@ -25,6 +25,7 @@
 
 #include "platform/speech/PlatformSpeechSynthesizer.h"
 
+#include "build/build_config.h"
 #include "platform/exported/WebSpeechSynthesizerClientImpl.h"
 #include "platform/speech/PlatformSpeechSynthesisUtterance.h"
 #include "platform/wtf/PtrUtil.h"
@@ -39,7 +40,13 @@ PlatformSpeechSynthesizer* PlatformSpeechSynthesizer::Create(
     PlatformSpeechSynthesizerClient* client) {
   PlatformSpeechSynthesizer* synthesizer =
       new PlatformSpeechSynthesizer(client);
+#if defined(OS_ANDROID)
+// On Android devices we don't fetch voices until the object
+// is touched to avoid needlessly binding to TTS service, see
+// https://crbug.com/811929.
+#else
   synthesizer->InitializeVoiceList();
+#endif
   return synthesizer;
 }
 
@@ -52,40 +59,57 @@ PlatformSpeechSynthesizer::PlatformSpeechSynthesizer(
       web_speech_synthesizer_client_);
 }
 
-PlatformSpeechSynthesizer::~PlatformSpeechSynthesizer() {}
+PlatformSpeechSynthesizer::~PlatformSpeechSynthesizer() = default;
 
 void PlatformSpeechSynthesizer::Speak(
     PlatformSpeechSynthesisUtterance* utterance) {
+  MaybeInitializeVoiceList();
   if (web_speech_synthesizer_ && web_speech_synthesizer_client_)
     web_speech_synthesizer_->Speak(WebSpeechSynthesisUtterance(utterance));
 }
 
 void PlatformSpeechSynthesizer::Pause() {
+  MaybeInitializeVoiceList();
   if (web_speech_synthesizer_)
     web_speech_synthesizer_->Pause();
 }
 
 void PlatformSpeechSynthesizer::Resume() {
+  MaybeInitializeVoiceList();
   if (web_speech_synthesizer_)
     web_speech_synthesizer_->Resume();
 }
 
 void PlatformSpeechSynthesizer::Cancel() {
+  MaybeInitializeVoiceList();
   if (web_speech_synthesizer_)
     web_speech_synthesizer_->Cancel();
 }
 
+const Vector<scoped_refptr<PlatformSpeechSynthesisVoice>>&
+PlatformSpeechSynthesizer::GetVoiceList() {
+  MaybeInitializeVoiceList();
+  return voice_list_;
+}
+
 void PlatformSpeechSynthesizer::SetVoiceList(
-    Vector<RefPtr<PlatformSpeechSynthesisVoice>>& voices) {
+    Vector<scoped_refptr<PlatformSpeechSynthesisVoice>>& voices) {
   voice_list_ = voices;
 }
 
-void PlatformSpeechSynthesizer::InitializeVoiceList() {
-  if (web_speech_synthesizer_)
-    web_speech_synthesizer_->UpdateVoiceList();
+void PlatformSpeechSynthesizer::MaybeInitializeVoiceList() {
+  if (!voices_initialized_)
+    InitializeVoiceList();
 }
 
-DEFINE_TRACE(PlatformSpeechSynthesizer) {
+void PlatformSpeechSynthesizer::InitializeVoiceList() {
+  if (web_speech_synthesizer_) {
+    voices_initialized_ = true;
+    web_speech_synthesizer_->UpdateVoiceList();
+  }
+}
+
+void PlatformSpeechSynthesizer::Trace(blink::Visitor* visitor) {
   visitor->Trace(speech_synthesizer_client_);
   visitor->Trace(web_speech_synthesizer_client_);
 }

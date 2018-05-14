@@ -8,10 +8,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <memory>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -28,6 +28,7 @@
 #include "net/spdy/core/spdy_protocol.h"
 #include "net/spdy/platform/api/spdy_string.h"
 #include "net/ssl/ssl_client_cert_type.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -119,7 +120,8 @@ class NET_EXPORT_PRIVATE SpdyStream {
              RequestPriority priority,
              int32_t initial_send_window_size,
              int32_t max_recv_window_size,
-             const NetLogWithSource& net_log);
+             const NetLogWithSource& net_log,
+             const NetworkTrafficAnnotationTag& traffic_annotation);
 
   ~SpdyStream();
 
@@ -167,9 +169,10 @@ class NET_EXPORT_PRIVATE SpdyStream {
   // send window size to go negative, it must not cause it to wrap
   // around in either direction. Does nothing if the stream is already
   // closed.
-  //
-  // If stream flow control is turned off, this must not be called.
-  void AdjustSendWindowSize(int32_t delta_window_size);
+  // Returns true if successful.  Returns false if |send_window_size_|
+  // would exceed 2^31-1 after the update, see RFC7540 Section 6.9.2.
+  // Note that |send_window_size_| should not possibly underflow.
+  bool AdjustSendWindowSize(int32_t delta_window_size) WARN_UNUSED_RESULT;
 
   // Called when bytes are consumed from a SpdyBuffer for a DATA frame
   // that is to be written or is being written. Increases the send
@@ -247,7 +250,7 @@ class NET_EXPORT_PRIVATE SpdyStream {
 
   // Called by the SpdySession when a frame carrying request headers opening a
   // push stream is received. Stream transits to STATE_RESERVED_REMOTE state.
-  void OnPushPromiseHeadersReceived(SpdyHeaderBlock headers);
+  void OnPushPromiseHeadersReceived(SpdyHeaderBlock headers, GURL url);
 
   // Called by the SpdySession when response data has been received
   // for this stream.  This callback may be called multiple times as
@@ -289,7 +292,7 @@ class NET_EXPORT_PRIVATE SpdyStream {
   void OnClose(int status);
 
   // Called by the SpdySession to log stream related errors.
-  void LogStreamError(int status, const SpdyString& description);
+  void LogStreamError(int error, const SpdyString& description);
 
   // If this stream is active, reset it, and close it otherwise. In
   // either case the stream is deleted.
@@ -320,6 +323,7 @@ class NET_EXPORT_PRIVATE SpdyStream {
   // MORE_DATA_TO_SEND for bidirectional streams; for request/response
   // streams, it must be MORE_DATA_TO_SEND if there is more data to
   // upload, or NO_MORE_DATA_TO_SEND if not.
+  // Must not be called until Delegate::OnHeadersSent() is called.
   void SendData(IOBuffer* data, int length, SpdySendStatus send_status);
 
   // Fills SSL info in |ssl_info| and returns true when SSL is in use.
@@ -336,7 +340,8 @@ class NET_EXPORT_PRIVATE SpdyStream {
   // set |send_stalled_by_flow_control_| to false and unstall the data
   // sending. Called by the session or by the stream itself. Must be
   // called only when the stream is still open.
-  void PossiblyResumeIfSendStalled();
+  enum ShouldRequeueStream { Requeue, DoNotRequeue };
+  ShouldRequeueStream PossiblyResumeIfSendStalled();
 
   // Returns whether or not this stream is closed. Note that the only
   // time a stream is closed and not deleted is in its delegate's
@@ -368,8 +373,11 @@ class NET_EXPORT_PRIVATE SpdyStream {
   int64_t raw_received_bytes() const { return raw_received_bytes_; }
   int64_t raw_sent_bytes() const { return raw_sent_bytes_; }
   int recv_bytes() const { return recv_bytes_; }
+  bool ShouldRetryRSTPushStream();
 
   bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const;
+
+  const SpdyHeaderBlock& request_headers() { return request_headers_; }
 
   // Get the URL from the appropriate stream headers, or the empty
   // GURL() if it is unknown.
@@ -377,6 +385,10 @@ class NET_EXPORT_PRIVATE SpdyStream {
 
   // Returns the estimate of dynamically allocated memory in bytes.
   size_t EstimateMemoryUsage() const;
+
+  const NetworkTrafficAnnotationTag traffic_annotation() const {
+    return traffic_annotation_;
+  }
 
  private:
   class HeadersBufferProducer;
@@ -522,6 +534,8 @@ class NET_EXPORT_PRIVATE SpdyStream {
   // TODO(jgraettinger): Consider removing after crbug.com/35511 is tracked
   // down.
   bool write_handler_guard_;
+
+  const NetworkTrafficAnnotationTag traffic_annotation_;
 
   base::WeakPtrFactory<SpdyStream> weak_ptr_factory_;
 

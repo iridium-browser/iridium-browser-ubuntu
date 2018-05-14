@@ -11,11 +11,16 @@
 #include <string>
 #include <utility>
 
+#include "base/bind.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/task_scheduler/task_traits.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/win/scoped_handle.h"
 
 // These structures and functions are documented in MSDN, see
@@ -86,6 +91,13 @@ using LdrUnregisterDllNotificationFunc = NTSTATUS(NTAPI*)(PVOID cookie);
 namespace {
 
 // Global lock for ensuring synchronization of destruction and notifications.
+//
+// Warning: Since this lock is acquired inside the DLL notification callbacks,
+//          it must never be held when calling into any functions that may
+//          acquire the Loader Lock, as this is a lock order violation that will
+//          cause a deadlock. A noteworthy example in this file are the
+//          LdrRegisterDllNotification and LdrUnregisterDllNotification
+//          functions.
 base::LazyInstance<base::Lock>::Leaky g_module_watcher_lock =
     LAZY_INSTANCE_INITIALIZER;
 // Global pointer to the singleton ModuleWatcher, if one exists. Under
@@ -119,26 +131,52 @@ void OnModuleEvent(mojom::ModuleEventType event_type,
 // static
 std::unique_ptr<ModuleWatcher> ModuleWatcher::Create(
     OnModuleEventCallback callback) {
-  // If a ModuleWatcher already exists then bail out.
-  base::AutoLock lock(g_module_watcher_lock.Get());
-  if (g_module_watcher_instance)
-    return nullptr;
+  {
+    base::AutoLock lock(g_module_watcher_lock.Get());
+    // If a ModuleWatcher already exists then bail out.
+    if (g_module_watcher_instance)
+      return nullptr;
+    g_module_watcher_instance = new ModuleWatcher();
+  }
 
-  // This thread acquired the right to create a ModuleWatcher, so do so.
-  g_module_watcher_instance = new ModuleWatcher(std::move(callback));
+  // Initialization mustn't occur while holding |g_module_watcher_lock|.
+  g_module_watcher_instance->Initialize(std::move(callback));
   return base::WrapUnique(g_module_watcher_instance);
 }
 
 ModuleWatcher::~ModuleWatcher() {
+  // Done before acquiring |g_module_watcher_lock|.
+  UnregisterDllNotificationCallback();
+
   // As soon as |g_module_watcher_instance| is null any dispatched callbacks
   // will be silently absorbed by LoaderNotificationCallback.
   base::AutoLock lock(g_module_watcher_lock.Get());
   DCHECK_EQ(g_module_watcher_instance, this);
   g_module_watcher_instance = nullptr;
-  UnregisterDllNotificationCallback();
+}
+
+ModuleWatcher::ModuleWatcher() : weak_ptr_factory_(this) {}
+
+// Initializes the ModuleWatcher instance.
+void ModuleWatcher::Initialize(OnModuleEventCallback callback) {
+  callback_ = std::move(callback);
+  RegisterDllNotificationCallback();
+
+  // The enumeration of modules is done on a background task to make sure it
+  // doesn't slow down startup.
+  base::PostTaskWithTraits(
+      FROM_HERE,
+      {base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+      base::BindOnce(&ModuleWatcher::EnumerateAlreadyLoadedModules,
+                     base::SequencedTaskRunnerHandle::Get(),
+                     base::BindRepeating(&ModuleWatcher::RunCallback,
+                                         weak_ptr_factory_.GetWeakPtr())));
 }
 
 void ModuleWatcher::RegisterDllNotificationCallback() {
+  // It's safe to pass the return value of ::GetModuleHandle() directly to
+  // ::GetProcAddress() because ntdll is guaranteed to be loaded.
   LdrRegisterDllNotificationFunc reg_fn =
       reinterpret_cast<LdrRegisterDllNotificationFunc>(::GetProcAddress(
           ::GetModuleHandle(kNtDll), kLdrRegisterDllNotification));
@@ -147,6 +185,8 @@ void ModuleWatcher::RegisterDllNotificationCallback() {
 }
 
 void ModuleWatcher::UnregisterDllNotificationCallback() {
+  // It's safe to pass the return value of ::GetModuleHandle() directly to
+  // ::GetProcAddress() because ntdll is guaranteed to be loaded.
   LdrUnregisterDllNotificationFunc unreg_fn =
       reinterpret_cast<LdrUnregisterDllNotificationFunc>(::GetProcAddress(
           ::GetModuleHandle(kNtDll), kLdrUnregisterDllNotification));
@@ -154,13 +194,16 @@ void ModuleWatcher::UnregisterDllNotificationCallback() {
     unreg_fn(dll_notification_cookie_);
 }
 
-void ModuleWatcher::EnumerateAlreadyLoadedModules() {
+// static
+void ModuleWatcher::EnumerateAlreadyLoadedModules(
+    scoped_refptr<base::SequencedTaskRunner> task_runner,
+    OnModuleEventCallback callback) {
   // Get all modules in the current process. According to MSDN,
   // CreateToolhelp32Snapshot should be retried as long as its returning
   // ERROR_BAD_LENGTH. To avoid locking up here a retry limit is enforced.
   base::win::ScopedHandle snap;
   DWORD process_id = ::GetCurrentProcessId();
-  for (size_t i = 0; i < 5; ++i) {
+  for (int i = 0; i < 5; ++i) {
     snap.Set(::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
                                         process_id));
     if (snap.IsValid())
@@ -178,10 +221,8 @@ void ModuleWatcher::EnumerateAlreadyLoadedModules() {
     ModuleEvent event(mojom::ModuleEventType::MODULE_ALREADY_LOADED,
                       base::FilePath(module.szExePath), module.modBaseAddr,
                       module.modBaseSize);
-    callback_.Run(event);
+    task_runner->PostTask(FROM_HERE, base::BindOnce(callback, event));
   }
-
-  return;
 }
 
 // static
@@ -209,8 +250,7 @@ void __stdcall ModuleWatcher::LoaderNotificationCallback(
       break;
 
     case LDR_DLL_NOTIFICATION_REASON_UNLOADED:
-      OnModuleEvent(mojom::ModuleEventType::MODULE_UNLOADED,
-                    notification_data->Unloaded, callback);
+      // Intentionally ignored.
       break;
 
     default:
@@ -220,8 +260,6 @@ void __stdcall ModuleWatcher::LoaderNotificationCallback(
   }
 }
 
-ModuleWatcher::ModuleWatcher(OnModuleEventCallback callback)
-    : callback_(std::move(callback)) {
-  RegisterDllNotificationCallback();
-  EnumerateAlreadyLoadedModules();
+void ModuleWatcher::RunCallback(const ModuleEvent& event) {
+  callback_.Run(event);
 }

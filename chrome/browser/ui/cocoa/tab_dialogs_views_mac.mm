@@ -8,16 +8,24 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/cocoa/browser_window_controller.h"
+#include "chrome/browser/ui/cocoa/browser_dialogs_views_mac.h"
+#import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/bubble_anchor_helper_views.h"
 #import "chrome/browser/ui/cocoa/passwords/passwords_bubble_controller.h"
 #include "chrome/browser/ui/views/collected_cookies_views.h"
-#include "chrome/browser/ui/views/passwords/manage_passwords_bubble_view.h"
+#include "chrome/browser/ui/views/passwords/password_bubble_view_base.h"
 #include "chrome/browser/ui/views/sync/profile_signin_confirmation_dialog_views.h"
 #include "content/public/browser/web_contents.h"
 #import "ui/base/cocoa/cocoa_base_utils.h"
-#include "ui/base/material_design/material_design_controller.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
+
+namespace {
+
+gfx::Point ScreenPointFromBrowser(Browser* browser, NSPoint ns_point) {
+  return gfx::ScreenPointFromNSPoint(ui::ConvertPointFromWindowToScreen(
+      browser->window()->GetNativeWindow(), ns_point));
+}
+}
 
 TabDialogsViewsMac::TabDialogsViewsMac(content::WebContents* contents)
     : TabDialogsCocoa(contents) {}
@@ -39,7 +47,7 @@ void TabDialogsViewsMac::ShowProfileSigninConfirmation(
 }
 
 void TabDialogsViewsMac::ShowManagePasswordsBubble(bool user_action) {
-  if (!ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+  if (!chrome::ShowAllDialogsWithViewsToolkit()) {
     TabDialogsCocoa::ShowManagePasswordsBubble(user_action);
     return;
   }
@@ -56,15 +64,17 @@ void TabDialogsViewsMac::ShowManagePasswordsBubble(bool user_action) {
   // earlier because the bubble is shown on mouse release (but dismissed on
   // mouse pressed). A Cocoa browser does both on mouse pressed, so a check
   // when showing is sufficient.
-  if (ManagePasswordsBubbleView::manage_password_bubble())
+  if (PasswordBubbleViewBase::manage_password_bubble() &&
+      PasswordBubbleViewBase::manage_password_bubble()
+          ->GetWidget()
+          ->IsVisible())
     return;
 
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
   BrowserWindowController* bwc =
       [BrowserWindowController browserWindowControllerForWindow:window];
   gfx::Point anchor_point =
-      gfx::ScreenPointFromNSPoint(ui::ConvertPointFromWindowToScreen(
-          browser->window()->GetNativeWindow(), [bwc bookmarkBubblePoint]));
+      ScreenPointFromBrowser(browser, [bwc bookmarkBubblePoint]);
   gfx::NativeView parent =
       platform_util::GetViewForWindow(browser->window()->GetNativeWindow());
   DCHECK(parent);
@@ -72,7 +82,8 @@ void TabDialogsViewsMac::ShowManagePasswordsBubble(bool user_action) {
   LocationBarBubbleDelegateView::DisplayReason reason =
       user_action ? LocationBarBubbleDelegateView::USER_GESTURE
                   : LocationBarBubbleDelegateView::AUTOMATIC;
-  ManagePasswordsBubbleView* bubble_view = new ManagePasswordsBubbleView(
+
+  PasswordBubbleViewBase* bubble_view = PasswordBubbleViewBase::CreateBubble(
       web_contents(), nullptr, anchor_point, reason);
   bubble_view->set_arrow(views::BubbleBorder::TOP_RIGHT);
   bubble_view->set_parent_window(parent);
@@ -83,9 +94,14 @@ void TabDialogsViewsMac::ShowManagePasswordsBubble(bool user_action) {
 
 void TabDialogsViewsMac::HideManagePasswordsBubble() {
   // Close toolkit-views bubble.
-  if (!ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+  if (!chrome::ShowAllDialogsWithViewsToolkit()) {
     TabDialogsCocoa::HideManagePasswordsBubble();
     return;
   }
-  ManagePasswordsBubbleView::CloseCurrentBubble();
+  if (!PasswordBubbleViewBase::manage_password_bubble())
+    return;
+  const content::WebContents* bubble_web_contents =
+      PasswordBubbleViewBase::manage_password_bubble()->GetWebContents();
+  if (web_contents() == bubble_web_contents)
+    PasswordBubbleViewBase::CloseCurrentBubble();
 }

@@ -19,7 +19,7 @@ PushEvent::PushEvent(const AtomicString& type, const PushEventInit& initializer)
     data_ = PushMessageData::Create(initializer.data());
 }
 
-PushEvent::~PushEvent() {}
+PushEvent::~PushEvent() = default;
 
 const AtomicString& PushEvent::InterfaceName() const {
   return EventNames::PushEvent;
@@ -29,7 +29,7 @@ PushMessageData* PushEvent::data() {
   return data_.Get();
 }
 
-DEFINE_TRACE(PushEvent) {
+void PushEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(data_);
   ExtendableEvent::Trace(visitor);
 }

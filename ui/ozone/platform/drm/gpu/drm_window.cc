@@ -14,6 +14,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSurface.h"
+#include "ui/gfx/presentation_feedback.h"
 #include "ui/ozone/common/gpu/ozone_gpu_message_params.h"
 #include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/gpu/crtc_controller.h"
@@ -55,7 +56,7 @@ void DrmWindow::Initialize(ScanoutBufferGenerator* buffer_generator) {
 
   device_manager_->UpdateDrmDevice(widget_, nullptr);
   overlay_validator_ =
-      base::MakeUnique<DrmOverlayValidator>(this, buffer_generator);
+      std::make_unique<DrmOverlayValidator>(this, buffer_generator);
 }
 
 void DrmWindow::Shutdown() {
@@ -114,7 +115,7 @@ void DrmWindow::MoveCursor(const gfx::Point& location) {
     controller_->MoveCursor(location);
 }
 
-void DrmWindow::SchedulePageFlip(const std::vector<OverlayPlane>& planes,
+bool DrmWindow::SchedulePageFlip(const std::vector<OverlayPlane>& planes,
                                  SwapCompletionOnceCallback callback) {
   if (controller_) {
     const DrmDevice* drm = controller_->GetAllocationDrmDevice().get();
@@ -130,18 +131,21 @@ void DrmWindow::SchedulePageFlip(const std::vector<OverlayPlane>& planes,
 
   if (force_buffer_reallocation_) {
     force_buffer_reallocation_ = false;
-    std::move(callback).Run(gfx::SwapResult::SWAP_NAK_RECREATE_BUFFERS);
-    return;
+    std::move(callback).Run(gfx::SwapResult::SWAP_NAK_RECREATE_BUFFERS,
+                            gfx::PresentationFeedback());
+    return true;
   }
 
   last_submitted_planes_ = planes;
 
   if (!controller_) {
-    std::move(callback).Run(gfx::SwapResult::SWAP_ACK);
-    return;
+    std::move(callback).Run(gfx::SwapResult::SWAP_ACK,
+                            gfx::PresentationFeedback());
+    return true;
   }
 
-  controller_->SchedulePageFlip(last_submitted_planes_, std::move(callback));
+  return controller_->SchedulePageFlip(last_submitted_planes_,
+                                       std::move(callback));
 }
 
 std::vector<OverlayCheckReturn_Params> DrmWindow::TestPageFlip(
@@ -162,18 +166,11 @@ void DrmWindow::GetVSyncParameters(
   // If we're in mirror mode the 2 CRTCs should have similar modes with the same
   // refresh rates.
   CrtcController* crtc = controller_->crtc_controllers()[0].get();
-  // The value is invalid, so we can't update the parameters.
-  if (controller_->GetTimeOfLastFlip() == 0 || crtc->mode().vrefresh == 0)
-    return;
-
-  // Stores the time of the last refresh.
-  base::TimeTicks timebase =
-      base::TimeTicks::FromInternalValue(controller_->GetTimeOfLastFlip());
-  // Stores the refresh rate.
-  base::TimeDelta interval =
-      base::TimeDelta::FromSeconds(1) / crtc->mode().vrefresh;
-
-  callback.Run(timebase, interval);
+  const base::TimeTicks last_flip = controller_->GetTimeOfLastFlip();
+  if (last_flip == base::TimeTicks() || crtc->mode().vrefresh == 0)
+    return;  // The value is invalid, so we can't update the parameters.
+  callback.Run(last_flip,
+               base::TimeDelta::FromSeconds(1) / crtc->mode().vrefresh);
 }
 
 void DrmWindow::ResetCursor(bool bitmap_only) {

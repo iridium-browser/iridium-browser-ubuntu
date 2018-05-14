@@ -25,7 +25,9 @@
 #define HTMLLinkElement_h
 
 #include <memory>
+#include "base/single_thread_task_runner.h"
 #include "core/CoreExport.h"
+#include "core/dom/CreateElementFlags.h"
 #include "core/dom/DOMTokenList.h"
 #include "core/dom/IncrementLoadEventDelayCount.h"
 #include "core/html/HTMLElement.h"
@@ -35,13 +37,13 @@
 #include "core/html/RelList.h"
 #include "core/loader/LinkLoader.h"
 #include "core/loader/LinkLoaderClient.h"
-#include "platform/WebTaskRunner.h"
 #include "platform/bindings/TraceWrapperMember.h"
 
 namespace blink {
 
 class KURL;
 class LinkImport;
+struct LinkLoadParameters;
 
 class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
                                           public LinkLoaderClient {
@@ -49,7 +51,7 @@ class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
   USING_GARBAGE_COLLECTED_MIXIN(HTMLLinkElement);
 
  public:
-  static HTMLLinkElement* Create(Document&, bool created_by_parser);
+  static HTMLLinkElement* Create(Document&, const CreateElementFlags);
   ~HTMLLinkElement() override;
 
   KURL Href() const;
@@ -57,6 +59,7 @@ class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
   String Media() const { return media_; }
   String TypeValue() const { return type_; }
   String AsValue() const { return as_; }
+  String IntegrityValue() const { return integrity_; }
   ReferrerPolicy GetReferrerPolicy() const { return referrer_policy_; }
   const LinkRelAttribute& RelAttribute() const { return rel_attribute_; }
   DOMTokenList& relList() const {
@@ -74,7 +77,7 @@ class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
   bool Async() const;
 
   CSSStyleSheet* sheet() const {
-    return GetLinkStyle() ? GetLinkStyle()->Sheet() : 0;
+    return GetLinkStyle() ? GetLinkStyle()->Sheet() : nullptr;
   }
   Document* import() const;
 
@@ -96,11 +99,7 @@ class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
   bool ShouldLoadLink() override;
 
   // For LinkStyle
-  bool LoadLink(const String& type,
-                const String& as,
-                const String& media,
-                ReferrerPolicy,
-                const KURL&);
+  bool LoadLink(const LinkLoadParameters&);
   bool IsAlternate() const {
     return GetLinkStyle()->IsUnset() && rel_attribute_.IsAlternate();
   }
@@ -109,12 +108,12 @@ class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
   }
   bool IsCreatedByParser() const { return created_by_parser_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  private:
-  HTMLLinkElement(Document&, bool created_by_parser);
+  HTMLLinkElement(Document&, const CreateElementFlags);
 
   LinkStyle* GetLinkStyle() const;
   LinkImport* GetLinkImport() const;
@@ -148,7 +147,7 @@ class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
   void DidStopLinkPrerender() override;
   void DidSendLoadForLinkPrerender() override;
   void DidSendDOMContentLoadedForLinkPrerender() override;
-  RefPtr<WebTaskRunner> GetLoadingTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetLoadingTaskRunner() override;
 
   Member<LinkResource> link_;
   Member<LinkLoader> link_loader_;
@@ -156,6 +155,7 @@ class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
   String type_;
   String as_;
   String media_;
+  String integrity_;
   ReferrerPolicy referrer_policy_;
   Member<DOMTokenList> sizes_;
   Vector<IntSize> icon_sizes_;

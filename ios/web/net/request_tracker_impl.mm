@@ -8,27 +8,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/bind_helpers.h"
-#include "base/containers/hash_tables.h"
-#include "base/location.h"
 #include "base/logging.h"
 #import "base/mac/bind_objc_block.h"
-#import "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
-#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "ios/web/history_state_util.h"
-#import "ios/web/net/crw_request_tracker_delegate.h"
 #include "ios/web/public/browser_state.h"
 #include "ios/web/public/certificate_policy_cache.h"
-#include "ios/web/public/ssl_status.h"
 #include "ios/web/public/url_util.h"
 #include "ios/web/public/web_thread.h"
 #import "net/base/mac/url_conversions.h"
-#include "net/base/net_errors.h"
-#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -37,19 +27,6 @@
 
 namespace {
 
-struct EqualNSStrings {
-  bool operator()(const base::scoped_nsobject<NSString>& s1,
-                  const base::scoped_nsobject<NSString>& s2) const {
-    // Use a ternary due to the BOOL vs bool type difference.
-    return [s1 isEqualToString:s2] ? true : false;
-  }
-};
-
-struct HashNSString {
-  size_t operator()(const base::scoped_nsobject<NSString>& s) const {
-    return [s hash];
-  }
-};
 
 // A map of all RequestTrackerImpls for tabs that are:
 // * Currently open
@@ -58,9 +35,7 @@ struct HashNSString {
 // always access it from the main thread, the provider is accessing it from the
 // WebThread, a thread created by the UIWebView/CFURL. For this reason access to
 // this variable must always gated by |g_trackers_lock|.
-typedef base::hash_map<base::scoped_nsobject<NSString>,
-                       web::RequestTrackerImpl*,
-                       HashNSString, EqualNSStrings> TrackerMap;
+typedef base::hash_map<std::string, web::RequestTrackerImpl*> TrackerMap;
 
 TrackerMap* g_trackers = NULL;
 base::Lock* g_trackers_lock = NULL;
@@ -93,30 +68,17 @@ void InitializeGlobals() {
 // identifier is needed for tracker (e.g. storing certs).
 int g_next_request_tracker_id = 0;
 
-// IsIntranetHost logic and its associated kDot constant are lifted directly
-// from content/browser/ssl/ssl_policy.cc. Unfortunately that particular file
-// has way too many dependencies on content to be used on iOS.
-static const char kDot = '.';
-
-static bool IsIntranetHost(const std::string& host) {
-  const size_t dot = host.find(kDot);
-  return dot == std::string::npos || dot == host.length() - 1;
-}
-
 // Add |tracker| to |g_trackers| under |key|.
 static void RegisterTracker(web::RequestTrackerImpl* tracker, NSString* key) {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
   pthread_once(&g_once_control, &InitializeGlobals);
   {
-    base::scoped_nsobject<NSString> scoped_key([key copy]);
+    std::string scoped_key = base::SysNSStringToUTF8(key);
     base::AutoLock scoped_lock(*g_trackers_lock);
     DCHECK(!g_trackers->count(scoped_key));
     (*g_trackers)[scoped_key] = tracker;
   }
 }
-
-// Empty callback.
-void DoNothing(bool flag) {}
 
 }  // namespace
 
@@ -125,8 +87,8 @@ struct TrackerCounts {
  public:
   TrackerCounts(const GURL& tracked_url, const net::URLRequest* tracked_request)
       : url(tracked_url),
-        first_party_for_cookies_origin(
-            tracked_request->first_party_for_cookies().GetOrigin()),
+        site_for_cookies_origin(
+            tracked_request->site_for_cookies().GetOrigin()),
         request(tracked_request),
         ssl_info(net::SSLInfo()),
         ssl_judgment(web::CertPolicy::ALLOWED),
@@ -135,8 +97,9 @@ struct TrackerCounts {
         processed(0),
         done(false) {
     DCHECK_CURRENTLY_ON(web::WebThread::IO);
-    is_subrequest = tracked_request->first_party_for_cookies().is_valid() &&
-        tracked_request->url() != tracked_request->first_party_for_cookies();
+    is_subrequest =
+        tracked_request->site_for_cookies().is_valid() &&
+        tracked_request->url() != tracked_request->site_for_cookies();
   };
 
   // The resource url.
@@ -144,7 +107,7 @@ struct TrackerCounts {
   // The origin of the url of the top level document of the resource. This is
   // used to ignore request coming from an old document when detecting mixed
   // content.
-  const GURL first_party_for_cookies_origin;
+  const GURL site_for_cookies_origin;
   // The request associated with this struct. As a void* to prevent access from
   // the wrong thread.
   const void* request;
@@ -200,134 +163,6 @@ struct TrackerCounts {
   DISALLOW_COPY_AND_ASSIGN(TrackerCounts);
 };
 
-// A SSL carrier is used to transport SSL information to the UI via its
-// encapsulation in a block. Once the object is constructed all public methods
-// can be called from any thread safely. This object is designed so it is
-// instantiated on the IO thread but may be accessed from the UI thread.
-@interface CRWSSLCarrier : NSObject {
- @private
-  scoped_refptr<web::RequestTrackerImpl> tracker_;
-  net::SSLInfo sslInfo_;
-  GURL url_;
-  web::SSLStatus status_;
-}
-
-// Designated initializer.
-- (id)initWithTracker:(web::RequestTrackerImpl*)tracker
-               counts:(const TrackerCounts*)counts;
-// URL of the request.
-- (const GURL&)url;
-// Returns a SSLStatus representing the state of the page. This assumes the
-// target carrier is the main page request.
-- (const web::SSLStatus&)sslStatus;
-// Returns a SSLInfo with a reference to the certificate and SSL information.
-- (const net::SSLInfo&)sslInfo;
-// Internal method used to build the SSLStatus object. Called from the
-// initializer to make sure it is invoked on the network thread.
-- (void)buildSSLStatus;
-@end
-
-@implementation CRWSSLCarrier
-
-- (id)initWithTracker:(web::RequestTrackerImpl*)tracker
-               counts:(const TrackerCounts*)counts {
-  self = [super init];
-  if (self) {
-    tracker_ = tracker;
-    url_ = counts->url;
-    sslInfo_ = counts->ssl_info;
-    [self buildSSLStatus];
-  }
-  return self;
-}
-
-- (const GURL&)url {
-  return url_;
-}
-
-- (const net::SSLInfo&)sslInfo {
-  return sslInfo_;
-}
-
-- (const web::SSLStatus&)sslStatus {
-  return status_;
-}
-
-- (void)buildSSLStatus {
-  DCHECK_CURRENTLY_ON(web::WebThread::IO);
-  if (!sslInfo_.is_valid())
-    return;
-
-  status_.certificate = sslInfo_.cert;
-
-  status_.cert_status = sslInfo_.cert_status;
-  if (status_.cert_status & net::CERT_STATUS_COMMON_NAME_INVALID) {
-    // CAs issue certificates for intranet hosts to everyone.  Therefore, we
-    // mark intranet hosts as being non-unique.
-    if (IsIntranetHost(url_.host())) {
-      status_.cert_status |= net::CERT_STATUS_NON_UNIQUE_NAME;
-    }
-  }
-
-  status_.connection_status = sslInfo_.connection_status;
-
-  if (tracker_->has_mixed_content()) {
-    // TODO(noyau): In iOS there is no notion of resource type. The insecure
-    // content could be an image (DISPLAYED_INSECURE_CONTENT) or a script
-    // (RAN_INSECURE_CONTENT). The status of the page is different for both, but
-    // there is not enough information from UIWebView to differentiate the two
-    // cases.
-    status_.content_status = web::SSLStatus::DISPLAYED_INSECURE_CONTENT;
-  } else {
-    status_.content_status = web::SSLStatus::NORMAL_CONTENT;
-  }
-
-  if (!url_.SchemeIsCryptographic()) {
-    // Should not happen as the sslInfo is valid.
-    NOTREACHED();
-    status_.security_style = web::SECURITY_STYLE_UNAUTHENTICATED;
-  } else if (net::IsCertStatusError(status_.cert_status) &&
-             !net::IsCertStatusMinorError(status_.cert_status)) {
-    // Minor errors don't lower the security style to
-    // SECURITY_STYLE_AUTHENTICATION_BROKEN.
-    status_.security_style = web::SECURITY_STYLE_AUTHENTICATION_BROKEN;
-  } else {
-    // This page is secure.
-    status_.security_style = web::SECURITY_STYLE_AUTHENTICATED;
-  }
-}
-
-- (NSString*)description {
-  NSString* sslInfo = @"";
-  if (sslInfo_.is_valid()) {
-    switch (status_.security_style) {
-      case web::SECURITY_STYLE_UNKNOWN:
-      case web::SECURITY_STYLE_UNAUTHENTICATED:
-        sslInfo = @"Unexpected SSL state ";
-        break;
-      case web::SECURITY_STYLE_AUTHENTICATION_BROKEN:
-        sslInfo = @"Not secure ";
-        break;
-      case web::SECURITY_STYLE_WARNING:
-        sslInfo = @"Security warning";
-        break;
-      case web::SECURITY_STYLE_AUTHENTICATED:
-        if (status_.content_status ==
-            web::SSLStatus::DISPLAYED_INSECURE_CONTENT)
-          sslInfo = @"Mixed ";
-        else
-          sslInfo = @"Secure ";
-        break;
-    }
-  }
-
-  NSURL* url = net::NSURLWithGURL(url_);
-
-  return [NSString stringWithFormat:@"<%@%@>", sslInfo, url];
-}
-
-@end
-
 namespace web {
 
 #pragma mark Consumer API
@@ -337,13 +172,12 @@ scoped_refptr<RequestTrackerImpl>
 RequestTrackerImpl::CreateTrackerForRequestGroupID(
     NSString* request_group_id,
     BrowserState* browser_state,
-    net::URLRequestContextGetter* context_getter,
-    id<CRWRequestTrackerDelegate> delegate) {
+    net::URLRequestContextGetter* context_getter) {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
   DCHECK(request_group_id);
 
   scoped_refptr<RequestTrackerImpl> tracker =
-      new RequestTrackerImpl(request_group_id, context_getter, delegate);
+      new RequestTrackerImpl(request_group_id, context_getter);
 
   scoped_refptr<CertificatePolicyCache> policy_cache =
       BrowserState::GetCertificatePolicyCache(browser_state);
@@ -359,7 +193,7 @@ RequestTrackerImpl::CreateTrackerForRequestGroupID(
 
 void RequestTrackerImpl::StartPageLoad(const GURL& url, id user_info) {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  base::scoped_nsobject<id> scoped_user_info(user_info);
+  id scoped_user_info = user_info;
   web::WebThread::PostTask(
       web::WebThread::IO, FROM_HERE,
       base::Bind(&RequestTrackerImpl::TrimToURL, this, url, scoped_user_info));
@@ -396,10 +230,8 @@ void RequestTrackerImpl::Close() {
                                },
                                base::RetainedRef(this)));
 
-  // Disable the delegate.
-  delegate_ = nil;
   // The user_info is no longer needed.
-  user_info_.reset();
+  user_info_ = nil;
 }
 
 // static
@@ -409,7 +241,7 @@ void RequestTrackerImpl::RunAfterRequestsCancel(const base::Closure& callback) {
   // This ensures that |callback| runs after anything elese queued on the IO
   // thread, in particular CancelRequest() calls made from closing trackers.
   web::WebThread::PostTaskAndReply(web::WebThread::IO, FROM_HERE,
-                                   base::Bind(&base::DoNothing), callback);
+                                   base::DoNothing(), callback);
 }
 
 // static
@@ -459,8 +291,7 @@ RequestTrackerImpl* RequestTrackerImpl::GetTrackerForRequestGroupID(
   pthread_once(&g_once_control, &InitializeGlobals);
   {
     base::AutoLock scoped_lock(*g_trackers_lock);
-    map_it = g_trackers->find(
-        base::scoped_nsobject<NSString>([request_group_id copy]));
+    map_it = g_trackers->find(base::SysNSStringToUTF8(request_group_id));
     if (map_it != g_trackers->end())
       tracker = map_it->second;
   }
@@ -486,27 +317,12 @@ void RequestTrackerImpl::StartRequest(net::URLRequest* request) {
   }
   const GURL& url = request->original_url();
   auto counts =
-      base::MakeUnique<TrackerCounts>(GURLByRemovingRefFromGURL(url), request);
+      std::make_unique<TrackerCounts>(GURLByRemovingRefFromGURL(url), request);
   counts_by_request_[request] = counts.get();
   counts_.push_back(std::move(counts));
   if (page_url_.SchemeIsCryptographic() && !url.SchemeIsCryptographic())
     has_mixed_content_ = true;
   Notify();
-}
-
-void RequestTrackerImpl::CaptureHeaders(net::URLRequest* request) {
-  DCHECK_CURRENTLY_ON(web::WebThread::IO);
-  if (is_closing_)
-    return;
-
-  if (!request->response_headers())
-    return;
-
-  scoped_refptr<net::HttpResponseHeaders> headers(request->response_headers());
-  web::WebThread::PostTask(
-      web::WebThread::UI, FROM_HERE,
-      base::Bind(&RequestTrackerImpl::NotifyResponseHeaders, this,
-                 base::RetainedRef(headers), request->url()));
 }
 
 void RequestTrackerImpl::CaptureExpectedLength(const net::URLRequest* request,
@@ -583,18 +399,6 @@ void RequestTrackerImpl::CaptureCertificatePolicyCache(
 
   // Notify the  delegate that a judgment has been used.
   DCHECK(judgment == CertPolicy::ALLOWED);
-  if (counts_by_request_.count(request)) {
-    const net::SSLInfo& ssl_info = request->ssl_info();
-    TrackerCounts* counts = counts_by_request_[request];
-    counts->allowed_by_user = true;
-    if (ssl_info.is_valid())
-      counts->ssl_info = ssl_info;
-    web::WebThread::PostTask(
-        web::WebThread::UI, FROM_HERE,
-        base::Bind(&RequestTrackerImpl::NotifyCertificateUsed, this,
-                   base::RetainedRef(ssl_info.cert), host,
-                   ssl_info.cert_status));
-  }
   should_continue.Run(true);
 }
 
@@ -649,10 +453,8 @@ void RequestTrackerImpl::ScheduleIOTask(const base::Closure& task) {
 
 RequestTrackerImpl::RequestTrackerImpl(
     NSString* request_group_id,
-    net::URLRequestContextGetter* context_getter,
-    id<CRWRequestTrackerDelegate> delegate)
-    : delegate_(delegate),
-      previous_estimate_(0.0f),  // Not active by default.
+    net::URLRequestContextGetter* context_getter)
+    : previous_estimate_(0.0f),  // Not active by default.
       estimate_start_index_(0),
       notification_depth_(0),
       has_mixed_content_(false),
@@ -702,7 +504,7 @@ void RequestTrackerImpl::Destruct() {
   pthread_once(&g_once_control, &InitializeGlobals);
   {
     base::AutoLock scoped_lock(*g_trackers_lock);
-    g_trackers->erase(request_group_id_);
+    g_trackers->erase(base::SysNSStringToUTF8(request_group_id_));
   }
   InvalidateWeakPtrs();
   // Delete on the UI thread.
@@ -737,80 +539,6 @@ void RequestTrackerImpl::StackNotification() {
   --notification_depth_;
   if (notification_depth_)
     return;
-
-  SSLNotify();
-  if (is_loading_) {
-    float estimate = EstimatedProgress();
-    if (estimate != -1.0f) {
-      web::WebThread::PostTask(
-          web::WebThread::UI, FROM_HERE,
-          base::Bind(&RequestTrackerImpl::NotifyUpdatedProgress, this,
-                     estimate));
-    }
-  }
-}
-
-void RequestTrackerImpl::SSLNotify() {
-  DCHECK_CURRENTLY_ON(web::WebThread::IO);
-  if (is_closing_)
-    return;
-
-  if (counts_.empty())
-    return;  // Nothing yet to notify.
-
-  if (!page_url_.SchemeIsCryptographic())
-    return;
-
-  const GURL page_origin = page_url_.GetOrigin();
-  for (const auto& tracker_count : counts_) {
-    if (!tracker_count->ssl_info.is_valid())
-      continue;  // No SSL info at this point in time on this tracker.
-
-    GURL request_origin = tracker_count->url.GetOrigin();
-    if (request_origin != page_origin)
-      continue;  // Not interesting in the context of the page.
-
-    base::scoped_nsobject<CRWSSLCarrier> carrier([[CRWSSLCarrier alloc]
-        initWithTracker:this
-                 counts:tracker_count.get()]);
-    web::WebThread::PostTask(
-        web::WebThread::UI, FROM_HERE,
-        base::Bind(&RequestTrackerImpl::NotifyUpdatedSSLStatus, this, carrier));
-    break;
-  }
-}
-
-void RequestTrackerImpl::NotifyResponseHeaders(
-    net::HttpResponseHeaders* headers,
-    const GURL& request_url) {
-  DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  [delegate_ handleResponseHeaders:headers requestUrl:request_url];
-}
-
-void RequestTrackerImpl::NotifyCertificateUsed(
-    net::X509Certificate* certificate,
-    const std::string& host,
-    net::CertStatus status) {
-  DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  [delegate_ certificateUsed:certificate forHost:host status:status];
-}
-
-void RequestTrackerImpl::NotifyUpdatedProgress(float estimate) {
-  DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  [delegate_ updatedProgress:estimate];
-}
-
-void RequestTrackerImpl::NotifyClearCertificates() {
-  DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  [delegate_ clearCertificates];
-}
-
-void RequestTrackerImpl::NotifyUpdatedSSLStatus(
-    base::scoped_nsobject<CRWSSLCarrier> carrier) {
-  DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  [delegate_ updatedSSLStatus:[carrier sslStatus]
-                   forPageUrl:[carrier url]
-                     userInfo:user_info_];
 }
 
 void RequestTrackerImpl::EvaluateSSLCallbackForCounts(TrackerCounts* counts) {
@@ -874,7 +602,7 @@ void RequestTrackerImpl::EvaluateSSLCallbackForCounts(TrackerCounts* counts) {
       break;
     case CertPolicy::ALLOWED:
       counts->ssl_callback.Run(YES);
-      counts->ssl_callback = base::Bind(&DoNothing);
+      counts->ssl_callback = base::DoNothing();
       break;
     default:
       NOTREACHED();
@@ -902,7 +630,7 @@ void RequestTrackerImpl::CancelRequestForCounts(TrackerCounts* counts) {
   counts->done = true;
   counts_by_request_.erase(counts->request);
   counts->ssl_callback.Run(NO);
-  counts->ssl_callback = base::Bind(&DoNothing);
+  counts->ssl_callback = base::DoNothing();
   Notify();
 }
 
@@ -1022,7 +750,7 @@ void RequestTrackerImpl::RecomputeMixedContent(
     auto it = counts_.begin();
     while (it != counts_.end() && it->get() != split_position) {
       if (!(*it)->url.SchemeIsCryptographic() &&
-          origin == (*it)->first_party_for_cookies_origin) {
+          origin == (*it)->site_for_cookies_origin) {
         old_url_has_mixed_content = true;
         break;
       }
@@ -1035,31 +763,7 @@ void RequestTrackerImpl::RecomputeMixedContent(
       // Resend a notification for the |page_url_| informing the upper layer
       // that the mixed content was a red herring.
       has_mixed_content_ = false;
-      SSLNotify();
     }
-  }
-}
-
-void RequestTrackerImpl::RecomputeCertificatePolicy(
-    const TrackerCounts* splitPosition) {
-  DCHECK_CURRENTLY_ON(web::WebThread::IO);
-  // Clear the judgments for the old URL.
-  web::WebThread::PostTask(
-      web::WebThread::UI, FROM_HERE,
-      base::Bind(&RequestTrackerImpl::NotifyClearCertificates, this));
-  // Report judgements for the new URL.
-  for (auto it = counts_.rbegin(); it != counts_.rend(); ++it) {
-    TrackerCounts* counts = it->get();
-    if (counts->allowed_by_user) {
-      std::string host = counts->url.host();
-      web::WebThread::PostTask(
-          web::WebThread::UI, FROM_HERE,
-          base::Bind(&RequestTrackerImpl::NotifyCertificateUsed, this,
-                     base::RetainedRef(counts->ssl_info.cert), host,
-                     counts->ssl_info.cert_status));
-    }
-    if (counts == splitPosition)
-      break;
   }
 }
 
@@ -1084,7 +788,7 @@ void RequestTrackerImpl::TrimToURL(const GURL& full_url, id user_info) {
   auto rit = counts_.rbegin();
   while (rit != counts_.rend() && (*rit)->url != url) {
     if (url_scheme_is_secure && !(*rit)->url.SchemeIsCryptographic() &&
-        (*rit)->first_party_for_cookies_origin == url.GetOrigin()) {
+        (*rit)->site_for_cookies_origin == url.GetOrigin()) {
       new_url_has_mixed_content = true;
     }
     ++rit;
@@ -1115,7 +819,6 @@ void RequestTrackerImpl::TrimToURL(const GURL& full_url, id user_info) {
     }
   }
   RecomputeMixedContent(split_position);
-  RecomputeCertificatePolicy(split_position);
 
   // Trim up to that element.
   auto it = counts_.begin();
@@ -1132,7 +835,7 @@ void RequestTrackerImpl::TrimToURL(const GURL& full_url, id user_info) {
 
   has_mixed_content_ = new_url_has_mixed_content;
   page_url_ = url;
-  user_info_.reset(user_info);
+  user_info_ = user_info;
   estimate_start_index_ = 0;
   is_loading_ = true;
   previous_estimate_ = 0.0f;
@@ -1174,7 +877,7 @@ NSString* RequestTrackerImpl::UnsafeDescription() {
     [urls addObject:tracker_count->Description()];
 
   return [NSString stringWithFormat:@"RequestGroupID %@\n%@\n%@",
-                                    request_group_id_.get(),
+                                    request_group_id_,
                                     net::NSURLWithGURL(page_url_),
                                     [urls componentsJoinedByString:@"\n"]];
 }

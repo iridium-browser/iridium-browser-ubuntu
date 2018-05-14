@@ -5,7 +5,6 @@
 #include "components/payments/core/payment_method_data.h"
 
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 
@@ -48,10 +47,9 @@ PaymentMethodData::PaymentMethodData(const PaymentMethodData& other) = default;
 PaymentMethodData::~PaymentMethodData() = default;
 
 bool PaymentMethodData::operator==(const PaymentMethodData& other) const {
-  return this->supported_methods == other.supported_methods &&
-         this->data == other.data &&
-         this->supported_networks == other.supported_networks &&
-         this->supported_types == other.supported_types;
+  return supported_methods == other.supported_methods && data == other.data &&
+         supported_networks == other.supported_networks &&
+         supported_types == other.supported_types;
 }
 
 bool PaymentMethodData::operator!=(const PaymentMethodData& other) const {
@@ -60,24 +58,34 @@ bool PaymentMethodData::operator!=(const PaymentMethodData& other) const {
 
 bool PaymentMethodData::FromDictionaryValue(
     const base::DictionaryValue& value) {
-  this->supported_methods.clear();
-  this->supported_networks.clear();
-  this->supported_types.clear();
+  supported_methods.clear();
+  supported_networks.clear();
+  supported_types.clear();
 
+  // The value of supportedMethods can be an array or a string.
   const base::ListValue* supported_methods_list = nullptr;
-  // At least one supported method is required.
-  if (!value.GetList(kSupportedMethods, &supported_methods_list) ||
-      supported_methods_list->GetSize() == 0) {
-    return false;
-  }
-  for (size_t i = 0; i < supported_methods_list->GetSize(); ++i) {
+  if (value.GetList(kSupportedMethods, &supported_methods_list)) {
+    for (size_t i = 0; i < supported_methods_list->GetSize(); ++i) {
+      std::string supported_method;
+      if (!supported_methods_list->GetString(i, &supported_method) ||
+          !base::IsStringASCII(supported_method)) {
+        return false;
+      }
+      if (!supported_method.empty())
+        supported_methods.push_back(supported_method);
+    }
+  } else {
     std::string supported_method;
-    if (!supported_methods_list->GetString(i, &supported_method) ||
-        !base::IsStringASCII(supported_method)) {
+    if (!value.GetString(kSupportedMethods, &supported_method) ||
+        !base::IsStringASCII(supported_method) || supported_method.empty()) {
       return false;
     }
-    this->supported_methods.push_back(supported_method);
+    supported_methods.push_back(supported_method);
   }
+
+  // At least one supported method is required.
+  if (supported_methods.empty())
+    return false;
 
   // Data is optional, but if a dictionary is present, save a stringified
   // version and attempt to parse supportedNetworks/supportedTypes.
@@ -85,7 +93,7 @@ bool PaymentMethodData::FromDictionaryValue(
   if (value.GetDictionary(kMethodDataData, &data_dict)) {
     std::string json_data;
     base::JSONWriter::Write(*data_dict, &json_data);
-    this->data = json_data;
+    data = json_data;
     const base::ListValue* supported_networks_list = nullptr;
     if (data_dict->GetList(kSupportedNetworks, &supported_networks_list)) {
       for (size_t i = 0; i < supported_networks_list->GetSize(); ++i) {
@@ -94,7 +102,7 @@ bool PaymentMethodData::FromDictionaryValue(
             !base::IsStringASCII(supported_network)) {
           return false;
         }
-        this->supported_networks.push_back(supported_network);
+        supported_networks.push_back(supported_network);
       }
     }
     const base::ListValue* supported_types_list = nullptr;
@@ -108,7 +116,7 @@ bool PaymentMethodData::FromDictionaryValue(
         autofill::CreditCard::CardType card_type =
             autofill::CreditCard::CARD_TYPE_UNKNOWN;
         if (ConvertCardTypeStringToEnum(supported_type, &card_type))
-          this->supported_types.insert(card_type);
+          supported_types.insert(card_type);
       }
     }
   }

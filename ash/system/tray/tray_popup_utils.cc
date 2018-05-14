@@ -5,10 +5,12 @@
 #include "ash/system/tray/tray_popup_utils.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "ash/ash_constants.h"
 #include "ash/ash_view_ids.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
@@ -16,7 +18,6 @@
 #include "ash/system/tray/size_range_layout.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_item_style.h"
-#include "base/memory/ptr_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/insets.h"
@@ -49,7 +50,7 @@ namespace {
 // stretched horizontally and centered vertically.
 std::unique_ptr<views::LayoutManager> CreateDefaultCenterLayoutManager() {
   // TODO(bruthig): Use constants instead of magic numbers.
-  auto box_layout = base::MakeUnique<views::BoxLayout>(
+  auto box_layout = std::make_unique<views::BoxLayout>(
       views::BoxLayout::kVertical,
       gfx::Insets(8, kTrayPopupLabelHorizontalPadding));
   box_layout->set_main_axis_alignment(
@@ -63,7 +64,7 @@ std::unique_ptr<views::LayoutManager> CreateDefaultCenterLayoutManager() {
 // centered along the horizontal and vertical axis.
 std::unique_ptr<views::LayoutManager> CreateDefaultEndsLayoutManager() {
   auto box_layout =
-      base::MakeUnique<views::BoxLayout>(views::BoxLayout::kHorizontal);
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal);
   box_layout->set_main_axis_alignment(
       views::BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
   box_layout->set_cross_axis_alignment(
@@ -125,7 +126,7 @@ class BorderlessLabelButton : public views::LabelButton {
     TrayPopupUtils::ConfigureTrayPopupButton(this);
   }
 
-  ~BorderlessLabelButton() override {}
+  ~BorderlessLabelButton() override = default;
 
   // views::LabelButton:
   int GetHeightForWidth(int width) const override { return kMenuButtonSize; }
@@ -134,8 +135,7 @@ class BorderlessLabelButton : public views::LabelButton {
   // TODO(estade,bruthig): there's a lot in common here with ActionableView.
   // Find a way to share. See related TODO on InkDropHostView::SetInkDropMode().
   std::unique_ptr<views::InkDrop> CreateInkDrop() override {
-    return TrayPopupUtils::CreateInkDrop(TrayPopupInkDropStyle::INSET_BOUNDS,
-                                         this);
+    return TrayPopupUtils::CreateInkDrop(this);
   }
 
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override {
@@ -197,11 +197,11 @@ TriView* TrayPopupUtils::CreateMultiTargetRowView() {
   ConfigureDefaultSizeAndFlex(tri_view, TriView::Container::END);
 
   tri_view->SetContainerLayout(TriView::Container::START,
-                               base::MakeUnique<views::FillLayout>());
+                               std::make_unique<views::FillLayout>());
   tri_view->SetContainerLayout(TriView::Container::CENTER,
-                               base::MakeUnique<views::FillLayout>());
+                               std::make_unique<views::FillLayout>());
   tri_view->SetContainerLayout(TriView::Container::END,
-                               base::MakeUnique<views::FillLayout>());
+                               std::make_unique<views::FillLayout>());
 
   return tri_view;
 }
@@ -212,8 +212,11 @@ views::Label* TrayPopupUtils::CreateDefaultLabel() {
   // Frequently the label will paint to a layer that's non-opaque, so subpixel
   // rendering won't work unless we explicitly set a background. See
   // crbug.com/686363
-  label->SetBackground(views::CreateThemedSolidBackground(
-      label, ui::NativeTheme::kColorId_BubbleBackground));
+  label->SetBackground(
+      features::IsSystemTrayUnifiedEnabled()
+          ? views::CreateSolidBackground(kUnifiedMenuBackgroundColor)
+          : views::CreateThemedSolidBackground(
+                label, ui::NativeTheme::kColorId_BubbleBackground));
   return label;
 }
 
@@ -250,7 +253,6 @@ views::ToggleButton* TrayPopupUtils::CreateToggleButton(
       (kTrayToggleButtonWidth - toggle_size.width()) / 2;
   toggle->SetBorder(views::CreateEmptyBorder(
       gfx::Insets(vertical_padding, horizontal_padding)));
-  toggle->SetFocusPainter(CreateFocusPainter());
   toggle->SetAccessibleName(l10n_util::GetStringUTF16(accessible_name_id));
   return toggle;
 }
@@ -260,7 +262,7 @@ std::unique_ptr<views::Painter> TrayPopupUtils::CreateFocusPainter() {
       kFocusBorderColor, kFocusBorderThickness, gfx::InsetsF());
 }
 
-void TrayPopupUtils::ConfigureTrayPopupButton(views::CustomButton* button) {
+void TrayPopupUtils::ConfigureTrayPopupButton(views::Button* button) {
   button->SetFocusPainter(TrayPopupUtils::CreateFocusPainter());
   button->SetFocusForPlatform();
 
@@ -272,8 +274,11 @@ void TrayPopupUtils::ConfigureTrayPopupButton(views::CustomButton* button) {
 
 void TrayPopupUtils::ConfigureAsStickyHeader(views::View* view) {
   view->set_id(VIEW_ID_STICKY_HEADER);
-  view->SetBackground(views::CreateThemedSolidBackground(
-      view, ui::NativeTheme::kColorId_BubbleBackground));
+  view->SetBackground(
+      features::IsSystemTrayUnifiedEnabled()
+          ? views::CreateSolidBackground(kUnifiedMenuBackgroundColor)
+          : views::CreateThemedSolidBackground(
+                view, ui::NativeTheme::kColorId_BubbleBackground));
   view->SetBorder(
       views::CreateEmptyBorder(gfx::Insets(kMenuSeparatorVerticalPadding, 0)));
   view->SetPaintToLayer();
@@ -297,8 +302,7 @@ void TrayPopupUtils::ShowStickyHeaderSeparator(views::View* view,
 
 void TrayPopupUtils::ConfigureContainer(TriView::Container container,
                                         views::View* container_view) {
-  container_view->SetLayoutManager(
-      CreateDefaultLayoutManager(container).release());
+  container_view->SetLayoutManager(CreateDefaultLayoutManager(container));
 }
 
 views::LabelButton* TrayPopupUtils::CreateTrayPopupBorderlessButton(
@@ -323,10 +327,9 @@ views::Separator* TrayPopupUtils::CreateVerticalSeparator() {
 }
 
 std::unique_ptr<views::InkDrop> TrayPopupUtils::CreateInkDrop(
-    TrayPopupInkDropStyle ink_drop_style,
     views::InkDropHostView* host) {
   std::unique_ptr<views::InkDropImpl> ink_drop =
-      base::MakeUnique<views::InkDropImpl>(host, host->size());
+      std::make_unique<views::InkDropImpl>(host, host->size());
   ink_drop->SetAutoHighlightMode(
       views::InkDropImpl::AutoHighlightMode::SHOW_ON_RIPPLE);
   ink_drop->SetShowHighlightOnHover(false);
@@ -339,7 +342,7 @@ std::unique_ptr<views::InkDropRipple> TrayPopupUtils::CreateInkDropRipple(
     const views::View* host,
     const gfx::Point& center_point,
     SkColor color) {
-  return base::MakeUnique<views::FloodFillInkDropRipple>(
+  return std::make_unique<views::FloodFillInkDropRipple>(
       host->size(), TrayPopupUtils::GetInkDropInsets(ink_drop_style),
       center_point, color, kTrayPopupInkDropRippleOpacity);
 }
@@ -370,13 +373,13 @@ std::unique_ptr<views::InkDropMask> TrayPopupUtils::CreateInkDropMask(
           GetInkDropBounds(TrayPopupInkDropStyle::HOST_CENTERED, host);
       const int radius =
           std::min(mask_bounds.width(), mask_bounds.height()) / 2;
-      return base::MakeUnique<views::CircleInkDropMask>(
+      return std::make_unique<views::CircleInkDropMask>(
           layer_size, mask_bounds.CenterPoint(), radius);
     }
     case TrayPopupInkDropStyle::INSET_BOUNDS: {
       const gfx::Insets mask_insets =
           GetInkDropInsets(TrayPopupInkDropStyle::INSET_BOUNDS);
-      return base::MakeUnique<views::RoundRectInkDropMask>(
+      return std::make_unique<views::RoundRectInkDropMask>(
           layer_size, mask_insets, kTrayPopupInkDropCornerRadius);
     }
     case TrayPopupInkDropStyle::FILL_BOUNDS:

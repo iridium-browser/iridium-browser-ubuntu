@@ -31,10 +31,10 @@ class TestBrowserThreadImpl : public BrowserThreadImpl {
 
   void Init() override {
 #if defined(OS_WIN)
-    com_initializer_ = base::MakeUnique<base::win::ScopedCOMInitializer>();
+    com_initializer_ = std::make_unique<base::win::ScopedCOMInitializer>();
 #endif
 
-    notification_service_ = base::MakeUnique<NotificationServiceImpl>();
+    notification_service_ = std::make_unique<NotificationServiceImpl>();
     BrowserThreadImpl::Init();
   }
 
@@ -99,6 +99,10 @@ bool TestBrowserThread::StartIOThread() {
   base::Thread::Options options;
   options.message_loop_type = base::MessageLoop::TYPE_IO;
   return impl_->StartWithOptions(options);
+}
+
+void TestBrowserThread::InitIOThreadDelegate() {
+  impl_->InitIOThreadDelegate();
 }
 
 void TestBrowserThread::Stop() {

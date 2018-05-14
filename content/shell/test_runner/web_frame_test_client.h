@@ -33,44 +33,37 @@ class WebFrameTestClient : public blink::WebFrameClient {
   ~WebFrameTestClient() override;
 
   // WebFrameClient overrides needed by WebFrameTestProxy.
-  void FrameDetached(blink::WebLocalFrame*, DetachType) override;
-  blink::WebColorChooser* CreateColorChooser(
-      blink::WebColorChooserClient* client,
-      const blink::WebColor& initial_color,
-      const blink::WebVector<blink::WebColorSuggestion>& suggestions) override;
   void RunModalAlertDialog(const blink::WebString& message) override;
   bool RunModalConfirmDialog(const blink::WebString& message) override;
   bool RunModalPromptDialog(const blink::WebString& message,
                             const blink::WebString& default_value,
                             blink::WebString* actual_value) override;
   bool RunModalBeforeUnloadDialog(bool is_reload) override;
-  blink::WebScreenOrientationClient* GetWebScreenOrientationClient() override;
   void PostAccessibilityEvent(const blink::WebAXObject& object,
                               blink::WebAXEvent event) override;
   void DidChangeSelection(bool is_selection_empty) override;
+  void DidChangeContents() override;
   blink::WebPlugin* CreatePlugin(const blink::WebPluginParams& params) override;
   void ShowContextMenu(
       const blink::WebContextMenuData& context_menu_data) override;
-  blink::WebUserMediaClient* UserMediaClient() override;
   void DidAddMessageToConsole(const blink::WebConsoleMessage& message,
                               const blink::WebString& source_name,
                               unsigned source_line,
                               const blink::WebString& stack_trace) override;
   void DownloadURL(const blink::WebURLRequest& request,
                    const blink::WebString& suggested_name) override;
-  void LoadURLExternally(const blink::WebURLRequest& request,
-                         blink::WebNavigationPolicy policy,
-                         blink::WebTriggeringEventInfo triggering_event_info,
-                         bool replaces_current_history_item) override;
   void LoadErrorPage(int reason) override;
-  void DidStartProvisionalLoad(blink::WebDataSource* data_source,
+  void DidStartProvisionalLoad(blink::WebDocumentLoader* loader,
                                blink::WebURLRequest& request) override;
   void DidReceiveServerRedirectForProvisionalLoad() override;
   void DidFailProvisionalLoad(const blink::WebURLError& error,
                               blink::WebHistoryCommitType commit_type) override;
-  void DidCommitProvisionalLoad(
-      const blink::WebHistoryItem& history_item,
-      blink::WebHistoryCommitType history_type) override;
+  void DidCommitProvisionalLoad(const blink::WebHistoryItem& history_item,
+                                blink::WebHistoryCommitType history_type,
+                                blink::WebGlobalObjectReusePolicy) override;
+  void DidNavigateWithinPage(const blink::WebHistoryItem& history_item,
+                             blink::WebHistoryCommitType history_type,
+                             bool content_initiated) override;
   void DidReceiveTitle(const blink::WebString& title,
                        blink::WebTextDirection direction) override;
   void DidChangeIcon(blink::WebIconURL::Type icon_type) override;
@@ -79,10 +72,6 @@ class WebFrameTestClient : public blink::WebFrameClient {
   void DidFailLoad(const blink::WebURLError& error,
                    blink::WebHistoryCommitType commit_type) override;
   void DidFinishLoad() override;
-  void DidNavigateWithinPage(const blink::WebHistoryItem& history_item,
-                             blink::WebHistoryCommitType commit_type,
-                             bool contentInitiated) override;
-  void DidStartLoading(bool to_different_document) override;
   void DidStopLoading() override;
   void DidDetectXSS(const blink::WebURL& insecure_url,
                     bool did_block_entire_page) override;

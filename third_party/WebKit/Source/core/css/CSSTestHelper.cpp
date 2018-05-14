@@ -29,6 +29,7 @@
 
 #include "core/css/CSSTestHelper.h"
 
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/css/CSSRuleList.h"
 #include "core/css/CSSStyleSheet.h"
 #include "core/css/RuleSet.h"
@@ -39,17 +40,20 @@
 
 namespace blink {
 
-CSSTestHelper::~CSSTestHelper() {}
+CSSTestHelper::~CSSTestHelper() = default;
 
 CSSTestHelper::CSSTestHelper() {
-  document_ = Document::Create();
+  document_ = Document::CreateForTest();
   TextPosition position;
   style_sheet_ = CSSStyleSheet::CreateInline(*document_, NullURL(), position,
                                              UTF8Encoding());
 }
 
 CSSRuleList* CSSTestHelper::CssRules() {
-  return style_sheet_->cssRules();
+  DummyExceptionStateForTesting exception_state;
+  CSSRuleList* result = style_sheet_->cssRules(exception_state);
+  EXPECT_FALSE(exception_state.HadException());
+  return result;
 }
 
 RuleSet& CSSTestHelper::GetRuleSet() {
@@ -59,11 +63,14 @@ RuleSet& CSSTestHelper::GetRuleSet() {
   return rule_set;
 }
 
-void CSSTestHelper::AddCSSRules(const char* css_text) {
+void CSSTestHelper::AddCSSRules(const char* css_text, bool is_empty_sheet) {
   TextPosition position;
   unsigned sheet_length = style_sheet_->length();
   style_sheet_->Contents()->ParseStringAtPosition(css_text, position);
-  ASSERT_TRUE(style_sheet_->length() > sheet_length);
+  if (!is_empty_sheet)
+    ASSERT_GT(style_sheet_->length(), sheet_length);
+  else
+    ASSERT_EQ(style_sheet_->length(), sheet_length);
 }
 
 }  // namespace blink

@@ -46,15 +46,16 @@ class WorkerGlobalScopeCrypto final
   USING_GARBAGE_COLLECTED_MIXIN(WorkerGlobalScopeCrypto);
 
  public:
+  static const char kSupplementName[];
+
   static WorkerGlobalScopeCrypto& From(Supplementable<WorkerGlobalScope>&);
   static Crypto* crypto(Supplementable<WorkerGlobalScope>&);
   Crypto* crypto() const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   WorkerGlobalScopeCrypto();
-  static const char* SupplementName();
 
   mutable Member<Crypto> crypto_;
 };

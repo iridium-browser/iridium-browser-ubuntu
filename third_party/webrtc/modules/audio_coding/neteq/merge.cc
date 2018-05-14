@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/neteq/merge.h"
+#include "modules/audio_coding/neteq/merge.h"
 
 #include <assert.h>
 #include <string.h>  // memmove, memcpy, memset, size_t
@@ -16,14 +16,14 @@
 #include <algorithm>  // min, max
 #include <memory>
 
-#include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
-#include "webrtc/modules/audio_coding/neteq/audio_multi_vector.h"
-#include "webrtc/modules/audio_coding/neteq/cross_correlation.h"
-#include "webrtc/modules/audio_coding/neteq/dsp_helper.h"
-#include "webrtc/modules/audio_coding/neteq/expand.h"
-#include "webrtc/modules/audio_coding/neteq/sync_buffer.h"
-#include "webrtc/rtc_base/safe_conversions.h"
-#include "webrtc/rtc_base/safe_minmax.h"
+#include "common_audio/signal_processing/include/signal_processing_library.h"
+#include "modules/audio_coding/neteq/audio_multi_vector.h"
+#include "modules/audio_coding/neteq/cross_correlation.h"
+#include "modules/audio_coding/neteq/dsp_helper.h"
+#include "modules/audio_coding/neteq/expand.h"
+#include "modules/audio_coding/neteq/sync_buffer.h"
+#include "rtc_base/numerics/safe_conversions.h"
+#include "rtc_base/numerics/safe_minmax.h"
 
 namespace webrtc {
 
@@ -291,7 +291,12 @@ void Merge::Downsample(const int16_t* input, size_t input_length,
                            decimation_factor, kCompensateDelay);
   if (input_length <= length_limit) {
     // Not quite long enough, so we have to cheat a bit.
-    size_t temp_len = input_length - signal_offset;
+    // If the input is really short, we'll just use the input length as is, and
+    // won't bother with correcting for the offset. This is clearly a
+    // pathological case, and the signal quality will suffer.
+    const size_t temp_len = input_length > signal_offset
+                                ? input_length - signal_offset
+                                : input_length;
     // TODO(hlundin): Should |downsamp_temp_len| be corrected for round-off
     // errors? I.e., (temp_len + decimation_factor - 1) / decimation_factor?
     size_t downsamp_temp_len = temp_len / decimation_factor;

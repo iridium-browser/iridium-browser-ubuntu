@@ -5,15 +5,20 @@
 #include "gpu/ipc/client/gpu_memory_buffer_impl_io_surface.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "ui/gfx/buffer_format_util.h"
-#include "ui/gfx/icc_profile.h"
 #include "ui/gfx/mac/io_surface.h"
 
 namespace gpu {
 namespace {
+
+// The maximum number of times to dump before throttling (to avoid sending
+// thousands of crash dumps).
+const int kMaxCrashDumps = 10;
 
 uint32_t LockFlags(gfx::BufferUsage usage) {
   switch (usage) {
@@ -21,15 +26,15 @@ uint32_t LockFlags(gfx::BufferUsage usage) {
       return kIOSurfaceLockAvoidSync;
     case gfx::BufferUsage::GPU_READ:
     case gfx::BufferUsage::SCANOUT:
+    case gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE:
     case gfx::BufferUsage::SCANOUT_CPU_READ_WRITE:
+    case gfx::BufferUsage::SCANOUT_VDA_WRITE:
     case gfx::BufferUsage::GPU_READ_CPU_READ_WRITE_PERSISTENT:
       return 0;
   }
   NOTREACHED();
   return 0;
 }
-
-void NoOp() {}
 
 }  // namespace
 
@@ -54,10 +59,22 @@ GpuMemoryBufferImplIOSurface::CreateFromHandle(
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
     const DestructionCallback& callback) {
+  if (!handle.mach_port) {
+    LOG(ERROR) << "Invalid IOSurface mach port returned to client.";
+    return nullptr;
+  }
+
   base::ScopedCFTypeRef<IOSurfaceRef> io_surface(
       IOSurfaceLookupFromMachPort(handle.mach_port.get()));
-  if (!io_surface)
+  if (!io_surface) {
+    LOG(ERROR) << "Failed to open IOSurface via mach port returned to client.";
+    static int dump_counter = kMaxCrashDumps;
+    if (dump_counter) {
+      dump_counter -= 1;
+      base::debug::DumpWithoutCrashing();
+    }
     return nullptr;
+  }
 
   return base::WrapUnique(
       new GpuMemoryBufferImplIOSurface(handle.id, size, format, callback,
@@ -84,7 +101,7 @@ base::Closure GpuMemoryBufferImplIOSurface::AllocateForTesting(
   handle->type = gfx::IO_SURFACE_BUFFER;
   handle->id = kBufferId;
   handle->mach_port.reset(IOSurfaceCreateMachPort(io_surface));
-  return base::Bind(&NoOp);
+  return base::DoNothing();
 }
 
 bool GpuMemoryBufferImplIOSurface::Map() {
@@ -112,25 +129,12 @@ int GpuMemoryBufferImplIOSurface::stride(size_t plane) const {
   return IOSurfaceGetBytesPerRowOfPlane(io_surface_, plane);
 }
 
-void GpuMemoryBufferImplIOSurface::SetColorSpaceForScanout(
+void GpuMemoryBufferImplIOSurface::SetColorSpace(
     const gfx::ColorSpace& color_space) {
   if (color_space == color_space_)
     return;
   color_space_ = color_space;
-
-  // Retrieve the ICC profile data.
-  gfx::ICCProfile icc_profile;
-  if (!color_space_.GetAsFullRangeRGB().GetICCProfile(&icc_profile)) {
-    DLOG(ERROR) << "Failed to set color space for scanout: no ICC profile.";
-    return;
-  }
-
-  // Package it as a CFDataRef and send it to the IOSurface.
-  base::ScopedCFTypeRef<CFDataRef> cf_data_icc_profile(CFDataCreate(
-      nullptr, reinterpret_cast<const UInt8*>(icc_profile.GetData().data()),
-      icc_profile.GetData().size()));
-  IOSurfaceSetValue(io_surface_, CFSTR("IOSurfaceColorSpace"),
-                    cf_data_icc_profile);
+  IOSurfaceSetColorSpace(io_surface_, color_space);
 }
 
 gfx::GpuMemoryBufferHandle GpuMemoryBufferImplIOSurface::GetHandle() const {

@@ -4,9 +4,9 @@
 
 #include "components/gcm_driver/gcm_stats_recorder_impl.h"
 
-#include <deque>
 #include <vector>
 
+#include "base/containers/circular_deque.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -24,13 +24,15 @@ namespace {
 
 // Insert an item to the front of deque while maintaining the size of the deque.
 // Overflow item is discarded.
+//
+// DANGER: the returned pointer will not be valind if the queue is modified.
 template <typename T>
-T* InsertCircularBuffer(std::deque<T>* q, const T& item) {
+T* InsertCircularBuffer(base::circular_deque<T>* q, const T& item) {
   DCHECK(q);
-  q->push_front(item);
-  if (q->size() > MAX_LOGGED_ACTIVITY_COUNT) {
+  if (q->size() > MAX_LOGGED_ACTIVITY_COUNT - 1) {
     q->pop_back();
   }
+  q->push_front(item);
   return &q->front();
 }
 
@@ -163,10 +165,9 @@ std::string GetUnregistrationStatusString(
 
 GCMStatsRecorderImpl::GCMStatsRecorderImpl()
     : is_recording_(false),
-      delegate_(NULL),
+      delegate_(nullptr),
       data_message_received_since_connected_(false),
-      received_data_message_burst_size_(0) {
-}
+      received_data_message_burst_size_(0) {}
 
 GCMStatsRecorderImpl::~GCMStatsRecorderImpl() {
 }

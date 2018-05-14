@@ -4,13 +4,16 @@
 
 #include "ash/wm/tablet_mode/tablet_mode_window_manager.h"
 
-#include "ash/ash_switches.h"
+#include <memory>
+
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_port.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/tablet_mode/scoped_skip_user_session_blocked_check.h"
 #include "ash/wm/tablet_mode/tablet_mode_backdrop_delegate_impl.h"
 #include "ash/wm/tablet_mode/tablet_mode_event_handler.h"
 #include "ash/wm/tablet_mode/tablet_mode_window_state.h"
@@ -18,7 +21,6 @@
 #include "ash/wm/wm_event.h"
 #include "ash/wm/workspace_controller.h"
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/display/screen.h"
@@ -47,6 +49,7 @@ TabletModeWindowManager::~TabletModeWindowManager() {
   added_windows_.clear();
   Shell::Get()->RemoveShellObserver(this);
   display::Screen::GetScreen()->RemoveObserver(this);
+  Shell::Get()->split_view_controller()->RemoveObserver(this);
   EnableBackdropBehindTopWindowOnEachDisplay(false);
   RemoveWindowCreationObservers();
   RestoreAllWindows();
@@ -69,30 +72,38 @@ void TabletModeWindowManager::AddWindow(aura::Window* window) {
 }
 
 void TabletModeWindowManager::WindowStateDestroyed(aura::Window* window) {
-  // At this time ForgetWindow() should already have been called. If not,
-  // someone else must have replaced the "window manager's state object".
+  // We come here because the tablet window state object was destroyed. It was
+  // destroyed either because ForgetWindow() was called, or because its
+  // associated window was destroyed. In both cases, the window must has removed
+  // TabletModeWindowManager as an observer.
   DCHECK(!window->HasObserver(this));
 
+  // The window state object might have been removed in OnWindowDestroying().
   auto it = window_state_map_.find(window);
-  DCHECK(it != window_state_map_.end());
-  window_state_map_.erase(it);
+  if (it != window_state_map_.end())
+    window_state_map_.erase(it);
 }
 
 void TabletModeWindowManager::OnOverviewModeStarting() {
-  SetDeferBoundsUpdates(true);
+  for (auto& pair : window_state_map_)
+    SetDeferBoundsUpdates(pair.first, true);
 }
 
 void TabletModeWindowManager::OnOverviewModeEnded() {
-  SetDeferBoundsUpdates(false);
+  for (auto& pair : window_state_map_)
+    SetDeferBoundsUpdates(pair.first, false);
 }
 
 void TabletModeWindowManager::OnSplitViewModeEnded() {
-  // Maximize all snapped windows upon exiting split view mode.
-  for (auto& pair : window_state_map_) {
-    if (pair.second->GetType() == wm::WINDOW_STATE_TYPE_LEFT_SNAPPED ||
-        pair.second->GetType() == wm::WINDOW_STATE_TYPE_RIGHT_SNAPPED) {
+  // Maximize all snapped windows upon exiting split view mode. Note the snapped
+  // window might not be tracked in our |window_state_map_|.
+  MruWindowTracker::WindowList windows =
+      Shell::Get()->mru_window_tracker()->BuildWindowListIgnoreModal();
+  for (auto* window : windows) {
+    wm::WindowState* window_state = wm::GetWindowState(window);
+    if (window_state->IsSnapped()) {
       wm::WMEvent event(wm::WM_EVENT_MAXIMIZE);
-      wm::GetWindowState(pair.first)->OnWMEvent(&event);
+      window_state->OnWMEvent(&event);
     }
   }
 }
@@ -109,7 +120,7 @@ void TabletModeWindowManager::OnWindowDestroying(aura::Window* window) {
   } else {
     // If a known window gets destroyed we need to remove all knowledge about
     // it.
-    ForgetWindow(window);
+    ForgetWindow(window, true /* destroyed */);
   }
 }
 
@@ -144,14 +155,15 @@ void TabletModeWindowManager::OnWindowPropertyChanged(aura::Window* window,
   // Stop managing |window| if the always-on-top property is added.
   if (key == aura::client::kAlwaysOnTopKey &&
       window->GetProperty(aura::client::kAlwaysOnTopKey)) {
-    ForgetWindow(window);
+    ForgetWindow(window, false /* destroyed */);
   }
 }
 
 void TabletModeWindowManager::OnWindowBoundsChanged(
     aura::Window* window,
     const gfx::Rect& old_bounds,
-    const gfx::Rect& new_bounds) {
+    const gfx::Rect& new_bounds,
+    ui::PropertyChangeReason reason) {
   if (!IsContainerWindow(window))
     return;
   // Reposition all non maximizeable windows.
@@ -193,6 +205,33 @@ void TabletModeWindowManager::OnDisplayMetricsChanged(const display::Display&,
   // Nothing to do here.
 }
 
+void TabletModeWindowManager::OnSplitViewStateChanged(
+    SplitViewController::State previous_state,
+    SplitViewController::State state) {
+  // It might be possible that split view mode and overview mode are active at
+  // the same time. We need make sure the snapped windows bounds can be updated
+  // immediately.
+  // TODO(xdai): In overview mode, if we snap two windows to the same position
+  // one by one, we need to restore the first window's |defer_bounds_updates_|
+  // state here. It's unnecessary now since we don't insert the first window
+  // back to the overview grid but we probably should do so in the future.
+  if (state != SplitViewController::NO_SNAP) {
+    SplitViewController* split_view_controller =
+        Shell::Get()->split_view_controller();
+    if (split_view_controller->left_window())
+      SetDeferBoundsUpdates(split_view_controller->left_window(), false);
+    if (split_view_controller->right_window())
+      SetDeferBoundsUpdates(split_view_controller->right_window(), false);
+  } else {
+    // If split view mode is ended when overview mode is still active, defer
+    // all bounds change until overview mode is ended.
+    if (Shell::Get()->window_selector_controller()->IsSelecting()) {
+      for (auto& pair : window_state_map_)
+        SetDeferBoundsUpdates(pair.first, true);
+    }
+  }
+}
+
 void TabletModeWindowManager::SetIgnoreWmEventsForExit() {
   for (auto& pair : window_state_map_) {
     pair.second->set_ignore_wm_events(true);
@@ -209,10 +248,14 @@ TabletModeWindowManager::TabletModeWindowManager() {
   EnableBackdropBehindTopWindowOnEachDisplay(true);
   display::Screen::GetScreen()->AddObserver(this);
   Shell::Get()->AddShellObserver(this);
+  Shell::Get()->split_view_controller()->AddObserver(this);
   event_handler_ = ShellPort::Get()->CreateTabletModeEventHandler();
 }
 
 void TabletModeWindowManager::MaximizeAllWindows() {
+  // For maximizing and tracking windows, we want the build mru list to ignore
+  // the fact that the windows are on the lock screen.
+  ScopedSkipUserSessionBlockedCheck scoped_skip_user_session_blocked_check;
   MruWindowTracker::WindowList windows =
       Shell::Get()->mru_window_tracker()->BuildWindowListIgnoreModal();
   // Add all existing MRU windows.
@@ -222,12 +265,14 @@ void TabletModeWindowManager::MaximizeAllWindows() {
 
 void TabletModeWindowManager::RestoreAllWindows() {
   while (window_state_map_.size())
-    ForgetWindow(window_state_map_.begin()->first);
+    ForgetWindow(window_state_map_.begin()->first, false /* destroyed */);
 }
 
-void TabletModeWindowManager::SetDeferBoundsUpdates(bool defer_bounds_updates) {
-  for (auto& pair : window_state_map_)
-    pair.second->SetDeferBoundsUpdates(defer_bounds_updates);
+void TabletModeWindowManager::SetDeferBoundsUpdates(aura::Window* window,
+                                                    bool defer_bounds_updates) {
+  auto iter = window_state_map_.find(window);
+  if (iter != window_state_map_.end())
+    iter->second->SetDeferBoundsUpdates(defer_bounds_updates);
 }
 
 void TabletModeWindowManager::MaximizeAndTrackWindow(aura::Window* window) {
@@ -242,21 +287,31 @@ void TabletModeWindowManager::MaximizeAndTrackWindow(aura::Window* window) {
   window_state_map_[window] = new TabletModeWindowState(window, this);
 }
 
-void TabletModeWindowManager::ForgetWindow(aura::Window* window) {
+void TabletModeWindowManager::ForgetWindow(aura::Window* window,
+                                           bool destroyed) {
   added_windows_.erase(window);
   window->RemoveObserver(this);
 
   WindowToState::iterator it = window_state_map_.find(window);
   // A window may not be registered yet if the observer was
   // registered in OnWindowHierarchyChanged.
-  if (it == window_state_map_.end()) {
+  if (it == window_state_map_.end())
     return;
-  }
 
-  // By telling the state object to revert, it will switch back the old
-  // State object and destroy itself, calling WindowStateDestroyed().
-  it->second->LeaveTabletMode(wm::GetWindowState(it->first));
-  DCHECK(!base::ContainsKey(window_state_map_, window));
+  if (destroyed) {
+    // If the window is to-be-destroyed, remove it from |window_state_map_|
+    // immidietely. Otherwise it's possible to send a WMEvent to the to-be-
+    // destroyed window.  Note we should not restore its old previous window
+    // state object here since it will send unnecessary window state change
+    // events. The tablet window state object and the old window state object
+    // will be both deleted when the window is destroyed.
+    window_state_map_.erase(it);
+  } else {
+    // By telling the state object to revert, it will switch back the old
+    // State object and destroy itself, calling WindowStateDestroyed().
+    it->second->LeaveTabletMode(wm::GetWindowState(it->first));
+    DCHECK(!base::ContainsKey(window_state_map_, window));
+  }
 }
 
 bool TabletModeWindowManager::ShouldHandleWindow(aura::Window* window) {
@@ -311,7 +366,7 @@ void TabletModeWindowManager::EnableBackdropBehindTopWindowOnEachDisplay(
   // the topmost window of its container.
   for (auto* controller : Shell::GetAllRootWindowControllers()) {
     controller->workspace_controller()->SetBackdropDelegate(
-        enable ? base::MakeUnique<TabletModeBackdropDelegateImpl>() : nullptr);
+        enable ? std::make_unique<TabletModeBackdropDelegateImpl>() : nullptr);
   }
 }
 

@@ -9,7 +9,6 @@
 
 #include <sstream>
 
-#include "core/fxcrt/fx_basic.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/xml/cfx_saxreader.h"
 
@@ -19,7 +18,7 @@ class CFX_SAXContext {
   ~CFX_SAXContext();
 
   std::ostringstream m_TextBuf;
-  CFX_ByteString m_bsTagName;
+  ByteString m_bsTagName;
   CFX_SAXItem::Type m_eNode;
 };
 

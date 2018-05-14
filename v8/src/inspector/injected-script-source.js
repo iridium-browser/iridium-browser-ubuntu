@@ -77,17 +77,6 @@ function toStringDescription(obj)
 }
 
 /**
- * @param {number|string} obj
- * @return {boolean}
- */
-function isUInt32(obj)
-{
-    if (typeof obj === "number")
-        return obj >>> 0 === obj && (obj > 0 || 1 / obj > 0);
-    return "" + (obj >>> 0) === obj;
-}
-
-/**
  * FireBug's array detection.
  * @param {*} obj
  * @return {boolean}
@@ -101,7 +90,8 @@ function isArrayLike(obj)
         if (!InjectedScriptHost.objectHasOwnProperty(/** @type {!Object} */ (obj), "length"))
             return false;
         var len = InjectedScriptHost.getProperty(obj, "length");
-        return typeof len === "number" && isUInt32(len);
+        // is len uint32?
+        return typeof len === "number" && len >>> 0 === len && (len > 0 || 1 / len > 0);
     }
     return false;
 }
@@ -184,16 +174,18 @@ InjectedScript.primitiveTypes = {
  * @type {!Object<string, string>}
  * @const
  */
-InjectedScript.closureTypes = { __proto__: null };
-InjectedScript.closureTypes["local"] = "Local";
-InjectedScript.closureTypes["closure"] = "Closure";
-InjectedScript.closureTypes["catch"] = "Catch";
-InjectedScript.closureTypes["block"] = "Block";
-InjectedScript.closureTypes["script"] = "Script";
-InjectedScript.closureTypes["with"] = "With Block";
-InjectedScript.closureTypes["global"] = "Global";
-InjectedScript.closureTypes["eval"] = "Eval";
-InjectedScript.closureTypes["module"] = "Module";
+InjectedScript.closureTypes = {
+    "local": "Local",
+    "closure": "Closure",
+    "catch": "Catch",
+    "block": "Block",
+    "script": "Script",
+    "with": "With Block",
+    "global": "Global",
+    "eval": "Eval",
+    "module": "Module",
+    __proto__: null
+};
 
 InjectedScript.prototype = {
     /**
@@ -228,21 +220,6 @@ InjectedScript.prototype = {
     },
 
     /**
-     * @param {!Array<!Object>} array
-     * @param {string} property
-     * @param {string} groupName
-     * @param {boolean} forceValueType
-     * @param {boolean} generatePreview
-     */
-    wrapPropertyInArray: function(array, property, groupName, forceValueType, generatePreview)
-    {
-        for (var i = 0; i < array.length; ++i) {
-            if (typeof array[i] === "object" && property in array[i])
-                array[i][property] = this.wrapObject(array[i][property], groupName, forceValueType, generatePreview);
-        }
-    },
-
-    /**
      * @param {!Object} table
      * @param {!Array.<string>|string|boolean} columns
      * @return {!RuntimeAgent.RemoteObject}
@@ -254,6 +231,7 @@ InjectedScript.prototype = {
             columns = [columns];
         if (InjectedScriptHost.subtype(columns) === "array") {
             columnNames = [];
+            InjectedScriptHost.nullifyPrototype(columnNames);
             for (var i = 0; i < columns.length; ++i)
                 columnNames[i] = toString(columns[i]);
         }
@@ -402,9 +380,18 @@ InjectedScript.prototype = {
 
                 var descriptor;
                 try {
-                    descriptor = InjectedScriptHost.getOwnPropertyDescriptor(o, property);
-                    if (descriptor) {
-                        InjectedScriptHost.nullifyPrototype(descriptor);
+                    var nativeAccessorDescriptor = InjectedScriptHost.nativeAccessorDescriptor(o, property);
+                    if (nativeAccessorDescriptor && !nativeAccessorDescriptor.isBuiltin) {
+                        descriptor = { __proto__: null };
+                        if (nativeAccessorDescriptor.hasGetter)
+                            descriptor.get = function nativeGetter() { return o[property]; };
+                        if (nativeAccessorDescriptor.hasSetter)
+                            descriptor.set = function nativeSetter(v) { o[property] = v; };
+                    } else {
+                        descriptor = InjectedScriptHost.getOwnPropertyDescriptor(o, property);
+                        if (descriptor) {
+                            InjectedScriptHost.nullifyPrototype(descriptor);
+                        }
                     }
                     var isAccessorProperty = descriptor && ("get" in descriptor || "set" in descriptor);
                     if (accessorPropertiesOnly && !isAccessorProperty)
@@ -472,6 +459,10 @@ InjectedScript.prototype = {
             o = /** @type {!Object} */ (o);
             if (InjectedScriptHost.subtype(o) === "proxy")
                 continue;
+
+            var typedArrays = subtype === "arraybuffer" ? InjectedScriptHost.typedArrayProperties(o) || [] : [];
+            for (var i = 0; i < typedArrays.length; i += 2)
+                addPropertyIfNeeded(descriptors, { name: typedArrays[i], value: typedArrays[i + 1], isOwn: true, enumerable: false, configurable: false, __proto__: null });
 
             try {
                 if (skipGetOwnPropertyNames && o === object) {
@@ -599,15 +590,21 @@ InjectedScript.prototype = {
 
         if (subtype === "node") {
             var description = "";
-            if (obj.nodeName)
-                description = obj.nodeName.toLowerCase();
-            else if (obj.constructor)
-                description = obj.constructor.name.toLowerCase();
+            var nodeName = InjectedScriptHost.getProperty(obj, "nodeName");
+            if (nodeName) {
+                description = nodeName.toLowerCase();
+            } else {
+                var constructor = InjectedScriptHost.getProperty(obj, "constructor");
+                if (constructor)
+                    description = (InjectedScriptHost.getProperty(constructor, "name") || "").toLowerCase();
+            }
 
-            switch (obj.nodeType) {
+            var nodeType = InjectedScriptHost.getProperty(obj, "nodeType");
+            switch (nodeType) {
             case 1 /* Node.ELEMENT_NODE */:
-                description += obj.id ? "#" + obj.id : "";
-                var className = obj.className;
+                var id = InjectedScriptHost.getProperty(obj, "id");
+                description += id ? "#" + id : "";
+                var className = InjectedScriptHost.getProperty(obj, "className");
                 description += (className && typeof className === "string") ? "." + className.trim().replace(/\s+/g, ".") : "";
                 break;
             case 10 /*Node.DOCUMENT_TYPE_NODE */:
@@ -627,9 +624,15 @@ InjectedScript.prototype = {
             return className;
         }
 
-        if (subtype === "map" || subtype === "set") {
+        if (subtype === "map" || subtype === "set" || subtype === "blob") {
             if (typeof obj.size === "number")
                 return className + "(" + obj.size + ")";
+            return className;
+        }
+
+        if (subtype === "arraybuffer" || subtype === "dataview") {
+            if (typeof obj.byteLength === "number")
+                return className + "(" + obj.byteLength + ")";
             return className;
         }
 
@@ -850,6 +853,7 @@ InjectedScript.RemoteObject.prototype = {
             properties: [],
             __proto__: null
         };
+        InjectedScriptHost.nullifyPrototype(preview.properties);
         if (this.subtype)
             preview.subtype = /** @type {!RuntimeAgent.ObjectPreviewSubtype.<string>} */ (this.subtype);
         return preview;
@@ -873,19 +877,25 @@ InjectedScript.RemoteObject.prototype = {
             __proto__: null
         };
         var subtype = this.subtype;
+        var primitiveString;
 
         try {
-            var descriptors = injectedScript._propertyDescriptors(object, addPropertyIfNeeded, false /* ownProperties */, undefined /* accessorPropertiesOnly */, firstLevelKeys);
+            var descriptors = [];
+            InjectedScriptHost.nullifyPrototype(descriptors);
 
             // Add internal properties to preview.
             var rawInternalProperties = InjectedScriptHost.getInternalProperties(object) || [];
             var internalProperties = [];
+            InjectedScriptHost.nullifyPrototype(rawInternalProperties);
+            InjectedScriptHost.nullifyPrototype(internalProperties);
             var entries = null;
             for (var i = 0; i < rawInternalProperties.length; i += 2) {
                 if (rawInternalProperties[i] === "[[Entries]]") {
                     entries = /** @type {!Array<*>} */(rawInternalProperties[i + 1]);
                     continue;
                 }
+                if (rawInternalProperties[i] === "[[PrimitiveValue]]" && typeof rawInternalProperties[i + 1] === 'string')
+                    primitiveString = rawInternalProperties[i + 1];
                 var internalPropertyDescriptor = {
                     name: rawInternalProperties[i],
                     value: rawInternalProperties[i + 1],
@@ -893,9 +903,12 @@ InjectedScript.RemoteObject.prototype = {
                     enumerable: true,
                     __proto__: null
                 };
-                if (!addPropertyIfNeeded(descriptors, internalPropertyDescriptor))
-                    break;
+                push(descriptors, internalPropertyDescriptor);
             }
+            var naturalDescriptors = injectedScript._propertyDescriptors(object, addPropertyIfNeeded, false /* ownProperties */, undefined /* accessorPropertiesOnly */, firstLevelKeys);
+            for (var i = 0; i < naturalDescriptors.length; i++)
+                push(descriptors, naturalDescriptors[i]);
+
             this._appendPropertyPreviewDescriptors(preview, descriptors, secondLevelKeys, isTable);
 
             if (subtype === "map" || subtype === "set" || subtype === "weakmap" || subtype === "weakset" || subtype === "iterator")
@@ -926,12 +939,20 @@ InjectedScript.RemoteObject.prototype = {
             if ((subtype === "map" || subtype === "set") && descriptor.name === "size")
                 return true;
 
+            // Ignore ArrayBuffer previews
+            if (subtype === 'arraybuffer' && (descriptor.name === "[[Int8Array]]" || descriptor.name === "[[Uint8Array]]" || descriptor.name === "[[Int16Array]]" || descriptor.name === "[[Int32Array]]"))
+                return true;
+
             // Never preview prototype properties.
             if (!descriptor.isOwn)
                 return true;
 
             // Ignore computed properties unless they have getters.
             if (!("value" in descriptor) && !descriptor.get)
+                return true;
+
+            // Ignore index properties when there is a primitive string.
+            if (primitiveString && primitiveString[descriptor.name] === descriptor.value)
                 return true;
 
             if (toString(descriptor.name >>> 0) === descriptor.name)
@@ -1022,6 +1043,7 @@ InjectedScript.RemoteObject.prototype = {
             return;
         }
         preview.entries = [];
+        InjectedScriptHost.nullifyPrototype(preview.entries);
         var entriesThreshold = 5;
         for (var i = 0; i < entries.length; ++i) {
             if (preview.entries.length >= entriesThreshold) {

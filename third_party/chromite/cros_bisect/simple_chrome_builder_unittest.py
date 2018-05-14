@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -6,6 +7,7 @@
 
 from __future__ import print_function
 
+import mock
 import os
 
 from chromite.cros_bisect import simple_chrome_builder
@@ -206,13 +208,17 @@ class TestSimpleChromeBuilder(cros_test_lib.MockTempDirTestCase):
       if 'gn gen' in bash_command:
         build_dir = bash_command.split()[2]
         osutils.SafeMakedirs(os.path.join(self.default_repo_dir, build_dir))
+      return mock.DEFAULT
 
   def testBuild(self):
     gsync_mock = self.PatchObject(simple_chrome_builder.SimpleChromeBuilder,
                                   'GclientSync')
+    success_result = cros_test_lib.EasyAttr(returncode=0)
     chrome_sdk_run_mock = self.PatchObject(
-        commands.ChromeSDK, 'Run', side_effect=self._ChromeSdkRunSideEffect)
-    chrome_sdk_ninja_mock = self.PatchObject(commands.ChromeSDK, 'Ninja')
+        commands.ChromeSDK, 'Run', side_effect=self._ChromeSdkRunSideEffect,
+        return_value=success_result)
+    chrome_sdk_ninja_mock = self.PatchObject(
+        commands.ChromeSDK, 'Ninja', return_value=success_result)
 
     commit_label = 'test'
     archive_path = os.path.join(
@@ -236,9 +242,12 @@ class TestSimpleChromeBuilder(cros_test_lib.MockTempDirTestCase):
   def testBuildNoArchive(self):
     gsync_mock = self.PatchObject(simple_chrome_builder.SimpleChromeBuilder,
                                   'GclientSync')
+    success_result = cros_test_lib.EasyAttr(returncode=0)
     chrome_sdk_run_mock = self.PatchObject(
-        commands.ChromeSDK, 'Run', side_effect=self._ChromeSdkRunSideEffect)
-    chrome_sdk_ninja_mock = self.PatchObject(commands.ChromeSDK, 'Ninja')
+        commands.ChromeSDK, 'Run', side_effect=self._ChromeSdkRunSideEffect,
+        return_value=success_result)
+    chrome_sdk_ninja_mock = self.PatchObject(
+        commands.ChromeSDK, 'Ninja', return_value=success_result)
 
     commit_label = 'test'
     archive_path = os.path.join(

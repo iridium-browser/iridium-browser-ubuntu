@@ -7,15 +7,13 @@
 
 #include <jni.h>
 
-#include <memory>
-
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
 #include "chromecast/browser/cast_content_window.h"
 
 namespace content {
 class WebContents;
-}
+}  // namespace content
 
 namespace chromecast {
 namespace shell {
@@ -24,14 +22,12 @@ namespace shell {
 // CastWebContentsActivity.
 class CastContentWindowAndroid : public CastContentWindow {
  public:
-  static bool RegisterJni(JNIEnv* env);
-
   ~CastContentWindowAndroid() override;
 
   // CastContentWindow implementation:
-  void SetTransparent() override;
-  void ShowWebContents(content::WebContents* web_contents,
-                       CastWindowManager* window_manager) override;
+  void CreateWindowForWebContents(content::WebContents* web_contents,
+                                  CastWindowManager* window_manager,
+                                  bool is_visible) override;
 
   // Called through JNI.
   void OnActivityStopped(JNIEnv* env,
@@ -44,7 +40,9 @@ class CastContentWindowAndroid : public CastContentWindow {
   friend class CastContentWindow;
 
   // This class should only be instantiated by CastContentWindow::Create.
-  explicit CastContentWindowAndroid(CastContentWindow::Delegate* delegate);
+  CastContentWindowAndroid(CastContentWindow::Delegate* delegate,
+                           bool is_headless,
+                           bool enable_touch_input);
 
   CastContentWindow::Delegate* const delegate_;
   base::android::ScopedJavaGlobalRef<jobject> java_window_;

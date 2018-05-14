@@ -11,19 +11,18 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
-#import "ios/chrome/browser/ui/settings/settings_collection_view_controller.h"
-#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_popup_controller.h"
+#include "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #include "ios/chrome/test/app/navigation_test_util.h"
-#include "ios/chrome/test/app/web_view_interaction_test_util.h"
+#import "ios/chrome/test/app/web_view_interaction_test_util.h"
 #include "ios/chrome/test/earl_grey/accessibility_util.h"
 #import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#include "ios/chrome/test/scoped_block_popups_pref.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
 #import "ios/web/public/test/web_view_interaction_test_util.h"
@@ -35,6 +34,7 @@
 #endif
 
 using chrome_test_util::ContentSettingsButton;
+using chrome_test_util::GetOriginalBrowserState;
 using chrome_test_util::NavigationBarDoneButton;
 using chrome_test_util::SettingsMenuBackButton;
 
@@ -58,43 +58,6 @@ const std::string kOpenedWindowResponse = "Opened window";
 id<GREYMatcher> BlockPopupsSettingsButton() {
   return chrome_test_util::ButtonWithAccessibilityLabelId(IDS_IOS_BLOCK_POPUPS);
 }
-
-// ScopedBlockPopupsPref modifies the block popups preference and resets the
-// preference to its original value when this object goes out of scope.
-class ScopedBlockPopupsPref {
- public:
-  ScopedBlockPopupsPref(ContentSetting setting) {
-    original_setting_ = GetPrefValue();
-    SetPrefValue(setting);
-  }
-  ~ScopedBlockPopupsPref() { SetPrefValue(original_setting_); }
-
- private:
-  // Gets the current value of the preference.
-  ContentSetting GetPrefValue() {
-    ContentSetting popupSetting =
-        ios::HostContentSettingsMapFactory::GetForBrowserState(
-            chrome_test_util::GetOriginalBrowserState())
-            ->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_POPUPS, NULL);
-    return popupSetting;
-  }
-
-  // Sets the preference to the given value.
-  void SetPrefValue(ContentSetting setting) {
-    DCHECK(setting == CONTENT_SETTING_BLOCK ||
-           setting == CONTENT_SETTING_ALLOW);
-    ios::ChromeBrowserState* state =
-        chrome_test_util::GetOriginalBrowserState();
-    ios::HostContentSettingsMapFactory::GetForBrowserState(state)
-        ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_POPUPS, setting);
-  }
-
-  // Saves the original pref setting so that it can be restored when the scoper
-  // is destroyed.
-  ContentSetting original_setting_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedBlockPopupsPref);
-};
 
 // ScopedBlockPopupsException adds an exception to the block popups exception
 // list for as long as this object is in scope.
@@ -169,12 +132,13 @@ class ScopedBlockPopupsException {
   responses[openedWindowURL] = kOpenedWindowResponse;
   web::test::SetUpSimpleHttpServer(responses);
 
-  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW);
+  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW,
+                                   GetOriginalBrowserState());
   [ChromeEarlGrey loadURL:blockPopupsURL];
   [ChromeEarlGrey waitForMainTabCount:1];
 
   // Request popup and make sure the popup opened in a new tab.
-  __unsafe_unretained NSError* error = nil;
+  NSError* error = nil;
   chrome_test_util::ExecuteJavaScript(kOpenPopupScript, &error);
   GREYAssert(!error, @"Error during script execution: %@", error);
   [ChromeEarlGrey waitForMainTabCount:2];
@@ -199,14 +163,15 @@ class ScopedBlockPopupsException {
   responses[openedWindowURL] = kOpenedWindowResponse;
   web::test::SetUpSimpleHttpServer(responses);
 
-  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_BLOCK);
+  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_BLOCK,
+                                   GetOriginalBrowserState());
   [ChromeEarlGrey loadURL:blockPopupsURL];
   [ChromeEarlGrey waitForMainTabCount:1];
 
   // Request popup, then make sure it was blocked and an infobar was displayed.
   // The window.open() call is run via async JS, so the infobar may not open
   // immediately.
-  __unsafe_unretained NSError* error = nil;
+  NSError* error = nil;
   chrome_test_util::ExecuteJavaScript(kOpenPopupScript, &error);
   GREYAssert(!error, @"Error during script execution: %@", error);
 
@@ -229,7 +194,8 @@ class ScopedBlockPopupsException {
 // revealed properly when the preference switch is toggled.
 - (void)testSettingsPageWithExceptions {
   std::string allowedPattern = "[*.]example.com";
-  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_BLOCK);
+  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_BLOCK,
+                                   GetOriginalBrowserState());
   ScopedBlockPopupsException exceptionSetter(allowedPattern);
 
   [ChromeEarlGreyUI openSettingsMenu];

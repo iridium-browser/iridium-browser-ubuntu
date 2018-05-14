@@ -4,6 +4,8 @@
 
 #include "content/renderer/gpu/queue_message_swap_promise.h"
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
@@ -44,7 +46,7 @@ void QueueMessageSwapPromise::DidActivate() {
   // The OutputSurface will take care of the Drain+Send.
 }
 
-void QueueMessageSwapPromise::WillSwap(cc::CompositorFrameMetadata* metadata) {
+void QueueMessageSwapPromise::WillSwap(viz::CompositorFrameMetadata* metadata) {
 #if DCHECK_IS_ON()
   DCHECK(!completed_);
 #endif
@@ -55,6 +57,7 @@ void QueueMessageSwapPromise::WillSwap(cc::CompositorFrameMetadata* metadata) {
         send_message_scope = message_queue_->AcquireSendMessageScope();
     std::vector<std::unique_ptr<IPC::Message>> messages;
     message_queue_->DrainMessages(&messages);
+
     std::vector<IPC::Message> messages_to_send;
     FrameSwapMessageQueue::TransferMessages(&messages, &messages_to_send);
     if (!messages_to_send.empty()) {

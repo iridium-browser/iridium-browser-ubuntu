@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_BASE_OPENSSLIDENTITY_H_
-#define WEBRTC_RTC_BASE_OPENSSLIDENTITY_H_
+#ifndef RTC_BASE_OPENSSLIDENTITY_H_
+#define RTC_BASE_OPENSSLIDENTITY_H_
 
 #include <openssl/evp.h>
 #include <openssl/x509.h>
@@ -17,9 +17,9 @@
 #include <memory>
 #include <string>
 
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/constructormagic.h"
-#include "webrtc/rtc_base/sslidentity.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/constructormagic.h"
+#include "rtc_base/sslidentity.h"
 
 typedef struct ssl_ctx_st SSL_CTX;
 
@@ -36,8 +36,7 @@ class OpenSSLKeyPair {
   static OpenSSLKeyPair* Generate(const KeyParams& key_params);
   // Constructs a key pair from the private key PEM string. This must not result
   // in missing public key parameters. Returns null on error.
-  static OpenSSLKeyPair* FromPrivateKeyPEMString(
-      const std::string& pem_string);
+  static OpenSSLKeyPair* FromPrivateKeyPEMString(const std::string& pem_string);
 
   virtual ~OpenSSLKeyPair();
 
@@ -62,9 +61,7 @@ class OpenSSLKeyPair {
 class OpenSSLCertificate : public SSLCertificate {
  public:
   // Caller retains ownership of the X509 object.
-  explicit OpenSSLCertificate(X509* x509) : x509_(x509) {
-    AddReference();
-  }
+  explicit OpenSSLCertificate(X509* x509);
 
   static OpenSSLCertificate* Generate(OpenSSLKeyPair* key_pair,
                                       const SSLIdentityParams& params);
@@ -95,7 +92,6 @@ class OpenSSLCertificate : public SSLCertificate {
                             size_t* length);
 
   bool GetSignatureDigestAlgorithm(std::string* algorithm) const override;
-  std::unique_ptr<SSLCertChain> GetChain() const override;
 
   int64_t CertificateExpirationTime() const override;
 
@@ -103,7 +99,6 @@ class OpenSSLCertificate : public SSLCertificate {
   void AddReference() const;
 
   X509* x509_;
-
   RTC_DISALLOW_COPY_AND_ASSIGN(OpenSSLCertificate);
 };
 
@@ -117,9 +112,12 @@ class OpenSSLIdentity : public SSLIdentity {
   static OpenSSLIdentity* GenerateForTest(const SSLIdentityParams& params);
   static SSLIdentity* FromPEMStrings(const std::string& private_key,
                                      const std::string& certificate);
+  static SSLIdentity* FromPEMChainStrings(const std::string& private_key,
+                                          const std::string& certificate_chain);
   ~OpenSSLIdentity() override;
 
   const OpenSSLCertificate& certificate() const override;
+  const SSLCertChain& cert_chain() const override;
   OpenSSLIdentity* GetReference() const override;
 
   // Configure an SSL context object to use our key and certificate.
@@ -131,17 +129,19 @@ class OpenSSLIdentity : public SSLIdentity {
   bool operator!=(const OpenSSLIdentity& other) const;
 
  private:
-  OpenSSLIdentity(OpenSSLKeyPair* key_pair, OpenSSLCertificate* certificate);
+  OpenSSLIdentity(std::unique_ptr<OpenSSLKeyPair> key_pair,
+                  std::unique_ptr<OpenSSLCertificate> certificate);
+  OpenSSLIdentity(std::unique_ptr<OpenSSLKeyPair> key_pair,
+                  std::unique_ptr<SSLCertChain> cert_chain);
 
   static OpenSSLIdentity* GenerateInternal(const SSLIdentityParams& params);
 
   std::unique_ptr<OpenSSLKeyPair> key_pair_;
-  std::unique_ptr<OpenSSLCertificate> certificate_;
+  std::unique_ptr<SSLCertChain> cert_chain_;
 
   RTC_DISALLOW_COPY_AND_ASSIGN(OpenSSLIdentity);
 };
 
-
 }  // namespace rtc
 
-#endif  // WEBRTC_RTC_BASE_OPENSSLIDENTITY_H_
+#endif  // RTC_BASE_OPENSSLIDENTITY_H_

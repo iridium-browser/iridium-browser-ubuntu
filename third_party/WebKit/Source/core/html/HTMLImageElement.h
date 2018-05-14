@@ -24,12 +24,13 @@
 #ifndef HTMLImageElement_h
 #define HTMLImageElement_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/CoreExport.h"
-#include "core/html/FormAssociated.h"
+#include "core/dom/CreateElementFlags.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLImageLoader.h"
 #include "core/html/canvas/ImageElementBase.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
+#include "core/html/forms/FormAssociated.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/heap/HeapAllocator.h"
 #include "platform/loader/fetch/FetchParameters.h"
@@ -53,7 +54,7 @@ class CORE_EXPORT HTMLImageElement final
   class ViewportChangeListener;
 
   static HTMLImageElement* Create(Document&);
-  static HTMLImageElement* Create(Document&, bool created_by_parser);
+  static HTMLImageElement* Create(Document&, const CreateElementFlags);
   static HTMLImageElement* CreateForJSConstructor(Document&);
   static HTMLImageElement* CreateForJSConstructor(Document&, unsigned width);
   static HTMLImageElement* CreateForJSConstructor(Document&,
@@ -61,7 +62,7 @@ class CORE_EXPORT HTMLImageElement final
                                                   unsigned height);
 
   ~HTMLImageElement() override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   unsigned width();
   unsigned height();
@@ -79,7 +80,7 @@ class CORE_EXPORT HTMLImageElement final
   String AltText() const final;
 
   ImageResourceContent* CachedImage() const {
-    return GetImageLoader().GetImage();
+    return GetImageLoader().GetContent();
   }
   ImageResource* CachedImageResourceForImageDocument() const {
     return GetImageLoader().ImageResourceForImageDocument();
@@ -120,7 +121,6 @@ class CORE_EXPORT HTMLImageElement final
   bool IsCollapsed() const;
 
   // CanvasImageSource interface implementation.
-  FloatSize SourceDefaultObjectSize() override;
   FloatSize DefaultDestinationSize(const FloatSize&) const override;
 
   // public so that HTMLPictureElement can call this as well.
@@ -135,8 +135,6 @@ class CORE_EXPORT HTMLImageElement final
 
   FormAssociated* ToFormAssociatedOrNull() override { return this; };
   void AssociateWith(HTMLFormElement*) override;
-
-  void ImageNotifyFinished(bool success);
 
  protected:
   // Controls how an image element appears in the layout. See:
@@ -160,16 +158,17 @@ class CORE_EXPORT HTMLImageElement final
   void DidMoveToNewDocument(Document& old_document) override;
 
   void DidAddUserAgentShadowRoot(ShadowRoot&) override;
-  PassRefPtr<ComputedStyle> CustomStyleForLayoutObject() override;
+  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() override;
 
  private:
   bool AreAuthorShadowsAllowed() const override { return false; }
 
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
   void SetLayoutDisposition(LayoutDisposition, bool force_reattach = false);
 
   void AttachLayoutTree(AttachContext&) override;
@@ -185,21 +184,16 @@ class CORE_EXPORT HTMLImageElement final
 
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;
-  bool ShouldRegisterAsNamedItem() const override { return true; }
-  bool ShouldRegisterAsExtraNamedItem() const override { return true; }
+  NamedItemType GetNamedItemType() const override {
+    return NamedItemType::kNameOrIdWithName;
+  }
   bool IsInteractiveContent() const override;
   Image* ImageContents() override;
-
-  // Issues a request to decode the image to the chrome client.
-  void RequestDecode();
-  // A callback that is called when the image with the given sequence id has
-  // been decoded (either successfully or not). This is a signal to
-  // resolve/reject the promises that have been handed out.
-  void DecodeRequestFinished(uint32_t sequence_id, bool success);
 
   void ResetFormOwner();
   ImageCandidate FindBestFitImageFromPictureParent();
   void SetBestFitURLAndDPRFromImageCandidate(const ImageCandidate&);
+  LayoutSize DensityCorrectedIntrinsicDimensions() const;
   HTMLImageLoader& GetImageLoader() const override { return *image_loader_; }
   void NotifyViewportChanged();
   void CreateMediaQueryListIfDoesNotExist();
@@ -211,8 +205,6 @@ class CORE_EXPORT HTMLImageElement final
   float image_device_pixel_ratio_;
   Member<HTMLSourceElement> source_;
   LayoutDisposition layout_disposition_;
-  HeapVector<Member<ScriptPromiseResolver>> decode_promise_resolvers_;
-  uint32_t decode_sequence_id_;
   unsigned form_was_set_by_parser_ : 1;
   unsigned element_created_by_parser_ : 1;
   unsigned is_fallback_image_ : 1;

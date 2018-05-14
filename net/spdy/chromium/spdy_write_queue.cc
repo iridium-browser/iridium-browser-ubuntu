@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/containers/circular_deque.h"
 #include "base/logging.h"
 #include "net/spdy/chromium/spdy_buffer.h"
 #include "net/spdy/chromium/spdy_buffer_producer.h"
@@ -16,18 +17,20 @@
 
 namespace net {
 
-SpdyWriteQueue::PendingWrite::PendingWrite() {}
+SpdyWriteQueue::PendingWrite::PendingWrite() = default;
 
 SpdyWriteQueue::PendingWrite::PendingWrite(
     SpdyFrameType frame_type,
     std::unique_ptr<SpdyBufferProducer> frame_producer,
-    const base::WeakPtr<SpdyStream>& stream)
+    const base::WeakPtr<SpdyStream>& stream,
+    const MutableNetworkTrafficAnnotationTag& traffic_annotation)
     : frame_type(frame_type),
       frame_producer(std::move(frame_producer)),
       stream(stream),
+      traffic_annotation(traffic_annotation),
       has_stream(stream.get() != nullptr) {}
 
-SpdyWriteQueue::PendingWrite::~PendingWrite() {}
+SpdyWriteQueue::PendingWrite::~PendingWrite() = default;
 
 SpdyWriteQueue::PendingWrite::PendingWrite(PendingWrite&& other) = default;
 SpdyWriteQueue::PendingWrite& SpdyWriteQueue::PendingWrite::operator=(
@@ -51,22 +54,27 @@ bool SpdyWriteQueue::IsEmpty() const {
   return true;
 }
 
-void SpdyWriteQueue::Enqueue(RequestPriority priority,
-                             SpdyFrameType frame_type,
-                             std::unique_ptr<SpdyBufferProducer> frame_producer,
-                             const base::WeakPtr<SpdyStream>& stream) {
+void SpdyWriteQueue::Enqueue(
+    RequestPriority priority,
+    SpdyFrameType frame_type,
+    std::unique_ptr<SpdyBufferProducer> frame_producer,
+    const base::WeakPtr<SpdyStream>& stream,
+    const NetworkTrafficAnnotationTag& traffic_annotation) {
   CHECK(!removing_writes_);
   CHECK_GE(priority, MINIMUM_PRIORITY);
   CHECK_LE(priority, MAXIMUM_PRIORITY);
   if (stream.get())
     DCHECK_EQ(stream->priority(), priority);
-  queue_[priority].push_back({frame_type, std::move(frame_producer), stream});
+  queue_[priority].push_back(
+      {frame_type, std::move(frame_producer), stream,
+       MutableNetworkTrafficAnnotationTag(traffic_annotation)});
 }
 
 bool SpdyWriteQueue::Dequeue(
     SpdyFrameType* frame_type,
     std::unique_ptr<SpdyBufferProducer>* frame_producer,
-    base::WeakPtr<SpdyStream>* stream) {
+    base::WeakPtr<SpdyStream>* stream,
+    MutableNetworkTrafficAnnotationTag* traffic_annotation) {
   CHECK(!removing_writes_);
   for (int i = MAXIMUM_PRIORITY; i >= MINIMUM_PRIORITY; --i) {
     if (!queue_[i].empty()) {
@@ -75,6 +83,7 @@ bool SpdyWriteQueue::Dequeue(
       *frame_type = pending_write.frame_type;
       *frame_producer = std::move(pending_write.frame_producer);
       *stream = pending_write.stream;
+      *traffic_annotation = pending_write.traffic_annotation;
       if (pending_write.has_stream)
         DCHECK(stream->get());
       return true;
@@ -108,7 +117,7 @@ void SpdyWriteQueue::RemovePendingWritesForStream(
   std::vector<std::unique_ptr<SpdyBufferProducer>> erased_buffer_producers;
 
   // Do the actual deletion and removal, preserving FIFO-ness.
-  std::deque<PendingWrite>& queue = queue_[priority];
+  base::circular_deque<PendingWrite>& queue = queue_[priority];
   auto out_it = queue.begin();
   for (auto it = queue.begin(); it != queue.end(); ++it) {
     if (it->stream.get() == stream.get()) {
@@ -130,7 +139,7 @@ void SpdyWriteQueue::RemovePendingWritesForStreamsAfter(
 
   for (int i = MINIMUM_PRIORITY; i <= MAXIMUM_PRIORITY; ++i) {
     // Do the actual deletion and removal, preserving FIFO-ness.
-    std::deque<PendingWrite>& queue = queue_[i];
+    base::circular_deque<PendingWrite>& queue = queue_[i];
     auto out_it = queue.begin();
     for (auto it = queue.begin(); it != queue.end(); ++it) {
       if (it->stream.get() && (it->stream->stream_id() > last_good_stream_id ||

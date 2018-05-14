@@ -10,15 +10,13 @@
 #include "base/ios/block_types.h"
 #include "base/strings/string16.h"
 #include "components/autofill/core/browser/payments/full_card_request.h"
-#import "ios/chrome/browser/chrome_coordinator.h"
+#import "ios/chrome/browser/ui/coordinators/chrome_coordinator.h"
 #import "ios/chrome/browser/ui/payments/address_edit_coordinator.h"
 #import "ios/chrome/browser/ui/payments/contact_info_edit_coordinator.h"
 #import "ios/chrome/browser/ui/payments/contact_info_selection_coordinator.h"
 #import "ios/chrome/browser/ui/payments/credit_card_edit_coordinator.h"
-#include "ios/chrome/browser/ui/payments/full_card_requester.h"
 #import "ios/chrome/browser/ui/payments/payment_items_display_coordinator.h"
 #import "ios/chrome/browser/ui/payments/payment_method_selection_coordinator.h"
-#include "ios/chrome/browser/ui/payments/payment_request_error_coordinator.h"
 #import "ios/chrome/browser/ui/payments/payment_request_view_controller.h"
 #import "ios/chrome/browser/ui/payments/shipping_address_selection_coordinator.h"
 #import "ios/chrome/browser/ui/payments/shipping_option_selection_coordinator.h"
@@ -32,18 +30,19 @@ class ChromeBrowserState;
 }  // namespace ios
 
 namespace payments {
-class PaymentRequest;
-}  // namespace payments
-
-namespace web {
 class PaymentDetails;
+class PaymentRequest;
 class PaymentShippingOption;
-}  // namespace web
+}  // namespace payments
 
 @class PaymentRequestCoordinator;
 
 // Delegate protocol for PaymentRequestCoordinator.
 @protocol PaymentRequestCoordinatorDelegate<NSObject>
+
+// Notifies the delegate that the user has confirmed the payment request.
+- (void)paymentRequestCoordinatorDidConfirm:
+    (PaymentRequestCoordinator*)coordinator;
 
 // Notifies the delegate that the user has canceled the payment request.
 - (void)paymentRequestCoordinatorDidCancel:
@@ -54,12 +53,6 @@ class PaymentShippingOption;
 - (void)paymentRequestCoordinatorDidSelectSettings:
     (PaymentRequestCoordinator*)coordinator;
 
-// Notifies the delegate that the full payment method name and details
-// have been receieved.
-- (void)paymentRequestCoordinator:(PaymentRequestCoordinator*)coordinator
-         didReceiveFullMethodName:(const std::string&)methodName
-               stringifiedDetails:(const std::string&)stringifiedDetails;
-
 // Notifies the delegate that the user has selected a shipping address.
 - (void)paymentRequestCoordinator:(PaymentRequestCoordinator*)coordinator
          didSelectShippingAddress:
@@ -68,7 +61,7 @@ class PaymentShippingOption;
 // Notifies the delegate that the user has selected a shipping option.
 - (void)paymentRequestCoordinator:(PaymentRequestCoordinator*)coordinator
           didSelectShippingOption:
-              (const web::PaymentShippingOption&)shippingOption;
+              (const payments::PaymentShippingOption&)shippingOption;
 
 @end
 
@@ -80,17 +73,15 @@ class PaymentShippingOption;
                         ContactInfoEditCoordinatorDelegate,
                         ContactInfoSelectionCoordinatorDelegate,
                         CreditCardEditCoordinatorDelegate,
-                        FullCardRequesterConsumer,
                         PaymentItemsDisplayCoordinatorDelegate,
                         PaymentMethodSelectionCoordinatorDelegate,
-                        PaymentRequestErrorCoordinatorDelegate,
                         PaymentRequestViewControllerDelegate,
                         ShippingAddressSelectionCoordinatorDelegate,
                         ShippingOptionSelectionCoordinatorDelegate>
 
-// The PaymentRequest object having a copy of web::PaymentRequest as provided by
-// the page invoking the Payment Request API. This pointer is not owned by this
-// class and should outlive it.
+// The PaymentRequest object having a copy of payments::WebPaymentRequest as
+// provided by the page invoking the Payment Request API. This pointer is not
+// owned by this class and should outlive it.
 @property(nonatomic, assign) payments::PaymentRequest* paymentRequest;
 
 // An instance of autofill::AutofillManager used for credit card unmasking. This
@@ -116,6 +107,13 @@ class PaymentShippingOption;
 // Whether or not the connection is secure.
 @property(nonatomic, assign, getter=isConnectionSecure) BOOL connectionSecure;
 
+// Whether or not the PaymentRequest view controller is in a pending state.
+@property(nonatomic, assign, getter=isPending) BOOL pending;
+
+// Whether or not the user can cancel out of the Payment Request view
+// controller.
+@property(nonatomic, assign, getter=isCancellable) BOOL cancellable;
+
 // The delegate to be notified when the user confirms or cancels the request.
 @property(nonatomic, weak) id<PaymentRequestCoordinatorDelegate> delegate;
 
@@ -127,10 +125,10 @@ requestFullCreditCard:(const autofill::CreditCard&)card
                resultDelegate;
 
 // Updates the payment details of the PaymentRequest and updates the UI.
-- (void)updatePaymentDetails:(web::PaymentDetails)paymentDetails;
+- (void)updatePaymentDetails:(payments::PaymentDetails)paymentDetails;
 
-// Displays an error message. Invokes |callback| when the message is dismissed.
-- (void)displayErrorWithCallback:(ProceduralBlock)callback;
+// Dismisses the payment request UI. Invokes |completion| when UI is dismissed.
+- (void)stopWithCompletion:(ProceduralBlock)completion;
 
 @end
 

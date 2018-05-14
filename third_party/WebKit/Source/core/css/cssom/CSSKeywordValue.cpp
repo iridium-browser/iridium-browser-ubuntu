@@ -58,11 +58,21 @@ const String& CSSKeywordValue::value() const {
   return keyword_value_;
 }
 
+void CSSKeywordValue::setValue(const String& keyword,
+                               ExceptionState& exception_state) {
+  if (keyword.IsEmpty()) {
+    exception_state.ThrowTypeError(
+        "CSSKeywordValue does not support empty strings");
+    return;
+  }
+  keyword_value_ = keyword;
+}
+
 CSSValueID CSSKeywordValue::KeywordValueID() const {
   return CssValueKeywordID(keyword_value_);
 }
 
-CSSValue* CSSKeywordValue::ToCSSValue() const {
+const CSSValue* CSSKeywordValue::ToCSSValue() const {
   CSSValueID keyword_id = KeywordValueID();
   switch (keyword_id) {
     case (CSSValueInherit):
@@ -70,7 +80,7 @@ CSSValue* CSSKeywordValue::ToCSSValue() const {
     case (CSSValueInitial):
       return CSSInitialValue::Create();
     case (CSSValueUnset):
-      return CSSUnsetValue::Create();
+      return cssvalue::CSSUnsetValue::Create();
     case (CSSValueInvalid):
       return CSSCustomIdentValue::Create(AtomicString(keyword_value_));
     default:

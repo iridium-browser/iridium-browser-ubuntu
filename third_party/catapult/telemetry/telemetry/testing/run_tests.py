@@ -69,6 +69,7 @@ class RunTestsCommand(command_line.OptparseCommand):
                       action='append', help=(
                           'Globs of test names to skip (defaults to '
                           '%(default)s).'))
+
     typ.ArgumentParser.add_option_group(parser,
                                         "Options for running the tests",
                                         running=True,
@@ -173,7 +174,7 @@ class RunTestsCommand(command_line.OptparseCommand):
     runner.args.retry_limit = args.retry_limit
     runner.args.test_results_server = args.test_results_server
     runner.args.test_type = args.test_type
-    runner.args.top_level_dir = args.top_level_dir
+    runner.args.top_level_dirs = args.top_level_dirs
     runner.args.write_full_results_to = args.write_full_results_to
     runner.args.write_trace_to = args.write_trace_to
     runner.args.list_only = args.list_only
@@ -212,8 +213,8 @@ def GetClassifier(args, possible_browser):
           typ.TestInput(name, 'skipped because matched --skip'))
       return
     if (not args.positional_args
-        or _MatchesSelectedTest(name, args.positional_args,
-                                  args.exact_test_filter)):
+        or _MatchesSelectedTest(
+            name, args.positional_args, args.exact_test_filter)):
       # TODO(telemetry-team): Make sure that all telemetry unittest that invokes
       # actual browser are subclasses of browser_test_case.BrowserTestCase
       # (crbug.com/537428)
@@ -292,9 +293,6 @@ def _SetUpProcess(child, context): # pylint: disable=unused-argument
 
 
 def _TearDownProcess(child, context): # pylint: disable=unused-argument
-  # It's safe to call teardown_browser even if we did not start any browser
-  # in any of the tests.
-  browser_test_case.teardown_browser()
   options_for_unittests.Pop()
 
 

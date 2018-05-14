@@ -10,6 +10,10 @@
 
 namespace tests_hook {
 
+bool DisableContentSuggestions() {
+  return true;
+}
+
 bool DisableContextualSearch() {
   return true;
 }
@@ -28,6 +32,10 @@ bool DisableSigninRecallPromo() {
 
 bool DisableUpdateService() {
   return true;
+}
+
+bool ForceUIRefreshPhase1() {
+  return false;
 }
 
 void SetUpTestsIfPresent() {

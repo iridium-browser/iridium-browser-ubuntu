@@ -11,11 +11,11 @@
 
 namespace blink {
 
-PassRefPtr<PaintRecordPattern> PaintRecordPattern::Create(
+scoped_refptr<PaintRecordPattern> PaintRecordPattern::Create(
     sk_sp<PaintRecord> record,
     const FloatRect& record_bounds,
     RepeatMode repeat_mode) {
-  return AdoptRef(
+  return base::AdoptRef(
       new PaintRecordPattern(std::move(record), record_bounds, repeat_mode));
 }
 
@@ -31,7 +31,7 @@ PaintRecordPattern::PaintRecordPattern(sk_sp<PaintRecord> record,
   // FIXME: we don't have a good way to account for DL memory utilization.
 }
 
-PaintRecordPattern::~PaintRecordPattern() {}
+PaintRecordPattern::~PaintRecordPattern() = default;
 
 sk_sp<PaintShader> PaintRecordPattern::CreateShader(
     const SkMatrix& local_matrix) {

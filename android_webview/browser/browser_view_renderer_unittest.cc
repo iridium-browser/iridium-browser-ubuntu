@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <map>
+#include <memory>
 #include <queue>
 #include <utility>
 
@@ -12,10 +13,9 @@
 #include "android_webview/browser/render_thread_manager.h"
 #include "android_webview/browser/test/rendering_test.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "cc/output/compositor_frame.h"
+#include "components/viz/common/quads/compositor_frame.h"
 #include "content/public/test/test_synchronous_compositor_android.h"
 
 namespace android_webview {
@@ -341,7 +341,7 @@ RENDERING_TEST_F(ClientIsInvisibleAfterDetachTest);
 
 class ResourceRenderingTest : public RenderingTest {
  public:
-  using ResourceCountMap = std::map<cc::ResourceId, int>;
+  using ResourceCountMap = std::map<viz::ResourceId, int>;
   using LayerTreeFrameSinkResourceCountMap =
       std::map<uint32_t, ResourceCountMap>;
 
@@ -401,7 +401,7 @@ class ResourceRenderingTest : public RenderingTest {
 class SwitchLayerTreeFrameSinkIdTest : public ResourceRenderingTest {
   struct FrameInfo {
     uint32_t layer_tree_frame_sink_id;
-    cc::ResourceId resource_id;  // Each frame contains a single resource.
+    viz::ResourceId resource_id;  // Each frame contains a single resource.
   };
 
   std::unique_ptr<content::SynchronousCompositor::Frame> GetFrame(
@@ -463,8 +463,8 @@ class RenderThreadManagerDeletionTest : public ResourceRenderingTest {
     }
 
     const uint32_t layer_tree_frame_sink_id = 0u;
-    const cc::ResourceId resource_id =
-        static_cast<cc::ResourceId>(frame_number);
+    const viz::ResourceId resource_id =
+        static_cast<viz::ResourceId>(frame_number);
 
     std::unique_ptr<content::SynchronousCompositor::Frame> frame(
         new content::SynchronousCompositor::Frame);
@@ -500,7 +500,7 @@ class RenderThreadManagerSwitchTest : public ResourceRenderingTest {
         // Switch to new RTM.
         std::unique_ptr<FakeFunctor> functor(new FakeFunctor);
         functor->Init(window_.get(),
-                      base::MakeUnique<RenderThreadManager>(
+                      std::make_unique<RenderThreadManager>(
                           functor.get(), base::ThreadTaskRunnerHandle::Get()));
         browser_view_renderer_->SetCurrentCompositorFrameConsumer(
             functor->GetCompositorFrameConsumer());
@@ -525,8 +525,8 @@ class RenderThreadManagerSwitchTest : public ResourceRenderingTest {
     }
 
     const uint32_t layer_tree_frame_sink_id = 0u;
-    const cc::ResourceId resource_id =
-        static_cast<cc::ResourceId>(frame_number);
+    const viz::ResourceId resource_id =
+        static_cast<viz::ResourceId>(frame_number);
 
     std::unique_ptr<content::SynchronousCompositor::Frame> frame(
         new content::SynchronousCompositor::Frame);

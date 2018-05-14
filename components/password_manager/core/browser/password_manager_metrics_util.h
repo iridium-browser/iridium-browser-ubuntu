@@ -10,6 +10,7 @@
 #include <string>
 
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_reuse_defines.h"
 #include "components/password_manager/core/common/credential_manager_types.h"
 
 namespace password_manager {
@@ -36,6 +37,7 @@ enum UIDisplayDisposition {
   AUTOMATIC_SIGNIN_TOAST,
   MANUAL_WITH_PASSWORD_PENDING_UPDATE,
   AUTOMATIC_WITH_PASSWORD_PENDING_UPDATE,
+  MANUAL_GENERATED_PASSWORD_CONFIRMATION,
   NUM_DISPLAY_DISPOSITIONS
 };
 
@@ -226,12 +228,12 @@ enum class CredentialSourceType {
   kCredentialManagementAPI
 };
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS)) || \
-    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
 enum class SyncPasswordHashChange {
   SAVED_ON_CHROME_SIGNIN,
   SAVED_IN_CONTENT_AREA,
   CLEARED_ON_CHROME_SIGNOUT,
+  CHANGED_IN_CONTENT_AREA,
   SAVED_SYNC_PASSWORD_CHANGE_COUNT
 };
 
@@ -241,6 +243,45 @@ enum class IsSyncPasswordHashSaved {
   IS_SYNC_PASSWORD_HASH_SAVED_COUNT
 };
 #endif
+
+// Specifies the context in which the "Show all saved passwords" fallback is
+// shown or accepted.
+// Metrics:
+// - PasswordManager.ShowAllSavedPasswordsAcceptedContext
+// - PasswordManager.ShowAllSavedPasswordsShownContext
+enum ShowAllSavedPasswordsContext {
+  SHOW_ALL_SAVED_PASSWORDS_CONTEXT_NONE,
+  // The "Show all saved passwords..." fallback is shown below a list of
+  // available passwords.
+  SHOW_ALL_SAVED_PASSWORDS_CONTEXT_PASSWORD,
+  // The "Show all saved passwords..." fallback is shown when no available
+  // passwords can be suggested to the user, e.g. because none are saved or
+  // because of technical issues.
+  SHOW_ALL_SAVED_PASSWORDS_CONTEXT_MANUAL_FALLBACK,
+  // The "Show all saved  passwords..." fallback is shown in context menu.
+  SHOW_ALL_SAVED_PASSWORDS_CONTEXT_CONTEXT_MENU,
+  SHOW_ALL_SAVED_PASSWORDS_CONTEXT_COUNT
+};
+
+// Metrics: "PasswordManager.CertificateErrorsWhileSeeingForms"
+enum class CertificateError {
+  NONE = 0,
+  OTHER = 1,
+  AUTHORITY_INVALID = 2,
+  DATE_INVALID = 3,
+  COMMON_NAME_INVALID = 4,
+  WEAK_SIGNATURE_ALGORITHM = 5,
+  COUNT
+};
+
+// Metric: PasswordManager.ExportPasswordsToCSVResult
+enum class ExportPasswordsResult {
+  SUCCESS = 0,
+  USER_ABORTED = 1,
+  WRITE_FAILED = 2,
+  NO_CONSUMER = 3,  // Only used on Android.
+  COUNT,
+};
 
 // A version of the UMA_HISTOGRAM_BOOLEAN macro that allows the |name|
 // to vary over the program's runtime.
@@ -319,6 +360,15 @@ void LogShowedHttpNotSecureExplanation();
 // per main-frame navigation.
 void LogShowedFormNotSecureWarningOnCurrentNavigation();
 
+// Log the context in which the "Show all saved passwords" fallback was shown.
+void LogContextOfShowAllSavedPasswordsShown(
+    ShowAllSavedPasswordsContext context);
+
+// Log the context in which the "Show all saved passwords" fallback was
+// accepted.
+void LogContextOfShowAllSavedPasswordsAccepted(
+    ShowAllSavedPasswordsContext context);
+
 // Log a password successful submission event.
 void LogPasswordSuccessfulSubmissionIndicatorEvent(
     autofill::PasswordForm::SubmissionIndicatorEvent event);
@@ -331,8 +381,7 @@ void LogPasswordAcceptedSaveUpdateSubmissionIndicatorEvent(
 // Log a frame of a submitted password form.
 void LogSubmittedFormFrame(SubmittedFormFrame frame);
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS)) || \
-    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
 // Log a save sync password change event.
 void LogSyncPasswordHashChange(SyncPasswordHashChange event);
 

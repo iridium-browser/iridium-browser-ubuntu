@@ -11,12 +11,10 @@
 #include "android_webview/browser/net/aw_url_request_job_factory.h"
 #include "android_webview/browser/net/input_stream_reader.h"
 #include "base/format_macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/test/scoped_task_environment.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_response_headers.h"
@@ -81,7 +79,7 @@ class StreamReaderDelegate :
 
   std::unique_ptr<InputStream> OpenInputStream(JNIEnv* env,
                                                const GURL& url) override {
-    return base::MakeUnique<NotImplInputStream>();
+    return std::make_unique<NotImplInputStream>();
   }
 
   void OnInputStreamOpenFailed(net::URLRequest* request,
@@ -166,7 +164,6 @@ class TestStreamReaderJob : public AndroidStreamReaderURLRequestJob {
                                          network_delegate,
                                          std::move(delegate)),
         stream_reader_(std::move(stream_reader)) {
-    task_runner_ = base::ThreadTaskRunnerHandle::Get();
   }
 
   ~TestStreamReaderJob() override {}
@@ -177,12 +174,7 @@ class TestStreamReaderJob : public AndroidStreamReaderURLRequestJob {
   }
 
  protected:
-  base::TaskRunner* GetWorkerThreadRunner() override {
-    return task_runner_.get();
-  }
-
   std::unique_ptr<InputStreamReader> stream_reader_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 };
 
 }  // namespace
@@ -212,7 +204,7 @@ class AndroidStreamReaderURLRequestJobTest : public Test {
 
   void SetUpTestJob(std::unique_ptr<InputStreamReader> stream_reader) {
     SetUpTestJob(std::move(stream_reader),
-                 base::MakeUnique<StreamReaderDelegate>());
+                 std::make_unique<StreamReaderDelegate>());
   }
 
   void SetUpTestJob(std::unique_ptr<InputStreamReader> stream_reader,
@@ -231,7 +223,8 @@ class AndroidStreamReaderURLRequestJobTest : public Test {
     DCHECK(set_protocol);
   }
 
-  base::MessageLoopForIO loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_ = {
+      base::test::ScopedTaskEnvironment::MainThreadType::IO};
   TestURLRequestContext context_;
   android_webview::AwURLRequestJobFactory factory_;
   TestDelegate url_request_delegate_;
@@ -264,7 +257,7 @@ TEST_F(AndroidStreamReaderURLRequestJobTest, ReadEmptyStream) {
 }
 
 TEST_F(AndroidStreamReaderURLRequestJobTest, ReadWithNullStream) {
-  SetUpTestJob(nullptr, base::MakeUnique<NullStreamReaderDelegate>());
+  SetUpTestJob(nullptr, std::make_unique<NullStreamReaderDelegate>());
   req_->Start();
 
   // The TestDelegate will quit the message loop on request completion.
@@ -280,7 +273,7 @@ TEST_F(AndroidStreamReaderURLRequestJobTest, ReadWithNullStream) {
 }
 
 TEST_F(AndroidStreamReaderURLRequestJobTest, ModifyHeadersAndStatus) {
-  SetUpTestJob(nullptr, base::MakeUnique<HeaderAlteringStreamReaderDelegate>());
+  SetUpTestJob(nullptr, std::make_unique<HeaderAlteringStreamReaderDelegate>());
   req_->Start();
 
   // The TestDelegate will quit the message loop on request completion.

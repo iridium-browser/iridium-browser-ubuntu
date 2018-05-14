@@ -12,7 +12,9 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/process/process.h"
+#include "chrome/browser/extensions/install_verifier.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/test/integration/configuration_refresher.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/protocol/sync_protocol_error.h"
@@ -279,6 +281,8 @@ class SyncTest : public InProcessBrowserTest {
   // used for UI Signin. Blocks until profile is created.
   static Profile* MakeProfileForUISignin(base::FilePath profile_path);
 
+  base::test::ScopedFeatureList feature_list_;
+
   // GAIA account used by the test case.
   std::string username_;
 
@@ -294,7 +298,7 @@ class SyncTest : public InProcessBrowserTest {
  private:
   // Handles Profile creation for given index. Profile's path and type is
   // determined at runtime based on server type.
-  void CreateProfile(int index);
+  bool CreateProfile(int index);
 
   // Callback for MakeProfileForUISignin() method. It runs the quit_closure once
   // profile is created successfully.
@@ -390,6 +394,11 @@ class SyncTest : public InProcessBrowserTest {
   // server types).
   ServerType server_type_;
 
+  // The default profile, created before our actual testing |profiles_|. This is
+  // needed in a workaround for https://crbug.com/801569, see comments in the
+  // .cc file.
+  Profile* previous_profile_;
+
   // Number of sync clients that will be created by a test.
   int num_clients_;
 
@@ -432,6 +441,9 @@ class SyncTest : public InProcessBrowserTest {
   std::vector<fake_server::FakeServerInvalidationService*>
       fake_server_invalidation_services_;
 
+  // Triggers a GetUpdates via refresh after a configuration.
+  std::unique_ptr<ConfigurationRefresher> configuration_refresher_;
+
   // Sync profile against which changes to individual profiles are verified. We
   // don't need a corresponding verifier sync client because the contents of the
   // verifier profile are strictly local, and are not meant to be synced.
@@ -458,6 +470,9 @@ class SyncTest : public InProcessBrowserTest {
   // The contents to be written to a profile's Preferences file before the
   // Profile object is created. If empty, no preexisting file will be written.
   std::string preexisting_preferences_file_contents_;
+
+  // Disable extension install verification.
+  extensions::ScopedInstallVerifierBypassForTest ignore_install_verification_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncTest);
 };

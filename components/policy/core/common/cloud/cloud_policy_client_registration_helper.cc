@@ -265,6 +265,7 @@ void CloudPolicyClientRegistrationHelper::OnGetUserInfoSuccess(
   client_->Register(
       registration_type_,
       enterprise_management::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
+      enterprise_management::DeviceRegisterRequest::LIFETIME_INDEFINITE,
       enterprise_management::LicenseType::UNDEFINED, oauth_access_token_,
       std::string(), std::string(), std::string());
 }
@@ -293,7 +294,7 @@ void CloudPolicyClientRegistrationHelper::RequestCompleted() {
   if (client_) {
     client_->RemoveObserver(this);
     // |client_| may be freed by the callback so clear it now.
-    client_ = NULL;
+    client_ = nullptr;
     callback_.Run();
   }
 }

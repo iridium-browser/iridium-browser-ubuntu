@@ -18,17 +18,16 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.MockitoAnnotations;
 import org.mockito.Spy;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 
 import java.util.Set;
 
 /** Unit tests for {@link BackgroundTaskSchedulerUma}. */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class BackgroundTaskSchedulerUmaTest {
     @Spy
@@ -37,7 +36,6 @@ public class BackgroundTaskSchedulerUmaTest {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-        ContextUtils.initApplicationContextForTests(RuntimeEnvironment.application);
         BackgroundTaskSchedulerUma.setInstanceForTesting(mUmaSpy);
         doNothing().when(mUmaSpy).assertNativeIsLoaded();
     }
@@ -73,7 +71,18 @@ public class BackgroundTaskSchedulerUmaTest {
         assertEquals(BackgroundTaskSchedulerUma.BACKGROUND_TASK_DOWNLOAD_CLEANUP,
                 BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(
                         TaskIds.DOWNLOAD_CLEANUP_JOB_ID));
-        assertEquals(BackgroundTaskSchedulerUma.BACKGROUND_TASK_COUNT, 10);
+        assertEquals(BackgroundTaskSchedulerUma.BACKGROUND_TASK_WEBVIEW_VARIATIONS,
+                BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(
+                        TaskIds.WEBVIEW_VARIATIONS_SEED_FETCH_JOB_ID));
+        assertEquals(BackgroundTaskSchedulerUma.BACKGROUND_TASK_OFFLINE_CONTENT_NOTIFICATION,
+                BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(
+                        TaskIds.OFFLINE_PAGES_PREFETCH_NOTIFICATION_JOB_ID));
+        assertEquals(BackgroundTaskSchedulerUma.BACKGROUND_TASK_WEBAPK_UPDATE,
+                BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(TaskIds.WEBAPK_UPDATE_JOB_ID));
+        assertEquals(BackgroundTaskSchedulerUma.BACKGROUND_TASK_DOWNLOAD_RESUMPTION,
+                BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(
+                        TaskIds.DOWNLOAD_RESUMPTION_JOB_ID));
+        assertEquals(BackgroundTaskSchedulerUma.BACKGROUND_TASK_COUNT, 14);
     }
 
     @Test
@@ -186,5 +195,15 @@ public class BackgroundTaskSchedulerUmaTest {
         verify(mUmaSpy, times(1))
                 .cacheEvent(eq("Android.BackgroundTaskScheduler.TaskStopped"),
                         eq(BackgroundTaskSchedulerUma.BACKGROUND_TASK_GCM));
+    }
+
+    @Test
+    @Feature({"BackgroundTaskScheduler"})
+    public void testReportTaskStartedNative() {
+        doNothing().when(mUmaSpy).cacheEvent(anyString(), anyInt());
+        BackgroundTaskSchedulerExternalUma.reportTaskStartedNative(TaskIds.DOWNLOAD_SERVICE_JOB_ID);
+        verify(mUmaSpy, times(1))
+                .cacheEvent(eq("Android.BackgroundTaskScheduler.TaskLoadedNative"),
+                        eq(BackgroundTaskSchedulerUma.BACKGROUND_TASK_DOWNLOAD_SERVICE));
     }
 }

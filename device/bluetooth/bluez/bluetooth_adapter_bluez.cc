@@ -13,11 +13,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -129,11 +129,6 @@ void OnRegisterationErrorCallback(
       BluetoothGattServiceBlueZ::DBusErrorToServiceError(error_name));
 }
 
-void DoNothingOnError(
-    device::BluetoothGattService::GattErrorCode /*error_code*/) {}
-void DoNothingOnAdvertisementError(
-    device::BluetoothAdvertisement::ErrorCode /*error_code*/) {}
-
 void SetIntervalErrorCallbackConnector(
     const device::BluetoothAdapter::AdvertisementErrorCallback& error_callback,
     const std::string& error_name,
@@ -210,8 +205,7 @@ void BluetoothAdapterBlueZ::Shutdown() {
   // the fact that it has been already unregistered and will call our empty
   // error callback with an "Already unregistered" error, which we'll ignore.
   for (auto& it : advertisements_) {
-    it->Unregister(base::Bind(&base::DoNothing),
-                   base::Bind(&DoNothingOnAdvertisementError));
+    it->Unregister(base::DoNothing(), base::DoNothing());
   }
   advertisements_.clear();
 
@@ -225,8 +219,7 @@ void BluetoothAdapterBlueZ::Shutdown() {
   BLUETOOTH_LOG(EVENT) << "Unregistering pairing agent";
   bluez::BluezDBusManager::Get()
       ->GetBluetoothAgentManagerClient()
-      ->UnregisterAgent(dbus::ObjectPath(kAgentPath),
-                        base::Bind(&base::DoNothing),
+      ->UnregisterAgent(dbus::ObjectPath(kAgentPath), base::DoNothing(),
                         base::Bind(&OnUnregisterAgentError));
 
   agent_.reset();
@@ -240,6 +233,7 @@ BluetoothAdapterBlueZ::BluetoothAdapterBlueZ(const InitCallback& init_callback)
       dbus_is_shutdown_(false),
       num_discovery_sessions_(0),
       discovery_request_pending_(false),
+      force_deactivate_discovery_(false),
       weak_ptr_factory_(this) {
   ui_task_runner_ = base::ThreadTaskRunnerHandle::Get();
   socket_thread_ = device::BluetoothSocketThread::Get();
@@ -1042,10 +1036,9 @@ void BluetoothAdapterBlueZ::SetStandardChromeOSAdapterName() {
   // Take the lower 2 bytes of hashed Bluetooth address and combine it with the
   // device type to create a more identifiable device name.
   const std::string address = GetAddress();
-  alias = base::StringPrintf(
-      "%s_%04X", alias.c_str(),
-      base::SuperFastHash(address.data(), address.size()) & 0xFFFF);
-  SetName(alias, base::Bind(&base::DoNothing), base::Bind(&base::DoNothing));
+  alias = base::StringPrintf("%s_%04X", alias.c_str(),
+                             base::PersistentHash(address) & 0xFFFF);
+  SetName(alias, base::DoNothing(), base::DoNothing());
 }
 #endif
 
@@ -1090,11 +1083,21 @@ void BluetoothAdapterBlueZ::DiscoveringChanged(bool discovering) {
   // If the adapter stopped discovery due to a reason other than a request by
   // us, reset the count to 0.
   BLUETOOTH_LOG(EVENT) << "Discovering changed: " << discovering;
-  if (!discovering && !discovery_request_pending_ &&
-      num_discovery_sessions_ > 0) {
-    BLUETOOTH_LOG(DEBUG) << "Marking sessions as inactive.";
-    num_discovery_sessions_ = 0;
-    MarkDiscoverySessionsAsInactive();
+  if (!discovering && num_discovery_sessions_ > 0) {
+    if (discovery_request_pending_) {
+      // If there is discovery request pending, this is guaranteed to be a
+      // Stop() of the last discovery session (num_discovery_sessions_ == 1).
+      // That last Stop() may fail due to adapter not being present, in which
+      // case there will be dangling discovery count. So we are setting a flag
+      // so that the failing Stop() assumes that there is no more discovery
+      // session.
+      BLUETOOTH_LOG(DEBUG) << "Forcing to deactivate discovery.";
+      force_deactivate_discovery_ = true;
+    } else {
+      BLUETOOTH_LOG(DEBUG) << "Marking sessions as inactive.";
+      num_discovery_sessions_ = 0;
+      MarkDiscoverySessionsAsInactive();
+    }
   }
   for (auto& observer : observers_)
     observer.AdapterDiscoveringChanged(this, discovering);
@@ -1202,8 +1205,7 @@ void BluetoothAdapterBlueZ::RemoveLocalGattService(
 
   if (registered_gatt_services_.count(service->object_path()) != 0) {
     registered_gatt_services_.erase(service->object_path());
-    UpdateRegisteredApplication(true, base::Bind(&base::DoNothing),
-                                base::Bind(&DoNothingOnError));
+    UpdateRegisteredApplication(true, base::DoNothing(), base::DoNothing());
   }
 
   owned_gatt_services_.erase(service_iter);
@@ -1349,6 +1351,12 @@ void BluetoothAdapterBlueZ::OnPropertyChangeCompleted(
   } else {
     error_callback.Run();
   }
+}
+
+// BluetoothAdapterBlueZ should override SetPowered() instead.
+bool BluetoothAdapterBlueZ::SetPoweredImpl(bool powered) {
+  NOTREACHED();
+  return false;
 }
 
 void BluetoothAdapterBlueZ::AddDiscoverySession(
@@ -1565,18 +1573,7 @@ void BluetoothAdapterBlueZ::OnStartDiscoveryError(
   DCHECK(discovery_request_pending_);
   discovery_request_pending_ = false;
 
-  // Discovery request may fail if discovery was previously initiated by Chrome,
-  // but the session were invalidated due to the discovery state unexpectedly
-  // changing to false and then back to true. In this case, report success.
-  if (IsPresent() && error_name == bluetooth_device::kErrorInProgress &&
-      IsDiscovering()) {
-    BLUETOOTH_LOG(DEBUG)
-        << "Discovery previously initiated. Reporting success.";
-    num_discovery_sessions_++;
-    callback.Run();
-  } else {
-    error_callback.Run(TranslateDiscoveryErrorToUMA(error_name));
-  }
+  error_callback.Run(TranslateDiscoveryErrorToUMA(error_name));
 
   // Try to add a new discovery session for each queued request.
   ProcessQueuedDiscoveryRequests();
@@ -1591,6 +1588,8 @@ void BluetoothAdapterBlueZ::OnStopDiscovery(const base::Closure& callback) {
   num_discovery_sessions_--;
   callback.Run();
 
+  force_deactivate_discovery_ = false;
+
   current_filter_.reset();
 
   // Try to add a new discovery session for each queued request.
@@ -1601,14 +1600,27 @@ void BluetoothAdapterBlueZ::OnStopDiscoveryError(
     const DiscoverySessionErrorCallback& error_callback,
     const std::string& error_name,
     const std::string& error_message) {
-  BLUETOOTH_LOG(ERROR) << object_path_.value()
-                       << ": Failed to stop discovery: " << error_name << ": "
-                       << error_message;
-
   // Failed to stop discovery. This can only happen if the count is at 1.
   DCHECK(discovery_request_pending_);
   DCHECK_EQ(num_discovery_sessions_, 1);
   discovery_request_pending_ = false;
+
+  if (force_deactivate_discovery_) {
+    BLUETOOTH_LOG(DEBUG) << "Forced to mark sessions as inactive";
+    force_deactivate_discovery_ = false;
+    num_discovery_sessions_ = 0;
+    MarkDiscoverySessionsAsInactive();
+    // Do not consider this situation as error as the error from Stop()
+    // discovery session was expected. So log with DEBUG instead of ERROR.
+    BLUETOOTH_LOG(DEBUG) << object_path_.value()
+                         << ": Failed to stop discovery: " << error_name << ": "
+                         << error_message;
+  } else {
+    BLUETOOTH_LOG(ERROR) << object_path_.value()
+                         << ": Failed to stop discovery: " << error_name << ": "
+                         << error_message;
+  }
+
   error_callback.Run(TranslateDiscoveryErrorToUMA(error_name));
 
   // Try to add a new discovery session for each queued request.

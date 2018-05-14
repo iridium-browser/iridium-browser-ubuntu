@@ -4,27 +4,15 @@
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file.
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:chrome="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical" >
-
-    <android.support.v7.widget.Toolbar
-        android:id="@+id/toolbar"
-        android:layout_width="match_parent"
-        android:layout_height="?attr/actionBarSize"
-        android:background="?attr/colorPrimary" />
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="4dp"
-        android:layout_marginBottom="-4dp"
-        android:background="@drawable/bookmark_title_bar_shadow" />
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:chrome="http://schemas.android.com/apk/res-auto" >
 
     <ScrollView
+        android:id="@+id/scroll_view"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" >
+        android:layout_height="match_parent"
+        android:paddingTop="@dimen/toolbar_height_no_shadow"
+        android:clipToPadding="false" >
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -33,7 +21,7 @@
             android:layout_marginStart="16dp"
             android:orientation="vertical" >
 
-            <org.chromium.chrome.browser.widget.FloatLabelLayout
+            <org.chromium.chrome.browser.widget.CompatibilityTextInputLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="22dp" >
@@ -46,7 +34,7 @@
                     android:inputType="textCapSentences|textAutoCorrect"
                     android:singleLine="true"
                     chrome:alertMessage="@string/bookmark_missing_title" />
-            </org.chromium.chrome.browser.widget.FloatLabelLayout>
+            </org.chromium.chrome.browser.widget.CompatibilityTextInputLayout>
 
             <TextView
                 android:layout_width="wrap_content"
@@ -68,7 +56,7 @@
                 android:textAppearance="@style/TextAppearance.AppCompat.Medium"
                 android:textColor="@color/dark_mode_tint" />
 
-            <org.chromium.chrome.browser.widget.FloatLabelLayout
+            <org.chromium.chrome.browser.widget.CompatibilityTextInputLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp" >
@@ -82,7 +70,21 @@
                     android:inputType="textUri"
                     android:singleLine="true"
                     chrome:alertMessage="@string/bookmark_missing_url" />
-            </org.chromium.chrome.browser.widget.FloatLabelLayout>
+            </org.chromium.chrome.browser.widget.CompatibilityTextInputLayout>
         </LinearLayout>
     </ScrollView>
-</LinearLayout>
+
+    <android.support.v7.widget.Toolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_height_no_shadow"
+        style="@style/ModernToolbar" />
+
+    <View
+        android:id="@+id/shadow"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_marginTop="@dimen/toolbar_height_no_shadow"
+        android:background="@drawable/bookmark_title_bar_shadow"
+        android:visibility="gone" />
+</merge>

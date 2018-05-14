@@ -4,13 +4,14 @@
 
 #include "core/html/parser/HTMLDocumentParser.h"
 
+#include <memory>
 #include "core/html/HTMLDocument.h"
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/loader/PrerendererClient.h"
 #include "core/loader/TextResourceDecoderBuilder.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/testing/PageTestBase.h"
+#include "public/platform/WebPrerenderingSupport.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <memory>
 
 namespace blink {
 
@@ -28,30 +29,49 @@ class TestPrerendererClient : public PrerendererClient {
   bool is_prefetch_only_;
 };
 
-class HTMLDocumentParserTest : public ::testing::Test {
+class TestPrerenderingSupport : public WebPrerenderingSupport {
+ public:
+  TestPrerenderingSupport() { Initialize(this); }
+
+  virtual void Add(const WebPrerender&) {}
+  virtual void Cancel(const WebPrerender&) {}
+  virtual void Abandon(const WebPrerender&) {}
+  virtual void PrefetchFinished() { prefetch_finished_ = true; }
+
+  bool IsPrefetchFinished() const { return prefetch_finished_; }
+
+ private:
+  bool prefetch_finished_ = false;
+};
+
+class HTMLDocumentParserTest : public PageTestBase {
  protected:
-  HTMLDocumentParserTest() : dummy_page_holder_(DummyPageHolder::Create()) {
-    dummy_page_holder_->GetDocument().SetURL(
-        KURL(NullURL(), "https://example.test"));
+  void SetUp() override {
+    PageTestBase::SetUp();
+    GetDocument().SetURL(KURL("https://example.test"));
   }
 
   HTMLDocumentParser* CreateParser(HTMLDocument& document) {
     HTMLDocumentParser* parser =
         HTMLDocumentParser::Create(document, kForceSynchronousParsing);
-    TextResourceDecoderBuilder decoder_builder("text/html", g_null_atom);
     std::unique_ptr<TextResourceDecoder> decoder(
-        decoder_builder.BuildFor(&document));
+        BuildTextResourceDecoderFor(&document, "text/html", g_null_atom));
     parser->SetDecoder(std::move(decoder));
     return parser;
   }
 
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
+  bool PrefetchFinishedCleanly() {
+    return prerendering_support_.IsPrefetchFinished();
+  }
+
+ private:
+  TestPrerenderingSupport prerendering_support_;
 };
 
 }  // namespace
 
 TEST_F(HTMLDocumentParserTest, AppendPrefetch) {
-  HTMLDocument& document = ToHTMLDocument(dummy_page_holder_->GetDocument());
+  HTMLDocument& document = ToHTMLDocument(GetDocument());
   ProvidePrerendererClientTo(
       *document.GetPage(),
       new TestPrerendererClient(*document.GetPage(), true));
@@ -65,10 +85,15 @@ TEST_F(HTMLDocumentParserTest, AppendPrefetch) {
       parser->AsHTMLParserScriptRunnerHostForTesting();
   EXPECT_TRUE(script_runner_host->HasPreloadScanner());
   EXPECT_EQ(HTMLTokenizer::kDataState, parser->Tokenizer()->GetState());
+  // Finishing should not cause parsing to start (verified via an internal
+  // DCHECK).
+  static_cast<DocumentParser*>(parser)->Finish();
+  EXPECT_EQ(HTMLTokenizer::kDataState, parser->Tokenizer()->GetState());
+  EXPECT_TRUE(PrefetchFinishedCleanly());
 }
 
 TEST_F(HTMLDocumentParserTest, AppendNoPrefetch) {
-  HTMLDocument& document = ToHTMLDocument(dummy_page_holder_->GetDocument());
+  HTMLDocument& document = ToHTMLDocument(GetDocument());
   EXPECT_FALSE(document.IsPrefetchOnly());
   // Use ForceSynchronousParsing to allow calling append().
   HTMLDocumentParser* parser = CreateParser(document);

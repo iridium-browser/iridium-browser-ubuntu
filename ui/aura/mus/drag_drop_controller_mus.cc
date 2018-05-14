@@ -15,7 +15,9 @@
 #include "mojo/public/cpp/bindings/map.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
 #include "services/ui/public/interfaces/window_tree_constants.mojom.h"
+#include "ui/aura/client/drag_drop_client_observer.h"
 #include "ui/aura/client/drag_drop_delegate.h"
+#include "ui/aura/env.h"
 #include "ui/aura/mus/drag_drop_controller_host.h"
 #include "ui/aura/mus/mus_types.h"
 #include "ui/aura/mus/os_exchange_data_provider_mus.h"
@@ -38,7 +40,7 @@ namespace aura {
 
 // State related to a drag initiated by this client.
 struct DragDropControllerMus::CurrentDragState {
-  Id window_id;
+  ui::Id window_id;
 
   // The change id of the drag. Used to identify the drag on the server.
   uint32_t change_id;
@@ -69,8 +71,8 @@ bool DragDropControllerMus::DoesChangeIdMatchDragChangeId(uint32_t id) const {
 
 void DragDropControllerMus::OnDragDropStart(
     std::map<std::string, std::vector<uint8_t>> data) {
-  os_exchange_data_ = base::MakeUnique<ui::OSExchangeData>(
-      base::MakeUnique<aura::OSExchangeDataProviderMus>(std::move(data)));
+  os_exchange_data_ = std::make_unique<ui::OSExchangeData>(
+      std::make_unique<aura::OSExchangeDataProviderMus>(std::move(data)));
 }
 
 uint32_t DragDropControllerMus::OnDragEnter(WindowMus* window,
@@ -116,8 +118,11 @@ uint32_t DragDropControllerMus::OnCompleteDrop(
 
 void DragDropControllerMus::OnPerformDragDropCompleted(uint32_t action_taken) {
   DCHECK(current_drag_state_);
+  for (client::DragDropClientObserver& observer : observers_)
+    observer.OnDragEnded();
   current_drag_state_->completed_action = action_taken;
   current_drag_state_->runloop_quit_closure.Run();
+  current_drag_state_ = nullptr;
 }
 
 void DragDropControllerMus::OnDragDropDone() {
@@ -140,8 +145,10 @@ int DragDropControllerMus::StartDragAndDrop(
   CurrentDragState current_drag_state = {root_window_mus->server_id(),
                                          change_id, ui::mojom::kDropEffectNone,
                                          data, run_loop.QuitClosure()};
-  base::AutoReset<CurrentDragState*> resetter(&current_drag_state_,
-                                              &current_drag_state);
+
+  // current_drag_state_ will be reset in |OnPerformDragDropCompleted| before
+  // run_loop.Run() quits.
+  current_drag_state_ = &current_drag_state;
 
   base::MessageLoop* loop = base::MessageLoop::current();
   base::MessageLoop::ScopedNestableTaskAllower allow_nested(loop);
@@ -155,6 +162,10 @@ int DragDropControllerMus::StartDragAndDrop(
   std::map<std::string, std::vector<uint8_t>> drag_data =
       static_cast<const aura::OSExchangeDataProviderMus&>(data.provider())
           .GetData();
+
+  for (client::DragDropClientObserver& observer : observers_)
+    observer.OnDragStarted();
+
   window_tree_->PerformDragDrop(
       change_id, root_window_mus->server_id(), screen_location,
       mojo::MapToUnorderedMap(drag_data),
@@ -162,7 +173,6 @@ int DragDropControllerMus::StartDragAndDrop(
       data.provider().GetDragImageOffset(), drag_operations, mojo_source);
 
   run_loop.Run();
-
   return current_drag_state.completed_action;
 }
 
@@ -174,6 +184,16 @@ void DragDropControllerMus::DragCancel() {
 
 bool DragDropControllerMus::IsDragDropInProgress() {
   return current_drag_state_ != nullptr;
+}
+
+void DragDropControllerMus::AddObserver(
+    client::DragDropClientObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void DragDropControllerMus::RemoveObserver(
+    client::DragDropClientObserver* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 uint32_t DragDropControllerMus::HandleDragEnterOrOver(
@@ -211,7 +231,7 @@ DragDropControllerMus::CreateDropTargetEvent(Window* window,
   gfx::Point location = root_location;
   Window::ConvertPointToTarget(window->GetRootWindow(), window, &location);
   std::unique_ptr<ui::DropTargetEvent> event =
-      base::MakeUnique<ui::DropTargetEvent>(
+      std::make_unique<ui::DropTargetEvent>(
           current_drag_state_ ? current_drag_state_->drag_data
                               : *(os_exchange_data_.get()),
           location, root_location, effect_bitmask);

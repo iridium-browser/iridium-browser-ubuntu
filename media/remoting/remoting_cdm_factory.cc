@@ -4,11 +4,13 @@
 
 #include "media/remoting/remoting_cdm_factory.h"
 
+#include <memory>
+
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "media/base/cdm_config.h"
 #include "media/remoting/remoting_cdm.h"
+#include "url/origin.h"
 
 namespace media {
 namespace remoting {
@@ -26,7 +28,7 @@ RemotingCdmFactory::RemotingCdmFactory(
   DCHECK(sink_observer_);
 }
 
-RemotingCdmFactory::~RemotingCdmFactory() {}
+RemotingCdmFactory::~RemotingCdmFactory() = default;
 
 std::unique_ptr<RemotingCdmController>
 RemotingCdmFactory::CreateRemotingCdmController() {
@@ -40,22 +42,22 @@ RemotingCdmFactory::CreateRemotingCdmController() {
   // HACK: Copy-over the sink availability status from |sink_observer_| before
   // the RemotingCdmController would naturally get the notification. This is to
   // avoid the possible delay on OnSinkAvailable() call from browser.
-  if (sink_observer_->is_remote_decryption_available())
-    session->OnSinkAvailable(sink_observer_->sink_capabilities());
-  return base::MakeUnique<RemotingCdmController>(std::move(session));
+  if (sink_observer_->IsRemoteDecryptionAvailable())
+    session->OnSinkAvailable(sink_observer_->sink_metadata().Clone());
+  return std::make_unique<RemotingCdmController>(std::move(session));
 }
 
 // TODO(xjz): Replace the callbacks with an interface. http://crbug.com/657940.
 void RemotingCdmFactory::Create(
     const std::string& key_system,
-    const GURL& security_origin,
+    const url::Origin& security_origin,
     const CdmConfig& cdm_config,
     const SessionMessageCB& session_message_cb,
     const SessionClosedCB& session_closed_cb,
     const SessionKeysChangeCB& session_keys_change_cb,
     const SessionExpirationUpdateCB& session_expiration_update_cb,
     const CdmCreatedCB& cdm_created_cb) {
-  if (!sink_observer_->is_remote_decryption_available()) {
+  if (!sink_observer_->IsRemoteDecryptionAvailable()) {
     CreateCdm(key_system, security_origin, cdm_config, session_message_cb,
               session_closed_cb, session_keys_change_cb,
               session_expiration_update_cb, cdm_created_cb, nullptr, false);
@@ -77,7 +79,7 @@ void RemotingCdmFactory::Create(
 
 void RemotingCdmFactory::CreateCdm(
     const std::string& key_system,
-    const GURL& security_origin,
+    const url::Origin& security_origin,
     const CdmConfig& cdm_config,
     const SessionMessageCB& session_message_cb,
     const SessionClosedCB& session_closed_cb,

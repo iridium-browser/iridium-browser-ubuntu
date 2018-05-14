@@ -9,14 +9,12 @@
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/workers/WorkletGlobalScope.h"
-#include "core/workers/WorkletPendingTasks.h"
-#include "platform/WebTaskRunner.h"
-#include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
 class ConsoleMessage;
 class LocalFrame;
+class WorkerReportingProxy;
 
 class CORE_EXPORT MainThreadWorkletGlobalScope
     : public WorkletGlobalScope,
@@ -25,27 +23,15 @@ class CORE_EXPORT MainThreadWorkletGlobalScope
 
  public:
   MainThreadWorkletGlobalScope(LocalFrame*,
-                               const KURL&,
-                               const String& user_agent,
-                               PassRefPtr<SecurityOrigin>,
-                               v8::Isolate*);
+                               std::unique_ptr<GlobalScopeCreationParams>,
+                               WorkerReportingProxy&);
   ~MainThreadWorkletGlobalScope() override;
+
   bool IsMainThreadWorkletGlobalScope() const final { return true; }
 
   // WorkerOrWorkletGlobalScope
-  void ReportFeature(WebFeature) override;
-  void ReportDeprecation(WebFeature) override;
   WorkerThread* GetThread() const final;
-
-  // Implementation of the "fetch and invoke a worklet script" algorithm:
-  // https://drafts.css-houdini.org/worklets/#fetch-and-invoke-a-worklet-script
-  // When script evaluation is done or any exception happens, it's notified to
-  // the given WorkletPendingTasks via |outside_settings_task_runner| (i.e., the
-  // parent frame's task runner).
-  void FetchAndInvokeScript(const KURL& module_url_record,
-                            WebURLRequest::FetchCredentialsMode,
-                            RefPtr<WebTaskRunner> outside_settings_task_runner,
-                            WorkletPendingTasks*);
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(TaskType) override;
 
   void Terminate();
 
@@ -54,7 +40,7 @@ class CORE_EXPORT MainThreadWorkletGlobalScope
   void ExceptionThrown(ErrorEvent*) final;
   CoreProbeSink* GetProbeSink() final;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 };
 
 DEFINE_TYPE_CASTS(MainThreadWorkletGlobalScope,

@@ -65,8 +65,8 @@ class DOM {
       throw new Error(`Template not found: template${selector}`);
     }
 
-    const clone = /** @type {!DocumentFragment} */ (
-        this._document.importNode(template.content, true));
+    const clone = /** @type {!DocumentFragment} */ (this._document.importNode(
+        template.content, true));
 
     // Prevent duplicate styles in the DOM. After a template has been stamped
     // for the first time, remove the clone's styles so they're not re-added.
@@ -95,7 +95,7 @@ class DOM {
     const element = this.createElement('span');
 
     // Split on markdown links (e.g. [some link](https://...)).
-    const parts = text.split(/\[(.*?)\]\((https?:\/\/.*?)\)/g);
+    const parts = text.split(/\[([^\]]*?)\]\((https?:\/\/.*?)\)/g);
 
     while (parts.length) {
       // Pop off the same number of elements as there are capture groups.

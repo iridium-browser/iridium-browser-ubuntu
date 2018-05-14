@@ -36,19 +36,10 @@ void WebStateListMetricsObserver::RecordSessionMetrics() {
 void WebStateListMetricsObserver::WebStateInsertedAt(
     WebStateList* web_state_list,
     web::WebState* web_state,
-    int index) {
+    int index,
+    bool activating) {
   base::RecordAction(base::UserMetricsAction("MobileNewTabOpened"));
   ++inserted_web_state_counter_;
-}
-
-void WebStateListMetricsObserver::WebStateReplacedAt(
-    WebStateList* web_state_list,
-    web::WebState* old_web_state,
-    web::WebState* new_web_state,
-    int index) {
-  // Record a tab clobber, since swapping tabs bypasses the Tab code that would
-  // normally log clobbers.
-  base::RecordAction(base::UserMetricsAction("MobileTabClobbered"));
 }
 
 void WebStateListMetricsObserver::WebStateDetachedAt(
@@ -64,9 +55,9 @@ void WebStateListMetricsObserver::WebStateActivatedAt(
     web::WebState* old_web_state,
     web::WebState* new_web_state,
     int active_index,
-    bool user_action) {
+    int reason) {
   ++activated_web_state_counter_;
-  if (!user_action)
+  if (!(reason & WebStateListObserver::CHANGE_REASON_USER_ACTION))
     return;
 
   base::RecordAction(base::UserMetricsAction("MobileTabSwitched"));

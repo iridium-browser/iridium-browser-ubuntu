@@ -11,8 +11,7 @@
 #include "base/bind_helpers.h"
 #include "base/feature_list.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task_scheduler/post_task.h"
@@ -56,7 +55,7 @@ void ChromeCleanerRunner::RunChromeCleanerAndReplyWithExitCode(
     base::OnceClosure on_connection_closed,
     ChromeCleanerRunner::ProcessDoneCallback on_process_done,
     scoped_refptr<base::SequencedTaskRunner> task_runner) {
-  auto cleaner_runner = make_scoped_refptr(new ChromeCleanerRunner(
+  auto cleaner_runner = base::WrapRefCounted(new ChromeCleanerRunner(
       cleaner_executable_path, reporter_invocation, metrics_status,
       std::move(on_prompt_user), std::move(on_connection_closed),
       std::move(on_process_done), std::move(task_runner)));
@@ -88,7 +87,6 @@ ChromeCleanerRunner::ChromeCleanerRunner(
       on_prompt_user_(std::move(on_prompt_user)),
       on_connection_closed_(std::move(on_connection_closed)),
       on_process_done_(std::move(on_process_done)) {
-  DCHECK(base::FeatureList::IsEnabled(kInBrowserCleanerUIFeature));
   DCHECK(on_prompt_user_);
   DCHECK(on_connection_closed_);
   DCHECK(on_process_done_);
@@ -118,11 +116,20 @@ ChromeCleanerRunner::ChromeCleanerRunner(
   // If set, forward the engine flag from the reporter. Otherwise, set the
   // engine flag explicitly to 1.
   const std::string& reporter_engine =
-      reporter_invocation.command_line.GetSwitchValueASCII(
+      reporter_invocation.command_line().GetSwitchValueASCII(
           chrome_cleaner::kEngineSwitch);
   cleaner_command_line_.AppendSwitchASCII(
       chrome_cleaner::kEngineSwitch,
       reporter_engine.empty() ? "1" : reporter_engine);
+
+  if (reporter_invocation.cleaner_logs_upload_enabled()) {
+    cleaner_command_line_.AppendSwitch(
+        chrome_cleaner::kWithScanningModeLogsSwitch);
+  }
+
+  cleaner_command_line_.AppendSwitchASCII(
+      chrome_cleaner::kChromePromptSwitch,
+      base::IntToString(static_cast<int>(reporter_invocation.chrome_prompt())));
 
   // If metrics is enabled, we can enable crash reporting in the Chrome Cleaner
   // process.
@@ -130,6 +137,12 @@ ChromeCleanerRunner::ChromeCleanerRunner(
     cleaner_command_line_.AppendSwitch(chrome_cleaner::kUmaUserSwitch);
     cleaner_command_line_.AppendSwitch(
         chrome_cleaner::kEnableCrashReportingSwitch);
+  }
+
+  const std::string group_name = GetSRTFieldTrialGroupName();
+  if (!group_name.empty()) {
+    cleaner_command_line_.AppendSwitchASCII(
+        chrome_cleaner::kSRTPromptFieldTrialGroupNameSwitch, group_name);
   }
 }
 
@@ -143,11 +156,9 @@ ChromeCleanerRunner::LaunchAndWaitForExitOnBackgroundThread() {
       chrome_cleaner::kChromeMojoPipeTokenSwitch, mojo_pipe_token);
 
   mojo::edk::PlatformChannelPair channel;
-  base::HandlesToInheritVector handles_to_inherit;
-  channel.PrepareToPassClientHandleToChildProcess(&cleaner_command_line_,
-                                                  &handles_to_inherit);
   base::LaunchOptions launch_options;
-  launch_options.handles_to_inherit = &handles_to_inherit;
+  channel.PrepareToPassClientHandleToChildProcess(
+      &cleaner_command_line_, &launch_options.handles_to_inherit);
 
   base::Process cleaner_process =
       g_test_delegate
@@ -179,9 +190,8 @@ ChromeCleanerRunner::LaunchAndWaitForExitOnBackgroundThread() {
         LaunchStatus::kLaunchSucceededFailedToWaitForCompletion);
   }
 
-  UMA_HISTOGRAM_SPARSE_SLOWLY(
+  base::UmaHistogramSparse(
       "SoftwareReporter.Cleaner.ExitCodeFromConnectedProcess", exit_code);
-
   return ProcessStatus(LaunchStatus::kSuccess, exit_code);
 }
 
@@ -192,7 +202,7 @@ void ChromeCleanerRunner::CreateChromePromptImpl(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!chrome_prompt_impl_);
 
-  // Cannot use base::MakeUnique() since it does not support creating
+  // Cannot use std::make_unique() since it does not support creating
   // std::unique_ptrs with custom deleters.
   chrome_prompt_impl_.reset(new ChromePromptImpl(
       std::move(chrome_prompt_request),
@@ -202,12 +212,12 @@ void ChromeCleanerRunner::CreateChromePromptImpl(
 }
 
 void ChromeCleanerRunner::OnPromptUser(
-    std::unique_ptr<std::set<base::FilePath>> files_to_delete,
+    ChromeCleanerScannerResults&& scanner_results,
     ChromePrompt::PromptUserCallback prompt_user_callback) {
   if (on_prompt_user_) {
     task_runner_->PostTask(FROM_HERE,
                            base::BindOnce(std::move(on_prompt_user_),
-                                          base::Passed(&files_to_delete),
+                                          base::Passed(&scanner_results),
                                           base::Passed(&prompt_user_callback)));
   }
 }

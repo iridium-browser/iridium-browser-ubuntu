@@ -19,6 +19,7 @@ class LayerTreeFrameSink;
 class LayerTreeHost;
 class LayerTreeMutator;
 class ProxyImpl;
+class RenderFrameMetadataObserver;
 
 // This class aggregates all interactions that the impl side of the compositor
 // needs to have with the main side.
@@ -51,6 +52,10 @@ class CC_EXPORT ProxyMain : public Proxy {
   void DidCompletePageScaleAnimation();
   void BeginMainFrame(
       std::unique_ptr<BeginMainFrameAndCommitState> begin_main_frame_state);
+  void DidPresentCompositorFrame(const std::vector<int>& source_frames,
+                                 base::TimeTicks time,
+                                 base::TimeDelta refresh,
+                                 uint32_t flags);
 
   CommitPipelineStage max_requested_pipeline_stage() const {
     return max_requested_pipeline_stage_;
@@ -88,6 +93,10 @@ class CC_EXPORT ProxyMain : public Proxy {
                                   BrowserControlsState current,
                                   bool animate) override;
   void RequestBeginMainFrameNotExpected(bool new_state) override;
+  void SetURLForUkm(const GURL& url) override;
+  void ClearHistoryOnNavigation() override;
+  void SetRenderFrameObserver(
+      std::unique_ptr<RenderFrameMetadataObserver> observer) override;
 
   // Returns |true| if the request was actually sent, |false| if one was
   // already outstanding.
@@ -115,6 +124,9 @@ class CC_EXPORT ProxyMain : public Proxy {
   // will stop. Only valid while we are executing the pipeline (i.e.,
   // |current_pipeline_stage| is set to a pipeline stage).
   CommitPipelineStage final_pipeline_stage_;
+  // The final_pipeline_stage_ that was requested before the last commit was
+  // deferred.
+  CommitPipelineStage deferred_final_pipeline_stage_;
 
   bool commit_waits_for_activation_;
 

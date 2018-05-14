@@ -26,18 +26,19 @@
 #ifndef FocusController_h
 #define FocusController_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebFocusType.h"
 
 namespace blink {
 
 struct FocusCandidate;
 struct FocusParams;
+class ContainerNode;
 class Document;
 class Element;
 class FocusChangedObserver;
@@ -51,9 +52,9 @@ class RemoteFrame;
 
 class CORE_EXPORT FocusController final
     : public GarbageCollected<FocusController> {
-  WTF_MAKE_NONCOPYABLE(FocusController);
-
  public:
+  using OwnerMap = HeapHashMap<Member<ContainerNode>, Member<Element>>;
+
   static FocusController* Create(Page*);
 
   void SetFocusedFrame(Frame*, bool notify_embedder = true);
@@ -97,12 +98,14 @@ class CORE_EXPORT FocusController final
 
   void RegisterFocusChangedObserver(FocusChangedObserver*);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
+  using SkipList = HeapHashSet<Member<Node>>;
+
   explicit FocusController(Page*);
 
-  Element* FindFocusableElement(WebFocusType, Element&);
+  Element* FindFocusableElement(WebFocusType, Element&, OwnerMap&);
 
   bool AdvanceFocus(WebFocusType,
                     bool initial_focus,
@@ -115,13 +118,15 @@ class CORE_EXPORT FocusController final
       bool initial_focus,
       InputDeviceCapabilities* source_capabilities);
 
-  bool AdvanceFocusDirectionallyInContainer(Node* container,
+  bool AdvanceFocusDirectionallyInContainer(Node* start_container,
                                             const LayoutRect& starting_rect,
-                                            WebFocusType);
+                                            WebFocusType,
+                                            Node* pruned_sub_tree_root);
   void FindFocusCandidateInContainer(Node& container,
                                      const LayoutRect& starting_rect,
                                      WebFocusType,
-                                     FocusCandidate& closest);
+                                     FocusCandidate& closest,
+                                     const SkipList& already_checked);
 
   void NotifyFocusChangedObservers() const;
 
@@ -131,6 +136,7 @@ class CORE_EXPORT FocusController final
   bool is_focused_;
   bool is_changing_focused_frame_;
   HeapHashSet<WeakMember<FocusChangedObserver>> focus_changed_observers_;
+  DISALLOW_COPY_AND_ASSIGN(FocusController);
 };
 
 }  // namespace blink

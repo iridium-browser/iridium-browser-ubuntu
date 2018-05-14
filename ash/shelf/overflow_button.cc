@@ -4,12 +4,13 @@
 
 #include "ash/shelf/overflow_button.h"
 
+#include <memory>
+
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_view.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "base/memory/ptr_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_skia_operations.h"
@@ -22,7 +23,7 @@
 namespace ash {
 
 OverflowButton::OverflowButton(ShelfView* shelf_view, Shelf* shelf)
-    : CustomButton(nullptr),
+    : Button(nullptr),
       upward_image_(gfx::CreateVectorIcon(kShelfOverflowIcon, kShelfIconColor)),
       chevron_image_(nullptr),
       shelf_view_(shelf_view),
@@ -41,7 +42,7 @@ OverflowButton::OverflowButton(ShelfView* shelf_view, Shelf* shelf)
   UpdateChevronImage();
 }
 
-OverflowButton::~OverflowButton() {}
+OverflowButton::~OverflowButton() = default;
 
 void OverflowButton::OnShelfAlignmentChanged() {
   UpdateChevronImage();
@@ -120,7 +121,7 @@ std::unique_ptr<views::InkDrop> OverflowButton::CreateInkDrop() {
 std::unique_ptr<views::InkDropRipple> OverflowButton::CreateInkDropRipple()
     const {
   gfx::Insets insets = GetLocalBounds().InsetsFrom(CalculateButtonBounds());
-  return base::MakeUnique<views::FloodFillInkDropRipple>(
+  return std::make_unique<views::FloodFillInkDropRipple>(
       size(), insets, GetInkDropCenterBasedOnLastEvent(), GetInkDropBaseColor(),
       ink_drop_visible_opacity());
 }
@@ -129,17 +130,17 @@ bool OverflowButton::ShouldEnterPushedState(const ui::Event& event) {
   if (shelf_view_->IsShowingOverflowBubble())
     return false;
 
-  return CustomButton::ShouldEnterPushedState(event);
+  return Button::ShouldEnterPushedState(event);
 }
 
 void OverflowButton::NotifyClick(const ui::Event& event) {
-  CustomButton::NotifyClick(event);
+  Button::NotifyClick(event);
   shelf_view_->ButtonPressed(this, event, GetInkDrop());
 }
 
 std::unique_ptr<views::InkDropMask> OverflowButton::CreateInkDropMask() const {
   gfx::Insets insets = GetLocalBounds().InsetsFrom(CalculateButtonBounds());
-  return base::MakeUnique<views::RoundRectInkDropMask>(
+  return std::make_unique<views::RoundRectInkDropMask>(
       size(), insets, kOverflowButtonCornerRadius);
 }
 

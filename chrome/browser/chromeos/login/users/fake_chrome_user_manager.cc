@@ -5,17 +5,19 @@
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 
 #include <set>
+#include <utility>
 
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_util.h"
 #include "chrome/browser/chromeos/login/users/fake_supervised_user_manager.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
+#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/login_state.h"
 #include "components/user_manager/known_user.h"
@@ -37,7 +39,7 @@ class FakeTaskRunner : public base::TaskRunner {
 
  private:
   // base::TaskRunner overrides.
-  bool PostDelayedTask(const tracked_objects::Location& from_here,
+  bool PostDelayedTask(const base::Location& from_here,
                        base::OnceClosure task,
                        base::TimeDelta delay) override {
     std::move(task).Run();
@@ -72,14 +74,16 @@ const user_manager::User* FakeChromeUserManager::AddUser(
 const user_manager::User* FakeChromeUserManager::AddUserWithAffiliation(
     const AccountId& account_id,
     bool is_affiliated) {
-  user_manager::User* user = user_manager::User::CreateRegularUser(account_id);
+  user_manager::User* user = user_manager::User::CreateRegularUser(
+      account_id, user_manager::USER_TYPE_REGULAR);
   user->SetAffiliation(is_affiliated);
   user->set_username_hash(ProfileHelper::GetUserIdHashByUserIdForTesting(
       account_id.GetUserEmail()));
-  user->SetStubImage(base::MakeUnique<user_manager::UserImage>(
-                         *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-                             IDR_LOGIN_DEFAULT_USER)),
-                     user_manager::User::USER_IMAGE_PROFILE, false);
+  user->SetStubImage(
+      std::make_unique<user_manager::UserImage>(
+          *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+              IDR_LOGIN_DEFAULT_USER)),
+      user_manager::User::USER_IMAGE_PROFILE, false);
   users_.push_back(user);
   chromeos::ProfileHelper::Get()->SetProfileToUserMappingForTesting(user);
   return user;
@@ -114,16 +118,26 @@ user_manager::User* FakeChromeUserManager::AddSupervisedUser(
   return user;
 }
 
+user_manager::User* FakeChromeUserManager::AddGuestUser() {
+  user_manager::User* user =
+      user_manager::User::CreateGuestUser(GetGuestAccountId());
+  user->set_username_hash(ProfileHelper::GetUserIdHashByUserIdForTesting(
+      GetGuestAccountId().GetUserEmail()));
+  users_.push_back(user);
+  return user;
+}
+
 const user_manager::User* FakeChromeUserManager::AddPublicAccountUser(
     const AccountId& account_id) {
   user_manager::User* user =
       user_manager::User::CreatePublicAccountUser(account_id);
   user->set_username_hash(ProfileHelper::GetUserIdHashByUserIdForTesting(
       account_id.GetUserEmail()));
-  user->SetStubImage(base::MakeUnique<user_manager::UserImage>(
-                         *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-                             IDR_LOGIN_DEFAULT_USER)),
-                     user_manager::User::USER_IMAGE_PROFILE, false);
+  user->SetStubImage(
+      std::make_unique<user_manager::UserImage>(
+          *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+              IDR_LOGIN_DEFAULT_USER)),
+      user_manager::User::USER_IMAGE_PROFILE, false);
   users_.push_back(user);
   chromeos::ProfileHelper::Get()->SetProfileToUserMappingForTesting(user);
   return user;
@@ -134,21 +148,18 @@ bool FakeChromeUserManager::AreEphemeralUsersEnabled() const {
 }
 
 void FakeChromeUserManager::LoginUser(const AccountId& account_id) {
-  UserLoggedIn(account_id, ProfileHelper::GetUserIdHashByUserIdForTesting(
-                               account_id.GetUserEmail()),
-               false /* browser_restart */);
+  UserLoggedIn(
+      account_id,
+      ProfileHelper::GetUserIdHashByUserIdForTesting(account_id.GetUserEmail()),
+      false /* browser_restart */, false /* is_child */);
 
   // NOTE: This does not match production. See function comment.
   for (auto* user : users_) {
     if (user->GetAccountId() == account_id) {
-      user->set_profile_is_created();
+      user->SetProfileIsCreated();
       break;
     }
   }
-}
-
-BootstrapManager* FakeChromeUserManager::GetBootstrapManager() {
-  return bootstrap_manager_;
 }
 
 MultiProfileUserController*
@@ -226,7 +237,7 @@ void FakeChromeUserManager::RemoveUser(
     user_manager::RemoveUserDelegate* delegate) {}
 
 void FakeChromeUserManager::RemoveUserFromList(const AccountId& account_id) {
-  WallpaperManager::Get()->RemoveUserWallpaperInfo(account_id);
+  WallpaperControllerClient::Get()->RemoveUserWallpaper(account_id);
   chromeos::ProfileHelper::Get()->RemoveUserFromListForTesting(account_id);
 
   const user_manager::UserList::iterator it =
@@ -324,6 +335,13 @@ bool FakeChromeUserManager::IsStubAccountId(const AccountId& account_id) const {
 
 bool FakeChromeUserManager::IsSupervisedAccountId(
     const AccountId& account_id) const {
+  const policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  // Supervised accounts are not allowed on the Active Directory devices. It
+  // also makes sure "locally-managed.localhost" would work properly and would
+  // not be detected as supervised users.
+  if (connector->IsActiveDirectoryManaged())
+    return false;
   return gaia::ExtractDomainName(account_id.GetUserEmail()) ==
          user_manager::kSupervisedUserDomain;
 }
@@ -336,7 +354,7 @@ bool FakeChromeUserManager::HasBrowserRestarted() const {
 
 const gfx::ImageSkia& FakeChromeUserManager::GetResourceImagekiaNamed(
     int id) const {
-  return *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(id);
+  return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(id);
 }
 
 base::string16 FakeChromeUserManager::GetResourceStringUTF16(
@@ -346,7 +364,7 @@ base::string16 FakeChromeUserManager::GetResourceStringUTF16(
 
 void FakeChromeUserManager::ScheduleResolveLocale(
     const std::string& locale,
-    const base::Closure& on_resolved_callback,
+    base::OnceClosure on_resolved_callback,
     std::string* out_resolved_locale) const {
   NOTIMPLEMENTED();
   return;
@@ -385,7 +403,8 @@ user_manager::UserList FakeChromeUserManager::GetUnlockUsers() const {
 
 void FakeChromeUserManager::UserLoggedIn(const AccountId& account_id,
                                          const std::string& username_hash,
-                                         bool browser_restart) {
+                                         bool browser_restart,
+                                         bool is_child) {
   for (auto* user : users_) {
     if (user->username_hash() == username_hash) {
       user->set_is_logged_in(true);
@@ -476,9 +495,7 @@ std::string FakeChromeUserManager::GetUserDisplayEmail(
   return account_id.GetUserEmail();
 }
 
-void FakeChromeUserManager::SaveUserType(
-    const AccountId& account_id,
-    const user_manager::UserType& user_type) {
+void FakeChromeUserManager::SaveUserType(const user_manager::User* user) {
   NOTREACHED();
 }
 
@@ -500,6 +517,10 @@ bool FakeChromeUserManager::IsCurrentUserNonCryptohomeDataEphemeral() const {
   return false;
 }
 
+bool FakeChromeUserManager::IsCurrentUserCryptohomeDataEphemeral() const {
+  return current_user_ephemeral_;
+}
+
 bool FakeChromeUserManager::CanCurrentUserLock() const {
   return false;
 }
@@ -518,7 +539,10 @@ bool FakeChromeUserManager::IsLoggedInAsChildUser() const {
 }
 
 bool FakeChromeUserManager::IsLoggedInAsPublicAccount() const {
-  return false;
+  const user_manager::User* active_user = GetActiveUser();
+  return active_user
+             ? active_user->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT
+             : false;
 }
 
 bool FakeChromeUserManager::IsLoggedInAsGuest() const {
@@ -549,20 +573,46 @@ bool FakeChromeUserManager::IsLoggedInAsStub() const {
 
 bool FakeChromeUserManager::IsUserNonCryptohomeDataEphemeral(
     const AccountId& account_id) const {
-  return false;
-}
-
-void FakeChromeUserManager::ChangeUserChildStatus(user_manager::User* user,
-                                                  bool is_child) {
-  NOTREACHED();
+  return current_user_ephemeral_;
 }
 
 bool FakeChromeUserManager::AreSupervisedUsersAllowed() const {
   return true;
 }
 
+bool FakeChromeUserManager::IsGuestSessionAllowed() const {
+  bool is_guest_allowed = false;
+  CrosSettings::Get()->GetBoolean(kAccountsPrefAllowGuest, &is_guest_allowed);
+  return is_guest_allowed;
+}
+
+bool FakeChromeUserManager::IsGaiaUserAllowed(
+    const user_manager::User& user) const {
+  DCHECK(user.HasGaiaAccount());
+  return CrosSettings::Get()->IsUserWhitelisted(
+      user.GetAccountId().GetUserEmail(), nullptr);
+}
+
+bool FakeChromeUserManager::IsUserAllowed(
+    const user_manager::User& user) const {
+  DCHECK(user.GetType() == user_manager::USER_TYPE_REGULAR ||
+         user.GetType() == user_manager::USER_TYPE_GUEST ||
+         user.GetType() == user_manager::USER_TYPE_SUPERVISED ||
+         user.GetType() == user_manager::USER_TYPE_CHILD);
+
+  if (user.GetType() == user_manager::USER_TYPE_GUEST &&
+      !IsGuestSessionAllowed())
+    return false;
+  if (user.GetType() == user_manager::USER_TYPE_SUPERVISED &&
+      !AreSupervisedUsersAllowed())
+    return false;
+  if (user.HasGaiaAccount() && !IsGaiaUserAllowed(user))
+    return false;
+  return true;
+}
+
 void FakeChromeUserManager::CreateLocalState() {
-  local_state_ = base::MakeUnique<TestingPrefServiceSimple>();
+  local_state_ = std::make_unique<TestingPrefServiceSimple>();
   user_manager::known_user::RegisterPrefs(local_state_->registry());
 }
 
@@ -591,7 +641,7 @@ void FakeChromeUserManager::LoadDeviceLocalAccounts(
 }
 
 bool FakeChromeUserManager::IsEnterpriseManaged() const {
-  return false;
+  return is_enterprise_managed_;
 }
 
 void FakeChromeUserManager::PerformPreUserListLoadingActions() {

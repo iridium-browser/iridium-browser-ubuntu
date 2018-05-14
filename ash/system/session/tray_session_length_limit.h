@@ -51,13 +51,14 @@ class ASH_EXPORT TraySessionLengthLimit : public SystemTrayItem,
   void UpdateTrayBubbleView() const;
 
   // These require that the state has been updated before.
-  base::string16 ComposeNotificationMessage() const;
+  base::string16 ComposeNotificationTitle() const;
   base::string16 ComposeTrayBubbleMessage() const;
 
   base::TimeDelta remaining_session_time_;
 
   LimitState limit_state_;       // Current state.
   LimitState last_limit_state_;  // State of last notification update.
+  bool has_notification_been_shown_;
 
   LabelTrayView* tray_bubble_view_;
   std::unique_ptr<base::RepeatingTimer> timer_;

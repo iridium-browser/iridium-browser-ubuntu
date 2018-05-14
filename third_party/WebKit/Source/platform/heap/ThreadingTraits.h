@@ -11,8 +11,6 @@
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/HashSet.h"
 #include "platform/wtf/HashTable.h"
-#include "platform/wtf/LinkedHashSet.h"
-#include "platform/wtf/ListHashSet.h"
 #include "platform/wtf/TypeTraits.h"
 #include "platform/wtf/Vector.h"
 
@@ -39,12 +37,15 @@ enum ThreadAffinity {
 // Remove them.
 class Node;
 class NodeList;
+class NodeRareDataBase;
 
 template <
     typename T,
     bool mainThreadOnly =
         WTF::IsSubclass<typename std::remove_const<T>::type, Node>::value ||
-        WTF::IsSubclass<typename std::remove_const<T>::type, NodeList>::value>
+        WTF::IsSubclass<typename std::remove_const<T>::type, NodeList>::value ||
+        WTF::IsSubclass<typename std::remove_const<T>::type,
+                        NodeRareDataBase>::value>
 struct DefaultThreadingTrait;
 
 template <typename T>

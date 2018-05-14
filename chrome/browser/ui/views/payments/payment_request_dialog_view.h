@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/views/payments/view_stack.h"
 #include "components/payments/content/payment_request_dialog.h"
 #include "components/payments/content/payment_request_spec.h"
+#include "components/payments/content/payment_request_state.h"
 #include "ui/views/controls/throbber.h"
 #include "ui/views/window/dialog_delegate.h"
 
@@ -44,7 +45,8 @@ enum class BackNavigationType {
 // the WebPayments flow and managing the transition between those states.
 class PaymentRequestDialogView : public views::DialogDelegateView,
                                  public PaymentRequestDialog,
-                                 public PaymentRequestSpec::Observer {
+                                 public PaymentRequestSpec::Observer,
+                                 public PaymentRequestState::Observer {
  public:
   class ObserverForTest {
    public:
@@ -77,6 +79,10 @@ class PaymentRequestDialogView : public views::DialogDelegateView,
     virtual void OnSpecDoneUpdating() = 0;
 
     virtual void OnCvcPromptShown() = 0;
+
+    virtual void OnProcessingSpinnerShown() = 0;
+
+    virtual void OnProcessingSpinnerHidden() = 0;
   };
 
   // Build a Dialog around the PaymentRequest object. |observer| is used to
@@ -102,10 +108,19 @@ class PaymentRequestDialogView : public views::DialogDelegateView,
   void ShowDialog() override;
   void CloseDialog() override;
   void ShowErrorMessage() override;
+  void ShowProcessingSpinner() override;
+  bool IsInteractive() const override;
+  void ShowPaymentHandlerScreen(
+      const GURL& url,
+      PaymentHandlerOpenWindowCallback callback) override;
 
   // PaymentRequestSpec::Observer:
   void OnStartUpdating(PaymentRequestSpec::UpdateReason reason) override;
   void OnSpecUpdated() override;
+
+  // PaymentRequestState::Observer:
+  void OnGetAllPaymentInstrumentsFinished() override;
+  void OnSelectedInformationChanged() override {}
 
   void Pay();
   void GoBack();
@@ -158,9 +173,7 @@ class PaymentRequestDialogView : public views::DialogDelegateView,
           result_delegate,
       content::WebContents* web_contents) override;
 
-  // Shows/Hides a full dialog spinner with the "processing" label that doesn't
-  // offer a way of closing the dialog.
-  void ShowProcessingSpinner();
+  // Hides the full dialog spinner with the "processing" label.
   void HideProcessingSpinner();
 
   Profile* GetProfile();

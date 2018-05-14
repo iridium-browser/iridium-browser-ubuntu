@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/files/file_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -20,7 +19,7 @@
 #include "chrome/browser/safe_browsing/incident_reporting/binary_integrity_incident.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_receiver.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 
 namespace safe_browsing {
 
@@ -30,7 +29,7 @@ void RecordSignatureVerificationTime(size_t file_index,
 
   base::HistogramBase* signature_verification_time_histogram =
       base::Histogram::FactoryTimeGet(
-          std::string(kHistogramName) + base::SizeTToString(file_index),
+          std::string(kHistogramName) + base::NumberToString(file_index),
           base::TimeDelta::FromMilliseconds(1),
           base::TimeDelta::FromSeconds(20), 50,
           base::Histogram::kUmaTargetedHistogramFlag);
@@ -44,7 +43,7 @@ void ClearBinaryIntegrityForFile(IncidentReceiver* incident_receiver,
       incident(new ClientIncidentReport_IncidentData_BinaryIntegrityIncident());
   incident->set_file_basename(basename);
   incident_receiver->ClearIncidentForProcess(
-      base::MakeUnique<BinaryIntegrityIncident>(std::move(incident)));
+      std::make_unique<BinaryIntegrityIncident>(std::move(incident)));
 }
 
 void RegisterBinaryIntegrityAnalysis() {

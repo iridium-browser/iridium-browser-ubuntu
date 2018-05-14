@@ -14,7 +14,8 @@
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "components/viz/common/gpu/context_provider.h"
-#include "gpu/command_buffer/common/gles2_cmd_utils.h"
+#include "components/viz/common/gpu/raster_context_provider.h"
+#include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -30,57 +31,83 @@ class GrContextForGLES2Interface;
 
 namespace ui {
 
-class InProcessContextProvider : public viz::ContextProvider {
+class InProcessContextProvider
+    : public base::RefCountedThreadSafe<InProcessContextProvider>,
+      public viz::ContextProvider,
+      public viz::RasterContextProvider {
  public:
   static scoped_refptr<InProcessContextProvider> Create(
-      const gpu::gles2::ContextCreationAttribHelper& attribs,
+      const gpu::ContextCreationAttribs& attribs,
       InProcessContextProvider* shared_context,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       gpu::ImageFactory* image_factory,
       gpu::SurfaceHandle window,
-      const std::string& debug_name);
+      const std::string& debug_name,
+      bool support_locking);
 
   // Uses default attributes for creating an offscreen context.
   static scoped_refptr<InProcessContextProvider> CreateOffscreen(
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       gpu::ImageFactory* image_factory,
-      InProcessContextProvider* shared_context);
+      InProcessContextProvider* shared_context,
+      bool support_locking);
 
-  // cc::ContextProvider implementation.
-  bool BindToCurrentThread() override;
-  void DetachFromThread() override;
-  gpu::Capabilities ContextCapabilities() override;
+  // viz::ContextProvider / viz::RasterContextProvider implementation.
+  void AddRef() const override;
+  void Release() const override;
+  gpu::ContextResult BindToCurrentThread() override;
+  const gpu::Capabilities& ContextCapabilities() const override;
+  const gpu::GpuFeatureInfo& GetGpuFeatureInfo() const override;
   gpu::gles2::GLES2Interface* ContextGL() override;
+  gpu::raster::RasterInterface* RasterInterface() override;
   gpu::ContextSupport* ContextSupport() override;
   class GrContext* GrContext() override;
   viz::ContextCacheController* CacheController() override;
   void InvalidateGrContext(uint32_t state) override;
   base::Lock* GetLock() override;
-  void SetLostContextCallback(
-      const LostContextCallback& lost_context_callback) override;
+  void AddObserver(viz::ContextLostObserver* obs) override;
+  void RemoveObserver(viz::ContextLostObserver* obs) override;
 
   // Gives the GL internal format that should be used for calling CopyTexImage2D
   // on the default framebuffer.
   uint32_t GetCopyTextureInternalFormat();
 
  private:
+  friend class base::RefCountedThreadSafe<InProcessContextProvider>;
+
   InProcessContextProvider(
-      const gpu::gles2::ContextCreationAttribHelper& attribs,
+      const gpu::ContextCreationAttribs& attribs,
       InProcessContextProvider* shared_context,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       gpu::ImageFactory* image_factory,
       gpu::SurfaceHandle window,
-      const std::string& debug_name);
+      const std::string& debug_name,
+      bool support_locking);
   ~InProcessContextProvider() override;
+
+  void CheckValidThreadOrLockAcquired() const {
+#if DCHECK_IS_ON()
+    if (support_locking_) {
+      context_lock_.AssertAcquired();
+    } else {
+      DCHECK(context_thread_checker_.CalledOnValidThread());
+    }
+#endif
+  }
 
   base::ThreadChecker main_thread_checker_;
   base::ThreadChecker context_thread_checker_;
 
   std::unique_ptr<gpu::GLInProcessContext> context_;
   std::unique_ptr<skia_bindings::GrContextForGLES2Interface> gr_context_;
+  std::unique_ptr<gpu::raster::RasterInterface> raster_context_;
   std::unique_ptr<viz::ContextCacheController> cache_controller_;
 
-  gpu::gles2::ContextCreationAttribHelper attribs_;
+  const bool support_locking_ ALLOW_UNUSED_TYPE;
+  bool bind_tried_ = false;
+  gpu::ContextResult bind_result_;
+
+  gpu::ContextCreationAttribs attribs_;
   InProcessContextProvider* shared_context_;
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
   gpu::ImageFactory* image_factory_;

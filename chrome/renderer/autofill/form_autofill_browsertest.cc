@@ -12,10 +12,12 @@
 #include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/test/base/chrome_render_view_test.h"
 #include "components/autofill/content/renderer/form_autofill_util.h"
 #include "components/autofill/content/renderer/form_cache.h"
 #include "components/autofill/core/common/autofill_data_validation.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/form_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebString.h"
@@ -23,17 +25,18 @@
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebElementCollection.h"
-#include "third_party/WebKit/public/web/WebExceptionCode.h"
 #include "third_party/WebKit/public/web/WebFormControlElement.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebSelectElement.h"
 
+using autofill::features::kAutofillEnforceMinRequiredFieldsForHeuristics;
+using autofill::features::kAutofillEnforceMinRequiredFieldsForQuery;
+using autofill::features::kAutofillEnforceMinRequiredFieldsForUpload;
 using base::ASCIIToUTF16;
 using blink::WebDocument;
 using blink::WebElement;
-using blink::WebExceptionCode;
 using blink::WebFormControlElement;
 using blink::WebFormElement;
 using blink::WebInputElement;
@@ -268,7 +271,10 @@ bool ClickElement(const WebDocument& document,
 
 class FormAutofillTest : public ChromeRenderViewTest {
  public:
-  FormAutofillTest() : ChromeRenderViewTest() {}
+  FormAutofillTest() : ChromeRenderViewTest() {
+    scoped_feature_list_.InitAndEnableFeature(
+        features::kAutofillRestrictUnownedFieldsToFormlessCheckout);
+  }
   ~FormAutofillTest() override {}
 
   void ExpectLabels(const char* html,
@@ -293,7 +299,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -358,7 +364,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -598,8 +604,10 @@ class FormAutofillTest : public ChromeRenderViewTest {
 
     // Verify preview selection.
     WebInputElement firstname = GetInputElementById("firstname");
+    // Since the suggestion is previewed as a placeholder, there should be no
+    // selected text.
     EXPECT_EQ(0, firstname.SelectionStart());
-    EXPECT_EQ(19, firstname.SelectionEnd());
+    EXPECT_EQ(0, firstname.SelectionEnd());
   }
 
   void TestUnmatchedUnownedForm(const char* html, const char* url_override) {
@@ -611,7 +619,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(0U, forms.size());
   }
@@ -621,7 +629,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -676,7 +684,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -740,7 +748,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -830,7 +838,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -904,7 +912,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -981,7 +989,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     const size_t expected_size = unowned ? 1 : 2;
     ASSERT_EQ(expected_size, forms.size());
@@ -1072,7 +1080,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -1148,8 +1156,9 @@ class FormAutofillTest : public ChromeRenderViewTest {
     form.fields[1].is_autofilled = true;
     form.fields[2].is_autofilled = true;
     PreviewForm(form, input_element);
+    // The selection should be set after the second character.
     EXPECT_EQ(2, input_element.SelectionStart());
-    EXPECT_EQ(5, input_element.SelectionEnd());
+    EXPECT_EQ(2, input_element.SelectionEnd());
 
     // Fill the form.
     FillForm(form, input_element);
@@ -1210,12 +1219,377 @@ class FormAutofillTest : public ChromeRenderViewTest {
     EXPECT_EQ(5, input_element.SelectionEnd());
   }
 
+  void TestFillFormAndModifyValues(const char* html,
+                                   const char* placeholder_firstname,
+                                   const char* placeholder_lastname,
+                                   const char* placeholder_phone,
+                                   const char* placeholder_creditcard) {
+    LoadHTML(html);
+    WebLocalFrame* web_frame = GetMainFrame();
+    ASSERT_NE(nullptr, web_frame);
+
+    FormCache form_cache(web_frame);
+    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    ASSERT_EQ(1U, forms.size());
+
+    // Get the input element we want to find.
+    WebInputElement input_element = GetInputElementById("firstname");
+    WebFormElement form_element = input_element.Form();
+    std::vector<WebFormControlElement> control_elements =
+        ExtractAutofillableElementsInForm(form_element);
+
+    ASSERT_EQ(4U, control_elements.size());
+    // We now modify the values.
+    // This will be ignored.
+    control_elements[0].SetValue(WebString::FromUTF16(
+        base::char16(base::i18n::kLeftToRightMark) + ASCIIToUTF16("     ")));
+    // This will be considered as a value entered by the user.
+    control_elements[1].SetValue(WebString::FromUTF16(ASCIIToUTF16("Earp")));
+    // This will be ignored.
+    control_elements[2].SetValue(
+        WebString::FromUTF16(ASCIIToUTF16("(___)-___-____")));
+    // This will be ignored.
+    control_elements[3].SetValue(
+        WebString::FromUTF16(ASCIIToUTF16("____-____-____-____")));
+
+    // Find the form that contains the input element.
+    FormData form;
+    FormFieldData field;
+    EXPECT_TRUE(
+        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
+              form.origin);
+    EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
+    EXPECT_EQ(GURL("http://abc.com"), form.action);
+
+    const std::vector<FormFieldData>& fields = form.fields;
+    ASSERT_EQ(4U, fields.size());
+
+    // Preview the form and verify that the cursor position has been updated.
+    form.fields[0].value = ASCIIToUTF16("Wyatt");
+    form.fields[1].value = ASCIIToUTF16("Earpagus");
+    form.fields[2].value = ASCIIToUTF16("888-123-4567");
+    form.fields[3].value = ASCIIToUTF16("1111-2222-3333-4444");
+    form.fields[0].is_autofilled = true;
+    form.fields[1].is_autofilled = true;
+    form.fields[2].is_autofilled = true;
+    form.fields[3].is_autofilled = true;
+    PreviewForm(form, input_element);
+    // The selection should be set after the fifth character.
+    EXPECT_EQ(5, input_element.SelectionStart());
+    EXPECT_EQ(5, input_element.SelectionEnd());
+
+    // Fill the form.
+    FillForm(form, input_element);
+
+    // Find the newly-filled form that contains the input element.
+    FormData form2;
+    FormFieldData field2;
+    EXPECT_TRUE(
+        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
+              form2.origin);
+    EXPECT_EQ(ASCIIToUTF16("TestForm"), form2.name);
+    EXPECT_EQ(GURL("http://abc.com"), form2.action);
+
+    const std::vector<FormFieldData>& fields2 = form2.fields;
+    ASSERT_EQ(4U, fields2.size());
+
+    FormFieldData expected;
+    expected.form_control_type = "text";
+    expected.max_length = WebInputElement::DefaultMaxLength();
+
+    expected.name = ASCIIToUTF16("firstname");
+    expected.value = ASCIIToUTF16("Wyatt");
+    if (placeholder_firstname) {
+      expected.label = ASCIIToUTF16(placeholder_firstname);
+      expected.placeholder = ASCIIToUTF16(placeholder_firstname);
+    } else {
+      expected.label.clear();
+      expected.placeholder.clear();
+    }
+    expected.is_autofilled = true;
+    EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields2[0]);
+
+    // The last name field is not filled, because there is a value in it.
+    expected.name = ASCIIToUTF16("lastname");
+    expected.value = ASCIIToUTF16("Earp");
+    if (placeholder_lastname) {
+      expected.label = ASCIIToUTF16(placeholder_lastname);
+      expected.placeholder = ASCIIToUTF16(placeholder_lastname);
+    } else {
+      expected.label.clear();
+      expected.placeholder.clear();
+    }
+    expected.is_autofilled = false;
+    EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields2[1]);
+
+    expected.name = ASCIIToUTF16("phone");
+    expected.value = ASCIIToUTF16("888-123-4567");
+    if (placeholder_phone) {
+      expected.label = ASCIIToUTF16(placeholder_phone);
+      expected.placeholder = ASCIIToUTF16(placeholder_phone);
+    } else {
+      expected.label.clear();
+      expected.placeholder.clear();
+    }
+    expected.is_autofilled = true;
+    EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields2[2]);
+
+    expected.name = ASCIIToUTF16("cc");
+    expected.value = ASCIIToUTF16("1111-2222-3333-4444");
+    if (placeholder_creditcard) {
+      expected.label = ASCIIToUTF16(placeholder_creditcard);
+      expected.placeholder = ASCIIToUTF16(placeholder_creditcard);
+    } else {
+      expected.label.clear();
+      expected.placeholder.clear();
+    }
+    expected.is_autofilled = true;
+    EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields2[3]);
+
+    // Verify that the cursor position has been updated.
+    EXPECT_EQ(5, input_element.SelectionStart());
+    EXPECT_EQ(5, input_element.SelectionEnd());
+  }
+
+  void TestFillFormWithPlaceholderValues(const char* html,
+                                         const char* placeholder_firstname,
+                                         const char* placeholder_lastname,
+                                         const char* placeholder_email) {
+    LoadHTML(html);
+    WebLocalFrame* web_frame = GetMainFrame();
+    ASSERT_NE(nullptr, web_frame);
+
+    FormCache form_cache(web_frame);
+    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    ASSERT_EQ(1U, forms.size());
+
+    // Get the input element we want to find.
+    WebInputElement input_element = GetInputElementById("firstname");
+    WebFormElement form_element = input_element.Form();
+    std::vector<WebFormControlElement> control_elements =
+        ExtractAutofillableElementsInForm(form_element);
+
+    ASSERT_EQ(3U, control_elements.size());
+    // We now modify the values.
+    // These will be ignored, because it's (case insensitively) equal to the
+    // placeholder.
+    control_elements[0].SetValue(
+        WebString::FromUTF16(base::char16(base::i18n::kLeftToRightMark) +
+                             ASCIIToUTF16("first name")));
+    control_elements[1].SetValue(
+        WebString::FromUTF16(ASCIIToUTF16("LAST NAME")));
+    // This will be considered.
+    control_elements[2].SetValue(
+        WebString::FromUTF16(ASCIIToUTF16("john@smith.com")));
+    // Find the form that contains the input element.
+    FormData form;
+    FormFieldData field;
+    EXPECT_TRUE(
+        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
+              form.origin);
+    EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
+    EXPECT_EQ(GURL("http://abc.com"), form.action);
+
+    const std::vector<FormFieldData>& fields = form.fields;
+    ASSERT_EQ(3U, fields.size());
+
+    // Preview the form and verify that the cursor position has been updated.
+    form.fields[0].value = ASCIIToUTF16("Wyatt");
+    form.fields[1].value = ASCIIToUTF16("Earpagus");
+    form.fields[2].value = ASCIIToUTF16("susan@smith.com");
+    form.fields[0].is_autofilled = true;
+    form.fields[1].is_autofilled = true;
+    form.fields[2].is_autofilled = false;
+    PreviewForm(form, input_element);
+    // The selection should be set after the fifth character.
+    EXPECT_EQ(5, input_element.SelectionStart());
+    EXPECT_EQ(5, input_element.SelectionEnd());
+
+    // Fill the form.
+    FillForm(form, input_element);
+
+    // Find the newly-filled form that contains the input element.
+    FormData form2;
+    FormFieldData field2;
+    EXPECT_TRUE(
+        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
+              form2.origin);
+    EXPECT_EQ(ASCIIToUTF16("TestForm"), form2.name);
+    EXPECT_EQ(GURL("http://abc.com"), form2.action);
+
+    const std::vector<FormFieldData>& fields2 = form2.fields;
+    ASSERT_EQ(3U, fields2.size());
+
+    FormFieldData expected;
+    expected.form_control_type = "text";
+    expected.max_length = WebInputElement::DefaultMaxLength();
+
+    expected.name = ASCIIToUTF16("firstname");
+    expected.value = ASCIIToUTF16("Wyatt");
+    if (placeholder_firstname) {
+      expected.label = ASCIIToUTF16(placeholder_firstname);
+      expected.placeholder = ASCIIToUTF16(placeholder_firstname);
+    } else {
+      expected.label.clear();
+      expected.placeholder.clear();
+    }
+    expected.is_autofilled = true;
+    EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields2[0]);
+
+    expected.name = ASCIIToUTF16("lastname");
+    expected.value = ASCIIToUTF16("Earpagus");
+    if (placeholder_lastname) {
+      expected.label = ASCIIToUTF16(placeholder_lastname);
+      expected.placeholder = ASCIIToUTF16(placeholder_lastname);
+    } else {
+      expected.label.clear();
+      expected.placeholder.clear();
+    }
+    expected.is_autofilled = true;
+    EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields2[1]);
+
+    // The email field is not filled, because there is a value in it.
+    expected.name = ASCIIToUTF16("email");
+    expected.value = ASCIIToUTF16("john@smith.com");
+    if (placeholder_email) {
+      expected.label = ASCIIToUTF16(placeholder_email);
+      expected.placeholder = ASCIIToUTF16(placeholder_email);
+    } else {
+      expected.label.clear();
+      expected.placeholder.clear();
+    }
+    expected.is_autofilled = false;
+    EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields2[2]);
+
+    // Verify that the cursor position has been updated.
+    EXPECT_EQ(5, input_element.SelectionStart());
+    EXPECT_EQ(5, input_element.SelectionEnd());
+  }
+
+  void TestFillFormAndModifyInitiatingValue(const char* html,
+                                            const char* placeholder_creditcard,
+                                            const char* placeholder_expiration,
+                                            const char* placeholder_name) {
+    LoadHTML(html);
+    WebLocalFrame* web_frame = GetMainFrame();
+    ASSERT_NE(nullptr, web_frame);
+
+    FormCache form_cache(web_frame);
+    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    ASSERT_EQ(1U, forms.size());
+
+    // Get the input element we want to find.
+    WebInputElement input_element = GetInputElementById("cc");
+    WebFormElement form_element = input_element.Form();
+    std::vector<WebFormControlElement> control_elements =
+        ExtractAutofillableElementsInForm(form_element);
+
+    ASSERT_EQ(3U, control_elements.size());
+    // We now modify the values.
+    // This will be ignored.
+    control_elements[0].SetValue(
+        WebString::FromUTF16(ASCIIToUTF16("____-____-____-____")));
+    // This will be ignored.
+    control_elements[1].SetValue(WebString::FromUTF16(ASCIIToUTF16("____/__")));
+    control_elements[2].SetValue(
+        WebString::FromUTF16(ASCIIToUTF16("John Smith")));
+
+    // Find the form that contains the input element.
+    FormData form;
+    FormFieldData field;
+    EXPECT_TRUE(
+        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
+              form.origin);
+    EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
+    EXPECT_EQ(GURL("http://abc.com"), form.action);
+
+    const std::vector<FormFieldData>& fields = form.fields;
+    ASSERT_EQ(3U, fields.size());
+
+    // Preview the form and verify that the cursor position has been updated.
+    form.fields[0].value = ASCIIToUTF16("1111-2222-3333-4444");
+    form.fields[1].value = ASCIIToUTF16("03/2030");
+    form.fields[2].value = ASCIIToUTF16("Susan Smith");
+    form.fields[0].is_autofilled = true;
+    form.fields[1].is_autofilled = true;
+    form.fields[2].is_autofilled = true;
+    PreviewForm(form, input_element);
+    // The selection should be set after the 19th character.
+    EXPECT_EQ(19, input_element.SelectionStart());
+    EXPECT_EQ(19, input_element.SelectionEnd());
+
+    // Fill the form.
+    FillForm(form, input_element);
+
+    // Find the newly-filled form that contains the input element.
+    FormData form2;
+    FormFieldData field2;
+    EXPECT_TRUE(
+        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
+              form2.origin);
+    EXPECT_EQ(ASCIIToUTF16("TestForm"), form2.name);
+    EXPECT_EQ(GURL("http://abc.com"), form2.action);
+
+    const std::vector<FormFieldData>& fields2 = form2.fields;
+    ASSERT_EQ(3U, fields2.size());
+
+    FormFieldData expected;
+    expected.form_control_type = "text";
+    expected.max_length = WebInputElement::DefaultMaxLength();
+
+    expected.name = ASCIIToUTF16("cc");
+    expected.value = ASCIIToUTF16("1111-2222-3333-4444");
+    if (placeholder_creditcard) {
+      expected.label = ASCIIToUTF16(placeholder_creditcard);
+      expected.placeholder = ASCIIToUTF16(placeholder_creditcard);
+    } else {
+      expected.label.clear();
+      expected.placeholder.clear();
+    }
+    expected.is_autofilled = true;
+    EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields2[0]);
+
+    expected.name = ASCIIToUTF16("expiration_date");
+    expected.value = ASCIIToUTF16("03/2030");
+    if (placeholder_expiration) {
+      expected.label = ASCIIToUTF16(placeholder_expiration);
+      expected.placeholder = ASCIIToUTF16(placeholder_expiration);
+    } else {
+      expected.label.clear();
+      expected.placeholder.clear();
+    }
+    expected.is_autofilled = true;
+    EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields2[1]);
+
+    expected.name = ASCIIToUTF16("name");
+    expected.value = ASCIIToUTF16("John Smith");
+    if (placeholder_name) {
+      expected.label = ASCIIToUTF16(placeholder_name);
+      expected.placeholder = ASCIIToUTF16(placeholder_name);
+    } else {
+      expected.label.clear();
+      expected.placeholder.clear();
+    }
+    expected.is_autofilled = false;
+    EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields2[2]);
+
+    // Verify that the cursor position has been updated.
+    EXPECT_EQ(19, input_element.SelectionStart());
+    EXPECT_EQ(19, input_element.SelectionEnd());
+  }
+
   void TestClearFormWithNode(const char* html, bool unowned) {
     LoadHTML(html);
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -1318,7 +1692,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -1386,7 +1760,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -1440,7 +1814,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -1493,7 +1867,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -1547,7 +1921,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     ASSERT_EQ(1U, forms.size());
 
@@ -1606,6 +1980,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
   }
 
  private:
+  base::test::ScopedFeatureList scoped_feature_list_;
   DISALLOW_COPY_AND_ASSIGN(FormAutofillTest);
 };
 
@@ -2449,7 +2824,7 @@ TEST_F(FormAutofillTest, ExtractMultipleForms) {
   WebLocalFrame* web_frame = GetMainFrame();
   ASSERT_NE(nullptr, web_frame);
 
-  FormCache form_cache(*web_frame);
+  FormCache form_cache(web_frame);
   std::vector<FormData> forms = form_cache.ExtractNewForms();
   ASSERT_EQ(2U, forms.size());
 
@@ -2522,7 +2897,7 @@ TEST_F(FormAutofillTest, OnlyExtractNewForms) {
   WebLocalFrame* web_frame = GetMainFrame();
   ASSERT_NE(nullptr, web_frame);
 
-  FormCache form_cache(*web_frame);
+  FormCache form_cache(web_frame);
   std::vector<FormData> forms = form_cache.ExtractNewForms();
   ASSERT_EQ(1U, forms.size());
 
@@ -2629,24 +3004,30 @@ TEST_F(FormAutofillTest, ExtractFormsTooFewFields) {
   WebLocalFrame* web_frame = GetMainFrame();
   ASSERT_NE(nullptr, web_frame);
 
-  FormCache form_cache(*web_frame);
-  std::vector<FormData> forms = form_cache.ExtractNewForms();
-  ASSERT_TRUE(forms.empty());
-}
+  // If all minimums are enforced, we ignore this form.
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitWithFeatures(
+        // Enabled.
+        {kAutofillEnforceMinRequiredFieldsForHeuristics,
+         kAutofillEnforceMinRequiredFieldsForQuery,
+         kAutofillEnforceMinRequiredFieldsForUpload},
+        // Disabled.
+        {});
+    ASSERT_TRUE(FormCache(web_frame).ExtractNewForms().empty());
+  }
 
-// We should not report additional forms for empty forms.
-TEST_F(FormAutofillTest, ExtractFormsSkippedForms) {
-  LoadHTML("<FORM name='TestForm' action='http://cnn.com' method='post'>"
-           "  <INPUT type='text' id='firstname' value='John'/>"
-           "  <INPUT type='text' id='lastname' value='Smith'/>"
-           "</FORM>");
-
-  WebLocalFrame* web_frame = GetMainFrame();
-  ASSERT_NE(nullptr, web_frame);
-
-  FormCache form_cache(*web_frame);
-  std::vector<FormData> forms = form_cache.ExtractNewForms();
-  ASSERT_TRUE(forms.empty());
+  // If at least one of the minimums is not enforced, we parse the form.
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitWithFeatures(
+        // Enabled.
+        {kAutofillEnforceMinRequiredFieldsForHeuristics,
+         kAutofillEnforceMinRequiredFieldsForQuery},
+        // Disabled.
+        {kAutofillEnforceMinRequiredFieldsForUpload});
+    ASSERT_FALSE(FormCache(web_frame).ExtractNewForms().empty());
+  }
 }
 
 // We should not report additional forms for empty forms.
@@ -2657,7 +3038,7 @@ TEST_F(FormAutofillTest, ExtractFormsNoFields) {
   WebLocalFrame* web_frame = GetMainFrame();
   ASSERT_NE(nullptr, web_frame);
 
-  FormCache form_cache(*web_frame);
+  FormCache form_cache(web_frame);
   std::vector<FormData> forms = form_cache.ExtractNewForms();
   ASSERT_TRUE(forms.empty());
 }
@@ -2676,9 +3057,31 @@ TEST_F(FormAutofillTest, ExtractFormsTooFewFieldsSkipsCheckable) {
   WebLocalFrame* web_frame = GetMainFrame();
   ASSERT_NE(nullptr, web_frame);
 
-  FormCache form_cache(*web_frame);
-  std::vector<FormData> forms = form_cache.ExtractNewForms();
-  ASSERT_TRUE(forms.empty());
+  // Without small form support, the form is not parsed.
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitWithFeatures(
+        // Enabled.
+        {kAutofillEnforceMinRequiredFieldsForHeuristics,
+         kAutofillEnforceMinRequiredFieldsForQuery,
+         kAutofillEnforceMinRequiredFieldsForUpload},
+        // Disabled.
+        {});
+    ASSERT_TRUE(FormCache(web_frame).ExtractNewForms().empty());
+  }
+
+  // With small form support, the form is parsed.
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitWithFeatures(
+        // Enabled.
+        {},
+        // Disabled.
+        {kAutofillEnforceMinRequiredFieldsForHeuristics,
+         kAutofillEnforceMinRequiredFieldsForQuery,
+         kAutofillEnforceMinRequiredFieldsForUpload});
+    ASSERT_FALSE(FormCache(web_frame).ExtractNewForms().empty());
+  }
 }
 
 TEST_F(FormAutofillTest, WebFormElementToFormDataAutocomplete) {
@@ -4115,6 +4518,35 @@ TEST_F(FormAutofillTest, FillFormNonEmptyFieldsWithDefaultValues) {
       false, "Enter last name", "Enter email", nullptr, nullptr, nullptr);
 }
 
+TEST_F(FormAutofillTest, FillFormModifyValues) {
+  TestFillFormAndModifyValues(
+      "<FORM name='TestForm' action='http://abc.com' method='post'>"
+      "  <INPUT type='text' id='firstname' placeholder='First Name' "
+      "value='First Name'/>"
+      "  <INPUT type='text' id='lastname' placeholder='Last Name' value='Last "
+      "Name'/>"
+      "  <INPUT type='text' id='phone' placeholder='Phone' value='Phone'/>"
+      "  <INPUT type='text' id='cc' placeholder='Credit Card Number' "
+      "value='Credit Card'/>"
+      "  <INPUT type='submit' value='Send'/>"
+      "</FORM>",
+      "First Name", "Last Name", "Phone", "Credit Card Number");
+}
+
+TEST_F(FormAutofillTest, FillFormModifyInitiatingValue) {
+  TestFillFormAndModifyInitiatingValue(
+      "<FORM name='TestForm' action='http://abc.com' method='post'>"
+      "  <INPUT type='text' id='cc' placeholder='Credit Card Number' "
+      "value='Credit Card'/>"
+      "  <INPUT type='text' id='expiration_date' placeholder='Expiration Date' "
+      "value='Expiration Date'/>"
+      "  <INPUT type='text' id='name' placeholder='Full Name' "
+      "value='Full Name'/>"
+      "  <INPUT type='submit' value='Send'/>"
+      "</FORM>",
+      "Credit Card Number", "Expiration Date", "Full Name");
+}
+
 TEST_F(FormAutofillTest, FillFormNonEmptyFieldsWithPlaceholderValues) {
   TestFillFormNonEmptyField(
       "<FORM name='TestForm' action='http://abc.com' method='post'>"
@@ -4126,6 +4558,19 @@ TEST_F(FormAutofillTest, FillFormNonEmptyFieldsWithPlaceholderValues) {
       "  <INPUT type='submit' value='Send'/>"
       "</FORM>",
       false, nullptr, nullptr, "First Name", "Last Name", "Email");
+}
+
+TEST_F(FormAutofillTest, FillFormWithPlaceholderValues) {
+  TestFillFormWithPlaceholderValues(
+      "<FORM name='TestForm' action='http://abc.com' method='post'>"
+      "  <INPUT type='text' id='firstname' placeholder='First Name' "
+      "value='First Name'/>"
+      "  <INPUT type='text' id='lastname' placeholder='Last Name'"
+      "Name'/>"
+      "  <INPUT type='text' id='email' placeholder='Email' value='Email'/>"
+      "  <INPUT type='submit' value='Send'/>"
+      "</FORM>",
+      "First Name", "Last Name", "Email");
 }
 
 TEST_F(FormAutofillTest, FillFormNonEmptyFieldForUnownedForm) {
@@ -4598,31 +5043,81 @@ TEST_F(FormAutofillTest, UnownedFormElementsAndFieldSetsToFormDataWithForm) {
       &form, nullptr));
 }
 
+TEST_F(FormAutofillTest, FormlessForms) {
+  std::vector<WebElement> fieldsets;
+  std::vector<WebFormControlElement> control_elements;
+
+  const ExtractMask extract_mask =
+      static_cast<ExtractMask>(EXTRACT_VALUE | EXTRACT_OPTIONS);
+
+  LoadHTML(kUnownedUntitledFormHtml);
+
+  WebLocalFrame* frame = GetMainFrame();
+  ASSERT_NE(nullptr, frame);
+
+  control_elements = GetUnownedAutofillableFormFieldElements(
+      frame->GetDocument().All(), &fieldsets);
+  ASSERT_FALSE(control_elements.empty());
+  ASSERT_TRUE(fieldsets.empty());
+
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndEnableFeature(
+        features::kAutofillRestrictUnownedFieldsToFormlessCheckout);
+    FormData form;
+    EXPECT_FALSE(UnownedCheckoutFormElementsAndFieldSetsToFormData(
+        fieldsets, control_elements, nullptr, frame->GetDocument(),
+        extract_mask, &form, nullptr));
+  }
+
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndDisableFeature(
+        features::kAutofillRestrictUnownedFieldsToFormlessCheckout);
+    FormData form;
+    EXPECT_TRUE(UnownedCheckoutFormElementsAndFieldSetsToFormData(
+        fieldsets, control_elements, nullptr, frame->GetDocument(),
+        extract_mask, &form, nullptr));
+  }
+}
+
 TEST_F(FormAutofillTest, FormCache_ExtractNewForms) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeatures(
+      // Enabled.
+      {kAutofillEnforceMinRequiredFieldsForHeuristics,
+       kAutofillEnforceMinRequiredFieldsForQuery},
+      // Disabled.
+      {kAutofillEnforceMinRequiredFieldsForUpload});
   struct {
+    const char* description;
     const char* html;
     const bool has_extracted_form;
     const bool is_form_tag;
     const bool is_formless_checkout;
   } test_cases[] = {
       // An empty form should not be extracted
-      {"<FORM name='TestForm' action='http://abc.com' method='post'>"
+      {"Empty Form",
+       "<FORM name='TestForm' action='http://abc.com' method='post'>"
        "</FORM>",
        false, true, false},
       // A form with less than three fields with no autocomplete type(s) should
-      // not be extracted.
-      {"<FORM name='TestForm' action='http://abc.com' method='post'>"
-       "  <INPUT type='name' id='firstname'/>"
+      // be extracted because no minimum is being enforced for upload.
+      {"Small Form no autocomplete",
+       "<FORM name='TestForm' action='http://abc.com' method='post'>"
+       "  <INPUT type='text' id='firstname'/>"
        "</FORM>",
-       false, true, false},
+       true, true, false},
       // A form with less than three fields with at least one autocomplete type
       // should be extracted.
-      {"<FORM name='TestForm' action='http://abc.com' method='post'>"
-       "  <INPUT type='name' id='firstname' autocomplete='given-name'/>"
+      {"Small Form w/ autocomplete",
+       "<FORM name='TestForm' action='http://abc.com' method='post'>"
+       "  <INPUT type='text' id='firstname' autocomplete='given-name'/>"
        "</FORM>",
        true, true, false},
       // A form with three or more fields should be extracted.
-      {"<FORM name='TestForm' action='http://abc.com' method='post'>"
+      {"3 Field Form",
+       "<FORM name='TestForm' action='http://abc.com' method='post'>"
        "  <INPUT type='text' id='firstname'/>"
        "  <INPUT type='text' id='lastname'/>"
        "  <INPUT type='text' id='email'/>"
@@ -4632,21 +5127,25 @@ TEST_F(FormAutofillTest, FormCache_ExtractNewForms) {
       // An input field with an autocomplete attribute outside of a form should
       // be extracted. The is_formless_checkout attribute should
       // then be true.
-      {"<INPUT type='text' id='firstname' autocomplete='given-name'/>"
+      {"Small, formless, with autocomplete",
+       "<INPUT type='text' id='firstname' autocomplete='given-name'/>"
        "<INPUT type='submit' value='Send'/>",
        true, false, false},
-      // An input field without an autocomplete attribute outside of a form
-      // should not be extracted.
-      {"<INPUT type='text' id='firstname'/>"
+      // An input field without an autocomplete attribute outside of a form,
+      // with no checkout hints, should not be extracted.
+      {"Small, formless, no autocomplete",
+       "<INPUT type='text' id='firstname'/>"
        "<INPUT type='submit' value='Send'/>",
        false, false, false},
-      // A form with one field which is password should not be extracted.
-      {"<FORM name='TestForm' action='http://abc.com' method='post'>"
+      // A form with one field which is password gets extracted.
+      {"Password-Only",
+       "<FORM name='TestForm' action='http://abc.com' method='post'>"
        "  <INPUT type='password' id='pw'/>"
        "</FORM>",
-       false, true, false},
+       true, true, false},
       // A form with two fields which are passwords should be extracted.
-      {"<FORM name='TestForm' action='http://abc.com' method='post'>"
+      {"two passwords",
+       "<FORM name='TestForm' action='http://abc.com' method='post'>"
        "  <INPUT type='password' id='pw'/>"
        "  <INPUT type='password' id='new_pw'/>"
        "</FORM>",
@@ -4654,12 +5153,13 @@ TEST_F(FormAutofillTest, FormCache_ExtractNewForms) {
   };
 
   for (auto test_case : test_cases) {
+    SCOPED_TRACE(test_case.description);
     LoadHTML(test_case.html);
 
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    FormCache form_cache(*web_frame);
+    FormCache form_cache(web_frame);
     std::vector<FormData> forms = form_cache.ExtractNewForms();
     EXPECT_EQ(test_case.has_extracted_form, forms.size() == 1);
 

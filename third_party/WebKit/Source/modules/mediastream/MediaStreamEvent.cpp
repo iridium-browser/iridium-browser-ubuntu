@@ -48,7 +48,7 @@ MediaStreamEvent::MediaStreamEvent(const AtomicString& type,
     stream_ = initializer.stream();
 }
 
-MediaStreamEvent::~MediaStreamEvent() {}
+MediaStreamEvent::~MediaStreamEvent() = default;
 
 MediaStream* MediaStreamEvent::stream() const {
   return stream_.Get();
@@ -63,7 +63,7 @@ const AtomicString& MediaStreamEvent::InterfaceName() const {
   return EventNames::MediaStreamEvent;
 }
 
-DEFINE_TRACE(MediaStreamEvent) {
+void MediaStreamEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(stream_);
   Event::Trace(visitor);
 }

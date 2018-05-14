@@ -30,17 +30,15 @@
 
 #include "public/web/WebInputElement.h"
 
-#include "core/HTMLNames.h"
-#include "core/InputTypeNames.h"
 #include "core/dom/ElementShadow.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/html/HTMLDataListElement.h"
-#include "core/html/HTMLDataListOptionsCollection.h"
-#include "core/html/HTMLInputElement.h"
+#include "core/html/forms/HTMLDataListElement.h"
+#include "core/html/forms/HTMLDataListOptionsCollection.h"
+#include "core/html/forms/HTMLInputElement.h"
 #include "core/html/forms/TextControlInnerElements.h"
 #include "core/html/shadow/ShadowElementNames.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "core/html_names.h"
+#include "core/input_type_names.h"
 #include "public/platform/WebString.h"
 #include "public/web/WebElementCollection.h"
 #include "public/web/WebOptionElement.h"
@@ -61,6 +59,15 @@ bool WebInputElement::IsEmailField() const {
 }
 
 bool WebInputElement::IsPasswordField() const {
+  return ConstUnwrap<HTMLInputElement>()->type() == InputTypeNames::password;
+}
+
+bool WebInputElement::IsPasswordFieldForAutofill() const {
+  if (ConstUnwrap<HTMLInputElement>()->IsTextField() &&
+      ConstUnwrap<HTMLInputElement>()->HasBeenPasswordField()) {
+    return true;
+  }
+
   return ConstUnwrap<HTMLInputElement>()->type() == InputTypeNames::password;
 }
 
@@ -137,7 +144,7 @@ WebInputElement::WebInputElement(HTMLInputElement* elem)
     : WebFormControlElement(elem) {}
 
 DEFINE_WEB_NODE_TYPE_CASTS(WebInputElement,
-                           isHTMLInputElement(ConstUnwrap<Node>()));
+                           IsHTMLInputElement(ConstUnwrap<Node>()));
 
 WebInputElement& WebInputElement::operator=(HTMLInputElement* elem) {
   private_ = elem;
@@ -145,12 +152,12 @@ WebInputElement& WebInputElement::operator=(HTMLInputElement* elem) {
 }
 
 WebInputElement::operator HTMLInputElement*() const {
-  return toHTMLInputElement(private_.Get());
+  return ToHTMLInputElement(private_.Get());
 }
 
 WebInputElement* ToWebInputElement(WebElement* web_element) {
-  if (!isHTMLInputElement(*web_element->Unwrap<Element>()))
-    return 0;
+  if (!IsHTMLInputElement(*web_element->Unwrap<Element>()))
+    return nullptr;
 
   return static_cast<WebInputElement*>(web_element);
 }

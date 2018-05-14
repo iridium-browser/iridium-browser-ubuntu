@@ -53,15 +53,25 @@ unsigned NumGraphemeClusters(const String& string) {
   return num;
 }
 
-static inline bool IsBreakableSpace(UChar ch) {
-  switch (ch) {
-    case ' ':
-    case '\n':
-    case '\t':
-      return true;
-    default:
-      return false;
+unsigned LengthOfGraphemeCluster(const String& string, unsigned offset) {
+  unsigned string_length = string.length();
+
+  if (string_length - offset <= 1)
+    return string_length - offset;
+
+  // The only Latin-1 Extended Grapheme Cluster is CRLF.
+  if (string.Is8Bit()) {
+    auto* characters = string.Characters8();
+    return 1 + (characters[offset] == '\r' && characters[offset + 1] == '\n');
   }
+
+  NonSharedCharacterBreakIterator it(string);
+  if (!it)
+    return string_length - offset;
+
+  if (it.Following(offset) == kTextBreakDone)
+    return string_length - offset;
+  return it.Current() - offset;
 }
 
 static const UChar kAsciiLineBreakTableFirstChar = '!';
@@ -266,7 +276,7 @@ inline bool NeedsLineBreakIterator(UChar ch) {
 
 template <typename CharacterType,
           LineBreakType lineBreakType,
-          bool break_after_space>
+          BreakSpaceType break_space>
 inline int LazyLineBreakIterator::NextBreakablePosition(
     int pos,
     const CharacterType* str) const {
@@ -287,14 +297,21 @@ inline int LazyLineBreakIterator::NextBreakablePosition(
     ch = str[i];
 
     is_space = IsBreakableSpace(ch);
-    if (!break_after_space) {
-      if (is_space)
-        return i;
-    } else {
-      if (is_space)
-        continue;
-      if (is_last_space)
-        return i;
+    switch (break_space) {
+      case BreakSpaceType::kBeforeEverySpace:
+        if (is_space)
+          return i;
+        break;
+      case BreakSpaceType::kBeforeSpaceRun:
+        // Theoritically, preserved newline characters are different from space
+        // and tab characters. The difference is not implemented because the
+        // LayoutNG line breaker handles preserved newline characters by itself.
+        if (is_space) {
+          if (!is_last_space)
+            return i;
+          continue;
+        }
+        break;
     }
 
     if (ShouldBreakAfter(last_last_ch, last_ch, ch))
@@ -329,7 +346,7 @@ inline int LazyLineBreakIterator::NextBreakablePosition(
           }
         }
       }
-      if (i == next_break && (break_after_space || !is_last_space))
+      if (i == next_break && !is_last_space)
         return i;
     }
   }
@@ -341,9 +358,17 @@ template <typename CharacterType, LineBreakType lineBreakType>
 inline int LazyLineBreakIterator::NextBreakablePosition(
     int pos,
     const CharacterType* str) const {
-  if (!break_after_space_)
-    return NextBreakablePosition<CharacterType, lineBreakType, false>(pos, str);
-  return NextBreakablePosition<CharacterType, lineBreakType, true>(pos, str);
+  switch (break_space_) {
+    case BreakSpaceType::kBeforeEverySpace:
+      return NextBreakablePosition<CharacterType, lineBreakType,
+                                   BreakSpaceType::kBeforeEverySpace>(pos, str);
+    case BreakSpaceType::kBeforeSpaceRun:
+      return NextBreakablePosition<CharacterType, lineBreakType,
+                                   BreakSpaceType::kBeforeSpaceRun>(pos, str);
+  }
+  NOTREACHED();
+  return NextBreakablePosition<CharacterType, lineBreakType,
+                               BreakSpaceType::kBeforeEverySpace>(pos, str);
 }
 
 template <LineBreakType lineBreakType>
@@ -384,6 +409,7 @@ int LazyLineBreakIterator::NextBreakablePosition(
 unsigned LazyLineBreakIterator::NextBreakOpportunity(unsigned offset) const {
   int next_break = -1;
   IsBreakable(offset, next_break);
+  DCHECK_GE(next_break, 0);
   return next_break;
 }
 
@@ -410,6 +436,17 @@ std::ostream& operator<<(std::ostream& ostream, LineBreakType line_break_type) {
   }
   NOTREACHED();
   return ostream << "LineBreakType::" << static_cast<int>(line_break_type);
+}
+
+std::ostream& operator<<(std::ostream& ostream, BreakSpaceType break_space) {
+  switch (break_space) {
+    case BreakSpaceType::kBeforeEverySpace:
+      return ostream << "kBeforeEverySpace";
+    case BreakSpaceType::kBeforeSpaceRun:
+      return ostream << "kBeforeSpaceRun";
+  }
+  NOTREACHED();
+  return ostream << "BreakSpaceType::" << static_cast<int>(break_space);
 }
 
 }  // namespace blink

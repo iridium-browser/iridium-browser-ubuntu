@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
@@ -9,7 +9,6 @@
       'target_name': 'iron-autogrow-textarea-extracted',
       'dependencies': [
         '../iron-behaviors/compiled_resources2.gyp:iron-control-state-extracted',
-        '../iron-form-element-behavior/compiled_resources2.gyp:iron-form-element-behavior-extracted',
         '../iron-validatable-behavior/compiled_resources2.gyp:iron-validatable-behavior-extracted',
       ],
       'includes': ['../../../../closure_compiler/compile_js2.gypi'],

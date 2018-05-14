@@ -9,7 +9,7 @@
 #include <memory>
 #include <set>
 
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -24,6 +24,10 @@
 #include "base/time/time.h"
 #endif  // OS_ANDROID
 
+namespace blink {
+enum class WebFullscreenVideoStatus;
+}
+
 namespace media {
 
 enum class MediaContentType;
@@ -32,9 +36,8 @@ enum class MediaContentType;
 // the MediaPlayerDelegateHost.
 class CONTENT_EXPORT RendererWebMediaPlayerDelegate
     : public content::RenderFrameObserver,
-      public NON_EXPORTED_BASE(WebMediaPlayerDelegate),
-      public NON_EXPORTED_BASE(
-          base::SupportsWeakPtr<RendererWebMediaPlayerDelegate>) {
+      public WebMediaPlayerDelegate,
+      public base::SupportsWeakPtr<RendererWebMediaPlayerDelegate> {
  public:
   explicit RendererWebMediaPlayerDelegate(content::RenderFrame* render_frame);
   ~RendererWebMediaPlayerDelegate() override;
@@ -57,7 +60,9 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   bool IsIdle(int player_id) override;
   void ClearStaleFlag(int player_id) override;
   bool IsStale(int player_id) override;
-  void SetIsEffectivelyFullscreen(int player_id, bool is_fullscreen) override;
+  void SetIsEffectivelyFullscreen(
+      int player_id,
+      blink::WebFullscreenVideoStatus fullscreen_video_status) override;
   void DidPlayerSizeChange(int delegate_id, const gfx::Size& size) override;
   void DidPlayerMutedStatusChange(int delegate_id, bool muted) override;
 
@@ -71,6 +76,7 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   // and |is_jelly_bean_| to |is_jelly_bean|. A zero cleanup interval
   // will cause the idle timer to run with each run of the message loop.
   void SetIdleCleanupParamsForTesting(base::TimeDelta idle_timeout,
+                                      base::TimeDelta idle_cleanup_interval,
                                       base::TickClock* tick_clock,
                                       bool is_jelly_bean);
   bool IsIdleCleanupTimerRunningForTesting() const;
@@ -83,6 +89,8 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
  private:
   void OnMediaDelegatePause(int player_id);
   void OnMediaDelegatePlay(int player_id);
+  void OnMediaDelegateSeekForward(int player_id, base::TimeDelta seek_time);
+  void OnMediaDelegateSeekBackward(int player_id, base::TimeDelta seek_time);
   void OnMediaDelegateSuspendAllMediaPlayers();
   void OnMediaDelegateVolumeMultiplierUpdate(int player_id, double multiplier);
   void OnMediaDelegateBecamePersistentVideo(int player_id, bool value);
@@ -112,7 +120,7 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   bool has_played_video_ = false;
   bool pending_update_task_ = false;
 
-  IDMap<Observer*> id_map_;
+  base::IDMap<Observer*> id_map_;
 
   // Flag for gating if players should ever transition to a stale state after a
   // period of inactivity.
@@ -134,7 +142,6 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
 
   // Clock used for calculating when players have become stale. May be
   // overridden for testing.
-  std::unique_ptr<base::DefaultTickClock> default_tick_clock_;
   base::TickClock* tick_clock_;
 
 #if defined(OS_ANDROID)

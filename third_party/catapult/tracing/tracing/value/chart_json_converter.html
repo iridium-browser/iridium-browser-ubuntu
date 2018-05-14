@@ -20,6 +20,25 @@ tr.exportTo('tr.v', function() {
      * @param {!tr.v.HistogramSet} histograms
      */
     static convertChartJson(charts, histograms) {
+      const traceValues = charts.charts.trace;
+
+      // The chromeperf dashboard requires some Diagnostics to be shared, even
+      // if there is only a single Histogram in the HistogramSet.
+      const diagnosticCaches = new Map();
+      function addSharedDiagnostic(hist, name, diagnostic) {
+        if (!diagnosticCaches.has(name)) {
+          diagnosticCaches.set(name, new Map());
+        }
+        const cache = diagnosticCaches.get(name);
+        const datum = diagnostic instanceof tr.v.d.GenericSet ?
+          tr.b.getOnlyElement(diagnostic) : diagnostic.minDate;
+        if (!cache.has(datum)) {
+          cache.set(datum, diagnostic);
+          histograms.addSharedDiagnostic(diagnostic);
+        }
+        hist.diagnostics.set(name, cache.get(datum));
+      }
+
       for (const [name, pageValues] of Object.entries(charts.charts)) {
         if (name === 'trace') continue;
 
@@ -44,20 +63,48 @@ tr.exportTo('tr.v', function() {
           const unitNameSuffix = tr.b.Unit.nameSuffixForImprovementDirection(
               improvementDirection);
 
-          const hist = new tr.v.Histogram(
-              value.name,
-              tr.b.Unit.byName[unitName + unitNameSuffix],
-              tr.v.HistogramBinBoundaries.SINGULAR);
-          hist.description = value.description || '';
-          histograms.addHistogram(hist);
+          const hist = histograms.createHistogram(
+              value.name, tr.b.Unit.byName[unitName + unitNameSuffix], [], {
+                binBoundaries: tr.v.HistogramBinBoundaries.SINGULAR,
+                description: value.description || '',
+              });
 
-          new tr.v.d.TelemetryInfo({
-            storyDisplayName: pageValuesCount > 1 ? storyName : '',
-            legacyTIRLabel: value.tir_label,
-            benchmarkName: charts.benchmark_name,
-            label: charts.label,
-            benchmarkStartMs: charts.benchmarkStartMs,
-          }).addToHistogram(hist);
+          if (traceValues) {
+            const traceValue = traceValues[storyName] || {};
+            let traceUrl = traceValue.cloud_url;
+            if (!traceUrl && traceValue.file_path) {
+              traceUrl = 'file://' + traceValue.file_path;
+            }
+            if (traceUrl) {
+              addSharedDiagnostic(hist, tr.v.d.RESERVED_NAMES.TRACE_URLS,
+                  new tr.v.d.GenericSet([traceUrl]));
+            }
+          }
+
+          if (pageValuesCount > 1) {
+            addSharedDiagnostic(hist, tr.v.d.RESERVED_NAMES.STORIES,
+                new tr.v.d.GenericSet([storyName]));
+          }
+
+          if (value.tir_label) {
+            addSharedDiagnostic(hist, tr.v.d.RESERVED_NAMES.STORY_TAGS,
+                new tr.v.d.GenericSet([`tir_label:${value.tir_label}`]));
+          }
+
+          if (charts.benchmark_name) {
+            addSharedDiagnostic(hist, tr.v.d.RESERVED_NAMES.BENCHMARKS,
+                new tr.v.d.GenericSet([charts.benchmark_name]));
+          }
+
+          if (charts.label) {
+            addSharedDiagnostic(hist, tr.v.d.RESERVED_NAMES.LABELS,
+                new tr.v.d.GenericSet([charts.label]));
+          }
+
+          if (charts.benchmarkStartMs) {
+            addSharedDiagnostic(hist, tr.v.d.RESERVED_NAMES.BENCHMARK_START,
+                new tr.v.d.DateRange(charts.benchmarkStartMs));
+          }
 
           if (value.type === 'histogram') {
             for (const bucket of value.buckets) {

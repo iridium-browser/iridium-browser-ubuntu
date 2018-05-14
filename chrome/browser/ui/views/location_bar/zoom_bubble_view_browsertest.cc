@@ -5,20 +5,40 @@
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
 
 #include "build/build_config.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller_test.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "ui/base/ui_features.h"
+#include "ui/views/test/test_widget_observer.h"
+
+#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
-#include "chrome/test/base/in_process_browser_test.h"
+#endif
 
-typedef InProcessBrowserTest ZoomBubbleBrowserTest;
-
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
 #include "ash/public/cpp/immersive/immersive_fullscreen_controller_test_api.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller_ash.h"
+#include "ui/aura/test/env_test_helper.h"
 #endif
+
+using ZoomBubbleBrowserTest = InProcessBrowserTest;
+
+namespace {
+
+void ShowInActiveTab(Browser* browser) {
+  content::WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
+  ZoomBubbleView::ShowBubble(web_contents, gfx::Point(),
+                             ZoomBubbleView::USER_GESTURE);
+  EXPECT_TRUE(ZoomBubbleView::GetZoomBubble());
+}
+
+}  // namespace
 
 // TODO(linux_aura) http://crbug.com/163931
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
@@ -26,6 +46,7 @@ typedef InProcessBrowserTest ZoomBubbleBrowserTest;
 #else
 #define MAYBE_NonImmersiveFullscreen NonImmersiveFullscreen
 #endif
+#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 // Test whether the zoom bubble is anchored and whether it is visible when in
 // non-immersive fullscreen.
 IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, MAYBE_NonImmersiveFullscreen) {
@@ -71,12 +92,13 @@ IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, MAYBE_NonImmersiveFullscreen) {
     waiter->Wait();
   }
 }
+#endif  // !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 
-// TODO(zturner): Change this to USE_ASH after fixing the test on Windows.
 #if defined(OS_CHROMEOS)
 // Test whether the zoom bubble is anchored and whether it is visible when in
 // immersive fullscreen.
 IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, ImmersiveFullscreen) {
+  aura::test::EnvTestHelper().SetAlwaysUseLastMouseLocation(true);
   BrowserView* browser_view = static_cast<BrowserView*>(browser()->window());
   content::WebContents* web_contents = browser_view->GetActiveWebContents();
 
@@ -143,12 +165,11 @@ IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, ImmersiveFullscreen) {
 
 // Tests that trying to open zoom bubble with stale WebContents is safe.
 IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, NoWebContentsIsSafe) {
-  BrowserView* browser_view = static_cast<BrowserView*>(browser()->window());
-  content::WebContents* web_contents = browser_view->GetActiveWebContents();
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
 
   ZoomBubbleView::ShowBubble(web_contents, gfx::Point(),
                              ZoomBubbleView::AUTOMATIC);
-
   // Close the current tab and try opening the zoom bubble with stale
   // |web_contents|.
   chrome::CloseTab(browser());
@@ -156,25 +177,50 @@ IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, NoWebContentsIsSafe) {
                              ZoomBubbleView::AUTOMATIC);
 }
 
+// Ensure a tab switch closes the bubble.
+IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, TabSwitchCloses) {
+  AddTabAtIndex(0, GURL(url::kAboutBlankURL), ui::PAGE_TRANSITION_LINK);
+  ShowInActiveTab(browser());
+  chrome::SelectNextTab(browser());
+  EXPECT_FALSE(ZoomBubbleView::GetZoomBubble());
+}
+
+// Ensure the bubble is dismissed on tab closure and doesn't reference a
+// destroyed WebContents.
+IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, DestroyedWebContents) {
+  AddTabAtIndex(0, GURL(url::kAboutBlankURL), ui::PAGE_TRANSITION_LINK);
+  ShowInActiveTab(browser());
+
+  ZoomBubbleView* bubble = ZoomBubbleView::GetZoomBubble();
+  EXPECT_TRUE(bubble);
+
+  views::test::TestWidgetObserver observer(bubble->GetWidget());
+  EXPECT_FALSE(bubble->GetWidget()->IsClosed());
+
+  chrome::CloseTab(browser());
+  EXPECT_FALSE(ZoomBubbleView::GetZoomBubble());
+
+  // Widget::Close() completes asynchronously, so it's still safe to access
+  // |bubble| here, even though GetZoomBubble() returned null.
+  EXPECT_FALSE(observer.widget_closed());
+  EXPECT_TRUE(bubble->GetWidget()->IsClosed());
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(observer.widget_closed());
+}
+
 class ZoomBubbleDialogTest : public DialogBrowserTest {
  public:
   ZoomBubbleDialogTest() {}
 
   // DialogBrowserTest:
-  void ShowDialog(const std::string& name) override {
-    BrowserView* browser_view = static_cast<BrowserView*>(browser()->window());
-    content::WebContents* web_contents = browser_view->GetActiveWebContents();
-    ZoomBubbleView::ShowBubble(web_contents, gfx::Point(),
-                               ZoomBubbleView::USER_GESTURE);
-  }
+  void ShowUi(const std::string& name) override { ShowInActiveTab(browser()); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ZoomBubbleDialogTest);
 };
 
-// Test that calls ShowDialog("default"). Interactive when run via
-// browser_tests --gtest_filter=BrowserDialogTest.Invoke --interactive
-// --dialog=ZoomBubbleDialogTest.InvokeDialog_default
-IN_PROC_BROWSER_TEST_F(ZoomBubbleDialogTest, InvokeDialog_default) {
-  RunDialog();
+// Test that calls ShowUi("default").
+IN_PROC_BROWSER_TEST_F(ZoomBubbleDialogTest, InvokeUi_default) {
+  ShowAndVerifyUi();
 }

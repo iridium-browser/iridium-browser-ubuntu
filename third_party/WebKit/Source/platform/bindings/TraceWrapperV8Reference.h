@@ -5,7 +5,7 @@
 #ifndef TraceWrapperV8Reference_h
 #define TraceWrapperV8Reference_h
 
-#include "platform/bindings/ScriptWrappableVisitor.h"
+#include "platform/bindings/ScriptWrappableMarkingVisitor.h"
 
 namespace blink {
 
@@ -19,12 +19,9 @@ namespace blink {
 template <typename T>
 class TraceWrapperV8Reference {
  public:
-  explicit TraceWrapperV8Reference(void* parent) : parent_(parent) {}
+  TraceWrapperV8Reference() = default;
 
-  TraceWrapperV8Reference(v8::Isolate* isolate,
-                          void* parent,
-                          v8::Local<T> handle)
-      : parent_(parent) {
+  TraceWrapperV8Reference(v8::Isolate* isolate, v8::Local<T> handle) {
     InternalSet(isolate, handle);
     handle_.SetWeak();
   }
@@ -52,10 +49,19 @@ class TraceWrapperV8Reference {
 
   bool IsEmpty() const { return handle_.IsEmpty(); }
   void Clear() { handle_.Reset(); }
+  ALWAYS_INLINE const v8::Persistent<T>& Get() const { return handle_; }
   ALWAYS_INLINE v8::Persistent<T>& Get() { return handle_; }
 
   template <typename S>
   const TraceWrapperV8Reference<S>& Cast() const {
+    static_assert(std::is_base_of<S, T>::value, "T must inherit from S");
+    return reinterpret_cast<const TraceWrapperV8Reference<S>&>(
+        const_cast<const TraceWrapperV8Reference<T>&>(*this));
+  }
+  // TODO(mlippautz): Support TraceWrappers(const
+  // TraceWrapperV8Reference<v8::Module>&) and remove UnsafeCast.
+  template <typename S>
+  const TraceWrapperV8Reference<S>& UnsafeCast() const {
     return reinterpret_cast<const TraceWrapperV8Reference<S>&>(
         const_cast<const TraceWrapperV8Reference<T>&>(*this));
   }
@@ -63,11 +69,11 @@ class TraceWrapperV8Reference {
  private:
   inline void InternalSet(v8::Isolate* isolate, v8::Local<T> handle) {
     handle_.Reset(isolate, handle);
-    ScriptWrappableVisitor::WriteBarrier(isolate, parent_, &Cast<v8::Value>());
+    ScriptWrappableMarkingVisitor::WriteBarrier(isolate,
+                                                UnsafeCast<v8::Value>());
   }
 
   v8::Persistent<T> handle_;
-  void* parent_;
 };
 
 }  // namespace blink

@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_ANDROID_WEBAPK_WEBAPK_METRICS_H_
 #define CHROME_BROWSER_ANDROID_WEBAPK_WEBAPK_METRICS_H_
 
+#include "chrome/browser/installable/installable_metrics.h"
+
 namespace base {
 class TimeDelta;
 }
@@ -29,37 +31,23 @@ enum InstallEvent {
 };
 
 // The ways in which WebAPK installation can be started.
+// InstallSource is deprecated in favor of WebappInstallSource, which tracks
+// install sources for both desktop and Android.  If a new element is added to
+// InstallSource, it should be mapped (in webapk::TrackInstallSource()) to an
+// element in WebappInstallSource.
+// TODO(crbug.com/790788): Once Webapp.Install.InstallSource contains enough
+// historical data for Android, remove the Android-specific metric and use the
+// general metric instead.
 enum InstallSource {
   INSTALL_SOURCE_BANNER,
   INSTALL_SOURCE_MENU,
   INSTALL_SOURCE_MAX,
 };
 
-// The ways in which the WebAPK infobar can be shown.
-enum InfoBarShown {
-  WEBAPK_INFOBAR_SHOWN_FROM_BANNER,
-  WEBAPK_INFOBAR_SHOWN_FROM_MENU,
-  WEBAPK_INFOBAR_SHOWN_MAX,
-};
-
-// User actions after a WebAPK is installed.
-enum UserAction {
-  // Launch a previously installed WebAPK since the WebAPK has been installed on
-  // the device before.
-  USER_ACTION_OPEN,  // Obsolete
-  USER_ACTION_OPEN_DISMISS,  // Obsolete
-  // Open a newly installed WebAPK via a successful installation.
-  USER_ACTION_INSTALLED_OPEN,
-  USER_ACTION_INSTALLED_OPEN_DISMISS,
-  USER_ACTION_MAX,
-};
-
 void TrackRequestTokenDuration(base::TimeDelta delta);
 void TrackInstallDuration(base::TimeDelta delta);
 void TrackInstallEvent(InstallEvent event);
-void TrackInstallSource(InstallSource event);
-void TrackInstallInfoBarShown(InfoBarShown event);
-void TrackUserAction(UserAction event);
+void TrackInstallSource(WebappInstallSource event);
 
 };  // namespace webapk
 

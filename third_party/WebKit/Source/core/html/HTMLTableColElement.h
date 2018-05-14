@@ -41,15 +41,18 @@ class HTMLTableColElement final : public HTMLTablePartElement {
 
   const AtomicString& Width() const;
 
+  bool HasNonInBodyInsertionMode() const override { return true; }
+
  private:
   HTMLTableColElement(const QualifiedName& tag_name, Document&);
 
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
-  const StylePropertySet* AdditionalPresentationAttributeStyle() override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
+  const CSSPropertyValueSet* AdditionalPresentationAttributeStyle() override;
 
   unsigned span_;
 };

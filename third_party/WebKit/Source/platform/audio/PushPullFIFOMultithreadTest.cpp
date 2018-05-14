@@ -10,9 +10,10 @@
 #include "platform/WaitableEvent.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/audio/AudioUtilities.h"
+#include "platform/testing/TestingPlatformSupport.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/wtf/Functional.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -28,30 +29,27 @@ class FIFOClient {
   FIFOClient(PushPullFIFO* fifo, size_t bus_length, size_t jitter_range_ms)
       : fifo_(fifo),
         bus_(AudioBus::Create(fifo->NumberOfChannels(), bus_length)),
-        client_thread_(Platform::Current()->CreateThread("client thread")),
-        done_event_(WTF::MakeUnique<WaitableEvent>()),
+        client_thread_(Platform::Current()->CreateThread(
+            WebThreadCreationParams(WebThreadType::kTestThread)
+                .SetThreadName("FIFOClientThread"))),
+        done_event_(std::make_unique<WaitableEvent>()),
         jitter_range_ms_(jitter_range_ms) {}
 
   WaitableEvent* Start(double duration_ms, double interval_ms) {
     duration_ms_ = duration_ms;
     interval_ms_ = interval_ms;
-    client_thread_->GetWebTaskRunner()->PostTask(
-        BLINK_FROM_HERE,
-        CrossThreadBind(&FIFOClient::RunTaskOnOwnThread,
-                        CrossThreadUnretained(this)));
+    PostCrossThreadTask(*client_thread_->GetTaskRunner(), FROM_HERE,
+                        CrossThreadBind(&FIFOClient::RunTaskOnOwnThread,
+                                        CrossThreadUnretained(this)));
     return done_event_.get();
   }
 
   virtual void Stop(int callback_counter) = 0;
   virtual void RunTask() = 0;
 
-  void Pull(size_t frames_to_pull) {
-    fifo_->Pull(bus_.Get(), frames_to_pull);
-  }
+  void Pull(size_t frames_to_pull) { fifo_->Pull(bus_.get(), frames_to_pull); }
 
-  void Push() {
-    fifo_->Push(bus_.Get());
-  }
+  void Push() { fifo_->Push(bus_.get()); }
 
  private:
   void RunTaskOnOwnThread() {
@@ -61,8 +59,8 @@ class FIFOClient {
     ++counter_;
     RunTask();
     if (elapsed_ms_ < duration_ms_) {
-      client_thread_->GetWebTaskRunner()->PostDelayedTask(
-          BLINK_FROM_HERE,
+      PostDelayedCrossThreadTask(
+          *client_thread_->GetTaskRunner(), FROM_HERE,
           CrossThreadBind(&FIFOClient::RunTaskOnOwnThread,
                           CrossThreadUnretained(this)),
           TimeDelta::FromMillisecondsD(interval_with_jitter));
@@ -72,8 +70,13 @@ class FIFOClient {
     }
   }
 
+  // Should be instantiated before calling Platform::Current()->CreateThread().
+  // Do not place this after the |client_thread_| below.
+  ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
+      platform_;
+
   PushPullFIFO* fifo_;
-  RefPtr<AudioBus> bus_;
+  scoped_refptr<AudioBus> bus_;
   std::unique_ptr<WebThread> client_thread_;
   std::unique_ptr<WaitableEvent> done_event_;
 
@@ -96,7 +99,7 @@ class FIFOClient {
 
 // FIFO-pulling client (consumer). This mimics the audio device thread.
 // |frames_to_pull| is variable.
-class PullClient : public FIFOClient {
+class PullClient final : public FIFOClient {
  public:
   PullClient(PushPullFIFO* fifo, size_t frames_to_pull, double jitter_range_ms)
       : FIFOClient(fifo, frames_to_pull, jitter_range_ms),
@@ -117,7 +120,7 @@ class PullClient : public FIFOClient {
 
 // FIFO-pushing client (producer). This mimics the WebAudio rendering thread.
 // The frames to push are static as 128 frames.
-class PushClient : public FIFOClient {
+class PushClient final : public FIFOClient {
  public:
   PushClient(PushPullFIFO* fifo, size_t frames_to_push, double jitter_range_ms)
       : FIFOClient(fifo, frames_to_push, jitter_range_ms) {}
@@ -182,36 +185,36 @@ FIFOSmokeTestParam smoke_test_params[] = {
   // Test case 0 (OSX): 256 Pull, 128 Push, Minimal jitter.
   // WebThread's priority is lower than the device thread, so its jitter range
   // is slightly bigger than the other.
-  {48000, 2, 8192, 1000, 256, 1, 128, 2},
+  {48000, 2, 8192, 250, 256, 1, 128, 2},
 
   // Test case 1 (Windows): 441 Pull, 128 Push. Moderate Jitter.
   // Windows' audio callback is known to be ~10ms and UMA data shows the
   // evidence for it. The jitter range was determined speculatively.
-  {44100, 2, 8192, 1000, 441, 2, 128, 3},
+  {44100, 2, 8192, 250, 441, 2, 128, 3},
 
   // Test case 2 (Ubuntu/Linux): 512 Pull, 128 Push. Unstable callback, but
   // fast CPU. A typical configuration for Ubuntu + PulseAudio setup.
   // PulseAudio's callback is known to be rather unstable.
-  {48000, 2, 8192, 1000, 512, 8, 128, 1},
+  {48000, 2, 8192, 250, 512, 8, 128, 1},
 
   // Test case 3 (Android-Reference): 512 Pull, 128 Push. Similar to Linux, but
   // low profile CPU.
-  {44100, 2, 8192, 1000, 512, 8, 128, 3},
+  {44100, 2, 8192, 250, 512, 8, 128, 3},
 
   // Test case 4 (Android-ExternalA): 441 Pull, 128 Push. Extreme jitter with
   // low profile CPU.
-  {44100, 2, 8192, 1000, 441, 24, 128, 8},
+  {44100, 2, 8192, 250, 441, 24, 128, 8},
 
   // Test case 5 (Android-ExternalB): 5768 Pull, 128 Push. Huge callback with
   // large jitter. Low profile CPU.
-  {44100, 2, 8192, 1000, 5768, 120, 128, 12},
+  {44100, 2, 8192, 250, 5768, 120, 128, 12},
 
   // Test case 6 (User-specified buffer size): 960 Pull, 128 Push. Minimal
   // Jitter. 960 frames = 20ms at 48KHz.
-  {48000, 2, 8192, 1000, 960, 1, 128, 1},
+  {48000, 2, 8192, 250, 960, 1, 128, 1},
 
-  // Test case 7 (Longer test duration): 256 Pull, 128 Push. 10 seconds.
-  {48000, 2, 8192, 10000, 256, 0, 128, 1}
+  // Test case 7 (Longer test duration): 256 Pull, 128 Push. 2.5 seconds.
+  {48000, 2, 8192, 2500, 256, 0, 128, 1}
 };
 
 INSTANTIATE_TEST_CASE_P(PushPullFIFOSmokeTest,

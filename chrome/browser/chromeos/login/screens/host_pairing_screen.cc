@@ -148,8 +148,8 @@ void HostPairingScreen::ConfigureHostRequested(
           << ", keyboard_layout=" << keyboard_layout;
 
   if (delegate_) {
-    delegate_->ConfigureHostRequested(
-        accepted_eula, lang, timezone, send_reports, keyboard_layout);
+    delegate_->ConfigureHostRequested(accepted_eula, lang, timezone,
+                                      send_reports, keyboard_layout);
   }
 }
 
@@ -217,7 +217,7 @@ void HostPairingScreen::OnOtherError(
 }
 
 void HostPairingScreen::OnDeviceEnrolled(const std::string& additional_token) {
-  StartupUtils::MarkDeviceRegistered(base::BindOnce(&base::DoNothing));
+  StartupUtils::MarkDeviceRegistered(base::DoNothing());
   enrollment_helper_->ClearAuth(base::Bind(&HostPairingScreen::OnAuthCleared,
                                            weak_ptr_factory_.GetWeakPtr()));
 

@@ -14,6 +14,8 @@
 #include "modules/serviceworkers/WaitUntilObserver.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponse.h"
 
+using blink::mojom::ServiceWorkerResponseError;
+
 namespace blink {
 
 void RespondWithObserver::ContextDestroyed(ExecutionContext*) {
@@ -37,7 +39,7 @@ void RespondWithObserver::DidDispatchEvent(
   if (dispatch_result == DispatchEventResult::kNotCanceled) {
     OnNoResponse();
   } else {
-    OnResponseRejected(kWebServiceWorkerResponseErrorDefaultPrevented);
+    OnResponseRejected(ServiceWorkerResponseError::kDefaultPrevented);
   }
 
   state_ = kDone;
@@ -56,15 +58,15 @@ void RespondWithObserver::RespondWith(ScriptState* script_state,
   state_ = kPending;
   observer_->WaitUntil(
       script_state, script_promise, exception_state,
-      WTF::Bind(&RespondWithObserver::ResponseWasFulfilled,
-                WrapPersistent(this)),
-      WTF::Bind(&RespondWithObserver::ResponseWasRejected, WrapPersistent(this),
-                kWebServiceWorkerResponseErrorPromiseRejected));
+      WTF::BindRepeating(&RespondWithObserver::ResponseWasFulfilled,
+                         WrapPersistent(this)),
+      WTF::BindRepeating(&RespondWithObserver::ResponseWasRejected,
+                         WrapPersistent(this),
+                         ServiceWorkerResponseError::kPromiseRejected));
 }
 
-void RespondWithObserver::ResponseWasRejected(
-    WebServiceWorkerResponseError error,
-    const ScriptValue& value) {
+void RespondWithObserver::ResponseWasRejected(ServiceWorkerResponseError error,
+                                              const ScriptValue& value) {
   OnResponseRejected(error);
   state_ = kDone;
   observer_.Clear();
@@ -84,7 +86,7 @@ RespondWithObserver::RespondWithObserver(ExecutionContext* context,
       state_(kInitial),
       observer_(observer) {}
 
-DEFINE_TRACE(RespondWithObserver) {
+void RespondWithObserver::Trace(blink::Visitor* visitor) {
   visitor->Trace(observer_);
   ContextLifecycleObserver::Trace(visitor);
 }

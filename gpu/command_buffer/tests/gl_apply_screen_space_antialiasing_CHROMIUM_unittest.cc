@@ -13,12 +13,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/command_line.h"
 #include "gpu/command_buffer/tests/gl_manager.h"
 #include "gpu/command_buffer/tests/gl_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gl/gl_switches.h"
 
 namespace gpu {
 
@@ -75,9 +73,8 @@ class GLApplyScreenSpaceAntialiasingCHROMIUMTest : public testing::Test {
   }
 
   void SetUp() override {
-    base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
     GLManager::Options options;
-    gl_.InitializeWithCommandLine(options, command_line);
+    gl_.Initialize(options);
     CheckStatus();
   }
 
@@ -102,11 +99,19 @@ class GLApplyScreenSpaceAntialiasingCHROMIUMES3Test
     : public GLApplyScreenSpaceAntialiasingCHROMIUMTest {
  protected:
   void SetUp() override {
-    base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
     GLManager::Options options;
-    options.context_type = gles2::CONTEXT_TYPE_OPENGLES3;
-    gl_.InitializeWithCommandLine(options, command_line);
+    options.context_type = CONTEXT_TYPE_OPENGLES3;
+    gl_.Initialize(options);
     CheckStatus();
+  }
+  void CheckStatus() {
+    // Not applicable for devices not supporting OpenGLES3.
+    if (!gl_.IsInitialized()) {
+      LOG(INFO) << "CONTEXT_TYPE_OPENGLES3 not supported. "
+                   "Skipping test...";
+      return;
+    }
+    GLApplyScreenSpaceAntialiasingCHROMIUMTest::CheckStatus();
   }
 };
 

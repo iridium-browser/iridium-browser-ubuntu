@@ -14,9 +14,19 @@
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_status.h"
 
+#include <vector>
+
 class GURL;
 
 namespace safe_browsing {
+
+class PasswordProtectionNavigationThrottle;
+
+// UMA metrics
+extern const char kPasswordOnFocusVerdictHistogram[];
+extern const char kAnyPasswordEntryVerdictHistogram[];
+extern const char kSyncPasswordEntryVerdictHistogram[];
+extern const char kProtectedPasswordEntryVerdictHistogram[];
 
 // A request for checking if an unfamiliar login form or a password reuse event
 // is safe. PasswordProtectionRequest objects are owned by
@@ -44,7 +54,8 @@ class PasswordProtectionRequest : public base::RefCountedThreadSafe<
                             const GURL& main_frame_url,
                             const GURL& password_form_action,
                             const GURL& password_form_frame_url,
-                            const std::string& saved_domain,
+                            bool matches_sync_password,
+                            const std::vector<std::string>& matching_origins,
                             LoginReputationClientRequest::TriggerType type,
                             bool password_field_exists,
                             PasswordProtectionService* pps,
@@ -78,11 +89,34 @@ class PasswordProtectionRequest : public base::RefCountedThreadSafe<
     return trigger_type_;
   }
 
- private:
+  bool matches_sync_password() { return matches_sync_password_; }
+
+  bool is_modal_warning_showing() const { return is_modal_warning_showing_; }
+
+  void set_is_modal_warning_showing(bool is_warning_showing) {
+    is_modal_warning_showing_ = is_warning_showing;
+  }
+
+  // Keeps track of created navigation throttle.
+  void AddThrottle(PasswordProtectionNavigationThrottle* throttle) {
+    throttles_.insert(throttle);
+  }
+
+  void RemoveThrottle(PasswordProtectionNavigationThrottle* throttle) {
+    throttles_.erase(throttle);
+  }
+
+  // Cancels navigation if there is modal warning showing, resumes it otherwise.
+  void HandleDeferredNavigations();
+
+ protected:
   friend class base::RefCountedThreadSafe<PasswordProtectionRequest>;
+
+ private:
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
   friend class base::DeleteHelper<PasswordProtectionRequest>;
+  friend class ChromePasswordProtectionServiceTest;
   ~PasswordProtectionRequest() override;
 
   // Start checking the whitelist.
@@ -125,8 +159,13 @@ class PasswordProtectionRequest : public base::RefCountedThreadSafe<
   // Frame url of the detected password form.
   const GURL password_form_frame_url_;
 
-  // Domain on which a password is saved and gets reused.
-  const std::string saved_domain_;
+  // True if the password is the sync/Google password.
+  const bool matches_sync_password_;
+
+  // Domains from the Password Manager that match this password.
+  // Should be non-empty if |matches_sync_password_| == false. Otherwise,
+  // may or may not be empty.
+  const std::vector<std::string> matching_domains_;
 
   // If this request is for unfamiliar login page or for a password reuse event.
   const LoginReputationClientRequest::TriggerType trigger_type_;
@@ -152,6 +191,14 @@ class PasswordProtectionRequest : public base::RefCountedThreadSafe<
 
   // Needed for canceling tasks posted to different threads.
   base::CancelableTaskTracker tracker_;
+
+  // Navigation throttles created for this |web_contents_| during |this|'s
+  // lifetime. These throttles are owned by their corresponding
+  // NavigationHandler instances.
+  std::set<PasswordProtectionNavigationThrottle*> throttles_;
+
+  // Whether there is a modal warning triggered by this request.
+  bool is_modal_warning_showing_;
 
   base::WeakPtrFactory<PasswordProtectionRequest> weakptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(PasswordProtectionRequest);

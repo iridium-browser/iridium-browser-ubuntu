@@ -8,18 +8,20 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "base/test/scoped_path_override.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -36,6 +38,7 @@
 #include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_error_factory_mock.h"
 #include "components/sync_preferences/pref_service_syncable.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 
@@ -45,17 +48,28 @@ namespace {
 
 const char kExternalAppId[] = "kekdneafjmhmndejhmbcadfiiofngffo";
 const char kStandaloneAppId[] = "ldnnhddmnhbkjipkidpdiheffobcpfmf";
+const char kStandaloneChildAppId[] = "hcglmfcclpfgljeaiahehebeoaiicbko";
 
 class ExternalProviderImplChromeOSTest : public ExtensionServiceTestBase {
  public:
   ExternalProviderImplChromeOSTest()
       : fake_user_manager_(new chromeos::FakeChromeUserManager()),
-        scoped_user_manager_(fake_user_manager_) {}
+        scoped_user_manager_(base::WrapUnique(fake_user_manager_)) {}
 
   ~ExternalProviderImplChromeOSTest() override {}
 
   void InitServiceWithExternalProviders(bool standalone) {
+    InitServiceWithExternalProvidersAndUserType(standalone,
+                                                false /* is_child */);
+  }
+
+  void InitServiceWithExternalProvidersAndUserType(bool standalone,
+                                                   bool is_child) {
     InitializeEmptyExtensionService();
+
+    if (is_child)
+      profile_.get()->SetSupervisedUserId(supervised_users::kChildAccountSUID);
+
     service_->Init();
 
     if (standalone) {
@@ -81,14 +95,33 @@ class ExternalProviderImplChromeOSTest : public ExtensionServiceTestBase {
   }
 
   void TearDown() override {
+    // If some extensions are being installed (on a background thread) and we
+    // stop before the intsallation is complete, some installation related
+    // objects might be leaked (as the background thread won't block on exit and
+    // finish cleanly).
+    // So ensure we let pending extension installations finish.
+    WaitForPendingStandaloneExtensionsInstalled();
     chromeos::KioskAppManager::Shutdown();
+    ExtensionServiceTestBase::TearDown();
+  }
+
+  // Waits until all possible standalone extensions are installed.
+  void WaitForPendingStandaloneExtensionsInstalled() {
+    service_->CheckForExternalUpdates();
+    base::RunLoop().RunUntilIdle();
+    extensions::PendingExtensionManager* const pending_extension_manager =
+        service_->pending_extension_manager();
+    while (pending_extension_manager->IsIdPending(kStandaloneAppId) ||
+           pending_extension_manager->IsIdPending(kStandaloneChildAppId)) {
+      base::RunLoop().RunUntilIdle();
+    }
   }
 
  private:
   std::unique_ptr<base::ScopedPathOverride> external_externsions_overrides_;
   chromeos::system::ScopedFakeStatisticsProvider fake_statistics_provider_;
   chromeos::FakeChromeUserManager* fake_user_manager_;
-  chromeos::ScopedUserManagerEnabler scoped_user_manager_;
+  user_manager::ScopedUserManager scoped_user_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalProviderImplChromeOSTest);
 };
@@ -126,12 +159,23 @@ TEST_F(ExternalProviderImplChromeOSTest, AppMode) {
 TEST_F(ExternalProviderImplChromeOSTest, Standalone) {
   InitServiceWithExternalProviders(true);
 
-  service_->CheckForExternalUpdates();
-  content::WindowedNotificationObserver(
-      extensions::NOTIFICATION_CRX_INSTALLER_DONE,
-      content::NotificationService::AllSources()).Wait();
+  WaitForPendingStandaloneExtensionsInstalled();
 
   EXPECT_TRUE(service_->GetInstalledExtension(kStandaloneAppId));
+  // Also include apps available for child.
+  EXPECT_TRUE(service_->GetInstalledExtension(kStandaloneChildAppId));
+}
+
+// Should include only subset of default apps
+TEST_F(ExternalProviderImplChromeOSTest, StandaloneChild) {
+  InitServiceWithExternalProvidersAndUserType(true /* standalone */,
+                                              true /* is_child */);
+
+  WaitForPendingStandaloneExtensionsInstalled();
+
+  // kStandaloneAppId is not available for child.
+  EXPECT_FALSE(service_->GetInstalledExtension(kStandaloneAppId));
+  EXPECT_TRUE(service_->GetInstalledExtension(kStandaloneChildAppId));
 }
 
 // Normal mode, standalone app should be installed, because sync is disabled.

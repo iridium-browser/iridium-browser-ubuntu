@@ -32,12 +32,21 @@ Polymer({
     tpmFirmwareUpdateChecked_: Boolean,
 
     /**
+     * If the checkbox to request a TPM firmware update is editable.
+     */
+    tpmFirmwareUpdateEditable_: Boolean,
+
+    /**
      * Reference to OOBE screen object.
      * @type {!OobeTypes.Screen}
      */
     screen: {
       type: Object,
     },
+  },
+
+  focus: function() {
+    this.$.resetDialog.focus();
   },
 
   /** @private */
@@ -108,4 +117,17 @@ Polymer({
     this.screen.onTPMFirmwareUpdateChanged_(
         this.$.tpmFirmwareUpdateCheckbox.checked);
   },
+
+  /**
+   * On-tap event handler for the TPM firmware update learn more link.
+   *
+   * @param {!Event} event
+   * @private
+   */
+  onTPMFirmwareUpdateLearnMore_: function(event) {
+    chrome.send(
+        'login.ResetScreen.userActed', ['tpm-firmware-update-learn-more-link']);
+    event.stopPropagation();
+  },
+
 });

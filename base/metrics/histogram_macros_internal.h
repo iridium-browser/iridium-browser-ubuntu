@@ -132,19 +132,22 @@
 // forcing an explicit cast to the HistogramBase::Sample integral type.
 //
 // Note the range checks verify two separate issues:
-// - that the declared enum max isn't out of range of HistogramBase::Sample
-// - that the declared enum max is > 0
+// - that the declared enum size isn't out of range of HistogramBase::Sample
+// - that the declared enum size is > 0
 //
 // TODO(dcheng): This should assert that the passed in types are actually enum
 // types.
 #define INTERNAL_HISTOGRAM_ENUMERATION_WITH_FLAG(name, sample, boundary, flag) \
   do {                                                                         \
-    static_assert(                                                             \
-        !std::is_enum<decltype(sample)>::value ||                              \
-            !std::is_enum<decltype(boundary)>::value ||                        \
-            std::is_same<std::remove_const<decltype(sample)>::type,            \
-                         std::remove_const<decltype(boundary)>::type>::value,  \
-        "|sample| and |boundary| shouldn't be of different enums");            \
+    using decayed_sample = std::decay<decltype(sample)>::type;                 \
+    using decayed_boundary = std::decay<decltype(boundary)>::type;             \
+    static_assert(!std::is_enum<decayed_boundary>::value ||                    \
+                      std::is_enum<decayed_sample>::value,                     \
+                  "Unexpected: |boundary| is enum, but |sample| is not.");     \
+    static_assert(!std::is_enum<decayed_sample>::value ||                      \
+                      !std::is_enum<decayed_boundary>::value ||                \
+                      std::is_same<decayed_sample, decayed_boundary>::value,   \
+                  "|sample| and |boundary| shouldn't be of different enums");  \
     static_assert(                                                             \
         static_cast<uintmax_t>(boundary) <                                     \
             static_cast<uintmax_t>(                                            \
@@ -176,17 +179,5 @@
    private:                                                                    \
     base::TimeTicks constructed_;                                              \
   } scoped_histogram_timer_##key
-
-// Macro for sparse histogram.
-// The implementation is more costly to add values to, and each value
-// stored has more overhead, compared to the other histogram types. However it
-// may be more efficient in memory if the total number of sample values is small
-// compared to the range of their values.
-#define INTERNAL_HISTOGRAM_SPARSE_SLOWLY(name, sample)                         \
-    do {                                                                       \
-      base::HistogramBase* histogram = base::SparseHistogram::FactoryGet(      \
-          name, base::HistogramBase::kUmaTargetedHistogramFlag);               \
-      histogram->Add(sample);                                                  \
-    } while (0)
 
 #endif  // BASE_METRICS_HISTOGRAM_MACROS_INTERNAL_H_

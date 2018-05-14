@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process_platform_part.h"
@@ -22,11 +23,9 @@
 #include "media/media_features.h"
 
 class BackgroundModeManager;
-class CRLSetFetcher;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
 class GpuModeManager;
-class GpuProfileCache;
 class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
@@ -36,10 +35,15 @@ class NotificationUIManager;
 class PrefService;
 class ProfileManager;
 class StatusTray;
+class SystemNetworkContextManager;
 class WatchDogThread;
 #if BUILDFLAG(ENABLE_WEBRTC)
 class WebRtcLogUploader;
 #endif
+
+namespace content {
+class NetworkConnectionTracker;
+}
 
 namespace safe_browsing {
 class SafeBrowsingService;
@@ -55,7 +59,6 @@ class VariationsService;
 
 namespace component_updater {
 class ComponentUpdateService;
-class PnaclComponentInstaller;
 class SupervisedUserWhitelistInstaller;
 }
 
@@ -65,10 +68,6 @@ class EventRouterForwarder;
 
 namespace gcm {
 class GCMDriver;
-}
-
-namespace message_center {
-class MessageCenter;
 }
 
 namespace metrics {
@@ -91,12 +90,16 @@ namespace network_time {
 class NetworkTimeTracker;
 }
 
+namespace optimization_guide {
+class OptimizationGuideService;
+}
+
 namespace physical_web {
 class PhysicalWebDataSource;
 }
 
 namespace policy {
-class BrowserPolicyConnector;
+class ChromeBrowserPolicyConnector;
 class PolicyService;
 }
 
@@ -122,10 +125,6 @@ namespace safe_browsing {
 class ClientSideDetectionService;
 }
 
-namespace ukm {
-class UkmRecorder;
-}
-
 // NOT THREAD SAFE, call only from the main thread.
 // These functions shouldn't return NULL unless otherwise noted.
 class BrowserProcess {
@@ -138,9 +137,13 @@ class BrowserProcess {
 
   // Invoked when the user is logging out/shutting down. When logging off we may
   // not have enough time to do a normal shutdown. This method is invoked prior
-  // to normal shutdown and saves any state that must be saved before we are
-  // continue shutdown.
+  // to normal shutdown and saves any state that must be saved before system
+  // shutdown.
   virtual void EndSession() = 0;
+
+  // Ensures |local_state()| was flushed to disk and then posts |reply| back on
+  // the current sequence.
+  virtual void FlushLocalStateAndReply(base::OnceClosure reply) = 0;
 
   // Gets the manager for the various metrics-related services, constructing it
   // if necessary.
@@ -150,7 +153,6 @@ class BrowserProcess {
   // Services: any of these getters may return NULL
   virtual metrics::MetricsService* metrics_service() = 0;
   virtual rappor::RapporServiceImpl* rappor_service() = 0;
-  virtual ukm::UkmRecorder* ukm_recorder() = 0;
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
@@ -167,9 +169,6 @@ class BrowserProcess {
   virtual NotificationUIManager* notification_ui_manager() = 0;
   virtual NotificationPlatformBridge* notification_platform_bridge() = 0;
 
-  // MessageCenter is a global list of currently displayed notifications.
-  virtual message_center::MessageCenter* message_center() = 0;
-
   // Returns the state object for the thread that we perform I/O
   // coordination on (network requests, communication with renderers,
   // etc.
@@ -180,11 +179,21 @@ class BrowserProcess {
   // BrowserThread::PostTask (or other variants).
   virtual IOThread* io_thread() = 0;
 
+  // Replacement for IOThread (And ChromeNetLog). It owns and manages the
+  // NetworkContext which will use the network service when the network service
+  // is enabled. When the network service is not enabled, its NetworkContext is
+  // backed by the IOThread's URLRequestContext.
+  virtual SystemNetworkContextManager* system_network_context_manager() = 0;
+
+  // Returns a NetworkConnectionTracker that can be used to subscribe for
+  // network change events.
+  virtual content::NetworkConnectionTracker* network_connection_tracker() = 0;
+
   // Returns the thread that is used for health check of all browser threads.
   virtual WatchDogThread* watchdog_thread() = 0;
 
   // Starts and manages the policy system.
-  virtual policy::BrowserPolicyConnector* browser_policy_connector() = 0;
+  virtual policy::ChromeBrowserPolicyConnector* browser_policy_connector() = 0;
 
   // This is the main interface for chromium components to retrieve policy
   // information from the policy system.
@@ -194,13 +203,8 @@ class BrowserProcess {
 
   virtual GpuModeManager* gpu_mode_manager() = 0;
 
-  virtual GpuProfileCache* gpu_profile_cache() = 0;
+  virtual void CreateDevToolsProtocolHandler() = 0;
 
-  // Create and bind remote debugging server to a given |ip| and |port|.
-  // Passing empty |ip| results in binding to localhost:
-  // 127.0.0.1 or ::1 depending on the environment.
-  virtual void CreateDevToolsHttpProtocolHandler(const std::string& ip,
-                                                 uint16_t port) = 0;
   virtual void CreateDevToolsAutoOpener() = 0;
 
   virtual bool IsShuttingDown() = 0;
@@ -246,6 +250,11 @@ class BrowserProcess {
   virtual subresource_filter::ContentRulesetService*
   subresource_filter_ruleset_service() = 0;
 
+  // Returns the service used to provide hints for what optimizations can be
+  // performed on slow page loads.
+  virtual optimization_guide::OptimizationGuideService*
+  optimization_guide_service() = 0;
+
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   // This will start a timer that, if Chrome is in persistent mode, will check
   // whether an update is available, and if that's the case, restart the
@@ -261,17 +270,10 @@ class BrowserProcess {
 
   virtual component_updater::ComponentUpdateService* component_updater() = 0;
 
-  virtual CRLSetFetcher* crl_set_fetcher() = 0;
-
-  virtual component_updater::PnaclComponentInstaller*
-  pnacl_component_installer() = 0;
-
   virtual component_updater::SupervisedUserWhitelistInstaller*
   supervised_user_whitelist_installer() = 0;
 
   virtual MediaFileSystemRegistry* media_file_system_registry() = 0;
-
-  virtual bool created_local_state() const = 0;
 
 #if BUILDFLAG(ENABLE_WEBRTC)
   virtual WebRtcLogUploader* webrtc_log_uploader() = 0;

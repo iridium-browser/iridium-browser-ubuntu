@@ -891,6 +891,7 @@ void UnmapTexSubImage2DCHROMIUM(const void* mem) override;
 void ResizeCHROMIUM(GLuint width,
                     GLuint height,
                     GLfloat scale_factor,
+                    GLenum color_space,
                     GLboolean alpha) override;
 
 const GLchar* GetRequestableExtensionsCHROMIUM() override;
@@ -979,16 +980,10 @@ void VertexAttribDivisorANGLE(GLuint index, GLuint divisor) override;
 
 void GenMailboxCHROMIUM(GLbyte* mailbox) override;
 
-void ProduceTextureCHROMIUM(GLenum target, const GLbyte* mailbox) override;
-
 void ProduceTextureDirectCHROMIUM(GLuint texture,
-                                  GLenum target,
                                   const GLbyte* mailbox) override;
 
-void ConsumeTextureCHROMIUM(GLenum target, const GLbyte* mailbox) override;
-
-GLuint CreateAndConsumeTextureCHROMIUM(GLenum target,
-                                       const GLbyte* mailbox) override;
+GLuint CreateAndConsumeTextureCHROMIUM(const GLbyte* mailbox) override;
 
 void BindUniformLocationCHROMIUM(GLuint program,
                                  GLint location,
@@ -1013,16 +1008,20 @@ void DiscardFramebufferEXT(GLenum target,
 
 void LoseContextCHROMIUM(GLenum current, GLenum other) override;
 
-GLuint64 InsertFenceSyncCHROMIUM() override;
+void GenSyncTokenCHROMIUM(GLbyte* sync_token) override;
 
-void GenSyncTokenCHROMIUM(GLuint64 fence_sync, GLbyte* sync_token) override;
-
-void GenUnverifiedSyncTokenCHROMIUM(GLuint64 fence_sync,
-                                    GLbyte* sync_token) override;
+void GenUnverifiedSyncTokenCHROMIUM(GLbyte* sync_token) override;
 
 void VerifySyncTokensCHROMIUM(GLbyte** sync_tokens, GLsizei count) override;
 
 void WaitSyncTokenCHROMIUM(const GLbyte* sync_token) override;
+
+void UnpremultiplyAndDitherCopyCHROMIUM(GLuint source_id,
+                                        GLuint dest_id,
+                                        GLint x,
+                                        GLint y,
+                                        GLsizei width,
+                                        GLsizei height) override;
 
 void DrawBuffersEXT(GLsizei count, const GLenum* bufs) override;
 
@@ -1221,7 +1220,9 @@ void UniformMatrix4fvStreamTextureMatrixCHROMIUM(
 void OverlayPromotionHintCHROMIUM(GLuint texture,
                                   GLboolean promotion_hint,
                                   GLint display_x,
-                                  GLint display_y) override;
+                                  GLint display_y,
+                                  GLint display_width,
+                                  GLint display_height) override;
 
 void SwapBuffersWithBoundsCHROMIUM(GLsizei count, const GLint* rects) override;
 
@@ -1237,5 +1238,38 @@ void InitializeDiscardableTextureCHROMIUM(GLuint texture_id) override;
 void UnlockDiscardableTextureCHROMIUM(GLuint texture_id) override;
 
 bool LockDiscardableTextureCHROMIUM(GLuint texture_id) override;
+
+void BeginRasterCHROMIUM(GLuint texture_id,
+                         GLuint sk_color,
+                         GLuint msaa_sample_count,
+                         GLboolean can_use_lcd_text,
+                         GLboolean use_distance_field_text,
+                         GLint color_type,
+                         GLuint color_space_transfer_cache_id) override;
+
+void* MapRasterCHROMIUM(GLsizeiptr size) override;
+
+void UnmapRasterCHROMIUM(GLsizeiptr written_size) override;
+
+void EndRasterCHROMIUM() override;
+
+void TexStorage2DImageCHROMIUM(GLenum target,
+                               GLenum internalFormat,
+                               GLenum bufferUsage,
+                               GLsizei width,
+                               GLsizei height) override;
+
+void SetColorSpaceMetadataCHROMIUM(GLuint texture_id,
+                                   GLColorSpace color_space) override;
+
+void WindowRectanglesEXT(GLenum mode, GLsizei count, const GLint* box) override;
+
+GLuint CreateGpuFenceCHROMIUM() override;
+
+GLuint CreateClientGpuFenceCHROMIUM(ClientGpuFence source) override;
+
+void WaitGpuFenceCHROMIUM(GLuint gpu_fence_id) override;
+
+void DestroyGpuFenceCHROMIUM(GLuint gpu_fence_id) override;
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_AUTOGEN_H_

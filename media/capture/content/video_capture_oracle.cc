@@ -95,19 +95,16 @@ bool HasSufficientRecentFeedback(
 
 }  // anonymous namespace
 
-VideoCaptureOracle::VideoCaptureOracle(
-    base::TimeDelta min_capture_period,
-    const gfx::Size& max_frame_size,
-    media::ResolutionChangePolicy resolution_change_policy,
-    bool enable_auto_throttling)
+// static
+constexpr base::TimeDelta VideoCaptureOracle::kDefaultMinCapturePeriod;
+
+VideoCaptureOracle::VideoCaptureOracle(bool enable_auto_throttling)
     : auto_throttling_enabled_(enable_auto_throttling),
       next_frame_number_(0),
-      source_is_dirty_(true),
       last_successfully_delivered_frame_number_(-1),
       num_frames_pending_(0),
-      smoothing_sampler_(min_capture_period),
-      content_sampler_(min_capture_period),
-      resolution_chooser_(max_frame_size, resolution_change_policy),
+      smoothing_sampler_(kDefaultMinCapturePeriod),
+      content_sampler_(kDefaultMinCapturePeriod),
       buffer_pool_utilization_(base::TimeDelta::FromMicroseconds(
           kBufferUtilizationEvaluationMicros)),
       estimated_capable_area_(base::TimeDelta::FromMicroseconds(
@@ -116,7 +113,20 @@ VideoCaptureOracle::VideoCaptureOracle(
           << (auto_throttling_enabled_ ? "enabled." : "disabled.");
 }
 
-VideoCaptureOracle::~VideoCaptureOracle() {
+VideoCaptureOracle::~VideoCaptureOracle() = default;
+
+void VideoCaptureOracle::SetMinCapturePeriod(base::TimeDelta period) {
+  DCHECK_GT(period, base::TimeDelta());
+  smoothing_sampler_.SetMinCapturePeriod(period);
+  content_sampler_.SetMinCapturePeriod(period);
+}
+
+void VideoCaptureOracle::SetCaptureSizeConstraints(
+    const gfx::Size& min_size,
+    const gfx::Size& max_size,
+    bool use_fixed_aspect_ratio) {
+  resolution_chooser_.SetConstraints(min_size, max_size,
+                                     use_fixed_aspect_ratio);
 }
 
 void VideoCaptureOracle::SetSourceSize(const gfx::Size& source_size) {
@@ -140,11 +150,6 @@ bool VideoCaptureOracle::ObserveEventAndDecideCapture(
   }
   last_event_time_[event] = event_time;
 
-  // If the event indicates a change to the source content, set a flag that will
-  // prevent passive refresh requests until a capture is made.
-  if (event != kActiveRefreshRequest && event != kPassiveRefreshRequest)
-    source_is_dirty_ = true;
-
   bool should_sample = false;
   duration_of_next_frame_ = base::TimeDelta();
   switch (event) {
@@ -167,12 +172,7 @@ bool VideoCaptureOracle::ObserveEventAndDecideCapture(
       break;
     }
 
-    case kPassiveRefreshRequest:
-      if (source_is_dirty_)
-        break;
-    // Intentional flow-through to next case here!
-    case kActiveRefreshRequest:
-    case kMouseCursorUpdate:
+    case kRefreshRequest:
       // Only allow non-compositor samplings when content has not recently been
       // animating, and only if there are no samplings currently in progress.
       if (num_frames_pending_ == 0) {
@@ -202,9 +202,8 @@ bool VideoCaptureOracle::ObserveEventAndDecideCapture(
     }
     const base::TimeDelta upper_bound =
         base::TimeDelta::FromMilliseconds(kUpperBoundDurationEstimateMicros);
-    duration_of_next_frame_ =
-        std::max(std::min(duration_of_next_frame_, upper_bound),
-                 smoothing_sampler_.min_capture_period());
+    duration_of_next_frame_ = std::max(
+        std::min(duration_of_next_frame_, upper_bound), min_capture_period());
   }
 
   // Update |capture_size_| and reset all feedback signal accumulators if
@@ -224,14 +223,8 @@ bool VideoCaptureOracle::ObserveEventAndDecideCapture(
   return true;
 }
 
-int VideoCaptureOracle::next_frame_number() const {
-  return next_frame_number_;
-}
-
 void VideoCaptureOracle::RecordCapture(double pool_utilization) {
   DCHECK(std::isfinite(pool_utilization) && pool_utilization >= 0.0);
-
-  source_is_dirty_ = false;
 
   smoothing_sampler_.RecordSample();
   const base::TimeTicks timestamp = GetFrameTimestamp(next_frame_number_);
@@ -283,9 +276,6 @@ bool VideoCaptureOracle::CompleteCapture(int frame_number,
 
   if (!capture_was_successful) {
     VLOG(2) << "Capture of frame #" << frame_number << " was not successful.";
-    // Since capture of this frame might have been required for capturing an
-    // update to the source content, set the dirty flag.
-    source_is_dirty_ = true;
     return false;
   }
 
@@ -327,6 +317,18 @@ bool VideoCaptureOracle::CompleteCapture(int frame_number,
   return true;
 }
 
+void VideoCaptureOracle::CancelAllCaptures() {
+  // The following is the desired behavior:
+  //
+  //   for (int i = num_frames_pending_; i > 0; --i) {
+  //     CompleteCapture(next_frame_number_ - i, false, nullptr);
+  //     --num_frames_pending_;
+  //   }
+  //
+  // ...which simplifies to:
+  num_frames_pending_ = 0;
+}
+
 void VideoCaptureOracle::RecordConsumerFeedback(int frame_number,
                                                 double resource_utilization) {
   if (!auto_throttling_enabled_)
@@ -361,12 +363,8 @@ const char* VideoCaptureOracle::EventAsString(Event event) {
   switch (event) {
     case kCompositorUpdate:
       return "compositor";
-    case kActiveRefreshRequest:
-      return "active_refresh";
-    case kPassiveRefreshRequest:
-      return "passive_refresh";
-    case kMouseCursorUpdate:
-      return "mouse";
+    case kRefreshRequest:
+      return "refresh";
     case kNumEvents:
       break;
   }

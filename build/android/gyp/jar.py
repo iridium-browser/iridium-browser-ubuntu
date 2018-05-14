@@ -7,6 +7,7 @@
 import optparse
 import os
 import shutil
+import stat
 import sys
 import tempfile
 
@@ -42,7 +43,12 @@ def Jar(class_files, classes_dir, jar_path, manifest_file=None,
       jar_dir = os.path.dirname(full_jar_filepath)
       if not os.path.exists(jar_dir):
         os.makedirs(jar_dir)
-      shutil.copy(filepath, full_jar_filepath)
+      # Some of our JARs are mode 0440 because they exist in the source tree as
+      # symlinks to JARs managed by CIPD. shutil.copyfile copies the contents,
+      # not the permissions, so the resulting copy is writeable despite the
+      # the source JAR not being so. (shutil.copy does copy the permissions and
+      # as such doesn't work without changing the mode after.)
+      shutil.copyfile(filepath, full_jar_filepath)
       jar_cmd.append(jar_filepath)
 
     if provider_configurations:
@@ -66,13 +72,29 @@ def Jar(class_files, classes_dir, jar_path, manifest_file=None,
 
 def JarDirectory(classes_dir, jar_path, manifest_file=None, predicate=None,
                  provider_configurations=None, additional_files=None):
-  class_files = build_utils.FindInDirectory(classes_dir, '*.class')
+  all_files = build_utils.FindInDirectory(classes_dir, '*')
   if predicate:
-    class_files = [f for f in class_files if predicate(f)]
+    all_files = [
+        f for f in all_files if predicate(os.path.relpath(f, classes_dir))]
 
-  Jar(class_files, classes_dir, jar_path, manifest_file=manifest_file,
+  Jar(all_files, classes_dir, jar_path, manifest_file=manifest_file,
       provider_configurations=provider_configurations,
       additional_files=additional_files)
+
+
+def _CreateFilterPredicate(excluded_classes, included_classes):
+  if not excluded_classes and not included_classes:
+    return None
+
+  def predicate(f):
+    # Exclude filters take precidence over include filters.
+    if build_utils.MatchesGlob(f, excluded_classes):
+      return False
+    if included_classes and not build_utils.MatchesGlob(f, included_classes):
+      return False
+    return True
+
+  return predicate
 
 
 def main():
@@ -82,6 +104,8 @@ def main():
   parser.add_option('--jar-path', help='Jar output path.')
   parser.add_option('--excluded-classes',
       help='GN list of .class file patterns to exclude from the jar.')
+  parser.add_option('--included-classes',
+      help='GN list of .class file patterns to include in the jar.')
   parser.add_option('--strip-resource-classes-for',
       help='GN list of java package names exclude R.class files in.')
   parser.add_option('--stamp', help='Path to touch on success.')
@@ -94,16 +118,16 @@ def main():
   excluded_classes = []
   if options.excluded_classes:
     excluded_classes = build_utils.ParseGnList(options.excluded_classes)
+  included_classes = []
+  if options.included_classes:
+    included_classes = build_utils.ParseGnList(options.included_classes)
 
   if options.strip_resource_classes_for:
     packages = build_utils.ParseGnList(options.strip_resource_classes_for)
     excluded_classes.extend(p.replace('.', '/') + '/' + f
                             for p in packages for f in _RESOURCE_CLASSES)
 
-  predicate = None
-  if excluded_classes:
-    predicate = lambda f: not build_utils.MatchesGlob(f, excluded_classes)
-
+  predicate = _CreateFilterPredicate(excluded_classes, included_classes)
   with build_utils.TempDir() as temp_dir:
     classes_dir = options.classes_dir
     if options.input_jar:

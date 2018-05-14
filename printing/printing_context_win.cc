@@ -51,11 +51,10 @@ PrintingContextWin::~PrintingContextWin() {
   ReleaseContext();
 }
 
-void PrintingContextWin::AskUserForSettings(
-    int max_pages,
-    bool has_selection,
-    bool is_scripted,
-    const PrintSettingsCallback& callback) {
+void PrintingContextWin::AskUserForSettings(int max_pages,
+                                            bool has_selection,
+                                            bool is_scripted,
+                                            PrintSettingsCallback callback) {
   NOTIMPLEMENTED();
 }
 
@@ -200,18 +199,17 @@ PrintingContext::Result PrintingContextWin::UpdatePrinterSettings(
 
     const PrintSettings::RequestedMedia& requested_media =
         settings_.requested_media();
-    static const int kFromUm = 100;  // Windows uses 0.1mm.
-    int width = requested_media.size_microns.width() / kFromUm;
-    int height = requested_media.size_microns.height() / kFromUm;
     unsigned id = 0;
-    if (base::StringToUint(requested_media.vendor_id, &id) && id) {
+    // If the paper size is a custom user size, setting by ID may not work.
+    if (base::StringToUint(requested_media.vendor_id, &id) && id &&
+        id < DMPAPER_USER) {
       dev_mode->dmFields |= DM_PAPERSIZE;
       dev_mode->dmPaperSize = static_cast<short>(id);
-    } else if (width > 0 && height > 0) {
-      dev_mode->dmFields |= DM_PAPERWIDTH;
-      dev_mode->dmPaperWidth = width;
-      dev_mode->dmFields |= DM_PAPERLENGTH;
-      dev_mode->dmPaperLength = height;
+    } else if (!requested_media.size_microns.IsEmpty()) {
+      static constexpr int kFromUm = 100;  // Windows uses 0.1mm.
+      dev_mode->dmFields |= DM_PAPERWIDTH | DM_PAPERLENGTH;
+      dev_mode->dmPaperWidth = requested_media.size_microns.width() / kFromUm;
+      dev_mode->dmPaperLength = requested_media.size_microns.height() / kFromUm;
     }
   }
 
@@ -264,11 +262,12 @@ PrintingContext::Result PrintingContextWin::NewDocument(
   di.lpszDocName = document_name.c_str();
 
   // Is there a debug dump directory specified? If so, force to print to a file.
-  base::string16 debug_dump_path =
-      PrintedDocument::CreateDebugDumpPath(document_name,
-                                           FILE_PATH_LITERAL(".prn")).value();
-  if (!debug_dump_path.empty())
-    di.lpszOutput = debug_dump_path.c_str();
+  if (PrintedDocument::HasDebugDumpPath()) {
+    base::FilePath debug_dump_path = PrintedDocument::CreateDebugDumpPath(
+        document_name, FILE_PATH_LITERAL(".prn"));
+    if (!debug_dump_path.empty())
+      di.lpszOutput = debug_dump_path.value().c_str();
+  }
 
   // No message loop running in unit tests.
   DCHECK(!base::MessageLoop::current() ||
@@ -334,7 +333,7 @@ void PrintingContextWin::ReleaseContext() {
   }
 }
 
-skia::NativeDrawingContext PrintingContextWin::context() const {
+printing::NativeDrawingContext PrintingContextWin::context() const {
   return context_;
 }
 

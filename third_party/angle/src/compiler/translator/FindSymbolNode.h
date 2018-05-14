@@ -9,18 +9,14 @@
 #ifndef COMPILER_TRANSLATOR_FIND_SYMBOL_H_
 #define COMPILER_TRANSLATOR_FIND_SYMBOL_H_
 
-#include "compiler/translator/BaseTypes.h"
-#include "compiler/translator/Common.h"
-
 namespace sh
 {
 
+class ImmutableString;
 class TIntermNode;
 class TIntermSymbol;
 
-const TIntermSymbol *FindSymbolNode(TIntermNode *root,
-                                    const TString &symbolName,
-                                    TBasicType basicType);
+const TIntermSymbol *FindSymbolNode(TIntermNode *root, const ImmutableString &symbolName);
 
 }  // namespace sh
 

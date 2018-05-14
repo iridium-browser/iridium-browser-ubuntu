@@ -45,6 +45,7 @@
 #define PaintLayerScrollableArea_h
 
 #include <memory>
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/layout/ScrollAnchor.h"
 #include "core/page/scrolling/StickyPositionScrollingConstraints.h"
@@ -52,6 +53,7 @@
 #include "core/paint/PaintLayerFragment.h"
 #include "core/paint/ScrollbarManager.h"
 #include "platform/heap/Handle.h"
+#include "platform/scroll/ScrollTypes.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
@@ -68,13 +70,13 @@ class StickyPositionScrollingConstraints;
 class SubtreeLayoutScope;
 
 struct CORE_EXPORT PaintLayerScrollableAreaRareData {
-  WTF_MAKE_NONCOPYABLE(PaintLayerScrollableAreaRareData);
   USING_FAST_MALLOC(PaintLayerScrollableAreaRareData);
 
  public:
   PaintLayerScrollableAreaRareData();
 
   StickyConstraintsMap sticky_constraints_map_;
+  DISALLOW_COPY_AND_ASSIGN(PaintLayerScrollableAreaRareData);
 };
 
 // PaintLayerScrollableArea represents the scrollable area of a LayoutBox.
@@ -142,9 +144,9 @@ class CORE_EXPORT PaintLayerScrollableArea final
     void SetHasVerticalScrollbar(bool has_scrollbar) override;
 
     void DestroyDetachedScrollbars();
+    Scrollbar* CreateScrollbar(ScrollbarOrientation) override;
 
    protected:
-    Scrollbar* CreateScrollbar(ScrollbarOrientation) override;
     void DestroyScrollbar(ScrollbarOrientation) override;
 
     PaintLayerScrollableArea* ScrollableArea();
@@ -224,7 +226,9 @@ class CORE_EXPORT PaintLayerScrollableArea final
 
   ~PaintLayerScrollableArea() override;
   void Dispose();
+  bool HasBeenDisposed() const override;
 
+  void ForceVerticalScrollbarForFirstLayout() { SetHasVerticalScrollbar(true); }
   bool HasHorizontalScrollbar() const { return HorizontalScrollbar(); }
   bool HasVerticalScrollbar() const { return VerticalScrollbar(); }
 
@@ -234,6 +238,12 @@ class CORE_EXPORT PaintLayerScrollableArea final
   Scrollbar* VerticalScrollbar() const override {
     return scrollbar_manager_.VerticalScrollbar();
   }
+  Scrollbar* CreateScrollbar(ScrollbarOrientation orientation) override {
+    return scrollbar_manager_.CreateScrollbar(orientation);
+  }
+
+  void CalculateScrollbarModes(ScrollbarMode& h_mode,
+                               ScrollbarMode& v_mode) const;
 
   PlatformChromeClient* GetChromeClient() const override;
 
@@ -278,8 +288,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
   IntSize MaximumScrollOffsetInt() const override;
   IntRect VisibleContentRect(
       IncludeScrollbarsInRect = kExcludeScrollbars) const override;
-  int VisibleHeight() const override;
-  int VisibleWidth() const override;
+  LayoutRect VisibleScrollSnapportRect() const override;
   IntSize ContentsSize() const override;
   void ContentsResized() override;
   bool IsScrollable() const override;
@@ -298,16 +307,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
   ScrollBehavior ScrollBehaviorStyle() const override;
   CompositorAnimationHost* GetCompositorAnimationHost() const override;
   CompositorAnimationTimeline* GetCompositorAnimationTimeline() const override;
-
-  // These are temporary convenience methods.  They delegate to Box() methods,
-  // which will be up-to-date when UpdateAfterLayout runs.  By contrast,
-  // VisibleContentRect() is based on layer_.Size(), which isn't updated
-  // until later, when UpdateLayerPosition runs.  A future patch will cause
-  // layer_.Size() to be updated effectively simultaneously with Box()
-  // sizing.  When that lands, these methods should be removed in favor of
-  // using VisibleContentRect() and/or layer_.Size() everywhere.
-  LayoutSize ClientSize() const;
-  IntSize PixelSnappedClientSize() const;
+  void GetTickmarks(Vector<IntRect>&) const override;
 
   void VisibleSizeChanged();
 
@@ -388,22 +388,10 @@ class CORE_EXPORT PaintLayerScrollableArea final
   bool HitTestResizerInFragments(const PaintLayerFragments&,
                                  const HitTestLocation&) const;
 
-  // Returns the new offset, after scrolling, of the given rect in parents
-  // coordinates.
-  LayoutRect ScrollLocalRectIntoView(const LayoutRect&,
-                                     const ScrollAlignment& align_x,
-                                     const ScrollAlignment& align_y,
-                                     bool is_smooth,
-                                     ScrollType = kProgrammaticScroll,
-                                     bool is_for_scroll_sequence = false);
   // Returns the new offset, after scrolling, of the given rect in absolute
   // coordinates, clipped by the parent's client rect.
   LayoutRect ScrollIntoView(const LayoutRect&,
-                            const ScrollAlignment& align_x,
-                            const ScrollAlignment& align_y,
-                            bool is_smooth,
-                            ScrollType = kProgrammaticScroll,
-                            bool is_for_scroll_sequence = false) override;
+                            const WebScrollIntoViewParams&) override;
 
   // Returns true if scrollable area is in the FrameView's collection of
   // scrollable areas. This can only happen if we're scrollable, visible to hit
@@ -415,9 +403,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
   // Rectangle encompassing the scroll corner and resizer rect.
   IntRect ScrollCornerAndResizerRect() const final;
 
-  enum LCDTextMode { kConsiderLCDText, kIgnoreLCDText };
-
-  void UpdateNeedsCompositedScrolling(LCDTextMode = kConsiderLCDText);
+  void UpdateNeedsCompositedScrolling(bool layer_has_been_composited = false);
   bool NeedsCompositedScrolling() const { return needs_composited_scrolling_; }
 
   // These are used during compositing updates to determine if the overflow
@@ -430,8 +416,6 @@ class CORE_EXPORT PaintLayerScrollableArea final
 
   IntRect ResizerCornerRect(const IntRect&, ResizerHitTestType) const;
 
-  // TODO(ymalik): Remove box() and update callers to use layoutBox() instead.
-  LayoutBox& Box() const;
   PaintLayer* Layer() const override;
 
   LayoutScrollbarPart* Resizer() const override { return resizer_; }
@@ -448,16 +432,17 @@ class CORE_EXPORT PaintLayerScrollableArea final
 
   bool ScheduleAnimation() override;
   bool ShouldPerformScrollAnchoring() const override;
+  bool RestoreScrollAnchor(const SerializedAnchor&) override;
   ScrollAnchor* GetScrollAnchor() override { return &scroll_anchor_; }
   bool IsPaintLayerScrollableArea() const override { return true; }
 
-  LayoutBox* GetLayoutBox() const override { return &Box(); }
+  LayoutBox* GetLayoutBox() const override;
 
   FloatQuad LocalToVisibleContentQuad(const FloatQuad&,
                                       const LayoutObject*,
                                       unsigned = 0) const final;
 
-  RefPtr<WebTaskRunner> GetTimerTaskRunner() const final;
+  scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() const final;
 
   bool ShouldRebuildHorizontalScrollbarLayer() const {
     return rebuild_horizontal_scrollbar_layer_;
@@ -502,13 +487,19 @@ class CORE_EXPORT PaintLayerScrollableArea final
   void InvalidateAllStickyConstraints();
   void InvalidateStickyConstraintsFor(PaintLayer*,
                                       bool needs_compositing_update = true);
+  void InvalidatePaintForStickyDescendants();
+  void UpdateLayerPositionForStickyDescendants();
+  bool HasStickyDescendants() const;
+  bool HasNonCompositedStickyDescendants() const;
   uint32_t GetNonCompositedMainThreadScrollingReasons() {
     return non_composited_main_thread_scrolling_reasons_;
   }
 
   uint64_t Id() const;
 
-  DECLARE_VIRTUAL_TRACE();
+  ScrollbarTheme& GetPageScrollbarTheme() const override;
+
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit PaintLayerScrollableArea(PaintLayer&);
@@ -523,7 +514,11 @@ class CORE_EXPORT PaintLayerScrollableArea final
   void UpdateScrollDimensions();
   void UpdateScrollbarEnabledState();
 
+  // Update the proportions used for thumb rect dimensions.
+  void UpdateScrollbarProportions();
+
   void UpdateScrollOffset(const ScrollOffset&, ScrollType) override;
+  void InvalidatePaintForScrollOffsetChange(bool offset_was_zero);
 
   int VerticalScrollbarStart(int min_x, int max_x) const;
   int HorizontalScrollbarStart(int min_x) const;
@@ -535,16 +530,23 @@ class CORE_EXPORT PaintLayerScrollableArea final
       bool& needs_vertical_scrollbar,
       ComputeScrollbarExistenceOption = kDefault) const;
 
+  // If the content fits entirely in the area without auto scrollbars, returns
+  // true to try to remove them. This is a heuristic and can be incorrect if the
+  // content size depends on the scrollbar size (e.g., percentage sizing).
+  bool TryRemovingAutoScrollbars(const bool& needs_horizontal_scrollbar,
+                                 const bool& needs_vertical_scrollbar);
+
   // Returns true iff scrollbar existence changed.
   bool SetHasHorizontalScrollbar(bool has_scrollbar);
   bool SetHasVerticalScrollbar(bool has_scrollbar);
 
   void UpdateScrollCornerStyle();
   LayoutSize MinimumSizeForResizing(float zoom_factor);
+  LayoutRect LayoutContentRect(IncludeScrollbarsInRect) const;
 
   // See comments on isPointInResizeControl.
   void UpdateResizerAreaSet();
-  void UpdateResizerStyle();
+  void UpdateResizerStyle(const ComputedStyle* old_style);
 
   void UpdateScrollableAreaSet();
 
@@ -553,15 +555,24 @@ class CORE_EXPORT PaintLayerScrollableArea final
   ScrollingCoordinator* GetScrollingCoordinator() const;
 
   PaintLayerScrollableAreaRareData* RareData() { return rare_data_.get(); }
+  const PaintLayerScrollableAreaRareData* RareData() const {
+    return rare_data_.get();
+  }
 
   PaintLayerScrollableAreaRareData& EnsureRareData() {
     if (!rare_data_)
-      rare_data_ = WTF::MakeUnique<PaintLayerScrollableAreaRareData>();
+      rare_data_ = std::make_unique<PaintLayerScrollableAreaRareData>();
     return *rare_data_.get();
   }
 
-  bool ComputeNeedsCompositedScrolling(const LCDTextMode, const PaintLayer*);
-  PaintLayer& layer_;
+  bool ComputeNeedsCompositedScrolling(const bool, const PaintLayer*);
+
+  IntRect CornerRect(const IntRect& bounds) const;
+
+  // PaintLayer is destructed before PaintLayerScrollable area, during this
+  // time before PaintLayerScrollableArea has been collected layer_ will
+  // be set to nullptr by the Dispose method.
+  PaintLayer* layer_;
 
   PaintLayer* next_topmost_scroll_child_;
   PaintLayer* topmost_scroll_child_;
@@ -571,7 +582,11 @@ class CORE_EXPORT PaintLayerScrollableArea final
   unsigned in_resize_mode_ : 1;
   unsigned scrolls_overflow_ : 1;
 
+  // True if we are in an overflow scrollbar relayout.
   unsigned in_overflow_relayout_ : 1;
+
+  // True if a second overflow scrollbar relayout is permitted.
+  unsigned allow_second_overflow_relayout_ : 1;
 
   // FIXME: once cc can handle composited scrolling with clip paths, we will
   // no longer need this bit.
@@ -614,8 +629,6 @@ class CORE_EXPORT PaintLayerScrollableArea final
 
   // MainThreadScrollingReason due to the properties of the LayoutObject
   uint32_t non_composited_main_thread_scrolling_reasons_;
-
-  bool has_been_disposed_;
 };
 
 DEFINE_TYPE_CASTS(PaintLayerScrollableArea,

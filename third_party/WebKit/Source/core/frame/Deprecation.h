@@ -5,20 +5,21 @@
 #ifndef Deprecation_h
 #define Deprecation_h
 
+#include "base/macros.h"
 #include "core/CSSPropertyNames.h"
 #include "core/CoreExport.h"
 #include "core/frame/UseCounter.h"
 #include "platform/wtf/BitVector.h"
-#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
+namespace mojom {
+enum class FeaturePolicyFeature;
+}  // namespace mojom
 
 class LocalFrame;
-enum class WebFeaturePolicyFeature;
 
 class CORE_EXPORT Deprecation {
   DISALLOW_NEW();
-  WTF_MAKE_NONCOPYABLE(Deprecation);
 
  public:
   Deprecation();
@@ -50,7 +51,8 @@ class CORE_EXPORT Deprecation {
   static void CountDeprecationCrossOriginIframe(const Document&, WebFeature);
 
   static void CountDeprecationFeaturePolicy(const Document&,
-                                            WebFeaturePolicyFeature);
+                                            mojom::FeaturePolicyFeature);
+
   static String DeprecationMessage(WebFeature);
 
   // Note: this is only public for tests.
@@ -61,8 +63,14 @@ class CORE_EXPORT Deprecation {
   // CSSPropertyIDs that aren't deprecated return an empty string.
   static String DeprecationMessage(CSSPropertyID unresolved_property);
 
+  // Generates a deprecation report, to be routed to the Reporting API and any
+  // ReportingObservers. Also sends the deprecation message to the console.
+  static void GenerateReport(const LocalFrame*, WebFeature);
+
   BitVector css_property_deprecation_bits_;
   unsigned mute_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(Deprecation);
 };
 
 }  // namespace blink

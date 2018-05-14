@@ -6,7 +6,6 @@
 
 #include "core/fxcrt/xml/cfx_xmlparser.h"
 
-#include "core/fxcrt/fx_basic.h"
 #include "core/fxcrt/xml/cfx_xmlchardata.h"
 #include "core/fxcrt/xml/cfx_xmlelement.h"
 #include "core/fxcrt/xml/cfx_xmlinstruction.h"
@@ -14,9 +13,8 @@
 #include "core/fxcrt/xml/cfx_xmltext.h"
 #include "third_party/base/ptr_util.h"
 
-CFX_XMLParser::CFX_XMLParser(
-    CFX_XMLNode* pParent,
-    const CFX_RetainPtr<CFX_SeekableStreamProxy>& pStream)
+CFX_XMLParser::CFX_XMLParser(CFX_XMLNode* pParent,
+                             const RetainPtr<CFX_SeekableStreamProxy>& pStream)
     : m_nElementStart(0),
       m_dwCheckStatus(0),
       m_dwCurrentCheckStatus(0),
@@ -74,7 +72,8 @@ int32_t CFX_XMLParser::DoParser() {
         if (m_NodeStack.empty()) {
           m_syntaxParserResult = FX_XmlSyntaxResult::Error;
           break;
-        } else if (m_dwCurrentCheckStatus != 0 && m_NodeStack.size() == 2) {
+        }
+        if (m_dwCurrentCheckStatus != 0 && m_NodeStack.size() == 2) {
           m_nSize[m_dwCurrentCheckStatus - 1] =
               m_pParser->GetCurrentBinaryPos() -
               m_nStart[m_dwCurrentCheckStatus - 1];
@@ -88,7 +87,7 @@ int32_t CFX_XMLParser::DoParser() {
         m_ws1 = m_pParser->GetTargetName();
         if (m_ws1 == L"originalXFAVersion" || m_ws1 == L"acrobat") {
           m_pChild = new CFX_XMLInstruction(m_ws1);
-          m_pParent->InsertChildNode(m_pChild);
+          m_pParent->AppendChild(m_pChild);
         } else {
           m_pChild = nullptr;
         }
@@ -97,12 +96,12 @@ int32_t CFX_XMLParser::DoParser() {
       case FX_XmlSyntaxResult::TagName:
         m_ws1 = m_pParser->GetTagName();
         m_pChild = new CFX_XMLElement(m_ws1);
-        m_pParent->InsertChildNode(m_pChild);
+        m_pParent->AppendChild(m_pChild);
         m_NodeStack.push(m_pChild);
         m_pParent = m_pChild;
 
         if (m_dwCheckStatus != 0x03 && m_NodeStack.size() == 3) {
-          CFX_WideString wsTag =
+          WideString wsTag =
               static_cast<CFX_XMLElement*>(m_pChild)->GetLocalTagName();
           if (wsTag == L"template") {
             m_dwCheckStatus |= 0x01;
@@ -131,13 +130,13 @@ int32_t CFX_XMLParser::DoParser() {
       case FX_XmlSyntaxResult::Text:
         m_ws1 = m_pParser->GetTextData();
         m_pChild = new CFX_XMLText(m_ws1);
-        m_pParent->InsertChildNode(m_pChild);
+        m_pParent->AppendChild(m_pChild);
         m_pChild = m_pParent;
         break;
       case FX_XmlSyntaxResult::CData:
         m_ws1 = m_pParser->GetTextData();
         m_pChild = new CFX_XMLCharData(m_ws1);
-        m_pParent->InsertChildNode(m_pChild);
+        m_pParent->AppendChild(m_pChild);
         m_pChild = m_pParent;
         break;
       case FX_XmlSyntaxResult::TargetData:

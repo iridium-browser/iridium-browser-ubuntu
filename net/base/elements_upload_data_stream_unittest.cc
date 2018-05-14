@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <memory>
 #include <vector>
 
 #include "base/bind.h"
@@ -16,7 +15,6 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -74,16 +72,26 @@ class MockUploadElementReader : public UploadElementReader {
         init_result_(OK),
         read_result_(OK) {}
 
-  ~MockUploadElementReader() override {}
+  ~MockUploadElementReader() override = default;
 
   // UploadElementReader overrides.
-  MOCK_METHOD1(Init, int(const CompletionCallback& callback));
+  int Init(CompletionOnceCallback callback) override {
+    // This is a back to get around Gmock's lack of support for move-only types.
+    return Init(&callback);
+  }
+  MOCK_METHOD1(Init, int(CompletionOnceCallback* callback));
   uint64_t GetContentLength() const override { return content_length_; }
   uint64_t BytesRemaining() const override { return bytes_remaining_; }
   bool IsInMemory() const override { return is_in_memory_; }
-  MOCK_METHOD3(Read, int(IOBuffer* buf,
-                         int buf_length,
-                         const CompletionCallback& callback));
+  int Read(IOBuffer* buf,
+           int buf_length,
+           CompletionOnceCallback callback) override {
+    return Read(buf, buf_length, &callback);
+  }
+  MOCK_METHOD3(Read,
+               int(IOBuffer* buf,
+                   int buf_length,
+                   CompletionOnceCallback* callback));
 
   // Sets expectation to return the specified result from Init() asynchronously.
   void SetAsyncInitExpectation(int result) {
@@ -101,21 +109,19 @@ class MockUploadElementReader : public UploadElementReader {
   }
 
  private:
-  void OnInit(const CompletionCallback& callback) {
+  void OnInit(CompletionOnceCallback* callback) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, init_result_));
+        FROM_HERE, base::BindOnce(std::move(*callback), init_result_));
   }
 
-  int OnRead(IOBuffer* buf,
-             int buf_length,
-             const CompletionCallback& callback) {
+  int OnRead(IOBuffer* buf, int buf_length, CompletionOnceCallback* callback) {
     if (read_result_ > 0)
       bytes_remaining_ = std::max(0, bytes_remaining_ - read_result_);
     if (IsInMemory()) {
       return read_result_;
     } else {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(callback, read_result_));
+          FROM_HERE, base::BindOnce(std::move(*callback), read_result_));
       return ERR_IO_PENDING;
     }
   }
@@ -164,7 +170,7 @@ TEST_F(ElementsUploadDataStreamTest, EmptyUploadData) {
 
 TEST_F(ElementsUploadDataStreamTest, ConsumeAllBytes) {
   element_readers_.push_back(
-      base::MakeUnique<UploadBytesElementReader>(kTestData, kTestDataSize));
+      std::make_unique<UploadBytesElementReader>(kTestData, kTestDataSize));
   std::unique_ptr<UploadDataStream> stream(
       new ElementsUploadDataStream(std::move(element_readers_), 0));
   ASSERT_THAT(stream->Init(CompletionCallback(), NetLogWithSource()), IsOk());
@@ -189,7 +195,7 @@ TEST_F(ElementsUploadDataStreamTest, File) {
   ASSERT_EQ(static_cast<int>(kTestDataSize),
             base::WriteFile(temp_file_path, kTestData, kTestDataSize));
 
-  element_readers_.push_back(base::MakeUnique<UploadFileElementReader>(
+  element_readers_.push_back(std::make_unique<UploadFileElementReader>(
       base::ThreadTaskRunnerHandle::Get().get(), temp_file_path, 0,
       std::numeric_limits<uint64_t>::max(), base::Time()));
 
@@ -226,7 +232,7 @@ TEST_F(ElementsUploadDataStreamTest, FileSmallerThanLength) {
   UploadFileElementReader::ScopedOverridingContentLengthForTests
       overriding_content_length(kFakeSize);
 
-  element_readers_.push_back(base::MakeUnique<UploadFileElementReader>(
+  element_readers_.push_back(std::make_unique<UploadFileElementReader>(
       base::ThreadTaskRunnerHandle::Get().get(), temp_file_path, 0,
       std::numeric_limits<uint64_t>::max(), base::Time()));
 
@@ -269,7 +275,7 @@ TEST_F(ElementsUploadDataStreamTest, ReadErrorSync) {
 
   // This element is ignored because of the error from the previous reader.
   element_readers_.push_back(
-      base::MakeUnique<UploadBytesElementReader>(kTestData, kTestDataSize));
+      std::make_unique<UploadBytesElementReader>(kTestData, kTestDataSize));
 
   std::unique_ptr<UploadDataStream> stream(
       new ElementsUploadDataStream(std::move(element_readers_), 0));
@@ -304,7 +310,7 @@ TEST_F(ElementsUploadDataStreamTest, ReadErrorAsync) {
 
   // This element is ignored because of the error from the previous reader.
   element_readers_.push_back(
-      base::MakeUnique<UploadBytesElementReader>(kTestData, kTestDataSize));
+      std::make_unique<UploadBytesElementReader>(kTestData, kTestDataSize));
 
   std::unique_ptr<UploadDataStream> stream(
       new ElementsUploadDataStream(std::move(element_readers_), 0));
@@ -343,12 +349,12 @@ TEST_F(ElementsUploadDataStreamTest, FileAndBytes) {
 
   const uint64_t kFileRangeOffset = 1;
   const uint64_t kFileRangeLength = 4;
-  element_readers_.push_back(base::MakeUnique<UploadFileElementReader>(
+  element_readers_.push_back(std::make_unique<UploadFileElementReader>(
       base::ThreadTaskRunnerHandle::Get().get(), temp_file_path,
       kFileRangeOffset, kFileRangeLength, base::Time()));
 
   element_readers_.push_back(
-      base::MakeUnique<UploadBytesElementReader>(kTestData, kTestDataSize));
+      std::make_unique<UploadBytesElementReader>(kTestData, kTestDataSize));
 
   const uint64_t kStreamSize = kTestDataSize + kFileRangeLength;
   TestCompletionCallback init_callback;
@@ -456,7 +462,7 @@ TEST_F(ElementsUploadDataStreamTest, InitAsyncFailureSync) {
 // Read with a buffer whose size is same as the data.
 TEST_F(ElementsUploadDataStreamTest, ReadAsyncWithExactSizeBuffer) {
   element_readers_.push_back(
-      base::WrapUnique(new UploadBytesElementReader(kTestData, kTestDataSize)));
+      std::make_unique<UploadBytesElementReader>(kTestData, kTestDataSize));
   std::unique_ptr<UploadDataStream> stream(
       new ElementsUploadDataStream(std::move(element_readers_), 0));
 
@@ -539,7 +545,7 @@ void ElementsUploadDataStreamTest::FileChangedHelper(
   // Don't use element_readers_ here, as this function is called twice, and
   // reusing element_readers_ is wrong.
   std::vector<std::unique_ptr<UploadElementReader>> element_readers;
-  element_readers.push_back(base::MakeUnique<UploadFileElementReader>(
+  element_readers.push_back(std::make_unique<UploadFileElementReader>(
       base::ThreadTaskRunnerHandle::Get().get(), file_path, 1, 2, time));
 
   TestCompletionCallback init_callback;
@@ -582,8 +588,8 @@ TEST_F(ElementsUploadDataStreamTest, MultipleInit) {
 
   // Prepare data.
   element_readers_.push_back(
-      base::MakeUnique<UploadBytesElementReader>(kTestData, kTestDataSize));
-  element_readers_.push_back(base::MakeUnique<UploadFileElementReader>(
+      std::make_unique<UploadBytesElementReader>(kTestData, kTestDataSize));
+  element_readers_.push_back(std::make_unique<UploadFileElementReader>(
       base::ThreadTaskRunnerHandle::Get().get(), temp_file_path, 0,
       std::numeric_limits<uint64_t>::max(), base::Time()));
   std::unique_ptr<UploadDataStream> stream(
@@ -627,8 +633,8 @@ TEST_F(ElementsUploadDataStreamTest, MultipleInitAsync) {
 
   // Prepare data.
   element_readers_.push_back(
-      base::MakeUnique<UploadBytesElementReader>(kTestData, kTestDataSize));
-  element_readers_.push_back(base::MakeUnique<UploadFileElementReader>(
+      std::make_unique<UploadBytesElementReader>(kTestData, kTestDataSize));
+  element_readers_.push_back(std::make_unique<UploadFileElementReader>(
       base::ThreadTaskRunnerHandle::Get().get(), temp_file_path, 0,
       std::numeric_limits<uint64_t>::max(), base::Time()));
   std::unique_ptr<UploadDataStream> stream(
@@ -669,8 +675,8 @@ TEST_F(ElementsUploadDataStreamTest, InitToReset) {
 
   // Prepare data.
   element_readers_.push_back(
-      base::MakeUnique<UploadBytesElementReader>(kTestData, kTestDataSize));
-  element_readers_.push_back(base::MakeUnique<UploadFileElementReader>(
+      std::make_unique<UploadBytesElementReader>(kTestData, kTestDataSize));
+  element_readers_.push_back(std::make_unique<UploadFileElementReader>(
       base::ThreadTaskRunnerHandle::Get().get(), temp_file_path, 0,
       std::numeric_limits<uint64_t>::max(), base::Time()));
   std::unique_ptr<UploadDataStream> stream(
@@ -727,8 +733,8 @@ TEST_F(ElementsUploadDataStreamTest, InitDuringAsyncInit) {
 
   // Prepare data.
   element_readers_.push_back(
-      base::MakeUnique<UploadBytesElementReader>(kTestData, kTestDataSize));
-  element_readers_.push_back(base::MakeUnique<UploadFileElementReader>(
+      std::make_unique<UploadBytesElementReader>(kTestData, kTestDataSize));
+  element_readers_.push_back(std::make_unique<UploadFileElementReader>(
       base::ThreadTaskRunnerHandle::Get().get(), temp_file_path, 0,
       std::numeric_limits<uint64_t>::max(), base::Time()));
   std::unique_ptr<UploadDataStream> stream(
@@ -775,8 +781,8 @@ TEST_F(ElementsUploadDataStreamTest, InitDuringAsyncRead) {
 
   // Prepare data.
   element_readers_.push_back(
-      base::MakeUnique<UploadBytesElementReader>(kTestData, kTestDataSize));
-  element_readers_.push_back(base::MakeUnique<UploadFileElementReader>(
+      std::make_unique<UploadBytesElementReader>(kTestData, kTestDataSize));
+  element_readers_.push_back(std::make_unique<UploadFileElementReader>(
       base::ThreadTaskRunnerHandle::Get().get(), temp_file_path, 0,
       std::numeric_limits<uint64_t>::max(), base::Time()));
   std::unique_ptr<UploadDataStream> stream(

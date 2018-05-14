@@ -42,6 +42,7 @@ class ProfileSyncServiceHarness {
   static std::unique_ptr<ProfileSyncServiceHarness> Create(
       Profile* profile,
       const std::string& username,
+      const std::string& gaia_id,
       const std::string& password,
       SigninType signin_type);
   virtual ~ProfileSyncServiceHarness();
@@ -67,6 +68,9 @@ class ProfileSyncServiceHarness {
   // to recover from a lost birthday. Use directly after a clear server data
   // command to start from clean slate.
   bool RestartSyncService();
+
+  // Sign out of sync service.
+  void SignoutSyncService();
 
   // Calling this acts as a barrier and blocks the caller until |this| and
   // |partner| have both completed a sync cycle.  When calling this method,
@@ -139,11 +143,11 @@ class ProfileSyncServiceHarness {
   void FinishSyncSetup();
 
  private:
-  ProfileSyncServiceHarness(
-      Profile* profile,
-      const std::string& username,
-      const std::string& password,
-      SigninType signin_type);
+  ProfileSyncServiceHarness(Profile* profile,
+                            const std::string& username,
+                            const std::string& gaia_id,
+                            const std::string& password,
+                            SigninType signin_type);
 
   // Gets detailed status from |service_| in pretty-printable form.
   std::string GetServiceStatus();
@@ -162,6 +166,7 @@ class ProfileSyncServiceHarness {
 
   // Credentials used for GAIA authentication.
   std::string username_;
+  std::string gaia_id_;
   std::string password_;
 
   // Used to decide what method of profile signin to use.

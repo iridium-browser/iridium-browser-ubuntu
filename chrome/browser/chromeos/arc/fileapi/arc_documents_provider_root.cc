@@ -11,7 +11,6 @@
 #include "base/callback.h"
 #include "base/files/file.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -250,8 +249,7 @@ void ArcDocumentsProviderRoot::ReadDirectoryWithDocumentId(
     const std::string& document_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (document_id.empty()) {
-    std::move(callback).Run(base::File::FILE_ERROR_NOT_FOUND,
-                            std::vector<ThinFileInfo>());
+    std::move(callback).Run(base::File::FILE_ERROR_NOT_FOUND, {});
     return;
   }
   ReadDirectoryInternal(
@@ -267,7 +265,7 @@ void ArcDocumentsProviderRoot::ReadDirectoryWithNameToDocumentMap(
     const NameToDocumentMap& mapping) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (error != base::File::FILE_OK) {
-    std::move(callback).Run(error, std::vector<ThinFileInfo>());
+    std::move(callback).Run(error, {});
     return;
   }
 

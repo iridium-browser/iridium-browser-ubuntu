@@ -8,6 +8,7 @@
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Heap.h"
 #include "public/platform/modules/permissions/permission.mojom-blink.h"
+#include "third_party/WebKit/public/mojom/quota/quota_dispatcher_host.mojom-blink.h"
 
 namespace blink {
 
@@ -16,8 +17,7 @@ class ScriptPromise;
 class ScriptPromiseResolver;
 class ScriptState;
 
-class StorageManager final : public GarbageCollectedFinalized<StorageManager>,
-                             public ScriptWrappable {
+class StorageManager final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -25,15 +25,19 @@ class StorageManager final : public GarbageCollectedFinalized<StorageManager>,
   ScriptPromise persist(ScriptState*);
 
   ScriptPromise estimate(ScriptState*);
-  DECLARE_TRACE();
 
  private:
-  mojom::blink::PermissionService* GetPermissionService(ExecutionContext*);
+  mojom::blink::PermissionService& GetPermissionService(ExecutionContext*);
   void PermissionServiceConnectionError();
   void PermissionRequestComplete(ScriptPromiseResolver*,
                                  mojom::blink::PermissionStatus);
 
+  // Binds the interface (if not already bound) with the given interface
+  // provider, and returns it,
+  mojom::blink::QuotaDispatcherHost& GetQuotaHost(ExecutionContext*);
+
   mojom::blink::PermissionServicePtr permission_service_;
+  mojom::blink::QuotaDispatcherHostPtr quota_host_;
 };
 
 }  // namespace blink

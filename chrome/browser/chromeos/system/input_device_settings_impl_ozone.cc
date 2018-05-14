@@ -16,12 +16,12 @@ namespace chromeos {
 namespace system {
 namespace {
 
-InputDeviceSettings* g_instance = nullptr;
+InputDeviceSettings* g_input_device_settings_impl_ozone_instance = nullptr;
 
 // Callback from SetInternalTouchpadEnabled().
 void OnSetInternalTouchpadEnabled(bool result) {}
 
-// InputDeviceSettings for Linux without X11 (a.k.a. Ozone).
+// InputDeviceSettings for Ozone.
 class InputDeviceSettingsImplOzone : public InputDeviceSettings {
  public:
   InputDeviceSettingsImplOzone();
@@ -42,6 +42,7 @@ class InputDeviceSettingsImplOzone : public InputDeviceSettings {
   void UpdateMouseSettings(const MouseSettings& settings) override;
   void SetMouseSensitivity(int value) override;
   void SetPrimaryButtonRight(bool right) override;
+  void SetMouseReverseScroll(bool enabled) override;
   void ReapplyTouchpadSettings() override;
   void ReapplyMouseSettings() override;
   InputDeviceSettings::FakeInterface* GetFakeInterface() override;
@@ -126,6 +127,11 @@ void InputDeviceSettingsImplOzone::SetPrimaryButtonRight(bool right) {
   input_device_controller_client_->SetPrimaryButtonRight(right);
 }
 
+void InputDeviceSettingsImplOzone::SetMouseReverseScroll(bool enabled) {
+  current_mouse_settings_.SetReverseScroll(enabled);
+  input_device_controller_client_->SetMouseReverseScroll(enabled);
+}
+
 void InputDeviceSettingsImplOzone::ReapplyTouchpadSettings() {
   TouchpadSettings::Apply(current_touchpad_settings_, this);
 }
@@ -152,13 +158,15 @@ void InputDeviceSettingsImplOzone::SetTouchscreensEnabled(bool enabled) {
 
 // static
 InputDeviceSettings* InputDeviceSettings::Get() {
-  if (!g_instance) {
+  if (!g_input_device_settings_impl_ozone_instance) {
     if (IsRunningAsSystemCompositor())
-      g_instance = new InputDeviceSettingsImplOzone;
+      g_input_device_settings_impl_ozone_instance =
+          new InputDeviceSettingsImplOzone;
     else
-      g_instance = new FakeInputDeviceSettings();
+      g_input_device_settings_impl_ozone_instance =
+          new FakeInputDeviceSettings();
   }
-  return g_instance;
+  return g_input_device_settings_impl_ozone_instance;
 }
 
 }  // namespace system

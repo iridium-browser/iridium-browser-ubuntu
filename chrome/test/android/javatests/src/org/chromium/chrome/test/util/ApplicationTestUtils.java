@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.test.util;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.ActivityManager;
@@ -12,8 +13,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.PowerManager;
 
-import junit.framework.Assert;
-import junit.framework.AssertionFailedError;
+import org.junit.Assert;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationState;
@@ -23,6 +23,8 @@ import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.omaha.OmahaBase;
 import org.chromium.chrome.browser.omaha.VersionNumberGetter;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.content.browser.test.util.Coordinates;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 
@@ -39,6 +41,7 @@ public class ApplicationTestUtils {
 
     // TODO(jbudorick): fix deprecation warning crbug.com/537347
     @SuppressWarnings("deprecation")
+    @SuppressLint("WakelockTimeout")
     public static void setUp(Context context, boolean clearAppData) {
         if (clearAppData) {
             // Clear data and remove any tasks listed in Android's Overview menu between test runs.
@@ -65,7 +68,7 @@ public class ApplicationTestUtils {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             try {
                 finishAllChromeTasks(context);
-            } catch (AssertionFailedError exception) {
+            } catch (AssertionError exception) {
             }
         }
     }
@@ -79,6 +82,8 @@ public class ApplicationTestUtils {
         ApplicationData.clearAppData(context);
     }
 
+    // TODO(bauerb): make this function throw more specific exception and update
+    // StartupLoadingMetricsTest correspondingly.
     /** Send the user to the Android home screen. */
     public static void fireHomeScreenIntent(Context context) throws Exception {
         Intent intent = new Intent(Intent.ACTION_MAIN);
@@ -192,7 +197,7 @@ public class ApplicationTestUtils {
     }
 
     /**
-     * Waits till the ContentViewCore receives the expected page scale factor
+     * Waits till the WebContents receives the expected page scale factor
      * from the compositor and asserts that this happens.
      *
      * Proper use of this function requires waiting for a page scale factor that isn't 1.0f because
@@ -203,13 +208,15 @@ public class ApplicationTestUtils {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                if (activity.getCurrentContentViewCore() == null) return false;
+                Tab tab = activity.getActivityTab();
+                if (tab == null) return false;
 
-                updateFailureReason("Expecting scale factor of: " + expectedScale + ", got: "
-                        + activity.getCurrentContentViewCore().getScale());
-                return Math.abs(activity.getCurrentContentViewCore().getScale() - expectedScale)
-                        < FLOAT_EPSILON;
+                Coordinates coord = Coordinates.createFor(tab.getWebContents());
+                float scale = coord.getPageScaleFactor();
+                updateFailureReason(
+                        "Expecting scale factor of: " + expectedScale + ", got: " + scale);
+                return Math.abs(scale - expectedScale) < FLOAT_EPSILON;
             }
-        }, CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
+        });
     }
 }

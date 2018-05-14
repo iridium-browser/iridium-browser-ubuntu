@@ -47,22 +47,28 @@ message DownloadFileType {
     PLATFORM_WINDOWS = 5;
   }
 
-  // Next id: 4
+  // Next id: 5
   message PlatformSettings {
     optional PlatformType platform = 1 [default = PLATFORM_ANY];
     optional DangerLevel danger_level = 2;  // required
     optional AutoOpenHint auto_open_hint = 3;  // required
+    optional uint64 max_file_size_to_analyze = 4
+        [default = 18446744073709551615];  // (2^64)-1]
   };
 
   // Protos parsed by Chrome should have exactly one entry here.
   repeated PlatformSettings platform_settings = 5;
 };
 
-// Next id: 5
+// Next id: 6
 message DownloadFileTypeConfig {
   // All required
   optional uint32 version_id = 1;
   optional float sampled_ping_probability = 2;
   repeated DownloadFileType file_types = 3;
   optional DownloadFileType default_file_type = 4;
+
+  // Limits on repeated fields in the ClientDownloadRequest (i.e. the
+  // download ping). Limits are per-ping.
+  optional uint64 max_archived_binaries_to_report = 5;
 }

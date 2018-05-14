@@ -8,18 +8,11 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 
-namespace chrome {
-class TestingIOThreadState;
-}
-
-namespace predictors {
-class PredictorDatabase;
-}
-
 class BrowserView;
-class ScopedTestingLocalState;
 
 // Base class for BrowserView based unit tests. TestWithBrowserView creates
 // a Browser with a valid BrowserView and BrowserFrame with as little else as
@@ -40,9 +33,7 @@ class TestWithBrowserView : public BrowserWithTestWindowTest {
 
  private:
   BrowserView* browser_view_;  // Not owned.
-  std::unique_ptr<ScopedTestingLocalState> local_state_;
-  std::unique_ptr<predictors::PredictorDatabase> predictor_db_;
-  std::unique_ptr<chrome::TestingIOThreadState> testing_io_thread_state_;
+  base::test::ScopedFeatureList feature_list_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWithBrowserView);
 };

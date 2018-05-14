@@ -4,17 +4,15 @@
 
 #include "net/http/http_stream_factory_impl_request.h"
 
-#include <memory>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "net/http/http_stream_factory_impl.h"
 #include "net/http/http_stream_factory_impl_job.h"
 #include "net/http/http_stream_factory_impl_job_controller.h"
 #include "net/http/http_stream_factory_test_util.h"
-#include "net/proxy/proxy_info.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_info.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/spdy/chromium/spdy_test_util_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -28,8 +26,8 @@ class HttpStreamFactoryImplRequestTest : public ::testing::Test {};
 TEST_F(HttpStreamFactoryImplRequestTest, SetPriority) {
   SequencedSocketData data(nullptr, 0, nullptr, 0);
   data.set_connect_data(MockConnect(ASYNC, OK));
-  auto ssl_data = base::MakeUnique<SSLSocketDataProvider>(ASYNC, OK);
-  SpdySessionDependencies session_deps(ProxyService::CreateDirect());
+  auto ssl_data = std::make_unique<SSLSocketDataProvider>(ASYNC, OK);
+  SpdySessionDependencies session_deps(ProxyResolutionService::CreateDirect());
   session_deps.socket_factory->AddSocketDataProvider(&data);
   session_deps.socket_factory->AddSSLSocketDataProvider(ssl_data.get());
 
@@ -41,9 +39,10 @@ TEST_F(HttpStreamFactoryImplRequestTest, SetPriority) {
   TestJobFactory job_factory;
   HttpRequestInfo request_info;
   request_info.url = GURL("http://www.example.com/");
-  auto job_controller = base::MakeUnique<HttpStreamFactoryImpl::JobController>(
+  auto job_controller = std::make_unique<HttpStreamFactoryImpl::JobController>(
       factory, &request_delegate, session.get(), &job_factory, request_info,
       /* is_preconnect = */ false,
+      /* is_websocket = */ false,
       /* enable_ip_based_pooling = */ true,
       /* enable_alternative_services = */ true, SSLConfig(), SSLConfig());
   HttpStreamFactoryImpl::JobController* job_controller_raw_ptr =
@@ -60,7 +59,7 @@ TEST_F(HttpStreamFactoryImplRequestTest, SetPriority) {
   request->SetPriority(MEDIUM);
   EXPECT_EQ(MEDIUM, job_controller_raw_ptr->main_job()->priority());
 
-  EXPECT_CALL(request_delegate, OnStreamFailed(_, _)).Times(1);
+  EXPECT_CALL(request_delegate, OnStreamFailed(_, _, _)).Times(1);
   job_controller_raw_ptr->OnStreamFailed(job_factory.main_job(), ERR_FAILED,
                                          SSLConfig());
 

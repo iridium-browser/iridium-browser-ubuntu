@@ -18,7 +18,6 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Manual;
@@ -31,13 +30,17 @@ import org.chromium.ui.base.PageTransition;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.io.Reader;
+import java.io.UnsupportedEncodingException;
+import java.io.Writer;
+import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -50,8 +53,7 @@ import java.util.concurrent.TimeoutException;
  * can continue opening the next URL when they are restarted.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PopularUrlsTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -93,14 +95,17 @@ public class PopularUrlsTest {
     }
 
     private BufferedReader getInputStream(File inputFile) throws FileNotFoundException {
-        FileReader fileReader = new FileReader(inputFile);
-        BufferedReader bufferedReader = new BufferedReader(fileReader);
-
-        return bufferedReader;
+        try {
+            Reader fileReader = new InputStreamReader(new FileInputStream(inputFile), "UTF-8");
+            return new BufferedReader(fileReader);
+        } catch (UnsupportedEncodingException ex) {
+            throw new RuntimeException("UTF-8 not present...time to give up on this charade.", ex);
+        }
     }
 
     private OutputStreamWriter getOutputStream(File outputFile) throws IOException {
-        return new FileWriter(outputFile, mStatus.getIsRecovery());
+        return new OutputStreamWriter(
+                new FileOutputStream(outputFile, mStatus.getIsRecovery()), "UTF-8");
     }
 
     private void logToStream(String str, OutputStreamWriter writer) throws IOException {
@@ -124,14 +129,14 @@ public class PopularUrlsTest {
 
         public RunStatus(File file) throws IOException {
             mFile = file;
-            FileReader input = null;
+            Reader input = null;
             BufferedReader reader = null;
             mIsRecovery = false;
             mAllClear = false;
             mIteration = 0;
             mPage = 0;
             try {
-                input = new FileReader(mFile);
+                input = new InputStreamReader(new FileInputStream(mFile), "UTF-8");
                 mIsRecovery = true;
                 reader = new BufferedReader(input);
                 String line = reader.readLine();
@@ -162,14 +167,13 @@ public class PopularUrlsTest {
             }
         }
 
-        @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
         public void write() throws IOException {
-            FileWriter output = null;
+            Writer output = null;
             if (mFile.exists()) {
                 mFile.delete();
             }
             try {
-                output = new FileWriter(mFile);
+                output = new OutputStreamWriter(new FileOutputStream(mFile), "UTF-8");
                 output.write(mIteration + NEW_LINE);
                 output.write(mPage + NEW_LINE);
                 output.write(mUrl + NEW_LINE);
@@ -180,7 +184,6 @@ public class PopularUrlsTest {
             }
         }
 
-        @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
         public void cleanUp() {
             // Only perform cleanup when mAllClear flag is set, i.e.
             // when the test was not interrupted by a Java crash.
@@ -252,13 +255,10 @@ public class PopularUrlsTest {
             }
         });
 
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
-            @Override
-            public void run() {
-                Tab tab = mActivityTestRule.getActivity().getActivityTab();
-                int pageTransition = PageTransition.TYPED | PageTransition.FROM_ADDRESS_BAR;
-                tab.loadUrl(new LoadUrlParams(url, pageTransition));
-            }
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            Tab tab1 = mActivityTestRule.getActivity().getActivityTab();
+            int pageTransition = PageTransition.TYPED | PageTransition.FROM_ADDRESS_BAR;
+            tab1.loadUrl(new LoadUrlParams(url, pageTransition));
         });
         // There are a combination of events ordering in a failure case.
         // There might be TAB_CRASHED with or without PAGE_LOAD_FINISHED preceding it.
@@ -310,12 +310,8 @@ public class PopularUrlsTest {
             mFailed = true;
         }
         // Try to stop page load.
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
-            @Override
-            public void run() {
-                mActivityTestRule.getActivity().getActivityTab().stopLoading();
-            }
-        });
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(
+                () -> mActivityTestRule.getActivity().getActivityTab().stopLoading());
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
@@ -333,7 +329,7 @@ public class PopularUrlsTest {
     private void loopUrls(BufferedReader input, OutputStreamWriter outputWriter,
             OutputStreamWriter failureWriter, boolean clearCache, int loopCount)
             throws IOException, InterruptedException {
-        List<String> pages = new LinkedList<String>();
+        List<String> pages = new ArrayList<>();
 
         String page;
         while (null != (page = input.readLine())) {

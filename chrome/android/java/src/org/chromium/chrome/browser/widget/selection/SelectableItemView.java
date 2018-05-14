@@ -5,17 +5,24 @@
 package org.chromium.chrome.browser.widget.selection;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
+import android.graphics.drawable.Drawable;
+import android.support.annotation.Nullable;
+import android.support.annotation.VisibleForTesting;
+import android.support.graphics.drawable.AnimatedVectorDrawableCompat;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.View.OnLongClickListener;
 import android.widget.Checkable;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.widget.displaystyle.HorizontalDisplayStyle;
-import org.chromium.chrome.browser.widget.displaystyle.MarginResizer;
-import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
+import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.widget.TintedDrawable;
+import org.chromium.chrome.browser.widget.TintedImageView;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate.SelectionObserver;
 
 import java.util.List;
@@ -29,15 +36,31 @@ import java.util.List;
  */
 public abstract class SelectableItemView<E> extends FrameLayout implements Checkable,
         OnClickListener, OnLongClickListener, SelectionObserver<E> {
+    protected final int mDefaultLevel;
+    protected final int mSelectedLevel;
+    protected final AnimatedVectorDrawableCompat mCheckDrawable;
+
+    protected TintedImageView mIconView;
+    protected TextView mTitleView;
+    protected TextView mDescriptionView;
+    protected ColorStateList mIconColorList;
+
     private SelectionDelegate<E> mSelectionDelegate;
-    private SelectableItemHighlightView mHighlightView;
     private E mItem;
+    private boolean mIsChecked;
+    private Drawable mIconDrawable;
 
     /**
      * Constructor for inflating from XML.
      */
     public SelectableItemView(Context context, AttributeSet attrs) {
         super(context, attrs);
+        mIconColorList =
+                ApiCompatibilityUtils.getColorStateList(getResources(), R.color.white_mode_tint);
+        mDefaultLevel = getResources().getInteger(R.integer.list_item_level_default);
+        mSelectedLevel = getResources().getInteger(R.integer.list_item_level_selected);
+        mCheckDrawable = AnimatedVectorDrawableCompat.create(
+                getContext(), R.drawable.ic_check_googblue_24dp_animated);
     }
 
     /**
@@ -63,19 +86,6 @@ public abstract class SelectableItemView<E> extends FrameLayout implements Check
     }
 
     /**
-     * Sets the lateral margins used in {@link HorizontalDisplayStyle#WIDE} and
-     * {@link HorizontalDisplayStyle#REGULAR}. This should be called when the item uses the
-     * list_item* 9-patches as a background and the SelectableListLayout that contains the item
-     * is width constrained.
-     *
-     * @param uiConfig The UiConfig used to observe display style changes.
-     */
-    public void configureWideDisplayStyle(UiConfig uiConfig) {
-        MarginResizer.createAndAttach(this, uiConfig,
-                SelectableListLayout.getDefaultListItemLateralMarginPx(getResources()), 0);
-    }
-
-    /**
      * @param item The item associated with this SelectableItemView.
      */
     public void setItem(E item) {
@@ -95,8 +105,17 @@ public abstract class SelectableItemView<E> extends FrameLayout implements Check
     protected void onFinishInflate() {
         super.onFinishInflate();
 
-        inflate(getContext(), R.layout.selectable_item_highlight_view, this);
-        mHighlightView = (SelectableItemHighlightView) findViewById(R.id.highlight);
+        mIconView = findViewById(R.id.icon_view);
+        mTitleView = findViewById(R.id.title);
+        mDescriptionView = findViewById(R.id.description);
+
+        if (mIconView != null) {
+            mIconView.setBackgroundResource(R.drawable.list_item_icon_modern_bg);
+            mIconView.setTint(getDefaultIconTint());
+            if (!FeatureUtilities.isChromeModernDesignEnabled()) {
+                mIconView.getBackground().setAlpha(0);
+            }
+        }
 
         setOnClickListener(this);
         setOnLongClickListener(this);
@@ -156,7 +175,7 @@ public abstract class SelectableItemView<E> extends FrameLayout implements Check
     // Checkable implementations.
     @Override
     public boolean isChecked() {
-        return mHighlightView.isChecked();
+        return mIsChecked;
     }
 
     @Override
@@ -166,13 +185,55 @@ public abstract class SelectableItemView<E> extends FrameLayout implements Check
 
     @Override
     public void setChecked(boolean checked) {
-        mHighlightView.setChecked(checked);
+        if (checked == mIsChecked) return;
+        mIsChecked = checked;
+        updateIconView();
     }
 
     // SelectionObserver implementation.
     @Override
     public void onSelectionStateChange(List<E> selectedItems) {
         setChecked(mSelectionDelegate.isItemSelected(mItem));
+    }
+
+    /**
+     * Set drawable for the icon view. Note that you may need to use this method instead of
+     * mIconView#setImageDrawable to ensure icon view is correctly set in selection mode.
+     */
+    protected void setIconDrawable(Drawable iconDrawable) {
+        mIconDrawable = iconDrawable;
+        updateIconView();
+    }
+
+    /**
+     * Update icon image and background based on whether this item is selected.
+     */
+    protected void updateIconView() {
+        // TODO(huayinz): Refactor this method so that mIconView is not exposed to subclass.
+        if (mIconView == null) return;
+
+        if (isChecked()) {
+            mIconView.getBackground().setLevel(mSelectedLevel);
+            mIconView.setImageDrawable(mCheckDrawable);
+            mIconView.setTint(mIconColorList);
+            mCheckDrawable.start();
+        } else {
+            mIconView.getBackground().setLevel(mDefaultLevel);
+            mIconView.setImageDrawable(mIconDrawable);
+            mIconView.setTint(getDefaultIconTint());
+        }
+
+        if (!FeatureUtilities.isChromeModernDesignEnabled()) {
+            mIconView.getBackground().setAlpha(isChecked() ? 255 : 0);
+        }
+    }
+
+    /**
+     * @return The {@link ColorStateList} used to tint the icon drawable set via
+     *         {@link #setIconDrawable(Drawable)} when the item is not selected.
+     */
+    protected @Nullable ColorStateList getDefaultIconTint() {
+        return null;
     }
 
     /**
@@ -183,25 +244,27 @@ public abstract class SelectableItemView<E> extends FrameLayout implements Check
      */
     protected abstract void onClick();
 
+    @VisibleForTesting
+    public void endAnimationsForTests() {
+        mCheckDrawable.stop();
+    }
+
     /**
-     * Sets the background resource for this view using the item's positioning in its group.
-     * @param isFirstInGroup Whether this item is the first in its group.
-     * @param isLastInGroup Whether this item is the last in its group.
+     * Sets the icon for the image view: the default icon if unselected, the check mark if selected.
+     *
+     * @param imageView     The image view in which the icon will be presented.
+     * @param defaultIcon   The default icon that will be displayed if not selected.
+     * @param isSelected    Whether the item is selected or not.
      */
-    public void setBackgroundResourceForGroupPosition(
-            boolean isFirstInGroup, boolean isLastInGroup) {
-        int backgroundResource;
-
-        if (!isLastInGroup && !isFirstInGroup) {
-            backgroundResource = R.drawable.list_item_middle;
-        } else if (!isLastInGroup) {
-            backgroundResource = R.drawable.list_item_top;
-        } else if (!isFirstInGroup) {
-            backgroundResource = R.drawable.list_item_bottom;
-        } else {
-            backgroundResource = R.drawable.list_item_single;
-        }
-
-        setBackgroundResource(backgroundResource);
+    public static void applyModernIconStyle(
+            TintedImageView imageView, Drawable defaultIcon, boolean isSelected) {
+        imageView.setBackgroundResource(R.drawable.list_item_icon_modern_bg);
+        imageView.setImageDrawable(isSelected
+                        ? TintedDrawable.constructTintedDrawable(imageView.getResources(),
+                                  R.drawable.ic_check_googblue_24dp, R.color.white_mode_tint)
+                        : defaultIcon);
+        imageView.getBackground().setLevel(isSelected
+                        ? imageView.getResources().getInteger(R.integer.list_item_level_selected)
+                        : imageView.getResources().getInteger(R.integer.list_item_level_default));
     }
 }

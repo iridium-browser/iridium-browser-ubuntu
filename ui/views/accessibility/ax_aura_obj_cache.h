@@ -9,10 +9,11 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include "base/macros.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/aura/client/focus_change_observer.h"
 #include "ui/views/views_export.h"
 
@@ -39,7 +40,7 @@ class VIEWS_EXPORT AXAuraObjCache : public aura::client::FocusChangeObserver {
    public:
     virtual void OnChildWindowRemoved(AXAuraObjWrapper* parent) = 0;
     virtual void OnEvent(AXAuraObjWrapper* aura_obj,
-                         ui::AXEvent event_type) = 0;
+                         ax::mojom::Event event_type) = 0;
   };
 
   // Get or create an entry in the cache based on an Aura view.
@@ -51,10 +52,6 @@ class VIEWS_EXPORT AXAuraObjCache : public aura::client::FocusChangeObserver {
   int32_t GetID(View* view) const;
   int32_t GetID(Widget* widget) const;
   int32_t GetID(aura::Window* window) const;
-
-  // Gets the next unique id for this cache. Useful for non-Aura view backed
-  // views.
-  int32_t GetNextID() { return current_id_++; }
 
   // Removes an entry from this cache based on an Aura view.
   void Remove(View* view);
@@ -83,7 +80,7 @@ class VIEWS_EXPORT AXAuraObjCache : public aura::client::FocusChangeObserver {
   void OnFocusedViewChanged();
 
   // Tell our delegate to fire an event on a given object.
-  void FireEvent(AXAuraObjWrapper* aura_obj, ui::AXEvent event_type);
+  void FireEvent(AXAuraObjWrapper* aura_obj, ax::mojom::Event event_type);
 
   // Indicates if this object's currently being destroyed.
   bool is_destroying() { return is_destroying_; }
@@ -127,14 +124,13 @@ class VIEWS_EXPORT AXAuraObjCache : public aura::client::FocusChangeObserver {
   std::map<aura::Window*, int32_t> window_to_id_map_;
 
   std::map<int32_t, std::unique_ptr<AXAuraObjWrapper>> cache_;
-  int32_t current_id_;
 
   // True immediately when entering this object's destructor.
-  bool is_destroying_;
+  bool is_destroying_ = false;
 
-  Delegate* delegate_;
+  Delegate* delegate_ = nullptr;
 
-  aura::Window* root_window_;
+  std::set<aura::Window*> root_windows_;
 
   DISALLOW_COPY_AND_ASSIGN(AXAuraObjCache);
 };

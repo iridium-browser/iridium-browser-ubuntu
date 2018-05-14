@@ -5,6 +5,7 @@
 #ifndef MediaControlDownloadButtonElement_h
 #define MediaControlDownloadButtonElement_h
 
+#include "modules/ModulesExport.h"
 #include "modules/media_controls/elements/MediaControlInputElement.h"
 
 namespace blink {
@@ -12,7 +13,7 @@ namespace blink {
 class Event;
 class MediaControlsImpl;
 
-class MediaControlDownloadButtonElement final
+class MODULES_EXPORT MediaControlDownloadButtonElement final
     : public MediaControlInputElement {
  public:
   explicit MediaControlDownloadButtonElement(MediaControlsImpl&);
@@ -26,10 +27,11 @@ class MediaControlDownloadButtonElement final
   WebLocalizedString::Name GetOverflowStringName() const final;
   bool HasOverflowButton() const final;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   const char* GetNameForHistograms() const final;
+  void UpdateShownState() final;
 
  private:
   // This is used for UMA histogram (Media.Controls.Download). New values should
@@ -41,9 +43,6 @@ class MediaControlDownloadButtonElement final
   };
 
   void DefaultEventHandler(Event*) final;
-
-  // Points to an anchor element that contains the URL of the media file.
-  Member<HTMLAnchorElement> anchor_;
 };
 
 }  // namespace blink

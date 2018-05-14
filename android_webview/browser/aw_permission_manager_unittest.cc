@@ -10,13 +10,11 @@
 #include "android_webview/browser/aw_browser_permission_request_delegate.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/ptr_util.h"
 #include "content/public/browser/permission_manager.h"
 #include "content/public/browser/permission_type.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
-using base::MakeUnique;
 using blink::mojom::PermissionStatus;
 using content::PermissionType;
 
@@ -32,7 +30,7 @@ const char kEmbeddingOrigin[] = "https://www.google.com/";
 const char kRequestingOrigin1[] = "https://www.google.com/";
 const char kRequestingOrigin2[] = "https://www.chromium.org/";
 
-class AwBrowserPermissionRequestDelegateForTesting
+class AwBrowserPermissionRequestDelegateForTesting final
     : public AwBrowserPermissionRequestDelegate {
  public:
   void EnqueueResponse(const std::string& origin,
@@ -46,7 +44,7 @@ class AwBrowserPermissionRequestDelegateForTesting
       callback.Run(grant);
       return;
     }
-    response_.push_back(MakeUnique<Response>(origin, type, grant));
+    response_.push_back(std::make_unique<Response>(origin, type, grant));
   }
 
   // AwBrowserPermissionRequestDelegate:
@@ -89,7 +87,7 @@ class AwBrowserPermissionRequestDelegateForTesting
       callback.Run(grant);
       return;
     }
-    request_.push_back(MakeUnique<Request>(origin, type, callback));
+    request_.push_back(std::make_unique<Request>(origin, type, callback));
   }
 
   void CancelPermission(const GURL& origin, PermissionType type) {
@@ -714,183 +712,6 @@ TEST_F(AwPermissionManagerTest, ComplicatedRequestScenario4) {
   EXPECT_EQ(3, resolved_permission_request_id[4]);
   EXPECT_EQ(PermissionStatus::DENIED, resolved_permission_status[5]);
   EXPECT_EQ(3, resolved_permission_request_id[5]);
-}
-
-// Test the case CancelPermissionRequest is called for an invalid request.
-TEST_F(AwPermissionManagerTest, InvalidRequestIsCancelled) {
-  manager->CancelPermissionRequest(0);
-}
-
-// Test the case a delegate is called, and cancelled.
-TEST_F(AwPermissionManagerTest, SinglePermissionRequestIsCancelled) {
-  int request_id = manager->RequestPermission(
-      PermissionType::GEOLOCATION, render_frame_host, GURL(kRequestingOrigin1),
-      true, base::Bind(&AwPermissionManagerTest::PermissionRequestResponse,
-                       base::Unretained(this), 0));
-  EXPECT_NE(kNoPendingOperation, request_id);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  manager->CancelPermissionRequest(request_id);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  // This should not resolve the permission.
-  manager->EnqueuePermissionResponse(kRequestingOrigin1,
-                                     PermissionType::GEOLOCATION, true);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-}
-
-// Test the case multiple permissions are requested through single call, and
-// cancelled.
-TEST_F(AwPermissionManagerTest, SinglePermissionsRequestIsCancelled) {
-  std::vector<PermissionType> permissions_1 = {PermissionType::MIDI,
-                                               PermissionType::MIDI_SYSEX};
-
-  int request_id = manager->RequestPermissions(
-      permissions_1, render_frame_host, GURL(kRequestingOrigin1), true,
-      base::Bind(&AwPermissionManagerTest::PermissionsRequestResponse,
-                 base::Unretained(this), 0));
-  EXPECT_NE(kNoPendingOperation, request_id);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  manager->CancelPermissionRequest(request_id);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  std::vector<PermissionType> permissions_2 = {PermissionType::GEOLOCATION,
-                                               PermissionType::MIDI_SYSEX};
-
-  request_id = manager->RequestPermissions(
-      permissions_2, render_frame_host, GURL(kRequestingOrigin1), true,
-      base::Bind(&AwPermissionManagerTest::PermissionsRequestResponse,
-                 base::Unretained(this), 0));
-  EXPECT_NE(kNoPendingOperation, request_id);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  manager->CancelPermissionRequest(request_id);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  // This should not resolve the permission.
-  manager->EnqueuePermissionResponse(kRequestingOrigin1,
-                                     PermissionType::GEOLOCATION, true);
-  manager->EnqueuePermissionResponse(kRequestingOrigin1,
-                                     PermissionType::MIDI_SYSEX, true);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-}
-
-// Test the case multiple permissions are requested, and cancelled as follow.
-//  1. Permission A is requested.
-//  2. Permission A is requested for the same origin again.
-//  3. The first request is cancelled.
-TEST_F(AwPermissionManagerTest, ComplicatedCancelScenario1) {
-  int request_1 = manager->RequestPermission(
-      PermissionType::GEOLOCATION, render_frame_host, GURL(kRequestingOrigin1),
-      true, base::Bind(&AwPermissionManagerTest::PermissionRequestResponse,
-                       base::Unretained(this), 1));
-  EXPECT_NE(kNoPendingOperation, request_1);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  int request_2 = manager->RequestPermission(
-      PermissionType::GEOLOCATION, render_frame_host, GURL(kRequestingOrigin1),
-      true, base::Bind(&AwPermissionManagerTest::PermissionRequestResponse,
-                       base::Unretained(this), 2));
-  EXPECT_NE(kNoPendingOperation, request_2);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  EXPECT_NE(request_1, request_2);
-
-  manager->CancelPermissionRequest(request_1);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  // This should resolve the second request.
-  manager->EnqueuePermissionResponse(kRequestingOrigin1,
-                                     PermissionType::GEOLOCATION, true);
-  EXPECT_EQ(1u, resolved_permission_status.size());
-  EXPECT_EQ(PermissionStatus::GRANTED, resolved_permission_status[0]);
-  EXPECT_EQ(2, resolved_permission_request_id[0]);
-}
-
-// Test the case multiple permissions are requested, and cancelled as follow.
-//  1. Permission A is requested.
-//  2. Permission A is requested for a different origin.
-//  3. The first request is cancelled.
-TEST_F(AwPermissionManagerTest, ComplicatedCancelScenario2) {
-  int request_1 = manager->RequestPermission(
-      PermissionType::GEOLOCATION, render_frame_host, GURL(kRequestingOrigin1),
-      true, base::Bind(&AwPermissionManagerTest::PermissionRequestResponse,
-                       base::Unretained(this), 1));
-  EXPECT_NE(kNoPendingOperation, request_1);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  int request_2 = manager->RequestPermission(
-      PermissionType::GEOLOCATION, render_frame_host, GURL(kRequestingOrigin2),
-      true, base::Bind(&AwPermissionManagerTest::PermissionRequestResponse,
-                       base::Unretained(this), 2));
-  EXPECT_NE(kNoPendingOperation, request_2);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  EXPECT_NE(request_1, request_2);
-
-  manager->CancelPermissionRequest(request_1);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  // This should not resolve the first request.
-  manager->EnqueuePermissionResponse(kRequestingOrigin1,
-                                     PermissionType::GEOLOCATION, true);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  // This should resolve the second request.
-  manager->EnqueuePermissionResponse(kRequestingOrigin2,
-                                     PermissionType::GEOLOCATION, true);
-  EXPECT_EQ(1u, resolved_permission_status.size());
-  EXPECT_EQ(PermissionStatus::GRANTED, resolved_permission_status[0]);
-  EXPECT_EQ(2, resolved_permission_request_id[0]);
-}
-
-// Test the case multiple permissions are requested, and cancelled as follow.
-//  1. Permission A and B are requested.
-//  2. Permission A and B are requested for a different origin.
-//  3. Permission A for the second request is resolved.
-//  4. The second request is cancelled.
-TEST_F(AwPermissionManagerTest, ComplicatedCancelScenario3) {
-  std::vector<PermissionType> permissions = {PermissionType::GEOLOCATION,
-                                             PermissionType::MIDI_SYSEX};
-
-  int request_1 = manager->RequestPermissions(
-      permissions, render_frame_host, GURL(kRequestingOrigin1), true,
-      base::Bind(&AwPermissionManagerTest::PermissionsRequestResponse,
-                 base::Unretained(this), 1));
-  EXPECT_NE(kNoPendingOperation, request_1);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  int request_2 = manager->RequestPermissions(
-      permissions, render_frame_host, GURL(kRequestingOrigin2), true,
-      base::Bind(&AwPermissionManagerTest::PermissionsRequestResponse,
-                 base::Unretained(this), 2));
-  EXPECT_NE(kNoPendingOperation, request_2);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  EXPECT_NE(request_1, request_2);
-
-  manager->EnqueuePermissionResponse(kRequestingOrigin2,
-                                     PermissionType::GEOLOCATION, true);
-
-  manager->CancelPermissionRequest(request_1);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  // This should not resolve the first request.
-  manager->EnqueuePermissionResponse(kRequestingOrigin1,
-                                     PermissionType::GEOLOCATION, true);
-  manager->EnqueuePermissionResponse(kRequestingOrigin1,
-                                     PermissionType::MIDI_SYSEX, true);
-  EXPECT_EQ(0u, resolved_permission_status.size());
-
-  // This should resolve the second request.
-  manager->EnqueuePermissionResponse(kRequestingOrigin2,
-                                     PermissionType::MIDI_SYSEX, true);
-  EXPECT_EQ(2u, resolved_permission_status.size());
-  EXPECT_EQ(PermissionStatus::GRANTED, resolved_permission_status[0]);
-  EXPECT_EQ(2, resolved_permission_request_id[0]);
-  EXPECT_EQ(PermissionStatus::GRANTED, resolved_permission_status[1]);
-  EXPECT_EQ(2, resolved_permission_request_id[1]);
 }
 
 }  // namespace

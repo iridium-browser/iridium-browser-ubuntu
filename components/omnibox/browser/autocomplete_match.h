@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/strings/utf_offset_string_conversions.h"
@@ -68,12 +69,15 @@ struct AutocompleteMatch {
     // A Java counterpart will be generated for this enum.
     // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.omnibox
     // GENERATED_JAVA_CLASS_NAME_OVERRIDE: MatchClassificationStyle
+    // clang-format off
     enum Style {
-      NONE  = 0,
-      URL   = 1 << 0,  // A URL
-      MATCH = 1 << 1,  // A match for the user's search term
-      DIM   = 1 << 2,  // "Helper text"
+      NONE      = 0,
+      URL       = 1 << 0,  // A URL
+      MATCH     = 1 << 1,  // A match for the user's search term
+      DIM       = 1 << 2,  // "Helper text"
+      INVISIBLE = 1 << 3,  // "Prefix" text we don't want to see
     };
+    // clang-format on
 
     ACMatchClassification(size_t offset, int style)
         : offset(offset),
@@ -110,8 +114,10 @@ struct AutocompleteMatch {
   // Converts |type| to a string representation.  Used in logging and debugging.
   AutocompleteMatch& operator=(const AutocompleteMatch& match);
 
-  // Gets the vector icon identifier for the icon to be shown for |type|.
-  static const gfx::VectorIcon& TypeToVectorIcon(Type type);
+  // Gets the vector icon identifier for the icon to be shown for |type|. If
+  // |is_bookmark| is true, returns a bookmark icon rather than what the type
+  // would determine.
+  static const gfx::VectorIcon& TypeToVectorIcon(Type type, bool is_bookmark);
 
   // Comparison function for determining when one match is better than another.
   static bool MoreRelevant(const AutocompleteMatch& elem1,
@@ -209,13 +215,31 @@ struct AutocompleteMatch {
                                  TemplateURLService* template_url_service,
                                  const base::string16& keyword);
 
+  // Sets the |match_in_scheme|, |match_in_subdomain|, and |match_after_host|
+  // flags based on the provided |url| and list of substring |match_positions|.
+  // |match_positions| is the [begin, end) positions of a match within the
+  // unstripped URL spec.
+  using MatchPosition = std::pair<size_t, size_t>;
+  static void GetMatchComponents(
+      const GURL& url,
+      const std::vector<MatchPosition>& match_positions,
+      bool* match_in_scheme,
+      bool* match_in_subdomain,
+      bool* match_after_host);
+
   // Gets the formatting flags used for display of suggestions. This method
   // encapsulates the return of experimental flags too, so any URLs displayed
   // as an Omnibox suggestion should use this method.
   //
   // This function returns flags that may destructively format the URL, and
   // therefore should never be used for the |fill_into_edit| field.
-  static url_formatter::FormatUrlTypes GetFormatTypes(bool trim_scheme);
+  //
+  // |preserve_scheme|, |preserve_subdomain|, and |preserve_after_host| indicate
+  // that these URL components are important (part of the match), and should
+  // not be trimmed or elided.
+  static url_formatter::FormatUrlTypes GetFormatTypes(bool preserve_scheme,
+                                                      bool preserve_subdomain,
+                                                      bool preserve_after_host);
 
   // Computes the stripped destination URL (via GURLToStrippedGURL()) and
   // stores the result in |stripped_destination_url|.  |input| is used for the
@@ -288,14 +312,25 @@ struct AutocompleteMatch {
   // This is used to decide whether we should call DeleteMatch().
   bool SupportsDeletion() const;
 
-  // Swaps the contents and description fields, and their associated
-  // classifications, if this is a match for which we should emphasize the
-  // title (stored in the description field) over the URL (in the contents
-  // field).  Intended to only be used at the UI level before displaying, lest
-  // other omnibox systems get confused about which is which.  See the code
-  // that sets |swap_contents_and_description| for conditions under which
-  // it is true.
-  void PossiblySwapContentsAndDescriptionForDisplay();
+  // Returns a copy of this match with the contents and description fields, and
+  // their associated classifications, possibly swapped.  We swap these if this
+  // is a match for which we should emphasize the title (stored in the
+  // description field) over the URL (in the contents field).
+  //
+  // We specifically return a copy to prevent the UI code from accidentally
+  // mucking with the matches stored in the model, lest other omnibox systems
+  // get confused about which is which.  See the code that sets
+  // |swap_contents_and_description| for conditions they are swapped.
+  AutocompleteMatch GetMatchWithContentsAndDescriptionPossiblySwapped() const;
+
+  // If this match is a tail suggestion, prepends the passed |common_prefix|.
+  // If not, but the prefix matches the beginning of the suggestion, dims that
+  // portion in the classification.
+  void InlineTailPrefix(const base::string16& common_prefix);
+
+  // Estimates dynamic memory usage.
+  // See base/trace_event/memory_usage_estimator.h for more info.
+  size_t EstimateMemoryUsage() const;
 
   // The provider of this match, used to remember which provider the user had
   // selected when the input changes. This may be NULL, in which case there is

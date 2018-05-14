@@ -63,9 +63,9 @@
     stringifier;
 
     // CSSOM View Module
-    // https://dev.w3.org/csswg/cssom-view/#extensions-to-the-range-interface
-    DOMRectList getClientRects();
-    DOMRect getBoundingClientRect();
+    // https://drafts.csswg.org/cssom-view/#extensions-to-the-range-interface
+    [Measure] DOMRectList getClientRects();
+    [Measure] DOMRect getBoundingClientRect();
 
     // DOM Parsing and Serialization
     // https://w3c.github.io/DOM-Parsing/#extensions-to-the-range-interface

@@ -21,7 +21,8 @@ class MakeElementTypeHelpersWriter(json5_generator.Writer):
         'Conditional': {},
         'ImplementedAs': {},
         'JSInterfaceName': {},
-        'constructorNeedsCreatedByParser': {},
+        'constructorNeedsCreateElementFlags': {},
+        'interfaceHeaderDir': {},
         'interfaceName': {},
         'noConstructor': {},
         'noTypeHelpers': {},
@@ -49,12 +50,17 @@ class MakeElementTypeHelpersWriter(json5_generator.Writer):
 
         assert self.namespace, 'A namespace is required.'
 
+        basename = self.namespace.lower() + '_element_type_helpers'
         self._outputs = {
-            (self.namespace + "ElementTypeHelpers.h"): self.generate_helper_header,
-            (self.namespace + "ElementTypeHelpers.cpp"): self.generate_helper_implementation,
+            (basename + '.h'): self.generate_helper_header,
+            (basename + '.cc'): self.generate_helper_implementation,
         }
 
+        base_element_header = 'core/%s/%s_element.h' % (self.namespace.lower(), self.namespace.lower())
+        if not self.snake_case_source_files:
+            base_element_header = 'core/%s/%sElement.h' % (self.namespace.lower(), self.namespace)
         self._template_context = {
+            'base_element_header': base_element_header,
             'input_files': self._input_files,
             'namespace': self.namespace,
             'tags': self.json5_file.name_dictionaries,
@@ -67,16 +73,19 @@ class MakeElementTypeHelpersWriter(json5_generator.Writer):
         for tag in tags:
             tag['interface'] = self._interface(tag)
             interface_counts[tag['interface']] += 1
-            elements.add(tag['interface'])
+            tag['js_interface'] = tag['interface']
+            if tag['JSInterfaceName']:
+                tag['js_interface'] = tag['JSInterfaceName']
+            elements.add(tag['js_interface'])
 
         for tag in tags:
             tag['multipleTagNames'] = (interface_counts[tag['interface']] > 1 or tag['interface'] == self.fallback_interface)
 
-    @template_expander.use_jinja("templates/ElementTypeHelpers.h.tmpl", filters=filters)
+    @template_expander.use_jinja("templates/element_type_helpers.h.tmpl", filters=filters)
     def generate_helper_header(self):
         return self._template_context
 
-    @template_expander.use_jinja("templates/ElementTypeHelpers.cpp.tmpl", filters=filters)
+    @template_expander.use_jinja("templates/element_type_helpers.cc.tmpl", filters=filters)
     def generate_helper_implementation(self):
         return self._template_context
 

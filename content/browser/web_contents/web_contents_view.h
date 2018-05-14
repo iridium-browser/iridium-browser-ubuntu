@@ -43,9 +43,6 @@ class WebContentsView {
   // The following static method is implemented by each platform.
   static void GetDefaultScreenInfo(ScreenInfo* results);
 
-  // Gets screen information for the window associated with this view.
-  virtual void GetScreenInfo(ScreenInfo* screen_info) const = 0;
-
   // Computes the rectangle for the native widget that contains the contents of
   // the tab in the screen coordinate system.
   virtual void GetContainerBounds(gfx::Rect* out) const = 0;
@@ -73,6 +70,11 @@ class WebContentsView {
   // Restores focus to the last focus view. If StoreFocus has not yet been
   // invoked, SetInitialFocus is invoked.
   virtual void RestoreFocus() = 0;
+
+  // Focuses the first (last if |reverse| is true) element in the page.
+  // Invoked when this tab is getting the focus through tab traversal (|reverse|
+  // is true when using Shift-Tab).
+  virtual void FocusThroughTabTraversal(bool reverse) = 0;
 
   // Returns the current drop data, if any.
   virtual DropData* GetDropData() const = 0;

@@ -33,15 +33,25 @@
 #include "core/css/cssom/InlineStylePropertyMap.h"
 #include "core/resize_observer/ResizeObservation.h"
 #include "core/resize_observer/ResizeObserver.h"
+#include "core/style/ComputedStyle.h"
+#include "third_party/WebKit/Source/core/dom/AXObjectCache.h"
 
 namespace blink {
 
 struct SameSizeAsElementRareData : NodeRareData {
   IntSize scroll_offset;
-  AtomicString nonce;
-  void* pointers[1];
+  void* pointers_or_strings[3];
   Member<void*> members[14];
 };
+
+ElementRareData::ElementRareData(NodeRenderingData* node_layout_data)
+    : NodeRareData(node_layout_data), class_list_(nullptr) {
+  is_element_rare_data_ = true;
+}
+
+ElementRareData::~ElementRareData() {
+  DCHECK(!pseudo_element_data_);
+}
 
 CSSStyleDeclaration& ElementRareData::EnsureInlineCSSStyleDeclaration(
     Element* owner_element) {
@@ -58,6 +68,15 @@ InlineStylePropertyMap& ElementRareData::EnsureInlineStylePropertyMap(
   return *cssom_map_wrapper_;
 }
 
+void ElementRareData::SetComputedStyle(
+    scoped_refptr<ComputedStyle> computed_style) {
+  computed_style_ = std::move(computed_style);
+}
+
+void ElementRareData::ClearComputedStyle() {
+  computed_style_ = nullptr;
+}
+
 AttrNodeList& ElementRareData::EnsureAttrNodeList() {
   if (!attr_node_list_)
     attr_node_list_ = new AttrNodeList;
@@ -67,12 +86,12 @@ AttrNodeList& ElementRareData::EnsureAttrNodeList() {
 ElementRareData::ResizeObserverDataMap&
 ElementRareData::EnsureResizeObserverData() {
   if (!resize_observer_data_)
-    resize_observer_data_ =
-        new HeapHashMap<Member<ResizeObserver>, Member<ResizeObservation>>();
+    resize_observer_data_ = new HeapHashMap<TraceWrapperMember<ResizeObserver>,
+                                            Member<ResizeObservation>>();
   return *resize_observer_data_;
 }
 
-DEFINE_TRACE_AFTER_DISPATCH(ElementRareData) {
+void ElementRareData::TraceAfterDispatch(blink::Visitor* visitor) {
   visitor->Trace(dataset_);
   visitor->Trace(class_list_);
   visitor->Trace(shadow_);
@@ -90,18 +109,24 @@ DEFINE_TRACE_AFTER_DISPATCH(ElementRareData) {
   NodeRareData::TraceAfterDispatch(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS_AFTER_DISPATCH(ElementRareData) {
+void ElementRareData::TraceWrappersAfterDispatch(
+    const ScriptWrappableVisitor* visitor) const {
   if (attr_node_list_.Get()) {
     for (auto& attr : *attr_node_list_) {
-      visitor->TraceWrappersWithManualWriteBarrier(attr);
+      visitor->TraceWrappers(attr);
     }
   }
-  visitor->TraceWrappersWithManualWriteBarrier(shadow_);
-  visitor->TraceWrappersWithManualWriteBarrier(attribute_map_);
-  visitor->TraceWrappersWithManualWriteBarrier(dataset_);
-  visitor->TraceWrappersWithManualWriteBarrier(class_list_);
-  visitor->TraceWrappersWithManualWriteBarrier(accessible_node_);
-  visitor->TraceWrappersWithManualWriteBarrier(intersection_observer_data_);
+  visitor->TraceWrappers(dataset_);
+  visitor->TraceWrappers(shadow_);
+  visitor->TraceWrappers(class_list_);
+  visitor->TraceWrappers(attribute_map_);
+  visitor->TraceWrappers(accessible_node_);
+  visitor->TraceWrappers(intersection_observer_data_);
+  if (resize_observer_data_) {
+    for (auto& resize_observer : resize_observer_data_->Keys()) {
+      visitor->TraceWrappers(resize_observer);
+    }
+  }
   NodeRareData::TraceWrappersAfterDispatch(visitor);
 }
 

@@ -170,7 +170,7 @@ class RequestImpl : public SMSService::Request,
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "The feature cannot be disabled by settings, but it can be "
             "disabled by 'Desktop to iOS Promotions' feature flag in "
@@ -304,7 +304,7 @@ void SMSService::QueryPhoneNumberCompletionCallback(
   bool has_number = false;
   std::unique_ptr<base::Value> value =
       base::JSONReader::Read(request->GetResponseBody());
-  if (value.get() && value.get()->IsType(base::Value::Type::DICTIONARY)) {
+  if (value.get() && value.get()->is_dict()) {
     const base::DictionaryValue* dictionary;
     if (value->GetAsDictionary(&dictionary)) {
       const base::ListValue* number_list;
@@ -333,7 +333,7 @@ void SMSService::SendSMSCallback(
   bool has_number = false;
   std::unique_ptr<base::Value> value =
       base::JSONReader::Read(request->GetResponseBody());
-  if (value.get() && value.get()->IsType(base::Value::Type::DICTIONARY)) {
+  if (value.get() && value.get()->is_dict()) {
     const base::DictionaryValue* dictionary;
     if (value->GetAsDictionary(&dictionary)) {
       if (dictionary->GetString("phoneNumber", &phone_number))

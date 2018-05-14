@@ -8,18 +8,25 @@ import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import android.content.Intent;
 import android.net.Uri;
+import android.support.customtabs.TrustedWebUtils;
+import android.support.test.InstrumentationRegistry;
 import android.view.ViewGroup;
 
 import org.junit.Assert;
+import org.junit.Rule;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.net.test.EmbeddedTestServer;
+import org.chromium.net.test.EmbeddedTestServerRule;
 
 /**
  * Custom {@link ChromeActivityTestRule} for tests using {@link WebappActivity}.
@@ -64,8 +71,15 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
             + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
             + "AAAAAAAAAOA3AvAAAdln8YgAAAAASUVORK5CYII=";
 
+    @Rule
+    private EmbeddedTestServerRule mTestServerRule = new EmbeddedTestServerRule();
+
     public WebappActivityTestRule() {
         super(WebappActivity0.class);
+    }
+
+    public EmbeddedTestServer getTestServer() {
+        return mTestServerRule.getServer();
     }
 
     /**
@@ -75,7 +89,8 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
      * {@link UrlUtils} cannot parse this type of URL.
      */
     public Intent createIntent() {
-        Intent intent = new Intent(getInstrumentation().getTargetContext(), WebappActivity0.class);
+        Intent intent =
+                new Intent(InstrumentationRegistry.getTargetContext(), WebappActivity0.class);
         intent.setData(Uri.parse(WebappActivity.WEBAPP_SCHEME + "://" + WEBAPP_ID));
         intent.putExtra(ShortcutHelper.EXTRA_ID, WEBAPP_ID);
         intent.putExtra(ShortcutHelper.EXTRA_URL, "about:blank");
@@ -84,21 +99,57 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
         return intent;
     }
 
+    /** Adds a mock Custom Tab session token to the intent. */
+    public void addTwaExtrasToIntent(Intent intent) {
+        Intent cctIntent = CustomTabsTestUtils.createMinimalCustomTabIntent(
+                InstrumentationRegistry.getTargetContext(), "about:blank");
+        intent.putExtras(cctIntent.getExtras());
+        intent.putExtra(TrustedWebUtils.EXTRA_LAUNCH_AS_TRUSTED_WEB_ACTIVITY, true);
+    }
+
     @Override
     public Statement apply(final Statement base, Description description) {
-        return new Statement() {
+        Statement webappTestRuleStatement = new Statement() {
             @Override
             public void evaluate() throws Throwable {
-                // Register the webapp so when the data storage is opened, the test doesn't crash.
-                WebappRegistry.refreshSharedPrefsForTesting();
-                TestFetchStorageCallback callback = new TestFetchStorageCallback();
-                WebappRegistry.getInstance().register(WEBAPP_ID, callback);
+                // We run the WebappRegistry calls on the UI thread to prevent
+                // ConcurrentModificationExceptions caused by multiple threads iterating and
+                // modifying its hashmap at the same time.
+                final TestFetchStorageCallback callback = new TestFetchStorageCallback();
+                ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+                    @Override
+                    public void run() {
+                        // Register the webapp so when the data storage is opened, the test doesn't
+                        // crash.
+                        WebappRegistry.refreshSharedPrefsForTesting();
+                        WebappRegistry.getInstance().register(WEBAPP_ID, callback);
+                    }
+                });
+
+                // Running this on the UI thread causes issues, so can't group everything into one
+                // runnable.
                 callback.waitForCallback(0);
-                callback.getStorage().updateFromShortcutIntent(createIntent());
+
+                ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+                    @Override
+                    public void run() {
+                        callback.getStorage().updateFromShortcutIntent(createIntent());
+                    }
+                });
 
                 base.evaluate();
+
+                ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+                    @Override
+                    public void run() {
+                        WebappRegistry.getInstance().clearForTesting();
+                    }
+                });
             }
         };
+
+        Statement testServerStatement = mTestServerRule.apply(webappTestRuleStatement, description);
+        return super.apply(testServerStatement, description);
     }
 
     /**
@@ -127,7 +178,7 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
      * Waits until any loads in progress of a selected activity have completed.
      */
     protected void waitUntilIdle(final ChromeActivity activity) {
-        getInstrumentation().waitForIdleSync();
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
@@ -135,7 +186,47 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
             }
         }, STARTUP_TIMEOUT, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
 
-        getInstrumentation().waitForIdleSync();
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    }
+
+    /**
+     * Starts up the WebappActivity and sets up the test observer.
+     * Wait till Splashscreen full loaded.
+     */
+    public final ViewGroup startWebappActivityAndWaitForSplashScreen() throws Exception {
+        return startWebappActivityAndWaitForSplashScreen(createIntent());
+    }
+
+    /**
+     * Starts up the WebappActivity and sets up the test observer.
+     * Wait till Splashscreen full loaded.
+     * Intent url is modified to one that takes more time to load.
+     */
+    public final ViewGroup startWebappActivityAndWaitForSplashScreen(Intent intent)
+            throws Exception {
+        // Reset the url to one that takes more time to load.
+        // This is to make sure splash screen won't disappear during test.
+        intent.putExtra(ShortcutHelper.EXTRA_URL, getTestServer().getURL("/slow?2"));
+        launchActivity(intent);
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                // we are waiting for WebappActivity#getActivityTab() to be non-null because we want
+                // to ensure that native has been loaded.
+                // We also wait till the splash screen has finished initializing.
+                ViewGroup splashScreen = getActivity().getSplashScreenForTests();
+                return getActivity().getActivityTab() != null && splashScreen != null
+                        && splashScreen.getChildCount() > 0;
+            }
+        }, STARTUP_TIMEOUT, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
+
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        ViewGroup splashScreen = getActivity().getSplashScreenForTests();
+        if (splashScreen == null) {
+            Assert.fail("No splash screen available.");
+        }
+        return splashScreen;
     }
 
     /**
@@ -147,22 +238,7 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
             public boolean isSatisfied() {
                 return !isSplashScreenVisible();
             }
-        });
-    }
-
-    public ViewGroup waitUntilSplashScreenAppears() {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return getActivity().getSplashScreenForTests() != null;
-            }
-        });
-
-        ViewGroup splashScreen = getActivity().getSplashScreenForTests();
-        if (splashScreen == null) {
-            Assert.fail("No splash screen available.");
-        }
-        return splashScreen;
+        }, STARTUP_TIMEOUT, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
     }
 
     public boolean isSplashScreenVisible() {

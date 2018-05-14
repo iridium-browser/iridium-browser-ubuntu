@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -6,13 +7,11 @@
 
 This includes definitions for various build flags:
 
-  FINISHED - means that the payloads have been fully generated.
   LOCK - means that payload processing is in progress on the host which
          owns the locks. Locks have a timeout associated with them in
          case of error, but are not 100% atomic when a lock is timing out.
 
   Example file paths:
-    gs://chromeos-releases/blah-channel/board-name/1.2.3/payloads/FINISHED_flag
     gs://chromeos-releases/blah-channel/board-name/1.2.3/payloads/LOCK_flag
 """
 
@@ -136,19 +135,14 @@ class Payload(utils.RestrictedAttrDict):
     src_image: A representation of image it updates from. None for
                Full updates, or the same type as tgt_image otherwise.
     uri: The URI of the payload. This can be any format understood by urilib.
-    labels: A list of strings. Labels are used to catalogue payloads.
-    skip: A boolean. If true, we skip generating this payload.
     exists: A boolean. If true, artifacts for this build already exist.
   """
   _name = 'Payload definition'
-  _slots = ('tgt_image', 'src_image', 'uri', 'labels', 'skip', 'exists')
+  _slots = ('tgt_image', 'src_image', 'uri', 'exists')
 
-  def __init__(self, labels=None, skip=False, exists=False, *args, **kwargs):
-    kwargs.update(labels=labels, skip=skip, exists=exists)
+  def __init__(self, exists=False, *args, **kwargs):
+    kwargs.update(exists=exists)
     super(Payload, self).__init__(*args, **kwargs)
-
-    if self['labels'] is None:
-      self['labels'] = []
 
   def __str__(self):
     if self.uri:
@@ -163,10 +157,9 @@ class ChromeosReleases(object):
   BUCKET = 'chromeos-releases'
 
   # Build flags
-  FINISHED = 'FINISHED'
   LOCK = 'LOCK'
 
-  FLAGS = (FINISHED, LOCK)
+  FLAGS = (LOCK,)
 
   UNSIGNED_IMAGE_TYPES = ('test', 'recovery', 'base')
 
@@ -258,7 +251,6 @@ class ChromeosReleases(object):
   def BuildPayloadsFlagUri(channel, board, version, flag, bucket=None):
     """Creates the gspath for a given build flag.
 
-    FINISHED - means that the payloads have been fully generated.
     LOCK - means that payload processing is in progress on the host which
            owns the locks. Locks have a timeout associated with them in
            case of error, but are not 100% atomic when a lock is timing out.
@@ -267,7 +259,7 @@ class ChromeosReleases(object):
       channel: What channel does the build belong too. Usually "xxx-channel".
       board: What board is the build for? "x86-alex", "lumpy", etc.
       version: What is the build version. "3015.0.0", "1945.76.3", etc
-      flag: gs_paths.FINISHED, or gs_paths.LOCK
+      flag: gs_paths.LOCK
       bucket: What bucket is the build in? (None means ChromeosReleases.BUCKET)
 
     Returns:
@@ -368,8 +360,8 @@ class ChromeosReleases(object):
                                    image_type))
 
   @staticmethod
-  def UnsignedImageArchiveUri(channel, board, version, milestone, image_type,
-                              bucket=None):
+  def UnsignedImageUri(channel, board, version, milestone, image_type,
+                       bucket=None):
     """Creates the gspath for a given unsigned build image archive.
 
     Args:
@@ -414,7 +406,7 @@ class ChromeosReleases(object):
     return Image(values)
 
   @classmethod
-  def ParseUnsignedImageArchiveUri(cls, image_uri):
+  def ParseUnsignedImageUri(cls, image_uri):
     """Parse the URI of an image into an UnsignedImageArchive object."""
 
     # The named values in this regex must match the arguments to gspaths.Image.
@@ -472,8 +464,7 @@ class ChromeosReleases(object):
         bin-610c97c30fae8561bde01a6116d65cb9.signed
     """
     if random_str is None:
-      random.seed()
-      random_str = hashlib.md5(str(random.getrandbits(128))).hexdigest()
+      random_str = _RandomString()
 
     if key is None:
       signed_ext = ''
@@ -719,3 +710,13 @@ def IsUnsignedImageArchive(a):
     True if |a| is of UnsignedImageArchive type, False otherwise
   """
   return isinstance(a, UnsignedImageArchive)
+
+
+def _RandomString():
+  """Helper function for generating a random string for a payload name.
+
+  This is an external helper function so that it can be trivially mocked
+  to make test results deterministic.
+  """
+  random.seed()
+  return hashlib.md5(str(random.getrandbits(128))).hexdigest()

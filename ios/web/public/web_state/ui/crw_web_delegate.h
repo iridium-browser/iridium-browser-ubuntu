@@ -11,7 +11,6 @@
 
 #import "base/ios/block_types.h"
 #include "ios/web/public/favicon_url.h"
-#import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/ssl_status.h"
 #import "ios/web/public/web_state/ui/crw_native_content.h"
 #import "ios/web/public/web_state/web_state.h"
@@ -34,47 +33,19 @@ class GURL;
               sourceURL:(const GURL&)sourceURL
             linkClicked:(BOOL)linkClicked;
 
-// This method is invoked whenever the system believes the URL is about to
-// change, or immediately after any unexpected change of the URL, prior to
-// updating the navigation manager's pending entry.
-// Phase will be LOAD_REQUESTED.
-- (void)webWillAddPendingURL:(const GURL&)url
-                  transition:(ui::PageTransition)transition;
-// Called when a placeholder image should be displayed instead of the WebView.
-- (void)webController:(CRWWebController*)webController
-    retrievePlaceholderOverlayImage:(void (^)(UIImage*))block;
-
-// ---------------------------------------------------------------------
-// TODO(rohitrao): Eliminate as many of the following delegate methods as
-// possible.  They only exist because the Tab and CRWWebController logic was
-// very intertwined. We should streamline the logic to jump between classes
-// less, then remove any delegate method that becomes unneccessary as a result.
-
-// Called when a page is loaded using loadWithParams.
-- (void)webDidUpdateSessionForLoadWithParams:
-            (const web::NavigationManager::WebLoadParams&)params
-                        wasInitialNavigation:(BOOL)initialNavigation;
-
 @optional
 
 // Called to ask CRWWebDelegate if |CRWWebController| should open the given URL.
 // CRWWebDelegate can intercept the request by returning NO and processing URL
-// in own way.
+// in its own way.
 - (BOOL)webController:(CRWWebController*)webController
         shouldOpenURL:(const GURL&)url
-      mainDocumentURL:(const GURL&)mainDocumentURL
-          linkClicked:(BOOL)linkClicked;
+      mainDocumentURL:(const GURL&)mainDocumentURL;
 
 // Called to ask if external URL should be opened. External URL is one that
 // cannot be presented by CRWWebController.
 - (BOOL)webController:(CRWWebController*)webController
     shouldOpenExternalURL:(const GURL&)URL;
-
-// Called to ask the delegate for a controller to display the given url,
-// which contained content that the UIWebView couldn't display. Returns
-// the native controller to display if the delegate can handle the url,
-// or nil otherwise.
-- (id<CRWNativeContent>)controllerForUnhandledContentAtURL:(const GURL&)url;
 
 // Called to retrieve the height of any header that is overlaying on top of the
 // web view. This can be used to implement, for e.g. a toolbar that changes

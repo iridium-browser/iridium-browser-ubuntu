@@ -6,10 +6,11 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
-#include "core/editing/EditingTestBase.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/Position.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/VisibleSelection.h"
+#include "core/editing/testing/EditingTestBase.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/testing/DummyPageHolder.h"
@@ -36,31 +37,43 @@ TEST_F(DeleteSelectionCommandTest, deleteListFromTable) {
   Element* br = GetDocument().QuerySelector("br");
 
   LocalFrame* frame = GetDocument().GetFrame();
-  frame->Selection().SetSelection(
+  frame->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .Collapse(Position(br, PositionAnchorType::kBeforeAnchor))
           .Extend(Position(table, PositionAnchorType::kAfterAnchor))
           .Build());
 
-  const bool kNoSmartDelete = false;
-  const bool kMergeBlocksAfterDelete = true;
-  const bool kNoExpandForSpecialElements = false;
-  const bool kSanitizeMarkup = true;
-  DeleteSelectionCommand* command = DeleteSelectionCommand::Create(
-      GetDocument(), kNoSmartDelete, kMergeBlocksAfterDelete,
-      kNoExpandForSpecialElements, kSanitizeMarkup,
-      InputEvent::InputType::kDeleteByCut);
+  DeleteSelectionCommand* command =
+      DeleteSelectionCommand::Create(GetDocument(),
+                                     DeleteSelectionOptions::Builder()
+                                         .SetMergeBlocksAfterDelete(true)
+                                         .SetSanitizeMarkup(true)
+                                         .Build(),
+                                     InputEvent::InputType::kDeleteByCut);
 
   EXPECT_TRUE(command->Apply()) << "the delete command should have succeeded";
   EXPECT_EQ("<div contenteditable=\"true\"><br></div>",
-            GetDocument().body()->innerHTML());
-  EXPECT_TRUE(frame->Selection()
-                  .ComputeVisibleSelectionInDOMTreeDeprecated()
-                  .IsCaret());
+            GetDocument().body()->InnerHTMLAsString());
+  EXPECT_TRUE(frame->Selection().GetSelectionInDOMTree().IsCaret());
   EXPECT_EQ(Position(div, 0), frame->Selection()
                                   .ComputeVisibleSelectionInDOMTree()
                                   .Base()
                                   .ToOffsetInAnchor());
+}
+
+TEST_F(DeleteSelectionCommandTest, ForwardDeleteWithFirstLetter) {
+  InsertStyleElement("p::first-letter {font-size:200%;}");
+  Selection().SetSelectionAndEndTyping(
+      SetSelectionTextToBody("<p contenteditable>a^b|c</p>"));
+
+  DeleteSelectionCommand& command = *DeleteSelectionCommand::Create(
+      GetDocument(), DeleteSelectionOptions::Builder()
+                         .SetMergeBlocksAfterDelete(true)
+                         .SetSanitizeMarkup(true)
+                         .Build());
+  EXPECT_TRUE(command.Apply()) << "the delete command should have succeeded";
+  EXPECT_EQ("<p contenteditable>a|c</p>",
+            GetSelectionTextFromBody(Selection().GetSelectionInDOMTree()));
 }
 
 }  // namespace blink

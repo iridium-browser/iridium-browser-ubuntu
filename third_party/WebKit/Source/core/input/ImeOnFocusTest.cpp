@@ -6,7 +6,7 @@
 #include "core/dom/Element.h"
 #include "core/dom/Node.h"
 #include "core/frame/FrameTestHelpers.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "core/html/HTMLElement.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
@@ -66,9 +66,9 @@ class ImeOnFocusTest : public ::testing::Test {
 };
 
 void ImeOnFocusTest::SendGestureTap(WebView* web_view, IntPoint client_point) {
-  WebGestureEvent web_gesture_event(WebInputEvent::kGestureTap,
-                                    WebInputEvent::kNoModifiers,
-                                    WebInputEvent::kTimeStampForTesting);
+  WebGestureEvent web_gesture_event(
+      WebInputEvent::kGestureTap, WebInputEvent::kNoModifiers,
+      WebInputEvent::GetStaticTimeStampForTests());
   // GestureTap is only ever from touch screens.
   web_gesture_event.source_device = kWebGestureDeviceTouchscreen;
   web_gesture_event.x = client_point.X();
@@ -97,11 +97,11 @@ void ImeOnFocusTest::RunImeOnFocusTest(
   RegisterMockedURLLoadFromBase(WebString::FromUTF8(base_url_),
                                 testing::CoreTestDataPath(),
                                 WebString::FromUTF8(file_name));
-  WebViewBase* web_view =
+  WebViewImpl* web_view =
       web_view_helper_.Initialize(nullptr, nullptr, &client);
   web_view->Resize(WebSize(800, 1200));
   LoadFrame(web_view->MainFrameImpl(), base_url_ + file_name);
-  document_ = web_view_helper_.WebView()
+  document_ = web_view_helper_.GetWebView()
                   ->MainFrameImpl()
                   ->GetDocument()
                   .Unwrap<Document>();

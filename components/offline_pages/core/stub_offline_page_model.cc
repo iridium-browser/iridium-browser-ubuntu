@@ -4,9 +4,12 @@
 
 #include "components/offline_pages/core/stub_offline_page_model.h"
 
+#include "base/files/file_path.h"
+
 namespace offline_pages {
 
-StubOfflinePageModel::StubOfflinePageModel() {}
+StubOfflinePageModel::StubOfflinePageModel()
+    : archive_directory_(base::FilePath(FILE_PATH_LITERAL("/archive_dir/"))) {}
 StubOfflinePageModel::~StubOfflinePageModel() {}
 
 void StubOfflinePageModel::AddObserver(Observer* observer) {}
@@ -24,18 +27,16 @@ void StubOfflinePageModel::DeletePagesByOfflineId(
 void StubOfflinePageModel::DeletePagesByClientIds(
     const std::vector<ClientId>& client_ids,
     const DeletePageCallback& callback) {}
-void StubOfflinePageModel::GetPagesMatchingQuery(
-    std::unique_ptr<OfflinePageModelQuery> query,
-    const MultipleOfflinePageItemCallback& callback) {}
+void StubOfflinePageModel::DeletePagesByClientIdsAndOrigin(
+    const std::vector<ClientId>& client_ids,
+    const std::string& origin,
+    const DeletePageCallback& callback) {}
 void StubOfflinePageModel::GetPagesByClientIds(
     const std::vector<ClientId>& client_ids,
     const MultipleOfflinePageItemCallback& callback) {}
 void StubOfflinePageModel::DeleteCachedPagesByURLPredicate(
     const UrlPredicate& predicate,
     const DeletePageCallback& callback) {}
-void StubOfflinePageModel::CheckPagesExistOffline(
-    const std::set<GURL>& urls,
-    const CheckPagesExistOfflineCallback& callback) {}
 void StubOfflinePageModel::GetAllPages(
     const MultipleOfflinePageItemCallback& callback) {}
 void StubOfflinePageModel::GetOfflineIdsForClientId(
@@ -48,11 +49,31 @@ void StubOfflinePageModel::GetPagesByURL(
     const GURL& url,
     URLSearchMode url_search_mode,
     const MultipleOfflinePageItemCallback& callback) {}
+void StubOfflinePageModel::GetPagesByRequestOrigin(
+    const std::string& origin,
+    const MultipleOfflinePageItemCallback& callback) {}
+void StubOfflinePageModel::GetPageBySizeAndDigest(
+    int64_t file_size,
+    const std::string& digest,
+    const SingleOfflinePageItemCallback& callback) {}
+void StubOfflinePageModel::GetPagesRemovedOnCacheReset(
+    const MultipleOfflinePageItemCallback& callback) {}
+void StubOfflinePageModel::GetPagesByNamespace(
+    const std::string& name_space,
+    const MultipleOfflinePageItemCallback& callback) {}
+void StubOfflinePageModel::GetPagesSupportedByDownloads(
+    const MultipleOfflinePageItemCallback& callback) {}
+const base::FilePath& StubOfflinePageModel::GetInternalArchiveDirectory(
+    const std::string& name_space) const {
+  return archive_directory_;
+}
+bool StubOfflinePageModel::IsArchiveInInternalDir(
+    const base::FilePath& file_path) const {
+  return archive_directory_.IsParent(file_path);
+}
+
 ClientPolicyController* StubOfflinePageModel::GetPolicyController() {
   return &policy_controller_;
-}
-bool StubOfflinePageModel::is_loaded() const {
-  return true;
 }
 OfflineEventLogger* StubOfflinePageModel::GetLogger() {
   return nullptr;

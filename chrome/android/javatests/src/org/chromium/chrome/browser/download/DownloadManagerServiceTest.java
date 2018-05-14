@@ -24,6 +24,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.AdvancedMockContext;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.download.DownloadInfo.Builder;
@@ -32,6 +33,7 @@ import org.chromium.chrome.browser.test.ChromeBrowserTestRule;
 import org.chromium.components.offline_items_collection.ContentId;
 import org.chromium.components.offline_items_collection.OfflineItem.Progress;
 import org.chromium.components.offline_items_collection.OfflineItemProgressUnit;
+import org.chromium.components.offline_items_collection.PendingState;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.net.ConnectionType;
@@ -59,9 +61,6 @@ public class DownloadManagerServiceTest {
      * simple mock object that provides testing support for checking a sequence of calls.
      */
     static class MockDownloadNotifier extends SystemDownloadNotifier {
-        private final Context mContext;
-        private MockDownloadNotificationService mService;
-
         /**
          * The Ids of different methods in this mock object.
          */
@@ -80,24 +79,7 @@ public class DownloadManagerServiceTest {
 
         public MockDownloadNotifier(Context context) {
             super(context);
-            mContext = context;
             expect(MethodID.CLEAR_PENDING_DOWNLOADS, null);
-        }
-
-        /**
-         * Helper method to simulate that the DownloadNotificationService is connected.
-         */
-        public void onServiceConnected() {
-            ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-                @Override
-                public void run() {
-                    mService = new MockDownloadNotificationService();
-                    mService.setContext(new AdvancedMockContext(
-                            mContext.getApplicationContext()));
-                    mService.onCreate();
-                }
-            });
-            setDownloadNotificationService(mService);
         }
 
         public MockDownloadNotifier expect(MethodID method, Object param) {
@@ -165,7 +147,8 @@ public class DownloadManagerServiceTest {
         }
 
         @Override
-        public void notifyDownloadInterrupted(DownloadInfo downloadInfo, boolean isAutoResumable) {
+        public void notifyDownloadInterrupted(DownloadInfo downloadInfo, boolean isAutoResumable,
+                @PendingState int pendingState) {
             assertCorrectExpectedCall(MethodID.DOWNLOAD_INTERRUPTED, downloadInfo, true);
         }
 
@@ -258,6 +241,7 @@ public class DownloadManagerServiceTest {
 
     private static class DownloadManagerServiceForTest extends DownloadManagerService {
         boolean mResumed;
+        DownloadSnackbarController mDownloadSnackbarController;
 
         public DownloadManagerServiceForTest(Context context, MockDownloadNotifier mockNotifier,
                 long updateDelayInMillis) {
@@ -280,12 +264,20 @@ public class DownloadManagerServiceTest {
 
         @Override
         protected void scheduleUpdateIfNeeded() {
-            ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-                @Override
-                public void run() {
-                    DownloadManagerServiceForTest.super.scheduleUpdateIfNeeded();
-                }
-            });
+            ThreadUtils.runOnUiThreadBlocking(
+                    () -> DownloadManagerServiceForTest.super.scheduleUpdateIfNeeded());
+        }
+
+        @Override
+        protected void setDownloadSnackbarController(
+                DownloadSnackbarController downloadSnackbarController) {
+            mDownloadSnackbarController = downloadSnackbarController;
+            super.setDownloadSnackbarController(downloadSnackbarController);
+        }
+
+        @Override
+        protected void onDownloadFailed(String fileName, int reason) {
+            mDownloadSnackbarController.onDownloadFailed("", false);
         }
     }
 
@@ -313,8 +305,7 @@ public class DownloadManagerServiceTest {
     }
 
     private Context getTestContext() {
-        return new AdvancedMockContext(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        return new AdvancedMockContext(InstrumentationRegistry.getTargetContext());
     }
 
     @Test
@@ -393,21 +384,17 @@ public class DownloadManagerServiceTest {
     @Test
     @MediumTest
     @Feature({"Download"})
+    @RetryOnFailure
     public void testDownloadCompletedIsCalled() throws InterruptedException {
         MockDownloadNotifier notifier = new MockDownloadNotifier(getTestContext());
         MockDownloadSnackbarController snackbarController = new MockDownloadSnackbarController();
         final DownloadManagerServiceForTest dService = new DownloadManagerServiceForTest(
                 getTestContext(), notifier, UPDATE_DELAY_FOR_TEST);
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                DownloadManagerService.setDownloadManagerService(dService);
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                (Runnable) () -> DownloadManagerService.setDownloadManagerService(dService));
         dService.setDownloadSnackbarController(snackbarController);
         // Try calling download completed directly.
         DownloadInfo successful = getDownloadInfo();
-        notifier.onServiceConnected();
         notifier.expect(MethodID.DOWNLOAD_SUCCESSFUL, successful);
 
         dService.onDownloadCompleted(successful);
@@ -430,8 +417,12 @@ public class DownloadManagerServiceTest {
     @Feature({"Download"})
     public void testDownloadFailedIsCalled() throws InterruptedException {
         MockDownloadNotifier notifier = new MockDownloadNotifier(getTestContext());
-        DownloadManagerServiceForTest dService = new DownloadManagerServiceForTest(
+        MockDownloadSnackbarController snackbarController = new MockDownloadSnackbarController();
+        final DownloadManagerServiceForTest dService = new DownloadManagerServiceForTest(
                 getTestContext(), notifier, UPDATE_DELAY_FOR_TEST);
+        ThreadUtils.runOnUiThreadBlocking(
+                (Runnable) () -> DownloadManagerService.setDownloadManagerService(dService));
+        dService.setDownloadSnackbarController(snackbarController);
         // Check that if an interrupted download cannot be resumed, it will trigger a download
         // failure.
         DownloadInfo failure =
@@ -439,6 +430,7 @@ public class DownloadManagerServiceTest {
         notifier.expect(MethodID.DOWNLOAD_FAILED, failure);
         dService.onDownloadInterrupted(failure, false);
         notifier.waitTillExpectedCallsComplete();
+        snackbarController.waitForSnackbarControllerToFinish(false);
     }
 
     @Test
@@ -509,8 +501,9 @@ public class DownloadManagerServiceTest {
     }
 
     @Test
-    @MediumTest
-    @Feature({"Download"})
+    //@MediumTest
+    //@Feature({"Download"})
+    @DisabledTest // crbug.com/789931
     public void testInterruptedUnmeteredDownloadCannotAutoResumeOnMeteredNetwork()
             throws InterruptedException {
         MockDownloadNotifier notifier = new MockDownloadNotifier(getTestContext());

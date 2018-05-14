@@ -26,10 +26,10 @@
 #ifndef CSSGradientValue_h
 #define CSSGradientValue_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/css/CSSIdentifierValue.h"
 #include "core/css/CSSImageGeneratorValue.h"
 #include "core/css/CSSPrimitiveValue.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -37,7 +37,8 @@ namespace blink {
 class Color;
 class Gradient;
 class Document;
-class LayoutObject;
+
+namespace cssvalue {
 
 enum CSSGradientType {
   kCSSDeprecatedLinearGradient,
@@ -72,26 +73,29 @@ struct CSSGradientColorStop {
 
   bool IsCacheable() const;
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   Member<const CSSPrimitiveValue> offset_;  // percentage | length | angle
   Member<const CSSValue> color_;
 };
 
+}  // namespace cssvalue
 }  // namespace blink
 
 // We have to declare the VectorTraits specialization before CSSGradientValue
 // declares its inline capacity vector below.
-WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::CSSGradientColorStop);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(
+    blink::cssvalue::CSSGradientColorStop);
 
 namespace blink {
+namespace cssvalue {
 
 class CSSGradientValue : public CSSImageGeneratorValue {
  public:
-  PassRefPtr<Image> GetImage(const ImageResourceObserver&,
-                             const Document&,
-                             const ComputedStyle&,
-                             const IntSize&);
+  scoped_refptr<Image> GetImage(const ImageResourceObserver&,
+                                const Document&,
+                                const ComputedStyle&,
+                                const FloatSize&) const;
 
   void AddStop(const CSSGradientColorStop& stop) {
     stops_.push_back(stop);
@@ -105,16 +109,16 @@ class CSSGradientValue : public CSSImageGeneratorValue {
   CSSGradientType GradientType() const { return gradient_type_; }
 
   bool IsFixedSize() const { return false; }
-  IntSize FixedSize(const Document&) const { return IntSize(); }
+  FloatSize FixedSize(const Document&) const { return FloatSize(); }
 
   bool IsPending() const { return false; }
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const;
 
   void LoadSubimages(const Document&) {}
 
-  void GetStopColors(Vector<Color>& stop_colors, const LayoutObject&) const;
+  Vector<Color> GetStopColors(const Document&, const ComputedStyle&) const;
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
   struct GradientDesc;
 
@@ -125,13 +129,15 @@ class CSSGradientValue : public CSSImageGeneratorValue {
       : CSSImageGeneratorValue(class_type),
         gradient_type_(gradient_type),
         repeating_(repeat == kRepeating),
-        stops_sorted_(false),
         is_cacheable_(true) {}
 
   void AddStops(GradientDesc&,
                 const CSSToLengthConversionData&,
-                const LayoutObject&);
-  void AddDeprecatedStops(GradientDesc&, const LayoutObject&);
+                const Document&,
+                const ComputedStyle&) const;
+  void AddDeprecatedStops(GradientDesc&,
+                          const Document&,
+                          const ComputedStyle&) const;
 
   void AppendCSSTextForColorStops(StringBuilder&,
                                   bool requires_separator) const;
@@ -141,7 +147,6 @@ class CSSGradientValue : public CSSImageGeneratorValue {
   HeapVector<CSSGradientColorStop, 2> stops_;
   CSSGradientType gradient_type_;
   bool repeating_ : 1;
-  bool stops_sorted_ : 1;
   bool is_cacheable_ : 1;
 };
 
@@ -164,13 +169,14 @@ class CSSLinearGradientValue final : public CSSGradientValue {
   String CustomCSSText() const;
 
   // Create the gradient for a given size.
-  PassRefPtr<Gradient> CreateGradient(const CSSToLengthConversionData&,
-                                      const IntSize&,
-                                      const LayoutObject&);
+  scoped_refptr<Gradient> CreateGradient(const CSSToLengthConversionData&,
+                                         const FloatSize&,
+                                         const Document&,
+                                         const ComputedStyle&) const;
 
   bool Equals(const CSSLinearGradientValue&) const;
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
  private:
   CSSLinearGradientValue(const CSSValue* first_x,
@@ -237,13 +243,14 @@ class CSSRadialGradientValue final : public CSSGradientValue {
   void SetEndVerticalSize(CSSPrimitiveValue* val) { end_vertical_size_ = val; }
 
   // Create the gradient for a given size.
-  PassRefPtr<Gradient> CreateGradient(const CSSToLengthConversionData&,
-                                      const IntSize&,
-                                      const LayoutObject&);
+  scoped_refptr<Gradient> CreateGradient(const CSSToLengthConversionData&,
+                                         const FloatSize&,
+                                         const Document&,
+                                         const ComputedStyle&) const;
 
   bool Equals(const CSSRadialGradientValue&) const;
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
  private:
   CSSRadialGradientValue(const CSSValue* first_x,
@@ -303,13 +310,14 @@ class CSSConicGradientValue final : public CSSGradientValue {
   String CustomCSSText() const;
 
   // Create the gradient for a given size.
-  PassRefPtr<Gradient> CreateGradient(const CSSToLengthConversionData&,
-                                      const IntSize&,
-                                      const LayoutObject&);
+  scoped_refptr<Gradient> CreateGradient(const CSSToLengthConversionData&,
+                                         const FloatSize&,
+                                         const Document&,
+                                         const ComputedStyle&) const;
 
   bool Equals(const CSSConicGradientValue&) const;
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
  private:
   CSSConicGradientValue(const CSSValue* x,
@@ -329,6 +337,7 @@ class CSSConicGradientValue final : public CSSGradientValue {
 
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSConicGradientValue, IsConicGradientValue());
 
+}  // namespace cssvalue
 }  // namespace blink
 
 #endif  // CSSGradientValue_h

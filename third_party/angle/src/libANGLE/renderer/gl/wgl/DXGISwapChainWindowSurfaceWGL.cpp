@@ -144,6 +144,7 @@ egl::Error DXGISwapChainWindowSurfaceWGL::postSubBuffer(const gl::Context *conte
                                                         EGLint width,
                                                         EGLint height)
 {
+    ASSERT(width > 0 && height > 0);
     ASSERT(mSwapChain1 != nullptr);
 
     mFunctionsGL->flush();
@@ -270,7 +271,8 @@ FramebufferImpl *DXGISwapChainWindowSurfaceWGL::createDefaultFramebuffer(
     const gl::FramebufferState &data)
 {
     return new FramebufferGL(mFramebufferID, data, mFunctionsGL, mWorkarounds,
-                             mRenderer->getBlitter(), mStateManager);
+                             mRenderer->getBlitter(), mRenderer->getMultiviewClearer(),
+                             mStateManager);
 }
 
 HDC DXGISwapChainWindowSurfaceWGL::getDC() const

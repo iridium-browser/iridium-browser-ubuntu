@@ -6,11 +6,14 @@
 // They represent a list of string fragments and variable references.
 // Spec: https://drafts.css-houdini.org/css-typed-om/#unparsedvalue-objects
 [
-    Exposed(Window CSSTypedOM, PaintWorklet CSSPaintAPI)
+  Constructor(sequence<CSSUnparsedSegment> members),
+  RuntimeEnabled=CSSTypedOM,
+  Exposed=(Window,LayoutWorklet,PaintWorklet)
 ] interface CSSUnparsedValue : CSSStyleValue {
-    // https://github.com/w3c/css-houdini-drafts/issues/358
+    iterable<CSSUnparsedSegment>;
     readonly attribute unsigned long length;
-    [ImplementedAs=fragmentAtIndex] getter (DOMString or CSSVariableReferenceValue) (unsigned long index);
-
-    iterable<(DOMString or CSSVariableReferenceValue)>;
+    [RaisesException] getter CSSUnparsedSegment (unsigned long index);
+    [RaisesException] setter CSSUnparsedSegment (unsigned long index, CSSUnparsedSegment val);
 };
+
+typedef (DOMString or CSSVariableReferenceValue) CSSUnparsedSegment;

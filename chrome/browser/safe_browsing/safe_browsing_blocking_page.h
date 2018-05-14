@@ -47,7 +47,7 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
   typedef security_interstitials::BaseSafeBrowsingErrorUI
       BaseSafeBrowsingErrorUI;
   // Interstitial type, used in tests.
-  static content::InterstitialPageDelegate::TypeID kTypeForTesting;
+  static const content::InterstitialPageDelegate::TypeID kTypeForTesting;
 
   ~SafeBrowsingBlockingPage() override;
 
@@ -129,9 +129,6 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
   // SafeBrowsingBlockingPage.
   static SafeBrowsingBlockingPageFactory* factory_;
  private:
-  static std::string GetSamplingEventName(
-      BaseSafeBrowsingErrorUI::SBInterstitialReason interstitial_reason);
-
   static std::unique_ptr<
       security_interstitials::SecurityInterstitialControllerClient>
   CreateControllerClient(content::WebContents* web_contents,

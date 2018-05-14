@@ -10,12 +10,16 @@
 #include "ash/wm/window_state.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_chromeos.h"
+#include "chrome/browser/ui/ash/test_wallpaper_controller.h"
+#include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "components/signin/core/account_id/account_id.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "extensions/browser/api_test_utils.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
@@ -31,7 +35,7 @@ class WallpaperPrivateApiUnittest : public ash::AshTestBase {
  public:
   WallpaperPrivateApiUnittest()
       : fake_user_manager_(new FakeChromeUserManager()),
-        scoped_user_manager_(fake_user_manager_) {}
+        scoped_user_manager_(base::WrapUnique(fake_user_manager_)) {}
 
  protected:
   FakeChromeUserManager* fake_user_manager() { return fake_user_manager_; }
@@ -41,7 +45,7 @@ class WallpaperPrivateApiUnittest : public ash::AshTestBase {
 
  private:
   FakeChromeUserManager* fake_user_manager_;
-  ScopedUserManagerEnabler scoped_user_manager_;
+  user_manager::ScopedUserManager scoped_user_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(WallpaperPrivateApiUnittest);
 };
@@ -173,46 +177,50 @@ class WallpaperPrivateApiMultiUserUnittest
   void TearDown() override;
 
  protected:
-  void SetUpMultiUserWindowManager(
-      const AccountId& active_account_id,
-      chrome::MultiUserWindowManager::MultiProfileMode mode);
+  void SetUpMultiUserWindowManager(const AccountId& active_account_id);
 
   void SwitchActiveUser(const AccountId& active_account_id);
 
-  chrome::MultiUserWindowManagerChromeOS* multi_user_window_manager() {
+  MultiUserWindowManagerChromeOS* multi_user_window_manager() {
     return multi_user_window_manager_;
   }
 
  private:
-  chrome::MultiUserWindowManagerChromeOS* multi_user_window_manager_;
+  MultiUserWindowManagerChromeOS* multi_user_window_manager_;
+  std::unique_ptr<WallpaperControllerClient> wallpaper_controller_client_;
+  TestWallpaperController test_wallpaper_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(WallpaperPrivateApiMultiUserUnittest);
 };
 
 void WallpaperPrivateApiMultiUserUnittest::SetUp() {
   AshTestBase::SetUp();
-  WallpaperManager::Initialize();
+  DeviceSettingsService::Initialize();
+  CrosSettings::Initialize();
+  wallpaper_controller_client_ = std::make_unique<WallpaperControllerClient>();
+  wallpaper_controller_client_->InitForTesting(
+      test_wallpaper_controller_.CreateInterfacePtr());
   fake_user_manager()->AddUser(test_account_id1_);
   fake_user_manager()->AddUser(test_account_id2_);
 }
 
 void WallpaperPrivateApiMultiUserUnittest::TearDown() {
-  chrome::MultiUserWindowManager::DeleteInstance();
+  MultiUserWindowManager::DeleteInstance();
   AshTestBase::TearDown();
-  WallpaperManager::Shutdown();
+  wallpaper_controller_client_.reset();
+  CrosSettings::Shutdown();
+  DeviceSettingsService::Shutdown();
 }
 
 void WallpaperPrivateApiMultiUserUnittest::SetUpMultiUserWindowManager(
-    const AccountId& active_account_id,
-    chrome::MultiUserWindowManager::MultiProfileMode mode) {
+    const AccountId& active_account_id) {
   multi_user_window_manager_ =
-      new chrome::MultiUserWindowManagerChromeOS(active_account_id);
+      new MultiUserWindowManagerChromeOS(active_account_id);
   multi_user_window_manager_->Init();
-  chrome::MultiUserWindowManager::SetInstanceForTest(
-      multi_user_window_manager_, mode);
+  MultiUserWindowManager::SetInstanceForTest(multi_user_window_manager_);
   // We do not want animations while the test is going on.
   multi_user_window_manager_->SetAnimationSpeedForTest(
-      chrome::MultiUserWindowManagerChromeOS::ANIMATION_SPEED_DISABLED);
+      MultiUserWindowManagerChromeOS::ANIMATION_SPEED_DISABLED);
   EXPECT_TRUE(multi_user_window_manager_);
 }
 
@@ -227,9 +235,7 @@ void WallpaperPrivateApiMultiUserUnittest::SwitchActiveUser(
 // then switch to a different profile and open another wallpaper picker
 // without closing the first one.
 TEST_F(WallpaperPrivateApiMultiUserUnittest, HideAndRestoreWindowsTwoUsers) {
-  SetUpMultiUserWindowManager(
-      test_account_id1_,
-      chrome::MultiUserWindowManager::MULTI_PROFILE_MODE_SEPARATED);
+  SetUpMultiUserWindowManager(test_account_id1_);
 
   std::unique_ptr<aura::Window> window4(CreateTestWindowInShellWithId(4));
   std::unique_ptr<aura::Window> window3(CreateTestWindowInShellWithId(3));
@@ -320,9 +326,7 @@ TEST_F(WallpaperPrivateApiMultiUserUnittest, HideAndRestoreWindowsTwoUsers) {
 // In multi profile mode, user may teleport windows. Teleported window should
 // also be minimized when open wallpaper picker.
 TEST_F(WallpaperPrivateApiMultiUserUnittest, HideTeleportedWindow) {
-  SetUpMultiUserWindowManager(
-      AccountId::FromUserEmail(kTestAccount1),
-      chrome::MultiUserWindowManager::MULTI_PROFILE_MODE_MIXED);
+  SetUpMultiUserWindowManager(AccountId::FromUserEmail(kTestAccount1));
 
   std::unique_ptr<aura::Window> window3(CreateTestWindowInShellWithId(3));
   std::unique_ptr<aura::Window> window2(CreateTestWindowInShellWithId(2));

@@ -9,7 +9,9 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/KnownPorts.h"
 #include "platform/weborigin/SecurityOrigin.h"
+#include "platform/wtf/Assertions.h"
 #include "platform/wtf/text/WTFString.h"
+#include "public/platform/WebContentSecurityPolicyStruct.h"
 
 namespace blink {
 
@@ -62,14 +64,8 @@ CSPSource::SchemeMatchingResult CSPSource::SchemeMatches(
     return SchemeMatchingResult::kMatchingExact;
 
   if ((scheme == "http" && protocol == "https") ||
-      (scheme == "http" && protocol == "https-so") ||
       (scheme == "ws" && protocol == "wss")) {
     return SchemeMatchingResult::kMatchingUpgrade;
-  }
-
-  if ((scheme == "http" && protocol == "http-so") ||
-      (scheme == "https" && protocol == "https-so")) {
-    return SchemeMatchingResult::kMatchingExact;
   }
 
   return SchemeMatchingResult::kNotMatching;
@@ -269,8 +265,11 @@ CSPSource::ExposeForNavigationalChecks() const {
   return source_expression;
 }
 
-DEFINE_TRACE(CSPSource) {
+void CSPSource::Trace(blink::Visitor* visitor) {
   visitor->Trace(policy_);
 }
+
+STATIC_ASSERT_ENUM(kWebWildcardDispositionNoWildcard, CSPSource::kNoWildcard);
+STATIC_ASSERT_ENUM(kWebWildcardDispositionHasWildcard, CSPSource::kHasWildcard);
 
 }  // namespace blink

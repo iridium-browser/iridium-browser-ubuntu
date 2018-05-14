@@ -36,13 +36,11 @@
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/devtools/remote_debugging_server.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_external_agent_proxy.h"
 #include "content/public/browser/devtools_external_agent_proxy_delegate.h"
@@ -73,8 +71,6 @@ bool BrowserIdFromString(const std::string& browser_id_str,
   *browser_id = browser_id_str.substr(colon_pos + 1);
   return true;
 }
-
-static void NoOp(int, const std::string&) {}
 
 }  // namespace
 
@@ -148,7 +144,7 @@ void DevToolsAndroidBridge::OpenRemotePage(scoped_refptr<RemoteBrowser> browser,
   std::string query = net::EscapeQueryParamValue(url, false /* use_plus */);
   std::string request =
       base::StringPrintf(kNewPageRequestWithURL, query.c_str());
-  SendJsonRequest(browser->GetId(), request, base::Bind(&NoOp));
+  SendJsonRequest(browser->GetId(), request, base::DoNothing());
 }
 
 DevToolsAndroidBridge::DevToolsAndroidBridge(
@@ -168,11 +164,11 @@ DevToolsAndroidBridge::DevToolsAndroidBridge(
   pref_change_registrar_.Add(prefs::kDevToolsDiscoverTCPTargetsEnabled,
       base::Bind(&DevToolsAndroidBridge::CreateDeviceProviders,
                  base::Unretained(this)));
-  base::ListValue* target_discovery = new base::ListValue();
-  target_discovery->AppendString(kChromeDiscoveryURL);
-  target_discovery->AppendString(kNodeDiscoveryURL);
-  profile->GetPrefs()->SetDefaultPrefValue(
-      prefs::kDevToolsTCPDiscoveryConfig, target_discovery);
+  base::Value target_discovery(base::Value::Type::LIST);
+  target_discovery.GetList().emplace_back(kChromeDiscoveryURL);
+  target_discovery.GetList().emplace_back(kNodeDiscoveryURL);
+  profile->GetPrefs()->SetDefaultPrefValue(prefs::kDevToolsTCPDiscoveryConfig,
+                                           std::move(target_discovery));
   CreateDeviceProviders();
 }
 
@@ -297,8 +293,7 @@ void DevToolsAndroidBridge::RequestDeviceCount(
     const base::Callback<void(int)>& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  if (device_count_listeners_.empty() ||
-      !callback.Equals(device_count_callback_.callback()))
+  if (device_count_listeners_.empty() || callback.IsCancelled())
     return;
 
   UsbDeviceProvider::CountDevices(callback);

@@ -61,6 +61,9 @@ const char kProfileEverInitialized[] = "profile_ever_initialized";
 // attempted.
 const char kMinimalMigrationAttempted[] = "minimal_migration_attempted";
 
+// Key of the boolean flag telling if user session requires policy.
+const char kProfileRequiresPolicy[] = "profile_requires_policy";
+
 PrefService* GetLocalState() {
   if (!UserManager::IsInitialized())
     return nullptr;
@@ -480,6 +483,22 @@ void SetProfileEverInitialized(const AccountId& account_id, bool initialized) {
   SetBooleanPref(account_id, kProfileEverInitialized, initialized);
 }
 
+void SetProfileRequiresPolicy(const AccountId& account_id,
+                              ProfileRequiresPolicy required) {
+  DCHECK_NE(required, ProfileRequiresPolicy::kUnknown);
+  SetBooleanPref(account_id, kProfileRequiresPolicy,
+                 required == ProfileRequiresPolicy::kPolicyRequired);
+}
+
+ProfileRequiresPolicy GetProfileRequiresPolicy(const AccountId& account_id) {
+  bool requires_policy;
+  if (GetBooleanPref(account_id, kProfileRequiresPolicy, &requires_policy)) {
+    return requires_policy ? ProfileRequiresPolicy::kPolicyRequired
+                           : ProfileRequiresPolicy::kNoPolicyRequired;
+  }
+  return ProfileRequiresPolicy::kUnknown;
+}
+
 void UpdateReauthReason(const AccountId& account_id, const int reauth_reason) {
   SetIntegerPref(account_id, kReauthReasonKey, reauth_reason);
 }
@@ -526,8 +545,20 @@ void RemovePrefs(const AccountId& account_id) {
 }
 
 // Exported so tests can call this from other components.
-void RemovePrefsForTesting(const AccountId& account_id) {
-  RemovePrefs(account_id);
+void RemoveSetProfileEverInitializedPrefForTesting(
+    const AccountId& account_id) {
+  const base::DictionaryValue* prefs = nullptr;
+  if (!FindPrefs(account_id, &prefs))
+    return;
+
+  if (!prefs->HasKey(kProfileEverInitialized))
+    return;
+
+  std::unique_ptr<base::DictionaryValue> new_prefs(prefs->CreateDeepCopy());
+  if (!new_prefs->RemoveKey(kProfileEverInitialized))
+    return;
+
+  UpdatePrefs(account_id, *new_prefs, true);
 }
 
 void RegisterPrefs(PrefRegistrySimple* registry) {

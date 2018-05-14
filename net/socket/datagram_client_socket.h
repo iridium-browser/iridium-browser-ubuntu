@@ -13,6 +13,7 @@
 namespace net {
 
 class IPEndPoint;
+class SocketTag;
 
 class NET_EXPORT_PRIVATE DatagramClientSocket : public DatagramSocket,
                                                 public Socket {
@@ -41,6 +42,12 @@ class NET_EXPORT_PRIVATE DatagramClientSocket : public DatagramSocket,
   // ConnectUsingNetwork() or ConnectUsingDefaultNetwork().
   virtual NetworkChangeNotifier::NetworkHandle GetBoundNetwork() const = 0;
 
+  // Apply |tag| to this socket.
+  virtual void ApplySocketTag(const SocketTag& tag) = 0;
+
+  // Enables experimental optimization for receiving data from a socket.
+  // By default, this method is no-op.
+  virtual void EnableRecvOptimization() {}
 };
 
 }  // namespace net

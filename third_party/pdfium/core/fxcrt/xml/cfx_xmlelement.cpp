@@ -6,13 +6,16 @@
 
 #include "core/fxcrt/xml/cfx_xmlelement.h"
 
+#include <utility>
+
+#include "core/fxcrt/cfx_widetextbuf.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/xml/cfx_xmlchardata.h"
 #include "core/fxcrt/xml/cfx_xmltext.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
 
-CFX_XMLElement::CFX_XMLElement(const CFX_WideString& wsTag)
+CFX_XMLElement::CFX_XMLElement(const WideString& wsTag)
     : CFX_XMLAttributeNode(wsTag) {}
 
 CFX_XMLElement::~CFX_XMLElement() {}
@@ -25,39 +28,31 @@ std::unique_ptr<CFX_XMLNode> CFX_XMLElement::Clone() {
   auto pClone = pdfium::MakeUnique<CFX_XMLElement>(GetName());
   pClone->SetAttributes(GetAttributes());
 
-  CFX_WideString wsText;
-  CFX_XMLNode* pChild = m_pChild;
-  while (pChild) {
-    switch (pChild->GetType()) {
-      case FX_XMLNODE_Text:
-        wsText += static_cast<CFX_XMLText*>(pChild)->GetText();
-        break;
-      default:
-        break;
-    }
-    pChild = pChild->m_pNext;
+  WideString wsText;
+  for (CFX_XMLNode* pChild = GetFirstChild(); pChild;
+       pChild = pChild->GetNextSibling()) {
+    if (pChild->GetType() == FX_XMLNODE_Text)
+      wsText += static_cast<CFX_XMLText*>(pChild)->GetText();
   }
   pClone->SetTextData(wsText);
-  return pClone;
+  return std::move(pClone);
 }
 
-CFX_WideString CFX_XMLElement::GetLocalTagName() const {
-  FX_STRSIZE iFind = GetName().Find(L':', 0);
-  if (iFind < 0)
-    return GetName();
-  return GetName().Right(GetName().GetLength() - iFind - 1);
+WideString CFX_XMLElement::GetLocalTagName() const {
+  auto pos = GetName().Find(L':');
+  return pos.has_value()
+             ? GetName().Right(GetName().GetLength() - pos.value() - 1)
+             : GetName();
 }
 
-CFX_WideString CFX_XMLElement::GetNamespacePrefix() const {
-  FX_STRSIZE iFind = GetName().Find(L':', 0);
-  if (iFind < 0)
-    return CFX_WideString();
-  return GetName().Left(iFind);
+WideString CFX_XMLElement::GetNamespacePrefix() const {
+  auto pos = GetName().Find(L':');
+  return pos.has_value() ? GetName().Left(pos.value()) : WideString();
 }
 
-CFX_WideString CFX_XMLElement::GetNamespaceURI() const {
-  CFX_WideString wsAttri(L"xmlns");
-  CFX_WideString wsPrefix = GetNamespacePrefix();
+WideString CFX_XMLElement::GetNamespaceURI() const {
+  WideString wsAttri(L"xmlns");
+  WideString wsPrefix = GetNamespacePrefix();
   if (wsPrefix.GetLength() > 0) {
     wsAttri += L":";
     wsAttri += wsPrefix;
@@ -70,33 +65,57 @@ CFX_WideString CFX_XMLElement::GetNamespaceURI() const {
 
     auto* pElement = static_cast<const CFX_XMLElement*>(pNode);
     if (!pElement->HasAttribute(wsAttri)) {
-      pNode = pNode->GetNodeItem(CFX_XMLNode::Parent);
+      pNode = pNode->GetParent();
       continue;
     }
     return pElement->GetString(wsAttri);
   }
-  return CFX_WideString();
+  return WideString();
 }
 
-CFX_WideString CFX_XMLElement::GetTextData() const {
+WideString CFX_XMLElement::GetTextData() const {
   CFX_WideTextBuf buffer;
-  CFX_XMLNode* pChild = m_pChild;
-  while (pChild) {
-    switch (pChild->GetType()) {
-      case FX_XMLNODE_Text:
-      case FX_XMLNODE_CharData:
-        buffer << static_cast<CFX_XMLText*>(pChild)->GetText();
-        break;
-      default:
-        break;
+
+  for (CFX_XMLNode* pChild = GetFirstChild(); pChild;
+       pChild = pChild->GetNextSibling()) {
+    if (pChild->GetType() == FX_XMLNODE_Text ||
+        pChild->GetType() == FX_XMLNODE_CharData) {
+      buffer << static_cast<CFX_XMLText*>(pChild)->GetText();
     }
-    pChild = pChild->m_pNext;
   }
   return buffer.MakeString();
 }
 
-void CFX_XMLElement::SetTextData(const CFX_WideString& wsText) {
+void CFX_XMLElement::SetTextData(const WideString& wsText) {
   if (wsText.GetLength() < 1)
     return;
-  InsertChildNode(new CFX_XMLText(wsText));
+  AppendChild(new CFX_XMLText(wsText));
+}
+
+void CFX_XMLElement::Save(
+    const RetainPtr<CFX_SeekableStreamProxy>& pXMLStream) {
+  WideString ws(L"<");
+  ws += GetName();
+  pXMLStream->WriteString(ws.AsStringView());
+
+  for (auto it : GetAttributes()) {
+    pXMLStream->WriteString(
+        AttributeToString(it.first, it.second).AsStringView());
+  }
+
+  if (GetFirstChild()) {
+    ws = L"\n>";
+    pXMLStream->WriteString(ws.AsStringView());
+
+    for (CFX_XMLNode* pChild = GetFirstChild(); pChild;
+         pChild = pChild->GetNextSibling()) {
+      pChild->Save(pXMLStream);
+    }
+    ws = L"</";
+    ws += GetName();
+    ws += L"\n>";
+  } else {
+    ws = L"\n/>";
+  }
+  pXMLStream->WriteString(ws.AsStringView());
 }

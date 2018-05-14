@@ -8,12 +8,12 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 #include "base/base_paths.h"
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
@@ -61,26 +61,20 @@ bool IsUnsafeCharacter(char c) {
 }  // namespace
 
 LocalPolicyTestServer::LocalPolicyTestServer()
-    : net::LocalTestServer(net::BaseTestServer::TYPE_HTTP,
-                           net::BaseTestServer::kLocalhost,
-                           base::FilePath()) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+    : net::LocalTestServer(net::BaseTestServer::TYPE_HTTP, base::FilePath()) {
+  base::ScopedAllowBlockingForTesting allow_blocking;
   CHECK(server_data_dir_.CreateUniqueTempDir());
   config_file_ = server_data_dir_.GetPath().Append(kPolicyFileName);
 }
 
 LocalPolicyTestServer::LocalPolicyTestServer(const base::FilePath& config_file)
-    : net::LocalTestServer(net::BaseTestServer::TYPE_HTTP,
-                           net::BaseTestServer::kLocalhost,
-                           base::FilePath()),
+    : net::LocalTestServer(net::BaseTestServer::TYPE_HTTP, base::FilePath()),
       config_file_(config_file) {}
 
 LocalPolicyTestServer::LocalPolicyTestServer(const std::string& test_name)
-    : net::LocalTestServer(net::BaseTestServer::TYPE_HTTP,
-                           net::BaseTestServer::kLocalhost,
-                           base::FilePath()) {
+    : net::LocalTestServer(net::BaseTestServer::TYPE_HTTP, base::FilePath()) {
   // Read configuration from a file in chrome/test/data/policy.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::FilePath source_root;
   CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &source_root));
   config_file_ = source_root
@@ -95,7 +89,7 @@ LocalPolicyTestServer::~LocalPolicyTestServer() {}
 
 bool LocalPolicyTestServer::SetSigningKeyAndSignature(
     const crypto::RSAPrivateKey* key, const std::string& signature) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   CHECK(server_data_dir_.IsValid());
 
   std::vector<uint8_t> signing_key_bits;
@@ -151,7 +145,7 @@ void LocalPolicyTestServer::RegisterClient(const std::string& dm_token,
 bool LocalPolicyTestServer::UpdatePolicy(const std::string& type,
                                          const std::string& entity_id,
                                          const std::string& policy) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   CHECK(server_data_dir_.IsValid());
 
   std::string selector = GetSelector(type, entity_id);
@@ -165,7 +159,7 @@ bool LocalPolicyTestServer::UpdatePolicy(const std::string& type,
 bool LocalPolicyTestServer::UpdatePolicyData(const std::string& type,
                                              const std::string& entity_id,
                                              const std::string& data) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   CHECK(server_data_dir_.IsValid());
 
   std::string selector = GetSelector(type, entity_id);
@@ -181,7 +175,7 @@ GURL LocalPolicyTestServer::GetServiceURL() const {
 }
 
 bool LocalPolicyTestServer::SetPythonPath() const {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   if (!net::LocalTestServer::SetPythonPath())
     return false;
 
@@ -229,7 +223,7 @@ bool LocalPolicyTestServer::SetPythonPath() const {
 
 bool LocalPolicyTestServer::GetTestServerPath(
     base::FilePath* testserver_path) const {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::FilePath source_root;
   if (!PathService::Get(base::DIR_SOURCE_ROOT, &source_root)) {
     LOG(ERROR) << "Failed to get DIR_SOURCE_ROOT";
@@ -246,7 +240,7 @@ bool LocalPolicyTestServer::GetTestServerPath(
 
 bool LocalPolicyTestServer::GenerateAdditionalArguments(
     base::DictionaryValue* arguments) const {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   if (!net::LocalTestServer::GenerateAdditionalArguments(arguments))
     return false;
 
@@ -255,7 +249,7 @@ bool LocalPolicyTestServer::GenerateAdditionalArguments(
     arguments->SetString("policy-key", policy_key_.AsUTF8Unsafe());
   if (automatic_rotation_of_signing_keys_enabled_) {
     arguments->Set("rotate-policy-keys-automatically",
-                   base::MakeUnique<base::Value>());
+                   std::make_unique<base::Value>());
   }
   if (server_data_dir_.IsValid()) {
     arguments->SetString("data-dir", server_data_dir_.GetPath().AsUTF8Unsafe());

@@ -10,13 +10,13 @@
 
 #include <gtk/gtk.h>
 
-#include "webrtc/examples/peerconnection/client/conductor.h"
-#include "webrtc/examples/peerconnection/client/flagdefs.h"
-#include "webrtc/examples/peerconnection/client/linux/main_wnd.h"
-#include "webrtc/examples/peerconnection/client/peer_connection_client.h"
+#include "examples/peerconnection/client/conductor.h"
+#include "examples/peerconnection/client/flagdefs.h"
+#include "examples/peerconnection/client/linux/main_wnd.h"
+#include "examples/peerconnection/client/peer_connection_client.h"
 
-#include "webrtc/rtc_base/ssladapter.h"
-#include "webrtc/rtc_base/thread.h"
+#include "rtc_base/ssladapter.h"
+#include "rtc_base/thread.h"
 
 class CustomSocketServer : public rtc::PhysicalSocketServer {
  public:
@@ -32,7 +32,7 @@ class CustomSocketServer : public rtc::PhysicalSocketServer {
   void set_conductor(Conductor* conductor) { conductor_ = conductor; }
 
   // Override so that we can also pump the GTK message loop.
-  virtual bool Wait(int cms, bool process_io) {
+  bool Wait(int cms, bool process_io) override {
     // Pump GTK events.
     // TODO(henrike): We really should move either the socket server or UI to a
     // different thread.  Alternatively we could look at merging the two loops

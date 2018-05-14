@@ -17,7 +17,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/background/background_trigger.h"
 #include "chrome/browser/push_messaging/push_messaging_notification_manager.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -31,12 +31,9 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/push_messaging_service.h"
 #include "content/public/common/push_event_payload.h"
-#include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
-#include "third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h"
 
 class Profile;
 class PushMessagingAppIdentifier;
-class PushMessagingServiceObserver;
 class PushMessagingServiceTest;
 class ScopedKeepAlive;
 struct PushSubscriptionOptions;
@@ -67,6 +64,10 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
 
   explicit PushMessagingServiceImpl(Profile* profile);
   ~PushMessagingServiceImpl() override;
+
+  // Gets the permission status for the given |origin|.
+  blink::mojom::PermissionStatus GetPermissionStatus(const GURL& origin,
+                                                     bool user_visible);
 
   // gcm::GCMAppHandler implementation.
   void ShutdownHandler() override;
@@ -104,9 +105,6 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
                    int64_t service_worker_registration_id,
                    const std::string& sender_id,
                    const UnregisterCallback&) override;
-  blink::WebPushPermissionStatus GetPermissionStatus(
-      const GURL& origin,
-      bool user_visible) override;
   bool SupportNonVisibleMessages() override;
   void DidDeleteServiceWorkerRegistration(
       const GURL& origin,
@@ -291,10 +289,7 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
 
   MessageDispatchedCallback message_dispatched_callback_for_testing_;
 
-  std::unique_ptr<PushMessagingServiceObserver>
-      push_messaging_service_observer_;
-
-#if BUILDFLAG(ENABLE_BACKGROUND)
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
   // KeepAlive registered while we have in-flight push messages, to make sure
   // we can finish processing them without being interrupted.
   std::unique_ptr<ScopedKeepAlive> in_flight_keep_alive_;

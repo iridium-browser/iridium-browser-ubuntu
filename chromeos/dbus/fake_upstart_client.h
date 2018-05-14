@@ -22,9 +22,11 @@ class CHROMEOS_EXPORT FakeUpstartClient : public UpstartClient {
   // UpstartClient overrides.
   void StartAuthPolicyService() override;
   void RestartAuthPolicyService() override;
-  void StartMediaAnalytics(const UpstartCallback& callback) override;
-  void RestartMediaAnalytics(const UpstartCallback& callback) override;
+  void StartMediaAnalytics(const std::vector<std::string>& upstart_env,
+                           VoidDBusMethodCallback callback) override;
+  void RestartMediaAnalytics(VoidDBusMethodCallback callback) override;
   void StopMediaAnalytics() override;
+  void StopMediaAnalytics(VoidDBusMethodCallback callback) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeUpstartClient);

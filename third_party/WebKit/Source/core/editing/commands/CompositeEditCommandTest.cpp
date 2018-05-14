@@ -4,10 +4,10 @@
 
 #include "core/editing/commands/CompositeEditCommand.h"
 
-#include "core/css/StylePropertySet.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/dom/Document.h"
-#include "core/editing/EditingTestBase.h"
 #include "core/editing/FrameSelection.h"
+#include "core/editing/testing/EditingTestBase.h"
 #include "core/frame/LocalFrame.h"
 
 namespace blink {
@@ -23,6 +23,9 @@ class SampleCommand final : public CompositeEditCommand {
                         EditingState*,
                         ShouldAssumeContentIsAlwaysEditable =
                             kDoNotAssumeContentIsAlwaysEditable);
+
+  void MoveParagraphContentsToNewBlockIfNecessary(const Position&,
+                                                  EditingState*);
 
   // CompositeEditCommand member implementations
   void DoApply(EditingState*) final {}
@@ -45,6 +48,13 @@ void SampleCommand::InsertNodeBefore(
       should_assume_content_is_always_editable);
 }
 
+void SampleCommand::MoveParagraphContentsToNewBlockIfNecessary(
+    const Position& position,
+    EditingState* editing_state) {
+  CompositeEditCommand::MoveParagraphContentsToNewBlockIfNecessary(
+      position, editing_state);
+}
+
 }  // namespace
 
 class CompositeEditCommandTest : public EditingTestBase {};
@@ -59,7 +69,7 @@ TEST_F(CompositeEditCommandTest, insertNodeBefore) {
   EditingState editing_state;
   sample.InsertNodeBefore(insert_child, ref_child, &editing_state);
   EXPECT_FALSE(editing_state.IsAborted());
-  EXPECT_EQ("foo<b></b>", div->innerHTML());
+  EXPECT_EQ("foo<b></b>", div->InnerHTMLAsString());
 }
 
 TEST_F(CompositeEditCommandTest, insertNodeBeforeInUneditable) {
@@ -84,7 +94,7 @@ TEST_F(CompositeEditCommandTest, insertNodeBeforeDisconnectedNode) {
   EditingState editing_state;
   sample.InsertNodeBefore(insert_child, ref_child, &editing_state);
   EXPECT_FALSE(editing_state.IsAborted());
-  EXPECT_EQ("<b></b>", div->innerHTML())
+  EXPECT_EQ("<b></b>", div->InnerHTMLAsString())
       << "InsertNodeBeforeCommand does nothing for disconnected node";
 }
 
@@ -99,7 +109,41 @@ TEST_F(CompositeEditCommandTest, insertNodeBeforeWithDirtyLayoutTree) {
   EditingState editing_state;
   sample.InsertNodeBefore(insert_child, ref_child, &editing_state);
   EXPECT_FALSE(editing_state.IsAborted());
-  EXPECT_EQ("foo<b></b>", div->innerHTML());
+  EXPECT_EQ("foo<b></b>", div->InnerHTMLAsString());
+}
+
+TEST_F(CompositeEditCommandTest,
+       MoveParagraphContentsToNewBlockWithNonEditableStyle) {
+  SetBodyContent(
+      "<style>div{-webkit-user-modify:read-only;user-select:none;}</style>"
+      "foo");
+  SampleCommand& sample = *new SampleCommand(GetDocument());
+  Element* body = GetDocument().body();
+  Node* text = body->lastChild();
+  body->setAttribute(HTMLNames::contenteditableAttr, "true");
+  GetDocument().UpdateStyleAndLayout();
+
+  EditingState editing_state;
+  sample.MoveParagraphContentsToNewBlockIfNecessary(Position(text, 0),
+                                                    &editing_state);
+  EXPECT_TRUE(editing_state.IsAborted());
+  EXPECT_EQ(
+      "<div><br></div>"
+      "<style>div{-webkit-user-modify:read-only;user-select:none;}</style>"
+      "foo",
+      body->InnerHTMLAsString());
+}
+
+TEST_F(CompositeEditCommandTest, InsertNodeOnDisconnectedParent) {
+  SetBodyContent("<p><b></b></p>");
+  SampleCommand& sample = *new SampleCommand(GetDocument());
+  Node* insert_child = GetDocument().QuerySelector("b");
+  Element* ref_child = GetDocument().QuerySelector("p");
+  ref_child->remove();
+  EditingState editing_state;
+  // editing state should abort here.
+  sample.InsertNodeBefore(insert_child, ref_child, &editing_state);
+  EXPECT_TRUE(editing_state.IsAborted());
 }
 
 }  // namespace blink

@@ -5,142 +5,160 @@
 #include "core/frame/Frame.h"
 
 #include "core/dom/UserGestureIndicator.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/loader/DocumentLoader.h"
+#include "core/testing/PageTestBase.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
-class FrameTest : public ::testing::Test {
+class FrameTest : public PageTestBase {
  public:
   void SetUp() override {
-    dummy_page_holder_ = DummyPageHolder::Create(IntSize(800, 600));
-    Navigate("https://example.com/");
+    PageTestBase::SetUp();
+    Navigate("https://example.com/", false);
 
-    ASSERT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+    ASSERT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
     ASSERT_FALSE(
         GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
   }
 
-  Document& GetDocument() const { return dummy_page_holder_->GetDocument(); }
-
-  void Navigate(const String& destinationUrl) {
+  void Navigate(const String& destinationUrl, bool user_activated) {
     const KURL& url = KURL(NullURL(), destinationUrl);
     FrameLoadRequest request(nullptr, ResourceRequest(url),
                              SubstituteData(SharedBuffer::Create()));
     GetDocument().GetFrame()->Loader().Load(request);
+    if (user_activated) {
+      GetDocument()
+          .GetFrame()
+          ->Loader()
+          .GetProvisionalDocumentLoader()
+          ->SetUserActivated();
+    }
     blink::testing::RunPendingTasks();
     ASSERT_EQ(url.GetString(), GetDocument().Url().GetString());
   }
 
   void NavigateSameDomain(const String& page) {
-    Navigate("https://test.example.com/" + page);
+    NavigateSameDomain(page, true);
   }
 
-  void NavigateDifferentDomain() { Navigate("https://example.org/"); }
+  void NavigateSameDomain(const String& page, bool user_activated) {
+    Navigate("https://test.example.com/" + page, user_activated);
+  }
 
- private:
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
+  void NavigateDifferentDomain() { Navigate("https://example.org/", false); }
 };
 
 TEST_F(FrameTest, NoGesture) {
-  // A nullptr Document* will not set user gesture state.
-  UserGestureToken::Create(nullptr);
-  EXPECT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  // A nullptr LocalFrame* will not set user gesture state.
+  std::unique_ptr<UserGestureIndicator> holder =
+      Frame::NotifyUserActivation(nullptr);
+  EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
 }
 
 TEST_F(FrameTest, PossiblyExisting) {
-  // A non-null Document* will set state, but a subsequent nullptr Document*
+  // A non-null LocalFrame* will set state, but a subsequent nullptr Document*
   // token will not override it.
-  UserGestureToken::Create(&GetDocument());
-  EXPECT_TRUE(GetDocument().GetFrame()->HasReceivedUserGesture());
-  UserGestureToken::Create(nullptr);
-  EXPECT_TRUE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  {
+    std::unique_ptr<UserGestureIndicator> holder =
+        Frame::NotifyUserActivation(GetDocument().GetFrame());
+    EXPECT_TRUE(GetDocument().GetFrame()->HasBeenActivated());
+  }
+  {
+    std::unique_ptr<UserGestureIndicator> holder =
+        Frame::NotifyUserActivation(nullptr);
+    EXPECT_TRUE(GetDocument().GetFrame()->HasBeenActivated());
+  }
 }
 
 TEST_F(FrameTest, NewGesture) {
   // UserGestureToken::Status doesn't impact Document gesture state.
-  UserGestureToken::Create(&GetDocument(), UserGestureToken::kNewGesture);
-  EXPECT_TRUE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  std::unique_ptr<UserGestureIndicator> holder = Frame::NotifyUserActivation(
+      GetDocument().GetFrame(), UserGestureToken::kNewGesture);
+  EXPECT_TRUE(GetDocument().GetFrame()->HasBeenActivated());
 }
 
 TEST_F(FrameTest, NavigateDifferentDomain) {
-  UserGestureToken::Create(&GetDocument());
-  EXPECT_TRUE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  std::unique_ptr<UserGestureIndicator> holder =
+      Frame::NotifyUserActivation(GetDocument().GetFrame());
+  EXPECT_TRUE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_FALSE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 
   // Navigate to a different Document. In the main frame, user gesture state
   // will get reset. State will not persist since the domain has changed.
   NavigateDifferentDomain();
-  EXPECT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_FALSE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 }
 
 TEST_F(FrameTest, NavigateSameDomainMultipleTimes) {
-  UserGestureToken::Create(&GetDocument());
-  EXPECT_TRUE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  std::unique_ptr<UserGestureIndicator> holder =
+      Frame::NotifyUserActivation(GetDocument().GetFrame());
+  EXPECT_TRUE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_FALSE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 
   // Navigate to a different Document in the same domain.  In the main frame,
   // user gesture state will get reset, but persisted state will be true.
   NavigateSameDomain("page1");
-  EXPECT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_TRUE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 
   // Navigate to a different Document in the same domain, the persisted
   // state will be true.
   NavigateSameDomain("page2");
-  EXPECT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_TRUE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 
   // Navigate to the same URL in the same domain, the persisted state
   // will be true, but the user gesture state will be reset.
   NavigateSameDomain("page2");
-  EXPECT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_TRUE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 
   // Navigate to a different Document in the same domain, the persisted
   // state will be true.
   NavigateSameDomain("page3");
-  EXPECT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_TRUE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 }
 
 TEST_F(FrameTest, NavigateSameDomainDifferentDomain) {
-  UserGestureToken::Create(&GetDocument());
-  EXPECT_TRUE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  std::unique_ptr<UserGestureIndicator> holder =
+      Frame::NotifyUserActivation(GetDocument().GetFrame());
+  EXPECT_TRUE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_FALSE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 
   // Navigate to a different Document in the same domain.  In the main frame,
   // user gesture state will get reset, but persisted state will be true.
   NavigateSameDomain("page1");
-  EXPECT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_TRUE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 
   // Navigate to a different Document in a different domain, the persisted
   // state will be reset.
   NavigateDifferentDomain();
-  EXPECT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_FALSE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 }
 
 TEST_F(FrameTest, NavigateSameDomainNoGesture) {
-  EXPECT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_FALSE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 
-  NavigateSameDomain("page1");
-  EXPECT_FALSE(GetDocument().GetFrame()->HasReceivedUserGesture());
+  NavigateSameDomain("page1", false);
+  EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_FALSE(
       GetDocument().GetFrame()->HasReceivedUserGestureBeforeNavigation());
 }

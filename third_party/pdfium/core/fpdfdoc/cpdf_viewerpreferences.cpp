@@ -34,13 +34,13 @@ CPDF_Array* CPDF_ViewerPreferences::PrintPageRange() const {
   return pDict ? pDict->GetArrayFor("PrintPageRange") : nullptr;
 }
 
-CFX_ByteString CPDF_ViewerPreferences::Duplex() const {
+ByteString CPDF_ViewerPreferences::Duplex() const {
   CPDF_Dictionary* pDict = GetViewerPreferences();
-  return pDict ? pDict->GetStringFor("Duplex") : CFX_ByteString("None");
+  return pDict ? pDict->GetStringFor("Duplex") : ByteString("None");
 }
 
-bool CPDF_ViewerPreferences::GenericName(const CFX_ByteString& bsKey,
-                                         CFX_ByteString* bsVal) const {
+bool CPDF_ViewerPreferences::GenericName(const ByteString& bsKey,
+                                         ByteString* bsVal) const {
   ASSERT(bsVal);
   CPDF_Dictionary* pDict = GetViewerPreferences();
   if (!pDict)
@@ -55,6 +55,6 @@ bool CPDF_ViewerPreferences::GenericName(const CFX_ByteString& bsKey,
 }
 
 CPDF_Dictionary* CPDF_ViewerPreferences::GetViewerPreferences() const {
-  CPDF_Dictionary* pDict = m_pDoc->GetRoot();
+  const CPDF_Dictionary* pDict = m_pDoc->GetRoot();
   return pDict ? pDict->GetDictFor("ViewerPreferences") : nullptr;
 }

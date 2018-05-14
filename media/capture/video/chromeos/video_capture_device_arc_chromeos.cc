@@ -4,13 +4,17 @@
 
 #include "media/capture/video/chromeos/video_capture_device_arc_chromeos.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/bind_helpers.h"
-#include "base/memory/ptr_util.h"
+#include "base/location.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "media/base/bind_to_current_loop.h"
+#include "media/capture/video/chromeos/camera_device_context.h"
 #include "media/capture/video/chromeos/camera_device_delegate.h"
 #include "media/capture/video/chromeos/camera_hal_delegate.h"
 #include "ui/display/display.h"
@@ -37,12 +41,18 @@ VideoCaptureDeviceArcChromeOS::VideoCaptureDeviceArcChromeOS(
       // We don't want to rotate the frame even if the device rotates.
       rotates_with_device_(lens_facing_ !=
                            VideoFacingMode::MEDIA_VIDEO_FACING_NONE),
-      rotation_(0) {}
+      rotation_(0),
+      weak_ptr_factory_(this) {
+  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(
+      this);
+}
 
 VideoCaptureDeviceArcChromeOS::~VideoCaptureDeviceArcChromeOS() {
   DCHECK(capture_task_runner_->BelongsToCurrentThread());
   DCHECK(!camera_device_ipc_thread_.IsRunning());
   screen_observer_delegate_->RemoveObserver();
+  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(
+      this);
 }
 
 // VideoCaptureDevice implementation.
@@ -58,16 +68,12 @@ void VideoCaptureDeviceArcChromeOS::AllocateAndStart(
     client->OnError(FROM_HERE, error_msg);
     return;
   }
-  camera_device_delegate_ = base::MakeUnique<CameraDeviceDelegate>(
+  capture_params_ = params;
+  device_context_ = std::make_unique<CameraDeviceContext>(std::move(client));
+  camera_device_delegate_ = std::make_unique<CameraDeviceDelegate>(
       device_descriptor_, camera_hal_delegate_,
       camera_device_ipc_thread_.task_runner());
-  camera_device_ipc_thread_.task_runner()->PostTask(
-      FROM_HERE, base::Bind(&CameraDeviceDelegate::AllocateAndStart,
-                            camera_device_delegate_->GetWeakPtr(), params,
-                            base::Passed(&client)));
-  camera_device_ipc_thread_.task_runner()->PostTask(
-      FROM_HERE, base::Bind(&CameraDeviceDelegate::SetRotation,
-                            camera_device_delegate_->GetWeakPtr(), rotation_));
+  OpenDevice();
 }
 
 void VideoCaptureDeviceArcChromeOS::StopAndDeAllocate() {
@@ -76,27 +82,10 @@ void VideoCaptureDeviceArcChromeOS::StopAndDeAllocate() {
   if (!camera_device_delegate_) {
     return;
   }
-
-  // We do our best to allow the camera HAL cleanly shut down the device.  In
-  // general we don't trust the camera HAL so if the device does not close in
-  // time we simply terminate the Mojo channel by resetting
-  // |camera_device_delegate_|.
-  base::WaitableEvent device_closed(
-      base::WaitableEvent::ResetPolicy::MANUAL,
-      base::WaitableEvent::InitialState::NOT_SIGNALED);
-  camera_device_ipc_thread_.task_runner()->PostTask(
-      FROM_HERE, base::Bind(&CameraDeviceDelegate::StopAndDeAllocate,
-                            camera_device_delegate_->GetWeakPtr(),
-                            base::Bind(
-                                [](base::WaitableEvent* device_closed) {
-                                  device_closed->Signal();
-                                },
-                                base::Unretained(&device_closed))));
-  base::TimeDelta kWaitTimeoutSecs = base::TimeDelta::FromSeconds(3);
-  device_closed.TimedWait(kWaitTimeoutSecs);
-
+  CloseDevice(base::Closure());
   camera_device_ipc_thread_.Stop();
   camera_device_delegate_.reset();
+  device_context_.reset();
 }
 
 void VideoCaptureDeviceArcChromeOS::TakePhoto(TakePhotoCallback callback) {
@@ -125,6 +114,72 @@ void VideoCaptureDeviceArcChromeOS::SetPhotoOptions(
       FROM_HERE, base::Bind(&CameraDeviceDelegate::SetPhotoOptions,
                             camera_device_delegate_->GetWeakPtr(),
                             base::Passed(&settings), base::Passed(&callback)));
+}
+
+void VideoCaptureDeviceArcChromeOS::SuspendImminent(
+    power_manager::SuspendImminent::Reason reason) {
+  capture_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          &VideoCaptureDeviceArcChromeOS::CloseDevice,
+          weak_ptr_factory_.GetWeakPtr(),
+          BindToCurrentLoop(chromeos::DBusThreadManager::Get()
+                                ->GetPowerManagerClient()
+                                ->GetSuspendReadinessCallback(FROM_HERE))));
+}
+
+void VideoCaptureDeviceArcChromeOS::SuspendDone(
+    const base::TimeDelta& sleep_duration) {
+  capture_task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&VideoCaptureDeviceArcChromeOS::OpenDevice,
+                                weak_ptr_factory_.GetWeakPtr()));
+}
+
+void VideoCaptureDeviceArcChromeOS::OpenDevice() {
+  DCHECK(capture_task_runner_->BelongsToCurrentThread());
+
+  if (!camera_device_delegate_) {
+    return;
+  }
+  // It's safe to pass unretained |device_context_| here since
+  // VideoCaptureDeviceArcChromeOS owns |camera_device_delegate_| and makes
+  // sure |device_context_| outlives |camera_device_delegate_|.
+  camera_device_ipc_thread_.task_runner()->PostTask(
+      FROM_HERE,
+      base::Bind(&CameraDeviceDelegate::AllocateAndStart,
+                 camera_device_delegate_->GetWeakPtr(), capture_params_,
+                 base::Unretained(device_context_.get())));
+  camera_device_ipc_thread_.task_runner()->PostTask(
+      FROM_HERE, base::Bind(&CameraDeviceDelegate::SetRotation,
+                            camera_device_delegate_->GetWeakPtr(), rotation_));
+}
+
+void VideoCaptureDeviceArcChromeOS::CloseDevice(base::Closure callback) {
+  DCHECK(capture_task_runner_->BelongsToCurrentThread());
+
+  if (!camera_device_delegate_) {
+    return;
+  }
+  // We do our best to allow the camera HAL cleanly shut down the device.  In
+  // general we don't trust the camera HAL so if the device does not close in
+  // time we simply terminate the Mojo channel by resetting
+  // |camera_device_delegate_|.
+  base::WaitableEvent device_closed(
+      base::WaitableEvent::ResetPolicy::MANUAL,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
+  camera_device_ipc_thread_.task_runner()->PostTask(
+      FROM_HERE, base::Bind(&CameraDeviceDelegate::StopAndDeAllocate,
+                            camera_device_delegate_->GetWeakPtr(),
+                            base::Bind(
+                                [](base::WaitableEvent* device_closed) {
+                                  device_closed->Signal();
+                                },
+                                base::Unretained(&device_closed))));
+  base::TimeDelta kWaitTimeoutSecs = base::TimeDelta::FromSeconds(3);
+  device_closed.TimedWait(kWaitTimeoutSecs);
+  if (callback) {
+    callback.Run();
+  }
 }
 
 void VideoCaptureDeviceArcChromeOS::SetDisplayRotation(

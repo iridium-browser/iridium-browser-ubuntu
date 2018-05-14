@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "base/atomicops.h"
+#include "base/containers/stack.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -23,10 +24,11 @@
 
 namespace base {
 
-template <typename Type>
-struct DefaultSingletonTraits;
 class MessageLoop;
 class RefCountedString;
+
+template <typename T>
+class NoDestructor;
 
 namespace trace_event {
 
@@ -192,7 +194,7 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
       const char* scope,
       unsigned long long id,
       int num_args,
-      const char** arg_names,
+      const char* const* arg_names,
       const unsigned char* arg_types,
       const unsigned long long* arg_values,
       std::unique_ptr<ConvertableToTraceFormat>* convertable_values,
@@ -205,7 +207,7 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
       unsigned long long id,
       unsigned long long bind_id,
       int num_args,
-      const char** arg_names,
+      const char* const* arg_names,
       const unsigned char* arg_types,
       const unsigned long long* arg_values,
       std::unique_ptr<ConvertableToTraceFormat>* convertable_values,
@@ -218,7 +220,7 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
       unsigned long long id,
       int process_id,
       int num_args,
-      const char** arg_names,
+      const char* const* arg_names,
       const unsigned char* arg_types,
       const unsigned long long* arg_values,
       std::unique_ptr<ConvertableToTraceFormat>* convertable_values,
@@ -232,7 +234,7 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
       int thread_id,
       const TimeTicks& timestamp,
       int num_args,
-      const char** arg_names,
+      const char* const* arg_names,
       const unsigned char* arg_types,
       const unsigned long long* arg_values,
       std::unique_ptr<ConvertableToTraceFormat>* convertable_values,
@@ -247,7 +249,7 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
       int thread_id,
       const TimeTicks& timestamp,
       int num_args,
-      const char** arg_names,
+      const char* const* arg_names,
       const unsigned char* arg_types,
       const unsigned long long* arg_values,
       std::unique_ptr<ConvertableToTraceFormat>* convertable_values,
@@ -258,7 +260,7 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
       const unsigned char* category_group_enabled,
       const char* name,
       int num_args,
-      const char** arg_names,
+      const char* const* arg_names,
       const unsigned char* arg_types,
       const unsigned long long* arg_values,
       std::unique_ptr<ConvertableToTraceFormat>* convertable_values,
@@ -292,8 +294,8 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
     filter_factory_for_testing_ = factory;
   }
 
-  // Allows deleting our singleton instance.
-  static void DeleteForTesting();
+  // Allows clearing up our singleton instance.
+  static void ResetForTesting();
 
   // Allow tests to inspect TraceEvents.
   TraceEvent* GetEventByHandle(TraceEventHandle handle);
@@ -305,9 +307,13 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
   // on their sort index, ascending, then by their name, and then tid.
   void SetProcessSortIndex(int sort_index);
 
-  // Sets the name of the process. |process_name| should be a string literal
-  // since it is a whitelisted argument for background field trials.
-  void SetProcessName(const char* process_name);
+  // Sets the name of the process.
+  void set_process_name(const std::string& process_name) {
+    AutoLock lock(lock_);
+    process_name_ = process_name;
+  }
+
+  bool IsProcessNameEmpty() const { return process_name_.empty(); }
 
   // Processes can have labels in addition to their names. Use labels, for
   // instance, to list out the web page titles that a process is handling.
@@ -337,6 +343,9 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
   void UpdateETWCategoryGroupEnabledFlags();
 #endif
 
+  // Replaces |logged_events_| with a new TraceBuffer for testing.
+  void SetTraceBufferForTesting(std::unique_ptr<TraceBuffer> trace_buffer);
+
  private:
   typedef unsigned int InternalTraceOptions;
 
@@ -352,9 +361,7 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
   FRIEND_TEST_ALL_PREFIXES(TraceEventTestFixture,
                            TraceRecordAsMuchAsPossibleMode);
 
-  // This allows constructor and destructor to be private and usable only
-  // by the Singleton class.
-  friend struct DefaultSingletonTraits<TraceLog>;
+  friend class base::NoDestructor<TraceLog>;
 
   // MemoryDumpProvider implementation.
   bool OnMemoryDump(const MemoryDumpArgs& args,
@@ -458,9 +465,10 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
   int process_sort_index_;
   std::unordered_map<int, int> thread_sort_indices_;
   std::unordered_map<int, std::string> thread_names_;
+  base::Time process_creation_time_;
 
   // The following two maps are used only when ECHO_TO_CONSOLE.
-  std::unordered_map<int, std::stack<TimeTicks>> thread_event_start_times_;
+  std::unordered_map<int, base::stack<TimeTicks>> thread_event_start_times_;
   std::unordered_map<std::string, int> thread_colors_;
 
   TimeTicks buffer_limit_reached_timestamp_;

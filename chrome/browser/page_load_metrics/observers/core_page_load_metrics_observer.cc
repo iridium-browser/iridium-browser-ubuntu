@@ -9,6 +9,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/metrics/histogram_macros.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
 #include "components/rappor/public/rappor_utils.h"
@@ -70,6 +71,11 @@ void RecordFirstMeaningfulPaintStatus(
       status, internal::FIRST_MEANINGFUL_PAINT_LAST_ENTRY);
 }
 
+void RecordTimeToInteractiveStatus(internal::TimeToInteractiveStatus status) {
+  UMA_HISTOGRAM_ENUMERATION(internal::kHistogramTimeToInteractiveStatus, status,
+                            internal::TIME_TO_INTERACTIVE_LAST_ENTRY);
+}
+
 }  // namespace
 
 namespace internal {
@@ -104,6 +110,14 @@ const char kBackgroundHistogramFirstContentfulPaint[] =
     "PageLoad.PaintTiming.NavigationToFirstContentfulPaint.Background";
 const char kHistogramFirstMeaningfulPaint[] =
     "PageLoad.Experimental.PaintTiming.NavigationToFirstMeaningfulPaint";
+const char kHistogramTimeToInteractive[] =
+    "PageLoad.Experimental.NavigationToInteractive";
+const char kHistogramInteractiveToInteractiveDetection[] =
+    "PageLoad.Internal.InteractiveToInteractiveDetection";
+const char kHistogramFirstInputDelay[] =
+    "PageLoad.InteractiveTiming.FirstInputDelay";
+const char kHistogramFirstInputTimestamp[] =
+    "PageLoad.InteractiveTiming.FirstInputTimestamp";
 const char kHistogramParseStartToFirstMeaningfulPaint[] =
     "PageLoad.Experimental.PaintTiming.ParseStartToFirstMeaningfulPaint";
 const char kHistogramParseStartToFirstContentfulPaint[] =
@@ -185,13 +199,6 @@ const char kHistogramForegroundToFirstContentfulPaint[] =
 const char kHistogramForegroundToFirstMeaningfulPaint[] =
     "PageLoad.Experimental.PaintTiming.ForegroundToFirstMeaningfulPaint";
 
-const char kHistogramCacheRequestPercentParseStop[] =
-    "PageLoad.Experimental.Cache.RequestPercent.ParseStop";
-const char kHistogramCacheTotalRequestsParseStop[] =
-    "PageLoad.Experimental.Cache.TotalRequests.ParseStop";
-const char kHistogramTotalRequestsParseStop[] =
-    "PageLoad.Experimental.TotalRequests.ParseStop";
-
 const char kRapporMetricsNameCoarseTiming[] =
     "PageLoad.CoarseTiming.NavigationToFirstContentfulPaint";
 
@@ -204,14 +211,18 @@ const char kHistogramFirstContentfulPaintUserInitiated[] =
 const char kHistogramFirstMeaningfulPaintStatus[] =
     "PageLoad.Experimental.PaintTiming.FirstMeaningfulPaintStatus";
 
+const char kHistogramTimeToInteractiveStatus[] =
+    "PageLoad.Experimental.TimeToInteractiveStatus";
+
 const char kHistogramFirstNonScrollInputAfterFirstPaint[] =
     "PageLoad.InputTiming.NavigationToFirstNonScroll.AfterPaint";
 const char kHistogramFirstScrollInputAfterFirstPaint[] =
     "PageLoad.InputTiming.NavigationToFirstScroll.AfterPaint";
 
-const char kHistogramTotalBytes[] = "PageLoad.Experimental.Bytes.Total";
-const char kHistogramNetworkBytes[] = "PageLoad.Experimental.Bytes.Network";
-const char kHistogramCacheBytes[] = "PageLoad.Experimental.Bytes.Cache";
+const char kHistogramPageLoadTotalBytes[] = "PageLoad.Experimental.Bytes.Total";
+const char kHistogramPageLoadNetworkBytes[] =
+    "PageLoad.Experimental.Bytes.Network";
+const char kHistogramPageLoadCacheBytes[] = "PageLoad.Experimental.Bytes.Cache";
 
 const char kHistogramLoadTypeTotalBytesForwardBack[] =
     "PageLoad.Experimental.Bytes.Total.LoadType.ForwardBackNavigation";
@@ -476,17 +487,71 @@ void CorePageLoadMetricsObserver::OnFirstMeaningfulPaintInMainFrameDocument(
                         timing.paint_timing->first_meaningful_paint.value() -
                             timing.parse_timing->parse_start.value());
     RecordFirstMeaningfulPaintStatus(internal::FIRST_MEANINGFUL_PAINT_RECORDED);
-
-    if (WasStartedInBackgroundOptionalEventInForeground(
-            timing.paint_timing->first_meaningful_paint, info)) {
-      PAGE_LOAD_HISTOGRAM(internal::kHistogramForegroundToFirstMeaningfulPaint,
-                          timing.paint_timing->first_meaningful_paint.value() -
-                              info.first_foreground_time.value());
-    }
   } else {
     RecordFirstMeaningfulPaintStatus(
         internal::FIRST_MEANINGFUL_PAINT_BACKGROUNDED);
   }
+
+  if (WasStartedInBackgroundOptionalEventInForeground(
+          timing.paint_timing->first_meaningful_paint, info)) {
+    PAGE_LOAD_HISTOGRAM(internal::kHistogramForegroundToFirstMeaningfulPaint,
+                        timing.paint_timing->first_meaningful_paint.value() -
+                            info.first_foreground_time.value());
+  }
+}
+
+void CorePageLoadMetricsObserver::OnPageInteractive(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& info) {
+  // Both interactive and interactive detection time must be present.
+  DCHECK(timing.interactive_timing->interactive);
+  DCHECK(timing.interactive_timing->interactive_detection);
+  DCHECK_GE(timing.interactive_timing->interactive_detection.value(),
+            timing.interactive_timing->interactive.value());
+
+  if (!WasStartedInForegroundOptionalEventInForeground(
+          timing.interactive_timing->interactive_detection, info)) {
+    RecordTimeToInteractiveStatus(internal::TIME_TO_INTERACTIVE_BACKGROUNDED);
+    return;
+  }
+
+  if (timing.interactive_timing->first_invalidating_input &&
+      timing.interactive_timing->first_invalidating_input.value() <
+          timing.interactive_timing->interactive) {
+    RecordTimeToInteractiveStatus(
+        internal::TIME_TO_INTERACTIVE_USER_INTERACTION_BEFORE_INTERACTIVE);
+    return;
+  }
+
+  base::TimeDelta time_to_interactive =
+      timing.interactive_timing->interactive.value();
+  base::TimeDelta interactive_to_detection =
+      timing.interactive_timing->interactive_detection.value() -
+      time_to_interactive;
+  PAGE_LOAD_HISTOGRAM(internal::kHistogramTimeToInteractive,
+                      time_to_interactive);
+  PAGE_LOAD_HISTOGRAM(internal::kHistogramInteractiveToInteractiveDetection,
+                      interactive_to_detection);
+  RecordTimeToInteractiveStatus(internal::TIME_TO_INTERACTIVE_RECORDED);
+}
+
+void CorePageLoadMetricsObserver::OnFirstInputInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& extra_info) {
+  if (!WasStartedInForegroundOptionalEventInForeground(
+          timing.interactive_timing->first_input_timestamp, extra_info)) {
+    return;
+  }
+
+  // Input delay will often be ~0, and will only be > 10 seconds very
+  // rarely. Capture the range from 1ms to 60s.
+  UMA_HISTOGRAM_CUSTOM_TIMES(
+      internal::kHistogramFirstInputDelay,
+      timing.interactive_timing->first_input_delay.value(),
+      base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromSeconds(60),
+      50);
+  PAGE_LOAD_HISTOGRAM(internal::kHistogramFirstInputTimestamp,
+                      timing.interactive_timing->first_input_timestamp.value());
 }
 
 void CorePageLoadMetricsObserver::OnParseStart(
@@ -550,28 +615,6 @@ void CorePageLoadMetricsObserver::OnParseStop(
         timing.parse_timing
             ->parse_blocked_on_script_execution_from_document_write_duration
             .value());
-
-    int total_resources = num_cache_resources_ + num_network_resources_;
-    if (total_resources) {
-      int percent_cached = (100 * num_cache_resources_) / total_resources;
-      UMA_HISTOGRAM_PERCENTAGE(internal::kHistogramCacheRequestPercentParseStop,
-                               percent_cached);
-      UMA_HISTOGRAM_COUNTS(internal::kHistogramCacheTotalRequestsParseStop,
-                           num_cache_resources_);
-      UMA_HISTOGRAM_COUNTS(internal::kHistogramTotalRequestsParseStop,
-                           num_cache_resources_ + num_network_resources_);
-
-      // Separate out parse duration based on cache percent.
-      if (percent_cached <= 50) {
-        PAGE_LOAD_HISTOGRAM(
-            "PageLoad.Experimental.ParseDuration.CachedPercent.0-50",
-            parse_duration);
-      } else {
-        PAGE_LOAD_HISTOGRAM(
-            "PageLoad.Experimental.ParseDuration.CachedPercent.51-100",
-            parse_duration);
-      }
-    }
   } else {
     PAGE_LOAD_HISTOGRAM(internal::kBackgroundHistogramParseDuration,
                         parse_duration);
@@ -671,6 +714,10 @@ void CorePageLoadMetricsObserver::OnLoadedResource(
   }
 }
 
+// This method records values for metrics that were not recorded during any
+// other event, or records failure status for metrics that have not been
+// collected yet. This is meant to be called at the end of a page lifetime, for
+// example, when the user is navigating away from the page.
 void CorePageLoadMetricsObserver::RecordTimingHistograms(
     const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
@@ -688,6 +735,15 @@ void CorePageLoadMetricsObserver::RecordTimingHistograms(
             ? internal::FIRST_MEANINGFUL_PAINT_DID_NOT_REACH_NETWORK_STABLE
             : internal::
                   FIRST_MEANINGFUL_PAINT_DID_NOT_REACH_FIRST_CONTENTFUL_PAINT);
+  }
+
+  if (timing.paint_timing->first_paint &&
+      !timing.interactive_timing->interactive) {
+    RecordTimeToInteractiveStatus(
+        timing.paint_timing->first_meaningful_paint
+            ? internal::TIME_TO_INTERACTIVE_DID_NOT_REACH_QUIESCENCE
+            : internal::
+                  TIME_TO_INTERACTIVE_DID_NOT_REACH_FIRST_MEANINGFUL_PAINT);
   }
 }
 
@@ -731,9 +787,10 @@ void CorePageLoadMetricsObserver::RecordByteAndResourceHistograms(
   DCHECK_GE(cache_bytes_, 0);
   int64_t total_bytes = network_bytes_ + cache_bytes_;
 
-  PAGE_BYTES_HISTOGRAM(internal::kHistogramNetworkBytes, network_bytes_);
-  PAGE_BYTES_HISTOGRAM(internal::kHistogramCacheBytes, cache_bytes_);
-  PAGE_BYTES_HISTOGRAM(internal::kHistogramTotalBytes, total_bytes);
+  PAGE_BYTES_HISTOGRAM(internal::kHistogramPageLoadNetworkBytes,
+                       network_bytes_);
+  PAGE_BYTES_HISTOGRAM(internal::kHistogramPageLoadCacheBytes, cache_bytes_);
+  PAGE_BYTES_HISTOGRAM(internal::kHistogramPageLoadTotalBytes, total_bytes);
 
   switch (GetPageLoadType(transition_)) {
     case LOAD_TYPE_RELOAD:

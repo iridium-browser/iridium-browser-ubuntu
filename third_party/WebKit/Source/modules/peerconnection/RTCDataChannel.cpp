@@ -26,16 +26,17 @@
 
 #include <memory>
 #include <utility>
+
+#include "base/memory/ptr_util.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/MessageEvent.h"
 #include "core/fileapi/Blob.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "core/typed_arrays/DOMArrayBufferView.h"
 #include "modules/peerconnection/RTCPeerConnection.h"
-#include "platform/wtf/PtrUtil.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebRTCPeerConnectionHandler.h"
 
 namespace blink {
@@ -59,7 +60,7 @@ RTCDataChannel* RTCDataChannel::Create(
     std::unique_ptr<WebRTCDataChannelHandler> handler) {
   DCHECK(handler);
   RTCDataChannel* channel = new RTCDataChannel(context, std::move(handler));
-  channel->SuspendIfNeeded();
+  channel->PauseIfNeeded();
 
   return channel;
 }
@@ -71,14 +72,14 @@ RTCDataChannel* RTCDataChannel::Create(
     const WebRTCDataChannelInit& init,
     ExceptionState& exception_state) {
   std::unique_ptr<WebRTCDataChannelHandler> handler =
-      WTF::WrapUnique(peer_connection_handler->CreateDataChannel(label, init));
+      base::WrapUnique(peer_connection_handler->CreateDataChannel(label, init));
   if (!handler) {
     exception_state.ThrowDOMException(kNotSupportedError,
                                       "RTCDataChannel is not supported");
     return nullptr;
   }
   RTCDataChannel* channel = new RTCDataChannel(context, std::move(handler));
-  channel->SuspendIfNeeded();
+  channel->PauseIfNeeded();
 
   return channel;
 }
@@ -86,20 +87,19 @@ RTCDataChannel* RTCDataChannel::Create(
 RTCDataChannel::RTCDataChannel(
     ExecutionContext* context,
     std::unique_ptr<WebRTCDataChannelHandler> handler)
-    : SuspendableObject(context),
+    : PausableObject(context),
       handler_(std::move(handler)),
       ready_state_(kReadyStateConnecting),
       binary_type_(kBinaryTypeArrayBuffer),
-      scheduled_event_timer_(
-          TaskRunnerHelper::Get(TaskType::kNetworking, context),
-          this,
-          &RTCDataChannel::ScheduledEventTimerFired),
+      scheduled_event_timer_(context->GetTaskRunner(TaskType::kNetworking),
+                             this,
+                             &RTCDataChannel::ScheduledEventTimerFired),
       buffered_amount_low_threshold_(0U),
       stopped_(false) {
   handler_->SetClient(this);
 }
 
-RTCDataChannel::~RTCDataChannel() {}
+RTCDataChannel::~RTCDataChannel() = default;
 
 void RTCDataChannel::Dispose() {
   if (stopped_)
@@ -301,17 +301,17 @@ const AtomicString& RTCDataChannel::InterfaceName() const {
 }
 
 ExecutionContext* RTCDataChannel::GetExecutionContext() const {
-  return SuspendableObject::GetExecutionContext();
+  return PausableObject::GetExecutionContext();
 }
 
-// SuspendableObject
-void RTCDataChannel::Suspend() {
+// PausableObject
+void RTCDataChannel::Pause() {
   scheduled_event_timer_.Stop();
 }
 
-void RTCDataChannel::Resume() {
+void RTCDataChannel::Unpause() {
   if (!scheduled_events_.IsEmpty() && !scheduled_event_timer_.IsActive())
-    scheduled_event_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    scheduled_event_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void RTCDataChannel::ContextDestroyed(ExecutionContext*) {
@@ -342,10 +342,10 @@ bool RTCDataChannel::HasPendingActivity() const {
   switch (ready_state_) {
     case kReadyStateConnecting:
       has_valid_listeners |= HasEventListeners(EventTypeNames::open);
-    // fallthrough intended
+      FALLTHROUGH;
     case kReadyStateOpen:
       has_valid_listeners |= HasEventListeners(EventTypeNames::message);
-    // fallthrough intended
+      FALLTHROUGH;
     case kReadyStateClosing:
       has_valid_listeners |= HasEventListeners(EventTypeNames::error) ||
                              HasEventListeners(EventTypeNames::close);
@@ -364,7 +364,7 @@ void RTCDataChannel::ScheduleDispatchEvent(Event* event) {
   scheduled_events_.push_back(event);
 
   if (!scheduled_event_timer_.IsActive())
-    scheduled_event_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    scheduled_event_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void RTCDataChannel::ScheduledEventTimerFired(TimerBase*) {
@@ -378,10 +378,10 @@ void RTCDataChannel::ScheduledEventTimerFired(TimerBase*) {
   events.clear();
 }
 
-DEFINE_TRACE(RTCDataChannel) {
+void RTCDataChannel::Trace(blink::Visitor* visitor) {
   visitor->Trace(scheduled_events_);
   EventTargetWithInlineData::Trace(visitor);
-  SuspendableObject::Trace(visitor);
+  PausableObject::Trace(visitor);
 }
 
 }  // namespace blink

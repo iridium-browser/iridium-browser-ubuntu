@@ -33,7 +33,7 @@
 
 #include "platform/Timer.h"
 #include "platform/bindings/ScriptWrappable.h"
-#include "platform/geometry/FloatPoint.h"
+#include "platform/geometry/DoublePoint.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -45,8 +45,7 @@ class HTMLDivElement;
 class VTTCueBox;
 class VTTScanner;
 
-class VTTRegion final : public GarbageCollectedFinalized<VTTRegion>,
-                        public ScriptWrappable {
+class VTTRegion final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -54,14 +53,14 @@ class VTTRegion final : public GarbageCollectedFinalized<VTTRegion>,
 
   virtual ~VTTRegion();
 
-  const String& Id() const { return id_; }
-  void SetId(const String&);
+  const String& id() const { return id_; }
+  void setId(const String&);
 
   double width() const { return width_; }
   void setWidth(double, ExceptionState&);
 
-  int lines() const { return lines_; }
-  void setLines(int, ExceptionState&);
+  unsigned lines() const { return lines_; }
+  void setLines(unsigned);
 
   double regionAnchorX() const { return region_anchor_.X(); }
   void setRegionAnchorX(double, ExceptionState&);
@@ -88,7 +87,7 @@ class VTTRegion final : public GarbageCollectedFinalized<VTTRegion>,
   void DisplayLastVTTCueBox();
   void WillRemoveVTTCueBox(VTTCueBox*);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   VTTRegion();
@@ -104,7 +103,7 @@ class VTTRegion final : public GarbageCollectedFinalized<VTTRegion>,
     kNone,
     kId,
     kWidth,
-    kHeight,
+    kLines,
     kRegionAnchor,
     kViewportAnchor,
     kScroll
@@ -117,8 +116,8 @@ class VTTRegion final : public GarbageCollectedFinalized<VTTRegion>,
   String id_;
   double width_;
   unsigned lines_;
-  FloatPoint region_anchor_;
-  FloatPoint viewport_anchor_;
+  DoublePoint region_anchor_;
+  DoublePoint viewport_anchor_;
   bool scroll_;
 
   // The cue container is the container that is scrolled up to obtain the

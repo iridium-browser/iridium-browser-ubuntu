@@ -11,7 +11,6 @@
 #include "platform/bindings/ScopedPersistent.h"
 #include "platform/bindings/V8PerContextData.h"
 #include "platform/wtf/RefCounted.h"
-#include "v8/include/v8-debug.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -30,7 +29,7 @@ class ScriptValue;
 //
 // In some cases, you need ScriptState in code that doesn't have any JavaScript
 // on the stack. Then you can store ScriptState on a C++ object using
-// RefPtr<ScriptState>.
+// scoped_refptr<ScriptState>.
 //
 // class SomeObject {
 //   void someMethod(ScriptState* scriptState) {
@@ -48,7 +47,7 @@ class ScriptValue;
 //     // Do V8 related things.
 //     ToV8(...);
 //   }
-//   RefPtr<ScriptState> script_state_;
+//   scoped_refptr<ScriptState> script_state_;
 // };
 //
 // You should not store ScriptState on a C++ object that can be accessed
@@ -88,8 +87,8 @@ class PLATFORM_EXPORT ScriptState : public RefCounted<ScriptState> {
     v8::Local<v8::Context> context_;
   };
 
-  static PassRefPtr<ScriptState> Create(v8::Local<v8::Context>,
-                                        PassRefPtr<DOMWrapperWorld>);
+  static scoped_refptr<ScriptState> Create(v8::Local<v8::Context>,
+                                           scoped_refptr<DOMWrapperWorld>);
   virtual ~ScriptState();
 
   static ScriptState* Current(v8::Isolate* isolate)  // DEPRECATED
@@ -97,26 +96,22 @@ class PLATFORM_EXPORT ScriptState : public RefCounted<ScriptState> {
     return From(isolate->GetCurrentContext());
   }
 
-  static ScriptState* ForFunctionObject(
+  static ScriptState* ForCurrentRealm(
       const v8::FunctionCallbackInfo<v8::Value>& info) {
-    // We're assuming that the current context is not yet changed since
-    // the callback function has got called back.
-    // TODO(yukishiino): Once info.GetFunctionContext() gets implemented,
-    // we should use it instead.
     return From(info.GetIsolate()->GetCurrentContext());
   }
 
-  static ScriptState* ForReceiverObject(
+  static ScriptState* ForRelevantRealm(
       const v8::FunctionCallbackInfo<v8::Value>& info) {
     return From(info.Holder()->CreationContext());
   }
 
-  static ScriptState* ForReceiverObject(
+  static ScriptState* ForRelevantRealm(
       const v8::PropertyCallbackInfo<v8::Value>& info) {
     return From(info.Holder()->CreationContext());
   }
 
-  static ScriptState* ForReceiverObject(
+  static ScriptState* ForRelevantRealm(
       const v8::PropertyCallbackInfo<void>& info) {
     return From(info.Holder()->CreationContext());
   }
@@ -129,7 +124,7 @@ class PLATFORM_EXPORT ScriptState : public RefCounted<ScriptState> {
     // ScriptState::from() must not be called for a context that does not have
     // valid embedder data in the embedder field.
     SECURITY_CHECK(script_state);
-    SECURITY_CHECK(script_state->GetContext() == context);
+    SECURITY_CHECK(script_state->context_ == context);
     return script_state;
   }
 
@@ -150,7 +145,7 @@ class PLATFORM_EXPORT ScriptState : public RefCounted<ScriptState> {
   void DisposePerContextData();
 
  protected:
-  ScriptState(v8::Local<v8::Context>, PassRefPtr<DOMWrapperWorld>);
+  ScriptState(v8::Local<v8::Context>, scoped_refptr<DOMWrapperWorld>);
 
  private:
   v8::Isolate* isolate_;
@@ -159,7 +154,7 @@ class PLATFORM_EXPORT ScriptState : public RefCounted<ScriptState> {
 
   // This RefPtr doesn't cause a cycle because all persistent handles that
   // DOMWrapperWorld holds are weak.
-  RefPtr<DOMWrapperWorld> world_;
+  scoped_refptr<DOMWrapperWorld> world_;
 
   // This std::unique_ptr causes a cycle:
   // V8PerContextData --(Persistent)--> v8::Context --(RefPtr)--> ScriptState
@@ -184,15 +179,15 @@ class ScriptStateProtectingContext {
       context_.Set(script_state_->GetIsolate(), script_state_->GetContext());
   }
 
-  ScriptState* operator->() const { return script_state_.Get(); }
-  ScriptState* Get() const { return script_state_.Get(); }
+  ScriptState* operator->() const { return script_state_.get(); }
+  ScriptState* Get() const { return script_state_.get(); }
   void Clear() {
     script_state_ = nullptr;
     context_.Clear();
   }
 
  private:
-  RefPtr<ScriptState> script_state_;
+  scoped_refptr<ScriptState> script_state_;
   ScopedPersistent<v8::Context> context_;
 };
 

@@ -34,7 +34,8 @@ class MockUserManager : public ChromeUserManager {
                      user_manager::UserList(void));
   MOCK_CONST_METHOD0(GetLoggedInUsers, const user_manager::UserList&(void));
   MOCK_CONST_METHOD0(GetLRULoggedInUsers, const user_manager::UserList&(void));
-  MOCK_METHOD3(UserLoggedIn, void(const AccountId&, const std::string&, bool));
+  MOCK_METHOD4(UserLoggedIn,
+               void(const AccountId&, const std::string&, bool, bool));
   MOCK_METHOD1(SwitchActiveUser, void(const AccountId& account_id));
   MOCK_METHOD0(SessionStarted, void(void));
   MOCK_METHOD2(RemoveUser,
@@ -76,6 +77,9 @@ class MockUserManager : public ChromeUserManager {
                void(UserManager::UserSessionStateObserver*));
   MOCK_METHOD0(NotifyLocalStateChanged, void(void));
   MOCK_CONST_METHOD0(AreSupervisedUsersAllowed, bool(void));
+  MOCK_CONST_METHOD0(IsGuestSessionAllowed, bool(void));
+  MOCK_CONST_METHOD1(IsGaiaUserAllowed, bool(const user_manager::User& user));
+  MOCK_CONST_METHOD1(IsUserAllowed, bool(const user_manager::User& user));
   MOCK_CONST_METHOD3(UpdateLoginState,
                      void(const user_manager::User*,
                           const user_manager::User*,
@@ -114,9 +118,9 @@ class MockUserManager : public ChromeUserManager {
   MOCK_METHOD1(OnUserRemoved, void(const AccountId&));
   MOCK_CONST_METHOD1(GetResourceImagekiaNamed, const gfx::ImageSkia&(int));
   MOCK_CONST_METHOD1(GetResourceStringUTF16, base::string16(int));
-  MOCK_CONST_METHOD3(ScheduleResolveLocale,
+  MOCK_CONST_METHOD3(DoScheduleResolveLocale,
                      void(const std::string&,
-                          const base::Closure&,
+                          base::OnceClosure*,
                           std::string*));
   MOCK_CONST_METHOD1(IsValidDefaultUserImageId, bool(int));
 
@@ -130,7 +134,6 @@ class MockUserManager : public ChromeUserManager {
   const user_manager::User* GetPrimaryUser() const override;
 
   // ChromeUserManager overrides:
-  BootstrapManager* GetBootstrapManager() override;
   MultiProfileUserController* GetMultiProfileUserController() override;
   UserImageManager* GetUserImageManager(const AccountId& account_id) override;
   SupervisedUserManager* GetSupervisedUserManager() override;
@@ -143,6 +146,13 @@ class MockUserManager : public ChromeUserManager {
                     const chromeos::AffiliationIDSet& user_affiliation_ids));
 
   bool ShouldReportUser(const std::string& user_id) const override;
+
+  // We cannot mock ScheduleResolveLocale directly because of
+  // base::OnceClosure's removed deleter. This is a trampoline to the actual
+  // mock.
+  void ScheduleResolveLocale(const std::string& locale,
+                             base::OnceClosure on_resolved_callback,
+                             std::string* out_resolved_locale) const override;
 
   // Sets a new User instance. Users previously created by this MockUserManager
   // become invalid.

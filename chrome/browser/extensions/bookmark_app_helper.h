@@ -11,8 +11,10 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/installable/installable_metrics.h"
 #include "chrome/common/web_application_info.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -20,6 +22,8 @@
 
 class ExtensionService;
 class FaviconDownloader;
+struct InstallableData;
+class InstallableManager;
 class Profile;
 class SkBitmap;
 
@@ -53,9 +57,11 @@ class BookmarkAppHelper : public content::NotificationObserver {
   // All existing icons from WebApplicationInfo will also be used. The user
   // will then be prompted to edit the creation information via a bubble and
   // will have a chance to cancel the operation.
+  // |install_source| indicates how the installation was triggered.
   BookmarkAppHelper(Profile* profile,
                     WebApplicationInfo web_app_info,
-                    content::WebContents* contents);
+                    content::WebContents* contents,
+                    WebappInstallSource install_source);
   ~BookmarkAppHelper() override;
 
   // Update the given WebApplicationInfo with information from the manifest.
@@ -105,25 +111,32 @@ class BookmarkAppHelper : public content::NotificationObserver {
   // Begins the asynchronous bookmark app creation.
   void Create(const CreateBookmarkAppCallback& callback);
 
-  // Begins the asynchronous bookmark app creation from an app banner.
-  void CreateFromAppBanner(const CreateBookmarkAppCallback& callback,
-                           const content::Manifest& manifest);
-
  protected:
   // Protected methods for testing.
 
-  // Called by the WebContents when the manifest has been downloaded. If there
-  // is no manifest, or the WebContents is destroyed before the manifest could
-  // be downloaded, this is called with an empty manifest.
-  void OnDidGetManifest(const GURL& manifest_url,
-                        const content::Manifest& manifest);
+  // Called by the InstallableManager when the installability check is
+  // completed.
+  void OnDidPerformInstallableCheck(const InstallableData& data);
 
   // Performs post icon download tasks including installing the bookmark app.
   virtual void OnIconsDownloaded(
       bool success,
       const std::map<GURL, std::vector<SkBitmap>>& bitmaps);
 
+  // Downloads icons from the given WebApplicationInfo using the given
+  // WebContents.
+  std::unique_ptr<FaviconDownloader> favicon_downloader_;
+
  private:
+  FRIEND_TEST_ALL_PREFIXES(BookmarkAppHelperTest,
+                           CreateWindowedPWAIntoAppWindow);
+
+  enum Installable {
+    INSTALLABLE_YES,
+    INSTALLABLE_NO,
+    INSTALLABLE_UNKNOWN,
+  };
+
   // Called after the bubble has been shown, and the user has either accepted or
   // the dialog was dismissed.
   void OnBubbleCompleted(bool user_accepted,
@@ -150,14 +163,17 @@ class BookmarkAppHelper : public content::NotificationObserver {
   // Called on app creation or failure.
   CreateBookmarkAppCallback callback_;
 
-  // Downloads icons from the given WebApplicationInfo using the given
-  // WebContents.
-  std::unique_ptr<FaviconDownloader> favicon_downloader_;
-
   // Used to install the created bookmark app.
   scoped_refptr<extensions::CrxInstaller> crx_installer_;
 
   content::NotificationRegistrar registrar_;
+
+  InstallableManager* installable_manager_;
+
+  Installable installable_ = INSTALLABLE_UNKNOWN;
+
+  // The mechanism via which the app creation was triggered.
+  WebappInstallSource install_source_;
 
   // With fast tab unloading enabled, shutting down can cause BookmarkAppHelper
   // to be destroyed before the bookmark creation bubble. Use weak pointers to
@@ -169,15 +185,6 @@ class BookmarkAppHelper : public content::NotificationObserver {
 // be downloaded from the icon URLs provided in |web_app_info|.
 void CreateOrUpdateBookmarkApp(ExtensionService* service,
                                WebApplicationInfo* web_app_info);
-
-// Retrieves the WebApplicationInfo that represents a given bookmark app.
-// |callback| will be called with a WebApplicationInfo which is populated with
-// the extension's details and icons on success and an unpopulated
-// WebApplicationInfo on failure.
-void GetWebApplicationInfoFromApp(
-    content::BrowserContext* browser_context,
-    const extensions::Extension* extension,
-    const base::Callback<void(const WebApplicationInfo&)> callback);
 
 // Returns whether the given |url| is a valid bookmark app url.
 bool IsValidBookmarkAppUrl(const GURL& url);

@@ -9,7 +9,7 @@
 #include "modules/serviceworkers/RespondWithObserver.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/WebURLRequest.h"
-#include "public/platform/modules/serviceworker/WebServiceWorkerResponseError.h"
+#include "services/network/public/mojom/fetch_api.mojom-blink.h"
 
 namespace blink {
 
@@ -23,36 +23,37 @@ class MODULES_EXPORT FetchRespondWithObserver : public RespondWithObserver {
  public:
   ~FetchRespondWithObserver() override = default;
 
-  static FetchRespondWithObserver* Create(ExecutionContext*,
-                                          int fetch_event_id,
-                                          const KURL& request_url,
-                                          WebURLRequest::FetchRequestMode,
-                                          WebURLRequest::FetchRedirectMode,
-                                          WebURLRequest::FrameType,
-                                          WebURLRequest::RequestContext,
-                                          WaitUntilObserver*);
+  static FetchRespondWithObserver* Create(
+      ExecutionContext*,
+      int fetch_event_id,
+      const KURL& request_url,
+      network::mojom::FetchRequestMode,
+      network::mojom::FetchRedirectMode,
+      network::mojom::RequestContextFrameType,
+      WebURLRequest::RequestContext,
+      WaitUntilObserver*);
 
-  void OnResponseRejected(WebServiceWorkerResponseError) override;
+  void OnResponseRejected(mojom::ServiceWorkerResponseError) override;
   void OnResponseFulfilled(const ScriptValue&) override;
   void OnNoResponse() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  protected:
   FetchRespondWithObserver(ExecutionContext*,
                            int fetch_event_id,
                            const KURL& request_url,
-                           WebURLRequest::FetchRequestMode,
-                           WebURLRequest::FetchRedirectMode,
-                           WebURLRequest::FrameType,
+                           network::mojom::FetchRequestMode,
+                           network::mojom::FetchRedirectMode,
+                           network::mojom::RequestContextFrameType,
                            WebURLRequest::RequestContext,
                            WaitUntilObserver*);
 
  private:
   const KURL request_url_;
-  const WebURLRequest::FetchRequestMode request_mode_;
-  const WebURLRequest::FetchRedirectMode redirect_mode_;
-  const WebURLRequest::FrameType frame_type_;
+  const network::mojom::FetchRequestMode request_mode_;
+  const network::mojom::FetchRedirectMode redirect_mode_;
+  const network::mojom::RequestContextFrameType frame_type_;
   const WebURLRequest::RequestContext request_context_;
 };
 

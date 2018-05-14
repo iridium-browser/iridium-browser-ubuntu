@@ -5,8 +5,8 @@
 #ifndef AnimationPlaybackEvent_h
 #define AnimationPlaybackEvent_h
 
+#include "core/dom/events/Event.h"
 #include "core/events/AnimationPlaybackEventInit.h"
-#include "core/events/Event.h"
 
 namespace blink {
 
@@ -34,7 +34,7 @@ class AnimationPlaybackEvent final : public Event {
 
   const AtomicString& InterfaceName() const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   AnimationPlaybackEvent(const AtomicString& type,

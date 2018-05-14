@@ -16,10 +16,10 @@
 
 ******************************************************************/
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_LSF_CHECK_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_LSF_CHECK_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_LSF_CHECK_H_
+#define MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_LSF_CHECK_H_
 
-#include "defines.h"
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  *  check for stability of lsf coefficients

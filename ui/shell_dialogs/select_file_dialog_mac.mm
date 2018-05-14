@@ -20,6 +20,7 @@
 #include "base/threading/thread_restrictions.h"
 #import "ui/base/cocoa/nib_loading.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/shell_dialogs/select_file_policy.h"
 #include "ui/strings/grit/ui_strings.h"
 
 namespace {
@@ -58,6 +59,7 @@ NSString* GetDescriptionFromExtension(const base::FilePath::StringType& ext) {
 }
 
 - (id)initWithSelectFileDialogImpl:(ui::SelectFileDialogImpl*)s;
+- (void)selectFileDialogImplWillBeDestroyed;
 - (void)endedPanel:(NSSavePanel*)panel
          didCancel:(bool)did_cancel
               type:(ui::SelectFileDialog::Type)type
@@ -87,12 +89,12 @@ NSString* GetDescriptionFromExtension(const base::FilePath::StringType& ext) {
 
 namespace ui {
 
-SelectFileDialogImpl::SelectFileDialogImpl(Listener* listener,
-                                           ui::SelectFilePolicy* policy)
-    : SelectFileDialog(listener, policy),
-      bridge_([[SelectFileDialogBridge alloc]
-               initWithSelectFileDialogImpl:this]) {
-}
+SelectFileDialogImpl::SelectFileDialogImpl(
+    Listener* listener,
+    std::unique_ptr<ui::SelectFilePolicy> policy)
+    : SelectFileDialog(listener, std::move(policy)),
+      bridge_(
+          [[SelectFileDialogBridge alloc] initWithSelectFileDialogImpl:this]) {}
 
 bool SelectFileDialogImpl::IsRunning(gfx::NativeWindow parent_window) const {
   return parents_.find(parent_window) != parents_.end();
@@ -208,7 +210,7 @@ void SelectFileDialogImpl::SelectFileImpl(
       [dialog setCanSelectHiddenExtension:YES];
     }
   } else {
-    NSOpenPanel* open_dialog = (NSOpenPanel*)dialog;
+    NSOpenPanel* open_dialog = base::mac::ObjCCastStrict<NSOpenPanel>(dialog);
 
     if (type == SELECT_OPEN_MULTI_FILE)
       [open_dialog setAllowsMultipleSelection:YES];
@@ -234,13 +236,23 @@ void SelectFileDialogImpl::SelectFileImpl(
     [dialog setDirectoryURL:[NSURL fileURLWithPath:default_dir]];
   if (default_filename)
     [dialog setNameFieldStringValue:default_filename];
+
+  // Ensure the bridge (rather than |this|) is retained by the block.
+  SelectFileDialogBridge* bridge = bridge_.get();
   [dialog beginSheetModalForWindow:owning_window
                  completionHandler:^(NSInteger result) {
-    [bridge_.get() endedPanel:dialog
-                    didCancel:result != NSFileHandlingPanelOKButton
-                         type:type
-                 parentWindow:owning_window];
-  }];
+                   [bridge endedPanel:dialog
+                            didCancel:result != NSFileHandlingPanelOKButton
+                                 type:type
+                         parentWindow:owning_window];
+
+                   // Balance the setDelegate above. Note this should usually
+                   // have been done already in FileWasSelected().
+                   [dialog setDelegate:nil];
+
+                   // Balance the retain at the start of SelectFileImpl().
+                   [dialog release];
+                 }];
 }
 
 SelectFileDialogImpl::DialogData::DialogData(
@@ -262,6 +274,12 @@ SelectFileDialogImpl::~SelectFileDialogImpl() {
 
   for (const auto& panel : panels)
     [panel cancel:panel];
+
+  // Running |cancel| on all the panels should have run all the completion
+  // handlers, but retaining references to C++ objects inside an NSObject can
+  // result in subtle problems. Ensure the reference to |this| is cleared.
+  DCHECK(dialog_data_map_.empty());
+  [bridge_ selectFileDialogImplWillBeDestroyed];
 }
 
 // static
@@ -366,9 +384,10 @@ bool SelectFileDialogImpl::HasMultipleFileTypeChoicesImpl() {
   return hasMultipleFileTypeChoices_;
 }
 
-SelectFileDialog* CreateSelectFileDialog(SelectFileDialog::Listener* listener,
-                                         SelectFilePolicy* policy) {
-  return new SelectFileDialogImpl(listener, policy);
+SelectFileDialog* CreateSelectFileDialog(
+    SelectFileDialog::Listener* listener,
+    std::unique_ptr<SelectFilePolicy> policy) {
+  return new SelectFileDialogImpl(listener, std::move(policy));
 }
 
 }  // namespace ui
@@ -382,10 +401,17 @@ SelectFileDialog* CreateSelectFileDialog(SelectFileDialog::Listener* listener,
   return self;
 }
 
+- (void)selectFileDialogImplWillBeDestroyed {
+  selectFileDialogImpl_ = nullptr;
+}
+
 - (void)endedPanel:(NSSavePanel*)panel
          didCancel:(bool)did_cancel
               type:(ui::SelectFileDialog::Type)type
       parentWindow:(NSWindow*)parentWindow {
+  if (!selectFileDialogImpl_)
+    return;
+
   int index = 0;
   std::vector<base::FilePath> paths;
   if (!did_cancel) {
@@ -420,11 +446,22 @@ SelectFileDialog* CreateSelectFileDialog(SelectFileDialog::Listener* listener,
                                          isMulti,
                                          paths,
                                          index);
-  [panel release];
 }
 
 - (BOOL)panel:(id)sender shouldEnableURL:(NSURL *)url {
   return [url isFileURL];
+}
+
+- (BOOL)panel:(id)sender validateURL:(NSURL*)url error:(NSError**)outError {
+  // Refuse to accept users closing the dialog with a key repeat, since the key
+  // may have been first pressed while the user was looking at insecure content.
+  // See https://crbug.com/637098.
+  if ([[NSApp currentEvent] type] == NSKeyDown &&
+      [[NSApp currentEvent] isARepeat]) {
+    return NO;
+  }
+
+  return YES;
 }
 
 @end

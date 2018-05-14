@@ -8,6 +8,8 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/strings/string_piece.h"
+#include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,6 +28,10 @@
 #include <excpt.h>
 #include <windows.h>
 #endif  // OS_WIN
+
+#if defined(OS_FUCHSIA)
+#include "base/fuchsia/fuchsia_logging.h"
+#endif
 
 namespace logging {
 
@@ -275,6 +281,7 @@ TEST_F(LoggingTest, CheckCausesDistinctBreakpoints) {
 }
 
 #elif defined(OS_POSIX) && !defined(OS_NACL) && !defined(OS_IOS) && \
+    !defined(OS_FUCHSIA) &&                                         \
     (defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARM_FAMILY))
 
 int g_child_crash_pipe;
@@ -319,9 +326,9 @@ void CrashChildMain(int death_location) {
   struct sigaction act = {};
   act.sa_sigaction = CheckCrashTestSighandler;
   act.sa_flags = SA_SIGINFO;
-  ASSERT_EQ(0, sigaction(SIGTRAP, &act, NULL));
-  ASSERT_EQ(0, sigaction(SIGBUS, &act, NULL));
-  ASSERT_EQ(0, sigaction(SIGILL, &act, NULL));
+  ASSERT_EQ(0, sigaction(SIGTRAP, &act, nullptr));
+  ASSERT_EQ(0, sigaction(SIGBUS, &act, nullptr));
+  ASSERT_EQ(0, sigaction(SIGILL, &act, nullptr));
   DO_CHECK(death_location != 1);
   DO_CHECK(death_location != 2);
   printf("\n");
@@ -392,7 +399,7 @@ TEST_F(LoggingTest, DcheckStreamsAreLazy) {
   DCHECK(mock_log_source.Log()) << mock_log_source.Log();
   DPCHECK(mock_log_source.Log()) << mock_log_source.Log();
   DCHECK_EQ(0, 0) << mock_log_source.Log();
-  DCHECK_EQ(mock_log_source.Log(), static_cast<const char*>(NULL))
+  DCHECK_EQ(mock_log_source.Log(), static_cast<const char*>(nullptr))
       << mock_log_source.Log();
 #endif
 }
@@ -405,6 +412,20 @@ void DcheckEmptyFunction1() {
 }
 void DcheckEmptyFunction2() {}
 
+#if DCHECK_IS_ON() && defined(SYZYASAN)
+class ScopedDcheckSeverity {
+ public:
+  ScopedDcheckSeverity(LogSeverity new_severity) : old_severity_(LOG_DCHECK) {
+    LOG_DCHECK = new_severity;
+  }
+
+  ~ScopedDcheckSeverity() { LOG_DCHECK = old_severity_; }
+
+ private:
+  LogSeverity old_severity_;
+};
+#endif  // DCHECK_IS_ON() && defined(SYZYASAN)
+
 // https://crbug.com/709067 tracks test flakiness on iOS.
 #if defined(OS_IOS)
 #define MAYBE_Dcheck DISABLED_Dcheck
@@ -412,6 +433,13 @@ void DcheckEmptyFunction2() {}
 #define MAYBE_Dcheck Dcheck
 #endif
 TEST_F(LoggingTest, MAYBE_Dcheck) {
+#if DCHECK_IS_ON() && defined(SYZYASAN)
+  // When DCHECKs are enabled in SyzyASAN builds, LOG_DCHECK is mutable but
+  // defaults to non-fatal. Set it to LOG_FATAL to get the expected behavior
+  // from the rest of this test.
+  ScopedDcheckSeverity dcheck_severity(LOG_FATAL);
+#endif  // DCHECK_IS_ON() && defined(SYZYASAN)
+
 #if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
   // Release build.
   EXPECT_FALSE(DCHECK_IS_ON());
@@ -428,13 +456,16 @@ TEST_F(LoggingTest, MAYBE_Dcheck) {
   EXPECT_TRUE(DLOG_IS_ON(DCHECK));
 #endif
 
+  // DCHECKs are fatal iff they're compiled in DCHECK_IS_ON() and the DCHECK
+  // log level is set to fatal.
+  const bool dchecks_are_fatal = DCHECK_IS_ON() && LOG_DCHECK == LOG_FATAL;
   EXPECT_EQ(0, g_log_sink_call_count);
   DCHECK(false);
-  EXPECT_EQ(DCHECK_IS_ON() ? 1 : 0, g_log_sink_call_count);
+  EXPECT_EQ(dchecks_are_fatal ? 1 : 0, g_log_sink_call_count);
   DPCHECK(false);
-  EXPECT_EQ(DCHECK_IS_ON() ? 2 : 0, g_log_sink_call_count);
+  EXPECT_EQ(dchecks_are_fatal ? 2 : 0, g_log_sink_call_count);
   DCHECK_EQ(0, 1);
-  EXPECT_EQ(DCHECK_IS_ON() ? 3 : 0, g_log_sink_call_count);
+  EXPECT_EQ(dchecks_are_fatal ? 3 : 0, g_log_sink_call_count);
 
   // Test DCHECK on std::nullptr_t
   g_log_sink_call_count = 0;
@@ -451,7 +482,7 @@ TEST_F(LoggingTest, MAYBE_Dcheck) {
   DCHECK_EQ(Animal::DOG, Animal::DOG);
   EXPECT_EQ(0, g_log_sink_call_count);
   DCHECK_EQ(Animal::DOG, Animal::CAT);
-  EXPECT_EQ(DCHECK_IS_ON() ? 1 : 0, g_log_sink_call_count);
+  EXPECT_EQ(dchecks_are_fatal ? 1 : 0, g_log_sink_call_count);
 
   // Test DCHECK on functions and function pointers.
   g_log_sink_call_count = 0;
@@ -474,9 +505,9 @@ TEST_F(LoggingTest, MAYBE_Dcheck) {
   DCHECK_EQ(mp2, &MemberFunctions::MemberFunction2);
   EXPECT_EQ(0, g_log_sink_call_count);
   DCHECK_EQ(fp1, fp2);
-  EXPECT_EQ(DCHECK_IS_ON() ? 1 : 0, g_log_sink_call_count);
+  EXPECT_EQ(dchecks_are_fatal ? 1 : 0, g_log_sink_call_count);
   DCHECK_EQ(mp2, &MemberFunctions::MemberFunction1);
-  EXPECT_EQ(DCHECK_IS_ON() ? 2 : 0, g_log_sink_call_count);
+  EXPECT_EQ(dchecks_are_fatal ? 2 : 0, g_log_sink_call_count);
 }
 
 TEST_F(LoggingTest, DcheckReleaseBehavior) {
@@ -567,6 +598,79 @@ namespace nested_test {
     EXPECT_EQ("Hello World", ostr.str());
   }
 }  // namespace nested_test
+
+#if DCHECK_IS_ON() && defined(SYZYASAN)
+TEST_F(LoggingTest, AsanConditionalDCheck) {
+  // Verify that DCHECKs default to non-fatal in SyzyASAN builds.
+  // Note that we require only that DCHECK is non-fatal by default, rather
+  // than requiring that it be exactly INFO, ERROR, etc level.
+  EXPECT_LT(LOG_DCHECK, LOG_FATAL);
+  DCHECK(false);
+
+  // Verify that DCHECK* aren't hard-wired to crash on failure.
+  LOG_DCHECK = LOG_INFO;
+  DCHECK(false);
+  DCHECK_EQ(1, 2);
+
+  // Verify that DCHECK does crash if LOG_DCHECK is set to LOG_FATAL.
+  LOG_DCHECK = LOG_FATAL;
+
+  ::testing::StrictMock<MockLogAssertHandler> handler;
+  EXPECT_CALL(handler, HandleLogAssert(_, _, _, _)).Times(2);
+  {
+    logging::ScopedLogAssertHandler scoped_handler_b(base::Bind(
+        &MockLogAssertHandler::HandleLogAssert, base::Unretained(&handler)));
+    DCHECK(false);
+    DCHECK_EQ(1, 2);
+  }
+}
+
+TEST_F(LoggingTest, AsanConditionalDCheckFeature) {
+  // Enable fatal DCHECKs, so that preconditions in
+  // Initialize FeatureList with and without DcheckIsFatal, and verify the
+  // value of LOG_DCHECK. Note that we don't require that DCHECK take a
+  // specific value when the feature is off, only that it is non-fatal.
+
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitFromCommandLine("DcheckIsFatal", "");
+    EXPECT_EQ(LOG_DCHECK, LOG_FATAL);
+  }
+
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitFromCommandLine("", "DcheckIsFatal");
+    EXPECT_LT(LOG_DCHECK, LOG_FATAL);
+  }
+
+  // The default case is last, so we leave LOG_DCHECK in the default state.
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitFromCommandLine("", "");
+    EXPECT_LT(LOG_DCHECK, LOG_FATAL);
+  }
+}
+#endif  // DCHECK_IS_ON() && defined(SYZYASAN)
+
+#if defined(OS_FUCHSIA)
+TEST_F(LoggingTest, FuchsiaLogging) {
+  MockLogSource mock_log_source;
+  EXPECT_CALL(mock_log_source, Log())
+      .Times(DCHECK_IS_ON() ? 2 : 1)
+      .WillRepeatedly(Return("log message"));
+
+  SetMinLogLevel(LOG_INFO);
+
+  EXPECT_TRUE(LOG_IS_ON(INFO));
+  EXPECT_TRUE((DCHECK_IS_ON() != 0) == DLOG_IS_ON(INFO));
+
+  ZX_LOG(INFO, ZX_ERR_INTERNAL) << mock_log_source.Log();
+  ZX_DLOG(INFO, ZX_ERR_INTERNAL) << mock_log_source.Log();
+
+  ZX_CHECK(true, ZX_ERR_INTERNAL);
+  ZX_DCHECK(true, ZX_ERR_INTERNAL);
+}
+#endif  // defined(OS_FUCHSIA)
 
 }  // namespace
 

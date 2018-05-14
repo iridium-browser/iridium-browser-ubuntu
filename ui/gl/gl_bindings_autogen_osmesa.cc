@@ -20,9 +20,14 @@
 
 namespace gl {
 
-DriverOSMESA g_driver_osmesa;
+DriverOSMESA g_driver_osmesa;  // Exists in .bss
 
 void DriverOSMESA::InitializeStaticBindings() {
+  // Ensure struct has been zero-initialized.
+  char* this_bytes = reinterpret_cast<char*>(this);
+  DCHECK(this_bytes[0] == 0);
+  DCHECK(memcmp(this_bytes, this_bytes + 1, sizeof(*this) - 1) == 0);
+
   fn.OSMesaColorClampFn = reinterpret_cast<OSMesaColorClampProc>(
       GetGLProcAddress("OSMesaColorClamp"));
   fn.OSMesaCreateContextFn = reinterpret_cast<OSMesaCreateContextProc>(
@@ -48,8 +53,8 @@ void DriverOSMESA::InitializeStaticBindings() {
 }
 
 void DriverOSMESA::InitializeExtensionBindings() {
-  std::string extensions(GetPlatformExtensions());
-  extensions += " ";
+  std::string platform_extensions(GetPlatformExtensions());
+  ExtensionSet extensions(MakeExtensionSet(platform_extensions));
   ALLOW_UNUSED_LOCAL(extensions);
 }
 

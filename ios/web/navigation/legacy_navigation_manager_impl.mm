@@ -40,22 +40,13 @@ void LegacyNavigationManagerImpl::SetBrowserState(BrowserState* browser_state) {
 
 void LegacyNavigationManagerImpl::SetSessionController(
     CRWSessionController* session_controller) {
-  session_controller_.reset(session_controller);
+  session_controller_ = session_controller;
   [session_controller_ setNavigationManager:this];
 }
 
 void LegacyNavigationManagerImpl::InitializeSession() {
   SetSessionController(
       [[CRWSessionController alloc] initWithBrowserState:browser_state_]);
-}
-
-void LegacyNavigationManagerImpl::ReplaceSessionHistory(
-    std::vector<std::unique_ptr<web::NavigationItem>> items,
-    int lastCommittedItemIndex) {
-  SetSessionController([[CRWSessionController alloc]
-        initWithBrowserState:browser_state_
-             navigationItems:std::move(items)
-      lastCommittedItemIndex:lastCommittedItemIndex]);
 }
 
 void LegacyNavigationManagerImpl::OnNavigationItemsPruned(
@@ -75,7 +66,7 @@ void LegacyNavigationManagerImpl::OnNavigationItemCommitted() {
   if (details.previous_item_index >= 0) {
     DCHECK([session_controller_ previousItem]);
     details.previous_url = [session_controller_ previousItem]->GetURL();
-    details.is_in_page = AreUrlsFragmentChangeNavigation(
+    details.is_in_page = IsFragmentChangeNavigationBetweenUrls(
         details.previous_url, details.item->GetURL());
   } else {
     details.previous_url = GURL();
@@ -115,46 +106,13 @@ void LegacyNavigationManagerImpl::AddPendingItem(
                        initiationType:initiation_type
               userAgentOverrideOption:user_agent_override_option];
 
-  // Set the user agent type for web URLs.
-  NavigationItem* pending_item = GetPendingItem();
-  if (!pending_item)
+  if (!GetPendingItem()) {
     return;
-
-  // |user_agent_override_option| must be INHERIT if |pending_item|'s
-  // UserAgentType is NONE, as requesting a desktop or mobile user agent should
-  // be disabled for app-specific URLs.
-  DCHECK(pending_item->GetUserAgentType() != UserAgentType::NONE ||
-         user_agent_override_option == UserAgentOverrideOption::INHERIT);
-
-  // Newly created pending items are created with UserAgentType::NONE for native
-  // pages or UserAgentType::MOBILE for non-native pages.  If the pending item's
-  // URL is non-native, check which user agent type it should be created with
-  // based on |user_agent_override_option|.
-  DCHECK_NE(UserAgentType::DESKTOP, pending_item->GetUserAgentType());
-  if (pending_item->GetUserAgentType() == UserAgentType::NONE)
-    return;
-
-  switch (user_agent_override_option) {
-    case UserAgentOverrideOption::DESKTOP:
-      pending_item->SetUserAgentType(UserAgentType::DESKTOP);
-      break;
-    case UserAgentOverrideOption::MOBILE:
-      pending_item->SetUserAgentType(UserAgentType::MOBILE);
-      break;
-    case UserAgentOverrideOption::INHERIT: {
-      // Propagate the last committed non-native item's UserAgentType if there
-      // is one, otherwise keep the default value, which is mobile.
-      NavigationItem* last_non_native_item =
-          GetLastCommittedNonAppSpecificItem();
-      DCHECK(!last_non_native_item ||
-             last_non_native_item->GetUserAgentType() != UserAgentType::NONE);
-      if (last_non_native_item) {
-        pending_item->SetUserAgentType(
-            last_non_native_item->GetUserAgentType());
-      }
-      break;
-    }
   }
+
+  UpdatePendingItemUserAgentType(user_agent_override_option,
+                                 GetLastCommittedNonAppSpecificItem(),
+                                 GetPendingItem());
 }
 
 void LegacyNavigationManagerImpl::CommitPendingItem() {
@@ -173,39 +131,12 @@ NavigationItem* LegacyNavigationManagerImpl::GetVisibleItem() const {
   return [session_controller_ visibleItem];
 }
 
-NavigationItem* LegacyNavigationManagerImpl::GetLastCommittedItem() const {
-  return [session_controller_ lastCommittedItem];
-}
-
-NavigationItem* LegacyNavigationManagerImpl::GetPendingItem() const {
-  return [session_controller_ pendingItem];
-}
-
-NavigationItem* LegacyNavigationManagerImpl::GetTransientItem() const {
-  return [session_controller_ transientItem];
-}
-
 void LegacyNavigationManagerImpl::DiscardNonCommittedItems() {
   [session_controller_ discardNonCommittedItems];
 }
 
-void LegacyNavigationManagerImpl::LoadURLWithParams(
-    const NavigationManager::WebLoadParams& params) {
-  delegate_->LoadURLWithParams(params);
-}
-
-void LegacyNavigationManagerImpl::AddTransientURLRewriter(
-    BrowserURLRewriter::URLRewriter rewriter) {
-  DCHECK(rewriter);
-  if (!transient_url_rewriters_) {
-    transient_url_rewriters_.reset(
-        new std::vector<BrowserURLRewriter::URLRewriter>());
-  }
-  transient_url_rewriters_->push_back(rewriter);
-}
-
 int LegacyNavigationManagerImpl::GetItemCount() const {
-  return [session_controller_ items].size();
+  return session_controller_ ? [session_controller_ items].size() : 0;
 }
 
 NavigationItem* LegacyNavigationManagerImpl::GetItemAtIndex(
@@ -266,15 +197,11 @@ bool LegacyNavigationManagerImpl::CanGoToOffset(int offset) const {
 }
 
 void LegacyNavigationManagerImpl::GoBack() {
-  delegate_->GoToIndex(GetIndexForOffset(-1));
+  GoToIndex(GetIndexForOffset(-1));
 }
 
 void LegacyNavigationManagerImpl::GoForward() {
-  delegate_->GoToIndex(GetIndexForOffset(1));
-}
-
-void LegacyNavigationManagerImpl::GoToIndex(int index) {
-  delegate_->GoToIndex(index);
+  GoToIndex(GetIndexForOffset(1));
 }
 
 NavigationItemList LegacyNavigationManagerImpl::GetBackwardItems() const {
@@ -283,6 +210,18 @@ NavigationItemList LegacyNavigationManagerImpl::GetBackwardItems() const {
 
 NavigationItemList LegacyNavigationManagerImpl::GetForwardItems() const {
   return [session_controller_ forwardItems];
+}
+
+void LegacyNavigationManagerImpl::Restore(
+    int last_committed_item_index,
+    std::vector<std::unique_ptr<NavigationItem>> items) {
+  DCHECK(GetItemCount() == 0 && !GetPendingItem());
+  DCHECK_LT(last_committed_item_index, static_cast<int>(items.size()));
+  DCHECK(items.empty() || last_committed_item_index >= 0);
+  SetSessionController([[CRWSessionController alloc]
+        initWithBrowserState:browser_state_
+             navigationItems:std::move(items)
+      lastCommittedItemIndex:last_committed_item_index]);
 }
 
 void LegacyNavigationManagerImpl::CopyStateFromAndPrune(
@@ -296,15 +235,6 @@ void LegacyNavigationManagerImpl::CopyStateFromAndPrune(
 
 bool LegacyNavigationManagerImpl::CanPruneAllButLastCommittedItem() const {
   return [session_controller_ canPruneAllButLastCommittedItem];
-}
-
-std::unique_ptr<std::vector<BrowserURLRewriter::URLRewriter>>
-LegacyNavigationManagerImpl::GetTransientURLRewriters() {
-  return std::move(transient_url_rewriters_);
-}
-
-void LegacyNavigationManagerImpl::RemoveTransientURLRewriters() {
-  transient_url_rewriters_.reset();
 }
 
 int LegacyNavigationManagerImpl::GetIndexForOffset(int offset) const {
@@ -325,7 +255,10 @@ int LegacyNavigationManagerImpl::GetIndexForOffset(int offset) const {
       // even aware existed, it is necessary to pass over pages that would
       // immediately result in a redirect (the item *before* the redirected
       // page).
-      while (result > 0 && IsRedirectItemAtIndex(result)) {
+      while (result > 0) {
+        const NavigationItem* item = GetItemAtIndex(result);
+        if (!ui::PageTransitionIsRedirect(item->GetTransitionType()))
+          break;
         --result;
       }
       --result;
@@ -341,7 +274,10 @@ int LegacyNavigationManagerImpl::GetIndexForOffset(int offset) const {
       ++result;
       --offset;
       // As with going back, skip over redirects.
-      while (result + 1 < GetItemCount() && IsRedirectItemAtIndex(result + 1)) {
+      while (result + 1 < GetItemCount()) {
+        const NavigationItem* item = GetItemAtIndex(result + 1);
+        if (!ui::PageTransitionIsRedirect(item->GetTransitionType()))
+          break;
         ++result;
       }
     }
@@ -355,30 +291,58 @@ int LegacyNavigationManagerImpl::GetIndexForOffset(int offset) const {
   return result;
 }
 
-bool LegacyNavigationManagerImpl::IsRedirectItemAtIndex(int index) const {
-  DCHECK_GE(index, 0);
-  DCHECK_LT(index, GetItemCount());
-  ui::PageTransition transition = GetItemAtIndex(index)->GetTransitionType();
-  return transition & ui::PAGE_TRANSITION_IS_REDIRECT_MASK;
+NavigationItemImpl* LegacyNavigationManagerImpl::GetLastCommittedItemImpl()
+    const {
+  return [session_controller_ lastCommittedItem];
 }
 
-NavigationItem*
-LegacyNavigationManagerImpl::GetLastCommittedNonAppSpecificItem() const {
-  int index = GetLastCommittedItemIndex();
-  if (index == -1)
-    return nullptr;
-  WebClient* client = GetWebClient();
+NavigationItemImpl* LegacyNavigationManagerImpl::GetPendingItemImpl() const {
+  return [session_controller_ pendingItem];
+}
+
+NavigationItemImpl* LegacyNavigationManagerImpl::GetTransientItemImpl() const {
+  return [session_controller_ transientItem];
+}
+
+void LegacyNavigationManagerImpl::FinishGoToIndex(
+    int index,
+    NavigationInitiationType type) {
   const ScopedNavigationItemImplList& items = [session_controller_ items];
-  while (index >= 0) {
-    NavigationItem* item = items[index--].get();
-    if (!client->IsAppSpecificURL(item->GetVirtualURL()))
-      return item;
+  NavigationItem* to_item = items[index].get();
+  NavigationItem* previous_item = [session_controller_ currentItem];
+
+  to_item->SetTransitionType(ui::PageTransitionFromInt(
+      to_item->GetTransitionType() | ui::PAGE_TRANSITION_FORWARD_BACK));
+
+  bool same_document_navigation =
+      [session_controller_ isSameDocumentNavigationBetweenItem:previous_item
+                                                       andItem:to_item];
+  if (same_document_navigation) {
+    [session_controller_ goToItemAtIndex:index discardNonCommittedItems:YES];
+    delegate_->OnGoToIndexSameDocumentNavigation(type);
+  } else {
+    [session_controller_ discardNonCommittedItems];
+    [session_controller_ setPendingItemIndex:index];
+    delegate_->LoadCurrentItem();
   }
-  return nullptr;
 }
 
 int LegacyNavigationManagerImpl::GetPreviousItemIndex() const {
   return base::checked_cast<int>([session_controller_ previousItemIndex]);
+}
+
+void LegacyNavigationManagerImpl::SetPreviousItemIndex(
+    int previous_item_index) {
+  [session_controller_ setPreviousItemIndex:previous_item_index];
+}
+
+void LegacyNavigationManagerImpl::AddPushStateItemIfNecessary(
+    const GURL& url,
+    NSString* state_object,
+    ui::PageTransition transition) {
+  [session_controller_ pushNewItemWithURL:url
+                              stateObject:state_object
+                               transition:transition];
 }
 
 }  // namespace web

@@ -8,12 +8,19 @@
 #include <array>
 #include <string>
 
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gl/gl_bindings.h"
+
+#define SHADER(Src) "#version 100\n" #Src
+#define OEIE_SHADER(Src) \
+  "#version 100\n#extension GL_OES_EGL_image_external : require\n" #Src
+#define VOID_OFFSET(x) reinterpret_cast<void*>(x)
 
 namespace gfx {
 class RectF;
 class Size;
+class SizeF;
 class Transform;
 }  // namespace gfx
 
@@ -33,6 +40,22 @@ GLuint CompileShader(GLenum shader_type,
 GLuint CreateAndLinkProgram(GLuint vertex_shader_handle,
                             GLuint fragment_shader_handle,
                             std::string& error);
+
+// Returns the normalized size of the element projected into screen space.
+// If (1, 1) the element fills the entire buffer.
+gfx::SizeF CalculateScreenSize(const gfx::Transform& proj_matrix,
+                               float distance,
+                               const gfx::SizeF& size);
+
+// Sets default texture parameters given a texture type.
+void SetTexParameters(GLenum texture_type);
+
+// Sets color uniforms given an SkColor.
+void SetColorUniform(GLuint handle, SkColor c);
+
+// Sets color uniforms (but not alpha) given an SkColor. The alpha is assumed to
+// be 1.0 in this case.
+void SetOpaqueColorUniform(GLuint handle, SkColor c);
 
 }  // namespace vr
 

@@ -8,11 +8,11 @@
 #include <utility>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_package_syncable_service_factory.h"
 #include "chrome/common/pref_names.h"
+#include "components/arc/connection_holder.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_data.h"
@@ -30,7 +30,7 @@ constexpr int64_t kNoAndroidID = 0;
 
 std::unique_ptr<ArcSyncItem> CreateSyncItemFromSyncSpecifics(
     const sync_pb::ArcPackageSpecifics& specifics) {
-  return base::MakeUnique<ArcSyncItem>(
+  return std::make_unique<ArcSyncItem>(
       specifics.package_name(), specifics.package_version(),
       specifics.last_backup_android_id(), specifics.last_backup_time());
 }
@@ -67,7 +67,7 @@ syncer::SyncData GetSyncDataFromSyncItem(const ArcSyncItem* item) {
 std::unique_ptr<ArcSyncItem> CreateSyncItemFromPrefs(
     std::unique_ptr<ArcAppListPrefs::PackageInfo> package_info) {
   DCHECK(package_info);
-  return base::MakeUnique<ArcSyncItem>(
+  return std::make_unique<ArcSyncItem>(
       package_info->package_name, package_info->package_version,
       package_info->last_backup_android_id, package_info->last_backup_time);
 }
@@ -198,7 +198,7 @@ syncer::SyncDataList ArcPackageSyncableService::GetAllSyncData(
 }
 
 syncer::SyncError ArcPackageSyncableService::ProcessSyncChanges(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const syncer::SyncChangeList& change_list) {
   if (!sync_processor_.get()) {
     return syncer::SyncError(FROM_HERE, syncer::SyncError::DATATYPE_ERROR,
@@ -329,7 +329,7 @@ void ArcPackageSyncableService::SendSyncChange(
     return;
   }
 
-  std::unique_ptr<ArcSyncItem> sync_item = base::MakeUnique<ArcSyncItem>(
+  std::unique_ptr<ArcSyncItem> sync_item = std::make_unique<ArcSyncItem>(
       package_info.package_name, package_info.package_version,
       package_info.last_backup_android_id, package_info.last_backup_time);
 
@@ -406,7 +406,7 @@ void ArcPackageSyncableService::InstallPackage(const ArcSyncItem* sync_item) {
     return;
   }
 
-  auto* instance = ARC_GET_INSTANCE_FOR_METHOD(prefs_->app_instance_holder(),
+  auto* instance = ARC_GET_INSTANCE_FOR_METHOD(prefs_->app_connection_holder(),
                                                InstallPackage);
   if (!instance)
     return;
@@ -428,7 +428,7 @@ void ArcPackageSyncableService::UninstallPackage(const ArcSyncItem* sync_item) {
     return;
   }
 
-  auto* instance = ARC_GET_INSTANCE_FOR_METHOD(prefs_->app_instance_holder(),
+  auto* instance = ARC_GET_INSTANCE_FOR_METHOD(prefs_->app_connection_holder(),
                                                UninstallPackage);
   if (!instance)
     return;

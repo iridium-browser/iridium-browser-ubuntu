@@ -17,11 +17,12 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "net/base/completion_callback.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/net_error_details.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
+#include "net/http/http_raw_request_headers.h"
 #include "net/ssl/token_binding.h"
 
 namespace crypto {
@@ -50,12 +51,15 @@ class NET_EXPORT_PRIVATE HttpStream {
   // Initialize stream.  Must be called before calling SendRequest().
   // The consumer should ensure that request_info points to a valid value till
   // final response headers are received; after that point, the HttpStream
-  // will not access |*request_info| and it may be deleted.
+  // will not access |*request_info| and it may be deleted. If |can_send_early|
+  // is true, this stream may send data early without confirming the handshake
+  // if this is a resumption of a previously established connection.
   // Returns a net error code, possibly ERR_IO_PENDING.
   virtual int InitializeStream(const HttpRequestInfo* request_info,
+                               bool can_send_early,
                                RequestPriority priority,
                                const NetLogWithSource& net_log,
-                               const CompletionCallback& callback) = 0;
+                               CompletionOnceCallback callback) = 0;
 
   // Writes the headers and uploads body data to the underlying socket.
   // ERR_IO_PENDING is returned if the operation could not be completed
@@ -72,7 +76,7 @@ class NET_EXPORT_PRIVATE HttpStream {
   // headers, except in the case of 1xx responses (See ReadResponseHeaders).
   virtual int SendRequest(const HttpRequestHeaders& request_headers,
                           HttpResponseInfo* response,
-                          const CompletionCallback& callback) = 0;
+                          CompletionOnceCallback callback) = 0;
 
   // Reads from the underlying socket until the next set of response headers
   // have been completely received.  This may only be called on 1xx responses
@@ -83,7 +87,7 @@ class NET_EXPORT_PRIVATE HttpStream {
   // synchronously, in which case the result will be passed to the callback when
   // available. Returns OK on success. The response headers are available in
   // the HttpResponseInfo passed in to original call to SendRequest.
-  virtual int ReadResponseHeaders(const CompletionCallback& callback) = 0;
+  virtual int ReadResponseHeaders(CompletionOnceCallback callback) = 0;
 
   // Reads response body data, up to |buf_len| bytes. |buf_len| should be a
   // reasonable size (<2MB). The number of bytes read is returned, or an
@@ -95,8 +99,9 @@ class NET_EXPORT_PRIVATE HttpStream {
   // callback when available. If the operation is not completed immediately,
   // the socket acquires a reference to the provided buffer until the callback
   // is invoked or the socket is destroyed.
-  virtual int ReadResponseBody(IOBuffer* buf, int buf_len,
-                               const CompletionCallback& callback) = 0;
+  virtual int ReadResponseBody(IOBuffer* buf,
+                               int buf_len,
+                               CompletionOnceCallback callback) = 0;
 
   // Closes the stream.
   // |not_reusable| indicates if the stream can be used for further requests.
@@ -193,6 +198,8 @@ class NET_EXPORT_PRIVATE HttpStream {
   // from the previous request is drained before calling this method.  If the
   // subclass does not support renewing the stream, NULL is returned.
   virtual HttpStream* RenewStreamForAuth() = 0;
+
+  virtual void SetRequestHeadersCallback(RequestHeadersCallback callback) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HttpStream);

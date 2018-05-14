@@ -4,20 +4,25 @@
 
 #import "ios/chrome/browser/ui/payments/payment_request_coordinator.h"
 
+#include <memory>
+
 #include "base/json/json_reader.h"
-#include "base/memory/ptr_util.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/payments/core/autofill_payment_instrument.h"
-#include "components/payments/core/journey_logger.h"
 #include "components/payments/core/payment_address.h"
+#include "components/payments/core/payment_details.h"
 #include "components/payments/core/payment_instrument.h"
+#include "components/payments/core/payment_item.h"
 #include "components/payments/core/payment_request_data_util.h"
+#include "components/payments/core/payment_shipping_option.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/payments/payment_request.h"
 #include "ios/chrome/browser/payments/payment_request_util.h"
+#include "ios/chrome/browser/ui/payments/full_card_requester.h"
 #include "ios/chrome/browser/ui/payments/payment_request_mediator.h"
+#import "ios/chrome/browser/ui/payments/payment_request_navigation_controller.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -29,14 +34,21 @@ namespace {
 const NSTimeInterval kUpdatePaymentSummaryItemIntervalSeconds = 10.0;
 }  // namespace
 
+@interface PaymentRequestCoordinator ()
+
+// Updates the current total amount and asks the view controller to update the
+// Payment Summary item so that the changes in total amount are reflected.
+- (void)updatePaymentSummaryItem;
+
+@end
+
 @implementation PaymentRequestCoordinator {
-  UINavigationController* _navigationController;
+  PaymentRequestNavigationController* _navigationController;
   AddressEditCoordinator* _addressEditCoordinator;
   CreditCardEditCoordinator* _creditCardEditCoordinator;
   ContactInfoEditCoordinator* _contactInfoEditCoordinator;
   ContactInfoSelectionCoordinator* _contactInfoSelectionCoordinator;
   PaymentRequestViewController* _viewController;
-  PaymentRequestErrorCoordinator* _errorCoordinator;
   PaymentItemsDisplayCoordinator* _itemsDisplayCoordinator;
   ShippingAddressSelectionCoordinator* _shippingAddressSelectionCoordinator;
   ShippingOptionSelectionCoordinator* _shippingOptionSelectionCoordinator;
@@ -51,6 +63,9 @@ const NSTimeInterval kUpdatePaymentSummaryItemIntervalSeconds = 10.0;
   // The selected shipping address, pending approval from the page.
   autofill::AutofillProfile* _pendingShippingAddress;
 
+  // The current total amount. Used to keep track of changes to total amount.
+  std::unique_ptr<payments::PaymentItem> _currentTotal;
+
   // Timer used to update the Payment Summary item.
   NSTimer* _updatePaymentSummaryItemTimer;
 }
@@ -62,9 +77,15 @@ const NSTimeInterval kUpdatePaymentSummaryItemIntervalSeconds = 10.0;
 @synthesize pageTitle = _pageTitle;
 @synthesize pageHost = _pageHost;
 @synthesize connectionSecure = _connectionSecure;
+@synthesize pending = _pending;
+@synthesize cancellable = _cancellable;
 @synthesize delegate = _delegate;
 
 - (void)start {
+  _currentTotal =
+      std::make_unique<payments::PaymentItem>(self.paymentRequest->GetTotal(
+          self.paymentRequest->selected_payment_method()));
+
   _mediator =
       [[PaymentRequestMediator alloc] initWithPaymentRequest:_paymentRequest];
 
@@ -73,20 +94,18 @@ const NSTimeInterval kUpdatePaymentSummaryItemIntervalSeconds = 10.0;
   [_viewController setPageTitle:_pageTitle];
   [_viewController setPageHost:_pageHost];
   [_viewController setConnectionSecure:_connectionSecure];
+  [_viewController setPending:!_paymentRequest->payment_instruments_ready()];
+  [_viewController setCancellable:YES];
   [_viewController setDelegate:self];
   [_viewController setDataSource:_mediator];
   [_viewController loadModel];
 
-  _navigationController = [[UINavigationController alloc]
+  _navigationController = [[PaymentRequestNavigationController alloc]
       initWithRootViewController:_viewController];
-  [_navigationController
-      setModalPresentationStyle:UIModalPresentationFormSheet];
-  [_navigationController
-      setModalTransitionStyle:UIModalTransitionStyleCoverVertical];
-  [_navigationController setNavigationBarHidden:YES];
-
-  _fullCardRequester = base::MakeUnique<FullCardRequester>(
-      self, _navigationController, _browserState);
+  _navigationController.modalPresentationStyle = UIModalPresentationFormSheet;
+  _navigationController.modalTransitionStyle =
+      UIModalTransitionStyleCoverVertical;
+  _navigationController.navigationBarHidden = YES;
 
   [[self baseViewController] presentViewController:_navigationController
                                           animated:YES
@@ -94,11 +113,16 @@ const NSTimeInterval kUpdatePaymentSummaryItemIntervalSeconds = 10.0;
 }
 
 - (void)stop {
+  [self stopWithCompletion:nil];
+}
+
+- (void)stopWithCompletion:(ProceduralBlock)completion {
   [_updatePaymentSummaryItemTimer invalidate];
 
   [[_navigationController presentingViewController]
       dismissViewControllerAnimated:YES
-                         completion:nil];
+                         completion:completion];
+
   [_addressEditCoordinator stop];
   _addressEditCoordinator = nil;
   [_creditCardEditCoordinator stop];
@@ -115,69 +139,57 @@ const NSTimeInterval kUpdatePaymentSummaryItemIntervalSeconds = 10.0;
   _shippingOptionSelectionCoordinator = nil;
   [_methodSelectionCoordinator stop];
   _methodSelectionCoordinator = nil;
-  [_errorCoordinator stop];
-  _errorCoordinator = nil;
   _viewController = nil;
   _navigationController = nil;
 }
+
+#pragma mark - Setters
+
+- (void)setPending:(BOOL)pending {
+  _pending = pending;
+
+  [_updatePaymentSummaryItemTimer invalidate];
+
+  [_viewController setPending:pending];
+  [_viewController loadModel];
+  [[_viewController collectionView] reloadData];
+}
+
+- (void)setCancellable:(BOOL)cancellable {
+  _cancellable = cancellable;
+  [_viewController setCancellable:cancellable];
+}
+
+#pragma mark - Public Methods
 
 - (void)
 requestFullCreditCard:(const autofill::CreditCard&)card
        resultDelegate:
            (base::WeakPtr<autofill::payments::FullCardRequest::ResultDelegate>)
                resultDelegate {
+  _fullCardRequester =
+      std::make_unique<FullCardRequester>(_navigationController, _browserState);
   _fullCardRequester->GetFullCard(card, _autofillManager, resultDelegate);
 }
 
-#pragma mark - FullCardRequesterConsumer
-
-- (void)fullCardRequestDidSucceedWithMethodName:(const std::string&)methodName
-                             stringifiedDetails:
-                                 (const std::string&)stringifiedDetails {
-  _viewController.view.userInteractionEnabled = NO;
-  [_viewController setPending:YES];
-  [_viewController loadModel];
-  [[_viewController collectionView] reloadData];
-
-  [_delegate paymentRequestCoordinator:self
-              didReceiveFullMethodName:methodName
-                    stringifiedDetails:stringifiedDetails];
-}
-
-#pragma mark - Public methods
-
-- (void)updatePaymentDetails:(web::PaymentDetails)paymentDetails {
-  [_updatePaymentSummaryItemTimer invalidate];
-
-  BOOL totalValueChanged =
-      (_paymentRequest->payment_details().total != paymentDetails.total);
-  [_mediator setTotalValueChanged:totalValueChanged];
-  // Update the payment summary item.
-  [_viewController updatePaymentSummaryItem];
-
-  if (totalValueChanged) {
-    // If the total value changed, update the Payment Summary item after a
-    // certain time interval in order to clear the 'Updated' label on the item.
-    _updatePaymentSummaryItemTimer = [NSTimer
-        scheduledTimerWithTimeInterval:kUpdatePaymentSummaryItemIntervalSeconds
-                                target:_viewController
-                              selector:@selector(updatePaymentSummaryItem)
-                              userInfo:nil
-                               repeats:NO];
-  }
-
+- (void)updatePaymentDetails:(payments::PaymentDetails)paymentDetails {
   _paymentRequest->UpdatePaymentDetails(paymentDetails);
 
-  // If a shipping address has been selected and there are available shipping
-  // options, set it as the selected shipping address.
-  if (_pendingShippingAddress && !_paymentRequest->shipping_options().empty()) {
+  [self updatePaymentSummaryItem];
+
+  // If there are no available shipping options, reset the previously selected
+  // shipping address. Otherwise, if a shipping address had been selected, set
+  // it as the selected shipping address.
+  if (_paymentRequest->shipping_options().empty())
+    _paymentRequest->set_selected_shipping_profile(nullptr);
+  else if (_pendingShippingAddress) {
     _paymentRequest->set_selected_shipping_profile(_pendingShippingAddress);
   }
   _pendingShippingAddress = nil;
 
   // Update the shipping section. The available shipping addresses/options and
   // the selected shipping address/option are already up-to-date.
-  [_viewController updateShippingSection];
+  [_viewController reloadSections];
 
   if (_paymentRequest->shipping_options().empty()) {
     // Display error in the shipping address selection view, if present.
@@ -200,15 +212,6 @@ requestFullCreditCard:(const autofill::CreditCard&)card
   _addressEditCoordinator = nil;
 }
 
-- (void)displayErrorWithCallback:(ProceduralBlock)callback {
-  _errorCoordinator = [[PaymentRequestErrorCoordinator alloc]
-      initWithBaseViewController:_navigationController];
-  [_errorCoordinator setCallback:callback];
-  [_errorCoordinator setDelegate:self];
-
-  [_errorCoordinator start];
-}
-
 #pragma mark - PaymentRequestViewControllerDelegate
 
 - (void)paymentRequestViewControllerDidCancel:
@@ -218,12 +221,7 @@ requestFullCreditCard:(const autofill::CreditCard&)card
 
 - (void)paymentRequestViewControllerDidConfirm:
     (PaymentRequestViewController*)controller {
-  DCHECK(_paymentRequest->selected_payment_method());
-
-  [self recordPayButtonTapped];
-
-  _paymentRequest->selected_payment_method()->InvokePaymentApp(
-      _fullCardRequester.get());
+  [_delegate paymentRequestCoordinatorDidConfirm:self];
 }
 
 - (void)paymentRequestViewControllerDidSelectSettings:
@@ -234,7 +232,9 @@ requestFullCreditCard:(const autofill::CreditCard&)card
 - (void)paymentRequestViewControllerDidSelectPaymentSummaryItem:
     (PaymentRequestViewController*)controller {
   // Return if there are no display items.
-  if (_paymentRequest->payment_details().display_items.empty())
+  if (_paymentRequest
+          ->GetDisplayItems(_paymentRequest->selected_payment_method())
+          .empty())
     return;
 
   _itemsDisplayCoordinator = [[PaymentItemsDisplayCoordinator alloc]
@@ -317,19 +317,6 @@ requestFullCreditCard:(const autofill::CreditCard&)card
   [_methodSelectionCoordinator start];
 }
 
-#pragma mark - PaymentRequestErrorCoordinatorDelegate
-
-- (void)paymentRequestErrorCoordinatorDidDismiss:
-    (PaymentRequestErrorCoordinator*)coordinator {
-  ProceduralBlock callback = coordinator.callback;
-
-  [_errorCoordinator stop];
-  _errorCoordinator = nil;
-
-  if (callback)
-    callback();
-}
-
 #pragma mark - PaymentItemsDisplayCoordinatorDelegate
 
 - (void)paymentItemsDisplayCoordinatorDidReturn:
@@ -340,12 +327,9 @@ requestFullCreditCard:(const autofill::CreditCard&)card
 
 - (void)paymentItemsDisplayCoordinatorDidConfirm:
     (PaymentItemsDisplayCoordinator*)coordinator {
-  DCHECK(_paymentRequest->selected_payment_method());
-
-  [self recordPayButtonTapped];
-
-  _paymentRequest->selected_payment_method()->InvokePaymentApp(
-      _fullCardRequester.get());
+  [_delegate paymentRequestCoordinatorDidConfirm:self];
+  [_itemsDisplayCoordinator stop];
+  _itemsDisplayCoordinator = nil;
 }
 
 #pragma mark - ContactInfoSelectionCoordinatorDelegate
@@ -355,7 +339,7 @@ contactInfoSelectionCoordinator:(ContactInfoSelectionCoordinator*)coordinator
         didSelectContactProfile:(autofill::AutofillProfile*)contactProfile {
   DCHECK(contactProfile);
   _paymentRequest->set_selected_contact_profile(contactProfile);
-  [_viewController updateContactInfoSection];
+  [_viewController reloadSections];
 
   [_contactInfoSelectionCoordinator stop];
   _contactInfoSelectionCoordinator = nil;
@@ -373,7 +357,7 @@ contactInfoSelectionCoordinator:(ContactInfoSelectionCoordinator*)coordinator
            didFinishEditingProfile:(autofill::AutofillProfile*)profile {
   DCHECK(profile);
   _paymentRequest->set_selected_contact_profile(profile);
-  [_viewController updateContactInfoSection];
+  [_viewController reloadSections];
 
   [_contactInfoEditCoordinator stop];
   _contactInfoEditCoordinator = nil;
@@ -423,7 +407,7 @@ contactInfoSelectionCoordinator:(ContactInfoSelectionCoordinator*)coordinator
 - (void)shippingOptionSelectionCoordinator:
             (ShippingOptionSelectionCoordinator*)coordinator
                    didSelectShippingOption:
-                       (web::PaymentShippingOption*)shippingOption {
+                       (payments::PaymentShippingOption*)shippingOption {
   DCHECK(shippingOption);
   [_delegate paymentRequestCoordinator:self
                didSelectShippingOption:*shippingOption];
@@ -444,7 +428,9 @@ contactInfoSelectionCoordinator:(ContactInfoSelectionCoordinator*)coordinator
   DCHECK(paymentMethod);
   DCHECK(paymentMethod->IsCompleteForPayment());
   _paymentRequest->set_selected_payment_method(paymentMethod);
-  [_viewController updatePaymentMethodSection];
+  [_viewController reloadSections];
+
+  [self updatePaymentSummaryItem];
 
   [_methodSelectionCoordinator stop];
   _methodSelectionCoordinator = nil;
@@ -464,7 +450,9 @@ contactInfoSelectionCoordinator:(ContactInfoSelectionCoordinator*)coordinator
   DCHECK(paymentMethod);
   DCHECK(paymentMethod->IsCompleteForPayment());
   _paymentRequest->set_selected_payment_method(paymentMethod);
-  [_viewController updatePaymentMethodSection];
+  [_viewController reloadSections];
+
+  [self updatePaymentSummaryItem];
 
   [_creditCardEditCoordinator stop];
   _creditCardEditCoordinator = nil;
@@ -478,14 +466,27 @@ contactInfoSelectionCoordinator:(ContactInfoSelectionCoordinator*)coordinator
 
 #pragma mark - Helper methods
 
-- (void)recordPayButtonTapped {
-  _paymentRequest->journey_logger().SetEventOccurred(
-      payments::JourneyLogger::EVENT_PAY_CLICKED);
-  _paymentRequest->journey_logger().SetSelectedPaymentMethod(
-      _paymentRequest->selected_payment_method()->type() ==
-              payments::PaymentInstrument::Type::AUTOFILL
-          ? payments::JourneyLogger::SELECTED_PAYMENT_METHOD_CREDIT_CARD
-          : payments::JourneyLogger::SELECTED_PAYMENT_METHOD_OTHER_PAYMENT_APP);
+- (void)updatePaymentSummaryItem {
+  const payments::PaymentItem total =
+      _paymentRequest->GetTotal(_paymentRequest->selected_payment_method());
+  DCHECK(_currentTotal);
+  BOOL totalValueChanged = (*_currentTotal != total);
+  _currentTotal.reset(new payments::PaymentItem(total));
+
+  [_mediator setTotalValueChanged:totalValueChanged];
+  [_viewController updatePaymentSummaryItem];
+
+  [_updatePaymentSummaryItemTimer invalidate];
+  if (totalValueChanged) {
+    // If the total value changed, update the Payment Summary item after a
+    // certain time interval in order to clear the 'Updated' label on the item.
+    _updatePaymentSummaryItemTimer = [NSTimer
+        scheduledTimerWithTimeInterval:kUpdatePaymentSummaryItemIntervalSeconds
+                                target:_viewController
+                              selector:@selector(updatePaymentSummaryItem)
+                              userInfo:nil
+                               repeats:NO];
+  }
 }
 
 @end

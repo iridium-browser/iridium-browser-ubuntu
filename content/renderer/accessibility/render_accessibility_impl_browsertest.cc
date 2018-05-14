@@ -10,7 +10,6 @@
 #include "build/build_config.h"
 #include "content/common/accessibility_messages.h"
 #include "content/common/frame_messages.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/common/view_message_enums.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/render_view_test.h"
@@ -33,7 +32,7 @@ namespace content {
 class TestRenderAccessibilityImpl : public RenderAccessibilityImpl {
  public:
   explicit TestRenderAccessibilityImpl(RenderFrameImpl* render_frame)
-      : RenderAccessibilityImpl(render_frame, kAccessibilityModeComplete) {}
+      : RenderAccessibilityImpl(render_frame, ui::kAXModeComplete) {}
 
   void SendPendingAccessibilityEvents() {
     RenderAccessibilityImpl::SendPendingAccessibilityEvents();
@@ -66,9 +65,7 @@ class RenderAccessibilityImplTest : public RenderViewTest {
      RenderViewTest::TearDown();
   }
 
-  void SetMode(AccessibilityMode mode) {
-    frame()->OnSetAccessibilityMode(mode);
-  }
+  void SetMode(ui::AXMode mode) { frame()->OnSetAccessibilityMode(mode); }
 
   void GetAllAccEvents(
       std::vector<AccessibilityHostMsg_EventParams>* param_list) {
@@ -128,9 +125,7 @@ TEST_F(RenderAccessibilityImplTest, SendFullAccessibilityTreeOnReload) {
   sink_->ClearMessages();
   WebDocument document = GetMainFrame()->GetDocument();
   WebAXObject root_obj = WebAXObject::FromWebDocument(document);
-  accessibility->HandleAXEvent(
-      root_obj,
-      ui::AX_EVENT_LAYOUT_COMPLETE);
+  accessibility->HandleAXEvent(root_obj, ax::mojom::Event::kLayoutComplete);
   accessibility->SendPendingAccessibilityEvents();
   EXPECT_EQ(1, CountAccessibilityNodesSentToBrowser());
   {
@@ -147,9 +142,7 @@ TEST_F(RenderAccessibilityImplTest, SendFullAccessibilityTreeOnReload) {
   document = GetMainFrame()->GetDocument();
   root_obj = WebAXObject::FromWebDocument(document);
   sink_->ClearMessages();
-  accessibility->HandleAXEvent(
-      root_obj,
-      ui::AX_EVENT_LAYOUT_COMPLETE);
+  accessibility->HandleAXEvent(root_obj, ax::mojom::Event::kLayoutComplete);
   accessibility->SendPendingAccessibilityEvents();
   EXPECT_EQ(4, CountAccessibilityNodesSentToBrowser());
 
@@ -161,9 +154,8 @@ TEST_F(RenderAccessibilityImplTest, SendFullAccessibilityTreeOnReload) {
   root_obj = WebAXObject::FromWebDocument(document);
   sink_->ClearMessages();
   const WebAXObject& first_child = root_obj.ChildAt(0);
-  accessibility->HandleAXEvent(
-      first_child,
-      ui::AX_EVENT_LIVE_REGION_CHANGED);
+  accessibility->HandleAXEvent(first_child,
+                               ax::mojom::Event::kLiveRegionChanged);
   accessibility->SendPendingAccessibilityEvents();
   EXPECT_EQ(4, CountAccessibilityNodesSentToBrowser());
 }
@@ -202,9 +194,7 @@ TEST_F(RenderAccessibilityImplTest, HideAccessibilityObject) {
 
   // Send a childrenChanged on 'A'.
   sink_->ClearMessages();
-  accessibility->HandleAXEvent(
-      node_a,
-      ui::AX_EVENT_CHILDREN_CHANGED);
+  accessibility->HandleAXEvent(node_a, ax::mojom::Event::kChildrenChanged);
 
   accessibility->SendPendingAccessibilityEvents();
   AccessibilityHostMsg_EventParams event;
@@ -252,9 +242,7 @@ TEST_F(RenderAccessibilityImplTest, ShowAccessibilityObject) {
   WebAXObject node_b = node_a.ChildAt(0);
   WebAXObject node_c = node_b.ChildAt(0);
 
-  accessibility->HandleAXEvent(
-      node_a,
-      ui::AX_EVENT_CHILDREN_CHANGED);
+  accessibility->HandleAXEvent(node_a, ax::mojom::Event::kChildrenChanged);
 
   accessibility->SendPendingAccessibilityEvents();
   AccessibilityHostMsg_EventParams event;

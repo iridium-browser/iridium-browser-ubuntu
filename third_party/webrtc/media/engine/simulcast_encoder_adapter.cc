@@ -8,18 +8,19 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/media/engine/simulcast_encoder_adapter.h"
+#include "media/engine/simulcast_encoder_adapter.h"
 
 #include <algorithm>
 
-// NOTE(ajm): Path provided by gyp.
-#include "libyuv/scale.h"  // NOLINT
 
-#include "webrtc/api/video/i420_buffer.h"
-#include "webrtc/modules/video_coding/codecs/vp8/screenshare_layers.h"
-#include "webrtc/modules/video_coding/codecs/vp8/simulcast_rate_allocator.h"
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/system_wrappers/include/clock.h"
+#include "api/video/i420_buffer.h"
+#include "api/video_codecs/video_encoder_factory.h"
+#include "media/engine/scopedvideoencoder.h"
+#include "modules/video_coding/codecs/vp8/screenshare_layers.h"
+#include "modules/video_coding/codecs/vp8/simulcast_rate_allocator.h"
+#include "rtc_base/checks.h"
+#include "system_wrappers/include/clock.h"
+#include "third_party/libyuv/include/libyuv/scale.h"
 
 namespace {
 
@@ -117,6 +118,13 @@ class TemporalLayersFactoryAdapter : public webrtc::TemporalLayersFactory {
     return tl_factory_.Create(adapted_simulcast_id_, temporal_layers,
                               initial_tl0_pic_idx);
   }
+  std::unique_ptr<webrtc::TemporalLayersChecker> CreateChecker(
+      int simulcast_id,
+      int temporal_layers,
+      uint8_t initial_tl0_pic_idx) const override {
+    return tl_factory_.CreateChecker(adapted_simulcast_id_, temporal_layers,
+                                     initial_tl0_pic_idx);
+  }
 
   const int adapted_simulcast_id_;
   const TemporalLayersFactory& tl_factory_;
@@ -126,12 +134,13 @@ class TemporalLayersFactoryAdapter : public webrtc::TemporalLayersFactory {
 
 namespace webrtc {
 
-SimulcastEncoderAdapter::SimulcastEncoderAdapter(
-    cricket::WebRtcVideoEncoderFactory* factory)
+SimulcastEncoderAdapter::SimulcastEncoderAdapter(VideoEncoderFactory* factory)
     : inited_(0),
       factory_(factory),
       encoded_complete_callback_(nullptr),
       implementation_name_("SimulcastEncoderAdapter") {
+  RTC_DCHECK(factory_);
+
   // The adapter is typically created on the worker thread, but operated on
   // the encoder task queue.
   encoder_queue_.Detach();
@@ -148,14 +157,15 @@ int SimulcastEncoderAdapter::Release() {
   RTC_DCHECK_CALLED_SEQUENTIALLY(&encoder_queue_);
 
   while (!streaminfos_.empty()) {
-    VideoEncoder* encoder = streaminfos_.back().encoder;
-    encoder->Release();
+    std::unique_ptr<VideoEncoder> encoder =
+        std::move(streaminfos_.back().encoder);
     // Even though it seems very unlikely, there are no guarantees that the
-    // encoder will not call back after being Release()'d. Therefore, we disable
-    // the callbacks here.
+    // encoder will not call back after being Release()'d. Therefore, we first
+    // disable the callbacks here.
     encoder->RegisterEncodeCompleteCallback(nullptr);
+    encoder->Release();
     streaminfos_.pop_back();  // Deletes callback adapter.
-    stored_encoders_.push(encoder);
+    stored_encoders_.push(std::move(encoder));
   }
 
   // It's legal to move the encoder to another queue now.
@@ -232,27 +242,28 @@ int SimulcastEncoderAdapter::InitEncode(const VideoCodec* inst,
     // If an existing encoder instance exists, reuse it.
     // TODO(brandtr): Set initial RTP state (e.g., picture_id/tl0_pic_idx) here,
     // when we start storing that state outside the encoder wrappers.
-    VideoEncoder* encoder;
+    std::unique_ptr<VideoEncoder> encoder;
     if (!stored_encoders_.empty()) {
-      encoder = stored_encoders_.top();
+      encoder = std::move(stored_encoders_.top());
       stored_encoders_.pop();
     } else {
-      encoder = factory_->CreateVideoEncoder(cricket::VideoCodec("VP8"));
+      encoder = factory_->CreateVideoEncoder(SdpVideoFormat("VP8"));
     }
 
     ret = encoder->InitEncode(&stream_codec, number_of_cores, max_payload_size);
     if (ret < 0) {
       // Explicitly destroy the current encoder; because we haven't registered a
       // StreamInfo for it yet, Release won't do anything about it.
-      factory_->DestroyVideoEncoder(encoder);
+      encoder.reset();
       Release();
       return ret;
     }
     std::unique_ptr<EncodedImageCallback> callback(
         new AdapterEncodedImageCallback(this, i));
     encoder->RegisterEncodeCompleteCallback(callback.get());
-    streaminfos_.emplace_back(encoder, std::move(callback), stream_codec.width,
-                              stream_codec.height, start_bitrate_kbps > 0);
+    streaminfos_.emplace_back(std::move(encoder), std::move(callback),
+                              stream_codec.width, stream_codec.height,
+                              start_bitrate_kbps > 0);
 
     if (i != 0) {
       implementation_name += ", ";
@@ -431,7 +442,9 @@ int SimulcastEncoderAdapter::SetRateAllocation(const BitrateAllocation& bitrate,
     // the encoder handling the current simulcast stream.
     BitrateAllocation stream_allocation;
     for (int i = 0; i < kMaxTemporalStreams; ++i) {
-      stream_allocation.SetBitrate(0, i, bitrate.GetBitrate(stream_idx, i));
+      if (bitrate.HasBitrate(stream_idx, i)) {
+        stream_allocation.SetBitrate(0, i, bitrate.GetBitrate(stream_idx, i));
+      }
     }
     streaminfos_[stream_idx].encoder->SetRateAllocation(stream_allocation,
                                                         new_framerate);
@@ -500,8 +513,6 @@ bool SimulcastEncoderAdapter::Initialized() const {
 
 void SimulcastEncoderAdapter::DestroyStoredEncoders() {
   while (!stored_encoders_.empty()) {
-    VideoEncoder* encoder = stored_encoders_.top();
-    factory_->DestroyVideoEncoder(encoder);
     stored_encoders_.pop();
   }
 }
@@ -524,7 +535,7 @@ VideoEncoder::ScalingSettings SimulcastEncoderAdapter::GetScalingSettings()
   // RTC_DCHECK_CALLED_SEQUENTIALLY(&encoder_queue_);
   // Turn off quality scaling for simulcast.
   if (!Initialized() || NumberOfStreams(codec_) != 1) {
-    return VideoEncoder::ScalingSettings(false);
+    return VideoEncoder::ScalingSettings::kOff;
   }
   return streaminfos_[0].encoder->GetScalingSettings();
 }

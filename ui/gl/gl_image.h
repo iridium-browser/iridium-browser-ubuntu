@@ -11,6 +11,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -71,6 +72,9 @@ class GL_EXPORT GLImage : public base::RefCounted<GLImage> {
                                     gfx::OverlayTransform transform,
                                     const gfx::Rect& bounds_rect,
                                     const gfx::RectF& crop_rect) = 0;
+
+  // Set the color space when image is used as an overlay.
+  virtual void SetColorSpace(const gfx::ColorSpace& color_space) = 0;
 
   // Flush any preceding rendering for the image.
   virtual void Flush() = 0;

@@ -53,8 +53,8 @@
 #include "google_apis/drive/auth_service.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "services/device/public/interfaces/constants.mojom.h"
-#include "services/device/public/interfaces/wake_lock_provider.mojom.h"
+#include "services/device/public/mojom/constants.mojom.h"
+#include "services/device/public/mojom/wake_lock_provider.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -255,7 +255,8 @@ DriveIntegrationService::DriveIntegrationService(
 
   logger_.reset(new EventLogger);
   blocking_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::USER_BLOCKING});
+      {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
+       base::WithBaseSyncPrimitives()});
 
   ProfileOAuth2TokenService* oauth_service =
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
@@ -402,6 +403,8 @@ void DriveIntegrationService::RemoveObserver(
 }
 
 void DriveIntegrationService::OnNotificationReceived() {
+  logger_->Log(logging::LOG_INFO,
+               "Received Drive update notification. Will check for update.");
   file_system_->CheckForUpdates();
   drive_app_registry_->Update();
 }

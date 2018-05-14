@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -159,7 +160,8 @@ class UnloadTest : public InProcessBrowserTest {
   }
 
   void NavigateToNolistenersFileTwice() {
-    GURL url(net::URLRequestMockHTTPJob::GetMockUrl("title2.html"));
+    ASSERT_TRUE(embedded_test_server()->Start());
+    GURL url(embedded_test_server()->GetURL("/title2.html"));
     ui_test_utils::NavigateToURL(browser(), url);
     CheckTitle("Title Of Awesomeness");
     ui_test_utils::NavigateToURL(browser(), url);
@@ -170,7 +172,8 @@ class UnloadTest : public InProcessBrowserTest {
   // load is purposely async to test the case where the user loads another
   // page without waiting for the first load to complete.
   void NavigateToNolistenersFileTwiceAsync() {
-    GURL url(net::URLRequestMockHTTPJob::GetMockUrl("title2.html"));
+    ASSERT_TRUE(embedded_test_server()->Start());
+    GURL url(embedded_test_server()->GetURL("/title2.html"));
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), url, WindowOpenDisposition::CURRENT_TAB, 0);
     ui_test_utils::NavigateToURL(browser(), url);
@@ -884,7 +887,8 @@ IN_PROC_BROWSER_TEST_F(FastUnloadTest, DISABLED_WindowCloseAfterUnloadCrash) {
 }
 
 // Times out on Windows and Linux.
-#if defined(OS_WIN) || defined(OS_LINUX)
+// Crashes on Mac (http://crbug/810294).
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
 #define MAYBE_WindowCloseAfterBeforeUnloadCrash \
     DISABLED_WindowCloseAfterBeforeUnloadCrash
 #else

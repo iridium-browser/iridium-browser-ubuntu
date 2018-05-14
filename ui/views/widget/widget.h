@@ -59,10 +59,6 @@ class OSExchangeData;
 class ThemeProvider;
 }  // namespace ui
 
-namespace wm {
-enum class ShadowElevation;
-}
-
 namespace views {
 
 class DesktopWindowTreeHost;
@@ -109,7 +105,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
                             public FocusTraversable,
                             public ui::NativeThemeObserver {
  public:
-  typedef std::set<Widget*> Widgets;
+  using Widgets = std::set<Widget*>;
+  using ShapeRects = std::vector<gfx::Rect>;
 
   enum FrameType {
     FRAME_TYPE_DEFAULT,         // Use whatever the default would be.
@@ -242,7 +239,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     ShadowType shadow_type;
     // A hint about the size of the shadow if the type is SHADOW_TYPE_DROP. May
     // be ignored on some platforms. No value indicates no preference.
-    base::Optional<wm::ShadowElevation> shadow_elevation;
+    base::Optional<int> shadow_elevation;
+    // The window corner radius. May be ignored on some platforms.
+    base::Optional<int> corner_radius;
     // Specifies that the system default caption and icon should not be
     // rendered, and that the client area should be equivalent to the window
     // area. Only used on some platforms (Windows and Linux).
@@ -484,7 +483,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Sets a shape on the widget. Passing a NULL |shape| reverts the widget to
   // be rectangular.
-  void SetShape(std::unique_ptr<SkRegion> shape);
+  void SetShape(std::unique_ptr<ShapeRects> shape);
 
   // Hides the widget then closes it after a return to the message loop.
   virtual void Close();
@@ -641,13 +640,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // changed.
   void ThemeChanged();
 
-  // Notifies the view hierarchy contained in this widget that locale resources
-  // changed.
-  void LocaleChanged();
-
   // Notifies the view hierarchy contained in this widget that the device scale
   // factor changed.
-  void DeviceScaleFactorChanged(float device_scale_factor);
+  void DeviceScaleFactorChanged(float old_device_scale_factor,
+                                float new_device_scale_factor);
 
   void SetFocusTraversableParent(FocusTraversable* parent);
   void SetFocusTraversableParentView(View* parent_view);
@@ -859,7 +855,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
  private:
   friend class ComboboxTest;
-  friend class CustomButtonTest;
+  friend class ButtonTest;
   friend class TextfieldTest;
   friend class ViewAuraTest;
 

@@ -38,9 +38,9 @@ struct WebDateTimeSuggestion {
   WebString localized_value;
   WebString label;
 
-  WebDateTimeSuggestion() {}
+  WebDateTimeSuggestion() = default;
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   BLINK_EXPORT WebDateTimeSuggestion(const DateTimeSuggestion&);
   BLINK_EXPORT WebDateTimeSuggestion& operator=(const DateTimeSuggestion&);
 #endif

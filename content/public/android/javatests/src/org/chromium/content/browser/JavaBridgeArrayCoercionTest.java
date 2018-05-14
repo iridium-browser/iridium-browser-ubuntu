@@ -12,10 +12,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
-import org.chromium.content.browser.JavaBridgeTestCommon.Controller;
+import org.chromium.content.browser.JavaBridgeActivityTestRule.Controller;
 
 /**
  * Part of the test suite for the Java Bridge. This class tests that we correctly convert
@@ -36,7 +35,6 @@ public class JavaBridgeArrayCoercionTest {
     public JavaBridgeActivityTestRule mActivityTestRule =
             new JavaBridgeActivityTestRule().shouldSetUp(true);
 
-    @SuppressFBWarnings("CHROMIUM_SYNCHRONIZED_METHOD")
     private static class TestObject extends Controller {
         private final Object mObjectInstance;
         private final CustomType mCustomTypeInstance;

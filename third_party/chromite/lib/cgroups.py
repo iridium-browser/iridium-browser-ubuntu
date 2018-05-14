@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -379,11 +380,18 @@ class Cgroup(object):
         # settings
         self._SudoSet('cgroup.clone_children', '1')
 
+      # Deal with noprefix mount option.  Because Android.
+      # https://crbug.com/647994 & https://crbug.com/786506
+      name_prefix = 'cpuset.'
+      if os.path.exists(os.path.join(self.path, 'cpus')):
+        name_prefix = ''
+
       try:
         # TODO(ferringb): sort out an appropriate filter/list for using:
         # for name in os.listdir(parent):
         # rather than just transfering these two values.
-        for name in ('cpuset.cpus', 'cpuset.mems'):
+        for name in ('cpus', 'mems'):
+          name = name_prefix + name
           if not self._overwrite:
             # Top level nodes like cros/cbuildbot we don't want to overwrite-
             # users/system may've leveled configuration.  If it's empty,

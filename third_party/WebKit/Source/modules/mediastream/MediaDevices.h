@@ -5,25 +5,32 @@
 #ifndef MediaDevices_h
 #define MediaDevices_h
 
-#include "bindings/core/v8/ScriptPromise.h"
-#include "core/dom/SuspendableObject.h"
-#include "core/events/EventTarget.h"
+#include "base/callback.h"
+#include "bindings/core/v8/ActiveScriptWrappable.h"
+#include "core/dom/PausableObject.h"
+#include "core/dom/events/EventTarget.h"
 #include "modules/EventTargetModules.h"
 #include "modules/ModulesExport.h"
+#include "modules/mediastream/MediaDeviceInfo.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "platform/AsyncMethodRunner.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
+#include "platform/heap/HeapAllocator.h"
+#include "public/platform/modules/mediastream/media_devices.mojom-blink.h"
 
 namespace blink {
 
+class LocalFrame;
 class MediaStreamConstraints;
 class MediaTrackSupportedConstraints;
+class ScriptPromise;
+class ScriptPromiseResolver;
 class ScriptState;
-class UserMediaController;
 
 class MODULES_EXPORT MediaDevices final
     : public EventTargetWithInlineData,
       public ActiveScriptWrappable<MediaDevices>,
-      public SuspendableObject {
+      public PausableObject,
+      public mojom::blink::MediaDevicesListener {
   USING_GARBAGE_COLLECTED_MIXIN(MediaDevices);
   DEFINE_WRAPPERTYPEINFO();
   USING_PRE_FINALIZER(MediaDevices, Dispose);
@@ -37,7 +44,6 @@ class MODULES_EXPORT MediaDevices final
   ScriptPromise getUserMedia(ScriptState*,
                              const MediaStreamConstraints&,
                              ExceptionState&);
-  void DidChangeMediaDevices();
 
   // EventTarget overrides.
   const AtomicString& InterfaceName() const override;
@@ -47,12 +53,35 @@ class MODULES_EXPORT MediaDevices final
   // ScriptWrappable
   bool HasPendingActivity() const override;
 
-  // SuspendableObject overrides.
+  // PausableObject overrides.
   void ContextDestroyed(ExecutionContext*) override;
-  void Suspend() override;
-  void Resume() override;
+  void Pause() override;
+  void Unpause() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  // mojom::blink::MediaDevicesListener implementation.
+  void OnDevicesChanged(MediaDeviceType,
+                        Vector<mojom::blink::MediaDeviceInfoPtr>) override;
+
+  // Callback for testing only.
+  using EnumerateDevicesTestCallback =
+      base::OnceCallback<void(const MediaDeviceInfoVector&)>;
+
+  void SetDispatcherHostForTesting(mojom::blink::MediaDevicesDispatcherHostPtr);
+
+  void SetEnumerateDevicesCallbackForTesting(
+      EnumerateDevicesTestCallback test_callback) {
+    enumerate_devices_test_callback_ = std::move(test_callback);
+  }
+
+  void SetConnectionErrorCallbackForTesting(base::OnceClosure test_callback) {
+    connection_error_test_callback_ = std::move(test_callback);
+  }
+
+  void SetDeviceChangeCallbackForTesting(base::OnceClosure test_callback) {
+    device_change_test_callback_ = std::move(test_callback);
+  }
+
+  virtual void Trace(blink::Visitor*);
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(devicechange);
 
@@ -64,18 +93,31 @@ class MODULES_EXPORT MediaDevices final
                             const RegisteredEventListener&) override;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(MediaDevicesTest, ObserveDeviceChangeEvent);
   explicit MediaDevices(ExecutionContext*);
   void ScheduleDispatchEvent(Event*);
   void DispatchScheduledEvent();
   void StartObserving();
   void StopObserving();
-  UserMediaController* GetUserMediaController();
   void Dispose();
+  void DevicesEnumerated(ScriptPromiseResolver*,
+                         Vector<Vector<mojom::blink::MediaDeviceInfoPtr>>);
+  void OnDispatcherHostConnectionError();
+  const mojom::blink::MediaDevicesDispatcherHostPtr& GetDispatcherHost(
+      LocalFrame*);
 
-  bool observing_;
   bool stopped_;
+  // Async runner may be null when there is no valid execution context.
+  // No async work may be posted in this scenario.
   Member<AsyncMethodRunner<MediaDevices>> dispatch_scheduled_event_runner_;
   HeapVector<Member<Event>> scheduled_events_;
+  mojom::blink::MediaDevicesDispatcherHostPtr dispatcher_host_;
+  mojo::Binding<mojom::blink::MediaDevicesListener> binding_;
+  HeapHashSet<Member<ScriptPromiseResolver>> requests_;
+
+  EnumerateDevicesTestCallback enumerate_devices_test_callback_;
+  base::OnceClosure connection_error_test_callback_;
+  base::OnceClosure device_change_test_callback_;
 };
 
 }  // namespace blink

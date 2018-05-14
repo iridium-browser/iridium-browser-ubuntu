@@ -19,76 +19,77 @@
 #include "platform/geometry/LayoutPoint.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/geometry/LayoutSize.h"
+#include "platform/wtf/text/WTFString.h"
 #include <ostream>  // NOLINT
 
 namespace blink {
 
 void PrintTo(const DoublePoint& point, std::ostream* os) {
-  *os << point.ToString();
+  *os << point;
 }
 
 void PrintTo(const DoubleRect& rect, std::ostream* os) {
-  *os << rect.ToString();
+  *os << rect;
 }
 
 void PrintTo(const DoubleSize& size, std::ostream* os) {
-  *os << size.ToString();
+  *os << size;
 }
 
 void PrintTo(const FloatBox& box, std::ostream* os) {
-  *os << box.ToString();
+  *os << box;
 }
 
 void PrintTo(const FloatPoint& point, std::ostream* os) {
-  *os << point.ToString();
+  *os << point;
 }
 
 void PrintTo(const FloatPoint3D& point, std::ostream* os) {
-  *os << point.ToString();
+  *os << point;
 }
 
 void PrintTo(const FloatQuad& quad, std::ostream* os) {
-  *os << quad.ToString();
+  *os << quad;
 }
 
 void PrintTo(const FloatRect& rect, std::ostream* os) {
-  *os << rect.ToString();
+  *os << rect;
 }
 
 void PrintTo(const FloatRoundedRect& rounded_rect, std::ostream* os) {
-  *os << rounded_rect.ToString();
+  *os << rounded_rect;
 }
 
 void PrintTo(const FloatRoundedRect::Radii& radii, std::ostream* os) {
-  *os << radii.ToString();
+  *os << radii;
 }
 
 void PrintTo(const FloatSize& size, std::ostream* os) {
-  *os << size.ToString();
+  *os << size;
 }
 
 void PrintTo(const IntPoint& point, std::ostream* os) {
-  *os << point.ToString();
+  *os << point;
 }
 
 void PrintTo(const IntRect& rect, std::ostream* os) {
-  *os << rect.ToString();
+  *os << rect;
 }
 
 void PrintTo(const IntSize& size, std::ostream* os) {
-  *os << size.ToString();
+  *os << size;
 }
 
 void PrintTo(const LayoutPoint& point, std::ostream* os) {
-  *os << point.ToString();
+  *os << point;
 }
 
 void PrintTo(const LayoutRect& rect, std::ostream* os) {
-  *os << rect.ToString();
+  *os << rect;
 }
 
 void PrintTo(const LayoutSize& size, std::ostream* os) {
-  *os << size.ToString();
+  *os << size;
 }
 
 }  // namespace blink

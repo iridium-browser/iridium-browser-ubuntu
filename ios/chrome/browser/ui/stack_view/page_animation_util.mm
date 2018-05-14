@@ -75,8 +75,6 @@ const CGFloat kAnimateOutAnchorY = 0;
 
 @end
 
-namespace ios_internal {
-
 namespace page_animation_util {
 
 const CGFloat kCardMargin = 14.0;
@@ -110,7 +108,7 @@ void AnimateInPaperWithAnimationAndCompletion(UIView* view,
   [parent insertSubview:paper belowSubview:view];
   [paper addSubview:view];
   [paper setBackgroundColor:isOffTheRecord
-                                ? [UIColor colorWithWhite:34 / 255 alpha:1]
+                                ? [UIColor colorWithWhite:34 / 255.0 alpha:1]
                                 : [UIColor whiteColor]];
 
   [CATransaction begin];
@@ -208,6 +206,7 @@ void AnimateInCardWithAnimationAndCompletion(UIView* view,
 
 void AnimateNewBackgroundPageWithCompletion(CardView* currentPageCard,
                                             CGRect displayFrame,
+                                            CGRect imageFrame,
                                             BOOL isPortrait,
                                             void (^completion)(void)) {
   // Create paper background.
@@ -242,10 +241,10 @@ void AnimateNewBackgroundPageWithCompletion(CardView* currentPageCard,
   // Align the bottom of |currentPageCard|'s snapshot with the bottom of the
   // screen, so that snapshots of any height are correctly aligned with the
   // tab's content.
-  currentPageCard.center = CGPointMake(
-      displaySize.width / 2.0, displaySize.height -
-                                   (currentPageCard.image.size.height / 2.0) -
-                                   kCardImageInsets.top / 2);
+  currentPageCard.center =
+      CGPointMake(displaySize.width / 2.0, displaySize.height -
+                                               (imageFrame.size.height / 2.0) -
+                                               kCardImageInsets.top / 2);
   CGAffineTransform fullScreenTransform =
       CGAffineTransformMakeScale(fullScreenScale, fullScreenScale);
   currentPageCard.transform = fullScreenTransform;
@@ -471,5 +470,3 @@ CGFloat AnimateOutTransformBreadth() {
 }
 
 }  // namespace page_animation_util
-
-}  // namespace ios_internal

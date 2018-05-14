@@ -14,7 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string16.h"
-#include "device/usb/public/interfaces/chooser_service.mojom.h"
+#include "device/usb/public/mojom/chooser_service.mojom.h"
 #include "device/usb/usb_service.h"
 
 namespace content {
@@ -32,7 +32,7 @@ class UsbChooserDialogAndroid : public device::UsbService::Observer {
   UsbChooserDialogAndroid(
       std::vector<device::mojom::UsbDeviceFilterPtr> filters,
       content::RenderFrameHost* render_frame_host,
-      const device::mojom::UsbChooserService::GetPermissionCallback& callback);
+      device::mojom::UsbChooserService::GetPermissionCallback callback);
   ~UsbChooserDialogAndroid() override;
 
   // device::UsbService::Observer:

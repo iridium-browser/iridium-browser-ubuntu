@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "base/macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/metrics_hashes.h"
 #include "url/url_constants.h"
@@ -35,7 +36,7 @@ const char kTranslateLanguageDetectionConflict[] =
 namespace {
 
 // Page languages for which we track CLD3 language conflicts.
-const char* kLanguageDetectionConflictPageLangs[] = {
+const char kLanguageDetectionConflictPageLangs[][6] = {
     "en", "en-US", "en-GB", "en-CA", "en-AU", "en-NZ", "en-ZA", "en-IN"};
 
 LanguageCheckType GetLanguageCheckMetric(const std::string& provided_code,
@@ -113,13 +114,13 @@ void ReportSimilarLanguageMatch(bool match) {
 
 void ReportLanguageDetectionConflict(const std::string& page_lang,
                                      const std::string& cld_lang) {
-  const char* const* const it =
+  const auto* it =
       std::find(std::begin(kLanguageDetectionConflictPageLangs),
                 std::end(kLanguageDetectionConflictPageLangs), page_lang);
   const std::string page_lang_token =
       it == std::end(kLanguageDetectionConflictPageLangs) ? "other" : *it;
 
-  UMA_HISTOGRAM_SPARSE_SLOWLY(
+  base::UmaHistogramSparse(
       metrics_internal::kTranslateLanguageDetectionConflict,
       base::HashMetricName(page_lang_token + "," + cld_lang));
 }

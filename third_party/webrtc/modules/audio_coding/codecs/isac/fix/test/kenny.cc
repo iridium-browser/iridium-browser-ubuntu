@@ -14,8 +14,9 @@
 #include <time.h>
 #include <ctype.h>
 
-#include "webrtc/modules/audio_coding/codecs/isac/fix/include/isacfix.h"
-#include "webrtc/test/testsupport/perf_test.h"
+#include "modules/audio_coding/codecs/isac/fix/include/isacfix.h"
+#include "test/gtest.h"
+#include "test/testsupport/perf_test.h"
 
 // TODO(kma): Clean up the code and change benchmarking the whole codec to
 // separate encoder and decoder.
@@ -40,6 +41,11 @@ int readframe(int16_t *data, FILE *inp, int length) {
 
   return status;
 }
+
+// Globals needed because gtest does not provide access to argv.
+// This should be reworked to use flags.
+static int global_argc;
+static char **global_argv;
 
 /* Struct for bottleneck model */
 typedef struct {
@@ -92,14 +98,17 @@ void get_arrival_time2(int current_framesamples,
   BN_data->rtp_number++;
 }
 
-int main(int argc, char* argv[])
-{
+TEST(IsacFixTest, Kenny) {
+  int argc = global_argc;
+  char **argv = global_argv;
 
   char inname[100], outname[100],  outbitsname[100], bottleneck_file[100];
   FILE *inp, *outp, *f_bn, *outbits;
   int endfile;
 
-  size_t i;
+  const char* chartjson_result_file = NULL;
+
+  int i;
   int errtype, h = 0, k, packetLossPercent = 0;
   int16_t CodingMode;
   int16_t bottleneck;
@@ -155,7 +164,7 @@ int main(int argc, char* argv[])
   packetLossPercent = 0;
 
   /* Handling wrong input arguments in the command line */
-  if ((argc<3) || (argc>21))  {
+  if ((argc<3) || (argc>22))  {
     printf("\n\nWrong number of arguments or flag values.\n\n");
 
     printf("\n");
@@ -163,7 +172,7 @@ int main(int argc, char* argv[])
     printf("iSAC version %s \n\n", version_number);
 
     printf("Usage:\n\n");
-    printf("%s [-F num][-I] bottleneck_value infile outfile \n\n", argv[0]);
+    printf("%s [-I] bottleneck_value infile outfile [-F num]\n\n", argv[0]);
     printf("with:\n");
     printf("[-I]             :if -I option is specified, the coder will use\n");
     printf("                  an instantaneous Bottleneck value. If not, it\n");
@@ -171,6 +180,8 @@ int main(int argc, char* argv[])
     printf("bottleneck_value :the value of the bottleneck provided either\n");
     printf("                  as a fixed value (e.g. 25000) or\n");
     printf("                  read from a file (e.g. bottleneck.txt)\n\n");
+    printf("infile           :Normal speech input file\n\n");
+    printf("outfile          :Speech output file\n\n");
     printf("[-INITRATE num]  :Set a new value for initial rate. Note! Only used"
            " in adaptive mode.\n\n");
     printf("[-FL num]        :Set (initial) frame length in msec. Valid length"
@@ -200,30 +211,31 @@ int main(int argc, char* argv[])
     printf("                        encoder/decoder instance\n");
     printf("                  F 9 - Call decodeB without calling decodeA\n");
     printf("                  F 10 - Call decodeB with garbage data\n");
-    printf("[-PL num]       : if -PL option is specified 0<num<100 will "
+    printf("[-PL num]        :if -PL option is specified 0<num<100 will "
            "specify the\n");
     printf("                  percentage of packet loss\n\n");
-    printf("[-G file]       : if -G option is specified the file given is"
+    printf("[-G file]        :if -G option is specified the file given is"
            " a .gns file\n");
     printf("                  that represents a network profile\n\n");
-    printf("[-NB num]       : if -NB option, use the narrowband interfaces\n");
+    printf("[-NB num]        :if -NB option, use the narrowband interfaces\n");
     printf("                  num=1 => encode with narrowband encoder"
            " (infile is narrowband)\n");
     printf("                  num=2 => decode with narrowband decoder"
            " (outfile is narrowband)\n\n");
-    printf("[-CE num]       : Test of APIs used by Conference Engine.\n");
+    printf("[-CE num]        :Test of APIs used by Conference Engine.\n");
     printf("                  CE 1 - createInternal, freeInternal,"
            " getNewBitstream \n");
     printf("                  CE 2 - transcode, getBWE \n");
     printf("                  CE 3 - getSendBWE, setSendBWE.  \n\n");
-    printf("[-RTP_INIT num] : if -RTP_INIT option is specified num will be"
+    printf("[-RTP_INIT num]  :if -RTP_INIT option is specified num will be"
            " the initial\n");
     printf("                  value of the rtp sequence number.\n\n");
-    printf("infile          : Normal speech input file\n\n");
-    printf("outfile         : Speech output file\n\n");
-    printf("Example usage   : \n\n");
+    printf("[--isolated-script-test-perf-output=file]\n");
+    printf("                 :If this option is specified, perf values will be"
+           " written to this file in a JSON format.\n\n");
+    printf("Example usage    :\n\n");
     printf("%s -I bottleneck.txt speechIn.pcm speechOut.pcm\n\n", argv[0]);
-    exit(0);
+    exit(1);
 
   }
 
@@ -235,22 +247,35 @@ int main(int argc, char* argv[])
   CodingMode = 0;
   testNum = 0;
   testCE = 0;
-  for (i = 1; i + 2 < static_cast<size_t>(argc); i++) {
-    /* Instantaneous mode */
-    if (!strcmp ("-I", argv[i])) {
-      printf("\nInstantaneous BottleNeck\n");
-      CodingMode = 1;
-      i++;
-    }
+  i = 1;
 
+  /* Instantaneous mode */
+  if (!strcmp ("-I", argv[i])) {
+    printf("\nInstantaneous BottleNeck\n");
+    CodingMode = 1;
+    i++;
+  }
+
+  /* Bottleneck value is processed after the for */
+  i++;
+
+  /* Get Input and Output files */
+  sscanf(argv[i++], "%s", inname);
+  sscanf(argv[i++], "%s", outname);
+
+  for (; i < argc; i++) {
     /* Set (initial) bottleneck value */
     if (!strcmp ("-INITRATE", argv[i])) {
+      if (i + 1 >= argc) {
+        printf("-INITRATE requires a parameter.\n");
+        exit(1);
+      }
       rateBPS = atoi(argv[i + 1]);
       setControlBWE = 1;
       if ((rateBPS < 10000) || (rateBPS > 32000)) {
         printf("\n%d is not a initial rate. "
                "Valid values are in the range 10000 to 32000.\n", rateBPS);
-        exit(0);
+        exit(1);
       }
       printf("\nNew initial rate: %d\n", rateBPS);
       i++;
@@ -258,11 +283,15 @@ int main(int argc, char* argv[])
 
     /* Set (initial) framelength */
     if (!strcmp ("-FL", argv[i])) {
+      if (i + 1 >= argc) {
+        printf("-FL requires a parameter.\n");
+        exit(1);
+      }
       framesize = atoi(argv[i + 1]);
       if ((framesize != 30) && (framesize != 60)) {
         printf("\n%d is not a valid frame length. "
                "Valid length are 30 and 60 msec.\n", framesize);
-        exit(0);
+        exit(1);
       }
       printf("\nFrame Length: %d\n", framesize);
       i++;
@@ -276,6 +305,10 @@ int main(int argc, char* argv[])
 
     /* Set maximum allowed payload size in bytes */
     if (!strcmp ("-MAX", argv[i])) {
+      if (i + 1 >= argc) {
+        printf("-MAX requires a parameter.\n");
+        exit(1);
+      }
       payloadSize = atoi(argv[i + 1]);
       printf("Maximum Payload Size: %d\n", payloadSize);
       i++;
@@ -283,6 +316,10 @@ int main(int argc, char* argv[])
 
     /* Set maximum rate in bytes */
     if (!strcmp ("-MAXRATE", argv[i])) {
+      if (i + 1 >= argc) {
+        printf("-MAXRATE requires a parameter.\n");
+        exit(1);
+      }
       payloadRate = atoi(argv[i + 1]);
       printf("Maximum Rate in kbps: %d\n", payloadRate);
       i++;
@@ -290,23 +327,31 @@ int main(int argc, char* argv[])
 
     /* Test of fault scenarious */
     if (!strcmp ("-F", argv[i])) {
+      if (i + 1 >= argc) {
+        printf("-F requires a parameter.");
+        exit(1);
+      }
       testNum = atoi(argv[i + 1]);
       printf("\nFault test: %d\n", testNum);
       if (testNum < 1 || testNum > 10) {
         printf("\n%d is not a valid Fault Scenario number."
                " Valid Fault Scenarios are numbered 1-10.\n", testNum);
-        exit(0);
+        exit(1);
       }
       i++;
     }
 
     /* Packet loss test */
     if (!strcmp ("-PL", argv[i])) {
+      if (i + 1 >= argc) {
+        printf("-PL requires a parameter.\n");
+        exit(1);
+      }
       if( isdigit( *argv[i+1] ) ) {
         packetLossPercent = atoi( argv[i+1] );
         if( (packetLossPercent < 0) | (packetLossPercent > 100) ) {
           printf( "\nInvalid packet loss perentage \n" );
-          exit( 0 );
+          exit( 1 );
         }
         if( packetLossPercent > 0 ) {
           printf( "\nSimulating %d %% of independent packet loss\n",
@@ -319,8 +364,7 @@ int main(int argc, char* argv[])
         readLoss = 1;
         plFile = fopen( argv[i+1], "rb" );
         if( plFile == NULL ) {
-          printf( "\n couldn't open the frameloss file: %s\n", argv[i+1] );
-          exit( 0 );
+          FAIL() << "Couldn't open the frameloss file: " << argv[i+1];
         }
         printf( "\nSimulating packet loss through the given "
                 "channel file: %s\n", argv[i+1] );
@@ -336,11 +380,14 @@ int main(int argc, char* argv[])
 
     /* Use gns file */
     if (!strcmp ("-G", argv[i])) {
+      if (i + 1 >= argc) {
+        printf("-G requires a parameter.\n");
+        exit(1);
+      }
       sscanf(argv[i + 1], "%s", gns_file);
       fp_gns = fopen(gns_file, "rb");
       if (fp_gns  == NULL) {
-        printf("Cannot read file %s.\n", gns_file);
-        exit(0);
+        FAIL() << "Cannot read file " << gns_file << ".";
       }
       gns = 1;
       i++;
@@ -348,12 +395,20 @@ int main(int argc, char* argv[])
 
     /* Run Narrowband interfaces (either encoder or decoder) */
     if (!strcmp ("-NB", argv[i])) {
+      if (i + 1 >= argc) {
+        printf("-NB requires a parameter.\n");
+        exit(1);
+      }
       nbTest = atoi(argv[i + 1]);
       i++;
     }
 
     /* Run Conference Engine APIs */
     if (!strcmp ("-CE", argv[i])) {
+      if (i + 1 >= argc) {
+        printf("-CE requires a parameter.\n");
+        exit(1);
+      }
       testCE = atoi(argv[i + 1]);
       if (testCE==1 || testCE==2) {
         i++;
@@ -361,14 +416,27 @@ int main(int argc, char* argv[])
       } else if (testCE < 1 || testCE > 3) {
         printf("\n%d is not a valid CE-test number, valid Fault "
                "Scenarios are numbered 1-3\n", testCE);
-        exit(0);
+        exit(1);
       }
       i++;
     }
 
     /* Set initial RTP number */
     if (!strcmp ("-RTP_INIT", argv[i])) {
+      if (i + 1 >= argc) {
+        printf("-RTP_INIT requires a parameter.\n");
+        exit(1);
+      }
       i++;
+    }
+
+    if (strstr(argv[i], "--isolated-script-test-perf-output") == argv[i]) {
+      const char* filename_start = strstr(argv[i], "=");
+      if (!filename_start || strlen(filename_start) < 2) {
+        printf("Expected --isolated-script-test-perf-output=/some/filename\n");
+        exit(1);
+      }
+      chartjson_result_file = filename_start + 1;
     }
   }
 
@@ -379,9 +447,8 @@ int main(int argc, char* argv[])
     sscanf(argv[CodingMode+1], "%s", bottleneck_file);
     f_bn = fopen(bottleneck_file, "rb");
     if (f_bn  == NULL) {
-      printf("No value provided for BottleNeck and cannot read file %s\n",
-             bottleneck_file);
-      exit(0);
+      printf("No value provided for BottleNeck\n");
+      FAIL() << "Cannot read file " << bottleneck_file;
     } else {
       int aux_var;
       printf("reading bottleneck rates from file %s\n\n",bottleneck_file);
@@ -389,7 +456,7 @@ int main(int argc, char* argv[])
         /* Set pointer to beginning of file */
         fseek(f_bn, 0L, SEEK_SET);
         if (fscanf(f_bn, "%d", &aux_var) == EOF) {
-          exit(0);
+          FAIL();
         }
       }
       bottleneck = (int16_t)aux_var;
@@ -409,10 +476,6 @@ int main(int argc, char* argv[])
     printf("\nAdaptive BottleNeck\n");
   }
 
-  /* Get Input and Output files */
-  sscanf(argv[argc-2], "%s", inname);
-  sscanf(argv[argc-1], "%s", outname);
-
   /* Add '.bit' to output bitstream file */
   while ((int)outname[h] != 0) {
     outbitsname[h] = outname[h];
@@ -423,17 +486,14 @@ int main(int argc, char* argv[])
     h++;
   }
   if ((inp = fopen(inname,"rb")) == NULL) {
-    printf("  iSAC: Cannot read file %s\n", inname);
-    exit(1);
+    FAIL() << "  iSAC: Cannot read file " << inname;
   }
   if ((outp = fopen(outname,"wb")) == NULL) {
-    printf("  iSAC: Cannot write file %s\n", outname);
-    exit(1);
+    FAIL() << "  iSAC: Cannot write file " << outname;
   }
 
   if ((outbits = fopen(outbitsname,"wb")) == NULL) {
-    printf("  iSAC: Cannot write file %s\n", outbitsname);
-    exit(1);
+    FAIL() << "  iSAC: Cannot write file " << outbitsname;
   }
   printf("\nInput:%s\nOutput:%s\n\n", inname, outname);
 
@@ -512,8 +572,7 @@ int main(int argc, char* argv[])
     if (err < 0) {
       /* exit if returned with error */
       errtype=WebRtcIsacfix_GetErrorCode(ISAC_main_inst);
-      printf("\n\n Error in SetMaxPayloadSize: %d.\n\n", errtype);
-      exit(EXIT_FAILURE);
+      FAIL() << "Error in SetMaxPayloadSize: " << errtype;
     }
   }
   if (payloadRate != 0) {
@@ -521,8 +580,7 @@ int main(int argc, char* argv[])
     if (err < 0) {
       /* exit if returned with error */
       errtype=WebRtcIsacfix_GetErrorCode(ISAC_main_inst);
-      printf("\n\n Error in SetMaxRateInBytes: %d.\n\n", errtype);
-      exit(EXIT_FAILURE);
+      FAIL() << "Error in SetMaxRateInBytes: " << errtype;
     }
   }
 
@@ -624,7 +682,7 @@ int main(int argc, char* argv[])
         stream_len = static_cast<size_t>(stream_len_int);
         if (fwrite(streamdata, sizeof(char), stream_len, outbits) !=
             stream_len) {
-          return -1;
+          FAIL();
         }
       }
 
@@ -637,7 +695,7 @@ int main(int argc, char* argv[])
           /* Set pointer to beginning of file */
           fseek(f_bn, 0L, SEEK_SET);
           if (fscanf(f_bn, "%d", &aux_var) == EOF) {
-            exit(0);
+            FAIL();
           }
         }
         bottleneck = (int16_t)aux_var;
@@ -664,7 +722,7 @@ int main(int argc, char* argv[])
 
     if (testNum == 6) {
       srand(time(NULL));
-      for (i = 0; i < stream_len; i++ ) {
+      for (i = 0; i < static_cast<int>(stream_len); i++ ) {
         streamdata[i] = rand();
       }
     }
@@ -674,7 +732,7 @@ int main(int argc, char* argv[])
       if (fscanf(fp_gns, "%d", &cur_delay) == EOF) {
         fseek(fp_gns, 0L, SEEK_SET);
         if (fscanf(fp_gns, "%d", &cur_delay) == EOF) {
-          exit(0);
+          FAIL();
         }
       }
     }
@@ -694,7 +752,7 @@ int main(int argc, char* argv[])
 
       /* Error test number 10, garbage data */
       if (testNum == 10) {
-        for ( i = 0; i < stream_len; i++) {
+        for ( i = 0; i < static_cast<int>(stream_len); i++) {
           streamdata[i] = (short) (streamdata[i] + (short) rand());
         }
       }
@@ -783,7 +841,7 @@ int main(int argc, char* argv[])
       /* Write decoded speech frame to file */
       if (fwrite(decoded, sizeof(int16_t),
                  declen, outp) != (size_t)declen) {
-        return -1;
+        FAIL();
       }
       //   fprintf( ratefile, "%f \n", stream_len / ( ((double)declen)/
       // ((double)FS) ) * 8 );
@@ -827,6 +885,10 @@ int main(int argc, char* argv[])
   webrtc::test::PrintResult("isac", "", "time_per_10ms_frame",
                             (runtime * 10000) / length_file, "us", false);
 
+  if (chartjson_result_file) {
+    webrtc::test::WritePerfResults(chartjson_result_file);
+  }
+
   fclose(inp);
   fclose(outp);
   fclose(outbits);
@@ -835,5 +897,12 @@ int main(int argc, char* argv[])
     WebRtcIsacfix_FreeInternal(ISAC_main_inst);
   }
   WebRtcIsacfix_Free(ISAC_main_inst);
-  return 0;
+}
+
+int main(int argc, char* argv[]) {
+  ::testing::InitGoogleTest(&argc, argv);
+  global_argc = argc;
+  global_argv = argv;
+
+  return RUN_ALL_TESTS();
 }

@@ -31,14 +31,16 @@
 #define DocumentLoader_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
+#include "base/unguessable_token.h"
 #include "bindings/core/v8/SourceLocation.h"
 #include "core/CoreExport.h"
 #include "core/dom/ViewportDescription.h"
 #include "core/dom/WeakIdentifierMap.h"
 #include "core/frame/FrameTypes.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
+#include "core/html/parser/ParserSynchronizationPolicy.h"
 #include "core/loader/DocumentLoadTiming.h"
-#include "core/loader/DocumentWriter.h"
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/loader/LinkLoader.h"
 #include "core/loader/NavigationPolicy.h"
@@ -50,23 +52,25 @@
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/loader/fetch/SubstituteData.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebLoadingBehaviorFlag.h"
+#include "public/web/WebGlobalObjectReusePolicy.h"
 
 #include <memory>
 
 namespace blink {
 
 class ApplicationCacheHost;
-class SubresourceFilter;
-class ResourceFetcher;
-class DocumentInit;
+class CSSPreloaderResourceClient;
+class Document;
+class DocumentParser;
+class FrameLoader;
 class HistoryItem;
 class LocalFrame;
 class LocalFrameClient;
-class FrameLoader;
+class ResourceFetcher;
 class ResourceTimingInfo;
 class SerializedScriptValue;
+class SubresourceFilter;
 class WebServiceWorkerNetworkProvider;
 struct ViewportDescriptionWrapper;
 
@@ -77,13 +81,16 @@ class CORE_EXPORT DocumentLoader
   USING_GARBAGE_COLLECTED_MIXIN(DocumentLoader);
 
  public:
-  static DocumentLoader* Create(LocalFrame* frame,
-                                const ResourceRequest& request,
-                                const SubstituteData& data,
-                                ClientRedirectPolicy client_redirect_policy) {
+  static DocumentLoader* Create(
+      LocalFrame* frame,
+      const ResourceRequest& request,
+      const SubstituteData& data,
+      ClientRedirectPolicy client_redirect_policy,
+      const base::UnguessableToken& devtools_navigation_token) {
     DCHECK(frame);
 
-    return new DocumentLoader(frame, request, data, client_redirect_policy);
+    return new DocumentLoader(frame, request, data, client_redirect_policy,
+                              devtools_navigation_token);
   }
   ~DocumentLoader() override;
 
@@ -95,7 +102,9 @@ class CORE_EXPORT DocumentLoader
 
   unsigned long MainResourceIdentifier() const;
 
-  void ReplaceDocumentWhileExecutingJavaScriptURL(const DocumentInit&,
+  void ReplaceDocumentWhileExecutingJavaScriptURL(const KURL&,
+                                                  Document* owner_document,
+                                                  WebGlobalObjectReusePolicy,
                                                   const String& source);
 
   const AtomicString& MimeType() const;
@@ -117,13 +126,11 @@ class CORE_EXPORT DocumentLoader
   const KURL& UnreachableURL() const;
   const KURL& UrlForHistory() const;
 
-  const AtomicString& ResponseMIMEType() const;
-
   void DidChangePerformanceTiming();
   void DidObserveLoadingBehavior(WebLoadingBehaviorFlag);
   void UpdateForSameDocumentNavigation(const KURL&,
                                        SameDocumentNavigationSource,
-                                       PassRefPtr<SerializedScriptValue>,
+                                       scoped_refptr<SerializedScriptValue>,
                                        HistoryScrollRestorationType,
                                        FrameLoadType,
                                        Document*);
@@ -165,6 +172,7 @@ class CORE_EXPORT DocumentLoader
   HistoryItem* GetHistoryItem() const { return history_item_; }
 
   void StartLoading();
+  void StopLoading();
 
   DocumentLoadTiming& GetTiming() { return document_load_timing_; }
   const DocumentLoadTiming& GetTiming() const { return document_load_timing_; }
@@ -186,6 +194,7 @@ class CORE_EXPORT DocumentLoader
         : was_scrolled_by_user(false), did_restore_from_history(false) {}
 
     bool was_scrolled_by_user;
+    bool was_scrolled_by_js;
     bool did_restore_from_history;
   };
   InitialScrollState& GetInitialScrollState() { return initial_scroll_state_; }
@@ -196,7 +205,9 @@ class CORE_EXPORT DocumentLoader
   void DispatchLinkHeaderPreloads(ViewportDescriptionWrapper*,
                                   LinkLoader::MediaPreloadPolicy);
 
-  Resource* StartPreload(Resource::Type, FetchParameters&);
+  Resource* StartPreload(Resource::Type,
+                         FetchParameters&,
+                         CSSPreloaderResourceClient*);
 
   void SetServiceWorkerNetworkProvider(
       std::unique_ptr<WebServiceWorkerNetworkProvider>);
@@ -213,38 +224,64 @@ class CORE_EXPORT DocumentLoader
 
   void LoadFailed(const ResourceError&);
 
-  DECLARE_VIRTUAL_TRACE();
+  void SetUserActivated();
+
+  const AtomicString& RequiredCSP();
+
+  void Trace(blink::Visitor*) override;
+
+  // For automation driver-initiated navigations over the devtools protocol,
+  // |devtools_navigation_token_| is used to tag the navigation. This navigation
+  // token is then sent into the renderer and lands on the DocumentLoader. That
+  // way subsequent Blink-level frame lifecycle events can be associated with
+  // the concrete navigation.
+  // - The value should not be sent back to the browser.
+  // - The value on DocumentLoader may be generated in the renderer in some
+  // cases, and thus shouldn't be trusted.
+  // TODO(crbug.com/783506): Replace devtools navigation token with the generic
+  // navigation token that can be passed from renderer to the browser.
+  const base::UnguessableToken& GetDevToolsNavigationToken() {
+    return devtools_navigation_token_;
+  }
+
+  // Can be used to block the parser.
+  void BlockParser();
+  void ResumeParser();
 
  protected:
   DocumentLoader(LocalFrame*,
                  const ResourceRequest&,
                  const SubstituteData&,
-                 ClientRedirectPolicy);
+                 ClientRedirectPolicy,
+                 const base::UnguessableToken& devtools_navigation_token);
 
-  static bool ShouldClearWindowName(const LocalFrame&,
-                                    SecurityOrigin* previous_security_origin,
-                                    const Document& new_document);
+  static bool ShouldClearWindowName(
+      const LocalFrame&,
+      const SecurityOrigin* previous_security_origin,
+      const Document& new_document);
 
   Vector<KURL> redirect_chain_;
 
  private:
   // installNewDocument() does the work of creating a Document and
-  // DocumentWriter, as well as creating a new LocalDOMWindow if needed. It also
+  // DocumentParser, as well as creating a new LocalDOMWindow if needed. It also
   // initalizes a bunch of state on the Document (e.g., the state based on
   // response headers).
   enum class InstallNewDocumentReason { kNavigation, kJavascriptURL };
-  void InstallNewDocument(const DocumentInit&,
+  void InstallNewDocument(const KURL&,
+                          Document* owner_document,
+                          WebGlobalObjectReusePolicy,
                           const AtomicString& mime_type,
                           const AtomicString& encoding,
                           InstallNewDocumentReason,
                           ParserSynchronizationPolicy,
                           const KURL& overriding_url);
-  void DidInstallNewDocument(Document*, InstallNewDocumentReason);
-  void DidCommitNavigation();
+  void DidInstallNewDocument(Document*);
+  void WillCommitNavigation();
+  void DidCommitNavigation(WebGlobalObjectReusePolicy);
 
-  void EnsureWriter(const AtomicString& mime_type,
-                    const KURL& overriding_url = KURL());
-  void EndWriting();
+  void CommitNavigation(const AtomicString& mime_type,
+                        const KURL& overriding_url = KURL());
 
   // Use these method only where it's guaranteed that |m_frame| hasn't been
   // cleared.
@@ -252,11 +289,10 @@ class CORE_EXPORT DocumentLoader
   LocalFrameClient& GetLocalFrameClient() const;
 
   void CommitData(const char* bytes, size_t length);
-  void ClearMainResourceHandle();
 
   bool MaybeCreateArchive();
 
-  void FinishedLoading(double finish_time);
+  void FinishedLoading(TimeTicks finish_time);
   void CancelLoadAfterCSPDenied(const ResourceResponse&);
 
   enum class HistoryNavigationType {
@@ -289,13 +325,19 @@ class CORE_EXPORT DocumentLoader
 
   bool ShouldContinueForResponse() const;
 
+  // Processes the data stored in the data_buffer_, used to avoid appending data
+  // to the parser in a nested message loop.
+  void ProcessDataBuffer();
+
   Member<LocalFrame> frame_;
   Member<ResourceFetcher> fetcher_;
 
-  Member<RawResource> main_resource_;
   Member<HistoryItem> history_item_;
 
-  Member<DocumentWriter> writer_;
+  // The parser that was created when the current Document was installed.
+  // document.open() may create a new parser at a later point, but this
+  // will not be updated.
+  Member<DocumentParser> parser_;
 
   Member<SubresourceFilter> subresource_filter_;
 
@@ -323,7 +365,7 @@ class CORE_EXPORT DocumentLoader
 
   DocumentLoadTiming document_load_timing_;
 
-  double time_of_last_data_received_;
+  TimeTicks time_of_last_data_received_;
 
   Member<ApplicationCacheHost> application_cache_host_;
 
@@ -336,11 +378,6 @@ class CORE_EXPORT DocumentLoader
 
   bool was_blocked_after_csp_;
 
-  static bool ShouldPersistUserGestureValue(
-      const SecurityOrigin* previous_security_origin,
-      const SecurityOrigin* new_security_origin);
-  static bool CheckOriginIsHttpOrHttps(const SecurityOrigin*);
-
   // PlzNavigate: set when committing a navigation. The data has originally been
   // captured when the navigation was sent to the browser process, and it is
   // sent back at commit time.
@@ -349,9 +386,18 @@ class CORE_EXPORT DocumentLoader
   enum State { kNotStarted, kProvisional, kCommitted, kSentDidFinishLoad };
   State state_;
 
+  // Used to block the parser.
+  bool is_parser_blocked_ = false;
+  bool finished_loading_ = false;
+  scoped_refptr<SharedBuffer> committed_data_buffer_;
+
   // Used to protect against reentrancy into dataReceived().
   bool in_data_received_;
-  RefPtr<SharedBuffer> data_buffer_;
+  scoped_refptr<SharedBuffer> data_buffer_;
+  base::UnguessableToken devtools_navigation_token_;
+
+  // Whether this load request comes from a user activation.
+  bool user_activated_;
 };
 
 DECLARE_WEAK_IDENTIFIER_MAP(DocumentLoader);

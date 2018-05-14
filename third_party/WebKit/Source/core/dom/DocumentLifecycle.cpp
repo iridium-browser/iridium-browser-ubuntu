@@ -30,7 +30,7 @@
 
 #include "core/dom/DocumentLifecycle.h"
 
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Assertions.h"
 
 #if DCHECK_IS_ON()
@@ -40,7 +40,7 @@
 namespace blink {
 
 static DocumentLifecycle::DeprecatedTransition* g_deprecated_transition_stack =
-    0;
+    nullptr;
 
 // TODO(skyostil): Come up with a better way to store cross-frame lifecycle
 // related data to avoid this being a global setting.
@@ -88,7 +88,7 @@ DocumentLifecycle::DisallowThrottlingScope::~DisallowThrottlingScope() {
 DocumentLifecycle::DocumentLifecycle()
     : state_(kUninitialized), detach_count_(0), disallow_transition_count_(0) {}
 
-DocumentLifecycle::~DocumentLifecycle() {}
+DocumentLifecycle::~DocumentLifecycle() = default;
 
 #if DCHECK_IS_ON()
 
@@ -222,6 +222,7 @@ bool DocumentLifecycle::CanAdvanceTo(LifecycleState next_state) const {
       // Otherwise, we can continue onwards.
       if (next_state == kCompositingClean)
         return true;
+      break;
     case kCompositingClean:
       DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV2Enabled());
       if (next_state == kInStyleRecalc)
@@ -263,6 +264,8 @@ bool DocumentLifecycle::CanAdvanceTo(LifecycleState next_state) const {
           next_state == kInCompositingUpdate)
         return true;
       if (next_state == kInPrePaint)
+        return true;
+      if (next_state == kInPaint)
         return true;
       break;
     case kStopping:

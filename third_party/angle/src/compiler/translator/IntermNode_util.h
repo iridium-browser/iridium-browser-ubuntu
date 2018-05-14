@@ -14,33 +14,50 @@
 namespace sh
 {
 
-TIntermFunctionPrototype *CreateInternalFunctionPrototypeNode(const TType &returnType,
-                                                              const char *name,
-                                                              const TSymbolUniqueId &functionId);
-TIntermFunctionDefinition *CreateInternalFunctionDefinitionNode(const TType &returnType,
-                                                                const char *name,
-                                                                TIntermBlock *functionBody,
-                                                                const TSymbolUniqueId &functionId);
-TIntermAggregate *CreateInternalFunctionCallNode(const TType &returnType,
-                                                 const char *name,
-                                                 const TSymbolUniqueId &functionId,
-                                                 TIntermSequence *arguments);
+class TSymbolTable;
+class TVariable;
+
+TIntermFunctionPrototype *CreateInternalFunctionPrototypeNode(const TFunction &func);
+TIntermFunctionDefinition *CreateInternalFunctionDefinitionNode(const TFunction &func,
+                                                                TIntermBlock *functionBody);
 
 TIntermTyped *CreateZeroNode(const TType &type);
 TIntermConstantUnion *CreateIndexNode(int index);
 TIntermConstantUnion *CreateBoolNode(bool value);
+
+TVariable *CreateTempVariable(TSymbolTable *symbolTable, const TType *type);
+TVariable *CreateTempVariable(TSymbolTable *symbolTable, const TType *type, TQualifier qualifier);
+
+TIntermSymbol *CreateTempSymbolNode(const TVariable *tempVariable);
+TIntermDeclaration *CreateTempDeclarationNode(const TVariable *tempVariable);
+TIntermDeclaration *CreateTempInitDeclarationNode(const TVariable *tempVariable,
+                                                  TIntermTyped *initializer);
+TIntermBinary *CreateTempAssignmentNode(const TVariable *tempVariable, TIntermTyped *rightNode);
+
+TVariable *DeclareTempVariable(TSymbolTable *symbolTable,
+                               const TType *type,
+                               TQualifier qualifier,
+                               TIntermDeclaration **declarationOut);
+TVariable *DeclareTempVariable(TSymbolTable *symbolTable,
+                               TIntermTyped *initializer,
+                               TQualifier qualifier,
+                               TIntermDeclaration **declarationOut);
 
 // If the input node is nullptr, return nullptr.
 // If the input node is a block node, return it.
 // If the input node is not a block node, put it inside a block node and return that.
 TIntermBlock *EnsureBlock(TIntermNode *node);
 
-TIntermSymbol *ReferenceGlobalVariable(const TString &name, const TSymbolTable &symbolTable);
-TIntermSymbol *ReferenceBuiltInVariable(const TString &name,
+// Should be called from inside Compiler::compileTreeImpl() where the global level is in scope.
+TIntermSymbol *ReferenceGlobalVariable(const ImmutableString &name,
+                                       const TSymbolTable &symbolTable);
+
+// Note: this can access desktop GLSL built-ins that are hidden from the parser.
+TIntermSymbol *ReferenceBuiltInVariable(const ImmutableString &name,
                                         const TSymbolTable &symbolTable,
                                         int shaderVersion);
 
-TIntermTyped *CreateBuiltInFunctionCallNode(const TString &name,
+TIntermTyped *CreateBuiltInFunctionCallNode(const char *name,
                                             TIntermSequence *arguments,
                                             const TSymbolTable &symbolTable,
                                             int shaderVersion);

@@ -48,39 +48,32 @@ void InitCrashReporterIfEnabled(bool enabled) {
 
 namespace first_run {
 
-bool ShowFirstRunDialog(Profile* profile) {
-  return FirstRunDialog::Show(profile);
+void ShowFirstRunDialog(Profile* profile) {
+  FirstRunDialog::Show(profile);
 }
 
 }  // namespace first_run
 
 // static
-bool FirstRunDialog::Show(Profile* profile) {
-  bool dialog_shown = false;
+void FirstRunDialog::Show(Profile* profile) {
+  FirstRunDialog* dialog = new FirstRunDialog(profile);
+  views::DialogDelegate::CreateDialogWidget(dialog, NULL, NULL)->Show();
 
-#if defined(GOOGLE_CHROME_BUILD)
-  // If the metrics reporting is managed, we won't ask.
-  if (!IsMetricsReportingPolicyManaged()) {
-    FirstRunDialog* dialog = new FirstRunDialog(profile);
-    views::DialogDelegate::CreateDialogWidget(dialog, NULL, NULL)->Show();
-
-    base::MessageLoopForUI* loop = base::MessageLoopForUI::current();
-    base::MessageLoopForUI::ScopedNestableTaskAllower allow_nested(loop);
-    base::RunLoop run_loop;
-    dialog->quit_runloop_ = run_loop.QuitClosure();
-    run_loop.Run();
-    dialog_shown = true;
-  }
-#endif  // defined(GOOGLE_CHROME_BUILD)
-
-  return dialog_shown;
+  base::MessageLoopForUI* loop = base::MessageLoopForUI::current();
+  base::MessageLoopForUI::ScopedNestableTaskAllower allow_nested(loop);
+  base::RunLoop run_loop;
+  dialog->quit_runloop_ = run_loop.QuitClosure();
+  run_loop.Run();
 }
 
 FirstRunDialog::FirstRunDialog(Profile* profile)
     : profile_(profile),
       make_default_(NULL),
       report_crashes_(NULL) {
-  GridLayout* layout = GridLayout::CreatePanel(this);
+  set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
+      views::TEXT, views::TEXT));
+  GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   views::ColumnSet* column_set = layout->AddColumnSet(0);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
@@ -95,8 +88,8 @@ FirstRunDialog::FirstRunDialog(Profile* profile)
   layout->StartRowWithPadding(0, 0, 0,
                               ChromeLayoutProvider::Get()->GetDistanceMetric(
                                   views::DISTANCE_RELATED_CONTROL_VERTICAL));
-  report_crashes_ = new views::Checkbox(l10n_util::GetStringUTF16(
-      IDS_OPTIONS_ENABLE_LOGGING));
+  report_crashes_ = new views::Checkbox(
+      l10n_util::GetStringUTF16(IDS_SETTINGS_ENABLE_LOGGING));
   // Having this box checked means the user has to opt-out of metrics recording.
   report_crashes_->SetChecked(!first_run::IsMetricsReportingOptIn());
   layout->AddView(report_crashes_);

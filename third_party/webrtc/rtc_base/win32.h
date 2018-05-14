@@ -8,10 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_BASE_WIN32_H_
-#define WEBRTC_RTC_BASE_WIN32_H_
+#ifndef RTC_BASE_WIN32_H_
+#define RTC_BASE_WIN32_H_
 
-#if defined(WEBRTC_WIN)
+#ifndef WEBRTC_WIN
+#error "Only #include this header in Windows builds"
+#endif
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -38,57 +40,16 @@ typedef struct _TOKEN_MANDATORY_LABEL {
 
 #include <string>
 
-#include "webrtc/rtc_base/basictypes.h"
-#include "webrtc/rtc_base/stringutils.h"
+#include "rtc_base/basictypes.h"
+#include "rtc_base/stringutils.h"
 
 namespace rtc {
 
 const char* win32_inet_ntop(int af, const void *src, char* dst, socklen_t size);
 int win32_inet_pton(int af, const char* src, void *dst);
 
-inline std::wstring ToUtf16(const char* utf8, size_t len) {
-  int len16 = ::MultiByteToWideChar(CP_UTF8, 0, utf8, static_cast<int>(len),
-                                    nullptr, 0);
-  wchar_t* ws = STACK_ARRAY(wchar_t, len16);
-  ::MultiByteToWideChar(CP_UTF8, 0, utf8, static_cast<int>(len), ws, len16);
-  return std::wstring(ws, len16);
-}
-
-inline std::wstring ToUtf16(const std::string& str) {
-  return ToUtf16(str.data(), str.length());
-}
-
-inline std::string ToUtf8(const wchar_t* wide, size_t len) {
-  int len8 = ::WideCharToMultiByte(CP_UTF8, 0, wide, static_cast<int>(len),
-                                   nullptr, 0, nullptr, nullptr);
-  char* ns = STACK_ARRAY(char, len8);
-  ::WideCharToMultiByte(CP_UTF8, 0, wide, static_cast<int>(len), ns, len8,
-                        nullptr, nullptr);
-  return std::string(ns, len8);
-}
-
-inline std::string ToUtf8(const wchar_t* wide) {
-  return ToUtf8(wide, wcslen(wide));
-}
-
-inline std::string ToUtf8(const std::wstring& wstr) {
-  return ToUtf8(wstr.data(), wstr.length());
-}
-
-// Convert FILETIME to time_t
-void FileTimeToUnixTime(const FILETIME& ft, time_t* ut);
-
-// Convert time_t to FILETIME
-void UnixTimeToFileTime(const time_t& ut, FILETIME * ft);
-
 // Convert a Utf8 path representation to a non-length-limited Unicode pathname.
 bool Utf8ToWindowsFilename(const std::string& utf8, std::wstring* filename);
-
-// Convert a FILETIME to a UInt64
-inline uint64_t ToUInt64(const FILETIME& ft) {
-  ULARGE_INTEGER r = {{ft.dwLowDateTime, ft.dwHighDateTime}};
-  return r.QuadPart;
-}
 
 enum WindowsMajorVersions {
   kWindows2000 = 5,
@@ -124,5 +85,4 @@ inline bool IsCurrentProcessLowIntegrity() {
 
 }  // namespace rtc
 
-#endif  // WEBRTC_WIN
-#endif  // WEBRTC_RTC_BASE_WIN32_H_
+#endif  // RTC_BASE_WIN32_H_

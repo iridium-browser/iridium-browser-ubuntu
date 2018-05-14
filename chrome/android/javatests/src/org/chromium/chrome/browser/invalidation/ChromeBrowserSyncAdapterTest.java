@@ -41,8 +41,7 @@ import org.chromium.content.browser.test.util.CriteriaHelper;
  * Tests for ChromeBrowserSyncAdapter.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ChromeBrowserSyncAdapterTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -85,9 +84,8 @@ public class ChromeBrowserSyncAdapterTest {
     @Before
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
-        mSyncAdapter =
-                new TestSyncAdapter(InstrumentationRegistry.getInstrumentation().getTargetContext(),
-                        mActivityTestRule.getActivity().getApplication());
+        mSyncAdapter = new TestSyncAdapter(InstrumentationRegistry.getTargetContext(),
+                mActivityTestRule.getActivity().getApplication());
     }
 
     private void performSyncWithBundle(Bundle bundle) {

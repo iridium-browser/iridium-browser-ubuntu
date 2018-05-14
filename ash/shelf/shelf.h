@@ -23,11 +23,13 @@ class Rect;
 
 namespace ui {
 class GestureEvent;
+class MouseWheelEvent;
 }
 
 namespace ash {
 
 enum class AnimationChangeType;
+class LoginShelfView;
 class ShelfBezelEventHandler;
 class ShelfLayoutManager;
 class ShelfLayoutManagerTest;
@@ -36,6 +38,7 @@ class ShelfView;
 class ShelfWidget;
 class StatusAreaWidget;
 class ShelfObserver;
+class TrayBackgroundView;
 
 // Controller for the shelf state. One per display, because each display might
 // have different shelf alignment, autohide, etc. Exists for the lifetime of the
@@ -49,10 +52,6 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
   // widget may not exist, or the shelf may not be visible.
   static Shelf* ForWindow(aura::Window* window);
 
-  // Returns if shelf alignment options are enabled, and the user is able to
-  // adjust the alignment (eg. not allowed in guest and supervised user modes).
-  static bool CanChangeShelfAlignment();
-
   void CreateShelfWidget(aura::Window* root);
   void ShutdownShelfWidget();
   void DestroyShelfWidget();
@@ -62,9 +61,6 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
   }
 
   ShelfWidget* shelf_widget() { return shelf_widget_.get(); }
-
-  // TODO(jamescook): Eliminate this method.
-  void NotifyShelfInitialized();
 
   // Returns the window showing the shelf.
   aura::Window* GetWindow();
@@ -100,6 +96,9 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
 
   int GetAccessibilityPanelHeight() const;
 
+  // Returns the height of the Docked Magnifier viewport.
+  int GetDockedMagnifierHeight() const;
+
   // Returns the ideal bounds of the shelf assuming it is visible.
   gfx::Rect GetIdealBounds();
 
@@ -130,15 +129,34 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
   // Returns true if the event was handled.
   bool ProcessGestureEvent(const ui::GestureEvent& event);
 
+  // Handles a mousewheel scroll event coming from the shelf.
+  void ProcessMouseWheelEvent(const ui::MouseWheelEvent& event);
+
   void AddObserver(ShelfObserver* observer);
   void RemoveObserver(ShelfObserver* observer);
 
   void NotifyShelfIconPositionsChanged();
   StatusAreaWidget* GetStatusAreaWidget() const;
 
+  // Get the tray button that the system tray bubble and the notification center
+  // bubble will be anchored. See also: StatusAreaWidget::GetSystemTrayAnchor()
+  TrayBackgroundView* GetSystemTrayAnchor() const;
+
+  void set_is_tablet_mode_animation_running(bool value) {
+    is_tablet_mode_animation_running_ = value;
+  }
+  bool is_tablet_mode_animation_running() const {
+    return is_tablet_mode_animation_running_;
+  }
+
+  // Returns whether this shelf should be hidden on secondary display in a given
+  // |state|.
+  bool ShouldHideOnSecondaryDisplay(session_manager::SessionState state);
+
   void SetVirtualKeyboardBoundsForTesting(const gfx::Rect& bounds);
   ShelfLockingManager* GetShelfLockingManagerForTesting();
   ShelfView* GetShelfViewForTesting();
+  LoginShelfView* GetLoginShelfViewForTesting();
 
  protected:
   // ShelfLayoutManagerObserver:
@@ -174,6 +192,14 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
   // Forwards touch gestures on a bezel sensor to the shelf.
   // TODO(mash): Facilitate simliar functionality in mash: crbug.com/636647
   std::unique_ptr<ShelfBezelEventHandler> bezel_event_handler_;
+
+  // True while the animation to enter or exit tablet mode is running. Sometimes
+  // this value is true when the shelf movements are not actually animating
+  // (animation value = 0.0). This is because this is set to true when we
+  // enter/exit tablet mode but the animation is not started until a shelf
+  // OnBoundsChanged is called because of tablet mode. Use this value to sync
+  // the animation for AppListButton.
+  bool is_tablet_mode_animation_running_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(Shelf);
 };

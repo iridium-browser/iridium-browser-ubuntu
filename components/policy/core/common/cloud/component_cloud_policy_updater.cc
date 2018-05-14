@@ -14,7 +14,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "components/policy/core/common/cloud/component_cloud_policy_store.h"
@@ -39,7 +38,7 @@ const int64_t kMaxParallelPolicyDataFetches = 2;
 
 std::string NamespaceToKey(const PolicyNamespace& ns) {
   const std::string domain = base::IntToString(ns.domain);
-  const std::string size = base::SizeTToString(domain.size());
+  const std::string size = base::NumberToString(domain.size());
   return size + ":" + domain + ":" + ns.component_id;
 }
 
@@ -75,7 +74,7 @@ void ComponentCloudPolicyUpdater::UpdateExternalPolicy(
   }
 
   // Validate the policy before doing anything else.
-  auto policy_data = base::MakeUnique<em::PolicyData>();
+  auto policy_data = std::make_unique<em::PolicyData>();
   em::ExternalPolicyData data;
   if (!store_->ValidatePolicy(ns, std::move(response), policy_data.get(),
                               &data)) {

@@ -51,6 +51,7 @@ const Type &GetTypeInfo(GLenum type);
 struct InternalFormat
 {
     InternalFormat();
+    InternalFormat(const InternalFormat &other);
 
     GLuint computePixelBytes(GLenum formatType) const;
 
@@ -68,8 +69,7 @@ struct InternalFormat
                                             GLint rowLength,
                                             GLint imageHeight) const;
 
-    ErrorOrResult<GLuint> computeCompressedImageSize(GLenum formatType,
-                                                     const Extents &size) const;
+    ErrorOrResult<GLuint> computeCompressedImageSize(const Extents &size) const;
 
     ErrorOrResult<GLuint> computeSkipBytes(GLuint rowPitch,
                                            GLuint depthPitch,
@@ -83,7 +83,7 @@ struct InternalFormat
 
     bool isLUMA() const;
     GLenum getReadPixelsFormat() const;
-    GLenum getReadPixelsType() const;
+    GLenum getReadPixelsType(const Version &version) const;
 
     // Return true if the format is a required renderbuffer format in the given version of the core
     // spec. Note that it isn't always clear whether all the rules that apply to core required
@@ -150,6 +150,7 @@ struct Format
 
     static Format Invalid();
     static bool SameSized(const Format &a, const Format &b);
+    static bool EquivalentForBlit(const Format &a, const Format &b);
 
     friend std::ostream &operator<<(std::ostream &os, const Format &fmt);
 

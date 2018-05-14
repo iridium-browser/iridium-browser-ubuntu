@@ -21,14 +21,14 @@ class IntPoint;
 class IntRect;
 class TransformationMatrix;
 class WebInputEvent;
-class WebViewBase;
+class WebViewImpl;
 
 class CORE_EXPORT DevToolsEmulator final
     : public GarbageCollectedFinalized<DevToolsEmulator> {
  public:
   ~DevToolsEmulator();
-  static DevToolsEmulator* Create(WebViewBase*);
-  DECLARE_TRACE();
+  static DevToolsEmulator* Create(WebViewImpl*);
+  void Trace(blink::Visitor*);
 
   // Settings overrides.
   void SetTextAutosizingEnabled(bool);
@@ -52,7 +52,7 @@ class CORE_EXPORT DevToolsEmulator final
   void ForceViewport(const WebFloatPoint& position, float scale);
   void ResetViewport();
   bool ResizeIsDeviceSizeChange();
-  void SetTouchEventEmulationEnabled(bool);
+  void SetTouchEventEmulationEnabled(bool, int max_touch_points);
   bool HandleInputEvent(const WebInputEvent&);
   void SetScriptExecutionDisabled(bool);
 
@@ -65,7 +65,7 @@ class CORE_EXPORT DevToolsEmulator final
   WTF::Optional<IntRect> VisibleContentRectForPainting() const;
 
  private:
-  explicit DevToolsEmulator(WebViewBase*);
+  explicit DevToolsEmulator(WebViewImpl*);
 
   void EnableMobileEmulation();
   void DisableMobileEmulation();
@@ -78,7 +78,7 @@ class CORE_EXPORT DevToolsEmulator final
   void ApplyViewportOverride(TransformationMatrix*);
   void UpdateRootLayerTransform();
 
-  WebViewBase* web_view_;
+  WebViewImpl* web_view_;
 
   bool device_metrics_enabled_;
   bool emulate_mobile_enabled_;
@@ -96,6 +96,7 @@ class CORE_EXPORT DevToolsEmulator final
   bool is_mobile_layout_theme_enabled_;
   float original_default_minimum_page_scale_factor_;
   float original_default_maximum_page_scale_factor_;
+  bool use_solid_color_scrollbar_;
   bool embedder_text_autosizing_enabled_;
   float embedder_device_scale_adjustment_;
   bool embedder_prefer_compositing_to_lcd_text_enabled_;
@@ -109,7 +110,6 @@ class CORE_EXPORT DevToolsEmulator final
 
   bool touch_event_emulation_enabled_;
   bool double_tap_to_zoom_enabled_;
-  bool original_touch_event_feature_detection_enabled_;
   bool original_device_supports_touch_;
   int original_max_touch_points_;
   std::unique_ptr<IntPoint> last_pinch_anchor_css_;

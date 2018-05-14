@@ -25,18 +25,17 @@ class ASH_EXPORT AshWindowTreeHostPlatform
   AshWindowTreeHostPlatform();
 
   // AshWindowTreeHost:
-  bool ConfineCursorToRootWindow() override;
-  void UnConfineCursor() override;
+  void ConfineCursorToRootWindow() override;
+  void ConfineCursorToBoundsInRoot(const gfx::Rect& bounds_in_root) override;
+  gfx::Rect GetLastCursorConfineBoundsInPixels() const override;
   void SetRootWindowTransformer(
       std::unique_ptr<RootWindowTransformer> transformer) override;
   gfx::Insets GetHostInsets() const override;
   aura::WindowTreeHost* AsWindowTreeHost() override;
   void PrepareForShutdown() override;
-#if defined(USE_OZONE)
   void SetCursorConfig(const display::Display& display,
                        display::Display::Rotation rotation) override;
   void ClearCursorConfig() override;
-#endif
 
   // aura::WindowTreeHostPlatform:
   void SetRootTransform(const gfx::Transform& transform) override;
@@ -53,6 +52,8 @@ class ASH_EXPORT AshWindowTreeHostPlatform
   void SetTapToClickPaused(bool state);
 
   TransformerHelper transformer_helper_;
+
+  gfx::Rect last_cursor_confine_bounds_in_pixels_;
 
   DISALLOW_COPY_AND_ASSIGN(AshWindowTreeHostPlatform);
 };

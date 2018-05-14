@@ -4,11 +4,13 @@
 
 package org.chromium.content.browser;
 
+import android.view.View;
+
 import org.chromium.base.ThreadUtils;
-import org.chromium.ui.base.WindowAndroid;
+import org.chromium.content.browser.selection.SelectionInsertionHandleObserver;
 
 /**
- * A class factory for content browser layer.
+ * A class factory for downstream injecting code to content layer.
  */
 public class ContentClassFactory {
     private static ContentClassFactory sSingleton;
@@ -38,10 +40,9 @@ public class ContentClassFactory {
     protected ContentClassFactory() {}
 
     /**
-     * Creates SmartSelectorProvider object.
+     * Creates HandleObserver object.
      */
-    public SmartSelectionProvider createSmartSelectionProvider(
-            SmartSelectionProvider.ResultCallback callback, WindowAndroid windowAndroid) {
+    public SelectionInsertionHandleObserver createHandleObserver(View view) {
         // Implemented by a subclass.
         return null;
     }

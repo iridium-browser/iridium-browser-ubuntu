@@ -19,16 +19,13 @@ public final class WebApkConstants {
     public static final String EXTRA_SOURCE = "org.chromium.chrome.browser.webapp_source";
     public static final String EXTRA_WEBAPK_PACKAGE_NAME =
             "org.chromium.chrome.browser.webapk_package_name";
-    // Whether the WebAPK should navigate to the URL in {@link EXTRA_URL} if the WebAPK is already
-    // open.
-    public static final String EXTRA_WEBAPK_FORCE_NAVIGATION =
+    public static final String EXTRA_FORCE_NAVIGATION =
             "org.chromium.chrome.browser.webapk_force_navigation";
-
-    public static final String DEFAULT_HOST_BROWSER = "com.android.chrome";
 
     // Must be kept in sync with chrome/browser/android/shortcut_info.h.
     public static final int SHORTCUT_SOURCE_UNKNOWN = 0;
     public static final int SHORTCUT_SOURCE_EXTERNAL_INTENT = 9;
+    public static final int SHORTCUT_SOURCE_SHARE = 13;
 
     /** Name of the shared preferences file. */
     public static final String PREF_PACKAGE = "org.chromium.webapk.shell_apk";

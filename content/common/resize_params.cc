@@ -8,11 +8,13 @@ namespace content {
 
 ResizeParams::ResizeParams()
     : browser_controls_shrink_blink_size(false),
+      scroll_focused_node_into_view(false),
       top_controls_height(0.f),
       bottom_controls_height(0.f),
       is_fullscreen_granted(false),
       display_mode(blink::kWebDisplayModeUndefined),
-      needs_resize_ack(false) {}
+      needs_resize_ack(false),
+      content_source_id(0u) {}
 
 ResizeParams::ResizeParams(const ResizeParams& other) = default;
 

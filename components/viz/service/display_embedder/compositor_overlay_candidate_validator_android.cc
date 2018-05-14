@@ -6,9 +6,8 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
-#include "cc/output/overlay_processor.h"
-#include "cc/output/overlay_strategy_underlay.h"
+#include "components/viz/service/display/overlay_processor.h"
+#include "components/viz/service/display/overlay_strategy_underlay.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
 namespace viz {
@@ -20,8 +19,8 @@ CompositorOverlayCandidateValidatorAndroid::
     ~CompositorOverlayCandidateValidatorAndroid() {}
 
 void CompositorOverlayCandidateValidatorAndroid::GetStrategies(
-    cc::OverlayProcessor::StrategyList* strategies) {
-  strategies->push_back(base::MakeUnique<cc::OverlayStrategyUnderlay>(this));
+    OverlayProcessor::StrategyList* strategies) {
+  strategies->push_back(std::make_unique<OverlayStrategyUnderlay>(this));
 }
 
 void CompositorOverlayCandidateValidatorAndroid::CheckOverlaySupport(

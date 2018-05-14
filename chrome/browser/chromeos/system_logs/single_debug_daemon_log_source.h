@@ -7,8 +7,11 @@
 
 #include <stddef.h>
 
+#include <string>
+
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "components/feedback/system_logs/system_logs_source.h"
 
 namespace system_logs {
@@ -22,20 +25,28 @@ class SingleDebugDaemonLogSource : public SystemLogsSource {
 
     // For "lsusb" command.
     kLsusb,
+
+    // For "lspci" command.
+    kLspci,
+
+    // For "ifconfig" command.
+    kIfconfig,
+
+    // For "/proc/uptime" entry.
+    kUptime,
   };
 
   explicit SingleDebugDaemonLogSource(SupportedSource source);
   ~SingleDebugDaemonLogSource() override;
 
   // system_logs::SystemLogsSource:
-  void Fetch(const SysLogsSourceCallback& callback) override;
+  void Fetch(SysLogsSourceCallback callback) override;
 
  private:
   // Callback for handling response from DebugDaemonClient.
   void OnFetchComplete(const std::string& log_name,
-                       const SysLogsSourceCallback& callback,
-                       bool success,
-                       const std::string& result) const;
+                       SysLogsSourceCallback callback,
+                       base::Optional<std::string> result) const;
 
   base::WeakPtrFactory<SingleDebugDaemonLogSource> weak_ptr_factory_;
 

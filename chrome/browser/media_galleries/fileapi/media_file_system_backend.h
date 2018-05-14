@@ -36,11 +36,7 @@ class MediaPathFilter;
 
 class MediaFileSystemBackend : public storage::FileSystemBackend {
  public:
-  static const char kMediaTaskRunnerName[];
-
-  MediaFileSystemBackend(
-      const base::FilePath& profile_path,
-      base::SequencedTaskRunner* media_task_runner);
+  explicit MediaFileSystemBackend(const base::FilePath& profile_path);
   ~MediaFileSystemBackend() override;
 
   // Asserts that the current task is sequenced with any other task that calls
@@ -59,14 +55,14 @@ class MediaFileSystemBackend : public storage::FileSystemBackend {
       const net::URLRequest* url_request,
       const storage::FileSystemURL& filesystem_url,
       const std::string& storage_domain,
-      const base::Callback<void(base::File::Error result)>& callback);
+      base::OnceCallback<void(base::File::Error result)> callback);
 
   // FileSystemBackend implementation.
   bool CanHandleType(storage::FileSystemType type) const override;
   void Initialize(storage::FileSystemContext* context) override;
   void ResolveURL(const storage::FileSystemURL& url,
                   storage::OpenFileSystemMode mode,
-                  const OpenFileSystemCallback& callback) override;
+                  OpenFileSystemCallback callback) override;
   storage::AsyncFileUtil* GetAsyncFileUtil(
       storage::FileSystemType type) override;
   storage::WatcherManager* GetWatcherManager(
@@ -103,8 +99,6 @@ class MediaFileSystemBackend : public storage::FileSystemBackend {
   // Store the profile path. We need this to create temporary snapshot files.
   const base::FilePath profile_path_;
 
-  scoped_refptr<base::SequencedTaskRunner> media_task_runner_;
-
   std::unique_ptr<MediaPathFilter> media_path_filter_;
   std::unique_ptr<storage::CopyOrMoveFileValidatorFactory>
       media_copy_or_move_file_validator_factory_;
@@ -113,15 +107,6 @@ class MediaFileSystemBackend : public storage::FileSystemBackend {
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
   std::unique_ptr<DeviceMediaAsyncFileUtil> device_media_async_file_util_;
-#endif
-
-#if defined(OS_WIN) || defined(OS_MACOSX)
-  std::unique_ptr<storage::AsyncFileUtil> picasa_file_util_;
-  std::unique_ptr<storage::AsyncFileUtil> itunes_file_util_;
-
-  // Used for usage UMA tracking.
-  bool picasa_file_util_used_;
-  bool itunes_file_util_used_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(MediaFileSystemBackend);

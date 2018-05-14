@@ -13,12 +13,7 @@ namespace internal {
 WorkQueue::WorkQueue(TaskQueueImpl* task_queue,
                      const char* name,
                      QueueType queue_type)
-    : work_queue_sets_(nullptr),
-      task_queue_(task_queue),
-      work_queue_set_index_(0),
-      name_(name),
-      fence_(0),
-      queue_type_(queue_type) {}
+    : task_queue_(task_queue), name_(name), queue_type_(queue_type) {}
 
 void WorkQueue::AsValueInto(base::TimeTicks now,
                             base::trace_event::TracedValue* state) const {
@@ -51,7 +46,7 @@ bool WorkQueue::BlockedByFence() const {
   // If the queue is empty then any future tasks will have a higher enqueue
   // order and will be blocked. The queue is also blocked if the head is past
   // the fence.
-  return work_queue_.empty() || work_queue_.front().enqueue_order() > fence_;
+  return work_queue_.empty() || work_queue_.front().enqueue_order() >= fence_;
 }
 
 bool WorkQueue::GetFrontTaskEnqueueOrder(EnqueueOrder* enqueue_order) const {
@@ -72,6 +67,10 @@ void WorkQueue::Push(TaskQueueImpl::Task task) {
   DCHECK(task.enqueue_order_set());
 #endif
 
+  // Make sure the |enqueue_order()| is monotonically increasing.
+  DCHECK(was_empty ||
+         work_queue_.rbegin()->enqueue_order() < task.enqueue_order());
+
   // Amoritized O(1).
   work_queue_.push_back(std::move(task));
 
@@ -83,10 +82,38 @@ void WorkQueue::Push(TaskQueueImpl::Task task) {
     work_queue_sets_->OnTaskPushedToEmptyQueue(this);
 }
 
-void WorkQueue::PopTaskForTest() {
-  if (work_queue_.empty())
+void WorkQueue::PushNonNestableTaskToFront(TaskQueueImpl::Task task) {
+  DCHECK(task.nestable == base::Nestable::kNonNestable);
+
+  bool was_empty = work_queue_.empty();
+  bool was_blocked = BlockedByFence();
+#ifndef NDEBUG
+  DCHECK(task.enqueue_order_set());
+#endif
+
+  if (!was_empty) {
+    // Make sure the |enqueue_order()| is monotonically increasing.
+    DCHECK_LE(task.enqueue_order(), work_queue_.front().enqueue_order())
+        << task_queue_->GetName() << " : " << work_queue_sets_->GetName()
+        << " : " << name_;
+  }
+
+  // Amoritized O(1).
+  work_queue_.push_front(std::move(task));
+
+  if (!work_queue_sets_)
     return;
-  work_queue_.pop_front();
+
+  // Pretend  to WorkQueueSets that nothing has changed if we're blocked.
+  if (BlockedByFence())
+    return;
+
+  // Pushing task to front may unblock the fence.
+  if (was_empty || was_blocked) {
+    work_queue_sets_->OnTaskPushedToEmptyQueue(this);
+  } else {
+    work_queue_sets_->OnFrontTaskChanged(this);
+  }
 }
 
 void WorkQueue::ReloadEmptyImmediateQueue() {
@@ -105,15 +132,9 @@ TaskQueueImpl::Task WorkQueue::TakeTaskFromWorkQueue() {
   DCHECK(work_queue_sets_);
   DCHECK(!work_queue_.empty());
 
-  // Skip over canceled tasks, except for the last one since we always return
-  // something.
-  while (work_queue_.size() > 1u && work_queue_.front().task.IsCancelled()) {
-    work_queue_.pop_front();
-  }
-
   TaskQueueImpl::Task pending_task = work_queue_.TakeFirst();
   // NB immediate tasks have a different pipeline to delayed ones.
-  if (queue_type_ == QueueType::IMMEDIATE && work_queue_.empty()) {
+  if (queue_type_ == QueueType::kImmediate && work_queue_.empty()) {
     // Short-circuit the queue reload so that OnPopQueue does the right thing.
     work_queue_ = task_queue_->TakeImmediateIncomingQueue();
   }
@@ -124,6 +145,26 @@ TaskQueueImpl::Task WorkQueue::TakeTaskFromWorkQueue() {
   return pending_task;
 }
 
+bool WorkQueue::RemoveAllCanceledTasksFromFront() {
+  DCHECK(work_queue_sets_);
+  bool task_removed = false;
+  while (!work_queue_.empty() && (!work_queue_.front().task ||
+                                  work_queue_.front().task.IsCancelled())) {
+    work_queue_.pop_front();
+    task_removed = true;
+  }
+  if (task_removed) {
+    // NB immediate tasks have a different pipeline to delayed ones.
+    if (queue_type_ == QueueType::kImmediate && work_queue_.empty()) {
+      // Short-circuit the queue reload so that OnPopQueue does the right thing.
+      work_queue_ = task_queue_->TakeImmediateIncomingQueue();
+    }
+    work_queue_sets_->OnPopQueue(this);
+    task_queue_->TraceQueueSize();
+  }
+  return task_removed;
+}
+
 void WorkQueue::AssignToWorkQueueSets(WorkQueueSets* work_queue_sets) {
   work_queue_sets_ = work_queue_sets;
 }
@@ -132,11 +173,23 @@ void WorkQueue::AssignSetIndex(size_t work_queue_set_index) {
   work_queue_set_index_ = work_queue_set_index;
 }
 
-bool WorkQueue::InsertFence(EnqueueOrder fence) {
+bool WorkQueue::InsertFenceImpl(EnqueueOrder fence) {
   DCHECK_NE(fence, 0u);
   DCHECK(fence >= fence_ || fence == 1u);
   bool was_blocked_by_fence = BlockedByFence();
   fence_ = fence;
+  return was_blocked_by_fence;
+}
+
+void WorkQueue::InsertFenceSilently(EnqueueOrder fence) {
+  // Ensure that there is no fence present or a new one blocks queue completely.
+  DCHECK(fence_ == 0u || fence == 1u);
+  InsertFenceImpl(fence);
+}
+
+bool WorkQueue::InsertFence(EnqueueOrder fence) {
+  bool was_blocked_by_fence = InsertFenceImpl(fence);
+
   // Moving the fence forward may unblock some tasks.
   if (work_queue_sets_ && !work_queue_.empty() && was_blocked_by_fence &&
       !BlockedByFence()) {
@@ -170,6 +223,12 @@ bool WorkQueue::ShouldRunBefore(const WorkQueue* other_queue) const {
   DCHECK(have_task);
   DCHECK(have_other_task);
   return enqueue_order < other_enqueue_order;
+}
+
+void WorkQueue::PopTaskForTesting() {
+  if (work_queue_.empty())
+    return;
+  work_queue_.pop_front();
 }
 
 }  // namespace internal

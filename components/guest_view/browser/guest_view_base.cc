@@ -4,11 +4,11 @@
 
 #include "components/guest_view/browser/guest_view_base.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/guest_view/browser/guest_view_event.h"
 #include "components/guest_view/browser/guest_view_manager.h"
@@ -228,7 +228,7 @@ void GuestViewBase::InitWithWebContents(
   // an observer to the owner WebContents. This observer will be responsible
   // for destroying the guest WebContents if the owner goes away.
   owner_contents_observer_ =
-      base::MakeUnique<OwnerContentsObserver>(this, owner_web_contents_);
+      std::make_unique<OwnerContentsObserver>(this, owner_web_contents_);
 
   WebContentsObserver::Observe(guest_web_contents);
   guest_web_contents->SetDelegate(this);
@@ -263,13 +263,13 @@ void GuestViewBase::DispatchOnResizeEvent(const gfx::Size& old_size,
     return;
 
   // Dispatch the onResize event.
-  auto args = base::MakeUnique<base::DictionaryValue>();
+  auto args = std::make_unique<base::DictionaryValue>();
   args->SetInteger(kOldWidth, old_size.width());
   args->SetInteger(kOldHeight, old_size.height());
   args->SetInteger(kNewWidth, new_size.width());
   args->SetInteger(kNewHeight, new_size.height());
   DispatchEventToGuestProxy(
-      base::MakeUnique<GuestViewEvent>(kEventResize, std::move(args)));
+      std::make_unique<GuestViewEvent>(kEventResize, std::move(args)));
 }
 
 gfx::Size GuestViewBase::GetDefaultSize() const {
@@ -391,8 +391,6 @@ bool GuestViewBase::ZoomPropagatesFromEmbedderToGuest() const {
   return true;
 }
 
-void GuestViewBase::SetContextMenuPosition(const gfx::Point& position) {}
-
 GuestViewManager* GuestViewBase::GetGuestViewManager() {
   return GuestViewManager::FromBrowserContext(browser_context());
 }
@@ -436,8 +434,8 @@ void GuestViewBase::DidAttach(int guest_proxy_routing_id) {
 void GuestViewBase::DidDetach() {
   GuestViewManager::FromBrowserContext(browser_context_)->DetachGuest(this);
   StopTrackingEmbedderZoomLevel();
-  owner_web_contents()->Send(new GuestViewMsg_GuestDetached(
-      element_instance_id_));
+  owner_web_contents()->GetRenderViewHost()->Send(
+      new GuestViewMsg_GuestDetached(element_instance_id_));
   element_instance_id_ = kInstanceIDNone;
   if (ShouldDestroyOnDetach())
     Destroy(true);
@@ -445,10 +443,6 @@ void GuestViewBase::DidDetach() {
 
 WebContents* GuestViewBase::GetOwnerWebContents() const {
   return owner_web_contents_;
-}
-
-void GuestViewBase::GuestSizeChanged(const gfx::Size& new_size) {
-  UpdateGuestSize(new_size, auto_size_enabled_);
 }
 
 const GURL& GuestViewBase::GetOwnerSiteURL() const {
@@ -505,7 +499,7 @@ void GuestViewBase::SetOpener(GuestViewBase* guest) {
     opener_ = guest->weak_ptr_factory_.GetWeakPtr();
     if (!attached()) {
       opener_lifetime_observer_ =
-          base::MakeUnique<OpenerLifetimeObserver>(this);
+          std::make_unique<OpenerLifetimeObserver>(this);
     }
     return;
   }
@@ -520,7 +514,16 @@ void GuestViewBase::SetGuestHost(content::GuestHost* guest_host) {
 void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
                                int element_instance_id,
                                bool is_full_page_plugin,
-                               const base::Closure& callback) {
+                               const base::Closure& completion_callback) {
+  WillAttach(embedder_web_contents, element_instance_id, is_full_page_plugin,
+             base::OnceClosure(), completion_callback);
+}
+
+void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
+                               int element_instance_id,
+                               bool is_full_page_plugin,
+                               base::OnceClosure perform_attach,
+                               const base::Closure& completion_callback) {
   // Stop tracking the old embedder's zoom level.
   if (owner_web_contents())
     StopTrackingEmbedderZoomLevel();
@@ -529,7 +532,7 @@ void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
     DCHECK_EQ(owner_contents_observer_->web_contents(), owner_web_contents_);
     owner_web_contents_ = embedder_web_contents;
     owner_contents_observer_ =
-        base::MakeUnique<OwnerContentsObserver>(this, embedder_web_contents);
+        std::make_unique<OwnerContentsObserver>(this, embedder_web_contents);
     SetOwnerHost();
   }
 
@@ -541,9 +544,12 @@ void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
 
   WillAttachToEmbedder();
 
+  if (perform_attach)
+    std::move(perform_attach).Run();
+
   // Completing attachment will resume suspended resource loads and then send
   // queued events.
-  SignalWhenReady(callback);
+  SignalWhenReady(completion_callback);
 }
 
 void GuestViewBase::SignalWhenReady(const base::Closure& callback) {
@@ -608,14 +614,13 @@ void GuestViewBase::ActivateContents(WebContents* web_contents) {
 }
 
 void GuestViewBase::ContentsMouseEvent(WebContents* source,
-                                       const gfx::Point& location,
                                        bool motion,
                                        bool exited) {
   if (!attached() || !embedder_web_contents()->GetDelegate())
     return;
 
   embedder_web_contents()->GetDelegate()->ContentsMouseEvent(
-      embedder_web_contents(), location, motion, exited);
+      embedder_web_contents(), motion, exited);
 }
 
 void GuestViewBase::ContentsZoomChange(bool zoom_in) {
@@ -647,7 +652,7 @@ void GuestViewBase::LoadingStateChanged(WebContents* source,
 content::ColorChooser* GuestViewBase::OpenColorChooser(
     WebContents* web_contents,
     SkColor color,
-    const std::vector<content::ColorSuggestion>& suggestions) {
+    const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) {
   if (!attached() || !embedder_web_contents()->GetDelegate())
     return nullptr;
 
@@ -657,7 +662,7 @@ content::ColorChooser* GuestViewBase::OpenColorChooser(
 
 void GuestViewBase::ResizeDueToAutoResize(WebContents* web_contents,
                                           const gfx::Size& new_size) {
-  guest_host_->GuestResizeDueToAutoResize(new_size);
+  UpdateGuestSize(new_size, auto_size_enabled_);
 }
 
 void GuestViewBase::RunFileChooser(content::RenderFrameHost* render_frame_host,
@@ -872,14 +877,16 @@ void GuestViewBase::StartTrackingEmbedderZoomLevel() {
 }
 
 void GuestViewBase::StopTrackingEmbedderZoomLevel() {
-  if (!attached() || !ZoomPropagatesFromEmbedderToGuest())
-    return;
+  // TODO(wjmaclean): Remove the observer any time the GuestWebView transitions
+  // from propagating to not-propagating the zoom from the embedder.
 
   auto* embedder_zoom_controller =
       zoom::ZoomController::FromWebContents(owner_web_contents());
   // Chrome Apps do not have a ZoomController.
   if (!embedder_zoom_controller)
     return;
+
+  // It is safe to remove an observer that was never registed.
   embedder_zoom_controller->RemoveObserver(this);
 }
 

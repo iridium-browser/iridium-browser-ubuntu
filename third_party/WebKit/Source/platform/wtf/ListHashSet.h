@@ -29,15 +29,19 @@
 
 namespace WTF {
 
-// ListHashSet: Just like HashSet, this class provides a Set interface - a
-// collection of unique objects with O(1) insertion, removal and test for
-// containership. However, it also has an order - iterating it will always give
-// back values in the order in which they are added.
-
-// Unlike iteration of most WTF Hash data structures, iteration is guaranteed
-// safe against mutation of the ListHashSet, except for removal of the item
-// currently pointed to by a given iterator.
-
+// ListHashSet provides a Set interface like HashSet, but also has a
+// predictable iteration order. It has O(1) insertion, removal, and test for
+// containership. It maintains a linked list through its contents such that
+// iterating it yields values in the order in which they were inserted.
+//
+// ListHashSet iterators are not invalidated by mutation of the collection,
+// unless they point to removed items. This means, for example, that you can
+// safely modify the container while iterating over it, as long as you don't
+// remove the current item.
+//
+// Prefer to use LinkedHashSet instead where possible
+// (https://crbug.com/614112). We would like to eventually remove ListHashSet
+// in favor of LinkedHashSet, because the latter supports WeakMember<T>.
 template <typename Value,
           size_t inlineCapacity,
           typename HashFunctions,
@@ -154,16 +158,18 @@ class ListHashSet
   bool IsEmpty() const { return impl_.IsEmpty(); }
 
   iterator begin() { return MakeIterator(head_); }
-  iterator end() { return MakeIterator(0); }
+  iterator end() { return MakeIterator(nullptr); }
   const_iterator begin() const { return MakeConstIterator(head_); }
-  const_iterator end() const { return MakeConstIterator(0); }
+  const_iterator end() const { return MakeConstIterator(nullptr); }
 
   reverse_iterator rbegin() { return MakeReverseIterator(tail_); }
-  reverse_iterator rend() { return MakeReverseIterator(0); }
+  reverse_iterator rend() { return MakeReverseIterator(nullptr); }
   const_reverse_iterator rbegin() const {
     return MakeConstReverseIterator(tail_);
   }
-  const_reverse_iterator rend() const { return MakeConstReverseIterator(0); }
+  const_reverse_iterator rend() const {
+    return MakeConstReverseIterator(nullptr);
+  }
 
   ValueType& front();
   const ValueType& front() const;
@@ -441,10 +447,6 @@ class ListHashSetNode : public ListHashSetNodeBase<ValueArg> {
     allocator->Deallocate(this);
   }
 
-  // This is not called in normal tracing, but it is called if we find a
-  // pointer to a node on the stack using conservative scanning. Since the
-  // original ListHashSet may no longer exist we make sure to mark the
-  // neighbours in the chain too.
   template <typename VisitorDispatcher>
   void Trace(VisitorDispatcher visitor) {
     // The conservative stack scan can find nodes that have been removed
@@ -457,8 +459,8 @@ class ListHashSetNode : public ListHashSetNodeBase<ValueArg> {
     if (WasAlreadyDestructed())
       return;
     NodeAllocator::TraceValue(visitor, this);
-    visitor->Mark(Next());
-    visitor->Mark(Prev());
+    visitor->Trace(Next());
+    visitor->Trace(Prev());
   }
 
   ListHashSetNode* Next() const {
@@ -508,7 +510,7 @@ class ListHashSetIterator {
       : iterator_(set, position) {}
 
  public:
-  ListHashSetIterator() {}
+  ListHashSetIterator() = default;
 
   // default copy, assignment and destructor are OK
 
@@ -568,7 +570,7 @@ class ListHashSetConstIterator {
       : set_(set), position_(position) {}
 
  public:
-  ListHashSetConstIterator() {}
+  ListHashSetConstIterator() = default;
 
   PointerType Get() const { return &position_->value_; }
   ReferenceType operator*() const { return *Get(); }
@@ -630,7 +632,7 @@ class ListHashSetReverseIterator {
       : iterator_(set, position) {}
 
  public:
-  ListHashSetReverseIterator() {}
+  ListHashSetReverseIterator() = default;
 
   // default copy, assignment and destructor are OK
 
@@ -690,7 +692,7 @@ class ListHashSetConstReverseIterator {
       : set_(set), position_(position) {}
 
  public:
-  ListHashSetConstReverseIterator() {}
+  ListHashSetConstReverseIterator() = default;
 
   PointerType Get() const { return &position_->value_; }
   ReferenceType operator*() const { return *Get(); }
@@ -1114,17 +1116,16 @@ void ListHashSet<T, inlineCapacity, U, V>::DeleteAllNodes() {
     return;
 
   for (Node *node = head_, *next = head_->Next(); node;
-       node = next, next = node ? node->Next() : 0)
+       node = next, next = node ? node->Next() : nullptr)
     node->Destroy(this->GetAllocator());
 }
 
 template <typename T, size_t inlineCapacity, typename U, typename V>
 template <typename VisitorDispatcher>
 void ListHashSet<T, inlineCapacity, U, V>::Trace(VisitorDispatcher visitor) {
-  static_assert(
-      HashTraits<T>::kWeakHandlingFlag == kNoWeakHandlingInCollections,
-      "HeapListHashSet does not support weakness, consider using "
-      "HeapLinkedHashSet instead.");
+  static_assert(HashTraits<T>::kWeakHandlingFlag == kNoWeakHandling,
+                "HeapListHashSet does not support weakness, consider using "
+                "HeapLinkedHashSet instead.");
   // This marks all the nodes and their contents live that can be accessed
   // through the HashTable. That includes m_head and m_tail so we do not have
   // to explicitly trace them here.

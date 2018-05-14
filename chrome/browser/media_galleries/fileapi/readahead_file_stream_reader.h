@@ -7,16 +7,14 @@
 
 #include <stdint.h>
 
-#include <queue>
-
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/io_buffer.h"
 #include "storage/browser/fileapi/file_stream_reader.h"
 
 // Wraps a source FileStreamReader with a readahead buffer.
-class ReadaheadFileStreamReader
-    : public NON_EXPORTED_BASE(storage::FileStreamReader) {
+class ReadaheadFileStreamReader : public storage::FileStreamReader {
  public:
   // Takes ownership of |source|.
   explicit ReadaheadFileStreamReader(storage::FileStreamReader* source);
@@ -50,7 +48,7 @@ class ReadaheadFileStreamReader
 
   // This contains a queue of buffers filled from |source_|, waiting to be
   // consumed.
-  std::queue<scoped_refptr<net::DrainableIOBuffer> > buffers_;
+  base::queue<scoped_refptr<net::DrainableIOBuffer>> buffers_;
 
   // The read buffer waiting for the source FileStreamReader to finish
   // reading and fill the cache.

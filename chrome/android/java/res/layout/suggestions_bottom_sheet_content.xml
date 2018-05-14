@@ -11,12 +11,14 @@
     <org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView
         android:id="@+id/recycler_view"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
+        android:layout_height="match_parent"
+        android:scrollbars="vertical"
+        android:paddingTop="@dimen/chrome_home_suggestions_recycler_view_padding_top" />
 
-    <org.chromium.chrome.browser.widget.FadingShadowView
-        android:id="@+id/shadow"
-        android:layout_width="match_parent"
-        android:layout_height="@dimen/action_bar_shadow_height"
-        android:visibility="gone" />
+    <org.chromium.chrome.browser.widget.LoadingView
+        android:id="@+id/loading_view"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal" />
 
 </FrameLayout>

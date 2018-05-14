@@ -18,7 +18,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/chromeos_switches.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/browser/signin_pref_names.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/remove_user_delegate.h"
 #include "components/user_manager/user_manager.h"
@@ -96,7 +96,8 @@ class DeviceIDTest : public OobeBaseTest,
   void WaitForSessionStart() {
     content::WindowedNotificationObserver(
         chrome::NOTIFICATION_SESSION_STARTED,
-        content::NotificationService::AllSources()).Wait();
+        content::NotificationService::AllSources())
+        .Wait();
   }
 
   void SignInOnline(const std::string& user_id,
@@ -164,7 +165,7 @@ class DeviceIDTest : public OobeBaseTest,
   void SaveRefreshTokenToDeviceIdMap() {
     base::DictionaryValue dictionary;
     for (const auto& kv : fake_gaia_->refresh_token_to_device_id_map())
-      dictionary.SetStringWithoutPathExpansion(kv.first, kv.second);
+      dictionary.SetKey(kv.first, base::Value(kv.second));
     std::string json;
     EXPECT_TRUE(base::JSONWriter::Write(dictionary, &json));
     EXPECT_EQ(static_cast<int>(json.length()),

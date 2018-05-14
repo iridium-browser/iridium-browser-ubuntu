@@ -4,6 +4,7 @@
 
 #include "services/preferences/public/cpp/persistent_pref_store_client.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/macros.h"
@@ -18,7 +19,7 @@
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/preferences/public/cpp/dictionary_value_update.h"
 #include "services/preferences/public/cpp/scoped_pref_update.h"
-#include "services/preferences/public/interfaces/preferences.mojom.h"
+#include "services/preferences/public/mojom/preferences.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace prefs {
@@ -27,8 +28,6 @@ namespace {
 constexpr char kDictionaryKey[] = "path.to.key";
 constexpr char kUninitializedDictionaryKey[] = "path.to.an.uninitialized.dict";
 
-void DoNothingWithReadError(::PersistentPrefStore::PrefReadError read_error) {}
-
 class PersistentPrefStoreClientTest : public testing::Test,
                                       public mojom::PersistentPrefStore {
  public:
@@ -36,25 +35,27 @@ class PersistentPrefStoreClientTest : public testing::Test,
 
   // testing::Test:
   void SetUp() override {
-    mojom::PersistentPrefStorePtr store_proxy;
-    binding_.Bind(mojo::MakeRequest(&store_proxy));
-    auto persistent_pref_store_client = make_scoped_refptr(
-        new PersistentPrefStoreClient(mojom::PersistentPrefStoreConnection::New(
-            mojom::PrefStoreConnection::New(
-                mojom::PrefStoreObserverRequest(),
-                base::MakeUnique<base::DictionaryValue>(), true),
-            std::move(store_proxy), ::PersistentPrefStore::PREF_READ_ERROR_NONE,
-            false)));
-    auto pref_registry = make_scoped_refptr(new PrefRegistrySimple());
+    mojom::PersistentPrefStorePtrInfo store_proxy_info;
+    binding_.Bind(mojo::MakeRequest(&store_proxy_info));
+    auto persistent_pref_store_client =
+        base::MakeRefCounted<PersistentPrefStoreClient>(
+            mojom::PersistentPrefStoreConnection::New(
+                mojom::PrefStoreConnection::New(
+                    mojom::PrefStoreObserverRequest(),
+                    std::make_unique<base::DictionaryValue>(), true),
+                std::move(store_proxy_info),
+                ::PersistentPrefStore::PREF_READ_ERROR_NONE, false));
+    auto pref_registry = base::MakeRefCounted<PrefRegistrySimple>();
     pref_registry->RegisterDictionaryPref(kDictionaryKey);
     pref_registry->RegisterDictionaryPref(kUninitializedDictionaryKey);
-    PrefNotifierImpl* pref_notifier = new PrefNotifierImpl;
-    pref_service_ = base::MakeUnique<PrefService>(
-        pref_notifier,
-        new PrefValueStore(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                           nullptr, pref_notifier),
+    auto pref_notifier = std::make_unique<PrefNotifierImpl>();
+    auto pref_value_store = std::make_unique<PrefValueStore>(
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+        pref_notifier.get());
+    pref_service_ = std::make_unique<PrefService>(
+        std::move(pref_notifier), std::move(pref_value_store),
         persistent_pref_store_client.get(), pref_registry.get(),
-        base::Bind(&DoNothingWithReadError), false);
+        base::DoNothing(), false);
   }
 
   void TearDown() override {
@@ -99,6 +100,7 @@ class PersistentPrefStoreClientTest : public testing::Test,
 
   void SchedulePendingLossyWrites() override {}
   void ClearMutableValues() override {}
+  void OnStoreDeletionFromDisk() override {}
 
   base::MessageLoop message_loop_;
 
@@ -130,7 +132,7 @@ TEST_F(PersistentPrefStoreClientTest,
        SubPrefUpdates_BasicWithoutPathExpansion) {
   {
     ScopedDictionaryPrefUpdate update(pref_service(), kDictionaryKey);
-    update->SetIntegerWithoutPathExpansion("key.for.integer", 1);
+    update->SetKey("key.for.integer", base::Value(1));
   }
   auto update = WaitForUpdate();
   ASSERT_TRUE(update->is_split_updates());
@@ -165,8 +167,8 @@ TEST_F(PersistentPrefStoreClientTest,
        SubPrefUpdates_RemoveWithoutPathExpansion) {
   {
     ScopedDictionaryPrefUpdate update(pref_service(), kDictionaryKey);
-    update->SetIntegerWithoutPathExpansion("path.to.another_integer", 1);
-    update->SetIntegerWithoutPathExpansion("path.to.integer", 1);
+    update->SetKey("path.to.another_integer", base::Value(1));
+    update->SetKey("path.to.integer", base::Value(1));
   }
   WaitForUpdate();
   {
@@ -185,7 +187,7 @@ TEST_F(PersistentPrefStoreClientTest,
 TEST_F(PersistentPrefStoreClientTest, SubPrefUpdates_MultipleUpdates) {
   {
     ScopedDictionaryPrefUpdate update(pref_service(), kDictionaryKey);
-    update->SetDoubleWithoutPathExpansion("a.double", 1);
+    update->SetKey("a.double", base::Value(1.0));
   }
   {
     ScopedDictionaryPrefUpdate update(pref_service(), kDictionaryKey);
@@ -224,7 +226,7 @@ TEST_F(PersistentPrefStoreClientTest, SubPrefUpdates_NestedUpdateAfterSet) {
 TEST_F(PersistentPrefStoreClientTest, SubPrefUpdates_NestedUpdateBeforeSet) {
   {
     ScopedDictionaryPrefUpdate update(pref_service(), kDictionaryKey);
-    update->Set("path.to", base::MakeUnique<base::DictionaryValue>());
+    update->Set("path.to", std::make_unique<base::DictionaryValue>());
   }
   {
     ScopedDictionaryPrefUpdate update(pref_service(), kDictionaryKey);
@@ -285,7 +287,7 @@ TEST_F(PersistentPrefStoreClientTest,
   {
     ScopedDictionaryPrefUpdate update(pref_service(), kDictionaryKey);
     auto dict = update->SetDictionary(
-        "path.to", base::MakeUnique<base::DictionaryValue>());
+        "path.to", std::make_unique<base::DictionaryValue>());
     dict->SetString("string", "string value");
   }
   auto update = WaitForUpdate();
@@ -303,15 +305,15 @@ TEST_F(PersistentPrefStoreClientTest,
   {
     ScopedDictionaryPrefUpdate update(pref_service(), kDictionaryKey);
     auto dict = update->SetDictionaryWithoutPathExpansion(
-        "a.dictionary", base::MakeUnique<base::DictionaryValue>());
-    dict->SetStringWithoutPathExpansion("a.string", "string value");
+        "a.dictionary", std::make_unique<base::DictionaryValue>());
+    dict->SetKey("a.string", base::Value("string value"));
   }
   auto update = WaitForUpdate();
   ASSERT_TRUE(update->is_split_updates());
   auto& split_updates = update->get_split_updates();
   ASSERT_EQ(1u, split_updates.size());
   base::DictionaryValue expected_value;
-  expected_value.SetStringWithoutPathExpansion("a.string", "string value");
+  expected_value.SetKey("a.string", base::Value("string value"));
   EXPECT_EQ(expected_value, *split_updates[0]->value);
   EXPECT_EQ((std::vector<std::string>{"a.dictionary"}), split_updates[0]->path);
 }

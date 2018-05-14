@@ -97,8 +97,7 @@ void TriggerSyncCycle(syncer::ModelType type) {
       chrome_test_util::GetOriginalBrowserState();
   browser_sync::ProfileSyncService* profile_sync_service =
       IOSChromeProfileSyncServiceFactory::GetForBrowserState(browser_state);
-  const syncer::ModelTypeSet types(type);
-  profile_sync_service->RefreshTypesForTest(types);
+  profile_sync_service->TriggerRefresh({type});
 }
 
 void ClearSyncServerData() {
@@ -178,7 +177,7 @@ void InjectAutofillProfileOnFakeSyncServer(std::string guid,
 
   std::unique_ptr<syncer::LoopbackServerEntity> entity =
       syncer::PersistentUniqueClientEntity::CreateFromEntitySpecifics(
-          guid, entity_specifics);
+          guid, entity_specifics, 12345, 12345);
   gSyncFakeServer->InjectEntity(std::move(entity));
 }
 
@@ -268,7 +267,7 @@ void InjectTypedURLOnFakeSyncServer(const std::string& url) {
 
   std::unique_ptr<syncer::LoopbackServerEntity> entity =
       syncer::PersistentUniqueClientEntity::CreateFromEntitySpecifics(
-          url, entitySpecifics);
+          url, entitySpecifics, 12345, 12345);
   gSyncFakeServer->InjectEntity(std::move(entity));
 }
 

@@ -11,6 +11,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/containers/flat_set.h"
 #include "base/feature_list.h"
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/metrics/field_trial.h"
@@ -23,7 +24,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
-#include "base/time/tick_clock.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
@@ -32,15 +33,18 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/resource_coordinator/background_tab_navigation_throttle.h"
 #include "chrome/browser/resource_coordinator/resource_coordinator_web_contents_observer.h"
-#include "chrome/browser/resource_coordinator/tab_manager_grc_tab_signal_observer.h"
-#include "chrome/browser/resource_coordinator/tab_manager_observer.h"
+#include "chrome/browser/resource_coordinator/tab_lifecycle_observer.h"
+#include "chrome/browser/resource_coordinator/tab_manager_features.h"
+#include "chrome/browser/resource_coordinator/tab_manager_resource_coordinator_signal_observer.h"
 #include "chrome/browser/resource_coordinator/tab_manager_stats_collector.h"
 #include "chrome/browser/resource_coordinator/tab_manager_web_contents_data.h"
+#include "chrome/browser/resource_coordinator/time.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
+#include "chrome/browser/ui/tab_ui_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/common/chrome_constants.h"
@@ -49,7 +53,9 @@
 #include "components/metrics/system_memory_stats_recorder.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -57,12 +63,10 @@
 #include "content/public/common/content_features.h"
 #include "content/public/common/page_importance_signals.h"
 #include "third_party/WebKit/public/platform/WebSuddenTerminationDisablerType.h"
+#include "ui/gfx/geometry/rect.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/multi_profile_uma.h"
-#include "ash/shell.h"
 #include "chrome/browser/resource_coordinator/tab_manager_delegate_chromeos.h"
-#include "components/user_manager/user_manager.h"
 #endif
 
 using base::TimeDelta;
@@ -73,27 +77,28 @@ using content::WebContents;
 namespace resource_coordinator {
 namespace {
 
+// The default timeout time after which the next background tab gets loaded if
+// the previous tab has not finished loading yet. This is ignored in kPaused
+// loading mode.
+const TimeDelta kDefaultBackgroundTabLoadTimeout = TimeDelta::FromSeconds(10);
+
+// The number of loading slots for background tabs. TabManager will start to
+// load the next background tab when the loading slots free up.
+const size_t kNumOfLoadingSlots = 1;
+
 // The default interval in seconds after which to adjust the oom_score_adj
 // value.
 const int kAdjustmentIntervalSeconds = 10;
-
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
-// For each period of this length record a statistic to indicate whether or not
-// the user experienced a low memory event. If this interval is changed,
-// Tabs.Discard.DiscardInLastMinute must be replaced with a new statistic.
-const int kRecentTabDiscardIntervalSeconds = 60;
-#endif
 
 // The time during which a tab is protected from discarding after it stops being
 // audible.
 const int kAudioProtectionTimeSeconds = 60;
 
-int FindWebContentsById(const TabStripModel* model,
-                        int64_t target_web_contents_id) {
+int FindWebContentsById(const TabStripModel* model, int32_t tab_id) {
   for (int idx = 0; idx < model->count(); idx++) {
     WebContents* web_contents = model->GetWebContentsAt(idx);
-    int64_t web_contents_id = TabManager::IdFromWebContents(web_contents);
-    if (web_contents_id == target_web_contents_id)
+    auto* data = TabManager::WebContentsData::FromWebContents(web_contents);
+    if (data && tab_id == data->id())
       return idx;
   }
 
@@ -109,12 +114,82 @@ void ReloadWebContentsIfDiscarded(WebContents* contents,
   }
 }
 
+// Returns a set with browsers in |browser_info_list| that are completely
+// covered by another browser in |browser_info_list| (some browsers that match
+// this description might not be included in the set if insufficient z-order
+// information is provided). Non-browser windows are not taken into
+// consideration when computing window occlusion, because there is no simple way
+// to know whether they opaquely fill their bounds.
+//
+// TODO(fdoray): Handle the case where a browser window is completely covered by
+// the union of other browser windows but not by a single browser window.
+base::flat_set<const BrowserInfo*> GetOccludedBrowsers(
+    const std::vector<BrowserInfo>& browser_info_list,
+    const std::vector<gfx::NativeWindow>& windows_sorted_by_z_index) {
+  base::flat_set<const BrowserInfo*> occluded_browsers;
+  std::vector<gfx::Rect> bounds_of_previous_browsers;
+
+  // Traverse windows from topmost to bottommost.
+  for (gfx::NativeWindow native_window : windows_sorted_by_z_index) {
+    // Find the BrowserInfo corresponding to the current NativeWindow.
+    auto browser_info_it = std::find_if(
+        browser_info_list.begin(), browser_info_list.end(),
+        [&native_window](const BrowserInfo& browser_info) {
+          return browser_info.browser->window()->GetNativeWindow() ==
+                 native_window;
+        });
+
+    // Skip the current NativeWindow if no browser is associated with it or if
+    // the associated browser is minimized.
+    if (browser_info_it == browser_info_list.end() ||
+        browser_info_it->browser->window()->IsMinimized()) {
+      continue;
+    }
+
+    // Determine if the browser window is occluded by looking for a previously
+    // traversed browser window that completely covers it.]
+    bool browser_is_occluded = false;
+    const gfx::Rect bounds = browser_info_it->browser->window()->GetBounds();
+    for (const gfx::Rect other_bounds : bounds_of_previous_browsers) {
+      if (other_bounds.Contains(bounds)) {
+        browser_is_occluded = true;
+        break;
+      }
+    }
+
+    // Add the current browser to the list of occluded browsers if
+    // |browser_is_occluded| is true. Otherwise, add the current window bounds
+    // to |bounds_of_previous_browsers| for use in future window occlusion
+    // computations.
+    if (browser_is_occluded)
+      occluded_browsers.insert(&*browser_info_it);
+    else
+      bounds_of_previous_browsers.push_back(bounds);
+  }
+
+  return occluded_browsers;
+}
+
+std::unique_ptr<base::trace_event::ConvertableToTraceFormat> DataAsTraceValue(
+    TabManager::BackgroundTabLoadingMode mode,
+    size_t num_of_pending_navigations,
+    size_t num_of_loading_contents) {
+  std::unique_ptr<base::trace_event::TracedValue> data(
+      new base::trace_event::TracedValue());
+  data->SetInteger("background_tab_loading_mode", mode);
+  data->SetInteger("num_of_pending_navigations", num_of_pending_navigations);
+  data->SetInteger("num_of_loading_contents", num_of_loading_contents);
+  return std::move(data);
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // TabManager
 
-class TabManager::TabManagerSessionRestoreObserver
+constexpr base::TimeDelta TabManager::kDiscardProtectionTime;
+
+class TabManager::TabManagerSessionRestoreObserver final
     : public SessionRestoreObserver {
  public:
   explicit TabManagerSessionRestoreObserver(TabManager* tab_manager)
@@ -133,6 +208,10 @@ class TabManager::TabManagerSessionRestoreObserver
     tab_manager_->OnSessionRestoreFinishedLoadingTabs();
   }
 
+  void OnWillRestoreTab(WebContents* web_contents) override {
+    tab_manager_->OnWillRestoreTab(web_contents);
+  }
+
  private:
   TabManager* tab_manager_;
 };
@@ -141,57 +220,40 @@ constexpr base::TimeDelta TabManager::kDefaultMinTimeToPurge;
 
 TabManager::TabManager()
     : discard_count_(0),
-      recent_tab_discard_(false),
-      discard_once_(false),
-#if !defined(OS_CHROMEOS)
-      minimum_protection_time_(base::TimeDelta::FromMinutes(10)),
-#endif
       browser_tab_strip_tracker_(this, nullptr, this),
-      test_tick_clock_(nullptr),
       is_session_restore_loading_tabs_(false),
+      restored_tab_count_(0u),
+      background_tab_loading_mode_(BackgroundTabLoadingMode::kStaggered),
+      force_load_timer_(std::make_unique<base::OneShotTimer>(GetTickClock())),
+      loading_slots_(kNumOfLoadingSlots),
       weak_ptr_factory_(this) {
 #if defined(OS_CHROMEOS)
   delegate_.reset(new TabManagerDelegate(weak_ptr_factory_.GetWeakPtr()));
 #endif
   browser_tab_strip_tracker_.Init();
   session_restore_observer_.reset(new TabManagerSessionRestoreObserver(this));
-  if (GRCTabSignalObserver::IsEnabled()) {
-    grc_tab_signal_observer_.reset(new GRCTabSignalObserver());
+  if (PageSignalReceiver::IsEnabled()) {
+    resource_coordinator_signal_observer_.reset(
+        new ResourceCoordinatorSignalObserver());
   }
-  tab_manager_stats_collector_.reset(new TabManagerStatsCollector(this));
+  stats_collector_.reset(new TabManagerStatsCollector());
 }
 
 TabManager::~TabManager() {
+  resource_coordinator_signal_observer_.reset();
   Stop();
 }
 
 void TabManager::Start() {
+  background_tab_loading_mode_ = BackgroundTabLoadingMode::kStaggered;
+
 #if defined(OS_WIN) || defined(OS_MACOSX)
   // Note that discarding is now enabled by default. This check is kept as a
   // kill switch.
   // TODO(georgesak): remote this when deemed not needed anymore.
   if (!base::FeatureList::IsEnabled(features::kAutomaticTabDiscarding))
     return;
-
-  // Check the variation parameter to see if a tab is to be protected for an
-  // amount of time after being backgrounded. The value is in seconds. Default
-  // is 10 minutes if the variation is absent.
-  std::string minimum_protection_time_string =
-      variations::GetVariationParamValue(features::kAutomaticTabDiscarding.name,
-                                         "MinimumProtectionTime");
-  if (!minimum_protection_time_string.empty()) {
-    unsigned int minimum_protection_time_seconds = 0;
-    if (base::StringToUint(minimum_protection_time_string,
-                           &minimum_protection_time_seconds)) {
-      if (minimum_protection_time_seconds > 0)
-        minimum_protection_time_ =
-            base::TimeDelta::FromSeconds(minimum_protection_time_seconds);
-    }
-  }
 #endif
-
-  // Check if only one discard is allowed.
-  discard_once_ = CanOnlyDiscardOnce();
 
   if (!update_timer_.IsRunning()) {
     update_timer_.Start(FROM_HERE,
@@ -202,12 +264,6 @@ void TabManager::Start() {
 // MemoryPressureMonitor is not implemented on Linux so far and tabs are never
 // discarded.
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
-  if (!recent_tab_discard_timer_.IsRunning()) {
-    recent_tab_discard_timer_.Start(
-        FROM_HERE, TimeDelta::FromSeconds(kRecentTabDiscardIntervalSeconds),
-        this, &TabManager::RecordRecentTabDiscard);
-  }
-  start_time_ = NowTicks();
   // Create a |MemoryPressureListener| to listen for memory events when
   // MemoryCoordinator is disabled. When MemoryCoordinator is enabled
   // it asks TabManager to do tab discarding.
@@ -251,17 +307,17 @@ void TabManager::Start() {
 
 void TabManager::Stop() {
   update_timer_.Stop();
-  recent_tab_discard_timer_.Stop();
+  force_load_timer_->Stop();
   memory_pressure_listener_.reset();
 }
 
-int TabManager::FindTabStripModelById(int64_t target_web_contents_id,
+int TabManager::FindTabStripModelById(int32_t tab_id,
                                       TabStripModel** model) const {
   DCHECK(model);
 
   for (const auto& browser_info : GetBrowserInfoList()) {
     TabStripModel* local_model = browser_info.tab_strip_model;
-    int idx = FindWebContentsById(local_model, target_web_contents_id);
+    int idx = FindWebContentsById(local_model, tab_id);
     if (idx != -1) {
       *model = local_model;
       return idx;
@@ -285,7 +341,8 @@ bool TabManager::IsTabDiscarded(content::WebContents* contents) const {
   return GetWebContentsData(contents)->IsDiscarded();
 }
 
-bool TabManager::CanDiscardTab(const TabStats& tab_stats) const {
+bool TabManager::CanDiscardTab(const TabStats& tab_stats,
+                               DiscardReason reason) const {
 #if defined(OS_CHROMEOS)
   if (tab_stats.is_active && tab_stats.is_in_visible_window)
     return false;
@@ -295,7 +352,7 @@ bool TabManager::CanDiscardTab(const TabStats& tab_stats) const {
 #endif  // defined(OS_CHROMEOS)
 
   TabStripModel* model;
-  const int idx = FindTabStripModelById(tab_stats.tab_contents_id, &model);
+  const int idx = FindTabStripModelById(tab_stats.id, &model);
 
   if (idx == -1)
     return false;
@@ -324,65 +381,72 @@ bool TabManager::CanDiscardTab(const TabStats& tab_stats) const {
     return false;
 
   // Do not discard PDFs as they might contain entry that is not saved and they
-  // don't remember their scrolling positions. See crbug.com/547286 and
-  // crbug.com/65244.
+  // don't remember their scrolling positions. See https://crbug.com/547286 and
+  // https://crbug.com/65244.
   // TODO(georgesak): Remove this workaround when the bugs are fixed.
   if (web_contents->GetContentsMimeType() == "application/pdf")
     return false;
-
-  // Do not discard a previously discarded tab if that's the desired behavior.
-  if (discard_once_ && GetWebContentsData(web_contents)->DiscardCount() > 0)
-    return false;
-
-  // Do not discard a recently used tab.
-  if (minimum_protection_time_.InSeconds() > 0) {
-    auto delta =
-        NowTicks() - GetWebContentsData(web_contents)->LastInactiveTime();
-    if (delta < minimum_protection_time_)
-      return false;
-  }
 
   // Do not discard a tab that was explicitly disallowed to.
   if (!IsTabAutoDiscardable(web_contents))
     return false;
 
+#if defined(OS_CHROMEOS)
+  // The following protections are ignored on ChromeOS during urgent discard,
+  // because running out of memory would lead to a kernel panic.
+  if (reason == DiscardReason::kUrgent)
+    return true;
+#endif  // defined(OS_CHROMEOS)
+
+  if (GetWebContentsData(web_contents)->DiscardCount() > 0)
+    return false;
+
+  auto delta =
+      NowTicks() - GetWebContentsData(web_contents)->LastInactiveTime();
+  if (delta < kDiscardProtectionTime)
+    return false;
+
   return true;
 }
 
-void TabManager::DiscardTab(DiscardTabCondition condition) {
+void TabManager::DiscardTab(DiscardReason reason) {
+  if (reason == DiscardReason::kUrgent)
+    stats_collector_->RecordWillDiscardUrgently(GetNumAliveTabs());
+
 #if defined(OS_CHROMEOS)
   // Call Chrome OS specific low memory handling process.
   if (base::FeatureList::IsEnabled(features::kArcMemoryManagement)) {
-    delegate_->LowMemoryKill(GetUnsortedTabStats(), condition);
+    delegate_->LowMemoryKill(reason);
     return;
   }
 #endif
-  DiscardTabImpl(condition);
+  DiscardTabImpl(reason);
 }
 
-WebContents* TabManager::DiscardTabById(int64_t target_web_contents_id,
-                                        DiscardTabCondition condition) {
+WebContents* TabManager::DiscardTabById(int32_t tab_id, DiscardReason reason) {
   TabStripModel* model;
-  int index = FindTabStripModelById(target_web_contents_id, &model);
+  int index = FindTabStripModelById(tab_id, &model);
 
   if (index == -1)
     return nullptr;
 
-  VLOG(1) << "Discarding tab " << index << " id " << target_web_contents_id;
+  VLOG(1) << "Discarding tab " << index << " id " << tab_id;
 
-  return DiscardWebContentsAt(index, model, condition);
+  return DiscardWebContentsAt(index, model, reason);
 }
 
 WebContents* TabManager::DiscardTabByExtension(content::WebContents* contents) {
-  if (contents)
-    return DiscardTabById(IdFromWebContents(contents), kProactiveShutdown);
+  if (contents) {
+    return DiscardTabById(IdFromWebContents(contents),
+                          DiscardReason::kExternal);
+  }
 
-  return DiscardTabImpl(kProactiveShutdown);
+  return DiscardTabImpl(DiscardReason::kExternal);
 }
 
-void TabManager::LogMemoryAndDiscardTab(DiscardTabCondition condition) {
+void TabManager::LogMemoryAndDiscardTab(DiscardReason reason) {
   LogMemory("Tab Discards Memory details",
-            base::Bind(&TabManager::PurgeMemoryAndDiscardTab, condition));
+            base::Bind(&TabManager::PurgeMemoryAndDiscardTab, reason));
 }
 
 void TabManager::LogMemory(const std::string& title,
@@ -391,43 +455,43 @@ void TabManager::LogMemory(const std::string& title,
   memory::OomMemoryDetails::Log(title, callback);
 }
 
-void TabManager::set_test_tick_clock(base::TickClock* test_tick_clock) {
-  test_tick_clock_ = test_tick_clock;
-}
-
-// Things to collect on the browser thread (because TabStripModel isn't thread
-// safe):
-// 1) whether or not a tab is pinned
-// 2) last time a tab was selected
-// 3) is the tab currently selected
-TabStatsList TabManager::GetUnsortedTabStats() const {
+TabStatsList TabManager::GetUnsortedTabStats(
+    const std::vector<gfx::NativeWindow>& windows_sorted_by_z_index) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  const auto browser_info_list = GetBrowserInfoList();
+  const base::flat_set<const BrowserInfo*> occluded_browsers =
+      GetOccludedBrowsers(browser_info_list, windows_sorted_by_z_index);
 
   TabStatsList stats_list;
   stats_list.reserve(32);  // 99% of users have < 30 tabs open.
-  for (const BrowserInfo& browser_info : GetBrowserInfoList()) {
+  for (const BrowserInfo& browser_info : browser_info_list) {
     const bool window_is_active = stats_list.empty();
-    AddTabStats(browser_info, window_is_active, &stats_list);
+    const bool window_is_visible =
+        !browser_info.window_is_minimized &&
+        !base::ContainsKey(occluded_browsers, &browser_info);
+    AddTabStats(browser_info, window_is_active, window_is_visible, &stats_list);
   }
 
   return stats_list;
 }
 
-void TabManager::AddObserver(TabManagerObserver* observer) {
+void TabManager::AddObserver(TabLifecycleObserver* observer) {
   observers_.AddObserver(observer);
 }
 
-void TabManager::RemoveObserver(TabManagerObserver* observer) {
+void TabManager::RemoveObserver(TabLifecycleObserver* observer) {
   observers_.RemoveObserver(observer);
-}
-
-void TabManager::set_minimum_protection_time_for_tests(
-    base::TimeDelta minimum_protection_time) {
-  minimum_protection_time_ = minimum_protection_time;
 }
 
 bool TabManager::IsTabAutoDiscardable(content::WebContents* contents) const {
   return GetWebContentsData(contents)->IsAutoDiscardable();
+}
+
+void TabManager::SetTabAutoDiscardableState(int32_t tab_id, bool state) {
+  auto* web_contents = GetWebContentsById(tab_id);
+  if (web_contents)
+    SetTabAutoDiscardableState(web_contents, state);
 }
 
 void TabManager::SetTabAutoDiscardableState(content::WebContents* contents,
@@ -435,22 +499,21 @@ void TabManager::SetTabAutoDiscardableState(content::WebContents* contents,
   GetWebContentsData(contents)->SetAutoDiscardableState(state);
 }
 
-content::WebContents* TabManager::GetWebContentsById(
-    int64_t tab_contents_id) const {
+content::WebContents* TabManager::GetWebContentsById(int32_t tab_id) const {
   TabStripModel* model = nullptr;
-  int index = FindTabStripModelById(tab_contents_id, &model);
+  int index = FindTabStripModelById(tab_id, &model);
   if (index == -1)
     return nullptr;
   return model->GetWebContentsAt(index);
 }
 
-bool TabManager::CanSuspendBackgroundedRenderer(int render_process_id) const {
+bool TabManager::CanPurgeBackgroundedRenderer(int render_process_id) const {
   // A renderer can be purged if it's not playing media.
   auto tab_stats = GetUnsortedTabStats();
   for (auto& tab : tab_stats) {
     if (tab.child_process_host_id != render_process_id)
       continue;
-    WebContents* web_contents = GetWebContentsById(tab.tab_contents_id);
+    WebContents* web_contents = GetWebContentsById(tab.id);
     if (!web_contents)
       return false;
     if (IsMediaTab(web_contents))
@@ -499,18 +562,42 @@ bool TabManager::CompareTabStats(const TabStats& first,
 }
 
 // static
-int64_t TabManager::IdFromWebContents(WebContents* web_contents) {
-  return reinterpret_cast<int64_t>(web_contents);
+int32_t TabManager::IdFromWebContents(WebContents* web_contents) {
+  auto* data = GetWebContentsData(web_contents);
+  return data->id();
 }
 
-void TabManager::OnSessionRestoreStartedLoadingTabs() {
-  DCHECK(!is_session_restore_loading_tabs_);
-  is_session_restore_loading_tabs_ = true;
+bool TabManager::IsTabInSessionRestore(WebContents* web_contents) const {
+  return GetWebContentsData(web_contents)->is_in_session_restore();
 }
 
-void TabManager::OnSessionRestoreFinishedLoadingTabs() {
-  DCHECK(is_session_restore_loading_tabs_);
-  is_session_restore_loading_tabs_ = false;
+bool TabManager::IsTabRestoredInForeground(WebContents* web_contents) const {
+  return GetWebContentsData(web_contents)->is_restored_in_foreground();
+}
+
+size_t TabManager::GetBackgroundTabLoadingCount() const {
+  if (!IsInBackgroundTabOpeningSession())
+    return 0;
+
+  return loading_contents_.size();
+}
+
+size_t TabManager::GetBackgroundTabPendingCount() const {
+  if (!IsInBackgroundTabOpeningSession())
+    return 0;
+
+  return pending_navigations_.size();
+}
+
+int TabManager::GetTabCount() const {
+  int tab_count = 0;
+  for (auto* browser : *BrowserList::GetInstance())
+    tab_count += browser->tab_strip_model()->count();
+  return tab_count;
+}
+
+int TabManager::restored_tab_count() const {
+  return restored_tab_count_;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -518,21 +605,21 @@ void TabManager::OnSessionRestoreFinishedLoadingTabs() {
 
 void TabManager::OnDiscardedStateChange(content::WebContents* contents,
                                         bool is_discarded) {
-  for (TabManagerObserver& observer : observers_)
+  for (TabLifecycleObserver& observer : observers_)
     observer.OnDiscardedStateChange(contents, is_discarded);
 }
 
 void TabManager::OnAutoDiscardableStateChange(content::WebContents* contents,
                                               bool is_auto_discardable) {
-  for (TabManagerObserver& observer : observers_)
+  for (TabLifecycleObserver& observer : observers_)
     observer.OnAutoDiscardableStateChange(contents, is_auto_discardable);
 }
 
 // static
-void TabManager::PurgeMemoryAndDiscardTab(DiscardTabCondition condition) {
+void TabManager::PurgeMemoryAndDiscardTab(DiscardReason reason) {
   TabManager* manager = g_browser_process->GetTabManager();
   manager->PurgeBrowserMemory();
-  manager->DiscardTab(condition);
+  manager->DiscardTab(reason);
 }
 
 // static
@@ -541,8 +628,7 @@ bool TabManager::IsInternalPage(const GURL& url) {
   // are likely to have open. Most of the benefit is the from NTP URL.
   const char* const kInternalPagePrefixes[] = {
       chrome::kChromeUIDownloadsURL, chrome::kChromeUIHistoryURL,
-      chrome::kChromeUINewTabURL, chrome::kChromeUISettingsURL,
-  };
+      chrome::kChromeUINewTabURL, chrome::kChromeUISettingsURL};
   // Prefix-match against the table above. Use strncmp to avoid allocating
   // memory to convert the URL prefix constants into std::strings.
   for (size_t i = 0; i < arraysize(kInternalPagePrefixes); ++i) {
@@ -553,62 +639,6 @@ bool TabManager::IsInternalPage(const GURL& url) {
   return false;
 }
 
-void TabManager::RecordDiscardStatistics() {
-  discard_count_++;
-
-  // TODO(jamescook): Maybe incorporate extension count?
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Tabs.Discard.TabCount", GetTabCount(), 1, 100,
-                              50);
-#if defined(OS_CHROMEOS)
-  // Record the discarded tab in relation to the amount of simultaneously
-  // logged in users.
-  if (ash::Shell::HasInstance()) {
-    ash::MultiProfileUMA::RecordDiscardedTab(
-        user_manager::UserManager::Get()->GetLoggedInUsers().size());
-  }
-#endif
-  // TODO(jamescook): If the time stats prove too noisy, then divide up users
-  // based on how heavily they use Chrome using tab count as a proxy.
-  // Bin into <= 1, <= 2, <= 4, <= 8, etc.
-  if (last_discard_time_.is_null()) {
-    // This is the first discard this session.
-    TimeDelta interval = NowTicks() - start_time_;
-    int interval_seconds = static_cast<int>(interval.InSeconds());
-    // Record time in seconds over an interval of approximately 1 day.
-    UMA_HISTOGRAM_CUSTOM_COUNTS("Tabs.Discard.InitialTime2", interval_seconds,
-                                1, 100000, 50);
-  } else {
-    // Not the first discard, so compute time since last discard.
-    TimeDelta interval = NowTicks() - last_discard_time_;
-    int interval_ms = static_cast<int>(interval.InMilliseconds());
-    // Record time in milliseconds over an interval of approximately 1 day.
-    // Start at 100 ms to get extra resolution in the target 750 ms range.
-    UMA_HISTOGRAM_CUSTOM_COUNTS("Tabs.Discard.IntervalTime2", interval_ms, 100,
-                                100000 * 1000, 50);
-  }
-// TODO(georgesak): Remove this #if when RecordMemoryStats is implemented for
-// all platforms.
-#if defined(OS_WIN) || defined(OS_CHROMEOS)
-  // Record system memory usage at the time of the discard.
-  metrics::RecordMemoryStats(metrics::RECORD_MEMORY_STATS_TAB_DISCARDED);
-#endif
-  // Set up to record the next interval.
-  last_discard_time_ = NowTicks();
-}
-
-void TabManager::RecordRecentTabDiscard() {
-  // If Chrome is shutting down, do not do anything.
-  if (g_browser_process->IsShuttingDown())
-    return;
-
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  // If the interval is changed, so should the histogram name.
-  UMA_HISTOGRAM_BOOLEAN("Tabs.Discard.DiscardInLastMinute",
-                        recent_tab_discard_);
-  // Reset for the next interval.
-  recent_tab_discard_ = false;
-}
-
 void TabManager::PurgeBrowserMemory() {
   // Based on experimental evidence, attempts to free memory from renderers
   // have been too slow to use in OOM situations (V8 garbage collection) or
@@ -616,23 +646,16 @@ void TabManager::PurgeBrowserMemory() {
   // function therefore only targets large blocks of memory in the browser.
   // Note that other objects will listen to MemoryPressureListener events
   // to release memory.
-  for (TabContentsIterator it; !it.done(); it.Next()) {
-    WebContents* web_contents = *it;
+  for (auto* web_contents : AllTabContentses()) {
     // Screenshots can consume ~5 MB per web contents for platforms that do
     // touch back/forward.
     web_contents->GetController().ClearAllScreenshots();
   }
 }
 
-int TabManager::GetTabCount() const {
-  int tab_count = 0;
-  for (auto* browser : *BrowserList::GetInstance())
-    tab_count += browser->tab_strip_model()->count();
-  return tab_count;
-}
-
 void TabManager::AddTabStats(const BrowserInfo& browser_info,
                              bool window_is_active,
+                             bool window_is_visible,
                              TabStatsList* stats_list) const {
   TabStripModel* tab_strip_model = browser_info.tab_strip_model;
   for (int i = 0; i < tab_strip_model->count(); i++) {
@@ -645,29 +668,36 @@ void TabManager::AddTabStats(const BrowserInfo& browser_info,
       stats.is_pinned = tab_strip_model->IsTabPinned(i);
       stats.is_active = tab_strip_model->active_index() == i;
       stats.is_in_active_window = window_is_active;
-      // Only consider the window non-visible if it is minimized. The consumer
-      // of the constructed TabStatsList may update this after performing more
-      // advanced window visibility checks.
-      stats.is_in_visible_window = !browser_info.window_is_minimized;
+      stats.is_in_visible_window = window_is_visible;
       stats.is_discarded = GetWebContentsData(contents)->IsDiscarded();
       stats.has_form_entry =
           contents->GetPageImportanceSignals().had_form_interaction;
       stats.discard_count = GetWebContentsData(contents)->DiscardCount();
       stats.last_active = contents->GetLastActiveTime();
-      stats.last_hidden = contents->GetLastHiddenTime();
-      stats.render_process_host = contents->GetRenderProcessHost();
-      stats.renderer_handle = contents->GetRenderProcessHost()->GetHandle();
-      stats.child_process_host_id = contents->GetRenderProcessHost()->GetID();
+      stats.render_process_host = contents->GetMainFrame()->GetProcess();
+      stats.renderer_handle =
+          contents->GetMainFrame()->GetProcess()->GetHandle();
+      stats.child_process_host_id =
+          contents->GetMainFrame()->GetProcess()->GetID();
 #if defined(OS_CHROMEOS)
       stats.oom_score = delegate_->GetCachedOomScore(stats.renderer_handle);
 #endif
+      stats.tab_url = contents->GetLastCommittedURL().spec();
+      auto* commit = contents->GetController().GetLastCommittedEntry();
+      if (commit) {
+        const auto& favicon = commit->GetFavicon();
+        if (favicon.valid)
+          stats.favicon_url = favicon.url.spec();
+      }
       stats.title = contents->GetTitle();
-      stats.tab_contents_id = IdFromWebContents(contents);
+      stats.id = IdFromWebContents(contents);
       content::RenderFrameHost* render_frame = contents->GetMainFrame();
       DCHECK(render_frame);
       stats.has_beforeunload_handler =
           render_frame->GetSuddenTerminationDisablerState(
               blink::kBeforeUnloadHandler);
+      stats.is_auto_discardable =
+          GetWebContentsData(contents)->IsAutoDiscardable();
       stats_list->push_back(stats);
     }
   }
@@ -684,8 +714,6 @@ void TabManager::UpdateTimerCallback() {
 
   if (BrowserList::GetInstance()->empty())
     return;
-
-  last_adjust_time_ = NowTicks();
 
 #if defined(OS_CHROMEOS)
   TabStatsList stats_list = GetTabStats();
@@ -717,10 +745,10 @@ void TabManager::PurgeBackgroundedTabsIfNeeded() {
   for (auto& tab : tab_stats) {
     if (!tab.render_process_host->IsProcessBackgrounded())
       continue;
-    if (!CanSuspendBackgroundedRenderer(tab.child_process_host_id))
+    if (!CanPurgeBackgroundedRenderer(tab.child_process_host_id))
       continue;
 
-    WebContents* content = GetWebContentsById(tab.tab_contents_id);
+    WebContents* content = GetWebContentsById(tab.id);
     if (!content)
       continue;
 
@@ -739,16 +767,14 @@ void TabManager::PurgeBackgroundedTabsIfNeeded() {
 
 WebContents* TabManager::DiscardWebContentsAt(int index,
                                               TabStripModel* model,
-                                              DiscardTabCondition condition) {
+                                              DiscardReason reason) {
   WebContents* old_contents = model->GetWebContentsAt(index);
 
   // Can't discard tabs that are already discarded.
   if (GetWebContentsData(old_contents)->IsDiscarded())
     return nullptr;
 
-  // Record statistics before discarding to capture the memory state that leads
-  // to the discard.
-  RecordDiscardStatistics();
+  ++discard_count_;
 
   UMA_HISTOGRAM_BOOLEAN(
       "TabManager.Discarding.DiscardedTabHasBeforeUnloadHandler",
@@ -779,10 +805,11 @@ WebContents* TabManager::DiscardWebContentsAt(int index,
 
   // First try to fast-kill the process, if it's just running a single tab.
   bool fast_shutdown_success =
-      old_contents->GetRenderProcessHost()->FastShutdownIfPossible(1u, false);
+      old_contents->GetMainFrame()->GetProcess()->FastShutdownIfPossible(1u,
+                                                                         false);
 
 #ifdef OS_CHROMEOS
-  if (!fast_shutdown_success && condition == kUrgentShutdown) {
+  if (!fast_shutdown_success && reason == DiscardReason::kUrgent) {
     content::RenderFrameHost* main_frame = old_contents->GetMainFrame();
     // We avoid fast shutdown on tabs with beforeunload handlers on the main
     // frame, as that is often an indication of unsaved user state.
@@ -790,7 +817,7 @@ WebContents* TabManager::DiscardWebContentsAt(int index,
     if (!main_frame->GetSuddenTerminationDisablerState(
             blink::kBeforeUnloadHandler)) {
       fast_shutdown_success =
-          old_contents->GetRenderProcessHost()->FastShutdownIfPossible(
+          old_contents->GetMainFrame()->GetProcess()->FastShutdownIfPossible(
               1u, /* skip_unload_handlers */ true);
     }
     UMA_HISTOGRAM_BOOLEAN(
@@ -812,12 +839,34 @@ WebContents* TabManager::DiscardWebContentsAt(int index,
 
   // Discard the old tab's renderer.
   // TODO(jamescook): This breaks script connections with other tabs.
-  // Find a different approach that doesn't do that, perhaps based on navigation
-  // to swappedout://.
+  // Find a different approach that doesn't do that, perhaps based on
+  // RenderFrameProxyHosts.
   delete old_contents;
-  recent_tab_discard_ = true;
 
   return null_contents;
+}
+
+void TabManager::PauseBackgroundTabOpeningIfNeeded() {
+  TRACE_EVENT_INSTANT0("navigation",
+                       "TabManager::PauseBackgroundTabOpeningIfNeeded",
+                       TRACE_EVENT_SCOPE_THREAD);
+  if (IsInBackgroundTabOpeningSession()) {
+    stats_collector_->TrackPausedBackgroundTabs(pending_navigations_.size());
+    stats_collector_->OnBackgroundTabOpeningSessionEnded();
+  }
+
+  background_tab_loading_mode_ = BackgroundTabLoadingMode::kPaused;
+}
+
+void TabManager::ResumeBackgroundTabOpeningIfNeeded() {
+  TRACE_EVENT_INSTANT0("navigation",
+                       "TabManager::ResumeBackgroundTabOpeningIfNeeded",
+                       TRACE_EVENT_SCOPE_THREAD);
+  background_tab_loading_mode_ = BackgroundTabLoadingMode::kStaggered;
+  LoadNextBackgroundTabIfNeeded();
+
+  if (IsInBackgroundTabOpeningSession())
+    stats_collector_->OnBackgroundTabOpeningSessionStarted();
 }
 
 void TabManager::OnMemoryPressure(
@@ -826,10 +875,18 @@ void TabManager::OnMemoryPressure(
   if (g_browser_process->IsShuttingDown())
     return;
 
-  // Under critical pressure try to discard a tab.
-  if (memory_pressure_level ==
-      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL) {
-    LogMemoryAndDiscardTab(kUrgentShutdown);
+  // TODO(crbug.com/762775): Pause or resume background tab opening based on
+  // memory pressure signal after it becomes more reliable.
+  switch (memory_pressure_level) {
+    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
+      break;
+    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
+      break;
+    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL:
+      LogMemoryAndDiscardTab(DiscardReason::kUrgent);
+      break;
+    default:
+      NOTREACHED();
   }
   // TODO(skuhne): If more memory pressure levels are introduced, consider
   // calling PurgeBrowserMemory() before CRITICAL is reached.
@@ -838,7 +895,7 @@ void TabManager::OnMemoryPressure(
 void TabManager::TabChangedAt(content::WebContents* contents,
                               int index,
                               TabChangeType change_type) {
-  if (change_type != TabChangeType::ALL)
+  if (change_type != TabChangeType::kAll)
     return;
   auto* data = GetWebContentsData(contents);
   bool old_state = data->IsRecentlyAudible();
@@ -855,7 +912,7 @@ void TabManager::ActiveTabChanged(content::WebContents* old_contents,
                                   int reason) {
   // An active tab is not purged.
   // Calling GetWebContentsData() early ensures that the WebContentsData is
-  // created for |new_contents|, which |tab_manager_stats_collector_| expects.
+  // created for |new_contents|, which |stats_collector_| expects.
   GetWebContentsData(new_contents)->set_is_purged(false);
 
   // If |old_contents| is set, that tab has switched from being active to
@@ -868,7 +925,7 @@ void TabManager::ActiveTabChanged(content::WebContents* old_contents,
             GetTimeToPurge(min_time_to_purge_, max_time_to_purge_));
     // Only record switch-to-tab metrics when a switch happens, i.e.
     // |old_contents| is set.
-    tab_manager_stats_collector_->RecordSwitchToTab(new_contents);
+    stats_collector_->RecordSwitchToTab(old_contents, new_contents);
   }
 
   // Reload |web_contents| if it is in an active browser and discarded.
@@ -884,16 +941,6 @@ void TabManager::TabInsertedAt(TabStripModel* tab_strip_model,
                                content::WebContents* contents,
                                int index,
                                bool foreground) {
-  // Gets CoordinationUnitID for this WebContents and adds it to
-  // GRCTabSignalObserver.
-  if (grc_tab_signal_observer_) {
-    auto* tab_resource_coordinator =
-        ResourceCoordinatorWebContentsObserver::FromWebContents(contents)
-            ->tab_resource_coordinator();
-    grc_tab_signal_observer_->AssociateCoordinationUnitIDWithWebContents(
-        tab_resource_coordinator->id(), contents);
-  }
-
   // Only interested in background tabs, as foreground tabs get taken care of by
   // ActiveTabChanged.
   if (foreground)
@@ -905,20 +952,6 @@ void TabManager::TabInsertedAt(TabStripModel* tab_strip_model,
   // Re-setting time-to-purge every time a tab becomes inactive.
   GetWebContentsData(contents)->set_time_to_purge(
       GetTimeToPurge(min_time_to_purge_, max_time_to_purge_));
-}
-
-void TabManager::TabClosingAt(TabStripModel* tab_strip_model,
-                              content::WebContents* contents,
-                              int index) {
-  // Gets CoordinationUnitID for this WebContents and removes it from
-  // GRCTabSignalObserver.
-  if (!grc_tab_signal_observer_)
-    return;
-  auto* tab_resource_coordinator =
-      ResourceCoordinatorWebContentsObserver::FromWebContents(contents)
-          ->tab_resource_coordinator();
-  grc_tab_signal_observer_->RemoveCoordinationUnitID(
-      tab_resource_coordinator->id());
 }
 
 void TabManager::OnBrowserSetLastActive(Browser* browser) {
@@ -941,30 +974,29 @@ bool TabManager::IsMediaTab(WebContents* contents) const {
     return true;
   }
 
-  auto delta = NowTicks() - GetWebContentsData(contents)->LastAudioChangeTime();
+  auto last_audio_change_time =
+      GetWebContentsData(contents)->LastAudioChangeTime();
+
+  if (last_audio_change_time.is_null()) {
+    // The tab was never audible.
+    return false;
+  }
+
+  auto delta = NowTicks() - last_audio_change_time;
   return delta < TimeDelta::FromSeconds(kAudioProtectionTimeSeconds);
 }
 
+// static
 TabManager::WebContentsData* TabManager::GetWebContentsData(
-    content::WebContents* contents) const {
+    content::WebContents* contents) {
   WebContentsData::CreateForWebContents(contents);
-  auto* web_contents_data = WebContentsData::FromWebContents(contents);
-  web_contents_data->set_test_tick_clock(test_tick_clock_);
-  return web_contents_data;
-}
-
-TimeTicks TabManager::NowTicks() const {
-  if (!test_tick_clock_)
-    return TimeTicks::Now();
-
-  return test_tick_clock_->NowTicks();
+  return WebContentsData::FromWebContents(contents);
 }
 
 // TODO(jamescook): This should consider tabs with references to other tabs,
 // such as tabs created with JavaScript window.open(). Potentially consider
 // discarding the entire set together, or use that in the priority computation.
-content::WebContents* TabManager::DiscardTabImpl(
-    DiscardTabCondition condition) {
+content::WebContents* TabManager::DiscardTabImpl(DiscardReason reason) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   TabStatsList stats = GetTabStats();
 
@@ -973,31 +1005,13 @@ content::WebContents* TabManager::DiscardTabImpl(
   // Loop until a non-discarded tab to kill is found.
   for (TabStatsList::const_reverse_iterator stats_rit = stats.rbegin();
        stats_rit != stats.rend(); ++stats_rit) {
-    if (CanDiscardTab(*stats_rit)) {
-      WebContents* new_contents =
-          DiscardTabById(stats_rit->tab_contents_id, condition);
+    if (CanDiscardTab(*stats_rit, reason)) {
+      WebContents* new_contents = DiscardTabById(stats_rit->id, reason);
       if (new_contents)
         return new_contents;
     }
   }
   return nullptr;
-}
-
-// Check the variation parameter to see if a tab can be discarded only once or
-// multiple times.
-// Default is to only discard once per tab.
-bool TabManager::CanOnlyDiscardOnce() const {
-#if defined(OS_WIN) || defined(OS_MACOSX)
-  // On Windows and MacOS, default to discarding only once unless otherwise
-  // specified by the variation parameter.
-  // TODO(georgesak): Add Linux when automatic discarding is enabled for that
-  // platform.
-  std::string allow_multiple_discards = variations::GetVariationParamValue(
-      features::kAutomaticTabDiscarding.name, "AllowMultipleDiscards");
-  return (allow_multiple_discards != "true");
-#else
-  return false;
-#endif
 }
 
 bool TabManager::IsActiveWebContentsInActiveBrowser(
@@ -1009,7 +1023,7 @@ bool TabManager::IsActiveWebContentsInActiveBrowser(
          contents;
 }
 
-std::vector<TabManager::BrowserInfo> TabManager::GetBrowserInfoList() const {
+std::vector<BrowserInfo> TabManager::GetBrowserInfoList() const {
   if (!test_browser_info_list_.empty())
     return test_browser_info_list_;
 
@@ -1022,6 +1036,7 @@ std::vector<TabManager::BrowserInfo> TabManager::GetBrowserInfoList() const {
     Browser* browser = *browser_iterator;
 
     BrowserInfo browser_info;
+    browser_info.browser = browser;
     browser_info.tab_strip_model = browser->tab_strip_model();
     browser_info.window_is_minimized = browser->window()->IsMinimized();
     browser_info.browser_is_app = browser->is_app();
@@ -1031,29 +1046,96 @@ std::vector<TabManager::BrowserInfo> TabManager::GetBrowserInfoList() const {
   return browser_info_list;
 }
 
+void TabManager::OnSessionRestoreStartedLoadingTabs() {
+  DCHECK(!is_session_restore_loading_tabs_);
+  is_session_restore_loading_tabs_ = true;
+}
+
+void TabManager::OnSessionRestoreFinishedLoadingTabs() {
+  DCHECK(is_session_restore_loading_tabs_);
+  is_session_restore_loading_tabs_ = false;
+  restored_tab_count_ = 0u;
+}
+
+void TabManager::OnWillRestoreTab(WebContents* contents) {
+  WebContentsData* data = GetWebContentsData(contents);
+  DCHECK(!data->is_in_session_restore());
+  data->SetIsInSessionRestore(true);
+  data->SetIsRestoredInForeground(contents->GetVisibility() !=
+                                  content::Visibility::HIDDEN);
+  restored_tab_count_++;
+
+  // TabUIHelper is initialized in TabHelpers::AttachTabHelpers. But this place
+  // gets called earlier than that. So for restored tabs, also initialize their
+  // TabUIHelper here.
+  TabUIHelper::CreateForWebContents(contents);
+  TabUIHelper::FromWebContents(contents)->set_created_by_session_restore(true);
+}
+
 content::NavigationThrottle::ThrottleCheckResult
 TabManager::MaybeThrottleNavigation(BackgroundTabNavigationThrottle* throttle) {
-  content::NavigationHandle* navigation_handle = throttle->navigation_handle();
-  if (!ShouldDelayNavigation(navigation_handle)) {
-    loading_contents_.insert(navigation_handle->GetWebContents());
+  content::WebContents* contents =
+      throttle->navigation_handle()->GetWebContents();
+  DCHECK_EQ(contents->GetVisibility(), content::Visibility::HIDDEN);
+
+  // Skip delaying the navigation if this tab is in session restore, whose
+  // loading is already controlled by TabLoader.
+  if (GetWebContentsData(contents)->is_in_session_restore())
+    return content::NavigationThrottle::PROCEED;
+
+  if (background_tab_loading_mode_ == BackgroundTabLoadingMode::kStaggered &&
+      !IsInBackgroundTabOpeningSession()) {
+    stats_collector_->OnBackgroundTabOpeningSessionStarted();
+  }
+
+  stats_collector_->TrackNewBackgroundTab(pending_navigations_.size(),
+                                          loading_contents_.size());
+
+  if (!base::FeatureList::IsEnabled(
+          features::kStaggeredBackgroundTabOpeningExperiment) ||
+      CanLoadNextTab()) {
+    loading_contents_.insert(contents);
+    stats_collector_->TrackBackgroundTabLoadAutoStarted();
     return content::NavigationThrottle::PROCEED;
   }
 
-  // TODO(zhenw): Try to set the favicon and title from history service if this
-  // navigation will be delayed.
-  GetWebContentsData(navigation_handle->GetWebContents())
-      ->SetTabLoadingState(TAB_IS_NOT_LOADING);
+  // Notify TabUIHelper that the navigation is delayed, so that the tab UI such
+  // as favicon and title can be updated accordingly.
+  TabUIHelper::FromWebContents(contents)->NotifyInitialNavigationDelayed(true);
+
+  GetWebContentsData(contents)->SetTabLoadingState(TAB_IS_NOT_LOADING);
   pending_navigations_.push_back(throttle);
+  std::stable_sort(pending_navigations_.begin(), pending_navigations_.end(),
+                   ComparePendingNavigations);
+
+  TRACE_EVENT_INSTANT1(
+      "navigation", "TabManager::MaybeThrottleNavigation",
+      TRACE_EVENT_SCOPE_THREAD, "data",
+      DataAsTraceValue(background_tab_loading_mode_,
+                       pending_navigations_.size(), loading_contents_.size()));
+
+  StartForceLoadTimer();
   return content::NavigationThrottle::DEFER;
 }
 
-bool TabManager::ShouldDelayNavigation(
-    content::NavigationHandle* navigation_handle) const {
-  // Do not delay the navigation if no tab is currently loading.
-  if (loading_contents_.empty())
+bool TabManager::IsInBackgroundTabOpeningSession() const {
+  if (background_tab_loading_mode_ != BackgroundTabLoadingMode::kStaggered)
     return false;
 
-  return true;
+  return !(pending_navigations_.empty() && loading_contents_.empty());
+}
+
+bool TabManager::CanLoadNextTab() const {
+  if (background_tab_loading_mode_ != BackgroundTabLoadingMode::kStaggered)
+    return false;
+
+  // TabManager can only load the next tab when the loading slots free up. The
+  // loading slot limit can be exceeded when |force_load_timer_| fires or when
+  // the user selects a background tab.
+  if (loading_contents_.size() < loading_slots_)
+    return true;
+
+  return false;
 }
 
 void TabManager::OnDidFinishNavigation(
@@ -1062,6 +1144,9 @@ void TabManager::OnDidFinishNavigation(
   while (it != pending_navigations_.end()) {
     BackgroundTabNavigationThrottle* throttle = *it;
     if (throttle->navigation_handle() == navigation_handle) {
+      TRACE_EVENT_INSTANT1("navigation", "TabManager::OnDidFinishNavigation",
+                           TRACE_EVENT_SCOPE_THREAD,
+                           "found_navigation_handle_to_remove", true);
       pending_navigations_.erase(it);
       break;
     }
@@ -1069,44 +1154,94 @@ void TabManager::OnDidFinishNavigation(
   }
 }
 
-void TabManager::OnDidStopLoading(content::WebContents* contents) {
+void TabManager::OnTabIsLoaded(content::WebContents* contents) {
   DCHECK_EQ(TAB_IS_LOADED, GetWebContentsData(contents)->tab_loading_state());
+  bool was_in_background_tab_opening_session =
+      IsInBackgroundTabOpeningSession();
+
   loading_contents_.erase(contents);
+  stats_collector_->OnTabIsLoaded(contents);
   LoadNextBackgroundTabIfNeeded();
+
+  if (was_in_background_tab_opening_session &&
+      !IsInBackgroundTabOpeningSession()) {
+    stats_collector_->OnBackgroundTabOpeningSessionEnded();
+  }
 }
 
 void TabManager::OnWebContentsDestroyed(content::WebContents* contents) {
+  bool was_in_background_tab_opening_session =
+      IsInBackgroundTabOpeningSession();
+
   RemovePendingNavigationIfNeeded(contents);
   loading_contents_.erase(contents);
+  stats_collector_->OnWebContentsDestroyed(contents);
   LoadNextBackgroundTabIfNeeded();
+
+  if (was_in_background_tab_opening_session &&
+      !IsInBackgroundTabOpeningSession()) {
+    stats_collector_->OnBackgroundTabOpeningSessionEnded();
+  }
+}
+
+void TabManager::StartForceLoadTimer() {
+  TRACE_EVENT_INSTANT1(
+      "navigation", "TabManager::StartForceLoadTimer", TRACE_EVENT_SCOPE_THREAD,
+      "data",
+      DataAsTraceValue(background_tab_loading_mode_,
+                       pending_navigations_.size(), loading_contents_.size()));
+
+  force_load_timer_->Stop();
+  force_load_timer_->Start(FROM_HERE,
+                           GetTabLoadTimeout(kDefaultBackgroundTabLoadTimeout),
+                           this, &TabManager::LoadNextBackgroundTabIfNeeded);
 }
 
 void TabManager::LoadNextBackgroundTabIfNeeded() {
-  // Do not load more background tabs until all currently loading tabs have
-  // finished.
-  if (!loading_contents_.empty())
+  TRACE_EVENT_INSTANT2(
+      "navigation", "TabManager::LoadNextBackgroundTabIfNeeded",
+      TRACE_EVENT_SCOPE_THREAD, "is_force_load_timer_running",
+      force_load_timer_->IsRunning(), "data",
+      DataAsTraceValue(background_tab_loading_mode_,
+                       pending_navigations_.size(), loading_contents_.size()));
+
+  if (background_tab_loading_mode_ != BackgroundTabLoadingMode::kStaggered)
+    return;
+
+  // Do not load more background tabs until TabManager can load the next tab.
+  // Ignore this constraint if the timer fires to force loading the next
+  // background tab.
+  if (force_load_timer_->IsRunning() && !CanLoadNextTab())
     return;
 
   if (pending_navigations_.empty())
     return;
 
+  stats_collector_->OnWillLoadNextBackgroundTab(
+      !force_load_timer_->IsRunning());
   BackgroundTabNavigationThrottle* throttle = pending_navigations_.front();
   pending_navigations_.erase(pending_navigations_.begin());
   ResumeNavigation(throttle);
+  stats_collector_->TrackBackgroundTabLoadAutoStarted();
+
+  StartForceLoadTimer();
 }
 
 void TabManager::ResumeTabNavigationIfNeeded(content::WebContents* contents) {
   BackgroundTabNavigationThrottle* throttle =
       RemovePendingNavigationIfNeeded(contents);
-  if (throttle)
+  if (throttle) {
     ResumeNavigation(throttle);
+    stats_collector_->TrackBackgroundTabLoadUserInitiated();
+  }
 }
 
 void TabManager::ResumeNavigation(BackgroundTabNavigationThrottle* throttle) {
-  content::NavigationHandle* navigation_handle = throttle->navigation_handle();
-  GetWebContentsData(navigation_handle->GetWebContents())
-      ->SetTabLoadingState(TAB_IS_LOADING);
-  loading_contents_.insert(navigation_handle->GetWebContents());
+  content::WebContents* contents =
+      throttle->navigation_handle()->GetWebContents();
+  GetWebContentsData(contents)->SetTabLoadingState(TAB_IS_LOADING);
+  loading_contents_.insert(contents);
+  TabUIHelper::FromWebContents(contents)->NotifyInitialNavigationDelayed(false);
 
   throttle->ResumeNavigation();
 }
@@ -1123,6 +1258,38 @@ BackgroundTabNavigationThrottle* TabManager::RemovePendingNavigationIfNeeded(
     it++;
   }
   return nullptr;
+}
+
+// static
+bool TabManager::ComparePendingNavigations(
+    const BackgroundTabNavigationThrottle* first,
+    const BackgroundTabNavigationThrottle* second) {
+  bool first_is_internal_page =
+      IsInternalPage(first->navigation_handle()->GetURL());
+  bool second_is_internal_page =
+      IsInternalPage(second->navigation_handle()->GetURL());
+
+  if (first_is_internal_page != second_is_internal_page)
+    return !first_is_internal_page;
+
+  return false;
+}
+
+int TabManager::GetNumAliveTabs() const {
+  int tab_count = 0;
+  for (auto* browser : *BrowserList::GetInstance()) {
+    TabStripModel* tab_strip_model = browser->tab_strip_model();
+    for (int index = 0; index < tab_strip_model->count(); ++index) {
+      content::WebContents* contents = tab_strip_model->GetWebContentsAt(index);
+      if (!IsTabDiscarded(contents))
+        ++tab_count;
+    }
+  }
+
+  tab_count -= pending_navigations_.size();
+  DCHECK_GE(tab_count, 0);
+
+  return tab_count;
 }
 
 bool TabManager::IsTabLoadingForTest(content::WebContents* contents) const {

@@ -29,16 +29,14 @@
 #ifndef AXARIAGrid_h
 #define AXARIAGrid_h
 
+#include "base/macros.h"
 #include "modules/accessibility/AXTable.h"
-#include "platform/wtf/Forward.h"
 
 namespace blink {
 
 class AXObjectCacheImpl;
 
 class AXARIAGrid final : public AXTable {
-  WTF_MAKE_NONCOPYABLE(AXARIAGrid);
-
  private:
   AXARIAGrid(LayoutObject*, AXObjectCacheImpl&);
 
@@ -58,10 +56,15 @@ class AXARIAGrid final : public AXTable {
   // ARIA treegrids and grids support selected rows.
   bool SupportsSelectedRows() override { return true; }
   bool IsTableExposableThroughAccessibility() const override { return true; }
+  bool ComputeIsDataTable() const override { return true; }
 
-  bool AddTableRowChild(AXObject*,
-                        HeapHashSet<Member<AXObject>>& appended_rows,
-                        unsigned& column_count);
+  void ComputeRows(AXObjectVector from_child_list);
+  bool AddRow(AXObject*);
+  unsigned CalculateNumColumns();
+  void AddColumnChildren(unsigned num_cols);
+  void AddHeaderContainerChild();
+
+  DISALLOW_COPY_AND_ASSIGN(AXARIAGrid);
 };
 
 }  // namespace blink

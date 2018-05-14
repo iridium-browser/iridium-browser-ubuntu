@@ -9,10 +9,11 @@
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/KURLHash.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/WeakPtr.h"
+#include "platform/wtf/Optional.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
@@ -61,7 +62,7 @@ class WebURLLoaderMockFactoryImpl : public WebURLLoaderMockFactory {
   // Called by the loader to load a resource.
   void LoadSynchronously(const WebURLRequest& request,
                          WebURLResponse* response,
-                         WebURLError* error,
+                         Optional<WebURLError>* error,
                          WebData* data,
                          int64_t* encoded_data_length);
   void LoadAsynchronouly(const WebURLRequest& request,
@@ -80,19 +81,19 @@ class WebURLLoaderMockFactoryImpl : public WebURLLoaderMockFactory {
 
   // Loads the specified request and populates the response, error and data
   // accordingly.
-  void LoadRequest(const WebURLRequest& request,
+  void LoadRequest(const WebURL& url,
                    WebURLResponse* response,
-                   WebURLError* error,
+                   Optional<WebURLError>* error,
                    WebData* data);
 
   // Checks if the loader is pending. Otherwise, it may have been deleted.
-  bool IsPending(WeakPtr<WebURLLoaderMock> loader);
+  bool IsPending(base::WeakPtr<WebURLLoaderMock> loader);
 
   // Looks up an URL in the mock URL table.
   //
   // If the URL is found, returns true and sets |error| and |response_info|.
   bool LookupURL(const WebURL& url,
-                 WebURLError* error,
+                 Optional<WebURLError>* error,
                  ResponseInfo* response_info);
 
   // Reads |m_filePath| and puts its content in |data|.
@@ -105,7 +106,9 @@ class WebURLLoaderMockFactoryImpl : public WebURLLoaderMockFactory {
   using LoaderToRequestMap = HashMap<WebURLLoaderMock*, WebURLRequest>;
   LoaderToRequestMap pending_loaders_;
 
-  typedef HashMap<KURL, WebURLError> URLToErrorMap;
+  // All values must be valid, but we use Optional because HashMap requires
+  // "empty value".
+  typedef HashMap<KURL, Optional<WebURLError>> URLToErrorMap;
   URLToErrorMap url_to_error_info_;
 
   // Table of the registered URLs and the responses that they should receive.

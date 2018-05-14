@@ -4,6 +4,8 @@
 
 #include "content/public/test/unittest_test_suite.h"
 
+#include "base/base_switches.h"
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
 #include "base/test/test_suite.h"
@@ -12,23 +14,30 @@
 #include "third_party/WebKit/public/web/WebKit.h"
 
 #if defined(USE_AURA)
-#include "ui/aura/env.h"
+#include "ui/aura/test/aura_test_suite_setup.h"
 #endif
 
 #if defined(USE_X11)
-#include <X11/Xlib.h>
+#include "ui/gfx/x/x11.h"
 #endif
 
 namespace content {
 
 UnitTestTestSuite::UnitTestTestSuite(base::TestSuite* test_suite)
     : test_suite_(test_suite) {
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  std::string enabled =
+      command_line->GetSwitchValueASCII(switches::kEnableFeatures);
+  std::string disabled =
+      command_line->GetSwitchValueASCII(switches::kDisableFeatures);
+  feature_list_.InitFromCommandLine(enabled, disabled);
+
 #if defined(USE_X11)
   XInitThreads();
 #endif
 #if defined(USE_AURA)
-  DCHECK(!aura::Env::GetInstanceDontCreate());
-  env_ = aura::Env::CreateInstance();
+  aura_test_suite_setup_ = std::make_unique<aura::AuraTestSuiteSetup>();
 #endif
   DCHECK(test_suite);
   blink_test_support_.reset(new TestBlinkWebUnitTestSupport);
@@ -37,7 +46,7 @@ UnitTestTestSuite::UnitTestTestSuite(base::TestSuite* test_suite)
 UnitTestTestSuite::~UnitTestTestSuite() {
   blink_test_support_.reset();
 #if defined(USE_AURA)
-  env_.reset();
+  aura_test_suite_setup_.reset();
 #endif
 }
 

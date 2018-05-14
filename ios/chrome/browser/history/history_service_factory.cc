@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_service.h"
@@ -74,15 +73,14 @@ std::unique_ptr<KeyedService> HistoryServiceFactory::BuildServiceInstanceFor(
       ios::ChromeBrowserState::FromBrowserState(context);
   std::unique_ptr<history::HistoryService> history_service(
       new history::HistoryService(
-          base::MakeUnique<HistoryClientImpl>(
+          std::make_unique<HistoryClientImpl>(
               ios::BookmarkModelFactory::GetForBrowserState(browser_state)),
           nullptr));
   if (!history_service->Init(history::HistoryDatabaseParamsForPath(
           browser_state->GetStatePath()))) {
     return nullptr;
   }
-  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
-  return std::move(history_service);
+  return history_service;
 }
 
 web::BrowserState* HistoryServiceFactory::GetBrowserStateToUse(

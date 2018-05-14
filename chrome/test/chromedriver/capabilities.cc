@@ -63,6 +63,17 @@ Status ParseInterval(int* to_set,
   return Status(kOk);
 }
 
+Status ParseTimeDelta(base::TimeDelta* to_set,
+                      const base::Value& option,
+                      Capabilities* capabilities) {
+  int milliseconds;
+  Status status = ParseInterval(&milliseconds, option, capabilities);
+  if (status.IsError())
+    return status;
+  *to_set = base::TimeDelta::FromMilliseconds(milliseconds);
+  return Status(kOk);
+}
+
 Status ParseFilePath(base::FilePath* to_set,
                      const base::Value& option,
                      Capabilities* capabilities) {
@@ -258,7 +269,7 @@ Status ParseProxy(const base::Value& option, Capabilities* capabilities) {
     std::string proxy_servers;
     for (size_t i = 0; i < arraysize(proxy_servers_options); ++i) {
       if (!proxy_dict->Get(proxy_servers_options[i][0], &option_value) ||
-          option_value->IsType(base::Value::Type::NONE)) {
+          option_value->is_none()) {
         continue;
       }
       std::string value;
@@ -277,8 +288,7 @@ Status ParseProxy(const base::Value& option, Capabilities* capabilities) {
     }
 
     std::string proxy_bypass_list;
-    if (proxy_dict->Get("noProxy", &option_value) &&
-        !option_value->IsType(base::Value::Type::NONE)) {
+    if (proxy_dict->Get("noProxy", &option_value) && !option_value->is_none()) {
       if (!option_value->GetAsString(&proxy_bypass_list))
         return Status(kUnknownError, "'noProxy' must be a string");
     }
@@ -383,8 +393,6 @@ Status ParsePerfLoggingPrefs(const base::Value& option,
       &ParseInspectorDomainStatus, &capabilities->perf_logging_prefs.network);
   parser_map["enablePage"] = base::Bind(
       &ParseInspectorDomainStatus, &capabilities->perf_logging_prefs.page);
-  parser_map["enableTimeline"] = base::Bind(
-      &ParseInspectorDomainStatus, &capabilities->perf_logging_prefs.timeline);
   parser_map["traceCategories"] = base::Bind(
       &ParseString, &capabilities->perf_logging_prefs.trace_categories);
 
@@ -466,6 +474,10 @@ Status ParseChromeOptions(
         base::Bind(&ParseString, &capabilities->android_package);
     parser_map["androidProcess"] =
         base::Bind(&ParseString, &capabilities->android_process);
+    parser_map["androidExecName"] =
+        base::BindRepeating(&ParseString, &capabilities->android_exec_name);
+    parser_map["androidDeviceSocket"] =
+        base::BindRepeating(&ParseString, &capabilities->android_device_socket);
     parser_map["androidUseRunningApp"] =
         base::Bind(&ParseBoolean, &capabilities->android_use_running_app);
     parser_map["args"] = base::Bind(&ParseSwitches);
@@ -479,6 +491,8 @@ Status ParseChromeOptions(
     parser_map["detach"] = base::Bind(&ParseBoolean, &capabilities->detach);
     parser_map["excludeSwitches"] = base::Bind(&ParseExcludeSwitches);
     parser_map["extensions"] = base::Bind(&ParseExtensions);
+    parser_map["extensionLoadTimeout"] =
+        base::Bind(&ParseTimeDelta, &capabilities->extension_load_timeout);
     parser_map["forceDevToolsScreenshot"] = base::Bind(
         &ParseBoolean, &capabilities->force_devtools_screenshot);
     parser_map["loadAsync"] = base::Bind(&IgnoreDeprecatedOption, "loadAsync");
@@ -620,7 +634,6 @@ std::string Switches::ToString() const {
 PerfLoggingPrefs::PerfLoggingPrefs()
     : network(InspectorDomainStatus::kDefaultEnabled),
       page(InspectorDomainStatus::kDefaultEnabled),
-      timeline(InspectorDomainStatus::kDefaultDisabled),
       trace_categories(),
       buffer_usage_reporting_interval(1000) {}
 
@@ -629,9 +642,11 @@ PerfLoggingPrefs::~PerfLoggingPrefs() {}
 Capabilities::Capabilities()
     : android_use_running_app(false),
       detach(false),
+      extension_load_timeout(base::TimeDelta::FromSeconds(10)),
       force_devtools_screenshot(true),
       page_load_strategy(PageLoadStrategy::kNormal),
       network_emulation_enabled(false),
+      accept_insecure_certs(false),
       use_automation_extension(true) {}
 
 Capabilities::~Capabilities() {}
@@ -659,6 +674,8 @@ Status Capabilities::Parse(const base::DictionaryValue& desired_caps) {
   parser_map["pageLoadStrategy"] = base::Bind(&ParsePageLoadStrategy);
   parser_map["unexpectedAlertBehaviour"] =
       base::Bind(&ParseUnexpectedAlertBehaviour);
+  parser_map["acceptInsecureCerts"] =
+      base::BindRepeating(&ParseBoolean, &accept_insecure_certs);
   // Network emulation requires device mode, which is only enabled when
   // mobile emulation is on.
   if (desired_caps.GetDictionary("goog:chromeOptions.mobileEmulation",

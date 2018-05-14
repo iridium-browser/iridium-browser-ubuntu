@@ -50,8 +50,8 @@ class ASH_EXPORT SystemModalContainerLayoutManager
                                intptr_t old) override;
 
   // Overridden from keyboard::KeyboardControllerObserver:
-  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
-  void OnKeyboardClosed() override;
+  void OnKeyboardWorkspaceOccludedBoundsChanged(
+      const gfx::Rect& new_bounds) override;
 
   // True if the window is either contained by the top most modal window,
   // or contained by its transient children.
@@ -77,6 +77,10 @@ class ASH_EXPORT SystemModalContainerLayoutManager
   // Removes |window| from |modal_windows_|. Returns true if |window| was in
   // |modal_windows_|.
   bool RemoveModalWindow(aura::Window* window);
+
+  // Called when a modal window is removed. It will activate another modal
+  // window if any, or remove modal screens on all displays.
+  void OnModalWindowRemoved(aura::Window* removed);
 
   // Reposition the dialogs to become visible after the work area changes.
   void PositionDialogsAfterWorkAreaResize();

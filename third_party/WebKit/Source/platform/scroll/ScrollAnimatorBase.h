@@ -43,6 +43,13 @@ class CompositorAnimationTimeline;
 class ScrollableArea;
 class Scrollbar;
 
+// ScrollAnimatorBase is the common base class for all user scroll animators.
+// Every scrollable area has a lazily-created animator for user-input scrolls
+// (ScrollableArea::scroll_animator_).
+//
+// ScrollAnimatorBase is directly instantiated when scroll animations are
+// disabled.  In this case, all scrolls are instantaneous.
+
 class PLATFORM_EXPORT ScrollAnimatorBase
     : public ScrollAnimatorCompositorCoordinator {
  public:
@@ -104,7 +111,7 @@ class PLATFORM_EXPORT ScrollAnimatorBase
 
   virtual bool SetScrollbarsVisibleForTesting(bool) { return false; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   explicit ScrollAnimatorBase(ScrollableArea*);

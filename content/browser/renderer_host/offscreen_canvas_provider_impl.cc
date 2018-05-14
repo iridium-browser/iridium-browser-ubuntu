@@ -5,6 +5,7 @@
 #include "content/browser/renderer_host/offscreen_canvas_provider_impl.h"
 
 #include "base/bind.h"
+#include "components/viz/host/host_frame_sink_manager.h"
 #include "content/browser/renderer_host/offscreen_canvas_surface_impl.h"
 
 namespace content {
@@ -25,8 +26,7 @@ void OffscreenCanvasProviderImpl::Add(
 void OffscreenCanvasProviderImpl::CreateOffscreenCanvasSurface(
     const viz::FrameSinkId& parent_frame_sink_id,
     const viz::FrameSinkId& frame_sink_id,
-    blink::mojom::OffscreenCanvasSurfaceClientPtr client,
-    blink::mojom::OffscreenCanvasSurfaceRequest request) {
+    blink::mojom::OffscreenCanvasSurfaceClientPtr client) {
   // TODO(kylechar): Kill the renderer too.
   if (parent_frame_sink_id.client_id() != renderer_client_id_) {
     DLOG(ERROR) << "Invalid parent client id " << parent_frame_sink_id;
@@ -41,15 +41,15 @@ void OffscreenCanvasProviderImpl::CreateOffscreenCanvasSurface(
       &OffscreenCanvasProviderImpl::DestroyOffscreenCanvasSurface,
       base::Unretained(this), frame_sink_id);
 
-  canvas_map_[frame_sink_id] = base::MakeUnique<OffscreenCanvasSurfaceImpl>(
+  canvas_map_[frame_sink_id] = std::make_unique<OffscreenCanvasSurfaceImpl>(
       host_frame_sink_manager_, parent_frame_sink_id, frame_sink_id,
-      std::move(client), std::move(request), std::move(destroy_callback));
+      std::move(client), std::move(destroy_callback));
 }
 
 void OffscreenCanvasProviderImpl::CreateCompositorFrameSink(
     const viz::FrameSinkId& frame_sink_id,
-    cc::mojom::CompositorFrameSinkClientPtr client,
-    cc::mojom::CompositorFrameSinkRequest request) {
+    viz::mojom::CompositorFrameSinkClientPtr client,
+    viz::mojom::CompositorFrameSinkRequest request) {
   // TODO(kylechar): Kill the renderer too.
   if (frame_sink_id.client_id() != renderer_client_id_) {
     DLOG(ERROR) << "Invalid client id " << frame_sink_id;

@@ -33,7 +33,9 @@ class IOBufferWithByteBuffer : public net::WrappedIOBuffer {
   jint initial_position() const { return initial_position_; }
   jint initial_limit() const { return initial_limit_; }
 
-  jobject byte_buffer() const { return byte_buffer_.obj(); }
+  const base::android::JavaRef<jobject>& byte_buffer() const {
+    return byte_buffer_;
+  }
 
  private:
   ~IOBufferWithByteBuffer() override;
@@ -44,6 +46,31 @@ class IOBufferWithByteBuffer : public net::WrappedIOBuffer {
   const jint initial_limit_;
 
   DISALLOW_COPY_AND_ASSIGN(IOBufferWithByteBuffer);
+};
+
+// Represents a Java direct ByteBuffer backed by a net::IOBuffer. Keeps both the
+// net::IOBuffer and the Java ByteBuffer object alive until destroyed.
+class ByteBufferWithIOBuffer {
+ public:
+  ByteBufferWithIOBuffer(JNIEnv* env,
+                         net::IOBuffer* io_buffer,
+                         int io_buffer_len);
+
+  ~ByteBufferWithIOBuffer();
+  const net::IOBuffer* io_buffer() const { return io_buffer_.get(); }
+  int io_buffer_len() const { return io_buffer_len_; }
+
+  const base::android::JavaRef<jobject>& byte_buffer() const {
+    return byte_buffer_;
+  }
+
+ private:
+  scoped_refptr<net::IOBuffer> io_buffer_;
+  int io_buffer_len_;
+
+  base::android::ScopedJavaGlobalRef<jobject> byte_buffer_;
+
+  DISALLOW_COPY_AND_ASSIGN(ByteBufferWithIOBuffer);
 };
 
 }  // namespace cronet

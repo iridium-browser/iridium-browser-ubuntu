@@ -99,7 +99,7 @@ Renderer9::Renderer9(egl::Display *display) : RendererD3D(display), mStateManage
             mDeviceType = D3DDEVTYPE_HAL;
             break;
 
-        case EGL_PLATFORM_ANGLE_DEVICE_TYPE_REFERENCE_ANGLE:
+        case EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_REFERENCE_ANGLE:
             mDeviceType = D3DDEVTYPE_REF;
             break;
 
@@ -132,8 +132,6 @@ Renderer9::Renderer9(egl::Display *display) : RendererD3D(display), mStateManage
     mAppliedProgramSerial = 0;
 
     gl::InitializeDebugAnnotations(&mAnnotator);
-
-    mEGLDevice = nullptr;
 }
 
 Renderer9::~Renderer9()
@@ -160,7 +158,6 @@ void Renderer9::release()
 
     releaseDeviceResources();
 
-    SafeDelete(mEGLDevice);
     SafeRelease(mDevice);
     SafeRelease(mDeviceEx);
     SafeRelease(mD3d9);
@@ -339,7 +336,7 @@ egl::Error Renderer9::initialize()
                                 mAdapter, mDeviceType, currentDisplayMode.Format,
                                 D3DUSAGE_QUERY_VERTEXTEXTURE, D3DRTYPE_TEXTURE, D3DFMT_R16F));
 
-    initializeDevice();
+    ANGLE_TRY(initializeDevice());
 
     return egl::NoError();
 }
@@ -347,7 +344,7 @@ egl::Error Renderer9::initialize()
 // do any one-time device initialization
 // NOTE: this is also needed after a device lost/reset
 // to reset the scene status and ensure the default states are reset.
-void Renderer9::initializeDevice()
+egl::Error Renderer9::initializeDevice()
 {
     // Permanent non-default states
     mDevice->SetRenderState(D3DRS_POINTSPRITEENABLE, TRUE);
@@ -376,15 +373,22 @@ void Renderer9::initializeDevice()
 
     ASSERT(!mBlit);
     mBlit = new Blit9(this);
-    mBlit->initialize();
+    ANGLE_TRY(mBlit->initialize());
 
     ASSERT(!mVertexDataManager && !mIndexDataManager);
     mVertexDataManager = new VertexDataManager(this);
-    mIndexDataManager  = new IndexDataManager(this, getRendererClass());
+    mIndexDataManager  = new IndexDataManager(this);
+
+    if (mVertexDataManager->initialize().isError())
+    {
+        return egl::EglBadAlloc() << "Error initializing VertexDataManager";
+    }
 
     mTranslatedAttribCache.resize(getNativeCaps().maxVertexAttributes);
 
     mStateManager.initialize();
+
+    return egl::NoError();
 }
 
 D3DPRESENT_PARAMETERS Renderer9::getDefaultPresentParameters()
@@ -570,6 +574,8 @@ void Renderer9::generateDisplayExtensions(egl::DisplayExtensions *outExtensions)
 
     // D3D9 can be used without an output surface
     outExtensions->surfacelessContext = true;
+
+    outExtensions->robustResourceInitialization = true;
 }
 
 void Renderer9::startScene()
@@ -719,7 +725,7 @@ egl::Error Renderer9::getD3DTextureInfo(const egl::Config *config,
                                         IUnknown *d3dTexture,
                                         EGLint *width,
                                         EGLint *height,
-                                        GLenum *fboFormat) const
+                                        const angle::Format **angleFormat) const
 {
     IDirect3DTexture9 *texture = nullptr;
     if (FAILED(d3dTexture->QueryInterface(&texture)))
@@ -763,11 +769,11 @@ egl::Error Renderer9::getD3DTextureInfo(const egl::Config *config,
                    << "Unknown client buffer texture format: " << desc.Format;
     }
 
-    if (fboFormat)
+    if (angleFormat)
     {
         const auto &d3dFormatInfo = d3d9::GetD3DFormatInfo(desc.Format);
         ASSERT(d3dFormatInfo.info().id != angle::Format::ID::NONE);
-        *fboFormat = d3dFormatInfo.info().fboImplementationInternalFormat;
+        *angleFormat = &d3dFormatInfo.info();
     }
 
     return egl::NoError();
@@ -897,7 +903,7 @@ IndexBuffer *Renderer9::createIndexBuffer()
     return new IndexBuffer9(this);
 }
 
-StreamProducerImpl *Renderer9::createStreamProducerD3DTextureNV12(
+StreamProducerImpl *Renderer9::createStreamProducerD3DTexture(
     egl::Stream::ConsumerType consumerType,
     const egl::AttributeMap &attribs)
 {
@@ -926,13 +932,14 @@ gl::Error Renderer9::fastCopyBufferToTexture(const gl::Context *context,
 }
 
 gl::Error Renderer9::setSamplerState(const gl::Context *context,
-                                     gl::SamplerType type,
+                                     gl::ShaderType type,
                                      int index,
                                      gl::Texture *texture,
                                      const gl::SamplerState &samplerState)
 {
-    CurSamplerState &appliedSampler = (type == gl::SAMPLER_PIXEL) ? mCurPixelSamplerStates[index]
-                                                                  : mCurVertexSamplerStates[index];
+    CurSamplerState &appliedSampler = (type == gl::SHADER_FRAGMENT)
+                                          ? mCurPixelSamplerStates[index]
+                                          : mCurVertexSamplerStates[index];
 
     // Make sure to add the level offset for our tiny compressed texture workaround
     TextureD3D *textureD3D = GetImplAs<TextureD3D>(texture);
@@ -948,7 +955,7 @@ gl::Error Renderer9::setSamplerState(const gl::Context *context,
     if (appliedSampler.forceSet || appliedSampler.baseLevel != baseLevel ||
         memcmp(&samplerState, &appliedSampler, sizeof(gl::SamplerState)) != 0)
     {
-        int d3dSamplerOffset = (type == gl::SAMPLER_PIXEL) ? 0 : D3DVERTEXTEXTURESAMPLER0;
+        int d3dSamplerOffset = (type == gl::SHADER_FRAGMENT) ? 0 : D3DVERTEXTEXTURESAMPLER0;
         int d3dSampler       = index + d3dSamplerOffset;
 
         mDevice->SetSamplerState(d3dSampler, D3DSAMP_ADDRESSU,
@@ -984,17 +991,17 @@ gl::Error Renderer9::setSamplerState(const gl::Context *context,
 }
 
 gl::Error Renderer9::setTexture(const gl::Context *context,
-                                gl::SamplerType type,
+                                gl::ShaderType type,
                                 int index,
                                 gl::Texture *texture)
 {
-    int d3dSamplerOffset              = (type == gl::SAMPLER_PIXEL) ? 0 : D3DVERTEXTEXTURESAMPLER0;
+    int d3dSamplerOffset = (type == gl::SHADER_FRAGMENT) ? 0 : D3DVERTEXTEXTURESAMPLER0;
     int d3dSampler                    = index + d3dSamplerOffset;
     IDirect3DBaseTexture9 *d3dTexture = nullptr;
     bool forceSetTexture              = false;
 
     std::vector<uintptr_t> &appliedTextures =
-        (type == gl::SAMPLER_PIXEL) ? mCurPixelTextures : mCurVertexTextures;
+        (type == gl::SHADER_FRAGMENT) ? mCurPixelTextures : mCurVertexTextures;
 
     if (texture)
     {
@@ -1027,18 +1034,9 @@ gl::Error Renderer9::setTexture(const gl::Context *context,
     return gl::NoError();
 }
 
-gl::Error Renderer9::setUniformBuffers(const gl::ContextState & /*data*/,
-                                       const std::vector<GLint> & /*vertexUniformBuffers*/,
-                                       const std::vector<GLint> & /*fragmentUniformBuffers*/)
-{
-    // No effect in ES2/D3D9
-    return gl::NoError();
-}
-
 gl::Error Renderer9::updateState(const gl::Context *context, GLenum drawMode)
 {
-    const auto &data    = context->getContextState();
-    const auto &glState = data.getState();
+    const auto &glState = context->getGLState();
 
     // Applies the render target surface, depth stencil surface, viewport rectangle and
     // scissor rectangle to the renderer
@@ -1059,7 +1057,7 @@ gl::Error Renderer9::updateState(const gl::Context *context, GLenum drawMode)
     // the sample counts that we set in render target view, here we use renderTarget->getSamples to
     // get the actual samples.
     GLsizei samples           = 0;
-    auto firstColorAttachment = framebuffer->getFirstColorbuffer();
+    const gl::FramebufferAttachment *firstColorAttachment = framebuffer->getFirstColorbuffer();
     if (firstColorAttachment)
     {
         ASSERT(firstColorAttachment->isAttached());
@@ -1071,7 +1069,7 @@ gl::Error Renderer9::updateState(const gl::Context *context, GLenum drawMode)
     rasterizer.pointDrawMode       = (drawMode == GL_POINTS);
     rasterizer.multiSample         = (samples != 0);
 
-    unsigned int mask = GetBlendSampleMask(data, samples);
+    unsigned int mask = GetBlendSampleMask(glState, samples);
     ANGLE_TRY(setBlendDepthRasterStates(context, mask));
 
     mStateManager.resetDirtyBits();
@@ -1087,13 +1085,13 @@ void Renderer9::setScissorRectangle(const gl::Rectangle &scissor, bool enabled)
 gl::Error Renderer9::setBlendDepthRasterStates(const gl::Context *context, GLenum drawMode)
 {
     const auto &glState  = context->getGLState();
-    auto drawFramebuffer = glState.getDrawFramebuffer();
+    gl::Framebuffer *drawFramebuffer = glState.getDrawFramebuffer();
     ASSERT(!drawFramebuffer->hasAnyDirtyBit());
     // Since framebuffer->getSamples will return the original samples which may be different with
     // the sample counts that we set in render target view, here we use renderTarget->getSamples to
     // get the actual samples.
     GLsizei samples           = 0;
-    auto firstColorAttachment = drawFramebuffer->getFirstColorbuffer();
+    const gl::FramebufferAttachment *firstColorAttachment = drawFramebuffer->getFirstColorbuffer();
     if (firstColorAttachment)
     {
         ASSERT(firstColorAttachment->isAttached());
@@ -1105,7 +1103,7 @@ gl::Error Renderer9::setBlendDepthRasterStates(const gl::Context *context, GLenu
     rasterizer.pointDrawMode       = (drawMode == GL_POINTS);
     rasterizer.multiSample         = (samples != 0);
 
-    unsigned int mask = GetBlendSampleMask(context->getContextState(), samples);
+    unsigned int mask = GetBlendSampleMask(glState, samples);
     return mStateManager.setBlendDepthRasterStates(glState, mask);
 }
 
@@ -1183,7 +1181,7 @@ gl::Error Renderer9::getNullColorbuffer(const gl::Context *context,
 
     auto *implFactory = context->getImplementation();
 
-    gl::Renderbuffer *nullRenderbuffer = new gl::Renderbuffer(implFactory->createRenderbuffer(), 0);
+    gl::Renderbuffer *nullRenderbuffer = new gl::Renderbuffer(implFactory, 0);
     gl::Error error = nullRenderbuffer->setStorage(context, GL_NONE, size.width, size.height);
     if (error.isError())
     {
@@ -1313,14 +1311,15 @@ gl::Error Renderer9::applyRenderTarget(const gl::Context *context,
                              framebuffer->getDepthOrStencilbuffer());
 }
 
-gl::Error Renderer9::applyVertexBuffer(const gl::State &state,
+gl::Error Renderer9::applyVertexBuffer(const gl::Context *context,
                                        GLenum mode,
                                        GLint first,
                                        GLsizei count,
                                        GLsizei instances,
                                        TranslatedIndexData * /*indexInfo*/)
 {
-    gl::Error error = mVertexDataManager->prepareVertexData(state, first, count,
+    const gl::State &state = context->getGLState();
+    gl::Error error        = mVertexDataManager->prepareVertexData(context, first, count,
                                                             &mTranslatedAttribCache, instances);
     if (error.isError())
     {
@@ -1332,21 +1331,21 @@ gl::Error Renderer9::applyVertexBuffer(const gl::State &state,
 }
 
 // Applies the indices and element array bindings to the Direct3D 9 device
-gl::Error Renderer9::applyIndexBuffer(const gl::ContextState &data,
+gl::Error Renderer9::applyIndexBuffer(const gl::Context *context,
                                       const void *indices,
                                       GLsizei count,
                                       GLenum mode,
                                       GLenum type,
                                       TranslatedIndexData *indexInfo)
 {
-    gl::VertexArray *vao           = data.getState().getVertexArray();
+    gl::VertexArray *vao           = context->getGLState().getVertexArray();
     gl::Buffer *elementArrayBuffer = vao->getElementArrayBuffer().get();
-    gl::Error error = mIndexDataManager->prepareIndexData(type, count, elementArrayBuffer, indices,
-                                                          indexInfo, false);
-    if (error.isError())
-    {
-        return error;
-    }
+    const auto &lazyIndexRange     = context->getParams<gl::HasIndexRange>();
+
+    GLenum dstType = GetIndexTranslationDestType(type, lazyIndexRange, false);
+
+    ANGLE_TRY(mIndexDataManager->prepareIndexData(context, type, dstType, count, elementArrayBuffer,
+                                                  indices, indexInfo));
 
     // Directly binding the storage buffer is not supported for d3d9
     ASSERT(indexInfo->storage == nullptr);
@@ -1362,25 +1361,19 @@ gl::Error Renderer9::applyIndexBuffer(const gl::ContextState &data,
     return gl::NoError();
 }
 
-gl::Error Renderer9::applyTransformFeedbackBuffers(const gl::State &state)
-{
-    ASSERT(!state.isTransformFeedbackActiveUnpaused());
-    return gl::NoError();
-}
-
-gl::Error Renderer9::drawArraysImpl(const gl::ContextState &data,
+gl::Error Renderer9::drawArraysImpl(const gl::Context *context,
                                     GLenum mode,
                                     GLint startVertex,
                                     GLsizei count,
                                     GLsizei instances)
 {
-    ASSERT(!data.getState().isTransformFeedbackActiveUnpaused());
+    ASSERT(!context->getGLState().isTransformFeedbackActiveUnpaused());
 
     startScene();
 
     if (mode == GL_LINE_LOOP)
     {
-        return drawLineLoop(count, GL_NONE, nullptr, 0, nullptr);
+        return drawLineLoop(context, count, GL_NONE, nullptr, 0, nullptr);
     }
     else if (instances > 0)
     {
@@ -1413,32 +1406,40 @@ gl::Error Renderer9::drawArraysImpl(const gl::ContextState &data,
     }
 }
 
-gl::Error Renderer9::drawElementsImpl(const gl::ContextState &data,
-                                      const TranslatedIndexData &indexInfo,
+gl::Error Renderer9::drawElementsImpl(const gl::Context *context,
                                       GLenum mode,
                                       GLsizei count,
                                       GLenum type,
                                       const void *indices,
-                                      GLsizei /*instances*/)
+                                      GLsizei instances)
 {
+    TranslatedIndexData indexInfo;
+
+    ANGLE_TRY(applyIndexBuffer(context, indices, count, mode, type, &indexInfo));
+
+    const auto &lazyIndexRange       = context->getParams<gl::HasIndexRange>();
+    const gl::IndexRange &indexRange = lazyIndexRange.getIndexRange().value();
+    size_t vertexCount               = indexRange.vertexCount();
+    ANGLE_TRY(applyVertexBuffer(context, mode, static_cast<GLsizei>(indexRange.start),
+                                static_cast<GLsizei>(vertexCount), instances, &indexInfo));
+
     startScene();
 
-    int minIndex = static_cast<int>(indexInfo.indexRange.start);
+    int minIndex = static_cast<int>(indexRange.start);
 
-    gl::VertexArray *vao           = data.getState().getVertexArray();
+    gl::VertexArray *vao           = context->getGLState().getVertexArray();
     gl::Buffer *elementArrayBuffer = vao->getElementArrayBuffer().get();
 
     if (mode == GL_POINTS)
     {
-        return drawIndexedPoints(count, type, indices, minIndex, elementArrayBuffer);
+        return drawIndexedPoints(context, count, type, indices, minIndex, elementArrayBuffer);
     }
     else if (mode == GL_LINE_LOOP)
     {
-        return drawLineLoop(count, type, indices, minIndex, elementArrayBuffer);
+        return drawLineLoop(context, count, type, indices, minIndex, elementArrayBuffer);
     }
     else
     {
-        size_t vertexCount = indexInfo.indexRange.vertexCount();
         for (int i = 0; i < mRepeatDraw; i++)
         {
             mDevice->DrawIndexedPrimitive(mPrimitiveType, -minIndex, minIndex,
@@ -1449,7 +1450,8 @@ gl::Error Renderer9::drawElementsImpl(const gl::ContextState &data,
     }
 }
 
-gl::Error Renderer9::drawLineLoop(GLsizei count,
+gl::Error Renderer9::drawLineLoop(const gl::Context *context,
+                                  GLsizei count,
                                   GLenum type,
                                   const void *indices,
                                   int minIndex,
@@ -1461,7 +1463,7 @@ gl::Error Renderer9::drawLineLoop(GLsizei count,
         BufferD3D *storage        = GetImplAs<BufferD3D>(elementArrayBuffer);
         intptr_t offset           = reinterpret_cast<intptr_t>(indices);
         const uint8_t *bufferData = nullptr;
-        gl::Error error           = storage->getData(&bufferData);
+        gl::Error error           = storage->getData(context, &bufferData);
         if (error.isError())
         {
             return error;
@@ -1667,7 +1669,8 @@ static gl::Error drawPoints(IDirect3DDevice9 *device,
     return gl::NoError();
 }
 
-gl::Error Renderer9::drawIndexedPoints(GLsizei count,
+gl::Error Renderer9::drawIndexedPoints(const gl::Context *context,
+                                       GLsizei count,
                                        GLenum type,
                                        const void *indices,
                                        int minIndex,
@@ -1682,7 +1685,7 @@ gl::Error Renderer9::drawIndexedPoints(GLsizei count,
         intptr_t offset    = reinterpret_cast<intptr_t>(indices);
 
         const uint8_t *bufferData = nullptr;
-        gl::Error error           = storage->getData(&bufferData);
+        gl::Error error           = storage->getData(context, &bufferData);
         if (error.isError())
         {
             return error;
@@ -1716,14 +1719,10 @@ gl::Error Renderer9::getCountingIB(size_t count, StaticIndexBufferInterface **ou
         {
             SafeDelete(mCountingIB);
             mCountingIB = new StaticIndexBufferInterface(this);
-            mCountingIB->reserveBufferSpace(spaceNeeded, GL_UNSIGNED_SHORT);
+            ANGLE_TRY(mCountingIB->reserveBufferSpace(spaceNeeded, GL_UNSIGNED_SHORT));
 
             void *mappedMemory = nullptr;
-            gl::Error error    = mCountingIB->mapBuffer(spaceNeeded, &mappedMemory, nullptr);
-            if (error.isError())
-            {
-                return error;
-            }
+            ANGLE_TRY(mCountingIB->mapBuffer(spaceNeeded, &mappedMemory, nullptr));
 
             unsigned short *data = reinterpret_cast<unsigned short *>(mappedMemory);
             for (size_t i = 0; i < count; i++)
@@ -1731,11 +1730,7 @@ gl::Error Renderer9::getCountingIB(size_t count, StaticIndexBufferInterface **ou
                 data[i] = static_cast<unsigned short>(i);
             }
 
-            error = mCountingIB->unmapBuffer();
-            if (error.isError())
-            {
-                return error;
-            }
+            ANGLE_TRY(mCountingIB->unmapBuffer());
         }
     }
     else if (getNativeExtensions().elementIndexUint)
@@ -1746,14 +1741,10 @@ gl::Error Renderer9::getCountingIB(size_t count, StaticIndexBufferInterface **ou
         {
             SafeDelete(mCountingIB);
             mCountingIB = new StaticIndexBufferInterface(this);
-            mCountingIB->reserveBufferSpace(spaceNeeded, GL_UNSIGNED_INT);
+            ANGLE_TRY(mCountingIB->reserveBufferSpace(spaceNeeded, GL_UNSIGNED_INT));
 
             void *mappedMemory = nullptr;
-            gl::Error error    = mCountingIB->mapBuffer(spaceNeeded, &mappedMemory, nullptr);
-            if (error.isError())
-            {
-                return error;
-            }
+            ANGLE_TRY(mCountingIB->mapBuffer(spaceNeeded, &mappedMemory, nullptr));
 
             unsigned int *data = reinterpret_cast<unsigned int *>(mappedMemory);
             for (unsigned int i = 0; i < count; i++)
@@ -1761,11 +1752,7 @@ gl::Error Renderer9::getCountingIB(size_t count, StaticIndexBufferInterface **ou
                 data[i] = i;
             }
 
-            error = mCountingIB->unmapBuffer();
-            if (error.isError())
-            {
-                return error;
-            }
+            ANGLE_TRY(mCountingIB->unmapBuffer());
         }
     }
     else
@@ -1785,16 +1772,17 @@ gl::Error Renderer9::applyShaders(const gl::Context *context, GLenum drawMode)
     ANGLE_TRY(ensureHLSLCompilerInitialized());
 
     ProgramD3D *programD3D = GetImplAs<ProgramD3D>(state.getProgram());
-    programD3D->updateCachedInputLayout(state);
-
-    const auto &inputLayout = programD3D->getCachedInputLayout();
+    VertexArray9 *vao      = GetImplAs<VertexArray9>(state.getVertexArray());
+    programD3D->updateCachedInputLayout(vao->getCurrentStateSerial(), state);
 
     ShaderExecutableD3D *vertexExe = nullptr;
-    ANGLE_TRY(programD3D->getVertexExecutableForInputLayout(inputLayout, &vertexExe, nullptr));
+    ANGLE_TRY(programD3D->getVertexExecutableForCachedInputLayout(&vertexExe, nullptr));
 
     const gl::Framebuffer *drawFramebuffer = state.getDrawFramebuffer();
-    ShaderExecutableD3D *pixelExe          = nullptr;
-    ANGLE_TRY(programD3D->getPixelExecutableForFramebuffer(context, drawFramebuffer, &pixelExe));
+    programD3D->updateCachedOutputLayout(context, drawFramebuffer);
+
+    ShaderExecutableD3D *pixelExe = nullptr;
+    ANGLE_TRY(programD3D->getPixelExecutableForCachedOutputLayout(&pixelExe, nullptr));
 
     IDirect3DVertexShader9 *vertexShader =
         (vertexExe ? GetAs<ShaderExecutable9>(vertexExe)->getVertexShader() : nullptr);
@@ -1826,22 +1814,35 @@ gl::Error Renderer9::applyShaders(const gl::Context *context, GLenum drawMode)
         mAppliedProgramSerial = programSerial;
     }
 
-    return programD3D->applyUniforms(drawMode);
+    ANGLE_TRY(applyUniforms(programD3D));
+
+    // Driver uniforms
+    mStateManager.setShaderConstants();
+
+    return gl::NoError();
 }
 
-gl::Error Renderer9::applyUniforms(const ProgramD3D &programD3D,
-                                   GLenum /*drawMode*/,
-                                   const std::vector<D3DUniform *> &uniformArray)
+gl::Error Renderer9::applyUniforms(ProgramD3D *programD3D)
 {
+    // Skip updates if we're not dirty. Note that D3D9 cannot have compute.
+    if (!programD3D->areVertexUniformsDirty() && !programD3D->areFragmentUniformsDirty())
+    {
+        return gl::NoError();
+    }
+
+    const auto &uniformArray = programD3D->getD3DUniforms();
+
     for (const D3DUniform *targetUniform : uniformArray)
     {
-        if (!targetUniform->dirty)
+        // Built-in uniforms must be skipped.
+        if (!targetUniform->isReferencedByFragmentShader() &&
+            !targetUniform->isReferencedByVertexShader())
             continue;
 
-        GLfloat *f = (GLfloat *)targetUniform->data;
-        GLint *i   = (GLint *)targetUniform->data;
+        const GLfloat *f = reinterpret_cast<const GLfloat *>(targetUniform->firstNonNullData());
+        const GLint *i   = reinterpret_cast<const GLint *>(targetUniform->firstNonNullData());
 
-        switch (targetUniform->type)
+        switch (targetUniform->typeInfo.type)
         {
             case GL_SAMPLER_2D:
             case GL_SAMPLER_CUBE:
@@ -1873,9 +1874,7 @@ gl::Error Renderer9::applyUniforms(const ProgramD3D &programD3D,
         }
     }
 
-    // Driver uniforms
-    mStateManager.setShaderConstants();
-
+    programD3D->markUniformsClean();
     return gl::NoError();
 }
 
@@ -2353,7 +2352,10 @@ bool Renderer9::resetDevice()
     if (!removedDevice)
     {
         // reset device defaults
-        initializeDevice();
+        if (initializeDevice().isError())
+        {
+            return false;
+        }
     }
 
     return true;
@@ -2441,16 +2443,6 @@ unsigned int Renderer9::getReservedVertexUniformVectors() const
 unsigned int Renderer9::getReservedFragmentUniformVectors() const
 {
     return d3d9_gl::GetReservedFragmentUniformVectors();
-}
-
-unsigned int Renderer9::getReservedVertexUniformBuffers() const
-{
-    return 0;
-}
-
-unsigned int Renderer9::getReservedFragmentUniformBuffers() const
-{
-    return 0;
 }
 
 bool Renderer9::getShareHandleSupport() const
@@ -2563,6 +2555,7 @@ gl::Error Renderer9::copyTexture(const gl::Context *context,
                                  GLint sourceLevel,
                                  const gl::Rectangle &sourceRect,
                                  GLenum destFormat,
+                                 GLenum destType,
                                  const gl::Offset &destOffset,
                                  TextureStorage *storage,
                                  GLenum destTarget,
@@ -2691,7 +2684,7 @@ gl::Error Renderer9::createRenderTargetCopy(RenderTargetD3D *source, RenderTarge
 
 gl::Error Renderer9::loadExecutable(const uint8_t *function,
                                     size_t length,
-                                    ShaderType type,
+                                    gl::ShaderType type,
                                     const std::vector<D3DVarying> &streamOutVaryings,
                                     bool separatedOutputBuffers,
                                     ShaderExecutableD3D **outExecutable)
@@ -2701,7 +2694,7 @@ gl::Error Renderer9::loadExecutable(const uint8_t *function,
 
     switch (type)
     {
-        case SHADER_VERTEX:
+        case gl::SHADER_VERTEX:
         {
             IDirect3DVertexShader9 *vshader = nullptr;
             gl::Error error = createVertexShader((DWORD *)function, length, &vshader);
@@ -2712,7 +2705,7 @@ gl::Error Renderer9::loadExecutable(const uint8_t *function,
             *outExecutable = new ShaderExecutable9(function, length, vshader);
         }
         break;
-        case SHADER_PIXEL:
+        case gl::SHADER_FRAGMENT:
         {
             IDirect3DPixelShader9 *pshader = nullptr;
             gl::Error error                = createPixelShader((DWORD *)function, length, &pshader);
@@ -2733,7 +2726,7 @@ gl::Error Renderer9::loadExecutable(const uint8_t *function,
 
 gl::Error Renderer9::compileToExecutable(gl::InfoLog &infoLog,
                                          const std::string &shaderHLSL,
-                                         ShaderType type,
+                                         gl::ShaderType type,
                                          const std::vector<D3DVarying> &streamOutVaryings,
                                          bool separatedOutputBuffers,
                                          const angle::CompilerWorkaroundsD3D &workarounds,
@@ -2746,10 +2739,10 @@ gl::Error Renderer9::compileToExecutable(gl::InfoLog &infoLog,
 
     switch (type)
     {
-        case SHADER_VERTEX:
+        case gl::SHADER_VERTEX:
             profileStream << "vs";
             break;
-        case SHADER_PIXEL:
+        case gl::SHADER_FRAGMENT:
             profileStream << "ps";
             break;
         default:
@@ -2878,7 +2871,7 @@ gl::Error Renderer9::copyToRenderTarget(IDirect3DSurface9 *dest,
 
         if (SUCCEEDED(result))
         {
-            Image9::copyLockableSurfaces(surf, source);
+            ANGLE_TRY(Image9::copyLockableSurfaces(surf, source));
             result = mDevice->UpdateSurface(surf, nullptr, dest, nullptr);
             SafeRelease(surf);
         }
@@ -2896,6 +2889,11 @@ gl::Error Renderer9::copyToRenderTarget(IDirect3DSurface9 *dest,
     }
 
     return gl::NoError();
+}
+
+RendererClass Renderer9::getRendererClass() const
+{
+    return RENDERER_D3D9;
 }
 
 ImageD3D *Renderer9::createImage()
@@ -2927,8 +2925,10 @@ gl::Error Renderer9::copyImage(const gl::Context *context,
                                bool unpackPremultiplyAlpha,
                                bool unpackUnmultiplyAlpha)
 {
-    UNREACHABLE();
-    return gl::NoError();
+    Image9 *dest9 = GetAs<Image9>(dest);
+    Image9 *src9  = GetAs<Image9>(source);
+    return Image9::CopyImage(context, dest9, src9, sourceRect, destOffset, unpackFlipY,
+                             unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
 }
 
 TextureStorage *Renderer9::createTextureStorage2D(SwapChainD3D *swapChain)
@@ -3002,12 +3002,12 @@ TextureStorage *Renderer9::createTextureStorage2DMultisample(GLenum internalform
                                                              GLsizei height,
                                                              int levels,
                                                              int samples,
-                                                             GLboolean fixedSampleLocations)
+                                                             bool fixedSampleLocations)
 {
     // 2D multisampled textures are not supported by the D3D9 backend.
     UNREACHABLE();
 
-    return NULL;
+    return nullptr;
 }
 
 bool Renderer9::getLUID(LUID *adapterLuid) const
@@ -3082,38 +3082,9 @@ angle::WorkaroundsD3D Renderer9::generateWorkarounds() const
     return d3d9::GenerateWorkarounds();
 }
 
-gl::Error Renderer9::clearTextures(const gl::Context *context,
-                                   gl::SamplerType samplerType,
-                                   size_t rangeStart,
-                                   size_t rangeEnd)
+DeviceImpl *Renderer9::createEGLDevice()
 {
-    // TODO(jmadill): faster way?
-    for (size_t samplerIndex = rangeStart; samplerIndex < rangeEnd; samplerIndex++)
-    {
-        ANGLE_TRY(setTexture(context, samplerType, static_cast<int>(samplerIndex), nullptr));
-    }
-
-    return gl::NoError();
-}
-
-egl::Error Renderer9::getEGLDevice(DeviceImpl **device)
-{
-    if (mEGLDevice == nullptr)
-    {
-        ASSERT(mDevice != nullptr);
-        mEGLDevice       = new DeviceD3D();
-        egl::Error error = mEGLDevice->initialize(reinterpret_cast<void *>(mDevice),
-                                                  EGL_D3D9_DEVICE_ANGLE, EGL_FALSE);
-
-        if (error.isError())
-        {
-            SafeDelete(mEGLDevice);
-            return error;
-        }
-    }
-
-    *device = static_cast<DeviceImpl *>(mEGLDevice);
-    return egl::NoError();
+    return new DeviceD3D(EGL_D3D9_DEVICE_ANGLE, mDevice);
 }
 
 Renderer9::CurSamplerState::CurSamplerState()
@@ -3126,8 +3097,7 @@ gl::Error Renderer9::genericDrawElements(const gl::Context *context,
                                          GLsizei count,
                                          GLenum type,
                                          const void *indices,
-                                         GLsizei instances,
-                                         const gl::IndexRange &indexRange)
+                                         GLsizei instances)
 {
     const auto &data     = context->getContextState();
     gl::Program *program = context->getGLState().getProgram();
@@ -3143,29 +3113,12 @@ gl::Error Renderer9::genericDrawElements(const gl::Context *context,
     }
 
     ANGLE_TRY(updateState(context, mode));
-
-    TranslatedIndexData indexInfo;
-    indexInfo.indexRange = indexRange;
-
-    ANGLE_TRY(applyIndexBuffer(data, indices, count, mode, type, &indexInfo));
-
-    applyTransformFeedbackBuffers(data.getState());
-    // Transform feedback is not allowed for DrawElements, this error should have been caught at the
-    // API validation
-    // layer.
-    ASSERT(!data.getState().isTransformFeedbackActiveUnpaused());
-
-    size_t vertexCount = indexInfo.indexRange.vertexCount();
-    ANGLE_TRY(applyVertexBuffer(data.getState(), mode,
-                                static_cast<GLsizei>(indexInfo.indexRange.start),
-                                static_cast<GLsizei>(vertexCount), instances, &indexInfo));
     ANGLE_TRY(applyTextures(context));
     ANGLE_TRY(applyShaders(context, mode));
-    ANGLE_TRY(programD3D->applyUniformBuffers(data));
 
-    if (!skipDraw(data, mode))
+    if (!skipDraw(data.getState(), mode))
     {
-        ANGLE_TRY(drawElementsImpl(data, indexInfo, mode, count, type, indices, instances));
+        ANGLE_TRY(drawElementsImpl(context, mode, count, type, indices, instances));
     }
 
     return gl::NoError();
@@ -3177,7 +3130,6 @@ gl::Error Renderer9::genericDrawArrays(const gl::Context *context,
                                        GLsizei count,
                                        GLsizei instances)
 {
-    const auto &data     = context->getContextState();
     gl::Program *program = context->getGLState().getProgram();
     ASSERT(program != nullptr);
     ProgramD3D *programD3D = GetImplAs<ProgramD3D>(program);
@@ -3191,20 +3143,13 @@ gl::Error Renderer9::genericDrawArrays(const gl::Context *context,
     }
 
     ANGLE_TRY(updateState(context, mode));
-    ANGLE_TRY(applyTransformFeedbackBuffers(data.getState()));
-    ANGLE_TRY(applyVertexBuffer(data.getState(), mode, first, count, instances, nullptr));
+    ANGLE_TRY(applyVertexBuffer(context, mode, first, count, instances, nullptr));
     ANGLE_TRY(applyTextures(context));
     ANGLE_TRY(applyShaders(context, mode));
-    ANGLE_TRY(programD3D->applyUniformBuffers(data));
 
-    if (!skipDraw(data, mode))
+    if (!skipDraw(context->getGLState(), mode))
     {
-        ANGLE_TRY(drawArraysImpl(data, mode, first, count, instances));
-
-        if (data.getState().isTransformFeedbackActiveUnpaused())
-        {
-            ANGLE_TRY(markTransformFeedbackUsage(data));
-        }
+        ANGLE_TRY(drawArraysImpl(context, mode, first, count, instances));
     }
 
     return gl::NoError();
@@ -3220,17 +3165,130 @@ gl::Version Renderer9::getMaxSupportedESVersion() const
     return gl::Version(2, 0);
 }
 
-gl::Error Renderer9::applyComputeUniforms(const ProgramD3D &programD3D,
-                                          const std::vector<D3DUniform *> &uniformArray)
+gl::Error Renderer9::clearRenderTarget(RenderTargetD3D *renderTarget,
+                                       const gl::ColorF &clearColorValue,
+                                       const float clearDepthValue,
+                                       const unsigned int clearStencilValue)
 {
-    UNIMPLEMENTED();
-    return gl::InternalError() << "Compute shader is not implemented on D3D9";
+    D3DCOLOR color =
+        D3DCOLOR_ARGB(gl::unorm<8>(clearColorValue.alpha), gl::unorm<8>(clearColorValue.red),
+                      gl::unorm<8>(clearColorValue.green), gl::unorm<8>(clearColorValue.blue));
+    float depth   = clearDepthValue;
+    DWORD stencil = clearStencilValue & 0x000000FF;
+
+    unsigned int renderTargetSerial        = renderTarget->getSerial();
+    RenderTarget9 *renderTarget9           = GetAs<RenderTarget9>(renderTarget);
+    IDirect3DSurface9 *renderTargetSurface = renderTarget9->getSurface();
+    ASSERT(renderTargetSurface);
+
+    DWORD dxClearFlags = 0;
+
+    const gl::InternalFormat &internalFormatInfo =
+        gl::GetSizedInternalFormatInfo(renderTarget->getInternalFormat());
+    if (internalFormatInfo.depthBits > 0 || internalFormatInfo.stencilBits > 0)
+    {
+        dxClearFlags = D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL;
+        if (mAppliedDepthStencilSerial != renderTargetSerial)
+        {
+            mDevice->SetDepthStencilSurface(renderTargetSurface);
+        }
+    }
+    else
+    {
+        dxClearFlags = D3DCLEAR_TARGET;
+        if (mAppliedRenderTargetSerial != renderTargetSerial)
+        {
+            mDevice->SetRenderTarget(0, renderTargetSurface);
+        }
+    }
+    SafeRelease(renderTargetSurface);
+
+    D3DVIEWPORT9 viewport;
+    viewport.X      = 0;
+    viewport.Y      = 0;
+    viewport.Width  = renderTarget->getWidth();
+    viewport.Height = renderTarget->getHeight();
+    mDevice->SetViewport(&viewport);
+
+    mDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+
+    mDevice->Clear(0, nullptr, dxClearFlags, color, depth, stencil);
+
+    markAllStateDirty();
+
+    return gl::NoError();
 }
 
-gl::Error Renderer9::clearRenderTarget(RenderTargetD3D *renderTarget, const gl::ColorF &clearValues)
+bool Renderer9::canSelectViewInVertexShader() const
 {
-    UNIMPLEMENTED();
-    return gl::InternalError() << "clearRenderTarget is not implemented on D3D9";
+    return false;
+}
+
+// For each Direct3D sampler of either the pixel or vertex stage,
+// looks up the corresponding OpenGL texture image unit and texture type,
+// and sets the texture and its addressing/filtering state (or NULL when inactive).
+// Sampler mapping needs to be up-to-date on the program object before this is called.
+gl::Error Renderer9::applyTextures(const gl::Context *context, gl::ShaderType shaderType)
+{
+    const auto &glState    = context->getGLState();
+    const auto &caps       = context->getCaps();
+    ProgramD3D *programD3D = GetImplAs<ProgramD3D>(glState.getProgram());
+
+    ASSERT(!programD3D->isSamplerMappingDirty());
+
+    // TODO(jmadill): Use the Program's sampler bindings.
+    const auto &completeTextures = glState.getCompleteTextureCache();
+
+    unsigned int samplerRange = programD3D->getUsedSamplerRange(shaderType);
+    for (unsigned int samplerIndex = 0; samplerIndex < samplerRange; samplerIndex++)
+    {
+        GLint textureUnit = programD3D->getSamplerMapping(shaderType, samplerIndex, caps);
+        ASSERT(textureUnit != -1);
+        gl::Texture *texture = completeTextures[textureUnit];
+
+        // A nullptr texture indicates incomplete.
+        if (texture)
+        {
+            gl::Sampler *samplerObject = glState.getSampler(textureUnit);
+
+            const gl::SamplerState &samplerState =
+                samplerObject ? samplerObject->getSamplerState() : texture->getSamplerState();
+
+            ANGLE_TRY(setSamplerState(context, shaderType, samplerIndex, texture, samplerState));
+            ANGLE_TRY(setTexture(context, shaderType, samplerIndex, texture));
+        }
+        else
+        {
+            GLenum textureType = programD3D->getSamplerTextureType(shaderType, samplerIndex);
+
+            // Texture is not sampler complete or it is in use by the framebuffer.  Bind the
+            // incomplete texture.
+            gl::Texture *incompleteTexture = nullptr;
+            ANGLE_TRY(getIncompleteTexture(context, textureType, &incompleteTexture));
+            ANGLE_TRY(setSamplerState(context, shaderType, samplerIndex, incompleteTexture,
+                                      incompleteTexture->getSamplerState()));
+            ANGLE_TRY(setTexture(context, shaderType, samplerIndex, incompleteTexture));
+        }
+    }
+
+    // Set all the remaining textures to NULL
+    size_t samplerCount = (shaderType == gl::SHADER_FRAGMENT) ? caps.maxTextureImageUnits
+                                                              : caps.maxVertexTextureImageUnits;
+
+    // TODO(jmadill): faster way?
+    for (size_t samplerIndex = samplerRange; samplerIndex < samplerCount; samplerIndex++)
+    {
+        ANGLE_TRY(setTexture(context, shaderType, static_cast<int>(samplerIndex), nullptr));
+    }
+
+    return gl::NoError();
+}
+
+gl::Error Renderer9::applyTextures(const gl::Context *context)
+{
+    ANGLE_TRY(applyTextures(context, gl::SHADER_VERTEX));
+    ANGLE_TRY(applyTextures(context, gl::SHADER_FRAGMENT));
+    return gl::NoError();
 }
 
 }  // namespace rx

@@ -26,19 +26,23 @@
 #include "platform/graphics/GraphicsLayer.h"
 
 #include <memory>
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/animation/CompositorAnimation.h"
+#include "platform/animation/CompositorAnimationClient.h"
 #include "platform/animation/CompositorAnimationHost.h"
-#include "platform/animation/CompositorAnimationPlayer.h"
-#include "platform/animation/CompositorAnimationPlayerClient.h"
 #include "platform/animation/CompositorAnimationTimeline.h"
 #include "platform/animation/CompositorFloatAnimationCurve.h"
+#include "platform/animation/CompositorKeyframeModel.h"
 #include "platform/animation/CompositorTargetProperty.h"
 #include "platform/graphics/CompositorElementId.h"
+#include "platform/graphics/paint/PaintControllerTest.h"
+#include "platform/graphics/paint/PropertyTreeState.h"
+#include "platform/graphics/paint/ScopedPaintChunkProperties.h"
+#include "platform/graphics/test/FakeScrollableArea.h"
 #include "platform/scheduler/child/web_scheduler.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "platform/testing/FakeGraphicsLayer.h"
 #include "platform/testing/FakeGraphicsLayerClient.h"
+#include "platform/testing/PaintTestConfigurations.h"
 #include "platform/testing/WebLayerTreeViewImplForTesting.h"
 #include "platform/transforms/Matrix3DTransformOperation.h"
 #include "platform/transforms/RotateTransformOperation.h"
@@ -53,13 +57,15 @@
 
 namespace blink {
 
-class GraphicsLayerTest : public ::testing::Test {
+class GraphicsLayerTest : public ::testing::Test,
+                          public PaintTestConfigurations {
  public:
   GraphicsLayerTest() {
-    clip_layer_ = WTF::WrapUnique(new FakeGraphicsLayer(&client_));
-    scroll_elasticity_layer_ = WTF::WrapUnique(new FakeGraphicsLayer(&client_));
-    page_scale_layer_ = WTF::WrapUnique(new FakeGraphicsLayer(&client_));
-    graphics_layer_ = WTF::WrapUnique(new FakeGraphicsLayer(&client_));
+    clip_layer_ = WTF::WrapUnique(new FakeGraphicsLayer(client_));
+    scroll_elasticity_layer_ = WTF::WrapUnique(new FakeGraphicsLayer(client_));
+    page_scale_layer_ = WTF::WrapUnique(new FakeGraphicsLayer(client_));
+    graphics_layer_ = WTF::WrapUnique(new FakeGraphicsLayer(client_));
+    graphics_layer_->SetDrawsContent(true);
     clip_layer_->AddChild(scroll_elasticity_layer_.get());
     scroll_elasticity_layer_->AddChild(page_scale_layer_.get());
     page_scale_layer_->AddChild(graphics_layer_.get());
@@ -77,6 +83,11 @@ class GraphicsLayerTest : public ::testing::Test {
     viewport_layers.inner_viewport_scroll = graphics_layer_->PlatformLayer();
     layer_tree_view_->RegisterViewportLayers(viewport_layers);
     layer_tree_view_->SetViewportSize(WebSize(1, 1));
+
+    if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
+      graphics_layer_->SetLayerState(
+          PropertyTreeState(PropertyTreeState::Root()), IntPoint());
+    }
   }
 
   ~GraphicsLayerTest() override {
@@ -87,31 +98,39 @@ class GraphicsLayerTest : public ::testing::Test {
   WebLayerTreeView* LayerTreeView() { return layer_tree_view_.get(); }
 
  protected:
+  bool PaintWithoutCommit(GraphicsLayer& layer, const IntRect* interest_rect) {
+    return layer.PaintWithoutCommit(interest_rect);
+  }
+
   WebLayer* platform_layer_;
   std::unique_ptr<FakeGraphicsLayer> graphics_layer_;
   std::unique_ptr<FakeGraphicsLayer> page_scale_layer_;
   std::unique_ptr<FakeGraphicsLayer> scroll_elasticity_layer_;
   std::unique_ptr<FakeGraphicsLayer> clip_layer_;
+  FakeGraphicsLayerClient client_;
 
  private:
-  std::unique_ptr<WebLayerTreeView> layer_tree_view_;
-  FakeGraphicsLayerClient client_;
+  std::unique_ptr<WebLayerTreeViewImplForTesting> layer_tree_view_;
 };
 
-class AnimationPlayerForTesting : public CompositorAnimationPlayerClient {
+INSTANTIATE_TEST_CASE_P(All,
+                        GraphicsLayerTest,
+                        ::testing::Values(0, kSlimmingPaintV175));
+
+class AnimationForTesting : public CompositorAnimationClient {
  public:
-  AnimationPlayerForTesting() {
-    compositor_player_ = CompositorAnimationPlayer::Create();
+  AnimationForTesting() {
+    compositor_animation_ = CompositorAnimation::Create();
   }
 
-  CompositorAnimationPlayer* CompositorPlayer() const override {
-    return compositor_player_.get();
+  CompositorAnimation* GetCompositorAnimation() const override {
+    return compositor_animation_.get();
   }
 
-  std::unique_ptr<CompositorAnimationPlayer> compositor_player_;
+  std::unique_ptr<CompositorAnimation> compositor_animation_;
 };
 
-TEST_F(GraphicsLayerTest, updateLayerShouldFlattenTransformWithAnimations) {
+TEST_P(GraphicsLayerTest, updateLayerShouldFlattenTransformWithAnimations) {
   ASSERT_FALSE(platform_layer_->HasTickingAnimationForTesting());
 
   std::unique_ptr<CompositorFloatAnimationCurve> curve =
@@ -120,26 +139,28 @@ TEST_F(GraphicsLayerTest, updateLayerShouldFlattenTransformWithAnimations) {
       CompositorFloatKeyframe(0.0, 0.0,
                               *CubicBezierTimingFunction::Preset(
                                   CubicBezierTimingFunction::EaseType::EASE)));
-  std::unique_ptr<CompositorAnimation> float_animation(
-      CompositorAnimation::Create(*curve, CompositorTargetProperty::OPACITY, 0,
-                                  0));
-  int animation_id = float_animation->Id();
+  std::unique_ptr<CompositorKeyframeModel> float_keyframe_model(
+      CompositorKeyframeModel::Create(*curve, CompositorTargetProperty::OPACITY,
+                                      0, 0));
+  int keyframe_model_id = float_keyframe_model->Id();
 
   std::unique_ptr<CompositorAnimationTimeline> compositor_timeline =
       CompositorAnimationTimeline::Create();
-  AnimationPlayerForTesting player;
+  AnimationForTesting animation;
 
   CompositorAnimationHost host(LayerTreeView()->CompositorAnimationHost());
 
   host.AddTimeline(*compositor_timeline);
-  compositor_timeline->PlayerAttached(player);
+  compositor_timeline->AnimationAttached(animation);
 
   platform_layer_->SetElementId(CompositorElementId(platform_layer_->Id()));
 
-  player.CompositorPlayer()->AttachElement(platform_layer_->GetElementId());
-  ASSERT_TRUE(player.CompositorPlayer()->IsElementAttached());
+  animation.GetCompositorAnimation()->AttachElement(
+      platform_layer_->GetElementId());
+  ASSERT_TRUE(animation.GetCompositorAnimation()->IsElementAttached());
 
-  player.CompositorPlayer()->AddAnimation(std::move(float_animation));
+  animation.GetCompositorAnimation()->AddKeyframeModel(
+      std::move(float_keyframe_model));
 
   ASSERT_TRUE(platform_layer_->HasTickingAnimationForTesting());
 
@@ -149,7 +170,7 @@ TEST_F(GraphicsLayerTest, updateLayerShouldFlattenTransformWithAnimations) {
   ASSERT_TRUE(platform_layer_);
 
   ASSERT_TRUE(platform_layer_->HasTickingAnimationForTesting());
-  player.CompositorPlayer()->RemoveAnimation(animation_id);
+  animation.GetCompositorAnimation()->RemoveKeyframeModel(keyframe_model_id);
   ASSERT_FALSE(platform_layer_->HasTickingAnimationForTesting());
 
   graphics_layer_->SetShouldFlattenTransform(true);
@@ -159,57 +180,72 @@ TEST_F(GraphicsLayerTest, updateLayerShouldFlattenTransformWithAnimations) {
 
   ASSERT_FALSE(platform_layer_->HasTickingAnimationForTesting());
 
-  player.CompositorPlayer()->DetachElement();
-  ASSERT_FALSE(player.CompositorPlayer()->IsElementAttached());
+  animation.GetCompositorAnimation()->DetachElement();
+  ASSERT_FALSE(animation.GetCompositorAnimation()->IsElementAttached());
 
-  compositor_timeline->PlayerDestroyed(player);
+  compositor_timeline->AnimationDestroyed(animation);
   host.RemoveTimeline(*compositor_timeline.get());
 }
 
-class FakeScrollableArea : public GarbageCollectedFinalized<FakeScrollableArea>,
-                           public ScrollableArea {
-  USING_GARBAGE_COLLECTED_MIXIN(FakeScrollableArea);
+TEST_P(GraphicsLayerTest, Paint) {
+  IntRect interest_rect(1, 2, 3, 4);
+  EXPECT_TRUE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
+  graphics_layer_->GetPaintController().CommitNewDisplayItems();
 
- public:
-  static FakeScrollableArea* Create() { return new FakeScrollableArea; }
+  client_.SetNeedsRepaint(true);
+  EXPECT_TRUE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
+  graphics_layer_->GetPaintController().CommitNewDisplayItems();
 
-  bool IsActive() const override { return false; }
-  int ScrollSize(ScrollbarOrientation) const override { return 100; }
-  bool IsScrollCornerVisible() const override { return false; }
-  IntRect ScrollCornerRect() const override { return IntRect(); }
-  IntRect VisibleContentRect(
-      IncludeScrollbarsInRect = kExcludeScrollbars) const override {
-    return IntRect(ScrollOffsetInt().Width(), ScrollOffsetInt().Height(), 10,
-                   10);
-  }
-  IntSize ContentsSize() const override { return IntSize(100, 100); }
-  bool ScrollbarsCanBeActive() const override { return false; }
-  IntRect ScrollableAreaBoundingBox() const override { return IntRect(); }
-  void ScrollControlWasSetNeedsPaintInvalidation() override {}
-  bool UserInputScrollable(ScrollbarOrientation) const override { return true; }
-  bool ShouldPlaceVerticalScrollbarOnLeft() const override { return false; }
-  int PageStep(ScrollbarOrientation) const override { return 0; }
-  IntSize MinimumScrollOffsetInt() const override { return IntSize(); }
-  IntSize MaximumScrollOffsetInt() const override {
-    return ContentsSize() - IntSize(VisibleWidth(), VisibleHeight());
-  }
+  client_.SetNeedsRepaint(false);
+  EXPECT_FALSE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
 
-  void UpdateScrollOffset(const ScrollOffset& offset, ScrollType) override {
-    scroll_offset_ = offset;
-  }
-  ScrollOffset GetScrollOffset() const override { return scroll_offset_; }
-  IntSize ScrollOffsetInt() const override {
-    return FlooredIntSize(scroll_offset_);
-  }
+  interest_rect.Move(IntSize(10, 20));
+  EXPECT_TRUE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
+  graphics_layer_->GetPaintController().CommitNewDisplayItems();
+  EXPECT_FALSE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
 
-  RefPtr<WebTaskRunner> GetTimerTaskRunner() const final {
-    return Platform::Current()->CurrentThread()->Scheduler()->TimerTaskRunner();
-  }
+  graphics_layer_->SetNeedsDisplay();
+  EXPECT_TRUE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
+  graphics_layer_->GetPaintController().CommitNewDisplayItems();
+  EXPECT_FALSE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
+}
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { ScrollableArea::Trace(visitor); }
+TEST_P(GraphicsLayerTest, PaintRecursively) {
+  if (!RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
+    return;
 
- private:
-  ScrollOffset scroll_offset_;
-};
+  IntRect interest_rect(1, 2, 3, 4);
+  auto transform_root = TransformPaintPropertyNode::Root();
+  auto transform1 = TransformPaintPropertyNode::Create(
+      transform_root, TransformationMatrix().Translate(10, 20), FloatPoint3D());
+  auto transform2 = TransformPaintPropertyNode::Create(
+      transform1, TransformationMatrix().Scale(2), FloatPoint3D());
+
+  client_.SetPainter([&](const GraphicsLayer* layer, GraphicsContext& context,
+                         GraphicsLayerPaintingPhase, const IntRect&) {
+    {
+      ScopedPaintChunkProperties properties(
+          context.GetPaintController(), transform1, *layer, kBackgroundType);
+      PaintControllerTestBase::DrawRect(context, *layer, kBackgroundType,
+                                        interest_rect);
+    }
+    {
+      ScopedPaintChunkProperties properties(
+          context.GetPaintController(), transform2, *layer, kForegroundType);
+      PaintControllerTestBase::DrawRect(context, *layer, kForegroundType,
+                                        interest_rect);
+    }
+  });
+
+  transform1->Update(transform_root, TransformationMatrix().Translate(20, 30),
+                     FloatPoint3D());
+  EXPECT_TRUE(transform1->Changed(*transform_root));
+  EXPECT_TRUE(transform2->Changed(*transform_root));
+  client_.SetNeedsRepaint(true);
+  graphics_layer_->PaintRecursively();
+
+  EXPECT_FALSE(transform1->Changed(*transform_root));
+  EXPECT_FALSE(transform2->Changed(*transform_root));
+}
 
 }  // namespace blink

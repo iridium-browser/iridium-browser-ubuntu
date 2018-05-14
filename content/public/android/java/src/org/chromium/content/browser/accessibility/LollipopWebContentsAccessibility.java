@@ -14,13 +14,11 @@ import android.os.Build;
 import android.text.SpannableString;
 import android.text.style.LocaleSpan;
 import android.util.SparseArray;
-import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction;
 
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.content.browser.RenderCoordinates;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.Locale;
@@ -34,26 +32,24 @@ public class LollipopWebContentsAccessibility extends KitKatWebContentsAccessibi
     private static SparseArray<AccessibilityAction> sAccessibilityActionMap =
             new SparseArray<AccessibilityAction>();
     private String mSystemLanguageTag;
+    private BroadcastReceiver mBroadcastReceiver;
 
-    LollipopWebContentsAccessibility(Context context, ViewGroup containerView,
-            WebContents webContents, RenderCoordinates renderCoordinates,
-            boolean shouldFocusOnPageLoad) {
-        super(context, containerView, webContents, renderCoordinates, shouldFocusOnPageLoad);
+    LollipopWebContentsAccessibility(WebContents webContents) {
+        super(webContents);
+    }
 
-        // Cache the system language and set up a listener for when it changes.
-        try {
-            IntentFilter filter = new IntentFilter(Intent.ACTION_LOCALE_CHANGED);
-            context.registerReceiver(new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    mSystemLanguageTag = Locale.getDefault().toLanguageTag();
-                }
-            }, filter);
-        } catch (ReceiverCallNotAllowedException e) {
-            // WebView may be running inside a BroadcastReceiver, in which case registerReceiver is
-            // not allowed.
-        }
-        mSystemLanguageTag = Locale.getDefault().toLanguageTag();
+    @Override
+    protected void onNativeInit() {
+        super.onNativeInit();
+        mBroadcastReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                mSystemLanguageTag = Locale.getDefault().toLanguageTag();
+            }
+        };
+
+        // Register a broadcast receiver for locale change for Lollipop or higher version.
+        if (mView.isAttachedToWindow()) registerLocaleChangeReceiver();
     }
 
     @Override
@@ -157,5 +153,30 @@ public class LollipopWebContentsAccessibility extends KitKatWebContentsAccessibi
             return spannable;
         }
         return charSequence;
+    }
+
+    @Override
+    public void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        if (!isNativeInitialized()) return;
+        mContext.getApplicationContext().unregisterReceiver(mBroadcastReceiver);
+    }
+
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        registerLocaleChangeReceiver();
+    }
+
+    private void registerLocaleChangeReceiver() {
+        if (!isNativeInitialized()) return;
+        try {
+            IntentFilter filter = new IntentFilter(Intent.ACTION_LOCALE_CHANGED);
+            mContext.getApplicationContext().registerReceiver(mBroadcastReceiver, filter);
+        } catch (ReceiverCallNotAllowedException e) {
+            // WebView may be running inside a BroadcastReceiver, in which case registerReceiver is
+            // not allowed.
+        }
+        mSystemLanguageTag = Locale.getDefault().toLanguageTag();
     }
 }

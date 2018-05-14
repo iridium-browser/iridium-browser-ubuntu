@@ -7,7 +7,9 @@ package org.chromium.chrome.browser.customtabs;
 import android.app.PendingIntent;
 import android.app.PendingIntent.CanceledException;
 import android.content.Intent;
+import android.content.res.Resources;
 import android.net.Uri;
+import android.support.annotation.Nullable;
 import android.support.customtabs.CustomTabsIntent;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -22,8 +24,11 @@ import org.chromium.base.Log;
 import org.chromium.base.metrics.CachedMetrics;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.contextualsearch.ContextualSearchManager;
+import org.chromium.chrome.browser.contextualsearch.ContextualSearchObserver;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager.FullscreenListener;
+import org.chromium.chrome.browser.gsa.GSAContextDisplaySelection;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
 
@@ -76,29 +81,25 @@ class CustomTabBottomBarDelegate implements FullscreenListener {
             mClickableIDs = mDataProvider.getClickableViewIDs();
             mClickPendingIntent = mDataProvider.getRemoteViewsPendingIntent();
             showRemoteViews(remoteViews);
-        } else {
-            List<CustomButtonParams> items = mDataProvider.getCustomButtonsOnBottombar();
-            if (items.isEmpty()) return;
-            LinearLayout layout = new LinearLayout(mActivity);
-            layout.setId(R.id.custom_tab_bottom_bar_wrapper);
-            layout.setBackgroundColor(mDataProvider.getBottomBarColor());
-            for (CustomButtonParams params : items) {
-                if (params.showOnToolbar()) continue;
-                final PendingIntent pendingIntent = params.getPendingIntent();
-                OnClickListener clickListener = null;
-                if (pendingIntent != null) {
-                    clickListener = new OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            sendPendingIntentWithUrl(pendingIntent, null, mActivity);
-                        }
-                    };
-                }
-                layout.addView(
-                        params.buildBottomBarButton(mActivity, getBottomBarView(), clickListener));
-            }
-            getBottomBarView().addView(layout);
+            return;
         }
+
+        List<CustomButtonParams> items = mDataProvider.getCustomButtonsOnBottombar();
+        if (items.isEmpty()) return;
+        LinearLayout layout = new LinearLayout(mActivity);
+        layout.setId(R.id.custom_tab_bottom_bar_wrapper);
+        layout.setBackgroundColor(mDataProvider.getBottomBarColor());
+        for (CustomButtonParams params : items) {
+            if (params.showOnToolbar()) continue;
+            final PendingIntent pendingIntent = params.getPendingIntent();
+            OnClickListener clickListener = null;
+            if (pendingIntent != null) {
+                clickListener = v -> sendPendingIntentWithUrl(pendingIntent, null, mActivity);
+            }
+            layout.addView(
+                    params.buildBottomBarButton(mActivity, getBottomBarView(), clickListener));
+        }
+        getBottomBarView().addView(layout);
     }
 
     /**
@@ -127,14 +128,14 @@ class CustomTabBottomBarDelegate implements FullscreenListener {
             hideBottomBar();
             mClickableIDs = null;
             mClickPendingIntent = null;
+            return true;
         } else {
             // TODO: investigate updating the RemoteViews without replacing the entire hierarchy.
             mClickableIDs = clickableIDs;
             mClickPendingIntent = pendingIntent;
             if (getBottomBarView().getChildCount() > 1) getBottomBarView().removeViewAt(1);
-            showRemoteViews(remoteViews);
+            return showRemoteViews(remoteViews);
         }
-        return true;
     }
 
     /**
@@ -159,6 +160,34 @@ class CustomTabBottomBarDelegate implements FullscreenListener {
         return mBottomBarView;
     }
 
+    public void addContextualSearchObserver() {
+        ContextualSearchManager manager = mActivity.getContextualSearchManager();
+        if (manager != null) {
+            ContextualSearchObserver observer = new ContextualSearchObserver() {
+                @Override
+                public void onShowContextualSearch(
+                        @Nullable GSAContextDisplaySelection selectionContext) {
+                    if (mBottomBarView == null) return;
+                    mBottomBarView.animate()
+                            .alpha(0)
+                            .setInterpolator(BakedBezierInterpolator.TRANSFORM_CURVE)
+                            .setDuration(SLIDE_ANIMATION_DURATION_MS)
+                            .start();
+                }
+                @Override
+                public void onHideContextualSearch() {
+                    if (mBottomBarView == null) return;
+                    mBottomBarView.animate()
+                            .alpha(1)
+                            .setInterpolator(BakedBezierInterpolator.TRANSFORM_CURVE)
+                            .setDuration(SLIDE_ANIMATION_DURATION_MS)
+                            .start();
+                }
+            };
+            manager.addObserver(observer);
+        }
+    }
+
     private void hideBottomBar() {
         if (mBottomBarView == null) return;
         mBottomBarView.animate().alpha(0f).translationY(mBottomBarView.getHeight())
@@ -174,24 +203,34 @@ class CustomTabBottomBarDelegate implements FullscreenListener {
         mFullscreenManager.setBottomControlsHeight(0);
     }
 
-    private void showRemoteViews(RemoteViews remoteViews) {
-        final View inflatedView = remoteViews.apply(mActivity, getBottomBarView());
-        if (mClickableIDs != null && mClickPendingIntent != null) {
-            for (int id: mClickableIDs) {
-                if (id < 0) return;
-                View view = inflatedView.findViewById(id);
-                if (view != null) view.setOnClickListener(mBottomBarClickListener);
+    private boolean showRemoteViews(RemoteViews remoteViews) {
+        try {
+            final View inflatedView =
+                    remoteViews.apply(mActivity.getApplicationContext(), getBottomBarView());
+            if (mClickableIDs != null && mClickPendingIntent != null) {
+                for (int id: mClickableIDs) {
+                    if (id < 0) return false;
+                    View view = inflatedView.findViewById(id);
+                    if (view != null) view.setOnClickListener(mBottomBarClickListener);
+                }
             }
+            getBottomBarView().addView(inflatedView, 1);
+            inflatedView.addOnLayoutChangeListener(new OnLayoutChangeListener() {
+                @Override
+                public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                        int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                    inflatedView.removeOnLayoutChangeListener(this);
+                    mFullscreenManager.setBottomControlsHeight(v.getHeight());
+                }
+            });
+            return true;
+        } catch (RemoteViews.ActionException e) {
+            Log.e(TAG, "Failed to inflate the RemoteViews", e);
+            return false;
+        } catch (Resources.NotFoundException e) {
+            Log.e(TAG, "Failed to inflate the RemoteViews", e);
+            return false;
         }
-        getBottomBarView().addView(inflatedView, 1);
-        inflatedView.addOnLayoutChangeListener(new OnLayoutChangeListener() {
-            @Override
-            public void onLayoutChange(View v, int left, int top, int right, int bottom,
-                    int oldLeft, int oldTop, int oldRight, int oldBottom) {
-                inflatedView.removeOnLayoutChangeListener(this);
-                mFullscreenManager.setBottomControlsHeight(v.getHeight());
-            }
-        });
     }
 
     private static void sendPendingIntentWithUrl(PendingIntent pendingIntent, Intent extraIntent,

@@ -9,6 +9,7 @@
 
 #include <limits>
 #include <memory>
+#include <utility>
 
 #include "base/files/file.h"
 #include "base/macros.h"
@@ -18,7 +19,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -179,13 +179,12 @@ int GetMaxPersistentId() {
 // The order must match as the index is used in determining the raw id.
 bool InputScalesValid(const base::StringPiece& input,
                       const std::vector<ui::ScaleFactor>& expected) {
-  size_t scales_size = static_cast<size_t>(input.size() / sizeof(float));
-  if (scales_size != expected.size())
+  if (input.size() != expected.size() * sizeof(float))
     return false;
-  std::unique_ptr<float[]> scales(new float[scales_size]);
+  std::unique_ptr<float[]> scales(new float[expected.size()]);
   // Do a memcpy to avoid misaligned memory access.
   memcpy(scales.get(), input.data(), input.size());
-  for (size_t index = 0; index < scales_size; ++index) {
+  for (size_t index = 0; index < expected.size(); ++index) {
     if (scales[index] != ui::GetScaleForScaleFactor(expected[index]))
       return false;
   }
@@ -277,13 +276,6 @@ const IntToIntTable kFrameTintMap[] = {
   { PRS_THEME_FRAME_INCOGNITO, ThemeProperties::TINT_FRAME_INCOGNITO },
   { PRS_THEME_FRAME_INCOGNITO_INACTIVE,
     ThemeProperties::TINT_FRAME_INCOGNITO_INACTIVE },
-};
-
-// Mapping used in GenerateTabBackgroundImages() to associate what frame image
-// goes with which tab background.
-const IntToIntTable kTabBackgroundMap[] = {
-  { PRS_THEME_TAB_BACKGROUND, PRS_THEME_FRAME },
-  { PRS_THEME_TAB_BACKGROUND_INCOGNITO, PRS_THEME_FRAME_INCOGNITO },
 };
 
 struct CropEntry {
@@ -497,26 +489,32 @@ class ThemeImagePngSource : public gfx::ImageSkiaSource {
 
 class TabBackgroundImageSource: public gfx::CanvasImageSource {
  public:
-  TabBackgroundImageSource(const gfx::ImageSkia& image_to_tint,
+  TabBackgroundImageSource(SkColor background_color,
+                           const gfx::ImageSkia& image_to_tint,
                            const gfx::ImageSkia& overlay,
                            const color_utils::HSL& hsl_shift,
                            int vertical_offset)
-      : gfx::CanvasImageSource(image_to_tint.size(), false),
+      : gfx::CanvasImageSource(
+            image_to_tint.isNull() ? overlay.size() : image_to_tint.size(),
+            false),
+        background_color_(background_color),
         image_to_tint_(image_to_tint),
         overlay_(overlay),
         hsl_shift_(hsl_shift),
-        vertical_offset_(vertical_offset) {
-  }
+        vertical_offset_(vertical_offset) {}
 
   ~TabBackgroundImageSource() override {}
 
   // Overridden from CanvasImageSource:
   void Draw(gfx::Canvas* canvas) override {
-    gfx::ImageSkia bg_tint =
-        gfx::ImageSkiaOperations::CreateHSLShiftedImage(image_to_tint_,
-            hsl_shift_);
-    canvas->TileImageInt(bg_tint, 0, vertical_offset_, 0, 0,
-        size().width(), size().height());
+    canvas->DrawColor(background_color_);
+
+    if (!image_to_tint_.isNull()) {
+      gfx::ImageSkia bg_tint = gfx::ImageSkiaOperations::CreateHSLShiftedImage(
+          image_to_tint_, hsl_shift_);
+      canvas->TileImageInt(bg_tint, 0, vertical_offset_, 0, 0, size().width(),
+                           size().height());
+    }
 
     // If they've provided a custom image, overlay it.
     if (!overlay_.isNull()) {
@@ -526,6 +524,7 @@ class TabBackgroundImageSource: public gfx::CanvasImageSource {
   }
 
  private:
+  const SkColor background_color_;
   const gfx::ImageSkia image_to_tint_;
   const gfx::ImageSkia overlay_;
   const color_utils::HSL hsl_shift_;
@@ -591,9 +590,8 @@ void BrowserThemePack::BuildFromExtension(
   for (ImageCache::iterator it = pack->images_.begin();
        it != pack->images_.end(); ++it) {
     const gfx::ImageSkia source_image_skia = it->second.AsImageSkia();
-    ThemeImageSource* source = new ThemeImageSource(source_image_skia);
-    // image_skia takes ownership of source.
-    gfx::ImageSkia image_skia(source, source_image_skia.size());
+    auto source = std::make_unique<ThemeImageSource>(source_image_skia);
+    gfx::ImageSkia image_skia(std::move(source), source_image_skia.size());
     it->second = gfx::Image(image_skia);
   }
 
@@ -792,7 +790,7 @@ gfx::Image BrowserThemePack::GetImageNamed(int idr_id) {
       png_map[scale_factors_[i]] = memory;
   }
   if (!png_map.empty()) {
-    gfx::ImageSkia image_skia(base::MakeUnique<ThemeImagePngSource>(png_map),
+    gfx::ImageSkia image_skia(std::make_unique<ThemeImagePngSource>(png_map),
                               1.0f);
     gfx::Image ret = gfx::Image(image_skia);
     images_[prs_id] = ret;
@@ -1069,7 +1067,7 @@ void BrowserThemePack::ParseImageNamesFromJSON(
 
   for (base::DictionaryValue::Iterator iter(*images_value); !iter.IsAtEnd();
        iter.Advance()) {
-    if (iter.value().IsType(base::Value::Type::DICTIONARY)) {
+    if (iter.value().is_dict()) {
       const base::DictionaryValue* inner_value = NULL;
       if (iter.value().GetAsDictionary(&inner_value)) {
         for (base::DictionaryValue::Iterator inner_iter(*inner_value);
@@ -1078,7 +1076,7 @@ void BrowserThemePack::ParseImageNamesFromJSON(
           std::string name;
           ui::ScaleFactor scale_factor = ui::SCALE_FACTOR_NONE;
           if (GetScaleFactorFromManifestKey(inner_iter.key(), &scale_factor) &&
-              inner_iter.value().IsType(base::Value::Type::STRING) &&
+              inner_iter.value().is_string() &&
               inner_iter.value().GetAsString(&name)) {
             AddFileAtScaleToMap(iter.key(),
                                 scale_factor,
@@ -1087,7 +1085,7 @@ void BrowserThemePack::ParseImageNamesFromJSON(
           }
         }
       }
-    } else if (iter.value().IsType(base::Value::Type::STRING)) {
+    } else if (iter.value().is_string()) {
       std::string name;
       if (iter.value().GetAsString(&name)) {
         AddFileAtScaleToMap(iter.key(),
@@ -1243,31 +1241,44 @@ void BrowserThemePack::CreateFrameImages(ImageCache* images) const {
 }
 
 void BrowserThemePack::CreateTabBackgroundImages(ImageCache* images) const {
+  static constexpr int kTabBackgroundMap[][3] = {
+      {PRS_THEME_TAB_BACKGROUND, PRS_THEME_FRAME, ThemeProperties::COLOR_FRAME},
+      {PRS_THEME_TAB_BACKGROUND_INCOGNITO, PRS_THEME_FRAME_INCOGNITO,
+       ThemeProperties::COLOR_FRAME_INCOGNITO},
+  };
+
   ImageCache temp_output;
   for (size_t i = 0; i < arraysize(kTabBackgroundMap); ++i) {
-    int prs_id = kTabBackgroundMap[i].key;
-    int prs_base_id = kTabBackgroundMap[i].value;
+    int prs_id = kTabBackgroundMap[i][0];
 
-    // We only need to generate the background tab images if we were provided
-    // with a PRS_THEME_FRAME.
-    ImageCache::const_iterator it = images->find(prs_base_id);
-    if (it != images->end()) {
-      gfx::ImageSkia image_to_tint = (it->second).AsImageSkia();
-      color_utils::HSL hsl_shift = GetTintInternal(
-          ThemeProperties::TINT_BACKGROUND_TAB);
-      int vertical_offset = images->count(prs_id)
-                            ? kRestoredTabVerticalOffset : 0;
+    // We need to generate the background tab images if we were provided with
+    // custom frame or background tab images; in the former case the theme
+    // author may want the background tabs to appear to tint the frame, and in
+    // the latter case the provided background tab image may have transparent
+    // regions, which must be made opaque by overlaying atop the original frame.
+    ImageCache::const_iterator frame_it = images->find(kTabBackgroundMap[i][1]);
+    ImageCache::const_iterator tab_it = images->find(prs_id);
+    if (frame_it != images->end() || tab_it != images->end()) {
+      SkColor background_color;
+      GetColor(kTabBackgroundMap[i][2], &background_color);
+
+      gfx::ImageSkia image_to_tint;
+      if (frame_it != images->end())
+        image_to_tint = (frame_it->second).AsImageSkia();
 
       gfx::ImageSkia overlay;
-      ImageCache::const_iterator overlay_it = images->find(prs_id);
-      if (overlay_it != images->end())
-        overlay = overlay_it->second.AsImageSkia();
+      int vertical_offset = 0;
+      if (tab_it != images->end()) {
+        overlay = tab_it->second.AsImageSkia();
+        vertical_offset = kRestoredTabVerticalOffset;
+      }
 
-      gfx::ImageSkiaSource* source = new TabBackgroundImageSource(
-          image_to_tint, overlay, hsl_shift, vertical_offset);
-      // ImageSkia takes ownership of |source|.
-      temp_output[prs_id] = gfx::Image(gfx::ImageSkia(source,
-          image_to_tint.size()));
+      auto source = std::make_unique<TabBackgroundImageSource>(
+          background_color, image_to_tint, overlay,
+          GetTintInternal(ThemeProperties::TINT_BACKGROUND_TAB),
+          vertical_offset);
+      temp_output[prs_id] =
+          gfx::Image(gfx::ImageSkia(std::move(source), image_to_tint.size()));
     }
   }
   MergeImageCaches(temp_output, images);

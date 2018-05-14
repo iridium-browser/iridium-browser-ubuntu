@@ -25,7 +25,7 @@ class CORE_EXPORT RemoteFrame final : public Frame {
   ~RemoteFrame() override;
 
   // Frame overrides:
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
   void Navigate(Document& origin_document,
                 const KURL&,
                 bool replace_current_item,
@@ -34,10 +34,11 @@ class CORE_EXPORT RemoteFrame final : public Frame {
   void Reload(FrameLoadType, ClientRedirectPolicy) override;
   void Detach(FrameDetachType) override;
   RemoteSecurityContext* GetSecurityContext() const override;
-  void PrintNavigationErrorMessage(const Frame&, const char* reason) override {}
-  void PrintNavigationWarning(const String&) override {}
   bool PrepareForCommit() override;
+  void CheckCompleted() override;
   bool ShouldClose() override;
+  void DidFreeze() override;
+  void DidResume() override;
   void SetIsInert(bool) override;
 
   void SetWebLayer(WebLayer*);

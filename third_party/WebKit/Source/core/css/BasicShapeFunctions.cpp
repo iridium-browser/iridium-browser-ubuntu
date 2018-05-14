@@ -120,7 +120,7 @@ CSSValue* ValueForBasicShape(const ComputedStyle& style,
   switch (basic_shape->GetType()) {
     case BasicShape::kStyleRayType: {
       const StyleRay& ray = ToStyleRay(*basic_shape);
-      return CSSRayValue::Create(
+      return cssvalue::CSSRayValue::Create(
           *CSSPrimitiveValue::Create(ray.Angle(),
                                      CSSPrimitiveValue::UnitType::kDegrees),
           *CSSIdentifierValue::Create(RaySizeToKeyword(ray.Size())),
@@ -133,8 +133,8 @@ CSSValue* ValueForBasicShape(const ComputedStyle& style,
 
     case BasicShape::kBasicShapeCircleType: {
       const BasicShapeCircle* circle = ToBasicShapeCircle(basic_shape);
-      CSSBasicShapeCircleValue* circle_value =
-          CSSBasicShapeCircleValue::Create();
+      cssvalue::CSSBasicShapeCircleValue* circle_value =
+          cssvalue::CSSBasicShapeCircleValue::Create();
 
       circle_value->SetCenterX(ValueForCenterCoordinate(
           style, circle->CenterX(), EBoxOrient::kHorizontal));
@@ -146,8 +146,8 @@ CSSValue* ValueForBasicShape(const ComputedStyle& style,
     }
     case BasicShape::kBasicShapeEllipseType: {
       const BasicShapeEllipse* ellipse = ToBasicShapeEllipse(basic_shape);
-      CSSBasicShapeEllipseValue* ellipse_value =
-          CSSBasicShapeEllipseValue::Create();
+      cssvalue::CSSBasicShapeEllipseValue* ellipse_value =
+          cssvalue::CSSBasicShapeEllipseValue::Create();
 
       ellipse_value->SetCenterX(ValueForCenterCoordinate(
           style, ellipse->CenterX(), EBoxOrient::kHorizontal));
@@ -161,8 +161,8 @@ CSSValue* ValueForBasicShape(const ComputedStyle& style,
     }
     case BasicShape::kBasicShapePolygonType: {
       const BasicShapePolygon* polygon = ToBasicShapePolygon(basic_shape);
-      CSSBasicShapePolygonValue* polygon_value =
-          CSSBasicShapePolygonValue::Create();
+      cssvalue::CSSBasicShapePolygonValue* polygon_value =
+          cssvalue::CSSBasicShapePolygonValue::Create();
 
       polygon_value->SetWindRule(polygon->GetWindRule());
       const Vector<Length>& values = polygon->Values();
@@ -175,7 +175,8 @@ CSSValue* ValueForBasicShape(const ComputedStyle& style,
     }
     case BasicShape::kBasicShapeInsetType: {
       const BasicShapeInset* inset = ToBasicShapeInset(basic_shape);
-      CSSBasicShapeInsetValue* inset_value = CSSBasicShapeInsetValue::Create();
+      cssvalue::CSSBasicShapeInsetValue* inset_value =
+          cssvalue::CSSBasicShapeInsetValue::Create();
 
       inset_value->SetTop(
           CSSPrimitiveValue::Create(inset->Top(), style.EffectiveZoom()));
@@ -281,14 +282,15 @@ static BasicShapeRadius CssValueToBasicShapeRadius(
   return BasicShapeRadius(ConvertToLength(state, ToCSSPrimitiveValue(radius)));
 }
 
-PassRefPtr<BasicShape> BasicShapeForValue(const StyleResolverState& state,
-                                          const CSSValue& basic_shape_value) {
-  RefPtr<BasicShape> basic_shape;
+scoped_refptr<BasicShape> BasicShapeForValue(
+    const StyleResolverState& state,
+    const CSSValue& basic_shape_value) {
+  scoped_refptr<BasicShape> basic_shape;
 
   if (basic_shape_value.IsBasicShapeCircleValue()) {
-    const CSSBasicShapeCircleValue& circle_value =
-        ToCSSBasicShapeCircleValue(basic_shape_value);
-    RefPtr<BasicShapeCircle> circle = BasicShapeCircle::Create();
+    const cssvalue::CSSBasicShapeCircleValue& circle_value =
+        cssvalue::ToCSSBasicShapeCircleValue(basic_shape_value);
+    scoped_refptr<BasicShapeCircle> circle = BasicShapeCircle::Create();
 
     circle->SetCenterX(
         ConvertToCenterCoordinate(state, circle_value.CenterX()));
@@ -298,9 +300,9 @@ PassRefPtr<BasicShape> BasicShapeForValue(const StyleResolverState& state,
 
     basic_shape = std::move(circle);
   } else if (basic_shape_value.IsBasicShapeEllipseValue()) {
-    const CSSBasicShapeEllipseValue& ellipse_value =
-        ToCSSBasicShapeEllipseValue(basic_shape_value);
-    RefPtr<BasicShapeEllipse> ellipse = BasicShapeEllipse::Create();
+    const cssvalue::CSSBasicShapeEllipseValue& ellipse_value =
+        cssvalue::ToCSSBasicShapeEllipseValue(basic_shape_value);
+    scoped_refptr<BasicShapeEllipse> ellipse = BasicShapeEllipse::Create();
 
     ellipse->SetCenterX(
         ConvertToCenterCoordinate(state, ellipse_value.CenterX()));
@@ -313,9 +315,9 @@ PassRefPtr<BasicShape> BasicShapeForValue(const StyleResolverState& state,
 
     basic_shape = std::move(ellipse);
   } else if (basic_shape_value.IsBasicShapePolygonValue()) {
-    const CSSBasicShapePolygonValue& polygon_value =
-        ToCSSBasicShapePolygonValue(basic_shape_value);
-    RefPtr<BasicShapePolygon> polygon = BasicShapePolygon::Create();
+    const cssvalue::CSSBasicShapePolygonValue& polygon_value =
+        cssvalue::ToCSSBasicShapePolygonValue(basic_shape_value);
+    scoped_refptr<BasicShapePolygon> polygon = BasicShapePolygon::Create();
 
     polygon->SetWindRule(polygon_value.GetWindRule());
     const HeapVector<Member<CSSPrimitiveValue>>& values =
@@ -326,9 +328,9 @@ PassRefPtr<BasicShape> BasicShapeForValue(const StyleResolverState& state,
 
     basic_shape = std::move(polygon);
   } else if (basic_shape_value.IsBasicShapeInsetValue()) {
-    const CSSBasicShapeInsetValue& rect_value =
-        ToCSSBasicShapeInsetValue(basic_shape_value);
-    RefPtr<BasicShapeInset> rect = BasicShapeInset::Create();
+    const cssvalue::CSSBasicShapeInsetValue& rect_value =
+        cssvalue::ToCSSBasicShapeInsetValue(basic_shape_value);
+    scoped_refptr<BasicShapeInset> rect = BasicShapeInset::Create();
 
     rect->SetTop(ConvertToLength(state, rect_value.Top()));
     rect->SetRight(ConvertToLength(state, rect_value.Right()));
@@ -346,7 +348,8 @@ PassRefPtr<BasicShape> BasicShapeForValue(const StyleResolverState& state,
 
     basic_shape = std::move(rect);
   } else if (basic_shape_value.IsRayValue()) {
-    const CSSRayValue& ray_value = ToCSSRayValue(basic_shape_value);
+    const cssvalue::CSSRayValue& ray_value =
+        cssvalue::ToCSSRayValue(basic_shape_value);
     float angle = ray_value.Angle().ComputeDegrees();
     StyleRay::RaySize size = KeywordToRaySize(ray_value.Size().GetValueID());
     bool contain = !!ray_value.Contain();

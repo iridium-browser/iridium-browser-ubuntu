@@ -8,12 +8,16 @@
 #include <memory>
 
 #include "base/gtest_prod_util.h"
-#include "base/time/clock.h"
 #include "base/time/time.h"
+#include "chrome/browser/media/router/discovery/dial/safe_dial_device_description_parser.h"
 #include "chrome/browser/ui/webui/media_router/media_cast_mode.h"
 #include "media/base/container_names.h"
 
+class GURL;
+
 namespace media_router {
+
+enum class SinkIconType;
 
 // NOTE: Do not renumber enums as that would confuse interpretation of
 // previously logged data. When making changes, also update the enum list
@@ -57,18 +61,33 @@ enum class MediaRouterUserAction {
   TOTAL_COUNT = 6
 };
 
+enum class PresentationUrlType {
+  kOther,
+  kCast,            // cast:
+  kCastDial,        // cast-dial:
+  kCastLegacy,      // URLs that start with |kLegacyCastPresentationUrlPrefix|.
+  kDial,            // dial:
+  kHttp,            // http:
+  kHttps,           // https:
+  kRemotePlayback,  // remote-playback:
+  // Add new types only immediately above this line. Remember to also update
+  // tools/metrics/histograms/enums.xml.
+  kPresentationUrlTypeCount
+};
+
 class MediaRouterMetrics {
  public:
   MediaRouterMetrics();
   ~MediaRouterMetrics();
 
   // UMA histogram names.
-  static const char kHistogramDialAvailableDeviceCount[];
-  static const char kHistogramDialKnownDeviceCount[];
+  static const char kHistogramDialParsingError[];
   static const char kHistogramIconClickLocation[];
   static const char kHistogramMediaRouterCastingSource[];
   static const char kHistogramMediaRouterFileFormat[];
   static const char kHistogramMediaRouterFileSize[];
+  static const char kHistogramMediaSinkType[];
+  static const char kHistogramPresentationUrlType[];
   static const char kHistogramRouteCreationOutcome[];
   static const char kHistogramUiDialogPaint[];
   static const char kHistogramUiDialogLoadedWithData[];
@@ -107,19 +126,15 @@ class MediaRouterMetrics {
   // Records the size of a cast file.
   static void RecordMediaRouterFileSize(int64_t size);
 
-  // Records device counts.
-  // TODO(zhaobin): Move device count specific metrics and state into its own
-  // class eventually.
-  void RecordDialDeviceCounts(size_t available_device_count,
-                              size_t known_device_count);
+  // Records why DIAL device description resolution failed.
+  static void RecordDialParsingError(
+      SafeDialDeviceDescriptionParser::ParsingError parsing_error);
 
-  // Allows tests to swap in a fake clock.
-  void SetClockForTest(std::unique_ptr<base::Clock> clock);
+  // Records the type of Presentation URL used by a web page.
+  static void RecordPresentationUrlType(const GURL& url);
 
- private:
-  base::Time device_count_metrics_record_time_;
-
-  std::unique_ptr<base::Clock> clock_;
+  // Records the type of the sink that media is being Cast to.
+  static void RecordMediaSinkType(SinkIconType sink_icon_type);
 };
 
 }  // namespace media_router

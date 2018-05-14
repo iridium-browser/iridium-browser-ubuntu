@@ -9,29 +9,36 @@
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/browser_sync/profile_sync_service.h"
+#include "components/sessions/core/session_types.h"
 #include "components/sessions/core/tab_restore_service_helper.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync_sessions/open_tabs_ui_delegate.h"
 #import "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#include "ios/chrome/browser/feature_engagement/tracker_util.h"
 #import "ios/chrome/browser/metrics/tab_usage_recorder.h"
 #include "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
+#include "ios/chrome/browser/sessions/session_util.h"
 #include "ios/chrome/browser/sessions/tab_restore_service_delegate_impl_ios.h"
 #include "ios/chrome/browser/sessions/tab_restore_service_delegate_impl_ios_factory.h"
+#import "ios/chrome/browser/snapshots/snapshot_tab_helper.h"
 #include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
-#import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
+#import "ios/chrome/browser/ui/authentication/signin_promo_view_configurator.h"
+#import "ios/chrome/browser/ui/authentication/signin_promo_view_consumer.h"
+#import "ios/chrome/browser/ui/authentication/signin_promo_view_mediator.h"
 #include "ios/chrome/browser/ui/commands/application_commands.h"
 #include "ios/chrome/browser/ui/commands/browser_commands.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
+#import "ios/chrome/browser/ui/commands/command_dispatcher.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
+#import "ios/chrome/browser/ui/commands/show_signin_command.h"
 #import "ios/chrome/browser/ui/keyboard/UIKeyCommand+Chrome.h"
 #include "ios/chrome/browser/ui/ntp/recent_tabs/synced_sessions.h"
 #import "ios/chrome/browser/ui/ntp/recent_tabs/views/signed_in_sync_off_view.h"
 #import "ios/chrome/browser/ui/ntp/recent_tabs/views/signed_in_sync_on_no_sessions_view.h"
-#import "ios/chrome/browser/ui/ntp/recent_tabs/views/signed_out_view.h"
+#import "ios/chrome/browser/ui/settings/sync_utils/sync_presenter.h"
+#import "ios/chrome/browser/ui/signin_interaction/public/signin_presenter.h"
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_cache.h"
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_header_view.h"
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_model.h"
@@ -42,16 +49,18 @@
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_session_cell_data.h"
 #include "ios/chrome/browser/ui/tab_switcher/tab_switcher_transition_context.h"
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_view.h"
-#import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
+#import "ios/chrome/browser/ui/tabs/requirements/tab_strip_fold_animation.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_owner.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/web_state_list/web_state_opener.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
-#import "ios/shared/chrome/browser/ui/commands/command_dispatcher.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/referrer.h"
+#import "ios/web/public/web_state/web_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -71,6 +80,11 @@ const CGFloat kTransitionAnimationDuration = 0.25;
 // The height of the browser view controller header.
 const CGFloat kHeaderHeight = 39;
 
+enum class TabModelType {
+  MODEL_MAIN,
+  MODEL_OTR,
+};
+
 enum class TransitionType {
   TRANSITION_PRESENT,
   TRANSITION_DISMISS,
@@ -84,18 +98,23 @@ enum class SnapshotViewOption {
 
 }  // namespace
 
-@interface TabSwitcherController ()<TabSwitcherModelDelegate,
+@interface TabSwitcherController ()<SigninPresenter,
+                                    SigninPromoViewConsumer,
+                                    SyncPresenter,
+                                    TabSwitcherModelDelegate,
                                     TabSwitcherViewDelegate,
                                     TabSwitcherHeaderViewDelegate,
                                     TabSwitcherHeaderViewDataSource,
-                                    TabSwitcherPanelControllerDelegate> {
+                                    TabSwitcherPanelControllerDelegate,
+                                    TabSwitcherPanelOverlayViewDelegate> {
   // weak.
   ios::ChromeBrowserState* _browserState;
   // weak.
-  id<TabSwitcherDelegate> _delegate;
-  // The model selected when the tab switcher was toggled.
-  // weak.
-  TabModel* _onLoadActiveModel;
+  __weak id<TabSwitcherDelegate> _delegate;
+  // The type of the model that was selected when the tab switcher was toggled.
+  // Callers can retrieve the associated TabModel with |[self
+  // onLoadActiveModel]|.
+  TabModelType _onLoadActiveModelType;
   // The view this controller manages.
   TabSwitcherView* _tabSwitcherView;
   // The list of panels controllers for distant sessions.
@@ -107,6 +126,8 @@ enum class SnapshotViewOption {
   TabSwitcherModel* _tabSwitcherModel;
   // Stores the current sign-in panel type.
   TabSwitcherSignInPanelsType _signInPanelType;
+  // Stores the sign-in panel overlay view.
+  TabSwitcherPanelOverlayView* _signInPanelOverlayView;
   // Cache for the panel's cells.
   TabSwitcherCache* _cache;
   // Stores the background color of the window when the tab switcher was
@@ -118,6 +139,8 @@ enum class SnapshotViewOption {
   BOOL _shouldAddPromoPanelHeaderCell;
   // Handles command dispatching.
   CommandDispatcher* _dispatcher;
+  // Sign-in promo view mediator for the "Other Devices" tab.
+  SigninPromoViewMediator* _signinPromoViewMediator;
 }
 
 // Updates the window background color to the tab switcher's background color.
@@ -152,18 +175,8 @@ enum class SnapshotViewOption {
 // Returns the tab model of the currently selected tab.
 - (TabModel*)currentSelectedModel;
 
-// Calls tabSwitcherDismissWithModel:animated: with the |animated| parameter
-// set to YES.
-- (void)tabSwitcherDismissWithModel:(TabModel*)model;
-
-// Dismisses the tab switcher using the given tab model. The completion block is
-// called at the end of the animation. The tab switcher delegate method
-// -tabSwitcherPresentationTransitionDidEnd: must be called in the completion
-// block. The dismissal of the tab switcher will be animated if the |animated|
-// parameter is set to YES.
-- (void)tabSwitcherDismissWithModel:(TabModel*)model
-                           animated:(BOOL)animated
-                     withCompletion:(ProceduralBlock)completion;
+// Returns the tab model that was active when the tab switcher was toggled.
+- (TabModel*)onLoadActiveModel;
 
 // Dismisses the tab switcher using the currently selected tab's tab model.
 - (void)tabSwitcherDismissWithCurrentSelectedModel;
@@ -188,6 +201,7 @@ enum class SnapshotViewOption {
 
 @implementation TabSwitcherController
 
+@synthesize animationDelegate = _animationDelegate;
 @synthesize transitionContext = _transitionContext;
 
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
@@ -207,12 +221,25 @@ enum class SnapshotViewOption {
                               forProtocol:@protocol(BrowserCommands)];
     [_dispatcher startDispatchingToTarget:endpoint
                               forProtocol:@protocol(ApplicationCommands)];
+    // -startDispatchingToTarget:forProtocol: doesn't pick up protocols the
+    // passed protocol conforms to, so ApplicationSettingsCommands is explicitly
+    // dispatched to the endpoint as well. Since this is potentially
+    // fragile, DCHECK that it should still work (if the endpoint is nonnull).
+    DCHECK(
+        !endpoint ||
+        [endpoint conformsToProtocol:@protocol(ApplicationSettingsCommands)]);
+    [_dispatcher
+        startDispatchingToTarget:endpoint
+                     forProtocol:@protocol(ApplicationSettingsCommands)];
+
     // self.dispatcher shouldn't be used in this init method, so duplicate the
     // typecast to pass dispatcher into child objects.
     id<ApplicationCommands, BrowserCommands> passableDispatcher =
         static_cast<id<ApplicationCommands, BrowserCommands>>(_dispatcher);
 
-    _onLoadActiveModel = activeTabModel;
+    _onLoadActiveModelType = (activeTabModel == mainTabModel)
+                                 ? TabModelType::MODEL_MAIN
+                                 : TabModelType::MODEL_OTR;
     _cache = [[TabSwitcherCache alloc] init];
     [_cache setMainTabModel:mainTabModel otrTabModel:otrTabModel];
     _tabSwitcherModel =
@@ -228,6 +255,7 @@ enum class SnapshotViewOption {
         forLocalSessionOfType:TabSwitcherSessionType::REGULAR_SESSION
                     withCache:_cache
                  browserState:_browserState
+                    presenter:self /* id<SigninPresenter, SyncPresenter> */
                    dispatcher:passableDispatcher];
     [_onTheRecordSession setDelegate:self];
     _offTheRecordSession = [[TabSwitcherPanelController alloc]
@@ -235,6 +263,7 @@ enum class SnapshotViewOption {
         forLocalSessionOfType:TabSwitcherSessionType::OFF_THE_RECORD_SESSION
                     withCache:_cache
                  browserState:_browserState
+                    presenter:self /* id<SigninPresenter, SyncPresenter> */
                    dispatcher:passableDispatcher];
     [_offTheRecordSession setDelegate:self];
     [_tabSwitcherView addPanelView:[_offTheRecordSession view]
@@ -244,7 +273,7 @@ enum class SnapshotViewOption {
     [self addPromoPanelForSignInPanelType:[_tabSwitcherModel signInPanelType]];
     [[_tabSwitcherView headerView] reloadData];
     [_tabSwitcherModel syncedSessionsChanged];
-    [self selectPanelForTabModel:_onLoadActiveModel];
+    [self selectPanelForTabModel:[self onLoadActiveModel]];
   }
   return self;
 }
@@ -347,10 +376,18 @@ enum class SnapshotViewOption {
 - (void)restoreInternalStateWithMainTabModel:(TabModel*)mainModel
                                  otrTabModel:(TabModel*)otrModel
                               activeTabModel:(TabModel*)activeModel {
-  _onLoadActiveModel = activeModel;
+  DCHECK(mainModel);
+  DCHECK(otrModel);
+  DCHECK(activeModel == mainModel || activeModel == otrModel);
+  _onLoadActiveModelType = (activeModel == mainModel) ? TabModelType::MODEL_MAIN
+                                                      : TabModelType::MODEL_OTR;
   [_cache setMainTabModel:mainModel otrTabModel:otrModel];
   [_tabSwitcherModel setMainTabModel:mainModel otrTabModel:otrModel];
   [self selectPanelForTabModel:activeModel];
+}
+
+- (UIViewController*)viewController {
+  return self;
 }
 
 - (void)setOtrTabModel:(TabModel*)otrModel {
@@ -362,11 +399,12 @@ enum class SnapshotViewOption {
 - (void)showWithSelectedTabAnimation {
   [self updateWindowBackgroundColor];
   [self performTabSwitcherTransition:TransitionType::TRANSITION_PRESENT
-                           withModel:_onLoadActiveModel
+                           withModel:[self onLoadActiveModel]
                             animated:YES
                       withCompletion:^{
-                        [self.delegate
-                            tabSwitcherPresentationTransitionDidEnd:self];
+                        [self.animationDelegate
+                            tabSwitcherPresentationAnimationDidEnd:self];
+                        [_tabSwitcherView wasShown];
                       }];
 }
 
@@ -398,6 +436,10 @@ enum class SnapshotViewOption {
   return static_cast<id<ApplicationCommands, BrowserCommands>>(_dispatcher);
 }
 
+- (void)prepareForDisplayAtSize:(CGSize)size {
+  // No-op.
+}
+
 #pragma mark - BrowserCommands
 
 - (void)openNewTab:(OpenNewTabCommand*)command {
@@ -411,22 +453,16 @@ enum class SnapshotViewOption {
                           : TabSwitcherSessionType::REGULAR_SESSION;
 
   TabModel* model = [self tabModelForSessionType:panelSessionType];
+
+  // Either send or don't send the "New Tab Opened" or "Incognito Tab Opened" to
+  // the feature_engageament::Tracker based on |command.userInitiated| and
+  // |command.incognito|.
+  feature_engagement::NotifyNewTabEventForCommand(model.browserState, command);
+
   [self dismissWithNewTabAnimation:GURL(kChromeUINewTabURL)
                            atIndex:NSNotFound
                         transition:ui::PAGE_TRANSITION_TYPED
                           tabModel:model];
-}
-
-- (IBAction)chromeExecuteCommand:(id)sender {
-  int command = [sender tag];
-  switch (command) {
-    case IDC_TOGGLE_TAB_SWITCHER:
-      [self tabSwitcherDismissWithCurrentSelectedModel];
-      break;
-    default:
-      [super chromeExecuteCommand:sender];
-      break;
-  }
 }
 
 #pragma mark - Private
@@ -511,6 +547,7 @@ enum class SnapshotViewOption {
       base::RecordAction(base::UserMetricsAction("MobileTabSwitcherDismissed"));
       break;
   }
+  DCHECK(tabModel);
   DCHECK(completion);
   DCHECK([self transitionContext]);
   [[self view] setUserInteractionEnabled:NO];
@@ -519,9 +556,6 @@ enum class SnapshotViewOption {
       [self transitionContextContentForTabModel:tabModel];
   DCHECK(transitionContextContent);
 
-  ToolbarController* toolbarController =
-      [[self.delegate tabSwitcherTransitionToolbarOwner]
-          relinquishedToolbarController];
   Tab* selectedTab = [tabModel currentTab];
 
   NSInteger selectedTabIndex = [tabModel indexOfTab:selectedTab];
@@ -570,7 +604,8 @@ enum class SnapshotViewOption {
                                            toView:self.view];
 
   // Compute initial and final toolbar screenshot frames.
-  const CGRect initialToolbarFrame = toolbarController.view.frame;
+  const CGRect initialToolbarFrame =
+      [[self.delegate tabSwitcherTransitionToolbarOwner] toolbarFrame];
   CGRect initialToolbarScreenshotFrame = CGRectMake(
       0, 0, initialToolbarFrame.size.width, initialToolbarFrame.size.height);
 
@@ -592,15 +627,19 @@ enum class SnapshotViewOption {
     // context
     tabScreenshotImageView.image =
         [self updateScreenshotForCellIfNeeded:selectedCell tabModel:tabModel];
-    [selectedTab retrieveSnapshot:^(UIImage* snapshot) {
-      [weakTabScreenshotImageView setImage:snapshot];
-    }];
+    if (selectedTab) {
+      SnapshotTabHelper::FromWebState(selectedTab.webState)
+          ->RetrieveColorSnapshot(^(UIImage* snapshot) {
+            [weakTabScreenshotImageView setImage:snapshot];
+          });
+    }
   }
 
   const CGSize tabScreenshotImageSize = tabScreenshotImageView.image.size;
 
   CGRect initialTabScreenshotFrame = CGRectZero;
-  const CGSize toolbarSize = toolbarController.view.bounds.size;
+  const CGSize toolbarSize =
+      [[self.delegate tabSwitcherTransitionToolbarOwner] toolbarFrame].size;
   CGSize initialTabTargetSize =
       CGSizeMake(initialTabFrame.size.width,
                  initialTabFrame.size.height - toolbarSize.height);
@@ -619,7 +658,7 @@ enum class SnapshotViewOption {
                       finalTabScreenshotFrame);
   finalTabScreenshotFrame.origin.y += cellTopBarHeight;
 
-  TabSwitcherTabStripPlaceholderView* tabStripPlaceholderView =
+  UIView<TabStripFoldAnimation>* tabStripPlaceholderView =
       [transitionContextContent generateTabStripPlaceholderView];
   tabStripPlaceholderView.clipsToBounds = YES;
   tabStripPlaceholderView.backgroundColor = [UIColor clearColor];
@@ -712,8 +751,6 @@ enum class SnapshotViewOption {
         [strongSelf setTransitionContext:nil];
       }
     }
-    [[[strongSelf delegate] tabSwitcherTransitionToolbarOwner]
-        reparentToolbarController];
     [[strongSelf view] setUserInteractionEnabled:YES];
     completion();
   };
@@ -792,8 +829,17 @@ enum class SnapshotViewOption {
       [self sessionTypeForPanelIndex:currentPanelIndex];
   TabModel* model = [self tabModelForSessionType:sessionType];
   if (!model)
-    model = _onLoadActiveModel;
+    model = [self onLoadActiveModel];
   return model;
+}
+
+- (TabModel*)onLoadActiveModel {
+  switch (_onLoadActiveModelType) {
+    case TabModelType::MODEL_MAIN:
+      return [_tabSwitcherModel mainTabModel];
+    case TabModelType::MODEL_OTR:
+      return [_tabSwitcherModel otrTabModel];
+  }
 }
 
 - (void)selectPanelForTabModel:(TabModel*)selectedTabModel {
@@ -816,40 +862,26 @@ enum class SnapshotViewOption {
   return nil;
 }
 
-- (void)tabSwitcherDismissWithModel:(TabModel*)model {
-  [self tabSwitcherDismissWithModel:model animated:YES];
-}
-
 - (void)tabSwitcherDismissWithModel:(TabModel*)model animated:(BOOL)animated {
-  [self tabSwitcherDismissWithModel:model
-                           animated:animated
-                     withCompletion:^{
-                       [self.delegate tabSwitcherDismissTransitionDidEnd:self];
-                     }];
-}
-
-- (void)tabSwitcherDismissWithModel:(TabModel*)model
-                           animated:(BOOL)animated
-                     withCompletion:(ProceduralBlock)completion {
-  DCHECK(completion);
   DCHECK(model);
   [[self presentedViewController] dismissViewControllerAnimated:NO
                                                      completion:nil];
-  [self.delegate tabSwitcher:self
-      dismissTransitionWillStartWithActiveModel:model];
+  [self.delegate tabSwitcher:self shouldFinishWithActiveModel:model];
   [self performTabSwitcherTransition:TransitionType::TRANSITION_DISMISS
                            withModel:model
                             animated:animated
                       withCompletion:^{
-                        [self.view removeFromSuperview];
-                        completion();
+                        [self.animationDelegate
+                            tabSwitcherDismissalAnimationDidEnd:self];
+                        [self.delegate tabSwitcherDismissTransitionDidEnd:self];
+                        [_tabSwitcherView wasHidden];
                       }];
 }
 
 - (void)tabSwitcherDismissWithCurrentSelectedModel {
   TabModel* model = [self currentSelectedModel];
   base::RecordAction(base::UserMetricsAction("MobileTabSwitcherClose"));
-  [self tabSwitcherDismissWithModel:model];
+  [self tabSwitcherDismissWithModel:model animated:YES];
 }
 
 - (Tab*)dismissWithNewTabAnimation:(const GURL&)URL
@@ -869,11 +901,7 @@ enum class SnapshotViewOption {
                                        atIndex:tabIndex
                                   inBackground:NO];
 
-  [self tabSwitcherDismissWithModel:tabModel
-                           animated:YES
-                     withCompletion:^{
-                       [self.delegate tabSwitcherDismissTransitionDidEnd:self];
-                     }];
+  [self tabSwitcherDismissWithModel:tabModel animated:YES];
 
   return tab;
 }
@@ -891,28 +919,23 @@ enum class SnapshotViewOption {
   const sessions::SessionTab* toLoad = nullptr;
   if (openTabs->GetForeignTab(distantTab->session_tag, distantTab->tab_id,
                               &toLoad)) {
-    TabModel* mainModel = [_tabSwitcherModel mainTabModel];
     // Disable user interactions until the tab is inserted to prevent multiple
     // concurrent tab model updates.
     [_tabSwitcherView setUserInteractionEnabled:NO];
-    Tab* tab = [mainModel insertTabWithURL:GURL()
-                                  referrer:web::Referrer()
-                                transition:ui::PAGE_TRANSITION_TYPED
-                                    opener:nil
-                               openedByDOM:NO
-                                   atIndex:NSNotFound
-                              inBackground:NO];
-    [tab loadSessionTab:toLoad];
-    [mainModel setCurrentTab:tab];
+
+    TabModel* tabModel = [_tabSwitcherModel mainTabModel];
+    WebStateList* webStateList = [tabModel webStateList];
+    webStateList->InsertWebState(
+        webStateList->count(),
+        session_util::CreateWebStateWithNavigationEntries(
+            [tabModel browserState], toLoad->current_navigation_index,
+            toLoad->navigations),
+        WebStateList::INSERT_FORCE_INDEX | WebStateList::INSERT_ACTIVATE,
+        WebStateOpener());
 
     // Reenable touch events.
     [_tabSwitcherView setUserInteractionEnabled:YES];
-    [self
-        tabSwitcherDismissWithModel:mainModel
-                           animated:YES
-                     withCompletion:^{
-                       [self.delegate tabSwitcherDismissTransitionDidEnd:self];
-                     }];
+    [self tabSwitcherDismissWithModel:tabModel animated:YES];
   }
 }
 
@@ -970,11 +993,13 @@ enum class SnapshotViewOption {
   for (NSNumber* objCIndex in insertedIndexes) {
     int index = [objCIndex intValue];
     std::string tag = [_tabSwitcherModel tagOfDistantSessionAtIndex:index];
-    TabSwitcherPanelController* panelController =
-        [[TabSwitcherPanelController alloc] initWithModel:_tabSwitcherModel
-                                 forDistantSessionWithTag:tag
-                                             browserState:_browserState
-                                               dispatcher:self.dispatcher];
+    TabSwitcherPanelController* panelController = [
+        [TabSwitcherPanelController alloc]
+                   initWithModel:_tabSwitcherModel
+        forDistantSessionWithTag:tag
+                    browserState:_browserState
+                       presenter:self /* id<SigninPresenter, SyncPresenter> */
+                      dispatcher:self.dispatcher];
     [panelController setDelegate:self];
     [_tabSwitcherView addPanelView:[panelController view]
                            atIndex:index + offset];
@@ -1016,6 +1041,10 @@ enum class SnapshotViewOption {
         [_tabSwitcherView currentPanelIndex] != kSignInPromoPanelIndex;
     [_tabSwitcherView removePanelViewAtIndex:kSignInPromoPanelIndex
                             updateScrollView:updateScrollView];
+    _signinPromoViewMediator.consumer = nil;
+    [_signinPromoViewMediator signinPromoViewRemoved];
+    _signinPromoViewMediator = nil;
+    _signInPanelOverlayView = nil;
   } else {
     _shouldAddPromoPanelHeaderCell = YES;
   }
@@ -1024,13 +1053,31 @@ enum class SnapshotViewOption {
 
 - (void)addPromoPanelForSignInPanelType:(TabSwitcherSignInPanelsType)panelType {
   _signInPanelType = panelType;
+  DCHECK_EQ(nil, _signInPanelOverlayView);
   if (panelType != TabSwitcherSignInPanelsType::NO_PANEL) {
-    TabSwitcherPanelOverlayView* panelView =
-        [[TabSwitcherPanelOverlayView alloc] initWithFrame:CGRectZero
-                                              browserState:_browserState
-                                                dispatcher:self.dispatcher];
-    [panelView setOverlayType:PanelOverlayTypeFromSignInPanelsType(panelType)];
-    [_tabSwitcherView addPanelView:panelView atIndex:kSignInPromoPanelIndex];
+    _signInPanelOverlayView = [[TabSwitcherPanelOverlayView alloc]
+        initWithFrame:CGRectZero
+         browserState:_browserState
+            presenter:self /* id<SigninPresenter, SyncPresenter> */
+           dispatcher:self.dispatcher];
+    [_signInPanelOverlayView
+        setOverlayType:PanelOverlayTypeFromSignInPanelsType(panelType)];
+    _signInPanelOverlayView.delegate = self;
+    if (panelType == TabSwitcherSignInPanelsType::PANEL_USER_SIGNED_OUT) {
+      DCHECK_NE(nil, _signInPanelOverlayView.signinPromoView);
+      _signinPromoViewMediator = [[SigninPromoViewMediator alloc]
+          initWithBrowserState:_browserState
+                   accessPoint:signin_metrics::AccessPoint::
+                                   ACCESS_POINT_TAB_SWITCHER
+                     presenter:self];
+      _signinPromoViewMediator.consumer = self;
+      _signInPanelOverlayView.signinPromoView.delegate =
+          _signinPromoViewMediator;
+      [[_signinPromoViewMediator createConfigurator]
+          configureSigninPromoView:_signInPanelOverlayView.signinPromoView];
+    }
+    [_tabSwitcherView addPanelView:_signInPanelOverlayView
+                           atIndex:kSignInPromoPanelIndex];
   }
 }
 
@@ -1045,6 +1092,10 @@ enum class SnapshotViewOption {
       NOTREACHED();
       return {};
   }
+}
+
+- (BOOL)isSigninInProgress {
+  return _signinPromoViewMediator.signinInProgress;
 }
 
 #pragma mark - TabSwitcherHeaderViewDelegate
@@ -1091,8 +1142,8 @@ enum class SnapshotViewOption {
     } else {
       index -= kHeaderDistantSessionIndexOffset;
 
-      sync_sessions::SyncedSession::DeviceType deviceType =
-          sync_sessions::SyncedSession::TYPE_UNSET;
+      sync_pb::SyncEnums::DeviceType deviceType =
+          sync_pb::SyncEnums::TYPE_UNSET;
       NSString* cellTitle = nil;
 
       if (index < _controllersOfDistantSessions.count) {
@@ -1105,10 +1156,10 @@ enum class SnapshotViewOption {
       }
       TabSwitcherSessionCellType cellType;
       switch (deviceType) {
-        case sync_sessions::SyncedSession::TYPE_PHONE:
+        case sync_pb::SyncEnums::TYPE_PHONE:
           cellType = kPhoneRemoteSessionCell;
           break;
-        case sync_sessions::SyncedSession::TYPE_TABLET:
+        case sync_pb::SyncEnums::TYPE_TABLET:
           cellType = kTabletRemoteSessionCell;
           break;
         default:
@@ -1145,24 +1196,23 @@ enum class SnapshotViewOption {
       openNewTab:[OpenNewTabCommand commandWithIncognito:incognito]];
 }
 
-- (ios_internal::NewTabButtonStyle)buttonStyleForPanelAtIndex:
-    (NSInteger)panelIndex {
+- (NewTabButtonStyle)buttonStyleForPanelAtIndex:(NSInteger)panelIndex {
   CHECK(panelIndex >= 0);
   switch (panelIndex) {
     case kLocalTabsOnTheRecordPanelIndex:
       if ([_onTheRecordSession shouldShowNewTabButton]) {
-        return ios_internal::NewTabButtonStyle::BLUE;
+        return NewTabButtonStyle::BLUE;
       } else {
-        return ios_internal::NewTabButtonStyle::HIDDEN;
+        return NewTabButtonStyle::HIDDEN;
       }
     case kLocalTabsOffTheRecordPanelIndex:
       if ([_offTheRecordSession shouldShowNewTabButton]) {
-        return ios_internal::NewTabButtonStyle::GRAY;
+        return NewTabButtonStyle::GRAY;
       } else {
-        return ios_internal::NewTabButtonStyle::HIDDEN;
+        return NewTabButtonStyle::HIDDEN;
       }
     default:
-      return ios_internal::NewTabButtonStyle::HIDDEN;
+      return NewTabButtonStyle::HIDDEN;
   }
 }
 
@@ -1201,9 +1251,7 @@ enum class SnapshotViewOption {
       tabSwitcherPanelController.sessionType;
   TabModel* tabModel = [self tabModelForSessionType:panelSessionType];
   [tabModel setCurrentTab:tab];
-  [self.delegate tabSwitcher:self
-      dismissTransitionWillStartWithActiveModel:tabModel];
-  [self tabSwitcherDismissWithModel:tabModel];
+  [self tabSwitcherDismissWithModel:tabModel animated:YES];
   if (panelSessionType == TabSwitcherSessionType::OFF_THE_RECORD_SESSION) {
     base::RecordAction(
         base::UserMetricsAction("MobileTabSwitcherOpenIncognitoTab"));
@@ -1238,6 +1286,59 @@ enum class SnapshotViewOption {
 - (void)tabSwitcherPanelControllerDidUpdateOverlayViewVisibility:
     (TabSwitcherPanelController*)tabSwitcherPanelController {
   [_tabSwitcherView updateOverlayButtonState];
+}
+
+#pragma mark - SyncPresenter
+
+- (void)showReauthenticateSignin {
+  [self.dispatcher
+              showSignin:
+                  [[ShowSigninCommand alloc]
+                      initWithOperation:AUTHENTICATION_OPERATION_REAUTHENTICATE
+                            accessPoint:signin_metrics::AccessPoint::
+                                            ACCESS_POINT_UNKNOWN]
+      baseViewController:self];
+}
+
+- (void)showSyncSettings {
+  [self.dispatcher showSyncSettingsFromViewController:self];
+}
+
+- (void)showSyncPassphraseSettings {
+  [self.dispatcher showSyncPassphraseSettingsFromViewController:self];
+}
+
+#pragma mark - SigninPresenter
+
+- (void)showSignin:(ShowSigninCommand*)command {
+  [self.dispatcher showSignin:command baseViewController:self];
+}
+
+#pragma mark - SigninPromoViewConsumer
+
+- (void)configureSigninPromoWithConfigurator:
+            (SigninPromoViewConfigurator*)configurator
+                             identityChanged:(BOOL)identityChanged {
+  DCHECK_NE(nil, _signInPanelOverlayView);
+  DCHECK_NE(nil, _signInPanelOverlayView.signinPromoView);
+  [configurator
+      configureSigninPromoView:_signInPanelOverlayView.signinPromoView];
+}
+
+- (void)signinDidFinish {
+  [_tabSwitcherModel syncedSessionsChanged];
+}
+
+#pragma mark - TabSwitcherPanelOverlayViewDelegate
+
+- (void)tabSwitcherPanelOverlViewWasShown:
+    (TabSwitcherPanelOverlayView*)tabSwitcherPanelOverlayView {
+  [_signinPromoViewMediator signinPromoViewVisible];
+}
+
+- (void)tabSwitcherPanelOverlViewWasHidden:
+    (TabSwitcherPanelOverlayView*)tabSwitcherPanelOverlayView {
+  [_signinPromoViewMediator signinPromoViewHidden];
 }
 
 @end

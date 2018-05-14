@@ -7,8 +7,6 @@
 #include <stdint.h>
 #include <utility>
 
-#include "ash/shell.h"
-#include "ash/system/tray/system_tray_delegate.h"
 #include "base/callback.h"
 #include "base/location.h"
 #include "base/macros.h"
@@ -23,6 +21,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/grit/generated_resources.h"
@@ -46,9 +45,8 @@
 #include "extensions/common/extension_set.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/message_center/message_center.h"
-#include "ui/message_center/notification.h"
-#include "ui/message_center/notification_delegate.h"
+#include "ui/message_center/public/cpp/notification.h"
+#include "ui/message_center/public/cpp/notification_delegate.h"
 #include "url/gurl.h"
 
 namespace chromeos {
@@ -108,9 +106,9 @@ void DriveOfflineNotificationDelegate::ButtonClick(int button_index) {
   const GURL url = GURL(kDriveOfflineSupportUrl);
 
   chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
-  chrome::ShowSingletonTabOverwritingNTP(
+  ShowSingletonTabOverwritingNTP(
       displayer.browser(),
-      chrome::GetSingletonTabNavigateParams(displayer.browser(), url));
+      GetSingletonTabNavigateParams(displayer.browser(), url));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -157,8 +155,7 @@ class DriveWebContentsManager : public content::WebContentsObserver,
   void DidFailLoad(content::RenderFrameHost* render_frame_host,
                    const GURL& validated_url,
                    int error_code,
-                   const base::string16& error_description,
-                   bool was_ignored_by_handler) override;
+                   const base::string16& error_description) override;
 
   // content::WebContentsDelegate overrides:
   bool ShouldCreateWebContents(
@@ -266,8 +263,7 @@ void DriveWebContentsManager::DidFailLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description,
-    bool was_ignored_by_handler) {
+    const base::string16& error_description) {
   if (!render_frame_host->GetParent()) {
     LOG(WARNING) << "Failed to load WebContents to enable offline mode.";
     OnOfflineInit(false,
@@ -304,8 +300,7 @@ bool DriveWebContentsManager::ShouldCreateWebContents(
       BackgroundContentsServiceFactory::GetForProfile(profile_);
 
   // Prevent redirection if background contents already exists.
-  if (background_contents_service->GetAppBackgroundContents(
-      base::UTF8ToUTF16(app_id_))) {
+  if (background_contents_service->GetAppBackgroundContents(app_id_)) {
     return false;
   }
   // drive_first_run/app/manifest.json sets allow_js_access to false and
@@ -316,8 +311,8 @@ bool DriveWebContentsManager::ShouldCreateWebContents(
   BackgroundContents* contents =
       background_contents_service->CreateBackgroundContents(
           content::SiteInstance::Create(profile_), nullptr, MSG_ROUTING_NONE,
-          MSG_ROUTING_NONE, MSG_ROUTING_NONE, profile_, frame_name,
-          base::ASCIIToUTF16(app_id_), partition_id, session_storage_namespace);
+          MSG_ROUTING_NONE, MSG_ROUTING_NONE, profile_, frame_name, app_id_,
+          partition_id, session_storage_namespace);
 
   contents->web_contents()->GetController().LoadURL(
       target_url,
@@ -334,9 +329,9 @@ void DriveWebContentsManager::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_BACKGROUND_CONTENTS_OPENED, type);
-  const std::string app_id = base::UTF16ToUTF8(
+  const std::string& app_id =
       content::Details<BackgroundContentsOpenedDetails>(details)
-          ->application_id);
+          ->application_id;
   if (app_id == app_id_)
     OnOfflineInit(true, DriveFirstRunController::OUTCOME_OFFLINE_ENABLED);
 }
@@ -385,7 +380,7 @@ void DriveFirstRunController::EnableOfflineMode() {
   BackgroundContentsService* background_contents_service =
       BackgroundContentsServiceFactory::GetForProfile(profile_);
   if (background_contents_service->GetAppBackgroundContents(
-      base::UTF8ToUTF16(drive_hosted_app_id_))) {
+          drive_hosted_app_id_)) {
     LOG(WARNING) << "Background page for Drive app already exists";
     OnOfflineInit(false, OUTCOME_BACKGROUND_PAGE_EXISTS);
     return;
@@ -465,19 +460,18 @@ void DriveFirstRunController::ShowNotification() {
   data.buttons.push_back(message_center::ButtonInfo(
       l10n_util::GetStringUTF16(IDS_DRIVE_OFFLINE_NOTIFICATION_BUTTON)));
   ui::ResourceBundle& resource_bundle = ui::ResourceBundle::GetSharedInstance();
-  std::unique_ptr<message_center::Notification> notification(
-      new message_center::Notification(
-          message_center::NOTIFICATION_TYPE_SIMPLE, kDriveOfflineNotificationId,
-          base::string16(),  // title
-          l10n_util::GetStringUTF16(IDS_DRIVE_OFFLINE_NOTIFICATION_MESSAGE),
-          resource_bundle.GetImageNamed(IDR_NOTIFICATION_DRIVE),
-          base::UTF8ToUTF16(extension->name()), GURL(),
-          message_center::NotifierId(message_center::NotifierId::APPLICATION,
-                                     kDriveHostedAppId),
-          data, new DriveOfflineNotificationDelegate(profile_)));
-  notification->set_priority(message_center::LOW_PRIORITY);
-  message_center::MessageCenter::Get()->AddNotification(
-      std::move(notification));
+  message_center::Notification notification(
+      message_center::NOTIFICATION_TYPE_SIMPLE, kDriveOfflineNotificationId,
+      base::string16(),  // title
+      l10n_util::GetStringUTF16(IDS_DRIVE_OFFLINE_NOTIFICATION_MESSAGE),
+      resource_bundle.GetImageNamed(IDR_NOTIFICATION_DRIVE),
+      base::UTF8ToUTF16(extension->name()), GURL(),
+      message_center::NotifierId(message_center::NotifierId::APPLICATION,
+                                 kDriveHostedAppId),
+      data, new DriveOfflineNotificationDelegate(profile_));
+  notification.set_priority(message_center::LOW_PRIORITY);
+  NotificationDisplayService::GetForProfile(profile_)->Display(
+      NotificationHandler::Type::TRANSIENT, notification);
 }
 
 }  // namespace chromeos

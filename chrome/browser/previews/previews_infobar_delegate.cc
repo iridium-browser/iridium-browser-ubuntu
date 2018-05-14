@@ -8,7 +8,6 @@
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -20,12 +19,13 @@
 #include "chrome/browser/page_load_metrics/metrics_web_contents_observer.h"
 #include "chrome/browser/previews/previews_infobar_tab_helper.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_pingback_client.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/infobars/core/infobar.h"
 #include "components/network_time/network_time_tracker.h"
+#include "components/previews/content/previews_ui_service.h"
 #include "components/previews/core/previews_features.h"
+#include "components/previews/core/previews_logger.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -42,6 +42,7 @@ const char kMinStalenessParamName[] = "min_staleness_in_minutes";
 const char kMaxStalenessParamName[] = "max_staleness_in_minutes";
 const int kMinStalenessParamDefaultValue = 5;
 const int kMaxStalenessParamDefaultValue = 1440;
+static const char kPreviewInfobarEventType[] = "InfoBar";
 
 void RecordPreviewsInfoBarAction(
     previews::PreviewsType previews_type,
@@ -61,51 +62,25 @@ void RecordStaleness(PreviewsInfoBarDelegate::PreviewsInfoBarTimestamp value) {
                             PreviewsInfoBarDelegate::TIMESTAMP_INDEX_BOUNDARY);
 }
 
-// Sends opt out information to the pingback service based on a key value in the
-// infobar tab helper. Sending this information in the case of a navigation that
-// should not send a pingback (or is not a server preview) will not alter the
-// pingback.
-void ReportPingbackInformation(content::WebContents* web_contents) {
-  auto* data_reduction_proxy_settings =
-      DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
-          web_contents->GetBrowserContext());
-  PreviewsInfoBarTabHelper* infobar_tab_helper =
-      PreviewsInfoBarTabHelper::FromWebContents(web_contents);
-  if (infobar_tab_helper &&
-      infobar_tab_helper->committed_data_saver_navigation_id()) {
-    data_reduction_proxy_settings->data_reduction_proxy_service()
-        ->pingback_client()
-        ->AddOptOut(
-            infobar_tab_helper->committed_data_saver_navigation_id().value());
-  }
-}
-
-// Increments the prefs-based opt out information for data reduction proxy when
-// the user is not already transitioned to the PreviewsBlackList.
-void IncrementDataReductionProxyPrefs(content::WebContents* web_contents) {
-  auto* data_reduction_proxy_settings =
-      DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
-          web_contents->GetBrowserContext());
-  data_reduction_proxy_settings->IncrementLoFiUserRequestsForImages();
-}
-
 // Reloads the content of the page without previews.
 void ReloadWithoutPreviews(previews::PreviewsType previews_type,
                            content::WebContents* web_contents) {
   switch (previews_type) {
     case previews::PreviewsType::LITE_PAGE:
     case previews::PreviewsType::OFFLINE:
-      // Prevent LoFi and lite page modes from showing after reload.
-      // TODO(ryansturm): rename DISABLE_LOFI_MODE to DISABLE_PREVIEWS.
-      // crbug.com/707272
+    case previews::PreviewsType::AMP_REDIRECTION:
+    case previews::PreviewsType::NOSCRIPT:
+      // Prevent previews and lite page modes from showing after reload.
       web_contents->GetController().Reload(
-          content::ReloadType::DISABLE_LOFI_MODE, true);
+          content::ReloadType::DISABLE_PREVIEWS, true);
       break;
     case previews::PreviewsType::LOFI:
       web_contents->ReloadLoFiImages();
       break;
     case previews::PreviewsType::NONE:
+    case previews::PreviewsType::UNSPECIFIED:
     case previews::PreviewsType::LAST:
+      NOTREACHED();
       break;
   }
 }
@@ -125,7 +100,7 @@ void InformPLMOfOptOut(content::WebContents* web_contents) {
 
 PreviewsInfoBarDelegate::~PreviewsInfoBarDelegate() {
   if (!on_dismiss_callback_.is_null())
-    on_dismiss_callback_.Run(false);
+    std::move(on_dismiss_callback_).Run(false);
 
   RecordPreviewsInfoBarAction(previews_type_, infobar_dismissed_action_);
 }
@@ -137,7 +112,8 @@ void PreviewsInfoBarDelegate::Create(
     base::Time previews_freshness,
     bool is_data_saver_user,
     bool is_reload,
-    const OnDismissPreviewsInfobarCallback& on_dismiss_callback) {
+    OnDismissPreviewsInfobarCallback on_dismiss_callback,
+    previews::PreviewsUIService* previews_ui_service) {
   PreviewsInfoBarTabHelper* infobar_tab_helper =
       PreviewsInfoBarTabHelper::FromWebContents(web_contents);
   InfoBarService* infobar_service =
@@ -152,7 +128,7 @@ void PreviewsInfoBarDelegate::Create(
 
   std::unique_ptr<PreviewsInfoBarDelegate> delegate(new PreviewsInfoBarDelegate(
       infobar_tab_helper, previews_type, previews_freshness, is_data_saver_user,
-      is_reload, on_dismiss_callback));
+      is_reload, std::move(on_dismiss_callback)));
 
 #if defined(OS_ANDROID)
   std::unique_ptr<infobars::InfoBar> infobar_ptr(
@@ -162,15 +138,20 @@ void PreviewsInfoBarDelegate::Create(
       infobar_service->CreateConfirmInfoBar(std::move(delegate)));
 #endif
 
-  infobars::InfoBar* infobar =
-      infobar_service->AddInfoBar(std::move(infobar_ptr));
+  infobar_service->AddInfoBar(std::move(infobar_ptr));
+  uint64_t page_id = (infobar_tab_helper->previews_user_data())
+                         ? infobar_tab_helper->previews_user_data()->page_id()
+                         : 0;
 
-  if (infobar && (previews_type == previews::PreviewsType::LITE_PAGE ||
-                  previews_type == previews::PreviewsType::LOFI)) {
-    auto* data_reduction_proxy_settings =
-        DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
-            web_contents->GetBrowserContext());
-    data_reduction_proxy_settings->IncrementLoFiUIShown();
+  if (previews_ui_service) {
+    // Not in incognito mode or guest mode.
+    previews_ui_service->previews_logger()->LogMessage(
+        kPreviewInfobarEventType,
+        previews::GetDescriptionForInfoBarDescription(previews_type),
+        web_contents->GetController()
+            .GetLastCommittedEntry()
+            ->GetRedirectChain()[0] /* GURL */,
+        base::Time::Now(), page_id);
   }
 
   RecordPreviewsInfoBarAction(previews_type, INFOBAR_SHOWN);
@@ -183,7 +164,7 @@ PreviewsInfoBarDelegate::PreviewsInfoBarDelegate(
     base::Time previews_freshness,
     bool is_data_saver_user,
     bool is_reload,
-    const OnDismissPreviewsInfobarCallback& on_dismiss_callback)
+    OnDismissPreviewsInfobarCallback on_dismiss_callback)
     : ConfirmInfoBarDelegate(),
       infobar_tab_helper_(infobar_tab_helper),
       previews_type_(previews_type),
@@ -193,7 +174,10 @@ PreviewsInfoBarDelegate::PreviewsInfoBarDelegate(
       message_text_(l10n_util::GetStringUTF16(
           is_data_saver_user ? IDS_PREVIEWS_INFOBAR_SAVED_DATA_TITLE
                              : IDS_PREVIEWS_INFOBAR_FASTER_PAGE_TITLE)),
-      on_dismiss_callback_(on_dismiss_callback) {}
+      on_dismiss_callback_(std::move(on_dismiss_callback)) {
+  DCHECK(previews_type_ != previews::PreviewsType::NONE &&
+         previews_type_ != previews::PreviewsType::UNSPECIFIED);
+}
 
 infobars::InfoBarDelegate::InfoBarIdentifier
 PreviewsInfoBarDelegate::GetIdentifier() const {
@@ -231,7 +215,9 @@ base::string16 PreviewsInfoBarDelegate::GetMessageText() const {
   base::string16 timestamp = GetTimestampText();
   if (timestamp.empty())
     return message_text_;
-  return message_text_ + base::ASCIIToUTF16(" ") + timestamp;
+  // This string concatenation wouldn't fly for l10n, but this is only a hack
+  // for Chromium devs and not expected to ever appear for users.
+  return message_text_ + base::ASCIIToUTF16(" - ") + timestamp;
 #endif
 }
 
@@ -246,21 +232,12 @@ base::string16 PreviewsInfoBarDelegate::GetLinkText() const {
 bool PreviewsInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
   infobar_dismissed_action_ = INFOBAR_LOAD_ORIGINAL_CLICKED;
   if (!on_dismiss_callback_.is_null())
-    on_dismiss_callback_.Run(true);
-  on_dismiss_callback_.Reset();
+    std::move(on_dismiss_callback_).Run(true);
 
   content::WebContents* web_contents =
       InfoBarService::WebContentsFromInfoBar(infobar());
 
-  ReportPingbackInformation(web_contents);
-
   InformPLMOfOptOut(web_contents);
-
-  if ((previews_type_ == previews::PreviewsType::LITE_PAGE ||
-       previews_type_ == previews::PreviewsType::LOFI) &&
-      !data_reduction_proxy::params::IsBlackListEnabledForServerPreviews()) {
-    IncrementDataReductionProxyPrefs(web_contents);
-  }
 
   ReloadWithoutPreviews(previews_type_, web_contents);
 

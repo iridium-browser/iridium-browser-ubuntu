@@ -2,349 +2,354 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-ObjectUI.JavaScriptAutocomplete = {};
-
-/** @typedef {{title:(string|undefined), items:Array<string>}} */
-ObjectUI.JavaScriptAutocomplete.CompletionGroup;
-
-/**
- * @param {string} text
- * @param {string} query
- * @param {boolean=} force
- * @return {!Promise<!UI.SuggestBox.Suggestions>}
- */
-ObjectUI.JavaScriptAutocomplete.completionsForTextInCurrentContext = function(text, query, force) {
-  var clippedExpression = ObjectUI.JavaScriptAutocomplete._clipExpression(text, true);
-  var mapCompletionsPromise = ObjectUI.JavaScriptAutocomplete._mapCompletions(text, query);
-  return ObjectUI.JavaScriptAutocomplete.completionsForExpression(clippedExpression, query, force)
-      .then(completions => mapCompletionsPromise.then(mapCompletions => mapCompletions.concat(completions)));
-};
-
-/**
- * @param {string} text
- * @param {boolean=} allowEndingBracket
- * @return {string}
- */
-ObjectUI.JavaScriptAutocomplete._clipExpression = function(text, allowEndingBracket) {
-  var index;
-  var stopChars = new Set('=:({;,!+-*/&|^<>`'.split(''));
-  var whiteSpaceChars = new Set(' \r\n\t'.split(''));
-  var continueChars = new Set('[. \r\n\t'.split(''));
-
-  for (index = text.length - 1; index >= 0; index--) {
-    if (stopChars.has(text.charAt(index)))
-      break;
-    if (whiteSpaceChars.has(text.charAt(index)) && !continueChars.has(text.charAt(index - 1)))
-      break;
+ObjectUI.JavaScriptAutocomplete = class {
+  constructor() {
+    /** @type {!Map<string, {date: number, value: !Promise<?Object>}>} */
+    this._expressionCache = new Map();
+    SDK.consoleModel.addEventListener(SDK.ConsoleModel.Events.CommandEvaluated, this._clearCache, this);
+    SDK.targetManager.addModelListener(
+        SDK.RuntimeModel, SDK.RuntimeModel.Events.ExecutionContextChanged, this._clearCache, this);
+    SDK.targetManager.addModelListener(
+        SDK.DebuggerModel, SDK.DebuggerModel.Events.DebuggerPaused, this._clearCache, this);
   }
-  var clippedExpression = text.substring(index + 1).trim();
-  var bracketCount = 0;
 
-  index = clippedExpression.length - 1;
-  while (index >= 0) {
-    var character = clippedExpression.charAt(index);
-    if (character === ']')
-      bracketCount++;
-    // Allow an open bracket at the end for property completion.
-    if (character === '[' && (index < clippedExpression.length - 1 || !allowEndingBracket)) {
-      bracketCount--;
-      if (bracketCount < 0)
+  _clearCache() {
+    this._expressionCache.clear();
+  }
+
+  /**
+   * @param {string} text
+   * @param {string} query
+   * @param {boolean=} force
+   * @return {!Promise<!UI.SuggestBox.Suggestions>}
+   */
+  completionsForTextInCurrentContext(text, query, force) {
+    const clippedExpression = this._clipExpression(text, true);
+    const mapCompletionsPromise = this._mapCompletions(text, query);
+    return this._completionsForExpression(clippedExpression, query, force)
+        .then(completions => mapCompletionsPromise.then(mapCompletions => mapCompletions.concat(completions)));
+  }
+
+  /**
+   * @param {string} text
+   * @param {boolean=} allowEndingBracket
+   * @return {string}
+   */
+  _clipExpression(text, allowEndingBracket) {
+    let index;
+    const stopChars = new Set('=:({;,!+-*/&|^<>`'.split(''));
+    const whiteSpaceChars = new Set(' \r\n\t'.split(''));
+    const continueChars = new Set('[. \r\n\t'.split(''));
+
+    for (index = text.length - 1; index >= 0; index--) {
+      if (stopChars.has(text.charAt(index)))
+        break;
+      if (whiteSpaceChars.has(text.charAt(index)) && !continueChars.has(text.charAt(index - 1)))
         break;
     }
-    index--;
-  }
-  return clippedExpression.substring(index + 1).trim();
-};
+    const clippedExpression = text.substring(index + 1).trim();
+    let bracketCount = 0;
 
-/**
- * @param {string} text
- * @param {string} query
- * @return {!Promise<!UI.SuggestBox.Suggestions>}
- */
-ObjectUI.JavaScriptAutocomplete._mapCompletions = function(text, query) {
-  var mapMatch = text.match(/\.\s*(get|set|delete)\s*\(\s*$/);
-  var executionContext = UI.context.flavor(SDK.ExecutionContext);
-  if (!executionContext || !mapMatch)
-    return Promise.resolve([]);
-
-  var clippedExpression = ObjectUI.JavaScriptAutocomplete._clipExpression(text.substring(0, mapMatch.index));
-  var fulfill;
-  var promise = new Promise(x => fulfill = x);
-  executionContext.evaluate(clippedExpression, 'completion', true, true, false, false, false, evaluated);
-  return promise;
-
-  /**
-   * @param {?SDK.RemoteObject} result
-   * @param {!Protocol.Runtime.ExceptionDetails=} exceptionDetails
-   */
-  function evaluated(result, exceptionDetails) {
-    if (!result || !!exceptionDetails || result.subtype !== 'map') {
-      fulfill([]);
-      return;
+    index = clippedExpression.length - 1;
+    while (index >= 0) {
+      const character = clippedExpression.charAt(index);
+      if (character === ']')
+        bracketCount++;
+      // Allow an open bracket at the end for property completion.
+      if (character === '[' && (index < clippedExpression.length - 1 || !allowEndingBracket)) {
+        bracketCount--;
+        if (bracketCount < 0)
+          break;
+      }
+      index--;
     }
-    result.getOwnPropertiesPromise(false).then(extractEntriesProperty);
+    return clippedExpression.substring(index + 1).trim();
   }
 
   /**
-   * @param {!{properties: ?Array<!SDK.RemoteObjectProperty>, internalProperties: ?Array<!SDK.RemoteObjectProperty>}} properties
+   * @param {string} text
+   * @param {string} query
+   * @return {!Promise<!UI.SuggestBox.Suggestions>}
    */
-  function extractEntriesProperty(properties) {
-    var internalProperties = properties.internalProperties || [];
-    var entriesProperty = internalProperties.find(property => property.name === '[[Entries]]');
-    if (!entriesProperty) {
-      fulfill([]);
-      return;
-    }
-    entriesProperty.value.callFunctionJSONPromise(getEntries).then(keysObj => gotKeys(Object.keys(keysObj)));
-  }
+  async _mapCompletions(text, query) {
+    const mapMatch = text.match(/\.\s*(get|set|delete)\s*\(\s*$/);
+    const executionContext = UI.context.flavor(SDK.ExecutionContext);
+    if (!executionContext || !mapMatch)
+      return [];
 
-  /**
-   * @suppressReceiverCheck
-   * @this {!Array<{key:?, value:?}>}
-   * @return {!Object}
-   */
-  function getEntries() {
-    var result = {__proto__: null};
-    for (var i = 0; i < this.length; i++) {
-      if (typeof this[i].key === 'string')
-        result[this[i].key] = true;
-    }
-    return result;
-  }
-
-  /**
-   * @param {!Array<string>} rawKeys
-   */
-  function gotKeys(rawKeys) {
-    var caseSensitivePrefix = [];
-    var caseInsensitivePrefix = [];
-    var caseSensitiveAnywhere = [];
-    var caseInsensitiveAnywhere = [];
-    var quoteChar = '"';
-    if (query.startsWith('\''))
-      quoteChar = '\'';
-    var endChar = ')';
-    if (mapMatch[0].indexOf('set') !== -1)
-      endChar = ', ';
-
-    var sorter = rawKeys.length < 1000 ? String.naturalOrderComparator : undefined;
-    var keys = rawKeys.sort(sorter).map(key => quoteChar + key + quoteChar);
-
-    for (var key of keys) {
-      if (key.length < query.length)
-        continue;
-      if (query.length && key.toLowerCase().indexOf(query.toLowerCase()) === -1)
-        continue;
-      // Substitute actual newlines with newline characters. @see crbug.com/498421
-      var title = key.split('\n').join('\\n');
-      var text = title + endChar;
-
-      if (key.startsWith(query))
-        caseSensitivePrefix.push({text: text, title: title, priority: 4});
-      else if (key.toLowerCase().startsWith(query.toLowerCase()))
-        caseInsensitivePrefix.push({text: text, title: title, priority: 3});
-      else if (key.indexOf(query) !== -1)
-        caseSensitiveAnywhere.push({text: text, title: title, priority: 2});
-      else
-        caseInsensitiveAnywhere.push({text: text, title: title, priority: 1});
-    }
-    var suggestions = caseSensitivePrefix.concat(caseInsensitivePrefix, caseSensitiveAnywhere, caseInsensitiveAnywhere);
-    if (suggestions.length)
-      suggestions[0].subtitle = Common.UIString('Keys');
-    fulfill(suggestions);
-  }
-};
-
-/**
- * @param {string} expressionString
- * @param {string} query
- * @param {boolean=} force
- * @return {!Promise<!UI.SuggestBox.Suggestions>}
- */
-ObjectUI.JavaScriptAutocomplete.completionsForExpression = function(expressionString, query, force) {
-  var executionContext = UI.context.flavor(SDK.ExecutionContext);
-  if (!executionContext)
-    return Promise.resolve([]);
-
-  var lastIndex = expressionString.length - 1;
-
-  var dotNotation = (expressionString[lastIndex] === '.');
-  var bracketNotation = (expressionString.length > 1 && expressionString[lastIndex] === '[');
-
-  if (dotNotation || bracketNotation)
-    expressionString = expressionString.substr(0, lastIndex);
-  else
-    expressionString = '';
-
-  // User is entering float value, do not suggest anything.
-  if ((expressionString && !isNaN(expressionString)) || (!expressionString && query && !isNaN(query)))
-    return Promise.resolve([]);
-
-
-  if (!query && !expressionString && !force)
-    return Promise.resolve([]);
-
-  var fulfill;
-  var promise = new Promise(x => fulfill = x);
-  var selectedFrame = executionContext.debuggerModel.selectedCallFrame();
-  if (!expressionString && selectedFrame)
-    variableNamesInScopes(selectedFrame, receivedPropertyNames);
-  else
-    executionContext.evaluate(expressionString, 'completion', true, true, false, false, false, evaluated);
-
-  return promise;
-  /**
-   * @param {?SDK.RemoteObject} result
-   * @param {!Protocol.Runtime.ExceptionDetails=} exceptionDetails
-   */
-  function evaluated(result, exceptionDetails) {
-    if (!result || !!exceptionDetails) {
-      fulfill([]);
-      return;
-    }
+    const clippedExpression = this._clipExpression(text.substring(0, mapMatch.index));
+    const result = await executionContext.evaluate(
+        {
+          expression: clippedExpression,
+          objectGroup: 'completion',
+          includeCommandLineAPI: true,
+          silent: true,
+          returnByValue: false,
+          generatePreview: false
+        },
+        /* userGesture */ false, /* awaitPromise */ false);
+    if (result.error || !!result.exceptionDetails || result.object.subtype !== 'map')
+      return [];
+    const properties = await result.object.getOwnPropertiesPromise(false);
+    const internalProperties = properties.internalProperties || [];
+    const entriesProperty = internalProperties.find(property => property.name === '[[Entries]]');
+    if (!entriesProperty)
+      return [];
+    const keysObj = await entriesProperty.value.callFunctionJSONPromise(getEntries);
+    return gotKeys(Object.keys(keysObj));
 
     /**
-     * @param {?SDK.RemoteObject} object
-     * @return {!Promise<?SDK.RemoteObject>}
-     */
-    function extractTarget(object) {
-      if (!object)
-        return Promise.resolve(/** @type {?SDK.RemoteObject} */ (null));
-      if (object.type !== 'object' || object.subtype !== 'proxy')
-        return Promise.resolve(/** @type {?SDK.RemoteObject} */ (object));
-      return object.getOwnPropertiesPromise(false /* generatePreview */)
-          .then(extractTargetFromProperties)
-          .then(extractTarget);
-    }
-
-    /**
-     * @param {!{properties: ?Array<!SDK.RemoteObjectProperty>, internalProperties: ?Array<!SDK.RemoteObjectProperty>}} properties
-     * @return {?SDK.RemoteObject}
-     */
-    function extractTargetFromProperties(properties) {
-      var internalProperties = properties.internalProperties || [];
-      var target = internalProperties.find(property => property.name === '[[Target]]');
-      return target ? target.value : null;
-    }
-
-    /**
-     * @param {string=} type
-     * @return {!Object}
      * @suppressReceiverCheck
-     * @this {Object}
+     * @this {!Array<{key:?, value:?}>}
+     * @return {!Object}
      */
-    function getCompletions(type) {
-      var object;
-      if (type === 'string')
-        object = new String('');
-      else if (type === 'number')
-        object = new Number(0);
-      else if (type === 'boolean')
-        object = new Boolean(false);
-      else
-        object = this;
-
-      var result = [];
-      try {
-        for (var o = object; o; o = Object.getPrototypeOf(o)) {
-          if ((type === 'array' || type === 'typedarray') && o === object && ArrayBuffer.isView(o) && o.length > 9999)
-            continue;
-
-          var group = {items: [], __proto__: null};
-          try {
-            if (typeof o === 'object' && o.constructor && o.constructor.name)
-              group.title = o.constructor.name;
-          } catch (ee) {
-            // we could break upon cross origin check.
-          }
-          result[result.length] = group;
-          var names = Object.getOwnPropertyNames(o);
-          var isArray = Array.isArray(o);
-          for (var i = 0; i < names.length; ++i) {
-            // Skip array elements indexes.
-            if (isArray && /^[0-9]/.test(names[i]))
-              continue;
-            group.items[group.items.length] = names[i];
-          }
-        }
-      } catch (e) {
+    function getEntries() {
+      const result = {__proto__: null};
+      for (let i = 0; i < this.length; i++) {
+        if (typeof this[i].key === 'string')
+          result[this[i].key] = true;
       }
       return result;
     }
 
     /**
-     * @param {?SDK.RemoteObject} object
+     * @param {!Array<string>} rawKeys
+     * @return {!UI.SuggestBox.Suggestions}
      */
-    function completionsForObject(object) {
-      if (!object) {
-        receivedPropertyNames(null);
-      } else if (object.type === 'object' || object.type === 'function') {
-        object.callFunctionJSON(
-            getCompletions, [SDK.RemoteObject.toCallArgument(object.subtype)], receivedPropertyNames);
+    function gotKeys(rawKeys) {
+      const caseSensitivePrefix = [];
+      const caseInsensitivePrefix = [];
+      const caseSensitiveAnywhere = [];
+      const caseInsensitiveAnywhere = [];
+      let quoteChar = '"';
+      if (query.startsWith('\''))
+        quoteChar = '\'';
+      let endChar = ')';
+      if (mapMatch[0].indexOf('set') !== -1)
+        endChar = ', ';
+
+      const sorter = rawKeys.length < 1000 ? String.naturalOrderComparator : undefined;
+      const keys = rawKeys.sort(sorter).map(key => quoteChar + key + quoteChar);
+
+      for (const key of keys) {
+        if (key.length < query.length)
+          continue;
+        if (query.length && key.toLowerCase().indexOf(query.toLowerCase()) === -1)
+          continue;
+        // Substitute actual newlines with newline characters. @see crbug.com/498421
+        const title = key.split('\n').join('\\n');
+        const text = title + endChar;
+
+        if (key.startsWith(query))
+          caseSensitivePrefix.push({text: text, title: title, priority: 4});
+        else if (key.toLowerCase().startsWith(query.toLowerCase()))
+          caseInsensitivePrefix.push({text: text, title: title, priority: 3});
+        else if (key.indexOf(query) !== -1)
+          caseSensitiveAnywhere.push({text: text, title: title, priority: 2});
+        else
+          caseInsensitiveAnywhere.push({text: text, title: title, priority: 1});
+      }
+      const suggestions =
+          caseSensitivePrefix.concat(caseInsensitivePrefix, caseSensitiveAnywhere, caseInsensitiveAnywhere);
+      if (suggestions.length)
+        suggestions[0].subtitle = Common.UIString('Keys');
+      return suggestions;
+    }
+  }
+
+  /**
+   * @param {string} expressionString
+   * @param {string} query
+   * @param {boolean=} force
+   * @return {!Promise<!UI.SuggestBox.Suggestions>}
+   */
+  async _completionsForExpression(expressionString, query, force) {
+    const executionContext = UI.context.flavor(SDK.ExecutionContext);
+    if (!executionContext)
+      return [];
+
+    const lastIndex = expressionString.length - 1;
+
+    const dotNotation = (expressionString[lastIndex] === '.');
+    const bracketNotation = (expressionString.length > 1 && expressionString[lastIndex] === '[');
+
+    if (dotNotation || bracketNotation)
+      expressionString = expressionString.substr(0, lastIndex);
+    else
+      expressionString = '';
+
+    // User is entering float value, do not suggest anything.
+    if ((expressionString && !isNaN(expressionString)) || (!expressionString && query && !isNaN(query)))
+      return [];
+
+
+    if (!query && !expressionString && !force)
+      return [];
+    const selectedFrame = executionContext.debuggerModel.selectedCallFrame();
+    let completionGroups;
+    const TEN_SECONDS = 10000;
+    let cache = this._expressionCache.get(expressionString);
+    if (cache && cache.date + TEN_SECONDS > Date.now()) {
+      completionGroups = await cache.value;
+    } else if (!expressionString && selectedFrame) {
+      cache = {date: Date.now(), value: completionsOnPause(selectedFrame)};
+      this._expressionCache.set(expressionString, cache);
+      completionGroups = await cache.value;
+    } else {
+      const resultPromise = executionContext.evaluate(
+          {
+            expression: expressionString,
+            objectGroup: 'completion',
+            includeCommandLineAPI: true,
+            silent: true,
+            returnByValue: false,
+            generatePreview: false
+          },
+          /* userGesture */ false, /* awaitPromise */ false);
+      cache = {date: Date.now(), value: resultPromise.then(result => completionsOnGlobal.call(this, result))};
+      this._expressionCache.set(expressionString, cache);
+      completionGroups = await cache.value;
+    }
+    return this._receivedPropertyNames(
+        completionGroups.slice(0), dotNotation, bracketNotation, expressionString, query);
+
+    /**
+     * @this {ObjectUI.JavaScriptAutocomplete}
+     * @param {!SDK.RuntimeModel.EvaluationResult} result
+     * @return {!Promise<!Array<!ObjectUI.JavaScriptAutocomplete.CompletionGroup>>}
+     */
+    async function completionsOnGlobal(result) {
+      if (result.error || !!result.exceptionDetails || !result.object)
+        return [];
+
+      let object = result.object;
+      while (object && object.type === 'object' && object.subtype === 'proxy') {
+        const properties = await object.getOwnPropertiesPromise(false /* generatePreview */);
+        const internalProperties = properties.internalProperties || [];
+        const target = internalProperties.find(property => property.name === '[[Target]]');
+        object = target ? target.value : null;
+      }
+      if (!object)
+        return [];
+      let completions = [];
+      if (object.type === 'object' || object.type === 'function') {
+        completions =
+            await object.callFunctionJSONPromise(getCompletions, [SDK.RemoteObject.toCallArgument(object.subtype)]) ||
+            [];
       } else if (object.type === 'string' || object.type === 'number' || object.type === 'boolean') {
-        executionContext.evaluate(
-            '(' + getCompletions + ')("' + result.type + '")', 'completion', false, true, true, false, false,
-            receivedPropertyNamesFromEval);
+        const evaluateResult = await executionContext.evaluate(
+            {
+              expression: '(' + getCompletions + ')("' + object.type + '")',
+              objectGroup: 'completion',
+              includeCommandLineAPI: false,
+              silent: true,
+              returnByValue: true,
+              generatePreview: false
+            },
+            /* userGesture */ false,
+            /* awaitPromise */ false);
+        if (evaluateResult.object && !evaluateResult.exceptionDetails)
+          completions = evaluateResult.object.value || [];
+      }
+      executionContext.runtimeModel.releaseObjectGroup('completion');
+
+      if (!expressionString) {
+        const globalNames = await executionContext.globalLexicalScopeNames();
+        // Merge lexical scope names with first completion group on global object: let a and let b should be in the same group.
+        if (completions.length)
+          completions[0].items = completions[0].items.concat(globalNames);
+        else
+          completions.push({items: globalNames.sort(), title: Common.UIString('Lexical scope variables')});
+      }
+
+      for (const group of completions) {
+        for (let i = 0; i < group.items.length; i++)
+          group.items[i] = group.items[i].replace(/\n/g, '\\n');
+
+        group.items.sort(group.items.length < 1000 ? this._itemComparator : undefined);
+      }
+
+      return completions;
+
+      /**
+       * @param {string=} type
+       * @return {!Object}
+       * @suppressReceiverCheck
+       * @this {Object}
+       */
+      function getCompletions(type) {
+        let object;
+        if (type === 'string')
+          object = new String('');
+        else if (type === 'number')
+          object = new Number(0);
+        else if (type === 'boolean')
+          object = new Boolean(false);
+        else
+          object = this;
+
+        const result = [];
+        try {
+          for (let o = object; o; o = Object.getPrototypeOf(o)) {
+            if ((type === 'array' || type === 'typedarray') && o === object && o.length > 9999)
+              continue;
+
+            const group = {items: [], __proto__: null};
+            try {
+              if (typeof o === 'object' && o.constructor && o.constructor.name)
+                group.title = o.constructor.name;
+            } catch (ee) {
+              // we could break upon cross origin check.
+            }
+            result[result.length] = group;
+            const names = Object.getOwnPropertyNames(o);
+            const isArray = Array.isArray(o);
+            for (let i = 0; i < names.length && group.items.length < 10000; ++i) {
+              // Skip array elements indexes.
+              if (isArray && /^[0-9]/.test(names[i]))
+                continue;
+              group.items[group.items.length] = names[i];
+            }
+          }
+        } catch (e) {
+        }
+        return result;
       }
     }
 
-    extractTarget(result).then(completionsForObject);
-  }
-
-  /**
-   * @param {!SDK.DebuggerModel.CallFrame} callFrame
-   * @param {function(!Array<!ObjectUI.JavaScriptAutocomplete.CompletionGroup>)} callback
-   */
-  function variableNamesInScopes(callFrame, callback) {
-    var result = [{items: ['this']}];
-
     /**
-     * @param {string} name
-     * @param {?Array<!SDK.RemoteObjectProperty>} properties
+     * @param {!SDK.DebuggerModel.CallFrame} callFrame
+     * @return {!Promise<?Object>}
      */
-    function propertiesCollected(name, properties) {
-      var group = {title: name, items: []};
-      result.push(group);
-      for (var i = 0; properties && i < properties.length; ++i)
-        group.items.push(properties[i].name);
-      if (--pendingRequests === 0)
-        callback(result);
-    }
-
-    var scopeChain = callFrame.scopeChain();
-    var pendingRequests = scopeChain.length;
-    for (var i = 0; i < scopeChain.length; ++i) {
-      var scope = scopeChain[i];
-      var object = scope.object();
-      object.getAllProperties(
-          false /* accessorPropertiesOnly */, false /* generatePreview */,
-          propertiesCollected.bind(null, scope.typeName()));
+    async function completionsOnPause(callFrame) {
+      const result = [{items: ['this']}];
+      const scopeChain = callFrame.scopeChain();
+      const groupPromises = [];
+      for (const scope of scopeChain) {
+        groupPromises.push(scope.object()
+                               .getAllPropertiesPromise(false /* accessorPropertiesOnly */, false /* generatePreview */)
+                               .then(result => ({properties: result.properties, name: scope.name()})));
+      }
+      const fullScopes = await Promise.all(groupPromises);
+      executionContext.runtimeModel.releaseObjectGroup('completion');
+      for (const scope of fullScopes)
+        result.push({title: scope.name, items: scope.properties.map(property => property.name).sort()});
+      return result;
     }
   }
 
   /**
-   * @param {?SDK.RemoteObject} result
-   * @param {!Protocol.Runtime.ExceptionDetails=} exceptionDetails
+   * @param {?Array<!ObjectUI.JavaScriptAutocomplete.CompletionGroup>} propertyGroups
+   * @param {boolean} dotNotation
+   * @param {boolean} bracketNotation
+   * @param {string} expressionString
+   * @param {string} query
+   * @return {!UI.SuggestBox.Suggestions}
    */
-  function receivedPropertyNamesFromEval(result, exceptionDetails) {
-    executionContext.runtimeModel.releaseObjectGroup('completion');
-    if (result && !exceptionDetails)
-      receivedPropertyNames(/** @type {!Object} */ (result.value));
-    else
-      fulfill([]);
-  }
-
-  /**
-   * @param {?Object} object
-   */
-  function receivedPropertyNames(object) {
-    executionContext.runtimeModel.releaseObjectGroup('completion');
-    if (!object) {
-      fulfill([]);
-      return;
-    }
-    var propertyGroups = /** @type {!Array<!ObjectUI.JavaScriptAutocomplete.CompletionGroup>} */ (object);
-    var includeCommandLineAPI = (!dotNotation && !bracketNotation);
+  _receivedPropertyNames(propertyGroups, dotNotation, bracketNotation, expressionString, query) {
+    if (!propertyGroups)
+      return [];
+    const includeCommandLineAPI = (!dotNotation && !bracketNotation);
     if (includeCommandLineAPI) {
       const commandLineAPI = [
         'dir',
@@ -364,106 +369,105 @@ ObjectUI.JavaScriptAutocomplete.completionsForExpression = function(expressionSt
         'monitor',
         'unmonitor',
         'table',
+        'queryObjects',
         '$',
         '$$',
         '$x'
       ];
       propertyGroups.push({items: commandLineAPI});
     }
-    fulfill(ObjectUI.JavaScriptAutocomplete._completionsForQuery(
-        dotNotation, bracketNotation, expressionString, query, propertyGroups));
+    return this._completionsForQuery(dotNotation, bracketNotation, expressionString, query, propertyGroups);
   }
-};
-
-/**
-   * @param {boolean} dotNotation
-   * @param {boolean} bracketNotation
-   * @param {string} expressionString
-   * @param {string} query
-   * @param {!Array<!ObjectUI.JavaScriptAutocomplete.CompletionGroup>} propertyGroups
-   * @return {!UI.SuggestBox.Suggestions}
-   */
-ObjectUI.JavaScriptAutocomplete._completionsForQuery = function(
-    dotNotation, bracketNotation, expressionString, query, propertyGroups) {
-  if (bracketNotation) {
-    if (query.length && query[0] === '\'')
-      var quoteUsed = '\'';
-    else
-      var quoteUsed = '"';
-  }
-
-  if (!expressionString) {
-    const keywords = [
-      'break', 'case',     'catch',  'continue', 'default',    'delete', 'do',     'else',   'finally',
-      'for',   'function', 'if',     'in',       'instanceof', 'new',    'return', 'switch', 'this',
-      'throw', 'try',      'typeof', 'var',      'void',       'while',  'with'
-    ];
-    propertyGroups.push({title: Common.UIString('keywords'), items: keywords});
-  }
-
-  var result = [];
-  var lastGroupTitle;
-  for (var group of propertyGroups) {
-    group.items.sort(itemComparator.bind(null, group.items.length > 1000));
-    var caseSensitivePrefix = [];
-    var caseInsensitivePrefix = [];
-    var caseSensitiveAnywhere = [];
-    var caseInsensitiveAnywhere = [];
-
-    for (var property of group.items) {
-      // Assume that all non-ASCII characters are letters and thus can be used as part of identifier.
-      if (!bracketNotation && !/^[a-zA-Z_$\u008F-\uFFFF][a-zA-Z0-9_$\u008F-\uFFFF]*$/.test(property))
-        continue;
-
-      if (bracketNotation) {
-        if (!/^[0-9]+$/.test(property))
-          property = quoteUsed + property.escapeCharacters(quoteUsed + '\\') + quoteUsed;
-        property += ']';
-      }
-
-      if (property.length < query.length)
-        continue;
-      if (query.length && property.toLowerCase().indexOf(query.toLowerCase()) === -1)
-        continue;
-      // Substitute actual newlines with newline characters. @see crbug.com/498421
-      var prop = property.split('\n').join('\\n');
-
-      if (property.startsWith(query))
-        caseSensitivePrefix.push({text: prop, priority: 4});
-      else if (property.toLowerCase().startsWith(query.toLowerCase()))
-        caseInsensitivePrefix.push({text: prop, priority: 3});
-      else if (property.indexOf(query) !== -1)
-        caseSensitiveAnywhere.push({text: prop, priority: 2});
-      else
-        caseInsensitiveAnywhere.push({text: prop, priority: 1});
-    }
-    var structuredGroup =
-        caseSensitivePrefix.concat(caseInsensitivePrefix, caseSensitiveAnywhere, caseInsensitiveAnywhere);
-    if (structuredGroup.length && group.title !== lastGroupTitle) {
-      structuredGroup[0].subtitle = group.title;
-      lastGroupTitle = group.title;
-    }
-    result = result.concat(structuredGroup);
-    result.forEach(item => {
-      if (item.text.endsWith(']'))
-        item.title = item.text.substring(0, item.text.length - 1);
-    });
-  }
-  return result;
 
   /**
-   * @param {boolean} naturalOrder
+     * @param {boolean} dotNotation
+     * @param {boolean} bracketNotation
+     * @param {string} expressionString
+     * @param {string} query
+     * @param {!Array<!ObjectUI.JavaScriptAutocomplete.CompletionGroup>} propertyGroups
+     * @return {!UI.SuggestBox.Suggestions}
+     */
+  _completionsForQuery(dotNotation, bracketNotation, expressionString, query, propertyGroups) {
+    const quoteUsed = (bracketNotation && query.startsWith('\'')) ? '\'' : '"';
+
+    if (!expressionString) {
+      const keywords = [
+        'break', 'case',     'catch',  'continue', 'default',    'delete', 'do',     'else',   'finally',
+        'for',   'function', 'if',     'in',       'instanceof', 'new',    'return', 'switch', 'this',
+        'throw', 'try',      'typeof', 'var',      'void',       'while',  'with'
+      ];
+      propertyGroups.push({title: Common.UIString('keywords'), items: keywords});
+    }
+
+    let result = [];
+    let lastGroupTitle;
+    const regex = /^[a-zA-Z_$\u008F-\uFFFF][a-zA-Z0-9_$\u008F-\uFFFF]*$/;
+    const lowerCaseQuery = query.toLowerCase();
+    for (const group of propertyGroups) {
+      const caseSensitivePrefix = [];
+      const caseInsensitivePrefix = [];
+      const caseSensitiveAnywhere = [];
+      const caseInsensitiveAnywhere = [];
+
+      for (let i = 0; i < group.items.length; i++) {
+        let property = group.items[i];
+        // Assume that all non-ASCII characters are letters and thus can be used as part of identifier.
+        if (!bracketNotation && !regex.test(property))
+          continue;
+
+        if (bracketNotation) {
+          if (!/^[0-9]+$/.test(property))
+            property = quoteUsed + property.escapeCharacters(quoteUsed + '\\') + quoteUsed;
+          property += ']';
+        }
+
+        if (property.length < query.length)
+          continue;
+        const lowerCaseProperty = property.toLowerCase();
+        if (query.length && lowerCaseProperty.indexOf(lowerCaseQuery) === -1)
+          continue;
+
+        if (property.startsWith(query))
+          caseSensitivePrefix.push({text: property, priority: 4});
+        else if (lowerCaseProperty.startsWith(lowerCaseQuery))
+          caseInsensitivePrefix.push({text: property, priority: 3});
+        else if (property.indexOf(query) !== -1)
+          caseSensitiveAnywhere.push({text: property, priority: 2});
+        else
+          caseInsensitiveAnywhere.push({text: property, priority: 1});
+      }
+      const structuredGroup =
+          caseSensitivePrefix.concat(caseInsensitivePrefix, caseSensitiveAnywhere, caseInsensitiveAnywhere);
+      if (structuredGroup.length && group.title !== lastGroupTitle) {
+        structuredGroup[0].subtitle = group.title;
+        lastGroupTitle = group.title;
+      }
+      result = result.concat(structuredGroup);
+      result.forEach(item => {
+        if (item.text.endsWith(']'))
+          item.title = item.text.substring(0, item.text.length - 1);
+      });
+    }
+    return result;
+  }
+
+  /**
    * @param {string} a
    * @param {string} b
    * @return {number}
    */
-  function itemComparator(naturalOrder, a, b) {
-    var aStartsWithUnderscore = a.startsWith('_');
-    var bStartsWithUnderscore = b.startsWith('_');
+  _itemComparator(a, b) {
+    const aStartsWithUnderscore = a.startsWith('_');
+    const bStartsWithUnderscore = b.startsWith('_');
     if (aStartsWithUnderscore && !bStartsWithUnderscore)
       return 1;
     if (bStartsWithUnderscore && !aStartsWithUnderscore)
       return -1;
-    return naturalOrder ? String.naturalOrderComparator(a, b) : a.localeCompare(b);
+    return String.naturalOrderComparator(a, b);
   }
 };
+
+/** @typedef {{title:(string|undefined), items:Array<string>}} */
+ObjectUI.JavaScriptAutocomplete.CompletionGroup;
+
+ObjectUI.javaScriptAutocomplete = new ObjectUI.JavaScriptAutocomplete();

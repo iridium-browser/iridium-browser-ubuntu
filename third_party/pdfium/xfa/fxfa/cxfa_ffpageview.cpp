@@ -10,18 +10,20 @@
 #include <memory>
 #include <vector>
 
+#include "fxjs/xfa/cjx_object.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
-#include "xfa/fde/cfde_rendercontext.h"
-#include "xfa/fxfa/app/cxfa_ffcheckbutton.h"
-#include "xfa/fxfa/app/cxfa_fffield.h"
-#include "xfa/fxfa/app/cxfa_ffimageedit.h"
-#include "xfa/fxfa/app/cxfa_ffpushbutton.h"
-#include "xfa/fxfa/app/cxfa_fwladapterwidgetmgr.h"
+#include "xfa/fxfa/cxfa_ffcheckbutton.h"
 #include "xfa/fxfa/cxfa_ffdoc.h"
 #include "xfa/fxfa/cxfa_ffdocview.h"
+#include "xfa/fxfa/cxfa_fffield.h"
+#include "xfa/fxfa/cxfa_ffimageedit.h"
+#include "xfa/fxfa/cxfa_ffpushbutton.h"
 #include "xfa/fxfa/cxfa_ffwidget.h"
+#include "xfa/fxfa/cxfa_fwladapterwidgetmgr.h"
 #include "xfa/fxfa/parser/cxfa_node.h"
+#include "xfa/fxfa/parser/cxfa_traversal.h"
+#include "xfa/fxfa/parser/cxfa_traverse.h"
 
 namespace {
 
@@ -69,10 +71,10 @@ bool PageWidgetFilter(CXFA_FFWidget* pWidget,
                       uint32_t dwFilter,
                       bool bTraversal,
                       bool bIgnorerelevant) {
-  CXFA_WidgetAcc* pWidgetAcc = pWidget->GetDataAcc();
+  CXFA_Node* pNode = pWidget->GetNode();
 
   if (!!(dwFilter & XFA_WidgetStatus_Focused) &&
-      pWidgetAcc->GetElementType() != XFA_Element::Field) {
+      (!pNode || pNode->GetElementType() != XFA_Element::Field)) {
     return false;
   }
 
@@ -209,7 +211,8 @@ CXFA_FFWidget* CXFA_FFPageWidgetIterator::GetWidget(
 
   if (!pWidget->IsLoaded() &&
       !!(pWidget->GetStatus() & XFA_WidgetStatus_Visible)) {
-    pWidget->LoadWidget();
+    if (!pWidget->LoadWidget())
+      return nullptr;
   }
   return pWidget;
 }
@@ -307,21 +310,22 @@ bool CXFA_FFTabOrderPageWidgetIterator::SetCurrentWidget(
 
 CXFA_FFWidget* CXFA_FFTabOrderPageWidgetIterator::GetTraverseWidget(
     CXFA_FFWidget* pWidget) {
-  CXFA_WidgetAcc* pAcc = pWidget->GetDataAcc();
-  CXFA_Node* pTraversal = pAcc->GetNode()->GetChild(0, XFA_Element::Traversal);
+  CXFA_Traversal* pTraversal = pWidget->GetNode()->GetChild<CXFA_Traversal>(
+      0, XFA_Element::Traversal, false);
   if (pTraversal) {
-    CXFA_Node* pTraverse = pTraversal->GetChild(0, XFA_Element::Traverse);
+    CXFA_Traverse* pTraverse =
+        pTraversal->GetChild<CXFA_Traverse>(0, XFA_Element::Traverse, false);
     if (pTraverse) {
-      CFX_WideString wsTraverseWidgetName;
-      if (pTraverse->GetAttribute(XFA_ATTRIBUTE_Ref, wsTraverseWidgetName)) {
-        return FindWidgetByName(wsTraverseWidgetName, pWidget);
-      }
+      Optional<WideString> traverseWidgetName =
+          pTraverse->JSObject()->TryAttribute(XFA_Attribute::Ref, true);
+      if (traverseWidgetName)
+        return FindWidgetByName(*traverseWidgetName, pWidget);
     }
   }
   return nullptr;
 }
 CXFA_FFWidget* CXFA_FFTabOrderPageWidgetIterator::FindWidgetByName(
-    const CFX_WideString& wsWidgetName,
+    const WideString& wsWidgetName,
     CXFA_FFWidget* pRefWidget) {
   return pRefWidget->GetDocView()->GetWidgetByName(wsWidgetName, pRefWidget);
 }
@@ -340,22 +344,21 @@ void CXFA_FFTabOrderPageWidgetIterator::CreateTabOrderWidgetArray() {
          nWidgetCount) {
     if (!pdfium::ContainsValue(m_TabOrderWidgetArray, hWidget)) {
       m_TabOrderWidgetArray.push_back(hWidget);
-      CXFA_WidgetAcc* pWidgetAcc = hWidget->GetDataAcc();
-      if (pWidgetAcc->GetUIType() == XFA_Element::ExclGroup) {
+      CXFA_Node* pNode = hWidget->GetNode();
+      if (pNode->GetFFWidgetType() == XFA_FFWidgetType::kExclGroup) {
         auto it = std::find(SpaceOrderWidgetArray.begin(),
                             SpaceOrderWidgetArray.end(), hWidget);
         int32_t iWidgetIndex = it != SpaceOrderWidgetArray.end()
                                    ? it - SpaceOrderWidgetArray.begin() + 1
                                    : 0;
         while (true) {
-          CXFA_FFWidget* pRadio =
+          CXFA_FFWidget* radio =
               SpaceOrderWidgetArray[iWidgetIndex % nWidgetCount];
-          if (pRadio->GetDataAcc()->GetExclGroup() != pWidgetAcc) {
+          if (radio->GetNode()->GetExclGroupIfExists() != pNode)
             break;
-          }
-          if (!pdfium::ContainsValue(m_TabOrderWidgetArray, hWidget)) {
-            m_TabOrderWidgetArray.push_back(pRadio);
-          }
+          if (!pdfium::ContainsValue(m_TabOrderWidgetArray, hWidget))
+            m_TabOrderWidgetArray.push_back(radio);
+
           iWidgetIndex++;
         }
       }

@@ -31,14 +31,21 @@ namespace blink {
 WorkerNavigator::WorkerNavigator(const String& user_agent)
     : user_agent_(user_agent) {}
 
-WorkerNavigator::~WorkerNavigator() {}
+WorkerNavigator::~WorkerNavigator() = default;
 
 String WorkerNavigator::userAgent() const {
   return user_agent_;
 }
 
-DEFINE_TRACE(WorkerNavigator) {
+void WorkerNavigator::Trace(blink::Visitor* visitor) {
+  ScriptWrappable::Trace(visitor);
   Supplementable<WorkerNavigator>::Trace(visitor);
+}
+
+void WorkerNavigator::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
+  ScriptWrappable::TraceWrappers(visitor);
+  Supplementable<WorkerNavigator>::TraceWrappers(visitor);
 }
 
 }  // namespace blink

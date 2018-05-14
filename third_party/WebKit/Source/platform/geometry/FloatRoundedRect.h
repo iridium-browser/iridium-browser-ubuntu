@@ -48,7 +48,7 @@ class PLATFORM_EXPORT FloatRoundedRect {
     DISALLOW_NEW();
 
    public:
-    Radii() {}
+    Radii() = default;
     Radii(const FloatSize& top_left,
           const FloatSize& top_right,
           const FloatSize& bottom_left,
@@ -106,7 +106,7 @@ class PLATFORM_EXPORT FloatRoundedRect {
     FloatSize bottom_right_;
   };
 
-  FloatRoundedRect() {}
+  FloatRoundedRect() = default;
   explicit FloatRoundedRect(const FloatRect&, const Radii& = Radii());
   FloatRoundedRect(float x, float y, float width, float height);
   FloatRoundedRect(const FloatRect&,
@@ -230,6 +230,11 @@ inline bool operator==(const FloatRoundedRect& a, const FloatRoundedRect& b) {
 inline bool operator!=(const FloatRoundedRect& a, const FloatRoundedRect& b) {
   return !(a == b);
 }
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&,
+                                         const FloatRoundedRect&);
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&,
+                                         const FloatRoundedRect::Radii&);
 
 // Redeclared here to avoid ODR issues.
 // See platform/testing/GeometryPrinters.h.

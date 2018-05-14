@@ -25,6 +25,10 @@ namespace base {
 class Clock;
 }
 
+namespace net {
+class NetLog;
+}
+
 namespace media_router {
 
 // Keeps track of devices that have responded to discovery requests and notifies
@@ -58,6 +62,11 @@ class DialRegistry : public DialService::Observer,
 
   static DialRegistry* GetInstance();
 
+  // Sets the NetLog object used for logging. Should be called right after
+  // GetInstance(). If the registry already has a NetLog, does nothing. The
+  // NetLog should live at least as long as the IO Thread.
+  void SetNetLog(net::NetLog* net_log);
+
   // Called by the DIAL API when event listeners are added or removed. The dial
   // service is started after the first listener is added and stopped after the
   // last listener is removed.
@@ -88,7 +97,7 @@ class DialRegistry : public DialService::Observer,
   void AddDeviceForTest(const DialDeviceData& device_data);
 
   // Allows tests to swap in a fake clock.
-  void SetClockForTest(std::unique_ptr<base::Clock> clock);
+  void SetClockForTest(base::Clock* clock);
 
  protected:
   // Returns a new instance of the DIAL service.  Overridden by tests.
@@ -191,7 +200,10 @@ class DialRegistry : public DialService::Observer,
   // DIAL API owns this DIAL registry.
   base::ObserverList<Observer> observers_;
 
-  std::unique_ptr<base::Clock> clock_;
+  // Set just after construction, only used on the IO thread.
+  net::NetLog* net_log_ = nullptr;
+
+  base::Clock* clock_;
 
   FRIEND_TEST_ALL_PREFIXES(DialRegistryTest, TestAddRemoveListeners);
   FRIEND_TEST_ALL_PREFIXES(DialRegistryTest, TestNoDevicesDiscovered);

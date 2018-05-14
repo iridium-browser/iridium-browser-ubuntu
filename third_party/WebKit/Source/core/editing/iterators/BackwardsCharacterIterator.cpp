@@ -27,17 +27,19 @@
 
 #include "core/editing/iterators/BackwardsCharacterIterator.h"
 
+#include "core/editing/EphemeralRange.h"
+
 namespace blink {
 
 template <typename Strategy>
 BackwardsCharacterIteratorAlgorithm<Strategy>::
-    BackwardsCharacterIteratorAlgorithm(const PositionTemplate<Strategy>& start,
-                                        const PositionTemplate<Strategy>& end,
-                                        const TextIteratorBehavior& behavior)
+    BackwardsCharacterIteratorAlgorithm(
+        const EphemeralRangeTemplate<Strategy>& range,
+        const TextIteratorBehavior& behavior)
     : offset_(0),
       run_offset_(0),
       at_break_(true),
-      text_iterator_(start, end, behavior) {
+      text_iterator_(range, behavior) {
   while (!AtEnd() && !text_iterator_.length())
     text_iterator_.Advance();
 }
@@ -47,7 +49,7 @@ PositionTemplate<Strategy>
 BackwardsCharacterIteratorAlgorithm<Strategy>::EndPosition() const {
   if (!text_iterator_.AtEnd()) {
     if (text_iterator_.length() > 1) {
-      Node* n = text_iterator_.StartContainer();
+      const Node* n = text_iterator_.StartContainer();
       return PositionTemplate<Strategy>::EditingPositionOf(
           n, text_iterator_.EndOffset() - run_offset_);
     }

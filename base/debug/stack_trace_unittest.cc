@@ -8,7 +8,7 @@
 #include <sstream>
 #include <string>
 
-#include "base/debug/debugging_flags.h"
+#include "base/debug/debugging_buildflags.h"
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
 #include "base/process/kill.h"
@@ -172,11 +172,11 @@ MULTIPROCESS_TEST_MAIN(MismatchedMallocChildProcess) {
 // and e.g. mismatched new[]/delete would cause a hang because
 // of re-entering malloc.
 TEST_F(StackTraceTest, AsyncSignalUnsafeSignalHandlerHang) {
-  SpawnChildResult spawn_result = SpawnChild("MismatchedMallocChildProcess");
-  ASSERT_TRUE(spawn_result.process.IsValid());
+  Process child = SpawnChild("MismatchedMallocChildProcess");
+  ASSERT_TRUE(child.IsValid());
   int exit_code;
-  ASSERT_TRUE(spawn_result.process.WaitForExitWithTimeout(
-      TestTimeouts::action_timeout(), &exit_code));
+  ASSERT_TRUE(
+      child.WaitForExitWithTimeout(TestTimeouts::action_timeout(), &exit_code));
 }
 #endif  // !defined(OS_IOS)
 

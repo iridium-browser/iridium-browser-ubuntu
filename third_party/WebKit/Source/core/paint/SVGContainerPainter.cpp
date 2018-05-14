@@ -33,32 +33,50 @@ void SVGContainerPainter::Paint(const PaintInfo& paint_info) {
 
   // Spec: An empty viewBox on the <svg> element disables rendering.
   DCHECK(layout_svg_container_.GetElement());
-  if (isSVGSVGElement(*layout_svg_container_.GetElement()) &&
-      toSVGSVGElement(*layout_svg_container_.GetElement()).HasEmptyViewBox())
+  if (IsSVGSVGElement(*layout_svg_container_.GetElement()) &&
+      ToSVGSVGElement(*layout_svg_container_.GetElement()).HasEmptyViewBox())
     return;
 
   PaintInfo paint_info_before_filtering(paint_info);
   paint_info_before_filtering.UpdateCullRect(
       layout_svg_container_.LocalToSVGParentTransform());
   SVGTransformContext transform_context(
-      paint_info_before_filtering.context, layout_svg_container_,
+      paint_info_before_filtering, layout_svg_container_,
       layout_svg_container_.LocalToSVGParentTransform());
   {
     Optional<FloatClipRecorder> clip_recorder;
+    Optional<ScopedPaintChunkProperties> scoped_paint_chunk_properties;
     if (layout_svg_container_.IsSVGViewportContainer() &&
-        SVGLayoutSupport::IsOverflowHidden(&layout_svg_container_)) {
-      FloatRect viewport =
-          layout_svg_container_.LocalToSVGParentTransform().Inverse().MapRect(
-              ToLayoutSVGViewportContainer(layout_svg_container_).Viewport());
-      clip_recorder.emplace(paint_info_before_filtering.context,
-                            layout_svg_container_,
-                            paint_info_before_filtering.phase, viewport);
+        SVGLayoutSupport::IsOverflowHidden(layout_svg_container_)) {
+      if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
+        const auto* fragment =
+            paint_info.FragmentToPaint(layout_svg_container_);
+        if (!fragment)
+          return;
+        const auto* properties = fragment->PaintProperties();
+        // TODO(crbug.com/814815): The condition should be a DCHECK, but for now
+        // we may paint the object for filters during PrePaint before the
+        // properties are ready.
+        if (properties && properties->OverflowOrInnerBorderRadiusClip()) {
+          scoped_paint_chunk_properties.emplace(
+              paint_info.context.GetPaintController(),
+              properties->OverflowOrInnerBorderRadiusClip(),
+              layout_svg_container_, paint_info.DisplayItemTypeForClipping());
+        }
+      } else {
+        FloatRect viewport =
+            layout_svg_container_.LocalToSVGParentTransform().Inverse().MapRect(
+                ToLayoutSVGViewportContainer(layout_svg_container_).Viewport());
+        clip_recorder.emplace(paint_info_before_filtering.context,
+                              layout_svg_container_,
+                              paint_info_before_filtering.phase, viewport);
+      }
     }
 
     SVGPaintContext paint_context(layout_svg_container_,
                                   paint_info_before_filtering);
     bool continue_rendering = true;
-    if (paint_context.GetPaintInfo().phase == kPaintPhaseForeground)
+    if (paint_context.GetPaintInfo().phase == PaintPhase::kForeground)
       continue_rendering = paint_context.ApplyClipMaskAndFilterIfNecessary();
 
     if (continue_rendering) {
@@ -68,13 +86,13 @@ void SVGContainerPainter::Paint(const PaintInfo& paint_info) {
     }
   }
 
-  if (paint_info_before_filtering.phase != kPaintPhaseForeground)
+  if (paint_info_before_filtering.phase != PaintPhase::kForeground)
     return;
 
   if (layout_svg_container_.Style()->OutlineWidth() &&
       layout_svg_container_.Style()->Visibility() == EVisibility::kVisible) {
     PaintInfo outline_paint_info(paint_info_before_filtering);
-    outline_paint_info.phase = kPaintPhaseSelfOutlineOnly;
+    outline_paint_info.phase = PaintPhase::kSelfOutlineOnly;
     ObjectPainter(layout_svg_container_)
         .PaintOutline(outline_paint_info, LayoutPoint(bounding_box.Location()));
   }

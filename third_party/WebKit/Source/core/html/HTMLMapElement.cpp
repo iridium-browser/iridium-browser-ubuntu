@@ -21,7 +21,6 @@
 
 #include "core/html/HTMLMapElement.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeListsNodeData.h"
@@ -29,6 +28,7 @@
 #include "core/html/HTMLAreaElement.h"
 #include "core/html/HTMLCollection.h"
 #include "core/html/HTMLImageElement.h"
+#include "core/html_names.h"
 #include "core/layout/HitTestResult.h"
 
 namespace blink {
@@ -42,7 +42,7 @@ inline HTMLMapElement::HTMLMapElement(Document& document)
 
 DEFINE_NODE_FACTORY(HTMLMapElement)
 
-HTMLMapElement::~HTMLMapElement() {}
+HTMLMapElement::~HTMLMapElement() = default;
 
 HTMLAreaElement* HTMLMapElement::AreaForPoint(
     const LayoutPoint& location,
@@ -62,11 +62,9 @@ HTMLAreaElement* HTMLMapElement::AreaForPoint(
 HTMLImageElement* HTMLMapElement::ImageElement() {
   HTMLCollection* images = GetDocument().images();
   for (unsigned i = 0; Element* curr = images->item(i); ++i) {
-    DCHECK(isHTMLImageElement(curr));
-
     // The HTMLImageElement's useMap() value includes the '#' symbol at the
     // beginning, which has to be stripped off.
-    HTMLImageElement& image_element = toHTMLImageElement(*curr);
+    HTMLImageElement& image_element = ToHTMLImageElement(*curr);
     String use_map_name =
         image_element.getAttribute(usemapAttr).GetString().Substring(1);
     if (use_map_name == name_)

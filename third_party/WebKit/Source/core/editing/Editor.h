@@ -26,34 +26,35 @@
 #ifndef Editor_h
 #define Editor_h
 
+#include <memory>
+
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/clipboard/DataTransferAccessPolicy.h"
 #include "core/editing/EditingBehavior.h"
 #include "core/editing/EditingStyle.h"
-#include "core/editing/EphemeralRange.h"
-#include "core/editing/FindOptions.h"
-#include "core/editing/FrameSelection.h"
+#include "core/editing/Forward.h"
 #include "core/editing/VisibleSelection.h"
 #include "core/editing/WritingDirection.h"
+#include "core/editing/finder/FindOptions.h"
 #include "core/events/InputEvent.h"
 #include "platform/PasteMode.h"
 #include "platform/heap/Handle.h"
-#include <memory>
+#include "platform/scroll/ScrollAlignment.h"
 
 namespace blink {
 
 class CompositeEditCommand;
 class DragData;
-class EditorClient;
 class EditorInternalCommand;
+class FrameSelection;
 class LocalFrame;
 class HitTestResult;
 class KillRing;
-class Pasteboard;
+class SetSelectionOptions;
 class SpellChecker;
-class StylePropertySet;
+class CSSPropertyValueSet;
 class TextEvent;
-class TypingCommand;
 class UndoStack;
 class UndoStep;
 
@@ -61,7 +62,6 @@ enum class DeleteDirection;
 enum class DeleteMode { kSimple, kSmart };
 enum class InsertMode { kSimple, kSmart };
 enum class DragSourceType { kHTMLSource, kPlainTextSource };
-enum class TypingContinuation { kContinue, kEnd };
 
 enum EditorCommandSource { kCommandFromMenuOrKeyBinding, kCommandFromDOM };
 enum EditorParagraphSeparator {
@@ -70,16 +70,11 @@ enum EditorParagraphSeparator {
 };
 
 class CORE_EXPORT Editor final : public GarbageCollectedFinalized<Editor> {
-  WTF_MAKE_NONCOPYABLE(Editor);
-
  public:
   static Editor* Create(LocalFrame&);
   ~Editor();
 
-  EditorClient& Client() const;
-
   CompositeEditCommand* LastEditCommand() { return last_edit_command_.Get(); }
-  TypingCommand* LastTypingCommandIfStillOpenForTyping() const;
 
   void HandleKeyboardEvent(KeyboardEvent*);
   bool HandleTextEvent(TextEvent*);
@@ -87,49 +82,27 @@ class CORE_EXPORT Editor final : public GarbageCollectedFinalized<Editor> {
   bool CanEdit() const;
   bool CanEditRichly() const;
 
-  bool CanDHTMLCut();
-  bool CanDHTMLCopy();
-
   bool CanCut() const;
   bool CanCopy() const;
   bool CanPaste() const;
   bool CanDelete() const;
   bool CanSmartCopyOrDelete() const;
 
-  void Cut(EditorCommandSource);
-  void Copy(EditorCommandSource);
-  void Paste(EditorCommandSource);
-  void PasteAsPlainText(EditorCommandSource);
-  void PerformDelete();
-
   static void CountEvent(ExecutionContext*, const Event*);
   void CopyImage(const HitTestResult&);
 
-  void Transpose();
-
   void RespondToChangedContents(const Position&);
-
-  bool SelectionStartHasStyle(CSSPropertyID, const String& value) const;
-  TriState SelectionHasStyle(CSSPropertyID, const String& value) const;
-  String SelectionStartCSSPropertyValue(CSSPropertyID);
-
-  void RemoveFormattingAndStyle();
 
   void RegisterCommandGroup(CompositeEditCommand* command_group_wrapper);
 
-  bool DeleteWithDirection(DeleteDirection,
-                           TextGranularity,
-                           bool kill_ring,
-                           bool is_typing_action);
   void DeleteSelectionWithSmartDelete(
       DeleteMode,
       InputEvent::InputType,
       const Position& reference_move_position = Position());
 
-  void ApplyStyle(StylePropertySet*, InputEvent::InputType);
-  void ApplyParagraphStyle(StylePropertySet*, InputEvent::InputType);
-  void ApplyStyleToSelection(StylePropertySet*, InputEvent::InputType);
-  void ApplyParagraphStyleToSelection(StylePropertySet*, InputEvent::InputType);
+  void ApplyParagraphStyle(CSSPropertyValueSet*, InputEvent::InputType);
+  void ApplyParagraphStyleToSelection(CSSPropertyValueSet*,
+                                      InputEvent::InputType);
 
   void AppliedEditing(CompositeEditCommand*);
   void UnappliedEditing(UndoStep*);
@@ -152,7 +125,7 @@ class CORE_EXPORT Editor final : public GarbageCollectedFinalized<Editor> {
     bool IsSupported() const;
     bool IsEnabled(Event* triggering_event = nullptr) const;
 
-    TriState GetState(Event* triggering_event = nullptr) const;
+    EditingTriState GetState(Event* triggering_event = nullptr) const;
     String Value(Event* triggering_event = nullptr) const;
 
     bool IsTextInsertion() const;
@@ -213,12 +186,14 @@ class CORE_EXPORT Editor final : public GarbageCollectedFinalized<Editor> {
   bool IsSelectTrailingWhitespaceEnabled() const;
 
   bool PreventRevealSelection() const { return prevent_reveal_selection_; }
+  void IncreasePreventRevealSelection() { ++prevent_reveal_selection_; }
+  void DecreasePreventRevealSelection() { --prevent_reveal_selection_; }
 
   void SetStartNewKillRingSequence(bool);
 
   void Clear();
 
-  VisibleSelection SelectionForCommand(Event*);
+  SelectionInDOMTree SelectionForCommand(Event*);
 
   KillRing& GetKillRing() const { return *kill_ring_; }
 
@@ -228,15 +203,10 @@ class CORE_EXPORT Editor final : public GarbageCollectedFinalized<Editor> {
 
   void AddToKillRing(const EphemeralRange&);
 
-  void PasteAsFragment(DocumentFragment*, bool smart_replace, bool match_style);
-  void PasteAsPlainText(const String&, bool smart_replace);
-
-  Element* FindEventTargetFrom(const VisibleSelection&) const;
-  Element* FindEventTargetFromSelection() const;
+  Element* FindEventTargetForClipboardEvent(EditorCommandSource) const;
 
   bool FindString(const String&, FindOptions);
 
-  Range* FindStringAndScrollToVisible(const String&, Range*, FindOptions);
   Range* FindRangeOfString(const String& target,
                            const EphemeralRange& reference_range,
                            FindOptions);
@@ -245,15 +215,14 @@ class CORE_EXPORT Editor final : public GarbageCollectedFinalized<Editor> {
                            FindOptions);
 
   const VisibleSelection& Mark() const;  // Mark, to be used as emacs uses it.
-  void SetMark(const VisibleSelection&);
+  bool MarkIsDirectional() const;
+  void SetMark();
 
-  void ComputeAndSetTypingStyle(StylePropertySet*, InputEvent::InputType);
+  void ComputeAndSetTypingStyle(CSSPropertyValueSet*, InputEvent::InputType);
 
-  // |firstRectForRange| requires up-to-date layout.
-  IntRect FirstRectForRange(const EphemeralRange&) const;
+  EphemeralRange RangeForPoint(const IntPoint&) const;
 
-  void RespondToChangedSelection(const Position& old_selection_start,
-                                 TypingContinuation);
+  void RespondToChangedSelection();
 
   bool MarkedTextMatchesAreHighlighted() const;
   void SetMarkedTextMatchesAreHighlighted(bool);
@@ -295,28 +264,14 @@ class CORE_EXPORT Editor final : public GarbageCollectedFinalized<Editor> {
     default_paragraph_separator_ = separator;
   }
 
-  static void TidyUpHTMLStructure(Document&);
-
-  class RevealSelectionScope {
-    WTF_MAKE_NONCOPYABLE(RevealSelectionScope);
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-
-   public:
-    explicit RevealSelectionScope(Editor*);
-    ~RevealSelectionScope();
-
-    DECLARE_TRACE();
-
-   private:
-    Member<Editor> editor_;
-  };
-  friend class RevealSelectionScope;
-
   EditingStyle* TypingStyle() const;
   void SetTypingStyle(EditingStyle*);
   void ClearTypingStyle();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
+
+  void RevealSelectionAfterEditingOperation(
+      const ScrollAlignment& = ScrollAlignment::kAlignCenterIfNeeded);
 
  private:
   Member<LocalFrame> frame_;
@@ -331,6 +286,7 @@ class CORE_EXPORT Editor final : public GarbageCollectedFinalized<Editor> {
   EditorParagraphSeparator default_paragraph_separator_;
   bool overwrite_mode_enabled_;
   Member<EditingStyle> typing_style_;
+  bool mark_is_directional_ = false;
 
   explicit Editor(LocalFrame&);
 
@@ -339,29 +295,15 @@ class CORE_EXPORT Editor final : public GarbageCollectedFinalized<Editor> {
     return *frame_;
   }
 
-  bool CanDeleteRange(const EphemeralRange&) const;
-
-  bool TryDHTMLCopy();
-  bool TryDHTMLCut();
-  bool TryDHTMLPaste(PasteMode);
-
-  bool CanSmartReplaceWithPasteboard(Pasteboard*);
-  void PasteAsPlainTextWithPasteboard(Pasteboard*);
-  void PasteWithPasteboard(Pasteboard*);
-  void WriteSelectionToPasteboard();
-  bool DispatchCPPEvent(const AtomicString&,
-                        DataTransferAccessPolicy,
-                        PasteMode = kAllMimeTypes);
-
-  void RevealSelectionAfterEditingOperation(
-      const ScrollAlignment& = ScrollAlignment::kAlignCenterIfNeeded,
-      RevealExtentOption = kDoNotRevealExtent);
   void ChangeSelectionAfterCommand(const SelectionInDOMTree&,
-                                   FrameSelection::SetSelectionOptions);
+                                   const SetSelectionOptions&);
 
   SpellChecker& GetSpellChecker() const;
+  FrameSelection& GetFrameSelection() const;
 
   bool HandleEditingKeyboardEvent(KeyboardEvent*);
+
+  DISALLOW_COPY_AND_ASSIGN(Editor);
 };
 
 inline void Editor::SetStartNewKillRingSequence(bool flag) {
@@ -372,8 +314,8 @@ inline const VisibleSelection& Editor::Mark() const {
   return mark_;
 }
 
-inline void Editor::SetMark(const VisibleSelection& selection) {
-  mark_ = selection;
+inline bool Editor::MarkIsDirectional() const {
+  return mark_is_directional_;
 }
 
 inline bool Editor::MarkedTextMatchesAreHighlighted() const {

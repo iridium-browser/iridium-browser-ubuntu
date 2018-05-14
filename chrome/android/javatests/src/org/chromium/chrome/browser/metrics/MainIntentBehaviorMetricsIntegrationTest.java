@@ -4,16 +4,25 @@
 
 package org.chromium.chrome.browser.metrics;
 
+import static org.junit.Assert.assertThat;
+
+import android.annotation.SuppressLint;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
 
+import org.hamcrest.Matchers;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.UserActionTester;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
@@ -30,18 +39,30 @@ import org.chromium.content_public.common.ContentUrlConstants;
 
 import java.util.concurrent.Callable;
 
+/**
+ * Tests the metrics recording for main intent behaviours.
+ */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@SuppressLint({"ApplySharedPref", "CommitPrefEdits"})
 public class MainIntentBehaviorMetricsIntegrationTest {
+    private static final long HOURS_IN_MS = 60 * 60 * 1000L;
+
     @Rule
     public ChromeActivityTestRule<ChromeTabbedActivity> mActivityTestRule =
             new ChromeActivityTestRule<>(ChromeTabbedActivity.class);
 
+    private UserActionTester mActionTester;
+
+    @After
+    public void tearDown() {
+        if (mActionTester != null) mActionTester.tearDown();
+    }
+
     @MediumTest
     @Test
-    public void testFocusOmnibox() throws InterruptedException {
-        mActivityTestRule.startMainActivityFromLauncher();
+    public void testFocusOmnibox() {
+        startActivity(true);
         assertMainIntentBehavior(null);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -55,8 +76,8 @@ public class MainIntentBehaviorMetricsIntegrationTest {
 
     @MediumTest
     @Test
-    public void testSwitchTabs() throws InterruptedException {
-        mActivityTestRule.startMainActivityFromLauncher();
+    public void testSwitchTabs() {
+        startActivity(true);
         assertMainIntentBehavior(null);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -85,8 +106,8 @@ public class MainIntentBehaviorMetricsIntegrationTest {
 
     @MediumTest
     @Test
-    public void testBackgrounded() throws InterruptedException {
-        mActivityTestRule.startMainActivityFromLauncher();
+    public void testBackgrounded() {
+        startActivity(true);
         assertMainIntentBehavior(null);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -99,8 +120,8 @@ public class MainIntentBehaviorMetricsIntegrationTest {
 
     @MediumTest
     @Test
-    public void testCreateNtp() throws InterruptedException {
-        mActivityTestRule.startMainActivityFromLauncher();
+    public void testCreateNtp() {
+        startActivity(true);
         assertMainIntentBehavior(null);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -113,10 +134,10 @@ public class MainIntentBehaviorMetricsIntegrationTest {
 
     @MediumTest
     @Test
-    public void testContinuation() throws InterruptedException {
+    public void testContinuation() {
         try {
             MainIntentBehaviorMetrics.setTimeoutDurationMsForTesting(500);
-            mActivityTestRule.startMainActivityFromLauncher();
+            startActivity(true);
             assertMainIntentBehavior(MainIntentBehaviorMetrics.CONTINUATION);
         } finally {
             MainIntentBehaviorMetrics.setTimeoutDurationMsForTesting(
@@ -126,18 +147,91 @@ public class MainIntentBehaviorMetricsIntegrationTest {
 
     @MediumTest
     @Test
-    public void testMainIntentWithLauncherCategory() throws InterruptedException {
-        mActivityTestRule.startMainActivityFromIntent(new Intent(Intent.ACTION_MAIN), null);
+    public void testMainIntentWithoutLauncherCategory() {
+        startActivity(false);
         assertMainIntentBehavior(null);
         Assert.assertFalse(mActivityTestRule.getActivity().getMainIntentBehaviorMetricsForTesting()
                 .getPendingActionRecordForMainIntent());
+    }
+
+    @MediumTest
+    @Test
+    public void testBackgroundDuration_24hrs() {
+        assertBackgroundDurationLogged(
+                24 * HOURS_IN_MS, "MobileStartup.MainIntentReceived.After24Hours");
+    }
+
+    @MediumTest
+    @Test
+    public void testBackgroundDuration_12hrs() {
+        assertBackgroundDurationLogged(
+                12 * HOURS_IN_MS, "MobileStartup.MainIntentReceived.After12Hours");
+    }
+
+    @MediumTest
+    @Test
+    public void testBackgroundDuration_6hrs() {
+        assertBackgroundDurationLogged(
+                6 * HOURS_IN_MS, "MobileStartup.MainIntentReceived.After6Hours");
+    }
+
+    @MediumTest
+    @Test
+    public void testBackgroundDuration_1hr() {
+        assertBackgroundDurationLogged(HOURS_IN_MS, "MobileStartup.MainIntentReceived.After1Hour");
+    }
+
+    @MediumTest
+    @Test
+    public void testBackgroundDuration_0hr() {
+        assertBackgroundDurationLogged(0, null);
+        for (String action : mActionTester.getActions()) {
+            if (action.startsWith("MobileStartup.MainIntentReceived.After")) {
+                Assert.fail("Unexpected background duration logged: " + action);
+            }
+        }
+    }
+
+    private void assertBackgroundDurationLogged(long duration, String expectedMetric) {
+        startActivity(false);
+        mActionTester = new UserActionTester();
+        ContextUtils.getAppSharedPreferences()
+                .edit()
+                .putLong(ChromeTabbedActivity.LAST_BACKGROUNDED_TIME_MS_PREF,
+                        System.currentTimeMillis() - duration)
+                .commit();
+
+        Intent intent = new Intent(Intent.ACTION_MAIN);
+        intent.addCategory(Intent.CATEGORY_LAUNCHER);
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> { mActivityTestRule.getActivity().onNewIntent(intent); });
+
+        assertThat(mActionTester.toString(), mActionTester.getActions(),
+                Matchers.hasItem("MobileStartup.MainIntentReceived"));
+        if (expectedMetric != null) {
+            assertThat(mActionTester.toString(), mActionTester.getActions(),
+                    Matchers.hasItem(expectedMetric));
+        }
+    }
+
+    private void startActivity(boolean addLauncherCategory) {
+        Intent intent = new Intent(Intent.ACTION_MAIN);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (addLauncherCategory) intent.addCategory(Intent.CATEGORY_LAUNCHER);
+        intent.setComponent(new ComponentName(
+                InstrumentationRegistry.getTargetContext(), ChromeTabbedActivity.class));
+
+        mActivityTestRule.startActivityCompletely(intent);
+        mActivityTestRule.waitForActivityNativeInitializationComplete();
     }
 
     private void assertMainIntentBehavior(Integer expected) {
         CriteriaHelper.pollUiThread(Criteria.equals(expected, new Callable<Integer>() {
             @Override
             public Integer call() throws Exception {
-                return MainIntentBehaviorMetrics.getLastMainIntentBehaviorForTesting();
+                return mActivityTestRule.getActivity()
+                        .getMainIntentBehaviorMetricsForTesting()
+                        .getLastMainIntentBehaviorForTesting();
             }
         }));
     }

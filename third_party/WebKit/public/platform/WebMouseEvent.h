@@ -6,7 +6,7 @@
 #define WebMouseEvent_h
 
 #include "WebInputEvent.h"
-#include "public/platform/WebMenuSourceType.h"
+#include "WebMenuSourceType.h"
 
 namespace blink {
 
@@ -17,9 +17,6 @@ class WebGestureEvent;
 
 // WebMouseEvent --------------------------------------------------------------
 
-// TODO(mustaq): We are truncating |float|s to integers whenever setting
-//   coordinate values, to avoid regressions for now. Will be fixed later
-//   on. crbug.com/456625
 class WebMouseEvent : public WebInputEvent, public WebPointerProperties {
  public:
   static constexpr PointerId kMousePointerId = std::numeric_limits<int>::max();
@@ -28,27 +25,6 @@ class WebMouseEvent : public WebInputEvent, public WebPointerProperties {
 
   // Only used for contextmenu events.
   WebMenuSourceType menu_source_type;
-
-  WebMouseEvent(Type type_param,
-                int x_param,
-                int y_param,
-                int global_x_param,
-                int global_y_param,
-                int modifiers_param,
-                double time_stamp_seconds_param,
-                PointerId id_param = kMousePointerId)
-      : WebInputEvent(sizeof(WebMouseEvent),
-                      type_param,
-                      modifiers_param,
-                      time_stamp_seconds_param),
-        WebPointerProperties(id_param,
-                             PointerType::kUnknown,
-                             Button::kNoButton,
-                             WebFloatPoint(x_param, y_param),
-                             WebFloatPoint(global_x_param, global_y_param)) {
-    DCHECK_GE(type_param, kMouseTypeFirst);
-    DCHECK_LE(type_param, kMouseTypeLast);
-  }
 
   WebMouseEvent(Type type_param,
                 WebFloatPoint position,
@@ -63,12 +39,11 @@ class WebMouseEvent : public WebInputEvent, public WebPointerProperties {
                       type_param,
                       modifiers_param,
                       time_stamp_seconds_param),
-        WebPointerProperties(
-            id_param,
-            PointerType::kMouse,
-            button_param,
-            WebFloatPoint(floor(position.x), floor(position.y)),
-            WebFloatPoint(floor(global_position.x), floor(global_position.y))),
+        WebPointerProperties(id_param,
+                             PointerType::kMouse,
+                             button_param,
+                             position,
+                             global_position),
         click_count(click_count_param),
         menu_source_type(menu_source_type_param) {
     DCHECK_GE(type_param, kMouseTypeFirst);
@@ -103,18 +78,10 @@ class WebMouseEvent : public WebInputEvent, public WebPointerProperties {
   BLINK_PLATFORM_EXPORT WebFloatPoint MovementInRootFrame() const;
   BLINK_PLATFORM_EXPORT WebFloatPoint PositionInRootFrame() const;
 
-  // Sets any scaled values to be their computed values and sets |frameScale|
-  // back to 1 and |translateX|, |translateY| back to 0.
+  // Sets any scaled values to be their computed values and sets |frame_scale_|
+  // back to 1 and |frame_translate_| X and Y coordinates back to 0.
   BLINK_PLATFORM_EXPORT WebMouseEvent FlattenTransform() const;
 #endif
-
-  void SetPositionInWidget(float x, float y) {
-    position_in_widget_ = WebFloatPoint(floor(x), floor(y));
-  }
-
-  void SetPositionInScreen(float x, float y) {
-    position_in_screen_ = WebFloatPoint(floor(x), floor(y));
-  }
 
  protected:
   WebMouseEvent(unsigned size_param, PointerId id_param)

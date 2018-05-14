@@ -41,6 +41,16 @@ enum HistogramType {
   SPARSE_HISTOGRAM,
 };
 
+// Controls the verbosity of the information when the histogram is serialized to
+// a JSON.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.base.metrics
+enum JSONVerbosityLevel {
+  // The histogram is completely serialized.
+  JSON_VERBOSITY_LEVEL_FULL,
+  // The bucket information is not serialized.
+  JSON_VERBOSITY_LEVEL_OMIT_BUCKETS,
+};
+
 std::string HistogramTypeToString(HistogramType type);
 
 // This enum is used for reporting how many histograms and of what types and
@@ -133,10 +143,12 @@ class BASE_EXPORT HistogramBase {
     NEVER_EXCEEDED_VALUE = 0x10,
   };
 
-  explicit HistogramBase(const std::string& name);
+  // Construct the base histogram. The name is not copied; it's up to the
+  // caller to ensure that it lives at least as long as this object.
+  explicit HistogramBase(const char* name);
   virtual ~HistogramBase();
 
-  const std::string& histogram_name() const { return histogram_name_; }
+  const char* histogram_name() const { return histogram_name_; }
 
   // Comapres |name| to the histogram name and triggers a DCHECK if they do not
   // match. This is a helper function used by histogram macros, which results in
@@ -169,6 +181,13 @@ class BASE_EXPORT HistogramBase {
   // than or equal to 1.
   virtual void AddCount(Sample value, int count) = 0;
 
+  // Similar to above but divides |count| by the |scale| amount. Probabilistic
+  // rounding is used to yield a reasonably accurate total when many samples
+  // are added. Methods for common cases of scales 1000 and 1024 are included.
+  void AddScaled(Sample value, int count, int scale);
+  void AddKilo(Sample value, int count);  // scale=1000
+  void AddKiB(Sample value, int count);   // scale=1024
+
   // 2 convenient functions that call Add(Sample).
   void AddTime(const TimeDelta& time);
   void AddBoolean(bool value);
@@ -179,7 +198,7 @@ class BASE_EXPORT HistogramBase {
   // Serialize the histogram info into |pickle|.
   // Note: This only serializes the construction arguments of the histogram, but
   // does not serialize the samples.
-  bool SerializeInfo(base::Pickle* pickle) const;
+  void SerializeInfo(base::Pickle* pickle) const;
 
   // Try to find out data corruption from histogram and the samples.
   // The returned value is a combination of Inconsistency enum.
@@ -211,26 +230,20 @@ class BASE_EXPORT HistogramBase {
   virtual void WriteAscii(std::string* output) const = 0;
 
   // TODO(bcwhite): Remove this after crbug/736675.
-  virtual void ValidateHistogramContents() const {}
+  virtual bool ValidateHistogramContents(bool crash_if_invalid,
+                                         int corrupted_count) const;
 
-  // Produce a JSON representation of the histogram. This is implemented with
-  // the help of GetParameters and GetCountAndBucketData; overwrite them to
-  // customize the output.
-  void WriteJSON(std::string* output) const;
-
-  // This enables a histogram that reports the what types of histograms are
-  // created and their flags. It must be called while still single-threaded.
-  //
-  // IMPORTANT: Callers must update tools/metrics/histograms/histograms.xml
-  // with the following histogram:
-  //    UMA.Histograms.process_type.Creations
-  static void EnableActivityReportHistogram(const std::string& process_type);
+  // Produce a JSON representation of the histogram with |verbosity_level| as
+  // the serialization verbosity. This is implemented with the help of
+  // GetParameters and GetCountAndBucketData; overwrite them to customize the
+  // output.
+  void WriteJSON(std::string* output, JSONVerbosityLevel verbosity_level) const;
 
  protected:
   enum ReportActivity { HISTOGRAM_CREATED, HISTOGRAM_LOOKUP };
 
   // Subclasses should implement this function to make SerializeInfo work.
-  virtual bool SerializeInfoImpl(base::Pickle* pickle) const = 0;
+  virtual void SerializeInfoImpl(base::Pickle* pickle) const = 0;
 
   // Writes information about the construction parameters in |params|.
   virtual void GetParameters(DictionaryValue* params) const = 0;
@@ -260,17 +273,24 @@ class BASE_EXPORT HistogramBase {
   // passing |sample| as the parameter.
   void FindAndRunCallback(Sample sample) const;
 
-  // Update report with an |activity| that occurred for |histogram|.
-  static void ReportHistogramActivity(const HistogramBase& histogram,
-                                      ReportActivity activicty);
-
-  // Retrieves the global histogram reporting what histograms are created.
-  static HistogramBase* report_histogram_;
+  // Gets a permanent string that can be used for histogram objects when the
+  // original is not a code constant or held in persistent memory.
+  static const char* GetPermanentName(const std::string& name);
 
  private:
   friend class HistogramBaseTest;
 
-  const std::string histogram_name_;
+  // A pointer to permanent storage where the histogram name is held. This can
+  // be code space or the output of GetPermanentName() or any other storage
+  // that is known to never change. This is not StringPiece because (a) char*
+  // is 1/2 the size and (b) StringPiece transparently casts from std::string
+  // which can easily lead to a pointer to non-permanent space.
+  // For persistent histograms, this will simply point into the persistent
+  // memory segment, thus avoiding duplication. For heap histograms, the
+  // GetPermanentName method will create the necessary copy.
+  const char* const histogram_name_;
+
+  // Additional information about the histogram.
   AtomicCount flags_;
 
   DISALLOW_COPY_AND_ASSIGN(HistogramBase);

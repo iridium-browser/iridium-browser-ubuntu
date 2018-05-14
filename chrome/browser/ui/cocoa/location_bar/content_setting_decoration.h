@@ -37,8 +37,11 @@ class ContentSettingDecoration : public ImageDecoration {
   // Returns true if the decoration's visible state changed.
   bool UpdateFromWebContents(content::WebContents* web_contents);
 
+  // Returns if the content setting bubble is showing for this decoration.
+  bool IsShowingBubble() const;
+
   // Overridden from |LocationBarDecoration|
-  bool AcceptsMousePress() override;
+  AcceptsPress AcceptsMousePress() override;
   bool OnMousePressed(NSRect frame, NSPoint location) override;
   NSString* GetToolTip() override;
   CGFloat GetWidthForSpace(CGFloat width) override;

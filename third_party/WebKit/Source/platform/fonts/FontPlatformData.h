@@ -33,24 +33,22 @@
 
 #include "SkPaint.h"
 #include "SkTypeface.h"
+#include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "platform/PlatformExport.h"
 #include "platform/fonts/FontDescription.h"
 #include "platform/fonts/FontOrientation.h"
 #include "platform/fonts/SmallCapsIterator.h"
-#include "platform/fonts/opentype/OpenTypeVerticalData.h"
+#include "platform/graphics/paint/PaintFont.h"
+#include "platform/graphics/paint/PaintTypeface.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/HashTableDeletedValueType.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/CString.h"
 #include "platform/wtf/text/StringImpl.h"
+#include "public/platform/WebFontRenderStyle.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-
-#if defined(OS_LINUX) || defined(OS_ANDROID)
-#include "platform/fonts/linux/FontRenderStyle.h"
-#endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
 #if defined(OS_MACOSX)
 OBJC_CLASS NSFont;
@@ -102,8 +100,8 @@ class PLATFORM_EXPORT FontPlatformData {
                    FontOrientation,
                    FontVariationSettings*);
 #endif
-  FontPlatformData(sk_sp<SkTypeface>,
-                   const char* name,
+  FontPlatformData(const PaintTypeface&,
+                   const CString& name,
                    float text_size,
                    bool synthetic_bold,
                    bool synthetic_italic,
@@ -143,34 +141,41 @@ class PLATFORM_EXPORT FontPlatformData {
   void SetSyntheticItalic(bool synthetic_italic) {
     synthetic_italic_ = synthetic_italic;
   }
+  void SetAvoidEmbeddedBitmaps(bool embedded_bitmaps) {
+    avoid_embedded_bitmaps_ = embedded_bitmaps;
+  }
   bool operator==(const FontPlatformData&) const;
   const FontPlatformData& operator=(const FontPlatformData&);
 
   bool IsHashTableDeletedValue() const { return is_hash_table_deleted_value_; }
   bool FontContainsCharacter(UChar32 character);
 
-  PassRefPtr<OpenTypeVerticalData> VerticalData() const;
-  Vector<char> OpenTypeTable(SkFontTableTag) const;
-
-#if defined(OS_LINUX) || defined(OS_ANDROID)
-  // The returned styles are all actual styles without
-  // FontRenderStyle::NoPreference.
-  const FontRenderStyle& GetFontRenderStyle() const { return style_; }
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
+  const WebFontRenderStyle& GetFontRenderStyle() const { return style_; }
 #endif
-  void SetupPaint(SkPaint*,
-                  float device_scale_factor = 1,
-                  const Font* = 0) const;
+
+  void SetupPaintFont(PaintFont*,
+                      float device_scale_factor = 1,
+                      const Font* = nullptr) const;
+  const PaintTypeface& GetPaintTypeface() const;
 
 #if defined(OS_WIN)
   int PaintTextFlags() const { return paint_text_flags_; }
 #endif
 
  private:
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
+  WebFontRenderStyle QuerySystemRenderStyle(const CString& family,
+                                            float text_size,
+                                            SkFontStyle);
+#endif
 #if defined(OS_WIN)
+  // TODO(https://crbug.com/808221): Remove and use QuerySystemRenderStyle()
+  // instead.
   void QuerySystemForRenderStyle();
 #endif
 
-  sk_sp<SkTypeface> typeface_;
+  PaintTypeface paint_typeface_;
 #if !defined(OS_WIN)
   CString family_;
 #endif
@@ -179,16 +184,18 @@ class PLATFORM_EXPORT FontPlatformData {
   float text_size_;
   bool synthetic_bold_;
   bool synthetic_italic_;
+  bool avoid_embedded_bitmaps_;
   FontOrientation orientation_;
 
  private:
-#if defined(OS_LINUX) || defined(OS_ANDROID)
-  FontRenderStyle style_;
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
+  WebFontRenderStyle style_;
 #endif
 
-  mutable RefPtr<HarfBuzzFace> harf_buzz_face_;
+  mutable scoped_refptr<HarfBuzzFace> harf_buzz_face_;
   bool is_hash_table_deleted_value_;
 #if defined(OS_WIN)
+  // TODO(https://crbug.com/808221): Replace |paint_text_flags_| with |style_|.
   int paint_text_flags_;
 #endif
 };

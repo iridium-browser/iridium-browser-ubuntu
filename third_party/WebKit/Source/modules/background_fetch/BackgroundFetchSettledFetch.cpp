@@ -4,7 +4,7 @@
 
 #include "modules/background_fetch/BackgroundFetchSettledFetch.h"
 
-#include "modules/fetch/Response.h"
+#include "core/fetch/Response.h"
 
 namespace blink {
 
@@ -16,7 +16,7 @@ Response* BackgroundFetchSettledFetch::response() const {
   return response_;
 }
 
-DEFINE_TRACE(BackgroundFetchSettledFetch) {
+void BackgroundFetchSettledFetch::Trace(blink::Visitor* visitor) {
   visitor->Trace(response_);
   BackgroundFetchFetch::Trace(visitor);
 }

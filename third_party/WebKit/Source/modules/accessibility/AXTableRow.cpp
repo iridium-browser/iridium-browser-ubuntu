@@ -41,7 +41,7 @@ AXTableRow::AXTableRow(LayoutObject* layout_object,
                        AXObjectCacheImpl& ax_object_cache)
     : AXLayoutObject(layout_object, ax_object_cache) {}
 
-AXTableRow::~AXTableRow() {}
+AXTableRow::~AXTableRow() = default;
 
 AXTableRow* AXTableRow::Create(LayoutObject* layout_object,
                                AXObjectCacheImpl& ax_object_cache) {
@@ -72,7 +72,7 @@ AccessibilityRole AXTableRow::DetermineAccessibilityRole() {
   if ((aria_role_ = DetermineAriaRoleAttribute()) != kUnknownRole)
     return aria_role_;
 
-  return kRowRole;
+  return ParentTable()->IsDataTable() ? kRowRole : kLayoutTableRowRole;
 }
 
 bool AXTableRow::IsTableRow() const {
@@ -100,7 +100,7 @@ bool AXTableRow::ComputeAccessibilityIsIgnored(
 AXObject* AXTableRow::ParentTable() const {
   AXObject* parent = ParentObjectUnignored();
   if (!parent || !parent->IsAXTable())
-    return 0;
+    return nullptr;
 
   return parent;
 }
@@ -109,7 +109,7 @@ AXObject* AXTableRow::HeaderObject() {
   AXObjectVector headers;
   HeaderObjectsForRow(headers);
   if (!headers.size())
-    return 0;
+    return nullptr;
 
   return headers[0].Get();
 }

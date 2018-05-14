@@ -4,7 +4,9 @@
 
 #include "platform/audio/IIRFilter.h"
 
+#include <algorithm>
 #include <complex>
+
 #include "platform/audio/AudioUtilities.h"
 #include "platform/audio/VectorMath.h"
 #include "platform/wtf/MathExtras.h"
@@ -26,7 +28,7 @@ IIRFilter::IIRFilter(const AudioDoubleArray* feedforward,
   y_buffer_.Allocate(kBufferLength);
 }
 
-IIRFilter::~IIRFilter() {}
+IIRFilter::~IIRFilter() = default;
 
 void IIRFilter::Reset() {
   x_buffer_.Zero();

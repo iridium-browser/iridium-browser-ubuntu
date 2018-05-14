@@ -31,10 +31,10 @@
 #include "core/editing/commands/ReplaceNodeWithSpanCommand.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLSpanElement.h"
+#include "core/html_names.h"
 #include "platform/wtf/Assertions.h"
 
 namespace blink {
@@ -60,7 +60,7 @@ static void SwapInNodePreservingAttributesAndChildren(
 
   // FIXME: Fix this to send the proper MutationRecords when MutationObservers
   // are present.
-  new_element->CloneDataFromElement(element_to_replace);
+  new_element->CloneAttributesFrom(element_to_replace);
 
   parent_node->RemoveChild(&element_to_replace, ASSERT_NO_EXCEPTION);
 }
@@ -81,7 +81,7 @@ void ReplaceNodeWithSpanCommand::DoUnapply() {
                                             *span_element_);
 }
 
-DEFINE_TRACE(ReplaceNodeWithSpanCommand) {
+void ReplaceNodeWithSpanCommand::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_to_replace_);
   visitor->Trace(span_element_);
   SimpleEditCommand::Trace(visitor);

@@ -21,12 +21,14 @@ class SimpleDataProducer : public QuicStreamFrameDataProducer {
   SimpleDataProducer();
   ~SimpleDataProducer() override;
 
-  // QuicStreamFrameDataProducer methods:
   void SaveStreamData(QuicStreamId id,
-                      QuicIOVector iov,
+                      const struct iovec* iov,
+                      int iov_count,
                       size_t iov_offset,
                       QuicStreamOffset offset,
-                      QuicByteCount data_length) override;
+                      QuicByteCount data_length);
+
+  // QuicStreamFrameDataProducer
   bool WriteStreamData(QuicStreamId id,
                        QuicStreamOffset offset,
                        QuicByteCount data_length,

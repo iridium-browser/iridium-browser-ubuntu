@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "components/ownership/owner_key_util.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
@@ -30,7 +29,8 @@ DeviceLocalAccountPolicyStore::DeviceLocalAccountPolicyStore(
     chromeos::SessionManagerClient* session_manager_client,
     chromeos::DeviceSettingsService* device_settings_service,
     scoped_refptr<base::SequencedTaskRunner> background_task_runner)
-    : UserCloudPolicyStoreBase(background_task_runner),
+    : UserCloudPolicyStoreBase(background_task_runner,
+                               PolicyScope::POLICY_SCOPE_USER),
       account_id_(account_id),
       session_manager_client_(session_manager_client),
       device_settings_service_(device_settings_service),
@@ -63,15 +63,15 @@ void DeviceLocalAccountPolicyStore::LoadImmediately() {
   RetrievePolicyResponseType response =
       session_manager_client_->BlockingRetrieveDeviceLocalAccountPolicy(
           account_id_, &policy_blob);
-  ValidateLoadedPolicyBlob(false /*validate_in_background*/, policy_blob,
-                           response);
+  ValidateLoadedPolicyBlob(false /*validate_in_background*/, response,
+                           policy_blob);
 }
 
 void DeviceLocalAccountPolicyStore::Store(
     const em::PolicyFetchResponse& policy) {
   weak_factory_.InvalidateWeakPtrs();
   CheckKeyAndValidate(
-      true, base::MakeUnique<em::PolicyFetchResponse>(policy),
+      true, std::make_unique<em::PolicyFetchResponse>(policy),
       true /*validate_in_background*/,
       base::Bind(&DeviceLocalAccountPolicyStore::StoreValidatedPolicy,
                  weak_factory_.GetWeakPtr()));
@@ -79,8 +79,8 @@ void DeviceLocalAccountPolicyStore::Store(
 
 void DeviceLocalAccountPolicyStore::ValidateLoadedPolicyBlob(
     bool validate_in_background,
-    const std::string& policy_blob,
-    RetrievePolicyResponseType response_type) {
+    RetrievePolicyResponseType response_type,
+    const std::string& policy_blob) {
   if (response_type != RetrievePolicyResponseType::SUCCESS ||
       policy_blob.empty()) {
     status_ = CloudPolicyStore::STATUS_LOAD_ERROR;

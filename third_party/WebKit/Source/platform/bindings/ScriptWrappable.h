@@ -33,7 +33,8 @@
 
 #include "build/build_config.h"
 #include "platform/PlatformExport.h"
-#include "platform/bindings/ScriptWrappableVisitor.h"
+#include "platform/bindings/TraceWrapperBase.h"
+#include "platform/bindings/TraceWrapperV8Reference.h"
 #include "platform/bindings/WrapperTypeInfo.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Noncopyable.h"
@@ -42,29 +43,28 @@
 
 namespace blink {
 
-class PLATFORM_EXPORT TraceWrapperBase {
-  WTF_MAKE_NONCOPYABLE(TraceWrapperBase);
-
- public:
-  TraceWrapperBase() = default;
-  virtual bool IsScriptWrappable() const { return false; }
-
-  DECLARE_VIRTUAL_TRACE_WRAPPERS(){};
-};
-
 // ScriptWrappable provides a way to map from/to C++ DOM implementation to/from
 // JavaScript object (platform object).  ToV8() converts a ScriptWrappable to
 // a v8::Object and toScriptWrappable() converts a v8::Object back to
 // a ScriptWrappable.  v8::Object as platform object is called "wrapper object".
 // The wrapper object for the main world is stored in ScriptWrappable.  Wrapper
 // objects for other worlds are stored in DOMWrapperMap.
-class PLATFORM_EXPORT ScriptWrappable : public TraceWrapperBase {
+class PLATFORM_EXPORT ScriptWrappable
+    : public GarbageCollectedFinalized<ScriptWrappable>,
+      public TraceWrapperBase {
   WTF_MAKE_NONCOPYABLE(ScriptWrappable);
 
  public:
-  ScriptWrappable() {}
+  virtual ~ScriptWrappable() = default;
+
+  virtual void Trace(blink::Visitor*) {}
+
+  // Traces wrapper objects corresponding to this ScriptWrappable in all worlds.
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
   bool IsScriptWrappable() const override { return true; }
+
+  const char* NameInHeapSnapshot() const override;
 
   template <typename T>
   T* ToImpl() {
@@ -122,62 +122,58 @@ class PLATFORM_EXPORT ScriptWrappable : public TraceWrapperBase {
       wrapper = MainWorldWrapper(isolate);
       return false;
     }
-    main_world_wrapper_.Reset(isolate, wrapper);
-    wrapper_type_info->ConfigureWrapper(&main_world_wrapper_);
-    main_world_wrapper_.SetWeak();
+    main_world_wrapper_.Set(isolate, wrapper);
     DCHECK(ContainsWrapper());
-    ScriptWrappableVisitor::WriteBarrier(isolate, &main_world_wrapper_);
+    wrapper_type_info->ConfigureWrapper(&main_world_wrapper_.Get());
     return true;
   }
 
   // Dissociates the wrapper, if any, from this instance.
   void UnsetWrapperIfAny() {
     if (ContainsWrapper()) {
-      main_world_wrapper_.Reset();
+      main_world_wrapper_.Get().Reset();
       WrapperTypeInfo::WrapperDestroyed();
     }
   }
 
   bool IsEqualTo(const v8::Local<v8::Object>& other) const {
-    return main_world_wrapper_ == other;
+    return main_world_wrapper_.Get() == other;
   }
 
   bool SetReturnValue(v8::ReturnValue<v8::Value> return_value) {
-    return_value.Set(main_world_wrapper_);
+    return_value.Set(main_world_wrapper_.Get());
     return ContainsWrapper();
   }
 
   bool ContainsWrapper() const { return !main_world_wrapper_.IsEmpty(); }
 
-  //  Mark wrapper of this ScriptWrappable as alive in V8. Only marks
-  //  wrapper in the main world. To mark wrappers in all worlds call
-  //  ScriptWrappableVisitor::markWrapper(ScriptWrappable*, v8::Isolate*)
-  void MarkWrapper(const WrapperVisitor*) const;
+ protected:
+  ScriptWrappable() = default;
 
  private:
-  // These classes are exceptionally allowed to use mainWorldWrapper().
+  // These classes are exceptionally allowed to use MainWorldWrapper().
   friend class DOMDataStore;
   friend class HeapSnaphotWrapperVisitor;
   friend class V8HiddenValue;
   friend class V8PrivateProperty;
 
   v8::Local<v8::Object> MainWorldWrapper(v8::Isolate* isolate) const {
-    return v8::Local<v8::Object>::New(isolate, main_world_wrapper_);
+    return main_world_wrapper_.NewLocal(isolate);
   }
 
   // Only use when really necessary, i.e., when passing over this
   // ScriptWrappable's reference to V8. Should only be needed by GC
   // infrastructure.
   const v8::Persistent<v8::Object>* RawMainWorldWrapper() const {
-    return &main_world_wrapper_;
+    return &main_world_wrapper_.Get();
   }
 
-  v8::Persistent<v8::Object> main_world_wrapper_;
+  TraceWrapperV8Reference<v8::Object> main_world_wrapper_;
 };
 
-// Defines 'wrapperTypeInfo' virtual method which returns the WrapperTypeInfo of
-// the instance. Also declares a static member of type WrapperTypeInfo, of which
-// the definition is given by the IDL code generator.
+// Defines |GetWrapperTypeInfo| virtual method which returns the WrapperTypeInfo
+// of the instance. Also declares a static member of type WrapperTypeInfo, of
+// which the definition is given by the IDL code generator.
 //
 // All the derived classes of ScriptWrappable, regardless of directly or
 // indirectly, must write this macro in the class definition as long as the
@@ -191,7 +187,7 @@ class PLATFORM_EXPORT ScriptWrappable : public TraceWrapperBase {
  private:                                                      \
   static const WrapperTypeInfo& wrapper_type_info_
 
-// Declares 'wrapperTypeInfo' method without definition.
+// Declares |GetWrapperTypeInfo| method without definition.
 //
 // This macro is used for template classes. e.g. DOMTypedArray<>.
 // To export such a template class X, we need to instantiate X with EXPORT_API,
@@ -206,7 +202,7 @@ class PLATFORM_EXPORT ScriptWrappable : public TraceWrapperBase {
   const WrapperTypeInfo* GetWrapperTypeInfo() const override; \
                                                               \
  private:                                                     \
-  typedef void end_of_define_wrappertypeinfo_not_reached_t
+  typedef void end_of_declare_wrappertypeinfo_t
 
 }  // namespace blink
 

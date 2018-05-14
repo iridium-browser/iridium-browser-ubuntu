@@ -8,30 +8,29 @@ This is the only Quest/Execution where the Execution has a reference back to
 modify the Quest.
 """
 
+import collections
+import copy
 import json
-import os
+import shlex
 
+from dashboard.common import namespaced_stored_object
 from dashboard.pinpoint.models.quest import execution as execution_module
 from dashboard.pinpoint.models.quest import quest
 from dashboard.services import swarming_service
 
 
+_BOT_CONFIGURATIONS = 'bot_configurations'
+
+_SWARMING_EXTRA_ARGS = (
+    '--isolated-script-test-output', '${ISOLATED_OUTDIR}/output.json',
+    '--isolated-script-test-chartjson-output',
+    '${ISOLATED_OUTDIR}/chartjson-output.json',
+)
+
+
 class RunTestError(Exception):
 
   pass
-
-
-class UnknownConfigError(RunTestError):
-
-  def __init__(self, configuration):
-    self.configuration = configuration
-    super(UnknownConfigError, self).__init__(
-        'There are no swarming bots corresponding to config "%s".' %
-        self.configuration)
-
-  def __reduce__(self):
-    # http://stackoverflow.com/a/36342588
-    return UnknownConfigError, (self.configuration,)
 
 
 class SwarmingTaskError(RunTestError):
@@ -64,46 +63,171 @@ class SwarmingTestError(RunTestError):
 
 class RunTest(quest.Quest):
 
-  def __init__(self, configuration, test_suite, test):
-    self._configuration = configuration
-    self._test_suite = test_suite
-    self._test = test
+  def __init__(self, dimensions, extra_args):
+    self._dimensions = dimensions
+    self._extra_args = extra_args
 
     # We want subsequent executions use the same bot as the first one.
-    self._first_execution = None
+    self._canonical_executions = []
+    self._execution_counts = collections.defaultdict(int)
+
+  def __eq__(self, other):
+    return (isinstance(other, type(self)) and
+            self._dimensions == other._dimensions and
+            self._extra_args == other._extra_args and
+            self._canonical_executions == other._canonical_executions and
+            self._execution_counts == other._execution_counts)
+
 
   def __str__(self):
-    if self._test:
-      running = '/'.join((self._test_suite, self._test))
+    return 'Test'
+
+  def Start(self, change, isolate_hash):
+    index = self._execution_counts[change]
+    self._execution_counts[change] += 1
+
+    # For results2 to differentiate between runs, we need telemetry to
+    # append --results-label=foo to the runs. Since this is where we're given
+    # the actual change that's being run, we look for the dummy
+    # --results-label in extra_args and fill it in with the change string.
+    # https://github.com/catapult-project/catapult/issues/3998
+    extra_args = copy.copy(self._extra_args)
+    try:
+      results_label_index = self._extra_args.index('--results-label')
+      extra_args[results_label_index+1] = str(change)
+    except ValueError:
+      # If it's not there, this is probably a gtest
+      pass
+
+    if len(self._canonical_executions) <= index:
+      execution = _RunTestExecution(
+          self._dimensions, extra_args, isolate_hash)
+      self._canonical_executions.append(execution)
     else:
-      running = self._test_suite
-    return 'Run %s on %s' % (running, self._configuration)
-
-  @property
-  def retry_count(self):
-    return 4
-
-  def Start(self, isolate_hash):
-    execution = _RunTestExecution(self._configuration, self._test_suite,
-                                  self._test, isolate_hash,
-                                  first_execution=self._first_execution)
-
-    if not self._first_execution:
-      self._first_execution = execution
+      execution = _RunTestExecution(
+          self._dimensions, extra_args, isolate_hash,
+          previous_execution=self._canonical_executions[index])
 
     return execution
+
+  @classmethod
+  def FromDict(cls, arguments):
+    # TODO: Create separate Telemetry and GTest subclasses.
+    target = arguments.get('target')
+    if target in ('telemetry_perf_tests', 'telemetry_perf_webview_tests'):
+      return cls._TelemetryFromDict(arguments)
+    else:
+      return cls._GTestFromDict(arguments)
+
+  @classmethod
+  def _TelemetryFromDict(cls, arguments):
+    swarming_extra_args = []
+
+    benchmark = arguments.get('benchmark')
+    if not benchmark:
+      raise TypeError('Missing "benchmark" argument.')
+    swarming_extra_args.append(benchmark)
+
+    dimensions = _GetDimensions(arguments)
+
+    story = arguments.get('story')
+    if story:
+      swarming_extra_args += ('--story-filter', story)
+
+    # TODO: Workaround for crbug.com/677843.
+    if (benchmark.startswith('startup.warm') or
+        benchmark.startswith('start_with_url.warm')):
+      swarming_extra_args += ('--pageset-repeat', '2')
+    else:
+      swarming_extra_args += ('--pageset-repeat', '1')
+
+    browser = _GetBrowser(arguments)
+    swarming_extra_args += ('--browser', browser)
+
+    extra_test_args = arguments.get('extra_test_args')
+    if extra_test_args:
+      # We accept a json list, or a string. If it can't be loaded as json, we
+      # fall back to assuming it's a string argument.
+      try:
+        extra_test_args = json.loads(extra_test_args)
+      except ValueError:
+        extra_test_args = shlex.split(extra_test_args)
+      if not isinstance(extra_test_args, list):
+        raise TypeError('extra_test_args must be a list: %s' % extra_test_args)
+      swarming_extra_args += extra_test_args
+
+    swarming_extra_args += (
+        '-v', '--upload-results', '--output-format', 'histograms',
+        '--results-label', '')
+    swarming_extra_args += _SWARMING_EXTRA_ARGS
+    if browser == 'android-webview':
+      # TODO: Share code with the perf waterfall configs. crbug.com/771680
+      swarming_extra_args += ('--webview-embedder-apk',
+                              '../../out/Release/apks/SystemWebViewShell.apk')
+
+    return cls(dimensions, swarming_extra_args)
+
+  @classmethod
+  def _GTestFromDict(cls, arguments):
+    swarming_extra_args = []
+
+    dimensions = _GetDimensions(arguments)
+
+    test = arguments.get('test')
+    if test:
+      swarming_extra_args.append('--gtest_filter=' + test)
+
+    swarming_extra_args.append('--gtest_repeat=1')
+
+    extra_test_args = arguments.get('extra_test_args')
+    if extra_test_args:
+      extra_test_args = json.loads(extra_test_args)
+      if not isinstance(extra_test_args, list):
+        raise TypeError('extra_test_args must be a list: %s' % extra_test_args)
+      swarming_extra_args += extra_test_args
+
+    swarming_extra_args += _SWARMING_EXTRA_ARGS
+
+    return cls(dimensions, swarming_extra_args)
+
+
+def _GetDimensions(arguments):
+  configuration = arguments.get('configuration')
+  dimensions = arguments.get('dimensions')
+  if dimensions:
+    dimensions = json.loads(dimensions)
+  elif configuration:
+    bots = namespaced_stored_object.Get(_BOT_CONFIGURATIONS)
+    dimensions = bots[configuration]['dimensions']
+  else:
+    raise TypeError('Missing a "configuration" or a "dimensions" argument.')
+
+  return dimensions
+
+
+def _GetBrowser(arguments):
+  configuration = arguments.get('configuration')
+  browser = arguments.get('browser')
+  if browser:
+    pass
+  elif configuration:
+    bots = namespaced_stored_object.Get(_BOT_CONFIGURATIONS)
+    browser = bots[configuration]['browser']
+  else:
+    raise TypeError('Missing a "configuration" or a "browser" argument.')
+
+  return browser
 
 
 class _RunTestExecution(execution_module.Execution):
 
-  def __init__(self, configuration, test_suite, test, isolate_hash,
-               first_execution=None):
+  def __init__(self, dimensions, extra_args, isolate_hash,
+               previous_execution=None):
     super(_RunTestExecution, self).__init__()
-    self._configuration = configuration
-    self._test_suite = test_suite
-    self._test = test
+    self._dimensions = dimensions
+    self._extra_args = extra_args
     self._isolate_hash = isolate_hash
-    self._first_execution = first_execution
+    self._previous_execution = previous_execution
 
     self._task_id = None
     self._bot_id = None
@@ -111,6 +235,12 @@ class _RunTestExecution(execution_module.Execution):
   @property
   def bot_id(self):
     return self._bot_id
+
+  def _AsDict(self):
+    return {
+        'bot_id': self._bot_id,
+        'task_id': self._task_id,
+    }
 
   def _Poll(self):
     if not self._task_id:
@@ -132,70 +262,46 @@ class _RunTestExecution(execution_module.Execution):
     if result['failure']:
       raise SwarmingTestError(self._task_id, result['exit_code'])
 
-    result_arguments = {'isolate_hash': result['outputs_ref']['isolated']}
+    isolate_hash = result['outputs_ref']['isolated']
+
+    result_arguments = {'isolate_hash': isolate_hash}
     self._Complete(result_arguments=result_arguments)
 
 
   def _StartTask(self):
     """Kick off a Swarming task to run a test."""
-    if self._first_execution and not self._first_execution._bot_id:
-      if self._first_execution.failed:
-        # If the first Execution fails before it gets a bot ID, it's likely it
-        # couldn't find any device to run on. Subsequent Executions probably
+    if self._previous_execution and not self._previous_execution.bot_id:
+      if self._previous_execution.failed:
+        # If the previous Execution fails before it gets a bot ID, it's likely
+        # it couldn't find any device to run on. Subsequent Executions probably
         # wouldn't have any better luck, and failing fast is less complex than
         # handling retries.
         raise RunTestError('There are no bots available to run the test.')
       else:
         return
 
-    # TODO: Support non-Telemetry tests.
-    extra_args = [self._test_suite]
-    if self._test:
-      extra_args.append('--story-filter')
-      extra_args.append(self._test)
-    # TODO: Use the correct browser for Android and 64-bit Windows.
-    extra_args += [
-        '-v', '--upload-results',
-        '--output-format=chartjson', '--browser=release',
-        '--isolated-script-test-output=${ISOLATED_OUTDIR}/output.json',
-        '--isolated-script-test-chartjson-output='
-        '${ISOLATED_OUTDIR}/chartjson-output.json',
-    ]
-
     dimensions = [{'key': 'pool', 'value': 'Chrome-perf-pinpoint'}]
-    if self._first_execution:
-      dimensions.append({'key': 'id', 'value': self._first_execution.bot_id})
+    if self._previous_execution:
+      dimensions.append({
+          'key': 'id',
+          'value': self._previous_execution.bot_id
+      })
     else:
-      dimensions += _ConfigurationDimensions(self._configuration)
+      dimensions += self._dimensions
 
     body = {
-        'name': 'Pinpoint job on %s' % self._configuration,
+        'name': 'Pinpoint job',
         'user': 'Pinpoint',
         'priority': '100',
-        'expiration_secs': '600',
+        'expiration_secs': '86400',  # 1 day.
         'properties': {
             'inputs_ref': {'isolated': self._isolate_hash},
-            'extra_args': extra_args,
+            'extra_args': self._extra_args,
             'dimensions': dimensions,
-            'execution_timeout_secs': '3600',
-            'io_timeout_secs': '3600',
+            'execution_timeout_secs': '7200',  # 2 hours.
+            'io_timeout_secs': '1200',  # 20 minutes, to match the perf bots.
         },
-        'tags': [
-            'configuration:' + self._configuration,
-        ],
     }
     response = swarming_service.Tasks().New(body)
 
     self._task_id = response['task_id']
-
-
-def _ConfigurationDimensions(configuration):
-  bot_dimensions_path = os.path.join(os.path.dirname(__file__),
-                                     'bot_dimensions.json')
-  with open(bot_dimensions_path) as bot_dimensions_file:
-    bot_dimensions = json.load(bot_dimensions_file)
-
-  if configuration not in bot_dimensions:
-    raise UnknownConfigError(configuration)
-
-  return bot_dimensions[configuration]

@@ -11,7 +11,6 @@
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/invalidation/public/invalidation_service.h"
 #include "components/invalidation/public/object_id_invalidation_map.h"
@@ -63,7 +62,7 @@ SyncBackendHostImpl::~SyncBackendHostImpl() {
 }
 
 void SyncBackendHostImpl::Initialize(InitParams params) {
-  CHECK(params.sync_task_runner);
+  DCHECK(params.sync_task_runner);
   DCHECK(params.host);
   DCHECK(params.registrar);
 
@@ -72,8 +71,8 @@ void SyncBackendHostImpl::Initialize(InitParams params) {
   registrar_ = params.registrar.get();
 
   sync_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&SyncBackendHostCore::DoInitialize, core_,
-                            base::Passed(&params)));
+      FROM_HERE, base::BindOnce(&SyncBackendHostCore::DoInitialize, core_,
+                                std::move(params)));
 }
 
 void SyncBackendHostImpl::TriggerRefresh(const ModelTypeSet& types) {
@@ -138,7 +137,9 @@ void SyncBackendHostImpl::Shutdown(ShutdownReason reason) {
   DCHECK(!host_);
 
   if (invalidation_handler_registered_) {
-    CHECK(invalidator_->UpdateRegisteredInvalidationIds(this, ObjectIdSet()));
+    bool success =
+        invalidator_->UpdateRegisteredInvalidationIds(this, ObjectIdSet());
+    DCHECK(success);
     invalidator_->UnregisterInvalidationHandler(this);
     invalidator_ = nullptr;
   }
@@ -161,8 +162,8 @@ void SyncBackendHostImpl::ConfigureDataTypes(ConfigureParams params) {
       base::Bind(&SyncBackendHostCore::DoPurgeDisabledTypes, core_,
                  params.to_purge, params.to_journal, params.to_unapply));
   sync_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&SyncBackendHostCore::DoConfigureSyncer, core_,
-                            base::Passed(&params)));
+      FROM_HERE, base::BindOnce(&SyncBackendHostCore::DoConfigureSyncer, core_,
+                                std::move(params)));
 }
 
 void SyncBackendHostImpl::RegisterDirectoryDataType(ModelType type,
@@ -228,7 +229,6 @@ bool SyncBackendHostImpl::IsCryptographerReady(
 void SyncBackendHostImpl::GetModelSafeRoutingInfo(
     ModelSafeRoutingInfo* out) const {
   if (initialized()) {
-    CHECK(registrar_);
     registrar_->GetModelSafeRoutingInfo(out);
   } else {
     NOTREACHED();
@@ -277,8 +277,9 @@ void SyncBackendHostImpl::FinishConfigureDataTypesOnFrontendLoop(
     const ModelTypeSet failed_configuration_types,
     const base::Callback<void(ModelTypeSet, ModelTypeSet)>& ready_task) {
   if (invalidator_) {
-    CHECK(invalidator_->UpdateRegisteredInvalidationIds(
-        this, ModelTypeSetToObjectIdSet(enabled_types)));
+    bool success = invalidator_->UpdateRegisteredInvalidationIds(
+        this, ModelTypeSetToObjectIdSet(enabled_types));
+    DCHECK(success);
   }
 
   if (!ready_task.is_null())
@@ -286,7 +287,7 @@ void SyncBackendHostImpl::FinishConfigureDataTypesOnFrontendLoop(
 }
 
 void SyncBackendHostImpl::AddExperimentalTypes() {
-  CHECK(initialized());
+  DCHECK(initialized());
   Experiments experiments;
   if (core_->sync_manager()->ReceivedExperiment(&experiments))
     host_->OnExperimentsChanged(experiments);
@@ -413,13 +414,6 @@ void SyncBackendHostImpl::UpdateInvalidationVersions(
     const std::map<ModelType, int64_t>& invalidation_versions) {
   DCHECK(thread_checker_.CalledOnValidThread());
   sync_prefs_->UpdateInvalidationVersions(invalidation_versions);
-}
-
-void SyncBackendHostImpl::RefreshTypesForTest(ModelTypeSet types) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  sync_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&SyncBackendHostCore::DoRefreshTypes, core_, types));
 }
 
 void SyncBackendHostImpl::ClearServerData(const base::Closure& callback) {

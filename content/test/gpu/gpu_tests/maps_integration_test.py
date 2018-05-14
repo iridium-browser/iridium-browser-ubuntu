@@ -14,42 +14,19 @@ from gpu_tests import color_profile_manager
 
 from py_utils import cloud_storage
 
+maps_perf_test_path = os.path.join(
+  path_util.GetChromiumSrcDir(), 'tools', 'perf', 'page_sets', 'maps_perf_test')
+
 data_path = os.path.join(path_util.GetChromiumSrcDir(),
-                         'content', 'test', 'gpu', 'page_sets', 'data')
+                         'content', 'test', 'gpu', 'gpu_tests')
 
 class MapsIntegrationTest(
     cloud_storage_integration_test_base.CloudStorageIntegrationTestBase):
   """Google Maps pixel tests.
 
-  Note: the WPR for this test was recorded from the smoothness.maps
-  benchmark's similar page. The Maps team gave us a build of their test.  The
-  only modification to the test was to config.js, where the width and height
-  query args were set to 800 by 600. The WPR was recorded with:
-
-  tools/perf/record_wpr smoothness_maps --browser=system
-
-  This produced maps_???.wpr and maps.json, which were copied from
-  tools/perf/page_sets/data into content/test/gpu/page_sets/data.
-
-  It's worth noting that telemetry no longer allows replaying a URL that
-  refers to localhost. If the recording was created for the locahost URL, one
-  can update the host name by running:
-
-    web-page-replay/httparchive.py remap-host maps_004.wpr \
-    localhost:10020 map-test
-
-  (web-page-replay/ can be found in third_party/catapult/telemetry/third_party/)
-
-  After updating the host name in the WPR archive, please remember to update
-  the host URL in content/test/gpu/gpu_tests/maps_integration_test.py as well.
-
-  To upload the maps_???.wpr to cloud storage, one would run:
-
-    depot_tools/upload_to_google_storage.py --bucket=chromium-telemetry \
-    maps_???.wpr
-
-  The same sha1 file and json file need to be copied into both of these
-  directories in any CL which updates the recording.
+  Note: this test uses the same WPR as the smoothness.maps benchmark
+  in tools/perf/benchmarks. See src/tools/perf/page_sets/maps.py for
+  documentation on updating the WPR archive.
   """
 
   @classmethod
@@ -62,14 +39,18 @@ class MapsIntegrationTest(
 
   @classmethod
   def SetUpProcess(cls):
-    color_profile_manager.ForceUntilExitSRGB()
+    options = cls.GetParsedCommandLineOptions()
+    color_profile_manager.ForceUntilExitSRGB(
+      options.dont_restore_color_profile_after_test)
     super(MapsIntegrationTest, cls).SetUpProcess()
     browser_args = [
         '--force-color-profile=srgb',
-        '--enable-features=ColorCorrectRendering']
+        '--ensure-forced-color-profile']
     cls.CustomizeBrowserArgs(browser_args)
-    cls.StartWPRServer(os.path.join(data_path, 'maps_004.wpr.updated'),
-                       cloud_storage.PUBLIC_BUCKET)
+    cloud_storage.GetIfChanged(
+      os.path.join(maps_perf_test_path, 'load_dataset'),
+      cloud_storage.PUBLIC_BUCKET)
+    cls.SetStaticServerDirs([maps_perf_test_path])
     cls.StartBrowser()
 
   @classmethod
@@ -80,9 +61,9 @@ class MapsIntegrationTest(
   @classmethod
   def GenerateGpuTests(cls, options):
     cls.SetParsedCommandLineOptions(options)
-    yield('Maps_maps_004',
-          'http://map-test/performance.html',
-          ('maps_004_expectations.json'))
+    yield('Maps_maps',
+          'file://performance.html',
+          ('maps_pixel_expectations.json'))
 
   def _ReadPixelExpectations(self, expectations_file):
     expectations_path = os.path.join(data_path, expectations_file)
@@ -113,8 +94,9 @@ class MapsIntegrationTest(
     pixel_expectations_file = args[0]
     action_runner = tab.action_runner
     action_runner.Navigate(url)
-    action_runner.WaitForJavaScriptCondition(
-        'window.testDone', timeout=320)
+    action_runner.WaitForJavaScriptCondition('window.startTest != undefined')
+    action_runner.EvaluateJavaScript('window.startTest()')
+    action_runner.WaitForJavaScriptCondition('window.testDone', timeout=320)
 
     # TODO(kbr): This should not be necessary, but it's not clear if the test
     # is failing on the bots in its absence. Remove once we can verify that

@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_BROWSER_COMMANDS_H_
 
 #include <string>
+#include <vector>
 
 #include "build/build_config.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
@@ -15,13 +16,17 @@
 #include "printing/features/features.h"
 #include "ui/base/window_open_disposition.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/arc/intent_helper/arc_navigation_throttle.h"
+#include "chrome/browser/ui/browser_dialogs.h"
+#endif
+
 class Browser;
 class CommandObserver;
 class GURL;
 class Profile;
 
 namespace content {
-class PageState;
 class WebContents;
 }
 
@@ -90,7 +95,7 @@ void DuplicateTab(Browser* browser);
 bool CanDuplicateTab(const Browser* browser);
 content::WebContents* DuplicateTabAt(Browser* browser, int index);
 bool CanDuplicateTabAt(const Browser* browser, int index);
-void MuteTab(Browser* browser);
+void MuteSite(Browser* browser);
 void PinTab(Browser* browser);
 void ConvertPopupToTabbedBrowser(Browser* browser);
 void Exit();
@@ -105,7 +110,6 @@ void ManagePasswordsForPage(Browser* browser);
 void SavePage(Browser* browser);
 bool CanSavePage(const Browser* browser);
 void ShowFindBar(Browser* browser);
-bool ShowPageInfo(Browser* browser, content::WebContents* web_contents);
 void Print(Browser* browser);
 bool CanPrint(Browser* browser);
 #if BUILDFLAG(ENABLE_BASIC_PRINTING)
@@ -127,7 +131,7 @@ void FocusLocationBar(Browser* browser);
 void FocusSearch(Browser* browser);
 void FocusAppMenu(Browser* browser);
 void FocusBookmarksToolbar(Browser* browser);
-void FocusInfobars(Browser* browser);
+void FocusInactivePopupForAccessibility(Browser* browser);
 void FocusNextPane(Browser* browser);
 void FocusPreviousPane(Browser* browser);
 void ToggleDevToolsWindow(Browser* browser, DevToolsToggleAction action);
@@ -145,17 +149,16 @@ void ToggleRequestTabletSite(Browser* browser);
 void ToggleFullscreenMode(Browser* browser);
 void ClearCache(Browser* browser);
 bool IsDebuggerAttachedToCurrentTab(Browser* browser);
+void CopyURL(Browser* browser);
+void OpenInChrome(Browser* browser);
+#if defined(OS_CHROMEOS)
+void QueryAndDisplayArcApps(
+    const Browser* browser,
+    const std::vector<arc::ArcNavigationThrottle::AppInfo>& app_info,
+    IntentPickerResponse callback);
+void SetIntentPickerViewVisibility(Browser* browser, bool visible);
+#endif  // defined(OS_CHROMEOS)
 
-// Opens a view-source tab for a given web contents.
-void ViewSource(Browser* browser, content::WebContents* tab);
-
-// Opens a view-source tab for any frame within a given web contents.
-void ViewSource(Browser* browser,
-                content::WebContents* tab,
-                const GURL& url,
-                const content::PageState& page_state);
-
-void ViewSelectedSource(Browser* browser);
 bool CanViewSource(const Browser* browser);
 
 void CreateBookmarkAppFromCurrentWebContents(Browser* browser);

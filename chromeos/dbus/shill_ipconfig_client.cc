@@ -113,7 +113,7 @@ void ShillIPConfigClientImpl::SetProperty(const dbus::ObjectPath& ipconfig_path,
   dbus::MessageWriter writer(&method_call);
   writer.AppendString(name);
   // IPConfig supports writing basic type and string array properties.
-  switch (value.GetType()) {
+  switch (value.type()) {
     case base::Value::Type::LIST: {
       const base::ListValue* list_value = NULL;
       value.GetAsList(&list_value);
@@ -124,14 +124,14 @@ void ShillIPConfigClientImpl::SetProperty(const dbus::ObjectPath& ipconfig_path,
       for (base::ListValue::const_iterator it = list_value->begin();
            it != list_value->end();
            ++it) {
-        DLOG_IF(ERROR, it->GetType() != base::Value::Type::STRING)
-            << "Unexpected type " << it->GetType();
+        DLOG_IF(ERROR, !it->is_string()) << "Unexpected type " << it->type();
         std::string str;
         it->GetAsString(&str);
         array_writer.AppendString(str);
       }
       variant_writer.CloseContainer(&array_writer);
       writer.CloseContainer(&variant_writer);
+      break;
     }
     case base::Value::Type::BOOLEAN:
     case base::Value::Type::INTEGER:
@@ -140,7 +140,7 @@ void ShillIPConfigClientImpl::SetProperty(const dbus::ObjectPath& ipconfig_path,
       dbus::AppendBasicTypeValueDataAsVariant(&writer, value);
       break;
     default:
-      DLOG(ERROR) << "Unexpected type " << value.GetType();
+      DLOG(ERROR) << "Unexpected type " << value.type();
   }
   GetHelper(ipconfig_path)->CallVoidMethod(&method_call, std::move(callback));
 }
@@ -170,9 +170,9 @@ ShillIPConfigClientImpl::GetTestInterface() {
 
 }  // namespace
 
-ShillIPConfigClient::ShillIPConfigClient() {}
+ShillIPConfigClient::ShillIPConfigClient() = default;
 
-ShillIPConfigClient::~ShillIPConfigClient() {}
+ShillIPConfigClient::~ShillIPConfigClient() = default;
 
 // static
 ShillIPConfigClient* ShillIPConfigClient::Create() {

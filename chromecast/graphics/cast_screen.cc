@@ -6,33 +6,10 @@
 
 #include <stdint.h>
 
-#include "base/command_line.h"
-#include "chromecast/public/graphics_properties_shlib.h"
 #include "ui/aura/env.h"
-#include "ui/gfx/geometry/rect_conversions.h"
-#include "ui/gfx/geometry/size.h"
-#include "ui/gfx/geometry/size_conversions.h"
-#include "ui/gfx/native_widget_types.h"
+#include "ui/display/display.h"
 
 namespace chromecast {
-
-namespace {
-
-const int64_t kDisplayId = 1;
-
-// Helper to return the screen resolution (device pixels)
-// to use.
-gfx::Size GetScreenResolution() {
-  if (GraphicsPropertiesShlib::IsSupported(
-          GraphicsPropertiesShlib::k1080p,
-          base::CommandLine::ForCurrentProcess()->argv())) {
-    return gfx::Size(1920, 1080);
-  } else {
-    return gfx::Size(1280, 720);
-  }
-}
-
-}  // namespace
 
 CastScreen::~CastScreen() {
 }
@@ -56,11 +33,16 @@ display::Display CastScreen::GetDisplayNearestWindow(
 }
 
 CastScreen::CastScreen() {
-  // Device scale factor computed relative to 720p display
-  display::Display display(kDisplayId);
-  const gfx::Size size = GetScreenResolution();
-  const float device_scale_factor = size.height() / 720.0f;
-  display.SetScaleAndBounds(device_scale_factor, gfx::Rect(size));
+}
+
+void CastScreen::OnDisplayChanged(int64_t display_id,
+                                  float device_scale_factor,
+                                  display::Display::Rotation rotation,
+                                  const gfx::Rect& bounds) {
+  display::Display display(display_id);
+  display.SetScaleAndBounds(device_scale_factor, bounds);
+  display.set_rotation(rotation);
+  VLOG(1) << __func__ << " " << display.ToString();
   ProcessDisplayChanged(display, true /* is_primary */);
 }
 

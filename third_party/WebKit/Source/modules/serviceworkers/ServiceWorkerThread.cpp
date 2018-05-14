@@ -31,38 +31,47 @@
 #include "modules/serviceworkers/ServiceWorkerThread.h"
 
 #include <memory>
+
 #include "core/workers/GlobalScopeCreationParams.h"
 #include "core/workers/WorkerBackingThread.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
+#include "modules/serviceworkers/ServiceWorkerGlobalScopeProxy.h"
 #include "modules/serviceworkers/ServiceWorkerInstalledScriptsManager.h"
-#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
 ServiceWorkerThread::ServiceWorkerThread(
     ThreadableLoadingContext* loading_context,
-    WorkerReportingProxy& worker_reporting_proxy,
+    ServiceWorkerGlobalScopeProxy* global_scope_proxy,
     std::unique_ptr<ServiceWorkerInstalledScriptsManager>
         installed_scripts_manager)
-    : WorkerThread(loading_context, worker_reporting_proxy),
-      worker_backing_thread_(
-          WorkerBackingThread::Create("ServiceWorker Thread")),
+    : WorkerThread(loading_context, *global_scope_proxy),
+      global_scope_proxy_(global_scope_proxy),
+      worker_backing_thread_(WorkerBackingThread::Create(
+          WebThreadCreationParams(GetThreadType()))),
       installed_scripts_manager_(std::move(installed_scripts_manager)) {}
 
-ServiceWorkerThread::~ServiceWorkerThread() {}
+ServiceWorkerThread::~ServiceWorkerThread() {
+  global_scope_proxy_->Detach();
+}
 
 void ServiceWorkerThread::ClearWorkerBackingThread() {
   worker_backing_thread_ = nullptr;
+}
+
+InstalledScriptsManager* ServiceWorkerThread::GetInstalledScriptsManager() {
+  return installed_scripts_manager_.get();
+}
+
+void ServiceWorkerThread::TerminateForTesting() {
+  global_scope_proxy_->TerminateWorkerContext();
+  WorkerThread::TerminateForTesting();
 }
 
 WorkerOrWorkletGlobalScope* ServiceWorkerThread::CreateWorkerGlobalScope(
     std::unique_ptr<GlobalScopeCreationParams> creation_params) {
   return ServiceWorkerGlobalScope::Create(this, std::move(creation_params),
                                           time_origin_);
-}
-
-InstalledScriptsManager* ServiceWorkerThread::GetInstalledScriptsManager() {
-  return installed_scripts_manager_.get();
 }
 
 }  // namespace blink

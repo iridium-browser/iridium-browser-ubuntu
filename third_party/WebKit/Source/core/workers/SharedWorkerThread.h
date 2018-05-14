@@ -51,11 +51,14 @@ class CORE_EXPORT SharedWorkerThread : public WorkerThread {
   }
   void ClearWorkerBackingThread() override;
 
- protected:
+ private:
   WorkerOrWorkletGlobalScope* CreateWorkerGlobalScope(
       std::unique_ptr<GlobalScopeCreationParams>) override;
 
- private:
+  WebThreadType GetThreadType() const override {
+    return WebThreadType::kSharedWorkerThread;
+  }
+
   std::unique_ptr<WorkerBackingThread> worker_backing_thread_;
   String name_;
 };

@@ -12,13 +12,14 @@
 #include "base/message_loop/message_loop.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "content/browser/compositor/test/no_transport_image_transport_factory.h"
+#include "content/browser/compositor/test/test_image_transport_factory.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/input_messages.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
+#include "content/test/mock_widget_impl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -97,8 +98,8 @@ class RenderWidgetHostDelegateEditCommandCounter
 class RenderWidgetHostViewMacEditCommandHelperTest : public PlatformTest {
  protected:
   void SetUp() override {
-    ImageTransportFactory::InitializeForUnitTests(
-        base::MakeUnique<NoTransportImageTransportFactory>());
+    ImageTransportFactory::SetFactory(
+        std::make_unique<TestImageTransportFactory>());
   }
   void TearDown() override { ImageTransportFactory::Terminate(); }
 
@@ -110,8 +111,8 @@ class RenderWidgetHostViewMacEditCommandHelperWithTaskEnvTest
     : public PlatformTest {
  protected:
   void SetUp() override {
-    ImageTransportFactory::InitializeForUnitTests(
-        base::MakeUnique<NoTransportImageTransportFactory>());
+    ImageTransportFactory::SetFactory(
+        std::make_unique<TestImageTransportFactory>());
   }
   void TearDown() override { ImageTransportFactory::Terminate(); }
 
@@ -130,7 +131,7 @@ TEST_F(RenderWidgetHostViewMacEditCommandHelperWithTaskEnvTest,
   TestBrowserContext browser_context;
   MockRenderProcessHostFactory process_host_factory;
   RenderProcessHost* process_host =
-      process_host_factory.CreateRenderProcessHost(&browser_context);
+      process_host_factory.CreateRenderProcessHost(&browser_context, nullptr);
 
   // Populates |g_supported_scale_factors|.
   std::vector<ui::ScaleFactor> supported_factors;
@@ -140,9 +141,12 @@ TEST_F(RenderWidgetHostViewMacEditCommandHelperWithTaskEnvTest,
   base::mac::ScopedNSAutoreleasePool pool;
 
   int32_t routing_id = process_host->GetNextRoutingID();
+  mojom::WidgetPtr widget;
+  std::unique_ptr<MockWidgetImpl> widget_impl =
+      std::make_unique<MockWidgetImpl>(mojo::MakeRequest(&widget));
 
-  RenderWidgetHostImpl* render_widget =
-      new RenderWidgetHostImpl(&delegate, process_host, routing_id, false);
+  RenderWidgetHostImpl* render_widget = new RenderWidgetHostImpl(
+      &delegate, process_host, routing_id, std::move(widget), false);
 
   ui::WindowResizeHelperMac::Get()->Init(base::ThreadTaskRunnerHandle::Get());
 

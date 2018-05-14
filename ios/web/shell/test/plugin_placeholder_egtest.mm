@@ -20,8 +20,6 @@
 #error "This file requires ARC support."
 #endif
 
-using web::WebViewCssSelector;
-
 namespace {
 
 // Loads a web page with given content.
@@ -58,8 +56,7 @@ void LoadPage(const std::string& page_content) {
   // Verify that placeholder image is not displayed.
   [ShellEarlGrey waitForWebViewContainingText:kPageDescription];
   [ShellEarlGrey waitForWebViewContainingText:kFallbackText];
-  [[EarlGrey selectElementWithMatcher:WebViewCssSelector("img")]
-      assertWithMatcher:grey_nil()];
+  [ShellEarlGrey waitForWebViewNotContainingCSSSelector:"img"];
 }
 
 // Tests placeholder for a large <applet> with no fallback.
@@ -76,12 +73,34 @@ void LoadPage(const std::string& page_content) {
 
   // Verify that plugin object is replaced with placeholder image.
   [ShellEarlGrey waitForWebViewContainingText:kPageDescription];
-  [[EarlGrey selectElementWithMatcher:WebViewCssSelector("img[src*='data']")]
-      assertWithMatcher:grey_notNil()];
+  [ShellEarlGrey waitForWebViewContainingCSSSelector:"img[src*='data']"];
 }
 
-// Tests placeholder for a large <object> with an embed fallback.
-- (void)testPluginPlaceholderObjectEmbed {
+// Tests placeholder for a large <object> with a flash embed fallback.
+- (void)testPluginPlaceholderObjectFlashEmbedFallback {
+  const char kPageDescription[] = "Object, embed fallback";
+  const std::string page = base::StringPrintf(
+      "<html><body width='800' height='600'>"
+      "<p>%s</p>"
+      "<object classid='clsid:D27CDB6E-AE6D-11cf-96B8-444553540000'"
+      "    codebase='http://download.macromedia.com/pub/shockwave/cabs/'"
+      "flash/swflash.cab#version=6,0,0,0' width='550' height='550'>"
+      "  <param name='movie' value='some.swf'>"
+      "  <embed src='some.swf' type='application/x-shockwave-flash' "
+      "width='550' height='550'>"
+      "</object>"
+      "</body></html>",
+      kPageDescription);
+  LoadPage(page);
+
+  // Verify that plugin object is replaced with placeholder image.
+  [ShellEarlGrey waitForWebViewContainingText:kPageDescription];
+  [ShellEarlGrey waitForWebViewContainingCSSSelector:"img[src*='data']"];
+}
+
+// Tests that a large <object> with an embed fallback of unspecified type is
+// untouched.
+- (void)testPluginPlaceholderObjectUndefinedEmbedFallback {
   const char kPageDescription[] = "Object, embed fallback";
   const std::string page = base::StringPrintf(
       "<html><body width='800' height='600'>"
@@ -96,10 +115,9 @@ void LoadPage(const std::string& page_content) {
       kPageDescription);
   LoadPage(page);
 
-  // Verify that plugin object is replaced with placeholder image.
+  // Verify that placeholder image is not displayed.
   [ShellEarlGrey waitForWebViewContainingText:kPageDescription];
-  [[EarlGrey selectElementWithMatcher:WebViewCssSelector("img[src*='data']")]
-      assertWithMatcher:grey_notNil()];
+  [ShellEarlGrey waitForWebViewNotContainingCSSSelector:"img"];
 }
 
 // Tests that a large <object> with text fallback is untouched.
@@ -121,8 +139,7 @@ void LoadPage(const std::string& page_content) {
   // Verify that placeholder image is not displayed.
   [ShellEarlGrey waitForWebViewContainingText:kPageDescription];
   [ShellEarlGrey waitForWebViewContainingText:kFallbackText];
-  [[EarlGrey selectElementWithMatcher:WebViewCssSelector("img")]
-      assertWithMatcher:grey_nil()];
+  [ShellEarlGrey waitForWebViewNotContainingCSSSelector:"img"];
 }
 
 // Tests placeholder for a large <object> with no fallback.
@@ -140,8 +157,7 @@ void LoadPage(const std::string& page_content) {
 
   // Verify that plugin object is replaced with placeholder image.
   [ShellEarlGrey waitForWebViewContainingText:kPageDescription];
-  [[EarlGrey selectElementWithMatcher:WebViewCssSelector("img[src*='data']")]
-      assertWithMatcher:grey_notNil()];
+  [ShellEarlGrey waitForWebViewContainingCSSSelector:"img[src*='data']"];
 }
 
 // Tests that a large png <object> is untouched.
@@ -158,8 +174,7 @@ void LoadPage(const std::string& page_content) {
 
   // Verify that placeholder image is not displayed.
   [ShellEarlGrey waitForWebViewContainingText:kPageDescription];
-  [[EarlGrey selectElementWithMatcher:WebViewCssSelector("img")]
-      assertWithMatcher:grey_nil()];
+  [ShellEarlGrey waitForWebViewNotContainingCSSSelector:"img"];
 }
 
 // Test that non-major plugins (e.g., top/side ads) don't get placeholders.
@@ -195,8 +210,7 @@ void LoadPage(const std::string& page_content) {
 
   // Verify that placeholder image is not displayed.
   [ShellEarlGrey waitForWebViewContainingText:kPageDescription];
-  [[EarlGrey selectElementWithMatcher:WebViewCssSelector("img")]
-      assertWithMatcher:grey_nil()];
+  [ShellEarlGrey waitForWebViewNotContainingCSSSelector:"img"];
 }
 
 @end

@@ -51,6 +51,7 @@ def RunSteps(api):
   soln.name = 'src'
   soln.url = 'https://chromium.googlesource.com/chromium/src.git'
   soln.revision = api.properties.get('revision')
+  soln.custom_vars = {'string_var': 'string_val', 'true_var': True}
   src_cfg.parent_got_revision_mapping['parent_got_revision'] = 'got_revision'
   api.gclient.c = src_cfg
   api.gclient.checkout()
@@ -65,8 +66,7 @@ def RunSteps(api):
   bl_cfg.got_revision_mapping['src/blatley'] = 'got_blatley_revision'
   with api.context(cwd=api.path['start_dir'].join('src', 'third_party')):
     api.gclient.checkout(
-        gclient_config=bl_cfg,
-        with_branch_heads=True)
+        gclient_config=bl_cfg)
 
   api.gclient.got_revision_reverse_mapping(bl_cfg)
 

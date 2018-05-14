@@ -100,8 +100,10 @@ class SampleFactoryImpl : public sample::Factory {
     sample::ResponsePtr response(sample::Response::New(2, std::move(pipe0)));
     callback.Run(std::move(response), text1);
 
-    if (request->obj)
-      request->obj->DoSomething();
+    if (request->obj) {
+      imported::ImportedInterfacePtr proxy(std::move(request->obj));
+      proxy->DoSomething();
+    }
   }
 
   void DoStuff2(ScopedDataPipeConsumerHandle pipe,
@@ -116,15 +118,12 @@ class SampleFactoryImpl : public sample::Factory {
               mojo::Wait(pipe.get(), MOJO_HANDLE_SIGNAL_READABLE, &state));
     ASSERT_TRUE(state.satisfied_signals & MOJO_HANDLE_SIGNAL_READABLE);
     ASSERT_EQ(MOJO_RESULT_OK,
-              ReadDataRaw(
-                  pipe.get(), nullptr, &data_size, MOJO_READ_DATA_FLAG_QUERY));
+              pipe->ReadData(nullptr, &data_size, MOJO_READ_DATA_FLAG_QUERY));
     ASSERT_NE(0, static_cast<int>(data_size));
     char data[64];
     ASSERT_LT(static_cast<int>(data_size), 64);
-    ASSERT_EQ(
-        MOJO_RESULT_OK,
-        ReadDataRaw(
-            pipe.get(), data, &data_size, MOJO_READ_DATA_FLAG_ALL_OR_NONE));
+    ASSERT_EQ(MOJO_RESULT_OK, pipe->ReadData(data, &data_size,
+                                             MOJO_READ_DATA_FLAG_ALL_OR_NONE));
 
     callback.Run(data);
   }
@@ -132,7 +131,7 @@ class SampleFactoryImpl : public sample::Factory {
   void CreateNamedObject(
       InterfaceRequest<sample::NamedObject> object_request) override {
     EXPECT_TRUE(object_request.is_pending());
-    MakeStrongBinding(base::MakeUnique<SampleNamedObjectImpl>(),
+    MakeStrongBinding(std::make_unique<SampleNamedObjectImpl>(),
                       std::move(object_request));
   }
 
@@ -206,7 +205,7 @@ TEST_P(HandlePassingTest, Basic) {
   MessagePipe pipe1;
   EXPECT_TRUE(WriteTextMessage(pipe1.handle1.get(), kText2));
 
-  imported::ImportedInterfacePtr imported;
+  imported::ImportedInterfacePtrInfo imported;
   base::RunLoop run_loop;
   ImportedInterfaceImpl imported_impl(MakeRequest(&imported),
                                       run_loop.QuitClosure());
@@ -235,9 +234,9 @@ TEST_P(HandlePassingTest, PassInvalid) {
   sample::FactoryPtr factory;
   SampleFactoryImpl factory_impl(MakeRequest(&factory));
 
-  sample::RequestPtr request(
-      sample::Request::New(1, ScopedMessagePipeHandle(), base::nullopt,
-                           imported::ImportedInterfacePtr()));
+  sample::RequestPtr request(sample::Request::New(1, ScopedMessagePipeHandle(),
+                                                  base::nullopt, nullptr));
+
   bool got_response = false;
   std::string got_text_reply;
   base::RunLoop run_loop;
@@ -271,10 +270,8 @@ TEST_P(HandlePassingTest, DataPipe) {
   // +1 for \0.
   uint32_t data_size = static_cast<uint32_t>(expected_text_reply.size() + 1);
   ASSERT_EQ(MOJO_RESULT_OK,
-            WriteDataRaw(producer_handle.get(),
-                         expected_text_reply.c_str(),
-                         &data_size,
-                         MOJO_WRITE_DATA_FLAG_ALL_OR_NONE));
+            producer_handle->WriteData(expected_text_reply.c_str(), &data_size,
+                                       MOJO_WRITE_DATA_FLAG_ALL_OR_NONE));
 
   bool got_response = false;
   std::string got_text_reply;
@@ -289,32 +286,6 @@ TEST_P(HandlePassingTest, DataPipe) {
 
   EXPECT_TRUE(got_response);
   EXPECT_EQ(expected_text_reply, got_text_reply);
-}
-
-TEST_P(HandlePassingTest, PipesAreClosed) {
-  sample::FactoryPtr factory;
-  SampleFactoryImpl factory_impl(MakeRequest(&factory));
-
-  MessagePipe extra_pipe;
-
-  MojoHandle handle0_value = extra_pipe.handle0.get().value();
-  MojoHandle handle1_value = extra_pipe.handle1.get().value();
-
-  {
-    std::vector<ScopedMessagePipeHandle> pipes(2);
-    pipes[0] = std::move(extra_pipe.handle0);
-    pipes[1] = std::move(extra_pipe.handle1);
-
-    sample::RequestPtr request(sample::Request::New());
-    request->more_pipes = std::move(pipes);
-
-    factory->DoStuff(std::move(request), ScopedMessagePipeHandle(),
-                     sample::Factory::DoStuffCallback());
-  }
-
-  // We expect the pipes to have been closed.
-  EXPECT_EQ(MOJO_RESULT_INVALID_ARGUMENT, MojoClose(handle0_value));
-  EXPECT_EQ(MOJO_RESULT_INVALID_ARGUMENT, MojoClose(handle1_value));
 }
 
 TEST_P(HandlePassingTest, CreateNamedObject) {

@@ -5,8 +5,10 @@
 #include "core/inspector/ThreadDebugger.h"
 
 #include <memory>
+#include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/SourceLocation.h"
 #include "bindings/core/v8/V8BindingForCore.h"
+#include "bindings/core/v8/V8Blob.h"
 #include "bindings/core/v8/V8DOMException.h"
 #include "bindings/core/v8/V8DOMTokenList.h"
 #include "bindings/core/v8/V8Event.h"
@@ -23,9 +25,11 @@
 #include "core/inspector/InspectorDOMDebuggerAgent.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/inspector/V8InspectorString.h"
-#include "platform/ScriptForbiddenScope.h"
-#include "platform/wtf/CurrentTime.h"
+#include "core/probe/CoreProbes.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
+#include "platform/scheduler/child/web_scheduler.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 
 namespace blink {
 
@@ -34,7 +38,7 @@ ThreadDebugger::ThreadDebugger(v8::Isolate* isolate)
       v8_inspector_(v8_inspector::V8Inspector::create(isolate, this)),
       v8_tracing_cpu_profiler_(v8::TracingCpuProfiler::Create(isolate)) {}
 
-ThreadDebugger::~ThreadDebugger() {}
+ThreadDebugger::~ThreadDebugger() = default;
 
 // static
 ThreadDebugger* ThreadDebugger::From(v8::Isolate* isolate) {
@@ -77,14 +81,16 @@ void ThreadDebugger::IdleFinished(v8::Isolate* isolate) {
     debugger->GetV8Inspector()->idleFinished();
 }
 
-void ThreadDebugger::AsyncTaskScheduled(const String& operation_name,
+void ThreadDebugger::AsyncTaskScheduled(const StringView& operation_name,
                                         void* task,
                                         bool recurring) {
+  DCHECK_EQ(reinterpret_cast<intptr_t>(task) % 2, 0);
   v8_inspector_->asyncTaskScheduled(ToV8InspectorStringView(operation_name),
                                     task, recurring);
 }
 
 void ThreadDebugger::AsyncTaskCanceled(void* task) {
+  DCHECK_EQ(reinterpret_cast<intptr_t>(task) % 2, 0);
   v8_inspector_->asyncTaskCanceled(task);
 }
 
@@ -93,11 +99,29 @@ void ThreadDebugger::AllAsyncTasksCanceled() {
 }
 
 void ThreadDebugger::AsyncTaskStarted(void* task) {
+  DCHECK_EQ(reinterpret_cast<intptr_t>(task) % 2, 0);
   v8_inspector_->asyncTaskStarted(task);
 }
 
 void ThreadDebugger::AsyncTaskFinished(void* task) {
+  DCHECK_EQ(reinterpret_cast<intptr_t>(task) % 2, 0);
   v8_inspector_->asyncTaskFinished(task);
+}
+
+v8_inspector::V8StackTraceId ThreadDebugger::StoreCurrentStackTrace(
+    const StringView& description) {
+  return v8_inspector_->storeCurrentStackTrace(
+      ToV8InspectorStringView(description));
+}
+
+void ThreadDebugger::ExternalAsyncTaskStarted(
+    const v8_inspector::V8StackTraceId& parent) {
+  v8_inspector_->externalAsyncTaskStarted(parent);
+}
+
+void ThreadDebugger::ExternalAsyncTaskFinished(
+    const v8_inspector::V8StackTraceId& parent) {
+  v8_inspector_->externalAsyncTaskFinished(parent);
 }
 
 unsigned ThreadDebugger::PromiseRejected(
@@ -130,8 +154,10 @@ void ThreadDebugger::PromiseRejectionRevoked(v8::Local<v8::Context> context,
 }
 
 void ThreadDebugger::beginUserGesture() {
-  user_gesture_indicator_ = WTF::WrapUnique(
-      new UserGestureIndicator(UserGestureToken::Create(nullptr)));
+  ExecutionContext* ec = CurrentExecutionContext(isolate_);
+  Document* document = ec && ec->IsDocument() ? ToDocument(ec) : nullptr;
+  user_gesture_indicator_ =
+      Frame::NotifyUserActivation(document ? document->GetFrame() : nullptr);
 }
 
 void ThreadDebugger::endUserGesture() {
@@ -143,6 +169,7 @@ std::unique_ptr<v8_inspector::StringBuffer> ThreadDebugger::valueSubtype(
   static const char kNode[] = "node";
   static const char kArray[] = "array";
   static const char kError[] = "error";
+  static const char kBlob[] = "blob";
   if (V8Node::hasInstance(value, isolate_))
     return ToV8InspectorStringBuffer(kNode);
   if (V8NodeList::hasInstance(value, isolate_) ||
@@ -153,6 +180,8 @@ std::unique_ptr<v8_inspector::StringBuffer> ThreadDebugger::valueSubtype(
   }
   if (V8DOMException::hasInstance(value, isolate_))
     return ToV8InspectorStringBuffer(kError);
+  if (V8Blob::hasInstance(value, isolate_))
+    return ToV8InspectorStringBuffer(kBlob);
   return nullptr;
 }
 
@@ -212,7 +241,7 @@ static void CreateFunctionPropertyWithData(v8::Local<v8::Context> context,
                         v8::ConstructorBehavior::kThrow)
           .ToLocal(&to_string_function))
     CreateDataProperty(context, func,
-                       V8String(context->GetIsolate(), "toString"),
+                       V8AtomicString(context->GetIsolate(), "toString"),
                        to_string_function);
   CreateDataProperty(context, object, func_name, func);
 }
@@ -250,8 +279,10 @@ void ThreadDebugger::installAdditionalCommandLineAPI(
   v8::Local<v8::Value> function_value;
   bool success =
       V8ScriptRunner::CompileAndRunInternalScript(
-          V8String(isolate_, "(function(e) { console.log(e.type, e); })"),
-          isolate_)
+          isolate_, ScriptState::From(context),
+          ScriptSourceCode("(function(e) { console.log(e.type, e); })",
+                           ScriptSourceLocationType::kInternal, nullptr, KURL(),
+                           TextPosition()))
           .ToLocal(&function_value) &&
       function_value->IsFunction();
   DCHECK(success);
@@ -324,7 +355,7 @@ static EventTarget* FirstArgumentAsEventTarget(
   if (info.Length() < 1)
     return nullptr;
   if (EventTarget* target =
-          V8EventTarget::toImplWithTypeCheck(info.GetIsolate(), info[0]))
+          V8EventTarget::ToImplWithTypeCheck(info.GetIsolate(), info[0]))
     return target;
   return ToDOMWindow(info.GetIsolate(), info[0]);
 }
@@ -396,21 +427,25 @@ void ThreadDebugger::GetEventListenersCallback(
       current_event_type = info.event_type;
       listeners = v8::Array::New(isolate);
       output_index = 0;
-      CreateDataProperty(context, result, V8String(isolate, current_event_type),
+      CreateDataProperty(context, result,
+                         V8AtomicString(isolate, current_event_type),
                          listeners);
     }
 
     v8::Local<v8::Object> listener_object = v8::Object::New(isolate);
-    CreateDataProperty(context, listener_object, V8String(isolate, "listener"),
-                       info.handler);
     CreateDataProperty(context, listener_object,
-                       V8String(isolate, "useCapture"),
+                       V8AtomicString(isolate, "listener"), info.handler);
+    CreateDataProperty(context, listener_object,
+                       V8AtomicString(isolate, "useCapture"),
                        v8::Boolean::New(isolate, info.use_capture));
-    CreateDataProperty(context, listener_object, V8String(isolate, "passive"),
+    CreateDataProperty(context, listener_object,
+                       V8AtomicString(isolate, "passive"),
                        v8::Boolean::New(isolate, info.passive));
-    CreateDataProperty(context, listener_object, V8String(isolate, "once"),
+    CreateDataProperty(context, listener_object,
+                       V8AtomicString(isolate, "once"),
                        v8::Boolean::New(isolate, info.once));
-    CreateDataProperty(context, listener_object, V8String(isolate, "type"),
+    CreateDataProperty(context, listener_object,
+                       V8AtomicString(isolate, "type"),
                        V8String(isolate, current_event_type));
     CreateDataPropertyInArray(context, listeners, output_index++,
                               listener_object);
@@ -433,13 +468,13 @@ void ThreadDebugger::consoleTimeEnd(const v8_inspector::StringView& title) {
 }
 
 void ThreadDebugger::consoleTimeStamp(const v8_inspector::StringView& title) {
-  v8::Isolate* isolate = isolate_;
+  ExecutionContext* ec = CurrentExecutionContext(isolate_);
   // TODO(dgozman): we can save on a copy here if TracedValue would take a
   // StringView.
-  TRACE_EVENT_INSTANT1(
-      "devtools.timeline", "TimeStamp", TRACE_EVENT_SCOPE_THREAD, "data",
-      InspectorTimeStampEvent::Data(CurrentExecutionContext(isolate),
-                                    ToCoreString(title)));
+  TRACE_EVENT_INSTANT1("devtools.timeline", "TimeStamp",
+                       TRACE_EVENT_SCOPE_THREAD, "data",
+                       InspectorTimeStampEvent::Data(ec, ToCoreString(title)));
+  probe::consoleTimeStamp(ec, ToCoreString(title));
 }
 
 void ThreadDebugger::startRepeatingTimer(
@@ -449,20 +484,22 @@ void ThreadDebugger::startRepeatingTimer(
   timer_data_.push_back(data);
   timer_callbacks_.push_back(callback);
 
-  std::unique_ptr<Timer<ThreadDebugger>> timer = WTF::WrapUnique(
-      new Timer<ThreadDebugger>(this, &ThreadDebugger::OnTimer));
-  Timer<ThreadDebugger>* timer_ptr = timer.get();
+  std::unique_ptr<TaskRunnerTimer<ThreadDebugger>> timer =
+      std::make_unique<TaskRunnerTimer<ThreadDebugger>>(
+          Platform::Current()->CurrentThread()->Scheduler()->V8TaskRunner(),
+          this, &ThreadDebugger::OnTimer);
+  TaskRunnerTimer<ThreadDebugger>* timer_ptr = timer.get();
   timers_.push_back(std::move(timer));
-  timer_ptr->StartRepeating(interval, BLINK_FROM_HERE);
+  timer_ptr->StartRepeating(TimeDelta::FromSecondsD(interval), FROM_HERE);
 }
 
 void ThreadDebugger::cancelTimer(void* data) {
   for (size_t index = 0; index < timer_data_.size(); ++index) {
     if (timer_data_[index] == data) {
       timers_[index]->Stop();
-      timer_callbacks_.erase(index);
-      timers_.erase(index);
-      timer_data_.erase(index);
+      timer_callbacks_.EraseAt(index);
+      timers_.EraseAt(index);
+      timer_data_.EraseAt(index);
       return;
     }
   }

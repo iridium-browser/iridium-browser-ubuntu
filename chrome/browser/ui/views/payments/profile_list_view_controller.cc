@@ -9,7 +9,6 @@
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view_ids.h"
 #include "chrome/browser/ui/views/payments/payment_request_row_view.h"
 #include "chrome/browser/ui/views/payments/payment_request_views_util.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/payments/content/payment_request_spec.h"
 #include "components/payments/content/payment_request_state.h"
 #include "components/payments/core/payments_profile_comparator.h"
@@ -182,10 +181,10 @@ class ShippingProfileViewController : public ProfileListViewController,
     if (!spec()->GetShippingOptions().empty())
       return nullptr;
 
-    auto header_view = base::MakeUnique<views::View>();
+    auto header_view = std::make_unique<views::View>();
     // 8 pixels between the warning icon view (if present) and the text.
     constexpr int kRowHorizontalSpacing = 8;
-    auto layout = base::MakeUnique<views::BoxLayout>(
+    auto layout = std::make_unique<views::BoxLayout>(
         views::BoxLayout::kHorizontal,
         gfx::Insets(0, kPaymentRequestRowHorizontalInsets),
         kRowHorizontalSpacing);
@@ -193,9 +192,9 @@ class ShippingProfileViewController : public ProfileListViewController,
         views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
     layout->set_cross_axis_alignment(
         views::BoxLayout::CROSS_AXIS_ALIGNMENT_STRETCH);
-    header_view->SetLayoutManager(layout.release());
+    header_view->SetLayoutManager(std::move(layout));
 
-    auto label = base::MakeUnique<views::Label>(
+    auto label = std::make_unique<views::Label>(
         spec()->selected_shipping_option_error().empty()
             ? GetShippingAddressSelectorInfoMessage(spec()->shipping_type())
             : spec()->selected_shipping_option_error());
@@ -210,7 +209,7 @@ class ShippingProfileViewController : public ProfileListViewController,
     label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
     if (!spec()->selected_shipping_option_error().empty()) {
-      auto warning_icon = base::MakeUnique<views::ImageView>();
+      auto warning_icon = std::make_unique<views::ImageView>();
       warning_icon->set_can_process_events_within_subtree(false);
       warning_icon->SetImage(gfx::CreateVectorIcon(
           vector_icons::kWarningIcon, 16,
@@ -229,9 +228,7 @@ class ShippingProfileViewController : public ProfileListViewController,
     return GetShippingAddressSectionString(spec()->shipping_type());
   }
 
-  int GetSecondaryButtonTextId() override {
-    return IDS_AUTOFILL_ADD_ADDRESS_CAPTION;
-  }
+  int GetSecondaryButtonTextId() override { return IDS_PAYMENTS_ADD_ADDRESS; }
 
   int GetSecondaryButtonTag() override {
     return static_cast<int>(
@@ -327,9 +324,7 @@ class ContactProfileViewController : public ProfileListViewController {
         IDS_PAYMENT_REQUEST_CONTACT_INFO_SECTION_NAME);
   }
 
-  int GetSecondaryButtonTextId() override {
-    return IDS_AUTOFILL_ADD_CONTACT_CAPTION;
-  }
+  int GetSecondaryButtonTextId() override { return IDS_PAYMENTS_ADD_CONTACT; }
 
   int GetSecondaryButtonTag() override {
     return static_cast<int>(
@@ -352,7 +347,7 @@ ProfileListViewController::GetShippingProfileViewController(
     PaymentRequestSpec* spec,
     PaymentRequestState* state,
     PaymentRequestDialogView* dialog) {
-  return base::MakeUnique<ShippingProfileViewController>(spec, state, dialog);
+  return std::make_unique<ShippingProfileViewController>(spec, state, dialog);
 }
 
 // static
@@ -361,14 +356,14 @@ ProfileListViewController::GetContactProfileViewController(
     PaymentRequestSpec* spec,
     PaymentRequestState* state,
     PaymentRequestDialogView* dialog) {
-  return base::MakeUnique<ContactProfileViewController>(spec, state, dialog);
+  return std::make_unique<ContactProfileViewController>(spec, state, dialog);
 }
 
 ProfileListViewController::ProfileListViewController(
     PaymentRequestSpec* spec,
     PaymentRequestState* state,
     PaymentRequestDialogView* dialog)
-    : PaymentRequestSheetController(spec, state, dialog) {}
+    : PaymentRequestSheetController(spec, state, dialog), list_(dialog) {}
 
 ProfileListViewController::~ProfileListViewController() {}
 
@@ -386,18 +381,18 @@ void ProfileListViewController::PopulateList() {
   list_.Clear();
 
   for (auto* profile : GetProfiles()) {
-    list_.AddItem(base::MakeUnique<ProfileItem>(
+    list_.AddItem(std::make_unique<ProfileItem>(
         profile, spec(), state(), &list_, this, dialog(),
         profile == selected_profile, IsEnabled(profile)));
   }
 }
 
 void ProfileListViewController::FillContentView(views::View* content_view) {
-  auto layout = base::MakeUnique<views::BoxLayout>(views::BoxLayout::kVertical);
+  auto layout = std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical);
   layout->set_main_axis_alignment(views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
   layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_STRETCH);
-  content_view->SetLayoutManager(layout.release());
+  content_view->SetLayoutManager(std::move(layout));
   std::unique_ptr<views::View> header_view = CreateHeaderView();
   if (header_view)
     content_view->AddChildView(header_view.release());
@@ -408,11 +403,11 @@ void ProfileListViewController::FillContentView(views::View* content_view) {
 
 std::unique_ptr<views::View>
 ProfileListViewController::CreateExtraFooterView() {
-  auto extra_view = base::MakeUnique<views::View>();
+  auto extra_view = std::make_unique<views::View>();
 
-  extra_view->SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kHorizontal, gfx::Insets(),
-                           kPaymentRequestButtonSpacing));
+  extra_view->SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kHorizontal, gfx::Insets(),
+      kPaymentRequestButtonSpacing));
 
   views::LabelButton* button = views::MdTextButton::CreateSecondaryUiButton(
       this, l10n_util::GetStringUTF16(GetSecondaryButtonTextId()));

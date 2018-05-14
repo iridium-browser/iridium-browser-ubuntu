@@ -4,6 +4,8 @@
 
 #include "chromeos/dbus/fake_cras_audio_client.h"
 
+#include <utility>
+
 namespace chromeos {
 
 FakeCrasAudioClient::FakeCrasAudioClient()
@@ -11,8 +13,7 @@ FakeCrasAudioClient::FakeCrasAudioClient()
       active_output_node_id_(0) {
 }
 
-FakeCrasAudioClient::~FakeCrasAudioClient() {
-}
+FakeCrasAudioClient::~FakeCrasAudioClient() = default;
 
 void FakeCrasAudioClient::Init(dbus::Bus* bus) {
   VLOG(1) << "FakeCrasAudioClient is created";
@@ -96,13 +97,17 @@ bool FakeCrasAudioClient::HasObserver(const Observer* observer) const {
 }
 
 void FakeCrasAudioClient::GetVolumeState(
-    const GetVolumeStateCallback& callback) {
-  callback.Run(volume_state_, true);
+    DBusMethodCallback<VolumeState> callback) {
+  std::move(callback).Run(volume_state_);
 }
 
-void FakeCrasAudioClient::GetNodes(const GetNodesCallback& callback,
-                                   const ErrorCallback& error_callback) {
-  callback.Run(node_list_, true);
+void FakeCrasAudioClient::GetDefaultOutputBufferSize(
+    DBusMethodCallback<int> callback) {
+  std::move(callback).Run(512);
+}
+
+void FakeCrasAudioClient::GetNodes(DBusMethodCallback<AudioNodeList> callback) {
+  std::move(callback).Run(node_list_);
 }
 
 void FakeCrasAudioClient::SetOutputNodeVolume(uint64_t node_id,
@@ -183,8 +188,8 @@ void FakeCrasAudioClient::AddActiveOutputNode(uint64_t node_id) {
 }
 
 void FakeCrasAudioClient::WaitForServiceToBeAvailable(
-    const WaitForServiceToBeAvailableCallback& callback) {
-  callback.Run(true);
+    WaitForServiceToBeAvailableCallback callback) {
+  std::move(callback).Run(true);
 }
 
 void FakeCrasAudioClient::RemoveActiveOutputNode(uint64_t node_id) {
@@ -230,6 +235,12 @@ void FakeCrasAudioClient::NotifyOutputNodeVolumeChangedForTesting(
     int volume) {
   for (auto& observer : observers_)
     observer.OutputNodeVolumeChanged(node_id, volume);
+}
+
+void FakeCrasAudioClient::NotifyHotwordTriggeredForTesting(uint64_t tv_sec,
+                                                           uint64_t tv_nsec) {
+  for (auto& observer : observers_)
+    observer.HotwordTriggered(tv_sec, tv_nsec);
 }
 
 AudioNodeList::iterator FakeCrasAudioClient::FindNode(uint64_t node_id) {

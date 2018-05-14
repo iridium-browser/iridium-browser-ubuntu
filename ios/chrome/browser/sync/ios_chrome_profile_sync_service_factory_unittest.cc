@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/task_scheduler/task_scheduler.h"
 #include "components/browser_sync/browser_sync_switches.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/sync/base/model_type.h"
@@ -16,10 +17,11 @@
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #include "ios/web/public/test/test_web_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 
 using syncer::DataTypeController;
 
-class IOSChromeProfileSyncServiceFactoryTest : public testing::Test {
+class IOSChromeProfileSyncServiceFactoryTest : public PlatformTest {
  public:
   IOSChromeProfileSyncServiceFactoryTest() {
     TestChromeBrowserState::Builder browser_state_builder;
@@ -29,6 +31,10 @@ class IOSChromeProfileSyncServiceFactoryTest : public testing::Test {
   void SetUp() override {
     // Some services will only be created if there is a WebDataService.
     chrome_browser_state_->CreateWebDataService();
+  }
+
+  void TearDown() override {
+    base::TaskScheduler::GetInstance()->FlushForTesting();
   }
 
  protected:

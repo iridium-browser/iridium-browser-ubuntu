@@ -14,11 +14,11 @@ ShelfButtonPressedMetricTrackerTestAPI::ShelfButtonPressedMetricTrackerTestAPI(
           shelf_button_pressed_metric_tracker) {}
 
 ShelfButtonPressedMetricTrackerTestAPI::
-    ~ShelfButtonPressedMetricTrackerTestAPI() {}
+    ~ShelfButtonPressedMetricTrackerTestAPI() = default;
 
 void ShelfButtonPressedMetricTrackerTestAPI::SetTickClock(
-    std::unique_ptr<base::TickClock> tick_clock) {
-  shelf_button_pressed_metric_tracker_->tick_clock_ = std::move(tick_clock);
+    base::TickClock* tick_clock) {
+  shelf_button_pressed_metric_tracker_->tick_clock_ = tick_clock;
 }
 
 }  // namespace ash

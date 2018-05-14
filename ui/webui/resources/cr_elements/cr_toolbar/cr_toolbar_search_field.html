@@ -40,7 +40,7 @@
       }
 
       paper-spinner-lite {
-        @apply(--cr-icon-height-width);
+        @apply --cr-icon-height-width;
         --paper-spinner-color: white;
         margin: 0 6px;
         opacity: 0;
@@ -105,7 +105,7 @@
         background: rgba(0, 0, 0, 0.22);
         border-radius: 2px;
         cursor: text;
-        width: var(--cr-toolbar-field-width);
+        width: var(--cr-toolbar-field-width, 680px);
       }
 
       :host(:not([narrow]):not([showing-search])) #icon,
@@ -151,7 +151,6 @@
           on-blur="onInputBlur_"
           incremental
           autofocus>
-      </input>
     </div>
     <template is="dom-if" if="[[hasSearchText]]">
       <button is="paper-icon-button-light" class="icon-cancel-toolbar"

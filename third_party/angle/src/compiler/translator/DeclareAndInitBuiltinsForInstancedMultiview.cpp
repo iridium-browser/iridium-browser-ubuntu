@@ -13,6 +13,8 @@
 #include "compiler/translator/InitializeVariables.h"
 #include "compiler/translator/IntermNode_util.h"
 #include "compiler/translator/IntermTraverse.h"
+#include "compiler/translator/ReplaceVariable.h"
+#include "compiler/translator/StaticType.h"
 #include "compiler/translator/SymbolTable.h"
 #include "compiler/translator/util.h"
 
@@ -22,54 +24,32 @@ namespace sh
 namespace
 {
 
-class ReplaceVariableTraverser : public TIntermTraverser
-{
-  public:
-    ReplaceVariableTraverser(const TString &symbolName, TIntermSymbol *newSymbol)
-        : TIntermTraverser(true, false, false), mSymbolName(symbolName), mNewSymbol(newSymbol)
-    {
-    }
-
-    void visitSymbol(TIntermSymbol *node) override
-    {
-        TName &name = node->getName();
-        if (name.getString() == mSymbolName)
-        {
-            queueReplacement(mNewSymbol->deepCopy(), OriginalNode::IS_DROPPED);
-        }
-    }
-
-  private:
-    TString mSymbolName;
-    TIntermSymbol *mNewSymbol;
-};
+constexpr const ImmutableString kGlLayerString("gl_Layer");
+constexpr const ImmutableString kGlViewportIndexString("gl_ViewportIndex");
+constexpr const ImmutableString kGlViewIdOVRString("gl_ViewID_OVR");
+constexpr const ImmutableString kGlInstanceIdString("gl_InstanceID");
+constexpr const ImmutableString kViewIDVariableName("ViewID_OVR");
+constexpr const ImmutableString kInstanceIDVariableName("InstanceID");
+constexpr const ImmutableString kMultiviewBaseViewLayerIndexVariableName(
+    "multiviewBaseViewLayerIndex");
 
 TIntermSymbol *CreateGLInstanceIDSymbol(const TSymbolTable &symbolTable)
 {
-    return ReferenceBuiltInVariable("gl_InstanceID", symbolTable, 300);
+    return ReferenceBuiltInVariable(kGlInstanceIdString, symbolTable, 300);
 }
 
 // Adds the InstanceID and ViewID_OVR initializers to the end of the initializers' sequence.
-void InitializeViewIDAndInstanceID(TIntermTyped *viewIDSymbol,
-                                   TIntermTyped *instanceIDSymbol,
+void InitializeViewIDAndInstanceID(const TVariable *viewID,
+                                   const TVariable *instanceID,
                                    unsigned numberOfViews,
                                    const TSymbolTable &symbolTable,
                                    TIntermSequence *initializers)
 {
-    // Create a signed numberOfViews node.
-    TConstantUnion *numberOfViewsConstant = new TConstantUnion();
-    numberOfViewsConstant->setIConst(static_cast<int>(numberOfViews));
-    TIntermConstantUnion *numberOfViewsIntSymbol =
-        new TIntermConstantUnion(numberOfViewsConstant, TType(EbtInt, EbpHigh, EvqConst));
-
-    // Create a gl_InstanceID / numberOfViews node.
-    TIntermBinary *normalizedInstanceID =
-        new TIntermBinary(EOpDiv, CreateGLInstanceIDSymbol(symbolTable), numberOfViewsIntSymbol);
-
-    // Create a InstanceID = gl_InstanceID / numberOfViews node.
-    TIntermBinary *instanceIDInitializer =
-        new TIntermBinary(EOpAssign, instanceIDSymbol->deepCopy(), normalizedInstanceID);
-    initializers->push_back(instanceIDInitializer);
+    // Create an unsigned numberOfViews node.
+    TConstantUnion *numberOfViewsUnsignedConstant = new TConstantUnion();
+    numberOfViewsUnsignedConstant->setUConst(numberOfViews);
+    TIntermConstantUnion *numberOfViewsUint =
+        new TIntermConstantUnion(numberOfViewsUnsignedConstant, TType(EbtUInt, EbpHigh, EvqConst));
 
     // Create a uint(gl_InstanceID) node.
     TIntermSequence *glInstanceIDSymbolCastArguments = new TIntermSequence();
@@ -77,55 +57,85 @@ void InitializeViewIDAndInstanceID(TIntermTyped *viewIDSymbol,
     TIntermAggregate *glInstanceIDAsUint = TIntermAggregate::CreateConstructor(
         TType(EbtUInt, EbpHigh, EvqTemporary), glInstanceIDSymbolCastArguments);
 
-    // Create an unsigned numberOfViews node.
-    TConstantUnion *numberOfViewsUnsignedConstant = new TConstantUnion();
-    numberOfViewsUnsignedConstant->setUConst(numberOfViews);
-    TIntermConstantUnion *numberOfViewsUintSymbol =
-        new TIntermConstantUnion(numberOfViewsUnsignedConstant, TType(EbtUInt, EbpHigh, EvqConst));
+    // Create a uint(gl_InstanceID) / numberOfViews node.
+    TIntermBinary *normalizedInstanceID =
+        new TIntermBinary(EOpDiv, glInstanceIDAsUint, numberOfViewsUint);
+
+    // Create an int(uint(gl_InstanceID) / numberOfViews) node.
+    TIntermSequence *normalizedInstanceIDCastArguments = new TIntermSequence();
+    normalizedInstanceIDCastArguments->push_back(normalizedInstanceID);
+    TIntermAggregate *normalizedInstanceIDAsInt = TIntermAggregate::CreateConstructor(
+        TType(EbtInt, EbpHigh, EvqTemporary), normalizedInstanceIDCastArguments);
+
+    // Create an InstanceID = int(uint(gl_InstanceID) / numberOfViews) node.
+    TIntermBinary *instanceIDInitializer =
+        new TIntermBinary(EOpAssign, new TIntermSymbol(instanceID), normalizedInstanceIDAsInt);
+    initializers->push_back(instanceIDInitializer);
 
     // Create a uint(gl_InstanceID) % numberOfViews node.
     TIntermBinary *normalizedViewID =
-        new TIntermBinary(EOpIMod, glInstanceIDAsUint, numberOfViewsUintSymbol);
+        new TIntermBinary(EOpIMod, glInstanceIDAsUint->deepCopy(), numberOfViewsUint->deepCopy());
 
     // Create a ViewID_OVR = uint(gl_InstanceID) % numberOfViews node.
     TIntermBinary *viewIDInitializer =
-        new TIntermBinary(EOpAssign, viewIDSymbol->deepCopy(), normalizedViewID);
+        new TIntermBinary(EOpAssign, new TIntermSymbol(viewID), normalizedViewID);
     initializers->push_back(viewIDInitializer);
 }
 
-// Replaces every occurrence of a symbol with the name specified in symbolName with newSymbolNode.
-void ReplaceSymbol(TIntermBlock *root, const TString &symbolName, TIntermSymbol *newSymbolNode)
+void DeclareGlobalVariable(TIntermBlock *root, const TVariable *variable)
 {
-    ReplaceVariableTraverser traverser(symbolName, newSymbolNode);
-    root->traverse(&traverser);
-    traverser.updateTree();
-}
-
-void DeclareGlobalVariable(TIntermBlock *root, TIntermTyped *typedNode)
-{
-    TIntermSequence *globalSequence = root->getSequence();
     TIntermDeclaration *declaration = new TIntermDeclaration();
-    declaration->appendDeclarator(typedNode->deepCopy());
+    declaration->appendDeclarator(new TIntermSymbol(variable));
+
+    TIntermSequence *globalSequence = root->getSequence();
     globalSequence->insert(globalSequence->begin(), declaration);
 }
 
-// Adds the expression gl_ViewportIndex = int(ViewID_OVR) to the end of the initializers' sequence.
-void SelectViewportIndexInVertexShader(TIntermTyped *viewIDSymbol, TIntermSequence *initializers)
+// Adds a branch to write int(ViewID_OVR) to either gl_ViewportIndex or gl_Layer. The branch is
+// added to the end of the initializers' sequence.
+void SelectViewIndexInVertexShader(const TVariable *viewID,
+                                   const TVariable *multiviewBaseViewLayerIndex,
+                                   TIntermSequence *initializers,
+                                   const TSymbolTable &symbolTable)
 {
-    // Create a gl_ViewportIndex node.
-    TIntermSymbol *viewportIndexSymbol =
-        new TIntermSymbol(0, "gl_ViewportIndex", TType(EbtInt, EbpHigh, EvqViewportIndex));
-
     // Create an int(ViewID_OVR) node.
     TIntermSequence *viewIDSymbolCastArguments = new TIntermSequence();
-    viewIDSymbolCastArguments->push_back(viewIDSymbol);
+    viewIDSymbolCastArguments->push_back(new TIntermSymbol(viewID));
     TIntermAggregate *viewIDAsInt = TIntermAggregate::CreateConstructor(
         TType(EbtInt, EbpHigh, EvqTemporary), viewIDSymbolCastArguments);
 
-    // Create a gl_ViewportIndex = int(ViewID_OVR) node.
-    TIntermBinary *viewIDInitializer =
-        new TIntermBinary(EOpAssign, viewportIndexSymbol, viewIDAsInt);
-    initializers->push_back(viewIDInitializer);
+    // Create a gl_ViewportIndex node.
+    TIntermSymbol *viewportIndexSymbol =
+        ReferenceBuiltInVariable(kGlViewportIndexString, symbolTable, 0);
+
+    // Create a { gl_ViewportIndex = int(ViewID_OVR) } node.
+    TIntermBlock *viewportIndexInitializerInBlock = new TIntermBlock();
+    viewportIndexInitializerInBlock->appendStatement(
+        new TIntermBinary(EOpAssign, viewportIndexSymbol, viewIDAsInt));
+
+    // Create a gl_Layer node.
+    TIntermSymbol *layerSymbol = ReferenceBuiltInVariable(kGlLayerString, symbolTable, 0);
+
+    // Create an int(ViewID_OVR) + multiviewBaseViewLayerIndex node
+    TIntermBinary *sumOfViewIDAndBaseViewIndex = new TIntermBinary(
+        EOpAdd, viewIDAsInt->deepCopy(), new TIntermSymbol(multiviewBaseViewLayerIndex));
+
+    // Create a { gl_Layer = int(ViewID_OVR) + multiviewBaseViewLayerIndex } node.
+    TIntermBlock *layerInitializerInBlock = new TIntermBlock();
+    layerInitializerInBlock->appendStatement(
+        new TIntermBinary(EOpAssign, layerSymbol, sumOfViewIDAndBaseViewIndex));
+
+    // Create a node to compare whether the base view index uniform is less than zero.
+    TIntermBinary *multiviewBaseViewLayerIndexZeroComparison =
+        new TIntermBinary(EOpLessThan, new TIntermSymbol(multiviewBaseViewLayerIndex),
+                          CreateZeroNode(TType(EbtInt, EbpHigh, EvqConst)));
+
+    // Create an if-else statement to select the code path.
+    TIntermIfElse *multiviewBranch =
+        new TIntermIfElse(multiviewBaseViewLayerIndexZeroComparison,
+                          viewportIndexInitializerInBlock, layerInitializerInBlock);
+
+    initializers->push_back(multiviewBranch);
 }
 
 }  // namespace
@@ -140,37 +150,53 @@ void DeclareAndInitBuiltinsForInstancedMultiview(TIntermBlock *root,
     ASSERT(shaderType == GL_VERTEX_SHADER || shaderType == GL_FRAGMENT_SHADER);
 
     TQualifier viewIDQualifier  = (shaderType == GL_VERTEX_SHADER) ? EvqFlatOut : EvqFlatIn;
-    TIntermSymbol *viewIDSymbol = new TIntermSymbol(symbolTable->nextUniqueId(), "ViewID_OVR",
-                                                    TType(EbtUInt, EbpHigh, viewIDQualifier));
-    viewIDSymbol->setInternal(true);
+    const TVariable *viewID =
+        new TVariable(symbolTable, kViewIDVariableName,
+                      new TType(EbtUInt, EbpHigh, viewIDQualifier), SymbolType::AngleInternal);
 
-    DeclareGlobalVariable(root, viewIDSymbol);
-    ReplaceSymbol(root, "gl_ViewID_OVR", viewIDSymbol);
+    DeclareGlobalVariable(root, viewID);
+    ReplaceVariable(
+        root,
+        static_cast<const TVariable *>(symbolTable->findBuiltIn(kGlViewIdOVRString, 300, true)),
+        viewID);
     if (shaderType == GL_VERTEX_SHADER)
     {
         // Replacing gl_InstanceID with InstanceID should happen before adding the initializers of
         // InstanceID and ViewID.
-        TIntermSymbol *instanceIDSymbol = new TIntermSymbol(
-            symbolTable->nextUniqueId(), "InstanceID", TType(EbtInt, EbpHigh, EvqGlobal));
-        instanceIDSymbol->setInternal(true);
-        DeclareGlobalVariable(root, instanceIDSymbol);
-        ReplaceSymbol(root, "gl_InstanceID", instanceIDSymbol);
+        const TType *instanceIDVariableType   = StaticType::Get<EbtInt, EbpHigh, EvqGlobal, 1, 1>();
+        const TVariable *instanceID =
+            new TVariable(symbolTable, kInstanceIDVariableName, instanceIDVariableType,
+                          SymbolType::AngleInternal);
+        DeclareGlobalVariable(root, instanceID);
+        ReplaceVariable(root,
+                        static_cast<const TVariable *>(
+                            symbolTable->findBuiltIn(kGlInstanceIdString, 300, true)),
+                        instanceID);
 
         TIntermSequence *initializers = new TIntermSequence();
-        InitializeViewIDAndInstanceID(viewIDSymbol, instanceIDSymbol, numberOfViews, *symbolTable,
+        InitializeViewIDAndInstanceID(viewID, instanceID, numberOfViews, *symbolTable,
                                       initializers);
 
         // The AST transformation which adds the expression to select the viewport index should
         // be done only for the GLSL and ESSL output.
-        const bool selectViewport =
-            (compileOptions & SH_SELECT_VIEW_IN_NV_GLSL_VERTEX_SHADER) != 0u;
-        // Assert that if the viewport is selected in the vertex shader, then the output is
+        const bool selectView = (compileOptions & SH_SELECT_VIEW_IN_NV_GLSL_VERTEX_SHADER) != 0u;
+        // Assert that if the view is selected in the vertex shader, then the output is
         // either GLSL or ESSL.
-        ASSERT(!selectViewport || IsOutputGLSL(shaderOutput) || IsOutputESSL(shaderOutput));
-        if (selectViewport)
+        ASSERT(!selectView || IsOutputGLSL(shaderOutput) || IsOutputESSL(shaderOutput));
+        if (selectView)
         {
-            // Setting a value to gl_ViewportIndex should happen after ViewID_OVR's initialization.
-            SelectViewportIndexInVertexShader(viewIDSymbol->deepCopy(), initializers);
+            // Add a uniform to switch between side-by-side and layered rendering.
+            const TType *baseLayerIndexVariableType =
+                StaticType::Get<EbtInt, EbpHigh, EvqUniform, 1, 1>();
+            const TVariable *multiviewBaseViewLayerIndex =
+                new TVariable(symbolTable, kMultiviewBaseViewLayerIndexVariableName,
+                              baseLayerIndexVariableType, SymbolType::AngleInternal);
+            DeclareGlobalVariable(root, multiviewBaseViewLayerIndex);
+
+            // Setting a value to gl_ViewportIndex or gl_Layer should happen after ViewID_OVR's
+            // initialization.
+            SelectViewIndexInVertexShader(viewID, multiviewBaseViewLayerIndex, initializers,
+                                          *symbolTable);
         }
 
         // Insert initializers at the beginning of main().

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
 #include "net/quic/chromium/quic_chromium_client_session.h"
 #include "net/quic/chromium/quic_http_stream.h"
 #include "net/quic/chromium/quic_stream_factory.h"
@@ -32,12 +33,12 @@ QuicCryptoClientConfig* QuicStreamFactoryPeer::GetCryptoConfig(
 
 bool QuicStreamFactoryPeer::HasActiveSession(QuicStreamFactory* factory,
                                              const QuicServerId& server_id) {
-  return factory->HasActiveSession(server_id);
+  return factory->HasActiveSession(QuicSessionKey(server_id, SocketTag()));
 }
 
 bool QuicStreamFactoryPeer::HasActiveJob(QuicStreamFactory* factory,
                                          const QuicServerId& server_id) {
-  return factory->HasActiveJob(server_id);
+  return factory->HasActiveJob(QuicSessionKey(server_id, SocketTag()));
 }
 
 bool QuicStreamFactoryPeer::HasActiveCertVerifierJob(
@@ -49,8 +50,9 @@ bool QuicStreamFactoryPeer::HasActiveCertVerifierJob(
 QuicChromiumClientSession* QuicStreamFactoryPeer::GetActiveSession(
     QuicStreamFactory* factory,
     const QuicServerId& server_id) {
-  DCHECK(factory->HasActiveSession(server_id));
-  return factory->active_sessions_[server_id];
+  QuicSessionKey session_key(server_id, SocketTag());
+  DCHECK(factory->HasActiveSession(session_key));
+  return factory->active_sessions_[session_key];
 }
 
 bool QuicStreamFactoryPeer::IsLiveSession(QuicStreamFactory* factory,
@@ -64,8 +66,9 @@ bool QuicStreamFactoryPeer::IsLiveSession(QuicStreamFactory* factory,
   return false;
 }
 
-void QuicStreamFactoryPeer::SetTaskRunner(QuicStreamFactory* factory,
-                                          base::TaskRunner* task_runner) {
+void QuicStreamFactoryPeer::SetTaskRunner(
+    QuicStreamFactory* factory,
+    base::SequencedTaskRunner* task_runner) {
   factory->task_runner_ = task_runner;
 }
 
@@ -136,11 +139,7 @@ void QuicStreamFactoryPeer::CacheDummyServerConfig(
   scoped_refptr<X509Certificate> cert(
       ImportCertFromFile(GetTestCertsDirectory(), "wildcard.pem"));
   DCHECK(cert);
-  std::string der_bytes;
-  bool success =
-      X509Certificate::GetDEREncoded(cert->os_cert_handle(), &der_bytes);
-  DCHECK(success);
-  certs.push_back(der_bytes);
+  certs.emplace_back(x509_util::CryptoBufferAsStringPiece(cert->cert_buffer()));
 
   QuicCryptoClientConfig* crypto_config = &factory->crypto_config_;
   QuicCryptoClientConfig::CachedState* cached =

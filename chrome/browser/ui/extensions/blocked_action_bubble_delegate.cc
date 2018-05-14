@@ -49,15 +49,12 @@ base::string16 BlockedActionBubbleDelegate::GetDismissButtonText() {
       IDS_EXTENSION_BLOCKED_ACTION_BUBBLE_CANCEL_BUTTON);
 }
 
-base::string16 BlockedActionBubbleDelegate::GetLearnMoreButtonText() {
-  return base::string16();  // No learn more link.
-}
-
 std::string BlockedActionBubbleDelegate::GetAnchorActionId() {
   return extension_id_;
 }
 
-void BlockedActionBubbleDelegate::OnBubbleShown() {}
+void BlockedActionBubbleDelegate::OnBubbleShown(
+    const base::Closure& close_bubble_callback) {}
 
 void BlockedActionBubbleDelegate::OnBubbleClosed(CloseAction action) {
   base::ResetAndReturn(&callback_).Run(action);

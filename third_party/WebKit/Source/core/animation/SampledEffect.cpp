@@ -6,9 +6,10 @@
 
 namespace blink {
 
-SampledEffect::SampledEffect(KeyframeEffectReadOnly* effect)
+SampledEffect::SampledEffect(KeyframeEffectReadOnly* effect,
+                             unsigned sequence_number)
     : effect_(effect),
-      sequence_number_(effect->GetAnimation()->SequenceNumber()),
+      sequence_number_(sequence_number),
       priority_(effect->GetPriority()) {}
 
 void SampledEffect::Clear() {
@@ -16,8 +17,10 @@ void SampledEffect::Clear() {
   interpolations_.clear();
 }
 
+// Design doc:
+// https://docs.google.com/document/d/1NomOWRrGQHlynQGO64CgdqRPAAEHhi3fSa8sf0Ip6xE
 bool SampledEffect::WillNeverChange() const {
-  return !effect_ || !effect_->GetAnimation();
+  return !effect_ || !effect_->HasAnimation();
 }
 
 void SampledEffect::RemoveReplacedInterpolations(
@@ -25,7 +28,7 @@ void SampledEffect::RemoveReplacedInterpolations(
   size_t new_size = 0;
   for (auto& interpolation : interpolations_) {
     if (!replaced_properties.Contains(interpolation->GetProperty()))
-      interpolations_[new_size++].Swap(interpolation);
+      interpolations_[new_size++].swap(interpolation);
   }
   interpolations_.Shrink(new_size);
 }
@@ -38,7 +41,7 @@ void SampledEffect::UpdateReplacedProperties(
   }
 }
 
-DEFINE_TRACE(SampledEffect) {
+void SampledEffect::Trace(blink::Visitor* visitor) {
   visitor->Trace(effect_);
 }
 

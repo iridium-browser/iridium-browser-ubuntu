@@ -18,9 +18,11 @@
 #include "base/task_scheduler/task_scheduler.h"
 #include "build/build_config.h"
 #include "content/public/common/content_client.h"
+#include "content/public/renderer/url_loader_throttle_provider.h"
 #include "media/base/decode_capabilities.h"
+#include "services/service_manager/public/mojom/service.mojom.h"
+#include "third_party/WebKit/public/mojom/page/page_visibility_state.mojom.h"
 #include "third_party/WebKit/public/platform/WebContentSettingsClient.h"
-#include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
 #include "third_party/WebKit/public/web/WebNavigationPolicy.h"
 #include "third_party/WebKit/public/web/WebNavigationType.h"
 #include "ui/base/page_transition_types.h"
@@ -41,12 +43,8 @@ class WebFrame;
 class WebLocalFrame;
 class WebMIDIAccessor;
 class WebMIDIAccessorClient;
-class WebMediaStreamCenter;
-class WebMediaStreamCenterClient;
 class WebPlugin;
 class WebPrescientNetworking;
-class WebRTCPeerConnectionHandler;
-class WebRTCPeerConnectionHandlerClient;
 class WebSocketHandshakeThrottle;
 class WebSpeechSynthesizer;
 class WebSpeechSynthesizerClient;
@@ -67,7 +65,6 @@ class BrowserPluginDelegate;
 class MediaStreamRendererFactory;
 class RenderFrame;
 class RenderView;
-class URLLoaderThrottle;
 
 // Embedder API for participating in renderer logic.
 class CONTENT_EXPORT ContentRendererClient {
@@ -113,29 +110,36 @@ class CONTENT_EXPORT ContentRendererClient {
       const GURL& original_url);
 
   // Returns true if the embedder has an error page to show for the given http
-  // status code. If so |error_domain| should be set to according to WebURLError
-  // and the embedder's GetNavigationErrorHtml will be called afterwards to get
-  // the error html.
-  virtual bool HasErrorPage(int http_status_code,
-                            std::string* error_domain);
+  // status code.
+  virtual bool HasErrorPage(int http_status_code);
 
   // Returns true if the embedder prefers not to show an error page for a failed
   // navigation to |url| in |render_frame|.
   virtual bool ShouldSuppressErrorPage(RenderFrame* render_frame,
                                        const GURL& url);
 
+  // Returns false for new tab page activities, which should be filtered out in
+  // UseCounter; returns true otherwise.
+  virtual bool ShouldTrackUseCounter(const GURL& url);
+
   // Returns the information to display when a navigation error occurs.
-  // If |error_html| is not null then it may be set to a HTML page containing
-  // the details of the error and maybe links to more info.
+  // If |error_html| is not null then it may be set to a HTML page
+  // containing the details of the error and maybe links to more info.
   // If |error_description| is not null it may be set to contain a brief
   // message describing the error that has occurred.
   // Either of the out parameters may be not written to in certain cases
   // (lack of information on the error code) so the caller should take care to
   // initialize the string values with safe defaults before the call.
-  virtual void GetNavigationErrorStrings(
+  virtual void PrepareErrorPage(content::RenderFrame* render_frame,
+                                const blink::WebURLRequest& failed_request,
+                                const blink::WebURLError& error,
+                                std::string* error_html,
+                                base::string16* error_description) {}
+  virtual void PrepareErrorPageForHttpStatusError(
       content::RenderFrame* render_frame,
       const blink::WebURLRequest& failed_request,
-      const blink::WebURLError& error,
+      const GURL& unreachable_url,
+      int http_status,
       std::string* error_html,
       base::string16* error_description) {}
 
@@ -146,17 +150,6 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual void DeferMediaLoad(RenderFrame* render_frame,
                               bool has_played_media_before,
                               const base::Closure& closure);
-
-  // Allows the embedder to override creating a WebMediaStreamCenter. If it
-  // returns NULL the content layer will create the stream center.
-  virtual std::unique_ptr<blink::WebMediaStreamCenter>
-  OverrideCreateWebMediaStreamCenter(blink::WebMediaStreamCenterClient* client);
-
-  // Allows the embedder to override creating a WebRTCPeerConnectionHandler. If
-  // it returns NULL the content layer will create the connection handler.
-  virtual std::unique_ptr<blink::WebRTCPeerConnectionHandler>
-  OverrideCreateWebRTCPeerConnectionHandler(
-      blink::WebRTCPeerConnectionHandlerClient* client);
 
   // Allows the embedder to override creating a WebMIDIAccessor.  If it
   // returns NULL the content layer will create the MIDI accessor.
@@ -186,13 +179,18 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual std::unique_ptr<blink::WebSpeechSynthesizer>
   OverrideSpeechSynthesizer(blink::WebSpeechSynthesizerClient* client);
 
+  // Called on the main-thread immediately after the compositor thread is
+  // created.
+  virtual void PostCompositorThreadCreated(
+      base::SingleThreadTaskRunner* compositor_thread_task_runner);
+
   // Returns true if the renderer process should schedule the idle handler when
   // all widgets are hidden.
   virtual bool RunIdleHandlerWhenWidgetsHidden();
 
-  // Returns true if the renderer process should allow shared timer suspension
+  // Returns true if the renderer process should allow task suspension
   // after the process has been backgrounded. Defaults to false.
-  virtual bool AllowTimerSuspensionWhenProcessBackgrounded();
+  virtual bool AllowStoppingWhenProcessBackgrounded();
 
   // Returns true if a popup window should be allowed.
   virtual bool AllowPopup();
@@ -230,14 +228,11 @@ class CONTENT_EXPORT ContentRendererClient {
                           bool* send_referrer);
 
   // Notifies the embedder that the given frame is requesting the resource at
-  // |url|. |throttles| is appended with URLLoaderThrottle instances that should
-  // be applied to the resource loading. It is only used when network service is
-  // enabled. If the function returns true, the url is changed to |new_url|.
+  // |url|. If the function returns true, the url is changed to |new_url|.
   virtual bool WillSendRequest(
       blink::WebLocalFrame* frame,
       ui::PageTransition transition_type,
       const blink::WebURL& url,
-      std::vector<std::unique_ptr<URLLoaderThrottle>>* throttles,
       GURL* new_url);
 
   // Returns true if the request is associated with a document that is in
@@ -252,7 +247,7 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual blink::WebPrescientNetworking* GetPrescientNetworking();
   virtual bool ShouldOverridePageVisibilityState(
       const RenderFrame* render_frame,
-      blink::WebPageVisibilityState* override_state);
+      blink::mojom::PageVisibilityState* override_state);
 
   // Returns true if the given Pepper plugin is external (requiring special
   // startup steps).
@@ -322,6 +317,7 @@ class CONTENT_EXPORT ContentRendererClient {
   // Currently only called when the context menu is for an image.
   virtual void AddImageContextMenuProperties(
       const blink::WebURLResponse& response,
+      bool is_image_in_context_a_placeholder_image,
       std::map<std::string, std::string>* properties) {}
 
   // Notifies that a document element has been inserted in the frame's document.
@@ -378,6 +374,30 @@ class CONTENT_EXPORT ContentRendererClient {
   // Whether the renderer allows idle media players to be automatically
   // suspended after a period of inactivity.
   virtual bool AllowIdleMediaSuspend();
+
+  // Called when a resource at |url| is loaded using an otherwise-valid legacy
+  // Symantec certificate that will be distrusted in future. Allows the embedder
+  // to override the message that is added to the console to inform developers
+  // that their certificate will be distrusted in future. If the method returns
+  // true, then |*console_message| will be printed to the console; otherwise a
+  // generic mesage will be used.
+  virtual bool OverrideLegacySymantecCertConsoleMessage(
+      const GURL& url,
+      std::string* console_messsage);
+
+  // Asks the embedder to bind |service_request| to its renderer-side service
+  // implementation.
+  virtual void CreateRendererService(
+      service_manager::mojom::ServiceRequest service_request) {}
+
+  virtual std::unique_ptr<URLLoaderThrottleProvider>
+  CreateURLLoaderThrottleProvider(URLLoaderThrottleProviderType provider_type);
+
+  // Called when Blink cannot find a frame with the given name in the frame's
+  // browsing instance.  This gives the embedder a chance to return a frame
+  // from outside of the browsing instance.
+  virtual blink::WebFrame* FindFrame(blink::WebLocalFrame* relative_to_frame,
+                                     const std::string& name);
 };
 
 }  // namespace content

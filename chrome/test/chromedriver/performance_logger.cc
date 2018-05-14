@@ -25,7 +25,7 @@
 namespace {
 
 // DevTools event domain prefixes to intercept.
-const char* const kDomains[] = {"Network.", "Page.", "Timeline."};
+const char* const kDomains[] = {"Network.", "Page."};
 
 // Whitelist of WebDriver commands on which to request buffered trace events.
 const char* const kRequestTraceCommands[] = {"GetLog" /* required */,
@@ -127,12 +127,12 @@ void PerformanceLogger::AddLogEntry(
   base::DictionaryValue log_message_dict;
   log_message_dict.SetString("webview", webview);
   log_message_dict.SetString("message.method", method);
-  log_message_dict.Set("message.params", base::MakeUnique<base::Value>(params));
+  log_message_dict.SetPath({"message", "params"}, params.Clone());
   std::string log_message_json;
   base::JSONWriter::Write(log_message_dict, &log_message_json);
 
   // TODO(klm): extract timestamp from params?
-  // Look at where it is for Page, Network, Timeline, and trace events.
+  // Look at where it is for Page, Network, and trace events.
   log_->AddEntry(level, log_message_json);
 }
 
@@ -149,13 +149,6 @@ Status PerformanceLogger::EnableInspectorDomains(DevToolsClient* client) {
     enable_commands.push_back("Network.enable");
   if (IsEnabled(prefs_.page))
     enable_commands.push_back("Page.enable");
-  if (IsEnabled(prefs_.timeline)) {
-    // Timeline feed implicitly disabled when trace categories are specified.
-    // So even if kDefaultEnabled, don't enable unless empty |trace_categories|.
-    if (prefs_.trace_categories.empty() || prefs_.timeline ==
-        PerfLoggingPrefs::InspectorDomainStatus::kExplicitlyEnabled)
-      enable_commands.push_back("Timeline.start");
-  }
   for (const auto& enable_command : enable_commands) {
     base::DictionaryValue params;  // All the enable commands have empty params.
     Status status = client->SendCommand(enable_command, params);

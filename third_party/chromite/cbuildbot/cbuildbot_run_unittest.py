@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -12,9 +13,9 @@ import time
 
 from chromite.cbuildbot import chromeos_config
 from chromite.cbuildbot import cbuildbot_run
+from chromite.lib.const import waterfall
 from chromite.lib import config_lib
 from chromite.lib import config_lib_unittest
-from chromite.lib import constants
 from chromite.lib import cros_test_lib
 from chromite.lib import parallel
 
@@ -350,7 +351,7 @@ class BuilderRunTest(_BuilderRunTestCase):
     self.assertFalse(run.InEmailReportingEnvironment())
 
     run.attrs.metadata.UpdateWithDict(
-        {'buildbot-master-name': constants.WATERFALL_BRILLO})
+        {'buildbot-master-name': waterfall.WATERFALL_INTERNAL})
     self.assertTrue(run.InEmailReportingEnvironment())
 
 

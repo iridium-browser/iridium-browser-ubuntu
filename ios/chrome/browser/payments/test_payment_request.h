@@ -6,6 +6,8 @@
 #define IOS_CHROME_BROWSER_PAYMENTS_TEST_PAYMENT_REQUEST_H_
 
 #include "base/macros.h"
+#include "components/autofill/core/browser/address_normalization_manager.h"
+#include "components/autofill/core/browser/test_address_normalizer.h"
 #include "ios/chrome/browser/payments/payment_request.h"
 
 namespace autofill {
@@ -18,12 +20,11 @@ class ChromeBrowserState;
 }  // namespace ios
 
 namespace payments {
+class PaymentShippingOption;
 class PaymentsProfileComparator;
 }  // namespace payments
 
 namespace web {
-class PaymentRequest;
-class PaymentShippingOption;
 class WebState;
 }  // namespace web
 
@@ -36,29 +37,16 @@ class TestPaymentRequest : public PaymentRequest {
  public:
   // |browser_state|, |web_state|, and |personal_data_manager| should not be
   // null and should outlive this object.
-  TestPaymentRequest(const web::PaymentRequest& web_payment_request,
+  TestPaymentRequest(const payments::WebPaymentRequest& web_payment_request,
                      ios::ChromeBrowserState* browser_state,
                      web::WebState* web_state,
                      autofill::PersonalDataManager* personal_data_manager,
-                     id<PaymentRequestUIDelegate> payment_request_ui_delegate)
-      : PaymentRequest(web_payment_request,
-                       browser_state,
-                       web_state,
-                       personal_data_manager,
-                       payment_request_ui_delegate),
-        region_data_loader_(nullptr),
-        pref_service_(nullptr),
-        profile_comparator_(nullptr) {}
+                     id<PaymentRequestUIDelegate> payment_request_ui_delegate);
 
-  TestPaymentRequest(const web::PaymentRequest& web_payment_request,
+  TestPaymentRequest(const payments::WebPaymentRequest& web_payment_request,
                      ios::ChromeBrowserState* browser_state,
                      web::WebState* web_state,
-                     autofill::PersonalDataManager* personal_data_manager)
-      : TestPaymentRequest(web_payment_request,
-                           browser_state,
-                           web_state,
-                           personal_data_manager,
-                           nil) {}
+                     autofill::PersonalDataManager* personal_data_manager);
 
   ~TestPaymentRequest() override {}
 
@@ -74,9 +62,11 @@ class TestPaymentRequest : public PaymentRequest {
     profile_comparator_ = profile_comparator;
   }
 
-  // Returns the web::PaymentRequest instance that was used to build this
-  // object.
-  web::PaymentRequest& web_payment_request() { return web_payment_request_; }
+  // Returns the payments::WebPaymentRequest instance that was used to build
+  // this object.
+  payments::WebPaymentRequest& web_payment_request() {
+    return web_payment_request_;
+  }
 
   // Removes all the shipping profiles.
   void ClearShippingProfiles();
@@ -87,17 +77,31 @@ class TestPaymentRequest : public PaymentRequest {
   // Removes all the payment methods.
   void ClearPaymentMethods();
 
+  // Clears all url payment method identifiers, supported card networks,
+  // basic card specified networks, and supported card types and then resets
+  // them.
+  void ResetParsedPaymentMethodData();
+
   // Sets the currently selected shipping option for this PaymentRequest flow.
-  void set_selected_shipping_option(web::PaymentShippingOption* option) {
+  void set_selected_shipping_option(payments::PaymentShippingOption* option) {
     selected_shipping_option_ = option;
   }
 
+  void set_is_incognito(bool is_incognito) { is_incognito_ = is_incognito; }
+
   // PaymentRequest
+  autofill::AddressNormalizer* GetAddressNormalizer() override;
+  autofill::AddressNormalizationManager* GetAddressNormalizationManager()
+      override;
   autofill::RegionDataLoader* GetRegionDataLoader() override;
   PrefService* GetPrefService() override;
   PaymentsProfileComparator* profile_comparator() override;
+  bool IsIncognito() const override;
 
  private:
+  autofill::TestAddressNormalizer address_normalizer_;
+  autofill::AddressNormalizationManager address_normalization_manager_;
+
   // Not owned and must outlive this object.
   autofill::RegionDataLoader* region_data_loader_;
 
@@ -106,6 +110,9 @@ class TestPaymentRequest : public PaymentRequest {
 
   // Not owned and must outlive this object.
   PaymentsProfileComparator* profile_comparator_;
+
+  // Whether the user is in incognito mode.
+  bool is_incognito_;
 
   DISALLOW_COPY_AND_ASSIGN(TestPaymentRequest);
 };

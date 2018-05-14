@@ -55,7 +55,8 @@ thunk::PPB_PDF_API* PDFResource::AsPPB_PDF_API() {
 void PDFResource::SearchString(const unsigned short* input_string,
                                const unsigned short* input_term,
                                bool case_sensitive,
-                               PP_PrivateFindResult** results, int* count) {
+                               PP_PrivateFindResult** results,
+                               uint32_t* count) {
   if (locale_.empty())
     locale_ = GetLocale();
   const base::char16* string =
@@ -67,7 +68,8 @@ void PDFResource::SearchString(const unsigned short* input_string,
   UStringSearch* searcher = usearch_open(term, -1, string, -1, locale_.c_str(),
                                          0, &status);
   DCHECK(status == U_ZERO_ERROR || status == U_USING_FALLBACK_WARNING ||
-         status == U_USING_DEFAULT_WARNING);
+         status == U_USING_DEFAULT_WARNING)
+      << status;
   UCollationStrength strength = case_sensitive ? UCOL_TERTIARY : UCOL_PRIMARY;
 
   UCollator* collator = usearch_getCollator(searcher);
@@ -78,7 +80,7 @@ void PDFResource::SearchString(const unsigned short* input_string,
 
   status = U_ZERO_ERROR;
   int match_start = usearch_first(searcher, &status);
-  DCHECK(status == U_ZERO_ERROR);
+  DCHECK_EQ(U_ZERO_ERROR, status);
 
   std::vector<PP_PrivateFindResult> pp_results;
   while (match_start != USEARCH_DONE) {
@@ -88,7 +90,7 @@ void PDFResource::SearchString(const unsigned short* input_string,
     result.length = matched_length;
     pp_results.push_back(result);
     match_start = usearch_next(searcher, &status);
-    DCHECK(status == U_ZERO_ERROR);
+    DCHECK_EQ(U_ZERO_ERROR, status);
   }
 
   if (pp_results.empty() ||
@@ -146,7 +148,7 @@ PP_Bool PDFResource::IsFeatureEnabled(PP_PDFFeature feature) {
       result = PP_TRUE;
       break;
     case PP_PDFFEATURE_PRINTING:
-      // TODO(raymes): Use PrintWebViewHelper::IsPrintingEnabled.
+      // TODO(raymes): Use PrintRenderFrameHelper::IsPrintingEnabled.
       result = PP_FALSE;
       break;
   }
@@ -193,10 +195,26 @@ void PDFResource::SetAccessibilityPageInfo(
 }
 
 void PDFResource::SetCrashData(const char* pdf_url, const char* top_level_url) {
-  if (pdf_url)
-    base::debug::SetCrashKeyValue("subresource_url", pdf_url);
+  if (pdf_url) {
+    static base::debug::CrashKeyString* subresource_url =
+        base::debug::AllocateCrashKeyString("subresource_url",
+                                            base::debug::CrashKeySize::Size256);
+    base::debug::SetCrashKeyString(subresource_url, pdf_url);
+  }
   if (top_level_url)
     PluginGlobals::Get()->SetActiveURL(top_level_url);
+}
+
+void PDFResource::SelectionChanged(const PP_FloatPoint& left,
+                                   int32_t left_height,
+                                   const PP_FloatPoint& right,
+                                   int32_t right_height) {
+  Post(RENDERER, PpapiHostMsg_PDF_SelectionChanged(left, left_height, right,
+                                                   right_height));
+}
+
+void PDFResource::DidScroll() {
+  Post(RENDERER, PpapiHostMsg_PDF_DidScroll());
 }
 
 }  // namespace proxy

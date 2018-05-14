@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2014 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -28,7 +29,7 @@ class TestTreeStatus(cros_test_lib.MockTestCase):
   def setUp(self):
     mock_site_config = config_lib_unittest.MockSiteConfig()
     # Add a couple other builders so we have more than one.
-    mock_site_config.Add('amd64-generic-paladin')
+    mock_site_config.Add('x86-generic-paladin')
     mock_site_config.Add('arm-generic-paladin')
     self.site_config = mock_site_config
 
@@ -164,21 +165,20 @@ class TestTreeStatus(cros_test_lib.MockTestCase):
     """Tests that GetExperimentalBuilders parses out EXPERIMENTAL-BUILDERS=."""
     self._SetupMockTreeStatusResponses(
         final_tree_status=(
-            'Tree is open (EXPERIMENTAL=x86-generic-paladin).'),
+            'Tree is open (EXPERIMENTAL=amd64-generic-paladin).'),
         final_general_state=constants.TREE_OPEN)
     builders = tree_status.GetExperimentalBuilders(self.status_url)
-    self.assertItemsEqual(builders, ['x86-generic-paladin'])
+    self.assertItemsEqual(builders, ['amd64-generic-paladin'])
 
     self._SetupMockTreeStatusResponses(
         final_tree_status=('Tree is open '
-                           '(EXPERIMENTAL=x86-generic-paladin,'
-                           'amd64-generic-paladin EXPERIMENTAL='
-                           'arm-generic-paladin).'),
+                           '(EXPERIMENTAL=amd64-generic-paladin '
+                           'EXPERIMENTAL=arm-generic-paladin).'),
         final_general_state=constants.TREE_OPEN)
     builders = tree_status.GetExperimentalBuilders(self.status_url)
     self.assertItemsEqual(
         builders,
-        ['x86-generic-paladin', 'amd64-generic-paladin', 'arm-generic-paladin'])
+        ['amd64-generic-paladin', 'arm-generic-paladin'])
 
     # Builders not in the site config are filtered out.
     self._SetupMockTreeStatusResponses(
@@ -191,17 +191,17 @@ class TestTreeStatus(cros_test_lib.MockTestCase):
     # Case insensitive.
     self._SetupMockTreeStatusResponses(
         final_tree_status=(
-            'Tree is open (experimental=x86-generic-paladin).'),
+            'Tree is open (experimental=amd64-generic-paladin).'),
         final_general_state=constants.TREE_OPEN)
     builders = tree_status.GetExperimentalBuilders(self.status_url)
-    self.assertItemsEqual(builders, ['x86-generic-paladin'])
+    self.assertItemsEqual(builders, ['amd64-generic-paladin'])
 
   def testGetExperimentalBuildersTimeout(self):
     """Tests timeout behavior of GetExperimentalBuilders."""
     with mock.patch.object(tree_status, '_GetStatusDict') as m:
       m.side_effect = lambda _: time.sleep(10)
-      builders = tree_status.GetExperimentalBuilders(self.status_url, timeout=1)
-      self.assertEqual(builders, [])
+      with self.assertRaises(timeout_util.TimeoutError):
+        tree_status.GetExperimentalBuilders(self.status_url, timeout=1)
 
   def testUpdateTreeStatusWithEpilogue(self):
     """Tests that epilogue is appended to the message."""

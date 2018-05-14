@@ -18,12 +18,13 @@
 #include "headless/public/util/managed_dispatch_url_request_job.h"
 #include "headless/public/util/url_fetcher.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "url/gurl.h"
 
 namespace net {
-class HttpResponseHeaders;
 class IOBuffer;
+class UploadElementReader;
 }  // namespace net
 
 namespace content {
@@ -42,14 +43,22 @@ class HEADLESS_EXPORT Request {
 
   virtual const net::URLRequest* GetURLRequest() const = 0;
 
+  virtual const net::HttpRequestHeaders& GetHttpRequestHeaders() const = 0;
+
   // The frame from which the request came from.
-  virtual int GetFrameTreeNodeId() const = 0;
+  virtual std::string GetDevToolsFrameId() const = 0;
 
   // The devtools agent host id for the page where the request came from.
   virtual std::string GetDevToolsAgentHostId() const = 0;
 
   // Gets the POST data, if any, from the net::URLRequest.
   virtual std::string GetPostData() const = 0;
+
+  // Returns the size of the POST data, if any, from the net::URLRequest.
+  virtual uint64_t GetPostDataSize() const = 0;
+
+  // Returns true if the fetch was issues by the browser.
+  virtual bool IsBrowserSideFetch() const = 0;
 
   enum class ResourceType {
     MAIN_FRAME = 0,
@@ -86,41 +95,6 @@ class HEADLESS_EXPORT Request {
   DISALLOW_COPY_AND_ASSIGN(Request);
 };
 
-// Details of a pending request received by GenericURLRequestJob which must be
-// either Allowed, Blocked, Modified or have it's response Mocked.
-class HEADLESS_EXPORT PendingRequest {
- public:
-  virtual const Request* GetRequest() const = 0;
-
-  // Allows the request to proceed as normal.
-  virtual void AllowRequest() = 0;
-
-  // Causes the request to fail with the specified |error|.
-  virtual void BlockRequest(net::Error error) = 0;
-
-  // Allows the request to be completely re-written.
-  virtual void ModifyRequest(
-      const GURL& url,
-      const std::string& method,
-      const std::string& post_data,
-      const net::HttpRequestHeaders& request_headers) = 0;
-
-  struct MockResponseData {
-    std::string response_data;
-  };
-
-  // Instead of fetching the request, |mock_response| is returned instead.
-  virtual void MockResponse(
-      std::unique_ptr<MockResponseData> mock_response) = 0;
-
- protected:
-  PendingRequest() {}
-  virtual ~PendingRequest() {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(PendingRequest);
-};
-
 // Intended for use in a protocol handler, this ManagedDispatchURLRequestJob has
 // the following features:
 //
@@ -130,16 +104,10 @@ class HEADLESS_EXPORT PendingRequest {
 class HEADLESS_EXPORT GenericURLRequestJob
     : public ManagedDispatchURLRequestJob,
       public URLFetcher::ResultListener,
-      public PendingRequest,
       public Request {
  public:
   class HEADLESS_EXPORT Delegate {
    public:
-    // Notifies the delegate of an PendingRequest which must either be
-    // allowed, blocked, modifed or it's response mocked. Called on an arbitrary
-    // thread.
-    virtual void OnPendingRequest(PendingRequest* pending_request) = 0;
-
     // Notifies the delegate of any fetch failure. Called on an arbitrary
     // thread.
     virtual void OnResourceLoadFailed(const Request* request,
@@ -175,58 +143,53 @@ class HEADLESS_EXPORT GenericURLRequestJob
   bool GetMimeType(std::string* mime_type) const override;
   bool GetCharset(std::string* charset) override;
   void GetLoadTimingInfo(net::LoadTimingInfo* load_timing_info) const override;
+  int64_t GetTotalReceivedBytes() const override;
 
-  // URLFetcher::FetchResultListener implementation:
+  // URLFetcher::ResultListener implementation:
   void OnFetchStartError(net::Error error) override;
   void OnFetchComplete(const GURL& final_url,
                        scoped_refptr<net::HttpResponseHeaders> response_headers,
                        const char* body,
-                       size_t body_size) override;
+                       size_t body_size,
+                       const net::LoadTimingInfo& load_timing_info,
+                       size_t total_received_bytes) override;
 
  protected:
   // Request implementation:
   uint64_t GetRequestId() const override;
+  const net::HttpRequestHeaders& GetHttpRequestHeaders() const override;
   const net::URLRequest* GetURLRequest() const override;
-  int GetFrameTreeNodeId() const override;
+  std::string GetDevToolsFrameId() const override;
   std::string GetDevToolsAgentHostId() const override;
   std::string GetPostData() const override;
+  uint64_t GetPostDataSize() const override;
   ResourceType GetResourceType() const override;
   bool IsAsync() const override;
-
-  // PendingRequest implementation:
-  const Request* GetRequest() const override;
-  void AllowRequest() override;
-  void BlockRequest(net::Error error) override;
-  void ModifyRequest(const GURL& url,
-                     const std::string& method,
-                     const std::string& post_data,
-                     const net::HttpRequestHeaders& request_headers) override;
-  void MockResponse(std::unique_ptr<MockResponseData> mock_response) override;
+  bool IsBrowserSideFetch() const override;
 
  private:
   void PrepareCookies(const GURL& rewritten_url,
                       const std::string& method,
-                      const url::Origin& site_for_cookies,
-                      const base::Closure& done_callback);
+                      const url::Origin& site_for_cookies);
   void OnCookiesAvailable(const GURL& rewritten_url,
                           const std::string& method,
-                          const base::Closure& done_callback,
                           const net::CookieList& cookie_list);
+
+  const std::vector<std::unique_ptr<net::UploadElementReader>>*
+  GetInitializedReaders() const;
 
   std::unique_ptr<URLFetcher> url_fetcher_;
   net::HttpRequestHeaders extra_request_headers_;
   scoped_refptr<net::HttpResponseHeaders> response_headers_;
   scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner_;
-  std::unique_ptr<MockResponseData> mock_response_;
   Delegate* delegate_;          // Not owned.
   HeadlessBrowserContext* headless_browser_context_;           // Not owned.
   const content::ResourceRequestInfo* request_resource_info_;  // Not owned.
   const char* body_ = nullptr;  // Not owned.
   size_t body_size_ = 0;
   size_t read_offset_ = 0;
-  base::TimeTicks response_time_;
-  const uint64_t request_id_;
-  static uint64_t next_request_id_;
+  net::LoadTimingInfo load_timing_info_;
+  size_t total_received_bytes_ = 0;
 
   base::WeakPtrFactory<GenericURLRequestJob> weak_factory_;
 

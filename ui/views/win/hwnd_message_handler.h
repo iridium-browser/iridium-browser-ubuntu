@@ -20,7 +20,7 @@
 #include "base/strings/string16.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/win_util.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/ime/input_method_observer.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/base/win/window_event_target.h"
@@ -29,13 +29,11 @@
 #include "ui/gfx/sequential_id_generator.h"
 #include "ui/gfx/win/window_impl.h"
 #include "ui/views/views_export.h"
+#include "ui/views/win/pen_event_processor.h"
 
 namespace gfx {
 class ImageSkia;
 class Insets;
-namespace win {
-class DirectManipulationHelper;
-}  // namespace win
 }  // namespace gfx
 
 namespace ui  {
@@ -43,7 +41,10 @@ class AXSystemCaretWin;
 class InputMethod;
 class TextInputClient;
 class ViewProp;
-}
+namespace win {
+class DirectManipulationHelper;
+}  // namespace win
+}  // namespace ui
 
 namespace views {
 
@@ -543,6 +544,13 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
                                     WPARAM w_param,
                                     LPARAM l_param);
 
+  LRESULT GenerateMouseEventFromPointerEvent(
+      UINT message,
+      UINT32 pointer_id,
+      const POINTER_INFO& pointer_info,
+      const gfx::Point& point,
+      const ui::PointerDetails& pointer_details);
+
   // Returns true if the mouse message passed in is an OS synthesized mouse
   // message.
   // |message| identifies the mouse message.
@@ -561,7 +569,7 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   // |time_stamp| is the time stamp associated with the message.
   void GenerateTouchEvent(ui::EventType event_type,
                           const gfx::Point& point,
-                          unsigned int id,
+                          size_t id,
                           base::TimeTicks time_stamp,
                           TouchEvents* touch_events);
 
@@ -671,6 +679,8 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   // Generates touch-ids for touch-events.
   ui::SequentialIDGenerator id_generator_;
 
+  PenEventProcessor pen_processor_;
+
   // Set to true if we are in the context of a sizing operation.
   bool in_size_loop_;
 
@@ -685,11 +695,11 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   // native SetFocus calls invoked in the views code.
   int touch_down_contexts_;
 
-  // Time the last touch message was received. Used to flag mouse messages
-  // synthesized by Windows for touch which are not flagged by the OS as
-  // synthesized mouse messages. For more information please refer to
-  // the IsMouseEventFromTouch function.
-  static long last_touch_message_time_;
+  // Time the last touch or pen message was received. Used to flag mouse
+  // messages synthesized by Windows for touch which are not flagged by the OS
+  // as synthesized mouse messages. For more information please refer to the
+  // IsMouseEventFromTouch function.
+  static long last_touch_or_pen_message_time_;
 
   // Time the last WM_MOUSEHWHEEL message is received. Please refer to the
   // HandleMouseEventInternal function as to why this is needed.
@@ -721,7 +731,7 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   // This class provides functionality to register the legacy window as a
   // Direct Manipulation consumer. This allows us to support smooth scroll
   // in Chrome on Windows 10.
-  std::unique_ptr<gfx::win::DirectManipulationHelper>
+  std::unique_ptr<ui::win::DirectManipulationHelper>
       direct_manipulation_helper_;
 
   // The location where the user clicked on the caption. We cache this when we
@@ -742,6 +752,10 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   // True if the window should have no border and its contents should be
   // partially or fully transparent.
   bool is_translucent_ = false;
+
+  // True if the window should process WM_POINTER for touch events and
+  // not WM_TOUCH events.
+  bool pointer_events_for_touch_;
 
   // This is a map of the HMONITOR to full screeen window instance. It is safe
   // to keep a raw pointer to the HWNDMessageHandler instance as we track the

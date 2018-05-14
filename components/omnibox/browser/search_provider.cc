@@ -25,7 +25,6 @@
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/history/core/browser/in_memory_database.h"
 #include "components/history/core/browser/keyword_search_term.h"
-#include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/browser/autocomplete_provider_client.h"
 #include "components/omnibox/browser/autocomplete_provider_listener.h"
 #include "components/omnibox/browser/autocomplete_result.h"
@@ -44,6 +43,7 @@
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
+#include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/url_constants.h"
 #include "url/url_util.h"
@@ -99,13 +99,17 @@ SearchProvider::Providers::Providers(TemplateURLService* template_url_service)
     : template_url_service_(template_url_service) {}
 
 const TemplateURL* SearchProvider::Providers::GetDefaultProviderURL() const {
-  return default_provider_.empty() ? NULL :
-      template_url_service_->GetTemplateURLForKeyword(default_provider_);
+  if (default_provider_.empty())
+    return nullptr;
+  DCHECK(template_url_service_);
+  return template_url_service_->GetTemplateURLForKeyword(default_provider_);
 }
 
 const TemplateURL* SearchProvider::Providers::GetKeywordProviderURL() const {
-  return keyword_provider_.empty() ? NULL :
-      template_url_service_->GetTemplateURLForKeyword(keyword_provider_);
+  if (keyword_provider_.empty())
+    return nullptr;
+  DCHECK(template_url_service_);
+  return template_url_service_->GetTemplateURLForKeyword(keyword_provider_);
 }
 
 
@@ -162,7 +166,7 @@ void SearchProvider::RegisterDisplayedAnswers(
 
 // static
 int SearchProvider::CalculateRelevanceForKeywordVerbatim(
-    metrics::OmniboxInputType::Type type,
+    metrics::OmniboxInputType type,
     bool allow_exact_keyword_match,
     bool prefer_keyword) {
   // This function is responsible for scoring verbatim query matches
@@ -172,8 +176,9 @@ int SearchProvider::CalculateRelevanceForKeywordVerbatim(
   if (allow_exact_keyword_match && prefer_keyword)
     return 1500;
   return (allow_exact_keyword_match &&
-          (type == metrics::OmniboxInputType::QUERY)) ?
-      1450 : 1100;
+          (type == metrics::OmniboxInputType::QUERY))
+             ? 1450
+             : 1100;
 }
 
 void SearchProvider::ResetSession() {
@@ -237,18 +242,18 @@ void SearchProvider::Start(const AutocompleteInput& input,
   const TemplateURL* keyword_provider =
       KeywordProvider::GetSubstitutingTemplateURLForInput(model,
                                                           &keyword_input_);
-  if (keyword_provider == NULL)
+  if (keyword_provider == nullptr)
     keyword_input_.Clear();
   else if (keyword_input_.text().empty())
-    keyword_provider = NULL;
+    keyword_provider = nullptr;
 
   const TemplateURL* default_provider = model->GetDefaultSearchProvider();
   if (default_provider &&
       !default_provider->SupportsReplacement(model->search_terms_data()))
-    default_provider = NULL;
+    default_provider = nullptr;
 
   if (keyword_provider == default_provider)
-    default_provider = NULL;  // No use in querying the same provider twice.
+    default_provider = nullptr;  // No use in querying the same provider twice.
 
   if (!default_provider && !keyword_provider) {
     // No valid providers.
@@ -535,9 +540,10 @@ void SearchProvider::EnforceConstraints() {
     // These blocks attempt to repair undesirable behavior by suggested
     // relevances with minimal impact, preserving other suggested relevances.
     const TemplateURL* keyword_url = providers_.GetKeywordProviderURL();
-    const bool is_extension_keyword = (keyword_url != NULL) &&
+    const bool is_extension_keyword =
+        (keyword_url != nullptr) &&
         (keyword_url->type() == TemplateURL::OMNIBOX_API_EXTENSION);
-    if ((keyword_url != NULL) && !is_extension_keyword &&
+    if ((keyword_url != nullptr) && !is_extension_keyword &&
         (AutocompleteResult::FindTopMatch(&matches_) == matches_.end())) {
       // In non-extension keyword mode, disregard the keyword verbatim suggested
       // relevance if necessary, so at least one match is allowed to be default.
@@ -867,7 +873,7 @@ std::unique_ptr<net::URLFetcher> SearchProvider::CreateSuggestFetcher(
     const TemplateURL* template_url,
     const AutocompleteInput& input) {
   if (!template_url || template_url->suggestions_url().empty())
-    return NULL;
+    return nullptr;
 
   // Bail if the suggestion URL is invalid with the given replacements.
   TemplateURLRef::SearchTermsArgs search_term_args(input.text());
@@ -886,15 +892,13 @@ std::unique_ptr<net::URLFetcher> SearchProvider::CreateSuggestFetcher(
       search_term_args,
       client()->GetTemplateURLService()->search_terms_data()));
   if (!suggest_url.is_valid())
-    return NULL;
+    return nullptr;
 
-  // Send the current page URL if user setting and URL requirements are met and
-  // the user is in the field trial.
+  // Send the current page URL if user setting and URL requirements are met.
   TemplateURLService* template_url_service = client()->GetTemplateURLService();
   if (CanSendURL(input.current_url(), suggest_url, template_url,
                  input.current_page_classification(),
-                 template_url_service->search_terms_data(), client()) &&
-      OmniboxFieldTrial::InZeroSuggestAfterTypingFieldTrial()) {
+                 template_url_service->search_terms_data(), client())) {
     search_term_args.current_page_url = input.current_url().spec();
     // Create the suggest URL again with the current page URL.
     suggest_url = GURL(template_url->suggestions_url_ref().ReplaceSearchTerms(
@@ -918,7 +922,7 @@ std::unique_ptr<net::URLFetcher> SearchProvider::CreateSuggestFetcher(
           destination: WEBSITE
         }
         policy {
-          cookies_allowed: true
+          cookies_allowed: YES
           cookies_store: "user"
           setting:
             "Users can control this feature via the 'Use a prediction service "
@@ -939,12 +943,13 @@ std::unique_ptr<net::URLFetcher> SearchProvider::CreateSuggestFetcher(
   fetcher->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
   // Add Chrome experiment state to the request headers.
   net::HttpRequestHeaders headers;
-  // Note: It's OK to pass |is_signed_in| false if it's unknown, as it does
-  // not affect transmission of experiments coming from the variations server.
-  bool is_signed_in = false;
+  // Note: It's OK to pass SignedIn::kNo if it's unknown, as it does not affect
+  // transmission of experiments coming from the variations server.
   variations::AppendVariationHeaders(fetcher->GetOriginalURL(),
-                                     client()->IsOffTheRecord(), false,
-                                     is_signed_in, &headers);
+                                     client()->IsOffTheRecord()
+                                         ? variations::InIncognito::kYes
+                                         : variations::InIncognito::kNo,
+                                     variations::SignedIn::kNo, &headers);
   fetcher->SetExtraRequestHeaders(headers.ToString());
   fetcher->Start();
   return fetcher;
@@ -955,7 +960,6 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
   // the most relevant match for each result.
   base::TimeTicks start_time(base::TimeTicks::Now());
   MatchMap map;
-  const base::Time no_time;
   int did_not_accept_keyword_suggestion =
       keyword_results_.suggest_results.empty() ?
       TemplateURLRef::NO_SUGGESTIONS_AVAILABLE :
@@ -997,7 +1001,7 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
         answer_type, std::move(answer), std::string(), std::string(), false,
         verbatim_relevance, relevance_from_server, false, trimmed_verbatim);
     AddMatchToMap(verbatim, std::string(), did_not_accept_default_suggestion,
-                  false, keyword_url != NULL, &map);
+                  false, keyword_url != nullptr, &map);
   }
   if (!keyword_input_.text().empty()) {
     // We only create the verbatim search query match for a keyword
@@ -1116,10 +1120,10 @@ bool SearchProvider::IsTopMatchSearchWithURLInput() const {
   ACMatches::const_iterator first_match =
       AutocompleteResult::FindTopMatch(matches_);
   return (input_.type() == metrics::OmniboxInputType::URL) &&
-      (first_match != matches_.end()) &&
-      (first_match->relevance > CalculateRelevanceForVerbatim()) &&
-      (first_match->type != AutocompleteMatchType::NAVSUGGEST) &&
-      (first_match->type != AutocompleteMatchType::NAVSUGGEST_PERSONALIZED);
+         (first_match != matches_.end()) &&
+         (first_match->relevance > CalculateRelevanceForVerbatim()) &&
+         (first_match->type != AutocompleteMatchType::NAVSUGGEST) &&
+         (first_match->type != AutocompleteMatchType::NAVSUGGEST_PERSONALIZED);
 }
 
 void SearchProvider::AddNavigationResultsToMatches(
@@ -1159,7 +1163,7 @@ void SearchProvider::AddTransformedHistoryResultsToMap(
        i != transformed_results.end();
        ++i) {
     AddMatchToMap(*i, std::string(), did_not_accept_suggestion, true,
-                  providers_.GetKeywordProviderURL() != NULL, map);
+                  providers_.GetKeywordProviderURL() != nullptr, map);
   }
 }
 
@@ -1245,7 +1249,7 @@ SearchProvider::ScoreHistoryResultsHelper(const HistoryResults& results,
       scored_results.front().relevance() >= 1200) {
     AutocompleteMatch match;
     client()->Classify(scored_results.front().suggestion(), false, false,
-                       input_.current_page_classification(), &match, NULL);
+                       input_.current_page_classification(), &match, nullptr);
     // Demote this match that would normally be interpreted as a URL to have
     // the highest score a previously-issued search query could have when
     // scoring with the non-aggressive method.  A consequence of demoting
@@ -1285,7 +1289,8 @@ void SearchProvider::ScoreHistoryResults(
     return;
   }
 
-  bool prevent_inline_autocomplete = input_.prevent_inline_autocomplete() ||
+  bool prevent_inline_autocomplete =
+      input_.prevent_inline_autocomplete() ||
       (input_.type() == metrics::OmniboxInputType::URL);
   const base::string16 input_text = GetInput(is_keyword).text();
   bool input_multiple_words = HasMultipleWords(input_text);
@@ -1321,7 +1326,7 @@ void SearchProvider::AddSuggestResultsToMap(
     MatchMap* map) {
   for (size_t i = 0; i < results.size(); ++i) {
     AddMatchToMap(results[i], metadata, i, false,
-                  providers_.GetKeywordProviderURL() != NULL, map);
+                  providers_.GetKeywordProviderURL() != nullptr, map);
   }
 }
 
@@ -1450,16 +1455,18 @@ AutocompleteMatch SearchProvider::NavigationToMatch(
   // scheme.
   const URLPrefix* prefix =
       URLPrefix::BestURLPrefix(navigation.formatted_url(), input);
-  size_t match_start = (prefix == NULL) ?
-      navigation.formatted_url().find(input) : prefix->prefix.length();
+  size_t match_start = (prefix == nullptr)
+                           ? navigation.formatted_url().find(input)
+                           : prefix->prefix.length();
   bool trim_http = !AutocompleteInput::HasHTTPScheme(input) &&
       (!prefix || (match_start != 0));
   const url_formatter::FormatUrlTypes format_types =
-      url_formatter::kFormatUrlOmitAll &
+      url_formatter::kFormatUrlOmitDefaults &
       ~(trim_http ? 0 : url_formatter::kFormatUrlOmitHTTP);
 
-  size_t inline_autocomplete_offset = (prefix == NULL) ?
-      base::string16::npos : (match_start + input.length());
+  size_t inline_autocomplete_offset = (prefix == nullptr)
+                                          ? base::string16::npos
+                                          : (match_start + input.length());
   match.fill_into_edit +=
       AutocompleteInput::FormattedStringWithEquivalentMeaning(
           navigation.url(),
@@ -1483,11 +1490,10 @@ AutocompleteMatch SearchProvider::NavigationToMatch(
   // We don't want to claim http://foo.com/bar is inlineable against the
   // input "foo.com/b ".
   match.allowed_to_be_default_match =
-      (prefix != NULL) &&
-      (providers_.GetKeywordProviderURL() == NULL) &&
+      (prefix != nullptr) && (providers_.GetKeywordProviderURL() == nullptr) &&
       !navigation.received_after_last_keystroke() &&
       (match.inline_autocompletion.empty() ||
-      (!input_.prevent_inline_autocomplete() && !trimmed_whitespace));
+       (!input_.prevent_inline_autocomplete() && !trimmed_whitespace));
   match.EnsureUWYTIsAllowedToBeDefault(input_,
                                        client()->GetTemplateURLService());
 

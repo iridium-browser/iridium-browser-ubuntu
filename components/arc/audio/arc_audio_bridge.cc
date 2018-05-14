@@ -45,7 +45,8 @@ ArcAudioBridge* ArcAudioBridge::GetForBrowserContext(
 
 ArcAudioBridge::ArcAudioBridge(content::BrowserContext* context,
                                ArcBridgeService* bridge_service)
-    : arc_bridge_service_(bridge_service), binding_(this) {
+    : arc_bridge_service_(bridge_service) {
+  arc_bridge_service_->audio()->SetHost(this);
   arc_bridge_service_->audio()->AddObserver(this);
   if (chromeos::CrasAudioHandler::IsInitialized()) {
     cras_audio_handler_ = chromeos::CrasAudioHandler::Get();
@@ -56,26 +57,16 @@ ArcAudioBridge::ArcAudioBridge(content::BrowserContext* context,
 ArcAudioBridge::~ArcAudioBridge() {
   if (cras_audio_handler_)
     cras_audio_handler_->RemoveAudioObserver(this);
-
-  // TODO(hidehiko): Currently, the lifetime of ArcBridgeService and
-  // BrowserContextKeyedService is not nested.
-  // If ArcServiceManager::Get() returns nullptr, it is already destructed,
-  // so do not touch it.
-  if (ArcServiceManager::Get())
-    arc_bridge_service_->audio()->RemoveObserver(this);
+  arc_bridge_service_->audio()->RemoveObserver(this);
+  arc_bridge_service_->audio()->SetHost(nullptr);
 }
 
-void ArcAudioBridge::OnInstanceReady() {
-  mojom::AudioInstance* audio_instance =
-      ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service_->audio(), Init);
-  DCHECK(audio_instance);  // the instance on ARC side is too old.
-  mojom::AudioHostPtr host_proxy;
-  binding_.Bind(mojo::MakeRequest(&host_proxy));
-  audio_instance->Init(std::move(host_proxy));
+void ArcAudioBridge::OnConnectionReady() {
+  // TODO(hidehiko): Replace with ConnectionHolder::IsConnected().
   available_ = true;
 }
 
-void ArcAudioBridge::OnInstanceClosed() {
+void ArcAudioBridge::OnConnectionClosed() {
   available_ = false;
 }
 

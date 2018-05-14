@@ -14,12 +14,12 @@
 
 CPDF_FlateEncoder::CPDF_FlateEncoder(CPDF_Stream* pStream, bool bFlateEncode)
     : m_dwSize(0), m_pAcc(pdfium::MakeRetain<CPDF_StreamAcc>(pStream)) {
-  m_pAcc->LoadAllData(true);
+  m_pAcc->LoadAllDataRaw();
 
   bool bHasFilter = pStream && pStream->HasFilter();
   if (bHasFilter && !bFlateEncode) {
     auto pDestAcc = pdfium::MakeRetain<CPDF_StreamAcc>(pStream);
-    pDestAcc->LoadAllData();
+    pDestAcc->LoadAllDataFiltered();
 
     m_dwSize = pDestAcc->GetSize();
     m_pData = pDestAcc->DetachData();
@@ -43,27 +43,6 @@ CPDF_FlateEncoder::CPDF_FlateEncoder(CPDF_Stream* pStream, bool bFlateEncode)
   m_pDict->SetNewFor<CPDF_Number>("Length", static_cast<int>(m_dwSize));
   m_pDict->SetNewFor<CPDF_Name>("Filter", "FlateDecode");
   m_pDict->RemoveFor("DecodeParms");
-}
-
-CPDF_FlateEncoder::CPDF_FlateEncoder(const uint8_t* pBuffer,
-                                     uint32_t size,
-                                     bool bFlateEncode,
-                                     bool bXRefStream)
-    : m_dwSize(0) {
-  if (!bFlateEncode) {
-    m_pData = const_cast<uint8_t*>(pBuffer);
-    m_dwSize = size;
-    return;
-  }
-
-  uint8_t* buffer = nullptr;
-  // TODO(thestig): Move to Init() and check return value.
-  if (bXRefStream)
-    ::PngEncode(pBuffer, size, &buffer, &m_dwSize);
-  else
-    ::FlateEncode(pBuffer, size, &buffer, &m_dwSize);
-
-  m_pData = std::unique_ptr<uint8_t, FxFreeDeleter>(buffer);
 }
 
 CPDF_FlateEncoder::~CPDF_FlateEncoder() {}

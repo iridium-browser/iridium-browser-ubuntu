@@ -87,27 +87,30 @@ class CORE_EXPORT ContentSecurityPolicy
   enum class InlineType { kBlock, kAttribute };
 
   enum class DirectiveType {
-    kUndefined,
     kBaseURI,
     kBlockAllMixedContent,
     kChildSrc,
     kConnectSrc,
     kDefaultSrc,
-    kFrameAncestors,
-    kFrameSrc,
     kFontSrc,
     kFormAction,
+    kFrameAncestors,
+    kFrameSrc,
     kImgSrc,
     kManifestSrc,
     kMediaSrc,
     kObjectSrc,
     kPluginTypes,
+    kPrefetchSrc,
+    kReportTo,
     kReportURI,
     kRequireSRIFor,
+    kRequireTrustedTypes,
     kSandbox,
     kScriptSrc,
     kStyleSrc,
     kTreatAsPublicAddress,
+    kUndefined,
     kUpgradeInsecureRequests,
     kWorkerSrc,
   };
@@ -130,7 +133,7 @@ class CORE_EXPORT ContentSecurityPolicy
 
   static ContentSecurityPolicy* Create() { return new ContentSecurityPolicy(); }
   ~ContentSecurityPolicy();
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   void BindToExecutionContext(ExecutionContext*);
   void SetupSelf(const SecurityOrigin&);
@@ -178,6 +181,10 @@ class CORE_EXPORT ContentSecurityPolicy
                  SecurityViolationReportingPolicy,
                  ExceptionStatus,
                  const String& script_content) const;
+  bool AllowWasmEval(ScriptState*,
+                     SecurityViolationReportingPolicy,
+                     ExceptionStatus,
+                     const String& script_content) const;
   bool AllowPluginType(const String& type,
                        const String& type_attribute,
                        const KURL&,
@@ -195,6 +202,12 @@ class CORE_EXPORT ContentSecurityPolicy
           SecurityViolationReportingPolicy::kReport) const;
 
   bool AllowObjectFromSource(
+      const KURL&,
+      RedirectStatus = RedirectStatus::kNoRedirect,
+      SecurityViolationReportingPolicy =
+          SecurityViolationReportingPolicy::kReport,
+      CheckHeaderType = CheckHeaderType::kCheckAll) const;
+  bool AllowPrefetchFromSource(
       const KURL&,
       RedirectStatus = RedirectStatus::kNoRedirect,
       SecurityViolationReportingPolicy =
@@ -319,6 +332,7 @@ class CORE_EXPORT ContentSecurityPolicy
   void SetOverrideURLForSelf(const KURL&);
 
   bool IsActive() const;
+  bool IsActiveForConnections() const;
 
   // If a frame is passed in, the message will be logged to its active
   // document's console.  Otherwise, the message will be logged to this object's
@@ -358,6 +372,7 @@ class CORE_EXPORT ContentSecurityPolicy
                        const String& console_message,
                        const KURL& blocked_url,
                        const Vector<String>& report_endpoints,
+                       bool use_reporting_api,
                        const String& header,
                        ContentSecurityPolicyHeaderType,
                        ViolationType,
@@ -378,6 +393,7 @@ class CORE_EXPORT ContentSecurityPolicy
   const KURL Url() const;
   void EnforceSandboxFlags(SandboxFlags);
   void TreatAsPublicAddress();
+  void RequireTrustedTypes();
   String EvalDisabledErrorMessage() const;
 
   // Upgrade-Insecure-Requests and Block-All-Mixed-Content are represented in
@@ -401,6 +417,7 @@ class CORE_EXPORT ContentSecurityPolicy
   static bool ShouldBypassMainWorld(const ExecutionContext*);
   static bool ShouldBypassContentSecurityPolicy(
       const KURL&,
+      ExecutionContext*,
       SchemeRegistry::PolicyAreas = SchemeRegistry::kPolicyAreaAll);
 
   static bool IsNonceableElement(const Element*);
@@ -409,7 +426,7 @@ class CORE_EXPORT ContentSecurityPolicy
   // experimental EmbeddingCSP feature
   // Please, see https://w3c.github.io/webappsec-csp/embedded/#origin-allowed.
   static bool ShouldEnforceEmbeddersPolicy(const ResourceResponse&,
-                                           SecurityOrigin*);
+                                           const SecurityOrigin*);
 
   static const char* GetDirectiveName(const DirectiveType&);
   static DirectiveType GetDirectiveType(const String& name);
@@ -424,14 +441,18 @@ class CORE_EXPORT ContentSecurityPolicy
 
   bool HasHeaderDeliveredPolicy() const { return header_delivered_; }
 
-  static bool IsValidCSPAttr(const String& attr);
+  static bool IsValidCSPAttr(const String& attr,
+                             const String& context_required_csp);
+
+  // Returns the 'wasm-eval' source is supported.
+  bool SupportsWasmEval() const { return supports_wasm_eval_; }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ContentSecurityPolicyTest, NonceInline);
   FRIEND_TEST_ALL_PREFIXES(ContentSecurityPolicyTest, NonceSinglePolicy);
   FRIEND_TEST_ALL_PREFIXES(ContentSecurityPolicyTest, NonceMultiplePolicy);
-  FRIEND_TEST_ALL_PREFIXES(BaseFetchContextTest,
-                           RedirectChecksReportedAndEnforcedCSP);
+  FRIEND_TEST_ALL_PREFIXES(BaseFetchContextTest, CanRequest);
+  FRIEND_TEST_ALL_PREFIXES(BaseFetchContextTest, CheckCSPForRequest);
   FRIEND_TEST_ALL_PREFIXES(BaseFetchContextTest,
                            AllowResponseChecksReportedAndEnforcedCSP);
   FRIEND_TEST_ALL_PREFIXES(FrameFetchContextTest,
@@ -440,8 +461,6 @@ class CORE_EXPORT ContentSecurityPolicy
   ContentSecurityPolicy();
 
   void ApplyPolicySideEffectsToExecutionContext();
-
-  KURL CompleteURL(const String&) const;
 
   void LogToConsole(const String& message, MessageLevel = kErrorMessageLevel);
 
@@ -455,7 +474,8 @@ class CORE_EXPORT ContentSecurityPolicy
                                Element*);
   void PostViolationReport(const SecurityPolicyViolationEventInit&,
                            LocalFrame*,
-                           const Vector<String>& report_endpoints);
+                           const Vector<String>& report_endpoints,
+                           bool use_reporting_api);
 
   static void FillInCSPHashValues(const String& source,
                                   uint8_t hash_algorithms_used,
@@ -487,11 +507,14 @@ class CORE_EXPORT ContentSecurityPolicy
   // State flags used to configure the environment after parsing a policy.
   SandboxFlags sandbox_mask_;
   bool treat_as_public_address_;
+  bool require_safe_types_;
   String disable_eval_error_message_;
   WebInsecureRequestPolicy insecure_request_policy_;
 
   Member<CSPSource> self_source_;
   String self_protocol_;
+
+  bool supports_wasm_eval_ = false;
 };
 
 }  // namespace blink

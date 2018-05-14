@@ -74,7 +74,7 @@ std::string StatusToString(BlobStatus status) {
       return "BlobStatus::ERR_OUT_OF_MEMORY: Not enough memory or disk space "
              "available for blob.";
     case BlobStatus::ERR_FILE_WRITE_FAILED:
-      return "BlobStatus::ERR_FILE_WRITE_FAILED: File operation filed";
+      return "BlobStatus::ERR_FILE_WRITE_FAILED: File operation failed";
     case BlobStatus::ERR_SOURCE_DIED_IN_TRANSIT:
       return "BlobStatus::ERR_SOURCE_DIED_IN_TRANSIT: Blob source died before "
              "transporting data to browser.";
@@ -84,6 +84,9 @@ std::string StatusToString(BlobStatus status) {
     case BlobStatus::ERR_REFERENCED_BLOB_BROKEN:
       return "BlobStatus::ERR_REFERENCED_BLOB_BROKEN: Blob contains dependency "
              "blob that is broken.";
+    case BlobStatus::ERR_REFERENCED_FILE_UNAVAILABLE:
+      return "BlobStatus::ERR_REFERENCED_FILE_UNAVAILABLE: Blob contains "
+             "dependency on file that is unavailable.";
     case BlobStatus::DONE:
       return "BlobStatus::DONE: Blob built with no errors.";
     case BlobStatus::PENDING_QUOTA:
@@ -148,13 +151,12 @@ ViewBlobInternalsJob::ViewBlobInternalsJob(
       weak_factory_(this) {
 }
 
-ViewBlobInternalsJob::~ViewBlobInternalsJob() {
-}
+ViewBlobInternalsJob::~ViewBlobInternalsJob() = default;
 
 void ViewBlobInternalsJob::Start() {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ViewBlobInternalsJob::StartAsync,
-                            weak_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&ViewBlobInternalsJob::StartAsync,
+                                weak_factory_.GetWeakPtr()));
 }
 
 bool ViewBlobInternalsJob::IsRedirectResponse(GURL* location,
@@ -246,10 +248,10 @@ void ViewBlobInternalsJob::GenerateHTMLForBlobData(
     const BlobDataItem& item = *(blob_data.items().at(i)->item());
 
     switch (item.type()) {
-      case DataElement::TYPE_BYTES:
+      case BlobDataItem::Type::kBytes:
         AddHTMLListItem(kType, "data", out);
         break;
-      case DataElement::TYPE_FILE:
+      case BlobDataItem::Type::kFile:
         AddHTMLListItem(kType, "file", out);
         AddHTMLListItem(kPath,
                  net::EscapeForHTML(item.path().AsUTF8Unsafe()),
@@ -260,10 +262,7 @@ void ViewBlobInternalsJob::GenerateHTMLForBlobData(
               out);
         }
         break;
-      case DataElement::TYPE_BLOB:
-        NOTREACHED();   // Should be flattened in the storage context.
-        break;
-      case DataElement::TYPE_FILE_FILESYSTEM:
+      case BlobDataItem::Type::kFileFilesystem:
         AddHTMLListItem(kType, "filesystem", out);
         AddHTMLListItem(kURL, item.filesystem_url().spec(), out);
         if (!item.expected_modification_time().is_null()) {
@@ -272,14 +271,12 @@ void ViewBlobInternalsJob::GenerateHTMLForBlobData(
               out);
         }
         break;
-      case DataElement::TYPE_DISK_CACHE_ENTRY:
+      case BlobDataItem::Type::kDiskCacheEntry:
         AddHTMLListItem(kType, "disk cache entry", out);
         AddHTMLListItem(kURL, item.disk_cache_entry()->GetKey(), out);
         break;
-      case DataElement::TYPE_BYTES_DESCRIPTION:
+      case BlobDataItem::Type::kBytesDescription:
         AddHTMLListItem(kType, "pending data", out);
-      case DataElement::TYPE_UNKNOWN:
-        NOTREACHED();
         break;
     }
     if (item.offset()) {

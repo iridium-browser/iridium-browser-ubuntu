@@ -4,6 +4,7 @@
 
 #include "ash/frame/caption_buttons/frame_caption_button.h"
 
+#include "ash/ash_constants.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
@@ -21,8 +22,8 @@ const int kSwapImagesAnimationDurationMs = 200;
 // animation as a ratio of |kSwapImagesAnimationDurationMs|.
 const float kFadeOutRatio = 0.5f;
 
-// The alpha to draw inactive icons with.
-const float kInactiveIconAlpha = 0.2f;
+// The ratio applied to the button's alpha when the button is disabled.
+const float kDisabledButtonAlphaRatio = 0.5f;
 
 // The colors and alpha values used for the button background hovered and
 // pressed states.
@@ -37,7 +38,7 @@ const char FrameCaptionButton::kViewClassName[] = "FrameCaptionButton";
 
 FrameCaptionButton::FrameCaptionButton(views::ButtonListener* listener,
                                        CaptionButtonIcon icon)
-    : CustomButton(listener),
+    : Button(listener),
       icon_(icon),
       paint_as_active_(false),
       use_light_images_(false),
@@ -51,14 +52,18 @@ FrameCaptionButton::FrameCaptionButton(views::ButtonListener* listener,
   // horizontally symmetrical.
 }
 
-FrameCaptionButton::~FrameCaptionButton() {}
+FrameCaptionButton::~FrameCaptionButton() = default;
+
+// static
+SkColor FrameCaptionButton::GetButtonColor(bool use_light_images) {
+  return use_light_images ? SK_ColorWHITE : gfx::kChromeIconGrey;
+}
 
 void FrameCaptionButton::SetImage(CaptionButtonIcon icon,
                                   Animate animate,
                                   const gfx::VectorIcon& icon_definition) {
-  gfx::ImageSkia new_icon_image = gfx::CreateVectorIcon(
-      icon_definition,
-      use_light_images_ ? SK_ColorWHITE : gfx::kChromeIconGrey);
+  gfx::ImageSkia new_icon_image =
+      gfx::CreateVectorIcon(icon_definition, GetButtonColor(use_light_images_));
 
   // The early return is dependent on |animate| because callers use SetImage()
   // with ANIMATE_NO to progress the crossfade animation to the end.
@@ -102,7 +107,7 @@ const char* FrameCaptionButton::GetClassName() const {
 }
 
 void FrameCaptionButton::OnGestureEvent(ui::GestureEvent* event) {
-  // CustomButton does not become pressed when the user drags off and then back
+  // Button does not become pressed when the user drags off and then back
   // onto the button. Make FrameCaptionButton pressed in this case because this
   // behavior is more consistent with AlternateFrameSizeButton.
   if (event->type() == ui::ET_GESTURE_SCROLL_BEGIN ||
@@ -121,7 +126,11 @@ void FrameCaptionButton::OnGestureEvent(ui::GestureEvent* event) {
       event->StopPropagation();
     }
   }
-  CustomButton::OnGestureEvent(event);
+  Button::OnGestureEvent(event);
+}
+
+views::PaintInfo::ScaleType FrameCaptionButton::GetPaintScaleType() const {
+  return views::PaintInfo::ScaleType::kUniformScaling;
 }
 
 void FrameCaptionButton::PaintButtonContents(gfx::Canvas* canvas) {
@@ -169,11 +178,15 @@ void FrameCaptionButton::PaintButtonContents(gfx::Canvas* canvas) {
 }
 
 int FrameCaptionButton::GetAlphaForIcon(int base_alpha) const {
+  if (!enabled())
+    return base_alpha * kDisabledButtonAlphaRatio;
+
   if (paint_as_active_)
     return base_alpha;
 
   // Paint icons as active when they are hovered over or pressed.
-  double inactive_alpha = kInactiveIconAlpha;
+  double inactive_alpha = kInactiveFrameButtonIconAlphaRatio;
+
   if (hover_animation().is_animating()) {
     inactive_alpha =
         hover_animation().CurrentValueBetween(inactive_alpha, 1.0f);

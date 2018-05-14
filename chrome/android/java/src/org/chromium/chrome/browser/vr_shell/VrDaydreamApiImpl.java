@@ -13,21 +13,31 @@ import android.os.StrictMode;
 
 import com.google.vr.ndk.base.DaydreamApi;
 import com.google.vr.ndk.base.GvrApi;
+import com.google.vr.ndk.base.GvrUiLayout;
 
-import junit.framework.Assert;
-
+import org.chromium.base.Log;
 import org.chromium.ui.base.WindowAndroid;
 
+import java.lang.reflect.Method;
 
 /**
- * A wrapper for DaydreamApi. Note that we have to recreate the DaydreamApi instance each time we
- * use it, or API calls begin to silently fail.
+ * A wrapper for DaydreamApi.
  */
 public class VrDaydreamApiImpl implements VrDaydreamApi {
+    public static final String VR_BOOT_SYSTEM_PROPERTY = "ro.boot.vr";
+
     private final Context mContext;
+
+    private DaydreamApi mDaydreamApi;
+    private Boolean mBootsToVr = null;
 
     public VrDaydreamApiImpl(Context context) {
         mContext = context;
+    }
+
+    private DaydreamApi getDaydreamApi() {
+        if (mDaydreamApi == null) mDaydreamApi = DaydreamApi.create(mContext);
+        return mDaydreamApi;
     }
 
     @Override
@@ -37,19 +47,17 @@ public class VrDaydreamApiImpl implements VrDaydreamApi {
 
     @Override
     public boolean registerDaydreamIntent(final PendingIntent pendingIntent) {
-        DaydreamApi daydreamApi = DaydreamApi.create(mContext);
+        DaydreamApi daydreamApi = getDaydreamApi();
         if (daydreamApi == null) return false;
         daydreamApi.registerDaydreamIntent(pendingIntent);
-        daydreamApi.close();
         return true;
     }
 
     @Override
     public boolean unregisterDaydreamIntent() {
-        DaydreamApi daydreamApi = DaydreamApi.create(mContext);
+        DaydreamApi daydreamApi = getDaydreamApi();
         if (daydreamApi == null) return false;
         daydreamApi.unregisterDaydreamIntent();
-        daydreamApi.close();
         return true;
     }
 
@@ -60,27 +68,35 @@ public class VrDaydreamApiImpl implements VrDaydreamApi {
 
     @Override
     public boolean launchInVr(final PendingIntent pendingIntent) {
-        DaydreamApi daydreamApi = DaydreamApi.create(mContext);
+        DaydreamApi daydreamApi = getDaydreamApi();
         if (daydreamApi == null) return false;
         daydreamApi.launchInVr(pendingIntent);
-        daydreamApi.close();
+        return true;
+    }
+
+    @Override
+    public boolean launchInVr(final Intent intent) {
+        DaydreamApi daydreamApi = getDaydreamApi();
+        if (daydreamApi == null) return false;
+        daydreamApi.launchInVr(intent);
         return true;
     }
 
     @Override
     public boolean exitFromVr(int requestCode, final Intent intent) {
         Activity activity = WindowAndroid.activityFromContext(mContext);
-        Assert.assertNotNull(activity);
-        DaydreamApi daydreamApi = DaydreamApi.create(activity);
+        if (activity == null) {
+            throw new IllegalStateException("Activity is null");
+        }
+        DaydreamApi daydreamApi = getDaydreamApi();
         if (daydreamApi == null) return false;
         daydreamApi.exitFromVr(activity, requestCode, intent);
-        daydreamApi.close();
         return true;
     }
 
     @Override
     public Boolean isDaydreamCurrentViewer() {
-        DaydreamApi daydreamApi = DaydreamApi.create(mContext);
+        DaydreamApi daydreamApi = getDaydreamApi();
         if (daydreamApi == null) return false;
         // If this is the first time any app reads the daydream config file, daydream may create its
         // config directory... crbug.com/686104
@@ -91,15 +107,59 @@ public class VrDaydreamApiImpl implements VrDaydreamApi {
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
-        daydreamApi.close();
         return type == GvrApi.ViewerType.DAYDREAM;
     }
 
     @Override
-    public void launchVrHomescreen() {
-        DaydreamApi daydreamApi = DaydreamApi.create(mContext);
-        if (daydreamApi == null) return;
+    public boolean launchVrHomescreen() {
+        DaydreamApi daydreamApi = getDaydreamApi();
+        if (daydreamApi == null) return false;
         daydreamApi.launchVrHomescreen();
-        daydreamApi.close();
+        return true;
+    }
+
+    @Override
+    public boolean bootsToVr() {
+        if (mBootsToVr == null) {
+            // TODO(mthiesse): Replace this with a Daydream API call when supported.
+            // Note that System.GetProperty is unable to read system ro properties, so we have to
+            // resort to reflection as seen below. This method of reading system properties has been
+            // available since API level 1.
+            mBootsToVr = getIntSystemProperty(VR_BOOT_SYSTEM_PROPERTY, 0) == 1;
+        }
+        return mBootsToVr;
+    }
+
+    @Override
+    public Intent setupVrIntent(Intent intent) {
+        return DaydreamApi.setupVrIntent(intent);
+    }
+
+    @Override
+    public void launchGvrSettings() {
+        Activity activity = WindowAndroid.activityFromContext(mContext);
+        if (activity == null) {
+            throw new IllegalStateException("Activity is null");
+        }
+        GvrUiLayout.launchOrInstallGvrApp(activity);
+    }
+
+    @Override
+    public void close() {
+        if (mDaydreamApi == null) return;
+        mDaydreamApi.close();
+        mDaydreamApi = null;
+    }
+
+    private int getIntSystemProperty(String key, int defaultValue) {
+        try {
+            final Class<?> systemProperties = Class.forName("android.os.SystemProperties");
+            final Method getInt = systemProperties.getMethod("getInt", String.class, int.class);
+            return (Integer) getInt.invoke(null, key, defaultValue);
+        } catch (Exception e) {
+            Log.e("Exception while getting system property %s. Using default %s.", key,
+                    defaultValue, e);
+            return defaultValue;
+        }
     }
 }

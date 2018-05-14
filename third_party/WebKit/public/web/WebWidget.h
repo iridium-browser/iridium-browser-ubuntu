@@ -41,7 +41,8 @@
 #include "public/platform/WebRect.h"
 #include "public/platform/WebSize.h"
 #include "public/platform/WebTextInputInfo.h"
-#include "public/web/WebCompositionUnderline.h"
+#include "public/web/WebHitTestResult.h"
+#include "public/web/WebImeTextSpan.h"
 #include "public/web/WebRange.h"
 #include "public/web/WebTextDirection.h"
 
@@ -49,11 +50,10 @@ namespace blink {
 
 class WebCompositeAndReadbackAsyncCallback;
 class WebCoalescedInputEvent;
+class WebLayerTreeView;
 class WebLayoutAndPaintAsyncCallback;
 class WebPagePopup;
 struct WebPoint;
-template <typename T>
-class WebVector;
 
 class WebWidget {
  public:
@@ -88,19 +88,36 @@ class WebWidget {
   // Called to run through the entire set of document lifecycle phases needed
   // to render a frame of the web widget. This MUST be called before Paint,
   // and it may result in calls to WebWidgetClient::didInvalidateRect.
-  virtual void UpdateAllLifecyclePhases() {}
+  virtual void UpdateAllLifecyclePhases() { UpdateLifecycle(); }
+
+  // Selectively runs all lifecycle phases or all phases excluding paint. The
+  // latter can be used to trigger side effects of updating layout and
+  // animations if painting is not required.
+  enum class LifecycleUpdate { kPrePaint, kAll };
+  virtual void UpdateLifecycle(
+      LifecycleUpdate requested_update = LifecycleUpdate::kAll) {}
+
+  // Performs the complete set of document lifecycle phases, including updates
+  // to the compositor state except rasterization.
+  virtual void UpdateAllLifecyclePhasesAndCompositeForTesting() {}
 
   // Called to paint the rectangular region within the WebWidget
-  // onto the specified canvas at (viewPort.x,viewPort.y). You MUST call
-  // Layout before calling this method. It is okay to call paint
-  // multiple times once layout has been called, assuming no other
-  // changes are made to the WebWidget (e.g., once events are
-  // processed, it should be assumed that another call to layout is
-  // warranted before painting again).
+  // onto the specified canvas at (viewPort.x,viewPort.y).
+  //
+  // Before calling Paint(), you must call
+  // UpdateLifecycle(LifecycleUpdate::All): this method assumes the lifecycle is
+  // clean. It is okay to call paint multiple times once the lifecycle is
+  // updated, assuming no other changes are made to the WebWidget (e.g., once
+  // events are processed, it should be assumed that another call to
+  // UpdateLifecycle is warranted before painting again).
   virtual void Paint(WebCanvas*, const WebRect& view_port) {}
 
   // Similar to paint() but ignores compositing decisions, squashing all
   // contents of the WebWidget into the output given to the WebCanvas.
+  //
+  // Before calling PaintIgnoringCompositing(), you must call
+  // UpdateLifecycle(LifecycleUpdate::All): this method assumes the lifecycle is
+  // clean.
   virtual void PaintIgnoringCompositing(WebCanvas*, const WebRect&) {}
 
   // Run layout and paint of all pending document changes asynchronously.
@@ -119,16 +136,25 @@ class WebWidget {
   // on receiving this message
   virtual void ThemeChanged() {}
 
+  // Do a hit test at given point and return the WebHitTestResult.
+  virtual WebHitTestResult HitTestResultAt(const WebPoint&) {
+    return WebHitTestResult();
+  }
+
   // Called to inform the WebWidget of an input event.
   virtual WebInputEventResult HandleInputEvent(const WebCoalescedInputEvent&) {
     return WebInputEventResult::kNotHandled;
   }
 
+  // Send any outstanding touch events. Touch events need to be grouped together
+  // and any changes since the last time a touch event is going to be sent in
+  // the new touch event.
+  virtual WebInputEventResult DispatchBufferedTouchEvents() {
+    return WebInputEventResult::kNotHandled;
+  }
+
   // Called to inform the WebWidget of the mouse cursor's visibility.
   virtual void SetCursorVisibilityState(bool is_visible) {}
-
-  // Check whether the given point hits any registered touch event handlers.
-  virtual bool HasTouchEventHandlersAt(const WebPoint&) { return true; }
 
   // Applies viewport related properties during a commit from the compositor
   // thread.
@@ -147,29 +173,14 @@ class WebWidget {
   // Called to inform the WebWidget that it has gained or lost keyboard focus.
   virtual void SetFocus(bool) {}
 
-  // Fetches the character range of the current composition, also called the
-  // "marked range."
-  virtual WebRange CompositionRange() { return WebRange(); }
-
   // Returns the anchor and focus bounds of the current selection.
   // If the selection range is empty, it returns the caret bounds.
   virtual bool SelectionBounds(WebRect& anchor, WebRect& focus) const {
     return false;
   }
 
-  // Returns the text direction at the start and end bounds of the current
-  // selection.  If the selection range is empty, it returns false.
-  virtual bool SelectionTextDirection(WebTextDirection& start,
-                                      WebTextDirection& end) const {
-    return false;
-  }
-
-  // Returns true if the selection range is nonempty and its anchor is first
-  // (i.e its anchor is its start).
-  virtual bool IsSelectionAnchorFirst() const { return false; }
-
-  // Changes the text direction of the selected input node.
-  virtual void SetTextDirection(WebTextDirection) {}
+  // Returns true if the WebWidget is currently animating a GestureFling.
+  virtual bool IsFlinging() const { return false; }
 
   // Returns true if the WebWidget uses GPU accelerated compositing
   // to render its contents.
@@ -177,6 +188,9 @@ class WebWidget {
 
   // Returns true if the WebWidget created is of type WebView.
   virtual bool IsWebView() const { return false; }
+
+  // Returns true if the WebWidget created is of type PepperWidget.
+  virtual bool IsPepperWidget() const { return false; }
 
   // Returns true if the WebWidget created is of type WebFrameWidget.
   virtual bool IsWebFrameWidget() const { return false; }
@@ -215,18 +229,11 @@ class WebWidget {
                                           WebBrowserControlsState current,
                                           bool animate) {}
 
-  // Populate |bounds| with the composition character bounds for the ongoing
-  // composition. Returns false if there is no focused input or any ongoing
-  // composition.
-  virtual bool GetCompositionCharacterBounds(WebVector<WebRect>& bounds) {
-    return false;
-  }
-
   // Called by client to request showing the context menu.
   virtual void ShowContextMenu(WebMenuSourceType) {}
 
  protected:
-  ~WebWidget() {}
+  ~WebWidget() = default;
 };
 
 }  // namespace blink

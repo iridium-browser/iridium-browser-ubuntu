@@ -25,7 +25,7 @@ RTCVoidRequestPromiseImpl::RTCVoidRequestPromiseImpl(
   DCHECK(resolver_);
 }
 
-RTCVoidRequestPromiseImpl::~RTCVoidRequestPromiseImpl() {}
+RTCVoidRequestPromiseImpl::~RTCVoidRequestPromiseImpl() = default;
 
 void RTCVoidRequestPromiseImpl::RequestSucceeded() {
   if (requester_ && requester_->ShouldFireDefaultCallbacks()) {
@@ -57,7 +57,7 @@ void RTCVoidRequestPromiseImpl::Clear() {
   requester_.Clear();
 }
 
-DEFINE_TRACE(RTCVoidRequestPromiseImpl) {
+void RTCVoidRequestPromiseImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(resolver_);
   visitor->Trace(requester_);
   RTCVoidRequest::Trace(visitor);

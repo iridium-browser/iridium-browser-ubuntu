@@ -10,17 +10,17 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/process/process.h"
 #include "base/run_loop.h"
+#include "build/build_config.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/interfaces/connector.mojom.h"
-#include "services/service_manager/public/interfaces/service_factory.mojom.h"
+#include "services/service_manager/public/mojom/connector.mojom.h"
+#include "services/service_manager/public/mojom/service_factory.mojom.h"
 #include "services/service_manager/runner/common/switches.h"
 
 namespace service_manager {
@@ -75,23 +75,24 @@ mojom::ConnectResult LaunchAndConnectToProcess(
   connector->StartService(target, std::move(client), MakeRequest(&receiver));
   mojom::ConnectResult result;
   {
-    base::RunLoop loop;
+    base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
     Connector::TestApi test_api(connector);
     test_api.SetStartServiceCallback(
         base::Bind(&GrabConnectResult, &loop, &result));
-    base::MessageLoop::ScopedNestableTaskAllower allow(
-        base::MessageLoop::current());
     loop.Run();
   }
 
   base::LaunchOptions options;
 #if defined(OS_WIN)
-  options.handles_to_inherit = &handle_passing_info;
+  options.handles_to_inherit = handle_passing_info;
+#elif defined(OS_FUCHSIA)
+  options.handles_to_transfer = handle_passing_info;
 #elif defined(OS_POSIX)
-  options.fds_to_remap = &handle_passing_info;
+  options.fds_to_remap = handle_passing_info;
 #endif
   *process = base::LaunchProcess(child_command_line, options);
   DCHECK(process->IsValid());
+  platform_channel_pair.ChildProcessLaunched();
   receiver->SetPID(process->Pid());
   invitation.Send(
       process->Handle(),

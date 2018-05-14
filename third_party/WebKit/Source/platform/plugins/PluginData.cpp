@@ -30,7 +30,7 @@
 
 namespace blink {
 
-DEFINE_TRACE(MimeClassInfo) {
+void MimeClassInfo::Trace(blink::Visitor* visitor) {
   visitor->Trace(plugin_);
 }
 
@@ -39,7 +39,7 @@ MimeClassInfo::MimeClassInfo(const String& type,
                              PluginInfo& plugin)
     : type_(type), description_(description), plugin_(&plugin) {}
 
-DEFINE_TRACE(PluginInfo) {
+void PluginInfo::Trace(blink::Visitor* visitor) {
   visitor->Trace(mimes_);
 }
 
@@ -53,7 +53,7 @@ void PluginInfo::AddMimeType(MimeClassInfo* info) {
 }
 
 const MimeClassInfo* PluginInfo::GetMimeClassInfo(size_t index) const {
-  if (index > mimes_.size())
+  if (index >= mimes_.size())
     return nullptr;
   return mimes_[index];
 }
@@ -71,7 +71,7 @@ size_t PluginInfo::GetMimeClassInfoSize() const {
   return mimes_.size();
 }
 
-DEFINE_TRACE(PluginData) {
+void PluginData::Trace(blink::Visitor* visitor) {
   visitor->Trace(plugins_);
   visitor->Trace(mimes_);
 }
@@ -83,7 +83,7 @@ void PluginData::RefreshBrowserSidePluginCache() {
                                      &builder);
 }
 
-void PluginData::UpdatePluginList(SecurityOrigin* main_frame_origin) {
+void PluginData::UpdatePluginList(const SecurityOrigin* main_frame_origin) {
   ResetPluginData();
   main_frame_origin_ = main_frame_origin;
   PluginListBuilder builder(&plugins_);

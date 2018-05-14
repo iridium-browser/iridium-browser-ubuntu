@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -49,8 +50,7 @@ HttpAuthHandlerNegotiate::Factory::Factory()
       is_unsupported_(false) {
 }
 
-HttpAuthHandlerNegotiate::Factory::~Factory() {
-}
+HttpAuthHandlerNegotiate::Factory::~Factory() = default;
 
 void HttpAuthHandlerNegotiate::Factory::set_host_resolver(
     HostResolver* resolver) {
@@ -139,8 +139,7 @@ HttpAuthHandlerNegotiate::HttpAuthHandlerNegotiate(
       http_auth_preferences_(prefs) {
 }
 
-HttpAuthHandlerNegotiate::~HttpAuthHandlerNegotiate() {
-}
+HttpAuthHandlerNegotiate::~HttpAuthHandlerNegotiate() = default;
 
 std::string HttpAuthHandlerNegotiate::CreateSPN(const AddressList& address_list,
                                                 const GURL& origin) {
@@ -285,9 +284,7 @@ void HttpAuthHandlerNegotiate::OnIOComplete(int result) {
 void HttpAuthHandlerNegotiate::DoCallback(int rv) {
   DCHECK(rv != ERR_IO_PENDING);
   DCHECK(!callback_.is_null());
-  CompletionCallback callback = callback_;
-  callback_.Reset();
-  callback.Run(rv);
+  base::ResetAndReturn(&callback_).Run(rv);
 }
 
 int HttpAuthHandlerNegotiate::DoLoop(int result) {

@@ -11,6 +11,8 @@
 
 #import "cwv_export.h"
 
+NS_ASSUME_NONNULL_BEGIN
+
 @protocol CWVScrollViewDelegate;
 
 // Scroll view inside the web view. This is not a subclass of UIScrollView
@@ -19,21 +21,25 @@
 //
 // These methods are forwarded to the internal UIScrollView. Please see the
 // <UIKit/UIScrollView.h> documentation for details about the following methods.
-//
-// TODO(crbug.com/719323): Add nullability annotations.
 CWV_EXPORT
 @interface CWVScrollView : NSObject
 
+// Not KVO compliant.
 @property(nonatomic, readonly) CGRect bounds;
-@property(nonatomic) CGPoint contentOffset;
 @property(nonatomic) UIEdgeInsets scrollIndicatorInsets;
 @property(nonatomic, weak) id<CWVScrollViewDelegate> delegate;
 @property(nonatomic, readonly, getter=isDecelerating) BOOL decelerating;
 @property(nonatomic, readonly, getter=isDragging) BOOL dragging;
+@property(nonatomic, readonly, getter=isTracking) BOOL tracking;
 @property(nonatomic) BOOL scrollsToTop;
+@property(nonatomic)
+    UIScrollViewContentInsetAdjustmentBehavior contentInsetAdjustmentBehavior
+        API_AVAILABLE(ios(11.0));
 @property(nonatomic, readonly) UIPanGestureRecognizer* panGestureRecognizer;
+@property(nonatomic, readonly, copy) NSArray<__kindof UIView*>* subviews;
 
 // KVO compliant.
+@property(nonatomic) CGPoint contentOffset;
 @property(nonatomic, readonly) CGSize contentSize;
 
 // Be careful when using this property. There's a bug with the
@@ -43,6 +49,8 @@ CWV_EXPORT
 // the height between the top and bottom insets.
 // https://bugs.webkit.org/show_bug.cgi?id=134230
 // rdar://23584409 (not available on Open Radar)
+//
+// Not KVO compliant.
 @property(nonatomic) UIEdgeInsets contentInset;
 
 - (void)setContentOffset:(CGPoint)contentOffset animated:(BOOL)animated;
@@ -50,5 +58,7 @@ CWV_EXPORT
 - (void)removeGestureRecognizer:(UIGestureRecognizer*)gestureRecognizer;
 
 @end
+
+NS_ASSUME_NONNULL_END
 
 #endif  // IOS_WEB_VIEW_PUBLIC_CWV_SCROLL_VIEW_H_

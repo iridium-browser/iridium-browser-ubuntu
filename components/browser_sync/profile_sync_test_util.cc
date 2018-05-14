@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/memory/ptr_util.h"
+#include "base/bind.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -19,6 +19,7 @@
 #include "components/sync/engine/passive_model_worker.h"
 #include "components/sync/engine/sequenced_model_worker.h"
 #include "components/sync/engine/ui_model_worker.h"
+#include "components/sync/model/model_type_store_test_util.h"
 #include "net/url_request/url_request_test_util.h"
 
 namespace browser_sync {
@@ -93,7 +94,7 @@ BundleSyncClient::BundleSyncClient(
       db_thread_(db_thread),
       file_thread_(file_thread),
       history_service_(history_service) {
-  DCHECK_EQ(!!db_thread_, !!file_thread_);
+  EXPECT_EQ(!!db_thread_, !!file_thread_);
 }
 
 BundleSyncClient::~BundleSyncClient() = default;
@@ -127,7 +128,8 @@ scoped_refptr<syncer::ModelSafeWorker>
 BundleSyncClient::CreateModelWorkerForGroup(syncer::ModelSafeGroup group) {
   if (!db_thread_)
     return FakeSyncClient::CreateModelWorkerForGroup(group);
-  DCHECK(file_thread_) << "DB thread was specified but FILE thread was not.";
+  EXPECT_TRUE(file_thread_)
+      << "DB thread was specified but FILE thread was not.";
   switch (group) {
     case syncer::GROUP_DB:
       return new syncer::SequencedModelWorker(db_thread_, syncer::GROUP_DB);
@@ -162,10 +164,6 @@ bookmarks::BookmarkModel* BundleSyncClient::GetBookmarkModel() {
 }
 
 }  // namespace
-
-void EmptyNetworkTimeUpdate(const base::Time&,
-                            const base::TimeDelta&,
-                            const base::TimeDelta&) {}
 
 void RegisterPrefsForProfileSyncService(
     user_prefs::PrefRegistrySyncable* registry) {
@@ -213,7 +211,7 @@ void ProfileSyncServiceBundle::SyncClientBuilder::SetBookmarkModelCallback(
 
 std::unique_ptr<syncer::FakeSyncClient>
 ProfileSyncServiceBundle::SyncClientBuilder::Build() {
-  return base::MakeUnique<BundleSyncClient>(
+  return std::make_unique<BundleSyncClient>(
       bundle_->component_factory(), bundle_->pref_service(),
       bundle_->sync_sessions_client(), personal_data_manager_,
       get_syncable_service_callback_, get_sync_service_callback_,
@@ -225,7 +223,6 @@ ProfileSyncServiceBundle::SyncClientBuilder::Build() {
 
 ProfileSyncServiceBundle::ProfileSyncServiceBundle()
     : db_thread_(base::ThreadTaskRunnerHandle::Get()),
-      worker_pool_owner_(2, "sync test worker pool"),
       signin_client_(&pref_service_),
 #if defined(OS_CHROMEOS)
       signin_manager_(&signin_client_, &account_tracker_),
@@ -253,14 +250,16 @@ ProfileSyncService::InitParams ProfileSyncServiceBundle::CreateBasicInitParams(
   init_params.start_behavior = start_behavior;
   init_params.sync_client = std::move(sync_client);
   init_params.signin_wrapper =
-      base::MakeUnique<SigninManagerWrapper>(signin_manager());
+      std::make_unique<SigninManagerWrapper>(signin_manager());
   init_params.oauth2_token_service = auth_service();
-  init_params.network_time_update_callback =
-      base::Bind(&EmptyNetworkTimeUpdate);
-  init_params.base_directory = base::FilePath(FILE_PATH_LITERAL("dummyPath"));
+  init_params.network_time_update_callback = base::DoNothing();
+  EXPECT_TRUE(base_directory_.CreateUniqueTempDir());
+  init_params.base_directory = base_directory_.GetPath();
   init_params.url_request_context = url_request_context();
   init_params.debug_identifier = "dummyDebugName";
   init_params.channel = version_info::Channel::UNKNOWN;
+  init_params.model_type_store_factory =
+      syncer::ModelTypeStoreTestUtil::FactoryForInMemoryStoreForTest();
 
   return init_params;
 }

@@ -118,11 +118,30 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     lastBackMessageValue_: false,
 
     /**
+     * Number of users in the login screen UI.
+     * This is mainly used by views login screen, this value is always 0 for
+     * WebUI login screen.
+     * TODO(crbug.com/808271): WebUI and views implementation should return the
+     * same user list.
+     * @type {number}
+     * @private
+     */
+    userCount_: 0,
+
+    /**
      * Whether the dialog could be closed.
+     * This is being checked in cancel() when user clicks on signin-back-button
+     * (normal gaia flow) or the buttons in gaia-navigation (used in enterprise
+     * enrollment) etc.
+     * This value also controls the visibility of refresh button and close
+     * button in the gaia-navigation.
      * @type {boolean}
      */
     get closable() {
-      return !!$('pod-row').pods.length || this.isOffline();
+      var hasUser = Oobe.getInstance().showingViewsLogin ?
+          (!!this.userCount_) :
+          (!!$('pod-row').pods.length);
+      return hasUser || this.isOffline();
     },
 
     /**
@@ -186,7 +205,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      * to match the API version.
      * Note that this cannot be changed after authenticator is created.
      */
-    chromeOSApiVersion_: undefined,
+    chromeOSApiVersion_: 2,
 
     /** @override */
     decorate: function() {
@@ -621,6 +640,52 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     },
 
     /**
+     * Copies attributes between nodes.
+     * @param {!Object} fromNode source to copy attributes from
+     * @param {!Object} toNode target to copy attributes to
+     * @param {!Set<string>} skipAttributes specifies attributes to be skipped
+     * @private
+     */
+    copyAttributes_: function(fromNode, toNode, skipAttributes) {
+      for (var i = 0; i < fromNode.attributes.length; ++i) {
+        var attribute = fromNode.attributes[i];
+        if (!skipAttributes.has(attribute.nodeName))
+          toNode.setAttribute(attribute.nodeName, attribute.nodeValue);
+      }
+    },
+
+    /**
+     * Changes the 'partition' attribute of the sign-in frame. If the sign-in
+     * frame has already navigated, this function re-creates it.
+     * @param {string} newWebviewPartitionName the new partition
+     * @private
+     */
+    setSigninFramePartition_: function(newWebviewPartitionName) {
+      var signinFrame = $('signin-frame');
+
+      if (!signinFrame.src) {
+        // We have not navigated anywhere yet. Note that a webview's src
+        // attribute does not allow a change back to "".
+        signinFrame.partition = newWebviewPartitionName;
+      } else if (signinFrame.partition != newWebviewPartitionName) {
+        // The webview has already navigated. We have to re-create it.
+        var signinFrameParent = signinFrame.parentElement;
+
+        // Copy all attributes except for partition and src from the previous
+        // webview. Use the specified |newWebviewPartitionName|.
+        var newSigninFrame = document.createElement('webview');
+        this.copyAttributes_(
+            signinFrame, newSigninFrame, new Set(['src', 'partition']));
+        newSigninFrame.partition = newWebviewPartitionName;
+
+        signinFrameParent.replaceChild(newSigninFrame, signinFrame);
+
+        // Make sure the auth host uses the new webview from now on.
+        this.gaiaAuthHost_.rebindWebview($('signin-frame'));
+      }
+    },
+
+    /**
      * Loads the authentication extension into the iframe.
      * @param {Object} data Extension parameters bag.
      * @private
@@ -633,7 +698,13 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
         this.gaiaAuthHost_.resetWebview();
       }
 
+      this.setSigninFramePartition_(data.webviewPartitionName);
+
+      // Must be set before calling updateSigninFrameContainers_()
+      this.chromeOSApiVersion_ = data.chromeOSApiVersion;
+      // This triggers updateSigninFrameContainers_()
       this.screenMode = data.screenMode;
+      this.userCount_ = data.userCount;
       this.email = '';
       this.authCompleted_ = false;
       this.lastBackMessageValue_ = false;
@@ -647,7 +718,6 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       $('saml-notice-container').hidden = true;
       this.samlPasswordConfirmAttempt_ = 0;
 
-      this.chromeOSApiVersion_ = data.chromeOSApiVersion;
       if (this.chromeOSApiVersion_ == 2) {
         $('signin-frame-container-v2').appendChild($('signin-frame'));
         $('gaia-signin')
@@ -656,6 +726,9 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
         $('offline-gaia').removeAttribute('not-a-dialog');
         $('offline-gaia').classList.toggle('fit', false);
       } else {
+        $('gaia-signin-form-container').appendChild($('signin-frame'));
+        $('gaia-signin-form-container')
+            .appendChild($('offline-gaia'), $('gaia-step-contents'));
         $('offline-gaia').glifMode = false;
         $('offline-gaia').setAttribute('not-a-dialog', true);
         $('offline-gaia').classList.toggle('fit', true);
@@ -680,6 +753,8 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       params.menuGuestMode = data.guestSignin;
       params.menuKeyboardOptions = false;
       params.menuEnterpriseEnrollment =
+          !(data.enterpriseManagedDevice || data.hasDeviceOwner);
+      params.isFirstUser =
           !(data.enterpriseManagedDevice || data.hasDeviceOwner);
 
       this.gaiaAuthParams_ = params;
@@ -713,7 +788,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      * Displays correct screen container for given mode and APi version.
      */
     updateSigninFrameContainers_: function() {
-      let old_state = this.classList.contains('v2');
+      let oldState = this.classList.contains('v2');
       this.classList.toggle('v2', false);
       if ((this.screenMode_ == ScreenMode.DEFAULT ||
            this.screenMode_ == ScreenMode.OFFLINE) &&
@@ -724,7 +799,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
         return;
       // Switching between signin-frame-dialog and gaia-step-contents
       // updates screen size.
-      if (old_state != this.classList.contains('v2'))
+      if (oldState != this.classList.contains('v2'))
         Oobe.getInstance().updateScreenSize(this);
     },
 
@@ -1005,16 +1080,10 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
             'authenticateUser',
             [credentials.email, credentials.password, false]);
       } else if (credentials.authCode) {
-        if (credentials.hasOwnProperty('authCodeOnly') &&
-            credentials.authCodeOnly) {
-          chrome.send(
-              'completeAuthenticationAuthCodeOnly', [credentials.authCode]);
-        } else {
-          chrome.send('completeAuthentication', [
-            credentials.gaiaId, credentials.email, credentials.password,
-            credentials.authCode, credentials.usingSAML, credentials.gapsCookie
-          ]);
-        }
+        chrome.send('completeAuthentication', [
+          credentials.gaiaId, credentials.email, credentials.password,
+          credentials.authCode, credentials.usingSAML, credentials.gapsCookie
+        ]);
       } else {
         chrome.send('completeLogin', [
           credentials.gaiaId, credentials.email, credentials.password,
@@ -1023,6 +1092,10 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       }
 
       this.loading = true;
+      // Hide the back button and the border line as they are not useful
+      // when the loading screen is shown.
+      $('signin-back-button').hidden = true;
+      $('signin-frame-dialog').setAttribute('hide-shadow', true);
 
       // Now that we're in logged in state header should be hidden.
       Oobe.getInstance().headerHidden = true;
@@ -1219,6 +1292,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       var adAuthUI = this.getSigninFrame_();
       adAuthUI.setUser(username);
       adAuthUI.setInvalid(errorState);
+      this.authCompleted_ = false;
       this.loading = false;
       Oobe.getInstance().headerHidden = false;
     }

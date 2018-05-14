@@ -25,11 +25,11 @@ ISOLATED_FILE_VERSION = '1.6'
 DISK_FILE_CHUNK = 1024 * 1024
 
 
-# Sadly, hashlib uses 'sha1' instead of the standard 'sha-1' so explicitly
+# Sadly, hashlib uses 'shaX' instead of the standard 'sha-X' so explicitly
 # specify the names here.
 SUPPORTED_ALGOS = {
-  'md5': hashlib.md5,
   'sha-1': hashlib.sha1,
+  'sha-256': hashlib.sha256,
   'sha-512': hashlib.sha512,
 }
 
@@ -37,7 +37,8 @@ SUPPORTED_ALGOS = {
 # Used for serialization.
 SUPPORTED_ALGOS_REVERSE = dict((v, k) for k, v in SUPPORTED_ALGOS.iteritems())
 
-SUPPORTED_FILE_TYPES = ['basic', 'ar', 'tar']
+
+SUPPORTED_FILE_TYPES = ['basic', 'tar']
 
 
 class IsolatedError(ValueError):
@@ -56,10 +57,29 @@ def is_valid_hash(value, algo):
   return bool(re.match(r'^[a-fA-F0-9]{%d}$' % size, value))
 
 
-def get_hash_algo(_namespace):
+get_hash_algo_has_logged = False
+
+
+def get_hash_algo(namespace):
   """Return hash algorithm class to use when uploading to given |namespace|."""
-  # TODO(vadimsh): Implement this at some point.
-  return hashlib.sha1
+  global get_hash_algo_has_logged
+  chosen = None
+  for name, algo in SUPPORTED_ALGOS.iteritems():
+    if namespace.startswith(name + '-'):
+      chosen = algo
+      break
+
+  if not get_hash_algo_has_logged:
+    get_hash_algo_has_logged = True
+    if chosen:
+      logging.info('Using hash algo %s for namespace %s', chosen, namespace)
+    else:
+      logging.warn('No hash algo found in \'%s\', assuming sha-1', namespace)
+
+  if not chosen:
+    return hashlib.sha1
+
+  return chosen
 
 
 def is_namespace_with_compression(namespace):
@@ -86,7 +106,7 @@ class IsolatedFile(object):
   """Represents a single parsed .isolated file."""
 
   def __init__(self, obj_hash, algo):
-    """|obj_hash| is really the sha-1 of the file."""
+    """|obj_hash| is really the hash of the file."""
     self.obj_hash = obj_hash
     self.algo = algo
 
@@ -161,7 +181,7 @@ def expand_symlinks(indir, relfile):
     # readlink doesn't exist on Windows.
     # pylint: disable=E1101
     target = os.path.normpath(os.path.join(done, pre_symlink))
-    symlink_target = os.readlink(symlink_path)
+    symlink_target = fs.readlink(symlink_path)
     if os.path.isabs(symlink_target):
       # Absolute path are considered a normal directories. The use case is
       # generally someone who puts the output directory on a separate drive.
@@ -170,7 +190,7 @@ def expand_symlinks(indir, relfile):
       # The symlink itself could be using the wrong path case.
       target = file_path.fix_native_path_case(target, symlink_target)
 
-    if not os.path.exists(target):
+    if not fs.exists(target):
       raise MappingError(
           'Symlink target doesn\'t exist: %s -> %s' % (symlink_path, target))
     target = file_path.get_native_path_case(target)
@@ -214,17 +234,17 @@ def expand_directory_and_symlink(indir, relfile, blacklist, follow_symlinks):
     ln -s .. foo
   """
   if os.path.isabs(relfile):
-    raise MappingError('Can\'t map absolute path %s' % relfile)
+    raise MappingError(u'Can\'t map absolute path %s' % relfile)
 
   infile = file_path.normpath(os.path.join(indir, relfile))
   if not infile.startswith(indir):
-    raise MappingError('Can\'t map file %s outside %s' % (infile, indir))
+    raise MappingError(u'Can\'t map file %s outside %s' % (infile, indir))
 
   filepath = os.path.join(indir, relfile)
   native_filepath = file_path.get_native_path_case(filepath)
   if filepath != native_filepath:
     # Special case './'.
-    if filepath != native_filepath + '.' + os.path.sep:
+    if filepath != native_filepath + u'.' + os.path.sep:
       # While it'd be nice to enforce path casing on Windows, it's impractical.
       # Also give up enforcing strict path case on OSX. Really, it's that sad.
       # The case where it happens is very specific and hard to reproduce:
@@ -242,7 +262,7 @@ def expand_directory_and_symlink(indir, relfile, blacklist, follow_symlinks):
       # have no idea why.
       if sys.platform not in ('darwin', 'win32'):
         raise MappingError(
-            'File path doesn\'t equal native file path\n%s != %s' %
+            u'File path doesn\'t equal native file path\n%s != %s' %
             (filepath, native_filepath))
 
   symlinks = []
@@ -254,12 +274,12 @@ def expand_directory_and_symlink(indir, relfile, blacklist, follow_symlinks):
       pass
 
   if relfile.endswith(os.path.sep):
-    if not os.path.isdir(infile):
+    if not fs.isdir(infile):
       raise MappingError(
-          '%s is not a directory but ends with "%s"' % (infile, os.path.sep))
+          u'%s is not a directory but ends with "%s"' % (infile, os.path.sep))
 
     # Special case './'.
-    if relfile.startswith('.' + os.path.sep):
+    if relfile.startswith(u'.' + os.path.sep):
       relfile = relfile[2:]
     outfiles = symlinks
     try:
@@ -267,7 +287,7 @@ def expand_directory_and_symlink(indir, relfile, blacklist, follow_symlinks):
         inner_relfile = os.path.join(relfile, filename)
         if blacklist and blacklist(inner_relfile):
           continue
-        if os.path.isdir(os.path.join(indir, inner_relfile)):
+        if fs.isdir(os.path.join(indir, inner_relfile)):
           inner_relfile += os.path.sep
         outfiles.extend(
             expand_directory_and_symlink(indir, inner_relfile, blacklist,
@@ -275,15 +295,15 @@ def expand_directory_and_symlink(indir, relfile, blacklist, follow_symlinks):
       return outfiles
     except OSError as e:
       raise MappingError(
-          'Unable to iterate over directory %s.\n%s' % (infile, e))
+          u'Unable to iterate over directory %s.\n%s' % (infile, e))
   else:
     # Always add individual files even if they were blacklisted.
-    if os.path.isdir(infile):
+    if fs.isdir(infile):
       raise MappingError(
-          'Input directory %s must have a trailing slash' % infile)
+          u'Input directory %s must have a trailing slash' % infile)
 
-    if not os.path.isfile(infile):
-      raise MappingError('Input file %s doesn\'t exist' % infile)
+    if not fs.isfile(infile):
+      raise MappingError(u'Input file %s doesn\'t exist' % infile)
 
     return symlinks + [relfile]
 
@@ -319,7 +339,7 @@ def file_to_metadata(filepath, prevdict, read_only, algo, collapse_symlinks):
 
   Arguments:
     filepath: File to act on.
-    prevdict: the previous dictionary. It is used to retrieve the cached sha-1
+    prevdict: the previous dictionary. It is used to retrieve the cached hash
               to skip recalculating the hash. Optional.
     read_only: If 1 or 2, the file mode is manipulated. In practice, only save
                one of 4 modes: 0755 (rwx), 0644 (rw), 0555 (rx), 0444 (r). On
@@ -344,10 +364,10 @@ def file_to_metadata(filepath, prevdict, read_only, algo, collapse_symlinks):
   try:
     if collapse_symlinks:
       # os.stat follows symbolic links
-      filestats = os.stat(filepath)
+      filestats = fs.stat(filepath)
     else:
       # os.lstat does not follow symbolic links, and thus preserves them.
-      filestats = os.lstat(filepath)
+      filestats = fs.lstat(filepath)
   except OSError:
     # The file is not present.
     raise MappingError('%s is missing' % filepath)
@@ -375,7 +395,7 @@ def file_to_metadata(filepath, prevdict, read_only, algo, collapse_symlinks):
   if not is_link:
     out['s'] = filestats.st_size
     # If the timestamp wasn't updated and the file size is still the same, carry
-    # on the sha-1.
+    # on the hash.
     if (prevdict.get('t') == out['t'] and
         prevdict.get('s') == out['s']):
       # Reuse the previous hash if available.
@@ -393,7 +413,7 @@ def file_to_metadata(filepath, prevdict, read_only, algo, collapse_symlinks):
       # TODO(maruel): It'd be better if it was only done once, in
       # expand_directory_and_symlink(), so it would not be necessary to do again
       # here.
-      symlink_value = os.readlink(filepath)  # pylint: disable=E1101
+      symlink_value = fs.readlink(filepath)  # pylint: disable=E1101
       filedir = file_path.get_native_path_case(os.path.dirname(filepath))
       native_dest = file_path.fix_native_path_case(filedir, symlink_value)
       out['l'] = os.path.relpath(native_dest, filedir)
@@ -434,10 +454,13 @@ def load_isolated(content, algo):
   - algo: hashlib algorithm class. Used to confirm the algorithm matches the
           algorithm used on the Isolate Server.
   """
+  if not algo:
+    raise IsolatedError('\'algo\' is required')
   try:
     data = json.loads(content)
-  except ValueError:
-    raise IsolatedError('Failed to parse: %s...' % content[:100])
+  except ValueError as v:
+    logging.error('Failed to parse .isolated file:\n%s', content)
+    raise IsolatedError('Failed to parse (%s): %s...' % (v, content[:100]))
 
   if not isinstance(data, dict):
     raise IsolatedError('Expected dict, got %r' % data)
@@ -458,11 +481,7 @@ def load_isolated(content, algo):
         'Expected compatible \'%s\' version, got %r' %
         (ISOLATED_FILE_VERSION, value))
 
-  if algo is None:
-    # TODO(maruel): Remove the default around Jan 2014.
-    # Default the algorithm used in the .isolated file itself, falls back to
-    # 'sha-1' if unspecified.
-    algo = SUPPORTED_ALGOS_REVERSE[data.get('algo', 'sha-1')]
+  algo_name = SUPPORTED_ALGOS_REVERSE[algo]
 
   for key, value in data.iteritems():
     if key == 'algo':
@@ -511,7 +530,8 @@ def load_isolated(content, algo):
               raise IsolatedError('Expected int, got %r' % subsubvalue)
           elif subsubkey == 'h':
             if not is_valid_hash(subsubvalue, algo):
-              raise IsolatedError('Expected sha-1, got %r' % subsubvalue)
+              raise IsolatedError('Expected %s, got %r' %
+                                  (algo_name, subsubvalue))
           elif subsubkey == 's':
             if not isinstance(subsubvalue, (int, long)):
               raise IsolatedError('Expected int or long, got %r' % subsubvalue)
@@ -523,12 +543,12 @@ def load_isolated(content, algo):
             raise IsolatedError('Unknown subsubkey %s' % subsubkey)
         if bool('h' in subvalue) == bool('l' in subvalue):
           raise IsolatedError(
-              'Need only one of \'h\' (sha-1) or \'l\' (link), got: %r' %
-              subvalue)
+              'Need only one of \'h\' (%s) or \'l\' (link), got: %r' %
+              (algo_name, subvalue))
         if bool('h' in subvalue) != bool('s' in subvalue):
           raise IsolatedError(
-              'Both \'h\' (sha-1) and \'s\' (size) should be set, got: %r' %
-              subvalue)
+              'Both \'h\' (%s) and \'s\' (size) should be set, got: %r' %
+              (algo_name, subvalue))
         if bool('s' in subvalue) == bool('l' in subvalue):
           raise IsolatedError(
               'Need only one of \'s\' (size) or \'l\' (link), got: %r' %
@@ -545,7 +565,7 @@ def load_isolated(content, algo):
         raise IsolatedError('Expected non-empty includes list')
       for subvalue in value:
         if not is_valid_hash(subvalue, algo):
-          raise IsolatedError('Expected sha-1, got %r' % subvalue)
+          raise IsolatedError('Expected %s, got %r' % (algo_name, subvalue))
 
     elif key == 'os':
       if version >= (1, 4):

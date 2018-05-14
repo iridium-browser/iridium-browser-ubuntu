@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -88,6 +89,12 @@ class InterfaceTest(cros_test_lib.OutputTestCase):
     options = _ParseCommandLine(argv)
     self.assertEqual(options.mount_dir, '/foo/bar/cow')
 
+  def testSshIdentityOptionSetsOption(self):
+    argv = list(_REGULAR_TO) + ['--private-key', '/foo/bar/key',
+                                '--board', 'cedar',
+                                '--build-dir', '/path/to/nowhere' ]
+    options = _ParseCommandLine(argv)
+    self.assertEqual(options.private_key, '/foo/bar/key')
 
 class DeployChromeMock(partial_mock.PartialMock):
   """Deploy Chrome Mock Class."""

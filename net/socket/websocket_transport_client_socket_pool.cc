@@ -45,6 +45,7 @@ WebSocketTransportConnectJob::WebSocketTransportConnectJob(
     : ConnectJob(group_name,
                  timeout_duration,
                  priority,
+                 SocketTag(),
                  respect_limits,
                  delegate,
                  NetLogWithSource::Make(
@@ -61,7 +62,7 @@ WebSocketTransportConnectJob::WebSocketTransportConnectJob(
       had_ipv4_(false),
       had_ipv6_(false) {}
 
-WebSocketTransportConnectJob::~WebSocketTransportConnectJob() {}
+WebSocketTransportConnectJob::~WebSocketTransportConnectJob() = default;
 
 LoadState WebSocketTransportConnectJob::GetLoadState() const {
   LoadState load_state = LOAD_STATE_RESOLVING_HOST;
@@ -324,6 +325,7 @@ int WebSocketTransportClientSocketPool::RequestSocket(
     const std::string& group_name,
     const void* params,
     RequestPriority priority,
+    const SocketTag& socket_tag,
     RespectLimits respect_limits,
     ClientSocketHandle* handle,
     const CompletionCallback& callback,
@@ -338,6 +340,8 @@ int WebSocketTransportClientSocketPool::RequestSocket(
   CHECK(handle);
 
   request_net_log.BeginEvent(NetLogEventType::SOCKET_POOL);
+
+  DCHECK(socket_tag == SocketTag());
 
   if (ReachedMaxSocketsLimit() &&
       respect_limits == ClientSocketPool::RespectLimits::ENABLED) {
@@ -386,7 +390,8 @@ void WebSocketTransportClientSocketPool::RequestSockets(
     const std::string& group_name,
     const void* params,
     int num_sockets,
-    const NetLogWithSource& net_log) {
+    const NetLogWithSource& net_log,
+    HttpRequestInfo::RequestMotivation motivation) {
   NOTIMPLEMENTED();
 }
 
@@ -665,11 +670,12 @@ void WebSocketTransportClientSocketPool::ActivateStalledRequest() {
     stalled_request_queue_.pop_front();
     stalled_request_map_.erase(request.handle);
 
-    int rv = RequestSocket("ignored", &request.params, request.priority,
-                           // Stalled requests can't have |respect_limits|
-                           // DISABLED.
-                           RespectLimits::ENABLED, request.handle,
-                           request.callback, request.net_log);
+    int rv =
+        RequestSocket("ignored", &request.params, request.priority, SocketTag(),
+                      // Stalled requests can't have |respect_limits|
+                      // DISABLED.
+                      RespectLimits::ENABLED, request.handle, request.callback,
+                      request.net_log);
 
     // ActivateStalledRequest() never returns synchronously, so it is never
     // called re-entrantly.
@@ -692,7 +698,8 @@ WebSocketTransportClientSocketPool::ConnectJobDelegate::ConnectJobDelegate(
     WebSocketTransportClientSocketPool* owner)
     : owner_(owner) {}
 
-WebSocketTransportClientSocketPool::ConnectJobDelegate::~ConnectJobDelegate() {}
+WebSocketTransportClientSocketPool::ConnectJobDelegate::~ConnectJobDelegate() =
+    default;
 
 void
 WebSocketTransportClientSocketPool::ConnectJobDelegate::OnConnectJobComplete(
@@ -717,6 +724,6 @@ WebSocketTransportClientSocketPool::StalledRequest::StalledRequest(
 WebSocketTransportClientSocketPool::StalledRequest::StalledRequest(
     const StalledRequest& other) = default;
 
-WebSocketTransportClientSocketPool::StalledRequest::~StalledRequest() {}
+WebSocketTransportClientSocketPool::StalledRequest::~StalledRequest() = default;
 
 }  // namespace net

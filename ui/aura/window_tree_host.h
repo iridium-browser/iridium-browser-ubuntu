@@ -5,16 +5,21 @@
 #ifndef UI_AURA_WINDOW_TREE_HOST_H_
 #define UI_AURA_WINDOW_TREE_HOST_H_
 
-#include <memory>
-#include <vector>
+#include <stdint.h>
 
+#include <memory>
+
+#include "base/containers/flat_set.h"
 #include "base/event_types.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/optional.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "ui/aura/aura_export.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/ime/input_method_delegate.h"
+#include "ui/compositor/compositor_observer.h"
 #include "ui/display/display_observer.h"
 #include "ui/events/event_source.h"
 #include "ui/gfx/geometry/insets.h"
@@ -36,6 +41,8 @@ class ViewProp;
 }
 
 namespace aura {
+class ScopedKeyboardHook;
+
 namespace test {
 class WindowTreeHostTestApi;
 }
@@ -49,7 +56,8 @@ class WindowTreeHostObserver;
 // aura.
 class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
                                    public ui::EventSource,
-                                   public display::DisplayObserver {
+                                   public display::DisplayObserver,
+                                   public ui::CompositorObserver {
  public:
   ~WindowTreeHost() override;
 
@@ -83,6 +91,13 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   virtual void SetRootTransform(const gfx::Transform& transform);
   virtual gfx::Transform GetInverseRootTransform() const;
 
+  // These functions are used in event translation for translating the local
+  // coordinates of LocatedEvents. Default implementation calls to non-local
+  // ones (e.g. GetRootTransform()).
+  virtual gfx::Transform GetRootTransformForLocalEventCoordinates() const;
+  virtual gfx::Transform GetInverseRootTransformForLocalEventCoordinates()
+      const;
+
   // Sets padding applied to the output surface. The output surface is sized to
   // to the size of the host plus output surface padding. |window()| is offset
   // by |padding_in_pixels|, that is, |window|'s origin is set to
@@ -108,11 +123,11 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
 
   // Converts |point| from the root window's coordinate system to the
   // host window's.
-  void ConvertDIPToPixels(gfx::Point* point) const;
+  virtual void ConvertDIPToPixels(gfx::Point* point) const;
 
   // Converts |point| from the host window's coordinate system to the
   // root window's.
-  void ConvertPixelsToDIP(gfx::Point* point) const;
+  virtual void ConvertPixelsToDIP(gfx::Point* point) const;
 
   // Cursor.
   // Sets the currently-displayed cursor. If the cursor was previously hidden
@@ -160,6 +175,9 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   // Overridden from ui::internal::InputMethodDelegate:
   ui::EventDispatchDetails DispatchKeyEventPostIME(ui::KeyEvent* event) final;
 
+  // Returns the id of the display. Default implementation queries Screen.
+  virtual int64_t GetDisplayId();
+
   // Returns the EventSource responsible for dispatching events to the window
   // tree.
   virtual ui::EventSource* GetEventSource() = 0;
@@ -183,7 +201,15 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   // Releases OS capture of the root window.
   virtual void ReleaseCapture() = 0;
 
+  // Requests that |keys| be intercepted at the platform level and routed
+  // directly to the web content.  If |keys| is empty, all keys will be
+  // intercepted.  Returns a ScopedKeyboardHook instance which stops capturing
+  // system key events when destroyed.
+  std::unique_ptr<ScopedKeyboardHook> CaptureSystemKeyEvents(
+      base::Optional<base::flat_set<int>> keys);
+
  protected:
+  friend class ScopedKeyboardHook;
   friend class TestScreen;  // TODO(beng): see if we can remove/consolidate.
 
   WindowTreeHost();
@@ -195,7 +221,9 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   // If frame_sink_id is not passed in, one will be grabbed from
   // ContextFactoryPrivate.
   void CreateCompositor(
-      const viz::FrameSinkId& frame_sink_id = viz::FrameSinkId());
+      const viz::FrameSinkId& frame_sink_id = viz::FrameSinkId(),
+      bool force_software_compositor = false,
+      bool external_begin_frames_enabled = false);
 
   void InitCompositor();
   void OnAcceleratedWidgetAvailable();
@@ -206,6 +234,7 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   void OnHostMovedInPixels(const gfx::Point& new_location_in_pixels);
   void OnHostResizedInPixels(const gfx::Size& new_size_in_pixels);
   void OnHostWorkspaceChanged();
+  void OnHostDisplayChanged();
   void OnHostCloseRequested();
   void OnHostActivated();
   void OnHostLostWindowCapture();
@@ -235,6 +264,18 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t metrics) override;
 
+  // Begins capturing system key events.  Returns true if successful.
+  virtual bool CaptureSystemKeyEventsImpl(
+      base::Optional<base::flat_set<int>> keys) = 0;
+
+  // Stops capturing system keyboard events.
+  virtual void ReleaseSystemKeyEventCapture() = 0;
+
+ protected:
+  const base::ObserverList<WindowTreeHostObserver>& observers() const {
+    return observers_;
+  }
+
  private:
   friend class test::WindowTreeHostTestApi;
 
@@ -242,6 +283,15 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   // by MoveCursorToLocationInDIP() and MoveCursorToLocationInPixels().
   void MoveCursorToInternal(const gfx::Point& root_location,
                             const gfx::Point& host_location);
+
+  // Overrided from CompositorObserver:
+  void OnCompositingDidCommit(ui::Compositor* compositor) override;
+  void OnCompositingStarted(ui::Compositor* compositor,
+                            base::TimeTicks start_time) override;
+  void OnCompositingEnded(ui::Compositor* compositor) override;
+  void OnCompositingLockStateChanged(ui::Compositor* compositor) override;
+  void OnCompositingChildResizing(ui::Compositor* compositor) override;
+  void OnCompositingShuttingDown(ui::Compositor* compositor) override;
 
   // We don't use a std::unique_ptr for |window_| since we need this ptr to be
   // valid during its deletion. (Window's dtor notifies observers that may
@@ -270,6 +320,14 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   bool owned_input_method_;
 
   gfx::Insets output_surface_padding_in_pixels_;
+
+  // Set to the time the synchronization event began.
+  base::TimeTicks synchronization_start_time_;
+
+  // Set to true if this WindowTreeHost is currently holding pointer moves.
+  bool holding_pointer_moves_ = false;
+
+  base::WeakPtrFactory<WindowTreeHost> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowTreeHost);
 };

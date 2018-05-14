@@ -17,15 +17,18 @@
 #include "base/time/time.h"
 #include "chrome/browser/android/chrome_feature_list.h"
 #include "chrome/browser/android/ntp/content_suggestions_notifier_service.h"
+#include "chrome/browser/android/ntp/get_remote_suggestions_scheduler.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/ntp_snippets/content_suggestions_notifier_service_factory.h"
 #include "chrome/browser/ntp_snippets/content_suggestions_service_factory.h"
+#include "chrome/browser/ntp_snippets/contextual_content_suggestions_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/ntp_snippets/content_suggestion.h"
 #include "components/ntp_snippets/content_suggestions_metrics.h"
+#include "components/ntp_snippets/pref_names.h"
 #include "components/ntp_snippets/remote/remote_suggestions_provider.h"
 #include "components/ntp_snippets/remote/remote_suggestions_scheduler.h"
 #include "jni/SnippetsBridge_jni.h"
@@ -52,24 +55,26 @@ using ntp_snippets::ContentSuggestion;
 namespace {
 
 // Converts a vector of ContentSuggestions to its Java equivalent.
-ScopedJavaLocalRef<jobject> ToJavaSuggestionList(
+ScopedJavaLocalRef<jobject> JNI_SnippetsBridge_ToJavaSuggestionList(
     JNIEnv* env,
     const Category& category,
     const std::vector<ContentSuggestion>& suggestions) {
   ScopedJavaLocalRef<jobject> result =
       Java_SnippetsBridge_createSuggestionList(env);
   for (const ContentSuggestion& suggestion : suggestions) {
+    // image_dominant_color equal to 0 encodes absence of the value. 0 is not a
+    // valid color, because the passed color cannot be fully transparent.
     ScopedJavaLocalRef<jobject> java_suggestion =
         Java_SnippetsBridge_addSuggestion(
             env, result, category.id(),
             ConvertUTF8ToJavaString(env, suggestion.id().id_within_category()),
             ConvertUTF16ToJavaString(env, suggestion.title()),
             ConvertUTF16ToJavaString(env, suggestion.publisher_name()),
-            ConvertUTF16ToJavaString(env, suggestion.snippet_text()),
             ConvertUTF8ToJavaString(env, suggestion.url().spec()),
             suggestion.publish_date().ToJavaTime(), suggestion.score(),
             suggestion.fetch_date().ToJavaTime(),
-            suggestion.is_video_suggestion());
+            suggestion.is_video_suggestion(),
+            suggestion.optional_image_dominant_color().value_or(0));
     if (suggestion.id().category().IsKnownCategory(
             KnownCategories::DOWNLOADS) &&
         suggestion.download_suggestion_extra() != nullptr) {
@@ -101,28 +106,18 @@ ScopedJavaLocalRef<jobject> ToJavaSuggestionList(
   return result;
 }
 
-ntp_snippets::RemoteSuggestionsScheduler* GetRemoteSuggestionsScheduler() {
-  ntp_snippets::ContentSuggestionsService* content_suggestions_service =
-      ContentSuggestionsServiceFactory::GetForProfile(
-          ProfileManager::GetLastUsedProfile());
-  // Can maybe be null in some cases? (Incognito profile?) crbug.com/647920
-  if (!content_suggestions_service) {
-    return nullptr;
-  }
-  return content_suggestions_service->remote_suggestions_scheduler();
-}
-
 }  // namespace
 
-static jlong Init(JNIEnv* env,
-                  const JavaParamRef<jobject>& j_bridge,
-                  const JavaParamRef<jobject>& j_profile) {
+static jlong JNI_SnippetsBridge_Init(JNIEnv* env,
+                                     const JavaParamRef<jobject>& j_bridge,
+                                     const JavaParamRef<jobject>& j_profile) {
   NTPSnippetsBridge* snippets_bridge =
       new NTPSnippetsBridge(env, j_bridge, j_profile);
   return reinterpret_cast<intptr_t>(snippets_bridge);
 }
 
-static void RemoteSuggestionsSchedulerOnPersistentSchedulerWakeUp(
+static void
+JNI_SnippetsBridge_RemoteSuggestionsSchedulerOnPersistentSchedulerWakeUp(
     JNIEnv* env,
     const JavaParamRef<jclass>& caller) {
   ntp_snippets::RemoteSuggestionsScheduler* scheduler =
@@ -134,7 +129,7 @@ static void RemoteSuggestionsSchedulerOnPersistentSchedulerWakeUp(
   scheduler->OnPersistentSchedulerWakeUp();
 }
 
-static void RemoteSuggestionsSchedulerOnBrowserUpgraded(
+static void JNI_SnippetsBridge_RemoteSuggestionsSchedulerOnBrowserUpgraded(
     JNIEnv* env,
     const JavaParamRef<jclass>& caller) {
   ntp_snippets::RemoteSuggestionsScheduler* scheduler =
@@ -148,45 +143,7 @@ static void RemoteSuggestionsSchedulerOnBrowserUpgraded(
   scheduler->OnBrowserUpgraded();
 }
 
-static void SetRemoteSuggestionsEnabled(JNIEnv* env,
-                                        const JavaParamRef<jclass>& caller,
-                                        jboolean enabled) {
-  ntp_snippets::ContentSuggestionsService* content_suggestions_service =
-      ContentSuggestionsServiceFactory::GetForProfile(
-          ProfileManager::GetLastUsedProfile());
-  if (!content_suggestions_service)
-    return;
-
-  content_suggestions_service->SetRemoteSuggestionsEnabled(enabled);
-}
-
-// Returns true if the remote provider is managed by an adminstrator's policy.
-static jboolean AreRemoteSuggestionsManaged(
-    JNIEnv* env,
-    const JavaParamRef<jclass>& caller) {
-  ntp_snippets::ContentSuggestionsService* content_suggestions_service =
-      ContentSuggestionsServiceFactory::GetForProfile(
-          ProfileManager::GetLastUsedProfile());
-  if (!content_suggestions_service)
-    return false;
-
-  return content_suggestions_service->AreRemoteSuggestionsManaged();
-}
-
-// Returns true if the remote provider is managed by a supervisor
-static jboolean AreRemoteSuggestionsManagedByCustodian(
-    JNIEnv* env,
-    const JavaParamRef<jclass>& caller) {
-  ntp_snippets::ContentSuggestionsService* content_suggestions_service =
-      ContentSuggestionsServiceFactory::GetForProfile(
-          ProfileManager::GetLastUsedProfile());
-  if (!content_suggestions_service)
-    return false;
-
-  return content_suggestions_service->AreRemoteSuggestionsManagedByCustodian();
-}
-
-static void SetContentSuggestionsNotificationsEnabled(
+static void JNI_SnippetsBridge_SetContentSuggestionsNotificationsEnabled(
     JNIEnv* env,
     const JavaParamRef<jclass>& caller,
     jboolean enabled) {
@@ -199,7 +156,7 @@ static void SetContentSuggestionsNotificationsEnabled(
   notifier_service->SetEnabled(enabled);
 }
 
-static jboolean AreContentSuggestionsNotificationsEnabled(
+static jboolean JNI_SnippetsBridge_AreContentSuggestionsNotificationsEnabled(
     JNIEnv* env,
     const JavaParamRef<jclass>& caller) {
   ContentSuggestionsNotifierService* notifier_service =
@@ -220,9 +177,19 @@ NTPSnippetsBridge::NTPSnippetsBridge(JNIEnv* env,
   Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
   content_suggestions_service_ =
       ContentSuggestionsServiceFactory::GetForProfile(profile);
+  contextual_content_suggestions_service_ =
+      ContextualContentSuggestionsServiceFactory::GetForProfile(profile);
   history_service_ = HistoryServiceFactory::GetForProfile(
       profile, ServiceAccessType::EXPLICIT_ACCESS);
   content_suggestions_service_observer_.Add(content_suggestions_service_);
+
+  pref_change_registrar_.Init(profile->GetPrefs());
+  pref_change_registrar_.Add(
+      ntp_snippets::prefs::kArticlesListVisible,
+      base::BindRepeating(
+          &NTPSnippetsBridge::OnSuggestionsVisibilityChanged,
+          base::Unretained(this),
+          Category::FromKnownCategory(KnownCategories::ARTICLES)));
 }
 
 void NTPSnippetsBridge::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
@@ -268,7 +235,7 @@ ScopedJavaLocalRef<jobject> NTPSnippetsBridge::GetSuggestionsForCategory(
     const JavaParamRef<jobject>& obj,
     jint j_category_id) {
   Category category = Category::FromIDValue(j_category_id);
-  return ToJavaSuggestionList(
+  return JNI_SnippetsBridge_ToJavaSuggestionList(
       env, category,
       content_suggestions_service_->GetSuggestionsForCategory(category));
 }
@@ -315,8 +282,10 @@ void NTPSnippetsBridge::Fetch(
     const JavaParamRef<jobject>& obj,
     jint j_category_id,
     const JavaParamRef<jobjectArray>& j_displayed_suggestions,
-    const JavaParamRef<jobject>& j_callback) {
-  ScopedJavaGlobalRef<jobject> callback(j_callback);
+    const JavaParamRef<jobject>& j_success_callback,
+    const JavaParamRef<jobject>& j_failure_callback) {
+  ScopedJavaGlobalRef<jobject> success_callback(j_success_callback);
+  ScopedJavaGlobalRef<jobject> failure_callback(j_failure_callback);
   std::vector<std::string> known_suggestion_ids;
   AppendJavaStringArrayToStringVector(env, j_displayed_suggestions,
                                       &known_suggestion_ids);
@@ -327,7 +296,8 @@ void NTPSnippetsBridge::Fetch(
       std::set<std::string>(known_suggestion_ids.begin(),
                             known_suggestion_ids.end()),
       base::Bind(&NTPSnippetsBridge::OnSuggestionsFetched,
-                 weak_ptr_factory_.GetWeakPtr(), callback, category));
+                 weak_ptr_factory_.GetWeakPtr(), success_callback,
+                 failure_callback, category));
 }
 
 void NTPSnippetsBridge::FetchContextualSuggestions(
@@ -336,25 +306,28 @@ void NTPSnippetsBridge::FetchContextualSuggestions(
     const JavaParamRef<jstring>& j_url,
     const JavaParamRef<jobject>& j_callback) {
   DCHECK(base::FeatureList::IsEnabled(
-      chrome::android::kContextualSuggestionsCarousel));
+             chrome::android::kContextualSuggestionsCarousel) ||
+         base::FeatureList::IsEnabled(
+             chrome::android::kContextualSuggestionsAboveArticles));
+  GURL url(ConvertJavaStringToUTF8(env, j_url));
+  contextual_content_suggestions_service_->FetchContextualSuggestions(
+      url, base::Bind(&NTPSnippetsBridge::OnContextualSuggestionsFetched,
+                      weak_ptr_factory_.GetWeakPtr(),
+                      ScopedJavaGlobalRef<jobject>(j_callback)));
+}
 
-  // We don't currently have a contextual suggestions service or provider, so
-  // we use articles as placeholders.
-  Category category = Category::FromKnownCategory(KnownCategories::ARTICLES);
-  auto suggestions = ToJavaSuggestionList(
-      env, category,
-      content_suggestions_service_->GetSuggestionsForCategory(category));
-
-  // We would eventually have to hit the network or a database, so let's
-  // pretend here the call is asynchronous.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(
-                     [](const base::android::JavaRef<jobject>& j_callback,
-                        const base::android::JavaRef<jobject>& j_suggestions) {
-                       RunCallbackAndroid(j_callback, j_suggestions);
-                     },
-                     ScopedJavaGlobalRef<jobject>(j_callback),
-                     ScopedJavaGlobalRef<jobject>(suggestions)));
+void NTPSnippetsBridge::FetchContextualSuggestionImage(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jint j_category_id,
+    const JavaParamRef<jstring>& id_within_category,
+    const JavaParamRef<jobject>& j_callback) {
+  ScopedJavaGlobalRef<jobject> callback(j_callback);
+  contextual_content_suggestions_service_->FetchContextualSuggestionImage(
+      ContentSuggestion::ID(Category::FromIDValue(j_category_id),
+                            ConvertJavaStringToUTF8(env, id_within_category)),
+      base::Bind(&NTPSnippetsBridge::OnImageFetched,
+                 weak_ptr_factory_.GetWeakPtr(), callback));
 }
 
 void NTPSnippetsBridge::ReloadSuggestions(JNIEnv* env,
@@ -425,13 +398,13 @@ void NTPSnippetsBridge::OnSuggestionInvalidated(
     const ContentSuggestion::ID& suggestion_id) {
   JNIEnv* env = AttachCurrentThread();
   Java_SnippetsBridge_onSuggestionInvalidated(
-      env, bridge_.obj(), static_cast<int>(suggestion_id.category().id()),
-      ConvertUTF8ToJavaString(env, suggestion_id.id_within_category()).obj());
+      env, bridge_, static_cast<int>(suggestion_id.category().id()),
+      ConvertUTF8ToJavaString(env, suggestion_id.id_within_category()));
 }
 
 void NTPSnippetsBridge::OnFullRefreshRequired() {
   JNIEnv* env = AttachCurrentThread();
-  Java_SnippetsBridge_onFullRefreshRequired(env, bridge_.obj());
+  Java_SnippetsBridge_onFullRefreshRequired(env, bridge_);
 }
 
 void NTPSnippetsBridge::ContentSuggestionsServiceShutdown() {
@@ -449,12 +422,40 @@ void NTPSnippetsBridge::OnImageFetched(ScopedJavaGlobalRef<jobject> callback,
 }
 
 void NTPSnippetsBridge::OnSuggestionsFetched(
-    const ScopedJavaGlobalRef<jobject>& callback,
+    const ScopedJavaGlobalRef<jobject>& success_callback,
+    const ScopedJavaGlobalRef<jobject>& failure_callback,
     Category category,
     ntp_snippets::Status status,
     std::vector<ContentSuggestion> suggestions) {
   // TODO(fhorschig, dgn): Allow refetch or show notification acc. to status.
   JNIEnv* env = AttachCurrentThread();
-  RunCallbackAndroid(callback,
-                     ToJavaSuggestionList(env, category, suggestions));
+  if (status.IsSuccess()) {
+    RunCallbackAndroid(
+        success_callback,
+        JNI_SnippetsBridge_ToJavaSuggestionList(env, category, suggestions));
+  } else {
+    // The second parameter here means nothing - it was more convenient to pass
+    // a Callback (which has 1 parameter) over to the native side than a
+    // Runnable (which has no parameters). We ignore the parameter Java-side.
+    RunCallbackAndroid(failure_callback, 0);
+  }
+}
+
+void NTPSnippetsBridge::OnContextualSuggestionsFetched(
+    ScopedJavaGlobalRef<jobject> j_callback,
+    ntp_snippets::Status status,
+    const GURL& url,
+    std::vector<ContentSuggestion> suggestions) {
+  JNIEnv* env = AttachCurrentThread();
+  auto j_suggestions = JNI_SnippetsBridge_ToJavaSuggestionList(
+      env, Category::FromKnownCategory(KnownCategories::CONTEXTUAL),
+      suggestions);
+  RunCallbackAndroid(j_callback, j_suggestions);
+}
+
+void NTPSnippetsBridge::OnSuggestionsVisibilityChanged(
+    const Category category) {
+  JNIEnv* env = AttachCurrentThread();
+  Java_SnippetsBridge_onSuggestionsVisibilityChanged(
+      env, bridge_, static_cast<int>(category.id()));
 }

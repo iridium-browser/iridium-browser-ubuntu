@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/cancelable_callback.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
@@ -33,18 +34,17 @@
 #include "cc/input/scrollbar.h"
 #include "cc/layers/layer_collections.h"
 #include "cc/layers/layer_list_iterator.h"
-#include "cc/output/layer_tree_frame_sink.h"
-#include "cc/output/swap_promise.h"
 #include "cc/trees/compositor_mode.h"
+#include "cc/trees/layer_tree_frame_sink.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "cc/trees/mutator_host.h"
 #include "cc/trees/proxy.h"
+#include "cc/trees/swap_promise.h"
 #include "cc/trees/swap_promise_manager.h"
 #include "cc/trees/target_property.h"
-#include "components/viz/common/quads/resource_format.h"
-#include "components/viz/common/surfaces/surface_reference_owner.h"
-#include "components/viz/common/surfaces/surface_sequence_generator.h"
+#include "components/viz/common/resources/resource_format.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -59,15 +59,16 @@ class LayerTreeMutator;
 class MutatorEvents;
 class MutatorHost;
 struct PendingPageScaleAnimation;
+class RenderFrameMetadataObserver;
 class RenderingStatsInstrumentation;
+struct OverscrollBehavior;
 class TaskGraphRunner;
 class UIResourceManager;
+class UkmRecorderFactory;
 struct RenderingStats;
 struct ScrollAndScaleSet;
 
-class CC_EXPORT LayerTreeHost
-    : public NON_EXPORTED_BASE(viz::SurfaceReferenceOwner),
-      public NON_EXPORTED_BASE(MutatorHostClient) {
+class CC_EXPORT LayerTreeHost : public MutatorHostClient {
  public:
   struct CC_EXPORT InitParams {
     LayerTreeHostClient* client = nullptr;
@@ -81,6 +82,8 @@ class CC_EXPORT LayerTreeHost
     // raster worker threads.
     scoped_refptr<base::SequencedTaskRunner> image_worker_task_runner;
 
+    std::unique_ptr<UkmRecorderFactory> ukm_recorder_factory;
+
     InitParams();
     ~InitParams();
   };
@@ -93,7 +96,7 @@ class CC_EXPORT LayerTreeHost
       LayerTreeHostSingleThreadClient* single_thread_client,
       InitParams* params);
 
-  ~LayerTreeHost() override;
+  virtual ~LayerTreeHost();
 
   // Returns the process global unique identifier for this LayerTreeHost.
   int GetId() const;
@@ -112,10 +115,6 @@ class CC_EXPORT LayerTreeHost
 
   // Returns the settings used by this host.
   const LayerTreeSettings& GetSettings() const;
-
-  // Sets the client id used to generate the viz::SurfaceId that uniquely
-  // identifies the Surfaces produced by this compositor.
-  void SetFrameSinkId(const viz::FrameSinkId& frame_sink_id);
 
   // Sets the LayerTreeMutator interface used to directly mutate the compositor
   // state on the compositor thread. (Compositor-Worker)
@@ -147,7 +146,8 @@ class CC_EXPORT LayerTreeHost
       std::unique_ptr<LayerTreeFrameSink> layer_tree_frame_sink);
 
   // Forces the host to immediately release all references to the
-  // LayerTreeFrameSink, if any. Can be safely called any time.
+  // LayerTreeFrameSink, if any. Can be safely called any time, but the
+  // compositor should not be visible.
   std::unique_ptr<LayerTreeFrameSink> ReleaseLayerTreeFrameSink();
 
   // Frame Scheduling (main and compositor frames) requests -------
@@ -185,7 +185,7 @@ class CC_EXPORT LayerTreeHost
   // Synchronously performs a complete main frame update, commit and compositor
   // frame. Used only in single threaded mode when the compositor's internal
   // scheduling is disabled.
-  void Composite(base::TimeTicks frame_begin_time);
+  void Composite(base::TimeTicks frame_begin_time, bool raster);
 
   // Requests a redraw (compositor frame) for the given rect.
   void SetNeedsRedrawRect(const gfx::Rect& damage_rect);
@@ -223,7 +223,7 @@ class CC_EXPORT LayerTreeHost
   // Returns the id of the benchmark on success, 0 otherwise.
   int ScheduleMicroBenchmark(const std::string& benchmark_name,
                              std::unique_ptr<base::Value> value,
-                             const MicroBenchmark::DoneCallback& callback);
+                             MicroBenchmark::DoneCallback callback);
 
   // Returns true if the message was successfully delivered and handled.
   bool SendMessageToMicroBenchmark(int id, std::unique_ptr<base::Value> value);
@@ -237,6 +237,13 @@ class CC_EXPORT LayerTreeHost
   // The LayerTreeHost tracks whether the content is suitable for Gpu raster.
   // Calling this will reset it back to not suitable state.
   void ResetGpuRasterizationTracking();
+
+  // Registers a callback that is run when the next frame successfully makes it
+  // to the screen (it's entirely possible some frames may be dropped between
+  // the time this is called and the callback is run).
+  using PresentationTimeCallback =
+      base::OnceCallback<void(base::TimeTicks, base::TimeDelta, uint32_t)>;
+  void RequestPresentationTimeForNextFrame(PresentationTimeCallback callback);
 
   void SetRootLayer(scoped_refptr<Layer> root_layer);
   Layer* root_layer() { return root_layer_.get(); }
@@ -285,12 +292,17 @@ class CC_EXPORT LayerTreeHost
     return event_listener_properties_[static_cast<size_t>(event_class)];
   }
 
-  void SetViewportSize(const gfx::Size& device_viewport_size);
+  void SetViewportSizeAndScale(const gfx::Size& device_viewport_size,
+                               float device_scale_factor,
+                               const viz::LocalSurfaceId& local_surface_id);
+
   gfx::Size device_viewport_size() const { return device_viewport_size_; }
 
-  void SetBrowserControlsHeight(float height, bool shrink);
+  void SetBrowserControlsHeight(float top_height,
+                                float bottom_height,
+                                bool shrink);
   void SetBrowserControlsShownRatio(float ratio);
-  void SetBottomControlsHeight(float height);
+  void SetOverscrollBehavior(const OverscrollBehavior& overscroll_behavior);
 
   void SetPageScaleFactorAndLimits(float page_scale_factor,
                                    float min_page_scale_factor,
@@ -302,23 +314,16 @@ class CC_EXPORT LayerTreeHost
   void set_background_color(SkColor color) { background_color_ = color; }
   SkColor background_color() const { return background_color_; }
 
-  void set_has_transparent_background(bool transparent) {
-    has_transparent_background_ = transparent;
-  }
-  bool has_transparent_background() const {
-    return has_transparent_background_;
-  }
-
   void StartPageScaleAnimation(const gfx::Vector2d& target_offset,
                                bool use_anchor,
                                float scale,
                                base::TimeDelta duration);
   bool HasPendingPageScaleAnimation() const;
 
-  void SetDeviceScaleFactor(float device_scale_factor);
   float device_scale_factor() const { return device_scale_factor_; }
 
-  void SetPaintedDeviceScaleFactor(float painted_device_scale_factor);
+  void SetRecordingScaleFactor(float recording_scale_factor);
+
   float painted_device_scale_factor() const {
     return painted_device_scale_factor_;
   }
@@ -339,8 +344,10 @@ class CC_EXPORT LayerTreeHost
   }
 
   // Used externally by blink for setting the PropertyTrees when
-  // |settings_.use_layer_lists| is true. This is a SPV2 setting.
+  // UseLayerLists() is true, which also implies that Slimming Paint
+  // v2 is enabled.
   PropertyTrees* property_trees() { return &property_trees_; }
+  const PropertyTrees* property_trees() const { return &property_trees_; }
 
   void SetNeedsDisplayOnAllLayers();
 
@@ -396,9 +403,7 @@ class CC_EXPORT LayerTreeHost
   void RegisterElement(ElementId element_id,
                        ElementListType list_type,
                        Layer* layer);
-  void UnregisterElement(ElementId element_id,
-                         ElementListType list_type,
-                         Layer* layer);
+  void UnregisterElement(ElementId element_id, ElementListType list_type);
   void SetElementIdsForTesting();
 
   void BuildPropertyTreesForTesting();
@@ -412,11 +417,13 @@ class CC_EXPORT LayerTreeHost
   // LayerTreeHostInProcess interface to Proxy.
   void WillBeginMainFrame();
   void DidBeginMainFrame();
-  void BeginMainFrame(const BeginFrameArgs& args);
+  void BeginMainFrame(const viz::BeginFrameArgs& args);
   void BeginMainFrameNotExpectedSoon();
   void BeginMainFrameNotExpectedUntil(base::TimeTicks time);
   void AnimateLayers(base::TimeTicks monotonic_frame_begin_time);
-  void RequestMainFrameUpdate();
+  using VisualStateUpdate = LayerTreeHostClient::VisualStateUpdate;
+  void RequestMainFrameUpdate(
+      VisualStateUpdate requested_update = VisualStateUpdate::kAll);
   void FinishCommitOnImplThread(LayerTreeHostImpl* host_impl);
   void WillCommit();
   void CommitComplete();
@@ -431,6 +438,10 @@ class CC_EXPORT LayerTreeHost
     client_->DidReceiveCompositorFrameAck();
   }
   bool UpdateLayers();
+  void DidPresentCompositorFrame(const std::vector<int>& source_frames,
+                                 base::TimeTicks time,
+                                 base::TimeDelta refresh,
+                                 uint32_t flags);
   // Called when the compositor completed page scale animation.
   void DidCompletePageScaleAnimation();
   void ApplyScrollAndScale(ScrollAndScaleSet* info);
@@ -458,8 +469,10 @@ class CC_EXPORT LayerTreeHost
   bool IsSingleThreaded() const;
   bool IsThreaded() const;
 
-  // viz::SurfaceReferenceOwner implementation.
-  viz::SurfaceSequenceGenerator* GetSurfaceSequenceGenerator() override;
+  // Indicates whether this host is configured to use layer lists
+  // rather than layer trees. This also implies that property trees
+  // are always already built and so cc doesn't have to build them.
+  bool IsUsingLayerLists() const;
 
   // MutatorHostClient implementation.
   bool IsElementInList(ElementId element_id,
@@ -490,9 +503,17 @@ class CC_EXPORT LayerTreeHost
       ElementId element_id) const override;
 
   void QueueImageDecode(const PaintImage& image,
-                        const base::Callback<void(bool)>& callback);
+                        base::OnceCallback<void(bool)> callback);
+  void ImageDecodesFinished(const std::vector<std::pair<int, bool>>& results);
 
   void RequestBeginMainFrameNotExpected(bool new_state);
+
+  float recording_scale_factor() const { return recording_scale_factor_; }
+
+  void SetURLForUkm(const GURL& url);
+
+  void SetRenderFrameObserver(
+      std::unique_ptr<RenderFrameMetadataObserver> observer);
 
  protected:
   LayerTreeHost(InitParams* params, CompositorMode mode);
@@ -524,6 +545,7 @@ class CC_EXPORT LayerTreeHost
   base::WeakPtr<InputHandler> input_handler_weak_ptr_;
 
   scoped_refptr<base::SequencedTaskRunner> image_worker_task_runner_;
+  std::unique_ptr<UkmRecorderFactory> ukm_recorder_factory_;
 
  private:
   friend class LayerTreeHostSerializationTest;
@@ -586,7 +608,6 @@ class CC_EXPORT LayerTreeHost
 
   TaskGraphRunner* task_graph_runner_;
 
-  viz::SurfaceSequenceGenerator surface_sequence_generator_;
   uint32_t num_consecutive_frames_without_slow_paths_ = 0;
 
   scoped_refptr<Layer> root_layer_;
@@ -596,14 +617,18 @@ class CC_EXPORT LayerTreeHost
   float top_controls_height_ = 0.f;
   float top_controls_shown_ratio_ = 0.f;
   bool browser_controls_shrink_blink_size_ = false;
+  OverscrollBehavior overscroll_behavior_;
 
   float bottom_controls_height_ = 0.f;
 
   float device_scale_factor_ = 1.f;
   float painted_device_scale_factor_ = 1.f;
+  float recording_scale_factor_ = 1.f;
   float page_scale_factor_ = 1.f;
   float min_page_scale_factor_ = 1.f;
   float max_page_scale_factor_ = 1.f;
+
+  int raster_color_space_id_ = -1;
   gfx::ColorSpace raster_color_space_;
 
   uint32_t content_source_id_;
@@ -611,7 +636,6 @@ class CC_EXPORT LayerTreeHost
   bool defer_commits_ = false;
 
   SkColor background_color_ = SK_ColorWHITE;
-  bool has_transparent_background_ = false;
 
   LayerSelection selection_;
 
@@ -654,8 +678,19 @@ class CC_EXPORT LayerTreeHost
 
   MutatorHost* mutator_host_;
 
-  std::vector<std::pair<PaintImage, base::Callback<void(bool)>>>
+  std::vector<std::pair<PaintImage, base::OnceCallback<void(bool)>>>
       queued_image_decodes_;
+  std::unordered_map<int, base::OnceCallback<void(bool)>>
+      pending_image_decodes_;
+
+  // Presentation time callbacks requested for the next frame are initially
+  // added here.
+  std::vector<PresentationTimeCallback> pending_presentation_time_callbacks_;
+
+  // Maps from the source frame presentation callbacks are requested for to
+  // the callbacks.
+  std::map<int, std::vector<PresentationTimeCallback>>
+      frame_to_presentation_time_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerTreeHost);
 };

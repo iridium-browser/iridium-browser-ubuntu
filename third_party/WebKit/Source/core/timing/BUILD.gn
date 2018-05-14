@@ -12,12 +12,11 @@ blink_core_sources("timing") {
     "MemoryInfo.h",
     "Performance.cpp",
     "Performance.h",
-    "PerformanceBase.cpp",
-    "PerformanceBase.h",
     "PerformanceEntry.cpp",
     "PerformanceEntry.h",
     "PerformanceLongTaskTiming.cpp",
     "PerformanceLongTaskTiming.h",
+    "PerformanceMark.cpp",
     "PerformanceMark.h",
     "PerformanceMeasure.h",
     "PerformanceNavigation.cpp",
@@ -38,18 +37,15 @@ blink_core_sources("timing") {
     "PerformanceTiming.h",
     "PerformanceUserTiming.cpp",
     "PerformanceUserTiming.h",
-    "SharedWorkerPerformance.cpp",
-    "SharedWorkerPerformance.h",
+    "SubTaskAttribution.cpp",
+    "SubTaskAttribution.h",
     "TaskAttributionTiming.cpp",
     "TaskAttributionTiming.h",
+    "WindowPerformance.cpp",
+    "WindowPerformance.h",
     "WorkerGlobalScopePerformance.cpp",
     "WorkerGlobalScopePerformance.h",
     "WorkerPerformance.cpp",
     "WorkerPerformance.h",
-  ]
-
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
   ]
 }

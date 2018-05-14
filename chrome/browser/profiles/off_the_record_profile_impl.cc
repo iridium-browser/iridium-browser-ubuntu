@@ -14,9 +14,10 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
+#include "chrome/browser/background_fetch/background_fetch_delegate_factory.h"
+#include "chrome/browser/background_fetch/background_fetch_delegate_impl.h"
 #include "chrome/browser/background_sync/background_sync_controller_factory.h"
 #include "chrome/browser/background_sync/background_sync_controller_impl.h"
 #include "chrome/browser/browser_process.h"
@@ -29,7 +30,6 @@
 #include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
-#include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/permissions/permission_manager.h"
 #include "chrome/browser/permissions/permission_manager_factory.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
@@ -43,15 +43,14 @@
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/features.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/prefs/json_pref_store.h"
-#include "components/proxy_config/pref_proxy_config_tracker.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
@@ -65,13 +64,12 @@
 #include "ppapi/features/features.h"
 #include "services/preferences/public/cpp/in_process_service_factory.h"
 #include "services/preferences/public/cpp/pref_service_main.h"
-#include "services/preferences/public/interfaces/preferences.mojom.h"
+#include "services/preferences/public/mojom/preferences.mojom.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "storage/browser/database/database_tracker.h"
 
 #if defined(OS_ANDROID)
 #include "components/prefs/scoped_user_pref_update.h"
-#include "components/proxy_config/proxy_prefs.h"
 #else  // !defined(OS_ANDROID)
 #include "chrome/browser/ui/zoom/chrome_zoom_level_otr_delegate.h"
 #include "components/zoom/zoom_event_manager.h"
@@ -128,27 +126,16 @@ void NotifyOTRProfileDestroyedOnIOThread(void* original_profile,
 }  // namespace
 #endif
 
-PrefStore* CreateExtensionPrefStore(Profile* profile,
-                                    bool incognito_pref_store) {
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  return new ExtensionPrefStore(
-      ExtensionPrefValueMapFactory::GetForBrowserContext(profile),
-      incognito_pref_store);
-#else
-  return NULL;
-#endif
-}
-
 OffTheRecordProfileImpl::OffTheRecordProfileImpl(Profile* real_profile)
-    : profile_(real_profile), start_time_(Time::Now()) {
+    : profile_(real_profile), start_time_(base::Time::Now()) {
   // Must happen before we ask for prefs as prefs needs the connection to the
   // service manager, which is set up in Initialize.
   BrowserContext::Initialize(this, profile_->GetPath());
-  prefs_.reset(CreateIncognitoPrefServiceSyncable(
+  prefs_ = CreateIncognitoPrefServiceSyncable(
       PrefServiceSyncableFromProfile(profile_),
       CreateExtensionPrefStore(profile_, true),
       InProcessPrefServiceFactoryFactory::GetInstanceForContext(this)
-          ->CreateDelegate()));
+          ->CreateDelegate());
   // Register on BrowserContext.
   user_prefs::UserPrefs::Set(this, prefs_.get());
 }
@@ -174,10 +161,11 @@ void OffTheRecordProfileImpl::Init() {
   set_is_guest_profile(
       profile_->GetPath() == ProfileManager::GetGuestProfilePath());
 
+  // Always crash when incognito is not available.
   // Guest profiles may always be OTR. Check IncognitoModePrefs otherwise.
-  DCHECK(profile_->IsGuestSession() ||
-         IncognitoModePrefs::GetAvailability(profile_->GetPrefs()) !=
-             IncognitoModePrefs::DISABLED);
+  CHECK(profile_->IsGuestSession() || profile_->IsSystemProfile() ||
+        IncognitoModePrefs::GetAvailability(profile_->GetPrefs()) !=
+            IncognitoModePrefs::DISABLED);
 
 #if !defined(OS_ANDROID)
   TrackZoomLevelsFromParent();
@@ -193,6 +181,8 @@ void OffTheRecordProfileImpl::Init() {
   extensions::ExtensionIconSource* icon_source =
       new extensions::ExtensionIconSource(profile_);
   content::URLDataSource::Add(this, icon_source);
+
+  extensions::ExtensionSystem::Get(this)->InitForIncognitoProfile();
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -220,9 +210,6 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
       BrowserThread::IO, FROM_HERE,
       base::BindOnce(&NotifyOTRProfileDestroyedOnIOThread, profile_, this));
 #endif
-
-  if (pref_proxy_config_tracker_)
-    pref_proxy_config_tracker_->DetachFromPrefService();
 
   // Clears any data the network stack contains that may be related to the
   // OTR session.
@@ -285,7 +272,7 @@ base::FilePath OffTheRecordProfileImpl::GetPath() const {
 std::unique_ptr<content::ZoomLevelDelegate>
 OffTheRecordProfileImpl::CreateZoomLevelDelegate(
     const base::FilePath& partition_path) {
-  return base::MakeUnique<ChromeZoomLevelOTRDelegate>(
+  return std::make_unique<ChromeZoomLevelOTRDelegate>(
       zoom::ZoomEventManager::GetForBrowserContext(this)->GetWeakPtr());
 }
 #endif  // !defined(OS_ANDROID)
@@ -313,6 +300,10 @@ bool OffTheRecordProfileImpl::HasOffTheRecordProfile() {
 }
 
 Profile* OffTheRecordProfileImpl::GetOriginalProfile() {
+  return profile_;
+}
+
+const Profile* OffTheRecordProfileImpl::GetOriginalProfile() const {
   return profile_;
 }
 
@@ -450,6 +441,11 @@ content::PermissionManager* OffTheRecordProfileImpl::GetPermissionManager() {
   return PermissionManagerFactory::GetForProfile(this);
 }
 
+content::BackgroundFetchDelegate*
+OffTheRecordProfileImpl::GetBackgroundFetchDelegate() {
+  return BackgroundFetchDelegateFactory::GetForProfile(this);
+}
+
 content::BackgroundSyncController*
 OffTheRecordProfileImpl::GetBackgroundSyncController() {
   return BackgroundSyncControllerFactory::GetForProfile(this);
@@ -460,11 +456,20 @@ OffTheRecordProfileImpl::GetBrowsingDataRemoverDelegate() {
   return ChromeBrowsingDataRemoverDelegateFactory::GetForProfile(this);
 }
 
+media::VideoDecodePerfHistory*
+OffTheRecordProfileImpl::GetVideoDecodePerfHistory() {
+  // Defer to the original profile for VideoDecodePerfHistory. The incognito
+  // profile will have no history of its own (we don't save it for incognito)
+  // and the two profiles should have the same video performance. The history is
+  // not exposed directly to the web, so privacy is not compromised.
+  return GetOriginalProfile()->GetVideoDecodePerfHistory();
+}
+
 bool OffTheRecordProfileImpl::IsSameProfile(Profile* profile) {
   return (profile == this) || (profile == profile_);
 }
 
-Time OffTheRecordProfileImpl::GetStartTime() const {
+base::Time OffTheRecordProfileImpl::GetStartTime() const {
   return start_time_;
 }
 
@@ -507,33 +512,10 @@ void OffTheRecordProfileImpl::InitChromeOSPreferences() {
 }
 #endif  // defined(OS_CHROMEOS)
 
-PrefProxyConfigTracker* OffTheRecordProfileImpl::GetProxyConfigTracker() {
-  if (!pref_proxy_config_tracker_)
-    pref_proxy_config_tracker_.reset(CreateProxyConfigTracker());
-  return pref_proxy_config_tracker_.get();
-}
-
 chrome_browser_net::Predictor* OffTheRecordProfileImpl::GetNetworkPredictor() {
   // We do not store information about websites visited in OTR profiles which
   // is necessary for a Predictor, so we do not have a Predictor at all.
   return NULL;
-}
-
-DevToolsNetworkControllerHandle*
-OffTheRecordProfileImpl::GetDevToolsNetworkControllerHandle() {
-  return io_data_->GetDevToolsNetworkControllerHandle();
-}
-
-void OffTheRecordProfileImpl::ClearNetworkingHistorySince(
-    base::Time time,
-    const base::Closure& completion) {
-  // Nothing to do here, our transport security state is read-only.
-  // Still, fire the callback to indicate we have finished, otherwise the
-  // BrowsingDataRemover will never be destroyed and the dialog will never be
-  // closed. We must do this asynchronously in order to avoid reentrancy issues.
-  if (!completion.is_null()) {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, completion);
-  }
 }
 
 GURL OffTheRecordProfileImpl::GetHomePage() {
@@ -607,14 +589,3 @@ void OffTheRecordProfileImpl::UpdateDefaultZoomLevel() {
       ->OnDefaultZoomLevelChanged();
 }
 #endif  // !defined(OS_ANDROID)
-
-PrefProxyConfigTracker* OffTheRecordProfileImpl::CreateProxyConfigTracker() {
-#if defined(OS_CHROMEOS)
-  if (chromeos::ProfileHelper::IsSigninProfile(this)) {
-    return ProxyServiceFactory::CreatePrefProxyConfigTrackerOfLocalState(
-        g_browser_process->local_state());
-  }
-#endif  // defined(OS_CHROMEOS)
-  return ProxyServiceFactory::CreatePrefProxyConfigTrackerOfProfile(
-      GetPrefs(), g_browser_process->local_state());
-}

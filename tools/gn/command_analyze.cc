@@ -111,9 +111,10 @@ int RunAnalyze(const std::vector<std::string>& args) {
     return 1;
 
   Err err;
-  Analyzer analyzer(setup->builder(),
-                    setup->build_settings().build_config_file(),
-                    setup->dotfile_input_file()->name());
+  Analyzer analyzer(
+      setup->builder(), setup->build_settings().build_config_file(),
+      setup->GetDotFile(),
+      setup->build_settings().build_args().build_args_dependency_files());
   std::string output = analyzer.Analyze(input, &err);
   if (err.has_error()) {
     err.PrintToStdout();

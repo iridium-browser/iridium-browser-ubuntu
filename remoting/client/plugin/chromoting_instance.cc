@@ -18,7 +18,6 @@
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
@@ -38,6 +37,7 @@
 #include "ppapi/cpp/var_array_buffer.h"
 #include "ppapi/cpp/var_dictionary.h"
 #include "remoting/base/constants.h"
+#include "remoting/base/service_urls.h"
 #include "remoting/base/util.h"
 #include "remoting/client/chromoting_client.h"
 #include "remoting/client/input/normalizing_input_filter_cros.h"
@@ -193,7 +193,7 @@ ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
   rtc::InitRandom(random_seed, sizeof(random_seed));
 
   // Send hello message.
-  PostLegacyJsonMessage("hello", base::MakeUnique<base::DictionaryValue>());
+  PostLegacyJsonMessage("hello", std::make_unique<base::DictionaryValue>());
 }
 
 ChromotingInstance::~ChromotingInstance() {
@@ -285,6 +285,8 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
     HandleEnableDebugRegion(*data);
   } else if (method == "enableTouchEvents") {
     HandleEnableTouchEvents(*data);
+  } else if (method == "enableStuckModifierKeyDetection") {
+    HandleEnableStuckModifierKeyDetection(*data);
   }
 }
 
@@ -342,7 +344,7 @@ void ChromotingInstance::OnVideoDecodeError() {
 
 void ChromotingInstance::OnVideoFirstFrameReceived() {
   PostLegacyJsonMessage("onFirstFrameReceived",
-                        base::MakeUnique<base::DictionaryValue>());
+                        std::make_unique<base::DictionaryValue>());
 }
 
 void ChromotingInstance::OnVideoFrameDirtyRegion(
@@ -564,6 +566,7 @@ void ChromotingInstance::HandleConnect(const base::DictionaryValue& data) {
   std::string local_jid;
   std::string host_jid;
   std::string host_public_key;
+  std::string directory_bot_jid;
   if (!data.GetString("hostJid", &host_jid) ||
       !data.GetString("hostPublicKey", &host_public_key) ||
       !data.GetString("localJid", &local_jid) ||
@@ -574,6 +577,12 @@ void ChromotingInstance::HandleConnect(const base::DictionaryValue& data) {
 
   data.GetString("clientPairingId", &client_auth_config.pairing_client_id);
   data.GetString("clientPairedSecret", &client_auth_config.pairing_secret);
+
+#if !defined(NDEBUG)
+  if (data.GetString("directoryBotJid", &directory_bot_jid)) {
+    ServiceUrls::GetInstance()->set_directory_bot_jid(directory_bot_jid);
+  }
+#endif
 
   if (use_async_pin_dialog_) {
     client_auth_config.fetch_secret_callback = base::Bind(
@@ -683,8 +692,8 @@ void ChromotingInstance::HandleConnect(const base::DictionaryValue& data) {
   scoped_refptr<protocol::TransportContext> transport_context(
       new protocol::TransportContext(
           signal_strategy_.get(),
-          base::MakeUnique<PepperPortAllocatorFactory>(this),
-          base::MakeUnique<PepperUrlRequestFactory>(this),
+          std::make_unique<PepperPortAllocatorFactory>(this),
+          std::make_unique<PepperUrlRequestFactory>(this),
           protocol::NetworkSettings(
               protocol::NetworkSettings::NAT_TRAVERSAL_FULL),
           protocol::TransportRole::CLIENT));
@@ -694,6 +703,10 @@ void ChromotingInstance::HandleConnect(const base::DictionaryValue& data) {
   if (std::find(experiments_list.begin(), experiments_list.end(), "vp9") !=
       experiments_list.end()) {
     config->set_vp9_experiment_enabled(true);
+  }
+  if (std::find(experiments_list.begin(), experiments_list.end(), "h264") !=
+      experiments_list.end()) {
+    config->set_h264_experiment_enabled(true);
   }
   client_->set_protocol_config(std::move(config));
 
@@ -965,7 +978,7 @@ void ChromotingInstance::HandleEnableTouchEvents(
     const base::DictionaryValue& data) {
   bool enable = false;
   if (!data.GetBoolean("enable", &enable)) {
-    LOG(ERROR) << "Invalid handleTouchEvents.";
+    LOG(ERROR) << "Invalid enableTouchEvents.";
     return;
   }
 
@@ -974,6 +987,17 @@ void ChromotingInstance::HandleEnableTouchEvents(
   } else {
     ClearInputEventRequest(PP_INPUTEVENT_CLASS_TOUCH);
   }
+}
+
+void ChromotingInstance::HandleEnableStuckModifierKeyDetection(
+    const base::DictionaryValue& data) {
+  bool enable = false;
+  if (!data.GetBoolean("enable", &enable)) {
+    LOG(ERROR) << "Invalid enableStuckModifierKeyDetection.";
+    return;
+  }
+
+  input_handler_.set_detect_stuck_modifiers(enable);
 }
 
 void ChromotingInstance::Disconnect() {

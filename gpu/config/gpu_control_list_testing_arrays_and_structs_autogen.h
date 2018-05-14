@@ -18,7 +18,7 @@ const int kFeatureListForEntry1[1] = {
     TEST_FEATURE_0,
 };
 
-const char* kDisabledExtensionsForEntry1[2] = {
+const char* const kDisabledExtensionsForEntry1[2] = {
     "test_extension1", "test_extension2",
 };
 
@@ -93,6 +93,7 @@ const GpuControlList::More kMoreForEntry9 = {
     true,       // direct_rendering
     {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
      nullptr},  // gpu_count
+    0,          // test_group
 };
 
 const int kFeatureListForEntry10[1] = {
@@ -110,6 +111,7 @@ const GpuControlList::More kMoreForEntry10 = {
     true,       // direct_rendering
     {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
      nullptr},  // gpu_count
+    0,          // test_group
 };
 
 const int kFeatureListForEntry11[1] = {
@@ -127,6 +129,7 @@ const GpuControlList::More kMoreForEntry11 = {
     true,       // direct_rendering
     {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
      nullptr},  // gpu_count
+    0,          // test_group
 };
 
 const int kFeatureListForEntry12[1] = {
@@ -236,6 +239,7 @@ const GpuControlList::More kMoreForEntry23 = {
     true,       // direct_rendering
     {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
      nullptr},  // gpu_count
+    0,          // test_group
 };
 
 const int kFeatureListForEntry24[3] = {
@@ -258,7 +262,7 @@ const int kFeatureListForEntry27[1] = {
     TEST_FEATURE_0,
 };
 
-const char* kMachineModelNameForEntry27[4] = {
+const char* const kMachineModelNameForEntry27[4] = {
     "Nexus 4", "XT1032", "GT-.*", "SCH-.*",
 };
 
@@ -273,7 +277,7 @@ const int kFeatureListForEntry28[1] = {
     TEST_FEATURE_0,
 };
 
-const char* kMachineModelNameForEntry28Exception0[1] = {
+const char* const kMachineModelNameForEntry28Exception0[1] = {
     "Nexus.*",
 };
 
@@ -289,7 +293,7 @@ const int kFeatureListForEntry29[1] = {
     TEST_FEATURE_0,
 };
 
-const char* kMachineModelNameForEntry29[1] = {
+const char* const kMachineModelNameForEntry29[1] = {
     "MacBookPro",
 };
 
@@ -304,7 +308,7 @@ const int kFeatureListForEntry30[1] = {
     TEST_FEATURE_0,
 };
 
-const char* kMachineModelNameForEntry30[1] = {
+const char* const kMachineModelNameForEntry30[1] = {
     "MacBookPro",
 };
 
@@ -401,6 +405,7 @@ const GpuControlList::More kMoreForEntry40 = {
     true,       // direct_rendering
     {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
      nullptr},  // gpu_count
+    0,          // test_group
 };
 
 const int kFeatureListForEntry41[1] = {
@@ -470,6 +475,7 @@ const GpuControlList::More kMoreForEntry48 = {
     true,       // direct_rendering
     {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
      nullptr},  // gpu_count
+    0,          // test_group
 };
 
 const int kFeatureListForEntry49[1] = {
@@ -524,11 +530,11 @@ const GpuControlList::DriverInfo kDriverInfoForEntry54 = {
      nullptr},  // driver_date
 };
 
-const char* kDisabledExtensionsForEntry55[2] = {
+const char* const kDisabledExtensionsForEntry55[2] = {
     "test_extension2", "test_extension1",
 };
 
-const char* kDisabledExtensionsForEntry56[2] = {
+const char* const kDisabledExtensionsForEntry56[2] = {
     "test_extension3", "test_extension2",
 };
 
@@ -547,10 +553,47 @@ const GpuControlList::More kMoreForEntry57 = {
     false,      // direct_rendering
     {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
      nullptr},  // gpu_count
+    0,          // test_group
 };
 
 const int kFeatureListForEntry58[1] = {
     TEST_FEATURE_0,
+};
+
+const int kFeatureListForEntry59[1] = {
+    TEST_FEATURE_0,
+};
+
+const GpuControlList::More kMoreForEntry59 = {
+    GpuControlList::kGLTypeNone,  // gl_type
+    {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
+     nullptr},  // gl_version
+    {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
+     nullptr},  // pixel_shader_version
+    false,      // in_process_gpu
+    0,          // gl_reset_notification_strategy
+    true,       // direct_rendering
+    {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
+     nullptr},  // gpu_count
+    1,          // test_group
+};
+
+const int kFeatureListForEntry60[1] = {
+    TEST_FEATURE_1,
+};
+
+const GpuControlList::More kMoreForEntry60 = {
+    GpuControlList::kGLTypeNone,  // gl_type
+    {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
+     nullptr},  // gl_version
+    {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
+     nullptr},  // pixel_shader_version
+    false,      // in_process_gpu
+    0,          // gl_reset_notification_strategy
+    true,       // direct_rendering
+    {GpuControlList::kUnknown, GpuControlList::kVersionStyleNumerical, nullptr,
+     nullptr},  // gpu_count
+    2,          // test_group
 };
 
 }  // namespace gpu

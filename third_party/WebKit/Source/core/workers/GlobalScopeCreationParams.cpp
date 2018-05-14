@@ -13,40 +13,40 @@ namespace blink {
 GlobalScopeCreationParams::GlobalScopeCreationParams(
     const KURL& script_url,
     const String& user_agent,
-    const String& source_code,
-    std::unique_ptr<Vector<char>> cached_meta_data,
-    WorkerThreadStartMode start_mode,
-    const Vector<CSPHeaderAndType>* content_security_policy_headers,
-    const String& referrer_policy,
+    const Vector<CSPHeaderAndType>* content_security_policy_parsed_headers,
+    ReferrerPolicy referrer_policy,
     const SecurityOrigin* starter_origin,
+    bool starter_secure_context,
     WorkerClients* worker_clients,
-    WebAddressSpace address_space,
+    mojom::IPAddressSpace address_space,
     const Vector<String>* origin_trial_tokens,
+    const base::UnguessableToken& parent_devtools_token,
     std::unique_ptr<WorkerSettings> worker_settings,
-    V8CacheOptions v8_cache_options)
+    V8CacheOptions v8_cache_options,
+    service_manager::mojom::blink::InterfaceProviderPtrInfo
+        interface_provider_info)
     : script_url(script_url.Copy()),
       user_agent(user_agent.IsolatedCopy()),
-      source_code(source_code.IsolatedCopy()),
-      cached_meta_data(std::move(cached_meta_data)),
-      start_mode(start_mode),
-      referrer_policy(referrer_policy.IsolatedCopy()),
-      starter_origin_privilege_data(
-          starter_origin ? starter_origin->CreatePrivilegeData() : nullptr),
+      referrer_policy(referrer_policy),
+      starter_origin(starter_origin ? starter_origin->IsolatedCopy() : nullptr),
+      starter_secure_context(starter_secure_context),
       worker_clients(worker_clients),
       address_space(address_space),
+      parent_devtools_token(parent_devtools_token),
       worker_settings(std::move(worker_settings)),
-      v8_cache_options(v8_cache_options) {
-  this->content_security_policy_headers =
-      WTF::MakeUnique<Vector<CSPHeaderAndType>>();
-  if (content_security_policy_headers) {
-    for (const auto& header : *content_security_policy_headers) {
+      v8_cache_options(v8_cache_options),
+      interface_provider(std::move(interface_provider_info)) {
+  this->content_security_policy_parsed_headers =
+      std::make_unique<Vector<CSPHeaderAndType>>();
+  if (content_security_policy_parsed_headers) {
+    for (const auto& header : *content_security_policy_parsed_headers) {
       CSPHeaderAndType copied_header(header.first.IsolatedCopy(),
                                      header.second);
-      this->content_security_policy_headers->push_back(copied_header);
+      this->content_security_policy_parsed_headers->push_back(copied_header);
     }
   }
 
-  this->origin_trial_tokens = WTF::MakeUnique<Vector<String>>();
+  this->origin_trial_tokens = std::make_unique<Vector<String>>();
   if (origin_trial_tokens) {
     for (const String& token : *origin_trial_tokens)
       this->origin_trial_tokens->push_back(token.IsolatedCopy());

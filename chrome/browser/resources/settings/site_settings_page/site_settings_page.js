@@ -51,6 +51,31 @@ Polymer({
       }
     },
 
+    /** @private */
+    enableClipboardContentSetting_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('enableClipboardContentSetting');
+      }
+    },
+
+    /** @private */
+    enableSoundContentSetting_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('enableSoundContentSetting');
+      }
+    },
+
+    /** @private */
+    enableSensorsContentSetting_: {
+      type: Boolean,
+      readOnly: true,
+      value: function() {
+        return loadTimeData.getBoolean('enableSensorsContentSetting');
+      }
+    },
+
     /** @type {!Map<string, string>} */
     focusConfig: {
       type: Object,
@@ -71,14 +96,14 @@ Polymer({
     // Populate the |focusConfig| map of the parent <settings-animated-pages>
     // element, with additional entries that correspond to subpage trigger
     // elements residing in this element's Shadow DOM.
-    var R = settings.routes;
+    const R = settings.routes;
     [[R.SITE_SETTINGS_COOKIES, 'cookies'],
      [R.SITE_SETTINGS_LOCATION, 'location'], [R.SITE_SETTINGS_CAMERA, 'camera'],
      [R.SITE_SETTINGS_MICROPHONE, 'microphone'],
      [R.SITE_SETTINGS_NOTIFICATIONS, 'notifications'],
      [R.SITE_SETTINGS_JAVASCRIPT, 'javascript'],
-     [R.SITE_SETTINGS_FLASH, 'flash'], [R.SITE_SETTINGS_IMAGES, 'images'],
-     [R.SITE_SETTINGS_POPUPS, 'popups'],
+     [R.SITE_SETTINGS_SOUND, 'sound'], [R.SITE_SETTINGS_FLASH, 'flash'],
+     [R.SITE_SETTINGS_IMAGES, 'images'], [R.SITE_SETTINGS_POPUPS, 'popups'],
      [R.SITE_SETTINGS_BACKGROUND_SYNC, 'background-sync'],
      [R.SITE_SETTINGS_AUTOMATIC_DOWNLOADS, 'automatic-downloads'],
      [R.SITE_SETTINGS_UNSANDBOXED_PLUGINS, 'unsandboxed-plugins'],
@@ -88,11 +113,13 @@ Polymer({
      [R.SITE_SETTINGS_USB_DEVICES, 'usb-devices'],
      [R.SITE_SETTINGS_PDF_DOCUMENTS, 'pdf-documents'],
      [R.SITE_SETTINGS_PROTECTED_CONTENT, 'protected-content'],
-    ].forEach(function(pair) {
-      var route = pair[0];
-      var id = pair[1];
+     [R.SITE_SETTINGS_CLIPBOARD, 'clipboard'],
+     [R.SITE_SETTINGS_SENSORS, 'sensors'],
+    ].forEach(pair => {
+      const route = pair[0];
+      const id = pair[1];
       this.focusConfig.set(route.path, '* /deep/ #' + id + ' .subpage-arrow');
-    }.bind(this));
+    });
   },
 
   /** @override */
@@ -100,18 +127,23 @@ Polymer({
     this.ContentSettingsTypes = settings.ContentSettingsTypes;
     this.ALL_SITES = settings.ALL_SITES;
 
-    var keys = Object.keys(settings.ContentSettingsTypes);
-    for (var i = 0; i < keys.length; ++i) {
-      var key = settings.ContentSettingsTypes[keys[i]];
+    const keys = Object.keys(settings.ContentSettingsTypes);
+    for (let i = 0; i < keys.length; ++i) {
+      const key = settings.ContentSettingsTypes[keys[i]];
       // Default labels are not applicable to USB and ZOOM.
       if (key == settings.ContentSettingsTypes.USB_DEVICES ||
           key == settings.ContentSettingsTypes.ZOOM_LEVELS)
         continue;
-      // Some values are not available (and will DCHECK) in guest mode.
+      // Protocol handlers are not available (and will DCHECK) in guest mode.
       if (this.isGuest_ &&
           key == settings.ContentSettingsTypes.PROTOCOL_HANDLERS) {
         continue;
       }
+      // Similarly, protected content is only available in CrOS.
+      // <if expr="not chromeos">
+      if (key == settings.ContentSettingsTypes.PROTECTED_CONTENT)
+        continue;
+      // </if>
       this.updateDefaultValueLabel_(key);
     }
 
@@ -146,11 +178,11 @@ Polymer({
    */
   updateDefaultValueLabel_: function(category) {
     this.browserProxy.getDefaultValueForContentType(category).then(
-        function(defaultValue) {
+        defaultValue => {
           this.set(
               'default_.' + Polymer.CaseMap.dashToCamelCase(category),
               defaultValue.setting);
-        }.bind(this));
+        });
   },
 
   /**
@@ -159,7 +191,7 @@ Polymer({
    * @private
    */
   updateHandlersEnabled_: function(enabled) {
-    var category = settings.ContentSettingsTypes.PROTOCOL_HANDLERS;
+    const category = settings.ContentSettingsTypes.PROTOCOL_HANDLERS;
     this.set(
         'default_.' + Polymer.CaseMap.dashToCamelCase(category),
         enabled ? settings.ContentSetting.ALLOW :
@@ -172,7 +204,8 @@ Polymer({
    * @private
    */
   onTapNavigate_: function(event) {
-    var dataSet = /** @type {{route: string}} */ (event.currentTarget.dataset);
+    const dataSet =
+        /** @type {{route: string}} */ (event.currentTarget.dataset);
     settings.navigateTo(settings.routes[dataSet.route]);
   },
 });

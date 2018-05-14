@@ -5,7 +5,9 @@
 #include "chrome/browser/safe_browsing/permission_reporter.h"
 
 #include <functional>
+#include <memory>
 
+#include "base/containers/queue.h"
 #include "base/hash.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_piece.h"
@@ -21,7 +23,7 @@ namespace safe_browsing {
 namespace {
 // URL to upload permission action reports.
 const char kPermissionActionReportingUploadUrl[] =
-    "https://safebrowsing.googleusercontent.com/safebrowsing/clientreport/"
+    "https://safebrowsing.google.com/safebrowsing/clientreport/"
     "chrome-permissions";
 
 const int kMaximumReportsPerOriginPerPermissionPerMinute = 5;
@@ -31,8 +33,6 @@ PermissionReport::PermissionType PermissionTypeForReport(
   switch (permission) {
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
       return PermissionReport::MIDI_SYSEX;
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
-      return PermissionReport::PUSH_MESSAGING;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
       return PermissionReport::NOTIFICATIONS;
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
@@ -69,9 +69,6 @@ PermissionReport::Action PermissionActionForReport(PermissionAction action) {
       return PermissionReport::IGNORED;
     case PermissionAction::REVOKED:
       return PermissionReport::REVOKED;
-    case PermissionAction::REENABLED:
-    case PermissionAction::REQUESTED:
-      return PermissionReport::ACTION_UNSPECIFIED;
     case PermissionAction::NUM:
       break;
   }
@@ -115,23 +112,9 @@ PermissionReport::GestureType GestureTypeForReport(
   return PermissionReport::GESTURE_TYPE_UNSPECIFIED;
 }
 
-PermissionReport::PersistDecision PersistDecisionForReport(
-    PermissionPersistDecision persist_decision) {
-  switch (persist_decision) {
-    case PermissionPersistDecision::UNSPECIFIED:
-      return PermissionReport::PERSIST_DECISION_UNSPECIFIED;
-    case PermissionPersistDecision::PERSISTED:
-      return PermissionReport::PERSISTED;
-    case PermissionPersistDecision::NOT_PERSISTED:
-      return PermissionReport::NOT_PERSISTED;
-  }
-
-  NOTREACHED();
-  return PermissionReport::PERSIST_DECISION_UNSPECIFIED;
-}
-
-constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
-    net::DefineNetworkTrafficAnnotation("permission_reporting", R"(
+constexpr net::NetworkTrafficAnnotationTag
+    kPermissionReportingTrafficAnnotation =
+        net::DefineNetworkTrafficAnnotation("permission_reporting", R"(
         semantics {
           sender: "Safe Browsing"
           description:
@@ -149,7 +132,7 @@ constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "Users can control this feature via either of the 'Protect you and "
             "your device from dangerous sites' setting under 'Privacy', or "
@@ -192,16 +175,15 @@ std::size_t PermissionAndOriginHash::operator()(
 }
 
 PermissionReporter::PermissionReporter(net::URLRequestContext* request_context)
-    : PermissionReporter(
-          base::MakeUnique<net::ReportSender>(request_context,
-                                              kTrafficAnnotation),
-          base::WrapUnique(new base::DefaultClock)) {}
+    : PermissionReporter(std::make_unique<net::ReportSender>(
+                             request_context,
+                             kPermissionReportingTrafficAnnotation),
+                         base::DefaultClock::GetInstance()) {}
 
 PermissionReporter::PermissionReporter(
     std::unique_ptr<net::ReportSender> report_sender,
-    std::unique_ptr<base::Clock> clock)
-    : permission_report_sender_(std::move(report_sender)),
-      clock_(std::move(clock)) {}
+    base::Clock* clock)
+    : permission_report_sender_(std::move(report_sender)), clock_(clock) {}
 
 PermissionReporter::~PermissionReporter() {}
 
@@ -221,13 +203,15 @@ void PermissionReporter::SendReport(const PermissionReportInfo& report_info) {
 bool PermissionReporter::BuildReport(const PermissionReportInfo& report_info,
                                      std::string* output) {
   PermissionReport report;
+  // The origin is stored as a GURL, so ensure it's actually an origin.
+  DCHECK_EQ(report_info.origin, report_info.origin.GetOrigin());
   report.set_origin(report_info.origin.spec());
   report.set_permission(PermissionTypeForReport(report_info.permission));
   report.set_action(PermissionActionForReport(report_info.action));
   report.set_source_ui(SourceUIForReport(report_info.source_ui));
   report.set_gesture(GestureTypeForReport(report_info.gesture_type));
-  report.set_persisted(
-      PersistDecisionForReport(report_info.persist_decision));
+  // The persistence experiment was removed in M64.
+  report.set_persisted(PermissionReport::PERSIST_DECISION_UNSPECIFIED);
   report.set_num_prior_dismissals(report_info.num_prior_dismissals);
   report.set_num_prior_ignores(report_info.num_prior_ignores);
 
@@ -256,7 +240,7 @@ bool PermissionReporter::BuildReport(const PermissionReportInfo& report_info,
 bool PermissionReporter::IsReportThresholdExceeded(
     ContentSettingsType permission,
     const GURL& origin) {
-  std::queue<base::Time>& log = report_logs_[{permission, origin}];
+  base::queue<base::Time>& log = report_logs_[{permission, origin}];
   base::Time current_time = clock_->Now();
   // Remove entries that are sent more than one minute ago.
   while (!log.empty() &&

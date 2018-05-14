@@ -8,19 +8,23 @@
 
 #include <memory>
 
+#import <OCMock/OCMock.h>
+
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #import "base/mac/bind_objc_block.h"
-#include "base/memory/ptr_util.h"
 #import "base/test/ios/wait_util.h"
+#include "ios/web/navigation/placeholder_navigation_util.h"
 #import "ios/web/public/java_script_dialog_presenter.h"
 #include "ios/web/public/load_committed_details.h"
+#import "ios/web/public/test/fakes/fake_navigation_context.h"
 #include "ios/web/public/test/fakes/test_browser_state.h"
 #import "ios/web/public/test/fakes/test_web_state_delegate.h"
 #import "ios/web/public/test/fakes/test_web_state_observer.h"
 #include "ios/web/public/test/web_test.h"
 #import "ios/web/public/web_state/context_menu_params.h"
+#include "ios/web/public/web_state/form_activity_params.h"
 #include "ios/web/public/web_state/global_web_state_observer.h"
 #import "ios/web/public/web_state/web_state_delegate.h"
 #include "ios/web/public/web_state/web_state_observer.h"
@@ -59,6 +63,7 @@ class TestGlobalWebStateObserver : public GlobalWebStateObserver {
         navigation_item_committed_called_(false),
         did_start_loading_called_(false),
         did_stop_loading_called_(false),
+        did_start_navigation_called_(false),
         page_loaded_called_with_success_(false),
         web_state_destroyed_called_(false) {}
 
@@ -75,6 +80,9 @@ class TestGlobalWebStateObserver : public GlobalWebStateObserver {
   }
   bool did_start_loading_called() const { return did_start_loading_called_; }
   bool did_stop_loading_called() const { return did_stop_loading_called_; }
+  bool did_start_navigation_called() const {
+    return did_start_navigation_called_;
+  }
   bool page_loaded_called_with_success() const {
     return page_loaded_called_with_success_;
   }
@@ -102,6 +110,11 @@ class TestGlobalWebStateObserver : public GlobalWebStateObserver {
   void WebStateDidStopLoading(WebState* web_state) override {
     did_stop_loading_called_ = true;
   }
+  void WebStateDidStartNavigation(
+      WebState* web_state,
+      NavigationContext* navigation_context) override {
+    did_start_navigation_called_ = true;
+  }
   void PageLoaded(WebState* web_state,
                   PageLoadCompletionStatus load_completion_status) override {
     page_loaded_called_with_success_ =
@@ -116,6 +129,7 @@ class TestGlobalWebStateObserver : public GlobalWebStateObserver {
   bool navigation_item_committed_called_;
   bool did_start_loading_called_;
   bool did_stop_loading_called_;
+  bool did_start_navigation_called_;
   bool page_loaded_called_with_success_;
   bool web_state_destroyed_called_;
 };
@@ -128,8 +142,10 @@ class MockWebStatePolicyDecider : public WebStatePolicyDecider {
       : WebStatePolicyDecider(web_state) {}
   virtual ~MockWebStatePolicyDecider() {}
 
-  MOCK_METHOD1(ShouldAllowRequest, bool(NSURLRequest* request));
-  MOCK_METHOD1(ShouldAllowResponse, bool(NSURLResponse* response));
+  MOCK_METHOD2(ShouldAllowRequest,
+               bool(NSURLRequest* request, ui::PageTransition transition));
+  MOCK_METHOD2(ShouldAllowResponse,
+               bool(NSURLResponse* response, bool for_main_frame));
   MOCK_METHOD0(WebStateDestroyed, void());
 };
 
@@ -168,7 +184,7 @@ class WebStateImplTest : public web::WebTest {
  protected:
   WebStateImplTest() : web::WebTest() {
     web::WebState::CreateParams params(GetBrowserState());
-    web_state_ = base::MakeUnique<web::WebStateImpl>(params);
+    web_state_ = std::make_unique<web::WebStateImpl>(params);
   }
 
   std::unique_ptr<WebStateImpl> web_state_;
@@ -176,15 +192,15 @@ class WebStateImplTest : public web::WebTest {
 
 TEST_F(WebStateImplTest, WebUsageEnabled) {
   // Default is false.
-  ASSERT_FALSE(web_state_->IsWebUsageEnabled());
-
-  web_state_->SetWebUsageEnabled(true);
-  EXPECT_TRUE(web_state_->IsWebUsageEnabled());
-  EXPECT_TRUE(web_state_->GetWebController().webUsageEnabled);
+  ASSERT_TRUE(web_state_->IsWebUsageEnabled());
 
   web_state_->SetWebUsageEnabled(false);
   EXPECT_FALSE(web_state_->IsWebUsageEnabled());
   EXPECT_FALSE(web_state_->GetWebController().webUsageEnabled);
+
+  web_state_->SetWebUsageEnabled(true);
+  EXPECT_TRUE(web_state_->IsWebUsageEnabled());
+  EXPECT_TRUE(web_state_->GetWebController().webUsageEnabled);
 }
 
 TEST_F(WebStateImplTest, ShouldSuppressDialogs) {
@@ -206,13 +222,11 @@ TEST_F(WebStateImplTest, ResponseHeaders) {
   scoped_refptr<net::HttpResponseHeaders> real_headers(HeadersFromString(
       "HTTP/1.1 200 OK\r\n"
       "Content-Type: text/html\r\n"
-      "Content-Language: en\r\n"
       "X-Should-Be-Here: yep\r\n"
       "\r\n"));
   scoped_refptr<net::HttpResponseHeaders> frame_headers(HeadersFromString(
       "HTTP/1.1 200 OK\r\n"
       "Content-Type: application/pdf\r\n"
-      "Content-Language: fr\r\n"
       "X-Should-Not-Be-Here: oops\r\n"
       "\r\n"));
   // Simulate a load of a page with a frame.
@@ -231,7 +245,6 @@ TEST_F(WebStateImplTest, ResponseHeaders) {
 
   // And that it was parsed correctly.
   EXPECT_EQ("text/html", web_state_->GetContentsMimeType());
-  EXPECT_EQ("en", web_state_->GetContentLanguageHeader());
 }
 
 TEST_F(WebStateImplTest, ResponseHeaderClearing) {
@@ -239,7 +252,6 @@ TEST_F(WebStateImplTest, ResponseHeaderClearing) {
   scoped_refptr<net::HttpResponseHeaders> headers(HeadersFromString(
       "HTTP/1.1 200 OK\r\n"
       "Content-Type: text/html\r\n"
-      "Content-Language: en\r\n"
       "\r\n"));
   web_state_->OnHttpResponseHeadersReceived(headers.get(), url);
 
@@ -251,14 +263,12 @@ TEST_F(WebStateImplTest, ResponseHeaderClearing) {
   ASSERT_TRUE(web_state_->GetHttpResponseHeaders());
   EXPECT_TRUE(web_state_->GetHttpResponseHeaders()->HasHeader("Content-Type"));
   EXPECT_NE("", web_state_->GetContentsMimeType());
-  EXPECT_NE("", web_state_->GetContentLanguageHeader());
 
   // ... but not after loading another page, nor should there be specific
   // parsed values.
   web_state_->UpdateHttpResponseHeaders(GURL("http://elsewhere.com/"));
   EXPECT_EQ(NULL, web_state_->GetHttpResponseHeaders());
   EXPECT_EQ("", web_state_->GetContentsMimeType());
-  EXPECT_EQ("", web_state_->GetContentLanguageHeader());
 }
 
 // Tests forwarding to WebStateObserver callbacks.
@@ -266,6 +276,22 @@ TEST_F(WebStateImplTest, ObserverTest) {
   std::unique_ptr<TestWebStateObserver> observer(
       new TestWebStateObserver(web_state_.get()));
   EXPECT_EQ(web_state_.get(), observer->web_state());
+
+  // Test that WasShown() is called.
+  ASSERT_FALSE(web_state_->IsVisible());
+  ASSERT_FALSE(observer->was_shown_info());
+  web_state_->WasShown();
+  ASSERT_TRUE(observer->was_shown_info());
+  EXPECT_EQ(web_state_.get(), observer->was_shown_info()->web_state);
+  EXPECT_TRUE(web_state_->IsVisible());
+
+  // Test that WasHidden() is called.
+  ASSERT_TRUE(web_state_->IsVisible());
+  ASSERT_FALSE(observer->was_hidden_info());
+  web_state_->WasHidden();
+  ASSERT_TRUE(observer->was_hidden_info());
+  EXPECT_EQ(web_state_.get(), observer->was_hidden_info()->web_state);
+  EXPECT_FALSE(web_state_->IsVisible());
 
   // Test that LoadProgressChanged() is called.
   ASSERT_FALSE(observer->change_loading_progress_info());
@@ -285,7 +311,7 @@ TEST_F(WebStateImplTest, ObserverTest) {
 
   // Test that DidChangeVisibleSecurityState() is called.
   ASSERT_FALSE(observer->did_change_visible_security_state_info());
-  web_state_->OnVisibleSecurityStateChange();
+  web_state_->DidChangeVisibleSecurityState();
   ASSERT_TRUE(observer->did_change_visible_security_state_info());
   EXPECT_EQ(web_state_.get(),
             observer->did_change_visible_security_state_info()->web_state);
@@ -299,33 +325,45 @@ TEST_F(WebStateImplTest, ObserverTest) {
 
   // Test that DocumentSubmitted() is called.
   ASSERT_FALSE(observer->submit_document_info());
-  std::string kTestFormName("form-name");
-  BOOL user_initiated = true;
-  web_state_->OnDocumentSubmitted(kTestFormName, user_initiated);
+  const std::string kTestFormName("form-name");
+  bool user_initiated = true;
+  bool is_main_frame = false;
+  web_state_->OnDocumentSubmitted(kTestFormName, user_initiated, is_main_frame);
   ASSERT_TRUE(observer->submit_document_info());
   EXPECT_EQ(web_state_.get(), observer->submit_document_info()->web_state);
   EXPECT_EQ(kTestFormName, observer->submit_document_info()->form_name);
   EXPECT_EQ(user_initiated, observer->submit_document_info()->user_initiated);
+  EXPECT_EQ(is_main_frame, observer->submit_document_info()->is_main_frame);
 
   // Test that FormActivityRegistered() is called.
   ASSERT_FALSE(observer->form_activity_info());
-  std::string kTestFieldName("field-name");
-  std::string kTestTypeType("type");
-  std::string kTestValue("value");
-  web_state_->OnFormActivityRegistered(kTestFormName, kTestFieldName,
-                                       kTestTypeType, kTestValue, true);
+  FormActivityParams params;
+  params.form_name = kTestFormName;
+  params.field_name = "field-name";
+  params.field_type = "field-type";
+  params.type = "type";
+  params.value = "value";
+  params.input_missing = true;
+  params.is_main_frame = false;
+  web_state_->OnFormActivityRegistered(params);
   ASSERT_TRUE(observer->form_activity_info());
   EXPECT_EQ(web_state_.get(), observer->form_activity_info()->web_state);
-  EXPECT_EQ(kTestFormName, observer->form_activity_info()->form_name);
-  EXPECT_EQ(kTestFieldName, observer->form_activity_info()->field_name);
-  EXPECT_EQ(kTestTypeType, observer->form_activity_info()->type);
-  EXPECT_EQ(kTestValue, observer->form_activity_info()->value);
-  EXPECT_TRUE(observer->form_activity_info()->input_missing);
+  EXPECT_EQ(params.form_name,
+            observer->form_activity_info()->form_activity.form_name);
+  EXPECT_EQ(params.field_name,
+            observer->form_activity_info()->form_activity.field_name);
+  EXPECT_EQ(params.field_type,
+            observer->form_activity_info()->form_activity.field_type);
+  EXPECT_EQ(params.type, observer->form_activity_info()->form_activity.type);
+  EXPECT_EQ(params.value, observer->form_activity_info()->form_activity.value);
+  EXPECT_TRUE(observer->form_activity_info()->form_activity.input_missing);
+  EXPECT_FALSE(observer->form_activity_info()->form_activity.is_main_frame);
 
   // Test that FaviconUrlUpdated() is called.
   ASSERT_FALSE(observer->update_favicon_url_candidates_info());
   web::FaviconURL favicon_url(GURL("https://chromium.test/"),
-                              web::FaviconURL::TOUCH_ICON, {gfx::Size(5, 6)});
+                              web::FaviconURL::IconType::kTouchIcon,
+                              {gfx::Size(5, 6)});
   web_state_->OnFaviconUrlUpdated({favicon_url});
   ASSERT_TRUE(observer->update_favicon_url_candidates_info());
   EXPECT_EQ(web_state_.get(),
@@ -356,7 +394,7 @@ TEST_F(WebStateImplTest, ObserverTest) {
   std::unique_ptr<web::NavigationContext> context =
       NavigationContextImpl::CreateNavigationContext(
           web_state_.get(), url,
-          ui::PageTransition::PAGE_TRANSITION_AUTO_BOOKMARK);
+          ui::PageTransition::PAGE_TRANSITION_AUTO_BOOKMARK, true);
   web_state_->OnNavigationFinished(context.get());
   ASSERT_TRUE(observer->did_finish_navigation_info());
   EXPECT_EQ(web_state_.get(),
@@ -424,7 +462,7 @@ TEST_F(WebStateImplTest, ObserverTest) {
   EXPECT_TRUE(observer->load_page_info()->success);
 
   // Test that OnTitleChanged() is called.
-  observer = base::MakeUnique<TestWebStateObserver>(web_state_.get());
+  observer = std::make_unique<TestWebStateObserver>(web_state_.get());
   ASSERT_FALSE(observer->title_was_set_info());
   web_state_->OnTitleChanged();
   ASSERT_TRUE(observer->title_was_set_info());
@@ -436,6 +474,28 @@ TEST_F(WebStateImplTest, ObserverTest) {
   EXPECT_TRUE(observer->web_state_destroyed_info());
 
   EXPECT_EQ(nullptr, observer->web_state());
+}
+
+// Tests that placeholder navigations are not visible to WebStateObservers.
+TEST_F(WebStateImplTest, PlaceholderNavigationNotExposedToObservers) {
+  TestWebStateObserver observer(web_state_.get());
+  FakeNavigationContext context;
+  context.SetUrl(placeholder_navigation_util::CreatePlaceholderUrlForUrl(
+      GURL("chrome://newtab")));
+
+  // Test that OnPageLoaded() is not called.
+  web_state_->OnPageLoaded(context.GetUrl(), true /* load_success */);
+  EXPECT_FALSE(observer.load_page_info());
+  web_state_->OnPageLoaded(context.GetUrl(), false /* load_success */);
+  EXPECT_FALSE(observer.load_page_info());
+
+  // Test that OnNavigationStarted() is not called.
+  web_state_->OnNavigationStarted(&context);
+  EXPECT_FALSE(observer.did_start_navigation_info());
+
+  // Test that OnNavigationFinished() is not called.
+  web_state_->OnNavigationFinished(&context);
+  EXPECT_FALSE(observer.did_finish_navigation_info());
 }
 
 // Tests that WebStateDelegate methods appropriately called.
@@ -527,6 +587,32 @@ TEST_F(WebStateImplTest, DelegateTest) {
   EXPECT_EQ(delegate.last_authentication_request()->protection_space,
             protection_space);
   EXPECT_EQ(delegate.last_authentication_request()->credential, credential);
+
+  // Test that ShouldPreviewLink() is delegated correctly.
+  GURL link_url("http://link.test/");
+  delegate.SetShouldPreviewLink(false);
+  delegate.ClearLastLinkURL();
+  EXPECT_FALSE(web_state_->ShouldPreviewLink(link_url));
+  EXPECT_EQ(link_url, delegate.last_link_url());
+  delegate.SetShouldPreviewLink(true);
+  delegate.ClearLastLinkURL();
+  EXPECT_TRUE(web_state_->ShouldPreviewLink(link_url));
+  EXPECT_EQ(link_url, delegate.last_link_url());
+
+  // Test that GetPreviewingViewController() is delegated correctly.
+  UIViewController* previewing_view_controller =
+      OCMClassMock([UIViewController class]);
+  delegate.SetPreviewingViewController(previewing_view_controller);
+  delegate.ClearLastLinkURL();
+  EXPECT_EQ(previewing_view_controller,
+            web_state_->GetPreviewingViewController(link_url));
+  EXPECT_EQ(link_url, delegate.last_link_url());
+
+  // Test that CommitPreviewingViewController() is called.
+  delegate.ClearLastPreviewingViewController();
+  web_state_->CommitPreviewingViewController(previewing_view_controller);
+  EXPECT_EQ(previewing_view_controller,
+            delegate.last_previewing_view_controller());
 }
 
 // Verifies that GlobalWebStateObservers are called when expected.
@@ -549,6 +635,12 @@ TEST_F(WebStateImplTest, GlobalObserverTest) {
   LoadCommittedDetails details;
   web_state_->OnNavigationItemCommitted(details);
   EXPECT_TRUE(observer->navigation_item_committed_called());
+
+  // Test that DidStartNavigation() is called.
+  EXPECT_FALSE(observer->did_start_navigation_called());
+  FakeNavigationContext context;
+  web_state_->OnNavigationStarted(&context);
+  EXPECT_TRUE(observer->did_start_navigation_called());
 
   // Test that WebStateDidStartLoading() is called.
   EXPECT_FALSE(observer->did_start_loading_called());
@@ -573,49 +665,73 @@ TEST_F(WebStateImplTest, GlobalObserverTest) {
   EXPECT_TRUE(observer->web_state_destroyed_called());
 }
 
+// A Google Mock matcher which matches ui::PAGE_TRANSITION_LINK.
+// This is needed because ui::PageTransition doesn't support operator==.
+MATCHER(IsPageTransitionLink, /* argument_name = */ "") {
+  return ui::PageTransitionTypeIncludingQualifiersIs(arg,
+                                                     ui::PAGE_TRANSITION_LINK);
+}
+
 // Verifies that policy deciders are correctly called by the web state.
 TEST_F(WebStateImplTest, PolicyDeciderTest) {
   MockWebStatePolicyDecider decider(web_state_.get());
   MockWebStatePolicyDecider decider2(web_state_.get());
   EXPECT_EQ(web_state_.get(), decider.web_state());
 
+  NSURL* url = [NSURL URLWithString:@"http://example.com"];
+  NSURLRequest* request = [NSURLRequest requestWithURL:url];
+  NSURLResponse* response = [[NSURLResponse alloc] initWithURL:url
+                                                      MIMEType:@"text/html"
+                                         expectedContentLength:0
+                                              textEncodingName:nil];
+
   // Test that ShouldAllowRequest() is called.
-  EXPECT_CALL(decider, ShouldAllowRequest(_)).Times(1).WillOnce(Return(true));
-  EXPECT_CALL(decider2, ShouldAllowRequest(_)).Times(1).WillOnce(Return(true));
-  EXPECT_TRUE(web_state_->ShouldAllowRequest(nil));
+  EXPECT_CALL(decider, ShouldAllowRequest(request, IsPageTransitionLink()))
+      .Times(1)
+      .WillOnce(Return(true));
+  EXPECT_CALL(decider2, ShouldAllowRequest(request, IsPageTransitionLink()))
+      .Times(1)
+      .WillOnce(Return(true));
+  EXPECT_TRUE(
+      web_state_->ShouldAllowRequest(request, ui::PAGE_TRANSITION_LINK));
 
   // Test that ShouldAllowRequest() is stopping on negative answer. Only one
   // one the decider should be called.
   {
     bool decider_called = false;
     bool decider2_called = false;
-    EXPECT_CALL(decider, ShouldAllowRequest(_))
+    EXPECT_CALL(decider, ShouldAllowRequest(request, IsPageTransitionLink()))
         .Times(AtMost(1))
         .WillOnce(DoAll(Assign(&decider_called, true), Return(false)));
-    EXPECT_CALL(decider2, ShouldAllowRequest(_))
+    EXPECT_CALL(decider2, ShouldAllowRequest(request, IsPageTransitionLink()))
         .Times(AtMost(1))
         .WillOnce(DoAll(Assign(&decider2_called, true), Return(false)));
-    EXPECT_FALSE(web_state_->ShouldAllowRequest(nil));
+    EXPECT_FALSE(
+        web_state_->ShouldAllowRequest(request, ui::PAGE_TRANSITION_LINK));
     EXPECT_FALSE(decider_called && decider2_called);
   }
 
   // Test that ShouldAllowResponse() is called.
-  EXPECT_CALL(decider, ShouldAllowResponse(_)).Times(1).WillOnce(Return(true));
-  EXPECT_CALL(decider2, ShouldAllowResponse(_)).Times(1).WillOnce(Return(true));
-  EXPECT_TRUE(web_state_->ShouldAllowResponse(nil));
+  EXPECT_CALL(decider, ShouldAllowResponse(response, true))
+      .Times(1)
+      .WillOnce(Return(true));
+  EXPECT_CALL(decider2, ShouldAllowResponse(response, true))
+      .Times(1)
+      .WillOnce(Return(true));
+  EXPECT_TRUE(web_state_->ShouldAllowResponse(response, true));
 
   // Test that ShouldAllowResponse() is stopping on negative answer. Only one
   // one the decider should be called.
   {
     bool decider_called = false;
     bool decider2_called = false;
-    EXPECT_CALL(decider, ShouldAllowResponse(_))
+    EXPECT_CALL(decider, ShouldAllowResponse(response, false))
         .Times(AtMost(1))
         .WillOnce(DoAll(Assign(&decider_called, true), Return(false)));
-    EXPECT_CALL(decider2, ShouldAllowResponse(_))
+    EXPECT_CALL(decider2, ShouldAllowResponse(response, false))
         .Times(AtMost(1))
         .WillOnce(DoAll(Assign(&decider2_called, true), Return(false)));
-    EXPECT_FALSE(web_state_->ShouldAllowResponse(nil));
+    EXPECT_FALSE(web_state_->ShouldAllowResponse(response, false));
     EXPECT_FALSE(decider_called && decider2_called);
   }
 
@@ -697,6 +813,55 @@ TEST_F(WebStateImplTest, CreatedWithOpener) {
   std::unique_ptr<WebState> web_state_with_opener =
       WebState::Create(params_with_opener);
   EXPECT_TRUE(web_state_with_opener->HasOpener());
+}
+
+// Tests that WebStateObserver::FaviconUrlUpdated is called for same-document
+// navigations.
+TEST_F(WebStateImplTest, FaviconUpdateForSameDocumentNavigations) {
+  auto observer = std::make_unique<TestWebStateObserver>(web_state_.get());
+
+  // No callback if icons has not been fetched yet.
+  FakeNavigationContext context;
+  context.SetIsSameDocument(true);
+  web_state_->OnNavigationFinished(&context);
+  EXPECT_FALSE(observer->update_favicon_url_candidates_info());
+
+  // Callback is called when icons were fetched.
+  observer = std::make_unique<TestWebStateObserver>(web_state_.get());
+  web::FaviconURL favicon_url(GURL("https://chromium.test/"),
+                              web::FaviconURL::IconType::kTouchIcon,
+                              {gfx::Size(5, 6)});
+  web_state_->OnFaviconUrlUpdated({favicon_url});
+  EXPECT_TRUE(observer->update_favicon_url_candidates_info());
+
+  // Callback is now called after same-document navigation.
+  observer = std::make_unique<TestWebStateObserver>(web_state_.get());
+  web_state_->OnNavigationFinished(&context);
+  ASSERT_TRUE(observer->update_favicon_url_candidates_info());
+  ASSERT_EQ(1U,
+            observer->update_favicon_url_candidates_info()->candidates.size());
+  const web::FaviconURL& actual_favicon_url =
+      observer->update_favicon_url_candidates_info()->candidates[0];
+  EXPECT_EQ(favicon_url.icon_url, actual_favicon_url.icon_url);
+  EXPECT_EQ(favicon_url.icon_type, actual_favicon_url.icon_type);
+  ASSERT_EQ(favicon_url.icon_sizes.size(),
+            actual_favicon_url.icon_sizes.size());
+  EXPECT_EQ(favicon_url.icon_sizes[0].width(),
+            actual_favicon_url.icon_sizes[0].width());
+  EXPECT_EQ(favicon_url.icon_sizes[0].height(),
+            actual_favicon_url.icon_sizes[0].height());
+
+  // Document change navigation does not call callback.
+  observer = std::make_unique<TestWebStateObserver>(web_state_.get());
+  context.SetIsSameDocument(false);
+  web_state_->OnNavigationFinished(&context);
+  EXPECT_FALSE(observer->update_favicon_url_candidates_info());
+
+  // Previous candidates were invalidated by the document change. No callback
+  // if icons has not been fetched yet.
+  context.SetIsSameDocument(true);
+  web_state_->OnNavigationFinished(&context);
+  EXPECT_FALSE(observer->update_favicon_url_candidates_info());
 }
 
 }  // namespace web

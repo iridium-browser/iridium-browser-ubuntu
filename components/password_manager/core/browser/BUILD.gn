@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//testing/libfuzzer/fuzzer_test.gni")
 import("//third_party/protobuf/proto_library.gni")
 
 if (is_android) {
@@ -35,6 +36,8 @@ static_library("browser") {
     "android_affiliation/test_affiliation_fetcher_factory.h",
     "browser_save_password_progress_logger.cc",
     "browser_save_password_progress_logger.h",
+    "credential_manager_impl.cc",
+    "credential_manager_impl.h",
     "credential_manager_logger.cc",
     "credential_manager_logger.h",
     "credential_manager_password_form_manager.cc",
@@ -48,8 +51,8 @@ static_library("browser") {
     "export/csv_writer.h",
     "export/password_csv_writer.cc",
     "export/password_csv_writer.h",
-    "export/password_exporter.cc",
-    "export/password_exporter.h",
+    "export/password_manager_exporter.cc",
+    "export/password_manager_exporter.h",
     "form_fetcher.h",
     "form_fetcher_impl.cc",
     "form_fetcher_impl.h",
@@ -89,10 +92,14 @@ static_library("browser") {
     "password_form_user_action.h",
     "password_generation_manager.cc",
     "password_generation_manager.h",
+    "password_list_sorter.cc",
+    "password_list_sorter.h",
     "password_manager.cc",
     "password_manager.h",
     "password_manager_client.cc",
     "password_manager_client.h",
+    "password_manager_client_helper.cc",
+    "password_manager_client_helper.h",
     "password_manager_constants.cc",
     "password_manager_constants.h",
     "password_manager_driver.h",
@@ -133,6 +140,10 @@ static_library("browser") {
     "statistics_table.h",
     "suppressed_form_fetcher.cc",
     "suppressed_form_fetcher.h",
+    "ui/credential_provider_interface.h",
+    "ui/export_flow.h",
+    "ui/export_progress_status.h",
+    "ui/import_flow.h",
     "webdata/logins_table.cc",
     "webdata/logins_table.h",
     "webdata/logins_table_win.cc",
@@ -149,11 +160,8 @@ static_library("browser") {
       "password_reuse_detector_consumer.cc",
       "password_reuse_detector_consumer.h",
     ]
-
-    if (is_win || is_mac || (is_linux && !is_chromeos)) {
+    if (is_win || is_mac || is_linux || is_chromeos) {
       sources += [
-        "hash_password_manager.cc",
-        "hash_password_manager.h",
         "password_store_signin_notifier.cc",
         "password_store_signin_notifier.h",
       ]
@@ -165,8 +173,8 @@ static_library("browser") {
     "//components/sync",
   ]
   deps = [
+    ":hash_password_manager",
     ":proto",
-    "//base",
     "//base:i18n",
     "//components/autofill/core/browser",
     "//components/autofill/core/browser/proto",
@@ -182,10 +190,10 @@ static_library("browser") {
     "//components/url_formatter",
     "//components/variations",
     "//components/webdata/common",
-    "//crypto",
     "//google_apis",
     "//net",
     "//services/metrics/public/cpp:metrics_cpp",
+    "//services/metrics/public/cpp:ukm_builders",
     "//sql",
     "//third_party/protobuf:protobuf_lite",
     "//third_party/re2",
@@ -214,6 +222,20 @@ static_library("browser") {
 proto_library("proto") {
   sources = [
     "android_affiliation/affiliation_api.proto",
+  ]
+}
+
+static_library("hash_password_manager") {
+  sources = [
+    "hash_password_manager.cc",
+    "hash_password_manager.h",
+  ]
+  deps = [
+    "//base:base",
+    "//components/os_crypt",
+    "//components/password_manager/core/common",
+    "//components/prefs",
+    "//crypto",
   ]
 }
 
@@ -310,11 +332,12 @@ source_set("unit_tests") {
     "android_affiliation/affiliation_utils_unittest.cc",
     "android_affiliation/facet_manager_unittest.cc",
     "browser_save_password_progress_logger_unittest.cc",
+    "credential_manager_impl_unittest.cc",
     "credential_manager_logger_unittest.cc",
     "credential_manager_password_form_manager_unittest.cc",
     "export/csv_writer_unittest.cc",
     "export/password_csv_writer_unittest.cc",
-    "export/password_exporter_unittest.cc",
+    "export/password_manager_exporter_unittest.cc",
     "form_fetcher_impl_unittest.cc",
     "form_saver_impl_unittest.cc",
     "http_password_store_migrator_unittest.cc",
@@ -330,6 +353,7 @@ source_set("unit_tests") {
     "password_form_manager_unittest.cc",
     "password_form_metrics_recorder_unittest.cc",
     "password_generation_manager_unittest.cc",
+    "password_list_sorter_unittest.cc",
     "password_manager_metrics_recorder_unittest.cc",
     "password_manager_unittest.cc",
     "password_manager_util_unittest.cc",
@@ -362,10 +386,13 @@ source_set("unit_tests") {
       "password_reuse_detector_unittest.cc",
     ]
   }
-  if (is_win || is_mac || (is_linux && !is_chromeos)) {
+
+  if (is_win || is_mac || is_linux || is_chromeos) {
     sources += [ "hash_password_manager_unittest.cc" ]
   }
+
   deps = [
+    ":hash_password_manager",
     ":test_support",
     ":unit_tests_bundle_data",
     "//base/test:test_support",
@@ -383,10 +410,24 @@ source_set("unit_tests") {
     "//components/ukm:test_support",
     "//components/variations",
     "//net:test_support",
+    "//services/metrics/public/cpp:ukm_builders",
     "//sql:test_support",
     "//testing/gmock",
     "//testing/gtest",
     "//ui/base",
     "//url",
   ]
+}
+
+fuzzer_test("csv_reader_fuzzer") {
+  sources = [
+    "import/password_csv_reader_fuzzer.cc",
+  ]
+  deps = [
+    ":browser",
+    "//base:i18n",
+    "//components/autofill/core/common:common",
+  ]
+  seed_corpus = "import/password_csv_reader_corpus"
+  dict = "import/password_csv_reader_fuzzer.dict"
 }

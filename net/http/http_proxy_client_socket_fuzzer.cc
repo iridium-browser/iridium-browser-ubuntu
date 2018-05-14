@@ -64,17 +64,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // is HTTPS.
   bool is_https_proxy = data_provider.ConsumeBool();
   net::HttpProxyClientSocket socket(
-      socket_handle.release(), "Bond/007", net::HostPortPair("foo", 80),
-      net::HostPortPair("proxy", 42), auth_controller.get(), true /* tunnel */,
-      false /* using_spdy */, net::kProtoUnknown, nullptr /* proxy_delegate */,
-      is_https_proxy);
+      std::move(socket_handle), "Bond/007", net::HostPortPair("foo", 80),
+      auth_controller.get(), true /* tunnel */, false /* using_spdy */,
+      net::kProtoUnknown, is_https_proxy);
   int result = socket.Connect(callback.callback());
   result = callback.GetResult(result);
 
   // Repeatedly try to log in with the same credentials.
   while (result == net::ERR_PROXY_AUTH_REQUESTED) {
-    auth_controller->ResetAuth(net::AuthCredentials(
-        base::ASCIIToUTF16("user"), base::ASCIIToUTF16("pass")));
+    if (!auth_controller->HaveAuth()) {
+      auth_controller->ResetAuth(net::AuthCredentials(
+          base::ASCIIToUTF16("user"), base::ASCIIToUTF16("pass")));
+    }
     result = socket.RestartWithAuth(callback.callback());
     result = callback.GetResult(result);
   }

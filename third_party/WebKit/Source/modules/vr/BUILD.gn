@@ -12,7 +12,6 @@ blink_modules_sources("vr") {
     "VRController.h",
     "VRDisplay.cpp",
     "VRDisplay.h",
-    "VRDisplayCapabilities.cpp",
     "VRDisplayCapabilities.h",
     "VRDisplayEvent.cpp",
     "VRDisplayEvent.h",
@@ -30,6 +29,7 @@ blink_modules_sources("vr") {
   ]
 
   deps = [
-    "//device/vr:mojo_bindings_blink",
+    "//device/vr/public/mojom:mojom_blink",
+    "//services/metrics/public/cpp:ukm_builders",
   ]
 }

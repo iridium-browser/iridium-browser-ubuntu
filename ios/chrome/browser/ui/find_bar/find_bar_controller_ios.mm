@@ -14,7 +14,7 @@
 #import "ios/chrome/browser/find_in_page/find_in_page_controller.h"
 #import "ios/chrome/browser/find_in_page/find_in_page_model.h"
 #import "ios/chrome/browser/ui/UIView+SizeClassSupport.h"
-#import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
+#import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/find_bar/find_bar_view.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -32,6 +32,9 @@ namespace {
 // Right padding on iPad find bar.
 const CGFloat kFindBarIPhoneHeight = 56;
 const CGFloat kFindBarIPadHeight = 62;
+
+// Padding added by the invisible background.
+const CGFloat kBackgroundPadding = 6;
 
 // Find Bar animation drop down duration.
 const CGFloat kAnimationDuration = 0.15;
@@ -67,10 +70,9 @@ const NSTimeInterval kSearchShortDelay = 0.100;
 // Returns the appropriate variant of the image for |image_name| based on
 // |_isIncognito| and device idiom.
 - (UIImage*)imageWithName:(NSString*)image_name;
-// Delay searching for the first |kSearchDelayChars| characters of a search term
-// to give time for a user to type out a longer word.  Short words are currently
-// very inefficient and lock up the UIWebView.
-- (void)editingChanged:(id)sender;
+// Responds to touches that make editing changes on the text field, triggering
+// find-in-page searches for the field's current value.
+- (void)editingChanged;
 // Return the expected find bar height. This will include the status bar height
 // when running iOS7 on an iPhone.
 - (CGFloat)findBarHeight;
@@ -97,6 +99,7 @@ const NSTimeInterval kSearchShortDelay = 0.100;
 @synthesize findBarView = _findBarView;
 @synthesize delayTimer = _delayTimer;
 @synthesize isIncognito = _isIncognito;
+@synthesize dispatcher = _dispatcher;
 
 #pragma mark - Lifecycle
 
@@ -154,14 +157,23 @@ const NSTimeInterval kSearchShortDelay = 0.100;
 
   self.findBarView.inputField.delegate = self;
   [self.findBarView.inputField addTarget:self
-                                  action:@selector(editingChanged:)
+                                  action:@selector(editingChanged)
                         forControlEvents:UIControlEventEditingChanged];
+  [self.findBarView.nextButton addTarget:self.dispatcher
+                                  action:@selector(findNextStringInPage)
+                        forControlEvents:UIControlEventTouchUpInside];
   [self.findBarView.nextButton addTarget:self
                                   action:@selector(hideKeyboard:)
                         forControlEvents:UIControlEventTouchUpInside];
+  [self.findBarView.previousButton addTarget:self.dispatcher
+                                      action:@selector(findPreviousStringInPage)
+                            forControlEvents:UIControlEventTouchUpInside];
   [self.findBarView.previousButton addTarget:self
                                       action:@selector(hideKeyboard:)
                             forControlEvents:UIControlEventTouchUpInside];
+  [self.findBarView.closeButton addTarget:self.dispatcher
+                                   action:@selector(closeFindInPage)
+                         forControlEvents:UIControlEventTouchUpInside];
 
   return findBarBackground;
 }
@@ -231,7 +243,7 @@ const NSTimeInterval kSearchShortDelay = 0.100;
   if (initialUpdate) {
     // Set initial text and first search.
     [self.findBarView.inputField setText:model.text];
-    [self editingChanged:self.findBarView.inputField];
+    [self editingChanged];
   }
 
   // Focus input field if necessary.
@@ -352,7 +364,6 @@ const NSTimeInterval kSearchShortDelay = 0.100;
   frame.size.height = 0;
 
   CGFloat containerWidth = parentView.bounds.size.width;
-  CGFloat nibWidth = frame.size.width;
 
   // On iPad, there are three possible frames for the Search bar:
   // 1. In Regular width size class, it is short, right-aligned to the omnibox's
@@ -363,17 +374,19 @@ const NSTimeInterval kSearchShortDelay = 0.100;
   //   container view from edge to edge, ignoring the omnibox.
   if (view.cr_widthSizeClass == REGULAR) {
     if (base::i18n::IsRTL()) {
-      frame.origin.x = CGRectGetMinX(omniboxFrame);
+      frame.origin.x = CGRectGetMinX(omniboxFrame) - kBackgroundPadding;
     } else {
-      frame.origin.x =
-          CGRectGetMinX(omniboxFrame) + CGRectGetWidth(omniboxFrame) - nibWidth;
+      frame.origin.x = CGRectGetMinX(omniboxFrame) +
+                       CGRectGetWidth(omniboxFrame) - frame.size.width +
+                       kBackgroundPadding;
     }
-    frame.size.width = nibWidth;
   } else {
     // Compact size class.
-    if (omniboxFrame.size.width > nibWidth) {
-      frame.origin.x = omniboxFrame.origin.x;
-      frame.size.width = omniboxFrame.size.width;
+    CGRect visibleFrame = CGRectInset(frame, kBackgroundPadding, 0);
+    if (omniboxFrame.size.width > visibleFrame.size.width) {
+      visibleFrame.origin.x = omniboxFrame.origin.x;
+      visibleFrame.size.width = omniboxFrame.size.width;
+      frame = CGRectInset(visibleFrame, -kBackgroundPadding, 0);
     } else {
       frame.origin.x = 0;
       frame.size.width = containerWidth;
@@ -423,24 +436,23 @@ const NSTimeInterval kSearchShortDelay = 0.100;
       }];
 }
 
-- (void)textChanged {
-  [self.view chromeExecuteCommand:self.findBarView.inputField];
-}
-
-- (void)editingChanged:(id)sender {
+- (void)editingChanged {
   [self.delayTimer invalidate];
   NSUInteger length = [[self searchTerm] length];
-  if (length == 0)
-    return [self textChanged];
+  if (length == 0) {
+    [self.dispatcher searchFindInPage];
+    return;
+  }
 
-  // Delay delivery of text change event.  Use a longer delay when the input
-  // length is short.
+  // Delay delivery of the search text event to give time for a user to type out
+  // a longer word.  Use a longer delay when the input length is short, as short
+  // words are currently very inefficient and lock up the web view.
   NSTimeInterval delay =
       (length > kSearchDelayChars) ? kSearchShortDelay : kSearchLongDelay;
   self.delayTimer =
       [NSTimer scheduledTimerWithTimeInterval:delay
-                                       target:self
-                                     selector:@selector(textChanged)
+                                       target:self.dispatcher
+                                     selector:@selector(searchFindInPage)
                                      userInfo:nil
                                       repeats:NO];
 }

@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Multiply-included message header, no traditional include guard.
+#ifndef PPAPI_PROXY_PPAPI_MESSAGES_H_
+#define PPAPI_PROXY_PPAPI_MESSAGES_H_
 
 #include <stdint.h>
 
@@ -92,46 +93,63 @@
 
 IPC_ENUM_TRAITS_MAX_VALUE(ppapi::TCPSocketVersion,
                           ppapi::TCP_SOCKET_VERSION_1_1_OR_ABOVE)
-IPC_ENUM_TRAITS(PP_AudioSampleRate)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_AudioSampleRate, PP_AUDIOSAMPLERATE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_BlendMode, PP_BLENDMODE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_CdmExceptionCode, PP_CDMEXCEPTIONCODE_MAX)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_CdmKeyStatus, PP_CDMKEYSTATUS_MAX)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_CdmMessageType, PP_CDMMESSAGETYPE_MAX)
-IPC_ENUM_TRAITS(PP_DeviceType_Dev)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_DeviceType_Dev, PP_DEVICETYPE_DEV_MAX)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_DecryptorStreamType, PP_DECRYPTORSTREAMTYPE_MAX)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_FileSystemType, PP_FILESYSTEMTYPE_ISOLATED)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_FileType, PP_FILETYPE_OTHER)
-IPC_ENUM_TRAITS(PP_Flash_BrowserOperations_Permission)
-IPC_ENUM_TRAITS(PP_Flash_BrowserOperations_SettingType)
-IPC_ENUM_TRAITS(PP_FlashSetting)
-IPC_ENUM_TRAITS(PP_ImageDataFormat)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_Flash_BrowserOperations_Permission,
+                          PP_FLASH_BROWSEROPERATIONS_PERMISSION_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_Flash_BrowserOperations_SettingType,
+                          PP_FLASH_BROWSEROPERATIONS_SETTINGTYPE_LAST)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(PP_FlashSetting,
+                              PP_FLASHSETTING_FIRST,
+                              PP_FLASHSETTING_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_HdcpVersion, PP_HDCPVERSION_MAX)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_ImageDataFormat, PP_IMAGEDATAFORMAT_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_InitDataType, PP_INITDATATYPE_MAX)
-IPC_ENUM_TRAITS(PP_InputEvent_MouseButton)
-IPC_ENUM_TRAITS(PP_InputEvent_Type)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(PP_InputEvent_MouseButton,
+                              PP_INPUTEVENT_MOUSEBUTTON_FIRST,
+                              PP_INPUTEVENT_MOUSEBUTTON_LAST)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(PP_InputEvent_Type,
+                              PP_INPUTEVENT_TYPE_FIRST,
+                              PP_INPUTEVENT_TYPE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_IsolatedFileSystemType_Private,
                           PP_ISOLATEDFILESYSTEMTYPE_PRIVATE_PLUGINPRIVATE)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_NetAddressFamily_Private,
                           PP_NETADDRESSFAMILY_PRIVATE_IPV6)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_NetworkList_State, PP_NETWORKLIST_STATE_UP)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_NetworkList_Type, PP_NETWORKLIST_TYPE_CELLULAR)
-IPC_ENUM_TRAITS(PP_PrintOrientation_Dev)
-IPC_ENUM_TRAITS(PP_PrintOutputFormat_Dev)
-IPC_ENUM_TRAITS(PP_PrintScalingOption_Dev)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_PrintOrientation_Dev,
+                          PP_PRINTORIENTATION_ROTATED_LAST)
+IPC_ENUM_TRAITS(PP_PrintOutputFormat_Dev)  // Bitmask.
+IPC_ENUM_TRAITS_MAX_VALUE(PP_PrintScalingOption_Dev, PP_PRINTSCALINGOPTION_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_PrivateDuplexMode_Dev, PP_PRIVATEDUPLEXMODE_LAST)
-IPC_ENUM_TRAITS(PP_PrivateFontCharset)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_PrivateFontCharset, PP_PRIVATEFONTCHARSET_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_SessionType, PP_SESSIONTYPE_MAX)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_TCPSocket_Option,
                           PP_TCPSOCKET_OPTION_RECV_BUFFER_SIZE)
-IPC_ENUM_TRAITS(PP_TextInput_Type)
-IPC_ENUM_TRAITS(PP_TrueTypeFontFamily_Dev)
-IPC_ENUM_TRAITS(PP_TrueTypeFontStyle_Dev)
-IPC_ENUM_TRAITS(PP_TrueTypeFontWeight_Dev)
-IPC_ENUM_TRAITS(PP_TrueTypeFontWidth_Dev)
-IPC_ENUM_TRAITS(PP_TrueTypeFontCharset_Dev)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_TextInput_Type, PP_TEXTINPUT_TYPE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_TrueTypeFontFamily_Dev, PP_TRUETYPEFONTFAMILY_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_TrueTypeFontStyle_Dev, PP_TRUETYPEFONTSTYLE_LAST)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(PP_TrueTypeFontWeight_Dev,
+                              PP_TRUETYPEFONTWEIGHT_FIRST,
+                              PP_TRUETYPEFONTWEIGHT_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_TrueTypeFontWidth_Dev, PP_TRUETYPEFONTWIDTH_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_TrueTypeFontCharset_Dev,
+                          PP_TRUETYPEFONTCHARSET_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_UDPSocket_Option,
                           PP_UDPSOCKET_OPTION_MULTICAST_TTL)
-IPC_ENUM_TRAITS(PP_VideoDecodeError_Dev)
-IPC_ENUM_TRAITS(PP_VideoDecoder_Profile)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(PP_VideoDecodeError_Dev,
+                              PP_VIDEODECODERERROR_FIRST,
+                              PP_VIDEODECODERERROR_LAST)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(PP_VideoDecoder_Profile,
+                              PP_VIDEODECODER_PROFILE_FIRST,
+                              PP_VIDEODECODER_PROFILE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_VideoFrame_Format, PP_VIDEOFRAME_FORMAT_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_HardwareAcceleration, PP_HARDWAREACCELERATION_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_AudioProfile, PP_AUDIOPROFILE_MAX)
@@ -790,6 +808,22 @@ IPC_SYNC_MESSAGE_ROUTED1_2(
     PP_Bool /* result */)
 IPC_MESSAGE_ROUTED1(PpapiMsg_PPPPdf_EnableAccessibility,
                     PP_Instance /* instance */)
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPPPdf_SetCaretPosition,
+                    PP_Instance /* instance */,
+                    PP_FloatPoint /* position */)
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPPPdf_MoveRangeSelectionExtent,
+                    PP_Instance /* instance */,
+                    PP_FloatPoint /* extent */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPPdf_SetSelectionBounds,
+                    PP_Instance /* instance */,
+                    PP_FloatPoint /* base */,
+                    PP_FloatPoint /* extent */)
+IPC_SYNC_MESSAGE_ROUTED1_1(PpapiMsg_PPPPdf_CanEditText,
+                           PP_Instance /* instance */,
+                           PP_Bool /* result */)
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPPPdf_ReplaceSelection,
+                    PP_Instance /* instance */,
+                    std::string /* text */)
 
 // Find
 IPC_MESSAGE_ROUTED2(PpapiPluginMsg_PPPFind_StartFind,
@@ -856,6 +890,10 @@ IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_SetServerCertificate,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
                     std::vector<uint8_t> /* certificate */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_GetStatusForPolicy,
+                    PP_Instance /* instance */,
+                    uint32_t /* promise_id */,
+                    PP_HdcpVersion /* min_hdcp_version */)
 IPC_MESSAGE_ROUTED5(
     PpapiMsg_PPPContentDecryptor_CreateSessionAndGenerateRequest,
     PP_Instance /* instance */,
@@ -1050,15 +1088,14 @@ IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBCore_ReleaseResource,
                     ppapi::HostResource)
 
 // PPB_Graphics3D.
-IPC_SYNC_MESSAGE_ROUTED3_4(
-    PpapiHostMsg_PPBGraphics3D_Create,
-    PP_Instance /* instance */,
-    ppapi::HostResource /* share_context */,
-    gpu::gles2::ContextCreationAttribHelper /* attrib_helper */,
-    ppapi::HostResource /* result */,
-    gpu::Capabilities /* capabilities */,
-    ppapi::proxy::SerializedHandle /* shared_state */,
-    gpu::CommandBufferId /* command_buffer_id */)
+IPC_SYNC_MESSAGE_ROUTED3_4(PpapiHostMsg_PPBGraphics3D_Create,
+                           PP_Instance /* instance */,
+                           ppapi::HostResource /* share_context */,
+                           gpu::ContextCreationAttribs /* attrib_helper */,
+                           ppapi::HostResource /* result */,
+                           gpu::Capabilities /* capabilities */,
+                           ppapi::proxy::SerializedHandle /* shared_state */,
+                           gpu::CommandBufferId /* command_buffer_id */)
 IPC_SYNC_MESSAGE_ROUTED2_0(PpapiHostMsg_PPBGraphics3D_SetGetBuffer,
                            ppapi::HostResource /* context */,
                            int32_t /* transfer_buffer_id */)
@@ -1286,6 +1323,10 @@ IPC_SYNC_MESSAGE_ROUTED2_2(
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_PromiseResolved,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_PromiseResolvedWithKeyStatus,
+                    PP_Instance /* instance */,
+                    uint32_t /* promise_id */,
+                    PP_CdmKeyStatus /* key_status */)
 IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_PromiseResolvedWithSession,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
@@ -1843,7 +1884,7 @@ IPC_MESSAGE_CONTROL3(PpapiHostMsg_PlatformVerification_ChallengePlatformReply,
                      std::string /* platform_key_certificate */)
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_PlatformVerification_GetStorageId)
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_PlatformVerification_GetStorageIdReply,
-                     std::string /* storage_id */)
+                     std::vector<uint8_t> /* storage_id */)
 
 // Printing.
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_Printing_Create)
@@ -2521,6 +2562,16 @@ IPC_MESSAGE_CONTROL3(
     std::vector<PP_PrivateAccessibilityTextRunInfo> /* text_runs */,
     std::vector<PP_PrivateAccessibilityCharInfo> /* chars */)
 
+// Send information about the selection coordinates.
+IPC_MESSAGE_CONTROL4(PpapiHostMsg_PDF_SelectionChanged,
+                     PP_FloatPoint /* left */,
+                     int32_t /* left_height */,
+                     PP_FloatPoint /* right */,
+                     int32_t /* right_height */)
+
+// Notify that the plugin has scrolled.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_PDF_DidScroll)
+
 // VideoCapture ----------------------------------------------------------------
 
 // VideoCapture_Dev, plugin -> host
@@ -2551,3 +2602,5 @@ IPC_MESSAGE_CONTROL1(PpapiPluginMsg_VideoCapture_OnBufferReady,
                      uint32_t /* buffer */)
 
 #endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
+
+#endif  // PPAPI_PROXY_PPAPI_MESSAGES_H_

@@ -9,6 +9,9 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/task_scheduler/post_task.h"
+#include "ios/net/cookies/cookie_store_ios_client.h"
+#include "net/cookies/cookie_change_dispatcher.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store.h"
 #include "url/gurl.h"
@@ -38,6 +41,7 @@ class TestPersistentCookieStore
   void UpdateCookieAccessTime(const net::CanonicalCookie& cc) override;
   void DeleteCookie(const net::CanonicalCookie& cc) override;
   void SetForceKeepSessionState() override;
+  void SetBeforeFlushCallback(base::RepeatingClosure callback) override;
   void Flush(base::OnceClosure callback) override;
 
   ~TestPersistentCookieStore() override;
@@ -47,28 +51,30 @@ class TestPersistentCookieStore
   bool flushed_;
 };
 
-// Helper callback to be passed to CookieStore::GetCookiesWithOptionsAsync().
-class GetCookieCallback {
+class TestCookieStoreIOSClient : public CookieStoreIOSClient {
  public:
-  GetCookieCallback();
+  TestCookieStoreIOSClient();
+  // CookieStoreIOSClient implementation.
+  scoped_refptr<base::SequencedTaskRunner> GetTaskRunner() const override;
+};
 
-  // Returns true if the callback has been run.
-  bool did_run();
+class ScopedTestingCookieStoreIOSClient {
+ public:
+  explicit ScopedTestingCookieStoreIOSClient(
+      std::unique_ptr<CookieStoreIOSClient> cookie_store_client);
+  ~ScopedTestingCookieStoreIOSClient();
 
-  // Returns the parameter of the callback.
-  const std::string& cookie_line();
-
-  void Run(const std::string& cookie_line);
+  CookieStoreIOSClient* Get();
 
  private:
-  bool did_run_;
-  std::string cookie_line_;
+  std::unique_ptr<CookieStoreIOSClient> cookie_store_client_;
+  CookieStoreIOSClient* original_client_;
 };
 
 void RecordCookieChanges(std::vector<net::CanonicalCookie>* out_cookies,
                          std::vector<bool>* out_removes,
                          const net::CanonicalCookie& cookie,
-                         net::CookieStore::ChangeCause cause);
+                         net::CookieChangeCause cause);
 
 // Sets a cookie.
 void SetCookie(const std::string& cookie_line,

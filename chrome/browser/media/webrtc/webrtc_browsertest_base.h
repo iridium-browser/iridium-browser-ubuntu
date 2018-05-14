@@ -22,6 +22,10 @@ namespace content {
 class WebContents;
 }
 
+namespace extensions {
+class Extension;
+}
+
 // Base class for WebRTC browser tests with useful primitives for interacting
 // getUserMedia. We use inheritance here because it makes the test code look
 // as clean as it can be.
@@ -40,8 +44,7 @@ class WebRtcTestBase : public InProcessBrowserTest {
   static const char kAudioVideoCallConstraints720p[];
 
   static const char kOkGotStream[];
-  static const char kFailedWithPermissionDeniedError[];
-  static const char kFailedWithPermissionDismissedError[];
+  static const char kFailedWithNotAllowedError[];
 
   static const char kUseDefaultCertKeygen[];
   static const char kUseDefaultAudioCodec[];
@@ -53,6 +56,15 @@ class WebRtcTestBase : public InProcessBrowserTest {
     NO_STREAM,
     SHARED_STREAM,
     INDIVIDUAL_STREAMS
+  };
+
+  struct TrackEvent {
+    explicit TrackEvent(const std::string& track_id);
+    TrackEvent(const TrackEvent&);
+    ~TrackEvent();
+
+    std::string track_id;
+    std::vector<std::string> stream_ids;
   };
 
  protected:
@@ -99,9 +111,10 @@ class WebRtcTestBase : public InProcessBrowserTest {
   content::WebContents* OpenTestPageAndGetUserMediaInNewTab(
     const std::string& test_page) const;
 
-  // Opens the page at |url| where getUserMedia has been invoked through other
-  // means and accepts the user media request.
-  content::WebContents* OpenPageAndAcceptUserMedia(const GURL& url) const;
+  // Convenience method which gets the URL for |test_page|, but without calling
+  // GetUserMedia.
+  content::WebContents* OpenTestPageInNewTab(
+      const std::string& test_page) const;
 
   // Closes the last local stream acquired by the GetUserMedia* methods.
   void CloseLastLocalStream(content::WebContents* tab_contents) const;
@@ -193,8 +206,12 @@ class WebRtcTestBase : public InProcessBrowserTest {
   // Change the default audio/video codec in the offer SDP.
   void SetDefaultAudioCodec(content::WebContents* tab,
                             const std::string& audio_codec) const;
+  // |prefer_hw_codec| controls what codec with name |video_codec| should be
+  // selected. This parameter only matters if there are multiple codecs with the
+  // same name, which can be the case for H264.
   void SetDefaultVideoCodec(content::WebContents* tab,
-                            const std::string& video_codec) const;
+                            const std::string& video_codec,
+                            bool prefer_hw_codec = false) const;
 
   // Add 'usedtx=1' to the offer SDP.
   void EnableOpusDtx(content::WebContents* tab) const;
@@ -222,9 +239,14 @@ class WebRtcTestBase : public InProcessBrowserTest {
   bool HasReceiverWithTrack(content::WebContents* tab,
                             std::string track_id) const;
   size_t GetNegotiationNeededCount(content::WebContents* tab) const;
+  std::vector<TrackEvent> GetTrackEvents(content::WebContents* tab) const;
   // Performs garbage collection with "gc()". Requires command line switch
   // |kJavaScriptFlags| with "--expose-gc".
   void CollectGarbage(content::WebContents* tab) const;
+  // Try to open a dekstop media stream, and return the stream id.
+  // On failure, will return empty string.
+  std::string GetDesktopMediaStream(content::WebContents* tab);
+  base::Optional<std::string> LoadDesktopCaptureExtension();
 
  private:
   void CloseInfoBarInTab(content::WebContents* tab_contents,
@@ -247,6 +269,7 @@ class WebRtcTestBase : public InProcessBrowserTest {
       const std::string& constraints) const;
 
   bool detect_errors_in_javascript_;
+  scoped_refptr<const extensions::Extension> desktop_capture_extension_;
 
   DISALLOW_COPY_AND_ASSIGN(WebRtcTestBase);
 };

@@ -40,7 +40,6 @@
 #include <memory>
 #include "build/build_config.h"
 #include "platform/instrumentation/PlatformInstrumentation.h"
-#include "platform/wtf/PtrUtil.h"
 
 extern "C" {
 #include <stdio.h>  // jpeglib.h needs stdio FILE.
@@ -78,7 +77,7 @@ namespace {
 const int exifMarker = JPEG_APP0 + 1;
 
 // JPEG only supports a denominator of 8.
-const unsigned scaleDenominator = 8;
+const unsigned g_scale_denomiator = 8;
 
 }  // namespace
 
@@ -376,7 +375,7 @@ class JPEGImageReader final {
   }
 
   void SetData(SegmentReader* data) {
-    if (data_.Get() == data)
+    if (data_.get() == data)
       return;
 
     data_ = data;
@@ -393,6 +392,8 @@ class JPEGImageReader final {
     ClearBuffer();
   }
 
+  // Decode the JPEG data. If |only_size| is specified, then only the size
+  // information will be decoded.
   bool Decode(bool only_size) {
     // We need to do the setjmp here. Otherwise bad things will happen
     if (setjmp(err_.setjmp_buffer))
@@ -400,7 +401,7 @@ class JPEGImageReader final {
 
     J_COLOR_SPACE override_color_space = JCS_UNKNOWN;
     switch (state_) {
-      case JPEG_HEADER:
+      case JPEG_HEADER: {
         // Read file parameters with jpeg_read_header().
         if (jpeg_read_header(&info_, true) == JPEG_SUSPENDED)
           return false;  // I/O suspension.
@@ -435,8 +436,22 @@ class JPEGImageReader final {
           return false;
 
         // Calculate and set decoded size.
-        info_.scale_num = decoder_->DesiredScaleNumerator();
-        info_.scale_denom = scaleDenominator;
+        int max_numerator = decoder_->DesiredScaleNumerator();
+        info_.scale_denom = g_scale_denomiator;
+
+        if (decoder_->ShouldGenerateAllSizes()) {
+          std::vector<SkISize> sizes;
+          sizes.reserve(max_numerator);
+          for (int numerator = 1; numerator <= max_numerator; ++numerator) {
+            info_.scale_num = numerator;
+            jpeg_calc_output_dimensions(&info_);
+            sizes.push_back(
+                SkISize::Make(info_.output_width, info_.output_height));
+          }
+          decoder_->SetSupportedDecodeSizes(std::move(sizes));
+        }
+
+        info_.scale_num = max_numerator;
         // Scaling caused by running low on memory isn't supported by YUV
         // decoding since YUV decoding is performed on full sized images. At
         // this point, buffers and various image info structs have already been
@@ -454,8 +469,30 @@ class JPEGImageReader final {
           JOCTET* profile = nullptr;
           unsigned profile_length = 0;
           if (read_icc_profile(Info(), &profile, &profile_length)) {
-            Decoder()->SetEmbeddedColorProfile(reinterpret_cast<char*>(profile),
-                                               profile_length);
+            sk_sp<SkColorSpace> color_space =
+                SkColorSpace::MakeICC(profile, profile_length);
+            if (color_space) {
+              const SkColorSpace::Type type = color_space->type();
+              switch (info_.jpeg_color_space) {
+                case JCS_CMYK:
+                case JCS_YCCK:
+                  if (type != SkColorSpace::kCMYK_Type)
+                    color_space = nullptr;
+                  break;
+                case JCS_GRAYSCALE:
+                  if (type != SkColorSpace::kGray_Type &&
+                      type != SkColorSpace::kRGB_Type)
+                    color_space = nullptr;
+                  break;
+                default:
+                  if (type != SkColorSpace::kRGB_Type)
+                    color_space = nullptr;
+                  break;
+              }
+              Decoder()->SetEmbeddedColorSpace(std::move(color_space));
+            } else {
+              DLOG(ERROR) << "Failed to parse image ICC profile";
+            }
             free(profile);
           }
           if (Decoder()->ColorTransform()) {
@@ -492,8 +529,8 @@ class JPEGImageReader final {
           ClearBuffer();
           return true;
         }
-      // FALL THROUGH
-
+      }
+      FALLTHROUGH;
       case JPEG_START_DECOMPRESS:
         // Set parameters for decompression.
         // FIXME -- Should reset dct_method and dither mode for final pass
@@ -507,7 +544,7 @@ class JPEGImageReader final {
         info_.enable_external_quant = false;
         info_.enable_1pass_quant = false;
         info_.quantize_colors = false;
-        info_.colormap = 0;
+        info_.colormap = nullptr;
 
         // Make a one-row-high sample array that will go away when done with
         // image. Always make it big enough to hold one RGBA row. Since this
@@ -522,7 +559,7 @@ class JPEGImageReader final {
         // If this is a progressive JPEG ...
         state_ = (info_.buffered_image) ? JPEG_DECOMPRESS_PROGRESSIVE
                                         : JPEG_DECOMPRESS_SEQUENTIAL;
-      // FALL THROUGH
+        FALLTHROUGH;
 
       case JPEG_DECOMPRESS_SEQUENTIAL:
         if (state_ == JPEG_DECOMPRESS_SEQUENTIAL) {
@@ -533,7 +570,7 @@ class JPEGImageReader final {
           DCHECK_EQ(info_.output_scanline, info_.output_height);
           state_ = JPEG_DONE;
         }
-      // FALL THROUGH
+        FALLTHROUGH;
 
       case JPEG_DECOMPRESS_PROGRESSIVE:
         if (state_ == JPEG_DECOMPRESS_PROGRESSIVE) {
@@ -589,7 +626,7 @@ class JPEGImageReader final {
 
           state_ = JPEG_DONE;
         }
-      // FALL THROUGH
+        FALLTHROUGH;
 
       case JPEG_DONE:
         // Finish decompression.
@@ -645,7 +682,7 @@ class JPEGImageReader final {
     last_set_byte_ = nullptr;
   }
 
-  RefPtr<SegmentReader> data_;
+  scoped_refptr<SegmentReader> data_;
   JPEGImageDecoder* decoder_;
 
   // Input reading: True if we need to back up to restart_position_.
@@ -685,7 +722,7 @@ void emit_message(j_common_ptr cinfo, int msg_level) {
   err->pub.num_warnings++;
 
   // Detect and count corrupt JPEG warning messages.
-  const char* warning = 0;
+  const char* warning = nullptr;
   int code = err->pub.msg_code;
   if (code > 0 && code <= err->pub.last_jpeg_message)
     warning = err->pub.jpeg_message_table[code];
@@ -716,7 +753,7 @@ JPEGImageDecoder::JPEGImageDecoder(AlphaOption alpha_option,
                                    size_t max_decoded_bytes)
     : ImageDecoder(alpha_option, color_behavior, max_decoded_bytes) {}
 
-JPEGImageDecoder::~JPEGImageDecoder() {}
+JPEGImageDecoder::~JPEGImageDecoder() = default;
 
 bool JPEGImageDecoder::SetSize(unsigned width, unsigned height) {
   if (!ImageDecoder::SetSize(width, height))
@@ -762,15 +799,19 @@ unsigned JPEGImageDecoder::DesiredScaleNumerator() const {
   size_t original_bytes = Size().Width() * Size().Height() * 4;
 
   if (original_bytes <= max_decoded_bytes_)
-    return scaleDenominator;
+    return g_scale_denomiator;
 
   // Downsample according to the maximum decoded size.
   unsigned scale_numerator = static_cast<unsigned>(floor(sqrt(
       // MSVC needs explicit parameter type for sqrt().
-      static_cast<float>(max_decoded_bytes_ * scaleDenominator *
-                         scaleDenominator / original_bytes))));
+      static_cast<float>(max_decoded_bytes_ * g_scale_denomiator *
+                         g_scale_denomiator / original_bytes))));
 
   return scale_numerator;
+}
+
+bool JPEGImageDecoder::ShouldGenerateAllSizes() const {
+  return supported_decode_sizes_.empty();
 }
 
 bool JPEGImageDecoder::CanDecodeToYUV() {
@@ -792,6 +833,17 @@ bool JPEGImageDecoder::DecodeToYUV() {
 void JPEGImageDecoder::SetImagePlanes(
     std::unique_ptr<ImagePlanes> image_planes) {
   image_planes_ = std::move(image_planes);
+}
+
+void JPEGImageDecoder::SetSupportedDecodeSizes(std::vector<SkISize> sizes) {
+  supported_decode_sizes_ = std::move(sizes);
+}
+
+std::vector<SkISize> JPEGImageDecoder::GetSupportedDecodeSizes() const {
+  // DCHECK IsDecodedSizeAvailable instead of IsSizeAvailable, since the latter
+  // has side effects of actually doing the decode.
+  DCHECK(IsDecodedSizeAvailable());
+  return supported_decode_sizes_;
 }
 
 // At the moment we support only JCS_RGB and JCS_CMYK values of the
@@ -851,10 +903,12 @@ bool OutputRows(JPEGImageReader* reader, ImageFrame& buffer) {
       SetPixel<colorSpace>(pixel, samples, x);
 
     SkColorSpaceXform* xform = reader->Decoder()->ColorTransform();
-    if (JCS_RGB == colorSpace && xform) {
+    if (xform) {
       ImageFrame::PixelData* row = buffer.GetAddr(0, y);
-      xform->apply(XformColorFormat(), row, XformColorFormat(), row, width,
-                   kOpaque_SkAlphaType);
+      bool color_converison_successful =
+          xform->apply(XformColorFormat(), row, XformColorFormat(), row, width,
+                       kOpaque_SkAlphaType);
+      DCHECK(color_converison_successful);
     }
   }
 
@@ -960,8 +1014,10 @@ bool JPEGImageDecoder::OutputScanlines() {
 
       SkColorSpaceXform* xform = ColorTransform();
       if (xform) {
-        xform->apply(XformColorFormat(), row, XformColorFormat(), row,
-                     info->output_width, kOpaque_SkAlphaType);
+        bool color_converison_successful =
+            xform->apply(XformColorFormat(), row, XformColorFormat(), row,
+                         info->output_width, kOpaque_SkAlphaType);
+        DCHECK(color_converison_successful);
       }
     }
     buffer.SetPixelsChanged(true);
@@ -1001,8 +1057,8 @@ void JPEGImageDecoder::Decode(bool only_size) {
     return;
 
   if (!reader_) {
-    reader_ = WTF::MakeUnique<JPEGImageReader>(this);
-    reader_->SetData(data_.Get());
+    reader_ = std::make_unique<JPEGImageReader>(this);
+    reader_->SetData(data_.get());
   }
 
   // If we couldn't decode the image but have received all the data, decoding

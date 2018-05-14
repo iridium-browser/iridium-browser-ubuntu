@@ -7,25 +7,18 @@
 
 #include <memory>
 #include "base/callback.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "platform/wtf/Compiler.h"
 #include "platform/wtf/Functional.h"
 #include "platform/wtf/RefCounted.h"
 #include "platform/wtf/Time.h"
-#include "platform/wtf/WeakPtr.h"
 #include "public/platform/WebCommon.h"
-#include "public/platform/WebTraceLocation.h"
-
-namespace base {
-class SingleThreadTaskRunner;
-}
 
 namespace blink {
 
-using SingleThreadTaskRunner = base::SingleThreadTaskRunner;
-
-// TaskHandle is associated to a task posted by
-// WebTaskRunner::postCancellableTask or
-// WebTaskRunner::postCancellableDelayedTask and cancels the associated task on
+// TaskHandle is associated to a task posted by PostCancellableTask() or
+// PostCancellableDelayedTask() and cancels the associated task on
 // TaskHandle::cancel() call or on TaskHandle destruction.
 class BLINK_PLATFORM_EXPORT TaskHandle {
  public:
@@ -50,73 +43,41 @@ class BLINK_PLATFORM_EXPORT TaskHandle {
   class Runner;
 
  private:
-  friend class WebTaskRunner;
-
-  explicit TaskHandle(RefPtr<Runner>);
-  RefPtr<Runner> runner_;
-};
-
-// The blink representation of a chromium SingleThreadTaskRunner.
-class BLINK_PLATFORM_EXPORT WebTaskRunner
-    : public ThreadSafeRefCounted<WebTaskRunner> {
- public:
-  // Returns true if tasks posted to this TaskRunner are sequenced
-  // with this call.
-  virtual bool RunsTasksInCurrentSequence() = 0;
-
-  // ---
-
-  // Headless Chrome virtualises time for determinism and performance (fast
-  // forwarding of timers). To make this work some parts of blink (e.g. Timers)
-  // need to use virtual time, however by default new code should use the normal
-  // non-virtual time APIs.
-
-  // Returns a double which is the number of seconds since epoch (Jan 1, 1970).
-  // This may represent either the real time, or a virtual time depending on
-  // whether or not the WebTaskRunner is associated with a virtual time domain
-  // or a real time domain.
-  virtual double VirtualTimeSeconds() const = 0;
-
-  // Returns a microsecond resolution platform dependant time source.
-  // This may represent either the real time, or a virtual time depending on
-  // whether or not the WebTaskRunner is associated with a virtual time domain
-  // or a real time domain.
-  virtual double MonotonicallyIncreasingVirtualTimeSeconds() const = 0;
-
-  // Returns the underlying task runner object.
-  virtual SingleThreadTaskRunner* ToSingleThreadTaskRunner() = 0;
-
-  // Helpers for posting bound functions as tasks.
-
-  // For cross-thread posting. Can be called from any thread.
-  void PostTask(const WebTraceLocation&, std::unique_ptr<CrossThreadClosure>);
-  void PostDelayedTask(const WebTraceLocation&,
-                       std::unique_ptr<CrossThreadClosure>,
-                       TimeDelta delay);
-
-  // For same-thread posting. Must be called from the associated WebThread.
-  void PostTask(const WebTraceLocation&, std::unique_ptr<WTF::Closure>);
-  void PostDelayedTask(const WebTraceLocation&,
-                       std::unique_ptr<WTF::Closure>,
-                       TimeDelta delay);
-
-  // For same-thread cancellable task posting. Returns a TaskHandle object for
-  // cancellation.
-  WARN_UNUSED_RESULT TaskHandle
-  PostCancellableTask(const WebTraceLocation&, std::unique_ptr<WTF::Closure>);
-  WARN_UNUSED_RESULT TaskHandle
-  PostDelayedCancellableTask(const WebTraceLocation&,
-                             std::unique_ptr<WTF::Closure>,
+  friend BLINK_PLATFORM_EXPORT WARN_UNUSED_RESULT TaskHandle
+  PostCancellableTask(base::SingleThreadTaskRunner&,
+                      const base::Location&,
+                      base::OnceClosure);
+  friend BLINK_PLATFORM_EXPORT WARN_UNUSED_RESULT TaskHandle
+  PostDelayedCancellableTask(base::SingleThreadTaskRunner&,
+                             const base::Location&,
+                             base::OnceClosure,
                              TimeDelta delay);
 
- protected:
-  friend ThreadSafeRefCounted<WebTaskRunner>;
-  WebTaskRunner() = default;
-  virtual ~WebTaskRunner();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(WebTaskRunner);
+  explicit TaskHandle(scoped_refptr<Runner>);
+  scoped_refptr<Runner> runner_;
 };
+
+// For cross-thread posting. Can be called from any thread.
+BLINK_PLATFORM_EXPORT void PostCrossThreadTask(base::SingleThreadTaskRunner&,
+                                               const base::Location&,
+                                               CrossThreadClosure);
+BLINK_PLATFORM_EXPORT void PostDelayedCrossThreadTask(
+    base::SingleThreadTaskRunner&,
+    const base::Location&,
+    CrossThreadClosure,
+    TimeDelta delay);
+
+// For same-thread cancellable task posting. Returns a TaskHandle object for
+// cancellation.
+BLINK_PLATFORM_EXPORT WARN_UNUSED_RESULT TaskHandle
+PostCancellableTask(base::SingleThreadTaskRunner&,
+                    const base::Location&,
+                    base::OnceClosure);
+BLINK_PLATFORM_EXPORT WARN_UNUSED_RESULT TaskHandle
+PostDelayedCancellableTask(base::SingleThreadTaskRunner&,
+                           const base::Location&,
+                           base::OnceClosure,
+                           TimeDelta delay);
 
 }  // namespace blink
 

@@ -26,7 +26,7 @@
 #ifndef PageTransitionEvent_h
 #define PageTransitionEvent_h
 
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/events/PageTransitionEventInit.h"
 
 namespace blink {
@@ -51,7 +51,7 @@ class PageTransitionEvent final : public Event {
 
   bool persisted() const { return persisted_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   PageTransitionEvent();

@@ -141,6 +141,7 @@ ONC_EXPORT extern const char kRoamingHome[];
 ONC_EXPORT extern const char kRoamingRequired[];
 ONC_EXPORT extern const char kRoamingRoaming[];
 ONC_EXPORT extern const char kRoamingState[];
+ONC_EXPORT extern const char kScanning[];
 ONC_EXPORT extern const char kServingOperator[];
 ONC_EXPORT extern const char kSignalStrength[];
 ONC_EXPORT extern const char kSIMLockStatus[];
@@ -208,6 +209,8 @@ ONC_EXPORT extern const char kIPv6[];
 ONC_EXPORT extern const char kNameServers[];
 ONC_EXPORT extern const char kRoutingPrefix[];
 ONC_EXPORT extern const char kSearchDomains[];
+ONC_EXPORT extern const char kIncludedRoutes[];
+ONC_EXPORT extern const char kExcludedRoutes[];
 ONC_EXPORT extern const char kType[];
 ONC_EXPORT extern const char kWebProxyAutoDiscoveryUrl[];
 }  // namespace ipconfig
@@ -325,6 +328,7 @@ ONC_EXPORT extern const char kServerCAPEMs[];
 ONC_EXPORT extern const char kServerCARef[];
 ONC_EXPORT extern const char kServerCARefs[];
 ONC_EXPORT extern const char kSubjectMatch[];
+ONC_EXPORT extern const char kTLSVersionMax[];
 ONC_EXPORT extern const char kUseSystemCAs[];
 ONC_EXPORT extern const char kUseProactiveKeyCaching[];
 }  // namespace eap
@@ -338,6 +342,7 @@ ONC_EXPORT extern const char kOpenVPN[];
 ONC_EXPORT extern const char kPassword[];
 ONC_EXPORT extern const char kSaveCredentials[];
 ONC_EXPORT extern const char kThirdPartyVpn[];
+ONC_EXPORT extern const char kArcVpn[];
 ONC_EXPORT extern const char kTypeL2TP_IPsec[];
 ONC_EXPORT extern const char kType[];
 ONC_EXPORT extern const char kUsername[];
@@ -370,6 +375,7 @@ ONC_EXPORT extern const char kAuth[];
 ONC_EXPORT extern const char kCipher[];
 ONC_EXPORT extern const char kCompLZO[];
 ONC_EXPORT extern const char kCompNoAdapt[];
+ONC_EXPORT extern const char kExtraHosts[];
 ONC_EXPORT extern const char kIgnoreDefaultRoute[];
 ONC_EXPORT extern const char kInteract[];
 ONC_EXPORT extern const char kKeyDirection[];
@@ -396,6 +402,7 @@ ONC_EXPORT extern const char kShaper[];
 ONC_EXPORT extern const char kStaticChallenge[];
 ONC_EXPORT extern const char kTLSAuthContents[];
 ONC_EXPORT extern const char kTLSRemote[];
+ONC_EXPORT extern const char kTLSVersionMin[];
 ONC_EXPORT extern const char kUserAuthenticationType[];
 ONC_EXPORT extern const char kVerb[];
 ONC_EXPORT extern const char kVerifyHash[];
@@ -414,6 +421,10 @@ ONC_EXPORT extern const char kExtensionID[];
 ONC_EXPORT extern const char kProviderName[];
 }  // third_party_vpn
 
+namespace arc_vpn {
+ONC_EXPORT extern const char kTunnelChrome[];
+}  // namespace arc_vpn
+
 namespace verify_x509 {
 ONC_EXPORT extern const char kName[];
 ONC_EXPORT extern const char kType[];
@@ -427,6 +438,7 @@ ONC_EXPORT extern const char kSubject[];
 
 namespace substitutes {
 ONC_EXPORT extern const char kEmailField[];
+ONC_EXPORT extern const char kPasswordField[];
 ONC_EXPORT extern const char kLoginIDField[];
 ONC_EXPORT extern const char kCertSANEmail[];
 ONC_EXPORT extern const char kCertSANUPN[];

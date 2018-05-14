@@ -10,20 +10,27 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/app/vector_icons/vector_icons.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/harmony/bulleted_label_list_view.h"
 #include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/harmony/chrome_typography.h"
+#include "chrome/browser/ui/views_mode_controller.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/native_theme/common_theme.h"
 #include "ui/native_theme/native_theme.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
+#include "ui/views/controls/webview/webview.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/widget.h"
 
@@ -32,9 +39,6 @@ namespace {
 constexpr int kMaxContentWidth = 600;
 constexpr int kMinColumnWidth = 120;
 constexpr int kTitleBottomSpacing = 13;
-constexpr int kBulletBottomSpacing = 1;
-constexpr int kBulletWidth = 20;
-constexpr int kBulletPadding = 13;
 
 views::Label* CreateFormattedLabel(const base::string16& message) {
   views::Label* label =
@@ -49,14 +53,21 @@ views::Label* CreateFormattedLabel(const base::string16& message) {
 
 }  // namespace
 
-SadTabView::SadTabView(content::WebContents* web_contents,
-                       chrome::SadTabKind kind)
+// static
+const char SadTabView::kViewClassName[] = "SadTabView";
+
+SadTabView::SadTabView(content::WebContents* web_contents, SadTabKind kind)
     : SadTab(web_contents, kind) {
+  // This view gets inserted as a child of a WebView, but we don't want the
+  // WebView to delete us if the WebView gets deleted before the SadTabHelper
+  // does.
+  set_owned_by_client();
+
   SetBackground(views::CreateThemedSolidBackground(
       this, ui::NativeTheme::kColorId_DialogBackground));
 
-  views::GridLayout* layout = new views::GridLayout(this);
-  SetLayoutManager(layout);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   const int column_set_id = 0;
   views::ColumnSet* columns = layout->AddColumnSet(column_set_id);
@@ -100,33 +111,12 @@ SadTabView::SadTabView(content::WebContents* web_contents,
 
   std::vector<int> bullet_string_ids = GetSubMessages();
   if (!bullet_string_ids.empty()) {
-    const int bullet_columnset_id = 1;
-    views::ColumnSet* column_set = layout->AddColumnSet(bullet_columnset_id);
-    column_set->AddPaddingColumn(1, unrelated_horizontal_spacing);
-    column_set->AddColumn(views::GridLayout::TRAILING,
-                          views::GridLayout::LEADING, 0,
-                          views::GridLayout::FIXED, kBulletWidth, 0);
-    column_set->AddPaddingColumn(0, kBulletPadding);
-    column_set->AddColumn(views::GridLayout::LEADING,
-                          views::GridLayout::LEADING, 0,
-                          views::GridLayout::USE_PREF,
-                          0,  // No fixed width.
-                          0);
-    column_set->AddPaddingColumn(1, unrelated_horizontal_spacing);
+    auto list_view = std::make_unique<BulletedLabelListView>();
+    for (const auto& id : bullet_string_ids)
+      list_view->AddLabel(l10n_util::GetStringUTF16(id));
 
-    for (int bullet_string_id : bullet_string_ids) {
-      const base::string16 bullet_character(base::WideToUTF16(L"\u2022"));
-      views::Label* bullet_label = CreateFormattedLabel(bullet_character);
-      views::Label* label =
-          CreateFormattedLabel(l10n_util::GetStringUTF16(bullet_string_id));
-
-      layout->StartRowWithPadding(0, bullet_columnset_id, 0,
-                                  kBulletBottomSpacing);
-      layout->AddView(bullet_label);
-      layout->AddView(label);
-
-      bullet_labels_.push_back(label);
-    }
+    layout->StartRow(0, column_set_id);
+    layout->AddView(list_view.release(), 2, 1);
   }
 
   action_button_ = views::MdTextButton::CreateSecondaryUiBlueButton(
@@ -143,29 +133,50 @@ SadTabView::SadTabView(content::WebContents* web_contents,
   layout->AddPaddingRow(2, provider->GetDistanceMetric(
                                views::DISTANCE_UNRELATED_CONTROL_VERTICAL));
 
-  views::Widget::InitParams sad_tab_params(
-      views::Widget::InitParams::TYPE_CONTROL);
+  // Needed to ensure this View is drawn even if a sibling (such as dev tools)
+  // has a z-order.
+  SetPaintToLayer();
 
-  // It is not possible to create a native_widget_win that has no parent in
-  // and later re-parent it.
-  // TODO(avi): This is a cheat. Can this be made cleaner?
-  sad_tab_params.parent = web_contents->GetNativeView();
+  AttachToWebView();
 
-  set_owned_by_client();
-
-  views::Widget* sad_tab = new views::Widget;
-  sad_tab->Init(sad_tab_params);
-  sad_tab->SetContentsView(this);
-
-  views::Widget::ReparentNativeView(sad_tab->GetNativeView(),
-                                    web_contents->GetNativeView());
-  gfx::Rect bounds = web_contents->GetContainerBounds();
-  sad_tab->SetBounds(gfx::Rect(bounds.size()));
+  // Make the accessibility role of this view an alert dialog, and
+  // put focus on the action button. This causes screen readers to
+  // immediately announce the text of this view.
+  GetViewAccessibility().OverrideRole(ax::mojom::Role::kDialog);
+  action_button_->RequestFocus();
 }
 
 SadTabView::~SadTabView() {
-  if (GetWidget())
-    GetWidget()->Close();
+  if (owner_)
+    owner_->SetCrashedOverlayView(nullptr);
+}
+
+void SadTabView::ReinstallInWebView() {
+  if (owner_) {
+    owner_->SetCrashedOverlayView(nullptr);
+    owner_ = nullptr;
+  }
+  AttachToWebView();
+}
+
+void SadTabView::AttachToWebView() {
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
+  // This can be null during prefetch.
+  if (!browser)
+    return;
+
+  // In unit tests, browser->window() might not be a real BrowserView.
+  if (!browser->window()->GetNativeWindow())
+    return;
+
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
+  DCHECK(browser_view);
+
+  views::WebView* web_view = browser_view->contents_web_view();
+  if (web_view->GetWebContents() == web_contents()) {
+    owner_ = web_view;
+    owner_->SetCrashedOverlayView(this);
+  }
 }
 
 void SadTabView::LinkClicked(views::Link* source, int event_flags) {
@@ -187,11 +198,11 @@ void SadTabView::Layout() {
   message_->SizeToFit(max_width);
   title_->SizeToFit(max_width);
 
-  // Bullet labels need to take into account the size of the bullet.
-  for (views::Label* label : bullet_labels_)
-    label->SizeToFit(max_width - kBulletWidth - kBulletPadding);
-
   View::Layout();
+}
+
+const char* SadTabView::GetClassName() const {
+  return kViewClassName;
 }
 
 void SadTabView::OnPaint(gfx::Canvas* canvas) {
@@ -202,11 +213,15 @@ void SadTabView::OnPaint(gfx::Canvas* canvas) {
   View::OnPaint(canvas);
 }
 
-namespace chrome {
+void SadTabView::RemovedFromWidget() {
+  owner_ = nullptr;
+}
 
 SadTab* SadTab::Create(content::WebContents* web_contents,
                        SadTabKind kind) {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa())
+    return CreateCocoa(web_contents, kind);
+#endif
   return new SadTabView(web_contents, kind);
 }
-
-}  // namespace chrome

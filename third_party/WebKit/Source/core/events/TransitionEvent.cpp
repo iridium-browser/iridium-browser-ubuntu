@@ -50,7 +50,7 @@ TransitionEvent::TransitionEvent(const AtomicString& type,
     pseudo_element_ = initializer.pseudoElement();
 }
 
-TransitionEvent::~TransitionEvent() {}
+TransitionEvent::~TransitionEvent() = default;
 
 const String& TransitionEvent::propertyName() const {
   return property_name_;
@@ -68,7 +68,7 @@ const AtomicString& TransitionEvent::InterfaceName() const {
   return EventNames::TransitionEvent;
 }
 
-DEFINE_TRACE(TransitionEvent) {
+void TransitionEvent::Trace(blink::Visitor* visitor) {
   Event::Trace(visitor);
 }
 

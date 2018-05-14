@@ -21,18 +21,15 @@ void RegisterAppStartTime() {
 }
 
 void RegisterAppDidFinishLaunchingTime() {
-  DCHECK(g_start_time);
-  DCHECK(!g_finish_launching_time);
   g_finish_launching_time = new base::Time(base::Time::Now());
 }
 
 void RegisterAppDidBecomeActiveTime() {
-  DCHECK(g_start_time);
   g_become_active_time = new base::Time(base::Time::Now());
 }
 
 bool LogData(NSString* testName) {
-  // Store the data into a format compatiable with infra scripts.
+  // Store the data into a format compatible with infra scripts.
   double finishLaunchingDuration =
       g_finish_launching_time->ToDoubleT() - g_start_time->ToDoubleT();
   double becomeActiveDuration =

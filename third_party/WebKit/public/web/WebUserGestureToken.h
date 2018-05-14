@@ -42,7 +42,7 @@ class UserGestureToken;
 // processing the user gesture in case it was not consumed meanwhile.
 class WebUserGestureToken {
  public:
-  WebUserGestureToken() {}
+  WebUserGestureToken() = default;
   WebUserGestureToken(const WebUserGestureToken& other) { Assign(other); }
   WebUserGestureToken& operator=(const WebUserGestureToken& other) {
     Assign(other);
@@ -51,13 +51,11 @@ class WebUserGestureToken {
   ~WebUserGestureToken() { Reset(); }
 
   BLINK_EXPORT bool HasGestures() const;
-  BLINK_EXPORT void SetOutOfProcess();
-  BLINK_EXPORT void SetJavascriptPrompt();
   bool IsNull() const { return token_.IsNull(); }
 
-#if BLINK_IMPLEMENTATION
-  explicit WebUserGestureToken(PassRefPtr<UserGestureToken>);
-  operator PassRefPtr<UserGestureToken>() const;
+#if INSIDE_BLINK
+  explicit WebUserGestureToken(scoped_refptr<UserGestureToken>);
+  operator scoped_refptr<UserGestureToken>() const;
 #endif
 
  private:

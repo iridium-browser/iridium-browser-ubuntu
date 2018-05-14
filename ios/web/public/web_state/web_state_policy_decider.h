@@ -8,6 +8,7 @@
 #import <Foundation/Foundation.h>
 
 #include "base/macros.h"
+#include "ui/base/page_transition_types.h"
 
 namespace web {
 
@@ -20,12 +21,25 @@ class WebStatePolicyDecider {
   virtual ~WebStatePolicyDecider();
 
   // Asks the decider whether the navigation corresponding to |request| should
-  // be allowed to continue. Defaults to true if not overriden.
-  virtual bool ShouldAllowRequest(NSURLRequest* request);
+  // be allowed to continue. Defaults to true if not overriden. Called before
+  // WebStateObserver::DidStartNavigation.
+  // Never called in the following cases:
+  //  - same-document back-forward and state change navigations
+  //  - CRWNativeContent navigations
+  virtual bool ShouldAllowRequest(NSURLRequest* request,
+                                  ui::PageTransition transition);
 
   // Asks the decider whether the navigation corresponding to |response| should
   // be allowed to continue. Defaults to true if not overriden.
-  virtual bool ShouldAllowResponse(NSURLResponse* response);
+  // |for_main_frame| indicates whether the frame being navigated is the main
+  // frame. Called before WebStateObserver::DidFinishNavigation.
+  // Never called in the following cases:
+  //  - same-document navigations (unless ititiated via LoadURLWithParams)
+  //  - CRWNativeContent navigations
+  //  - going back after form submission navigation (except iOS 9)
+  //  - user-initiated POST navigation on iOS 9 and 10
+  virtual bool ShouldAllowResponse(NSURLResponse* response,
+                                   bool for_main_frame);
 
   // Notifies the policy decider that the web state is being destroyed.
   // Gives subclasses a chance to cleanup.

@@ -133,11 +133,6 @@ class TestRunner {
   DWORD process_id() { return target_process_id_; }
 
  private:
-  // Initializes the data in the object. Sets is_init_ to tree if the
-  // function succeeds. This is meant to be called from the constructor.
-  void Init(JobLevel job_level,
-            TokenLevel startup_token,
-            TokenLevel main_token);
 
   // The actual runner.
   int InternalRunTest(const wchar_t* command);

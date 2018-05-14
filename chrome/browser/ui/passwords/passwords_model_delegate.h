@@ -24,6 +24,8 @@ namespace metrics_util {
 enum class CredentialSourceType;
 }  // namespace metrics_util
 }  // namespace password_manager
+
+struct AccountInfo;
 class GURL;
 
 // An interface for ManagePasswordsBubbleModel implemented by
@@ -68,6 +70,9 @@ class PasswordsModelDelegate {
   virtual const password_manager::InteractionsStats*
   GetCurrentInteractionStats() const = 0;
 
+  // Returns true iff the current bubble is the manual fallback for saving.
+  virtual bool BubbleIsManualFallbackForSaving() const = 0;
+
   // Called from the model when the bubble is displayed.
   virtual void OnBubbleShown() = 0;
 
@@ -84,9 +89,10 @@ class PasswordsModelDelegate {
   virtual void NeverSavePassword() = 0;
 
   // Called from the model when the user chooses to save a password. The
-  // username seen on the ui is sent as a parameter, and handled accordingly if
-  // user had edited it.
-  virtual void SavePassword(const base::string16& username) = 0;
+  // username and password seen on the ui is sent as a parameter, and
+  // handled accordingly if user had edited them.
+  virtual void SavePassword(const base::string16& username,
+                            const base::string16& password) = 0;
 
   // Called from the model when the user chooses to update a password.
   virtual void UpdatePassword(const autofill::PasswordForm& password_form) = 0;
@@ -103,11 +109,24 @@ class PasswordsModelDelegate {
   virtual void NavigateToPasswordManagerAccountDashboard() = 0;
   // Open a new tab, pointing to the password manager settings page.
   virtual void NavigateToPasswordManagerSettingsPage() = 0;
-  // Starts the Chrome Sign in flow.
-  virtual void NavigateToChromeSignIn() = 0;
+  // Called by the view when the "Sign in to Chrome" button or the "Sync to"
+  // button in the promo bubble are clicked.
+  virtual void EnableSync(const AccountInfo& account) = 0;
 
   // Called from the dialog controller when the dialog is hidden.
   virtual void OnDialogHidden() = 0;
+
+  // Called from the model when re-auth is needed to show passwords. Returns
+  // true immediately if user authentication is not available for the given
+  // platform. Otherwise, the method schedules a task to show an authentication
+  // dialog and reopens the bubble afterwards, then the method returns false.
+  // The password in the reopened bubble will be revealed if the authentication
+  // was successful.
+  virtual bool AuthenticateUser() = 0;
+
+  // Returns true if the password values should be revealed when the bubble is
+  // opened.
+  virtual bool ArePasswordsRevealedWhenBubbleIsOpened() const = 0;
 
  protected:
   virtual ~PasswordsModelDelegate() = default;

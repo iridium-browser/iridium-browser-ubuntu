@@ -13,7 +13,6 @@
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_controller_delegate.h"
 #include "components/omnibox/browser/autocomplete_input.h"
@@ -21,6 +20,7 @@
 #include "components/omnibox/browser/omnibox_controller.h"
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
@@ -85,7 +85,7 @@ class OmniboxEditModel {
                    std::unique_ptr<OmniboxClient> client);
   virtual ~OmniboxEditModel();
 
-  // TODO(beaudoin): Remove this accessor when the AutocompleteController has
+  // TODO(jdonnelly): Remove this accessor when the AutocompleteController has
   //     completely moved to OmniboxController.
   AutocompleteController* autocomplete_controller() const {
     return omnibox_controller_->autocomplete_controller();
@@ -95,8 +95,8 @@ class OmniboxEditModel {
     omnibox_controller_->set_popup_model(popup_model);
   }
 
-  // TODO: The edit and popup should be siblings owned by the LocationBarView,
-  // making this accessor unnecessary.
+  // TODO(jdonnelly): The edit and popup should be siblings owned by the
+  // LocationBarView, making this accessor unnecessary.
   // NOTE: popup_model() can be NULL for testing.
   OmniboxPopupModel* popup_model() const {
     return omnibox_controller_->popup_model();
@@ -110,15 +110,15 @@ class OmniboxEditModel {
   // the internal state appropriately.
   const State GetStateForTabSwitch();
 
-  // Resets the tab state, then restores local state from the saved |state|.
-  // |state| may be NULL if there is no saved state.
+  // Resets the tab state, then restores local state from |state|. |state| may
+  // be nullptr if there is no saved state.
   void RestoreState(const State* state);
 
   // Returns the match for the current text. If the user has not edited the text
   // this is the match corresponding to the permanent text. Returns the
   // alternate nav URL, if |alternate_nav_url| is non-NULL and there is such a
-  // URL.
-  AutocompleteMatch CurrentMatch(GURL* alternate_nav_url) const;
+  // URL. Virtual for testing.
+  virtual AutocompleteMatch CurrentMatch(GURL* alternate_nav_url) const;
 
   // Called when the user wants to export the entire current text as a URL.
   // Sets the url, and if known, the title and favicon.
@@ -138,11 +138,11 @@ class OmniboxEditModel {
   // of the selection e.g. min(selection_start, selection_end). |text| is the
   // currently selected text. If |is_all_selected| is true all the text in the
   // edit is selected. If the url should be copied to the clipboard |write_url|
-  // is set to true and |url| set to the url to write.
+  // is set to true and |url_from_text| set to the url to write.
   void AdjustTextForCopy(int sel_min,
                          bool is_all_selected,
                          base::string16* text,
-                         GURL* url,
+                         GURL* url_from_text,
                          bool* write_url);
 
   bool user_input_in_progress() const { return user_input_in_progress_; }
@@ -151,17 +151,23 @@ class OmniboxEditModel {
   // that state has changed.
   void SetInputInProgress(bool in_progress);
 
-  // Updates permanent_text_ to the current permanent text from the toolbar
-  // model.  Returns true if the permanent text changed and the change should be
+  // Calls SetInputInProgress, via SetInputInProgressNoNotify and
+  // NotifyObserversInputInProgress, calling the latter after
+  // StartAutocomplete, so that the result is only updated once.
+  void UpdateInput(bool has_selected_text,
+                   bool prevent_inline_autocomplete);
+
+  // Resets the permanent display URLs to those provided by the controller.
+  // Returns true if the display URLs have changed and the change should be
   // immediately user-visible, because either the user is not editing or the
   // edit does not have focus.
-  bool UpdatePermanentText();
+  bool ResetDisplayUrls();
 
   // Returns the URL corresponding to the permanent text.
   GURL PermanentURL() const;
 
-  // Returns the raw permanent text.
-  const base::string16& PermanentText() { return permanent_text_; }
+  // Returns the permanent URL text for the current page and Omnibox state.
+  base::string16 GetCurrentPermanentUrlText() const;
 
   // Sets the user_text_ to |text|.  Only the View should call this.
   void SetUserText(const base::string16& text);
@@ -204,7 +210,7 @@ class OmniboxEditModel {
   // OpenMatch() needs to know the original text that drove this action.  If
   // |pasted_text| is non-empty, this is a Paste-And-Go/Search action, and
   // that's the relevant input text.  Otherwise, the relevant input text is
-  // either the user text or the permanent text, depending on if user input is
+  // either the user text or the display URL, depending on if user input is
   // in progress.
   //
   // |match| is passed by value for two reasons:
@@ -226,6 +232,11 @@ class OmniboxEditModel {
   bool has_focus() const { return focus_state_ != OMNIBOX_FOCUS_NONE; }
   bool is_caret_visible() const {
     return focus_state_ == OMNIBOX_FOCUS_VISIBLE;
+  }
+
+  FocusSource focus_source() const { return focus_source_; }
+  void set_focus_source(FocusSource focus_source) {
+    focus_source_ = focus_source;
   }
 
   // Accessors for keyword-related state (see comments on keyword_ and
@@ -303,7 +314,7 @@ class OmniboxEditModel {
   bool is_pasting() const { return paste_state_ == PASTING; }
 
   // Called when the user presses up or down.  |count| is a repeat count,
-  // negative for moving up, positive for moving down.
+  // negative for moving up, positive for moving down. Virtual for testing.
   virtual void OnUpOrDownKeyPressed(int count);
 
   // Called when any relevant data changes.  This rolls together several
@@ -378,7 +389,8 @@ class OmniboxEditModel {
 
   // Returns true if the popup exists and is open.  (This is a convenience
   // wrapper for the benefit of test code, which may not have a popup model.)
-  bool PopupIsOpen() const;
+  // Virtual for testing.
+  virtual bool PopupIsOpen() const;
 
   // Called whenever user_text_ should change.
   void InternalSetUserText(const base::string16& text);
@@ -433,6 +445,13 @@ class OmniboxEditModel {
                                    AutocompleteMatch* match,
                                    GURL* alternate_nav_url) const;
 
+  // Sets the state of user_input_in_progress_. Returns whether said state
+  // changed, so that the caller can evoke NotifyObserversInputInProgress().
+  bool SetInputInProgressNoNotify(bool in_progress);
+
+  // Notifies the observers that the state has changed.
+  void NotifyObserversInputInProgress(bool in_progress);
+
   // If focus_state_ does not match |state|, we update it and notify the
   // InstantController about the change (passing along the |reason| for the
   // change). If the caret visibility changes, we call ApplyCaretVisibility() on
@@ -456,8 +475,15 @@ class OmniboxEditModel {
   // is in progress or the Omnibox is not focused.
   FocusSource focus_source_;
 
-  // The URL of the currently displayed page.
-  base::string16 permanent_text_;
+  // The text representing the current URL for steady state display. This may
+  // be a simplified version of the current URL with destructive elisions
+  // applied - and should not be considered suitable for editing.
+  base::string16 display_only_url_;
+
+  // The initial text representing the current URL suitable for editing.
+  // This should fully represent the current URL without any meaning-changing
+  // elisions applied - and is suitable for user editing.
+  base::string16 url_for_editing_;
 
   // This flag is true when the user has modified the contents of the edit, but
   // not yet accepted them.  We use this to determine when we need to save
@@ -517,13 +543,13 @@ class OmniboxEditModel {
   // autocomplete popup until, say, "google.com" appears in the edit box, then
   // the user_text_ is still "goog", and "google.com" is "temporary text".
   // When the user hits <esc>, the edit box reverts to "goog".  Hit <esc> again
-  // and the popup is closed and "goog" is replaced by the permanent_text_,
-  // which is the URL of the current page.
+  // and the popup is closed and "goog" is replaced by the permanent display
+  // URL, which is the URL of the current page.
   //
   // original_url_ is only valid when there is temporary text, and is used as
   // the unique identifier of the originally selected item.  Thus, if the user
   // arrows to a different item with the same text, we can still distinguish
-  // them and not revert all the way to the permanent_text_.
+  // them and not revert all the way to the permanent display URL.
   bool has_temporary_text_;
   GURL original_url_;
 

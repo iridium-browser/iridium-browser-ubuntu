@@ -3,11 +3,12 @@
 // found in the LICENSE file.
 
 #include "testing/js_embedder_test.h"
+
 #include "third_party/base/ptr_util.h"
 
 JSEmbedderTest::JSEmbedderTest()
-    : m_pArrayBufferAllocator(new FXJS_ArrayBufferAllocator),
-      m_pIsolate(nullptr) {}
+    : m_pArrayBufferAllocator(
+          pdfium::MakeUnique<CFX_V8ArrayBufferAllocator>()) {}
 
 JSEmbedderTest::~JSEmbedderTest() {}
 
@@ -39,5 +40,5 @@ v8::Isolate* JSEmbedderTest::isolate() {
 }
 
 v8::Local<v8::Context> JSEmbedderTest::GetV8Context() {
-  return m_Engine->GetPersistentContext();
+  return m_Engine->GetV8Context();
 }

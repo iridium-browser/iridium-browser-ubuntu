@@ -13,7 +13,6 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/observer_list.h"
@@ -100,7 +99,7 @@ SyncManagerImpl::SyncManagerImpl(const std::string& name)
 
 SyncManagerImpl::~SyncManagerImpl() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  CHECK(!initialized_);
+  DCHECK(!initialized_);
 }
 
 SyncManagerImpl::NotificationInfo::NotificationInfo() : total_count(0) {}
@@ -145,10 +144,6 @@ bool SyncManagerImpl::VisiblePropertiesDiffer(
     return true;
   if (!AreSpecificsEqual(cryptographer, a.ref(syncable::SPECIFICS),
                          b.ref(syncable::SPECIFICS))) {
-    return true;
-  }
-  if (!AreAttachmentMetadataEqual(a.ref(syncable::ATTACHMENT_METADATA),
-                                  b.ref(syncable::ATTACHMENT_METADATA))) {
     return true;
   }
   // We only care if the name has changed if neither specifics is encrypted
@@ -203,7 +198,7 @@ void SyncManagerImpl::ConfigureSyncer(
 }
 
 void SyncManagerImpl::Init(InitArgs* args) {
-  CHECK(!initialized_);
+  DCHECK(!initialized_);
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(args->post_factory.get());
   if (!args->enable_local_sync_backend) {
@@ -230,7 +225,7 @@ void SyncManagerImpl::Init(InitArgs* args) {
 
   allstatus_.SetHasKeystoreKey(
       !args->restored_keystore_key_for_bootstrapping.empty());
-  sync_encryption_handler_ = base::MakeUnique<SyncEncryptionHandlerImpl>(
+  sync_encryption_handler_ = std::make_unique<SyncEncryptionHandlerImpl>(
       &share_, args->encryptor, args->restored_key_for_bootstrapping,
       args->restored_keystore_key_for_bootstrapping);
   sync_encryption_handler_->AddObserver(this);
@@ -246,7 +241,7 @@ void SyncManagerImpl::Init(InitArgs* args) {
           args->credentials.account_id, absolute_db_path);
 
   DCHECK(backing_store.get());
-  share_.directory = base::MakeUnique<syncable::Directory>(
+  share_.directory = std::make_unique<syncable::Directory>(
       std::move(backing_store), args->unrecoverable_error_handler,
       report_unrecoverable_error_function_, sync_encryption_handler_.get(),
       sync_encryption_handler_->GetCryptographerUnsafe());
@@ -275,10 +270,10 @@ void SyncManagerImpl::Init(InitArgs* args) {
     VLOG(1) << "Running against local sync backend.";
     allstatus_.SetLocalBackendFolder(
         args->local_sync_backend_folder.AsUTF8Unsafe());
-    connection_manager_ = base::MakeUnique<LoopbackConnectionManager>(
+    connection_manager_ = std::make_unique<LoopbackConnectionManager>(
         args->cancelation_signal, args->local_sync_backend_folder);
   } else {
-    connection_manager_ = base::MakeUnique<SyncServerConnectionManager>(
+    connection_manager_ = std::make_unique<SyncServerConnectionManager>(
         args->service_url.host() + args->service_url.path(),
         args->service_url.EffectiveIntPort(),
         args->service_url.SchemeIsCryptographic(), args->post_factory.release(),
@@ -294,8 +289,9 @@ void SyncManagerImpl::Init(InitArgs* args) {
   DVLOG(1) << "Setting invalidator client ID: " << args->invalidator_client_id;
   allstatus_.SetInvalidatorClientId(args->invalidator_client_id);
 
-  model_type_registry_ = base::MakeUnique<ModelTypeRegistry>(
-      args->workers, &share_, this, base::Bind(&MigrateDirectoryData));
+  model_type_registry_ = std::make_unique<ModelTypeRegistry>(
+      args->workers, &share_, this, base::Bind(&MigrateDirectoryData),
+      args->cancelation_signal);
   sync_encryption_handler_->AddObserver(model_type_registry_.get());
 
   // Build a SyncCycleContext and store the worker in it.
@@ -316,8 +312,7 @@ void SyncManagerImpl::Init(InitArgs* args) {
   initialized_ = true;
 
   if (!args->enable_local_sync_backend) {
-    net::NetworkChangeNotifier::AddIPAddressObserver(this);
-    net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
+    net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
     observing_network_connectivity_changes_ = true;
 
     UpdateCredentials(args->credentials);
@@ -534,8 +529,7 @@ void SyncManagerImpl::ShutdownOnSyncThread(ShutdownReason reason) {
     connection_manager_->RemoveListener(this);
   connection_manager_.reset();
 
-  net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
-  net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
+  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
   observing_network_connectivity_changes_ = false;
 
   if (initialized_ && directory()) {
@@ -554,28 +548,15 @@ void SyncManagerImpl::ShutdownOnSyncThread(ShutdownReason reason) {
   weak_handle_this_.Reset();
 }
 
-void SyncManagerImpl::OnIPAddressChanged() {
-  if (!observing_network_connectivity_changes_) {
-    DVLOG(1) << "IP address change dropped.";
-    return;
-  }
-  DVLOG(1) << "IP address change detected.";
-  OnNetworkConnectivityChangedImpl();
-}
-
-void SyncManagerImpl::OnConnectionTypeChanged(
-    net::NetworkChangeNotifier::ConnectionType) {
-  if (!observing_network_connectivity_changes_) {
-    DVLOG(1) << "Connection type change dropped.";
-    return;
-  }
-  DVLOG(1) << "Connection type change detected.";
-  OnNetworkConnectivityChangedImpl();
-}
-
-void SyncManagerImpl::OnNetworkConnectivityChangedImpl() {
+void SyncManagerImpl::OnNetworkChanged(
+    net::NetworkChangeNotifier::ConnectionType type) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  scheduler_->OnConnectionStatusChange();
+  if (!observing_network_connectivity_changes_) {
+    DVLOG(1) << "Network change dropped.";
+    return;
+  }
+  DVLOG(1) << "Network change detected.";
+  scheduler_->OnConnectionStatusChange(type);
 }
 
 void SyncManagerImpl::OnServerConnectionEvent(
@@ -784,7 +765,7 @@ void SyncManagerImpl::HandleCalculateChangesChangeEventFromSyncer(
 }
 
 void SyncManagerImpl::RequestNudgeForDataTypes(
-    const tracked_objects::Location& nudge_location,
+    const base::Location& nudge_location,
     ModelTypeSet types) {
   debug_info_event_listener_.OnNudgeFromDatatype(types.First().Get());
 
@@ -909,7 +890,7 @@ ModelTypeConnector* SyncManagerImpl::GetModelTypeConnector() {
 std::unique_ptr<ModelTypeConnector>
 SyncManagerImpl::GetModelTypeConnectorProxy() {
   DCHECK(initialized_);
-  return base::MakeUnique<ModelTypeConnectorProxy>(
+  return std::make_unique<ModelTypeConnectorProxy>(
       base::ThreadTaskRunnerHandle::Get(), model_type_registry_->AsWeakPtr());
 }
 

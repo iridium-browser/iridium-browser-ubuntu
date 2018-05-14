@@ -4,9 +4,8 @@
 
 #include "media/base/video_frame_pool.h"
 
-#include <deque>
-
 #include "base/bind.h"
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
@@ -57,16 +56,16 @@ class VideoFramePool::PoolImpl
     scoped_refptr<VideoFrame> frame;
   };
 
-  std::deque<FrameEntry> frames_;
+  base::circular_deque<FrameEntry> frames_;
 
-  // |tick_clock_| is always &|default_tick_clock_| outside of testing.
-  base::DefaultTickClock default_tick_clock_;
+  // |tick_clock_| is always a DefaultTickClock outside of testing.
   base::TickClock* tick_clock_;
 
   DISALLOW_COPY_AND_ASSIGN(PoolImpl);
 };
 
-VideoFramePool::PoolImpl::PoolImpl() : tick_clock_(&default_tick_clock_) {}
+VideoFramePool::PoolImpl::PoolImpl()
+    : tick_clock_(base::DefaultTickClock::GetInstance()) {}
 
 VideoFramePool::PoolImpl::~PoolImpl() {
   DCHECK(is_shutdown_);

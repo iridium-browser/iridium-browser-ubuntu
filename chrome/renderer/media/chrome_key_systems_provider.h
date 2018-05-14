@@ -14,8 +14,6 @@
 #include "base/time/time.h"
 #include "media/base/key_system_properties.h"
 
-namespace chrome {
-
 typedef std::vector<std::unique_ptr<media::KeySystemProperties>>
     KeySystemPropertiesVector;
 typedef base::Callback<void(KeySystemPropertiesVector*)>
@@ -34,7 +32,7 @@ class ChromeKeySystemsProvider {
   // less fragile (don't assume AddSupportedKeySystems has just one caller).
   bool IsKeySystemsUpdateNeeded();
 
-  void SetTickClockForTesting(std::unique_ptr<base::TickClock> tick_clock);
+  void SetTickClockForTesting(base::TickClock* tick_clock);
 
   void SetProviderDelegateForTesting(
       const KeySystemsProviderDelegate& test_provider);
@@ -51,7 +49,7 @@ class ChromeKeySystemsProvider {
   // Throttle how often we signal an update is needed to avoid unnecessary high
   // frequency of expensive IPC calls.
   base::TimeTicks last_update_time_ticks_;
-  std::unique_ptr<base::TickClock> tick_clock_;
+  base::TickClock* tick_clock_;
 
   // Ensure all methods are called from the same (Main) thread.
   base::ThreadChecker thread_checker_;
@@ -62,7 +60,5 @@ class ChromeKeySystemsProvider {
 
   DISALLOW_COPY_AND_ASSIGN(ChromeKeySystemsProvider);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_RENDERER_MEDIA_CHROME_KEY_SYSTEMS_PROVIDER_H_

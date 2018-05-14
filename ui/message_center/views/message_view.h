@@ -15,9 +15,10 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/message_center/message_center_export.h"
-#include "ui/message_center/notification.h"
-#include "ui/message_center/notification_delegate.h"
+#include "ui/message_center/public/cpp/notification.h"
+#include "ui/message_center/public/cpp/notification_delegate.h"
 #include "ui/message_center/views/slide_out_controller.h"
+#include "ui/views/animation/ink_drop_host_view.h"
 #include "ui/views/view.h"
 
 namespace views {
@@ -29,23 +30,27 @@ namespace message_center {
 
 class Notification;
 class NotificationControlButtonsView;
-class MessageCenterController;
 
 // An base class for a notification entry. Contains background and other
 // elements shared by derived notification views.
 class MESSAGE_CENTER_EXPORT MessageView
-    : public views::View,
+    : public views::InkDropHostView,
       public views::SlideOutController::Delegate {
  public:
-  MessageView(MessageCenterController* controller,
-              const Notification& notification);
+  static const char kViewClassName[];
+
+  // Notify this notification view is in the sidebar. This is necessary until
+  // removing the experimental flag for Sidebar, since the flag exists in Ash,
+  // so we don't refer the flag directly. Some layout and behavior may change by
+  // this flag.
+  // TODO(yoshiki, tetsui): Remove this after removing the flag for Sidebar.
+  static void SetSidebarEnabled();
+
+  explicit MessageView(const Notification& notification);
   ~MessageView() override;
 
   // Updates this view with the new data contained in the notification.
   virtual void UpdateWithNotification(const Notification& notification);
-
-  // Returns the insets for the shadow it will have for rich notification.
-  static gfx::Insets GetShadowInsets();
 
   // Creates a shadow around the notification and changes slide-out behavior.
   void SetIsNested();
@@ -55,8 +60,20 @@ class MESSAGE_CENTER_EXPORT MessageView
   virtual void RequestFocusOnCloseButton() = 0;
   virtual void UpdateControlButtonsVisibility() = 0;
 
+  virtual void SetExpanded(bool expanded);
+  virtual bool IsExpanded() const;
+  virtual bool IsManuallyExpandedOrCollapsed() const;
+  virtual void SetManuallyExpandedOrCollapsed(bool value);
+
+  // Invoked when the container view of MessageView (e.g. MessageCenterView in
+  // ash) is starting the animation that possibly hides some part of
+  // the MessageView.
+  // During the animation, MessageView should comply with the Z order in views.
+  virtual void OnContainerAnimationStarted();
+  virtual void OnContainerAnimationEnded();
+
   void OnCloseButtonPressed();
-  void OnSettingsButtonPressed();
+  virtual void OnSettingsButtonPressed(const ui::Event& event);
 
   // views::View
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
@@ -67,6 +84,7 @@ class MESSAGE_CENTER_EXPORT MessageView
   void OnFocus() override;
   void OnBlur() override;
   void Layout() override;
+  const char* GetClassName() const override;
   void OnGestureEvent(ui::GestureEvent* event) override;
 
   // views::SlideOutController::Delegate
@@ -74,15 +92,10 @@ class MESSAGE_CENTER_EXPORT MessageView
   void OnSlideChanged() override;
   void OnSlideOut() override;
 
-  void set_scroller(views::ScrollView* scroller) { scroller_ = scroller; }
-  std::string notification_id() { return notification_id_; }
-  NotifierId notifier_id() { return notifier_id_; }
-  const base::string16& display_source() const { return display_source_; }
-  bool pinned() const { return pinned_; }
+  bool GetPinned() const;
 
-  void set_controller(MessageCenterController* controller) {
-    controller_ = controller;
-  }
+  void set_scroller(views::ScrollView* scroller) { scroller_ = scroller; }
+  std::string notification_id() const { return notification_id_; }
 
  protected:
   // Creates and add close button to view hierarchy when necessary. Derived
@@ -96,18 +109,17 @@ class MESSAGE_CENTER_EXPORT MessageView
 
   views::View* background_view() { return background_view_; }
   views::ScrollView* scroller() { return scroller_; }
-  MessageCenterController* controller() { return controller_; }
+
+  bool is_nested() const { return is_nested_; }
 
  private:
-  MessageCenterController* controller_;  // Weak, lives longer then views.
   std::string notification_id_;
-  NotifierId notifier_id_;
   views::View* background_view_ = nullptr;  // Owned by views hierarchy.
   views::ScrollView* scroller_ = nullptr;
 
   base::string16 accessible_name_;
 
-  base::string16 display_source_;
+  // Flag if the notification is set to pinned or not.
   bool pinned_ = false;
 
   std::unique_ptr<views::Painter> focus_painter_;

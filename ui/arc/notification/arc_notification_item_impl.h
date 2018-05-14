@@ -42,10 +42,11 @@ class ArcNotificationItemImpl : public ArcNotificationItem {
   void RemoveObserver(Observer* observer) override;
   void IncrementWindowRefCount() override;
   void DecrementWindowRefCount() override;
-  bool GetPinned() const override;
   const gfx::ImageSkia& GetSnapshot() const override;
   mojom::ArcNotificationExpandState GetExpandState() const override;
+  bool IsManuallyExpandedOrCollapsed() const override;
   mojom::ArcNotificationShownContents GetShownContents() const override;
+  gfx::Rect GetSwipeInputRect() const override;
   const std::string& GetNotificationKey() const override;
   const std::string& GetNotificationId() const override;
   const base::string16& GetAccessibleName() const override;
@@ -57,8 +58,6 @@ class ArcNotificationItemImpl : public ArcNotificationItem {
   ArcNotificationManager* const manager_;
   message_center::MessageCenter* const message_center_;
 
-  // The pinned state of the latest notification.
-  bool pinned_ = false;
   // The snapshot of the latest notification.
   gfx::ImageSkia snapshot_;
   // The expand state of the latest notification.
@@ -67,6 +66,8 @@ class ArcNotificationItemImpl : public ArcNotificationItem {
   // The type of shown content of the latest notification.
   mojom::ArcNotificationShownContents shown_contents_ =
       mojom::ArcNotificationShownContents::CONTENTS_SHOWN;
+  // Rect indicating where Android wants to handle swipe events by itself.
+  gfx::Rect swipe_input_rect_ = gfx::Rect();
   // The reference counter of the window.
   int window_ref_count_ = 0;
   // The accessible name of the latest notification.
@@ -84,6 +85,8 @@ class ArcNotificationItemImpl : public ArcNotificationItem {
   //   (1) the notification is being removed
   //   (2) the removing is initiated by manager
   bool being_removed_by_manager_ = false;
+
+  bool manually_expanded_or_collapsed_ = false;
 
   base::ThreadChecker thread_checker_;
   base::WeakPtrFactory<ArcNotificationItemImpl> weak_ptr_factory_;

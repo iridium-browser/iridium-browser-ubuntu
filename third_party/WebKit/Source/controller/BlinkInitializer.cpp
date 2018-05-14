@@ -28,20 +28,29 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "controller/BlinkInitializer.h"
+
+#include <memory>
+
 #include "bindings/core/v8/V8Initializer.h"
+#include "bindings/modules/v8/V8ContextSnapshotExternalReferences.h"
+#include "build/build_config.h"
+#include "controller/DevToolsFrontendImpl.h"
+#include "controller/OomInterventionImpl.h"
 #include "core/animation/AnimationClock.h"
-#include "modules/ModulesInitializer.h"
+#include "core/frame/LocalFrame.h"
+#include "platform/Histogram.h"
 #include "platform/bindings/Microtask.h"
 #include "platform/bindings/V8PerIsolateData.h"
 #include "platform/heap/Heap.h"
 #include "platform/wtf/Assertions.h"
-#include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Functional.h"
 #include "platform/wtf/WTF.h"
+#include "public/platform/InterfaceRegistry.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
 #include "public/web/WebKit.h"
 #include "v8/include/v8.h"
-#include "web/WebFactoryImpl.h"
 
 namespace blink {
 
@@ -60,20 +69,45 @@ class EndOfTaskRunner : public WebThread::TaskObserver {
 
 static WebThread::TaskObserver* g_end_of_task_runner = nullptr;
 
-static ModulesInitializer& GetModulesInitializer() {
-  DEFINE_STATIC_LOCAL(std::unique_ptr<ModulesInitializer>, initializer,
-                      (WTF::WrapUnique(new ModulesInitializer)));
+static BlinkInitializer& GetBlinkInitializer() {
+  DEFINE_STATIC_LOCAL(std::unique_ptr<BlinkInitializer>, initializer,
+                      (std::make_unique<BlinkInitializer>()));
   return *initializer;
 }
 
-void Initialize(Platform* platform) {
+void Initialize(Platform* platform, service_manager::BinderRegistry* registry) {
+  DCHECK(registry);
   Platform::Initialize(platform);
 
-  V8Initializer::InitializeMainThread();
+#if !defined(ARCH_CPU_X86_64) && !defined(ARCH_CPU_ARM64) && defined(OS_WIN)
+  // Reserve address space on 32 bit Windows, to make it likelier that large
+  // array buffer allocations succeed.
+  BOOL is_wow_64 = -1;
+  if (!IsWow64Process(GetCurrentProcess(), &is_wow_64))
+    is_wow_64 = FALSE;
+  if (!is_wow_64) {
+    // Try to reserve as much address space as we reasonably can.
+    const size_t kMB = 1024 * 1024;
+    for (size_t size = 512 * kMB; size >= 32 * kMB; size -= 16 * kMB) {
+      if (base::ReserveAddressSpace(size)) {
+        // Report successful reservation.
+        DEFINE_STATIC_LOCAL(CustomCountHistogram, reservation_size_histogram,
+                            ("Renderer4.ReservedMemory", 32, 512, 32));
+        reservation_size_histogram.Count(size / kMB);
 
-  GetModulesInitializer().Initialize();
+        break;
+      }
+    }
+  }
+#endif  // !defined(ARCH_CPU_X86_64) && !defined(ARCH_CPU_ARM64) &&
+        // defined(OS_WIN)
 
-  WebFactoryImpl::Initialize();
+  V8Initializer::InitializeMainThread(
+      V8ContextSnapshotExternalReferences::GetTable());
+
+  GetBlinkInitializer().Initialize();
+
+  GetBlinkInitializer().RegisterInterfaces(*registry);
 
   // currentThread is null if we are running on a thread without a message loop.
   if (WebThread* current_thread = platform->CurrentThread()) {
@@ -81,6 +115,36 @@ void Initialize(Platform* platform) {
     g_end_of_task_runner = new EndOfTaskRunner;
     current_thread->AddTaskObserver(g_end_of_task_runner);
   }
+}
+
+void BlinkInitializer::RegisterInterfaces(
+    service_manager::BinderRegistry& registry) {
+  ModulesInitializer::RegisterInterfaces(registry);
+  WebThread* main_thread = Platform::Current()->MainThread();
+  // GetSingleThreadTaskRunner() uses GetTaskRunner() internally.
+  // crbug.com/781664
+  if (!main_thread || !main_thread->GetTaskRunner())
+    return;
+
+  registry.AddInterface(
+      ConvertToBaseCallback(CrossThreadBind(&OomInterventionImpl::Create)),
+      main_thread->GetTaskRunner());
+}
+
+void BlinkInitializer::InitLocalFrame(LocalFrame& frame) const {
+  frame.GetInterfaceRegistry()->AddAssociatedInterface(WTF::BindRepeating(
+      &DevToolsFrontendImpl::BindMojoRequest, WrapWeakPersistent(&frame)));
+  ModulesInitializer::InitLocalFrame(frame);
+}
+
+void BlinkInitializer::OnClearWindowObjectInMainWorld(
+    Document& document,
+    const Settings& settings) const {
+  if (DevToolsFrontendImpl* devtools_frontend =
+          DevToolsFrontendImpl::From(document.GetFrame())) {
+    devtools_frontend->DidClearWindowObject();
+  }
+  ModulesInitializer::OnClearWindowObjectInMainWorld(document, settings);
 }
 
 }  // namespace blink

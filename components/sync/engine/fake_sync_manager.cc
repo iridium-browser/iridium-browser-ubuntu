@@ -10,7 +10,6 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -66,8 +65,8 @@ int FakeSyncManager::GetInvalidationCount() const {
 void FakeSyncManager::WaitForSyncThread() {
   // Post a task to |sync_task_runner_| and block until it runs.
   base::RunLoop run_loop;
-  if (!sync_task_runner_->PostTaskAndReply(
-          FROM_HERE, base::Bind(&base::DoNothing), run_loop.QuitClosure())) {
+  if (!sync_task_runner_->PostTaskAndReply(FROM_HERE, base::DoNothing(),
+                                           run_loop.QuitClosure())) {
     NOTREACHED();
   }
   run_loop.Run();
@@ -204,7 +203,7 @@ ModelTypeConnector* FakeSyncManager::GetModelTypeConnector() {
 
 std::unique_ptr<ModelTypeConnector>
 FakeSyncManager::GetModelTypeConnectorProxy() {
-  return base::MakeUnique<FakeModelTypeConnector>();
+  return std::make_unique<FakeModelTypeConnector>();
 }
 
 const std::string FakeSyncManager::cache_guid() {

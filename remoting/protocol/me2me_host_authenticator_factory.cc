@@ -63,9 +63,9 @@ Me2MeHostAuthenticatorFactory::CreateWithThirdPartyAuth(
   return std::move(result);
 }
 
-Me2MeHostAuthenticatorFactory::Me2MeHostAuthenticatorFactory() {}
+Me2MeHostAuthenticatorFactory::Me2MeHostAuthenticatorFactory() = default;
 
-Me2MeHostAuthenticatorFactory::~Me2MeHostAuthenticatorFactory() {}
+Me2MeHostAuthenticatorFactory::~Me2MeHostAuthenticatorFactory() = default;
 
 std::unique_ptr<Authenticator>
 Me2MeHostAuthenticatorFactory::CreateAuthenticator(
@@ -118,7 +118,7 @@ Me2MeHostAuthenticatorFactory::CreateAuthenticator(
     if (!matched) {
       LOG(ERROR) << "Rejecting incoming connection from " << remote_jid
                  << ": Domain not allowed.";
-      return base::MakeUnique<RejectingAuthenticator>(
+      return std::make_unique<RejectingAuthenticator>(
           Authenticator::INVALID_ACCOUNT);
     }
   }

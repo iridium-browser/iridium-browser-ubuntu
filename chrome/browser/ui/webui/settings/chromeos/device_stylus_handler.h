@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/chromeos/note_taking_helper.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
 #include "ui/events/devices/input_device_event_observer.h"
@@ -17,12 +18,16 @@ namespace base {
 class ListValue;
 }
 
+namespace ui {
+class InputDeviceManager;
+}
+
 namespace chromeos {
 namespace settings {
 
 // Chrome OS stylus settings handler.
 class StylusHandler : public ::settings::SettingsPageUIHandler,
-                      public chromeos::NoteTakingHelper::Observer,
+                      public NoteTakingHelper::Observer,
                       public ui::InputDeviceEventObserver {
  public:
   StylusHandler();
@@ -30,8 +35,8 @@ class StylusHandler : public ::settings::SettingsPageUIHandler,
 
   // SettingsPageUIHandler implementation.
   void RegisterMessages() override;
-  void OnJavascriptAllowed() override {}
-  void OnJavascriptDisallowed() override {}
+  void OnJavascriptAllowed() override;
+  void OnJavascriptDisallowed() override;
 
   // chromeos::NoteTakingHelper::Observer implementation.
   void OnAvailableNoteTakingAppsUpdated() override;
@@ -42,21 +47,25 @@ class StylusHandler : public ::settings::SettingsPageUIHandler,
 
  private:
   void UpdateNoteTakingApps();
-  void RequestApps(const base::ListValue* unused_args);
-  void SetPreferredNoteTakingApp(const base::ListValue* args);
-  void SetPreferredNoteTakingAppEnabledOnLockScreen(
+  void HandleRequestApps(const base::ListValue* unused_args);
+  void HandleSetPreferredNoteTakingApp(const base::ListValue* args);
+  void HandleSetPreferredNoteTakingAppEnabledOnLockScreen(
       const base::ListValue* args);
-
-  // Called by JS to request a |SendHasStylus| call.
   void HandleInitialize(const base::ListValue* args);
+
   // Enables or disables the stylus UI section.
   void SendHasStylus();
 
   // Called by JS to show the Play Store Android app.
-  void ShowPlayStoreApps(const base::ListValue* args);
+  void HandleShowPlayStoreApps(const base::ListValue* args);
 
   // IDs of available note-taking apps.
   std::set<std::string> note_taking_app_ids_;
+
+  // Observer registration.
+  ScopedObserver<NoteTakingHelper, NoteTakingHelper::Observer> note_observer_;
+  ScopedObserver<ui::InputDeviceManager, ui::InputDeviceEventObserver>
+      input_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(StylusHandler);
 };

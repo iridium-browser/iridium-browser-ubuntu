@@ -34,7 +34,7 @@
 Sources.EditingLocationHistoryManager = class {
   /**
    * @param {!Sources.SourcesView} sourcesView
-   * @param {function():?SourceFrame.UISourceCodeFrame} currentSourceFrameCallback
+   * @param {function():?Sources.UISourceCodeFrame} currentSourceFrameCallback
    */
   constructor(sourcesView, currentSourceFrameCallback) {
     this._sourcesView = sourcesView;
@@ -43,7 +43,7 @@ Sources.EditingLocationHistoryManager = class {
   }
 
   /**
-   * @param {!SourceFrame.UISourceCodeFrame} sourceFrame
+   * @param {!Sources.UISourceCodeFrame} sourceFrame
    */
   trackSourceFrameCursorJumps(sourceFrame) {
     sourceFrame.textEditor.addEventListener(
@@ -69,14 +69,14 @@ Sources.EditingLocationHistoryManager = class {
   }
 
   updateCurrentState() {
-    var sourceFrame = this._currentSourceFrameCallback();
+    const sourceFrame = this._currentSourceFrameCallback();
     if (!sourceFrame)
       return;
     this._updateActiveState(sourceFrame.textEditor.selection());
   }
 
   pushNewState() {
-    var sourceFrame = this._currentSourceFrameCallback();
+    const sourceFrame = this._currentSourceFrameCallback();
     if (!sourceFrame)
       return;
     this._pushActiveState(sourceFrame.textEditor.selection());
@@ -86,13 +86,13 @@ Sources.EditingLocationHistoryManager = class {
    * @param {!TextUtils.TextRange} selection
    */
   _updateActiveState(selection) {
-    var active = this._historyManager.active();
+    const active = this._historyManager.active();
     if (!active)
       return;
-    var sourceFrame = this._currentSourceFrameCallback();
+    const sourceFrame = this._currentSourceFrameCallback();
     if (!sourceFrame)
       return;
-    var entry = new Sources.EditingLocationHistoryEntry(this._sourcesView, this, sourceFrame, selection);
+    const entry = new Sources.EditingLocationHistoryEntry(this._sourcesView, this, sourceFrame, selection);
     active.merge(entry);
   }
 
@@ -100,10 +100,10 @@ Sources.EditingLocationHistoryManager = class {
    * @param {!TextUtils.TextRange} selection
    */
   _pushActiveState(selection) {
-    var sourceFrame = this._currentSourceFrameCallback();
+    const sourceFrame = this._currentSourceFrameCallback();
     if (!sourceFrame)
       return;
-    var entry = new Sources.EditingLocationHistoryEntry(this._sourcesView, this, sourceFrame, selection);
+    const entry = new Sources.EditingLocationHistoryEntry(this._sourcesView, this, sourceFrame, selection);
     this._historyManager.push(entry);
   }
 
@@ -129,17 +129,17 @@ Sources.EditingLocationHistoryEntry = class {
   /**
    * @param {!Sources.SourcesView} sourcesView
    * @param {!Sources.EditingLocationHistoryManager} editingLocationManager
-   * @param {!SourceFrame.UISourceCodeFrame} sourceFrame
+   * @param {!Sources.UISourceCodeFrame} sourceFrame
    * @param {!TextUtils.TextRange} selection
    */
   constructor(sourcesView, editingLocationManager, sourceFrame, selection) {
     this._sourcesView = sourcesView;
     this._editingLocationManager = editingLocationManager;
-    var uiSourceCode = sourceFrame.uiSourceCode();
+    const uiSourceCode = sourceFrame.uiSourceCode();
     this._projectId = uiSourceCode.project().id();
     this._url = uiSourceCode.url();
 
-    var position = this._positionFromSelection(selection);
+    const position = this._positionFromSelection(selection);
     this._positionHandle = sourceFrame.textEditor.textEditorPositionHandle(position.lineNumber, position.columnNumber);
   }
 
@@ -165,8 +165,8 @@ Sources.EditingLocationHistoryEntry = class {
    * @return {boolean}
    */
   valid() {
-    var position = this._positionHandle.resolve();
-    var uiSourceCode = Workspace.workspace.uiSourceCode(this._projectId, this._url);
+    const position = this._positionHandle.resolve();
+    const uiSourceCode = Workspace.workspace.uiSourceCode(this._projectId, this._url);
     return !!(position && uiSourceCode);
   }
 
@@ -174,8 +174,8 @@ Sources.EditingLocationHistoryEntry = class {
    * @override
    */
   reveal() {
-    var position = this._positionHandle.resolve();
-    var uiSourceCode = Workspace.workspace.uiSourceCode(this._projectId, this._url);
+    const position = this._positionHandle.resolve();
+    const uiSourceCode = Workspace.workspace.uiSourceCode(this._projectId, this._url);
     if (!position || !uiSourceCode)
       return;
 

@@ -14,8 +14,9 @@
 namespace blink {
 
 UnpackedSerializedScriptValue::UnpackedSerializedScriptValue(
-    RefPtr<SerializedScriptValue> value)
+    scoped_refptr<SerializedScriptValue> value)
     : value_(std::move(value)) {
+  value_->RegisterMemoryAllocatedWithCurrentScriptContext();
   auto& array_buffer_contents = value_->array_buffer_contents_array_;
   if (!array_buffer_contents.IsEmpty()) {
     array_buffers_.Grow(array_buffer_contents.size());
@@ -35,16 +36,16 @@ UnpackedSerializedScriptValue::UnpackedSerializedScriptValue(
     image_bitmaps_.Grow(image_bitmap_contents.size());
     std::transform(image_bitmap_contents.begin(), image_bitmap_contents.end(),
                    image_bitmaps_.begin(),
-                   [](RefPtr<StaticBitmapImage>& contents) {
+                   [](scoped_refptr<StaticBitmapImage>& contents) {
                      return ImageBitmap::Create(std::move(contents));
                    });
     image_bitmap_contents.clear();
   }
 }
 
-UnpackedSerializedScriptValue::~UnpackedSerializedScriptValue() {}
+UnpackedSerializedScriptValue::~UnpackedSerializedScriptValue() = default;
 
-DEFINE_TRACE(UnpackedSerializedScriptValue) {
+void UnpackedSerializedScriptValue::Trace(blink::Visitor* visitor) {
   visitor->Trace(array_buffers_);
   visitor->Trace(image_bitmaps_);
 }

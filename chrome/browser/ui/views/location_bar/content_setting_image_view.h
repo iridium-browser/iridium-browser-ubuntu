@@ -17,7 +17,6 @@
 #include "ui/views/view.h"
 
 class ContentSettingImageModel;
-class LocationBarView;
 
 namespace content {
 class WebContents;
@@ -36,18 +35,36 @@ class BubbleDialogDelegateView;
 // blocking, geolocation).
 class ContentSettingImageView : public IconLabelBubbleView {
  public:
+  class Delegate {
+   public:
+    // Gets the web contents the ContentSettingImageView is for.
+    virtual content::WebContents* GetContentSettingWebContents() = 0;
+
+    // Gets the ContentSettingBubbleModelDelegate for this
+    // ContentSettingImageView.
+    virtual ContentSettingBubbleModelDelegate*
+    GetContentSettingBubbleModelDelegate() = 0;
+
+    // Invoked when a bubble is shown.
+    virtual void OnContentSettingImageBubbleShown(
+        ContentSettingImageModel::ImageType type) const {}
+
+   protected:
+    virtual ~Delegate() {}
+  };
+
   ContentSettingImageView(std::unique_ptr<ContentSettingImageModel> image_model,
-                          LocationBarView* parent,
+                          Delegate* delegate,
                           const gfx::FontList& font_list);
   ~ContentSettingImageView() override;
 
   // Updates the decoration from the shown WebContents.
-  void Update(content::WebContents* web_contents);
+  void Update();
 
- private:
-  // The total animation time, including open and close as well as an
-  // intervening "stay open" period.
-  static const int kAnimationDurationMS;
+  // Set the color of the button icon. Based on the text color by default.
+  void SetIconColor(SkColor color);
+
+  void disable_animation() { can_animate_ = false; }
 
   // IconLabelBubbleView:
   const char* GetClassName() const override;
@@ -55,12 +72,18 @@ class ContentSettingImageView : public IconLabelBubbleView {
   bool GetTooltipText(const gfx::Point& p,
                       base::string16* tooltip) const override;
   void OnNativeThemeChanged(const ui::NativeTheme* native_theme) override;
+  SkColor GetInkDropBaseColor() const override;
   SkColor GetTextColor() const override;
   bool ShouldShowLabel() const override;
   double WidthMultiplier() const override;
   bool IsShrinking() const override;
   bool ShowBubble(const ui::Event& event) override;
   bool IsBubbleShowing() const override;
+
+ private:
+  // The total animation time, including open and close as well as an
+  // intervening "stay open" period.
+  static const int kAnimationDurationMS;
 
   // gfx::AnimationDelegate:
   void AnimationEnded(const gfx::Animation* animation) override;
@@ -80,12 +103,15 @@ class ContentSettingImageView : public IconLabelBubbleView {
   // animation is running.
   void AnimateIn();
 
-  LocationBarView* parent_;  // Weak, owns us.
+  Delegate* delegate_;  // Weak.
   std::unique_ptr<ContentSettingImageModel> content_setting_image_model_;
   gfx::SlideAnimation slide_animator_;
   bool pause_animation_;
   double pause_animation_state_;
   views::BubbleDialogDelegateView* bubble_view_;
+  base::Optional<SkColor> icon_color_;
+
+  bool can_animate_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingImageView);
 };

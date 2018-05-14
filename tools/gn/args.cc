@@ -6,6 +6,7 @@
 
 #include "base/sys_info.h"
 #include "build/build_config.h"
+#include "tools/gn/source_file.h"
 #include "tools/gn/string_utils.h"
 #include "tools/gn/variables.h"
 
@@ -96,11 +97,9 @@ Args::ValueWithOverride::ValueWithOverride(const Value& def_val)
       override_value() {
 }
 
-Args::ValueWithOverride::~ValueWithOverride() {
-}
+Args::ValueWithOverride::~ValueWithOverride() = default;
 
-Args::Args() {
-}
+Args::Args() = default;
 
 Args::Args(const Args& other)
     : overrides_(other.overrides_),
@@ -110,8 +109,7 @@ Args::Args(const Args& other)
       toolchain_overrides_(other.toolchain_overrides_) {
 }
 
-Args::~Args() {
-}
+Args::~Args() = default;
 
 void Args::AddArgOverride(const char* name, const Value& value) {
   base::AutoLock lock(lock_);
@@ -127,6 +125,12 @@ void Args::AddArgOverrides(const Scope::KeyValueMap& overrides) {
     overrides_[cur_override.first] = cur_override.second;
     all_overrides_[cur_override.first] = cur_override.second;
   }
+}
+
+void Args::AddDefaultArgOverrides(const Scope::KeyValueMap& overrides) {
+  base::AutoLock lock(lock_);
+  for (const auto& cur_override : overrides)
+    overrides_[cur_override.first] = cur_override.second;
 }
 
 const Value* Args::GetArgOverride(const char* name) const {
@@ -248,7 +252,7 @@ bool Args::VerifyAllOverridesUsed(Err* err) const {
   std::string err_help(
       "The variable \"" + name + "\" was set as a build argument\n"
       "but never appeared in a declare_args() block in any buildfile.\n\n"
-      "To view all possible args, run \"gn args --list <builddir>\"");
+      "To view all possible args, run \"gn args --list <out_dir>\"");
 
   // Use all declare_args for a spelling suggestion.
   std::vector<base::StringPiece> candidates;
@@ -304,6 +308,8 @@ void Args::SetSystemVarsLocked(Scope* dest) const {
   os = "netbsd";
 #elif defined(OS_AIX)
   os = "aix";
+#elif defined(OS_FUCHSIA)
+  os = "fuchsia";
 #else
   #error Unknown OS type.
 #endif

@@ -32,21 +32,26 @@
 
 #include <memory>
 
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
-#include "platform/FontFamilyNames.h"
 #include "platform/Histogram.h"
+#include "platform/InstanceCountersMemoryDumpProvider.h"
 #include "platform/Language.h"
 #include "platform/MemoryCoordinator.h"
 #include "platform/PartitionAllocMemoryDumpProvider.h"
+#include "platform/WebTaskRunner.h"
+#include "platform/exported/WebClipboardImpl.h"
+#include "platform/font_family_names.h"
 #include "platform/fonts/FontCacheMemoryDumpProvider.h"
 #include "platform/heap/BlinkGCMemoryDumpProvider.h"
 #include "platform/heap/GCTaskRunner.h"
+#include "platform/instrumentation/resource_coordinator/BlinkResourceCoordinatorBase.h"
+#include "platform/instrumentation/resource_coordinator/RendererResourceCoordinator.h"
 #include "platform/instrumentation/tracing/MemoryCacheDumpProvider.h"
 #include "platform/wtf/HashMap.h"
 #include "public/platform/InterfaceProvider.h"
 #include "public/platform/WebCanvasCaptureHandler.h"
-#include "public/platform/WebFeaturePolicy.h"
 #include "public/platform/WebGestureCurve.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
 #include "public/platform/WebImageCaptureFrameGrabber.h"
@@ -58,9 +63,11 @@
 #include "public/platform/WebSocketHandshakeThrottle.h"
 #include "public/platform/WebStorageNamespace.h"
 #include "public/platform/WebThread.h"
+#include "public/platform/WebTrialTokenValidator.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCacheStorage.h"
 #include "public/platform/modules/webmidi/WebMIDIAccessor.h"
 #include "services/service_manager/public/cpp/connector.h"
+#include "third_party/WebKit/public/common/origin_trials/trial_policy.h"
 
 namespace blink {
 
@@ -99,14 +106,16 @@ static void MaxObservedSizeFunction(size_t size_in_mb) {
 
 static void CallOnMainThreadFunction(WTF::MainThreadFunction function,
                                      void* context) {
-  Platform::Current()->MainThread()->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE,
+  PostCrossThreadTask(
+      *Platform::Current()->MainThread()->GetTaskRunner(), FROM_HERE,
       CrossThreadBind(function, CrossThreadUnretained(context)));
 }
 
-Platform::Platform() : main_thread_(0) {
+Platform::Platform() : main_thread_(nullptr) {
   WTF::Partitions::Initialize(MaxObservedSizeFunction);
 }
+
+Platform::~Platform() = default;
 
 void Platform::Initialize(Platform* platform) {
   DCHECK(!g_platform);
@@ -118,10 +127,13 @@ void Platform::Initialize(Platform* platform) {
 
   ProcessHeap::Init();
   MemoryCoordinator::Initialize();
-  if (base::ThreadTaskRunnerHandle::IsSet())
+  if (base::ThreadTaskRunnerHandle::IsSet()) {
+    base::trace_event::MemoryDumpProvider::Options options;
+    options.supports_heap_profiling = true;
     base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
         BlinkGCMemoryDumpProvider::Instance(), "BlinkGC",
-        base::ThreadTaskRunnerHandle::Get());
+        base::ThreadTaskRunnerHandle::Get(), options);
+  }
 
   ThreadState::AttachMainThread();
 
@@ -135,16 +147,29 @@ void Platform::Initialize(Platform* platform) {
   if (g_platform->main_thread_) {
     DCHECK(!g_gc_task_runner);
     g_gc_task_runner = new GCTaskRunner(g_platform->main_thread_);
+    base::trace_event::MemoryDumpProvider::Options heap_profiling_options;
+    heap_profiling_options.supports_heap_profiling = true;
     base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
         PartitionAllocMemoryDumpProvider::Instance(), "PartitionAlloc",
-        base::ThreadTaskRunnerHandle::Get());
+        base::ThreadTaskRunnerHandle::Get(), heap_profiling_options);
     base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
         FontCacheMemoryDumpProvider::Instance(), "FontCaches",
         base::ThreadTaskRunnerHandle::Get());
     base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
         MemoryCacheDumpProvider::Instance(), "MemoryCache",
         base::ThreadTaskRunnerHandle::Get());
+    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+        InstanceCountersMemoryDumpProvider::Instance(), "BlinkObjectCounters",
+        base::ThreadTaskRunnerHandle::Get());
   }
+
+  // Pre-create the File thread so multiple threads can call FileTaskRunner() in
+  // a non racy way later.
+  g_platform->file_thread_ = g_platform->CreateThread(
+      WebThreadCreationParams(WebThreadType::kFileThread));
+
+  if (BlinkResourceCoordinatorBase::IsEnabled())
+    RendererResourceCoordinator::Initialize();
 }
 
 void Platform::SetCurrentPlatformForTesting(Platform* platform) {
@@ -159,6 +184,15 @@ Platform* Platform::Current() {
 
 WebThread* Platform::MainThread() const {
   return main_thread_;
+}
+
+base::SingleThreadTaskRunner* Platform::FileTaskRunner() const {
+  return file_thread_ ? file_thread_->GetTaskRunner().get() : nullptr;
+}
+
+scoped_refptr<base::SingleThreadTaskRunner> Platform::BaseFileTaskRunner()
+    const {
+  return file_thread_ ? file_thread_->GetTaskRunner() : nullptr;
 }
 
 service_manager::Connector* Platform::GetConnector() {
@@ -179,12 +213,22 @@ std::unique_ptr<WebStorageNamespace> Platform::CreateLocalStorageNamespace() {
   return nullptr;
 }
 
+std::unique_ptr<WebStorageNamespace> Platform::CreateSessionStorageNamespace(
+    base::StringPiece namespace_id) {
+  return nullptr;
+}
+
 std::unique_ptr<WebServiceWorkerCacheStorage> Platform::CreateCacheStorage(
     const WebSecurityOrigin&) {
   return nullptr;
 }
 
-std::unique_ptr<WebThread> Platform::CreateThread(const char* name) {
+std::unique_ptr<WebThread> Platform::CreateThread(
+    const WebThreadCreationParams& params) {
+  return nullptr;
+}
+
+std::unique_ptr<WebThread> Platform::CreateWebAudioThread() {
   return nullptr;
 }
 
@@ -210,12 +254,14 @@ std::unique_ptr<WebGestureCurve> Platform::CreateFlingAnimationCurve(
 }
 
 std::unique_ptr<WebRTCPeerConnectionHandler>
-Platform::CreateRTCPeerConnectionHandler(WebRTCPeerConnectionHandlerClient*) {
+Platform::CreateRTCPeerConnectionHandler(
+    WebRTCPeerConnectionHandlerClient*,
+    scoped_refptr<base::SingleThreadTaskRunner>) {
   return nullptr;
 }
 
-std::unique_ptr<WebMediaRecorderHandler>
-Platform::CreateMediaRecorderHandler() {
+std::unique_ptr<WebMediaRecorderHandler> Platform::CreateMediaRecorderHandler(
+    scoped_refptr<base::SingleThreadTaskRunner>) {
   return nullptr;
 }
 
@@ -246,18 +292,14 @@ Platform::CreateImageCaptureFrameGrabber() {
   return nullptr;
 }
 
-std::unique_ptr<WebFeaturePolicy> Platform::CreateFeaturePolicy(
-    const WebFeaturePolicy* parent_policy,
-    const WebParsedFeaturePolicy& container_policy,
-    const WebParsedFeaturePolicy& policy_header,
-    const WebSecurityOrigin&) {
+std::unique_ptr<WebTrialTokenValidator> Platform::CreateTrialTokenValidator() {
   return nullptr;
 }
 
-std::unique_ptr<WebFeaturePolicy> Platform::DuplicateFeaturePolicyWithOrigin(
-    const WebFeaturePolicy&,
-    const WebSecurityOrigin&) {
-  return nullptr;
+// TODO(slangley): Remove this once we can get pepper to use mojo directly.
+WebClipboard* Platform::Clipboard() {
+  DEFINE_STATIC_LOCAL(WebClipboardImpl, clipboard, ());
+  return &clipboard;
 }
 
 }  // namespace blink

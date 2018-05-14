@@ -6,10 +6,10 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "components/security_state/core/security_state.h"
+#include "components/security_state/ios/ssl_status_input_event_data.h"
 #include "ios/web/public/browser_state.h"
 #include "ios/web/public/navigation_item.h"
 #import "ios/web/public/navigation_manager.h"
@@ -39,7 +39,7 @@ void IOSSecurityStateTabHelper::GetSecurityInfo(
 
 std::unique_ptr<security_state::VisibleSecurityState>
 IOSSecurityStateTabHelper::GetVisibleSecurityState() const {
-  auto state = base::MakeUnique<security_state::VisibleSecurityState>();
+  auto state = std::make_unique<security_state::VisibleSecurityState>();
 
   web::NavigationItem* item =
       web_state_->GetNavigationManager()->GetVisibleItem();
@@ -51,19 +51,16 @@ IOSSecurityStateTabHelper::GetVisibleSecurityState() const {
   const web::SSLStatus& ssl = item->GetSSL();
   state->certificate = ssl.certificate;
   state->cert_status = ssl.cert_status;
-  state->connection_status = ssl.connection_status;
   state->displayed_mixed_content =
       (ssl.content_status & web::SSLStatus::DISPLAYED_INSECURE_CONTENT) ? true
                                                                         : false;
-  state->displayed_password_field_on_http =
-      (ssl.content_status & web::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP)
-          ? true
-          : false;
-  state->displayed_credit_card_field_on_http =
-      (ssl.content_status & web::SSLStatus::DISPLAYED_CREDIT_CARD_FIELD_ON_HTTP)
-          ? true
-          : false;
   state->is_incognito = web_state_->GetBrowserState()->IsOffTheRecord();
+
+  security_state::SSLStatusInputEventData* input_events =
+      static_cast<security_state::SSLStatusInputEventData*>(
+          ssl.user_data.get());
+  if (input_events)
+    state->insecure_input_events = *input_events->input_events();
 
   return state;
 }

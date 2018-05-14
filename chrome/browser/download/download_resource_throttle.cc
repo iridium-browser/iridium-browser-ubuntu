@@ -21,29 +21,30 @@ using content::BrowserThread;
 namespace {
 
 void OnCanDownloadDecided(base::WeakPtr<DownloadResourceThrottle> throttle,
-                          bool allow) {
+                          bool storage_permission_granted, bool allow) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&DownloadResourceThrottle::ContinueDownload, throttle,
-                     allow));
+      base::Bind(&DownloadResourceThrottle::ContinueDownload, throttle,
+                 storage_permission_granted, allow));
 }
 
 void CanDownload(
     std::unique_ptr<DownloadResourceThrottle::DownloadRequestInfo> info) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   info->limiter->CanDownload(info->web_contents_getter, info->url,
-                             info->request_method, info->continue_callback);
+                             info->request_method,
+                             base::Bind(info->continue_callback, true));
 }
 
 #if defined(OS_ANDROID)
-void OnAcquireFileAccessPermissionDone(
+void OnThrottleAcquireFileAccessPermissionDone(
     std::unique_ptr<DownloadResourceThrottle::DownloadRequestInfo> info,
     bool granted) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (granted)
     CanDownload(std::move(info));
   else
-    info->continue_callback.Run(false);
+    info->continue_callback.Run(false, false);
 }
 #endif
 
@@ -54,8 +55,9 @@ void CanDownloadOnUIThread(
   const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter =
       info->web_contents_getter;
   DownloadControllerBase::Get()->AcquireFileAccessPermission(
-      web_contents_getter, base::Bind(&OnAcquireFileAccessPermissionDone,
-                                      base::Passed(std::move(info))));
+      web_contents_getter,
+      base::Bind(&OnThrottleAcquireFileAccessPermissionDone,
+                 base::Passed(std::move(info))));
 #else
   CanDownload(std::move(info));
 #endif
@@ -68,7 +70,7 @@ DownloadResourceThrottle::DownloadRequestInfo::DownloadRequestInfo(
     const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
     const GURL& url,
     const std::string& request_method,
-    const DownloadRequestLimiter::Callback& continue_callback)
+    const DownloadRequestInfo::Callback& continue_callback)
     : limiter(limiter),
       web_contents_getter(web_contents_getter),
       url(url),
@@ -90,10 +92,9 @@ DownloadResourceThrottle::DownloadResourceThrottle(
       BrowserThread::UI, FROM_HERE,
       base::BindOnce(
           &CanDownloadOnUIThread,
-          base::Passed(
-              std::unique_ptr<DownloadRequestInfo>(new DownloadRequestInfo(
-                  limiter, web_contents_getter, url, request_method,
-                  base::Bind(&OnCanDownloadDecided, AsWeakPtr()))))));
+          std::unique_ptr<DownloadRequestInfo>(new DownloadRequestInfo(
+              limiter, web_contents_getter, url, request_method,
+              base::Bind(&OnCanDownloadDecided, AsWeakPtr())))));
 }
 
 DownloadResourceThrottle::~DownloadResourceThrottle() {
@@ -131,12 +132,15 @@ void DownloadResourceThrottle::WillDownload(bool* defer) {
     Cancel();
 }
 
-void DownloadResourceThrottle::ContinueDownload(bool allow) {
+void DownloadResourceThrottle::ContinueDownload(
+    bool storage_permission_granted, bool allow) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   querying_limiter_ = false;
   request_allowed_ = allow;
 
-  if (allow) {
+  if (!storage_permission_granted) {
+    // UMA for this will be recorded in MobileDownload.StoragePermission.
+  } else if (allow) {
     // Presumes all downloads initiated by navigation use this throttle and
     // nothing else does.
     RecordDownloadSource(DOWNLOAD_INITIATED_BY_NAVIGATION);

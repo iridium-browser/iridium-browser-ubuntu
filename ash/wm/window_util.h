@@ -8,7 +8,6 @@
 #include <stdint.h>
 
 #include "ash/ash_export.h"
-#include "base/compiler_specific.h"
 #include "ui/base/ui_base_types.h"
 
 namespace aura {
@@ -31,6 +30,7 @@ class ImmersiveFullscreenController;
 namespace wm {
 
 // Utility functions for window activation.
+// DEPRECATED: Prefer the functions in ui/wm/core/window_util.h.
 ASH_EXPORT void ActivateWindow(aura::Window* window);
 ASH_EXPORT void DeactivateWindow(aura::Window* window);
 ASH_EXPORT bool IsActiveWindow(aura::Window* window);
@@ -47,6 +47,18 @@ ASH_EXPORT aura::Window* GetActivatableWindow(aura::Window* window);
 
 // Returns the window with capture, null if no window currently has capture.
 ASH_EXPORT aura::Window* GetCaptureWindow();
+
+// Returns the Windows that may block events.
+// If |min_container| is non-null then windows that are not children of
+// |min_container| or not stacked above (z-order) will not receive events.
+// |system_modal_container| is the window system modal windows appear in. If
+// there is a system modal window in it, then events that are not targetted
+// at the active modal window (or an ancestor or transient ancestor) will not
+// receive events.
+ASH_EXPORT void GetBlockingContainersForRoot(
+    aura::Window* root_window,
+    aura::Window** min_container,
+    aura::Window** system_modal_container);
 
 // Returns true if |window|'s location can be controlled by the user.
 ASH_EXPORT bool IsWindowUserPositionable(aura::Window* window);

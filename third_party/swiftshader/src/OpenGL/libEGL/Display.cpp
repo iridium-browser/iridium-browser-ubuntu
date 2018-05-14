@@ -567,11 +567,14 @@ bool Display::isValidWindow(EGLNativeWindowType window)
 			XWindowAttributes windowAttributes;
 			Status status = libX11->XGetWindowAttributes((::Display*)nativeDisplay, window, &windowAttributes);
 
-			return status == True;
+			return status != 0;
 		}
 		return false;
 	#elif defined(__APPLE__)
 		return sw::OSX::IsValidWindow(window);
+	#elif defined(__Fuchsia__)
+		// TODO(crbug.com/800951): Integrate with Mozart.
+		return true;
 	#else
 		#error "Display::isValidWindow unimplemented for this platform"
 		return false;
@@ -580,11 +583,11 @@ bool Display::isValidWindow(EGLNativeWindowType window)
 
 bool Display::hasExistingWindowSurface(EGLNativeWindowType window)
 {
-	for(SurfaceSet::iterator surface = mSurfaceSet.begin(); surface != mSurfaceSet.end(); surface++)
+	for(const auto &surface : mSurfaceSet)
 	{
-		if((*surface)->isWindowSurface())
+		if(surface->isWindowSurface())
 		{
-			if((*surface)->getWindowHandle() == window)
+			if(surface->getWindowHandle() == window)
 			{
 				return true;
 			}
@@ -676,7 +679,10 @@ sw::Format Display::getDisplayFormat() const
 			if(fd != -1)
 			{
 				struct fb_var_screeninfo info;
-				if(ioctl(fd, FBIOGET_VSCREENINFO, &info) >= 0)
+				int io = ioctl(fd, FBIOGET_VSCREENINFO, &info);
+				close(fd);
+
+				if(io >= 0)
 				{
 					switch(info.bits_per_pixel)
 					{
@@ -716,8 +722,6 @@ sw::Format Display::getDisplayFormat() const
 						UNIMPLEMENTED();
 					}
 				}
-
-				close(fd);
 			}
 		}
 
@@ -742,6 +746,8 @@ sw::Format Display::getDisplayFormat() const
 			return sw::FORMAT_X8R8G8B8;
 		}
 	#elif defined(__APPLE__)
+		return sw::FORMAT_A8B8G8R8;
+	#elif defined(__Fuchsia__)
 		return sw::FORMAT_A8B8G8R8;
 	#else
 		#error "Display::isValidWindow unimplemented for this platform"

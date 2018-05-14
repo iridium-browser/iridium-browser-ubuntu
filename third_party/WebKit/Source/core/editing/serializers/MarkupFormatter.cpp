@@ -27,10 +27,6 @@
 
 #include "core/editing/serializers/MarkupFormatter.h"
 
-#include "core/HTMLNames.h"
-#include "core/XLinkNames.h"
-#include "core/XMLNSNames.h"
-#include "core/XMLNames.h"
 #include "core/dom/CDATASection.h"
 #include "core/dom/Comment.h"
 #include "core/dom/Document.h"
@@ -41,6 +37,10 @@
 #include "core/editing/Editor.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLTemplateElement.h"
+#include "core/html_names.h"
+#include "core/xlink_names.h"
+#include "core/xml_names.h"
+#include "core/xmlns_names.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/text/CharacterNames.h"
 
@@ -126,7 +126,7 @@ MarkupFormatter::MarkupFormatter(EAbsoluteURLs resolve_urls_method,
     : resolve_urls_method_(resolve_urls_method),
       serialization_type_(serialization_type) {}
 
-MarkupFormatter::~MarkupFormatter() {}
+MarkupFormatter::~MarkupFormatter() = default;
 
 String MarkupFormatter::ResolveURLIfNeeded(const Element& element,
                                            const String& url_string) const {
@@ -205,23 +205,21 @@ void MarkupFormatter::AppendQuotedURLAttributeValue(
     const Element& element,
     const Attribute& attribute) {
   DCHECK(element.IsURLAttribute(attribute)) << element;
-  const String resolved_url_string =
-      ResolveURLIfNeeded(element, attribute.Value());
+  String resolved_url_string = ResolveURLIfNeeded(element, attribute.Value());
   UChar quote_char = '"';
-  String stripped_url_string = resolved_url_string.StripWhiteSpace();
-  if (ProtocolIsJavaScript(stripped_url_string)) {
+  if (ProtocolIsJavaScript(resolved_url_string)) {
     // minimal escaping for javascript urls
-    if (stripped_url_string.Contains('&'))
-      stripped_url_string.Replace('&', "&amp;");
+    if (resolved_url_string.Contains('&'))
+      resolved_url_string.Replace('&', "&amp;");
 
-    if (stripped_url_string.Contains('"')) {
-      if (stripped_url_string.Contains('\''))
-        stripped_url_string.Replace('"', "&quot;");
+    if (resolved_url_string.Contains('"')) {
+      if (resolved_url_string.Contains('\''))
+        resolved_url_string.Replace('"', "&quot;");
       else
         quote_char = '\'';
     }
     result.Append(quote_char);
-    result.Append(stripped_url_string);
+    result.Append(resolved_url_string);
     result.Append(quote_char);
     return;
   }
@@ -239,7 +237,7 @@ void MarkupFormatter::AppendNamespace(StringBuilder& result,
                                       Namespaces& namespaces) {
   const AtomicString& lookup_key = (!prefix) ? g_empty_atom : prefix;
   AtomicString found_uri = namespaces.at(lookup_key);
-  if (found_uri != namespace_uri) {
+  if (!EqualIgnoringNullity(found_uri, namespace_uri)) {
     namespaces.Set(lookup_key, namespace_uri);
     result.Append(' ');
     result.Append(g_xmlns_atom.GetString());
@@ -349,13 +347,6 @@ void MarkupFormatter::AppendCloseTag(StringBuilder& result,
   result.Append('>');
 }
 
-static inline bool AttributeIsInSerializedNamespace(
-    const Attribute& attribute) {
-  return attribute.NamespaceURI() == XMLNames::xmlNamespaceURI ||
-         attribute.NamespaceURI() == XLinkNames::xlinkNamespaceURI ||
-         attribute.NamespaceURI() == XMLNSNames::xmlnsNamespaceURI;
-}
-
 void MarkupFormatter::AppendAttribute(StringBuilder& result,
                                       const Element& element,
                                       const Attribute& attribute,
@@ -363,9 +354,17 @@ void MarkupFormatter::AppendAttribute(StringBuilder& result,
   bool document_is_html = SerializeAsHTMLDocument(element);
 
   QualifiedName prefixed_name = attribute.GetName();
-  if (document_is_html && !AttributeIsInSerializedNamespace(attribute)) {
+  if (document_is_html) {
+    if (attribute.NamespaceURI() == XMLNSNames::xmlnsNamespaceURI) {
+      if (!attribute.Prefix() && attribute.LocalName() != g_xmlns_atom)
+        prefixed_name.SetPrefix(g_xmlns_atom);
+    } else if (attribute.NamespaceURI() == XMLNames::xmlNamespaceURI) {
+      prefixed_name.SetPrefix(g_xml_atom);
+    } else if (attribute.NamespaceURI() == XLinkNames::xlinkNamespaceURI) {
+      prefixed_name.SetPrefix(g_xlink_atom);
+    }
     result.Append(' ');
-    result.Append(attribute.GetName().LocalName());
+    result.Append(prefixed_name.ToString());
   } else {
     if (attribute.NamespaceURI() == XMLNSNames::xmlnsNamespaceURI) {
       if (!attribute.Prefix() && attribute.LocalName() != g_xmlns_atom)
@@ -475,8 +474,13 @@ EntityMask MarkupFormatter::EntityMaskForText(const Text& text) const {
   if (text.parentElement())
     parent_name = &(text.parentElement())->TagQName();
 
-  if (parent_name && (*parent_name == scriptTag || *parent_name == styleTag ||
-                      *parent_name == xmpTag))
+  if (parent_name &&
+      (*parent_name == scriptTag || *parent_name == styleTag ||
+       *parent_name == xmpTag || *parent_name == iframeTag ||
+       *parent_name == plaintextTag || *parent_name == noembedTag ||
+       *parent_name == noframesTag ||
+       (*parent_name == noscriptTag && text.GetDocument().GetFrame() &&
+        text.GetDocument().CanExecuteScripts(kNotAboutToExecuteScript))))
     return kEntityMaskInCDATA;
   return kEntityMaskInHTMLPCDATA;
 }

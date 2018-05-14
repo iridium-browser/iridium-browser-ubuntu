@@ -11,11 +11,12 @@
 
 namespace content {
 
-void StartHistogramInternalsURLLoader(const ResourceRequest& request,
-                                      mojom::URLLoaderClientPtr client) {
+void StartHistogramInternalsURLLoader(
+    const network::ResourceRequest& request,
+    network::mojom::URLLoaderClientPtr client) {
   scoped_refptr<net::HttpResponseHeaders> headers(
       new net::HttpResponseHeaders("HTTP/1.1 200 OK"));
-  ResourceResponseHead resource_response;
+  network::ResourceResponseHead resource_response;
   resource_response.headers = headers;
   resource_response.mime_type = "text/html";
   client->OnReceiveResponse(resource_response, base::nullopt, nullptr);
@@ -26,7 +27,10 @@ void StartHistogramInternalsURLLoader(const ResourceRequest& request,
   CHECK(mojo::common::BlockingCopyFromString(data, data_pipe.producer_handle));
 
   client->OnStartLoadingResponseBody(std::move(data_pipe.consumer_handle));
-  client->OnComplete(ResourceRequestCompletionStatus(data.size()));
+  network::URLLoaderCompletionStatus status(net::OK);
+  status.encoded_data_length = data.size();
+  status.encoded_body_length = data.size();
+  client->OnComplete(status);
 }
 
 }  // namespace content

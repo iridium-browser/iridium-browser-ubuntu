@@ -6,17 +6,16 @@ cr.define('extensions', function() {
   'use strict';
 
   /** @interface */
-  function LoadErrorDelegate() {}
-
-  LoadErrorDelegate.prototype = {
+  class LoadErrorDelegate {
     /**
      * Attempts to load the previously-attempted unpacked extension.
      * @param {string} retryId
+     * @return {!Promise}
      */
-    retryLoadUnpacked: assertNotReached,
-  };
+    retryLoadUnpacked(retryId) {}
+  }
 
-  var LoadError = Polymer({
+  const LoadError = Polymer({
     is: 'extensions-load-error',
     properties: {
       /** @type {extensions.LoadErrorDelegate} */
@@ -24,6 +23,9 @@ cr.define('extensions', function() {
 
       /** @type {chrome.developerPrivate.LoadError} */
       loadError: Object,
+
+      /** @private */
+      retrying_: Boolean,
     },
 
     observers: [
@@ -40,19 +42,29 @@ cr.define('extensions', function() {
 
     /** @private */
     onRetryTap_: function() {
-      this.delegate.retryLoadUnpacked(this.loadError.retryGuid);
-      this.close();
+      this.retrying_ = true;
+      this.delegate.retryLoadUnpacked(this.loadError.retryGuid)
+          .then(
+              () => {
+                this.close();
+              },
+              loadError => {
+                this.loadError =
+                    /** @type {chrome.developerPrivate.LoadError} */ (
+                        loadError);
+                this.retrying_ = false;
+              });
     },
 
     /** @private */
     observeLoadErrorChanges_: function() {
       assert(this.loadError);
-      var source = this.loadError.source;
+      const source = this.loadError.source;
       // CodeSection expects a RequestFileSourceResponse, rather than an
       // ErrorFileSource. Massage into place.
       // TODO(devlin): Make RequestFileSourceResponse use ErrorFileSource.
       /** @type {!chrome.developerPrivate.RequestFileSourceResponse} */
-      var codeSectionProperties = {
+      const codeSectionProperties = {
         beforeHighlight: source ? source.beforeHighlight : '',
         highlight: source ? source.highlight : '',
         afterHighlight: source ? source.afterHighlight : '',

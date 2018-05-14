@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 
+#include <memory>
+
 #include "base/files/file_path.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
@@ -41,7 +43,7 @@ class FileSelectionUser : public ui::SelectFileDialog::Listener {
   void StartFileSelection() {
     CHECK(!select_file_dialog_.get());
     select_file_dialog_ = ui::SelectFileDialog::Create(
-        this, new ChromeSelectFilePolicy(NULL));
+        this, std::make_unique<ChromeSelectFilePolicy>(nullptr));
 
     const base::FilePath file_path;
     const base::string16 title = base::string16();
@@ -95,7 +97,7 @@ TEST_F(ChromeSelectFilePolicyTest, MAYBE_ExpectAsynchronousListenerCall) {
 
   // Disallow file-selection dialogs.
   local_state.Get()->SetManagedPref(prefs::kAllowFileSelectionDialogs,
-                                    base::MakeUnique<base::Value>(false));
+                                    std::make_unique<base::Value>(false));
 
   file_selection_user->StartFileSelection();
 }

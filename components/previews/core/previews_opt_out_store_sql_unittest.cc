@@ -13,7 +13,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_param_associator.h"
@@ -65,7 +64,7 @@ class PreviewsOptOutStoreSQLTest : public testing::Test {
 
   // Creates a store that operates on one thread.
   void Create(std::unique_ptr<PreviewsTypeList> enabled_previews) {
-    store_ = base::MakeUnique<PreviewsOptOutStoreSQL>(
+    store_ = std::make_unique<PreviewsOptOutStoreSQL>(
         base::ThreadTaskRunnerHandle::Get(),
         base::ThreadTaskRunnerHandle::Get(),
         temp_dir_.GetPath().Append(kOptOutFilename),
@@ -178,7 +177,7 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestMaxRows) {
   std::string test_host_c = "host_c.com";
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   size_t row_limit = 2;
-  std::string row_limit_string = base::SizeTToString(row_limit);
+  std::string row_limit_string = base::NumberToString(row_limit);
   command_line->AppendSwitchASCII("previews-max-opt-out-rows",
                                   row_limit_string);
   std::unique_ptr<PreviewsTypeList> enabled_previews(new PreviewsTypeList);
@@ -244,7 +243,7 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestMaxRowsPerHost) {
   std::string test_host = "host.com";
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   size_t row_limit = 2;
-  std::string row_limit_string = base::SizeTToString(row_limit);
+  std::string row_limit_string = base::NumberToString(row_limit);
   command_line->AppendSwitchASCII("previews-max-opt-out-rows-per-host",
                                   row_limit_string);
   std::unique_ptr<PreviewsTypeList> enabled_previews(new PreviewsTypeList);

@@ -37,14 +37,20 @@
 #include "core/frame/UseCounter.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/loader/DocumentLoader.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "core/workers/WorkerContentSettingsClient.h"
+#include "core/workers/WorkerGlobalScope.h"
+#include "core/workers/WorkerOrWorkletGlobalScope.h"
+#include "core/workers/WorkerSettings.h"
 #include "platform/network/NetworkUtils.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/text/StringBuilder.h"
-#include "public/platform/WebAddressSpace.h"
+#include "public/mojom/net/ip_address_space.mojom-blink.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "public/platform/WebMixedContent.h"
+#include "public/platform/WebSecurityOrigin.h"
+#include "public/platform/WebWorkerFetchContext.h"
+#include "services/network/public/mojom/request_context_frame_type.mojom-blink.h"
 
 namespace blink {
 
@@ -146,7 +152,8 @@ static void MeasureStricterVersionOfIsMixedContent(Frame& frame,
   // What about other "secure" contexts the SchemeRegistry knows about? We'll
   // use this method to measure the occurrence of non-webby mixed content to
   // make sure we're not breaking the world without realizing it.
-  SecurityOrigin* origin = frame.GetSecurityContext()->GetSecurityOrigin();
+  const SecurityOrigin* origin =
+      frame.GetSecurityContext()->GetSecurityOrigin();
   if (MixedContentChecker::IsMixedContent(origin, url)) {
     if (origin->Protocol() != "https") {
       UseCounter::Count(
@@ -161,14 +168,15 @@ static void MeasureStricterVersionOfIsMixedContent(Frame& frame,
   }
 }
 
-bool RequestIsSubframeSubresource(Frame* frame,
-                                  WebURLRequest::FrameType frame_type) {
+bool RequestIsSubframeSubresource(
+    Frame* frame,
+    network::mojom::RequestContextFrameType frame_type) {
   return (frame && frame != frame->Tree().Top() &&
-          frame_type != WebURLRequest::kFrameTypeNested);
+          frame_type != network::mojom::RequestContextFrameType::kNested);
 }
 
 // static
-bool MixedContentChecker::IsMixedContent(SecurityOrigin* security_origin,
+bool MixedContentChecker::IsMixedContent(const SecurityOrigin* security_origin,
                                          const KURL& url) {
   if (!SchemeRegistry::ShouldTreatURLSchemeAsRestrictingMixedContent(
           security_origin->Protocol()))
@@ -183,23 +191,19 @@ bool MixedContentChecker::IsMixedContent(SecurityOrigin* security_origin,
   bool is_allowed = url.ProtocolIs("blob") || url.ProtocolIs("filesystem") ||
                     SecurityOrigin::IsSecure(url) ||
                     SecurityOrigin::Create(url)->IsPotentiallyTrustworthy();
-  // TODO(mkwst): Remove this once 'localhost' is no longer considered
-  // potentially trustworthy.
-  if (is_allowed && url.ProtocolIs("http") &&
-      NetworkUtils::IsLocalHostname(url.Host(), nullptr))
-    is_allowed = false;
   return !is_allowed;
 }
 
 // static
 Frame* MixedContentChecker::InWhichFrameIsContentMixed(
     Frame* frame,
-    WebURLRequest::FrameType frame_type,
+    network::mojom::RequestContextFrameType frame_type,
     const KURL& url,
     const LocalFrame* source) {
   // We only care about subresource loads; top-level navigations cannot be mixed
   // content. Neither can frameless requests.
-  if (frame_type == WebURLRequest::kFrameTypeTopLevel || !frame)
+  if (frame_type == network::mojom::RequestContextFrameType::kTopLevel ||
+      !frame)
     return nullptr;
 
   // Check the top frame first.
@@ -218,7 +222,7 @@ Frame* MixedContentChecker::InWhichFrameIsContentMixed(
 
 // static
 void MixedContentChecker::LogToConsoleAboutFetch(
-    LocalFrame* frame,
+    ExecutionContext* execution_context,
     const KURL& main_resource_url,
     const KURL& url,
     WebURLRequest::RequestContext request_context,
@@ -235,11 +239,11 @@ void MixedContentChecker::LogToConsoleAboutFetch(
   MessageLevel message_level =
       allowed ? kWarningMessageLevel : kErrorMessageLevel;
   if (source_location) {
-    frame->GetDocument()->AddConsoleMessage(
+    execution_context->AddConsoleMessage(
         ConsoleMessage::Create(kSecurityMessageSource, message_level, message,
                                std::move(source_location)));
   } else {
-    frame->GetDocument()->AddConsoleMessage(
+    execution_context->AddConsoleMessage(
         ConsoleMessage::Create(kSecurityMessageSource, message_level, message));
   }
 }
@@ -300,14 +304,14 @@ void MixedContentChecker::Count(Frame* frame,
 bool MixedContentChecker::ShouldBlockFetch(
     LocalFrame* frame,
     WebURLRequest::RequestContext request_context,
-    WebURLRequest::FrameType frame_type,
+    network::mojom::RequestContextFrameType frame_type,
     ResourceRequest::RedirectStatus redirect_status,
     const KURL& url,
     SecurityViolationReportingPolicy reporting_policy) {
   // Frame-level loads are checked by the browser if PlzNavigate is enabled. No
   // need to check them again here.
   if (frame->GetSettings()->GetBrowserSideNavigationEnabled() &&
-      frame_type != WebURLRequest::kFrameTypeNone) {
+      frame_type != network::mojom::RequestContextFrameType::kNone) {
     return false;
   }
 
@@ -328,7 +332,7 @@ bool MixedContentChecker::ShouldBlockFetch(
   LocalFrameClient* client = frame->Client();
   ContentSettingsClient* content_settings_client =
       frame->GetContentSettingsClient();
-  SecurityOrigin* security_origin =
+  const SecurityOrigin* security_origin =
       mixed_frame->GetSecurityContext()->GetSecurityOrigin();
   bool allowed = false;
 
@@ -352,7 +356,7 @@ bool MixedContentChecker::ShouldBlockFetch(
   // FIXME: Remove this temporary hack once we have a reasonable API for
   // launching external applications via URLs. http://crbug.com/318788 and
   // https://crbug.com/393481
-  if (frame_type == WebURLRequest::kFrameTypeNested &&
+  if (frame_type == network::mojom::RequestContextFrameType::kNested &&
       !SchemeRegistry::ShouldTreatURLSchemeAsCORSEnabled(url.Protocol()))
     context_type = WebMixedContentContextType::kOptionallyBlockable;
 
@@ -409,7 +413,70 @@ bool MixedContentChecker::ShouldBlockFetch(
   };
 
   if (reporting_policy == SecurityViolationReportingPolicy::kReport) {
-    LogToConsoleAboutFetch(frame, MainResourceUrlForFrame(mixed_frame), url,
+    LogToConsoleAboutFetch(frame->GetDocument(),
+                           MainResourceUrlForFrame(mixed_frame), url,
+                           request_context, allowed, nullptr);
+  }
+  return !allowed;
+}
+
+// static
+bool MixedContentChecker::ShouldBlockFetchOnWorker(
+    WorkerOrWorkletGlobalScope* global_scope,
+    WebWorkerFetchContext* worker_fetch_context,
+    WebURLRequest::RequestContext request_context,
+    network::mojom::RequestContextFrameType frame_type,
+    ResourceRequest::RedirectStatus redirect_status,
+    const KURL& url,
+    SecurityViolationReportingPolicy reporting_policy) {
+  if (!MixedContentChecker::IsMixedContent(global_scope->GetSecurityOrigin(),
+                                           url)) {
+    return false;
+  }
+
+  UseCounter::Count(global_scope, WebFeature::kMixedContentPresent);
+  UseCounter::Count(global_scope, WebFeature::kMixedContentBlockable);
+  if (ContentSecurityPolicy* policy = global_scope->GetContentSecurityPolicy())
+    policy->ReportMixedContent(url, redirect_status);
+
+  // Blocks all mixed content request from worklets.
+  // TODO(horo): Revise this when the spec is updated.
+  // Worklets spec: https://www.w3.org/TR/worklets-1/#security-considerations
+  // Spec issue: https://github.com/w3c/css-houdini-drafts/issues/92
+  if (!global_scope->IsWorkerGlobalScope())
+    return true;
+
+  WorkerGlobalScope* worker_global_scope = ToWorkerGlobalScope(global_scope);
+  WorkerSettings* settings = worker_global_scope->GetWorkerSettings();
+  DCHECK(settings);
+  bool allowed = false;
+  if (!settings->GetAllowRunningOfInsecureContent() &&
+      worker_fetch_context->IsOnSubframe()) {
+    UseCounter::Count(global_scope,
+                      WebFeature::kBlockableMixedContentInSubframeBlocked);
+    allowed = false;
+  } else {
+    bool strict_mode = worker_global_scope->GetInsecureRequestPolicy() &
+                           kBlockAllMixedContent ||
+                       settings->GetStrictMixedContentChecking();
+    bool should_ask_embedder =
+        !strict_mode && (!settings->GetStrictlyBlockBlockableMixedContent() ||
+                         settings->GetAllowRunningOfInsecureContent());
+    allowed = should_ask_embedder &&
+              WorkerContentSettingsClient::From(*global_scope)
+                  ->AllowRunningInsecureContent(
+                      settings->GetAllowRunningOfInsecureContent(),
+                      global_scope->GetSecurityOrigin(), url);
+    if (allowed) {
+      worker_fetch_context->DidRunInsecureContent(
+          WebSecurityOrigin(global_scope->GetSecurityOrigin()), url);
+      UseCounter::Count(global_scope,
+                        WebFeature::kMixedContentBlockableAllowed);
+    }
+  }
+
+  if (reporting_policy == SecurityViolationReportingPolicy::kReport) {
+    LogToConsoleAboutFetch(global_scope, global_scope->Url(), url,
                            request_context, allowed, nullptr);
   }
   return !allowed;
@@ -442,7 +509,7 @@ bool MixedContentChecker::ShouldBlockWebSocket(
     const KURL& url,
     SecurityViolationReportingPolicy reporting_policy) {
   Frame* mixed_frame = InWhichFrameIsContentMixed(
-      frame, WebURLRequest::kFrameTypeNone, url, frame);
+      frame, network::mojom::RequestContextFrameType::kNone, url, frame);
   if (!mixed_frame)
     return false;
 
@@ -460,7 +527,7 @@ bool MixedContentChecker::ShouldBlockWebSocket(
   ContentSettingsClient* content_settings_client =
       frame->GetContentSettingsClient();
   LocalFrameClient* client = frame->Client();
-  SecurityOrigin* security_origin =
+  const SecurityOrigin* security_origin =
       mixed_frame->GetSecurityContext()->GetSecurityOrigin();
   bool allowed = false;
 
@@ -500,7 +567,7 @@ bool MixedContentChecker::IsMixedFormAction(
     return false;
 
   Frame* mixed_frame = InWhichFrameIsContentMixed(
-      frame, WebURLRequest::kFrameTypeNone, url, frame);
+      frame, network::mojom::RequestContextFrameType::kNone, url, frame);
   if (!mixed_frame)
     return false;
 
@@ -513,7 +580,7 @@ bool MixedContentChecker::IsMixedFormAction(
   if (reporting_policy == SecurityViolationReportingPolicy::kReport) {
     String message = String::Format(
         "Mixed Content: The page at '%s' was loaded over a secure connection, "
-        "but contains a form which targets an insecure endpoint '%s'. This "
+        "but contains a form that targets an insecure endpoint '%s'. This "
         "endpoint should be made available over a secure connection.",
         MainResourceUrlForFrame(mixed_frame).ElidedString().Utf8().data(),
         url.ElidedString().Utf8().data());
@@ -532,7 +599,7 @@ void MixedContentChecker::CheckMixedPrivatePublic(
 
   // Just count these for the moment, don't block them.
   if (NetworkUtils::IsReservedIPAddress(resource_ip_address) &&
-      frame->GetDocument()->AddressSpace() == kWebAddressSpacePublic) {
+      frame->GetDocument()->AddressSpace() == mojom::IPAddressSpace::kPublic) {
     UseCounter::Count(frame->GetDocument(),
                       WebFeature::kMixedContentPrivateHostnameInPublicHostname);
     // We can simplify the IP checks here, as we've already verified that
@@ -550,10 +617,10 @@ void MixedContentChecker::CheckMixedPrivatePublic(
 
 Frame* MixedContentChecker::EffectiveFrameForFrameType(
     LocalFrame* frame,
-    WebURLRequest::FrameType frame_type) {
+    network::mojom::RequestContextFrameType frame_type) {
   // If we're loading the main resource of a subframe, ensure that we check
   // against the parent of the active frame, rather than the frame itself.
-  if (frame_type != WebURLRequest::kFrameTypeNested)
+  if (frame_type != network::mojom::RequestContextFrameType::kNested)
     return frame;
 
   Frame* parent_frame = frame->Tree().Parent();
@@ -564,10 +631,11 @@ Frame* MixedContentChecker::EffectiveFrameForFrameType(
 void MixedContentChecker::HandleCertificateError(
     LocalFrame* frame,
     const ResourceResponse& response,
-    WebURLRequest::FrameType frame_type,
+    network::mojom::RequestContextFrameType frame_type,
     WebURLRequest::RequestContext request_context) {
   Frame* effective_frame = EffectiveFrameForFrameType(frame, frame_type);
-  if (frame_type == WebURLRequest::kFrameTypeTopLevel || !effective_frame)
+  if (frame_type == network::mojom::RequestContextFrameType::kTopLevel ||
+      !effective_frame)
     return;
 
   // Use the current local frame's client; the embedder doesn't distinguish
@@ -580,12 +648,12 @@ void MixedContentChecker::HandleCertificateError(
       WebMixedContent::ContextTypeFromRequestContext(
           request_context, strict_mixed_content_checking_for_plugin);
   if (context_type == WebMixedContentContextType::kBlockable) {
-    client->DidRunContentWithCertificateErrors(response.Url());
+    client->DidRunContentWithCertificateErrors();
   } else {
     // contextTypeFromRequestContext() never returns NotMixedContent (it
     // computes the type of mixed content, given that the content is mixed).
     DCHECK_NE(context_type, WebMixedContentContextType::kNotMixedContent);
-    client->DidDisplayContentWithCertificateErrors(response.Url());
+    client->DidDisplayContentWithCertificateErrors();
   }
 }
 
@@ -599,8 +667,8 @@ void MixedContentChecker::MixedContentFound(
     bool had_redirect,
     std::unique_ptr<SourceLocation> source_location) {
   // Logs to the frame console.
-  LogToConsoleAboutFetch(frame, main_resource_url, mixed_content_url,
-                         request_context, was_allowed,
+  LogToConsoleAboutFetch(frame->GetDocument(), main_resource_url,
+                         mixed_content_url, request_context, was_allowed,
                          std::move(source_location));
   // Reports to the CSP policy.
   ContentSecurityPolicy* policy =
@@ -624,9 +692,10 @@ WebMixedContentContextType MixedContentChecker::ContextTypeForInspector(
   if (!mixed_frame)
     return WebMixedContentContextType::kNotMixedContent;
 
-  // See comment in shouldBlockFetch() about loading the main resource of a
+  // See comment in ShouldBlockFetch() about loading the main resource of a
   // subframe.
-  if (request.GetFrameType() == WebURLRequest::kFrameTypeNested &&
+  if (request.GetFrameType() ==
+          network::mojom::RequestContextFrameType::kNested &&
       !SchemeRegistry::ShouldTreatURLSchemeAsCORSEnabled(
           request.Url().Protocol())) {
     return WebMixedContentContextType::kOptionallyBlockable;

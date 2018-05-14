@@ -5,14 +5,14 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "chrome/browser/media/router/media_router_ui_service.h"
-#include "chrome/browser/media/router/test_helper.h"
+#include "chrome/browser/media/router/test/test_helper.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/mock_media_router_action_controller.h"
 #include "chrome/browser/ui/webui/media_router/media_router_dialog_controller_impl.h"
 #include "chrome/browser/ui/webui/media_router/media_router_ui.h"
+#include "chrome/browser/ui/webui/media_router/media_router_ui_service.h"
 #include "chrome/browser/ui/webui/media_router/media_router_web_ui_test.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -252,18 +252,16 @@ TEST_F(MediaRouterDialogControllerImplTest, NotifyActionController) {
   dialog_controller_->HideMediaRouterDialog();
 
   EXPECT_CALL(*action_controller, OnDialogShown());
-  dialog_controller_->ShowMediaRouterDialogForPresentation(
-      std::unique_ptr<CreatePresentationConnectionRequest>(
-          new CreatePresentationConnectionRequest(
-              RenderFrameHostId(1, 2),
-              {GURL("http://test.com"), GURL("http://test2.com")},
-              url::Origin(GURL("http://example.com")),
-              base::Bind(&MediaRouterDialogControllerImplTest::
-                             PresentationSuccessCallback,
-                         base::Unretained(this)),
-              base::Bind(&MediaRouterDialogControllerImplTest::
-                             PresentationErrorCallback,
-                         base::Unretained(this)))));
+  EXPECT_TRUE(dialog_controller_->ShowMediaRouterDialogForPresentation(
+      content::PresentationRequest(
+          {1, 2}, {GURL("http://test.com"), GURL("http://test2.com")},
+          url::Origin::Create(GURL("http://example.com"))),
+      base::Bind(
+          &MediaRouterDialogControllerImplTest::PresentationSuccessCallback,
+          base::Unretained(this)),
+      base::Bind(
+          &MediaRouterDialogControllerImplTest::PresentationErrorCallback,
+          base::Unretained(this))));
 
   // When |dialog_controller_| is destroyed with its dialog open,
   // |action_controller| should be notified.

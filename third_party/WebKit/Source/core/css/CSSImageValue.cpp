@@ -25,12 +25,11 @@
 #include "core/frame/LocalFrame.h"
 #include "core/loader/resource/ImageResourceContent.h"
 #include "core/style/StyleFetchedImage.h"
-#include "core/style/StyleInvalidImage.h"
 #include "platform/CrossOriginAttributeValue.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityPolicy.h"
 
@@ -51,7 +50,7 @@ CSSImageValue::CSSImageValue(const AtomicString& absolute_url)
       relative_url_(absolute_url),
       absolute_url_(absolute_url) {}
 
-CSSImageValue::~CSSImageValue() {}
+CSSImageValue::~CSSImageValue() = default;
 
 StyleImage* CSSImageValue::CacheImage(
     const Document& document,
@@ -78,13 +77,7 @@ StyleImage* CSSImageValue::CacheImage(
         placeholder_image_request_type == FetchParameters::kAllowPlaceholder)
       document.GetFrame()->MaybeAllowImagePlaceholder(params);
 
-    if (ImageResourceContent* cached_image =
-            ImageResourceContent::Fetch(params, document.Fetcher())) {
-      cached_image_ =
-          StyleFetchedImage::Create(cached_image, document, params.Url());
-    } else {
-      cached_image_ = StyleInvalidImage::Create(Url());
-    }
+    cached_image_ = StyleFetchedImage::Create(document, params);
   }
 
   return cached_image_.Get();
@@ -100,7 +93,7 @@ void CSSImageValue::RestoreCachedResourceIfNeeded(
     return;
 
   resource->EmulateLoadStartedForInspector(
-      document.Fetcher(), KURL(kParsedURLString, absolute_url_),
+      document.Fetcher(), KURL(absolute_url_),
       initiator_name_.IsEmpty() ? FetchInitiatorTypeNames::css
                                 : initiator_name_);
 }
@@ -129,7 +122,7 @@ bool CSSImageValue::KnownToBeOpaque(const Document& document,
                        : false;
 }
 
-DEFINE_TRACE_AFTER_DISPATCH(CSSImageValue) {
+void CSSImageValue::TraceAfterDispatch(blink::Visitor* visitor) {
   visitor->Trace(cached_image_);
   CSSValue::TraceAfterDispatch(visitor);
 }

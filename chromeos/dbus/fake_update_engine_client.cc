@@ -17,8 +17,7 @@ FakeUpdateEngineClient::FakeUpdateEngineClient()
       rollback_call_count_(0),
       can_rollback_call_count_(0) {}
 
-FakeUpdateEngineClient::~FakeUpdateEngineClient() {
-}
+FakeUpdateEngineClient::~FakeUpdateEngineClient() = default;
 
 void FakeUpdateEngineClient::Init(dbus::Bus* bus) {
 }
@@ -70,6 +69,12 @@ void FakeUpdateEngineClient::NotifyObserversThatStatusChanged(
     observer.UpdateStatusChanged(status);
 }
 
+void FakeUpdateEngineClient::
+    NotifyUpdateOverCellularOneTimePermissionGranted() {
+  for (auto& observer : observers_)
+    observer.OnUpdateOverCellularOneTimePermissionGranted();
+}
+
 void FakeUpdateEngineClient::SetChannel(const std::string& target_channel,
                                         bool is_powerwash_allowed) {
 }
@@ -80,11 +85,10 @@ void FakeUpdateEngineClient::GetChannel(bool get_current_channel,
       FROM_HERE, base::Bind(callback, std::string()));
 }
 
-void FakeUpdateEngineClient::GetEolStatus(
-    const GetEolStatusCallback& callback) {
+void FakeUpdateEngineClient::GetEolStatus(GetEolStatusCallback callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(callback, update_engine::EndOfLifeStatus::kSupported));
+      FROM_HERE, base::BindOnce(std::move(callback),
+                                update_engine::EndOfLifeStatus::kSupported));
 }
 
 void FakeUpdateEngineClient::SetUpdateOverCellularPermission(
@@ -93,10 +97,12 @@ void FakeUpdateEngineClient::SetUpdateOverCellularPermission(
   base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
-void FakeUpdateEngineClient::SetUpdateOverCellularTarget(
+void FakeUpdateEngineClient::SetUpdateOverCellularOneTimePermission(
     const std::string& target_version,
     int64_t target_size,
-    const SetUpdateOverCellularTargetCallback& callback) {}
+    const UpdateOverCellularOneTimePermissionCallback& callback) {
+  callback.Run(true);
+}
 
 void FakeUpdateEngineClient::set_default_status(
     const UpdateEngineClient::Status& status) {

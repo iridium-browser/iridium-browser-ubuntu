@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/run_loop.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
 #include "chrome/browser/browser_process.h"
@@ -76,15 +75,7 @@ void SetCompletedState(DWORD value) {
   ASSERT_EQ(ERROR_SUCCESS, result);
 }
 
-class ChromeCleanerTagForResettingTest : public InProcessBrowserTest {
- public:
-  void SetUpInProcessBrowserTestFixture() override {
-    scoped_feature_list_.InitAndEnableFeature(kInBrowserCleanerUIFeature);
-  }
-
- protected:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
+using ChromeCleanerTagForResettingTest = InProcessBrowserTest;
 
 IN_PROC_BROWSER_TEST_F(ChromeCleanerTagForResettingTest, Run) {
   Browser* browser = chrome::FindLastActive();
@@ -106,7 +97,7 @@ class SettingsResetterTestDelegate
 
   void FetchDefaultSettings(
       DefaultSettingsFetcher::SettingsCallback callback) override {
-    callback.Run(base::MakeUnique<BrandcodedDefaultSettings>());
+    callback.Run(std::make_unique<BrandcodedDefaultSettings>());
   }
 
   // Returns a MockProfileResetter that requires Reset() be called.
@@ -114,7 +105,7 @@ class SettingsResetterTestDelegate
       Profile* profile) override {
     ++(*num_resets_);
     auto mock_profile_resetter =
-        base::MakeUnique<StrictMock<MockProfileResetter>>(profile);
+        std::make_unique<StrictMock<MockProfileResetter>>(profile);
     EXPECT_CALL(*mock_profile_resetter, MockReset(_, _, _));
     return std::move(mock_profile_resetter);
   }
@@ -153,13 +144,11 @@ class ChromeCleanerResetTaggedProfilesTest
     completion_state_ = GetParam();
     ASSERT_TRUE(completion_state_ >= CleanupCompletionState::kNotAvailable &&
                 completion_state_ <= CleanupCompletionState::kInvalidValue);
-    scoped_feature_list_.InitAndEnableFeature(kInBrowserCleanerUIFeature);
   }
 
  protected:
   CleanupCompletionState completion_state_;
 
-  base::test::ScopedFeatureList scoped_feature_list_;
   registry_util::RegistryOverrideManager registry_override_manager_;
 };
 
@@ -195,7 +184,7 @@ IN_PROC_BROWSER_TEST_P(ChromeCleanerResetTaggedProfilesTest, Run) {
   profile3->GetPrefs()->SetBoolean(prefs::kChromeCleanerResetPending, true);
 
   int num_resets = 0;
-  auto delegate = base::MakeUnique<SettingsResetterTestDelegate>(&num_resets);
+  auto delegate = std::make_unique<SettingsResetterTestDelegate>(&num_resets);
 
   PostCleanupSettingsResetter resetter;
   base::RunLoop run_loop_for_reset;

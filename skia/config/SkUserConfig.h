@@ -94,16 +94,6 @@
 #define SK_SUPPORT_UNITTEST
 #endif
 
-/* If cross process SkPictureImageFilters are not explicitly enabled then
-   they are always disabled.
- */
-#ifndef SK_ALLOW_CROSSPROCESS_PICTUREIMAGEFILTERS
-    #ifndef SK_DISALLOW_CROSSPROCESS_PICTUREIMAGEFILTERS
-        #define SK_DISALLOW_CROSSPROCESS_PICTUREIMAGEFILTERS
-    #endif
-#endif
-
-
 /* If your system embeds skia and has complex event logging, define this
    symbol to name a file that maps the following macros to your system's
    equivalents:
@@ -148,14 +138,7 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #define SK_B32_SHIFT    0
 #endif
 
-#if defined(SK_BUILD_FOR_WIN32)
-
-#define SK_BUILD_FOR_WIN
-
-// Skia uses this deprecated bzero function to fill zeros into a string.
-#define bzero(str, len) memset(str, 0, len)
-
-#elif defined(SK_BUILD_FOR_MAC)
+#if defined(SK_BUILD_FOR_MAC)
 
 #define SK_CPU_LENDIAN
 #undef  SK_CPU_BENDIAN
@@ -200,21 +183,38 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 
 // Remove this after we fixed all the issues related to the new SDF algorithm
 // (https://codereview.chromium.org/1643143002)
-#ifndef    SK_USE_LEGACY_DISTANCE_FIELDS
-#   define SK_USE_LEGACY_DISTANCE_FIELDS
+#ifndef SK_USE_LEGACY_DISTANCE_FIELDS
+#define SK_USE_LEGACY_DISTANCE_FIELDS
 #endif
 
-#ifndef SK_SUPPORT_LEGACY_RADIAL_GRADIENT
-#define SK_SUPPORT_LEGACY_RADIAL_GRADIENT
+// Skia is enabling this feature soon. Chrome probably does
+// not want it for M64
+#ifndef SK_DISABLE_EXPLICIT_GPU_RESOURCE_ALLOCATION
+#define SK_DISABLE_EXPLICIT_GPU_RESOURCE_ALLOCATION
 #endif
 
-#ifndef SK_DISABLE_DEFERRED_PROXIES
-#define SK_DISABLE_DEFERRED_PROXIES
+// Skia is enabling this feature soon. Chrome probably does
+// not want it for M64
+#ifndef SK_DISABLE_RENDER_TARGET_SORTING
+#define SK_DISABLE_RENDER_TARGET_SORTING
 #endif
 
 #ifndef SK_SUPPORT_LEGACY_TILED_BITMAPS
 #define SK_SUPPORT_LEGACY_TILED_BITMAPS
 #endif
+
+// remove after rebaselining svg layout tests
+#ifndef SK_SUPPORT_LEGACY_SVG_ARC_TO
+#define SK_SUPPORT_LEGACY_SVG_ARC_TO
+#endif
+
+// Remove after M66 branch to use new read/writePixels implementations
+#ifndef SK_LEGACY_GPU_PIXEL_OPS
+#define SK_LEGACY_GPU_PIXEL_OPS
+#endif
+
+// Max. verb count for paths rendered by the edge-AA tessellating path renderer.
+#define GR_AA_TESSELLATOR_MAX_VERB_COUNT 10
 
 ///////////////////////// Imported from BUILD.gn and skia_common.gypi
 
@@ -222,10 +222,6 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
  *  or fall back to lazy runtime initialization. Chrome always wants the latter.
  */
 #define SK_ALLOW_STATIC_GLOBAL_INITIALIZERS 0
-
-/* This flag forces Skia not to use typographic metrics with GDI.
- */
-#define SK_GDI_ALWAYS_USE_TEXTMETRICS_FOR_FONT_METRICS
 
 /* Restrict formats for Skia font matching to SFNT type fonts. */
 #define SK_FONT_CONFIG_INTERFACE_ONLY_ALLOW_SFNT_FONTS

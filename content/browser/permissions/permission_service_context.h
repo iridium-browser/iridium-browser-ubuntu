@@ -33,6 +33,8 @@ class CONTENT_EXPORT PermissionServiceContext : public WebContentsObserver {
   ~PermissionServiceContext() override;
 
   void CreateService(blink::mojom::PermissionServiceRequest request);
+  void CreateServiceForWorker(blink::mojom::PermissionServiceRequest request,
+                              const url::Origin& origin);
 
   void CreateSubscription(PermissionType permission_type,
                           const url::Origin& origin,
@@ -41,13 +43,19 @@ class CONTENT_EXPORT PermissionServiceContext : public WebContentsObserver {
   // Called when the connection to a PermissionObserver has an error.
   void ObserverHadConnectionError(int subscription_id);
 
+  // May return nullptr during teardown, or when showing an interstitial.
   BrowserContext* GetBrowserContext() const;
+
   GURL GetEmbeddingOrigin() const;
 
   RenderFrameHost* render_frame_host() const;
 
  private:
   class PermissionSubscription;
+
+  void CreateServiceForWorkerImpl(
+      blink::mojom::PermissionServiceRequest request,
+      const url::Origin& origin);
 
   // WebContentsObserver
   void RenderFrameHostChanged(RenderFrameHost* old_host,

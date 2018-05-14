@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -144,12 +143,10 @@ class AutoEnrollmentClientTest : public testing::Test {
   void VerifyCachedResult(bool should_enroll, int power_limit) {
     base::Value value_should_enroll(should_enroll);
     base::Value value_power_limit(power_limit);
-    EXPECT_TRUE(base::Value::Equals(
-        &value_should_enroll,
-        local_state_->GetUserPref(prefs::kShouldAutoEnroll)));
-    EXPECT_TRUE(base::Value::Equals(
-        &value_power_limit,
-        local_state_->GetUserPref(prefs::kAutoEnrollmentPowerLimit)));
+    EXPECT_EQ(value_should_enroll,
+              *local_state_->GetUserPref(prefs::kShouldAutoEnroll));
+    EXPECT_EQ(value_power_limit,
+              *local_state_->GetUserPref(prefs::kAutoEnrollmentPowerLimit));
   }
 
   bool HasServerBackedState() {
@@ -347,6 +344,25 @@ TEST_F(AutoEnrollmentClientTest, ForcedReEnrollment) {
   EXPECT_EQ(AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT, state_);
 }
 
+TEST_F(AutoEnrollmentClientTest, ForcedReEnrollmentZeroTouch) {
+  ServerWillReply(-1, true, true);
+  ServerWillSendState(
+      "example.com",
+      em::DeviceStateRetrievalResponse::RESTORE_MODE_REENROLLMENT_ZERO_TOUCH,
+      kDisabledMessage);
+  client_->Start();
+  EXPECT_EQ(AUTO_ENROLLMENT_STATE_TRIGGER_ZERO_TOUCH, state_);
+  VerifyCachedResult(true, 8);
+  VerifyServerBackedState("example.com",
+                          kDeviceStateRestoreModeReEnrollmentZeroTouch,
+                          kDisabledMessage);
+
+  // Network changes don't trigger retries after obtaining a response from
+  // the server.
+  client_->OnNetworkChanged(net::NetworkChangeNotifier::CONNECTION_ETHERNET);
+  EXPECT_EQ(AUTO_ENROLLMENT_STATE_TRIGGER_ZERO_TOUCH, state_);
+}
+
 TEST_F(AutoEnrollmentClientTest, RequestedReEnrollment) {
   ServerWillReply(-1, true, true);
   ServerWillSendState(
@@ -428,9 +444,9 @@ TEST_F(AutoEnrollmentClientTest, ReuseCachedDecision) {
               CreateJob(DeviceManagementRequestJob::TYPE_AUTO_ENROLLMENT, _))
       .Times(0);
   local_state_->SetUserPref(prefs::kShouldAutoEnroll,
-                            base::MakeUnique<base::Value>(true));
+                            std::make_unique<base::Value>(true));
   local_state_->SetUserPref(prefs::kAutoEnrollmentPowerLimit,
-                            base::MakeUnique<base::Value>(8));
+                            std::make_unique<base::Value>(8));
 
   // Note that device state will be retrieved every time, regardless of any
   // cached information. This is intentional, the idea is that device state on
@@ -449,9 +465,9 @@ TEST_F(AutoEnrollmentClientTest, ReuseCachedDecision) {
 
 TEST_F(AutoEnrollmentClientTest, RetryIfPowerLargerThanCached) {
   local_state_->SetUserPref(prefs::kShouldAutoEnroll,
-                            base::MakeUnique<base::Value>(false));
+                            std::make_unique<base::Value>(false));
   local_state_->SetUserPref(prefs::kAutoEnrollmentPowerLimit,
-                            base::MakeUnique<base::Value>(8));
+                            std::make_unique<base::Value>(8));
   CreateClient(kStateKey, 5, 10);
   ServerWillReply(-1, true, true);
   ServerWillSendState(

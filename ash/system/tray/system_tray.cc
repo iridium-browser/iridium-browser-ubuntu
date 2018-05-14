@@ -6,10 +6,14 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <vector>
 
+#include "ash/accessibility/accessibility_controller.h"
 #include "ash/login_status.h"
 #include "ash/metrics/user_metrics_recorder.h"
+#include "ash/public/cpp/ash_features.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
@@ -36,7 +40,9 @@
 #include "ash/system/rotation/tray_rotation_lock.h"
 #include "ash/system/screen_security/screen_capture_tray_item.h"
 #include "ash/system/screen_security/screen_share_tray_item.h"
+#include "ash/system/screen_security/screen_tray_item.h"
 #include "ash/system/session/tray_session_length_limit.h"
+#include "ash/system/status_area_widget.h"
 #include "ash/system/supervised/tray_supervised_user.h"
 #include "ash/system/tiles/tray_tiles.h"
 #include "ash/system/tray/system_tray_controller.h"
@@ -47,6 +53,7 @@
 #include "ash/system/tray_accessibility.h"
 #include "ash/system/tray_caps_lock.h"
 #include "ash/system/tray_tracing.h"
+#include "ash/system/unified/unified_system_tray.h"
 #include "ash/system/update/tray_update.h"
 #include "ash/system/user/tray_user.h"
 #include "ash/system/web_notification/web_notification_tray.h"
@@ -66,12 +73,15 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/message_center_style.h"
+#include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/message_box_view.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_delegate.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_change_observer.h"
 #include "ui/wm/public/activation_client.h"
@@ -82,11 +92,54 @@ namespace ash {
 
 namespace {
 
+// Dialog that confirms the user wants to stop screen share/cast. Calls a
+// callback with the result.
+class CancelCastingDialog : public views::DialogDelegateView {
+ public:
+  explicit CancelCastingDialog(base::OnceCallback<void(bool)> callback)
+      : callback_(std::move(callback)) {
+    AddChildView(new views::MessageBoxView(views::MessageBoxView::InitParams(
+        l10n_util::GetStringUTF16(IDS_DESKTOP_CASTING_ACTIVE_MESSAGE))));
+    SetLayoutManager(std::make_unique<views::FillLayout>());
+  }
+  ~CancelCastingDialog() override = default;
+
+  base::string16 GetWindowTitle() const override {
+    return l10n_util::GetStringUTF16(IDS_DESKTOP_CASTING_ACTIVE_TITLE);
+  }
+
+  int GetDialogButtons() const override {
+    return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
+  }
+
+  bool Cancel() override {
+    std::move(callback_).Run(false);
+    return true;
+  }
+
+  bool Accept() override {
+    // Stop screen sharing and capturing.
+    SystemTray* system_tray = Shell::Get()->GetPrimarySystemTray();
+    if (system_tray->GetScreenShareItem()->is_started())
+      system_tray->GetScreenShareItem()->Stop();
+    if (system_tray->GetScreenCaptureItem()->is_started())
+      system_tray->GetScreenCaptureItem()->Stop();
+
+    std::move(callback_).Run(true);
+    return true;
+  }
+
+ private:
+  base::OnceCallback<void(bool)> callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(CancelCastingDialog);
+};
+
 // A tray item that just reserves space in the tray.
 class PaddingTrayItem : public SystemTrayItem {
  public:
   PaddingTrayItem() : SystemTrayItem(nullptr, UMA_NOT_RECORDED) {}
-  ~PaddingTrayItem() override {}
+  ~PaddingTrayItem() override = default;
 
   // SystemTrayItem:
   views::View* CreateTrayView(LoginStatus status) override {
@@ -110,89 +163,50 @@ class PaddingTrayItem : public SystemTrayItem {
 class SystemBubbleWrapper {
  public:
   // Takes ownership of |bubble|.
-  explicit SystemBubbleWrapper(SystemTrayBubble* bubble)
-      : bubble_(bubble), is_persistent_(false) {}
+  SystemBubbleWrapper() = default;
+
+  ~SystemBubbleWrapper() {
+    if (system_tray_view())
+      system_tray_view()->DestroyItemViews();
+  }
 
   // Initializes the bubble view and creates |bubble_wrapper_|.
-  void InitView(TrayBackgroundView* tray,
+  void InitView(SystemTray* tray,
                 views::View* anchor,
                 const gfx::Insets& anchor_insets,
+                const std::vector<ash::SystemTrayItem*>& items,
+                SystemTrayView::SystemTrayType system_tray_type,
                 TrayBubbleView::InitParams* init_params,
                 bool is_persistent) {
     DCHECK(anchor);
 
+    bubble_ = std::make_unique<SystemTrayBubble>(tray);
     is_persistent_ = is_persistent;
 
     const LoginStatus login_status =
         Shell::Get()->session_controller()->login_status();
-    bubble_->InitView(anchor, login_status, init_params);
+    bubble_->InitView(anchor, items, system_tray_type, login_status,
+                      init_params);
     bubble_->bubble_view()->set_anchor_view_insets(anchor_insets);
-    bubble_wrapper_.reset(new TrayBubbleWrapper(tray, bubble_->bubble_view()));
+    bubble_wrapper_ = std::make_unique<TrayBubbleWrapper>(
+        tray, bubble_->bubble_view(), is_persistent);
   }
 
   // Convenience accessors:
-  SystemTrayBubble* bubble() const { return bubble_.get(); }
-  SystemTrayBubble::BubbleType bubble_type() const {
-    return bubble_->bubble_type();
+  SystemTrayBubble* bubble() { return bubble_.get(); }
+  SystemTrayView* system_tray_view() { return bubble_->system_tray_view(); }
+  SystemTrayView::SystemTrayType system_tray_type() const {
+    return bubble_->system_tray_view()->system_tray_type();
   }
-  TrayBubbleView* bubble_view() const { return bubble_->bubble_view(); }
+  TrayBubbleView* bubble_view() { return bubble_->bubble_view(); }
   bool is_persistent() const { return is_persistent_; }
 
  private:
   std::unique_ptr<SystemTrayBubble> bubble_;
   std::unique_ptr<TrayBubbleWrapper> bubble_wrapper_;
-  bool is_persistent_;
+  bool is_persistent_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(SystemBubbleWrapper);
-};
-
-// An activation observer to close the bubble if the window other
-// than system bubble nor popup notification is activated.
-class SystemTray::ActivationObserver : public ::wm::ActivationChangeObserver {
- public:
-  explicit ActivationObserver(SystemTray* tray) : tray_(tray) {
-    DCHECK(tray_);
-    Shell::Get()->activation_client()->AddObserver(this);
-  }
-
-  ~ActivationObserver() override {
-    Shell::Get()->activation_client()->RemoveObserver(this);
-  }
-
-  // WmActivationObserver:
-  void OnWindowActivated(ActivationReason reason,
-                         aura::Window* gained_active,
-                         aura::Window* lost_active) override {
-    if (!tray_->HasSystemBubble() || !gained_active)
-      return;
-
-    int container_id = wm::GetContainerForWindow(gained_active)->id();
-
-    // Don't close the bubble if a popup notification is activated.
-    if (container_id == kShellWindowId_StatusContainer ||
-        container_id == kShellWindowId_SettingBubbleContainer) {
-      return;
-    }
-
-    views::Widget* bubble_widget =
-        tray_->GetSystemBubble()->bubble_view()->GetWidget();
-    // Don't close the bubble if a transient child is gaining or losing
-    // activation.
-    if (bubble_widget == GetInternalWidgetForWindow(gained_active) ||
-        ::wm::HasTransientAncestor(gained_active,
-                                   bubble_widget->GetNativeWindow()) ||
-        (lost_active && ::wm::HasTransientAncestor(
-                            lost_active, bubble_widget->GetNativeWindow()))) {
-      return;
-    }
-
-    tray_->CloseBubble();
-  }
-
- private:
-  SystemTray* tray_;
-
-  DISALLOW_COPY_AND_ASSIGN(ActivationObserver);
 };
 
 // SystemTray
@@ -204,26 +218,28 @@ SystemTray::SystemTray(Shelf* shelf) : TrayBackgroundView(shelf) {
   // horizontal shelf and that is sufficient to indicate separation, no
   // separator is required.
   set_separator_visibility(false);
-
-  if (!drag_controller())
-    set_drag_controller(base::MakeUnique<TrayDragController>(shelf));
 }
 
 SystemTray::~SystemTray() {
+  // On shutdown, views in the bubble might be destroyed after this. Clear the
+  // list of SystemTrayItems in the SystemTrayView, since they are owned by
+  // this class.
+  if (system_bubble_ && system_bubble_->system_tray_view())
+    system_bubble_->system_tray_view()->set_items(
+        std::vector<SystemTrayItem*>());
+
   // Destroy any child views that might have back pointers before ~View().
-  activation_observer_.reset();
   system_bubble_.reset();
   for (const auto& item : items_)
     item->OnTrayViewDestroyed();
 }
 
 void SystemTray::InitializeTrayItems(
-    SystemTrayDelegate* delegate,
     WebNotificationTray* web_notification_tray) {
   DCHECK(web_notification_tray);
   web_notification_tray_ = web_notification_tray;
   TrayBackgroundView::Initialize();
-  CreateItems(delegate);
+  CreateItems();
 }
 
 void SystemTray::Shutdown() {
@@ -231,12 +247,12 @@ void SystemTray::Shutdown() {
   web_notification_tray_ = nullptr;
 }
 
-void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
-  AddTrayItem(base::MakeUnique<TrayUser>(this));
+void SystemTray::CreateItems() {
+  AddTrayItem(std::make_unique<TrayUser>(this));
 
   // Crucially, this trailing padding has to be inside the user item(s).
   // Otherwise it could be a main axis margin on the tray's box layout.
-  AddTrayItem(base::MakeUnique<PaddingTrayItem>());
+  AddTrayItem(std::make_unique<PaddingTrayItem>());
 
   tray_session_length_limit_ = new TraySessionLengthLimit(this);
   AddTrayItem(base::WrapUnique(tray_session_length_limit_));
@@ -244,39 +260,37 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
   AddTrayItem(base::WrapUnique(tray_enterprise_));
   tray_supervised_user_ = new TraySupervisedUser(this);
   AddTrayItem(base::WrapUnique(tray_supervised_user_));
-  AddTrayItem(base::MakeUnique<TrayIME>(this));
+  AddTrayItem(std::make_unique<TrayIME>(this));
   tray_accessibility_ = new TrayAccessibility(this);
   AddTrayItem(base::WrapUnique(tray_accessibility_));
   tray_tracing_ = new TrayTracing(this);
   AddTrayItem(base::WrapUnique(tray_tracing_));
   AddTrayItem(
-      base::MakeUnique<TrayPower>(this, message_center::MessageCenter::Get()));
+      std::make_unique<TrayPower>(this, message_center::MessageCenter::Get()));
   tray_network_ = new TrayNetwork(this);
   AddTrayItem(base::WrapUnique(tray_network_));
-  AddTrayItem(base::MakeUnique<TrayVPN>(this));
-  AddTrayItem(base::MakeUnique<TrayBluetooth>(this));
+  AddTrayItem(std::make_unique<TrayVPN>(this));
+  AddTrayItem(std::make_unique<TrayBluetooth>(this));
   tray_cast_ = new TrayCast(this);
   AddTrayItem(base::WrapUnique(tray_cast_));
   screen_capture_tray_item_ = new ScreenCaptureTrayItem(this);
   AddTrayItem(base::WrapUnique(screen_capture_tray_item_));
   screen_share_tray_item_ = new ScreenShareTrayItem(this);
   AddTrayItem(base::WrapUnique(screen_share_tray_item_));
-  AddTrayItem(base::MakeUnique<MultiProfileMediaTrayItem>(this));
+  AddTrayItem(std::make_unique<MultiProfileMediaTrayItem>(this));
   tray_audio_ = new TrayAudio(this);
   AddTrayItem(base::WrapUnique(tray_audio_));
   tray_scale_ = new TrayScale(this);
   AddTrayItem(base::WrapUnique(tray_scale_));
-  AddTrayItem(base::MakeUnique<TrayBrightness>(this));
-  AddTrayItem(base::MakeUnique<TrayKeyboardBrightness>(this));
-  AddTrayItem(base::MakeUnique<TrayCapsLock>(this));
-  if (NightLightController::IsFeatureEnabled()) {
+  AddTrayItem(std::make_unique<TrayBrightness>(this));
+  AddTrayItem(std::make_unique<TrayKeyboardBrightness>(this));
+  tray_caps_lock_ = new TrayCapsLock(this);
+  AddTrayItem(base::WrapUnique(tray_caps_lock_));
+  if (switches::IsNightLightEnabled()) {
     tray_night_light_ = new TrayNightLight(this);
     AddTrayItem(base::WrapUnique(tray_night_light_));
   }
-  // TODO(jamescook): Remove this when mash has support for display management
-  // and we have a DisplayManager equivalent. See http://crbug.com/548429
-  if (Shell::GetAshConfig() != Config::MASH)
-    AddTrayItem(base::MakeUnique<TrayRotationLock>(this));
+  AddTrayItem(std::make_unique<TrayRotationLock>(this));
   tray_update_ = new TrayUpdate(this);
   AddTrayItem(base::WrapUnique(tray_update_));
   tray_tiles_ = new TrayTiles(this);
@@ -284,7 +298,7 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
   tray_system_info_ = new TraySystemInfo(this);
   AddTrayItem(base::WrapUnique(tray_system_info_));
   // Leading padding.
-  AddTrayItem(base::MakeUnique<PaddingTrayItem>());
+  AddTrayItem(std::make_unique<PaddingTrayItem>());
 }
 
 void SystemTray::AddTrayItem(std::unique_ptr<SystemTrayItem> item) {
@@ -308,52 +322,40 @@ std::vector<SystemTrayItem*> SystemTray::GetTrayItems() const {
   return result;
 }
 
-void SystemTray::ShowDefaultView(BubbleCreationType creation_type) {
+void SystemTray::ShowDefaultView(BubbleCreationType creation_type,
+                                 bool show_by_click) {
   if (creation_type != BUBBLE_USE_EXISTING)
     Shell::Get()->metrics()->RecordUserMetricsAction(
         UMA_STATUS_AREA_MENU_OPENED);
-  ShowItems(GetTrayItems(), false, true, creation_type, false);
+  ShowItems(GetTrayItems(), false, creation_type, false, show_by_click);
 }
 
 void SystemTray::ShowPersistentDefaultView() {
-  ShowItems(GetTrayItems(), false, false, BUBBLE_CREATE_NEW, true);
+  ShowItems(GetTrayItems(), false, BUBBLE_CREATE_NEW, true, false);
 }
 
 void SystemTray::ShowDetailedView(SystemTrayItem* item,
                                   int close_delay,
-                                  bool activate,
                                   BubbleCreationType creation_type) {
   std::vector<SystemTrayItem*> items;
   // The detailed view with timeout means a UI to show the current system state,
   // like the audio level or brightness. Such UI should behave as persistent and
   // keep its own logic for the appearance.
-  bool persistent =
-      (!activate && close_delay > 0 && creation_type == BUBBLE_CREATE_NEW);
+  bool persistent = (close_delay > 0 && creation_type == BUBBLE_CREATE_NEW);
   items.push_back(item);
-  ShowItems(items, true, activate, creation_type, persistent);
+  ShowItems(items, true, creation_type, persistent, false);
   if (system_bubble_)
     system_bubble_->bubble()->StartAutoCloseTimer(close_delay);
 }
 
 void SystemTray::SetDetailedViewCloseDelay(int close_delay) {
-  if (HasSystemBubbleType(SystemTrayBubble::BUBBLE_TYPE_DETAILED))
+  if (HasSystemTrayType(SystemTrayView::SYSTEM_TRAY_TYPE_DETAILED))
     system_bubble_->bubble()->StartAutoCloseTimer(close_delay);
 }
 
-void SystemTray::HideDetailedView(SystemTrayItem* item, bool animate) {
+void SystemTray::HideDetailedView(SystemTrayItem* item) {
   if (item != detailed_item_)
     return;
-
-  if (!animate) {
-    // In unittest, GetSystemBubble might return nullptr.
-    if (GetSystemBubble()) {
-      GetSystemBubble()
-          ->bubble_view()
-          ->GetWidget()
-          ->SetVisibilityAnimationTransition(
-              views::Widget::VisibilityTransition::ANIMATE_NONE);
-    }
-  }
 
   DestroySystemBubble();
 }
@@ -399,10 +401,26 @@ TrayAudio* SystemTray::GetTrayAudio() const {
   return tray_audio_;
 }
 
+void SystemTray::CanSwitchAwayFromActiveUser(
+    base::OnceCallback<void(bool)> callback) {
+  // If neither screen sharing nor capturing is going on we can immediately
+  // switch users.
+  if (!GetScreenShareItem()->is_started() &&
+      !GetScreenCaptureItem()->is_started()) {
+    std::move(callback).Run(true);
+    return;
+  }
+
+  views::DialogDelegate::CreateDialogWidget(
+      new CancelCastingDialog(std::move(callback)),
+      Shell::GetPrimaryRootWindow(), nullptr)
+      ->Show();
+}
+
 // Private methods.
 
-bool SystemTray::HasSystemBubbleType(SystemTrayBubble::BubbleType type) {
-  return system_bubble_.get() && system_bubble_->bubble_type() == type;
+bool SystemTray::HasSystemTrayType(SystemTrayView::SystemTrayType type) {
+  return system_bubble_.get() && system_bubble_->system_tray_type() == type;
 }
 
 void SystemTray::DestroySystemBubble() {
@@ -420,20 +438,20 @@ base::string16 SystemTray::GetAccessibleNameForTray() {
 
 void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
                            bool detailed,
-                           bool can_activate,
                            BubbleCreationType creation_type,
-                           bool persistent) {
-  // No system tray bubbles in kiosk mode.
-  if (Shell::Get()->session_controller()->IsKioskSession())
+                           bool persistent,
+                           bool show_by_click) {
+  // No system tray bubbles in kiosk app mode.
+  if (Shell::Get()->session_controller()->IsRunningInAppMode())
     return;
 
   // Destroy any existing bubble and create a new one.
-  SystemTrayBubble::BubbleType bubble_type =
-      detailed ? SystemTrayBubble::BUBBLE_TYPE_DETAILED
-               : SystemTrayBubble::BUBBLE_TYPE_DEFAULT;
+  SystemTrayView::SystemTrayType system_tray_type =
+      detailed ? SystemTrayView::SYSTEM_TRAY_TYPE_DETAILED
+               : SystemTrayView::SYSTEM_TRAY_TYPE_DEFAULT;
 
   if (system_bubble_.get() && creation_type == BUBBLE_USE_EXISTING) {
-    system_bubble_->bubble()->UpdateView(items, bubble_type);
+    system_bubble_->bubble()->UpdateView(items, system_tray_type);
   } else {
     // Cleanup the existing bubble before showing a new one. Otherwise, it's
     // possible to confuse the new system bubble with the old one during
@@ -449,12 +467,13 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
 
     TrayBubbleView::InitParams init_params;
     init_params.anchor_alignment = GetAnchorAlignment();
-    init_params.min_width = kTrayMenuMinimumWidth;
-    init_params.max_width = kTrayPopupMaxWidth;
+    init_params.min_width = kTrayMenuWidth;
+    init_params.max_width = kTrayMenuWidth;
     // The bubble is not initially activatable, but will become activatable if
     // the user presses Tab. For behavioral consistency with the non-activatable
     // scenario, don't close on deactivation after Tab either.
     init_params.close_on_deactivate = false;
+    init_params.show_by_click = show_by_click;
     if (detailed) {
       // This is the case where a volume control or brightness control bubble
       // is created.
@@ -462,14 +481,12 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
     } else {
       init_params.bg_color = kHeaderBackgroundColor;
     }
-    SystemTrayBubble* bubble = new SystemTrayBubble(this, items, bubble_type);
 
-    system_bubble_.reset(new SystemBubbleWrapper(bubble));
-    system_bubble_->InitView(this, GetBubbleAnchor(), GetBubbleAnchorInsets(),
-                             &init_params, persistent);
-
-    activation_observer_.reset(persistent ? nullptr
-                                          : new ActivationObserver(this));
+    system_bubble_ = std::make_unique<SystemBubbleWrapper>();
+    system_bubble_->InitView(
+        this, shelf()->GetSystemTrayAnchor()->GetBubbleAnchor(),
+        shelf()->GetSystemTrayAnchor()->GetBubbleAnchorInsets(), items,
+        system_tray_type, &init_params, persistent);
 
     // Record metrics for the system menu when the default view is invoked.
     if (!detailed)
@@ -530,6 +547,7 @@ void SystemTray::UpdateAfterShelfAlignmentChange() {
 
 void SystemTray::AnchorUpdated() {
   if (system_bubble_) {
+    UpdateClippingWindowBounds();
     system_bubble_->bubble_view()->UpdateBubble();
     // Should check |system_bubble_| again here. Since UpdateBubble above
     // set the bounds of the bubble which will stop the current animation.
@@ -559,13 +577,21 @@ void SystemTray::ClickedOutsideBubble() {
 }
 
 bool SystemTray::PerformAction(const ui::Event& event) {
+  UserMetricsRecorder::RecordUserClickOnTray(
+      LoginMetricsRecorder::TrayClickTarget::kSystemTray);
+
+  if (features::IsSystemTrayUnifiedEnabled()) {
+    return shelf()->GetStatusAreaWidget()->system_tray_unified()->PerformAction(
+        event);
+  }
+
   // If we're already showing a full system tray menu, either default or
   // detailed menu, hide it; otherwise, show it (and hide any popup that's
   // currently shown).
   if (HasSystemBubble() && full_system_tray_menu_) {
     system_bubble_->bubble()->Close();
   } else {
-    ShowDefaultView(BUBBLE_CREATE_NEW);
+    ShowBubble(event.IsMouseEvent() || event.IsGestureEvent());
     if (event.IsKeyEvent() || (event.flags() & ui::EF_TOUCH_ACCESSIBILITY))
       ActivateBubble();
   }
@@ -578,8 +604,8 @@ void SystemTray::CloseBubble() {
   system_bubble_->bubble()->Close();
 }
 
-void SystemTray::ShowBubble() {
-  ShowDefaultView(BUBBLE_CREATE_NEW);
+void SystemTray::ShowBubble(bool show_by_click) {
+  ShowDefaultView(BUBBLE_CREATE_NEW, show_by_click);
 }
 
 views::TrayBubbleView* SystemTray::GetBubbleView() {
@@ -592,7 +618,6 @@ views::TrayBubbleView* SystemTray::GetBubbleView() {
 
 void SystemTray::BubbleViewDestroyed() {
   if (system_bubble_) {
-    system_bubble_->bubble()->DestroyItemViews();
     system_bubble_->bubble()->BubbleViewDestroyed();
   }
 }
@@ -616,7 +641,7 @@ bool SystemTray::ShouldEnableExtraKeyboardAccessibility() {
   // e.g. volume slider. Persistent system bubble is a bubble which is not
   // closed even if user clicks outside of the bubble.
   return system_bubble_ && !system_bubble_->is_persistent() &&
-         Shell::Get()->accessibility_delegate()->IsSpokenFeedbackEnabled();
+         Shell::Get()->accessibility_controller()->IsSpokenFeedbackEnabled();
 }
 
 void SystemTray::HideBubble(const TrayBubbleView* bubble_view) {
@@ -643,7 +668,6 @@ void SystemTray::ActivateBubble() {
 }
 
 void SystemTray::CloseSystemBubbleAndDeactivateSystemTray() {
-  activation_observer_.reset();
   system_bubble_.reset();
   // When closing a system bubble with the alternate shelf layout, we need to
   // turn off the active tinting of the shelf.
@@ -656,7 +680,8 @@ void SystemTray::CloseSystemBubbleAndDeactivateSystemTray() {
 void SystemTray::RecordSystemMenuMetrics() {
   DCHECK(system_bubble_);
 
-  system_bubble_->bubble()->RecordVisibleRowMetrics();
+  if (system_bubble_->system_tray_view())
+    system_bubble_->system_tray_view()->RecordVisibleRowMetrics();
 
   TrayBubbleView* bubble_view = system_bubble_->bubble_view();
   int num_rows = 0;

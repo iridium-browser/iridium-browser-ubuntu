@@ -14,6 +14,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/win/object_watcher.h"
 #include "base/win/scoped_handle.h"
@@ -27,15 +28,16 @@
 #include "net/log/net_log_with_source.h"
 #include "net/socket/datagram_socket.h"
 #include "net/socket/diff_serv_code_point.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
 
 class IPAddress;
 class NetLog;
 struct NetLogSource;
+class SocketTag;
 
-class NET_EXPORT UDPSocketWin
-    : NON_EXPORTED_BASE(public base::win::ObjectWatcher::Delegate) {
+class NET_EXPORT UDPSocketWin : public base::win::ObjectWatcher::Delegate {
  public:
   UDPSocketWin(DatagramSocket::BindType bind_type,
                const RandIntCallback& rand_int_cb,
@@ -87,7 +89,10 @@ class NET_EXPORT UDPSocketWin
   // Writes to the socket.
   // Only usable from the client-side of a UDP socket, after the socket
   // has been connected.
-  int Write(IOBuffer* buf, int buf_len, const CompletionCallback& callback);
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback,
+            const NetworkTrafficAnnotationTag& traffic_annotation);
 
   // Reads from a socket and receive sender address information.
   // |buf| is the buffer to read data into.
@@ -199,6 +204,9 @@ class NET_EXPORT UDPSocketWin
   // This class by default uses overlapped IO. Call this method before Open()
   // to switch to non-blocking IO.
   void UseNonBlockingIO();
+
+  // Apply |tag| to this socket.
+  void ApplySocketTag(const SocketTag& tag);
 
  private:
   enum SocketOptions {
@@ -326,6 +334,10 @@ class NET_EXPORT UDPSocketWin
 
   THREAD_CHECKER(thread_checker_);
 
+  // Used to prevent null dereferences in OnObjectSignaled, when passing an
+  // error to both read and write callbacks. Cleared in Close()
+  base::WeakPtrFactory<UDPSocketWin> event_pending_;
+
   DISALLOW_COPY_AND_ASSIGN(UDPSocketWin);
 };
 
@@ -374,6 +386,8 @@ class NET_EXPORT QwaveAPI {
                LPOVERLAPPED overlapped);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(UDPSocketTest, SetDSCPFake);
+
   bool qwave_supported_;
   CreateHandleFn create_handle_func_;
   CloseHandleFn close_handle_func_;
@@ -381,7 +395,6 @@ class NET_EXPORT QwaveAPI {
   RemoveSocketFromFlowFn remove_socket_from_flow_func_;
   SetFlowFn set_flow_func_;
 
-  FRIEND_TEST_ALL_PREFIXES(UDPSocketTest, SetDSCPFake);
   DISALLOW_COPY_AND_ASSIGN(QwaveAPI);
 };
 

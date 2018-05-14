@@ -75,7 +75,7 @@ VideoCaptureImpl::VideoCaptureImpl(media::VideoCaptureSessionId session_id)
   io_thread_checker_.DetachFromThread();
 
   if (ChildThread::Get()) {  // This will be null in unit tests.
-    mojom::VideoCaptureHostPtr temp_video_capture_host;
+    media::mojom::VideoCaptureHostPtr temp_video_capture_host;
     ChildThread::Get()->GetConnector()->BindInterface(
         mojom::kBrowserServiceName,
         mojo::MakeRequest(&temp_video_capture_host));
@@ -176,8 +176,8 @@ void VideoCaptureImpl::GetDeviceSupportedFormats(
   DCHECK(io_thread_checker_.CalledOnValidThread());
   GetVideoCaptureHost()->GetDeviceSupportedFormats(
       device_id_, session_id_,
-      base::Bind(&VideoCaptureImpl::OnDeviceSupportedFormats,
-                 weak_factory_.GetWeakPtr(), callback));
+      base::BindOnce(&VideoCaptureImpl::OnDeviceSupportedFormats,
+                     weak_factory_.GetWeakPtr(), callback));
 }
 
 void VideoCaptureImpl::GetDeviceFormatsInUse(
@@ -185,16 +185,16 @@ void VideoCaptureImpl::GetDeviceFormatsInUse(
   DCHECK(io_thread_checker_.CalledOnValidThread());
   GetVideoCaptureHost()->GetDeviceFormatsInUse(
       device_id_, session_id_,
-      base::Bind(&VideoCaptureImpl::OnDeviceFormatsInUse,
-                 weak_factory_.GetWeakPtr(), callback));
+      base::BindOnce(&VideoCaptureImpl::OnDeviceFormatsInUse,
+                     weak_factory_.GetWeakPtr(), callback));
 }
 
-void VideoCaptureImpl::OnStateChanged(mojom::VideoCaptureState state) {
+void VideoCaptureImpl::OnStateChanged(media::mojom::VideoCaptureState state) {
   DVLOG(1) << __func__ << " state: " << state;
   DCHECK(io_thread_checker_.CalledOnValidThread());
 
   switch (state) {
-    case mojom::VideoCaptureState::STARTED:
+    case media::mojom::VideoCaptureState::STARTED:
       state_ = VIDEO_CAPTURE_STATE_STARTED;
       for (const auto& client : clients_)
         client.second.state_update_cb.Run(VIDEO_CAPTURE_STATE_STARTED);
@@ -203,28 +203,28 @@ void VideoCaptureImpl::OnStateChanged(mojom::VideoCaptureState state) {
       // Capture device will make a decision if it should refresh a frame.
       RequestRefreshFrame();
       break;
-    case mojom::VideoCaptureState::STOPPED:
+    case media::mojom::VideoCaptureState::STOPPED:
       state_ = VIDEO_CAPTURE_STATE_STOPPED;
       client_buffers_.clear();
       weak_factory_.InvalidateWeakPtrs();
       if (!clients_.empty() || !clients_pending_on_restart_.empty())
         RestartCapture();
       break;
-    case mojom::VideoCaptureState::PAUSED:
+    case media::mojom::VideoCaptureState::PAUSED:
       for (const auto& client : clients_)
         client.second.state_update_cb.Run(VIDEO_CAPTURE_STATE_PAUSED);
       break;
-    case mojom::VideoCaptureState::RESUMED:
+    case media::mojom::VideoCaptureState::RESUMED:
       for (const auto& client : clients_)
         client.second.state_update_cb.Run(VIDEO_CAPTURE_STATE_RESUMED);
       break;
-    case mojom::VideoCaptureState::FAILED:
+    case media::mojom::VideoCaptureState::FAILED:
       for (const auto& client : clients_)
         client.second.state_update_cb.Run(VIDEO_CAPTURE_STATE_ERROR);
       clients_.clear();
       state_ = VIDEO_CAPTURE_STATE_ERROR;
       break;
-    case mojom::VideoCaptureState::ENDED:
+    case media::mojom::VideoCaptureState::ENDED:
       // We'll only notify the client that the stream has stopped.
       for (const auto& client : clients_)
         client.second.state_update_cb.Run(VIDEO_CAPTURE_STATE_STOPPED);
@@ -242,12 +242,16 @@ void VideoCaptureImpl::OnBufferCreated(int32_t buffer_id,
 
   base::SharedMemoryHandle memory_handle;
   size_t memory_size = 0;
-  bool read_only_flag = false;
+  mojo::UnwrappedSharedMemoryHandleProtection protection;
 
   const MojoResult result = mojo::UnwrapSharedMemoryHandle(
-      std::move(handle), &memory_handle, &memory_size, &read_only_flag);
+      std::move(handle), &memory_handle, &memory_size, &protection);
   DCHECK_EQ(MOJO_RESULT_OK, result);
   DCHECK_GT(memory_size, 0u);
+
+  // TODO(https://crbug.com/803136): We should also be able to assert that the
+  // unwrapped handle was shared for read-only mapping. That condition is not
+  // currently guaranteed to be met.
 
   std::unique_ptr<base::SharedMemory> shm(
       new base::SharedMemory(memory_handle, true /* read_only */));
@@ -271,11 +275,11 @@ void VideoCaptureImpl::OnBufferReady(int32_t buffer_id,
   bool consume_buffer = state_ == VIDEO_CAPTURE_STATE_STARTED;
   if ((info->pixel_format != media::PIXEL_FORMAT_I420 &&
        info->pixel_format != media::PIXEL_FORMAT_Y16) ||
-      info->storage_type != media::PIXEL_STORAGE_CPU) {
+      info->storage_type != media::VideoPixelStorage::CPU) {
     consume_buffer = false;
     LOG(DFATAL) << "Wrong pixel format or storage, got pixel format:"
                 << VideoPixelFormatToString(info->pixel_format)
-                << ", storage:" << info->storage_type;
+                << ", storage:" << static_cast<int>(info->storage_type);
   }
   if (!consume_buffer) {
     GetVideoCaptureHost()->ReleaseBuffer(device_id_, buffer_id, -1.0);
@@ -309,7 +313,7 @@ void VideoCaptureImpl::OnBufferReady(int32_t buffer_id,
 
   const auto& iter = client_buffers_.find(buffer_id);
   DCHECK(iter != client_buffers_.end());
-  const scoped_refptr<ClientBuffer> buffer = iter->second;
+  scoped_refptr<ClientBuffer> buffer = iter->second;
   scoped_refptr<media::VideoFrame> frame =
       media::VideoFrame::WrapExternalSharedMemory(
           static_cast<media::VideoPixelFormat>(info->pixel_format),
@@ -322,12 +326,11 @@ void VideoCaptureImpl::OnBufferReady(int32_t buffer_id,
     return;
   }
 
-  BufferFinishedCallback buffer_finished_callback = media::BindToCurrentLoop(
-      base::Bind(&VideoCaptureImpl::OnClientBufferFinished,
-                 weak_factory_.GetWeakPtr(), buffer_id, buffer));
-  frame->AddDestructionObserver(
-      base::Bind(&VideoCaptureImpl::DidFinishConsumingFrame, frame->metadata(),
-                 buffer_finished_callback));
+  frame->AddDestructionObserver(base::BindOnce(
+      &VideoCaptureImpl::DidFinishConsumingFrame, frame->metadata(),
+      media::BindToCurrentLoop(base::BindOnce(
+          &VideoCaptureImpl::OnClientBufferFinished, weak_factory_.GetWeakPtr(),
+          buffer_id, std::move(buffer)))));
 
   frame->metadata()->MergeInternalValuesFrom(*info->metadata);
 
@@ -350,9 +353,29 @@ void VideoCaptureImpl::OnBufferDestroyed(int32_t buffer_id) {
 
 void VideoCaptureImpl::OnClientBufferFinished(
     int buffer_id,
-    const scoped_refptr<ClientBuffer>& /* ignored_buffer */,
+    scoped_refptr<ClientBuffer> buffer,
     double consumer_resource_utilization) {
   DCHECK(io_thread_checker_.CalledOnValidThread());
+
+// Subtle race note: It's important that the |buffer| argument be
+// std::move()'ed to this method and never copied. This is so that the caller,
+// DidFinishConsumingFrame(), does not implicitly retain a reference while it
+// is running the trampoline callback on another thread. This is necessary to
+// ensure the reference count on the ClientBuffer will be correct at the time
+// OnBufferDestroyed() is called. http://crbug.com/797851
+#if DCHECK_IS_ON()
+  // The ClientBuffer should have exactly two references to it at this point,
+  // one is this method's second argument and the other is from
+  // |client_buffers_|.
+  DCHECK(!buffer->HasOneRef());
+  ClientBuffer* const buffer_raw_ptr = buffer.get();
+  buffer = nullptr;
+  // Now there should be only one reference, from |client_buffers_|.
+  DCHECK(buffer_raw_ptr->HasOneRef());
+#else
+  buffer = nullptr;
+#endif
+
   GetVideoCaptureHost()->ReleaseBuffer(
       device_id_, buffer_id, consumer_resource_utilization);
 }
@@ -391,7 +414,7 @@ void VideoCaptureImpl::StartCaptureInternal() {
   DCHECK(io_thread_checker_.CalledOnValidThread());
   state_ = VIDEO_CAPTURE_STATE_STARTING;
 
-  mojom::VideoCaptureObserverPtr observer;
+  media::mojom::VideoCaptureObserverPtr observer;
   observer_binding_.Bind(mojo::MakeRequest(&observer));
   GetVideoCaptureHost()->Start(device_id_, session_id_, params_,
                                std::move(observer));
@@ -423,7 +446,7 @@ bool VideoCaptureImpl::RemoveClient(int client_id, ClientInfoMap* clients) {
   return true;
 }
 
-mojom::VideoCaptureHost* VideoCaptureImpl::GetVideoCaptureHost() {
+media::mojom::VideoCaptureHost* VideoCaptureImpl::GetVideoCaptureHost() {
   DCHECK(io_thread_checker_.CalledOnValidThread());
   if (video_capture_host_for_testing_)
     return video_capture_host_for_testing_;
@@ -436,7 +459,7 @@ mojom::VideoCaptureHost* VideoCaptureImpl::GetVideoCaptureHost() {
 // static
 void VideoCaptureImpl::DidFinishConsumingFrame(
     const media::VideoFrameMetadata* metadata,
-    const BufferFinishedCallback& callback_to_io_thread) {
+    BufferFinishedCallback callback_to_io_thread) {
   // Note: This function may be called on any thread by the VideoFrame
   // destructor.  |metadata| is still valid for read-access at this point.
   double consumer_resource_utilization = -1.0;
@@ -444,7 +467,7 @@ void VideoCaptureImpl::DidFinishConsumingFrame(
                            &consumer_resource_utilization)) {
     consumer_resource_utilization = -1.0;
   }
-  callback_to_io_thread.Run(consumer_resource_utilization);
+  std::move(callback_to_io_thread).Run(consumer_resource_utilization);
 }
 
 }  // namespace content

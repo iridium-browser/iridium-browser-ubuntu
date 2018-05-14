@@ -44,32 +44,20 @@ UI.SearchableView = class extends UI.VBox {
 
     this._searchProvider = searchable;
     this._setting = settingName ? Common.settings.createSetting(settingName, {}) : null;
+    this._replaceable = false;
 
     this.contentElement.createChild('content');
     this._footerElementContainer = this.contentElement.createChild('div', 'search-bar hidden');
     this._footerElementContainer.style.order = 100;
-
-    var toolbar = new UI.Toolbar('', this._footerElementContainer);
-
-    if (this._searchProvider.supportsCaseSensitiveSearch()) {
-      this._caseSensitiveButton = new UI.ToolbarToggle(Common.UIString('Case sensitive'), '');
-      this._caseSensitiveButton.setText('Aa');
-      this._caseSensitiveButton.addEventListener(UI.ToolbarButton.Events.Click, this._toggleCaseSensitiveSearch, this);
-      toolbar.appendToolbarItem(this._caseSensitiveButton);
-    }
-
-    if (this._searchProvider.supportsRegexSearch()) {
-      this._regexButton = new UI.ToolbarToggle(Common.UIString('Regex'), '');
-      this._regexButton.setText('.*');
-      this._regexButton.addEventListener(UI.ToolbarButton.Events.Click, this._toggleRegexSearch, this);
-      toolbar.appendToolbarItem(this._regexButton);
-    }
-
     this._footerElement = this._footerElementContainer.createChild('div', 'toolbar-search');
 
-    // Build the text input elements.
-    var searchInputElements = this._footerElement.createChild('div', 'toolbar-search-inputs');
-    var searchControlElement = searchInputElements.createChild('div', 'toolbar-search-control');
+    const replaceToggleToolbar = new UI.Toolbar('replace-toggle-toolbar', this._footerElement);
+    this._replaceToggleButton = new UI.ToolbarToggle(Common.UIString('Replace'), 'mediumicon-replace');
+    this._replaceToggleButton.addEventListener(UI.ToolbarButton.Events.Click, this._toggleReplace, this);
+    replaceToggleToolbar.appendToolbarItem(this._replaceToggleButton);
+
+    const searchInputElements = this._footerElement.createChild('div', 'toolbar-search-inputs');
+    const searchControlElement = searchInputElements.createChild('div', 'toolbar-search-control');
 
     this._searchInputElement = UI.HistoryInput.create();
     this._searchInputElement.classList.add('search-replace');
@@ -80,7 +68,7 @@ UI.SearchableView = class extends UI.VBox {
     this._matchesElement = searchControlElement.createChild('label', 'search-results-matches');
     this._matchesElement.setAttribute('for', 'search-input-field');
 
-    var searchNavigationElement = searchControlElement.createChild('div', 'toolbar-search-navigation-controls');
+    const searchNavigationElement = searchControlElement.createChild('div', 'toolbar-search-navigation-controls');
 
     this._searchNavigationPrevElement =
         searchNavigationElement.createChild('div', 'toolbar-search-navigation toolbar-search-navigation-prev');
@@ -100,44 +88,42 @@ UI.SearchableView = class extends UI.VBox {
     this._replaceInputElement.addEventListener('keydown', this._onReplaceKeyDown.bind(this), true);
     this._replaceInputElement.placeholder = Common.UIString('Replace');
 
-    // Build the buttons (Find, Previous, Replace, Replace All).
-    this._buttonsContainer = this._footerElement.createChild('div', 'toolbar-search-buttons hidden');
+    this._buttonsContainer = this._footerElement.createChild('div', 'toolbar-search-buttons');
+    const firstRowButtons = this._buttonsContainer.createChild('div', 'first-row-buttons');
 
-    var findButtonElement =
-        UI.createTextButton(Common.UIString('Find'), this._onFindClick.bind(this), 'search-action-button');
-    findButtonElement.tabIndex = -1;
-    this._buttonsContainer.appendChild(findButtonElement);
+    const toolbar = new UI.Toolbar('', firstRowButtons);
 
-    var prevButtonElement =
-        UI.createTextButton(Common.UIString('Previous'), this._onPreviousClick.bind(this), 'search-action-button');
-    prevButtonElement.tabIndex = -1;
-    this._buttonsContainer.appendChild(prevButtonElement);
+    if (this._searchProvider.supportsCaseSensitiveSearch()) {
+      this._caseSensitiveButton = new UI.ToolbarToggle(Common.UIString('Case sensitive'));
+      this._caseSensitiveButton.setText('Aa');
+      this._caseSensitiveButton.addEventListener(UI.ToolbarButton.Events.Click, this._toggleCaseSensitiveSearch, this);
+      toolbar.appendToolbarItem(this._caseSensitiveButton);
+    }
+
+    if (this._searchProvider.supportsRegexSearch()) {
+      this._regexButton = new UI.ToolbarToggle('');
+      this._regexButton.setText('/regex/');
+      this._regexButton.addEventListener(UI.ToolbarButton.Events.Click, this._toggleRegexSearch, this);
+      toolbar.appendToolbarItem(this._regexButton);
+    }
+
+    const cancelButtonElement =
+        UI.createTextButton(Common.UIString('Cancel'), this.closeSearch.bind(this), 'search-action-button');
+    firstRowButtons.appendChild(cancelButtonElement);
+
+    this._secondRowButtons = this._buttonsContainer.createChild('div', 'second-row-buttons hidden');
 
     this._replaceButtonElement =
         UI.createTextButton(Common.UIString('Replace'), this._replace.bind(this), 'search-action-button');
     this._replaceButtonElement.disabled = true;
-    this._replaceButtonElement.tabIndex = -1;
-    this._buttonsContainer.appendChild(this._replaceButtonElement);
+    this._secondRowButtons.appendChild(this._replaceButtonElement);
 
-    var replaceAllButtonElement =
+    this._replaceAllButtonElement =
         UI.createTextButton(Common.UIString('Replace all'), this._replaceAll.bind(this), 'search-action-button');
-    this._buttonsContainer.appendChild(replaceAllButtonElement);
+    this._secondRowButtons.appendChild(this._replaceAllButtonElement);
+    this._replaceAllButtonElement.disabled = true;
 
-    // Build the replace checkbox and cancel button.
-    this._replaceElement = this._footerElement.createChild('div').createChild('span', 'toolbar-replace-checkbox');
-
-    var replaceLabelElement = UI.CheckboxLabel.create(Common.UIString('Replace'));
-    this._replaceCheckboxElement = replaceLabelElement.checkboxElement;
-    this._replaceCheckboxElement.addEventListener('change', this._updateSecondRowVisibility.bind(this), false);
-
-    this._replaceElement.appendChild(replaceLabelElement);
-
-    var cancelButtonElement =
-        UI.createTextButton(Common.UIString('Cancel'), this.closeSearch.bind(this), 'search-action-button');
-    cancelButtonElement.tabIndex = -1;
     this._minimalSearchQuerySize = 3;
-    this._footerElement.createChild('div').appendChild(cancelButtonElement);
-
     this._loadSetting();
   }
 
@@ -146,7 +132,7 @@ UI.SearchableView = class extends UI.VBox {
    * @return {?UI.SearchableView}
    */
   static fromElement(element) {
-    var view = null;
+    let view = null;
     while (element && !view) {
       view = element[UI.SearchableView._symbol];
       element = element.parentElementOrShadowHost();
@@ -166,17 +152,22 @@ UI.SearchableView = class extends UI.VBox {
     this._performSearch(false, true);
   }
 
+  _toggleReplace() {
+    this._replaceToggleButton.setToggled(!this._replaceToggleButton.toggled());
+    this._updateSecondRowVisibility();
+  }
+
   _saveSetting() {
     if (!this._setting)
       return;
-    var settingValue = this._setting.get() || {};
+    const settingValue = this._setting.get() || {};
     settingValue.caseSensitive = this._caseSensitiveButton.toggled();
     settingValue.isRegex = this._regexButton.toggled();
     this._setting.set(settingValue);
   }
 
   _loadSetting() {
-    var settingValue = this._setting ? (this._setting.get() || {}) : {};
+    const settingValue = this._setting ? (this._setting.get() || {}) : {};
     if (this._searchProvider.supportsCaseSensitiveSearch())
       this._caseSensitiveButton.setToggled(!!settingValue.caseSensitive);
     if (this._searchProvider.supportsRegexSearch())
@@ -208,6 +199,8 @@ UI.SearchableView = class extends UI.VBox {
    * @param {number} matches
    */
   updateSearchMatchesCount(matches) {
+    if (this._searchProvider.currentSearchMatches === matches)
+      return;
     this._searchProvider.currentSearchMatches = matches;
     this._updateSearchMatchesCountAndCurrentMatchIndex(this._searchProvider.currentQuery ? matches : 0, -1);
   }
@@ -301,6 +294,7 @@ UI.SearchableView = class extends UI.VBox {
    */
   _updateSearchNavigationButtonState(enabled) {
     this._replaceButtonElement.disabled = !enabled;
+    this._replaceAllButtonElement.disabled = !enabled;
     if (enabled) {
       this._searchNavigationPrevElement.classList.add('enabled');
       this._searchNavigationNextElement.classList.add('enabled');
@@ -330,9 +324,9 @@ UI.SearchableView = class extends UI.VBox {
     if (this._searchIsVisible)
       this.cancelSearch();
 
-    var queryCandidate;
+    let queryCandidate;
     if (!this._searchInputElement.hasFocus()) {
-      var selection = UI.inspectorView.element.window().getSelection();
+      const selection = UI.inspectorView.element.window().getSelection();
       if (selection.rangeCount)
         queryCandidate = selection.toString().replace(/\r?\n.*/, '');
     }
@@ -348,9 +342,9 @@ UI.SearchableView = class extends UI.VBox {
   }
 
   _updateReplaceVisibility() {
-    this._replaceElement.classList.toggle('hidden', !this._replaceable);
+    this._replaceToggleButton.setVisible(this._replaceable);
     if (!this._replaceable) {
-      this._replaceCheckboxElement.checked = false;
+      this._replaceToggleButton.setToggled(false);
       this._updateSecondRowVisibility();
     }
   }
@@ -439,7 +433,7 @@ UI.SearchableView = class extends UI.VBox {
    * @param {boolean=} jumpBackwards
    */
   _performSearch(forceSearch, shouldJump, jumpBackwards) {
-    var query = this._searchInputElement.value;
+    const query = this._searchInputElement.value;
     if (!query || (!forceSearch && query.length < this._minimalSearchQuerySize && !this._currentQuery)) {
       this._clearSearch();
       return;
@@ -448,7 +442,7 @@ UI.SearchableView = class extends UI.VBox {
     this._currentQuery = query;
     this._searchProvider.currentQuery = query;
 
-    var searchConfig = this._currentSearchConfig();
+    const searchConfig = this._currentSearchConfig();
     this._searchProvider.performSearch(searchConfig, shouldJump, jumpBackwards);
   }
 
@@ -456,18 +450,17 @@ UI.SearchableView = class extends UI.VBox {
    * @return {!UI.SearchableView.SearchConfig}
    */
   _currentSearchConfig() {
-    var query = this._searchInputElement.value;
-    var caseSensitive = this._caseSensitiveButton ? this._caseSensitiveButton.toggled() : false;
-    var isRegex = this._regexButton ? this._regexButton.toggled() : false;
+    const query = this._searchInputElement.value;
+    const caseSensitive = this._caseSensitiveButton ? this._caseSensitiveButton.toggled() : false;
+    const isRegex = this._regexButton ? this._regexButton.toggled() : false;
     return new UI.SearchableView.SearchConfig(query, caseSensitive, isRegex);
   }
 
   _updateSecondRowVisibility() {
-    var secondRowVisible = this._replaceCheckboxElement.checked;
+    const secondRowVisible = this._replaceToggleButton.toggled();
     this._footerElementContainer.classList.toggle('replaceable', secondRowVisible);
-    this._buttonsContainer.classList.toggle('hidden', !secondRowVisible);
+    this._secondRowButtons.classList.toggle('hidden', !secondRowVisible);
     this._replaceInputElement.classList.toggle('hidden', !secondRowVisible);
-    this._replaceCheckboxElement.tabIndex = secondRowVisible ? -1 : 0;
 
     if (secondRowVisible)
       this._replaceInputElement.focus();
@@ -477,7 +470,7 @@ UI.SearchableView = class extends UI.VBox {
   }
 
   _replace() {
-    var searchConfig = this._currentSearchConfig();
+    const searchConfig = this._currentSearchConfig();
     /** @type {!UI.Replaceable} */ (this._searchProvider)
         .replaceSelectionWith(searchConfig, this._replaceInputElement.value);
     delete this._currentQuery;
@@ -485,7 +478,7 @@ UI.SearchableView = class extends UI.VBox {
   }
 
   _replaceAll() {
-    var searchConfig = this._currentSearchConfig();
+    const searchConfig = this._currentSearchConfig();
     /** @type {!UI.Replaceable} */ (this._searchProvider).replaceAllWith(searchConfig, this._replaceInputElement.value);
   }
 
@@ -495,7 +488,7 @@ UI.SearchableView = class extends UI.VBox {
   _onInput(event) {
     if (this._valueChangedTimeoutId)
       clearTimeout(this._valueChangedTimeoutId);
-    var timeout = this._searchInputElement.value.length < 3 ? 200 : 0;
+    const timeout = this._searchInputElement.value.length < 3 ? 200 : 0;
     this._valueChangedTimeoutId = setTimeout(this._onValueChanged.bind(this), timeout);
   }
 
@@ -580,12 +573,12 @@ UI.SearchableView.SearchConfig = class {
    * @return {!RegExp}
    */
   toSearchRegex(global) {
-    var modifiers = this.caseSensitive ? '' : 'i';
+    let modifiers = this.caseSensitive ? '' : 'i';
     if (global)
       modifiers += 'g';
-    var query = this.isRegex ? '/' + this.query + '/' : this.query;
+    const query = this.isRegex ? '/' + this.query + '/' : this.query;
 
-    var regex;
+    let regex;
 
     // First try creating regex if user knows the / / hint.
     try {

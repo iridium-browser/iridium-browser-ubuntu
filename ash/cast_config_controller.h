@@ -29,8 +29,7 @@ class CastConfigControllerObserver {
 
 // We want to establish our connection lazily and preferably only once, as
 // TrayCast instances will come and go.
-class CastConfigController : public ash::mojom::CastConfig,
-                             public ash::mojom::CastConfigClient {
+class CastConfigController : public ash::mojom::CastConfig {
  public:
   CastConfigController();
   ~CastConfigController() override;
@@ -48,10 +47,10 @@ class CastConfigController : public ash::mojom::CastConfig,
   void SetClient(mojom::CastConfigClientAssociatedPtrInfo client) override;
   void OnDevicesUpdated(std::vector<mojom::SinkAndRoutePtr> devices) override;
 
-  // ash::mojom::CastConfigClient:
-  void RequestDeviceRefresh() override;
-  void CastToSink(mojom::CastSinkPtr sink) override;
-  void StopCasting(mojom::CastRoutePtr route) override;
+  // Methods to forward to |client_|.
+  void RequestDeviceRefresh();
+  void CastToSink(mojom::CastSinkPtr sink);
+  void StopCasting(mojom::CastRoutePtr route);
 
  private:
   // Bindings for the CastConfig interface.

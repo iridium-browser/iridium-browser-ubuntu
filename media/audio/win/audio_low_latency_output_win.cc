@@ -25,7 +25,6 @@
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
 
-using base::win::ScopedComPtr;
 using base::win::ScopedCOMInitializer;
 using base::win::ScopedCoMem;
 
@@ -135,21 +134,11 @@ bool WASAPIAudioOutputStream::Open() {
   DCHECK(!audio_client_.Get());
   DCHECK(!audio_render_client_.Get());
 
-  // Will be set to true if we ended up opening the default communications
-  // device.
-  bool communications_device = false;
+  const bool communications_device =
+      device_id_.empty() ? (device_role_ == eCommunications) : false;
 
-  // Create an IAudioClient interface for the default rendering IMMDevice.
-  ScopedComPtr<IAudioClient> audio_client;
-  if (device_id_.empty()) {
-    audio_client = CoreAudioUtil::CreateDefaultClient(eRender, device_role_);
-    communications_device = (device_role_ == eCommunications);
-  } else {
-    ScopedComPtr<IMMDevice> device(CoreAudioUtil::CreateDevice(device_id_));
-    DLOG_IF(ERROR, !device.Get()) << "Failed to open device: " << device_id_;
-    if (device.Get())
-      audio_client = CoreAudioUtil::CreateClient(device.Get());
-  }
+  Microsoft::WRL::ComPtr<IAudioClient> audio_client(
+      CoreAudioUtil::CreateClient(device_id_, eRender, device_role_));
 
   if (!audio_client.Get())
     return false;
@@ -180,7 +169,7 @@ bool WASAPIAudioOutputStream::Open() {
 
     const int preferred_frames_per_buffer = static_cast<int>(
         format_.Format.nSamplesPerSec *
-            CoreAudioUtil::RefererenceTimeToTimeDelta(device_period)
+            CoreAudioUtil::ReferenceTimeToTimeDelta(device_period)
                 .InSecondsF() +
         0.5);
 
@@ -232,7 +221,7 @@ bool WASAPIAudioOutputStream::Open() {
   // Create an IAudioRenderClient client for an initialized IAudioClient.
   // The IAudioRenderClient interface enables us to write output data to
   // a rendering endpoint buffer.
-  ScopedComPtr<IAudioRenderClient> audio_render_client =
+  Microsoft::WRL::ComPtr<IAudioRenderClient> audio_render_client =
       CoreAudioUtil::CreateRenderClient(audio_client.Get());
   if (!audio_render_client.Get())
     return false;
@@ -262,17 +251,34 @@ void WASAPIAudioOutputStream::Start(AudioSourceCallback* callback) {
     return;
   }
 
-  source_ = callback;
-
-  // Ensure that the endpoint buffer is prepared with silence.
+  // Ensure that the endpoint buffer is prepared with silence. Also serves as
+  // a sanity check for the IAudioClient and IAudioRenderClient which may have
+  // been invalidated by Windows since the last Stop() call.
+  //
+  // While technically we only need to retry when WASAPI tells us the device has
+  // been invalidated (AUDCLNT_E_DEVICE_INVALIDATED), we retry for all errors
+  // for simplicity and due to large sites like YouTube reporting high success
+  // rates with a simple retry upon detection of an audio output error.
   if (share_mode_ == AUDCLNT_SHAREMODE_SHARED) {
     if (!CoreAudioUtil::FillRenderEndpointBufferWithSilence(
             audio_client_.Get(), audio_render_client_.Get())) {
-      LOG(ERROR) << "Failed to prepare endpoint buffers with silence.";
-      callback->OnError();
-      return;
+      DLOG(WARNING) << "Failed to prepare endpoint buffers with silence. "
+                       "Attempting recovery with a new IAudioClient and "
+                       "IAudioRenderClient.";
+
+      opened_ = false;
+      audio_client_.Reset();
+      audio_render_client_.Reset();
+      if (!Open() || !CoreAudioUtil::FillRenderEndpointBufferWithSilence(
+                         audio_client_.Get(), audio_render_client_.Get())) {
+        DLOG(ERROR) << "Failed recovery of audio clients; Start() failed.";
+        callback->OnError();
+        return;
+      }
     }
   }
+
+  source_ = callback;
   num_written_frames_ = endpoint_buffer_size_frames_;
 
   // Create and start the thread that will drive the rendering by waiting for
@@ -525,8 +531,10 @@ bool WASAPIAudioOutputStream::RenderAudioFromSource(UINT64 device_frequency) {
       delay = base::TimeDelta::FromMicroseconds(
           delay_frames * base::Time::kMicrosecondsPerSecond /
           format_.Format.nSamplesPerSec);
-
-      delay_timestamp = base::TimeTicks::FromQPCValue(qpc_position);
+      // Note: the obtained |qpc_position| value is in 100ns intervals and from
+      // the same time origin as QPC. We can simply convert it into us dividing
+      // by 10.0 since 10x100ns = 1us.
+      delay_timestamp += base::TimeDelta::FromMicroseconds(qpc_position * 0.1);
     } else {
       // Use a delay of zero.
       delay_timestamp = base::TimeTicks::Now();

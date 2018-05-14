@@ -15,8 +15,6 @@
 // The expected use is to create a view with the same size and position as the
 // page content area, add it to the view hierarchy, then call the appropriate
 // animation method.
-namespace ios_internal {
-
 namespace page_animation_util {
 
 // The standard margin between a card and the edge of the content view, in
@@ -65,9 +63,11 @@ void AnimateInPaperWithAnimationAndCompletion(UIView* view,
 // StackViewController), and out again. Creates and moves a paper card into the
 // center of the screen, and then slides it offscreen. |completion| is
 // called at the end of the sequence. |displayFrame| gives the frame within
-// which the animation will take place.
+// which the animation will take place. |imageFrame| gives the size of the
+// snapshot image from which the animation starts.
 void AnimateNewBackgroundPageWithCompletion(CardView* currentPageCard,
                                             CGRect displayFrame,
+                                            CGRect imageFrame,
                                             BOOL isPortrait,
                                             void (^completion)(void));
 
@@ -102,7 +102,5 @@ CGAffineTransform AnimateOutTransform(CGFloat fraction,
 CGFloat AnimateOutTransformBreadth();
 
 }  // namespace page_animation_util
-
-}  // namespace ios_internal
 
 #endif  // IOS_CHROME_BROWSER_UI_STACK_VIEW_PAGE_ANIMATION_UTIL_H_

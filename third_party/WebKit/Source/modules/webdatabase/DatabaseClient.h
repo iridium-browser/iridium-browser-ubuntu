@@ -50,9 +50,11 @@ class MODULES_EXPORT DatabaseClient : public GarbageCollected<DatabaseClient>,
   WTF_MAKE_NONCOPYABLE(DatabaseClient);
 
  public:
+  static const char kSupplementName[];
+
   DatabaseClient();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   bool AllowDatabase(ExecutionContext*,
                      const String& name,
@@ -66,7 +68,6 @@ class MODULES_EXPORT DatabaseClient : public GarbageCollected<DatabaseClient>,
 
   static DatabaseClient* FromPage(Page*);
   static DatabaseClient* From(ExecutionContext*);
-  static const char* SupplementName();
 
   void SetInspectorAgent(InspectorDatabaseAgent*);
 

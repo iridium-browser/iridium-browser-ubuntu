@@ -4,19 +4,13 @@
 
 #include "core/layout/ng/ng_block_node.h"
 
-#include "core/layout/LayoutTestHelper.h"
-#include "core/layout/ng/ng_box_fragment.h"
-#include "core/layout/ng/ng_min_max_content_size.h"
-#include "core/style/ComputedStyle.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#include "core/layout/MinMaxSize.h"
+#include "core/layout/ng/ng_layout_test.h"
 
 namespace blink {
 namespace {
-class NGBlockNodeForTest : public RenderingTest {
- public:
-  NGBlockNodeForTest() { RuntimeEnabledFeatures::SetLayoutNGEnabled(true); }
-  ~NGBlockNodeForTest() { RuntimeEnabledFeatures::SetLayoutNGEnabled(false); };
-};
+
+using NGBlockNodeForTest = NGLayoutTest;
 
 TEST_F(NGBlockNodeForTest, ChildInlineAndBlock) {
   SetBodyInnerHTML(R"HTML(
@@ -135,9 +129,9 @@ TEST_F(NGBlockNodeForTest, ChildOofBeforeInline) {
   )HTML");
   NGBlockNode container(ToLayoutBox(GetLayoutObjectByElementId("container")));
   NGLayoutInputNode child1 = container.FirstChild();
-  EXPECT_TRUE(child1 && child1.IsBlock());
+  EXPECT_TRUE(child1 && child1.IsInline());
   NGLayoutInputNode child2 = child1.NextSibling();
-  EXPECT_TRUE(child2 && child2.IsBlock());
+  EXPECT_EQ(child2, nullptr);
 }
 
 TEST_F(NGBlockNodeForTest, ChildOofAfterInline) {
@@ -165,9 +159,9 @@ TEST_F(NGBlockNodeForTest, MinAndMaxContent) {
   const int kWidth = 30;
 
   NGBlockNode box(ToLayoutBox(GetLayoutObjectByElementId("box")));
-  MinMaxContentSize sizes = box.ComputeMinMaxContentSize();
-  EXPECT_EQ(LayoutUnit(kWidth), sizes.min_content);
-  EXPECT_EQ(LayoutUnit(kWidth), sizes.max_content);
+  MinMaxSize sizes = box.ComputeMinMaxSize(MinMaxSizeInput());
+  EXPECT_EQ(LayoutUnit(kWidth), sizes.min_size);
+  EXPECT_EQ(LayoutUnit(kWidth), sizes.max_size);
 }
 }  // namespace
 }  // namespace blink

@@ -105,7 +105,7 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ApplyGamma, reporter, ctxInfo) {
     SkAutoTMalloc<uint32_t> read(kW * kH);
 
     // We allow more error on GPUs with lower precision shader variables.
-    float error = context->caps()->shaderCaps()->floatPrecisionVaries() ? 1.2f : 0.5f;
+    float error = context->caps()->shaderCaps()->halfIs32Bits() ? 0.5f : 1.2f;
 
     for (auto toSRGB : { false, true }) {
         sk_sp<SkSurface> dst(SkSurface::MakeRenderTarget(context, SkBudgeted::kNo, ii));
@@ -129,7 +129,7 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ApplyGamma, reporter, ctxInfo) {
         dstCanvas->flush();
 
         sk_memset32(read.get(), 0, kW * kH);
-        if (!dstCanvas->readPixels(ii, read.get(), kRowBytes, 0, 0)) {
+        if (!dst->readPixels(ii, read.get(), kRowBytes, 0, 0)) {
             ERRORF(reporter, "Error calling readPixels");
             continue;
         }

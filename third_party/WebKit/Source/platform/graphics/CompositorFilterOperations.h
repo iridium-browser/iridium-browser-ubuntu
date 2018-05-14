@@ -5,15 +5,14 @@
 #ifndef CompositorFilterOperations_h
 #define CompositorFilterOperations_h
 
-#include "cc/base/filter_operations.h"
+#include "cc/paint/filter_operations.h"
 #include "platform/PlatformExport.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/IntPoint.h"
 #include "platform/graphics/Color.h"
+#include "platform/graphics/paint/PaintFilter.h"
 #include "platform/wtf/text/WTFString.h"
 #include "third_party/skia/include/core/SkScalar.h"
-
-class SkImageFilter;
 
 namespace blink {
 
@@ -33,11 +32,11 @@ class PLATFORM_EXPORT CompositorFilterOperations {
   void AppendOpacityFilter(float amount);
   void AppendBlurFilter(float amount);
   void AppendDropShadowFilter(IntPoint offset, float std_deviation, Color);
-  void AppendColorMatrixFilter(SkScalar matrix[20]);
+  void AppendColorMatrixFilter(const cc::FilterOperation::Matrix&);
   void AppendZoomFilter(float amount, int inset);
   void AppendSaturatingBrightnessFilter(float amount);
 
-  void AppendReferenceFilter(sk_sp<SkImageFilter>);
+  void AppendReferenceFilter(sk_sp<PaintFilter>);
 
   void Clear();
   bool IsEmpty() const;
@@ -47,6 +46,9 @@ class PLATFORM_EXPORT CompositorFilterOperations {
   FloatRect MapRect(const FloatRect& input_rect) const;
 
   bool HasFilterThatMovesPixels() const;
+
+  void SetReferenceBox(const FloatRect& r) { reference_box_ = r; }
+  FloatRect ReferenceBox() const { return reference_box_; }
 
   // For reference filters, this equality operator compares pointers of the
   // image_filter fields instead of their values.
@@ -61,6 +63,7 @@ class PLATFORM_EXPORT CompositorFilterOperations {
 
  private:
   cc::FilterOperations filter_operations_;
+  FloatRect reference_box_;
 };
 
 }  // namespace blink

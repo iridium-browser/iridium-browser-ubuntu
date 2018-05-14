@@ -32,7 +32,6 @@
 #include "modules/webaudio/AudioNodeOutput.h"
 #include "modules/webaudio/ConvolverOptions.h"
 #include "platform/audio/Reverb.h"
-#include "platform/wtf/PtrUtil.h"
 
 // Note about empirical tuning:
 // The maximum FFT size affects reverb performance and accuracy.
@@ -58,9 +57,9 @@ ConvolverHandler::ConvolverHandler(AudioNode& node, float sample_rate)
   Initialize();
 }
 
-PassRefPtr<ConvolverHandler> ConvolverHandler::Create(AudioNode& node,
-                                                      float sample_rate) {
-  return AdoptRef(new ConvolverHandler(node, sample_rate));
+scoped_refptr<ConvolverHandler> ConvolverHandler::Create(AudioNode& node,
+                                                         float sample_rate) {
+  return base::AdoptRef(new ConvolverHandler(node, sample_rate));
 }
 
 ConvolverHandler::~ConvolverHandler() {
@@ -128,7 +127,7 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
   // Wrap the AudioBuffer by an AudioBus. It's an efficient pointer set and not
   // a memcpy().  This memory is simply used in the Reverb constructor and no
   // reference to it is kept for later use in that class.
-  RefPtr<AudioBus> buffer_bus =
+  scoped_refptr<AudioBus> buffer_bus =
       AudioBus::Create(number_of_channels, buffer_length, false);
   for (unsigned i = 0; i < number_of_channels; ++i)
     buffer_bus->SetChannelMemory(i, buffer->getChannelData(i).View()->Data(),
@@ -137,14 +136,14 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
   buffer_bus->SetSampleRate(buffer->sampleRate());
 
   // Create the reverb with the given impulse response.
-  std::unique_ptr<Reverb> reverb = WTF::WrapUnique(new Reverb(
-      buffer_bus.Get(), AudioUtilities::kRenderQuantumFrames, MaxFFTSize,
-      Context() && Context()->HasRealtimeConstraint(), normalize_));
+  std::unique_ptr<Reverb> reverb = std::make_unique<Reverb>(
+      buffer_bus.get(), AudioUtilities::kRenderQuantumFrames, MaxFFTSize,
+      Context() && Context()->HasRealtimeConstraint(), normalize_);
 
   {
     // The context must be locked since changing the buffer can
     // re-configure the number of channels that are output.
-    BaseAudioContext::AutoLocker context_locker(Context());
+    BaseAudioContext::GraphAutoLocker context_locker(Context());
 
     // Synchronize with process().
     MutexLocker locker(process_lock_);
@@ -198,7 +197,7 @@ unsigned ConvolverHandler::ComputeNumberOfOutputChannels(
 void ConvolverHandler::SetChannelCount(unsigned long channel_count,
                                        ExceptionState& exception_state) {
   DCHECK(IsMainThread());
-  BaseAudioContext::AutoLocker locker(Context());
+  BaseAudioContext::GraphAutoLocker locker(Context());
 
   // channelCount must be 2.
   if (channel_count != 2) {
@@ -211,7 +210,7 @@ void ConvolverHandler::SetChannelCount(unsigned long channel_count,
 void ConvolverHandler::SetChannelCountMode(const String& mode,
                                            ExceptionState& exception_state) {
   DCHECK(IsMainThread());
-  BaseAudioContext::AutoLocker locker(Context());
+  BaseAudioContext::GraphAutoLocker locker(Context());
 
   // channcelCountMode must be 'clamped-max'.
   if (mode != "clamped-max") {

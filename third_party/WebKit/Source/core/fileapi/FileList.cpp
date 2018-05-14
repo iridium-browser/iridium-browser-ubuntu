@@ -27,11 +27,11 @@
 
 namespace blink {
 
-FileList::FileList() {}
+FileList::FileList() = default;
 
 File* FileList::item(unsigned index) const {
   if (index >= files_.size())
-    return 0;
+    return nullptr;
   return files_[index].Get();
 }
 
@@ -49,8 +49,9 @@ Vector<String> FileList::PathsForUserVisibleFiles() const {
   return paths;
 }
 
-DEFINE_TRACE(FileList) {
+void FileList::Trace(blink::Visitor* visitor) {
   visitor->Trace(files_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

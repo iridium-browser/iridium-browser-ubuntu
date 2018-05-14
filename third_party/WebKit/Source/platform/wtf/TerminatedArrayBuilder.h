@@ -4,14 +4,15 @@
 #ifndef TerminatedArrayBuilder_h
 #define TerminatedArrayBuilder_h
 
+#include "base/macros.h"
 #include "platform/wtf/Allocator.h"
+#include "platform/wtf/ConstructTraits.h"
 
 namespace WTF {
 
 template <typename T, template <typename> class ArrayType = TerminatedArray>
 class TerminatedArrayBuilder {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(TerminatedArrayBuilder);
 
  public:
   explicit TerminatedArrayBuilder(
@@ -44,6 +45,9 @@ class TerminatedArrayBuilder {
     CHECK_LT(count_, capacity_);
     DCHECK(!item.IsLastInArray());
     array_->at(count_++) = item;
+    ConstructTraits<T, VectorTraits<T>,
+                    typename ArrayType<T>::Allocator::BackendAllocator>::
+        NotifyNewElements(&array_->at(count_ - 1), 1);
     if (count_ == capacity_)
       array_->at(capacity_ - 1).SetLastInArray(true);
   }
@@ -69,6 +73,8 @@ class TerminatedArrayBuilder {
   typename ArrayType<T>::Allocator::Ptr array_;
   size_t count_;
   size_t capacity_;
+
+  DISALLOW_COPY_AND_ASSIGN(TerminatedArrayBuilder);
 };
 
 }  // namespace WTF

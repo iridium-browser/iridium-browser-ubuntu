@@ -12,7 +12,7 @@
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/UseCounter.h"
 #include "core/timing/DOMWindowPerformance.h"
-#include "core/timing/Performance.h"
+#include "core/timing/WindowPerformance.h"
 #include "modules/webaudio/AudioContextOptions.h"
 #include "modules/webaudio/AudioTimestamp.h"
 #include "modules/webaudio/DefaultAudioDestinationNode.h"
@@ -26,10 +26,12 @@
 
 namespace blink {
 
-// Don't allow more than this number of simultaneous AudioContexts
-// talking to hardware.
-const unsigned kMaxHardwareContexts = 6;
+// Number of AudioContexts still alive.  It's incremented when an
+// AudioContext is created and decremented when the context is closed.
 static unsigned g_hardware_context_count = 0;
+
+// A context ID that is incremented for each context that is created.
+// This initializes the internal id for the context.
 static unsigned g_context_id = 0;
 
 AudioContext* AudioContext::Create(Document& document,
@@ -40,28 +42,19 @@ AudioContext* AudioContext::Create(Document& document,
   UseCounter::CountCrossOriginIframe(
       document, WebFeature::kAudioContextCrossOriginIframe);
 
-  if (g_hardware_context_count >= kMaxHardwareContexts) {
-    exception_state.ThrowDOMException(
-        kNotSupportedError,
-        ExceptionMessages::IndexExceedsMaximumBound(
-            "number of hardware contexts", g_hardware_context_count,
-            kMaxHardwareContexts));
-    return nullptr;
-  }
-
   WebAudioLatencyHint latency_hint(WebAudioLatencyHint::kCategoryInteractive);
-  if (context_options.latencyHint().isAudioContextLatencyCategory()) {
+  if (context_options.latencyHint().IsAudioContextLatencyCategory()) {
     latency_hint = WebAudioLatencyHint(
-        context_options.latencyHint().getAsAudioContextLatencyCategory());
-  } else if (context_options.latencyHint().isDouble()) {
+        context_options.latencyHint().GetAsAudioContextLatencyCategory());
+  } else if (context_options.latencyHint().IsDouble()) {
     // This should be the requested output latency in seconds, without taking
     // into account double buffering (same as baseLatency).
     latency_hint =
-        WebAudioLatencyHint(context_options.latencyHint().getAsDouble());
+        WebAudioLatencyHint(context_options.latencyHint().GetAsDouble());
   }
 
   AudioContext* audio_context = new AudioContext(document, latency_hint);
-  audio_context->SuspendIfNeeded();
+  audio_context->PauseIfNeeded();
 
   if (!AudioUtilities::IsValidAudioBufferSampleRate(
           audio_context->sampleRate())) {
@@ -106,7 +99,8 @@ AudioContext* AudioContext::Create(Document& document,
 
 AudioContext::AudioContext(Document& document,
                            const WebAudioLatencyHint& latency_hint)
-    : BaseAudioContext(&document), context_id_(g_context_id++) {
+    : BaseAudioContext(&document, kRealtimeContext),
+      context_id_(g_context_id++) {
   destination_node_ = DefaultAudioDestinationNode::Create(this, latency_hint);
   Initialize();
 }
@@ -118,14 +112,14 @@ AudioContext::~AudioContext() {
 #endif
 }
 
-DEFINE_TRACE(AudioContext) {
+void AudioContext::Trace(blink::Visitor* visitor) {
   visitor->Trace(close_resolver_);
   BaseAudioContext::Trace(visitor);
 }
 
 ScriptPromise AudioContext::suspendContext(ScriptState* script_state) {
   DCHECK(IsMainThread());
-  AutoLocker locker(this);
+  GraphAutoLocker locker(this);
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
@@ -178,7 +172,7 @@ ScriptPromise AudioContext::resumeContext(ScriptState* script_state) {
   // Save the resolver which will get resolved when the destination node starts
   // pulling on the graph again.
   {
-    AutoLocker locker(this);
+    GraphAutoLocker locker(this);
     resume_resolvers_.push_back(resolver);
   }
 
@@ -198,13 +192,13 @@ void AudioContext::getOutputTimestamp(ScriptState* script_state,
     return;
   }
 
-  Performance* performance = DOMWindowPerformance::performance(*window);
+  WindowPerformance* performance = DOMWindowPerformance::performance(*window);
   DCHECK(performance);
 
   AudioIOPosition position = OutputPosition();
 
-  double performance_time =
-      performance->MonotonicTimeToDOMHighResTimeStamp(position.timestamp);
+  double performance_time = performance->MonotonicTimeToDOMHighResTimeStamp(
+      TimeTicksFromSeconds(position.timestamp));
   if (performance_time < 0.0)
     performance_time = 0.0;
 

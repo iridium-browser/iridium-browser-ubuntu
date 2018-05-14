@@ -8,23 +8,23 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/api/audio_codecs/ilbc/audio_decoder_ilbc.h"
+#include "api/audio_codecs/ilbc/audio_decoder_ilbc.h"
 
 #include <memory>
 #include <vector>
 
-#include "webrtc/common_types.h"
-#include "webrtc/modules/audio_coding/codecs/ilbc/audio_decoder_ilbc.h"
-#include "webrtc/rtc_base/ptr_util.h"
+#include "common_types.h"  // NOLINT(build/include)
+#include "modules/audio_coding/codecs/ilbc/audio_decoder_ilbc.h"
+#include "rtc_base/ptr_util.h"
 
 namespace webrtc {
 
 rtc::Optional<AudioDecoderIlbc::Config> AudioDecoderIlbc::SdpToConfig(
     const SdpAudioFormat& format) {
-  return STR_CASE_CMP(format.name.c_str(), "ilbc") == 0 &&
+  return STR_CASE_CMP(format.name.c_str(), "ILBC") == 0 &&
                  format.clockrate_hz == 8000 && format.num_channels == 1
              ? rtc::Optional<Config>(Config())
-             : rtc::Optional<Config>();
+             : rtc::nullopt;
 }
 
 void AudioDecoderIlbc::AppendSupportedDecoders(

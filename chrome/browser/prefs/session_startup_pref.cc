@@ -91,7 +91,7 @@ void SessionStartupPref::SetStartupPref(PrefService* prefs,
     url_pref_list->Clear();
     for (size_t i = 0; i < pref.urls.size(); ++i) {
       url_pref_list->Set(static_cast<int>(i),
-                         base::MakeUnique<base::Value>(pref.urls[i].spec()));
+                         std::make_unique<base::Value>(pref.urls[i].spec()));
     }
   }
 }
@@ -130,6 +130,15 @@ bool SessionStartupPref::TypeIsManaged(PrefService* prefs) {
       prefs->FindPreference(prefs::kRestoreOnStartup);
   DCHECK(pref_restore);
   return pref_restore->IsManaged();
+}
+
+// static
+bool SessionStartupPref::TypeIsRecommended(PrefService* prefs) {
+  DCHECK(prefs);
+  const PrefService::Preference* pref_restore =
+      prefs->FindPreference(prefs::kRestoreOnStartup);
+  DCHECK(pref_restore);
+  return pref_restore->IsRecommended();
 }
 
 // static

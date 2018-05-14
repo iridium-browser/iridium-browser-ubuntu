@@ -7,6 +7,7 @@
   "base": {
     "exclusions": [
       ".*isolate",
+      ".vpython",
       "build/.*gyp[i]?",
       "build/android/.*py",
       "build/android/devil/.*",
@@ -14,17 +15,17 @@
       "build/android/pylib/.*",
       "build/check_gn_headers.py",
       "build/check_gn_headers_whitelist.txt",
-      "build/compiler_version.py",
+      "build/cipd/android/android.ensure",
       "build/get_landmines.py",
       "build/gyp_chromium",
-      "build/linux/sysroot_ld_path.sh",
       "build/mac_toolchain.py",
       "build/toolchain/get_concurrent_links.py",
       "build/toolchain/mac/.*py",
       "build/util/lib/common/unittest_util.py",
       "infra/scripts/.*",
       "DEPS",
-      "testing/buildbot/.*",
+      "testing/buildbot/.*json",
+      "testing/buildbot/.*pyl",
       "testing/scripts/.*",
       "testing/test_env.py",
       "third_party/android_platform/development/scripts/.*",
@@ -69,12 +70,31 @@
       "tools/metrics/histograms/histograms.xml",
       "tools/perf/.*",
       "tools/telemetry/.*",
+      "tools/traffic_annotation/scripts/.*",
       "ui/webui/resources/.*(css|html|js)"
+    ]
+  },
+  "fuchsia": {
+    "exclusions": [
+      "build/fuchsia/.*py"
     ]
   },
   "ios": {
     "exclusions": [
       "ios/build/bots/.*"
+    ]
+  },
+  "linux": {
+    "exclusions": [
+      "build/linux/sysroot_ld_path.sh",
+      "build/linux/sysroot_scripts/sysroots.json",
+      "testing/xvfb.py",
+      "third_party/binutils/Linux_x64/binutils.tar.bz2.sha1"
+    ]
+  },
+  "win": {
+    "exclusions": [
+      "build/toolchain/win/rc/win/rc.exe.sha1"
     ]
   }
 }

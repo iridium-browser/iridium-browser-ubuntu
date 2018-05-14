@@ -5,11 +5,12 @@
 #include "core/paint/TableCellPainter.h"
 
 #include "core/layout/LayoutTableCell.h"
+#include "core/paint/AdjustPaintOffsetScope.h"
 #include "core/paint/BackgroundImageGeometry.h"
 #include "core/paint/BlockPainter.h"
 #include "core/paint/BoxModelObjectPainter.h"
 #include "core/paint/BoxPainter.h"
-#include "core/paint/LayoutObjectDrawingRecorder.h"
+#include "core/paint/BoxPainterBase.h"
 #include "core/paint/ObjectPainter.h"
 #include "core/paint/PaintInfo.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
@@ -37,9 +38,11 @@ void TableCellPainter::PaintContainerBackgroundBehindCell(
       !layout_table_cell_.FirstChild())
     return;
 
-  LayoutRect paint_rect = PaintRectNotIncludingVisualOverflow(
-      paint_offset + layout_table_cell_.Location());
-  PaintBackground(paint_info, paint_rect, background_object);
+  AdjustPaintOffsetScope adjustment(layout_table_cell_, paint_info,
+                                    paint_offset);
+  auto paint_rect =
+      PaintRectNotIncludingVisualOverflow(adjustment.AdjustedPaintOffset());
+  PaintBackground(adjustment.GetPaintInfo(), paint_rect, background_object);
 }
 
 void TableCellPainter::PaintBackground(const PaintInfo& paint_info,
@@ -48,7 +51,7 @@ void TableCellPainter::PaintBackground(const PaintInfo& paint_info,
   if (layout_table_cell_.BackgroundStolenForBeingBody())
     return;
 
-  Color c = background_object.ResolveColor(CSSPropertyBackgroundColor);
+  Color c = background_object.ResolveColor(GetCSSPropertyBackgroundColor());
   const FillLayer& bg_layer = background_object.StyleRef().BackgroundLayers();
   if (bg_layer.HasImage() || c.Alpha()) {
     // We have to clip here because the background would paint
@@ -80,44 +83,55 @@ void TableCellPainter::PaintBoxDecorationBackground(
       !layout_table_cell_.FirstChild())
     return;
 
+  bool has_background = style.HasBackground();
+  bool has_box_shadow = style.BoxShadow();
   bool needs_to_paint_border =
       style.HasBorderDecoration() && !table->ShouldCollapseBorders();
-  if (!style.HasBackground() && !style.BoxShadow() && !needs_to_paint_border)
+  if (!has_background && !has_box_shadow && !needs_to_paint_border)
     return;
 
-  if (LayoutObjectDrawingRecorder::UseCachedDrawingIfPossible(
+  if (DrawingRecorder::UseCachedDrawingIfPossible(
           paint_info.context, layout_table_cell_,
           DisplayItem::kBoxDecorationBackground))
     return;
 
-  LayoutRect visual_overflow_rect = layout_table_cell_.VisualOverflowRect();
-  visual_overflow_rect.MoveBy(paint_offset);
   // TODO(chrishtr): the pixel-snapping here is likely incorrect.
-  LayoutObjectDrawingRecorder recorder(
-      paint_info.context, layout_table_cell_,
-      DisplayItem::kBoxDecorationBackground,
-      PixelSnappedIntRect(visual_overflow_rect));
+  DrawingRecorder recorder(paint_info.context, layout_table_cell_,
+                           DisplayItem::kBoxDecorationBackground);
 
   LayoutRect paint_rect = PaintRectNotIncludingVisualOverflow(paint_offset);
 
-  BoxPainter::PaintNormalBoxShadow(paint_info, paint_rect, style);
-  PaintBackground(paint_info, paint_rect, layout_table_cell_);
-  // TODO(wangxianzhu): Calculate the inset shadow bounds by insetting paintRect
-  // by half widths of collapsed borders.
-  BoxPainter::PaintInsetBoxShadow(paint_info, paint_rect, style);
+  if (has_box_shadow)
+    BoxPainterBase::PaintNormalBoxShadow(paint_info, paint_rect, style);
+
+  if (has_background)
+    PaintBackground(paint_info, paint_rect, layout_table_cell_);
+
+  if (has_box_shadow) {
+    // If the table collapses borders, the inner rect is the border box rect
+    // inset by inner half widths of collapsed borders (which are returned
+    // from the overriden BorderXXX() methods). Otherwise the following code is
+    // equivalent to BoxPainterBase::PaintInsetBoxShadowWithBorderRect().
+    auto inner_rect = paint_rect;
+    inner_rect.ContractEdges(
+        layout_table_cell_.BorderTop(), layout_table_cell_.BorderRight(),
+        layout_table_cell_.BorderBottom(), layout_table_cell_.BorderLeft());
+    BoxPainterBase::PaintInsetBoxShadowWithInnerRect(
+        paint_info, inner_rect, layout_table_cell_.StyleRef());
+  }
 
   if (!needs_to_paint_border)
     return;
 
-  BoxPainter::PaintBorder(layout_table_cell_, layout_table_cell_.GetDocument(),
-                          layout_table_cell_.GeneratingNode(), paint_info,
-                          paint_rect, style);
+  BoxPainterBase::PaintBorder(
+      layout_table_cell_, layout_table_cell_.GetDocument(),
+      layout_table_cell_.GeneratingNode(), paint_info, paint_rect, style);
 }
 
 void TableCellPainter::PaintMask(const PaintInfo& paint_info,
                                  const LayoutPoint& paint_offset) {
   if (layout_table_cell_.Style()->Visibility() != EVisibility::kVisible ||
-      paint_info.phase != kPaintPhaseMask)
+      paint_info.phase != PaintPhase::kMask)
     return;
 
   LayoutTable* table_elt = layout_table_cell_.Table();
@@ -126,13 +140,13 @@ void TableCellPainter::PaintMask(const PaintInfo& paint_info,
       !layout_table_cell_.FirstChild())
     return;
 
-  if (LayoutObjectDrawingRecorder::UseCachedDrawingIfPossible(
+  if (DrawingRecorder::UseCachedDrawingIfPossible(
           paint_info.context, layout_table_cell_, paint_info.phase))
     return;
 
+  DrawingRecorder recorder(paint_info.context, layout_table_cell_,
+                           paint_info.phase);
   LayoutRect paint_rect = PaintRectNotIncludingVisualOverflow(paint_offset);
-  LayoutObjectDrawingRecorder recorder(paint_info.context, layout_table_cell_,
-                                       paint_info.phase, paint_rect);
   BoxPainter(layout_table_cell_).PaintMaskImages(paint_info, paint_rect);
 }
 

@@ -21,14 +21,9 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.payments.PaymentAppFactory.PaymentAppCreatedCallback;
-import org.chromium.chrome.browser.payments.PaymentAppFactory.PaymentAppFactoryAddition;
-import org.chromium.chrome.browser.payments.PaymentRequestTestCommon.TestPay;
-import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.TestPay;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content_public.browser.WebContents;
 
-import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
@@ -36,10 +31,7 @@ import java.util.concurrent.TimeoutException;
  * A payment integration test for a merchant that requests payment via Bob Pay.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestPaymentAppTest {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
@@ -53,7 +45,7 @@ public class PaymentRequestPaymentAppTest {
             throws InterruptedException, ExecutionException, TimeoutException {
         mPaymentRequestTestRule.openPageAndClickBuyAndWait(mPaymentRequestTestRule.getShowFailed());
         mPaymentRequestTestRule.expectResultContains(
-                new String[] {"show() rejected", "The payment method is not supported"});
+                new String[] {"show() rejected", "The payment method", "not supported"});
     }
 
     /**
@@ -68,7 +60,7 @@ public class PaymentRequestPaymentAppTest {
         mPaymentRequestTestRule.installPaymentApp(NO_INSTRUMENTS, IMMEDIATE_RESPONSE);
         mPaymentRequestTestRule.openPageAndClickBuyAndWait(mPaymentRequestTestRule.getShowFailed());
         mPaymentRequestTestRule.expectResultContains(
-                new String[] {"show() rejected", "The payment method is not supported"});
+                new String[] {"show() rejected", "The payment method", "not supported"});
     }
 
     /**
@@ -83,7 +75,7 @@ public class PaymentRequestPaymentAppTest {
         mPaymentRequestTestRule.installPaymentApp(NO_INSTRUMENTS, DELAYED_RESPONSE);
         mPaymentRequestTestRule.openPageAndClickBuyAndWait(mPaymentRequestTestRule.getShowFailed());
         mPaymentRequestTestRule.expectResultContains(
-                new String[] {"show() rejected", "The payment method is not supported"});
+                new String[] {"show() rejected", "The payment method", "not supported"});
     }
 
     /**
@@ -96,23 +88,15 @@ public class PaymentRequestPaymentAppTest {
     public void testPaymentWithInstrumentsAppResponseAfterDismissShouldNotCrash()
             throws InterruptedException, ExecutionException, TimeoutException {
         final TestPay app = new TestPay("https://bobpay.com", HAVE_INSTRUMENTS, IMMEDIATE_RESPONSE);
-        PaymentAppFactory.getInstance().addAdditionalFactory(new PaymentAppFactoryAddition() {
-            @Override
-            public void create(WebContents webContents, Set<String> methodNames,
-                    PaymentAppFactory.PaymentAppCreatedCallback callback) {
-                callback.onPaymentAppCreated(app);
-                callback.onAllPaymentAppsCreated();
-            }
-        });
+        PaymentAppFactory.getInstance().addAdditionalFactory(
+                (webContents, methodNames, callback) -> {
+                    callback.onPaymentAppCreated(app);
+                    callback.onAllPaymentAppsCreated();
+                });
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyForInput());
         mPaymentRequestTestRule.clickAndWait(
                 R.id.close_button, mPaymentRequestTestRule.getDismissed());
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                app.respond();
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(() -> app.respond());
         mPaymentRequestTestRule.expectResultContains(
                 new String[] {"show() rejected", "Request cancelled"});
     }
@@ -126,23 +110,15 @@ public class PaymentRequestPaymentAppTest {
     public void testPaymentAppNoInstrumentsResponseAfterDismissShouldNotCrash()
             throws InterruptedException, ExecutionException, TimeoutException {
         final TestPay app = new TestPay("https://bobpay.com", NO_INSTRUMENTS, IMMEDIATE_RESPONSE);
-        PaymentAppFactory.getInstance().addAdditionalFactory(new PaymentAppFactoryAddition() {
-            @Override
-            public void create(WebContents webContents, Set<String> methodNames,
-                    PaymentAppCreatedCallback callback) {
-                callback.onPaymentAppCreated(app);
-                callback.onAllPaymentAppsCreated();
-            }
-        });
+        PaymentAppFactory.getInstance().addAdditionalFactory(
+                (webContents, methodNames, callback) -> {
+                    callback.onPaymentAppCreated(app);
+                    callback.onAllPaymentAppsCreated();
+                });
         mPaymentRequestTestRule.openPageAndClickBuyAndWait(mPaymentRequestTestRule.getShowFailed());
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                app.respond();
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(() -> app.respond());
         mPaymentRequestTestRule.expectResultContains(
-                new String[] {"show() rejected", "The payment method is not supported"});
+                new String[] {"show() rejected", "The payment method", "not supported"});
     }
 
     /**

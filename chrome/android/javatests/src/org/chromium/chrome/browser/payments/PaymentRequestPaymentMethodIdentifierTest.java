@@ -4,15 +4,28 @@
 
 package org.chromium.chrome.browser.payments;
 
+import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.DECEMBER;
+import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.FIRST_BILLING_ADDRESS;
+import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.NEXT_YEAR;
+
 import android.content.DialogInterface;
 import android.support.test.filters.MediumTest;
 
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
@@ -20,9 +33,15 @@ import java.util.concurrent.TimeoutException;
 /**
  * A payment integration test for supported payment methods.
  */
-public class PaymentRequestPaymentMethodIdentifierTest extends PaymentRequestTestBase {
-    public PaymentRequestPaymentMethodIdentifierTest() {
-        super("payment_request_payment_method_identifier_test.html");
+@RunWith(ChromeJUnit4ClassRunner.class)
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+public class PaymentRequestPaymentMethodIdentifierTest implements MainActivityStartCallback {
+    @Rule
+    public PaymentRequestTestRule mPaymentRequestTestRule =
+            new PaymentRequestTestRule("payment_request_payment_method_identifier_test.html", this);
+
+    @Before
+    public void setUp() {
         PaymentRequestImpl.setIsLocalCanMakePaymentQueryQuotaEnforcedForTest();
     }
 
@@ -39,62 +58,81 @@ public class PaymentRequestPaymentMethodIdentifierTest extends PaymentRequestTes
                 CardType.UNKNOWN, billingAddressId, "" /* serverId */));
     }
 
+    @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testCanPayWithBasicCard() throws InterruptedException,
-            ExecutionException, TimeoutException {
-        openPageAndClickNodeAndWait("checkBasicCard", getCanMakePaymentQueryResponded());
-        expectResultContains(new String[] {"true"});
+    public void testCanPayWithBasicCard()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        mPaymentRequestTestRule.openPageAndClickNodeAndWait(
+                "checkBasicCard", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
+        mPaymentRequestTestRule.expectResultContains(new String[] {"true"});
 
-        clickNodeAndWait("buyBasicCard", getReadyForInput());
+        mPaymentRequestTestRule.clickNodeAndWait(
+                "buyBasicCard", mPaymentRequestTestRule.getReadyForInput());
     }
 
+    @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testIgnoreCardType() throws InterruptedException,
-            ExecutionException, TimeoutException {
-        openPageAndClickNodeAndWait("checkBasicDebit", getCanMakePaymentQueryResponded());
-        expectResultContains(new String[] {"true"});
+    public void testIgnoreCardType()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        mPaymentRequestTestRule.openPageAndClickNodeAndWait(
+                "checkBasicDebit", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
+        mPaymentRequestTestRule.expectResultContains(new String[] {"true"});
 
-        clickNodeAndWait("buyBasicDebit", getReadyForInput());
+        mPaymentRequestTestRule.clickNodeAndWait(
+                "buyBasicDebit", mPaymentRequestTestRule.getReadyForInput());
     }
 
+    @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testCannotMakeActivePaymentWithBasicMasterCard() throws InterruptedException,
-            ExecutionException, TimeoutException {
-        openPageAndClickNodeAndWait("checkBasicMasterCard", getCanMakePaymentQueryResponded());
-        expectResultContains(new String[] {"false"});
+    public void testCannotMakeActivePaymentWithBasicMasterCard()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        mPaymentRequestTestRule.openPageAndClickNodeAndWait(
+                "checkBasicMasterCard", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
+        mPaymentRequestTestRule.expectResultContains(new String[] {"false"});
 
-        reTriggerUIAndWait("buyBasicMasterCard", getReadyForInput());
+        mPaymentRequestTestRule.reTriggerUIAndWait(
+                "buyBasicMasterCard", mPaymentRequestTestRule.getReadyForInput());
     }
 
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testSupportedNetworksMustMatchForCanMakePayment()
             throws InterruptedException, ExecutionException, TimeoutException {
-        openPageAndClickNodeAndWait("checkBasicVisa", getCanMakePaymentQueryResponded());
-        expectResultContains(new String[] {"true"});
+        mPaymentRequestTestRule.openPageAndClickNodeAndWait(
+                "checkBasicVisa", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
+        mPaymentRequestTestRule.expectResultContains(new String[] {"true"});
 
-        clickNodeAndWait("checkBasicMasterCard", getCanMakePaymentQueryResponded());
-        expectResultContains(new String[] {"Not allowed to check whether can make payment"});
+        mPaymentRequestTestRule.clickNodeAndWait(
+                "checkBasicMasterCard", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
+        mPaymentRequestTestRule.expectResultContains(
+                new String[] {"Not allowed to check whether can make payment"});
 
-        clickNodeAndWait("checkBasicVisa", getCanMakePaymentQueryResponded());
-        expectResultContains(new String[] {"true"});
+        mPaymentRequestTestRule.clickNodeAndWait(
+                "checkBasicVisa", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
+        mPaymentRequestTestRule.expectResultContains(new String[] {"true"});
     }
 
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testSupportedTypesMustMatchForCanMakePayment()
             throws InterruptedException, ExecutionException, TimeoutException {
-        openPageAndClickNodeAndWait("checkBasicVisa", getCanMakePaymentQueryResponded());
-        expectResultContains(new String[] {"true"});
+        mPaymentRequestTestRule.openPageAndClickNodeAndWait(
+                "checkBasicVisa", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
+        mPaymentRequestTestRule.expectResultContains(new String[] {"true"});
 
-        clickNodeAndWait("checkBasicDebit", getCanMakePaymentQueryResponded());
-        expectResultContains(new String[] {"Not allowed to check whether can make payment"});
+        mPaymentRequestTestRule.clickNodeAndWait(
+                "checkBasicDebit", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
+        mPaymentRequestTestRule.expectResultContains(
+                new String[] {"Not allowed to check whether can make payment"});
 
-        clickNodeAndWait("checkBasicVisa", getCanMakePaymentQueryResponded());
-        expectResultContains(new String[] {"true"});
+        mPaymentRequestTestRule.clickNodeAndWait(
+                "checkBasicVisa", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
+        mPaymentRequestTestRule.expectResultContains(new String[] {"true"});
     }
 
     /**
@@ -102,19 +140,24 @@ public class PaymentRequestPaymentMethodIdentifierTest extends PaymentRequestTes
      * network support, then the user should be able to pay via their "visa" card. The merchant will
      * receive the "basic-card" method name.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testPayWithBasicCard()  throws InterruptedException, ExecutionException,
-            TimeoutException {
-        openPageAndClickNodeAndWait("checkBasicVisa", getCanMakePaymentQueryResponded());
-        expectResultContains(new String[] {"true"});
+    public void testPayWithBasicCard()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        mPaymentRequestTestRule.openPageAndClickNodeAndWait(
+                "checkBasicVisa", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
+        mPaymentRequestTestRule.expectResultContains(new String[] {"true"});
 
-        reTriggerUIAndWait("buy", getReadyToPay());
-        clickAndWait(R.id.button_primary, getReadyForUnmaskInput());
-        setTextInCardUnmaskDialogAndWait(R.id.card_unmask_input, "123", getReadyToUnmask());
-        clickCardUnmaskButtonAndWait(DialogInterface.BUTTON_POSITIVE, getDismissed());
-        expectResultContains(new String[] {"Jon Doe", "4111111111111111", "12", "2050",
-                "basic-card", "123"});
+        mPaymentRequestTestRule.reTriggerUIAndWait("buy", mPaymentRequestTestRule.getReadyToPay());
+        mPaymentRequestTestRule.clickAndWait(
+                R.id.button_primary, mPaymentRequestTestRule.getReadyForUnmaskInput());
+        mPaymentRequestTestRule.setTextInCardUnmaskDialogAndWait(
+                R.id.card_unmask_input, "123", mPaymentRequestTestRule.getReadyToUnmask());
+        mPaymentRequestTestRule.clickCardUnmaskButtonAndWait(
+                DialogInterface.BUTTON_POSITIVE, mPaymentRequestTestRule.getDismissed());
+        mPaymentRequestTestRule.expectResultContains(
+                new String[] {"Jon Doe", "4111111111111111", "12", "2050", "basic-card", "123"});
     }
 
     /**
@@ -122,23 +165,31 @@ public class PaymentRequestPaymentMethodIdentifierTest extends PaymentRequestTes
      * network support, then the user should be able to add a "mastercard" card and pay with it. The
      * merchant will receive the "mastercard" method name.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testAddMasterCard()  throws InterruptedException, ExecutionException,
-            TimeoutException {
-        triggerUIAndWait(getReadyToPay());
-        clickInPaymentMethodAndWait(R.id.payments_section, getReadyForInput());
-        clickInPaymentMethodAndWait(R.id.payments_add_option_button, getReadyToEdit());
-        setTextInCardEditorAndWait(
-                new String[] {"5555-5555-5555-4444", "Jane Jones"}, getEditorTextUpdate());
-        setSpinnerSelectionsInCardEditorAndWait(
+    public void testAddMasterCard()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_add_option_button, mPaymentRequestTestRule.getReadyToEdit());
+        mPaymentRequestTestRule.setTextInCardEditorAndWait(
+                new String[] {"5555-5555-5555-4444", "Jane Jones"},
+                mPaymentRequestTestRule.getEditorTextUpdate());
+        mPaymentRequestTestRule.setSpinnerSelectionsInCardEditorAndWait(
                 new int[] {DECEMBER, NEXT_YEAR, FIRST_BILLING_ADDRESS},
-                getBillingAddressChangeProcessed());
-        clickInCardEditorAndWait(R.id.payments_edit_done_button, getReadyToPay());
-        clickAndWait(R.id.button_primary, getReadyForUnmaskInput());
-        setTextInCardUnmaskDialogAndWait(R.id.card_unmask_input, "123", getReadyToUnmask());
-        clickCardUnmaskButtonAndWait(DialogInterface.BUTTON_POSITIVE, getDismissed());
-        expectResultContains(
+                mPaymentRequestTestRule.getBillingAddressChangeProcessed());
+        mPaymentRequestTestRule.clickInCardEditorAndWait(
+                R.id.payments_edit_done_button, mPaymentRequestTestRule.getReadyToPay());
+        mPaymentRequestTestRule.clickAndWait(
+                R.id.button_primary, mPaymentRequestTestRule.getReadyForUnmaskInput());
+        mPaymentRequestTestRule.setTextInCardUnmaskDialogAndWait(
+                R.id.card_unmask_input, "123", mPaymentRequestTestRule.getReadyToUnmask());
+        mPaymentRequestTestRule.clickCardUnmaskButtonAndWait(
+                DialogInterface.BUTTON_POSITIVE, mPaymentRequestTestRule.getDismissed());
+        mPaymentRequestTestRule.expectResultContains(
                 new String[] {"5555555555554444", "12", "Jane Jones", "123", "mastercard"});
     }
 
@@ -147,23 +198,31 @@ public class PaymentRequestPaymentMethodIdentifierTest extends PaymentRequestTes
      * network support, then the user should be able to add a new "visa" card and pay with it. The
      * merchant will receive the "basic-card" method name.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testAddBasicCard()  throws InterruptedException, ExecutionException,
-            TimeoutException {
-        triggerUIAndWait(getReadyToPay());
-        clickInPaymentMethodAndWait(R.id.payments_section, getReadyForInput());
-        clickInPaymentMethodAndWait(R.id.payments_add_option_button, getReadyToEdit());
-        setTextInCardEditorAndWait(
-                new String[] {"4242-4242-4242-4242", "Jane Jones"}, getEditorTextUpdate());
-        setSpinnerSelectionsInCardEditorAndWait(
+    public void testAddBasicCard()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_add_option_button, mPaymentRequestTestRule.getReadyToEdit());
+        mPaymentRequestTestRule.setTextInCardEditorAndWait(
+                new String[] {"4242-4242-4242-4242", "Jane Jones"},
+                mPaymentRequestTestRule.getEditorTextUpdate());
+        mPaymentRequestTestRule.setSpinnerSelectionsInCardEditorAndWait(
                 new int[] {DECEMBER, NEXT_YEAR, FIRST_BILLING_ADDRESS},
-                getBillingAddressChangeProcessed());
-        clickInCardEditorAndWait(R.id.payments_edit_done_button, getReadyToPay());
-        clickAndWait(R.id.button_primary, getReadyForUnmaskInput());
-        setTextInCardUnmaskDialogAndWait(R.id.card_unmask_input, "123", getReadyToUnmask());
-        clickCardUnmaskButtonAndWait(DialogInterface.BUTTON_POSITIVE, getDismissed());
-        expectResultContains(
+                mPaymentRequestTestRule.getBillingAddressChangeProcessed());
+        mPaymentRequestTestRule.clickInCardEditorAndWait(
+                R.id.payments_edit_done_button, mPaymentRequestTestRule.getReadyToPay());
+        mPaymentRequestTestRule.clickAndWait(
+                R.id.button_primary, mPaymentRequestTestRule.getReadyForUnmaskInput());
+        mPaymentRequestTestRule.setTextInCardUnmaskDialogAndWait(
+                R.id.card_unmask_input, "123", mPaymentRequestTestRule.getReadyToUnmask());
+        mPaymentRequestTestRule.clickCardUnmaskButtonAndWait(
+                DialogInterface.BUTTON_POSITIVE, mPaymentRequestTestRule.getDismissed());
+        mPaymentRequestTestRule.expectResultContains(
                 new String[] {"4242424242424242", "12", "Jane Jones", "123", "basic-card"});
     }
 }

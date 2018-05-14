@@ -5,16 +5,18 @@
 #ifndef IDBTestHelper_h
 #define IDBTestHelper_h
 
+#include "base/memory/scoped_refptr.h"
 #include "modules/indexeddb/IDBValue.h"
-#include "platform/wtf/RefPtr.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
+std::unique_ptr<IDBValue> CreateNullIDBValueForTesting(v8::Isolate*);
+
 // The created value is an array of true. If create_wrapped_value is true, the
 // IDBValue's byte array will be wrapped in a Blob, otherwise it will not be.
-RefPtr<IDBValue> CreateIDBValueForTesting(v8::Isolate*,
-                                          bool create_wrapped_value);
+std::unique_ptr<IDBValue> CreateIDBValueForTesting(v8::Isolate*,
+                                                   bool create_wrapped_value);
 
 }  // namespace blink
 

@@ -131,8 +131,8 @@ void DispatchOnStartupEventImpl(BrowserContext* browser_context,
           ->ShouldEnqueueTask(browser_context, extension)) {
     LazyBackgroundTaskQueue::Get(browser_context)
         ->AddPendingTask(browser_context, extension_id,
-                         base::Bind(&DispatchOnStartupEventImpl,
-                                    browser_context, extension_id, false));
+                         base::BindOnce(&DispatchOnStartupEventImpl,
+                                        browser_context, extension_id, false));
     return;
   }
 
@@ -148,7 +148,7 @@ void SetUninstallURL(ExtensionPrefs* prefs,
                      const std::string& extension_id,
                      const std::string& url_string) {
   prefs->UpdateExtensionPref(extension_id, kUninstallUrl,
-                             base::MakeUnique<base::Value>(url_string));
+                             std::make_unique<base::Value>(url_string));
 }
 
 std::string GetUninstallURL(ExtensionPrefs* prefs,
@@ -235,8 +235,8 @@ void RuntimeAPI::OnExtensionUninstalled(
     content::BrowserContext* browser_context,
     const Extension* extension,
     UninstallReason reason) {
-  RuntimeEventRouter::OnExtensionUninstalled(
-      browser_context_, extension->id(), reason);
+  RuntimeEventRouter::OnExtensionUninstalled(browser_context_, extension->id(),
+                                             reason);
 }
 
 void RuntimeAPI::Shutdown() {
@@ -572,6 +572,12 @@ void RuntimeEventRouter::OnExtensionUninstalled(
     return;
   }
 
+  // Blacklisted extensions should not open uninstall_url.
+  if (extensions::ExtensionPrefs::Get(context)->IsExtensionBlacklisted(
+          extension_id)) {
+    return;
+  }
+
   RuntimeAPI::GetFactoryInstance()->Get(context)->OpenURL(uninstall_url);
 }
 
@@ -593,7 +599,8 @@ ExtensionFunction::ResponseAction RuntimeGetBackgroundPageFunction::Run() {
     LazyBackgroundTaskQueue::Get(browser_context())
         ->AddPendingTask(
             browser_context(), extension_id(),
-            base::Bind(&RuntimeGetBackgroundPageFunction::OnPageLoaded, this));
+            base::BindOnce(&RuntimeGetBackgroundPageFunction::OnPageLoaded,
+                           this));
   } else if (host) {
     OnPageLoaded(host);
   } else {
@@ -653,11 +660,11 @@ void RuntimeRequestUpdateCheckFunction::CheckComplete(
   if (result.success) {
     std::unique_ptr<base::DictionaryValue> details(new base::DictionaryValue);
     details->SetString("version", result.version);
-    Respond(TwoArguments(base::MakeUnique<base::Value>(result.response),
+    Respond(TwoArguments(std::make_unique<base::Value>(result.response),
                          std::move(details)));
   } else {
     // HMM(kalman): Why does !success not imply Error()?
-    Respond(OneArgument(base::MakeUnique<base::Value>(result.response)));
+    Respond(OneArgument(std::make_unique<base::Value>(result.response)));
   }
 }
 

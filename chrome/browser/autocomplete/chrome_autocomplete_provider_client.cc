@@ -12,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
+#include "chrome/browser/autocomplete/contextual_suggestions_service_factory.h"
 #include "chrome/browser/autocomplete/in_memory_url_index_factory.h"
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_service.h"
@@ -23,17 +24,24 @@
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/prefs/pref_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/sync/driver/sync_service_utils.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/browser/web_contents.h"
 #include "extensions/features/features.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 
@@ -44,7 +52,7 @@
 namespace {
 
 #if !defined(OS_ANDROID)
-// This list should be kept in sync with chrome/common/url_constants.h.
+// This list should be kept in sync with chrome/common/webui_url_constants.h.
 // Only include useful sub-pages, confirmation alerts are not useful.
 const char* const kChromeSettingsSubPages[] = {
     chrome::kAutofillSubPage,        chrome::kClearBrowserDataSubPage,
@@ -63,18 +71,14 @@ const char* const kChromeSettingsSubPages[] = {
 };
 #endif  // !defined(OS_ANDROID)
 
-// A callback that does nothing, called after the search service worker is
-// started.
-void NoopCallback(content::StartServiceWorkerForNavigationHintResult) {}
-
 }  // namespace
 
 ChromeAutocompleteProviderClient::ChromeAutocompleteProviderClient(
     Profile* profile)
     : profile_(profile),
       scheme_classifier_(profile),
-      search_terms_data_(profile_) {
-}
+      search_terms_data_(profile_),
+      storage_partition_(nullptr) {}
 
 ChromeAutocompleteProviderClient::~ChromeAutocompleteProviderClient() {
 }
@@ -133,6 +137,13 @@ ChromeAutocompleteProviderClient::GetTemplateURLService() const {
   return TemplateURLServiceFactory::GetForProfile(profile_);
 }
 
+ContextualSuggestionsService*
+ChromeAutocompleteProviderClient::GetContextualSuggestionsService(
+    bool create_if_necessary) const {
+  return ContextualSuggestionsServiceFactory::GetForProfile(
+      profile_, create_if_necessary);
+}
+
 const
 SearchTermsData& ChromeAutocompleteProviderClient::GetSearchTermsData() const {
   return search_terms_data_;
@@ -152,7 +163,7 @@ std::unique_ptr<KeywordExtensionsDelegate>
 ChromeAutocompleteProviderClient::GetKeywordExtensionsDelegate(
     KeywordProvider* keyword_provider) {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  return base::MakeUnique<KeywordExtensionsDelegateImpl>(profile_,
+  return std::make_unique<KeywordExtensionsDelegateImpl>(profile_,
                                                          keyword_provider);
 #else
   return nullptr;
@@ -211,6 +222,30 @@ ChromeAutocompleteProviderClient::GetBuiltinsToProvideAsUserTypes() {
   return builtins_to_provide;
 }
 
+base::Time ChromeAutocompleteProviderClient::GetCurrentVisitTimestamp() const {
+// The timestamp is currenly used only for contextual zero suggest suggestions
+// on desktop. Consider updating this if this will be used for mobile services.
+#if !defined(OS_ANDROID)
+  const Browser* active_browser = BrowserList::GetInstance()->GetLastActive();
+  if (!active_browser)
+    return base::Time();
+
+  const content::WebContents* active_tab =
+      active_browser->tab_strip_model()->GetActiveWebContents();
+  if (!active_tab)
+    return base::Time();
+
+  const content::NavigationEntry* navigation =
+      active_tab->GetController().GetLastCommittedEntry();
+  if (!navigation)
+    return base::Time();
+
+  return navigation->GetTimestamp();
+#else
+  return base::Time();
+#endif  // !defined(OS_ANDROID)
+}
+
 bool ChromeAutocompleteProviderClient::IsOffTheRecord() const {
   return profile_->IsOffTheRecord();
 }
@@ -223,6 +258,12 @@ bool ChromeAutocompleteProviderClient::TabSyncEnabledAndUnencrypted() const {
   return syncer::IsTabSyncEnabledAndUnencrypted(
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_),
       profile_->GetPrefs());
+}
+
+bool ChromeAutocompleteProviderClient::IsAuthenticated() const {
+  SigninManagerBase* signin_manager =
+      SigninManagerFactory::GetForProfile(profile_);
+  return signin_manager != nullptr && signin_manager->IsAuthenticated();
 }
 
 void ChromeAutocompleteProviderClient::Classify(
@@ -273,7 +314,7 @@ void ChromeAutocompleteProviderClient::PrefetchImage(const GURL& url) {
           destination: WEBSITE
         }
         policy {
-          cookies_allowed: true
+          cookies_allowed: YES
           cookies_store: "user"
           setting:
             "You can enable or disable this feature via 'Use a prediction "
@@ -293,8 +334,15 @@ void ChromeAutocompleteProviderClient::PrefetchImage(const GURL& url) {
 
 void ChromeAutocompleteProviderClient::StartServiceWorker(
     const GURL& destination_url) {
-  content::StoragePartition* partition =
-      content::BrowserContext::GetDefaultStoragePartition(profile_);
+  if (!SearchSuggestEnabled())
+    return;
+
+  if (profile_->IsOffTheRecord())
+    return;
+
+  content::StoragePartition* partition = storage_partition_;
+  if (!partition)
+    partition = content::BrowserContext::GetDefaultStoragePartition(profile_);
   if (!partition)
     return;
 
@@ -302,11 +350,8 @@ void ChromeAutocompleteProviderClient::StartServiceWorker(
   if (!context)
     return;
 
-  if (!SearchSuggestEnabled())
-    return;
-
   context->StartServiceWorkerForNavigationHint(destination_url,
-                                               base::Bind(&NoopCallback));
+                                               base::DoNothing());
 }
 
 void ChromeAutocompleteProviderClient::OnAutocompleteControllerResultReady(
@@ -315,4 +360,27 @@ void ChromeAutocompleteProviderClient::OnAutocompleteControllerResultReady(
       chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
       content::Source<AutocompleteController>(controller),
       content::NotificationService::NoDetails());
+}
+
+// TODO(crbug.com/46623): Maintain a map of URL->WebContents for fast look-up.
+bool ChromeAutocompleteProviderClient::IsTabOpenWithURL(const GURL& url) {
+#if !defined(OS_ANDROID)
+  Browser* active_browser = BrowserList::GetInstance()->GetLastActive();
+  content::WebContents* active_tab = nullptr;
+  if (active_browser)
+    active_tab = active_browser->tab_strip_model()->GetActiveWebContents();
+  for (auto* browser : *BrowserList::GetInstance()) {
+    // Only look at same profile (and anonymity level).
+    if (browser->profile()->IsSameProfile(profile_) &&
+        browser->profile()->GetProfileType() == profile_->GetProfileType()) {
+      for (int i = 0; i < browser->tab_strip_model()->count(); ++i) {
+        content::WebContents* web_contents =
+            browser->tab_strip_model()->GetWebContentsAt(i);
+        if (web_contents != active_tab && web_contents->GetVisibleURL() == url)
+          return true;
+      }
+    }
+  }
+#endif  // !defined(OS_ANDROID)
+  return false;
 }

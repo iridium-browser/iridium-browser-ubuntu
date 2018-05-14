@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/values.h"
+#include "chromeos/network/network_event_log.h"
 #include "chromeos/network/onc/onc_signature.h"
 #include "chromeos/network/onc/onc_utils.h"
 #include "components/onc/onc_constants.h"
@@ -19,8 +20,7 @@ Normalizer::Normalizer(bool remove_recommended_fields)
     : remove_recommended_fields_(remove_recommended_fields) {
 }
 
-Normalizer::~Normalizer() {
-}
+Normalizer::~Normalizer() = default;
 
 std::unique_ptr<base::DictionaryValue> Normalizer::NormalizeObject(
     const OncValueSignature* object_signature,
@@ -73,8 +73,10 @@ namespace {
 void RemoveEntryUnless(base::DictionaryValue* dict,
                        const std::string& path,
                        bool condition) {
-  if (!condition)
-    dict->RemoveWithoutPathExpansion(path, NULL);
+  if (!condition && dict->FindKey(path)) {
+    NET_LOG(ERROR) << "onc::Normalizer:Removing: " << path;
+    dict->RemoveKey(path);
+  }
 }
 
 }  // namespace
@@ -195,9 +197,12 @@ void Normalizer::NormalizeOpenVPN(base::DictionaryValue* openvpn) {
                     ::onc::client_cert::kClientCertRef,
                     clientcert_type == ::onc::client_cert::kRef);
 
-  std::string user_auth_type;
-  openvpn->GetStringWithoutPathExpansion(
-      ::onc::openvpn::kUserAuthenticationType, &user_auth_type);
+  base::Value* user_auth_type_value = openvpn->FindKeyOfType(
+      ::onc::openvpn::kUserAuthenticationType, base::Value::Type::STRING);
+  // If UserAuthenticationType is unspecified, do not strip Password and OTP.
+  if (!user_auth_type_value)
+    return;
+  std::string user_auth_type = user_auth_type_value->GetString();
   RemoveEntryUnless(
       openvpn,
       ::onc::openvpn::kPassword,
@@ -229,6 +234,7 @@ void Normalizer::NormalizeVPN(base::DictionaryValue* vpn) {
   RemoveEntryUnless(vpn, kIPsec, type == kIPsec || type == kTypeL2TP_IPsec);
   RemoveEntryUnless(vpn, kL2TP, type == kTypeL2TP_IPsec);
   RemoveEntryUnless(vpn, kThirdPartyVpn, type == kThirdPartyVpn);
+  RemoveEntryUnless(vpn, kArcVpn, type == kArcVpn);
 }
 
 void Normalizer::NormalizeWiFi(base::DictionaryValue* wifi) {

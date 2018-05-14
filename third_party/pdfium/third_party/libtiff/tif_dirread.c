@@ -41,6 +41,7 @@
 
 #include "tiffiop.h"
 #include <float.h>
+#include <limits.h>
 
 #define IGNORE 0          /* tag placeholder used below */
 #define FAILED_FII    ((uint32) -1)
@@ -3638,6 +3639,13 @@ TIFFReadDirectory(TIFF* tif)
 		    isTiled(tif) ? "tiles" : "strips");
 		goto bad;
 	}
+	if (tif->tif_dir.td_nstrips > INT_MAX) {
+		TIFFErrorExt(tif->tif_clientdata, module,
+		    "Cannot handle %u number of %s",
+		    tif->tif_dir.td_nstrips,
+		    isTiled(tif) ? "tiles" : "strips");
+		goto bad;
+	}
 	tif->tif_dir.td_stripsperimage = tif->tif_dir.td_nstrips;
 	if (tif->tif_dir.td_planarconfig == PLANARCONFIG_SEPARATE)
 		tif->tif_dir.td_stripsperimage /= tif->tif_dir.td_samplesperpixel;
@@ -4491,7 +4499,7 @@ TIFFFetchDirectory(TIFF* tif, uint64 diroff, TIFFDirEntry** pdir,
 	static const char module[] = "TIFFFetchDirectory";
 
 	void* origdir;
-	uint16 dircount16 = 0;
+	uint16 dircount16;
 	uint32 dirsize;
 	TIFFDirEntry* dir;
 	uint8* ma;
@@ -5429,8 +5437,6 @@ TIFFFetchStripThing(TIFF* tif, TIFFDirEntry* dir, uint32 nstrips, uint64** lpp)
 	static const char module[] = "TIFFFetchStripThing";
 	enum TIFFReadDirEntryErr err;
 	uint64* data;
-	_TIFFfree(*lpp);
-	*lpp = 0;
 	err=TIFFReadDirEntryLong8Array(tif,dir,&data);
 	if (err!=TIFFReadDirEntryErrOk)
 	{

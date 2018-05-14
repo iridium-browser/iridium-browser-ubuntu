@@ -17,13 +17,18 @@ namespace content {
 class WebContents;
 }
 
+namespace previews {
+class PreviewsUIService;
+}
+
 // Shows an infobar that lets the user know that a preview page has been loaded,
 // and gives the user a link to reload the original page. This infobar will only
 // be shown once per page load. Records UMA data for user interactions with the
 // infobar.
 class PreviewsInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  typedef base::Callback<void(bool opt_out)> OnDismissPreviewsInfobarCallback;
+  typedef base::OnceCallback<void(bool opt_out)>
+      OnDismissPreviewsInfobarCallback;
 
   // Actions on the previews infobar. This enum must remain synchronized with
   // the enum of the same name in metrics/histograms/histograms.xml.
@@ -52,14 +57,18 @@ class PreviewsInfoBarDelegate : public ConfirmInfoBarDelegate {
   ~PreviewsInfoBarDelegate() override;
 
   // Creates a preview infobar and corresponding delegate and adds the infobar
-  // to InfoBarService.
+  // to InfoBarService. |on_dismiss_callback| is called when the InfoBar is
+  // dismissed.
   static void Create(
       content::WebContents* web_contents,
       previews::PreviewsType previews_type,
       base::Time previews_freshness,
       bool is_data_saver_user,
       bool is_reload,
-      const OnDismissPreviewsInfobarCallback& on_dismiss_callback);
+      // TODO(ryansturm): Replace |on_dismiss_callback| with direct call to
+      // |previews_ui_service|.
+      OnDismissPreviewsInfobarCallback on_dismiss_callback,
+      previews::PreviewsUIService* previews_ui_service);
 
   // ConfirmInfoBarDelegate overrides:
   int GetIconId() const override;
@@ -72,13 +81,12 @@ class PreviewsInfoBarDelegate : public ConfirmInfoBarDelegate {
   static const void* OptOutEventKey();
 
  private:
-  PreviewsInfoBarDelegate(
-      PreviewsInfoBarTabHelper* infobar_tab_helper,
-      previews::PreviewsType previews_type,
-      base::Time previews_freshness,
-      bool is_data_saver_user,
-      bool is_reload,
-      const OnDismissPreviewsInfobarCallback& on_dismiss_callback);
+  PreviewsInfoBarDelegate(PreviewsInfoBarTabHelper* infobar_tab_helper,
+                          previews::PreviewsType previews_type,
+                          base::Time previews_freshness,
+                          bool is_data_saver_user,
+                          bool is_reload,
+                          OnDismissPreviewsInfobarCallback on_dismiss_callback);
 
   // ConfirmInfoBarDelegate overrides:
   infobars::InfoBarDelegate::InfoBarIdentifier GetIdentifier() const override;

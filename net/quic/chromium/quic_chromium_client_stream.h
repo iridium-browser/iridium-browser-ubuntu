@@ -9,11 +9,12 @@
 
 #include <stddef.h>
 
-#include <deque>
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
+#include "net/base/completion_callback.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
 #include "net/base/upload_data_stream.h"
@@ -23,10 +24,11 @@
 #include "net/log/net_log_with_source.h"
 #include "net/quic/core/quic_spdy_stream.h"
 #include "net/quic/platform/api/quic_string_piece.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
 
-class QuicClientSessionBase;
+class QuicSpdyClientSessionBase;
 
 // A client-initiated ReliableQuicStream.  Instances of this class
 // are owned by the QuicClientSession which created them.
@@ -116,6 +118,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream : public QuicSpdyStream {
     uint64_t stream_bytes_read() const;
     uint64_t stream_bytes_written() const;
     size_t NumBytesConsumed() const;
+    bool HasBytesToRead() const;
     bool IsDoneReading() const;
     bool IsFirstStream() const;
 
@@ -123,8 +126,9 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream : public QuicSpdyStream {
     void OnPromiseHeaderList(QuicStreamId promised_id,
                              size_t frame_len,
                              const QuicHeaderList& header_list);
-    SpdyPriority priority() const;
     bool can_migrate();
+
+    const NetLogWithSource& net_log() const;
 
    private:
     friend class QuicChromiumClientStream;
@@ -180,18 +184,21 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream : public QuicSpdyStream {
     bool is_done_reading_;
     bool is_first_stream_;
     size_t num_bytes_consumed_;
-    SpdyPriority priority_;
 
     int net_error_;
+
+    NetLogWithSource net_log_;
 
     base::WeakPtrFactory<Handle> weak_factory_;
 
     DISALLOW_COPY_AND_ASSIGN(Handle);
   };
 
-  QuicChromiumClientStream(QuicStreamId id,
-                           QuicClientSessionBase* session,
-                           const NetLogWithSource& net_log);
+  QuicChromiumClientStream(
+      QuicStreamId id,
+      QuicSpdyClientSessionBase* session,
+      const NetLogWithSource& net_log,
+      const NetworkTrafficAnnotationTag& traffic_annotation);
 
   ~QuicChromiumClientStream() override;
 
@@ -212,7 +219,6 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream : public QuicSpdyStream {
                       bool fin,
                       QuicReferenceCountedPointer<QuicAckListenerInterface>
                           ack_listener) override;
-  SpdyPriority priority() const override;
 
   // While the server's set_priority shouldn't be called externally, the creator
   // of client-side streams should be able to set the priority.
@@ -273,7 +279,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream : public QuicSpdyStream {
   // True when initial headers have been sent.
   bool initial_headers_sent_;
 
-  QuicClientSessionBase* session_;
+  QuicSpdyClientSessionBase* session_;
 
   // Set to false if this stream to not be migrated during connection migration.
   bool can_migrate_;

@@ -5,7 +5,6 @@
 #import "ios/chrome/browser/ui/commands/show_signin_command.h"
 
 #include "base/logging.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -19,18 +18,13 @@
 @synthesize promoAction = _promoAction;
 @synthesize callback = _callback;
 
-- (instancetype)initWithTag:(NSInteger)tag {
-  NOTREACHED();
-  return nil;
-}
-
 - (instancetype)initWithOperation:(AuthenticationOperation)operation
                          identity:(ChromeIdentity*)identity
                       accessPoint:(signin_metrics::AccessPoint)accessPoint
                       promoAction:(signin_metrics::PromoAction)promoAction
                          callback:
                              (ShowSigninCommandCompletionCallback)callback {
-  if ((self = [super initWithTag:IDC_SHOW_SIGNIN_IOS])) {
+  if ((self = [super init])) {
     DCHECK(operation == AUTHENTICATION_OPERATION_SIGNIN || identity == nil);
     _operation = operation;
     _identity = identity;

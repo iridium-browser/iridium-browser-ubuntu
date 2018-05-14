@@ -8,14 +8,14 @@
 #include "ash/frame/caption_buttons/frame_caption_button_container_view.h"
 #include "ash/public/cpp/immersive/immersive_fullscreen_controller_test_api.h"
 #include "ash/public/cpp/shelf_types.h"
+#include "ash/public/cpp/window_properties.h"
+#include "ash/public/interfaces/window_pin_type.mojom.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
@@ -72,7 +72,7 @@ class ImmersiveModeControllerAshTest : public TestWithBrowserView {
   // Set whether the browser is in tab fullscreen.
   void SetTabFullscreen(bool tab_fullscreen) {
     content::WebContents* web_contents =
-        browser_view()->GetContentsWebViewForTest()->GetWebContents();
+        browser_view()->contents_web_view()->GetWebContents();
     std::unique_ptr<FullscreenNotificationObserver> waiter(
         new FullscreenNotificationObserver());
     if (tab_fullscreen) {
@@ -120,8 +120,7 @@ TEST_F(ImmersiveModeControllerAshTest, Layout) {
 
   TabStrip* tabstrip = browser_view()->tabstrip();
   ToolbarView* toolbar = browser_view()->toolbar();
-  views::WebView* contents_web_view =
-      browser_view()->GetContentsWebViewForTest();
+  views::WebView* contents_web_view = browser_view()->contents_web_view();
 
   // Immersive fullscreen starts out disabled.
   ASSERT_FALSE(browser_view()->GetWidget()->IsFullscreen());
@@ -281,169 +280,11 @@ TEST_F(ImmersiveModeControllerAshTest, LayeredSpinners) {
   EXPECT_TRUE(tabstrip->CanPaintThrobberToLayer());
 }
 
-class ImmersiveModeControllerAshTestHostedApp
-    : public ImmersiveModeControllerAshTest {
- public:
-  ImmersiveModeControllerAshTestHostedApp()
-      : ImmersiveModeControllerAshTest(Browser::TYPE_POPUP, true) {}
-  ~ImmersiveModeControllerAshTestHostedApp() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ImmersiveModeControllerAshTestHostedApp);
-};
-
-// Test the layout and visibility of the TopContainerView and web contents when
-// a hosted app is put into immersive fullscreen.
-TEST_F(ImmersiveModeControllerAshTestHostedApp, Layout) {
-  // Add a tab because the browser starts out without any tabs at all.
-  AddTab(browser(), GURL("about:blank"));
-
-  TabStrip* tabstrip = browser_view()->tabstrip();
-  ToolbarView* toolbar = browser_view()->toolbar();
-  views::WebView* contents_web_view =
-      browser_view()->GetContentsWebViewForTest();
-  views::View* top_container = browser_view()->top_container();
-
-  // Immersive fullscreen starts out disabled.
-  ASSERT_FALSE(browser_view()->GetWidget()->IsFullscreen());
-  ASSERT_FALSE(controller()->IsEnabled());
-
-  // The tabstrip and toolbar are not visible for hosted apps.
-  EXPECT_FALSE(tabstrip->visible());
-  EXPECT_FALSE(toolbar->visible());
-
-  // The window header should be above the web contents.
-  int header_height = GetBoundsInWidget(contents_web_view).y();
-
+// Make sure that going from regular fullscreen to locked fullscreen does not
+// cause a crash. crbug.com/796171
+TEST_F(ImmersiveModeControllerAshTest, RegularFullscreenToLockedFullscreen) {
   ToggleFullscreen();
-  EXPECT_TRUE(browser_view()->GetWidget()->IsFullscreen());
-  EXPECT_TRUE(controller()->IsEnabled());
-  EXPECT_FALSE(controller()->IsRevealed());
-
-  // Entering immersive fullscreen should make the web contents flush with the
-  // top of the widget. The popup browser type doesn't support tabstrip and
-  // toolbar feature, thus invisible.
-  EXPECT_FALSE(tabstrip->visible());
-  EXPECT_FALSE(toolbar->visible());
-  EXPECT_TRUE(top_container->GetVisibleBounds().IsEmpty());
-  EXPECT_EQ(0, GetBoundsInWidget(contents_web_view).y());
-
-  // Reveal the window header.
-  AttemptReveal();
-
-  // The tabstrip and toolbar should still be hidden and the web contents should
-  // still be flush with the top of the screen.
-  EXPECT_FALSE(tabstrip->visible());
-  EXPECT_FALSE(toolbar->visible());
-  EXPECT_EQ(0, GetBoundsInWidget(contents_web_view).y());
-
-  // During an immersive reveal, the window header should be painted to the
-  // TopContainerView. The TopContainerView should be flush with the top of the
-  // widget and have |header_height|.
-  gfx::Rect top_container_bounds_in_widget(GetBoundsInWidget(top_container));
-  EXPECT_EQ(0, top_container_bounds_in_widget.y());
-  EXPECT_EQ(header_height, top_container_bounds_in_widget.height());
-
-  // Exit immersive fullscreen. The web contents should be back below the window
-  // header.
-  ToggleFullscreen();
-  EXPECT_FALSE(browser_view()->GetWidget()->IsFullscreen());
-  EXPECT_FALSE(controller()->IsEnabled());
-  EXPECT_FALSE(tabstrip->visible());
-  EXPECT_FALSE(toolbar->visible());
-  EXPECT_EQ(header_height, GetBoundsInWidget(contents_web_view).y());
-}
-
-class ImmersiveModeControllerAshTestTabletMode
-    : public ImmersiveModeControllerAshTest {
- public:
-  ImmersiveModeControllerAshTestTabletMode()
-      : ImmersiveModeControllerAshTest(Browser::TYPE_POPUP, false) {}
-  ~ImmersiveModeControllerAshTestTabletMode() override {}
-
-  void SetUp() override {
-    scoped_feature_list.InitAndEnableFeature(
-        ash::kAutoHideTitleBarsInTabletMode);
-    ImmersiveModeControllerAshTest::SetUp();
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list;
-
-  DISALLOW_COPY_AND_ASSIGN(ImmersiveModeControllerAshTestTabletMode);
-};
-
-// Verify the immersive mode status is as expected in tablet mode when the auto
-// hide title bars in tablet mode feature is enabled.
-TEST_F(ImmersiveModeControllerAshTestTabletMode, ImmersiveModeStatus) {
-  ASSERT_FALSE(controller()->IsEnabled());
-
-  // Verify that after entering tablet mode, immersive mode is enabled.
-  ash::Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(
-      true);
-  EXPECT_TRUE(controller()->IsEnabled());
-
-  // Verify that after minimizing, immersive mode is disabled.
-  browser()->window()->Minimize();
-  EXPECT_FALSE(controller()->IsEnabled());
-
-  // Verify that after showing the browser, immersive mode is reenabled.
-  browser()->window()->Show();
-  EXPECT_TRUE(controller()->IsEnabled());
-
-  // Verify that immersive mode remains if fullscreen is toggled while in tablet
-  // mode.
-  ToggleFullscreen();
-  EXPECT_TRUE(controller()->IsEnabled());
-  ash::Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(
-      false);
-  EXPECT_TRUE(controller()->IsEnabled());
-
-  // Verify that immersive mode remains if the browser was fullscreened when
-  // entering tablet mode.
-  ash::Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(
-      true);
-  EXPECT_TRUE(controller()->IsEnabled());
-
-  // Verify that if the browser is not fullscreened, upon exiting tablet mode,
-  // immersive mode is not enabled.
-  ToggleFullscreen();
-  EXPECT_TRUE(controller()->IsEnabled());
-  ash::Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(
-      false);
-  EXPECT_FALSE(controller()->IsEnabled());
-}
-
-// Verify that the frame layout is as expected when using immersive mode in
-// tablet mode.
-TEST_F(ImmersiveModeControllerAshTestTabletMode, FrameLayout) {
-  ASSERT_FALSE(controller()->IsEnabled());
-  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
-  // We know we're using Ash, so static cast.
-  BrowserNonClientFrameViewAsh* frame_view =
-      static_cast<BrowserNonClientFrameViewAsh*>(
-          browser_view->GetWidget()->non_client_view()->frame_view());
-  ash::FrameCaptionButtonContainerView* caption_button_container =
-      frame_view->caption_button_container_;
-  ash::FrameCaptionButtonContainerView::TestApi frame_test_api(
-      caption_button_container);
-
-  EXPECT_TRUE(frame_test_api.size_button()->visible());
-  ash::Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(
-      true);
-  frame_test_api.EndAnimations();
-
-  // Verify the size button is hidden in tablet mode.
-  EXPECT_FALSE(frame_test_api.size_button()->visible());
-  ash::Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(
-      false);
-  frame_test_api.EndAnimations();
-
-  // Verify the size button is visible in clamshell mode, and that it does not
-  // cover the other two buttons.
-  EXPECT_TRUE(frame_test_api.size_button()->visible());
-  EXPECT_FALSE(frame_test_api.size_button()->GetBoundsInScreen().Intersects(
-      frame_test_api.close_button()->GetBoundsInScreen()));
-  EXPECT_FALSE(frame_test_api.size_button()->GetBoundsInScreen().Intersects(
-      frame_test_api.minimize_button()->GetBoundsInScreen()));
+  // Set locked fullscreen state.
+  browser()->window()->GetNativeWindow()->SetProperty(
+      ash::kWindowPinTypeKey, ash::mojom::WindowPinType::TRUSTED_PINNED);
 }

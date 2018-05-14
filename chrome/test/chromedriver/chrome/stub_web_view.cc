@@ -116,7 +116,9 @@ Status StubWebView::GetCookies(std::unique_ptr<base::ListValue>* cookies,
 }
 
 Status StubWebView::DeleteCookie(const std::string& name,
-                                 const std::string& url) {
+                                 const std::string& url,
+                                 const std::string& domain,
+                                 const std::string& path) {
   return Status(kOk);
 }
 
@@ -207,4 +209,12 @@ Status StubWebView::SetScreenOrientation(std::string orientation) {
 
 Status StubWebView::DeleteScreenOrientation() {
   return Status(kOk);
+}
+
+bool StubWebView::IsOOPIF(const std::string& frame_id) {
+  return false;
+}
+
+FrameTracker* StubWebView::GetFrameTracker() const {
+  return nullptr;
 }

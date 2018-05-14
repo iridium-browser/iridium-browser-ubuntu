@@ -5,19 +5,23 @@
 #ifndef NGFloatsUtils_h
 #define NGFloatsUtils_h
 
-#include "core/layout/ng/geometry/ng_logical_offset.h"
-#include "core/layout/ng/ng_constraint_space.h"
-#include "core/layout/ng/ng_fragment_builder.h"
-#include "core/layout/ng/ng_positioned_float.h"
-#include "core/layout/ng/ng_unpositioned_float.h"
+#include "base/memory/scoped_refptr.h"
+#include "core/CoreExport.h"
+#include "platform/LayoutUnit.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
+
+class NGConstraintSpace;
+class NGExclusionSpace;
+struct NGPositionedFloat;
+struct NGUnpositionedFloat;
 
 // Returns the inline size (relative to {@code parent_space}) of the
 // unpositioned float. If the float is in a different writing mode, this will
 // perform a layout.
 CORE_EXPORT LayoutUnit
-ComputeInlineSizeForUnpositionedFloat(NGConstraintSpace* parent_space,
+ComputeInlineSizeForUnpositionedFloat(const NGConstraintSpace& parent_space,
                                       NGUnpositionedFloat* unpositioned_float);
 
 // Positions {@code unpositioned_float} into {@code new_parent_space}.
@@ -26,15 +30,17 @@ CORE_EXPORT NGPositionedFloat
 PositionFloat(LayoutUnit origin_block_offset,
               LayoutUnit parent_bfc_block_offset,
               NGUnpositionedFloat*,
-              NGConstraintSpace* new_parent_space);
+              const NGConstraintSpace& parent_space,
+              NGExclusionSpace* exclusion_space);
 
 // Positions the list of {@code unpositioned_floats}. Adds them as exclusions to
 // {@code space}.
 CORE_EXPORT const Vector<NGPositionedFloat> PositionFloats(
     LayoutUnit origin_block_offset,
     LayoutUnit container_block_offset,
-    const Vector<RefPtr<NGUnpositionedFloat>>& unpositioned_floats,
-    NGConstraintSpace* space);
+    const Vector<scoped_refptr<NGUnpositionedFloat>>& unpositioned_floats,
+    const NGConstraintSpace& space,
+    NGExclusionSpace* exclusion_space);
 
 }  // namespace blink
 

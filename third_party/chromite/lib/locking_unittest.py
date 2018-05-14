@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -32,7 +33,7 @@ class LockingTest(cros_test_lib.TempDirTestCase):
 
   def _HelperSingleLockTest(self, blocking, shared, locktype):
     """Helper method that runs a basic test with/without blocking/sharing."""
-    self.assertFalse(os.path.exists(self.lock_file))
+    self.assertNotExists(self.lock_file)
 
     lock = locking.FileLock(
         self.lock_file, blocking=blocking, locktype=locktype)
@@ -40,7 +41,7 @@ class LockingTest(cros_test_lib.TempDirTestCase):
 
     lock.write_lock()
     self.assertTrue(lock.IsLocked())
-    self.assertTrue(os.path.exists(self.lock_file))
+    self.assertExists(self.lock_file)
 
     # Acquiring the lock again should be safe.
     lock.lock(shared)

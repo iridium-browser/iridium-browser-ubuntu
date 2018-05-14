@@ -51,9 +51,11 @@ void PaintLayerResourceInfo::ResourceContentChanged() {
   DCHECK(layer_);
   LayoutObject& layout_object = layer_->GetLayoutObject();
   layout_object.SetShouldDoFullPaintInvalidation();
+  layout_object.InvalidateClipPathCache();
   // The effect paint property nodes depend on SVG filters so we need
   // to update these properties when filter resources change.
   layout_object.SetNeedsPaintPropertyUpdate();
+  layer_->SetFilterOnEffectNodeDirty();
   const ComputedStyle& style = layout_object.StyleRef();
   if (style.HasFilter() && style.Filter().HasReferenceFilter())
     InvalidateFilterChain();
@@ -63,9 +65,11 @@ void PaintLayerResourceInfo::ResourceElementChanged() {
   DCHECK(layer_);
   LayoutObject& layout_object = layer_->GetLayoutObject();
   layout_object.SetShouldDoFullPaintInvalidation();
+  layout_object.InvalidateClipPathCache();
   // The effect paint property nodes depend on SVG filters so we need
   // to update these properties when filter resources change.
   layout_object.SetNeedsPaintPropertyUpdate();
+  layer_->SetFilterOnEffectNodeDirty();
   const ComputedStyle& style = layout_object.StyleRef();
   if (style.HasFilter() && style.Filter().HasReferenceFilter())
     InvalidateFilterChain();
@@ -83,7 +87,7 @@ void PaintLayerResourceInfo::InvalidateFilterChain() {
   last_effect_ = nullptr;
 }
 
-DEFINE_TRACE(PaintLayerResourceInfo) {
+void PaintLayerResourceInfo::Trace(blink::Visitor* visitor) {
   visitor->Trace(last_effect_);
   SVGResourceClient::Trace(visitor);
 }

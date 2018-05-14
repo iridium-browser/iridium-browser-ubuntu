@@ -4,8 +4,9 @@
 
 #include "remoting/base/chromium_url_request.h"
 
+#include <memory>
+
 #include "base/callback_helpers.h"
-#include "base/memory/ptr_util.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -34,7 +35,7 @@ ChromiumUrlRequest::ChromiumUrlRequest(
                              net::LOAD_DO_NOT_SEND_COOKIES);
 }
 
-ChromiumUrlRequest::~ChromiumUrlRequest() {}
+ChromiumUrlRequest::~ChromiumUrlRequest() = default;
 
 void ChromiumUrlRequest::AddHeader(const std::string& value) {
   url_fetcher_->AddExtraRequestHeader(value);
@@ -72,13 +73,13 @@ void ChromiumUrlRequest::OnURLFetchComplete(
 ChromiumUrlRequestFactory::ChromiumUrlRequestFactory(
     scoped_refptr<net::URLRequestContextGetter> url_context)
     : url_context_(url_context) {}
-ChromiumUrlRequestFactory::~ChromiumUrlRequestFactory() {}
+ChromiumUrlRequestFactory::~ChromiumUrlRequestFactory() = default;
 
 std::unique_ptr<UrlRequest> ChromiumUrlRequestFactory::CreateUrlRequest(
     UrlRequest::Type type,
     const std::string& url,
     const net::NetworkTrafficAnnotationTag& traffic_annotation) {
-  return base::MakeUnique<ChromiumUrlRequest>(url_context_, type, url,
+  return std::make_unique<ChromiumUrlRequest>(url_context_, type, url,
                                               traffic_annotation);
 }
 

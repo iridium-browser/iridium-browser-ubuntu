@@ -5,7 +5,6 @@
 #import "ios/web/navigation/serializable_user_data_manager_impl.h"
 
 #import "base/mac/foundation_util.h"
-#include "base/memory/ptr_util.h"
 #import "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -38,7 +37,7 @@ class SerializableUserDataManagerWrapper : public base::SupportsUserData::Data {
 
     web_state->SetUserData(
         kSerializableUserDataManagerKey,
-        base::MakeUnique<SerializableUserDataManagerWrapper>());
+        std::make_unique<SerializableUserDataManagerWrapper>());
     return static_cast<SerializableUserDataManagerWrapper*>(
         web_state->GetUserData(kSerializableUserDataManagerKey));
   }
@@ -54,7 +53,7 @@ class SerializableUserDataManagerWrapper : public base::SupportsUserData::Data {
 
 // static
 std::unique_ptr<SerializableUserData> SerializableUserData::Create() {
-  return base::MakeUnique<SerializableUserDataImpl>();
+  return std::make_unique<SerializableUserDataImpl>();
 }
 
 SerializableUserDataImpl::SerializableUserDataImpl() : data_(@{}) {}
@@ -75,14 +74,14 @@ void SerializableUserDataImpl::Decode(NSCoder* coder) {
   NSMutableDictionary<NSString*, id<NSCoding>>* data =
       [[coder decodeObjectForKey:kSerializedUserDataKey] mutableCopy];
   if (!data) {
-    // Sessions saved with version M-57 or ealier do not have a serialized
+    // Sessions saved with version M-57 or earlier do not have a serialized
     // user data. Ensure that |data| is non-null.
     // TODO(crbug.com/661633): remove this once migration from version M-57
     // or earlier is no longer supported.
     data = [NSMutableDictionary dictionary];
   }
   [data addEntriesFromDictionary:GetDecodedLegacyValues(coder)];
-  data_.reset([data copy]);
+  data_ = [data copy];
   DCHECK(data_);
 }
 
@@ -138,7 +137,7 @@ id<NSCoding> SerializableUserDataManagerImpl::GetValueForSerializationKey(
 
 std::unique_ptr<SerializableUserData>
 SerializableUserDataManagerImpl::CreateSerializableUserData() const {
-  return base::MakeUnique<SerializableUserDataImpl>(data_);
+  return std::make_unique<SerializableUserDataImpl>(data_);
 }
 
 void SerializableUserDataManagerImpl::AddSerializableUserData(
@@ -146,7 +145,7 @@ void SerializableUserDataManagerImpl::AddSerializableUserData(
   if (data) {
     SerializableUserDataImpl* data_impl =
         static_cast<SerializableUserDataImpl*>(data);
-    data_.reset([data_impl->data() mutableCopy]);
+    data_ = [data_impl->data() mutableCopy];
     DCHECK(data_);
   }
 }

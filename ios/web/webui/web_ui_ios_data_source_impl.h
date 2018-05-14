@@ -34,6 +34,8 @@ class WebUIIOSDataSourceImpl : public URLDataSourceIOSImpl,
   void AddResourcePath(const std::string& path, int resource_id) override;
   void SetDefaultResource(int resource_id) override;
   void DisableDenyXFrameOptions() override;
+  void UseGzip() override;
+  const ui::TemplateReplacements* GetReplacements() const override;
 
  protected:
   ~WebUIIOSDataSourceImpl() override;
@@ -41,12 +43,6 @@ class WebUIIOSDataSourceImpl : public URLDataSourceIOSImpl,
   // Completes a request by sending our dictionary of localized strings.
   void SendLocalizedStringsAsJSON(
       const URLDataSourceIOS::GotDataCallback& callback);
-
-  // Completes a request to |path| by sending the file specified by |idr| as the
-  // response.
-  void SendFromResourceBundle(const std::string& path,
-                              const URLDataSourceIOS::GotDataCallback& callback,
-                              int idr);
 
  private:
   class InternalDataSource;
@@ -75,13 +71,14 @@ class WebUIIOSDataSourceImpl : public URLDataSourceIOSImpl,
   std::map<std::string, int> path_to_idr_map_;
   // The replacements are initiallized in the main thread and then used in the
   // IO thread. The map is safe to read from multiple threads as long as no
-  // futher changes are made to it after initialization.
+  // further changes are made to it after initialization.
   ui::TemplateReplacements replacements_;
   // The |replacements_| is intended to replace |localized_strings_|.
   base::DictionaryValue localized_strings_;
   bool deny_xframe_options_;
   bool load_time_data_defaults_added_;
   bool replace_existing_source_;
+  bool use_gzip_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUIIOSDataSourceImpl);
 };

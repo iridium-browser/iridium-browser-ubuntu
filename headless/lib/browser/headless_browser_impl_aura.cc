@@ -4,6 +4,8 @@
 
 #include "headless/lib/browser/headless_browser_impl.h"
 
+#include <memory>
+
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "headless/lib/browser/headless_clipboard.h"
@@ -24,7 +26,7 @@ void HeadlessBrowserImpl::PlatformInitialize() {
   // TODO(eseckler): We shouldn't share clipboard contents across WebContents
   // (or at least BrowserContexts).
   ui::Clipboard::SetClipboardForCurrentThread(
-      base::MakeUnique<HeadlessClipboard>());
+      std::make_unique<HeadlessClipboard>());
 }
 
 void HeadlessBrowserImpl::PlatformStart() {
@@ -34,7 +36,8 @@ void HeadlessBrowserImpl::PlatformStart() {
 
 void HeadlessBrowserImpl::PlatformInitializeWebContents(
     HeadlessWebContentsImpl* web_contents) {
-  auto window_tree_host = base::MakeUnique<HeadlessWindowTreeHost>(gfx::Rect());
+  auto window_tree_host = std::make_unique<HeadlessWindowTreeHost>(
+      gfx::Rect(), web_contents->begin_frame_control_enabled());
   window_tree_host->InitHost();
   gfx::NativeWindow parent_window = window_tree_host->window();
   parent_window->Show();
@@ -60,6 +63,11 @@ void HeadlessBrowserImpl::PlatformSetWebContentsBounds(
       web_contents->web_contents()->GetRenderWidgetHostView();
   if (host_view)
     host_view->SetSize(bounds.size());
+}
+
+ui::Compositor* HeadlessBrowserImpl::PlatformGetCompositor(
+    HeadlessWebContentsImpl* web_contents) {
+  return web_contents->window_tree_host()->compositor();
 }
 
 }  // namespace headless

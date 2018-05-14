@@ -26,22 +26,31 @@
 #ifndef CSSFontFaceSource_h
 #define CSSFontFaceSource_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/fonts/FontCacheKey.h"
+#include "platform/fonts/FontSelectionTypes.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/HashMap.h"
+#include "platform/wtf/LinkedHashSet.h"
 
 namespace blink {
 
-class CSSFontFace;
 class FontDescription;
 class SimpleFontData;
 
+enum FontDisplay {
+  kFontDisplayAuto,
+  kFontDisplayBlock,
+  kFontDisplaySwap,
+  kFontDisplayFallback,
+  kFontDisplayOptional,
+  kFontDisplayEnumMax
+};
+
 class CORE_EXPORT CSSFontFaceSource
     : public GarbageCollectedFinalized<CSSFontFaceSource> {
-  WTF_MAKE_NONCOPYABLE(CSSFontFaceSource);
-
  public:
   virtual ~CSSFontFaceSource();
 
@@ -50,31 +59,40 @@ class CORE_EXPORT CSSFontFaceSource
   virtual bool IsLoaded() const { return true; }
   virtual bool IsValid() const { return true; }
 
-  void SetFontFace(CSSFontFace* face) { face_ = face; }
-
-  PassRefPtr<SimpleFontData> GetFontData(const FontDescription&);
+  scoped_refptr<SimpleFontData> GetFontData(const FontDescription&,
+                                            const FontSelectionCapabilities&);
 
   virtual bool IsLocalFontAvailable(const FontDescription&) { return false; }
   virtual void BeginLoadIfNeeded() {}
+  virtual void SetDisplay(FontDisplay) {}
 
-  virtual bool IsBlank() { return false; }
+  virtual bool IsInBlockPeriod() const { return false; }
+  virtual bool IsInFailurePeriod() const { return false; }
 
   // For UMA reporting
   virtual bool HadBlankText() { return false; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor* visitor) {}
 
  protected:
-  CSSFontFaceSource();
-  virtual PassRefPtr<SimpleFontData> CreateFontData(const FontDescription&) = 0;
+  CSSFontFaceSource() = default;
+  virtual scoped_refptr<SimpleFontData> CreateFontData(
+      const FontDescription&,
+      const FontSelectionCapabilities&) = 0;
+  void PruneTable();
 
+ private:
+  void PruneOldestIfNeeded();
   using FontDataTable = HashMap<FontCacheKey,
-                                RefPtr<SimpleFontData>,
+                                scoped_refptr<SimpleFontData>,
                                 FontCacheKeyHash,
                                 FontCacheKeyTraits>;
+  using FontCacheKeyAgeList =
+      LinkedHashSet<FontCacheKey, FontCacheKeyHash, FontCacheKeyTraits>;
 
-  Member<CSSFontFace> face_;  // Our owning font face.
   FontDataTable font_data_table_;
+  FontCacheKeyAgeList font_cache_key_age;
+  DISALLOW_COPY_AND_ASSIGN(CSSFontFaceSource);
 };
 
 }  // namespace blink

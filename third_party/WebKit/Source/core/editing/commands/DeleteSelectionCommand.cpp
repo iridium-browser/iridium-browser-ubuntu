@@ -25,7 +25,6 @@
 
 #include "core/editing/commands/DeleteSelectionCommand.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/NodeTraversal.h"
@@ -33,13 +32,18 @@
 #include "core/editing/EditingBoundary.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/RelocatablePosition.h"
+#include "core/editing/SelectionTemplate.h"
+#include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleUnits.h"
+#include "core/editing/commands/EditingCommandsUtilities.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLBRElement.h"
-#include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLStyleElement.h"
 #include "core/html/HTMLTableRowElement.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutTableCell.h"
 
 namespace blink {
@@ -54,7 +58,7 @@ static bool IsTableCellEmpty(Node* cell) {
 }
 
 static bool IsTableRowEmpty(Node* row) {
-  if (!isHTMLTableRowElement(row))
+  if (!IsHTMLTableRowElement(row))
     return false;
 
   row->GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
@@ -65,52 +69,35 @@ static bool IsTableRowEmpty(Node* row) {
   return true;
 }
 
+static bool CanMergeListElements(Element* first_list, Element* second_list) {
+  if (!first_list || !second_list || first_list == second_list)
+    return false;
+
+  return CanMergeLists(*first_list, *second_list);
+}
+
 DeleteSelectionCommand::DeleteSelectionCommand(
     Document& document,
-    bool smart_delete,
-    bool merge_blocks_after_delete,
-    bool expand_for_special_elements,
-    bool sanitize_markup,
+    const DeleteSelectionOptions& options,
     InputEvent::InputType input_type,
     const Position& reference_move_position)
     : CompositeEditCommand(document),
+      options_(options),
       has_selection_to_delete_(false),
-      smart_delete_(smart_delete),
-      merge_blocks_after_delete_(merge_blocks_after_delete),
-      need_placeholder_(false),
-      expand_for_special_elements_(expand_for_special_elements),
-      prune_start_block_if_necessary_(false),
-      starts_at_empty_line_(false),
-      sanitize_markup_(sanitize_markup),
+      merge_blocks_after_delete_(options.IsMergeBlocksAfterDelete()),
       input_type_(input_type),
-      reference_move_position_(reference_move_position),
-      start_block_(nullptr),
-      end_block_(nullptr),
-      typing_style_(nullptr),
-      delete_into_blockquote_style_(nullptr) {}
+      reference_move_position_(reference_move_position) {}
 
 DeleteSelectionCommand::DeleteSelectionCommand(
     const VisibleSelection& selection,
-    bool smart_delete,
-    bool merge_blocks_after_delete,
-    bool expand_for_special_elements,
-    bool sanitize_markup,
+    const DeleteSelectionOptions& options,
     InputEvent::InputType input_type)
     : CompositeEditCommand(*selection.Start().GetDocument()),
+      options_(options),
       has_selection_to_delete_(true),
-      smart_delete_(smart_delete),
-      merge_blocks_after_delete_(merge_blocks_after_delete),
-      need_placeholder_(false),
-      expand_for_special_elements_(expand_for_special_elements),
-      prune_start_block_if_necessary_(false),
-      starts_at_empty_line_(false),
-      sanitize_markup_(sanitize_markup),
+      merge_blocks_after_delete_(options.IsMergeBlocksAfterDelete()),
       input_type_(input_type),
-      selection_to_delete_(selection),
-      start_block_(nullptr),
-      end_block_(nullptr),
-      typing_style_(nullptr),
-      delete_into_blockquote_style_(nullptr) {}
+      selection_to_delete_(selection) {}
 
 void DeleteSelectionCommand::InitializeStartEnd(Position& start,
                                                 Position& end) {
@@ -127,19 +114,19 @@ void DeleteSelectionCommand::InitializeStartEnd(Position& start,
   // For HRs, we'll get a position at (HR,1) when hitting delete from the
   // beginning of the previous line, or (HR,0) when forward deleting, but in
   // these cases, we want to delete it, so manually expand the selection
-  if (isHTMLHRElement(*start.AnchorNode()))
+  if (IsHTMLHRElement(*start.AnchorNode()))
     start = Position::BeforeNode(*start.AnchorNode());
-  else if (isHTMLHRElement(*end.AnchorNode()))
+  else if (IsHTMLHRElement(*end.AnchorNode()))
     end = Position::AfterNode(*end.AnchorNode());
 
   // FIXME: This is only used so that moveParagraphs can avoid the bugs in
   // special element expansion.
-  if (!expand_for_special_elements_)
+  if (!options_.IsExpandForSpecialElements())
     return;
 
   while (1) {
-    start_special_container = 0;
-    end_special_container = 0;
+    start_special_container = nullptr;
+    end_special_container = nullptr;
 
     Position s =
         PositionBeforeContainingSpecialElement(start, &start_special_container);
@@ -195,7 +182,7 @@ void DeleteSelectionCommand::SetStartingSelectionOnSmartDelete(
   DocumentLifecycle::DisallowTransitionScope disallow_transition(
       GetDocument().Lifecycle());
 
-  bool is_base_first = StartingSelection().IsBaseFirst();
+  const bool is_base_first = StartingSelection().IsBaseFirst();
   // TODO(yosin): We should not call |createVisiblePosition()| here and use
   // |start| and |end| as base/extent since |VisibleSelection| also calls
   // |createVisiblePosition()| during construction.
@@ -207,9 +194,34 @@ void DeleteSelectionCommand::SetStartingSelectionOnSmartDelete(
   SelectionInDOMTree::Builder builder;
   builder.SetAffinity(new_base.Affinity())
       .SetBaseAndExtentDeprecated(new_base.DeepEquivalent(),
-                                  new_extent.DeepEquivalent())
-      .SetIsDirectional(StartingSelection().IsDirectional());
-  SetStartingSelection(CreateVisibleSelection(builder.Build()));
+                                  new_extent.DeepEquivalent());
+  const VisibleSelection& visible_selection =
+      CreateVisibleSelection(builder.Build());
+  SetStartingSelection(
+      SelectionForUndoStep::From(visible_selection.AsSelection()));
+}
+
+// This assumes that it starts in editable content.
+static Position TrailingWhitespacePosition(const Position& position,
+                                           WhitespacePositionOption option) {
+  DCHECK(!NeedsLayoutTreeUpdate(position));
+  DCHECK(IsEditablePosition(position)) << position;
+  if (position.IsNull())
+    return Position();
+
+  const VisiblePosition visible_position = CreateVisiblePosition(position);
+  const UChar character_after_visible_position =
+      CharacterAfter(visible_position);
+  const bool is_space =
+      option == kConsiderNonCollapsibleWhitespace
+          ? (IsSpaceOrNewline(character_after_visible_position) ||
+             character_after_visible_position == kNoBreakSpaceCharacter)
+          : IsCollapsibleWhitespace(character_after_visible_position);
+  // The space must not be in another paragraph and it must be editable.
+  if (is_space && !IsEndOfParagraph(visible_position) &&
+      NextPositionOf(visible_position, kCannotCrossEditingBoundary).IsNotNull())
+    return position;
+  return Position();
 }
 
 void DeleteSelectionCommand::InitializePositionData(
@@ -241,9 +253,9 @@ void DeleteSelectionCommand::InitializePositionData(
   end_root_ = RootEditableElementOf(end);
 
   start_table_row_ =
-      toHTMLTableRowElement(EnclosingNodeOfType(start, &isHTMLTableRowElement));
+      ToHTMLTableRowElement(EnclosingNodeOfType(start, &IsHTMLTableRowElement));
   end_table_row_ =
-      toHTMLTableRowElement(EnclosingNodeOfType(end, &isHTMLTableRowElement));
+      ToHTMLTableRowElement(EnclosingNodeOfType(end, &IsHTMLTableRowElement));
 
   // Don't move content out of a table cell.
   // If the cell is non-editable, enclosingNodeOfType won't return it by
@@ -287,43 +299,43 @@ void DeleteSelectionCommand::InitializePositionData(
 
   // Handle leading and trailing whitespace, as well as smart delete adjustments
   // to the selection
-  leading_whitespace_ = LeadingWhitespacePosition(
+  leading_whitespace_ = LeadingCollapsibleWhitespacePosition(
       upstream_start_, selection_to_delete_.Affinity());
-  trailing_whitespace_ =
-      TrailingWhitespacePosition(downstream_end_, VP_DEFAULT_AFFINITY);
+  trailing_whitespace_ = TrailingWhitespacePosition(
+      downstream_end_, kNotConsiderNonCollapsibleWhitespace);
 
-  if (smart_delete_) {
+  if (options_.IsSmartDelete()) {
     // skip smart delete if the selection to delete already starts or ends with
     // whitespace
     Position pos =
         CreateVisiblePosition(upstream_start_, selection_to_delete_.Affinity())
             .DeepEquivalent();
     bool skip_smart_delete =
-        TrailingWhitespacePosition(pos, VP_DEFAULT_AFFINITY,
-                                   kConsiderNonCollapsibleWhitespace)
+        TrailingWhitespacePosition(pos, kConsiderNonCollapsibleWhitespace)
             .IsNotNull();
-    if (!skip_smart_delete)
-      skip_smart_delete =
-          LeadingWhitespacePosition(downstream_end_, VP_DEFAULT_AFFINITY,
-                                    kConsiderNonCollapsibleWhitespace)
-              .IsNotNull();
+    if (!skip_smart_delete) {
+      skip_smart_delete = LeadingCollapsibleWhitespacePosition(
+                              downstream_end_, TextAffinity::kDefault,
+                              kConsiderNonCollapsibleWhitespace)
+                              .IsNotNull();
+    }
 
     // extend selection upstream if there is whitespace there
     bool has_leading_whitespace_before_adjustment =
-        LeadingWhitespacePosition(upstream_start_,
-                                  selection_to_delete_.Affinity(),
-                                  kConsiderNonCollapsibleWhitespace)
+        LeadingCollapsibleWhitespacePosition(upstream_start_,
+                                             selection_to_delete_.Affinity(),
+                                             kConsiderNonCollapsibleWhitespace)
             .IsNotNull();
     if (!skip_smart_delete && has_leading_whitespace_before_adjustment) {
-      VisiblePosition visible_pos = PreviousPositionOf(
-          CreateVisiblePosition(upstream_start_, VP_DEFAULT_AFFINITY));
+      VisiblePosition visible_pos =
+          PreviousPositionOf(CreateVisiblePosition(upstream_start_));
       pos = visible_pos.DeepEquivalent();
       // Expand out one character upstream for smart delete and recalculate
       // positions based on this change.
       upstream_start_ = MostBackwardCaretPosition(pos);
       downstream_start_ = MostForwardCaretPosition(pos);
-      leading_whitespace_ =
-          LeadingWhitespacePosition(upstream_start_, visible_pos.Affinity());
+      leading_whitespace_ = LeadingCollapsibleWhitespacePosition(
+          upstream_start_, visible_pos.Affinity());
 
       SetStartingSelectionOnSmartDelete(upstream_start_, upstream_end_);
     }
@@ -332,18 +344,17 @@ void DeleteSelectionCommand::InitializePositionData(
     // leading whitespace, as in the case where you double-click the first word
     // of a paragraph.
     if (!skip_smart_delete && !has_leading_whitespace_before_adjustment &&
-        TrailingWhitespacePosition(downstream_end_, VP_DEFAULT_AFFINITY,
+        TrailingWhitespacePosition(downstream_end_,
                                    kConsiderNonCollapsibleWhitespace)
             .IsNotNull()) {
       // Expand out one character downstream for smart delete and recalculate
       // positions based on this change.
-      pos = NextPositionOf(
-                CreateVisiblePosition(downstream_end_, VP_DEFAULT_AFFINITY))
+      pos = NextPositionOf(CreateVisiblePosition(downstream_end_))
                 .DeepEquivalent();
       upstream_end_ = MostBackwardCaretPosition(pos);
       downstream_end_ = MostForwardCaretPosition(pos);
-      trailing_whitespace_ =
-          TrailingWhitespacePosition(downstream_end_, VP_DEFAULT_AFFINITY);
+      trailing_whitespace_ = TrailingWhitespacePosition(
+          downstream_end_, kNotConsiderNonCollapsibleWhitespace);
 
       SetStartingSelectionOnSmartDelete(downstream_start_, downstream_end_);
     }
@@ -416,8 +427,8 @@ bool DeleteSelectionCommand::HandleSpecialCaseBRDelete(
 
   // Check for special-case where the selection contains only a BR on a line by
   // itself after another BR.
-  bool upstream_start_is_br = isHTMLBRElement(*node_after_upstream_start);
-  bool downstream_start_is_br = isHTMLBRElement(*node_after_downstream_start);
+  bool upstream_start_is_br = IsHTMLBRElement(*node_after_upstream_start);
+  bool downstream_start_is_br = IsHTMLBRElement(*node_after_downstream_start);
   bool is_br_on_line_by_itself =
       upstream_start_is_br && downstream_start_is_br &&
       node_after_downstream_start == node_after_upstream_end;
@@ -448,7 +459,7 @@ static Position FirstEditablePositionInNode(Node* node) {
   Node* next = node;
   while (next && !HasEditableStyle(*next))
     next = NodeTraversal::Next(*next, node);
-  return next ? FirstPositionInOrBeforeNode(next) : Position();
+  return next ? FirstPositionInOrBeforeNode(*next) : Position();
 }
 
 void DeleteSelectionCommand::RemoveNode(
@@ -569,7 +580,7 @@ void DeleteSelectionCommand::
   Node* node = range->FirstNode();
   while (node && node != range->PastLastNode()) {
     Node* next_node = NodeTraversal::Next(*node);
-    if (isHTMLStyleElement(*node) || isHTMLLinkElement(*node)) {
+    if (IsHTMLStyleElement(*node) || IsHTMLLinkElement(*node)) {
       next_node = NodeTraversal::NextSkippingChildren(*node);
       Element* element = RootEditableElement(*node);
       if (element) {
@@ -602,13 +613,14 @@ void DeleteSelectionCommand::HandleGeneralDelete(EditingState* editing_state) {
   // merge content in.
   if (start_node == start_block_.Get() && !start_offset &&
       CanHaveChildrenForEditing(start_node) &&
-      !isHTMLTableElement(*start_node)) {
+      !IsHTMLTableElement(*start_node)) {
     start_offset = 0;
     start_node = NodeTraversal::Next(*start_node);
     if (!start_node)
       return;
   }
 
+  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
   if (start_offset >= CaretMaxOffset(start_node) && start_node->IsTextNode()) {
     Text* text = ToText(start_node);
     if (text->length() > (unsigned)CaretMaxOffset(start_node))
@@ -641,6 +653,8 @@ void DeleteSelectionCommand::HandleGeneralDelete(EditingState* editing_state) {
           return;
         ending_position_ = upstream_start_;
       }
+      // We should update layout to associate |start_node| to layout object.
+      GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
     }
 
     // The selection to delete is all in one node.
@@ -674,7 +688,7 @@ void DeleteSelectionCommand::HandleGeneralDelete(EditingState* editing_state) {
 
     // handle deleting all nodes that are completely selected
     while (node && node != downstream_end_.AnchorNode()) {
-      if (ComparePositions(FirstPositionInOrBeforeNode(node),
+      if (ComparePositions(FirstPositionInOrBeforeNode(*node),
                            downstream_end_) >= 0) {
         // NodeTraversal::nextSkippingChildren just blew past the end position,
         // so stop deleting
@@ -689,6 +703,7 @@ void DeleteSelectionCommand::HandleGeneralDelete(EditingState* editing_state) {
           return;
         node = next_node;
       } else {
+        GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
         Node& n = NodeTraversal::LastWithinOrSelf(*node);
         if (downstream_end_.AnchorNode() == n &&
             downstream_end_.ComputeEditingOffset() >= CaretMaxOffset(&n)) {
@@ -701,6 +716,10 @@ void DeleteSelectionCommand::HandleGeneralDelete(EditingState* editing_state) {
         }
       }
     }
+
+    // TODO(editing-dev): Hoist updateStyleAndLayoutIgnorePendingStylesheets
+    // to caller. See http://crbug.com/590369 for more details.
+    GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
 
     if (downstream_end_.AnchorNode() != start_node &&
         !upstream_start_.AnchorNode()->IsDescendantOf(
@@ -752,9 +771,6 @@ void DeleteSelectionCommand::HandleGeneralDelete(EditingState* editing_state) {
 
 void DeleteSelectionCommand::FixupWhitespace() {
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
-  // TODO(yosin) |isRenderedCharacter()| should be removed, and we should use
-  // |VisiblePosition::characterAfter()| and
-  // |VisiblePosition::characterBefore()|
   if (leading_whitespace_.IsNotNull() &&
       !IsRenderedCharacter(leading_whitespace_) &&
       leading_whitespace_.AnchorNode()->IsTextNode()) {
@@ -871,10 +887,8 @@ void DeleteSelectionCommand::MergeParagraphs(EditingState* editing_state) {
   Node* list_item_in_second_paragraph =
       EnclosingNodeOfType(downstream_end_, IsListItem);
   if (list_item_in_first_paragraph && list_item_in_second_paragraph &&
-      list_item_in_first_paragraph->parentElement() !=
-          list_item_in_second_paragraph->parentElement() &&
-      CanMergeLists(list_item_in_first_paragraph->parentElement(),
-                    list_item_in_second_paragraph->parentElement())) {
+      CanMergeListElements(list_item_in_first_paragraph->parentElement(),
+                           list_item_in_second_paragraph->parentElement())) {
     MergeIdenticalElements(list_item_in_first_paragraph->parentElement(),
                            list_item_in_second_paragraph->parentElement(),
                            editing_state);
@@ -890,7 +904,7 @@ void DeleteSelectionCommand::MergeParagraphs(EditingState* editing_state) {
   if (!starts_at_empty_line_ && IsStartOfParagraph(merge_destination) &&
       AbsoluteCaretBoundsOf(start_of_paragraph_to_move).X() >
           AbsoluteCaretBoundsOf(merge_destination).X()) {
-    if (isHTMLBRElement(
+    if (IsHTMLBRElement(
             *MostForwardCaretPosition(merge_destination.DeepEquivalent())
                  .AnchorNode())) {
       RemoveNodeAndPruneAncestors(
@@ -932,7 +946,7 @@ void DeleteSelectionCommand::MergeParagraphs(EditingState* editing_state) {
   need_placeholder_ = need_placeholder;
   // The endingPosition was likely clobbered by the move, so recompute it
   // (moveParagraph selects the moved paragraph).
-  ending_position_ = EndingSelection().Start();
+  ending_position_ = EndingVisibleSelection().Start();
 }
 
 void DeleteSelectionCommand::RemovePreviouslySelectedEmptyTableRows(
@@ -1059,9 +1073,10 @@ void DeleteSelectionCommand::DoApply(EditingState* editing_state) {
   // If selection has not been set to a custom selection when the command was
   // created, use the current ending selection.
   if (!has_selection_to_delete_)
-    selection_to_delete_ = EndingSelection();
+    selection_to_delete_ = EndingVisibleSelection();
 
-  if (!selection_to_delete_.IsNonOrphanedRange() ||
+  if (!selection_to_delete_.IsValidFor(GetDocument()) ||
+      !selection_to_delete_.IsRange() ||
       !selection_to_delete_.IsContentEditable()) {
     // editing/execCommand/delete-non-editable-range-crash.html reaches here.
     return;
@@ -1125,10 +1140,12 @@ void DeleteSelectionCommand::DoApply(EditingState* editing_state) {
     GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
     SelectionInDOMTree::Builder builder;
     builder.SetAffinity(affinity);
-    builder.SetIsDirectional(EndingSelection().IsDirectional());
     if (ending_position_.IsNotNull())
       builder.Collapse(ending_position_);
-    SetEndingSelection(builder.Build());
+    const VisibleSelection& visible_selection =
+        CreateVisibleSelection(builder.Build());
+    SetEndingSelection(
+        SelectionForUndoStep::From(visible_selection.AsSelection()));
     ClearTransientState();
     RebalanceWhitespace();
     return;
@@ -1164,7 +1181,7 @@ void DeleteSelectionCommand::DoApply(EditingState* editing_state) {
       need_placeholder_ ? HTMLBRElement::Create(GetDocument()) : nullptr;
 
   if (placeholder) {
-    if (sanitize_markup_) {
+    if (options_.IsSanitizeMarkup()) {
       RemoveRedundantBlocks(editing_state);
       if (editing_state->IsAborted())
         return;
@@ -1186,10 +1203,12 @@ void DeleteSelectionCommand::DoApply(EditingState* editing_state) {
 
   SelectionInDOMTree::Builder builder;
   builder.SetAffinity(affinity);
-  builder.SetIsDirectional(EndingSelection().IsDirectional());
   if (ending_position_.IsNotNull())
     builder.Collapse(ending_position_);
-  SetEndingSelection(builder.Build());
+  const VisibleSelection& visible_selection =
+      CreateVisibleSelection(builder.Build());
+  SetEndingSelection(
+      SelectionForUndoStep::From(visible_selection.AsSelection()));
 
   if (relocatable_reference_position.GetPosition().IsNull()) {
     ClearTransientState();
@@ -1204,7 +1223,7 @@ void DeleteSelectionCommand::DoApply(EditingState* editing_state) {
   // Fixes: <rdar://problem/3910425> REGRESSION (Mail): Crash in
   // ReplaceSelectionCommand; selection is empty, leading to null deref
   if (!reference_move_position_.IsConnected())
-    reference_move_position_ = EndingSelection().Start();
+    reference_move_position_ = EndingVisibleSelection().Start();
 
   // Move selection shouldn't left empty <li> block.
   CleanupAfterDeletion(editing_state,
@@ -1232,7 +1251,7 @@ bool DeleteSelectionCommand::PreservesTypingStyle() const {
   return typing_style_;
 }
 
-DEFINE_TRACE(DeleteSelectionCommand) {
+void DeleteSelectionCommand::Trace(blink::Visitor* visitor) {
   visitor->Trace(selection_to_delete_);
   visitor->Trace(upstream_start_);
   visitor->Trace(downstream_start_);

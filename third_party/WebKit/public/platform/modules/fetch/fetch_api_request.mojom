@@ -4,18 +4,11 @@
 
 module blink.mojom;
 
+import "services/network/public/mojom/fetch_api.mojom";
+import "services/network/public/mojom/request_context_frame_type.mojom";
 import "third_party/WebKit/public/platform/referrer.mojom";
-import "url/mojo/url.mojom";
-
-// The mode associated with a request.
-// https://fetch.spec.whatwg.org/#concept-request-mode
-enum FetchRequestMode {
-  SAME_ORIGIN,
-  NO_CORS,
-  CORS,
-  CORS_WITH_FORCED_PREFLIGHT,
-  NAVIGATE,
-};
+import "third_party/WebKit/public/mojom/blob/blob.mojom";
+import "url/mojom/url.mojom";
 
 // Type of the context associated with a request.
 enum RequestContextType {
@@ -55,52 +48,61 @@ enum RequestContextType {
   XSLT,
 };
 
-// Frame type of the context associated with a request.
-enum RequestContextFrameType {
-  AUXILIARY,
-  NESTED,
-  NONE,
-  TOP_LEVEL,
-};
+// https://fetch.spec.whatwg.org/#concept-request-cache-mode
+enum FetchCacheMode {
+  // "default": Fetch will inspect the HTTP cache on the way to the network. If
+  // there is a fresh response it will be used. If there is a stale response a
+  // conditional request will be created, and a normal request otherwise. It
+  // then updates the HTTP cache with the response.
+  kDefault,
 
-// Credentials mode indicating which credentials should be included with a
-// request.
-enum FetchCredentialsMode {
-  OMIT,
-  SAME_ORIGIN,
-  INCLUDE,
-  PASSWORD,
-};
+  // "no-store": Fetch behaves as if there is no HTTP cache at all.
+  kNoStore,
 
-// The redirect mode indicating how redirects should be handled.
-// https://fetch.spec.whatwg.org/#concept-request-redirect-mode
-enum FetchRedirectMode {
-  FOLLOW,
-  ERROR_MODE,
-  MANUAL,
-};
+  // "reload": Fetch behaves as if there is no HTTP cache on the way to the
+  // network. Ergo, it creates a normal request and updates the HTTP cache with
+  // the response.
+  kBypassCache,
 
-// Whether this is a regular fetch, or a foreign fetch request.
-enum ServiceWorkerFetchType {
-  FETCH,
-  FOREIGN_FETCH,
+  // "no-cache": Fetch creates a conditional request if there is a response in
+  // the HTTP cache and a normal request otherwise. It then updates the HTTP
+  // cache with the response.
+  kValidateCache,
+
+  // "force-cache": Fetch uses any response in the HTTP cache matching the
+  // request, not paying attention to staleness. If there was no response, it
+  // creates a normal request and updates the HTTP cache with the response.
+  kForceCache,
+
+  // "only-if-cached": Fetch uses any response in the HTTP cache matching the
+  // request, not paying attention to staleness. If there was no response, it
+  // returns a network error.
+  kOnlyIfCached,
+
+  // Unspecified ones
+  // Similar to ONLY_IF_CACHED, but checks freshness strictly.
+  kUnspecifiedOnlyIfCachedStrict,
+  // Used by devtools to trigger a request which ends up in CACHE_MISS.
+  kUnspecifiedForceCacheMiss,
 };
 
 struct FetchAPIRequest {
-  FetchRequestMode mode;
+  network.mojom.FetchRequestMode mode;
   bool is_main_resource_load;
   RequestContextType request_context_type;
-  RequestContextFrameType frame_type;
+  network.mojom.RequestContextFrameType frame_type;
   url.mojom.Url url;
   string method;
   map<string, string> headers;
   string? blob_uuid;
   uint64 blob_size;
+  Blob? blob;
   Referrer referrer;
-  FetchCredentialsMode credentials_mode;
-  FetchRedirectMode redirect_mode;
+  network.mojom.FetchCredentialsMode credentials_mode;
+  FetchCacheMode cache_mode;
+  network.mojom.FetchRedirectMode redirect_mode;
   string? integrity;
+  bool keepalive;
   string? client_id;
   bool is_reload;
-  ServiceWorkerFetchType fetch_type;
 };

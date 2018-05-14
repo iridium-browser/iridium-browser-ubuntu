@@ -5,28 +5,36 @@
 #include "content/shell/browser/layout_test/blink_test_controller.h"
 
 #include <stddef.h>
+#include <string.h>
 
+#include <algorithm>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <utility>
+#include <vector>
 
 #include "base/base64.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/strings/nullable_string16.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "content/common/page_state_serialization.h"
+#include "content/common/unique_name_helper.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -40,10 +48,10 @@
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/associated_interface_provider.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/test/layouttest_support.h"
 #include "content/shell/browser/layout_test/devtools_protocol_test_bindings.h"
 #include "content/shell/browser/layout_test/layout_test_bluetooth_chooser_factory.h"
 #include "content/shell/browser/layout_test/layout_test_content_browser_client.h"
@@ -57,6 +65,8 @@
 #include "content/shell/common/layout_test/layout_test_switches.h"
 #include "content/shell/common/shell_messages.h"
 #include "content/shell/renderer/layout_test/blink_test_helpers.h"
+#include "content/shell/test_runner/test_common.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_provider.h"
 #include "ui/gfx/codec/png_codec.h"
 
 #if defined(OS_MACOSX)
@@ -66,9 +76,6 @@
 namespace content {
 
 namespace {
-
-const int kTestSVGWindowWidthDip = 480;
-const int kTestSVGWindowHeightDip = 360;
 
 base::FilePath GetBuildDirectory() {
   base::FilePath result;
@@ -82,6 +89,74 @@ base::FilePath GetBuildDirectory() {
     result = result.DirName().DirName().DirName();
   }
 #endif
+  return result;
+}
+
+std::string DumpFrameState(const ExplodedFrameState& frame_state,
+                           size_t indent,
+                           bool is_current_index) {
+  std::string result;
+  if (is_current_index) {
+    constexpr const char kCurrentMarker[] = "curr->";
+    result.append(kCurrentMarker);
+    result.append(indent - strlen(kCurrentMarker), ' ');
+  } else {
+    result.append(indent, ' ');
+  }
+
+  std::string url = test_runner::NormalizeLayoutTestURL(
+      base::UTF16ToUTF8(frame_state.url_string.value_or(base::string16())));
+  result.append(url);
+  DCHECK(frame_state.target);
+  if (!frame_state.target->empty()) {
+    std::string unique_name = base::UTF16ToUTF8(*frame_state.target);
+    result.append(" (in frame \"");
+    result.append(UniqueNameHelper::ExtractStableNameForTesting(unique_name));
+    result.append("\")");
+  }
+  result.append("\n");
+
+  std::vector<ExplodedFrameState> sorted_children = frame_state.children;
+  std::sort(sorted_children.begin(), sorted_children.end(),
+            [](const ExplodedFrameState& lhs, const ExplodedFrameState& rhs) {
+              // Child nodes should always have a target (aka unique name).
+              DCHECK(lhs.target);
+              DCHECK(rhs.target);
+              std::string lhs_name =
+                  UniqueNameHelper::ExtractStableNameForTesting(
+                      base::UTF16ToUTF8(*lhs.target));
+              std::string rhs_name =
+                  UniqueNameHelper::ExtractStableNameForTesting(
+                      base::UTF16ToUTF8(*rhs.target));
+              if (!base::EqualsCaseInsensitiveASCII(lhs_name, rhs_name))
+                return base::CompareCaseInsensitiveASCII(lhs_name, rhs_name) <
+                       0;
+
+              return lhs.item_sequence_number < rhs.item_sequence_number;
+            });
+  for (const auto& child : sorted_children)
+    result += DumpFrameState(child, indent + 4, false);
+
+  return result;
+}
+
+std::string DumpNavigationEntry(NavigationEntry* navigation_entry,
+                                bool is_current_index) {
+  // This is silly, but it's currently the best way to extract the information.
+  PageState page_state = navigation_entry->GetPageState();
+  ExplodedPageState exploded_page_state;
+  CHECK(DecodePageState(page_state.ToEncodedData(), &exploded_page_state));
+  return DumpFrameState(exploded_page_state.top, 8, is_current_index);
+}
+
+std::string DumpHistoryForWebContents(WebContents* web_contents) {
+  std::string result;
+  const int current_index =
+      web_contents->GetController().GetCurrentEntryIndex();
+  for (int i = 0; i < web_contents->GetController().GetEntryCount(); ++i) {
+    result += DumpNavigationEntry(
+        web_contents->GetController().GetEntryAtIndex(i), i == current_index);
+  }
   return result;
 }
 
@@ -240,16 +315,15 @@ void BlinkTestResultPrinter::CloseStderr() {
 
 // BlinkTestController -------------------------------------------------------
 
-BlinkTestController* BlinkTestController::instance_ = NULL;
+BlinkTestController* BlinkTestController::instance_ = nullptr;
 
 // static
 BlinkTestController* BlinkTestController::Get() {
-  DCHECK(instance_);
   return instance_;
 }
 
 BlinkTestController::BlinkTestController()
-    : main_window_(NULL),
+    : main_window_(nullptr),
       secondary_window_(nullptr),
       devtools_window_(nullptr),
       test_phase_(BETWEEN_TESTS),
@@ -257,7 +331,9 @@ BlinkTestController::BlinkTestController()
           base::CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kEnableLeakDetection)),
       crash_when_leak_found_(false),
-      render_process_host_observer_(this) {
+      pending_layout_dumps_(0),
+      render_process_host_observer_(this),
+      weak_factory_(this) {
   CHECK(!instance_);
   instance_ = this;
 
@@ -285,7 +361,7 @@ BlinkTestController::~BlinkTestController() {
   CHECK(test_phase_ == BETWEEN_TESTS);
   GpuDataManager::GetInstance()->RemoveObserver(this);
   DiscardMainWindow();
-  instance_ = NULL;
+  instance_ = nullptr;
 }
 
 bool BlinkTestController::PrepareForLayoutTest(
@@ -317,15 +393,9 @@ bool BlinkTestController::PrepareForLayoutTest(
   is_compositing_test_ =
       test_url_.spec().find("compositing/") != std::string::npos;
   initial_size_ = Shell::GetShellDefaultSize();
-  // The W3C SVG layout tests use a different size than the other layout tests.
-  if (test_url_.spec().find("W3C-SVG-1.1") != std::string::npos)
-    initial_size_ = gfx::Size(kTestSVGWindowWidthDip, kTestSVGWindowHeightDip);
   if (!main_window_) {
-    main_window_ = content::Shell::CreateNewWindow(
-        browser_context,
-        GURL(),
-        NULL,
-        initial_size_);
+    main_window_ = content::Shell::CreateNewWindow(browser_context, GURL(),
+                                                   nullptr, initial_size_);
     WebContentsObserver::Observe(main_window_->web_contents());
     if (is_devtools_protocol_test) {
       devtools_protocol_test_bindings_.reset(
@@ -338,6 +408,14 @@ bool BlinkTestController::PrepareForLayoutTest(
       LoadDevToolsJSTest();
     else
       main_window_->LoadURL(test_url_);
+
+#if defined(OS_ANDROID)
+    // On Android, the browser main loop runs on the UI thread so the view
+    // hierarchy never gets to layout since the UI thread is blocked. This call
+    // simulates a layout and ensures our RenderWidget hierarchy gets correctly
+    // sized.
+    main_window_->SizeTo(initial_size_);
+#endif
   } else {
 #if defined(OS_MACOSX)
     // Shell::SizeTo is not implemented on all platforms.
@@ -348,6 +426,7 @@ bool BlinkTestController::PrepareForLayoutTest(
         ->GetWidget()
         ->GetView()
         ->SetSize(initial_size_);
+    // Try to reset the window size. This can fail, see crbug.com/772811
     main_window_->web_contents()
         ->GetRenderViewHost()
         ->GetWidget()
@@ -398,10 +477,8 @@ Shell* BlinkTestController::SecondaryWindow() {
 void BlinkTestController::LoadDevToolsJSTest() {
   devtools_window_ = main_window_;
   Shell* secondary = SecondaryWindow();
-  devtools_bindings_.reset(LayoutTestDevToolsBindings::LoadDevTools(
-      devtools_window_->web_contents(), secondary->web_contents(), "",
-      test_url_.spec()));
-  secondary->LoadURL(GURL(url::kAboutBlankURL));
+  devtools_bindings_ = std::make_unique<LayoutTestDevToolsBindings>(
+      devtools_window_->web_contents(), secondary->web_contents(), test_url_);
 }
 
 bool BlinkTestController::ResetAfterLayoutTest() {
@@ -418,7 +495,6 @@ bool BlinkTestController::ResetAfterLayoutTest() {
   prefs_ = WebPreferences();
   should_override_prefs_ = false;
   LayoutTestContentBrowserClient::Get()->SetPopupBlockingEnabled(false);
-  devtools_bindings_.reset();
 
 #if defined(OS_ANDROID)
   // Re-using the shell's main window on Android causes issues with networking
@@ -479,7 +555,7 @@ std::unique_ptr<BluetoothChooser> BlinkTestController::RunBluetoothChooser(
     return bluetooth_chooser_factory_->RunBluetoothChooser(frame,
                                                            event_handler);
   }
-  return base::MakeUnique<LayoutTestFirstDeviceBluetoothChooser>(event_handler);
+  return std::make_unique<LayoutTestFirstDeviceBluetoothChooser>(event_handler);
 }
 
 bool BlinkTestController::OnMessageReceived(const IPC::Message& message) {
@@ -499,17 +575,11 @@ bool BlinkTestController::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ShellViewHostMsg_SetPopupBlockingEnabled,
                         OnSetPopupBlockingEnabled)
     IPC_MESSAGE_HANDLER(ShellViewHostMsg_TestFinished, OnTestFinished)
-    IPC_MESSAGE_HANDLER(ShellViewHostMsg_ClearDevToolsLocalStorage,
-                        OnClearDevToolsLocalStorage)
-    IPC_MESSAGE_HANDLER(ShellViewHostMsg_ShowDevTools, OnShowDevTools)
-    IPC_MESSAGE_HANDLER(ShellViewHostMsg_EvaluateInDevTools,
-                        OnEvaluateInDevTools)
-    IPC_MESSAGE_HANDLER(ShellViewHostMsg_CloseDevTools, OnCloseDevTools)
+    IPC_MESSAGE_HANDLER(ShellViewHostMsg_NavigateSecondaryWindow,
+                        OnNavigateSecondaryWindow)
     IPC_MESSAGE_HANDLER(ShellViewHostMsg_GoToOffset, OnGoToOffset)
     IPC_MESSAGE_HANDLER(ShellViewHostMsg_Reload, OnReload)
     IPC_MESSAGE_HANDLER(ShellViewHostMsg_LoadURLForFrame, OnLoadURLForFrame)
-    IPC_MESSAGE_HANDLER(ShellViewHostMsg_CaptureSessionHistory,
-                        OnCaptureSessionHistory)
     IPC_MESSAGE_HANDLER(ShellViewHostMsg_CloseRemainingWindows,
                         OnCloseRemainingWindows)
     IPC_MESSAGE_HANDLER(ShellViewHostMsg_ResetDone, OnResetDone)
@@ -530,11 +600,11 @@ void BlinkTestController::PluginCrashed(const base::FilePath& plugin_path,
                                         base::ProcessId plugin_pid) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   printer_->AddErrorMessage(
-      base::StringPrintf("#CRASHED - plugin (pid %d)", plugin_pid));
+      base::StringPrintf("#CRASHED - plugin (pid %" CrPRIdPid ")", plugin_pid));
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(base::IgnoreResult(&BlinkTestController::DiscardMainWindow),
-                 base::Unretained(this)));
+      FROM_HERE, base::BindOnce(base::IgnoreResult(
+                                    &BlinkTestController::DiscardMainWindow),
+                                weak_factory_.GetWeakPtr()));
 }
 
 void BlinkTestController::RenderFrameCreated(
@@ -632,7 +702,7 @@ void BlinkTestController::DiscardMainWindow() {
   // discard the main window.
   devtools_bindings_.reset();
   devtools_protocol_test_bindings_.reset();
-  WebContentsObserver::Observe(NULL);
+  WebContentsObserver::Observe(nullptr);
   if (test_phase_ != BETWEEN_TESTS) {
     Shell::CloseAllWindows();
     base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -641,15 +711,11 @@ void BlinkTestController::DiscardMainWindow() {
   } else if (main_window_) {
     main_window_->Close();
   }
-  main_window_ = NULL;
+  main_window_ = nullptr;
   current_pid_ = base::kNullProcessId;
 }
 
 void BlinkTestController::HandleNewRenderFrameHost(RenderFrameHost* frame) {
-  // All RenderFrameHosts in layout tests should get Mojo bindings.
-  if (!(frame->GetEnabledBindings() & BINDINGS_POLICY_MOJO))
-    frame->AllowBindings(BINDINGS_POLICY_MOJO);
-
   RenderProcessHost* process = frame->GetProcess();
   bool main_window =
       WebContents::FromRenderFrameHost(frame) == main_window_->web_contents();
@@ -709,7 +775,9 @@ void BlinkTestController::OnTestFinished() {
   test_phase_ = CLEAN_UP;
   if (!printer_->output_finished())
     printer_->PrintImageFooter();
-  main_window_->web_contents()->ExitFullscreen(/*will_cause_resize=*/false);
+  if (main_window_)
+    main_window_->web_contents()->ExitFullscreen(/*will_cause_resize=*/false);
+  devtools_bindings_.reset();
   devtools_protocol_test_bindings_.reset();
 
   ShellBrowserContext* browser_context =
@@ -717,15 +785,30 @@ void BlinkTestController::OnTestFinished() {
   StoragePartition* storage_partition =
       BrowserContext::GetStoragePartition(browser_context, nullptr);
   storage_partition->GetServiceWorkerContext()->ClearAllServiceWorkersForTest(
-      base::Bind(&BlinkTestController::OnAllServiceWorkersCleared,
-                 base::Unretained(this)));
+      base::BindOnce(&BlinkTestController::OnAllServiceWorkersCleared,
+                     weak_factory_.GetWeakPtr()));
   storage_partition->ClearBluetoothAllowedDevicesMapForTesting();
 }
 
 void BlinkTestController::OnAllServiceWorkersCleared() {
+  // TODO(nhiroki): Add a comment about the reason why we terminate all shared
+  // workers here.
+  TerminateAllSharedWorkersForTesting(
+      BrowserContext::GetStoragePartition(
+          ShellContentBrowserClient::Get()->browser_context(), nullptr),
+      base::BindOnce(&BlinkTestController::OnAllSharedWorkersDestroyed,
+                     weak_factory_.GetWeakPtr()));
+}
+
+void BlinkTestController::OnAllSharedWorkersDestroyed() {
   if (main_window_) {
-    Send(new ShellViewMsg_Reset(
-        main_window_->web_contents()->GetRenderViewHost()->GetRoutingID()));
+    RenderViewHost* rvh = main_window_->web_contents()->GetRenderViewHost();
+    rvh->Send(new ShellViewMsg_Reset(rvh->GetRoutingID()));
+  }
+  if (secondary_window_) {
+    RenderViewHost* rvh =
+        secondary_window_->web_contents()->GetRenderViewHost();
+    rvh->Send(new ShellViewMsg_Reset(rvh->GetRoutingID()));
   }
 }
 
@@ -740,18 +823,29 @@ void BlinkTestController::OnImageDump(const std::string& actual_pixel_hash,
 
     bool discard_transparency = true;
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kForceOverlayFullscreenVideo))
+            switches::kForceOverlayFullscreenVideo)) {
       discard_transparency = false;
+    }
+
+    gfx::PNGCodec::ColorFormat pixel_format;
+    switch (image.info().colorType()) {
+      case kBGRA_8888_SkColorType:
+        pixel_format = gfx::PNGCodec::FORMAT_BGRA;
+        break;
+      case kRGBA_8888_SkColorType:
+        pixel_format = gfx::PNGCodec::FORMAT_RGBA;
+        break;
+      default:
+        NOTREACHED();
+        return;
+    }
 
     std::vector<gfx::PNGCodec::Comment> comments;
     comments.push_back(gfx::PNGCodec::Comment("checksum", actual_pixel_hash));
     bool success = gfx::PNGCodec::Encode(
-        static_cast<const unsigned char*>(image.getPixels()),
-        gfx::PNGCodec::FORMAT_BGRA,
+        static_cast<const unsigned char*>(image.getPixels()), pixel_format,
         gfx::Size(image.width(), image.height()),
-        static_cast<int>(image.rowBytes()),
-        discard_transparency,
-        comments,
+        static_cast<int>(image.rowBytes()), discard_transparency, comments,
         &png);
     if (success)
       printer_->PrintImageBlock(png);
@@ -765,13 +859,37 @@ void BlinkTestController::OnAudioDump(const std::vector<unsigned char>& dump) {
   printer_->PrintAudioFooter();
 }
 
-void BlinkTestController::OnTextDump(const std::string& dump) {
+void BlinkTestController::OnTextDump(const std::string& dump,
+                                     bool should_dump_history) {
   printer_->PrintTextHeader();
   printer_->PrintTextBlock(dump);
+  if (should_dump_history) {
+    RenderFrameHost* main_rfh = main_window_->web_contents()->GetMainFrame();
+    for (auto* window : Shell::windows()) {
+      WebContents* web_contents = window->web_contents();
+      // Only capture the history from windows in the same process as the main
+      // window. During layout tests, we only use two processes when a devtools
+      // window is open.
+      // TODO(https://crbug.com/771003): Dump history for all WebContentses, not
+      // just ones that happen to be in the same process as the main test
+      // window's main frame.
+      if (main_rfh->GetProcess() != web_contents->GetMainFrame()->GetProcess())
+        continue;
+
+      printer_->PrintTextBlock(
+          "\n============== Back Forward List ==============\n");
+      printer_->PrintTextBlock(DumpHistoryForWebContents(web_contents));
+      printer_->PrintTextBlock(
+          "===============================================\n");
+    }
+  }
   printer_->PrintTextFooter();
 }
 
 void BlinkTestController::OnInitiateLayoutDump() {
+  // There should be at most 1 layout dump in progress at any given time.
+  DCHECK_EQ(0, pending_layout_dumps_);
+
   int number_of_messages = 0;
   for (RenderFrameHost* rfh : main_window_->web_contents()->GetAllFrames()) {
     if (!rfh->IsRenderFrameLive())
@@ -779,8 +897,8 @@ void BlinkTestController::OnInitiateLayoutDump() {
 
     ++number_of_messages;
     GetLayoutTestControlPtr(rfh)->DumpFrameLayout(
-        base::Bind(&BlinkTestController::OnDumpFrameLayoutResponse,
-                   base::Unretained(this), rfh->GetFrameTreeNodeId()));
+        base::BindOnce(&BlinkTestController::OnDumpFrameLayoutResponse,
+                       weak_factory_.GetWeakPtr(), rfh->GetFrameTreeNodeId()));
   }
 
   pending_layout_dumps_ = number_of_messages;
@@ -819,6 +937,13 @@ void BlinkTestController::OnDumpFrameLayoutResponse(int frame_tree_node_id,
   DCHECK_LE(0, pending_layout_dumps_);
   if (pending_layout_dumps_ > 0)
     return;
+
+  // If the main test window was destroyed while waiting for the responses, then
+  // there is nobody to receive the |stitched_layout_dump| and finish the test.
+  if (!web_contents()) {
+    OnTestFinished();
+    return;
+  }
 
   // Stitch the frame-specific results in the right order.
   std::string stitched_layout_dump;
@@ -864,34 +989,14 @@ void BlinkTestController::OnSetPopupBlockingEnabled(bool block_popups) {
   LayoutTestContentBrowserClient::Get()->SetPopupBlockingEnabled(block_popups);
 }
 
-void BlinkTestController::OnClearDevToolsLocalStorage() {
-  ShellBrowserContext* browser_context =
-      ShellContentBrowserClient::Get()->browser_context();
-  StoragePartition* storage_partition =
-      BrowserContext::GetStoragePartition(browser_context, NULL);
-  storage_partition->GetDOMStorageContext()->DeleteLocalStorage(
-      content::LayoutTestDevToolsBindings::GetDevToolsPathAsURL("")
-          .GetOrigin());
+void BlinkTestController::OnNavigateSecondaryWindow(const GURL& url) {
+  if (secondary_window_)
+    secondary_window_->LoadURL(url);
 }
 
-void BlinkTestController::OnShowDevTools(const std::string& settings,
-                                         const std::string& frontend_url) {
-  devtools_window_ = SecondaryWindow();
-  devtools_bindings_.reset(LayoutTestDevToolsBindings::LoadDevTools(
-      devtools_window_->web_contents(), main_window_->web_contents(), settings,
-      frontend_url));
-  devtools_window_->web_contents()->GetRenderViewHost()->GetWidget()->Focus();
-  devtools_window_->web_contents()->Focus();
-}
-
-void BlinkTestController::OnEvaluateInDevTools(
-    int call_id, const std::string& script) {
+void BlinkTestController::OnInspectSecondaryWindow() {
   if (devtools_bindings_)
-    devtools_bindings_->EvaluateInFrontend(call_id, script);
-}
-
-void BlinkTestController::OnCloseDevTools() {
-  devtools_bindings_.reset();
+    devtools_bindings_->Attach();
 }
 
 void BlinkTestController::OnGoToOffset(int offset) {
@@ -907,48 +1012,6 @@ void BlinkTestController::OnLoadURLForFrame(const GURL& url,
   main_window_->LoadURLForFrame(url, frame_name);
 }
 
-void BlinkTestController::OnCaptureSessionHistory() {
-  std::vector<int> routing_ids;
-  std::vector<std::vector<PageState> > session_histories;
-  std::vector<unsigned> current_entry_indexes;
-
-  RenderFrameHost* render_frame_host =
-      main_window_->web_contents()->GetMainFrame();
-
-  for (auto* window : Shell::windows()) {
-    WebContents* web_contents = window->web_contents();
-    // Only capture the history from windows in the same process as the main
-    // window. During layout tests, we only use two processes when an
-    // devtools window is open.
-    auto* process = web_contents->GetMainFrame()->GetProcess();
-    if (render_frame_host->GetProcess() != process)
-      continue;
-
-    routing_ids.push_back(web_contents->GetRenderViewHost()->GetRoutingID());
-    current_entry_indexes.push_back(
-        web_contents->GetController().GetCurrentEntryIndex());
-    std::vector<PageState> history;
-    for (int entry = 0; entry < web_contents->GetController().GetEntryCount();
-         ++entry) {
-      PageState state = web_contents->GetController().GetEntryAtIndex(entry)->
-          GetPageState();
-      if (!state.IsValid()) {
-        state = PageState::CreateFromURL(
-            web_contents->GetController().GetEntryAtIndex(entry)->GetURL());
-      }
-      history.push_back(state);
-    }
-    session_histories.push_back(history);
-  }
-
-  RenderViewHost* render_view_host =
-      main_window_->web_contents()->GetRenderViewHost();
-  Send(new ShellViewMsg_SessionHistory(render_view_host->GetRoutingID(),
-                                       routing_ids,
-                                       session_histories,
-                                       current_entry_indexes));
-}
-
 void BlinkTestController::OnCloseRemainingWindows() {
   DevToolsAgentHost::DetachAllClients();
   std::vector<Shell*> open_windows(Shell::windows());
@@ -962,10 +1025,8 @@ void BlinkTestController::OnCloseRemainingWindows() {
 void BlinkTestController::OnResetDone() {
   if (is_leak_detection_enabled_) {
     if (main_window_ && main_window_->web_contents()) {
-      RenderViewHost* render_view_host =
-          main_window_->web_contents()->GetRenderViewHost();
-      render_view_host->Send(
-          new ShellViewMsg_TryLeakDetection(render_view_host->GetRoutingID()));
+      RenderViewHost* rvh = main_window_->web_contents()->GetRenderViewHost();
+      rvh->Send(new ShellViewMsg_TryLeakDetection(rvh->GetRoutingID()));
     }
     return;
   }
@@ -1004,9 +1065,9 @@ void BlinkTestController::OnGetBluetoothManualChooserEvents() {
         "getBluetoothManualChooserEvents.");
     return;
   }
-  Send(new ShellViewMsg_ReplyBluetoothManualChooserEvents(
-      main_window_->web_contents()->GetRenderViewHost()->GetRoutingID(),
-      bluetooth_chooser_factory_->GetAndResetEvents()));
+  RenderViewHost* rvh = main_window_->web_contents()->GetRenderViewHost();
+  rvh->Send(new ShellViewMsg_ReplyBluetoothManualChooserEvents(
+      rvh->GetRoutingID(), bluetooth_chooser_factory_->GetAndResetEvents()));
 }
 
 void BlinkTestController::OnSendBluetoothManualChooserEvent(
@@ -1040,8 +1101,8 @@ mojom::LayoutTestControl* BlinkTestController::GetLayoutTestControlPtr(
     frame->GetRemoteAssociatedInterfaces()->GetInterface(
         &layout_test_control_map_[frame]);
     layout_test_control_map_[frame].set_connection_error_handler(
-        base::Bind(&BlinkTestController::HandleLayoutTestControlError,
-                   base::Unretained(this), frame));
+        base::BindOnce(&BlinkTestController::HandleLayoutTestControlError,
+                       weak_factory_.GetWeakPtr(), frame));
   }
   DCHECK(layout_test_control_map_[frame].get());
   return layout_test_control_map_[frame].get();

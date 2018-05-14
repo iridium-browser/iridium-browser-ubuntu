@@ -4,26 +4,32 @@
 
 #include "ios/chrome/browser/browser_state/browser_state_keyed_service_factories.h"
 
+#include "base/feature_list.h"
 #include "ios/chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "ios/chrome/browser/autocomplete/in_memory_url_index_factory.h"
 #include "ios/chrome/browser/autocomplete/shortcuts_backend_factory.h"
 #include "ios/chrome/browser/autofill/personal_data_manager_factory.h"
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "ios/chrome/browser/bookmarks/startup_task_runner_service_factory.h"
+#include "ios/chrome/browser/browsing_data/browsing_data_remover_factory.h"
+#include "ios/chrome/browser/consent_auditor/consent_auditor_factory.h"
 #include "ios/chrome/browser/content_settings/cookie_settings_factory.h"
 #include "ios/chrome/browser/desktop_promotion/desktop_promotion_sync_service_factory.h"
 #include "ios/chrome/browser/dom_distiller/dom_distiller_service_factory.h"
+#include "ios/chrome/browser/download/browser_download_service_factory.h"
 #include "ios/chrome/browser/favicon/favicon_service_factory.h"
 #include "ios/chrome/browser/favicon/ios_chrome_favicon_loader_factory.h"
 #include "ios/chrome/browser/favicon/ios_chrome_large_icon_cache_factory.h"
 #include "ios/chrome/browser/favicon/ios_chrome_large_icon_service_factory.h"
-#include "ios/chrome/browser/feature_engagement_tracker/feature_engagement_tracker_factory.h"
+#include "ios/chrome/browser/feature_engagement/tracker_factory.h"
 #include "ios/chrome/browser/google/google_logo_service_factory.h"
 #include "ios/chrome/browser/google/google_url_tracker_factory.h"
 #include "ios/chrome/browser/history/history_service_factory.h"
 #include "ios/chrome/browser/history/top_sites_factory.h"
 #include "ios/chrome/browser/history/web_history_service_factory.h"
 #include "ios/chrome/browser/invalidation/ios_chrome_profile_invalidation_provider_factory.h"
+#include "ios/chrome/browser/language/language_model_factory.h"
+#include "ios/chrome/browser/language/url_language_histogram_factory.h"
 #include "ios/chrome/browser/ntp_snippets/ios_chrome_content_suggestions_service_factory.h"
 #include "ios/chrome/browser/passwords/ios_chrome_password_store_factory.h"
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
@@ -47,9 +53,13 @@
 #include "ios/chrome/browser/sync/ios_user_event_service_factory.h"
 #include "ios/chrome/browser/sync/sync_setup_service_factory.h"
 #include "ios/chrome/browser/translate/translate_accept_languages_factory.h"
+#include "ios/chrome/browser/translate/translate_ranker_factory.h"
+#include "ios/chrome/browser/ui/browser_list/browser_list_factory.h"
+#include "ios/chrome/browser/ui/browser_list/browser_list_session_service_factory.h"
+#include "ios/chrome/browser/ui/fullscreen/fullscreen_controller_factory.h"
+#import "ios/chrome/browser/ui/overlays/overlay_service_factory.h"
 #include "ios/chrome/browser/undo/bookmark_undo_service_factory.h"
 #include "ios/chrome/browser/web_data_service_factory.h"
-#include "ios/shared/chrome/browser/ui/browser_list/browser_list_session_service_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -89,9 +99,14 @@ void EnsureBrowserStateKeyedServiceFactoriesBuilt() {
   ios::TopSitesFactory::GetInstance();
   ios::WebDataServiceFactory::GetInstance();
   ios::WebHistoryServiceFactory::GetInstance();
+  translate::TranslateRankerFactory::GetInstance();
   AuthenticationServiceFactory::GetInstance();
+  BrowserListFactory::GetInstance();
   BrowserListSessionServiceFactory::GetInstance();
+  BrowsingDataRemoverFactory::GetInstance();
+  ConsentAuditorFactory::GetInstance();
   DesktopPromotionSyncServiceFactory::GetInstance();
+  feature_engagement::TrackerFactory::GetInstance();
   IOSChromeGCMProfileServiceFactory::GetInstance();
   IOSChromeLargeIconCacheFactory::GetInstance();
   IOSChromeLargeIconServiceFactory::GetInstance();
@@ -101,8 +116,8 @@ void EnsureBrowserStateKeyedServiceFactoriesBuilt() {
   IOSChromeProfileInvalidationProviderFactory::GetInstance();
   IOSChromeProfileSyncServiceFactory::GetInstance();
   IOSUserEventServiceFactory::GetInstance();
-  FeatureEngagementTrackerFactory::GetInstance();
   GoogleLogoServiceFactory::GetInstance();
+  LanguageModelFactory::GetInstance();
   OAuth2TokenServiceFactory::GetInstance();
   ReadingListModelFactory::GetInstance();
   SigninClientFactory::GetInstance();
@@ -111,4 +126,8 @@ void EnsureBrowserStateKeyedServiceFactoriesBuilt() {
   SyncSetupServiceFactory::GetInstance();
   TabRestoreServiceDelegateImplIOSFactory::GetInstance();
   TranslateAcceptLanguagesFactory::GetInstance();
+  UrlLanguageHistogramFactory::GetInstance();
+  BrowserDownloadServiceFactory::GetInstance();
+  FullscreenControllerFactory::GetInstance();
+  OverlayServiceFactory::GetInstance();
 }

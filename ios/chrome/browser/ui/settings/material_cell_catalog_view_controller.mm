@@ -111,6 +111,8 @@ const CGFloat kCardIssuerNetworkIconDimension = 25.0;
   self =
       [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
   if (self) {
+    // TODO(crbug.com/764578): -loadModel should not be called from
+    // initializer. A possible fix is to move this call to -viewDidLoad.
     [self loadModel];
   }
   return self;
@@ -341,7 +343,7 @@ const CGFloat kCardIssuerNetworkIconDimension = 25.0;
 
 - (void)viewDidLoad {
   [super viewDidLoad];
-  self.title = @"Cell Catalog";
+  self.title = @"Collection Cell Catalog";
 
   // Customize collection view settings.
   self.styler.cellStyle = MDCCollectionViewCellStyleCard;
@@ -442,7 +444,9 @@ const CGFloat kCardIssuerNetworkIconDimension = 25.0;
 - (CollectionViewItem*)accountItemDetailWithError {
   CollectionViewAccountItem* accountItemDetail =
       [[CollectionViewAccountItem alloc] initWithType:ItemTypeAccountDetail];
-  accountItemDetail.image = [UIImage imageNamed:@"default_avatar"];
+  // TODO(crbug.com/754032): ios_default_avatar image is from a downstream iOS
+  // internal repository. It should be used through a provider API instead.
+  accountItemDetail.image = [UIImage imageNamed:@"ios_default_avatar"];
   accountItemDetail.text = @"Account User Name";
   accountItemDetail.detailText =
       @"Syncing to AccountUserNameAccount@example.com";
@@ -455,7 +459,9 @@ const CGFloat kCardIssuerNetworkIconDimension = 25.0;
 - (CollectionViewItem*)accountItemCheckMark {
   CollectionViewAccountItem* accountItemCheckMark =
       [[CollectionViewAccountItem alloc] initWithType:ItemTypeAccountCheckMark];
-  accountItemCheckMark.image = [UIImage imageNamed:@"default_avatar"];
+  // TODO(crbug.com/754032): ios_default_avatar image is from a downstream iOS
+  // internal repository. It should be used through a provider API instead.
+  accountItemCheckMark.image = [UIImage imageNamed:@"ios_default_avatar"];
   accountItemCheckMark.text = @"Lorem ipsum dolor sit amet, consectetur "
                               @"adipiscing elit, sed do eiusmod tempor "
                               @"incididunt ut labore et dolore magna aliqua.";
@@ -483,7 +489,8 @@ const CGFloat kCardIssuerNetworkIconDimension = 25.0;
   signinPromoItem.configurator =
       [[SigninPromoViewConfigurator alloc] initWithUserEmail:nil
                                                 userFullName:nil
-                                                   userImage:nil];
+                                                   userImage:nil
+                                              hasCloseButton:YES];
   return signinPromoItem;
 }
 
@@ -493,7 +500,8 @@ const CGFloat kCardIssuerNetworkIconDimension = 25.0;
   signinPromoItem.configurator = [[SigninPromoViewConfigurator alloc]
       initWithUserEmail:@"jonhdoe@example.com"
            userFullName:@"John Doe"
-              userImage:nil];
+              userImage:nil
+         hasCloseButton:NO];
   return signinPromoItem;
 }
 
@@ -552,7 +560,7 @@ const CGFloat kCardIssuerNetworkIconDimension = 25.0;
       [[PaymentsTextItem alloc] initWithType:ItemTypePaymentsDynamicHeight];
   item.text = @"If you want to display a long text that wraps to the next line "
               @"and may need to feature an image this is the cell to use.";
-  item.image = [UIImage imageNamed:@"app_icon_placeholder"];
+  item.leadingImage = [UIImage imageNamed:@"app_icon_placeholder"];
   return item;
 }
 
@@ -725,7 +733,7 @@ const CGFloat kCardIssuerNetworkIconDimension = 25.0;
       [[ContentSuggestionsFooterItem alloc]
           initWithType:ItemTypeContentSuggestions
                  title:@"Footer title"
-                 block:nil];
+              callback:nil];
   return footerItem;
 }
 

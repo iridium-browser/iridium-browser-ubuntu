@@ -12,7 +12,6 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/cancellation_flag.h"
@@ -78,7 +77,7 @@ class FullFeedFetcher : public ChangeListLoader::FeedFetcher {
       google_apis::DriveApiErrorCode status,
       std::unique_ptr<google_apis::TeamDriveList> team_drives) {
     DCHECK(is_team_drive_enabled_);
-    change_lists_.push_back(base::MakeUnique<ChangeList>(*team_drives));
+    change_lists_.push_back(std::make_unique<ChangeList>(*team_drives));
 
     if (!team_drives->next_page_token().empty()) {
       scheduler_->GetRemainingTeamDriveList(
@@ -115,7 +114,7 @@ class FullFeedFetcher : public ChangeListLoader::FeedFetcher {
     }
 
     DCHECK(file_list);
-    change_lists_.push_back(base::MakeUnique<ChangeList>(*file_list));
+    change_lists_.push_back(std::make_unique<ChangeList>(*file_list));
 
     if (!file_list->next_link().is_empty()) {
       // There is the remaining result so fetch it.
@@ -179,7 +178,7 @@ class DeltaFeedFetcher : public ChangeListLoader::FeedFetcher {
     }
 
     DCHECK(change_list);
-    change_lists_.push_back(base::MakeUnique<ChangeList>(*change_list));
+    change_lists_.push_back(std::make_unique<ChangeList>(*change_list));
 
     if (!change_list->next_link().is_empty()) {
       // There is the remaining result so fetch it.
@@ -219,7 +218,7 @@ std::unique_ptr<base::ScopedClosureRunner> LoaderController::GetLock() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   ++lock_count_;
-  return base::MakeUnique<base::ScopedClosureRunner>(
+  return std::make_unique<base::ScopedClosureRunner>(
       base::Bind(&LoaderController::Unlock, weak_ptr_factory_.GetWeakPtr()));
 }
 
@@ -269,10 +268,10 @@ void AboutResourceLoader::GetAboutResource(
   if (cached_about_resource_) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(
+        base::BindOnce(
             callback, google_apis::HTTP_NO_CONTENT,
-            base::Passed(std::unique_ptr<google_apis::AboutResource>(
-                new google_apis::AboutResource(*cached_about_resource_)))));
+            std::unique_ptr<google_apis::AboutResource>(
+                new google_apis::AboutResource(*cached_about_resource_))));
   } else {
     UpdateAboutResource(callback);
   }
@@ -321,7 +320,7 @@ void AboutResourceLoader::UpdateAboutResourceAfterGetAbout(
 
   for (size_t i = 0; i < callbacks.size(); ++i) {
     callbacks[i].Run(
-        status, base::MakeUnique<google_apis::AboutResource>(*about_resource));
+        status, std::make_unique<google_apis::AboutResource>(*about_resource));
   }
 }
 
@@ -448,8 +447,7 @@ void ChangeListLoader::LoadAfterGetLargestChangestamp(
 
     // Continues to load from server in background.
     // Put dummy callbacks to indicate that fetching is still continuing.
-    pending_load_callback_.push_back(
-        base::Bind(&util::EmptyFileOperationCallback));
+    pending_load_callback_.push_back(base::DoNothing());
   }
 
   about_resource_loader_->GetAboutResource(
@@ -549,7 +547,7 @@ void ChangeListLoader::LoadChangeListFromServer(int64_t start_changestamp) {
   change_feed_fetcher_->Run(
       base::Bind(&ChangeListLoader::LoadChangeListFromServerAfterLoadChangeList,
                  weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(base::MakeUnique<google_apis::AboutResource>(
+                 base::Passed(std::make_unique<google_apis::AboutResource>(
                      *about_resource_loader_->cached_about_resource())),
                  is_delta_update));
 }

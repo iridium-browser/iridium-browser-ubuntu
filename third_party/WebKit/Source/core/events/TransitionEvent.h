@@ -27,7 +27,7 @@
 #ifndef TransitionEvent_h
 #define TransitionEvent_h
 
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/events/TransitionEventInit.h"
 
 namespace blink {
@@ -57,7 +57,7 @@ class TransitionEvent final : public Event {
 
   const AtomicString& InterfaceName() const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   TransitionEvent();

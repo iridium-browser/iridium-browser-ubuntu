@@ -10,11 +10,12 @@
 
 #include <list>
 
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/memory/ptr_util.h"
 #include "base/process/kill.h"
 #include "base/process/process_handle.h"
 #include "base/supports_user_data.h"
+#include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/public/common/bind_interface_helpers.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -34,7 +35,7 @@ class Identity;
 }
 
 namespace resource_coordinator {
-class ResourceCoordinatorInterface;
+class ProcessResourceCoordinator;
 }
 
 namespace viz {
@@ -50,6 +51,10 @@ class RendererAudioOutputStreamFactoryContext;
 class StoragePartition;
 struct GlobalRequestID;
 
+#if defined(OS_ANDROID)
+enum class ChildProcessImportance;
+#endif
+
 namespace mojom {
 class Renderer;
 }
@@ -61,7 +66,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
                                          public IPC::Listener,
                                          public base::SupportsUserData {
  public:
-  using iterator = IDMap<RenderProcessHost*>::iterator;
+  using iterator = base::IDMap<RenderProcessHost*>::iterator;
 
   // Details for RENDERER_PROCESS_CLOSED notifications.
   struct RendererClosedDetails {
@@ -177,7 +182,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
 
   // Returns whether the process is ready. The process is ready once both
   // conditions (which can happen in arbitrary order) are true:
-  // 1- the launcher reported a succesful launch
+  // 1- the launcher reported a successful launch
   // 2- the channel is connected.
   //
   // After that point, GetHandle() is valid, and deferred messages have been
@@ -228,6 +233,15 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual void AddWidget(RenderWidgetHost* widget) = 0;
   virtual void RemoveWidget(RenderWidgetHost* widget) = 0;
 
+#if defined(OS_ANDROID)
+  // Called by an already added widget when its importance changes.
+  virtual void UpdateWidgetImportance(ChildProcessImportance old_value,
+                                      ChildProcessImportance new_value) = 0;
+
+  // Return the highest importance of all widgets in this process.
+  virtual ChildProcessImportance ComputeEffectiveImportance() = 0;
+#endif
+
   // Sets a flag indicating that the process can be abnormally terminated.
   virtual void SetSuddenTerminationAllowed(bool allowed) = 0;
   // Returns true if the process can be abnormally terminated.
@@ -248,37 +262,26 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual void EnableAudioDebugRecordings(const base::FilePath& file) = 0;
   virtual void DisableAudioDebugRecordings() = 0;
 
-  // Starts a WebRTC event log for each peerconnection on the render process.
-  // A base file_path can be supplied, which will be extended to include several
-  // identifiers to ensure uniqueness. If a recording was already in progress,
-  // this call will return false and have no other effect.
-  virtual bool StartWebRTCEventLog(const base::FilePath& file_path) = 0;
-
-  // Stops recording a WebRTC event log for each peerconnection on the render
-  // process. If no recording was in progress, this call will return false.
-  virtual bool StopWebRTCEventLog() = 0;
-
   // Enables or disables WebRTC's echo canceller AEC3. Disabled implies
-  // selecting the older AEC2.
-  // Note: This will be removed once the AEC3 is fully rolled out and the old
-  // AEC is deprecated.
-  virtual void SetEchoCanceller3(bool enable) = 0;
+  // selecting the older AEC2. The operation is asynchronous, |callback| is run
+  // when done with the boolean indicating if successful and an error message.
+  // The error message is empty if successful.
+  // TODO(crbug.com/696930): Remove once the AEC3 is fully rolled out and the
+  // old AEC is deprecated.
+  virtual void SetEchoCanceller3(
+      bool enable,
+      base::OnceCallback<void(bool /* success */,
+                              const std::string& /* error_message */)>
+          callback) = 0;
 
-  // When set, |callback| receives log messages regarding, for example, media
-  // devices (webcams, mics, etc) that were initially requested in the render
-  // process associated with this RenderProcessHost.
-  virtual void SetWebRtcLogMessageCallback(
-      base::Callback<void(const std::string&)> callback) = 0;
-  virtual void ClearWebRtcLogMessageCallback() = 0;
+  using WebRtcRtpPacketCallback =
+      base::Callback<void(std::unique_ptr<uint8_t[]> packet_header,
+                          size_t header_length,
+                          size_t packet_length,
+                          bool incoming)>;
 
-  typedef base::Callback<void(std::unique_ptr<uint8_t[]> packet_header,
-                              size_t header_length,
-                              size_t packet_length,
-                              bool incoming)>
-      WebRtcRtpPacketCallback;
-
-  typedef base::Callback<void(bool incoming, bool outgoing)>
-      WebRtcStopRtpDumpCallback;
+  using WebRtcStopRtpDumpCallback =
+      base::Callback<void(bool incoming, bool outgoing)>;
 
   // Starts passing RTP packets to |packet_callback| and returns the callback
   // used to stop dumping.
@@ -316,38 +319,39 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Returns true if this process currently has backgrounded priority.
   virtual bool IsProcessBackgrounded() const = 0;
 
-  // Returns the sum of the shared worker and service worker ref counts.
-  virtual size_t GetWorkerRefCount() const = 0;
+  // "Keep alive ref count" represents the number of the customers of this
+  // render process who wish the renderer process to be alive. While the ref
+  // count is positive, |this| object will keep the renderer process alive,
+  // unless DisableKeepAliveRefCount() is called.
+  //
+  // Here is the list of users:
+  //  - Service Worker:
+  //    While there are service workers who live in this process, they wish
+  //    the renderer process to be alive. The ref count is incremented when this
+  //    process is allocated to the worker, and decremented when worker's
+  //    shutdown sequence is completed.
+  //  - Shared Worker:
+  //    While there are shared workers who live in this process, they wish
+  //    the renderer process to be alive. The ref count is incremented when
+  //    a shared worker is created in the process, and decremented when
+  //    it is terminated (it self-destructs when it no longer has clients).
+  //  - Keepalive request (if the KeepAliveRendererForKeepaliveRequests
+  //    feature is enabled):
+  //    When a fetch request with keepalive flag
+  //    (https://fetch.spec.whatwg.org/#request-keepalive-flag) specified is
+  //    pending, it wishes the renderer process to be kept alive.
+  virtual void IncrementKeepAliveRefCount() = 0;
+  virtual void DecrementKeepAliveRefCount() = 0;
 
-  // Counts the number of service workers who live on this process. The service
-  // worker ref count is incremented when this process is allocated to the
-  // worker, and decremented when worker's shutdown sequence is completed.
-  virtual void IncrementServiceWorkerRefCount() = 0;
-  virtual void DecrementServiceWorkerRefCount() = 0;
-
-  // The shared worker ref count is non-zero if any other process is connected
-  // to a shared worker in this process, or a new shared worker is being created
-  // in this process.
-  // IncrementSharedWorkerRefCount is called in two cases:
-  // - there was no external renderer connected to a shared worker in this
-  //   process, and now there is at least one
-  // - a new worker is being created in this process.
-  // DecrementSharedWorkerRefCount is called in two cases:
-  // - there was an external renderer connected to a shared worker in this
-  //    process, and now there is none
-  // - a new worker finished being created in this process.
-  virtual void IncrementSharedWorkerRefCount() = 0;
-  virtual void DecrementSharedWorkerRefCount() = 0;
-
-  // Sets worker ref counts to zero. Called when the browser context will be
+  // Sets keep alive ref counts to zero. Called when the browser context will be
   // destroyed so this RenderProcessHost can immediately die.
   //
-  // After this is called, the Increment/DecrementWorkerRefCount functions must
-  // not be called.
-  virtual void ForceReleaseWorkerRefCounts() = 0;
+  // After this is called, the Increment/DecrementKeepAliveRefCount() functions
+  // must not be called.
+  virtual void DisableKeepAliveRefCount() = 0;
 
-  // Returns true if ForceReleaseWorkerRefCounts was called.
-  virtual bool IsWorkerRefCountDisabled() = 0;
+  // Returns true if DisableKeepAliveRefCount() was called.
+  virtual bool IsKeepAliveRefCountDisabled() = 0;
 
   // Purges and suspends the renderer process.
   virtual void PurgeAndSuspend() = 0;
@@ -361,7 +365,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual mojom::Renderer* GetRendererInterface() = 0;
 
   // Acquires the interface to the Global Resource Coordinator for this process.
-  virtual resource_coordinator::ResourceCoordinatorInterface*
+  virtual resource_coordinator::ProcessResourceCoordinator*
   GetProcessResourceCoordinator() = 0;
 
   // Whether this process is locked out from ever being reused for sites other
@@ -433,7 +437,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // to a RenderProcess which is instantiated in the same process
   // with the Browser.  All IPC between the Browser and the
   // Renderer is the same, it's just not crossing a process boundary.
-
   static bool run_renderer_in_process();
 
   // This also calls out to ContentBrowserClient::GetApplicationLocale and
@@ -447,6 +450,12 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Returns the RenderProcessHost given its ID.  Returns nullptr if the ID does
   // not correspond to a live RenderProcessHost.
   static RenderProcessHost* FromID(int render_process_id);
+
+  // Returns the RenderProcessHost given its renderer's service Identity.
+  // Returns nullptr if the Identity does not correspond to a live
+  // RenderProcessHost.
+  static RenderProcessHost* FromRendererIdentity(
+      const service_manager::Identity& identity);
 
   // Returns whether the process-per-site model is in use (globally or just for
   // the current site), in which case we should ensure there is only one
@@ -478,8 +487,13 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Returns the current maximum number of renderer process hosts kept by the
   // content module.
   static size_t GetMaxRendererProcessCount();
+
+  // TODO(siggi): Remove once https://crbug.com/806661 is resolved.
+  using AnalyzeHungRendererFunction = void (*)(const base::Process& renderer);
+  static void SetHungRendererAnalysisFunction(
+      AnalyzeHungRendererFunction analyze_hung_renderer);
 };
 
-}  // namespace content.
+}  // namespace content
 
 #endif  // CONTENT_PUBLIC_BROWSER_RENDER_PROCESS_HOST_H_

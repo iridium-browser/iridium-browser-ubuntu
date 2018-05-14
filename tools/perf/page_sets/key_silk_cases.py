@@ -19,10 +19,9 @@ class KeySilkCasesPage(page_module.Page):
     if not name.startswith('http'):
       name = url.split('/')[-1]
     super(KeySilkCasesPage, self).__init__(
-        url=url, page_set=page_set, credentials_path = 'data/credentials.json',
+        url=url, page_set=page_set,
         shared_page_state_class=shared_page_state.SharedMobilePageState,
         name=name)
-    self.archive_data_file = 'data/key_silk_cases.json'
     self._run_no_page_interactions = run_no_page_interactions
 
   def RunNavigateSteps(self, action_runner):
@@ -326,14 +325,17 @@ class Page17(KeySilkCasesPage):
   def StressHideyBars(self, action_runner):
     with action_runner.CreateGestureInteraction(
         'ScrollAction', repeatable=True):
+      action_runner.WaitForElement(selector='#messages')
       action_runner.ScrollElement(
         selector='#messages', direction='down', speed_in_pixels_per_second=200)
     with action_runner.CreateGestureInteraction(
         'ScrollAction', repeatable=True):
+      action_runner.WaitForElement(selector='#messages')
       action_runner.ScrollElement(
           selector='#messages', direction='up', speed_in_pixels_per_second=200)
     with action_runner.CreateGestureInteraction(
         'ScrollAction', repeatable=True):
+      action_runner.WaitForElement(selector='#messages')
       action_runner.ScrollElement(
           selector='#messages', direction='down',
           speed_in_pixels_per_second=200)
@@ -464,8 +466,6 @@ class Page22(KeySilkCasesPage):
     super(Page22, self).__init__(
       url='http://plus.google.com/app/basic/stream',
       page_set=page_set, run_no_page_interactions=run_no_page_interactions)
-
-    self.credentials = 'google'
 
   def RunNavigateSteps(self, action_runner):
     super(Page22, self).RunNavigateSteps(action_runner)
@@ -770,13 +770,3 @@ class KeySilkCasesPageSet(story.StorySet):
               KeySilkCasesPage.RunPageInteractions), (
               'Pages in this page set must not override KeySilkCasesPage\' '
               'RunPageInteractions method.')
-
-
-class KeySilkCasesStoryExpectations(story.expectations.StoryExpectations):
-  def SetExpectations(self):
-    self.DisableStory('https://polymer-topeka.appspot.com/',
-                      [story.expectations.ALL], 'crbug.com/507865')
-    self.DisableStory('http://plus.google.com/app/basic/stream',
-                      [story.expectations.ALL], 'crbug.com/338838')
-    self.DisableStory('inbox_app.html?slide_drawer',
-                      [story.expectations.ALL], 'crbug.com/446332')

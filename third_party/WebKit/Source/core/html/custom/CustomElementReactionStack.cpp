@@ -25,15 +25,16 @@ Persistent<CustomElementReactionStack>& GetCustomElementReactionStack() {
 // TODO(dominicc): Consider using linked heap structures, avoiding
 // finalizers, to make short-lived entries fast.
 
-CustomElementReactionStack::CustomElementReactionStack() {}
+CustomElementReactionStack::CustomElementReactionStack() = default;
 
-DEFINE_TRACE(CustomElementReactionStack) {
+void CustomElementReactionStack::Trace(blink::Visitor* visitor) {
   visitor->Trace(map_);
   visitor->Trace(stack_);
   visitor->Trace(backup_queue_);
 }
 
-DEFINE_TRACE_WRAPPERS(CustomElementReactionStack) {
+void CustomElementReactionStack::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   for (auto key : map_.Keys()) {
     visitor->TraceWrappers(key);
   }
@@ -77,7 +78,7 @@ void CustomElementReactionStack::Enqueue(Member<ElementQueue>& queue,
   CustomElementReactionQueue* reactions = map_.at(element);
   if (!reactions) {
     reactions = new CustomElementReactionQueue();
-    map_.insert(TraceWrapperMember<Element>(this, element), reactions);
+    map_.insert(element, reactions);
   }
 
   reactions->Add(reaction);

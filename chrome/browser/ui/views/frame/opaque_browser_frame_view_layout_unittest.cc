@@ -12,7 +12,7 @@
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/signin/core/common/profile_management_switches.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/text_constants.h"
@@ -49,6 +49,7 @@ class TestLayoutDelegate : public OpaqueBrowserFrameViewLayoutDelegate {
   void set_maximized(bool maximized) { maximized_ = maximized; }
 
   // OpaqueBrowserFrameViewLayoutDelegate:
+  bool IsIncognito() const override { return false; }
   bool ShouldShowWindowIcon() const override { return !window_title_.empty(); }
   bool ShouldShowWindowTitle() const override { return !window_title_.empty(); }
   base::string16 GetWindowTitle() const override { return window_title_; }
@@ -74,6 +75,8 @@ class TestLayoutDelegate : public OpaqueBrowserFrameViewLayoutDelegate {
   gfx::Size GetTabstripPreferredSize() const override {
     return IsTabStripVisible() ? gfx::Size(78, 29) : gfx::Size();
   }
+  int GetTopAreaHeight() const override { return 0; }
+  bool UseCustomFrame() const override { return true; }
 
  private:
   base::string16 window_title_;
@@ -94,14 +97,15 @@ class OpaqueBrowserFrameViewLayoutTest : public views::ViewsTestBase {
     views::ViewsTestBase::SetUp();
 
     delegate_.reset(new TestLayoutDelegate);
-    layout_manager_ = new OBFVL(delegate_.get());
-    layout_manager_->set_extra_caption_y(0);
-    layout_manager_->set_window_caption_spacing(0);
+    auto layout = std::make_unique<OBFVL>();
+    layout->set_delegate(delegate_.get());
+    layout->set_extra_caption_y(0);
+    layout->set_forced_window_caption_spacing_for_test(0);
     widget_ = new views::Widget;
     widget_->Init(CreateParams(views::Widget::InitParams::TYPE_POPUP));
     root_view_ = widget_->GetRootView();
     root_view_->SetSize(gfx::Size(kWindowWidth, kWindowWidth));
-    root_view_->SetLayoutManager(layout_manager_);
+    layout_manager_ = root_view_->SetLayoutManager(std::move(layout));
 
     // Add the caption buttons. We use fake images because we're modeling the
     // Windows assets here, while the linux version uses differently sized
@@ -136,7 +140,7 @@ class OpaqueBrowserFrameViewLayoutTest : public views::ViewsTestBase {
     views::ImageButton* button = new views::ImageButton(nullptr);
     gfx::ImageSkiaRep rep(size, 1.0f);
     gfx::ImageSkia image(rep);
-    button->SetImage(views::CustomButton::STATE_NORMAL, &image);
+    button->SetImage(views::Button::STATE_NORMAL, &image);
     button->set_id(view_id);
     root_view_->AddChildView(button);
     return button;
@@ -234,7 +238,8 @@ class OpaqueBrowserFrameViewLayoutTest : public views::ViewsTestBase {
       caption_buttons_width +=
           avatar_button_->GetPreferredSize().width() +
           (maximized ? OBFVL::kCaptionSpacing
-                     : -GetLayoutSize(NEW_TAB_BUTTON).width());
+                     : -GetLayoutSize(NEW_TAB_BUTTON, delegate_->IsIncognito())
+                            .width());
     }
     int tabstrip_x = OpaqueBrowserFrameView::kAvatarIconPadding;
     if (show_caption_buttons && caption_buttons_on_left) {

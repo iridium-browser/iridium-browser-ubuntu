@@ -29,6 +29,7 @@
 #include "platform/audio/ReverbConvolver.h"
 
 #include <memory>
+#include "base/location.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/audio/AudioBus.h"
@@ -36,7 +37,6 @@
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
-#include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 
@@ -138,8 +138,9 @@ ReverbConvolver::ReverbConvolver(AudioChannel* impulse_response,
   // FIXME: would be better to up the thread priority here.  It doesn't need to
   // be real-time, but higher than the default...
   if (use_background_threads && background_stages_.size() > 0) {
-    background_thread_ = Platform::Current()->CreateThread(
-        "Reverb convolution background thread");
+    background_thread_ =
+        Platform::Current()->CreateThread(WebThreadCreationParams(
+            WebThreadType::kReverbConvolutionBackgroundThread));
   }
 }
 
@@ -199,10 +200,11 @@ void ReverbConvolver::Process(const AudioChannel* source_channel,
 
   // Now that we've buffered more input, post another task to the background
   // thread.
-  if (background_thread_)
-    background_thread_->GetWebTaskRunner()->PostTask(
-        BLINK_FROM_HERE, CrossThreadBind(&ReverbConvolver::ProcessInBackground,
-                                         CrossThreadUnretained(this)));
+  if (background_thread_) {
+    PostCrossThreadTask(*background_thread_->GetTaskRunner(), FROM_HERE,
+                        CrossThreadBind(&ReverbConvolver::ProcessInBackground,
+                                        CrossThreadUnretained(this)));
+  }
 }
 
 void ReverbConvolver::Reset() {

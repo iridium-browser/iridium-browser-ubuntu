@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -37,7 +38,7 @@ class TestUtils(cros_test_lib.TempDirTestCase):
       temp_name = temp_file.name
 
       # Verify the name is valid.
-      self.assertTrue(os.path.exists(temp_name))
+      self.assertExists(temp_name)
 
       # Verify it has the right contents
       with open(temp_name, 'r') as f:
@@ -46,7 +47,7 @@ class TestUtils(cros_test_lib.TempDirTestCase):
       self.assertEqual([message], contents)
 
     # Verify the temp file goes away when we close it.
-    self.assertFalse(os.path.exists(temp_name))
+    self.assertNotExists(temp_name)
 
   # pylint: disable=E1101
   def testListdirFullpath(self):

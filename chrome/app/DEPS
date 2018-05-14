@@ -1,5 +1,4 @@
 include_rules = [
-  "+breakpad",
   "+chrome/browser",
   "+chrome/child",
   "+chrome/chrome_watcher",
@@ -23,7 +22,7 @@ include_rules = [
   "+components/nacl/renderer/plugin/ppapi_entrypoints.h",
   "+components/nacl/zygote",
   "+components/policy",
-  "+components/safe_browsing_db",
+  "+components/safe_browsing",
   "+components/startup_metric_utils/browser",
   "+components/upload_list",
   "+components/version_info",
@@ -32,11 +31,12 @@ include_rules = [
   "+extensions/common/constants.h",
   "+headless/public",  # For headless mode.
   "+mash/common",
-  "+mash/quick_launch/public",
+  "+ash/components/quick_launch/public",
   "+native_client/src/trusted/service_runtime/osx",
   "+remoting/client/plugin",
   "+sandbox",
   "+services/service_manager",
   "+services/ui/public",
+  "+third_party/breakpad/breakpad",
   "+third_party/crashpad/crashpad",
 ]

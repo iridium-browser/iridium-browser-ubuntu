@@ -36,6 +36,7 @@ struct BlockMemberInfo;
 namespace rx
 {
 class BlitGL;
+class ClearMultiviewGL;
 class ContextImpl;
 class FunctionsGL;
 class StateManagerGL;
@@ -62,23 +63,20 @@ class RendererGL : angle::NonCopyable
                            GLenum mode,
                            GLsizei count,
                            GLenum type,
-                           const void *indices,
-                           const gl::IndexRange &indexRange);
+                           const void *indices);
     gl::Error drawElementsInstanced(const gl::Context *context,
                                     GLenum mode,
                                     GLsizei count,
                                     GLenum type,
                                     const void *indices,
-                                    GLsizei instances,
-                                    const gl::IndexRange &indexRange);
+                                    GLsizei instances);
     gl::Error drawRangeElements(const gl::Context *context,
                                 GLenum mode,
                                 GLuint start,
                                 GLuint end,
                                 GLsizei count,
                                 GLenum type,
-                                const void *indices,
-                                const gl::IndexRange &indexRange);
+                                const void *indices);
     gl::Error drawArraysIndirect(const gl::Context *context, GLenum mode, const void *indirect);
     gl::Error drawElementsIndirect(const gl::Context *context,
                                    GLenum mode,
@@ -151,6 +149,10 @@ class RendererGL : angle::NonCopyable
     void pushGroupMarker(GLsizei length, const char *marker);
     void popGroupMarker();
 
+    // KHR_debug
+    void pushDebugGroup(GLenum source, GLuint id, GLsizei length, const char *message);
+    void popDebugGroup();
+
     std::string getVendorString() const;
     std::string getRendererDescription() const;
 
@@ -162,6 +164,7 @@ class RendererGL : angle::NonCopyable
     StateManagerGL *getStateManager() const { return mStateManager; }
     const WorkaroundsGL &getWorkarounds() const { return mWorkarounds; }
     BlitGL *getBlitter() const { return mBlitter; }
+    ClearMultiviewGL *getMultiviewClearer() const { return mMultiviewClearer; }
 
     MultiviewImplementationTypeGL getMultiviewImplementationType() const;
     const gl::Caps &getNativeCaps() const;
@@ -174,6 +177,10 @@ class RendererGL : angle::NonCopyable
                               GLuint numGroupsX,
                               GLuint numGroupsY,
                               GLuint numGroupsZ);
+    gl::Error dispatchComputeIndirect(const gl::Context *context, GLintptr indirect);
+
+    gl::Error memoryBarrier(GLbitfield barriers);
+    gl::Error memoryBarrierByRegion(GLbitfield barriers);
 
   private:
     void ensureCapsInitialized() const;
@@ -188,13 +195,11 @@ class RendererGL : angle::NonCopyable
     StateManagerGL *mStateManager;
 
     BlitGL *mBlitter;
+    ClearMultiviewGL *mMultiviewClearer;
 
     WorkaroundsGL mWorkarounds;
 
     bool mUseDebugOutput;
-
-    // For performance debugging
-    bool mSkipDrawCalls;
 
     mutable bool mCapsInitialized;
     mutable gl::Caps mNativeCaps;

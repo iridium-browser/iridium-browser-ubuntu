@@ -65,8 +65,12 @@ bool ChooserController::ShouldShowIconBeforeText() const {
   return false;
 }
 
-bool ChooserController::ShouldShowFootnoteView() const {
+bool ChooserController::ShouldShowHelpButton() const {
   return true;
+}
+
+bool ChooserController::ShouldShowReScanButton() const {
+  return false;
 }
 
 bool ChooserController::AllowMultipleSelection() const {
@@ -83,6 +87,14 @@ bool ChooserController::IsConnected(size_t index) const {
 
 bool ChooserController::IsPaired(size_t index) const {
   return false;
+}
+
+void ChooserController::RefreshOptions() {
+  NOTREACHED();
+}
+
+base::string16 ChooserController::GetStatus() const {
+  return base::string16();
 }
 
 void ChooserController::OpenAdapterOffHelpUrl() const {

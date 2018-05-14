@@ -22,7 +22,6 @@ import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.concurrent.ExecutionException;
@@ -35,10 +34,7 @@ import java.util.concurrent.TimeoutException;
  * https://developers.braintreepayments.com/guides/unionpay/testing/javascript/v3
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestCardEditorAutoAdvanceTest implements MainActivityStartCallback {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
@@ -87,12 +83,7 @@ public class PaymentRequestCardEditorAutoAdvanceTest implements MainActivityStar
         Assert.assertTrue(mPaymentRequestTestRule.getCardEditorFocusedView() != focusedChildView);
 
         // Request focus to card number field after auto advancing above.
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                focusedChildView.requestFocus();
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking((Runnable) () -> focusedChildView.requestFocus());
         mPaymentRequestTestRule.setTextInCardEditorAndWait(
                 new String[] {"3056 9309 0259 041"}, mPaymentRequestTestRule.getEditorTextUpdate());
         Assert.assertTrue(mPaymentRequestTestRule.getCardEditorFocusedView() == focusedChildView);
@@ -127,12 +118,7 @@ public class PaymentRequestCardEditorAutoAdvanceTest implements MainActivityStar
         Assert.assertTrue(mPaymentRequestTestRule.getCardEditorFocusedView() != focusedChildView);
 
         // Request focus to card number field after auto advancing above.
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                focusedChildView.requestFocus();
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking((Runnable) () -> focusedChildView.requestFocus());
         mPaymentRequestTestRule.setTextInCardEditorAndWait(new String[] {"3782 822463 10005 1"},
                 mPaymentRequestTestRule.getEditorTextUpdate());
         Assert.assertTrue(mPaymentRequestTestRule.getCardEditorFocusedView() == focusedChildView);
@@ -177,12 +163,7 @@ public class PaymentRequestCardEditorAutoAdvanceTest implements MainActivityStar
         Assert.assertTrue(mPaymentRequestTestRule.getCardEditorFocusedView() != focusedChildView);
 
         // Request focus to card number field after auto advancing above.
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                focusedChildView.requestFocus();
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking((Runnable) () -> focusedChildView.requestFocus());
         mPaymentRequestTestRule.setTextInCardEditorAndWait(new String[] {"4012 8888 8888 1881 1"},
                 mPaymentRequestTestRule.getEditorTextUpdate());
         Assert.assertTrue(mPaymentRequestTestRule.getCardEditorFocusedView() == focusedChildView);
@@ -226,12 +207,7 @@ public class PaymentRequestCardEditorAutoAdvanceTest implements MainActivityStar
         Assert.assertTrue(mPaymentRequestTestRule.getCardEditorFocusedView() != focusedChildView);
 
         // Request focus to card number field after auto advancing above.
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                focusedChildView.requestFocus();
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking((Runnable) () -> focusedChildView.requestFocus());
         mPaymentRequestTestRule.setTextInCardEditorAndWait(
                 new String[] {"6212 3456 7890 0000 0031"},
                 mPaymentRequestTestRule.getEditorTextUpdate());

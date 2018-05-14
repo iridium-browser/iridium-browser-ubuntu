@@ -5,39 +5,48 @@
 #ifndef CONTENT_RENDERER_DEVICE_SENSORS_DEVICE_MOTION_EVENT_PUMP_H_
 #define CONTENT_RENDERER_DEVICE_SENSORS_DEVICE_MOTION_EVENT_PUMP_H_
 
-#include <memory>
-
 #include "base/macros.h"
 #include "content/renderer/device_sensors/device_sensor_event_pump.h"
-#include "content/renderer/shared_memory_seqlock_reader.h"
-#include "device/sensors/public/cpp/motion_data.h"
-#include "device/sensors/public/interfaces/motion.mojom.h"
+#include "third_party/WebKit/public/platform/modules/device_orientation/WebDeviceMotionListener.h"
 
-namespace blink {
-class WebDeviceMotionListener;
+namespace device {
+class MotionData;
 }
 
 namespace content {
 
-typedef SharedMemorySeqLockReader<device::MotionData>
-    DeviceMotionSharedMemoryReader;
+class RenderThread;
 
 class CONTENT_EXPORT DeviceMotionEventPump
-    : public DeviceSensorMojoClientMixin<
-          DeviceSensorEventPump<blink::WebDeviceMotionListener>,
-          device::mojom::MotionSensor> {
+    : public DeviceSensorEventPump<blink::WebDeviceMotionListener> {
  public:
   explicit DeviceMotionEventPump(RenderThread* thread);
   ~DeviceMotionEventPump() override;
 
-  // PlatformEventObserver.
+  // PlatformEventObserver:
+  void SendStartMessage() override;
+  void SendStopMessage() override;
   void SendFakeDataForTesting(void* fake_data) override;
 
  protected:
+  // DeviceSensorEventPump:
   void FireEvent() override;
-  bool InitializeReader(base::SharedMemoryHandle handle) override;
 
-  std::unique_ptr<DeviceMotionSharedMemoryReader> reader_;
+  void SendStartMessageImpl();
+
+  SensorEntry accelerometer_;
+  SensorEntry linear_acceleration_sensor_;
+  SensorEntry gyroscope_;
+
+ private:
+  friend class DeviceMotionEventPumpTest;
+
+  // DeviceSensorEventPump:
+  bool SensorsReadyOrErrored() const override;
+
+  void GetDataFromSharedMemory(device::MotionData* data);
+
+  bool ShouldFireEvent(const device::MotionData& data) const;
 
   DISALLOW_COPY_AND_ASSIGN(DeviceMotionEventPump);
 };

@@ -53,8 +53,7 @@
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/loader/FrameLoader.h"
 #include "core/typed_arrays/FlexibleArrayBufferView.h"
-#include "core/workers/WorkerGlobalScope.h"
-#include "core/workers/WorkletGlobalScope.h"
+#include "core/workers/WorkerOrWorkletGlobalScope.h"
 #include "core/xml/XPathNSResolver.h"
 #include "platform/bindings/RuntimeCallStats.h"
 #include "platform/bindings/V8BindingMacros.h"
@@ -504,51 +503,10 @@ double ToRestrictedDouble(v8::Isolate* isolate,
   return number_value;
 }
 
-String ToByteString(v8::Isolate* isolate,
-                    v8::Local<v8::Value> value,
-                    ExceptionState& exception_state) {
-  // Handle null default value.
-  if (value.IsEmpty())
-    return String();
-
-  // From the Web IDL spec: http://heycam.github.io/webidl/#es-ByteString
-  if (value.IsEmpty())
-    return String();
-
-  // 1. Let x be ToString(v)
-  v8::Local<v8::String> string_object;
-  if (value->IsString()) {
-    string_object = value.As<v8::String>();
-  } else {
-    v8::TryCatch block(isolate);
-    if (!value->ToString(isolate->GetCurrentContext())
-             .ToLocal(&string_object)) {
-      exception_state.RethrowV8Exception(block.Exception());
-      return String();
-    }
-  }
-
-  String x = ToCoreString(string_object);
-
-  // 2. If the value of any element of x is greater than 255, then throw a
-  //    TypeError.
-  if (!x.ContainsOnlyLatin1()) {
-    exception_state.ThrowTypeError("Value is not a valid ByteString.");
-    return String();
-  }
-
-  // 3. Return an IDL ByteString value whose length is the length of x, and
-  //    where the value of each element is the value of the corresponding
-  //    element of x.
-  //    Blink: A ByteString is simply a String with a range constrained per the
-  //    above, so this is the identity operation.
-  return x;
-}
-
 static bool HasUnmatchedSurrogates(const String& string) {
   // By definition, 8-bit strings are confined to the Latin-1 code page and
   // have no surrogates, matched or otherwise.
-  if (string.Is8Bit())
+  if (string.IsEmpty() || string.Is8Bit())
     return false;
 
   const UChar* characters = string.Characters16();
@@ -572,7 +530,7 @@ static bool HasUnmatchedSurrogates(const String& string) {
 }
 
 // Replace unmatched surrogates with REPLACEMENT CHARACTER U+FFFD.
-static String ReplaceUnmatchedSurrogates(const String& string) {
+String ReplaceUnmatchedSurrogates(const String& string) {
   // This roughly implements http://heycam.github.io/webidl/#dfn-obtain-unicode
   // but since Blink strings are 16-bits internally, the output is simply
   // re-encoded to UTF-16.
@@ -647,37 +605,11 @@ static String ReplaceUnmatchedSurrogates(const String& string) {
   return u.ToString();
 }
 
-String ToUSVString(v8::Isolate* isolate,
-                   v8::Local<v8::Value> value,
-                   ExceptionState& exception_state) {
-  // http://heycam.github.io/webidl/#es-USVString
-  if (value.IsEmpty())
-    return String();
-
-  v8::Local<v8::String> string_object;
-  if (value->IsString()) {
-    string_object = value.As<v8::String>();
-  } else {
-    v8::TryCatch block(isolate);
-    if (!value->ToString(isolate->GetCurrentContext())
-             .ToLocal(&string_object)) {
-      exception_state.RethrowV8Exception(block.Exception());
-      return String();
-    }
-  }
-
-  // USVString is identical to DOMString except that "convert a
-  // DOMString to a sequence of Unicode characters" is used subsequently
-  // when converting to an IDL value
-  String x = ToCoreString(string_object);
-  return ReplaceUnmatchedSurrogates(x);
-}
-
 XPathNSResolver* ToXPathNSResolver(ScriptState* script_state,
                                    v8::Local<v8::Value> value) {
   XPathNSResolver* resolver = nullptr;
   if (V8XPathNSResolver::hasInstance(value, script_state->GetIsolate())) {
-    resolver = V8XPathNSResolver::toImpl(v8::Local<v8::Object>::Cast(value));
+    resolver = V8XPathNSResolver::ToImpl(v8::Local<v8::Object>::Cast(value));
   } else if (value->IsObject()) {
     resolver =
         V8CustomXPathNSResolver::Create(script_state, value.As<v8::Object>());
@@ -687,18 +619,18 @@ XPathNSResolver* ToXPathNSResolver(ScriptState* script_state,
 
 DOMWindow* ToDOMWindow(v8::Isolate* isolate, v8::Local<v8::Value> value) {
   if (value.IsEmpty() || !value->IsObject())
-    return 0;
+    return nullptr;
 
   v8::Local<v8::Object> window_wrapper = V8Window::findInstanceInPrototypeChain(
       v8::Local<v8::Object>::Cast(value), isolate);
   if (!window_wrapper.IsEmpty())
-    return V8Window::toImpl(window_wrapper);
-  return 0;
+    return V8Window::ToImpl(window_wrapper);
+  return nullptr;
 }
 
 LocalDOMWindow* ToLocalDOMWindow(v8::Local<v8::Context> context) {
   if (context.IsEmpty())
-    return 0;
+    return nullptr;
   return ToLocalDOMWindow(
       ToDOMWindow(context->GetIsolate(), context->Global()));
 }
@@ -730,11 +662,11 @@ ExecutionContext* ToExecutionContext(v8::Local<v8::Context> context) {
 
   const WrapperTypeInfo* wrapper_type_info = ToWrapperTypeInfo(global_proxy);
   if (wrapper_type_info->Equals(&V8Window::wrapperTypeInfo))
-    return V8Window::toImpl(global_proxy)->GetExecutionContext();
+    return V8Window::ToImpl(global_proxy)->GetExecutionContext();
   if (wrapper_type_info->IsSubclass(&V8WorkerGlobalScope::wrapperTypeInfo))
-    return V8WorkerGlobalScope::toImpl(global_proxy)->GetExecutionContext();
+    return V8WorkerGlobalScope::ToImpl(global_proxy)->GetExecutionContext();
   if (wrapper_type_info->IsSubclass(&V8WorkletGlobalScope::wrapperTypeInfo))
-    return V8WorkletGlobalScope::toImpl(global_proxy)->GetExecutionContext();
+    return V8WorkletGlobalScope::ToImpl(global_proxy)->GetExecutionContext();
 
   NOTREACHED();
   return nullptr;
@@ -761,7 +693,7 @@ void ToFlexibleArrayBufferView(v8::Isolate* isolate,
   DCHECK(value->IsArrayBufferView());
   v8::Local<v8::ArrayBufferView> buffer = value.As<v8::ArrayBufferView>();
   if (!storage) {
-    result.SetFull(V8ArrayBufferView::toImpl(buffer));
+    result.SetFull(V8ArrayBufferView::ToImpl(buffer));
     return;
   }
   size_t length = buffer->ByteLength();
@@ -789,7 +721,7 @@ v8::Local<v8::Context> ToV8Context(ExecutionContext* context,
   if (context->IsDocument()) {
     if (LocalFrame* frame = ToDocument(context)->GetFrame())
       return ToV8Context(frame, world);
-  } else if (context->IsWorkerGlobalScope()) {
+  } else if (context->IsWorkerOrWorkletGlobalScope()) {
     if (WorkerOrWorkletScriptController* script =
             ToWorkerOrWorkletGlobalScope(context)->ScriptController()) {
       if (script->GetScriptState()->ContextIsValid())
@@ -808,6 +740,8 @@ v8::Local<v8::Context> ToV8Context(LocalFrame* frame, DOMWrapperWorld& world) {
 
 v8::Local<v8::Context> ToV8ContextEvenIfDetached(LocalFrame* frame,
                                                  DOMWrapperWorld& world) {
+  // TODO(yukishiino): this method probably should not force context creation,
+  // but it does through WindowProxy() call.
   DCHECK(frame);
   return frame->WindowProxy(world)->ContextIfInitialized();
 }
@@ -898,28 +832,6 @@ bool HasCallableIteratorSymbol(v8::Isolate* isolate,
   return iterator_getter->IsFunction();
 }
 
-void MoveEventListenerToNewWrapper(v8::Isolate* isolate,
-                                   v8::Local<v8::Object> object,
-                                   EventListener* old_value,
-                                   v8::Local<v8::Value> new_value,
-                                   int array_index) {
-  if (old_value) {
-    V8AbstractEventListener* old_listener =
-        V8AbstractEventListener::Cast(old_value);
-    if (old_listener) {
-      v8::Local<v8::Object> old_listener_object =
-          old_listener->GetExistingListenerObject();
-      if (!old_listener_object.IsEmpty()) {
-        RemoveHiddenValueFromArray(isolate, object, old_listener_object,
-                                   array_index);
-      }
-    }
-  }
-  // Non-callable input is treated as null and ignored
-  if (new_value->IsFunction())
-    AddHiddenValueToArray(isolate, object, new_value, array_index);
-}
-
 v8::Isolate* ToIsolate(ExecutionContext* context) {
   if (context && context->IsDocument())
     return V8PerIsolateData::MainThreadIsolate();
@@ -932,11 +844,12 @@ v8::Isolate* ToIsolate(LocalFrame* frame) {
 }
 
 v8::Local<v8::Value> FromJSONString(v8::Isolate* isolate,
+                                    v8::Local<v8::Context> context,
                                     const String& stringified_json,
                                     ExceptionState& exception_state) {
   v8::Local<v8::Value> parsed;
   v8::TryCatch try_catch(isolate);
-  if (!v8::JSON::Parse(isolate, V8String(isolate, stringified_json))
+  if (!v8::JSON::Parse(context, V8String(isolate, stringified_json))
            .ToLocal(&parsed)) {
     if (try_catch.HasCaught())
       exception_state.RethrowV8Exception(try_catch.Exception());

@@ -18,6 +18,7 @@ import os
 import sys
 import unittest
 import jni_generator
+import jni_registration_generator
 from jni_generator import CalledByNative
 from jni_generator import IsMainDexJavaClass
 from jni_generator import NativeMethod
@@ -99,14 +100,14 @@ class TestGenerator(unittest.TestCase):
     with file(golden_file, 'r') as f:
       return f.read()
 
-  def assertGoldenTextEquals(self, generated_text):
+  def assertGoldenTextEquals(self, generated_text, suffix=''):
     script_dir = os.path.dirname(sys.argv[0])
     # This is the caller test method.
     caller = inspect.stack()[1][3]
     self.assertTrue(caller.startswith('test'),
                     'assertGoldenTextEquals can only be called from a '
                     'test* method, not %s' % caller)
-    golden_file = os.path.join(script_dir, caller + '.golden')
+    golden_file = os.path.join(script_dir, '%s%s.golden' % (caller, suffix))
     golden_text = self._ReadGoldenFile(golden_file)
     if os.environ.get(REBASELINE_ENV):
       if golden_text != generated_text:
@@ -283,10 +284,18 @@ class TestGenerator(unittest.TestCase):
                      type='function')
     ]
     self.assertListEquals(golden_natives, natives)
-    h = jni_generator.InlHeaderFileGenerator('', 'org/chromium/TestJni',
-                                             natives, [], [], jni_params,
-                                             TestOptions())
-    self.assertGoldenTextEquals(h.GetContent())
+    h1 = jni_generator.InlHeaderFileGenerator('', 'org/chromium/TestJni',
+                                              natives, [], [], jni_params,
+                                              TestOptions())
+    self.assertGoldenTextEquals(h1.GetContent())
+    content = {}
+    h2 = jni_registration_generator.HeaderGenerator(
+        '', 'org/chromium/TestJni', natives, jni_params, content, True)
+    h2.AddContent()
+    self.assertGoldenTextEquals(
+        jni_registration_generator.CreateFromDict(content),
+        suffix='Registrations')
+
 
   def testInnerClassNatives(self):
     test_data = """
@@ -366,6 +375,14 @@ class TestGenerator(unittest.TestCase):
                                              TestOptions())
     self.assertGoldenTextEquals(h.GetContent())
 
+    content = {}
+    h2 = jni_registration_generator.HeaderGenerator(
+        '', 'org/chromium/TestJni', natives, jni_params, content, True)
+    h2.AddContent()
+    self.assertGoldenTextEquals(
+        jni_registration_generator.CreateFromDict(content),
+        suffix='Registrations')
+
   def testCalledByNatives(self):
     test_data = """"
     import android.graphics.Bitmap;
@@ -376,7 +393,9 @@ class TestGenerator(unittest.TestCase):
     class InnerClass {}
 
     @CalledByNative
-    InnerClass showConfirmInfoBar(int nativeInfoBar,
+    @SomeOtherA
+    @SomeOtherB
+    public InnerClass showConfirmInfoBar(int nativeInfoBar,
             String buttonOk, String buttonCancel, String title, Bitmap icon) {
         InfoBar infobar = new ConfirmInfoBar(nativeInfoBar, mContext,
                                              buttonOk, buttonCancel,
@@ -750,12 +769,14 @@ import org.chromium.base.BuildInfo;
 public abstract class java.util.HashSet<T> extends java.util.AbstractSet<E>
       implements java.util.Set<E>, java.lang.Cloneable, java.io.Serializable {
     public void dummy();
-  Signature: ()V
+      Signature: ()V
+    public java.lang.Class<?> getClass();
+      Signature: ()Ljava/lang/Class<*>;
 }
 """
     jni_from_javap = jni_generator.JNIFromJavaP(contents.split('\n'),
                                                 TestOptions())
-    self.assertEquals(1, len(jni_from_javap.called_by_natives))
+    self.assertEquals(2, len(jni_from_javap.called_by_natives))
     self.assertGoldenTextEquals(jni_from_javap.GetContent())
 
   def testSnippnetJavap6_7_8(self):
@@ -1112,9 +1133,14 @@ def TouchStamp(stamp_path):
 def main(argv):
   parser = optparse.OptionParser()
   parser.add_option('--stamp', help='Path to touch on success.')
+  parser.add_option('--verbose', action="store_true",
+                    help='Whether to output details.')
   options, _ = parser.parse_args(argv[1:])
 
-  test_result = unittest.main(argv=argv[0:1], exit=False)
+  test_result = unittest.main(
+      argv=argv[0:1],
+      exit=False,
+      verbosity=(2 if options.verbose else 1))
 
   if test_result.result.wasSuccessful() and options.stamp:
     TouchStamp(options.stamp)

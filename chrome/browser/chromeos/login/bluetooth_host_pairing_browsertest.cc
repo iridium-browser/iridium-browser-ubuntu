@@ -4,7 +4,6 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
@@ -18,7 +17,10 @@
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "device/bluetooth/dbus/fake_bluetooth_adapter_client.h"
 #include "device/bluetooth/dbus/fake_bluetooth_device_client.h"
-#include "device/hid/fake_input_service_linux.h"
+#include "services/device/public/cpp/hid/fake_input_service_linux.h"
+#include "services/device/public/mojom/constants.mojom.h"
+#include "services/device/public/mojom/input_service.mojom.h"
+#include "services/service_manager/public/cpp/service_context.h"
 
 namespace chromeos {
 
@@ -58,26 +60,33 @@ class TestDelegate
 // The device will put itself in Bluetooth discoverable mode.
 class BluetoothHostPairingNoInputTest : public OobeBaseTest {
  public:
-  void OnConnectSuccess() { message_loop_.QuitWhenIdle(); }
-  void OnConnectFailed(device::BluetoothDevice::ConnectErrorCode error) {
-    message_loop_.QuitWhenIdle();
+  void OnConnectSuccess(base::OnceClosure continuation_callback) {
+    std::move(continuation_callback).Run();
+  }
+  void OnConnectFailed(base::OnceClosure continuation_callback,
+                       device::BluetoothDevice::ConnectErrorCode error) {
+    std::move(continuation_callback).Run();
   }
 
  protected:
-  using InputDeviceInfo = device::InputServiceLinux::InputDeviceInfo;
+  using InputDeviceInfoPtr = device::mojom::InputDeviceInfoPtr;
 
   BluetoothHostPairingNoInputTest() {
-    InputServiceProxy::SetUseUIThreadForTesting(true);
-    device::InputServiceLinux::SetForTesting(
-        base::MakeUnique<device::FakeInputServiceLinux>());
+    fake_input_service_manager_ =
+        std::make_unique<device::FakeInputServiceLinux>();
+
+    service_manager::ServiceContext::SetGlobalBinderForTesting(
+        device::mojom::kServiceName, device::mojom::InputDeviceManager::Name_,
+        base::Bind(&device::FakeInputServiceLinux::Bind,
+                   base::Unretained(fake_input_service_manager_.get())));
 
     // Set up the fake Bluetooth environment.
     std::unique_ptr<bluez::BluezDBusManagerSetter> bluez_dbus_setter =
         bluez::BluezDBusManager::GetSetterForTesting();
     bluez_dbus_setter->SetBluetoothAdapterClient(
-        base::MakeUnique<bluez::FakeBluetoothAdapterClient>());
+        std::make_unique<bluez::FakeBluetoothAdapterClient>());
     bluez_dbus_setter->SetBluetoothDeviceClient(
-        base::MakeUnique<bluez::FakeBluetoothDeviceClient>());
+        std::make_unique<bluez::FakeBluetoothDeviceClient>());
 
     // Get pointer.
     fake_bluetooth_device_client_ =
@@ -123,45 +132,39 @@ class BluetoothHostPairingNoInputTest : public OobeBaseTest {
   }
 
   void AddUsbMouse() {
-    InputDeviceInfo mouse;
-    mouse.id = "usb_mouse";
-    mouse.subsystem = InputDeviceInfo::SUBSYSTEM_INPUT;
-    mouse.type = InputDeviceInfo::TYPE_USB;
-    mouse.is_mouse = true;
-    AddDeviceForTesting(mouse);
+    auto mouse = device::mojom::InputDeviceInfo::New();
+    mouse->id = "usb_mouse";
+    mouse->subsystem = device::mojom::InputDeviceSubsystem::SUBSYSTEM_INPUT;
+    mouse->type = device::mojom::InputDeviceType::TYPE_USB;
+    mouse->is_mouse = true;
+    fake_input_service_manager_->AddDevice(std::move(mouse));
   }
 
   void AddUsbKeyboard() {
-    InputDeviceInfo keyboard;
-    keyboard.id = "usb_keyboard";
-    keyboard.subsystem = InputDeviceInfo::SUBSYSTEM_INPUT;
-    keyboard.type = InputDeviceInfo::TYPE_USB;
-    keyboard.is_keyboard = true;
-    AddDeviceForTesting(keyboard);
+    auto keyboard = device::mojom::InputDeviceInfo::New();
+    keyboard->id = "usb_keyboard";
+    keyboard->subsystem = device::mojom::InputDeviceSubsystem::SUBSYSTEM_INPUT;
+    keyboard->type = device::mojom::InputDeviceType::TYPE_USB;
+    keyboard->is_keyboard = true;
+    fake_input_service_manager_->AddDevice(std::move(keyboard));
   }
 
   void AddBluetoothMouse() {
-    InputDeviceInfo mouse;
-    mouse.id = "bluetooth_mouse";
-    mouse.subsystem = InputDeviceInfo::SUBSYSTEM_INPUT;
-    mouse.type = InputDeviceInfo::TYPE_BLUETOOTH;
-    mouse.is_mouse = true;
-    AddDeviceForTesting(mouse);
+    auto mouse = device::mojom::InputDeviceInfo::New();
+    mouse->id = "bluetooth_mouse";
+    mouse->subsystem = device::mojom::InputDeviceSubsystem::SUBSYSTEM_INPUT;
+    mouse->type = device::mojom::InputDeviceType::TYPE_BLUETOOTH;
+    mouse->is_mouse = true;
+    fake_input_service_manager_->AddDevice(std::move(mouse));
   }
 
  private:
-  void AddDeviceForTesting(const InputDeviceInfo& info) {
-    static_cast<device::FakeInputServiceLinux*>(
-        device::InputServiceLinux::GetInstance())
-        ->AddDeviceForTesting(info);
-  }
-
+  std::unique_ptr<device::FakeInputServiceLinux> fake_input_service_manager_;
   scoped_refptr<device::BluetoothAdapter> bluetooth_adapter_;
   std::unique_ptr<TestDelegate> delegate_;
   pairing_chromeos::BluetoothHostPairingController* controller_ = nullptr;
 
   bluez::FakeBluetoothDeviceClient* fake_bluetooth_device_client_ = nullptr;
-  base::MessageLoopForUI message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(BluetoothHostPairingNoInputTest);
 };
@@ -212,12 +215,14 @@ IN_PROC_BROWSER_TEST_F(BluetoothHostPairingNoInputTest, ForgetDevice) {
   EXPECT_FALSE(device->IsPaired());
   EXPECT_EQ(3U, bluetooth_adapter()->GetDevices().size());
 
-  device->Connect(controller(),
-                  base::Bind(&BluetoothHostPairingNoInputTest::OnConnectSuccess,
-                             base::Unretained(this)),
-                  base::Bind(&BluetoothHostPairingNoInputTest::OnConnectFailed,
-                             base::Unretained(this)));
-  base::RunLoop().Run();
+  base::RunLoop run_loop;
+  device->Connect(
+      controller(),
+      base::Bind(&BluetoothHostPairingNoInputTest::OnConnectSuccess,
+                 base::Unretained(this), run_loop.QuitWhenIdleClosure()),
+      base::Bind(&BluetoothHostPairingNoInputTest::OnConnectFailed,
+                 base::Unretained(this), run_loop.QuitWhenIdleClosure()));
+  run_loop.Run();
   EXPECT_TRUE(device->IsPaired());
 
   ResetController();

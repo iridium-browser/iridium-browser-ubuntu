@@ -6,6 +6,7 @@
 #define Gyroscope_h
 
 #include "modules/sensor/Sensor.h"
+#include "modules/sensor/SpatialSensorOptions.h"
 
 namespace blink {
 
@@ -14,7 +15,7 @@ class Gyroscope final : public Sensor {
 
  public:
   static Gyroscope* Create(ExecutionContext*,
-                           const SensorOptions&,
+                           const SpatialSensorOptions&,
                            ExceptionState&);
   static Gyroscope* Create(ExecutionContext*, ExceptionState&);
 
@@ -22,10 +23,10 @@ class Gyroscope final : public Sensor {
   double y(bool& is_null) const;
   double z(bool& is_null) const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
-  Gyroscope(ExecutionContext*, const SensorOptions&, ExceptionState&);
+  Gyroscope(ExecutionContext*, const SpatialSensorOptions&, ExceptionState&);
 };
 
 }  // namespace blink

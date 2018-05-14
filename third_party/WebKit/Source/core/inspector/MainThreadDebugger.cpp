@@ -57,7 +57,6 @@
 #include "core/inspector/ConsoleMessageStorage.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectedFrames.h"
-#include "core/inspector/InspectorTaskRunner.h"
 #include "core/inspector/V8InspectorString.h"
 #include "core/page/Page.h"
 #include "core/timing/MemoryInfo.h"
@@ -72,10 +71,6 @@
 namespace blink {
 
 namespace {
-
-int FrameId(LocalFrame& frame) {
-  return WeakIdentifierMap<LocalFrame>::Identifier(&frame);
-}
 
 Mutex& CreationMutex() {
   DEFINE_THREAD_SAFE_STATIC_LOCAL(Mutex, mutex, ());
@@ -97,7 +92,6 @@ MainThreadDebugger* MainThreadDebugger::instance_ = nullptr;
 
 MainThreadDebugger::MainThreadDebugger(v8::Isolate* isolate)
     : ThreadDebugger(isolate),
-      task_runner_(WTF::MakeUnique<InspectorTaskRunner>()),
       paused_(false) {
   MutexLocker locker(CreationMutex());
   DCHECK(!instance_);
@@ -139,7 +133,7 @@ void MainThreadDebugger::DidClearContextsForFrame(LocalFrame* frame) {
 
 void MainThreadDebugger::ContextCreated(ScriptState* script_state,
                                         LocalFrame* frame,
-                                        SecurityOrigin* origin) {
+                                        const SecurityOrigin* origin) {
   DCHECK(IsMainThread());
   v8::HandleScope handles(script_state->GetIsolate());
   DOMWrapperWorld& world = script_state->World();
@@ -214,7 +208,7 @@ void MainThreadDebugger::ExceptionThrown(ExecutionContext* context,
 
 int MainThreadDebugger::ContextGroupId(LocalFrame* frame) {
   LocalFrame& local_frame_root = frame->LocalFrameRoot();
-  return FrameId(local_frame_root);
+  return WeakIdentifierMap<LocalFrame>::Identifier(&local_frame_root);
 }
 
 MainThreadDebugger* MainThreadDebugger::Instance() {
@@ -225,13 +219,16 @@ MainThreadDebugger* MainThreadDebugger::Instance() {
   return static_cast<MainThreadDebugger*>(debugger);
 }
 
-void MainThreadDebugger::InterruptMainThreadAndRun(
-    std::unique_ptr<InspectorTaskRunner::Task> task) {
-  MutexLocker locker(CreationMutex());
-  if (instance_) {
-    instance_->task_runner_->AppendTask(std::move(task));
-    instance_->task_runner_->InterruptAndRunAllTasksDontWait(
-        instance_->isolate_);
+// In the test, we just assume that we hit a devtool's break point during the
+// lifecycle.
+void MainThreadDebugger::SetPostponeTransitionScopeForTesting(
+    Document& document) {
+  if (postponed_transition_scope_) {
+    postponed_transition_scope_->SetLifecyclePostponed();
+  } else {
+    postponed_transition_scope_ =
+        std::make_unique<DocumentLifecycle::PostponeTransitionScope>(
+            document.Lifecycle());
   }
 }
 
@@ -241,18 +238,39 @@ void MainThreadDebugger::runMessageLoopOnPause(int context_group_id) {
   // Do not pause in Context of detached frame.
   if (!paused_frame)
     return;
+  // If we hit a break point in the paint() function for CSS paint, then we are
+  // in the middle of document life cycle. In this case, we should not allow
+  // any style update or layout, which could be triggered by resizing the
+  // browser window, or clicking at the element panel on devtool.
+  if (paused_frame->GetDocument() &&
+      !paused_frame->GetDocument()->Lifecycle().StateAllowsTreeMutations()) {
+    if (postponed_transition_scope_) {
+      postponed_transition_scope_->SetLifecyclePostponed();
+    } else {
+      postponed_transition_scope_ =
+          std::make_unique<DocumentLifecycle::PostponeTransitionScope>(
+              paused_frame->GetDocument()->Lifecycle());
+    }
+  }
   DCHECK(paused_frame == paused_frame->LocalFrameRoot());
   paused_ = true;
 
-  if (UserGestureToken* token = UserGestureIndicator::CurrentToken())
-    token->SetTimeoutPolicy(UserGestureToken::kHasPaused);
+  UserGestureIndicator::SetTimeoutPolicy(UserGestureToken::kHasPaused);
+
   // Wait for continue or step command.
   if (client_message_loop_)
     client_message_loop_->Run(paused_frame);
 }
 
+void MainThreadDebugger::ResetPostponeTransitionScopeForTesting() {
+  if (postponed_transition_scope_)
+    postponed_transition_scope_->ResetLifecyclePostponed();
+}
+
 void MainThreadDebugger::quitMessageLoopOnPause() {
   paused_ = false;
+  if (postponed_transition_scope_)
+    postponed_transition_scope_->ResetLifecyclePostponed();
   if (client_message_loop_)
     client_message_loop_->QuitNow();
 }
@@ -358,7 +376,7 @@ void MainThreadDebugger::installAdditionalCommandLineAPI(
 static Node* SecondArgumentAsNode(
     const v8::FunctionCallbackInfo<v8::Value>& info) {
   if (info.Length() > 1) {
-    if (Node* node = V8Node::toImplWithTypeCheck(info.GetIsolate(), info[1]))
+    if (Node* node = V8Node::ToImplWithTypeCheck(info.GetIsolate(), info[1]))
       return node;
   }
   ExecutionContext* execution_context =

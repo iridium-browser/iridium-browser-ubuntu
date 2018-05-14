@@ -17,24 +17,25 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/switch_utils.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/crash_keys.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/switch_utils.h"
+#include "components/crash/core/common/crash_key.h"
 #include "components/metrics/metrics_service.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/tracing/common/tracing_switches.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/tracing_controller.h"
 #include "printing/features/features.h"
@@ -54,11 +55,11 @@
 #include "chrome/browser/lifetime/termination_notification.h"
 #endif
 
-#if BUILDFLAG(ENABLE_BACKGROUND)
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
 #include "chrome/browser/background/background_mode_manager.h"
 #endif
 
-#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
 #include "chrome/browser/service_process/service_process_control.h"
 #endif
 
@@ -66,9 +67,7 @@
 #include "components/rlz/rlz_tracker.h"
 #endif
 
-using base::Time;
 using base::TimeDelta;
-using content::BrowserThread;
 
 namespace browser_shutdown {
 namespace {
@@ -76,12 +75,18 @@ namespace {
 // Whether the browser is trying to quit (e.g., Quit chosen from menu).
 bool g_trying_to_quit = false;
 
-Time* g_shutdown_started = nullptr;
+base::Time* g_shutdown_started = nullptr;
 ShutdownType g_shutdown_type = NOT_VALID;
 int g_shutdown_num_processes;
 int g_shutdown_num_processes_slow;
 
-const char kShutdownMsFile[] = "chrome_shutdown_ms.txt";
+constexpr char kShutdownMsFile[] = "chrome_shutdown_ms.txt";
+
+base::FilePath GetShutdownMsPath() {
+  base::FilePath shutdown_ms_file;
+  PathService::Get(chrome::DIR_USER_DATA, &shutdown_ms_file);
+  return shutdown_ms_file.AppendASCII(kShutdownMsFile);
+}
 
 const char* ToShutdownTypeString(ShutdownType type) {
   switch (type) {
@@ -114,8 +119,10 @@ ShutdownType GetShutdownType() {
 void OnShutdownStarting(ShutdownType type) {
   if (g_shutdown_type != NOT_VALID)
     return;
-  base::debug::SetCrashKeyValue(crash_keys::kShutdownType,
-                                ToShutdownTypeString(type));
+
+  static crash_reporter::CrashKeyString<8> shutdown_type_key("shutdown-type");
+  shutdown_type_key.Set(ToShutdownTypeString(type));
+
 #if !defined(OS_CHROMEOS)
   // Start the shutdown tracing. Note that On ChromeOS this has already been
   // called in AttemptUserExit().
@@ -128,7 +135,7 @@ void OnShutdownStarting(ShutdownType type) {
   // thread, and we'd really like to avoid anything which might add further
   // delays to shutdown time.
   DCHECK(!g_shutdown_started);
-  g_shutdown_started = new Time(Time::Now());
+  g_shutdown_started = new base::Time(base::Time::Now());
 
   // Call FastShutdown on all of the RenderProcessHosts.  This will be
   // a no-op in some cases, so we still need to go through the normal
@@ -144,22 +151,16 @@ void OnShutdownStarting(ShutdownType type) {
   }
 }
 
-base::FilePath GetShutdownMsPath() {
-  base::FilePath shutdown_ms_file;
-  PathService::Get(chrome::DIR_USER_DATA, &shutdown_ms_file);
-  return shutdown_ms_file.AppendASCII(kShutdownMsFile);
-}
-
 #if !defined(OS_ANDROID)
 bool ShutdownPreThreadsStop() {
 #if defined(OS_CHROMEOS)
   chromeos::BootTimesRecorder::Get()->AddLogoutTimeMarker(
       "BrowserShutdownStarted", false);
 #endif
-#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
   // Shutdown the IPC channel to the service processes.
   ServiceProcessControl::GetInstance()->Disconnect();
-#endif  // ENABLE_PRINT_PREVIEW
+#endif
 
   // WARNING: During logoff/shutdown (WM_ENDSESSION) we may not have enough
   // time to get here. If you have something that *must* happen on end session,
@@ -209,7 +210,7 @@ bool RecordShutdownInfoPrefs() {
 
 void ShutdownPostThreadsStop(int shutdown_flags) {
   delete g_browser_process;
-  g_browser_process = NULL;
+  g_browser_process = nullptr;
 
   // crbug.com/95079 - This needs to happen after the browser process object
   // goes away.
@@ -228,7 +229,9 @@ void ShutdownPostThreadsStop(int shutdown_flags) {
 #endif
 
   if (shutdown_flags & RESTART_LAST_SESSION) {
-#if !defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
+    NOTIMPLEMENTED();
+#else
     // Make sure to relaunch the browser with the original command line plus
     // the Restore Last Session flag. Note that Chrome can be launched (ie.
     // through ShellExecute on Windows) with a switch argument terminator at
@@ -237,42 +240,40 @@ void ShutdownPostThreadsStop(int shutdown_flags) {
     // 46182). We therefore use GetSwitches to copy the command line (it stops
     // at the switch argument terminator).
     base::CommandLine old_cl(*base::CommandLine::ForCurrentProcess());
-    std::unique_ptr<base::CommandLine> new_cl(
-        new base::CommandLine(old_cl.GetProgram()));
-    std::map<std::string, base::CommandLine::StringType> switches =
-        old_cl.GetSwitches();
+    auto new_cl = std::make_unique<base::CommandLine>(old_cl.GetProgram());
+    base::CommandLine::SwitchMap switches = old_cl.GetSwitches();
     // Remove the switches that shouldn't persist across restart.
     about_flags::RemoveFlagsSwitches(&switches);
     switches::RemoveSwitchesForAutostart(&switches);
     // Append the old switches to the new command line.
     for (const auto& it : switches) {
-      const base::CommandLine::StringType& switch_value = it.second;
-      if (!switch_value.empty())
-        new_cl->AppendSwitchNative(it.first, it.second);
+      const auto& switch_name = it.first;
+      const auto& switch_value = it.second;
+      if (switch_value.empty())
+        new_cl->AppendSwitch(switch_name);
       else
-        new_cl->AppendSwitch(it.first);
+        new_cl->AppendSwitchNative(switch_name, switch_value);
     }
     if (shutdown_flags & RESTART_IN_BACKGROUND)
       new_cl->AppendSwitch(switches::kNoStartupWindow);
 
-#if defined(OS_POSIX) || defined(OS_WIN)
-    upgrade_util::RelaunchChromeBrowser(*new_cl.get());
-#endif  // defined(OS_WIN)
-
-#else
-    NOTIMPLEMENTED();
-#endif  // !defined(OS_CHROMEOS)
+    upgrade_util::RelaunchChromeBrowser(*new_cl);
+#endif  // defined(OS_CHROMEOS)
   }
 
   if (g_shutdown_type > NOT_VALID && g_shutdown_num_processes > 0) {
     // Measure total shutdown time as late in the process as possible
     // and then write it to a file to be read at startup.
     // We can't use prefs since all services are shutdown at this point.
-    TimeDelta shutdown_delta = Time::Now() - *g_shutdown_started;
+    TimeDelta shutdown_delta = base::Time::Now() - *g_shutdown_started;
     std::string shutdown_ms =
         base::Int64ToString(shutdown_delta.InMilliseconds());
     int len = static_cast<int>(shutdown_ms.length()) + 1;
     base::FilePath shutdown_ms_file = GetShutdownMsPath();
+    // Note: ReadLastShutdownFile() is done as a BLOCK_SHUTDOWN task so there's
+    // an implicit sequencing between it and this write which happens after
+    // threads have been stopped (and thus TaskScheduler::Shutdown() is
+    // complete).
     base::WriteFile(shutdown_ms_file, shutdown_ms.c_str(), len);
   }
 
@@ -285,7 +286,7 @@ void ShutdownPostThreadsStop(int shutdown_flags) {
 void ReadLastShutdownFile(ShutdownType type,
                           int num_procs,
                           int num_procs_slow) {
-  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
+  base::AssertBlockingAllowed();
 
   base::FilePath shutdown_ms_file = GetShutdownMsPath();
   std::string shutdown_ms_str;
@@ -332,9 +333,10 @@ void ReadLastShutdownInfo() {
 
   UMA_HISTOGRAM_ENUMERATION("Shutdown.ShutdownType", type, kNumShutdownTypes);
 
-  // Read and delete the file on the file thread.
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
       base::BindOnce(&ReadLastShutdownFile, type, num_procs, num_procs_slow));
 }
 
@@ -355,9 +357,9 @@ void SetTryingToQuit(bool quitting) {
     pref_service->ClearPref(prefs::kRestartLastSessionOnShutdown);
   }
 
-#if BUILDFLAG(ENABLE_BACKGROUND)
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
   BackgroundModeManager::set_should_restart_in_background(false);
-#endif  // BUILDFLAG(ENABLE_BACKGROUND)
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
 }
 
 bool IsTryingToQuit() {

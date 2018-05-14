@@ -33,7 +33,7 @@
 #include "core/animation/animatable/AnimatableDouble.h"
 #include "core/animation/animatable/AnimatableFilterOperations.h"
 #include "core/animation/animatable/AnimatableTransform.h"
-#include "core/css/CSSPropertyMetadata.h"
+#include "core/css/properties/CSSProperty.h"
 #include "core/style/ComputedStyle.h"
 
 #include <type_traits>
@@ -43,7 +43,9 @@ namespace blink {
 void AnimatedStyleBuilder::ApplyProperty(CSSPropertyID property,
                                          ComputedStyle& style,
                                          const AnimatableValue* value) {
-  DCHECK(CSSPropertyMetadata::IsInterpolableProperty(property));
+#if DCHECK_IS_ON()
+  DCHECK(CSSProperty::Get(property).IsInterpolable());
+#endif
   switch (property) {
     case CSSPropertyOpacity:
       // Avoiding a value of 1 forces a layer to be created.

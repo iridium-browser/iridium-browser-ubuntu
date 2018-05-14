@@ -51,6 +51,14 @@ ProfilePolicyConnectorFactory::CreateForBrowserContext(
                                                         force_immediate_load);
 }
 
+// static
+bool ProfilePolicyConnectorFactory::IsProfileManaged(
+    const content::BrowserContext* context) {
+  // Note: GetForBrowserContextInternal CHECK-fails if there is no
+  // ProfilePolicyConnector for |context| yet.
+  return GetInstance()->GetForBrowserContextInternal(context)->IsManaged();
+}
+
 void ProfilePolicyConnectorFactory::SetServiceForTesting(
     content::BrowserContext* context,
     ProfilePolicyConnector* connector) {
@@ -82,10 +90,10 @@ ProfilePolicyConnectorFactory::~ProfilePolicyConnectorFactory() {
 
 ProfilePolicyConnector*
 ProfilePolicyConnectorFactory::GetForBrowserContextInternal(
-    content::BrowserContext* context) {
+    const content::BrowserContext* context) const {
   // Get the connector for the original Profile, so that the incognito Profile
   // gets managed settings from the same PolicyService.
-  content::BrowserContext* const original_context =
+  const content::BrowserContext* const original_context =
       chrome::GetBrowserContextRedirectedInIncognito(context);
   const ConnectorMap::const_iterator it = connectors_.find(original_context);
   CHECK(it != connectors_.end());
@@ -145,7 +153,8 @@ ProfilePolicyConnectorFactory::CreateForBrowserContextInternal(
     PolicyServiceImpl::Providers providers;
     providers.push_back(test_providers_.front());
     test_providers_.pop_front();
-    std::unique_ptr<PolicyService> service(new PolicyServiceImpl(providers));
+    std::unique_ptr<PolicyServiceImpl> service =
+        std::make_unique<PolicyServiceImpl>(std::move(providers));
     connector->InitForTesting(std::move(service));
   }
 

@@ -43,13 +43,14 @@ class ContextFeatures final : public GarbageCollectedFinalized<ContextFeatures>,
   USING_GARBAGE_COLLECTED_MIXIN(ContextFeatures);
 
  public:
+  static const char kSupplementName[];
+
   enum FeatureType {
     kPagePopup = 0,
     kMutationEvents,
     kFeatureTypeSize  // Should be the last entry.
   };
 
-  static const char* SupplementName();
   static ContextFeatures& DefaultSwitch();
   static ContextFeatures* Create(std::unique_ptr<ContextFeaturesClient>);
 
@@ -72,7 +73,7 @@ class ContextFeaturesClient {
  public:
   static std::unique_ptr<ContextFeaturesClient> Empty();
 
-  virtual ~ContextFeaturesClient() {}
+  virtual ~ContextFeaturesClient() = default;
   virtual bool IsEnabled(Document*,
                          ContextFeatures::FeatureType,
                          bool default_value) {

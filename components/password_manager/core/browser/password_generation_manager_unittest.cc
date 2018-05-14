@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/utf_string_conversions.h"
@@ -46,7 +45,7 @@ class TestPasswordManagerDriver : public StubPasswordManagerDriver {
   explicit TestPasswordManagerDriver(PasswordManagerClient* client)
       : password_manager_(client),
         password_generation_manager_(client, this),
-        password_autofill_manager_(this, nullptr) {}
+        password_autofill_manager_(this, nullptr, client) {}
   ~TestPasswordManagerDriver() override {}
 
   // PasswordManagerDriver implementation.
@@ -70,6 +69,7 @@ class TestPasswordManagerDriver : public StubPasswordManagerDriver {
   }
 
   MOCK_METHOD0(AllowToRunFormClassifier, void());
+  MOCK_METHOD0(MatchingBlacklistedFormFound, void());
 
  private:
   PasswordManager password_manager_;
@@ -150,7 +150,7 @@ TEST_F(PasswordGenerationManagerTest, IsGenerationEnabled) {
 
   EXPECT_CALL(*client_, GetPasswordSyncState())
       .WillRepeatedly(testing::Return(SYNCING_WITH_CUSTOM_PASSPHRASE));
-  EXPECT_FALSE(IsGenerationEnabled());
+  EXPECT_TRUE(IsGenerationEnabled());
 
   // Disabling password syncing should cause generation to be disabled.
   EXPECT_CALL(*client_, GetPasswordSyncState())
@@ -235,17 +235,17 @@ TEST_F(PasswordGenerationManagerTest, DetectFormsEligibleForGeneration) {
   // NEW_PASSWORD = 88
   // CONFIRMATION_PASSWORD = 95
   autofill::AutofillQueryResponseContents response;
-  response.add_field()->set_autofill_type(9);
-  response.add_field()->set_autofill_type(75);
-  response.add_field()->set_autofill_type(9);
-  response.add_field()->set_autofill_type(76);
-  response.add_field()->set_autofill_type(75);
-  response.add_field()->set_autofill_type(88);
-  response.add_field()->set_autofill_type(95);
+  response.add_field()->set_overall_type_prediction(9);
+  response.add_field()->set_overall_type_prediction(75);
+  response.add_field()->set_overall_type_prediction(9);
+  response.add_field()->set_overall_type_prediction(76);
+  response.add_field()->set_overall_type_prediction(75);
+  response.add_field()->set_overall_type_prediction(88);
+  response.add_field()->set_overall_type_prediction(95);
 
   std::string response_string;
   ASSERT_TRUE(response.SerializeToString(&response_string));
-  autofill::FormStructure::ParseQueryResponse(response_string, forms, NULL);
+  autofill::FormStructure::ParseQueryResponse(response_string, forms);
 
   DetectFormsEligibleForGeneration(forms);
   EXPECT_EQ(2u, GetTestDriver()->GetFoundEligibleForGenerationForms().size());
@@ -296,7 +296,7 @@ TEST_F(PasswordGenerationManagerTest, CheckIfFormClassifierShouldRun) {
     scoped_refptr<base::FieldTrial> field_trial;
     if (is_autofill_field_metadata_enabled) {
       field_trial_list.reset(new base::FieldTrialList(
-          base::MakeUnique<metrics::SHA1EntropyProvider>("foo")));
+          std::make_unique<variations::SHA1EntropyProvider>("foo")));
       field_trial = base::FieldTrialList::CreateFieldTrial(
           "AutofillFieldMetadata", "Enabled");
       EXPECT_CALL(*GetTestDriver(), AllowToRunFormClassifier())

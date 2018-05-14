@@ -17,23 +17,23 @@ import android.os.Build;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
-
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowNotification;
 
-import org.chromium.base.BaseChromiumApplication;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.content_public.common.MediaMetadata;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 
 /**
  * JUnit tests for checking MediaNotificationManager presents correct notification to Android
  * NotificationManager.
  */
-@RunWith(LocalRobolectricTestRunner.class)
-@Config(manifest = Config.NONE, application = BaseChromiumApplication.class,
-        shadows = MediaNotificationTestShadowResources.class)
+@RunWith(BaseRobolectricTestRunner.class)
+@Config(manifest = Config.NONE,
+        // Remove this after updating to a version of Robolectric that supports
+        // notification channel creation. crbug.com/774315
+        sdk = Build.VERSION_CODES.N_MR1, shadows = MediaNotificationTestShadowResources.class)
 public class MediaNotificationManagerNotificationTest extends MediaNotificationManagerTestBase {
     @Test
     public void updateNotificationBuilderDisplaysCorrectMetadata_PreN_NonEmptyArtistAndAlbum() {
@@ -102,8 +102,7 @@ public class MediaNotificationManagerNotificationTest extends MediaNotificationM
         Notification notification = updateNotificationBuilderAndBuild(info);
 
         if (hasNApis()) {
-            assertTrue(largeIcon.sameAs(iconToBitmap(
-                    notification.extras.getParcelable(Notification.EXTRA_LARGE_ICON))));
+            assertTrue(largeIcon.sameAs(iconToBitmap(notification.getLargeIcon())));
         }
     }
 
@@ -115,7 +114,7 @@ public class MediaNotificationManagerNotificationTest extends MediaNotificationM
         Notification notification = updateNotificationBuilderAndBuild(info);
 
         if (hasNApis()) {
-            assertNull(notification.extras.getParcelable(Notification.EXTRA_LARGE_ICON));
+            assertNull(notification.getLargeIcon());
         }
         assertNull(getManager().mDefaultNotificationLargeIcon);
     }
@@ -132,8 +131,8 @@ public class MediaNotificationManagerNotificationTest extends MediaNotificationM
 
         assertNotNull(getManager().mDefaultNotificationLargeIcon);
         if (hasNApis()) {
-            assertTrue(getManager().mDefaultNotificationLargeIcon.sameAs(iconToBitmap(
-                    notification.extras.getParcelable(Notification.EXTRA_LARGE_ICON))));
+            assertTrue(getManager().mDefaultNotificationLargeIcon.sameAs(
+                    iconToBitmap(notification.getLargeIcon())));
         }
     }
 
@@ -146,7 +145,7 @@ public class MediaNotificationManagerNotificationTest extends MediaNotificationM
         Notification notification = updateNotificationBuilderAndBuild(info);
 
         if (hasNApis()) {
-            assertNull(notification.extras.getParcelable(Notification.EXTRA_LARGE_ICON));
+            assertNull(notification.getLargeIcon());
         }
     }
 

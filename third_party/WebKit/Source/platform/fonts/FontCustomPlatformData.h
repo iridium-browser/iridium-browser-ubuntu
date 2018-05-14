@@ -34,6 +34,7 @@
 
 #include "platform/PlatformExport.h"
 #include "platform/fonts/FontOrientation.h"
+#include "platform/fonts/FontSelectionTypes.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/Noncopyable.h"
@@ -55,16 +56,20 @@ class PLATFORM_EXPORT FontCustomPlatformData
   WTF_MAKE_NONCOPYABLE(FontCustomPlatformData);
 
  public:
-  static PassRefPtr<FontCustomPlatformData> Create(SharedBuffer*,
-                                                   String& ots_parse_message);
+  static scoped_refptr<FontCustomPlatformData> Create(SharedBuffer*,
+                                               String& ots_parse_message);
   ~FontCustomPlatformData();
 
   FontPlatformData GetFontPlatformData(
       float size,
       bool bold,
       bool italic,
+      const FontSelectionRequest&,
+      const FontSelectionCapabilities&,
       FontOrientation = FontOrientation::kHorizontal,
       const FontVariationSettings* = nullptr);
+
+  SkString FamilyNameForInspector() const;
 
   size_t DataSize() const { return data_size_; }
   static bool SupportsFormat(const String&);

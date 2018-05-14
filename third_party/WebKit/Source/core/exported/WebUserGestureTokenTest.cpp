@@ -31,6 +31,7 @@
 #include "public/web/WebUserGestureToken.h"
 
 #include "core/dom/UserGestureIndicator.h"
+#include "core/frame/LocalFrame.h"
 #include "public/web/WebScopedUserGesture.h"
 #include "public/web/WebUserGestureIndicator.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -43,31 +44,31 @@ TEST(WebUserGestureTokenTest, Basic) {
 
   {
     WebScopedUserGesture indicator(token);
-    EXPECT_FALSE(WebUserGestureIndicator::IsProcessingUserGesture());
+    EXPECT_FALSE(WebUserGestureIndicator::IsProcessingUserGesture(nullptr));
   }
 
   {
-    UserGestureIndicator indicator(
-        UserGestureToken::Create(nullptr, UserGestureToken::kNewGesture));
-    EXPECT_TRUE(WebUserGestureIndicator::IsProcessingUserGesture());
+    std::unique_ptr<UserGestureIndicator> indicator =
+        Frame::NotifyUserActivation(nullptr, UserGestureToken::kNewGesture);
+    EXPECT_TRUE(WebUserGestureIndicator::IsProcessingUserGesture(nullptr));
     token = WebUserGestureIndicator::CurrentUserGestureToken();
   }
 
   EXPECT_TRUE(token.HasGestures());
-  EXPECT_FALSE(WebUserGestureIndicator::IsProcessingUserGesture());
+  EXPECT_FALSE(WebUserGestureIndicator::IsProcessingUserGesture(nullptr));
 
   {
     WebScopedUserGesture indicator(token);
-    EXPECT_TRUE(WebUserGestureIndicator::IsProcessingUserGesture());
-    WebUserGestureIndicator::ConsumeUserGesture();
-    EXPECT_FALSE(WebUserGestureIndicator::IsProcessingUserGesture());
+    EXPECT_TRUE(WebUserGestureIndicator::IsProcessingUserGesture(nullptr));
+    WebUserGestureIndicator::ConsumeUserGesture(nullptr);
+    EXPECT_FALSE(WebUserGestureIndicator::IsProcessingUserGesture(nullptr));
   }
 
   EXPECT_FALSE(token.HasGestures());
 
   {
     WebScopedUserGesture indicator(token);
-    EXPECT_FALSE(WebUserGestureIndicator::IsProcessingUserGesture());
+    EXPECT_FALSE(WebUserGestureIndicator::IsProcessingUserGesture(nullptr));
   }
 }
 

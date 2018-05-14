@@ -4,15 +4,12 @@
 
 #include "core/layout/LayoutTestHelper.h"
 
-#include "bindings/core/v8/StringOrArrayBufferOrArrayBufferView.h"
 #include "bindings/core/v8/V8BindingForCore.h"
-#include "core/css/FontFaceDescriptors.h"
-#include "core/css/FontFaceSet.h"
 #include "core/html/HTMLIFrameElement.h"
+#include "core/page/Page.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "platform/loader/fetch/MemoryCache.h"
 #include "platform/scroll/ScrollbarTheme.h"
-#include "platform/testing/UnitTestHelpers.h"
 
 namespace blink {
 
@@ -42,23 +39,22 @@ ChromeClient& RenderingTest::GetChromeClient() const {
 }
 
 RenderingTest::RenderingTest(LocalFrameClient* local_frame_client)
-    : local_frame_client_(local_frame_client) {}
+    : UseMockScrollbarSettings(), local_frame_client_(local_frame_client) {}
 
 void RenderingTest::SetUp() {
   Page::PageClients page_clients;
   FillWithEmptyClients(page_clients);
   page_clients.chrome_client = &GetChromeClient();
-  page_holder_ =
-      DummyPageHolder::Create(IntSize(800, 600), &page_clients,
-                              local_frame_client_, SettingOverrider());
-
-  Settings::SetMockScrollbarsEnabled(true);
-  RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(true);
-  EXPECT_TRUE(ScrollbarTheme::GetTheme().UsesOverlayScrollbars());
+  SetupPageWithClients(&page_clients, local_frame_client_, SettingOverrider());
+  EXPECT_TRUE(
+      GetDocument().GetPage()->GetScrollbarTheme().UsesOverlayScrollbars());
 
   // This ensures that the minimal DOM tree gets attached
   // correctly for tests that don't call setBodyInnerHTML.
   GetDocument().View()->UpdateAllLifecyclePhases();
+
+  // Allow ASSERT_DEATH and EXPECT_DEATH for multiple threads.
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
 }
 
 void RenderingTest::TearDown() {
@@ -66,31 +62,15 @@ void RenderingTest::TearDown() {
   // may restore RuntimeEnabledFeatures setting during teardown, which happens
   // before our destructor getting invoked, breaking the assumption that REF
   // can't change during Blink lifetime.
-  page_holder_ = nullptr;
+  PageTestBase::TearDown();
 
   // Clear memory cache, otherwise we can leak pruned resources.
   GetMemoryCache()->EvictResources();
 }
 
 void RenderingTest::SetChildFrameHTML(const String& html) {
-  ChildDocument().SetBaseURLOverride(KURL(kParsedURLString, "http://test.com"));
-  ChildDocument().body()->setInnerHTML(html, ASSERT_NO_EXCEPTION);
-}
-
-void RenderingTest::LoadAhem() {
-  RefPtr<SharedBuffer> shared_buffer =
-      testing::ReadFromFile(testing::CoreTestDataPath("Ahem.ttf"));
-  StringOrArrayBufferOrArrayBufferView buffer =
-      StringOrArrayBufferOrArrayBufferView::fromArrayBuffer(
-          DOMArrayBuffer::Create(shared_buffer));
-  FontFace* ahem =
-      FontFace::Create(&GetDocument(), "Ahem", buffer, FontFaceDescriptors());
-
-  ScriptState* script_state =
-      ToScriptStateForMainWorld(&page_holder_->GetFrame());
-  DummyExceptionStateForTesting exception_state;
-  FontFaceSet::From(GetDocument())
-      ->addForBinding(script_state, ahem, exception_state);
+  ChildDocument().SetBaseURLOverride(KURL("http://test.com"));
+  ChildDocument().body()->SetInnerHTMLFromString(html, ASSERT_NO_EXCEPTION);
 }
 
 }  // namespace blink

@@ -8,16 +8,16 @@
 #include "core/dom/Document.h"
 #include "core/dom/DocumentInit.h"
 #include "core/frame/FrameTestHelpers.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
+#include "platform/testing/TestingPlatformSupport.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
-#include "public/platform/Platform.h"
-#include "public/platform/WebPageVisibilityState.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/mojom/page/page_visibility_state.mojom-blink.h"
 
 #include <memory>
 
@@ -58,9 +58,8 @@ class ScreenWakeLockTest : public ::testing::Test {
     service_manager::InterfaceProvider::TestApi test_api(
         test_web_frame_client_.GetInterfaceProvider());
     test_api.SetBinderForName(
-        WakeLock::Name_,
-        ConvertToBaseCallback(
-            WTF::Bind(&MockWakeLock::Bind, WTF::Unretained(&mock_wake_lock_))));
+        WakeLock::Name_, WTF::BindRepeating(&MockWakeLock::Bind,
+                                            WTF::Unretained(&mock_wake_lock_)));
 
     web_view_helper_.Initialize(&test_web_frame_client_);
     URLTestHelpers::RegisterMockedURLLoadFromBase(
@@ -70,22 +69,21 @@ class ScreenWakeLockTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
+    platform_->GetURLLoaderMockFactory()
         ->UnregisterAllURLsAndClearMemoryCache();
     testing::RunPendingTasks();
   }
 
   void LoadFrame() {
-    FrameTestHelpers::LoadFrame(web_view_helper_.WebView()->MainFrameImpl(),
+    FrameTestHelpers::LoadFrame(web_view_helper_.GetWebView()->MainFrameImpl(),
                                 "http://example.com/foo.html");
-    web_view_helper_.WebView()->UpdateAllLifecyclePhases();
+    web_view_helper_.GetWebView()->UpdateAllLifecyclePhases();
   }
 
   LocalFrame* GetFrame() {
-    DCHECK(web_view_helper_.WebView());
-    DCHECK(web_view_helper_.WebView()->MainFrameImpl());
-    return web_view_helper_.WebView()->MainFrameImpl()->GetFrame();
+    DCHECK(web_view_helper_.GetWebView());
+    DCHECK(web_view_helper_.GetWebView()->MainFrameImpl());
+    return web_view_helper_.GetWebView()->MainFrameImpl()->GetFrame();
   }
 
   Screen* GetScreen() {
@@ -109,17 +107,17 @@ class ScreenWakeLockTest : public ::testing::Test {
   }
 
   void Show() {
-    DCHECK(web_view_helper_.WebView());
-    web_view_helper_.WebView()->SetVisibilityState(
-        kWebPageVisibilityStateVisible, false);
+    DCHECK(web_view_helper_.GetWebView());
+    web_view_helper_.GetWebView()->SetVisibilityState(
+        mojom::blink::PageVisibilityState::kVisible, false);
     // Let the notification sink through the mojo pipes.
     testing::RunPendingTasks();
   }
 
   void Hide() {
-    DCHECK(web_view_helper_.WebView());
-    web_view_helper_.WebView()->SetVisibilityState(
-        kWebPageVisibilityStateHidden, false);
+    DCHECK(web_view_helper_.GetWebView());
+    web_view_helper_.GetWebView()->SetVisibilityState(
+        mojom::blink::PageVisibilityState::kHidden, false);
     // Let the notification sink through the mojo pipes.
     testing::RunPendingTasks();
   }
@@ -130,6 +128,7 @@ class ScreenWakeLockTest : public ::testing::Test {
   FrameTestHelpers::WebViewHelper web_view_helper_;
 
   MockWakeLock mock_wake_lock_;
+  ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
 };
 
 TEST_F(ScreenWakeLockTest, setAndReset) {

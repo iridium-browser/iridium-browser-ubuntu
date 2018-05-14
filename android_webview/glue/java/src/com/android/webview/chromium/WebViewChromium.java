@@ -24,6 +24,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.print.PrintDocumentAdapter;
 import android.util.Log;
+import android.util.SparseArray;
 import android.view.DragEvent;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -33,8 +34,10 @@ import android.view.ViewStructure;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityNodeProvider;
+import android.view.autofill.AutofillValue;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
+import android.view.textclassifier.TextClassifier;
 import android.webkit.DownloadListener;
 import android.webkit.FindActionModeCallback;
 import android.webkit.ValueCallback;
@@ -55,11 +58,12 @@ import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwPrintDocumentAdapter;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.ResourcesContextWrapperFactory;
+import org.chromium.android_webview.renderer_priority.RendererPriority;
+import org.chromium.base.BuildInfo;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.components.autofill.AutofillProvider;
-import org.chromium.content.browser.SmartClipProvider;
 import org.chromium.content_public.browser.NavigationHistory;
+import org.chromium.content_public.browser.SmartClipProvider;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -102,6 +106,8 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
     protected WebViewChromiumFactoryProvider mFactory;
 
+    private final SharedWebViewChromium mSharedWebViewChromium;
+
     private final boolean mShouldDisableThreadChecking;
 
     private static boolean sRecordWholeDocumentEnabledByApi;
@@ -122,6 +128,8 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         mFactory = factory;
         mShouldDisableThreadChecking = shouldDisableThreadChecking;
         factory.getWebViewDelegate().addWebViewAssetPath(mWebView.getContext());
+        mSharedWebViewChromium =
+                new SharedWebViewChromium(mFactory.getRunQueue(), mFactory.getAwInit());
     }
 
     static void completeWindowCreation(WebView parent, WebView child) {
@@ -136,7 +144,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     @Override
     // BUG=6790250 |javaScriptInterfaces| was only ever used by the obsolete DumpRenderTree
     // so is ignored. TODO: remove it from WebViewProvider.
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     public void init(final Map<String, Object> javaScriptInterfaces,
             final boolean privateBrowsing) {
         if (privateBrowsing) {
@@ -190,6 +197,11 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             mWebSettings.getAwSettings().setZeroLayoutHeightDisablesViewportQuirk(true);
         }
 
+        if (BuildInfo.targetsAtLeastP()) {
+            mWebSettings.getAwSettings().setCSSHexAlphaColorEnabled(true);
+            mWebSettings.getAwSettings().setScrollTopLeftInteropEnabled(true);
+        }
+
         if (mShouldDisableThreadChecking) disableThreadChecking();
 
         mFactory.addTask(new Runnable() {
@@ -237,6 +249,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
                         return mFactory.createAutofillProvider(context, mWebView);
                     }
                 });
+        mSharedWebViewChromium.setAwContentsOnUiThread(mAwContents);
 
         if (mAppTargetSdkVersion >= Build.VERSION_CODES.KITKAT) {
             // On KK and above, favicons are automatically downloaded as the method
@@ -260,11 +273,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     }
 
     protected boolean checkNeedsPost() {
-        boolean needsPost = !mFactory.hasStarted() || !ThreadUtils.runningOnUiThread();
-        if (!needsPost && mAwContents == null) {
-            throw new IllegalStateException("AwContents must be created if we are not posting!");
-        }
-        return needsPost;
+        return mSharedWebViewChromium.checkNeedsPost();
     }
 
     //  Intentionally not static, as no need to check thread on static methods
@@ -582,12 +591,14 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             mFactory.addTask(new Runnable() {
                 @Override
                 public void run() {
-                    mAwContents.evaluateJavaScript(script, resultCallback);
+                    mAwContents.evaluateJavaScript(
+                            script, CallbackConverter.fromValueCallback(resultCallback));
                 }
             });
         } else {
             checkThread();
-            mAwContents.evaluateJavaScript(script, resultCallback);
+            mAwContents.evaluateJavaScript(
+                    script, CallbackConverter.fromValueCallback(resultCallback));
         }
     }
 
@@ -608,7 +619,8 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return;
         }
-        mAwContents.saveWebArchive(basename, autoname, callback);
+        mAwContents.saveWebArchive(
+                basename, autoname, CallbackConverter.fromValueCallback(callback));
     }
 
     @Override
@@ -764,23 +776,15 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     }
 
     @Override
+    @TargetApi(Build.VERSION_CODES.M)
     public void insertVisualStateCallback(
             final long requestId, final VisualStateCallback callback) {
-        if (checkNeedsPost()) {
-            mFactory.addTask(new Runnable() {
-                @Override
-                public void run() {
-                    insertVisualStateCallback(requestId, callback);
-                }
-            });
-            return;
-        }
-        mAwContents.insertVisualStateCallback(
+        mSharedWebViewChromium.insertVisualStateCallback(
                 requestId, new AwContents.VisualStateCallback() {
-                        @Override
-                        public void onComplete(long requestId) {
-                            callback.onComplete(requestId);
-                        }
+                    @Override
+                    public void onComplete(long requestId) {
+                        callback.onComplete(requestId);
+                    }
                 });
     }
 
@@ -1168,7 +1172,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         mAwContents.findAllAsync(searchString);
     }
 
-    @SuppressFBWarnings("RCN_REDUNDANT_NULLCHECK_OF_NONNULL_VALUE")
     @Override
     public boolean showFindDialog(final String text, final boolean showIme) {
         mFactory.startYourEngines(false);
@@ -1245,7 +1248,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         mContentsClientAdapter.setWebViewClient(client);
     }
 
-    // TODO(ntfschr): add @Override once the next Android is released (http://crbug.com/627248)
+    @Override
     public WebViewClient getWebViewClient() {
         return mContentsClientAdapter.getWebViewClient();
     }
@@ -1261,7 +1264,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         mContentsClientAdapter.setWebChromeClient(client);
     }
 
-    // TODO(ntfschr): add @Override once the next Android is released (http://crbug.com/627248)
+    @Override
     public WebChromeClient getWebChromeClient() {
         return mContentsClientAdapter.getWebChromeClient();
     }
@@ -1350,32 +1353,14 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
     @Override
     public WebMessagePort[] createWebMessageChannel() {
-        mFactory.startYourEngines(true);
-        if (checkNeedsPost()) {
-            WebMessagePort[] ret = mFactory.runOnUiThreadBlocking(new Callable<WebMessagePort[]>() {
-                @Override
-                public WebMessagePort[] call() {
-                    return createWebMessageChannel();
-                }
-            });
-            return ret;
-        }
-        return WebMessagePortAdapter.fromMessagePorts(mAwContents.createMessageChannel());
+        return WebMessagePortAdapter.fromMessagePorts(
+                mSharedWebViewChromium.createWebMessageChannel());
     }
 
     @Override
     @TargetApi(Build.VERSION_CODES.M)
     public void postMessageToMainFrame(final WebMessage message, final Uri targetOrigin) {
-        if (checkNeedsPost()) {
-            mFactory.addTask(new Runnable() {
-                @Override
-                public void run() {
-                    postMessageToMainFrame(message, targetOrigin);
-                }
-            });
-            return;
-        }
-        mAwContents.postMessageToFrame(null, message.getData(), targetOrigin.toString(),
+        mSharedWebViewChromium.postMessageToMainFrame(message.getData(), targetOrigin.toString(),
                 WebMessagePortAdapter.toMessagePorts(message.getPorts()));
     }
 
@@ -1487,19 +1472,80 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     @Override
     public void setRendererPriorityPolicy(
             int rendererRequestedPriority, boolean waivedWhenNotVisible) {
-        // TODO(paulmiller): Unfork O APIs
+        @RendererPriority
+        int awRendererRequestedPriority;
+        switch (rendererRequestedPriority) {
+            case WebView.RENDERER_PRIORITY_WAIVED:
+                awRendererRequestedPriority = RendererPriority.WAIVED;
+                break;
+            case WebView.RENDERER_PRIORITY_BOUND:
+                awRendererRequestedPriority = RendererPriority.LOW;
+                break;
+            default:
+            case WebView.RENDERER_PRIORITY_IMPORTANT:
+                awRendererRequestedPriority = RendererPriority.HIGH;
+                break;
+        }
+        mAwContents.setRendererPriorityPolicy(awRendererRequestedPriority, waivedWhenNotVisible);
     }
 
     @Override
     public int getRendererRequestedPriority() {
-        // TODO(paulmiller): Unfork O APIs
-        return 0;
+        @RendererPriority
+        final int awRendererRequestedPriority = mAwContents.getRendererRequestedPriority();
+        switch (awRendererRequestedPriority) {
+            case RendererPriority.WAIVED:
+                return WebView.RENDERER_PRIORITY_WAIVED;
+            case RendererPriority.LOW:
+                return WebView.RENDERER_PRIORITY_BOUND;
+            default:
+            case RendererPriority.HIGH:
+                return WebView.RENDERER_PRIORITY_IMPORTANT;
+        }
     }
 
     @Override
     public boolean getRendererPriorityWaivedWhenNotVisible() {
-        // TODO(paulmiller): Unfork O APIs
-        return false;
+        return mAwContents.getRendererPriorityWaivedWhenNotVisible();
+    }
+
+    @Override
+    public void setTextClassifier(TextClassifier textClassifier) {
+        mAwContents.setTextClassifier(textClassifier);
+    }
+
+    @Override
+    public TextClassifier getTextClassifier() {
+        return mAwContents.getTextClassifier();
+    }
+
+    @Override
+    public void autofill(final SparseArray<AutofillValue> values) {
+        mFactory.startYourEngines(false);
+        if (checkNeedsPost()) {
+            mFactory.runVoidTaskOnUiThreadBlocking(new Runnable() {
+                @Override
+                public void run() {
+                    autofill(values);
+                }
+            });
+        }
+        mAwContents.autofill(values);
+    }
+
+    @Override
+    public void onProvideAutofillVirtualStructure(final ViewStructure structure, final int flags) {
+        mFactory.startYourEngines(false);
+        if (checkNeedsPost()) {
+            mFactory.runVoidTaskOnUiThreadBlocking(new Runnable() {
+                @Override
+                public void run() {
+                    onProvideAutofillVirtualStructure(structure, flags);
+                }
+            });
+            return;
+        }
+        mAwContents.onProvideAutoFillVirtualStructure(structure, flags);
     }
 
     // WebViewProvider glue methods ---------------------------------------------------------------
@@ -1569,32 +1615,14 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
     @Override
     public void onInitializeAccessibilityNodeInfo(final AccessibilityNodeInfo info) {
-        mFactory.startYourEngines(false);
-        if (checkNeedsPost()) {
-            mFactory.runVoidTaskOnUiThreadBlocking(new Runnable() {
-                @Override
-                public void run() {
-                    onInitializeAccessibilityNodeInfo(info);
-                }
-            });
-            return;
-        }
-        mAwContents.onInitializeAccessibilityNodeInfo(info);
+        // Intentional no-op. Chromium accessibility implementation currently does not need this
+        // calls.
     }
 
     @Override
     public void onInitializeAccessibilityEvent(final AccessibilityEvent event) {
-        mFactory.startYourEngines(false);
-        if (checkNeedsPost()) {
-            mFactory.runVoidTaskOnUiThreadBlocking(new Runnable() {
-                @Override
-                public void run() {
-                    onInitializeAccessibilityEvent(event);
-                }
-            });
-            return;
-        }
-        mAwContents.onInitializeAccessibilityEvent(event);
+        // Intentional no-op. Chromium accessibility implementation currently does not need this
+        // calls.
     }
 
     @Override
@@ -2079,28 +2107,50 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
     // Overrides method added to WebViewProvider.ViewDelegate interface
     // (not called in M and below)
+    @Override
     public Handler getHandler(Handler originalHandler) {
         return originalHandler;
     }
 
     // Overrides method added to WebViewProvider.ViewDelegate interface
     // (not called in M and below)
+    @Override
     public View findFocus(View originalFocusedView) {
         return originalFocusedView;
     }
 
     // Remove from superclass
+    @Override
     public void preDispatchDraw(Canvas canvas) {
         // TODO(leandrogracia): remove this method from WebViewProvider if we think
         // we won't need it again.
     }
 
+    @Override
     public void onStartTemporaryDetach() {
         mAwContents.onStartTemporaryDetach();
     }
 
+    @Override
     public void onFinishTemporaryDetach() {
         mAwContents.onFinishTemporaryDetach();
+    }
+
+    // TODO(changwan): override WebViewProvider.ViewDelegate method once the framework change has
+    // rolled in.
+    // (not called in O-MR1 and below)
+    // @Override
+    public boolean onCheckIsTextEditor() {
+        mFactory.startYourEngines(false);
+        if (checkNeedsPost()) {
+            return mFactory.runOnUiThreadBlocking(new Callable<Boolean>() {
+                @Override
+                public Boolean call() {
+                    return onCheckIsTextEditor();
+                }
+            });
+        }
+        return mAwContents.onCheckIsTextEditor();
     }
 
     // WebViewProvider.ScrollDelegate implementation ----------------------------------------------
@@ -2253,13 +2303,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         }
 
         @Override
-        public boolean awakenScrollBars() {
-            mWebViewPrivate.awakenScrollBars(0);
-            // TODO: modify the WebView.PrivateAccess to provide a return value.
-            return true;
-        }
-
-        @Override
         public boolean super_awakenScrollBars(int arg0, boolean arg1) {
             return false;
         }
@@ -2306,5 +2349,9 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     public void setSmartClipResultHandler(final Handler resultHandler) {
         checkThread();
         mAwContents.setSmartClipResultHandler(resultHandler);
+    }
+
+    SharedWebViewChromium getSharedWebViewChromium() {
+        return mSharedWebViewChromium;
     }
 }

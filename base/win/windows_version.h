@@ -36,16 +36,22 @@ enum Version {
   VERSION_WIN10_TH2 = 8,    // Threshold 2: Version 1511, Build 10586.
   VERSION_WIN10_RS1 = 9,    // Redstone 1: Version 1607, Build 14393.
   VERSION_WIN10_RS2 = 10,   // Redstone 2: Version 1703, Build 15063.
-  VERSION_WIN_LAST,         // Indicates error condition.
+  VERSION_WIN10_RS3 = 11,   // Redstone 3: Version 1709, Build 16299.
+  // On edit, update tools\metrics\histograms\enums.xml "WindowsVersion" and
+  // "GpuBlacklistFeatureTestResultsWindows2".
+  VERSION_WIN_LAST,  // Indicates error condition.
 };
 
 // A rough bucketing of the available types of versions of Windows. This is used
 // to distinguish enterprise enabled versions from home versions and potentially
-// server versions.
+// server versions. Keep these values in the same order, since they are used as
+// is for metrics histogram ids.
 enum VersionType {
-  SUITE_HOME,
+  SUITE_HOME = 0,
   SUITE_PROFESSIONAL,
   SUITE_SERVER,
+  SUITE_ENTERPRISE,
+  SUITE_EDUCATION,
   SUITE_LAST,
 };
 

@@ -21,9 +21,11 @@ public class InstantAppsBannerData {
     private final WebContents mWebContents;
     private final Uri mReferrer;
     private final String mPrimaryActionLabel;
+    private final boolean mInstantAppIsDefault;
 
     public InstantAppsBannerData(String appName, Bitmap icon, String url, Uri referrer,
-            Intent intent, String primaryActionLabel, WebContents webContents) {
+            Intent intent, String primaryActionLabel, WebContents webContents,
+            boolean instantAppIsDefault) {
         mAppName = appName;
         mAppIcon = icon;
         mUrl = url;
@@ -31,6 +33,7 @@ public class InstantAppsBannerData {
         mPrimaryActionLabel = primaryActionLabel;
         mWebContents = webContents;
         mReferrer = referrer;
+        mInstantAppIsDefault = instantAppIsDefault;
     }
 
     /** @return The name of the Instant App. */
@@ -66,5 +69,15 @@ public class InstantAppsBannerData {
     /** @return The label for the button that will launch the Instant App. */
     public String getPrimaryActionLabel() {
         return mPrimaryActionLabel;
+    }
+
+    /**
+     * @return Whether this instant app is being opened by default.
+     *
+     *  This distinguishes between asking a user whether they want to install an app for the first
+     *  time and asking them if they want to leave their current mobile web experience.
+     */
+    public boolean isInstantAppDefault() {
+        return mInstantAppIsDefault;
     }
 }

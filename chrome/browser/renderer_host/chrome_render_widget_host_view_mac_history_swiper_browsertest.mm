@@ -20,6 +20,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
+#include "third_party/WebKit/public/platform/WebMouseWheelEvent.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/ocmock_extensions.h"
 #include "ui/events/base_event_utils.h"
@@ -96,10 +97,8 @@ class ChromeRenderWidgetHostViewMacHistorySwiperTest
     ui_test_utils::NavigateToURL(browser(), url2_);
     ASSERT_EQ(url2_, GetWebContents()->GetURL());
 
-    std::unique_ptr<base::SimpleTestTickClock> mock_clock(
-      new base::SimpleTestTickClock());
-    mock_clock->Advance(base::TimeDelta::FromMilliseconds(100));
-    ui::SetEventTickClockForTesting(std::move(mock_clock));
+    mock_clock_.Advance(base::TimeDelta::FromMilliseconds(100));
+    ui::SetEventTickClockForTesting(&mock_clock_);
   }
 
   void TearDownOnMainThread() override { event_queue_.reset(); }
@@ -375,6 +374,8 @@ class ChromeRenderWidgetHostViewMacHistorySwiperTest
     const int scroll_offset = GetScrollTop();
     EXPECT_EQ(offset, scroll_offset);
   }
+
+  base::SimpleTestTickClock mock_clock_;
 
   GURL url1_;
   GURL url2_;
@@ -737,6 +738,17 @@ IN_PROC_BROWSER_TEST_F(ChromeRenderWidgetHostViewMacHistorySwiperTest,
 
   ui_test_utils::NavigateToURL(browser(), url_iframe_);
   ASSERT_EQ(url_iframe_, GetWebContents()->GetURL());
+
+  content::InputEventAckWaiter wheel_end_ack_waiter(
+      GetWebContents()->GetRenderViewHost()->GetWidget(),
+      base::BindRepeating([](content::InputEventAckSource,
+                             content::InputEventAckState,
+                             const blink::WebInputEvent& event) {
+        return event.GetType() == blink::WebInputEvent::kMouseWheel &&
+               static_cast<const blink::WebMouseWheelEvent&>(event).phase ==
+                   blink::WebMouseWheelEvent::kPhaseEnded;
+      }));
+
   QueueBeginningEvents(0, -1);
   for (int i = 0; i < 10; ++i)
     QueueScrollAndTouchMoved(0, -1);
@@ -745,6 +757,10 @@ IN_PROC_BROWSER_TEST_F(ChromeRenderWidgetHostViewMacHistorySwiperTest,
 
   QueueEndEvents();
   RunQueuedEvents();
+
+  // Wait for the scroll to end.
+  wheel_end_ack_waiter.Wait();
+
   content::WaitForLoadStop(GetWebContents());
   EXPECT_EQ(url_iframe_, GetWebContents()->GetURL());
 }

@@ -33,13 +33,11 @@ import org.chromium.net.test.EmbeddedTestServer;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.concurrent.Callable;
 
 /** Test suite for different Android URL schemes. */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class UrlSchemeTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -53,13 +51,10 @@ public class UrlSchemeTest {
     @Before
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityFromLauncher();
-        TestContentProvider.resetResourceRequestCounts(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        TestContentProvider.resetResourceRequestCounts(InstrumentationRegistry.getTargetContext());
         TestContentProvider.setDataFilePath(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(),
-                UrlUtils.getTestFilePath(""));
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+                InstrumentationRegistry.getTargetContext(), UrlUtils.getTestFilePath(""));
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
     }
 
     @After
@@ -80,7 +75,7 @@ public class UrlSchemeTest {
         ensureResourceRequestCountInContentProvider(resource, 0);
         // Make a request to the content provider.
         Uri uri = Uri.parse(createContentUrl(resource));
-        Context context = InstrumentationRegistry.getInstrumentation().getContext();
+        Context context = InstrumentationRegistry.getContext();
         InputStream inputStream = null;
         try {
             inputStream = context.getContentResolver().openInputStream(uri);
@@ -221,12 +216,8 @@ public class UrlSchemeTest {
     }
 
     private String getTitleOnUiThread() {
-        return ThreadUtils.runOnUiThreadBlockingNoException(new Callable<String>() {
-            @Override
-            public String call() throws Exception {
-                return mActivityTestRule.getActivity().getActivityTab().getTitle();
-            }
-        });
+        return ThreadUtils.runOnUiThreadBlockingNoException(
+                () -> mActivityTestRule.getActivity().getActivityTab().getTitle());
     }
 
     /**
@@ -254,7 +245,7 @@ public class UrlSchemeTest {
      * @param expectedCount Expected resource requests count
      */
     private void ensureResourceRequestCountInContentProvider(String resource, int expectedCount) {
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
         int actualCount = TestContentProvider.getResourceRequestCount(context, resource);
         Assert.assertEquals(expectedCount, actualCount);
     }
@@ -266,7 +257,7 @@ public class UrlSchemeTest {
      */
     private void ensureResourceRequestCountInContentProviderNotLessThan(
             String resource, int expectedMinimalCount) {
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
         int actualCount = TestContentProvider.getResourceRequestCount(context, resource);
         Assert.assertTrue("Minimal expected: " + expectedMinimalCount + ", actual: " + actualCount,
                 actualCount >= expectedMinimalCount);

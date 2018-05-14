@@ -43,6 +43,11 @@ void SpellCheckClient::Reset() {
 }
 
 // blink::WebSpellCheckClient
+bool SpellCheckClient::IsSpellCheckingEnabled() const {
+  // Ensure that the spellchecker code paths are always tested in layout tests.
+  return true;
+}
+
 void SpellCheckClient::CheckSpelling(
     const blink::WebString& text,
     int& misspelled_offset,
@@ -71,6 +76,7 @@ void SpellCheckClient::RequestCheckingOfText(
 
   if (last_requested_text_checking_completion_) {
     last_requested_text_checking_completion_->DidCancelCheckingText();
+    last_requested_text_checking_completion_ = nullptr;
     RequestResolved();
   }
 
@@ -122,7 +128,7 @@ void SpellCheckClient::FinishLastTextCheck() {
                                            &results);
   }
   last_requested_text_checking_completion_->DidFinishCheckingText(results);
-  last_requested_text_checking_completion_ = 0;
+  last_requested_text_checking_completion_ = nullptr;
   RequestResolved();
 
   if (test_runner_->shouldDumpSpellCheckCallbacks())

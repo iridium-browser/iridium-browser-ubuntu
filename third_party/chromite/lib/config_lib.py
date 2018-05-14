@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -11,13 +12,14 @@ import itertools
 import json
 import os
 
+from chromite.lib.const import waterfall
 from chromite.lib import constants
 from chromite.lib import osutils
 
 
 GS_PATH_DEFAULT = 'default' # Means gs://chromeos-image-archive/ + bot_id
 
-# Contains the valid build config suffixes in the order that they are dumped.
+# Contains the valid build config suffixes.
 CONFIG_TYPE_PRECQ = 'pre-cq'
 CONFIG_TYPE_PALADIN = 'paladin'
 CONFIG_TYPE_RELEASE = 'release'
@@ -27,43 +29,63 @@ CONFIG_TYPE_FACTORY = 'factory'
 CONFIG_TYPE_RELEASE_AFDO = 'release-afdo'
 CONFIG_TYPE_TOOLCHAIN = 'toolchain'
 
-# This is only used for unitests... find a better solution?
-CONFIG_TYPE_DUMP_ORDER = (
-    CONFIG_TYPE_PALADIN,
-    CONFIG_TYPE_PRECQ,
-    constants.PRE_CQ_LAUNCHER_CONFIG,
-    'incremental',
-    'telemetry',
-    CONFIG_TYPE_FULL,
-    'full-group',
-    CONFIG_TYPE_RELEASE,
-    'release-group',
-    'release-afdo',
-    'release-afdo-generate',
-    'release-afdo-use',
-    'sdk',
-    'chromium-pfq',
-    'chromium-pfq-informational',
-    'chrome-perf',
-    'chrome-pfq',
-    'chrome-pfq-cheets-informational',
-    'chrome-pfq-informational',
-    'android-pfq',
-    'config-updater',
-    'pre-flight-branch',
-    CONFIG_TYPE_FACTORY,
-    CONFIG_TYPE_FIRMWARE,
-    'toolchain',
-    'asan',
-    'asan-informational',
-    'refresh-packages',
-    'test-ap',
-    'test-ap-group',
-    constants.BRANCH_UTIL_CONFIG,
-    constants.PAYLOADS_TYPE,
-    'cbuildbot',
-    'unittest-stress',
-)
+# DISPLAY labels are used to group related builds together in the GE UI.
+
+DISPLAY_LABEL_PRECQ = 'pre_cq'
+DISPLAY_LABEL_TRYJOB = 'tryjob'
+DISPLAY_LABEL_INCREMENATAL = 'incremental'
+DISPLAY_LABEL_FULL = 'full'
+DISPLAY_LABEL_INFORMATIONAL = 'informational'
+
+# These are the build groups against which tryjobs can be run. All other
+# groups MUST be production builds.
+# TODO: crbug.com/776955 Make the above statement true.
+TRYJOB_DISPLAY_LABEL = {
+    DISPLAY_LABEL_PRECQ,
+    DISPLAY_LABEL_TRYJOB,
+    DISPLAY_LABEL_INCREMENATAL,
+    DISPLAY_LABEL_FULL,
+    DISPLAY_LABEL_INFORMATIONAL,
+}
+
+DISPLAY_LABEL_CQ = 'cq'
+DISPLAY_LABEL_RELEASE = 'release'
+DISPLAY_LABEL_CHROME_PFQ = 'chrome_pfq'
+DISPLAY_LABEL_MST_ANDROID_PFQ = 'mst_android_pfq'
+DISPLAY_LABEL_MNC_ANDROID_PFQ = 'mnc_android_pfq'
+DISPLAY_LABEL_NYC_ANDROID_PFQ = 'nyc_android_pfq'
+DISPLAY_LABEL_FIRMWARE = 'firmware'
+DISPLAY_LABEL_FACTORY = 'factory'
+DISPLAY_LABEL_TOOLCHAIN = 'toolchain'
+DISPLAY_LABEL_UTILITY = 'utility'
+DISPLAY_LABEL_UNKNOWN_PRODUCTION = 'production_tryjob'
+
+# This list of constants should be kept in sync with GoldenEye code.
+ALL_DISPLAY_LABEL = TRYJOB_DISPLAY_LABEL | {
+    DISPLAY_LABEL_CQ,
+    DISPLAY_LABEL_RELEASE,
+    DISPLAY_LABEL_CHROME_PFQ,
+    DISPLAY_LABEL_MST_ANDROID_PFQ,
+    DISPLAY_LABEL_MNC_ANDROID_PFQ,
+    DISPLAY_LABEL_NYC_ANDROID_PFQ,
+    DISPLAY_LABEL_FIRMWARE,
+    DISPLAY_LABEL_FACTORY,
+    DISPLAY_LABEL_TOOLCHAIN,
+    DISPLAY_LABEL_UTILITY,
+    DISPLAY_LABEL_UNKNOWN_PRODUCTION,
+}
+
+def isTryjobConfig(build_config):
+  """Is a given build config a tryjob config, or a production config?
+
+  Args:
+    build_config: A fully populated instance of BuildConfig.
+
+  Returns:
+    Boolean. True if it's a tryjob config.
+  """
+  return build_config.display_label in TRYJOB_DISPLAY_LABEL
+
 
 # In the Json, this special build config holds the default values for all
 # other configs.
@@ -86,6 +108,9 @@ CONFIG_TEMPLATE_RELEASE_BRANCH = 'release_branch'
 CONFIG_TEMPLATE_REFERENCE_BOARD_NAME = 'reference_board_name'
 CONFIG_TEMPLATE_MODELS = 'models'
 CONFIG_TEMPLATE_MODEL_NAME = 'name'
+CONFIG_TEMPLATE_MODEL_BOARD_NAME = 'board_name'
+CONFIG_TEMPLATE_MODEL_TEST_SUITES = 'test_suites'
+CONFIG_TEMPLATE_MODEL_CQ_TEST_ENABLED = 'cq_test_enabled'
 
 CONFIG_X86_INTERNAL = 'X86_INTERNAL'
 CONFIG_X86_EXTERNAL = 'X86_EXTERNAL'
@@ -123,13 +148,14 @@ def IsMasterBuild(config):
 
 def UseBuildbucketScheduler(config):
   """Returns True if this build uses Buildbucket to schedule builds."""
-  return (config.active_waterfall in (constants.WATERFALL_INTERNAL,
-                                      constants.WATERFALL_EXTERNAL,
-                                      constants.WATERFALL_TRYBOT) and
+  return (config.active_waterfall in (waterfall.WATERFALL_INTERNAL,
+                                      waterfall.WATERFALL_EXTERNAL,
+                                      waterfall.WATERFALL_TRYBOT,
+                                      waterfall.WATERFALL_RELEASE) and
           config.name in (constants.CQ_MASTER,
                           constants.CANARY_MASTER,
                           constants.PFQ_MASTER,
-                          constants.MNC_ANDROID_PFQ_MASTER,
+                          constants.MST_ANDROID_PFQ_MASTER,
                           constants.NYC_ANDROID_PFQ_MASTER,
                           constants.TOOLCHAIN_MASTTER,
                           constants.PRE_CQ_LAUNCHER_NAME))
@@ -228,7 +254,8 @@ class BuildConfig(AttrDict):
 
   Each dictionary entry is in turn a dictionary of config_param->value.
 
-  See _settings for details on known configurations, and their documentation.
+  See DefaultSettings for details on known configurations, and their
+  documentation.
   """
   def GetBotId(self, remote_trybot=False):
     """Get the 'bot id' of a particular bot.
@@ -259,7 +286,8 @@ class BuildConfig(AttrDict):
         if k == 'child_configs':
           result[k] = [x.deepcopy() for x in v]
         elif k in ('vm_tests', 'vm_tests_override',
-                   'hw_tests', 'hw_tests_override'):
+                   'hw_tests', 'hw_tests_override',
+                   'tast_vm_tests'):
           result[k] = [copy.copy(x) for x in v]
         # type(v) is faster than isinstance.
         elif type(v) is list:
@@ -275,7 +303,7 @@ class BuildConfig(AttrDict):
 
     Args:
       args: Dictionaries or templates to update this config with.
-      kwargs: Settings to inject; see _settings for valid values.
+      kwargs: Settings to inject; see DefaultSettings for valid values.
 
     Returns:
       self after changes are applied.
@@ -329,7 +357,7 @@ class BuildConfig(AttrDict):
 
     Args:
       args: Mapping instances to mixin.
-      kwargs: Settings to inject; see _settings for valid values.
+      kwargs: Settings to inject; see DefaultSettings for valid values.
 
     Returns:
       A new _config instance.
@@ -364,6 +392,84 @@ class VMTestConfig(object):
 
   Members:
     test_type: Test type to be run.
+    test_suite: Test suite to be run in VMTest.
+    timeout: Number of seconds to wait before timing out waiting for
+             results.
+    retry: Whether we should retry tests that fail in a suite run.
+    max_retries: Integer, maximum job retries allowed at suite level.
+                 None for no max.
+  """
+  DEFAULT_TEST_TIMEOUT = 60 * 60
+
+  def __init__(self, test_type, test_suite=None,
+               timeout=DEFAULT_TEST_TIMEOUT, retry=False,
+               max_retries=constants.VM_TEST_MAX_RETRIES):
+    """Constructor -- see members above."""
+    self.test_type = test_type
+    self.test_suite = test_suite
+    self.timeout = timeout
+    self.retry = retry
+    self.max_retries = max_retries
+
+
+  def __eq__(self, other):
+    return self.__dict__ == other.__dict__
+
+
+class GCETestConfig(object):
+  """Config object for GCE tests suites.
+
+  Members:
+    test_type: Test type to be run.
+    test_suite: Test suite to be run in GCETest.
+    timeout: Number of seconds to wait before timing out waiting for
+             results.
+  """
+  DEFAULT_TEST_TIMEOUT = 60 * 60
+
+  def __init__(self, test_type, test_suite=None,
+               timeout=DEFAULT_TEST_TIMEOUT):
+    """Constructor -- see members above."""
+    self.test_type = test_type
+    self.test_suite = test_suite
+    self.timeout = timeout
+
+  def __eq__(self, other):
+    return self.__dict__ == other.__dict__
+
+
+class TastVMTestConfig(object):
+  """Config object for a Tast virtual-machine-based test suite.
+
+  Members:
+    name: String containing short human-readable name describing test suite.
+    test_exprs: List of string expressions describing which tests to run; this
+                is passed directly to the 'tast run' command. See
+                https://goo.gl/UPNEgT for info about test expressions.
+    timeout: Number of seconds to wait before timing out waiting for
+             results.
+  """
+  DEFAULT_TEST_TIMEOUT = 10 * 60
+
+  def __init__(self, suite_name, test_exprs, timeout=DEFAULT_TEST_TIMEOUT):
+    """Constructor -- see members above."""
+    # This is an easy mistake to make and results in confusing errors later when
+    # a list of one-character strings gets passed to the tast command.
+    if not isinstance(test_exprs, list):
+      raise TypeError('test_exprs must be list of strings')
+    self.suite_name = suite_name
+    self.test_exprs = test_exprs
+    self.timeout = timeout
+
+  def __eq__(self, other):
+    return self.__dict__ == other.__dict__
+
+
+class MoblabVMTestConfig(object):
+  """Config object for moblab tests suites.
+
+  Members:
+    test_type: Test type to be run.
     timeout: Number of seconds to wait before timing out waiting for
              results.
   """
@@ -378,20 +484,19 @@ class VMTestConfig(object):
     return self.__dict__ == other.__dict__
 
 
-class GCETestConfig(object):
-  """Config object for GCE tests suites.
+class ModelTestConfig(object):
+  """Model specific config that controls which test suites are executed.
 
   Members:
-    test_type: Test type to be run.
-    timeout: Number of seconds to wait before timing out waiting for
-             results.
+    name: The name of the model that will be tested (matches model label)
+    lab_board_name: The name of the board in the lab (matches board label)
+    test_suites: List of hardware test suites that will be executed.
   """
-  DEFAULT_TEST_TIMEOUT = 60 * 60
-
-  def __init__(self, test_type, timeout=DEFAULT_TEST_TIMEOUT):
+  def __init__(self, name, lab_board_name, test_suites=None):
     """Constructor -- see members above."""
-    self.test_type = test_type
-    self.timeout = timeout
+    self.name = name
+    self.lab_board_name = lab_board_name
+    self.test_suites = test_suites
 
   def __eq__(self, other):
     return self.__dict__ == other.__dict__
@@ -421,7 +526,6 @@ class HWTestConfig(object):
     priority:  Priority at which tests in the suite will be scheduled in
                the hw lab.
     file_bugs: Should we file bugs if a test fails in a suite run.
-    num: Maximum number of DUTs to use when scheduling tests in the hw lab.
     minimum_duts: minimum number of DUTs required for testing in the hw lab.
     retry: Whether we should retry tests that fail in a suite run.
     max_retries: Integer, maximum job retries allowed at suite level.
@@ -429,6 +533,9 @@ class HWTestConfig(object):
     suite_min_duts: Preferred minimum duts. Lab will prioritize on getting such
                     number of duts even if the suite is competing with
                     other suites that have higher priority.
+    suite_args: Arguments passed to the suite.  This should be a dict
+                representing keyword arguments.  The value is marshalled
+                using repr(), so the dict values should be basic types.
 
   Some combinations of member settings are invalid:
     * A suite config may not specify both blocking and async.
@@ -453,17 +560,25 @@ class HWTestConfig(object):
   # there's a better fix, we'll allow these phases hours to fail.
   ASYNC_HW_TEST_TIMEOUT = int(250.0 * _MINUTE)
 
-  def __init__(self, suite, num=constants.HWTEST_DEFAULT_NUM,
-               pool=constants.HWTEST_MACH_POOL, timeout=SHARED_HW_TEST_TIMEOUT,
-               async=False, warn_only=False, critical=False, blocking=False,
-               file_bugs=False, priority=constants.HWTEST_BUILD_PRIORITY,
-               retry=True, max_retries=constants.HWTEST_MAX_RETRIES,
-               minimum_duts=0, suite_min_duts=0, offload_failures_only=False):
+  def __init__(self, suite,
+               pool=constants.HWTEST_MACH_POOL,
+               timeout=SHARED_HW_TEST_TIMEOUT,
+               async=False,
+               warn_only=False,
+               critical=False,
+               blocking=False,
+               file_bugs=False,
+               priority=constants.HWTEST_BUILD_PRIORITY,
+               retry=True,
+               max_retries=constants.HWTEST_MAX_RETRIES,
+               minimum_duts=0,
+               suite_min_duts=0,
+               suite_args=None,
+               offload_failures_only=False):
     """Constructor -- see members above."""
     assert not async or not blocking
     assert not warn_only or not critical
     self.suite = suite
-    self.num = num
     self.pool = pool
     self.timeout = timeout
     self.blocking = blocking
@@ -476,6 +591,7 @@ class HWTestConfig(object):
     self.max_retries = max_retries
     self.minimum_duts = minimum_duts
     self.suite_min_duts = suite_min_duts
+    self.suite_args = suite_args
     self.offload_failures_only = offload_failures_only
 
   def SetBranchedValues(self):
@@ -488,9 +604,11 @@ class HWTestConfig(object):
     self.minimum_duts = 0
 
     # Only reduce priority if it's lower.
-    new_priority = constants.HWTEST_DEFAULT_PRIORITY
-    if (constants.HWTEST_PRIORITIES_MAP[self.priority] >
-        constants.HWTEST_PRIORITIES_MAP[new_priority]):
+    new_priority = constants.HWTEST_PRIORITIES_MAP[
+        constants.HWTEST_DEFAULT_PRIORITY]
+    if isinstance(self.priority, (int, long)):
+      self.priority = min(self.priority, new_priority)
+    elif constants.HWTEST_PRIORITIES_MAP[self.priority] > new_priority:
       self.priority = new_priority
 
   @property
@@ -499,6 +617,7 @@ class HWTestConfig(object):
 
   def __eq__(self, other):
     return self.__dict__ == other.__dict__
+
 
 def DefaultSettings():
   # Enumeration of valid settings; any/all config settings must be in this.
@@ -518,10 +637,15 @@ def DefaultSettings():
       # A list of boards to build.
       boards=None,
 
-      # A list of all models that are supported by a given unified build.
-      # For unified builds, we still need hardware test coverage to fan out
-      # and test every model, which is what this setting controls.
+      # A list of ModelTestConfig objects that represent all of the models
+      # supported by a given unified build and their corresponding test config.
       models=[],
+
+      # This value defines what part of the Golden Eye UI is responsible for
+      # displaying builds of this build config. The value is required, and
+      # must be in ALL_DISPLAY_LABEL.
+      # TODO: Make the value required after crbug.com/776955 is finished.
+      display_label=None,
 
       # The profile of the variant to set up and build.
       profile=None,
@@ -539,6 +663,11 @@ def DefaultSettings():
       # mark the builder as important=True.
       important=False,
 
+      # If True, build config should always be run as if --debug was set
+      # on the cbuildbot command line. This is different from 'important'
+      # and is usually correlated with tryjob build configs.
+      debug=False,
+
       # Timeout for the build as a whole (in seconds).
       build_timeout=(4 * 60 + 30) * 60,
 
@@ -548,6 +677,11 @@ def DefaultSettings():
       # feature of upload_symbols, and it may make sense to merge the features
       # at some point.
       health_threshold=0,
+
+      # If this build_config fails this many times consecutively, trigger a
+      # sanity-check build on this build_config. A sanity-check-pre-cq is a
+      # pre-cq build without patched CLs.
+      sanity_check_threshold=0,
 
       # List of email addresses to send health alerts to for this builder. It
       # supports automatic email address lookup for the following sheriff
@@ -581,14 +715,6 @@ def DefaultSettings():
       # CommitQueueSync. This is basically ToT immediately prior to the
       # current commit queue run.
       do_not_apply_cq_patches=False,
-
-      # Applies only to master builders. List of the names of slave builders
-      # to be treated as sanity checkers. If only sanity check builders fail,
-      # then the master will ignore the failures. In a CQ run, if any of the
-      # sanity check builders fail and other builders fail as well, the master
-      # will treat the build as failed, but will not reset the ready bit of
-      # the tested patches.
-      sanity_check_slaves=None,
 
       # emerge use flags to use while setting up the board, building packages,
       # making images, etc.
@@ -705,13 +831,17 @@ def DefaultSettings():
       # profile information found in the chrome ebuild file.
       afdo_use=False,
 
-      # A list of the vm_tests to run by default.
-      vm_tests=[VMTestConfig(constants.SMOKE_SUITE_TEST_TYPE),
+      # A list of VMTestConfig objects to run by default.
+      vm_tests=[VMTestConfig(constants.VM_SUITE_TEST_TYPE, test_suite='smoke'),
                 VMTestConfig(constants.SIMPLE_AU_TEST_TYPE)],
 
-      # A list of all VM Tests to use if VM Tests are forced on (--vmtest
-      # command line or trybot). None means no override.
+      # A list of all VMTestConfig objects to use if VM Tests are forced on
+      # (--vmtest command line or trybot). None means no override.
       vm_tests_override=None,
+
+      # If true, in addition to upload vm test result to artifact folder, report
+      # results to other dashboard as well.
+      vm_test_report_to_dashboards=False,
 
       # The number of times to run the VMTest stage. If this is >1, then we
       # will run the stage this many times, stopping if we encounter any
@@ -721,8 +851,8 @@ def DefaultSettings():
       # A list of HWTestConfig objects to run.
       hw_tests=[],
 
-      # A list of all HW Tests to use if HW Tests are forced on (--hwtest
-      # command line or trybot). None means no override.
+      # A list of all HWTestConfig objects to use if HW Tests are forced on
+      # (--hwtest command line or trybot). None means no override.
       hw_tests_override=None,
 
       # If true, uploads artifacts for hw testing. Upload payloads for test
@@ -733,9 +863,17 @@ def DefaultSettings():
       # If true, uploads individual image tarballs.
       upload_standalone_images=True,
 
-      # Default to not run gce tests. Currently only some lakitu builders run
-      # gce tests.
+      # A list of GCETestConfig objects to use. Currently only some lakitu
+      # builders run gce tests.
       gce_tests=[],
+
+      # A list of TastVMTestConfig objects describing Tast-based test suites
+      # that should be run in a VM.
+      tast_vm_tests=[],
+
+      # Default to not run moblab tests. Currently the blessed moblab board runs
+      # these tests.
+      moblab_vm_tests=[],
 
       # List of patterns for portage packages for which stripped binpackages
       # should be uploaded to GS. The patterns are used to search for packages
@@ -956,7 +1094,7 @@ def DefaultSettings():
       # on its waterfall.
       buildbot_waterfall_name=None,
 
-      # If not None, the name (in constants.CIDB_KNOWN_WATERFALLS) of the
+      # If not None, the name (in waterfall.CIDB_KNOWN_WATERFALLS) of the
       # waterfall that this target should be active on.
       active_waterfall=None,
 
@@ -1157,7 +1295,7 @@ class SiteConfig(dict):
     return BuildConfig(**self._defaults)
 
   def GetTemplates(self):
-    """Create the canonical default build configuration."""
+    """Get the templates of the build configs"""
     return self._templates
 
   @property
@@ -1166,7 +1304,7 @@ class SiteConfig(dict):
 
   @property
   def params(self):
-    """Create the canonical default build configuration."""
+    """Get the site-wide configuration parameters."""
     return SiteParameters(**self._site_params)
 
   #
@@ -1524,6 +1662,9 @@ def GeBuildConfigAllBoards(ge_build_config):
 def GetUnifiedBuildConfigAllBuilds(ge_build_config):
   """Extract a list of all unified build configurations.
 
+  This dictionary is based on the JSON defined by the proto generated from
+  GoldenEye.  See cs/crosbuilds.proto
+
   Args:
     ge_build_config: Dictionary containing the decoded GE configuration file.
 
@@ -1654,11 +1795,11 @@ def LoadConfigFromString(json_string):
   # Use standard defaults, but allow the config to override.
   defaults = DefaultSettings()
   defaults.update(config_dict.pop(DEFAULT_BUILD_CONFIG))
-  _UpdateConfig(defaults)
+  _DeserializeTestConfigs(defaults)
 
   templates = config_dict.pop('_templates', {})
   for t in templates.itervalues():
-    _UpdateConfig(t)
+    _DeserializeTestConfigs(t)
 
   site_params = DefaultSiteParameters()
   site_params.update(config_dict.pop('_site_params', {}))
@@ -1676,66 +1817,54 @@ def LoadConfigFromString(json_string):
   return result
 
 
-def _CreateVmTestConfig(jsonString):
-  """Create a VMTestConfig object from a JSON string."""
-  if isinstance(jsonString, VMTestConfig):
-    return jsonString
-  # Each VM Test is dumped as a json string embedded in json.
-  vm_test_config = json.loads(jsonString)
-  return VMTestConfig(**vm_test_config)
+def _DeserializeTestConfig(build_dict, config_key, test_class,
+                           preserve_none=False):
+  """Deserialize test config of given type inside build_dict.
+
+  Args:
+    build_dict: The build_dict to update (in place)
+    config_key: Key for the config inside build_dict.
+    test_class: The class to instantiate for the config.
+    preserve_none: If True, None values are preserved as is. By default, they
+        are dropped.
+  """
+  serialized_test_configs = build_dict.pop(config_key, None)
+  if serialized_test_configs is None:
+    if preserve_none:
+      build_dict[config_key] = None
+    return
+
+  test_configs = []
+  for test_config_string in serialized_test_configs:
+    if isinstance(test_config_string, test_class):
+      test_config = test_config_string
+    else:
+      # Each test config is dumped as a json string embedded in json.
+      embedded_configs = json.loads(test_config_string)
+      test_config = test_class(**embedded_configs)
+    test_configs.append(test_config)
+  build_dict[config_key] = test_configs
 
 
-def _CreateHwTestConfig(jsonString):
-  """Create a HWTestConfig object from a JSON string."""
-  if isinstance(jsonString, HWTestConfig):
-    return jsonString
-  # Each HW Test is dumped as a json string embedded in json.
-  hw_test_config = json.loads(jsonString)
-  return HWTestConfig(**hw_test_config)
+def _DeserializeTestConfigs(build_dict):
+  """Updates a config dictionary with recreated objects.
 
+  Various test configs are serialized as strings (rather than JSON objects), so
+  we need to turn them into real objects before they can be consumed.
 
-def _CreateGceTestConfig(jsonString):
-  """Create a GCETestConfig object from a JSON string."""
-  if isinstance(jsonString, GCETestConfig):
-    return jsonString
-  # Each GCE Test is dumped as a json string embedded in json.
-  gce_test_config = json.loads(jsonString)
-  return GCETestConfig(**gce_test_config)
-
-
-def _UpdateConfig(build_dict):
-  """Updates a config dictionary with recreated objects."""
-  # VM, HW and GCE test configs are serialized as strings (rather than JSON
-  # objects), so we need to turn them into real objects before they can be
-  # consumed.
-  vmtests = build_dict.pop('vm_tests', None)
-  if vmtests is not None:
-    build_dict['vm_tests'] = [_CreateVmTestConfig(vmtest) for vmtest in vmtests]
-
-  vmtests = build_dict.pop('vm_tests_override', None)
-  if vmtests is not None:
-    build_dict['vm_tests_override'] = [
-        _CreateVmTestConfig(vmtest) for vmtest in vmtests
-    ]
-  else:
-    build_dict['vm_tests_override'] = None
-
-  hwtests = build_dict.pop('hw_tests', None)
-  if hwtests is not None:
-    build_dict['hw_tests'] = [_CreateHwTestConfig(hwtest) for hwtest in hwtests]
-
-  hwtests = build_dict.pop('hw_tests_override', None)
-  if hwtests is not None:
-    build_dict['hw_tests_override'] = [
-        _CreateHwTestConfig(hwtest) for hwtest in hwtests
-    ]
-  else:
-    build_dict['hw_tests_override'] = None
-
-  gcetests = build_dict.pop('gce_tests', None)
-  if gcetests is not None:
-    build_dict['gce_tests'] = [_CreateGceTestConfig(gcetest) for gcetest in
-                               gcetests]
+  Args:
+    build_dict: The config dictionary to update (in place).
+  """
+  _DeserializeTestConfig(build_dict, 'vm_tests', VMTestConfig)
+  _DeserializeTestConfig(build_dict, 'vm_tests_override', VMTestConfig,
+                         preserve_none=True)
+  _DeserializeTestConfig(build_dict, 'models', ModelTestConfig)
+  _DeserializeTestConfig(build_dict, 'hw_tests', HWTestConfig)
+  _DeserializeTestConfig(build_dict, 'hw_tests_override', HWTestConfig,
+                         preserve_none=True)
+  _DeserializeTestConfig(build_dict, 'gce_tests', GCETestConfig)
+  _DeserializeTestConfig(build_dict, 'tast_vm_tests', TastVMTestConfig)
+  _DeserializeTestConfig(build_dict, 'moblab_vm_tests', MoblabVMTestConfig)
 
 
 def _CreateBuildConfig(name, default, build_dict, templates):
@@ -1753,7 +1882,7 @@ def _CreateBuildConfig(name, default, build_dict, templates):
     result.update(templates[template])
   result.update(build_dict)
 
-  _UpdateConfig(result)
+  _DeserializeTestConfigs(result)
 
   if child_configs is not None:
     result['child_configs'] = [

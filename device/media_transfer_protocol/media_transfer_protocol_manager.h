@@ -8,23 +8,19 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "device/media_transfer_protocol/public/mojom/mtp_file_entry.mojom.h"
+#include "device/media_transfer_protocol/public/mojom/mtp_storage_info.mojom.h"
 
-#if !defined(OS_LINUX)
-#error "Only used on Linux and ChromeOS"
+#if !defined(OS_CHROMEOS)
+#error "Only used on ChromeOS"
 #endif
-
-class MtpFileEntry;
-class MtpStorageInfo;
-
-namespace base {
-class SequencedTaskRunner;
-}
 
 namespace device {
 
@@ -32,58 +28,76 @@ namespace device {
 // Other classes can add themselves as observers.
 class MediaTransferProtocolManager {
  public:
+  // A callback to handle the result of AddObserverAndEnumerateStorages().
+  // The argument is the returned vector of available MTP storages info.
+  // The pointers in the vector are guaranteed to be non-NULL.
+  using EnumerateStoragesCallback = base::OnceCallback<void(
+      std::vector<const mojom::MtpStorageInfo*> storage_info_list)>;
+
+  // A callback to handle the result of GetStorages().
+  // The argument is the returned vector of available MTP storage names.
+  using GetStoragesCallback =
+      base::OnceCallback<void(const std::vector<std::string>& storages)>;
+
+  // A callback to receive the result of GetStorageInfo().
+  // On success, the |storage_info| argument contains the storage metadata.
+  // Otherwise, |storage_info| is a nullptr.
+  using GetStorageInfoCallback =
+      base::OnceCallback<void(const mojom::MtpStorageInfo* storage_info)>;
+
   // A callback to handle the result of GetStorageInfoFromDevice.
   // The first argument is the returned storage info.
   // The second argument is true if there was an error.
-  typedef base::Callback<void(const MtpStorageInfo& storage_info,
-                              const bool error)>
-      GetStorageInfoFromDeviceCallback;
+  using GetStorageInfoFromDeviceCallback =
+      base::Callback<void(const mojom::MtpStorageInfo& storage_info,
+                          const bool error)>;
 
   // A callback to handle the result of OpenStorage.
   // The first argument is the returned handle.
   // The second argument is true if there was an error.
-  typedef base::Callback<void(const std::string& handle,
-                              bool error)> OpenStorageCallback;
+  using OpenStorageCallback =
+      base::Callback<void(const std::string& handle, bool error)>;
 
   // A callback to handle the result of CloseStorage.
   // The argument is true if there was an error.
-  typedef base::Callback<void(bool error)> CloseStorageCallback;
+  using CloseStorageCallback = base::Callback<void(bool error)>;
 
   // A callback to handle the result of CreateDirectory.
   // The first argument is true if there was an error.
-  typedef base::Callback<void(bool error)> CreateDirectoryCallback;
+  using CreateDirectoryCallback = base::Callback<void(bool error)>;
 
   // A callback to handle the result of ReadDirectory.
   // The first argument is a vector of file entries.
   // The second argument is true if there are more file entries.
   // The third argument is true if there was an error.
-  typedef base::Callback<void(const std::vector<MtpFileEntry>& file_entries,
-                              bool has_more,
-                              bool error)> ReadDirectoryCallback;
+  using ReadDirectoryCallback =
+      base::Callback<void(const std::vector<mojom::MtpFileEntry>& file_entries,
+                          bool has_more,
+                          bool error)>;
 
   // A callback to handle the result of ReadFileChunk.
   // The first argument is a string containing the file data.
   // The second argument is true if there was an error.
-  typedef base::Callback<void(const std::string& data,
-                              bool error)> ReadFileCallback;
+  using ReadFileCallback =
+      base::Callback<void(const std::string& data, bool error)>;
 
   // A callback to handle the result of GetFileInfo.
   // The first argument is a file entry.
   // The second argument is true if there was an error.
-  typedef base::Callback<void(const MtpFileEntry& file_entry,
-                              bool error)> GetFileInfoCallback;
+  using GetFileInfoCallback =
+      base::Callback<void(const mojom::MtpFileEntry& file_entry, bool error)>;
 
   // A callback to handle the result of RenameObject.
   // The first argument is true if there was an error.
-  typedef base::Callback<void(bool error)> RenameObjectCallback;
+  using RenameObjectCallback = base::Callback<void(bool error)>;
 
   // A callback to handle the result of CopyFileFromLocal.
   // The first argument is true if there was an error.
-  typedef base::Callback<void(bool error)> CopyFileFromLocalCallback;
+  using CopyFileFromLocalCallback = base::Callback<void(bool error)>;
 
   // A callback to handle the result of DeleteObject.
   // The first argument is true if there was an error.
-  typedef base::Callback<void(bool error)> DeleteObjectCallback;
+  using DeleteObjectCallback = base::Callback<void(bool error)>;
 
   // Implement this interface to be notified about MTP storage
   // attachment / detachment events.
@@ -91,26 +105,28 @@ class MediaTransferProtocolManager {
    public:
     virtual ~Observer() {}
 
-    // A function called after a MTP storage has been attached / detached.
-    virtual void StorageChanged(bool is_attached,
-                                const std::string& storage_name) = 0;
+    // Functions called after a MTP storage has been attached / detached.
+    virtual void StorageAttached(
+        const device::mojom::MtpStorageInfo& storage_info) = 0;
+    virtual void StorageDetached(const std::string& storage_name) = 0;
   };
 
   virtual ~MediaTransferProtocolManager() {}
 
-  // Adds an observer.
-  virtual void AddObserver(Observer* observer) = 0;
+  // Adds an observer and runs |callback| with a list of existing storages.
+  virtual void AddObserverAndEnumerateStorages(
+      Observer* observer,
+      EnumerateStoragesCallback callback) = 0;
 
   // Removes an observer.
   virtual void RemoveObserver(Observer* observer) = 0;
 
-  // Returns a vector of available MTP storages.
-  virtual const std::vector<std::string> GetStorages() const = 0;
+  // Gets all available MTP storages and runs |callback|.
+  virtual void GetStorages(GetStoragesCallback callback) const = 0;
 
-  // On success, returns the metadata for |storage_name|.
-  // Otherwise returns NULL.
-  virtual const MtpStorageInfo* GetStorageInfo(
-      const std::string& storage_name) const = 0;
+  // Gets the metadata for |storage_name| and runs |callback| synchronously.
+  virtual void GetStorageInfo(const std::string& storage_name,
+                              GetStorageInfoCallback callback) const = 0;
 
   // Read the metadata of |storage_name| from device and runs |callback|.
   virtual void GetStorageInfoFromDevice(
@@ -173,12 +189,7 @@ class MediaTransferProtocolManager {
                             const DeleteObjectCallback& callback) = 0;
 
   // Creates and returns the global MediaTransferProtocolManager instance.
-  // On Linux, |task_runner| specifies the task runner to process asynchronous
-  // operations.
-  // On ChromeOS, |task_runner| should just be set to NULL because ChromeOS
-  // already has a dedicated task runner.
-  static MediaTransferProtocolManager* Initialize(
-      scoped_refptr<base::SequencedTaskRunner> task_runner);
+  static std::unique_ptr<MediaTransferProtocolManager> Initialize();
 };
 
 }  // namespace device

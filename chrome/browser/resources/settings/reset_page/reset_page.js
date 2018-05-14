@@ -32,11 +32,23 @@ Polymer({
       value: cr.isChromeOS ? loadTimeData.getBoolean('allowPowerwash') : false
     },
 
+    // <if expr="_google_chrome and is_win">
     /** @private */
-    showResetProfileDialog_: {
+    userInitiatedCleanupsEnabled_: {
       type: Boolean,
-      value: false,
+      value: function() {
+        return loadTimeData.getBoolean('userInitiatedCleanupsEnabled');
+      },
     },
+
+    /** @private */
+    showIncompatibleApplications_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('showIncompatibleApplications');
+      },
+    },
+    // </if>
   },
 
   /**
@@ -45,9 +57,12 @@ Polymer({
    * @protected
    */
   currentRouteChanged: function(route) {
-    this.showResetProfileDialog_ =
-        route == settings.routes.TRIGGERED_RESET_DIALOG ||
-        route == settings.routes.RESET_DIALOG;
+    if (route == settings.routes.TRIGGERED_RESET_DIALOG ||
+        route == settings.routes.RESET_DIALOG) {
+      /** @type {!SettingsResetProfileDialogElement} */ (
+          this.$.resetProfileDialog.get())
+          .show();
+    }
   },
 
   /** @private */
@@ -78,4 +93,17 @@ Polymer({
     cr.ui.focusWithoutInk(assert(this.$.powerwashArrow));
   },
   // </if>
+
+  // <if expr="_google_chrome and is_win">
+  /** @private */
+  onChromeCleanupTap_: function() {
+    settings.navigateTo(settings.routes.CHROME_CLEANUP);
+  },
+
+  /** @private */
+  onIncompatibleApplicationsTap_: function() {
+    settings.navigateTo(settings.routes.INCOMPATIBLE_APPLICATIONS);
+  },
+  // </if>
+
 });

@@ -6,10 +6,12 @@ package org.chromium.native_test;
 
 import android.app.Activity;
 
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
 import org.chromium.base.PowerMonitor;
+import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.NativeLibraries;
 
 /**
@@ -25,6 +27,10 @@ public class NativeUnitTest extends NativeTest {
         // initialize ContextUtils.
         ContextUtils.initApplicationContext(activity.getApplicationContext());
 
+        // Necessary because BaseChromiumApplication no longer automatically initializes application
+        // tracking.
+        ApplicationStatus.initialize(activity.getApplication());
+
         // Needed by path_utils_unittest.cc
         PathUtils.setPrivateDataDirectorySuffix("chrome");
 
@@ -38,6 +44,7 @@ public class NativeUnitTest extends NativeTest {
     }
 
     private void loadLibraries() {
+        LibraryLoader.setEnvForNative();
         for (String library : NativeLibraries.LIBRARIES) {
             Log.i(TAG, "loading: %s", library);
             System.loadLibrary(library);

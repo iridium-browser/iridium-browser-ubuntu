@@ -7,7 +7,6 @@
 
 #include <stdint.h>
 
-#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,6 +14,7 @@
 #include "base/callback_forward.h"
 #include "base/callback_list.h"
 #include "base/compiler_specific.h"
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -24,6 +24,7 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/system/version_loader.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "components/prefs/pref_member.h"
@@ -40,6 +41,7 @@ namespace user_manager {
 class User;
 }
 
+class PrefChangeRegistrar;
 class PrefRegistrySimple;
 class PrefService;
 class Profile;
@@ -166,7 +168,9 @@ class DeviceStatusCollector {
                                  int min_day_trim_duration,
                                  int64_t max_day_key);
 
-  void AddActivePeriod(base::Time start, base::Time end);
+  void AddActivePeriod(base::Time start,
+                       base::Time end,
+                       const std::string& active_user_email);
 
   // Clears the cached hardware resource usage.
   void ClearCachedResourceUsage();
@@ -174,6 +178,8 @@ class DeviceStatusCollector {
   // Callbacks from chromeos::VersionLoader.
   void OnOSVersion(const std::string& version);
   void OnOSFirmware(const std::string& version);
+  void OnTpmVersion(
+      const chromeos::CryptohomeClient::TpmVersionInfo& tpm_version_info);
 
   void GetDeviceStatus(scoped_refptr<GetStatusState> state);
   void GetSessionStatus(scoped_refptr<GetStatusState> state);
@@ -215,6 +221,9 @@ class DeviceStatusCollector {
   // Callback invoked to update our cpu usage information.
   void ReceiveCPUStatistics(const std::string& statistics);
 
+  // Callback invoked when reporting users pref is changed.
+  void ReportingUsersChanged();
+
   PrefService* const local_state_;
 
   // The last time an idle state check was performed.
@@ -232,6 +241,7 @@ class DeviceStatusCollector {
 
   std::string os_version_;
   std::string firmware_version_;
+  chromeos::CryptohomeClient::TpmVersionInfo tpm_version_info_;
 
   struct ResourceUsage {
     // Sample of percentage-of-CPU-used.
@@ -244,7 +254,7 @@ class DeviceStatusCollector {
 
   // Samples of resource usage (contains multiple samples taken
   // periodically every kHardwareStatusSampleIntervalSeconds).
-  std::deque<ResourceUsage> resource_usage_;
+  base::circular_deque<ResourceUsage> resource_usage_;
 
   // Callback invoked to fetch information about the mounted disk volumes.
   VolumeInfoFetcher volume_info_fetcher_;
@@ -294,6 +304,8 @@ class DeviceStatusCollector {
       os_update_status_subscription_;
   std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
       running_kiosk_app_subscription_;
+
+  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
 
   // Task runner in the creation thread where responses are sent to.
   scoped_refptr<base::SequencedTaskRunner> task_runner_;

@@ -38,12 +38,6 @@ bool QuicSentPacketManagerPeer::GetUseNewRto(
 }
 
 // static
-bool QuicSentPacketManagerPeer::GetUndoRetransmits(
-    QuicSentPacketManager* sent_packet_manager) {
-  return sent_packet_manager->undo_pending_retransmits_;
-}
-
-// static
 void QuicSentPacketManagerPeer::SetPerspective(
     QuicSentPacketManager* sent_packet_manager,
     Perspective perspective) {
@@ -77,20 +71,15 @@ void QuicSentPacketManagerPeer::SetLossAlgorithm(
 }
 
 // static
-bool QuicSentPacketManagerPeer::HasPendingPackets(
-    const QuicSentPacketManager* sent_packet_manager) {
-  return sent_packet_manager->unacked_packets_.HasInFlightPackets();
+RttStats* QuicSentPacketManagerPeer::GetRttStats(
+    QuicSentPacketManager* sent_packet_manager) {
+  return &sent_packet_manager->rtt_stats_;
 }
 
 // static
-QuicTime QuicSentPacketManagerPeer::GetSentTime(
-    const QuicSentPacketManager* sent_packet_manager,
-    QuicPacketNumber packet_number) {
-  DCHECK(sent_packet_manager->unacked_packets_.IsUnacked(packet_number));
-
-  return sent_packet_manager->unacked_packets_
-      .GetTransmissionInfo(packet_number)
-      .sent_time;
+bool QuicSentPacketManagerPeer::HasPendingPackets(
+    const QuicSentPacketManager* sent_packet_manager) {
+  return sent_packet_manager->unacked_packets_.HasInFlightPackets();
 }
 
 // static
@@ -100,6 +89,11 @@ bool QuicSentPacketManagerPeer::IsRetransmission(
   DCHECK(HasRetransmittableFrames(sent_packet_manager, packet_number));
   if (!HasRetransmittableFrames(sent_packet_manager, packet_number)) {
     return false;
+  }
+  if (sent_packet_manager->session_decides_what_to_write()) {
+    return sent_packet_manager->unacked_packets_
+               .GetTransmissionInfo(packet_number)
+               .transmission_type != NOT_RETRANSMISSION;
   }
   for (auto transmission_info : sent_packet_manager->unacked_packets_) {
     if (transmission_info.retransmission == packet_number) {
@@ -124,6 +118,12 @@ QuicTime::Delta QuicSentPacketManagerPeer::GetRetransmissionDelay(
 }
 
 // static
+QuicTime::Delta QuicSentPacketManagerPeer::GetTailLossProbeDelay(
+    const QuicSentPacketManager* sent_packet_manager) {
+  return sent_packet_manager->GetTailLossProbeDelay();
+}
+
+// static
 bool QuicSentPacketManagerPeer::HasUnackedCryptoPackets(
     const QuicSentPacketManager* sent_packet_manager) {
   return sent_packet_manager->unacked_packets_.HasPendingCryptoPackets();
@@ -136,7 +136,7 @@ size_t QuicSentPacketManagerPeer::GetNumRetransmittablePackets(
   for (QuicUnackedPacketMap::const_iterator it =
            sent_packet_manager->unacked_packets_.begin();
        it != sent_packet_manager->unacked_packets_.end(); ++it) {
-    if (!it->retransmittable_frames.empty()) {
+    if (sent_packet_manager->unacked_packets_.HasRetransmittableFrames(*it)) {
       ++num_unacked_packets;
     }
   }
@@ -147,13 +147,6 @@ size_t QuicSentPacketManagerPeer::GetNumRetransmittablePackets(
 QuicByteCount QuicSentPacketManagerPeer::GetBytesInFlight(
     const QuicSentPacketManager* sent_packet_manager) {
   return sent_packet_manager->unacked_packets_.bytes_in_flight();
-}
-
-// static
-QuicSentPacketManager::NetworkChangeVisitor*
-QuicSentPacketManagerPeer::GetNetworkChangeVisitor(
-    const QuicSentPacketManager* sent_packet_manager) {
-  return sent_packet_manager->network_change_visitor_;
 }
 
 // static
@@ -208,6 +201,20 @@ bool QuicSentPacketManagerPeer::HasRetransmittableFrames(
 QuicUnackedPacketMap* QuicSentPacketManagerPeer::GetUnackedPacketMap(
     QuicSentPacketManager* sent_packet_manager) {
   return &sent_packet_manager->unacked_packets_;
+}
+
+// static
+void QuicSentPacketManagerPeer::DisablePacerBursts(
+    QuicSentPacketManager* sent_packet_manager) {
+  sent_packet_manager->pacing_sender_.burst_tokens_ = 0;
+  sent_packet_manager->pacing_sender_.initial_burst_size_ = 0;
+}
+
+// static
+void QuicSentPacketManagerPeer::SetNextPacedPacketTime(
+    QuicSentPacketManager* sent_packet_manager,
+    QuicTime time) {
+  sent_packet_manager->pacing_sender_.ideal_next_packet_send_time_ = time;
 }
 
 }  // namespace test

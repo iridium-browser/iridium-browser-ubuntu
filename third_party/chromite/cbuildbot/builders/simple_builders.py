@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,6 +8,7 @@
 from __future__ import print_function
 
 import collections
+import traceback
 
 from chromite.cbuildbot import afdo
 from chromite.cbuildbot import manifest_version
@@ -18,18 +20,21 @@ from chromite.cbuildbot.stages import build_stages
 from chromite.cbuildbot.stages import chrome_stages
 from chromite.cbuildbot.stages import completion_stages
 from chromite.cbuildbot.stages import generic_stages
+from chromite.cbuildbot.stages import handle_changes_stages
 from chromite.cbuildbot.stages import release_stages
 from chromite.cbuildbot.stages import report_stages
 from chromite.cbuildbot.stages import scheduler_stages
 from chromite.cbuildbot.stages import sync_stages
+from chromite.cbuildbot.stages import tast_test_stages
 from chromite.cbuildbot.stages import test_stages
+from chromite.cbuildbot.stages import vm_test_stages
 from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cros_logging as logging
+from chromite.lib import failures_lib
 from chromite.lib import patch as cros_patch
 from chromite.lib import parallel
 from chromite.lib import results_lib
-from chromite.lib import failures_lib
 
 
 # TODO: SimpleBuilder needs to be broken up big time.
@@ -91,7 +96,6 @@ class SimpleBuilder(generic_builders.Builder):
       builder_run: BuilderRun object for these background stages.
       board: Board name.
     """
-    parallel_stages = []
 
     if not builder_run.options.archive:
       logging.warning("HWTests were requested but could not be run because "
@@ -99,38 +103,103 @@ class SimpleBuilder(generic_builders.Builder):
                       "option in the builder config is set to True.")
       return
 
-    models = [board]
+    # For non-uni builds, we don't pass a model (just board)
+    models = [config_lib.ModelTestConfig(None, board)]
 
+    unibuild = False
     if builder_run.config.models:
       models = builder_run.config.models
+      unibuild = True
 
+    parallel_stages = []
     for suite_config in builder_run.config.hw_tests:
       # Even for blocking stages, all models can still be run in parallel since
       # it will still block the next stage from executing.
       for model in models:
-        stage_class = None
-        if suite_config.async:
-          stage_class = test_stages.ASyncHWTestStage
-        elif suite_config.suite == constants.HWTEST_AU_SUITE:
-          stage_class = test_stages.AUTestStage
-        else:
-          stage_class = test_stages.HWTestStage
-
-        new_stage = self._GetStageInstance(stage_class,
-                                           board,
-                                           model,
-                                           suite_config,
-                                           builder_run=builder_run)
-        parallel_stages.append(new_stage)
+        new_stage = self._GetHWTestStage(
+            builder_run, board, model, suite_config)
+        if new_stage:
+          parallel_stages.append(new_stage)
 
       # Please see docstring for blocking in the HWTestConfig for more
       # information on this behavior.
-      if suite_config.blocking:
+      if suite_config.blocking and not unibuild:
         self._RunParallelStages(parallel_stages)
         parallel_stages = []
 
     if parallel_stages:
       self._RunParallelStages(parallel_stages)
+
+  def _GetHWTestStage(self, builder_run, board, model, suite_config):
+    """Gets the correct hw test stage for a given test suite and model.
+
+    Args:
+      builder_run: BuilderRun object for these background stages.
+      board: board overlay name
+      model: ModelTestConfig object to test against.
+      suite_config: HWTestConfig object that defines the test suite.
+
+    Returns:
+      The test stage or None if the test suite was filtered for the model.
+    """
+    result = None
+
+    # If test_suites doesn't exist, then there is no filter.
+    # Whereas, an empty array will act as a comprehensive filter.
+    if (model.test_suites is None
+        or suite_config.suite in model.test_suites):
+      stage_class = None
+      if suite_config.async:
+        stage_class = test_stages.ASyncHWTestStage
+      else:
+        stage_class = test_stages.HWTestStage
+
+      result = self._GetStageInstance(stage_class,
+                                      board,
+                                      model.name,
+                                      suite_config,
+                                      lab_board_name=model.lab_board_name,
+                                      builder_run=builder_run)
+    return result
+
+  def _RunVMTests(self, builder_run, board):
+    """Run VM test stages for the specified board.
+
+    Args:
+      builder_run: BuilderRun object for stages.
+      board: String containing board name.
+    """
+    config = builder_run.config
+    except_infos = []
+
+    try:
+      if config.vm_test_runs > 1:
+        # Run the VMTests multiple times to see if they fail.
+        self._RunStage(generic_stages.RepeatStage, config.vm_test_runs,
+                       vm_test_stages.VMTestStage, board,
+                       builder_run=builder_run)
+      else:
+        # Retry VM-based tests in case failures are flaky.
+        self._RunStage(generic_stages.RetryStage, constants.VM_NUM_RETRIES,
+                       vm_test_stages.VMTestStage, board,
+                       builder_run=builder_run)
+    except Exception as e:
+      except_infos.extend(
+          failures_lib.CreateExceptInfo(e, traceback.format_exc()))
+
+    # Run stages serially to avoid issues encountered when running VMs (or the
+    # devserver) in parallel: https://crbug.com/779267
+    if config.tast_vm_tests:
+      try:
+        self._RunStage(generic_stages.RetryStage, constants.VM_NUM_RETRIES,
+                       tast_test_stages.TastVMTestStage, board,
+                       builder_run=builder_run)
+      except Exception as e:
+        except_infos.extend(
+            failures_lib.CreateExceptInfo(e, traceback.format_exc()))
+
+    if except_infos:
+      raise failures_lib.CompoundFailure('VM tests failed', except_infos)
 
   def _RunDebugSymbolStages(self, builder_run, board):
     """Run debug-related stages for the specified board.
@@ -207,20 +276,12 @@ class SimpleBuilder(generic_builders.Builder):
 
     stage_list += [[chrome_stages.SimpleChromeArtifactsStage, board]]
 
-    if config.vm_test_runs > 1:
-      # Run the VMTests multiple times to see if they fail.
-      stage_list += [
-          [generic_stages.RepeatStage, config.vm_test_runs,
-           test_stages.VMTestStage, board]]
-    else:
-      # Give the VMTests one retry attempt in case failures are flaky.
-      stage_list += [[generic_stages.RetryStage, 1, test_stages.VMTestStage,
-                      board]]
-
     if config.gce_tests:
-      # Give the GCETests one retry attempt in case failures are flaky.
-      stage_list += [[generic_stages.RetryStage, 1, test_stages.GCETestStage,
-                      board]]
+      stage_list += [[generic_stages.RetryStage, constants.VM_NUM_RETRIES,
+                      vm_test_stages.GCETestStage, board]]
+
+    if config.moblab_vm_tests:
+      stage_list += [[vm_test_stages.MoblabVMTestStage, board]]
 
     if config.afdo_generate:
       stage_list += [[afdo_stages.AFDODataGenerateStage, board]]
@@ -247,6 +308,7 @@ class SimpleBuilder(generic_builders.Builder):
     parallel.RunParallelSteps([
         lambda: self._RunParallelStages(stage_objs + [archive_stage]),
         lambda: self._RunHWTests(builder_run, board),
+        lambda: self._RunVMTests(builder_run, board),
         lambda: self._RunDebugSymbolStages(builder_run, board),
     ])
 
@@ -287,7 +349,6 @@ class SimpleBuilder(generic_builders.Builder):
     self._RunStage(build_stages.RegenPortageCacheStage)
     self.RunSetupBoard()
     self._RunStage(chrome_stages.SyncChromeStage)
-    self._RunStage(chrome_stages.PatchChromeStage)
     self._RunStage(android_stages.UprevAndroidStage)
     self._RunStage(android_stages.AndroidMetadataStage)
 
@@ -347,7 +408,9 @@ class SimpleBuilder(generic_builders.Builder):
 
           if (builder_run.config.afdo_generate_min and
               builder_run.config.afdo_update_ebuild):
-            self._RunStage(afdo_stages.AFDOUpdateEbuildStage,
+            self._RunStage(afdo_stages.AFDOUpdateChromeEbuildStage,
+                           builder_run=builder_run)
+            self._RunStage(afdo_stages.AFDOUpdateKernelEbuildStage,
                            builder_run=builder_run)
 
         # Kick off our background stages.
@@ -451,16 +514,28 @@ class DistributedBuilder(SimpleBuilder):
       build_finished: Whether the build completed. A build can be successful
         without completing if it raises ExitEarlyException.
     """
-    completion_stage = self._GetStageInstance(self.completion_stage_class,
-                                              self.sync_stage,
-                                              was_build_successful)
-    self._completion_stage = completion_stage
+    self._completion_stage = self._GetStageInstance(
+        self.completion_stage_class, self.sync_stage, was_build_successful)
     completion_successful = False
     try:
-      completion_stage.Run()
+      self._completion_stage.Run()
+      self._HandleChanges()
       completion_successful = True
+    except failures_lib.StepFailure as e:
+      if isinstance(e, completion_stages.ImportantBuilderFailedException):
+        # When ImportantBuilderFailedException is the only exception, the master
+        # build can still submit partial changes (CLs).
+        self._HandleChanges()
+
+      raise
     finally:
       self._Publish(was_build_successful, build_finished, completion_successful)
+
+  def _HandleChanges(self):
+    """Handle changes picked up by the validation_pool in the sync stage."""
+    if config_lib.IsMasterCQ(self._run.config):
+      self._RunStage(handle_changes_stages.CommitQueueHandleChangesStage,
+                     self.sync_stage, self._completion_stage)
 
   def _Publish(self, was_build_successful, build_finished,
                completion_successful):
@@ -477,15 +552,16 @@ class DistributedBuilder(SimpleBuilder):
     updateEbuild_successful = False
     try:
       # When (afdo_update_ebuild and not afdo_generate_min) is True,
-      # if completion_stage passed, need to run AFDOUpdateEbuildStage to
-      # prepare for pushing commits to masters;
+      # if completion_stage passed, need to run
+      # AFDOUpdateChromeEbuildStage to prepare for pushing commits to masters;
       # if it's a master_chrome_pfq build and compeletion_stage failed,
-      # need to run AFDOUpdateEbuildStage to prepare for pushing commits
+      # need to run AFDOUpdateChromeEbuildStage to prepare for pushing commits
       # to a staging branch.
       if ((completion_successful or is_master_chrome_pfq) and
           self._run.config.afdo_update_ebuild and
           not self._run.config.afdo_generate_min):
-        self._RunStage(afdo_stages.AFDOUpdateEbuildStage)
+        self._RunStage(afdo_stages.AFDOUpdateChromeEbuildStage)
+        self._RunStage(afdo_stages.AFDOUpdateKernelEbuildStage)
         updateEbuild_successful = True
     finally:
       if self._run.config.master:
@@ -493,8 +569,16 @@ class DistributedBuilder(SimpleBuilder):
       if self._run.config.push_overlays:
         publish = (was_build_successful and completion_successful and
                    build_finished)
+        if is_master_chrome_pfq:
+          if publish:
+            self._RunStage(completion_stages.UpdateChromeosLKGMStage)
+          else:
+            logging.info('Skipping UpdateChromeosLKGMStage, '
+                         'build_successful=%d completion_successful=%d '
+                         'build_finished=%d', was_build_successful,
+                         completion_successful, build_finished)
         # If this build is master chrome pfq, completion_stage failed,
-        # AFDOUpdateEbuildStage passed, and the necessary build stages
+        # AFDOUpdateChromeEbuildStage passed, and the necessary build stages
         # passed, it means publish is False and we need to stage the
         # push to another branch instead of master.
         stage_push = (is_master_chrome_pfq and

@@ -4,12 +4,13 @@
 
 #include "ios/chrome/browser/google/google_logo_service_factory.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "ios/chrome/browser/browser_state/browser_state_otr_helper.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/google/google_logo_service.h"
+#include "ios/chrome/browser/search_engines/template_url_service_factory.h"
+#include "net/url_request/url_request_context_getter.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -30,7 +31,9 @@ GoogleLogoServiceFactory* GoogleLogoServiceFactory::GetInstance() {
 GoogleLogoServiceFactory::GoogleLogoServiceFactory()
     : BrowserStateKeyedServiceFactory(
           "GoogleLogoService",
-          BrowserStateDependencyManager::GetInstance()) {}
+          BrowserStateDependencyManager::GetInstance()) {
+  DependsOn(ios::TemplateURLServiceFactory::GetInstance());
+}
 
 GoogleLogoServiceFactory::~GoogleLogoServiceFactory() {}
 
@@ -38,7 +41,9 @@ std::unique_ptr<KeyedService> GoogleLogoServiceFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
   ios::ChromeBrowserState* browser_state =
       ios::ChromeBrowserState::FromBrowserState(context);
-  return base::MakeUnique<GoogleLogoService>(browser_state);
+  return std::make_unique<GoogleLogoService>(
+      ios::TemplateURLServiceFactory::GetForBrowserState(browser_state),
+      browser_state->GetRequestContext());
 }
 
 web::BrowserState* GoogleLogoServiceFactory::GetBrowserStateToUse(

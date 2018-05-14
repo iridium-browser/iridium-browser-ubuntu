@@ -14,7 +14,9 @@
 #include "base/strings/string16.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chrome/browser/offline_pages/offline_page_utils.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
+#include "components/offline_pages/core/archive_validator.h"
 #include "components/security_state/core/security_state.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
@@ -24,8 +26,6 @@
 
 namespace offline_pages {
 namespace {
-const base::FilePath::CharType kMHTMLExtension[] = FILE_PATH_LITERAL("mhtml");
-
 void DeleteFileOnFileThread(const base::FilePath& file_path,
                             const base::Closure& callback) {
   base::PostTaskWithTraitsAndReply(
@@ -33,6 +33,17 @@ void DeleteFileOnFileThread(const base::FilePath& file_path,
       base::BindOnce(base::IgnoreResult(&base::DeleteFile), file_path,
                      false /* recursive */),
       callback);
+}
+
+// Compute a SHA256 digest using a background thread. The computed digest will
+// be returned in the callback parameter. If it is empty, the digest calculation
+// fails.
+void ComputeDigestOnFileThread(
+    const base::FilePath& file_path,
+    const base::Callback<void(const std::string&)>& callback) {
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::Bind(&ArchiveValidator::ComputeDigest, file_path), callback);
 }
 }  // namespace
 
@@ -107,7 +118,8 @@ void OfflinePageMHTMLArchiver::GenerateMHTML(
   GURL url(web_contents_->GetLastCommittedURL());
   base::string16 title(web_contents_->GetTitle());
   base::FilePath file_path(
-      archives_dir.Append(base::GenerateGUID()).AddExtension(kMHTMLExtension));
+      archives_dir.Append(base::GenerateGUID())
+          .AddExtension(OfflinePageUtils::kMHTMLExtension));
   content::MHTMLGenerationParams params(file_path);
   params.use_binary_encoding = true;
   params.remove_popup_overlay = create_archive_params.remove_popup_overlay;
@@ -126,16 +138,32 @@ void OfflinePageMHTMLArchiver::OnGenerateMHTMLDone(
     const base::string16& title,
     int64_t file_size) {
   if (file_size < 0) {
-    DeleteFileOnFileThread(
-        file_path, base::Bind(&OfflinePageMHTMLArchiver::ReportFailure,
-                              weak_ptr_factory_.GetWeakPtr(),
-                              ArchiverResult::ERROR_ARCHIVE_CREATION_FAILED));
-  } else {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(callback_, this, ArchiverResult::SUCCESSFULLY_CREATED, url,
-                   file_path, title, file_size));
+    DeleteFileAndReportFailure(file_path,
+                               ArchiverResult::ERROR_ARCHIVE_CREATION_FAILED);
+    return;
   }
+
+  ComputeDigestOnFileThread(
+      file_path, base::Bind(&OfflinePageMHTMLArchiver::OnComputeDigestDone,
+                            weak_ptr_factory_.GetWeakPtr(), url, file_path,
+                            title, file_size));
+}
+
+void OfflinePageMHTMLArchiver::OnComputeDigestDone(
+    const GURL& url,
+    const base::FilePath& file_path,
+    const base::string16& title,
+    int64_t file_size,
+    const std::string& digest) {
+  if (digest.empty()) {
+    DeleteFileAndReportFailure(file_path,
+                               ArchiverResult::ERROR_DIGEST_CALCULATION_FAILED);
+    return;
+  }
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(callback_, this, ArchiverResult::SUCCESSFULLY_CREATED, url,
+                 file_path, title, file_size, digest));
 }
 
 bool OfflinePageMHTMLArchiver::HasConnectionSecurityError() {
@@ -153,11 +181,19 @@ content::PageType OfflinePageMHTMLArchiver::GetPageType() {
   return web_contents_->GetController().GetVisibleEntry()->GetPageType();
 }
 
+void OfflinePageMHTMLArchiver::DeleteFileAndReportFailure(
+    const base::FilePath& file_path,
+    ArchiverResult result) {
+  DeleteFileOnFileThread(file_path,
+                         base::Bind(&OfflinePageMHTMLArchiver::ReportFailure,
+                                    weak_ptr_factory_.GetWeakPtr(), result));
+}
+
 void OfflinePageMHTMLArchiver::ReportFailure(ArchiverResult result) {
   DCHECK(result != ArchiverResult::SUCCESSFULLY_CREATED);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(callback_, this, result, GURL(), base::FilePath(),
-                            base::string16(), 0));
+                            base::string16(), 0, std::string()));
 }
 
 }  // namespace offline_pages

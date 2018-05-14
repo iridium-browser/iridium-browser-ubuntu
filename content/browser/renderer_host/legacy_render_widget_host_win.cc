@@ -18,12 +18,13 @@
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
 #include "content/public/common/content_switches.h"
 #include "ui/accessibility/platform/ax_system_caret_win.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/base/view_prop.h"
+#include "ui/base/win/direct_manipulation.h"
 #include "ui/base/win/internal_constants.h"
 #include "ui/base/win/window_event_target.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/win/direct_manipulation.h"
 
 namespace content {
 
@@ -122,15 +123,17 @@ LegacyRenderWidgetHostHWND::~LegacyRenderWidgetHostHWND() {
 }
 
 bool LegacyRenderWidgetHostHWND::Init() {
-  RegisterTouchWindow(hwnd(), TWF_WANTPALM);
+  // Only register a touch window if we are using WM_TOUCH.
+  if (!features::IsUsingWMPointerForTouch())
+    RegisterTouchWindow(hwnd(), TWF_WANTPALM);
 
   HRESULT hr = ::CreateStdAccessibleObject(hwnd(), OBJID_WINDOW,
                                            IID_PPV_ARGS(&window_accessible_));
   DCHECK(SUCCEEDED(hr));
 
-  AccessibilityMode mode =
+  ui::AXMode mode =
       BrowserAccessibilityStateImpl::GetInstance()->accessibility_mode();
-  if (!mode.has_mode(AccessibilityMode::kNativeAPIs)) {
+  if (!mode.has_mode(ui::AXMode::kNativeAPIs)) {
     // Attempt to detect screen readers or other clients who want full
     // accessibility support, by seeing if they respond to this event.
     NotifyWinEvent(EVENT_SYSTEM_ALERT, hwnd(), kIdScreenReaderHoneyPot,
@@ -140,7 +143,7 @@ bool LegacyRenderWidgetHostHWND::Init() {
   // Direct Manipulation is enabled on Windows 10+. The CreateInstance function
   // returns NULL if Direct Manipulation is not available.
   direct_manipulation_helper_ =
-      gfx::win::DirectManipulationHelper::CreateInstance();
+      ui::win::DirectManipulationHelper::CreateInstance();
   if (direct_manipulation_helper_)
     direct_manipulation_helper_->Initialize(hwnd());
 
@@ -175,7 +178,7 @@ LRESULT LegacyRenderWidgetHostHWND::OnGetObject(UINT message,
     // enable basic accessibility support. (Full screen reader support is
     // detected later when specific more advanced APIs are accessed.)
     BrowserAccessibilityStateImpl::GetInstance()->AddAccessibilityModeFlags(
-        AccessibilityMode::kNativeAPIs | AccessibilityMode::kWebContents);
+        ui::AXMode::kNativeAPIs | ui::AXMode::kWebContents);
     return static_cast<LRESULT>(0L);
   }
 
@@ -194,7 +197,7 @@ LRESULT LegacyRenderWidgetHostHWND::OnGetObject(UINT message,
     if (!manager || !manager->GetRoot())
       return static_cast<LRESULT>(0L);
 
-    base::win::ScopedComPtr<IAccessible> root(
+    Microsoft::WRL::ComPtr<IAccessible> root(
         ToBrowserAccessibilityWin(manager->GetRoot())->GetCOM());
     return LresultFromObject(IID_IAccessible, w_param,
                              static_cast<IAccessible*>(root.Detach()));
@@ -202,7 +205,7 @@ LRESULT LegacyRenderWidgetHostHWND::OnGetObject(UINT message,
 
   if (static_cast<DWORD>(OBJID_CARET) == obj_id && host_->HasFocus()) {
     DCHECK(ax_system_caret_);
-    base::win::ScopedComPtr<IAccessible> ax_system_caret_accessible =
+    Microsoft::WRL::ComPtr<IAccessible> ax_system_caret_accessible =
         ax_system_caret_->GetCaret();
     return LresultFromObject(IID_IAccessible, w_param,
                              ax_system_caret_accessible.Detach());

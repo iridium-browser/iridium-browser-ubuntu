@@ -45,16 +45,16 @@ base::ThreadLocalPointer<MessageLoop>* GetTLSMessageLoop() {
   static auto* lazy_tls_ptr = new base::ThreadLocalPointer<MessageLoop>();
   return lazy_tls_ptr;
 }
-MessageLoop::MessagePumpFactory* message_pump_for_ui_factory_ = NULL;
+MessageLoop::MessagePumpFactory* message_pump_for_ui_factory_ = nullptr;
 
 #if defined(OS_IOS)
-typedef MessagePumpIOSForIO MessagePumpForIO;
+using MessagePumpForIO = MessagePumpIOSForIO;
 #elif defined(OS_NACL_SFI)
-typedef MessagePumpDefault MessagePumpForIO;
+using MessagePumpForIO = MessagePumpDefault;
 #elif defined(OS_FUCHSIA)
-typedef MessagePumpFuchsia MessagePumpForIO;
+using MessagePumpForIO = MessagePumpFuchsia;
 #elif defined(OS_POSIX)
-typedef MessagePumpLibevent MessagePumpForIO;
+using MessagePumpForIO = MessagePumpLibevent;
 #endif
 
 #if !defined(OS_NACL_SFI)
@@ -71,14 +71,11 @@ std::unique_ptr<MessagePump> ReturnPump(std::unique_ptr<MessagePump> pump) {
 
 //------------------------------------------------------------------------------
 
-MessageLoop::TaskObserver::TaskObserver() {
-}
+MessageLoop::TaskObserver::TaskObserver() = default;
 
-MessageLoop::TaskObserver::~TaskObserver() {
-}
+MessageLoop::TaskObserver::~TaskObserver() = default;
 
-MessageLoop::DestructionObserver::~DestructionObserver() {
-}
+MessageLoop::DestructionObserver::~DestructionObserver() = default;
 
 //------------------------------------------------------------------------------
 
@@ -88,7 +85,7 @@ MessageLoop::MessageLoop(Type type)
 }
 
 MessageLoop::MessageLoop(std::unique_ptr<MessagePump> pump)
-    : MessageLoop(TYPE_CUSTOM, BindOnce(&ReturnPump, Passed(&pump))) {
+    : MessageLoop(TYPE_CUSTOM, BindOnce(&ReturnPump, std::move(pump))) {
   BindToCurrentThread();
 }
 
@@ -105,8 +102,7 @@ MessageLoop::~MessageLoop() {
   // There should be no active RunLoops on this thread, unless this MessageLoop
   // isn't bound to the current thread (see other condition at the top of this
   // method).
-  DCHECK((!pump_ && current() != this) ||
-         !run_loop_client_->GetTopMostRunLoop());
+  DCHECK((!pump_ && current() != this) || !RunLoop::IsRunningOnCurrentThread());
 #endif
 
 #if defined(OS_WIN)
@@ -119,16 +115,15 @@ MessageLoop::~MessageLoop() {
   // tasks.  Normally, we should only pass through this loop once or twice.  If
   // we end up hitting the loop limit, then it is probably due to one task that
   // is being stubborn.  Inspect the queues to see who is left.
-  bool did_work;
+  bool tasks_remain;
   for (int i = 0; i < 100; ++i) {
     DeletePendingTasks();
-    ReloadWorkQueue();
     // If we end up with empty queues, then break out of the loop.
-    did_work = DeletePendingTasks();
-    if (!did_work)
+    tasks_remain = incoming_task_queue_->triage_tasks().HasTasks();
+    if (!tasks_remain)
       break;
   }
-  DCHECK(!did_work);
+  DCHECK(!tasks_remain);
 
   // Let interested parties have one last shot at accessing this.
   for (auto& observer : destruction_observers_)
@@ -138,9 +133,9 @@ MessageLoop::~MessageLoop() {
 
   // Tell the incoming queue that we are dying.
   incoming_task_queue_->WillDestroyCurrentMessageLoop();
-  incoming_task_queue_ = NULL;
-  unbound_task_runner_ = NULL;
-  task_runner_ = NULL;
+  incoming_task_queue_ = nullptr;
+  unbound_task_runner_ = nullptr;
+  task_runner_ = nullptr;
 
   // OK, now make it so that no one can find us.
   if (current() == this)
@@ -168,11 +163,11 @@ bool MessageLoop::InitMessagePumpForUIFactory(MessagePumpFactory* factory) {
 std::unique_ptr<MessagePump> MessageLoop::CreateMessagePumpForType(Type type) {
 // TODO(rvargas): Get rid of the OS guards.
 #if defined(USE_GLIB) && !defined(OS_NACL)
-  typedef MessagePumpGlib MessagePumpForUI;
+  using MessagePumpForUI = MessagePumpGlib;
 #elif (defined(OS_LINUX) && !defined(OS_NACL)) || defined(OS_BSD)
-  typedef MessagePumpLibevent MessagePumpForUI;
+  using MessagePumpForUI = MessagePumpLibevent;
 #elif defined(OS_FUCHSIA)
-  typedef MessagePumpFuchsia MessagePumpForUI;
+  using MessagePumpForUI = MessagePumpFuchsia;
 #endif
 
 #if defined(OS_IOS) || defined(OS_MACOSX)
@@ -183,15 +178,6 @@ std::unique_ptr<MessagePump> MessageLoop::CreateMessagePumpForType(Type type) {
 #define MESSAGE_PUMP_UI std::unique_ptr<MessagePump>()
 #else
 #define MESSAGE_PUMP_UI std::unique_ptr<MessagePump>(new MessagePumpForUI())
-#endif
-
-#if defined(OS_MACOSX)
-  // Use an OS native runloop on Mac to support timer coalescing.
-#define MESSAGE_PUMP_DEFAULT \
-  std::unique_ptr<MessagePump>(new MessagePumpCFRunLoop())
-#else
-#define MESSAGE_PUMP_DEFAULT \
-  std::unique_ptr<MessagePump>(new MessagePumpDefault())
 #endif
 
   if (type == MessageLoop::TYPE_UI) {
@@ -208,7 +194,12 @@ std::unique_ptr<MessagePump> MessageLoop::CreateMessagePumpForType(Type type) {
 #endif
 
   DCHECK_EQ(MessageLoop::TYPE_DEFAULT, type);
-  return MESSAGE_PUMP_DEFAULT;
+#if defined(OS_IOS)
+  // On iOS, a native runloop is always required to pump system work.
+  return std::make_unique<MessagePumpCFRunLoop>();
+#else
+  return std::make_unique<MessagePumpDefault>();
+#endif
 }
 
 void MessageLoop::AddDestructionObserver(
@@ -223,31 +214,13 @@ void MessageLoop::RemoveDestructionObserver(
   destruction_observers_.RemoveObserver(destruction_observer);
 }
 
-void MessageLoop::QuitWhenIdle() {
-  DCHECK_EQ(this, current());
-  DCHECK(run_loop_client_->GetTopMostRunLoop())
-      << "Must be inside Run to call QuitWhenIdle";
-  run_loop_client_->GetTopMostRunLoop()->QuitWhenIdle();
-}
-
-void MessageLoop::QuitNow() {
-  DCHECK_EQ(this, current());
-  DCHECK(run_loop_client_->GetTopMostRunLoop())
-      << "Must be inside Run to call Quit";
-  pump_->Quit();
-}
-
 bool MessageLoop::IsType(Type type) const {
   return type_ == type;
 }
 
-static void QuitCurrentWhenIdle() {
-  MessageLoop::current()->QuitWhenIdle();
-}
-
 // static
 Closure MessageLoop::QuitWhenIdleClosure() {
-  return Bind(&QuitCurrentWhenIdle);
+  return Bind(&RunLoop::QuitCurrentWhenIdleDeprecated);
 }
 
 void MessageLoop::SetNestableTasksAllowed(bool allowed) {
@@ -255,14 +228,14 @@ void MessageLoop::SetNestableTasksAllowed(bool allowed) {
     CHECK(RunLoop::IsNestingAllowedOnCurrentThread());
 
     // Kick the native pump just in case we enter a OS-driven nested message
-    // loop.
+    // loop that does not go through RunLoop::Run().
     pump_->ScheduleWork();
   }
-  nestable_tasks_allowed_ = allowed;
+  task_execution_allowed_ = allowed;
 }
 
 bool MessageLoop::NestableTasksAllowed() const {
-  return nestable_tasks_allowed_;
+  return task_execution_allowed_;
 }
 
 // TODO(gab): Migrate TaskObservers to RunLoop as part of separating concerns
@@ -280,14 +253,18 @@ void MessageLoop::RemoveTaskObserver(TaskObserver* task_observer) {
   task_observers_.RemoveObserver(task_observer);
 }
 
-bool MessageLoop::HasHighResolutionTasks() {
-  return incoming_task_queue_->HasHighResolutionTasks();
-}
-
 bool MessageLoop::IsIdleForTesting() {
-  // We only check the incoming queue, since we don't want to lock the work
-  // queue.
-  return incoming_task_queue_->IsIdleForTesting();
+  // Have unprocessed tasks? (this reloads the work queue if necessary)
+  if (incoming_task_queue_->triage_tasks().HasTasks())
+    return false;
+
+  // Have unprocessed deferred tasks which can be processed at this run-level?
+  if (incoming_task_queue_->deferred_tasks().HasTasks() &&
+      !RunLoop::IsNestedOnCurrentThread()) {
+    return false;
+  }
+
+  return true;
 }
 
 //------------------------------------------------------------------------------
@@ -301,18 +278,11 @@ std::unique_ptr<MessageLoop> MessageLoop::CreateUnbound(
 
 MessageLoop::MessageLoop(Type type, MessagePumpFactoryCallback pump_factory)
     : type_(type),
-#if defined(OS_WIN)
-      pending_high_res_tasks_(0),
-      in_high_res_mode_(false),
-#endif
-      nestable_tasks_allowed_(true),
       pump_factory_(std::move(pump_factory)),
-      current_pending_task_(nullptr),
       incoming_task_queue_(new internal::IncomingTaskQueue(this)),
       unbound_task_runner_(
           new internal::MessageLoopTaskRunner(incoming_task_queue_)),
-      task_runner_(unbound_task_runner_),
-      thread_id_(kInvalidThreadId) {
+      task_runner_(unbound_task_runner_) {
   // If type is TYPE_CUSTOM non-null pump_factory must be given.
   DCHECK(type_ != TYPE_CUSTOM || !pump_factory_.is_null());
 }
@@ -333,11 +303,11 @@ void MessageLoop::BindToCurrentThread() {
   SetThreadTaskRunnerHandle();
   thread_id_ = PlatformThread::CurrentId();
 
-  scoped_set_sequence_local_storage_map_for_current_thread_ =
-      MakeUnique<internal::ScopedSetSequenceLocalStorageMapForCurrentThread>(
-          &sequence_local_storage_map_);
+  scoped_set_sequence_local_storage_map_for_current_thread_ = std::make_unique<
+      internal::ScopedSetSequenceLocalStorageMapForCurrentThread>(
+      &sequence_local_storage_map_);
 
-  run_loop_client_ = RunLoop::RegisterDelegateForCurrentThread(this);
+  RunLoop::RegisterDelegateForCurrentThread(this);
 }
 
 std::string MessageLoop::GetThreadName() const {
@@ -364,14 +334,28 @@ void MessageLoop::ClearTaskRunnerForTesting() {
   thread_task_runner_handle_.reset();
 }
 
-void MessageLoop::Run() {
+void MessageLoop::Run(bool application_tasks_allowed) {
   DCHECK_EQ(this, current());
-  pump_->Run(this);
+  if (application_tasks_allowed && !task_execution_allowed_) {
+    // Allow nested task execution as explicitly requested.
+    DCHECK(RunLoop::IsNestedOnCurrentThread());
+    task_execution_allowed_ = true;
+    pump_->Run(this);
+    task_execution_allowed_ = false;
+  } else {
+    pump_->Run(this);
+  }
 }
 
 void MessageLoop::Quit() {
   DCHECK_EQ(this, current());
-  QuitNow();
+  pump_->Quit();
+}
+
+void MessageLoop::EnsureWorkScheduled() {
+  DCHECK_EQ(this, current());
+  if (incoming_task_queue_->triage_tasks().HasTasks())
+    pump_->ScheduleWork();
 }
 
 void MessageLoop::SetThreadTaskRunnerHandle() {
@@ -383,53 +367,43 @@ void MessageLoop::SetThreadTaskRunnerHandle() {
 }
 
 bool MessageLoop::ProcessNextDelayedNonNestableTask() {
-  if (run_loop_client_->IsNested())
+  if (RunLoop::IsNestedOnCurrentThread())
     return false;
 
-  while (!deferred_non_nestable_work_queue_.empty()) {
-    PendingTask pending_task =
-        std::move(deferred_non_nestable_work_queue_.front());
-    deferred_non_nestable_work_queue_.pop();
-
+  while (incoming_task_queue_->deferred_tasks().HasTasks()) {
+    PendingTask pending_task = incoming_task_queue_->deferred_tasks().Pop();
     if (!pending_task.task.IsCancelled()) {
       RunTask(&pending_task);
       return true;
     }
-
-#if defined(OS_WIN)
-    DecrementHighResTaskCountIfNeeded(pending_task);
-#endif
   }
 
   return false;
 }
 
 void MessageLoop::RunTask(PendingTask* pending_task) {
-  DCHECK(nestable_tasks_allowed_);
+  DCHECK(task_execution_allowed_);
   current_pending_task_ = pending_task;
 
-#if defined(OS_WIN)
-  DecrementHighResTaskCountIfNeeded(*pending_task);
-#endif
-
   // Execute the task and assume the worst: It is probably not reentrant.
-  nestable_tasks_allowed_ = false;
+  task_execution_allowed_ = false;
 
   TRACE_TASK_EXECUTION("MessageLoop::RunTask", *pending_task);
 
   for (auto& observer : task_observers_)
     observer.WillProcessTask(*pending_task);
-  task_annotator_.RunTask("MessageLoop::PostTask", pending_task);
+  incoming_task_queue_->RunTask(pending_task);
   for (auto& observer : task_observers_)
     observer.DidProcessTask(*pending_task);
 
-  nestable_tasks_allowed_ = true;
+  task_execution_allowed_ = true;
 
   current_pending_task_ = nullptr;
 }
 
 bool MessageLoop::DeferOrRunPendingTask(PendingTask pending_task) {
-  if (pending_task.nestable || !run_loop_client_->IsNested()) {
+  if (pending_task.nestable == Nestable::kNestable ||
+      !RunLoop::IsNestedOnCurrentThread()) {
     RunTask(&pending_task);
     // Show that we ran a task (Note: a new one might arrive as a
     // consequence!).
@@ -438,71 +412,17 @@ bool MessageLoop::DeferOrRunPendingTask(PendingTask pending_task) {
 
   // We couldn't run the task now because we're in a nested run loop
   // and the task isn't nestable.
-  deferred_non_nestable_work_queue_.push(std::move(pending_task));
+  incoming_task_queue_->deferred_tasks().Push(std::move(pending_task));
   return false;
 }
 
-void MessageLoop::AddToDelayedWorkQueue(PendingTask pending_task) {
-  // Move to the delayed work queue.
-  delayed_work_queue_.push(std::move(pending_task));
-}
-
-bool MessageLoop::SweepDelayedWorkQueueAndReturnTrueIfStillHasWork() {
-  while (!delayed_work_queue_.empty()) {
-    const PendingTask& pending_task = delayed_work_queue_.top();
-    if (!pending_task.task.IsCancelled())
-      return true;
-
-#if defined(OS_WIN)
-    DecrementHighResTaskCountIfNeeded(pending_task);
-#endif
-    delayed_work_queue_.pop();
-  }
-  return false;
-}
-
-bool MessageLoop::DeletePendingTasks() {
-  bool did_work = !work_queue_.empty();
-  while (!work_queue_.empty()) {
-    PendingTask pending_task = std::move(work_queue_.front());
-    work_queue_.pop();
-    if (!pending_task.delayed_run_time.is_null()) {
-      // We want to delete delayed tasks in the same order in which they would
-      // normally be deleted in case of any funny dependencies between delayed
-      // tasks.
-      AddToDelayedWorkQueue(std::move(pending_task));
-    }
-  }
-  did_work |= !deferred_non_nestable_work_queue_.empty();
-  while (!deferred_non_nestable_work_queue_.empty()) {
-    deferred_non_nestable_work_queue_.pop();
-  }
-  did_work |= !delayed_work_queue_.empty();
-
-  // Historically, we always delete the task regardless of valgrind status. It's
-  // not completely clear why we want to leak them in the loops above.  This
-  // code is replicating legacy behavior, and should not be considered
-  // absolutely "correct" behavior.  See TODO above about deleting all tasks
-  // when it's safe.
-  while (!delayed_work_queue_.empty()) {
-    delayed_work_queue_.pop();
-  }
-  return did_work;
-}
-
-void MessageLoop::ReloadWorkQueue() {
-  // We can improve performance of our loading tasks from the incoming queue to
-  // |*work_queue| by waiting until the last minute (|*work_queue| is empty) to
-  // load. That reduces the number of locks-per-task significantly when our
-  // queues get large.
-  if (work_queue_.empty()) {
-#if defined(OS_WIN)
-    pending_high_res_tasks_ +=
-        incoming_task_queue_->ReloadWorkQueue(&work_queue_);
-#else
-    incoming_task_queue_->ReloadWorkQueue(&work_queue_);
-#endif
-  }
+void MessageLoop::DeletePendingTasks() {
+  incoming_task_queue_->triage_tasks().Clear();
+  incoming_task_queue_->deferred_tasks().Clear();
+  // TODO(robliao): Determine if we can move delayed task destruction before
+  // deferred tasks to maintain the MessagePump DoWork, DoDelayedWork, and
+  // DoIdleWork processing order.
+  incoming_task_queue_->delayed_tasks().Clear();
 }
 
 void MessageLoop::ScheduleWork() {
@@ -510,37 +430,27 @@ void MessageLoop::ScheduleWork() {
 }
 
 bool MessageLoop::DoWork() {
-  if (!nestable_tasks_allowed_) {
-    // Task can't be executed right now.
+  if (!task_execution_allowed_)
     return false;
-  }
 
-  for (;;) {
-    ReloadWorkQueue();
-    if (work_queue_.empty())
-      break;
+  // Execute oldest task.
+  while (incoming_task_queue_->triage_tasks().HasTasks()) {
+    PendingTask pending_task = incoming_task_queue_->triage_tasks().Pop();
+    if (pending_task.task.IsCancelled())
+      continue;
 
-    // Execute oldest task.
-    do {
-      PendingTask pending_task = std::move(work_queue_.front());
-      work_queue_.pop();
-
-      if (pending_task.task.IsCancelled()) {
-#if defined(OS_WIN)
-        DecrementHighResTaskCountIfNeeded(pending_task);
-#endif
-      } else if (!pending_task.delayed_run_time.is_null()) {
-        int sequence_num = pending_task.sequence_num;
-        TimeTicks delayed_run_time = pending_task.delayed_run_time;
-        AddToDelayedWorkQueue(std::move(pending_task));
-        // If we changed the topmost task, then it is time to reschedule.
-        if (delayed_work_queue_.top().sequence_num == sequence_num)
-          pump_->ScheduleDelayedWork(delayed_run_time);
-      } else {
-        if (DeferOrRunPendingTask(std::move(pending_task)))
-          return true;
+    if (!pending_task.delayed_run_time.is_null()) {
+      int sequence_num = pending_task.sequence_num;
+      TimeTicks delayed_run_time = pending_task.delayed_run_time;
+      incoming_task_queue_->delayed_tasks().Push(std::move(pending_task));
+      // If we changed the topmost task, then it is time to reschedule.
+      if (incoming_task_queue_->delayed_tasks().Peek().sequence_num ==
+          sequence_num) {
+        pump_->ScheduleDelayedWork(delayed_run_time);
       }
-    } while (!work_queue_.empty());
+    } else if (DeferOrRunPendingTask(std::move(pending_task))) {
+      return true;
+    }
   }
 
   // Nothing happened.
@@ -548,8 +458,8 @@ bool MessageLoop::DoWork() {
 }
 
 bool MessageLoop::DoDelayedWork(TimeTicks* next_delayed_work_time) {
-  if (!nestable_tasks_allowed_ ||
-      !SweepDelayedWorkQueueAndReturnTrueIfStillHasWork()) {
+  if (!task_execution_allowed_ ||
+      !incoming_task_queue_->delayed_tasks().HasTasks()) {
     recent_time_ = *next_delayed_work_time = TimeTicks();
     return false;
   }
@@ -561,7 +471,8 @@ bool MessageLoop::DoDelayedWork(TimeTicks* next_delayed_work_time) {
   // fall behind (and have a lot of ready-to-run delayed tasks), the more
   // efficient we'll be at handling the tasks.
 
-  TimeTicks next_run_time = delayed_work_queue_.top().delayed_run_time;
+  TimeTicks next_run_time =
+      incoming_task_queue_->delayed_tasks().Peek().delayed_run_time;
   if (next_run_time > recent_time_) {
     recent_time_ = TimeTicks::Now();  // Get a better view of Now();
     if (next_run_time > recent_time_) {
@@ -570,12 +481,12 @@ bool MessageLoop::DoDelayedWork(TimeTicks* next_delayed_work_time) {
     }
   }
 
-  PendingTask pending_task =
-      std::move(const_cast<PendingTask&>(delayed_work_queue_.top()));
-  delayed_work_queue_.pop();
+  PendingTask pending_task = incoming_task_queue_->delayed_tasks().Pop();
 
-  if (SweepDelayedWorkQueueAndReturnTrueIfStillHasWork())
-    *next_delayed_work_time = delayed_work_queue_.top().delayed_run_time;
+  if (incoming_task_queue_->delayed_tasks().HasTasks()) {
+    *next_delayed_work_time =
+        incoming_task_queue_->delayed_tasks().Peek().delayed_run_time;
+  }
 
   return DeferOrRunPendingTask(std::move(pending_task));
 }
@@ -584,7 +495,7 @@ bool MessageLoop::DoIdleWork() {
   if (ProcessNextDelayedNonNestableTask())
     return true;
 
-  if (run_loop_client_->GetTopMostRunLoop()->quit_when_idle_received_)
+  if (ShouldQuitWhenIdle())
     pump_->Quit();
 
   // When we return we will do a kernel wait for more tasks.
@@ -593,7 +504,7 @@ bool MessageLoop::DoIdleWork() {
   // _if_ triggered by the timer happens with good resolution. If we don't
   // do this the default resolution is 15ms which might not be acceptable
   // for some tasks.
-  bool high_res = pending_high_res_tasks_ > 0;
+  bool high_res = incoming_task_queue_->HasPendingHighResolutionTasks();
   if (high_res != in_high_res_mode_) {
     in_high_res_mode_ = high_res;
     Time::ActivateHighResolutionTimer(in_high_res_mode_);
@@ -601,16 +512,6 @@ bool MessageLoop::DoIdleWork() {
 #endif
   return false;
 }
-
-#if defined(OS_WIN)
-void MessageLoop::DecrementHighResTaskCountIfNeeded(
-    const PendingTask& pending_task) {
-  if (!pending_task.is_high_res)
-    return;
-  --pending_high_res_tasks_;
-  DCHECK_GE(pending_high_res_tasks_, 0);
-}
-#endif
 
 #if !defined(OS_NACL)
 //------------------------------------------------------------------------------
@@ -625,14 +526,6 @@ void MessageLoopForUI::Start() {
   static_cast<MessagePumpForUI*>(pump_.get())->Start(this);
 }
 
-void MessageLoopForUI::StartForTesting(
-    base::android::JavaMessageHandlerFactory* factory,
-    WaitableEvent* test_done_event) {
-  // No Histogram support for UI message loop as it is managed by Java side
-  static_cast<MessagePumpForUI*>(pump_.get())
-      ->StartForUnitTest(this, factory, test_done_event);
-}
-
 void MessageLoopForUI::Abort() {
   static_cast<MessagePumpForUI*>(pump_.get())->Abort();
 }
@@ -644,7 +537,8 @@ void MessageLoopForUI::Attach() {
 }
 #endif
 
-#if defined(USE_OZONE) || (defined(USE_X11) && !defined(USE_GLIB))
+#if (defined(USE_OZONE) && !defined(OS_FUCHSIA)) || \
+    (defined(USE_X11) && !defined(USE_GLIB))
 bool MessageLoopForUI::WatchFileDescriptor(
     int fd,
     bool persistent,
@@ -695,5 +589,17 @@ bool MessageLoopForIO::WatchFileDescriptor(int fd,
 #endif
 
 #endif  // !defined(OS_NACL_SFI)
+
+#if defined(OS_FUCHSIA)
+// Additional watch API for native platform resources.
+bool MessageLoopForIO::WatchZxHandle(zx_handle_t handle,
+                                     bool persistent,
+                                     zx_signals_t signals,
+                                     ZxHandleWatchController* controller,
+                                     ZxHandleWatcher* delegate) {
+  return ToPumpIO(pump_.get())
+      ->WatchZxHandle(handle, persistent, signals, controller, delegate);
+}
+#endif
 
 }  // namespace base

@@ -36,9 +36,6 @@ public abstract class ContentSwitches {
     // How much of the browser controls need to be hidden before they will auto hide.
     public static final String TOP_CONTROLS_HIDE_THRESHOLD = "top-controls-hide-threshold";
 
-    // Native switch - shell_switches::kRunLayoutTest
-    public static final String RUN_LAYOUT_TEST = "run-layout-test";
-
     // Native switch - chrome_switches::kDisablePopupBlocking
     public static final String DISABLE_POPUP_BLOCKING = "disable-popup-blocking";
 
@@ -67,6 +64,15 @@ public abstract class ContentSwitches {
     // Use fake device for Media Stream to replace actual camera and microphone.
     public static final String USE_FAKE_DEVICE_FOR_MEDIA_STREAM =
             "use-fake-device-for-media-stream";
+
+    // Native switch kHostResolverRules
+    public static final String HOST_RESOLVER_RULES = "host-resolver-rules";
+
+    // Native switch kServiceSandboxType
+    public static final String SWITCH_SERVICE_SANDBOX_TYPE = "service-sandbox-type";
+
+    // Native switch value kNetworkSandbox
+    public static final String NETWORK_SANDBOX_TYPE = "network";
 
     // Prevent instantiation.
     private ContentSwitches() {}

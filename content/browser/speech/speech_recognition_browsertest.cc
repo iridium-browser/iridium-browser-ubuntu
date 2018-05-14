@@ -15,6 +15,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "content/browser/speech/speech_recognition_engine.h"
 #include "content/browser/speech/speech_recognition_manager_impl.h"
 #include "content/browser/speech/speech_recognizer_impl.h"
@@ -122,11 +123,12 @@ class SpeechRecognitionBrowserTest :
     ASSERT_TRUE(SpeechRecognitionManagerImpl::GetInstance());
     media::AudioManager::StartHangMonitorIfNeeded(
         BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
-    audio_manager_.reset(new media::MockAudioManager(
-        base::MakeUnique<media::AudioThreadImpl>()));
+    audio_manager_ = std::make_unique<media::MockAudioManager>(
+        std::make_unique<media::AudioThreadImpl>());
     audio_manager_->SetInputStreamParameters(
         media::AudioParameters::UnavailableDeviceParams());
-    audio_system_ = media::AudioSystemImpl::Create(audio_manager_.get());
+    audio_system_ =
+        std::make_unique<media::AudioSystemImpl>(audio_manager_.get());
     SpeechRecognizerImpl::SetAudioEnvironmentForTesting(audio_system_.get(),
                                                         audio_manager_.get());
   }
@@ -161,7 +163,8 @@ class SpeechRecognitionBrowserTest :
     audio_bus->FromInterleaved(&audio_buffer.get()[0],
                                audio_bus->frames(),
                                audio_params.bits_per_sample() / 8);
-    controller->sync_writer()->Write(audio_bus.get(), 0.0, false, 0);
+    controller->sync_writer()->Write(audio_bus.get(), 0.0, false,
+                                     base::TimeTicks::Now());
   }
 
   void FeedAudioController(int duration_ms, bool feed_with_noise) {
@@ -181,9 +184,10 @@ class SpeechRecognitionBrowserTest :
     for (int i = 0; i < n_buffers; ++i) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
-          base::Bind(&FeedSingleBufferToAudioController,
-                     scoped_refptr<media::TestAudioInputController>(controller),
-                     buffer_size, feed_with_noise));
+          base::BindOnce(
+              &FeedSingleBufferToAudioController,
+              scoped_refptr<media::TestAudioInputController>(controller),
+              buffer_size, feed_with_noise));
     }
   }
 
@@ -212,7 +216,13 @@ IN_PROC_BROWSER_TEST_F(SpeechRecognitionBrowserTest, DISABLED_Precheck) {
   EXPECT_EQ("success", GetPageFragment());
 }
 
-IN_PROC_BROWSER_TEST_F(SpeechRecognitionBrowserTest, OneShotRecognition) {
+// Flaky on mac, see https://crbug.com/794645.
+#if defined(OS_MACOSX)
+#define MAYBE_OneShotRecognition DISABLED_OneShotRecognition
+#else
+#define MAYBE_OneShotRecognition OneShotRecognition
+#endif
+IN_PROC_BROWSER_TEST_F(SpeechRecognitionBrowserTest, MAYBE_OneShotRecognition) {
   NavigateToURLBlockUntilNavigationsComplete(
       shell(), GetTestUrlFromFragment("oneshot"), 2);
 

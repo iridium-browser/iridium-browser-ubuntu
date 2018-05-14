@@ -6,17 +6,18 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
-#include "base/task_scheduler/post_task.h"
 #include "base/version.h"
 #include "components/component_updater/configurator_impl.h"
-#include "components/update_client/out_of_process_patcher.h"
+#include "components/update_client/activity_data_service.h"
 #include "components/update_client/update_query_params.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/google/google_brand.h"
 #include "ios/chrome/common/channel_info.h"
+#include "services/service_manager/public/cpp/connector.h"
 
 namespace component_updater {
 
@@ -24,8 +25,7 @@ namespace {
 
 class IOSConfigurator : public update_client::Configurator {
  public:
-  IOSConfigurator(const base::CommandLine* cmdline,
-                  net::URLRequestContextGetter* url_request_getter);
+  explicit IOSConfigurator(const base::CommandLine* cmdline);
 
   // update_client::Configurator overrides.
   int InitialDelay() const override;
@@ -42,16 +42,15 @@ class IOSConfigurator : public update_client::Configurator {
   std::string GetOSLongName() const override;
   std::string ExtraRequestParams() const override;
   std::string GetDownloadPreference() const override;
-  net::URLRequestContextGetter* RequestContext() const override;
-  scoped_refptr<update_client::OutOfProcessPatcher> CreateOutOfProcessPatcher()
+  scoped_refptr<net::URLRequestContextGetter> RequestContext() const override;
+  std::unique_ptr<service_manager::Connector> CreateServiceManagerConnector()
       const override;
   bool EnabledDeltas() const override;
   bool EnabledComponentUpdates() const override;
   bool EnabledBackgroundDownloader() const override;
   bool EnabledCupSigning() const override;
-  scoped_refptr<base::SequencedTaskRunner> GetSequencedTaskRunner()
-      const override;
   PrefService* GetPrefService() const override;
+  update_client::ActivityDataService* GetActivityDataService() const override;
   bool IsPerUserInstall() const override;
   std::vector<uint8_t> GetRunActionKeyHash() const override;
 
@@ -66,10 +65,8 @@ class IOSConfigurator : public update_client::Configurator {
 // Allows the component updater to use non-encrypted communication with the
 // update backend. The security of the update checks is enforced using
 // a custom message signing protocol and it does not depend on using HTTPS.
-IOSConfigurator::IOSConfigurator(
-    const base::CommandLine* cmdline,
-    net::URLRequestContextGetter* url_request_getter)
-    : configurator_impl_(cmdline, url_request_getter, false) {}
+IOSConfigurator::IOSConfigurator(const base::CommandLine* cmdline)
+    : configurator_impl_(cmdline, false) {}
 
 int IOSConfigurator::InitialDelay() const {
   return configurator_impl_.InitialDelay();
@@ -130,12 +127,13 @@ std::string IOSConfigurator::GetDownloadPreference() const {
   return configurator_impl_.GetDownloadPreference();
 }
 
-net::URLRequestContextGetter* IOSConfigurator::RequestContext() const {
-  return configurator_impl_.RequestContext();
+scoped_refptr<net::URLRequestContextGetter> IOSConfigurator::RequestContext()
+    const {
+  return GetApplicationContext()->GetSystemURLRequestContext();
 }
 
-scoped_refptr<update_client::OutOfProcessPatcher>
-IOSConfigurator::CreateOutOfProcessPatcher() const {
+std::unique_ptr<service_manager::Connector>
+IOSConfigurator::CreateServiceManagerConnector() const {
   return nullptr;
 }
 
@@ -155,15 +153,13 @@ bool IOSConfigurator::EnabledCupSigning() const {
   return configurator_impl_.EnabledCupSigning();
 }
 
-scoped_refptr<base::SequencedTaskRunner>
-IOSConfigurator::GetSequencedTaskRunner() const {
-  return base::CreateSequencedTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
-       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
-}
-
 PrefService* IOSConfigurator::GetPrefService() const {
   return GetApplicationContext()->GetLocalState();
+}
+
+update_client::ActivityDataService* IOSConfigurator::GetActivityDataService()
+    const {
+  return nullptr;
 }
 
 bool IOSConfigurator::IsPerUserInstall() const {
@@ -177,9 +173,8 @@ std::vector<uint8_t> IOSConfigurator::GetRunActionKeyHash() const {
 }  // namespace
 
 scoped_refptr<update_client::Configurator> MakeIOSComponentUpdaterConfigurator(
-    const base::CommandLine* cmdline,
-    net::URLRequestContextGetter* context_getter) {
-  return base::MakeRefCounted<IOSConfigurator>(cmdline, context_getter);
+    const base::CommandLine* cmdline) {
+  return base::MakeRefCounted<IOSConfigurator>(cmdline);
 }
 
 }  // namespace component_updater

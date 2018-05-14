@@ -10,7 +10,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.LocationManager;
 import android.support.test.filters.LargeTest;
-import android.test.MoreAsserts;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ListView;
@@ -39,15 +38,12 @@ import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.base.WindowAndroid.PermissionCallback;
 import org.chromium.ui.widget.TextViewWithClickableSpans;
 
-import java.util.concurrent.Callable;
-
 /**
  * Tests for the BluetoothChooserDialog class.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class BluetoothChooserDialogTest {
     /**
      * Works like the BluetoothChooserDialog class, but records calls to native methods instead of
@@ -111,12 +107,7 @@ public class BluetoothChooserDialogTest {
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
         mLocationUtils = new FakeLocationUtils();
-        LocationUtils.setFactory(new LocationUtils.Factory() {
-            @Override
-            public LocationUtils create() {
-                return mLocationUtils;
-            }
-        });
+        LocationUtils.setFactory(() -> mLocationUtils);
         mChooserDialog = createDialog();
     }
 
@@ -127,17 +118,14 @@ public class BluetoothChooserDialogTest {
 
     private BluetoothChooserDialogWithFakeNatives createDialog() {
         return ThreadUtils.runOnUiThreadBlockingNoException(
-                new Callable<BluetoothChooserDialogWithFakeNatives>() {
-                    @Override
-                    public BluetoothChooserDialogWithFakeNatives call() {
-                        mWindowAndroid = new ActivityWindowAndroid(mActivityTestRule.getActivity());
-                        BluetoothChooserDialogWithFakeNatives dialog =
-                                new BluetoothChooserDialogWithFakeNatives(mWindowAndroid,
-                                        "https://origin.example.com/",
-                                        ConnectionSecurityLevel.SECURE, 42);
-                        dialog.show();
-                        return dialog;
-                    }
+                () -> {
+                    mWindowAndroid = new ActivityWindowAndroid(mActivityTestRule.getActivity());
+                    BluetoothChooserDialogWithFakeNatives dialog =
+                            new BluetoothChooserDialogWithFakeNatives(mWindowAndroid,
+                                    "https://origin.example.com/",
+                                    ConnectionSecurityLevel.SECURE, 42);
+                    dialog.show();
+                    return dialog;
                 });
     }
 
@@ -230,22 +218,19 @@ public class BluetoothChooserDialogTest {
         final Button button = (Button) dialog.findViewById(R.id.positive);
         final View progress = dialog.findViewById(R.id.progress);
 
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                // Add non-connected device with no signal strength.
-                mChooserDialog.addOrUpdateDevice("id-1", "Name 1", false /* isGATTConnected */,
-                        -1 /* signalStrengthLevel */);
-                // Add connected device with no signal strength.
-                mChooserDialog.addOrUpdateDevice(
-                        "id-2", "Name 2", true /* isGATTConnected */, -1 /* signalStrengthLevel */);
-                // Add non-connected device with signal strength level 1.
-                mChooserDialog.addOrUpdateDevice(
-                        "id-3", "Name 3", false /* isGATTConnected */, 1 /* signalStrengthLevel */);
-                // Add connected device with signal strength level 1.
-                mChooserDialog.addOrUpdateDevice(
-                        "id-4", "Name 4", true /* isGATTConnected */, 1 /* signalStrengthLevel */);
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            // Add non-connected device with no signal strength.
+            mChooserDialog.addOrUpdateDevice("id-1", "Name 1", false /* isGATTConnected */,
+                    -1 /* signalStrengthLevel */);
+            // Add connected device with no signal strength.
+            mChooserDialog.addOrUpdateDevice(
+                    "id-2", "Name 2", true /* isGATTConnected */, -1 /* signalStrengthLevel */);
+            // Add non-connected device with signal strength level 1.
+            mChooserDialog.addOrUpdateDevice(
+                    "id-3", "Name 3", false /* isGATTConnected */, 1 /* signalStrengthLevel */);
+            // Add connected device with signal strength level 1.
+            mChooserDialog.addOrUpdateDevice(
+                    "id-4", "Name 4", true /* isGATTConnected */, 1 /* signalStrengthLevel */);
         });
 
         // After adding items to the dialog, the help message should be showing,
@@ -299,13 +284,8 @@ public class BluetoothChooserDialogTest {
                 new TestAndroidPermissionDelegate(dialog);
         mWindowAndroid.setAndroidPermissionDelegate(permissionDelegate);
 
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mChooserDialog.notifyDiscoveryState(
-                        BluetoothChooserDialog.DISCOVERY_FAILED_TO_START);
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(() -> mChooserDialog.notifyDiscoveryState(
+                BluetoothChooserDialog.DISCOVERY_FAILED_TO_START));
 
         Assert.assertEquals(removeLinkTags(mActivityTestRule.getActivity().getString(
                                     R.string.bluetooth_need_location_permission)),
@@ -318,27 +298,19 @@ public class BluetoothChooserDialogTest {
         Assert.assertEquals(View.GONE, items.getVisibility());
         Assert.assertEquals(View.GONE, progress.getVisibility());
 
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                errorView.getClickableSpans()[0].onClick(errorView);
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> errorView.getClickableSpans()[0].onClick(errorView));
 
         // Permission was requested.
-        MoreAsserts.assertEquals(permissionDelegate.mPermissionsRequested,
+        Assert.assertArrayEquals(permissionDelegate.mPermissionsRequested,
                 new String[] {Manifest.permission.ACCESS_COARSE_LOCATION});
         Assert.assertNotNull(permissionDelegate.mCallback);
         // Grant permission.
         mLocationUtils.mLocationGranted = true;
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                permissionDelegate.mCallback.onRequestPermissionsResult(
-                        new String[] {Manifest.permission.ACCESS_COARSE_LOCATION},
-                        new int[] {PackageManager.PERMISSION_GRANTED});
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> permissionDelegate.mCallback.onRequestPermissionsResult(
+                        new String[]{Manifest.permission.ACCESS_COARSE_LOCATION},
+                        new int[]{PackageManager.PERMISSION_GRANTED}));
 
         Assert.assertEquals(1, mChooserDialog.mRestartSearchCount);
         Assert.assertEquals(removeLinkTags(mActivityTestRule.getActivity().getString(
@@ -370,13 +342,8 @@ public class BluetoothChooserDialogTest {
         mLocationUtils.mLocationGranted = true;
         mLocationUtils.mSystemLocationSettingsEnabled = false;
 
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mChooserDialog.notifyDiscoveryState(
-                        BluetoothChooserDialog.DISCOVERY_FAILED_TO_START);
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(() -> mChooserDialog.notifyDiscoveryState(
+                BluetoothChooserDialog.DISCOVERY_FAILED_TO_START));
 
         Assert.assertEquals(removeLinkTags(mActivityTestRule.getActivity().getString(
                                     R.string.bluetooth_need_location_services_on)),
@@ -391,14 +358,10 @@ public class BluetoothChooserDialogTest {
 
         // Turn on Location Services.
         mLocationUtils.mSystemLocationSettingsEnabled = true;
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mChooserDialog.mLocationModeBroadcastReceiver.onReceive(
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> mChooserDialog.mLocationModeBroadcastReceiver.onReceive(
                         mActivityTestRule.getActivity(),
-                        new Intent(LocationManager.MODE_CHANGED_ACTION));
-            }
-        });
+                        new Intent(LocationManager.MODE_CHANGED_ACTION)));
 
         Assert.assertEquals(1, mChooserDialog.mRestartSearchCount);
         Assert.assertEquals(removeLinkTags(mActivityTestRule.getActivity().getString(
@@ -426,12 +389,7 @@ public class BluetoothChooserDialogTest {
         final View progress = dialog.findViewById(R.id.progress);
 
         // Turn off adapter.
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mChooserDialog.notifyAdapterTurnedOff();
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(() -> mChooserDialog.notifyAdapterTurnedOff());
 
         Assert.assertEquals(removeLinkTags(mActivityTestRule.getActivity().getString(
                                     R.string.bluetooth_adapter_off)),
@@ -445,12 +403,7 @@ public class BluetoothChooserDialogTest {
         Assert.assertEquals(View.GONE, progress.getVisibility());
 
         // Turn on adapter.
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                itemChooser.signalInitializingAdapter();
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(() -> itemChooser.signalInitializingAdapter());
 
         Assert.assertEquals(View.GONE, errorView.getVisibility());
         Assert.assertEquals(View.GONE, items.getVisibility());

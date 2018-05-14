@@ -8,7 +8,6 @@
 
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
 #import "ios/chrome/browser/crash_report/breakpad_helper.h"
@@ -25,20 +24,15 @@ const int kMaximumBreakpadValueSize = 255;
 }
 
 @implementation CrashReportMultiParameter {
-  base::scoped_nsobject<NSString> crashReportKey_;
+  NSString* crashReportKey_;
   std::unique_ptr<base::DictionaryValue> dictionary_;
-}
-
-- (instancetype)init {
-  NOTREACHED();
-  return nil;
 }
 
 - (instancetype)initWithKey:(NSString*)key {
   if ((self = [super init])) {
     DCHECK([key length] && ([key length] <= kMaximumBreakpadValueSize));
     dictionary_.reset(new base::DictionaryValue());
-    crashReportKey_.reset([key copy]);
+    crashReportKey_ = [key copy];
   }
   return self;
 }

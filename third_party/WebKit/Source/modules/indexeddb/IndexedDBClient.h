@@ -41,30 +41,34 @@ class ExecutionContext;
 class LocalFrame;
 class WorkerClients;
 
-class MODULES_EXPORT IndexedDBClient
-    : public GarbageCollectedFinalized<IndexedDBClient>,
-      public Supplement<LocalFrame>,
-      public Supplement<WorkerClients> {
+class IndexedDBClient : public GarbageCollected<IndexedDBClient>,
+                        public Supplement<LocalFrame>,
+                        public Supplement<WorkerClients>,
+                        public TraceWrapperBase {
   USING_GARBAGE_COLLECTED_MIXIN(IndexedDBClient);
   WTF_MAKE_NONCOPYABLE(IndexedDBClient);
 
  public:
-  explicit IndexedDBClient(LocalFrame&);
-  explicit IndexedDBClient(WorkerClients&);
-  virtual ~IndexedDBClient() {}
+  static const char kSupplementName[];
 
-  DECLARE_VIRTUAL_TRACE();
+  static IndexedDBClient* Create(LocalFrame&);
+  static IndexedDBClient* Create(WorkerClients&);
 
-  virtual bool AllowIndexedDB(ExecutionContext*, const String& name) = 0;
+  void Trace(blink::Visitor*) override;
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
+
+  bool AllowIndexedDB(ExecutionContext*, const String& name);
 
   static IndexedDBClient* From(ExecutionContext*);
-  static const char* SupplementName();
+
+ private:
+  explicit IndexedDBClient(LocalFrame&);
+  explicit IndexedDBClient(WorkerClients&);
 };
 
-MODULES_EXPORT void ProvideIndexedDBClientTo(LocalFrame&, IndexedDBClient*);
+void ProvideIndexedDBClientTo(LocalFrame&, IndexedDBClient*);
 
-MODULES_EXPORT void ProvideIndexedDBClientToWorker(WorkerClients*,
-                                                   IndexedDBClient*);
+void ProvideIndexedDBClientToWorker(WorkerClients*, IndexedDBClient*);
 
 }  // namespace blink
 

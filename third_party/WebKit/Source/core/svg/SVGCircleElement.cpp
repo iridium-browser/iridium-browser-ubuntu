@@ -20,7 +20,6 @@
 
 #include "core/svg/SVGCircleElement.h"
 
-#include "core/dom/StyleChangeReason.h"
 #include "core/layout/svg/LayoutSVGEllipse.h"
 #include "core/svg/SVGLength.h"
 
@@ -45,7 +44,7 @@ inline SVGCircleElement::SVGCircleElement(Document& document)
   AddToPropertyMap(r_);
 }
 
-DEFINE_TRACE(SVGCircleElement) {
+void SVGCircleElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(cx_);
   visitor->Trace(cy_);
   visitor->Trace(r_);
@@ -65,23 +64,18 @@ Path SVGCircleElement::AsPath() const {
   float r = length_context.ValueForLength(svg_style.R(), style,
                                           SVGLengthMode::kOther);
   if (r > 0) {
-    path.AddEllipse(
-        FloatRect(length_context.ValueForLength(svg_style.Cx(), style,
-                                                SVGLengthMode::kWidth) -
-                      r,
-                  length_context.ValueForLength(svg_style.Cy(), style,
-                                                SVGLengthMode::kHeight) -
-                      r,
-                  r * 2, r * 2));
+    FloatPoint center(length_context.ResolveLengthPair(svg_style.Cx(),
+                                                       svg_style.Cy(), style));
+    FloatSize radii(r, r);
+    path.AddEllipse(FloatRect(center - radii, radii.ScaledBy(2)));
   }
-
   return path;
 }
 
 void SVGCircleElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   SVGAnimatedPropertyBase* property = PropertyFromAttribute(name);
   if (property == cx_) {
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
@@ -101,19 +95,8 @@ void SVGCircleElement::CollectStyleForPresentationAttribute(
 void SVGCircleElement::SvgAttributeChanged(const QualifiedName& attr_name) {
   if (attr_name == SVGNames::rAttr || attr_name == SVGNames::cxAttr ||
       attr_name == SVGNames::cyAttr) {
-    SVGElement::InvalidationGuard invalidation_guard(this);
-
-    InvalidateSVGPresentationAttributeStyle();
-    SetNeedsStyleRecalc(kLocalStyleChange,
-                        StyleChangeReasonForTracing::FromAttribute(attr_name));
     UpdateRelativeLengthsInformation();
-
-    LayoutSVGShape* layout_object = ToLayoutSVGShape(this->GetLayoutObject());
-    if (!layout_object)
-      return;
-
-    layout_object->SetNeedsShapeUpdate();
-    MarkForLayoutAndParentResourceInvalidation(layout_object);
+    GeometryPresentationAttributeChanged(attr_name);
     return;
   }
 

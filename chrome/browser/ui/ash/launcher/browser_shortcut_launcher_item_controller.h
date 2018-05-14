@@ -21,9 +21,8 @@ class WebContents;
 
 // Shelf item delegate for a browser shortcut; only one such item should exist.
 // This item shows an application menu that lists open browser windows or tabs.
-class BrowserShortcutLauncherItemController
-    : public ash::ShelfItemDelegate,
-      public chrome::BrowserListObserver {
+class BrowserShortcutLauncherItemController : public ash::ShelfItemDelegate,
+                                              public BrowserListObserver {
  public:
   explicit BrowserShortcutLauncherItemController(ash::ShelfModel* shelf_model);
 
@@ -45,7 +44,11 @@ class BrowserShortcutLauncherItemController
                     ash::ShelfLaunchSource source,
                     ItemSelectedCallback callback) override;
   ash::MenuItemList GetAppMenuItems(int event_flags) override;
-  void ExecuteCommand(uint32_t command_id, int32_t event_flags) override;
+  std::unique_ptr<ui::MenuModel> GetContextMenu(int64_t display_id) override;
+  void ExecuteCommand(bool from_context_menu,
+                      int64_t command_id,
+                      int32_t event_flags,
+                      int64_t display_id) override;
   void Close() override;
 
  private:
@@ -61,7 +64,7 @@ class BrowserShortcutLauncherItemController
   // Get a list of active browsers.
   BrowserList::BrowserVector GetListOfActiveBrowsers();
 
-  // chrome::BrowserListObserver:
+  // BrowserListObserver:
   void OnBrowserClosing(Browser* browser) override;
 
   ash::ShelfModel* shelf_model_;

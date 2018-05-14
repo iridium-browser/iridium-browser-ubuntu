@@ -15,12 +15,12 @@
  *
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_TABLES_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_TABLES_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_TABLES_H_
+#define MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_TABLES_H_
 
-#include "structs.h"
+#include "modules/audio_coding/codecs/isac/main/source/structs.h"
 
-#include "settings.h"
+#include "modules/audio_coding/codecs/isac/main/source/settings.h"
 
 #define KLT_STEPSIZE         1.00000000
 #define KLT_NUM_AVG_GAIN     0
@@ -97,4 +97,4 @@ extern const double WebRtcIsac_kLpcMeansGain[12];
 
 extern const double WebRtcIsac_kLpcMeansShape[108];
 
-#endif /* WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_TABLES_H_ */
+#endif /* MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_LPC_TABLES_H_ */

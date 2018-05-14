@@ -80,9 +80,10 @@ void ApppendTouchPointDetails(const WebTouchPoint& point, std::string* result) {
 void ApppendEventDetails(const WebTouchEvent& event, std::string* result) {
   StringAppendF(result,
                 "{\n Touches: %u, DispatchType: %d, CausesScrolling: %d,"
-                " uniqueTouchEventId: %u\n[\n",
+                " Hovering: %d, uniqueTouchEventId: %u\n[\n",
                 event.touches_length, event.dispatch_type,
-                event.moved_beyond_slop_region, event.unique_touch_event_id);
+                event.moved_beyond_slop_region, event.hovering,
+                event.unique_touch_event_id);
   for (unsigned i = 0; i < event.touches_length; ++i)
     ApppendTouchPointDetails(event.touches[i], result);
   result->append(" ]\n}");
@@ -179,7 +180,6 @@ WebScopedInputEvent WebInputEventTraits::Clone(const WebInputEvent& event) {
 
 bool WebInputEventTraits::ShouldBlockEventStream(
     const WebInputEvent& event,
-    bool raf_aligned_touch_enabled,
     bool wheel_scroll_latching_enabled) {
   switch (event.GetType()) {
     case WebInputEvent::kContextMenu:
@@ -210,15 +210,9 @@ bool WebInputEventTraits::ShouldBlockEventStream(
              WebInputEvent::kBlocking;
 
     case WebInputEvent::kTouchMove:
-      // Non-blocking touch moves can be ack'd right away if raf_aligned
-      // touch is enabled.
-      if (raf_aligned_touch_enabled) {
-        return static_cast<const WebTouchEvent&>(event).dispatch_type ==
-               WebInputEvent::kBlocking;
-      }
-      // Touch move events may be non-blocking but are always explicitly
-      // acknowledge by the renderer so they block the event stream.
-      return true;
+      // Non-blocking touch moves can be ack'd right away.
+      return static_cast<const WebTouchEvent&>(event).dispatch_type ==
+             WebInputEvent::kBlocking;
 
     case WebInputEvent::kMouseWheel:
       return static_cast<const WebMouseWheelEvent&>(event).dispatch_type ==

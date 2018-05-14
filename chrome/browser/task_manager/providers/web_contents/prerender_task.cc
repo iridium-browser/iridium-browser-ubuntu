@@ -6,7 +6,6 @@
 
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
-#include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
@@ -23,34 +22,33 @@ gfx::ImageSkia* GetPrerenderIcon() {
   if (g_prerender_icon)
     return g_prerender_icon;
 
-  if (!ResourceBundle::HasSharedInstance())
+  if (!ui::ResourceBundle::HasSharedInstance())
     return nullptr;
 
   g_prerender_icon =
-      ResourceBundle::GetSharedInstance().GetImageSkiaNamed(IDR_PRERENDER);
+      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(IDR_PRERENDER);
   return g_prerender_icon;
 }
 
-base::string16 PrefixTitle(const base::string16& title) {
+base::string16 PrefixPrerenderTitle(const base::string16& title) {
   return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_PRERENDER_PREFIX, title);
 }
 
 }  // namespace
 
 PrerenderTask::PrerenderTask(content::WebContents* web_contents)
-    : RendererTask(
-          PrefixTitle(RendererTask::GetTitleFromWebContents(web_contents)),
-          GetPrerenderIcon(),
-          web_contents,
-          web_contents->GetRenderProcessHost()) {
-}
+    : RendererTask(PrefixPrerenderTitle(
+                       RendererTask::GetTitleFromWebContents(web_contents)),
+                   GetPrerenderIcon(),
+                   web_contents) {}
 
 PrerenderTask::~PrerenderTask() {
 }
 
 void PrerenderTask::UpdateTitle() {
   // As long as this task lives we keep prefixing its title with "Prerender:".
-  set_title(PrefixTitle(RendererTask::GetTitleFromWebContents(web_contents())));
+  set_title(PrefixPrerenderTitle(
+      RendererTask::GetTitleFromWebContents(web_contents())));
 }
 
 void PrerenderTask::UpdateFavicon() {

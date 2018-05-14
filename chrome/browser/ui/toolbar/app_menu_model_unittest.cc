@@ -19,7 +19,6 @@
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/menu_model_test.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_io_thread_state.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -58,31 +57,17 @@ class MenuError : public GlobalError {
 class AppMenuModelTest : public BrowserWithTestWindowTest,
                          public ui::AcceleratorProvider {
  public:
+  AppMenuModelTest() = default;
+  ~AppMenuModelTest() override = default;
+
   // Don't handle accelerators.
   bool GetAcceleratorForCommandId(int command_id,
                                   ui::Accelerator* accelerator) const override {
     return false;
   }
 
- protected:
-  void SetUp() override {
-    prefs_.reset(new TestingPrefServiceSimple());
-    chrome::RegisterLocalState(prefs_->registry());
-
-    TestingBrowserProcess::GetGlobal()->SetLocalState(prefs_.get());
-    testing_io_thread_state_.reset(new chrome::TestingIOThreadState());
-    BrowserWithTestWindowTest::SetUp();
-  }
-
-  void TearDown() override {
-    BrowserWithTestWindowTest::TearDown();
-    testing_io_thread_state_.reset();
-    TestingBrowserProcess::GetGlobal()->SetLocalState(NULL);
-  }
-
  private:
-  std::unique_ptr<TestingPrefServiceSimple> prefs_;
-  std::unique_ptr<chrome::TestingIOThreadState> testing_io_thread_state_;
+  DISALLOW_COPY_AND_ASSIGN(AppMenuModelTest);
 };
 
 // Copies parts of MenuModelTest::Delegate and combines them with the
@@ -120,6 +105,7 @@ class TestAppMenuModel : public AppMenuModel {
 
 TEST_F(AppMenuModelTest, Basics) {
   TestAppMenuModel model(this, browser());
+  model.Init();
   int itemCount = model.GetItemCount();
 
   // Verify it has items. The number varies by platform, so we don't check
@@ -186,6 +172,7 @@ TEST_F(AppMenuModelTest, GlobalError) {
   service->AddGlobalError(base::WrapUnique(error2));
 
   AppMenuModel model(this, browser());
+  model.Init();
   int index1 = model.GetIndexOfCommandId(command1);
   EXPECT_GT(index1, -1);
   int index2 = model.GetIndexOfCommandId(command2);

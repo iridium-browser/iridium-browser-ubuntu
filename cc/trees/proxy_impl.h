@@ -18,12 +18,13 @@
 namespace cc {
 class LayerTreeHost;
 class ProxyMain;
+class RenderFrameMetadataObserver;
 
 // This class aggregates all the interactions that the main side of the
 // compositor needs to have with the impl side.
 // The class is created and lives on the impl thread.
-class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
-                            public NON_EXPORTED_BASE(SchedulerClient) {
+class CC_EXPORT ProxyImpl : public LayerTreeHostImplClient,
+                            public SchedulerClient {
  public:
   ProxyImpl(base::WeakPtr<ProxyMain> proxy_main_weak_ptr,
             LayerTreeHost* layer_tree_host,
@@ -53,13 +54,15 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
                                  LayerTreeHost* layer_tree_host,
                                  base::TimeTicks main_thread_start_time,
                                  bool hold_commit_for_activation);
+  void SetURLForUkm(const GURL& url);
+  void ClearHistoryOnNavigation();
+  void SetRenderFrameObserver(
+      std::unique_ptr<RenderFrameMetadataObserver> observer);
 
   void MainFrameWillHappenOnImplForTesting(CompletionEvent* completion,
                                            bool* main_frame_will_happen);
 
   void RequestBeginMainFrameNotExpected(bool new_state) override;
-
-  NOINLINE void DumpForBeginMainFrameHang();
 
  private:
   // The members of this struct should be accessed on the impl thread only when
@@ -72,7 +75,7 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
 
   // LayerTreeHostImplClient implementation
   void DidLoseLayerTreeFrameSinkOnImplThread() override;
-  void SetBeginFrameSource(BeginFrameSource* source) override;
+  void SetBeginFrameSource(viz::BeginFrameSource* source) override;
   void DidReceiveCompositorFrameAckOnImplThread() override;
   void OnCanDrawStateChanged(bool can_draw) override;
   void NotifyReadyToActivate() override;
@@ -95,14 +98,20 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
   void DidPrepareTiles() override;
   void DidCompletePageScaleAnimationOnImplThread() override;
   void OnDrawForLayerTreeFrameSink(bool resourceless_software_draw) override;
-  void NeedsImplSideInvalidation() override;
+  void NeedsImplSideInvalidation(bool needs_first_draw_on_activation) override;
   void NotifyImageDecodeRequestFinished() override;
+  void DidPresentCompositorFrameOnImplThread(
+      const std::vector<int>& source_frames,
+      base::TimeTicks time,
+      base::TimeDelta refresh,
+      uint32_t flags) override;
 
   // SchedulerClient implementation
-  void WillBeginImplFrame(const BeginFrameArgs& args) override;
+  bool WillBeginImplFrame(const viz::BeginFrameArgs& args) override;
   void DidFinishImplFrame() override;
-  void DidNotProduceFrame(const BeginFrameAck& ack) override;
-  void ScheduledActionSendBeginMainFrame(const BeginFrameArgs& args) override;
+  void DidNotProduceFrame(const viz::BeginFrameAck& ack) override;
+  void ScheduledActionSendBeginMainFrame(
+      const viz::BeginFrameArgs& args) override;
   DrawResult ScheduledActionDrawIfPossible() override;
   DrawResult ScheduledActionDrawForced() override;
   void ScheduledActionCommit() override;
@@ -114,6 +123,11 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
   void SendBeginMainFrameNotExpectedSoon() override;
   void ScheduledActionBeginMainFrameNotExpectedUntil(
       base::TimeTicks time) override;
+  size_t CompositedAnimationsCount() const override;
+  size_t MainThreadAnimationsCount() const override;
+  size_t MainThreadCompositableAnimationsCount() const override;
+  bool CurrentFrameHadRAF() const override;
+  bool NextFrameHasPendingRAF() const override;
 
   DrawResult DrawInternal(bool forced_draw);
 
@@ -147,7 +161,7 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
 
   RenderingStatsInstrumentation* rendering_stats_instrumentation_;
 
-  std::unique_ptr<LayerTreeHostImpl> layer_tree_host_impl_;
+  std::unique_ptr<LayerTreeHostImpl> host_impl_;
 
   // Use accessors instead of this variable directly.
   BlockedMainCommitOnly main_thread_blocked_commit_vars_unsafe_;

@@ -9,7 +9,6 @@ import logging
 import os
 import re
 import StringIO
-import subprocess
 import sys
 import tempfile
 import threading
@@ -30,6 +29,7 @@ import test_utils
 from depot_tools import fix_encoding
 from utils import file_path
 from utils import logging_utils
+from utils import subprocess42
 from utils import tools
 
 import httpserver_mock
@@ -59,10 +59,11 @@ def get_results(keys, output_collector=None):
   """
   return list(
       swarming.yield_results(
-          'https://host:9001', keys, 10., None, True, output_collector, False))
+          'https://host:9001', keys, 10., None, True,
+          output_collector, False, True))
 
 
-def collect(url, task_ids):
+def collect(url, task_ids, task_stdout=('console', 'json')):
   """Simplifies the call to swarming.collect()."""
   return swarming.collect(
     swarming=url,
@@ -72,6 +73,7 @@ def collect(url, task_ids):
     print_status_updates=True,
     task_summary_json=None,
     task_output_dir=None,
+    task_output_stdout=task_stdout,
     include_perf=False)
 
 
@@ -94,11 +96,13 @@ def gen_request_data(properties=None, **kwargs):
       'caches': [],
       'cipd_input': None,
       'command': None,
+      'relative_cwd': None,
       'dimensions': [
         {'key': 'foo', 'value': 'bar'},
         {'key': 'os', 'value': 'Mac'},
       ],
       'env': [],
+      'env_prefixes': [],
       'execution_timeout_secs': 60,
       'extra_args': ['--some-arg', '123'],
       'grace_period_secs': 30,
@@ -169,22 +173,20 @@ class SwarmingServerHandler(httpserver_mock.MockHandler):
 
   def do_GET(self):
     logging.info('S GET %s', self.path)
-    if self.path in ('/on/load', '/on/quit'):
-      self._octet_stream('')
-    elif self.path == '/auth/api/v1/server/oauth_config':
-      self._json({
+    if self.path == '/auth/api/v1/server/oauth_config':
+      self.send_json({
           'client_id': 'c',
           'client_not_so_secret': 's',
           'primary_url': self.server.url})
     elif self.path == '/auth/api/v1/accounts/self':
-      self._json({'identity': 'user:joe', 'xsrf_token': 'foo'})
+      self.send_json({'identity': 'user:joe', 'xsrf_token': 'foo'})
     else:
       m = re.match(r'/api/swarming/v1/task/(\d+)/request', self.path)
       if m:
         logging.info('%s', m.group(1))
-        self._json(self.server.tasks[int(m.group(1))])
+        self.send_json(self.server.tasks[int(m.group(1))])
       else:
-        self._json( {'a': 'b'})
+        self.send_json( {'a': 'b'})
         #raise NotImplementedError(self.path)
 
   def do_POST(self):
@@ -222,11 +224,10 @@ class Common(object):
       self._tempdir = tempfile.mkdtemp(prefix=u'swarming_test')
     return self._tempdir
 
+  maxDiff = None
   def _check_output(self, out, err):
-    self.assertEqual(
-        out.splitlines(True), sys.stdout.getvalue().splitlines(True))
-    self.assertEqual(
-        err.splitlines(True), sys.stderr.getvalue().splitlines(True))
+    self.assertMultiLineEqual(out, sys.stdout.getvalue())
+    self.assertMultiLineEqual(err, sys.stderr.getvalue())
 
     # Flush their content by mocking them again.
     self.mock(sys, 'stdout', StringIO.StringIO())
@@ -252,7 +253,7 @@ class NetTestCase(net_utils.TestCase, Common):
     net_utils.TestCase.setUp(self)
     Common.setUp(self)
     self.mock(time, 'sleep', lambda _: None)
-    self.mock(subprocess, 'call', lambda *_: self.fail())
+    self.mock(subprocess42, 'call', lambda *_: self.fail())
     self.mock(threading, 'Event', NonBlockingEvent)
 
 
@@ -266,10 +267,8 @@ class TestIsolated(auto_stub.TestCase, Common):
 
   def tearDown(self):
     try:
-      self._isolate.close_start()
-      self._swarming.close_start()
-      self._isolate.close_end()
-      self._swarming.close_end()
+      self._isolate.close()
+      self._swarming.close()
     finally:
       Common.tearDown(self)
       auto_stub.TestCase.tearDown(self)
@@ -280,7 +279,11 @@ class TestIsolated(auto_stub.TestCase, Common):
       os.chdir(self.tempdir)
 
       def call(cmd, env, cwd):
-        self.assertEqual([sys.executable, u'main.py', u'foo', '--bar'], cmd)
+        # 'out' is the default value for --output-dir.
+        outdir = os.path.join(self.tempdir, 'out')
+        self.assertTrue(os.path.isdir(outdir))
+        self.assertEqual(
+            [sys.executable, u'main.py', u'foo', outdir, '--bar'], cmd)
         expected = os.environ.copy()
         expected['SWARMING_TASK_ID'] = 'reproduce'
         expected['SWARMING_BOT_ID'] = 'reproduce'
@@ -288,7 +291,7 @@ class TestIsolated(auto_stub.TestCase, Common):
         self.assertEqual(unicode(os.path.abspath('work')), cwd)
         return 0
 
-      self.mock(subprocess, 'call', call)
+      self.mock(subprocess42, 'call', call)
 
       main_hash = self._isolate.add_content_compressed(
           'default-gzip', 'not executed')
@@ -311,7 +314,7 @@ class TestIsolated(auto_stub.TestCase, Common):
             'namespace': 'default-gzip',
             'isolated': isolated_hash,
           },
-          'extra_args': ['foo'],
+          'extra_args': ['foo', '${ISOLATED_OUTDIR}'],
           'secret_bytes': None,
         },
       }
@@ -337,8 +340,10 @@ class TestSwarmingTrigger(NetTestCase):
             caches=[],
             cipd_input=None,
             command=['a', 'b'],
+            relative_cwd=None,
             dimensions=[('foo', 'bar'), ('os', 'Mac')],
             env={},
+            env_prefixes=[],
             execution_timeout_secs=60,
             extra_args=[],
             grace_period_secs=30,
@@ -351,11 +356,11 @@ class TestSwarmingTrigger(NetTestCase):
             io_timeout_secs=60,
             outputs=[],
             secret_bytes=None),
-        service_account_token=None,
+        service_account=None,
         tags=['tag:a', 'tag:b'],
         user='joe@localhost')
 
-    request_1 = swarming.task_request_to_raw_request(task_request, False)
+    request_1 = swarming.task_request_to_raw_request(task_request)
     request_1['name'] = u'unit_tests:0:2'
     request_1['properties']['env'] = [
       {'key': 'GTEST_SHARD_INDEX', 'value': '0'},
@@ -363,7 +368,7 @@ class TestSwarmingTrigger(NetTestCase):
     ]
     result_1 = gen_request_response(request_1)
 
-    request_2 = swarming.task_request_to_raw_request(task_request, False)
+    request_2 = swarming.task_request_to_raw_request(task_request)
     request_2['name'] = u'unit_tests:1:2'
     request_2['properties']['env'] = [
       {'key': 'GTEST_SHARD_INDEX', 'value': '1'},
@@ -412,8 +417,10 @@ class TestSwarmingTrigger(NetTestCase):
             caches=[],
             cipd_input=None,
             command=['a', 'b'],
+            relative_cwd=None,
             dimensions=[('foo', 'bar'), ('os', 'Mac')],
             env={},
+            env_prefixes=[],
             execution_timeout_secs=60,
             extra_args=[],
             grace_period_secs=30,
@@ -426,11 +433,11 @@ class TestSwarmingTrigger(NetTestCase):
             io_timeout_secs=60,
             outputs=[],
             secret_bytes=None),
-        service_account_token=None,
+        service_account=None,
         tags=['tag:a', 'tag:b'],
         user='joe@localhost')
 
-    request = swarming.task_request_to_raw_request(task_request, False)
+    request = swarming.task_request_to_raw_request(task_request)
     self.assertEqual('123', request['parent_task_id'])
 
     result = gen_request_response(request)
@@ -479,8 +486,10 @@ class TestSwarmingTrigger(NetTestCase):
                         version='abc123')],
                 server=None),
             command=['a', 'b'],
+            relative_cwd=None,
             dimensions=[('foo', 'bar'), ('os', 'Mac')],
             env={},
+            env_prefixes=[],
             execution_timeout_secs=60,
             extra_args=[],
             grace_period_secs=30,
@@ -493,11 +502,11 @@ class TestSwarmingTrigger(NetTestCase):
             io_timeout_secs=60,
             outputs=[],
             secret_bytes=None),
-        service_account_token=None,
+        service_account=None,
         tags=['tag:a', 'tag:b'],
         user='joe@localhost')
 
-    request = swarming.task_request_to_raw_request(task_request, False)
+    request = swarming.task_request_to_raw_request(task_request)
     expected = {
       'client_package': None,
       'packages': [{
@@ -710,13 +719,27 @@ class TestSwarmingCollection(NetTestCase):
     self.mock(swarming, 'yield_results', lambda *_: [(0, data)])
     self.assertEqual(0, collect('https://localhost:1', ['10100']))
     expected = u'\n'.join((
-      '+---------------------------------------------------------------------+',
-      '| Shard 0  https://localhost:1/user/task/10100                        |',
-      '+---------------------------------------------------------------------+',
+      '+------------------------------------------------------+',
+      '| Shard 0  https://localhost:1/user/task/10100         |',
+      '+------------------------------------------------------+',
       'Foo',
-      '+---------------------------------------------------------------------+',
-      '| End of shard 0  Pending: 6.0s  Duration: 1.0s  Bot: swarm6  Exit: 0 |',
-      '+---------------------------------------------------------------------+',
+      '+------------------------------------------------------+',
+      '| End of shard 0                                       |',
+      '|  Pending: 6.0s  Duration: 1.0s  Bot: swarm6  Exit: 0 |',
+      '+------------------------------------------------------+',
+      'Total duration: 1.0s',
+      ''))
+    self._check_output(expected, '')
+
+  def test_collect_success_nostdout(self):
+    data = gen_result_response(output='Foo')
+    self.mock(swarming, 'yield_results', lambda *_: [(0, data)])
+    self.assertEqual(0, collect('https://localhost:1', ['10100'], []))
+    expected = u'\n'.join((
+      '+------------------------------------------------------+',
+      '| Shard 0  https://localhost:1/user/task/10100         |',
+      '|  Pending: 6.0s  Duration: 1.0s  Bot: swarm6  Exit: 0 |',
+      '+------------------------------------------------------+',
       'Total duration: 1.0s',
       ''))
     self._check_output(expected, '')
@@ -727,19 +750,14 @@ class TestSwarmingCollection(NetTestCase):
     self.mock(swarming, 'yield_results', lambda *_: [(0, data)])
     self.assertEqual(-9, collect('https://localhost:1', ['10100']))
     expected = u'\n'.join((
-      '+----------------------------------------------------------------------'
-        '+',
-      '| Shard 0  https://localhost:1/user/task/10100                         '
-        '|',
-      '+----------------------------------------------------------------------'
-        '+',
+      '+-------------------------------------------------------+',
+      '| Shard 0  https://localhost:1/user/task/10100          |',
+      '+-------------------------------------------------------+',
       'Foo',
-      '+----------------------------------------------------------------------'
-        '+',
-      '| End of shard 0  Pending: 6.0s  Duration: 1.0s  Bot: swarm6  Exit: -9 '
-        '|',
-      '+----------------------------------------------------------------------'
-        '+',
+      '+-------------------------------------------------------+',
+      '| End of shard 0                                        |',
+      '|  Pending: 6.0s  Duration: 1.0s  Bot: swarm6  Exit: -9 |',
+      '+-------------------------------------------------------+',
       'Total duration: 1.0s',
       ''))
     self._check_output(expected, '')
@@ -750,13 +768,14 @@ class TestSwarmingCollection(NetTestCase):
     self.mock(swarming, 'yield_results', lambda *_: [(0, data)])
     self.assertEqual(1, collect('https://localhost:1', ['10100', '10200']))
     expected = u'\n'.join((
-      '+---------------------------------------------------------------------+',
-      '| Shard 0  https://localhost:1/user/task/10100                        |',
-      '+---------------------------------------------------------------------+',
+      '+------------------------------------------------------+',
+      '| Shard 0  https://localhost:1/user/task/10100         |',
+      '+------------------------------------------------------+',
       'Foo',
-      '+---------------------------------------------------------------------+',
-      '| End of shard 0  Pending: 6.0s  Duration: 1.0s  Bot: swarm6  Exit: 0 |',
-      '+---------------------------------------------------------------------+',
+      '+------------------------------------------------------+',
+      '| End of shard 0                                       |',
+      '|  Pending: 6.0s  Duration: 1.0s  Bot: swarm6  Exit: 0 |',
+      '+------------------------------------------------------+',
       '',
       'Total duration: 1.0s',
       ''))
@@ -774,7 +793,8 @@ class TestSwarmingCollection(NetTestCase):
       actual_calls.append((isolated_hash, outdir))
     self.mock(isolateserver, 'fetch_isolated', fetch_isolated)
 
-    collector = swarming.TaskOutputCollector(self.tempdir, 2)
+    collector = swarming.TaskOutputCollector(
+        self.tempdir, ['json', 'console'], 2)
     for index in xrange(2):
       collector.process_shard_result(
           index,
@@ -842,7 +862,8 @@ class TestSwarmingCollection(NetTestCase):
     ]
 
     # Feed them to collector.
-    collector = swarming.TaskOutputCollector(self.tempdir, 2)
+    collector = swarming.TaskOutputCollector(
+        self.tempdir, ['json', 'console'], 2)
     for index, result in enumerate(data):
       collector.process_shard_result(index, result)
     collector.finalize()
@@ -883,10 +904,12 @@ class TestMain(NetTestCase):
         'caches': [],
         'cipd_input': None,
         'command': ['python', '-c', 'print(\'hi\')'],
+        'relative_cwd': 'deeep',
         'dimensions': [
           {'key': 'foo', 'value': 'bar'},
         ],
         'env': [],
+        'env_prefixes': [],
         'execution_timeout_secs': 3600,
         'extra_args': None,
         'grace_period_secs': 30,
@@ -913,6 +936,7 @@ class TestMain(NetTestCase):
         '--swarming', 'https://localhost:1',
         '--dimension', 'foo', 'bar',
         '--raw-cmd',
+        '--relative-cwd', 'deeep',
         '--',
         'python',
         '-c',
@@ -939,10 +963,12 @@ class TestMain(NetTestCase):
         'caches': [],
         'cipd_input': None,
         'command': ['python', '-c', 'print(\'hi\')'],
+        'relative_cwd': None,
         'dimensions': [
           {'key': 'foo', 'value': 'bar'},
         ],
         'env': [],
+        'env_prefixes': [],
         'execution_timeout_secs': 3600,
         'extra_args': None,
         'grace_period_secs': 30,
@@ -1001,10 +1027,12 @@ class TestMain(NetTestCase):
         'caches': [],
         'cipd_input': None,
         'command': ['python', '-c', 'print(\'hi\')'],
+        'relative_cwd': None,
         'dimensions': [
           {'key': 'foo', 'value': 'bar'},
         ],
         'env': [],
+        'env_prefixes': [],
         'execution_timeout_secs': 3600,
         'extra_args': None,
         'grace_period_secs': 30,
@@ -1014,7 +1042,7 @@ class TestMain(NetTestCase):
         'outputs': [],
         'secret_bytes': None,
       },
-      'service_account_token': 'bot',
+      'service_account': 'bot',
       'tags': [],
       'user': None,
     }
@@ -1106,7 +1134,7 @@ class TestMain(NetTestCase):
     write_json_calls = []
     self.mock(tools, 'write_json', lambda *args: write_json_calls.append(args))
     subprocess_calls = []
-    self.mock(subprocess, 'call', lambda *c: subprocess_calls.append(c))
+    self.mock(subprocess42, 'call', lambda *c: subprocess_calls.append(c))
     self.mock(swarming, 'now', lambda: 123456)
 
     isolated = os.path.join(self.tempdir, 'zaz.isolated')
@@ -1188,11 +1216,13 @@ class TestMain(NetTestCase):
               'caches': [],
               'cipd_input': None,
               'command': None,
+              'relative_cwd': None,
               'dimensions': [
                 {'key': 'foo', 'value': 'bar'},
                 {'key': 'os', 'value': 'Mac'},
               ],
               'env': [],
+              'env_prefixes': [],
               'execution_timeout_secs': 60,
               'extra_args': ['--some-arg', '123'],
               'grace_period_secs': 30,
@@ -1382,7 +1412,7 @@ class TestMain(NetTestCase):
       json.dump(data, f)
     def stub_collect(
         swarming_server, task_ids, timeout, decorate, print_status_updates,
-        task_summary_json, task_output_dir, include_perf):
+        task_summary_json, task_output_dir, task_output_stdout, include_perf):
       self.assertEqual('https://host', swarming_server)
       self.assertEqual([u'12300'], task_ids)
       # It is automatically calculated from hard timeout + expiration + 10.
@@ -1391,13 +1421,14 @@ class TestMain(NetTestCase):
       self.assertEqual(True, print_status_updates)
       self.assertEqual('/a', task_summary_json)
       self.assertEqual('/b', task_output_dir)
+      self.assertSetEqual(set(['console', 'json']), set(task_output_stdout))
       self.assertEqual(False, include_perf)
       print('Fake output')
     self.mock(swarming, 'collect', stub_collect)
     self.main_safe(
         ['collect', '--swarming', 'https://host', '--json', j, '--decorate',
           '--print-status-updates', '--task-summary-json', '/a',
-          '--task-output-dir', '/b'])
+          '--task-output-dir', '/b', '--task-output-stdout', 'all'])
     self._check_output('Fake output\n', '')
 
   def test_query_base(self):
@@ -1467,13 +1498,16 @@ class TestMain(NetTestCase):
         self.assertEqual([os.path.join(w, 'foo'), '--bar'], cmd)
         expected = os.environ.copy()
         expected['aa'] = 'bb'
+        expected['PATH'] = os.pathsep.join(
+            (os.path.join(w, 'foo', 'bar'), os.path.join(w, 'second'),
+              expected['PATH']))
         expected['SWARMING_TASK_ID'] = 'reproduce'
         expected['SWARMING_BOT_ID'] = 'reproduce'
         self.assertEqual(expected, env)
         self.assertEqual(unicode(w), cwd)
         return 0
 
-      self.mock(subprocess, 'call', call)
+      self.mock(subprocess42, 'call', call)
 
       self.expected_requests(
           [
@@ -1485,6 +1519,9 @@ class TestMain(NetTestCase):
                   'command': ['foo'],
                   'env': [
                     {'key': 'aa', 'value': 'bb'},
+                  ],
+                  'env_prefixes': [
+                    {'key': 'PATH', 'value': ['foo/bar', 'second']},
                   ],
                   'secret_bytes': None,
                 },

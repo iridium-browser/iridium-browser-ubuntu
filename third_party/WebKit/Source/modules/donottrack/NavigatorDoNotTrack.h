@@ -45,16 +45,17 @@ class NavigatorDoNotTrack final : public GarbageCollected<NavigatorDoNotTrack>,
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorDoNotTrack);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorDoNotTrack& From(Navigator&);
   static String doNotTrack(Navigator&);
 
   String doNotTrack();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit NavigatorDoNotTrack(Navigator&);
-  static const char* SupplementName();
 };
 
 }  // namespace blink

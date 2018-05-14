@@ -100,6 +100,13 @@ class CloudStorageIntegrationTestBase(gpu_integration_test.GpuIntegrationTest):
       help='Overrides the default on-disk location for generated test images '
       '(only used for local testing without a cloud storage account)',
       default=default_generated_data_dir)
+    parser.add_option(
+      '--dont-restore-color-profile-after-test',
+      dest='dont_restore_color_profile_after_test',
+      action='store_true', default=False,
+      help='(Mainly on Mac) don\'t restore the system\'s original color '
+      'profile after the test completes; leave the system using the sRGB color '
+      'profile. See http://crbug.com/784456.')
 
   def _CompareScreenshotSamples(self, tab, screenshot, expected_colors,
                                 device_pixel_ratio, test_machine_name):
@@ -211,7 +218,7 @@ class CloudStorageIntegrationTestBase(gpu_integration_test.GpuIntegrationTest):
     cls._reference_image_parameters = None
 
   @classmethod
-  def _ComputeGpuInfo(cls, tab):
+  def _ComputeGpuInfo(cls, tab, page):
     if cls._reference_image_parameters:
       return
     browser = cls.browser
@@ -229,6 +236,11 @@ class CloudStorageIntegrationTestBase(gpu_integration_test.GpuIntegrationTest):
     elif device.vendor_string and device.device_string:
       params.vendor_string = device.vendor_string
       params.device_string = device.device_string
+    elif page.gpu_process_disabled:
+      # Match the vendor and device IDs that the browser advertises
+      # when the software renderer is active.
+      params.vendor_id = 65535
+      params.device_id = 65535
     else:
       raise Exception('GPU device information was incomplete')
     # TODO(senorblanco): This should probably be checking
@@ -242,8 +254,8 @@ class CloudStorageIntegrationTestBase(gpu_integration_test.GpuIntegrationTest):
     params.model_name = system_info.model_name
 
   @classmethod
-  def _FormatGpuInfo(cls, tab):
-    cls._ComputeGpuInfo(tab)
+  def _FormatGpuInfo(cls, tab, page):
+    cls._ComputeGpuInfo(tab, page)
     params = cls._reference_image_parameters
     msaa_string = '_msaa' if params.msaa else '_non_msaa'
     if params.vendor_id:
@@ -269,7 +281,7 @@ class CloudStorageIntegrationTestBase(gpu_integration_test.GpuIntegrationTest):
     return '%s_v%s_%s.png' % (
       img_name,
       page.revision,
-      cls._FormatGpuInfo(tab))
+      cls._FormatGpuInfo(tab, page))
 
   @classmethod
   def _UploadBitmapToCloudStorage(cls, bucket, name, bitmap, public=False):

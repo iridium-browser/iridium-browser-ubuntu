@@ -1993,18 +1993,25 @@ static int mkv_parse_video_projection(AVStream *st, const MatroskaTrack *track) 
             return AVERROR_INVALIDDATA;
         }
         break;
+    case MATROSKA_VIDEO_PROJECTION_TYPE_RECTANGULAR:
+        /* No Spherical metadata */
+        return 0;
     default:
+        av_log(NULL, AV_LOG_WARNING,
+               "Unknown spherical metadata type %"PRIu64"\n",
+               track->video.projection.type);
         return 0;
     }
 
     spherical = av_spherical_alloc(&spherical_size);
     if (!spherical)
         return AVERROR(ENOMEM);
+
     spherical->projection = projection;
 
-    spherical->yaw   = (int32_t)(track->video.projection.yaw   * (1 << 16));
-    spherical->pitch = (int32_t)(track->video.projection.pitch * (1 << 16));
-    spherical->roll  = (int32_t)(track->video.projection.roll  * (1 << 16));
+    spherical->yaw   = (int32_t) (track->video.projection.yaw   * (1 << 16));
+    spherical->pitch = (int32_t) (track->video.projection.pitch * (1 << 16));
+    spherical->roll  = (int32_t) (track->video.projection.roll  * (1 << 16));
 
     spherical->padding = padding;
 
@@ -2093,8 +2100,16 @@ static int matroska_parse_tracks(AVFormatContext *s)
         }
 
         if (track->type == MATROSKA_TRACK_TYPE_VIDEO) {
-            if (!track->default_duration && track->video.frame_rate > 0)
-                track->default_duration = 1000000000 / track->video.frame_rate;
+            if (!track->default_duration && track->video.frame_rate > 0) {
+                double default_duration = 1000000000 / track->video.frame_rate;
+                if (default_duration > UINT64_MAX || default_duration < 0) {
+                    av_log(matroska->ctx, AV_LOG_WARNING,
+                         "Invalid frame rate %e. Cannot calculate default duration.\n",
+                         track->video.frame_rate);
+                } else {
+                    track->default_duration = default_duration;
+                }
+            }
             if (track->video.display_width == -1)
                 track->video.display_width = track->video.pixel_width;
             if (track->video.display_height == -1)
@@ -3521,7 +3536,7 @@ static int matroska_read_seek(AVFormatContext *s, int stream_index,
     MatroskaDemuxContext *matroska = s->priv_data;
     MatroskaTrack *tracks = NULL;
     AVStream *st = s->streams[stream_index];
-    int i, index, index_sub, index_min;
+    int i, index, index_min;
 
     /* Parse the CUES now since we need the index data to seek. */
     if (matroska->cues_parsing_deferred > 0) {
@@ -3555,18 +3570,6 @@ static int matroska_read_seek(AVFormatContext *s, int stream_index,
         tracks[i].audio.sub_packet_cnt = 0;
         tracks[i].audio.buf_timecode   = AV_NOPTS_VALUE;
         tracks[i].end_timecode         = 0;
-        if (tracks[i].type == MATROSKA_TRACK_TYPE_SUBTITLE &&
-            tracks[i].stream &&
-            tracks[i].stream->discard != AVDISCARD_ALL) {
-            index_sub = av_index_search_timestamp(
-                tracks[i].stream, st->index_entries[index].timestamp,
-                AVSEEK_FLAG_BACKWARD);
-            while (index_sub >= 0 &&
-                  index_min > 0 &&
-                  tracks[i].stream->index_entries[index_sub].pos < st->index_entries[index_min].pos &&
-                  st->index_entries[index].timestamp - tracks[i].stream->index_entries[index_sub].timestamp < 30000000000 / matroska->time_scale)
-                index_min--;
-            }
     }
 
     avio_seek(s->pb, st->index_entries[index_min].pos, SEEK_SET);

@@ -32,8 +32,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/lifetime/keep_alive_registry.h"
-#include "chrome/browser/lifetime/keep_alive_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -55,6 +53,8 @@
 #include "chrome/grit/chrome_unscaled_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/keep_alive_registry/keep_alive_registry.h"
+#include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
@@ -194,7 +194,7 @@ void BackgroundModeManager::BackgroundModeData::BuildProfileMenu(
     int menu_command_id = command_id_handler_vector_->size();
     // Check that the command ID is within the dynamic range.
     DCHECK_LT(menu_command_id, IDC_MinimumLabelValue);
-    command_id_handler_vector_->push_back(base::Bind(&base::DoNothing));
+    command_id_handler_vector_->push_back(base::DoNothing());
     containing_menu->AddSubMenu(menu_command_id, name_, menu);
   }
 }
@@ -979,7 +979,7 @@ void BackgroundModeManager::UpdateStatusTrayIconContextMenu() {
       if (bmd->GetBackgroundClientCount() > 0) {
         // The submenu constructor caller owns the lifetime of the submenu.
         // The containing menu does not handle the lifetime.
-        submenus.push_back(base::MakeUnique<StatusIconMenuModel>(bmd));
+        submenus.push_back(std::make_unique<StatusIconMenuModel>(bmd));
         bmd->BuildProfileMenu(submenus.back().get(), menu.get());
         profiles_using_background_mode++;
       }

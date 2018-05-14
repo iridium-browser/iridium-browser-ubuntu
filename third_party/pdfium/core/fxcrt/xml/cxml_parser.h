@@ -26,18 +26,18 @@ class CXML_Parser {
   bool IsEOF();
   bool HaveAvailData();
   void SkipWhiteSpaces();
-  void GetName(CFX_ByteString* space, CFX_ByteString* name);
-  void GetAttrValue(CFX_WideString& value);
+  void GetName(ByteString* space, ByteString* name);
+  WideString GetAttrValue();
   uint32_t GetCharRef();
   void GetTagName(bool bStartTag,
                   bool* bEndTag,
-                  CFX_ByteString* space,
-                  CFX_ByteString* name);
-  void SkipLiterals(const CFX_ByteStringC& str);
+                  ByteString* space,
+                  ByteString* name);
+  void SkipLiterals(const ByteStringView& str);
   std::unique_ptr<CXML_Element> ParseElement(CXML_Element* pParent,
                                              bool bStartTag);
   void InsertContentSegment(bool bCDATA,
-                            const CFX_WideStringC& content,
+                            const WideStringView& content,
                             CXML_Element* pElement);
   void InsertCDATASegment(CFX_UTF8Decoder& decoder, CXML_Element* pElement);
 
@@ -53,9 +53,5 @@ class CXML_Parser {
   FX_FILESIZE m_nBufferOffset;
   size_t m_dwIndex;
 };
-
-void FX_XML_SplitQualifiedName(const CFX_ByteStringC& bsFullName,
-                               CFX_ByteStringC& bsSpace,
-                               CFX_ByteStringC& bsName);
 
 #endif  // CORE_FXCRT_XML_CXML_PARSER_H_

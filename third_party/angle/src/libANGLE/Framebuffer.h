@@ -58,8 +58,9 @@ class FramebufferState final : angle::NonCopyable
     ~FramebufferState();
 
     const std::string &getLabel();
+    size_t getReadIndex() const;
 
-    const FramebufferAttachment *getAttachment(GLenum attachment) const;
+    const FramebufferAttachment *getAttachment(const Context *context, GLenum attachment) const;
     const FramebufferAttachment *getReadAttachment() const;
     const FramebufferAttachment *getFirstNonNullAttachment() const;
     const FramebufferAttachment *getFirstColorAttachment() const;
@@ -80,6 +81,7 @@ class FramebufferState final : angle::NonCopyable
 
     bool attachmentsHaveSameDimensions() const;
     bool colorAttachmentsAreUniqueImages() const;
+    Box getDimensions() const;
 
     const FramebufferAttachment *getDrawBuffer(size_t drawBufferIdx) const;
     size_t getDrawBufferCount() const;
@@ -87,12 +89,21 @@ class FramebufferState final : angle::NonCopyable
     GLint getDefaultWidth() const { return mDefaultWidth; };
     GLint getDefaultHeight() const { return mDefaultHeight; };
     GLint getDefaultSamples() const { return mDefaultSamples; };
-    GLboolean getDefaultFixedSampleLocations() const { return mDefaultFixedSampleLocations; };
+    bool getDefaultFixedSampleLocations() const { return mDefaultFixedSampleLocations; };
 
     bool hasDepth() const;
     bool hasStencil() const;
 
+    GLenum getMultiviewLayout() const;
+    GLsizei getNumViews() const;
+    const std::vector<Offset> *getViewportOffsets() const;
+    GLint getBaseViewIndex() const;
+
   private:
+    const FramebufferAttachment *getWebGLDepthStencilAttachment() const;
+    const FramebufferAttachment *getWebGLDepthAttachment() const;
+    const FramebufferAttachment *getWebGLStencilAttachment() const;
+
     friend class Framebuffer;
 
     std::string mLabel;
@@ -104,11 +115,12 @@ class FramebufferState final : angle::NonCopyable
     std::vector<GLenum> mDrawBufferStates;
     GLenum mReadBufferState;
     DrawBufferMask mEnabledDrawBuffers;
+    ComponentTypeMask mDrawBufferTypeMask;
 
     GLint mDefaultWidth;
     GLint mDefaultHeight;
     GLint mDefaultSamples;
-    GLboolean mDefaultFixedSampleLocations;
+    bool mDefaultFixedSampleLocations;
 
     // It's necessary to store all this extra state so we can restore attachments
     // when DEPTH_STENCIL/DEPTH/STENCIL is unbound in WebGL 1.
@@ -116,13 +128,12 @@ class FramebufferState final : angle::NonCopyable
     FramebufferAttachment mWebGLDepthAttachment;
     FramebufferAttachment mWebGLStencilAttachment;
     bool mWebGLDepthStencilConsistent;
+
+    // Tracks if we need to initialize the resources for each attachment.
+    angle::BitSet<IMPLEMENTATION_MAX_FRAMEBUFFER_ATTACHMENTS + 2> mResourceNeedsInit;
 };
 
-using OnAttachmentDirtyBinding  = angle::ChannelBinding<>;
-using OnAttachmentDirtyChannel  = angle::BroadcastChannel<>;
-using OnAttachmentDirtyReceiver = angle::SignalReceiver<>;
-
-class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
+class Framebuffer final : public LabeledObject, public angle::ObserverInterface
 {
   public:
     // Constructor to build application-defined framebuffers
@@ -132,7 +143,7 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
     // Constructor to build a fake default framebuffer when surfaceless
     Framebuffer(rx::GLImplFactory *factory);
 
-    virtual ~Framebuffer();
+    ~Framebuffer() override;
     void onDestroy(const Context *context);
     void destroyDefault(const egl::Display *display);
 
@@ -148,6 +159,13 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
                        GLenum binding,
                        const ImageIndex &textureIndex,
                        FramebufferAttachmentObject *resource);
+    void setAttachmentMultiviewLayered(const Context *context,
+                                       GLenum type,
+                                       GLenum binding,
+                                       const ImageIndex &textureIndex,
+                                       FramebufferAttachmentObject *resource,
+                                       GLsizei numViews,
+                                       GLint baseViewIndex);
     void setAttachmentMultiviewSideBySide(const Context *context,
                                           GLenum type,
                                           GLenum binding,
@@ -157,8 +175,8 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
                                           const GLint *viewportOffsets);
     void resetAttachment(const Context *context, GLenum binding);
 
-    void detachTexture(const Context *context, GLuint texture);
-    void detachRenderbuffer(const Context *context, GLuint renderbuffer);
+    bool detachTexture(const Context *context, GLuint texture);
+    bool detachRenderbuffer(const Context *context, GLuint renderbuffer);
 
     const FramebufferAttachment *getColorbuffer(size_t colorAttachment) const;
     const FramebufferAttachment *getDepthbuffer() const;
@@ -171,7 +189,11 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
     const FramebufferAttachment *getFirstColorbuffer() const;
     const FramebufferAttachment *getFirstNonNullAttachment() const;
 
-    const FramebufferAttachment *getAttachment(GLenum attachment) const;
+    const FramebufferAttachment *getAttachment(const Context *context, GLenum attachment) const;
+    GLenum getMultiviewLayout() const;
+    GLsizei getNumViews() const;
+    GLint getBaseViewIndex() const;
+    const std::vector<Offset> *getViewportOffsets() const;
 
     size_t getDrawbufferStateCount() const;
     GLenum getDrawBufferState(size_t drawBuffer) const;
@@ -179,6 +201,8 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
     void setDrawBuffers(size_t count, const GLenum *buffers);
     const FramebufferAttachment *getDrawBuffer(size_t drawBuffer) const;
     GLenum getDrawbufferWriteType(size_t drawBuffer) const;
+    ComponentTypeMask getDrawBufferTypeMask() const;
+    DrawBufferMask getDrawBufferMask() const;
     bool hasEnabledDrawBuffer() const;
 
     GLenum getReadBufferState() const;
@@ -198,11 +222,11 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
     GLint getDefaultWidth() const;
     GLint getDefaultHeight() const;
     GLint getDefaultSamples() const;
-    GLboolean getDefaultFixedSampleLocations() const;
+    bool getDefaultFixedSampleLocations() const;
     void setDefaultWidth(GLint defaultWidth);
     void setDefaultHeight(GLint defaultHeight);
     void setDefaultSamples(GLint defaultSamples);
-    void setDefaultFixedSampleLocations(GLboolean defaultFixedSampleLocations);
+    void setDefaultFixedSampleLocations(bool defaultFixedSampleLocations);
 
     void invalidateCompletenessCache();
 
@@ -226,22 +250,22 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
     Error invalidateSub(const Context *context,
                         size_t count,
                         const GLenum *attachments,
-                        const gl::Rectangle &area);
+                        const Rectangle &area);
 
-    Error clear(const gl::Context *context, GLbitfield mask);
-    Error clearBufferfv(const gl::Context *context,
+    Error clear(const Context *context, GLbitfield mask);
+    Error clearBufferfv(const Context *context,
                         GLenum buffer,
                         GLint drawbuffer,
                         const GLfloat *values);
-    Error clearBufferuiv(const gl::Context *context,
+    Error clearBufferuiv(const Context *context,
                          GLenum buffer,
                          GLint drawbuffer,
                          const GLuint *values);
-    Error clearBufferiv(const gl::Context *context,
+    Error clearBufferiv(const Context *context,
                         GLenum buffer,
                         GLint drawbuffer,
                         const GLint *values);
-    Error clearBufferfi(const gl::Context *context,
+    Error clearBufferfi(const Context *context,
                         GLenum buffer,
                         GLint drawbuffer,
                         GLfloat depth,
@@ -249,23 +273,23 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
 
     GLenum getImplementationColorReadFormat(const Context *context) const;
     GLenum getImplementationColorReadType(const Context *context) const;
-    Error readPixels(const gl::Context *context,
-                     const gl::Rectangle &area,
+    Error readPixels(const Context *context,
+                     const Rectangle &area,
                      GLenum format,
                      GLenum type,
-                     void *pixels) const;
+                     void *pixels);
 
-    Error blit(const gl::Context *context,
+    Error blit(const Context *context,
                const Rectangle &sourceArea,
                const Rectangle &destArea,
                GLbitfield mask,
                GLenum filter);
 
-    enum DirtyBitType : uint32_t
+    enum DirtyBitType : size_t
     {
         DIRTY_BIT_COLOR_ATTACHMENT_0,
         DIRTY_BIT_COLOR_ATTACHMENT_MAX =
-            DIRTY_BIT_COLOR_ATTACHMENT_0 + gl::IMPLEMENTATION_MAX_FRAMEBUFFER_ATTACHMENTS,
+            DIRTY_BIT_COLOR_ATTACHMENT_0 + IMPLEMENTATION_MAX_FRAMEBUFFER_ATTACHMENTS,
         DIRTY_BIT_DEPTH_ATTACHMENT = DIRTY_BIT_COLOR_ATTACHMENT_MAX,
         DIRTY_BIT_STENCIL_ATTACHMENT,
         DIRTY_BIT_DRAW_BUFFERS,
@@ -278,22 +302,30 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
         DIRTY_BIT_MAX = DIRTY_BIT_UNKNOWN
     };
 
-    typedef angle::BitSet<DIRTY_BIT_MAX> DirtyBits;
+    using DirtyBits = angle::BitSet<DIRTY_BIT_MAX>;
     bool hasAnyDirtyBit() const { return mDirtyBits.any(); }
 
     void syncState(const Context *context);
 
-    // angle::SignalReceiver implementation
-    void signal(uint32_t token) override;
+    // Observer implementation
+    void onSubjectStateChange(const Context *context,
+                              angle::SubjectIndex index,
+                              angle::SubjectMessage message) override;
 
     bool formsRenderingFeedbackLoopWith(const State &state) const;
     bool formsCopyingFeedbackLoopWith(GLuint copyTextureID,
                                       GLint copyTextureLevel,
                                       GLint copyTextureLayer) const;
 
+    Error ensureDrawAttachmentsInitialized(const Context *context);
+    Error ensureReadAttachmentInitialized(const Context *context, GLbitfield blitMask);
+    Box getDimensions() const;
+
+    bool hasTextureAttachment(const Texture *texture) const;
+
   private:
-    void detachResourceById(const Context *context, GLenum resourceType, GLuint resourceId);
-    void detachMatchingAttachment(const Context *context,
+    bool detachResourceById(const Context *context, GLenum resourceType, GLuint resourceId);
+    bool detachMatchingAttachment(const Context *context,
                                   FramebufferAttachment *attachment,
                                   GLenum matchType,
                                   GLuint matchId,
@@ -325,7 +357,7 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
     void updateAttachment(const Context *context,
                           FramebufferAttachment *attachment,
                           size_t dirtyBit,
-                          OnAttachmentDirtyBinding *onDirtyBinding,
+                          angle::ObserverBinding *onDirtyBinding,
                           GLenum type,
                           GLenum binding,
                           const ImageIndex &textureIndex,
@@ -335,16 +367,32 @@ class Framebuffer final : public LabeledObject, public OnAttachmentDirtyReceiver
                           GLenum multiviewLayout,
                           const GLint *viewportOffsets);
 
+    void markDrawAttachmentsInitialized(bool color, bool depth, bool stencil);
+    void markBufferInitialized(GLenum bufferType, GLint bufferIndex);
+    Error ensureBufferInitialized(const Context *context, GLenum bufferType, GLint bufferIndex);
+
+    // Checks that we have a partially masked clear:
+    // * some color channels are masked out
+    // * some stencil values are masked out
+    // * scissor test partially overlaps the framebuffer
+    bool partialClearNeedsInit(const Context *context, bool color, bool depth, bool stencil);
+    bool partialBufferClearNeedsInit(const Context *context, GLenum bufferType);
+
+    FramebufferAttachment *getAttachmentFromSubjectIndex(angle::SubjectIndex index);
+
     FramebufferState mState;
     rx::FramebufferImpl *mImpl;
     GLuint mId;
 
     Optional<GLenum> mCachedStatus;
-    std::vector<OnAttachmentDirtyBinding> mDirtyColorAttachmentBindings;
-    OnAttachmentDirtyBinding mDirtyDepthAttachmentBinding;
-    OnAttachmentDirtyBinding mDirtyStencilAttachmentBinding;
+    std::vector<angle::ObserverBinding> mDirtyColorAttachmentBindings;
+    angle::ObserverBinding mDirtyDepthAttachmentBinding;
+    angle::ObserverBinding mDirtyStencilAttachmentBinding;
 
     DirtyBits mDirtyBits;
+
+    // A cache of attached textures for quick validation of feedback loops.
+    mutable Optional<std::set<const FramebufferAttachmentObject *>> mAttachedTextures;
 };
 
 }  // namespace gl

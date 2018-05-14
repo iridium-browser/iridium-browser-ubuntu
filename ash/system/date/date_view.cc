@@ -78,7 +78,7 @@ void BaseDateTimeView::UpdateText() {
 
 void BaseDateTimeView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   ActionableView::GetAccessibleNodeData(node_data);
-  node_data->role = ui::AX_ROLE_TIME;
+  node_data->role = ax::mojom::Role::kTime;
 }
 
 BaseDateTimeView::BaseDateTimeView(SystemTrayItem* owner)
@@ -116,30 +116,25 @@ void BaseDateTimeView::UpdateTextInternal(const base::Time& now) {
                     base::ASCIIToUTF16(", ") +
                     base::TimeFormatFriendlyDate(now));
 
-  NotifyAccessibilityEvent(ui::AX_EVENT_TEXT_CHANGED, true);
+  NotifyAccessibilityEvent(ax::mojom::Event::kTextChanged, true);
 }
 
 void BaseDateTimeView::ChildPreferredSizeChanged(views::View* child) {
   PreferredSizeChanged();
 }
 
-void BaseDateTimeView::OnLocaleChanged() {
-  UpdateText();
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 DateView::DateView(SystemTrayItem* owner)
     : BaseDateTimeView(owner), action_(DateAction::NONE) {
-  // TODO(tdanderson): Tweak spacing and layout for material design.
-  views::BoxLayout* box_layout =
-      new views::BoxLayout(views::BoxLayout::kHorizontal,
-                           gfx::Insets(0, kTrayPopupLabelHorizontalPadding), 0);
+  auto box_layout = std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kHorizontal,
+      gfx::Insets(0, kTrayPopupLabelHorizontalPadding), 0);
   box_layout->set_main_axis_alignment(
       views::BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
   box_layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
-  SetLayoutManager(box_layout);
+  SetLayoutManager(std::move(box_layout));
   date_label_ = TrayPopupUtils::CreateDefaultLabel();
   UpdateTextInternal(base::Time::Now());
   TrayPopupItemStyle style(TrayPopupItemStyle::FontStyle::SYSTEM_INFO);
@@ -147,7 +142,7 @@ DateView::DateView(SystemTrayItem* owner)
   AddChildView(date_label_);
 }
 
-DateView::~DateView() {}
+DateView::~DateView() = default;
 
 void DateView::SetAction(DateAction action) {
   if (action == action_)
@@ -200,7 +195,7 @@ TimeView::TimeView(ClockLayout clock_layout) : BaseDateTimeView(nullptr) {
   UpdateClockLayout(clock_layout);
 }
 
-TimeView::~TimeView() {}
+TimeView::~TimeView() = default;
 
 void TimeView::UpdateTimeFormat() {
   hour_type_ = Shell::Get()->system_tray_controller()->hour_clock_type();
@@ -251,7 +246,7 @@ bool TimeView::OnMousePressed(const ui::MouseEvent& event) {
 }
 
 void TimeView::OnGestureEvent(ui::GestureEvent* event) {
-  // Skip gesture handling happening in CustomButton so that the container views
+  // Skip gesture handling happening in Button so that the container views
   // receive and handle them properly.
   // TODO(mohsen): Refactor TimeView/DateView classes so that they are not
   // ActionableView anymore. Create an ActionableView as a container for when
@@ -263,12 +258,12 @@ void TimeView::UpdateClockLayout(ClockLayout clock_layout) {
   if (clock_layout == ClockLayout::HORIZONTAL_CLOCK) {
     RemoveChildView(vertical_label_hours_.get());
     RemoveChildView(vertical_label_minutes_.get());
-    SetLayoutManager(new views::FillLayout());
+    SetLayoutManager(std::make_unique<views::FillLayout>());
     AddChildView(horizontal_label_.get());
   } else {
     RemoveChildView(horizontal_label_.get());
-    views::GridLayout* layout = new views::GridLayout(this);
-    SetLayoutManager(layout);
+    views::GridLayout* layout =
+        SetLayoutManager(std::make_unique<views::GridLayout>(this));
     const int kColumnId = 0;
     views::ColumnSet* columns = layout->AddColumnSet(kColumnId);
     columns->AddPaddingColumn(0, kVerticalClockLeftPadding);

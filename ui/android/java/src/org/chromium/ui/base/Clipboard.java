@@ -19,7 +19,6 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.ui.R;
 import org.chromium.ui.widget.Toast;
@@ -88,7 +87,6 @@ public class Clipboard implements ClipboardManager.OnPrimaryClipChangedListener 
         }
     }
 
-    // TODO(ctzsm): Remove this method after Android API is updated
     private boolean hasStyleSpan(Spanned spanned) {
         Class<?>[] styleClasses = {
                 CharacterStyle.class, ParagraphStyle.class, UpdateAppearance.class};
@@ -143,7 +141,6 @@ public class Clipboard implements ClipboardManager.OnPrimaryClipChangedListener 
      * the specified string.
      * @param text  will become the content of the clipboard's primary clip
      */
-    @SuppressFBWarnings("UPM_UNCALLED_PRIVATE_METHOD")
     @CalledByNative
     public void setText(final String text) {
         setPrimaryClipNoException(ClipData.newPlainText("text", text));
@@ -156,7 +153,6 @@ public class Clipboard implements ClipboardManager.OnPrimaryClipChangedListener 
      * @param html  The HTML content to be pasted to the clipboard.
      * @param text  Plain-text representation of the HTML content.
      */
-    @SuppressFBWarnings("UPM_UNCALLED_PRIVATE_METHOD")
     @CalledByNative
     private void setHTMLText(final String html, final String text) {
         setPrimaryClipNoException(ClipData.newHtmlText("html", text, html));
@@ -166,7 +162,6 @@ public class Clipboard implements ClipboardManager.OnPrimaryClipChangedListener 
      * Clears the Clipboard Primary clip.
      *
      */
-    @SuppressFBWarnings("UPM_UNCALLED_PRIVATE_METHOD")
     @CalledByNative
     private void clear() {
         setPrimaryClipNoException(ClipData.newPlainText(null, null));

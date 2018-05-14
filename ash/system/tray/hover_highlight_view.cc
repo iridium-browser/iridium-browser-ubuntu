@@ -26,7 +26,7 @@ HoverHighlightView::HoverHighlightView(ViewClickListener* listener)
   SetInkDropMode(InkDropHostView::InkDropMode::ON);
 }
 
-HoverHighlightView::~HoverHighlightView() {}
+HoverHighlightView::~HoverHighlightView() = default;
 
 void HoverHighlightView::AddRightIcon(const gfx::ImageSkia& image,
                                       int icon_size) {
@@ -38,13 +38,17 @@ void HoverHighlightView::AddRightIcon(const gfx::ImageSkia& image,
   AddRightView(right_icon);
 }
 
-void HoverHighlightView::AddRightView(views::View* view) {
+void HoverHighlightView::AddRightView(views::View* view,
+                                      std::unique_ptr<views::Border> border) {
   DCHECK(is_populated_);
   DCHECK(!right_view_);
 
   // When a right view is added, extra padding on the CENTER container should be
   // removed.
   tri_view_->SetContainerBorder(TriView::Container::CENTER, nullptr);
+
+  if (border)
+    tri_view_->SetContainerBorder(TriView::Container::END, std::move(border));
 
   right_view_ = view;
   right_view_->SetEnabled(enabled());
@@ -57,6 +61,7 @@ void HoverHighlightView::SetRightViewVisible(bool visible) {
   if (!right_view_)
     return;
 
+  tri_view_->SetContainerVisible(TriView::Container::END, visible);
   right_view_->SetVisible(visible);
   Layout();
 }
@@ -113,7 +118,7 @@ void HoverHighlightView::DoAddIconAndLabels(
   DCHECK(!is_populated_);
   is_populated_ = true;
 
-  SetLayoutManager(new views::FillLayout);
+  SetLayoutManager(std::make_unique<views::FillLayout>());
   tri_view_ = TrayPopupUtils::CreateDefaultRowView();
   AddChildView(tri_view_);
 
@@ -146,7 +151,7 @@ void HoverHighlightView::AddLabelRow(const base::string16& text) {
   DCHECK(!is_populated_);
   is_populated_ = true;
 
-  SetLayoutManager(new views::FillLayout);
+  SetLayoutManager(std::make_unique<views::FillLayout>());
   tri_view_ = TrayPopupUtils::CreateDefaultRowView();
   AddChildView(tri_view_);
 
@@ -171,7 +176,7 @@ void HoverHighlightView::SetAccessiblityState(
     AccessibilityState accessibility_state) {
   accessibility_state_ = accessibility_state;
   if (accessibility_state_ != AccessibilityState::DEFAULT)
-    NotifyAccessibilityEvent(ui::AX_EVENT_CHECKED_STATE_CHANGED, true);
+    NotifyAccessibilityEvent(ax::mojom::Event::kCheckedStateChanged, true);
 }
 
 void HoverHighlightView::Reset() {
@@ -194,18 +199,18 @@ bool HoverHighlightView::PerformAction(const ui::Event& event) {
 void HoverHighlightView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   ActionableView::GetAccessibleNodeData(node_data);
 
-  ui::AXCheckedState checked_state;
+  ax::mojom::CheckedState checked_state;
 
   if (accessibility_state_ == AccessibilityState::CHECKED_CHECKBOX)
-    checked_state = ui::AX_CHECKED_STATE_TRUE;
+    checked_state = ax::mojom::CheckedState::kTrue;
   else if (accessibility_state_ == AccessibilityState::UNCHECKED_CHECKBOX)
-    checked_state = ui::AX_CHECKED_STATE_FALSE;
+    checked_state = ax::mojom::CheckedState::kFalse;
   else
     return;  // Not a checkbox
 
   // Checkbox
-  node_data->role = ui::AX_ROLE_CHECK_BOX;
-  node_data->AddIntAttribute(ui::AX_ATTR_CHECKED_STATE, checked_state);
+  node_data->role = ax::mojom::Role::kCheckBox;
+  node_data->SetCheckedState(checked_state);
 }
 
 gfx::Size HoverHighlightView::CalculatePreferredSize() const {

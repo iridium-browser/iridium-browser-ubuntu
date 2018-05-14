@@ -12,9 +12,9 @@ FlingAnimation::FlingAnimation(float time_constant,
                                const FlingCallback& fling_callback)
     : fling_tracker_(time_constant),
       fling_callback_(fling_callback),
-      clock_(new base::DefaultTickClock()) {}
+      clock_(base::DefaultTickClock::GetInstance()) {}
 
-FlingAnimation::~FlingAnimation() {}
+FlingAnimation::~FlingAnimation() = default;
 
 void FlingAnimation::SetVelocity(float velocity_x, float velocity_y) {
   fling_tracker_.StartFling(velocity_x, velocity_y);
@@ -42,9 +42,8 @@ void FlingAnimation::Abort() {
   fling_tracker_.StopFling();
 }
 
-void FlingAnimation::SetTickClockForTest(
-    std::unique_ptr<base::TickClock> clock) {
-  clock_ = std::move(clock);
+void FlingAnimation::SetTickClockForTest(base::TickClock* clock) {
+  clock_ = clock;
 }
 
 }  // namespace remoting

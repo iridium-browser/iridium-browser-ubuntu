@@ -4,6 +4,8 @@
 
 #include "chromeos/dbus/shill_manager_client.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
@@ -91,17 +93,15 @@ class ShillManagerClientImpl : public ShillManagerClient {
   }
 
   void SetNetworkThrottlingStatus(
-      const bool enabled,
-      const uint32_t upload_rate_kbits,
-      const uint32_t download_rate_kbits,
+      const NetworkThrottlingStatus& status,
       const base::Closure& callback,
       const ErrorCallback& error_callback) override {
     dbus::MethodCall method_call(shill::kFlimflamManagerInterface,
                                  shill::kSetNetworkThrottlingFunction);
     dbus::MessageWriter writer(&method_call);
-    writer.AppendBool(enabled);
-    writer.AppendUint32(upload_rate_kbits);
-    writer.AppendUint32(download_rate_kbits);
+    writer.AppendBool(status.enabled);
+    writer.AppendUint32(status.upload_rate_kbits);
+    writer.AppendUint32(status.download_rate_kbits);
     helper_->CallVoidMethodWithErrorCallback(&method_call, callback,
                                              error_callback);
   }
@@ -241,9 +241,9 @@ class ShillManagerClientImpl : public ShillManagerClient {
 
 }  // namespace
 
-ShillManagerClient::ShillManagerClient() {}
+ShillManagerClient::ShillManagerClient() = default;
 
-ShillManagerClient::~ShillManagerClient() {}
+ShillManagerClient::~ShillManagerClient() = default;
 
 // static
 ShillManagerClient* ShillManagerClient::Create() {
@@ -251,10 +251,8 @@ ShillManagerClient* ShillManagerClient::Create() {
 }
 
 // ShillManagerClient::VerificationProperties implementation.
-ShillManagerClient::VerificationProperties::VerificationProperties() {
-}
+ShillManagerClient::VerificationProperties::VerificationProperties() = default;
 
-ShillManagerClient::VerificationProperties::~VerificationProperties() {
-}
+ShillManagerClient::VerificationProperties::~VerificationProperties() = default;
 
 }  // namespace chromeos

@@ -4,51 +4,37 @@
 
 #include "core/dom/NthIndexCache.h"
 
+#include <memory>
 #include "core/dom/Document.h"
 #include "core/html/HTMLElement.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/testing/PageTestBase.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <memory>
 
 namespace blink {
 
-class NthIndexCacheTest : public ::testing::Test {
- protected:
-  void SetUp() override;
-
-  Document& GetDocument() const { return dummy_page_holder_->GetDocument(); }
-  void SetHtmlInnerHTML(const char* html_content);
-
- private:
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
-};
-
-void NthIndexCacheTest::SetUp() {
-  dummy_page_holder_ = DummyPageHolder::Create(IntSize(800, 600));
-}
+class NthIndexCacheTest : public PageTestBase {};
 
 TEST_F(NthIndexCacheTest, NthIndex) {
-  GetDocument().documentElement()->setInnerHTML(
-      "<body>"
-      "<span "
-      "id=first></span><span></span><span></span><span></span><span></span>"
-      "<span></span><span></span><span></span><span></span><span></span>"
-      "Text does not count"
-      "<span id=nth-last-child></span>"
-      "<span id=nth-child></span>"
-      "<span></span><span></span><span></span><span></span><span></span>"
-      "<span></span><span></span><span></span><span></span><span "
-      "id=last></span>"
-      "</body>");
+  GetDocument().documentElement()->SetInnerHTMLFromString(R"HTML(
+    <body>
+    <span
+    id=first></span><span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span><span></span>
+    Text does not count
+    <span id=nth-last-child></span>
+    <span id=nth-child></span>
+    <span></span><span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span><span
+    id=last></span>
+    </body>
+  )HTML");
 
   NthIndexCache nth_index_cache(GetDocument());
 
+  EXPECT_EQ(nth_index_cache.NthChildIndex(*GetElementById("nth-child")), 12U);
   EXPECT_EQ(
-      nth_index_cache.NthChildIndex(*GetDocument().getElementById("nth-child")),
+      nth_index_cache.NthLastChildIndex(*GetElementById("nth-last-child")),
       12U);
-  EXPECT_EQ(nth_index_cache.NthLastChildIndex(
-                *GetDocument().getElementById("nth-last-child")),
-            12U);
 }
 
 }  // namespace blink

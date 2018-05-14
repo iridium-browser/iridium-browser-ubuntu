@@ -4,6 +4,8 @@
 
 #include "chromeos/components/tether/disconnect_tethering_request_sender_impl.h"
 
+#include <memory>
+
 #include "chromeos/components/tether/ble_connection_manager.h"
 #include "chromeos/components/tether/tether_host_fetcher.h"
 #include "components/proximity_auth/logging/logging.h"
@@ -11,6 +13,36 @@
 namespace chromeos {
 
 namespace tether {
+
+// static
+DisconnectTetheringRequestSenderImpl::Factory*
+    DisconnectTetheringRequestSenderImpl::Factory::factory_instance_ = nullptr;
+
+// static
+std::unique_ptr<DisconnectTetheringRequestSender>
+DisconnectTetheringRequestSenderImpl::Factory::NewInstance(
+    BleConnectionManager* ble_connection_manager,
+    TetherHostFetcher* tether_host_fetcher) {
+  if (!factory_instance_)
+    factory_instance_ = new Factory();
+
+  return factory_instance_->BuildInstance(ble_connection_manager,
+                                          tether_host_fetcher);
+}
+
+// static
+void DisconnectTetheringRequestSenderImpl::Factory::SetInstanceForTesting(
+    Factory* factory) {
+  factory_instance_ = factory;
+}
+
+std::unique_ptr<DisconnectTetheringRequestSender>
+DisconnectTetheringRequestSenderImpl::Factory::BuildInstance(
+    BleConnectionManager* ble_connection_manager,
+    TetherHostFetcher* tether_host_fetcher) {
+  return base::WrapUnique(new DisconnectTetheringRequestSenderImpl(
+      ble_connection_manager, tether_host_fetcher));
+}
 
 DisconnectTetheringRequestSenderImpl::DisconnectTetheringRequestSenderImpl(
     BleConnectionManager* ble_connection_manager,

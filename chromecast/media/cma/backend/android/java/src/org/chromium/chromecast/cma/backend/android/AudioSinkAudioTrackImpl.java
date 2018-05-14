@@ -5,6 +5,8 @@
 package org.chromium.chromecast.cma.backend.android;
 
 import android.annotation.TargetApi;
+import android.content.Context;
+import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTimestamp;
@@ -13,9 +15,11 @@ import android.os.Build;
 import android.os.SystemClock;
 import android.util.SparseIntArray;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.chromecast.media.AudioContentType;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -48,11 +52,22 @@ class AudioSinkAudioTrackImpl {
     private static final int DEBUG_LEVEL = 0;
 
     // Mapping from Android's stream_type to Cast's AudioContentType (used for callback).
-    private static final SparseIntArray CAST_TYPE_TO_ANDROID_TYPE_MAP = new SparseIntArray(3) {
+    private static final SparseIntArray CAST_TYPE_TO_ANDROID_USAGE_TYPE_MAP = new SparseIntArray(
+            3) {
         {
-            append(AudioContentType.MEDIA, AudioManager.STREAM_MUSIC);
-            append(AudioContentType.ALARM, AudioManager.STREAM_ALARM);
-            append(AudioContentType.COMMUNICATION, AudioManager.STREAM_SYSTEM);
+            append(AudioContentType.MEDIA, AudioAttributes.USAGE_MEDIA);
+            append(AudioContentType.ALARM, AudioAttributes.USAGE_ALARM);
+            append(AudioContentType.COMMUNICATION, AudioAttributes.USAGE_ASSISTANCE_SONIFICATION);
+        }
+    };
+
+    private static final SparseIntArray CAST_TYPE_TO_ANDROID_CONTENT_TYPE_MAP = new SparseIntArray(
+            3) {
+        {
+            append(AudioContentType.MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC);
+            // Note: ALARM uses the same as COMMUNICATON.
+            append(AudioContentType.ALARM, AudioAttributes.CONTENT_TYPE_SONIFICATION);
+            append(AudioContentType.COMMUNICATION, AudioAttributes.CONTENT_TYPE_SONIFICATION);
         }
     };
 
@@ -62,13 +77,55 @@ class AudioSinkAudioTrackImpl {
     private static final int AUDIO_MODE = AudioTrack.MODE_STREAM;
     private static final int BYTES_PER_FRAME = 2 * 4; // 2 channels, float (4-bytes)
 
+    // Parameter to determine the proper internal buffer size of the AudioTrack instance. In order
+    // to minimize latency we want a buffer as small as possible. However, to avoid underruns we
+    // need a size several times the size returned by AudioTrack.getMinBufferSize() (see
+    // the Android documentation for details).
+    private static final int MIN_BUFFER_SIZE_MULTIPLIER = 3;
+
     private static final long NO_TIMESTAMP = Long.MIN_VALUE;
+    private static final long NO_FRAME_POSITION = -1;
 
     private static final long SEC_IN_NSEC = 1000000000L;
-    private static final long TIMESTAMP_UPDATE_PERIOD = 3 * SEC_IN_NSEC;
+    private static final long SEC_IN_USEC = 1000000L;
+    private static final long MSEC_IN_NSEC = 1000000L;
+    private static final long USEC_IN_NSEC = 1000L;
+
+    private static final long TIMESTAMP_UPDATE_PERIOD = 250 * MSEC_IN_NSEC;
     private static final long UNDERRUN_LOG_THROTTLE_PERIOD = SEC_IN_NSEC;
 
+    // Maximum amount a timestamp may deviate from the previous one to be considered stable at
+    // startup or after an underrun event.
+    private static final long MAX_STABLE_TIMESTAMP_DEVIATION_NSEC = 150 * USEC_IN_NSEC;
+    // Number of consecutive stable timestamps needed to make it a valid reference point at startup
+    // or after an underrun event.
+    private static final int MIN_TIMESTAMP_STABILITY_CNT = 3;
+    // Minimum time timestamps need to be stable to make it a valid reference point at startup or
+    // after an underrun event. This is an additional safeguard.
+    private static final long MIN_TIMESTAMP_STABILITY_TIME_NSEC = SEC_IN_NSEC;
+    // After startup, any timestamp deviating more than this amount is ignored.
+    private static final long TSTAMP_DEV_THRESHOLD_TO_IGNORE_NSEC = 500 * USEC_IN_NSEC;
+    // Don't ignore timestamps for longer than this amount of time.
+    private static final long MAX_TIME_IGNORING_TSTAMPS_NSECS = SEC_IN_NSEC;
+
+    // Additional padding for minimum buffer time, determined experimentally.
+    private static final long MIN_BUFFERED_TIME_PADDING_US = 20000;
+
+    private static AudioManager sAudioManager = null;
+
+    private static int sSessionIdMedia = AudioManager.ERROR;
+    private static int sSessionIdCommunication = AudioManager.ERROR;
+
     private final long mNativeAudioSinkAudioTrackImpl;
+
+    private enum ReferenceTimestampState {
+        STARTING_UP, // Starting up, no valid reference time yet.
+        STABLE, // Reference time exists and is updated regularly.
+        RESYNCING_AFTER_UNDERRUN, // The AudioTrack hit an underrun and we need to find a new
+                                  // reference timestamp after the underrun point.
+    }
+
+    ReferenceTimestampState mReferenceTimestampState;
 
     private boolean mIsInitialized;
 
@@ -77,11 +134,20 @@ class AudioSinkAudioTrackImpl {
 
     private AudioTrack mAudioTrack;
 
-    // Timestamping logic for RenderingDelay calculations.
-    private AudioTimestamp mRefPointTStamp;
+    // Timestamping logic for RenderingDelay calculations. See also the description for
+    // getNewFramePos0Timestamp() for additional information.
+    private long mRefNanoTimeAtFramePos0; // Reference time used to interpolate new timestamps at
+                                          // different frame positions.
+    private long mOriginalFramePosOfLastTimestamp; // The original frame position of the
+                                                   // AudioTimestamp that was last read from the
+                                                   // AudioTrack. This is used to filter duplicate
+                                                   // timestamps.
+    private long mRefNanoTimeAtFramePos0Candidate; // Candidate that still needs to show it is
+                                                   // stable.
     private long mLastTimestampUpdateNsec; // Last time we updated the timestamp.
     private boolean mTriggerTimestampUpdateNow; // Set to true to trigger an early update.
-
+    private long mTimestampStabilityCounter; // Counts consecutive stable timestamps at startup.
+    private long mTimestampStabilityStartTimeNsec; // Time when we started being stable.
     private int mLastUnderrunCount;
     private long mLastUnderrunLogNsec;
 
@@ -101,6 +167,55 @@ class AudioSinkAudioTrackImpl {
     private ByteBuffer mRenderingDelayBuffer; // RenderingDelay return value
                                               // (java->native)
 
+    /**
+     * Converts the given nanoseconds value into microseconds with proper rounding. It is assumed
+     * that the value given is positive.
+     */
+    private static long convertNsecsToUsecs(long nsecs) {
+        return (nsecs + 500) / 1000;
+    }
+
+    private static AudioManager getAudioManager() {
+        if (sAudioManager == null) {
+            sAudioManager = (AudioManager) ContextUtils.getApplicationContext().getSystemService(
+                    Context.AUDIO_SERVICE);
+        }
+        return sAudioManager;
+    }
+
+    @CalledByNative
+    public static long getMinimumBufferedTime(int sampleRateInHz) {
+        int sizeBytes = AudioTrack.getMinBufferSize(sampleRateInHz, CHANNEL_CONFIG, AUDIO_FORMAT);
+        long sizeUs = SEC_IN_USEC * (long) sizeBytes / (BYTES_PER_FRAME * (long) sampleRateInHz);
+        return sizeUs + MIN_BUFFERED_TIME_PADDING_US;
+    }
+
+    @CalledByNative
+    public static int getSessionIdMedia() {
+        if (sSessionIdMedia == AudioManager.ERROR) {
+            sSessionIdMedia = getAudioManager().generateAudioSessionId();
+            if (sSessionIdMedia == AudioManager.ERROR) {
+                Log.e(TAG, "Cannot generate session-id for media tracks!");
+            } else {
+                Log.i(TAG, "Session-id for media tracks is " + sSessionIdMedia);
+            }
+        }
+        return sSessionIdMedia;
+    }
+
+    @CalledByNative
+    public static int getSessionIdCommunication() {
+        if (sSessionIdCommunication == AudioManager.ERROR) {
+            sSessionIdCommunication = getAudioManager().generateAudioSessionId();
+            if (sSessionIdCommunication == AudioManager.ERROR) {
+                Log.e(TAG, "Cannot generate session-id for communication tracks!");
+            } else {
+                Log.i(TAG, "Session-id for communication tracks is " + sSessionIdCommunication);
+            }
+        }
+        return sSessionIdCommunication;
+    }
+
     /** Construction */
     @CalledByNative
     private static AudioSinkAudioTrackImpl createAudioSinkAudioTrackImpl(
@@ -110,16 +225,29 @@ class AudioSinkAudioTrackImpl {
 
     private AudioSinkAudioTrackImpl(long nativeAudioSinkAudioTrackImpl) {
         mNativeAudioSinkAudioTrackImpl = nativeAudioSinkAudioTrackImpl;
+        reset();
+    }
+
+    private void reset() {
         mIsInitialized = false;
         mLastTimestampUpdateNsec = NO_TIMESTAMP;
-        mTriggerTimestampUpdateNow = false;
-        mLastUnderrunCount = 0;
         mLastUnderrunLogNsec = NO_TIMESTAMP;
+        mTriggerTimestampUpdateNow = false;
+        mTimestampStabilityCounter = 0;
+        mReferenceTimestampState = ReferenceTimestampState.STARTING_UP;
+        mOriginalFramePosOfLastTimestamp = NO_FRAME_POSITION;
+        mLastUnderrunCount = 0;
         mTotalFramesWritten = 0;
     }
 
     private boolean haveValidRefPoint() {
         return mLastTimestampUpdateNsec != NO_TIMESTAMP;
+    }
+
+    /** Converts the given number of frames into an equivalent nanoTime period. */
+    private long convertFramesToNanoTime(long numOfFrames) {
+        // Use proper rounding (assumes all numbers are positive).
+        return (SEC_IN_NSEC * numOfFrames + mSampleRateInHz / 2) / mSampleRateInHz;
     }
 
     /**
@@ -145,16 +273,40 @@ class AudioSinkAudioTrackImpl {
         }
         mSampleRateInHz = sampleRateInHz;
 
-        // TODO(ckuiper): ALSA code uses a 90ms buffer size, we should do something
-        // similar.
-        int bufferSizeInBytes =
-                5 * AudioTrack.getMinBufferSize(mSampleRateInHz, CHANNEL_CONFIG, AUDIO_FORMAT);
-        int streamType = CAST_TYPE_TO_ANDROID_TYPE_MAP.get(castContentType);
+        int usageType = CAST_TYPE_TO_ANDROID_USAGE_TYPE_MAP.get(castContentType);
+        int contentType = CAST_TYPE_TO_ANDROID_CONTENT_TYPE_MAP.get(castContentType);
+
+        int sessionId = AudioManager.ERROR;
+        if (castContentType == AudioContentType.MEDIA) {
+            sessionId = getSessionIdMedia();
+        } else if (castContentType == AudioContentType.COMMUNICATION) {
+            sessionId = getSessionIdCommunication();
+        }
+        // AudioContentType.ALARM doesn't get a sessionId.
+
+        int bufferSizeInBytes = MIN_BUFFER_SIZE_MULTIPLIER
+                * AudioTrack.getMinBufferSize(mSampleRateInHz, CHANNEL_CONFIG, AUDIO_FORMAT);
+        int bufferSizeInMs = 1000 * bufferSizeInBytes / (BYTES_PER_FRAME * mSampleRateInHz);
         Log.i(TAG,
-                "Init: create an AudioTrack of size=" + bufferSizeInBytes + " type=" + streamType);
-        mAudioTrack = new AudioTrack(streamType, mSampleRateInHz, CHANNEL_CONFIG, AUDIO_FORMAT,
-                bufferSizeInBytes, AUDIO_MODE);
-        mRefPointTStamp = new AudioTimestamp();
+                "Init: create an AudioTrack of size=" + bufferSizeInBytes + " (" + bufferSizeInMs
+                        + "ms) usageType=" + usageType + " contentType=" + contentType
+                        + " with session-id=" + sessionId);
+
+        AudioTrack.Builder builder = new AudioTrack.Builder();
+        builder.setBufferSizeInBytes(bufferSizeInBytes)
+                .setTransferMode(AUDIO_MODE)
+                .setAudioAttributes(new AudioAttributes.Builder()
+                                            .setUsage(usageType)
+                                            .setContentType(contentType)
+                                            .build())
+                .setAudioFormat(new AudioFormat.Builder()
+                                        .setEncoding(AUDIO_FORMAT)
+                                        .setSampleRate(mSampleRateInHz)
+                                        .setChannelMask(CHANNEL_CONFIG)
+                                        .build());
+        if (sessionId != AudioManager.ERROR) builder.setSessionId(sessionId);
+
+        mAudioTrack = builder.build();
 
         // Allocated shared buffers.
         mPcmBuffer = ByteBuffer.allocateDirect(bytesPerBuffer);
@@ -216,18 +368,17 @@ class AudioSinkAudioTrackImpl {
 
         // Estimate how much playing time is left based on the most recent reference point.
         updateRefPointTimestamp();
-        long lastPlayoutTimeNsecs =
-                getInterpolatedTStampNsecs(mRefPointTStamp, mTotalFramesWritten);
-        if (lastPlayoutTimeNsecs != NO_TIMESTAMP) {
+        if (haveValidRefPoint()) {
+            long lastPlayoutTimeNsecs = getInterpolatedTStampNsecs(mTotalFramesWritten);
             long now = System.nanoTime();
             playtimeLeftNsecs = lastPlayoutTimeNsecs - now;
         } else {
             // We have no timestamp to estimate how much is left to play, so assume the worst case.
             long most_frames_left =
                     Math.min(mTotalFramesWritten, mAudioTrack.getBufferSizeInFrames());
-            playtimeLeftNsecs = SEC_IN_NSEC * most_frames_left / mSampleRateInHz;
+            playtimeLeftNsecs = convertFramesToNanoTime(most_frames_left);
         }
-        return playtimeLeftNsecs / 1000; // return usecs
+        return (playtimeLeftNsecs < 0) ? 0 : playtimeLeftNsecs / 1000; // return usecs
     }
 
     @CalledByNative
@@ -241,7 +392,7 @@ class AudioSinkAudioTrackImpl {
         }
         if (!isStopped()) mAudioTrack.stop();
         mAudioTrack.release();
-        mIsInitialized = false;
+        reset();
     }
 
     private String getPlayStateString() {
@@ -373,31 +524,48 @@ class AudioSinkAudioTrackImpl {
         }
 
         // Interpolate to get proper Rendering delay.
-        long playoutTimeNsecs = getInterpolatedTStampNsecs(mRefPointTStamp, mTotalFramesWritten);
-        long nowNsecs = System.nanoTime();
-        long delayNsecs = playoutTimeNsecs - nowNsecs;
+        long playoutTimeNsecs = getInterpolatedTStampNsecs(mTotalFramesWritten);
+        long playoutTimeUsecs = convertNsecsToUsecs(playoutTimeNsecs);
+        long nowUsecs = convertNsecsToUsecs(System.nanoTime());
+        long delayUsecs = playoutTimeUsecs - nowUsecs;
 
         // Populate RenderingDelay return value for native land.
-        mRenderingDelayBuffer.putLong(0, delayNsecs / 1000);
-        mRenderingDelayBuffer.putLong(8, nowNsecs / 1000);
+        mRenderingDelayBuffer.putLong(0, delayUsecs);
+        mRenderingDelayBuffer.putLong(8, nowUsecs);
 
         if (DEBUG_LEVEL >= 3) {
-            Log.i(TAG,
-                    "RenderingDelay: "
-                            + " delay=" + (delayNsecs / 1000) + " play=" + (nowNsecs / 1000));
+            Log.i(TAG, "RenderingDelay: delay=" + delayUsecs + " play=" + nowUsecs);
         }
     }
 
-    /** Returns an interpolated timestamp based on the reference point timestamp and given frame
-     * position. If no valid reference point exists, returns NO_TIMESTAMP.  */
-    private long getInterpolatedTStampNsecs(AudioTimestamp referencePoint, long framePosition) {
-        if (!haveValidRefPoint()) {
+    /**
+     * Returns a new nanoTime timestamp for framePosition=0. This is done by reading an
+     * AudioTimeStamp {nanoTime, framePosition} object from the AudioTrack and transforming it to
+     * its {nanoTime', 0} equivalent by taking advantage of the fact that
+     *      (nanoTime - nanoTime') / (framePosition - 0) = 1 / sampleRate.
+     * The nanoTime' value is returned as the timestamp. If no new timestamp is available,
+     * NO_TIMESTAMP is returned.
+     */
+    private long getNewFramePos0Timestamp() {
+        AudioTimestamp ts = new AudioTimestamp();
+        if (!mAudioTrack.getTimestamp(ts)) {
             return NO_TIMESTAMP;
         }
-        long deltaFrames = framePosition - referencePoint.framePosition;
-        long deltaNsecs = 1000000000L * deltaFrames / mSampleRateInHz;
-        long interpolatedTimestampNsecs = referencePoint.nanoTime + deltaNsecs;
-        return interpolatedTimestampNsecs;
+        // Check for duplicates, i.e., AudioTrack returned the same Timestamp object as last time.
+        if (mOriginalFramePosOfLastTimestamp != NO_FRAME_POSITION
+                && ts.framePosition == mOriginalFramePosOfLastTimestamp) {
+            // Not a new timestamp, skip this one.
+            return NO_TIMESTAMP;
+        }
+        mOriginalFramePosOfLastTimestamp = ts.framePosition;
+        return ts.nanoTime - convertFramesToNanoTime(ts.framePosition);
+    }
+
+    /**
+     * Returns a timestamp for the given frame position, interpolated from the reference timestamp.
+     */
+    private long getInterpolatedTStampNsecs(long framePosition) {
+        return mRefNanoTimeAtFramePos0 + convertFramesToNanoTime(framePosition);
     }
 
     /** Checks for underruns and if detected invalidates the reference point timestamp. */
@@ -408,11 +576,48 @@ class AudioSinkAudioTrackImpl {
             // Invalidate timestamp (resets RenderingDelay).
             mLastTimestampUpdateNsec = NO_TIMESTAMP;
             mLastUnderrunCount = underruns;
+            mTimestampStabilityCounter = 0;
+            mReferenceTimestampState = ReferenceTimestampState.RESYNCING_AFTER_UNDERRUN;
         }
     }
 
-    /** Gets a new reference point timestamp from AudioTrack. For performance reasons we only
-     * read a new timestamp in certain intervals. */
+    /**
+     * Returns true if the given timestamp is stable. A timestamp is considered stable if it and
+     * its two predecessors do not deviate significantly from each other.
+     */
+    private boolean isTimestampStable(long newNanoTimeAtFramePos0) {
+        if (mTimestampStabilityCounter == 0) {
+            mRefNanoTimeAtFramePos0Candidate = newNanoTimeAtFramePos0;
+            mTimestampStabilityCounter = 1;
+            mTimestampStabilityStartTimeNsec = System.nanoTime();
+            return false;
+        }
+
+        long deviation = mRefNanoTimeAtFramePos0Candidate - newNanoTimeAtFramePos0;
+        if (Math.abs(deviation) > MAX_STABLE_TIMESTAMP_DEVIATION_NSEC) {
+            // not stable
+            Log.i(TAG,
+                    "Timestamp [" + mTimestampStabilityCounter + "/"
+                            + elapsedNsec(mTimestampStabilityStartTimeNsec) / 1000000
+                            + "ms] is not stable (deviation:" + deviation / 1000 + "us)");
+            // Use this as the new starting point.
+            mRefNanoTimeAtFramePos0Candidate = newNanoTimeAtFramePos0;
+            mTimestampStabilityCounter = 1;
+            mTimestampStabilityStartTimeNsec = System.nanoTime();
+            return false;
+        }
+
+        if ((elapsedNsec(mTimestampStabilityStartTimeNsec) > MIN_TIMESTAMP_STABILITY_TIME_NSEC)
+                && ++mTimestampStabilityCounter >= MIN_TIMESTAMP_STABILITY_CNT) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Update the reference timestamp used for interpolation.
+     */
     private void updateRefPointTimestamp() {
         if (!mTriggerTimestampUpdateNow && haveValidRefPoint()
                 && elapsedNsec(mLastTimestampUpdateNsec) <= TIMESTAMP_UPDATE_PERIOD) {
@@ -420,16 +625,82 @@ class AudioSinkAudioTrackImpl {
             return;
         }
 
-        if (!mAudioTrack.getTimestamp(mRefPointTStamp)) {
+        long newNanoTimeAtFramePos0 = getNewFramePos0Timestamp();
+        if (newNanoTimeAtFramePos0 == NO_TIMESTAMP) {
             return; // no timestamp available
+        }
+
+        long prevRefNanoTimeAtFramePos0 = mRefNanoTimeAtFramePos0;
+        switch (mReferenceTimestampState) {
+            case STARTING_UP:
+                // The Audiotrack produces a few timestamps at the beginning of time that are widely
+                // inaccurate. Hence, we require several stable timestamps before setting a
+                // reference point.
+                if (!isTimestampStable(newNanoTimeAtFramePos0)) {
+                    return;
+                }
+                // First stable timestamp.
+                mRefNanoTimeAtFramePos0 = prevRefNanoTimeAtFramePos0 = newNanoTimeAtFramePos0;
+                mReferenceTimestampState = ReferenceTimestampState.STABLE;
+                Log.i(TAG,
+                        "First stable timestamp [" + mTimestampStabilityCounter + "/"
+                                + elapsedNsec(mTimestampStabilityStartTimeNsec) / 1000000 + "ms]");
+                break;
+
+            case RESYNCING_AFTER_UNDERRUN:
+                // Resyncing happens after we hit an underrun in the AudioTrack. This causes the
+                // Android Audio stack to insert additional samples, which increases the reference
+                // timestamp (at framePosition=0) by thousands of usecs. Hence we need to find a new
+                // initial reference timestamp. Unfortunately, even though the underrun already
+                // happened, the timestamps returned by the AudioTrack may still be located *before*
+                // the underrun, and there is no way to query the AudioTrack about at which
+                // framePosition the underrun occured and where and how much additional data was
+                // inserted.
+                //
+                // At this point we just do the same as when in STARTING_UP, but eventually there
+                // should be a more refined way to figure out when the timestamps returned from the
+                // AudioTrack are usable again.
+                if (!isTimestampStable(newNanoTimeAtFramePos0)) {
+                    return;
+                }
+                // Found a new stable timestamp.
+                mRefNanoTimeAtFramePos0 = newNanoTimeAtFramePos0;
+                mReferenceTimestampState = ReferenceTimestampState.STABLE;
+                Log.i(TAG,
+                        "New stable timestamp after underrun [" + mTimestampStabilityCounter + "/"
+                                + elapsedNsec(mTimestampStabilityStartTimeNsec) / 1000000 + "ms]");
+                break;
+
+            case STABLE:
+                // Timestamps can be jittery, and on some systems they are occasionally off by
+                // hundreds of usecs. Filter out timestamps that are too jittery and use a low-pass
+                // filter on the smaller ones.
+                // Note that the low-pass filter approach does not work well when the media clock
+                // rate does not match the system clock rate, and the timestamp drifts as a result.
+                // Currently none of the devices using this code do this.
+                long devNsec = mRefNanoTimeAtFramePos0 - newNanoTimeAtFramePos0;
+                if (Math.abs(devNsec) > TSTAMP_DEV_THRESHOLD_TO_IGNORE_NSEC) {
+                    Log.i(TAG, "Too jittery timestamp (" + convertNsecsToUsecs(devNsec) + ")");
+                    long timeSinceLastGoodTstamp = elapsedNsec(mLastTimestampUpdateNsec);
+                    if (timeSinceLastGoodTstamp <= MAX_TIME_IGNORING_TSTAMPS_NSECS) {
+                        return; // Ignore this one.
+                    }
+                    // We ignored jittery timestamps for too long, let this one pass.
+                    Log.i(TAG, "Too many jittery timestamps ignored!");
+                }
+                // Low-pass filter: 0.10*New + 0.90*Ref. Do integer math with proper rounding.
+                mRefNanoTimeAtFramePos0 =
+                        (10 * newNanoTimeAtFramePos0 + 90 * mRefNanoTimeAtFramePos0 + 50) / 100;
+                break;
         }
 
         // Got a new value.
         if (DEBUG_LEVEL >= 1) {
+            long dev1 = convertNsecsToUsecs(prevRefNanoTimeAtFramePos0 - newNanoTimeAtFramePos0);
+            long dev2 = convertNsecsToUsecs(prevRefNanoTimeAtFramePos0 - mRefNanoTimeAtFramePos0);
             Log.i(TAG,
-                    "New AudioTrack timestamp:"
-                            + " pos=" + mRefPointTStamp.framePosition
-                            + " ts=" + mRefPointTStamp.nanoTime / 1000 + "us");
+                    "Updated mRefNanoTimeAtFramePos0=" + mRefNanoTimeAtFramePos0 / 1000 + " us ("
+                            + dev1 + "/" + dev2 + ")");
         }
 
         mLastTimestampUpdateNsec = System.nanoTime();

@@ -32,10 +32,11 @@
 #define ColorChooserClient_h
 
 #include "core/CoreExport.h"
-#include "platform/ColorSuggestion.h"
 #include "platform/geometry/IntRect.h"
+#include "platform/graphics/Color.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Vector.h"
+#include "third_party/WebKit/public/mojom/color_chooser/color_chooser.mojom-blink.h"
 
 namespace blink {
 
@@ -44,7 +45,7 @@ class Element;
 class CORE_EXPORT ColorChooserClient : public GarbageCollectedMixin {
  public:
   virtual ~ColorChooserClient();
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  void Trace(blink::Visitor* visitor) override {}
 
   virtual void DidChooseColor(const Color&) = 0;
   virtual void DidEndChooser() = 0;
@@ -52,7 +53,7 @@ class CORE_EXPORT ColorChooserClient : public GarbageCollectedMixin {
   virtual IntRect ElementRectRelativeToViewport() const = 0;
   virtual Color CurrentColor() = 0;
   virtual bool ShouldShowSuggestions() const = 0;
-  virtual Vector<ColorSuggestion> Suggestions() const = 0;
+  virtual Vector<mojom::blink::ColorSuggestionPtr> Suggestions() const = 0;
 };
 
 }  // namespace blink

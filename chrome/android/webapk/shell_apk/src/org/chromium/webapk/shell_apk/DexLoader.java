@@ -23,6 +23,24 @@ public class DexLoader {
     private static final int BUFFER_SIZE = 16 * 1024;
     private static final String TAG = "cr.DexLoader";
 
+    /** Delete the given File and (if it's a directory) everything within it. */
+    public static void deletePath(File file) {
+        if (file == null) return;
+
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deletePath(child);
+                }
+            }
+        }
+
+        if (!file.delete()) {
+            Log.e(TAG, "Failed to delete : " + file.getAbsolutePath());
+        }
+    }
+
     /**
      * Creates ClassLoader for .dex file in {@link remoteContext}'s APK.
      * @param remoteContext The context with the APK with the .dex file.
@@ -76,27 +94,7 @@ public class DexLoader {
      * @param localDexDir Cache directory passed to {@link #load()}.
      */
     public void deleteCachedDexes(File localDexDir) {
-        deleteChildren(localDexDir);
-    }
-
-    /**
-     * Deletes all of a directory's children including subdirectories.
-     * @param parentDir Directory whose children should be deleted.
-     */
-    private static void deleteChildren(File parentDir) {
-        if (!parentDir.isDirectory()) {
-            return;
-        }
-
-        File[] files = parentDir.listFiles();
-        if (files != null) {
-            for (File file : files) {
-                deleteChildren(file);
-                if (!file.delete()) {
-                    Log.e(TAG, "Could not delete " + file.getPath());
-                }
-            }
-        }
+        deletePath(localDexDir);
     }
 
     /**

@@ -5,8 +5,7 @@
 #import <EarlGrey/EarlGrey.h>
 #import <XCTest/XCTest.h>
 
-#import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
-#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
+#include "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/earl_grey/accessibility_util.h"
@@ -43,7 +42,7 @@ id<GREYMatcher> FindInPageButton() {
 - (void)testOpenAndCloseToolsMenu {
   [ChromeEarlGreyUI openToolsMenu];
 
-  if (!IsCompact()) {
+  if (!IsCompactWidth()) {
     [[EarlGrey
         selectElementWithMatcher:grey_accessibilityLabel(l10n_util::GetNSString(
                                      IDS_IOS_TOOLBAR_CLOSE_MENU))]
@@ -53,8 +52,7 @@ id<GREYMatcher> FindInPageButton() {
         performAction:grey_tap()];
   }
 
-  [[EarlGrey
-      selectElementWithMatcher:grey_accessibilityID(kToolsMenuTableViewId)]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::ToolsMenuView()]
       assertWithMatcher:grey_notVisible()];
 }
 

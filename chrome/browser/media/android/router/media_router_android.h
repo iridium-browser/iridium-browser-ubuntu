@@ -10,7 +10,7 @@
 #include <memory>
 #include <unordered_map>
 
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "chrome/browser/media/android/router/media_router_android_bridge.h"
@@ -59,16 +59,12 @@ class MediaRouterAndroid : public MediaRouterBase {
   void SendRouteBinaryMessage(const MediaRoute::Id& route_id,
                               std::unique_ptr<std::vector<uint8_t>> data,
                               SendRouteMessageCallback callback) override;
-  void AddIssue(const IssueInfo& issue_info) override;
-  void ClearIssue(const Issue::Id& issue_id) override;
   void OnUserGesture() override;
   void SearchSinks(const MediaSink::Id& sink_id,
                    const MediaSource::Id& source_id,
                    const std::string& search_input,
                    const std::string& domain,
                    MediaSinkSearchResponseCallback sink_callback) override;
-  void ProvideSinks(const std::string& provider_name,
-                    std::vector<MediaSinkInternal> sinks) override;
 
   // The methods called by the Java bridge.
   // Notifies the media router that information about sinks is received for
@@ -113,8 +109,6 @@ class MediaRouterAndroid : public MediaRouterBase {
   void UnregisterMediaSinksObserver(MediaSinksObserver* observer) override;
   void RegisterMediaRoutesObserver(MediaRoutesObserver* observer) override;
   void UnregisterMediaRoutesObserver(MediaRoutesObserver* observer) override;
-  void RegisterIssuesObserver(IssuesObserver* observer) override;
-  void UnregisterIssuesObserver(IssuesObserver* observer) override;
   void RegisterRouteMessageObserver(RouteMessageObserver* observer) override;
   void UnregisterRouteMessageObserver(RouteMessageObserver* observer) override;
 
@@ -142,13 +136,14 @@ class MediaRouterAndroid : public MediaRouterBase {
     std::vector<MediaRouteResponseCallback> callbacks;
   };
 
-  using MediaRouteRequests = IDMap<std::unique_ptr<MediaRouteRequest>>;
+  using MediaRouteRequests = base::IDMap<std::unique_ptr<MediaRouteRequest>>;
   MediaRouteRequests route_requests_;
 
   using MediaRoutes = std::vector<MediaRoute>;
   MediaRoutes active_routes_;
 
-  using SendMessageCallbacks = IDMap<std::unique_ptr<SendRouteMessageCallback>>;
+  using SendMessageCallbacks =
+      base::IDMap<std::unique_ptr<SendRouteMessageCallback>>;
   SendMessageCallbacks message_callbacks_;
 
   using MessageObservers = std::unordered_map<

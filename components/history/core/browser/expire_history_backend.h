@@ -6,10 +6,10 @@
 #define COMPONENTS_HISTORY_CORE_BROWSER_EXPIRE_HISTORY_BACKEND_H_
 
 #include <memory>
-#include <queue>
 #include <set>
 #include <vector>
 
+#include "base/containers/queue.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -20,6 +20,7 @@ class GURL;
 class TestingProfile;
 
 namespace base {
+struct Feature;
 class SequencedTaskRunner;
 }
 
@@ -41,6 +42,14 @@ class ExpiringVisitsReader {
 };
 
 typedef std::vector<const ExpiringVisitsReader*> ExpiringVisitsReaders;
+
+namespace internal {
+// Feature that enables clearing old on-demand favicons.
+extern const base::Feature kClearOldOnDemandFavicons;
+
+// The minimum number of days since last use for an icon to be considered old.
+extern const int kOnDemandFaviconIsOldAfterDays;
+}  // namespace internal
 
 // Helper component to HistoryBackend that manages expiration and deleting of
 // history.
@@ -102,6 +111,16 @@ class ExpireHistoryBackend {
   FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, ExpireSomeOldHistory);
   FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, ExpiringVisitsReader);
   FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, ExpireSomeOldHistoryWithSource);
+  FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest,
+                           ClearOldOnDemandFaviconsDoesNotDeleteStarred);
+  FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest,
+                           ClearOldOnDemandFaviconsDoesDeleteUnstarred);
+  FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest,
+                           ClearOldOnDemandFaviconsDoesDeleteAfterLongDelay);
+  FRIEND_TEST_ALL_PREFIXES(
+      ExpireHistoryTest,
+      ClearOldOnDemandFaviconsDoesNotDeleteAfterShortDelay);
+
   friend class ::TestingProfile;
 
   struct DeleteEffects {
@@ -129,6 +148,9 @@ class ExpireHistoryBackend {
     // All favicon urls that were actually deleted from the thumbnail db.
     std::set<GURL> deleted_favicons;
   };
+
+  // Returns a vector with all visits that eventually redirect to |visits|.
+  VisitVector GetVisitsAndRedirectParents(const VisitVector& visits);
 
   // Deletes the visit-related stuff for all the visits in the given list, and
   // adds the rows for unique URLs affected to the affected_urls list in
@@ -179,6 +201,9 @@ class ExpireHistoryBackend {
   // any now-unused favicons.
   void ExpireURLsForVisits(const VisitVector& visits, DeleteEffects* effects);
 
+  void ExpireVisitsInternal(const VisitVector& visits,
+                            const DeletionTimeRange& time_range);
+
   // Deletes the favicons listed in |effects->affected_favicons| if they are
   // unsued. Fails silently (we don't care about favicons so much, so don't want
   // to stop everything if it fails). Fills |expired_favicons| with the set of
@@ -196,7 +221,9 @@ class ExpireHistoryBackend {
   };
 
   // Broadcasts URL modified and deleted notifications.
-  void BroadcastNotifications(DeleteEffects* effects, DeletionType type);
+  void BroadcastNotifications(DeleteEffects* effects,
+                              DeletionType type,
+                              const DeletionTimeRange& time_range);
 
   // Schedules a call to DoExpireIteration.
   void ScheduleExpire();
@@ -205,6 +232,11 @@ class ExpireHistoryBackend {
   // to the items in work queue, and schedules another call to happen in the
   // future.
   void DoExpireIteration();
+
+  // Clears all old on-demand favicons from thumbnail database. Fails silently
+  // (we don't care about favicons so much, so don't want to stop everything if
+  // it fails).
+  void ClearOldOnDemandFaviconsIfPossible(base::Time expiration_threshold);
 
   // Tries to expire the oldest |max_visits| visits from history that are older
   // than |time_threshold|. The return value indicates if we think there might
@@ -240,6 +272,9 @@ class ExpireHistoryBackend {
   // The threshold for "old" history where we will automatically delete it.
   base::TimeDelta expiration_threshold_;
 
+  // The lastly used threshold for "old" on-demand favicons.
+  base::Time last_on_demand_expiration_threshold_;
+
   // List of all distinct types of readers. This list is used to populate the
   // work queue.
   ExpiringVisitsReaders readers_;
@@ -247,7 +282,7 @@ class ExpireHistoryBackend {
   // Work queue for periodic expiration tasks, used by DoExpireIteration() to
   // determine what to do at an iteration, as well as populate it for future
   // iterations.
-  std::queue<const ExpiringVisitsReader*> work_queue_;
+  base::queue<const ExpiringVisitsReader*> work_queue_;
 
   // Readers for various types of visits.
   // TODO(dglazkov): If you are adding another one, please consider reorganizing

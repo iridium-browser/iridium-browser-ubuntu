@@ -7,16 +7,13 @@ package org.chromium.chromecast.shell;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Debug;
 
-import org.chromium.base.BaseSwitches;
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chromecast.base.ChromecastConfigAndroid;
-import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content.browser.DeviceUtils;
 import org.chromium.net.NetworkChangeNotifier;
@@ -47,7 +44,7 @@ public class CastBrowserHelper {
 
         // Initializing the command line must occur before loading the library.
         if (!CommandLine.isInitialized()) {
-            ContentApplication.initCommandLine(context);
+            ((CastApplication) context.getApplicationContext()).initCommandLine();
 
             if (context instanceof Activity) {
                 Intent launchingIntent = ((Activity) context).getIntent();
@@ -57,8 +54,6 @@ public class CastBrowserHelper {
                 }
             }
         }
-
-        waitForDebuggerIfNeeded();
 
         DeviceUtils.addDeviceSpecificUserAgentSwitch(context);
 
@@ -81,14 +76,5 @@ public class CastBrowserHelper {
 
     private static String[] getCommandLineParamsFromIntent(Intent intent) {
         return intent != null ? intent.getStringArrayExtra(COMMAND_LINE_ARGS_KEY) : null;
-    }
-
-    private static void waitForDebuggerIfNeeded() {
-        if (!CommandLine.getInstance().hasSwitch(BaseSwitches.WAIT_FOR_JAVA_DEBUGGER)) {
-            return;
-        }
-        Log.e(TAG, "Waiting for Java debugger to connect...");
-        Debug.waitForDebugger();
-        Log.e(TAG, "Java debugger connected. Resuming execution.");
     }
 }

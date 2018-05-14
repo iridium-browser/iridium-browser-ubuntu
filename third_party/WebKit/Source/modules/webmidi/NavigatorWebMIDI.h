@@ -46,17 +46,18 @@ class NavigatorWebMIDI final : public GarbageCollected<NavigatorWebMIDI>,
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorWebMIDI);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorWebMIDI& From(Navigator&);
   static ScriptPromise requestMIDIAccess(ScriptState*,
                                          Navigator&,
                                          const MIDIOptions&);
   ScriptPromise requestMIDIAccess(ScriptState*, const MIDIOptions&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit NavigatorWebMIDI(Navigator&);
-  static const char* SupplementName();
 };
 
 }  // namespace blink

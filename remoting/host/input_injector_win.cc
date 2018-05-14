@@ -16,6 +16,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
@@ -113,6 +114,12 @@ void ParseMouseClickEvent(const MouseEvent& event, std::vector<INPUT>* output) {
       input.mi.dwFlags = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
     } else if (button == MouseEvent::BUTTON_RIGHT) {
       input.mi.dwFlags = down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
+    } else if (button == MouseEvent::BUTTON_BACK) {
+      input.mi.dwFlags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
+      input.mi.mouseData = XBUTTON1;
+    } else if (button == MouseEvent::BUTTON_FORWARD) {
+      input.mi.dwFlags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
+      input.mi.mouseData = XBUTTON2;
     } else {
       input.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
     }
@@ -145,6 +152,44 @@ void ParseMouseWheelEvent(const MouseEvent& event, std::vector<INPUT>* output) {
       input.mi.mouseData = delta;
       input.mi.dwFlags = MOUSEEVENTF_WHEEL;
       output->push_back(std::move(input));
+    }
+  }
+}
+
+// Check if the given scan code is caps lock or num lock.
+bool IsLockKey(int scancode) {
+  UINT virtual_key = MapVirtualKey(scancode, MAPVK_VSC_TO_VK);
+  return virtual_key == VK_CAPITAL || virtual_key == VK_NUMLOCK;
+}
+
+// Sets the keyboard lock states to those provided.
+void SetLockStates(base::Optional<bool> caps_lock,
+                   base::Optional<bool> num_lock) {
+  // Can't use SendKeyboardInput because we need to send virtual key codes, not
+  // scan codes.
+  INPUT input[2] = {};
+  input[0].type = INPUT_KEYBOARD;
+  input[1].type = INPUT_KEYBOARD;
+  input[1].ki.dwFlags = KEYEVENTF_KEYUP;
+
+  if (caps_lock) {
+    bool client_capslock_state = *caps_lock;
+    bool host_capslock_state = (GetKeyState(VK_CAPITAL) & 1) != 0;
+    if (client_capslock_state != host_capslock_state) {
+      input[0].ki.wVk = VK_CAPITAL;
+      input[1].ki.wVk = VK_CAPITAL;
+      SendInput(arraysize(input), input, sizeof(INPUT));
+    }
+  }
+
+  // Sets the keyboard lock states to those provided.
+  if (num_lock) {
+    bool client_numlock_state = *num_lock;
+    bool host_numlock_state = (GetKeyState(VK_NUMLOCK) & 1) != 0;
+    if (client_numlock_state != host_numlock_state) {
+      input[0].ki.wVk = VK_NUMLOCK;
+      input[1].ki.wVk = VK_NUMLOCK;
+      SendInput(arraysize(input), input, sizeof(INPUT));
     }
   }
 }
@@ -198,12 +243,6 @@ class InputInjectorWin : public InputInjector {
     void HandleText(const TextEvent& event);
     void HandleMouse(const MouseEvent& event);
     void HandleTouch(const TouchEvent& event);
-
-    // Check if the given scan code is caps lock or num lock.
-    bool IsLockKey(int scancode);
-
-    // Sets the keyboard lock states to those provided.
-    void SetLockStates(uint32_t states);
 
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
@@ -333,7 +372,9 @@ void InputInjectorWin::Core::Stop() {
   }
 
   clipboard_.reset();
-  touch_injector_->Deinitialize();
+  if (touch_injector_) {
+    touch_injector_->Deinitialize();
+  }
 }
 
 InputInjectorWin::Core::~Core() {}
@@ -354,8 +395,27 @@ void InputInjectorWin::Core::HandleKey(const KeyEvent& event) {
   if (scancode == ui::KeycodeConverter::InvalidNativeKeycode())
     return;
 
-  if (event.has_lock_states() && event.pressed() && !IsLockKey(scancode)) {
-    SetLockStates(event.lock_states());
+  if (event.pressed() && !IsLockKey(scancode)) {
+    base::Optional<bool> caps_lock;
+    base::Optional<bool> num_lock;
+
+    // For caps lock, check both the new caps_lock field and the old lock_states
+    // field.
+    if (event.has_caps_lock_state()) {
+      caps_lock = event.caps_lock_state();
+    } else if (event.has_lock_states()) {
+      caps_lock =
+          (event.lock_states() & protocol::KeyEvent::LOCK_STATES_CAPSLOCK) != 0;
+    }
+
+    // Not all clients have a concept of num lock. Since there's no way to
+    // distinguish these clients using the legacy lock_states field, only update
+    // if the new num_lock field is specified.
+    if (event.has_num_lock_state()) {
+      num_lock = event.num_lock_state();
+    }
+
+    SetLockStates(caps_lock, num_lock);
   }
 
   uint32_t flags = KEYEVENTF_SCANCODE | (event.pressed() ? 0 : KEYEVENTF_KEYUP);
@@ -394,44 +454,13 @@ void InputInjectorWin::Core::HandleTouch(const TouchEvent& event) {
   touch_injector_->InjectTouchEvent(event);
 }
 
-bool InputInjectorWin::Core::IsLockKey(int scancode) {
-  UINT virtual_key = MapVirtualKey(scancode, MAPVK_VSC_TO_VK);
-  return virtual_key == VK_CAPITAL || virtual_key == VK_NUMLOCK;
-}
-
-void InputInjectorWin::Core::SetLockStates(uint32_t states) {
-  // Can't use SendKeyboardInput because we need to send virtual key codes, not
-  // scan codes.
-  INPUT input[2] = {};
-  input[0].type = INPUT_KEYBOARD;
-  input[1].type = INPUT_KEYBOARD;
-  input[1].ki.dwFlags = KEYEVENTF_KEYUP;
-
-  bool client_capslock_state =
-      (states & protocol::KeyEvent::LOCK_STATES_CAPSLOCK) != 0;
-  bool host_capslock_state = (GetKeyState(VK_CAPITAL) & 1) != 0;
-  if (client_capslock_state != host_capslock_state) {
-    input[0].ki.wVk = VK_CAPITAL;
-    input[1].ki.wVk = VK_CAPITAL;
-    SendInput(arraysize(input), input, sizeof(INPUT));
-  }
-
-  bool client_numlock_state =
-      (states & protocol::KeyEvent::LOCK_STATES_NUMLOCK) != 0;
-  bool host_numlock_state = (GetKeyState(VK_NUMLOCK) & 1) != 0;
-  if (client_numlock_state != host_numlock_state) {
-    input[0].ki.wVk = VK_NUMLOCK;
-    input[1].ki.wVk = VK_NUMLOCK;
-    SendInput(arraysize(input), input, sizeof(INPUT));
-  }
-}
-
 }  // namespace
 
 // static
 std::unique_ptr<InputInjector> InputInjector::Create(
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+    ui::SystemInputInjectorFactory* chromeos_system_input_injector_factory) {
   return base::WrapUnique(
       new InputInjectorWin(main_task_runner, ui_task_runner));
 }

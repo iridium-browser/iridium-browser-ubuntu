@@ -27,53 +27,48 @@ class QuicPacketWriterWrapper;
 
 namespace test {
 
+class MockableQuicClientEpollNetworkHelper;
+
 // A quic client which allows mocking out reads and writes.
 class MockableQuicClient : public QuicClient {
  public:
   MockableQuicClient(QuicSocketAddress server_address,
                      const QuicServerId& server_id,
-                     const QuicVersionVector& supported_versions,
+                     const ParsedQuicVersionVector& supported_versions,
                      EpollServer* epoll_server);
 
   MockableQuicClient(QuicSocketAddress server_address,
                      const QuicServerId& server_id,
                      const QuicConfig& config,
-                     const QuicVersionVector& supported_versions,
+                     const ParsedQuicVersionVector& supported_versions,
                      EpollServer* epoll_server);
 
   MockableQuicClient(QuicSocketAddress server_address,
                      const QuicServerId& server_id,
                      const QuicConfig& config,
-                     const QuicVersionVector& supported_versions,
+                     const ParsedQuicVersionVector& supported_versions,
                      EpollServer* epoll_server,
                      std::unique_ptr<ProofVerifier> proof_verifier);
 
   ~MockableQuicClient() override;
 
-  void ProcessPacket(const QuicSocketAddress& self_address,
-                     const QuicSocketAddress& peer_address,
-                     const QuicReceivedPacket& packet) override;
-
-  QuicPacketWriter* CreateQuicPacketWriter() override;
   QuicConnectionId GenerateNewConnectionId() override;
-  void UseWriter(QuicPacketWriterWrapper* writer);
   void UseConnectionId(QuicConnectionId connection_id);
-  const QuicReceivedPacket* last_incoming_packet() {
-    return last_incoming_packet_.get();
-  }
-  void set_track_last_incoming_packet(bool track) {
-    track_last_incoming_packet_ = track;
-  }
+
+  void UseWriter(QuicPacketWriterWrapper* writer);
   void set_peer_address(const QuicSocketAddress& address);
+  // The last incoming packet, iff |track_last_incoming_packet| is true.
+  const QuicReceivedPacket* last_incoming_packet();
+  // If true, copy each packet from ProcessPacket into |last_incoming_packet|
+  void set_track_last_incoming_packet(bool track);
+
+  // Casts the network helper to a MockableQuicClientEpollNetworkHelper.
+  MockableQuicClientEpollNetworkHelper* mockable_network_helper();
+  const MockableQuicClientEpollNetworkHelper* mockable_network_helper() const;
 
  private:
   QuicConnectionId override_connection_id_;  // ConnectionId to use, if nonzero
-  QuicPacketWriterWrapper* test_writer_;
   CachedNetworkParameters cached_network_paramaters_;
-  // The last incoming packet, iff |track_last_incoming_packet_| is true.
-  std::unique_ptr<QuicReceivedPacket> last_incoming_packet_;
-  // If true, copy each packet from ProcessPacket into |last_incoming_packet_|
-  bool track_last_incoming_packet_;
 
   DISALLOW_COPY_AND_ASSIGN(MockableQuicClient);
 };
@@ -84,15 +79,15 @@ class QuicTestClient : public QuicSpdyStream::Visitor,
  public:
   QuicTestClient(QuicSocketAddress server_address,
                  const std::string& server_hostname,
-                 const QuicVersionVector& supported_versions);
+                 const ParsedQuicVersionVector& supported_versions);
   QuicTestClient(QuicSocketAddress server_address,
                  const std::string& server_hostname,
                  const QuicConfig& config,
-                 const QuicVersionVector& supported_versions);
+                 const ParsedQuicVersionVector& supported_versions);
   QuicTestClient(QuicSocketAddress server_address,
                  const std::string& server_hostname,
                  const QuicConfig& config,
-                 const QuicVersionVector& supported_versions,
+                 const ParsedQuicVersionVector& supported_versions,
                  std::unique_ptr<ProofVerifier> proof_verifier);
 
   ~QuicTestClient() override;
@@ -132,6 +127,7 @@ class QuicTestClient : public QuicSpdyStream::Visitor,
   // Sends a GET request for |uri|, waits for the response, and returns the
   // response body.
   std::string SendSynchronousRequest(const std::string& uri);
+  void SendConnectivityProbing();
   void Connect();
   void ResetConnection();
   void Disconnect();
@@ -188,7 +184,12 @@ class QuicTestClient : public QuicSpdyStream::Visitor,
     WaitUntil(timeout_ms, [this]() { return response_size() != 0; });
   }
 
-  void MigrateSocket(const QuicIpAddress& new_host);
+  // Migrate local address to <|new_host|, a random port>.
+  // Return whether the migration succeeded.
+  bool MigrateSocket(const QuicIpAddress& new_host);
+  // Migrate local address to <|new_host|, |port|>.
+  // Return whether the migration succeeded.
+  bool MigrateSocketWithSpecifiedPort(const QuicIpAddress& new_host, int port);
   QuicIpAddress bind_to_address() const;
   void set_bind_to_address(QuicIpAddress address);
   const QuicSocketAddress& address() const;

@@ -93,7 +93,7 @@ BluetoothDevice::ConnectionInfo::ConnectionInfo(
       transmit_power(transmit_power),
       max_transmit_power(max_transmit_power) {}
 
-BluetoothDevice::ConnectionInfo::~ConnectionInfo() {}
+BluetoothDevice::ConnectionInfo::~ConnectionInfo() = default;
 
 base::string16 BluetoothDevice::GetNameForDisplay() const {
   base::Optional<std::string> name = GetName();
@@ -413,16 +413,19 @@ std::string BluetoothDevice::CanonicalizeAddress(const std::string& address) {
 
 std::string BluetoothDevice::GetIdentifier() const { return GetAddress(); }
 
-void BluetoothDevice::UpdateAdvertisementData(int8_t rssi,
-                                              UUIDList advertised_uuids,
-                                              ServiceDataMap service_data,
-                                              const int8_t* tx_power) {
+void BluetoothDevice::UpdateAdvertisementData(
+    int8_t rssi,
+    UUIDList advertised_uuids,
+    ServiceDataMap service_data,
+    ManufacturerDataMap manufacturer_data,
+    const int8_t* tx_power) {
   UpdateTimestamp();
 
   inquiry_rssi_ = rssi;
 
   device_uuids_.ReplaceAdvertisedUUIDs(std::move(advertised_uuids));
   service_data_ = std::move(service_data);
+  manufacturer_data_ = std::move(manufacturer_data);
 
   if (tx_power != nullptr) {
     inquiry_tx_power_ = *tx_power;
@@ -435,6 +438,7 @@ void BluetoothDevice::ClearAdvertisementData() {
   inquiry_rssi_ = base::nullopt;
   device_uuids_.ClearAdvertisedUUIDs();
   service_data_.clear();
+  manufacturer_data_.clear();
   inquiry_tx_power_ = base::nullopt;
   GetAdapter()->NotifyDeviceChanged(this);
 }
@@ -467,7 +471,7 @@ BluetoothDevice::GetPrimaryServicesByUUID(const BluetoothUUID& service_uuid) {
 void BluetoothDevice::DidConnectGatt() {
   for (const auto& callback : create_gatt_connection_success_callbacks_) {
     callback.Run(
-        base::MakeUnique<BluetoothGattConnection>(adapter_, GetAddress()));
+        std::make_unique<BluetoothGattConnection>(adapter_, GetAddress()));
   }
   create_gatt_connection_success_callbacks_.clear();
   create_gatt_connection_error_callbacks_.clear();

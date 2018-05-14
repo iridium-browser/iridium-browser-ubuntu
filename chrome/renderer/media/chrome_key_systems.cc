@@ -14,22 +14,23 @@
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/common/render_messages.h"
+#include "chrome/renderer/chrome_render_thread_observer.h"
 #include "components/cdm/renderer/external_clear_key_key_system_properties.h"
 #include "components/cdm/renderer/widevine_key_system_properties.h"
 #include "content/public/renderer/render_thread.h"
 #include "media/base/eme_constants.h"
 #include "media/base/key_system_properties.h"
 #include "media/media_features.h"
-#include "ppapi/features/features.h"
 
 #if defined(OS_ANDROID)
 #include "components/cdm/renderer/android_key_systems.h"
 #endif
 
-#if BUILDFLAG(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 #include "base/feature_list.h"
+#include "content/public/renderer/key_system_support.h"
 #include "media/base/media_switches.h"
+#include "media/base/video_codecs.h"
 #endif
 
 #include "widevine_cdm_version.h" // In SHARED_INTERMEDIATE_DIR.
@@ -41,24 +42,12 @@
 #include "base/version.h"
 #endif
 
+using media::EmeFeatureSupport;
+using media::EmeSessionTypeSupport;
 using media::KeySystemProperties;
 using media::SupportedCodecs;
 
-#if BUILDFLAG(ENABLE_PEPPER_CDMS)
-static bool IsPepperCdmAvailable(
-    const std::string& pepper_type,
-    std::vector<base::string16>* additional_param_names,
-    std::vector<base::string16>* additional_param_values) {
-  bool is_available = false;
-  content::RenderThread::Get()->Send(
-      new ChromeViewHostMsg_IsInternalPluginAvailableForMimeType(
-          pepper_type,
-          &is_available,
-          additional_param_names,
-          additional_param_values));
-
-  return is_available;
-}
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
 // External Clear Key (used for testing).
 static void AddExternalClearKey(
@@ -69,8 +58,8 @@ static void AddExternalClearKey(
       "org.chromium.externalclearkey";
   static const char kExternalClearKeyDecryptOnlyKeySystem[] =
       "org.chromium.externalclearkey.decryptonly";
-  static const char kExternalClearKeyRenewalKeySystem[] =
-      "org.chromium.externalclearkey.renewal";
+  static const char kExternalClearKeyMessageTypeTestKeySystem[] =
+      "org.chromium.externalclearkey.messagetypetest";
   static const char kExternalClearKeyFileIOTestKeySystem[] =
       "org.chromium.externalclearkey.fileiotest";
   static const char kExternalClearKeyOutputProtectionTestKeySystem[] =
@@ -85,12 +74,16 @@ static void AddExternalClearKey(
       "org.chromium.externalclearkey.verifycdmhosttest";
   static const char kExternalClearKeyStorageIdTestKeySystem[] =
       "org.chromium.externalclearkey.storageidtest";
+  static const char kExternalClearKeyDifferentGuidTestKeySystem[] =
+      "org.chromium.externalclearkey.differentguid";
+  static const char kExternalClearKeyCdmProxyTestKeySystem[] =
+      "org.chromium.externalclearkey.cdmproxytest";
 
-  std::vector<base::string16> additional_param_names;
-  std::vector<base::string16> additional_param_values;
-  if (!IsPepperCdmAvailable(cdm::kExternalClearKeyPepperType,
-                            &additional_param_names,
-                            &additional_param_values)) {
+  std::vector<media::VideoCodec> supported_video_codecs;
+  bool supports_persistent_license;
+  if (!content::IsKeySystemSupported(kExternalClearKeyKeySystem,
+                                     &supported_video_codecs,
+                                     &supports_persistent_license)) {
     return;
   }
 
@@ -101,9 +94,9 @@ static void AddExternalClearKey(
   concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
       kExternalClearKeyDecryptOnlyKeySystem));
 
-  // A key system that triggers renewal message in ClearKeyCdm.
-  concrete_key_systems->emplace_back(
-      new cdm::ExternalClearKeyProperties(kExternalClearKeyRenewalKeySystem));
+  // A key system that triggers various types of messages in ClearKeyCdm.
+  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
+      kExternalClearKeyMessageTypeTestKeySystem));
 
   // A key system that triggers the FileIO test in ClearKeyCdm.
   concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
@@ -134,35 +127,60 @@ static void AddExternalClearKey(
   // A key system that fetches the Storage ID in ClearKeyCdm.
   concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
       kExternalClearKeyStorageIdTestKeySystem));
+
+  // A key system that is registered with a different CDM GUID.
+  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
+      kExternalClearKeyDifferentGuidTestKeySystem));
+
+  // A key system that triggers CDM Proxy test in ClearKeyCdm.
+  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
+      kExternalClearKeyCdmProxyTestKeySystem));
 }
 
 #if defined(WIDEVINE_CDM_AVAILABLE)
-// This function finds "codecs" and parses the value into the vector |codecs|.
-// Converts the codec strings to UTF-8 since we only expect ASCII strings and
-// this simplifies the rest of the code in this file.
-void GetSupportedCodecsForPepperCdm(
-    const std::vector<base::string16>& additional_param_names,
-    const std::vector<base::string16>& additional_param_values,
-    std::vector<std::string>* codecs) {
-  DCHECK(codecs->empty());
-  DCHECK_EQ(additional_param_names.size(), additional_param_values.size());
-  for (size_t i = 0; i < additional_param_names.size(); ++i) {
-    if (additional_param_names[i] ==
-        base::ASCIIToUTF16(kCdmSupportedCodecsParamName)) {
-      const base::string16& codecs_string16 = additional_param_values[i];
-      std::string codecs_string;
-      if (!base::UTF16ToUTF8(codecs_string16.c_str(),
-                             codecs_string16.length(),
-                             &codecs_string)) {
-        DLOG(WARNING) << "Non-UTF-8 codecs string.";
-        // Continue using the best effort conversion.
-      }
-      *codecs = base::SplitString(
-          codecs_string, std::string(1, kCdmSupportedCodecsValueDelimiter),
-          base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-      break;
-    }
+// Returns persistent-license session support.
+EmeSessionTypeSupport GetPersistentLicenseSupport(bool supported_by_the_cdm) {
+  // Do not support persistent-license if the process cannot persist data.
+  // TODO(crbug.com/457487): Have a better plan on this. See bug for details.
+  if (ChromeRenderThreadObserver::is_incognito_process()) {
+    DVLOG(2) << __func__ << ": Not supported in incognito process.";
+    return EmeSessionTypeSupport::NOT_SUPPORTED;
   }
+
+  if (!supported_by_the_cdm) {
+    DVLOG(2) << __func__ << ": Not supported by the CDM.";
+    return EmeSessionTypeSupport::NOT_SUPPORTED;
+  }
+
+// On ChromeOS, platform verification is similar to CDM host verification.
+#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION) || defined(OS_CHROMEOS)
+  bool cdm_host_verification_potentially_supported = true;
+#else
+  bool cdm_host_verification_potentially_supported = false;
+#endif
+
+  // If we are sure CDM host verification is NOT supported, we should not
+  // support persistent-license.
+  if (!cdm_host_verification_potentially_supported) {
+    DVLOG(2) << __func__ << ": Not supported without CDM host verification.";
+    return EmeSessionTypeSupport::NOT_SUPPORTED;
+  }
+
+#if defined(OS_CHROMEOS)
+  // On ChromeOS, platform verification (similar to CDM host verification)
+  // requires identifier to be allowed.
+  // TODO(jrummell): Currently the ChromeOS CDM does not require storage ID
+  // to support persistent license. Update this logic when the new CDM requires
+  // storage ID.
+  return EmeSessionTypeSupport::SUPPORTED_WITH_IDENTIFIER;
+#elif BUILDFLAG(ENABLE_CDM_STORAGE_ID)
+  // On other platforms, we require storage ID to support persistent license.
+  return EmeSessionTypeSupport::SUPPORTED;
+#else
+  // Storage ID not implemented, so no support for persistent license.
+  DVLOG(2) << __func__ << ": Not supported without CDM storage ID.";
+  return EmeSessionTypeSupport::NOT_SUPPORTED;
+#endif  // defined(OS_CHROMEOS)
 }
 
 static void AddPepperBasedWidevine(
@@ -174,19 +192,14 @@ static void AddPepperBasedWidevine(
     return;
 #endif  // defined(WIDEVINE_CDM_MIN_GLIBC_VERSION)
 
-  std::vector<base::string16> additional_param_names;
-  std::vector<base::string16> additional_param_values;
-  if (!IsPepperCdmAvailable(kWidevineCdmPluginMimeType,
-                            &additional_param_names,
-                            &additional_param_values)) {
+  std::vector<media::VideoCodec> supported_video_codecs;
+  bool supports_persistent_license = false;
+  if (!content::IsKeySystemSupported(kWidevineKeySystem,
+                                     &supported_video_codecs,
+                                     &supports_persistent_license)) {
     DVLOG(1) << "Widevine CDM is not currently available.";
     return;
   }
-
-  std::vector<std::string> codecs;
-  GetSupportedCodecsForPepperCdm(additional_param_names,
-                                 additional_param_values,
-                                 &codecs);
 
   SupportedCodecs supported_codecs = media::EME_CODEC_NONE;
 
@@ -199,47 +212,56 @@ static void AddPepperBasedWidevine(
   supported_codecs |= media::EME_CODEC_MP4_AAC;
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
-  for (size_t i = 0; i < codecs.size(); ++i) {
-    if (codecs[i] == kCdmSupportedCodecVp8)
-      supported_codecs |= media::EME_CODEC_WEBM_VP8;
-    if (codecs[i] == kCdmSupportedCodecVp9) {
-      supported_codecs |= media::EME_CODEC_WEBM_VP9;
-      supported_codecs |= media::EME_CODEC_COMMON_VP9;
-    }
+  // Video codecs are determined by what was registered for the CDM.
+  for (const auto& codec : supported_video_codecs) {
+    switch (codec) {
+      case media::VideoCodec::kCodecVP8:
+        supported_codecs |= media::EME_CODEC_WEBM_VP8;
+        break;
+      case media::VideoCodec::kCodecVP9:
+        supported_codecs |= media::EME_CODEC_WEBM_VP9;
+        supported_codecs |= media::EME_CODEC_COMMON_VP9;
+        break;
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-    if (codecs[i] == kCdmSupportedCodecAvc1)
-      supported_codecs |= media::EME_CODEC_MP4_AVC1;
+      case media::VideoCodec::kCodecH264:
+        supported_codecs |= media::EME_CODEC_MP4_AVC1;
+        break;
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
+      default:
+        DVLOG(1) << "Unexpected supported codec: " << GetCodecName(codec);
+        break;
+    }
   }
 
+  EmeSessionTypeSupport persistent_license_support =
+      GetPersistentLicenseSupport(supports_persistent_license);
+
   using Robustness = cdm::WidevineKeySystemProperties::Robustness;
+
   concrete_key_systems->emplace_back(new cdm::WidevineKeySystemProperties(
       supported_codecs,
 #if defined(OS_CHROMEOS)
-      Robustness::HW_SECURE_ALL,  // Maximum audio robustness.
-      Robustness::HW_SECURE_ALL,  // Maximim video robustness.
-      media::EmeSessionTypeSupport::
-          SUPPORTED_WITH_IDENTIFIER,  // Persistent-license.
-      media::EmeSessionTypeSupport::
-          NOT_SUPPORTED,                        // Persistent-release-message.
-      media::EmeFeatureSupport::REQUESTABLE,    // Persistent state.
-      media::EmeFeatureSupport::REQUESTABLE));  // Distinctive identifier.
-#else   // (Desktop)
-      Robustness::SW_SECURE_CRYPTO,                 // Maximum audio robustness.
-      Robustness::SW_SECURE_DECODE,                 // Maximum video robustness.
-      media::EmeSessionTypeSupport::NOT_SUPPORTED,  // persistent-license.
-      media::EmeSessionTypeSupport::
-          NOT_SUPPORTED,                          // persistent-release-message.
-      media::EmeFeatureSupport::REQUESTABLE,      // Persistent state.
-      media::EmeFeatureSupport::NOT_SUPPORTED));  // Distinctive identifier.
-#endif  // defined(OS_CHROMEOS)
+      Robustness::HW_SECURE_ALL,             // Maximum audio robustness.
+      Robustness::HW_SECURE_ALL,             // Maximum video robustness.
+      persistent_license_support,            // Persistent-license.
+      EmeSessionTypeSupport::NOT_SUPPORTED,  // Persistent-release-message.
+      EmeFeatureSupport::REQUESTABLE,        // Persistent state.
+      EmeFeatureSupport::REQUESTABLE));      // Distinctive identifier.
+#else                                        // Desktop
+      Robustness::SW_SECURE_CRYPTO,          // Maximum audio robustness.
+      Robustness::SW_SECURE_DECODE,          // Maximum video robustness.
+      persistent_license_support,            // persistent-license.
+      EmeSessionTypeSupport::NOT_SUPPORTED,  // persistent-release-message.
+      EmeFeatureSupport::REQUESTABLE,        // Persistent state.
+      EmeFeatureSupport::NOT_SUPPORTED));    // Distinctive identifier.
+#endif                                       // defined(OS_CHROMEOS)
 }
 #endif  // defined(WIDEVINE_CDM_AVAILABLE)
-#endif  // BUILDFLAG(ENABLE_PEPPER_CDMS)
+#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
 void AddChromeKeySystems(
     std::vector<std::unique_ptr<KeySystemProperties>>* key_systems_properties) {
-#if BUILDFLAG(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
   if (base::FeatureList::IsEnabled(media::kExternalClearKeyForTesting))
     AddExternalClearKey(key_systems_properties);
 
@@ -247,7 +269,7 @@ void AddChromeKeySystems(
   AddPepperBasedWidevine(key_systems_properties);
 #endif  // defined(WIDEVINE_CDM_AVAILABLE)
 
-#endif  // BUILDFLAG(ENABLE_PEPPER_CDMS)
+#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
 #if defined(OS_ANDROID)
   cdm::AddAndroidWidevine(key_systems_properties);

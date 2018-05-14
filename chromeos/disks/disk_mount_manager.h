@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "base/callback_forward.h"
+#include "base/files/file_path.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/cros_disks_client.h"
 
@@ -51,7 +52,10 @@ class CHROMEOS_EXPORT DiskMountManager {
     FORMAT_COMPLETED
   };
 
-  // Used to house an instance of each found mount device.
+  enum RenameEvent { RENAME_STARTED, RENAME_COMPLETED };
+
+  // Used to house an instance of each found mount device. Created from
+  // non-virtual mount devices only - see IsAutoMountable().
   class Disk {
    public:
     Disk(const std::string& device_path,
@@ -78,7 +82,9 @@ class CHROMEOS_EXPORT DiskMountManager {
          bool has_media,
          bool on_boot_device,
          bool on_removable_device,
-         bool is_hidden);
+         bool is_hidden,
+         const std::string& file_system_type,
+         const std::string& base_mount_path);
     Disk(const Disk& other);
     ~Disk();
 
@@ -100,6 +106,10 @@ class CHROMEOS_EXPORT DiskMountManager {
 
     // Device's label.
     const std::string& device_label() const { return device_label_; }
+
+    void set_device_label(const std::string& device_label) {
+      device_label_ = device_label;
+    }
 
     // If disk is a parent, then its label, else parents label.
     // (e.g. "TransMemory")
@@ -155,10 +165,6 @@ class CHROMEOS_EXPORT DiskMountManager {
     // Shoud the device be shown in the UI, or automounted.
     bool is_hidden() const { return is_hidden_; }
 
-    void set_mount_path(const std::string& mount_path) {
-      mount_path_ = mount_path;
-    }
-
     void set_write_disabled_by_policy(bool disable) {
       write_disabled_by_policy_ = disable;
     }
@@ -166,6 +172,20 @@ class CHROMEOS_EXPORT DiskMountManager {
     void clear_mount_path() { mount_path_.clear(); }
 
     bool is_mounted() const { return !mount_path_.empty(); }
+
+    const std::string& file_system_type() const { return file_system_type_; }
+
+    void set_file_system_type(const std::string& file_system_type) {
+      file_system_type_ = file_system_type;
+    }
+    // Name of the first mount path of the disk.
+    const std::string& base_mount_path() const { return base_mount_path_; }
+
+    void SetMountPath(const std::string& mount_path);
+
+    bool IsAutoMountable() const;
+
+    bool IsStatefulPartition() const;
 
    private:
     std::string device_path_;
@@ -189,6 +209,8 @@ class CHROMEOS_EXPORT DiskMountManager {
     bool on_boot_device_;
     bool on_removable_device_;
     bool is_hidden_;
+    std::string file_system_type_;
+    std::string base_mount_path_;
   };
   typedef std::map<std::string, std::unique_ptr<Disk>> DiskMap;
 
@@ -228,12 +250,17 @@ class CHROMEOS_EXPORT DiskMountManager {
   typedef base::Callback<void(bool success)> EnsureMountInfoRefreshedCallback;
 
   // Implement this interface to be notified about disk/mount related events.
+  // TODO(agawronska): Make observer methods non-pure virtual, because
+  // subclasses only use small subset of them.
   class Observer {
    public:
     virtual ~Observer() {}
 
-    // Called when disk mount status is changed.
-    virtual void OnDiskEvent(DiskEvent event, const Disk* disk) = 0;
+    // Called when auto-mountable disk mount status is changed.
+    virtual void OnAutoMountableDiskEvent(DiskEvent event,
+                                          const Disk& disk) = 0;
+    // Called when fixed storage disk status is changed.
+    virtual void OnBootDeviceDiskEvent(DiskEvent event, const Disk& disk) = 0;
     // Called when device status is changed.
     virtual void OnDeviceEvent(DeviceEvent event,
                                const std::string& device_path) = 0;
@@ -244,6 +271,10 @@ class CHROMEOS_EXPORT DiskMountManager {
     // Called on format process events.
     virtual void OnFormatEvent(FormatEvent event,
                                FormatError error_code,
+                               const std::string& device_path) = 0;
+    // Called on rename process events.
+    virtual void OnRenameEvent(RenameEvent event,
+                               RenameError error_code,
                                const std::string& device_path) = 0;
   };
 
@@ -303,6 +334,12 @@ class CHROMEOS_EXPORT DiskMountManager {
   // Formats Device given its mount path. Unmounts the device.
   // Example: mount_path: /media/VOLUME_LABEL
   virtual void FormatMountedDevice(const std::string& mount_path) = 0;
+
+  // Renames Device given its mount path.
+  // Example: mount_path: /media/VOLUME_LABEL
+  //          volume_name: MYUSB
+  virtual void RenameMountedDevice(const std::string& mount_path,
+                                   const std::string& volume_name) = 0;
 
   // Unmounts device_path and all of its known children.
   virtual void UnmountDeviceRecursively(

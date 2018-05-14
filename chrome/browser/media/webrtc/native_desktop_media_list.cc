@@ -23,9 +23,9 @@
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_win.h"
 #endif  // defined(OS_WIN)
 
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#if defined(USE_X11)
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h"
-#endif  // defined(USE_X11) && !defined(OS_CHROMEOS)
+#endif  // defined(USE_X11)
 
 #if defined(USE_AURA)
 #include "ui/snapshot/snapshot_aura.h"
@@ -37,13 +37,13 @@ using content::DesktopMediaID;
 namespace {
 
 // Update the list every second.
-const int kDefaultUpdatePeriod = 1000;
+const int kDefaultNativeDesktopMediaListUpdatePeriod = 1000;
 
 // Returns a hash of a DesktopFrame content to detect when image for a desktop
 // media source has changed.
 uint32_t GetFrameHash(webrtc::DesktopFrame* frame) {
   int data_size = frame->stride() * frame->size().height();
-  return base::Hash(reinterpret_cast<char*>(frame->data()), data_size);
+  return base::Hash(frame->data(), data_size);
 }
 
 gfx::ImageSkia ScaleDesktopFrame(std::unique_ptr<webrtc::DesktopFrame> frame,
@@ -214,8 +214,8 @@ void NativeDesktopMediaList::Worker::OnCaptureResult(
 NativeDesktopMediaList::NativeDesktopMediaList(
     DesktopMediaID::Type type,
     std::unique_ptr<webrtc::DesktopCapturer> capturer)
-    : DesktopMediaListBase(
-          base::TimeDelta::FromMilliseconds(kDefaultUpdatePeriod)),
+    : DesktopMediaListBase(base::TimeDelta::FromMilliseconds(
+          kDefaultNativeDesktopMediaListUpdatePeriod)),
       weak_factory_(this) {
   type_ = type;
   capture_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
@@ -254,10 +254,10 @@ void NativeDesktopMediaList::RefreshForAuraWindows(
 #if defined(OS_WIN)
     aura_window = views::DesktopWindowTreeHostWin::GetContentWindowForHWND(
         reinterpret_cast<HWND>(source.id.id));
-#elif defined(USE_X11) && !defined(OS_CHROMEOS)
+#elif defined(USE_X11)
     aura_window =
         views::DesktopWindowTreeHostX11::GetContentWindowForXID(source.id.id);
-#endif  // defined(USE_X11) && !defined(OS_CHROMEOS)
+#endif  // defined(USE_X11)
     if (aura_window) {
       DesktopMediaID aura_id = DesktopMediaID::RegisterAuraWindow(
           DesktopMediaID::TYPE_WINDOW, aura_window);
@@ -325,14 +325,12 @@ void NativeDesktopMediaList::CaptureAuraWindowThumbnail(
   pending_aura_capture_requests_++;
   ui::GrabWindowSnapshotAndScaleAsyncAura(
       window, window_rect, scaled_rect.size(),
-      base::CreateTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::USER_VISIBLE}),
       base::Bind(&NativeDesktopMediaList::OnAuraThumbnailCaptured,
                  weak_factory_.GetWeakPtr(), id));
 }
 
 void NativeDesktopMediaList::OnAuraThumbnailCaptured(const DesktopMediaID& id,
-                                                     const gfx::Image& image) {
+                                                     gfx::Image image) {
   if (!image.IsEmpty()) {
     // Only new or changed thumbnail need update.
     new_aura_thumbnail_hashes_[id] = GetImageHash(image);

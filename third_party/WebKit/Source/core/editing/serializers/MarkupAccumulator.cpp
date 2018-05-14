@@ -27,9 +27,6 @@
 
 #include "core/editing/serializers/MarkupAccumulator.h"
 
-#include "core/XLinkNames.h"
-#include "core/XMLNSNames.h"
-#include "core/XMLNames.h"
 #include "core/dom/Attr.h"
 #include "core/dom/CDATASection.h"
 #include "core/dom/Comment.h"
@@ -41,6 +38,9 @@
 #include "core/editing/Editor.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLTemplateElement.h"
+#include "core/xlink_names.h"
+#include "core/xml_names.h"
+#include "core/xmlns_names.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/text/CharacterNames.h"
 
@@ -50,7 +50,7 @@ MarkupAccumulator::MarkupAccumulator(EAbsoluteURLs resolve_urls_method,
                                      SerializationType serialization_type)
     : formatter_(resolve_urls_method, serialization_type) {}
 
-MarkupAccumulator::~MarkupAccumulator() {}
+MarkupAccumulator::~MarkupAccumulator() = default;
 
 void MarkupAccumulator::AppendString(const String& string) {
   markup_.Append(string);
@@ -111,9 +111,19 @@ bool MarkupAccumulator::ShouldIgnoreElement(const Element& element) const {
 void MarkupAccumulator::AppendElement(StringBuilder& result,
                                       const Element& element,
                                       Namespaces* namespaces) {
+  // https://html.spec.whatwg.org/multipage/parsing.html#html-fragment-serialisation-algorithm
   AppendOpenTag(result, element, namespaces);
 
   AttributeCollection attributes = element.Attributes();
+  if (SerializeAsHTMLDocument(element)) {
+    // 3.2. Element: If current node's is value is not null, and the
+    // element does not have an is attribute in its attribute list, ...
+    const AtomicString& is_value = element.IsValue();
+    if (!is_value.IsNull() && !attributes.Find(HTMLNames::isAttr)) {
+      AppendAttribute(result, element, Attribute(HTMLNames::isAttr, is_value),
+                      namespaces);
+    }
+  }
   for (const auto& attribute : attributes) {
     if (!ShouldIgnoreAttribute(element, attribute))
       AppendAttribute(result, element, attribute, namespaces);
@@ -175,9 +185,9 @@ static void SerializeNodesWithNamespaces(MarkupAccumulator& accumulator,
 
   if (!(accumulator.SerializeAsHTMLDocument(target_node) &&
         ElementCannotHaveEndTag(target_node))) {
-    Node* current = isHTMLTemplateElement(target_node)
+    Node* current = IsHTMLTemplateElement(target_node)
                         ? Strategy::FirstChild(
-                              *toHTMLTemplateElement(target_node).content())
+                              *ToHTMLTemplateElement(target_node).content())
                         : Strategy::FirstChild(target_node);
     for (; current; current = Strategy::NextSibling(*current))
       SerializeNodesWithNamespaces<Strategy>(accumulator, *current,

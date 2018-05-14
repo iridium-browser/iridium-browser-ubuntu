@@ -4,7 +4,6 @@
 
 #include "sql/test/sql_test_suite.h"
 
-#include "base/metrics/statistics_recorder.h"
 #include "sql/test/paths.h"
 
 namespace sql {
@@ -12,16 +11,10 @@ namespace sql {
 SQLTestSuite::SQLTestSuite(int argc, char** argv)
     : base::TestSuite(argc, argv) {}
 
-SQLTestSuite::~SQLTestSuite() {}
+SQLTestSuite::~SQLTestSuite() = default;
 
 void SQLTestSuite::Initialize() {
   base::TestSuite::Initialize();
-
-  // Initialize the histograms subsystem, so that any histograms hit in tests
-  // are correctly registered with the statistics recorder and can be queried
-  // by tests.
-  base::StatisticsRecorder::Initialize();
-
   sql::test::RegisterPathProvider();
 }
 

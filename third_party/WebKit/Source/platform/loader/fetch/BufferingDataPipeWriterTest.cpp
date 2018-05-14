@@ -7,7 +7,7 @@
 #include <memory>
 #include <random>
 
-#include "platform/testing/TestingPlatformSupport.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 #include "platform/wtf/PtrUtil.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -40,8 +40,8 @@ TEST(BufferingDataPipeWriterTest, WriteMany) {
   for (size_t i = 0; i < total; ++i)
     input.push_back(static_cast<char>(engine() % 26 + 'A'));
 
-  auto writer = WTF::MakeUnique<BufferingDataPipeWriter>(
-      std::move(producer), platform->CurrentThread()->GetWebTaskRunner());
+  auto writer = std::make_unique<BufferingDataPipeWriter>(
+      std::move(producer), platform->CurrentThread()->GetTaskRunner().get());
 
   for (size_t i = 0; i < total;) {
     // We use a temporary buffer to check that the buffer is copied immediately.
@@ -60,7 +60,7 @@ TEST(BufferingDataPipeWriterTest, WriteMany) {
     constexpr auto kNone = MOJO_READ_DATA_FLAG_NONE;
     char buffer[reading_chunk_size] = {};
     uint32_t size = reading_chunk_size;
-    result = mojo::ReadDataRaw(consumer.get(), buffer, &size, kNone);
+    result = consumer->ReadData(buffer, &size, kNone);
 
     if (result == MOJO_RESULT_SHOULD_WAIT) {
       platform->RunUntilIdle();

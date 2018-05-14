@@ -18,6 +18,7 @@
 #include "net/socket/client_socket_pool.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/connection_attempts.h"
+#include "net/socket/socket_tag.h"
 
 namespace net {
 
@@ -36,14 +37,9 @@ class NET_EXPORT_PRIVATE TransportSocketParams
   // TCP FastOpen should not be used if the first write to the socket may
   // be non-idempotent, as the underlying socket could retransmit the data
   // on failure of the first transmission.
-  // NOTE: Currently, COMBINE_CONNECT_AND_WRITE_DESIRED is used if the data in
-  // the write is known to be idempotent, and COMBINE_CONNECT_AND_WRITE_DEFAULT
-  // is used as a default for other cases (including non-idempotent writes).
   enum CombineConnectAndWritePolicy {
-    COMBINE_CONNECT_AND_WRITE_DEFAULT,    // Default policy, implemented in
-                                          // TransportSocketParams constructor.
-    COMBINE_CONNECT_AND_WRITE_DESIRED,    // Combine if supported by socket.
-    COMBINE_CONNECT_AND_WRITE_PROHIBITED  // Do not combine.
+    COMBINE_CONNECT_AND_WRITE_DEFAULT,  // Default policy, don't combine.
+    COMBINE_CONNECT_AND_WRITE_DESIRED,  // Combine if supported by socket.
   };
 
   // |host_resolution_callback| will be invoked after the the hostname is
@@ -107,6 +103,7 @@ class NET_EXPORT_PRIVATE TransportConnectJob : public ConnectJob {
   TransportConnectJob(
       const std::string& group_name,
       RequestPriority priority,
+      const SocketTag& socket_tag,
       ClientSocketPool::RespectLimits respect_limits,
       const scoped_refptr<TransportSocketParams>& params,
       base::TimeDelta timeout_duration,
@@ -206,6 +203,7 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool : public ClientSocketPool {
   int RequestSocket(const std::string& group_name,
                     const void* resolve_info,
                     RequestPriority priority,
+                    const SocketTag& socket_tag,
                     RespectLimits respect_limits,
                     ClientSocketHandle* handle,
                     const CompletionCallback& callback,
@@ -213,7 +211,8 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool : public ClientSocketPool {
   void RequestSockets(const std::string& group_name,
                       const void* params,
                       int num_sockets,
-                      const NetLogWithSource& net_log) override;
+                      const NetLogWithSource& net_log,
+                      HttpRequestInfo::RequestMotivation motivation) override;
   void SetPriority(const std::string& group_name,
                    ClientSocketHandle* handle,
                    RequestPriority priority) override;

@@ -17,7 +17,8 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/sha1.h"
+#include "base/memory/protected_memory.h"
+#include "base/memory/protected_memory_cfi.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "crypto/scoped_nss_types.h"
@@ -29,6 +30,7 @@
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/crl_set.h"
 #include "net/cert/ev_root_ca_metadata.h"
+#include "net/cert/known_roots.h"
 #include "net/cert/known_roots_nss.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util_nss.h"
@@ -38,6 +40,28 @@
 namespace net {
 
 namespace {
+
+using CacheOCSPResponseFunction = SECStatus (*)(CERTCertDBHandle* handle,
+                                                CERTCertificate* cert,
+                                                PRTime time,
+                                                const SECItem* encodedResponse,
+                                                void* pwArg);
+
+static PROTECTED_MEMORY_SECTION base::ProtectedMemory<CacheOCSPResponseFunction>
+    g_cache_ocsp_response;
+
+// The function pointer for CERT_CacheOCSPResponseFromSideChannel is saved to
+// read-only memory after being dynamically resolved as a security mitigation to
+// prevent the pointer from being tampered with. See crbug.com/771365 for
+// details.
+const base::ProtectedMemory<CacheOCSPResponseFunction>&
+ResolveCacheOCSPResponse() {
+  static base::ProtectedMemory<CacheOCSPResponseFunction>::Initializer init(
+      &g_cache_ocsp_response,
+      reinterpret_cast<CacheOCSPResponseFunction>(
+          dlsym(RTLD_DEFAULT, "CERT_CacheOCSPResponseFromSideChannel")));
+  return g_cache_ocsp_response;
+}
 
 typedef std::unique_ptr<
     CERTCertificatePolicies,
@@ -198,7 +222,8 @@ void GetCertChainInfo(CERTCertList* cert_list,
     verified_chain.push_back(root_cert);
 
   scoped_refptr<X509Certificate> verified_cert_with_chain =
-      X509Certificate::CreateFromHandle(verified_cert, verified_chain);
+      x509_util::CreateX509CertificateFromCERTCertificate(verified_cert,
+                                                          verified_chain);
   if (verified_cert_with_chain)
     verify_result->verified_cert = std::move(verified_cert_with_chain);
   else
@@ -270,8 +295,9 @@ CRLSetResult CheckRevocationWithCRLSet(const CERTCertList* cert_list,
     base::StringPiece der(reinterpret_cast<char*>(cert->derCert.data),
                           cert->derCert.len);
 
-    base::StringPiece spki;
-    if (!asn1::ExtractSPKIFromDERCert(der, &spki)) {
+    base::StringPiece spki, subject;
+    if (!asn1::ExtractSPKIFromDERCert(der, &spki) ||
+        !asn1::ExtractSubjectFromDERCert(der, &subject)) {
       NOTREACHED();
       error = true;
       continue;
@@ -284,6 +310,8 @@ CRLSetResult CheckRevocationWithCRLSet(const CERTCertList* cert_list,
 
     CRLSet::Result result = crl_set->CheckSPKI(spki_hash);
 
+    if (result != CRLSet::REVOKED)
+      result = crl_set->CheckSubject(subject, spki_hash);
     if (result != CRLSet::REVOKED && !issuer_spki_hash.empty())
       result = crl_set->CheckSerial(serial_number, issuer_spki_hash);
 
@@ -623,16 +651,41 @@ HashValue CertPublicKeyHashSHA256(CERTCertificate* cert) {
   return hash;
 }
 
-void AppendPublicKeyHashes(CERTCertList* cert_list,
-                           CERTCertificate* root_cert,
-                           HashValueVector* hashes) {
+void AppendPublicKeyHashesAndTestKnownRoot(CERTCertList* cert_list,
+                                           CERTCertificate* root_cert,
+                                           HashValueVector* hashes,
+                                           bool* known_root) {
+  *known_root = false;
+
+  // First, traverse the list to build the list of public key hashes, in order
+  // of leaf to root.
   for (CERTCertListNode* node = CERT_LIST_HEAD(cert_list);
-       !CERT_LIST_END(node, cert_list);
-       node = CERT_LIST_NEXT(node)) {
+       !CERT_LIST_END(node, cert_list); node = CERT_LIST_NEXT(node)) {
     hashes->push_back(CertPublicKeyHashSHA256(node->cert));
   }
   if (root_cert) {
     hashes->push_back(CertPublicKeyHashSHA256(root_cert));
+  }
+
+  // Second, as an optimization, work from the hashes from the last (presumed
+  // root) to the leaf, checking against the built-in list.
+  for (auto it = hashes->rbegin(); it != hashes->rend() && !*known_root; ++it) {
+    *known_root = GetNetTrustAnchorHistogramIdForSPKI(*it) != 0;
+  }
+
+  // Third, see if a root_cert was provided, and if so, if it matches a
+  // built-in root (it should, if provided).
+  if (root_cert && !*known_root) {
+    *known_root = IsKnownRoot(root_cert);
+  }
+
+  // Finally, if all else has failed and nothing short-circuited, walk the
+  // remainder of the chain. As it's unlikely to reach this point, this just
+  // walks from the leaf and is not optimized, favoring readability.
+  for (CERTCertListNode* node = CERT_LIST_HEAD(cert_list);
+       !*known_root && !CERT_LIST_END(node, cert_list);
+       node = CERT_LIST_NEXT(node)) {
+    *known_root = IsKnownRoot(node->cert);
   }
 }
 
@@ -728,38 +781,42 @@ bool VerifyEV(CERTCertificate* cert_handle,
       return false;
   }
 
-  SHA1HashValue weak_fingerprint;
-  base::SHA1HashBytes(root_ca->derCert.data, root_ca->derCert.len,
-                      weak_fingerprint.data);
-  return metadata->HasEVPolicyOID(weak_fingerprint, ev_policy_oid);
+  SHA256HashValue fingerprint;
+  crypto::SHA256HashString(
+      base::StringPiece(reinterpret_cast<const char*>(root_ca->derCert.data),
+                        root_ca->derCert.len),
+      fingerprint.data, sizeof(fingerprint.data));
+  return metadata->HasEVPolicyOID(fingerprint, ev_policy_oid);
 }
 
-CERTCertList* CertificateListToCERTCertList(const CertificateList& list) {
-  CERTCertList* result = CERT_NewCertList();
+// Convert a CertificateList to an NSS CERTCertList. If any certs couldn't be
+// converted, they are silently ignored.
+ScopedCERTCertList CertificateListToCERTCertListIgnoringErrors(
+    const CertificateList& list) {
+  ScopedCERTCertList result(CERT_NewCertList());
   for (size_t i = 0; i < list.size(); ++i) {
-    CERTCertificate* cert = list[i]->os_cert_handle();
-    CERT_AddCertToListTail(result, CERT_DupCertificate(cert));
+    ScopedCERTCertificate cert =
+        x509_util::CreateCERTCertificateFromX509Certificate(list[i].get());
+    if (cert)
+      CERT_AddCertToListTail(result.get(), cert.release());
+    else
+      LOG(WARNING) << "ignoring cert: " << list[i]->subject().GetDisplayName();
   }
   return result;
 }
 
 }  // namespace
 
-CertVerifyProcNSS::CertVerifyProcNSS()
-    : cache_ocsp_response_from_side_channel_(
-          reinterpret_cast<CacheOCSPResponseFromSideChannelFunction>(
-              dlsym(RTLD_DEFAULT, "CERT_CacheOCSPResponseFromSideChannel")))
-{
-}
+CertVerifyProcNSS::CertVerifyProcNSS() = default;
 
-CertVerifyProcNSS::~CertVerifyProcNSS() {}
+CertVerifyProcNSS::~CertVerifyProcNSS() = default;
 
 bool CertVerifyProcNSS::SupportsAdditionalTrustAnchors() const {
   return true;
 }
 
 bool CertVerifyProcNSS::SupportsOCSPStapling() const {
-  return cache_ocsp_response_from_side_channel_;
+  return *ResolveCacheOCSPResponse() != nullptr;
 }
 
 int CertVerifyProcNSS::VerifyInternalImpl(
@@ -771,9 +828,20 @@ int CertVerifyProcNSS::VerifyInternalImpl(
     const CertificateList& additional_trust_anchors,
     CERTChainVerifyCallback* chain_verify_callback,
     CertVerifyResult* verify_result) {
-  CERTCertificate* cert_handle = cert->os_cert_handle();
+  // Convert the whole input chain into NSS certificates. Even though only the
+  // target cert is explicitly referred to in this function, creating NSS
+  // certificates for the intermediates is required for PKIXVerifyCert to find
+  // them during chain building.
+  ScopedCERTCertificateList input_chain =
+      x509_util::CreateCERTCertificateListFromX509Certificate(
+          cert, x509_util::InvalidIntermediateBehavior::kIgnore);
+  if (input_chain.empty()) {
+    verify_result->cert_status |= CERT_STATUS_INVALID;
+    return ERR_CERT_INVALID;
+  }
+  CERTCertificate* cert_handle = input_chain[0].get();
 
-  if (!ocsp_response.empty() && cache_ocsp_response_from_side_channel_) {
+  if (!ocsp_response.empty() && SupportsOCSPStapling()) {
     // Note: NSS uses a thread-safe global hash table, so this call will
     // affect any concurrent verification operations on |cert| or copies of
     // the same certificate. This is an unavoidable limitation of NSS's OCSP
@@ -782,9 +850,9 @@ int CertVerifyProcNSS::VerifyInternalImpl(
     ocsp_response_item.data = reinterpret_cast<unsigned char*>(
         const_cast<char*>(ocsp_response.data()));
     ocsp_response_item.len = ocsp_response.size();
-    cache_ocsp_response_from_side_channel_(CERT_GetDefaultCertDB(), cert_handle,
-                                           PR_Now(), &ocsp_response_item,
-                                           nullptr);
+    UnsanitizedCfiCall(ResolveCacheOCSPResponse())(
+        CERT_GetDefaultCertDB(), cert_handle, PR_Now(), &ocsp_response_item,
+        nullptr);
   }
 
   // Setup a callback to call into CheckChainRevocationWithCRLSet with the
@@ -836,17 +904,26 @@ int CertVerifyProcNSS::VerifyInternalImpl(
 
   ScopedCERTCertList trust_anchors;
   if (!additional_trust_anchors.empty()) {
-    trust_anchors.reset(
-        CertificateListToCERTCertList(additional_trust_anchors));
+    trust_anchors =
+        CertificateListToCERTCertListIgnoringErrors(additional_trust_anchors);
   }
 
   SECStatus status =
       PKIXVerifyCert(cert_handle, check_revocation, false, cert_io_enabled,
                      NULL, 0, trust_anchors.get(), &crlset_callback, cvout);
 
+  bool known_root = false;
+  HashValueVector hashes;
+  if (status == SECSuccess) {
+    AppendPublicKeyHashesAndTestKnownRoot(
+        cvout[cvout_cert_list_index].value.pointer.chain,
+        cvout[cvout_trust_anchor_index].value.pointer.cert, &hashes,
+        &known_root);
+  }
+
   if (status == SECSuccess &&
       (flags & CertVerifier::VERIFY_REV_CHECKING_REQUIRED_LOCAL_ANCHORS) &&
-      !IsKnownRoot(cvout[cvout_trust_anchor_index].value.pointer.cert)) {
+      !known_root) {
     // TODO(rsleevi): Optimize this by supplying the constructed chain to
     // libpkix via cvin. Omitting for now, due to lack of coverage in upstream
     // NSS tests for that feature.
@@ -854,15 +931,18 @@ int CertVerifyProcNSS::VerifyInternalImpl(
     verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
     status = PKIXVerifyCert(cert_handle, true, true, cert_io_enabled, NULL, 0,
                             trust_anchors.get(), &crlset_callback, cvout);
+    if (status == SECSuccess) {
+      AppendPublicKeyHashesAndTestKnownRoot(
+          cvout[cvout_cert_list_index].value.pointer.chain,
+          cvout[cvout_trust_anchor_index].value.pointer.cert, &hashes,
+          &known_root);
+    }
   }
 
   if (status == SECSuccess) {
-    AppendPublicKeyHashes(cvout[cvout_cert_list_index].value.pointer.chain,
-                          cvout[cvout_trust_anchor_index].value.pointer.cert,
-                          &verify_result->public_key_hashes);
+    verify_result->public_key_hashes = hashes;
+    verify_result->is_issued_by_known_root = known_root;
 
-    verify_result->is_issued_by_known_root =
-        IsKnownRoot(cvout[cvout_trust_anchor_index].value.pointer.cert);
     verify_result->is_issued_by_additional_trust_anchor =
         IsAdditionalTrustAnchor(
             trust_anchors.get(),

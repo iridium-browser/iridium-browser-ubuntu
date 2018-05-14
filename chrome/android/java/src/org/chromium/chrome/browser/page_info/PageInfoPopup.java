@@ -31,6 +31,7 @@ import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
+import android.text.style.TextAppearanceSpan;
 import android.util.AttributeSet;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -46,6 +47,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
@@ -67,7 +69,9 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ssl.SecurityStateModel;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.UrlUtilities;
+import org.chromium.chrome.browser.widget.TintedDrawable;
 import org.chromium.components.location.LocationUtils;
+import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.ui.base.DeviceFormFactor;
@@ -96,6 +100,14 @@ public class PageInfoPopup implements OnClickListener {
     public static final int OPENED_FROM_MENU = 1;
     public static final int OPENED_FROM_TOOLBAR = 2;
     public static final int OPENED_FROM_VR = 3;
+
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef({NOT_OFFLINE_PAGE, TRUSTED_OFFLINE_PAGE, UNTRUSTED_OFFLINE_PAGE})
+    private @interface OfflinePageState {}
+
+    public static final int NOT_OFFLINE_PAGE = 1;
+    public static final int TRUSTED_OFFLINE_PAGE = 2;
+    public static final int UNTRUSTED_OFFLINE_PAGE = 3;
 
     /**
      * An entry in the settings dropdown for a given permission. There are two options for each
@@ -304,6 +316,10 @@ public class PageInfoPopup implements OnClickListener {
     // Creation date of an offline copy, if web contents contains an offline page.
     private String mOfflinePageCreationDate;
 
+    // The state of offline page in the web contents (not offline page, trusted/untrusted offline
+    // page).
+    private @OfflinePageState int mOfflinePageState;
+
     // The name of the content publisher, if any.
     private String mContentPublisher;
 
@@ -316,15 +332,17 @@ public class PageInfoPopup implements OnClickListener {
      * @param activity                 Activity which is used for showing a popup.
      * @param tab                      Tab for which the pop up is shown.
      * @param offlinePageCreationDate  Date when the offline page was created.
+     * @param offlinePageState         State of the tab showing offline page.
      * @param publisher                The name of the content publisher, if any.
      */
     private PageInfoPopup(Activity activity, Tab tab, String offlinePageCreationDate,
-            String publisher) {
+            @OfflinePageState int offlinePageState, String publisher) {
         mContext = activity;
         mTab = tab;
         mIsBottomPopup = mTab.getActivity().getBottomSheet() != null;
+        mOfflinePageState = offlinePageState;
 
-        if (offlinePageCreationDate != null) {
+        if (mOfflinePageState != NOT_OFFLINE_PAGE) {
             mOfflinePageCreationDate = offlinePageCreationDate;
         }
         mWindowAndroid = mTab.getWebContents().getTopLevelNativeWindow();
@@ -409,6 +427,16 @@ public class PageInfoPopup implements OnClickListener {
         SpannableStringBuilder urlBuilder = new SpannableStringBuilder(mFullUrl);
         OmniboxUrlEmphasizer.emphasizeUrl(urlBuilder, mContext.getResources(), mTab.getProfile(),
                 mSecurityLevel, mIsInternalPage, true, true);
+        if (mSecurityLevel == ConnectionSecurityLevel.SECURE) {
+            OmniboxUrlEmphasizer.EmphasizeComponentsResponse emphasizeResponse =
+                    OmniboxUrlEmphasizer.parseForEmphasizeComponents(
+                            mTab.getProfile(), urlBuilder.toString());
+            if (emphasizeResponse.schemeLength > 0) {
+                urlBuilder.setSpan(
+                        new TextAppearanceSpan(mUrlTitle.getContext(), R.style.RobotoMediumStyle),
+                        0, emphasizeResponse.schemeLength, Spannable.SPAN_EXCLUSIVE_INCLUSIVE);
+            }
+        }
         mUrlTitle.setText(urlBuilder);
 
         if (mParsedUrl == null || mParsedUrl.getScheme() == null
@@ -426,9 +454,16 @@ public class PageInfoPopup implements OnClickListener {
             mOpenOnlineButton.setVisibility(View.GONE);
         }
 
-        mInstantAppIntent = (mIsInternalPage || isShowingOfflinePage()) ? null
-                : InstantAppsHandler.getInstance().getInstantAppIntentForUrl(mFullUrl);
-        if (mInstantAppIntent == null) mInstantAppButton.setVisibility(View.GONE);
+        InstantAppsHandler instantAppsHandler = InstantAppsHandler.getInstance();
+        if (!mIsInternalPage && !isShowingOfflinePage()
+                && instantAppsHandler.isInstantAppAvailable(mFullUrl, false /* checkHoldback */,
+                           false /* includeUserPrefersBrowser */)) {
+            mInstantAppIntent = instantAppsHandler.getInstantAppIntentForUrl(mFullUrl);
+            RecordUserAction.record("Android.InstantApps.OpenInstantAppButtonShown");
+        } else {
+            mInstantAppIntent = null;
+            mInstantAppButton.setVisibility(View.GONE);
+        }
 
         // Create the dialog.
         mDialog = new Dialog(mContext) {
@@ -593,7 +628,8 @@ public class PageInfoPopup implements OnClickListener {
 
         ImageView permissionIcon = (ImageView) permissionRow.findViewById(
                 R.id.page_info_permission_icon);
-        permissionIcon.setImageResource(getImageResourceForPermission(permission.type));
+        permissionIcon.setImageDrawable(TintedDrawable.constructTintedDrawable(
+                permissionIcon.getResources(), getImageResourceForPermission(permission.type)));
 
         if (permission.setting == ContentSetting.ALLOW) {
             int warningTextResource = 0;
@@ -620,7 +656,7 @@ public class PageInfoPopup implements OnClickListener {
 
                 permissionIcon.setImageResource(R.drawable.exclamation_triangle);
                 permissionIcon.setColorFilter(ApiCompatibilityUtils.getColor(
-                        mContext.getResources(), R.color.page_info_popup_text_link));
+                        mContext.getResources(), R.color.google_blue_700));
 
                 permissionRow.setOnClickListener(this);
             }
@@ -655,8 +691,7 @@ public class PageInfoPopup implements OnClickListener {
                 assert false : "Invalid setting " + permission.setting + " for permission "
                         + permission.type;
         }
-        if (permission.type == ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION
-                && WebsitePreferenceBridge.shouldUseDSEGeolocationSetting(mFullUrl, false)) {
+        if (WebsitePreferenceBridge.isPermissionControlledByDSE(permission.type, mFullUrl, false)) {
             status_text = statusTextForDSEPermission(permission);
         }
         builder.append(status_text);
@@ -686,10 +721,20 @@ public class PageInfoPopup implements OnClickListener {
         if (mContentPublisher != null) {
             messageBuilder.append(
                     mContext.getString(R.string.page_info_domain_hidden, mContentPublisher));
-        } else if (isShowingOfflinePage()) {
-            messageBuilder.append(String.format(
-                    mContext.getString(R.string.page_info_connection_offline),
-                    mOfflinePageCreationDate));
+        } else if (mOfflinePageState == TRUSTED_OFFLINE_PAGE) {
+            messageBuilder.append(
+                    String.format(mContext.getString(R.string.page_info_connection_offline),
+                            mOfflinePageCreationDate));
+        } else if (mOfflinePageState == UNTRUSTED_OFFLINE_PAGE) {
+            // For untrusted pages, if there's a creation date, show it in the message.
+            if (TextUtils.isEmpty(mOfflinePageCreationDate)) {
+                messageBuilder.append(mContext.getString(
+                        R.string.page_info_offline_page_not_trusted_without_date));
+            } else {
+                messageBuilder.append(String.format(
+                        mContext.getString(R.string.page_info_offline_page_not_trusted_with_date),
+                        mOfflinePageCreationDate));
+            }
         } else {
             if (!TextUtils.equals(summary, details)) {
                 mConnectionSummary.setVisibility(View.VISIBLE);
@@ -702,9 +747,9 @@ public class PageInfoPopup implements OnClickListener {
             messageBuilder.append(" ");
             SpannableString detailsText =
                     new SpannableString(mContext.getString(R.string.details_link));
-            final ForegroundColorSpan blueSpan = new ForegroundColorSpan(
-                    ApiCompatibilityUtils.getColor(mContext.getResources(),
-                            R.color.page_info_popup_text_link));
+            final ForegroundColorSpan blueSpan =
+                    new ForegroundColorSpan(ApiCompatibilityUtils.getColor(
+                            mContext.getResources(), R.color.google_blue_700));
             detailsText.setSpan(
                     blueSpan, 0, detailsText.length(), Spannable.SPAN_INCLUSIVE_EXCLUSIVE);
             messageBuilder.append(detailsText);
@@ -790,13 +835,14 @@ public class PageInfoPopup implements OnClickListener {
                     recordAction(PageInfoAction.PAGE_INFO_SITE_SETTINGS_OPENED);
                     Bundle fragmentArguments =
                             SingleWebsitePreferences.createFragmentArgsForSite(mFullUrl);
-                    fragmentArguments.putParcelable(SingleWebsitePreferences.EXTRA_WEB_CONTENTS,
-                            mTab.getWebContents());
                     Intent preferencesIntent = PreferencesLauncher.createIntentForSettingsPage(
                             mContext, SingleWebsitePreferences.class.getName());
                     preferencesIntent.putExtra(
                             Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, fragmentArguments);
-                    mContext.startActivity(preferencesIntent);
+                    // Disabling StrictMode to avoid violations (https://crbug.com/819410).
+                    try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+                        mContext.startActivity(preferencesIntent);
+                    }
                 }
             });
         } else if (view == mInstantAppButton) {
@@ -983,7 +1029,7 @@ public class PageInfoPopup implements OnClickListener {
      * Whether website dialog is displayed for an offline page.
      */
     private boolean isShowingOfflinePage() {
-        return mOfflinePageCreationDate != null;
+        return mOfflinePageState != NOT_OFFLINE_PAGE;
     }
 
     /**
@@ -1009,16 +1055,29 @@ public class PageInfoPopup implements OnClickListener {
         }
 
         String offlinePageCreationDate = null;
+        @OfflinePageState
+        int offlinePageState = NOT_OFFLINE_PAGE;
 
         OfflinePageItem offlinePage = OfflinePageUtils.getOfflinePage(tab);
         if (offlinePage != null) {
-            // Get formatted creation date of the offline page.
-            Date creationDate = new Date(offlinePage.getCreationTimeMs());
-            DateFormat df = DateFormat.getDateInstance(DateFormat.MEDIUM);
-            offlinePageCreationDate = df.format(creationDate);
+            if (OfflinePageUtils.isShowingTrustedOfflinePage(tab)) {
+                offlinePageState = TRUSTED_OFFLINE_PAGE;
+            } else {
+                offlinePageState = UNTRUSTED_OFFLINE_PAGE;
+            }
+            // Get formatted creation date of the offline page. If the page was shared (so the
+            // creation date cannot be acquired), make date an empty string and there will be
+            // specific processing for showing different string in UI.
+            long pageCreationTimeMs = offlinePage.getCreationTimeMs();
+            if (pageCreationTimeMs != 0) {
+                Date creationDate = new Date(offlinePage.getCreationTimeMs());
+                DateFormat df = DateFormat.getDateInstance(DateFormat.MEDIUM);
+                offlinePageCreationDate = df.format(creationDate);
+            }
         }
 
-        new PageInfoPopup(activity, tab, offlinePageCreationDate, contentPublisher);
+        new PageInfoPopup(
+                activity, tab, offlinePageCreationDate, offlinePageState, contentPublisher);
     }
 
     private static native long nativeInit(PageInfoPopup popup, WebContents webContents);

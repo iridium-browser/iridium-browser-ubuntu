@@ -31,13 +31,13 @@ class AppListService {
   // to track discoverability of the app lancher shortcut after install. Also
   // used to provide custom install behavior (e.g. "always" enable).
   enum AppListEnableSource {
-    ENABLE_NOT_RECORDED,        // Indicates app launcher not recently enabled.
-    ENABLE_FOR_APP_INSTALL,     // Triggered by a webstore packaged app install.
-    ENABLE_VIA_WEBSTORE_LINK,   // Triggered by webstore explicitly via API.
-    ENABLE_VIA_COMMAND_LINE,    // Triggered by --enable-app-list.
-    ENABLE_ON_REINSTALL_UNUSED, // Triggered by Chrome reinstall finding pref.
-                                // Unused since detecting a reinstall and
-                                // detecting a pref are mutually exclusive.
+    ENABLE_NOT_RECORDED,       // Indicates app launcher not recently enabled.
+    ENABLE_FOR_APP_INSTALL,    // Triggered by a webstore packaged app install.
+    ENABLE_VIA_WEBSTORE_LINK,  // Triggered by webstore explicitly via API.
+    ENABLE_VIA_COMMAND_LINE,   // Triggered by --enable-app-list.
+    ENABLE_ON_REINSTALL_UNUSED,  // Triggered by Chrome reinstall finding pref.
+                                 // Unused since detecting a reinstall and
+                                 // detecting a pref are mutually exclusive.
     ENABLE_SHOWN_UNDISCOVERED,  // This overrides a prior ENABLE_FOR_APP_INSTALL
                                 // when the launcher is auto-shown without
                                 // being "discovered" beforehand.
@@ -75,13 +75,6 @@ class AppListService {
   // profile to local prefs as the default app list profile.
   virtual void ShowForProfile(Profile* requested_profile) = 0;
 
-  // Shows the app list, and switches to voice search. Used by always-on
-  // hotwording.
-  virtual void ShowForVoiceSearch(
-      Profile* profile,
-      const scoped_refptr<content::SpeechRecognitionSessionPreamble>& preamble)
-      = 0;
-
   // Shows the app list, and reveals the page that contains |extension_id|. This
   // should only be called for things that show in the app list, and only when
   // they begin or complete installing. If |start_discovery_tracking| is set,
@@ -90,13 +83,6 @@ class AppListService {
   virtual void ShowForAppInstall(Profile* profile,
                                  const std::string& extension_id,
                                  bool start_discovery_tracking) = 0;
-
-  // Shows the app list, and switches to the custom launcher page.
-  virtual void ShowForCustomLauncherPage(Profile* profile) = 0;
-
-  // Hides the custom launcher page if it is currently being shown. Does nothing
-  // otherwise.
-  virtual void HideCustomLauncherPage() = 0;
 
   // Dismiss the app list.
   virtual void DismissAppList() = 0;
@@ -111,9 +97,6 @@ class AppListService {
   // operating system and shell.
   virtual void EnableAppList(Profile* initial_profile,
                              AppListEnableSource enable_source) = 0;
-
-  // Get the window the app list is in, or NULL if the app list isn't visible.
-  virtual gfx::NativeWindow GetAppListWindow() = 0;
 
   // Returns a pointer to the platform specific AppListControllerDelegate.
   virtual AppListControllerDelegate* GetControllerDelegate() = 0;

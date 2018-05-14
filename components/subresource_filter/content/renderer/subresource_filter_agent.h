@@ -24,10 +24,10 @@ struct DocumentLoadStatistics;
 class UnverifiedRulesetDealer;
 class WebDocumentSubresourceFilterImpl;
 
-// The renderer-side agent of ContentSubresourceFilterDriverFactory. There is
+// The renderer-side agent of ContentSubresourceFilterThrottleManager. There is
 // one instance per RenderFrame, responsible for setting up the subresource
 // filter for the ongoing provisional document load in the frame when instructed
-// to do so by the driver.
+// to do so by the manager.
 class SubresourceFilterAgent
     : public content::RenderFrameObserver,
       public content::RenderFrameObserverTracker<SubresourceFilterAgent>,
@@ -45,10 +45,15 @@ class SubresourceFilterAgent
   // Returns the URL of the currently committed document.
   virtual GURL GetDocumentURL();
 
+  virtual bool IsMainFrame();
+
   // Injects the provided subresource |filter| into the DocumentLoader
   // orchestrating the most recently committed load.
   virtual void SetSubresourceFilterForCommittedLoad(
       std::unique_ptr<blink::WebDocumentSubresourceFilter> filter);
+
+  // Sets in the underlying document, whether this is identified as an ad.
+  virtual void SetIsAdSubframeForDocument(bool is_ad_subframe);
 
   // Informs the browser that the first subresource load has been disallowed for
   // the most recently committed load. Not called if all resources are allowed.
@@ -64,10 +69,11 @@ class SubresourceFilterAgent
   static ActivationState GetParentActivationState(
       content::RenderFrame* render_frame);
 
-  void OnActivateForNextCommittedLoad(ActivationState activation_state);
-  void RecordHistogramsOnLoadCommitted();
+  void OnActivateForNextCommittedLoad(const ActivationState& activation_state,
+                                      bool is_ad_subframe);
+  void RecordHistogramsOnLoadCommitted(const ActivationState& activation_state);
   void RecordHistogramsOnLoadFinished();
-  void ResetActivatonStateForNextCommit();
+  void ResetInfoForNextCommit();
 
   // content::RenderFrameObserver:
   void OnDestruct() override;
@@ -78,15 +84,17 @@ class SubresourceFilterAgent
   bool OnMessageReceived(const IPC::Message& message) override;
   void WillCreateWorkerFetchContext(blink::WebWorkerFetchContext*) override;
 
-  // Subframe navigations matching these URLs/schemes will not trigger
-  // ReadyToCommitNavigation in the browser process, so they must be treated
-  // specially to maintain activation.
-  bool ShouldUseParentActivation(const GURL& url) const;
-
   // Owned by the ChromeContentRendererClient and outlives us.
   UnverifiedRulesetDealer* ruleset_dealer_;
 
   ActivationState activation_state_for_next_commit_;
+
+  // This is received along with activation state in the
+  // SubresourceFilterMsg_ActivateForNextCommittedLoad IPC message. Specifies
+  // whether this is a subframe which is identified as an ad. Note that this
+  // will only be set in dry run mode because in blocking mode the frame would
+  // have been blocked.
+  bool is_ad_subframe_for_next_commit_;
 
   base::WeakPtr<WebDocumentSubresourceFilterImpl>
       filter_for_last_committed_load_;

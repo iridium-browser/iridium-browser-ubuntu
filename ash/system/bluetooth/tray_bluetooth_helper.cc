@@ -18,6 +18,9 @@
 namespace ash {
 namespace {
 
+// System tray shows a limited number of bluetooth devices.
+const int kMaximumDevicesShown = 50;
+
 void BluetoothSetDiscoveringError() {
   LOG(ERROR) << "BluetoothSetDiscovering failed.";
 }
@@ -29,6 +32,17 @@ ash::SystemTrayNotifier* GetSystemTrayNotifier() {
   return Shell::Get()->system_tray_notifier();
 }
 
+BluetoothDeviceInfo GetBluetoothDeviceInfo(device::BluetoothDevice* device) {
+  BluetoothDeviceInfo info;
+  info.address = device->GetAddress();
+  info.display_name = device->GetNameForDisplay();
+  info.connected = device->IsConnected();
+  info.connecting = device->IsConnecting();
+  info.paired = device->IsPaired();
+  info.device_type = device->GetDeviceType();
+  return info;
+}
+
 }  // namespace
 
 BluetoothDeviceInfo::BluetoothDeviceInfo()
@@ -37,7 +51,7 @@ BluetoothDeviceInfo::BluetoothDeviceInfo()
 BluetoothDeviceInfo::BluetoothDeviceInfo(const BluetoothDeviceInfo& other) =
     default;
 
-BluetoothDeviceInfo::~BluetoothDeviceInfo() {}
+BluetoothDeviceInfo::~BluetoothDeviceInfo() = default;
 
 TrayBluetoothHelper::TrayBluetoothHelper() : weak_ptr_factory_(this) {}
 
@@ -60,18 +74,25 @@ void TrayBluetoothHelper::InitializeOnAdapterReady(
 }
 
 BluetoothDeviceList TrayBluetoothHelper::GetAvailableBluetoothDevices() const {
-  BluetoothDeviceList list;
-  for (device::BluetoothDevice* device : adapter_->GetDevices()) {
-    BluetoothDeviceInfo info;
-    info.address = device->GetAddress();
-    info.display_name = device->GetNameForDisplay();
-    info.connected = device->IsConnected();
-    info.connecting = device->IsConnecting();
-    info.paired = device->IsPaired();
-    info.device_type = device->GetDeviceType();
-    list.push_back(info);
+  BluetoothDeviceList device_list;
+  device::BluetoothAdapter::DeviceList devices = adapter_->GetDevices();
+  for (device::BluetoothDevice* device : devices) {
+    if (device_list.size() == kMaximumDevicesShown)
+      break;
+
+    if (device->IsPaired() || device->IsConnecting())
+      device_list.push_back(GetBluetoothDeviceInfo(device));
   }
-  return list;
+
+  for (device::BluetoothDevice* device : devices) {
+    if (device_list.size() == kMaximumDevicesShown)
+      break;
+
+    if (!device->IsPaired() && !device->IsConnecting())
+      device_list.push_back(GetBluetoothDeviceInfo(device));
+  }
+
+  return device_list;
 }
 
 void TrayBluetoothHelper::StartBluetoothDiscovering() {
@@ -94,7 +115,7 @@ void TrayBluetoothHelper::StopBluetoothDiscovering() {
     return;
   }
   VLOG(1) << "Stopping Bluetooth device discovery session.";
-  discovery_session_->Stop(base::Bind(&base::DoNothing),
+  discovery_session_->Stop(base::DoNothing(),
                            base::Bind(&BluetoothSetDiscoveringError));
 }
 
@@ -109,7 +130,7 @@ void TrayBluetoothHelper::ConnectToBluetoothDevice(const std::string& address) {
   if (device->IsPaired() || !device->IsPairable()) {
     base::RecordAction(
         base::UserMetricsAction("StatusArea_Bluetooth_Connect_Known"));
-    device->Connect(NULL, base::Bind(&base::DoNothing),
+    device->Connect(NULL, base::DoNothing(),
                     base::Bind(&BluetoothDeviceConnectError));
     return;
   }

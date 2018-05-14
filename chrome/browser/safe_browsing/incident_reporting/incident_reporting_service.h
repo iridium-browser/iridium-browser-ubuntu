@@ -18,7 +18,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/safe_browsing/download_protection_service.h"
+#include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
+#include "chrome/browser/safe_browsing/download_protection/download_protection_util.h"
 #include "chrome/browser/safe_browsing/incident_reporting/delayed_analysis_callback.h"
 #include "chrome/browser/safe_browsing/incident_reporting/delayed_callback_runner.h"
 #include "chrome/browser/safe_browsing/incident_reporting/download_metadata_manager.h"
@@ -51,9 +52,7 @@ class TrackedPreferenceValidationDelegate;
 
 namespace safe_browsing {
 
-#if !defined(GOOGLE_CHROME_BUILD)
-extern const base::Feature kIncidentReportingDisableUpload;
-#endif
+extern const base::Feature kIncidentReportingEnableUpload;
 
 class ClientDownloadRequest;
 class ClientIncidentReport;
@@ -62,7 +61,6 @@ class ClientIncidentReport_EnvironmentData;
 class ClientIncidentReport_ExtensionData;
 class Incident;
 class IncidentReceiver;
-class SafeBrowsingDatabaseManager;
 class SafeBrowsingService;
 
 // A class that manages the collection of incidents and submission of incident
@@ -253,8 +251,8 @@ class IncidentReportingService : public content::NotificationObserver {
   // Cancels all uploads, discarding all reports and responses in progress.
   void CancelAllReportUploads();
 
-  // Continues an upload after checking for the CSD whitelist killswitch.
-  void OnKillSwitchResult(UploadContext* context, bool is_killswitch_on);
+  // Continues an upload if uploading is enabled.
+  void UploadReportIfUploadingEnabled(UploadContext* context);
 
   // Performs processing for a report after succesfully receiving a response.
   void HandleResponse(const UploadContext& context);
@@ -265,17 +263,13 @@ class IncidentReportingService : public content::NotificationObserver {
                             std::unique_ptr<ClientIncidentResponse> response);
 
   // DownloadProtectionService::ClientDownloadRequestCallback implementation.
-  void OnClientDownloadRequest(content::DownloadItem* download,
+  void OnClientDownloadRequest(download::DownloadItem* download,
                                const ClientDownloadRequest* request);
 
   // content::NotificationObserver methods.
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
-
-  // The safe browsing database manager, through which the whitelist killswitch
-  // is checked.
-  scoped_refptr<SafeBrowsingDatabaseManager> database_manager_;
 
   // Accessor for an URL context with which reports will be sent.
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
@@ -296,8 +290,7 @@ class IncidentReportingService : public content::NotificationObserver {
 
   // A subscription for ClientDownloadRequests, used to persist them for later
   // use.
-  DownloadProtectionService::ClientDownloadRequestSubscription
-      client_download_request_subscription_;
+  ClientDownloadRequestSubscription client_download_request_subscription_;
 
   // True when the asynchronous environment collection task has been fired off
   // but has not yet completed.
@@ -350,7 +343,7 @@ class IncidentReportingService : public content::NotificationObserver {
 
   // A factory for handing out weak pointers for internal asynchronous tasks
   // that are posted during normal processing (e.g., environment collection,
-  // safe browsing database checks, and report uploads).
+  // and report uploads).
   base::WeakPtrFactory<IncidentReportingService> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(IncidentReportingService);

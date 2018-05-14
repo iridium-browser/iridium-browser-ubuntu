@@ -5,7 +5,7 @@
 #ifndef MediaControlsMediaEventListener_h
 #define MediaControlsMediaEventListener_h
 
-#include "core/events/EventListener.h"
+#include "core/dom/events/EventListener.h"
 #include "platform/wtf/Optional.h"
 
 namespace blink {
@@ -29,7 +29,7 @@ class MediaControlsMediaEventListener final : public EventListener {
 
   bool operator==(const EventListener&) const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   HTMLMediaElement& GetMediaElement();

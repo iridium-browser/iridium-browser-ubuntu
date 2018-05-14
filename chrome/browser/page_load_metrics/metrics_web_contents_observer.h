@@ -54,6 +54,13 @@ class MetricsWebContentsObserver
 
     void OnGoingAway();
 
+    // Some PageLoadTiming messages will race with the navigation
+    // commit. OnTrackerCreated() allows tests to manipulate the tracker very
+    // early (eg, to add observers) to handle those cases.
+    virtual void OnTrackerCreated(PageLoadTracker* tracker) {}
+
+    // In cases where LoadTimingInfo is not needed, waiting until commit is
+    // fine.
     virtual void OnCommit(PageLoadTracker* tracker) {}
 
    private:
@@ -78,8 +85,7 @@ class MetricsWebContentsObserver
       content::NavigationHandle* navigation_handle) override;
   void NavigationStopped() override;
   void OnInputEvent(const blink::WebInputEvent& event) override;
-  void WasShown() override;
-  void WasHidden() override;
+  void OnVisibilityChanged(content::Visibility visibility) override;
   void RenderProcessGone(base::TerminationStatus status) override;
   void RenderViewHostChanged(content::RenderViewHost* old_host,
                              content::RenderViewHost* new_host) override;
@@ -109,7 +115,8 @@ class MetricsWebContentsObserver
       int64_t raw_body_bytes,
       int64_t original_content_length,
       base::TimeTicks creation_time,
-      int net_error);
+      int net_error,
+      std::unique_ptr<net::LoadTimingInfo> load_timing_info);
 
   // Invoked on navigations where a navigation delay was added by the
   // DelayNavigationThrottle. This is a temporary method that will be removed
@@ -134,7 +141,8 @@ class MetricsWebContentsObserver
   // public only for testing
   void OnTimingUpdated(content::RenderFrameHost* render_frame_host,
                        const mojom::PageLoadTiming& timing,
-                       const mojom::PageLoadMetadata& metadata);
+                       const mojom::PageLoadMetadata& metadata,
+                       const mojom::PageLoadFeatures& new_features);
 
   // Informs the observers of the currently committed load that the event
   // corresponding to |event_key| has occurred. This should not be called within
@@ -147,7 +155,8 @@ class MetricsWebContentsObserver
 
   // page_load_metrics::mojom::PageLoadMetrics implementation.
   void UpdateTiming(mojom::PageLoadTimingPtr timing,
-                    mojom::PageLoadMetadataPtr metadata) override;
+                    mojom::PageLoadMetadataPtr metadata,
+                    mojom::PageLoadFeaturesPtr new_features) override;
 
   void HandleFailedNavigationForTrackedLoad(
       content::NavigationHandle* navigation_handle,

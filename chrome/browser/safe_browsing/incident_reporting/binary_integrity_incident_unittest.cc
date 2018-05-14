@@ -10,8 +10,7 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace safe_browsing {
@@ -40,7 +39,7 @@ std::unique_ptr<Incident> MakeIncident(const char* file_basename) {
     element->set_certificate(certificates[i], arraysize(certificates[i]));
   }
 
-  return base::MakeUnique<BinaryIntegrityIncident>(std::move(incident));
+  return std::make_unique<BinaryIntegrityIncident>(std::move(incident));
 }
 
 }  // namespace

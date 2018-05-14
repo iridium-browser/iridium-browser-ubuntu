@@ -18,8 +18,8 @@
 #include "components/spellcheck/common/spellcheck.mojom.h"
 #include "components/spellcheck/renderer/custom_dictionary_engine.h"
 #include "components/spellcheck/spellcheck_build_features.h"
-#include "content/public/renderer/render_thread_observer.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 
 class SpellcheckLanguage;
 struct SpellCheckResult;
@@ -30,12 +30,15 @@ struct WebTextCheckingResult;
 template <typename T> class WebVector;
 }
 
+namespace service_manager {
+class LocalInterfaceProvider;
+}
+
 // TODO(morrita): Needs reorg with SpellCheckProvider.
 // See http://crbug.com/73699.
 // Shared spellchecking logic/data for a RenderProcess. All RenderViews use
 // this object to perform spellchecking tasks.
-class SpellCheck : public content::RenderThreadObserver,
-                   public base::SupportsWeakPtr<SpellCheck>,
+class SpellCheck : public base::SupportsWeakPtr<SpellCheck>,
                    public spellcheck::mojom::SpellChecker {
  public:
   // TODO(groby): I wonder if this can be private, non-mac only.
@@ -45,7 +48,8 @@ class SpellCheck : public content::RenderThreadObserver,
     USE_NATIVE_CHECKER,  // Use native checker to double-check.
   };
 
-  SpellCheck();
+  SpellCheck(service_manager::BinderRegistry* registry,
+             service_manager::LocalInterfaceProvider* embedder_provider);
   ~SpellCheck() override;
 
   void AddSpellcheckLanguage(base::File file, const std::string& language);
@@ -157,8 +161,12 @@ class SpellCheck : public content::RenderThreadObserver,
   // Custom dictionary spelling engine.
   CustomDictionaryEngine custom_dictionary_;
 
+  service_manager::LocalInterfaceProvider* embedder_provider_;
+
   // Remember state for spellchecking.
   bool spellcheck_enabled_;
+
+  base::WeakPtrFactory<SpellCheck> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SpellCheck);
 };

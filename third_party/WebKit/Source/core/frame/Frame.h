@@ -29,15 +29,18 @@
 #ifndef Frame_h
 #define Frame_h
 
+#include "base/unguessable_token.h"
 #include "core/CoreExport.h"
+#include "core/dom/UserGestureIndicator.h"
 #include "core/frame/FrameLifecycle.h"
 #include "core/frame/FrameTypes.h"
 #include "core/frame/FrameView.h"
+#include "core/frame/UserActivationState.h"
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/page/FrameTree.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
-#include "public/platform/WebFeaturePolicy.h"
+#include "third_party/WebKit/public/common/feature_policy/feature_policy.h"
 
 namespace blink {
 
@@ -49,7 +52,6 @@ class FrameClient;
 class FrameOwner;
 class HTMLFrameOwnerElement;
 class LayoutEmbeddedContent;
-class LayoutEmbeddedContentItem;
 class LocalFrame;
 class KURL;
 class Page;
@@ -71,7 +73,7 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
  public:
   virtual ~Frame();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   virtual bool IsLocalFrame() const = 0;
   virtual bool IsRemoteFrame() const = 0;
@@ -88,6 +90,8 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   virtual void Detach(FrameDetachType);
   void DisconnectOwnerElement();
   virtual bool ShouldClose() = 0;
+  virtual void DidFreeze() = 0;
+  virtual void DidResume() = 0;
 
   FrameClient* Client() const;
 
@@ -116,16 +120,8 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   // otherwise.
   virtual bool PrepareForCommit() = 0;
 
-  // TODO(japhet): These should all move to LocalFrame.
-  virtual void PrintNavigationErrorMessage(const Frame&,
-                                           const char* reason) = 0;
-  virtual void PrintNavigationWarning(const String&) = 0;
-
-  // TODO(pilgrim): Replace all instances of ownerLayoutObject() with
-  // ownerLayoutItem(), https://crbug.com/499321
-  LayoutEmbeddedContent* OwnerLayoutObject()
-      const;  // LayoutObject for the element that contains this frame.
-  LayoutEmbeddedContentItem OwnerLayoutItem() const;
+  // LayoutObject for the element that contains this frame.
+  LayoutEmbeddedContent* OwnerLayoutObject() const;
 
   Settings* GetSettings() const;  // can be null
 
@@ -136,6 +132,10 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   void SetIsLoading(bool is_loading) { is_loading_ = is_loading; }
   bool IsLoading() const { return is_loading_; }
 
+  // Tells the frame to check whether its load has completed, based on the state
+  // of its subframes, etc.
+  virtual void CheckCompleted() = 0;
+
   WindowProxyManager* GetWindowProxyManager() const {
     return window_proxy_manager_;
   }
@@ -143,11 +143,13 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
 
   virtual void DidChangeVisibilityState();
 
-  void SetDocumentHasReceivedUserGesture();
-  bool HasReceivedUserGesture() const { return has_received_user_gesture_; }
-  void ClearDocumentHasReceivedUserGesture() {
-    has_received_user_gesture_ = false;
+  void UpdateUserActivationInFrameTree();
+
+  bool HasBeenActivated() const {
+    return user_activation_state_.HasBeenActive();
   }
+
+  void ClearActivation() { user_activation_state_.Clear(); }
 
   void SetDocumentHasReceivedUserGestureBeforeNavigation(bool value) {
     has_received_user_gesture_before_nav_ = value;
@@ -157,19 +159,50 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
     return has_received_user_gesture_before_nav_;
   }
 
+  // Creates a |UserGestureIndicator| that contains a |UserGestureToken| with
+  // the given status.  Also activates the user activation state of the
+  // |LocalFrame| (provided it's non-null) and all its ancestors.
+  static std::unique_ptr<UserGestureIndicator> NotifyUserActivation(
+      Frame*,
+      UserGestureToken::Status = UserGestureToken::kPossiblyExistingGesture);
+
+  // Returns the transient user activation state of the |LocalFrame|, provided
+  // it is non-null.  Otherwise returns |false|.
+  //
+  // The |checkIfMainThread| parameter determines if the token based gestures
+  // (legacy code) must be used in a thread-safe manner.
+  //
+  // TODO(mustaq): clarify/enforce the relation between the two params after
+  // null-frame main-thread cases (crbug.com/730690) have been removed.
+  static bool HasTransientUserActivation(Frame*,
+                                         bool checkIfMainThread = false);
+
+  // Consumes the transient user activation state of the |LocalFrame|, provided
+  // the frame pointer is non-null and the state hasn't been consumed since
+  // activation.  Returns |true| if succesfully consumed the state.
+  //
+  // The |checkIfMainThread| parameter determines if the token based gestures
+  // (legacy code) must be used in a thread-safe manner.
+  static bool ConsumeTransientUserActivation(Frame*,
+                                             bool checkIfMainThread = false);
+
   bool IsAttached() const {
     return lifecycle_.GetState() == FrameLifecycle::kAttached;
   }
 
   // Tests whether the feature-policy controlled feature is enabled by policy in
   // the given frame.
-  bool IsFeatureEnabled(WebFeaturePolicyFeature) const;
+  bool IsFeatureEnabled(mojom::FeaturePolicyFeature) const;
 
   // Called to make a frame inert or non-inert. A frame is inert when there
   // is a modal dialog displayed within an ancestor frame, and this frame
   // itself is not within the dialog.
   virtual void SetIsInert(bool) = 0;
   void UpdateInertIfPossible();
+
+  const base::UnguessableToken& GetDevToolsFrameToken() const {
+    return devtools_frame_token_;
+  }
 
  protected:
   Frame(FrameClient*, Page&, FrameOwner*, WindowProxyManager*);
@@ -180,7 +213,7 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   Member<FrameOwner> owner_;
   Member<DOMWindow> dom_window_;
 
-  bool has_received_user_gesture_ = false;
+  UserActivationState user_activation_state_;
   bool has_received_user_gesture_before_nav_ = false;
 
   FrameLifecycle lifecycle_;
@@ -191,10 +224,22 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   bool is_inert_ = false;
 
  private:
+  // Activates the user activation state of this frame and all its ancestors.
+  void NotifyUserActivation();
+
+  bool HasTransientUserActivation() {
+    return user_activation_state_.IsActive();
+  }
+
+  // Consumes and returns the transient user activation of current Frame, after
+  // updating all ancestor/descendant frames.
+  bool ConsumeTransientUserActivation();
+
   Member<FrameClient> client_;
   const Member<WindowProxyManager> window_proxy_manager_;
   // TODO(sashab): Investigate if this can be represented with m_lifecycle.
   bool is_loading_;
+  base::UnguessableToken devtools_frame_token_;
 };
 
 inline FrameClient* Frame::Client() const {

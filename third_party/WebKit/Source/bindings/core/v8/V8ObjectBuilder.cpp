@@ -53,7 +53,7 @@ V8ObjectBuilder& V8ObjectBuilder::AddStringOrNull(const StringView& name,
 }
 
 ScriptValue V8ObjectBuilder::GetScriptValue() const {
-  return ScriptValue(script_state_.Get(), object_);
+  return ScriptValue(script_state_.get(), object_);
 }
 
 void V8ObjectBuilder::AddInternal(const StringView& name,
@@ -62,9 +62,9 @@ void V8ObjectBuilder::AddInternal(const StringView& name,
     return;
   if (value.IsEmpty() ||
       object_
-          ->CreateDataProperty(script_state_->GetContext(),
-                               V8String(script_state_->GetIsolate(), name),
-                               value)
+          ->CreateDataProperty(
+              script_state_->GetContext(),
+              V8AtomicString(script_state_->GetIsolate(), name), value)
           .IsNothing())
     object_.Clear();
 }

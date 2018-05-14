@@ -10,16 +10,16 @@
 #include <vector>
 
 #include "base/files/file_path.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/extensions/load_error_reporter.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/chrome_manifest_url_handlers.h"
@@ -143,19 +143,20 @@ void RecordCreationFlags(const Extension* extension) {
 // Helper to record a single disable reason histogram value (see
 // RecordDisableReasons below).
 void RecordDisbleReasonHistogram(int reason) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Extensions.DisableReason", reason);
+  base::UmaHistogramSparse("Extensions.DisableReason", reason);
 }
 
 // Records the disable reasons for a single extension grouped by
-// Extension::DisableReason.
+// disable_reason::DisableReason.
 void RecordDisableReasons(int reasons) {
-  // |reasons| is a bitmask with values from Extension::DisabledReason
+  // |reasons| is a bitmask with values from ExtensionDisabledReason
   // which are increasing powers of 2.
-  if (reasons == Extension::DISABLE_NONE) {
-    RecordDisbleReasonHistogram(Extension::DISABLE_NONE);
+  if (reasons == disable_reason::DISABLE_NONE) {
+    RecordDisbleReasonHistogram(disable_reason::DISABLE_NONE);
     return;
   }
-  for (int reason = 1; reason < Extension::DISABLE_REASON_LAST; reason <<= 1) {
+  for (int reason = 1; reason < disable_reason::DISABLE_REASON_LAST;
+       reason <<= 1) {
     if (reasons & reason)
       RecordDisbleReasonHistogram(reason);
   }
@@ -179,7 +180,7 @@ void InstalledLoader::Load(const ExtensionInfo& info, bool write_to_prefs) {
     return;
 
   std::string error;
-  scoped_refptr<const Extension> extension(NULL);
+  scoped_refptr<const Extension> extension;
   if (info.extension_manifest) {
     extension = Extension::Create(
         info.extension_path,
@@ -197,51 +198,57 @@ void InstalledLoader::Load(const ExtensionInfo& info, bool write_to_prefs) {
   if (extension.get() && !Manifest::IsUnpackedLocation(extension->location()) &&
       info.extension_id != extension->id()) {
     error = errors::kCannotChangeExtensionID;
-    extension = NULL;
+    extension = nullptr;
   }
 
-  // Check policy on every load in case an extension was blacklisted while
-  // Chrome was not running.
+  if (!extension.get()) {
+    LoadErrorReporter::GetInstance()->ReportLoadError(
+        info.extension_path, error, extension_service_->profile(),
+        false);  // Be quiet.
+    return;
+  }
+
   const ManagementPolicy* policy = extensions::ExtensionSystem::Get(
       extension_service_->profile())->management_policy();
-  if (extension.get()) {
-    Extension::DisableReason disable_reason = Extension::DISABLE_NONE;
-    bool force_disabled = false;
-    if (!policy->UserMayLoad(extension.get(), nullptr)) {
-      // The error message from UserMayInstall() often contains the extension ID
-      // and is therefore not well suited to this UI.
-      error = errors::kDisabledByPolicy;
-      extension = NULL;
-    } else if (!extension_prefs_->IsExtensionDisabled(extension->id()) &&
-               policy->MustRemainDisabled(extension.get(), &disable_reason,
-                                          nullptr)) {
-      extension_prefs_->SetExtensionDisabled(extension->id(), disable_reason);
-      force_disabled = true;
-    } else if (extension_prefs_->IsExtensionDisabled(extension->id()) &&
-               policy->MustRemainEnabled(extension.get(), nullptr) &&
-               extension_prefs_->HasDisableReason(
-                   extension->id(), Extension::DISABLE_CORRUPTED)) {
-      // This extension must have been disabled due to corruption on a previous
-      // run of chrome, and for some reason we weren't successful in
-      // auto-reinstalling it. So we want to notify the PendingExtensionManager
-      // that we'd still like to keep attempt to re-download and reinstall it
-      // whenever the ExtensionService checks for external updates.
+  bool force_disabled = false;
+
+  if (extension_prefs_->IsExtensionDisabled(extension->id())) {
+    int disable_reasons = extension_prefs_->GetDisableReasons(extension->id());
+
+    // Update the extension prefs to reflect if the extension is no longer
+    // blocked due to admin policy.
+    if ((disable_reasons & disable_reason::DISABLE_BLOCKED_BY_POLICY) &&
+        !policy->MustRemainDisabled(extension.get(), nullptr, nullptr)) {
+      disable_reasons &= (~disable_reason::DISABLE_BLOCKED_BY_POLICY);
+      extension_prefs_->ReplaceDisableReasons(extension->id(), disable_reasons);
+      if (disable_reasons == disable_reason::DISABLE_NONE)
+        extension_prefs_->SetExtensionEnabled(extension->id());
+    }
+
+    if ((disable_reasons & disable_reason::DISABLE_CORRUPTED) &&
+        policy->MustRemainEnabled(extension.get(), nullptr)) {
+      // This extension must have been disabled due to corruption on a
+      // previous run of chrome, and for some reason we weren't successful in
+      // auto-reinstalling it. So we want to notify the
+      // PendingExtensionManager that we'd still like to keep attempt to
+      // re-download and reinstall it whenever the ExtensionService checks for
+      // external updates.
       PendingExtensionManager* pending_manager =
           extension_service_->pending_extension_manager();
       pending_manager->ExpectPolicyReinstallForCorruption(extension->id());
     }
-    UMA_HISTOGRAM_BOOLEAN("ExtensionInstalledLoader.ForceDisabled",
-                          force_disabled);
+  } else {
+    // Extension is enabled. Check management policy to verify if it should
+    // remain so.
+    disable_reason::DisableReason disable_reason = disable_reason::DISABLE_NONE;
+    if (policy->MustRemainDisabled(extension.get(), &disable_reason, nullptr)) {
+      extension_prefs_->SetExtensionDisabled(extension->id(), disable_reason);
+      force_disabled = true;
+    }
   }
 
-  if (!extension.get()) {
-    ExtensionErrorReporter::GetInstance()->ReportLoadError(
-        info.extension_path,
-        error,
-        extension_service_->profile(),
-        false);  // Be quiet.
-    return;
-  }
+  UMA_HISTOGRAM_BOOLEAN("ExtensionInstalledLoader.ForceDisabled2",
+                        force_disabled);
 
   if (write_to_prefs)
     extension_prefs_->UpdateManifest(extension.get());
@@ -291,11 +298,9 @@ void InstalledLoader::LoadAllExtensions() {
 
       if (!extension.get() || extension->id() != info->extension_id) {
         invalid_extensions_.insert(info->extension_path);
-        ExtensionErrorReporter::GetInstance()->ReportLoadError(
-            info->extension_path,
-            error,
-            profile,
-            false);  // Be quiet.
+        LoadErrorReporter::GetInstance()->ReportLoadError(info->extension_path,
+                                                          error, profile,
+                                                          false);  // Be quiet.
         continue;
       }
 

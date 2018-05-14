@@ -8,12 +8,12 @@
 #include <utility>
 
 #include "base/lazy_instance.h"
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/common/extensions/api/input_ime.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/extension_registry.h"
+#include "ui/base/ime/ime_bridge.h"
 #include "ui/keyboard/keyboard_util.h"
 
 namespace input_ime = extensions::api::input_ime;
@@ -34,11 +34,10 @@ ImeObserver::ImeObserver(const std::string& extension_id, Profile* profile)
     : extension_id_(extension_id), profile_(profile) {}
 
 void ImeObserver::OnActivate(const std::string& component_id) {
-  if (extension_id_.empty() ||
-      !HasListener(input_ime::OnActivate::kEventName)) {
-    LOG(ERROR) << "Can't send onActivate event to \"" << extension_id_ << "\"";
+  // Don't check whether the extension listens on onActivate event here.
+  // Send onActivate event to give the IME a chance to add their listeners.
+  if (extension_id_.empty())
     return;
-  }
 
   std::unique_ptr<base::ListValue> args(input_ime::OnActivate::Create(
       component_id, input_ime::ParseScreenType(GetCurrentScreenType())));
@@ -199,15 +198,6 @@ bool ImeObserver::HasListener(const std::string& event_name) const {
 
 std::string ImeObserver::ConvertInputContextType(
     ui::IMEEngineHandlerInterface::InputContext input_context) {
-  // This is a hack, but tricking the virtual keyboard to think the
-  // current input context is password will disable all keyboard features
-  // that are not supported in restricted keyboard mode.
-  if (keyboard::GetKeyboardRestricted() &&
-      input_context.type != ui::TEXT_INPUT_TYPE_TELEPHONE &&
-      input_context.type != ui::TEXT_INPUT_TYPE_NUMBER) {
-    return "password";
-  }
-
   std::string input_context_type = "text";
   switch (input_context.type) {
     case ui::TEXT_INPUT_TYPE_SEARCH:
@@ -237,19 +227,19 @@ std::string ImeObserver::ConvertInputContextType(
 
 bool ImeObserver::ConvertInputContextAutoCorrect(
     ui::IMEEngineHandlerInterface::InputContext input_context) {
-  return !keyboard::GetKeyboardRestricted() &&
+  return keyboard::GetKeyboardConfig().auto_correct &&
          !(input_context.flags & ui::TEXT_INPUT_FLAG_AUTOCORRECT_OFF);
 }
 
 bool ImeObserver::ConvertInputContextAutoComplete(
     ui::IMEEngineHandlerInterface::InputContext input_context) {
-  return !keyboard::GetKeyboardRestricted() &&
+  return keyboard::GetKeyboardConfig().auto_complete &&
          !(input_context.flags & ui::TEXT_INPUT_FLAG_AUTOCOMPLETE_OFF);
 }
 
 bool ImeObserver::ConvertInputContextSpellCheck(
     ui::IMEEngineHandlerInterface::InputContext input_context) {
-  return !keyboard::GetKeyboardRestricted() &&
+  return keyboard::GetKeyboardConfig().spell_check &&
          !(input_context.flags & ui::TEXT_INPUT_FLAG_SPELLCHECK_OFF);
 }
 
@@ -342,12 +332,12 @@ ExtensionFunction::ResponseAction InputImeSetCompositionFunction::Run() {
                                 selection_start, selection_end, params.cursor,
                                 segments, &error)) {
       std::unique_ptr<base::ListValue> results =
-          base::MakeUnique<base::ListValue>();
-      results->Append(base::MakeUnique<base::Value>(false));
+          std::make_unique<base::ListValue>();
+      results->Append(std::make_unique<base::Value>(false));
       return RespondNow(ErrorWithArguments(std::move(results), error));
     }
   }
-  return RespondNow(OneArgument(base::MakeUnique<base::Value>(true)));
+  return RespondNow(OneArgument(std::make_unique<base::Value>(true)));
 }
 
 ExtensionFunction::ResponseAction InputImeCommitTextFunction::Run() {
@@ -362,12 +352,12 @@ ExtensionFunction::ResponseAction InputImeCommitTextFunction::Run() {
     std::string error;
     if (!engine->CommitText(params.context_id, params.text.c_str(), &error)) {
       std::unique_ptr<base::ListValue> results =
-          base::MakeUnique<base::ListValue>();
-      results->Append(base::MakeUnique<base::Value>(false));
+          std::make_unique<base::ListValue>();
+      results->Append(std::make_unique<base::Value>(false));
       return RespondNow(ErrorWithArguments(std::move(results), error));
     }
   }
-  return RespondNow(OneArgument(base::MakeUnique<base::Value>(true)));
+  return RespondNow(OneArgument(std::make_unique<base::Value>(true)));
 }
 
 ExtensionFunction::ResponseAction InputImeSendKeyEventsFunction::Run() {
@@ -424,15 +414,17 @@ InputImeAPI::~InputImeAPI() = default;
 void InputImeAPI::Shutdown() {
   EventRouter::Get(browser_context_)->UnregisterObserver(this);
   registrar_.RemoveAll();
+  if (observer_ && ui::IMEBridge::Get()) {
+    ui::IMEBridge::Get()->SetObserver(nullptr);
+  }
 }
 
-static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<InputImeAPI>>::DestructorAtExit g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<InputImeAPI>>::
+    DestructorAtExit g_input_ime_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<InputImeAPI>* InputImeAPI::GetFactoryInstance() {
-  return g_factory.Pointer();
+  return g_input_ime_factory.Pointer();
 }
 
 InputImeEventRouter* GetInputImeEventRouter(Profile* profile) {

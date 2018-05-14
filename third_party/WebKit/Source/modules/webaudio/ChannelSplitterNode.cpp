@@ -41,6 +41,7 @@ ChannelSplitterHandler::ChannelSplitterHandler(AudioNode& node,
   // These properties are fixed and cannot be changed by the user.
   channel_count_ = number_of_outputs;
   SetInternalChannelCountMode(kExplicit);
+  SetInternalChannelInterpretation(AudioBus::kDiscrete);
   AddInput();
 
   // Create a fixed number of outputs (able to handle the maximum number of
@@ -51,11 +52,11 @@ ChannelSplitterHandler::ChannelSplitterHandler(AudioNode& node,
   Initialize();
 }
 
-PassRefPtr<ChannelSplitterHandler> ChannelSplitterHandler::Create(
+scoped_refptr<ChannelSplitterHandler> ChannelSplitterHandler::Create(
     AudioNode& node,
     float sample_rate,
     unsigned number_of_outputs) {
-  return AdoptRef(
+  return base::AdoptRef(
       new ChannelSplitterHandler(node, sample_rate, number_of_outputs));
 }
 
@@ -85,7 +86,7 @@ void ChannelSplitterHandler::Process(size_t frames_to_process) {
 void ChannelSplitterHandler::SetChannelCount(unsigned long channel_count,
                                              ExceptionState& exception_state) {
   DCHECK(IsMainThread());
-  BaseAudioContext::AutoLocker locker(Context());
+  BaseAudioContext::GraphAutoLocker locker(Context());
 
   // channelCount cannot be changed from the number of outputs.
   if (channel_count != NumberOfOutputs()) {
@@ -100,13 +101,27 @@ void ChannelSplitterHandler::SetChannelCountMode(
     const String& mode,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
-  BaseAudioContext::AutoLocker locker(Context());
+  BaseAudioContext::GraphAutoLocker locker(Context());
 
   // channcelCountMode must be 'explicit'.
   if (mode != "explicit") {
     exception_state.ThrowDOMException(
         kInvalidStateError,
         "ChannelSplitter: channelCountMode cannot be changed from 'explicit'");
+  }
+}
+
+void ChannelSplitterHandler::SetChannelInterpretation(
+    const String& mode,
+    ExceptionState& exception_state) {
+  DCHECK(IsMainThread());
+  BaseAudioContext::GraphAutoLocker locker(Context());
+
+  // channelInterpretation must be "discrete"
+  if (mode != "discrete") {
+    exception_state.ThrowDOMException(kInvalidStateError,
+                                      "ChannelSplitter: channelInterpretation "
+                                      "cannot be changed from 'discrete'");
   }
 }
 

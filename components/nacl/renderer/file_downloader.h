@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef COMPONENTS_NACL_RENDERER_FILE_DOWNLOADER_H_
+#define COMPONENTS_NACL_RENDERER_FILE_DOWNLOADER_H_
+
 #include <stdint.h>
 
 #include <string>
@@ -14,6 +17,7 @@
 namespace blink {
 class WebAssociatedURLLoader;
 struct WebURLError;
+class WebURLRequest;
 class WebURLResponse;
 }
 
@@ -63,3 +67,5 @@ class FileDownloader : public blink::WebAssociatedURLLoaderClient {
 };
 
 }  // namespace nacl
+
+#endif  // COMPONENTS_NACL_RENDERER_FILE_DOWNLOADER_H_

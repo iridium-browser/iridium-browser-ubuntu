@@ -33,7 +33,7 @@
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/ui/webui/profile_helper.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
@@ -86,7 +86,7 @@ void SigninCreateProfileHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(
           IDS_PROFILES_CREATE_SUPERVISED_NO_SIGNED_IN_USER_TEXT));
   localized_strings->SetString("createProfileConfirm",
-                               l10n_util::GetStringUTF16(IDS_SAVE));
+                               l10n_util::GetStringUTF16(IDS_ADD));
   localized_strings->SetString("learnMore",
                                l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   localized_strings->SetString(
@@ -431,7 +431,10 @@ void SigninCreateProfileHandler::OpenNewWindowForProfile(
 
 void SigninCreateProfileHandler::OpenSigninDialogForProfile(Profile* profile) {
   UserManagerProfileDialog::ShowSigninDialog(
-      web_ui()->GetWebContents()->GetBrowserContext(), profile->GetPath());
+      web_ui()->GetWebContents()->GetBrowserContext(), profile->GetPath(),
+      signin_util::IsForceSigninEnabled()
+          ? signin_metrics::Reason::REASON_FORCED_SIGNIN_PRIMARY_ACCOUNT
+          : signin_metrics::Reason::REASON_SIGNIN_PRIMARY_ACCOUNT);
 }
 
 void SigninCreateProfileHandler::ShowProfileCreationError(
@@ -444,7 +447,6 @@ void SigninCreateProfileHandler::ShowProfileCreationError(
   // The ProfileManager calls us back with a NULL profile in some cases.
   if (profile) {
     webui::DeleteProfileAtPath(profile->GetPath(),
-                               web_ui(),
                                ProfileMetrics::DELETE_PROFILE_SETTINGS);
   }
   profile_creation_type_ = NO_CREATION_IN_PROGRESS;
@@ -714,7 +716,6 @@ void SigninCreateProfileHandler::CancelProfileRegistration(
   // RegisterAndInitSync() won't be called, so the cleanup must be done here.
   profile_path_being_created_.clear();
   webui::DeleteProfileAtPath(new_profile->GetPath(),
-                             web_ui(),
                              ProfileMetrics::DELETE_PROFILE_SETTINGS);
 }
 

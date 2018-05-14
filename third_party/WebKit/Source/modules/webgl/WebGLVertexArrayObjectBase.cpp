@@ -16,7 +16,6 @@ WebGLVertexArrayObjectBase::WebGLVertexArrayObjectBase(
       object_(0),
       type_(type),
       has_ever_been_bound_(false),
-      bound_element_array_buffer_(this, nullptr),
       is_all_enabled_attrib_buffer_bound_(true) {
   array_buffer_list_.resize(ctx->MaxVertexAttribs());
   attrib_enabled_.resize(ctx->MaxVertexAttribs());
@@ -87,7 +86,7 @@ void WebGLVertexArrayObjectBase::SetArrayBufferForAttrib(GLuint index,
   if (array_buffer_list_[index])
     array_buffer_list_[index]->OnDetached(Context()->ContextGL());
 
-  array_buffer_list_[index] = TraceWrapperMember<WebGLBuffer>(this, buffer);
+  array_buffer_list_[index] = buffer;
   UpdateAttribBufferBoundStatus();
 }
 
@@ -127,13 +126,14 @@ void WebGLVertexArrayObjectBase::UnbindBuffer(WebGLBuffer* buffer) {
   UpdateAttribBufferBoundStatus();
 }
 
-DEFINE_TRACE(WebGLVertexArrayObjectBase) {
+void WebGLVertexArrayObjectBase::Trace(blink::Visitor* visitor) {
   visitor->Trace(bound_element_array_buffer_);
   visitor->Trace(array_buffer_list_);
   WebGLContextObject::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(WebGLVertexArrayObjectBase) {
+void WebGLVertexArrayObjectBase::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(bound_element_array_buffer_);
   for (size_t i = 0; i < array_buffer_list_.size(); ++i) {
     visitor->TraceWrappers(array_buffer_list_[i]);

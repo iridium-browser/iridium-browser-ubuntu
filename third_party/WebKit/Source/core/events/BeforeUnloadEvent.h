@@ -25,7 +25,7 @@
 #ifndef BeforeUnloadEvent_h
 #define BeforeUnloadEvent_h
 
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 
 namespace blink {
 
@@ -48,7 +48,7 @@ class BeforeUnloadEvent final : public Event {
     return EventNames::BeforeUnloadEvent;
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   BeforeUnloadEvent();

@@ -6,10 +6,14 @@
 #define CHROMEOS_DBUS_FAKE_AUTH_POLICY_CLIENT_H_
 
 #include <string>
+#include <utility>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 
 #include "chromeos/dbus/auth_policy_client.h"
+#include "chromeos/dbus/session_manager_client.h"
 
 class AccountId;
 
@@ -23,19 +27,41 @@ class CHROMEOS_EXPORT FakeAuthPolicyClient : public AuthPolicyClient {
   // DBusClient overrides.
   void Init(dbus::Bus* bus) override;
   // AuthPolicyClient overrides.
-  void JoinAdDomain(const std::string& machine_name,
-                    const std::string& user_principal_name,
+
+  // Performs basic checks on |request.machine_name| and
+  // |request.user_principal_name|. Could fail with ERROR_MACHINE_NAME_TOO_LONG,
+  // ERROR_INVALID_MACHINE_NAME or ERROR_PARSE_UPN_FAILED. Otherwise succeeds.
+  void JoinAdDomain(const authpolicy::JoinDomainRequest& request,
                     int password_fd,
                     JoinCallback callback) override;
-  void AuthenticateUser(const std::string& user_principal_name,
-                        const std::string& object_guid,
+
+  // Runs |callback| with |auth_error_|.
+  void AuthenticateUser(const authpolicy::AuthenticateUserRequest& request,
                         int password_fd,
                         AuthCallback callback) override;
-  void GetUserStatus(const std::string& object_guid,
+
+  // Runs |callback| with |password_status_| and |tgt_status_|. Also calls
+  // |on_get_status_closure_| after that.
+  void GetUserStatus(const authpolicy::GetUserStatusRequest& request,
                      GetUserStatusCallback callback) override;
-  void RefreshDevicePolicy(RefreshPolicyCallback calllback) override;
+
+  // Runs |callback| with Kerberos files.
+  void GetUserKerberosFiles(const std::string& object_guid,
+                            GetUserKerberosFilesCallback callback) override;
+
+  // Writes device policy file and runs callback.
+  void RefreshDevicePolicy(RefreshPolicyCallback callback) override;
+
+  // Writes user policy file and runs callback.
   void RefreshUserPolicy(const AccountId& account_id,
                          RefreshPolicyCallback callback) override;
+
+  // Runs |on_connected_callback| with success. Then runs |signal_callback|
+  // once.
+  void ConnectToSignal(
+      const std::string& signal_name,
+      dbus::ObjectProxy::SignalCallback signal_callback,
+      dbus::ObjectProxy::OnConnectedCallback on_connected_callback) override;
 
   // Mark service as started. It's getting started by the
   // UpstartClient::StartAuthPolicyService on the Active Directory managed
@@ -70,22 +96,36 @@ class CHROMEOS_EXPORT FakeAuthPolicyClient : public AuthPolicyClient {
     on_get_status_closure_ = std::move(on_get_status_closure);
   }
 
-  void set_operation_delay(const base::TimeDelta operation_delay) {
-    operation_delay_ = operation_delay;
+  void DisableOperationDelayForTesting() {
+    dbus_operation_delay_ = disk_operation_delay_ =
+        base::TimeDelta::FromSeconds(0);
   }
 
+ protected:
+  authpolicy::ErrorType auth_error_ = authpolicy::ERROR_NONE;
+
  private:
+  void OnDevicePolicyRetrieved(
+      RefreshPolicyCallback callback,
+      SessionManagerClient::RetrievePolicyResponseType response_type,
+      const std::string& protobuf);
   bool started_ = false;
   // If valid called after GetUserStatusCallback is called.
   base::OnceClosure on_get_status_closure_;
-  authpolicy::ErrorType auth_error_ = authpolicy::ERROR_NONE;
   std::string display_name_;
   std::string given_name_;
+  std::string machine_name_;
   authpolicy::ActiveDirectoryUserStatus::PasswordStatus password_status_ =
       authpolicy::ActiveDirectoryUserStatus::PASSWORD_VALID;
   authpolicy::ActiveDirectoryUserStatus::TgtStatus tgt_status_ =
       authpolicy::ActiveDirectoryUserStatus::TGT_VALID;
-  base::TimeDelta operation_delay_;
+  // Delay operations to be more realistic.
+  base::TimeDelta dbus_operation_delay_ = base::TimeDelta::FromSeconds(3);
+  base::TimeDelta disk_operation_delay_ =
+      base::TimeDelta::FromMilliseconds(100);
+
+  base::WeakPtrFactory<FakeAuthPolicyClient> weak_factory_{this};
+
   DISALLOW_COPY_AND_ASSIGN(FakeAuthPolicyClient);
 };
 

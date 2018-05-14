@@ -39,19 +39,17 @@ WorkerGlobalScopePerformance::WorkerGlobalScopePerformance(
     WorkerGlobalScope& worker_global_scope)
     : Supplement<WorkerGlobalScope>(worker_global_scope) {}
 
-const char* WorkerGlobalScopePerformance::SupplementName() {
-  return "WorkerGlobalScopePerformance";
-}
+const char WorkerGlobalScopePerformance::kSupplementName[] =
+    "WorkerGlobalScopePerformance";
 
 WorkerGlobalScopePerformance& WorkerGlobalScopePerformance::From(
     WorkerGlobalScope& worker_global_scope) {
   WorkerGlobalScopePerformance* supplement =
-      static_cast<WorkerGlobalScopePerformance*>(
-          Supplement<WorkerGlobalScope>::From(worker_global_scope,
-                                              SupplementName()));
+      Supplement<WorkerGlobalScope>::From<WorkerGlobalScopePerformance>(
+          worker_global_scope);
   if (!supplement) {
     supplement = new WorkerGlobalScopePerformance(worker_global_scope);
-    ProvideTo(worker_global_scope, SupplementName(), supplement);
+    ProvideTo(worker_global_scope, supplement);
   }
   return *supplement;
 }
@@ -68,9 +66,15 @@ WorkerPerformance* WorkerGlobalScopePerformance::performance(
   return performance_.Get();
 }
 
-DEFINE_TRACE(WorkerGlobalScopePerformance) {
+void WorkerGlobalScopePerformance::Trace(blink::Visitor* visitor) {
   visitor->Trace(performance_);
   Supplement<WorkerGlobalScope>::Trace(visitor);
+}
+
+void WorkerGlobalScopePerformance::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
+  visitor->TraceWrappers(performance_);
+  Supplement<WorkerGlobalScope>::TraceWrappers(visitor);
 }
 
 }  // namespace blink

@@ -53,7 +53,14 @@ class CONTENT_EXPORT BrowserMainParts {
   BrowserMainParts() {}
   virtual ~BrowserMainParts() {}
 
-  virtual void PreEarlyInitialization() {}
+  // Returns true if content should create a FeatureList. Default
+  // implementation returns true. Embedders that need to control when and/or
+  // how FeatureList should be created should override and return false.
+  virtual bool ShouldContentCreateFeatureList();
+
+  // A return value other than RESULT_CODE_NORMAL_EXIT indicates error and is
+  // used as the exit status.
+  virtual int PreEarlyInitialization();
 
   virtual void PostEarlyInitialization() {}
 
@@ -71,6 +78,10 @@ class CONTENT_EXPORT BrowserMainParts {
   // been run), and the toolkit has been initialized. Returns the error code
   // (or 0 if no error).
   virtual int PreCreateThreads();
+
+  // This is called right after all child threads owned by the content framework
+  // are created.
+  virtual void PostCreateThreads() {}
 
   virtual void ServiceManagerConnectionStarted(
       ServiceManagerConnection* connection) {}

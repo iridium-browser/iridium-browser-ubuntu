@@ -9,7 +9,7 @@
 #include <memory>
 #include <utility>
 
-#include "xfa/fde/cfde_txtedtengine.h"
+#include "xfa/fde/cfde_texteditengine.h"
 #include "xfa/fwl/cfwl_combobox.h"
 #include "xfa/fwl/cfwl_messagemouse.h"
 
@@ -22,14 +22,13 @@ CFWL_ComboEdit::CFWL_ComboEdit(
 }
 
 void CFWL_ComboEdit::ClearSelected() {
-  ClearSelections();
+  ClearSelection();
   RepaintRect(GetRTClient());
 }
 
 void CFWL_ComboEdit::SetSelected() {
   FlagFocus(true);
-  GetTxtEdtEngine()->MoveCaretPos(MC_End);
-  AddSelRange(0);
+  SelectAll();
 }
 
 void CFWL_ComboEdit::FlagFocus(bool bSet) {

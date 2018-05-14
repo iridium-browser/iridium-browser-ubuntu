@@ -65,7 +65,7 @@ class DesktopSessionProxy::IpcSharedBufferCore
   void* memory() { return shared_memory_.memory(); }
 
  private:
-  virtual ~IpcSharedBufferCore() {}
+  virtual ~IpcSharedBufferCore() = default;
   friend class base::RefCountedThreadSafe<IpcSharedBufferCore>;
 
   int id_;
@@ -108,31 +108,31 @@ DesktopSessionProxy::DesktopSessionProxy(
 std::unique_ptr<AudioCapturer> DesktopSessionProxy::CreateAudioCapturer() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return base::MakeUnique<IpcAudioCapturer>(this);
+  return std::make_unique<IpcAudioCapturer>(this);
 }
 
 std::unique_ptr<InputInjector> DesktopSessionProxy::CreateInputInjector() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return base::MakeUnique<IpcInputInjector>(this);
+  return std::make_unique<IpcInputInjector>(this);
 }
 
 std::unique_ptr<ScreenControls> DesktopSessionProxy::CreateScreenControls() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return base::MakeUnique<IpcScreenControls>(this);
+  return std::make_unique<IpcScreenControls>(this);
 }
 
 std::unique_ptr<webrtc::DesktopCapturer>
 DesktopSessionProxy::CreateVideoCapturer() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return base::MakeUnique<IpcVideoFrameCapturer>(this);
+  return std::make_unique<IpcVideoFrameCapturer>(this);
 }
 
 std::unique_ptr<webrtc::MouseCursorMonitor>
 DesktopSessionProxy::CreateMouseCursorMonitor() {
-  return base::MakeUnique<IpcMouseCursorMonitor>(this);
+  return std::make_unique<IpcMouseCursorMonitor>(this);
 }
 
 std::string DesktopSessionProxy::GetCapabilities() const {
@@ -222,9 +222,9 @@ bool DesktopSessionProxy::AttachToDesktop(
     return false;
 
   // Connect to the desktop process.
-  desktop_channel_ = IPC::ChannelProxy::Create(desktop_pipe,
-                                               IPC::Channel::MODE_CLIENT, this,
-                                               io_task_runner_.get());
+  desktop_channel_ = IPC::ChannelProxy::Create(
+      desktop_pipe, IPC::Channel::MODE_CLIENT, this, io_task_runner_.get(),
+      base::ThreadTaskRunnerHandle::Get());
 
   // Pass ID of the client (which is authenticated at this point) to the desktop
   // session agent and start the agent.

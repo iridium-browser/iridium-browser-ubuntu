@@ -39,6 +39,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "components/user_manager/user_manager.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 #endif
 
 using extensions::Extension;
@@ -251,11 +252,11 @@ void ChromeRuntimeAPIDelegate::OpenURL(const GURL& uninstall_url) {
   if (!browser)
     browser = new Browser(Browser::CreateParams(profile, false));
 
-  chrome::NavigateParams params(
-      browser, uninstall_url, ui::PAGE_TRANSITION_CLIENT_REDIRECT);
+  NavigateParams params(browser, uninstall_url,
+                        ui::PAGE_TRANSITION_CLIENT_REDIRECT);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   params.user_gesture = false;
-  chrome::Navigate(&params);
+  Navigate(&params);
 }
 
 bool ChromeRuntimeAPIDelegate::GetPlatformInfo(PlatformInfo* info) {
@@ -305,9 +306,8 @@ bool ChromeRuntimeAPIDelegate::GetPlatformInfo(PlatformInfo* info) {
 bool ChromeRuntimeAPIDelegate::RestartDevice(std::string* error_message) {
 #if defined(OS_CHROMEOS)
   if (user_manager::UserManager::Get()->IsLoggedInAsKioskApp()) {
-    chromeos::DBusThreadManager::Get()
-        ->GetPowerManagerClient()
-        ->RequestRestart();
+    chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart(
+        power_manager::REQUEST_RESTART_OTHER, "chrome.runtime API");
     return true;
   }
 #endif

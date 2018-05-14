@@ -5,8 +5,8 @@
 #ifndef MediaControlsWindowEventListener_h
 #define MediaControlsWindowEventListener_h
 
-#include "core/events/EventListener.h"
-#include "platform/wtf/Functional.h"
+#include "base/callback.h"
+#include "core/dom/events/EventListener.h"
 
 namespace blink {
 
@@ -14,26 +14,24 @@ class MediaControlsImpl;
 
 class MediaControlsWindowEventListener final : public EventListener {
  public:
-  using Callback = Function<void(), WTF::kSameThreadAffinity>;
+  using Callback = base::RepeatingCallback<void()>;
 
-  static MediaControlsWindowEventListener* Create(MediaControlsImpl*,
-                                                  std::unique_ptr<Callback>);
+  static MediaControlsWindowEventListener* Create(MediaControlsImpl*, Callback);
 
   bool operator==(const EventListener&) const override;
 
   void Start();
   void Stop();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
-  explicit MediaControlsWindowEventListener(MediaControlsImpl*,
-                                            std::unique_ptr<Callback>);
+  explicit MediaControlsWindowEventListener(MediaControlsImpl*, Callback);
 
   void handleEvent(ExecutionContext*, Event*) override;
 
   Member<MediaControlsImpl> media_controls_;
-  std::unique_ptr<Callback> callback_;
+  Callback callback_;
   bool is_active_;
 };
 

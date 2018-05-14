@@ -30,7 +30,7 @@
 
 #include "core/css/resolver/MatchedPropertiesCache.h"
 
-#include "core/css/StylePropertySet.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/style/ComputedStyle.h"
 
@@ -54,7 +54,7 @@ void CachedMatchedProperties::Clear() {
   parent_computed_style = nullptr;
 }
 
-MatchedPropertiesCache::MatchedPropertiesCache() {}
+MatchedPropertiesCache::MatchedPropertiesCache() = default;
 
 const CachedMatchedProperties* MatchedPropertiesCache::Find(
     unsigned hash,
@@ -66,7 +66,8 @@ const CachedMatchedProperties* MatchedPropertiesCache::Find(
   if (it == cache_.end())
     return nullptr;
   CachedMatchedProperties* cache_item = it->value.Get();
-  DCHECK(cache_item);
+  if (!cache_item)
+    return nullptr;
 
   size_t size = properties.size();
   if (size != cache_item->matched_properties.size())
@@ -87,7 +88,7 @@ void MatchedPropertiesCache::Add(const ComputedStyle& style,
                                  const MatchedPropertiesVector& properties) {
   DCHECK(hash);
   Cache::AddResult add_result = cache_.insert(hash, nullptr);
-  if (add_result.is_new_entry)
+  if (add_result.is_new_entry || !add_result.stored_value->value)
     add_result.stored_value->value = new CachedMatchedProperties;
 
   CachedMatchedProperties* cache_item = add_result.stored_value->value.Get();
@@ -102,7 +103,8 @@ void MatchedPropertiesCache::Clear() {
   // destructors in the properties (e.g., ~FontFallbackList) expect that
   // the destructors are called promptly without relying on a GC timing.
   for (auto& cache_entry : cache_) {
-    cache_entry.value->Clear();
+    if (cache_entry.value)
+      cache_entry.value->Clear();
   }
   cache_.clear();
 }
@@ -111,7 +113,7 @@ void MatchedPropertiesCache::ClearViewportDependent() {
   Vector<unsigned, 16> to_remove;
   for (const auto& cache_entry : cache_) {
     CachedMatchedProperties* cache_item = cache_entry.value.Get();
-    if (cache_item->computed_style->HasViewportUnits())
+    if (cache_item && cache_item->computed_style->HasViewportUnits())
       to_remove.push_back(cache_entry.key);
   }
   cache_.RemoveAll(to_remove);
@@ -121,10 +123,11 @@ bool MatchedPropertiesCache::IsStyleCacheable(const ComputedStyle& style) {
   // unique() styles are not cacheable.
   if (style.Unique())
     return false;
-  if (style.Zoom() != ComputedStyle::InitialZoom())
+  if (style.Zoom() != ComputedStyleInitialValues::InitialZoom())
     return false;
-  if (style.GetWritingMode() != ComputedStyle::InitialWritingMode() ||
-      style.Direction() != ComputedStyle::InitialDirection())
+  if (style.GetWritingMode() !=
+          ComputedStyleInitialValues::InitialWritingMode() ||
+      style.Direction() != ComputedStyleInitialValues::InitialDirection())
     return false;
   // styles with non inherited properties that reference variables are not
   // cacheable.
@@ -149,7 +152,7 @@ bool MatchedPropertiesCache::IsCacheable(const StyleResolverState& state) {
   return true;
 }
 
-DEFINE_TRACE(MatchedPropertiesCache) {
+void MatchedPropertiesCache::Trace(blink::Visitor* visitor) {
   visitor->Trace(cache_);
 }
 

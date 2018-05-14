@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "content/browser/appcache/appcache.h"
 #include "content/browser/appcache/appcache_entry.h"
@@ -17,10 +16,7 @@
 namespace content {
 
 AppCacheTestHelper::AppCacheTestHelper()
-    : group_id_(0),
-      appcache_id_(0),
-      response_id_(0),
-      origins_(NULL) {}
+    : group_id_(0), appcache_id_(0), response_id_(0), origins_(nullptr) {}
 
 AppCacheTestHelper::~AppCacheTestHelper() {}
 
@@ -30,7 +26,7 @@ void AppCacheTestHelper::OnGroupAndNewestCacheStored(
     bool success,
     bool /*would_exceed_quota*/) {
   ASSERT_TRUE(success);
-  base::MessageLoop::current()->QuitWhenIdle();
+  base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 void AppCacheTestHelper::AddGroupAndCache(AppCacheServiceImpl*
@@ -59,8 +55,8 @@ void AppCacheTestHelper::GetOriginsWithCaches(AppCacheServiceImpl*
   origins_ = origins;
   appcache_service->GetAllAppCacheInfo(
       appcache_info_.get(),
-      base::Bind(&AppCacheTestHelper::OnGotAppCacheInfo,
-                 base::Unretained(this)));
+      base::BindOnce(&AppCacheTestHelper::OnGotAppCacheInfo,
+                     base::Unretained(this)));
 
   // OnGotAppCacheInfo will quit the message loop.
   base::RunLoop().Run();
@@ -75,7 +71,7 @@ void AppCacheTestHelper::OnGotAppCacheInfo(int rv) {
        origin != appcache_info_->infos_by_origin.end(); ++origin) {
     origins_->insert(origin->first);
   }
-  base::MessageLoop::current()->QuitWhenIdle();
+  base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 }  // namespace content

@@ -103,7 +103,7 @@ class ExecTest(unittest.TestCase):
   def test_var(self):
     local_scope = {}
     global_scope = {
-        'Var': gclient.GClientKeywords.VarImpl({}, local_scope).Lookup,
+        'Var': lambda var_name: '{%s}' % var_name,
     }
     gclient_eval.Exec('\n'.join([
         'vars = {',
@@ -115,8 +115,59 @@ class ExecTest(unittest.TestCase):
     ]), global_scope, local_scope, '<string>')
     self.assertEqual({
         'vars': collections.OrderedDict([('foo', 'bar')]),
-        'deps': collections.OrderedDict([('a_dep', 'abarb')]),
+        'deps': collections.OrderedDict([('a_dep', 'a{foo}b')]),
     }, local_scope)
+
+
+class EvaluateConditionTest(unittest.TestCase):
+  def test_true(self):
+    self.assertTrue(gclient_eval.EvaluateCondition('True', {}))
+
+  def test_variable(self):
+    self.assertFalse(gclient_eval.EvaluateCondition('foo', {'foo': 'False'}))
+
+  def test_variable_cyclic_reference(self):
+    with self.assertRaises(ValueError) as cm:
+      self.assertTrue(gclient_eval.EvaluateCondition('bar', {'bar': 'bar'}))
+    self.assertIn(
+        'invalid cyclic reference to \'bar\' (inside \'bar\')',
+        str(cm.exception))
+
+  def test_operators(self):
+    self.assertFalse(gclient_eval.EvaluateCondition(
+        'a and not (b or c)', {'a': 'True', 'b': 'False', 'c': 'True'}))
+
+  def test_expansion(self):
+    self.assertTrue(gclient_eval.EvaluateCondition(
+        'a or b', {'a': 'b and c', 'b': 'not c', 'c': 'False'}))
+
+  def test_string_equality(self):
+    self.assertTrue(gclient_eval.EvaluateCondition(
+        'foo == "baz"', {'foo': '"baz"'}))
+    self.assertFalse(gclient_eval.EvaluateCondition(
+        'foo == "bar"', {'foo': '"baz"'}))
+
+  def test_string_inequality(self):
+    self.assertTrue(gclient_eval.EvaluateCondition(
+        'foo != "bar"', {'foo': '"baz"'}))
+    self.assertFalse(gclient_eval.EvaluateCondition(
+        'foo != "baz"', {'foo': '"baz"'}))
+
+  def test_string_bool(self):
+    self.assertFalse(gclient_eval.EvaluateCondition(
+        'false_str_var and true_var',
+        {'false_str_var': 'False', 'true_var': True}))
+
+  def test_string_bool_typo(self):
+    with self.assertRaises(ValueError) as cm:
+      gclient_eval.EvaluateCondition(
+          'false_var_str and true_var',
+          {'false_str_var': 'False', 'true_var': True})
+    self.assertIn(
+        'invalid "and" operand \'false_var_str\' '
+            '(inside \'false_var_str and true_var\')',
+        str(cm.exception))
+
 
 if __name__ == '__main__':
   level = logging.DEBUG if '-v' in sys.argv else logging.FATAL

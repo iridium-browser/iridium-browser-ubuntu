@@ -4,11 +4,11 @@
 
 #include "components/ntp_tiles/icon_cacher_impl.h"
 
-#include <set>
+#include <memory>
 #include <utility>
 
+#include "base/containers/flat_set.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/test/histogram_tester.h"
@@ -140,7 +140,7 @@ class IconCacherTestBase : public ::testing::Test {
                    favicon_base::IconType icon_type,
                    int width,
                    int height) {
-    favicon_service_.SetFavicons(url, icon_url, icon_type,
+    favicon_service_.SetFavicons({url}, icon_url, icon_type,
                                  gfx::test::CreateImage(width, height));
   }
 
@@ -193,7 +193,8 @@ class IconCacherTestPopularSites : public IconCacherTestBase {
               GURL("http://url.google/"),
               GURL("http://url.google/icon.png"),
               GURL("http://url.google/favicon.ico"),
-              GURL()),  // thumbnail, unused
+              GURL(),                     // thumbnail, unused
+              TileTitleSource::UNKNOWN),  // title_source, unused
         image_fetcher_(new ::testing::StrictMock<MockImageFetcher>),
         image_decoder_(new ::testing::StrictMock<MockImageDecoder>) {}
 
@@ -248,13 +249,13 @@ TEST_F(IconCacherTestPopularSites, LargeCached) {
                     data_use_measurement::DataUseUserData::NTP_TILES));
     EXPECT_CALL(*image_fetcher_, SetDesiredImageFrameSize(gfx::Size(128, 128)));
   }
-  PreloadIcon(site_.url, site_.large_icon_url, favicon_base::TOUCH_ICON, 128,
-              128);
+  PreloadIcon(site_.url, site_.large_icon_url,
+              favicon_base::IconType::kTouchIcon, 128, 128);
   IconCacherImpl cacher(&favicon_service_, nullptr, std::move(image_fetcher_));
   cacher.StartFetchPopularSites(site_, done.Get(), done.Get());
   WaitForMainThreadTasksToFinish();
-  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::FAVICON));
-  EXPECT_TRUE(IconIsCachedFor(site_.url, favicon_base::TOUCH_ICON));
+  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::IconType::kFavicon));
+  EXPECT_TRUE(IconIsCachedFor(site_.url, favicon_base::IconType::kTouchIcon));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   "NewTabPage.TileFaviconFetchSuccess.Popular"),
               IsEmpty());
@@ -279,8 +280,8 @@ TEST_F(IconCacherTestPopularSites, LargeNotCachedAndFetchSucceeded) {
   IconCacherImpl cacher(&favicon_service_, nullptr, std::move(image_fetcher_));
   cacher.StartFetchPopularSites(site_, done.Get(), done.Get());
   loop.Run();
-  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::FAVICON));
-  EXPECT_TRUE(IconIsCachedFor(site_.url, favicon_base::TOUCH_ICON));
+  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::IconType::kFavicon));
+  EXPECT_TRUE(IconIsCachedFor(site_.url, favicon_base::IconType::kTouchIcon));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   "NewTabPage.TileFaviconFetchSuccess.Popular"),
               ElementsAre(Bucket(/*bucket=*/true, /*count=*/1)));
@@ -306,8 +307,8 @@ TEST_F(IconCacherTestPopularSites, SmallNotCachedAndFetchSucceeded) {
   IconCacherImpl cacher(&favicon_service_, nullptr, std::move(image_fetcher_));
   cacher.StartFetchPopularSites(site_, done.Get(), done.Get());
   loop.Run();
-  EXPECT_TRUE(IconIsCachedFor(site_.url, favicon_base::FAVICON));
-  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::TOUCH_ICON));
+  EXPECT_TRUE(IconIsCachedFor(site_.url, favicon_base::IconType::kFavicon));
+  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::IconType::kTouchIcon));
 }
 
 TEST_F(IconCacherTestPopularSites, LargeNotCachedAndFetchFailed) {
@@ -328,8 +329,8 @@ TEST_F(IconCacherTestPopularSites, LargeNotCachedAndFetchFailed) {
   IconCacherImpl cacher(&favicon_service_, nullptr, std::move(image_fetcher_));
   cacher.StartFetchPopularSites(site_, done.Get(), done.Get());
   WaitForMainThreadTasksToFinish();
-  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::FAVICON));
-  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::TOUCH_ICON));
+  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::IconType::kFavicon));
+  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::IconType::kTouchIcon));
   EXPECT_THAT(
       histogram_tester.GetAllSamples(
           "NewTabPage.TileFaviconFetchSuccess.Popular"),
@@ -347,8 +348,8 @@ TEST_F(IconCacherTestPopularSites, HandlesEmptyCallbacksNicely) {
   WaitForHistoryThreadTasksToFinish();  // Writing the icon into the DB.
   WaitForMainThreadTasksToFinish();     // Finishing tasks after the DB write.
   // Even though the callbacks are not called, the icon gets written out.
-  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::FAVICON));
-  EXPECT_TRUE(IconIsCachedFor(site_.url, favicon_base::TOUCH_ICON));
+  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::IconType::kFavicon));
+  EXPECT_TRUE(IconIsCachedFor(site_.url, favicon_base::IconType::kTouchIcon));
   // The histogram gets reported despite empty callbacks.
   EXPECT_THAT(
       histogram_tester.GetAllSamples(
@@ -394,13 +395,15 @@ TEST_F(IconCacherTestPopularSites, ProvidesDefaultIconAndSucceedsWithFetching) {
                                 preliminary_icon_available.Get());
 
   default_loop.Run();  // Wait for the default image.
-  EXPECT_THAT(GetCachedIconFor(site_.url, favicon_base::TOUCH_ICON).Size(),
-              Eq(gfx::Size(64, 64)));  // Compares dimensions, not objects.
+  EXPECT_THAT(
+      GetCachedIconFor(site_.url, favicon_base::IconType::kTouchIcon).Size(),
+      Eq(gfx::Size(64, 64)));  // Compares dimensions, not objects.
 
   // Let the fetcher continue and wait for the second call of the callback.
   fetch_loop.Run();  // Wait for the updated image.
-  EXPECT_THAT(GetCachedIconFor(site_.url, favicon_base::TOUCH_ICON).Size(),
-              Eq(gfx::Size(128, 128)));  // Compares dimensions, not objects.
+  EXPECT_THAT(
+      GetCachedIconFor(site_.url, favicon_base::IconType::kTouchIcon).Size(),
+      Eq(gfx::Size(128, 128)));  // Compares dimensions, not objects.
   // The histogram gets reported only once (for the downloaded icon, not for the
   // default one).
   EXPECT_THAT(
@@ -430,19 +433,17 @@ TEST_F(IconCacherTestPopularSites, LargeNotCachedAndFetchPerformedOnlyOnce) {
   cacher.StartFetchPopularSites(site_, done.Get(), done.Get());
   cacher.StartFetchPopularSites(site_, done.Get(), done.Get());
   loop.Run();
-  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::FAVICON));
-  EXPECT_TRUE(IconIsCachedFor(site_.url, favicon_base::TOUCH_ICON));
+  EXPECT_FALSE(IconIsCachedFor(site_.url, favicon_base::IconType::kFavicon));
+  EXPECT_TRUE(IconIsCachedFor(site_.url, favicon_base::IconType::kTouchIcon));
 }
 
 class IconCacherTestMostLikely : public IconCacherTestBase {
  protected:
   IconCacherTestMostLikely()
-      : large_icon_service_background_task_runner_(
-            new base::TestSimpleTaskRunner()),
-        fetcher_for_large_icon_service_(
-            base::MakeUnique<::testing::StrictMock<MockImageFetcher>>()),
+      : fetcher_for_large_icon_service_(
+            std::make_unique<::testing::StrictMock<MockImageFetcher>>()),
         fetcher_for_icon_cacher_(
-            base::MakeUnique<::testing::StrictMock<MockImageFetcher>>()) {
+            std::make_unique<::testing::StrictMock<MockImageFetcher>>()) {
     // Expect uninteresting calls here, |fetcher_for_icon_cacher_| is not
     // related to these tests. Keep it strict to make sure we do not use it in
     // any other way.
@@ -453,8 +454,6 @@ class IconCacherTestMostLikely : public IconCacherTestBase {
                 SetDesiredImageFrameSize(gfx::Size(128, 128)));
   }
 
-  scoped_refptr<base::TestSimpleTaskRunner>
-      large_icon_service_background_task_runner_;
   std::unique_ptr<MockImageFetcher> fetcher_for_large_icon_service_;
   std::unique_ptr<MockImageFetcher> fetcher_for_icon_cacher_;
 };
@@ -464,11 +463,10 @@ TEST_F(IconCacherTestMostLikely, Cached) {
   base::HistogramTester histogram_tester;
 
   GURL icon_url("http://www.site.com/favicon.png");
-  PreloadIcon(page_url, icon_url, favicon_base::TOUCH_ICON, 128, 128);
+  PreloadIcon(page_url, icon_url, favicon_base::IconType::kTouchIcon, 128, 128);
 
   favicon::LargeIconService large_icon_service(
-      &favicon_service_, large_icon_service_background_task_runner_,
-      std::move(fetcher_for_large_icon_service_));
+      &favicon_service_, std::move(fetcher_for_large_icon_service_));
   IconCacherImpl cacher(&favicon_service_, &large_icon_service,
                         std::move(fetcher_for_icon_cacher_));
 
@@ -477,8 +475,8 @@ TEST_F(IconCacherTestMostLikely, Cached) {
   cacher.StartFetchMostLikely(page_url, done.Get());
   WaitForMainThreadTasksToFinish();
 
-  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::FAVICON));
-  EXPECT_TRUE(IconIsCachedFor(page_url, favicon_base::TOUCH_ICON));
+  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::IconType::kFavicon));
+  EXPECT_TRUE(IconIsCachedFor(page_url, favicon_base::IconType::kTouchIcon));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   "NewTabPage.TileFaviconFetchStatus.Server"),
               IsEmpty());
@@ -502,8 +500,7 @@ TEST_F(IconCacherTestMostLikely, NotCachedAndFetchSucceeded) {
   }
 
   favicon::LargeIconService large_icon_service(
-      &favicon_service_, large_icon_service_background_task_runner_,
-      std::move(fetcher_for_large_icon_service_));
+      &favicon_service_, std::move(fetcher_for_large_icon_service_));
   IconCacherImpl cacher(&favicon_service_, &large_icon_service,
                         std::move(fetcher_for_icon_cacher_));
 
@@ -511,11 +508,11 @@ TEST_F(IconCacherTestMostLikely, NotCachedAndFetchSucceeded) {
   // Both these task runners need to be flushed in order to get |done| called by
   // running the main loop.
   WaitForHistoryThreadTasksToFinish();
-  large_icon_service_background_task_runner_->RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
 
   loop.Run();
-  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::FAVICON));
-  EXPECT_TRUE(IconIsCachedFor(page_url, favicon_base::TOUCH_ICON));
+  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::IconType::kFavicon));
+  EXPECT_TRUE(IconIsCachedFor(page_url, favicon_base::IconType::kTouchIcon));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   "NewTabPage.TileFaviconFetchStatus.Server"),
               ElementsAre(Bucket(
@@ -541,8 +538,7 @@ TEST_F(IconCacherTestMostLikely, NotCachedAndFetchFailed) {
   }
 
   favicon::LargeIconService large_icon_service(
-      &favicon_service_, large_icon_service_background_task_runner_,
-      std::move(fetcher_for_large_icon_service_));
+      &favicon_service_, std::move(fetcher_for_large_icon_service_));
   IconCacherImpl cacher(&favicon_service_, &large_icon_service,
                         std::move(fetcher_for_icon_cacher_));
 
@@ -550,11 +546,11 @@ TEST_F(IconCacherTestMostLikely, NotCachedAndFetchFailed) {
   // Both these task runners need to be flushed before flushing the main thread
   // queue in order to finish the work.
   WaitForHistoryThreadTasksToFinish();
-  large_icon_service_background_task_runner_->RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
   WaitForMainThreadTasksToFinish();
 
-  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::FAVICON));
-  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::TOUCH_ICON));
+  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::IconType::kFavicon));
+  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::IconType::kTouchIcon));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   "NewTabPage.TileFaviconFetchStatus.Server"),
               ElementsAre(Bucket(
@@ -573,8 +569,7 @@ TEST_F(IconCacherTestMostLikely, HandlesEmptyCallbacksNicely) {
       .WillOnce(PassFetch(128, 128));
 
   favicon::LargeIconService large_icon_service(
-      &favicon_service_, large_icon_service_background_task_runner_,
-      std::move(fetcher_for_large_icon_service_));
+      &favicon_service_, std::move(fetcher_for_large_icon_service_));
   IconCacherImpl cacher(&favicon_service_, &large_icon_service,
                         std::move(fetcher_for_icon_cacher_));
 
@@ -582,12 +577,12 @@ TEST_F(IconCacherTestMostLikely, HandlesEmptyCallbacksNicely) {
   // Both these task runners need to be flushed before flushing the main thread
   // queue in order to finish the work.
   WaitForHistoryThreadTasksToFinish();
-  large_icon_service_background_task_runner_->RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
   WaitForMainThreadTasksToFinish();
 
   // Even though the callbacks are not called, the icon gets written out.
-  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::FAVICON));
-  EXPECT_TRUE(IconIsCachedFor(page_url, favicon_base::TOUCH_ICON));
+  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::IconType::kFavicon));
+  EXPECT_TRUE(IconIsCachedFor(page_url, favicon_base::IconType::kTouchIcon));
 }
 
 TEST_F(IconCacherTestMostLikely, NotCachedAndFetchPerformedOnlyOnce) {
@@ -609,8 +604,7 @@ TEST_F(IconCacherTestMostLikely, NotCachedAndFetchPerformedOnlyOnce) {
   }
 
   favicon::LargeIconService large_icon_service(
-      &favicon_service_, large_icon_service_background_task_runner_,
-      std::move(fetcher_for_large_icon_service_));
+      &favicon_service_, std::move(fetcher_for_large_icon_service_));
   IconCacherImpl cacher(&favicon_service_, &large_icon_service,
                         std::move(fetcher_for_icon_cacher_));
 
@@ -619,11 +613,11 @@ TEST_F(IconCacherTestMostLikely, NotCachedAndFetchPerformedOnlyOnce) {
   // Both these task runners need to be flushed in order to get |done| called by
   // running the main loop.
   WaitForHistoryThreadTasksToFinish();
-  large_icon_service_background_task_runner_->RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
 
   loop.Run();
-  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::FAVICON));
-  EXPECT_TRUE(IconIsCachedFor(page_url, favicon_base::TOUCH_ICON));
+  EXPECT_FALSE(IconIsCachedFor(page_url, favicon_base::IconType::kFavicon));
+  EXPECT_TRUE(IconIsCachedFor(page_url, favicon_base::IconType::kTouchIcon));
 }
 
 }  // namespace

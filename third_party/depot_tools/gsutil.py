@@ -29,6 +29,9 @@ DEFAULT_BIN_DIR = os.path.join(THIS_DIR, 'external_bin', 'gsutil')
 DEFAULT_FALLBACK_GSUTIL = os.path.join(
     THIS_DIR, 'third_party', 'gsutil', 'gsutil')
 
+IS_WINDOWS = os.name == 'nt'
+
+
 class InvalidGsutilError(Exception):
   pass
 
@@ -69,12 +72,6 @@ def download_gsutil(version, target_dir):
   return target_filename
 
 
-def check_gsutil(gsutil_bin):
-  """Run gsutil version and make sure it runs."""
-  return subprocess.call(
-      [sys.executable, gsutil_bin, 'version'],
-      stdout=subprocess.PIPE, stderr=subprocess.STDOUT) == 0
-
 @contextlib.contextmanager
 def temporary_directory(base):
   tmpdir = tempfile.mkdtemp(prefix='gsutil_py', dir=base)
@@ -87,7 +84,10 @@ def temporary_directory(base):
 def ensure_gsutil(version, target, clean):
   bin_dir = os.path.join(target, 'gsutil_%s' % version)
   gsutil_bin = os.path.join(bin_dir, 'gsutil', 'gsutil')
-  if not clean and os.path.isfile(gsutil_bin) and check_gsutil(gsutil_bin):
+  gsutil_flag = os.path.join(bin_dir, 'gsutil', 'install.flag')
+  # We assume that if gsutil_flag exists, then we have a good version
+  # of the gsutil package.
+  if not clean and os.path.isfile(gsutil_flag):
     # Everything is awesome! we're all done here.
     return gsutil_bin
 
@@ -113,10 +113,13 @@ def ensure_gsutil(version, target, clean):
     except (OSError, IOError):
       # Something else did this in parallel.
       pass
+    # Final check that the gsutil bin exists.  This should never fail.
+    if not os.path.isfile(gsutil_bin):
+      raise InvalidGsutilError()
+    # Drop a flag file.
+    with open(gsutil_flag, 'w') as f:
+      f.write('This flag file is dropped by gsutil.py')
 
-  # Final check that the gsutil bin is okay.  This should never fail.
-  if not check_gsutil(gsutil_bin):
-    raise InvalidGsutilError()
   return gsutil_bin
 
 
@@ -126,15 +129,34 @@ def run_gsutil(force_version, fallback, target, args, clean=False):
   else:
     gsutil_bin = fallback
   disable_update = ['-o', 'GSUtil:software_update_check_period=0']
-  cmd = [sys.executable, gsutil_bin] + disable_update + args
-  return subprocess.call(cmd)
+
+  if sys.platform == 'cygwin':
+    # This script requires Windows Python, so invoke with depot_tools'
+    # Python.
+    def winpath(path):
+      return subprocess.check_output(['cygpath', '-w', path]).strip()
+    cmd = ['python.bat', winpath(__file__)]
+    cmd.extend(args)
+    sys.exit(subprocess.call(cmd))
+  assert sys.platform != 'cygwin'
+
+  # Run "gsutil" through "vpython". We need to do this because on GCE instances,
+  # expectations are made about Python having access to "google-compute-engine"
+  # and "boto" packages that are not met with non-system Python (e.g., bundles).
+  cmd = [
+      'vpython',
+      '-vpython-spec', os.path.join(THIS_DIR, 'gsutil.vpython'),
+      '--',
+      gsutil_bin
+  ] + disable_update + args
+  return subprocess.call(cmd, shell=IS_WINDOWS)
 
 
 def parse_args():
   bin_dir = os.environ.get('DEPOT_TOOLS_GSUTIL_BIN_DIR', DEFAULT_BIN_DIR)
 
   parser = argparse.ArgumentParser()
-  parser.add_argument('--force-version', default='4.13')
+  parser.add_argument('--force-version', default='4.28')
   parser.add_argument('--clean', action='store_true',
       help='Clear any existing gsutil package, forcing a new download.')
   parser.add_argument('--fallback', default=DEFAULT_FALLBACK_GSUTIL)

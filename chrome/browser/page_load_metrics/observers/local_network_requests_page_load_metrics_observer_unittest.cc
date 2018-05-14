@@ -6,11 +6,11 @@
 
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "base/test/histogram_tester.h"
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_test_harness.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
+#include "chrome/browser/page_load_metrics/page_load_tracker.h"
 #include "components/ukm/ukm_source.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/common/resource_type.h"
@@ -79,7 +79,7 @@ class LocalNetworkRequestsPageLoadMetricsObserverTest
  protected:
   void RegisterObservers(page_load_metrics::PageLoadTracker* tracker) override {
     tracker->AddObserver(
-        base::MakeUnique<LocalNetworkRequestsPageLoadMetricsObserver>());
+        std::make_unique<LocalNetworkRequestsPageLoadMetricsObserver>());
   }
 
   void SetUp() override {
@@ -114,7 +114,8 @@ class LocalNetworkRequestsPageLoadMetricsObserverTest
         (net_error ? 1024 * 20 : 0) /* raw_body_bytes */,
         0 /* original_network_content_length */,
         nullptr /* data_reduction_proxy_data */,
-        content::ResourceType::RESOURCE_TYPE_MAIN_FRAME, net_error);
+        content::ResourceType::RESOURCE_TYPE_MAIN_FRAME, net_error,
+        {} /* load_timing_info */);
 
     PageLoadMetricsObserverTestHarness::SimulateLoadedResource(
         request_info, navigation_simulator_->GetGlobalRequestID());
@@ -176,39 +177,40 @@ class LocalNetworkRequestsPageLoadMetricsObserverTest
 
   void ExpectUkmPageDomainMetric(const internal::PageAddressInfo& page,
                                  const internal::DomainType domain_type) {
-    EXPECT_EQ(1ul, test_ukm_recorder().sources_count());
-    const ukm::UkmSource* source =
-        test_ukm_recorder().GetSourceForUrl(page.url);
-    EXPECT_EQ(GURL(page.url), source->url());
-
-    test_ukm_recorder().ExpectEntry(
-        *source, internal::kUkmPageDomainEventName,
-        {{internal::kUkmDomainTypeName, static_cast<int>(domain_type)}});
+    auto entries =
+        test_ukm_recorder().GetEntriesByName(internal::kUkmPageDomainEventName);
+    EXPECT_EQ(1u, entries.size());
+    for (const auto* const entry : entries) {
+      test_ukm_recorder().ExpectEntrySourceHasUrl(entry, GURL(page.url));
+      test_ukm_recorder().ExpectEntryMetric(entry, internal::kUkmDomainTypeName,
+                                            static_cast<int>(domain_type));
+    }
   }
 
   void ExpectMetricsAndHistograms(
       const internal::PageAddressInfo& page,
       const std::vector<internal::UkmMetricInfo>& expected_metrics,
       const std::map<std::string, int>& expected_histograms) {
-    // The page domain info UKM entry will always be created, so we expect that
-    // there should be one more UKM entry than the expected number of metrics
-    // entries.
-    EXPECT_EQ(expected_metrics.size() + 1, test_ukm_recorder().entries_count());
-
-    const ukm::UkmSource* source =
-        test_ukm_recorder().GetSourceForUrl(page.url);
-    for (auto entry : expected_metrics) {
-      std::vector<std::pair<const char*, int64_t>> metric_values = {
-          {internal::kUkmResourceTypeName, entry.resource_type},
-          {internal::kUkmSuccessfulCountName, entry.success_count},
-          {internal::kUkmFailedCountName, entry.failed_count}};
-      if (entry.resource_type == internal::RESOURCE_TYPE_LOCALHOST) {
-        // Localhost page load
-        metric_values.push_back(
-            {internal::kUkmPortTypeName, static_cast<int>(entry.port_type)});
+    auto entries = test_ukm_recorder().GetEntriesByName(
+        internal::kUkmLocalNetworkRequestsEventName);
+    ASSERT_EQ(entries.size(), expected_metrics.size());
+    for (size_t i = 0; i < entries.size() && i < expected_metrics.size(); i++) {
+      test_ukm_recorder().ExpectEntrySourceHasUrl(entries[i], GURL(page.url));
+      test_ukm_recorder().ExpectEntryMetric(entries[i],
+                                            internal::kUkmResourceTypeName,
+                                            expected_metrics[i].resource_type);
+      test_ukm_recorder().ExpectEntryMetric(entries[i],
+                                            internal::kUkmSuccessfulCountName,
+                                            expected_metrics[i].success_count);
+      test_ukm_recorder().ExpectEntryMetric(entries[i],
+                                            internal::kUkmFailedCountName,
+                                            expected_metrics[i].failed_count);
+      if (expected_metrics[i].resource_type ==
+          internal::RESOURCE_TYPE_LOCALHOST) {
+        test_ukm_recorder().ExpectEntryMetric(
+            entries[i], internal::kUkmPortTypeName,
+            static_cast<int>(expected_metrics[i].port_type));
       }
-      test_ukm_recorder().ExpectEntry(
-          *source, internal::kUkmLocalNetworkRequestsEventName, metric_values);
     }
 
     // Should have generated UMA histograms for all requests made.
@@ -768,14 +770,12 @@ TEST_F(LocalNetworkRequestsPageLoadMetricsObserverTest,
   // Load a resource that has the IP address in the URL but returned an empty
   // socket address for some reason.
   PageLoadMetricsObserverTestHarness::SimulateLoadedResource(
-      {
-          GURL(internal::kDiffSubnetRequest2.url), net::HostPortPair(),
-          -1 /* frame_tree_node_id */, true /* was_cached */,
-          1024 * 20 /* raw_body_bytes */,
-          0 /* original_network_content_length */,
-          nullptr /* data_reduction_proxy_data */,
-          content::ResourceType::RESOURCE_TYPE_MAIN_FRAME, 0,
-      },
+      {GURL(internal::kDiffSubnetRequest2.url), net::HostPortPair(),
+       -1 /* frame_tree_node_id */, true /* was_cached */,
+       1024 * 20 /* raw_body_bytes */, 0 /* original_network_content_length */,
+       nullptr /* data_reduction_proxy_data */,
+       content::ResourceType::RESOURCE_TYPE_MAIN_FRAME, 0,
+       nullptr /* load_timing_info */},
       GetGlobalRequestID());
   DeleteContents();
 
@@ -798,13 +798,12 @@ TEST_F(LocalNetworkRequestsPageLoadMetricsObserverTest,
   // Load a resource that doesn't have the IP address in the URL and returned an
   // empty socket address (e.g., failed DNS resolution).
   PageLoadMetricsObserverTestHarness::SimulateLoadedResource(
-      {
-          GURL(internal::kPrivatePage.url), net::HostPortPair(),
-          -1 /* frame_tree_node_id */, false /* was_cached */,
-          0 /* raw_body_bytes */, 0 /* original_network_content_length */,
-          nullptr /* data_reduction_proxy_data */,
-          content::ResourceType::RESOURCE_TYPE_MAIN_FRAME, -20,
-      },
+      {GURL(internal::kPrivatePage.url), net::HostPortPair(),
+       -1 /* frame_tree_node_id */, false /* was_cached */,
+       0 /* raw_body_bytes */, 0 /* original_network_content_length */,
+       nullptr /* data_reduction_proxy_data */,
+       content::ResourceType::RESOURCE_TYPE_MAIN_FRAME, -20,
+       nullptr /* load_timing_info */},
       GetGlobalRequestID());
   DeleteContents();
 
@@ -889,7 +888,6 @@ TEST_F(LocalNetworkRequestsPageLoadMetricsObserverTest, PrivatePageFailedLoad) {
   navigation_simulator->CommitErrorPage();
 
   // Nothing should have been generated.
-  EXPECT_EQ(0ul, test_ukm_recorder().sources_count());
   EXPECT_EQ(0ul, test_ukm_recorder().entries_count());
   ExpectNoHistograms();
 }

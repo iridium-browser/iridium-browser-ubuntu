@@ -31,16 +31,16 @@
 #ifndef BlobRegistry_h
 #define BlobRegistry_h
 
-#include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "platform/PlatformExport.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/PassRefPtr.h"
 
 namespace blink {
 
-class BlobData;
+class BlobBytesConsumer;
 class BlobDataHandle;
+class BlobURLRegistry;
 class KURL;
 class SecurityOrigin;
 
@@ -48,14 +48,19 @@ class SecurityOrigin;
 class PLATFORM_EXPORT BlobRegistry {
   STATIC_ONLY(BlobRegistry);
 
- public:
-  // Methods for controlling Blobs.
-  static void RegisterBlobData(const String& uuid, std::unique_ptr<BlobData>);
-  static void AddBlobDataRef(const String& uuid);
-  static void RemoveBlobDataRef(const String& uuid);
+  // Calling methods in this class directly won't work when Blob URL management
+  // is switched to mojo. Instead codew should call PublicURLManager methods to
+  // create/revoke blob URLs.
+  // To avoid new usage of these methods, mark all as private with friends for
+  // existing usage.
+ private:
+  friend class BlobBytesConsumer;
+  friend class BlobURLRegistry;
+
+  // Methods for controlling Blob URLs.
   static void RegisterPublicBlobURL(SecurityOrigin*,
                                     const KURL&,
-                                    PassRefPtr<BlobDataHandle>);
+                                    scoped_refptr<BlobDataHandle>);
   static void RevokePublicBlobURL(const KURL&);
 };
 

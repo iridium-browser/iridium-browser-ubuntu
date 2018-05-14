@@ -21,8 +21,8 @@ class CORE_EXPORT CSSParserTokenRange {
   DISALLOW_NEW();
 
  public:
-  template <size_t inlineBuffer>
-  CSSParserTokenRange(const Vector<CSSParserToken, inlineBuffer>& vector)
+  template <size_t InlineBuffer>
+  CSSParserTokenRange(const Vector<CSSParserToken, InlineBuffer>& vector)
       : first_(vector.begin()), last_(vector.end()) {}
 
   // This should be called on a range with tokens returned by that range.

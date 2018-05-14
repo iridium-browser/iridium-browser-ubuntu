@@ -69,9 +69,9 @@ class PLATFORM_EXPORT AudioBus : public ThreadSafeRefCounted<AudioBus> {
   // case the AudioChannels will memory-manage their own storage.  If allocate
   // is false then setChannelMemory() has to be called later on for each
   // channel before the AudioBus is useable...
-  static PassRefPtr<AudioBus> Create(unsigned number_of_channels,
-                                     size_t length,
-                                     bool allocate = true);
+  static scoped_refptr<AudioBus> Create(unsigned number_of_channels,
+                                        size_t length,
+                                        bool allocate = true);
 
   // Tells the given channel to use an externally allocated buffer.
   void SetChannelMemory(unsigned channel_index, float* storage, size_t length);
@@ -111,7 +111,7 @@ class PLATFORM_EXPORT AudioBus : public ThreadSafeRefCounted<AudioBus> {
 
   // Creates a new buffer from a range in the source buffer.
   // 0 may be returned if the range does not fit in the sourceBuffer
-  static PassRefPtr<AudioBus> CreateBufferFromRange(
+  static scoped_refptr<AudioBus> CreateBufferFromRange(
       const AudioBus* source_buffer,
       unsigned start_frame,
       unsigned end_frame);
@@ -121,7 +121,7 @@ class PLATFORM_EXPORT AudioBus : public ThreadSafeRefCounted<AudioBus> {
   // setSampleRate() must have been previously called on sourceBus.
   // Note: sample-rate conversion is already handled in the file-reading code
   // for the mac port, so we don't need this.
-  static PassRefPtr<AudioBus> CreateBySampleRateConverting(
+  static scoped_refptr<AudioBus> CreateBySampleRateConverting(
       const AudioBus* source_bus,
       bool mix_to_mono,
       double new_sample_rate);
@@ -129,12 +129,11 @@ class PLATFORM_EXPORT AudioBus : public ThreadSafeRefCounted<AudioBus> {
   // Creates a new AudioBus by mixing all the channels down to mono.
   // If sourceBus is already mono, then the returned AudioBus will simply be a
   // copy.
-  static PassRefPtr<AudioBus> CreateByMixingToMono(const AudioBus* source_bus);
+  static scoped_refptr<AudioBus> CreateByMixingToMono(
+      const AudioBus* source_bus);
 
   // Scales all samples by the same amount.
   void Scale(float scale);
-
-  void Reset() { is_first_time_ = true; }  // for de-zippering
 
   // Copies the samples from the source bus to this one.
   // This is just a simple per-channel copy if the number of channels match,
@@ -146,16 +145,9 @@ class PLATFORM_EXPORT AudioBus : public ThreadSafeRefCounted<AudioBus> {
   // otherwise an up-mix or down-mix is done.
   void SumFrom(const AudioBus& source_bus, ChannelInterpretation = kSpeakers);
 
-  // Copy each channel from sourceBus into our corresponding channel.
-  // We scale by targetGain (and our own internal gain m_busGain), performing
-  // "de-zippering" to smoothly change from *lastMixGain to
-  // (targetGain*m_busGain).  The caller is responsible for setting up
-  // lastMixGain to point to storage which is unique for every "stream" which
-  // will be applied to this bus.
-  // This represents the dezippering memory.
-  void CopyWithGainFrom(const AudioBus& source_bus,
-                        float* last_mix_gain,
-                        float target_gain);
+  // Copy each channel from |source_bus| into our corresponding channel.  We
+  // scale |source_bus| by |gain| before copying into the bus.
+  void CopyWithGainFrom(const AudioBus& source_bus, float gain);
 
   // Copies the sourceBus by scaling with sample-accurate gain values.
   void CopyWithSampleAccurateGainValuesFrom(const AudioBus& source_bus,
@@ -169,11 +161,11 @@ class PLATFORM_EXPORT AudioBus : public ThreadSafeRefCounted<AudioBus> {
   // Makes maximum absolute value == 1.0 (if possible).
   void Normalize();
 
-  static PassRefPtr<AudioBus> GetDataResource(const char* name,
-                                              float sample_rate);
+  static scoped_refptr<AudioBus> GetDataResource(const char* name,
+                                                 float sample_rate);
 
  protected:
-  AudioBus() {}
+  AudioBus() = default;
 
   AudioBus(unsigned number_of_channels, size_t length, bool allocate);
 
@@ -187,9 +179,6 @@ class PLATFORM_EXPORT AudioBus : public ThreadSafeRefCounted<AudioBus> {
   size_t length_;
   Vector<std::unique_ptr<AudioChannel>> channels_;
   int layout_;
-  float bus_gain_;
-  std::unique_ptr<AudioFloatArray> dezipper_gain_values_;
-  bool is_first_time_;
   float sample_rate_;  // 0.0 if unknown or N/A
 };
 

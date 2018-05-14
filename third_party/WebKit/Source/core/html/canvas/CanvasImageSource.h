@@ -27,11 +27,11 @@
 #ifndef CanvasImageSource_h
 #define CanvasImageSource_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "platform/geometry/FloatSize.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/weborigin/KURL.h"
-#include "platform/wtf/PassRefPtr.h"
 
 namespace blink {
 
@@ -50,17 +50,16 @@ enum SourceImageStatus {
 
 class CORE_EXPORT CanvasImageSource {
  public:
-  virtual PassRefPtr<Image> GetSourceImageForCanvas(SourceImageStatus*,
-                                                    AccelerationHint,
-                                                    SnapshotReason,
-                                                    const FloatSize&) = 0;
+  virtual scoped_refptr<Image> GetSourceImageForCanvas(SourceImageStatus*,
+                                                       AccelerationHint,
+                                                       const FloatSize&) = 0;
 
   // IMPORTANT: Result must be independent of whether destinationContext is
   // already tainted because this function may be used to determine whether
   // a CanvasPattern is "origin clean", and that pattern may be used on
   // another canvas, which may not be already tainted.
   virtual bool WouldTaintOrigin(
-      SecurityOrigin* destination_security_origin) const = 0;
+      const SecurityOrigin* destination_security_origin) const = 0;
 
   virtual bool IsCSSImageValue() const { return false; }
   virtual bool IsVideoElement() const { return false; }
@@ -84,11 +83,8 @@ class CORE_EXPORT CanvasImageSource {
   virtual bool IsOpaque() const { return false; }
   virtual bool IsAccelerated() const = 0;
 
-  virtual int SourceWidth() = 0;
-  virtual int SourceHeight() = 0;
-
  protected:
-  virtual ~CanvasImageSource() {}
+  virtual ~CanvasImageSource() = default;
 };
 
 }  // namespace blink

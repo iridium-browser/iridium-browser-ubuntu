@@ -1,8 +1,4 @@
-# For Blink API usage
-dglazkov@chromium.org
-
-# For Android
-aelias@chromium.org
+haraken@chromium.org
 
 # Mac Sandbox profiles.
 per-file *.sb=set noparent
@@ -11,3 +7,6 @@ per-file *.sb=rsesek@chromium.org
 # DirectWrite specific changes.
 per-file renderer_font_platform_win.*=scottmg@chromium.org
 per-file renderer_font_platform_win.*=cpu@chromium.org
+
+# For surface ID propagation and synchronization
+per-file child_frame_compositing_helper.*=fsamuel@chromium.org

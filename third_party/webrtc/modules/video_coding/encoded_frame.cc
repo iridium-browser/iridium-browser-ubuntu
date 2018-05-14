@@ -8,10 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/video_coding/include/video_coding_defines.h"
-#include "webrtc/modules/video_coding/encoded_frame.h"
-#include "webrtc/modules/video_coding/generic_encoder.h"
-#include "webrtc/modules/video_coding/jitter_buffer_common.h"
+#include "modules/video_coding/encoded_frame.h"
 
 namespace webrtc {
 
@@ -88,7 +85,7 @@ void VCMEncodedFrame::Reset() {
   _codec = kVideoCodecUnknown;
   rotation_ = kVideoRotation_0;
   content_type_ = VideoContentType::UNSPECIFIED;
-  timing_.is_timing_frame = false;
+  timing_.flags = TimingFrameFlags::kInvalid;
   _rotation_set = false;
 }
 
@@ -193,7 +190,8 @@ void VCMEncodedFrame::CopyCodecSpecific(const RTPVideoHeader* header) {
         _codecSpecificInfo.codecType = kVideoCodecH264;
         break;
       }
-      default: {
+      case kRtpVideoNone:
+      case kRtpVideoGeneric: {
         _codecSpecificInfo.codecType = kVideoCodecUnknown;
         break;
       }

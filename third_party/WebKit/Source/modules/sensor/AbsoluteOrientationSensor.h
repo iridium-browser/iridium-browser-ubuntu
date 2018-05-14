@@ -6,6 +6,7 @@
 #define AbsoluteOrientationSensor_h
 
 #include "modules/sensor/OrientationSensor.h"
+#include "modules/sensor/SpatialSensorOptions.h"
 
 namespace blink {
 
@@ -14,15 +15,15 @@ class AbsoluteOrientationSensor final : public OrientationSensor {
 
  public:
   static AbsoluteOrientationSensor* Create(ExecutionContext*,
-                                           const SensorOptions&,
+                                           const SpatialSensorOptions&,
                                            ExceptionState&);
   static AbsoluteOrientationSensor* Create(ExecutionContext*, ExceptionState&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   AbsoluteOrientationSensor(ExecutionContext*,
-                            const SensorOptions&,
+                            const SpatialSensorOptions&,
                             ExceptionState&);
 };
 

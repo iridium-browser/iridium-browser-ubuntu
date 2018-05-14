@@ -147,12 +147,12 @@ class WebCryptoAlgorithmPrivate;
 //   * Threadsafe
 //   * Copiable (cheaply)
 //
-// If WebCryptoAlgorithm "isNull()" then it is invalid to call any of the other
-// methods on it (other than destruction, assignment, or isNull()).
+// If WebCryptoAlgorithm "IsNull()" then it is invalid to call any of the other
+// methods on it (other than destruction, assignment, or IsNull()).
 class WebCryptoAlgorithm {
  public:
 #if INSIDE_BLINK
-  WebCryptoAlgorithm() {}
+  WebCryptoAlgorithm() = default;
   BLINK_PLATFORM_EXPORT WebCryptoAlgorithm(
       WebCryptoAlgorithmId,
       std::unique_ptr<WebCryptoAlgorithmParams>);

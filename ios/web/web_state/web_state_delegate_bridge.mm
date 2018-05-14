@@ -7,6 +7,10 @@
 #include "base/logging.h"
 #import "ios/web/public/web_state/context_menu_params.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace web {
 
 WebStateDelegateBridge::WebStateDelegateBridge(id<CRWWebStateDelegate> delegate)
@@ -43,13 +47,12 @@ WebState* WebStateDelegateBridge::OpenURLFromWebState(
   return nullptr;
 }
 
-bool WebStateDelegateBridge::HandleContextMenu(
+void WebStateDelegateBridge::HandleContextMenu(
     WebState* source,
     const ContextMenuParams& params) {
   if ([delegate_ respondsToSelector:@selector(webState:handleContextMenu:)]) {
-    return [delegate_ webState:source handleContextMenu:params];
+    [delegate_ webState:source handleContextMenu:params];
   }
-  return NO;
 }
 
 void WebStateDelegateBridge::ShowRepostFormWarningDialog(
@@ -96,6 +99,36 @@ void WebStateDelegateBridge::OnAuthRequired(
                            }];
   } else {
     local_callback.Run(nil, nil);
+  }
+}
+
+bool WebStateDelegateBridge::ShouldPreviewLink(WebState* source,
+                                               const GURL& link_url) {
+  if ([delegate_
+          respondsToSelector:@selector(webState:shouldPreviewLinkWithURL:)]) {
+    return [delegate_ webState:source shouldPreviewLinkWithURL:link_url];
+  }
+  return false;
+}
+
+UIViewController* WebStateDelegateBridge::GetPreviewingViewController(
+    WebState* source,
+    const GURL& link_url) {
+  if ([delegate_ respondsToSelector:@selector
+                 (webState:previewingViewControllerForLinkWithURL:)]) {
+    return [delegate_ webState:source
+        previewingViewControllerForLinkWithURL:link_url];
+  }
+  return nil;
+}
+
+void WebStateDelegateBridge::CommitPreviewingViewController(
+    WebState* source,
+    UIViewController* previewing_view_controller) {
+  if ([delegate_ respondsToSelector:@selector
+                 (webState:commitPreviewingViewController:)]) {
+    [delegate_ webState:source
+        commitPreviewingViewController:previewing_view_controller];
   }
 }
 

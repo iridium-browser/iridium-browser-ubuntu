@@ -14,7 +14,7 @@
 #include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
-#include "chromecast/chromecast_features.h"
+#include "chromecast/chromecast_buildflags.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/content_browser_client.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
@@ -67,9 +67,6 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   // Appends extra command line arguments before launching a new process.
   virtual void AppendExtraCommandLineSwitches(base::CommandLine* command_line);
 
-  // Hook for code to run before browser threads created.
-  virtual void PreCreateThreads();
-
   // Creates and returns the CastService instance for the current process.
   // Note: |request_context_getter| might be different than the main request
   // getter accessible via CastBrowserProcess.
@@ -116,14 +113,20 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   // content::ContentBrowserClient implementation:
   content::BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) override;
-  void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
+  void RenderProcessWillLaunch(
+      content::RenderProcessHost* host,
+      service_manager::mojom::ServiceRequest* service_request) override;
   bool IsHandledURL(const GURL& url) override;
+  void SiteInstanceGotProcess(content::SiteInstance* site_instance) override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
   void OverrideWebkitPrefs(content::RenderViewHost* render_view_host,
                            content::WebPreferences* prefs) override;
   void ResourceDispatcherHostCreated() override;
   std::string GetApplicationLocale() override;
+  void GetGeolocationRequestContext(
+      base::OnceCallback<void(scoped_refptr<net::URLRequestContextGetter>)>
+          callback) override;
   content::QuotaPermissionContext* CreateQuotaPermissionContext() override;
   void GetQuotaSettings(
       content::BrowserContext* context,
@@ -135,7 +138,6 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
       const net::SSLInfo& ssl_info,
       const GURL& request_url,
       content::ResourceType resource_type,
-      bool overridable,
       bool strict_enforcement,
       bool expired_previous_decision,
       const base::Callback<void(content::CertificateRequestResultType)>&
@@ -160,18 +162,23 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
                        bool* no_javascript_access) override;
   void ExposeInterfacesToRenderer(
       service_manager::BinderRegistry* registry,
-      content::AssociatedInterfaceRegistry* associated_registry,
+      blink::AssociatedInterfaceRegistry* associated_registry,
       content::RenderProcessHost* render_process_host) override;
+  void ExposeInterfacesToMediaService(
+      service_manager::BinderRegistry* registry,
+      content::RenderFrameHost* render_frame_host) override;
   void RegisterInProcessServices(StaticServiceMap* services) override;
   std::unique_ptr<base::Value> GetServiceManifestOverlay(
       base::StringPiece service_name) override;
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
-      content::FileDescriptorInfo* mappings) override;
+      content::PosixFileDescriptorInfo* mappings) override;
   void GetAdditionalWebUISchemes(
       std::vector<std::string>* additional_schemes) override;
   content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
+  std::unique_ptr<content::NavigationUIData> GetNavigationUIData(
+      content::NavigationHandle* navigation_handle) override;
 
  protected:
   CastContentBrowserClient();
@@ -181,11 +188,16 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   }
 
  private:
+  // Create device cert/key
+  virtual scoped_refptr<net::X509Certificate> DeviceCert();
+  virtual scoped_refptr<net::SSLPrivateKey> DeviceKey();
+
   void AddNetworkHintsMessageFilter(int render_process_id,
                                     net::URLRequestContext* context);
 
   void SelectClientCertificateOnIOThread(
       GURL requesting_url,
+      const std::string& session_id,
       int render_process_id,
       scoped_refptr<base::SequencedTaskRunner> original_runner,
       const base::Callback<void(scoped_refptr<net::X509Certificate>,

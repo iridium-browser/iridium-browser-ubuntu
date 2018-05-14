@@ -33,7 +33,6 @@
 
 #include "core/fileapi/FileError.h"
 #include "modules/filesystem/DirectoryReaderBase.h"
-#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -44,7 +43,7 @@ class ExceptionState;
 
 typedef HeapVector<Member<EntrySync>> EntrySyncHeapVector;
 
-class DirectoryReaderSync : public DirectoryReaderBase, public ScriptWrappable {
+class DirectoryReaderSync : public DirectoryReaderBase {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -53,17 +52,11 @@ class DirectoryReaderSync : public DirectoryReaderBase, public ScriptWrappable {
     return new DirectoryReaderSync(file_system, full_path);
   }
 
-  ~DirectoryReaderSync() override;
+  ~DirectoryReaderSync() override = default;
 
   EntrySyncHeapVector readEntries(ExceptionState&);
 
-  void AddEntries(const EntrySyncHeapVector& entries) {
-    entries_.AppendVector(entries);
-  }
-
-  void SetError(FileError::ErrorCode code) { error_code_ = code; }
-
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   class EntriesCallbackHelper;
@@ -71,9 +64,9 @@ class DirectoryReaderSync : public DirectoryReaderBase, public ScriptWrappable {
 
   DirectoryReaderSync(DOMFileSystemBase*, const String& full_path);
 
-  int callbacks_id_;
+  int callbacks_id_ = 0;
   EntrySyncHeapVector entries_;
-  FileError::ErrorCode error_code_;
+  FileError::ErrorCode error_code_ = FileError::kOK;
 };
 
 }  // namespace blink

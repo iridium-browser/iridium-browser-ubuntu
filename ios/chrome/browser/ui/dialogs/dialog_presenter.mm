@@ -4,21 +4,20 @@
 
 #import "ios/chrome/browser/ui/dialogs/dialog_presenter.h"
 
-#include <deque>
 #include <map>
 
+#include "base/containers/circular_deque.h"
 #import "base/ios/block_types.h"
 #include "base/logging.h"
-#import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/alert_coordinator/action_sheet_coordinator.h"
 #import "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
 #import "ios/chrome/browser/ui/alert_coordinator/input_alert_coordinator.h"
-#import "ios/chrome/browser/ui/dialogs/javascript_dialog_blocking_util.h"
+#import "ios/chrome/browser/ui/dialogs/java_script_dialog_blocking_state.h"
+#import "ios/chrome/browser/ui/dialogs/nsurl_protection_space_util.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/shared/chrome/browser/ui/dialogs/nsurl_protection_space_util.h"
 #include "ios/web/public/web_state/web_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
@@ -34,10 +33,9 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
 @interface DialogPresenter () {
   // Queue of WebStates which correspond to the keys in
   // |_dialogCoordinatorsForWebStates|.
-  std::deque<web::WebState*> _queuedWebStates;
+  base::circular_deque<web::WebState*> _queuedWebStates;
   // A map associating queued webStates with their coordinators.
-  std::map<web::WebState*, base::scoped_nsobject<AlertCoordinator>>
-      _dialogCoordinatorsForWebStates;
+  std::map<web::WebState*, AlertCoordinator*> _dialogCoordinatorsForWebStates;
 }
 
 // The delegate passed on initialization.
@@ -265,8 +263,7 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
                                                   NSString* password))handler {
   NSString* title = l10n_util::GetNSStringWithFixup(IDS_LOGIN_DIALOG_TITLE);
   NSString* message =
-      ios_internal::nsurlprotectionspace_util::MessageForHTTPAuth(
-          protectionSpace);
+      nsurlprotectionspace_util::MessageForHTTPAuth(protectionSpace);
 
   InputAlertCoordinator* alertCoordinator = [[InputAlertCoordinator alloc]
       initWithBaseViewController:self.viewController
@@ -354,7 +351,8 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
     return;
   // The active TabModel can't be changed while a JavaScript dialog is shown.
   DCHECK(!self.showingDialog);
-  if (_active && !_queuedWebStates.empty() && !self.delegate.presenting)
+  if (_active && !_queuedWebStates.empty() &&
+      !self.delegate.dialogPresenterDelegateIsPresenting)
     [self showNextDialog];
 }
 
@@ -385,10 +383,10 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
   DCHECK_NE(webState, self.presentedDialogWebState);
   DCHECK(!_dialogCoordinatorsForWebStates[webState]);
   _queuedWebStates.push_back(webState);
-  _dialogCoordinatorsForWebStates[webState] =
-      base::scoped_nsobject<AlertCoordinator>(coordinator);
+  _dialogCoordinatorsForWebStates[webState] = coordinator;
 
-  if (self.active && !self.showingDialog && !self.delegate.presenting)
+  if (self.active && !self.showingDialog &&
+      !self.delegate.dialogPresenterDelegateIsPresenting)
     [self showNextDialog];
 }
 
@@ -414,7 +412,8 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
   self.presentedDialogWebState = nil;
   self.presentedDialogCoordinator = nil;
   self.blockingConfirmationCoordinator = nil;
-  if (!_queuedWebStates.empty() && !self.delegate.presenting)
+  if (!_queuedWebStates.empty() &&
+      !self.delegate.dialogPresenterDelegateIsPresenting)
     [self showNextDialog];
 }
 
@@ -456,16 +455,20 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
   DCHECK(alertCoordinator);
   DCHECK(webState);
 
+  JavaScriptDialogBlockingState::CreateForWebState(webState);
+  JavaScriptDialogBlockingState* blockingState =
+      JavaScriptDialogBlockingState::FromWebState(webState);
+
   // Set up the start action.
   ProceduralBlock originalStartAction = alertCoordinator.startAction;
   alertCoordinator.startAction = ^{
     if (originalStartAction)
       originalStartAction();
-    JavaScriptDialogWasShown(webState);
+    blockingState->JavaScriptDialogWasShown();
   };
 
   // Early return if a blocking option should not be added.
-  if (!ShouldShowDialogBlockingOption(webState))
+  if (!blockingState->show_blocking_option())
     return;
 
   ProceduralBlock blockingAction =
@@ -506,7 +509,9 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
       DialogPresenter* strongSelf = weakSelf;
       if (!strongSelf)
         return;
-      DialogBlockingOptionSelected([strongSelf presentedDialogWebState]);
+      web::WebState* webState = [strongSelf presentedDialogWebState];
+      JavaScriptDialogBlockingState::FromWebState(webState)
+          ->JavaScriptDialogBlockingOptionSelected();
       [strongSelf dialogCoordinatorWasStopped:weakCoordinator];
     };
     ProceduralBlock cancelHandler = ^{

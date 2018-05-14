@@ -10,12 +10,20 @@
 #include "chrome/test/chromedriver/chrome/devtools_client.h"
 #include "chrome/test/chromedriver/chrome/javascript_dialog_manager.h"
 #include "chrome/test/chromedriver/chrome/status.h"
+#include "chrome/test/chromedriver/net/timeout.h"
 
 namespace {
 
 const char kDummyFrameName[] = "chromedriver dummy frame";
 const char kDummyFrameUrl[] = "about:blank";
-const char kUnreachableWebDataURL[] = "data:text/html,chromewebdata";
+
+// The error page URL was renamed in
+// https://chromium-review.googlesource.com/c/580169, but because ChromeDriver
+// needs to be backward-compatible with older versions of Chrome, it is
+// necessary to compare against both the old and new error URL.
+const char kUnreachableWebDataURL[] = "chrome-error://chromewebdata/";
+const char kDeprecatedUnreachableWebDataURL[] = "data:text/html,chromewebdata";
+
 const char kAutomationExtensionBackgroundPage[] =
     "chrome-extension://aapnijgdinlhnhlmodcfapnahmbfebeb/"
     "_generated_background_page.html";
@@ -156,20 +164,16 @@ Status NavigationTracker::IsPendingNavigation(const std::string& frame_id,
     // force loading to start and set the state to loading. This will cause a
     // frame start event to be received, and the frame stop event will not be
     // received until all frames are loaded.  Loading is forced to start by
-    // attaching a temporary iframe.  Forcing loading to start is not
-    // necessary if the main frame is not yet loaded.
+    // attaching a temporary iframe.
     const std::string kStartLoadingIfMainFrameNotLoading = base::StringPrintf(
-       "var isLoaded = document.readyState == 'complete' ||"
-       "    document.readyState == 'interactive';"
-       "if (isLoaded) {"
-       "  var frame = document.createElement('iframe');"
-       "  frame.name = '%s';"
-       "  frame.src = '%s';"
-       "  document.body.appendChild(frame);"
-       "  window.setTimeout(function() {"
-       "    document.body.removeChild(frame);"
-       "  }, 0);"
-       "}", kDummyFrameName, kDummyFrameUrl);
+        "var frame = document.createElement('iframe');"
+        "frame.name = '%s';"
+        "frame.src = '%s';"
+        "document.body.appendChild(frame);"
+        "window.setTimeout(function() {"
+        "  document.body.removeChild(frame);"
+        "}, 0);",
+        kDummyFrameName, kDummyFrameUrl);
     base::DictionaryValue params;
     params.SetString("expression", kStartLoadingIfMainFrameNotLoading);
     status = client_->SendCommandAndGetResultWithTimeout(
@@ -214,6 +218,10 @@ void NavigationTracker::set_timed_out(bool timed_out) {
   timed_out_ = timed_out;
 }
 
+bool NavigationTracker::IsNonBlocking() const {
+  return false;
+}
+
 Status NavigationTracker::OnConnected(DevToolsClient* client) {
   ResetLoadingState(kUnknown);
 
@@ -231,6 +239,24 @@ Status NavigationTracker::OnEvent(DevToolsClient* client,
       return Status(kUnknownError, "missing or invalid 'frameId'");
     pending_frame_set_.insert(frame_id);
     loading_state_ = kLoading;
+
+    if (browser_info_->major_version >= 63) {
+      // Check if the document is really loading.
+      base::DictionaryValue params;
+      params.SetString("expression", "document.readyState");
+      std::unique_ptr<base::DictionaryValue> result;
+      Status status =
+          client_->SendCommandAndGetResult("Runtime.evaluate", params, &result);
+      std::string value;
+      if (status.IsError() || !result->GetString("result.value", &value)) {
+        LOG(ERROR) << "Unable to retrieve document state " << status.message();
+        return status;
+      }
+      if (value == "complete") {
+        pending_frame_set_.erase(frame_id);
+        loading_state_ = kNotLoading;
+      }
+    }
   } else if (method == "Page.frameStoppedLoading") {
     // Versions of Blink before revision 170248 sent a single
     // Page.frameStoppedLoading event per page, but 170248 and newer revisions
@@ -317,7 +343,8 @@ Status NavigationTracker::OnEvent(DevToolsClient* client,
         std::string frame_url;
         if (!params.GetString("frame.url", &frame_url))
           return Status(kUnknownError, "missing or invalid 'frame.url'");
-        if (frame_url == kUnreachableWebDataURL)
+        if (frame_url == kUnreachableWebDataURL ||
+            frame_url == kDeprecatedUnreachableWebDataURL)
           pending_frame_set_.clear();
       }
     } else {
@@ -397,8 +424,11 @@ Status NavigationTracker::OnCommandSuccess(
     const std::string& method,
     const base::DictionaryValue& result,
     const Timeout& command_timeout) {
+  // Check for start of navigation. In some case response to navigate is delayed
+  // until after the command has already timed out, in which case it has already
+  // been cancelled or will be cancelled soon, and should be ignored.
   if ((method == "Page.navigate" || method == "Page.navigateToHistoryEntry") &&
-      loading_state_ != kLoading) {
+      loading_state_ != kLoading && !command_timeout.IsExpired()) {
     // At this point the browser has initiated the navigation, but besides that,
     // it is unknown what will happen.
     //

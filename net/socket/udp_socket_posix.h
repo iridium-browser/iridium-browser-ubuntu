@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread_checker.h"
+#include "base/timer/timer.h"
 #include "net/base/address_family.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
@@ -24,15 +25,60 @@
 #include "net/socket/datagram_socket.h"
 #include "net/socket/diff_serv_code_point.h"
 #include "net/socket/socket_descriptor.h"
+#include "net/socket/socket_tag.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
 
 class IPAddress;
 class NetLog;
 struct NetLogSource;
+class SocketTag;
 
 class NET_EXPORT UDPSocketPosix {
  public:
+  // Performance helper for NetworkActivityMonitor, it batches
+  // throughput samples, subject to a byte limit threshold (64 KB) or
+  // timer (100 ms), whichever comes first.  The batching is subject
+  // to a minimum number of samples (2) required by NQE to update its
+  // throughput estimate.
+  class ActivityMonitor {
+   public:
+    ActivityMonitor() : bytes_(0), increments_(0) {}
+    virtual ~ActivityMonitor() {}
+    // Provided by sent/received subclass.
+    // Update throughput, but batch to limit overhead of NetworkActivityMonitor.
+    void Increment(uint32_t bytes);
+    // For flushing cached values.
+    void OnClose();
+
+   private:
+    virtual void NetworkActivityMonitorIncrement(uint32_t bytes) = 0;
+    void Update();
+    void OnTimerFired();
+
+    uint32_t bytes_;
+    uint32_t increments_;
+    base::RepeatingTimer timer_;
+    DISALLOW_COPY_AND_ASSIGN(ActivityMonitor);
+  };
+
+  class SentActivityMonitor : public ActivityMonitor {
+   public:
+    ~SentActivityMonitor() override {}
+
+   private:
+    void NetworkActivityMonitorIncrement(uint32_t bytes) override;
+  };
+
+  class ReceivedActivityMonitor : public ActivityMonitor {
+   public:
+    ~ReceivedActivityMonitor() override {}
+
+   private:
+    void NetworkActivityMonitorIncrement(uint32_t bytes) override;
+  };
+
   UDPSocketPosix(DatagramSocket::BindType bind_type,
                  const RandIntCallback& rand_int_cb,
                  net::NetLog* net_log,
@@ -83,7 +129,10 @@ class NET_EXPORT UDPSocketPosix {
   // Writes to the socket.
   // Only usable from the client-side of a UDP socket, after the socket
   // has been connected.
-  int Write(IOBuffer* buf, int buf_len, const CompletionCallback& callback);
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback,
+            const NetworkTrafficAnnotationTag& traffic_annotation);
 
   // Reads from a socket and receive sender address information.
   // |buf| is the buffer to read data into.
@@ -195,6 +244,16 @@ class NET_EXPORT UDPSocketPosix {
   // Resets the thread to be used for thread-safety checks.
   void DetachFromThread();
 
+  // Apply |tag| to this socket.
+  void ApplySocketTag(const SocketTag& tag);
+
+  // Enables experimental optimization. This method should be called
+  // before the socket is used to read data for the first time.
+  void enable_experimental_recv_optimization() {
+    DCHECK_EQ(kInvalidSocket, socket_);
+    experimental_recv_optimization_enabled_ = true;
+  };
+
  private:
   enum SocketOptions {
     SOCKET_OPTION_MULTICAST_LOOP = 1 << 0
@@ -241,9 +300,11 @@ class NET_EXPORT UDPSocketPosix {
   // success, or the net error code on failure. On success, LogRead takes in a
   // sockaddr and its length, which are mandatory, while LogWrite takes in an
   // optional IPEndPoint.
-  void LogRead(int result, const char* bytes, socklen_t addr_len,
-               const sockaddr* addr) const;
-  void LogWrite(int result, const char* bytes, const IPEndPoint* address) const;
+  void LogRead(int result,
+               const char* bytes,
+               socklen_t addr_len,
+               const sockaddr* addr);
+  void LogWrite(int result, const char* bytes, const IPEndPoint* address);
 
   // Same as SendTo(), except that address is passed by pointer
   // instead of by reference. It is called from Write() with |address|
@@ -254,7 +315,27 @@ class NET_EXPORT UDPSocketPosix {
                     const CompletionCallback& callback);
 
   int InternalConnect(const IPEndPoint& address);
+
+  // Reads data from a UDP socket. Depending whether the socket is connected or
+  // not, the method delegates the call to InternalRecvFromConnectedSocket()
+  // or InternalRecvFromNonConnectedSocket() respectively.
+  // For proper detection of truncated reads, the |buf_len| should always be
+  // one byte longer than the expected maximum packet length.
   int InternalRecvFrom(IOBuffer* buf, int buf_len, IPEndPoint* address);
+
+  // A more efficient implementation of the InternalRecvFrom() method for
+  // reading data from connected sockets. Internally the method uses the read()
+  // system call.
+  int InternalRecvFromConnectedSocket(IOBuffer* buf,
+                                      int buf_len,
+                                      IPEndPoint* address);
+
+  // An implementation of the InternalRecvFrom() method for reading data
+  // from non-connected sockets. Internally the method uses the recvmsg()
+  // system call.
+  int InternalRecvFromNonConnectedSocket(IOBuffer* buf,
+                                         int buf_len,
+                                         IPEndPoint* address);
   int InternalSendTo(IOBuffer* buf, int buf_len, const IPEndPoint* address);
 
   // Applies |socket_options_| to |socket_|. Should be called before
@@ -320,6 +401,20 @@ class NET_EXPORT UDPSocketPosix {
 
   // Network that this socket is bound to via BindToNetwork().
   NetworkChangeNotifier::NetworkHandle bound_network_;
+
+  // These are used to lower the overhead updating activity monitor.
+  SentActivityMonitor sent_activity_monitor_;
+  ReceivedActivityMonitor received_activity_monitor_;
+
+  // Current socket tag if |socket_| is valid, otherwise the tag to apply when
+  // |socket_| is opened.
+  SocketTag tag_;
+
+  // If set to true, the socket will use an optimized experimental code path.
+  // By default, the value is set to false. To use the optimization, the
+  // client of the socket has to opt-in by calling the
+  // enable_experimental_recv_optimization() method.
+  bool experimental_recv_optimization_enabled_;
 
   THREAD_CHECKER(thread_checker_);
 

@@ -7,41 +7,32 @@
 
 #include "modules/ModulesExport.h"
 #include "platform/heap/Handle.h"
-#include "platform/weborigin/KURL.h"
-#include "platform/wtf/Allocator.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
-class WebLocalFrameBase;
+class KURL;
+class WebLocalFrameImpl;
 
 class MODULES_EXPORT NavigatorContentUtilsClient
     : public GarbageCollectedFinalized<NavigatorContentUtilsClient> {
  public:
-  static NavigatorContentUtilsClient* Create(WebLocalFrameBase*);
-  virtual ~NavigatorContentUtilsClient() {}
+  static NavigatorContentUtilsClient* Create(WebLocalFrameImpl*);
+  virtual ~NavigatorContentUtilsClient() = default;
 
   virtual void RegisterProtocolHandler(const String& scheme,
                                        const KURL&,
                                        const String& title);
 
-  enum CustomHandlersState {
-    kCustomHandlersNew,
-    kCustomHandlersRegistered,
-    kCustomHandlersDeclined
-  };
-
-  virtual CustomHandlersState IsProtocolHandlerRegistered(const String& scheme,
-                                                          const KURL&);
   virtual void UnregisterProtocolHandler(const String& scheme, const KURL&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
-  explicit NavigatorContentUtilsClient(WebLocalFrameBase*);
+  explicit NavigatorContentUtilsClient(WebLocalFrameImpl*);
 
  private:
-  Member<WebLocalFrameBase> web_frame_;
+  Member<WebLocalFrameImpl> web_frame_;
 };
 
 }  // namespace blink

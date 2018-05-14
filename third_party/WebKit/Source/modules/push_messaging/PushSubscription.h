@@ -6,15 +6,16 @@
 #define PushSubscription_h
 
 #include <memory>
+#include "base/gtest_prod_util.h"
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "core/dom/DOMTimeStamp.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
+#include "modules/ModulesExport.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -24,9 +25,7 @@ class ScriptPromiseResolver;
 class ScriptState;
 struct WebPushSubscription;
 
-class PushSubscription final
-    : public GarbageCollectedFinalized<PushSubscription>,
-      public ScriptWrappable {
+class MODULES_EXPORT PushSubscription final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -47,9 +46,12 @@ class PushSubscription final
 
   ScriptValue toJSONForBinding(ScriptState*);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(PushSubscriptionTest,
+                           SerializesToBase64URLWithoutPadding);
+
   PushSubscription(const WebPushSubscription&, ServiceWorkerRegistration*);
 
   KURL endpoint_;

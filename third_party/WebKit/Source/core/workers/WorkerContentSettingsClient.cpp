@@ -32,6 +32,8 @@
 
 #include <memory>
 #include "core/workers/WorkerGlobalScope.h"
+#include "platform/weborigin/SecurityOrigin.h"
+#include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/WebString.h"
 
 namespace blink {
@@ -41,7 +43,7 @@ WorkerContentSettingsClient* WorkerContentSettingsClient::Create(
   return new WorkerContentSettingsClient(std::move(client));
 }
 
-WorkerContentSettingsClient::~WorkerContentSettingsClient() {}
+WorkerContentSettingsClient::~WorkerContentSettingsClient() = default;
 
 bool WorkerContentSettingsClient::RequestFileSystemAccessSync() {
   if (!client_)
@@ -55,16 +57,25 @@ bool WorkerContentSettingsClient::AllowIndexedDB(const WebString& name) {
   return client_->AllowIndexedDB(name, WebSecurityOrigin());
 }
 
-const char* WorkerContentSettingsClient::SupplementName() {
-  return "WorkerContentSettingsClient";
+bool WorkerContentSettingsClient::AllowRunningInsecureContent(
+    bool enabled_per_settings,
+    const SecurityOrigin* origin,
+    const KURL& url) {
+  if (client_) {
+    return client_->AllowRunningInsecureContent(enabled_per_settings,
+                                                WebSecurityOrigin(origin), url);
+  }
+  return enabled_per_settings;
 }
+
+const char WorkerContentSettingsClient::kSupplementName[] =
+    "WorkerContentSettingsClient";
 
 WorkerContentSettingsClient* WorkerContentSettingsClient::From(
     ExecutionContext& context) {
   WorkerClients* clients = ToWorkerGlobalScope(context).Clients();
   DCHECK(clients);
-  return static_cast<WorkerContentSettingsClient*>(
-      Supplement<WorkerClients>::From(*clients, SupplementName()));
+  return Supplement<WorkerClients>::From<WorkerContentSettingsClient>(*clients);
 }
 
 WorkerContentSettingsClient::WorkerContentSettingsClient(
@@ -76,8 +87,7 @@ void ProvideContentSettingsClientToWorker(
     std::unique_ptr<WebContentSettingsClient> client) {
   DCHECK(clients);
   WorkerContentSettingsClient::ProvideTo(
-      *clients, WorkerContentSettingsClient::SupplementName(),
-      WorkerContentSettingsClient::Create(std::move(client)));
+      *clients, WorkerContentSettingsClient::Create(std::move(client)));
 }
 
 }  // namespace blink

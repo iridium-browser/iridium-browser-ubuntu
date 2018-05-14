@@ -8,7 +8,9 @@
 
 #include "compiler/translator/FindSymbolNode.h"
 
+#include "compiler/translator/ImmutableString.h"
 #include "compiler/translator/IntermTraverse.h"
+#include "compiler/translator/Symbol.h"
 
 namespace sh
 {
@@ -19,17 +21,14 @@ namespace
 class SymbolFinder : public TIntermTraverser
 {
   public:
-    SymbolFinder(const TString &symbolName, TBasicType basicType)
-        : TIntermTraverser(true, false, false),
-          mSymbolName(symbolName),
-          mNodeFound(nullptr),
-          mBasicType(basicType)
+    SymbolFinder(const ImmutableString &symbolName)
+        : TIntermTraverser(true, false, false), mSymbolName(symbolName), mNodeFound(nullptr)
     {
     }
 
     void visitSymbol(TIntermSymbol *node)
     {
-        if (node->getBasicType() == mBasicType && node->getSymbol() == mSymbolName)
+        if (node->variable().symbolType() != SymbolType::Empty && node->getName() == mSymbolName)
         {
             mNodeFound = node;
         }
@@ -39,18 +38,15 @@ class SymbolFinder : public TIntermTraverser
     const TIntermSymbol *getNode() const { return mNodeFound; }
 
   private:
-    TString mSymbolName;
+    ImmutableString mSymbolName;
     TIntermSymbol *mNodeFound;
-    TBasicType mBasicType;
 };
 
 }  // anonymous namespace
 
-const TIntermSymbol *FindSymbolNode(TIntermNode *root,
-                                    const TString &symbolName,
-                                    TBasicType basicType)
+const TIntermSymbol *FindSymbolNode(TIntermNode *root, const ImmutableString &symbolName)
 {
-    SymbolFinder finder(symbolName, basicType);
+    SymbolFinder finder(symbolName);
     root->traverse(&finder);
     return finder.getNode();
 }

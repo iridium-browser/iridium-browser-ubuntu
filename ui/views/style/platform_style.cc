@@ -25,7 +25,7 @@
 namespace views {
 namespace {
 
-#if !defined(DESKTOP_LINUX) && !defined(OS_MACOSX)
+#if !defined(DESKTOP_LINUX)
 // Default text and shadow colors for STYLE_BUTTON.
 const SkColor kStyleButtonTextColor = SK_ColorBLACK;
 const SkColor kStyleButtonShadowColor = SK_ColorWHITE;
@@ -33,38 +33,36 @@ const SkColor kStyleButtonShadowColor = SK_ColorWHITE;
 
 }  // namespace
 
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
+const bool PlatformStyle::kIsOkButtonLeading = true;
+#else
+const bool PlatformStyle::kIsOkButtonLeading = false;
+#endif
+
 #if !defined(OS_MACOSX)
 
 const int PlatformStyle::kMinLabelButtonWidth = 70;
 const int PlatformStyle::kMinLabelButtonHeight = 33;
-const bool PlatformStyle::kDefaultLabelButtonHasBoldFont = true;
 const bool PlatformStyle::kDialogDefaultButtonCanBeCancel = true;
 const bool PlatformStyle::kSelectWordOnRightClick = false;
 const bool PlatformStyle::kSelectAllOnRightClickWhenUnfocused = false;
-const CustomButton::NotifyAction PlatformStyle::kMenuNotifyActivationAction =
-    CustomButton::NOTIFY_ON_RELEASE;
-const CustomButton::KeyClickAction PlatformStyle::kKeyClickActionOnSpace =
-    CustomButton::CLICK_ON_KEY_RELEASE;
+const Button::NotifyAction PlatformStyle::kMenuNotifyActivationAction =
+    Button::NOTIFY_ON_RELEASE;
+const Button::KeyClickAction PlatformStyle::kKeyClickActionOnSpace =
+    Button::CLICK_ON_KEY_RELEASE;
 const bool PlatformStyle::kReturnClicksFocusedControl = true;
 const bool PlatformStyle::kTreeViewSelectionPaintsEntireRow = false;
-const bool PlatformStyle::kTreeViewUsesOpenIcon = true;
 const bool PlatformStyle::kUseRipples = true;
-const bool PlatformStyle::kMirrorBubbleArrowInRTLByDefault = true;
+const bool PlatformStyle::kTextfieldScrollsToStartOnFocusChange = false;
+const bool PlatformStyle::kTextfieldUsesDragCursorWhenDraggable = true;
 
 // static
 std::unique_ptr<ScrollBar> PlatformStyle::CreateScrollBar(bool is_horizontal) {
 #if defined(OS_CHROMEOS)
-  return base::MakeUnique<OverlayScrollBar>(is_horizontal);
+  return std::make_unique<OverlayScrollBar>(is_horizontal);
 #else
-  return base::MakeUnique<ScrollBarViews>(is_horizontal);
+  return std::make_unique<ScrollBarViews>(is_horizontal);
 #endif
-}
-
-// static
-SkColor PlatformStyle::TextColorForButton(
-    const ButtonColorByState& color_by_state,
-    const LabelButton& button) {
-  return color_by_state[button.state()];
 }
 
 // static
@@ -72,7 +70,7 @@ void PlatformStyle::OnTextfieldEditFailed() {}
 
 #endif  // OS_MACOSX
 
-#if !defined(DESKTOP_LINUX) && !defined(OS_MACOSX)
+#if !defined(DESKTOP_LINUX)
 // static
 void PlatformStyle::ApplyLabelButtonTextStyle(
     Label* label,

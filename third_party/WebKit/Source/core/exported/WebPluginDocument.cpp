@@ -30,19 +30,18 @@
 
 #include "public/web/WebPluginDocument.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "core/dom/Document.h"
 #include "core/exported/WebPluginContainerImpl.h"
 #include "core/html/PluginDocument.h"
-#include "platform/wtf/PassRefPtr.h"
 
 namespace blink {
 
 WebPlugin* WebPluginDocument::Plugin() {
   if (!IsPluginDocument())
-    return 0;
+    return nullptr;
   PluginDocument* doc = Unwrap<PluginDocument>();
-  WebPluginContainerImpl* container =
-      ToWebPluginContainerImpl(doc->GetPluginView());
+  WebPluginContainerImpl* container = doc->GetPluginView();
   return container ? container->Plugin() : nullptr;
 }
 

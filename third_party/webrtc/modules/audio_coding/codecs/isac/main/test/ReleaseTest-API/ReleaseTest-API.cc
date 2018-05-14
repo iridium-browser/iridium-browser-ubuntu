@@ -19,9 +19,9 @@
 #include <iostream>
 
 /* include API */
-#include "isac.h"
-#include "utility.h"
-#include "webrtc/rtc_base/format_macros.h"
+#include "modules/audio_coding/codecs/isac/main/include/isac.h"
+#include "modules/audio_coding/codecs/isac/main/util/utility.h"
+#include "rtc_base/format_macros.h"
 
 /* Defines */
 #define SEED_FILE "randseed.txt" /* Used when running decoder on garbage data */

@@ -17,7 +17,7 @@
  * @param {boolean} writableOnly If true, only writable volumes are returned.
  * @param {Window=} opt_backgroundPage Window object of the background
  *     page. If this is specified, the class skips to get background page.
- *     TOOD(hirono): Let all clients of the class pass the background page and
+ *     TODO(hirono): Let all clients of the class pass the background page and
  *     make the argument not optional.
  */
 function VolumeManagerWrapper(allowedPaths, writableOnly, opt_backgroundPage) {
@@ -117,6 +117,8 @@ VolumeManagerWrapper.prototype.onReady_ = function(volumeManager) {
       'drive-connection-changed', this.onEventBound_);
   this.volumeManager_.addEventListener(
       'externally-unmounted', this.onEventBound_);
+  this.volumeManager_.addEventListener(
+      VolumeManagerCommon.ARCHIVE_OPENED_EVENT_TYPE, this.onEventBound_);
 
   // Dispatch 'drive-connection-changed' to listeners, since the return value of
   // VolumeManagerWrapper.getDriveConnectionState() can be changed by setting
@@ -181,6 +183,9 @@ VolumeManagerWrapper.prototype.onEvent_ = function(event) {
       event = /** @type {!ExternallyUnmountedEvent} */ (event);
       if (this.isAllowedVolume_(event.volumeInfo))
         this.dispatchEvent(event);
+      break;
+    case VolumeManagerCommon.ARCHIVE_OPENED_EVENT_TYPE:
+      this.dispatchEvent(event);
       break;
   }
 };

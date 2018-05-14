@@ -18,35 +18,17 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/view_type.h"
-#include "ui/base/resource/resource_bundle.h"
 
 namespace task_manager {
 
-namespace {
-
-gfx::ImageSkia* g_default_icon = nullptr;
-
-gfx::ImageSkia* GetDefaultIcon() {
-  if (!ResourceBundle::HasSharedInstance())
-    return nullptr;
-
-  if (!g_default_icon) {
-    g_default_icon = ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-        IDR_EXTENSIONS_FAVICON);
-  }
-
-  return g_default_icon;
-}
-
-}  // namespace
+gfx::ImageSkia* ExtensionTask::s_icon_ = nullptr;
 
 ExtensionTask::ExtensionTask(content::WebContents* web_contents,
                              const extensions::Extension* extension,
                              extensions::ViewType view_type)
     : RendererTask(GetExtensionTitle(web_contents, extension, view_type),
-                   GetDefaultIcon(),
-                   web_contents,
-                   web_contents->GetRenderProcessHost()),
+                   FetchIcon(IDR_EXTENSIONS_FAVICON, &s_icon_),
+                   web_contents),
       view_type_(view_type) {
   LoadExtensionIcon(extension);
 }

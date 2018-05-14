@@ -12,7 +12,6 @@
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/optional.h"
 #include "base/strings/string_util.h"
@@ -37,7 +36,7 @@ const char kAndroidDownloadDirPrefix[] = "/storage/emulated/0/Download/";
 const char kMediaDocumentsProviderAuthority[] =
     "com.android.providers.media.documents";
 const char* kMediaDocumentsProviderRootIds[] = {
-    "images_root", "videos_root", "audio_root",
+    "images_root", "videos_root",
 };
 
 base::FilePath GetRelativeMountPath(const std::string& root_id) {
@@ -193,8 +192,7 @@ void RecentArcMediaSource::MediaRoot::ScanDirectory(
     // We already checked ARC is allowed for this profile (indirectly), so
     // this should never happen.
     LOG(ERROR) << "ArcDocumentsProviderRootMap is not available";
-    OnReadDirectory(path, base::File::FILE_ERROR_FAILED,
-                    std::vector<arc::ArcDocumentsProviderRoot::ThinFileInfo>());
+    OnReadDirectory(path, base::File::FILE_ERROR_FAILED, {});
     return;
   }
 
@@ -203,8 +201,7 @@ void RecentArcMediaSource::MediaRoot::ScanDirectory(
   if (!root) {
     // Media roots should always exist.
     LOG(ERROR) << "ArcDocumentsProviderRoot is missing";
-    OnReadDirectory(path, base::File::FILE_ERROR_NOT_FOUND,
-                    std::vector<arc::ArcDocumentsProviderRoot::ThinFileInfo>());
+    OnReadDirectory(path, base::File::FILE_ERROR_NOT_FOUND, {});
     return;
   }
 
@@ -284,7 +281,7 @@ RecentArcMediaSource::RecentArcMediaSource(Profile* profile)
     : profile_(profile), weak_ptr_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   for (const char* root_id : kMediaDocumentsProviderRootIds)
-    roots_.emplace_back(base::MakeUnique<MediaRoot>(root_id, profile_));
+    roots_.emplace_back(std::make_unique<MediaRoot>(root_id, profile_));
 }
 
 RecentArcMediaSource::~RecentArcMediaSource() {
@@ -307,7 +304,7 @@ void RecentArcMediaSource::GetRecentFiles(Params params) {
   // ArcFileSystemOperationRunner's deferring state switches from disabled to
   // enabled (one such case is when ARC container crashes).
   if (!WillArcFileSystemOperationsRunImmediately()) {
-    std::move(params.callback()).Run(std::vector<RecentFile>());
+    std::move(params.callback()).Run({});
     return;
   }
 

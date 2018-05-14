@@ -14,32 +14,14 @@
 #import "ios/public/provider/chrome/browser/signin/fake_chrome_identity_interaction_manager.h"
 #include "ios/public/provider/chrome/browser/signin/signin_resources_provider.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 using ::testing::_;
 using ::testing::Invoke;
 
 namespace {
-
-void FakeGetAccessToken(ChromeIdentity*,
-                        const std::string&,
-                        const std::string&,
-                        const std::set<std::string>&,
-                        ios::AccessTokenCallback callback) {
-  base::mac::ScopedBlock<ios::AccessTokenCallback> safe_callback(
-      [callback copy]);
-
-  // |GetAccessToken| is normally an asynchronous operation (that requires some
-  // network calls), this is replicated here by dispatching it.
-  dispatch_async(dispatch_get_main_queue(), ^{
-    // Token and expiration date. It should be larger than typical test
-    // execution because tests usually setup mock to expect one token request
-    // and then rely on access token being served from cache.
-    NSTimeInterval expiration = 60.0;
-    NSDate* expiresDate = [NSDate dateWithTimeIntervalSinceNow:expiration];
-    NSString* token = [expiresDate description];
-
-    safe_callback.get()(token, expiresDate, nil);
-  });
-}
 
 UIImage* FakeGetCachedAvatarForIdentity(ChromeIdentity*) {
   ios::SigninResourcesProvider* provider =
@@ -70,8 +52,8 @@ void FakeGetHostedDomainForIdentity(ChromeIdentity* identity,
 }
 
 @interface FakeAccountDetailsViewController : UIViewController {
-  ChromeIdentity* _identity;  // Weak.
-  base::scoped_nsobject<UIButton> _removeAccountButton;
+  __weak ChromeIdentity* _identity;
+  UIButton* _removeAccountButton;
 }
 @end
 
@@ -89,7 +71,6 @@ void FakeGetHostedDomainForIdentity(ChromeIdentity* identity,
   [_removeAccountButton removeTarget:self
                               action:@selector(didTapRemoveAccount:)
                     forControlEvents:UIControlEventTouchUpInside];
-  [super dealloc];
 }
 
 - (void)viewDidLoad {
@@ -98,8 +79,7 @@ void FakeGetHostedDomainForIdentity(ChromeIdentity* identity,
   // Obnoxious color, this is a test screen.
   self.view.backgroundColor = [UIColor orangeColor];
 
-  _removeAccountButton.reset(
-      [[UIButton buttonWithType:UIButtonTypeCustom] retain]);
+  _removeAccountButton = [UIButton buttonWithType:UIButtonTypeCustom];
   [_removeAccountButton setTitle:@"Remove account"
                         forState:UIControlStateNormal];
   [_removeAccountButton addTarget:self
@@ -131,7 +111,7 @@ NSString* const kIdentityEmailFormat = @"%@@foo.com";
 NSString* const kIdentityGaiaIDFormat = @"%@ID";
 
 FakeChromeIdentityService::FakeChromeIdentityService()
-    : identities_([[NSMutableArray alloc] init]) {}
+    : identities_([[NSMutableArray alloc] init]), _fakeMDMError(false) {}
 
 FakeChromeIdentityService::~FakeChromeIdentityService() {}
 
@@ -146,11 +126,10 @@ UINavigationController*
 FakeChromeIdentityService::CreateAccountDetailsController(
     ChromeIdentity* identity,
     id<ChromeIdentityBrowserOpener> browser_opener) {
-  base::scoped_nsobject<UIViewController> accountDetailsViewController(
-      [[FakeAccountDetailsViewController alloc] initWithIdentity:identity]);
-  UINavigationController* navigationController =
-      [[[UINavigationController alloc]
-          initWithRootViewController:accountDetailsViewController] autorelease];
+  UIViewController* accountDetailsViewController =
+      [[FakeAccountDetailsViewController alloc] initWithIdentity:identity];
+  UINavigationController* navigationController = [[UINavigationController alloc]
+      initWithRootViewController:accountDetailsViewController];
   return navigationController;
 }
 
@@ -159,7 +138,7 @@ FakeChromeIdentityService::CreateChromeIdentityInteractionManager(
     ios::ChromeBrowserState* browser_state,
     id<ChromeIdentityInteractionManagerDelegate> delegate) const {
   ChromeIdentityInteractionManager* manager =
-      [[[FakeChromeIdentityInteractionManager alloc] init] autorelease];
+      [[FakeChromeIdentityInteractionManager alloc] init];
   manager.delegate = delegate;
   return manager;
 }
@@ -216,7 +195,32 @@ void FakeChromeIdentityService::GetAccessToken(
     const std::string& client_secret,
     const std::set<std::string>& scopes,
     ios::AccessTokenCallback callback) {
-  FakeGetAccessToken(identity, client_id, client_secret, scopes, callback);
+  ios::AccessTokenCallback safe_callback = [callback copy];
+  NSError* error = nil;
+  NSDictionary* user_info = nil;
+  if (_fakeMDMError) {
+    // |GetAccessToken| is normally an asynchronous operation (that requires
+    // some network calls), this is replicated here by dispatching it.
+    error =
+        [NSError errorWithDomain:@"com.google.HTTPStatus" code:-1 userInfo:nil];
+    user_info = @{};
+    EXPECT_CALL(*this, HandleMDMNotification(identity, user_info, _))
+        .WillRepeatedly(testing::Return(true));
+  }
+  // |GetAccessToken| is normally an asynchronous operation (that requires some
+  // network calls), this is replicated here by dispatching it.
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (user_info)
+      FireAccessTokenRefreshFailed(identity, user_info);
+    // Token and expiration date. It should be larger than typical test
+    // execution because tests usually setup mock to expect one token request
+    // and then rely on access token being served from cache.
+    NSTimeInterval expiration = 60.0;
+    NSDate* expiresDate = [NSDate dateWithTimeIntervalSinceNow:expiration];
+    NSString* token = [expiresDate description];
+
+    safe_callback(token, expiresDate, error);
+  });
 }
 
 UIImage* FakeChromeIdentityService::GetCachedAvatarForIdentity(
@@ -258,6 +262,10 @@ void FakeChromeIdentityService::RemoveIdentity(ChromeIdentity* identity) {
     [identities_ removeObject:identity];
     FireIdentityListChanged();
   }
+}
+
+void FakeChromeIdentityService::SetFakeMDMError(bool fakeMDMError) {
+  _fakeMDMError = fakeMDMError;
 }
 
 }  // namespace ios

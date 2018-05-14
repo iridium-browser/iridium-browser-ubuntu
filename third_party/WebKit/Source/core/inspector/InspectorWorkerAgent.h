@@ -31,6 +31,7 @@
 #ifndef InspectorWorkerAgent_h
 #define InspectorWorkerAgent_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/protocol/Target.h"
@@ -45,12 +46,10 @@ class WorkerInspectorProxy;
 class CORE_EXPORT InspectorWorkerAgent final
     : public InspectorBaseAgent<protocol::Target::Metainfo>,
       public WorkerInspectorProxy::PageInspector {
-  WTF_MAKE_NONCOPYABLE(InspectorWorkerAgent);
-
  public:
   explicit InspectorWorkerAgent(InspectedFrames*);
   ~InspectorWorkerAgent() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   protocol::Response disable() override;
   void Restore() override;
@@ -64,13 +63,10 @@ class CORE_EXPORT InspectorWorkerAgent final
   // Called from Dispatcher
   protocol::Response setAutoAttach(bool auto_attach,
                                    bool wait_for_debugger_on_start) override;
-  protocol::Response setAttachToFrames(bool attach) override;
   protocol::Response sendMessageToTarget(
       const String& message,
       protocol::Maybe<String> session_id,
       protocol::Maybe<String> target_id) override;
-
-  void SetTracingSessionId(const String&);
 
  private:
   bool AutoAttachEnabled();
@@ -88,8 +84,8 @@ class CORE_EXPORT InspectorWorkerAgent final
   HeapHashMap<int, Member<WorkerInspectorProxy>> connected_proxies_;
   HashMap<int, String> connection_to_session_id_;
   HashMap<String, int> session_id_to_connection_;
-  String tracing_session_id_;
   static int s_last_connection_;
+  DISALLOW_COPY_AND_ASSIGN(InspectorWorkerAgent);
 };
 
 }  // namespace blink

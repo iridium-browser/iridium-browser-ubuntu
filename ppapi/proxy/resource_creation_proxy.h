@@ -24,7 +24,7 @@ namespace ppapi {
 
 namespace proxy {
 
-struct Connection;
+class Connection;
 class Dispatcher;
 
 class ResourceCreationProxy : public InterfaceProxy,
@@ -121,7 +121,7 @@ class ResourceCreationProxy : public InterfaceProxy,
   PP_Resource CreateGraphics3DRaw(
       PP_Instance instance,
       PP_Resource share_context,
-      const gpu::gles2::ContextCreationAttribHelper& attrib_helper,
+      const gpu::ContextCreationAttribs& attrib_helper,
       gpu::Capabilities* capabilities,
       base::SharedMemoryHandle* shared_state,
       gpu::CommandBufferId* command_buffer_id) override;

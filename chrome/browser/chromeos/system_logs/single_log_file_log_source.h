@@ -11,7 +11,6 @@
 #include "base/files/file.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "components/feedback/anonymizer_tool.h"
 #include "components/feedback/system_logs/system_logs_source.h"
 
 namespace base {
@@ -32,6 +31,21 @@ class SingleLogFileLogSource : public SystemLogsSource {
 
     // For /var/log/atrus.log.
     kAtrusLog,
+
+    // For /var/log/net.log.
+    kNetLog,
+
+    // For /var/log/eventlog.txt.
+    kEventLog,
+
+    // For /var/log/update_engine.log.
+    kUpdateEngineLog,
+
+    // For /var/log/power_manager/powerd.LATEST.
+    kPowerdLatest,
+
+    // For /var/log/power_manager/powerd.PREVIOUS.
+    kPowerdPrevious,
   };
 
   explicit SingleLogFileLogSource(SupportedSource source);
@@ -43,7 +57,7 @@ class SingleLogFileLogSource : public SystemLogsSource {
   static void SetChromeStartTimeForTesting(const base::Time* start_time);
 
   // system_logs::SystemLogsSource:
-  void Fetch(const SysLogsSourceCallback& callback) override;
+  void Fetch(SysLogsSourceCallback callback) override;
 
  private:
   friend class SingleLogFileLogSourceTest;
@@ -81,9 +95,6 @@ class SingleLogFileLogSource : public SystemLogsSource {
   // File system inode value that was associated with |log_file_path_| when it
   // was originally opened for reading.
   ino_t file_inode_;
-
-  // For removing PII from log results.
-  feedback::AnonymizerTool anonymizer_;
 
   base::WeakPtrFactory<SingleLogFileLogSource> weak_ptr_factory_;
 

@@ -11,6 +11,7 @@
 
 #include "ash/public/cpp/shelf_item_delegate.h"
 #include "base/metrics/histogram_macros.h"
+#include "ui/display/types/display_constants.h"
 #include "ui/gfx/image/image.h"
 
 namespace {
@@ -33,10 +34,8 @@ ShelfApplicationMenuModel::ShelfApplicationMenuModel(
   for (size_t i = 0; i < items_.size(); i++) {
     mojom::MenuItem* item = items_[i].get();
     AddItem(i, item->label);
-    if (!item->image.isNull()) {
-      SetIcon(GetIndexOfCommandId(i),
-              gfx::Image::CreateFrom1xBitmap(item->image));
-    }
+    if (!item->image.isNull())
+      SetIcon(GetIndexOfCommandId(i), gfx::Image(item->image));
   }
 
   // SimpleMenuModel does not allow two consecutive spacing separator items.
@@ -45,7 +44,7 @@ ShelfApplicationMenuModel::ShelfApplicationMenuModel(
     AddSeparator(ui::SPACING_SEPARATOR);
 }
 
-ShelfApplicationMenuModel::~ShelfApplicationMenuModel() {}
+ShelfApplicationMenuModel::~ShelfApplicationMenuModel() = default;
 
 bool ShelfApplicationMenuModel::IsCommandIdChecked(int command_id) const {
   return false;
@@ -59,8 +58,11 @@ void ShelfApplicationMenuModel::ExecuteCommand(int command_id,
                                                int event_flags) {
   DCHECK(IsCommandIdEnabled(command_id));
   // Have the delegate execute its own custom command id for the given item.
-  if (delegate_)
-    delegate_->ExecuteCommand(items_[command_id]->command_id, event_flags);
+  if (delegate_) {
+    // The display hosting the menu is irrelevant, windows activate in-place.
+    delegate_->ExecuteCommand(false, items_[command_id]->command_id,
+                              event_flags, display::kInvalidDisplayId);
+  }
   RecordMenuItemSelectedMetrics(command_id, items_.size());
 }
 

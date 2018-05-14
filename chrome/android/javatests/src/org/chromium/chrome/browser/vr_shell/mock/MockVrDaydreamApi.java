@@ -8,6 +8,8 @@ import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.Intent;
 
+import com.google.vr.ndk.base.DaydreamApi;
+
 import org.chromium.chrome.browser.vr_shell.VrDaydreamApi;
 
 /**
@@ -15,6 +17,9 @@ import org.chromium.chrome.browser.vr_shell.VrDaydreamApi;
  */
 public class MockVrDaydreamApi implements VrDaydreamApi {
     private boolean mLaunchInVrCalled;
+    private boolean mExitFromVrCalled;
+    private boolean mLaunchVrHomescreenCalled;
+    private boolean mForwardSetupIntent;
 
     @Override
     public boolean isDaydreamReadyDevice() {
@@ -43,8 +48,14 @@ public class MockVrDaydreamApi implements VrDaydreamApi {
     }
 
     @Override
-    public boolean exitFromVr(int requestCode, final Intent intent) {
+    public boolean launchInVr(final Intent intent) {
         return true;
+    }
+
+    @Override
+    public boolean exitFromVr(int requestCode, final Intent intent) {
+        mExitFromVrCalled = true;
+        return false;
     }
 
     @Override
@@ -53,9 +64,43 @@ public class MockVrDaydreamApi implements VrDaydreamApi {
     }
 
     @Override
-    public void launchVrHomescreen() {}
+    public boolean launchVrHomescreen() {
+        mLaunchVrHomescreenCalled = true;
+        return true;
+    }
 
     public boolean getLaunchInVrCalled() {
         return mLaunchInVrCalled;
     }
+
+    public boolean getExitFromVrCalled() {
+        return mExitFromVrCalled;
+    }
+
+    public boolean getLaunchVrHomescreenCalled() {
+        return mLaunchVrHomescreenCalled;
+    }
+
+    @Override
+    public boolean bootsToVr() {
+        return false;
+    }
+
+    @Override
+    public void close() {}
+
+    @Override
+    public Intent setupVrIntent(Intent intent) {
+        if (mForwardSetupIntent) {
+            return DaydreamApi.setupVrIntent(intent);
+        }
+        return null;
+    }
+
+    public void setForwardSetupIntent(boolean forward) {
+        mForwardSetupIntent = forward;
+    }
+
+    @Override
+    public void launchGvrSettings() {}
 }

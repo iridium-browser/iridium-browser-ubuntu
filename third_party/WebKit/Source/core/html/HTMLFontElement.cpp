@@ -24,13 +24,14 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
-#include "core/HTMLNames.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/CSSValueList.h"
 #include "core/css/CSSValuePool.h"
-#include "core/css/StylePropertySet.h"
 #include "core/css/parser/CSSParser.h"
+#include "core/dom/Document.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "platform/wtf/text/StringBuilder.h"
+#include "core/html_names.h"
+#include "platform/wtf/text/ParsingUtilities.h"
 #include "platform/wtf/text/StringToNumber.h"
 
 namespace blink {
@@ -54,11 +55,7 @@ static bool ParseFontSize(const CharacterType* characters,
   const CharacterType* end = characters + length;
 
   // Step 3
-  while (position < end) {
-    if (!IsHTMLSpace<CharacterType>(*position))
-      break;
-    ++position;
-  }
+  SkipWhile<CharacterType, IsHTMLSpace<CharacterType>>(position, end);
 
   // Step 4
   if (position == end)
@@ -83,28 +80,16 @@ static bool ParseFontSize(const CharacterType* characters,
   }
 
   // Step 6
-  StringBuilder digits;
-  digits.ReserveCapacity(16);
-  while (position < end) {
-    if (!IsASCIIDigit(*position))
-      break;
-    digits.Append(*position++);
-  }
+  const CharacterType* digits_start = position;
+  SkipWhile<CharacterType, IsASCIIDigit>(position, end);
 
   // Step 7
-  if (digits.IsEmpty())
+  if (digits_start == position)
     return false;
 
   // Step 8
-  int value;
-
-  if (digits.Is8Bit()) {
-    value =
-        CharactersToIntStrict(digits.Characters8(), digits.length(), nullptr);
-  } else {
-    value =
-        CharactersToIntStrict(digits.Characters16(), digits.length(), nullptr);
-  }
+  int value = CharactersToInt(digits_start, position - digits_start,
+                              WTF::NumberParsingOptions::kNone, nullptr);
 
   // Step 9
   if (mode == kRelativePlus)
@@ -135,12 +120,14 @@ static bool ParseFontSize(const String& input, int& size) {
 }
 
 static const CSSValueList* CreateFontFaceValueWithPool(
-    const AtomicString& string) {
+    const AtomicString& string,
+    SecureContextMode secure_context_mode) {
   CSSValuePool::FontFaceValueCache::AddResult entry =
       CssValuePool().GetFontFaceCacheEntry(string);
   if (!entry.stored_value->value) {
-    const CSSValue* parsed_value =
-        CSSParser::ParseSingleValue(CSSPropertyFontFamily, string);
+    const CSSValue* parsed_value = CSSParser::ParseSingleValue(
+        CSSPropertyFontFamily, string,
+        StrictCSSParserContext(secure_context_mode));
     if (parsed_value && parsed_value->IsValueList())
       entry.stored_value->value = ToCSSValueList(parsed_value);
   }
@@ -191,7 +178,7 @@ bool HTMLFontElement::IsPresentationAttribute(const QualifiedName& name) const {
 void HTMLFontElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == sizeAttr) {
     CSSValueID size = CSSValueInvalid;
     if (CssValueFromFontSizeNumber(value, size))
@@ -199,9 +186,11 @@ void HTMLFontElement::CollectStyleForPresentationAttribute(
   } else if (name == colorAttr) {
     AddHTMLColorToStyle(style, CSSPropertyColor, value);
   } else if (name == faceAttr && !value.IsEmpty()) {
-    if (const CSSValueList* font_face_value =
-            CreateFontFaceValueWithPool(value))
-      style->SetProperty(CSSProperty(CSSPropertyFontFamily, *font_face_value));
+    if (const CSSValueList* font_face_value = CreateFontFaceValueWithPool(
+            value, GetDocument().GetSecureContextMode())) {
+      style->SetProperty(
+          CSSPropertyValue(GetCSSPropertyFontFamily(), *font_face_value));
+    }
   } else {
     HTMLElement::CollectStyleForPresentationAttribute(name, value, style);
   }

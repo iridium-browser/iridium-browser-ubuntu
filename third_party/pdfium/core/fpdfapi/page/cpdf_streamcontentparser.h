@@ -9,6 +9,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include "core/fpdfapi/page/cpdf_contentmark.h"
@@ -37,9 +38,9 @@ class CPDF_StreamContentParser {
                            const CFX_Matrix* pmtContentToUser,
                            CPDF_PageObjectHolder* pObjectHolder,
                            CPDF_Dictionary* pResources,
-                           CFX_FloatRect* pBBox,
+                           const CFX_FloatRect& rcBBox,
                            CPDF_AllStates* pAllStates,
-                           int level);
+                           std::set<const uint8_t*>* parsedSet);
   ~CPDF_StreamContentParser();
 
   uint32_t Parse(const uint8_t* pData, uint32_t dwSize, uint32_t max_cost);
@@ -49,10 +50,12 @@ class CPDF_StreamContentParser {
   CPDF_AllStates* GetCurStates() const { return m_pCurStates.get(); }
   bool IsColored() const { return m_bColored; }
   const float* GetType3Data() const { return m_Type3Data; }
-  CPDF_Font* FindFont(const CFX_ByteString& name);
+  CPDF_Font* FindFont(const ByteString& name);
 
-  CFX_ByteStringC FindKeyAbbreviationForTesting(const CFX_ByteStringC& abbr);
-  CFX_ByteStringC FindValueAbbreviationForTesting(const CFX_ByteStringC& abbr);
+  static ByteStringView FindKeyAbbreviationForTesting(
+      const ByteStringView& abbr);
+  static ByteStringView FindValueAbbreviationForTesting(
+      const ByteStringView& abbr);
 
  private:
   struct ContentParam {
@@ -81,17 +84,17 @@ class CPDF_StreamContentParser {
   using OpCodes = std::map<uint32_t, void (CPDF_StreamContentParser::*)()>;
   static OpCodes InitializeOpCodes();
 
-  void AddNameParam(const CFX_ByteStringC& str);
-  void AddNumberParam(const CFX_ByteStringC& str);
+  void AddNameParam(const ByteStringView& str);
+  void AddNumberParam(const ByteStringView& str);
   void AddObjectParam(std::unique_ptr<CPDF_Object> pObj);
   int GetNextParamPos();
   void ClearAllParams();
   CPDF_Object* GetObject(uint32_t index);
-  CFX_ByteString GetString(uint32_t index);
+  ByteString GetString(uint32_t index);
   float GetNumber(uint32_t index);
   int GetInteger(uint32_t index) { return (int32_t)(GetNumber(index)); }
-  void OnOperator(const CFX_ByteStringC& op);
-  void AddTextObject(CFX_ByteString* pText,
+  void OnOperator(const ByteStringView& op);
+  void AddTextObject(ByteString* pText,
                      float fInitKerning,
                      float* pKerning,
                      int count);
@@ -103,17 +106,16 @@ class CPDF_StreamContentParser {
   void AddPathObject(int FillType, bool bStroke);
   CPDF_ImageObject* AddImage(std::unique_ptr<CPDF_Stream> pStream);
   CPDF_ImageObject* AddImage(uint32_t streamObjNum);
-  CPDF_ImageObject* AddImage(const CFX_RetainPtr<CPDF_Image>& pImage);
+  CPDF_ImageObject* AddImage(const RetainPtr<CPDF_Image>& pImage);
 
   void AddForm(CPDF_Stream* pStream);
   void SetGraphicStates(CPDF_PageObject* pObj,
                         bool bColor,
                         bool bText,
                         bool bGraph);
-  CPDF_ColorSpace* FindColorSpace(const CFX_ByteString& name);
-  CPDF_Pattern* FindPattern(const CFX_ByteString& name, bool bShading);
-  CPDF_Object* FindResourceObj(const CFX_ByteString& type,
-                               const CFX_ByteString& name);
+  CPDF_ColorSpace* FindColorSpace(const ByteString& name);
+  CPDF_Pattern* FindPattern(const ByteString& name, bool bShading);
+  CPDF_Object* FindResourceObj(const ByteString& type, const ByteString& name);
 
   // Takes ownership of |pImageObj|, returns unowned pointer to it.
   CPDF_ImageObject* AddImageObject(std::unique_ptr<CPDF_ImageObject> pImageObj);
@@ -191,14 +193,14 @@ class CPDF_StreamContentParser {
   void Handle_NextLineShowText_Space();
   void Handle_Invalid();
 
-  CFX_UnownedPtr<CPDF_Document> const m_pDocument;
-  CFX_UnownedPtr<CPDF_Dictionary> m_pPageResources;
-  CFX_UnownedPtr<CPDF_Dictionary> m_pParentResources;
-  CFX_UnownedPtr<CPDF_Dictionary> m_pResources;
-  CFX_UnownedPtr<CPDF_PageObjectHolder> m_pObjectHolder;
-  int m_Level;
+  UnownedPtr<CPDF_Document> const m_pDocument;
+  UnownedPtr<CPDF_Dictionary> const m_pPageResources;
+  UnownedPtr<CPDF_Dictionary> const m_pParentResources;
+  UnownedPtr<CPDF_Dictionary> m_pResources;
+  UnownedPtr<CPDF_PageObjectHolder> const m_pObjectHolder;
+  UnownedPtr<std::set<const uint8_t*>> const m_ParsedSet;
   CFX_Matrix m_mtContentToUser;
-  CFX_FloatRect m_BBox;
+  const CFX_FloatRect m_BBox;
   ContentParam m_ParamBuf[kParamBufSize];
   uint32_t m_ParamStartPos;
   uint32_t m_ParamCount;
@@ -206,7 +208,7 @@ class CPDF_StreamContentParser {
   std::unique_ptr<CPDF_AllStates> m_pCurStates;
   CPDF_ContentMark m_CurContentMark;
   std::vector<std::unique_ptr<CPDF_TextObject>> m_ClipTextList;
-  CFX_UnownedPtr<CPDF_TextObject> m_pLastTextObject;
+  UnownedPtr<CPDF_TextObject> m_pLastTextObject;
   float m_DefFontSize;
   std::vector<FX_PATHPOINT> m_PathPoints;
   float m_PathStartX;
@@ -214,8 +216,8 @@ class CPDF_StreamContentParser {
   float m_PathCurrentX;
   float m_PathCurrentY;
   uint8_t m_PathClipType;
-  CFX_ByteString m_LastImageName;
-  CFX_RetainPtr<CPDF_Image> m_pLastImage;
+  ByteString m_LastImageName;
+  RetainPtr<CPDF_Image> m_pLastImage;
   bool m_bColored;
   float m_Type3Data[6];
   bool m_bResourceMissing;

@@ -42,44 +42,48 @@
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
 
-using namespace blink;
+namespace {
 
-static bool supportsUIStateTransitionProgress() {
+bool SupportsUIStateTransitionProgress() {
   // FIXME: This is temporary until all platforms that support ScrollbarPainter
   // support this part of the API.
-  static bool globalSupportsUIStateTransitionProgress =
+  static bool global_supports_ui_state_transition_progress =
       [NSClassFromString(@"NSScrollerImp")
           instancesRespondToSelector:@selector(mouseEnteredScroller)];
-  return globalSupportsUIStateTransitionProgress;
+  return global_supports_ui_state_transition_progress;
 }
 
-static bool supportsExpansionTransitionProgress() {
-  static bool globalSupportsExpansionTransitionProgress =
+bool SupportsExpansionTransitionProgress() {
+  static bool global_supports_expansion_transition_progress =
       [NSClassFromString(@"NSScrollerImp")
           instancesRespondToSelector:@selector(expansionTransitionProgress)];
-  return globalSupportsExpansionTransitionProgress;
+  return global_supports_expansion_transition_progress;
 }
 
-static bool supportsContentAreaScrolledInDirection() {
-  static bool globalSupportsContentAreaScrolledInDirection = [NSClassFromString(
-      @"NSScrollerImpPair")
-      instancesRespondToSelector:@selector(contentAreaScrolledInDirection:)];
-  return globalSupportsContentAreaScrolledInDirection;
+bool SupportsContentAreaScrolledInDirection() {
+  static bool global_supports_content_area_scrolled_in_direction =
+      [NSClassFromString(@"NSScrollerImpPair")
+          instancesRespondToSelector:@selector
+          (contentAreaScrolledInDirection:)];
+  return global_supports_content_area_scrolled_in_direction;
 }
 
-static ScrollbarThemeMac* macOverlayScrollbarTheme() {
-  ScrollbarTheme& scrollbarTheme = ScrollbarTheme::GetTheme();
-  return !scrollbarTheme.IsMockTheme()
-             ? static_cast<ScrollbarThemeMac*>(&scrollbarTheme)
+blink::ScrollbarThemeMac* MacOverlayScrollbarTheme(
+    blink::ScrollbarTheme& scrollbar_theme) {
+  return !scrollbar_theme.IsMockTheme()
+             ? static_cast<blink::ScrollbarThemeMac*>(&scrollbar_theme)
              : nil;
 }
 
-static ScrollbarPainter scrollbarPainterForScrollbar(Scrollbar& scrollbar) {
-  if (ScrollbarThemeMac* scrollbarTheme = macOverlayScrollbarTheme())
-    return scrollbarTheme->PainterForScrollbar(scrollbar);
+ScrollbarPainter ScrollbarPainterForScrollbar(blink::Scrollbar& scrollbar) {
+  if (blink::ScrollbarThemeMac* scrollbar_theme =
+          MacOverlayScrollbarTheme(scrollbar.GetTheme()))
+    return scrollbar_theme->PainterForScrollbar(scrollbar);
 
   return nil;
 }
+
+}  // namespace
 
 @interface NSObject (ScrollAnimationHelperDetails)
 - (id)initWithDelegate:(id)delegate;
@@ -131,7 +135,7 @@ static NSSize abs(NSSize size) {
   if (!_animator)
     return;
   _animator->ImmediateScrollToOffsetForScrollAnimation(
-      ToScrollOffset(newPosition));
+      blink::ToScrollOffset(newPosition));
 }
 
 - (NSPoint)_pixelAlignProposedScrollPosition:(NSPoint)newOrigin {
@@ -172,14 +176,14 @@ static NSSize abs(NSSize size) {
 @end
 
 @interface BlinkScrollbarPainterControllerDelegate : NSObject {
-  ScrollableArea* _scrollableArea;
+  blink::ScrollableArea* _scrollableArea;
 }
-- (id)initWithScrollableArea:(ScrollableArea*)scrollableArea;
+- (id)initWithScrollableArea:(blink::ScrollableArea*)scrollableArea;
 @end
 
 @implementation BlinkScrollbarPainterControllerDelegate
 
-- (id)initWithScrollableArea:(ScrollableArea*)scrollableArea {
+- (id)initWithScrollableArea:(blink::ScrollableArea*)scrollableArea {
   self = [super init];
   if (!self)
     return nil;
@@ -235,7 +239,7 @@ static NSSize abs(NSSize size) {
   if (!scrollbar)
     return NSZeroPoint;
 
-  DCHECK_EQ(scrollerImp, scrollbarPainterForScrollbar(*scrollbar));
+  DCHECK_EQ(scrollerImp, ScrollbarPainterForScrollbar(*scrollbar));
 
   return scrollbar->ConvertFromContainingEmbeddedContentView(
       blink::IntPoint(pointInContentArea));
@@ -269,7 +273,7 @@ static NSSize abs(NSSize size) {
 
   [scrollerImpPair setScrollerStyle:newRecommendedScrollerStyle];
 
-  static_cast<ScrollAnimatorMac&>(_scrollableArea->GetScrollAnimator())
+  static_cast<blink::ScrollAnimatorMac&>(_scrollableArea->GetScrollAnimator())
       .UpdateScrollerStyle();
 }
 
@@ -295,7 +299,12 @@ class BlinkScrollbarPartAnimationTimer {
  public:
   BlinkScrollbarPartAnimationTimer(BlinkScrollbarPartAnimation* animation,
                                    CFTimeInterval duration)
-      : timer_(this, &BlinkScrollbarPartAnimationTimer::TimerFired),
+      : timer_(Platform::Current()
+                   ->MainThread()
+                   ->Scheduler()
+                   ->CompositorTaskRunner(),
+               this,
+               &BlinkScrollbarPartAnimationTimer::TimerFired),
         start_time_(0.0),
         duration_(duration),
         animation_(animation),
@@ -308,7 +317,7 @@ class BlinkScrollbarPartAnimationTimer {
     start_time_ = WTF::CurrentTime();
     // Set the framerate of the animation. NSAnimation uses a default
     // framerate of 60 Hz, so use that here.
-    timer_.StartRepeating(1.0 / 60.0, BLINK_FROM_HERE);
+    timer_.StartRepeating(TimeDelta::FromSecondsD(1.0 / 60.0), FROM_HERE);
   }
 
   void Stop() { timer_.Stop(); }
@@ -329,24 +338,24 @@ class BlinkScrollbarPartAnimationTimer {
     [animation_ setCurrentProgress:progress];
   }
 
-  Timer<BlinkScrollbarPartAnimationTimer> timer_;
+  TaskRunnerTimer<BlinkScrollbarPartAnimationTimer> timer_;
   double start_time_;                       // In seconds.
   double duration_;                         // In seconds.
   BlinkScrollbarPartAnimation* animation_;  // Weak, owns this.
-  RefPtr<CubicBezierTimingFunction> timing_function_;
+  scoped_refptr<CubicBezierTimingFunction> timing_function_;
 };
 
 }  // namespace blink
 
 @interface BlinkScrollbarPartAnimation : NSObject {
-  Scrollbar* _scrollbar;
-  std::unique_ptr<BlinkScrollbarPartAnimationTimer> _timer;
+  blink::Scrollbar* _scrollbar;
+  std::unique_ptr<blink::BlinkScrollbarPartAnimationTimer> _timer;
   RetainPtr<ScrollbarPainter> _scrollbarPainter;
   FeatureToAnimate _featureToAnimate;
   CGFloat _startValue;
   CGFloat _endValue;
 }
-- (id)initWithScrollbar:(Scrollbar*)scrollbar
+- (id)initWithScrollbar:(blink::Scrollbar*)scrollbar
        featureToAnimate:(FeatureToAnimate)featureToAnimate
             animateFrom:(CGFloat)startValue
               animateTo:(CGFloat)endValue
@@ -355,7 +364,7 @@ class BlinkScrollbarPartAnimationTimer {
 
 @implementation BlinkScrollbarPartAnimation
 
-- (id)initWithScrollbar:(Scrollbar*)scrollbar
+- (id)initWithScrollbar:(blink::Scrollbar*)scrollbar
        featureToAnimate:(FeatureToAnimate)featureToAnimate
             animateFrom:(CGFloat)startValue
               animateTo:(CGFloat)endValue
@@ -364,8 +373,8 @@ class BlinkScrollbarPartAnimationTimer {
   if (!self)
     return nil;
 
-  _timer =
-      WTF::WrapUnique(new BlinkScrollbarPartAnimationTimer(self, duration));
+  _timer = WTF::WrapUnique(
+      new blink::BlinkScrollbarPartAnimationTimer(self, duration));
   _scrollbar = scrollbar;
   _featureToAnimate = featureToAnimate;
   _startValue = startValue;
@@ -377,7 +386,7 @@ class BlinkScrollbarPartAnimationTimer {
 - (void)startAnimation {
   DCHECK(_scrollbar);
 
-  _scrollbarPainter = scrollbarPainterForScrollbar(*_scrollbar);
+  _scrollbarPainter = ScrollbarPainterForScrollbar(*_scrollbar);
   _timer->Start();
 }
 
@@ -406,22 +415,22 @@ class BlinkScrollbarPartAnimationTimer {
   else
     currentValue = progress;
 
-  ScrollbarPart invalidParts = kNoPart;
+  blink::ScrollbarPart invalidParts = blink::kNoPart;
   switch (_featureToAnimate) {
     case ThumbAlpha:
       [_scrollbarPainter.Get() setKnobAlpha:currentValue];
       break;
     case TrackAlpha:
       [_scrollbarPainter.Get() setTrackAlpha:currentValue];
-      invalidParts = static_cast<ScrollbarPart>(~kThumbPart);
+      invalidParts = static_cast<blink::ScrollbarPart>(~blink::kThumbPart);
       break;
     case UIStateTransition:
       [_scrollbarPainter.Get() setUiStateTransitionProgress:currentValue];
-      invalidParts = kAllParts;
+      invalidParts = blink::kAllParts;
       break;
     case ExpansionTransition:
       [_scrollbarPainter.Get() setExpansionTransitionProgress:currentValue];
-      invalidParts = kThumbPart;
+      invalidParts = blink::kThumbPart;
       break;
   }
 
@@ -464,7 +473,7 @@ class BlinkScrollbarPartAnimationTimer {
 
 - (void)updateVisibilityImmediately:(bool)show {
   [self cancelAnimations];
-  [scrollbarPainterForScrollbar(*_scrollbar) setKnobAlpha:(show ? 1.0 : 0.0)];
+  [ScrollbarPainterForScrollbar(*_scrollbar) setKnobAlpha:(show ? 1.0 : 0.0)];
 }
 
 - (void)cancelAnimations {
@@ -476,8 +485,8 @@ class BlinkScrollbarPartAnimationTimer {
   END_BLOCK_OBJC_EXCEPTIONS;
 }
 
-- (ScrollAnimatorMac&)scrollAnimator {
-  return static_cast<ScrollAnimatorMac&>(
+- (blink::ScrollAnimatorMac&)scrollAnimator {
+  return static_cast<blink::ScrollAnimatorMac&>(
       _scrollbar->GetScrollableArea()->GetScrollAnimator());
 }
 
@@ -493,7 +502,7 @@ class BlinkScrollbarPartAnimationTimer {
   if (!_scrollbar)
     return NSZeroPoint;
 
-  DCHECK_EQ(scrollerImp, scrollbarPainterForScrollbar(*_scrollbar));
+  DCHECK_EQ(scrollerImp, ScrollbarPainterForScrollbar(*_scrollbar));
 
   return _scrollbar->ConvertFromContainingEmbeddedContentView(
       _scrollbar->GetScrollableArea()->LastKnownMousePosition());
@@ -529,19 +538,19 @@ class BlinkScrollbarPartAnimationTimer {
   }
 
   if (part == blink::kThumbPart &&
-      _scrollbar->Orientation() == kVerticalScrollbar) {
+      _scrollbar->Orientation() == blink::kVerticalScrollbar) {
     if (newAlpha == 1) {
-      IntRect thumbRect = IntRect([scrollerPainter rectForPart:NSScrollerKnob]);
+      blink::IntRect thumbRect([scrollerPainter rectForPart:NSScrollerKnob]);
       [self scrollAnimator].SetVisibleScrollerThumbRect(thumbRect);
     } else
-      [self scrollAnimator].SetVisibleScrollerThumbRect(IntRect());
+      [self scrollAnimator].SetVisibleScrollerThumbRect(blink::IntRect());
   }
 
   scrollbarPartAnimation.AdoptNS([[BlinkScrollbarPartAnimation alloc]
       initWithScrollbar:_scrollbar
-       featureToAnimate:part == kThumbPart ? ThumbAlpha : TrackAlpha
-            animateFrom:part == kThumbPart ? [scrollerPainter knobAlpha]
-                                           : [scrollerPainter trackAlpha]
+       featureToAnimate:part == blink::kThumbPart ? ThumbAlpha : TrackAlpha
+            animateFrom:part == blink::kThumbPart ? [scrollerPainter knobAlpha]
+                                                  : [scrollerPainter trackAlpha]
               animateTo:newAlpha
                duration:duration]);
   [scrollbarPartAnimation.Get() startAnimation];
@@ -553,7 +562,7 @@ class BlinkScrollbarPartAnimationTimer {
   if (!_scrollbar)
     return;
 
-  DCHECK_EQ(scrollerImp, scrollbarPainterForScrollbar(*_scrollbar));
+  DCHECK_EQ(scrollerImp, ScrollbarPainterForScrollbar(*_scrollbar));
 
   ScrollbarPainter scrollerPainter = (ScrollbarPainter)scrollerImp;
   [self setUpAlphaAnimation:_knobAlphaAnimation
@@ -569,7 +578,7 @@ class BlinkScrollbarPartAnimationTimer {
   if (!_scrollbar)
     return;
 
-  DCHECK_EQ(scrollerImp, scrollbarPainterForScrollbar(*_scrollbar));
+  DCHECK_EQ(scrollerImp, ScrollbarPainterForScrollbar(*_scrollbar));
 
   ScrollbarPainter scrollerPainter = (ScrollbarPainter)scrollerImp;
   [self setUpAlphaAnimation:_trackAlphaAnimation
@@ -584,10 +593,10 @@ class BlinkScrollbarPartAnimationTimer {
   if (!_scrollbar)
     return;
 
-  if (!supportsUIStateTransitionProgress())
+  if (!SupportsUIStateTransitionProgress())
     return;
 
-  DCHECK_EQ(scrollerImp, scrollbarPainterForScrollbar(*_scrollbar));
+  DCHECK_EQ(scrollerImp, ScrollbarPainterForScrollbar(*_scrollbar));
 
   ScrollbarPainter scrollbarPainter = (ScrollbarPainter)scrollerImp;
 
@@ -619,10 +628,10 @@ class BlinkScrollbarPartAnimationTimer {
   if (!_scrollbar)
     return;
 
-  if (!supportsExpansionTransitionProgress())
+  if (!SupportsExpansionTransitionProgress())
     return;
 
-  DCHECK_EQ(scrollerImp, scrollbarPainterForScrollbar(*_scrollbar));
+  DCHECK_EQ(scrollerImp, ScrollbarPainterForScrollbar(*_scrollbar));
 
   ScrollbarPainter scrollbarPainter = (ScrollbarPainter)scrollerImp;
 
@@ -668,7 +677,7 @@ class BlinkScrollbarPartAnimationTimer {
     _hasExpandedSinceInvisible = YES;
   } else if (newOverlayScrollerState != NSScrollerStateInvisible &&
              _hasExpandedSinceInvisible) {
-    _scrollbar->SetNeedsPaintInvalidation(kThumbPart);
+    _scrollbar->SetNeedsPaintInvalidation(blink::kThumbPart);
     _hasExpandedSinceInvisible = NO;
   }
 }
@@ -688,14 +697,16 @@ class BlinkScrollbarPartAnimationTimer {
 namespace blink {
 
 ScrollAnimatorBase* ScrollAnimatorBase::Create(
-    ScrollableArea* scrollable_area) {
+    blink::ScrollableArea* scrollable_area) {
   return new ScrollAnimatorMac(scrollable_area);
 }
 
-ScrollAnimatorMac::ScrollAnimatorMac(ScrollableArea* scrollable_area)
+ScrollAnimatorMac::ScrollAnimatorMac(blink::ScrollableArea* scrollable_area)
     : ScrollAnimatorBase(scrollable_area),
-      task_runner_(
-          Platform::Current()->CurrentThread()->Scheduler()->TimerTaskRunner()),
+      task_runner_(Platform::Current()
+                       ->CurrentThread()
+                       ->Scheduler()
+                       ->CompositorTaskRunner()),
       have_scrolled_since_page_load_(false),
       needs_scroller_style_update_(false) {
   scroll_animation_helper_delegate_.AdoptNS(
@@ -720,6 +731,14 @@ ScrollAnimatorMac::~ScrollAnimatorMac() {}
 
 void ScrollAnimatorMac::Dispose() {
   BEGIN_BLOCK_OBJC_EXCEPTIONS;
+  ScrollbarPainter horizontal_scrollbar_painter =
+      [scrollbar_painter_controller_.Get() horizontalScrollerImp];
+  [horizontal_scrollbar_painter setDelegate:nil];
+
+  ScrollbarPainter vertical_scrollbar_painter =
+      [scrollbar_painter_controller_.Get() verticalScrollerImp];
+  [vertical_scrollbar_painter setDelegate:nil];
+
   [scrollbar_painter_controller_delegate_.Get() invalidate];
   [scrollbar_painter_controller_.Get() setDelegate:nil];
   [horizontal_scrollbar_painter_delegate_.Get() invalidate];
@@ -834,9 +853,9 @@ void ScrollAnimatorMac::MouseEnteredScrollbar(Scrollbar& scrollbar) const {
   if (!GetScrollableArea()->ScrollbarsCanBeActive())
     return;
 
-  if (!supportsUIStateTransitionProgress())
+  if (!SupportsUIStateTransitionProgress())
     return;
-  if (ScrollbarPainter painter = scrollbarPainterForScrollbar(scrollbar))
+  if (ScrollbarPainter painter = ScrollbarPainterForScrollbar(scrollbar))
     [painter mouseEnteredScroller];
 }
 
@@ -844,9 +863,9 @@ void ScrollAnimatorMac::MouseExitedScrollbar(Scrollbar& scrollbar) const {
   if (!GetScrollableArea()->ScrollbarsCanBeActive())
     return;
 
-  if (!supportsUIStateTransitionProgress())
+  if (!SupportsUIStateTransitionProgress())
     return;
-  if (ScrollbarPainter painter = scrollbarPainterForScrollbar(scrollbar))
+  if (ScrollbarPainter painter = ScrollbarPainterForScrollbar(scrollbar))
     [painter mouseExitedScroller];
 }
 
@@ -873,7 +892,7 @@ void ScrollAnimatorMac::FinishCurrentScrollAnimations() {
 }
 
 void ScrollAnimatorMac::DidAddVerticalScrollbar(Scrollbar& scrollbar) {
-  ScrollbarPainter painter = scrollbarPainterForScrollbar(scrollbar);
+  ScrollbarPainter painter = ScrollbarPainterForScrollbar(scrollbar);
   if (!painter)
     return;
 
@@ -886,20 +905,20 @@ void ScrollAnimatorMac::DidAddVerticalScrollbar(Scrollbar& scrollbar) {
 }
 
 void ScrollAnimatorMac::WillRemoveVerticalScrollbar(Scrollbar& scrollbar) {
-  ScrollbarPainter painter = scrollbarPainterForScrollbar(scrollbar);
+  ScrollbarPainter painter = ScrollbarPainterForScrollbar(scrollbar);
+  DCHECK_EQ([scrollbar_painter_controller_.Get() verticalScrollerImp], painter);
   if (!painter)
     return;
 
   DCHECK(vertical_scrollbar_painter_delegate_);
+  [painter setDelegate:nil];
   [vertical_scrollbar_painter_delegate_.Get() invalidate];
   vertical_scrollbar_painter_delegate_ = nullptr;
-
-  [painter setDelegate:nil];
   [scrollbar_painter_controller_.Get() setVerticalScrollerImp:nil];
 }
 
 void ScrollAnimatorMac::DidAddHorizontalScrollbar(Scrollbar& scrollbar) {
-  ScrollbarPainter painter = scrollbarPainterForScrollbar(scrollbar);
+  ScrollbarPainter painter = ScrollbarPainterForScrollbar(scrollbar);
   if (!painter)
     return;
 
@@ -912,15 +931,16 @@ void ScrollAnimatorMac::DidAddHorizontalScrollbar(Scrollbar& scrollbar) {
 }
 
 void ScrollAnimatorMac::WillRemoveHorizontalScrollbar(Scrollbar& scrollbar) {
-  ScrollbarPainter painter = scrollbarPainterForScrollbar(scrollbar);
+  ScrollbarPainter painter = ScrollbarPainterForScrollbar(scrollbar);
+  DCHECK_EQ([scrollbar_painter_controller_.Get() horizontalScrollerImp],
+            painter);
   if (!painter)
     return;
 
   DCHECK(horizontal_scrollbar_painter_delegate_);
+  [painter setDelegate:nil];
   [horizontal_scrollbar_painter_delegate_.Get() invalidate];
   horizontal_scrollbar_painter_delegate_ = nullptr;
-
-  [painter setDelegate:nil];
   [scrollbar_painter_controller_.Get() setHorizontalScrollerImp:nil];
 }
 
@@ -959,7 +979,8 @@ void ScrollAnimatorMac::UpdateScrollerStyle() {
     return;
   }
 
-  ScrollbarThemeMac* mac_theme = macOverlayScrollbarTheme();
+  blink::ScrollbarThemeMac* mac_theme =
+      MacOverlayScrollbarTheme(scrollable_area_->GetPageScrollbarTheme());
   if (!mac_theme) {
     needs_scroller_style_update_ = false;
     return;
@@ -979,6 +1000,9 @@ void ScrollAnimatorMac::UpdateScrollerStyle() {
                  controlSize:(NSControlSize)vertical_scrollbar->GetControlSize()
                   horizontal:NO
         replacingScrollerImp:old_vertical_painter];
+    [old_vertical_painter setDelegate:nil];
+    [new_vertical_painter
+        setDelegate:vertical_scrollbar_painter_delegate_.Get()];
     [scrollbar_painter_controller_.Get()
         setVerticalScrollerImp:new_vertical_painter];
     mac_theme->SetNewPainterForScrollbar(*vertical_scrollbar,
@@ -1007,6 +1031,9 @@ void ScrollAnimatorMac::UpdateScrollerStyle() {
                                      horizontal_scrollbar->GetControlSize()
                       horizontal:YES
             replacingScrollerImp:old_horizontal_painter];
+    [old_horizontal_painter setDelegate:nil];
+    [new_horizontal_painter
+        setDelegate:horizontal_scrollbar_painter_delegate_.Get()];
     [scrollbar_painter_controller_.Get()
         setHorizontalScrollerImp:new_horizontal_painter];
     mac_theme->SetNewPainterForScrollbar(*horizontal_scrollbar,
@@ -1035,12 +1062,11 @@ void ScrollAnimatorMac::UpdateScrollerStyle() {
 void ScrollAnimatorMac::StartScrollbarPaintTimer() {
   // Post a task with 1 ms delay to give a chance to run other immediate tasks
   // that may cancel this.
-  initial_scrollbar_paint_task_handle_ =
-      task_runner_->PostDelayedCancellableTask(
-          BLINK_FROM_HERE,
-          WTF::Bind(&ScrollAnimatorMac::InitialScrollbarPaintTask,
-                    WrapWeakPersistent(this)),
-          TimeDelta::FromMilliseconds(1));
+  initial_scrollbar_paint_task_handle_ = PostDelayedCancellableTask(
+      *task_runner_, FROM_HERE,
+      WTF::Bind(&ScrollAnimatorMac::InitialScrollbarPaintTask,
+                WrapWeakPersistent(this)),
+      TimeDelta::FromMilliseconds(1));
 }
 
 bool ScrollAnimatorMac::ScrollbarPaintTimerIsActive() const {
@@ -1064,14 +1090,14 @@ void ScrollAnimatorMac::SendContentAreaScrolledSoon(const ScrollOffset& delta) {
 
   if (send_content_area_scrolled_task_handle_.IsActive())
     return;
-  send_content_area_scrolled_task_handle_ = task_runner_->PostCancellableTask(
-      BLINK_FROM_HERE,
+  send_content_area_scrolled_task_handle_ = PostCancellableTask(
+      *task_runner_, FROM_HERE,
       WTF::Bind(&ScrollAnimatorMac::SendContentAreaScrolledTask,
                 WrapWeakPersistent(this)));
 }
 
 void ScrollAnimatorMac::SendContentAreaScrolledTask() {
-  if (supportsContentAreaScrolledInDirection()) {
+  if (SupportsContentAreaScrolledInDirection()) {
     [scrollbar_painter_controller_.Get()
         contentAreaScrolledInDirection:
             NSMakePoint(content_area_scrolled_timer_scroll_delta_.Width(),

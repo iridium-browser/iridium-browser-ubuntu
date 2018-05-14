@@ -30,10 +30,12 @@
 #define DatabaseTracker_h
 
 #include <memory>
+
+#include "base/callback.h"
+#include "base/macros.h"
 #include "modules/ModulesExport.h"
 #include "modules/webdatabase/DatabaseError.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Functional.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/HashSet.h"
 #include "platform/wtf/ThreadingPrimitives.h"
@@ -48,7 +50,6 @@ class Page;
 class SecurityOrigin;
 
 class MODULES_EXPORT DatabaseTracker {
-  WTF_MAKE_NONCOPYABLE(DatabaseTracker);
   USING_FAST_MALLOC(DatabaseTracker);
 
  public:
@@ -67,7 +68,7 @@ class MODULES_EXPORT DatabaseTracker {
                             const String& display_name,
                             unsigned estimated_size,
                             DatabaseError&);
-  String FullPathForDatabase(SecurityOrigin*,
+  String FullPathForDatabase(const SecurityOrigin*,
                              const String& name,
                              bool create_if_does_not_exist = true);
 
@@ -76,10 +77,10 @@ class MODULES_EXPORT DatabaseTracker {
 
   unsigned long long GetMaxSizeForDatabase(const Database*);
 
-  void CloseDatabasesImmediately(SecurityOrigin*, const String& name);
+  void CloseDatabasesImmediately(const SecurityOrigin*, const String& name);
 
-  using DatabaseCallback = Function<void(Database*)>;
-  void ForEachOpenDatabaseInPage(Page*, std::unique_ptr<DatabaseCallback>);
+  using DatabaseCallback = base::RepeatingCallback<void(Database*)>;
+  void ForEachOpenDatabaseInPage(Page*, DatabaseCallback);
 
   void PrepareToOpenDatabase(Database*);
   void FailedToOpenDatabase(Database*);
@@ -98,6 +99,8 @@ class MODULES_EXPORT DatabaseTracker {
   Mutex open_database_map_guard_;
 
   mutable std::unique_ptr<DatabaseOriginMap> open_database_map_;
+
+  DISALLOW_COPY_AND_ASSIGN(DatabaseTracker);
 };
 
 }  // namespace blink

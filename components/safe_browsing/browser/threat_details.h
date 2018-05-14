@@ -20,8 +20,8 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "components/safe_browsing/common/safebrowsing_types.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/common/safe_browsing.mojom.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "components/security_interstitials/content/unsafe_resource.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -34,8 +34,6 @@ class HistoryService;
 namespace net {
 class URLRequestContextGetter;
 }  // namespace net
-
-struct SafeBrowsingHostMsg_ThreatDOMDetails_Node;
 
 namespace safe_browsing {
 
@@ -64,6 +62,10 @@ using KeyToFrameTreeIdMap = base::hash_map<std::string, int>;
 // the Element IDs of the top-level HTML Elements in this frame.
 using FrameTreeIdToChildIdsMap = base::hash_map<int, std::unordered_set<int>>;
 
+// Callback used to notify a caller that ThreatDetails has finished creating and
+// sending a report.
+using ThreatDetailsDoneCallback = base::Callback<void(content::WebContents*)>;
+
 class ThreatDetails : public base::RefCountedThreadSafe<
                           ThreatDetails,
                           content::BrowserThread::DeleteOnUIThread>,
@@ -77,7 +79,9 @@ class ThreatDetails : public base::RefCountedThreadSafe<
       content::WebContents* web_contents,
       const UnsafeResource& resource,
       net::URLRequestContextGetter* request_context_getter,
-      history::HistoryService* history_service);
+      history::HistoryService* history_service,
+      bool trim_to_ad_tags,
+      ThreatDetailsDoneCallback done_callback);
 
   // Makes the passed |factory| the factory used to instantiate
   // SafeBrowsingBlockingPage objects. Useful for tests.
@@ -97,10 +101,6 @@ class ThreatDetails : public base::RefCountedThreadSafe<
 
   void OnRedirectionCollectionReady();
 
-  // content::WebContentsObserver implementation.
-  bool OnMessageReceived(const IPC::Message& message,
-                         content::RenderFrameHost* render_frame_host) override;
-
  protected:
   friend class ThreatDetailsFactoryImpl;
   friend class TestThreatDetailsFactory;
@@ -109,17 +109,19 @@ class ThreatDetails : public base::RefCountedThreadSafe<
                 content::WebContents* web_contents,
                 const UnsafeResource& resource,
                 net::URLRequestContextGetter* request_context_getter,
-                history::HistoryService* history_service);
+                history::HistoryService* history_service,
+                bool trim_to_ad_tags,
+                ThreatDetailsDoneCallback done_callback);
+
   // Default constructor for testing only.
   ThreatDetails();
 
   ~ThreatDetails() override;
 
   // Called on the IO thread with the DOM details.
-  virtual void AddDOMDetails(
-      const int frame_tree_node_id,
-      const std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node>& params,
-      const KeyToFrameTreeIdMap& child_frame_tree_map);
+  virtual void AddDOMDetails(const int frame_tree_node_id,
+                             std::vector<mojom::ThreatDOMDetailsNodePtr> params,
+                             const KeyToFrameTreeIdMap& child_frame_tree_map);
 
   // The report protocol buffer.
   std::unique_ptr<ClientSafeBrowsingReportRequest> report_;
@@ -157,10 +159,12 @@ class ThreatDetails : public base::RefCountedThreadSafe<
       const std::string& tagname,
       const std::vector<GURL>* children);
 
-  // Message handler.
+  void RequestThreatDOMDetails(content::RenderFrameHost* frame);
+
   void OnReceivedThreatDOMDetails(
+      mojom::ThreatReporterPtr threat_reporter,
       content::RenderFrameHost* sender,
-      const std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node>& params);
+      std::vector<mojom::ThreatDOMDetailsNodePtr> params);
 
   void AddRedirectUrlList(const std::vector<GURL>& urls);
 
@@ -174,8 +178,11 @@ class ThreatDetails : public base::RefCountedThreadSafe<
                      const int element_node_id,
                      const std::string& tag_name,
                      const int parent_element_node_id,
-                     const std::vector<AttributeNameValue>& attributes,
+                     const std::vector<mojom::AttributeNameValuePtr> attributes,
                      const ClientSafeBrowsingReportRequest::Resource* resource);
+
+  // Called when the report is complete. Runs |done_callback_|.
+  void AllDone();
 
   scoped_refptr<BaseUIManager> ui_manager_;
 
@@ -218,6 +225,15 @@ class ThreatDetails : public base::RefCountedThreadSafe<
   // associated with a parent Element in the parent frame.
   bool ambiguous_dom_;
 
+  // Whether this report should be trimmed down to only ad tags, not the entire
+  // page contents. Used for sampling ads.
+  bool trim_to_ad_tags_;
+
+  // A vector containing the IDs of the DOM Elements to trim to. If an element
+  // ID is in this list, then its siblings and its children should be included
+  // in the report. Only populated if this report will be trimmed.
+  std::set<int> trimmed_dom_element_ids_;
+
   // The factory used to instantiate SafeBrowsingBlockingPage objects.
   // Useful for tests, so they can provide their own implementation of
   // SafeBrowsingBlockingPage.
@@ -229,12 +245,23 @@ class ThreatDetails : public base::RefCountedThreadSafe<
   // Used to collect redirect urls from the history service
   scoped_refptr<ThreatDetailsRedirectsCollector> redirects_collector_;
 
+  // Callback to run when the report is finished.
+  ThreatDetailsDoneCallback done_callback_;
+
+  // Whether this ThreatDetails has begun finalizing the report and is expected
+  // to invoke |done_callback_| when it finishes.
+  bool all_done_expected_;
+
+  // Whether the |done_callback_| has been invoked.
+  bool is_all_done_;
+
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, HistoryServiceUrls);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, HttpsResourceSanitization);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, HTTPCacheNoEntries);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, HTTPCache);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, ThreatDOMDetails_AmbiguousDOM);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, ThreatDOMDetails_MultipleFrames);
+  FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, ThreatDOMDetails_TrimToAdTags);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, ThreatDOMDetails);
 
   DISALLOW_COPY_AND_ASSIGN(ThreatDetails);
@@ -250,7 +277,9 @@ class ThreatDetailsFactory {
       content::WebContents* web_contents,
       const security_interstitials::UnsafeResource& unsafe_resource,
       net::URLRequestContextGetter* request_context_getter,
-      history::HistoryService* history_service) = 0;
+      history::HistoryService* history_service,
+      bool trim_to_ad_tags,
+      ThreatDetailsDoneCallback done_callback) = 0;
 };
 
 }  // namespace safe_browsing

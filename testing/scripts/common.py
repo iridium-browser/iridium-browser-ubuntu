@@ -73,25 +73,10 @@ def run_command(argv, env=None, cwd=None):
   return rc
 
 
-def run_command_with_output(argv, stdoutfile, env=None, cwd=None):
-  """ Run command and stream its stdout/stderr to the console & |stdoutfile|.
-  """
-  print 'Running %r in %r (env: %r)' % (argv, cwd, env)
-  assert stdoutfile
-  with io.open(stdoutfile, 'w') as writer, io.open(stdoutfile, 'r', 1) as \
-      reader:
-    process = subprocess.Popen(argv, env=env, cwd=cwd, stdout=writer,
-        stderr=subprocess.STDOUT)
-    while process.poll() is None:
-      sys.stdout.write(reader.read())
-      time.sleep(0.1)
-    # Read the remaining
-    sys.stdout.write(reader.read())
-    print 'Command %r returned exit code %d' % (argv, process.returncode)
-    return process.returncode
-
-
 def run_runtest(cmd_args, runtest_args):
+  env = os.environ.copy()
+  env['CHROME_HEADLESS'] = '1'
+
   if cmd_args.use_src_side_runtest_py:
     cmd = [
       sys.executable,
@@ -114,7 +99,7 @@ def run_runtest(cmd_args, runtest_args):
       '--slave-name', cmd_args.properties['slavename'],
       '--build-number', str(cmd_args.properties['buildnumber']),
       '--build-properties', json.dumps(cmd_args.properties),
-  ] + runtest_args)
+  ] + runtest_args, env=env)
 
 
 @contextlib.contextmanager
@@ -177,6 +162,15 @@ def parse_common_test_results(json_results, test_separator='/'):
     results[key][test] = data
 
   return results
+
+
+def extract_filter_list(filter_list):
+  """Helper for isolated script test wrappers. Parses the
+  --isolated-script-test-filter command line argument. Currently, double-colon
+  ('::') is used as the separator between test names, because a single colon may
+  be used in the names of perf benchmarks, which contain URLs.
+  """
+  return filter_list.split('::')
 
 
 def run_integration_test(script_to_run, extra_args, log_file, output):

@@ -42,7 +42,8 @@ PaymentDetailsModifier ToPaymentDetailsModifier(
   for (const auto& web_method : web_modifier.supported_methods) {
     supported_methods.push_back(web_method);
   }
-  modifier.setSupportedMethods(supported_methods);
+  modifier.setSupportedMethods(
+      StringOrStringSequence::FromStringSequence(supported_methods));
   modifier.setTotal(ToPaymentItem(web_modifier.total));
   HeapVector<PaymentItem> additional_display_items;
   for (const auto& web_item : web_modifier.additional_display_items) {
@@ -59,7 +60,7 @@ ScriptValue StringDataToScriptValue(ScriptState* script_state,
 
   ScriptState::Scope scope(script_state);
   v8::Local<v8::Value> v8_value;
-  if (!v8::JSON::Parse(script_state->GetIsolate(),
+  if (!v8::JSON::Parse(script_state->GetContext(),
                        V8String(script_state->GetIsolate(), stringified_data))
            .ToLocal(&v8_value)) {
     return ScriptValue();
@@ -75,7 +76,8 @@ PaymentMethodData ToPaymentMethodData(
   for (const auto& method : web_method_data.supported_methods) {
     supported_methods.push_back(method);
   }
-  method_data.setSupportedMethods(supported_methods);
+  method_data.setSupportedMethods(
+      StringOrStringSequence::FromStringSequence(supported_methods));
   method_data.setData(
       StringDataToScriptValue(script_state, web_method_data.stringified_data));
   return method_data;

@@ -30,7 +30,8 @@
 
 #include "core/svg/graphics/SVGImage.h"
 #include "platform/graphics/ImageObserver.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/scheduler/child/web_scheduler.h"
+#include "platform/wtf/Time.h"
 
 namespace blink {
 
@@ -38,9 +39,14 @@ static const double kAnimationFrameDelay = 1.0 / 60;
 
 SVGImageChromeClient::SVGImageChromeClient(SVGImage* image)
     : image_(image),
-      animation_timer_(WTF::WrapUnique(new Timer<SVGImageChromeClient>(
-          this,
-          &SVGImageChromeClient::AnimationTimerFired))),
+      animation_timer_(
+          WTF::WrapUnique(new TaskRunnerTimer<SVGImageChromeClient>(
+              blink::Platform::Current()
+                  ->CurrentThread()
+                  ->Scheduler()
+                  ->CompositorTaskRunner(),
+              this,
+              &SVGImageChromeClient::AnimationTimerFired))),
       timeline_state_(kRunning) {}
 
 SVGImageChromeClient* SVGImageChromeClient::Create(SVGImage* image) {
@@ -101,7 +107,7 @@ void SVGImageChromeClient::ScheduleAnimation(const PlatformFrameView*) {
       return;
     fire_time = kAnimationFrameDelay;
   }
-  animation_timer_->StartOneShot(fire_time, BLINK_FROM_HERE);
+  animation_timer_->StartOneShot(fire_time, FROM_HERE);
 }
 
 void SVGImageChromeClient::SetTimer(std::unique_ptr<TimerBase> timer) {
@@ -122,7 +128,7 @@ void SVGImageChromeClient::AnimationTimerFired(TimerBase*) {
   if (!image_->GetImageObserver())
     return;
 
-  image_->ServiceAnimations(MonotonicallyIncreasingTime());
+  image_->ServiceAnimations(CurrentTimeTicksInSeconds());
 }
 
 }  // namespace blink

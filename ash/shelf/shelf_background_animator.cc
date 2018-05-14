@@ -7,10 +7,12 @@
 #include <algorithm>
 
 #include "ash/animation/animation_change_type.h"
-#include "ash/ash_switches.h"
+#include "ash/public/cpp/ash_switches.h"
+#include "ash/session/session_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_background_animator_observer.h"
 #include "ash/shelf/shelf_constants.h"
+#include "ash/shell.h"
 #include "ash/wallpaper/wallpaper_controller.h"
 #include "base/command_line.h"
 #include "ui/gfx/animation/slide_animation.h"
@@ -49,11 +51,45 @@ ColorProfile GetShelfColorProfile() {
   return color_profile;
 }
 
+// Gets the target color alpha value of shelf and shelf item according to the
+// given |background_type|.
+std::pair<int, int> GetTargetColorAlphaValues(
+    ShelfBackgroundType background_type) {
+  int target_shelf_color_alpha = 0;
+  int target_item_color_alpha = 0;
+
+  switch (background_type) {
+    case SHELF_BACKGROUND_DEFAULT:
+      target_shelf_color_alpha = 0;
+      target_item_color_alpha = kShelfTranslucentAlpha;
+      break;
+    case SHELF_BACKGROUND_OVERLAP:
+      target_shelf_color_alpha = kShelfTranslucentAlpha;
+      target_item_color_alpha = 0;
+      break;
+    case SHELF_BACKGROUND_MAXIMIZED:
+      target_shelf_color_alpha = ShelfBackgroundAnimator::kMaxAlpha;
+      target_item_color_alpha = 0;
+      break;
+    case SHELF_BACKGROUND_APP_LIST:
+      target_shelf_color_alpha = 0;
+      target_item_color_alpha = 0;
+      break;
+    case SHELF_BACKGROUND_SPLIT_VIEW:
+      target_shelf_color_alpha = ShelfBackgroundAnimator::kMaxAlpha;
+      target_item_color_alpha = 0;
+      break;
+    default:
+      NOTREACHED();
+  }
+  return std::pair<int, int>(target_shelf_color_alpha, target_item_color_alpha);
+}
+
 }  // namespace
 
-ShelfBackgroundAnimator::AnimationValues::AnimationValues() {}
+ShelfBackgroundAnimator::AnimationValues::AnimationValues() = default;
 
-ShelfBackgroundAnimator::AnimationValues::~AnimationValues() {}
+ShelfBackgroundAnimator::AnimationValues::~AnimationValues() = default;
 
 void ShelfBackgroundAnimator::AnimationValues::UpdateCurrentValues(double t) {
   current_color_ =
@@ -75,7 +111,9 @@ ShelfBackgroundAnimator::ShelfBackgroundAnimator(
     ShelfBackgroundType background_type,
     Shelf* shelf,
     WallpaperController* wallpaper_controller)
-    : shelf_(shelf), wallpaper_controller_(wallpaper_controller) {
+    : shelf_(shelf),
+      wallpaper_controller_(wallpaper_controller),
+      scoped_session_observer_(this) {
   if (wallpaper_controller_)
     wallpaper_controller_->AddObserver(this);
   if (shelf_)
@@ -133,9 +171,19 @@ void ShelfBackgroundAnimator::AnimationEnded(const gfx::Animation* animation) {
   animator_.reset();
 }
 
+int ShelfBackgroundAnimator::GetBackgroundAlphaValue(
+    ShelfBackgroundType background_type) const {
+  return GetTargetColorAlphaValues(background_type).first;
+}
+
 void ShelfBackgroundAnimator::OnWallpaperDataChanged() {}
 
 void ShelfBackgroundAnimator::OnWallpaperColorsChanged() {
+  AnimateBackground(target_background_type_, AnimationChangeType::ANIMATE);
+}
+
+void ShelfBackgroundAnimator::OnSessionStateChanged(
+    session_manager::SessionState state) {
   AnimateBackground(target_background_type_, AnimationChangeType::ANIMATE);
 }
 
@@ -206,6 +254,7 @@ void ShelfBackgroundAnimator::CreateAnimator(
       duration_ms = 500;
       break;
     case SHELF_BACKGROUND_MAXIMIZED:
+    case SHELF_BACKGROUND_SPLIT_VIEW:
       duration_ms = 250;
       break;
   }
@@ -229,27 +278,18 @@ void ShelfBackgroundAnimator::GetTargetValues(
     ShelfBackgroundType background_type,
     AnimationValues* shelf_background_values,
     AnimationValues* item_background_values) const {
-  int target_shelf_color_alpha = 0;
-  int target_item_color_alpha = 0;
-
-  switch (background_type) {
-    case SHELF_BACKGROUND_DEFAULT:
-      target_shelf_color_alpha = 0;
-      target_item_color_alpha = kShelfTranslucentAlpha;
-      break;
-    case SHELF_BACKGROUND_OVERLAP:
-      target_shelf_color_alpha = kShelfTranslucentAlpha;
-      target_item_color_alpha = 0;
-      break;
-    case SHELF_BACKGROUND_MAXIMIZED:
-      target_shelf_color_alpha = kMaxAlpha;
-      target_item_color_alpha = 0;
-      break;
-    case SHELF_BACKGROUND_APP_LIST:
-      target_shelf_color_alpha = 0;
-      target_item_color_alpha = 0;
-      break;
+  // Shelf has a transparent background except when session state is ACTIVE.
+  // Shell may not have instance in tests.
+  if (Shell::HasInstance() &&
+      Shell::Get()->session_controller()->GetSessionState() !=
+          session_manager::SessionState::ACTIVE) {
+    shelf_background_values->SetTargetValues(SK_ColorTRANSPARENT);
+    item_background_values->SetTargetValues(SK_ColorTRANSPARENT);
+    return;
   }
+
+  std::pair<int, int> target_color_alpha_values =
+      GetTargetColorAlphaValues(background_type);
 
   SkColor target_color =
       wallpaper_controller_
@@ -269,15 +309,18 @@ void ShelfBackgroundAnimator::GetTargetValues(
       case SHELF_BACKGROUND_MAXIMIZED:
         darkening_alpha = kShelfOpaqueColorDarkenAlpha;
         break;
+      case SHELF_BACKGROUND_SPLIT_VIEW:
+        darkening_alpha = ShelfBackgroundAnimator::kMaxAlpha;
+        break;
     }
     target_color = color_utils::GetResultingPaintColor(
         SkColorSetA(kShelfDefaultBaseColor, darkening_alpha), target_color);
   }
 
   shelf_background_values->SetTargetValues(
-      SkColorSetA(target_color, target_shelf_color_alpha));
+      SkColorSetA(target_color, target_color_alpha_values.first));
   item_background_values->SetTargetValues(
-      SkColorSetA(target_color, target_item_color_alpha));
+      SkColorSetA(target_color, target_color_alpha_values.second));
 }
 
 void ShelfBackgroundAnimator::SetAnimationValues(double t) {

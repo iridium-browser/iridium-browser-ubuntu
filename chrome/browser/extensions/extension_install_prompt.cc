@@ -8,7 +8,6 @@
 
 #include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -23,12 +22,12 @@
 #include "chrome/grit/theme_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/image_loader.h"
 #include "extensions/browser/install/extension_install_ui.h"
-#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_resource.h"
@@ -114,35 +113,6 @@ ExtensionInstallPrompt::Prompt::InstallPromptPermissions::
 ExtensionInstallPrompt::PromptType
 ExtensionInstallPrompt::g_last_prompt_type_for_tests =
     ExtensionInstallPrompt::UNSET_PROMPT_TYPE;
-
-// This should match the PromptType enum.
-std::string ExtensionInstallPrompt::PromptTypeToString(PromptType type) {
-  switch (type) {
-    case INSTALL_PROMPT:
-      return "INSTALL_PROMPT";
-    case INLINE_INSTALL_PROMPT:
-      return "INLINE_INSTALL_PROMPT";
-    case RE_ENABLE_PROMPT:
-      return "RE_ENABLE_PROMPT";
-    case PERMISSIONS_PROMPT:
-      return "PERMISSIONS_PROMPT";
-    case EXTERNAL_INSTALL_PROMPT:
-      return "EXTERNAL_INSTALL_PROMPT";
-    case POST_INSTALL_PERMISSIONS_PROMPT:
-      return "POST_INSTALL_PERMISSIONS_PROMPT";
-    case REMOTE_INSTALL_PROMPT:
-      return "REMOTE_INSTALL_PROMPT";
-    case REPAIR_PROMPT:
-      return "REPAIR_PROMPT";
-    case DELEGATED_PERMISSIONS_PROMPT:
-      return "DELEGATED_PERMISSIONS_PROMPT";
-    case UNSET_PROMPT_TYPE:
-    case NUM_PROMPT_TYPES:
-      NOTREACHED();
-      break;
-  }
-  return "OTHER";
-}
 
 ExtensionInstallPrompt::Prompt::Prompt(PromptType type)
     : type_(type),
@@ -440,7 +410,7 @@ void ExtensionInstallPrompt::Prompt::AppendRatingStars(
     rating_fractional = 0;
   }
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   int i;
   for (i = 0; i < rating_integer; i++) {
     appender(rb.GetImageSkiaNamed(IDR_EXTENSIONS_RATING_STAR_ON), data);
@@ -589,7 +559,7 @@ ExtensionInstallPrompt::GetReEnablePromptTypeForExtension(
   bool is_remote_install =
       context &&
       extensions::ExtensionPrefs::Get(context)->HasDisableReason(
-          extension->id(), extensions::Extension::DISABLE_REMOTE_INSTALL);
+          extension->id(), extensions::disable_reason::DISABLE_REMOTE_INSTALL);
 
   return is_remote_install ? REMOTE_INSTALL_PROMPT : RE_ENABLE_PROMPT;
 }
@@ -652,7 +622,7 @@ void ExtensionInstallPrompt::ShowDialog(
     const SkBitmap* icon,
     const ShowDialogCallback& show_dialog_callback) {
   ShowDialog(done_callback, extension, icon,
-             base::MakeUnique<Prompt>(INSTALL_PROMPT), show_dialog_callback);
+             std::make_unique<Prompt>(INSTALL_PROMPT), show_dialog_callback);
 }
 
 void ExtensionInstallPrompt::ShowDialog(

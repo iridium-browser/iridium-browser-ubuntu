@@ -32,7 +32,6 @@ void ExportLayoutTestSpecificPreferences(
   to->loads_images_automatically = from.loads_images_automatically;
   to->plugins_enabled = from.plugins_enabled;
   to->tabs_to_links = from.tabs_to_links;
-  to->experimental_webgl_enabled = from.experimental_webgl_enabled;
   // experimentalCSSRegionsEnabled is deprecated and ignored.
   to->hyperlink_auditing_enabled = from.hyperlink_auditing_enabled;
   to->allow_running_insecure_content = from.allow_running_of_insecure_content;
@@ -101,6 +100,8 @@ void ApplyLayoutTestDefaultPreferences(WebPreferences* prefs) {
   prefs->viewport_enabled = command_line.HasSwitch(switches::kEnableViewport);
   prefs->default_minimum_page_scale_factor = 1.f;
   prefs->default_maximum_page_scale_factor = 4.f;
+  prefs->presentation_receiver =
+      command_line.HasSwitch(switches::kForcePresentationReceiverForTesting);
 }
 
 base::FilePath GetWebKitRootDirFilePath() {

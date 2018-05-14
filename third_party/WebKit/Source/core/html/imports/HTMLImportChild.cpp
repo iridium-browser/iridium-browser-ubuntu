@@ -30,9 +30,9 @@
 
 #include "core/html/imports/HTMLImportChild.h"
 
+#include "core/css/StyleEngine.h"
 #include "core/css/StyleSheetList.h"
 #include "core/dom/Document.h"
-#include "core/dom/StyleEngine.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/custom/V0CustomElement.h"
@@ -47,12 +47,14 @@ namespace blink {
 
 HTMLImportChild::HTMLImportChild(const KURL& url,
                                  HTMLImportLoader* loader,
+                                 HTMLImportChildClient* client,
                                  SyncMode sync)
-    : HTMLImport(sync), url_(url), loader_(loader), client_(nullptr) {
-  DCHECK(loader);
+    : HTMLImport(sync), url_(url), loader_(loader), client_(client) {
+  DCHECK(loader_);
+  DCHECK(client_);
 }
 
-HTMLImportChild::~HTMLImportChild() {}
+HTMLImportChild::~HTMLImportChild() = default;
 
 void HTMLImportChild::OwnerInserted() {
   if (!loader_->IsDone())
@@ -150,12 +152,6 @@ HTMLImportLoader* HTMLImportChild::Loader() const {
   return loader_;
 }
 
-void HTMLImportChild::SetClient(HTMLImportChildClient* client) {
-  DCHECK(client);
-  DCHECK(!client_);
-  client_ = client;
-}
-
 HTMLLinkElement* HTMLImportChild::Link() const {
   if (!client_)
     return nullptr;
@@ -163,14 +159,16 @@ HTMLLinkElement* HTMLImportChild::Link() const {
 }
 
 // Ensuring following invariants against the import tree:
-// - HTMLImportChild::firstImport() is the "first import" of the DFS order of
-//   the import tree.
-// - The "first import" manages all the children that is loaded by the document.
+// - HTMLImportLoader::FirstImport() is the "first import" of the DFS order of
+//   the import tree loaded by the loader.
+// - The "first import" manages all the children that are loaded by the
+// document.
 void HTMLImportChild::Normalize() {
-  if (!Loader()->IsFirstImport(this) &&
-      this->Precedes(Loader()->FirstImport())) {
-    HTMLImportChild* old_first = Loader()->FirstImport();
-    Loader()->MoveToFirst(this);
+  DCHECK(loader_);
+
+  if (!loader_->IsFirstImport(this) && Precedes(loader_->FirstImport())) {
+    HTMLImportChild* old_first = loader_->FirstImport();
+    loader_->MoveToFirst(this);
     TakeChildrenFrom(old_first);
   }
 
@@ -182,17 +180,7 @@ void HTMLImportChild::Normalize() {
   }
 }
 
-#if !defined(NDEBUG)
-void HTMLImportChild::ShowThis() {
-  bool is_first = Loader() ? Loader()->IsFirstImport(this) : false;
-  HTMLImport::ShowThis();
-  fprintf(stderr, " loader=%p first=%d, step=%p sync=%s url=%s", loader_.Get(),
-          is_first, custom_element_microtask_step_.Get(), IsSync() ? "Y" : "N",
-          Url().GetString().Utf8().data());
-}
-#endif
-
-DEFINE_TRACE(HTMLImportChild) {
+void HTMLImportChild::Trace(blink::Visitor* visitor) {
   visitor->Trace(custom_element_microtask_step_);
   visitor->Trace(loader_);
   visitor->Trace(client_);

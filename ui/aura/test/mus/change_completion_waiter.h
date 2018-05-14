@@ -18,14 +18,14 @@ namespace test {
 // A class which will Wait for next change of |type| to complete.
 class ChangeCompletionWaiter : public WindowTreeClientTestObserver {
  public:
-  ChangeCompletionWaiter(WindowTreeClient* client,
-                         ChangeType type,
-                         bool success);
+  ChangeCompletionWaiter(ChangeType type, bool success);
   ~ChangeCompletionWaiter() override;
 
   // Wait for the first change that occurred after construction of this object
-  // of |type| to complete. May return immediately if it's already done.
-  void Wait();
+  // of |type| to complete. May return immediately if it's already done. Returns
+  // true if a change was encountered whose success state matches that of
+  // the supplied success state, false otherwise.
+  bool Wait();
 
  private:
   // WindowTreeClientTestObserver:
@@ -48,9 +48,15 @@ class ChangeCompletionWaiter : public WindowTreeClientTestObserver {
   aura::ChangeType type_;
   uint32_t change_id_;
   bool success_;
+  bool success_matched_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(ChangeCompletionWaiter);
 };
+
+// Under mus and mash, waits until there are no more pending changes on the
+// default window tree (e.g. window bounds, window visibility, cursor). Returns
+// immediately under classic ash because window operations are synchronous.
+void WaitForAllChangesToComplete();
 
 }  // namespace test
 }  // namespace aura

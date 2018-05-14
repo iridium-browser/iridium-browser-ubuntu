@@ -10,7 +10,11 @@
 #include "services/ui/common/types.h"
 
 namespace gfx {
-class Point;
+class PointF;
+}
+
+namespace viz {
+class HitTestQuery;
 }
 
 namespace ui {
@@ -57,15 +61,19 @@ class EventDispatcherDelegate {
   virtual void OnCaptureChanged(ServerWindow* new_capture,
                                 ServerWindow* old_capture) = 0;
 
-  virtual void OnMouseCursorLocationChanged(const gfx::Point& point,
+  virtual void OnMouseCursorLocationChanged(const gfx::PointF& point,
                                             int64_t display_id) = 0;
 
-  virtual void OnEventChangesCursorVisibility(bool visible) = 0;
+  virtual void OnEventChangesCursorVisibility(const ui::Event& event,
+                                              bool visible) = 0;
+
+  virtual void OnEventChangesCursorTouchVisibility(const ui::Event& event,
+                                                   bool visible) = 0;
 
   // Dispatches an event to the specific client.
   virtual void DispatchInputEventToWindow(ServerWindow* target,
                                           ClientSpecificId client_id,
-                                          int64_t display_id,
+                                          const EventLocation& event_location,
                                           const ui::Event& event,
                                           Accelerator* accelerator) = 0;
 
@@ -85,13 +93,39 @@ class EventDispatcherDelegate {
   // TODO(riajiang): No need to update |location_in_display| and |display_id|
   // after ozone drm can tell us the right display the cursor is on for
   // drag-n-drop events. crbug.com/726470
-  virtual ServerWindow* GetRootWindowContaining(gfx::Point* location_in_display,
-                                                int64_t* display_id) = 0;
+  virtual ServerWindow* GetRootWindowForDisplay(int64_t display_id) = 0;
+
+  // Returns the root of |window| that is used for event dispatch. The returned
+  // value is used for coordinate conversion.
+  virtual ServerWindow* GetRootWindowForEventDispatch(ServerWindow* window) = 0;
+
+  // Returns true if |window| is in a display root. This is called when the
+  // hierarchy changes and |window| needs to be tested if it's still in a valid
+  // display root.
+  virtual bool IsWindowInDisplayRoot(const ServerWindow* window) = 0;
 
   // Called when event dispatch could not find a target. OnAccelerator may still
   // be called.
   virtual void OnEventTargetNotFound(const ui::Event& event,
                                      int64_t display_id) = 0;
+
+  // If an event is blocked by a modal window this function is used to determine
+  // which window the event should be dispatched to. Return null to indicate no
+  // window. |window| is the window the event would be targetted at if there was
+  // no modal window open.
+  virtual ServerWindow* GetFallbackTargetForEventBlockedByModal(
+      ServerWindow* window) = 0;
+
+  // Called when an event occurs that targets a window that should be blocked
+  // by a modal window. |modal_window| is the modal window that blocked the
+  // event.
+  virtual void OnEventOccurredOutsideOfModalWindow(
+      ServerWindow* modal_window) = 0;
+
+  virtual viz::HitTestQuery* GetHitTestQueryForDisplay(int64_t display_id) = 0;
+
+  virtual ServerWindow* GetWindowFromFrameSinkId(
+      const viz::FrameSinkId& frame_sink_id) = 0;
 
  protected:
   virtual ~EventDispatcherDelegate() {}

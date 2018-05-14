@@ -5,10 +5,11 @@
 #include "chrome/browser/supervised_user/supervised_user_navigation_throttle.h"
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/profiles/profile.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
+#include "chrome/common/chrome_features.h"
 #include "content/public/browser/navigation_handle.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
@@ -79,6 +81,7 @@ int GetHistogramValueForFilteringBehavior(
           // Should never happen, only used for requests from Webview
           NOTREACHED();
       }
+      FALLTHROUGH;
     case SupervisedUserURLFilter::INVALID:
       NOTREACHED();
   }
@@ -109,9 +112,9 @@ void RecordFilterResultEvent(
   // because of how the macro works (look up the histogram on the first
   // invocation and cache it in a static variable).
   if (safesites_histogram)
-    UMA_HISTOGRAM_SPARSE_SLOWLY("ManagedUsers.SafetyFilter", value);
+    base::UmaHistogramSparse("ManagedUsers.SafetyFilter", value);
   else
-    UMA_HISTOGRAM_SPARSE_SLOWLY("ManagedUsers.FilteringResult", value);
+    base::UmaHistogramSparse("ManagedUsers.FilteringResult", value);
 }
 
 }  // namespace
@@ -126,7 +129,7 @@ SupervisedUserNavigationThrottle::MaybeCreateThrottleFor(
       navigation_handle->GetWebContents()->GetBrowserContext());
   if (!profile->IsSupervised())
     return nullptr;
-  // Can't use base::MakeUnique because the constructor is private.
+  // Can't use std::make_unique because the constructor is private.
   return base::WrapUnique(
       new SupervisedUserNavigationThrottle(navigation_handle));
 }
@@ -159,8 +162,8 @@ SupervisedUserNavigationThrottle::CheckURL() {
   if (got_result)
     behavior_ = SupervisedUserURLFilter::INVALID;
   if (deferred_)
-    return ThrottleCheckResult::DEFER;
-  return ThrottleCheckResult::PROCEED;
+    return NavigationThrottle::DEFER;
+  return NavigationThrottle::PROCEED;
 }
 
 void SupervisedUserNavigationThrottle::ShowInterstitial(
@@ -182,7 +185,6 @@ void SupervisedUserNavigationThrottle::ShowInterstitialAsync(
   // May not yet have been set when ShowInterstitial was called, but should have
   // been set by the time this is invoked.
   DCHECK(deferred_);
-
   SupervisedUserNavigationObserver::OnRequestBlocked(
       navigation_handle()->GetWebContents(), navigation_handle()->GetURL(),
       reason,
@@ -214,6 +216,8 @@ void SupervisedUserNavigationThrottle::OnCheckDone(
   if (!deferred_)
     behavior_ = behavior;
 
+  reason_ = reason;
+
   ui::PageTransition transition = navigation_handle()->GetPageTransition();
 
   RecordFilterResultEvent(false, behavior, reason, uncertain, transition);
@@ -233,9 +237,28 @@ void SupervisedUserNavigationThrottle::OnCheckDone(
 }
 
 void SupervisedUserNavigationThrottle::OnInterstitialResult(
-    bool continue_request) {
-  if (continue_request)
-    Resume();
-  else
-    CancelDeferredNavigation(CANCEL);
+    CallbackActions action) {
+  switch (action) {
+    case kContinueNavigation: {
+      Resume();
+      break;
+    }
+    case kCancelNavigation: {
+      CancelDeferredNavigation(CANCEL);
+      break;
+    }
+    case kCancelWithInterstitial: {
+      DCHECK(base::FeatureList::IsEnabled(
+          features::kSupervisedUserCommittedInterstitials));
+      std::string interstitial_html =
+          SupervisedUserInterstitial::GetHTMLContents(
+              Profile::FromBrowserContext(
+                  navigation_handle()->GetWebContents()->GetBrowserContext()),
+              reason_);
+      // If committed interstitials are enabled, include the HTML content in the
+      // ThrottleCheckResult.
+      CancelDeferredNavigation(content::NavigationThrottle::ThrottleCheckResult(
+          CANCEL, net::ERR_BLOCKED_BY_CLIENT, interstitial_html));
+    }
+  }
 }

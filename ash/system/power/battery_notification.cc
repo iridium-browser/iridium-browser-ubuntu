@@ -5,19 +5,18 @@
 #include "ash/system/power/battery_notification.h"
 
 #include "ash/resources/grit/ash_resources.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/system/power/power_status.h"
-#include "ash/system/system_notifier.h"
 #include "base/i18n/message_formatter.h"
 #include "base/i18n/time_formatting.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/notification.h"
+#include "ui/message_center/public/cpp/notification.h"
 
 using message_center::MessageCenter;
 using message_center::Notification;
@@ -27,21 +26,34 @@ namespace ash {
 namespace {
 
 const char kBatteryNotificationId[] = "battery";
+const char kNotifierBattery[] = "ash.battery";
 
-gfx::Image& GetBatteryImage(TrayPower::NotificationState notification_state) {
-  int resource_id;
+const gfx::VectorIcon& GetBatteryImageMD(
+    TrayPower::NotificationState notification_state) {
   if (PowerStatus::Get()->IsUsbChargerConnected()) {
-    resource_id = IDR_AURA_NOTIFICATION_BATTERY_FLUCTUATING;
+    return kNotificationBatteryFluctuatingIcon;
   } else if (notification_state == TrayPower::NOTIFICATION_LOW_POWER) {
-    resource_id = IDR_AURA_NOTIFICATION_BATTERY_LOW;
+    return kNotificationBatteryLowIcon;
   } else if (notification_state == TrayPower::NOTIFICATION_CRITICAL) {
-    resource_id = IDR_AURA_NOTIFICATION_BATTERY_CRITICAL;
+    return kNotificationBatteryCriticalIcon;
   } else {
     NOTREACHED();
-    resource_id = 0;
+    return gfx::kNoneIcon;
   }
+}
 
-  return ui::ResourceBundle::GetSharedInstance().GetImageNamed(resource_id);
+message_center::SystemNotificationWarningLevel GetWarningLevelMD(
+    TrayPower::NotificationState notification_state) {
+  if (PowerStatus::Get()->IsUsbChargerConnected()) {
+    return message_center::SystemNotificationWarningLevel::WARNING;
+  } else if (notification_state == TrayPower::NOTIFICATION_LOW_POWER) {
+    return message_center::SystemNotificationWarningLevel::WARNING;
+  } else if (notification_state == TrayPower::NOTIFICATION_CRITICAL) {
+    return message_center::SystemNotificationWarningLevel::CRITICAL_WARNING;
+  } else {
+    NOTREACHED();
+    return message_center::SystemNotificationWarningLevel::NORMAL;
+  }
 }
 
 std::unique_ptr<Notification> CreateNotification(
@@ -77,13 +89,15 @@ std::unique_ptr<Notification> CreateNotification(
   if (!time_message.empty())
     message = message + base::ASCIIToUTF16("\n") + time_message;
 
-  std::unique_ptr<Notification> notification(new Notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE, kBatteryNotificationId,
-      base::string16(), message, GetBatteryImage(notification_state),
-      base::string16(), GURL(),
-      message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
-                                 system_notifier::kNotifierBattery),
-      message_center::RichNotificationData(), NULL));
+  std::unique_ptr<Notification> notification =
+      Notification::CreateSystemNotification(
+          message_center::NOTIFICATION_TYPE_SIMPLE, kBatteryNotificationId,
+          base::string16(), message, gfx::Image(), base::string16(), GURL(),
+          message_center::NotifierId(
+              message_center::NotifierId::SYSTEM_COMPONENT, kNotifierBattery),
+          message_center::RichNotificationData(), nullptr,
+          GetBatteryImageMD(notification_state),
+          GetWarningLevelMD(notification_state));
   notification->SetSystemPriority();
   return notification;
 }

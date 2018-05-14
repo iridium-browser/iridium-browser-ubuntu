@@ -21,8 +21,6 @@ import org.chromium.chrome.browser.physicalweb.PhysicalWebDiagnosticsPage;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetMetrics;
 import org.chromium.content_public.browser.LoadUrlParams;
 
 /**
@@ -35,14 +33,7 @@ public class NativePageFactory {
     static class NativePageBuilder {
         protected NativePage buildNewTabPage(ChromeActivity activity, Tab tab,
                 TabModelSelector tabModelSelector) {
-            if (activity.getBottomSheet() != null) {
-                BottomSheet sheet = activity.getBottomSheet();
-                sheet.getBottomSheetMetrics().recordNativeNewTabPageShown();
-                sheet.getBottomSheetMetrics().recordSheetOpenReason(
-                        BottomSheetMetrics.OPENED_BY_NEW_TAB_CREATION);
-                sheet.setSheetState(BottomSheet.SHEET_STATE_FULL, true);
-                return null;
-            } else if (tab.isIncognito()) {
+            if (tab.isIncognito()) {
                 return new IncognitoNewTabPage(activity);
             } else {
                 return new NewTabPage(activity, new TabShim(tab), tabModelSelector);

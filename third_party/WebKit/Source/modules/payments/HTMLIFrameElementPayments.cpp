@@ -6,16 +6,15 @@
 
 #include "core/dom/QualifiedName.h"
 #include "core/html/HTMLIFrameElement.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 
 namespace blink {
 
-HTMLIFrameElementPayments::HTMLIFrameElementPayments() {}
+HTMLIFrameElementPayments::HTMLIFrameElementPayments() = default;
 
 // static
-const char* HTMLIFrameElementPayments::SupplementName() {
-  return "HTMLIFrameElementPayments";
-}
+const char HTMLIFrameElementPayments::kSupplementName[] =
+    "HTMLIFrameElementPayments";
 
 // static
 bool HTMLIFrameElementPayments::FastHasAttribute(
@@ -37,11 +36,10 @@ void HTMLIFrameElementPayments::SetBooleanAttribute(const QualifiedName& name,
 HTMLIFrameElementPayments& HTMLIFrameElementPayments::From(
     HTMLIFrameElement& iframe) {
   HTMLIFrameElementPayments* supplement =
-      static_cast<HTMLIFrameElementPayments*>(
-          Supplement<HTMLIFrameElement>::From(iframe, SupplementName()));
+      Supplement<HTMLIFrameElement>::From<HTMLIFrameElementPayments>(iframe);
   if (!supplement) {
     supplement = new HTMLIFrameElementPayments();
-    ProvideTo(iframe, SupplementName(), supplement);
+    ProvideTo(iframe, supplement);
   }
   return *supplement;
 }
@@ -53,7 +51,7 @@ bool HTMLIFrameElementPayments::AllowPaymentRequest(
          element.FastHasAttribute(HTMLNames::allowpaymentrequestAttr);
 }
 
-DEFINE_TRACE(HTMLIFrameElementPayments) {
+void HTMLIFrameElementPayments::Trace(blink::Visitor* visitor) {
   Supplement<HTMLIFrameElement>::Trace(visitor);
 }
 

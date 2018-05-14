@@ -78,7 +78,7 @@ DataObjectItem* DataObjectItem::CreateFromHTML(const String& html,
 }
 
 DataObjectItem* DataObjectItem::CreateFromSharedBuffer(
-    PassRefPtr<SharedBuffer> buffer,
+    scoped_refptr<SharedBuffer> buffer,
     const KURL& source_url,
     const String& filename_extension,
     const AtomicString& content_disposition) {
@@ -128,13 +128,11 @@ File* DataObjectItem::GetAsFile() const {
   DCHECK_EQ(source_, kPasteboardSource);
   if (GetType() == kMimeTypeImagePng) {
     WebBlobInfo blob_info = Platform::Current()->Clipboard()->ReadImage(
-        WebClipboard::kBufferStandard);
+        mojom::ClipboardBuffer::kStandard);
     if (blob_info.size() < 0)
       return nullptr;
-    return File::Create(
-        "image.png", CurrentTimeMS(),
-        BlobDataHandle::Create(blob_info.Uuid(), blob_info.GetType(),
-                               blob_info.size()));
+    return File::Create("image.png", CurrentTimeMS(),
+                        blob_info.GetBlobHandle());
   }
 
   return nullptr;
@@ -148,7 +146,7 @@ String DataObjectItem::GetAsString() const {
 
   DCHECK_EQ(source_, kPasteboardSource);
 
-  WebClipboard::Buffer buffer = Pasteboard::GeneralPasteboard()->GetBuffer();
+  mojom::ClipboardBuffer buffer = Pasteboard::GeneralPasteboard()->GetBuffer();
   String data;
   // This is ugly but there's no real alternative.
   if (type_ == kMimeTypeTextPlain) {
@@ -185,7 +183,7 @@ String DataObjectItem::FileSystemId() const {
   return file_system_id_;
 }
 
-DEFINE_TRACE(DataObjectItem) {
+void DataObjectItem::Trace(blink::Visitor* visitor) {
   visitor->Trace(file_);
 }
 

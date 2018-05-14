@@ -29,6 +29,7 @@ TEST(MimeUtilTest, ExtensionTest) {
     {FILE_PATH_LITERAL("css"), "text/css", true},
     {FILE_PATH_LITERAL("pjp"), "image/jpeg", true},
     {FILE_PATH_LITERAL("pjpeg"), "image/jpeg", true},
+    {FILE_PATH_LITERAL("json"), "application/json", true},
 #if defined(OS_CHROMEOS)
     // These are test cases for testing platform mime types on Chrome OS.
     {FILE_PATH_LITERAL("epub"), "application/epub+zip", true},
@@ -249,11 +250,7 @@ TEST(MimeUtilTest, TestGetExtensionsForMimeType) {
     {"message/", 0, NULL, true},
     {"image/bmp", 1, "bmp"},
     {"video/*", 6, "mp4"},
-#if defined(OS_LINUX) || defined(OS_ANDROID) || defined(OS_IOS)
-    {"video/*", 6, "mpg"},
-#else
     {"video/*", 6, "mpeg"},
-#endif
     {"audio/*", 6, "oga"},
     {"aUDIo/*", 6, "wav"},
   };

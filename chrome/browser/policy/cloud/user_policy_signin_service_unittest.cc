@@ -12,6 +12,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -96,8 +97,7 @@ UserCloudPolicyManager* BuildCloudPolicyManager(
   return new UserCloudPolicyManager(
       std::unique_ptr<UserCloudPolicyStore>(store), base::FilePath(),
       std::unique_ptr<CloudExternalDataManager>(),
-      base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
-      base::ThreadTaskRunnerHandle::Get());
+      base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get());
 }
 
 class UserPolicySigninServiceTest : public testing::Test {
@@ -141,7 +141,7 @@ class UserPolicySigninServiceTest : public testing::Test {
         &device_management_service_);
 
     local_state_.reset(new TestingPrefServiceSimple);
-    chrome::RegisterLocalState(local_state_->registry());
+    RegisterLocalState(local_state_->registry());
     system_request_context_getter_ = new net::TestURLRequestContextGetter(
         base::ThreadTaskRunnerHandle::Get());
     TestingBrowserProcess::GetGlobal()->SetSystemRequestContext(
@@ -155,7 +155,7 @@ class UserPolicySigninServiceTest : public testing::Test {
     // up a UserCloudPolicyManager with a MockUserCloudPolicyStore.
     std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> prefs(
         new sync_preferences::TestingPrefServiceSyncable());
-    chrome::RegisterUserProfilePrefs(prefs->registry());
+    RegisterUserProfilePrefs(prefs->registry());
 
     // UserCloudPolicyManagerFactory isn't a real
     // BrowserContextKeyedServiceFactory (it derives from

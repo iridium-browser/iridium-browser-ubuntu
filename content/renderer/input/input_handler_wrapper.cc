@@ -24,10 +24,12 @@ InputHandlerWrapper::InputHandlerWrapper(
     bool enable_smooth_scrolling)
     : input_handler_manager_(input_handler_manager),
       routing_id_(routing_id),
-      input_handler_proxy_(input_handler.get(),
-                           this,
-                           base::FeatureList::IsEnabled(
-                               features::kTouchpadAndWheelScrollLatching)),
+      input_handler_proxy_(
+          input_handler.get(),
+          this,
+          base::FeatureList::IsEnabled(
+              features::kTouchpadAndWheelScrollLatching),
+          base::FeatureList::IsEnabled(features::kAsyncWheelEvents)),
       main_task_runner_(main_task_runner),
       render_widget_(render_widget) {
   DCHECK(input_handler);
@@ -40,14 +42,7 @@ InputHandlerWrapper::~InputHandlerWrapper() {
 void InputHandlerWrapper::NeedsMainFrame() {
   main_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&RenderWidget::SetNeedsMainFrame, render_widget_));
-}
-
-void InputHandlerWrapper::TransferActiveWheelFlingAnimation(
-    const blink::WebActiveWheelFlingParameters& params) {
-  main_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&RenderWidget::TransferActiveWheelFlingAnimation,
-                            render_widget_, params));
+      base::BindOnce(&RenderWidget::SetNeedsMainFrame, render_widget_));
 }
 
 void InputHandlerWrapper::DispatchNonBlockingEventToMainThread(
@@ -74,12 +69,14 @@ void InputHandlerWrapper::DidOverscroll(
     const gfx::Vector2dF& accumulated_overscroll,
     const gfx::Vector2dF& latest_overscroll_delta,
     const gfx::Vector2dF& current_fling_velocity,
-    const gfx::PointF& causal_event_viewport_point) {
+    const gfx::PointF& causal_event_viewport_point,
+    const cc::OverscrollBehavior& overscroll_behavior) {
   ui::DidOverscrollParams params;
   params.accumulated_overscroll = accumulated_overscroll;
   params.latest_overscroll_delta = latest_overscroll_delta;
   params.current_fling_velocity = current_fling_velocity;
   params.causal_event_viewport_point = causal_event_viewport_point;
+  params.overscroll_behavior = overscroll_behavior;
   input_handler_manager_->DidOverscroll(routing_id_, params);
 }
 
@@ -110,8 +107,11 @@ void InputHandlerWrapper::GenerateScrollBeginAndSendToMainThread(
 }
 
 void InputHandlerWrapper::SetWhiteListedTouchAction(
-    cc::TouchAction touch_action) {
-  input_handler_manager_->SetWhiteListedTouchAction(routing_id_, touch_action);
+    cc::TouchAction touch_action,
+    uint32_t unique_touch_event_id,
+    ui::InputHandlerProxy::EventDisposition event_disposition) {
+  input_handler_manager_->SetWhiteListedTouchAction(
+      routing_id_, touch_action, unique_touch_event_id, event_disposition);
 }
 
 }  // namespace content

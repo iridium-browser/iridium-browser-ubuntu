@@ -19,6 +19,32 @@
 
 namespace blink {
 
+namespace {
+
+// This method and its dependencies must remain constant time, thus not branch
+// based on the value of |buffer| while encoding, assuming a known length.
+String ToBase64URLWithoutPadding(DOMArrayBuffer* buffer) {
+  String value = WTF::Base64URLEncode(static_cast<const char*>(buffer->Data()),
+                                      buffer->ByteLength());
+  DCHECK_GT(value.length(), 0u);
+
+  unsigned padding_to_remove = 0;
+  for (unsigned position = value.length() - 1; position; --position) {
+    if (value[position] != '=')
+      break;
+
+    ++padding_to_remove;
+  }
+
+  DCHECK_LT(padding_to_remove, 4u);
+  DCHECK_GT(value.length(), padding_to_remove);
+
+  value.Truncate(value.length() - padding_to_remove);
+  return value;
+}
+
+}  // namespace
+
 PushSubscription* PushSubscription::Take(
     ScriptPromiseResolver*,
     std::unique_ptr<WebPushSubscription> push_subscription,
@@ -44,7 +70,7 @@ PushSubscription::PushSubscription(
                                    subscription.auth.size())),
       service_worker_registration_(service_worker_registration) {}
 
-PushSubscription::~PushSubscription() {}
+PushSubscription::~PushSubscription() = default;
 
 DOMTimeStamp PushSubscription::expirationTime(bool& out_is_null) const {
   // This attribute reflects the time at which the subscription will expire,
@@ -73,7 +99,7 @@ ScriptPromise PushSubscription::unsubscribe(ScriptState* script_state) {
 
   web_push_provider->Unsubscribe(
       service_worker_registration_->WebRegistration(),
-      WTF::MakeUnique<CallbackPromiseAdapter<bool, PushError>>(resolver));
+      std::make_unique<CallbackPromiseAdapter<bool, PushError>>(resolver));
   return promise;
 }
 
@@ -85,21 +111,20 @@ ScriptValue PushSubscription::toJSONForBinding(ScriptState* script_state) {
   result.AddNull("expirationTime");
 
   V8ObjectBuilder keys(script_state);
-  keys.Add("p256dh",
-           WTF::Base64URLEncode(static_cast<const char*>(p256dh_->Data()),
-                                p256dh_->ByteLength()));
-  keys.Add("auth", WTF::Base64URLEncode(static_cast<const char*>(auth_->Data()),
-                                        auth_->ByteLength()));
+  keys.Add("p256dh", ToBase64URLWithoutPadding(p256dh_));
+  keys.Add("auth", ToBase64URLWithoutPadding(auth_));
+
   result.Add("keys", keys);
 
   return result.GetScriptValue();
 }
 
-DEFINE_TRACE(PushSubscription) {
+void PushSubscription::Trace(blink::Visitor* visitor) {
   visitor->Trace(options_);
   visitor->Trace(p256dh_);
   visitor->Trace(auth_);
   visitor->Trace(service_worker_registration_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

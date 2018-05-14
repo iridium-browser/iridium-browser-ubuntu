@@ -37,7 +37,7 @@ class PaintLayerScrollableAreaTest : public RenderingTest {
       : RenderingTest(EmptyLocalFrameClient::Create()),
         chrome_client_(new ScrollableAreaMockChromeClient) {}
 
-  ~PaintLayerScrollableAreaTest() {
+  ~PaintLayerScrollableAreaTest() override {
     ::testing::Mock::VerifyAndClearExpectations(&GetChromeClient());
   }
 
@@ -64,58 +64,96 @@ TEST_F(PaintLayerScrollableAreaTest,
        CanPaintBackgroundOntoScrollingContentsLayer) {
   GetDocument().GetFrame()->GetSettings()->SetPreferCompositingToLCDTextEnabled(
       true);
-  SetBodyInnerHTML(
-      "<style>"
-      ".scroller { overflow: scroll; will-change: transform; width: 300px; "
-      "height: 300px;} .spacer { height: 1000px; }"
-      "#scroller13::-webkit-scrollbar { width: 13px; height: 13px;}"
-      "</style>"
-      "<div id='scroller1' class='scroller' style='background: white local;'>"
-      "    <div id='negative-composited-child' style='background-color: red; "
-      "width: 1px; height: 1px; position: absolute; backface-visibility: "
-      "hidden; z-index: -1'></div>"
-      "    <div class='spacer'></div>"
-      "</div>"
-      "<div id='scroller2' class='scroller' style='background: white "
-      "content-box; padding: 10px;'><div class='spacer'></div></div>"
-      "<div id='scroller3' class='scroller' style='background: white local "
-      "content-box; padding: 10px;'><div class='spacer'></div></div>"
-      "<div id='scroller4' class='scroller' style='background: "
-      "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUg), white local;'><div "
-      "class='spacer'></div></div>"
-      "<div id='scroller5' class='scroller' style='background: "
-      "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUg) local, white "
-      "local;'><div class='spacer'></div></div>"
-      "<div id='scroller6' class='scroller' style='background: "
-      "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUg) local, white "
-      "padding-box; padding: 10px;'><div class='spacer'></div></div>"
-      "<div id='scroller7' class='scroller' style='background: "
-      "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUg) local, white "
-      "content-box; padding: 10px;'><div class='spacer'></div></div>"
-      "<div id='scroller8' class='scroller' style='background: white "
-      "border-box;'><div class='spacer'></div></div>"
-      "<div id='scroller9' class='scroller' style='background: white "
-      "border-box; border: 10px solid black;'><div class='spacer'></div></div>"
-      "<div id='scroller10' class='scroller' style='background: white "
-      "border-box; border: 10px solid rgba(0, 0, 0, 0.5);'><div "
-      "class='spacer'></div></div>"
-      "<div id='scroller11' class='scroller' style='background: white "
-      "content-box;'><div class='spacer'></div></div>"
-      "<div id='scroller12' class='scroller' style='background: white "
-      "content-box; padding: 10px;'><div class='spacer'></div></div>"
-      "<div id='scroller13' class='scroller' style='background: white "
-      "border-box;'><div class='spacer'></div></div>"
-      "<div id='scroller14' class='scroller' style='background: white; border: "
-      "1px solid black; outline: 1px solid blue; outline-offset: -1px;'><div "
-      "class='spacer'></div></div>"
-      "<div id='scroller15' class='scroller' style='background: white; border: "
-      "1px solid black; outline: 1px solid blue; outline-offset: -2px;'><div "
-      "class='spacer'></div></div>"
-      "<div id='scroller16' class='scroller' style='background: white; clip: "
-      "rect(0px,10px,10px,0px);'><div class='spacer'></div></div>"
-      "<div id='scroller17' class='scroller' style='background:"
-      "rgba(255, 255, 255, 0.5) border-box; border: 5px solid "
-      "rgba(0, 0, 0, 0.5);'><div class='spacer'></div></div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      .scroller {
+        overflow: scroll;
+        will-change: transform;
+        width: 300px;
+        height: 300px;
+      }
+      .spacer { height: 1000px; }
+      #scroller13::-webkit-scrollbar {
+        width: 13px;
+        height: 13px;
+      }
+    </style>
+    <div id='scroller1' class='scroller' style='background: white local;'>
+      <div id='negative-composited-child' style='background-color: red;
+          width: 1px; height: 1px; position: absolute;
+          backface-visibility: hidden; z-index: -1'></div>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller2' class='scroller' style='background: white content-box;
+        padding: 10px;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller3' class='scroller'
+        style='background: white local content-box; padding: 10px;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller4' class='scroller'
+        style='background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUg),
+        white local;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller5' class='scroller'
+        style='background:
+        url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUg) local, white local;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller6' class='scroller'
+        style='background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUg)
+        local, white padding-box; padding: 10px;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller7' class='scroller'
+        style='background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUg)
+        local, white content-box; padding: 10px;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller8' class='scroller' style='background: white border-box;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller9' class='scroller' style='background: white border-box;
+        border: 10px solid black;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller10' class='scroller' style='background: white border-box;
+        border: 10px solid rgba(0, 0, 0, 0.5);'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller11' class='scroller'
+        style='background: white content-box;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller12' class='scroller' style='background: white content-box;
+        padding: 10px;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller13' class='scroller' style='background: white border-box;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller14' class='scroller' style='background: white;
+        border: 1px solid black; outline: 1px solid blue;
+        outline-offset: -1px;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller15' class='scroller' style='background: white;
+        border: 1px solid black; outline: 1px solid blue;
+        outline-offset: -2px;'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller16' class='scroller' style='position: absolute;
+        background: white; clip: rect(0px,10px,10px,0px);'>
+      <div class='spacer'></div>
+    </div>
+    <div id='scroller17' class='scroller'
+        style='background: rgba(255, 255, 255, 0.5) border-box;
+        border: 5px solid rgba(0, 0, 0, 0.5);'>
+      <div class='spacer'></div>
+    </div>
+  )HTML");
 
   // #scroller1 cannot paint background into scrolling contents layer because it
   // has a negative z-index child.
@@ -212,16 +250,17 @@ TEST_F(PaintLayerScrollableAreaTest,
 }
 
 TEST_F(PaintLayerScrollableAreaTest, OpaqueContainedLayersPromoted) {
-  RuntimeEnabledFeatures::SetCompositeOpaqueScrollersEnabled(true);
+  ScopedCompositeOpaqueScrollersForTest composite_opaque_scrollers(true);
 
-  SetBodyInnerHTML(
-      "<style>"
-      "#scroller { overflow: scroll; height: 200px; width: 200px; "
-      "contain: paint; background: white local content-box; "
-      "border: 10px solid rgba(0, 255, 0, 0.5); }"
-      "#scrolled { height: 300px; }"
-      "</style>"
-      "<div id=\"scroller\"><div id=\"scrolled\"></div></div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #scroller { overflow: scroll; height: 200px; width: 200px;
+    contain: paint; background: white local content-box;
+    border: 10px solid rgba(0, 255, 0, 0.5); }
+    #scrolled { height: 300px; }
+    </style>
+    <div id="scroller"><div id="scrolled"></div></div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
@@ -238,20 +277,21 @@ TEST_F(PaintLayerScrollableAreaTest, OpaqueContainedLayersPromoted) {
 // Promoting the scroller would also require promoting the positioned div
 // which would lose subpixel anti-aliasing due to its transparent background.
 TEST_F(PaintLayerScrollableAreaTest, NonContainedLayersNotPromoted) {
-  RuntimeEnabledFeatures::SetCompositeOpaqueScrollersEnabled(true);
+  ScopedCompositeOpaqueScrollersForTest composite_opaque_scrollers(true);
 
-  SetBodyInnerHTML(
-      "<style>"
-      "#scroller { overflow: scroll; height: 200px; width: 200px; "
-      "background: white local content-box; "
-      "border: 10px solid rgba(0, 255, 0, 0.5); }"
-      "#scrolled { height: 300px; }"
-      "#positioned { position: relative; }"
-      "</style>"
-      "<div id=\"scroller\">"
-      "  <div id=\"positioned\">Not contained by scroller.</div>"
-      "  <div id=\"scrolled\"></div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #scroller { overflow: scroll; height: 200px; width: 200px;
+    background: white local content-box;
+    border: 10px solid rgba(0, 255, 0, 0.5); }
+    #scrolled { height: 300px; }
+    #positioned { position: relative; }
+    </style>
+    <div id="scroller">
+      <div id="positioned">Not contained by scroller.</div>
+      <div id="scrolled"></div>
+    </div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
@@ -264,16 +304,17 @@ TEST_F(PaintLayerScrollableAreaTest, NonContainedLayersNotPromoted) {
 }
 
 TEST_F(PaintLayerScrollableAreaTest, TransparentLayersNotPromoted) {
-  RuntimeEnabledFeatures::SetCompositeOpaqueScrollersEnabled(true);
+  ScopedCompositeOpaqueScrollersForTest composite_opaque_scrollers(true);
 
-  SetBodyInnerHTML(
-      "<style>"
-      "#scroller { overflow: scroll; height: 200px; width: 200px; background: "
-      "rgba(0, 255, 0, 0.5) local content-box; border: 10px solid rgba(0, 255, "
-      "0, 0.5); contain: paint; }"
-      "#scrolled { height: 300px; }"
-      "</style>"
-      "<div id=\"scroller\"><div id=\"scrolled\"></div></div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #scroller { overflow: scroll; height: 200px; width: 200px; background:
+    rgba(0, 255, 0, 0.5) local content-box; border: 10px solid rgba(0, 255,
+    0, 0.5); contain: paint; }
+    #scrolled { height: 300px; }
+    </style>
+    <div id="scroller"><div id="scrolled"></div></div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
@@ -286,15 +327,16 @@ TEST_F(PaintLayerScrollableAreaTest, TransparentLayersNotPromoted) {
 }
 
 TEST_F(PaintLayerScrollableAreaTest, OpaqueLayersDepromotedOnStyleChange) {
-  RuntimeEnabledFeatures::SetCompositeOpaqueScrollersEnabled(true);
+  ScopedCompositeOpaqueScrollersForTest composite_opaque_scrollers(true);
 
-  SetBodyInnerHTML(
-      "<style>"
-      "#scroller { overflow: scroll; height: 200px; width: 200px; background: "
-      "white local content-box; contain: paint; }"
-      "#scrolled { height: 300px; }"
-      "</style>"
-      "<div id=\"scroller\"><div id=\"scrolled\"></div></div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #scroller { overflow: scroll; height: 200px; width: 200px; background:
+    white local content-box; contain: paint; }
+    #scrolled { height: 300px; }
+    </style>
+    <div id="scroller"><div id="scrolled"></div></div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
@@ -316,15 +358,16 @@ TEST_F(PaintLayerScrollableAreaTest, OpaqueLayersDepromotedOnStyleChange) {
 }
 
 TEST_F(PaintLayerScrollableAreaTest, OpaqueLayersPromotedOnStyleChange) {
-  RuntimeEnabledFeatures::SetCompositeOpaqueScrollersEnabled(true);
+  ScopedCompositeOpaqueScrollersForTest composite_opaque_scrollers(true);
 
-  SetBodyInnerHTML(
-      "<style>"
-      "#scroller { overflow: scroll; height: 200px; width: 200px; background: "
-      "rgba(255,255,255,0.5) local content-box; contain: paint; }"
-      "#scrolled { height: 300px; }"
-      "</style>"
-      "<div id=\"scroller\"><div id=\"scrolled\"></div></div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #scroller { overflow: scroll; height: 200px; width: 200px; background:
+    rgba(255,255,255,0.5) local content-box; contain: paint; }
+    #scrolled { height: 300px; }
+    </style>
+    <div id="scroller"><div id="scrolled"></div></div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
@@ -352,15 +395,16 @@ TEST_F(PaintLayerScrollableAreaTest, OpaqueLayersPromotedOnStyleChange) {
 TEST_F(PaintLayerScrollableAreaTest, OnlyNonTransformedOpaqueLayersPromoted) {
   ScopedCompositeOpaqueScrollersForTest composite_opaque_scrollers(true);
 
-  SetBodyInnerHTML(
-      "<style>"
-      "#scroller { overflow: scroll; height: 200px; width: 200px; background: "
-      "white local content-box; contain: paint; }"
-      "#scrolled { height: 300px; }"
-      "</style>"
-      "<div id=\"parent\">"
-      "  <div id=\"scroller\"><div id=\"scrolled\"></div></div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #scroller { overflow: scroll; height: 200px; width: 200px; background:
+    white local content-box; contain: paint; }
+    #scrolled { height: 300px; }
+    </style>
+    <div id="parent">
+      <div id="scroller"><div id="scrolled"></div></div>
+    </div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
@@ -406,15 +450,16 @@ TEST_F(PaintLayerScrollableAreaTest, OnlyNonTransformedOpaqueLayersPromoted) {
 TEST_F(PaintLayerScrollableAreaTest, OnlyOpaqueLayersPromoted) {
   ScopedCompositeOpaqueScrollersForTest composite_opaque_scrollers(true);
 
-  SetBodyInnerHTML(
-      "<style>"
-      "#scroller { overflow: scroll; height: 200px; width: 200px; background: "
-      "white local content-box; contain: paint; }"
-      "#scrolled { height: 300px; }"
-      "</style>"
-      "<div id=\"parent\">"
-      "  <div id=\"scroller\"><div id=\"scrolled\"></div></div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #scroller { overflow: scroll; height: 200px; width: 200px; background:
+    white local content-box; contain: paint; }
+    #scrolled { height: 300px; }
+    </style>
+    <div id="parent">
+      <div id="scroller"><div id="scrolled"></div></div>
+    </div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
@@ -455,17 +500,71 @@ TEST_F(PaintLayerScrollableAreaTest, OnlyOpaqueLayersPromoted) {
   EXPECT_FALSE(paint_layer->GraphicsLayerBacking());
 }
 
+// Test that <input> elements get promoted with "will-change:transform".
+TEST_F(PaintLayerScrollableAreaTest, InputElementPromotionTest) {
+  SetBodyInnerHTML(R"HTML(
+    <!DOCTYPE html>
+    <style>
+     .composited { will-change: transform; }
+    </style>
+    <input id='input' width=10 style='font-size:40pt;'/>
+  )HTML");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  Element* element = GetDocument().getElementById("input");
+  PaintLayer* paint_layer =
+      ToLayoutBoxModelObject(element->GetLayoutObject())->Layer();
+  ASSERT_FALSE(paint_layer);
+
+  element->setAttribute("class", "composited");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  paint_layer = ToLayoutBoxModelObject(element->GetLayoutObject())->Layer();
+  ASSERT_TRUE(paint_layer);
+  ASSERT_TRUE(paint_layer->HasCompositedLayerMapping());
+}
+
+// Test that <select> elements get promoted with "will-change:transform".
+TEST_F(PaintLayerScrollableAreaTest, SelectElementPromotionTest) {
+  SetBodyInnerHTML(R"HTML(
+    <!DOCTYPE html>
+    <style>
+     .composited { will-change: transform; }
+    </style>
+    <select id='select' size='2'>
+      <option> value 1</option>
+      <option> value 2</option>
+      <option> value 3</option>
+      <option> value 4</option>
+    </select>
+  )HTML");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  Element* element = GetDocument().getElementById("select");
+  PaintLayer* paint_layer =
+      ToLayoutBoxModelObject(element->GetLayoutObject())->Layer();
+  // Paint layer is created on most platforms but not on all of them, e.g.
+  // Android Nexus 4. It's better not to check paint_layer separately.
+  ASSERT_TRUE(!paint_layer || !paint_layer->HasCompositedLayerMapping());
+
+  element->setAttribute("class", "composited");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  paint_layer = ToLayoutBoxModelObject(element->GetLayoutObject())->Layer();
+  ASSERT_TRUE(paint_layer);
+  ASSERT_TRUE(paint_layer->HasCompositedLayerMapping());
+}
+
 // Ensure OverlayScrollbarColorTheme get updated when page load
 TEST_F(PaintLayerScrollableAreaTest, OverlayScrollbarColorThemeUpdated) {
-  SetBodyInnerHTML(
-      "<style>"
-      "div { overflow: scroll; }"
-      "#white { background-color: white; }"
-      "#black { background-color: black; }"
-      "</style>"
-      "<div id=\"none\">a</div>"
-      "<div id=\"white\">b</div>"
-      "<div id=\"black\">c</div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    div { overflow: scroll; }
+    #white { background-color: white; }
+    #black { background-color: black; }
+    </style>
+    <div id="none">a</div>
+    <div id="white">b</div>
+    <div id="black">c</div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   Element* none = GetDocument().getElementById("none");
@@ -495,15 +594,16 @@ TEST_F(PaintLayerScrollableAreaTest, OverlayScrollbarColorThemeUpdated) {
 // scrolling contents layer to not be promoted.
 TEST_F(PaintLayerScrollableAreaTest,
        OnlyAutoClippedScrollingContentsLayerPromoted) {
-  SetBodyInnerHTML(
-      "<style>"
-      ".clip { clip: rect(0px,60px,50px,0px); }"
-      "#scroller { position: absolute; overflow: auto;"
-      "height: 100px; width: 100px; background: grey;"
-      "will-change:transform; }"
-      "#scrolled { height: 300px; }"
-      "</style>"
-      "<div id=\"scroller\"><div id=\"scrolled\"></div></div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    .clip { clip: rect(0px,60px,50px,0px); }
+    #scroller { position: absolute; overflow: auto;
+    height: 100px; width: 100px; background: grey;
+    will-change:transform; }
+    #scrolled { height: 300px; }
+    </style>
+    <div id="scroller"><div id="scrolled"></div></div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   Element* scroller = GetDocument().getElementById("scroller");
@@ -528,12 +628,13 @@ TEST_F(PaintLayerScrollableAreaTest,
 }
 
 TEST_F(PaintLayerScrollableAreaTest, HideTooltipWhenScrollPositionChanges) {
-  SetBodyInnerHTML(
-      "<style>"
-      "#scroller { width: 100px; height: 100px; overflow: scroll; }"
-      "#scrolled { height: 300px; }"
-      "</style>"
-      "<div id=\"scroller\"><div id=\"scrolled\"></div></div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #scroller { width: 100px; height: 100px; overflow: scroll; }
+    #scrolled { height: 300px; }
+    </style>
+    <div id="scroller"><div id="scrolled"></div></div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   Element* scroller = GetDocument().getElementById("scroller");
@@ -555,13 +656,14 @@ TEST_F(PaintLayerScrollableAreaTest, HideTooltipWhenScrollPositionChanges) {
 }
 
 TEST_F(PaintLayerScrollableAreaTest, IncludeOverlayScrollbarsInVisibleWidth) {
-  RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(false);
-  SetBodyInnerHTML(
-      "<style>"
-      "#scroller { overflow: overlay; height: 100px; width: 100px; }"
-      "#scrolled { width: 100px; height: 200px; }"
-      "</style>"
-      "<div id=\"scroller\"><div id=\"scrolled\"></div></div>");
+  ScopedOverlayScrollbarsForTest overlay_scrollbars(false);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #scroller { overflow: overlay; height: 100px; width: 100px; }
+    #scrolled { width: 100px; height: 200px; }
+    </style>
+    <div id="scroller"><div id="scrolled"></div></div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
   Element* scroller = GetDocument().getElementById("scroller");
   ASSERT_TRUE(scroller);
@@ -573,23 +675,24 @@ TEST_F(PaintLayerScrollableAreaTest, IncludeOverlayScrollbarsInVisibleWidth) {
 }
 
 TEST_F(PaintLayerScrollableAreaTest, ShowAutoScrollbarsForVisibleContent) {
-  RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(false);
-  SetBodyInnerHTML(
-      "<style>"
-      "#outerDiv {"
-      "  width: 15px;"
-      "  height: 100px;"
-      "  overflow-y: auto;"
-      "  overflow-x: hidden;"
-      "}"
-      "#innerDiv {"
-      "  height:300px;"
-      "  width: 1px;"
-      "}"
-      "</style>"
-      "<div id='outerDiv'>"
-      "  <div id='innerDiv'></div>"
-      "</div>");
+  ScopedOverlayScrollbarsForTest overlay_scrollbars(false);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #outerDiv {
+      width: 15px;
+      height: 100px;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    #innerDiv {
+      height:300px;
+      width: 1px;
+    }
+    </style>
+    <div id='outerDiv'>
+      <div id='innerDiv'></div>
+    </div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
   Element* outer_div = GetDocument().getElementById("outerDiv");
   ASSERT_TRUE(outer_div);
@@ -602,22 +705,23 @@ TEST_F(PaintLayerScrollableAreaTest, ShowAutoScrollbarsForVisibleContent) {
 }
 
 TEST_F(PaintLayerScrollableAreaTest, FloatOverflowInRtlContainer) {
-  RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(false);
-  SetBodyInnerHTML(
-      "<!DOCTYPE html>"
-      "<style>"
-      "#container {"
-      "  width: 200px;"
-      "  overflow-x: auto;"
-      "  overflow-y: scroll;"
-      "  direction: rtl;"
-      "}"
-      "</style>"
-      "<div id='container'>"
-      "  <div style='float:left'>"
-      "lorem ipsum"
-      "  </div>"
-      "</div>");
+  ScopedOverlayScrollbarsForTest overlay_scrollbars(false);
+  SetBodyInnerHTML(R"HTML(
+    <!DOCTYPE html>
+    <style>
+    #container {
+      width: 200px;
+      overflow-x: auto;
+      overflow-y: scroll;
+      direction: rtl;
+    }
+    </style>
+    <div id='container'>
+      <div style='float:left'>
+    lorem ipsum
+      </div>
+    </div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
   Element* container = GetDocument().getElementById("container");
   ASSERT_TRUE(container);
@@ -626,4 +730,242 @@ TEST_F(PaintLayerScrollableAreaTest, FloatOverflowInRtlContainer) {
   ASSERT_TRUE(scrollable_area);
   EXPECT_FALSE(scrollable_area->HasHorizontalScrollbar());
 }
+
+TEST_F(PaintLayerScrollableAreaTest,
+       SlimmingPaintV2OverflowHiddenScrollOffsetInvalidation) {
+  ScopedSlimmingPaintV2ForTest enabler(true);
+
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #scroller {
+      overflow: hidden;
+      height: 200px;
+      width: 200px;
+    }
+    </style>
+    <div id='scroller'>
+      <div id='forceScroll' style='height: 2000px;'></div>
+    </div>
+  )HTML");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  auto* scroller = GetLayoutObjectByElementId("scroller");
+  auto* scrollable_area = ToLayoutBoxModelObject(scroller)->GetScrollableArea();
+
+  const auto* properties = scroller->FirstFragment().PaintProperties();
+
+  // No scroll offset translation is needed when scroll offset is zero.
+  EXPECT_EQ(nullptr, properties->ScrollTranslation());
+  EXPECT_EQ(FloatSize(0, 0), scrollable_area->GetScrollOffset());
+
+  // Going from zero scroll offset to non-zero may require a new paint property
+  // and should invalidate paint and paint properties.
+  scrollable_area->SetScrollOffset(ScrollOffset(0, 1), kProgrammaticScroll);
+  EXPECT_TRUE(scroller->PaintingLayer()->NeedsRepaint());
+  EXPECT_TRUE(scroller->NeedsPaintPropertyUpdate());
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  // A scroll offset translation is needed when scroll offset is non-zero.
+  EXPECT_EQ(FloatSize(0, 1), scrollable_area->GetScrollOffset());
+  EXPECT_NE(nullptr, properties->ScrollTranslation());
+
+  // A property update is needed when scroll offset changes.
+  scrollable_area->SetScrollOffset(ScrollOffset(0, 2), kProgrammaticScroll);
+  EXPECT_TRUE(scroller->NeedsPaintPropertyUpdate());
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  // A scroll offset translation is still needed when scroll offset is non-zero.
+  EXPECT_EQ(FloatSize(0, 2), scrollable_area->GetScrollOffset());
+  EXPECT_NE(nullptr, properties->ScrollTranslation());
+
+  // Going from non-zero scroll offset to zero may require destroying a paint
+  // property and should invalidate paint and paint properties.
+  scrollable_area->SetScrollOffset(ScrollOffset(0, 0), kProgrammaticScroll);
+  EXPECT_TRUE(scroller->PaintingLayer()->NeedsRepaint());
+  EXPECT_TRUE(scroller->NeedsPaintPropertyUpdate());
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  // No scroll offset translation is needed when scroll offset is zero.
+  EXPECT_EQ(nullptr, properties->ScrollTranslation());
+  EXPECT_EQ(FloatSize(0, 0), scrollable_area->GetScrollOffset());
 }
+
+TEST_F(PaintLayerScrollableAreaTest, SlimmingPaintV2ScrollDoesNotInvalidate) {
+  ScopedSlimmingPaintV2ForTest enabler(true);
+
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      #scroller {
+        overflow: scroll;
+        height: 200px;
+        width: 200px;
+        background: linear-gradient(black, white);
+      }
+    </style>
+    <div id='scroller'>
+      <div id='forceScroll' style='height: 2000px;'></div>
+    </div>
+  )HTML");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  auto* scroller = GetLayoutObjectByElementId("scroller");
+  auto* scrollable_area = ToLayoutBoxModelObject(scroller)->GetScrollableArea();
+
+  const auto* properties = scroller->FirstFragment().PaintProperties();
+  // Scroll offset translation is needed even when scroll offset is zero.
+  EXPECT_NE(nullptr, properties->ScrollTranslation());
+  EXPECT_EQ(FloatSize(0, 0), scrollable_area->GetScrollOffset());
+
+  // Changing the scroll offset should not require paint invalidation.
+  scrollable_area->SetScrollOffset(ScrollOffset(0, 1), kProgrammaticScroll);
+  EXPECT_FALSE(scroller->ShouldDoFullPaintInvalidation());
+  EXPECT_TRUE(scroller->NeedsPaintPropertyUpdate());
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  EXPECT_EQ(FloatSize(0, 1), scrollable_area->GetScrollOffset());
+  EXPECT_NE(nullptr, properties->ScrollTranslation());
+}
+
+TEST_F(PaintLayerScrollableAreaTest,
+       SlimmingPaintV2ScrollWithLocalBackgroundAttachment) {
+  ScopedSlimmingPaintV2ForTest enabler(true);
+
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      #scroller {
+        overflow: scroll;
+        height: 200px;
+        width: 200px;
+        background: linear-gradient(black, white);
+        background-attachment: local;
+      }
+    </style>
+    <div id='scroller'>
+      <div id='forceScroll' style='height: 2000px;'></div>
+    </div>
+  )HTML");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  auto* scroller = GetLayoutObjectByElementId("scroller");
+  auto* scrollable_area = ToLayoutBoxModelObject(scroller)->GetScrollableArea();
+
+  // Programmatically changing the scroll offset should require paint
+  // invalidation due to background attachment.
+  scrollable_area->SetScrollOffset(ScrollOffset(0, 1), kProgrammaticScroll);
+  EXPECT_TRUE(scroller->ShouldDoFullPaintInvalidation());
+  EXPECT_TRUE(scroller->NeedsPaintPropertyUpdate());
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  EXPECT_EQ(FloatSize(0, 1), scrollable_area->GetScrollOffset());
+  const auto* properties = scroller->FirstFragment().PaintProperties();
+  EXPECT_NE(nullptr, properties->ScrollTranslation());
+}
+
+TEST_F(PaintLayerScrollableAreaTest, HitTestOverlayScrollbars) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    html, body {
+      margin: 0;
+    }
+    #scroller {
+      overflow: scroll;
+      height: 100px;
+      width: 100px;
+    }
+    #scrolled {
+      width: 1000px;
+      height: 1000px;
+    }
+    </style>
+    <div id='scroller'><div id='scrolled'></div></div>
+  )HTML");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  auto* scroller = GetLayoutObjectByElementId("scroller");
+  auto* scrollable_area = ToLayoutBoxModelObject(scroller)->GetScrollableArea();
+
+  scrollable_area->SetScrollbarsHidden(true);
+
+  HitTestRequest hit_request(HitTestRequest::kMove | HitTestRequest::kReadOnly);
+  HitTestResult hit_result(hit_request, LayoutPoint(95, 5));
+  GetDocument().GetLayoutView()->HitTest(hit_result);
+  EXPECT_EQ(hit_result.GetScrollbar(), nullptr);
+  hit_result = HitTestResult(hit_request, LayoutPoint(5, 95));
+  GetDocument().GetLayoutView()->HitTest(hit_result);
+  EXPECT_EQ(hit_result.GetScrollbar(), nullptr);
+
+  scrollable_area->SetScrollbarsHidden(false);
+
+  hit_result = HitTestResult(hit_request, LayoutPoint(95, 5));
+  GetDocument().GetLayoutView()->HitTest(hit_result);
+  EXPECT_EQ(hit_result.GetScrollbar(), scrollable_area->VerticalScrollbar());
+  hit_result = HitTestResult(hit_request, LayoutPoint(5, 95));
+  GetDocument().GetLayoutView()->HitTest(hit_result);
+  EXPECT_EQ(hit_result.GetScrollbar(), scrollable_area->HorizontalScrollbar());
+}
+
+TEST_F(PaintLayerScrollableAreaTest, CompositedStickyDescendant) {
+  SetBodyInnerHTML(R"HTML(
+    <div id=scroller style="overflow: scroll; width: 500px; height: 300px;
+        will-change: transform">
+      <div id=sticky style="top: 0px; position: sticky; background: green">
+      </div>
+      <div style="width: 10px; height: 700px; background: lightblue"></div>
+    </div>
+  )HTML");
+  auto* scroller =
+      ToLayoutBoxModelObject(GetLayoutObjectByElementId("scroller"));
+  auto* scrollable_area = scroller->GetScrollableArea();
+  EXPECT_EQ(kPaintsIntoOwnBacking, scroller->Layer()->GetCompositingState());
+  auto* sticky = ToLayoutBoxModelObject(GetLayoutObjectByElementId("sticky"));
+
+  EXPECT_EQ(FloatSize(0, 0), sticky->FirstFragment()
+                                 .LocalBorderBoxProperties()
+                                 .Transform()
+                                 ->Matrix()
+                                 .To2DTranslation());
+
+  scrollable_area->SetScrollOffset(ScrollOffset(0, 50), kUserScroll);
+  GetDocument().View()->UpdateAllLifecyclePhases();
+
+  EXPECT_EQ(FloatSize(0, 50), sticky->FirstFragment()
+                                  .LocalBorderBoxProperties()
+                                  .Transform()
+                                  ->Matrix()
+                                  .To2DTranslation());
+}
+
+class NonRLSPaintLayerScrollableAreaTest
+    : public PaintLayerScrollableAreaTest,
+      private ScopedRootLayerScrollingForTest {
+ public:
+  NonRLSPaintLayerScrollableAreaTest()
+      : ScopedRootLayerScrollingForTest(false) {}
+
+  ~NonRLSPaintLayerScrollableAreaTest() override {}
+};
+
+TEST_F(NonRLSPaintLayerScrollableAreaTest, RootPaintLayerNoScrollOriginRTL) {
+  // This test is checking a quirk of PLSA pre-RLS. It can be removed once RLS
+  // ships.
+  SetBodyInnerHTML(R"HTML(
+    <!DOCTYPE html>
+    <style>
+      body {
+        direction: rtl;
+        margin: 0;
+      }
+      .spacer {
+        width: 3000px;
+        height: 2000px;
+      }
+    </style>
+    <div class="spacer"></div>
+  )HTML");
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  auto* scrollable_area = GetDocument().GetLayoutView()->GetScrollableArea();
+
+  // The scroll origin should not be set on the root PLSA. It should only be
+  // set on the FrameView.
+  EXPECT_EQ(IntPoint(), scrollable_area->ScrollOrigin());
+  EXPECT_EQ(IntPoint(3000 - scrollable_area->VisibleWidth(), 0),
+            GetDocument().View()->ScrollOrigin());
+}
+}  // namespace blink

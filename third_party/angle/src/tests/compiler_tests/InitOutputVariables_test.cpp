@@ -12,6 +12,7 @@
 #include "compiler/translator/FindMain.h"
 #include "compiler/translator/IntermNode_util.h"
 #include "compiler/translator/IntermTraverse.h"
+#include "compiler/translator/SymbolTable.h"
 #include "tests/test_utils/ShaderCompileTreeTest.h"
 
 #include <algorithm>
@@ -35,7 +36,9 @@ bool AreSymbolsTheSame(const TIntermSymbol *expected, const TIntermSymbol *candi
     const bool sameTypes       = expectedType == candidateType &&
                            expectedType.getPrecision() == candidateType.getPrecision() &&
                            expectedType.getQualifier() == candidateType.getQualifier();
-    const bool sameSymbols = expected->getSymbol() == candidate->getSymbol();
+    const bool sameSymbols = (expected->variable().symbolType() == SymbolType::Empty &&
+                              candidate->variable().symbolType() == SymbolType::Empty) ||
+                             expected->getName() == candidate->getName();
     return sameSymbols && sameTypes;
 }
 
@@ -61,24 +64,34 @@ bool AreLValuesTheSame(TIntermTyped *expected, TIntermTyped *candidate)
     return AreSymbolsTheSame(expected->getAsSymbolNode(), candidate->getAsSymbolNode());
 }
 
-TIntermTyped *CreateLValueNode(const TString &lValueName, const TType &type)
+TIntermTyped *CreateLValueNode(const ImmutableString &lValueName, const TType &type)
 {
-    return new TIntermSymbol(0, lValueName, type);
+    // We're using a dummy symbol table here, don't need to assign proper symbol ids to these nodes.
+    TSymbolTable symbolTable;
+    TVariable *variable =
+        new TVariable(&symbolTable, lValueName, new TType(type), SymbolType::UserDefined);
+    return new TIntermSymbol(variable);
 }
 
-ExpectedLValues CreateIndexedLValueNodeList(const TString &lValueName,
-                                            TType elementType,
+ExpectedLValues CreateIndexedLValueNodeList(const ImmutableString &lValueName,
+                                            const TType &elementType,
                                             unsigned arraySize)
 {
     ASSERT(elementType.isArray() == false);
-    elementType.setArraySize(arraySize);
+    TType *arrayType = new TType(elementType);
+    arrayType->makeArray(arraySize);
+
+    // We're using a dummy symbol table here, don't need to assign proper symbol ids to these nodes.
+    TSymbolTable symbolTable;
+    TVariable *variable =
+        new TVariable(&symbolTable, lValueName, arrayType, SymbolType::UserDefined);
+    TIntermSymbol *arraySymbol = new TIntermSymbol(variable);
 
     ExpectedLValues expected(arraySize);
     for (unsigned index = 0u; index < arraySize; ++index)
     {
-        expected[index] =
-            new TIntermBinary(EOpIndexDirect, new TIntermSymbol(0, lValueName, elementType),
-                              CreateIndexNode(static_cast<int>(index)));
+        expected[index] = new TIntermBinary(EOpIndexDirect, arraySymbol->deepCopy(),
+                                            CreateIndexNode(static_cast<int>(index)));
     }
     return expected;
 }
@@ -143,7 +156,7 @@ class VerifyOutputVariableInitializers final : public TIntermTraverser
 class FindStructByName final : public TIntermTraverser
 {
   public:
-    FindStructByName(const TString &structName)
+    FindStructByName(const ImmutableString &structName)
         : TIntermTraverser(true, false, false), mStructName(structName), mStructure(nullptr)
     {
     }
@@ -155,20 +168,21 @@ class FindStructByName final : public TIntermTraverser
             return;
         }
 
-        TStructure *structure = symbol->getType().getStruct();
+        const TStructure *structure = symbol->getType().getStruct();
 
-        if (structure != nullptr && structure->name() == mStructName)
+        if (structure != nullptr && structure->symbolType() != SymbolType::Empty &&
+            structure->name() == mStructName)
         {
             mStructure = structure;
         }
     }
 
     bool isStructureFound() const { return mStructure != nullptr; };
-    TStructure *getStructure() const { return mStructure; }
+    const TStructure *getStructure() const { return mStructure; }
 
   private:
-    TString mStructName;
-    TStructure *mStructure;
+    ImmutableString mStructName;
+    const TStructure *mStructure;
 };
 
 }  // namespace
@@ -244,10 +258,10 @@ TEST_F(InitOutputVariablesWebGL2VertexShaderTest, OutputAllQualifiers)
     VerifyOutputVariableInitializers verifier(mASTRoot);
 
     ExpectedLValues expectedLValues = {
-        CreateLValueNode("out1", TType(EbtFloat, EbpMedium, EvqVertexOut, 4)),
-        CreateLValueNode("out2", TType(EbtInt, EbpLow, EvqFlatOut)),
-        CreateLValueNode("out3", TType(EbtFloat, EbpMedium, EvqCentroidOut)),
-        CreateLValueNode("out4", TType(EbtFloat, EbpMedium, EvqSmoothOut))};
+        CreateLValueNode(ImmutableString("out1"), TType(EbtFloat, EbpMedium, EvqVertexOut, 4)),
+        CreateLValueNode(ImmutableString("out2"), TType(EbtInt, EbpLow, EvqFlatOut)),
+        CreateLValueNode(ImmutableString("out3"), TType(EbtFloat, EbpMedium, EvqCentroidOut)),
+        CreateLValueNode(ImmutableString("out4"), TType(EbtFloat, EbpMedium, EvqSmoothOut))};
     EXPECT_TRUE(verifier.areAllExpectedLValuesFound(expectedLValues));
 }
 
@@ -263,8 +277,8 @@ TEST_F(InitOutputVariablesWebGL2VertexShaderTest, OutputArray)
     compileAssumeSuccess(shaderString);
     VerifyOutputVariableInitializers verifier(mASTRoot);
 
-    ExpectedLValues expectedLValues =
-        CreateIndexedLValueNodeList("out1", TType(EbtFloat, EbpMedium, EvqVertexOut), 2);
+    ExpectedLValues expectedLValues = CreateIndexedLValueNodeList(
+        ImmutableString("out1"), TType(EbtFloat, EbpMedium, EvqVertexOut), 2);
     EXPECT_TRUE(verifier.areAllExpectedLValuesFound(expectedLValues));
 }
 
@@ -284,14 +298,14 @@ TEST_F(InitOutputVariablesWebGL2VertexShaderTest, OutputStruct)
     compileAssumeSuccess(shaderString);
     VerifyOutputVariableInitializers verifier(mASTRoot);
 
-    FindStructByName findStruct("MyS");
+    FindStructByName findStruct(ImmutableString("MyS"));
     mASTRoot->traverse(&findStruct);
     ASSERT(findStruct.isStructureFound());
 
-    TType type(EbtStruct, EbpUndefined, EvqVertexOut);
-    type.setStruct(findStruct.getStructure());
+    TType type(findStruct.getStructure());
+    type.setQualifier(EvqVertexOut);
 
-    TIntermTyped *expectedLValue = CreateLValueNode("out1", type);
+    TIntermTyped *expectedLValue = CreateLValueNode(ImmutableString("out1"), type);
     EXPECT_TRUE(verifier.isExpectedLValueFound(expectedLValue));
     delete expectedLValue;
 }
@@ -308,7 +322,7 @@ TEST_F(InitOutputVariablesWebGL2VertexShaderTest, OutputFromESSL1Shader)
     VerifyOutputVariableInitializers verifier(mASTRoot);
 
     TIntermTyped *expectedLValue =
-        CreateLValueNode("out1", TType(EbtFloat, EbpMedium, EvqVaryingOut, 4));
+        CreateLValueNode(ImmutableString("out1"), TType(EbtFloat, EbpMedium, EvqVaryingOut, 4));
     EXPECT_TRUE(verifier.isExpectedLValueFound(expectedLValue));
     delete expectedLValue;
 }
@@ -326,7 +340,7 @@ TEST_F(InitOutputVariablesWebGL2FragmentShaderTest, Output)
     VerifyOutputVariableInitializers verifier(mASTRoot);
 
     TIntermTyped *expectedLValue =
-        CreateLValueNode("out1", TType(EbtFloat, EbpMedium, EvqFragmentOut, 4));
+        CreateLValueNode(ImmutableString("out1"), TType(EbtFloat, EbpMedium, EvqFragmentOut, 4));
     EXPECT_TRUE(verifier.isExpectedLValueFound(expectedLValue));
     delete expectedLValue;
 }
@@ -343,8 +357,8 @@ TEST_F(InitOutputVariablesWebGL2FragmentShaderTest, FragData)
     compileAssumeSuccess(shaderString);
     VerifyOutputVariableInitializers verifier(mASTRoot);
 
-    ExpectedLValues expectedLValues =
-        CreateIndexedLValueNodeList("gl_FragData", TType(EbtFloat, EbpMedium, EvqFragData, 4), 1);
+    ExpectedLValues expectedLValues = CreateIndexedLValueNodeList(
+        ImmutableString("gl_FragData"), TType(EbtFloat, EbpMedium, EvqFragData, 4), 1);
     EXPECT_TRUE(verifier.isExpectedLValueFound(expectedLValues[0]));
     EXPECT_EQ(1u, verifier.getCandidates().size());
 }
@@ -363,8 +377,8 @@ TEST_F(InitOutputVariablesWebGL1FragmentShaderTest, FragData)
 
     // In the symbol table, gl_FragData array has 2 elements. However, only the 1st one should be
     // initialized.
-    ExpectedLValues expectedLValues =
-        CreateIndexedLValueNodeList("gl_FragData", TType(EbtFloat, EbpMedium, EvqFragData, 4), 2);
+    ExpectedLValues expectedLValues = CreateIndexedLValueNodeList(
+        ImmutableString("gl_FragData"), TType(EbtFloat, EbpMedium, EvqFragData, 4), 2);
     EXPECT_TRUE(verifier.isExpectedLValueFound(expectedLValues[0]));
     EXPECT_EQ(1u, verifier.getCandidates().size());
 }
@@ -382,8 +396,8 @@ TEST_F(InitOutputVariablesWebGL1FragmentShaderTest, FragDataWithDrawBuffersExtEn
     compileAssumeSuccess(shaderString);
     VerifyOutputVariableInitializers verifier(mASTRoot);
 
-    ExpectedLValues expectedLValues =
-        CreateIndexedLValueNodeList("gl_FragData", TType(EbtFloat, EbpMedium, EvqFragData, 4), 2);
+    ExpectedLValues expectedLValues = CreateIndexedLValueNodeList(
+        ImmutableString("gl_FragData"), TType(EbtFloat, EbpMedium, EvqFragData, 4), 2);
     EXPECT_TRUE(verifier.isExpectedLValueFound(expectedLValues[0]));
     EXPECT_TRUE(verifier.isExpectedLValueFound(expectedLValues[1]));
     EXPECT_EQ(2u, verifier.getCandidates().size());
@@ -402,7 +416,7 @@ TEST_F(InitOutputVariablesWebGL2VertexShaderTest, InitGLPositionWhenNotStaticall
     VerifyOutputVariableInitializers verifier(mASTRoot);
 
     TIntermTyped *glPosition =
-        CreateLValueNode("gl_Position", TType(EbtFloat, EbpHigh, EvqPosition, 4));
+        CreateLValueNode(ImmutableString("gl_Position"), TType(EbtFloat, EbpHigh, EvqPosition, 4));
     EXPECT_TRUE(verifier.isExpectedLValueFound(glPosition));
     EXPECT_EQ(1u, verifier.getCandidates().size());
 }
@@ -421,7 +435,7 @@ TEST_F(InitOutputVariablesWebGL2VertexShaderTest, InitGLPositionOnceWhenStatical
     VerifyOutputVariableInitializers verifier(mASTRoot);
 
     TIntermTyped *glPosition =
-        CreateLValueNode("gl_Position", TType(EbtFloat, EbpHigh, EvqPosition, 4));
+        CreateLValueNode(ImmutableString("gl_Position"), TType(EbtFloat, EbpHigh, EvqPosition, 4));
     EXPECT_TRUE(verifier.isExpectedLValueFound(glPosition));
     EXPECT_EQ(1u, verifier.getCandidates().size());
 }

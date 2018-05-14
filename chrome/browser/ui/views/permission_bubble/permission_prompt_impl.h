@@ -17,12 +17,10 @@ class PermissionPromptImpl : public PermissionPrompt {
   ~PermissionPromptImpl() override;
 
   // PermissionPrompt:
-  bool CanAcceptRequestUpdate() override;
   void UpdateAnchorPosition() override;
   gfx::NativeWindow GetNativeWindow() override;
 
   void Closing();
-  void TogglePersist(bool value);
   void Accept();
   void Deny();
 
@@ -31,8 +29,8 @@ class PermissionPromptImpl : public PermissionPrompt {
  private:
   void Show();
 
-  Browser* browser_;
-  Delegate* delegate_;
+  Browser* const browser_;
+  Delegate* const delegate_;
   PermissionsBubbleDialogDelegateView* bubble_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(PermissionPromptImpl);

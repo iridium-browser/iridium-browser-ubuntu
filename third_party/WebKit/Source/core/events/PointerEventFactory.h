@@ -9,6 +9,7 @@
 #include "core/events/PointerEvent.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/HashMap.h"
+#include "public/platform/WebPointerEvent.h"
 #include "public/platform/WebPointerProperties.h"
 
 namespace blink {
@@ -34,16 +35,12 @@ class CORE_EXPORT PointerEventFactory {
                        const Vector<WebMouseEvent>&,
                        LocalDOMWindow*);
 
-  PointerEvent* Create(const WebTouchPoint&,
-                       const Vector<std::pair<WebTouchPoint, TimeTicks>>&,
-                       WebInputEvent::Modifiers,
-                       TimeTicks event_platform_time_stamp,
-                       LocalFrame*,
-                       DOMWindow*);
+  PointerEvent* Create(const WebPointerEvent&,
+                       const Vector<WebPointerEvent>&,
+                       LocalDOMWindow*);
 
   PointerEvent* CreatePointerCancelEvent(
       const int pointer_id,
-      const WebPointerProperties::PointerType,
       TimeTicks platfrom_time_stamp);
 
   // For creating capture events (i.e got/lostpointercapture)
@@ -62,8 +59,8 @@ class CORE_EXPORT PointerEventFactory {
   // the same id before.
   bool Remove(const int);
 
-  // Returns all ids of the given pointerType.
-  Vector<int> GetPointerIdsOfType(WebPointerProperties::PointerType) const;
+  // Returns all ids of pointers that are not hovering.
+  Vector<int> GetPointerIdsOfNonHoveringPointers() const;
 
   // Returns whether a pointer id exists and active.
   bool IsActive(const int) const;
@@ -79,12 +76,15 @@ class CORE_EXPORT PointerEventFactory {
   // Otherwise it returns WebPointerProperties::PointerType::Unknown.
   WebPointerProperties::PointerType GetPointerType(int pointer_id) const;
 
+  // Returns whether a WebPoinerProperties is primary pointer.
+  bool IsPrimary(const WebPointerProperties&) const;
+
   static const int kMouseId;
 
  private:
   typedef WTF::UnsignedWithZeroKeyHashTraits<int> UnsignedHash;
   typedef struct IncomingId : public std::pair<int, int> {
-    IncomingId() {}
+    IncomingId() = default;
     IncomingId(WebPointerProperties::PointerType pointer_type, int raw_id)
         : std::pair<int, int>(static_cast<int>(pointer_type), raw_id) {}
     int PointerTypeInt() const { return first; }
@@ -96,16 +96,25 @@ class CORE_EXPORT PointerEventFactory {
   typedef struct PointerAttributes {
     IncomingId incoming_id;
     bool is_active_buttons;
-    PointerAttributes() : incoming_id(), is_active_buttons(false) {}
-    PointerAttributes(IncomingId incoming_id, unsigned is_active_buttons)
-        : incoming_id(incoming_id), is_active_buttons(is_active_buttons) {}
+    bool hovering;
+    PointerAttributes()
+        : incoming_id(), is_active_buttons(false), hovering(true) {}
+    PointerAttributes(IncomingId incoming_id,
+                      bool is_active_buttons,
+                      bool hovering)
+        : incoming_id(incoming_id),
+          is_active_buttons(is_active_buttons),
+          hovering(hovering) {}
   } PointerAttributes;
 
-  int AddIdAndActiveButtons(const IncomingId, bool is_active_buttons);
+  int AddIdAndActiveButtons(const IncomingId,
+                            bool is_active_buttons,
+                            bool hovering);
   bool IsPrimary(const int) const;
   void SetIdTypeButtons(PointerEventInit&,
                         const WebPointerProperties&,
-                        unsigned buttons);
+                        unsigned buttons,
+                        bool hovering);
   void SetEventSpecificFields(PointerEventInit&, const AtomicString& type);
 
   // Creates pointerevents like boundary and capture events from another

@@ -44,7 +44,7 @@ class ChildConnection;
 /// class because it lives on the UI thread.
 class CONTENT_EXPORT BrowserChildProcessHostImpl
     : public BrowserChildProcessHost,
-      public NON_EXPORTED_BASE(ChildProcessHostDelegate),
+      public ChildProcessHostDelegate,
 #if defined(OS_WIN)
       public base::win::ObjectWatcher::Delegate,
 #endif
@@ -80,7 +80,6 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   service_manager::mojom::ServiceRequest TakeInProcessServiceRequest() override;
 
   // ChildProcessHostDelegate implementation:
-  bool CanShutdown() override;
   void OnChannelInitialized(IPC::Channel* channel) override;
   void OnChildDisconnected() override;
   const base::Process& GetProcess() const override;
@@ -101,7 +100,7 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   // Adds an IPC message filter.
   void AddFilter(BrowserMessageFilter* filter);
 
-  static void HistogramBadMessageTerminated(int process_type);
+  static void HistogramBadMessageTerminated(ProcessType process_type);
 
   BrowserChildProcessHostDelegate* delegate() const { return delegate_; }
 

@@ -6,46 +6,70 @@
 #define THIRD_PARTY_WEBKIT_SOURCE_PLATFORM_SCHEDULER_CHILD_WORKER_SCHEDULER_IMPL_H_
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "platform/WebFrameScheduler.h"
 #include "platform/scheduler/base/task_time_observer.h"
-#include "platform/scheduler/base/thread_load_tracker.h"
 #include "platform/scheduler/child/idle_canceled_delayed_task_sweeper.h"
 #include "platform/scheduler/child/idle_helper.h"
+#include "platform/scheduler/child/worker_metrics_helper.h"
 #include "platform/scheduler/child/worker_scheduler.h"
+#include "platform/scheduler/util/task_duration_metric_reporter.h"
+#include "platform/scheduler/util/thread_load_tracker.h"
+#include "public/platform/WebThreadType.h"
 
 namespace blink {
 namespace scheduler {
 
-class SchedulerTqmDelegate;
+class TaskQueueManager;
+class WorkerSchedulerProxy;
 
 class PLATFORM_EXPORT WorkerSchedulerImpl : public WorkerScheduler,
                                             public IdleHelper::Delegate,
                                             public TaskTimeObserver {
  public:
-  explicit WorkerSchedulerImpl(
-      scoped_refptr<SchedulerTqmDelegate> main_task_runner);
+  WorkerSchedulerImpl(std::unique_ptr<TaskQueueManager> task_queue_manager,
+                      WorkerSchedulerProxy* proxy);
   ~WorkerSchedulerImpl() override;
 
-  // WorkerScheduler implementation:
+  // ChildScheduler implementation:
   scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() override;
-  scoped_refptr<WorkerTaskQueue> DefaultTaskQueue() override;
   scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner() override;
-  bool CanExceedIdleDeadlineIfRequired() const override;
+  scoped_refptr<base::SingleThreadTaskRunner> IPCTaskRunner() override;
   bool ShouldYieldForHighPriorityWork() override;
+  bool CanExceedIdleDeadlineIfRequired() const override;
   void AddTaskObserver(base::MessageLoop::TaskObserver* task_observer) override;
   void RemoveTaskObserver(
       base::MessageLoop::TaskObserver* task_observer) override;
-  void Init() override;
   void Shutdown() override;
+
+  // WorkerScheduler implementation:
+  scoped_refptr<WorkerTaskQueue> DefaultTaskQueue() override;
+  void Init() override;
+  void OnTaskCompleted(WorkerTaskQueue* worker_task_queue,
+                       const TaskQueue::Task& task,
+                       base::TimeTicks start,
+                       base::TimeTicks end,
+                       base::Optional<base::TimeDelta> thread_time) override;
 
   // TaskTimeObserver implementation:
   void WillProcessTask(double start_time) override;
   void DidProcessTask(double start_time, double end_time) override;
-  void OnBeginNestedRunLoop() override;
 
   SchedulerHelper* GetSchedulerHelperForTesting();
   base::TimeTicks CurrentIdleTaskDeadlineForTesting() const;
+
+  void SetThreadType(WebThreadType thread_type) override;
+
+  // Virtual for test.
+  virtual void OnThrottlingStateChanged(
+      WebFrameScheduler::ThrottlingState throttling_state);
+
+  // Returns the control task queue.  Tasks posted to this queue are executed
+  // with the highest priority. Care must be taken to avoid starvation of other
+  // task queues.
+  scoped_refptr<WorkerTaskQueue> ControlTaskQueue();
 
  protected:
   // IdleHelper::Delegate implementation:
@@ -57,14 +81,26 @@ class PLATFORM_EXPORT WorkerSchedulerImpl : public WorkerScheduler,
   void OnIdlePeriodEnded() override {}
   void OnPendingTasksChanged(bool new_state) override {}
 
+  WebFrameScheduler::ThrottlingState throttling_state() const {
+    return throttling_state_;
+  }
+
  private:
   void MaybeStartLongIdlePeriod();
+
+  base::WeakPtr<WorkerSchedulerImpl> GetWeakPtr();
 
   IdleHelper idle_helper_;
   IdleCanceledDelayedTaskSweeper idle_canceled_delayed_task_sweeper_;
   ThreadLoadTracker load_tracker_;
   bool initialized_;
   base::TimeTicks thread_start_time_;
+  scoped_refptr<WorkerTaskQueue> control_task_queue_;
+  WebFrameScheduler::ThrottlingState throttling_state_;
+
+  WorkerMetricsHelper worker_metrics_helper_;
+
+  base::WeakPtrFactory<WorkerSchedulerImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkerSchedulerImpl);
 };

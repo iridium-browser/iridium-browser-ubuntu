@@ -6,15 +6,18 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_file_system_operation_runner.h"
+#include "chrome/test/base/testing_profile.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/common/file_system.mojom.h"
+#include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_file_system_instance.h"
+#include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -35,15 +38,26 @@ class ArcFileSystemOperationRunnerTest : public testing::Test {
   ~ArcFileSystemOperationRunnerTest() override = default;
 
   void SetUp() override {
-    arc_service_manager_ = base::MakeUnique<ArcServiceManager>();
+    arc_service_manager_ = std::make_unique<ArcServiceManager>();
+    profile_ = std::make_unique<TestingProfile>();
+    ArcFileSystemBridge::GetForBrowserContextForTesting(profile_.get());
     runner_ = ArcFileSystemOperationRunner::CreateForTesting(
-        arc_service_manager_->arc_bridge_service());
+        profile_.get(), arc_service_manager_->arc_bridge_service());
     arc_service_manager_->arc_bridge_service()->file_system()->SetInstance(
         &file_system_instance_);
+    WaitForInstanceReady(
+        arc_service_manager_->arc_bridge_service()->file_system());
 
     // Run the message loop until FileSystemInstance::Init() is called.
-    base::RunLoop().RunUntilIdle();
     ASSERT_TRUE(file_system_instance_.InitCalled());
+  }
+
+  void TearDown() override {
+    arc_service_manager_->arc_bridge_service()->file_system()->CloseInstance(
+        &file_system_instance_);
+    // Explicitly calls Shutdown() to detach from services.
+    if (runner_)
+      runner_->Shutdown();
   }
 
  protected:
@@ -56,8 +70,7 @@ class ArcFileSystemOperationRunnerTest : public testing::Test {
   void CallAllFunctions(int* counter) {
     // Following functions are deferred.
     runner_->AddWatcher(
-        kAuthority, kDocumentId,
-        base::Bind([](ArcFileSystemOperationRunner::ChangeType type) {}),
+        kAuthority, kDocumentId, base::DoNothing(),
         base::Bind([](int* counter, int64_t watcher_id) { ++*counter; },
                    counter));
     runner_->GetChildDocuments(
@@ -104,7 +117,11 @@ class ArcFileSystemOperationRunnerTest : public testing::Test {
 
   content::TestBrowserThreadBundle thread_bundle_;
   FakeFileSystemInstance file_system_instance_;
+
+  // Use the same initialization/destruction order as
+  // ChromeBrowserMainPartsChromeos.
   std::unique_ptr<ArcServiceManager> arc_service_manager_;
+  std::unique_ptr<TestingProfile> profile_;
   std::unique_ptr<ArcFileSystemOperationRunner> runner_;
 
  private:
@@ -131,6 +148,7 @@ TEST_F(ArcFileSystemOperationRunnerTest, DeferAndRun) {
   EXPECT_EQ(8, counter);
 }
 
+// TODO(nya,hidehiko): Check if we should keep this test.
 TEST_F(ArcFileSystemOperationRunnerTest, DeferAndDiscard) {
   int counter = 0;
   CallSetShouldDefer(true);
@@ -138,14 +156,15 @@ TEST_F(ArcFileSystemOperationRunnerTest, DeferAndDiscard) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, counter);
 
-  arc_service_manager_.reset();
+  runner_->Shutdown();
+  runner_.reset();
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, counter);
 }
 
 TEST_F(ArcFileSystemOperationRunnerTest, FileInstanceUnavailable) {
-  arc_service_manager_->arc_bridge_service()->file_system()->SetInstance(
-      nullptr);
+  arc_service_manager_->arc_bridge_service()->file_system()->CloseInstance(
+      &file_system_instance_);
 
   int counter = 0;
   CallSetShouldDefer(false);

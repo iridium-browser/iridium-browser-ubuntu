@@ -73,13 +73,14 @@ void GLSurfaceOSMesaX11::Destroy() {
     window_graphics_context_ = NULL;
   }
 
-  XSync(xdisplay_, False);
+  XSync(xdisplay_, x11::False);
 }
 
 bool GLSurfaceOSMesaX11::Resize(const gfx::Size& new_size,
                                 float scale_factor,
+                                ColorSpace color_space,
                                 bool alpha) {
-  if (!GLSurfaceOSMesa::Resize(new_size, scale_factor, alpha))
+  if (!GLSurfaceOSMesa::Resize(new_size, scale_factor, color_space, alpha))
     return false;
 
   XWindowAttributes attributes;
@@ -120,7 +121,10 @@ bool GLSurfaceOSMesaX11::IsOffscreen() {
   return false;
 }
 
-gfx::SwapResult GLSurfaceOSMesaX11::SwapBuffers() {
+gfx::SwapResult GLSurfaceOSMesaX11::SwapBuffers(
+    const PresentationCallback& callback) {
+  // TODO(penghuang): Provide useful presentation feedback.
+  // https://crbug.com/776877
   TRACE_EVENT2("gpu", "GLSurfaceOSMesaX11:RealSwapBuffers", "width",
                GetSize().width(), "height", GetSize().height());
 
@@ -149,10 +153,14 @@ bool GLSurfaceOSMesaX11::SupportsPostSubBuffer() {
   return true;
 }
 
-gfx::SwapResult GLSurfaceOSMesaX11::PostSubBuffer(int x,
-                                                  int y,
-                                                  int width,
-                                                  int height) {
+gfx::SwapResult GLSurfaceOSMesaX11::PostSubBuffer(
+    int x,
+    int y,
+    int width,
+    int height,
+    const PresentationCallback& callback) {
+  // TODO(penghuang): Provide useful presentation feedback.
+  // https://crbug.com/776877
   gfx::Size size = GetSize();
 
   // Move (0,0) from lower-left to upper-left

@@ -6,10 +6,12 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "base/message_loop/message_loop.h"
 #include "base/numerics/safe_conversions.h"
 #include "components/webcrypto/algorithm_dispatch.h"
 #include "components/webcrypto/crypto_data.h"
 #include "components/webcrypto/status.h"
+#include "mojo/edk/embedder/embedder.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebCryptoAlgorithmParams.h"
 #include "third_party/WebKit/public/web/WebKit.h"
@@ -19,13 +21,17 @@ namespace webcrypto {
 namespace {
 
 // This mock is used to initialize blink.
-class InitOnce : NON_EXPORTED_BASE(public blink::Platform) {
+class InitOnce : public blink::Platform {
  public:
   InitOnce() {
     base::CommandLine::Init(0, nullptr);
+    mojo::edk::Init();
     blink::Platform::Initialize(this);
   }
   ~InitOnce() override {}
+
+ private:
+  base::MessageLoop loop_;
 };
 
 base::LazyInstance<InitOnce>::Leaky g_once = LAZY_INSTANCE_INITIALIZER;

@@ -26,7 +26,7 @@
 #ifndef TrackEvent_h
 #define TrackEvent_h
 
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/html/track/TrackBase.h"
 #include "core/html/track/TrackEventInit.h"
 
@@ -56,7 +56,7 @@ class CORE_EXPORT TrackEvent final : public Event {
 
   void track(VideoTrackOrAudioTrackOrTextTrack&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   TrackEvent();

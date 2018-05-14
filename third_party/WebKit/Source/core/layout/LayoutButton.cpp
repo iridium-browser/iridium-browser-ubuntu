@@ -27,7 +27,7 @@ using namespace HTMLNames;
 LayoutButton::LayoutButton(Element* element)
     : LayoutFlexibleBox(element), inner_(nullptr) {}
 
-LayoutButton::~LayoutButton() {}
+LayoutButton::~LayoutButton() = default;
 
 void LayoutButton::AddChild(LayoutObject* new_child,
                             LayoutObject* before_child) {
@@ -44,7 +44,7 @@ void LayoutButton::AddChild(LayoutObject* new_child,
 void LayoutButton::RemoveChild(LayoutObject* old_child) {
   if (old_child == inner_ || !inner_) {
     LayoutFlexibleBox::RemoveChild(old_child);
-    inner_ = 0;
+    inner_ = nullptr;
 
   } else if (old_child->Parent() == this) {
     // We aren't the inner node, but we're getting removed from the button, this
@@ -84,10 +84,11 @@ LayoutRect LayoutButton::ControlClipRect(
   return rect;
 }
 
-int LayoutButton::BaselinePosition(FontBaseline baseline,
-                                   bool first_line,
-                                   LineDirectionMode direction,
-                                   LinePositionMode line_position_mode) const {
+LayoutUnit LayoutButton::BaselinePosition(
+    FontBaseline baseline,
+    bool first_line,
+    LineDirectionMode direction,
+    LinePositionMode line_position_mode) const {
   DCHECK_EQ(line_position_mode, kPositionOnContainingLine);
   // We want to call the LayoutBlock version of firstLineBoxBaseline to
   // avoid LayoutFlexibleBox synthesizing a baseline that we don't want.
@@ -97,13 +98,11 @@ int LayoutButton::BaselinePosition(FontBaseline baseline,
     // even when we have the anonymous LayoutBlock child, we calculate the
     // baseline for the empty case manually here.
     if (direction == kHorizontalLine) {
-      return (MarginTop() + Size().Height() - BorderBottom() - PaddingBottom() -
-              HorizontalScrollbarHeight())
-          .ToInt();
+      return MarginTop() + Size().Height() - BorderBottom() - PaddingBottom() -
+             HorizontalScrollbarHeight();
     }
-    return (MarginRight() + Size().Width() - BorderLeft() - PaddingLeft() -
-            VerticalScrollbarWidth())
-        .ToInt();
+    return MarginRight() + Size().Width() - BorderLeft() - PaddingLeft() -
+           VerticalScrollbarWidth();
   }
   return LayoutFlexibleBox::BaselinePosition(baseline, first_line, direction,
                                              line_position_mode);
@@ -111,6 +110,6 @@ int LayoutButton::BaselinePosition(FontBaseline baseline,
 
 // For compatibility with IE/FF we only clip overflow on input elements.
 bool LayoutButton::HasControlClip() const {
-  return !isHTMLButtonElement(GetNode());
+  return !IsHTMLButtonElement(GetNode());
 }
 }  // namespace blink

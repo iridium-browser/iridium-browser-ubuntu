@@ -41,7 +41,7 @@ class BudgetDatabaseTest : public ::testing::Test {
       : success_(false),
         db_(&profile_,
             profile_.GetPath().Append(FILE_PATH_LITERAL("BudgetDatabase"))),
-        origin_(url::Origin(GURL(kTestOrigin))) {}
+        origin_(url::Origin::Create(GURL(kTestOrigin))) {}
 
   void WriteBudgetComplete(base::Closure run_loop_closure,
                            blink::mojom::BudgetServiceErrorType error,
@@ -336,7 +336,7 @@ TEST_F(BudgetDatabaseTest, DefaultSiteEngagementInIncognitoProfile) {
   // Create a second BudgetDatabase instance for the off-the-record version of
   // a second profile. This will not have been influenced by the |profile_|.
   std::unique_ptr<BudgetDatabase> second_database =
-      base::MakeUnique<BudgetDatabase>(second_profile_incognito,
+      std::make_unique<BudgetDatabase>(second_profile_incognito,
                                        base::FilePath() /* in memory */);
 
   ASSERT_FALSE(profile()->IsOffTheRecord());

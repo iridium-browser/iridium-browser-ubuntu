@@ -12,7 +12,7 @@
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_discovery_filter.h"
 #include "device/bluetooth/bluetooth_uuid.h"
-#include "device/bluetooth/public/interfaces/test/fake_bluetooth.mojom.h"
+#include "device/bluetooth/public/mojom/test/fake_bluetooth.mojom.h"
 #include "device/bluetooth/test/fake_peripheral.h"
 #include "device/bluetooth/test/fake_remote_gatt_characteristic.h"
 #include "device/bluetooth/test/fake_remote_gatt_service.h"
@@ -28,17 +28,14 @@ void FakeCentral::SimulatePreconnectedPeripheral(
     const std::string& name,
     const std::vector<device::BluetoothUUID>& known_service_uuids,
     SimulatePreconnectedPeripheralCallback callback) {
-  auto device_iter = devices_.find(address);
-  if (device_iter == devices_.end()) {
-    auto fake_peripheral = base::MakeUnique<FakePeripheral>(this, address);
-
-    auto insert_iter = devices_.emplace(address, std::move(fake_peripheral));
-    DCHECK(insert_iter.second);
-    device_iter = insert_iter.first;
+  FakePeripheral* fake_peripheral = GetFakePeripheral(address);
+  if (fake_peripheral == nullptr) {
+    auto fake_peripheral_ptr = std::make_unique<FakePeripheral>(this, address);
+    fake_peripheral = fake_peripheral_ptr.get();
+    auto pair = devices_.emplace(address, std::move(fake_peripheral_ptr));
+    DCHECK(pair.second);
   }
 
-  FakePeripheral* fake_peripheral =
-      static_cast<FakePeripheral*>(device_iter->second.get());
   fake_peripheral->SetName(name);
   fake_peripheral->SetSystemConnected(true);
   fake_peripheral->SetServiceUUIDs(device::BluetoothDevice::UUIDSet(
@@ -47,18 +44,76 @@ void FakeCentral::SimulatePreconnectedPeripheral(
   std::move(callback).Run();
 }
 
+void FakeCentral::SimulateAdvertisementReceived(
+    mojom::ScanResultPtr scan_result_ptr,
+    SimulateAdvertisementReceivedCallback callback) {
+  // TODO(https://crbug.com/719826): Add a DCHECK to proceed only if a scan is
+  // currently in progress.
+  auto* fake_peripheral = GetFakePeripheral(scan_result_ptr->device_address);
+  const bool is_new_device = fake_peripheral == nullptr;
+  if (is_new_device) {
+    auto fake_peripheral_ptr =
+        std::make_unique<FakePeripheral>(this, scan_result_ptr->device_address);
+    fake_peripheral = fake_peripheral_ptr.get();
+    auto pair = devices_.emplace(scan_result_ptr->device_address,
+                                 std::move(fake_peripheral_ptr));
+    DCHECK(pair.second);
+  }
+
+  if (scan_result_ptr->scan_record->name) {
+    fake_peripheral->SetName(scan_result_ptr->scan_record->name.value());
+  }
+
+  device::BluetoothDevice::UUIDList uuids =
+      (scan_result_ptr->scan_record->uuids)
+          ? device::BluetoothDevice::UUIDList(
+                scan_result_ptr->scan_record->uuids.value().begin(),
+                scan_result_ptr->scan_record->uuids.value().end())
+          : device::BluetoothDevice::UUIDList();
+  // TODO(https://crbug.com/817603): Extract the service_data map from
+  // scan_result_ptr once the typemap for this field is added.
+  device::BluetoothDevice::ServiceDataMap service_data =
+      device::BluetoothDevice::ServiceDataMap();
+  device::BluetoothDevice::ManufacturerDataMap manufacturer_data =
+      (scan_result_ptr->scan_record->manufacturer_data)
+          ? device::BluetoothDevice::ManufacturerDataMap(
+                scan_result_ptr->scan_record->manufacturer_data.value().begin(),
+                scan_result_ptr->scan_record->manufacturer_data.value().end())
+          : device::BluetoothDevice::ManufacturerDataMap();
+
+  fake_peripheral->UpdateAdvertisementData(
+      scan_result_ptr->rssi, std::move(uuids), std::move(service_data),
+      std::move(manufacturer_data),
+      (scan_result_ptr->scan_record->tx_power->has_value)
+          ? &scan_result_ptr->scan_record->tx_power->value
+          : nullptr);
+
+  if (is_new_device) {
+    // Call DeviceAdded on observers because it is a newly detected peripheral.
+    for (auto& observer : observers_) {
+      observer.DeviceAdded(this, fake_peripheral);
+    }
+  } else {
+    // Call DeviceChanged on observers because it is a device that was detected
+    // before.
+    for (auto& observer : observers_) {
+      observer.DeviceChanged(this, fake_peripheral);
+    }
+  }
+
+  std::move(callback).Run();
+}
+
 void FakeCentral::SetNextGATTConnectionResponse(
     const std::string& address,
     uint16_t code,
     SetNextGATTConnectionResponseCallback callback) {
-  auto device_iter = devices_.find(address);
-  if (device_iter == devices_.end()) {
+  FakePeripheral* fake_peripheral = GetFakePeripheral(address);
+  if (fake_peripheral == nullptr) {
     std::move(callback).Run(false);
     return;
   }
 
-  FakePeripheral* fake_peripheral =
-      static_cast<FakePeripheral*>(device_iter->second.get());
   fake_peripheral->SetNextGATTConnectionResponse(code);
   std::move(callback).Run(true);
 }
@@ -67,28 +122,71 @@ void FakeCentral::SetNextGATTDiscoveryResponse(
     const std::string& address,
     uint16_t code,
     SetNextGATTDiscoveryResponseCallback callback) {
-  auto device_iter = devices_.find(address);
-  if (device_iter == devices_.end()) {
+  FakePeripheral* fake_peripheral = GetFakePeripheral(address);
+  if (fake_peripheral == nullptr) {
+    std::move(callback).Run(false);
+    return;
+  }
+
+  fake_peripheral->SetNextGATTDiscoveryResponse(code);
+  std::move(callback).Run(true);
+}
+
+bool FakeCentral::AllResponsesConsumed() {
+  return std::all_of(devices_.begin(), devices_.end(), [](const auto& e) {
+    // static_cast is safe because the parent class's devices_ is only
+    // populated via this FakeCentral, and only with FakePeripherals.
+    FakePeripheral* fake_peripheral =
+        static_cast<FakePeripheral*>(e.second.get());
+    return fake_peripheral->AllResponsesConsumed();
+  });
+}
+
+void FakeCentral::SimulateGATTDisconnection(
+    const std::string& address,
+    SimulateGATTDisconnectionCallback callback) {
+  FakePeripheral* fake_peripheral = GetFakePeripheral(address);
+  if (fake_peripheral == nullptr) {
     std::move(callback).Run(false);
   }
 
-  FakePeripheral* fake_peripheral =
-      static_cast<FakePeripheral*>(device_iter->second.get());
-  fake_peripheral->SetNextGATTDiscoveryResponse(code);
+  fake_peripheral->SimulateGATTDisconnection();
+  std::move(callback).Run(true);
+}
+
+void FakeCentral::SimulateGATTServicesChanged(
+    const std::string& address,
+    SimulateGATTServicesChangedCallback callback) {
+  FakePeripheral* fake_peripheral = GetFakePeripheral(address);
+  if (fake_peripheral == nullptr) {
+    std::move(callback).Run(false);
+    return;
+  }
+
   std::move(callback).Run(true);
 }
 
 void FakeCentral::AddFakeService(const std::string& peripheral_address,
                                  const device::BluetoothUUID& service_uuid,
                                  AddFakeServiceCallback callback) {
-  auto device_iter = devices_.find(peripheral_address);
-  if (device_iter == devices_.end()) {
+  FakePeripheral* fake_peripheral = GetFakePeripheral(peripheral_address);
+  if (fake_peripheral == nullptr) {
     std::move(callback).Run(base::nullopt);
+    return;
   }
 
-  FakePeripheral* fake_peripheral =
-      static_cast<FakePeripheral*>(device_iter->second.get());
   std::move(callback).Run(fake_peripheral->AddFakeService(service_uuid));
+}
+
+void FakeCentral::RemoveFakeService(const std::string& identifier,
+                                    const std::string& peripheral_address,
+                                    RemoveFakeServiceCallback callback) {
+  FakePeripheral* fake_peripheral = GetFakePeripheral(peripheral_address);
+  if (!fake_peripheral) {
+    std::move(callback).Run(false);
+    return;
+  }
+  std::move(callback).Run(fake_peripheral->RemoveFakeService(identifier));
 }
 
 void FakeCentral::AddFakeCharacteristic(
@@ -97,20 +195,31 @@ void FakeCentral::AddFakeCharacteristic(
     const std::string& service_id,
     const std::string& peripheral_address,
     AddFakeCharacteristicCallback callback) {
-  auto device_iter = devices_.find(peripheral_address);
-  if (device_iter == devices_.end()) {
-    std::move(callback).Run(base::nullopt);
-  }
-
   FakeRemoteGattService* fake_remote_gatt_service =
-      static_cast<FakeRemoteGattService*>(
-          device_iter->second.get()->GetGattService(service_id));
+      GetFakeRemoteGattService(peripheral_address, service_id);
   if (fake_remote_gatt_service == nullptr) {
     std::move(callback).Run(base::nullopt);
+    return;
   }
 
   std::move(callback).Run(fake_remote_gatt_service->AddFakeCharacteristic(
       characteristic_uuid, std::move(properties)));
+}
+
+void FakeCentral::RemoveFakeCharacteristic(
+    const std::string& identifier,
+    const std::string& service_id,
+    const std::string& peripheral_address,
+    RemoveFakeCharacteristicCallback callback) {
+  FakeRemoteGattService* fake_remote_gatt_service =
+      GetFakeRemoteGattService(peripheral_address, service_id);
+  if (fake_remote_gatt_service == nullptr) {
+    std::move(callback).Run(false);
+    return;
+  }
+
+  std::move(callback).Run(
+      fake_remote_gatt_service->RemoveFakeCharacteristic(identifier));
 }
 
 void FakeCentral::AddFakeDescriptor(
@@ -162,6 +271,24 @@ void FakeCentral::SetNextWriteCharacteristicResponse(
   }
 
   fake_remote_gatt_characteristic->SetNextWriteResponse(gatt_code);
+  std::move(callback).Run(true);
+}
+
+void FakeCentral::SetNextSubscribeToNotificationsResponse(
+    uint16_t gatt_code,
+    const std::string& characteristic_id,
+    const std::string& service_id,
+    const std::string& peripheral_address,
+    SetNextSubscribeToNotificationsResponseCallback callback) {
+  FakeRemoteGattCharacteristic* fake_remote_gatt_characteristic =
+      GetFakeRemoteGattCharacteristic(peripheral_address, service_id,
+                                      characteristic_id);
+  if (fake_remote_gatt_characteristic == nullptr) {
+    std::move(callback).Run(false);
+  }
+
+  fake_remote_gatt_characteristic->SetNextSubscribeToNotificationsResponse(
+      gatt_code);
   std::move(callback).Run(true);
 }
 
@@ -317,6 +444,11 @@ device::BluetoothLocalGattService* FakeCentral::GetGattService(
   return nullptr;
 }
 
+bool FakeCentral::SetPoweredImpl(bool powered) {
+  NOTREACHED();
+  return false;
+}
+
 void FakeCentral::AddDiscoverySession(
     device::BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
@@ -343,24 +475,46 @@ void FakeCentral::RemovePairingDelegateInternal(
   NOTREACHED();
 }
 
-FakeCentral::~FakeCentral() {}
+FakeCentral::~FakeCentral() = default;
 
-FakeRemoteGattCharacteristic* FakeCentral::GetFakeRemoteGattCharacteristic(
-    const std::string& peripheral_address,
-    const std::string& service_id,
-    const std::string& characteristic_id) const {
+FakePeripheral* FakeCentral::GetFakePeripheral(
+    const std::string& peripheral_address) const {
   auto device_iter = devices_.find(peripheral_address);
   if (device_iter == devices_.end()) {
     return nullptr;
   }
 
+  // static_cast is safe because the parent class's devices_ is only
+  // populated via this FakeCentral, and only with FakePeripherals.
+  return static_cast<FakePeripheral*>(device_iter->second.get());
+}
+
+FakeRemoteGattService* FakeCentral::GetFakeRemoteGattService(
+    const std::string& peripheral_address,
+    const std::string& service_id) const {
+  FakePeripheral* fake_peripheral = GetFakePeripheral(peripheral_address);
+  if (fake_peripheral == nullptr) {
+    return nullptr;
+  }
+
+  // static_cast is safe because FakePeripheral is only populated with
+  // FakeRemoteGattServices.
+  return static_cast<FakeRemoteGattService*>(
+      fake_peripheral->GetGattService(service_id));
+}
+
+FakeRemoteGattCharacteristic* FakeCentral::GetFakeRemoteGattCharacteristic(
+    const std::string& peripheral_address,
+    const std::string& service_id,
+    const std::string& characteristic_id) const {
   FakeRemoteGattService* fake_remote_gatt_service =
-      static_cast<FakeRemoteGattService*>(
-          device_iter->second.get()->GetGattService(service_id));
+      GetFakeRemoteGattService(peripheral_address, service_id);
   if (fake_remote_gatt_service == nullptr) {
     return nullptr;
   }
 
+  // static_cast is safe because FakeRemoteGattService is only populated with
+  // FakeRemoteGattCharacteristics.
   return static_cast<FakeRemoteGattCharacteristic*>(
       fake_remote_gatt_service->GetCharacteristic(characteristic_id));
 }
@@ -377,6 +531,8 @@ FakeRemoteGattDescriptor* FakeCentral::GetFakeRemoteGattDescriptor(
     return nullptr;
   }
 
+  // static_cast is safe because FakeRemoteGattCharacteristic is only populated
+  // with FakeRemoteGattDescriptors.
   return static_cast<FakeRemoteGattDescriptor*>(
       fake_remote_gatt_characteristic->GetDescriptor(descriptor_id));
 }

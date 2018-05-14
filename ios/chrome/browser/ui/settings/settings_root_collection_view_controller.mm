@@ -9,8 +9,7 @@
 #import "base/mac/foundation_util.h"
 
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/open_url_command.h"
 #import "ios/chrome/browser/ui/settings/bar_button_activity_indicator.h"
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
@@ -47,6 +46,7 @@ const CGFloat kActivityIndicatorDimensionIPhone = 56;
 @synthesize shouldHideDoneButton = shouldHideDoneButton_;
 @synthesize collectionViewAccessibilityIdentifier =
     collectionViewAccessibilityIdentifier_;
+@synthesize dispatcher = _dispatcher;
 
 - (void)viewDidLoad {
   [super viewDidLoad];
@@ -121,9 +121,10 @@ const CGFloat kActivityIndicatorDimensionIPhone = 56;
 #pragma mark - CollectionViewFooterLinkDelegate
 
 - (void)cell:(CollectionViewFooterCell*)cell didTapLinkURL:(GURL)URL {
+  // Subclass must have a valid dispatcher assigned.
+  DCHECK(self.dispatcher);
   OpenUrlCommand* command = [[OpenUrlCommand alloc] initWithURLFromChrome:URL];
-  [command setTag:IDC_CLOSE_SETTINGS_AND_OPEN_URL];
-  [self chromeExecuteCommand:command];
+  [self.dispatcher closeSettingsUIAndOpenURL:command];
 }
 
 #pragma mark - Status bar
@@ -162,7 +163,7 @@ const CGFloat kActivityIndicatorDimensionIPhone = 56;
   if (!base::ios::IsRunningOnIOS10OrLater()) {
     // TODO(crbug.com/620361): Remove the entire method override when iOS 9 is
     // dropped.
-    if (IsIPadIdiom() && !IsCompact()) {
+    if (IsIPadIdiom() && !IsCompactWidth()) {
       return UIStatusBarStyleLightContent;
     } else {
       return UIStatusBarStyleDefault;

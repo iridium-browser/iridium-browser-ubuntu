@@ -42,7 +42,7 @@ std::string CreateWifiConfigurationJsonString(const std::string& guid) {
 class ActiveHostNetworkStateUpdaterTest : public NetworkStateTest {
  protected:
   ActiveHostNetworkStateUpdaterTest() : NetworkStateTest() {}
-  ~ActiveHostNetworkStateUpdaterTest() override {}
+  ~ActiveHostNetworkStateUpdaterTest() override = default;
 
   void SetUp() override {
     DBusThreadManager::Initialize();
@@ -52,7 +52,7 @@ class ActiveHostNetworkStateUpdaterTest : public NetworkStateTest {
     SetUpTetherNetwork();
     SetUpWifiNetwork();
 
-    fake_active_host_ = base::MakeUnique<FakeActiveHost>();
+    fake_active_host_ = std::make_unique<FakeActiveHost>();
 
     updater_ = base::WrapUnique(new ActiveHostNetworkStateUpdater(
         fake_active_host_.get(), network_state_handler()));

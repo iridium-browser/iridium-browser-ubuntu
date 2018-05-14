@@ -77,24 +77,23 @@
 
 #include "core/frame/WebFrameSerializerImpl.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/DocumentType.h"
 #include "core/dom/Element.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/frame/FrameSerializer.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "core/html/HTMLAllCollection.h"
 #include "core/html/HTMLElement.h"
-#include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLFrameElementBase.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/HTMLHtmlElement.h"
 #include "core/html/HTMLMetaElement.h"
+#include "core/html/forms/HTMLFormElement.h"
+#include "core/html_names.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoader.h"
 #include "platform/wtf/text/TextEncoding.h"
-#include "public/platform/WebCString.h"
 #include "public/platform/WebVector.h"
 
 namespace blink {
@@ -130,13 +129,13 @@ String WebFrameSerializerImpl::PreActionBeforeSerializeOpenTag(
     // have overrided the META which have correct charset declaration after
     // serializing open tag of HEAD element.
     DCHECK(element);
-    if (isHTMLMetaElement(element) &&
-        toHTMLMetaElement(element)->ComputeEncoding().IsValid()) {
+    if (IsHTMLMetaElement(element) &&
+        ToHTMLMetaElement(element)->ComputeEncoding().IsValid()) {
       // Found META tag declared charset, we need to skip it when
       // serializing DOM.
       param->skip_meta_element = element;
       *need_skip = true;
-    } else if (isHTMLHtmlElement(*element)) {
+    } else if (IsHTMLHtmlElement(*element)) {
       // Check something before processing the open tag of HEAD element.
       // First we add doc type declaration if original document has it.
       if (!param->have_seen_doc_type) {
@@ -148,7 +147,7 @@ String WebFrameSerializerImpl::PreActionBeforeSerializeOpenTag(
       // See http://msdn2.microsoft.com/en-us/library/ms537628(VS.85).aspx.
       result.Append(
           WebFrameSerializer::GenerateMarkOfTheWebDeclaration(param->url));
-    } else if (isHTMLBaseElement(*element)) {
+    } else if (IsHTMLBaseElement(*element)) {
       // Comment the BASE tag when serializing dom.
       result.Append("<!--");
     }
@@ -188,7 +187,7 @@ String WebFrameSerializerImpl::PostActionAfterSerializeOpenTag(
   if (!param->is_html_document)
     return result.ToString();
   // Check after processing the open tag of HEAD element
-  if (!param->have_added_charset_declaration && isHTMLHeadElement(*element)) {
+  if (!param->have_added_charset_declaration && IsHTMLHeadElement(*element)) {
     param->have_added_charset_declaration = true;
     // Check meta element. WebKit only pre-parse the first 512 bytes of the
     // document. If the whole <HEAD> is larger and meta is the end of head
@@ -237,7 +236,7 @@ String WebFrameSerializerImpl::PostActionAfterSerializeEndTag(
   if (!param->is_html_document)
     return result.ToString();
   // Comment the BASE tag when serializing DOM.
-  if (isHTMLBaseElement(*element)) {
+  if (IsHTMLBaseElement(*element)) {
     result.Append("-->");
     // Append a new base tag declaration.
     result.Append(WebFrameSerializer::GenerateBaseTagDeclaration(
@@ -270,7 +269,9 @@ void WebFrameSerializerImpl::EncodeAndFlushBuffer(
       param->text_encoding.Encode(content, WTF::kEntitiesForUnencodables);
 
   // Send result to the client.
-  client_->DidSerializeDataForFrame(WebCString(encoded_content), status);
+  client_->DidSerializeDataForFrame(
+      WebVector<char>(encoded_content.data(), encoded_content.length()),
+      status);
 }
 
 // TODO(yosin): We should utilize |MarkupFormatter| here to share code,
@@ -350,7 +351,7 @@ void WebFrameSerializerImpl::OpenTagToString(Element* element,
   // is written even if the original document didn't have that attribute
   // (mainly needed for iframes with srcdoc, but with no src attribute).
   if (should_rewrite_frame_src && !did_rewrite_frame_src &&
-      isHTMLIFrameElement(element)) {
+      IsHTMLIFrameElement(element)) {
     AppendAttribute(result, param->is_html_document,
                     HTMLNames::srcAttr.ToString(), rewritten_frame_link);
   }
@@ -428,6 +429,7 @@ void WebFrameSerializerImpl::BuildContentForNode(Node* node,
     // Document type node can be in DOM?
     case Node::kDocumentTypeNode:
       param->have_seen_doc_type = true;
+      FALLTHROUGH;
     default:
       // For other type node, call default action.
       SaveHTMLContentToBuffer(CreateMarkup(node), param);
@@ -445,7 +447,7 @@ WebFrameSerializerImpl::WebFrameSerializerImpl(
       xml_entities_(true) {
   // Must specify available webframe.
   DCHECK(frame);
-  specified_web_local_frame_impl_ = ToWebLocalFrameBase(frame);
+  specified_web_local_frame_impl_ = ToWebLocalFrameImpl(frame);
   // Make sure we have non null client and delegate.
   DCHECK(client);
   DCHECK(delegate);
@@ -481,7 +483,7 @@ bool WebFrameSerializerImpl::Serialize() {
   } else {
     // Report empty contents for invalid URLs.
     client_->DidSerializeDataForFrame(
-        WebCString(), WebFrameSerializerClient::kCurrentFrameIsFinished);
+        WebVector<char>(), WebFrameSerializerClient::kCurrentFrameIsFinished);
   }
 
   DCHECK(data_buffer_.IsEmpty());

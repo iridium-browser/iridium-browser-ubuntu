@@ -21,7 +21,7 @@
 #ifndef HashChangeEvent_h
 #define HashChangeEvent_h
 
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/events/HashChangeEventInit.h"
 
 namespace blink {
@@ -48,10 +48,10 @@ class HashChangeEvent final : public Event {
     return EventNames::HashChangeEvent;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { Event::Trace(visitor); }
+  virtual void Trace(blink::Visitor* visitor) { Event::Trace(visitor); }
 
  private:
-  HashChangeEvent() {}
+  HashChangeEvent() = default;
 
   HashChangeEvent(const String& old_url, const String& new_url)
       : Event(EventTypeNames::hashchange, false, false),

@@ -10,11 +10,12 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/grit/generated_resources.h"
+#include "extensions/browser/device_local_account_util.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
@@ -28,138 +29,6 @@ namespace chromeos {
 namespace {
 
 namespace emk = extensions::manifest_keys;
-
-// Apps/extensions explicitly whitelisted for use in public sessions.
-const char* const kPublicSessionWhitelist[] = {
-    // Public sessions in general:
-    "cbkkbcmdlboombapidmoeolnmdacpkch",  // Chrome RDP
-    "djflhoibgkdhkhhcedjiklpkjnoahfmg",  // User Agent Switcher
-    "iabmpiboiopbgfabjmgeedhcmjenhbla",  // VNC Viewer
-    "haiffjcadagjlijoggckpgfnoeiflnem",  // Citrix Receiver
-    "lfnfbcjdepjffcaiagkdmlmiipelnfbb",  // Citrix Receiver (branded)
-    "mfaihdlpglflfgpfjcifdjdjcckigekc",  // ARC Runtime
-    "ngjnkanfphagcaokhjecbgkboelgfcnf",  // Print button
-    "cjanmonomjogheabiocdamfpknlpdehm",  // HP printer driver
-    "ioofdkhojeeimmagbjbknkejkgbphdfl",  // RICOH Print for Chrome
-    "pmnllmkmjilbojkpgplbdmckghmaocjh",  // Scan app by François Beaufort
-    "haeblkpifdemlfnkogkipmghfcbonief",  // Charismathics Smart Card Middleware
-    "mpnkhdpphjiihmlmkcamhpogecnnfffa",  // Service NSW Kiosk Utility
-
-    // Libraries:
-    "aclofikceldphonlfmghmimkodjdmhck",  // Ancoris login component
-    "eilbnahdgoddoedakcmfkcgfoegeloil",  // Ancoris proxy component
-    "ceehlgckkmkaoggdnjhibffkphfnphmg",  // Libdata login
-    "fnhgfoccpcjdnjcobejogdnlnidceemb",  // OverDrive
-
-    // Education:
-    "cmeclblmdmffdgpdlifgepjddoplmmal",  //  Imagine Learning
-
-    // Retail mode:
-    "bjfeaefhaooblkndnoabbkkkenknkemb",  // 500 px demo
-    "ehcabepphndocfmgbdkbjibfodelmpbb",  // Angry Birds demo
-    "kgimkbnclbekdkabkpjhpakhhalfanda",  // Bejeweled demo
-    "joodangkbfjnajiiifokapkpmhfnpleo",  // Calculator
-    "fpgfohogebplgnamlafljlcidjedbdeb",  // Calendar demo
-    "cdjikkcakjcdjemakobkmijmikhkegcj",  // Chrome Remote Desktop demo
-    "jkoildpomkimndcphjpffmephmcmkfhn",  // Chromebook Demo App
-    "lbhdhapagjhalobandnbdnmblnmocojh",  // Crackle demo
-    "ielkookhdphmgbipcfmafkaiagademfp",  // Custom bookmarks
-    "kogjlbfgggambihdjcpijgcbmenblimd",  // Custom bookmarks
-    "ogbkmlkceflgpilgbmbcfbifckpkfacf",  // Custom bookmarks
-    "pbbbjjecobhljkkcenlakfnkmkfkfamd",  // Custom bookmarks
-    "jkbfjmnjcdmhlfpephomoiipbhcoiffb",  // Custom bookmarks
-    "dgmblbpgafgcgpkoiilhjifindhinmai",  // Custom bookmarks
-    "iggnealjakkgfofealilhkkclnbnfnmo",  // Custom bookmarks
-    "lplkobnahgbopmpkdapaihnnojkphahc",  // Custom bookmarks
-    "lejnflfhjpcannpaghnahbedlabpmhoh",  // Custom bookmarks
-    "dhjmfhojkfjmfbnbnpichdmcdghdpccg",  // Cut the Rope demo
-    "ebkhfdfghngbimnpgelagnfacdafhaba",  // Deezer demo
-    "npnjdccdffhdndcbeappiamcehbhjibf",  // Docs.app demo
-    "ekgadegabdkcbkodfbgidncffijbghhl",  // Duolingo demo
-    "iddohohhpmajlkbejjjcfednjnhlnenk",  // Evernote demo
-    "bjdhhokmhgelphffoafoejjmlfblpdha",  // Gmail demo
-    "nldmakcnfaflagmohifhcihkfgcbmhph",  // Gmail offline demo
-    "mdhnphfgagkpdhndljccoackjjhghlif",  // Google Drive demo
-    "dondgdlndnpianbklfnehgdhkickdjck",  // Google Keep demo
-    "amfoiggnkefambnaaphodjdmdooiinna",  // Google Play Movie and TV demo
-    "fgjnkhlabjcaajddbaenilcmpcidahll",  // Google+ demo
-    "ifpkhncdnjfipfjlhfidljjffdgklanh",  // Google+ Photos demo
-    "cgmlfbhkckbedohgdepgbkflommbfkep",  // Hangouts.app demo
-    "ndlgnmfmgpdecjgehbcejboifbbmlkhp",  // Hash demo
-    "edhhaiphkklkcfcbnlbpbiepchnkgkpn",  // Helper.extension demo
-    "jckncghadoodfbbbmbpldacojkooophh",  // Journal demo
-    "diehajhcjifpahdplfdkhiboknagmfii",  // Kindle demo
-    "idneggepppginmaklfbaniklagjghpio",  // Kingsroad demo
-    "nhpmmldpbfjofkipjaieeomhnmcgihfm",  // Menu.app demo
-    "kcjbmmhccecjokfmckhddpmghepcnidb",  // Mint demo
-    "onbhgdmifjebcabplolilidlpgeknifi",  // Music.app demo
-    "kkkbcoabfhgekpnddfkaphobhinociem",  // Netflix demo
-    "adlphlfdhhjenpgimjochcpelbijkich",  // New York Times demo
-    "cgefhjmlaifaamhhoojmpcnihlbddeki",  // Pandora demo
-    "kpjjigggmcjinapdeipapdcnmnjealll",  // Pixlr demo
-    "ifnadhpngkodeccijnalokiabanejfgm",  // Pixsta demo
-    "klcojgagjmpgmffcildkgbfmfffncpcd",  // Plex demo
-    "nnikmgjhdlphciaonjmoppfckbpoinnb",  // Pocket demo
-    "khldngaiohpnnoikfmnmfnebecgeobep",  // Polarr Photo demo
-    "aleodiobpjillgfjdkblghiiaegggmcm",  // Quickoffice demo
-    "nifkmgcdokhkjghdlgflonppnefddien",  // Sheets demo
-    "hdmobeajeoanbanmdlabnbnlopepchip",  // Slides demo
-    "ikmidginfdcbojdbmejkeakncgdbmonc",  // Soundtrap demo
-    "dgohlccohkojjgkkfholmobjjoledflp",  // Spotify demo
-    "dhmdaeekeihmajjnmichlhiffffdbpde",  // Store.app demo
-    "onklhlmbpfnmgmelakhgehkfdmkpmekd",  // Todoist demo
-    "jeabmjjifhfcejonjjhccaeigpnnjaak",  // TweetDeck demo
-    "gnckahkflocidcgjbeheneogeflpjien",  // Vine demo
-    "pdckcbpciaaicoomipamcabpdadhofgh",  // Weatherbug demo
-    "biliocemfcghhioihldfdmkkhnofcgmb",  // Webcam Toy demo
-    "bhfoghflalnnjfcfkaelngenjgjjhapk",  // Wevideo demo
-    "pjckdjlmdcofkkkocnmhcbehkiapalho",  // Wunderlist demo
-    "pbdihpaifchmclcmkfdgffnnpfbobefh",  // YouTube demo
-
-    // Testing extensions:
-    "ongnjlefhnoajpbodoldndkbkdgfomlp",  // Show Managed Storage
-    "ilnpadgckeacioehlommkaafedibdeob",  // Enterprise DeviceAttributes
-    "oflckobdemeldmjddmlbaiaookhhcngo",  // Citrix Receiver QA version
-    "ljacajndfccfgnfohlgkdphmbnpkjflk",  // Chrome Remote Desktop (Dev Build)
-
-    // Google Apps:
-    "mclkkofklkfljcocdinagocijmpgbhab",  // Google input tools
-    "gbkeegbaiigmenfmjfclcdgdpimamgkj",  // Office Editing Docs/Sheets/Slides
-    "aapbdbdomjkkjkaonfhkkikfgjllcleb",  // Google Translate
-    "mgijmajocgfcbeboacabfgobmjgjcoja",  // Google Dictionary
-    "mfhehppjhmmnlfbbopchdfldgimhfhfk",  // Google Classroom
-    "mkaakpdehdafacodkgkpghoibnmamcme",  // Google Drawings
-    "pnhechapfaindjhompbnflcldabbghjo",  // Secure Shell
-    "fcgckldmmjdbpdejkclmfnnnehhocbfp",  // Google Finance
-    "jhknlonaankphkkbnmjdlpehkinifeeg",  // Google Forms
-    "jndclpdbaamdhonoechobihbbiimdgai",  // Chromebook Recovery Utility
-    "aohghmighlieiainnegkcijnfilokake",  // Google Docs
-    "eemlkeanncmjljgehlbplemhmdmalhdc",  // Chrome Connectivity Diagnostics
-    "eoieeedlomnegifmaghhjnghhmcldobl",  // Google Apps Script
-    "ndjpildffkeodjdaeebdhnncfhopkajk",  // Network File Share for Chrome OS
-    "pfoeakahkgllhkommkfeehmkfcloagkl",  // Fusion Tables
-    "aapocclcgogkmnckokdopfmhonfmgoek",  // Google Slides
-    "khpfeaanjngmcnplbdlpegiifgpfgdco",  // Smart Card Connector
-    "hmjkmjkepdijhoojdojkdfohbdgmmhki",  // Google Keep - notes and lists
-    "felcaaldnbdncclmgdcncolpebgiejap",  // Google Sheets
-    "gbchcmhmhahfdphkhkmpfmihenigjmpp",  // Chrome Remote Desktop
-    "khkjfddibboofomnlkndfedpoccieiee",  // Study Kit
-    "becloognjehhioodmnimnehjcibkloed",  // Coding with Chrome
-    "hfhhnacclhffhdffklopdkcgdhifgngh",  // Camera
-    "adokjfanaflbkibffcbhihgihpgijcei",  // Share to Classroom
-    "heildphpnddilhkemkielfhnkaagiabh",  // Legacy Browser Support
-    "lpcaedmchfhocbbapmcbpinfpgnhiddi",  // Google Keep Chrome Extension
-    "ldipcbpaocekfooobnbcddclnhejkcpn",  // Google Scholar Button
-    "nnckehldicaciogcbchegobnafnjkcne",  // Google Tone
-    "pfmgfdlgomnbgkofeojodiodmgpgmkac",  // Data Saver
-    "djcfdncoelnlbldjfhinnjlhdjlikmph",  // High Contrast
-    "ipkjmjaledkapilfdigkgfmpekpfnkih",  // Color Enhancer
-    "kcnhkahnjcbndmmehfkdnkjomaanaooo",  // Google Voice
-    "nlbjncdgjeocebhnmkbbbdekmmmcbfjd",  // RSS Subscription Extension
-    "aoggjnmghgmcllfenalipjhmooomfdce",  // SAML SSO for Chrome Apps
-    "fhndealchbngfhdoncgcokameljahhog",  // Certificate Enrollment for Chrome OS
-    "npeicpdbkakmehahjeeohfdhnlpdklia",  // WebRTC Network Limiter
-};
 
 // List of manifest entries from https://developer.chrome.com/apps/manifest.
 // Unsafe entries are commented out and special cases too.
@@ -288,9 +157,6 @@ const char* const kSafeManifestEntries[] = {
     // Not useful since it will prevent app from running, but we don't care.
     emk::kKioskSecondaryApps,
 
-    // Whitelisted to only allow Google Now.
-    emk::kLauncherPage,
-
     // Special-cased in IsSafeForPublicSession().
     // emk::kManifestVersion,
 
@@ -342,10 +208,10 @@ const char* const kSafeManifestEntries[] = {
     // No constant in manifest_constants.cc. Declared as a feature, but unused.
     // "platforms",
 
-    // N/A on Chrome OS, so we don't care.
-    emk::kPlugins,
+    // Deprecated manifest entry, so we don't care.
+    "plugins",
 
-    // Stated 3D/WebGL/plugin requirements of an app.
+    // Stated 3D/WebGL requirements of an app.
     emk::kRequirements,
 
     // Execute some pages in a separate sandbox.  (Note: Using string literal
@@ -774,8 +640,8 @@ void LogPermissionUmaStats(const std::string& permission_string) {
   // Not a permission.
   if (!permission_info) return;
 
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Enterprise.PublicSession.ExtensionPermissions",
-                              permission_info->id());
+  base::UmaHistogramSparse("Enterprise.PublicSession.ExtensionPermissions",
+                           permission_info->id());
 }
 
 // Returns true for extensions that are considered safe for Public Sessions,
@@ -948,7 +814,7 @@ DeviceLocalAccountManagementPolicyProvider::
 // static
 bool DeviceLocalAccountManagementPolicyProvider::IsWhitelisted(
     const std::string& extension_id) {
-  return ArrayContains(kPublicSessionWhitelist, extension_id);
+  return extensions::IsWhitelistedForPublicSession(extension_id);
 }
 
 std::string DeviceLocalAccountManagementPolicyProvider::

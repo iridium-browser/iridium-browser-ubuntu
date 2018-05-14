@@ -26,11 +26,11 @@ import android.view.Window;
 import android.view.accessibility.AccessibilityManager;
 
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.BuildInfo;
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ObserverList;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
@@ -39,11 +39,8 @@ import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.widget.Toast;
 
 import java.lang.ref.WeakReference;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedList;
 
 /**
  * The window base class that has the minimum functionality.
@@ -127,8 +124,8 @@ public class WindowAndroid {
     public interface KeyboardVisibilityListener {
         public void keyboardVisibilityChanged(boolean isShowing);
     }
-    private LinkedList<KeyboardVisibilityListener> mKeyboardVisibilityListeners =
-            new LinkedList<>();
+    private ObserverList<KeyboardVisibilityListener> mKeyboardVisibilityListeners =
+            new ObserverList<>();
 
     /**
      * An interface to notify listeners that a context menu is closed.
@@ -211,24 +208,21 @@ public class WindowAndroid {
         mContextRef = new WeakReference<>(context);
         mOutstandingIntents = new SparseArray<>();
         mIntentErrors = new HashMap<>();
-        mVSyncMonitor = new VSyncMonitor(context, mVSyncListener);
-        mAccessibilityManager = (AccessibilityManager) mApplicationContext.getSystemService(
-                Context.ACCESSIBILITY_SERVICE);
+        // Temporary solution for flaky tests, see https://crbug.com/767624 for context
+        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+            mVSyncMonitor = new VSyncMonitor(context, mVSyncListener);
+            mAccessibilityManager = (AccessibilityManager) mApplicationContext.getSystemService(
+                    Context.ACCESSIBILITY_SERVICE);
+        }
         mDisplayAndroid = display;
         // Configuration.isDisplayServerWideColorGamut must be queried from the window's context.
         // Because of crbug.com/756180, many devices report true for isScreenWideColorGamut in
         // 8.0.0, even when they don't actually support wide color gamut.
         // TODO(boliu): Observe configuration changes to update the value of isScreenWideColorGamut.
-        if (BuildInfo.isAtLeastO() && !Build.VERSION.RELEASE.equals("8.0.0")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !Build.VERSION.RELEASE.equals("8.0.0")
                 && activityFromContext(context) != null) {
             Configuration configuration = context.getResources().getConfiguration();
-            boolean isScreenWideColorGamut = false;
-            try {
-                Method method = configuration.getClass().getMethod("isScreenWideColorGamut");
-                isScreenWideColorGamut = (Boolean) method.invoke(configuration);
-            } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-                Log.e(TAG, "Error invoking isScreenWideColorGamut:", e);
-            }
+            boolean isScreenWideColorGamut = configuration.isScreenWideColorGamut();
             display.updateIsDisplayServerWideColorGamut(isScreenWideColorGamut);
         }
     }
@@ -590,7 +584,8 @@ public class WindowAndroid {
      * the object has not been previously initialized.
      * @return A pointer to the c++ AndroidWindow.
      */
-    public long getNativePointer() {
+    @CalledByNative
+    private long getNativePointer() {
         if (mNativeWindowAndroid == 0) {
             mNativeWindowAndroid = nativeInit(mDisplayAndroid.getDisplayId());
             nativeSetVSyncPaused(mNativeWindowAndroid, mVSyncPaused);
@@ -646,14 +641,14 @@ public class WindowAndroid {
         if (mKeyboardVisibilityListeners.isEmpty()) {
             registerKeyboardVisibilityCallbacks();
         }
-        mKeyboardVisibilityListeners.add(listener);
+        mKeyboardVisibilityListeners.addObserver(listener);
     }
 
     /**
      * @see #addKeyboardVisibilityListener(KeyboardVisibilityListener)
      */
     public void removeKeyboardVisibilityListener(KeyboardVisibilityListener listener) {
-        mKeyboardVisibilityListeners.remove(listener);
+        mKeyboardVisibilityListeners.removeObserver(listener);
         if (mKeyboardVisibilityListeners.isEmpty()) {
             unregisterKeyboardVisibilityCallbacks();
         }
@@ -694,10 +689,7 @@ public class WindowAndroid {
         if (mIsKeyboardShowing == isShowing) return;
         mIsKeyboardShowing = isShowing;
 
-        // Clone the list in case a listener tries to remove itself during the callback.
-        LinkedList<KeyboardVisibilityListener> listeners =
-                new LinkedList<>(mKeyboardVisibilityListeners);
-        for (KeyboardVisibilityListener listener : listeners) {
+        for (KeyboardVisibilityListener listener : mKeyboardVisibilityListeners) {
             listener.keyboardVisibilityChanged(isShowing);
         }
     }

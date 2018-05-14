@@ -35,13 +35,6 @@ Canvas::Canvas(const Size& size, float image_scale, bool is_opaque)
   Size pixel_size = ScaleToCeiledSize(size, image_scale);
   canvas_ = CreateOwnedCanvas(pixel_size, is_opaque);
 
-#if !defined(USE_CAIRO)
-  // skia::PlatformCanvas instances are initialized to 0 by Cairo, but
-  // uninitialized on other platforms.
-  if (!is_opaque)
-    canvas_->clear(SkColorSetARGB(0, 0, 0, 0));
-#endif
-
   SkScalar scale_scalar = SkFloatToScalar(image_scale);
   canvas_->scale(scale_scalar, scale_scalar);
 }
@@ -74,28 +67,31 @@ void Canvas::SizeStringInt(const base::string16& text,
                            int* width,
                            int* height,
                            int line_height,
-                           int flags) {
+                           int flags,
+                           Typesetter typesetter) {
   float fractional_width = static_cast<float>(*width);
   float factional_height = static_cast<float>(*height);
-  SizeStringFloat(text, font_list, &fractional_width,
-                  &factional_height, line_height, flags);
+  SizeStringFloat(text, font_list, &fractional_width, &factional_height,
+                  line_height, flags, typesetter);
   *width = ToCeiledInt(fractional_width);
   *height = ToCeiledInt(factional_height);
 }
 
 // static
 int Canvas::GetStringWidth(const base::string16& text,
-                           const FontList& font_list) {
+                           const FontList& font_list,
+                           Typesetter typesetter) {
   int width = 0, height = 0;
-  SizeStringInt(text, font_list, &width, &height, 0, NO_ELLIPSIS);
+  SizeStringInt(text, font_list, &width, &height, 0, NO_ELLIPSIS, typesetter);
   return width;
 }
 
 // static
 float Canvas::GetStringWidthF(const base::string16& text,
-                              const FontList& font_list) {
+                              const FontList& font_list,
+                              Typesetter typesetter) {
   float width = 0, height = 0;
-  SizeStringFloat(text, font_list, &width, &height, 0, NO_ELLIPSIS);
+  SizeStringFloat(text, font_list, &width, &height, 0, NO_ELLIPSIS, typesetter);
   return width;
 }
 
@@ -287,15 +283,19 @@ void Canvas::Draw1pxLine(PointF p1, PointF p2, SkColor color) {
 void Canvas::DrawCircle(const Point& center_point,
                         int radius,
                         const cc::PaintFlags& flags) {
-  DrawCircle(PointF(center_point), radius, flags);
+  canvas_->drawOval(
+      SkRect::MakeLTRB(center_point.x() - radius, center_point.y() - radius,
+                       center_point.x() + radius, center_point.y() + radius),
+      flags);
 }
 
 void Canvas::DrawCircle(const PointF& center_point,
                         float radius,
                         const cc::PaintFlags& flags) {
-  canvas_->drawCircle(SkFloatToScalar(center_point.x()),
-                      SkFloatToScalar(center_point.y()),
-                      SkFloatToScalar(radius), flags);
+  canvas_->drawOval(
+      SkRect::MakeLTRB(center_point.x() - radius, center_point.y() - radius,
+                       center_point.x() + radius, center_point.y() + radius),
+      flags);
 }
 
 void Canvas::DrawRoundRect(const Rect& rect,
@@ -569,7 +569,7 @@ cc::PaintCanvas* Canvas::CreateOwnedCanvas(const Size& size, bool is_opaque) {
   bitmap_.emplace();
   bitmap_->allocPixels(info);
   // Ensure that the bitmap is zeroed, since the code expects that.
-  memset(bitmap_->getPixels(), 0, bitmap_->getSafeSize());
+  memset(bitmap_->getPixels(), 0, bitmap_->computeByteSize());
 
   owned_canvas_.emplace(bitmap_.value());
   return &owned_canvas_.value();

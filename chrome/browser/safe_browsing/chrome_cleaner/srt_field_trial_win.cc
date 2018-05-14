@@ -15,7 +15,6 @@
 namespace {
 
 // Field trial strings.
-const char kSRTPromptTrial[] = "SRTPromptFieldTrial";
 const char kSRTCanaryGroup[] = "SRTCanary";
 const char kSRTPromptOffGroup[] = "Off";
 const char kSRTPromptSeedParam[] = "Seed";
@@ -23,30 +22,31 @@ const char kSRTPromptSeedParam[] = "Seed";
 const char kSRTElevationTrial[] = "SRTElevation";
 const char kSRTElevationAsNeededGroup[] = "AsNeeded";
 
-const char kSRTReporterTrial[] = "srt_reporter";
-const char kSRTReporterOffGroup[] = "Off";
-
 const char kDownloadRootPath[] =
     "https://dl.google.com/dl/softwareremovaltool/win/";
 
 // The download links of the Software Removal Tool.
 const char kMainSRTDownloadURL[] =
     "https://dl.google.com/dl"
-    "/softwareremovaltool/win/chrome_cleanup_tool.exe?chrome-prompt=1";
+    "/softwareremovaltool/win/chrome_cleanup_tool.exe";
 const char kCanarySRTDownloadURL[] =
     "https://dl.google.com/dl"
-    "/softwareremovaltool/win/c/chrome_cleanup_tool.exe?chrome-prompt=1";
-
-constexpr char kSoftwareReporterPromptShownMetricName[] =
-    "SoftwareReporter.PromptShown";
+    "/softwareremovaltool/win/c/chrome_cleanup_tool.exe";
 
 }  // namespace
 
 namespace safe_browsing {
 
-const base::Feature kInBrowserCleanerUIFeature{
-    "InBrowserCleanerUI", base::FEATURE_DISABLED_BY_DEFAULT};
+const char kSRTPromptTrial[] = "SRTPromptFieldTrial";
 
+const base::Feature kRebootPromptDialogFeature{
+    "RebootPromptDialog", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kUserInitiatedChromeCleanupsFeature{
+    "UserInitiatedChromeCleanups", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// TODO(b/786964): Rename this to remove ByBitness from the feature name once
+// all test scripts have been updated.
 const base::Feature kCleanerDownloadFeature{"DownloadCleanupToolByBitness",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -61,10 +61,8 @@ bool SRTPromptNeedsElevationIcon() {
       kSRTElevationAsNeededGroup, base::CompareCase::SENSITIVE);
 }
 
-bool IsSwReporterEnabled() {
-  return !base::StartsWith(
-      base::FieldTrialList::FindFullName(kSRTReporterTrial),
-      kSRTReporterOffGroup, base::CompareCase::SENSITIVE);
+bool UserInitiatedCleanupsEnabled() {
+  return base::FeatureList::IsEnabled(kUserInitiatedChromeCleanupsFeature);
 }
 
 GURL GetLegacyDownloadURL() {
@@ -91,13 +89,13 @@ GURL GetSRTDownloadURL() {
   // https://dl.google.com/.../win/{arch}/{group}/chrome_cleanup_tool.exe
   std::string download_url_str = std::string(kDownloadRootPath) + architecture +
                                  "/" + download_group +
-                                 "/chrome_cleanup_tool.exe?chrome-prompt=1";
+                                 "/chrome_cleanup_tool.exe";
   GURL download_url(download_url_str);
 
   // Ensure URL construction didn't change origin.
   const GURL download_root(kDownloadRootPath);
-  const url::Origin known_good_origin(download_root);
-  url::Origin current_origin(download_url);
+  const url::Origin known_good_origin = url::Origin::Create(download_root);
+  url::Origin current_origin = url::Origin::Create(download_url);
   if (!current_origin.IsSameOriginWith(known_good_origin))
     return GetLegacyDownloadURL();
 
@@ -109,18 +107,25 @@ std::string GetIncomingSRTSeed() {
                                             kSRTPromptSeedParam);
 }
 
-void RecordSRTPromptHistogram(SRTPromptHistogramValue value) {
-  UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.PromptUsage", value,
-                            SRT_PROMPT_MAX);
+std::string GetSRTFieldTrialGroupName() {
+  return base::FieldTrialList::FindFullName(kSRTPromptTrial);
 }
 
-void RecordPromptShownHistogram() {
-  UMA_HISTOGRAM_BOOLEAN(kSoftwareReporterPromptShownMetricName, true);
+bool IsRebootPromptModal() {
+  constexpr char kIsModalParam[] = "modal_reboot_prompt";
+  return base::FeatureList::IsEnabled(kRebootPromptDialogFeature) &&
+         base::GetFieldTrialParamByFeatureAsBool(kRebootPromptDialogFeature,
+                                                 kIsModalParam,
+                                                 /*default_value=*/false);
+}
+
+void RecordPromptShownWithTypeHistogram(PromptTypeHistogramValue value) {
+  UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.PromptShownWithType", value,
+                            PROMPT_TYPE_MAX);
 }
 
 void RecordPromptNotShownWithReasonHistogram(
     NoPromptReasonHistogramValue value) {
-  UMA_HISTOGRAM_BOOLEAN(kSoftwareReporterPromptShownMetricName, false);
   UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.NoPromptReason", value,
                             NO_PROMPT_REASON_MAX);
 }

@@ -11,6 +11,7 @@
 #include "platform/graphics/paint/PaintChunkProperties.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/Optional.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -33,7 +34,7 @@ class PLATFORM_EXPORT PaintChunker final {
   const PaintChunkProperties& CurrentPaintChunkProperties() const {
     return current_properties_;
   }
-  void UpdateCurrentPaintChunkProperties(const PaintChunk::Id*,
+  void UpdateCurrentPaintChunkProperties(const Optional<PaintChunk::Id>&,
                                          const PaintChunkProperties&);
 
   void ForceNewChunk() { force_new_chunk_ = true; }
@@ -63,8 +64,14 @@ class PLATFORM_EXPORT PaintChunker final {
 
  private:
   Vector<PaintChunk> chunks_;
+  // TODO(pdr): Refactor current_chunk_id_ so that it is always the equal to
+  // the current chunk id. This is currently not true when there is a forced
+  // chunk because the current_chunk_id_ is cleared for subsequent chunks, even
+  // though those subsequent chunks will have valid chunk ids.
   Optional<PaintChunk::Id> current_chunk_id_;
   PaintChunkProperties current_properties_;
+  // True when an item forces a new chunk (e.g., foreign display items), and for
+  // the item following a forced chunk.
   bool force_new_chunk_;
 };
 

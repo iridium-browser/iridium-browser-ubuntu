@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/macros.h"
 #include "chrome/common/importer/imported_bookmark_entry.h"
 #include "chrome/common/importer/importer_bridge.h"
@@ -60,7 +61,7 @@ bool CanImportURL(const GURL& url) {
         return true;
     }
 
-    for (int i = 0; i < chrome::kNumberOfChromeDebugURLs; ++i) {
+    for (size_t i = 0; i < chrome::kNumberOfChromeDebugURLs; ++i) {
       if (fixed_url == chrome::kChromeDebugURLs[i])
         return true;
     }

@@ -92,8 +92,8 @@ class NetworkChangeNotifierAndroid::DnsConfigServiceThread
       : base::Thread("DnsConfigService"),
         dns_config_for_testing_(dns_config_for_testing),
         creation_time_(base::Time::Now()),
-        address_tracker_(base::Bind(base::DoNothing),
-                         base::Bind(base::DoNothing),
+        address_tracker_(base::DoNothing(),
+                         base::DoNothing(),
                          // We're only interested in tunnel interface changes.
                          base::Bind(NotifyNetworkChangeNotifierObservers),
                          std::unordered_set<std::string>()) {}
@@ -182,7 +182,9 @@ bool NetworkChangeNotifierAndroid::AreNetworkHandlesCurrentlySupported() const {
   // NetworkHandles only implemented for Android versions >= L.
   return force_network_handles_supported_for_testing_ ||
          (base::android::BuildInfo::GetInstance()->sdk_int() >=
-          base::android::SDK_VERSION_LOLLIPOP);
+              base::android::SDK_VERSION_LOLLIPOP &&
+          !delegate_->IsProcessBoundToNetwork() &&
+          !delegate_->RegisterNetworkCallbackFailed());
 }
 
 void NetworkChangeNotifierAndroid::GetCurrentConnectedNetworks(
@@ -232,11 +234,6 @@ void NetworkChangeNotifierAndroid::OnNetworkDisconnected(
 void NetworkChangeNotifierAndroid::OnNetworkMadeDefault(NetworkHandle network) {
   NetworkChangeNotifier::NotifyObserversOfSpecificNetworkChange(
       NetworkChangeType::MADE_DEFAULT, network);
-}
-
-// static
-bool NetworkChangeNotifierAndroid::Register(JNIEnv* env) {
-  return NetworkChangeNotifierDelegateAndroid::Register(env);
 }
 
 NetworkChangeNotifierAndroid::NetworkChangeNotifierAndroid(

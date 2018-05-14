@@ -8,12 +8,15 @@
 
 #import "remoting/ios/app/app_delegate.h"
 
+#import "remoting/ios/app/app_initializer.h"
 #import "remoting/ios/app/app_view_controller.h"
 #import "remoting/ios/app/first_launch_view_presenter.h"
 #import "remoting/ios/app/help_and_feedback.h"
 #import "remoting/ios/app/help_view_controller.h"
+#import "remoting/ios/app/remoting_theme.h"
 #import "remoting/ios/app/remoting_view_controller.h"
 #import "remoting/ios/app/user_status_presenter.h"
+#import "remoting/ios/app/view_utils.h"
 #import "remoting/ios/app/web_view_controller.h"
 #import "remoting/ios/facade/remoting_oauth_authentication.h"
 
@@ -28,16 +31,13 @@
 }
 @end
 
-// TODO(nicholss): There is no FAQ page at the moment.
-static NSString* const kFAQsUrl =
-    @"https://support.google.com/chrome/answer/1649523?co=GENIE.Platform%3DiOS";
-
 @implementation AppDelegate
 
 @synthesize window = _window;
 
 - (BOOL)application:(UIApplication*)application
     willFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
+  [AppInitializer onAppWillFinishLaunching];
   self.window =
       [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
   self.window.backgroundColor = [UIColor whiteColor];
@@ -47,10 +47,15 @@ static NSString* const kFAQsUrl =
 - (BOOL)application:(UIApplication*)application
     didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
   [self launchRootViewController];
+  [RemotingTheme applyColorSchemes];
+  [AppInitializer onAppDidFinishLaunching];
+
   return YES;
 }
 
 #ifndef NDEBUG
+// Used by Chromium debug build to authenticate.
+// TODO(yuweih): This interface is deprecated in iOS 10 and needs some cleanups.
 - (BOOL)application:(UIApplication*)application handleOpenURL:(NSURL*)url {
   DCHECK([RemotingService.instance.authentication
       isKindOfClass:[RemotingOAuthAuthentication class]]);
@@ -115,13 +120,6 @@ static NSString* const kFAQsUrl =
 
 #pragma mark - AppDelegate
 
-- (void)navigateToFAQs:(UINavigationController*)navigationController {
-  WebViewController* viewController =
-      [[WebViewController alloc] initWithUrl:kFAQsUrl
-                                       title:l10n_util::GetNSString(IDS_FAQS)];
-  [navigationController pushViewController:viewController animated:YES];
-}
-
 - (void)navigateToHelpCenter:(UINavigationController*)navigationController {
   [navigationController pushViewController:[[HelpViewController alloc] init]
                                   animated:YES];
@@ -130,7 +128,7 @@ static NSString* const kFAQsUrl =
 - (void)presentHelpCenter {
   UINavigationController* navController = [[UINavigationController alloc]
       initWithRootViewController:[[HelpViewController alloc] init]];
-  [AppDelegate.topPresentingVC presentViewController:navController
+  [remoting::TopPresentingVC() presentViewController:navController
                                             animated:YES
                                           completion:nil];
 }
@@ -140,7 +138,7 @@ static NSString* const kFAQsUrl =
 }
 
 - (void)emailSetupInstructions {
-  NSLog(@"TODO: emailSetupInstructions");
+  NOTREACHED();
 }
 
 #pragma mark - FirstLaunchViewPresenterDelegate
@@ -148,19 +146,6 @@ static NSString* const kFAQsUrl =
 - (void)presentSignInFlow {
   DCHECK(_appViewController);
   [_appViewController presentSignInFlow];
-}
-
-#pragma mark - Private
-
-+ (UIViewController*)topPresentingVC {
-  UIViewController* topController =
-      UIApplication.sharedApplication.keyWindow.rootViewController;
-
-  while (topController.presentedViewController) {
-    topController = topController.presentedViewController;
-  }
-
-  return topController;
 }
 
 @end

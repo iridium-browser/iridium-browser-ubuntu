@@ -1,17 +1,22 @@
 <link rel="import" href="chrome://resources/cr_elements/paper_button_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/paper_checkbox_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/paper_input_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/paper_toggle_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/search_highlight_style_css.html">
 <link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
 <link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
 <link rel="import" href="settings_icons_css.html">
 <link rel="import" href="settings_vars_css.html">
 
+
 <!-- Common styles for Material Design settings. -->
 <dom-module id="settings-shared">
   <template>
-    <style include="settings-icons paper-button-style cr-shared-style">
+    <style include="settings-icons paper-button-style paper-checkbox-style paper-input-style paper-toggle-style cr-shared-style search-highlight-style">
       /* Prevent action-links from being selected to avoid accidental
        * selection when trying to click it. */
       a[is=action-link] {
-        -webkit-user-select: none;
+        user-select: none;
       }
 
       /* Use <h2> as the "sub-header" mentioned in the UX design docs. */
@@ -24,7 +29,7 @@
         font-weight: 500;
         margin: 0;
         padding-bottom: 12px;
-        padding-top: 24px;
+        padding-top: 32px;
       }
 
       iron-icon {
@@ -36,8 +41,32 @@
        --iron-icon-fill-color: var(--google-green-500);
       }
 
+      iron-list {
+        --iron-list-items-container: {
+          /* Text selection in an iron-list is problematic because the items are
+           * reused. The result is the selection happens somewhat arbitrarily.
+           * Add a |risk-selection| attribute to enabled selection in an
+           * iron-list. */
+          user-select: none;
+        }
+      }
+
+      iron-list[risk-selection] {
+        --iron-list-items-container: {
+          /* On short lists where selection is likely desired, we'll risk having
+           * text selection enabled. If the list is short enough that items are
+           * not actually reused, the bugs with selection are not evident. */
+          user-select: text;
+        }
+      }
+
       .separator + button[is='paper-icon-button-light'] {
         -webkit-margin-start: var(--cr-icon-ripple-margin);
+      }
+
+      neon-animatable {
+        display: flex;
+        flex-direction: column;
       }
 
       /* For "Advanced" toggle button. */
@@ -61,8 +90,9 @@
         -webkit-margin-start: 16px;
       }
 
-      /* Adjust the margin between the separator and the first button. */
-      .settings-box .separator + paper-button {
+      /* Adjust the margin between the separator and the first button. Exclude
+       * .action-button since it has a background thus is visually different. */
+      .separator + paper-button:not(.action-button) {
         -webkit-margin-start: calc(var(--cr-button-edge-spacing) * -1);
       }
 
@@ -77,8 +107,9 @@
       }
 
       paper-toggle-button {
-        @apply(--settings-actionable);
+        @apply --settings-actionable;
         height: var(--settings-row-min-height);
+        user-select: none;  /* Prevents text selection while dragging. */
         width: 36px;
       }
 
@@ -88,9 +119,6 @@
 
       a[href] {
         color: var(--google-blue-700);
-      }
-
-      a[href] {
         text-decoration: none;
       }
 
@@ -106,19 +134,6 @@
 
       .primary-toggle[checked] {
         color: var(--google-blue-500);
-      }
-
-      paper-checkbox {
-        --paper-checkbox-checked-color: var(--google-blue-500);
-        --paper-checkbox-label-spacing: var(--settings-control-label-spacing);
-        --paper-checkbox-size: var(--checkbox-size);
-        --paper-checkbox-unchecked-color: var(--paper-grey-600);
-        -webkit-margin-start: var(--checkbox-margin-start);
-      }
-
-      paper-input {
-        /* Fix issue with focus animation making labels wiggle. */
-        transform: translate3d(0, 0, 0);
       }
 
       controlled-radio-button,
@@ -141,7 +156,7 @@
 
       /* See also: .no-min-width below. */
       .text-elide {
-        @apply(--settings-text-elide);
+        @apply --cr-text-elide;
       }
 
       /* By default, flexbox children have min-width calculated to be the width
@@ -153,10 +168,6 @@
         min-width: 0;
       }
 
-      .button-strip {
-        text-align: end;
-      }
-
       .header-aligned-button {
         margin-top: 12px;  /* Align paper-button with <h2>. */
       }
@@ -165,7 +176,7 @@
        * outside of a settings-box. A list-frame is likely to follow a
        * settings box. */
       .list-frame {
-        @apply(--settings-list-frame-padding);
+        @apply --settings-list-frame-padding;
         align-items: center;
         display: block;
       }
@@ -221,11 +232,7 @@
       /* A settings-box is a horizontal row of text or controls within a
        * setting section (page or subpage). */
       .settings-box {
-        align-items: center;
-        border-top: var(--settings-separator-line);
-        display: flex;
-        min-height: var(--settings-row-min-height);
-        padding: 0 var(--settings-box-row-padding);
+        @apply --cr-section;
       }
 
       .settings-box.two-line {
@@ -260,9 +267,15 @@
         min-height: 0;
       }
 
+      /* A settings-box that is embedded in another settings-box (e.g. a control
+       * that is associated with a toggle button). */
+      .settings-box.embedded {
+        -webkit-padding-start: var(--settings-box-row-indent);
+      }
+
       /* The lower line of text in a two-line row. */
       .secondary {
-        @apply(--settings-secondary);
+        @apply --cr-secondary-text;
       }
 
       /* The |:empty| CSS selector only works when there is no whitespace.
@@ -301,11 +314,6 @@
         min-width: 0;  /* Workaround for text elision in sub-elements. */
       }
 
-      /* Expand to fill-up available space. */
-      .settings-row.wide {
-        flex: 1;
-      }
-
       .no-outline {
         background: none;
         outline: none;
@@ -330,7 +338,7 @@
       /* The separator a vertical line like a horizontal rule <hr> tag, but goes
        * the other way. An example is near the |sign out| button on the People
        * settings. */
-      :-webkit-any(.settings-box, .list-item) .separator {
+      .separator {
         -webkit-border-start: var(--settings-separator-line);
         -webkit-margin-end: var(--settings-box-row-padding);
         -webkit-margin-start: var(--settings-box-row-padding);
@@ -340,16 +348,9 @@
             var(--settings-separator-gaps));
       }
 
-      :-webkit-any(.settings-box, .list-item).two-line .separator {
+      .two-line .separator {
         height: calc(var(--settings-row-two-line-min-height) -
             2 * var(--settings-separator-gaps));
-      }
-
-      .settings-checkbox-spacer {
-        -webkit-margin-start: calc(
-            var(--checkbox-margin-start) +
-            var(--checkbox-size) +
-            var(--settings-control-label-spacing));
       }
 
       .favicon-image {
@@ -357,44 +358,6 @@
         background-size: contain;
         height: 16px;
         width: 16px;
-      }
-
-      .search-bubble {
-        /* RGB value matches var(--paper-yellow-500). */
-        --search-bubble-color: rgba(255, 235, 59, 0.9);
-        position: absolute;
-        z-index: 1;
-      }
-
-      .search-bubble-innards {
-        align-items: center;
-        background-color: var(--search-bubble-color);
-        border-radius: 2px;
-        max-width: 100px;
-        min-width: 64px;
-        padding: 4px 10px;
-        text-align: center;
-      }
-
-      /* Provides the arrow which points at the anchor element. */
-      .search-bubble-innards::after {
-        background-color: var(--search-bubble-color);
-        content: '';
-        height: 10px;
-        left: calc(50% - 5px);
-        position: absolute;
-        top: -5px;
-        transform: rotate(-45deg);
-        width: 10px;
-        z-index: -1;
-      }
-
-      /* Turns the arrow direction downwards, when the bubble is placed above
-       * the anchor element */
-      .search-bubble-innards.above::after {
-        bottom: -5px;
-        top: auto;
-        transform: rotate(-135deg);
       }
 
       .column-header {

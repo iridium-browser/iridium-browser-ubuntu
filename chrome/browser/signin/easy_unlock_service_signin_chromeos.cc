@@ -483,7 +483,7 @@ void EasyUnlockServiceSignin::LoadCurrentUserDataIfNeeded() {
   const auto it = user_data_.find(account_id_);
   if (it == user_data_.end())
     user_data_.insert(
-        std::make_pair(account_id_, base::MakeUnique<UserData>()));
+        std::make_pair(account_id_, std::make_unique<UserData>()));
 
   UserData* data = user_data_[account_id_].get();
 
@@ -540,7 +540,7 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
 
   cryptauth::RemoteDeviceList remote_devices;
   for (const auto& device : devices) {
-    std::string decoded_public_key, decoded_psk, decoded_challenge;
+    std::string decoded_public_key, decoded_psk;
     if (!base::Base64UrlDecode(device.public_key,
                                base::Base64UrlDecodePolicy::REQUIRE_PADDING,
                                &decoded_public_key) ||
@@ -552,9 +552,15 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
                     << "  psk: " << device.psk;
       continue;
     }
+    // TODO(tengs): We assume that the device is an unlock key since we only
+    // request unlock keys for EasyUnlock. Instead, we should include bool
+    // (as well as the "supports_mobile_hotspot" bool and
+    // last_update_time_millis) as part of EasyUnlockDeviceKeyData instead of
+    // making that assumption here.
     cryptauth::RemoteDevice remote_device(
         account_id.GetUserEmail(), std::string(), decoded_public_key,
-        device.bluetooth_address, decoded_psk, decoded_challenge);
+        device.bluetooth_address, decoded_psk, true /* unlock_key */,
+        false /* supports_mobile_hotspot */, 0L /* last_update_time_millis */);
 
     if (!device.serialized_beacon_seeds.empty()) {
       PA_LOG(INFO) << "Deserializing BeaconSeeds: "

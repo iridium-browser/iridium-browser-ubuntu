@@ -44,11 +44,22 @@ class ShellUtil {
     SYSTEM_LEVEL = 0x2   // Make any shell changes only at the system level
   };
 
-  // Chrome's default handler state for a given protocol.
+  // Chrome's default handler state for a given protocol. If the current install
+  // mode is not default, the brand's other modes are checked. This allows
+  // callers to take specific action in case the current mode (e.g., Chrome Dev)
+  // is not the default handler, but another of the brand's modes (e.g., stable
+  // Chrome) is.
   enum DefaultState {
+    // An error occurred while attempting to check the default handler for the
+    // protocol.
     UNKNOWN_DEFAULT,
+    // No install mode for the brand is default for the protocol.
     NOT_DEFAULT,
+    // The current install mode is default.
     IS_DEFAULT,
+    // The current install mode is not default, although one of the brand's
+    // other install modes is.
+    OTHER_MODE_IS_DEFAULT,
   };
 
   // Typical shortcut directories. Resolved in GetShortcutPath().
@@ -94,6 +105,7 @@ class ShellUtil {
       PROPERTIES_APP_ID = 1 << 4,
       PROPERTIES_SHORTCUT_NAME = 1 << 5,
       PROPERTIES_DUAL_MODE = 1 << 6,
+      PROPERTIES_TOAST_ACTIVATOR_CLSID = 1 << 7,
     };
 
     explicit ShortcutProperties(ShellChange level_in);
@@ -136,7 +148,7 @@ class ShellUtil {
       options |= PROPERTIES_ICON;
     }
 
-    // Sets the app model id for the shortcut (Win7+).
+    // Sets the app model id for the shortcut.
     void set_app_id(const base::string16& app_id_in) {
       app_id = app_id_in;
       options |= PROPERTIES_APP_ID;
@@ -148,6 +160,12 @@ class ShellUtil {
     void set_shortcut_name(const base::string16& shortcut_name_in) {
       shortcut_name = shortcut_name_in;
       options |= PROPERTIES_SHORTCUT_NAME;
+    }
+
+    // Sets the toast activator CLSID to |toast_activator_clsid_in|.
+    void set_toast_activator_clsid(const CLSID& toast_activator_clsid_in) {
+      toast_activator_clsid = toast_activator_clsid_in;
+      options |= PROPERTIES_TOAST_ACTIVATOR_CLSID;
     }
 
     // Sets whether to pin this shortcut to the taskbar after creating it
@@ -181,6 +199,10 @@ class ShellUtil {
       return (options & PROPERTIES_SHORTCUT_NAME) != 0;
     }
 
+    bool has_toast_activator_clsid() const {
+      return (options & PROPERTIES_TOAST_ACTIVATOR_CLSID) != 0;
+    }
+
     // The level to install this shortcut at (CURRENT_USER for a per-user
     // shortcut and SYSTEM_LEVEL for an all-users shortcut).
     ShellChange level;
@@ -192,6 +214,7 @@ class ShellUtil {
     int icon_index;
     base::string16 app_id;
     base::string16 shortcut_name;
+    CLSID toast_activator_clsid;
     bool pin_to_taskbar;
     // Bitfield made of IndividualProperties. Properties set in |options| will
     // be used to create/update the shortcut, others will be ignored on update
@@ -445,6 +468,13 @@ class ShellUtil {
                                 int shell_change,
                                 const base::FilePath& chrome_exe,
                                 bool elevate_if_not_admin);
+
+#if defined(GOOGLE_CHROME_BUILD)
+  // Opens the Apps & Features page in the Windows settings.
+  //
+  // This function DCHECKS that it is only called on Windows 10 or higher.
+  static bool LaunchUninstallAppsSettings();
+#endif
 
   // Windows 8: Shows and waits for the "How do you want to open webpages?"
   // dialog if Chrome is not already the default HTTP/HTTPS handler. Also does

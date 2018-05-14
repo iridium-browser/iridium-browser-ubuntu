@@ -15,6 +15,7 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -27,6 +28,8 @@
 
 namespace gl {
 
+class GLSurfacePresentationHelper;
+
 // If adding a new type, also add it to EGLDisplayType in
 // tools/metrics/histograms/histograms.xml. Don't remove or reorder entries.
 enum DisplayType {
@@ -38,7 +41,10 @@ enum DisplayType {
   ANGLE_OPENGL = 5,
   ANGLE_OPENGLES = 6,
   ANGLE_NULL = 7,
-  DISPLAY_TYPE_MAX = 8,
+  ANGLE_D3D11_NULL = 8,
+  ANGLE_OPENGL_NULL = 9,
+  ANGLE_OPENGLES_NULL = 10,
+  DISPLAY_TYPE_MAX = 11,
 };
 
 GL_EXPORT void GetEGLInitDisplays(bool supports_angle_d3d,
@@ -58,6 +64,8 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   GLSurfaceFormat GetFormat() override;
 
   static bool InitializeOneOff(EGLNativeDisplayType native_display);
+  static bool InitializeOneOffForTesting();
+  static bool InitializeExtensionSettingsOneOff();
   static void ShutdownOneOff();
   static EGLDisplay GetHardwareDisplay();
   static EGLDisplay InitializeDisplay(EGLNativeDisplayType native_display);
@@ -74,6 +82,10 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   static bool IsEGLSurfacelessContextSupported();
   static bool IsEGLContextPrioritySupported();
   static bool IsDirectCompositionSupported();
+  static bool IsRobustResourceInitSupported();
+  static bool IsDisplayTextureShareGroupSupported();
+  static bool IsCreateContextClientArraysSupported();
+  static bool IsAndroidNativeFenceSyncSupported();
 
  protected:
   ~GLSurfaceEGL() override;
@@ -83,6 +95,7 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GLSurfaceEGL);
+  static bool InitializeOneOffCommon();
   static bool initialized_;
 };
 
@@ -93,21 +106,30 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL {
                          std::unique_ptr<gfx::VSyncProvider> vsync_provider);
 
   // Implement GLSurface.
-  using GLSurfaceEGL::Initialize;
   bool Initialize(GLSurfaceFormat format) override;
+  bool SupportsSwapTimestamps() const override;
+  void SetEnableSwapTimestamps() override;
+  bool SupportsPresentationCallback() override;
   void Destroy() override;
   bool Resize(const gfx::Size& size,
               float scale_factor,
+              ColorSpace color_space,
               bool has_alpha) override;
   bool Recreate() override;
   bool IsOffscreen() override;
-  gfx::SwapResult SwapBuffers() override;
+  gfx::SwapResult SwapBuffers(const PresentationCallback& callback) override;
   gfx::Size GetSize() override;
   EGLSurface GetHandle() override;
   bool SupportsPostSubBuffer() override;
-  gfx::SwapResult PostSubBuffer(int x, int y, int width, int height) override;
+  gfx::SwapResult PostSubBuffer(int x,
+                                int y,
+                                int width,
+                                int height,
+                                const PresentationCallback& callback) override;
   bool SupportsCommitOverlayPlanes() override;
-  gfx::SwapResult CommitOverlayPlanes() override;
+  gfx::SwapResult CommitOverlayPlanes(
+      const PresentationCallback& callback) override;
+  bool OnMakeCurrent(GLContext* context) override;
   gfx::VSyncProvider* GetVSyncProvider() override;
   bool ScheduleOverlayPlane(int z_order,
                             gfx::OverlayTransform transform,
@@ -127,12 +149,21 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL {
   gfx::Size size_;
   bool enable_fixed_size_angle_;
 
-  gfx::SwapResult SwapBuffersWithDamage(const std::vector<int>& rects);
+  gfx::SwapResult SwapBuffersWithDamage(const std::vector<int>& rects,
+                                        const PresentationCallback& callback);
 
  private:
+  struct SwapInfo {
+    bool frame_id_is_valid;
+    EGLuint64KHR frame_id;
+  };
+
   // Commit the |pending_overlays_| and clear the vector. Returns false if any
   // fail to be committed.
   bool CommitAndClearPendingOverlays();
+
+  void UpdateSwapEvents(EGLuint64KHR newFrameId, bool newFrameIdIsValid);
+  void TraceSwapEvents(EGLuint64KHR oldFrameId);
 
   EGLSurface surface_;
   bool supports_post_sub_buffer_;
@@ -143,6 +174,16 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL {
   std::unique_ptr<gfx::VSyncProvider> vsync_provider_internal_;
 
   std::vector<GLSurfaceOverlay> pending_overlays_;
+
+  // Stored in separate vectors so we can pass the egl timestamps
+  // directly to the EGL functions.
+  bool use_egl_timestamps_;
+  std::vector<EGLint> supported_egl_timestamps_;
+  std::vector<const char*> supported_event_names_;
+
+  base::queue<SwapInfo> swap_info_queue_;
+
+  std::unique_ptr<GLSurfacePresentationHelper> presentation_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeViewGLSurfaceEGL);
 };
@@ -156,10 +197,11 @@ class GL_EXPORT PbufferGLSurfaceEGL : public GLSurfaceEGL {
   bool Initialize(GLSurfaceFormat format) override;
   void Destroy() override;
   bool IsOffscreen() override;
-  gfx::SwapResult SwapBuffers() override;
+  gfx::SwapResult SwapBuffers(const PresentationCallback& callback) override;
   gfx::Size GetSize() override;
   bool Resize(const gfx::Size& size,
               float scale_factor,
+              ColorSpace color_space,
               bool has_alpha) override;
   EGLSurface GetHandle() override;
   void* GetShareHandle() override;
@@ -186,10 +228,11 @@ class GL_EXPORT SurfacelessEGL : public GLSurfaceEGL {
   void Destroy() override;
   bool IsOffscreen() override;
   bool IsSurfaceless() const override;
-  gfx::SwapResult SwapBuffers() override;
+  gfx::SwapResult SwapBuffers(const PresentationCallback& callback) override;
   gfx::Size GetSize() override;
   bool Resize(const gfx::Size& size,
               float scale_factor,
+              ColorSpace color_space,
               bool has_alpha) override;
   EGLSurface GetHandle() override;
   void* GetShareHandle() override;

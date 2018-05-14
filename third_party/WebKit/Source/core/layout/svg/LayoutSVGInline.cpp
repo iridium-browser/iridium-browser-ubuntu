@@ -35,9 +35,10 @@ bool LayoutSVGInline::IsChildAllowed(LayoutObject* child,
   if (child->IsText())
     return SVGLayoutSupport::IsLayoutableTextNode(child);
 
-  if (isSVGAElement(*GetNode())) {
+  if (IsSVGAElement(*GetNode())) {
+    Node* child_node = child->GetNode();
     // Disallow direct descendant 'a'.
-    if (isSVGAElement(*child->GetNode()))
+    if (child_node && IsSVGAElement(*child_node))
       return false;
   }
 
@@ -117,7 +118,7 @@ void LayoutSVGInline::AbsoluteQuads(Vector<FloatQuad>& quads,
 }
 
 void LayoutSVGInline::WillBeDestroyed() {
-  SVGResourcesCache::ClientDestroyed(this);
+  SVGResourcesCache::ClientDestroyed(*this);
   LayoutInline::WillBeDestroyed();
 }
 
@@ -127,13 +128,13 @@ void LayoutSVGInline::StyleDidChange(StyleDifference diff,
     SetNeedsBoundariesUpdate();
 
   LayoutInline::StyleDidChange(diff, old_style);
-  SVGResourcesCache::ClientStyleChanged(this, diff, StyleRef());
+  SVGResourcesCache::ClientStyleChanged(*this, diff, StyleRef());
 }
 
 void LayoutSVGInline::AddChild(LayoutObject* child,
                                LayoutObject* before_child) {
   LayoutInline::AddChild(child, before_child);
-  SVGResourcesCache::ClientWasAddedToTree(child, child->StyleRef());
+  SVGResourcesCache::ClientWasAddedToTree(*child, child->StyleRef());
 
   if (LayoutSVGText* text_layout_object =
           LayoutSVGText::LocateLayoutSVGTextAncestor(this))
@@ -141,7 +142,7 @@ void LayoutSVGInline::AddChild(LayoutObject* child,
 }
 
 void LayoutSVGInline::RemoveChild(LayoutObject* child) {
-  SVGResourcesCache::ClientWillBeRemovedFromTree(child);
+  SVGResourcesCache::ClientWillBeRemovedFromTree(*child);
 
   if (LayoutSVGText* text_layout_object =
           LayoutSVGText::LocateLayoutSVGTextAncestor(this))

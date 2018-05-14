@@ -7,7 +7,6 @@
 #include <stdint.h>
 
 #include <algorithm>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,7 +14,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
@@ -34,6 +32,7 @@
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/socket_test_util.h"
 #include "net/test/gtest_util.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -140,7 +139,8 @@ TEST(HttpStreamParser, DataReadErrorSynchronous) {
 
   HttpResponseInfo response;
   TestCompletionCallback callback;
-  int result = parser.SendRequest("POST / HTTP/1.1\r\n", headers, &response,
+  int result = parser.SendRequest("POST / HTTP/1.1\r\n", headers,
+                                  TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                   callback.callback());
   EXPECT_THAT(callback.GetResult(result), IsError(ERR_FAILED));
 
@@ -181,7 +181,8 @@ TEST(HttpStreamParser, DataReadErrorAsynchronous) {
 
   HttpResponseInfo response;
   TestCompletionCallback callback;
-  int result = parser.SendRequest("POST / HTTP/1.1\r\n", headers, &response,
+  int result = parser.SendRequest("POST / HTTP/1.1\r\n", headers,
+                                  TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                   callback.callback());
   EXPECT_THAT(result, IsError(ERR_IO_PENDING));
 
@@ -257,7 +258,8 @@ TEST(HttpStreamParser, InitAsynchronousUploadDataStream) {
 
   HttpResponseInfo response;
   TestCompletionCallback callback1;
-  int result1 = parser.SendRequest("POST / HTTP/1.1\r\n", headers, &response,
+  int result1 = parser.SendRequest("POST / HTTP/1.1\r\n", headers,
+                                   TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                    callback1.callback());
   EXPECT_EQ(ERR_IO_PENDING, result1);
   base::RunLoop().RunUntilIdle();
@@ -342,7 +344,7 @@ TEST(HttpStreamParser, ShouldMergeRequestHeadersAndBody_NoBody) {
 TEST(HttpStreamParser, ShouldMergeRequestHeadersAndBody_EmptyBody) {
   std::vector<std::unique_ptr<UploadElementReader>> element_readers;
   std::unique_ptr<UploadDataStream> body(
-      base::MakeUnique<ElementsUploadDataStream>(std::move(element_readers),
+      std::make_unique<ElementsUploadDataStream>(std::move(element_readers),
                                                  0));
   ASSERT_THAT(body->Init(CompletionCallback(), NetLogWithSource()), IsOk());
   // Shouldn't be merged if upload data is empty.
@@ -373,7 +375,7 @@ TEST(HttpStreamParser, ShouldMergeRequestHeadersAndBody_FileBody) {
   {
     std::vector<std::unique_ptr<UploadElementReader>> element_readers;
 
-    element_readers.push_back(base::MakeUnique<UploadFileElementReader>(
+    element_readers.push_back(std::make_unique<UploadFileElementReader>(
         base::ThreadTaskRunnerHandle::Get().get(), temp_file_path, 0, 0,
         base::Time()));
 
@@ -395,7 +397,7 @@ TEST(HttpStreamParser, ShouldMergeRequestHeadersAndBody_FileBody) {
 TEST(HttpStreamParser, ShouldMergeRequestHeadersAndBody_SmallBodyInMemory) {
   std::vector<std::unique_ptr<UploadElementReader>> element_readers;
   const std::string payload = "123";
-  element_readers.push_back(base::MakeUnique<UploadBytesElementReader>(
+  element_readers.push_back(std::make_unique<UploadBytesElementReader>(
       payload.data(), payload.size()));
 
   std::unique_ptr<UploadDataStream> body(
@@ -409,7 +411,7 @@ TEST(HttpStreamParser, ShouldMergeRequestHeadersAndBody_SmallBodyInMemory) {
 TEST(HttpStreamParser, ShouldMergeRequestHeadersAndBody_LargeBodyInMemory) {
   std::vector<std::unique_ptr<UploadElementReader>> element_readers;
   const std::string payload(10000, 'a');  // 'a' x 10000.
-  element_readers.push_back(base::MakeUnique<UploadBytesElementReader>(
+  element_readers.push_back(std::make_unique<UploadBytesElementReader>(
       payload.data(), payload.size()));
 
   std::unique_ptr<UploadDataStream> body(
@@ -440,7 +442,8 @@ TEST(HttpStreamParser, SentBytesNoHeaders) {
   HttpResponseInfo response;
   TestCompletionCallback callback;
   EXPECT_EQ(OK, parser.SendRequest("GET / HTTP/1.1\r\n", HttpRequestHeaders(),
-                                   &response, callback.callback()));
+                                   TRAFFIC_ANNOTATION_FOR_TESTS, &response,
+                                   callback.callback()));
 
   EXPECT_EQ(CountWriteBytes(writes, arraysize(writes)), parser.sent_bytes());
 }
@@ -471,7 +474,8 @@ TEST(HttpStreamParser, SentBytesWithHeaders) {
 
   HttpResponseInfo response;
   TestCompletionCallback callback;
-  EXPECT_EQ(OK, parser.SendRequest("GET / HTTP/1.1\r\n", headers, &response,
+  EXPECT_EQ(OK, parser.SendRequest("GET / HTTP/1.1\r\n", headers,
+                                   TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                    callback.callback()));
 
   EXPECT_EQ(CountWriteBytes(writes, arraysize(writes)), parser.sent_bytes());
@@ -503,7 +507,8 @@ TEST(HttpStreamParser, SentBytesWithHeadersMultiWrite) {
   HttpResponseInfo response;
   TestCompletionCallback callback;
 
-  EXPECT_EQ(OK, parser.SendRequest("GET / HTTP/1.1\r\n", headers, &response,
+  EXPECT_EQ(OK, parser.SendRequest("GET / HTTP/1.1\r\n", headers,
+                                   TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                    callback.callback()));
 
   EXPECT_EQ(CountWriteBytes(writes, arraysize(writes)), parser.sent_bytes());
@@ -535,7 +540,8 @@ TEST(HttpStreamParser, SentBytesWithErrorWritingHeaders) {
   HttpResponseInfo response;
   TestCompletionCallback callback;
   EXPECT_EQ(ERR_CONNECTION_RESET,
-            parser.SendRequest("GET / HTTP/1.1\r\n", headers, &response,
+            parser.SendRequest("GET / HTTP/1.1\r\n", headers,
+                               TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                callback.callback()));
 
   EXPECT_EQ(CountWriteBytes(writes, arraysize(writes)), parser.sent_bytes());
@@ -554,7 +560,7 @@ TEST(HttpStreamParser, SentBytesPost) {
 
   std::vector<std::unique_ptr<UploadElementReader>> element_readers;
   element_readers.push_back(
-      base::MakeUnique<UploadBytesElementReader>("hello world!", 12));
+      std::make_unique<UploadBytesElementReader>("hello world!", 12));
   ElementsUploadDataStream upload_data_stream(std::move(element_readers), 0);
   ASSERT_THAT(upload_data_stream.Init(TestCompletionCallback().callback(),
                                       NetLogWithSource()),
@@ -574,7 +580,8 @@ TEST(HttpStreamParser, SentBytesPost) {
 
   HttpResponseInfo response;
   TestCompletionCallback callback;
-  EXPECT_EQ(OK, parser.SendRequest("POST / HTTP/1.1\r\n", headers, &response,
+  EXPECT_EQ(OK, parser.SendRequest("POST / HTTP/1.1\r\n", headers,
+                                   TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                    callback.callback()));
 
   EXPECT_EQ(CountWriteBytes(writes, arraysize(writes)), parser.sent_bytes());
@@ -618,6 +625,7 @@ TEST(HttpStreamParser, SentBytesChunkedPostError) {
   HttpResponseInfo response;
   TestCompletionCallback callback;
   EXPECT_EQ(ERR_IO_PENDING, parser.SendRequest("POST / HTTP/1.1\r\n", headers,
+                                               TRAFFIC_ANNOTATION_FOR_TESTS,
                                                &response, callback.callback()));
 
   base::RunLoop().RunUntilIdle();
@@ -687,7 +695,8 @@ TEST(HttpStreamParser, AsyncSingleChunkAndAsyncSocket) {
   // complete asynchronously.
   ASSERT_EQ(ERR_IO_PENDING,
             parser.SendRequest("GET /one.html HTTP/1.1\r\n", request_headers,
-                               &response_info, callback.callback()));
+                               TRAFFIC_ANNOTATION_FOR_TESTS, &response_info,
+                               callback.callback()));
 
   // Complete the initial request write.  Callback should not have been invoked.
   base::RunLoop().RunUntilIdle();
@@ -767,7 +776,8 @@ TEST(HttpStreamParser, SyncSingleChunkAndAsyncSocket) {
   // complete asynchronously.
   ASSERT_EQ(ERR_IO_PENDING,
             parser.SendRequest("GET /one.html HTTP/1.1\r\n", request_headers,
-                               &response_info, callback.callback()));
+                               TRAFFIC_ANNOTATION_FOR_TESTS, &response_info,
+                               callback.callback()));
   ASSERT_THAT(callback.WaitForResult(), IsOk());
 
   // Attempt to read the response status and the response headers.
@@ -847,7 +857,8 @@ TEST(HttpStreamParser, AsyncChunkAndAsyncSocketWithMultipleChunks) {
   // complete asynchronously.
   ASSERT_EQ(ERR_IO_PENDING,
             parser.SendRequest("GET /one.html HTTP/1.1\r\n", request_headers,
-                               &response_info, callback.callback()));
+                               TRAFFIC_ANNOTATION_FOR_TESTS, &response_info,
+                               callback.callback()));
   ASSERT_FALSE(callback.have_result());
 
   // Sending the request and the first chunk completes.
@@ -931,7 +942,8 @@ TEST(HttpStreamParser, AsyncEmptyChunkedUpload) {
   // complete asynchronously.
   ASSERT_EQ(ERR_IO_PENDING,
             parser.SendRequest("GET /one.html HTTP/1.1\r\n", request_headers,
-                               &response_info, callback.callback()));
+                               TRAFFIC_ANNOTATION_FOR_TESTS, &response_info,
+                               callback.callback()));
 
   // Now append the terminal 0-byte "chunk".
   upload_stream.AppendData(nullptr, 0, true);
@@ -1006,7 +1018,8 @@ TEST(HttpStreamParser, SyncEmptyChunkedUpload) {
   // complete asynchronously.
   ASSERT_EQ(ERR_IO_PENDING,
             parser.SendRequest("GET /one.html HTTP/1.1\r\n", request_headers,
-                               &response_info, callback.callback()));
+                               TRAFFIC_ANNOTATION_FOR_TESTS, &response_info,
+                               callback.callback()));
 
   // Complete writing the request headers and body.
   ASSERT_THAT(callback.WaitForResult(), IsOk());
@@ -1103,6 +1116,7 @@ TEST(HttpStreamParser, TruncatedHeaders) {
       HttpResponseInfo response_info;
       TestCompletionCallback callback;
       ASSERT_EQ(OK, parser.SendRequest("GET / HTTP/1.1\r\n", request_headers,
+                                       TRAFFIC_ANNOTATION_FOR_TESTS,
                                        &response_info, callback.callback()));
 
       int rv = parser.ReadResponseHeaders(callback.callback());
@@ -1160,7 +1174,8 @@ TEST(HttpStreamParser, Websocket101Response) {
   HttpResponseInfo response_info;
   TestCompletionCallback callback;
   ASSERT_EQ(OK, parser.SendRequest("GET / HTTP/1.1\r\n", request_headers,
-                                   &response_info, callback.callback()));
+                                   TRAFFIC_ANNOTATION_FOR_TESTS, &response_info,
+                                   callback.callback()));
 
   EXPECT_THAT(parser.ReadResponseHeaders(callback.callback()), IsOk());
   ASSERT_TRUE(response_info.headers.get());
@@ -1209,14 +1224,11 @@ class SimpleGetRunner {
     read_buffer_->set_offset(offset + size);
   }
 
-  void AddRead(const std::string& data) {
-    reads_.push_back(MockRead(SYNCHRONOUS, sequence_number_++, data.data()));
-  }
-
-  // Simple overload - the above method requires using std::strings that outlive
-  // the function call.  This version works with inlined C-style strings.
-  void AddRead(const char* data) {
-    reads_.push_back(MockRead(SYNCHRONOUS, sequence_number_++, data));
+  // The data used to back |string_piece| must stay alive until all mock data
+  // has been read.
+  void AddRead(base::StringPiece string_piece) {
+    reads_.push_back(MockRead(SYNCHRONOUS, string_piece.data(),
+                              string_piece.length(), sequence_number_++));
   }
 
   void SetupParserAndSendRequest() {
@@ -1238,6 +1250,7 @@ class SimpleGetRunner {
 
     TestCompletionCallback callback;
     ASSERT_EQ(OK, parser_->SendRequest("GET / HTTP/1.1\r\n", request_headers_,
+                                       TRAFFIC_ANNOTATION_FOR_TESTS,
                                        &response_info_, callback.callback()));
   }
 
@@ -1249,18 +1262,21 @@ class SimpleGetRunner {
 
   void ReadHeaders() { ReadHeadersExpectingError(OK); }
 
-  void ReadBody(int user_buf_len, int* read_lengths) {
+  std::string ReadBody(int user_buf_len, int* read_lengths) {
     TestCompletionCallback callback;
     scoped_refptr<IOBuffer> buffer = new IOBuffer(user_buf_len);
     int rv;
     int i = 0;
+    std::string body;
     while (true) {
       rv = parser_->ReadResponseBody(
           buffer.get(), user_buf_len, callback.callback());
       EXPECT_EQ(read_lengths[i], rv);
+      if (rv > 0)
+        body.append(buffer->data(), rv);
       i++;
       if (rv <= 0)
-        return;
+        return body;
     }
   }
 
@@ -1675,8 +1691,10 @@ TEST(HttpStreamParser, ReadAfterUnownedObjectsDestroyed) {
   std::unique_ptr<HttpRequestHeaders> request_headers(new HttpRequestHeaders());
   std::unique_ptr<HttpResponseInfo> response_info(new HttpResponseInfo());
   TestCompletionCallback callback;
-  ASSERT_EQ(OK, parser.SendRequest("GET /foo.html HTTP/1.1\r\n",
-            *request_headers, response_info.get(), callback.callback()));
+  ASSERT_EQ(
+      OK, parser.SendRequest("GET /foo.html HTTP/1.1\r\n", *request_headers,
+                             TRAFFIC_ANNOTATION_FOR_TESTS, response_info.get(),
+                             callback.callback()));
   ASSERT_THAT(parser.ReadResponseHeaders(callback.callback()), IsOk());
 
   // If the object that owns the HttpStreamParser is deleted, it takes the
@@ -1691,6 +1709,34 @@ TEST(HttpStreamParser, ReadAfterUnownedObjectsDestroyed) {
 
   EXPECT_EQ(CountWriteBytes(writes, arraysize(writes)), parser.sent_bytes());
   EXPECT_EQ(CountReadBytes(reads, arraysize(reads)), parser.received_bytes());
+}
+
+// Case where one byte is received at a time.
+TEST(HttpStreamParser, ReceiveOneByteAtATime) {
+  const std::string kResponseHeaders =
+      "HTTP/1.0 200 OK\r\n"
+      "Foo: Bar\r\n\r\n";
+  const std::string kResponseBody = "hi";
+
+  SimpleGetRunner get_runner;
+  for (size_t i = 0; i < kResponseHeaders.length(); ++i) {
+    get_runner.AddRead(base::StringPiece(kResponseHeaders.data() + i, 1));
+  }
+  for (size_t i = 0; i < kResponseBody.length(); ++i) {
+    get_runner.AddRead(base::StringPiece(kResponseBody.data() + i, 1));
+  }
+  // EOF
+  get_runner.AddRead("");
+
+  get_runner.SetupParserAndSendRequest();
+  get_runner.ReadHeaders();
+  std::string header_value;
+  EXPECT_TRUE(get_runner.response_info()->headers->GetNormalizedHeader(
+      "Foo", &header_value));
+  EXPECT_EQ("Bar", header_value);
+  int read_lengths[] = {1, 1, 0};
+  EXPECT_EQ(kResponseBody,
+            get_runner.ReadBody(kResponseBody.size(), read_lengths));
 }
 
 }  // namespace

@@ -5,9 +5,11 @@
 #include "chrome/browser/metrics/desktop_session_duration/audible_contents_tracker.h"
 
 #include "base/path_service.h"
+#include "base/run_loop.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/browser_test_base.h"
+#include "media/base/media_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -40,6 +42,13 @@ class AudibleContentsTrackerTest : public InProcessBrowserTest {
     observer_.reset(new MockAudibleContentsObserver());
     tracker_.reset(new metrics::AudibleContentsTracker(observer()));
     InProcessBrowserTest::SetUp();
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitchASCII(
+        switches::kAutoplayPolicy,
+        switches::autoplay::kNoUserGestureRequiredPolicy);
+    InProcessBrowserTest::SetUpCommandLine(command_line);
   }
 
   void TearDown() override {

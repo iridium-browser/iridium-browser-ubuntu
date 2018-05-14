@@ -9,7 +9,10 @@
 #include "base/bind.h"
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
+#include "content/common/input/ime_text_span_conversions.h"
+#include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/ime_event_guard.h"
+#include "content/renderer/input/widget_input_handler_manager.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/render_widget.h"
@@ -26,12 +29,12 @@ FrameInputHandlerImpl::FrameInputHandlerImpl(
       input_event_queue_(render_frame->GetRenderWidget()->GetInputEventQueue()),
       main_thread_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       weak_ptr_factory_(this)
-
 {
   weak_this_ = weak_ptr_factory_.GetWeakPtr();
   // If we have created an input event queue move the mojo request over to the
   // compositor thread.
-  if (input_event_queue_) {
+  if (RenderThreadImpl::current()->compositor_task_runner() &&
+      input_event_queue_) {
     // Mojo channel bound on compositor thread.
     RenderThreadImpl::current()->compositor_task_runner()->PostTask(
         FROM_HERE, base::BindOnce(&FrameInputHandlerImpl::BindNow,
@@ -65,11 +68,11 @@ void FrameInputHandlerImpl::RunOnMainThread(const base::Closure& closure) {
 void FrameInputHandlerImpl::SetCompositionFromExistingText(
     int32_t start,
     int32_t end,
-    const std::vector<ui::CompositionUnderline>& ui_underlines) {
+    const std::vector<ui::ImeTextSpan>& ui_ime_text_spans) {
   if (!main_thread_task_runner_->BelongsToCurrentThread()) {
     RunOnMainThread(
         base::Bind(&FrameInputHandlerImpl::SetCompositionFromExistingText,
-                   weak_this_, start, end, ui_underlines));
+                   weak_this_, start, end, ui_ime_text_spans));
     return;
   }
 
@@ -77,16 +80,19 @@ void FrameInputHandlerImpl::SetCompositionFromExistingText(
     return;
 
   ImeEventGuard guard(render_frame_->GetRenderWidget());
-  std::vector<blink::WebCompositionUnderline> underlines;
-  for (const auto& underline : ui_underlines) {
-    blink::WebCompositionUnderline blink_underline(
-        underline.start_offset, underline.end_offset, underline.color,
-        underline.thick, underline.background_color);
-    underlines.push_back(blink_underline);
+  std::vector<blink::WebImeTextSpan> ime_text_spans;
+  for (const auto& ime_text_span : ui_ime_text_spans) {
+    blink::WebImeTextSpan blink_ime_text_span(
+        ConvertUiImeTextSpanTypeToWebType(ime_text_span.type),
+        ime_text_span.start_offset, ime_text_span.end_offset,
+        ime_text_span.underline_color, ime_text_span.thick,
+        ime_text_span.background_color,
+        ime_text_span.suggestion_highlight_color, ime_text_span.suggestions);
+    ime_text_spans.push_back(blink_ime_text_span);
   }
 
   render_frame_->GetWebFrame()->SetCompositionFromExistingText(start, end,
-                                                               underlines);
+                                                               ime_text_spans);
 }
 
 void FrameInputHandlerImpl::ExtendSelectionAndDelete(int32_t before,
@@ -137,6 +143,7 @@ void FrameInputHandlerImpl::SetEditableSelectionOffsets(int32_t start,
   }
   if (!render_frame_)
     return;
+  HandlingState handling_state(render_frame_, UpdateState::kIsSelectingRange);
   render_frame_->GetWebFrame()->SetEditableSelectionOffsets(start, end);
 }
 
@@ -262,10 +269,11 @@ void FrameInputHandlerImpl::CollapseSelection() {
   if (range.IsNull())
     return;
 
-  HandlingState handling_state(render_frame_.get(),
-                               UpdateState::kIsSelectingRange);
+  HandlingState handling_state(render_frame_, UpdateState::kIsSelectingRange);
   render_frame_->GetWebFrame()->SelectRange(
-      blink::WebRange(range.EndOffset(), 0));
+      blink::WebRange(range.EndOffset(), 0),
+      blink::WebLocalFrame::kHideSelectionHandle,
+      blink::mojom::SelectionMenuBehavior::kHide);
 }
 
 void FrameInputHandlerImpl::SelectRange(const gfx::Point& base,
@@ -282,19 +290,20 @@ void FrameInputHandlerImpl::SelectRange(const gfx::Point& base,
   if (!render_frame_)
     return;
   RenderViewImpl* render_view = render_frame_->render_view();
-  HandlingState handling_state(render_frame_.get(),
-                               UpdateState::kIsSelectingRange);
+  HandlingState handling_state(render_frame_, UpdateState::kIsSelectingRange);
   render_frame_->GetWebFrame()->SelectRange(
       render_view->ConvertWindowPointToViewport(base),
       render_view->ConvertWindowPointToViewport(extent));
 }
 
-void FrameInputHandlerImpl::AdjustSelectionByCharacterOffset(int32_t start,
-                                                             int32_t end) {
+void FrameInputHandlerImpl::AdjustSelectionByCharacterOffset(
+    int32_t start,
+    int32_t end,
+    blink::mojom::SelectionMenuBehavior selection_menu_behavior) {
   if (!main_thread_task_runner_->BelongsToCurrentThread()) {
     RunOnMainThread(
         base::Bind(&FrameInputHandlerImpl::AdjustSelectionByCharacterOffset,
-                   weak_this_, start, end));
+                   weak_this_, start, end, selection_menu_behavior));
     return;
   }
 
@@ -310,15 +319,14 @@ void FrameInputHandlerImpl::AdjustSelectionByCharacterOffset(int32_t start,
   if (start - end > range.length() || range.StartOffset() + start < 0)
     return;
 
-  HandlingState handling_state(render_frame_.get(),
-                               UpdateState::kIsSelectingRange);
+  HandlingState handling_state(render_frame_, UpdateState::kIsSelectingRange);
   // A negative adjust amount moves the selection towards the beginning of
   // the document, a positive amount moves the selection towards the end of
   // the document.
   render_frame_->GetWebFrame()->SelectRange(
       blink::WebRange(range.StartOffset() + start,
                       range.length() + end - start),
-      blink::WebLocalFrame::kPreserveHandleVisibility);
+      blink::WebLocalFrame::kPreserveHandleVisibility, selection_menu_behavior);
 }
 
 void FrameInputHandlerImpl::MoveRangeSelectionExtent(const gfx::Point& extent) {
@@ -333,8 +341,7 @@ void FrameInputHandlerImpl::MoveRangeSelectionExtent(const gfx::Point& extent) {
 
   if (!render_frame_)
     return;
-  HandlingState handling_state(render_frame_.get(),
-                               UpdateState::kIsSelectingRange);
+  HandlingState handling_state(render_frame_, UpdateState::kIsSelectingRange);
   render_frame_->GetWebFrame()->MoveRangeSelectionExtent(
       render_frame_->render_view()->ConvertWindowPointToViewport(extent));
 }
@@ -351,8 +358,7 @@ void FrameInputHandlerImpl::ScrollFocusedEditableNodeIntoRect(
   if (!render_frame_)
     return;
 
-  RenderViewImpl* render_view = render_frame_->render_view();
-  render_view->ScrollFocusedEditableNodeIntoRect(rect);
+  render_frame_->ScrollFocusedEditableElementIntoRect(rect);
 }
 
 void FrameInputHandlerImpl::MoveCaret(const gfx::Point& point) {
@@ -370,13 +376,30 @@ void FrameInputHandlerImpl::MoveCaret(const gfx::Point& point) {
       render_view->ConvertWindowPointToViewport(point));
 }
 
+void FrameInputHandlerImpl::GetWidgetInputHandler(
+    mojom::WidgetInputHandlerAssociatedRequest interface_request,
+    mojom::WidgetInputHandlerHostPtr host) {
+  if (!main_thread_task_runner_->BelongsToCurrentThread()) {
+    main_thread_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&FrameInputHandlerImpl::GetWidgetInputHandler,
+                                  weak_this_, std::move(interface_request),
+                                  std::move(host)));
+    return;
+  }
+  if (!render_frame_)
+    return;
+  render_frame_->GetRenderWidget()
+      ->widget_input_handler_manager()
+      ->AddAssociatedInterface(std::move(interface_request), std::move(host));
+}
+
 void FrameInputHandlerImpl::ExecuteCommandOnMainThread(
     const std::string& command,
     UpdateState update_state) {
   if (!render_frame_)
     return;
 
-  HandlingState handling_state(render_frame_.get(), update_state);
+  HandlingState handling_state(render_frame_, update_state);
   render_frame_->GetWebFrame()->ExecuteCommand(
       blink::WebString::FromUTF8(command));
 }
@@ -387,7 +410,7 @@ void FrameInputHandlerImpl::Release() {
     // thread to delete this object.
     binding_.Close();
     main_thread_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&FrameInputHandlerImpl::Release, weak_this_));
+        FROM_HERE, base::BindOnce(&FrameInputHandlerImpl::Release, weak_this_));
     return;
   }
   delete this;
@@ -396,11 +419,11 @@ void FrameInputHandlerImpl::Release() {
 void FrameInputHandlerImpl::BindNow(mojom::FrameInputHandlerRequest request) {
   binding_.Bind(std::move(request));
   binding_.set_connection_error_handler(
-      base::Bind(&FrameInputHandlerImpl::Release, base::Unretained(this)));
+      base::BindOnce(&FrameInputHandlerImpl::Release, base::Unretained(this)));
 }
 
 FrameInputHandlerImpl::HandlingState::HandlingState(
-    RenderFrameImpl* render_frame,
+    const base::WeakPtr<RenderFrameImpl>& render_frame,
     UpdateState state)
     : render_frame_(render_frame),
       original_select_range_value_(render_frame->handling_select_range()),
@@ -408,6 +431,7 @@ FrameInputHandlerImpl::HandlingState::HandlingState(
   switch (state) {
     case UpdateState::kIsPasting:
       render_frame->set_is_pasting(true);
+      FALLTHROUGH;  // Matches RenderFrameImpl::OnPaste() which sets both.
     case UpdateState::kIsSelectingRange:
       render_frame->set_handling_select_range(true);
       break;
@@ -417,6 +441,9 @@ FrameInputHandlerImpl::HandlingState::HandlingState(
 }
 
 FrameInputHandlerImpl::HandlingState::~HandlingState() {
+  // RenderFrame may have been destroyed while this object was on the stack.
+  if (!render_frame_)
+    return;
   render_frame_->set_handling_select_range(original_select_range_value_);
   render_frame_->set_is_pasting(original_pasting_value_);
 }

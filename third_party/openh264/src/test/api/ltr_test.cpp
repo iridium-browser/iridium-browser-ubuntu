@@ -18,13 +18,13 @@ TEST_P (EncodeDecodeTestAPI, GetOptionLTR_ALLIDR) {
   int rv = encoder_->InitializeExt (&param_);
   ASSERT_TRUE (rv == cmResultSuccess);
 
-  InitialEncDec (p.width, p.height);
+  ASSERT_TRUE (InitialEncDec (p.width, p.height));
 
   int32_t iTraceLevel = WELS_LOG_QUIET;
   encoder_->SetOption (ENCODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   decoder_->SetOption (DECODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   int32_t iSpsPpsIdAddition = 1;
-  encoder_->SetOption (ENCODER_OPTION_ENABLE_SPS_PPS_ID_ADDITION, &iSpsPpsIdAddition);
+  encoder_->SetOption (ENCODER_OPTION_SPS_PPS_ID_STRATEGY, &iSpsPpsIdAddition);
   int32_t iIDRPeriod = (int32_t) pow (2.0f, (param_.iTemporalLayerNum - 1)) * ((rand() % 5) + 1);
   encoder_->SetOption (ENCODER_OPTION_IDR_INTERVAL, &iIDRPeriod);
   SLTRConfig sLtrConfigVal;
@@ -45,6 +45,8 @@ TEST_P (EncodeDecodeTestAPI, GetOptionLTR_ALLIDR) {
 TEST_P (EncodeDecodeTestAPI, GetOptionLTR_ALLLTR) {
   SLTRMarkingFeedback m_LTR_Marking_Feedback;
   SLTRRecoverRequest m_LTR_Recover_Request;
+  m_LTR_Recover_Request.iLayerId = 0;
+  m_LTR_Marking_Feedback.iLayerId = 0;
   EncodeDecodeFileParamBase p = GetParam();
   prepareParamDefault (1, p.slicenum,  p.width, p.height, p.frameRate, &param_);
   encoder_->Uninitialize();
@@ -71,7 +73,7 @@ TEST_P (EncodeDecodeTestAPI, GetOptionLTR_ALLLTR) {
   encoder_->SetOption (ENCODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   decoder_->SetOption (DECODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   int32_t iSpsPpsIdAddition = 1;
-  encoder_->SetOption (ENCODER_OPTION_ENABLE_SPS_PPS_ID_ADDITION, &iSpsPpsIdAddition);
+  encoder_->SetOption (ENCODER_OPTION_SPS_PPS_ID_STRATEGY, &iSpsPpsIdAddition);
   int32_t iIDRPeriod = 60;
   encoder_->SetOption (ENCODER_OPTION_IDR_INTERVAL, &iIDRPeriod);
   SLTRConfig sLtrConfigVal;
@@ -105,6 +107,8 @@ TEST_P (EncodeDecodeTestAPI, GetOptionLTR_Engine) {
   SLTRMarkingFeedback m_LTR_Marking_Feedback;
   SLTRRecoverRequest m_LTR_Recover_Request;
   m_LTR_Recover_Request.uiIDRPicId = 0;
+  m_LTR_Recover_Request.iLayerId = 0;
+  m_LTR_Marking_Feedback.iLayerId = 0;
   EncodeDecodeFileParamBase p = GetParam();
   prepareParamDefault (1, p.slicenum,  p.width, p.height, p.frameRate, &param_);
   encoder_->Uninitialize();
@@ -112,13 +116,13 @@ TEST_P (EncodeDecodeTestAPI, GetOptionLTR_Engine) {
   ASSERT_TRUE (rv == cmResultSuccess);
   m_LTR_Recover_Request.uiFeedbackType = NO_RECOVERY_REQUSET;
 
-  InitialEncDec (p.width, p.height);
+  ASSERT_TRUE (InitialEncDec (p.width, p.height));
 
   int32_t iTraceLevel = WELS_LOG_QUIET;
   encoder_->SetOption (ENCODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   decoder_->SetOption (DECODER_OPTION_TRACE_LEVEL, &iTraceLevel);
   int32_t iSpsPpsIdAddition = 1;
-  encoder_->SetOption (ENCODER_OPTION_ENABLE_SPS_PPS_ID_ADDITION, &iSpsPpsIdAddition);
+  encoder_->SetOption (ENCODER_OPTION_SPS_PPS_ID_STRATEGY, &iSpsPpsIdAddition);
   int32_t iIDRPeriod = 60;
   encoder_->SetOption (ENCODER_OPTION_IDR_INTERVAL, &iIDRPeriod);
   SLTRConfig sLtrConfigVal;

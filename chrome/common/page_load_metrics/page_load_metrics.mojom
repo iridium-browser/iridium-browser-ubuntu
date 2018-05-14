@@ -5,6 +5,7 @@
 module page_load_metrics.mojom;
 
 import "mojo/common/time.mojom";
+import "third_party/WebKit/public/platform/web_feature.mojom";
 
 // TimeDeltas below relative to navigation start.
 struct DocumentTiming {
@@ -82,6 +83,36 @@ struct StyleSheetTiming {
   mojo.common.mojom.TimeDelta? update_style_duration_before_fcp;
 };
 
+struct InteractiveTiming {
+  // The first time the page is considered 'interactive'. This is determined
+  // using heuristics based on main thread and network activity. Time delta is
+  // relative to navigation_start.
+  mojo.common.mojom.TimeDelta? interactive;
+
+  // The time of when we detect the page is interactive. There is a delay
+  // between when the page was interactive and when we were able to detect it.
+  // Time delta is relative to navigation_start.
+  // This is a page load metrics internal value and not generally intended for
+  // consumption by observers.
+  mojo.common.mojom.TimeDelta? interactive_detection;
+
+
+  // The time of when a significant input event happened that may cause
+  // observers to discard the value of Time to Interactive. Time delta is
+  // relative to navigation start.
+  // This is a page load metrics internal value and not generally intended for
+  // consumption by observers.
+  mojo.common.mojom.TimeDelta? first_invalidating_input;
+
+  // Queueing Time of the first click, tap, key press, cancellable touchstart,
+  // or pointer down followed by a pointer up.
+  mojo.common.mojom.TimeDelta? first_input_delay;
+
+  // The timestamp of the event whose delay is reported by GetFirstInputDelay().
+  mojo.common.mojom.TimeDelta? first_input_timestamp;
+};
+
+
 // PageLoadTiming contains timing metrics associated with a page load. Many of
 // the metrics here are based on the Navigation Timing spec:
 // http://www.w3.org/TR/navigation-timing/.
@@ -96,6 +127,7 @@ struct PageLoadTiming {
   // received.
   mojo.common.mojom.TimeDelta? response_start;
   DocumentTiming document_timing;
+  InteractiveTiming interactive_timing;
   PaintTiming paint_timing;
   ParseTiming parse_timing;
   StyleSheetTiming style_sheet_timing;
@@ -108,8 +140,18 @@ struct PageLoadMetadata {
   int32 behavior_flags = 0;
 };
 
+// PageLoadFeatures contains a list of features newly observed by use counter.
+// In a given page load, no PageLoadFeatures sent will contain previously seen
+// values.
+struct PageLoadFeatures {
+  // These features are defined as blink::mojom::WebFeature enums.
+  array<blink.mojom.WebFeature> features;
+};
+
 // Sent from renderer to browser process when the PageLoadTiming for the
 // associated frame changed.
 interface PageLoadMetrics {
-  UpdateTiming(PageLoadTiming page_load_timing, PageLoadMetadata page_load_metadata);
+  UpdateTiming(PageLoadTiming page_load_timing,
+               PageLoadMetadata page_load_metadata,
+               PageLoadFeatures new_features);
 };

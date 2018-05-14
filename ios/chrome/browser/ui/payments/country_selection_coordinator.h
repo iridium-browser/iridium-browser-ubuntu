@@ -8,7 +8,7 @@
 #import <UIKit/UIKit.h>
 #include <vector>
 
-#import "ios/chrome/browser/chrome_coordinator.h"
+#import "ios/chrome/browser/ui/coordinators/chrome_coordinator.h"
 #import "ios/chrome/browser/ui/payments/payment_request_picker_view_controller.h"
 
 @class CountrySelectionCoordinator;
@@ -19,6 +19,11 @@
 // Notifies the delegate that the user has selected a country.
 - (void)countrySelectionCoordinator:(CountrySelectionCoordinator*)coordinator
            didSelectCountryWithCode:(NSString*)countryCode;
+
+// Notifies the delegate that the user has chosen to return to the previous
+// screen without making a selection.
+- (void)countrySelectionCoordinatorDidReturn:
+    (CountrySelectionCoordinator*)coordinator;
 
 @end
 

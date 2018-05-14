@@ -72,6 +72,25 @@ Viewport::ScrollResult Viewport::ScrollBy(const gfx::Vector2dF& delta,
   return result;
 }
 
+bool Viewport::CanScroll(const ScrollState& scroll_state) const {
+  if (!OuterScrollLayer())
+    return false;
+
+  bool result = false;
+  ScrollTree& scroll_tree =
+      host_impl_->active_tree()->property_trees()->scroll_tree;
+  ScrollNode* inner_node =
+      scroll_tree.Node(InnerScrollLayer()->scroll_tree_index());
+  if (inner_node)
+    result |= host_impl_->CanConsumeDelta(*inner_node, scroll_state);
+  ScrollNode* outer_node =
+      scroll_tree.Node(OuterScrollLayer()->scroll_tree_index());
+  if (outer_node)
+    result |= host_impl_->CanConsumeDelta(*outer_node, scroll_state);
+
+  return result;
+}
+
 void Viewport::ScrollByInnerFirst(const gfx::Vector2dF& delta) {
   LayerImpl* scroll_layer = InnerScrollLayer();
 
@@ -104,7 +123,7 @@ gfx::Vector2dF Viewport::ScrollAnimated(const gfx::Vector2dF& delta,
   ScrollNode* inner_node =
       scroll_tree.Node(InnerScrollLayer()->scroll_tree_index());
   gfx::Vector2dF inner_delta =
-      host_impl_->ComputeScrollDelta(inner_node, delta);
+      host_impl_->ComputeScrollDelta(*inner_node, delta);
 
   gfx::Vector2dF pending_delta = scaled_delta - inner_delta;
   pending_delta.Scale(scale_factor);
@@ -112,7 +131,7 @@ gfx::Vector2dF Viewport::ScrollAnimated(const gfx::Vector2dF& delta,
   ScrollNode* outer_node =
       scroll_tree.Node(OuterScrollLayer()->scroll_tree_index());
   gfx::Vector2dF outer_delta =
-      host_impl_->ComputeScrollDelta(outer_node, pending_delta);
+      host_impl_->ComputeScrollDelta(*outer_node, pending_delta);
 
   if (inner_delta.IsZero() && outer_delta.IsZero())
     return gfx::Vector2dF(0, 0);
@@ -193,7 +212,33 @@ void Viewport::PinchUpdate(float magnify_delta, const gfx::Point& anchor) {
   Pan(move);
 }
 
-void Viewport::PinchEnd() {
+void Viewport::PinchEnd(const gfx::Point& anchor, bool snap_to_min) {
+  LayerTreeImpl* active_tree = host_impl_->active_tree();
+  // TODO(mcnee): Remove the InnerViewportScrollLayer() check (and add a
+  // DCHECK instead), after we no longer send GesturePinch events to
+  // OOPIF renderers. https://crbug.com/787924
+  // Snap-to-min only makes sense for mainframes, so we use the lack of an
+  // InnerViewportScrollLayer() to detect if this is an OOPIF.
+  if (snap_to_min && active_tree->InnerViewportScrollLayer()) {
+    const float kMaxZoomForSnapToMin = 1.05f;
+    const base::TimeDelta kSnapToMinZoomAnimationDuration =
+        base::TimeDelta::FromMilliseconds(200);
+    float page_scale = active_tree->current_page_scale_factor();
+    float min_scale = active_tree->min_page_scale_factor();
+
+    // If the page is close to minimum scale at pinch end, snap to minimum.
+    if (page_scale < min_scale * kMaxZoomForSnapToMin) {
+      gfx::PointF adjusted_anchor =
+          gfx::PointF(anchor + pinch_anchor_adjustment_);
+      adjusted_anchor =
+          gfx::ScalePoint(adjusted_anchor, min_scale / page_scale);
+      adjusted_anchor += ScrollOffsetToVector2dF(TotalScrollOffset());
+      host_impl_->StartPageScaleAnimation(
+          ToRoundedVector2d(adjusted_anchor.OffsetFromOrigin()), true,
+          min_scale, kSnapToMinZoomAnimationDuration);
+    }
+  }
+
   pinch_anchor_adjustment_ = gfx::Vector2d();
   pinch_zoom_active_ = false;
 }

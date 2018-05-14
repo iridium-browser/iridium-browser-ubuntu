@@ -39,8 +39,7 @@ class XPathExpression;
 class XPathNSResolver;
 class XPathResult;
 
-class XPathEvaluator final : public GarbageCollected<XPathEvaluator>,
-                             public ScriptWrappable {
+class XPathEvaluator final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -57,10 +56,8 @@ class XPathEvaluator final : public GarbageCollected<XPathEvaluator>,
                         const ScriptValue&,
                         ExceptionState&);
 
-  DEFINE_INLINE_TRACE() {}
-
  private:
-  XPathEvaluator() {}
+  XPathEvaluator() = default;
 };
 
 }  // namespace blink

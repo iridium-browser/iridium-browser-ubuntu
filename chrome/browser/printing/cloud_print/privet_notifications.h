@@ -9,12 +9,12 @@
 #include <memory>
 #include <string>
 
-#include "chrome/browser/notifications/notification_delegate.h"
 #include "chrome/browser/printing/cloud_print/privet_device_lister.h"
 #include "chrome/browser/printing/cloud_print/privet_http.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_member.h"
 #include "net/net_features.h"
+#include "ui/message_center/public/cpp/notification_delegate.h"
 
 class Profile;
 
@@ -121,6 +121,12 @@ class PrivetNotificationService
   void OnNotificationsEnabledChanged();
   void StartLister();
 
+  void AddNotification(
+      int devices_active,
+      bool device_added,
+      std::unique_ptr<std::set<std::string>> displayed_notifications,
+      bool supports_synchronization);
+
   // Virtual for testing. The returned delegate is refcounted.
   virtual PrivetNotificationDelegate* CreateNotificationDelegate(
       Profile* profile);
@@ -137,12 +143,11 @@ class PrivetNotificationService
 #endif  // ENABLE_MDNS
 };
 
-class PrivetNotificationDelegate : public NotificationDelegate {
+class PrivetNotificationDelegate : public message_center::NotificationDelegate {
  public:
   explicit PrivetNotificationDelegate(Profile* profile);
 
   // NotificationDelegate implementation.
-  std::string id() const override;
   void ButtonClick(int button_index) override;
 
  protected:

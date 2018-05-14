@@ -7,6 +7,8 @@
 
 #import <UIKit/UIKit.h>
 
+@protocol BrowserCommands;
+
 // The a11y ID of the text input field in the find-in-page bar.
 extern NSString* const kFindInPageInputFieldId;
 

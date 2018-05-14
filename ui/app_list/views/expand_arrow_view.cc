@@ -4,6 +4,9 @@
 
 #include "ui/app_list/views/expand_arrow_view.h"
 
+#include <memory>
+#include <utility>
+
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -63,10 +66,11 @@ constexpr SkColor kInkDropRippleColor =
 
 ExpandArrowView::ExpandArrowView(ContentsView* contents_view,
                                  AppListView* app_list_view)
-    : views::CustomButton(this),
+    : views::Button(this),
       contents_view_(contents_view),
       app_list_view_(app_list_view),
       weak_ptr_factory_(this) {
+  SetFocusBehavior(FocusBehavior::ALWAYS);
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
 
@@ -91,25 +95,14 @@ ExpandArrowView::ExpandArrowView(ContentsView* contents_view,
 
 ExpandArrowView::~ExpandArrowView() = default;
 
-void ExpandArrowView::SetSelected(bool selected) {
-  if (selected == selected_)
-    return;
-
-  selected_ = selected;
-  SchedulePaint();
-
-  if (selected)
-    NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
-}
-
 void ExpandArrowView::PaintButtonContents(gfx::Canvas* canvas) {
   gfx::Rect rect(GetContentsBounds());
 
   // Draw focused or unfocused background.
   cc::PaintFlags flags;
   flags.setAntiAlias(true);
-  flags.setColor(selected_ ? kFocusedBackgroundColor
-                           : kUnFocusedBackgroundColor);
+  flags.setColor(HasFocus() ? kFocusedBackgroundColor
+                            : kUnFocusedBackgroundColor);
   flags.setStyle(cc::PaintFlags::kFill_Style);
   canvas->DrawCircle(gfx::PointF(rect.CenterPoint()), kSelectedRadius, flags);
 
@@ -152,9 +145,19 @@ bool ExpandArrowView::OnKeyPressed(const ui::KeyEvent& event) {
   return true;
 }
 
+void ExpandArrowView::OnFocus() {
+  SchedulePaint();
+  Button::OnFocus();
+}
+
+void ExpandArrowView::OnBlur() {
+  SchedulePaint();
+  Button::OnBlur();
+}
+
 std::unique_ptr<views::InkDrop> ExpandArrowView::CreateInkDrop() {
   std::unique_ptr<views::InkDropImpl> ink_drop =
-      CustomButton::CreateDefaultInkDropImpl();
+      Button::CreateDefaultInkDropImpl();
   ink_drop->SetShowHighlightOnHover(false);
   ink_drop->SetShowHighlightOnFocus(false);
   ink_drop->SetAutoHighlightMode(views::InkDropImpl::AutoHighlightMode::NONE);
@@ -162,7 +165,7 @@ std::unique_ptr<views::InkDrop> ExpandArrowView::CreateInkDrop() {
 }
 
 std::unique_ptr<views::InkDropMask> ExpandArrowView::CreateInkDropMask() const {
-  return base::MakeUnique<views::CircleInkDropMask>(
+  return std::make_unique<views::CircleInkDropMask>(
       size(), GetLocalBounds().CenterPoint(), kInkDropRadius);
 }
 
@@ -171,7 +174,7 @@ std::unique_ptr<views::InkDropRipple> ExpandArrowView::CreateInkDropRipple()
   gfx::Point center = GetLocalBounds().CenterPoint();
   gfx::Rect bounds(center.x() - kInkDropRadius, center.y() - kInkDropRadius,
                    2 * kInkDropRadius, 2 * kInkDropRadius);
-  return base::MakeUnique<views::FloodFillInkDropRipple>(
+  return std::make_unique<views::FloodFillInkDropRipple>(
       size(), GetLocalBounds().InsetsFrom(bounds),
       GetInkDropCenterBasedOnLastEvent(), kInkDropRippleColor, 1.0f);
 }
@@ -251,12 +254,12 @@ void ExpandArrowView::AnimationEnded(const gfx::Animation* animation) {
 }
 
 void ExpandArrowView::TransitToFullscreenAllAppsState() {
-  UMA_HISTOGRAM_ENUMERATION(kPageOpenedHistogram, AppListModel::STATE_APPS,
-                            AppListModel::STATE_LAST);
+  UMA_HISTOGRAM_ENUMERATION(kPageOpenedHistogram, ash::AppListState::kStateApps,
+                            ash::AppListState::kStateLast);
   UMA_HISTOGRAM_ENUMERATION(kAppListPeekingToFullscreenHistogram, kExpandArrow,
                             kMaxPeekingToFullscreen);
-  contents_view_->SetActiveState(AppListModel::STATE_APPS);
-  app_list_view_->SetState(AppListView::FULLSCREEN_ALL_APPS);
+  contents_view_->SetActiveState(ash::AppListState::kStateApps);
+  app_list_view_->SetState(AppListViewState::FULLSCREEN_ALL_APPS);
 }
 
 void ExpandArrowView::ScheduleHintingAnimation(bool is_first_time) {

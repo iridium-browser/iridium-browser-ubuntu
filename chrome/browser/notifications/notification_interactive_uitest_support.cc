@@ -8,7 +8,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
-#include "chrome/browser/notifications/web_notification_delegate.h"
 #include "chrome/browser/permissions/permission_request_manager.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -316,35 +315,6 @@ void NotificationsTest::EnablePermissionsEmbargo(
        features::kBlockPromptsIfIgnoredOften},
       {});
 #endif  //  BUILDFLAG(ENABLE_NATIVE_NOTIFICATIONS)
-}
-
-void NotificationsTest::EnableFullscreenNotifications(
-    base::test::ScopedFeatureList* scoped_feature_list) {
-#if BUILDFLAG(ENABLE_NATIVE_NOTIFICATIONS)
-  scoped_feature_list->InitWithFeatures(
-      {features::kPreferHtmlOverPlugins,
-       features::kAllowFullscreenWebNotificationsFeature},
-      {features::kNativeNotifications});
-#else
-  scoped_feature_list->InitWithFeatures(
-      {features::kPreferHtmlOverPlugins,
-       features::kAllowFullscreenWebNotificationsFeature},
-      {});
-#endif  //  BUILDFLAG(ENABLE_NATIVE_NOTIFICATIONS)
-}
-
-void NotificationsTest::DisableFullscreenNotifications(
-    base::test::ScopedFeatureList* scoped_feature_list) {
-#if BUILDFLAG(ENABLE_NATIVE_NOTIFICATIONS)
-  scoped_feature_list->InitWithFeatures(
-      {features::kPreferHtmlOverPlugins},
-      {features::kAllowFullscreenWebNotificationsFeature,
-       features::kNativeNotifications});
-#else
-  scoped_feature_list->InitWithFeatures(
-      {features::kPreferHtmlOverPlugins},
-      {features::kAllowFullscreenWebNotificationsFeature});
-#endif  // BUILDFLAG(ENABLE_NATIVE_NOTIFICATIONS)
 }
 
 void NotificationsTest::DropOriginPreference(const GURL& origin) {

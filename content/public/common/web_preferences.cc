@@ -29,20 +29,16 @@ STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_ANDROID,
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_DEFAULT,
                    WebSettings::kV8CacheOptionsDefault);
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_NONE, WebSettings::kV8CacheOptionsNone);
-STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_PARSE, WebSettings::kV8CacheOptionsParse);
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_CODE, WebSettings::kV8CacheOptionsCode);
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_LAST, WebSettings::kV8CacheOptionsCode);
 
-STATIC_ASSERT_ENUM(ProgressBarCompletion::LOAD_EVENT,
-                   WebSettings::ProgressBarCompletion::kLoadEvent);
-STATIC_ASSERT_ENUM(ProgressBarCompletion::RESOURCES_BEFORE_DCL,
-                   WebSettings::ProgressBarCompletion::kResourcesBeforeDCL);
-STATIC_ASSERT_ENUM(ProgressBarCompletion::DOM_CONTENT_LOADED,
-                   WebSettings::ProgressBarCompletion::kDOMContentLoaded);
+STATIC_ASSERT_ENUM(SavePreviousDocumentResources::NEVER,
+                   WebSettings::SavePreviousDocumentResources::kNever);
 STATIC_ASSERT_ENUM(
-    ProgressBarCompletion::RESOURCES_BEFORE_DCL_AND_SAME_ORIGIN_IFRAMES,
-    WebSettings::ProgressBarCompletion::
-        kResourcesBeforeDCLAndSameOriginIFrames);
+    SavePreviousDocumentResources::UNTIL_ON_DOM_CONTENT_LOADED,
+    WebSettings::SavePreviousDocumentResources::kUntilOnDOMContentLoaded);
+STATIC_ASSERT_ENUM(SavePreviousDocumentResources::UNTIL_ON_LOAD,
+                   WebSettings::SavePreviousDocumentResources::kUntilOnLoad);
 
 STATIC_ASSERT_ENUM(IMAGE_ANIMATION_POLICY_ALLOWED,
                    WebSettings::kImageAnimationPolicyAllowed);
@@ -79,7 +75,6 @@ WebPreferences::WebPreferences()
       loads_images_automatically(true),
       images_enabled(true),
       plugins_enabled(true),
-      encrypted_media_enabled(true),
       dom_paste_enabled(false),  // enables execCommand("paste")
       shrinks_standalone_images_to_fit(true),
       text_areas_are_resizable(true),
@@ -98,7 +93,8 @@ WebPreferences::WebPreferences()
       hyperlink_auditing_enabled(true),
       allow_universal_access_from_file_urls(false),
       allow_file_access_from_file_urls(false),
-      experimental_webgl_enabled(false),
+      webgl1_enabled(true),
+      webgl2_enabled(true),
       pepper_3d_enabled(false),
       flash_3d_enabled(true),
       flash_stage3d_enabled(false),
@@ -109,7 +105,6 @@ WebPreferences::WebPreferences()
       hide_scrollbars(false),
       accelerated_2d_canvas_enabled(false),
       minimum_accelerated_2d_canvas_size(257 * 256),
-      disable_2d_canvas_copy_on_write(false),
       antialiased_2d_canvas_disabled(false),
       antialiased_clips_2d_canvas_enabled(true),
       accelerated_2d_canvas_msaa_sample_count(0),
@@ -173,12 +168,13 @@ WebPreferences::WebPreferences()
       navigate_on_drag_drop(true),
       v8_cache_options(V8_CACHE_OPTIONS_DEFAULT),
       record_whole_document(false),
+      save_previous_document_resources(SavePreviousDocumentResources::NEVER),
       cookie_enabled(true),
-      pepper_accelerated_video_decode_enabled(false),
+      accelerated_video_decode_enabled(false),
       animation_policy(IMAGE_ANIMATION_POLICY_ALLOWED),
       user_gesture_required_for_presentation(true),
       text_track_margin_percentage(0.0f),
-      page_popups_suppressed(false),
+      immersive_mode_enabled(false),
 #if defined(OS_ANDROID)
       text_autosizing_enabled(true),
       font_scale_factor(1.0f),
@@ -199,12 +195,13 @@ WebPreferences::WebPreferences()
       ignore_main_frame_overflow_hidden_quirk(false),
       report_screen_size_in_physical_pixels_quirk(false),
       resue_global_for_unowned_main_frame(false),
-      progress_bar_completion(ProgressBarCompletion::LOAD_EVENT),
       spellcheck_enabled_by_default(true),
       video_fullscreen_orientation_lock_enabled(false),
       video_rotate_to_fullscreen_enabled(false),
       video_fullscreen_detection_enabled(false),
       embedded_media_experience_enabled(false),
+      css_hex_alpha_color_enabled(true),
+      enable_media_download_in_product_help(false),
       scroll_top_left_interop_enabled(true),
 #endif  // defined(OS_ANDROID)
 #if defined(OS_ANDROID)
@@ -222,11 +219,8 @@ WebPreferences::WebPreferences()
       presentation_receiver(false),
       media_controls_enabled(true),
       do_not_update_selection_on_mutating_selection_range(false),
-#if defined(OS_ANDROID)
-      autoplay_policy(AutoplayPolicy::kUserGestureRequired) {
-#else
-      autoplay_policy(AutoplayPolicy::kNoUserGestureRequired) {
-#endif  // defined(OS_ANDROID)
+      autoplay_policy(AutoplayPolicy::kDocumentUserActivationRequired),
+      low_priority_iframes_threshold(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {
   standard_font_family_map[kCommonScript] =
       base::ASCIIToUTF16("Times New Roman");
   fixed_font_family_map[kCommonScript] = base::ASCIIToUTF16("Courier New");

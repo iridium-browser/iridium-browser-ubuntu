@@ -75,8 +75,7 @@ void DemoAppLauncher::OnProfileLoaded(Profile* profile) {
       extensions::ExtensionSystem::Get(profile)->extension_service();
   CHECK(demo_app_path_);
   const std::string extension_id = extension_service->component_loader()->Add(
-      IDR_DEMO_APP_MANIFEST,
-      *demo_app_path_);
+      IDR_DEMO_APP_MANIFEST, *demo_app_path_);
 
   const extensions::Extension* extension =
       extension_service->GetExtensionById(extension_id, true);
@@ -89,10 +88,9 @@ void DemoAppLauncher::OnProfileLoaded(Profile* profile) {
 
   // Disable network before launching the app.
   LOG(WARNING) << "Disabling network before launching demo app..";
-  NetworkStateHandler* handler = NetworkHandler::Get()->network_state_handler();
-  handler->SetTechnologyEnabled(NetworkTypePattern::NonVirtual(),
-                                false,
-                                chromeos::network_handler::ErrorCallback());
+  NetworkHandler::Get()->network_state_handler()->SetTechnologyEnabled(
+      NetworkTypePattern::Physical(), false,
+      chromeos::network_handler::ErrorCallback());
 
   OpenApplication(AppLaunchParams(profile, extension,
                                   extensions::LAUNCH_CONTAINER_WINDOW,
@@ -106,8 +104,8 @@ void DemoAppLauncher::OnProfileLoaded(Profile* profile) {
 }
 
 void DemoAppLauncher::OnProfileLoadFailed(KioskAppLaunchError::Error error) {
-  LOG(ERROR) << "Loading the Kiosk Profile failed: " <<
-      KioskAppLaunchError::GetErrorMessage(error);
+  LOG(ERROR) << "Loading the Kiosk Profile failed: "
+             << KioskAppLaunchError::GetErrorMessage(error);
 }
 
 }  // namespace chromeos

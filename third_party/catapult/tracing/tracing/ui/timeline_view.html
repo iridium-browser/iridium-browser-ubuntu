@@ -96,6 +96,20 @@ found in the LICENSE file.
     middle-container > x-timeline-view-side-panel-container { flex: 0 0 auto; }
     tr-ui-b-drag-handle { flex: 0 0 auto; }
     tr-ui-a-analysis-view { flex: 0 0 auto; }
+
+    #view_options_dropdown {
+      --dropdown-button: {
+        -webkit-appearance: none;
+        align-items: normal;
+        background-color: rgb(248, 248, 248);
+        border: 1px solid rgba(0, 0, 0, 0.5);
+        box-sizing: content-box;
+        color: rgba(0, 0, 0, 0.8);
+        font-family: sans-serif;
+        font-size: 12px;
+        padding: 2px 5px;
+      }
+    }
     </style>
 
     <tv-ui-b-hotkey-controller id="hkc"></tv-ui-b-hotkey-controller>
@@ -107,7 +121,7 @@ found in the LICENSE file.
           <tr-ui-b-toolbar-button id="view_metadata_button">
             M
           </tr-ui-b-toolbar-button>
-          <tr-ui-b-dropdown id="view_options_dropdown"></tr-ui-b-dropdown>
+          <tr-ui-b-dropdown id="view_options_dropdown" label="View Options"></tr-ui-b-dropdown>
           <tr-ui-find-control id="view_find_control"></tr-ui-find-control>
           <tr-ui-b-toolbar-button id="view_console_button">
             &#187;
@@ -140,6 +154,15 @@ found in the LICENSE file.
 Polymer({
   is: 'tr-ui-timeline-view',
 
+  created() {
+    this.trackViewContainer_ = undefined;
+
+    this.queuedModel_ = undefined;
+
+    this.builtPromise_ = undefined;
+    this.doneBuilding_ = undefined;
+  },
+
   attached() {
     this.async(function() {
       this.trackViewContainer_ = Polymer.dom(this).querySelector(
@@ -147,6 +170,8 @@ Polymer({
       if (!this.trackViewContainer_) {
         throw new Error('missing trackviewContainer');
       }
+
+      if (this.queuedModel_) this.updateContents_();
     });
   },
 
@@ -374,6 +399,30 @@ Polymer({
   },
 
   set model(model) {
+    this.build(model);
+  },
+
+  async build(model) {
+    this.queuedModel_ = model;
+    this.builtPromise_ = new Promise((resolve, reject) => {
+      this.doneBuilding_ = resolve;
+    });
+    if (this.trackViewContainer_) await this.updateContents_();
+  },
+
+  get builtPromise() {
+    return this.builtPromise_;
+  },
+
+  async updateContents_() {
+    if (this.trackViewContainer_ === undefined) {
+      throw new Error(
+          'timeline-view.updateContents_ requires trackViewContainer_');
+    }
+
+    const model = this.queuedModel_;
+    this.queuedModel_ = undefined;
+
     const modelInstanceChanged = model !== this.model;
     const modelValid = model && !model.bounds.isEmpty;
 
@@ -422,12 +471,15 @@ Polymer({
     }
 
     if (model) {
-      model.importWarningsThatShouldBeShownToUser.forEach(
-          function(importWarning) {
-            importWarningsEl.addMessage(
-                'Import Warning: ' + importWarning.type + ': ' +
-                importWarning.message);
-          }, this);
+      for (const warning of model.importWarningsThatShouldBeShownToUser) {
+        importWarningsEl.addMessage(
+            `Import Warning: ${warning.type}: ${warning.message}`, [{
+              buttonText: 'Dismiss',
+              onClick(event, infobar) {
+                infobar.visible = false;
+              }
+            }]);
+      }
     }
 
     // Do things that are selection specific
@@ -436,6 +488,8 @@ Polymer({
       this.brushingStateController_.modelDidChange();
       this.onViewportChanged_();
     }
+
+    this.doneBuilding_();
   },
 
   get brushingStateController() {

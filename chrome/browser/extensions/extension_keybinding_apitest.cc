@@ -9,7 +9,6 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
-#include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/extensions/browser_action_test_util.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -559,7 +559,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, MAYBE_AllowDuplicatedMediaKeys) {
 }
 
 IN_PROC_BROWSER_TEST_F(CommandsApiTest, ShortcutAddedOnUpdate) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir scoped_temp_dir;
   EXPECT_TRUE(scoped_temp_dir.CreateUniqueTempDir());
   base::FilePath pem_path = test_data_dir_.
@@ -605,7 +605,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, ShortcutAddedOnUpdate) {
 }
 
 IN_PROC_BROWSER_TEST_F(CommandsApiTest, ShortcutChangedOnUpdate) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir scoped_temp_dir;
   EXPECT_TRUE(scoped_temp_dir.CreateUniqueTempDir());
   base::FilePath pem_path = test_data_dir_.
@@ -654,7 +654,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, ShortcutChangedOnUpdate) {
 }
 
 IN_PROC_BROWSER_TEST_F(CommandsApiTest, ShortcutRemovedOnUpdate) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir scoped_temp_dir;
   EXPECT_TRUE(scoped_temp_dir.CreateUniqueTempDir());
   base::FilePath pem_path = test_data_dir_.
@@ -701,7 +701,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, ShortcutRemovedOnUpdate) {
 
 IN_PROC_BROWSER_TEST_F(CommandsApiTest,
                        ShortcutAddedOnUpdateAfterBeingAssignedByUser) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir scoped_temp_dir;
   EXPECT_TRUE(scoped_temp_dir.CreateUniqueTempDir());
   base::FilePath pem_path = test_data_dir_.
@@ -752,7 +752,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest,
 
 IN_PROC_BROWSER_TEST_F(CommandsApiTest,
                        ShortcutChangedOnUpdateAfterBeingReassignedByUser) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir scoped_temp_dir;
   EXPECT_TRUE(scoped_temp_dir.CreateUniqueTempDir());
   base::FilePath pem_path = test_data_dir_.
@@ -807,7 +807,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest,
 // Test that Media keys do not overwrite previous settings.
 IN_PROC_BROWSER_TEST_F(CommandsApiTest,
     MediaKeyShortcutChangedOnUpdateAfterBeingReassignedByUser) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir scoped_temp_dir;
   EXPECT_TRUE(scoped_temp_dir.CreateUniqueTempDir());
   base::FilePath pem_path = test_data_dir_.
@@ -861,7 +861,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest,
 
 IN_PROC_BROWSER_TEST_F(CommandsApiTest,
                        ShortcutRemovedOnUpdateAfterBeingReassignedByUser) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir scoped_temp_dir;
   EXPECT_TRUE(scoped_temp_dir.CreateUniqueTempDir());
   base::FilePath pem_path = test_data_dir_.

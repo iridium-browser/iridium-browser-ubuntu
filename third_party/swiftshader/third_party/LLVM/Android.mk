@@ -5,6 +5,7 @@ LOCAL_CLANG := true
 
 LOCAL_MODULE := libLLVM_swiftshader
 LOCAL_MODULE_TAGS := optional
+LOCAL_VENDOR_MODULE := true
 
 LOCAL_SRC_FILES := \
 	lib/Analysis/AliasAnalysis.cpp \
@@ -395,11 +396,21 @@ LOCAL_SRC_FILES += \
 	lib/VMCore/ValueTypes.cpp \
 	lib/VMCore/Verifier.cpp \
 
-
-LOCAL_CFLAGS += -DLOG_TAG=\"libLLVM_swiftshader\" \
-	-Wno-unused-parameter \
+LOCAL_CFLAGS += \
+	-DLOG_TAG=\"libLLVM_swiftshader\" \
+	-Wall \
+	-Werror \
 	-Wno-implicit-exception-spec-mismatch \
-	-Wno-overloaded-virtual
+	-Wno-overloaded-virtual \
+	-Wno-undefined-var-template \
+	-Wno-unneeded-internal-declaration \
+	-Wno-unused-const-variable \
+	-Wno-unused-function \
+	-Wno-unused-local-typedef \
+	-Wno-unused-parameter \
+	-Wno-unused-private-field \
+	-Wno-unused-variable \
+	-Wno-unknown-warning-option
 
 ifneq (16,${PLATFORM_SDK_VERSION})
 LOCAL_CFLAGS += -Xclang -fuse-init-array

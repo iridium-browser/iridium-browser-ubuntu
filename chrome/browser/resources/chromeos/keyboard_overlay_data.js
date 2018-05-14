@@ -4188,7 +4188,7 @@ var keyboardOverlayData = {
     'enter<>CTRL': 'keyboardOverlayAddWwwAndComAndOpenAddress',
     'enter<>SHIFT': 'keyboardOverlayFindPreviousText',
     'esc<>SEARCH': 'keyboardOverlayTaskManager',
-    'esc<>SEARCH<>SHIFT': 'keyboardOverlayUnPin',
+    'esc<>SEARCH<>SHIFT': 'keyboardOverlayUnpin',
     'f<>ALT': 'keyboardOverlayShowWrenchMenu',
     'f<>CTRL': 'keyboardOverlayFindText',
     'f1<>CTRL<>SEARCH': 'keyboardOverlayFocusPreviousPane',
@@ -4239,6 +4239,7 @@ var keyboardOverlayData = {
     'left<>CTRL': 'keyboardOverlayPreviousWord',
     'left<>CTRL<>SHIFT': 'keyboardOverlaySelectWordAtATime',
     'left<>SEARCH': 'keyboardOverlayHome',
+    'm<>ALT<>SEARCH': 'keyboardOverlayMoveActiveWindowBetweenDisplays',
     'm<>ALT<>SHIFT': 'keyboardOverlayOpenFileManager',
     'mute<>SEARCH': 'keyboardOverlayF8',
     'n<>ALT<>SHIFT': 'keyboardOverlayShowMessageCenter',
@@ -4292,6 +4293,7 @@ var keyboardOverlayData = {
     'x<>CTRL': 'keyboardOverlayCut',
     'z<>ALT<>CTRL': 'keyboardOverlayToggleChromevoxSpokenFeedback',
     'z<>CTRL': 'keyboardOverlayUndo',
-    'a<>SEARCH': 'keyboardOverlayVoiceInteraction'
+    'a<>SEARCH': 'keyboardOverlayVoiceInteraction',
+    's<>SEARCH<>SHIFT': 'keyboardOverlayToggleDictation'
   }
 };

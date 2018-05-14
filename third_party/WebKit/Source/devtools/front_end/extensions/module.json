@@ -1,12 +1,11 @@
 {
     "dependencies": [
         "components",
-        "network_log",
+        "browser_sdk",
         "common"
     ],
     "scripts": [
         "ExtensionAPI.js",
-        "ExtensionAuditCategory.js",
         "ExtensionRegistryStub.js",
         "ExtensionTraceProvider.js",
         "ExtensionServer.js",

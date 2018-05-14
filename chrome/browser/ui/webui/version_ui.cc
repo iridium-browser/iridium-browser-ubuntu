@@ -4,9 +4,10 @@
 
 #include "chrome/browser/ui/webui/version_ui.h"
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/i18n/message_formatter.h"
-#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
@@ -16,7 +17,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/install_static/install_details.h"
 #include "components/grit/components_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
@@ -36,6 +36,10 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/version_handler_chromeos.h"
+#endif
+
+#if defined(OS_WIN)
+#include "chrome/install_static/install_details.h"
 #endif
 
 using content::WebUIDataSource;
@@ -86,7 +90,8 @@ WebUIDataSource* CreateVersionUIDataSource() {
   html_source->AddString(version_ui::kProfilePath, std::string());
   html_source->AddLocalizedString(version_ui::kVariationsName,
                                   IDS_VERSION_UI_VARIATIONS);
-
+  html_source->AddLocalizedString(version_ui::kVariationsCmdName,
+                                  IDS_VERSION_UI_VARIATIONS_CMD);
 #if defined(OS_CHROMEOS)
   html_source->AddLocalizedString(version_ui::kARC, IDS_ARC_LABEL);
   html_source->AddLocalizedString(version_ui::kPlatform, IDS_PLATFORM_LABEL);
@@ -172,6 +177,7 @@ WebUIDataSource* CreateVersionUIDataSource() {
   html_source->AddResourcePath(version_ui::kAboutVersionCSS,
                                IDR_VERSION_UI_CSS);
   html_source->SetDefaultResource(IDR_VERSION_UI_HTML);
+  html_source->UseGzip();
   return html_source;
 }
 
@@ -182,9 +188,9 @@ VersionUI::VersionUI(content::WebUI* web_ui)
   Profile* profile = Profile::FromWebUI(web_ui);
 
 #if defined(OS_CHROMEOS)
-  web_ui->AddMessageHandler(base::MakeUnique<VersionHandlerChromeOS>());
+  web_ui->AddMessageHandler(std::make_unique<VersionHandlerChromeOS>());
 #else
-  web_ui->AddMessageHandler(base::MakeUnique<VersionHandler>());
+  web_ui->AddMessageHandler(std::make_unique<VersionHandler>());
 #endif
 
 #if !defined(OS_ANDROID)

@@ -4,10 +4,11 @@
 
 #include "chromeos/components/tether/tether_host_response_recorder.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/values.h"
 #include "chromeos/components/tether/pref_names.h"
-#include "components/prefs/pref_registry_simple.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 
 namespace chromeos {
@@ -15,16 +16,24 @@ namespace chromeos {
 namespace tether {
 
 // static
-void TetherHostResponseRecorder::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterListPref(prefs::kMostRecentTetherAvailablilityResponderIds);
-  registry->RegisterListPref(prefs::kMostRecentConnectTetheringResponderIds);
+void TetherHostResponseRecorder::RegisterPrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
+  // Make both of these preferences synced between devices. This ensures that
+  // if users utilize Tether networks on multiple Chromebooks, they will use the
+  // same prioritization criteria.
+  registry->RegisterListPref(
+      prefs::kMostRecentTetherAvailablilityResponderIds,
+      user_prefs::PrefRegistrySyncable::PrefRegistrationFlags::SYNCABLE_PREF);
+  registry->RegisterListPref(
+      prefs::kMostRecentConnectTetheringResponderIds,
+      user_prefs::PrefRegistrySyncable::PrefRegistrationFlags::SYNCABLE_PREF);
 }
 
 TetherHostResponseRecorder::TetherHostResponseRecorder(
     PrefService* pref_service)
     : pref_service_(pref_service) {}
 
-TetherHostResponseRecorder::~TetherHostResponseRecorder() {}
+TetherHostResponseRecorder::~TetherHostResponseRecorder() = default;
 
 void TetherHostResponseRecorder::AddObserver(Observer* observer) {
   observer_list_.AddObserver(observer);
@@ -81,11 +90,11 @@ bool TetherHostResponseRecorder::AddRecentResponse(
   // Create a mutable copy of the stored IDs, or create one if it has yet to be
   // stored.
   std::unique_ptr<base::ListValue> updated_ids =
-      ids ? ids->CreateDeepCopy() : base::MakeUnique<base::ListValue>();
+      ids ? ids->CreateDeepCopy() : std::make_unique<base::ListValue>();
 
   // Remove the device ID if it was already present in the list.
   std::unique_ptr<base::Value> device_id_value =
-      base::MakeUnique<base::Value>(device_id);
+      std::make_unique<base::Value>(device_id);
   updated_ids->Remove(*device_id_value, nullptr);
 
   // Add the device ID to the front of the queue.

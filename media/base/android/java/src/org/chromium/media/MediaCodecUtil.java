@@ -12,6 +12,7 @@ import android.media.MediaCodecInfo.CodecCapabilities;
 import android.media.MediaCodecInfo.CodecProfileLevel;
 import android.media.MediaCodecInfo.VideoCapabilities;
 import android.media.MediaCodecList;
+import android.media.MediaCrypto;
 import android.media.MediaFormat;
 import android.os.Build;
 
@@ -40,7 +41,7 @@ class MediaCodecUtil {
     public static class CodecCreationInfo {
         public MediaCodec mediaCodec;
         public boolean supportsAdaptivePlayback;
-        public BitrateAdjustmentTypes bitrateAdjustmentType = BitrateAdjustmentTypes.NO_ADJUSTMENT;
+        public BitrateAdjuster bitrateAdjuster = BitrateAdjuster.NO_ADJUSTMENT;
     }
 
     public static final class MimeTypes {
@@ -50,16 +51,6 @@ class MediaCodecUtil {
         public static final String VIDEO_H265 = "video/hevc";
         public static final String VIDEO_VP8 = "video/x-vnd.on2.vp8";
         public static final String VIDEO_VP9 = "video/x-vnd.on2.vp9";
-    }
-
-    // Type of bitrate adjustment for video encoder.
-    public enum BitrateAdjustmentTypes {
-        // No adjustment - video encoder has no known bitrate problem.
-        NO_ADJUSTMENT,
-        // Framerate based bitrate adjustment is required - HW encoder does not use frame
-        // timestamps to calculate frame bitrate budget and instead is relying on initial
-        // fps configuration assuming that all frames are coming at fixed initial frame rate.
-        FRAMERATE_ADJUSTMENT,
     }
 
     /**
@@ -249,6 +240,11 @@ class MediaCodecUtil {
         MediaCodecListHelper codecListHelper = new MediaCodecListHelper();
         for (MediaCodecInfo info : codecListHelper) {
             for (String mime : info.getSupportedTypes()) {
+                if (!isDecoderSupportedForDevice(mime)) {
+                    Log.w(TAG, "Decoder for type %s disabled on this device", mime);
+                    continue;
+                }
+
                 // On versions L and M, VP9 codecCapabilities do not advertise profile level
                 // support. In this case, estimate the level from MediaCodecInfo.VideoCapabilities
                 // instead. Assume VP9 is not supported before L. For more information, consult
@@ -274,8 +270,21 @@ class MediaCodecUtil {
      * @return CodecCreationInfo object
      */
     static CodecCreationInfo createDecoder(String mime, int codecType) {
+        return createDecoder(mime,codecType,null);
+    }
+
+    /**
+     * Creates MediaCodec decoder.
+     * @param mime MIME type of the media.
+     * @param codecType Type of codec to create.
+     * @param mediaCrypto Crypto of the media.
+     * @return CodecCreationInfo object
+     */
+    static CodecCreationInfo createDecoder(
+            String mime, @CodecType int codecType, MediaCrypto mediaCrypto) {
         // Always return a valid CodecCreationInfo, its |mediaCodec| field will be null
         // if we cannot create the codec.
+
         CodecCreationInfo result = new CodecCreationInfo();
 
         assert result.mediaCodec == null;
@@ -295,7 +304,10 @@ class MediaCodecUtil {
 
         try {
             // "SECURE" only applies to video decoders.
-            if (mime.startsWith("video") && codecType == CodecType.SECURE) {
+            // Use MediaCrypto.requiresSecureDecoderComponent() for audio: crbug.com/727918
+            if ((mime.startsWith("video") && codecType == CodecType.SECURE)
+                    || (mime.startsWith("audio") && mediaCrypto != null
+                               && mediaCrypto.requiresSecureDecoderComponent(mime))) {
                 // Creating secure codecs is not supported directly on older
                 // versions of Android. Therefore, always get the non-secure
                 // codec name and append ".secure" to get the secure codec name.
@@ -314,7 +326,9 @@ class MediaCodecUtil {
                             codecSupportsAdaptivePlayback(insecureCodec, mime);
                     insecureCodec.release();
                 }
+
                 result.mediaCodec = MediaCodec.createByCodecName(decoderName + ".secure");
+
             } else {
                 if (codecType == CodecType.SOFTWARE) {
                     String decoderName =
@@ -410,6 +424,11 @@ class MediaCodecUtil {
                     && Build.HARDWARE.startsWith("mt")) {
                 return false;
             }
+
+            // Nexus Player VP9 decoder performs poorly at >= 1080p resolution.
+            if (Build.MODEL.equals("Nexus Player")) {
+                return false;
+            }
         } else if (mime.equals("audio/opus")
                 && Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
             return false;
@@ -477,25 +496,25 @@ class MediaCodecUtil {
     // List of supported HW encoders.
     private static enum HWEncoderProperties {
         QcomVp8(MimeTypes.VIDEO_VP8, "OMX.qcom.", Build.VERSION_CODES.KITKAT,
-                BitrateAdjustmentTypes.NO_ADJUSTMENT),
+                BitrateAdjuster.NO_ADJUSTMENT),
         QcomH264(MimeTypes.VIDEO_H264, "OMX.qcom.", Build.VERSION_CODES.KITKAT,
-                BitrateAdjustmentTypes.NO_ADJUSTMENT),
+                BitrateAdjuster.NO_ADJUSTMENT),
         ExynosVp8(MimeTypes.VIDEO_VP8, "OMX.Exynos.", Build.VERSION_CODES.M,
-                BitrateAdjustmentTypes.NO_ADJUSTMENT),
+                BitrateAdjuster.NO_ADJUSTMENT),
         ExynosH264(MimeTypes.VIDEO_H264, "OMX.Exynos.", Build.VERSION_CODES.LOLLIPOP,
-                BitrateAdjustmentTypes.FRAMERATE_ADJUSTMENT);
+                BitrateAdjuster.FRAMERATE_ADJUSTMENT);
 
         private final String mMime;
         private final String mPrefix;
         private final int mMinSDK;
-        private final BitrateAdjustmentTypes mBitrateAdjustmentType;
+        private final BitrateAdjuster mBitrateAdjuster;
 
-        private HWEncoderProperties(String mime, String prefix, int minSDK,
-                BitrateAdjustmentTypes bitrateAdjustmentType) {
+        private HWEncoderProperties(
+                String mime, String prefix, int minSDK, BitrateAdjuster bitrateAdjuster) {
             this.mMime = mime;
             this.mPrefix = prefix;
             this.mMinSDK = minSDK;
-            this.mBitrateAdjustmentType = bitrateAdjustmentType;
+            this.mBitrateAdjuster = bitrateAdjuster;
         }
 
         public String getMime() {
@@ -510,8 +529,8 @@ class MediaCodecUtil {
             return mMinSDK;
         }
 
-        public BitrateAdjustmentTypes getBitrateAdjustmentType() {
-            return mBitrateAdjustmentType;
+        public BitrateAdjuster getBitrateAdjuster() {
+            return mBitrateAdjuster;
         }
     }
 
@@ -539,7 +558,7 @@ class MediaCodecUtil {
         try {
             result.mediaCodec = MediaCodec.createEncoderByType(mime);
             result.supportsAdaptivePlayback = false;
-            result.bitrateAdjustmentType = encoderProperties.getBitrateAdjustmentType();
+            result.bitrateAdjuster = encoderProperties.getBitrateAdjuster();
         } catch (Exception e) {
             Log.e(TAG, "Failed to create MediaCodec: %s", mime, e);
         }
@@ -584,8 +603,11 @@ class MediaCodecUtil {
     static boolean isSetOutputSurfaceSupported() {
         // All Huawei devices based on this processor will immediately hang during
         // MediaCodec.setOutputSurface().  http://crbug.com/683401
+        // Huawei P9 lite will, eventually, get the decoder into a bad state if SetSurface is called
+        // enough times (https://crbug.com/792261).
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                && !Build.HARDWARE.equalsIgnoreCase("hi6210sft");
+                && !Build.HARDWARE.equalsIgnoreCase("hi6210sft")
+                && !Build.HARDWARE.equalsIgnoreCase("hi6250");
     }
 
     /**

@@ -142,7 +142,7 @@ OverscanTracker::OverscanWebObserver* OverscanTracker::GetObserver(
     return iter->second.get();
   if (!create)
     return nullptr;
-  auto owned_observer = base::MakeUnique<OverscanWebObserver>(web_contents);
+  auto owned_observer = std::make_unique<OverscanWebObserver>(web_contents);
   auto* observer_ptr = owned_observer.get();
   observers_[web_contents] = std::move(owned_observer);
   return observer_ptr;
@@ -222,8 +222,9 @@ SystemDisplaySetDisplayPropertiesFunction::Run() {
 ExtensionFunction::ResponseAction SystemDisplaySetDisplayLayoutFunction::Run() {
   std::unique_ptr<display::SetDisplayLayout::Params> params(
       display::SetDisplayLayout::Params::Create(*args_));
-  if (!DisplayInfoProvider::Get()->SetDisplayLayout(params->layouts))
-    return RespondNow(Error("Unable to set display layout"));
+  std::string error;
+  if (!DisplayInfoProvider::Get()->SetDisplayLayout(params->layouts, &error))
+    return RespondNow(Error("Unable to set display layout: " + error));
   return RespondNow(NoArguments());
 }
 
@@ -292,9 +293,9 @@ SystemDisplayShowNativeTouchCalibrationFunction::Run() {
 
   if (!DisplayInfoProvider::Get()->ShowNativeTouchCalibration(
           params->id, &error,
-          base::Bind(&SystemDisplayShowNativeTouchCalibrationFunction::
-                         OnCalibrationComplete,
-                     this))) {
+          base::BindOnce(&SystemDisplayShowNativeTouchCalibrationFunction::
+                             OnCalibrationComplete,
+                         this))) {
     return RespondNow(Error(error));
   }
   return RespondLater();
@@ -303,7 +304,7 @@ SystemDisplayShowNativeTouchCalibrationFunction::Run() {
 void SystemDisplayShowNativeTouchCalibrationFunction::OnCalibrationComplete(
     bool success) {
   if (success)
-    Respond(OneArgument(base::MakeUnique<base::Value>(true)));
+    Respond(OneArgument(std::make_unique<base::Value>(true)));
   else
     Respond(Error(kTouchCalibrationError));
 }
@@ -350,6 +351,18 @@ SystemDisplayClearTouchCalibrationFunction::Run() {
 
   if (!DisplayInfoProvider::Get()->ClearTouchCalibration(params->id, &error))
     return RespondNow(Error(error));
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction SystemDisplaySetMirrorModeFunction::Run() {
+  std::unique_ptr<display::SetMirrorMode::Params> params(
+      display::SetMirrorMode::Params::Create(*args_));
+
+  std::string error;
+  if (!DisplayInfoProvider::Get()->SetMirrorMode(params->info, &error)) {
+    return RespondNow(Error(error));
+  }
+
   return RespondNow(NoArguments());
 }
 

@@ -6,7 +6,9 @@
 #define COMPONENTS_CRONET_IOS_CRONET_ENVIRONMENT_H_
 
 #include <list>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/files/file_path.h"
@@ -15,8 +17,8 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
-#include "components/cronet/ios/version.h"
 #include "components/cronet/url_request_context_config.h"
+#include "components/cronet/version.h"
 #include "net/cert/cert_verifier.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -32,15 +34,17 @@ class FileNetLogObserver;
 }  // namespace net
 
 namespace cronet {
+class CronetPrefsManager;
+
 // CronetEnvironment contains all the network stack configuration
 // and initialization.
 class CronetEnvironment {
  public:
   using PkpVector = std::vector<std::unique_ptr<URLRequestContextConfig::Pkp>>;
 
-  // Initialize Cronet environment globals. Must be called only once on the
-  // main thread.
-  static void Initialize();
+  // A special thread priority value that indicates that the thread priority
+  // should not be altered when a thread is created.
+  static const double kKeepDefaultThreadPriority;
 
   // |user_agent| will be used to generate the user-agent if
   // |user_agent_partial| is true, or will be used as the complete user-agent
@@ -77,10 +81,6 @@ class CronetEnvironment {
   bool quic_enabled() const { return quic_enabled_; }
   bool brotli_enabled() const { return brotli_enabled_; }
 
-  void set_quic_user_agent_id(const std::string& quic_user_agent_id) {
-    quic_user_agent_id_ = quic_user_agent_id;
-  }
-
   void set_accept_language(const std::string& accept_language) {
     accept_language_ = accept_language;
   }
@@ -111,27 +111,52 @@ class CronetEnvironment {
     enable_pkp_bypass_for_local_trust_anchors_ = enable;
   }
 
+  // Sets priority of the network thread. The |priority| should be a
+  // floating point number between 0.0 to 1.0, where 1.0 is highest priority.
+  void SetNetworkThreadPriority(double priority);
+
   // Returns the URLRequestContext associated with this object.
   net::URLRequestContext* GetURLRequestContext() const;
 
   // Return the URLRequestContextGetter associated with this object.
   net::URLRequestContextGetter* GetURLRequestContextGetter() const;
 
+  // The methods below are used for testing.
+  base::SingleThreadTaskRunner* GetFileThreadRunnerForTesting() const;
+  base::SingleThreadTaskRunner* GetNetworkThreadRunnerForTesting() const;
+
  private:
+  // Extends the base thread class to add the Cronet specific cleanup logic.
+  class CronetNetworkThread : public base::Thread {
+   public:
+    CronetNetworkThread(const std::string& name,
+                        cronet::CronetEnvironment* cronet_environment);
+
+   protected:
+    ~CronetNetworkThread() override;
+    void CleanUp() override;
+
+   private:
+    cronet::CronetEnvironment* const cronet_environment_;
+
+    DISALLOW_COPY_AND_ASSIGN(CronetNetworkThread);
+  };
+
   // Performs initialization tasks that must happen on the network thread.
   void InitializeOnNetworkThread();
 
-  // Runs a closure on the network thread.
-  void PostToNetworkThread(const tracked_objects::Location& from_here,
-                           const base::Closure& task);
+  // Returns the task runner for the network thread.
+  base::SingleThreadTaskRunner* GetNetworkThreadTaskRunner() const;
 
-  // Runs a closure on the file user blocking thread.
-  void PostToFileUserBlockingThread(const tracked_objects::Location& from_here,
-                                    const base::Closure& task);
+  // Runs a closure on the network thread.
+  void PostToNetworkThread(const base::Location& from_here,
+                           const base::Closure& task);
 
   // Helper methods that start/stop net logging on the network thread.
   void StartNetLogOnNetworkThread(const base::FilePath&, bool log_bytes);
   void StopNetLogOnNetworkThread(base::WaitableEvent* log_stopped_event);
+
+  std::unique_ptr<base::DictionaryValue> GetNetLogInfo() const;
 
   // Returns the HttpNetworkSession object from the passed in
   // URLRequestContext or NULL if none exists.
@@ -142,14 +167,24 @@ class CronetEnvironment {
   void SetHostResolverRulesOnNetworkThread(const std::string& rules,
                                            base::WaitableEvent* event);
 
+  // Sets priority of the network thread. This method should only be called
+  // on the network thread.
+  void SetNetworkThreadPriorityOnNetworkThread(double priority);
+
   std::string getDefaultQuicUserAgentId() const;
+
+  // Prepares the Cronet environment to be destroyed. The method must be
+  // executed on the network thread. No other tasks should be posted to the
+  // network thread after calling this method.
+  void CleanUpOnNetworkThread();
 
   bool http2_enabled_;
   bool quic_enabled_;
   bool brotli_enabled_;
-  std::string quic_user_agent_id_;
   std::string accept_language_;
   std::string experimental_options_;
+  // Effective experimental options. Kept for NetLog.
+  std::unique_ptr<base::DictionaryValue> effective_experimental_options_;
   std::string ssl_key_log_file_name_;
   URLRequestContextConfig::HttpCacheType http_cache_;
   PkpVector pkp_list_;
@@ -157,9 +192,7 @@ class CronetEnvironment {
   std::list<net::HostPortPair> quic_hints_;
 
   std::unique_ptr<base::Thread> network_io_thread_;
-  std::unique_ptr<base::Thread> network_cache_thread_;
   std::unique_ptr<base::Thread> file_thread_;
-  std::unique_ptr<base::Thread> file_user_blocking_thread_;
   scoped_refptr<base::SequencedTaskRunner> pref_store_worker_pool_;
   std::unique_ptr<net::CertVerifier> mock_cert_verifier_;
   std::unique_ptr<net::CookieStore> cookie_store_;
@@ -170,6 +203,8 @@ class CronetEnvironment {
   std::unique_ptr<net::NetLog> net_log_;
   std::unique_ptr<net::FileNetLogObserver> file_net_log_observer_;
   bool enable_pkp_bypass_for_local_trust_anchors_;
+  double network_thread_priority_;
+  std::unique_ptr<CronetPrefsManager> cronet_prefs_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(CronetEnvironment);
 };

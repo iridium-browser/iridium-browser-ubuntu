@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2014 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -19,6 +20,7 @@ from chromite.lib import constants
 from chromite.lib import alerts
 from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
+from chromite.lib import retry_util
 from chromite.lib import timeout_util
 
 
@@ -198,8 +200,10 @@ def GetExperimentalBuilders(status_url=None, timeout=1):
 
   Returns:
     A list of strings, where each string is a builder. Returns an empty list if
-    there are no experimental builders listed in the tree status, or the query
-    operation times out.
+    there are no experimental builders listed in the tree status.
+
+  Raises:
+    TimeoutError if the request takes longer than |timeout| to complete.
   """
   if not status_url:
     status_url = CROS_TREE_STATUS_JSON_URL
@@ -222,13 +226,14 @@ def GetExperimentalBuilders(status_url=None, timeout=1):
             logging.warning(
                 'Got unknown build config "%s" in list of '
                 'EXPERIMENTAL-BUILDERS.', builder)
+
+    if experimental:
+      logging.info('Got experimental build configs %s from tree status.',
+                   experimental)
+
     return experimental
 
-  try:
-    return _get_status_dict()
-  except timeout_util.TimeoutError:
-    logging.error('Timeout getting experimental builders from the tree status.')
-    return []
+  return retry_util.GenericRetry(lambda _: True, 3, _get_status_dict, sleep=1)
 
 def _GetPassword():
   """Returns the password for updating tree status."""
@@ -493,13 +498,13 @@ def ConstructViceroyBuildDetailsURL(build_id):
   Returns:
     The fully formed URL.
   """
-  _LINK = ('https://viceroy.corp.google.com/'
+  _link = ('https://viceroy.corp.google.com/'
            'chromeos/build_details?build_id=%(build_id)s')
-  return _LINK % {'build_id': build_id}
+  return _link % {'build_id': build_id}
 
 
-def ConstructViceroySuiteDetailsURL(job_id=None, build_id=None):
-  """Return the dashboard (viceroy) URL of suite details for job or build.
+def ConstructGoldenEyeSuiteDetailsURL(job_id=None, build_id=None):
+  """Return the dashboard (goldeneye) URL of suite details for job or build.
 
   Args:
     job_id: AFE job id.
@@ -510,8 +515,36 @@ def ConstructViceroySuiteDetailsURL(job_id=None, build_id=None):
   """
   if job_id is None and build_id is None:
     return None
-  _LINK = 'https://viceroy.corp.google.com/chromeos/suite_details?'
+  _link = 'http://cros-goldeneye/healthmonitoring/suiteDetails?'
   if job_id:
-    return _LINK + 'job_id=%d' % int(job_id)
+    return _link + 'suiteId=%d' % int(job_id)
   else:
-    return _LINK + 'build_id=%d' % int(build_id)
+    return _link + 'cidbBuildId=%d' % int(build_id)
+
+
+def ConstructGoldenEyeBuildDetailsURL(build_id):
+  """Return the dashboard (goldeneye) URL for this run.
+
+  Args:
+    build_id: CIDB id for the build.
+
+  Returns:
+    The fully formed URL.
+  """
+  _link = ('http://go/goldeneye/'
+           'chromeos/healthmonitoring/buildDetails?id=%(build_id)s')
+  return _link % {'build_id': build_id}
+
+
+def ConstructAnnotatorURL(build_id):
+  """Return the build annotator URL for this run.
+
+  Args:
+    build_id: CIDB id for the master build.
+
+  Returns:
+    The fully formed URL.
+  """
+  _link = ('https://chromiumos-build-annotator.googleplex.com/'
+           'build_annotations/edit_annotations/master-paladin/%(build_id)s/?')
+  return _link % {'build_id': build_id}

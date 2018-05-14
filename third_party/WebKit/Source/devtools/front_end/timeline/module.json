@@ -9,6 +9,16 @@
             "className": "Timeline.TimelinePanel"
         },
         {
+            "type": "view",
+            "location": "drawer-view",
+            "id": "performance.monitor",
+            "title": "Performance monitor",
+            "persistence": "closeable",
+            "order": 100,
+            "className": "Timeline.PerformanceMonitor",
+            "tags": "performance, system monitor, monitor, activity, metrics"
+        },
+        {
             "type": "setting",
             "category": "Performance",
             "title": "Hide chrome frame in Layers view",
@@ -24,15 +34,17 @@
         {
             "type": "context-menu-item",
             "location": "timelineMenu/open",
-            "actionId": "timeline.load-from-file"
+            "actionId": "timeline.load-from-file",
+            "order": 10
         },
         {
             "type": "context-menu-item",
             "location": "timelineMenu/open",
-            "actionId": "timeline.save-to-file"
+            "actionId": "timeline.save-to-file",
+            "order": 15
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "actionId": "timeline.toggle-recording",
             "iconClass": "largeicon-start-recording",
             "toggledIconClass": "largeicon-stop-recording",
@@ -63,7 +75,7 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "actionId": "timeline.record-reload",
             "iconClass": "largeicon-refresh",
             "contextTypes": [
@@ -84,7 +96,7 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "category": "Timeline",
             "actionId": "timeline.save-to-file",
             "contextTypes": [
@@ -104,13 +116,12 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "category": "Timeline",
             "actionId": "timeline.load-from-file",
             "contextTypes": [
                 "Timeline.TimelinePanel"
             ],
-            "order": 10,
             "className": "Timeline.TimelinePanel.ActionDelegate",
             "title": "Load profile\u2026",
             "bindings": [
@@ -125,7 +136,7 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "actionId": "timeline.jump-to-previous-frame",
             "contextTypes": [
                 "Timeline.TimelinePanel"
@@ -138,7 +149,7 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "actionId": "timeline.jump-to-next-frame",
             "contextTypes": [
                 "Timeline.TimelinePanel"
@@ -151,7 +162,7 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "actionId": "timeline.show-history",
             "className": "Timeline.TimelinePanel.ActionDelegate",
             "category": "Performance",
@@ -170,20 +181,68 @@
                     "shortcut": "Meta+Y"
                 }
             ]
+        },
+        {
+            "type": "view",
+            "location": "panel",
+            "id": "js_profiler",
+            "title": "JavaScript Profiler",
+            "persistence": "closeable",
+            "order": 65,
+            "className": "Profiler.JSProfilerPanel"
+        },
+        {
+            "type": "action",
+            "actionId": "timeline.previous-recording",
+            "className": "Timeline.TimelinePanel.ActionDelegate",
+            "experiment": "timelineKeepHistory",
+            "contextTypes": [
+                "Timeline.TimelinePanel"
+            ],
+            "bindings": [
+                {
+                    "platform": "windows,linux",
+                    "shortcut": "Alt+Left"
+                },
+                {
+                    "platform": "mac",
+                    "shortcut": "Meta+Left"
+                }
+            ]
+        },
+        {
+            "type": "action",
+            "actionId": "timeline.next-recording",
+            "className": "Timeline.TimelinePanel.ActionDelegate",
+            "experiment": "timelineKeepHistory",
+            "contextTypes": [
+                "Timeline.TimelinePanel"
+            ],
+            "bindings": [
+                {
+                    "platform": "windows,linux",
+                    "shortcut": "Alt+Right"
+                },
+                {
+                    "platform": "mac",
+                    "shortcut": "Meta+Right"
+                }
+            ]
         }
     ],
     "dependencies": [
-        "components",
+        "browser_components",
         "layer_viewer",
         "timeline_model",
         "perf_ui",
         "extensions",
         "data_grid",
         "product_registry",
-        "mobile_throttling",
-        "network_priorities"
+        "profiler",
+        "mobile_throttling"
     ],
     "scripts": [
+        "PerformanceMonitor.js",
         "CountersGraph.js",
         "ExtensionTracingSession.js",
         "PerformanceModel.js",
@@ -205,6 +264,7 @@
         "TimelinePanel.js"
     ],
     "resources": [
+        "performanceMonitor.css",
         "historyToolbarButton.css",
         "invalidationsTree.css",
         "timelineFlamechartPopover.css",

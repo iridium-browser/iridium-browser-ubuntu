@@ -27,13 +27,12 @@ import android.view.MenuItem;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.profiles.ProfileManagerUtils;
 
 /**
  * The Chrome settings activity.
@@ -59,7 +58,6 @@ public class Preferences extends AppCompatActivity implements
 
     private static boolean sActivityNotExportedChecked;
 
-    @SuppressFBWarnings("DM_EXIT")
     @SuppressLint("InlinedApi")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -176,7 +174,7 @@ public class Preferences extends AppCompatActivity implements
     @Override
     protected void onPause() {
         super.onPause();
-        ChromeApplication.flushPersistentData();
+        ProfileManagerUtils.flushPersistentDataForAllProfiles();
     }
 
     @Override

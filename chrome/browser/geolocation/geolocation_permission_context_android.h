@@ -27,6 +27,7 @@
 #include "base/time/time.h"
 #include "chrome/browser/android/location_settings.h"
 #include "chrome/browser/geolocation/geolocation_permission_context.h"
+#include "chrome/browser/permissions/permission_request_id.h"
 #include "components/location/android/location_settings_dialog_context.h"
 #include "components/location/android/location_settings_dialog_outcome.h"
 
@@ -39,7 +40,6 @@ class InfoBar;
 }
 
 class GURL;
-class PermissionRequestID;
 class PrefRegistrySimple;
 
 class GeolocationPermissionContextAndroid
@@ -60,15 +60,9 @@ class GeolocationPermissionContextAndroid
   explicit GeolocationPermissionContextAndroid(Profile* profile);
   ~GeolocationPermissionContextAndroid() override;
 
- protected:
-  // GeolocationPermissionContext:
-  ContentSetting GetPermissionStatusInternal(
-      content::RenderFrameHost* render_frame_host,
-      const GURL& requesting_origin,
-      const GURL& embedding_origin) const override;
-
  private:
   friend class GeolocationPermissionContextTests;
+  friend class PermissionManagerTest;
 
   static void AddDayOffsetForTesting(int days);
   static void SetDSEOriginForTesting(const char* dse_origin);
@@ -80,8 +74,6 @@ class GeolocationPermissionContextAndroid
       const GURL& requesting_frame_origin,
       bool user_gesture,
       const BrowserPermissionCallback& callback) override;
-  void CancelPermissionRequest(content::WebContents* web_contents,
-                               const PermissionRequestID& id) override;
   void UserMadePermissionDecision(const PermissionRequestID& id,
                                   const GURL& requesting_origin,
                                   const GURL& embedding_origin,
@@ -130,10 +122,8 @@ class GeolocationPermissionContextAndroid
                                      bool ignore_backoff) const;
 
   void OnLocationSettingsDialogShown(
-      const PermissionRequestID& id,
       const GURL& requesting_origin,
       const GURL& embedding_origin,
-      const BrowserPermissionCallback& callback,
       bool persist,
       ContentSetting content_setting,
       LocationSettingsDialogOutcome prompt_outcome);
@@ -152,8 +142,8 @@ class GeolocationPermissionContextAndroid
 
   std::unique_ptr<LocationSettings> location_settings_;
 
-  // This is owned by the InfoBarService (owner of the InfoBar).
-  infobars::InfoBar* permission_update_infobar_;
+  PermissionRequestID location_settings_dialog_request_id_;
+  BrowserPermissionCallback location_settings_dialog_callback_;
 
   // Must be the last member, to ensure that it will be destroyed first, which
   // will invalidate weak pointers.

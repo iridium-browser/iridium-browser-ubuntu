@@ -1,3 +1,4 @@
+
 /*
  *  Copyright (c) 2017 The WebRTC project authors. All Rights Reserved.
  *
@@ -8,85 +9,23 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/aec3/residual_echo_estimator.h"
+#include "modules/audio_processing/aec3/residual_echo_estimator.h"
 
 #include <numeric>
 #include <vector>
 
-#include "webrtc/rtc_base/checks.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
-namespace {
 
-// Estimates the echo generating signal power as gated maximal power over a time
-// window.
-void EchoGeneratingPower(const RenderBuffer& render_buffer,
-                         size_t min_delay,
-                         size_t max_delay,
-                         std::array<float, kFftLengthBy2Plus1>* X2) {
-  X2->fill(0.f);
-  for (size_t k = min_delay; k <= max_delay; ++k) {
-    std::transform(X2->begin(), X2->end(), render_buffer.Spectrum(k).begin(),
-                   X2->begin(),
-                   [](float a, float b) { return std::max(a, b); });
-  }
-
-  // Apply soft noise gate of -78 dBFS.
-  constexpr float kNoiseGatePower = 27509.42f;
-  std::for_each(X2->begin(), X2->end(), [kNoiseGatePower](float& a) {
-    if (kNoiseGatePower > a) {
-      a = std::max(0.f, a - 0.3f * (kNoiseGatePower - a));
-    }
-  });
-}
-
-constexpr int kNoiseFloorCounterMax = 50;
-constexpr float kNoiseFloorMin = 10.f * 10.f * 128.f * 128.f;
-
-// Updates estimate for the power of the stationary noise component in the
-// render signal.
-void RenderNoisePower(
-    const RenderBuffer& render_buffer,
-    std::array<float, kFftLengthBy2Plus1>* X2_noise_floor,
-    std::array<int, kFftLengthBy2Plus1>* X2_noise_floor_counter) {
-  RTC_DCHECK(X2_noise_floor);
-  RTC_DCHECK(X2_noise_floor_counter);
-
-  const auto render_power = render_buffer.Spectrum(0);
-  RTC_DCHECK_EQ(X2_noise_floor->size(), render_power.size());
-  RTC_DCHECK_EQ(X2_noise_floor_counter->size(), render_power.size());
-
-  // Estimate the stationary noise power in a minimum statistics manner.
-  for (size_t k = 0; k < render_power.size(); ++k) {
-    // Decrease rapidly.
-    if (render_power[k] < (*X2_noise_floor)[k]) {
-      (*X2_noise_floor)[k] = render_power[k];
-      (*X2_noise_floor_counter)[k] = 0;
-    } else {
-      // Increase in a delayed, leaky manner.
-      if ((*X2_noise_floor_counter)[k] >= kNoiseFloorCounterMax) {
-        (*X2_noise_floor)[k] =
-            std::max((*X2_noise_floor)[k] * 1.1f, kNoiseFloorMin);
-      } else {
-        ++(*X2_noise_floor_counter)[k];
-      }
-    }
-  }
-}
-
-// Assume a minimum echo path gain of -33 dB for headsets.
-constexpr float kHeadsetEchoPathGain = 0.0005f;
-
-}  // namespace
-
-ResidualEchoEstimator::ResidualEchoEstimator() {
+ResidualEchoEstimator::ResidualEchoEstimator(const EchoCanceller3Config& config)
+    : config_(config), S2_old_(config_.filter.main.length_blocks) {
   Reset();
 }
 
 ResidualEchoEstimator::~ResidualEchoEstimator() = default;
 
 void ResidualEchoEstimator::Estimate(
-    bool using_subtractor_output,
     const AecState& aec_state,
     const RenderBuffer& render_buffer,
     const std::array<float, kFftLengthBy2Plus1>& S2_linear,
@@ -94,72 +33,66 @@ void ResidualEchoEstimator::Estimate(
     std::array<float, kFftLengthBy2Plus1>* R2) {
   RTC_DCHECK(R2);
 
-  const rtc::Optional<size_t> delay =
-      aec_state.FilterDelay()
-          ? aec_state.FilterDelay()
-          : (aec_state.ExternalDelay() ? aec_state.ExternalDelay()
-                                       : rtc::Optional<size_t>());
-
   // Estimate the power of the stationary noise in the render signal.
   RenderNoisePower(render_buffer, &X2_noise_floor_, &X2_noise_floor_counter_);
 
   // Estimate the residual echo power.
-  const bool use_linear_echo_power =
-      aec_state.UsableLinearEstimate() && using_subtractor_output;
-  if (use_linear_echo_power && !aec_state.HeadsetDetected()) {
-    RTC_DCHECK(aec_state.FilterDelay());
-    const int filter_delay = *aec_state.FilterDelay();
-    LinearEstimate(S2_linear, aec_state.Erle(), filter_delay, R2);
-    AddEchoReverb(S2_linear, aec_state.SaturatedEcho(), filter_delay,
-                  aec_state.ReverbDecay(), R2);
+  if (aec_state.UsableLinearEstimate()) {
+    LinearEstimate(S2_linear, aec_state.Erle(), aec_state.FilterDelayBlocks(),
+                   R2);
+    AddEchoReverb(S2_linear, aec_state.SaturatedEcho(),
+                  aec_state.FilterDelayBlocks(), aec_state.ReverbDecay(), R2);
+
+    // If the echo is saturated, estimate the echo power as the maximum echo
+    // power with a leakage factor.
+    if (aec_state.SaturatedEcho()) {
+      R2->fill((*std::max_element(R2->begin(), R2->end())) * 100.f);
+    }
   } else {
     // Estimate the echo generating signal power.
     std::array<float, kFftLengthBy2Plus1> X2;
-    if (aec_state.ExternalDelay() || aec_state.FilterDelay()) {
-      RTC_DCHECK(delay);
-      const int delay_use = static_cast<int>(*delay);
 
-      // Computes the spectral power over the blocks surrounding the delay.
-      RTC_DCHECK_LT(delay_use, kResidualEchoPowerRenderWindowSize);
-      EchoGeneratingPower(
-          render_buffer, std::max(0, delay_use - 1),
-          std::min(kResidualEchoPowerRenderWindowSize - 1, delay_use + 1), &X2);
-    } else {
-      // Computes the spectral power over the latest blocks.
-      EchoGeneratingPower(render_buffer, 0,
-                          kResidualEchoPowerRenderWindowSize - 1, &X2);
-    }
+    // Computes the spectral power over the blocks surrounding the delay.
+    size_t window_start = std::max(
+        0, aec_state.FilterDelayBlocks() -
+               static_cast<int>(config_.echo_model.render_pre_window_size));
+    size_t window_end =
+        aec_state.FilterDelayBlocks() +
+        static_cast<int>(config_.echo_model.render_post_window_size);
+    EchoGeneratingPower(render_buffer, window_start, window_end, &X2);
 
     // Subtract the stationary noise power to avoid stationary noise causing
     // excessive echo suppression.
-    std::transform(
-        X2.begin(), X2.end(), X2_noise_floor_.begin(), X2.begin(),
-        [](float a, float b) { return std::max(0.f, a - 10.f * b); });
+    std::transform(X2.begin(), X2.end(), X2_noise_floor_.begin(), X2.begin(),
+                   [&](float a, float b) {
+                     return std::max(
+                         0.f, a - config_.echo_model.stationary_gate_slope * b);
+                   });
 
-    NonLinearEstimate(aec_state.HeadsetDetected(), X2, Y2, R2);
-    AddEchoReverb(*R2, aec_state.SaturatedEcho(),
-                  std::min(static_cast<size_t>(kAdaptiveFilterLength),
-                           delay.value_or(kAdaptiveFilterLength)),
-                  aec_state.ReverbDecay(), R2);
+    NonLinearEstimate(aec_state.SaturatedEcho(), aec_state.EchoPathGain(), X2,
+                      Y2, R2);
+
+    if (aec_state.SaturatedEcho()) {
+      // TODO(peah): Modify to make sense theoretically.
+      AddEchoReverb(*R2, aec_state.SaturatedEcho(),
+                    config_.filter.main.length_blocks, aec_state.ReverbDecay(),
+                    R2);
+    }
   }
 
   // If the echo is deemed inaudible, set the residual echo to zero.
-  if (aec_state.InaudibleEcho()) {
+  if (aec_state.TransparentMode()) {
     R2->fill(0.f);
-  }
-
-  // If the echo is saturated, estimate the echo power as the maximum echo power
-  // with a leakage factor.
-  if (aec_state.SaturatedEcho()) {
-    R2->fill((*std::max_element(R2->begin(), R2->end())) * 100.f);
+    R2_old_.fill(0.f);
+    R2_hold_counter_.fill(0.f);
   }
 
   std::copy(R2->begin(), R2->end(), R2_old_.begin());
 }
 
 void ResidualEchoEstimator::Reset() {
-  X2_noise_floor_counter_.fill(kNoiseFloorCounterMax);
-  X2_noise_floor_.fill(kNoiseFloorMin);
+  X2_noise_floor_counter_.fill(config_.echo_model.noise_floor_hold);
+  X2_noise_floor_.fill(config_.echo_model.min_noise_floor_power);
   R2_reverb_.fill(0.f);
   R2_old_.fill(0.f);
   R2_hold_counter_.fill(0.f);
@@ -182,27 +115,17 @@ void ResidualEchoEstimator::LinearEstimate(
 }
 
 void ResidualEchoEstimator::NonLinearEstimate(
-    bool headset_detected,
+    bool saturated_echo,
+    float echo_path_gain,
     const std::array<float, kFftLengthBy2Plus1>& X2,
     const std::array<float, kFftLengthBy2Plus1>& Y2,
     std::array<float, kFftLengthBy2Plus1>* R2) {
-  // Choose gains.
-  const float echo_path_gain_lf = headset_detected ? kHeadsetEchoPathGain : 100;
-  const float echo_path_gain_mf =
-      headset_detected ? kHeadsetEchoPathGain : 1000;
-  const float echo_path_gain_hf =
-      headset_detected ? kHeadsetEchoPathGain : 5000;
+  float echo_path_gain_use = saturated_echo ? 10000.f : echo_path_gain;
 
   // Compute preliminary residual echo.
   std::transform(
-      X2.begin(), X2.begin() + 12, R2->begin(),
-      [echo_path_gain_lf](float a) { return a * echo_path_gain_lf; });
-  std::transform(
-      X2.begin() + 12, X2.begin() + 25, R2->begin() + 12,
-      [echo_path_gain_mf](float a) { return a * echo_path_gain_mf; });
-  std::transform(
-      X2.begin() + 25, X2.end(), R2->begin() + 25,
-      [echo_path_gain_hf](float a) { return a * echo_path_gain_hf; });
+      X2.begin(), X2.end(), R2->begin(),
+      [echo_path_gain_use](float a) { return a * echo_path_gain_use; });
 
   for (size_t k = 0; k < R2->size(); ++k) {
     // Update hold counter.
@@ -210,9 +133,12 @@ void ResidualEchoEstimator::NonLinearEstimate(
 
     // Compute the residual echo by holding a maximum echo powers and an echo
     // fading corresponding to a room with an RT60 value of about 50 ms.
-    (*R2)[k] = R2_hold_counter_[k] < 2
-                   ? std::max((*R2)[k], R2_old_[k])
-                   : std::min((*R2)[k] + R2_old_[k] * 0.1f, Y2[k]);
+    (*R2)[k] =
+        R2_hold_counter_[k] < config_.echo_model.nonlinear_hold
+            ? std::max((*R2)[k], R2_old_[k])
+            : std::min(
+                  (*R2)[k] + R2_old_[k] * config_.echo_model.nonlinear_release,
+                  Y2[k]);
   }
 }
 
@@ -255,6 +181,58 @@ void ResidualEchoEstimator::AddEchoReverb(
   // Add the power of the echo reverb to the residual echo power.
   std::transform(R2->begin(), R2->end(), R2_reverb_.begin(), R2->begin(),
                  std::plus<float>());
+}
+
+void ResidualEchoEstimator::EchoGeneratingPower(
+    const RenderBuffer& render_buffer,
+    size_t min_delay,
+    size_t max_delay,
+    std::array<float, kFftLengthBy2Plus1>* X2) const {
+  X2->fill(0.f);
+  for (size_t k = min_delay; k <= max_delay; ++k) {
+    std::transform(X2->begin(), X2->end(), render_buffer.Spectrum(k).begin(),
+                   X2->begin(),
+                   [](float a, float b) { return std::max(a, b); });
+  }
+
+  // Apply soft noise gate.
+  std::for_each(X2->begin(), X2->end(), [&](float& a) {
+    if (config_.echo_model.noise_gate_power > a) {
+      a = std::max(0.f, a - config_.echo_model.noise_gate_slope *
+                                (config_.echo_model.noise_gate_power - a));
+    }
+  });
+}
+
+void ResidualEchoEstimator::RenderNoisePower(
+    const RenderBuffer& render_buffer,
+    std::array<float, kFftLengthBy2Plus1>* X2_noise_floor,
+    std::array<int, kFftLengthBy2Plus1>* X2_noise_floor_counter) const {
+  RTC_DCHECK(X2_noise_floor);
+  RTC_DCHECK(X2_noise_floor_counter);
+
+  const auto render_power = render_buffer.Spectrum(0);
+  RTC_DCHECK_EQ(X2_noise_floor->size(), render_power.size());
+  RTC_DCHECK_EQ(X2_noise_floor_counter->size(), render_power.size());
+
+  // Estimate the stationary noise power in a minimum statistics manner.
+  for (size_t k = 0; k < render_power.size(); ++k) {
+    // Decrease rapidly.
+    if (render_power[k] < (*X2_noise_floor)[k]) {
+      (*X2_noise_floor)[k] = render_power[k];
+      (*X2_noise_floor_counter)[k] = 0;
+    } else {
+      // Increase in a delayed, leaky manner.
+      if ((*X2_noise_floor_counter)[k] >=
+          static_cast<int>(config_.echo_model.noise_floor_hold)) {
+        (*X2_noise_floor)[k] =
+            std::max((*X2_noise_floor)[k] * 1.1f,
+                     config_.echo_model.min_noise_floor_power);
+      } else {
+        ++(*X2_noise_floor_counter)[k];
+      }
+    }
+  }
 }
 
 }  // namespace webrtc

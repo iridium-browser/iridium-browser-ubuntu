@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/strings/string16.h"
 #include "ui/gfx/native_widget_types.h"
 
 class PermissionRequest;
@@ -23,6 +24,13 @@ class WebContents;
 // to the manager for the visible tab.
 class PermissionPrompt {
  public:
+  // Holds the string to be displayed as the origin of the permission prompt,
+  // and whether or not that string is an origin.
+  struct DisplayNameOrOrigin {
+    base::string16 name_or_origin;
+    bool is_origin;
+  };
+
   // The delegate will receive events caused by user action which need to
   // be persisted in the per-tab UI state.
   class Delegate {
@@ -33,7 +41,10 @@ class PermissionPrompt {
     // deleted upon navigation and so on.
     virtual const std::vector<PermissionRequest*>& Requests() = 0;
 
-    virtual void TogglePersist(bool new_value) = 0;
+    // Returns the origin to be displayed in the permission prompt. May return
+    // a non-origin, e.g. extension URLs use the name of the extension.
+    virtual DisplayNameOrOrigin GetDisplayNameOrOrigin() = 0;
+
     virtual void Accept() = 0;
     virtual void Deny() = 0;
     virtual void Closing() = 0;
@@ -48,11 +59,6 @@ class PermissionPrompt {
       content::WebContents* web_contents,
       Delegate* delegate);
   virtual ~PermissionPrompt() {}
-
-  // Returns true if the view can accept a new Show() command to coalesce
-  // requests. Currently the policy is that this should return true if the view
-  // is being shown and the mouse is not over the view area (!IsMouseHovered).
-  virtual bool CanAcceptRequestUpdate() = 0;
 
   // Updates where the prompt should be anchored. ex: fullscreen toggle.
   virtual void UpdateAnchorPosition() = 0;

@@ -4,7 +4,6 @@
 
 #include <stddef.h>
 
-#include "base/command_line.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -17,7 +16,6 @@
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "extensions/browser/extension_system.h"
-#include "ui/app_list/app_list_switches.h"
 
 namespace {
 
@@ -95,11 +93,6 @@ class SingleClientAppListSyncTest : public SyncTest {
   ~SingleClientAppListSyncTest() override {}
 
   // SyncTest
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    SyncTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(app_list::switches::kEnableSyncAppList);
-  }
-
   bool SetupClients() override {
     if (!SyncTest::SetupClients())
       return false;
@@ -155,10 +148,10 @@ IN_PROC_BROWSER_TEST_F(SingleClientAppListSyncTest, LocalStorage) {
     service->SetPinPosition(app_ids.back(), pin_position);
     pin_position = pin_position.CreateAfter();
   }
-  SyncAppListHelper::GetInstance()->MoveAppToFolder(
-      profile, 2, "folder1");
-  SyncAppListHelper::GetInstance()->MoveAppToFolder(
-      profile, 3, "folder2");
+  SyncAppListHelper::GetInstance()->MoveAppToFolder(profile, app_ids[2],
+                                                    "folder1");
+  SyncAppListHelper::GetInstance()->MoveAppToFolder(profile, app_ids[3],
+                                                    "folder2");
 
   app_list::AppListSyncableService compare_service(
       profile, extensions::ExtensionSystem::Get(profile));
@@ -177,11 +170,10 @@ IN_PROC_BROWSER_TEST_F(SingleClientAppListSyncTest, LocalStorage) {
     service->SetPinPosition(app_id, pin_position);
     pin_position = pin_position.CreateAfter();
   }
-  SyncAppListHelper::GetInstance()->MoveAppFromFolder(
-      profile, 0, "folder1");
-  SyncAppListHelper::GetInstance()->MoveAppFromFolder(
-      profile, 0, "folder2");
-  SyncAppListHelper::GetInstance()->MoveApp(profile, 0, 1);
+  SyncAppListHelper::GetInstance()->MoveAppFromFolder(profile, app_ids[0],
+                                                      "folder1");
+  SyncAppListHelper::GetInstance()->MoveAppFromFolder(profile, app_ids[0],
+                                                      "folder2");
 
   EXPECT_FALSE(SyncItemsMatch(service, &compare_service));
 

@@ -13,6 +13,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "mojo/edk/system/channel.h"
+#include "mojo/edk/system/configuration.h"
 #include "mojo/edk/system/request_context.h"
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -26,8 +27,8 @@ namespace {
 
 // NOTE: Please ONLY append messages to the end of this enum.
 enum class MessageType : uint32_t {
-  ACCEPT_CHILD,
-  ACCEPT_PARENT,
+  ACCEPT_INVITEE,
+  ACCEPT_INVITATION,
   ADD_BROKER_CLIENT,
   BROKER_CLIENT_ADDED,
   ACCEPT_BROKER_CLIENT,
@@ -53,14 +54,14 @@ struct Header {
 static_assert(IsAlignedForChannelMessage(sizeof(Header)),
               "Invalid header size.");
 
-struct AcceptChildData {
-  ports::NodeName parent_name;
+struct AcceptInviteeData {
+  ports::NodeName inviter_name;
   ports::NodeName token;
 };
 
-struct AcceptParentData {
+struct AcceptInvitationData {
   ports::NodeName token;
-  ports::NodeName child_name;
+  ports::NodeName invitee_name;
 };
 
 struct AcceptPeerData {
@@ -91,7 +92,7 @@ struct BrokerClientAddedData {
 };
 
 // This data may be followed by a platform channel handle to the broker. If not,
-// then the parent is the broker and its channel should be used as such.
+// then the inviter is the broker and its channel should be used as such.
 struct AcceptBrokerClientData {
   ports::NodeName broker_name;
 };
@@ -136,7 +137,7 @@ Channel::MessagePtr CreateMessage(MessageType type,
   else
     capacity = std::max(total_size, capacity);
   auto message =
-      base::MakeUnique<Channel::Message>(capacity, total_size, num_handles);
+      std::make_unique<Channel::Message>(capacity, total_size, num_handles);
   Header* header = reinterpret_cast<Header*>(message->mutable_payload());
   header->type = type;
   header->padding = 0;
@@ -252,7 +253,7 @@ base::ProcessHandle NodeChannel::CopyRemoteProcessHandle() {
   base::AutoLock lock(remote_process_handle_lock_);
 #if defined(OS_WIN)
   if (remote_process_handle_ != base::kNullProcessHandle) {
-    // Privileged nodes use this to pass their childrens' process handles to the
+    // Privileged nodes use this to pass their invitees' process handles to the
     // broker on launch.
     HANDLE handle = remote_process_handle_;
     BOOL result = DuplicateHandle(
@@ -273,23 +274,23 @@ void NodeChannel::SetRemoteNodeName(const ports::NodeName& name) {
   remote_node_name_ = name;
 }
 
-void NodeChannel::AcceptChild(const ports::NodeName& parent_name,
-                              const ports::NodeName& token) {
-  AcceptChildData* data;
+void NodeChannel::AcceptInvitee(const ports::NodeName& inviter_name,
+                                const ports::NodeName& token) {
+  AcceptInviteeData* data;
   Channel::MessagePtr message = CreateMessage(
-      MessageType::ACCEPT_CHILD, sizeof(AcceptChildData), 0, &data);
-  data->parent_name = parent_name;
+      MessageType::ACCEPT_INVITEE, sizeof(AcceptInviteeData), 0, &data);
+  data->inviter_name = inviter_name;
   data->token = token;
   WriteChannelMessage(std::move(message));
 }
 
-void NodeChannel::AcceptParent(const ports::NodeName& token,
-                               const ports::NodeName& child_name) {
-  AcceptParentData* data;
+void NodeChannel::AcceptInvitation(const ports::NodeName& token,
+                                   const ports::NodeName& invitee_name) {
+  AcceptInvitationData* data;
   Channel::MessagePtr message = CreateMessage(
-      MessageType::ACCEPT_PARENT, sizeof(AcceptParentData), 0, &data);
+      MessageType::ACCEPT_INVITATION, sizeof(AcceptInvitationData), 0, &data);
   data->token = token;
-  data->child_name = child_name;
+  data->invitee_name = invitee_name;
   WriteChannelMessage(std::move(message));
 }
 
@@ -308,13 +309,13 @@ void NodeChannel::AcceptPeer(const ports::NodeName& sender_name,
 void NodeChannel::AddBrokerClient(const ports::NodeName& client_name,
                                   base::ProcessHandle process_handle) {
   AddBrokerClientData* data;
-  ScopedPlatformHandleVectorPtr handles(new PlatformHandleVector());
+  std::vector<ScopedPlatformHandle> handles;
 #if defined(OS_WIN)
-  handles->push_back(PlatformHandle(process_handle));
+  handles.emplace_back(ScopedPlatformHandle(PlatformHandle(process_handle)));
 #endif
-  Channel::MessagePtr message = CreateMessage(
-      MessageType::ADD_BROKER_CLIENT, sizeof(AddBrokerClientData),
-      handles->size(), &data);
+  Channel::MessagePtr message =
+      CreateMessage(MessageType::ADD_BROKER_CLIENT, sizeof(AddBrokerClientData),
+                    handles.size(), &data);
   message->SetHandles(std::move(handles));
   data->client_name = client_name;
 #if !defined(OS_WIN)
@@ -327,12 +328,12 @@ void NodeChannel::AddBrokerClient(const ports::NodeName& client_name,
 void NodeChannel::BrokerClientAdded(const ports::NodeName& client_name,
                                     ScopedPlatformHandle broker_channel) {
   BrokerClientAddedData* data;
-  ScopedPlatformHandleVectorPtr handles(new PlatformHandleVector());
+  std::vector<ScopedPlatformHandle> handles;
   if (broker_channel.is_valid())
-    handles->push_back(broker_channel.release());
-  Channel::MessagePtr message = CreateMessage(
-      MessageType::BROKER_CLIENT_ADDED, sizeof(BrokerClientAddedData),
-      handles->size(), &data);
+    handles.push_back(std::move(broker_channel));
+  Channel::MessagePtr message =
+      CreateMessage(MessageType::BROKER_CLIENT_ADDED,
+                    sizeof(BrokerClientAddedData), handles.size(), &data);
   message->SetHandles(std::move(handles));
   data->client_name = client_name;
   WriteChannelMessage(std::move(message));
@@ -341,12 +342,12 @@ void NodeChannel::BrokerClientAdded(const ports::NodeName& client_name,
 void NodeChannel::AcceptBrokerClient(const ports::NodeName& broker_name,
                                      ScopedPlatformHandle broker_channel) {
   AcceptBrokerClientData* data;
-  ScopedPlatformHandleVectorPtr handles(new PlatformHandleVector());
+  std::vector<ScopedPlatformHandle> handles;
   if (broker_channel.is_valid())
-    handles->push_back(broker_channel.release());
-  Channel::MessagePtr message = CreateMessage(
-      MessageType::ACCEPT_BROKER_CLIENT, sizeof(AcceptBrokerClientData),
-      handles->size(), &data);
+    handles.push_back(std::move(broker_channel));
+  Channel::MessagePtr message =
+      CreateMessage(MessageType::ACCEPT_BROKER_CLIENT,
+                    sizeof(AcceptBrokerClientData), handles.size(), &data);
   message->SetHandles(std::move(handles));
   data->broker_name = broker_name;
   WriteChannelMessage(std::move(message));
@@ -374,11 +375,11 @@ void NodeChannel::RequestIntroduction(const ports::NodeName& name) {
 void NodeChannel::Introduce(const ports::NodeName& name,
                             ScopedPlatformHandle channel_handle) {
   IntroductionData* data;
-  ScopedPlatformHandleVectorPtr handles(new PlatformHandleVector());
+  std::vector<ScopedPlatformHandle> handles;
   if (channel_handle.is_valid())
-    handles->push_back(channel_handle.release());
+    handles.push_back(std::move(channel_handle));
   Channel::MessagePtr message = CreateMessage(
-      MessageType::INTRODUCE, sizeof(IntroductionData), handles->size(), &data);
+      MessageType::INTRODUCE, sizeof(IntroductionData), handles.size(), &data);
   message->SetHandles(std::move(handles));
   data->name = name;
   WriteChannelMessage(std::move(message));
@@ -405,7 +406,7 @@ void NodeChannel::RelayEventMessage(const ports::NodeName& destination,
 
   // Note that this is only used on Windows, and on Windows all platform
   // handles are included in the message data. We blindly copy all the data
-  // here and the relay node (the parent) will duplicate handles as needed.
+  // here and the relay node (the broker) will duplicate handles as needed.
   size_t num_bytes = sizeof(RelayEventMessageData) + message->data_num_bytes();
   RelayEventMessageData* data;
   Channel::MessagePtr relay_message =
@@ -413,12 +414,18 @@ void NodeChannel::RelayEventMessage(const ports::NodeName& destination,
   data->destination = destination;
   memcpy(data + 1, message->data(), message->data_num_bytes());
 
-  // When the handles are duplicated in the parent, the source handles will
-  // be closed. If the parent never receives this message then these handles
+  // When the handles are duplicated in the broker, the source handles will
+  // be closed. If the broker never receives this message then these handles
   // will leak, but that means something else has probably broken and the
   // sending process won't likely be around much longer.
-  ScopedPlatformHandleVectorPtr handles = message->TakeHandles();
-  handles->clear();
+  //
+  // TODO(https://crbug.com/813112): We would like to be able to violate the
+  // above stated assumption. We should not leak handles in cases where we
+  // outlive the broker, as we may continue existing and eventually accept a new
+  // broker invitation.
+  std::vector<ScopedPlatformHandle> handles = message->TakeHandles();
+  for (auto& handle : handles)
+    ignore_result(handle.release());
 
 #else
   DCHECK(message->has_mach_ports());
@@ -428,11 +435,11 @@ void NodeChannel::RelayEventMessage(const ports::NodeName& destination,
   // moves them back to the relayed message. This is necessary because the
   // message may contain fds which need to be attached to the outer message so
   // that they can be transferred to the broker.
-  ScopedPlatformHandleVectorPtr handles = message->TakeHandles();
+  std::vector<ScopedPlatformHandle> handles = message->TakeHandles();
   size_t num_bytes = sizeof(RelayEventMessageData) + message->data_num_bytes();
   RelayEventMessageData* data;
   Channel::MessagePtr relay_message = CreateMessage(
-      MessageType::RELAY_EVENT_MESSAGE, num_bytes, handles->size(), &data);
+      MessageType::RELAY_EVENT_MESSAGE, num_bytes, handles.size(), &data);
   data->destination = destination;
   memcpy(data + 1, message->data(), message->data_num_bytes());
   relay_message->SetHandles(std::move(handles));
@@ -478,7 +485,7 @@ NodeChannel::~NodeChannel() {
 
 void NodeChannel::OnChannelMessage(const void* payload,
                                    size_t payload_size,
-                                   ScopedPlatformHandleVectorPtr handles) {
+                                   std::vector<ScopedPlatformHandle> handles) {
   DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
 
   RequestContext request_context(RequestContext::Source::SYSTEM);
@@ -494,21 +501,22 @@ void NodeChannel::OnChannelMessage(const void* payload,
   // from a privileged descendant.
   {
     base::AutoLock lock(remote_process_handle_lock_);
-    if (handles && remote_process_handle_ != base::kNullProcessHandle) {
+    if (!handles.empty() &&
+        remote_process_handle_ != base::kNullProcessHandle) {
       // Note that we explicitly mark the handles as being owned by the sending
       // process before rewriting them, in order to accommodate RewriteHandles'
       // internal sanity checks.
-      for (auto& handle : *handles)
-        handle.owning_process = remote_process_handle_;
+      for (auto& handle : handles)
+        handle.get().owning_process = remote_process_handle_;
       if (!Channel::Message::RewriteHandles(remote_process_handle_,
                                             base::GetCurrentProcessHandle(),
-                                            handles.get())) {
+                                            &handles)) {
         DLOG(ERROR) << "Received one or more invalid handles.";
       }
-    } else if (handles) {
+    } else if (!handles.empty()) {
       // Handles received by an unknown process must already be owned by us.
-      for (auto& handle : *handles)
-        handle.owning_process = base::GetCurrentProcessHandle();
+      for (auto& handle : handles)
+        handle.get().owning_process = base::GetCurrentProcessHandle();
     }
   }
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
@@ -517,11 +525,8 @@ void NodeChannel::OnChannelMessage(const void* payload,
   // RELAY_EVENT_MESSAGE.
   {
     MachPortRelay* relay = delegate_->GetMachPortRelay();
-    if (handles && !relay) {
-      if (!MachPortRelay::ReceivePorts(handles.get())) {
-        LOG(ERROR) << "Error receiving mach ports.";
-      }
-    }
+    if (!handles.empty() && !relay)
+      MachPortRelay::ReceivePorts(&handles);
   }
 #endif  // defined(OS_WIN)
 
@@ -533,21 +538,21 @@ void NodeChannel::OnChannelMessage(const void* payload,
 
   const Header* header = static_cast<const Header*>(payload);
   switch (header->type) {
-    case MessageType::ACCEPT_CHILD: {
-      const AcceptChildData* data;
+    case MessageType::ACCEPT_INVITEE: {
+      const AcceptInviteeData* data;
       if (GetMessagePayload(payload, payload_size, &data)) {
-        delegate_->OnAcceptChild(remote_node_name_, data->parent_name,
-                                 data->token);
+        delegate_->OnAcceptInvitee(remote_node_name_, data->inviter_name,
+                                   data->token);
         return;
       }
       break;
     }
 
-    case MessageType::ACCEPT_PARENT: {
-      const AcceptParentData* data;
+    case MessageType::ACCEPT_INVITATION: {
+      const AcceptInvitationData* data;
       if (GetMessagePayload(payload, payload_size, &data)) {
-        delegate_->OnAcceptParent(remote_node_name_, data->token,
-                                  data->child_name);
+        delegate_->OnAcceptInvitation(remote_node_name_, data->token,
+                                      data->invitee_name);
         return;
       }
       break;
@@ -556,18 +561,15 @@ void NodeChannel::OnChannelMessage(const void* payload,
     case MessageType::ADD_BROKER_CLIENT: {
       const AddBrokerClientData* data;
       if (GetMessagePayload(payload, payload_size, &data)) {
-        ScopedPlatformHandle process_handle;
 #if defined(OS_WIN)
-        if (!handles || handles->size() != 1) {
+        if (handles.size() != 1) {
           DLOG(ERROR) << "Dropping invalid AddBrokerClient message.";
           break;
         }
-        process_handle = ScopedPlatformHandle(handles->at(0));
-        handles->clear();
         delegate_->OnAddBrokerClient(remote_node_name_, data->client_name,
-                                     process_handle.release().handle);
+                                     handles.at(0).release().handle);
 #else
-        if (handles && handles->size() != 0) {
+        if (!handles.empty()) {
           DLOG(ERROR) << "Dropping invalid AddBrokerClient message.";
           break;
         }
@@ -582,15 +584,12 @@ void NodeChannel::OnChannelMessage(const void* payload,
     case MessageType::BROKER_CLIENT_ADDED: {
       const BrokerClientAddedData* data;
       if (GetMessagePayload(payload, payload_size, &data)) {
-        ScopedPlatformHandle broker_channel;
-        if (!handles || handles->size() != 1) {
+        if (handles.size() != 1) {
           DLOG(ERROR) << "Dropping invalid BrokerClientAdded message.";
           break;
         }
-        broker_channel = ScopedPlatformHandle(handles->at(0));
-        handles->clear();
         delegate_->OnBrokerClientAdded(remote_node_name_, data->client_name,
-                                       std::move(broker_channel));
+                                       std::move(handles.at(0)));
         return;
       }
       break;
@@ -600,13 +599,12 @@ void NodeChannel::OnChannelMessage(const void* payload,
       const AcceptBrokerClientData* data;
       if (GetMessagePayload(payload, payload_size, &data)) {
         ScopedPlatformHandle broker_channel;
-        if (handles && handles->size() > 1) {
+        if (handles.size() > 1) {
           DLOG(ERROR) << "Dropping invalid AcceptBrokerClient message.";
           break;
         }
-        if (handles && handles->size() == 1) {
-          broker_channel = ScopedPlatformHandle(handles->at(0));
-          handles->clear();
+        if (handles.size() == 1) {
+          broker_channel = std::move(handles.at(0));
         }
         delegate_->OnAcceptBrokerClient(remote_node_name_, data->broker_name,
                                         std::move(broker_channel));
@@ -616,9 +614,8 @@ void NodeChannel::OnChannelMessage(const void* payload,
     }
 
     case MessageType::EVENT_MESSAGE: {
-      size_t num_handles = handles ? handles->size() : 0;
       Channel::MessagePtr message(
-          new Channel::Message(payload_size, num_handles));
+          new Channel::Message(payload_size, handles.size()));
       message->SetHandles(std::move(handles));
       memcpy(message->mutable_payload(), payload, payload_size);
       delegate_->OnEventMessage(remote_node_name_, std::move(message));
@@ -652,14 +649,13 @@ void NodeChannel::OnChannelMessage(const void* payload,
     case MessageType::INTRODUCE: {
       const IntroductionData* data;
       if (GetMessagePayload(payload, payload_size, &data)) {
-        if (handles && handles->size() > 1) {
+        if (handles.size() > 1) {
           DLOG(ERROR) << "Dropping invalid introduction message.";
           break;
         }
         ScopedPlatformHandle channel_handle;
-        if (handles && handles->size() == 1) {
-          channel_handle = ScopedPlatformHandle(handles->at(0));
-          handles->clear();
+        if (handles.size() == 1) {
+          channel_handle = std::move(handles.at(0));
         }
         delegate_->OnIntroduce(remote_node_name_, data->name,
                                std::move(channel_handle));
@@ -738,9 +734,8 @@ void NodeChannel::OnChannelMessage(const void* payload,
           break;
         num_bytes -= sizeof(Header);
 
-        size_t num_handles = handles ? handles->size() : 0;
         Channel::MessagePtr message(
-            new Channel::Message(num_bytes, num_handles));
+            new Channel::Message(num_bytes, handles.size()));
         message->SetHandles(std::move(handles));
         if (num_bytes)
           memcpy(message->mutable_payload(), data + 1, num_bytes);
@@ -818,11 +813,7 @@ void NodeChannel::ProcessPendingMessagesWithMachPorts() {
   while (!pending_writes.empty()) {
     Channel::MessagePtr message = std::move(pending_writes.front());
     pending_writes.pop();
-    if (!relay->SendPortsToProcess(message.get(), remote_process_handle)) {
-      LOG(ERROR) << "Error on sending mach ports. Remote process is likely "
-                 << "gone. Dropping message.";
-      return;
-    }
+    relay->SendPortsToProcess(message.get(), remote_process_handle);
 
     base::AutoLock lock(channel_lock_);
     if (!channel_) {
@@ -852,7 +843,7 @@ void NodeChannel::WriteChannelMessage(Channel::MessagePtr message) {
   // privileged node should contain handles on Windows. If an unprivileged
   // node needs to send handles, it should do so via RelayEventMessage which
   // stashes the handles in the message in such a way that they go undetected
-  // here (they'll be unpacked and duplicated by a privileged parent.)
+  // here (they'll be unpacked and duplicated by the broker).
 
   if (message->has_handles()) {
     base::ProcessHandle remote_process_handle;
@@ -863,10 +854,9 @@ void NodeChannel::WriteChannelMessage(Channel::MessagePtr message) {
 
     // Rewrite outgoing handles if we have a handle to the destination process.
     if (remote_process_handle != base::kNullProcessHandle) {
-      ScopedPlatformHandleVectorPtr handles = message->TakeHandles();
+      std::vector<ScopedPlatformHandle> handles = message->TakeHandles();
       if (!Channel::Message::RewriteHandles(base::GetCurrentProcessHandle(),
-                                            remote_process_handle,
-                                            handles.get())) {
+                                            remote_process_handle, &handles)) {
         DLOG(ERROR) << "Failed to duplicate one or more outgoing handles.";
       }
       message->SetHandles(std::move(handles));
@@ -881,7 +871,7 @@ void NodeChannel::WriteChannelMessage(Channel::MessagePtr message) {
       base::ProcessHandle remote_process_handle;
       {
         base::AutoLock lock(remote_process_handle_lock_);
-        // Expect that the receiving node is a child.
+        // Expect that the receiving node is a known process.
         DCHECK(remote_process_handle_ != base::kNullProcessHandle);
         remote_process_handle = remote_process_handle_;
       }
@@ -898,14 +888,16 @@ void NodeChannel::WriteChannelMessage(Channel::MessagePtr message) {
         }
       }
 
-      if (!relay->SendPortsToProcess(message.get(), remote_process_handle)) {
-        LOG(ERROR) << "Error on sending mach ports. Remote process is likely "
-                   << "gone. Dropping message.";
-        return;
-      }
+      relay->SendPortsToProcess(message.get(), remote_process_handle);
     }
   }
 #endif
+
+  // Force a crash if this process attempts to send a message larger than the
+  // maximum allowed size. This is more useful than killing a Channel when we
+  // *receive* an oversized message, as we should consider oversized message
+  // transmission to be a bug and this helps easily identify offending code.
+  CHECK(message->data_num_bytes() < GetConfiguration().max_message_num_bytes);
 
   base::AutoLock lock(channel_lock_);
   if (!channel_)

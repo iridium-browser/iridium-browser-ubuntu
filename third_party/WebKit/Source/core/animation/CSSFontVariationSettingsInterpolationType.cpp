@@ -6,17 +6,18 @@
 
 #include "core/css/CSSFontVariationValue.h"
 #include "core/css/CSSValueList.h"
+#include "core/style/ComputedStyle.h"
 
 namespace blink {
 
 class CSSFontVariationSettingsNonInterpolableValue
     : public NonInterpolableValue {
  public:
-  ~CSSFontVariationSettingsNonInterpolableValue() final {}
+  ~CSSFontVariationSettingsNonInterpolableValue() final = default;
 
-  static PassRefPtr<CSSFontVariationSettingsNonInterpolableValue> Create(
+  static scoped_refptr<CSSFontVariationSettingsNonInterpolableValue> Create(
       Vector<AtomicString> tags) {
-    return AdoptRef(
+    return base::AdoptRef(
         new CSSFontVariationSettingsNonInterpolableValue(std::move(tags)));
   }
 
@@ -51,7 +52,7 @@ static bool TagsMatch(const NonInterpolableValue& a,
 
 class UnderlyingTagsChecker : public InterpolationType::ConversionChecker {
  public:
-  ~UnderlyingTagsChecker() final {}
+  ~UnderlyingTagsChecker() final = default;
 
   static std::unique_ptr<UnderlyingTagsChecker> Create(
       const Vector<AtomicString>& tags) {
@@ -72,7 +73,7 @@ class UnderlyingTagsChecker : public InterpolationType::ConversionChecker {
 class InheritedFontVariationSettingsChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
-  ~InheritedFontVariationSettingsChecker() final {}
+  ~InheritedFontVariationSettingsChecker() final = default;
 
   static std::unique_ptr<InheritedFontVariationSettingsChecker> Create(
       const FontVariationSettings* settings) {
@@ -86,11 +87,11 @@ class InheritedFontVariationSettingsChecker
   bool IsValid(const StyleResolverState& state,
                const InterpolationValue&) const final {
     return DataEquivalent(
-        settings_.Get(),
+        settings_.get(),
         state.ParentStyle()->GetFontDescription().VariationSettings());
   }
 
-  RefPtr<const FontVariationSettings> settings_;
+  scoped_refptr<const FontVariationSettings> settings_;
 };
 
 static InterpolationValue ConvertFontVariationSettings(
@@ -150,7 +151,8 @@ InterpolationValue CSSFontVariationSettingsInterpolationType::MaybeConvertValue(
   std::unique_ptr<InterpolableList> numbers = InterpolableList::Create(length);
   Vector<AtomicString> tags;
   for (size_t i = 0; i < length; ++i) {
-    const CSSFontVariationValue& item = ToCSSFontVariationValue(list.Item(i));
+    const cssvalue::CSSFontVariationValue& item =
+        cssvalue::ToCSSFontVariationValue(list.Item(i));
     numbers->Set(i, InterpolableNumber::Create(item.Value()));
     tags.push_back(item.Tag());
   }
@@ -200,7 +202,8 @@ void CSSFontVariationSettingsInterpolationType::ApplyStandardPropertyValue(
   const Vector<AtomicString>& tags = GetTags(*non_interpolable_value);
   DCHECK_EQ(numbers.length(), tags.size());
 
-  RefPtr<FontVariationSettings> settings = FontVariationSettings::Create();
+  scoped_refptr<FontVariationSettings> settings =
+      FontVariationSettings::Create();
   size_t length = numbers.length();
   for (size_t i = 0; i < length; ++i) {
     settings->Append(FontVariationAxis(

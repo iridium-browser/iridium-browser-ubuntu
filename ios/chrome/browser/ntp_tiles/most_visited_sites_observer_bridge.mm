@@ -12,13 +12,14 @@ namespace ntp_tiles {
 
 MostVisitedSitesObserverBridge::MostVisitedSitesObserverBridge(
     id<MostVisitedSitesObserving> observer) {
-  observer_.reset(observer);
+  observer_ = observer;
 }
 
 MostVisitedSitesObserverBridge::~MostVisitedSitesObserverBridge() {}
 
-void MostVisitedSitesObserverBridge::OnMostVisitedURLsAvailable(
-    const NTPTilesVector& most_visited) {
+void MostVisitedSitesObserverBridge::OnURLsAvailable(
+    const std::map<SectionType, NTPTilesVector>& sections) {
+  const NTPTilesVector& most_visited = sections.at(SectionType::PERSONALIZED);
   [observer_ onMostVisitedURLsAvailable:most_visited];
 }
 

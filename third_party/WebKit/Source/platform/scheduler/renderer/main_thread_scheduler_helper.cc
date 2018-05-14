@@ -4,29 +4,33 @@
 
 #include "platform/scheduler/renderer/main_thread_scheduler_helper.h"
 
-#include "platform/scheduler/child/scheduler_tqm_delegate.h"
 #include "platform/scheduler/renderer/main_thread_task_queue.h"
 
 namespace blink {
 namespace scheduler {
 
 MainThreadSchedulerHelper::MainThreadSchedulerHelper(
-    scoped_refptr<SchedulerTqmDelegate> task_queue_manager_delegate,
+    std::unique_ptr<TaskQueueManager> task_queue_manager,
     RendererSchedulerImpl* renderer_scheduler)
-    : SchedulerHelper(task_queue_manager_delegate),
+    : SchedulerHelper(std::move(task_queue_manager)),
       renderer_scheduler_(renderer_scheduler),
       default_task_queue_(
           NewTaskQueue(MainThreadTaskQueue::QueueCreationParams(
-                           MainThreadTaskQueue::QueueType::DEFAULT)
+                           MainThreadTaskQueue::QueueType::kDefault)
                            .SetShouldMonitorQuiescence(true))),
       control_task_queue_(
           NewTaskQueue(MainThreadTaskQueue::QueueCreationParams(
-                           MainThreadTaskQueue::QueueType::CONTROL)
+                           MainThreadTaskQueue::QueueType::kControl)
                            .SetShouldNotifyObservers(false))) {
   InitDefaultQueues(default_task_queue_, control_task_queue_);
+  task_queue_manager_->EnableCrashKeys("blink_scheduler_task_file_name",
+                                       "blink_scheduler_task_function_name");
 }
 
-MainThreadSchedulerHelper::~MainThreadSchedulerHelper() {}
+MainThreadSchedulerHelper::~MainThreadSchedulerHelper() {
+  control_task_queue_->ShutdownTaskQueue();
+  default_task_queue_->ShutdownTaskQueue();
+}
 
 scoped_refptr<MainThreadTaskQueue>
 MainThreadSchedulerHelper::DefaultMainThreadTaskQueue() {
@@ -48,8 +52,12 @@ scoped_refptr<TaskQueue> MainThreadSchedulerHelper::ControlTaskQueue() {
 
 scoped_refptr<MainThreadTaskQueue> MainThreadSchedulerHelper::NewTaskQueue(
     const MainThreadTaskQueue::QueueCreationParams& params) {
-  return task_queue_manager_->CreateTaskQueue<MainThreadTaskQueue>(
-      params.spec, params, renderer_scheduler_);
+  scoped_refptr<MainThreadTaskQueue> task_queue =
+      task_queue_manager_->CreateTaskQueue<MainThreadTaskQueue>(
+          params.spec, params, renderer_scheduler_);
+  if (params.used_for_important_tasks)
+    task_queue->SetQueuePriority(TaskQueue::QueuePriority::kHighPriority);
+  return task_queue;
 }
 
 }  // namespace scheduler

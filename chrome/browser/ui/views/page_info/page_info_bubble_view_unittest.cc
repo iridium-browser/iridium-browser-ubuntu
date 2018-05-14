@@ -6,26 +6,40 @@
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
-#include "chrome/browser/ui/views/page_info/chosen_object_row.h"
+#include "chrome/browser/ui/views/hover_button.h"
+#include "chrome/browser/ui/views/page_info/chosen_object_view.h"
 #include "chrome/browser/ui/views/page_info/permission_selector_row.h"
 #include "chrome/browser/usb/usb_chooser_context.h"
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/ssl_status.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_web_contents_factory.h"
 #include "device/base/mock_device_client.h"
 #include "device/usb/mock_usb_device.h"
 #include "device/usb/mock_usb_service.h"
+#include "ppapi/features/features.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/material_design/material_design_controller.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/events/event_utils.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
 #include "ui/views/test/scoped_views_test_helper.h"
 #include "ui/views/test/test_views_delegate.h"
+
+#if BUILDFLAG(ENABLE_PLUGINS)
+#include "chrome/browser/plugins/chrome_plugin_service_filter.h"
+#endif
 
 const char* kUrl = "http://www.example.com/index.html";
 
@@ -50,7 +64,7 @@ class PageInfoBubbleViewTestApi {
 
     security_state::SecurityInfo security_info;
     views::View* anchor_view = nullptr;
-    view_ = new PageInfoBubbleView(anchor_view, parent_, profile_,
+    view_ = new PageInfoBubbleView(anchor_view, gfx::Rect(), parent_, profile_,
                                    web_contents_, GURL(kUrl), security_info);
   }
 
@@ -59,6 +73,21 @@ class PageInfoBubbleViewTestApi {
 
   PermissionSelectorRow* GetPermissionSelectorAt(int index) {
     return view_->selector_rows_[index].get();
+  }
+
+  // Returns the number of cookies shown on the link or button to open the
+  // collected cookies dialog. This should always be shown.
+  base::string16 GetCookiesLinkText() {
+    if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+      EXPECT_TRUE(view_->cookie_button_);
+      ui::AXNodeData data;
+      view_->cookie_button_->GetAccessibleNodeData(&data);
+      std::string name;
+      data.GetStringAttribute(ax::mojom::StringAttribute::kName, &name);
+      return base::ASCIIToUTF16(name);
+    }
+    EXPECT_TRUE(view_->cookie_link_legacy_);
+    return view_->cookie_link_legacy_->text();
   }
 
   // Returns the permission label text of the |index|th permission selector row.
@@ -84,6 +113,16 @@ class PageInfoBubbleViewTestApi {
       return base::string16();
     }
   }
+
+  void SimulateUserSelectingComboboxItemAt(int selector_index, int menu_index) {
+    views::View* view = GetPermissionSelectorAt(selector_index)->button();
+    DCHECK_EQ(views::Combobox::kViewClassName, view->GetClassName());
+    views::Combobox* combobox = static_cast<views::Combobox*>(view);
+    combobox->SetSelectedIndex(menu_index);
+  }
+
+  // Simulates updating the number of cookies.
+  void SetCookieInfo(const CookieInfoList& list) { view_->SetCookieInfo(list); }
 
   // Simulates recreating the dialog with a new PermissionInfoList.
   void SetPermissionInfo(const PermissionInfoList& list) {
@@ -163,42 +202,74 @@ class PageInfoBubbleViewTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(PageInfoBubbleViewTest);
 };
 
-}  // namespace
+#if BUILDFLAG(ENABLE_PLUGINS)
+// Waits until a change is observed in content settings.
+class FlashContentSettingsChangeWaiter : public content_settings::Observer {
+ public:
+  explicit FlashContentSettingsChangeWaiter(Profile* profile)
+      : profile_(profile) {
+    HostContentSettingsMapFactory::GetForProfile(profile)->AddObserver(this);
+  }
+  ~FlashContentSettingsChangeWaiter() override {
+    HostContentSettingsMapFactory::GetForProfile(profile_)->RemoveObserver(
+        this);
+  }
 
-// TODO(ellyjones): re-enable this test for OSX.
-// This test exercises PermissionSelectorRow in a way that it is not used in
-// practice. In practice, every setting in PermissionSelectorRow starts off
-// "set", so there is always one option checked in the resulting MenuModel. This
-// test creates settings that are left at their defaults, leading to zero
-// checked options, and checks that the text on the MenuButtons is right. Since
-// the Comboboxes the MacViews version of this dialog uses don't have separate
-// text, this test doesn't work.
-#if defined(OS_MACOSX)
-#define MAYBE_SetPermissionInfo DISABLED_SetPermissionInfo
-#else
-#define MAYBE_SetPermissionInfo SetPermissionInfo
+  // content_settings::Observer:
+  void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
+                               const ContentSettingsPattern& secondary_pattern,
+                               ContentSettingsType content_type,
+                               std::string resource_identifier) override {
+    if (content_type == CONTENT_SETTINGS_TYPE_PLUGINS)
+      Proceed();
+  }
+
+  void Wait() { run_loop_.Run(); }
+
+ private:
+  void Proceed() { run_loop_.Quit(); }
+
+  Profile* profile_;
+  base::RunLoop run_loop_;
+
+  DISALLOW_COPY_AND_ASSIGN(FlashContentSettingsChangeWaiter);
+};
 #endif
+
+}  // namespace
 
 // Each permission selector row is like this: [icon] [label] [selector]
 constexpr int kViewsPerPermissionRow = 3;
 
 // Test UI construction and reconstruction via
 // PageInfoBubbleView::SetPermissionInfo().
-TEST_F(PageInfoBubbleViewTest, MAYBE_SetPermissionInfo) {
+TEST_F(PageInfoBubbleViewTest, SetPermissionInfo) {
+  // This test exercises PermissionSelectorRow in a way that it is not used in
+  // practice. In practice, every setting in PermissionSelectorRow starts off
+  // "set", so there is always one option checked in the resulting MenuModel.
+  // This test creates settings that are left at their defaults, leading to zero
+  // checked options, and checks that the text on the MenuButtons is right. On
+  // Mac, the behavior matches, but only when SecondaryUiMd is enabled.
+  const bool is_md = base::FeatureList::IsEnabled(features::kSecondaryUiMd);
+#if defined(OS_MACOSX)
+  if (!is_md)
+    return;
+#endif
+
   PermissionInfoList list(1);
   list.back().type = CONTENT_SETTINGS_TYPE_GEOLOCATION;
   list.back().source = content_settings::SETTING_SOURCE_USER;
   list.back().is_incognito = false;
-  list.back().setting = CONTENT_SETTING_DEFAULT;
+  list.back().setting = CONTENT_SETTING_BLOCK;
 
-  const int kExpectedChildren =
-      kViewsPerPermissionRow *
-      (ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled() ? 11 : 13);
-  EXPECT_EQ(kExpectedChildren, api_->permissions_view()->child_count());
+  // Initially, no permissions are shown because they are all set to default.
+  int num_expected_children = 0;
+  EXPECT_EQ(num_expected_children, api_->permissions_view()->child_count());
 
+  num_expected_children += kViewsPerPermissionRow * list.size();
   list.back().setting = CONTENT_SETTING_ALLOW;
   api_->SetPermissionInfo(list);
-  EXPECT_EQ(kExpectedChildren, api_->permissions_view()->child_count());
+  EXPECT_EQ(num_expected_children, api_->permissions_view()->child_count());
 
   PermissionSelectorRow* selector = api_->GetPermissionSelectorAt(0);
   EXPECT_TRUE(selector);
@@ -207,35 +278,49 @@ TEST_F(PageInfoBubbleViewTest, MAYBE_SetPermissionInfo) {
   EXPECT_EQ(base::ASCIIToUTF16("Location"), api_->GetPermissionLabelTextAt(0));
   EXPECT_EQ(base::ASCIIToUTF16("Allow"), api_->GetPermissionButtonTextAt(0));
 
-  // Verify calling SetPermisisonInfo() directly updates the UI.
+  // Verify calling SetPermissionInfo() directly updates the UI.
   list.back().setting = CONTENT_SETTING_BLOCK;
   api_->SetPermissionInfo(list);
   EXPECT_EQ(base::ASCIIToUTF16("Block"), api_->GetPermissionButtonTextAt(0));
 
   // Simulate a user selection via the UI. Note this will also cover logic in
   // PageInfo to update the pref.
-  list.back().setting = CONTENT_SETTING_ALLOW;
-  api_->GetPermissionSelectorAt(0)->PermissionChanged(list.back());
-  EXPECT_EQ(kExpectedChildren, api_->permissions_view()->child_count());
+  if (is_md) {
+    // Under MD, the changed setting is always read from the combobox selected
+    // index when changed in the UI. PermissionSelectorRow::PermissionChanged()
+    // ignores the argument, except to detect whether it is the default.
+    api_->SimulateUserSelectingComboboxItemAt(0, 1);
+  } else {
+    list.back().setting = CONTENT_SETTING_ALLOW;
+    api_->GetPermissionSelectorAt(0)->PermissionChanged(list.back());
+  }
+  EXPECT_EQ(num_expected_children, api_->permissions_view()->child_count());
   EXPECT_EQ(base::ASCIIToUTF16("Allow"), api_->GetPermissionButtonTextAt(0));
 
   // Setting to the default via the UI should keep the button around.
-  list.back().setting = CONTENT_SETTING_ASK;
-  api_->GetPermissionSelectorAt(0)->PermissionChanged(list.back());
-  EXPECT_EQ(kExpectedChildren, api_->permissions_view()->child_count());
-  EXPECT_EQ(base::ASCIIToUTF16("Ask"), api_->GetPermissionButtonTextAt(0));
+  if (is_md) {
+    api_->SimulateUserSelectingComboboxItemAt(0, 0);
+    // Under MD, PermissionMenuModel gets strings using PageInfoUI::
+    // PermissionActionToUIString(..) rather than directly from the
+    // ResourceBundle.
+    EXPECT_EQ(base::ASCIIToUTF16("Ask (default)"),
+              api_->GetPermissionButtonTextAt(0));
+  } else {
+    list.back().setting = CONTENT_SETTING_ASK;
+    api_->GetPermissionSelectorAt(0)->PermissionChanged(list.back());
+    EXPECT_EQ(base::ASCIIToUTF16("Ask"), api_->GetPermissionButtonTextAt(0));
+  }
+  EXPECT_EQ(num_expected_children, api_->permissions_view()->child_count());
 
   // However, since the setting is now default, recreating the dialog with those
   // settings should omit the permission from the UI.
   api_->SetPermissionInfo(list);
-  EXPECT_EQ(kExpectedChildren, api_->permissions_view()->child_count());
+  EXPECT_EQ(num_expected_children, api_->permissions_view()->child_count());
 }
 
 // Test UI construction and reconstruction with USB devices.
 TEST_F(PageInfoBubbleViewTest, SetPermissionInfoWithUsbDevice) {
-  const int kExpectedChildren =
-      kViewsPerPermissionRow *
-      (ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled() ? 11 : 13);
+  const int kExpectedChildren = 0;
   EXPECT_EQ(kExpectedChildren, api_->permissions_view()->child_count());
 
   const GURL origin = GURL(kUrl).GetOrigin();
@@ -250,9 +335,9 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfoWithUsbDevice) {
   api_->SetPermissionInfo(list);
   EXPECT_EQ(kExpectedChildren + 1, api_->permissions_view()->child_count());
 
-  ChosenObjectRow* object_view = static_cast<ChosenObjectRow*>(
+  ChosenObjectView* object_view = static_cast<ChosenObjectView*>(
       api_->permissions_view()->child_at(kExpectedChildren));
-  EXPECT_EQ(3, object_view->child_count());
+  EXPECT_EQ(4, object_view->child_count());
 
   const int kLabelIndex = 1;
   views::Label* label =
@@ -272,3 +357,80 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfoWithUsbDevice) {
   EXPECT_EQ(kExpectedChildren, api_->permissions_view()->child_count());
   EXPECT_FALSE(store->HasDevicePermission(origin, origin, device));
 }
+
+// Test that updating the number of cookies used by the current page doesn't add
+// any extra views to Page Info.
+TEST_F(PageInfoBubbleViewTest, UpdatingSiteDataRetainsLayout) {
+  const int kExpectedChildren = 5;
+  EXPECT_EQ(kExpectedChildren, api_->view()->child_count());
+
+  // Create a fake list of cookies.
+  PageInfoUI::CookieInfo first_party_cookies;
+  first_party_cookies.allowed = 10;
+  first_party_cookies.blocked = 0;
+  first_party_cookies.is_first_party = true;
+
+  PageInfoUI::CookieInfo third_party_cookies;
+  third_party_cookies.allowed = 6;
+  third_party_cookies.blocked = 32;
+  third_party_cookies.is_first_party = false;
+
+  const CookieInfoList cookies = {first_party_cookies, third_party_cookies};
+
+  // Update the number of cookies.
+  api_->SetCookieInfo(cookies);
+  EXPECT_EQ(kExpectedChildren, api_->view()->child_count());
+
+  // Check the number of cookies shown is correct.
+  base::string16 expected = l10n_util::GetPluralStringFUTF16(
+      IDS_PAGE_INFO_NUM_COOKIES,
+      first_party_cookies.allowed + third_party_cookies.allowed);
+  size_t index = api_->GetCookiesLinkText().find(expected);
+  EXPECT_NE(std::string::npos, index);
+}
+
+#if BUILDFLAG(ENABLE_PLUGINS)
+TEST_F(PageInfoBubbleViewTest, ChangingFlashSettingForSiteIsRemembered) {
+  Profile* profile = web_contents_helper_.profile();
+  ChromePluginServiceFilter::GetInstance()->RegisterResourceContext(
+      profile, profile->GetResourceContext());
+  FlashContentSettingsChangeWaiter waiter(profile);
+
+  const GURL url(kUrl);
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile);
+  // Make sure the site being tested doesn't already have this marker set.
+  EXPECT_EQ(nullptr,
+            map->GetWebsiteSetting(url, url, CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+                                   std::string(), nullptr));
+  EXPECT_EQ(0, api_->permissions_view()->child_count());
+
+  // Change the Flash setting.
+  map->SetContentSettingDefaultScope(url, url, CONTENT_SETTINGS_TYPE_PLUGINS,
+                                     std::string(), CONTENT_SETTING_ALLOW);
+  waiter.Wait();
+
+  // Check that this site has now been marked for displaying Flash always.
+  EXPECT_NE(nullptr,
+            map->GetWebsiteSetting(url, url, CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+                                   std::string(), nullptr));
+
+  // Check the Flash permission is now showing since it's non-default.
+  api_->CreateView();
+  const int kPermissionLabelIndex = 1;
+  views::Label* label = static_cast<views::Label*>(
+      api_->permissions_view()->child_at(kPermissionLabelIndex));
+  EXPECT_EQ(base::ASCIIToUTF16("Flash"), label->text());
+
+  // Change the Flash setting back to the default.
+  map->SetContentSettingDefaultScope(url, url, CONTENT_SETTINGS_TYPE_PLUGINS,
+                                     std::string(), CONTENT_SETTING_DEFAULT);
+  EXPECT_EQ(kViewsPerPermissionRow, api_->permissions_view()->child_count());
+
+  // Check the Flash permission is still showing since the user changed it
+  // previously.
+  label = static_cast<views::Label*>(
+      api_->permissions_view()->child_at(kPermissionLabelIndex));
+  EXPECT_EQ(base::ASCIIToUTF16("Flash"), label->text());
+}
+#endif

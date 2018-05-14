@@ -10,26 +10,23 @@
 #include "base/ios/ios_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
-#include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/content_settings/core/common/content_settings.h"
-#include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #include "ios/chrome/test/app/navigation_test_util.h"
-#include "ios/chrome/test/app/web_view_interaction_test_util.h"
+#import "ios/chrome/test/app/web_view_interaction_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#include "ios/chrome/test/scoped_block_popups_pref.h"
 #import "ios/testing/wait_util.h"
 #import "ios/web/public/test/earl_grey/web_view_actions.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
 #include "ios/web/public/test/http_server/data_response_provider.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
+#import "ios/web/public/web_client.h"
 #include "net/http/http_response_headers.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
@@ -38,7 +35,9 @@
 #error "This file requires ARC support."
 #endif
 
+using chrome_test_util::GetOriginalBrowserState;
 using chrome_test_util::OmniboxText;
+using chrome_test_util::TapWebViewElementWithId;
 
 namespace {
 
@@ -77,43 +76,6 @@ class ReloadResponseProvider : public web::DataResponseProvider {
   int request_number_;  // Count of requests received by the response provider.
 };
 
-// ScopedBlockPopupsPref modifies the block popups preference and resets the
-// preference to its original value when this object goes out of scope.
-// TODO(crbug.com/638674): Evaluate if this can move to shared code
-class ScopedBlockPopupsPref {
- public:
-  ScopedBlockPopupsPref(ContentSetting setting) {
-    original_setting_ = GetPrefValue();
-    SetPrefValue(setting);
-  }
-  ~ScopedBlockPopupsPref() { SetPrefValue(original_setting_); }
-
- private:
-  // Gets the current value of the preference.
-  ContentSetting GetPrefValue() {
-    ContentSetting popupSetting =
-        ios::HostContentSettingsMapFactory::GetForBrowserState(
-            chrome_test_util::GetOriginalBrowserState())
-            ->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_POPUPS, NULL);
-    return popupSetting;
-  }
-
-  // Sets the preference to the given value.
-  void SetPrefValue(ContentSetting setting) {
-    DCHECK(setting == CONTENT_SETTING_BLOCK ||
-           setting == CONTENT_SETTING_ALLOW);
-    ios::ChromeBrowserState* state =
-        chrome_test_util::GetOriginalBrowserState();
-    ios::HostContentSettingsMapFactory::GetForBrowserState(state)
-        ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_POPUPS, setting);
-  }
-
-  // Saves the original pref setting so that it can be restored when the scoper
-  // is destroyed.
-  ContentSetting original_setting_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedBlockPopupsPref);
-};
 }  // namespace
 
 // Tests web browsing scenarios.
@@ -224,12 +186,13 @@ id<GREYMatcher> TabWithTitle(const std::string& tab_title) {
   responses[destinationURL] = "You've arrived!";
   web::test::SetUpSimpleHttpServer(responses);
 
-  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW);
+  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW,
+                                   GetOriginalBrowserState());
 
   [ChromeEarlGrey loadURL:URL];
   [ChromeEarlGrey waitForMainTabCount:1];
 
-  chrome_test_util::TapWebViewElementWithId("link");
+  GREYAssert(TapWebViewElementWithId("link"), @"Failed to tap \"link\"");
 
   [ChromeEarlGrey waitForMainTabCount:2];
 
@@ -254,12 +217,13 @@ id<GREYMatcher> TabWithTitle(const std::string& tab_title) {
   responses[destinationURL] = "You've arrived!";
   web::test::SetUpSimpleHttpServer(responses);
 
-  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW);
+  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW,
+                                   GetOriginalBrowserState());
 
   [ChromeEarlGrey loadURL:URL];
   [ChromeEarlGrey waitForMainTabCount:1];
 
-  chrome_test_util::TapWebViewElementWithId("link");
+  GREYAssert(TapWebViewElementWithId("link"), @"Failed to tap \"link\"");
 
   [ChromeEarlGrey waitForMainTabCount:2];
 
@@ -294,12 +258,13 @@ id<GREYMatcher> TabWithTitle(const std::string& tab_title) {
 
   web::test::SetUpSimpleHttpServer(responses);
 
-  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW);
+  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW,
+                                   GetOriginalBrowserState());
 
   [ChromeEarlGrey loadURL:URL];
   [ChromeEarlGrey waitForMainTabCount:1];
 
-  chrome_test_util::TapWebViewElementWithId("link");
+  GREYAssert(TapWebViewElementWithId("link"), @"Failed to tap \"link\"");
 
   [ChromeEarlGrey waitForMainTabCount:2];
 
@@ -333,12 +298,13 @@ id<GREYMatcher> TabWithTitle(const std::string& tab_title) {
 
   web::test::SetUpSimpleHttpServer(responses);
 
-  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW);
+  ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW,
+                                   GetOriginalBrowserState());
 
   [ChromeEarlGrey loadURL:URL];
   [ChromeEarlGrey waitForMainTabCount:1];
 
-  chrome_test_util::TapWebViewElementWithId("link");
+  GREYAssert(TapWebViewElementWithId("link"), @"Failed to tap \"link\"");
 
   [ChromeEarlGrey waitForMainTabCount:2];
 
@@ -363,14 +329,24 @@ id<GREYMatcher> TabWithTitle(const std::string& tab_title) {
   web::test::SetUpSimpleHttpServer(responses);
 
   [ChromeEarlGrey loadURL:URL];
-  chrome_test_util::TapWebViewElementWithId("link");
+  GREYAssert(TapWebViewElementWithId("link"), @"Failed to tap \"link\"");
 
   [[EarlGrey selectElementWithMatcher:OmniboxText(destURL.GetContent())]
       assertWithMatcher:grey_notNil()];
 
   [ChromeEarlGrey goBack];
-  [[EarlGrey selectElementWithMatcher:OmniboxText(URL.GetContent())]
-      assertWithMatcher:grey_notNil()];
+
+  [ChromeEarlGrey waitForWebViewContainingText:"Link"];
+  if (web::GetWebClient()->IsSlimNavigationManagerEnabled()) {
+    // Due to the link click, URL of the first page now has an extra '#'. This
+    // is consistent with all other browsers.
+    const GURL newURL = web::test::HttpServer::MakeUrl("http://origin#");
+    [[EarlGrey selectElementWithMatcher:OmniboxText(newURL.GetContent())]
+        assertWithMatcher:grey_notNil()];
+  } else {
+    [[EarlGrey selectElementWithMatcher:OmniboxText(URL.GetContent())]
+        assertWithMatcher:grey_notNil()];
+  }
 }
 
 // Tests that a link with WebUI URL does not trigger a load. WebUI pages may
@@ -412,7 +388,7 @@ id<GREYMatcher> TabWithTitle(const std::string& tab_title) {
 // Tests that evaluating user JavaScript that causes navigation correctly
 // modifies history.
 - (void)testBrowsingUserJavaScriptNavigation {
-  // TODO(crbug.com/640220): Keyboard entry inside the omnibox fails only on
+  // TODO(crbug.com/703855): Keyboard entry inside the omnibox fails only on
   // iPad running iOS 10.
   if (IsIPadIdiom() && base::ios::IsRunningOnIOS10OrLater())
     return;
@@ -448,7 +424,7 @@ id<GREYMatcher> TabWithTitle(const std::string& tab_title) {
 
 // Tests that evaluating non-navigation user JavaScript doesn't affect history.
 - (void)testBrowsingUserJavaScriptWithoutNavigation {
-  // TODO(crbug.com/640220): Keyboard entry inside the omnibox fails only on
+  // TODO(crbug.com/703855): Keyboard entry inside the omnibox fails only on
   // iPad running iOS 10.
   if (IsIPadIdiom() && base::ios::IsRunningOnIOS10OrLater())
     return;

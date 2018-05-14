@@ -80,7 +80,7 @@ base::FilePath PepperInternalFileRefBackend::GetExternalFilePath() const {
 scoped_refptr<storage::FileSystemContext>
 PepperInternalFileRefBackend::GetFileSystemContext() const {
   if (!fs_host_.get())
-    return NULL;
+    return nullptr;
   return fs_host_->GetFileSystemContext();
 }
 
@@ -209,10 +209,9 @@ int32_t PepperInternalFileRefBackend::ReadDirectoryEntries(
       new storage::FileSystemOperation::FileEntryList;
   GetFileSystemContext()->operation_runner()->ReadDirectory(
       GetFileSystemURL(),
-      base::Bind(&PepperInternalFileRefBackend::ReadDirectoryComplete,
-                 weak_factory_.GetWeakPtr(),
-                 reply_context,
-                 base::Owned(accumulated_file_list)));
+      base::BindRepeating(&PepperInternalFileRefBackend::ReadDirectoryComplete,
+                          weak_factory_.GetWeakPtr(), reply_context,
+                          base::Owned(accumulated_file_list)));
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -220,7 +219,7 @@ void PepperInternalFileRefBackend::ReadDirectoryComplete(
     ppapi::host::ReplyMessageContext context,
     storage::FileSystemOperation::FileEntryList* accumulated_file_list,
     base::File::Error error,
-    const storage::FileSystemOperation::FileEntryList& file_list,
+    storage::FileSystemOperation::FileEntryList file_list,
     bool has_more) {
   accumulated_file_list->insert(
       accumulated_file_list->end(), file_list.begin(), file_list.end());

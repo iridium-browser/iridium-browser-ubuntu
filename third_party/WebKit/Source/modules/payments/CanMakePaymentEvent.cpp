@@ -12,7 +12,6 @@
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "modules/serviceworkers/ServiceWorkerWindowClientCallback.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
@@ -32,7 +31,7 @@ CanMakePaymentEvent* CanMakePaymentEvent::Create(
                                  wait_until_observer);
 }
 
-CanMakePaymentEvent::~CanMakePaymentEvent() {}
+CanMakePaymentEvent::~CanMakePaymentEvent() = default;
 
 const AtomicString& CanMakePaymentEvent::InterfaceName() const {
   return EventNames::CanMakePaymentEvent;
@@ -64,7 +63,7 @@ void CanMakePaymentEvent::respondWith(ScriptState* script_state,
   }
 }
 
-DEFINE_TRACE(CanMakePaymentEvent) {
+void CanMakePaymentEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(method_data_);
   visitor->Trace(modifiers_);
   visitor->Trace(observer_);

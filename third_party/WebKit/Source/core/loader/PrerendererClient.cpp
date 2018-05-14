@@ -31,7 +31,7 @@
 
 #include "core/loader/PrerendererClient.h"
 
-#include "core/exported/WebViewBase.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/page/Page.h"
 #include "platform/Prerender.h"
 #include "public/platform/WebPrerender.h"
@@ -40,15 +40,11 @@
 namespace blink {
 
 // static
-const char* PrerendererClient::SupplementName() {
-  return "PrerendererClient";
-}
+const char PrerendererClient::kSupplementName[] = "PrerendererClient";
 
 // static
 PrerendererClient* PrerendererClient::From(Page* page) {
-  PrerendererClient* supplement = static_cast<PrerendererClient*>(
-      Supplement<Page>::From(page, SupplementName()));
-  return supplement;
+  return Supplement<Page>::From<PrerendererClient>(page);
 }
 
 PrerendererClient::PrerendererClient(Page& page, WebPrerendererClient* client)
@@ -66,8 +62,7 @@ bool PrerendererClient::IsPrefetchOnly() {
 }
 
 void ProvidePrerendererClientTo(Page& page, PrerendererClient* client) {
-  PrerendererClient::ProvideTo(page, PrerendererClient::SupplementName(),
-                               client);
+  PrerendererClient::ProvideTo(page, client);
 }
 
 }  // namespace blink

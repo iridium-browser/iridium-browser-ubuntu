@@ -70,6 +70,7 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   int IntValue();
   int MinValue();
   int MaxValue();
+  int StepValue();
   std::string ValueDescription();
   int ChildrenCount();
 
@@ -95,6 +96,7 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   bool IsAtomic();
   bool IsBusy();
   bool IsRequired();
+  bool IsEditableRoot();
   bool IsEditable();
   bool IsRichlyEditable();
   bool IsFocused();
@@ -114,6 +116,7 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   bool IsValid();
   bool IsReadOnly();
   std::string Restriction();
+  v8::Local<v8::Object> ActiveDescendant();
   unsigned int BackgroundColor();
   unsigned int Color();
   // For input elements of type color.
@@ -164,7 +167,7 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   std::string ColumnIndexRange();
   v8::Local<v8::Object> CellForColumnAndRow(int column, int row);
   void SetSelectedTextRange(int selection_start, int length);
-  void SetSelection(v8::Local<v8::Value> anchor_object,
+  bool SetSelection(v8::Local<v8::Value> anchor_object,
                     int anchor_offset,
                     v8::Local<v8::Value> focus_object,
                     int focus_offset);

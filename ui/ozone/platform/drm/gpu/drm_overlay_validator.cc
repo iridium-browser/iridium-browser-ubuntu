@@ -6,6 +6,7 @@
 
 #include <drm_fourcc.h>
 
+#include "base/files/platform_file.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
@@ -74,22 +75,14 @@ std::vector<OverlayCheckReturn_Params> DrmOverlayValidator::TestPageFlip(
       continue;
     }
 
-    uint32_t original_format =
-        params[i].plane_z_order
-            ? GetFourCCFormatFromBufferFormat(params[i].format)
-            : GetFourCCFormatForOpaqueFramebuffer(params[i].format);
-    if (!controller->IsFormatSupported(original_format,
-                                       params[i].plane_z_order)) {
-      returns[i].status = OVERLAY_STATUS_NOT;
-      continue;
-    }
-
     scoped_refptr<ScanoutBuffer> buffer =
-        GetBufferForPageFlipTest(drm, params[i].buffer_size, original_format,
+        GetBufferForPageFlipTest(drm, params[i].buffer_size,
+                                 GetFourCCFormatFromBufferFormat(params[i].format),
                                  buffer_generator_, &reusable_buffers);
 
     OverlayPlane plane(buffer, params[i].plane_z_order, params[i].transform,
-                       params[i].display_rect, params[i].crop_rect);
+                       params[i].display_rect, params[i].crop_rect,
+                       base::kInvalidPlatformFile);
     test_list.push_back(plane);
 
     if (buffer && controller->TestPageFlip(test_list)) {

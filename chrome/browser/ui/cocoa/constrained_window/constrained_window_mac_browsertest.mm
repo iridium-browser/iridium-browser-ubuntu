@@ -94,13 +94,13 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowMacTest, ShowInInactiveTab) {
 // content will not be created. Verify that adding a constrained window to such
 // a tab works correctly.
 IN_PROC_BROWSER_TEST_F(ConstrainedWindowMacTest, ShowInUninitializedTab) {
+  content::WebContents::CreateParams create_params(browser()->profile());
+  create_params.initially_hidden = true;
   std::unique_ptr<content::WebContents> web_contents(
-      content::WebContents::Create(
-          content::WebContents::CreateParams(browser()->profile())));
-  bool was_blocked = false;
+      content::WebContents::Create(create_params));
   chrome::AddWebContents(browser(), NULL, web_contents.release(),
                          WindowOpenDisposition::NEW_BACKGROUND_TAB, gfx::Rect(),
-                         false, &was_blocked);
+                         false);
   content::WebContents* tab2 =
       browser()->tab_strip_model()->GetWebContentsAt(2);
   ASSERT_TRUE(tab2);

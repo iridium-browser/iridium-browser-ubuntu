@@ -5,8 +5,11 @@
 #include "modules/webaudio/AudioWorkletThread.h"
 
 #include <memory>
+
+#include "base/memory/ptr_util.h"
 #include "core/workers/GlobalScopeCreationParams.h"
 #include "core/workers/WorkerBackingThread.h"
+#include "modules/webaudio/AudioWorklet.h"
 #include "modules/webaudio/AudioWorkletGlobalScope.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/WaitableEvent.h"
@@ -14,29 +17,39 @@
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/Assertions.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
 
 namespace blink {
 
 template class WorkletThreadHolder<AudioWorkletThread>;
 
+WebThread* AudioWorkletThread::s_backing_thread_ = nullptr;
+
+unsigned AudioWorkletThread::s_ref_count_ = 0;
+
 std::unique_ptr<AudioWorkletThread> AudioWorkletThread::Create(
     ThreadableLoadingContext* loading_context,
     WorkerReportingProxy& worker_reporting_proxy) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("audio-worklet"),
                "AudioWorkletThread::create");
-  DCHECK(IsMainThread());
-  return WTF::WrapUnique(
+  return base::WrapUnique(
       new AudioWorkletThread(loading_context, worker_reporting_proxy));
 }
 
 AudioWorkletThread::AudioWorkletThread(
     ThreadableLoadingContext* loading_context,
     WorkerReportingProxy& worker_reporting_proxy)
-    : WorkerThread(loading_context, worker_reporting_proxy) {}
+    : WorkerThread(loading_context, worker_reporting_proxy) {
+  DCHECK(IsMainThread());
+  if (++s_ref_count_ == 1)
+    EnsureSharedBackingThread();
+}
 
-AudioWorkletThread::~AudioWorkletThread() {}
+AudioWorkletThread::~AudioWorkletThread() {
+  DCHECK(IsMainThread());
+  if (--s_ref_count_ == 0)
+    ClearSharedBackingThread();
+}
 
 WorkerBackingThread& AudioWorkletThread::GetWorkerBackingThread() {
   return *WorkletThreadHolder<AudioWorkletThread>::GetInstance()->GetThread();
@@ -55,41 +68,46 @@ void AudioWorkletThread::CollectAllGarbage() {
   if (!worklet_thread_holder)
     return;
   worklet_thread_holder->GetThread()->BackingThread().PostTask(
-      BLINK_FROM_HERE, CrossThreadBind(&CollectAllGarbageOnAudioWorkletThread,
-                                       CrossThreadUnretained(&done_event)));
+      FROM_HERE, CrossThreadBind(&CollectAllGarbageOnAudioWorkletThread,
+                                 CrossThreadUnretained(&done_event)));
   done_event.Wait();
 }
 
 void AudioWorkletThread::EnsureSharedBackingThread() {
   DCHECK(IsMainThread());
-  WorkletThreadHolder<AudioWorkletThread>::EnsureInstance("AudioWorkletThread");
+  if (!s_backing_thread_)
+    s_backing_thread_ = Platform::Current()->CreateWebAudioThread().release();
+  WorkletThreadHolder<AudioWorkletThread>::EnsureInstance(s_backing_thread_);
 }
 
 void AudioWorkletThread::ClearSharedBackingThread() {
   DCHECK(IsMainThread());
+  DCHECK(s_backing_thread_);
+  DCHECK_EQ(s_ref_count_, 0u);
   WorkletThreadHolder<AudioWorkletThread>::ClearInstance();
+  delete s_backing_thread_;
+  s_backing_thread_ = nullptr;
+}
+
+WebThread* AudioWorkletThread::GetSharedBackingThread() {
+  DCHECK(IsMainThread());
+  WorkletThreadHolder<AudioWorkletThread>* instance =
+      WorkletThreadHolder<AudioWorkletThread>::GetInstance();
+  return &(instance->GetThread()->BackingThread().PlatformThread());
 }
 
 void AudioWorkletThread::CreateSharedBackingThreadForTest() {
-  WorkletThreadHolder<AudioWorkletThread>::CreateForTest("AudioWorkletThread");
+  if (!s_backing_thread_)
+    s_backing_thread_ = Platform::Current()->CreateWebAudioThread().release();
+  WorkletThreadHolder<AudioWorkletThread>::CreateForTest(s_backing_thread_);
 }
 
 WorkerOrWorkletGlobalScope* AudioWorkletThread::CreateWorkerGlobalScope(
     std::unique_ptr<GlobalScopeCreationParams> creation_params) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("audio-worklet"),
                "AudioWorkletThread::createWorkerGlobalScope");
-
-  RefPtr<SecurityOrigin> security_origin =
-      SecurityOrigin::Create(creation_params->script_url);
-  if (creation_params->starter_origin_privilege_data) {
-    security_origin->TransferPrivilegesFrom(
-        std::move(creation_params->starter_origin_privilege_data));
-  }
-
-  return AudioWorkletGlobalScope::Create(
-      creation_params->script_url, creation_params->user_agent,
-      std::move(security_origin), this->GetIsolate(), this,
-      creation_params->worker_clients);
+  return AudioWorkletGlobalScope::Create(std::move(creation_params),
+                                         GetIsolate(), this);
 }
 
 }  // namespace blink

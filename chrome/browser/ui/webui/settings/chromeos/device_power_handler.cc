@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -120,7 +119,7 @@ void PowerHandler::OnJavascriptAllowed() {
   // Observe power management prefs used in the UI.
   base::Closure callback(base::Bind(&PowerHandler::SendPowerManagementSettings,
                                     base::Unretained(this), false /* force */));
-  pref_change_registrar_ = base::MakeUnique<PrefChangeRegistrar>();
+  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
   pref_change_registrar_->Init(prefs_);
   pref_change_registrar_->Add(prefs::kPowerAcIdleAction, callback);
   pref_change_registrar_->Add(prefs::kPowerAcScreenDimDelayMs, callback);
@@ -145,8 +144,9 @@ void PowerHandler::OnPowerStatusChanged() {
 }
 
 void PowerHandler::PowerManagerRestarted() {
-  DBusThreadManager::Get()->GetPowerManagerClient()->GetSwitchStates(base::Bind(
-      &PowerHandler::OnGotSwitchStates, weak_ptr_factory_.GetWeakPtr()));
+  DBusThreadManager::Get()->GetPowerManagerClient()->GetSwitchStates(
+      base::BindOnce(&PowerHandler::OnGotSwitchStates,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PowerHandler::LidEventReceived(PowerManagerClient::LidState state,
@@ -259,15 +259,16 @@ void PowerHandler::SendBatteryStatus() {
   base::string16 status_text;
   if (show_time) {
     status_text = l10n_util::GetStringFUTF16(
-        charging ? IDS_OPTIONS_BATTERY_STATUS_CHARGING
-                 : IDS_OPTIONS_BATTERY_STATUS,
+        charging ? IDS_SETTINGS_BATTERY_STATUS_CHARGING
+                 : IDS_SETTINGS_BATTERY_STATUS,
         base::IntToString16(percent), GetBatteryTimeText(time_left));
   } else {
-    status_text = l10n_util::GetStringFUTF16(IDS_OPTIONS_BATTERY_STATUS_SHORT,
+    status_text = l10n_util::GetStringFUTF16(IDS_SETTINGS_BATTERY_STATUS_SHORT,
                                              base::IntToString16(percent));
   }
 
   base::DictionaryValue battery_dict;
+  battery_dict.SetBoolean("present", power_status_->IsBatteryPresent());
   battery_dict.SetBoolean("charging", charging);
   battery_dict.SetBoolean("calculating", calculating);
   battery_dict.SetInteger("percent", percent);
@@ -352,9 +353,10 @@ void PowerHandler::SendPowerManagementSettings(bool force) {
 }
 
 void PowerHandler::OnGotSwitchStates(
-    PowerManagerClient::LidState lid_state,
-    PowerManagerClient::TabletMode tablet_mode) {
-  lid_state_ = lid_state;
+    base::Optional<PowerManagerClient::SwitchStates> result) {
+  if (!result.has_value())
+    return;
+  lid_state_ = result->lid_state;
   SendPowerManagementSettings(false /* force */);
 }
 

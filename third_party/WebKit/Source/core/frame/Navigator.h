@@ -23,6 +23,7 @@
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/frame/NavigatorConcurrentHardware.h"
+#include "core/frame/NavigatorDeviceMemory.h"
 #include "core/frame/NavigatorID.h"
 #include "core/frame/NavigatorLanguage.h"
 #include "core/frame/NavigatorOnLine.h"
@@ -35,12 +36,12 @@ namespace blink {
 
 class LocalFrame;
 
-class CORE_EXPORT Navigator final : public GarbageCollected<Navigator>,
+class CORE_EXPORT Navigator final : public ScriptWrappable,
                                     public NavigatorConcurrentHardware,
+                                    public NavigatorDeviceMemory,
                                     public NavigatorID,
                                     public NavigatorLanguage,
                                     public NavigatorOnLine,
-                                    public ScriptWrappable,
                                     public DOMWindowClient,
                                     public Supplementable<Navigator> {
   DEFINE_WRAPPERTYPEINFO();
@@ -52,16 +53,20 @@ class CORE_EXPORT Navigator final : public GarbageCollected<Navigator>,
   // NavigatorCookies
   bool cookieEnabled() const;
 
+  bool webdriver() const { return true; }
+
   String productSub() const;
   String vendor() const;
   String vendorSub() const;
 
+  String platform() const override;
   String userAgent() const override;
 
   // NavigatorLanguage
   Vector<String> languages() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  private:
   explicit Navigator(LocalFrame*);

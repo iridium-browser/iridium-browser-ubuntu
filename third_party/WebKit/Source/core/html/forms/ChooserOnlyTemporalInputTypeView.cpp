@@ -28,9 +28,9 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/dom/UserGestureIndicator.h"
+#include "core/dom/events/Event.h"
 #include "core/html/HTMLDivElement.h"
-#include "core/html/HTMLInputElement.h"
+#include "core/html/forms/HTMLInputElement.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 
@@ -51,31 +51,35 @@ ChooserOnlyTemporalInputTypeView::~ChooserOnlyTemporalInputTypeView() {
   DCHECK(!date_time_chooser_);
 }
 
-DEFINE_TRACE(ChooserOnlyTemporalInputTypeView) {
+void ChooserOnlyTemporalInputTypeView::Trace(blink::Visitor* visitor) {
   visitor->Trace(input_type_);
   visitor->Trace(date_time_chooser_);
   InputTypeView::Trace(visitor);
   DateTimeChooserClient::Trace(visitor);
 }
 
-void ChooserOnlyTemporalInputTypeView::HandleDOMActivateEvent(Event*) {
+void ChooserOnlyTemporalInputTypeView::HandleDOMActivateEvent(Event* event) {
+  Document& document = GetElement().GetDocument();
   if (GetElement().IsDisabledOrReadOnly() || !GetElement().GetLayoutObject() ||
-      !UserGestureIndicator::ProcessingUserGesture() ||
-      GetElement().openShadowRoot())
+      !Frame::HasTransientUserActivation(document.GetFrame()) ||
+      GetElement().OpenShadowRoot())
     return;
 
   if (date_time_chooser_)
     return;
-  if (!GetElement().GetDocument().IsActive())
+  if (!document.IsActive())
     return;
   DateTimeChooserParameters parameters;
   if (!GetElement().SetupDateTimeChooserParameters(parameters))
     return;
-  date_time_chooser_ = GetElement()
-                           .GetDocument()
-                           .GetPage()
-                           ->GetChromeClient()
-                           .OpenDateTimeChooser(this, parameters);
+  UseCounter::Count(
+      document,
+      (event->UnderlyingEvent() && event->UnderlyingEvent()->isTrusted())
+          ? WebFeature::kTemporalInputTypeChooserByTrustedClick
+          : WebFeature::kTemporalInputTypeChooserByUntrustedClick);
+  date_time_chooser_ =
+      document.GetPage()->GetChromeClient().OpenDateTimeChooser(this,
+                                                                parameters);
 }
 
 void ChooserOnlyTemporalInputTypeView::CreateShadowSubtree() {

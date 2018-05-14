@@ -4,8 +4,11 @@
 
 #include "ash/login/ui/login_auth_user_view.h"
 #include "ash/login/ui/login_test_base.h"
+#include "ash/login/ui/login_test_utils.h"
+#include "base/bind_helpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/layout/box_layout.h"
+#include "ui/views/widget/widget.h"
 
 namespace ash {
 
@@ -20,18 +23,19 @@ class LoginAuthUserViewUnittest : public LoginTestBase {
   void SetUp() override {
     LoginTestBase::SetUp();
 
-    user_ = CreateUser("user");
-    view_ = new LoginAuthUserView(user_, base::Bind([](bool auth_success) {}));
+    user_ = CreateUser("user@domain.com");
+    view_ = new LoginAuthUserView(user_, base::DoNothing(), base::DoNothing(),
+                                  base::DoNothing(), base::DoNothing());
 
     // We proxy |view_| inside of |container_| so we can control layout.
     container_ = new views::View();
     container_->SetLayoutManager(
-        new views::BoxLayout(views::BoxLayout::kVertical));
+        std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
     container_->AddChildView(view_);
-    ShowWidgetWithContent(container_);
+    SetWidget(CreateWidgetWithContent(container_));
   }
 
-  mojom::UserInfoPtr user_;
+  mojom::LoginUserInfoPtr user_;
   views::View* container_ = nullptr;   // Owned by test widget view hierarchy.
   LoginAuthUserView* view_ = nullptr;  // Owned by test widget view hierarchy.
   base::Optional<int> value_;
@@ -50,6 +54,28 @@ TEST_F(LoginAuthUserViewUnittest, ShowingPinExpandsView) {
   container_->Layout();
   gfx::Size expanded_size = view_->size();
   EXPECT_GT(expanded_size.height(), start_size.height());
+}
+
+// Verifies that an auth user that shows a password is opaque.
+TEST_F(LoginAuthUserViewUnittest, ShowingPasswordForcesOpaque) {
+  LoginAuthUserView::TestApi auth_test(view_);
+  LoginUserView::TestApi user_test(auth_test.user_view());
+
+  // Add another view that will hold focus. The user view cannot have focus
+  // since focus will keep it opaque.
+  auto* focus = new views::View();
+  focus->SetFocusBehavior(views::View::FocusBehavior::ALWAYS);
+  container_->AddChildView(focus);
+  focus->RequestFocus();
+  EXPECT_FALSE(auth_test.user_view()->HasFocus());
+
+  // If the user view is showing a password it must be opaque.
+  view_->SetAuthMethods(LoginAuthUserView::AUTH_PASSWORD);
+  EXPECT_TRUE(user_test.is_opaque());
+  view_->SetAuthMethods(LoginAuthUserView::AUTH_NONE);
+  EXPECT_FALSE(user_test.is_opaque());
+  view_->SetAuthMethods(LoginAuthUserView::AUTH_PASSWORD);
+  EXPECT_TRUE(user_test.is_opaque());
 }
 
 }  // namespace ash

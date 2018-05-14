@@ -8,12 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/api/video_codecs/video_encoder.h"
-#include "webrtc/common_video/include/video_bitrate_allocator.h"
-#include "webrtc/common_types.h"
-#include "webrtc/modules/video_coding/codecs/vp8/temporal_layers.h"
-#include "webrtc/modules/video_coding/include/video_codec_initializer.h"
-#include "webrtc/test/gtest.h"
+#include "api/video_codecs/video_encoder.h"
+#include "common_video/include/video_bitrate_allocator.h"
+#include "common_types.h"  // NOLINT(build/include)
+#include "modules/video_coding/codecs/vp8/temporal_layers.h"
+#include "modules/video_coding/include/video_codec_initializer.h"
+#include "rtc_base/refcountedobject.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
@@ -78,6 +79,7 @@ class VideoCodecInitializerTest : public ::testing::Test {
           webrtc::VideoEncoderConfig::Vp8EncoderSpecificSettings>(vp8_settings);
       settings_.payload_name = kVp8PayloadName;
       settings_.payload_type = kVp8PayloadType;
+    } else if (type == VideoCodecType::kVideoCodecMultiplex) {
     } else {
       ADD_FAILURE() << "Unexpected codec type: " << type;
     }
@@ -92,7 +94,8 @@ class VideoCodecInitializerTest : public ::testing::Test {
                                            &bitrate_allocator_out_)) {
       return false;
     }
-
+    if (codec_out_.codecType == VideoCodecType::kVideoCodecMultiplex)
+      return true;
     // Make sure temporal layers instances have been created.
     if (codec_out_.codecType == VideoCodecType::kVideoCodecVP8) {
       if (!codec_out_.VP8()->tl_factory)
@@ -115,6 +118,7 @@ class VideoCodecInitializerTest : public ::testing::Test {
     stream.target_bitrate_bps = kDefaultTargetBitrateBps;
     stream.max_bitrate_bps = kDefaultMaxBitrateBps;
     stream.max_qp = kDefaultMaxQp;
+    stream.active = true;
     return stream;
   }
 
@@ -125,6 +129,7 @@ class VideoCodecInitializerTest : public ::testing::Test {
     stream.max_bitrate_bps = 1000000;
     stream.max_framerate = kScreenshareDefaultFramerate;
     stream.temporal_layer_thresholds_bps.push_back(kScreenshareTl0BitrateBps);
+    stream.active = true;
     return stream;
   }
 
@@ -152,6 +157,20 @@ TEST_F(VideoCodecInitializerTest, SingleStreamVp8Screenshare) {
   EXPECT_EQ(kDefaultTargetBitrateBps, bitrate_allocation.get_sum_bps());
 }
 
+TEST_F(VideoCodecInitializerTest, SingleStreamVp8ScreenshareInactive) {
+  SetUpFor(VideoCodecType::kVideoCodecVP8, 1, 1, true);
+  VideoStream inactive_stream = DefaultStream();
+  inactive_stream.active = false;
+  streams_.push_back(inactive_stream);
+  EXPECT_TRUE(InitializeCodec());
+
+  BitrateAllocation bitrate_allocation = bitrate_allocator_out_->GetAllocation(
+      kDefaultTargetBitrateBps, kDefaultFrameRate);
+  EXPECT_EQ(1u, codec_out_.numberOfSimulcastStreams);
+  EXPECT_EQ(1u, codec_out_.VP8()->numberOfTemporalLayers);
+  EXPECT_EQ(0U, bitrate_allocation.get_sum_bps());
+}
+
 TEST_F(VideoCodecInitializerTest, TemporalLayeredVp8Screenshare) {
   SetUpFor(VideoCodecType::kVideoCodecVP8, 1, 2, true);
   streams_.push_back(DefaultScreenshareStream());
@@ -166,7 +185,7 @@ TEST_F(VideoCodecInitializerTest, TemporalLayeredVp8Screenshare) {
   EXPECT_EQ(kScreenshareTl0BitrateBps, bitrate_allocation.GetBitrate(0, 0));
 }
 
-TEST_F(VideoCodecInitializerTest, SimlucastVp8Screenshare) {
+TEST_F(VideoCodecInitializerTest, SimulcastVp8Screenshare) {
   SetUpFor(VideoCodecType::kVideoCodecVP8, 2, 1, true);
   streams_.push_back(DefaultScreenshareStream());
   VideoStream video_stream = DefaultStream();
@@ -187,7 +206,31 @@ TEST_F(VideoCodecInitializerTest, SimlucastVp8Screenshare) {
             bitrate_allocation.GetSpatialLayerSum(1));
 }
 
-TEST_F(VideoCodecInitializerTest, HighFpsSimlucastVp8Screenshare) {
+// Tests that when a video stream is inactive, then the bitrate allocation will
+// be 0 for that stream.
+TEST_F(VideoCodecInitializerTest, SimulcastVp8ScreenshareInactive) {
+  SetUpFor(VideoCodecType::kVideoCodecVP8, 2, 1, true);
+  streams_.push_back(DefaultScreenshareStream());
+  VideoStream inactive_video_stream = DefaultStream();
+  inactive_video_stream.active = false;
+  inactive_video_stream.max_framerate = kScreenshareDefaultFramerate;
+  streams_.push_back(inactive_video_stream);
+  EXPECT_TRUE(InitializeCodec());
+
+  EXPECT_EQ(2u, codec_out_.numberOfSimulcastStreams);
+  EXPECT_EQ(1u, codec_out_.VP8()->numberOfTemporalLayers);
+  const uint32_t target_bitrate =
+      streams_[0].target_bitrate_bps + streams_[1].target_bitrate_bps;
+  BitrateAllocation bitrate_allocation = bitrate_allocator_out_->GetAllocation(
+      target_bitrate, kScreenshareDefaultFramerate);
+  EXPECT_EQ(static_cast<uint32_t>(streams_[0].max_bitrate_bps),
+            bitrate_allocation.get_sum_bps());
+  EXPECT_EQ(static_cast<uint32_t>(streams_[0].max_bitrate_bps),
+            bitrate_allocation.GetSpatialLayerSum(0));
+  EXPECT_EQ(0U, bitrate_allocation.GetSpatialLayerSum(1));
+}
+
+TEST_F(VideoCodecInitializerTest, HighFpsSimulcastVp8Screenshare) {
   // Two simulcast streams, the lower one using legacy settings (two temporal
   // streams, 5fps), the higher one using 3 temporal streams and 30fps.
   SetUpFor(VideoCodecType::kVideoCodecVP8, 2, 3, true);
@@ -212,6 +255,12 @@ TEST_F(VideoCodecInitializerTest, HighFpsSimlucastVp8Screenshare) {
   EXPECT_EQ(kHighScreenshareTl0Bps, bitrate_allocation.GetBitrate(1, 0));
   EXPECT_EQ(kHighScreenshareTl1Bps - kHighScreenshareTl0Bps,
             bitrate_allocation.GetBitrate(1, 1));
+}
+
+TEST_F(VideoCodecInitializerTest, SingleStreamMultiplexCodec) {
+  SetUpFor(VideoCodecType::kVideoCodecMultiplex, 1, 1, true);
+  streams_.push_back(DefaultStream());
+  EXPECT_TRUE(InitializeCodec());
 }
 
 }  // namespace webrtc

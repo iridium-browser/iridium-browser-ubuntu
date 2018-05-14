@@ -18,13 +18,13 @@ namespace {
 // handle all destruction paths.
 class TestPermisisonRequestOwner {
  public:
-  TestPermisisonRequestOwner(Profile* profile, ContentSettingsType type) {
+  explicit TestPermisisonRequestOwner(ContentSettingsType type) {
     bool user_gesture = true;
-    auto decided = [](bool, ContentSetting) {};
-    request_ = base::MakeUnique<PermissionRequestImpl>(
-        GURL("https://example.com"), type, profile, user_gesture,
-        base::Bind(decided), base::Bind(&TestPermisisonRequestOwner::DeleteThis,
-                                        base::Unretained(this)));
+    auto decided = [](ContentSetting) {};
+    request_ = std::make_unique<PermissionRequestImpl>(
+        GURL("https://example.com"), type, user_gesture, base::Bind(decided),
+        base::Bind(&TestPermisisonRequestOwner::DeleteThis,
+                   base::Unretained(this)));
   }
 
   PermissionRequestImpl* request() { return request_.get(); }
@@ -49,15 +49,18 @@ PermissionRequestManagerTestApi::PermissionRequestManagerTestApi(
           browser->tab_strip_model()->GetActiveWebContents())) {}
 
 void PermissionRequestManagerTestApi::AddSimpleRequest(
-    Profile* profile,
     ContentSettingsType type) {
   TestPermisisonRequestOwner* request_owner =
-      new TestPermisisonRequestOwner(profile, type);
+      new TestPermisisonRequestOwner(type);
   manager_->AddRequest(request_owner->request());
 }
 
 gfx::NativeWindow PermissionRequestManagerTestApi::GetPromptWindow() {
   return manager_->view_ ? manager_->view_->GetNativeWindow() : nullptr;
+}
+
+void PermissionRequestManagerTestApi::SimulateWebContentsDestroyed() {
+  manager_->WebContentsDestroyed();
 }
 
 }  // namespace test

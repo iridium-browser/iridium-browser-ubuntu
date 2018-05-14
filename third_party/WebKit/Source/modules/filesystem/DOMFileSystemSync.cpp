@@ -31,18 +31,18 @@
 #include "modules/filesystem/DOMFileSystemSync.h"
 
 #include <memory>
+
+#include "base/memory/ptr_util.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/fileapi/File.h"
 #include "core/fileapi/FileError.h"
 #include "modules/filesystem/DOMFilePath.h"
 #include "modules/filesystem/DirectoryEntrySync.h"
-#include "modules/filesystem/ErrorCallback.h"
 #include "modules/filesystem/FileEntrySync.h"
 #include "modules/filesystem/FileSystemCallbacks.h"
-#include "modules/filesystem/FileWriterBaseCallback.h"
 #include "modules/filesystem/FileWriterSync.h"
+#include "modules/filesystem/SyncCallbackHelper.h"
 #include "platform/FileMetadata.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/WebFileSystem.h"
 #include "public/platform/WebFileSystemCallbacks.h"
 
@@ -62,7 +62,7 @@ DOMFileSystemSync::DOMFileSystemSync(ExecutionContext* context,
     : DOMFileSystemBase(context, name, type, root_url),
       root_entry_(DirectoryEntrySync::Create(this, DOMFilePath::kRoot)) {}
 
-DOMFileSystemSync::~DOMFileSystemSync() {}
+DOMFileSystemSync::~DOMFileSystemSync() = default;
 
 void DOMFileSystemSync::ReportError(ErrorCallbackBase* error_callback,
                                     FileError::ErrorCode file_error) {
@@ -85,7 +85,7 @@ class CreateFileHelper final : public AsyncFileSystemCallbacks {
     int code_;
     Member<File> file_;
 
-    DEFINE_INLINE_TRACE() { visitor->Trace(file_); }
+    void Trace(blink::Visitor* visitor) { visitor->Trace(file_); }
 
    private:
     CreateFileResult() : failed_(false), code_(0) {}
@@ -96,7 +96,7 @@ class CreateFileHelper final : public AsyncFileSystemCallbacks {
       const String& name,
       const KURL& url,
       FileSystemType type) {
-    return WTF::WrapUnique(static_cast<AsyncFileSystemCallbacks*>(
+    return base::WrapUnique(static_cast<AsyncFileSystemCallbacks*>(
         new CreateFileHelper(result, name, url, type)));
   }
 
@@ -105,10 +105,10 @@ class CreateFileHelper final : public AsyncFileSystemCallbacks {
     result_->code_ = code;
   }
 
-  ~CreateFileHelper() override {}
+  ~CreateFileHelper() override = default;
 
   void DidCreateSnapshotFile(const FileMetadata& metadata,
-                             PassRefPtr<BlobDataHandle> snapshot) override {
+                             scoped_refptr<BlobDataHandle> snapshot) override {
     // We can't directly use the snapshot blob data handle because the content
     // type on it hasn't been set.  The |snapshot| param is here to provide a a
     // chain of custody thru thread bridging that is held onto until *after*
@@ -153,68 +153,31 @@ File* DOMFileSystemSync::CreateFile(const FileEntrySync* file_entry,
   return result->file_.Get();
 }
 
-namespace {
-
-class ReceiveFileWriterCallback final : public FileWriterBaseCallback {
- public:
-  static ReceiveFileWriterCallback* Create() {
-    return new ReceiveFileWriterCallback();
-  }
-
-  void handleEvent(FileWriterBase*) override {}
-
- private:
-  ReceiveFileWriterCallback() {}
-};
-
-class LocalErrorCallback final : public ErrorCallbackBase {
- public:
-  static LocalErrorCallback* Create(FileError::ErrorCode& error_code) {
-    return new LocalErrorCallback(error_code);
-  }
-
-  void Invoke(FileError::ErrorCode error) override {
-    DCHECK_NE(error, FileError::kOK);
-    error_code_ = error;
-  }
-
- private:
-  explicit LocalErrorCallback(FileError::ErrorCode& error_code)
-      : error_code_(error_code) {}
-
-  FileError::ErrorCode& error_code_;
-};
-
-}  // namespace
-
 FileWriterSync* DOMFileSystemSync::CreateWriter(
     const FileEntrySync* file_entry,
     ExceptionState& exception_state) {
   DCHECK(file_entry);
 
   FileWriterSync* file_writer = FileWriterSync::Create();
-  ReceiveFileWriterCallback* success_callback =
-      ReceiveFileWriterCallback::Create();
-  FileError::ErrorCode error_code = FileError::kOK;
-  LocalErrorCallback* error_callback = LocalErrorCallback::Create(error_code);
 
+  FileWriterCallbacksSyncHelper* sync_helper =
+      FileWriterCallbacksSyncHelper::Create();
   std::unique_ptr<AsyncFileSystemCallbacks> callbacks =
-      FileWriterBaseCallbacks::Create(file_writer, success_callback,
-                                      error_callback, context_);
+      FileWriterCallbacks::Create(file_writer,
+                                  sync_helper->GetSuccessCallback(),
+                                  sync_helper->GetErrorCallback(), context_);
   callbacks->SetShouldBlockUntilCompletion(true);
 
   FileSystem()->CreateFileWriter(CreateFileSystemURL(file_entry), file_writer,
                                  std::move(callbacks));
-  if (error_code != FileError::kOK) {
-    FileError::ThrowDOMException(exception_state, error_code);
-    return 0;
-  }
-  return file_writer;
+
+  FileWriterBase* success = sync_helper->GetResultOrThrow(exception_state);
+  return success ? file_writer : nullptr;
 }
 
-DEFINE_TRACE(DOMFileSystemSync) {
-  DOMFileSystemBase::Trace(visitor);
+void DOMFileSystemSync::Trace(blink::Visitor* visitor) {
   visitor->Trace(root_entry_);
+  DOMFileSystemBase::Trace(visitor);
 }
 
 }  // namespace blink

@@ -8,7 +8,6 @@
 #include "bindings/core/v8/ScriptCustomElementDefinitionBuilder.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
-#include "core/HTMLElementTypeHelpers.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/ElementDefinitionOptions.h"
@@ -23,6 +22,7 @@
 #include "core/html/custom/CustomElementUpgradeReaction.h"
 #include "core/html/custom/CustomElementUpgradeSorter.h"
 #include "core/html/custom/V0CustomElementRegistrationContext.h"
+#include "core/html_element_type_helpers.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/wtf/Allocator.h"
 
@@ -83,22 +83,24 @@ CustomElementRegistry::CustomElementRegistry(const LocalDOMWindow* owner)
     : element_definition_is_running_(false),
       owner_(owner),
       v0_(new V0RegistrySet()),
-      upgrade_candidates_(new UpgradeCandidateMap()) {}
+      upgrade_candidates_(new UpgradeCandidateMap()),
+      reaction_stack_(&CustomElementReactionStack::Current()) {}
 
-DEFINE_TRACE(CustomElementRegistry) {
+void CustomElementRegistry::Trace(blink::Visitor* visitor) {
   visitor->Trace(definitions_);
   visitor->Trace(owner_);
   visitor->Trace(v0_);
   visitor->Trace(upgrade_candidates_);
   visitor->Trace(when_defined_promise_map_);
+  ScriptWrappable::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(CustomElementRegistry) {
-  // TODO(mlippautz): This is not safe for incremental marking.
-  visitor->TraceWrappersWithManualWriteBarrier(
-      &CustomElementReactionStack::Current());
+void CustomElementRegistry::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
+  visitor->TraceWrappers(reaction_stack_);
   for (auto definition : definitions_)
     visitor->TraceWrappers(definition);
+  ScriptWrappable::TraceWrappers(visitor);
 }
 
 CustomElementDefinition* CustomElementRegistry::define(
@@ -196,8 +198,7 @@ CustomElementDefinition* CustomElementRegistry::define(
   CustomElementDefinition* definition = builder.Build(descriptor, id);
   CHECK(!exception_state.HadException());
   CHECK(definition->Descriptor() == descriptor);
-  definitions_.emplace_back(
-      TraceWrapperMember<CustomElementDefinition>(this, definition));
+  definitions_.emplace_back(definition);
   NameIdMap::AddResult result = name_id_map_.insert(descriptor.GetName(), id);
   CHECK(result.is_new_entry);
 
@@ -272,7 +273,12 @@ CustomElementDefinition* CustomElementRegistry::DefinitionForId(
 }
 
 void CustomElementRegistry::AddCandidate(Element* candidate) {
-  const AtomicString& name = candidate->localName();
+  AtomicString name = candidate->localName();
+  if (!CustomElement::IsValidName(name)) {
+    const AtomicString& is = candidate->IsValue();
+    if (!is.IsNull())
+      name = is;
+  }
   if (NameIsDefined(name) || V0NameIsDefined(name))
     return;
   UpgradeCandidateMap::iterator it = upgrade_candidates_->find(name);

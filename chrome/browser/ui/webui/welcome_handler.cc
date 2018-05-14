@@ -23,12 +23,18 @@ WelcomeHandler::WelcomeHandler(content::WebUI* web_ui)
       login_ui_service_(LoginUIServiceFactory::GetForProfile(profile_)),
       result_(WelcomeResult::DEFAULT) {
   login_ui_service_->AddObserver(this);
-  base::RecordAction(
-      base::UserMetricsAction("Signin_Impression_FromStartPage"));
 }
 
 WelcomeHandler::~WelcomeHandler() {
   login_ui_service_->RemoveObserver(this);
+
+  // We log that an impression occurred at destruct-time. This can't be done at
+  // construct-time on some platforms because this page is shown immediately
+  // after a new installation of Chrome and loads while the user is deciding
+  // whether or not to opt in to logging.
+  base::RecordAction(
+      base::UserMetricsAction("Signin_Impression_FromStartPage"));
+
   UMA_HISTOGRAM_ENUMERATION("Welcome.SignInPromptResult", result_,
                             WelcomeResult::WELCOME_RESULT_MAX);
 }
@@ -55,7 +61,7 @@ void WelcomeHandler::HandleActivateSignIn(const base::ListValue* args) {
     GoToNewTabPage();
   } else {
     Browser* browser = GetBrowser();
-    browser->signin_view_controller()->ShowModalSignin(
+    browser->signin_view_controller()->ShowSignin(
         profiles::BubbleViewMode::BUBBLE_VIEW_MODE_GAIA_SIGNIN, browser,
         signin_metrics::AccessPoint::ACCESS_POINT_START_PAGE);
   }
@@ -67,7 +73,7 @@ void WelcomeHandler::HandleUserDecline(const base::ListValue* args) {
   // attempted to sign in.
   result_ = (result_ == WelcomeResult::ATTEMPTED)
                 ? WelcomeResult::ATTEMPTED_DECLINED
-                : result_ = WelcomeResult::DECLINED;
+                : WelcomeResult::DECLINED;
   GoToNewTabPage();
 }
 
@@ -82,9 +88,10 @@ void WelcomeHandler::RegisterMessages() {
 }
 
 void WelcomeHandler::GoToNewTabPage() {
-  chrome::NavigateParams params(GetBrowser(), GURL(chrome::kChromeUINewTabURL),
-                                ui::PageTransition::PAGE_TRANSITION_LINK);
-  chrome::Navigate(&params);
+  NavigateParams params(GetBrowser(), GURL(chrome::kChromeUINewTabURL),
+                        ui::PageTransition::PAGE_TRANSITION_LINK);
+  params.source_contents = web_ui()->GetWebContents();
+  Navigate(&params);
 }
 
 Browser* WelcomeHandler::GetBrowser() {

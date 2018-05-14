@@ -11,9 +11,7 @@ class Typical10MobilePage(page_module.Page):
   def __init__(self, url, page_set, name=''):
     super(Typical10MobilePage, self).__init__(
         url=url, page_set=page_set, name=name,
-        credentials_path = 'data/credentials.json',
         shared_page_state_class=shared_page_state.SharedMobilePageState)
-    self.archive_data_file = 'data/typical_10_mobile.json'
 
   def RunPageInteractions(self, action_runner):
     action_runner.Wait(20)
@@ -55,8 +53,3 @@ class Typical10MobilePageSet(story.StorySet):
 
     for url in urls_list:
       self.AddStory(Typical10MobilePage(url, self, name=url))
-
-
-class Typical10MobileStoryExpectations(story.expectations.StoryExpectations):
-  def SetExpectations(self):
-    pass  # No tests disabled.

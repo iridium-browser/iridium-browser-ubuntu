@@ -24,8 +24,8 @@ import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.util.RenderTestRule;
 
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
@@ -34,14 +34,15 @@ import java.util.concurrent.TimeoutException;
  * A payment integration test for a merchant that provides free shipping regardless of address.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestFreeShippingTest implements MainActivityStartCallback {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
             new PaymentRequestTestRule("payment_request_free_shipping_test.html", this);
+
+    @Rule
+    public RenderTestRule mRenderTestRule =
+            new RenderTestRule("components/test/data/payments/render_tests");
 
     @Override
     public void onMainActivityStarted()
@@ -59,11 +60,13 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
     /** Submit the shipping address to the merchant when the user clicks "Pay." */
     @Test
     @MediumTest
-    @Feature({"Payments"})
-    public void testPay() throws InterruptedException, ExecutionException, TimeoutException {
+    @Feature({"Payments", "RenderTest"})
+    public void testPayWithRender() throws Throwable {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
+        mRenderTestRule.render(mPaymentRequestTestRule.getPaymentRequestView(), "free_shipping");
         mPaymentRequestTestRule.clickAndWait(
                 R.id.button_primary, mPaymentRequestTestRule.getReadyForUnmaskInput());
+        mRenderTestRule.render(mPaymentRequestTestRule.getCardUnmaskView(), "unmask");
         mPaymentRequestTestRule.setTextInCardUnmaskDialogAndWait(
                 R.id.card_unmask_input, "123", mPaymentRequestTestRule.getReadyToUnmask());
         mPaymentRequestTestRule.clickCardUnmaskButtonAndWait(
@@ -162,18 +165,15 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
 
         // Quickly press on "add address" and then [X].
         int callCount = mPaymentRequestTestRule.getReadyToEdit().getCallCount();
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getShippingAddressSectionForTest()
-                        .findViewById(R.id.payments_add_option_button)
-                        .performClick();
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getDialogForTest()
-                        .findViewById(R.id.close_button)
-                        .performClick();
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getShippingAddressSectionForTest()
+                    .findViewById(R.id.payments_add_option_button)
+                    .performClick();
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getDialogForTest()
+                    .findViewById(R.id.close_button)
+                    .performClick();
         });
         mPaymentRequestTestRule.getReadyToEdit().waitForCallback(callCount);
 
@@ -196,18 +196,15 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
 
         // Quickly press on [X] and then "add address."
         int callCount = mPaymentRequestTestRule.getDismissed().getCallCount();
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getDialogForTest()
-                        .findViewById(R.id.close_button)
-                        .performClick();
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getShippingAddressSectionForTest()
-                        .findViewById(R.id.payments_add_option_button)
-                        .performClick();
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getDialogForTest()
+                    .findViewById(R.id.close_button)
+                    .performClick();
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getShippingAddressSectionForTest()
+                    .findViewById(R.id.payments_add_option_button)
+                    .performClick();
         });
         mPaymentRequestTestRule.getDismissed().waitForCallback(callCount);
 
@@ -227,18 +224,15 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
 
         // Quickly press on "add address" and then "cancel."
         int callCount = mPaymentRequestTestRule.getReadyToEdit().getCallCount();
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getShippingAddressSectionForTest()
-                        .findViewById(R.id.payments_add_option_button)
-                        .performClick();
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getDialogForTest()
-                        .findViewById(R.id.button_secondary)
-                        .performClick();
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getShippingAddressSectionForTest()
+                    .findViewById(R.id.payments_add_option_button)
+                    .performClick();
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getDialogForTest()
+                    .findViewById(R.id.button_secondary)
+                    .performClick();
         });
         mPaymentRequestTestRule.getReadyToEdit().waitForCallback(callCount);
 
@@ -261,18 +255,15 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
 
         // Quickly press on "cancel" and then "add address."
         int callCount = mPaymentRequestTestRule.getDismissed().getCallCount();
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getDialogForTest()
-                        .findViewById(R.id.button_secondary)
-                        .performClick();
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getShippingAddressSectionForTest()
-                        .findViewById(R.id.payments_add_option_button)
-                        .performClick();
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getDialogForTest()
+                    .findViewById(R.id.button_secondary)
+                    .performClick();
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getShippingAddressSectionForTest()
+                    .findViewById(R.id.payments_add_option_button)
+                    .performClick();
         });
         mPaymentRequestTestRule.getDismissed().waitForCallback(callCount);
 
@@ -281,12 +272,12 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
 
     /**
      * Test that ending a payment request that requires only the shipping address results in the
-     * appropriate metric being logged in the PaymentRequest.RequestedInformation histogram.
+     * appropriate metric being logged in PaymentRequest.Events.
      */
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testRequestedInformationMetric()
+    public void testPaymentRequestEventsMetric()
             throws InterruptedException, ExecutionException, TimeoutException {
         // Start and abort the Payment Request.
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
@@ -294,11 +285,11 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
                 R.id.close_button, mPaymentRequestTestRule.getDismissed());
         mPaymentRequestTestRule.expectResultContains(new String[] {"Request cancelled"});
 
-        // Make sure that only the appropriate enum value was logged.
-        for (int i = 0; i < RequestedInformation.MAX; ++i) {
-            Assert.assertEquals((i == RequestedInformation.SHIPPING ? 1 : 0),
-                    RecordHistogram.getHistogramValueCountForTesting(
-                            "PaymentRequest.RequestedInformation", i));
-        }
+        int expectedSample = Event.SHOWN | Event.USER_ABORTED | Event.HAD_INITIAL_FORM_OF_PAYMENT
+                | Event.HAD_NECESSARY_COMPLETE_SUGGESTIONS | Event.REQUEST_SHIPPING
+                | Event.REQUEST_METHOD_BASIC_CARD;
+        Assert.assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.Events", expectedSample));
     }
 }

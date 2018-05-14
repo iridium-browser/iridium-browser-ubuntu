@@ -15,6 +15,7 @@
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkFontStyle.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 
@@ -38,9 +39,8 @@ void OnReleaseTexture(
   gl->ShallowFlushCHROMIUM();
 }
 
-GLES2Interface* GLCBShim(
-    const WebMediaPlayerParams::Context3DCB& context_3d_cb) {
-  return context_3d_cb.Run().gl;
+GLES2Interface* GLCBShim(scoped_refptr<viz::ContextProvider> context_provider) {
+  return context_provider->ContextGL();
 }
 
 }  // namespace
@@ -64,8 +64,7 @@ scoped_refptr<VideoFrame> MakeTextFrameForCast(
   paint.setAntiAlias(true);
   paint.setFilterQuality(kHigh_SkFilterQuality);
   paint.setColor(SK_ColorWHITE);
-  paint.setTypeface(SkTypeface::MakeFromName(
-      "sans", SkFontStyle::FromOldStyle(SkTypeface::kBold)));
+  paint.setTypeface(SkTypeface::MakeFromName("sans", SkFontStyle::Bold()));
   paint.setTextSize(kTextSize);
 
   // Calculate the vertical margin from the top
@@ -131,13 +130,11 @@ scoped_refptr<VideoFrame> MakeTextFrameForCast(
 
   gpu::Mailbox texture_mailbox;
   gl->GenMailboxCHROMIUM(texture_mailbox.name);
-  gl->ProduceTextureCHROMIUM(texture_target, texture_mailbox.name);
-  const GLuint64 fence_sync = gl->InsertFenceSyncCHROMIUM();
-  gl->Flush();
+  gl->ProduceTextureDirectCHROMIUM(remote_playback_texture_id,
+                                   texture_mailbox.name);
 
   gpu::SyncToken texture_mailbox_sync_token;
-  gl->GenUnverifiedSyncTokenCHROMIUM(fence_sync,
-                                     texture_mailbox_sync_token.GetData());
+  gl->GenUnverifiedSyncTokenCHROMIUM(texture_mailbox_sync_token.GetData());
 
   gpu::MailboxHolder holders[media::VideoFrame::kMaxPlanes] = {
       gpu::MailboxHolder(texture_mailbox, texture_mailbox_sync_token,
@@ -153,8 +150,10 @@ scoped_refptr<VideoFrame> MakeTextFrameForCast(
 WebMediaPlayerCast::WebMediaPlayerCast(
     WebMediaPlayerImpl* impl,
     blink::WebMediaPlayerClient* client,
-    const WebMediaPlayerParams::Context3DCB& context_3d_cb)
-    : webmediaplayer_(impl), client_(client), context_3d_cb_(context_3d_cb) {}
+    scoped_refptr<viz::ContextProvider> context_provider)
+    : webmediaplayer_(impl),
+      client_(client),
+      context_provider_(context_provider) {}
 
 WebMediaPlayerCast::~WebMediaPlayerCast() {
   if (player_manager_) {
@@ -169,7 +168,7 @@ void WebMediaPlayerCast::Initialize(const GURL& url,
                                     blink::WebLocalFrame* frame,
                                     int delegate_id) {
   player_manager_->Initialize(MEDIA_PLAYER_TYPE_REMOTE_ONLY, player_id_, url,
-                              frame->GetDocument().FirstPartyForCookies(),
+                              frame->GetDocument().SiteForCookies(),
                               frame->GetDocument().Url(), true, delegate_id);
   is_player_initialized_ = true;
 }
@@ -255,12 +254,11 @@ void WebMediaPlayerCast::OnConnectedToRemoteDevice(
   client_->ConnectedToRemoteDevice();
 }
 
-double WebMediaPlayerCast::currentTime() const {
+base::TimeDelta WebMediaPlayerCast::currentTime() const {
   base::TimeDelta ret = remote_time_;
-  if (!paused_ && !initializing_) {
+  if (!paused_ && !initializing_)
     ret += base::TimeTicks::Now() - remote_time_at_;
-  }
-  return ret.InSecondsF();
+  return ret;
 }
 
 void WebMediaPlayerCast::play() {
@@ -283,15 +281,16 @@ void WebMediaPlayerCast::seek(base::TimeDelta t) {
 
 void WebMediaPlayerCast::OnDisconnectedFromRemoteDevice() {
   DVLOG(1) << __func__;
-  if (!paused_) {
+  if (!paused_)
     paused_ = true;
-  }
+
   is_remote_ = false;
-  double t = currentTime();
-  if (t + media::kTimeUpdateInterval * 2 / 1000 > webmediaplayer_->Duration()) {
-    t = webmediaplayer_->Duration();
-  }
-  webmediaplayer_->OnDisconnectedFromRemoteDevice(t);
+  auto t = currentTime();
+  auto d = base::TimeDelta::FromSecondsD(webmediaplayer_->Duration());
+  if (t + base::TimeDelta::FromMilliseconds(media::kTimeUpdateInterval * 2) > d)
+    t = d;
+
+  webmediaplayer_->OnDisconnectedFromRemoteDevice(t.InSecondsF());
 }
 
 void WebMediaPlayerCast::OnCancelledRemotePlaybackRequest() {
@@ -361,7 +360,7 @@ scoped_refptr<VideoFrame> WebMediaPlayerCast::GetCastingBanner() {
 
   return MakeTextFrameForCast(remote_playback_message_, canvas_size,
                               webmediaplayer_->NaturalSize(),
-                              base::Bind(&GLCBShim, context_3d_cb_));
+                              base::Bind(&GLCBShim, context_provider_));
 }
 
 void WebMediaPlayerCast::setPoster(const blink::WebURL& poster) {

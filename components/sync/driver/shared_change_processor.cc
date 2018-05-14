@@ -20,8 +20,6 @@ using base::AutoLock;
 
 namespace syncer {
 
-class AttachmentService;
-
 SharedChangeProcessor::SharedChangeProcessor(ModelType type)
     : disconnected_(false),
       type_(type),
@@ -164,12 +162,6 @@ base::WeakPtr<SyncableService> SharedChangeProcessor::Connect(
                                       type_, user_share, error_handler_->Copy(),
                                       local_service, merge_result, sync_client)
                                   .release();
-  // If available, propagate attachment service to the syncable service.
-  std::unique_ptr<AttachmentService> attachment_service =
-      generic_change_processor_->GetAttachmentService();
-  if (attachment_service) {
-    local_service->SetAttachmentService(std::move(attachment_service));
-  }
   return local_service;
 }
 
@@ -199,7 +191,7 @@ int SharedChangeProcessor::GetSyncCount() {
 }
 
 SyncError SharedChangeProcessor::ProcessSyncChanges(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const SyncChangeList& list_of_changes) {
   DCHECK(backend_task_runner_.get());
   DCHECK(backend_task_runner_->RunsTasksInCurrentSequence());
@@ -301,7 +293,7 @@ bool SharedChangeProcessor::GetDataTypeContext(std::string* context) const {
 }
 
 SyncError SharedChangeProcessor::CreateAndUploadError(
-    const tracked_objects::Location& location,
+    const base::Location& location,
     const std::string& message) {
   AutoLock lock(monitor_lock_);
   if (!disconnected_) {

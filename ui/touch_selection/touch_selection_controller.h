@@ -33,7 +33,9 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionControllerClient {
   virtual void SelectBetweenCoordinates(const gfx::PointF& base,
                                         const gfx::PointF& extent) = 0;
   virtual void OnSelectionEvent(SelectionEventType event) = 0;
+  virtual void OnDragUpdate(const gfx::PointF& position) = 0;
   virtual std::unique_ptr<TouchHandleDrawable> CreateDrawable() = 0;
+  virtual void DidScroll() = 0;
 };
 
 // Controller for manipulating text selection via touch input.
@@ -168,6 +170,11 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
   bool WillHandleTouchEventForLongPressDrag(const MotionEvent& event);
   void SetTemporarilyHiddenForLongPressDrag(bool hidden);
   void RefreshHandleVisibility();
+
+  // Returns the y-coordinate of middle point of selection bound corresponding
+  // to the active selection or insertion handle. If there is no active handle,
+  // returns 0.0.
+  float GetActiveHandleMiddleY() const;
 
   void HideHandles();
 

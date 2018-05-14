@@ -20,6 +20,7 @@
 #include "platform/mojo/MojoHelper.h"
 #include "public/platform/Platform.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/WebKit/public/mojom/page/page_visibility_state.mojom-blink.h"
 
 namespace {
 const char kJsonMimePostfix[] = "+json";
@@ -209,9 +210,10 @@ struct TypeConverter<Optional<Vector<uint8_t>>, blink::ScriptValue> {
       return mojo::ConvertTo<Vector<uint8_t>>(string);
     }
 
-    if (value->IsArrayBuffer())
+    if (value->IsArrayBuffer()) {
       return mojo::ConvertTo<Vector<uint8_t>>(
-          blink::V8ArrayBuffer::toImpl(value.As<v8::Object>()));
+          blink::V8ArrayBuffer::ToImpl(value.As<v8::Object>()));
+    }
 
     return WTF::nullopt;
   }
@@ -290,14 +292,14 @@ struct TypeConverter<NFCMessagePtr, blink::DOMArrayBuffer*> {
 template <>
 struct TypeConverter<NFCMessagePtr, blink::NFCPushMessage> {
   static NFCMessagePtr Convert(const blink::NFCPushMessage& message) {
-    if (message.isString())
-      return NFCMessage::From(message.getAsString());
+    if (message.IsString())
+      return NFCMessage::From(message.GetAsString());
 
-    if (message.isNFCMessage())
-      return NFCMessage::From(message.getAsNFCMessage());
+    if (message.IsNFCMessage())
+      return NFCMessage::From(message.GetAsNFCMessage());
 
-    if (message.isArrayBuffer())
-      return NFCMessage::From(message.getAsArrayBuffer());
+    if (message.IsArrayBuffer())
+      return NFCMessage::From(message.GetAsArrayBuffer());
 
     NOTREACHED();
     return nullptr;
@@ -501,16 +503,16 @@ ScriptPromise RejectIfInvalidNFCPushMessage(
     ScriptState* script_state,
     const NFCPushMessage& push_message) {
   // If NFCPushMessage of invalid type, reject promise with TypeError
-  if (!push_message.isNFCMessage() && !push_message.isString() &&
-      !push_message.isArrayBuffer()) {
+  if (!push_message.IsNFCMessage() && !push_message.IsString() &&
+      !push_message.IsArrayBuffer()) {
     return RejectWithTypeError(script_state,
                                "Invalid NFCPushMessage type was provided.");
   }
 
-  if (push_message.isNFCMessage()) {
+  if (push_message.IsNFCMessage()) {
     // https://w3c.github.io/web-nfc/#the-push-method
     // If NFCMessage.records is empty, reject promise with TypeError
-    const NFCMessage& message = push_message.getAsNFCMessage();
+    const NFCMessage& message = push_message.GetAsNFCMessage();
     if (!message.hasRecords() || message.records().IsEmpty()) {
       return RejectWithTypeError(script_state,
                                  "Empty NFCMessage was provided.");
@@ -524,7 +526,7 @@ ScriptPromise RejectIfInvalidNFCPushMessage(
 
 bool SetURL(const String& origin,
             device::mojom::blink::NFCMessagePtr& message) {
-  KURL origin_url(kParsedURLString, origin);
+  KURL origin_url(origin);
 
   if (!message->url.IsEmpty() && origin_url.CanSetPathname()) {
     origin_url.SetPath(message->url);
@@ -572,7 +574,8 @@ v8::Local<v8::Value> ToV8(ScriptState* script_state,
       if (record->record_type == device::mojom::blink::NFCRecordType::JSON) {
         v8::Local<v8::Value> json_object;
         v8::TryCatch try_catch(isolate);
-        if (!v8::JSON::Parse(isolate, string).ToLocal(&json_object)) {
+        if (!v8::JSON::Parse(script_state->GetContext(), string)
+                 .ToLocal(&json_object)) {
           return v8::Null(isolate);
         }
 
@@ -643,8 +646,8 @@ NFC::NFC(LocalFrame* frame)
     return;
 
   frame->GetInterfaceProvider().GetInterface(mojo::MakeRequest(&nfc_));
-  nfc_.set_connection_error_handler(ConvertToBaseCallback(
-      WTF::Bind(&NFC::OnConnectionError, WrapWeakPersistent(this))));
+  nfc_.set_connection_error_handler(
+      WTF::Bind(&NFC::OnConnectionError, WrapWeakPersistent(this)));
   device::mojom::blink::NFCClientPtr client;
   client_binding_.Bind(mojo::MakeRequest(&client));
   nfc_->SetClient(std::move(client));
@@ -715,11 +718,11 @@ ScriptPromise NFC::push(ScriptState* script_state,
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   requests_.insert(resolver);
-  auto callback = ConvertToBaseCallback(WTF::Bind(&NFC::OnRequestCompleted,
-                                                  WrapPersistent(this),
-                                                  WrapPersistent(resolver)));
+  auto callback = WTF::Bind(&NFC::OnRequestCompleted, WrapPersistent(this),
+                            WrapPersistent(resolver));
   nfc_->Push(std::move(message),
-             device::mojom::blink::NFCPushOptions::From(options), callback);
+             device::mojom::blink::NFCPushOptions::From(options),
+             std::move(callback));
 
   return resolver->Promise();
 }
@@ -732,10 +735,9 @@ ScriptPromise NFC::cancelPush(ScriptState* script_state, const String& target) {
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   requests_.insert(resolver);
-  auto callback = ConvertToBaseCallback(WTF::Bind(&NFC::OnRequestCompleted,
-                                                  WrapPersistent(this),
-                                                  WrapPersistent(resolver)));
-  nfc_->CancelPush(mojo::toNFCPushTarget(target), callback);
+  auto callback = WTF::Bind(&NFC::OnRequestCompleted, WrapPersistent(this),
+                            WrapPersistent(resolver));
+  nfc_->CancelPush(mojo::toNFCPushTarget(target), std::move(callback));
 
   return resolver->Promise();
 }
@@ -743,7 +745,7 @@ ScriptPromise NFC::cancelPush(ScriptState* script_state, const String& target) {
 // https://w3c.github.io/web-nfc/#watching-for-content
 // https://w3c.github.io/web-nfc/#dom-nfc-watch
 ScriptPromise NFC::watch(ScriptState* script_state,
-                         MessageCallback* callback,
+                         V8MessageCallback* callback,
                          const NFCWatchOptions& options) {
   ScriptPromise promise = RejectIfNotSupported(script_state);
   if (!promise.IsEmpty())
@@ -751,21 +753,21 @@ ScriptPromise NFC::watch(ScriptState* script_state,
 
   // https://w3c.github.io/web-nfc/#dom-nfc-watch (Step 9)
   if (options.hasURL() && !options.url().IsEmpty()) {
-    KURL pattern_url(kParsedURLString, options.url());
+    KURL pattern_url(options.url());
     if (!pattern_url.IsValid() || pattern_url.Protocol() != kProtocolHttps) {
       return RejectWithDOMException(script_state, kSyntaxError,
                                     "Invalid URL pattern was provided.");
     }
   }
 
-  callback->SetScriptState(script_state);
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   requests_.insert(resolver);
-  auto watch_callback = ConvertToBaseCallback(
+  auto watch_callback =
       WTF::Bind(&NFC::OnWatchRegistered, WrapPersistent(this),
-                WrapPersistent(callback), WrapPersistent(resolver)));
+                WrapPersistent(ToV8PersistentCallbackFunction(callback)),
+                WrapPersistent(resolver));
   nfc_->Watch(device::mojom::blink::NFCWatchOptions::From(options),
-              watch_callback);
+              std::move(watch_callback));
   return resolver->Promise();
 }
 
@@ -784,9 +786,9 @@ ScriptPromise NFC::cancelWatch(ScriptState* script_state, long id) {
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   requests_.insert(resolver);
-  nfc_->CancelWatch(id, ConvertToBaseCallback(WTF::Bind(
-                            &NFC::OnRequestCompleted, WrapPersistent(this),
-                            WrapPersistent(resolver))));
+  nfc_->CancelWatch(id,
+                    WTF::Bind(&NFC::OnRequestCompleted, WrapPersistent(this),
+                              WrapPersistent(resolver)));
   return resolver->Promise();
 }
 
@@ -800,9 +802,9 @@ ScriptPromise NFC::cancelWatch(ScriptState* script_state) {
   callbacks_.clear();
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   requests_.insert(resolver);
-  nfc_->CancelAllWatches(ConvertToBaseCallback(
-      WTF::Bind(&NFC::OnRequestCompleted, WrapPersistent(this),
-                WrapPersistent(resolver))));
+  nfc_->CancelAllWatches(WTF::Bind(&NFC::OnRequestCompleted,
+                                   WrapPersistent(this),
+                                   WrapPersistent(resolver)));
   return resolver->Promise();
 }
 
@@ -813,7 +815,7 @@ void NFC::PageVisibilityChanged() {
 
   // NFC operations should be suspended.
   // https://w3c.github.io/web-nfc/#nfc-suspended
-  if (GetPage()->VisibilityState() == kPageVisibilityStateVisible)
+  if (GetPage()->VisibilityState() == mojom::PageVisibilityState::kVisible)
     nfc_->ResumeNFCOperations();
   else
     nfc_->SuspendNFCOperations();
@@ -846,15 +848,18 @@ void NFC::OnConnectionError() {
 
 void NFC::OnWatch(const Vector<uint32_t>& ids,
                   device::mojom::blink::NFCMessagePtr message) {
+  if (!GetExecutionContext())
+    return;
+
   for (const auto& id : ids) {
     auto it = callbacks_.find(id);
     if (it != callbacks_.end()) {
-      MessageCallback* callback = it->value;
-      ScriptState* script_state = callback->GetScriptState();
+      V8MessageCallback* callback = it->value;
+      ScriptState* script_state = callback->CallbackRelevantScriptState();
       DCHECK(script_state);
       ScriptState::Scope scope(script_state);
       NFCMessage nfc_message = ToNFCMessage(script_state, message);
-      callback->handleMessage(nfc_message);
+      callback->InvokeAndReportException(nullptr, nfc_message);
     }
   }
 }
@@ -891,10 +896,11 @@ ScriptPromise NFC::RejectIfNotSupported(ScriptState* script_state) {
   return ScriptPromise();
 }
 
-void NFC::OnWatchRegistered(MessageCallback* callback,
-                            ScriptPromiseResolver* resolver,
-                            uint32_t id,
-                            device::mojom::blink::NFCErrorPtr error) {
+void NFC::OnWatchRegistered(
+    V8PersistentCallbackFunction<V8MessageCallback>* callback,
+    ScriptPromiseResolver* resolver,
+    uint32_t id,
+    device::mojom::blink::NFCErrorPtr error) {
   requests_.erase(resolver);
 
   // Invalid id was returned.
@@ -908,18 +914,25 @@ void NFC::OnWatchRegistered(MessageCallback* callback,
   }
 
   if (error.is_null()) {
-    callbacks_.insert(id, callback);
+    callbacks_.insert(id, callback->ToNonV8Persistent());
     resolver->Resolve(id);
   } else {
     resolver->Reject(NFCError::Take(resolver, error->error_type));
   }
 }
 
-DEFINE_TRACE(NFC) {
-  PageVisibilityObserver::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+void NFC::Trace(blink::Visitor* visitor) {
   visitor->Trace(requests_);
   visitor->Trace(callbacks_);
+  ScriptWrappable::Trace(visitor);
+  PageVisibilityObserver::Trace(visitor);
+  ContextLifecycleObserver::Trace(visitor);
+}
+
+void NFC::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
+  for (const auto& callback : callbacks_.Values())
+    visitor->TraceWrappers(callback);
+  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

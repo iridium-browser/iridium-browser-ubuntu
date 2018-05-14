@@ -8,9 +8,8 @@
 #include <unordered_map>
 
 #include "base/callback_forward.h"
-#include "base/id_map.h"
+#include "base/containers/id_map.h"
 #include "base/macros.h"
-#include "base/memory/weak_ptr.h"
 #include "chrome/browser/permissions/permission_util.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/common/content_settings.h"
@@ -33,6 +32,20 @@ class PermissionManager : public KeyedService,
 
   explicit PermissionManager(Profile* profile);
   ~PermissionManager() override;
+
+  // Converts from |url|'s actual origin to the "canonical origin" that should
+  // be used for the purpose of requesting/storing permissions. For example, the
+  // origin of the local NTP gets mapped to the Google base URL instead. With
+  // Permission Delegation it will transform the requesting origin into
+  // the embedding origin because all permission checks happen on the top level
+  // origin.
+  //
+  // All the public methods below, such as RequestPermission or
+  // GetPermissionStatus, take the actual origin and do the canonicalization
+  // internally. You only need to call this directly if you do something else
+  // with the origin, such as display it in the UI.
+  GURL GetCanonicalOrigin(const GURL& requesting_origin,
+                          const GURL& embedding_origin) const;
 
   // Callers from within chrome/ should use the methods which take the
   // ContentSettingsType enum. The methods which take PermissionType values
@@ -82,7 +95,6 @@ class PermissionManager : public KeyedService,
       const base::Callback<
           void(const std::vector<blink::mojom::PermissionStatus>&)>& callback)
       override;
-  void CancelPermissionRequest(int request_id) override;
   void ResetPermission(content::PermissionType permission,
                        const GURL& requesting_origin,
                        const GURL& embedding_origin) override;
@@ -108,12 +120,12 @@ class PermissionManager : public KeyedService,
   friend class GeolocationPermissionContextTests;
 
   class PendingRequest;
-  using PendingRequestsMap = IDMap<std::unique_ptr<PendingRequest>>;
+  using PendingRequestsMap = base::IDMap<std::unique_ptr<PendingRequest>>;
 
   class PermissionResponseCallback;
 
   struct Subscription;
-  using SubscriptionsMap = IDMap<std::unique_ptr<Subscription>>;
+  using SubscriptionsMap = base::IDMap<std::unique_ptr<Subscription>>;
 
   // KeyedService implementation
   void Shutdown() override;
@@ -150,8 +162,6 @@ class PermissionManager : public KeyedService,
                      std::unique_ptr<PermissionContextBase>,
                      ContentSettingsTypeHash>
       permission_contexts_;
-
-  base::WeakPtrFactory<PermissionManager> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PermissionManager);
 };

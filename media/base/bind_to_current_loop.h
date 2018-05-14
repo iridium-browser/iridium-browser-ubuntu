@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -30,14 +29,6 @@
 namespace media {
 namespace internal {
 
-inline base::OnceClosure MakeClosure(base::RepeatingClosure* callback) {
-  return *callback;
-}
-
-inline base::OnceClosure MakeClosure(base::OnceClosure* callback) {
-  return std::move(*callback);
-}
-
 template <typename Signature, typename... Args>
 base::OnceClosure MakeClosure(base::RepeatingCallback<Signature>* callback,
                               Args&&... args) {
@@ -53,7 +44,7 @@ base::OnceClosure MakeClosure(base::OnceCallback<Signature>* callback,
 template <typename CallbackType>
 class TrampolineHelper {
  public:
-  TrampolineHelper(const tracked_objects::Location& posted_from,
+  TrampolineHelper(const base::Location& posted_from,
                    scoped_refptr<base::SequencedTaskRunner> task_runner,
                    CallbackType callback)
       : posted_from_(posted_from),
@@ -82,7 +73,7 @@ class TrampolineHelper {
  private:
   static void ClearCallbackOnTargetTaskRunner(CallbackType) {}
 
-  tracked_objects::Location posted_from_;
+  base::Location posted_from_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   CallbackType callback_;
 };
@@ -98,7 +89,7 @@ inline base::RepeatingCallback<void(Args...)> BindToCurrentLoop(
   RunnerType run = &Helper::Run;
   // TODO(tzik): Propagate FROM_HERE from the caller.
   return base::BindRepeating(
-      run, base::MakeUnique<Helper>(
+      run, std::make_unique<Helper>(
                FROM_HERE, base::ThreadTaskRunnerHandle::Get(), std::move(cb)));
 }
 
@@ -111,7 +102,7 @@ inline base::OnceCallback<void(Args...)> BindToCurrentLoop(
   RunnerType run = &Helper::Run;
   // TODO(tzik): Propagate FROM_HERE from the caller.
   return base::BindOnce(
-      run, base::MakeUnique<Helper>(
+      run, std::make_unique<Helper>(
                FROM_HERE, base::ThreadTaskRunnerHandle::Get(), std::move(cb)));
 }
 

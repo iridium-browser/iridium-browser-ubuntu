@@ -4,17 +4,19 @@
 
 #include "media/audio/android/audio_manager_android.h"
 
+#include <memory>
+
 #include "base/android/build_info.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "jni/AudioManagerAndroid_jni.h"
 #include "media/audio/android/audio_record_input.h"
+#include "media/audio/android/audio_track_output_stream.h"
 #include "media/audio/android/opensles_input.h"
 #include "media/audio/android/opensles_output.h"
 #include "media/audio/audio_device_description.h"
@@ -28,6 +30,7 @@ using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 
 namespace media {
@@ -49,7 +52,7 @@ const int kDefaultOutputBufferSize = 2048;
 std::unique_ptr<AudioManager> CreateAudioManager(
     std::unique_ptr<AudioThread> audio_thread,
     AudioLogFactory* audio_log_factory) {
-  return base::MakeUnique<AudioManagerAndroid>(std::move(audio_thread),
+  return std::make_unique<AudioManagerAndroid>(std::move(audio_thread),
                                                audio_log_factory);
 }
 
@@ -239,9 +242,8 @@ AudioOutputStream* AudioManagerAndroid::MakeBitstreamOutputStream(
     const AudioParameters& params,
     const std::string& device_id,
     const LogCallback& log_callback) {
-  // TODO(tsunghung): add output stream for audio bitstream formats.
-  NOTREACHED();
-  return nullptr;
+  DCHECK(params.IsBitstreamFormat());
+  return new AudioTrackOutputStream(this, params);
 }
 
 AudioInputStream* AudioManagerAndroid::MakeLinearInputStream(
@@ -284,8 +286,9 @@ AudioInputStream* AudioManagerAndroid::MakeLowLatencyInputStream(
 }
 
 // static
-bool AudioManagerAndroid::RegisterAudioManager(JNIEnv* env) {
-  return RegisterNativesImpl(env);
+bool AudioManagerAndroid::SupportsPerformanceModeForOutput() {
+  return base::android::BuildInfo::GetInstance()->sdk_int() >=
+         base::android::SDK_VERSION_NOUGAT_MR1;
 }
 
 void AudioManagerAndroid::SetMute(JNIEnv* env,
@@ -339,8 +342,16 @@ AudioParameters AudioManagerAndroid::GetPreferredOutputStreamParameters(
       channel_layout = input_params.channel_layout();
     }
 
-    buffer_size = GetOptimalOutputFrameSize(
-        sample_rate, ChannelLayoutToChannelCount(channel_layout));
+    // For high latency playback on supported platforms, pass through the
+    // requested buffer size; this provides significant power savings (~25%) and
+    // reduces the potential for glitches under load.
+    if (SupportsPerformanceModeForOutput() &&
+        input_params.latency_tag() == AudioLatency::LATENCY_PLAYBACK) {
+      buffer_size = input_params.frames_per_buffer();
+    } else {
+      buffer_size = GetOptimalOutputFrameSize(
+          sample_rate, ChannelLayoutToChannelCount(channel_layout));
+    }
   }
 
   int user_buffer_size = GetUserBufferSize();
@@ -355,7 +366,7 @@ bool AudioManagerAndroid::HasNoAudioInputStreams() {
   return input_stream_count() == 0;
 }
 
-jobject AudioManagerAndroid::GetJavaAudioManager() {
+const JavaRef<jobject>& AudioManagerAndroid::GetJavaAudioManager() {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   if (j_audio_manager_.is_null()) {
     // Create the Android audio manager on the audio thread.
@@ -369,7 +380,7 @@ jobject AudioManagerAndroid::GetJavaAudioManager() {
     Java_AudioManagerAndroid_init(base::android::AttachCurrentThread(),
                                   j_audio_manager_);
   }
-  return j_audio_manager_.obj();
+  return j_audio_manager_;
 }
 
 void AudioManagerAndroid::SetCommunicationAudioModeOn(bool on) {

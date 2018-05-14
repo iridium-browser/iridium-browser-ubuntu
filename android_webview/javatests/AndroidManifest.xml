@@ -4,10 +4,11 @@
        in the LICENSE file. -->
   <manifest xmlns:android="http://schemas.android.com/apk/res/android"
       package="org.chromium.android_webview.test">
-    <uses-sdk android:minSdkVersion="19" android:targetSdkVersion="23" />
-    <instrumentation android:name="org.chromium.android_webview.test.AwInstrumentationTestRunner"
+    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="23" />
+    <instrumentation android:name="org.chromium.base.test.BaseChromiumAndroidJUnitRunner"
         android:targetPackage="org.chromium.android_webview.shell"
-        android:label="Tests for org.chromium.android_webview"/>
+        android:label="Tests for org.chromium.android_webview"
+        chromium-junit4="true"/>
     <uses-permission android:name="android.permission.RUN_INSTRUMENTATION" />
     <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" />
     <uses-permission android:name="android.permission.READ_LOGS"/>

@@ -12,10 +12,11 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "third_party/harfbuzz-ng/src/hb.h"
 #include "third_party/icu/source/common/unicode/ubidi.h"
 #include "third_party/icu/source/common/unicode/uscript.h"
 #include "ui/gfx/render_text.h"
+
+#include <hb.h>
 
 namespace base {
 namespace i18n {
@@ -53,12 +54,15 @@ struct GFX_EXPORT TextRunHarfBuzz {
   void GetClusterAt(size_t pos, Range* chars, Range* glyphs) const;
 
   // Returns the grapheme bounds at |text_index|. Handles multi-grapheme glyphs.
+  // Returned value is the horizontal pixel span in text-space (assumes all runs
+  // are on the same line). The returned range is never reversed.
   RangeF GetGraphemeBounds(RenderTextHarfBuzz* render_text,
                            size_t text_index) const;
 
-  // Returns the width of the given |char_range| handling grapheme boundaries
-  // within glyphs.
-  float GetGraphemeWidthForCharRange(RenderTextHarfBuzz* render_text,
+  // Returns the horizontal span of the given |char_range| handling grapheme
+  // boundaries within glyphs. This is a wrapper around one or more calls to
+  // GetGraphemeBounds(), returning a range in the same coordinate space.
+  RangeF GetGraphemeSpanForCharRange(RenderTextHarfBuzz* render_text,
                                      const Range& char_range) const;
 
   // Returns the glyph width for the given character range. |char_range| is in
@@ -87,6 +91,7 @@ struct GFX_EXPORT TextRunHarfBuzz {
   Font::Weight weight;
   bool strike;
   bool underline;
+  bool heavy_underline;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TextRunHarfBuzz);
@@ -162,7 +167,7 @@ class GFX_EXPORT RenderTextHarfBuzz : public RenderText {
   SelectionModel FindCursorPosition(const Point& point) override;
   bool IsSelectionSupported() const override;
   std::vector<FontSpan> GetFontSpansForTesting() override;
-  Range GetGlyphBounds(size_t index) override;
+  Range GetCursorSpan(const Range& text_range) override;
 
   // ICU grapheme iterator for the layout text. Can be null in case of an error.
   base::i18n::BreakIterator* GetGraphemeIterator();
@@ -188,13 +193,6 @@ class GFX_EXPORT RenderTextHarfBuzz : public RenderText {
  private:
   friend class test::RenderTextTestApi;
   friend class RenderTextHarfBuzzTest;
-
-  // Specify the width of a glyph for test. The width of glyphs is very
-  // platform-dependent and environment-dependent. Otherwise multiline test
-  // will become really flaky.
-  void set_glyph_width_for_test(float test_width) {
-    glyph_width_for_test_ = test_width;
-  }
 
   // Return the run index that contains the argument; or the length of the
   // |runs_| vector if argument exceeds the text length or width.
@@ -241,14 +239,12 @@ class GFX_EXPORT RenderTextHarfBuzz : public RenderText {
   // Makes sure that text runs for layout text are shaped.
   void EnsureLayoutRunList();
 
-  // Returns the current run list, |display_run_list_| if the text is
-  // elided, or |layout_run_list_| otherwise.
-  internal::TextRunList* GetRunList();
-  const internal::TextRunList* GetRunList() const;
-
   // RenderText:
+  internal::TextRunList* GetRunList() override;
+  const internal::TextRunList* GetRunList() const override;
   bool GetDecoratedTextForRange(const Range& range,
                                 DecoratedText* decorated_text) override;
+  void SetGlyphWidthForTest(float test_width) override;
 
   // Text run list for |layout_text_| and |display_text_|.
   // |display_run_list_| is created only when the text is elided.

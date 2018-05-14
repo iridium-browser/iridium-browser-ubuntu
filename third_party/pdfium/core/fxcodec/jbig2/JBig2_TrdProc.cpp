@@ -12,7 +12,7 @@
 #include "core/fxcodec/jbig2/JBig2_ArithIntDecoder.h"
 #include "core/fxcodec/jbig2/JBig2_GrrdProc.h"
 #include "core/fxcodec/jbig2/JBig2_HuffmanDecoder.h"
-#include "core/fxcrt/cfx_maybe_owned.h"
+#include "core/fxcrt/maybe_owned.h"
 #include "third_party/base/ptr_util.h"
 
 CJBig2_TRDProc::CJBig2_TRDProc() {}
@@ -25,30 +25,32 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Huffman(
   auto pHuffmanDecoder = pdfium::MakeUnique<CJBig2_HuffmanDecoder>(pStream);
   auto SBREG = pdfium::MakeUnique<CJBig2_Image>(SBW, SBH);
   SBREG->fill(SBDEFPIXEL);
-  int32_t STRIPT;
-  if (pHuffmanDecoder->decodeAValue(SBHUFFDT, &STRIPT) != 0)
+  int32_t INITIAL_STRIPT;
+  if (pHuffmanDecoder->decodeAValue(SBHUFFDT, &INITIAL_STRIPT) != 0)
     return nullptr;
 
+  FX_SAFE_INT32 STRIPT = INITIAL_STRIPT;
   STRIPT *= SBSTRIPS;
   STRIPT = -STRIPT;
-  int32_t FIRSTS = 0;
+  FX_SAFE_INT32 FIRSTS = 0;
   uint32_t NINSTANCES = 0;
   while (NINSTANCES < SBNUMINSTANCES) {
-    int32_t DT;
-    if (pHuffmanDecoder->decodeAValue(SBHUFFDT, &DT) != 0)
+    int32_t INITIAL_DT;
+    if (pHuffmanDecoder->decodeAValue(SBHUFFDT, &INITIAL_DT) != 0)
       return nullptr;
 
+    FX_SAFE_INT32 DT = INITIAL_DT;
     DT *= SBSTRIPS;
-    STRIPT = STRIPT + DT;
+    STRIPT += DT;
     bool bFirst = true;
-    int32_t CURS = 0;
+    FX_SAFE_INT32 CURS = 0;
     for (;;) {
       if (bFirst) {
         int32_t DFS;
         if (pHuffmanDecoder->decodeAValue(SBHUFFFS, &DFS) != 0)
           return nullptr;
 
-        FIRSTS = FIRSTS + DFS;
+        FIRSTS += DFS;
         CURS = FIRSTS;
         bFirst = false;
       } else {
@@ -60,7 +62,8 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Huffman(
         if (nVal != 0)
           return nullptr;
 
-        CURS = CURS + IDS + SBDSOFFSET;
+        CURS += IDS;
+        CURS += SBDSOFFSET;
       }
       uint8_t CURT = 0;
       if (SBSTRIPS != 1) {
@@ -73,7 +76,11 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Huffman(
 
         CURT = nVal;
       }
-      int32_t TI = STRIPT + CURT;
+      FX_SAFE_INT32 SAFE_TI = STRIPT + CURT;
+      if (!SAFE_TI.IsValid())
+        return nullptr;
+
+      int32_t TI = SAFE_TI.ValueOrDie();
       pdfium::base::CheckedNumeric<int32_t> nVal = 0;
       int32_t nBits = 0;
       uint32_t IDI;
@@ -101,7 +108,7 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Huffman(
       if (SBREFINE != 0 && pStream->read1Bit(&RI) != 0)
         return nullptr;
 
-      CFX_MaybeOwned<CJBig2_Image> IBI;
+      MaybeOwned<CJBig2_Image> IBI;
       if (RI == 0) {
         IBI = SBSYMS[IDI];
       } else {
@@ -160,12 +167,15 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Huffman(
       uint32_t HI = IBI->height();
       if (TRANSPOSED == 0 && ((REFCORNER == JBIG2_CORNER_TOPRIGHT) ||
                               (REFCORNER == JBIG2_CORNER_BOTTOMRIGHT))) {
-        CURS = CURS + WI - 1;
+        CURS += WI - 1;
       } else if (TRANSPOSED == 1 && ((REFCORNER == JBIG2_CORNER_BOTTOMLEFT) ||
                                      (REFCORNER == JBIG2_CORNER_BOTTOMRIGHT))) {
-        CURS = CURS + HI - 1;
+        CURS += HI - 1;
       }
-      int32_t SI = CURS;
+      if (!CURS.IsValid())
+        return nullptr;
+
+      int32_t SI = CURS.ValueOrDie();
       if (TRANSPOSED == 0) {
         switch (REFCORNER) {
           case JBIG2_CORNER_TOPLEFT:
@@ -199,10 +209,10 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Huffman(
       }
       if (TRANSPOSED == 0 && ((REFCORNER == JBIG2_CORNER_TOPLEFT) ||
                               (REFCORNER == JBIG2_CORNER_BOTTOMLEFT))) {
-        CURS = CURS + WI - 1;
+        CURS += WI - 1;
       } else if (TRANSPOSED == 1 && ((REFCORNER == JBIG2_CORNER_TOPLEFT) ||
                                      (REFCORNER == JBIG2_CORNER_TOPRIGHT))) {
-        CURS = CURS + HI - 1;
+        CURS += HI - 1;
       }
       NINSTANCES = NINSTANCES + 1;
     }
@@ -214,16 +224,16 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Arith(
     CJBig2_ArithDecoder* pArithDecoder,
     JBig2ArithCtx* grContext,
     JBig2IntDecoderState* pIDS) {
-  CFX_MaybeOwned<CJBig2_ArithIntDecoder> pIADT;
-  CFX_MaybeOwned<CJBig2_ArithIntDecoder> pIAFS;
-  CFX_MaybeOwned<CJBig2_ArithIntDecoder> pIADS;
-  CFX_MaybeOwned<CJBig2_ArithIntDecoder> pIAIT;
-  CFX_MaybeOwned<CJBig2_ArithIntDecoder> pIARI;
-  CFX_MaybeOwned<CJBig2_ArithIntDecoder> pIARDW;
-  CFX_MaybeOwned<CJBig2_ArithIntDecoder> pIARDH;
-  CFX_MaybeOwned<CJBig2_ArithIntDecoder> pIARDX;
-  CFX_MaybeOwned<CJBig2_ArithIntDecoder> pIARDY;
-  CFX_MaybeOwned<CJBig2_ArithIaidDecoder> pIAID;
+  MaybeOwned<CJBig2_ArithIntDecoder> pIADT;
+  MaybeOwned<CJBig2_ArithIntDecoder> pIAFS;
+  MaybeOwned<CJBig2_ArithIntDecoder> pIADS;
+  MaybeOwned<CJBig2_ArithIntDecoder> pIAIT;
+  MaybeOwned<CJBig2_ArithIntDecoder> pIARI;
+  MaybeOwned<CJBig2_ArithIntDecoder> pIARDW;
+  MaybeOwned<CJBig2_ArithIntDecoder> pIARDH;
+  MaybeOwned<CJBig2_ArithIntDecoder> pIARDX;
+  MaybeOwned<CJBig2_ArithIntDecoder> pIARDY;
+  MaybeOwned<CJBig2_ArithIaidDecoder> pIAID;
   if (pIDS) {
     pIADT = pIDS->IADT;
     pIAFS = pIDS->IAFS;
@@ -249,20 +259,22 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Arith(
   }
   auto SBREG = pdfium::MakeUnique<CJBig2_Image>(SBW, SBH);
   SBREG->fill(SBDEFPIXEL);
-  int32_t STRIPT;
-  if (!pIADT->decode(pArithDecoder, &STRIPT))
+  int32_t INITIAL_STRIPT;
+  if (!pIADT->decode(pArithDecoder, &INITIAL_STRIPT))
     return nullptr;
 
+  FX_SAFE_INT32 STRIPT = INITIAL_STRIPT;
   STRIPT *= SBSTRIPS;
   STRIPT = -STRIPT;
-  int32_t FIRSTS = 0;
+  FX_SAFE_INT32 FIRSTS = 0;
   uint32_t NINSTANCES = 0;
   while (NINSTANCES < SBNUMINSTANCES) {
-    int32_t CURS = 0;
-    int32_t DT;
-    if (!pIADT->decode(pArithDecoder, &DT))
+    FX_SAFE_INT32 CURS = 0;
+    int32_t INITIAL_DT;
+    if (!pIADT->decode(pArithDecoder, &INITIAL_DT))
       return nullptr;
 
+    FX_SAFE_INT32 DT = INITIAL_DT;
     DT *= SBSTRIPS;
     STRIPT += DT;
     bool bFirst = true;
@@ -278,7 +290,8 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Arith(
         if (!pIADS->decode(pArithDecoder, &IDS))
           break;
 
-        CURS += IDS + SBDSOFFSET;
+        CURS += IDS;
+        CURS += SBDSOFFSET;
       }
       if (NINSTANCES >= SBNUMINSTANCES)
         break;
@@ -287,7 +300,11 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Arith(
       if (SBSTRIPS != 1)
         pIAIT->decode(pArithDecoder, &CURT);
 
-      int32_t TI = STRIPT + CURT;
+      FX_SAFE_INT32 SAFE_TI = STRIPT + CURT;
+      if (!SAFE_TI.IsValid())
+        return nullptr;
+
+      int32_t TI = SAFE_TI.ValueOrDie();
       uint32_t IDI;
       pIAID->decode(pArithDecoder, &IDI);
       if (IDI >= SBNUMSYMS)
@@ -299,7 +316,7 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Arith(
       else
         pIARI->decode(pArithDecoder, &RI);
 
-      CFX_MaybeOwned<CJBig2_Image> pIBI;
+      MaybeOwned<CJBig2_Image> pIBI;
       if (RI == 0) {
         pIBI = SBSYMS[IDI];
       } else {
@@ -348,7 +365,10 @@ std::unique_ptr<CJBig2_Image> CJBig2_TRDProc::decode_Arith(
                                      (REFCORNER == JBIG2_CORNER_BOTTOMRIGHT))) {
         CURS += HI - 1;
       }
-      int32_t SI = CURS;
+      if (!CURS.IsValid())
+        return nullptr;
+
+      int32_t SI = CURS.ValueOrDie();
       if (TRANSPOSED == 0) {
         switch (REFCORNER) {
           case JBIG2_CORNER_TOPLEFT:

@@ -7,10 +7,11 @@
 
 #include <stddef.h>
 
+#include <map>
 #include <set>
-#include <stack>
 #include <string>
 
+#include "base/containers/stack.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
@@ -141,6 +142,10 @@ class URLIndexPrivateData
   // from the cache or a complete rebuild from the history database.
   void Clear();
 
+  // Estimates dynamic memory usage.
+  // See base/trace_event/memory_usage_estimator.h for more info.
+  size_t EstimateMemoryUsage() const;
+
  private:
   friend class base::RefCountedThreadSafe<URLIndexPrivateData>;
   ~URLIndexPrivateData();
@@ -149,6 +154,8 @@ class URLIndexPrivateData
   friend class InMemoryURLIndexTest;
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, CacheSaveRestore);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, CalculateWordStartsOffsets);
+  FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest,
+                           CalculateWordStartsOffsetsUnderscore);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, HugeResultSet);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, ReadVisitsFromHistory);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, RebuildFromHistoryIfCacheOld);
@@ -184,6 +191,10 @@ class URLIndexPrivateData
     SearchTermCacheItem(const SearchTermCacheItem& other);
 
     ~SearchTermCacheItem();
+
+    // Estimates dynamic memory usage.
+    // See base/trace_event/memory_usage_estimator.h for more info.
+    size_t EstimateMemoryUsage() const;
 
     WordIDSet word_id_set_;
     HistoryIDSet history_id_set_;
@@ -237,6 +248,11 @@ class URLIndexPrivateData
   // in each term.  For example, in the term "-foo" the word starts at offset 1.
   static void CalculateWordStartsOffsets(
       const String16Vector& terms,
+      WordStarts* terms_to_word_starts_offsets);
+
+  static void CalculateWordStartsOffsets(
+      const String16Vector& terms,
+      bool force_break_on_underscore,
       WordStarts* terms_to_word_starts_offsets);
 
   // Indexes one URL history item as described by |row|. Returns true if the
@@ -347,7 +363,7 @@ class URLIndexPrivateData
   // modified or deleted old words may be removed from the index, in which
   // case the slots for those words are added to available_words_ for reuse
   // by future URL updates.
-  std::stack<WordID> available_words_;
+  base::stack<WordID> available_words_;
 
   // A one-to-one mapping from the a word string to its slot number (i.e.
   // WordID) in the |word_list_|.

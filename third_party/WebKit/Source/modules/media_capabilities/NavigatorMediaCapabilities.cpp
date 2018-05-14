@@ -9,6 +9,10 @@
 
 namespace blink {
 
+// static
+const char NavigatorMediaCapabilities::kSupplementName[] =
+    "NavigatorMediaCapabilities";
+
 MediaCapabilities* NavigatorMediaCapabilities::mediaCapabilities(
     Navigator& navigator) {
   NavigatorMediaCapabilities& self =
@@ -18,7 +22,7 @@ MediaCapabilities* NavigatorMediaCapabilities::mediaCapabilities(
   return self.capabilities_.Get();
 }
 
-DEFINE_TRACE(NavigatorMediaCapabilities) {
+void NavigatorMediaCapabilities::Trace(blink::Visitor* visitor) {
   visitor->Trace(capabilities_);
   Supplement<Navigator>::Trace(visitor);
 }
@@ -29,17 +33,12 @@ NavigatorMediaCapabilities::NavigatorMediaCapabilities(Navigator& navigator)
 NavigatorMediaCapabilities& NavigatorMediaCapabilities::From(
     Navigator& navigator) {
   NavigatorMediaCapabilities* supplement =
-      static_cast<NavigatorMediaCapabilities*>(
-          Supplement<Navigator>::From(navigator, SupplementName()));
+      Supplement<Navigator>::From<NavigatorMediaCapabilities>(navigator);
   if (!supplement) {
     supplement = new NavigatorMediaCapabilities(navigator);
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
-}
-
-const char* NavigatorMediaCapabilities::SupplementName() {
-  return "NavigatorMediaCapabilities";
 }
 
 }  // namespace blink

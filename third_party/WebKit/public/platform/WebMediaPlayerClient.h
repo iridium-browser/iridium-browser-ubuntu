@@ -32,13 +32,16 @@
 #define WebMediaPlayerClient_h
 
 #include "WebCommon.h"
+#include "WebLocalizedString.h"
 #include "WebMediaPlayer.h"
+#include "ui/gfx/color_space.h"
 
 namespace blink {
 
 class WebInbandTextTrack;
 class WebLayer;
 class WebMediaSource;
+class WebRemotePlaybackClient;
 
 enum class WebRemotePlaybackAvailability;
 
@@ -94,6 +97,8 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   virtual void DisconnectedFromRemoteDevice() = 0;
   virtual void CancelledRemotePlaybackRequest() = 0;
   virtual void RemotePlaybackStarted() = 0;
+  virtual void RemotePlaybackCompatibilityChanged(const WebURL&,
+                                                  bool is_compatible) = 0;
 
   // Set the player as the persistent video. Persistent video should hide its
   // controls and go fullscreen.
@@ -101,8 +106,8 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
 
   // After the monitoring is activated, the client will inform WebMediaPlayer
   // when the element becomes/stops being the dominant visible content by
-  // calling WebMediaPlayer::becameDominantVisibleContent(bool).
-  virtual void ActivateViewportIntersectionMonitoring(bool) {}
+  // calling WebMediaPlayer::BecameDominantVisibleContent(bool).
+  virtual void ActivateViewportIntersectionMonitoring(bool) = 0;
 
   // Returns whether the media element is in an autoplay muted state.
   virtual bool IsAutoplayingMuted() = 0;
@@ -113,16 +118,50 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   // Returns the selected video track id (or an empty id if there's none).
   virtual WebMediaPlayer::TrackId GetSelectedVideoTrackId() = 0;
 
-  // Informs that media starts/stops being rendered and played back remotely.
-  virtual void MediaRemotingStarted() {}
-  virtual void MediaRemotingStopped() {}
+  // Informs that media starts being rendered and played back remotely.
+  // |remote_device_friendly_name| will be shown in the remoting UI to indicate
+  // which device the content is rendered on. An empty name indicates an unknown
+  // remote device. A default message will be shown in this case.
+  virtual void MediaRemotingStarted(
+      const WebString& remote_device_friendly_name) = 0;
+
+  // Informs that media stops being rendered remotely. |error_msg| corresponds
+  // to a localized string that explains the reason as user-readable text.
+  virtual void MediaRemotingStopped(WebLocalizedString::Name error_msg) = 0;
+
+  // Informs that Picture-in-Picture mode has started for the media element.
+  virtual void PictureInPictureStarted() = 0;
+
+  // Informs that Picture-in-Picture mode has stopped for the media element.
+  virtual void PictureInPictureStopped() = 0;
+
+  // Returns whether the media element is in Picture-in-Picture mode.
+  virtual bool IsInPictureInPictureMode() = 0;
 
   // Returns whether the media element has native controls. It does not mean
   // that the controls are currently visible.
   virtual bool HasNativeControls() = 0;
 
+  // Returns true iff the client represents an HTML <audio> element.
+  virtual bool IsAudioElement() = 0;
+
   // Returns the current display type of the media element.
   virtual WebMediaPlayer::DisplayType DisplayType() const = 0;
+
+  // Returns the remote playback client associated with the media element, if
+  // any.
+  virtual WebRemotePlaybackClient* RemotePlaybackClient() { return nullptr; };
+
+  // Returns the color space to render media into if.
+  // Rendering media into this color space may avoid some conversions.
+  virtual gfx::ColorSpace TargetColorSpace() { return gfx::ColorSpace(); }
+
+  // Returns whether the media element was initiated via autoplay.
+  // In this context, autoplay means that it was initiated before any user
+  // activation was received on the page and before a user initiated same-domain
+  // navigation. In other words, with the unified autoplay policy applied, it
+  // should only return `true` when MEI allowed autoplay.
+  virtual bool WasAutoplayInitiated() { return false; }
 
  protected:
   ~WebMediaPlayerClient() = default;

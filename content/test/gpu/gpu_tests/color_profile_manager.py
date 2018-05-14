@@ -2,31 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import atexit
+import os
+import subprocess
 import sys
 
-has_forced_srgb = False
+IMPL_PY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
+  __file__))), 'utilities', 'color_profile_manager_impl.py')
 
-# Force all displays to use an sRGB color profile until atexit.
-def ForceUntilExitSRGB():
-  global has_forced_srgb
+def ForceUntilExitSRGB(skip_restoring_color_profile=False):
   if not sys.platform.startswith('darwin'):
     return
-  if has_forced_srgb:
-    return
-  has_forced_srgb = True
-
-  from gpu_tests import color_profile_manager_mac
-  # Record the current color profiles.
-  display_profile_url_map = \
-      color_profile_manager_mac.GetDisplaysToProfileURLMap()
-  # Force to sRGB.
-  for display_id in display_profile_url_map:
-    color_profile_manager_mac.SetDisplayCustomProfile(
-        display_id, color_profile_manager_mac.GetSRGBProfileURL())
-  # Register an atexit handler to restore the previous color profiles.
-  def Restore():
-    for display_id in display_profile_url_map:
-      color_profile_manager_mac.SetDisplayCustomProfile(
-          display_id, display_profile_url_map[display_id])
-  atexit.register(Restore)
+  # The Mac-specific Python packages used by the other scripts are only
+  # available via the system-installed Python.
+  subprocess.call(['/usr/bin/python', IMPL_PY])

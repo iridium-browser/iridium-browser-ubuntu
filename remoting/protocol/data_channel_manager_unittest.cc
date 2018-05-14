@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "remoting/base/compound_buffer.h"
@@ -47,7 +46,7 @@ class FakeNamedMessagePipeHandler final : public NamedMessagePipeHandler {
 
   bool connected() const { return NamedMessagePipeHandler::connected(); }
 
-  void Send(google::protobuf::MessageLite* message,
+  void Send(const google::protobuf::MessageLite& message,
             const base::Closure& done);
 
  protected:
@@ -82,8 +81,9 @@ FakeNamedMessagePipeHandler* FakeNamedMessagePipeHandler::Find(
   return it->second;
 }
 
-void FakeNamedMessagePipeHandler::Send(google::protobuf::MessageLite* message,
-                                       const base::Closure& done) {
+void FakeNamedMessagePipeHandler::Send(
+    const google::protobuf::MessageLite& message,
+    const base::Closure& done) {
   if (connected()) {
     NamedMessagePipeHandler::Send(message, done);
     return;
@@ -140,9 +140,9 @@ void TestDataChannelManagerFullMatch(bool asynchronous) {
         },
         base::Unretained(&sent));
     ASSERT_TRUE(handler1->connected());
-    handler1->Send(&message, sent_callback);
+    handler1->Send(message, sent_callback);
     ASSERT_FALSE(handler2->connected());
-    handler2->Send(&message, sent_callback);
+    handler2->Send(message, sent_callback);
 
     base::RunLoop().RunUntilIdle();
     ASSERT_EQ(sent, 1);
@@ -159,8 +159,8 @@ void TestDataChannelManagerFullMatch(bool asynchronous) {
         base::Unretained(&sent));
     ASSERT_TRUE(handler2->connected());
 
-    handler1->Send(&message, sent_callback);
-    handler2->Send(&message, sent_callback);
+    handler1->Send(message, sent_callback);
+    handler2->Send(message, sent_callback);
 
     base::RunLoop().RunUntilIdle();
     ASSERT_EQ(sent, 2);
@@ -168,12 +168,12 @@ void TestDataChannelManagerFullMatch(bool asynchronous) {
 
   {
     std::string content;
-    auto message = base::MakeUnique<CompoundBuffer>();
+    auto message = std::make_unique<CompoundBuffer>();
     content = "FullMatchContent";
     message->AppendCopyOf(&(content[0]), content.size());
     pipe1.Receive(std::move(message));
 
-    message = base::MakeUnique<CompoundBuffer>();
+    message = std::make_unique<CompoundBuffer>();
     content = "AnotherFullMatchContent";
     message->AppendCopyOf(&(content[0]), content.size());
     pipe2.Receive(std::move(message));

@@ -31,31 +31,30 @@
 #include "core/CoreInitializer.h"
 
 #include "bindings/core/v8/ScriptStreamerThread.h"
-#include "core/EventNames.h"
-#include "core/EventTargetNames.h"
-#include "core/EventTypeNames.h"
-#include "core/HTMLNames.h"
-#include "core/HTMLTokenizerNames.h"
-#include "core/InputModeNames.h"
-#include "core/InputTypeNames.h"
-#include "core/MathMLNames.h"
-#include "core/MediaFeatureNames.h"
-#include "core/MediaTypeNames.h"
-#include "core/SVGNames.h"
-#include "core/XLinkNames.h"
-#include "core/XMLNSNames.h"
-#include "core/XMLNames.h"
 #include "core/css/MediaQueryEvaluator.h"
+#include "core/css/StyleChangeReason.h"
+#include "core/css/media_feature_names.h"
 #include "core/css/parser/CSSParserTokenRange.h"
 #include "core/dom/Document.h"
-#include "core/dom/StyleChangeReason.h"
+#include "core/event_names.h"
+#include "core/event_target_names.h"
+#include "core/event_type_names.h"
 #include "core/events/EventFactory.h"
 #include "core/html/canvas/CanvasRenderingContextFactory.h"
+#include "core/html_names.h"
+#include "core/html_tokenizer_names.h"
+#include "core/input_mode_names.h"
+#include "core/input_type_names.h"
+#include "core/mathml_names.h"
+#include "core/media_type_names.h"
+#include "core/svg_names.h"
 #include "core/workers/WorkerThread.h"
-#include "platform/FontFamilyNames.h"
-#include "platform/HTTPNames.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
+#include "core/xlink_names.h"
+#include "core/xml_names.h"
+#include "core/xmlns_names.h"
+#include "platform/font_family_names.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
+#include "platform/network/http_names.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityPolicy.h"
@@ -64,6 +63,8 @@
 #include "public/platform/Platform.h"
 
 namespace blink {
+
+CoreInitializer* CoreInitializer::instance_ = nullptr;
 
 void CoreInitializer::RegisterEventFactory() {
   static bool is_registered = false;
@@ -75,8 +76,9 @@ void CoreInitializer::RegisterEventFactory() {
 }
 
 void CoreInitializer::Initialize() {
-  DCHECK(!IsInitialized());
-  is_initialized_ = true;
+  // Initialize must be called once by singleton ModulesInitializer.
+  DCHECK(!instance_);
+  instance_ = this;
   // Note: in order to add core static strings for a new module (1)
   // the value of 'coreStaticStringsCount' must be updated with the
   // added strings count, (2) if the added strings are quialified names

@@ -29,6 +29,7 @@
 #ifndef AXTableColumn_h
 #define AXTableColumn_h
 
+#include "base/macros.h"
 #include "modules/ModulesExport.h"
 #include "modules/accessibility/AXMockObject.h"
 #include "modules/accessibility/AXTable.h"
@@ -38,8 +39,6 @@ namespace blink {
 class AXObjectCacheImpl;
 
 class MODULES_EXPORT AXTableColumn final : public AXMockObject {
-  WTF_MAKE_NONCOPYABLE(AXTableColumn);
-
  private:
   explicit AXTableColumn(AXObjectCacheImpl&);
 
@@ -52,20 +51,27 @@ class MODULES_EXPORT AXTableColumn final : public AXMockObject {
   // retrieves the "column" headers (th, scope) from top to bottom
   void HeaderObjectsForColumn(AXObjectVector&);
 
-  AccessibilityRole RoleValue() const override { return kColumnRole; }
-
   void SetColumnIndex(int column_index) { column_index_ = column_index; }
   int ColumnIndex() const { return column_index_; }
-  virtual bool CanSetSelectedAttribute() const { return false; }
 
   void AddChildren() override;
   void SetParent(AXObject*) override;
+
+ protected:
+  virtual bool CanSetSelectedAttribute() const { return false; }
+
+  // Set the role via RoleValue() instead of DetermineAccessibilityRole(),
+  // because the role depends on the parent, and DetermineAccessibilityRole()
+  // is called before SetParent().
+  AccessibilityRole RoleValue() const final;
 
  private:
   unsigned column_index_;
 
   bool IsTableCol() const override { return true; }
   bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
+
+  DISALLOW_COPY_AND_ASSIGN(AXTableColumn);
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXTableColumn, IsTableCol());

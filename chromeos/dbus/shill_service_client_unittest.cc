@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "base/test/mock_callback.h"
@@ -99,7 +101,7 @@ TEST_F(ShillServiceClientTest, GetProperties) {
 
   // Set expectations.
   base::DictionaryValue value;
-  value.SetIntegerWithoutPathExpansion(shill::kSignalStrengthProperty, kValue);
+  value.SetKey(shill::kSignalStrengthProperty, base::Value(kValue));
   PrepareForMethodCall(shill::kGetPropertiesFunction,
                        base::Bind(&ExpectNoArgument),
                        response.get());

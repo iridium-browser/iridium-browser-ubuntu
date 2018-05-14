@@ -28,11 +28,6 @@
 
 using content::BrowserThread;
 
-// Known browsers which we collect details for.
-enum BrowserProcess {
-  CHROME_BROWSER = 0,
-};
-
 MemoryDetails::MemoryDetails() {
   base::FilePath browser_process_path;
   PathService::Get(base::FILE_EXE, &browser_process_path);
@@ -49,7 +44,7 @@ ProcessData* MemoryDetails::ChromeBrowser() {
 
 void MemoryDetails::CollectProcessData(
     const std::vector<ProcessMemoryInformation>& child_info) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   // Clear old data.
   process_data_[0].processes.clear();

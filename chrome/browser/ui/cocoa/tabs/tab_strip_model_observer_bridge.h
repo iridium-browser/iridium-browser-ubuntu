@@ -55,17 +55,20 @@ class TabStripModelObserverBridge : public TabStripModelObserver {
   void TabPinnedStateChanged(TabStripModel* tab_strip_model,
                              content::WebContents* contents,
                              int index) override;
+  void TabBlockedStateChanged(content::WebContents* contents,
+                              int index) override;
   void TabStripEmpty() override;
+  void SetTabNeedsAttentionAt(int index, bool attention) override;
 
  private:
   id controller_;  // weak, owns me
   TabStripModel* model_;  // weak, owned by Browser
 };
 
-// A collection of methods which can be selectively implemented by any
-// Cocoa object to receive updates about changes to a tab strip model. It is
-// ok to not implement them, the calling code checks before calling.
-@interface NSObject(TabStripModelBridge)
+// A protocol which can be selectively implemented by any Cocoa object to
+// receive updates about changes to a tab strip model. All methods are optional.
+@protocol TabStripModelBridge
+@optional
 - (void)insertTabWithContents:(content::WebContents*)contents
                       atIndex:(NSInteger)index
                  inForeground:(bool)inForeground;
@@ -83,14 +86,17 @@ class TabStripModelObserverBridge : public TabStripModelObserver {
                      toIndex:(NSInteger)to;
 - (void)tabChangedWithContents:(content::WebContents*)contents
                        atIndex:(NSInteger)index
-                    changeType:(TabStripModelObserver::TabChangeType)change;
+                    changeType:(TabChangeType)change;
 - (void)tabReplacedWithContents:(content::WebContents*)newContents
                previousContents:(content::WebContents*)oldContents
                         atIndex:(NSInteger)index;
 - (void)tabPinnedStateChangedWithContents:(content::WebContents*)contents
                                   atIndex:(NSInteger)index;
+- (void)tabBlockedStateChangedWithContents:(content::WebContents*)contents
+                                   atIndex:(NSInteger)index;
 - (void)tabStripEmpty;
 - (void)tabSelectionChanged;
+- (void)tabAtIndex:(NSInteger)index needsAttention:(bool)attention;
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_TABS_TAB_STRIP_MODEL_OBSERVER_BRIDGE_H_

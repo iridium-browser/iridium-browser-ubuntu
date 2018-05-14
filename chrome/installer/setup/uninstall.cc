@@ -7,6 +7,7 @@
 #include "chrome/installer/setup/uninstall.h"
 
 #include <windows.h>
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -638,6 +639,15 @@ bool DeleteChromeRegistrationKeys(const InstallerState& installer_state,
   reg_app_id.append(install_static::GetBaseAppId() + browser_entry_suffix);
   InstallUtil::DeleteRegistryKey(root, reg_app_id, WorkItem::kWow64Default);
 
+  // Delete Software\Classes\CLSID\|toast_activator_clsid|.
+  base::string16 toast_activator_reg_path = GetToastActivatorRegistryPath();
+  if (!toast_activator_reg_path.empty()) {
+    InstallUtil::DeleteRegistryKey(root, toast_activator_reg_path,
+                                   WorkItem::kWow64Default);
+  } else {
+    LOG(DFATAL) << "Cannot retrieve the toast activator registry path";
+  }
+
   // Delete all Start Menu Internet registrations that refer to this Chrome.
   {
     using base::win::RegistryKeyIterator;
@@ -929,41 +939,40 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
       DeleteChromeRegistrationKeys(installer_state, browser_dist,
                                    HKEY_CURRENT_USER, old_style_suffix, &ret);
     }
-
-    // Chrome is registered in HKLM for all system-level installs and for
-    // user-level installs for which Chrome has been made the default browser.
-    // Always remove the HKLM registration for system-level installs.  For
-    // user-level installs, only remove it if both: 1) this uninstall isn't a
-    // self destruct following the installation of a system-level Chrome
-    // (because the system-level Chrome owns the HKLM registration now), and 2)
-    // this user has made Chrome their default browser (i.e. has shell
-    // integration entries registered with |suffix| (note: |suffix| will be the
-    // empty string if required as it is obtained by
-    // GetCurrentInstallationSuffix() above)).
-    // TODO(gab): This can still leave parts of a suffixed install behind. To be
-    // able to remove them we would need to be able to remove only suffixed
-    // entries (as it is now some of the registry entries (e.g. App Paths) are
-    // unsuffixed; thus removing suffixed installs is prohibited in HKLM if
-    // !|remove_all| for now).
-    if (installer_state.system_install() ||
-        (remove_all &&
-         ShellUtil::QuickIsChromeRegisteredInHKLM(chrome_exe, suffix))) {
-      DeleteChromeRegistrationKeys(installer_state, browser_dist,
-                                   HKEY_LOCAL_MACHINE, suffix, &ret);
-    }
-
-    ProcessChromeWorkItems(installer_state, product);
-
-    UninstallActiveSetupEntries(installer_state);
-
-    UninstallFirewallRules(browser_dist, chrome_exe);
-
-    RemoveBlacklistState();
-
-    // Notify the shell that associations have changed since Chrome was likely
-    // unregistered.
-    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
   }
+
+  // Chrome is registered in HKLM for all system-level installs and for
+  // user-level installs for which Chrome has been made the default browser.
+  // Always remove the HKLM registration for system-level installs. For
+  // user-level installs, only remove it if both: 1) this uninstall isn't a self
+  // destruct following the installation of a system-level Chrome (because the
+  // system-level Chrome owns the HKLM registration now), and 2) this user has
+  // made Chrome their default browser (i.e. has shell integration entries
+  // registered with |suffix| (note: |suffix| will be the empty string if
+  // required as it is obtained by GetCurrentInstallationSuffix() above)).
+  // TODO(gab): This can still leave parts of a suffixed install behind. To be
+  // able to remove them we would need to be able to remove only suffixed
+  // entries (as it is now some of the registry entries (e.g. App Paths) are
+  // unsuffixed; thus removing suffixed installs is prohibited in HKLM if
+  // !|remove_all| for now).
+  if (installer_state.system_install() ||
+      (remove_all &&
+       ShellUtil::QuickIsChromeRegisteredInHKLM(chrome_exe, suffix))) {
+    DeleteChromeRegistrationKeys(installer_state, browser_dist,
+                                 HKEY_LOCAL_MACHINE, suffix, &ret);
+  }
+
+  ProcessChromeWorkItems(installer_state, product);
+
+  UninstallActiveSetupEntries(installer_state);
+
+  UninstallFirewallRules(browser_dist, chrome_exe);
+
+  RemoveBlacklistState();
+
+  // Notify the shell that associations have changed since Chrome was likely
+  // unregistered.
+  SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
 
   // Get the state of the installed product (if any)
   const ProductState* product_state =

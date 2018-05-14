@@ -53,7 +53,7 @@ class MODULES_EXPORT MIDIAccessInitializer : public ScriptPromiseResolver,
     MIDIAccessInitializer* resolver =
         new MIDIAccessInitializer(script_state, options);
     resolver->KeepAliveWhilePending();
-    resolver->SuspendIfNeeded();
+    resolver->PauseIfNeeded();
     return resolver->Start();
   }
 
@@ -82,7 +82,7 @@ class MODULES_EXPORT MIDIAccessInitializer : public ScriptPromiseResolver,
   void DidReceiveMIDIData(unsigned port_index,
                           const unsigned char* data,
                           size_t length,
-                          double time_stamp) override {}
+                          TimeTicks time_stamp) override {}
 
  private:
   MIDIAccessInitializer(ScriptState*, const MIDIOptions&);

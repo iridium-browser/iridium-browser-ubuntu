@@ -19,7 +19,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
-#include "components/metrics/proto/system_profile.pb.h"
+#include "third_party/metrics_proto/system_profile.pb.h"
 
 // AntiVirusMetricsProvider is responsible for adding antivirus information to
 // the UMA system profile proto.
@@ -33,13 +33,9 @@ class AntiVirusMetricsProvider : public metrics::MetricsProvider {
   ~AntiVirusMetricsProvider() override;
 
   // metrics::MetricsDataProvider:
+  void AsyncInit(const base::Closure& done_callback) override;
   void ProvideSystemProfileMetrics(
       metrics::SystemProfileProto* system_profile_proto) override;
-
-  // Fetches AntiVirus data asynchronously and calls |done_callback| when
-  // done. Should be called before ProvideSystemProfileMetrics to ensure that
-  // data is ready to be collected.
-  void GetAntiVirusMetrics(const base::Closure& done_callback);
 
  private:
   // This enum is reported via a histogram so new values should always be added
@@ -81,7 +77,7 @@ class AntiVirusMetricsProvider : public metrics::MetricsProvider {
   static void MaybeAddUnregisteredAntiVirusProducts(
       std::vector<AvProduct>* products);
 
-  static std::vector<AvProduct> GetAntiVirusProductsOnFileThread();
+  static std::vector<AvProduct> GetAntiVirusProductsOnCOMSTAThread();
 
   // Removes anything extraneous from the end of the product name such as
   // versions, years, or anything containing numbers to make it more constant.

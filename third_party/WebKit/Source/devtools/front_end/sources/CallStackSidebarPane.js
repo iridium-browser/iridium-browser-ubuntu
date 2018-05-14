@@ -47,10 +47,16 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
     this._list.element.addEventListener('contextmenu', this._onContextMenu.bind(this), false);
     this._list.element.addEventListener('click', this._onClick.bind(this), false);
 
+    this._showMoreMessageElement = this._createShowMoreMessageElement();
+    this._showMoreMessageElement.classList.add('hidden');
+    this.contentElement.appendChild(this._showMoreMessageElement);
+
     this._showBlackboxed = false;
     Bindings.blackboxManager.addChangeListener(this._update.bind(this));
     this._locationPool = new Bindings.LiveLocationPool();
 
+    this._updateThrottler = new Common.Throttler(100);
+    this._maxAsyncStackChainDepth = Sources.CallStackSidebarPane._defaultMaxAsyncStackChainDepth;
     this._update();
   }
 
@@ -60,30 +66,38 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
    */
   flavorChanged(object) {
     this._showBlackboxed = false;
+    this._maxAsyncStackChainDepth = Sources.CallStackSidebarPane._defaultMaxAsyncStackChainDepth;
     this._update();
   }
 
   _update() {
+    this._updateThrottler.schedule(() => this._doUpdate());
+  }
+
+  /**
+   * @return {!Promise<undefined>}
+   */
+  async _doUpdate() {
     this._locationPool.disposeAll();
 
-    var details = UI.context.flavor(SDK.DebuggerPausedDetails);
+    const details = UI.context.flavor(SDK.DebuggerPausedDetails);
     if (!details) {
       this._notPausedMessageElement.classList.remove('hidden');
       this._blackboxedMessageElement.classList.add('hidden');
+      this._showMoreMessageElement.classList.add('hidden');
       this._items.replaceAll([]);
-      this._debuggerModel = null;
       UI.context.setFlavor(SDK.DebuggerModel.CallFrame, null);
       return;
     }
 
-    this._debuggerModel = details.debuggerModel;
+    let debuggerModel = details.debuggerModel;
     this._notPausedMessageElement.classList.add('hidden');
 
-    var showBlackboxed = this._showBlackboxed ||
+    const showBlackboxed = this._showBlackboxed ||
         details.callFrames.every(frame => Bindings.blackboxManager.isBlackboxedRawLocation(frame.location()));
 
-    var hiddenCallFramesCount = 0;
-    var items = details.callFrames.map(frame => ({debuggerCallFrame: frame}));
+    let hiddenCallFramesCount = 0;
+    let items = details.callFrames.map(frame => ({debuggerCallFrame: frame, debuggerModel: debuggerModel}));
     if (!showBlackboxed) {
       items = items.filter(
           item => !Bindings.blackboxManager.isBlackboxedRawLocation(
@@ -91,20 +105,27 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
       hiddenCallFramesCount += details.callFrames.length - items.length;
     }
 
-    var asyncStackTrace = details.asyncStackTrace;
-    var peviousStackTrace = details.callFrames;
-    while (asyncStackTrace) {
-      var title = '';
-      var isAwait = asyncStackTrace.description === 'async function';
+    let asyncStackTrace = details.asyncStackTrace;
+    if (!asyncStackTrace && details.asyncStackTraceId) {
+      if (details.asyncStackTraceId.debuggerId)
+        debuggerModel = SDK.DebuggerModel.modelForDebuggerId(details.asyncStackTraceId.debuggerId);
+      asyncStackTrace = debuggerModel ? await debuggerModel.fetchAsyncStackTrace(details.asyncStackTraceId) : null;
+    }
+    let peviousStackTrace = details.callFrames;
+    let maxAsyncStackChainDepth = this._maxAsyncStackChainDepth;
+    while (asyncStackTrace && maxAsyncStackChainDepth > 0) {
+      let title = '';
+      const isAwait = asyncStackTrace.description === 'async function';
       if (isAwait && peviousStackTrace.length && asyncStackTrace.callFrames.length) {
-        var lastPreviousFrame = peviousStackTrace[peviousStackTrace.length - 1];
-        var lastPreviousFrameName = UI.beautifyFunctionName(lastPreviousFrame.functionName);
+        const lastPreviousFrame = peviousStackTrace[peviousStackTrace.length - 1];
+        const lastPreviousFrameName = UI.beautifyFunctionName(lastPreviousFrame.functionName);
         title = UI.asyncStackTraceLabel('await in ' + lastPreviousFrameName);
       } else {
         title = UI.asyncStackTraceLabel(asyncStackTrace.description);
       }
 
-      var asyncItems = asyncStackTrace.callFrames.map(frame => ({runtimeCallFrame: frame}));
+      let asyncItems =
+          asyncStackTrace.callFrames.map(frame => ({runtimeCallFrame: frame, debuggerModel: debuggerModel}));
       if (!showBlackboxed) {
         asyncItems = asyncItems.filter(
             item => !Bindings.blackboxManager.isBlackboxedRawLocation(
@@ -112,37 +133,48 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
         hiddenCallFramesCount += asyncStackTrace.callFrames.length - asyncItems.length;
       }
 
-      if (asyncStackTrace.promiseCreationFrame && !isAwait) {
-        var chainedItem = {promiseCreationFrame: asyncStackTrace.promiseCreationFrame};
-        if (!Bindings.blackboxManager.isBlackboxedRawLocation(
-                /** @type {!SDK.DebuggerModel.Location} */ (this._itemLocation(chainedItem))))
-          items.push(chainedItem);
-      }
-
       if (asyncItems.length) {
         items.push({asyncStackHeader: title});
         items = items.concat(asyncItems);
       }
 
+      --maxAsyncStackChainDepth;
       peviousStackTrace = asyncStackTrace.callFrames;
-      asyncStackTrace = asyncStackTrace.parent;
+      if (asyncStackTrace.parent) {
+        asyncStackTrace = asyncStackTrace.parent;
+      } else if (asyncStackTrace.parentId) {
+        if (asyncStackTrace.parentId.debuggerId)
+          debuggerModel = SDK.DebuggerModel.modelForDebuggerId(asyncStackTrace.parentId.debuggerId);
+        asyncStackTrace = debuggerModel ? await debuggerModel.fetchAsyncStackTrace(asyncStackTrace.parentId) : null;
+      } else {
+        asyncStackTrace = null;
+      }
     }
+    if (asyncStackTrace)
+      this._showMoreMessageElement.classList.remove('hidden');
+    else
+      this._showMoreMessageElement.classList.add('hidden');
 
     if (!hiddenCallFramesCount) {
       this._blackboxedMessageElement.classList.add('hidden');
     } else {
       if (hiddenCallFramesCount === 1) {
         this._blackboxedMessageElement.firstChild.textContent =
-            Common.UIString('1 stack frame is hidden (black-boxed).');
+            Common.UIString('1 stack frame is hidden (blackboxed).');
       } else {
         this._blackboxedMessageElement.firstChild.textContent =
-            Common.UIString('%d stack frames are hidden (black-boxed).', hiddenCallFramesCount);
+            Common.UIString('%d stack frames are hidden (blackboxed).', hiddenCallFramesCount);
       }
       this._blackboxedMessageElement.classList.remove('hidden');
     }
 
     this._items.replaceAll(items);
-    this._list.selectNextItem(true /* canWrap */, false /* center */);
+    if (this._maxAsyncStackChainDepth === Sources.CallStackSidebarPane._defaultMaxAsyncStackChainDepth)
+      this._list.selectNextItem(true /* canWrap */, false /* center */);
+    this._updatedForTest();
+  }
+
+  _updatedForTest() {
   }
 
   /**
@@ -151,15 +183,13 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
    * @return {!Element}
    */
   createElementForItem(item) {
-    var element = createElementWithClass('div', 'call-frame-item');
-    var title = element.createChild('div', 'call-frame-item-title');
-    if (item.promiseCreationFrame)
-      title.createChild('div', 'call-frame-chained-arrow').textContent = '\u2935';
+    const element = createElementWithClass('div', 'call-frame-item');
+    const title = element.createChild('div', 'call-frame-item-title');
     title.createChild('div', 'call-frame-title-text').textContent = this._itemTitle(item);
     if (item.asyncStackHeader)
       element.classList.add('async-header');
 
-    var location = this._itemLocation(item);
+    const location = this._itemLocation(item);
     if (location) {
       if (Bindings.blackboxManager.isBlackboxedRawLocation(location))
         element.classList.add('blackboxed-call-frame');
@@ -168,15 +198,15 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
        * @param {!Bindings.LiveLocation} liveLocation
        */
       function updateLocation(liveLocation) {
-        var uiLocation = liveLocation.uiLocation();
+        const uiLocation = liveLocation.uiLocation();
         if (!uiLocation)
           return;
-        var text = uiLocation.linkText();
+        const text = uiLocation.linkText();
         linkElement.textContent = text.trimMiddle(30);
         linkElement.title = text;
       }
 
-      var linkElement = element.createChild('div', 'call-frame-location');
+      const linkElement = element.createChild('div', 'call-frame-location');
       Bindings.debuggerWorkspaceBinding.createCallFrameLiveLocation(location, updateLocation, this._locationPool);
     }
 
@@ -228,8 +258,6 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
       return UI.beautifyFunctionName(item.debuggerCallFrame.functionName);
     if (item.runtimeCallFrame)
       return UI.beautifyFunctionName(item.runtimeCallFrame.functionName);
-    if (item.promiseCreationFrame)
-      return Common.UIString('chained at');
     return item.asyncStackHeader || '';
   }
 
@@ -240,9 +268,11 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
   _itemLocation(item) {
     if (item.debuggerCallFrame)
       return item.debuggerCallFrame.location();
-    if (item.runtimeCallFrame || item.promiseCreationFrame) {
-      var frame = item.runtimeCallFrame || item.promiseCreationFrame;
-      return new SDK.DebuggerModel.Location(this._debuggerModel, frame.scriptId, frame.lineNumber, frame.columnNumber);
+    if (!item.debuggerModel)
+      return null;
+    if (item.runtimeCallFrame) {
+      const frame = item.runtimeCallFrame;
+      return new SDK.DebuggerModel.Location(item.debuggerModel, frame.scriptId, frame.lineNumber, frame.columnNumber);
     }
     return null;
   }
@@ -251,9 +281,9 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
    * @return {!Element}
    */
   _createBlackboxedMessageElement() {
-    var element = createElementWithClass('div', 'blackboxed-message');
+    const element = createElementWithClass('div', 'blackboxed-message');
     element.createChild('span');
-    var showAllLink = element.createChild('span', 'link');
+    const showAllLink = element.createChild('span', 'link');
     showAllLink.textContent = Common.UIString('Show');
     showAllLink.addEventListener('click', () => {
       this._showBlackboxed = true;
@@ -263,18 +293,33 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
   }
 
   /**
+   * @return {!Element}
+   */
+  _createShowMoreMessageElement() {
+    const element = createElementWithClass('div', 'show-more-message');
+    element.createChild('span');
+    const showAllLink = element.createChild('span', 'link');
+    showAllLink.textContent = Common.UIString('Show more');
+    showAllLink.addEventListener('click', () => {
+      this._maxAsyncStackChainDepth += Sources.CallStackSidebarPane._defaultMaxAsyncStackChainDepth;
+      this._update();
+    }, false);
+    return element;
+  }
+
+  /**
    * @param {!Event} event
    */
   _onContextMenu(event) {
-    var item = this._list.itemForNode(/** @type {?Node} */ (event.target));
+    const item = this._list.itemForNode(/** @type {?Node} */ (event.target));
     if (!item)
       return;
-    var contextMenu = new UI.ContextMenu(event);
+    const contextMenu = new UI.ContextMenu(event);
     if (item.debuggerCallFrame)
-      contextMenu.appendItem(Common.UIString('Restart frame'), () => item.debuggerCallFrame.restart());
-    contextMenu.appendItem(Common.UIString('Copy stack trace'), this._copyStackTrace.bind(this));
-    var location = this._itemLocation(item);
-    var uiLocation = location ? Bindings.debuggerWorkspaceBinding.rawLocationToUILocation(location) : null;
+      contextMenu.defaultSection().appendItem(Common.UIString('Restart frame'), () => item.debuggerCallFrame.restart());
+    contextMenu.defaultSection().appendItem(Common.UIString('Copy stack trace'), this._copyStackTrace.bind(this));
+    const location = this._itemLocation(item);
+    const uiLocation = location ? Bindings.debuggerWorkspaceBinding.rawLocationToUILocation(location) : null;
     if (uiLocation)
       this.appendBlackboxURLContextMenuItems(contextMenu, uiLocation.uiSourceCode);
     contextMenu.show();
@@ -284,7 +329,7 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
    * @param {!Event} event
    */
   _onClick(event) {
-    var item = this._list.itemForNode(/** @type {?Node} */ (event.target));
+    const item = this._list.itemForNode(/** @type {?Node} */ (event.target));
     if (item)
       this._activateItem(item);
   }
@@ -293,11 +338,11 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
    * @param {!Sources.CallStackSidebarPane.Item} item
    */
   _activateItem(item) {
-    var location = this._itemLocation(item);
+    const location = this._itemLocation(item);
     if (!location)
       return;
     if (item.debuggerCallFrame && UI.context.flavor(SDK.DebuggerModel.CallFrame) !== item.debuggerCallFrame) {
-      this._debuggerModel.setSelectedCallFrame(item.debuggerCallFrame);
+      item.debuggerModel.setSelectedCallFrame(item.debuggerCallFrame);
       UI.context.setFlavor(SDK.DebuggerModel.CallFrame, item.debuggerCallFrame);
     } else {
       Common.Revealer.reveal(Bindings.debuggerWorkspaceBinding.rawLocationToUILocation(location));
@@ -309,31 +354,31 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
    * @param {!Workspace.UISourceCode} uiSourceCode
    */
   appendBlackboxURLContextMenuItems(contextMenu, uiSourceCode) {
-    var binding = Persistence.persistence.binding(uiSourceCode);
+    const binding = Persistence.persistence.binding(uiSourceCode);
     if (binding)
       uiSourceCode = binding.network;
     if (uiSourceCode.project().type() === Workspace.projectTypes.FileSystem)
       return;
-    var canBlackbox = Bindings.blackboxManager.canBlackboxUISourceCode(uiSourceCode);
-    var isBlackboxed = Bindings.blackboxManager.isBlackboxedUISourceCode(uiSourceCode);
-    var isContentScript = uiSourceCode.project().type() === Workspace.projectTypes.ContentScripts;
+    const canBlackbox = Bindings.blackboxManager.canBlackboxUISourceCode(uiSourceCode);
+    const isBlackboxed = Bindings.blackboxManager.isBlackboxedUISourceCode(uiSourceCode);
+    const isContentScript = uiSourceCode.project().type() === Workspace.projectTypes.ContentScripts;
 
-    var manager = Bindings.blackboxManager;
+    const manager = Bindings.blackboxManager;
     if (canBlackbox) {
       if (isBlackboxed) {
-        contextMenu.appendItem(
+        contextMenu.defaultSection().appendItem(
             Common.UIString('Stop blackboxing'), manager.unblackboxUISourceCode.bind(manager, uiSourceCode));
       } else {
-        contextMenu.appendItem(
+        contextMenu.defaultSection().appendItem(
             Common.UIString('Blackbox script'), manager.blackboxUISourceCode.bind(manager, uiSourceCode));
       }
     }
     if (isContentScript) {
       if (isBlackboxed) {
-        contextMenu.appendItem(
+        contextMenu.defaultSection().appendItem(
             Common.UIString('Stop blackboxing all content scripts'), manager.blackboxContentScripts.bind(manager));
       } else {
-        contextMenu.appendItem(
+        contextMenu.defaultSection().appendItem(
             Common.UIString('Blackbox all content scripts'), manager.unblackboxContentScripts.bind(manager));
       }
     }
@@ -354,37 +399,51 @@ Sources.CallStackSidebarPane = class extends UI.SimpleView {
   }
 
   _copyStackTrace() {
-    var text = [];
-    for (var item of this._items) {
-      if (item.promiseCreationFrame)
-        continue;
-      var itemText = this._itemTitle(item);
-      var location = this._itemLocation(item);
-      var uiLocation = location ? Bindings.debuggerWorkspaceBinding.rawLocationToUILocation(location) : null;
+    const text = [];
+    for (const item of this._items) {
+      let itemText = this._itemTitle(item);
+      const location = this._itemLocation(item);
+      const uiLocation = location ? Bindings.debuggerWorkspaceBinding.rawLocationToUILocation(location) : null;
       if (uiLocation)
         itemText += ' (' + uiLocation.linkText(true /* skipTrim */) + ')';
       text.push(itemText);
     }
     InspectorFrontendHost.copyText(text.join('\n'));
   }
-
-  /**
-   * @param {function(!Array.<!UI.KeyboardShortcut.Descriptor>, function(!Event=):boolean)} registerShortcutDelegate
-   */
-  registerShortcuts(registerShortcutDelegate) {
-    registerShortcutDelegate(
-        UI.ShortcutsScreen.SourcesPanelShortcuts.NextCallFrame, this._selectNextCallFrameOnStack.bind(this));
-    registerShortcutDelegate(
-        UI.ShortcutsScreen.SourcesPanelShortcuts.PrevCallFrame, this._selectPreviousCallFrameOnStack.bind(this));
-  }
 };
+
+Sources.CallStackSidebarPane._defaultMaxAsyncStackChainDepth = 32;
 
 /**
  * @typedef {{
  *     debuggerCallFrame: (SDK.DebuggerModel.CallFrame|undefined),
  *     asyncStackHeader: (string|undefined),
  *     runtimeCallFrame: (Protocol.Runtime.CallFrame|undefined),
- *     promiseCreationFrame: (Protocol.Runtime.CallFrame|undefined)
+ *     debuggerModel: (!SDK.DebuggerModel|undefined)
  * }}
  */
 Sources.CallStackSidebarPane.Item;
+
+/**
+ * @implements {UI.ActionDelegate}
+ */
+Sources.CallStackSidebarPane.ActionDelegate = class {
+  /**
+   * @override
+   * @param {!UI.Context} context
+   * @param {string} actionId
+   * @return {boolean}
+   */
+  handleAction(context, actionId) {
+    const callStackSidebarPane = self.runtime.sharedInstance(Sources.CallStackSidebarPane);
+    switch (actionId) {
+      case 'debugger.next-call-frame':
+        callStackSidebarPane._selectNextCallFrameOnStack();
+        return true;
+      case 'debugger.previous-call-frame':
+        callStackSidebarPane._selectPreviousCallFrameOnStack();
+        return true;
+    }
+    return false;
+  }
+};

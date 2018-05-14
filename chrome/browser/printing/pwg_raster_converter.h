@@ -27,19 +27,19 @@ namespace printing {
 
 struct PwgRasterSettings;
 
-class PWGRasterConverter {
+class PwgRasterConverter {
  public:
   // Callback for when the PDF is converted to a PWG raster.
   // |success| denotes whether the conversion succeeded.
   // |temp_file| is the path to the temp file (owned by the converter) that
   //     contains the PWG raster data.
   using ResultCallback =
-      base::Callback<void(bool /*success*/,
-                          const base::FilePath& /*temp_file*/)>;
+      base::OnceCallback<void(bool /*success*/,
+                              const base::FilePath& /*temp_file*/)>;
 
-  virtual ~PWGRasterConverter() {}
+  virtual ~PwgRasterConverter() {}
 
-  static std::unique_ptr<PWGRasterConverter> CreateDefault();
+  static std::unique_ptr<PwgRasterConverter> CreateDefault();
 
   // Generates conversion settings to be used with converter from printer
   // capabilities and page size.
@@ -57,7 +57,7 @@ class PWGRasterConverter {
   virtual void Start(base::RefCountedMemory* data,
                      const PdfRenderSettings& conversion_settings,
                      const PwgRasterSettings& bitmap_settings,
-                     const ResultCallback& callback) = 0;
+                     ResultCallback callback) = 0;
 };
 
 }  // namespace printing

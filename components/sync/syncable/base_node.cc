@@ -4,8 +4,6 @@
 
 #include "components/sync/syncable/base_node.h"
 
-#include <stack>
-
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/sync/base/time.h"
@@ -260,16 +258,6 @@ const sync_pb::EntitySpecifics& BaseNode::GetEntitySpecifics() const {
 
 ModelType BaseNode::GetModelType() const {
   return GetEntry()->GetModelType();
-}
-
-const AttachmentIdList BaseNode::GetAttachmentIds() const {
-  AttachmentIdList result;
-  const sync_pb::AttachmentMetadata& metadata =
-      GetEntry()->GetAttachmentMetadata();
-  for (int i = 0; i < metadata.record_size(); ++i) {
-    result.push_back(AttachmentId::CreateFromProto(metadata.record(i).id()));
-  }
-  return result;
 }
 
 void BaseNode::SetUnencryptedSpecifics(

@@ -15,7 +15,6 @@ import static org.webrtc.MediaCodecUtils.INTEL_PREFIX;
 import static org.webrtc.MediaCodecUtils.NVIDIA_PREFIX;
 import static org.webrtc.MediaCodecUtils.QCOM_PREFIX;
 
-import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecInfo.CodecCapabilities;
 import android.media.MediaCodecList;
@@ -26,18 +25,49 @@ import android.os.Build;
 public class HardwareVideoDecoderFactory implements VideoDecoderFactory {
   private static final String TAG = "HardwareVideoDecoderFactory";
 
+  private final EglBase.Context sharedContext;
+  private final boolean fallbackToSoftware;
+
+  /** Creates a HardwareVideoDecoderFactory that does not use surface textures. */
+  @Deprecated // Not removed yet to avoid breaking callers.
+  public HardwareVideoDecoderFactory() {
+    this(null);
+  }
+
+  /**
+   * Creates a HardwareVideoDecoderFactory that supports surface texture rendering using the given
+   * shared context.  The context may be null.  If it is null, then surface support is disabled.
+   */
+  public HardwareVideoDecoderFactory(EglBase.Context sharedContext) {
+    this(sharedContext, true /* fallbackToSoftware */);
+  }
+
+  HardwareVideoDecoderFactory(EglBase.Context sharedContext, boolean fallbackToSoftware) {
+    this.sharedContext = sharedContext;
+    this.fallbackToSoftware = fallbackToSoftware;
+  }
+
   @Override
   public VideoDecoder createDecoder(String codecType) {
     VideoCodecType type = VideoCodecType.valueOf(codecType);
     MediaCodecInfo info = findCodecForType(type);
 
     if (info == null) {
-      return null; // No support for this codec type.
+      // No hardware support for this type.
+      // TODO(andersc): This is for backwards compatibility. Remove when clients have migrated to
+      // new DefaultVideoEncoderFactory.
+      if (fallbackToSoftware) {
+        SoftwareVideoDecoderFactory softwareVideoDecoderFactory = new SoftwareVideoDecoderFactory();
+        return softwareVideoDecoderFactory.createDecoder(codecType);
+      } else {
+        return null;
+      }
     }
 
     CodecCapabilities capabilities = info.getCapabilitiesForType(type.mimeType());
     return new HardwareVideoDecoder(info.getName(), type,
-        MediaCodecUtils.selectColorFormat(MediaCodecUtils.DECODER_COLOR_FORMATS, capabilities));
+        MediaCodecUtils.selectColorFormat(MediaCodecUtils.DECODER_COLOR_FORMATS, capabilities),
+        sharedContext);
   }
 
   private MediaCodecInfo findCodecForType(VideoCodecType type) {

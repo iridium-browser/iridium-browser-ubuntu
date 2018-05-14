@@ -5,33 +5,38 @@
 #include "ui/app_list/views/apps_grid_view.h"
 
 #include <algorithm>
+#include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
+#include "ash/app_list/model/app_list_folder_item.h"
+#include "ash/app_list/model/app_list_item.h"
 #include "base/guid.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/numerics/ranges.h"
+#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_features.h"
-#include "ui/app_list/app_list_folder_item.h"
-#include "ui/app_list/app_list_item.h"
+#include "ui/app_list/app_list_metrics.h"
 #include "ui/app_list/app_list_switches.h"
+#include "ui/app_list/app_list_util.h"
 #include "ui/app_list/app_list_view_delegate.h"
 #include "ui/app_list/pagination_controller.h"
 #include "ui/app_list/views/app_list_drag_and_drop_host.h"
 #include "ui/app_list/views/app_list_folder_view.h"
 #include "ui/app_list/views/app_list_item_view.h"
 #include "ui/app_list/views/app_list_main_view.h"
+#include "ui/app_list/views/apps_container_view.h"
 #include "ui/app_list/views/contents_view.h"
 #include "ui/app_list/views/expand_arrow_view.h"
 #include "ui/app_list/views/indicator_chip_view.h"
-#include "ui/app_list/views/page_switcher_horizontal.h"
-#include "ui/app_list/views/page_switcher_vertical.h"
 #include "ui/app_list/views/pulsing_block_view.h"
+#include "ui/app_list/views/search_box_view.h"
 #include "ui/app_list/views/search_result_tile_item_view.h"
 #include "ui/app_list/views/suggestions_container_view.h"
-#include "ui/app_list/views/tile_item_view.h"
 #include "ui/app_list/views/top_icon_animation_view.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -48,12 +53,23 @@
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/view_model_utils.h"
 #include "ui/views/widget/widget.h"
 
 namespace app_list {
 
 namespace {
+
+// The preferred width/height for apps grid. For page #01, it includes the
+// top/bottom 24px padding. For page #02 and all the followings, it includes top
+// 24px padding and bottom 56px padding.
+constexpr int kAppsGridPreferredWidth = 576;
+constexpr int kAppsGridPreferredHeight = 623;
+
+// 32px page break space adjustment needed to keep 48px page break space due to
+// the fact that page #02 and all the followings have bottom 56px padding.
+constexpr int kPageBreakSpaceAdjustment = 32;
 
 // Distance a drag needs to be from the app grid to be considered 'outside', at
 // which point we rearrange the apps to their pre-drag configuration, as a drop
@@ -64,25 +80,15 @@ constexpr int kDragBufferPx = 20;
 // Padding space in pixels between pages.
 constexpr int kPagePadding = 40;
 
-// Padding space in pixels between pages for fullscreen launcher.
-constexpr int kPagePaddingFullscreen = 48;
-
-// Preferred tile size when showing in fixed layout.
-constexpr int kPreferredTileWidth = 100;
-constexpr int kPreferredTileHeight = 100;
-
 // Padding on each side of a tile.
-constexpr int kTileLeftRightPadding = 10;
-constexpr int kTileBottomPadding = 6;
-constexpr int kTileTopPadding = 6;
 constexpr int kTileHorizontalPadding = 12;
 constexpr int kTileVerticalPadding = 6;
 
+// Padding of a tile within the folder view.
+constexpr int kFolderTilePadding = 6;
+
 // Width in pixels of the area on the sides that triggers a page flip.
 constexpr int kPageFlipZoneSize = 40;
-
-// Delay in milliseconds to do the page flip.
-constexpr int kPageFlipDelayInMs = 1000;
 
 // Delay in milliseconds to do the page flip in fullscreen app list.
 constexpr int kPageFlipDelayInMsFullscreen = 500;
@@ -104,10 +110,10 @@ constexpr int kFolderItemReparentDelay = 50;
 constexpr int kFolderDroppingCircleRadius = 39;
 
 // Padding between suggested apps tiles and all apps indicator.
-constexpr int kSuggestionsAllAppsIndicatorPadding = 16;
+constexpr int kSuggestionsAllAppsIndicatorPadding = 26;
 
-// Extra padding needed between all apps indicator and all apps tiles.
-constexpr int kAllAppsIndicatorExtraPadding = 6;
+// Padding between all apps indicator and all apps.
+constexpr int kAllAppsIndicatorBottomPadding = 2;
 
 // The height of gradient fade-out zones.
 constexpr int kFadeoutZoneHeight = 24;
@@ -132,21 +138,9 @@ constexpr float kExpandArrowDismissEndFraction = 0.2f;
 constexpr float kExpandArrowShowStartFraction = 0.5f;
 constexpr float kExpandArrowShowEndFraction = 1.0f;
 
-// Range of the height of centerline above screen bottom that all apps should
-// change opacity.
-constexpr float kAllAppsOpacityStartPx = 8.0f;
-constexpr float kAllAppsOpacityEndPx = 144.0f;
-
-// The length of time we ignore scroll events on the AppsGridView after the
-// AppListView transitions to FULLSCREEN_ALL_APPS.
-constexpr base::TimeDelta kIgnoreScrollEventsDurationMs =
-    base::TimeDelta::FromMilliseconds(500);
-
 // Returns the size of a tile view excluding its padding.
 gfx::Size GetTileViewSize() {
-  if (features::IsFullscreenAppListEnabled())
-    return gfx::Size(kGridTileWidth, kGridTileHeight);
-  return gfx::Size(kPreferredTileWidth, kPreferredTileHeight);
+  return gfx::Size(kGridTileWidth, kGridTileHeight);
 }
 
 // RowMoveAnimationDelegate is used when moving an item into a different row.
@@ -249,8 +243,8 @@ bool IsOEMFolderItem(AppListItem* item) {
              AppListFolderItem::FOLDER_TYPE_OEM;
 }
 
-int ClampToRange(int value, int min, int max) {
-  return std::min(std::max(value, min), max);
+int GetCompositorActivatedFrameCount(ui::Compositor* compositor) {
+  return compositor ? compositor->activated_frame_count() : 0;
 }
 
 }  // namespace
@@ -294,21 +288,21 @@ class AppsGridView::FadeoutLayerDelegate : public ui::LayerDelegate {
         SK_ColorTRANSPARENT));
     canvas->DrawRect(bottom_rect, flags);
   }
-  void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override {}
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
+  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                  float new_device_scale_factor) override {}
 
   ui::Layer layer_;
 
   DISALLOW_COPY_AND_ASSIGN(FadeoutLayerDelegate);
 };
 
-AppsGridView::AppsGridView(ContentsView* contents_view)
-    : contents_view_(contents_view),
+AppsGridView::AppsGridView(ContentsView* contents_view,
+                           AppsGridViewFolderDelegate* folder_delegate)
+    : folder_delegate_(folder_delegate),
+      contents_view_(contents_view),
       bounds_animator_(this),
-      is_fullscreen_app_list_enabled_(features::IsFullscreenAppListEnabled()),
-      page_flip_delay_in_ms_(is_fullscreen_app_list_enabled_
-                                 ? kPageFlipDelayInMsFullscreen
-                                 : kPageFlipDelayInMs) {
+      page_flip_delay_in_ms_(kPageFlipDelayInMsFullscreen),
+      pagination_animation_start_frame_number_(0) {
   DCHECK(contents_view_);
   SetPaintToLayer();
   // Clip any icons that are outside the grid view's bounds. These icons would
@@ -316,9 +310,9 @@ AppsGridView::AppsGridView(ContentsView* contents_view)
   layer()->SetMasksToBounds(true);
   layer()->SetFillsBoundsOpaquely(false);
 
-  if (is_fullscreen_app_list_enabled_) {
+  if (!folder_delegate_) {
     suggestions_container_ =
-        new SuggestionsContainerView(contents_view_, nullptr);
+        new SuggestionsContainerView(contents_view_, &pagination_model_);
     AddChildView(suggestions_container_);
     UpdateSuggestions();
 
@@ -342,16 +336,10 @@ AppsGridView::AppsGridView(ContentsView* contents_view)
 
   pagination_model_.AddObserver(this);
 
-  if (is_fullscreen_app_list_enabled_) {
-    page_switcher_view_ = new PageSwitcherVertical(&pagination_model_);
-    pagination_controller_.reset(new PaginationController(
-        &pagination_model_, PaginationController::SCROLL_AXIS_VERTICAL));
-  } else {
-    page_switcher_view_ = new PageSwitcherHorizontal(&pagination_model_);
-    pagination_controller_.reset(new PaginationController(
-        &pagination_model_, PaginationController::SCROLL_AXIS_HORIZONTAL));
-  }
-  AddChildView(page_switcher_view_);
+  pagination_controller_.reset(new PaginationController(
+      &pagination_model_, folder_delegate_
+                              ? PaginationController::SCROLL_AXIS_HORIZONTAL
+                              : PaginationController::SCROLL_AXIS_VERTICAL));
 }
 
 AppsGridView::~AppsGridView() {
@@ -369,7 +357,6 @@ AppsGridView::~AppsGridView() {
   if (item_list_)
     item_list_->RemoveObserver(this);
 
-  // Make sure |page_switcher_view_| is deleted before |pagination_model_|.
   view_model_.Clear();
   RemoveAllChildViews(true);
 }
@@ -377,54 +364,29 @@ AppsGridView::~AppsGridView() {
 void AppsGridView::SetLayout(int cols, int rows_per_page) {
   cols_ = cols;
   rows_per_page_ = rows_per_page;
-
-  if (!is_fullscreen_app_list_enabled_) {
-    SetBorder(
-        views::CreateEmptyBorder(0, kAppsGridPadding, 0, kAppsGridPadding));
-  }
 }
 
-// static
-gfx::Size AppsGridView::GetTotalTileSize() {
-  static gfx::Size rect_size;
-
-  if (!rect_size.IsEmpty())
-    return rect_size;
-
+gfx::Size AppsGridView::GetTotalTileSize() const {
   gfx::Rect rect(GetTileViewSize());
   rect.Inset(GetTilePadding());
-  rect_size = rect.size();
-
-  return rect_size;
+  return rect.size();
 }
 
-// static
-gfx::Insets AppsGridView::GetTilePadding() {
-  static gfx::Insets tile_padding;
-  static gfx::Insets tile_padding_full_screen;
+gfx::Insets AppsGridView::GetTilePadding() const {
+  if (folder_delegate_)
+    return gfx::Insets(-kFolderTilePadding, -kFolderTilePadding);
+  return gfx::Insets(-kTileVerticalPadding, -kTileHorizontalPadding);
+}
 
-  // Full screen mode.
-  if (features::IsFullscreenAppListEnabled()) {
-    if (!tile_padding_full_screen.IsEmpty())
-      return tile_padding_full_screen;
-    tile_padding_full_screen =
-        gfx::Insets(-kTileVerticalPadding, -kTileHorizontalPadding,
-                    -kTileVerticalPadding, -kTileHorizontalPadding);
-    return tile_padding_full_screen;
-  }
-
-  // Non full screen mode.
-  if (!tile_padding.IsEmpty()) {
-    return tile_padding;
-  }
-  tile_padding = gfx::Insets(-kTileTopPadding, -kTileLeftRightPadding,
-                             -kTileBottomPadding, -kTileLeftRightPadding);
-  return tile_padding;
+gfx::Size AppsGridView::GetTileGridSizeWithoutPadding() const {
+  gfx::Size size = GetTileGridSize();
+  gfx::Insets grid_padding = GetTilePadding();
+  size.Enlarge(grid_padding.width(), grid_padding.height());
+  return size;
 }
 
 void AppsGridView::ResetForShowApps() {
   UpdateSuggestions();
-  activated_folder_item_view_ = nullptr;
   ClearDragState();
   layer()->SetOpacity(1.0f);
   SetVisible(true);
@@ -435,6 +397,14 @@ void AppsGridView::ResetForShowApps() {
   }
   CHECK_EQ(item_list_->item_count(),
            static_cast<size_t>(view_model_.view_size()));
+}
+
+void AppsGridView::DisableFocusForShowingActiveFolder(bool disabled) {
+  for (auto* v : suggestions_container_->tile_views())
+    v->SetEnabled(!disabled);
+  for (int i = 0; i < view_model_.view_size(); ++i) {
+    view_model_.view_at(i)->SetEnabled(!disabled);
+  }
 }
 
 void AppsGridView::SetModel(AppListModel* model) {
@@ -480,8 +450,6 @@ void AppsGridView::ClearAnySelectedView() {
   }
   if (suggestions_container_)
     suggestions_container_->ClearSelectedIndex();
-  if (expand_arrow_view_)
-    expand_arrow_view_->SetSelected(false);
 }
 
 bool AppsGridView::IsSelectedView(const AppListItemView* view) const {
@@ -491,7 +459,7 @@ bool AppsGridView::IsSelectedView(const AppListItemView* view) const {
 views::View* AppsGridView::GetSelectedView() const {
   if (selected_view_)
     return selected_view_;
-  if (expand_arrow_view_ && expand_arrow_view_->selected())
+  if (expand_arrow_view_ && expand_arrow_view_->HasFocus())
     return expand_arrow_view_;
   if (suggestions_container_)
     return suggestions_container_->GetSelectedView();
@@ -551,8 +519,10 @@ bool AppsGridView::UpdateDragFromItem(Pointer pointer,
   gfx::Point location_in_screen = drag_point_in_grid_view;
   views::View::ConvertPointToScreen(this, &location_in_screen);
   DispatchDragEventToDragAndDropHost(location_in_screen);
-  if (drag_and_drop_host_)
-    drag_and_drop_host_->UpdateDragIconProxy(location_in_screen);
+  if (drag_and_drop_host_) {
+    drag_and_drop_host_->UpdateDragIconProxyByLocation(
+        drag_view_->icon()->GetBoundsInScreen().origin());
+  }
   return true;
 }
 
@@ -579,11 +549,6 @@ void AppsGridView::UpdateDrag(Pointer pointer, const gfx::Point& point) {
   CalculateDropTarget();
 
   MaybeStartPageFlipTimer(last_drag_point_);
-
-  gfx::Point page_switcher_point(last_drag_point_);
-  views::View::ConvertPointToTarget(this, page_switcher_view_,
-                                    &page_switcher_point);
-  page_switcher_view_->UpdateUIForDragPoint(page_switcher_point);
 
   if (last_folder_drop_target != folder_drop_target_ ||
       last_reorder_drop_target != reorder_drop_target_ ||
@@ -675,11 +640,6 @@ void AppsGridView::EndDrag(bool cancel) {
   AnimateToIdealBounds();
 
   StopPageFlipTimer();
-
-  // If user releases mouse inside a folder's grid view, burst the folder
-  // container ink bubble.
-  if (folder_delegate_ && !IsDraggingForReparentInHiddenGridView())
-    folder_delegate_->UpdateFolderViewBackground(false);
 }
 
 void AppsGridView::StopPageFlipTimer() {
@@ -689,13 +649,6 @@ void AppsGridView::StopPageFlipTimer() {
 
 AppListItemView* AppsGridView::GetItemViewAt(int index) const {
   return view_model_.view_at(index);
-}
-
-void AppsGridView::SetTopItemViewsVisible(bool visible) {
-  int top_item_count =
-      std::min(static_cast<int>(kNumFolderTopItems), view_model_.view_size());
-  for (int i = 0; i < top_item_count; ++i)
-    GetItemViewAt(i)->icon()->SetVisible(visible);
 }
 
 void AppsGridView::ScheduleShowHideAnimation(bool show) {
@@ -730,7 +683,9 @@ void AppsGridView::InitiateDragFromReparentItemInRootLevelGridView(
 
   // Create a new AppListItemView to duplicate the original_drag_view in the
   // folder's grid view.
-  AppListItemView* view = new AppListItemView(this, original_drag_view->item());
+  AppListItemView* view = new AppListItemView(
+      this, original_drag_view->item(),
+      contents_view_->app_list_main_view()->view_delegate());
   AddChildView(view);
   drag_view_ = view;
   drag_view_->SetPaintToLayer();
@@ -807,18 +762,10 @@ bool AppsGridView::IsAnimatingView(AppListItemView* view) {
 }
 
 gfx::Size AppsGridView::CalculatePreferredSize() const {
-  const gfx::Insets insets(GetInsets());
-  gfx::Size size = GetTileGridSize();
-  if (is_fullscreen_app_list_enabled_) {
-    // Add padding to both side of the apps grid to keep it horizontally
-    // centered.
-    size.Enlarge(kAppsGridLeftRightPaddingFullscreen * 2, 0);
-  } else {
-    // If we are in a folder, ignore the page switcher for height calculations.
-    int page_switcher_height =
-        folder_delegate_ ? 0 : page_switcher_view_->GetPreferredSize().height();
-    size.Enlarge(insets.width(), insets.height() + page_switcher_height);
-  }
+  if (folder_delegate_)
+    return GetTileGridSize();
+
+  gfx::Size size = gfx::Size(kAppsGridPreferredWidth, kAppsGridPreferredHeight);
   return size;
 }
 
@@ -838,6 +785,10 @@ int AppsGridView::OnDragUpdated(const ui::DropTargetEvent& event) {
   return ui::DragDropTypes::DRAG_MOVE;
 }
 
+const char* AppsGridView::GetClassName() const {
+  return "AppsGridView";
+}
+
 void AppsGridView::Layout() {
   if (bounds_animator_.IsAnimating())
     bounds_animator_.Cancel();
@@ -846,52 +797,47 @@ void AppsGridView::Layout() {
   if (rect.IsEmpty())
     return;
 
-  if (is_fullscreen_app_list_enabled_) {
-    if (fadeout_layer_delegate_)
-      fadeout_layer_delegate_->layer()->SetBounds(layer()->bounds());
-    rect.Inset(0, kSearchBoxFullscreenBottomPadding, 0, 0);
+  if (fadeout_layer_delegate_)
+    fadeout_layer_delegate_->layer()->SetBounds(layer()->bounds());
+  rect.Inset(0, kSearchBoxBottomPadding, 0, 0);
+
+  gfx::Rect indicator_rect(rect);
+  gfx::Rect arrow_rect(rect);
+  if (suggestions_container_) {
+    gfx::Rect suggestions_rect(rect);
+    suggestions_rect.set_height(
+        suggestions_container_->GetHeightForWidth(suggestions_rect.width()));
+    suggestions_rect.Offset((suggestions_rect.width() - kGridTileWidth) / 2 -
+                                (kGridTileWidth + kGridTileSpacing) * 2,
+                            0);
+    suggestions_rect.Offset(CalculateTransitionOffset(0));
+    suggestions_container_->SetBoundsRect(suggestions_rect);
+    indicator_rect.Inset(0,
+                         suggestions_container_->GetPreferredSize().height() +
+                             kSuggestionsAllAppsIndicatorPadding,
+                         0, 0);
+    arrow_rect.Inset(0,
+                     suggestions_container_->GetPreferredSize().height() +
+                         kExpandArrowTopPadding,
+                     0, 0);
   }
 
-  if (!folder_delegate_) {
-    gfx::Rect indicator_rect(rect);
-    gfx::Rect arrow_rect(rect);
-    if (suggestions_container_) {
-      gfx::Rect suggestions_rect(rect);
-      suggestions_rect.set_height(
-          suggestions_container_->GetHeightForWidth(suggestions_rect.width()));
-      suggestions_rect.Offset((suggestions_rect.width() - kGridTileWidth) / 2 -
-                                  (kGridTileWidth + kGridTileSpacing) * 2,
-                              0);
-      suggestions_rect.Offset(CalculateTransitionOffset(0));
-      suggestions_container_->SetBoundsRect(suggestions_rect);
-      indicator_rect.Inset(0,
-                           suggestions_container_->GetPreferredSize().height() +
-                               kSuggestionsAllAppsIndicatorPadding,
-                           0, 0);
-      arrow_rect.Inset(0,
-                       suggestions_container_->GetPreferredSize().height() +
-                           kExpandArrowTopPadding,
-                       0, 0);
-    }
+  if (all_apps_indicator_) {
+    gfx::Size indicator_size;
+    indicator_size = all_apps_indicator_->GetPreferredSize();
+    indicator_rect.Inset((indicator_rect.width() - indicator_size.width()) / 2,
+                         0);
+    indicator_rect.Offset(CalculateTransitionOffset(0));
+    all_apps_indicator_->SetBoundsRect(indicator_rect);
+  }
 
-    if (all_apps_indicator_) {
-      gfx::Size indicator_size;
-      indicator_size = all_apps_indicator_->GetPreferredSize();
-      indicator_rect.Inset(
-          (indicator_rect.width() - indicator_size.width()) / 2, 0);
-      indicator_rect.Offset(CalculateTransitionOffset(0));
-      all_apps_indicator_->SetBoundsRect(indicator_rect);
-    }
-
-    if (expand_arrow_view_) {
-      int left_right_padding =
-          (arrow_rect.width() -
-           expand_arrow_view_->GetPreferredSize().width()) /
-          2;
-      arrow_rect.Inset(left_right_padding, 0);
-      arrow_rect.set_height(expand_arrow_view_->GetPreferredSize().height());
-      expand_arrow_view_->SetBoundsRect(arrow_rect);
-    }
+  if (expand_arrow_view_) {
+    int left_right_padding =
+        (arrow_rect.width() - expand_arrow_view_->GetPreferredSize().width()) /
+        2;
+    arrow_rect.Inset(left_right_padding, 0);
+    arrow_rect.set_height(expand_arrow_view_->GetPreferredSize().height());
+    expand_arrow_view_->SetBoundsRect(arrow_rect);
   }
 
   CalculateIdealBounds();
@@ -901,139 +847,39 @@ void AppsGridView::Layout() {
       view->SetBoundsRect(view_model_.ideal_bounds(i));
   }
   views::ViewModelUtils::SetViewBoundsToIdealBounds(pulsing_blocks_model_);
-
-  if (is_fullscreen_app_list_enabled_) {
-    const int page_switcher_width =
-        page_switcher_view_->GetPreferredSize().width();
-    rect.set_x(rect.right() - page_switcher_width);
-    rect.set_width(page_switcher_width);
-  } else {
-    const int page_switcher_height =
-        page_switcher_view_->GetPreferredSize().height();
-    rect.set_y(rect.bottom() - page_switcher_height);
-    rect.set_height(page_switcher_height);
-  }
-  page_switcher_view_->SetBoundsRect(rect);
 }
 
-void AppsGridView::UpdateControlVisibility(
-    AppListView::AppListState app_list_state,
-    bool is_in_drag) {
-  if (!is_fullscreen_app_list_enabled_)
-    return;
-
+void AppsGridView::UpdateControlVisibility(AppListViewState app_list_state,
+                                           bool is_in_drag) {
   const bool fullscreen_apps_in_drag =
-      app_list_state == AppListView::FULLSCREEN_ALL_APPS || is_in_drag;
+      app_list_state == AppListViewState::FULLSCREEN_ALL_APPS || is_in_drag;
   if (all_apps_indicator_)
     all_apps_indicator_->SetVisible(fullscreen_apps_in_drag);
 
   if (expand_arrow_view_) {
     expand_arrow_view_->SetVisible(
-        app_list_state == AppListView::PEEKING ? true : false);
+        app_list_state == AppListViewState::PEEKING ? true : false);
   }
 
   for (int i = 0; i < view_model_.view_size(); ++i) {
     AppListItemView* view = GetItemViewAt(i);
     view->SetVisible(fullscreen_apps_in_drag);
   }
-
-  page_switcher_view_->SetVisible(fullscreen_apps_in_drag);
 }
 
 bool AppsGridView::OnKeyPressed(const ui::KeyEvent& event) {
-  bool handled = false;
-  if (suggestions_container_ &&
-      suggestions_container_->selected_index() != -1) {
-    int selected_suggested_index = suggestions_container_->selected_index();
-    handled = suggestions_container_->GetTileItemView(selected_suggested_index)
-                  ->OnKeyPressed(event);
-  }
-
-  if (expand_arrow_view_ && expand_arrow_view_->selected())
-    handled = expand_arrow_view_->OnKeyPressed(event);
-
-  if (selected_view_)
-    handled = static_cast<views::View*>(selected_view_)->OnKeyPressed(event);
-
-  if (!handled) {
-    const int forward_dir = base::i18n::IsRTL() ? -1 : 1;
-    switch (event.key_code()) {
-      case ui::VKEY_LEFT:
-        if (is_fullscreen_app_list_enabled_ && suggestions_container_ &&
-            suggestions_container_->selected_index() == 0) {
-          // Left arrow key moves focus back to search box when
-          // |suggestions_container|'s first app is selected.
-          ClearAnySelectedView();
-          return false;
-        }
-        MoveSelected(0, -forward_dir, 0);
-        return true;
-      case ui::VKEY_RIGHT:
-        MoveSelected(0, forward_dir, 0);
-        return true;
-      case ui::VKEY_UP:
-        if (is_fullscreen_app_list_enabled_ && suggestions_container_ &&
-            suggestions_container_->selected_index() != -1) {
-          // Up arrow key moves focus back to search box when
-          // |suggestions_container| is selected.
-          ClearAnySelectedView();
-          return false;
-        }
-        if (is_fullscreen_app_list_enabled_ || selected_view_) {
-          // Don't initiate selection with UP in non-fullscreen app list. In
-          // fullscreen app list, UP is already handled by SearchBoxView.
-          MoveSelected(0, 0, -1);
-        }
-        return true;
-      case ui::VKEY_DOWN:
-        MoveSelected(0, 0, 1);
-        return true;
-      case ui::VKEY_PRIOR: {
-        MoveSelected(-1, 0, 0);
-        return true;
-      }
-      case ui::VKEY_NEXT: {
-        MoveSelected(1, 0, 0);
-        return true;
-      }
-      case ui::VKEY_TAB: {
-        if (event.IsShiftDown()) {
-          ClearAnySelectedView();  // ContentsView will move focus back.
-        } else {
-          MoveSelected(0, 0, 0);  // Ensure but don't change selection.
-          handled = true;         // TABing internally doesn't move focus.
-        }
-        break;
-      }
-      default:
-        break;
-    }
-  }
-
-  return handled;
-}
-
-bool AppsGridView::OnKeyReleased(const ui::KeyEvent& event) {
-  bool handled = false;
-  if (selected_view_)
-    handled = selected_view_->OnKeyReleased(event);
-
-  return handled;
-}
-
-bool AppsGridView::OnMouseWheel(const ui::MouseWheelEvent& event) {
-  if (is_ignoring_scroll_events_)
-    return true;
-
-  // Bail on STATE_START or no apps page to make PaginationModel happy.
-  if (contents_view_->GetActiveState() == AppListModel::STATE_START ||
-      pagination_model_.total_pages() <= 0) {
+  // Let the FocusManager handle Left/Right keys.
+  if (!CanProcessUpDownKeyTraversal(event))
     return false;
-  }
 
-  return pagination_controller_->OnScroll(
-      gfx::Vector2d(event.x_offset(), event.y_offset()),
-      PaginationController::SCROLL_MOUSE_WHEEL);
+  const AppListViewState state =
+      contents_view_->app_list_view()->app_list_state();
+  const bool arrow_up = event.key_code() == ui::VKEY_UP;
+  if (state == AppListViewState::PEEKING)
+    return HandleFocusMovementInPeekingState(arrow_up);
+
+  DCHECK(state == AppListViewState::FULLSCREEN_ALL_APPS);
+  return HandleFocusMovementInFullscreenAllAppsState(arrow_up);
 }
 
 void AppsGridView::ViewHierarchyChanged(
@@ -1056,40 +902,13 @@ void AppsGridView::ViewHierarchyChanged(
 
 void AppsGridView::OnGestureEvent(ui::GestureEvent* event) {
   // Bail on STATE_START or no apps page to make PaginationModel happy.
-  if (contents_view_->GetActiveState() == AppListModel::STATE_START ||
+  if (contents_view_->GetActiveState() == ash::AppListState::kStateStart ||
       pagination_model_.total_pages() <= 0) {
     return;
   }
 
-  if (!contents_view_->app_list_view()->is_in_drag() &&
-      pagination_controller_->OnGestureEvent(*event, GetContentsBounds())) {
+  if (pagination_controller_->OnGestureEvent(*event, GetContentsBounds()))
     event->SetHandled();
-  } else {
-    event->ConvertLocationToTarget(
-        static_cast<View*>(this),
-        static_cast<View*>(contents_view_->app_list_view()));
-    contents_view_->app_list_view()->OnGestureEvent(event);
-  }
-}
-
-void AppsGridView::OnScrollEvent(ui::ScrollEvent* event) {
-  if (is_ignoring_scroll_events_)
-    return;
-  // Bail on STATE_START or no apps page to make PaginationModel happy.
-  if (contents_view_->GetActiveState() == AppListModel::STATE_START ||
-      pagination_model_.total_pages() <= 0) {
-    return;
-  }
-
-  if (event->type() == ui::ET_SCROLL_FLING_CANCEL)
-    return;
-
-  gfx::Vector2dF offset(event->x_offset(), event->y_offset());
-  if (pagination_controller_->OnScroll(gfx::ToFlooredVector2d(offset),
-                                       PaginationController::SCROLL_TOUCHPAD)) {
-    event->SetHandled();
-    event->StopPropagation();
-  }
 }
 
 void AppsGridView::Update() {
@@ -1102,6 +921,7 @@ void AppsGridView::Update() {
     view_model_.Add(view, i);
     AddChildView(view);
   }
+  UpdateColsAndRowsForFolder();
   UpdatePaging();
   UpdatePulsingBlockViews();
   Layout();
@@ -1113,18 +933,16 @@ void AppsGridView::UpdateSuggestions() {
     return;
   suggestions_container_->SetResults(contents_view_->app_list_main_view()
                                          ->view_delegate()
-                                         ->GetModel()
+                                         ->GetSearchModel()
                                          ->results());
 }
 
 int AppsGridView::TilesPerPage(int page) const {
-  if (is_fullscreen_app_list_enabled_ && page == 0)
+  if (folder_delegate_)
+    return kMaxFolderItemsPerPage;
+  if (page == 0)
     return cols_ * (rows_per_page_ - 1);
   return cols_ * rows_per_page_;
-}
-
-int AppsGridView::LastIndexOfPage(int page) const {
-  return TilesPerPage(page) - 1;
 }
 
 void AppsGridView::UpdatePaging() {
@@ -1150,7 +968,9 @@ void AppsGridView::UpdatePulsingBlockViews() {
   const int available_slots =
       TilesPerPage(current_page) - existing_items % TilesPerPage(current_page);
   const int desired =
-      model_->status() == AppListModel::STATUS_SYNCING ? available_slots : 0;
+      model_->status() == ash::AppListModelStatus::kStatusSyncing
+          ? available_slots
+          : 0;
 
   if (pulsing_blocks_model_.view_size() == desired)
     return;
@@ -1172,10 +992,24 @@ AppListItemView* AppsGridView::CreateViewForItemAtIndex(size_t index) {
   // The drag_view_ might be pending for deletion, therefore view_model_
   // may have one more item than item_list_.
   DCHECK_LE(index, item_list_->item_count());
-  AppListItemView* view = new AppListItemView(this, item_list_->item_at(index));
+  AppListItemView* view = new AppListItemView(
+      this, item_list_->item_at(index),
+      contents_view_->app_list_main_view()->view_delegate());
   view->SetPaintToLayer();
   view->layer()->SetFillsBoundsOpaquely(false);
   return view;
+}
+
+bool AppsGridView::HandleScroll(int offset, ui::EventType type) {
+  // Bail on STATE_START or no apps page to make PaginationModel happy.
+  if (contents_view_->GetActiveState() == ash::AppListState::kStateStart ||
+      pagination_model_.total_pages() <= 0) {
+    return false;
+  }
+
+  const gfx::Vector2dF scroll_offset_vector(0, offset);
+  return pagination_controller_->OnScroll(
+      gfx::ToFlooredVector2d(scroll_offset_vector), type);
 }
 
 AppsGridView::Index AppsGridView::GetIndexFromModelIndex(
@@ -1217,7 +1051,7 @@ void AppsGridView::SetSelectedItemByIndex(const Index& index) {
   selected_view_ = new_selection;
   selected_view_->SetTitleSubpixelAA();
   selected_view_->SchedulePaint();
-  selected_view_->NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
+  selected_view_->NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
 }
 
 bool AppsGridView::IsValidIndex(const Index& index) const {
@@ -1247,196 +1081,6 @@ AppsGridView::Index AppsGridView::GetLastViewIndex() const {
   DCHECK_LT(0, view_model_.view_size());
   int view_index = view_model_.view_size() - 1;
   return GetIndexFromModelIndex(view_index);
-}
-
-void AppsGridView::MoveSelected(int page_delta,
-                                int slot_x_delta,
-                                int slot_y_delta) {
-  if (expand_arrow_view_ && expand_arrow_view_->selected() &&
-      HandleExpandArrowMove(page_delta, slot_x_delta, slot_y_delta)) {
-    return;
-  }
-
-  if (!selected_view_) {
-    // If fullscreen app list is enabled and we are on the first page, moving
-    // selected should consider suggested apps tiles before all apps tiles.
-    int current_page = pagination_model_.selected_page();
-    if (!suggestions_container_ || current_page != 0)
-      return SetSelectedItemByIndex(Index(current_page, 0));
-    if (HandleSuggestionsMove(page_delta, slot_x_delta, slot_y_delta))
-      return;
-  }
-
-  const Index& selected = GetIndexOfView(selected_view_);
-  int target_slot = selected.slot + slot_x_delta + slot_y_delta * cols_;
-
-  if (!is_fullscreen_app_list_enabled_) {
-    if (selected.slot % cols_ == 0 && slot_x_delta == -1) {
-      if (selected.page > 0) {
-        page_delta = -1;
-        target_slot = selected.slot + cols_ - 1;
-      } else {
-        target_slot = selected.slot;
-      }
-    }
-
-    if (selected.slot % cols_ == cols_ - 1 && slot_x_delta == 1) {
-      if (selected.page < pagination_model_.total_pages() - 1) {
-        page_delta = 1;
-        target_slot = selected.slot - cols_ + 1;
-      } else {
-        target_slot = selected.slot;
-      }
-    }
-  } else {
-    // Moving left from the first slot of all apps tiles should move focus to
-    // the last slot of previous page or last tile of suggested apps.
-    if (selected.slot == 0 && slot_x_delta == -1) {
-      if (selected.page == 0) {
-        suggestions_container_->SetSelectedIndex(
-            suggestions_container_->num_results() - 1);
-        ClearSelectedView(selected_view_);
-        return;
-      } else {
-        page_delta = -1;
-        target_slot = LastIndexOfPage(selected.page + page_delta);
-      }
-    }
-
-    // Moving right from last slot should flip to next page and focus on the
-    // first tile.
-    if (selected.slot == LastIndexOfPage(selected.page) && slot_x_delta == 1) {
-      page_delta = 1;
-      target_slot = 0;
-    }
-
-    // Moving up from the first row of all apps tiles should move focus to the
-    // last row of previous page or suggested apps.
-    if (selected.slot / cols_ == 0 && slot_y_delta == -1) {
-      if (selected.page == 0) {
-        const int max_suggestion_index =
-            suggestions_container_->num_results() - 1;
-        int selected_index = std::min(max_suggestion_index, selected.slot);
-        suggestions_container_->SetSelectedIndex(selected_index);
-        ClearSelectedView(selected_view_);
-        return;
-      } else {
-        page_delta = -1;
-        target_slot = LastIndexOfPage(selected.page + page_delta) -
-                      (cols_ - 1 - selected.slot);
-      }
-    }
-
-    // Moving down from the last row of all apps tiles should move focus to the
-    // first row of next page if it exists.
-    if (LastIndexOfPage(selected.page) - selected.slot < cols_ &&
-        slot_y_delta == 1) {
-      if (selected.page < pagination_model_.total_pages() - 1) {
-        page_delta = 1;
-        target_slot =
-            (cols_ - 1) - (LastIndexOfPage(selected.page) - selected.slot);
-      } else {
-        target_slot = selected.slot;
-      }
-    }
-  }
-
-  // Clamp the target slot to the last item if we are moving in or to the last
-  // page but our target slot is past the end of the item list.
-  if (selected.page + page_delta == pagination_model_.total_pages() - 1) {
-    int last_item_slot =
-        GetIndexFromModelIndex(view_model_.view_size() - 1).slot;
-    if (last_item_slot < target_slot) {
-      target_slot = last_item_slot;
-    }
-  }
-
-  int target_page = std::min(pagination_model_.total_pages() - 1,
-                             std::max(selected.page + page_delta, 0));
-  SetSelectedItemByIndex(Index(target_page, target_slot));
-}
-
-bool AppsGridView::HandleSuggestionsMove(int page_delta,
-                                         int slot_x_delta,
-                                         int slot_y_delta) {
-  DCHECK(suggestions_container_);
-  DCHECK(expand_arrow_view_);
-
-  if (suggestions_container_->selected_index() == -1) {
-    suggestions_container_->SetSelectedIndex(0);
-    return true;
-  }
-
-  if (page_delta == -1 || slot_y_delta == -1)
-    return true;
-
-  if (slot_x_delta != 0) {
-    int new_index = suggestions_container_->selected_index() + slot_x_delta;
-    if (new_index == suggestions_container_->num_results()) {
-      suggestions_container_->ClearSelectedIndex();
-      if (contents_view_->GetActiveState() == AppListModel::STATE_START) {
-        // In state start, moving right out of |suggestions_container_| should
-        // give selection to the expand arrow.
-        expand_arrow_view_->SetSelected(true);
-      } else {
-        DCHECK(contents_view_->GetActiveState() == AppListModel::STATE_APPS);
-        // In state apps, moving right out of |suggestions_container_| should
-        // give selection to the first tile of all apps.
-        SetSelectedItemByIndex(Index(0, 0));
-      }
-    } else if (suggestions_container_->IsValidSelectionIndex(new_index)) {
-      suggestions_container_->SetSelectedIndex(new_index);
-    }
-    return true;
-  }
-
-  if (slot_y_delta == 1) {
-    if (contents_view_->GetActiveState() == AppListModel::STATE_START) {
-      // In state start, moving down from |suggestions_container_| should give
-      // selection to the expand arrow.
-      expand_arrow_view_->SetSelected(true);
-    } else {
-      DCHECK(contents_view_->GetActiveState() == AppListModel::STATE_APPS);
-      // In state apps, moving down from |suggestions_container_| should give
-      // selection to the first row of all apps.
-      SetSelectedItemByIndex(
-          Index(0, suggestions_container_->selected_index()));
-    }
-    suggestions_container_->ClearSelectedIndex();
-    return true;
-  }
-
-  // A page flip to next page from |suggestions_container_| should focus to
-  // the first tile of next page.
-  if (page_delta == 1) {
-    SetSelectedItemByIndex(Index(page_delta, 0));
-    suggestions_container_->ClearSelectedIndex();
-    return true;
-  }
-  return false;
-}
-
-bool AppsGridView::HandleExpandArrowMove(int page_delta,
-                                         int slot_x_delta,
-                                         int slot_y_delta) {
-  DCHECK(suggestions_container_);
-  DCHECK(expand_arrow_view_);
-  DCHECK(contents_view_->GetActiveState() == AppListModel::STATE_START);
-
-  if (page_delta != 0 || slot_x_delta == 1 || slot_y_delta == 1 ||
-      (slot_x_delta == 0 && slot_y_delta == 0)) {
-    return true;
-  }
-
-  if (slot_x_delta == -1 || slot_y_delta == -1) {
-    // Move focus to the last app in ||suggestions_container|.
-    expand_arrow_view_->SetSelected(false);
-    suggestions_container_->SetSelectedIndex(
-        suggestions_container_->num_results() - 1);
-    return true;
-  }
-
-  return false;
 }
 
 const gfx::Vector2d AppsGridView::CalculateTransitionOffset(
@@ -1472,7 +1116,7 @@ const gfx::Vector2d AppsGridView::CalculateTransitionOffset(
       }
     }
   } else {
-    const int page_height = grid_size.height() + kPagePaddingFullscreen;
+    const int page_height = grid_size.height();
     if (page_of_view < current_page)
       y_offset = -page_height;
     else if (page_of_view > current_page)
@@ -1484,6 +1128,13 @@ const gfx::Vector2d AppsGridView::CalculateTransitionOffset(
         y_offset += transition.progress * page_height * dir;
       }
     }
+
+    // Adjust pages with bottom 56px spaces to have 48px page break space, but
+    // do not over adjust for ideal offset.
+    if (page_of_view > current_page && current_page >= 1)
+      y_offset = std::max(y_offset - kPageBreakSpaceAdjustment, 0);
+    else if (page_of_view < current_page && page_of_view >= 1)
+      y_offset = std::min(y_offset + kPageBreakSpaceAdjustment, 0);
   }
 
   return gfx::Vector2d(x_offset, y_offset);
@@ -1505,28 +1156,8 @@ void AppsGridView::CalculateIdealBounds() {
       view_index = GetIndexFromModelIndex(slot_index);
     }
 
-    const int row = view_index.slot / cols_;
-    const int col = view_index.slot % cols_;
-    gfx::Rect tile_slot = GetExpectedTileBounds(row, col);
-    gfx::Vector2d offset = CalculateTransitionOffset(view_index.page);
-    if (is_fullscreen_app_list_enabled_) {
-      // For |current_page|'s neighbor pages, do adjustments to ensure page
-      // break space.
-      const int current_page = pagination_model_.selected_page();
-      if (view_index.page == current_page - 1) {
-        if (view_index.page == 0) {
-          offset.set_y(offset.y() + GetHeightOnTopOfAllAppsTiles(0) -
-                       GetHeightOnTopOfAllAppsTiles(1));
-        } else {
-          offset.set_y(offset.y() + GetHeightOnTopOfAllAppsTiles(current_page) +
-                       2 * kTileVerticalPadding);
-        }
-      } else if (view_index.page == current_page + 1) {
-        offset.set_y(offset.y() - GetHeightOnTopOfAllAppsTiles(current_page) -
-                     2 * kTileVerticalPadding);
-      }
-    }
-    tile_slot.Offset(offset.x(), offset.y());
+    gfx::Rect tile_slot = GetExpectedTileBounds(view_index);
+    tile_slot.Offset(CalculateTransitionOffset(view_index.page));
     if (i < view_model_.view_size()) {
       view_model_.set_ideal_bounds(i, tile_slot);
     } else {
@@ -1624,6 +1255,8 @@ void AppsGridView::ExtractDragLocation(const gfx::Point& root_location,
       GetWidget()->GetNativeWindow()->GetRootWindow(),
       GetWidget()->GetNativeWindow(), drag_point);
   views::View::ConvertPointFromWidget(this, drag_point);
+  // Ensure that |drag_point| is correct if RTL.
+  drag_point->set_x(GetMirroredXInView(drag_point->x()));
 }
 
 void AppsGridView::CalculateDropTarget() {
@@ -1631,6 +1264,8 @@ void AppsGridView::CalculateDropTarget() {
 
   gfx::Point point = drag_view_->icon()->bounds().CenterPoint();
   views::View::ConvertPointToTarget(drag_view_, this, &point);
+  // Ensure that the drop target location is correct if RTL.
+  point.set_x(GetMirroredXInView(point.x()));
   if (!IsPointWithinDragBuffer(point)) {
     // Reset the reorder target to the original position if the cursor is
     // outside the drag buffer.
@@ -1669,7 +1304,7 @@ bool AppsGridView::CalculateFolderDropTarget(const gfx::Point& point,
   }
 
   int distance_to_tile_center =
-      (point - GetExpectedTileBounds(nearest_tile_index.slot).CenterPoint())
+      (point - GetExpectedTileBounds(nearest_tile_index).CenterPoint())
           .Length();
   if (distance_to_tile_center > kFolderDroppingCircleRadius)
     return false;
@@ -1684,7 +1319,8 @@ bool AppsGridView::CalculateFolderDropTarget(const gfx::Point& point,
   // Items can only be dropped into non-folders (which have no children) or
   // folders that have fewer than the max allowed items.
   // The OEM folder does not allow drag/drop of other items into it.
-  if (target_item->ChildItemCount() >= kMaxFolderItems ||
+  const size_t kMaxItemCount = kMaxFolderItemsPerPage * kMaxFolderPages;
+  if (target_item->ChildItemCount() >= kMaxItemCount ||
       IsOEMFolderItem(target_item)) {
     return false;
   }
@@ -1699,7 +1335,7 @@ void AppsGridView::CalculateReorderDropTarget(const gfx::Point& point,
   gfx::Rect bounds = GetContentsBounds();
   Index grid_index = GetNearestTileIndexForPoint(point);
   gfx::Point reorder_placeholder_center =
-      GetExpectedTileBounds(reorder_placeholder_.slot).CenterPoint();
+      GetExpectedTileBounds(reorder_placeholder_).CenterPoint();
 
   int x_offset_direction = 0;
   if (grid_index == reorder_placeholder_) {
@@ -1720,7 +1356,7 @@ void AppsGridView::CalculateReorderDropTarget(const gfx::Point& point,
   int x_offset = x_offset_direction *
                  (total_tile_size.width() - kFolderDroppingCircleRadius) / 2;
   int col = (point.x() - bounds.x() + x_offset) / total_tile_size.width();
-  col = ClampToRange(col, 0, cols_ - 1);
+  col = base::ClampToRange(col, 0, cols_ - 1);
   *drop_target =
       std::min(Index(pagination_model_.selected_page(), row * cols_ + col),
                GetLastViewIndex());
@@ -1766,9 +1402,6 @@ void AppsGridView::UpdateDragStateInsideFolder(Pointer pointer,
     DispatchDragEventForReparent(pointer, drag_point);
     return;
   }
-
-  // Regular drag and drop in a folder's grid view.
-  folder_delegate_->UpdateFolderViewBackground(true);
 
   // Calculate if the drag_view_ is dragged out of the folder's container
   // ink bubble.
@@ -1816,6 +1449,115 @@ bool AppsGridView::IsUnderOEMFolder() {
     return false;
 
   return folder_delegate_->IsOEMFolder();
+}
+
+bool AppsGridView::HandleFocusMovementInPeekingState(bool arrow_up) {
+  DCHECK(expand_arrow_view_);
+  if (expand_arrow_view_->HasFocus())
+    return false;
+  // In peeking mode, the focus is now in suggestions container.
+  if (arrow_up)
+    contents_view_->GetSearchBoxView()->search_box()->RequestFocus();
+  else
+    expand_arrow_view_->RequestFocus();
+  return true;
+}
+
+bool AppsGridView::HandleFocusMovementInFullscreenAllAppsState(bool arrow_up) {
+  // The global index is the index of focused app in all pages, assuming
+  // all pages except last one have |cols_*rows_per_page_| apps, including
+  // apps in both |view_model_| and |suggestions_container_|. For example, if
+  // the focused app is the n-th app in p-th page, the global index is
+  // |(p-1)*(cols_*rows_per_page_)+(n-1)|.
+  int global_index;
+
+  // |suggestions_container_| does not exist in folder view.
+  bool has_suggestions_app =
+      suggestions_container_ && suggestions_container_->num_results() > 0;
+  const int suggestions_app_max_num = has_suggestions_app ? cols_ : 0;
+
+  // Calculate current global focus index.
+  views::View* focused_view = GetFocusManager()->GetFocusedView();
+  if (has_suggestions_app && suggestions_container_->Contains(focused_view)) {
+    const std::vector<SearchResultTileItemView*>& tile_views =
+        suggestions_container_->tile_views();
+    global_index =
+        std::find(tile_views.begin(), tile_views.end(), focused_view) -
+        tile_views.begin();
+    DCHECK(global_index < cols_);
+  } else {
+    global_index = view_model_.GetIndexOfView(
+                       static_cast<const AppListItemView*>(focused_view)) +
+                   suggestions_app_max_num;
+  }
+
+  // Calculate target global focus index.
+  const int tile_total = view_model_.view_size() + suggestions_app_max_num;
+  const int row_total = tile_total / cols_ + ((tile_total % cols_) ? 1 : 0);
+  int target_global_index = global_index + (arrow_up ? -cols_ : cols_);
+  if (target_global_index >= tile_total &&
+      target_global_index < cols_ * row_total) {
+    // Target index is on last row, so set it to last app's global index.
+    target_global_index = tile_total - 1;
+  } else if (has_suggestions_app && target_global_index >= 0 &&
+             target_global_index < cols_) {
+    // Target index is in |suggestions_container|, set it to last suggestion
+    // app's index if it is outside range.
+    target_global_index = std::min(suggestions_container_->num_results() - 1,
+                                   target_global_index);
+  }
+
+  // Move focus based on target global focus index.
+  if (folder_delegate_ &&
+      (target_global_index < 0 || target_global_index >= cols_ * row_total ||
+       target_global_index / kMaxFolderItemsPerPage !=
+           global_index / kMaxFolderItemsPerPage)) {
+    // The pagination inside a folder is set horizontally, so focus should be
+    // set on the search box when it is moved up outside the current page and
+    // should be set on the folder title when it is moved down outside the
+    // current page.
+    if (arrow_up) {
+      contents_view_->GetSearchBoxView()->search_box()->RequestFocus();
+    } else {
+      contents_view_->apps_container_view()
+          ->app_list_folder_view()
+          ->folder_header_view()
+          ->SetTextFocus();
+    }
+    return true;
+  }
+
+  if (target_global_index < 0 || target_global_index >= cols_ * row_total) {
+    // Target index is outside apps grid view.
+    contents_view_->GetSearchBoxView()->search_box()->RequestFocus();
+  } else if (has_suggestions_app &&
+             target_global_index < suggestions_container_->num_results()) {
+    suggestions_container_->tile_views()[target_global_index]->RequestFocus();
+  } else {
+    view_model_.view_at(target_global_index - suggestions_app_max_num)
+        ->RequestFocus();
+  }
+  return true;
+}
+
+void AppsGridView::UpdateColsAndRowsForFolder() {
+  if (!folder_delegate_ || !item_list_->item_count())
+    return;
+
+  // Try to shape the apps grid into a square.
+  int items_in_one_page =
+      std::min(kMaxFolderItemsPerPage, item_list_->item_count());
+  cols_ = std::sqrt(items_in_one_page - 1) + 1;
+  rows_per_page_ = (items_in_one_page - 1) / cols_ + 1;
+}
+
+size_t AppsGridView::GetAppListItemViewIndexOffset() const {
+  if (folder_delegate_)
+    return 0;
+
+  // The first app list item view must be right behind the expand arrow view.
+  DCHECK(expand_arrow_view_);
+  return GetIndexOf(expand_arrow_view_) + 1;
 }
 
 void AppsGridView::DispatchDragEventForReparent(Pointer pointer,
@@ -1884,8 +1626,11 @@ void AppsGridView::OnFolderItemRemoved() {
 void AppsGridView::UpdateOpacity() {
   int app_list_y_position_in_screen =
       contents_view_->app_list_view()->app_list_y_position_in_screen();
-  int work_area_bottom = contents_view_->app_list_view()->GetWorkAreaBottom();
-  bool is_in_drag = contents_view_->app_list_view()->is_in_drag();
+  AppListView* app_list_view = contents_view_->app_list_view();
+  int screen_bottom = app_list_view->GetScreenBottom();
+  bool should_restore_opacity =
+      !app_list_view->is_in_drag() &&
+      (app_list_view->app_list_state() != AppListViewState::CLOSED);
 
   // The opacity of suggested apps is a function of the fractional displacement
   // of the app list from collapsed(0) to peeking(1) state. When the fraction
@@ -1893,7 +1638,8 @@ void AppsGridView::UpdateOpacity() {
   // |kSuggestedAppsOpacityEndFraction|, the opacity of suggested apps changes
   // from 0.f to 1.0f.
   float fraction =
-      std::max<float>(work_area_bottom - app_list_y_position_in_screen, 0) /
+      std::max<float>(
+          screen_bottom - kShelfSize - app_list_y_position_in_screen, 0) /
       (kPeekingAppListHeight - kShelfSize);
   float opacity =
       std::min(std::max((fraction - kSuggestedAppsOpacityStartFraction) /
@@ -1901,7 +1647,10 @@ void AppsGridView::UpdateOpacity() {
                              kSuggestedAppsOpacityStartFraction),
                         0.f),
                1.0f);
-  suggestions_container_->layer()->SetOpacity(is_in_drag ? opacity : 1.0f);
+  if (suggestions_container_) {
+    suggestions_container_->layer()->SetOpacity(
+        should_restore_opacity ? 1.0f : opacity);
+  }
 
   // The opacity of expand arrow during dragging from collapsed(0) to peeking(1)
   // state. When the dragging amount fraction changes from
@@ -1922,8 +1671,8 @@ void AppsGridView::UpdateOpacity() {
   // changes from 0.f to 1.0f.
   float peeking_to_fullscreen_height =
       contents_view_->GetDisplayHeight() - kPeekingAppListHeight;
-  float drag_amount = (work_area_bottom + kShelfSize) -
-                      app_list_y_position_in_screen - kPeekingAppListHeight;
+  float drag_amount =
+      screen_bottom - app_list_y_position_in_screen - kPeekingAppListHeight;
   fraction = std::max(drag_amount / peeking_to_fullscreen_height, 0.f);
   opacity = std::min(std::max((fraction + kAllAppsIndicatorOpacityEndFraction -
                                kAllAppsIndicatorOpacityStartFraction - 1.0f) /
@@ -1931,7 +1680,10 @@ void AppsGridView::UpdateOpacity() {
                                    kAllAppsIndicatorOpacityStartFraction),
                               0.f),
                      1.0f);
-  all_apps_indicator_->layer()->SetOpacity(is_in_drag ? opacity : 1.0f);
+  if (all_apps_indicator_) {
+    all_apps_indicator_->layer()->SetOpacity(should_restore_opacity ? 1.0f
+                                                                    : opacity);
+  }
 
   // The opacity of expand arrow during dragging from peeking(0) to
   // fullscreen(1) state. When the dragging amount fraction changes from
@@ -1943,14 +1695,15 @@ void AppsGridView::UpdateOpacity() {
                              kExpandArrowDismissEndFraction),
                         0.f),
                1.0f);
-
-  if (app_list_y_position_in_screen <
-      (work_area_bottom + kShelfSize - kPeekingAppListHeight)) {
-    expand_arrow_view_->layer()->SetOpacity(
-        is_in_drag ? arrow_fullscreen_opacity : 1.0f);
-  } else {
-    expand_arrow_view_->layer()->SetOpacity(is_in_drag ? arrow_peeking_opacity
-                                                       : 1.0f);
+  if (expand_arrow_view_) {
+    if (app_list_y_position_in_screen <
+        (screen_bottom - kPeekingAppListHeight)) {
+      expand_arrow_view_->layer()->SetOpacity(
+          should_restore_opacity ? 1.0f : arrow_fullscreen_opacity);
+    } else {
+      expand_arrow_view_->layer()->SetOpacity(
+          should_restore_opacity ? 1.0f : arrow_peeking_opacity);
+    }
   }
 
   // Updates the opacity of all apps. The opacity of the app starting at 0.f
@@ -1958,9 +1711,8 @@ void AppsGridView::UpdateOpacity() {
   // of work area and transitioning to 1.0f by the time the centerline reaches
   // |kAllAppsOpacityEndPx| above the work area bottom.
   float centerline_above_work_area = 0.f;
-  const float drag_amount_above_peeking = work_area_bottom + kShelfSize -
-                                          app_list_y_position_in_screen -
-                                          kPeekingAppListHeight;
+  const float drag_amount_above_peeking =
+      screen_bottom - app_list_y_position_in_screen - kPeekingAppListHeight;
   const float opacity_factor = drag_amount_above_peeking / kShelfSize;
   for (int i = 0; i < view_model_.view_size(); ++i) {
     AppListItemView* item_view = GetItemViewAt(i);
@@ -1969,8 +1721,8 @@ void AppsGridView::UpdateOpacity() {
 
     gfx::Rect view_bounds = view_model_.ideal_bounds(i);
     views::View::ConvertRectToScreen(this, &view_bounds);
-    centerline_above_work_area = std::max<float>(
-        work_area_bottom + kShelfSize - view_bounds.CenterPoint().y(), 0.f);
+    centerline_above_work_area =
+        std::max<float>(screen_bottom - view_bounds.CenterPoint().y(), 0.f);
     opacity = std::min(
         std::max((centerline_above_work_area - kAllAppsOpacityStartPx) /
                      (kAllAppsOpacityEndPx - kAllAppsOpacityStartPx),
@@ -1990,27 +1742,31 @@ void AppsGridView::UpdateOpacity() {
       opacity = std::max(opacity * opacity_factor, 0.f);
     }
 
-    item_view->layer()->SetOpacity(is_in_drag ? opacity : 1.0f);
-  }
-
-  // Updates the opacity of page switcher buttons. The same rule as all apps.
-  if (page_switcher_view_) {
-    gfx::Rect switcher_bounds = page_switcher_view_->GetBoundsInScreen();
-    centerline_above_work_area = std::max<float>(
-        work_area_bottom + kShelfSize - switcher_bounds.CenterPoint().y(), 0.f);
-    opacity = std::min(
-        std::max((centerline_above_work_area - kAllAppsOpacityStartPx) /
-                     (kAllAppsOpacityEndPx - kAllAppsOpacityStartPx),
-                 0.f),
-        1.0f);
-    page_switcher_view_->layer()->SetOpacity(is_in_drag ? opacity : 1.0f);
+    item_view->layer()->SetOpacity(should_restore_opacity ? 1.0f : opacity);
   }
 }
 
-void AppsGridView::StartTimerToIgnoreScrollEvents() {
-  is_ignoring_scroll_events_ = true;
-  scroll_ignore_timer_.Start(FROM_HERE, kIgnoreScrollEventsDurationMs, this,
-                             &AppsGridView::StopIgnoringScrollEvents);
+bool AppsGridView::HandleScrollFromAppListView(int offset, ui::EventType type) {
+  // Scroll up at first page should close the launcher.
+  if (offset > 0 && !pagination_model()->IsValidPageRelative(-1))
+    return false;
+
+  HandleScroll(offset, type);
+  return true;
+}
+
+AppListItemView* AppsGridView::GetCurrentPageFirstItemViewInFolder() {
+  DCHECK(folder_delegate_);
+  int first_index = pagination_model_.selected_page() * kMaxFolderItemsPerPage;
+  return view_model_.view_at(first_index);
+}
+
+AppListItemView* AppsGridView::GetCurrentPageLastItemViewInFolder() {
+  DCHECK(folder_delegate_);
+  int last_index = std::min(
+      (pagination_model_.selected_page() + 1) * kMaxFolderItemsPerPage - 1,
+      item_list_->item_count() - 1);
+  return view_model_.view_at(last_index);
 }
 
 void AppsGridView::StartDragAndDropHostDrag(const gfx::Point& grid_location) {
@@ -2033,9 +1789,10 @@ void AppsGridView::StartDragAndDropHostDrag(const gfx::Point& grid_location) {
   // We have to hide the original item since the drag and drop host will do
   // the OS dependent code to "lift off the dragged item".
   DCHECK(!IsDraggingForReparentInRootLevelGridView());
-  drag_and_drop_host_->CreateDragIconProxy(
-      screen_location, drag_view_->item()->icon(), drag_view_, delta,
-      kDragAndDropProxyScale);
+  drag_and_drop_host_->CreateDragIconProxyByLocationWithNoAnimation(
+      drag_view_->icon()->GetBoundsInScreen().origin(),
+      drag_view_->item()->icon(), drag_view_, kDragAndDropProxyScale);
+
   SetViewHidden(drag_view_, true /* hide */, true /* no animation */);
 }
 
@@ -2077,7 +1834,7 @@ void AppsGridView::DispatchDragEventToDragAndDropHost(
 }
 
 void AppsGridView::MaybeStartPageFlipTimer(const gfx::Point& drag_point) {
-  if (!IsPointWithinDragBuffer(drag_point))
+  if (!IsPointWithinPageFlipBuffer(drag_point))
     StopPageFlipTimer();
   int new_page_flip_target = -1;
 
@@ -2089,14 +1846,6 @@ void AppsGridView::MaybeStartPageFlipTimer(const gfx::Point& drag_point) {
     else if (drag_point.y() > height() - kPageFlipZoneSize)
       new_page_flip_target = pagination_model_.selected_page() + 1;
   } else {
-    if (page_switcher_view_->bounds().Contains(drag_point)) {
-      gfx::Point page_switcher_point(drag_point);
-      views::View::ConvertPointToTarget(this, page_switcher_view_,
-                                        &page_switcher_point);
-      new_page_flip_target =
-          page_switcher_view_->GetPageForPoint(page_switcher_point);
-    }
-
     // TODO(xiyuan): Fix this for RTL.
     if (new_page_flip_target == -1 && drag_point.x() < kPageFlipZoneSize)
       new_page_flip_target = pagination_model_.selected_page() - 1;
@@ -2135,6 +1884,11 @@ void AppsGridView::MoveItemInModel(AppListItemView* item_view,
   DCHECK_GE(current_model_index, 0);
 
   int target_model_index = GetModelIndexFromIndex(target);
+
+  // Reorder the app list item views in accordance with |view_model_|.
+  ReorderChildView(item_view,
+                   GetAppListItemViewIndexOffset() + target_model_index);
+
   if (target_model_index == current_model_index)
     return;
 
@@ -2181,7 +1935,13 @@ void AppsGridView::MoveItemToFolder(AppListItemView* item_view,
           CreateViewForItemAtIndex(folder_item_index);
       target_folder_view->SetBoundsRect(target_view_bounds);
       view_model_.Add(target_folder_view, target_view_index);
-      AddChildView(target_folder_view);
+
+      // use |folder_item_index| instead of |target_view_index| because the
+      // dragged item has not yet been removed from |view_model_| and
+      // |target_view_index| is 1 greater than |folder_item_index| if target
+      // item is behind the dragged item.
+      AddChildViewAt(target_folder_view,
+                     GetAppListItemViewIndexOffset() + folder_item_index);
     } else {
       LOG(ERROR) << "Folder no longer in item_list: " << folder_item_id;
     }
@@ -2194,6 +1954,7 @@ void AppsGridView::MoveItemToFolder(AppListItemView* item_view,
   bounds_animator_.SetAnimationDelegate(
       drag_view_, std::unique_ptr<gfx::AnimationDelegate>(
                       new ItemRemoveAnimationDelegate(drag_view_)));
+  UpdateColsAndRowsForFolder();
   UpdatePaging();
 }
 
@@ -2231,11 +1992,14 @@ void AppsGridView::ReparentItemForReorder(AppListItemView* item_view,
     target_position = item_list_->item_at(target_model_index)->position();
   model_->MoveItemToFolderAt(reparent_item, "", target_position);
   view_model_.Move(current_model_index, target_model_index);
+  ReorderChildView(item_view,
+                   GetAppListItemViewIndexOffset() + target_model_index);
 
   RemoveLastItemFromReparentItemFolderIfNecessary(source_folder_id);
 
   item_list_->AddObserver(this);
   model_->AddObserver(this);
+  UpdateColsAndRowsForFolder();
   UpdatePaging();
 }
 
@@ -2286,12 +2050,17 @@ bool AppsGridView::ReparentItemToAnotherFolder(AppListItemView* item_view,
     const std::string& new_folder_id = reparent_item->folder_id();
     size_t new_folder_index;
     if (item_list_->FindItemIndex(new_folder_id, &new_folder_index)) {
+      // Save the target view's bounds before deletion, which will be used as
+      // new folder view's bounds.
+      gfx::Rect target_rect = target_view->bounds();
       int target_view_index = view_model_.GetIndexOfView(target_view);
       DeleteItemViewAtIndex(target_view_index);
       AppListItemView* new_folder_view =
           CreateViewForItemAtIndex(new_folder_index);
+      new_folder_view->SetBoundsRect(target_rect);
       view_model_.Add(new_folder_view, target_view_index);
-      AddChildView(new_folder_view);
+      AddChildViewAt(new_folder_view,
+                     GetAppListItemViewIndexOffset() + new_folder_index);
     } else {
       LOG(ERROR) << "Folder no longer in item_list: " << new_folder_id;
     }
@@ -2308,6 +2077,7 @@ bool AppsGridView::ReparentItemToAnotherFolder(AppListItemView* item_view,
   bounds_animator_.SetAnimationDelegate(
       drag_view_, std::unique_ptr<gfx::AnimationDelegate>(
                       new ItemRemoveAnimationDelegate(drag_view_)));
+  UpdateColsAndRowsForFolder();
   UpdatePaging();
 
   return true;
@@ -2324,6 +2094,9 @@ void AppsGridView::RemoveLastItemFromReparentItemFolderIfNecessary(
   if (!source_folder || source_folder->ChildItemCount() != 1u)
     return;
 
+  // Save the folder item view's bounds before deletion, which will be used as
+  // last item view's bounds.
+  gfx::Rect folder_rect = activated_folder_item_view()->bounds();
   // Delete view associated with the folder item to be removed.
   DeleteItemViewAtIndex(
       view_model_.GetIndexOfView(activated_folder_item_view()));
@@ -2340,8 +2113,10 @@ void AppsGridView::RemoveLastItemFromReparentItemFolderIfNecessary(
     return;
   }
   AppListItemView* last_item_view = CreateViewForItemAtIndex(last_item_index);
+  last_item_view->SetBoundsRect(folder_rect);
   view_model_.Add(last_item_view, last_item_index);
-  AddChildView(last_item_view);
+  AddChildViewAt(last_item_view,
+                 GetAppListItemViewIndexOffset() + last_item_index);
 }
 
 void AppsGridView::CancelFolderItemReparent(AppListItemView* drag_item_view) {
@@ -2352,15 +2127,13 @@ void AppsGridView::CancelFolderItemReparent(AppListItemView* drag_item_view) {
   gfx::Rect target_icon_rect =
       GetTargetIconRectInFolder(drag_item_view, activated_folder_item_view_);
 
-  gfx::Rect drag_view_icon_to_grid =
-      drag_item_view->ConvertRectToParent(drag_item_view->GetIconBounds());
-  drag_view_icon_to_grid.ClampToCenteredSize(
-      gfx::Size(kGridIconDimension, kGridIconDimension));
-  TopIconAnimationView* icon_view =
-      new TopIconAnimationView(drag_item_view->item()->icon(), target_icon_rect,
-                               false); /* animate like closing folder */
+  gfx::Rect drag_view_rect = drag_item_view->bounds();
+  TopIconAnimationView* icon_view = new TopIconAnimationView(
+      drag_item_view->item()->icon(),
+      base::UTF8ToUTF16(drag_item_view->item()->GetDisplayName()),
+      target_icon_rect, false, true); /* animate like closing folder */
   AddChildView(icon_view);
-  icon_view->SetBoundsRect(drag_view_icon_to_grid);
+  icon_view->SetBoundsRect(drag_view_rect);
   icon_view->TransformView();
 }
 
@@ -2382,17 +2155,18 @@ void AppsGridView::DeleteItemViewAtIndex(int index) {
 }
 
 bool AppsGridView::IsPointWithinDragBuffer(const gfx::Point& point) const {
-  if (is_fullscreen_app_list_enabled_) {
-    gfx::Point point_in_screen = point;
-    ConvertPointToScreen(this, &point_in_screen);
-    const display::Display display =
-        display::Screen::GetScreen()->GetDisplayNearestView(
-            GetWidget()->GetNativeView());
-    return display.work_area().Contains(point_in_screen);
-  }
   gfx::Rect rect(GetLocalBounds());
   rect.Inset(-kDragBufferPx, -kDragBufferPx, -kDragBufferPx, -kDragBufferPx);
   return rect.Contains(point);
+}
+
+bool AppsGridView::IsPointWithinPageFlipBuffer(const gfx::Point& point) const {
+  gfx::Point point_in_screen = point;
+  ConvertPointToScreen(this, &point_in_screen);
+  const display::Display display =
+      display::Screen::GetScreen()->GetDisplayNearestView(
+          GetWidget()->GetNativeView());
+  return display.work_area().Contains(point_in_screen);
 }
 
 void AppsGridView::ButtonPressed(views::Button* sender,
@@ -2425,8 +2199,14 @@ void AppsGridView::OnListItemAdded(size_t index, AppListItem* item) {
 
   AppListItemView* view = CreateViewForItemAtIndex(index);
   view_model_.Add(view, index);
-  AddChildView(view);
+  AddChildViewAt(view, GetAppListItemViewIndexOffset() + index);
 
+  // Ensure that AppListItems that are added to the AppListItemList are not
+  // shown while in PEEKING. The visibility of the app icons will be updated
+  // on drag/animation from PEEKING.
+  view->SetVisible(model_->state_fullscreen() != AppListViewState::PEEKING);
+
+  UpdateColsAndRowsForFolder();
   UpdatePaging();
   UpdatePulsingBlockViews();
   Layout();
@@ -2438,6 +2218,7 @@ void AppsGridView::OnListItemRemoved(size_t index, AppListItem* item) {
 
   DeleteItemViewAtIndex(index);
 
+  UpdateColsAndRowsForFolder();
   UpdatePaging();
   UpdatePulsingBlockViews();
   Layout();
@@ -2449,7 +2230,10 @@ void AppsGridView::OnListItemMoved(size_t from_index,
                                    AppListItem* item) {
   EndDrag(true);
   view_model_.Move(from_index, to_index);
+  ReorderChildView(view_model_.view_at(to_index),
+                   GetAppListItemViewIndexOffset() + to_index);
 
+  UpdateColsAndRowsForFolder();
   UpdatePaging();
   AnimateToIdealBounds();
 }
@@ -2475,7 +2259,10 @@ void AppsGridView::SelectedPageChanged(int old_selected, int new_selected) {
 }
 
 void AppsGridView::TransitionStarted() {
+  contents_view_->app_list_view()->SetIsIgnoringScrollEvents(true);
   CancelContextMenusOnCurrentPage();
+  pagination_animation_start_frame_number_ =
+      GetCompositorActivatedFrameCount(layer()->GetCompositor());
 }
 
 void AppsGridView::TransitionChanged() {
@@ -2485,6 +2272,25 @@ void AppsGridView::TransitionChanged() {
       pagination_model_.transition();
   if (pagination_model_.is_valid_page(transition.target_page))
     Layout();
+}
+
+void AppsGridView::TransitionEnded() {
+  contents_view_->app_list_view()->SetIsIgnoringScrollEvents(false);
+  const base::TimeDelta duration =
+      pagination_model_.GetTransitionAnimationSlideDuration();
+
+  ui::Compositor* compositor = layer()->GetCompositor();
+  // Do not record animation smoothness if |compositor| is nullptr.
+  if (!compositor)
+    return;
+
+  const int end_frame_number = GetCompositorActivatedFrameCount(compositor);
+  if (end_frame_number > pagination_animation_start_frame_number_ &&
+      !duration.is_zero()) {
+    RecordPaginationAnimationSmoothness(
+        end_frame_number - pagination_animation_start_frame_number_,
+        duration.InMilliseconds(), compositor->refresh_rate());
+  }
 }
 
 void AppsGridView::OnAppListModelStatusChanged() {
@@ -2508,14 +2314,9 @@ void AppsGridView::OnImplicitAnimationsCompleted() {
     SetVisible(false);
 }
 
-void AppsGridView::StopIgnoringScrollEvents() {
-  is_ignoring_scroll_events_ = false;
-}
-
 bool AppsGridView::EnableFolderDragDropUI() {
-  // Enable drag and drop folder UI only if it is at the app list root level
-  // and the switch is on.
-  return model_->folders_enabled() && !folder_delegate_;
+  // Enable drag and drop folder UI only if it is at the app list root level.
+  return !folder_delegate_;
 }
 
 AppsGridView::Index AppsGridView::GetNearestTileIndexForPoint(
@@ -2523,60 +2324,57 @@ AppsGridView::Index AppsGridView::GetNearestTileIndexForPoint(
   gfx::Rect bounds = GetContentsBounds();
   const int current_page = pagination_model_.selected_page();
   bounds.Inset(0, GetHeightOnTopOfAllAppsTiles(current_page), 0, 0);
+  bounds.Inset(GetTilePadding());
   const gfx::Size total_tile_size = GetTotalTileSize();
-  int col = ClampToRange((point.x() - bounds.x()) / total_tile_size.width(), 0,
-                         cols_ - 1);
-  int row = rows_per_page_;
-  if (is_fullscreen_app_list_enabled_ && current_page == 0) {
-    row = ClampToRange((point.y() - bounds.y()) / total_tile_size.height(), 0,
-                       rows_per_page_ - 2);
-  } else {
-    row = ClampToRange((point.y() - bounds.y()) / total_tile_size.height(), 0,
-                       rows_per_page_ - 1);
-  }
+  int col = base::ClampToRange(
+      (point.x() - bounds.x()) / total_tile_size.width(), 0, cols_ - 1);
+
+  const bool show_suggested_apps = current_page == 0 && !folder_delegate_;
+  int row =
+      base::ClampToRange((point.y() - bounds.y()) / total_tile_size.height(), 0,
+                         rows_per_page_ - (show_suggested_apps ? 2 : 1));
   return Index(current_page, row * cols_ + col);
 }
 
 gfx::Size AppsGridView::GetTileGridSize() const {
-  gfx::Rect bounds = GetExpectedTileBounds(0, 0);
-  const int current_page = pagination_model_.selected_page();
-  if (is_fullscreen_app_list_enabled_ && current_page == 0)
-    bounds.Union(GetExpectedTileBounds(rows_per_page_ - 2, cols_ - 1));
-  else
-    bounds.Union(GetExpectedTileBounds(rows_per_page_ - 1, cols_ - 1));
-  bounds.Inset(0, -GetHeightOnTopOfAllAppsTiles(current_page), 0, 0);
-  bounds.Inset(GetTilePadding());
-  return bounds.size();
+  if (!folder_delegate_)
+    return gfx::Size(kAppsGridPreferredWidth, kAppsGridPreferredHeight);
+
+  gfx::Rect rect(GetTotalTileSize());
+  rect.set_size(
+      gfx::Size(rect.width() * cols_, rect.height() * rows_per_page_));
+  rect.Inset(-GetTilePadding());
+  return rect.size();
 }
 
 int AppsGridView::GetHeightOnTopOfAllAppsTiles(int page) const {
-  if (!is_fullscreen_app_list_enabled_ || folder_delegate_)
+  if (folder_delegate_)
     return 0;
 
   if (page == 0) {
-    return kSearchBoxFullscreenBottomPadding +
+    DCHECK(suggestions_container_ && all_apps_indicator_);
+    return kSearchBoxBottomPadding +
            suggestions_container_->GetPreferredSize().height() +
            kSuggestionsAllAppsIndicatorPadding +
            all_apps_indicator_->GetPreferredSize().height() +
-           kAllAppsIndicatorExtraPadding;
+           kAllAppsIndicatorBottomPadding;
   }
-  return kSearchBoxFullscreenBottomPadding - kTileVerticalPadding;
+  return kSearchBoxBottomPadding;
 }
 
-gfx::Rect AppsGridView::GetExpectedTileBounds(int slot) const {
-  return GetExpectedTileBounds(slot / cols_, slot % cols_);
-}
+gfx::Rect AppsGridView::GetExpectedTileBounds(const Index& index) const {
+  if (!cols_)
+    return gfx::Rect();
 
-gfx::Rect AppsGridView::GetExpectedTileBounds(int row, int col) const {
   gfx::Rect bounds(GetContentsBounds());
-  bounds.Inset(
-      0, GetHeightOnTopOfAllAppsTiles(pagination_model_.selected_page()), 0, 0);
+  bounds.Inset(0, GetHeightOnTopOfAllAppsTiles(index.page), 0, 0);
+  bounds.Inset(GetTilePadding());
+  int row = index.slot / cols_;
+  int col = index.slot % cols_;
   const gfx::Size total_tile_size = GetTotalTileSize();
   gfx::Rect tile_bounds(gfx::Point(bounds.x() + col * total_tile_size.width(),
                                    bounds.y() + row * total_tile_size.height()),
                         total_tile_size);
-  if (is_fullscreen_app_list_enabled_)
-    tile_bounds.Offset(kAppsGridLeftRightPaddingFullscreen, 0);
   tile_bounds.Inset(-GetTilePadding());
   return tile_bounds;
 }
@@ -2587,9 +2385,8 @@ AppListItemView* AppsGridView::GetViewDisplayedAtSlotOnCurrentPage(
     return nullptr;
 
   // Calculate the original bound of the tile at |index|.
-  int row = slot / cols_;
-  int col = slot % cols_;
-  gfx::Rect tile_rect = GetExpectedTileBounds(row, col);
+  gfx::Rect tile_rect =
+      GetExpectedTileBounds(Index(pagination_model_.selected_page(), slot));
 
   for (int i = 0; i < view_model_.view_size(); ++i) {
     AppListItemView* view = GetItemViewAt(i);

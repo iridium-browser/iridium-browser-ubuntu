@@ -34,9 +34,8 @@
 
 // Tests that evaluating JavaScript in the omnibox (e.g, a bookmarklet) works.
 - (void)testJavaScriptInOmnibox {
-  // TODO(crbug.com/640220): Keyboard entry inside the omnibox fails only on
-  // iPad
-  // running iOS X.
+  // TODO(crbug.com/703855): Keyboard entry inside the omnibox fails only on
+  // iPad running iOS 10.
   if (IsIPadIdiom() && base::ios::IsRunningOnIOS10OrLater())
     return;
 
@@ -79,6 +78,30 @@
 
   // Verifies that the destination page is shown.
   [ChromeEarlGrey waitForWebViewContainingText:responses[destinationURL]];
+}
+
+// Tests the fix for the regression reported in https://crbug.com/801165.  The
+// bug was triggered by opening an HTML file picker and then dismissing it.
+- (void)testFixForCrbug801165 {
+  if (IsIPadIdiom()) {
+    EARL_GREY_TEST_SKIPPED(@"Skipped for iPad (no action sheet on tablet)");
+  }
+
+  std::map<GURL, std::string> responses;
+  const GURL testURL = web::test::HttpServer::MakeUrl("http://origin");
+  responses[testURL] = "File Picker Test <input id=\"file\" type=\"file\">";
+  web::test::SetUpSimpleHttpServer(responses);
+
+  // Load the test page.
+  [ChromeEarlGrey loadURL:testURL];
+  [ChromeEarlGrey waitForWebViewContainingText:"File Picker Test"];
+
+  // Invoke the file picker and tap on the "Cancel" button to dismiss the file
+  // picker.
+  [ChromeEarlGrey tapWebViewElementWithID:@"file"];
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::CancelButton()]
+      performAction:grey_tap()];
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
 }
 
 @end

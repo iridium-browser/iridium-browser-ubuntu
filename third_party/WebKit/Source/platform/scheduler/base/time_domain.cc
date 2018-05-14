@@ -7,13 +7,12 @@
 #include <set>
 
 #include "platform/scheduler/base/task_queue_impl.h"
-#include "platform/scheduler/base/task_queue_manager_delegate.h"
 #include "platform/scheduler/base/work_queue.h"
 
 namespace blink {
 namespace scheduler {
 
-TimeDomain::TimeDomain() {}
+TimeDomain::TimeDomain() = default;
 
 TimeDomain::~TimeDomain() {
   DCHECK(main_thread_checker_.CalledOnValidThread());

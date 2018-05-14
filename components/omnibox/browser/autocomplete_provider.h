@@ -7,12 +7,15 @@
 
 #include <stddef.h>
 
+#include <utility>
+#include <vector>
+
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_match.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 
 class AutocompleteInput;
 
@@ -223,6 +226,13 @@ class AutocompleteProvider
   // we have good relevance heuristics; the controller should handle all
   // culling.
   static const size_t kMaxMatches;
+
+  // Estimates dynamic memory usage.
+  // See base/trace_event/memory_usage_estimator.h for more info.
+  //
+  // Note: Subclasses that override this method must call the base class
+  // method and include the response in their estimate.
+  virtual size_t EstimateMemoryUsage() const;
 
  protected:
   friend class base::RefCountedThreadSafe<AutocompleteProvider>;

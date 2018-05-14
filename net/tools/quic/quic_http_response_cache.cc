@@ -41,13 +41,13 @@ QuicHttpResponseCache::ServerPushInfo::ServerPushInfo(
 QuicHttpResponseCache::Response::Response()
     : response_type_(REGULAR_RESPONSE) {}
 
-QuicHttpResponseCache::Response::~Response() {}
+QuicHttpResponseCache::Response::~Response() = default;
 
 QuicHttpResponseCache::ResourceFile::ResourceFile(
     const base::FilePath& file_name)
     : file_name_(file_name), file_name_string_(file_name.AsUTF8Unsafe()) {}
 
-QuicHttpResponseCache::ResourceFile::~ResourceFile() {}
+QuicHttpResponseCache::ResourceFile::~ResourceFile() = default;
 
 void QuicHttpResponseCache::ResourceFile::Read() {
   base::ReadFileToString(FilePath(file_name_), &file_contents_);
@@ -166,7 +166,7 @@ const QuicHttpResponseCache::Response* QuicHttpResponseCache::GetResponse(
   if (it == responses_.end()) {
     DVLOG(1) << "Get response for resource failed: host " << host << " path "
              << path;
-    if (default_response_.get()) {
+    if (default_response_) {
       return default_response_.get();
     }
     return nullptr;
@@ -227,7 +227,7 @@ void QuicHttpResponseCache::AddSpecialResponse(
                   SpdyHeaderBlock());
 }
 
-QuicHttpResponseCache::QuicHttpResponseCache() {}
+QuicHttpResponseCache::QuicHttpResponseCache() = default;
 
 void QuicHttpResponseCache::InitializeFromDirectory(
     const string& cache_directory) {
@@ -330,7 +330,11 @@ void QuicHttpResponseCache::AddResponseImpl(QuicStringPiece host,
 
 string QuicHttpResponseCache::GetKey(QuicStringPiece host,
                                      QuicStringPiece path) const {
-  return host.as_string() + path.as_string();
+  string host_string = host.as_string();
+  size_t port = host_string.find(':');
+  if (port != string::npos)
+    host_string = string(host_string.c_str(), port);
+  return host_string + path.as_string();
 }
 
 void QuicHttpResponseCache::MaybeAddServerPushResources(

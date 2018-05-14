@@ -37,7 +37,7 @@ class Element;
 
 class ValidationMessageClient : public GarbageCollectedMixin {
  public:
-  virtual ~ValidationMessageClient() {}
+  virtual ~ValidationMessageClient() = default;
 
   // Show validation message for the specified anchor element. An
   // implementation of this function may hide the message automatically after
@@ -63,7 +63,7 @@ class ValidationMessageClient : public GarbageCollectedMixin {
   virtual void LayoutOverlay() {}
   virtual void PaintOverlay() {}
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
 };
 
 }  // namespace blink

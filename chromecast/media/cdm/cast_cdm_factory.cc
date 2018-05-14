@@ -7,10 +7,12 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
+#include "chromecast/base/metrics/cast_metrics_helper.h"
 #include "chromecast/media/cdm/cast_cdm.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/cdm_config.h"
 #include "media/base/cdm_key_information.h"
+#include "url/origin.h"
 
 namespace chromecast {
 namespace media {
@@ -28,7 +30,7 @@ CastCdmFactory::~CastCdmFactory() {}
 
 void CastCdmFactory::Create(
     const std::string& key_system,
-    const GURL& security_origin,
+    const url::Origin& security_origin,
     const ::media::CdmConfig& cdm_config,
     const ::media::SessionMessageCB& session_message_cb,
     const ::media::SessionClosedCB& session_closed_cb,
@@ -55,6 +57,12 @@ void CastCdmFactory::Create(
     return;
   }
 
+  const int packed_cdm_config = (cdm_config.allow_distinctive_identifier << 2) |
+                                (cdm_config.allow_persistent_state << 1) |
+                                cdm_config.use_hw_secure_codecs;
+  metrics::CastMetricsHelper::GetInstance()->RecordApplicationEventWithValue(
+      "Cast.Platform.CreateCdm." + key_system, packed_cdm_config);
+
   task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&CastCdm::Initialize, base::Unretained(cast_cdm.get()),
@@ -67,7 +75,7 @@ void CastCdmFactory::Create(
 
 scoped_refptr<CastCdm> CastCdmFactory::CreatePlatformBrowserCdm(
     const CastKeySystem& cast_key_system,
-    const GURL& security_origin,
+    const url::Origin& security_origin,
     const ::media::CdmConfig& cdm_config) {
   return nullptr;
 }

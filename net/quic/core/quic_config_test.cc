@@ -9,12 +9,12 @@
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_time.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/quic_config_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/test/gtest_util.h"
 
-using std::string;
 
 namespace net {
 namespace test {
@@ -68,14 +68,13 @@ TEST_F(QuicConfigTest, ProcessClientHello) {
       2 * kInitialStreamFlowControlWindowForTest);
   client_config.SetInitialSessionFlowControlWindowToSend(
       2 * kInitialSessionFlowControlWindowForTest);
-  client_config.SetForceHolBlocking();
   QuicTagVector copt;
   copt.push_back(kTBBR);
   client_config.SetConnectionOptionsToSend(copt);
   CryptoHandshakeMessage msg;
   client_config.ToHandshakeMessage(&msg);
 
-  string error_details;
+  QuicString error_details;
   QuicTagVector initial_received_options;
   initial_received_options.push_back(kIW50);
   EXPECT_TRUE(
@@ -94,7 +93,6 @@ TEST_F(QuicConfigTest, ProcessClientHello) {
             config_.IdleNetworkTimeout());
   EXPECT_EQ(kDefaultMaxStreamsPerConnection, config_.MaxStreamsPerConnection());
   EXPECT_EQ(10 * kNumMicrosPerMilli, config_.ReceivedInitialRoundTripTimeUs());
-  EXPECT_TRUE(config_.ForceHolBlocking(Perspective::IS_SERVER));
   EXPECT_TRUE(config_.HasReceivedConnectionOptions());
   EXPECT_EQ(2u, config_.ReceivedConnectionOptions().size());
   EXPECT_EQ(config_.ReceivedConnectionOptions()[0], kIW50);
@@ -109,6 +107,7 @@ TEST_F(QuicConfigTest, ProcessServerHello) {
   QuicIpAddress host;
   host.FromString("127.0.3.1");
   const QuicSocketAddress kTestServerAddress = QuicSocketAddress(host, 1234);
+  const uint128 kTestResetToken = MakeUint128(0, 10111100001);
   QuicConfig server_config;
   QuicTagVector cgst;
   cgst.push_back(kQBIC);
@@ -123,9 +122,10 @@ TEST_F(QuicConfigTest, ProcessServerHello) {
   server_config.SetInitialSessionFlowControlWindowToSend(
       2 * kInitialSessionFlowControlWindowForTest);
   server_config.SetAlternateServerAddressToSend(kTestServerAddress);
+  server_config.SetStatelessResetTokenToSend(kTestResetToken);
   CryptoHandshakeMessage msg;
   server_config.ToHandshakeMessage(&msg);
-  string error_details;
+  QuicString error_details;
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, SERVER, &error_details);
   EXPECT_EQ(QUIC_NO_ERROR, error);
@@ -141,6 +141,8 @@ TEST_F(QuicConfigTest, ProcessServerHello) {
             2 * kInitialSessionFlowControlWindowForTest);
   EXPECT_TRUE(config_.HasReceivedAlternateServerAddress());
   EXPECT_EQ(kTestServerAddress, config_.ReceivedAlternateServerAddress());
+  EXPECT_TRUE(config_.HasReceivedStatelessResetToken());
+  EXPECT_EQ(kTestResetToken, config_.ReceivedStatelessResetToken());
 }
 
 TEST_F(QuicConfigTest, MissingOptionalValuesInCHLO) {
@@ -152,7 +154,7 @@ TEST_F(QuicConfigTest, MissingOptionalValuesInCHLO) {
   msg.SetValue(kMSPC, 1);
 
   // No error, as rest are optional.
-  string error_details;
+  QuicString error_details;
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, CLIENT, &error_details);
   EXPECT_EQ(QUIC_NO_ERROR, error);
@@ -167,7 +169,7 @@ TEST_F(QuicConfigTest, MissingOptionalValuesInSHLO) {
   msg.SetValue(kMSPC, 1);
 
   // No error, as rest are optional.
-  string error_details;
+  QuicString error_details;
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, SERVER, &error_details);
   EXPECT_EQ(QUIC_NO_ERROR, error);
@@ -177,7 +179,7 @@ TEST_F(QuicConfigTest, MissingOptionalValuesInSHLO) {
 TEST_F(QuicConfigTest, MissingValueInCHLO) {
   // Server receives CHLO with missing kICSL.
   CryptoHandshakeMessage msg;
-  string error_details;
+  QuicString error_details;
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, CLIENT, &error_details);
   EXPECT_EQ(QUIC_CRYPTO_MESSAGE_PARAMETER_NOT_FOUND, error);
@@ -186,7 +188,7 @@ TEST_F(QuicConfigTest, MissingValueInCHLO) {
 TEST_F(QuicConfigTest, MissingValueInSHLO) {
   // Client receives SHLO with missing kICSL.
   CryptoHandshakeMessage msg;
-  string error_details;
+  QuicString error_details;
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, SERVER, &error_details);
   EXPECT_EQ(QUIC_CRYPTO_MESSAGE_PARAMETER_NOT_FOUND, error);
@@ -200,7 +202,7 @@ TEST_F(QuicConfigTest, OutOfBoundSHLO) {
 
   CryptoHandshakeMessage msg;
   server_config.ToHandshakeMessage(&msg);
-  string error_details;
+  QuicString error_details;
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, SERVER, &error_details);
   EXPECT_EQ(QUIC_INVALID_NEGOTIATED_VALUE, error);
@@ -230,7 +232,7 @@ TEST_F(QuicConfigTest, HasClientSentConnectionOption) {
   CryptoHandshakeMessage msg;
   client_config.ToHandshakeMessage(&msg);
 
-  string error_details;
+  QuicString error_details;
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, CLIENT, &error_details);
   EXPECT_EQ(QUIC_NO_ERROR, error);
@@ -251,7 +253,7 @@ TEST_F(QuicConfigTest, DontSendClientConnectionOptions) {
   CryptoHandshakeMessage msg;
   client_config.ToHandshakeMessage(&msg);
 
-  string error_details;
+  QuicString error_details;
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, CLIENT, &error_details);
   EXPECT_EQ(QUIC_NO_ERROR, error);
@@ -278,7 +280,7 @@ TEST_F(QuicConfigTest, HasClientRequestedIndependentOption) {
   CryptoHandshakeMessage msg;
   client_config.ToHandshakeMessage(&msg);
 
-  string error_details;
+  QuicString error_details;
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, CLIENT, &error_details);
   EXPECT_EQ(QUIC_NO_ERROR, error);

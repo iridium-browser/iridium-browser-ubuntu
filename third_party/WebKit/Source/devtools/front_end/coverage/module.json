@@ -10,12 +10,12 @@
             "order": 100
         },
         {
-            "type": "@SourceFrame.UISourceCodeFrame.LineDecorator",
+            "type": "@SourceFrame.LineDecorator",
             "className": "Coverage.CoverageView.LineDecorator",
             "decoratorType": "coverage"
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "actionId": "coverage.toggle-recording",
             "iconClass": "largeicon-start-recording",
             "toggledIconClass": "largeicon-stop-recording",
@@ -34,7 +34,7 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "actionId": "coverage.start-with-reload",
             "iconClass": "largeicon-refresh",
             "className": "Coverage.CoverageView.ActionDelegate",

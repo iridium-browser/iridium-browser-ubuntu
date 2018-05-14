@@ -20,7 +20,6 @@
 
 #include "core/svg/SVGRectElement.h"
 
-#include "core/dom/StyleChangeReason.h"
 #include "core/layout/svg/LayoutSVGRect.h"
 #include "core/svg/SVGLength.h"
 
@@ -61,7 +60,7 @@ inline SVGRectElement::SVGRectElement(Document& document)
   AddToPropertyMap(ry_);
 }
 
-DEFINE_TRACE(SVGRectElement) {
+void SVGRectElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(x_);
   visitor->Trace(y_);
   visitor->Trace(width_);
@@ -79,47 +78,36 @@ Path SVGRectElement::AsPath() const {
   SVGLengthContext length_context(this);
   DCHECK(GetLayoutObject());
   const ComputedStyle& style = GetLayoutObject()->StyleRef();
+
+  FloatSize size(ToFloatSize(
+      length_context.ResolveLengthPair(style.Width(), style.Height(), style)));
+  if (size.Width() < 0 || size.Height() < 0 ||
+      (!size.Width() && !size.Height()))
+    return path;
+
   const SVGComputedStyle& svg_style = style.SvgStyle();
-
-  float width = length_context.ValueForLength(style.Width(), style,
-                                              SVGLengthMode::kWidth);
-  if (width < 0)
-    return path;
-  float height = length_context.ValueForLength(style.Height(), style,
-                                               SVGLengthMode::kHeight);
-  if (height < 0)
-    return path;
-  if (!width && !height)
-    return path;
-
-  float x = length_context.ValueForLength(svg_style.X(), style,
-                                          SVGLengthMode::kWidth);
-  float y = length_context.ValueForLength(svg_style.Y(), style,
-                                          SVGLengthMode::kHeight);
-  float rx = length_context.ValueForLength(svg_style.Rx(), style,
-                                           SVGLengthMode::kWidth);
-  float ry = length_context.ValueForLength(svg_style.Ry(), style,
-                                           SVGLengthMode::kHeight);
-  bool has_rx = rx > 0;
-  bool has_ry = ry > 0;
-  if (has_rx || has_ry) {
+  FloatRect rect(
+      length_context.ResolveLengthPair(svg_style.X(), svg_style.Y(), style),
+      size);
+  FloatPoint radii(
+      length_context.ResolveLengthPair(svg_style.Rx(), svg_style.Ry(), style));
+  if (radii.X() > 0 || radii.Y() > 0) {
     if (svg_style.Rx().IsAuto())
-      rx = ry;
+      radii.SetX(radii.Y());
     else if (svg_style.Ry().IsAuto())
-      ry = rx;
+      radii.SetY(radii.X());
 
-    path.AddRoundedRect(FloatRect(x, y, width, height), FloatSize(rx, ry));
-    return path;
+    path.AddRoundedRect(rect, ToFloatSize(radii));
+  } else {
+    path.AddRect(rect);
   }
-
-  path.AddRect(FloatRect(x, y, width, height));
   return path;
 }
 
 void SVGRectElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   SVGAnimatedPropertyBase* property = PropertyFromAttribute(name);
   if (property == x_) {
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
@@ -149,20 +137,8 @@ void SVGRectElement::SvgAttributeChanged(const QualifiedName& attr_name) {
   if (attr_name == SVGNames::xAttr || attr_name == SVGNames::yAttr ||
       attr_name == SVGNames::widthAttr || attr_name == SVGNames::heightAttr ||
       attr_name == SVGNames::rxAttr || attr_name == SVGNames::ryAttr) {
-    SVGElement::InvalidationGuard invalidation_guard(this);
-
-    InvalidateSVGPresentationAttributeStyle();
-    SetNeedsStyleRecalc(kLocalStyleChange,
-                        StyleChangeReasonForTracing::FromAttribute(attr_name));
     UpdateRelativeLengthsInformation();
-
-    LayoutSVGShape* layout_object = ToLayoutSVGShape(this->GetLayoutObject());
-    if (!layout_object)
-      return;
-
-    layout_object->SetNeedsShapeUpdate();
-    MarkForLayoutAndParentResourceInvalidation(layout_object);
-
+    GeometryPresentationAttributeChanged(attr_name);
     return;
   }
 

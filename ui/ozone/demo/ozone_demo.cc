@@ -6,6 +6,7 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
+#include "base/debug/stack_trace.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
@@ -26,9 +27,9 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/init/gl_factory.h"
-#include "ui/ozone/demo/gl_renderer.h"
+#include "ui/ozone/demo/skia_renderer.h"
 #include "ui/ozone/demo/software_renderer.h"
-#include "ui/ozone/demo/surfaceless_gl_renderer.h"
+#include "ui/ozone/demo/surfaceless_skia_renderer.h"
 #include "ui/ozone/public/ozone_gpu_test_helper.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/ozone_switches.h"
@@ -39,7 +40,6 @@ const int kTestWindowWidth = 800;
 const int kTestWindowHeight = 600;
 
 const char kDisableGpu[] = "disable-gpu";
-
 const char kDisableSurfaceless[] = "disable-surfaceless";
 
 const char kWindowSize[] = "window-size";
@@ -58,7 +58,7 @@ scoped_refptr<gl::GLSurface> CreateGLSurface(gfx::AcceleratedWidget widget) {
 class RendererFactory {
  public:
   enum RendererType {
-    GL,
+    SKIA,
     SOFTWARE,
   };
 
@@ -80,7 +80,7 @@ class RendererFactory {
 
 class WindowManager : public display::NativeDisplayObserver {
  public:
-  WindowManager(const base::Closure& quit_closure);
+  explicit WindowManager(const base::Closure& quit_closure);
   ~WindowManager() override;
 
   void Quit();
@@ -126,6 +126,7 @@ class DemoWindow : public ui::PlatformWindowDelegate {
         weak_ptr_factory_(this) {
     platform_window_ =
         ui::OzonePlatform::GetInstance()->CreatePlatformWindow(this, bounds);
+    platform_window_->Show();
   }
   ~DemoWindow() override {}
 
@@ -175,7 +176,8 @@ class DemoWindow : public ui::PlatformWindowDelegate {
   void StartOnGpu() {
     renderer_ =
         renderer_factory_->CreateRenderer(GetAcceleratedWidget(), GetSize());
-    renderer_->Initialize();
+    if (!renderer_->Initialize())
+      LOG(ERROR) << "Failed to initialize renderer.";
   }
 
   WindowManager* window_manager_;      // Not owned.
@@ -205,11 +207,12 @@ bool RendererFactory::Initialize() {
   ui::OzonePlatform::InitParams params;
   params.single_process = true;
   ui::OzonePlatform::InitializeForGPU(params);
+  ui::OzonePlatform::GetInstance()->AfterSandboxEntry();
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (!command_line->HasSwitch(kDisableGpu) && gl::init::InitializeGLOneOff() &&
       gpu_helper_.Initialize(base::ThreadTaskRunnerHandle::Get())) {
-    type_ = GL;
+    type_ = SKIA;
   } else {
     type_ = SOFTWARE;
   }
@@ -221,20 +224,18 @@ std::unique_ptr<ui::Renderer> RendererFactory::CreateRenderer(
     gfx::AcceleratedWidget widget,
     const gfx::Size& size) {
   switch (type_) {
-    case GL: {
+    case SKIA: {
       scoped_refptr<gl::GLSurface> surface = CreateGLSurface(widget);
       if (!surface)
         LOG(FATAL) << "Failed to create GL surface";
-      if (!surface->SupportsAsyncSwap())
-        LOG(FATAL) << "GL surface must support SwapBuffersAsync";
-      if (surface->IsSurfaceless())
-        return base::MakeUnique<ui::SurfacelessGlRenderer>(widget, surface,
-                                                           size);
-      else
-        return base::MakeUnique<ui::GlRenderer>(widget, surface, size);
+      if (surface->IsSurfaceless()) {
+        return std::make_unique<ui::SurfacelessSkiaRenderer>(widget, surface,
+                                                             size);
+      }
+      return std::make_unique<ui::SkiaRenderer>(widget, surface, size);
     }
     case SOFTWARE:
-      return base::MakeUnique<ui::SoftwareRenderer>(widget, size);
+      return std::make_unique<ui::SoftwareRenderer>(widget, size);
   }
 
   return nullptr;
@@ -285,7 +286,6 @@ void WindowManager::OnConfigurationChanged() {
   }
 
   is_configuring_ = true;
-  delegate_->GrabServer();
   delegate_->GetDisplays(
       base::Bind(&WindowManager::OnDisplaysAquired, base::Unretained(this)));
 }
@@ -310,7 +310,6 @@ void WindowManager::OnDisplaysAquired(
                    gfx::Rect(origin, display->native_mode()->size())));
     origin.Offset(display->native_mode()->size().width(), 0);
   }
-  delegate_->UngrabServer();
   is_configuring_ = false;
 
   if (should_configure_) {
@@ -336,6 +335,8 @@ int main(int argc, char** argv) {
   base::CommandLine::Init(argc, argv);
   base::AtExitManager exit_manager;
 
+  base::debug::EnableInProcessStackDumping();
+
   // Initialize logging so we can enable VLOG messages.
   logging::LoggingSettings settings;
   logging::InitLogging(settings);
@@ -354,7 +355,9 @@ int main(int argc, char** argv) {
   base::MessageLoopForUI message_loop;
   base::TaskScheduler::CreateAndStartWithDefaultParams("OzoneDemo");
 
-  ui::OzonePlatform::InitializeForUI();
+  ui::OzonePlatform::InitParams params;
+  params.single_process = true;
+  ui::OzonePlatform::InitializeForUI(params);
   ui::KeyboardLayoutEngineManager::GetKeyboardLayoutEngine()
       ->SetCurrentLayoutByName("us");
 

@@ -14,7 +14,7 @@ namespace blink {
 
 class MODULES_EXPORT AudioOutputDeviceClientImpl
     : public GarbageCollectedFinalized<AudioOutputDeviceClientImpl>,
-      public NON_EXPORTED_BASE(AudioOutputDeviceClient) {
+      public AudioOutputDeviceClient {
   USING_GARBAGE_COLLECTED_MIXIN(AudioOutputDeviceClientImpl);
   WTF_MAKE_NONCOPYABLE(AudioOutputDeviceClientImpl);
 
@@ -30,10 +30,9 @@ class MODULES_EXPORT AudioOutputDeviceClientImpl
       std::unique_ptr<WebSetSinkIdCallbacks>) override;
 
   // GarbageCollectedFinalized implementation.
-  DEFINE_INLINE_VIRTUAL_TRACE() { AudioOutputDeviceClient::Trace(visitor); }
-
- private:
-  AudioOutputDeviceClientImpl();
+  virtual void Trace(blink::Visitor* visitor) {
+    AudioOutputDeviceClient::Trace(visitor);
+  }
 };
 
 }  // namespace blink

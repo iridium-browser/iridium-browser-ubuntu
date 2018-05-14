@@ -12,7 +12,6 @@
 #ifndef LIBANGLE_RENDERER_FORMAT_H_
 #define LIBANGLE_RENDERER_FORMAT_H_
 
-#include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/renderer_utils.h"
 
 namespace angle
@@ -38,6 +37,7 @@ struct Format final : private angle::NonCopyable
                      GLuint stencilBits);
 
     static const Format &Get(ID id);
+    static ID InternalFormatToID(GLenum internalFormat);
 
     ID id;
 

@@ -31,28 +31,29 @@
 #ifndef DocumentThreadableLoaderClient_h
 #define DocumentThreadableLoaderClient_h
 
+#include "base/macros.h"
 #include "core/loader/ThreadableLoaderClient.h"
 
 namespace blink {
 
-class ResourceRequest;
+class KURL;
 class ResourceResponse;
 
 class DocumentThreadableLoaderClient : public ThreadableLoaderClient {
-  WTF_MAKE_NONCOPYABLE(DocumentThreadableLoaderClient);
   USING_FAST_MALLOC(DocumentThreadableLoaderClient);
 
  public:
   bool IsDocumentThreadableLoaderClient() final { return true; }
 
-  virtual bool WillFollowRedirect(
-      const ResourceRequest& /*newRequest*/,
-      const ResourceResponse& /*redirectResponse*/) {
+  virtual bool WillFollowRedirect(const KURL& new_url,
+                                  const ResourceResponse&) {
     return true;
   }
 
  protected:
-  DocumentThreadableLoaderClient() {}
+  DocumentThreadableLoaderClient() = default;
+
+  DISALLOW_COPY_AND_ASSIGN(DocumentThreadableLoaderClient);
 };
 
 }  // namespace blink

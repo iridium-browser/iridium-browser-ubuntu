@@ -8,7 +8,6 @@
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
@@ -44,6 +43,7 @@
   } while (false)
 
 using testing::ElementsAre;
+using testing::NotNull;
 
 namespace headless {
 
@@ -75,9 +75,7 @@ class HeadlessDevToolsClientNavigationTest
             .SetUrl(embedded_test_server()->GetURL("/hello.html").spec())
             .Build();
     devtools_client_->GetPage()->GetExperimental()->AddObserver(this);
-    base::RunLoop run_loop;
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetPage()->Enable(run_loop.QuitClosure());
     run_loop.Run();
     devtools_client_->GetPage()->Navigate(std::move(params));
@@ -102,8 +100,8 @@ class HeadlessDevToolsClientWindowManagementTest
       const gfx::Rect& rect,
       base::Callback<void(std::unique_ptr<browser::SetWindowBoundsResult>)>
           callback) {
-    std::unique_ptr<headless::browser::Bounds> bounds =
-        headless::browser::Bounds::Builder()
+    std::unique_ptr<browser::Bounds> bounds =
+        browser::Bounds::Builder()
             .SetLeft(rect.x())
             .SetTop(rect.y())
             .SetWidth(rect.width())
@@ -124,8 +122,8 @@ class HeadlessDevToolsClientWindowManagementTest
       const browser::WindowState state,
       base::Callback<void(std::unique_ptr<browser::SetWindowBoundsResult>)>
           callback) {
-    std::unique_ptr<headless::browser::Bounds> bounds =
-        headless::browser::Bounds::Builder().SetWindowState(state).Build();
+    std::unique_ptr<browser::Bounds> bounds =
+        browser::Bounds::Builder().SetWindowState(state).Build();
     int window_id = HeadlessWebContentsImpl::From(web_contents_)->window_id();
     std::unique_ptr<browser::SetWindowBoundsParams> params =
         browser::SetWindowBoundsParams::Builder()
@@ -153,7 +151,7 @@ class HeadlessDevToolsClientWindowManagementTest
       const gfx::Rect& bounds,
       const browser::WindowState state,
       std::unique_ptr<browser::GetWindowBoundsResult> result) {
-    const headless::browser::Bounds* actual_bounds = result->GetBounds();
+    const browser::Bounds* actual_bounds = result->GetBounds();
 // Mac does not support repositioning, as we don't show any actual window.
 #if !defined(OS_MACOSX)
     EXPECT_EQ(bounds.x(), actual_bounds->GetLeft());
@@ -275,17 +273,13 @@ class HeadlessDevToolsClientEvalTest
   }
 
   void OnFirstResult(std::unique_ptr<runtime::EvaluateResult> result) {
-    int value;
     EXPECT_TRUE(result->GetResult()->HasValue());
-    EXPECT_TRUE(result->GetResult()->GetValue()->GetAsInteger(&value));
-    EXPECT_EQ(3, value);
+    EXPECT_EQ(3, result->GetResult()->GetValue()->GetInt());
   }
 
   void OnSecondResult(std::unique_ptr<runtime::EvaluateResult> result) {
-    int value;
     EXPECT_TRUE(result->GetResult()->HasValue());
-    EXPECT_TRUE(result->GetResult()->GetValue()->GetAsInteger(&value));
-    EXPECT_EQ(168, value);
+    EXPECT_EQ(168, result->GetResult()->GetValue()->GetInt());
     FinishAsynchronousTest();
   }
 };
@@ -334,11 +328,9 @@ class HeadlessDevToolsClientObserverTest
  public:
   void RunDevTooledTest() override {
     EXPECT_TRUE(embedded_test_server()->Start());
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetNetwork()->AddObserver(this);
     devtools_client_->GetNetwork()->Enable(run_loop.QuitClosure());
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
     run_loop.Run();
 
     devtools_client_->GetPage()->Navigate(
@@ -356,10 +348,10 @@ class HeadlessDevToolsClientObserverTest
       const network::ResponseReceivedParams& params) override {
     EXPECT_EQ(200, params.GetResponse()->GetStatus());
     EXPECT_EQ("OK", params.GetResponse()->GetStatusText());
-    std::string content_type;
-    EXPECT_TRUE(params.GetResponse()->GetHeaders()->GetString("Content-Type",
-                                                              &content_type));
-    EXPECT_EQ("text/html", content_type);
+    const base::Value* content_type_value =
+        params.GetResponse()->GetHeaders()->FindKey("Content-Type");
+    ASSERT_THAT(content_type_value, NotNull());
+    EXPECT_EQ("text/html", content_type_value->GetString());
 
     devtools_client_->GetNetwork()->Disable();
     devtools_client_->GetNetwork()->RemoveObserver(this);
@@ -375,11 +367,9 @@ class HeadlessDevToolsClientExperimentalTest
  public:
   void RunDevTooledTest() override {
     EXPECT_TRUE(embedded_test_server()->Start());
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetPage()->GetExperimental()->AddObserver(this);
     devtools_client_->GetPage()->Enable(run_loop.QuitClosure());
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
     run_loop.Run();
     // Check that experimental commands require parameter objects.
     devtools_client_->GetRuntime()
@@ -459,11 +449,7 @@ class TargetDomainCreateAndDeletePageTest
   }
 };
 
-#if defined(OS_WIN)
-DISABLED_HEADLESS_ASYNC_DEVTOOLED_TEST_F(TargetDomainCreateAndDeletePageTest);
-#else
 HEADLESS_ASYNC_DEVTOOLED_TEST_F(TargetDomainCreateAndDeletePageTest);
-#endif
 
 class TargetDomainCreateAndDeleteBrowserContextTest
     : public HeadlessAsyncDevTooledBrowserTest {
@@ -531,12 +517,7 @@ class TargetDomainCreateAndDeleteBrowserContextTest
   std::string browser_context_id_;
 };
 
-#if defined(OS_WIN)
-DISABLED_HEADLESS_ASYNC_DEVTOOLED_TEST_F(
-    TargetDomainCreateAndDeleteBrowserContextTest);
-#else
 HEADLESS_ASYNC_DEVTOOLED_TEST_F(TargetDomainCreateAndDeleteBrowserContextTest);
-#endif
 
 class TargetDomainDisposeContextFailsIfInUse
     : public HeadlessAsyncDevTooledBrowserTest {
@@ -612,12 +593,7 @@ class TargetDomainDisposeContextFailsIfInUse
   std::string page_id_;
 };
 
-#if defined(OS_WIN)
-DISABLED_HEADLESS_ASYNC_DEVTOOLED_TEST_F(
-    TargetDomainDisposeContextFailsIfInUse);
-#else
 HEADLESS_ASYNC_DEVTOOLED_TEST_F(TargetDomainDisposeContextFailsIfInUse);
-#endif
 
 class TargetDomainCreateTwoContexts : public HeadlessAsyncDevTooledBrowserTest,
                                       public target::ExperimentalObserver,
@@ -626,11 +602,9 @@ class TargetDomainCreateTwoContexts : public HeadlessAsyncDevTooledBrowserTest,
   void RunDevTooledTest() override {
     EXPECT_TRUE(embedded_test_server()->Start());
 
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetPage()->AddObserver(this);
     devtools_client_->GetPage()->Enable(run_loop.QuitClosure());
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
     run_loop.Run();
 
     devtools_client_->GetTarget()->GetExperimental()->AddObserver(this);
@@ -772,9 +746,8 @@ class TargetDomainCreateTwoContexts : public HeadlessAsyncDevTooledBrowserTest,
       return;
     }
 
-    std::string method;
-    if (message_dict->GetString("method", &method) &&
-        method == "Page.loadEventFired") {
+    const base::Value* method_value = message_dict->FindKey("method");
+    if (method_value && method_value->GetString() == "Page.loadEventFired") {
       if (params.GetTargetId() == page_id_one_) {
         page_one_loaded_ = true;
       } else if (params.GetTargetId() == page_id_two_) {
@@ -784,9 +757,10 @@ class TargetDomainCreateTwoContexts : public HeadlessAsyncDevTooledBrowserTest,
       return;
     }
 
-    int message_id = 0;
-    if (!message_dict->GetInteger("id", &message_id))
+    const base::Value* id_value = message_dict->FindKey("id");
+    if (!id_value)
       return;
+    int message_id = id_value->GetInt();
     const base::DictionaryValue* result_dict;
     if (message_dict->GetDictionary("result", &result_dict)) {
       if (message_id == 101) {
@@ -825,9 +799,10 @@ class TargetDomainCreateTwoContexts : public HeadlessAsyncDevTooledBrowserTest,
         // There's a nested result. We want the inner one.
         EXPECT_TRUE(result_dict->GetDictionary("result", &result_dict));
 
-        std::string value;
-        EXPECT_TRUE(result_dict->GetString("value", &value));
-        EXPECT_EQ("", value) << "Page 2 should not share cookies from page one";
+        const base::Value* value_value = result_dict->FindKey("value");
+        ASSERT_THAT(value_value, NotNull());
+        EXPECT_EQ("", value_value->GetString())
+            << "Page 2 should not share cookies from page one";
 
         devtools_client_->GetTarget()->GetExperimental()->CloseTarget(
             target::CloseTargetParams::Builder()
@@ -889,41 +864,45 @@ class TargetDomainCreateTwoContexts : public HeadlessAsyncDevTooledBrowserTest,
   int context_closed_count_ = 0;
 };
 
-#if defined(OS_WIN)
-DISABLED_HEADLESS_ASYNC_DEVTOOLED_TEST_F(TargetDomainCreateTwoContexts);
-#else
 HEADLESS_ASYNC_DEVTOOLED_TEST_F(TargetDomainCreateTwoContexts);
-#endif
 
 class HeadlessDevToolsNavigationControlTest
     : public HeadlessAsyncDevTooledBrowserTest,
+      network::ExperimentalObserver,
       page::ExperimentalObserver {
  public:
   void RunDevTooledTest() override {
     EXPECT_TRUE(embedded_test_server()->Start());
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetPage()->GetExperimental()->AddObserver(this);
+    devtools_client_->GetNetwork()->GetExperimental()->AddObserver(this);
     devtools_client_->GetPage()->Enable(run_loop.QuitClosure());
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
     run_loop.Run();
-    devtools_client_->GetPage()->GetExperimental()->SetControlNavigations(
-        headless::page::SetControlNavigationsParams::Builder()
-            .SetEnabled(true)
+    devtools_client_->GetNetwork()->Enable();
+
+    std::unique_ptr<headless::network::RequestPattern> match_all =
+        headless::network::RequestPattern::Builder().SetUrlPattern("*").Build();
+    std::vector<std::unique_ptr<headless::network::RequestPattern>> patterns;
+    patterns.push_back(std::move(match_all));
+    devtools_client_->GetNetwork()->GetExperimental()->SetRequestInterception(
+        network::SetRequestInterceptionParams::Builder()
+            .SetPatterns(std::move(patterns))
             .Build());
     devtools_client_->GetPage()->Navigate(
         embedded_test_server()->GetURL("/hello.html").spec());
   }
 
-  void OnNavigationRequested(
-      const headless::page::NavigationRequestedParams& params) override {
-    navigation_requested_ = true;
+  void OnRequestIntercepted(
+      const network::RequestInterceptedParams& params) override {
+    if (params.GetIsNavigationRequest())
+      navigation_requested_ = true;
     // Allow the navigation to proceed.
-    devtools_client_->GetPage()->GetExperimental()->ProcessNavigation(
-        headless::page::ProcessNavigationParams::Builder()
-            .SetNavigationId(params.GetNavigationId())
-            .SetResponse(headless::page::NavigationResponse::PROCEED)
-            .Build());
+    devtools_client_->GetNetwork()
+        ->GetExperimental()
+        ->ContinueInterceptedRequest(
+            network::ContinueInterceptedRequestParams::Builder()
+                .SetInterceptionId(params.GetInterceptionId())
+                .Build());
   }
 
   void OnFrameStoppedLoading(
@@ -944,7 +923,7 @@ class HeadlessCrashObserverTest : public HeadlessAsyncDevTooledBrowserTest,
   void RunDevTooledTest() override {
     devtools_client_->GetInspector()->GetExperimental()->AddObserver(this);
     devtools_client_->GetInspector()->GetExperimental()->Enable(
-        headless::inspector::EnableParams::Builder().Build());
+        inspector::EnableParams::Builder().Build());
     devtools_client_->GetPage()->Enable();
     devtools_client_->GetPage()->Navigate(content::kChromeUICrashURL);
   }
@@ -991,10 +970,8 @@ class HeadlessDevToolsClientAttachTest
   }
 
   void OnFirstResult(std::unique_ptr<runtime::EvaluateResult> result) {
-    int value;
     EXPECT_TRUE(result->GetResult()->HasValue());
-    EXPECT_TRUE(result->GetResult()->GetValue()->GetAsInteger(&value));
-    EXPECT_EQ(24 * 7, value);
+    EXPECT_EQ(24 * 7, result->GetResult()->GetValue()->GetInt());
 
     HeadlessDevToolsTarget* devtools_target =
         web_contents_->GetDevToolsTarget();
@@ -1010,10 +987,8 @@ class HeadlessDevToolsClientAttachTest
   }
 
   void OnSecondResult(std::unique_ptr<runtime::EvaluateResult> result) {
-    int value;
     EXPECT_TRUE(result->GetResult()->HasValue());
-    EXPECT_TRUE(result->GetResult()->GetValue()->GetAsInteger(&value));
-    EXPECT_EQ(27 * 4, value);
+    EXPECT_EQ(27 * 4, result->GetResult()->GetValue()->GetInt());
 
     // If everything worked, this call will not crash, since it
     // detaches devtools_client_.
@@ -1032,11 +1007,9 @@ class HeadlessDevToolsMethodCallErrorTest
  public:
   void RunDevTooledTest() override {
     EXPECT_TRUE(embedded_test_server()->Start());
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetPage()->AddObserver(this);
     devtools_client_->GetPage()->Enable(run_loop.QuitClosure());
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
     run_loop.Run();
     devtools_client_->GetPage()->Navigate(
         embedded_test_server()->GetURL("/hello.html").spec());
@@ -1074,13 +1047,11 @@ class HeadlessDevToolsNetworkBlockedUrlTest
  public:
   void RunDevTooledTest() override {
     EXPECT_TRUE(embedded_test_server()->Start());
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetPage()->AddObserver(this);
     devtools_client_->GetPage()->Enable();
     devtools_client_->GetNetwork()->AddObserver(this);
     devtools_client_->GetNetwork()->Enable(run_loop.QuitClosure());
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
     run_loop.Run();
     std::vector<std::string> blockedUrls;
     blockedUrls.push_back("dom_tree_test.css");
@@ -1113,9 +1084,10 @@ class HeadlessDevToolsNetworkBlockedUrlTest
   }
 
   void OnLoadEventFired(const page::LoadEventFiredParams&) override {
-    EXPECT_THAT(requests_to_be_sent_,
-                ElementsAre("/dom_tree_test.html", "/dom_tree_test.css",
-                            "/iframe.html"));
+    EXPECT_THAT(
+        requests_to_be_sent_,
+        testing::UnorderedElementsAre("/dom_tree_test.html",
+                                      "/dom_tree_test.css", "/iframe.html"));
     EXPECT_THAT(responses_received_,
                 ElementsAre("/dom_tree_test.html", "/iframe.html"));
     EXPECT_THAT(failures_, ElementsAre("/dom_tree_test.css"));
@@ -1142,14 +1114,12 @@ class DevToolsHeaderStrippingTest : public HeadlessAsyncDevTooledBrowserTest,
                                     public network::Observer {
   void RunDevTooledTest() override {
     EXPECT_TRUE(embedded_test_server()->Start());
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetPage()->AddObserver(this);
     devtools_client_->GetPage()->Enable();
     // Enable network domain in order to get DevTools to add the header.
     devtools_client_->GetNetwork()->AddObserver(this);
     devtools_client_->GetNetwork()->Enable(run_loop.QuitClosure());
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
     run_loop.Run();
     devtools_client_->GetPage()->Navigate(
         "http://not-an-actual-domain.tld/hello.html");
@@ -1159,7 +1129,7 @@ class DevToolsHeaderStrippingTest : public HeadlessAsyncDevTooledBrowserTest,
     const std::string kResponseBody = "<p>HTTP response body</p>";
     ProtocolHandlerMap protocol_handlers;
     protocol_handlers[url::kHttpScheme] =
-        base::MakeUnique<TestProtocolHandler>(kResponseBody);
+        std::make_unique<TestProtocolHandler>(kResponseBody);
     test_handler_ = static_cast<TestProtocolHandler*>(
         protocol_handlers[url::kHttpScheme].get());
     return protocol_handlers;
@@ -1176,6 +1146,38 @@ class DevToolsHeaderStrippingTest : public HeadlessAsyncDevTooledBrowserTest,
 };
 
 HEADLESS_ASYNC_DEVTOOLED_TEST_F(DevToolsHeaderStrippingTest);
+
+class DevToolsNetworkOfflineEmulationTest
+    : public HeadlessAsyncDevTooledBrowserTest,
+      public page::Observer,
+      public network::Observer {
+  void RunDevTooledTest() override {
+    EXPECT_TRUE(embedded_test_server()->Start());
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
+    devtools_client_->GetPage()->AddObserver(this);
+    devtools_client_->GetPage()->Enable();
+    devtools_client_->GetNetwork()->AddObserver(this);
+    devtools_client_->GetNetwork()->Enable(run_loop.QuitClosure());
+    run_loop.Run();
+    std::unique_ptr<network::EmulateNetworkConditionsParams> params =
+        network::EmulateNetworkConditionsParams::Builder()
+            .SetOffline(true)
+            .SetLatency(0)
+            .SetDownloadThroughput(0)
+            .SetUploadThroughput(0)
+            .Build();
+    devtools_client_->GetNetwork()->EmulateNetworkConditions(std::move(params));
+    devtools_client_->GetPage()->Navigate(
+        embedded_test_server()->GetURL("/hello.html").spec());
+  }
+
+  void OnLoadingFailed(const network::LoadingFailedParams& failed) override {
+    EXPECT_EQ("net::ERR_INTERNET_DISCONNECTED", failed.GetErrorText());
+    FinishAsynchronousTest();
+  }
+};
+
+HEADLESS_ASYNC_DEVTOOLED_TEST_F(DevToolsNetworkOfflineEmulationTest);
 
 class RawDevtoolsProtocolTest
     : public HeadlessAsyncDevTooledBrowserTest,
@@ -1274,24 +1276,27 @@ class DomTreeExtractionBrowserTest : public HeadlessAsyncDevTooledBrowserTest,
       base::DictionaryValue* node_dict = dom_nodes[i].get();
 
       // Frame IDs are random.
-      if (node_dict->HasKey("frameId"))
+      if (node_dict->FindKey("frameId"))
         node_dict->SetString("frameId", "?");
 
       // Ports are random.
-      std::string url;
-      if (node_dict->GetString("baseURL", &url)) {
-        node_dict->SetString("baseURL",
-                             GURL(url).ReplaceComponents(replace_port).spec());
+      if (base::Value* base_url_value = node_dict->FindKey("baseURL")) {
+        node_dict->SetString("baseURL", GURL(base_url_value->GetString())
+                                            .ReplaceComponents(replace_port)
+                                            .spec());
       }
 
-      if (node_dict->GetString("documentURL", &url)) {
+      if (base::Value* document_url_value = node_dict->FindKey("documentURL")) {
         node_dict->SetString("documentURL",
-                             GURL(url).ReplaceComponents(replace_port).spec());
+                             GURL(document_url_value->GetString())
+                                 .ReplaceComponents(replace_port)
+                                 .spec());
       }
 
       // Merge LayoutTreeNode data into the dictionary.
-      int layout_node_index;
-      if (node_dict->GetInteger("layoutNodeIndex", &layout_node_index)) {
+      if (base::Value* layout_node_index_value =
+          node_dict->FindKey("layoutNodeIndex")) {
+        int layout_node_index = layout_node_index_value->GetInt();
         ASSERT_LE(0, layout_node_index);
         ASSERT_GT(result->GetLayoutTreeNodes()->size(),
                   static_cast<size_t>(layout_node_index));
@@ -1310,8 +1315,8 @@ class DomTreeExtractionBrowserTest : public HeadlessAsyncDevTooledBrowserTest,
         if (layout_node->HasInlineTextNodes()) {
           std::unique_ptr<base::ListValue> inline_text_nodes(
               new base::ListValue());
-          for (const std::unique_ptr<css::InlineTextBox>& inline_text_box :
-               *layout_node->GetInlineTextNodes()) {
+          for (const std::unique_ptr<dom_snapshot::InlineTextBox>&
+                   inline_text_box : *layout_node->GetInlineTextNodes()) {
             size_t index = inline_text_nodes->GetSize();
             inline_text_nodes->Set(index, inline_text_box->Serialize());
           }
@@ -1386,7 +1391,7 @@ class DomTreeExtractionBrowserTest : public HeadlessAsyncDevTooledBrowserTest,
 
 HEADLESS_ASYNC_DEVTOOLED_TEST_F(DomTreeExtractionBrowserTest);
 
-class FailedUrlRequestTest : public HeadlessAsyncDevTooledBrowserTest,
+class UrlRequestFailedTest : public HeadlessAsyncDevTooledBrowserTest,
                              public HeadlessBrowserContext::Observer,
                              public network::ExperimentalObserver,
                              public page::Observer {
@@ -1395,67 +1400,99 @@ class FailedUrlRequestTest : public HeadlessAsyncDevTooledBrowserTest,
     EXPECT_TRUE(embedded_test_server()->Start());
     devtools_client_->GetNetwork()->GetExperimental()->AddObserver(this);
     devtools_client_->GetNetwork()->Enable();
-    devtools_client_->GetNetwork()
-        ->GetExperimental()
-        ->SetRequestInterceptionEnabled(
-            network::SetRequestInterceptionEnabledParams::Builder()
-                .SetEnabled(true)
-                .Build());
+
+    std::unique_ptr<headless::network::RequestPattern> match_all =
+        headless::network::RequestPattern::Builder().SetUrlPattern("*").Build();
+    std::vector<std::unique_ptr<headless::network::RequestPattern>> patterns;
+    patterns.push_back(std::move(match_all));
+    devtools_client_->GetNetwork()->GetExperimental()->SetRequestInterception(
+        network::SetRequestInterceptionParams::Builder()
+            .SetPatterns(std::move(patterns))
+            .Build());
 
     browser_context_->AddObserver(this);
 
     devtools_client_->GetPage()->AddObserver(this);
 
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetPage()->Enable(run_loop.QuitClosure());
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
     run_loop.Run();
 
     devtools_client_->GetPage()->Navigate(
-        embedded_test_server()->GetURL("/dom_tree_test.html").spec());
+        embedded_test_server()->GetURL("/resource_cancel_test.html").spec());
+  }
+
+  bool ShouldCancel(const std::string& url) {
+    if (EndsWith(url, "/iframe.html", base::CompareCase::INSENSITIVE_ASCII))
+      return true;
+
+    if (EndsWith(url, "/test.jpg", base::CompareCase::INSENSITIVE_ASCII))
+      return true;
+
+    return false;
   }
 
   void OnRequestIntercepted(
       const network::RequestInterceptedParams& params) override {
-    if (EndsWith(params.GetRequest()->GetUrl(), "/iframe.html",
-                 base::CompareCase::INSENSITIVE_ASCII)) {
-      // Block the iframe resource load.
-      devtools_client_->GetNetwork()
-          ->GetExperimental()
-          ->ContinueInterceptedRequest(
-              network::ContinueInterceptedRequestParams::Builder()
-                  .SetInterceptionId(params.GetInterceptionId())
-                  .SetErrorReason(network::ErrorReason::ABORTED)
-                  .Build());
-    } else {
-      // Allow everything else to continue.
-      devtools_client_->GetNetwork()
-          ->GetExperimental()
-          ->ContinueInterceptedRequest(
-              network::ContinueInterceptedRequestParams::Builder()
-                  .SetInterceptionId(params.GetInterceptionId())
-                  .Build());
-    }
+    urls_seen_.push_back(GURL(params.GetRequest()->GetUrl()).ExtractFileName());
+    auto continue_intercept_params =
+        network::ContinueInterceptedRequestParams::Builder()
+            .SetInterceptionId(params.GetInterceptionId())
+            .Build();
+    if (ShouldCancel(params.GetRequest()->GetUrl()))
+      continue_intercept_params->SetErrorReason(GetErrorReason());
+
+    devtools_client_->GetNetwork()
+        ->GetExperimental()
+        ->ContinueInterceptedRequest(std::move(continue_intercept_params));
   }
 
   void OnLoadEventFired(const page::LoadEventFiredParams&) override {
+    browser_context_->RemoveObserver(this);
+
     base::AutoLock lock(lock_);
-    EXPECT_EQ("iframe.html", url_that_failed_to_load_);
+    EXPECT_THAT(urls_that_failed_to_load_,
+                ElementsAre("test.jpg", "iframe.html"));
+    EXPECT_THAT(
+        urls_seen_,
+        ElementsAre("resource_cancel_test.html", "dom_tree_test.css",
+                    "test.jpg", "iframe.html", "iframe2.html", "Ahem.ttf"));
     FinishAsynchronousTest();
   }
 
-  void UrlRequestFailed(net::URLRequest* request, int net_error) override {
+  void UrlRequestFailed(net::URLRequest* request,
+                        int net_error,
+                        bool canceled_by_devtools) override {
     base::AutoLock lock(lock_);
-    url_that_failed_to_load_ = request->url().ExtractFileName();
+    urls_that_failed_to_load_.push_back(request->url().ExtractFileName());
+    EXPECT_TRUE(canceled_by_devtools);
   }
+
+  virtual network::ErrorReason GetErrorReason() = 0;
 
  private:
   base::Lock lock_;
-  std::string url_that_failed_to_load_;
+  std::vector<std::string> urls_seen_;
+  std::vector<std::string> urls_that_failed_to_load_;
 };
 
-HEADLESS_ASYNC_DEVTOOLED_TEST_F(FailedUrlRequestTest);
+class UrlRequestFailedTest_Failed : public UrlRequestFailedTest {
+ public:
+  network::ErrorReason GetErrorReason() override {
+    return network::ErrorReason::FAILED;
+  }
+};
+
+HEADLESS_ASYNC_DEVTOOLED_TEST_F(UrlRequestFailedTest_Failed);
+
+class UrlRequestFailedTest_Abort : public UrlRequestFailedTest {
+ public:
+  network::ErrorReason GetErrorReason() override {
+    return network::ErrorReason::ABORTED;
+  }
+};
+
+HEADLESS_ASYNC_DEVTOOLED_TEST_F(UrlRequestFailedTest_Abort);
 
 class DevToolsSetCookieTest : public HeadlessAsyncDevTooledBrowserTest,
                               public network::Observer {
@@ -1464,10 +1501,8 @@ class DevToolsSetCookieTest : public HeadlessAsyncDevTooledBrowserTest,
     EXPECT_TRUE(embedded_test_server()->Start());
     devtools_client_->GetNetwork()->AddObserver(this);
 
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetNetwork()->Enable(run_loop.QuitClosure());
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
     run_loop.Run();
 
     devtools_client_->GetPage()->Navigate(
@@ -1491,7 +1526,6 @@ class DevtoolsInterceptionWithAuthProxyTest
  public:
   DevtoolsInterceptionWithAuthProxyTest()
       : proxy_server_(net::SpawnedTestServer::TYPE_BASIC_AUTH_PROXY,
-                      net::SpawnedTestServer::kLocalhost,
                       base::FilePath(FILE_PATH_LITERAL("headless/test/data"))) {
   }
 
@@ -1504,19 +1538,19 @@ class DevtoolsInterceptionWithAuthProxyTest
     EXPECT_TRUE(embedded_test_server()->Start());
     devtools_client_->GetNetwork()->GetExperimental()->AddObserver(this);
     devtools_client_->GetNetwork()->Enable();
-    devtools_client_->GetNetwork()
-        ->GetExperimental()
-        ->SetRequestInterceptionEnabled(
-            network::SetRequestInterceptionEnabledParams::Builder()
-                .SetEnabled(true)
-                .Build());
+    std::unique_ptr<headless::network::RequestPattern> match_all =
+        headless::network::RequestPattern::Builder().SetUrlPattern("*").Build();
+    std::vector<std::unique_ptr<headless::network::RequestPattern>> patterns;
+    patterns.push_back(std::move(match_all));
+    devtools_client_->GetNetwork()->GetExperimental()->SetRequestInterception(
+        network::SetRequestInterceptionParams::Builder()
+            .SetPatterns(std::move(patterns))
+            .Build());
 
     devtools_client_->GetPage()->AddObserver(this);
 
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     devtools_client_->GetPage()->Enable(run_loop.QuitClosure());
-    base::MessageLoop::ScopedNestableTaskAllower nest_loop(
-        base::MessageLoop::current());
     run_loop.Run();
 
     devtools_client_->GetPage()->Navigate(
@@ -1560,11 +1594,12 @@ class DevtoolsInterceptionWithAuthProxyTest
     FinishAsynchronousTest();
   }
 
-  std::unique_ptr<net::ProxyConfig> GetProxyConfig() override {
+  void CustomizeHeadlessBrowserContext(
+      HeadlessBrowserContext::Builder& builder) override {
     std::unique_ptr<net::ProxyConfig> proxy_config(new net::ProxyConfig);
     proxy_config->proxy_rules().ParseFromString(
         proxy_server_.host_port_pair().ToString());
-    return proxy_config;
+    builder.SetProxyConfig(std::move(proxy_config));
   }
 
  private:
@@ -1574,5 +1609,28 @@ class DevtoolsInterceptionWithAuthProxyTest
 };
 
 HEADLESS_ASYNC_DEVTOOLED_TEST_F(DevtoolsInterceptionWithAuthProxyTest);
+
+class NavigatorLanguages : public HeadlessAsyncDevTooledBrowserTest {
+ public:
+  void RunDevTooledTest() override {
+    devtools_client_->GetRuntime()->Evaluate(
+        "JSON.stringify(navigator.languages)",
+        base::Bind(&NavigatorLanguages::OnResult, base::Unretained(this)));
+  }
+
+  void OnResult(std::unique_ptr<runtime::EvaluateResult> result) {
+    EXPECT_TRUE(result->GetResult()->HasValue());
+    EXPECT_EQ("[\"en-UK\",\"DE\",\"FR\"]",
+              result->GetResult()->GetValue()->GetString());
+    FinishAsynchronousTest();
+  }
+
+  void CustomizeHeadlessBrowserContext(
+      HeadlessBrowserContext::Builder& builder) override {
+    builder.SetAcceptLanguage("en-UK, DE, FR");
+  }
+};
+
+HEADLESS_ASYNC_DEVTOOLED_TEST_F(NavigatorLanguages);
 
 }  // namespace headless

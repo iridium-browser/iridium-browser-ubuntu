@@ -193,15 +193,31 @@ def main():
       # Linux32 builds need to be special-cased, because 1) they are keyed by
       # git hash rather than commit position, and 2) come from a different
       # download site (so we can't just convert the commit position to a hash).
-      versions['60'] = 'c1148176d6794fff0fd8dba2b9f7ed71ec52fed8'
-      versions['59'] = 'c407e95a371a94bfd714e25eab788c9405de6975'
-      versions['58'] = '7613176285d46fbc5b4712e42bd135aae99cbba5'
+      versions['63'] = 'adb61db19020ed8ecee5e91b1a0ea4c924ae2988'
+      versions['62'] = '17030e3a08cfbb6e591991f7dbf0eb703454b365'
+      versions['61'] = '77132a2bc78e8dc9ce411e8166bfd009f6476f6f'
+
       # TODO(samuong): speculative fix for crbug.com/611886
       os.environ['CHROME_DEVEL_SANDBOX'] = '/opt/chromium/chrome_sandbox'
-    else:
-      versions['60'] = '474969'
-      versions['59'] = '464674'
-      versions['58'] = '454475'
+
+    # Linux64 build numbers
+    elif util.IsLinux():
+      versions['65'] = '530372'
+      versions['64'] = '520842'
+      versions['63'] = '508578'
+
+    # Mac build numbers
+    elif util.IsMac():
+      versions['65'] = '530368'
+      versions['64'] = '520840'
+      versions['63'] = '508578'
+
+    # Windows build numbers
+    elif util.IsWindows():
+      versions['65'] = '530366'
+      versions['64'] = '520840'
+      versions['63'] = '508578'
+
     code = 0
     for version, revision in versions.iteritems():
       if options.chrome_version and version != options.chrome_version:

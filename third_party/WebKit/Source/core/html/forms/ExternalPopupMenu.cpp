@@ -32,13 +32,13 @@
 
 #include "build/build_config.h"
 #include "core/dom/NodeComputedStyle.h"
-#include "core/dom/TaskRunnerHelper.h"
-#include "core/exported/WebViewBase.h"
+#include "core/events/CurrentInputEvent.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
-#include "core/frame/WebLocalFrameBase.h"
-#include "core/html/HTMLOptionElement.h"
-#include "core/html/HTMLSelectElement.h"
+#include "core/frame/WebLocalFrameImpl.h"
+#include "core/html/forms/HTMLOptionElement.h"
+#include "core/html/forms/HTMLSelectElement.h"
 #include "core/layout/LayoutBox.h"
 #include "core/page/Page.h"
 #include "core/style/ComputedStyle.h"
@@ -46,6 +46,7 @@
 #include "platform/geometry/IntPoint.h"
 #include "platform/text/TextDirection.h"
 #include "platform/wtf/PtrUtil.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebCoalescedInputEvent.h"
 #include "public/platform/WebMouseEvent.h"
 #include "public/platform/WebVector.h"
@@ -66,15 +67,14 @@ ExternalPopupMenu::ExternalPopupMenu(LocalFrame& frame,
     : owner_element_(owner_element),
       local_frame_(frame),
       web_view_(web_view),
-      dispatch_event_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, &frame),
-          this,
-          &ExternalPopupMenu::DispatchEvent),
-      web_external_popup_menu_(0) {}
+      dispatch_event_timer_(frame.GetTaskRunner(TaskType::kUnspecedTimer),
+                            this,
+                            &ExternalPopupMenu::DispatchEvent),
+      web_external_popup_menu_(nullptr) {}
 
-ExternalPopupMenu::~ExternalPopupMenu() {}
+ExternalPopupMenu::~ExternalPopupMenu() = default;
 
-DEFINE_TRACE(ExternalPopupMenu) {
+void ExternalPopupMenu::Trace(blink::Visitor* visitor) {
   visitor->Trace(owner_element_);
   visitor->Trace(local_frame_);
   PopupMenu::Trace(visitor);
@@ -85,15 +85,15 @@ bool ExternalPopupMenu::ShowInternal() {
   // recreate the actual external popup everytime.
   if (web_external_popup_menu_) {
     web_external_popup_menu_->Close();
-    web_external_popup_menu_ = 0;
+    web_external_popup_menu_ = nullptr;
   }
 
   WebPopupMenuInfo info;
   GetPopupMenuInfo(info, *owner_element_);
   if (info.items.empty())
     return false;
-  WebLocalFrameBase* webframe =
-      WebLocalFrameBase::FromFrame(local_frame_.Get());
+  WebLocalFrameImpl* webframe =
+      WebLocalFrameImpl::FromFrame(local_frame_.Get());
   web_external_popup_menu_ =
       webframe->Client()->CreateExternalPopupMenu(info, this);
   if (web_external_popup_menu_) {
@@ -119,15 +119,12 @@ void ExternalPopupMenu::Show() {
   if (!ShowInternal())
     return;
 #if defined(OS_MACOSX)
-  // TODO(sashab): Change this back to WebViewBase::CurrentInputEvent() once
-  // WebViewImpl is in core/.
-  const WebInputEvent* current_event =
-      local_frame_->GetPage()->GetChromeClient().GetCurrentInputEvent();
+  const WebInputEvent* current_event = CurrentInputEvent::Get();
   if (current_event && current_event->GetType() == WebInputEvent::kMouseDown) {
     synthetic_event_ = WTF::WrapUnique(new WebMouseEvent);
     *synthetic_event_ = *static_cast<const WebMouseEvent*>(current_event);
     synthetic_event_->SetType(WebInputEvent::kMouseUp);
-    dispatch_event_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    dispatch_event_timer_.StartOneShot(TimeDelta(), FROM_HERE);
     // FIXME: show() is asynchronous. If preparing a popup is slow and a
     // user released the mouse button before showing the popup, mouseup and
     // click events are correctly dispatched. Dispatching the synthetic
@@ -147,7 +144,7 @@ void ExternalPopupMenu::Hide() {
   if (!web_external_popup_menu_)
     return;
   web_external_popup_menu_->Close();
-  web_external_popup_menu_ = 0;
+  web_external_popup_menu_ = nullptr;
 }
 
 void ExternalPopupMenu::UpdateFromElement(UpdateReason reason) {
@@ -157,14 +154,14 @@ void ExternalPopupMenu::UpdateFromElement(UpdateReason reason) {
       if (needs_update_)
         return;
       needs_update_ = true;
-      TaskRunnerHelper::Get(TaskType::kUserInteraction,
-                            &owner_element_->GetDocument())
-          ->PostTask(BLINK_FROM_HERE, WTF::Bind(&ExternalPopupMenu::Update,
-                                                WrapPersistent(this)));
+      owner_element_->GetDocument()
+          .GetTaskRunner(TaskType::kUserInteraction)
+          ->PostTask(FROM_HERE, WTF::Bind(&ExternalPopupMenu::Update,
+                                          WrapPersistent(this)));
       break;
 
     case kByStyleChange:
-      // TOOD(tkent): We should update the popup location/content in some
+      // TODO(tkent): We should update the popup location/content in some
       // cases.  e.g. Updating ComputedStyle of the SELECT element affects
       // popup position and OPTION style.
       break;
@@ -203,13 +200,13 @@ void ExternalPopupMenu::DidAcceptIndex(int index) {
     owner_element_->PopupDidHide();
     owner_element_->SelectOptionByPopup(popup_menu_item_index);
   }
-  web_external_popup_menu_ = 0;
+  web_external_popup_menu_ = nullptr;
 }
 
 // Android uses this function even for single SELECT.
 void ExternalPopupMenu::DidAcceptIndices(const WebVector<int>& indices) {
   if (!owner_element_) {
-    web_external_popup_menu_ = 0;
+    web_external_popup_menu_ = nullptr;
     return;
   }
 
@@ -229,13 +226,13 @@ void ExternalPopupMenu::DidAcceptIndices(const WebVector<int>& indices) {
     owner_element->SelectMultipleOptionsByPopup(list_indices);
   }
 
-  web_external_popup_menu_ = 0;
+  web_external_popup_menu_ = nullptr;
 }
 
 void ExternalPopupMenu::DidCancel() {
   if (owner_element_)
     owner_element_->PopupDidHide();
-  web_external_popup_menu_ = 0;
+  web_external_popup_menu_ = nullptr;
 }
 
 void ExternalPopupMenu::GetPopupMenuInfo(WebPopupMenuInfo& info,
@@ -254,13 +251,13 @@ void ExternalPopupMenu::GetPopupMenuInfo(WebPopupMenuInfo& info,
     popup_item.label = owner_element.ItemText(item_element);
     popup_item.tool_tip = item_element.title();
     popup_item.checked = false;
-    if (isHTMLHRElement(item_element)) {
+    if (IsHTMLHRElement(item_element)) {
       popup_item.type = WebMenuItemInfo::kSeparator;
-    } else if (isHTMLOptGroupElement(item_element)) {
+    } else if (IsHTMLOptGroupElement(item_element)) {
       popup_item.type = WebMenuItemInfo::kGroup;
     } else {
       popup_item.type = WebMenuItemInfo::kOption;
-      popup_item.checked = toHTMLOptionElement(item_element).Selected();
+      popup_item.checked = ToHTMLOptionElement(item_element).Selected();
     }
     popup_item.enabled = !item_element.IsDisabledFormControl();
     const ComputedStyle& style = *owner_element.ItemComputedStyle(item_element);

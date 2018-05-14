@@ -141,7 +141,7 @@ PublicAccountUserDetails::PublicAccountUserDetails() : learn_more_(nullptr) {
   DeterminePreferredSize();
 }
 
-PublicAccountUserDetails::~PublicAccountUserDetails() {}
+PublicAccountUserDetails::~PublicAccountUserDetails() = default;
 
 void PublicAccountUserDetails::Layout() {
   lines_.clear();
@@ -159,7 +159,7 @@ void PublicAccountUserDetails::Layout() {
   gfx::Point position = contents_area.origin();
   gfx::Range display_name(gfx::Range::InvalidRange());
   for (auto it = lines.begin(); it != lines.end(); ++it) {
-    auto line = base::WrapUnique(gfx::RenderText::CreateInstance());
+    auto line = gfx::RenderText::CreateHarfBuzzInstance();
     line->SetDirectionalityMode(gfx::DIRECTIONALITY_FROM_UI);
     line->SetText(*it);
     const gfx::Size size(contents_area.width(), line->GetStringSize().height());
@@ -219,7 +219,7 @@ void PublicAccountUserDetails::OnPaint(gfx::Canvas* canvas) {
 
 void PublicAccountUserDetails::GetAccessibleNodeData(
     ui::AXNodeData* node_data) {
-  node_data->role = ui::AX_ROLE_STATIC_TEXT;
+  node_data->role = ax::mojom::Role::kStaticText;
   node_data->SetName(text_);
 }
 
@@ -282,16 +282,12 @@ void PublicAccountUserDetails::DeterminePreferredSize() {
 }  // namespace
 
 UserCardView::UserCardView(int user_index) : user_index_(user_index) {
-  auto* layout =
-      new views::BoxLayout(views::BoxLayout::kHorizontal, gfx::Insets(),
-                           kTrayPopupLabelHorizontalPadding);
-  SetLayoutManager(layout);
+  auto* layout = SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kHorizontal, gfx::Insets(),
+      kTrayPopupLabelHorizontalPadding));
   layout->set_minimum_cross_axis_size(kTrayPopupItemMinHeight);
   layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
-
-  SetBackground(views::CreateThemedSolidBackground(
-      this, ui::NativeTheme::kColorId_BubbleBackground));
 
   Shell::Get()->media_controller()->AddObserver(this);
 
@@ -313,7 +309,7 @@ void UserCardView::SetSuppressCaptureIcon(bool suppressed) {
 }
 
 void UserCardView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  node_data->role = ui::AX_ROLE_STATIC_TEXT;
+  node_data->role = ax::mojom::Role::kStaticText;
   std::vector<base::string16> labels;
 
   // Construct the name by concatenating descendants' names.
@@ -325,8 +321,8 @@ void UserCardView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
     if (view != this) {
       ui::AXNodeData descendant_data;
       view->GetAccessibleNodeData(&descendant_data);
-      base::string16 label =
-          descendant_data.GetString16Attribute(ui::AX_ATTR_NAME);
+      base::string16 label = descendant_data.GetString16Attribute(
+          ax::mojom::StringAttribute::kName);
       // If we find a non-empty name, use that and don't descend further into
       // the tree.
       if (!label.empty()) {
@@ -404,7 +400,7 @@ void UserCardView::AddUserContent(views::BoxLayout* layout) {
   base::string16 user_email_string;
   if (!is_guest) {
     user_email_string =
-        Shell::Get()->session_controller()->IsUserSupervised()
+        Shell::Get()->session_controller()->IsUserLegacySupervised()
             ? l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SUPERVISED_LABEL)
             : base::UTF8ToUTF16(user_session->user_info->display_email);
   }
@@ -418,7 +414,7 @@ void UserCardView::AddUserContent(views::BoxLayout* layout) {
   AddChildView(stack_of_labels);
   layout->SetFlexForView(stack_of_labels, 1);
   stack_of_labels->SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kVertical));
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
   stack_of_labels->AddChildView(user_name_);
   stack_of_labels->AddChildView(user_email);
   // The name and email have different font sizes. This border is designed
@@ -441,7 +437,8 @@ void UserCardView::AddUserContent(views::BoxLayout* layout) {
   media_capture_icon_->SetVisible(false);
 
   media_capture_container_ = new views::View();
-  media_capture_container_->SetLayoutManager(new views::FillLayout());
+  media_capture_container_->SetLayoutManager(
+      std::make_unique<views::FillLayout>());
   media_capture_container_->AddChildView(media_capture_icon_);
   AddChildView(media_capture_container_);
 

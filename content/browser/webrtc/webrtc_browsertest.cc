@@ -53,6 +53,15 @@ class MAYBE_WebRtcBrowserTest : public WebRtcContentBrowserTestBase {
   }
 };
 
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, CanSetupAudioAndVideoCall) {
+  MakeTypicalPeerConnectionCall("call({video: true, audio: true});");
+}
+
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
+                       CanSetupDefaultVideoCallWithOldGetUserMedia) {
+  MakeTypicalPeerConnectionCall("oldStyleCall();");
+}
+
 // These tests will make a complete PeerConnection-based call and verify that
 // video is playing for the call.
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
@@ -94,11 +103,6 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
   MakeTypicalPeerConnectionCall(javascript);
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
-                       CanSetupAudioAndVideoCall) {
-  MakeTypicalPeerConnectionCall("call({video: true, audio: true});");
-}
-
 
 #if defined(OS_WIN) && !defined(NVALGRIND)
 // Times out on Dr. Memory bots: https://crbug.com/545740
@@ -109,7 +113,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
                        MAYBE_CanSetupCallAndSendDtmf) {
-  MakeTypicalPeerConnectionCall("callAndSendDtmf(\'123,abc\');");
+  MakeTypicalPeerConnectionCall("callAndSendDtmf(\'123,ABC\');");
 }
 
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
@@ -151,8 +155,16 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
 // MSID and bundle attribute from the initial offer to verify that
 // video is playing for the call even if the initiating client don't support
 // MSID. http://tools.ietf.org/html/draft-alvestrand-rtcweb-msid-02
+// Fails with TSAN. https://crbug.com/756568
+#if defined(THREAD_SANITIZER)
+#define MAYBE_CanSetupAudioAndVideoCallWithoutMsidAndBundle \
+  DISABLED_CanSetupAudioAndVideoCallWithoutMsidAndBundle
+#else
+#define MAYBE_CanSetupAudioAndVideoCallWithoutMsidAndBundle \
+  CanSetupAudioAndVideoCallWithoutMsidAndBundle
+#endif
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
-                       CanSetupAudioAndVideoCallWithoutMsidAndBundle) {
+                       MAYBE_CanSetupAudioAndVideoCallWithoutMsidAndBundle) {
   MakeTypicalPeerConnectionCall("callWithoutMsidAndBundle();");
 }
 
@@ -165,7 +177,13 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
 
 // This test will modify the SDP offer to use no encryption, which should
 // cause SetLocalDescription to fail.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, NegotiateNonCryptoCall) {
+// Flaky on MAC: http://crbug/810321.
+#if defined(OS_MACOSX)
+#define MAYBE_NegotiateNonCryptoCall DISABLED_NegotiateNonCryptoCall
+#else
+#define MAYBE_NegotiateNonCryptoCall NegotiateNonCryptoCall
+#endif
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, MAYBE_NegotiateNonCryptoCall) {
   MakeTypicalPeerConnectionCall("negotiateNonCryptoCall();");
 }
 
@@ -218,5 +236,24 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, SetConfiguration) {
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, SetConfigurationErrors) {
   SetConfigurationTest("testSetConfigurationErrors();");
 }
+
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, ApplyConstraints) {
+  MakeTypicalPeerConnectionCall("testApplyConstraints();");
+}
+
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
+                       GetSettingsWhenRemoteDimensionsUnknown) {
+  MakeTypicalPeerConnectionCall(
+      "testGetSettingsWhenRemoteDimensionsUnknown();");
+}
+
+#if defined(OS_ANDROID)
+// This test is to make sure HW H264 work normally on supported devices, since
+// there is no SW H264 fallback available on Android.
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
+                       CanSetupH264VideoCallOnSupportedDevice) {
+  MakeTypicalPeerConnectionCall("CanSetupH264VideoCallOnSupportedDevice();");
+}
+#endif
 
 }  // namespace content

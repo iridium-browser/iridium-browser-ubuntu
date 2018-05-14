@@ -39,7 +39,7 @@ std::unique_ptr<ExtensionReenabler> ExtensionReenabler::PromptForReenable(
   // to a permissions increase.
   int disable_reasons =
       ExtensionPrefs::Get(browser_context)->GetDisableReasons(extension->id());
-  DCHECK_NE(0, disable_reasons & Extension::DISABLE_PERMISSIONS_INCREASE);
+  DCHECK_NE(0, disable_reasons & disable_reason::DISABLE_PERMISSIONS_INCREASE);
 #endif  // DCHECK_IS_ON()
 
   return base::WrapUnique(new ExtensionReenabler(
@@ -97,7 +97,7 @@ ExtensionReenabler::ExtensionReenabler(
         base::Bind(&ExtensionReenabler::OnInstallPromptDone,
                    weak_factory_.GetWeakPtr()),
         extension.get(), nullptr,
-        base::MakeUnique<ExtensionInstallPrompt::Prompt>(type),
+        std::make_unique<ExtensionInstallPrompt::Prompt>(type),
         show_dialog_callback_);
   }
 }
@@ -173,7 +173,7 @@ void ExtensionReenabler::OnWebstoreResponseParseSuccess(
         base::Bind(&ExtensionReenabler::OnInstallPromptDone,
                    weak_factory_.GetWeakPtr()),
         extension_.get(), nullptr,
-        base::MakeUnique<ExtensionInstallPrompt::Prompt>(type),
+        std::make_unique<ExtensionInstallPrompt::Prompt>(type),
         show_dialog_callback_);
   }
 }

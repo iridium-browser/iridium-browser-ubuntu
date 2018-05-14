@@ -5,6 +5,7 @@
 #ifndef CSSSkew_h
 #define CSSSkew_h
 
+#include "base/macros.h"
 #include "core/css/cssom/CSSNumericValue.h"
 #include "core/css/cssom/CSSTransformComponent.h"
 
@@ -17,16 +18,16 @@ class ExceptionState;
 // "transform".
 // See CSSSkew.idl for more information about this class.
 class CORE_EXPORT CSSSkew final : public CSSTransformComponent {
-  WTF_MAKE_NONCOPYABLE(CSSSkew);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   // Constructor defined in the IDL.
+  static CSSSkew* Create(CSSNumericValue*, CSSNumericValue*, ExceptionState&);
   static CSSSkew* Create(CSSNumericValue* ax, CSSNumericValue* ay) {
     return new CSSSkew(ax, ay);
   }
 
-  // Internal ways of creating CSSSkews.
+  // Internal ways of creating CSSSkew.
   static CSSSkew* FromCSSValue(const CSSFunctionValue&);
 
   // Getters and setters for the ax and ay attributes defined in the IDL.
@@ -40,23 +41,24 @@ class CORE_EXPORT CSSSkew final : public CSSTransformComponent {
   // https://drafts.css-houdini.org/css-typed-om/#dom-cssskew-is2d
   void setIs2D(bool is2D) final {}
 
-  // Internal methods - from CSSTransformComponent.
-  const DOMMatrix* AsMatrix() const override;
-  TransformComponentType GetType() const override { return kSkewType; }
-  CSSFunctionValue* ToCSSValue() const override;
+  DOMMatrix* toMatrix(ExceptionState&) const final;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  // Internal methods - from CSSTransformComponent.
+  TransformComponentType GetType() const override { return kSkewType; }
+  const CSSFunctionValue* ToCSSValue() const override;
+
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(ax_);
     visitor->Trace(ay_);
     CSSTransformComponent::Trace(visitor);
   }
 
  private:
-  CSSSkew(CSSNumericValue* ax, CSSNumericValue* ay)
-      : CSSTransformComponent(true /* is2D */), ax_(ax), ay_(ay) {}
+  CSSSkew(CSSNumericValue* ax, CSSNumericValue* ay);
 
   Member<CSSNumericValue> ax_;
   Member<CSSNumericValue> ay_;
+  DISALLOW_COPY_AND_ASSIGN(CSSSkew);
 };
 
 }  // namespace blink

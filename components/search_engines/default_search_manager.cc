@@ -47,21 +47,19 @@ const char DefaultSearchManager::kSyncGUID[] = "synced_guid";
 
 const char DefaultSearchManager::kURL[] = "url";
 const char DefaultSearchManager::kSuggestionsURL[] = "suggestions_url";
-const char DefaultSearchManager::kInstantURL[] = "instant_url";
 const char DefaultSearchManager::kImageURL[] = "image_url";
 const char DefaultSearchManager::kNewTabURL[] = "new_tab_url";
 const char DefaultSearchManager::kContextualSearchURL[] =
     "contextual_search_url";
 const char DefaultSearchManager::kFaviconURL[] = "favicon_url";
 const char DefaultSearchManager::kLogoURL[] = "logo_url";
+const char DefaultSearchManager::kDoodleURL[] = "doodle_url";
 const char DefaultSearchManager::kOriginatingURL[] = "originating_url";
 
 const char DefaultSearchManager::kSearchURLPostParams[] =
     "search_url_post_params";
 const char DefaultSearchManager::kSuggestionsURLPostParams[] =
     "suggestions_url_post_params";
-const char DefaultSearchManager::kInstantURLPostParams[] =
-    "instant_url_post_params";
 const char DefaultSearchManager::kImageURLPostParams[] =
     "image_url_post_params";
 
@@ -74,8 +72,6 @@ const char DefaultSearchManager::kLastVisited[] = "last_visited";
 
 const char DefaultSearchManager::kUsageCount[] = "usage_count";
 const char DefaultSearchManager::kAlternateURLs[] = "alternate_urls";
-const char DefaultSearchManager::kSearchTermsReplacementKey[] =
-    "search_terms_replacement_key";
 const char DefaultSearchManager::kCreatedByPolicy[] = "created_by_policy";
 const char DefaultSearchManager::kDisabledByPolicy[] = "disabled_by_policy";
 

@@ -585,8 +585,8 @@ FileTransferController.prototype.isMissingFileContents_ =
  * Obtains entries that need to share with me.
  * The method also observers child entries of the given entries.
  * @param {Array<Entry>} entries Entries.
- * @return {Promise} Promise to be fulfilled with the entries that need to
- *     share.
+ * @return {!Promise<Array<Entry>>} Promise to be fulfilled with the entries
+ *    that need to share.
  * @private
  */
 FileTransferController.prototype.getMultiProfileShareEntries_ =
@@ -752,7 +752,7 @@ FileTransferController.prototype.executePaste = function(pastePlan) {
 
   FileTransferController.URLsToEntriesWithAccess(sourceURLs)
       .then(
-          /**
+          (/**
            * @param {Object} result
            * @this {FileTransferController}
            */
@@ -762,9 +762,9 @@ FileTransferController.prototype.executePaste = function(pastePlan) {
             // progress center item here.
             return this.fileOperationManager_.filterSameDirectoryEntry(
                 result.entries, destinationEntry, toMove);
-          }.bind(this))
+          }).bind(this))
       .then(
-          /**
+          (/**
            * @param {!Array<Entry>} filteredEntries
            * @this {FileTransferController}
            * @return {!Promise<Array<Entry>>}
@@ -799,12 +799,12 @@ FileTransferController.prototype.executePaste = function(pastePlan) {
             this.progressCenter_.updateItem(item);
             // Check if cross share is needed or not.
             return this.getMultiProfileShareEntries_(entries);
-          }.bind(this))
+          }).bind(this))
       .then(
-          /**
-           * @param {!Array<Entry>} inShareEntries
+          (/**
+           * @param {Array<Entry>} inShareEntries
            * @this {FileTransferController}
-           * @return {!Promise<Array<Entry>>}
+           * @return {!Promise<Array<Entry>>|!Promise<null>}
            */
           function(inShareEntries) {
             shareEntries = inShareEntries;
@@ -812,7 +812,7 @@ FileTransferController.prototype.executePaste = function(pastePlan) {
               return Promise.resolve(null);
             return this.multiProfileShareDialog_.
                 showMultiProfileShareDialog(shareEntries.length > 1);
-          }.bind(this))
+          }).bind(this))
       .then(
           /**
            * @param {?string} dialogResult
@@ -841,9 +841,7 @@ FileTransferController.prototype.executePaste = function(pastePlan) {
               return requestDriveShare(0);
             })
       .then(
-          /**
-           * @this {FileTransferController}
-           */
+          (/** @this {FileTransferController} */
           function() {
             // Start the pasting operation.
             this.fileOperationManager_.paste(
@@ -864,7 +862,7 @@ FileTransferController.prototype.executePaste = function(pastePlan) {
               this.progressCenter_.updateItem(item);
               this.sourceNotFoundErrorCount_++;
             }
-          }.bind(this))
+          }).bind(this))
       .catch(
           function(error) {
             if (error !== 'ABORT')
@@ -921,8 +919,8 @@ FileTransferController.prototype.renderThumbnail_ = function() {
     return container;
   }
 
-  // Option 2. Thumbnail image available, then render it without
-  // a label.
+  // Option 2. Thumbnail image available from preloadedThumbnailImagePromise_,
+  // then render it without a label.
   if (this.preloadedThumbnailImagePromise_ &&
       this.preloadedThumbnailImagePromise_.value) {
     var thumbnailImage = this.preloadedThumbnailImagePromise_.value;
@@ -953,7 +951,24 @@ FileTransferController.prototype.renderThumbnail_ = function() {
     return container;
   }
 
-  // Option 3. Thumbnail not available. Render an icon and a label.
+  // Option 3. Thumbnail image available from file grid / list, render it
+  // without a label.
+  // Because of Option 1, there is only exactly one item selected.
+  var index = this.selectionHandler_.selection.indexes[0];
+  // We only need one of the thumbnails.
+  var thumbnail = this.listContainer_.currentView.getThumbnail(index);
+  if (thumbnail) {
+    var canvas = document.createElement('canvas');
+    canvas.width = FileTransferController.DRAG_THUMBNAIL_SIZE_;
+    canvas.height = FileTransferController.DRAG_THUMBNAIL_SIZE_;
+    canvas.style.backgroundImage = thumbnail.style.backgroundImage;
+    canvas.style.backgroundSize = 'cover';
+    canvas.classList.add('for-image');
+    contents.appendChild(canvas);
+    return container;
+  }
+
+  // Option 4. Thumbnail not available. Render an icon and a label.
   var entry = this.selectionHandler_.selection.entries[0];
   var icon = this.document_.createElement('div');
   icon.className = 'detail-icon';
@@ -979,12 +994,19 @@ FileTransferController.prototype.onDragStart_ = function(list, event) {
     return;
   }
 
-  // Check if a drag selection should be initiated or not.
-  if (list.shouldStartDragSelection(event)) {
+  // If this drag operation is initiated by mouse, check if we should start
+  // selecting area.
+  if (!this.touching_ && list.shouldStartDragSelection(event)) {
     event.preventDefault();
-    // If this drag operation is initiated by mouse, start selecting area.
-    if (!this.touching_)
-      this.dragSelector_.startDragSelection(list, event);
+    this.dragSelector_.startDragSelection(list, event);
+    return;
+  }
+
+  // If the drag starts outside the files list on a touch device, cancel the
+  // drag.
+  if (this.touching_ && !list.hasDragHitElement(event)) {
+    event.preventDefault();
+    list.selectionModel_.unselectAll();
     return;
   }
 

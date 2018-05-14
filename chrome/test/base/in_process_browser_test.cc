@@ -40,11 +40,11 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/features.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
@@ -62,7 +62,6 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/display/display_switches.h"
-#include "ui/gfx/color_space_switches.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -85,12 +84,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
-#include "chrome/browser/ui/webui/options/browser_options_handler.h"
-#endif  // defined(OS_CHROMEOS)
-
-#if defined(USE_ASH)
 #include "chrome/test/base/default_ash_event_generator_delegate.h"
-#endif
+#endif  // defined(OS_CHROMEOS)
 
 #if !defined(OS_CHROMEOS) && defined(OS_LINUX)
 #include "ui/views/test/test_desktop_screen_x11.h"
@@ -107,53 +102,15 @@ const char kBrowserTestType[] = "browser";
 InProcessBrowserTest::SetUpBrowserFunction*
     InProcessBrowserTest::global_browser_set_up_function_ = nullptr;
 
-// Library used for testing accessibility.
-const base::FilePath::CharType kAXSTesting[] =
-    FILE_PATH_LITERAL("third_party/accessibility-audit/axs_testing.js");
-// JavaScript snippet to configure and run the accessibility audit.
-const char kAccessibilityTestString[] =
-    "var config = new axs.AuditConfiguration();"
-    "/* Disable warning about rules that cannot be checked. */"
-    "config.showUnsupportedRulesWarning = false;"
-    "config.auditRulesToIgnore = ["
-    "  /*"
-    "   * The 'elements with meaningful background image' accessibility"
-    "   * audit (AX_IMAGE_01) does not apply, since Chrome doesn't"
-    "   * disable background images in high-contrast mode like some"
-    "   * browsers do."
-    "   */"
-    "  'elementsWithMeaningfulBackgroundImage',"
-    "  /*"
-    "   * Most WebUI pages are inside an IFrame, so the 'web page should"
-    "   * have a title that describes topic or purpose' test (AX_TITLE_01)"
-    "   * generally does not apply."
-    "   */"
-    "  'pageWithoutTitle',"
-    "  /*"
-    "   * Enable when crbug.com/267035 is fixed."
-    "   * Until then it's just noise."
-    "   */"
-    "  'lowContrastElements'"
-    "];"
-    "var result = axs.Audit.run(config);"
-    "var error = '';"
-    "for (var i = 0; i < result.length; ++i) {"
-    "  if (result[i].result == axs.constants.AuditResult.FAIL) {"
-    "    error = axs.Audit.createReport(result);"
-    "    break;"
-    "  }"
-    "}"
-    "domAutomationController.send(error);";
-
 InProcessBrowserTest::InProcessBrowserTest()
     : browser_(NULL),
       exit_when_last_browser_closes_(true),
-      open_about_blank_on_browser_launch_(true),
-      run_accessibility_checks_for_test_case_(false)
+      open_about_blank_on_browser_launch_(true)
 #if defined(OS_MACOSX)
-      , autorelease_pool_(NULL)
+      ,
+      autorelease_pool_(NULL)
 #endif  // OS_MACOSX
-    {
+{
 #if defined(OS_MACOSX)
   // TODO(phajdan.jr): Make browser_tests self-contained on Mac, remove this.
   // Before we run the browser, we have to hack the path to the exe to match
@@ -181,7 +138,7 @@ InProcessBrowserTest::InProcessBrowserTest()
   bundle_swizzler_.reset(new ScopedBundleSwizzlerMac);
 #endif
 
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
   DefaultAshEventGeneratorDelegate::GetInstance();
 #endif
 }
@@ -231,7 +188,7 @@ void InProcessBrowserTest::SetUp() {
     command_line->AppendSwitchASCII(switches::kHostWindowBounds,
                                     "0+0-1280x800");
   }
-#elif defined(OS_LINUX) && defined(USE_X11)
+#elif defined(USE_X11)
   DCHECK(!display::Screen::GetScreen());
   display::Screen::SetScreenInstance(
       views::test::TestDesktopScreenX11::GetInstance());
@@ -240,7 +197,7 @@ void InProcessBrowserTest::SetUp() {
   // Always use a mocked password storage if OS encryption is used (which is
   // when anything sensitive gets stored, including Cookies). Without this on
   // Mac, many tests will hang waiting for a user to approve KeyChain access.
-  OSCryptMocker::SetUpWithSingleton();
+  OSCryptMocker::SetUp();
 
 #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
   CaptivePortalService::set_state_for_testing(
@@ -253,9 +210,6 @@ void InProcessBrowserTest::SetUp() {
   google_util::SetMockLinkDoctorBaseURLForTesting();
 
 #if defined(OS_CHROMEOS)
-  // Polymer Elements are used for quick unlock configuration in options page,
-  // which is chromeos specific feature.
-  options::BrowserOptionsHandler::DisablePolymerPreloadForTesting();
   // On Chrome OS, access to files via file: scheme is restricted. Enable
   // access to all files here since browser_tests and interactive_ui_tests
   // rely on the ability to open any files via file: scheme.
@@ -305,57 +259,6 @@ void InProcessBrowserTest::SetUpDefaultCommandLine(
 
   if (open_about_blank_on_browser_launch_ && command_line->GetArgs().empty())
     command_line->AppendArg(url::kAboutBlankURL);
-}
-
-bool InProcessBrowserTest::RunAccessibilityChecks(std::string* error_message) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
-  if (!browser()) {
-    *error_message = "browser is NULL";
-    return false;
-  }
-  auto* tab_strip = browser()->tab_strip_model();
-  if (!tab_strip) {
-    *error_message = "tab_strip is NULL";
-    return false;
-  }
-  auto* web_contents = tab_strip->GetActiveWebContents();
-  if (!web_contents) {
-    *error_message = "web_contents is NULL";
-    return false;
-  }
-  auto* focused_frame = web_contents->GetFocusedFrame();
-  if (!focused_frame) {
-    *error_message = "focused_frame is NULL";
-    return false;
-  }
-
-  // Load accessibility library.
-  base::FilePath src_dir;
-  if (!PathService::Get(base::DIR_SOURCE_ROOT, &src_dir)) {
-    *error_message = "PathService::Get failed";
-    return false;
-  }
-  base::FilePath script_path = src_dir.Append(kAXSTesting);
-  std::string script;
-  if (!base::ReadFileToString(script_path, &script)) {
-    *error_message = "Could not read accessibility library";
-    return false;
-  }
-  if (!content::ExecuteScript(web_contents, script)) {
-    *error_message = "Failed to load accessibility library";
-    return false;
-  }
-
-  // Run accessibility audit.
-  if (!content::ExecuteScriptAndExtractString(focused_frame,
-                                              kAccessibilityTestString,
-                                              error_message)) {
-    *error_message = "Failed to run accessibility audit";
-    return false;
-  }
-
-  // Test result should be empty if there are no errors.
-  return error_message->empty();
 }
 
 bool InProcessBrowserTest::CreateUserDataDirectory() {
@@ -420,10 +323,10 @@ void InProcessBrowserTest::AddTabAtIndexToBrowser(
     const GURL& url,
     ui::PageTransition transition,
     bool check_navigation_success) {
-  chrome::NavigateParams params(browser, url, transition);
+  NavigateParams params(browser, url, transition);
   params.tabstrip_index = index;
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-  chrome::Navigate(&params);
+  Navigate(&params);
 
   if (check_navigation_success)
     content::WaitForLoadStop(params.target_contents);
@@ -469,10 +372,13 @@ Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
   return browser;
 }
 
-Browser* InProcessBrowserTest::CreateIncognitoBrowser() {
+Browser* InProcessBrowserTest::CreateIncognitoBrowser(Profile* profile) {
+  // Use active profile if default nullptr was passed.
+  if (!profile)
+    profile = browser()->profile();
   // Create a new browser with using the incognito profile.
-  Browser* incognito = new Browser(Browser::CreateParams(
-      browser()->profile()->GetOffTheRecordProfile(), true));
+  Browser* incognito = new Browser(
+      Browser::CreateParams(profile->GetOffTheRecordProfile(), true));
   AddBlankTabAndShow(incognito);
   return incognito;
 }
@@ -538,13 +444,14 @@ void InProcessBrowserTest::PreRunTestOnMainThread() {
   const BrowserList* active_browser_list = BrowserList::GetInstance();
   if (!active_browser_list->empty()) {
     browser_ = active_browser_list->get(0);
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
     // There are cases where windows get created maximized by default.
     if (browser_->window()->IsMaximized())
       browser_->window()->Restore();
 #endif
-    content::WaitForLoadStop(
-        browser_->tab_strip_model()->GetActiveWebContents());
+    auto* tab = browser_->tab_strip_model()->GetActiveWebContents();
+    content::WaitForLoadStop(tab);
+    SetInitialWebContents(tab);
   }
 
 #if !defined(OS_ANDROID)
@@ -568,11 +475,6 @@ void InProcessBrowserTest::PreRunTestOnMainThread() {
   // browser.
   content::RunAllPendingInMessageLoop();
 
-  // run_accessibility_checks_for_test_case_ must be set before calling
-  // SetUpOnMainThread or RunTestOnMainThread so that one or all tests can
-  // enable/disable the accessibility audit.
-  run_accessibility_checks_for_test_case_ = false;
-
   if (browser_ && global_browser_set_up_function_)
     ASSERT_TRUE(global_browser_set_up_function_(browser_));
 
@@ -586,16 +488,6 @@ void InProcessBrowserTest::PreRunTestOnMainThread() {
 }
 
 void InProcessBrowserTest::PostRunTestOnMainThread() {
-#if defined(OS_MACOSX)
-  autorelease_pool_->Recycle();
-#endif
-
-  if (run_accessibility_checks_for_test_case_) {
-    std::string error_message;
-    EXPECT_TRUE(RunAccessibilityChecks(&error_message));
-    EXPECT_EQ("", error_message);
-  }
-
 #if defined(OS_MACOSX)
   autorelease_pool_->Recycle();
 #endif
@@ -614,6 +506,14 @@ void InProcessBrowserTest::PostRunTestOnMainThread() {
 void InProcessBrowserTest::QuitBrowsers() {
   if (chrome::GetTotalBrowserCount() == 0) {
     browser_shutdown::NotifyAppTerminating();
+
+    // Post OnAppExiting call as a task because the code path CHECKs a RunLoop
+    // runs at the current thread.
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(&chrome::OnAppExiting));
+    // Spin the message loop to ensure OnAppExitting finishes so that proper
+    // clean up happens before returning.
+    content::RunAllPendingInMessageLoop();
     return;
   }
 

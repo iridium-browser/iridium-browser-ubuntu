@@ -9,11 +9,11 @@
 #include "base/files/file_path.h"
 #include "base/i18n/icu_util.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/test/test_discardable_memory_allocator.h"
 #include "build/build_config.h"
 #include "components/viz/host/host_frame_sink_manager.h"
@@ -69,11 +69,12 @@ int main(int argc, char** argv) {
   // The ContextFactory must exist before any Compositors are created.
   viz::HostFrameSinkManager host_frame_sink_manager_;
   viz::FrameSinkManagerImpl frame_sink_manager_;
-  auto context_factory = base::MakeUnique<ui::InProcessContextFactory>(
+  auto context_factory = std::make_unique<ui::InProcessContextFactory>(
       &host_frame_sink_manager_, &frame_sink_manager_);
   context_factory->set_use_test_surface(false);
 
-  base::MessageLoopForUI message_loop;
+  base::test::ScopedTaskEnvironment scoped_task_environment(
+      base::test::ScopedTaskEnvironment::MainThreadType::UI);
 
   base::i18n::InitializeICU();
 

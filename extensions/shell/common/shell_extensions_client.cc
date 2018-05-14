@@ -10,6 +10,8 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "components/version_info/version_info.h"
+#include "content/public/common/user_agent.h"
 #include "extensions/common/api/generated_schemas.h"
 #include "extensions/common/common_manifest_handlers.h"
 #include "extensions/common/extension_urls.h"
@@ -85,6 +87,9 @@ void ShellExtensionsClient::Initialize() {
   PermissionsInfo::GetInstance()->AddProvider(extensions_api_permissions_,
                                               GetExtensionsPermissionAliases());
 }
+
+void ShellExtensionsClient::InitializeWebStoreUrls(
+    base::CommandLine* command_line) {}
 
 const PermissionMessageProvider&
 ShellExtensionsClient::GetPermissionMessageProvider() const {
@@ -188,6 +193,11 @@ bool ShellExtensionsClient::IsBlacklistUpdateURL(const GURL& url) const {
   // TODO(rockot): Maybe we want to do something else here. For now we accept
   // any URL as a blacklist URL because we don't really care.
   return true;
+}
+
+std::string ShellExtensionsClient::GetUserAgent() const {
+  return content::BuildUserAgentFromProduct(
+      version_info::GetProductNameAndVersionForUserAgent());
 }
 
 }  // namespace extensions

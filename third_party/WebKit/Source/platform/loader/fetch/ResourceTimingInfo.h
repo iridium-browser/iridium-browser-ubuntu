@@ -51,12 +51,12 @@ class PLATFORM_EXPORT ResourceTimingInfo
   WTF_MAKE_NONCOPYABLE(ResourceTimingInfo);
 
  public:
-  static RefPtr<ResourceTimingInfo> Create(const AtomicString& type,
-                                           const double time,
-                                           bool is_main_resource) {
-    return AdoptRef(new ResourceTimingInfo(type, time, is_main_resource));
+  static scoped_refptr<ResourceTimingInfo> Create(const AtomicString& type,
+                                                  const double time,
+                                                  bool is_main_resource) {
+    return base::AdoptRef(new ResourceTimingInfo(type, time, is_main_resource));
   }
-  static RefPtr<ResourceTimingInfo> Adopt(
+  static scoped_refptr<ResourceTimingInfo> Adopt(
       std::unique_ptr<CrossThreadResourceTimingInfoData>);
 
   // Gets a copy of the data suitable for passing to another thread.
@@ -65,7 +65,6 @@ class PLATFORM_EXPORT ResourceTimingInfo
   double InitialTime() const { return initial_time_; }
   bool IsMainResource() const { return is_main_resource_; }
 
-  void SetInitiatorType(const AtomicString& type) { type_ = type; }
   const AtomicString& InitiatorType() const { return type_; }
 
   void SetOriginalTimingAllowOrigin(
@@ -139,7 +138,7 @@ struct CrossThreadResourceTimingInfoData {
   USING_FAST_MALLOC(CrossThreadResourceTimingInfoData);
 
  public:
-  CrossThreadResourceTimingInfoData() {}
+  CrossThreadResourceTimingInfoData() = default;
 
   String type_;
   String original_timing_allow_origin_;

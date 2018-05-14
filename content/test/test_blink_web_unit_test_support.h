@@ -10,10 +10,11 @@
 #include "base/compiler_specific.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "cc/blink/web_compositor_support_impl.h"
 #include "content/child/blink_platform_impl.h"
-#include "content/child/webfileutilities_impl.h"
+#include "content/renderer/webfileutilities_impl.h"
 #include "content/test/mock_webblob_registry_impl.h"
 #include "content/test/mock_webclipboard_impl.h"
 #include "third_party/WebKit/public/platform/WebURLLoaderMockFactory.h"
@@ -24,7 +25,7 @@ class RendererScheduler;
 }
 }
 
-namespace cc {
+namespace viz {
 class TestSharedBitmapManager;
 }
 
@@ -41,9 +42,10 @@ class TestBlinkWebUnitTestSupport : public BlinkPlatformImpl {
   blink::WebFileUtilities* GetFileUtilities() override;
   blink::WebIDBFactory* IdbFactory() override;
 
-  std::unique_ptr<blink::WebURLLoader> CreateURLLoader(
-      const blink::WebURLRequest& request,
-      base::SingleThreadTaskRunner* task_runner) override;
+  std::unique_ptr<blink::WebURLLoaderFactory> CreateDefaultURLLoaderFactory()
+      override;
+  std::unique_ptr<blink::WebDataConsumerHandle> CreateDataConsumerHandle(
+      mojo::ScopedDataPipeConsumerHandle handle) override;
   blink::WebString UserAgent() override;
   blink::WebString QueryLocalizedString(
       blink::WebLocalizedString::Name name) override;
@@ -85,7 +87,9 @@ class TestBlinkWebUnitTestSupport : public BlinkPlatformImpl {
   cc_blink::WebCompositorSupportImpl compositor_support_;
   std::unique_ptr<blink::scheduler::RendererScheduler> renderer_scheduler_;
   std::unique_ptr<blink::WebThread> web_thread_;
-  std::unique_ptr<cc::TestSharedBitmapManager> shared_bitmap_manager_;
+  std::unique_ptr<viz::TestSharedBitmapManager> shared_bitmap_manager_;
+
+  base::WeakPtrFactory<TestBlinkWebUnitTestSupport> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TestBlinkWebUnitTestSupport);
 };

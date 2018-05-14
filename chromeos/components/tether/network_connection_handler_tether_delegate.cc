@@ -34,7 +34,7 @@ NetworkConnectionHandlerTetherDelegate::Callbacks::Callbacks(
 NetworkConnectionHandlerTetherDelegate::Callbacks::Callbacks(
     const Callbacks& other) = default;
 
-NetworkConnectionHandlerTetherDelegate::Callbacks::~Callbacks() {}
+NetworkConnectionHandlerTetherDelegate::Callbacks::~Callbacks() = default;
 
 NetworkConnectionHandlerTetherDelegate::NetworkConnectionHandlerTetherDelegate(
     NetworkConnectionHandler* network_connection_handler,
@@ -73,7 +73,9 @@ void NetworkConnectionHandlerTetherDelegate::DisconnectFromNetwork(
       base::Bind(&NetworkConnectionHandlerTetherDelegate::OnRequestSuccess,
                  weak_ptr_factory_.GetWeakPtr(), request_num),
       base::Bind(&NetworkConnectionHandlerTetherDelegate::OnRequestError,
-                 weak_ptr_factory_.GetWeakPtr(), request_num));
+                 weak_ptr_factory_.GetWeakPtr(), request_num),
+      TetherSessionCompletionLogger::SessionCompletionReason::
+          USER_DISCONNECTED);
 }
 
 void NetworkConnectionHandlerTetherDelegate::ConnectToNetwork(
@@ -98,7 +100,7 @@ void NetworkConnectionHandlerTetherDelegate::ConnectToNetwork(
                  << "Disconnecting from network with GUID "
                  << previous_host_guid << ".";
     DisconnectFromNetwork(
-        previous_host_guid, base::Bind(&base::DoNothing),
+        previous_host_guid, base::DoNothing(),
         base::Bind(&OnFailedDisconnectionFromPreviousHost, previous_host_guid));
   }
 

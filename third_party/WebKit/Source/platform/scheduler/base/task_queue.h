@@ -6,6 +6,7 @@
 #define THIRD_PARTY_WEBKIT_SOURCE_PLATFORM_SCHEDULER_BASE_TASK_QUEUE_H_
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/optional.h"
 #include "base/single_thread_task_runner.h"
@@ -13,6 +14,9 @@
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "platform/PlatformExport.h"
+#include "platform/scheduler/base/graceful_queue_shutdown_helper.h"
+#include "platform/scheduler/base/moveable_auto_lock.h"
+#include "public/platform/TaskType.h"
 
 namespace base {
 namespace trace_event {
@@ -22,18 +26,21 @@ class BlameContext;
 
 namespace blink {
 namespace scheduler {
-
+namespace task_queue_throttler_unittest {
+class TaskQueueThrottlerTest;
+}
 namespace internal {
 class TaskQueueImpl;
 }
 
 class TimeDomain;
+class TaskQueueManagerImpl;
 
 class PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
  public:
   class PLATFORM_EXPORT Observer {
    public:
-    virtual ~Observer() {}
+    virtual ~Observer() = default;
 
     // Notify observer that the time at which this queue wants to run
     // the next task has changed. |next_wakeup| can be in the past
@@ -48,31 +55,47 @@ class PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
                                           base::TimeTicks next_wake_up) = 0;
   };
 
+  // A wrapper around base::OnceClosure with additional metadata to be passed
+  // to PostTask and plumbed until PendingTask is created.
+  struct PLATFORM_EXPORT PostedTask {
+    PostedTask(base::OnceClosure callback,
+               base::Location posted_from,
+               base::TimeDelta delay = base::TimeDelta(),
+               base::Nestable nestable = base::Nestable::kNestable,
+               base::Optional<TaskType> task_type = base::nullopt);
+
+    base::OnceClosure callback;
+    base::Location posted_from;
+    base::TimeDelta delay;
+    base::Nestable nestable;
+    base::Optional<TaskType> task_type;
+  };
+
   // Unregisters the task queue after which no tasks posted to it will run and
-  // the TaskQueueManager's reference to it will be released soon.
-  virtual void UnregisterTaskQueue();
+  // the TaskQueueManagerImpl's reference to it will be released soon.
+  virtual void ShutdownTaskQueue();
 
   enum QueuePriority {
     // Queues with control priority will run before any other queue, and will
     // explicitly starve other queues. Typically this should only be used for
     // private queues which perform control operations.
-    CONTROL_PRIORITY,
+    kControlPriority,
 
     // The selector will prioritize high over normal and low and normal over
     // low. However it will ensure neither of the lower priority queues can be
     // completely starved by higher priority tasks. All three of these queues
     // will always take priority over and can starve the best effort queue.
-    HIGH_PRIORITY,
+    kHighPriority,
     // Queues with normal priority are the default.
-    NORMAL_PRIORITY,
-    LOW_PRIORITY,
+    kNormalPriority,
+    kLowPriority,
 
     // Queues with best effort priority will only be run if all other queues are
     // empty. They can be starved by the other queues.
-    BEST_EFFORT_PRIORITY,
+    kBestEffortPriority,
     // Must be the last entry.
-    QUEUE_PRIORITY_COUNT,
-    FIRST_QUEUE_PRIORITY = CONTROL_PRIORITY,
+    kQueuePriorityCount,
+    kFirstQueuePriority = kControlPriority,
   };
 
   // Can be called on any thread.
@@ -84,8 +107,7 @@ class PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
         : name(name),
           should_monitor_quiescence(false),
           time_domain(nullptr),
-          should_notify_observers(true),
-          should_report_when_execution_blocked(false) {}
+          should_notify_observers(true) {}
 
     Spec SetShouldMonitorQuiescence(bool should_monitor) {
       should_monitor_quiescence = should_monitor;
@@ -102,34 +124,29 @@ class PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
       return *this;
     }
 
-    // See TaskQueueManager::Observer::OnTriedToExecuteBlockedTask.
-    Spec SetShouldReportWhenExecutionBlocked(bool should_report) {
-      should_report_when_execution_blocked = should_report;
-      return *this;
-    }
-
     const char* name;
     bool should_monitor_quiescence;
     TimeDomain* time_domain;
     bool should_notify_observers;
-    bool should_report_when_execution_blocked;
   };
 
   // Interface to pass per-task metadata to RendererScheduler.
   class PLATFORM_EXPORT Task : public base::PendingTask {
    public:
-    Task(const tracked_objects::Location& posted_from,
-         base::OnceClosure task,
-         base::TimeTicks desired_run_time,
-         bool nestable);
+    Task(PostedTask posted_task, base::TimeTicks desired_run_time);
+
+    base::Optional<TaskType> task_type() const { return task_type_; }
+
+   private:
+    base::Optional<TaskType> task_type_;
   };
 
   // An interface that lets the owner vote on whether or not the associated
   // TaskQueue should be enabled.
   class QueueEnabledVoter {
    public:
-    QueueEnabledVoter() {}
-    virtual ~QueueEnabledVoter() {}
+    QueueEnabledVoter() = default;
+    virtual ~QueueEnabledVoter() = default;
 
     // Votes to enable or disable the associated TaskQueue. The TaskQueue will
     // only be enabled if all the voters agree it should be enabled, or if there
@@ -195,9 +212,9 @@ class PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
   TimeDomain* GetTimeDomain() const;
 
   enum class InsertFencePosition {
-    NOW,  // Tasks posted on the queue up till this point further may run.
-          // All further tasks are blocked.
-    BEGINNING_OF_TIME,  // No tasks posted on this queue may run.
+    kNow,  // Tasks posted on the queue up till this point further may run.
+           // All further tasks are blocked.
+    kBeginningOfTime,  // No tasks posted on this queue may run.
   };
 
   // Inserts a barrier into the task queue which prevents tasks with an enqueue
@@ -205,13 +222,25 @@ class PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
   // removed or a subsequent fence has unblocked some tasks within the queue.
   // Note: delayed tasks get their enqueue order set once their delay has
   // expired, and non-delayed tasks get their enqueue order set when posted.
+  //
+  // Fences come in three flavours:
+  // - Regular (InsertFence(NOW)) - all tasks posted after this moment
+  //   are blocked.
+  // - Fully blocking (InsertFence(kBeginningOfTime)) - all tasks including
+  //   already posted are blocked.
+  // - Delayed (InsertFenceAt(timestamp)) - blocks all tasks posted after given
+  //   point in time (must be in the future).
+  //
+  // Only one fence can be scheduled at a time. Inserting a new fence
+  // will automatically remove the previous one, regardless of fence type.
   void InsertFence(InsertFencePosition position);
+  void InsertFenceAt(base::TimeTicks time);
 
   // Removes any previously added fence and unblocks execution of any tasks
   // blocked by it.
   void RemoveFence();
 
-  bool HasFence() const;
+  bool HasActiveFence();
 
   // Returns true if the queue has a fence which is blocking execution of tasks.
   bool BlockedByFence() const;
@@ -220,26 +249,51 @@ class PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
 
   // base::SingleThreadTaskRunner implementation
   bool RunsTasksInCurrentSequence() const override;
-  bool PostDelayedTask(const tracked_objects::Location& from_here,
+  bool PostDelayedTask(const base::Location& from_here,
                        base::OnceClosure task,
                        base::TimeDelta delay) override;
-  bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
+  bool PostNonNestableDelayedTask(const base::Location& from_here,
                                   base::OnceClosure task,
                                   base::TimeDelta delay) override;
 
+  bool PostTaskWithMetadata(PostedTask task);
+
  protected:
-  explicit TaskQueue(std::unique_ptr<internal::TaskQueueImpl> impl);
+  TaskQueue(std::unique_ptr<internal::TaskQueueImpl> impl,
+            const TaskQueue::Spec& spec);
   ~TaskQueue() override;
 
   internal::TaskQueueImpl* GetTaskQueueImpl() const { return impl_.get(); }
 
  private:
   friend class internal::TaskQueueImpl;
-  friend class TaskQueueManager;
+  friend class TaskQueueManagerImpl;
 
-  friend class TaskQueueThrottlerTest;
+  friend class task_queue_throttler_unittest::TaskQueueThrottlerTest;
 
-  const std::unique_ptr<internal::TaskQueueImpl> impl_;
+  bool IsOnMainThread() const;
+
+  base::Optional<MoveableAutoLock> AcquireImplReadLockIfNeeded() const;
+
+  // Take |impl_| and untie it from the enclosing task queue.
+  std::unique_ptr<internal::TaskQueueImpl> TakeTaskQueueImpl();
+
+  // |impl_| can be written to on the main thread but can be read from
+  // any thread.
+  // |impl_lock_| must be acquired when writing to |impl_| or when accessing
+  // it from non-main thread. Reading from the main thread does not require
+  // a lock.
+  mutable base::Lock impl_lock_;
+  std::unique_ptr<internal::TaskQueueImpl> impl_;
+
+  const base::PlatformThreadId thread_id_;
+
+  const base::WeakPtr<TaskQueueManagerImpl> task_queue_manager_;
+
+  const scoped_refptr<internal::GracefulQueueShutdownHelper>
+      graceful_queue_shutdown_helper_;
+
+  THREAD_CHECKER(main_thread_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(TaskQueue);
 };

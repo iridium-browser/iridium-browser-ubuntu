@@ -14,18 +14,12 @@ WebMemoryAllocatorDump::WebMemoryAllocatorDump(
     : memory_allocator_dump_(memory_allocator_dump),
       guid_(memory_allocator_dump->guid().ToUint64()) {}
 
-WebMemoryAllocatorDump::~WebMemoryAllocatorDump() {}
+WebMemoryAllocatorDump::~WebMemoryAllocatorDump() = default;
 
 void WebMemoryAllocatorDump::AddScalar(const char* name,
                                        const char* units,
                                        uint64_t value) {
   memory_allocator_dump_->AddScalar(name, units, value);
-}
-
-void WebMemoryAllocatorDump::AddScalarF(const char* name,
-                                        const char* units,
-                                        double value) {
-  memory_allocator_dump_->AddScalarF(name, units, value);
 }
 
 void WebMemoryAllocatorDump::AddString(const char* name,

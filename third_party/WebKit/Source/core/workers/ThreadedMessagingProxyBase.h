@@ -6,11 +6,11 @@
 #define ThreadedMessagingProxyBase_h
 
 #include "core/CoreExport.h"
-#include "core/frame/UseCounter.h"
+#include "core/frame/WebFeatureForward.h"
 #include "core/inspector/ConsoleTypes.h"
 #include "core/workers/ParentFrameTaskRunners.h"
 #include "core/workers/WorkerBackingThreadStartupData.h"
-#include "core/workers/WorkerClients.h"
+#include "core/workers/WorkerThread.h"
 #include "platform/heap/SelfKeepAlive.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/Optional.h"
@@ -21,7 +21,6 @@ class ExecutionContext;
 class SourceLocation;
 class ThreadableLoadingContext;
 class WorkerInspectorProxy;
-class WorkerThread;
 struct GlobalScopeCreationParams;
 
 // The base proxy class to talk to Worker/WorkletGlobalScope on a worker thread
@@ -30,7 +29,7 @@ struct GlobalScopeCreationParams;
 // accessed and destroyed on the parent context thread.
 //
 // This has a unique lifetime: this is co-owned by the parent object (e.g.,
-// InProcessWorkerBase, AnimationWorklet) and by itself via SelfKeepAlive. The
+// DedicatedWorker, AnimationWorklet) and by itself via SelfKeepAlive. The
 // parent object releases the reference on its destructor and SelfKeepAlive is
 // cleared when the worker thread is terminated.
 //
@@ -58,34 +57,30 @@ class CORE_EXPORT ThreadedMessagingProxyBase
                             std::unique_ptr<SourceLocation>);
   void PostMessageToPageInspector(int session_id, const String&);
 
-  // 'virtual' for testing.
-  virtual void WorkerThreadTerminated();
+  void WorkerThreadTerminated();
 
   // Number of live messaging proxies, used by leak detection.
   static int ProxyCount();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
-  ThreadedMessagingProxyBase(ExecutionContext*, WorkerClients*);
+  explicit ThreadedMessagingProxyBase(ExecutionContext*);
 
   void InitializeWorkerThread(
       std::unique_ptr<GlobalScopeCreationParams>,
-      const WTF::Optional<WorkerBackingThreadStartupData>&,
-      const KURL& script_url);
-  virtual void WorkerThreadCreated();
+      const WTF::Optional<WorkerBackingThreadStartupData>&);
 
   ThreadableLoadingContext* CreateThreadableLoadingContext() const;
 
   ExecutionContext* GetExecutionContext() const;
   ParentFrameTaskRunners* GetParentFrameTaskRunners() const;
   WorkerInspectorProxy* GetWorkerInspectorProxy() const;
+
+  // May return nullptr after termination is requested.
   WorkerThread* GetWorkerThread() const;
 
   bool AskedToTerminate() const { return asked_to_terminate_; }
-
-  // Transfers ownership of the clients to the caller.
-  WorkerClients* ReleaseWorkerClients();
 
   // Returns true if this is called on the parent context thread.
   bool IsParentContextThread() const;
@@ -94,7 +89,6 @@ class CORE_EXPORT ThreadedMessagingProxyBase
   virtual std::unique_ptr<WorkerThread> CreateWorkerThread() = 0;
 
   Member<ExecutionContext> execution_context_;
-  Member<WorkerClients> worker_clients_;
   Member<WorkerInspectorProxy> worker_inspector_proxy_;
 
   // Accessed cross-thread when worker thread posts tasks to the parent.
@@ -102,7 +96,7 @@ class CORE_EXPORT ThreadedMessagingProxyBase
 
   std::unique_ptr<WorkerThread> worker_thread_;
 
-  bool asked_to_terminate_;
+  bool asked_to_terminate_ = false;
 
   // Used to keep this alive until the worker thread gets terminated. This is
   // necessary because the co-owner (i.e., Worker or Worklet object) can be

@@ -10,22 +10,22 @@
 
 #include "core/fpdfapi/parser/cpdf_simple_parser.h"
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
-#include "core/fpdfdoc/cpdf_formcontrol.h"
+#include "core/fxge/cfx_color.h"
 
 bool CPDF_DefaultAppearance::HasFont() {
   if (m_csDA.IsEmpty())
     return false;
 
-  CPDF_SimpleParser syntax(m_csDA.AsStringC());
+  CPDF_SimpleParser syntax(m_csDA.AsStringView());
   return syntax.FindTagParamFromStart("Tf", 2);
 }
 
-CFX_ByteString CPDF_DefaultAppearance::GetFontString() {
-  CFX_ByteString csFont;
+ByteString CPDF_DefaultAppearance::GetFontString() {
+  ByteString csFont;
   if (m_csDA.IsEmpty())
     return csFont;
 
-  CPDF_SimpleParser syntax(m_csDA.AsStringC());
+  CPDF_SimpleParser syntax(m_csDA.AsStringView());
   if (syntax.FindTagParamFromStart("Tf", 2)) {
     csFont += syntax.GetWord();
     csFont += " ";
@@ -36,15 +36,15 @@ CFX_ByteString CPDF_DefaultAppearance::GetFontString() {
   return csFont;
 }
 
-CFX_ByteString CPDF_DefaultAppearance::GetFont(float* fFontSize) {
+ByteString CPDF_DefaultAppearance::GetFont(float* fFontSize) {
   *fFontSize = 0.0f;
   if (m_csDA.IsEmpty())
-    return CFX_ByteString();
+    return ByteString();
 
-  CFX_ByteString csFontNameTag;
-  CPDF_SimpleParser syntax(m_csDA.AsStringC());
+  ByteString csFontNameTag;
+  CPDF_SimpleParser syntax(m_csDA.AsStringView());
   if (syntax.FindTagParamFromStart("Tf", 2)) {
-    csFontNameTag = CFX_ByteString(syntax.GetWord());
+    csFontNameTag = ByteString(syntax.GetWord());
     csFontNameTag.Delete(0, 1);
     *fFontSize = FX_atof(syntax.GetWord());
   }
@@ -55,7 +55,7 @@ bool CPDF_DefaultAppearance::HasColor(PaintOperation nOperation) {
   if (m_csDA.IsEmpty())
     return false;
 
-  CPDF_SimpleParser syntax(m_csDA.AsStringC());
+  CPDF_SimpleParser syntax(m_csDA.AsStringView());
   if (syntax.FindTagParamFromStart(
           (nOperation == PaintOperation::STROKE ? "G" : "g"), 1)) {
     return true;
@@ -68,13 +68,12 @@ bool CPDF_DefaultAppearance::HasColor(PaintOperation nOperation) {
       (nOperation == PaintOperation::STROKE ? "K" : "k"), 4);
 }
 
-CFX_ByteString CPDF_DefaultAppearance::GetColorString(
-    PaintOperation nOperation) {
-  CFX_ByteString csColor;
+ByteString CPDF_DefaultAppearance::GetColorString(PaintOperation nOperation) {
+  ByteString csColor;
   if (m_csDA.IsEmpty())
     return csColor;
 
-  CPDF_SimpleParser syntax(m_csDA.AsStringC());
+  CPDF_SimpleParser syntax(m_csDA.AsStringView());
   if (syntax.FindTagParamFromStart(
           (nOperation == PaintOperation::STROKE ? "G" : "g"), 1)) {
     csColor += syntax.GetWord();
@@ -111,23 +110,23 @@ CFX_ByteString CPDF_DefaultAppearance::GetColorString(
 void CPDF_DefaultAppearance::GetColor(int& iColorType,
                                       float fc[4],
                                       PaintOperation nOperation) {
-  iColorType = COLORTYPE_TRANSPARENT;
+  iColorType = CFX_Color::kTransparent;
   for (int c = 0; c < 4; c++)
     fc[c] = 0;
 
   if (m_csDA.IsEmpty())
     return;
 
-  CPDF_SimpleParser syntax(m_csDA.AsStringC());
+  CPDF_SimpleParser syntax(m_csDA.AsStringView());
   if (syntax.FindTagParamFromStart(
           (nOperation == PaintOperation::STROKE ? "G" : "g"), 1)) {
-    iColorType = COLORTYPE_GRAY;
+    iColorType = CFX_Color::kGray;
     fc[0] = FX_atof(syntax.GetWord());
     return;
   }
   if (syntax.FindTagParamFromStart(
           (nOperation == PaintOperation::STROKE ? "RG" : "rg"), 3)) {
-    iColorType = COLORTYPE_RGB;
+    iColorType = CFX_Color::kRGB;
     fc[0] = FX_atof(syntax.GetWord());
     fc[1] = FX_atof(syntax.GetWord());
     fc[2] = FX_atof(syntax.GetWord());
@@ -135,7 +134,7 @@ void CPDF_DefaultAppearance::GetColor(int& iColorType,
   }
   if (syntax.FindTagParamFromStart(
           (nOperation == PaintOperation::STROKE ? "K" : "k"), 4)) {
-    iColorType = COLORTYPE_CMYK;
+    iColorType = CFX_Color::kCMYK;
     fc[0] = FX_atof(syntax.GetWord());
     fc[1] = FX_atof(syntax.GetWord());
     fc[2] = FX_atof(syntax.GetWord());
@@ -147,21 +146,21 @@ void CPDF_DefaultAppearance::GetColor(FX_ARGB& color,
                                       int& iColorType,
                                       PaintOperation nOperation) {
   color = 0;
-  iColorType = COLORTYPE_TRANSPARENT;
+  iColorType = CFX_Color::kTransparent;
   if (m_csDA.IsEmpty())
     return;
 
-  CPDF_SimpleParser syntax(m_csDA.AsStringC());
+  CPDF_SimpleParser syntax(m_csDA.AsStringView());
   if (syntax.FindTagParamFromStart(
           (nOperation == PaintOperation::STROKE ? "G" : "g"), 1)) {
-    iColorType = COLORTYPE_GRAY;
+    iColorType = CFX_Color::kGray;
     float g = FX_atof(syntax.GetWord()) * 255 + 0.5f;
     color = ArgbEncode(255, (int)g, (int)g, (int)g);
     return;
   }
   if (syntax.FindTagParamFromStart(
           (nOperation == PaintOperation::STROKE ? "RG" : "rg"), 3)) {
-    iColorType = COLORTYPE_RGB;
+    iColorType = CFX_Color::kRGB;
     float r = FX_atof(syntax.GetWord()) * 255 + 0.5f;
     float g = FX_atof(syntax.GetWord()) * 255 + 0.5f;
     float b = FX_atof(syntax.GetWord()) * 255 + 0.5f;
@@ -170,7 +169,7 @@ void CPDF_DefaultAppearance::GetColor(FX_ARGB& color,
   }
   if (syntax.FindTagParamFromStart(
           (nOperation == PaintOperation::STROKE ? "K" : "k"), 4)) {
-    iColorType = COLORTYPE_CMYK;
+    iColorType = CFX_Color::kCMYK;
     float c = FX_atof(syntax.GetWord());
     float m = FX_atof(syntax.GetWord());
     float y = FX_atof(syntax.GetWord());
@@ -187,16 +186,16 @@ bool CPDF_DefaultAppearance::HasTextMatrix() {
   if (m_csDA.IsEmpty())
     return false;
 
-  CPDF_SimpleParser syntax(m_csDA.AsStringC());
+  CPDF_SimpleParser syntax(m_csDA.AsStringView());
   return syntax.FindTagParamFromStart("Tm", 6);
 }
 
-CFX_ByteString CPDF_DefaultAppearance::GetTextMatrixString() {
-  CFX_ByteString csTM;
+ByteString CPDF_DefaultAppearance::GetTextMatrixString() {
+  ByteString csTM;
   if (m_csDA.IsEmpty())
     return csTM;
 
-  CPDF_SimpleParser syntax(m_csDA.AsStringC());
+  CPDF_SimpleParser syntax(m_csDA.AsStringView());
   if (syntax.FindTagParamFromStart("Tm", 6)) {
     for (int i = 0; i < 6; i++) {
       csTM += syntax.GetWord();
@@ -211,7 +210,7 @@ CFX_Matrix CPDF_DefaultAppearance::GetTextMatrix() {
   if (m_csDA.IsEmpty())
     return CFX_Matrix();
 
-  CPDF_SimpleParser syntax(m_csDA.AsStringC());
+  CPDF_SimpleParser syntax(m_csDA.AsStringView());
   if (!syntax.FindTagParamFromStart("Tm", 6))
     return CFX_Matrix();
 

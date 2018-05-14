@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://w3c.github.io/mediacapture-image/index.html#mediasettingsrange
+// https://w3c.github.io/mediacapture-image/#mediasettingsrange
 
-[
-    RuntimeEnabled=ImageCapture
-] interface MediaSettingsRange {
+[Exposed=Window]
+interface MediaSettingsRange {
     readonly attribute double max;
     readonly attribute double min;
     readonly attribute double step;

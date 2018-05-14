@@ -21,16 +21,16 @@ struct ImageSlice {
 
 class ImageSlicePropertyFunctions {
  public:
-  static ImageSlice GetInitialImageSlice(CSSPropertyID property) {
+  static ImageSlice GetInitialImageSlice(const CSSProperty& property) {
     return GetImageSlice(property, ComputedStyle::InitialStyle());
   }
 
-  static ImageSlice GetImageSlice(CSSPropertyID property,
+  static ImageSlice GetImageSlice(const CSSProperty& property,
                                   const ComputedStyle& style) {
-    switch (property) {
+    switch (property.PropertyID()) {
       default:
         NOTREACHED();
-      // Fall through.
+        FALLTHROUGH;
       case CSSPropertyBorderImageSlice:
         return ImageSlice(style.BorderImageSlices(),
                           style.BorderImageSlicesFill());
@@ -40,10 +40,10 @@ class ImageSlicePropertyFunctions {
     }
   }
 
-  static void SetImageSlice(CSSPropertyID property,
+  static void SetImageSlice(const CSSProperty& property,
                             ComputedStyle& style,
                             const ImageSlice& slice) {
-    switch (property) {
+    switch (property.PropertyID()) {
       case CSSPropertyBorderImageSlice:
         style.SetBorderImageSlices(slice.slices);
         style.SetBorderImageSlicesFill(slice.fill);

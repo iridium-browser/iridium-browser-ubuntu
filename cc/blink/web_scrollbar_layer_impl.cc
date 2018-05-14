@@ -39,12 +39,12 @@ WebScrollbarLayerImpl::WebScrollbarLayerImpl(
     bool is_overlay)
     : layer_(is_overlay
                  ? new WebLayerImpl(PaintedOverlayScrollbarLayer::Create(
-                       base::MakeUnique<ScrollbarImpl>(std::move(scrollbar),
+                       std::make_unique<ScrollbarImpl>(std::move(scrollbar),
                                                        painter,
                                                        std::move(geometry)),
                        cc::ElementId()))
                  : new WebLayerImpl(PaintedScrollbarLayer::Create(
-                       base::MakeUnique<ScrollbarImpl>(std::move(scrollbar),
+                       std::make_unique<ScrollbarImpl>(std::move(scrollbar),
                                                        painter,
                                                        std::move(geometry)),
                        cc::ElementId()))) {}
@@ -61,8 +61,7 @@ WebScrollbarLayerImpl::WebScrollbarLayerImpl(
                                            is_left_side_vertical_scrollbar,
                                            cc::ElementId()))) {}
 
-WebScrollbarLayerImpl::~WebScrollbarLayerImpl() {
-}
+WebScrollbarLayerImpl::~WebScrollbarLayerImpl() = default;
 
 blink::WebLayer* WebScrollbarLayerImpl::Layer() {
   return layer_.get();

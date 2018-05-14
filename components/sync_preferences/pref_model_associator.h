@@ -52,7 +52,7 @@ class PrefModelAssociator : public syncer::SyncableService {
   // syncer::SyncableService implementation.
   syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
   syncer::SyncError ProcessSyncChanges(
-      const tracked_objects::Location& from_here,
+      const base::Location& from_here,
       const syncer::SyncChangeList& change_list) override;
   syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
@@ -143,9 +143,8 @@ class PrefModelAssociator : public syncer::SyncableService {
   static std::unique_ptr<base::Value> MergeListValues(
       const base::Value& from_value,
       const base::Value& to_value);
-  static std::unique_ptr<base::Value> MergeDictionaryValues(
-      const base::Value& from_value,
-      const base::Value& to_value);
+  static base::Value MergeDictionaryValues(const base::Value& from_value,
+                                           const base::Value& to_value);
 
   // Do we have an active association between the preferences and sync models?
   // Set when start syncing, reset in StopSyncing. While this is not set, we

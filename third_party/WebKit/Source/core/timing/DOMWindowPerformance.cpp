@@ -6,42 +6,46 @@
 
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
-#include "core/timing/Performance.h"
+#include "core/timing/WindowPerformance.h"
 
 namespace blink {
 
 DOMWindowPerformance::DOMWindowPerformance(LocalDOMWindow& window)
     : Supplement<LocalDOMWindow>(window) {}
 
-DEFINE_TRACE(DOMWindowPerformance) {
+void DOMWindowPerformance::Trace(blink::Visitor* visitor) {
   visitor->Trace(performance_);
   Supplement<LocalDOMWindow>::Trace(visitor);
 }
 
-// static
-const char* DOMWindowPerformance::SupplementName() {
-  return "DOMWindowPerformance";
+void DOMWindowPerformance::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
+  visitor->TraceWrappers(performance_);
+  Supplement<LocalDOMWindow>::TraceWrappers(visitor);
 }
 
 // static
+const char DOMWindowPerformance::kSupplementName[] = "DOMWindowPerformance";
+
+// static
 DOMWindowPerformance& DOMWindowPerformance::From(LocalDOMWindow& window) {
-  DOMWindowPerformance* supplement = static_cast<DOMWindowPerformance*>(
-      Supplement<LocalDOMWindow>::From(window, SupplementName()));
+  DOMWindowPerformance* supplement =
+      Supplement<LocalDOMWindow>::From<DOMWindowPerformance>(window);
   if (!supplement) {
     supplement = new DOMWindowPerformance(window);
-    ProvideTo(window, SupplementName(), supplement);
+    ProvideTo(window, supplement);
   }
   return *supplement;
 }
 
 // static
-Performance* DOMWindowPerformance::performance(LocalDOMWindow& window) {
+WindowPerformance* DOMWindowPerformance::performance(LocalDOMWindow& window) {
   return From(window).performance();
 }
 
-Performance* DOMWindowPerformance::performance() {
+WindowPerformance* DOMWindowPerformance::performance() {
   if (!performance_)
-    performance_ = Performance::Create(GetSupplementable()->GetFrame());
+    performance_ = WindowPerformance::Create(GetSupplementable());
   return performance_.Get();
 }
 

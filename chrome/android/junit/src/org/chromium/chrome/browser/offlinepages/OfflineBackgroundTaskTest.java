@@ -36,8 +36,8 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.BaseSwitches;
 import org.chromium.base.Callback;
 import org.chromium.base.CommandLine;
-import org.chromium.base.ContextUtils;
 import org.chromium.base.SysUtils;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.DisableHistogramsRule;
 import org.chromium.chrome.browser.background_task_scheduler.NativeBackgroundTask;
@@ -48,17 +48,17 @@ import org.chromium.components.background_task_scheduler.TaskIds;
 import org.chromium.components.background_task_scheduler.TaskInfo;
 import org.chromium.components.background_task_scheduler.TaskParameters;
 import org.chromium.net.ConnectionType;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 
 /**
  * Unit tests for OfflineBackgroundTask.
  */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE, shadows = {ShadowDeviceConditions.class})
 public class OfflineBackgroundTaskTest {
     private static final boolean REQUIRE_POWER = true;
     private static final boolean REQUIRE_UNMETERED = true;
     private static final boolean POWER_CONNECTED = true;
+    private static final boolean POWER_SAVE_MODE_ON = true;
     private static final int MINIMUM_BATTERY_LEVEL = 33;
     private static final String IS_LOW_END_DEVICE_SWITCH =
             "--" + BaseSwitches.ENABLE_LOW_END_DEVICE_MODE;
@@ -70,8 +70,8 @@ public class OfflineBackgroundTaskTest {
     private long mTestTime;
     private TriggerConditions mTriggerConditions =
             new TriggerConditions(!REQUIRE_POWER, MINIMUM_BATTERY_LEVEL, REQUIRE_UNMETERED);
-    private DeviceConditions mDeviceConditions = new DeviceConditions(
-            !POWER_CONNECTED, MINIMUM_BATTERY_LEVEL + 5, ConnectionType.CONNECTION_3G);
+    private DeviceConditions mDeviceConditions = new DeviceConditions(!POWER_CONNECTED,
+            MINIMUM_BATTERY_LEVEL + 5, ConnectionType.CONNECTION_3G, !POWER_SAVE_MODE_ON);
     private Activity mTestActivity;
 
     @Mock
@@ -89,13 +89,12 @@ public class OfflineBackgroundTaskTest {
     @Before
     public void setUp() throws Exception {
         MockitoAnnotations.initMocks(this);
-        ContextUtils.initApplicationContextForTests(RuntimeEnvironment.application);
         BackgroundTaskSchedulerFactory.setSchedulerForTesting(mTaskScheduler);
         doReturn(true)
                 .when(mTaskScheduler)
                 .schedule(eq(RuntimeEnvironment.application), mTaskInfo.capture());
 
-        ShadowDeviceConditions.setCurrentConditions(mDeviceConditions);
+        ShadowDeviceConditions.setCurrentConditions(mDeviceConditions, false /* unmetered */);
 
         // Set up background scheduler processor mock.
         BackgroundSchedulerProcessor.setInstanceForTesting(mBackgroundSchedulerProcessor);
@@ -119,7 +118,7 @@ public class OfflineBackgroundTaskTest {
     public void tearDown() throws Exception {
         // Clean up static state for subsequent Robolectric tests.
         CommandLine.reset();
-        SysUtils.reset();
+        SysUtils.resetForTesting();
         ApplicationStatus.destroyForJUnitTests();
     }
 
@@ -134,9 +133,10 @@ public class OfflineBackgroundTaskTest {
     @Feature({"OfflinePages"})
     public void testCheckConditions_BatteryConditions_LowBattery_NoPower() {
         // Setup low battery conditions with no power connected.
-        DeviceConditions deviceConditionsLowBattery = new DeviceConditions(
-                !POWER_CONNECTED, MINIMUM_BATTERY_LEVEL - 1, ConnectionType.CONNECTION_WIFI);
-        ShadowDeviceConditions.setCurrentConditions(deviceConditionsLowBattery);
+        DeviceConditions deviceConditionsLowBattery = new DeviceConditions(!POWER_CONNECTED,
+                MINIMUM_BATTERY_LEVEL - 1, ConnectionType.CONNECTION_WIFI, !POWER_SAVE_MODE_ON);
+        ShadowDeviceConditions.setCurrentConditions(
+                deviceConditionsLowBattery, false /* unmetered */);
 
         // Verify that conditions for processing are not met.
         assertFalse(
@@ -158,9 +158,10 @@ public class OfflineBackgroundTaskTest {
     @Feature({"OfflinePages"})
     public void testCheckConditions_BatteryConditions_LowBattery_WithPower() {
         // Set battery percentage below minimum level, but connect power.
-        DeviceConditions deviceConditionsPowerConnected = new DeviceConditions(
-                POWER_CONNECTED, MINIMUM_BATTERY_LEVEL - 1, ConnectionType.CONNECTION_WIFI);
-        ShadowDeviceConditions.setCurrentConditions(deviceConditionsPowerConnected);
+        DeviceConditions deviceConditionsPowerConnected = new DeviceConditions(POWER_CONNECTED,
+                MINIMUM_BATTERY_LEVEL - 1, ConnectionType.CONNECTION_WIFI, !POWER_SAVE_MODE_ON);
+        ShadowDeviceConditions.setCurrentConditions(
+                deviceConditionsPowerConnected, false /* unmetered */);
 
         // Now verify that same battery level, with power connected, will pass the conditions.
         assertTrue(

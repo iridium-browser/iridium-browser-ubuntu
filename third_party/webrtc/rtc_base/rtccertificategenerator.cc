@@ -8,13 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/rtccertificategenerator.h"
+#include "rtc_base/rtccertificategenerator.h"
 
 #include <algorithm>
 #include <memory>
 
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/sslidentity.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/refcountedobject.h"
+#include "rtc_base/sslidentity.h"
 
 namespace rtc {
 
@@ -23,7 +24,7 @@ namespace {
 // A certificates' subject and issuer name.
 const char kIdentityName[] = "WebRTC";
 
-uint64_t kYearInSeconds = 365 * 24 * 60 * 60;
+const uint64_t kYearInSeconds = 365 * 24 * 60 * 60;
 
 enum {
   MSG_GENERATE,

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/synchronization/spin_wait.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/simple_thread.h"
@@ -51,13 +52,13 @@ typedef std::vector<char> Buffer;
 
 class AddressTrackerLinuxTest : public testing::Test {
  protected:
-  AddressTrackerLinuxTest() {}
+  AddressTrackerLinuxTest() = default;
 
   void InitializeAddressTracker(bool tracking) {
     if (tracking) {
-      tracker_.reset(new AddressTrackerLinux(
-          base::Bind(&base::DoNothing), base::Bind(&base::DoNothing),
-          base::Bind(&base::DoNothing), ignored_interfaces_));
+      tracker_.reset(
+          new AddressTrackerLinux(base::DoNothing(), base::DoNothing(),
+                                  base::DoNothing(), ignored_interfaces_));
     } else {
       tracker_.reset(new AddressTrackerLinux());
     }
@@ -696,7 +697,7 @@ class GetCurrentConnectionTypeRunner
         done_(base::WaitableEvent::ResetPolicy::MANUAL,
               base::WaitableEvent::InitialState::NOT_SIGNALED),
         thread_(this, thread_name) {}
-  ~GetCurrentConnectionTypeRunner() override {}
+  ~GetCurrentConnectionTypeRunner() override = default;
 
   void Run() override {
     tracker_->GetCurrentConnectionType();
@@ -734,6 +735,11 @@ TEST_F(AddressTrackerLinuxTest, BroadcastInit) {
 
   runner1.VerifyCompletes();
   runner2.VerifyCompletes();
+}
+
+TEST_F(AddressTrackerLinuxTest, TunnelInterfaceName) {
+  EXPECT_TRUE(AddressTrackerLinux::IsTunnelInterfaceName("tun0"));
+  EXPECT_FALSE(AddressTrackerLinux::IsTunnelInterfaceName("wlan0"));
 }
 
 }  // namespace

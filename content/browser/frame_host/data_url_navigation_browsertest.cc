@@ -508,13 +508,25 @@ IN_PROC_BROWSER_TEST_F(DataUrlNavigationBrowserTest, HTML_Navigation_Block) {
       NAVIGATION_BLOCKED);
 }
 
+class DataUrlNavigationBrowserTestWithFeatureFlag
+    : public DataUrlNavigationBrowserTest {
+ public:
+  DataUrlNavigationBrowserTestWithFeatureFlag() {
+    scoped_feature_list_.InitAndEnableFeature(
+        features::kAllowContentInitiatedDataUrlNavigations);
+  }
+  ~DataUrlNavigationBrowserTestWithFeatureFlag() override {}
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(DataUrlNavigationBrowserTestWithFeatureFlag);
+};
+
 // Tests that a content initiated navigation to a data URL is allowed if
 // blocking is disabled with a feature flag.
-IN_PROC_BROWSER_TEST_F(DataUrlNavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(DataUrlNavigationBrowserTestWithFeatureFlag,
                        HTML_Navigation_Allow_FeatureFlag) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(
-      features::kAllowContentInitiatedDataUrlNavigations);
   NavigateToURL(shell(),
                 embedded_test_server()->GetURL("/data_url_navigations.html"));
   ExecuteScriptAndCheckNavigation(
@@ -547,13 +559,6 @@ IN_PROC_BROWSER_TEST_F(DataUrlNavigationBrowserTest, HTML_FormPost_Block) {
 // subframe is blocked.
 IN_PROC_BROWSER_TEST_F(DataUrlNavigationBrowserTest,
                        HTML_NavigationFromFrame_Block) {
-  // This test fails and is disabled in site-per-process + no plznavigate mode.
-  // request->originDocument is null in FrameLoader::prepareForRequest,
-  // allowing the navigation by default. See https://crbug.com/647839
-  if (AreAllSitesIsolatedForTesting() && !IsBrowserSideNavigationEnabled()) {
-    return;
-  }
-
   NavigateToURL(shell(),
                 embedded_test_server()->GetURL("a.com", "/simple_page.html"));
   AddIFrame(
@@ -604,13 +609,6 @@ IN_PROC_BROWSER_TEST_F(DataUrlNavigationBrowserTest,
 // blocked even if the top frame is already a data URL.
 IN_PROC_BROWSER_TEST_F(DataUrlNavigationBrowserTest,
                        HTML_NavigationFromFrame_TopFrameIsDataURL_Block) {
-  // This test fails and is disabled in site-per-process + no plznavigate mode.
-  // request->originDocument is null in FrameLoader::prepareForRequest,
-  // allowing the navigation by default. See https://crbug.com/647839
-  if (AreAllSitesIsolatedForTesting() && !IsBrowserSideNavigationEnabled()) {
-    return;
-  }
-
   const GURL top_url(
       base::StringPrintf("data:text/html, <iframe src='%s'></iframe>",
                          embedded_test_server()
@@ -976,19 +974,17 @@ IN_PROC_BROWSER_TEST_F(DataUrlNavigationBrowserTest,
   WaitForLoadStop(new_shell->web_contents());
 
   // The window.open() should have resulted in an error page. The blocked
-  // URL should be in the virtual URL, not the actual URL.
-  //
-  // TODO(nasko): Now that the error commits on the previous URL, the blocked
-  // navigation logic is no longer needed. https://crbug.com/723796
+  // URL should be in both the actual and the virtual URL.
   {
     EXPECT_EQ(0, controller->GetLastCommittedEntryIndex());
     NavigationEntry* entry = controller->GetLastCommittedEntry();
     EXPECT_EQ(PAGE_TYPE_ERROR, entry->GetPageType());
     EXPECT_FALSE(entry->GetURL().SchemeIs(url::kDataScheme));
     EXPECT_TRUE(base::StartsWith(
-        entry->GetVirtualURL().spec(),
+        entry->GetURL().spec(),
         embedded_test_server()->GetURL("/server-redirect?").spec(),
         base::CompareCase::SENSITIVE));
+    EXPECT_EQ(entry->GetURL(), entry->GetVirtualURL());
   }
 
   // Navigate forward and then go back to ensure the navigation to data: URL
@@ -1006,10 +1002,10 @@ IN_PROC_BROWSER_TEST_F(DataUrlNavigationBrowserTest,
     EXPECT_EQ(0, controller->GetLastCommittedEntryIndex());
     EXPECT_FALSE(entry->GetURL().SchemeIs(url::kDataScheme));
     EXPECT_TRUE(base::StartsWith(
-        entry->GetVirtualURL().spec(),
+        entry->GetURL().spec(),
         embedded_test_server()->GetURL("/server-redirect?").spec(),
         base::CompareCase::SENSITIVE));
-    EXPECT_EQ(url::kAboutBlankURL, entry->GetURL().spec());
+    EXPECT_EQ(entry->GetURL(), entry->GetVirtualURL());
   }
 
   // Do another new navigation, but then use JavaScript to navigate back,
@@ -1026,10 +1022,10 @@ IN_PROC_BROWSER_TEST_F(DataUrlNavigationBrowserTest,
     EXPECT_EQ(0, controller->GetLastCommittedEntryIndex());
     EXPECT_FALSE(entry->GetURL().SchemeIs(url::kDataScheme));
     EXPECT_TRUE(base::StartsWith(
-        entry->GetVirtualURL().spec(),
+        entry->GetURL().spec(),
         embedded_test_server()->GetURL("/server-redirect?").spec(),
         base::CompareCase::SENSITIVE));
-    EXPECT_EQ(url::kAboutBlankURL, entry->GetURL().spec());
+    EXPECT_EQ(entry->GetURL(), entry->GetVirtualURL());
   }
 }
 

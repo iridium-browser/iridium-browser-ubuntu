@@ -17,12 +17,8 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sequenced_task_runner.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_checker.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -51,25 +47,26 @@ enum UpdateType {
 
 namespace component_updater {
 
-ComponentInfo::ComponentInfo(const std::string& id, const base::string16& name,
+ComponentInfo::ComponentInfo(const std::string& id,
+                             const std::string& fingerprint,
+                             const base::string16& name,
                              const base::Version& version)
-    : id(id), name(name), version(version) {}
+    : id(id), fingerprint(fingerprint), name(name), version(version) {}
+ComponentInfo::ComponentInfo(const ComponentInfo& other) = default;
+ComponentInfo::ComponentInfo(ComponentInfo&& other) = default;
 ComponentInfo::~ComponentInfo() {}
 
-CrxUpdateService::CrxUpdateService(
-    const scoped_refptr<Configurator>& config,
-    const scoped_refptr<UpdateClient>& update_client)
-    : config_(config),
-      update_client_(update_client),
-      blocking_task_runner_(config->GetSequencedTaskRunner()) {
+CrxUpdateService::CrxUpdateService(scoped_refptr<Configurator> config,
+                                   scoped_refptr<UpdateClient> update_client)
+    : config_(config), update_client_(update_client) {
   AddObserver(this);
 }
 
 CrxUpdateService::~CrxUpdateService() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  for (const auto item : ready_callbacks_) {
-    item.second.Run();
+  for (auto& item : ready_callbacks_) {
+    std::move(item.second).Run();
   }
 
   RemoveObserver(this);
@@ -203,9 +200,20 @@ std::unique_ptr<ComponentInfo> CrxUpdateService::GetComponentForMimeType(
   auto* const component = GetComponent(it->second);
   if (!component)
     return nullptr;
-  return base::MakeUnique<ComponentInfo>(GetCrxComponentID(*component),
-                                         base::UTF8ToUTF16(component->name),
-                                         component->version);
+  return std::make_unique<ComponentInfo>(
+      GetCrxComponentID(*component), component->fingerprint,
+      base::UTF8ToUTF16(component->name), component->version);
+}
+
+std::vector<ComponentInfo> CrxUpdateService::GetComponents() const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  std::vector<ComponentInfo> result;
+  for (const auto& it : components_) {
+    result.push_back(ComponentInfo(it.first, it.second.fingerprint,
+                                   base::UTF8ToUTF16(it.second.name),
+                                   it.second.version));
+  }
+  return result;
 }
 
 OnDemandUpdater& CrxUpdateService::GetOnDemandUpdater() {
@@ -217,45 +225,46 @@ const CrxComponent* CrxUpdateService::GetComponent(
     const std::string& id) const {
   DCHECK(thread_checker_.CalledOnValidThread());
   const auto it(components_.find(id));
-  return it != components_.end() ? &(it->second) : NULL;
+  return it != components_.end() ? &(it->second) : nullptr;
 }
 
 const CrxUpdateItem* CrxUpdateService::GetComponentState(
     const std::string& id) const {
   DCHECK(thread_checker_.CalledOnValidThread());
   const auto it(component_states_.find(id));
-  return it != component_states_.end() ? &it->second : NULL;
+  return it != component_states_.end() ? &it->second : nullptr;
 }
 
 void CrxUpdateService::MaybeThrottle(const std::string& id,
-                                     const base::Closure& callback) {
+                                     base::OnceClosure callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  auto it = components_.find(id);
+  const auto it = components_.find(id);
   if (it != components_.end()) {
     DCHECK_EQ(it->first, id);
     if (OnDemandUpdateWithCooldown(id)) {
-      ready_callbacks_.insert(std::make_pair(id, callback));
+      ready_callbacks_.insert(std::make_pair(id, std::move(callback)));
       return;
     }
   }
 
-  callback.Run();  // Unblock the request if the request can't be throttled.
+  // Unblock the request if the request can't be throttled.
+  std::move(callback).Run();
 }
 
 void CrxUpdateService::OnDemandUpdate(const std::string& id,
-                                      const Callback& callback) {
+                                      Callback callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (!GetComponent(id)) {
     if (!callback.is_null()) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE,
-          base::Bind(callback, update_client::Error::INVALID_ARGUMENT));
+          FROM_HERE, base::BindOnce(std::move(callback),
+                                    update_client::Error::INVALID_ARGUMENT));
     }
     return;
   }
 
-  OnDemandUpdateInternal(id, callback);
+  OnDemandUpdateInternal(id, std::move(callback));
 }
 
 bool CrxUpdateService::OnDemandUpdateWithCooldown(const std::string& id) {
@@ -265,7 +274,7 @@ bool CrxUpdateService::OnDemandUpdateWithCooldown(const std::string& id) {
 
   // Check if the request is too soon.
   const auto* component_state(GetComponentState(id));
-  if (component_state) {
+  if (component_state && !component_state->last_check.is_null()) {
     base::TimeDelta delta =
         base::TimeTicks::Now() - component_state->last_check;
     if (delta < base::TimeDelta::FromSeconds(config_->OnDemandDelay()))
@@ -277,15 +286,16 @@ bool CrxUpdateService::OnDemandUpdateWithCooldown(const std::string& id) {
 }
 
 void CrxUpdateService::OnDemandUpdateInternal(const std::string& id,
-                                              const Callback& callback) {
+                                              Callback callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   UMA_HISTOGRAM_ENUMERATION("ComponentUpdater.Calls", UPDATE_TYPE_MANUAL,
                             UPDATE_TYPE_COUNT);
   update_client_->Install(
-      id, base::Bind(&CrxUpdateService::OnUpdate, base::Unretained(this)),
-      base::Bind(&CrxUpdateService::OnUpdateComplete, base::Unretained(this),
-                 callback, base::TimeTicks::Now()));
+      id, base::BindOnce(&CrxUpdateService::OnUpdate, base::Unretained(this)),
+      base::BindOnce(&CrxUpdateService::OnUpdateComplete,
+                     base::Unretained(this), std::move(callback),
+                     base::TimeTicks::Now()));
 }
 
 bool CrxUpdateService::CheckForUpdates() {
@@ -309,26 +319,22 @@ bool CrxUpdateService::CheckForUpdates() {
   if (!unsecure_ids.empty()) {
     update_client_->Update(
         unsecure_ids,
-        base::Bind(&CrxUpdateService::OnUpdate, base::Unretained(this)),
-        base::Bind(&CrxUpdateService::OnUpdateComplete, base::Unretained(this),
-                   Callback(), base::TimeTicks::Now()));
+        base::BindOnce(&CrxUpdateService::OnUpdate, base::Unretained(this)),
+        base::BindOnce(&CrxUpdateService::OnUpdateComplete,
+                       base::Unretained(this), Callback(),
+                       base::TimeTicks::Now()));
   }
 
   if (!secure_ids.empty()) {
     update_client_->Update(
         secure_ids,
-        base::Bind(&CrxUpdateService::OnUpdate, base::Unretained(this)),
-        base::Bind(&CrxUpdateService::OnUpdateComplete, base::Unretained(this),
-                   Callback(), base::TimeTicks::Now()));
+        base::BindOnce(&CrxUpdateService::OnUpdate, base::Unretained(this)),
+        base::BindOnce(&CrxUpdateService::OnUpdateComplete,
+                       base::Unretained(this), Callback(),
+                       base::TimeTicks::Now()));
   }
 
   return true;
-}
-
-scoped_refptr<base::SequencedTaskRunner>
-CrxUpdateService::GetSequencedTaskRunner() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return blocking_task_runner_;
 }
 
 bool CrxUpdateService::GetComponentDetails(const std::string& id,
@@ -383,8 +389,8 @@ void CrxUpdateService::OnUpdateComplete(Callback callback,
   }
 
   if (!callback.is_null()) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                  base::Bind(callback, error));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), error));
   }
 }
 
@@ -393,10 +399,11 @@ void CrxUpdateService::OnEvent(Events event, const std::string& id) {
 
   // Unblock all throttles for the component.
   if (event == Observer::Events::COMPONENT_UPDATED ||
-      event == Observer::Events::COMPONENT_NOT_UPDATED) {
+      event == Observer::Events::COMPONENT_NOT_UPDATED ||
+      event == Observer::Events::COMPONENT_UPDATE_ERROR) {
     auto callbacks = ready_callbacks_.equal_range(id);
     for (auto it = callbacks.first; it != callbacks.second; ++it) {
-      it->second.Run();
+      std::move(it->second).Run();
     }
     ready_callbacks_.erase(id);
   }
@@ -426,10 +433,10 @@ void CrxUpdateService::OnEvent(Events event, const std::string& id) {
 // is the job of the browser process.
 // TODO(sorin): consider making this a singleton.
 std::unique_ptr<ComponentUpdateService> ComponentUpdateServiceFactory(
-    const scoped_refptr<Configurator>& config) {
+    scoped_refptr<Configurator> config) {
   DCHECK(config);
   auto update_client = update_client::UpdateClientFactory(config);
-  return base::MakeUnique<CrxUpdateService>(config, std::move(update_client));
+  return std::make_unique<CrxUpdateService>(config, std::move(update_client));
 }
 
 }  // namespace component_updater

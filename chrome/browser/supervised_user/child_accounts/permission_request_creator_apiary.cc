@@ -16,6 +16,7 @@
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/supervised_user/child_accounts/kids_management_api.h"
+#include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
@@ -32,12 +33,11 @@
 
 using net::URLFetcher;
 
-const char kApiPath[] = "people/me/permissionRequests";
-const char kApiScope[] = "https://www.googleapis.com/auth/kid.permission";
+const char kPermissionRequestApiPath[] = "people/me/permissionRequests";
+const char kPermissionRequestApiScope[] =
+    "https://www.googleapis.com/auth/kid.permission";
 
-const int kNumRetries = 1;
-
-const char kAuthorizationHeaderFormat[] = "Authorization: Bearer %s";
+const int kNumPermissionRequestRetries = 1;
 
 // Request keys.
 const char kEventTypeKey[] = "eventType";
@@ -141,7 +141,7 @@ GURL PermissionRequestCreatorApiary::GetApiUrl() const {
     return url;
   }
 
-  return kids_management_api::GetURL(kApiPath);
+  return kids_management_api::GetURL(kPermissionRequestApiPath);
 }
 
 std::string PermissionRequestCreatorApiary::GetApiScope() const {
@@ -150,7 +150,7 @@ std::string PermissionRequestCreatorApiary::GetApiScope() const {
     return base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
         switches::kPermissionRequestApiScope);
   } else {
-    return kApiScope;
+    return kPermissionRequestApiScope;
   }
 }
 
@@ -158,7 +158,7 @@ void PermissionRequestCreatorApiary::CreateRequest(
     const std::string& request_type,
     const std::string& object_ref,
     const SuccessCallback& callback) {
-  requests_.push_back(base::MakeUnique<Request>(request_type, object_ref,
+  requests_.push_back(std::make_unique<Request>(request_type, object_ref,
                                                 callback, url_fetcher_id_));
   StartFetching(requests_.back().get());
 }
@@ -197,7 +197,7 @@ void PermissionRequestCreatorApiary::OnGetTokenSuccess(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "This feature cannot be disabled in settings and is only enabled "
             "for child accounts. If sign-in is restricted to accounts from a "
@@ -219,14 +219,15 @@ void PermissionRequestCreatorApiary::OnGetTokenSuccess(
   (*it)->url_fetcher->SetRequestContext(context_);
   (*it)->url_fetcher->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                                    net::LOAD_DO_NOT_SAVE_COOKIES);
-  (*it)->url_fetcher->SetAutomaticallyRetryOnNetworkChanges(kNumRetries);
-  (*it)->url_fetcher->AddExtraRequestHeader(
-      base::StringPrintf(kAuthorizationHeaderFormat, access_token.c_str()));
+  (*it)->url_fetcher->SetAutomaticallyRetryOnNetworkChanges(
+      kNumPermissionRequestRetries);
+  (*it)->url_fetcher->AddExtraRequestHeader(base::StringPrintf(
+      supervised_users::kAuthorizationHeaderFormat, access_token.c_str()));
 
   base::DictionaryValue dict;
-  dict.SetStringWithoutPathExpansion(kEventTypeKey, (*it)->request_type);
-  dict.SetStringWithoutPathExpansion(kObjectRefKey, (*it)->object_ref);
-  dict.SetStringWithoutPathExpansion(kStateKey, kState);
+  dict.SetKey(kEventTypeKey, base::Value((*it)->request_type));
+  dict.SetKey(kObjectRefKey, base::Value((*it)->object_ref));
+  dict.SetKey(kStateKey, base::Value(kState));
 
   std::string body;
   base::JSONWriter::Write(dict, &body);

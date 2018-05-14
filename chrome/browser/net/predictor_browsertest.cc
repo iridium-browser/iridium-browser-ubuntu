@@ -23,15 +23,18 @@
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/synchronization/lock.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/net/predictor.h"
+#include "chrome/browser/predictors/loading_predictor_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -59,6 +62,7 @@
 #include "net/url_request/url_request_test_job.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "url/gurl.h"
+#include "url/url_constants.h"
 
 using content::BrowserThread;
 using testing::HasSubstr;
@@ -319,7 +323,7 @@ class CrossSitePredictorObserver
 
   void OnPreconnectUrl(
       const GURL& original_url,
-      const GURL& first_party_for_cookies,
+      const GURL& site_for_cookies,
       chrome_browser_net::UrlInfo::ResolutionMotivation motivation,
       int count) override {
     base::AutoLock lock(lock_);
@@ -507,9 +511,16 @@ class PredictorBrowserTest : public InProcessBrowserTest {
                                                   "127.0.0.1", 44);
     rule_based_resolver_proc_->AddRuleWithLatency("gmail.com", "127.0.0.1", 63);
     rule_based_resolver_proc_->AddSimulatedFailure("*.notfound");
+    rule_based_resolver_proc_->AddRuleWithLatency(
+        "slow*.google.com", "127.0.0.1",
+        Predictor::kMaxSpeculativeResolveQueueDelayMs + 300);
     rule_based_resolver_proc_->AddRuleWithLatency("delay.google.com",
                                                   "127.0.0.1", 1000 * 60);
+    scoped_feature_list_.InitAndDisableFeature(
+        predictors::kSpeculativePreconnectFeature);
   }
+
+  ~PredictorBrowserTest() override {}
 
  protected:
   void SetUpInProcessBrowserTestFixture() override {
@@ -520,8 +531,6 @@ class PredictorBrowserTest : public InProcessBrowserTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(
         switches::kEnableExperimentalWebPlatformFeatures);
-    command_line->AppendSwitchASCII(switches::kEnableFeatures,
-                                    "PreconnectMore");
   }
 
   void SetUpOnMainThread() override {
@@ -556,7 +565,7 @@ class PredictorBrowserTest : public InProcessBrowserTest {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
     net::URLRequestFilter::GetInstance()->AddHostnameInterceptor(
         url.scheme(), url.host(),
-        base::MakeUnique<MatchingPortRequestInterceptor>(url.EffectiveIntPort(),
+        std::make_unique<MatchingPortRequestInterceptor>(url.EffectiveIntPort(),
                                                          callback));
   }
 
@@ -727,18 +736,33 @@ class PredictorBrowserTest : public InProcessBrowserTest {
   }
 
   // This method verifies that |url| is in the predictor's |results_| map. This
-  // is used for pending lookups, and lookups performed before the observer is
-  // attached.
-  void ExpectUrlRequestedFromPredictorOnUIThread(const GURL& url) {
+  // is used for pending lookups.
+  void ExpectUrlLookupIsInProgressOnUIThread(const GURL& url) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::BindOnce(&PredictorBrowserTest::ExpectUrlRequestedFromPredictor,
+        base::BindOnce(&PredictorBrowserTest::ExpectUrlLookupIsInProgress,
                        base::Unretained(this), url));
   }
 
-  void ExpectUrlRequestedFromPredictor(const GURL& url) {
+  void ExpectUrlLookupIsInProgress(const GURL& url) {
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
     EXPECT_TRUE(base::ContainsKey(predictor()->results_, url));
+  }
+
+  // This method verifies that the predictor's |results_| map is empty, i.e.
+  // there are no lookups in progress.
+  void ExpectNoLookupsAreInProgressOnUIThread() {
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::BindOnce(&PredictorBrowserTest::ExpectNoLookupsAreInProgress,
+                       base::Unretained(this)));
+  }
+
+  void ExpectNoLookupsAreInProgress() {
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+    EXPECT_TRUE(predictor()->results_.empty());
   }
 
   void DiscardAllResultsOnUIThread() {
@@ -784,6 +808,8 @@ class PredictorBrowserTest : public InProcessBrowserTest {
     EXPECT_TRUE(result);
   }
 
+  base::test::ScopedFeatureList scoped_feature_list_;
+
   const GURL startup_url_;
   const GURL referring_url_;
   const GURL target_url_;
@@ -797,6 +823,8 @@ class PredictorBrowserTest : public InProcessBrowserTest {
   std::unique_ptr<net::EmbeddedTestServer> cross_site_test_server_;
   std::unique_ptr<CrossSitePredictorObserver> observer_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(PredictorBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, SingleLookupTest) {
@@ -809,6 +837,7 @@ IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, SingleLookupTest) {
   observer()->WaitUntilHostLookedUp(url);
   EXPECT_TRUE(observer()->HostFound(url));
   ExpectValidPeakPendingLookupsOnUI(1u);
+  ExpectNoLookupsAreInProgressOnUIThread();
 }
 
 IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, ConcurrentLookupTest) {
@@ -827,6 +856,7 @@ IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, ConcurrentLookupTest) {
   ExpectFoundUrls(found_names, not_found_names);
   ExpectValidPeakPendingLookupsOnUI(found_names.size() +
                                     not_found_names.size());
+  ExpectNoLookupsAreInProgressOnUIThread();
 }
 
 IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, MassiveConcurrentLookupTest) {
@@ -841,6 +871,7 @@ IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, MassiveConcurrentLookupTest) {
   WaitUntilHostsLookedUp(not_found_names);
   ExpectFoundUrls(std::vector<GURL>(), not_found_names);
   ExpectValidPeakPendingLookupsOnUI(not_found_names.size());
+  ExpectNoLookupsAreInProgressOnUIThread();
 }
 
 IN_PROC_BROWSER_TEST_F(PredictorBrowserTest,
@@ -855,8 +886,30 @@ IN_PROC_BROWSER_TEST_F(PredictorBrowserTest,
       base::TimeDelta::FromMilliseconds(500));
   base::RunLoop().Run();
 
-  ExpectUrlRequestedFromPredictor(delayed_url);
+  ExpectUrlLookupIsInProgressOnUIThread(delayed_url);
   EXPECT_FALSE(observer()->HasHostBeenLookedUp(delayed_url));
+}
+
+IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, CongestionControlTest) {
+  const int queue_max_size = Predictor::kMaxSpeculativeParallelResolves;
+  std::vector<GURL> slow_names;
+  std::vector<GURL> recycled_names;
+  for (int i = 0; i < queue_max_size; ++i)
+    slow_names.emplace_back(base::StringPrintf("http://slow%d.google.com", i));
+  for (int i = queue_max_size; i < 5; ++i) {
+    recycled_names.emplace_back(
+        base::StringPrintf("http://host%d.notfound", i));
+  }
+
+  FloodResolveRequestsOnUIThread(slow_names);
+  FloodResolveRequestsOnUIThread(recycled_names);
+
+  WaitUntilHostsLookedUp(slow_names);
+  ExpectFoundUrls(slow_names, {});
+  for (const auto& name : recycled_names)
+    EXPECT_FALSE(observer()->HasHostBeenLookedUp(name));
+  ExpectValidPeakPendingLookupsOnUI(slow_names.size());
+  ExpectNoLookupsAreInProgressOnUIThread();
 }
 
 IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, SimplePreconnectOne) {
@@ -1030,7 +1083,7 @@ IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, PredictBasedOnSubframeRedirect) {
   // TODO(csharrison): Possibly this is a bug in either net or Blink, and it
   // might be worthwhile to investigate.
   std::unique_ptr<net::EmbeddedTestServer> redirector =
-      base::MakeUnique<net::EmbeddedTestServer>();
+      std::make_unique<net::EmbeddedTestServer>();
 
   NavigateToCrossSiteHtmlUrl(1 /* num_cors */, "" /* file_suffix */);
   EXPECT_EQ(1, observer()->CrossSiteLearned());
@@ -1360,9 +1413,14 @@ IN_PROC_BROWSER_TEST_F(PredictorBrowserTest,
   EXPECT_EQ(0u, cross_site_connection_listener_->GetAcceptedSocketCount());
 
   // Now, navigate using a renderer initiated navigation and expect preconnects.
+  // Need to navigate to about:blank first so the referring site is different
+  // from the request site.
+  ui_test_utils::NavigateToURL(browser(), GURL(url::kAboutBlankURL));
   EXPECT_TRUE(content::ExecuteScript(
       browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.location.href='/title1.html'"));
+      base::StringPrintf(
+          "window.location.href='%s'",
+          embedded_test_server()->GetURL("/title1.html").spec().c_str())));
 
   // The renderer initiated navigation is not synchronous, so just wait for the
   // preconnects to go through.

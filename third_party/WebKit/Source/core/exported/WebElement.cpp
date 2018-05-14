@@ -31,13 +31,13 @@
 #include "public/web/WebElement.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
 #include "core/dom/Element.h"
 #include "core/editing/EditingUtilities.h"
-#include "core/html/TextControlElement.h"
+#include "core/fullscreen/Fullscreen.h"
 #include "core/html/custom/V0CustomElementProcessingStack.h"
+#include "core/html/forms/TextControlElement.h"
+#include "core/html_names.h"
 #include "platform/graphics/Image.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/text/AtomicString.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebRect.h"
@@ -123,7 +123,7 @@ WebString WebElement::TextContent() const {
 }
 
 WebString WebElement::InnerHTML() const {
-  return ConstUnwrap<Element>()->innerHTML();
+  return ConstUnwrap<Element>()->InnerHTMLAsString();
 }
 
 bool WebElement::HasNonEmptyLayoutSize() const {
@@ -138,7 +138,12 @@ WebImage WebElement::ImageContents() {
   if (IsNull())
     return WebImage();
 
-  return WebImage(Unwrap<Element>()->ImageContents());
+  return WebImage(Unwrap<Element>()->ImageContents(), kRespectImageOrientation);
+}
+
+void WebElement::RequestFullscreen() {
+  Element* element = Unwrap<Element>();
+  Fullscreen::RequestFullscreen(*element);
 }
 
 WebElement::WebElement(Element* elem) : WebNode(elem) {}

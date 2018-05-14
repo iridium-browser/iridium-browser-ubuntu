@@ -17,7 +17,6 @@
 #include "base/logging.h"
 #include "base/mac/mac_logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_byteorder.h"
@@ -252,6 +251,132 @@ void OutputThunk(void* decompression_output_refcon,
   VTVideoDecodeAccelerator* vda =
       reinterpret_cast<VTVideoDecodeAccelerator*>(decompression_output_refcon);
   vda->Output(source_frame_refcon, status, image_buffer);
+}
+
+// Read the value for the key in |key| to CFString and convert it to IdType.
+// Use the list of pairs in |cfstr_id_pairs| to do the conversion (by doing a
+// linear lookup).
+template <typename IdType, typename StringIdPair>
+bool GetImageBufferProperty(CVImageBufferRef image_buffer,
+                            CFStringRef key,
+                            const StringIdPair* cfstr_id_pairs,
+                            size_t cfstr_id_pairs_size,
+                            IdType* value_as_id) {
+  CFStringRef value_as_string = reinterpret_cast<CFStringRef>(
+      CVBufferGetAttachment(image_buffer, key, nullptr));
+  if (!value_as_string)
+    return false;
+
+  for (size_t i = 0; i < cfstr_id_pairs_size; ++i) {
+    if (!CFStringCompare(value_as_string, cfstr_id_pairs[i].cfstr, 0)) {
+      *value_as_id = cfstr_id_pairs[i].id;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+gfx::ColorSpace GetImageBufferColorSpace(CVImageBufferRef image_buffer) {
+  // The named primaries. Default to BT708.
+  gfx::ColorSpace::PrimaryID primary_id = gfx::ColorSpace::PrimaryID::BT709;
+  struct {
+    const CFStringRef cfstr;
+    const gfx::ColorSpace::PrimaryID id;
+  } primaries[] = {
+      {
+          kCVImageBufferColorPrimaries_ITU_R_709_2,
+          gfx::ColorSpace::PrimaryID::BT709,
+      },
+      {
+          kCVImageBufferColorPrimaries_EBU_3213,
+          gfx::ColorSpace::PrimaryID::BT470BG,
+      },
+      {
+          kCVImageBufferColorPrimaries_SMPTE_C,
+          gfx::ColorSpace::PrimaryID::SMPTE240M,
+      },
+  };
+  if (!GetImageBufferProperty(image_buffer, kCVImageBufferColorPrimariesKey,
+                              primaries, arraysize(primaries), &primary_id)) {
+    DLOG(ERROR) << "Filed to find CVImageBufferRef primaries.";
+  }
+
+  // The named transfer function.
+  gfx::ColorSpace::TransferID transfer_id = gfx::ColorSpace::TransferID::BT709;
+  SkColorSpaceTransferFn custom_tr_fn = {2.2f, 1, 0, 1, 0, 0, 0};
+  struct {
+    const CFStringRef cfstr;
+    gfx::ColorSpace::TransferID id;
+  } transfers[] = {
+      {
+          kCVImageBufferTransferFunction_ITU_R_709_2,
+          gfx::ColorSpace::TransferID::BT709,
+      },
+      {
+          kCVImageBufferTransferFunction_SMPTE_240M_1995,
+          gfx::ColorSpace::TransferID::SMPTE240M,
+      },
+      {
+          kCVImageBufferTransferFunction_UseGamma,
+          gfx::ColorSpace::TransferID::CUSTOM,
+      },
+  };
+  if (!GetImageBufferProperty(image_buffer, kCVImageBufferTransferFunctionKey,
+                              transfers, arraysize(transfers), &transfer_id)) {
+    DLOG(ERROR) << "Filed to find CVImageBufferRef transfer.";
+  }
+
+  // Transfer functions can also be specified as a gamma value.
+  if (transfer_id == gfx::ColorSpace::TransferID::CUSTOM) {
+    // If we fail to find the custom transfer function parameters, fall back to
+    // BT709.
+    transfer_id = gfx::ColorSpace::TransferID::BT709;
+    CFNumberRef gamma_number =
+        reinterpret_cast<CFNumberRef>(CVBufferGetAttachment(
+            image_buffer, kCVImageBufferGammaLevelKey, nullptr));
+    if (gamma_number) {
+      CGFloat gamma_float = 0;
+      if (CFNumberGetValue(gamma_number, kCFNumberCGFloatType, &gamma_float)) {
+        transfer_id = gfx::ColorSpace::TransferID::CUSTOM;
+        custom_tr_fn.fG = gamma_float;
+      } else {
+        DLOG(ERROR) << "Filed to get CVImageBufferRef gamma level as float.";
+      }
+    } else {
+      DLOG(ERROR) << "Filed to get CVImageBufferRef gamma level.";
+    }
+  }
+
+  // Read the RGB to YUV matrix ID.
+  gfx::ColorSpace::MatrixID matrix_id = gfx::ColorSpace::MatrixID::BT709;
+  struct {
+    const CFStringRef cfstr;
+    gfx::ColorSpace::MatrixID id;
+  } matrices[] = {{
+                      kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+                      gfx::ColorSpace::MatrixID::BT709,
+                  },
+                  {
+                      kCVImageBufferYCbCrMatrix_ITU_R_601_4,
+                      gfx::ColorSpace::MatrixID::SMPTE170M,
+                  },
+                  {
+                      kCVImageBufferYCbCrMatrix_SMPTE_240M_1995,
+                      gfx::ColorSpace::MatrixID::SMPTE240M,
+                  }};
+  if (!GetImageBufferProperty(image_buffer, kCVImageBufferYCbCrMatrixKey,
+                              matrices, arraysize(matrices), &matrix_id)) {
+    DLOG(ERROR) << "Filed to find CVImageBufferRef YUV matrix.";
+  }
+
+  // It is specified to the decoder to use luma=[16,235] chroma=[16,240] via
+  // the kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange.
+  gfx::ColorSpace::RangeID range_id = gfx::ColorSpace::RangeID::LIMITED;
+
+  if (transfer_id == gfx::ColorSpace::TransferID::CUSTOM)
+    return gfx::ColorSpace(primary_id, custom_tr_fn, matrix_id, range_id);
+  return gfx::ColorSpace(primary_id, transfer_id, matrix_id, range_id);
 }
 
 }  // namespace
@@ -636,8 +761,8 @@ void VTVideoDecodeAccelerator::DecodeTask(const BitstreamBuffer& bitstream,
           frame->pic_order_cnt = *pic_order_cnt;
           frame->reorder_window = ComputeReorderWindow(sps);
         }
+        FALLTHROUGH;
 
-      // Intentional fallthrough.
       default:
         nalus.push_back(nalu);
         data_size += kNALUHeaderLength + nalu.size;
@@ -910,7 +1035,7 @@ void VTVideoDecodeAccelerator::AssignPictureBuffers(
     DCHECK_LE(1u, picture.service_texture_ids().size());
     picture_info_map_.insert(std::make_pair(
         picture.id(),
-        base::MakeUnique<PictureInfo>(picture.client_texture_ids()[0],
+        std::make_unique<PictureInfo>(picture.client_texture_ids()[0],
                                       picture.service_texture_ids()[0])));
   }
 
@@ -1121,7 +1246,7 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
   }
 
   scoped_refptr<gl::GLImageIOSurface> gl_image(
-      new gl::GLImageIOSurface(frame.image_size, GL_BGRA_EXT));
+      gl::GLImageIOSurface::Create(frame.image_size, GL_BGRA_EXT));
   if (!gl_image->InitializeWithCVPixelBuffer(
           frame.image.get(),
           gfx::GenericSharedMemoryId(g_cv_pixel_buffer_ids.GetNext()),
@@ -1136,6 +1261,8 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
     NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
     return false;
   }
+  gfx::ColorSpace color_space = GetImageBufferColorSpace(frame.image);
+  gl_image->SetColorSpaceForYUVToRGBConversion(color_space);
 
   // Assign the new image(s) to the the picture info.
   picture_info->gl_image = gl_image;
@@ -1144,9 +1271,8 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
 
   DVLOG(3) << "PictureReady(picture_id=" << picture_id << ", "
            << "bitstream_id=" << frame.bitstream_id << ")";
-  // TODO(hubbe): Use the correct color space.  http://crbug.com/647725
   client_->PictureReady(Picture(picture_id, frame.bitstream_id,
-                                gfx::Rect(frame.image_size), gfx::ColorSpace(),
+                                gfx::Rect(frame.image_size), color_space,
                                 true));
   return true;
 }

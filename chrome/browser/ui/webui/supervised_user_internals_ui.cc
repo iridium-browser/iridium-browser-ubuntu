@@ -4,7 +4,8 @@
 
 #include "chrome/browser/ui/webui/supervised_user_internals_ui.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/supervised_user_internals_message_handler.h"
 #include "chrome/common/url_constants.h"
@@ -23,7 +24,7 @@ content::WebUIDataSource* CreateSupervisedUserInternalsHTMLSource() {
   source->AddResourcePath("supervised_user_internals.css",
                           IDR_SUPERVISED_USER_INTERNALS_CSS);
   source->SetDefaultResource(IDR_SUPERVISED_USER_INTERNALS_HTML);
-  source->UseGzip(std::unordered_set<std::string>());
+  source->UseGzip();
   return source;
 }
 
@@ -36,7 +37,7 @@ SupervisedUserInternalsUI::SupervisedUserInternalsUI(content::WebUI* web_ui)
                                 CreateSupervisedUserInternalsHTMLSource());
 
   web_ui->AddMessageHandler(
-      base::MakeUnique<SupervisedUserInternalsMessageHandler>());
+      std::make_unique<SupervisedUserInternalsMessageHandler>());
 }
 
 SupervisedUserInternalsUI::~SupervisedUserInternalsUI() {}

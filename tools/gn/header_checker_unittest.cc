@@ -2,24 +2,27 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <ostream>
 #include <vector>
 
+#include "base/bind.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "tools/gn/config.h"
 #include "tools/gn/header_checker.h"
 #include "tools/gn/scheduler.h"
 #include "tools/gn/target.h"
+#include "tools/gn/test_with_scheduler.h"
 #include "tools/gn/test_with_scope.h"
 
 namespace {
 
-class HeaderCheckerTest : public testing::Test {
+class HeaderCheckerTest : public TestWithScheduler {
  public:
   HeaderCheckerTest()
-      : a_(setup_.settings(), Label(SourceDir("//a/"), "a"), {}),
-        b_(setup_.settings(), Label(SourceDir("//b/"), "b"), {}),
-        c_(setup_.settings(), Label(SourceDir("//c/"), "c"), {}),
-        d_(setup_.settings(), Label(SourceDir("//d/"), "d"), {}) {
+      : a_(setup_.settings(), Label(SourceDir("//a/"), "a")),
+        b_(setup_.settings(), Label(SourceDir("//b/"), "b")),
+        c_(setup_.settings(), Label(SourceDir("//c/"), "c")),
+        d_(setup_.settings(), Label(SourceDir("//d/"), "d")) {
     a_.set_output_type(Target::SOURCE_SET);
     b_.set_output_type(Target::SOURCE_SET);
     c_.set_output_type(Target::SOURCE_SET);
@@ -52,8 +55,6 @@ class HeaderCheckerTest : public testing::Test {
   }
 
  protected:
-  Scheduler scheduler_;
-
   TestWithScope setup_;
 
   // Some headers that are automatically set up with a public dependency chain.
@@ -68,6 +69,10 @@ class HeaderCheckerTest : public testing::Test {
 
 }  // namespace
 
+void PrintTo(const SourceFile& source_file, ::std::ostream* os) {
+  *os << source_file.value();
+}
+
 TEST_F(HeaderCheckerTest, IsDependencyOf) {
   scoped_refptr<HeaderChecker> checker(
       new HeaderChecker(setup_.build_settings(), targets_));
@@ -75,7 +80,7 @@ TEST_F(HeaderCheckerTest, IsDependencyOf) {
   // Add a target P ("private") that privately depends on C, and hook up the
   // chain so that A -> P -> C. A will depend on C via two different paths.
   Err err;
-  Target p(setup_.settings(), Label(SourceDir("//p/"), "p"), {});
+  Target p(setup_.settings(), Label(SourceDir("//p/"), "p"));
   p.set_output_type(Target::SOURCE_SET);
   p.SetToolchain(setup_.toolchain(), &err);
   EXPECT_FALSE(err.has_error());
@@ -165,7 +170,7 @@ TEST_F(HeaderCheckerTest, CheckInclude) {
   // Create another toolchain.
   Settings other_settings(setup_.build_settings(), "other/");
   Toolchain other_toolchain(&other_settings,
-                            Label(SourceDir("//toolchain/"), "other"), {});
+                            Label(SourceDir("//toolchain/"), "other"));
   TestWithScope::SetupToolchain(&other_toolchain);
   other_settings.set_toolchain_label(other_toolchain.label());
   other_settings.set_default_toolchain_label(setup_.toolchain()->label());
@@ -174,8 +179,7 @@ TEST_F(HeaderCheckerTest, CheckInclude) {
   // connected to any targets in the main toolchain.
   Target otc(&other_settings,
              Label(SourceDir("//p/"), "otc", other_toolchain.label().dir(),
-                   other_toolchain.label().name()),
-             {});
+                   other_toolchain.label().name()));
   otc.set_output_type(Target::SOURCE_SET);
   Err err;
   EXPECT_TRUE(otc.SetToolchain(&other_toolchain, &err));
@@ -224,7 +228,7 @@ TEST_F(HeaderCheckerTest, CheckInclude) {
 TEST_F(HeaderCheckerTest, PublicFirst) {
   // Now make a A -> Z -> D private dependency chain (one shorter than the
   // public one to get to D).
-  Target z(setup_.settings(), Label(SourceDir("//a/"), "a"), {});
+  Target z(setup_.settings(), Label(SourceDir("//a/"), "a"));
   z.set_output_type(Target::SOURCE_SET);
   Err err;
   EXPECT_TRUE(z.SetToolchain(setup_.toolchain(), &err));
@@ -288,5 +292,59 @@ TEST_F(HeaderCheckerTest, CheckIncludeAllowCircular) {
   // Now the include from B to A should be allowed.
   err = Err();
   EXPECT_TRUE(checker->CheckInclude(&b_, input_file, a_public, range, &err));
+  EXPECT_FALSE(err.has_error());
+}
+
+TEST_F(HeaderCheckerTest, SourceFileForInclude) {
+  using base::FilePath;
+  const std::vector<SourceDir> kIncludeDirs = {
+      SourceDir("/c/custom_include/"), SourceDir("//"), SourceDir("//subdir")};
+  a_.sources().push_back(SourceFile("//lib/header1.h"));
+  b_.sources().push_back(SourceFile("/c/custom_include/header2.h"));
+
+  InputFile dummy_input_file(SourceFile("//some_file.cc"));
+  dummy_input_file.SetContents(std::string());
+  LocationRange dummy_range;
+
+  scoped_refptr<HeaderChecker> checker(
+      new HeaderChecker(setup_.build_settings(), targets_));
+  {
+    Err err;
+    SourceFile source_file = checker->SourceFileForInclude(
+        "lib/header1.h", kIncludeDirs, dummy_input_file, dummy_range, &err);
+    EXPECT_FALSE(err.has_error());
+    EXPECT_EQ(SourceFile("//lib/header1.h"), source_file);
+  }
+
+  {
+    Err err;
+    SourceFile source_file = checker->SourceFileForInclude(
+        "header2.h", kIncludeDirs, dummy_input_file, dummy_range, &err);
+    EXPECT_FALSE(err.has_error());
+    EXPECT_EQ(SourceFile("/c/custom_include/header2.h"), source_file);
+  }
+}
+
+TEST_F(HeaderCheckerTest, SourceFileForInclude_FileNotFound) {
+  using base::FilePath;
+  const char kFileContents[] = "Some dummy contents";
+  const std::vector<SourceDir> kIncludeDirs = {SourceDir("//")};
+  scoped_refptr<HeaderChecker> checker(
+      new HeaderChecker(setup_.build_settings(), targets_));
+
+  Err err;
+  InputFile input_file(SourceFile("//input.cc"));
+  input_file.SetContents(std::string(kFileContents));
+  const int kLineNumber = 10;
+  const int kColumnNumber = 16;
+  const int kLength = 8;
+  const int kByteNumber = 100;
+  LocationRange range(
+      Location(&input_file, kLineNumber, kColumnNumber, kByteNumber),
+      Location(&input_file, kLineNumber, kColumnNumber + kLength, kByteNumber));
+
+  SourceFile source_file = checker->SourceFileForInclude(
+      "header.h", kIncludeDirs, input_file, range, &err);
+  EXPECT_TRUE(source_file.is_null());
   EXPECT_FALSE(err.has_error());
 }

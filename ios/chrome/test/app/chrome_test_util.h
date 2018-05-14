@@ -13,10 +13,11 @@ namespace ios {
 class ChromeBrowserState;
 }
 
+@protocol ApplicationCommands;
 @class DeviceSharingManager;
-@class GenericChromeCommand;
 @class MainController;
 @class NewTabPageController;
+@class UIViewController;
 
 namespace chrome_test_util {
 
@@ -46,20 +47,19 @@ NSUInteger GetRegisteredKeyCommandsCount();
 // TODO(crbug.com/738881): Use DispatcherForActiveViewController() instead.
 id<BrowserCommands> BrowserCommandDispatcherForMainBVC();
 
-// Returns the dispatcher for the active view controller.
-id<BrowserCommands> DispatcherForActiveViewController();
+// Returns the active view controller.
+// NOTE: It is preferred to not directly access the active view controller if
+// possible.
+UIViewController* GetActiveViewController();
 
-// Runs |command| using the active view controller.
-void RunCommandWithActiveViewController(GenericChromeCommand* command);
+// Returns the dispatcher for the active view controller.
+id<ApplicationCommands, BrowserCommands> DispatcherForActiveViewController();
 
 // Removes all presented infobars.
 void RemoveAllInfoBars();
 
 // Dismisses all presented views and modal dialogs.
 void ClearPresentedState();
-
-// Purges and recreates all web views.
-void ResetAllWebViews();
 
 // Sets the value of a boolean local state pref.
 // TODO(crbug.com/647022): Clean up other tests that use this helper function.

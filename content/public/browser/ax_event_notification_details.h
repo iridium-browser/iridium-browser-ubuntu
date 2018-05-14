@@ -24,10 +24,11 @@ struct CONTENT_EXPORT AXEventNotificationDetails {
   ~AXEventNotificationDetails();
 
   ui::AXTreeUpdate update;
-  ui::AXEvent event_type;
+  ax::mojom::Event event_type;
   int id;
   int ax_tree_id;
-  ui::AXEventFrom event_from;
+  ax::mojom::EventFrom event_from;
+  int action_request_id;
 };
 
 // Use this object in conjunction with the

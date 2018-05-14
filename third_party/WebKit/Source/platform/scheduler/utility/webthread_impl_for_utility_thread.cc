@@ -13,7 +13,7 @@ WebThreadImplForUtilityThread::WebThreadImplForUtilityThread()
     : task_runner_(base::ThreadTaskRunnerHandle::Get()),
       thread_id_(base::PlatformThread::CurrentId()) {}
 
-WebThreadImplForUtilityThread::~WebThreadImplForUtilityThread() {}
+WebThreadImplForUtilityThread::~WebThreadImplForUtilityThread() = default;
 
 blink::WebScheduler* WebThreadImplForUtilityThread::Scheduler() const {
   NOTIMPLEMENTED();
@@ -24,9 +24,9 @@ blink::PlatformThreadId WebThreadImplForUtilityThread::ThreadId() const {
   return thread_id_;
 }
 
-base::SingleThreadTaskRunner* WebThreadImplForUtilityThread::GetTaskRunner()
-    const {
-  return task_runner_.get();
+scoped_refptr<base::SingleThreadTaskRunner>
+WebThreadImplForUtilityThread::GetTaskRunner() const {
+  return task_runner_;
 }
 
 scheduler::SingleThreadIdleTaskRunner*

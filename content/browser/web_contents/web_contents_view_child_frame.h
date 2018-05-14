@@ -27,13 +27,13 @@ class WebContentsViewChildFrame : public WebContentsView,
   gfx::NativeView GetNativeView() const override;
   gfx::NativeView GetContentNativeView() const override;
   gfx::NativeWindow GetTopLevelNativeWindow() const override;
-  void GetScreenInfo(ScreenInfo* screen_info) const override;
   void GetContainerBounds(gfx::Rect* out) const override;
   void SizeContents(const gfx::Size& size) override;
   void Focus() override;
   void SetInitialFocus() override;
   void StoreFocus() override;
   void RestoreFocus() override;
+  void FocusThroughTabTraversal(bool reverse) override;
   DropData* GetDropData() const override;
   gfx::Rect GetViewBounds() const override;
   void CreateView(const gfx::Size& initial_size,

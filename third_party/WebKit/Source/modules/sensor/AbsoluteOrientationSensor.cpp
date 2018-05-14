@@ -10,7 +10,7 @@ namespace blink {
 
 AbsoluteOrientationSensor* AbsoluteOrientationSensor::Create(
     ExecutionContext* execution_context,
-    const SensorOptions& options,
+    const SpatialSensorOptions& options,
     ExceptionState& exception_state) {
   return new AbsoluteOrientationSensor(execution_context, options,
                                        exception_state);
@@ -20,19 +20,22 @@ AbsoluteOrientationSensor* AbsoluteOrientationSensor::Create(
 AbsoluteOrientationSensor* AbsoluteOrientationSensor::Create(
     ExecutionContext* execution_context,
     ExceptionState& exception_state) {
-  return Create(execution_context, SensorOptions(), exception_state);
+  return Create(execution_context, SpatialSensorOptions(), exception_state);
 }
 
 AbsoluteOrientationSensor::AbsoluteOrientationSensor(
     ExecutionContext* execution_context,
-    const SensorOptions& options,
+    const SpatialSensorOptions& options,
     ExceptionState& exception_state)
     : OrientationSensor(execution_context,
                         options,
                         exception_state,
-                        SensorType::ABSOLUTE_ORIENTATION_QUATERNION) {}
+                        SensorType::ABSOLUTE_ORIENTATION_QUATERNION,
+                        {mojom::FeaturePolicyFeature::kAccelerometer,
+                         mojom::FeaturePolicyFeature::kGyroscope,
+                         mojom::FeaturePolicyFeature::kMagnetometer}) {}
 
-DEFINE_TRACE(AbsoluteOrientationSensor) {
+void AbsoluteOrientationSensor::Trace(blink::Visitor* visitor) {
   OrientationSensor::Trace(visitor);
 }
 

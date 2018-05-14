@@ -6,13 +6,15 @@
 #define WebServiceWorkerResponse_h
 
 #include "base/time/time.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebPrivatePtr.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebVector.h"
-#include "public/platform/modules/serviceworker/WebServiceWorkerResponseError.h"
-#include "public/platform/modules/serviceworker/WebServiceWorkerResponseType.h"
+#include "public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_error_type.mojom-shared.h"
 
 #if INSIDE_BLINK
 #include "platform/wtf/Forward.h"
@@ -54,8 +56,8 @@ class BLINK_PLATFORM_EXPORT WebServiceWorkerResponse {
   void SetStatusText(const WebString&);
   const WebString& StatusText() const;
 
-  void SetResponseType(WebServiceWorkerResponseType);
-  WebServiceWorkerResponseType ResponseType() const;
+  void SetResponseType(network::mojom::FetchResponseType);
+  network::mojom::FetchResponseType ResponseType() const;
 
   void SetHeader(const WebString& key, const WebString& value);
 
@@ -67,13 +69,21 @@ class BLINK_PLATFORM_EXPORT WebServiceWorkerResponse {
   WebString GetHeader(const WebString& key) const;
   void VisitHTTPHeaderFields(WebHTTPHeaderVisitor*) const;
 
-  void SetBlob(const WebString& uuid, uint64_t size);
+  void SetBlob(const WebString& uuid,
+               uint64_t size,
+               mojo::ScopedMessagePipeHandle);
   WebString BlobUUID() const;
   uint64_t BlobSize() const;
 
+  mojo::ScopedMessagePipeHandle CloneBlobPtr() const;
+
+  WebString SideDataBlobUUID() const;
+  uint64_t SideDataBlobSize() const;
+  mojo::ScopedMessagePipeHandle CloneSideDataBlobPtr() const;
+
   // Provides a more detailed error when status() is zero.
-  void SetError(WebServiceWorkerResponseError);
-  WebServiceWorkerResponseError GetError() const;
+  void SetError(mojom::ServiceWorkerResponseError);
+  mojom::ServiceWorkerResponseError GetError() const;
 
   void SetResponseTime(base::Time);
   base::Time ResponseTime() const;
@@ -87,8 +97,10 @@ class BLINK_PLATFORM_EXPORT WebServiceWorkerResponse {
 #if INSIDE_BLINK
   const HTTPHeaderMap& Headers() const;
 
-  void SetBlobDataHandle(PassRefPtr<BlobDataHandle>);
-  PassRefPtr<BlobDataHandle> GetBlobDataHandle() const;
+  void SetBlobDataHandle(scoped_refptr<BlobDataHandle>);
+  scoped_refptr<BlobDataHandle> GetBlobDataHandle() const;
+
+  void SetSideDataBlobDataHandle(scoped_refptr<BlobDataHandle>);
 #endif
 
  private:

@@ -13,21 +13,19 @@ ServiceWorkerRegistrationSync::ServiceWorkerRegistrationSync(
     ServiceWorkerRegistration* registration)
     : registration_(registration) {}
 
-ServiceWorkerRegistrationSync::~ServiceWorkerRegistrationSync() {}
+ServiceWorkerRegistrationSync::~ServiceWorkerRegistrationSync() = default;
 
-const char* ServiceWorkerRegistrationSync::SupplementName() {
-  return "ServiceWorkerRegistrationSync";
-}
+const char ServiceWorkerRegistrationSync::kSupplementName[] =
+    "ServiceWorkerRegistrationSync";
 
 ServiceWorkerRegistrationSync& ServiceWorkerRegistrationSync::From(
     ServiceWorkerRegistration& registration) {
   ServiceWorkerRegistrationSync* supplement =
-      static_cast<ServiceWorkerRegistrationSync*>(
-          Supplement<ServiceWorkerRegistration>::From(registration,
-                                                      SupplementName()));
+      Supplement<ServiceWorkerRegistration>::From<
+          ServiceWorkerRegistrationSync>(registration);
   if (!supplement) {
     supplement = new ServiceWorkerRegistrationSync(&registration);
-    ProvideTo(registration, SupplementName(), supplement);
+    ProvideTo(registration, supplement);
   }
   return *supplement;
 }
@@ -43,7 +41,7 @@ SyncManager* ServiceWorkerRegistrationSync::sync() {
   return sync_manager_.Get();
 }
 
-DEFINE_TRACE(ServiceWorkerRegistrationSync) {
+void ServiceWorkerRegistrationSync::Trace(blink::Visitor* visitor) {
   visitor->Trace(registration_);
   visitor->Trace(sync_manager_);
   Supplement<ServiceWorkerRegistration>::Trace(visitor);

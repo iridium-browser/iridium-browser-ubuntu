@@ -8,11 +8,11 @@
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/autofill/cells/status_item.h"
 #import "ios/chrome/browser/ui/collection_view/cells/MDCCollectionViewCell+Chrome.h"
-#import "ios/chrome/browser/ui/collection_view/cells/collection_view_item+collection_view_controller.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
 #import "ios/chrome/browser/ui/icons/chrome_icon.h"
+#import "ios/chrome/browser/ui/list_model/list_item+Controller.h"
 #import "ios/chrome/browser/ui/payments/cells/payments_is_selectable.h"
 #import "ios/chrome/browser/ui/payments/cells/payments_text_item.h"
 #import "ios/chrome/browser/ui/payments/payment_request_selector_view_controller_actions.h"
@@ -34,6 +34,7 @@ const CGFloat kSeparatorEdgeInset = 14;
 
 typedef NS_ENUM(NSInteger, SectionIdentifier) {
   SectionIdentifierItems = kSectionIdentifierEnumZero,
+  SectionIdentifierAddButton,
 };
 
 typedef NS_ENUM(NSInteger, ItemType) {
@@ -65,7 +66,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
     // Set up leading (back) button.
     UIBarButtonItem* backButton =
         [ChromeIcon templateBarButtonItemWithImage:[ChromeIcon backIcon]
-                                            target:nil
+                                            target:self
                                             action:@selector(onBack)];
     backButton.accessibilityLabel = l10n_util::GetNSString(IDS_ACCNAME_BACK);
     self.navigationItem.leftBarButtonItem = backButton;
@@ -167,10 +168,11 @@ typedef NS_ENUM(NSInteger, ItemType) {
   if (!self.editing) {
     CollectionViewItem* addButtonItem = [self.dataSource addButtonItem];
     if (addButtonItem) {
+      [model addSectionWithIdentifier:SectionIdentifierAddButton];
       addButtonItem.type = ItemTypeAddItem;
       addButtonItem.accessibilityTraits |= UIAccessibilityTraitButton;
       [model addItem:addButtonItem
-          toSectionWithIdentifier:SectionIdentifierItems];
+          toSectionWithIdentifier:SectionIdentifierAddButton];
     }
   }
 }
@@ -201,7 +203,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
       if ([cell isKindOfClass:[PaymentsTextCell class]]) {
         PaymentsTextCell* textCell =
             base::mac::ObjCCastStrict<PaymentsTextCell>(cell);
-        textCell.textLabel.font = [MDCTypography body2Font];
         textCell.textLabel.textColor =
             self.dataSource.state == PaymentRequestSelectorStateError
                 ? [[MDCPalette cr_redPalette] tint600]
@@ -209,25 +210,18 @@ typedef NS_ENUM(NSInteger, ItemType) {
       }
       break;
     }
-    case ItemTypeSelectableItem: {
+    case ItemTypeAddItem: {
       if ([cell isKindOfClass:[PaymentsTextCell class]]) {
-        PaymentsTextCell* textCell =
+        PaymentsTextCell* paymentsTextCell =
             base::mac::ObjCCastStrict<PaymentsTextCell>(cell);
-        textCell.textLabel.font = [MDCTypography body2Font];
-        textCell.textLabel.textColor = [[MDCPalette greyPalette] tint900];
-        textCell.detailTextLabel.font = [MDCTypography body1Font];
-        textCell.detailTextLabel.textColor = [[MDCPalette greyPalette] tint500];
+        // Style call to action cells.
+        if (paymentsTextCell.cellType == PaymentsTextCellTypeCallToAction) {
+          paymentsTextCell.textLabel.textColor =
+              [[MDCPalette cr_bluePalette] tint500];
+        }
       }
       break;
     }
-    case ItemTypeAddItem:
-      if ([cell isKindOfClass:[PaymentsTextCell class]]) {
-        PaymentsTextCell* textCell =
-            base::mac::ObjCCastStrict<PaymentsTextCell>(cell);
-        textCell.textLabel.font = [MDCTypography body2Font];
-        textCell.textLabel.textColor = [[MDCPalette greyPalette] tint900];
-      }
-      break;
     default:
       break;
   }
@@ -328,6 +322,13 @@ typedef NS_ENUM(NSInteger, ItemType) {
   } else {
     return NO;
   }
+}
+
+#pragma mark - UIAccessibilityAction
+
+- (BOOL)accessibilityPerformEscape {
+  [self onBack];
+  return YES;
 }
 
 @end

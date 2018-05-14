@@ -31,18 +31,13 @@
 #include "modules/filesystem/DOMFileSystem.h"
 
 #include <memory>
-#include "core/fileapi/BlobCallback.h"
+
 #include "core/probe/CoreProbes.h"
 #include "modules/filesystem/DOMFilePath.h"
 #include "modules/filesystem/DirectoryEntry.h"
 #include "modules/filesystem/FileEntry.h"
 #include "modules/filesystem/FileSystemCallbacks.h"
 #include "modules/filesystem/FileWriter.h"
-#include "modules/filesystem/FileWriterBaseCallback.h"
-#include "modules/filesystem/FileWriterCallback.h"
-#include "modules/filesystem/MetadataCallback.h"
-#include "platform/FileMetadata.h"
-#include "platform/WebTaskRunner.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "platform/wtf/text/WTFString.h"
@@ -56,12 +51,13 @@ namespace blink {
 namespace {
 
 void RunCallback(ExecutionContext* execution_context,
-                 std::unique_ptr<WTF::Closure> task) {
+                 base::OnceClosure task,
+                 std::unique_ptr<int> identifier) {
   if (!execution_context)
     return;
   DCHECK(execution_context->IsContextThread());
-  probe::AsyncTask async_task(execution_context, task.get());
-  (*task)();
+  probe::AsyncTask async_task(execution_context, identifier.get());
+  std::move(task).Run();
 }
 
 }  // namespace
@@ -78,7 +74,7 @@ DOMFileSystem* DOMFileSystem::CreateIsolatedFileSystem(
     ExecutionContext* context,
     const String& filesystem_id) {
   if (filesystem_id.IsEmpty())
-    return 0;
+    return nullptr;
 
   StringBuilder filesystem_name;
   filesystem_name.Append(Platform::Current()->FileSystemCreateOriginIdentifier(
@@ -99,7 +95,7 @@ DOMFileSystem* DOMFileSystem::CreateIsolatedFileSystem(
 
   return DOMFileSystem::Create(context, filesystem_name.ToString(),
                                kFileSystemTypeIsolated,
-                               KURL(kParsedURLString, root_url.ToString()));
+                               KURL(root_url.ToString()));
 }
 
 DOMFileSystem::DOMFileSystem(ExecutionContext* context,
@@ -144,34 +140,10 @@ void DOMFileSystem::ReportError(ExecutionContext* execution_context,
                              WrapPersistent(error_callback), file_error));
 }
 
-namespace {
-
-class ConvertToFileWriterCallback : public FileWriterBaseCallback {
- public:
-  static ConvertToFileWriterCallback* Create(FileWriterCallback* callback) {
-    return new ConvertToFileWriterCallback(callback);
-  }
-
-  DEFINE_INLINE_TRACE() {
-    visitor->Trace(callback_);
-    FileWriterBaseCallback::Trace(visitor);
-  }
-
-  void handleEvent(FileWriterBase* file_writer_base) {
-    callback_->handleEvent(static_cast<FileWriter*>(file_writer_base));
-  }
-
- private:
-  explicit ConvertToFileWriterCallback(FileWriterCallback* callback)
-      : callback_(callback) {}
-  Member<FileWriterCallback> callback_;
-};
-
-}  // namespace
-
-void DOMFileSystem::CreateWriter(const FileEntry* file_entry,
-                                 FileWriterCallback* success_callback,
-                                 ErrorCallbackBase* error_callback) {
+void DOMFileSystem::CreateWriter(
+    const FileEntry* file_entry,
+    FileWriterCallbacks::OnDidCreateFileWriterCallback* success_callback,
+    ErrorCallbackBase* error_callback) {
   DCHECK(file_entry);
 
   if (!FileSystem()) {
@@ -180,18 +152,17 @@ void DOMFileSystem::CreateWriter(const FileEntry* file_entry,
   }
 
   FileWriter* file_writer = FileWriter::Create(GetExecutionContext());
-  FileWriterBaseCallback* conversion_callback =
-      ConvertToFileWriterCallback::Create(success_callback);
   std::unique_ptr<AsyncFileSystemCallbacks> callbacks =
-      FileWriterBaseCallbacks::Create(file_writer, conversion_callback,
-                                      error_callback, context_);
+      FileWriterCallbacks::Create(file_writer, success_callback, error_callback,
+                                  context_);
   FileSystem()->CreateFileWriter(CreateFileSystemURL(file_entry), file_writer,
                                  std::move(callbacks));
 }
 
-void DOMFileSystem::CreateFile(const FileEntry* file_entry,
-                               BlobCallback* success_callback,
-                               ErrorCallbackBase* error_callback) {
+void DOMFileSystem::CreateFile(
+    const FileEntry* file_entry,
+    SnapshotFileCallback::OnDidCreateSnapshotFileCallback* success_callback,
+    ErrorCallbackBase* error_callback) {
   KURL file_system_url = CreateFileSystemURL(file_entry);
   if (!FileSystem()) {
     ReportError(error_callback, FileError::kAbortErr);
@@ -205,17 +176,23 @@ void DOMFileSystem::CreateFile(const FileEntry* file_entry,
 }
 
 void DOMFileSystem::ScheduleCallback(ExecutionContext* execution_context,
-                                     std::unique_ptr<WTF::Closure> task) {
+                                     base::OnceClosure task) {
+  if (!execution_context)
+    return;
+
   DCHECK(execution_context->IsContextThread());
+
+  std::unique_ptr<int> identifier = std::make_unique<int>(0);
   probe::AsyncTaskScheduled(execution_context, TaskNameForInstrumentation(),
-                            task.get());
-  TaskRunnerHelper::Get(TaskType::kFileReading, execution_context)
-      ->PostTask(BLINK_FROM_HERE,
+                            identifier.get());
+  execution_context->GetTaskRunner(TaskType::kFileReading)
+      ->PostTask(FROM_HERE,
                  WTF::Bind(&RunCallback, WrapWeakPersistent(execution_context),
-                           WTF::Passed(std::move(task))));
+                           WTF::Passed(std::move(task)),
+                           WTF::Passed(std::move(identifier))));
 }
 
-DEFINE_TRACE(DOMFileSystem) {
+void DOMFileSystem::Trace(blink::Visitor* visitor) {
   visitor->Trace(root_entry_);
   DOMFileSystemBase::Trace(visitor);
   ContextClient::Trace(visitor);

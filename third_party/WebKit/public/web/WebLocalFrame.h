@@ -8,22 +8,25 @@
 #include <memory>
 #include <set>
 
-#include "WebCompositionUnderline.h"
 #include "WebFrame.h"
 #include "WebFrameLoadType.h"
 #include "WebHistoryItem.h"
-#include "public/platform/WebCachePolicy.h"
+#include "WebImeTextSpan.h"
+#include "base/callback.h"
+#include "base/unguessable_token.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebFocusType.h"
 #include "public/platform/WebSize.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebURLRequest.h"
+#include "public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
 #include "public/platform/site_engagement.mojom-shared.h"
-#include "public/web/WebSandboxFlags.h"
+#include "public/web/WebTextDirection.h"
+#include "public/web/commit_result.mojom-shared.h"
+#include "public/web/selection_menu_behavior.mojom-shared.h"
+#include "third_party/WebKit/public/common/feature_policy/feature_policy.h"
+#include "third_party/WebKit/public/common/frame/sandbox_flags.h"
 #include "v8/include/v8.h"
-
-namespace base {
-class SingleThreadTaskRunner;
-}
 
 namespace blink {
 
@@ -32,9 +35,7 @@ class WebAssociatedURLLoader;
 class WebAutofillClient;
 class WebContentSettingsClient;
 class WebData;
-class WebDataSource;
-class WebDevToolsAgent;
-class WebDevToolsAgentClient;
+class WebDocumentLoader;
 class WebDocument;
 class WebDoubleSize;
 class WebDOMEvent;
@@ -42,14 +43,16 @@ class WebFrameClient;
 class WebFrameWidget;
 class WebFrameScheduler;
 class WebInputMethodController;
+class WebPerformance;
 class WebRange;
 class WebSecurityOrigin;
 class WebScriptExecutionCallback;
 class WebSharedWorkerRepositoryClient;
 class WebSpellCheckPanelHostClient;
+class WebString;
 class WebTextCheckClient;
 class WebURL;
-class WebURLLoader;
+class WebURLLoaderFactory;
 class WebView;
 enum class WebTreeScopeType;
 struct WebAssociatedURLLoaderOptions;
@@ -103,7 +106,7 @@ class WebLocalFrame : public WebFrame {
       blink::InterfaceRegistry*,
       WebRemoteFrame*,
       WebSandboxFlags,
-      WebParsedFeaturePolicy);
+      ParsedFeaturePolicy);
 
   // Creates a new local child of this frame. Similar to the other methods that
   // create frames, the returned frame should be freed by calling Close() when
@@ -130,8 +133,6 @@ class WebLocalFrame : public WebFrame {
 
   virtual void SetAutofillClient(WebAutofillClient*) = 0;
   virtual WebAutofillClient* AutofillClient() = 0;
-  virtual void SetDevToolsAgentClient(WebDevToolsAgentClient*) = 0;
-  virtual WebDevToolsAgent* DevToolsAgent() = 0;
   virtual void SetSharedWorkerRepositoryClient(
       WebSharedWorkerRepositoryClient*) = 0;
 
@@ -149,6 +150,12 @@ class WebLocalFrame : public WebFrame {
   virtual WebVector<WebIconURL> IconURLs(int icon_types_mask) const = 0;
 
   virtual WebDocument GetDocument() const = 0;
+
+  // The name of this frame. If no name is given, empty string is returned.
+  virtual WebString AssignedName() const = 0;
+
+  // Sets the name of this frame.
+  virtual void SetName(const WebString&) = 0;
 
   // Hierarchy ----------------------------------------------------------
 
@@ -173,7 +180,7 @@ class WebLocalFrame : public WebFrame {
 
   // Returns a WebURLRequest corresponding to the load of the WebHistoryItem.
   virtual WebURLRequest RequestFromHistoryItem(const WebHistoryItem&,
-                                               WebCachePolicy) const = 0;
+                                               mojom::FetchCacheMode) const = 0;
 
   // Returns a WebURLRequest corresponding to the reload of the current
   // HistoryItem.
@@ -183,11 +190,25 @@ class WebLocalFrame : public WebFrame {
 
   // Load the given URL. For history navigations, a valid WebHistoryItem
   // should be given, as well as a WebHistoryLoadType.
-  virtual void Load(const WebURLRequest&,
-                    WebFrameLoadType = WebFrameLoadType::kStandard,
-                    const WebHistoryItem& = WebHistoryItem(),
-                    WebHistoryLoadType = kWebHistoryDifferentDocumentLoad,
-                    bool is_client_redirect = false) = 0;
+  virtual void Load(
+      const WebURLRequest&,
+      WebFrameLoadType,
+      const WebHistoryItem&,
+      WebHistoryLoadType,
+      bool is_client_redirect,
+      const base::UnguessableToken& devtools_navigation_token) = 0;
+
+  // Commits a same-document navigation in the frame. For history navigations, a
+  // valid WebHistoryItem should be provided. Returns CommitResult::Ok if the
+  // load committed.
+  virtual mojom::CommitResult CommitSameDocumentNavigation(
+      const WebURL&,
+      WebFrameLoadType,
+      const WebHistoryItem&,
+      bool is_client_redirect) = 0;
+
+  // Loads a JavaScript URL in the frame.
+  virtual void LoadJavaScriptURL(const WebURL&) = 0;
 
   // This method is short-hand for calling LoadData, where mime_type is
   // "text/html" and text_encoding is "UTF-8".
@@ -199,7 +220,7 @@ class WebLocalFrame : public WebFrame {
   // Loads the given data with specific mime type and optional text
   // encoding.  For HTML data, baseURL indicates the security origin of
   // the document and is used to resolve links.  If specified,
-  // unreachableURL is reported via WebDataSource::unreachableURL.  If
+  // unreachableURL is reported via WebDocumentLoader::unreachableURL.  If
   // replace is false, then this data will be loaded as a normal
   // navigation.  Otherwise, the current history item will be replaced.
   virtual void LoadData(const WebData&,
@@ -213,11 +234,16 @@ class WebLocalFrame : public WebFrame {
                         WebHistoryLoadType = kWebHistoryDifferentDocumentLoad,
                         bool is_client_redirect = false) = 0;
 
-  // Returns the data source that is currently loading.  May be null.
-  virtual WebDataSource* ProvisionalDataSource() const = 0;
+  // Returns the document loader that is currently loading.  May be null.
+  virtual WebDocumentLoader* GetProvisionalDocumentLoader() const = 0;
 
-  // Returns the data source that is currently loaded.
-  virtual WebDataSource* DataSource() const = 0;
+  // View-source rendering mode.  Set this before loading an URL to cause
+  // it to be rendered in view-source mode.
+  virtual void EnableViewSourceMode(bool) = 0;
+  virtual bool IsViewSourceModeEnabled() const = 0;
+
+  // Returns the document loader that is currently loaded.
+  virtual WebDocumentLoader* GetDocumentLoader() const = 0;
 
   enum FallbackContentResult {
     // An error page should be shown instead of fallback.
@@ -246,7 +272,7 @@ class WebLocalFrame : public WebFrame {
   // Navigation State -------------------------------------------------------
 
   // Returns true if the current frame's load event has not completed.
-  virtual bool IsLoading() const = 0;
+  bool IsLoading() const override = 0;
 
   // Returns true if there is a pending redirect or location change
   // within specified interval (in seconds). This could be caused by:
@@ -264,10 +290,6 @@ class WebLocalFrame : public WebFrame {
   // in this frame. Used to propagate state when this frame has navigated
   // cross process.
   virtual void SetCommittedFirstRealLoad() = 0;
-
-  // Mark this frame's document as having received a user gesture, based on
-  // one of its descendants having processed a user gesture.
-  virtual void SetHasReceivedUserGesture() = 0;
 
   // Reports a list of unique blink::WebFeature values representing
   // Blink features used, performed or encountered by the browser during the
@@ -354,6 +376,10 @@ class WebLocalFrame : public WebFrame {
   // Associates an isolated world (see above for description) with a security
   // origin. XMLHttpRequest instances used in that world will be considered
   // to come from that origin, not the frame's.
+  //
+  // Currently the origin shouldn't be aliased, because IsolatedCopy() is
+  // taken before associating it to an isolated world and aliased relationship,
+  // if any, is broken. crbug.com/779730
   virtual void SetIsolatedWorldSecurityOrigin(int world_id,
                                               const WebSecurityOrigin&) = 0;
 
@@ -378,7 +404,7 @@ class WebLocalFrame : public WebFrame {
 
   // Call the function with the given receiver and arguments, bypassing
   // canExecute().
-  virtual v8::Local<v8::Value> CallFunctionEvenIfScriptDisabled(
+  virtual v8::MaybeLocal<v8::Value> CallFunctionEvenIfScriptDisabled(
       v8::Local<v8::Function>,
       v8::Local<v8::Value>,
       int argc,
@@ -408,6 +434,22 @@ class WebLocalFrame : public WebFrame {
                                         int argc,
                                         v8::Local<v8::Value> argv[],
                                         WebScriptExecutionCallback*) = 0;
+
+  enum class PausableTaskResult {
+    // The context was invalid or destroyed.
+    kContextInvalidOrDestroyed,
+    // Script is not paused.
+    kReady,
+  };
+  using PausableTaskCallback = base::OnceCallback<void(PausableTaskResult)>;
+
+  // Queues a callback to run script when the context is not paused, e.g. for a
+  // modal JS dialog or window.print(). This callback can run immediately if the
+  // context is not paused. If the context is invalidated before becoming
+  // unpaused, the callback will be run with a kContextInvalidOrDestroyed value.
+  // This asserts that the context is valid at the time of this
+  // call.
+  virtual void PostPausableTask(PausableTaskCallback) = 0;
 
   enum ScriptExecutionType {
     // Execute script synchronously, unless the page is suspended.
@@ -463,6 +505,16 @@ class WebLocalFrame : public WebFrame {
   virtual bool ExecuteCommand(const WebString&, const WebString& value) = 0;
   virtual bool IsCommandEnabled(const WebString&) const = 0;
 
+  // Returns the text direction at the start and end bounds of the current
+  // selection.  If the selection range is empty, it returns false.
+  virtual bool SelectionTextDirection(WebTextDirection& start,
+                                      WebTextDirection& end) const = 0;
+  // Returns true if the selection range is nonempty and its anchor is first
+  // (i.e its anchor is its start).
+  virtual bool IsSelectionAnchorFirst() const = 0;
+  // Changes the text direction of the selected input node.
+  virtual void SetTextDirection(WebTextDirection) = 0;
+
   // Selection -----------------------------------------------------------
 
   virtual bool HasSelection() const = 0;
@@ -488,8 +540,10 @@ class WebLocalFrame : public WebFrame {
     // Keep the current handle visibility.
     kPreserveHandleVisibility,
   };
+
   virtual void SelectRange(const WebRange&,
-                           HandleVisibilityBehavior = kHideSelectionHandle) = 0;
+                           HandleVisibilityBehavior,
+                           mojom::SelectionMenuBehavior) = 0;
 
   virtual WebString RangeAsText(const WebRange&) = 0;
 
@@ -508,7 +562,7 @@ class WebLocalFrame : public WebFrame {
   virtual bool SetCompositionFromExistingText(
       int composition_start,
       int composition_end,
-      const WebVector<WebCompositionUnderline>& underlines) = 0;
+      const WebVector<WebImeTextSpan>& ime_text_spans) = 0;
   virtual void ExtendSelectionAndDelete(int before, int after) = 0;
 
   virtual void SetCaretVisible(bool) = 0;
@@ -539,8 +593,6 @@ class WebLocalFrame : public WebFrame {
   virtual void SetSpellCheckPanelHostClient(WebSpellCheckPanelHostClient*) = 0;
   virtual WebSpellCheckPanelHostClient* SpellCheckPanelHostClient() const = 0;
   virtual void ReplaceMisspelledRange(const WebString&) = 0;
-  virtual void EnableSpellChecking(bool) = 0;
-  virtual bool IsSpellCheckingEnabled() const = 0;
   virtual void RemoveSpellingMarkers() = 0;
   virtual void RemoveSpellingMarkersUnderWords(
       const WebVector<WebString>& words) = 0;
@@ -673,7 +725,8 @@ class WebLocalFrame : public WebFrame {
   // Dispatches a message event on the current DOMWindow in this WebFrame.
   virtual void DispatchMessageEventWithOriginCheck(
       const WebSecurityOrigin& intended_target_origin,
-      const WebDOMEvent&) = 0;
+      const WebDOMEvent&,
+      bool has_user_gesture) = 0;
 
   // Site engagement --------------------------------------------------------
 
@@ -684,6 +737,11 @@ class WebLocalFrame : public WebFrame {
   // This will be removed following the deprecation.
   virtual void UsageCountChromeLoadTimes(const WebString& metric) = 0;
 
+  // Media engagement -------------------------------------------------------
+
+  // Sets the high media engagement bit for this frame's document.
+  virtual void SetHasHighMediaEngagement(bool has_high_media_engagement) = 0;
+
   // Scheduling ---------------------------------------------------------------
 
   virtual WebFrameScheduler* Scheduler() const = 0;
@@ -692,20 +750,17 @@ class WebLocalFrame : public WebFrame {
 
   // Returns frame-specific task runner to run tasks of this type on.
   // They have the same lifetime as the frame.
-  virtual base::SingleThreadTaskRunner* TimerTaskRunner() = 0;
-  virtual base::SingleThreadTaskRunner* LoadingTaskRunner() = 0;
-  virtual base::SingleThreadTaskRunner* UnthrottledTaskRunner() = 0;
+  virtual scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(
+      TaskType) = 0;
 
   // Returns the WebInputMethodController associated with this local frame.
   virtual WebInputMethodController* GetInputMethodController() = 0;
 
   // Loading ------------------------------------------------------------------
 
-  // Creates and returns a loader. This function can be called only when this
-  // frame is attached to a document.
-  virtual std::unique_ptr<WebURLLoader> CreateURLLoader(
-      const WebURLRequest&,
-      base::SingleThreadTaskRunner*) = 0;
+  // Creates and returns a new WebURLLoaderFactory. This function can be called
+  // only when this frame is attached to a document.
+  virtual std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() = 0;
 
   // Returns an AssociatedURLLoader that is associated with this frame.  The
   // loader will, for example, be cancelled when WebFrame::stopLoading is
@@ -728,6 +783,9 @@ class WebLocalFrame : public WebFrame {
   // Load the given URL.
   virtual void LoadRequest(const WebURLRequest&) = 0;
 
+  // Check whether loading has completed based on subframe state, etc.
+  virtual void CheckCompleted() = 0;
+
   // Geometry -----------------------------------------------------------------
 
   // NOTE: These routines do not force page layout so their results may
@@ -740,13 +798,18 @@ class WebLocalFrame : public WebFrame {
   // If set to false, do not draw scrollbars on this frame's view.
   virtual void SetCanHaveScrollbars(bool) = 0;
 
-  // The size of the contents area.
-  virtual WebSize ContentsSize() const = 0;
+  // The size of the document in this frame.
+  virtual WebSize DocumentSize() const = 0;
 
   // Returns true if the contents (minus scrollbars) has non-zero area.
   virtual bool HasVisibleContent() const = 0;
 
   // Printing ------------------------------------------------------------
+
+  // Dispatch |beforeprint| event, and execute event handlers. They might detach
+  // this frame from the owner WebView.
+  // This function should be called before pairs of PrintBegin() and PrintEnd().
+  virtual void DispatchBeforePrintEvent() = 0;
 
   // Reformats the WebFrame for printing. WebPrintParams specifies the printable
   // content size, paper size, printable area size, printer DPI and print
@@ -771,6 +834,11 @@ class WebLocalFrame : public WebFrame {
   // Reformats the WebFrame for screen display.
   virtual void PrintEnd() = 0;
 
+  // Dispatch |afterprint| event, and execute event handlers. They might detach
+  // this frame from the owner WebView.
+  // This function should be called after pairs of PrintBegin() and PrintEnd().
+  virtual void DispatchAfterPrintEvent() = 0;
+
   // If the frame contains a full-frame plugin or the given node refers to a
   // plugin whose content indicates that printed output should not be scaled,
   // return true, otherwise return false.
@@ -782,6 +850,10 @@ class WebLocalFrame : public WebFrame {
   // Shift + TAB. (Will be extended to other form controls like select element,
   // checkbox, radio etc.)
   virtual void AdvanceFocusInForm(WebFocusType) = 0;
+
+  // Performance --------------------------------------------------------
+
+  virtual WebPerformance Performance() const = 0;
 
   // Testing ------------------------------------------------------------------
 

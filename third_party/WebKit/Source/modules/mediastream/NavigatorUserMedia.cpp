@@ -18,16 +18,14 @@ NavigatorUserMedia::NavigatorUserMedia(Navigator& navigator)
           navigator.GetFrame() ? navigator.GetFrame()->GetDocument()
                                : nullptr)) {}
 
-const char* NavigatorUserMedia::SupplementName() {
-  return "NavigatorUserMedia";
-}
+const char NavigatorUserMedia::kSupplementName[] = "NavigatorUserMedia";
 
 NavigatorUserMedia& NavigatorUserMedia::From(Navigator& navigator) {
-  NavigatorUserMedia* supplement = static_cast<NavigatorUserMedia*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  NavigatorUserMedia* supplement =
+      Supplement<Navigator>::From<NavigatorUserMedia>(navigator);
   if (!supplement) {
     supplement = new NavigatorUserMedia(navigator);
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
 }
@@ -40,7 +38,7 @@ MediaDevices* NavigatorUserMedia::mediaDevices(Navigator& navigator) {
   return NavigatorUserMedia::From(navigator).GetMediaDevices();
 }
 
-DEFINE_TRACE(NavigatorUserMedia) {
+void NavigatorUserMedia::Trace(blink::Visitor* visitor) {
   visitor->Trace(media_devices_);
   Supplement<Navigator>::Trace(visitor);
 }

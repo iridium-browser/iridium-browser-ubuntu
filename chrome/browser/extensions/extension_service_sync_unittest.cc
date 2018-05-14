@@ -28,14 +28,15 @@
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/scripting_permissions_modifier.h"
+#include "chrome/browser/extensions/test_blacklist.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension_test_util.h"
 #include "chrome/common/extensions/sync_helper.h"
-#include "chrome/common/features.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/crx_file/id_util.h"
@@ -46,17 +47,16 @@
 #include "components/variations/variations_associated_data.h"
 #include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/app_sorting.h"
+#include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/browser/test_management_policy.h"
-#include "extensions/common/constants.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/permissions/permission_set.h"
-#include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
@@ -115,9 +115,9 @@ ExtensionSyncData GetEnableSyncData(const Extension& extension) {
   bool installed_by_custodian = false;
   ExtensionSyncData::OptionalBoolean has_all_urls =
       ExtensionSyncData::BOOLEAN_UNSET;
-  return ExtensionSyncData(extension, enabled, Extension::DISABLE_NONE,
-                           incognito_enabled, remote_install, has_all_urls,
-                           installed_by_custodian);
+  return ExtensionSyncData(
+      extension, enabled, extensions::disable_reason::DISABLE_NONE,
+      incognito_enabled, remote_install, has_all_urls, installed_by_custodian);
 }
 
 SyncChangeList MakeSyncChangeList(const std::string& id,
@@ -148,7 +148,7 @@ class StatefulChangeProcessor : public syncer::FakeSyncChangeProcessor {
   // the FakeSyncChangeProcessor's SyncDataList as a map keyed by extension
   // id.
   syncer::SyncError ProcessSyncChanges(
-      const tracked_objects::Location& from_here,
+      const base::Location& from_here,
       const syncer::SyncChangeList& change_list) override {
     syncer::FakeSyncChangeProcessor::ProcessSyncChanges(from_here, change_list);
     for (const auto& change : change_list) {
@@ -194,7 +194,7 @@ class StatefulChangeProcessor : public syncer::FakeSyncChangeProcessor {
   // want to
   // give up ownership of a local change processor.
   std::unique_ptr<syncer::SyncChangeProcessor> GetWrapped() {
-    return base::MakeUnique<syncer::SyncChangeProcessorWrapperForTest>(this);
+    return std::make_unique<syncer::SyncChangeProcessorWrapperForTest>(this);
   }
 
  protected:
@@ -222,14 +222,14 @@ class ExtensionServiceSyncTest
     ASSERT_TRUE(type == syncer::EXTENSIONS || type == syncer::APPS);
     extension_sync_service()->MergeDataAndStartSyncing(
         type, syncer::SyncDataList(),
-        base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-        base::MakeUnique<syncer::SyncErrorFactoryMock>());
+        std::make_unique<syncer::FakeSyncChangeProcessor>(),
+        std::make_unique<syncer::SyncErrorFactoryMock>());
   }
 
   void DisableExtensionFromSync(const Extension& extension,
                                 int disable_reasons) {
-    ExtensionSyncData disable_extension =
-        GetDisableSyncData(extension, Extension::DISABLE_USER_ACTION);
+    ExtensionSyncData disable_extension = GetDisableSyncData(
+        extension, extensions::disable_reason::DISABLE_USER_ACTION);
     SyncChangeList list(
         1, disable_extension.GetSyncChange(SyncChange::ACTION_UPDATE));
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
@@ -332,8 +332,8 @@ TEST_F(ExtensionServiceSyncTest, DeferredSyncStartupOnInstall) {
   // Once sync starts, flare should no longer be invoked.
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
   path = data_dir().AppendASCII("page_action.crx");
   InstallCRX(path, INSTALL_NEW);
   EXPECT_FALSE(flare_was_called);
@@ -367,14 +367,13 @@ TEST_F(ExtensionServiceSyncTest, DisableExtensionFromSync) {
   // Sync starts up.
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   // Then sync data arrives telling us to disable |good0|.
-  ExtensionSyncData disable_good_crx(*extension, false,
-                                     Extension::DISABLE_USER_ACTION, false,
-                                     false, ExtensionSyncData::BOOLEAN_UNSET,
-                                     false);
+  ExtensionSyncData disable_good_crx(
+      *extension, false, extensions::disable_reason::DISABLE_USER_ACTION, false,
+      false, ExtensionSyncData::BOOLEAN_UNSET, false);
   SyncChangeList list(
       1, disable_good_crx.GetSyncChange(SyncChange::ACTION_UPDATE));
   extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
@@ -404,19 +403,20 @@ TEST_F(ExtensionServiceSyncTest, ReenableDisabledExtensionFromSync) {
 
   syncer::FakeSyncChangeProcessor* processor_raw = nullptr;
   {
-    auto processor = base::MakeUnique<syncer::FakeSyncChangeProcessor>();
+    auto processor = std::make_unique<syncer::FakeSyncChangeProcessor>();
     processor_raw = processor.get();
     extension_sync_service()->MergeDataAndStartSyncing(
         syncer::EXTENSIONS, syncer::SyncDataList(), std::move(processor),
-        base::MakeUnique<syncer::SyncErrorFactoryMock>());
+        std::make_unique<syncer::SyncErrorFactoryMock>());
   }
   processor_raw->changes().clear();
 
-  DisableExtensionFromSync(*extension, Extension::DISABLE_USER_ACTION);
+  DisableExtensionFromSync(*extension,
+                           extensions::disable_reason::DISABLE_USER_ACTION);
 
   // The extension should be disabled.
   EXPECT_TRUE(registry()->disabled_extensions().GetByID(kExtensionId));
-  EXPECT_EQ(Extension::DISABLE_USER_ACTION,
+  EXPECT_EQ(extensions::disable_reason::DISABLE_USER_ACTION,
             ExtensionPrefs::Get(profile())->GetDisableReasons(kExtensionId));
   EXPECT_TRUE(processor_raw->changes().empty());
 
@@ -435,7 +435,8 @@ TEST_F(ExtensionServiceSyncTest, ReenableDisabledExtensionFromSync) {
 
   // Disable the extension again. Sync should push the new state.
   processor_raw->changes().clear();
-  service()->DisableExtension(kExtensionId, Extension::DISABLE_USER_ACTION);
+  service()->DisableExtension(kExtensionId,
+                              extensions::disable_reason::DISABLE_USER_ACTION);
   EXPECT_TRUE(registry()->disabled_extensions().GetByID(kExtensionId));
   {
     ASSERT_EQ(1u, processor_raw->changes().size());
@@ -444,7 +445,8 @@ TEST_F(ExtensionServiceSyncTest, ReenableDisabledExtensionFromSync) {
     std::unique_ptr<ExtensionSyncData> data =
         ExtensionSyncData::CreateFromSyncData(change.sync_data());
     EXPECT_EQ(kExtensionId, data->id());
-    EXPECT_EQ(Extension::DISABLE_USER_ACTION, data->disable_reasons());
+    EXPECT_EQ(extensions::disable_reason::DISABLE_USER_ACTION,
+              data->disable_reasons());
     EXPECT_FALSE(data->enabled());
   }
   processor_raw->changes().clear();
@@ -487,23 +489,25 @@ TEST_F(ExtensionServiceSyncTest,
 
   syncer::FakeSyncChangeProcessor* processor_raw = nullptr;
   {
-    auto processor = base::MakeUnique<syncer::FakeSyncChangeProcessor>();
+    auto processor = std::make_unique<syncer::FakeSyncChangeProcessor>();
     processor_raw = processor.get();
     extension_sync_service()->MergeDataAndStartSyncing(
         syncer::EXTENSIONS, syncer::SyncDataList(), std::move(processor),
-        base::MakeUnique<syncer::SyncErrorFactoryMock>());
+        std::make_unique<syncer::SyncErrorFactoryMock>());
   }
   processor_raw->changes().clear();
 
   // Sync state says the extension is disabled (e.g. on another machine).
-  DisableExtensionFromSync(*extension, Extension::DISABLE_USER_ACTION);
+  DisableExtensionFromSync(*extension,
+                           extensions::disable_reason::DISABLE_USER_ACTION);
 
   // The extension should still be enabled, since it's default-installed.
   EXPECT_TRUE(registry()->enabled_extensions().GetByID(kExtensionId));
   EXPECT_TRUE(processor_raw->changes().empty());
 
   // Now disable the extension locally. Sync should *not* push new state.
-  service()->DisableExtension(kExtensionId, Extension::DISABLE_USER_ACTION);
+  service()->DisableExtension(kExtensionId,
+                              extensions::disable_reason::DISABLE_USER_ACTION);
   EXPECT_TRUE(registry()->disabled_extensions().GetByID(kExtensionId));
   EXPECT_TRUE(processor_raw->changes().empty());
 
@@ -544,13 +548,15 @@ TEST_F(ExtensionServiceSyncTest, IgnoreSyncChangesWhenLocalStateIsMoreRecent) {
   ASSERT_TRUE(service()->IsExtensionEnabled(good2));
 
   // Disable and re-enable good0 before first sync data arrives.
-  service()->DisableExtension(good0, Extension::DISABLE_USER_ACTION);
+  service()->DisableExtension(good0,
+                              extensions::disable_reason::DISABLE_USER_ACTION);
   ASSERT_FALSE(service()->IsExtensionEnabled(good0));
   service()->EnableExtension(good0);
   ASSERT_TRUE(service()->IsExtensionEnabled(good0));
   // Disable good2 before first sync data arrives (good1 is considered
   // non-syncable because it has plugin permission).
-  service()->DisableExtension(good2, Extension::DISABLE_USER_ACTION);
+  service()->DisableExtension(good2,
+                              extensions::disable_reason::DISABLE_USER_ACTION);
   ASSERT_FALSE(service()->IsExtensionEnabled(good2));
 
   const Extension* extension0 = service()->GetExtensionById(good0, true);
@@ -559,19 +565,19 @@ TEST_F(ExtensionServiceSyncTest, IgnoreSyncChangesWhenLocalStateIsMoreRecent) {
   ASSERT_TRUE(extensions::sync_helper::IsSyncable(extension2));
 
   // Now sync data comes in that says to disable good0 and enable good2.
-  ExtensionSyncData disable_good0(*extension0, false,
-                                  Extension::DISABLE_USER_ACTION, false, false,
-                                  ExtensionSyncData::BOOLEAN_UNSET, false);
-  ExtensionSyncData enable_good2(*extension2, true, Extension::DISABLE_NONE,
-                                 false, false,
-                                 ExtensionSyncData::BOOLEAN_UNSET, false);
+  ExtensionSyncData disable_good0(
+      *extension0, false, extensions::disable_reason::DISABLE_USER_ACTION,
+      false, false, ExtensionSyncData::BOOLEAN_UNSET, false);
+  ExtensionSyncData enable_good2(
+      *extension2, true, extensions::disable_reason::DISABLE_NONE, false, false,
+      ExtensionSyncData::BOOLEAN_UNSET, false);
   syncer::SyncDataList sync_data;
   sync_data.push_back(disable_good0.GetSyncData());
   sync_data.push_back(enable_good2.GetSyncData());
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, sync_data,
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   // Both sync changes should be ignored, since the local state was changed
   // before sync started, and so the local state is considered more recent.
@@ -602,7 +608,7 @@ TEST_F(ExtensionServiceSyncTest, DontSelfNotify) {
       new syncer::FakeSyncChangeProcessor;
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(), base::WrapUnique(processor),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   processor->changes().clear();
 
@@ -614,9 +620,9 @@ TEST_F(ExtensionServiceSyncTest, DontSelfNotify) {
     ASSERT_TRUE(extension);
 
     // Disable the extension.
-    ExtensionSyncData data(*extension, false, Extension::DISABLE_USER_ACTION,
-                           false, false, ExtensionSyncData::BOOLEAN_UNSET,
-                           false);
+    ExtensionSyncData data(
+        *extension, false, extensions::disable_reason::DISABLE_USER_ACTION,
+        false, false, ExtensionSyncData::BOOLEAN_UNSET, false);
     SyncChangeList list(1, data.GetSyncChange(SyncChange::ACTION_UPDATE));
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
@@ -629,7 +635,8 @@ TEST_F(ExtensionServiceSyncTest, DontSelfNotify) {
     ASSERT_TRUE(extension);
 
     // Set incognito enabled to true.
-    ExtensionSyncData data(*extension, false, Extension::DISABLE_NONE, true,
+    ExtensionSyncData data(*extension, false,
+                           extensions::disable_reason::DISABLE_NONE, true,
                            false, ExtensionSyncData::BOOLEAN_UNSET, false);
     SyncChangeList list(1, data.GetSyncChange(SyncChange::ACTION_UPDATE));
 
@@ -643,11 +650,11 @@ TEST_F(ExtensionServiceSyncTest, DontSelfNotify) {
     ASSERT_TRUE(extension);
 
     // Add another disable reason.
-    ExtensionSyncData data(*extension, false,
-                           Extension::DISABLE_USER_ACTION |
-                               Extension::DISABLE_PERMISSIONS_INCREASE,
-                           false, false, ExtensionSyncData::BOOLEAN_UNSET,
-                           false);
+    ExtensionSyncData data(
+        *extension, false,
+        extensions::disable_reason::DISABLE_USER_ACTION |
+            extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE,
+        false, false, ExtensionSyncData::BOOLEAN_UNSET, false);
     SyncChangeList list(1, data.GetSyncChange(SyncChange::ACTION_UPDATE));
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
@@ -660,11 +667,11 @@ TEST_F(ExtensionServiceSyncTest, DontSelfNotify) {
     ASSERT_TRUE(extension);
 
     // Uninstall the extension.
-    ExtensionSyncData data(*extension, false,
-                           Extension::DISABLE_USER_ACTION |
-                               Extension::DISABLE_PERMISSIONS_INCREASE,
-                           false, false, ExtensionSyncData::BOOLEAN_UNSET,
-                           false);
+    ExtensionSyncData data(
+        *extension, false,
+        extensions::disable_reason::DISABLE_USER_ACTION |
+            extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE,
+        false, false, ExtensionSyncData::BOOLEAN_UNSET, false);
     SyncChangeList list(1, data.GetSyncChange(SyncChange::ACTION_DELETE));
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
@@ -681,8 +688,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncData) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   syncer::SyncDataList list =
       extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -696,7 +703,7 @@ TEST_F(ExtensionServiceSyncTest, GetSyncData) {
   EXPECT_EQ(extensions::util::IsIncognitoEnabled(good_crx, profile()),
             data->incognito_enabled());
   EXPECT_EQ(ExtensionSyncData::BOOLEAN_UNSET, data->all_urls_enabled());
-  EXPECT_EQ(data->version(), *extension->version());
+  EXPECT_EQ(data->version(), extension->version());
   EXPECT_EQ(extensions::ManifestURL::GetUpdateURL(extension),
             data->update_url());
   EXPECT_EQ(extension->name(), data->name());
@@ -710,8 +717,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataDisableReasons) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   {
     syncer::SyncDataList list =
@@ -722,11 +729,13 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataDisableReasons) {
     ASSERT_TRUE(data.get());
     EXPECT_TRUE(data->enabled());
     EXPECT_TRUE(data->supports_disable_reasons());
-    EXPECT_EQ(Extension::DISABLE_NONE, data->disable_reasons());
+    EXPECT_EQ(extensions::disable_reason::DISABLE_NONE,
+              data->disable_reasons());
   }
 
   // Syncable disable reason, should propagate to sync.
-  service()->DisableExtension(good_crx, Extension::DISABLE_USER_ACTION);
+  service()->DisableExtension(good_crx,
+                              extensions::disable_reason::DISABLE_USER_ACTION);
   {
     syncer::SyncDataList list =
         extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -736,12 +745,14 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataDisableReasons) {
     ASSERT_TRUE(data.get());
     EXPECT_FALSE(data->enabled());
     EXPECT_TRUE(data->supports_disable_reasons());
-    EXPECT_EQ(Extension::DISABLE_USER_ACTION, data->disable_reasons());
+    EXPECT_EQ(extensions::disable_reason::DISABLE_USER_ACTION,
+              data->disable_reasons());
   }
   service()->EnableExtension(good_crx);
 
   // Non-syncable disable reason. The sync data should still say "enabled".
-  service()->DisableExtension(good_crx, Extension::DISABLE_RELOAD);
+  service()->DisableExtension(good_crx,
+                              extensions::disable_reason::DISABLE_RELOAD);
   {
     syncer::SyncDataList list =
         extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -751,14 +762,16 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataDisableReasons) {
     ASSERT_TRUE(data.get());
     EXPECT_TRUE(data->enabled());
     EXPECT_TRUE(data->supports_disable_reasons());
-    EXPECT_EQ(Extension::DISABLE_NONE, data->disable_reasons());
+    EXPECT_EQ(extensions::disable_reason::DISABLE_NONE,
+              data->disable_reasons());
   }
   service()->EnableExtension(good_crx);
 
   // Both a syncable and a non-syncable disable reason, only the former should
   // propagate to sync.
-  service()->DisableExtension(
-      good_crx, Extension::DISABLE_USER_ACTION | Extension::DISABLE_RELOAD);
+  service()->DisableExtension(good_crx,
+                              extensions::disable_reason::DISABLE_USER_ACTION |
+                                  extensions::disable_reason::DISABLE_RELOAD);
   {
     syncer::SyncDataList list =
         extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -768,7 +781,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataDisableReasons) {
     ASSERT_TRUE(data.get());
     EXPECT_FALSE(data->enabled());
     EXPECT_TRUE(data->supports_disable_reasons());
-    EXPECT_EQ(Extension::DISABLE_USER_ACTION, data->disable_reasons());
+    EXPECT_EQ(extensions::disable_reason::DISABLE_USER_ACTION,
+              data->disable_reasons());
   }
   service()->EnableExtension(good_crx);
 }
@@ -782,8 +796,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataTerminated) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   syncer::SyncDataList list =
       extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -797,7 +811,7 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataTerminated) {
   EXPECT_EQ(extensions::util::IsIncognitoEnabled(good_crx, profile()),
             data->incognito_enabled());
   EXPECT_EQ(ExtensionSyncData::BOOLEAN_UNSET, data->all_urls_enabled());
-  EXPECT_EQ(data->version(), *extension->version());
+  EXPECT_EQ(data->version(), extension->version());
   EXPECT_EQ(extensions::ManifestURL::GetUpdateURL(extension),
             data->update_url());
   EXPECT_EQ(extension->name(), data->name());
@@ -811,8 +825,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataFilter) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::APPS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   syncer::SyncDataList list =
       extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -827,8 +841,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncExtensionDataUserSettings) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   {
     syncer::SyncDataList list =
@@ -842,7 +856,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncExtensionDataUserSettings) {
     EXPECT_EQ(ExtensionSyncData::BOOLEAN_UNSET, data->all_urls_enabled());
   }
 
-  service()->DisableExtension(good_crx, Extension::DISABLE_USER_ACTION);
+  service()->DisableExtension(good_crx,
+                              extensions::disable_reason::DISABLE_USER_ACTION);
   {
     syncer::SyncDataList list =
         extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -896,11 +911,11 @@ TEST_F(ExtensionServiceSyncTest, SyncForUninstalledExternalExtension) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
   StartSyncing(syncer::APPS);
 
-  UninstallExtension(good_crx, false);
+  UninstallExtension(good_crx);
   EXPECT_TRUE(
       ExtensionPrefs::Get(profile())->IsExternalExtensionUninstalled(good_crx));
 
@@ -929,8 +944,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncAppDataUserSettings) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::APPS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   syncer::StringOrdinal initial_ordinal =
       syncer::StringOrdinal::CreateInitialOrdinal();
@@ -1033,14 +1048,15 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataList) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::APPS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
-  service()->DisableExtension(page_action, Extension::DISABLE_USER_ACTION);
+  service()->DisableExtension(page_action,
+                              extensions::disable_reason::DISABLE_USER_ACTION);
   TerminateExtension(theme2_crx);
 
   EXPECT_EQ(0u, extension_sync_service()->GetAllSyncData(syncer::APPS).size());
@@ -1052,8 +1068,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataUninstall) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   sync_pb::EntitySpecifics specifics;
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
@@ -1097,7 +1113,7 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataWrongType) {
       app_specifics->mutable_extension();
   extension_specifics->set_id(good_crx);
   extension_specifics->set_version(
-      service()->GetInstalledExtension(good_crx)->version()->GetString());
+      service()->GetInstalledExtension(good_crx)->version().GetString());
 
   {
     extension_specifics->set_enabled(true);
@@ -1126,8 +1142,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataSettings) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   InstallCRX(data_dir().AppendASCII("good.crx"), INSTALL_NEW);
   EXPECT_TRUE(service()->IsExtensionEnabled(good_crx));
@@ -1138,7 +1154,7 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataSettings) {
   auto get_permissions_modifier = [this]() {
     const Extension* extension = registry()->GetExtensionById(
         good_crx, extensions::ExtensionRegistry::EVERYTHING);
-    return base::MakeUnique<ScriptingPermissionsModifier>(profile(), extension);
+    return std::make_unique<ScriptingPermissionsModifier>(profile(), extension);
   };
   EXPECT_FALSE(get_permissions_modifier()->HasSetAllowedOnAllUrls());
   const bool kDefaultAllowedScripting =
@@ -1150,7 +1166,7 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataSettings) {
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
   ext_specifics->set_id(good_crx);
   ext_specifics->set_version(
-      service()->GetInstalledExtension(good_crx)->version()->GetString());
+      service()->GetInstalledExtension(good_crx)->version().GetString());
   ext_specifics->set_enabled(false);
 
   {
@@ -1223,8 +1239,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataNewExtension) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   const base::FilePath path = data_dir().AppendASCII("good.crx");
   const ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
@@ -1242,22 +1258,26 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataNewExtension) {
     // installation.
     bool expect_permissions_granted;
   } test_cases[] = {
-    // Standard case: Extension comes in enabled; permissions should be granted
-    // during installation.
-    { "Standard", true, 0, 0, true },
-    // If the extension comes in disabled, its permissions should still be
-    // granted (the user already approved them on another machine).
-    { "Disabled", false, Extension::DISABLE_USER_ACTION,
-      Extension::DISABLE_USER_ACTION, true },
-    // Legacy case (<M45): No disable reasons come in from Sync (see
-    // crbug.com/484214). After installation, the reason should be set to
-    // DISABLE_USER_ACTION (default assumption).
-    { "Legacy", false, -1, Extension::DISABLE_USER_ACTION, true },
-    // If the extension came in disabled due to a permissions increase, then the
-    // user has *not* approved the permissions, and they shouldn't be granted.
-    // crbug.com/484214
-    { "PermissionsIncrease", false, Extension::DISABLE_PERMISSIONS_INCREASE,
-      Extension::DISABLE_PERMISSIONS_INCREASE, false },
+      // Standard case: Extension comes in enabled; permissions should be
+      // granted
+      // during installation.
+      {"Standard", true, 0, 0, true},
+      // If the extension comes in disabled, its permissions should still be
+      // granted (the user already approved them on another machine).
+      {"Disabled", false, extensions::disable_reason::DISABLE_USER_ACTION,
+       extensions::disable_reason::DISABLE_USER_ACTION, true},
+      // Legacy case (<M45): No disable reasons come in from Sync (see
+      // crbug.com/484214). After installation, the reason should be set to
+      // DISABLE_USER_ACTION (default assumption).
+      {"Legacy", false, -1, extensions::disable_reason::DISABLE_USER_ACTION,
+       true},
+      // If the extension came in disabled due to a permissions increase, then
+      // the
+      // user has *not* approved the permissions, and they shouldn't be granted.
+      // crbug.com/484214
+      {"PermissionsIncrease", false,
+       extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE,
+       extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE, false},
   };
 
   for (const TestCase& test_case : test_cases) {
@@ -1285,11 +1305,13 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataNewExtension) {
         prefs->GetGrantedPermissions(good_crx);
     EXPECT_EQ(test_case.expect_permissions_granted, !permissions->IsEmpty());
     ASSERT_FALSE(service()->pending_extension_manager()->IsIdPending(good_crx));
+    if (test_case.sync_enabled)
+      EXPECT_TRUE(registry()->enabled_extensions().GetByID(good_crx));
+    else
+      EXPECT_TRUE(registry()->disabled_extensions().GetByID(good_crx));
 
     // Remove the extension again, so we can install it again for the next case.
-    UninstallExtension(good_crx, false,
-                       test_case.sync_enabled ? Extension::ENABLED
-                                              : Extension::DISABLED);
+    UninstallExtension(good_crx);
   }
 }
 
@@ -1297,8 +1319,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataTerminatedExtension) {
   InitializeExtensionServiceWithUpdater();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   InstallCRX(data_dir().AppendASCII("good.crx"), INSTALL_NEW);
   TerminateExtension(good_crx);
@@ -1309,7 +1331,7 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataTerminatedExtension) {
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
   ext_specifics->set_id(good_crx);
   ext_specifics->set_version(
-      service()->GetInstalledExtension(good_crx)->version()->GetString());
+      service()->GetInstalledExtension(good_crx)->version().GetString());
   ext_specifics->set_enabled(false);
   ext_specifics->set_incognito_enabled(true);
 
@@ -1327,8 +1349,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataVersionCheck) {
   InitializeExtensionServiceWithUpdater();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   InstallCRX(data_dir().AppendASCII("good.crx"), INSTALL_NEW);
   EXPECT_TRUE(service()->IsExtensionEnabled(good_crx));
@@ -1340,7 +1362,7 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataVersionCheck) {
   ext_specifics->set_enabled(true);
 
   const base::Version installed_version =
-      *service()->GetInstalledExtension(good_crx)->version();
+      service()->GetInstalledExtension(good_crx)->version();
 
   {
     ext_specifics->set_version(installed_version.GetString());
@@ -1409,8 +1431,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataNotInstalled) {
   InitializeExtensionServiceWithUpdater();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   sync_pb::EntitySpecifics specifics;
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
@@ -1443,8 +1465,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataEnableDisable) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   const ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
 
@@ -1460,38 +1482,50 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataEnableDisable) {
     // extension should be disabled iff this is != 0.
     int expect_disable_reasons;
   } test_cases[] = {
-    { "NopEnable", 0, true, 0, 0 },
-    { "NopDisable", Extension::DISABLE_USER_ACTION, false,
-      Extension::DISABLE_USER_ACTION, Extension::DISABLE_USER_ACTION },
-    { "Enable", Extension::DISABLE_USER_ACTION, true, 0, 0 },
-    { "Disable", 0, false, Extension::DISABLE_USER_ACTION,
-      Extension::DISABLE_USER_ACTION },
-    { "AddDisableReason", Extension::DISABLE_REMOTE_INSTALL, false,
-      Extension::DISABLE_REMOTE_INSTALL | Extension::DISABLE_USER_ACTION,
-      Extension::DISABLE_REMOTE_INSTALL | Extension::DISABLE_USER_ACTION },
-    { "RemoveDisableReason",
-      Extension::DISABLE_REMOTE_INSTALL | Extension::DISABLE_USER_ACTION, false,
-      Extension::DISABLE_USER_ACTION, Extension::DISABLE_USER_ACTION },
-    { "PreserveLocalDisableReason", Extension::DISABLE_RELOAD, true, 0,
-      Extension::DISABLE_RELOAD },
-    { "PreserveOnlyLocalDisableReason",
-      Extension::DISABLE_USER_ACTION | Extension::DISABLE_RELOAD, true, 0,
-      Extension::DISABLE_RELOAD },
+      {"NopEnable", 0, true, 0, 0},
+      {"NopDisable", extensions::disable_reason::DISABLE_USER_ACTION, false,
+       extensions::disable_reason::DISABLE_USER_ACTION,
+       extensions::disable_reason::DISABLE_USER_ACTION},
+      {"Enable", extensions::disable_reason::DISABLE_USER_ACTION, true, 0, 0},
+      {"Disable", 0, false, extensions::disable_reason::DISABLE_USER_ACTION,
+       extensions::disable_reason::DISABLE_USER_ACTION},
+      {"AddDisableReason", extensions::disable_reason::DISABLE_REMOTE_INSTALL,
+       false,
+       extensions::disable_reason::DISABLE_REMOTE_INSTALL |
+           extensions::disable_reason::DISABLE_USER_ACTION,
+       extensions::disable_reason::DISABLE_REMOTE_INSTALL |
+           extensions::disable_reason::DISABLE_USER_ACTION},
+      {"RemoveDisableReason",
+       extensions::disable_reason::DISABLE_REMOTE_INSTALL |
+           extensions::disable_reason::DISABLE_USER_ACTION,
+       false, extensions::disable_reason::DISABLE_USER_ACTION,
+       extensions::disable_reason::DISABLE_USER_ACTION},
+      {"PreserveLocalDisableReason", extensions::disable_reason::DISABLE_RELOAD,
+       true, 0, extensions::disable_reason::DISABLE_RELOAD},
+      {"PreserveOnlyLocalDisableReason",
+       extensions::disable_reason::DISABLE_USER_ACTION |
+           extensions::disable_reason::DISABLE_RELOAD,
+       true, 0, extensions::disable_reason::DISABLE_RELOAD},
 
-    // Interaction with Chrome clients <=M44, which don't sync disable_reasons
-    // at all (any existing reasons are preserved).
-    { "M44Enable", Extension::DISABLE_USER_ACTION, true, -1, 0 },
-    // An M44 client enables an extension that had been disabled on a new
-    // client. The disable reasons are still be there, but should be ignored.
-    { "M44ReEnable", Extension::DISABLE_USER_ACTION, true,
-      Extension::DISABLE_USER_ACTION, 0 },
-    { "M44Disable", 0, false, -1, Extension::DISABLE_USER_ACTION },
-    { "M44ReDisable", 0, false, 0, Extension::DISABLE_USER_ACTION },
-    { "M44AlreadyDisabledByUser", Extension::DISABLE_USER_ACTION, false, -1,
-      Extension::DISABLE_USER_ACTION},
-    { "M44AlreadyDisabledWithOtherReason", Extension::DISABLE_REMOTE_INSTALL,
-      false, -1,
-      Extension::DISABLE_REMOTE_INSTALL | Extension::DISABLE_USER_ACTION },
+      // Interaction with Chrome clients <=M44, which don't sync disable_reasons
+      // at all (any existing reasons are preserved).
+      {"M44Enable", extensions::disable_reason::DISABLE_USER_ACTION, true, -1,
+       0},
+      // An M44 client enables an extension that had been disabled on a new
+      // client. The disable reasons are still be there, but should be ignored.
+      {"M44ReEnable", extensions::disable_reason::DISABLE_USER_ACTION, true,
+       extensions::disable_reason::DISABLE_USER_ACTION, 0},
+      {"M44Disable", 0, false, -1,
+       extensions::disable_reason::DISABLE_USER_ACTION},
+      {"M44ReDisable", 0, false, 0,
+       extensions::disable_reason::DISABLE_USER_ACTION},
+      {"M44AlreadyDisabledByUser",
+       extensions::disable_reason::DISABLE_USER_ACTION, false, -1,
+       extensions::disable_reason::DISABLE_USER_ACTION},
+      {"M44AlreadyDisabledWithOtherReason",
+       extensions::disable_reason::DISABLE_REMOTE_INSTALL, false, -1,
+       extensions::disable_reason::DISABLE_REMOTE_INSTALL |
+           extensions::disable_reason::DISABLE_USER_ACTION},
   };
 
   for (const TestCase& test_case : test_cases) {
@@ -1536,24 +1570,28 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataEnableDisable) {
     EXPECT_EQ(test_case.expect_disable_reasons, prefs->GetDisableReasons(id));
 
     // Remove the extension again, so we can install it again for the next case.
-    UninstallExtension(id, false, expect_enabled ? Extension::ENABLED
-                                                 : Extension::DISABLED);
+    UninstallExtension(id);
   }
 }
 
-TEST_F(ExtensionServiceSyncTest, ProcessSyncDataDeferredEnable) {
-  // The permissions_increase test extension has a different update URL.
-  // In order to make it syncable, we have to pretend it syncs from the
-  // webstore.
-  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kAppsGalleryUpdateURL,
-      "http://localhost/autoupdate/updates.xml");
+class ExtensionServiceSyncCustomGalleryTest : public ExtensionServiceSyncTest {
+ public:
+  void SetUp() override {
+    ExtensionServiceSyncTest::SetUp();
 
+    // This is the update URL specified in the permissions test extension.
+    // Setting it here is necessary to make the extension considered syncable.
+    extension_test_util::SetGalleryUpdateURL(
+        GURL("http://localhost/autoupdate/updates.xml"));
+  }
+};
+
+TEST_F(ExtensionServiceSyncCustomGalleryTest, ProcessSyncDataDeferredEnable) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   base::FilePath base_path = data_dir().AppendASCII("permissions_increase");
   base::FilePath pem_path = base_path.AppendASCII("permissions.pem");
@@ -1577,7 +1615,7 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataDeferredEnable) {
   ext_specifics->set_id(id);
   ext_specifics->set_version("3");
   ext_specifics->set_enabled(true);
-  ext_specifics->set_disable_reasons(Extension::DISABLE_NONE);
+  ext_specifics->set_disable_reasons(extensions::disable_reason::DISABLE_NONE);
 
   SyncChangeList list =
       MakeSyncChangeList(good_crx, specifics, SyncChange::ACTION_UPDATE);
@@ -1592,26 +1630,13 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataDeferredEnable) {
   PackCRXAndUpdateExtension(id, path, pem_path, ENABLED);
 }
 
-class ExtensionServiceSyncCustomGalleryTest : public ExtensionServiceSyncTest {
- public:
-  void SetUp() override {
-    ExtensionServiceSyncTest::SetUp();
-
-    // This is the update URL specified in the permissions test extension.
-    // Setting it here is necessary to make the extension considered syncable.
-    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        switches::kAppsGalleryUpdateURL,
-        "http://localhost/autoupdate/updates.xml");
-  }
-};
-
 TEST_F(ExtensionServiceSyncCustomGalleryTest,
        ProcessSyncDataPermissionApproval) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   const base::FilePath base_path =
       data_dir().AppendASCII("permissions_increase");
@@ -1642,16 +1667,19 @@ TEST_F(ExtensionServiceSyncCustomGalleryTest,
     // Whether the extension's permissions should be auto-granted.
     bool expect_permissions_granted;
   } test_cases[] = {
-    // Sync tells us to re-enable an older version. No permissions should be
-    // granted, since we can't be sure if the user actually approved the right
-    // set of permissions.
-    { "OldVersion", v1, 0, Extension::DISABLE_PERMISSIONS_INCREASE, false },
-    // Legacy case: Sync tells us to re-enable the extension, but doesn't
-    // specify disable reasons. No permissions should be granted.
-    { "Legacy", v2, -1, Extension::DISABLE_PERMISSIONS_INCREASE, false },
-    // Sync tells us to re-enable the extension and explicitly removes the
-    // disable reasons. Now the extension should have its permissions granted.
-    { "GrantPermissions", v2, 0, Extension::DISABLE_NONE, true },
+      // Sync tells us to re-enable an older version. No permissions should be
+      // granted, since we can't be sure if the user actually approved the right
+      // set of permissions.
+      {"OldVersion", v1, 0,
+       extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE, false},
+      // Legacy case: Sync tells us to re-enable the extension, but doesn't
+      // specify disable reasons. No permissions should be granted.
+      {"Legacy", v2, -1,
+       extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE, false},
+      // Sync tells us to re-enable the extension and explicitly removes the
+      // disable reasons. Now the extension should have its permissions granted.
+      {"GrantPermissions", v2, 0, extensions::disable_reason::DISABLE_NONE,
+       true},
   };
 
   for (const TestCase& test_case : test_cases) {
@@ -1683,7 +1711,7 @@ TEST_F(ExtensionServiceSyncCustomGalleryTest,
       ASSERT_EQ(v2, extension->VersionString());
     }
     ASSERT_TRUE(prefs->HasDisableReason(
-        id, Extension::DISABLE_PERMISSIONS_INCREASE));
+        id, extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE));
 
     // No new permissions should have been granted.
     std::unique_ptr<const PermissionSet> granted_permissions_v2 =
@@ -1719,8 +1747,7 @@ TEST_F(ExtensionServiceSyncCustomGalleryTest,
     }
 
     // Remove the extension again, so we can install it again for the next case.
-    UninstallExtension(id, false, expect_enabled ? Extension::ENABLED
-                                                 : Extension::DISABLED);
+    UninstallExtension(id);
   }
 }
 
@@ -1768,7 +1795,7 @@ class ExtensionServiceTestSupervised
       public SupervisedUserService::Delegate {
  public:
   ExtensionServiceTestSupervised()
-      : field_trial_list_(base::MakeUnique<base::MockEntropyProvider>()) {}
+      : field_trial_list_(std::make_unique<base::MockEntropyProvider>()) {}
 
   void TearDown() override {
     supervised_user_service()->SetDelegate(nullptr);
@@ -1785,8 +1812,8 @@ class ExtensionServiceTestSupervised
   }
 
   bool IsPendingCustodianApproval(const std::string& extension_id) {
-    auto function = make_scoped_refptr(
-        new WebstorePrivateIsPendingCustodianApprovalFunction());
+    auto function = base::MakeRefCounted<
+        WebstorePrivateIsPendingCustodianApprovalFunction>();
 
     std::unique_ptr<base::Value> result(RunFunctionAndReturnSingleResult(
         function.get(), "[\"" + extension_id + "\"]", browser_context()));
@@ -1861,7 +1888,7 @@ class ExtensionServiceTestSupervised
       CheckDisabledForCustodianApproval(id);
     }
 
-    EXPECT_EQ(*extension->version(), base::Version("1"));
+    EXPECT_EQ(base::Version("1"), extension->version());
 
     return id;
   }
@@ -1875,7 +1902,7 @@ class ExtensionServiceTestSupervised
     const Extension* extension = registry()->GetInstalledExtension(id);
     ASSERT_TRUE(extension);
     // The version should have been updated.
-    EXPECT_EQ(*extension->version(), base::Version(version));
+    EXPECT_EQ(base::Version(version), extension->version());
   }
 
   // Simulate a custodian approval for enabling the extension coming in
@@ -1902,7 +1929,7 @@ class ExtensionServiceTestSupervised
     ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(profile());
     EXPECT_TRUE(extension_prefs->HasDisableReason(
         extension_id,
-        extensions::Extension::DISABLE_CUSTODIAN_APPROVAL_REQUIRED));
+        extensions::disable_reason::DISABLE_CUSTODIAN_APPROVAL_REQUIRED));
   }
 
   SupervisedUserService* supervised_user_service() {
@@ -2003,7 +2030,7 @@ TEST_F(ExtensionServiceTestSupervised,
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
   ext_specifics->set_id(id);
   ext_specifics->set_enabled(true);
-  ext_specifics->set_disable_reasons(Extension::DISABLE_NONE);
+  ext_specifics->set_disable_reasons(extensions::disable_reason::DISABLE_NONE);
   ext_specifics->set_installed_by_custodian(true);
   ext_specifics->set_version(version);
 
@@ -2036,7 +2063,7 @@ TEST_F(ExtensionServiceTestSupervised,
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
   ext_specifics->set_id(id);
   ext_specifics->set_enabled(true);
-  ext_specifics->set_disable_reasons(Extension::DISABLE_NONE);
+  ext_specifics->set_disable_reasons(extensions::disable_reason::DISABLE_NONE);
   ext_specifics->set_installed_by_custodian(true);
   ext_specifics->set_version(version);
 
@@ -2133,8 +2160,10 @@ TEST_F(ExtensionServiceTestSupervised,
   profile()->AsTestingProfile()->SetSupervisedUserId(
       supervised_users::kChildAccountSUID);
 
-  // The extension should not be loaded anymore.
-  EXPECT_FALSE(registry()->GetInstalledExtension(id));
+  // The extension should now be disabled.
+  EXPECT_TRUE(registry()->disabled_extensions().Contains(id));
+  EXPECT_EQ(extensions::disable_reason::DISABLE_BLOCKED_BY_POLICY,
+            ExtensionPrefs::Get(profile())->GetDisableReasons(id));
 }
 
 TEST_F(ExtensionServiceTestSupervised, ExtensionApprovalBeforeInstallation) {
@@ -2179,7 +2208,7 @@ TEST_F(ExtensionServiceTestSupervised, UpdateWithoutPermissionIncrease) {
   const Extension* extension = registry()->enabled_extensions().GetByID(id);
   ASSERT_TRUE(extension);
   // The version should have changed.
-  EXPECT_EQ(*extension->version(), base::Version(version2));
+  EXPECT_EQ(base::Version(version2), extension->version());
   EXPECT_FALSE(IsPendingCustodianApproval(id));
 }
 
@@ -2210,7 +2239,7 @@ TEST_F(ExtensionServiceTestSupervised,
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
   ext_specifics->set_id(id);
   ext_specifics->set_enabled(true);
-  ext_specifics->set_disable_reasons(Extension::DISABLE_NONE);
+  ext_specifics->set_disable_reasons(extensions::disable_reason::DISABLE_NONE);
   ext_specifics->set_installed_by_custodian(true);
   ext_specifics->set_version(version1);
 
@@ -2257,7 +2286,7 @@ TEST_F(ExtensionServiceTestSupervised,
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
   ext_specifics->set_id(id);
   ext_specifics->set_enabled(true);
-  ext_specifics->set_disable_reasons(Extension::DISABLE_NONE);
+  ext_specifics->set_disable_reasons(extensions::disable_reason::DISABLE_NONE);
   ext_specifics->set_installed_by_custodian(true);
   ext_specifics->set_version(version2);
 
@@ -2294,7 +2323,7 @@ TEST_F(ExtensionServiceTestSupervised,
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
   ext_specifics->set_id(id);
   ext_specifics->set_enabled(true);
-  ext_specifics->set_disable_reasons(Extension::DISABLE_NONE);
+  ext_specifics->set_disable_reasons(extensions::disable_reason::DISABLE_NONE);
   ext_specifics->set_installed_by_custodian(true);
   ext_specifics->set_version(version3);
 
@@ -2379,7 +2408,7 @@ TEST_F(ExtensionServiceTestSupervised,
   const Extension* extension = registry()->enabled_extensions().GetByID(id);
   ASSERT_TRUE(extension);
   // The version should have increased.
-  EXPECT_EQ(1, extension->version()->CompareTo(base::Version(version1)));
+  EXPECT_EQ(1, extension->version().CompareTo(base::Version(version1)));
 
   // Check that the approved version has been updated in the prefs as well.
   // Prefs are updated via Sync.  If the prefs are updated, then the new
@@ -2390,7 +2419,7 @@ TEST_F(ExtensionServiceTestSupervised,
       pref_service->GetDictionary(prefs::kSupervisedUserApprovedExtensions);
   approved_extensions->GetStringWithoutPathExpansion(id, &approved_version);
 
-  EXPECT_EQ(base::Version(approved_version), *extension->version());
+  EXPECT_EQ(base::Version(approved_version), extension->version());
   EXPECT_FALSE(IsPendingCustodianApproval(id));
 }
 
@@ -2415,7 +2444,7 @@ TEST_F(ExtensionServiceTestSupervised,
   // The extension should be disabled.
   EXPECT_FALSE(registry()->enabled_extensions().Contains(id));
   EXPECT_TRUE(ExtensionPrefs::Get(profile())->HasDisableReason(
-      id, Extension::DISABLE_PERMISSIONS_INCREASE));
+      id, extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE));
 
   std::string version2("2");
   // Approve an older version
@@ -2425,9 +2454,9 @@ TEST_F(ExtensionServiceTestSupervised,
   // The extension should remain disabled.
   EXPECT_FALSE(registry()->enabled_extensions().Contains(id));
   EXPECT_TRUE(ExtensionPrefs::Get(profile())->HasDisableReason(
-      id, Extension::DISABLE_PERMISSIONS_INCREASE));
+      id, extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE));
   EXPECT_TRUE(ExtensionPrefs::Get(profile())->HasDisableReason(
-      id, Extension::DISABLE_CUSTODIAN_APPROVAL_REQUIRED));
+      id, extensions::disable_reason::DISABLE_CUSTODIAN_APPROVAL_REQUIRED));
 
   EXPECT_TRUE(IsPendingCustodianApproval(id));
   // Approve the latest version
@@ -2472,8 +2501,8 @@ TEST_F(ExtensionServiceSyncTest, SyncUninstallByCustodianSkipsPolicy) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
-      base::MakeUnique<syncer::SyncErrorFactoryMock>());
+      std::make_unique<syncer::FakeSyncChangeProcessor>(),
+      std::make_unique<syncer::SyncErrorFactoryMock>());
 
   extensions::util::SetWasInstalledByCustodian(good2048, profile(), true);
   // Install two extensions.
@@ -2531,18 +2560,9 @@ TEST_F(ExtensionServiceSyncTest, SyncExtensionHasAllhostsWithheld) {
   // Create an extension that needs all-hosts.
   const std::string kName("extension");
   scoped_refptr<const Extension> extension =
-      extensions::ExtensionBuilder()
+      extensions::ExtensionBuilder(kName)
           .SetLocation(Manifest::INTERNAL)
-          .SetManifest(
-              extensions::DictionaryBuilder()
-                  .Set("name", kName)
-                  .Set("description", "foo")
-                  .Set("manifest_version", 2)
-                  .Set("version", "1.0")
-                  .Set("permissions",
-                       extensions::ListBuilder().Append("*://*/*").Build())
-                  .Build())
-          .SetID(crx_file::id_util::GenerateId(kName))
+          .AddPermission("*://*/*")
           .Build();
 
   // Install and enable it.
@@ -2613,7 +2633,7 @@ TEST_F(ExtensionServiceSyncTest, AppToExtension) {
       ExtensionSyncData::CreateFromSyncData(app_change.sync_data());
   EXPECT_TRUE(app_data->is_app());
   EXPECT_EQ(id, app_data->id());
-  EXPECT_EQ(*v1->version(), app_data->version());
+  EXPECT_EQ(v1->version(), app_data->version());
 
   // Update the app to v2, which is an extension.
   const Extension* v2 =
@@ -2631,7 +2651,7 @@ TEST_F(ExtensionServiceSyncTest, AppToExtension) {
       ExtensionSyncData::CreateFromSyncData(extension_change.sync_data());
   EXPECT_FALSE(extension_data->is_app());
   EXPECT_EQ(id, extension_data->id());
-  EXPECT_EQ(*v2->version(), extension_data->version());
+  EXPECT_EQ(v2->version(), extension_data->version());
 
   // Get the current data from the change processors to use as the input to
   // the following call to MergeDataAndStartSyncing. This simulates what should
@@ -2667,4 +2687,118 @@ TEST_F(ExtensionServiceSyncTest, AppToExtension) {
   // Make sure there is one extension, and there are no more apps.
   EXPECT_EQ(1u, extensions_processor.data().size());
   EXPECT_TRUE(apps_processor.data().empty());
+}
+
+class BlacklistedExtensionSyncServiceTest : public ExtensionServiceSyncTest {
+ public:
+  BlacklistedExtensionSyncServiceTest() {}
+
+  void SetUp() override {
+    ExtensionServiceSyncTest::SetUp();
+
+    InitializeEmptyExtensionService();
+
+    // Enable sync.
+    browser_sync::ProfileSyncService* sync_service =
+        ProfileSyncServiceFactory::GetForProfile(profile());
+    sync_service->SetFirstSetupComplete();
+
+    test_blacklist_.Attach(service()->blacklist_);
+    service()->Init();
+
+    // Load up a simple extension.
+    extensions::ChromeTestExtensionLoader extension_loader(profile());
+    extension_loader.set_pack_extension(true);
+    extension_ = extension_loader.LoadExtension(
+        data_dir().AppendASCII("simple_with_file"));
+    ASSERT_TRUE(extension_);
+    extension_id_ = extension_->id();
+    ASSERT_TRUE(registry()->enabled_extensions().GetByID(extension_id_));
+
+    {
+      auto processor = std::make_unique<syncer::FakeSyncChangeProcessor>();
+      processor_raw_ = processor.get();
+      extension_sync_service()->MergeDataAndStartSyncing(
+          syncer::EXTENSIONS, syncer::SyncDataList(), std::move(processor),
+          std::make_unique<syncer::SyncErrorFactoryMock>());
+    }
+    processor_raw_->changes().clear();
+  }
+
+  void ForceBlacklistUpdate() {
+    service()->OnBlacklistUpdated();
+    content::RunAllTasksUntilIdle();
+  }
+
+  syncer::FakeSyncChangeProcessor* processor() { return processor_raw_; }
+
+  const Extension* extension() { return extension_.get(); }
+
+  std::string& extension_id() { return extension_id_; }
+
+  extensions::TestBlacklist& test_blacklist() { return test_blacklist_; }
+
+ private:
+  syncer::FakeSyncChangeProcessor* processor_raw_;
+  scoped_refptr<const Extension> extension_;
+  std::string extension_id_;
+  extensions::TestBlacklist test_blacklist_;
+
+  DISALLOW_COPY_AND_ASSIGN(BlacklistedExtensionSyncServiceTest);
+};
+
+// Test that sync cannot enable blacklisted extensions.
+TEST_F(BlacklistedExtensionSyncServiceTest, SyncBlacklistedExtension) {
+  std::string& extension_id = this->extension_id();
+
+  // Blacklist the extension.
+  test_blacklist().SetBlacklistState(extension_id,
+                                     extensions::BLACKLISTED_MALWARE, true);
+  ForceBlacklistUpdate();
+
+  // Try enabling the extension via sync.
+  EnableExtensionFromSync(*extension());
+
+  // The extension should not be enabled.
+  EXPECT_FALSE(registry()->enabled_extensions().GetByID(extension_id));
+  EXPECT_TRUE(processor()->changes().empty());
+}
+
+// Test that some greylisted extensions can be enabled through sync.
+TEST_F(BlacklistedExtensionSyncServiceTest, SyncAllowedGreylistedExtension) {
+  std::string& extension_id = this->extension_id();
+
+  // Greylist the extension.
+  test_blacklist().SetBlacklistState(
+      extension_id, extensions::BLACKLISTED_POTENTIALLY_UNWANTED, true);
+  ForceBlacklistUpdate();
+
+  EXPECT_FALSE(registry()->enabled_extensions().GetByID(extension_id));
+  {
+    ASSERT_EQ(1u, processor()->changes().size());
+    const SyncChange& change = processor()->changes()[0];
+    EXPECT_EQ(SyncChange::ACTION_UPDATE, change.change_type());
+    std::unique_ptr<ExtensionSyncData> data =
+        ExtensionSyncData::CreateFromSyncData(change.sync_data());
+    EXPECT_EQ(extension_id, data->id());
+    EXPECT_EQ(extensions::disable_reason::DISABLE_GREYLIST,
+              data->disable_reasons());
+    EXPECT_FALSE(data->enabled());
+  }
+  processor()->changes().clear();
+
+  // Manually re-enabling the extension should work.
+  service()->EnableExtension(extension_id);
+  EXPECT_TRUE(registry()->enabled_extensions().GetByID(extension_id));
+  {
+    ASSERT_EQ(1u, processor()->changes().size());
+    const SyncChange& change = processor()->changes()[0];
+    EXPECT_EQ(SyncChange::ACTION_UPDATE, change.change_type());
+    std::unique_ptr<ExtensionSyncData> data =
+        ExtensionSyncData::CreateFromSyncData(change.sync_data());
+    EXPECT_EQ(extension_id, data->id());
+    EXPECT_EQ(0, data->disable_reasons());
+    EXPECT_TRUE(data->enabled());
+  }
+  processor()->changes().clear();
 }

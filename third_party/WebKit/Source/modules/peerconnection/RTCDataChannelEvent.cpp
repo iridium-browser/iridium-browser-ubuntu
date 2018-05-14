@@ -50,7 +50,7 @@ RTCDataChannelEvent::RTCDataChannelEvent(
     const RTCDataChannelEventInit& initializer)
     : Event(type, initializer), channel_(initializer.channel()) {}
 
-RTCDataChannelEvent::~RTCDataChannelEvent() {}
+RTCDataChannelEvent::~RTCDataChannelEvent() = default;
 
 RTCDataChannel* RTCDataChannelEvent::channel() const {
   return channel_.Get();
@@ -60,7 +60,7 @@ const AtomicString& RTCDataChannelEvent::InterfaceName() const {
   return EventNames::RTCDataChannelEvent;
 }
 
-DEFINE_TRACE(RTCDataChannelEvent) {
+void RTCDataChannelEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(channel_);
   Event::Trace(visitor);
 }

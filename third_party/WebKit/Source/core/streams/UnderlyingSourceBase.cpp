@@ -6,7 +6,7 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
-#include "core/streams/ReadableStreamController.h"
+#include "core/streams/ReadableStreamDefaultControllerWrapper.h"
 #include "platform/bindings/ScriptState.h"
 #include "v8/include/v8.h"
 
@@ -18,7 +18,7 @@ ScriptPromise UnderlyingSourceBase::startWrapper(ScriptState* script_state,
   // construct multiple streams).
   DCHECK(!controller_);
 
-  controller_ = new ReadableStreamController(js_controller);
+  controller_ = new ReadableStreamDefaultControllerWrapper(js_controller);
 
   return Start(script_state);
 }
@@ -33,13 +33,18 @@ ScriptPromise UnderlyingSourceBase::pull(ScriptState* script_state) {
 
 ScriptPromise UnderlyingSourceBase::cancelWrapper(ScriptState* script_state,
                                                   ScriptValue reason) {
-  controller_->NoteHasBeenCanceled();
+  if (controller_)
+    controller_->NoteHasBeenCanceled();
   return Cancel(script_state, reason);
 }
 
 ScriptPromise UnderlyingSourceBase::Cancel(ScriptState* script_state,
                                            ScriptValue reason) {
   return ScriptPromise::CastUndefined(script_state);
+}
+
+ScriptValue UnderlyingSourceBase::type(ScriptState* script_state) const {
+  return ScriptValue(script_state, v8::Undefined(script_state->GetIsolate()));
 }
 
 void UnderlyingSourceBase::notifyLockAcquired() {
@@ -65,9 +70,10 @@ void UnderlyingSourceBase::ContextDestroyed(ExecutionContext*) {
   }
 }
 
-DEFINE_TRACE(UnderlyingSourceBase) {
-  ContextLifecycleObserver::Trace(visitor);
+void UnderlyingSourceBase::Trace(blink::Visitor* visitor) {
   visitor->Trace(controller_);
+  ScriptWrappable::Trace(visitor);
+  ContextLifecycleObserver::Trace(visitor);
 }
 
 }  // namespace blink

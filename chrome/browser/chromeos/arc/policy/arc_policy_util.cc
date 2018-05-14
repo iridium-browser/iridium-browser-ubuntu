@@ -13,14 +13,22 @@
 namespace arc {
 namespace policy_util {
 
-bool IsAccountManaged(Profile* profile) {
-  return policy::ProfilePolicyConnectorFactory::GetForBrowserContext(profile)
-      ->IsManaged();
+bool IsAccountManaged(const Profile* profile) {
+  return policy::ProfilePolicyConnectorFactory::IsProfileManaged(profile);
 }
 
 bool IsArcDisabledForEnterprise() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       chromeos::switches::kEnterpriseDisableArc);
+}
+
+EcryptfsMigrationAction GetDefaultEcryptfsMigrationActionForManagedUser(
+    bool active_directory_user) {
+  // Active directory users are assumed to be enterprise users, so mimic the
+  // server-side default logic for enterprise users, letting them choose if
+  // they want to migrate by default.
+  return active_directory_user ? EcryptfsMigrationAction::kAskUser
+                               : EcryptfsMigrationAction::kDisallowMigration;
 }
 
 }  // namespace policy_util

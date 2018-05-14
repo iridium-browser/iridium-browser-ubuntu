@@ -13,6 +13,7 @@
 #include "extensions/renderer/bindings/argument_spec.h"
 #include "extensions/renderer/bindings/argument_spec_builder.h"
 #include "gin/converter.h"
+#include "gin/dictionary.h"
 
 namespace extensions {
 namespace {
@@ -22,14 +23,14 @@ using SpecVector = std::vector<std::unique_ptr<ArgumentSpec>>;
 std::unique_ptr<APISignature> OneString() {
   SpecVector specs;
   specs.push_back(ArgumentSpecBuilder(ArgumentType::STRING, "string").Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> StringAndInt() {
   SpecVector specs;
   specs.push_back(ArgumentSpecBuilder(ArgumentType::STRING, "string").Build());
   specs.push_back(ArgumentSpecBuilder(ArgumentType::INTEGER, "int").Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> StringOptionalIntAndBool() {
@@ -38,7 +39,7 @@ std::unique_ptr<APISignature> StringOptionalIntAndBool() {
   specs.push_back(
       ArgumentSpecBuilder(ArgumentType::INTEGER, "int").MakeOptional().Build());
   specs.push_back(ArgumentSpecBuilder(ArgumentType::BOOLEAN, "bool").Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> OneObject() {
@@ -51,11 +52,11 @@ std::unique_ptr<APISignature> OneObject() {
               "prop2",
               ArgumentSpecBuilder(ArgumentType::STRING).MakeOptional().Build())
           .Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> NoArgs() {
-  return base::MakeUnique<APISignature>(SpecVector());
+  return std::make_unique<APISignature>(SpecVector());
 }
 
 std::unique_ptr<APISignature> IntAndCallback() {
@@ -63,7 +64,7 @@ std::unique_ptr<APISignature> IntAndCallback() {
   specs.push_back(ArgumentSpecBuilder(ArgumentType::INTEGER, "int").Build());
   specs.push_back(
       ArgumentSpecBuilder(ArgumentType::FUNCTION, "callback").Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> IntAndOptionalCallback() {
@@ -72,7 +73,7 @@ std::unique_ptr<APISignature> IntAndOptionalCallback() {
   specs.push_back(ArgumentSpecBuilder(ArgumentType::FUNCTION, "callback")
                       .MakeOptional()
                       .Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> OptionalIntAndCallback() {
@@ -81,7 +82,7 @@ std::unique_ptr<APISignature> OptionalIntAndCallback() {
       ArgumentSpecBuilder(ArgumentType::INTEGER, "int").MakeOptional().Build());
   specs.push_back(
       ArgumentSpecBuilder(ArgumentType::FUNCTION, "callback").Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> OptionalCallback() {
@@ -89,7 +90,7 @@ std::unique_ptr<APISignature> OptionalCallback() {
   specs.push_back(ArgumentSpecBuilder(ArgumentType::FUNCTION, "callback")
                       .MakeOptional()
                       .Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> IntAnyOptionalObjectOptionalCallback() {
@@ -106,21 +107,21 @@ std::unique_ptr<APISignature> IntAnyOptionalObjectOptionalCallback() {
   specs.push_back(ArgumentSpecBuilder(ArgumentType::FUNCTION, "callback")
                       .MakeOptional()
                       .Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> RefObj() {
   SpecVector specs;
   specs.push_back(
       ArgumentSpecBuilder(ArgumentType::REF, "obj").SetRef("refObj").Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> RefEnum() {
   SpecVector specs;
   specs.push_back(
       ArgumentSpecBuilder(ArgumentType::REF, "enum").SetRef("refEnum").Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
 }
 
 std::unique_ptr<APISignature> OptionalObjectAndCallback() {
@@ -135,7 +136,18 @@ std::unique_ptr<APISignature> OptionalObjectAndCallback() {
   specs.push_back(ArgumentSpecBuilder(ArgumentType::FUNCTION, "callback")
                       .MakeOptional()
                       .Build());
-  return base::MakeUnique<APISignature>(std::move(specs));
+  return std::make_unique<APISignature>(std::move(specs));
+}
+
+std::vector<v8::Local<v8::Value>> StringToV8Vector(
+    v8::Local<v8::Context> context,
+    const char* args) {
+  v8::Local<v8::Value> v8_args = V8ValueFromScriptSource(context, args);
+  EXPECT_FALSE(v8_args.IsEmpty());
+  EXPECT_TRUE(v8_args->IsArray());
+  std::vector<v8::Local<v8::Value>> vector_args;
+  EXPECT_TRUE(gin::ConvertFromV8(context->GetIsolate(), v8_args, &vector_args));
+  return vector_args;
 }
 
 }  // namespace
@@ -178,6 +190,8 @@ class APISignatureTest : public APIBindingTest {
     RunTest(signature, arg_values, base::StringPiece(), false, false,
             expected_error);
   }
+
+  const APITypeReferenceMap& type_refs() const { return type_refs_; }
 
  private:
   void RunTest(const APISignature& signature,
@@ -384,21 +398,11 @@ TEST_F(APISignatureTest, ParseIgnoringSchema) {
   v8::HandleScope handle_scope(isolate());
   v8::Local<v8::Context> context = MainContext();
 
-  auto string_to_v8_vector = [context](base::StringPiece args) {
-    v8::Local<v8::Value> v8_args = V8ValueFromScriptSource(context, args);
-    EXPECT_FALSE(v8_args.IsEmpty());
-    EXPECT_TRUE(v8_args->IsArray());
-    std::vector<v8::Local<v8::Value>> vector_args;
-    EXPECT_TRUE(
-        gin::ConvertFromV8(context->GetIsolate(), v8_args, &vector_args));
-    return vector_args;
-  };
-
   {
     // Test with providing an optional callback.
     auto signature = IntAndOptionalCallback();
     std::vector<v8::Local<v8::Value>> v8_args =
-        string_to_v8_vector("[1, function() {}]");
+        StringToV8Vector(context, "[1, function() {}]");
     v8::Local<v8::Function> callback;
     std::unique_ptr<base::ListValue> parsed;
     EXPECT_TRUE(signature->ConvertArgumentsIgnoringSchema(context, v8_args,
@@ -412,7 +416,7 @@ TEST_F(APISignatureTest, ParseIgnoringSchema) {
     // Test with omitting the optional callback.
     auto signature = IntAndOptionalCallback();
     std::vector<v8::Local<v8::Value>> v8_args =
-        string_to_v8_vector("[1, null]");
+        StringToV8Vector(context, "[1, null]");
     v8::Local<v8::Function> callback;
     std::unique_ptr<base::ListValue> parsed;
     EXPECT_TRUE(signature->ConvertArgumentsIgnoringSchema(context, v8_args,
@@ -427,7 +431,7 @@ TEST_F(APISignatureTest, ParseIgnoringSchema) {
     // is (unfortunately) allowed and used.
     auto signature = OneString();
     std::vector<v8::Local<v8::Value>> v8_args =
-        string_to_v8_vector("[{not: 'a string'}]");
+        StringToV8Vector(context, "[{not: 'a string'}]");
     v8::Local<v8::Function> callback;
     std::unique_ptr<base::ListValue> parsed;
     EXPECT_TRUE(signature->ConvertArgumentsIgnoringSchema(context, v8_args,
@@ -436,6 +440,57 @@ TEST_F(APISignatureTest, ParseIgnoringSchema) {
     EXPECT_EQ(R"([{"not":"a string"}])", ValueToString(*parsed));
     EXPECT_TRUE(callback.IsEmpty());
   }
+
+  {
+    auto signature = OneObject();
+    std::vector<v8::Local<v8::Value>> v8_args = StringToV8Vector(
+        context, "[{prop1: 'foo', other: 'bar', nullProp: null}]");
+    v8::Local<v8::Function> callback;
+    std::unique_ptr<base::ListValue> parsed;
+    EXPECT_TRUE(signature->ConvertArgumentsIgnoringSchema(context, v8_args,
+                                                          &parsed, &callback));
+    ASSERT_TRUE(parsed);
+    EXPECT_EQ(R"([{"other":"bar","prop1":"foo"}])", ValueToString(*parsed));
+    EXPECT_TRUE(callback.IsEmpty());
+  }
+}
+
+TEST_F(APISignatureTest, ParseArgumentsToV8) {
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = MainContext();
+
+  // Test that parsing a signature returns values that are free of tricky
+  // getters. This is more thoroughly tested in the ArgumentSpec conversion
+  // unittests, but verify that it applies to signature parsing.
+  auto signature = OneObject();
+  constexpr char kTrickyArgs[] = R"(
+      [{
+        get prop1() {
+          if (this.got)
+            return 'bar';
+          this.got = true;
+          return 'foo';
+        },
+        prop2: 'baz'
+      }])";
+  std::vector<v8::Local<v8::Value>> args =
+      StringToV8Vector(context, kTrickyArgs);
+
+  std::vector<v8::Local<v8::Value>> args_out;
+  std::string error;
+  ASSERT_TRUE(signature->ParseArgumentsToV8(context, args, type_refs(),
+                                            &args_out, &error));
+  ASSERT_EQ(1u, args_out.size());
+  ASSERT_TRUE(args_out[0]->IsObject());
+  gin::Dictionary dict(isolate(), args_out[0].As<v8::Object>());
+
+  std::string prop1;
+  ASSERT_TRUE(dict.Get("prop1", &prop1));
+  EXPECT_EQ("foo", prop1);
+
+  std::string prop2;
+  ASSERT_TRUE(dict.Get("prop2", &prop2));
+  EXPECT_EQ("baz", prop2);
 }
 
 }  // namespace extensions

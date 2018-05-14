@@ -8,12 +8,12 @@
 #include "base/macros.h"
 #include "net/quic/platform/api/quic_flag_utils.h"
 #include "net/quic/platform/api/quic_flags.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_string_piece.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/test/gtest_util.h"
 
-using std::string;
 using testing::UnorderedElementsAre;
 using testing::Pair;
 
@@ -40,7 +40,7 @@ TEST_F(CopyAndValidateHeaders, NormalUsage) {
                            {"cookie", "part3"},
 
                            // Already-delimited headers are passed through.
-                           {"passed-through", string("foo\0baz", 7)},
+                           {"passed-through", QuicString("foo\0baz", 7)},
 
                            // Other headers are joined on \0.
                            {"joined", "value 1"},
@@ -256,7 +256,6 @@ TEST_F(CopyAndValidateTrailers, DuplicateTrailers) {
   // Duplicate trailers are allowed, and their values are concatenated into a
   // single string delimted with '\0'. Some of the duplicate headers
   // deliberately have an empty value.
-  FLAGS_quic_reloadable_flag_quic_handle_duplicate_trailers = true;
   auto trailers = FromList({{"key", "value0"},
                             {"key", "value1"},
                             {"key", ""},
@@ -283,7 +282,6 @@ TEST_F(CopyAndValidateTrailers, DuplicateTrailers) {
 TEST_F(CopyAndValidateTrailers, DuplicateCookies) {
   // Duplicate cookie headers in trailers should be concatenated into a single
   //  "; " delimted string.
-  FLAGS_quic_reloadable_flag_quic_handle_duplicate_trailers = true;
   auto headers = FromList({{"cookie", " part 1"},
                            {"cookie", "part 2 "},
                            {"cookie", "part3"},
@@ -302,50 +300,67 @@ TEST_F(CopyAndValidateTrailers, DuplicateCookies) {
           Pair("key", "value")));
 }
 
-using GetUrlFromHeaderBlock = QuicTest;
+using GetPromisedUrlFromHeaders = QuicTest;
 
-TEST_F(GetUrlFromHeaderBlock, Basic) {
+TEST_F(GetPromisedUrlFromHeaders, Basic) {
   SpdyHeaderBlock headers;
-  EXPECT_EQ(SpdyUtils::GetUrlFromHeaderBlock(headers), "");
+  headers[":method"] = "GET";
+  EXPECT_EQ(SpdyUtils::GetPromisedUrlFromHeaders(headers), "");
   headers[":scheme"] = "https";
-  EXPECT_EQ(SpdyUtils::GetUrlFromHeaderBlock(headers), "");
+  EXPECT_EQ(SpdyUtils::GetPromisedUrlFromHeaders(headers), "");
   headers[":authority"] = "www.google.com";
-  EXPECT_EQ(SpdyUtils::GetUrlFromHeaderBlock(headers), "");
+  EXPECT_EQ(SpdyUtils::GetPromisedUrlFromHeaders(headers), "");
   headers[":path"] = "/index.html";
-  EXPECT_EQ(SpdyUtils::GetUrlFromHeaderBlock(headers),
+  EXPECT_EQ(SpdyUtils::GetPromisedUrlFromHeaders(headers),
             "https://www.google.com/index.html");
   headers["key1"] = "value1";
   headers["key2"] = "value2";
-  EXPECT_EQ(SpdyUtils::GetUrlFromHeaderBlock(headers),
+  EXPECT_EQ(SpdyUtils::GetPromisedUrlFromHeaders(headers),
             "https://www.google.com/index.html");
 }
 
-using GetHostNameFromHeaderBlock = QuicTest;
-
-TEST_F(GetHostNameFromHeaderBlock, NormalUsage) {
+TEST_F(GetPromisedUrlFromHeaders, Connect) {
   SpdyHeaderBlock headers;
-  EXPECT_EQ(SpdyUtils::GetHostNameFromHeaderBlock(headers), "");
-  headers[":scheme"] = "https";
-  EXPECT_EQ(SpdyUtils::GetHostNameFromHeaderBlock(headers), "");
+  headers[":method"] = "CONNECT";
+  EXPECT_EQ(SpdyUtils::GetPromisedUrlFromHeaders(headers), "");
   headers[":authority"] = "www.google.com";
-  EXPECT_EQ(SpdyUtils::GetHostNameFromHeaderBlock(headers), "");
+  EXPECT_EQ(SpdyUtils::GetPromisedUrlFromHeaders(headers), "");
+  headers[":scheme"] = "https";
+  EXPECT_EQ(SpdyUtils::GetPromisedUrlFromHeaders(headers), "");
+  headers[":path"] = "https";
+  EXPECT_EQ(SpdyUtils::GetPromisedUrlFromHeaders(headers), "");
+}
+
+using GetPromisedHostNameFromHeaders = QuicTest;
+
+TEST_F(GetPromisedHostNameFromHeaders, NormalUsage) {
+  SpdyHeaderBlock headers;
+  headers[":method"] = "GET";
+  EXPECT_EQ(SpdyUtils::GetPromisedHostNameFromHeaders(headers), "");
+  headers[":scheme"] = "https";
+  EXPECT_EQ(SpdyUtils::GetPromisedHostNameFromHeaders(headers), "");
+  headers[":authority"] = "www.google.com";
+  EXPECT_EQ(SpdyUtils::GetPromisedHostNameFromHeaders(headers), "");
   headers[":path"] = "/index.html";
-  EXPECT_EQ(SpdyUtils::GetHostNameFromHeaderBlock(headers), "www.google.com");
+  EXPECT_EQ(SpdyUtils::GetPromisedHostNameFromHeaders(headers),
+            "www.google.com");
   headers["key1"] = "value1";
   headers["key2"] = "value2";
-  EXPECT_EQ(SpdyUtils::GetHostNameFromHeaderBlock(headers), "www.google.com");
+  EXPECT_EQ(SpdyUtils::GetPromisedHostNameFromHeaders(headers),
+            "www.google.com");
   headers[":authority"] = "www.google.com:6666";
-  EXPECT_EQ(SpdyUtils::GetHostNameFromHeaderBlock(headers), "www.google.com");
+  EXPECT_EQ(SpdyUtils::GetPromisedHostNameFromHeaders(headers),
+            "www.google.com");
   headers[":authority"] = "192.168.1.1";
-  EXPECT_EQ(SpdyUtils::GetHostNameFromHeaderBlock(headers), "192.168.1.1");
+  EXPECT_EQ(SpdyUtils::GetPromisedHostNameFromHeaders(headers), "192.168.1.1");
   headers[":authority"] = "192.168.1.1:6666";
-  EXPECT_EQ(SpdyUtils::GetHostNameFromHeaderBlock(headers), "192.168.1.1");
+  EXPECT_EQ(SpdyUtils::GetPromisedHostNameFromHeaders(headers), "192.168.1.1");
 }
 
 using PopulateHeaderBlockFromUrl = QuicTest;
 
 TEST_F(PopulateHeaderBlockFromUrl, NormalUsage) {
-  string url = "https://www.google.com/index.html";
+  QuicString url = "https://www.google.com/index.html";
   SpdyHeaderBlock headers;
   EXPECT_TRUE(SpdyUtils::PopulateHeaderBlockFromUrl(url, &headers));
   EXPECT_EQ("https", headers[":scheme"].as_string());
@@ -354,7 +369,7 @@ TEST_F(PopulateHeaderBlockFromUrl, NormalUsage) {
 }
 
 TEST_F(PopulateHeaderBlockFromUrl, UrlWithNoPath) {
-  string url = "https://www.google.com";
+  QuicString url = "https://www.google.com";
   SpdyHeaderBlock headers;
   EXPECT_TRUE(SpdyUtils::PopulateHeaderBlockFromUrl(url, &headers));
   EXPECT_EQ("https", headers[":scheme"].as_string());

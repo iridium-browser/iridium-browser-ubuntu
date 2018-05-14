@@ -4,6 +4,9 @@
 
 #include "chrome/browser/ui/views/payments/payment_request_item_list.h"
 
+#include <utility>
+
+#include "chrome/browser/ui/views/payments/payment_request_dialog_view.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view_ids.h"
 #include "chrome/browser/ui/views/payments/payment_request_views_util.h"
 #include "components/payments/content/payment_request_state.h"
@@ -60,8 +63,8 @@ void PaymentRequestItemList::Item::Init() {
   std::unique_ptr<views::View> content =
       CreateContentView(&accessible_item_description_);
 
-  views::GridLayout* layout = new views::GridLayout(this);
-  SetLayoutManager(layout);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   // Add a column for the item's content view.
   views::ColumnSet* columns = layout->AddColumnSet(0);
@@ -133,7 +136,7 @@ void PaymentRequestItemList::Item::SetSelected(bool selected, bool notify) {
 std::unique_ptr<views::ImageView> PaymentRequestItemList::Item::CreateCheckmark(
     bool selected) {
   std::unique_ptr<views::ImageView> checkmark =
-      base::MakeUnique<views::ImageView>();
+      std::make_unique<views::ImageView>();
   checkmark->set_id(static_cast<int>(DialogViewID::CHECKMARK_VIEW));
   checkmark->set_can_process_events_within_subtree(false);
   checkmark->set_owned_by_client();
@@ -152,6 +155,10 @@ void PaymentRequestItemList::Item::ButtonPressed(views::Button* sender,
                                                  const ui::Event& event) {
   if (sender->id() == static_cast<int>(DialogViewID::EDIT_ITEM_BUTTON)) {
     EditButtonPressed();
+  } else if (selected_) {
+    // |dialog()| may be null in tests
+    if (list_->dialog())
+      list_->dialog()->GoBack();
   } else if (CanBeSelected()) {
     list()->SelectItem(this);
   } else {
@@ -170,13 +177,16 @@ void PaymentRequestItemList::Item::UpdateAccessibleName() {
   SetAccessibleName(accessible_content);
 }
 
-PaymentRequestItemList::PaymentRequestItemList() : selected_item_(nullptr) {}
+PaymentRequestItemList::PaymentRequestItemList(PaymentRequestDialogView* dialog)
+    : selected_item_(nullptr), dialog_(dialog) {}
 
 PaymentRequestItemList::~PaymentRequestItemList() {}
 
 void PaymentRequestItemList::AddItem(
     std::unique_ptr<PaymentRequestItemList::Item> item) {
   DCHECK_EQ(this, item->list());
+  if (!items_.empty())
+    item->set_previous_row(items_.back().get());
   items_.push_back(std::move(item));
   if (items_.back()->selected()) {
     if (selected_item_)
@@ -191,12 +201,11 @@ void PaymentRequestItemList::Clear() {
 }
 
 std::unique_ptr<views::View> PaymentRequestItemList::CreateListView() {
-  std::unique_ptr<views::View> content_view = base::MakeUnique<views::View>();
+  std::unique_ptr<views::View> content_view = std::make_unique<views::View>();
 
-  views::BoxLayout* layout =
-      new views::BoxLayout(views::BoxLayout::kVertical,
-                           gfx::Insets(kPaymentRequestRowVerticalInsets, 0), 0);
-  content_view->SetLayoutManager(layout);
+  content_view->SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kVertical,
+      gfx::Insets(kPaymentRequestRowVerticalInsets, 0), 0));
 
   for (auto& item : items_)
     content_view->AddChildView(item.release());

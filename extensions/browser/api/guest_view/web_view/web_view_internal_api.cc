@@ -4,7 +4,11 @@
 
 #include "extensions/browser/api/guest_view/web_view/web_view_internal_api.h"
 
+#include <memory>
+#include <set>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "base/guid.h"
 #include "base/memory/ptr_util.h"
@@ -108,10 +112,10 @@ void ParseScriptFiles(const GURL& owner_base_url,
       if (extension) {
         ExtensionResource resource = extension->GetResource(relative);
 
-        list->push_back(base::MakeUnique<extensions::UserScript::File>(
+        list->push_back(std::make_unique<extensions::UserScript::File>(
             resource.extension_root(), resource.relative_path(), url));
       } else {
-        list->push_back(base::MakeUnique<extensions::UserScript::File>(
+        list->push_back(std::make_unique<extensions::UserScript::File>(
             base::FilePath(), base::FilePath(), url));
       }
     }
@@ -311,13 +315,17 @@ bool WebViewInternalCaptureVisibleRegionFunction::RunAsyncSafe(
   }
 
   is_guest_transparent_ = guest->allow_transparency();
-  return CaptureAsync(
+  const CaptureResult capture_result = CaptureAsync(
       guest->web_contents(), image_details.get(),
-      base::Bind(
+      base::BindOnce(
           &WebViewInternalCaptureVisibleRegionFunction::CopyFromSurfaceComplete,
           this));
+  if (capture_result == OK)
+    return true;
+  SetErrorMessage(capture_result);
+  return false;
 }
-bool WebViewInternalCaptureVisibleRegionFunction::IsScreenshotEnabled() {
+bool WebViewInternalCaptureVisibleRegionFunction::IsScreenshotEnabled() const {
   // TODO(wjmaclean): Is it ok to always return true here?
   return true;
 }
@@ -334,16 +342,22 @@ void WebViewInternalCaptureVisibleRegionFunction::OnCaptureSuccess(
     return;
   }
 
-  SetResult(base::MakeUnique<base::Value>(base64_result));
+  SetResult(std::make_unique<base::Value>(base64_result));
   SendResponse(true);
 }
 
 void WebViewInternalCaptureVisibleRegionFunction::OnCaptureFailure(
-    FailureReason reason) {
+    CaptureResult result) {
+  SetErrorMessage(result);
+  SendResponse(false);
+}
+
+void WebViewInternalCaptureVisibleRegionFunction::SetErrorMessage(
+    CaptureResult result) {
   const char* reason_description = "internal error";
-  switch (reason) {
-    case FAILURE_REASON_UNKNOWN:
-      reason_description = "unknown error";
+  switch (result) {
+    case FAILURE_REASON_READBACK_FAILED:
+      reason_description = "image readback failed";
       break;
     case FAILURE_REASON_ENCODING_FAILED:
       reason_description = "encoding failed";
@@ -351,10 +365,17 @@ void WebViewInternalCaptureVisibleRegionFunction::OnCaptureFailure(
     case FAILURE_REASON_VIEW_INVISIBLE:
       reason_description = "view is invisible";
       break;
+    case FAILURE_REASON_SCREEN_SHOTS_DISABLED:
+      NOTREACHED() << "WebViewInternalCaptureVisibleRegionFunction always have "
+                      "screenshots enabled";
+      break;
+    case OK:
+      NOTREACHED()
+          << "SetErrorMessage should not be called with a successful result";
+      return;
   }
   error_ = ErrorUtils::FormatErrorMessage("Failed to capture webview: *",
                                           reason_description);
-  SendResponse(false);
 }
 
 ExtensionFunction::ResponseAction WebViewInternalNavigateFunction::Run() {
@@ -453,7 +474,7 @@ bool WebViewInternalExecuteCodeFunction::LoadFileForWebUI(
   GURL owner_base_url(guest->GetOwnerSiteURL().GetWithEmptyPath());
   GURL file_url(owner_base_url.Resolve(file_src));
 
-  url_fetcher_ = base::MakeUnique<WebUIURLFetcher>(
+  url_fetcher_ = std::make_unique<WebUIURLFetcher>(
       this->browser_context(), render_frame_host()->GetProcess()->GetID(),
       render_frame_host()->GetRoutingID(), file_url, std::move(callback));
   url_fetcher_->Start();
@@ -531,8 +552,8 @@ WebViewInternalAddContentScriptsFunction::Run() {
   DCHECK(manager);
 
   manager->AddContentScripts(
-      sender_web_contents->GetRenderProcessHost()->GetID(), render_frame_host(),
-      params->instance_id, host_id, std::move(result));
+      render_frame_host()->GetProcess()->GetID(),
+      render_frame_host(), params->instance_id, host_id, std::move(result));
 
   return RespondNow(NoArguments());
 }
@@ -565,7 +586,7 @@ WebViewInternalRemoveContentScriptsFunction::Run() {
   if (params->script_name_list)
     script_name_list.swap(*params->script_name_list);
   manager->RemoveContentScripts(
-      sender_web_contents->GetRenderProcessHost()->GetID(),
+      render_frame_host()->GetProcess()->GetID(),
       params->instance_id, host_id, script_name_list);
   return RespondNow(NoArguments());
 }
@@ -644,7 +665,7 @@ ExtensionFunction::ResponseAction WebViewInternalGetZoomFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   double zoom_factor = guest_->GetZoom();
-  return RespondNow(OneArgument(base::MakeUnique<base::Value>(zoom_factor)));
+  return RespondNow(OneArgument(std::make_unique<base::Value>(zoom_factor)));
 }
 
 WebViewInternalSetZoomModeFunction::WebViewInternalSetZoomModeFunction() {
@@ -704,7 +725,7 @@ ExtensionFunction::ResponseAction WebViewInternalGetZoomModeFunction::Run() {
   }
 
   return RespondNow(OneArgument(
-      base::MakeUnique<base::Value>(web_view_internal::ToString(zoom_mode))));
+      std::make_unique<base::Value>(web_view_internal::ToString(zoom_mode))));
 }
 
 WebViewInternalFindFunction::WebViewInternalFindFunction() {
@@ -806,7 +827,7 @@ ExtensionFunction::ResponseAction WebViewInternalGoFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   bool successful = guest_->Go(params->relative_index);
-  return RespondNow(OneArgument(base::MakeUnique<base::Value>(successful)));
+  return RespondNow(OneArgument(std::make_unique<base::Value>(successful)));
 }
 
 WebViewInternalReloadFunction::WebViewInternalReloadFunction() {
@@ -860,7 +881,7 @@ ExtensionFunction::ResponseAction WebViewInternalSetPermissionFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(result !=
                               WebViewPermissionHelper::SET_PERMISSION_INVALID);
 
-  return RespondNow(OneArgument(base::MakeUnique<base::Value>(
+  return RespondNow(OneArgument(std::make_unique<base::Value>(
       result == WebViewPermissionHelper::SET_PERMISSION_ALLOWED)));
 }
 
@@ -891,6 +912,47 @@ WebViewInternalStopFunction::~WebViewInternalStopFunction() {
 ExtensionFunction::ResponseAction WebViewInternalStopFunction::Run() {
   guest_->Stop();
   return RespondNow(NoArguments());
+}
+
+WebViewInternalSetAudioMutedFunction::WebViewInternalSetAudioMutedFunction() {}
+
+WebViewInternalSetAudioMutedFunction::~WebViewInternalSetAudioMutedFunction() {}
+
+ExtensionFunction::ResponseAction WebViewInternalSetAudioMutedFunction::Run() {
+  std::unique_ptr<web_view_internal::SetAudioMuted::Params> params(
+      web_view_internal::SetAudioMuted::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  guest_->web_contents()->SetAudioMuted(params->mute);
+  return RespondNow(NoArguments());
+}
+
+WebViewInternalIsAudioMutedFunction::WebViewInternalIsAudioMutedFunction() {}
+
+WebViewInternalIsAudioMutedFunction::~WebViewInternalIsAudioMutedFunction() {}
+
+ExtensionFunction::ResponseAction WebViewInternalIsAudioMutedFunction::Run() {
+  std::unique_ptr<web_view_internal::IsAudioMuted::Params> params(
+      web_view_internal::IsAudioMuted::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  content::WebContents* web_contents = guest_->web_contents();
+  return RespondNow(
+      OneArgument(std::make_unique<base::Value>(web_contents->IsAudioMuted())));
+}
+
+WebViewInternalGetAudioStateFunction::WebViewInternalGetAudioStateFunction() {}
+
+WebViewInternalGetAudioStateFunction::~WebViewInternalGetAudioStateFunction() {}
+
+ExtensionFunction::ResponseAction WebViewInternalGetAudioStateFunction::Run() {
+  std::unique_ptr<web_view_internal::GetAudioState::Params> params(
+      web_view_internal::GetAudioState::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  content::WebContents* web_contents = guest_->web_contents();
+  return RespondNow(OneArgument(
+      std::make_unique<base::Value>(web_contents->IsCurrentlyAudible())));
 }
 
 WebViewInternalTerminateFunction::WebViewInternalTerminateFunction() {

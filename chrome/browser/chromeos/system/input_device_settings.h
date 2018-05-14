@@ -9,8 +9,6 @@
 #include "base/optional.h"
 #include "chromeos/chromeos_export.h"
 
-class PrefRegistrySimple;
-
 namespace chromeos {
 namespace system {
 
@@ -88,6 +86,10 @@ class MouseSettings {
   bool GetPrimaryButtonRight() const;
   bool IsPrimaryButtonRightSet() const;
 
+  void SetReverseScroll(bool enabled);
+  bool GetReverseScroll() const;
+  bool IsReverseScrollSet() const;
+
   // Updates |this| with |settings|. If at least one setting was updated returns
   // true.
   bool Update(const MouseSettings& settings);
@@ -99,6 +101,7 @@ class MouseSettings {
  private:
   base::Optional<int> sensitivity_;
   base::Optional<bool> primary_button_right_;
+  base::Optional<bool> reverse_scroll_;
 };
 
 // Interface for configuring input device settings.
@@ -124,31 +127,6 @@ class CHROMEOS_EXPORT InputDeviceSettings {
   // Returns true if UI should implement enhanced keyboard support for cases
   // where other input devices like mouse are absent.
   static bool ForceKeyboardDrivenUINavigation();
-
-  // Registers local state pref names for touchscreen status.
-  static void RegisterPrefs(PrefRegistrySimple* registry);
-
-  // Registers profile pref names for touchpad and touchscreen statuses.
-  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
-
-  // Updates the enabled/disabled status of the touchscreen/touchpad from the
-  // preferences.
-  void UpdateTouchDevicesStatusFromPrefs();
-
-  // If |use_local_state| is true, returns the touchscreen status from local
-  // state, otherwise from user prefs.
-  bool IsTouchscreenEnabledInPrefs(bool use_local_state) const;
-
-  // Sets the status of touchscreen to |enabled| in prefs. If |use_local_state|,
-  // pref is set in local state, otherwise in user pref.
-  void SetTouchscreenEnabledInPrefs(bool enabled, bool use_local_state);
-
-  // Updates the enabled/disabled status of the touchscreen from prefs. Enabled
-  // if both local state and user prefs are enabled, otherwise disabled.
-  void UpdateTouchscreenStatusFromPrefs();
-
-  // Toggles the status of touchpad between enabled and disabled.
-  void ToggleTouchpad();
 
   // Calls |callback|, possibly asynchronously, after determining if a touchpad
   // is connected.
@@ -190,6 +168,9 @@ class CHROMEOS_EXPORT InputDeviceSettings {
 
   // Sets the primary mouse button to the right button if |right| is true.
   virtual void SetPrimaryButtonRight(bool right) = 0;
+
+  // Turns mouse reverse scrolling on/off.
+  virtual void SetMouseReverseScroll(bool enabled) = 0;
 
   // Reapplies previously set touchpad settings.
   virtual void ReapplyTouchpadSettings() = 0;

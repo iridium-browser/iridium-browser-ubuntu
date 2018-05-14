@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "cc/output/compositor_frame.h"
+#include "components/viz/common/quads/compositor_frame.h"
 
 namespace content {
 
@@ -43,7 +43,7 @@ TestSynchronousCompositor::DemandDrawHwAsync(
 
 void TestSynchronousCompositor::ReturnResources(
     uint32_t layer_tree_frame_sink_id,
-    const std::vector<cc::ReturnedResource>& resources) {
+    const std::vector<viz::ReturnedResource>& resources) {
   ReturnedResources returned_resources;
   returned_resources.layer_tree_frame_sink_id = layer_tree_frame_sink_id;
   returned_resources.resources = resources;
@@ -62,7 +62,7 @@ bool TestSynchronousCompositor::DemandDrawSw(SkCanvas* canvas) {
 
 void TestSynchronousCompositor::SetHardwareFrame(
     uint32_t layer_tree_frame_sink_id,
-    std::unique_ptr<cc::CompositorFrame> frame) {
+    std::unique_ptr<viz::CompositorFrame> frame) {
   hardware_frame_.layer_tree_frame_sink_id = layer_tree_frame_sink_id;
   hardware_frame_.frame = std::move(frame);
 }

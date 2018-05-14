@@ -49,8 +49,8 @@ class GPUInfoCollectorTest
     : public testing::Test,
       public ::testing::WithParamInterface<MockedOperatingSystemKind> {
  public:
-  GPUInfoCollectorTest() {}
-  ~GPUInfoCollectorTest() override {}
+  GPUInfoCollectorTest() = default;
+  ~GPUInfoCollectorTest() override = default;
 
   void SetUp() override {
     testing::Test::SetUp();
@@ -176,7 +176,7 @@ class GPUInfoCollectorTest
   void TearDown() override {
     ::gl::MockGLInterface::SetGLInterface(NULL);
     gl_.reset();
-    gl::init::ShutdownGL();
+    gl::init::ShutdownGL(false);
 
     testing::Test::TearDown();
   }
@@ -248,8 +248,8 @@ TEST_P(GPUInfoCollectorTest, CollectGraphicsInfoGL) {
 
 class CollectDriverInfoGLTest : public testing::Test {
  public:
-  CollectDriverInfoGLTest() {}
-  ~CollectDriverInfoGLTest() override {}
+  CollectDriverInfoGLTest() = default;
+  ~CollectDriverInfoGLTest() override = default;
 
   void SetUp() override {}
   void TearDown() override {}
@@ -380,7 +380,7 @@ TEST_F(CollectDriverInfoGLTest, CollectDriverInfoGL) {
     gpu_info.gl_renderer = testStrings.gl_renderer;
     gpu_info.gl_vendor = testStrings.gl_vendor;
     gpu_info.gl_version = testStrings.gl_version;
-    EXPECT_EQ(kCollectInfoSuccess, CollectDriverInfoGL(&gpu_info));
+    CollectDriverInfoGL(&gpu_info);
     EXPECT_EQ(testStrings.expected_driver_version, gpu_info.driver_version);
     if (testStrings.expected_driver_vendor) {
       EXPECT_EQ(testStrings.expected_driver_vendor, gpu_info.driver_vendor);
@@ -388,7 +388,7 @@ TEST_F(CollectDriverInfoGLTest, CollectDriverInfoGL) {
   }
 }
 
-TEST(MultiGPUsTest, IdentifyActiveGPU) {
+TEST(MultiGPUsTest, IdentifyActiveGPU0) {
   GPUInfo::GPUDevice nvidia_gpu;
   nvidia_gpu.vendor_id = 0x10de;
   nvidia_gpu.device_id = 0x0df8;
@@ -420,6 +420,107 @@ TEST(MultiGPUsTest, IdentifyActiveGPU) {
   EXPECT_FALSE(gpu_info.secondary_gpus[0].active);
 }
 
+TEST(MultiGPUsTest, IdentifyActiveGPU1) {
+  GPUInfo::GPUDevice nvidia_gpu;
+  nvidia_gpu.vendor_id = 0x10de;
+  nvidia_gpu.device_id = 0x0de1;
+  GPUInfo::GPUDevice intel_gpu;
+  intel_gpu.vendor_id = 0x8086;
+  intel_gpu.device_id = 0x040a;
+
+  GPUInfo gpu_info;
+  gpu_info.gpu = intel_gpu;
+  gpu_info.secondary_gpus.push_back(nvidia_gpu);
+
+  EXPECT_FALSE(gpu_info.gpu.active);
+  EXPECT_FALSE(gpu_info.secondary_gpus[0].active);
+
+  IdentifyActiveGPU(&gpu_info);
+  EXPECT_FALSE(gpu_info.gpu.active);
+  EXPECT_FALSE(gpu_info.secondary_gpus[0].active);
+
+  gpu_info.gl_vendor = "nouveau";
+  IdentifyActiveGPU(&gpu_info);
+  EXPECT_FALSE(gpu_info.gpu.active);
+  EXPECT_TRUE(gpu_info.secondary_gpus[0].active);
+}
+
+TEST(MultiGPUsTest, IdentifyActiveGPU2) {
+  GPUInfo::GPUDevice nvidia_gpu;
+  nvidia_gpu.vendor_id = 0x10de;
+  nvidia_gpu.device_id = 0x0de1;
+  GPUInfo::GPUDevice intel_gpu;
+  intel_gpu.vendor_id = 0x8086;
+  intel_gpu.device_id = 0x040a;
+
+  GPUInfo gpu_info;
+  gpu_info.gpu = intel_gpu;
+  gpu_info.secondary_gpus.push_back(nvidia_gpu);
+
+  EXPECT_FALSE(gpu_info.gpu.active);
+  EXPECT_FALSE(gpu_info.secondary_gpus[0].active);
+
+  IdentifyActiveGPU(&gpu_info);
+  EXPECT_FALSE(gpu_info.gpu.active);
+  EXPECT_FALSE(gpu_info.secondary_gpus[0].active);
+
+  gpu_info.gl_vendor = "Intel";
+  IdentifyActiveGPU(&gpu_info);
+  EXPECT_TRUE(gpu_info.gpu.active);
+  EXPECT_FALSE(gpu_info.secondary_gpus[0].active);
+}
+
+TEST(MultiGPUsTest, IdentifyActiveGPU3) {
+  GPUInfo::GPUDevice nvidia_gpu;
+  nvidia_gpu.vendor_id = 0x10de;
+  nvidia_gpu.device_id = 0x0de1;
+  GPUInfo::GPUDevice intel_gpu;
+  intel_gpu.vendor_id = 0x8086;
+  intel_gpu.device_id = 0x040a;
+  GPUInfo::GPUDevice amd_gpu;
+  amd_gpu.vendor_id = 0x1002;
+  amd_gpu.device_id = 0x6779;
+
+  GPUInfo gpu_info;
+  gpu_info.gpu = intel_gpu;
+  gpu_info.secondary_gpus.push_back(nvidia_gpu);
+  gpu_info.secondary_gpus.push_back(amd_gpu);
+
+  EXPECT_FALSE(gpu_info.gpu.active);
+  EXPECT_FALSE(gpu_info.secondary_gpus[0].active);
+  EXPECT_FALSE(gpu_info.secondary_gpus[1].active);
+
+  IdentifyActiveGPU(&gpu_info);
+  EXPECT_FALSE(gpu_info.gpu.active);
+  EXPECT_FALSE(gpu_info.secondary_gpus[0].active);
+  EXPECT_FALSE(gpu_info.secondary_gpus[1].active);
+
+  gpu_info.gl_vendor = "X.Org";
+  gpu_info.gl_renderer = "AMD R600";
+  IdentifyActiveGPU(&gpu_info);
+  EXPECT_FALSE(gpu_info.gpu.active);
+  EXPECT_FALSE(gpu_info.secondary_gpus[0].active);
+  EXPECT_TRUE(gpu_info.secondary_gpus[1].active);
+}
+
+TEST(MultiGPUsTest, IdentifyActiveGPU4) {
+  GPUInfo::GPUDevice nvidia_gpu;
+  nvidia_gpu.vendor_id = 0x10de;
+  nvidia_gpu.device_id = 0x0de1;
+
+  GPUInfo gpu_info;
+  gpu_info.gpu = nvidia_gpu;
+
+  EXPECT_FALSE(gpu_info.gpu.active);
+
+  IdentifyActiveGPU(&gpu_info);
+  EXPECT_TRUE(gpu_info.gpu.active);
+
+  gpu_info.gl_vendor = "nouveau";
+  IdentifyActiveGPU(&gpu_info);
+  EXPECT_TRUE(gpu_info.gpu.active);
+}
+
 TEST(MultiGPUsTest, IdentifyActiveGPUAvoidFalseMatch) {
   // Verify that "Corporation" won't be matched with "ati".
   GPUInfo::GPUDevice amd_gpu;
@@ -441,4 +542,3 @@ TEST(MultiGPUsTest, IdentifyActiveGPUAvoidFalseMatch) {
 }
 
 }  // namespace gpu
-

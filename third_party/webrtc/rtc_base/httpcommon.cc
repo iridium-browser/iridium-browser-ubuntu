@@ -11,7 +11,6 @@
 #include <time.h>
 
 #if defined(WEBRTC_WIN)
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -21,22 +20,90 @@
 
 #include <algorithm>
 
-#include "webrtc/rtc_base/arraysize.h"
-#include "webrtc/rtc_base/base64.h"
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/cryptstring.h"
-#include "webrtc/rtc_base/httpcommon-inl.h"
-#include "webrtc/rtc_base/httpcommon.h"
-#include "webrtc/rtc_base/messagedigest.h"
-#include "webrtc/rtc_base/socketaddress.h"
-#include "webrtc/rtc_base/stringencode.h"
-#include "webrtc/rtc_base/stringutils.h"
+#include "rtc_base/arraysize.h"
+#include "rtc_base/base64.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/cryptstring.h"
+#include "rtc_base/httpcommon-inl.h"
+#include "rtc_base/httpcommon.h"
+#include "rtc_base/messagedigest.h"
+#include "rtc_base/socketaddress.h"
 
 namespace rtc {
-
+namespace {
 #if defined(WEBRTC_WIN)
-extern const ConstantLabel SECURITY_ERRORS[];
-#endif
+///////////////////////////////////////////////////////////////////////////////
+// ConstantToLabel can be used to easily generate string names from constant
+// values.  This can be useful for logging descriptive names of error messages.
+// Usage:
+//   const ConstantToLabel LIBRARY_ERRORS[] = {
+//     KLABEL(SOME_ERROR),
+//     KLABEL(SOME_OTHER_ERROR),
+//     ...
+//     LASTLABEL
+//   }
+//
+//   int err = LibraryFunc();
+//   LOG(LS_ERROR) << "LibraryFunc returned: "
+//                 << GetErrorName(err, LIBRARY_ERRORS);
+struct ConstantToLabel { int value; const char * label; };
+
+const char* LookupLabel(int value, const ConstantToLabel entries[]) {
+  for (int i = 0; entries[i].label; ++i) {
+    if (value == entries[i].value) {
+      return entries[i].label;
+    }
+  }
+  return 0;
+}
+
+std::string GetErrorName(int err, const ConstantToLabel* err_table) {
+  if (err == 0)
+    return "No error";
+
+  if (err_table != 0) {
+    if (const char* value = LookupLabel(err, err_table))
+      return value;
+  }
+
+  char buffer[16];
+  snprintf(buffer, sizeof(buffer), "0x%08x", err);
+  return buffer;
+}
+
+#define KLABEL(x) { x, #x }
+#define LASTLABEL { 0, 0 }
+
+const ConstantToLabel SECURITY_ERRORS[] = {
+  KLABEL(SEC_I_COMPLETE_AND_CONTINUE),
+  KLABEL(SEC_I_COMPLETE_NEEDED),
+  KLABEL(SEC_I_CONTEXT_EXPIRED),
+  KLABEL(SEC_I_CONTINUE_NEEDED),
+  KLABEL(SEC_I_INCOMPLETE_CREDENTIALS),
+  KLABEL(SEC_I_RENEGOTIATE),
+  KLABEL(SEC_E_CERT_EXPIRED),
+  KLABEL(SEC_E_INCOMPLETE_MESSAGE),
+  KLABEL(SEC_E_INSUFFICIENT_MEMORY),
+  KLABEL(SEC_E_INTERNAL_ERROR),
+  KLABEL(SEC_E_INVALID_HANDLE),
+  KLABEL(SEC_E_INVALID_TOKEN),
+  KLABEL(SEC_E_LOGON_DENIED),
+  KLABEL(SEC_E_NO_AUTHENTICATING_AUTHORITY),
+  KLABEL(SEC_E_NO_CREDENTIALS),
+  KLABEL(SEC_E_NOT_OWNER),
+  KLABEL(SEC_E_OK),
+  KLABEL(SEC_E_SECPKG_NOT_FOUND),
+  KLABEL(SEC_E_TARGET_UNKNOWN),
+  KLABEL(SEC_E_UNKNOWN_CREDENTIALS),
+  KLABEL(SEC_E_UNSUPPORTED_FUNCTION),
+  KLABEL(SEC_E_UNTRUSTED_ROOT),
+  KLABEL(SEC_E_WRONG_PRINCIPAL),
+  LASTLABEL
+};
+#undef KLABEL
+#undef LASTLABEL
+#endif  // defined(WEBRTC_WIN)
+}  // namespace
 
 //////////////////////////////////////////////////////////////////////
 // Enum - TODO: expose globally later?
@@ -223,32 +290,7 @@ inline bool IsEndOfAttributeName(size_t pos, size_t len, const char * data) {
   return false;
 }
 
-// TODO: unittest for EscapeAttribute and HttpComposeAttributes.
-
-std::string EscapeAttribute(const std::string& attribute) {
-  const size_t kMaxLength = attribute.length() * 2 + 1;
-  char* buffer = STACK_ARRAY(char, kMaxLength);
-  size_t len = escape(buffer, kMaxLength, attribute.data(), attribute.length(),
-                      "\"", '\\');
-  return std::string(buffer, len);
-}
-
 }  // anonymous namespace
-
-void HttpComposeAttributes(const HttpAttributeList& attributes, char separator,
-                           std::string* composed) {
-  std::stringstream ss;
-  for (size_t i=0; i<attributes.size(); ++i) {
-    if (i > 0) {
-      ss << separator << " ";
-    }
-    ss << attributes[i].first;
-    if (!attributes[i].second.empty()) {
-      ss << "=\"" << EscapeAttribute(attributes[i].second) << "\"";
-    }
-  }
-  *composed = ss.str();
-}
 
 void HttpParseAttributes(const char * data, size_t len,
                          HttpAttributeList& attributes) {
@@ -652,7 +694,7 @@ HttpResponseData::parseLeader(const char* line, size_t len) {
     // This server's response has no version. :( NOTE: This happens for every
     // response to requests made from Chrome plugins, regardless of the server's
     // behaviour.
-    LOG(LS_VERBOSE) << "HTTP version missing from response";
+    RTC_LOG(LS_VERBOSE) << "HTTP version missing from response";
     version = HVER_UNKNOWN;
   } else if ((sscanf(line, "HTTP/%u.%u %u%n",
                      &vmajor, &vminor, &temp_scode, &temp_pos) == 3)
@@ -703,7 +745,7 @@ struct NegotiateAuthContext : public HttpAuthContext {
     specified_credentials(false)
   { }
 
-  virtual ~NegotiateAuthContext() {
+  ~NegotiateAuthContext() override {
     DeleteSecurityContext(&ctx);
     FreeCredentialsHandle(&cred);
   }
@@ -828,7 +870,7 @@ HttpAuthResult HttpAuthenticate(
     if (DsMakeSpn("HTTP", server.HostAsURIString().c_str(), nullptr,
                   server.port(),
                   0, &len, spn) != ERROR_SUCCESS) {
-      LOG_F(WARNING) << "(Negotiate) - DsMakeSpn failed";
+      RTC_LOG_F(WARNING) << "(Negotiate) - DsMakeSpn failed";
       return HAR_IGNORE;
     }
 #else
@@ -869,7 +911,8 @@ HttpAuthResult HttpAuthenticate(
     if (neg) {
       const size_t max_steps = 10;
       if (++neg->steps >= max_steps) {
-        LOG(WARNING) << "AsyncHttpsProxySocket::Authenticate(Negotiate) too many retries";
+        RTC_LOG(WARNING) << "AsyncHttpsProxySocket::Authenticate(Negotiate) "
+                            "too many retries";
         return HAR_ERROR;
       }
       steps = neg->steps;
@@ -889,10 +932,9 @@ HttpAuthResult HttpAuthenticate(
         in_buf_desc.pBuffers  = &in_sec;
 
         ret = InitializeSecurityContextA(&neg->cred, &neg->ctx, spn, flags, 0, SECURITY_NATIVE_DREP, &in_buf_desc, 0, &neg->ctx, &out_buf_desc, &ret_flags, &lifetime);
-        //LOG(INFO) << "$$$ InitializeSecurityContext @ " << TimeSince(now);
         if (FAILED(ret)) {
-          LOG(LS_ERROR) << "InitializeSecurityContext returned: "
-                      << ErrorName(ret, SECURITY_ERRORS);
+          RTC_LOG(LS_ERROR) << "InitializeSecurityContext returned: "
+                            << GetErrorName(ret, SECURITY_ERRORS);
           return HAR_ERROR;
         }
       } else if (neg->specified_credentials) {
@@ -946,19 +988,19 @@ HttpAuthResult HttpAuthenticate(
         auth_id.Password = passbuf;
         auth_id.Flags = SEC_WINNT_AUTH_IDENTITY_ANSI;
         pauth_id = &auth_id;
-        LOG(LS_VERBOSE) << "Negotiate protocol: Using specified credentials";
+        RTC_LOG(LS_VERBOSE)
+            << "Negotiate protocol: Using specified credentials";
       } else {
-        LOG(LS_VERBOSE) << "Negotiate protocol: Using default credentials";
+        RTC_LOG(LS_VERBOSE) << "Negotiate protocol: Using default credentials";
       }
 
       CredHandle cred;
       ret = AcquireCredentialsHandleA(
           0, const_cast<char*>(want_negotiate ? NEGOSSP_NAME_A : NTLMSP_NAME_A),
           SECPKG_CRED_OUTBOUND, 0, pauth_id, 0, 0, &cred, &lifetime);
-      //LOG(INFO) << "$$$ AcquireCredentialsHandle @ " << TimeSince(now);
       if (ret != SEC_E_OK) {
-        LOG(LS_ERROR) << "AcquireCredentialsHandle error: "
-                    << ErrorName(ret, SECURITY_ERRORS);
+        RTC_LOG(LS_ERROR) << "AcquireCredentialsHandle error: "
+                          << GetErrorName(ret, SECURITY_ERRORS);
         return HAR_IGNORE;
       }
 
@@ -966,10 +1008,9 @@ HttpAuthResult HttpAuthenticate(
 
       CtxtHandle ctx;
       ret = InitializeSecurityContextA(&cred, 0, spn, flags, 0, SECURITY_NATIVE_DREP, 0, 0, &ctx, &out_buf_desc, &ret_flags, &lifetime);
-      //LOG(INFO) << "$$$ InitializeSecurityContext @ " << TimeSince(now);
       if (FAILED(ret)) {
-        LOG(LS_ERROR) << "InitializeSecurityContext returned: "
-                    << ErrorName(ret, SECURITY_ERRORS);
+        RTC_LOG(LS_ERROR) << "InitializeSecurityContext returned: "
+                          << GetErrorName(ret, SECURITY_ERRORS);
         FreeCredentialsHandle(&cred);
         return HAR_IGNORE;
       }
@@ -982,15 +1023,12 @@ HttpAuthResult HttpAuthenticate(
 
     if ((ret == SEC_I_COMPLETE_NEEDED) || (ret == SEC_I_COMPLETE_AND_CONTINUE)) {
       ret = CompleteAuthToken(&neg->ctx, &out_buf_desc);
-      //LOG(INFO) << "$$$ CompleteAuthToken @ " << TimeSince(now);
-      LOG(LS_VERBOSE) << "CompleteAuthToken returned: "
-                      << ErrorName(ret, SECURITY_ERRORS);
+      RTC_LOG(LS_VERBOSE) << "CompleteAuthToken returned: "
+                          << GetErrorName(ret, SECURITY_ERRORS);
       if (FAILED(ret)) {
         return HAR_ERROR;
       }
     }
-
-    //LOG(INFO) << "$$$ NEGOTIATE took " << TimeSince(now) << "ms";
 
     std::string decoded(out_buf, out_buf + out_sec.cbBuffer);
     response = auth_method;

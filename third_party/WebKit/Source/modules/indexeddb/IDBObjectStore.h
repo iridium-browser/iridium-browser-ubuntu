@@ -26,6 +26,7 @@
 #ifndef IDBObjectStore_h
 #define IDBObjectStore_h
 
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/serialization/SerializedScriptValue.h"
 #include "modules/indexeddb/IDBCursor.h"
 #include "modules/indexeddb/IDBIndex.h"
@@ -36,7 +37,6 @@
 #include "modules/indexeddb/IDBRequest.h"
 #include "modules/indexeddb/IDBTransaction.h"
 #include "platform/bindings/ScriptWrappable.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/modules/indexeddb/WebIDBCursor.h"
 #include "public/platform/modules/indexeddb/WebIDBDatabase.h"
@@ -45,21 +45,18 @@
 namespace blink {
 
 class DOMStringList;
-class IDBAny;
 class ExceptionState;
 
-class MODULES_EXPORT IDBObjectStore final
-    : public GarbageCollectedFinalized<IDBObjectStore>,
-      public ScriptWrappable {
+class MODULES_EXPORT IDBObjectStore final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static IDBObjectStore* Create(RefPtr<IDBObjectStoreMetadata> metadata,
+  static IDBObjectStore* Create(scoped_refptr<IDBObjectStoreMetadata> metadata,
                                 IDBTransaction* transaction) {
     return new IDBObjectStore(std::move(metadata), transaction);
   }
-  ~IDBObjectStore() {}
-  DECLARE_TRACE();
+  ~IDBObjectStore() = default;
+  void Trace(blink::Visitor*);
 
   const IDBObjectStoreMetadata& Metadata() const { return *metadata_; }
   const IDBKeyPath& IdbKeyPath() const { return Metadata().key_path; }
@@ -103,9 +100,7 @@ class MODULES_EXPORT IDBObjectStore final
                   const ScriptValue&,
                   const ScriptValue& key,
                   ExceptionState&);
-  IDBRequest* deleteFunction(ScriptState*,
-                             const ScriptValue& key,
-                             ExceptionState&);
+  IDBRequest* Delete(ScriptState*, const ScriptValue& key, ExceptionState&);
   IDBRequest* clear(ScriptState*, ExceptionState&);
 
   IDBIndex* createIndex(ScriptState* script_state,
@@ -121,13 +116,13 @@ class MODULES_EXPORT IDBObjectStore final
 
   IDBRequest* count(ScriptState*, const ScriptValue& range, ExceptionState&);
 
-  // Used by IDBCursor::update():
-  IDBRequest* put(ScriptState*,
-                  WebIDBPutMode,
-                  IDBAny* source,
-                  const ScriptValue&,
-                  IDBKey*,
-                  ExceptionState&);
+  // Exposed for the use of IDBCursor::update().
+  IDBRequest* DoPut(ScriptState*,
+                    WebIDBPutMode,
+                    const IDBRequest::Source&,
+                    const ScriptValue&,
+                    const IDBKey*,
+                    ExceptionState&);
 
   // Used internally and by InspectorIndexedDBAgent:
   IDBRequest* openCursor(
@@ -135,6 +130,10 @@ class MODULES_EXPORT IDBObjectStore final
       IDBKeyRange*,
       WebIDBCursorDirection,
       WebIDBTaskType = kWebIDBTaskTypeNormal,
+      IDBRequest::AsyncTraceState = IDBRequest::AsyncTraceState());
+  IDBRequest* deleteFunction(
+      ScriptState*,
+      IDBKeyRange*,
       IDBRequest::AsyncTraceState = IDBRequest::AsyncTraceState());
 
   void MarkDeleted();
@@ -172,7 +171,7 @@ class MODULES_EXPORT IDBObjectStore final
   // IDBIndex metadata for indexes that were deleted in this transaction.
   //
   // Used when a versionchange transaction is aborted.
-  void RevertMetadata(RefPtr<IDBObjectStoreMetadata> previous_metadata);
+  void RevertMetadata(scoped_refptr<IDBObjectStoreMetadata> previous_metadata);
   // This relies on the changes made by RevertMetadata().
   void RevertDeletedIndexMetadata(IDBIndex& deleted_index);
 
@@ -187,25 +186,24 @@ class MODULES_EXPORT IDBObjectStore final
  private:
   using IDBIndexMap = HeapHashMap<String, Member<IDBIndex>>;
 
-  IDBObjectStore(RefPtr<IDBObjectStoreMetadata>, IDBTransaction*);
+  IDBObjectStore(scoped_refptr<IDBObjectStoreMetadata>, IDBTransaction*);
 
   IDBIndex* createIndex(ScriptState*,
                         const String& name,
                         const IDBKeyPath&,
                         const IDBIndexParameters&,
                         ExceptionState&);
-  IDBRequest* put(ScriptState*,
-                  WebIDBPutMode,
-                  IDBAny* source,
-                  const ScriptValue&,
-                  const ScriptValue& key,
-                  ExceptionState&);
+  IDBRequest* DoPut(ScriptState*,
+                    WebIDBPutMode,
+                    const ScriptValue&,
+                    const ScriptValue& key_value,
+                    ExceptionState&);
 
   int64_t FindIndexId(const String& name) const;
 
   // The IDBObjectStoreMetadata is shared with the object store map in the
   // database's metadata.
-  RefPtr<IDBObjectStoreMetadata> metadata_;
+  scoped_refptr<IDBObjectStoreMetadata> metadata_;
   Member<IDBTransaction> transaction_;
   bool deleted_ = false;
 

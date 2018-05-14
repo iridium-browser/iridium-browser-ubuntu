@@ -6,15 +6,17 @@
 #define CHROME_BROWSER_UI_VIEWS_HARMONY_CHROME_TYPOGRAPHY_H_
 
 #include "base/macros.h"
+#include "ui/gfx/font.h"
 #include "ui/views/style/typography.h"
 #include "ui/views/style/typography_provider.h"
 
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
+// gn check complains on Linux Ozone.
 #include "ash/public/cpp/ash_typography.h"  // nogncheck
 #endif
 
 enum ChromeTextContext {
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
   CHROME_TEXT_CONTEXT_START = ash::ASH_TEXT_CONTEXT_END,
 #else
   CHROME_TEXT_CONTEXT_START = views::style::VIEWS_TEXT_CONTEXT_END,
@@ -29,9 +31,13 @@ enum ChromeTextContext {
   // "Body 2". Usually 12pt.
   CONTEXT_BODY_TEXT_SMALL,
 
-  // ResourceBundle::SmallFont (11 pt). There is no equivalent in the Harmony
-  // spec, so new code should not be using this. It is only provided to avoid
-  // changing existing UI and it will eventually be removed.
+  // Text for titles, body text and buttons that appear in dialogs attempting to
+  // mimic the native Windows 10 look and feel.
+  CONTEXT_WINDOWS10_NATIVE,
+
+  // ui::ResourceBundle::SmallFont (11 pt). There is no equivalent in the
+  // Harmony spec, so new code should not be using this. It is only provided to
+  // avoid changing existing UI and it will eventually be removed.
   CONTEXT_DEPRECATED_SMALL,
 };
 
@@ -55,6 +61,13 @@ enum ChromeTextStyle {
   STYLE_EMPHASIZED,
 };
 
+// Sets the |size_delta| and |font_weight| for text that should not be affected
+// by the Harmony spec.
+void ApplyCommonFontStyles(int context,
+                           int style,
+                           int* size_delta,
+                           gfx::Font::Weight* weight);
+
 // TypographyProvider that provides pre-Harmony fonts in Chrome.
 class LegacyTypographyProvider : public views::DefaultTypographyProvider {
  public:
@@ -62,9 +75,9 @@ class LegacyTypographyProvider : public views::DefaultTypographyProvider {
 
   // DefaultTypographyProvider:
   const gfx::FontList& GetFont(int context, int style) const override;
-  SkColor GetColor(int context,
-                   int style,
-                   const ui::NativeTheme& theme) const override;
+  SkColor GetColor(const views::View& view,
+                   int context,
+                   int style) const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(LegacyTypographyProvider);

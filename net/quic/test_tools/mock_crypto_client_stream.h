@@ -11,10 +11,10 @@
 #include "net/quic/chromium/crypto/proof_verifier_chromium.h"
 #include "net/quic/core/crypto/crypto_handshake.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
-#include "net/quic/core/quic_client_session_base.h"
 #include "net/quic/core/quic_crypto_client_stream.h"
 #include "net/quic/core/quic_server_id.h"
 #include "net/quic/core/quic_session.h"
+#include "net/quic/core/quic_spdy_client_session_base.h"
 
 namespace net {
 
@@ -47,12 +47,13 @@ class MockCryptoClientStream : public QuicCryptoClientStream,
 
   MockCryptoClientStream(
       const QuicServerId& server_id,
-      QuicClientSessionBase* session,
+      QuicSpdyClientSessionBase* session,
       ProofVerifyContext* verify_context,
       const QuicConfig& config,
       QuicCryptoClientConfig* crypto_config,
       HandshakeMode handshake_mode,
-      const ProofVerifyDetailsChromium* proof_verify_details_);
+      const ProofVerifyDetailsChromium* proof_verify_details_,
+      bool use_mock_crypter);
   ~MockCryptoClientStream() override;
 
   // CryptoFramerVisitorInterface implementation.
@@ -83,6 +84,7 @@ class MockCryptoClientStream : public QuicCryptoClientStream,
   QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters>
       crypto_negotiated_params_;
   CryptoFramer crypto_framer_;
+  bool use_mock_crypter_;
 
   const QuicServerId server_id_;
   const ProofVerifyDetailsChromium* proof_verify_details_;

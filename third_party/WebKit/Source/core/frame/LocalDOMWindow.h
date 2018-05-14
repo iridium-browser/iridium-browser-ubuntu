@@ -28,7 +28,7 @@
 #define LocalDOMWindow_h
 
 #include "core/CoreExport.h"
-#include "core/events/EventTarget.h"
+#include "core/dom/events/EventTarget.h"
 #include "core/frame/DOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "platform/Supplementable.h"
@@ -57,9 +57,7 @@ class EventQueue;
 class ExceptionState;
 class External;
 class FrameConsole;
-class FrameRequestCallback;
 class History;
-class IdleRequestCallback;
 class IdleRequestOptions;
 class MediaQueryList;
 class MessageEvent;
@@ -67,12 +65,15 @@ class Modulator;
 class Navigator;
 class PostMessageTimer;
 class Screen;
+class ScriptPromise;
 class ScriptState;
 class ScrollToOptions;
 class SecurityOrigin;
 class SerializedScriptValue;
 class SourceLocation;
 class StyleMedia;
+class V8FrameRequestCallback;
+class V8IdleRequestCallback;
 
 enum PageshowEventPersistence {
   kPageshowEventNotPersisted = 0,
@@ -108,12 +109,12 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   LocalFrame* GetFrame() const { return ToLocalFrame(DOMWindow::GetFrame()); }
 
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void Trace(blink::Visitor*);
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
   Document* InstallNewDocument(const String& mime_type,
                                const DocumentInit&,
-                               bool force_xhtml = false);
+                               bool force_xhtml);
 
   // EventTarget overrides:
   ExecutionContext* GetExecutionContext() const override;
@@ -196,7 +197,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   // FIXME: ScrollBehaviorSmooth is currently unsupported in VisualViewport.
   // crbug.com/434497
-  void scrollBy(double x, double y, ScrollBehavior = kScrollBehaviorAuto) const;
+  void scrollBy(double x, double y) const;
   void scrollBy(const ScrollToOptions&) const;
   void scrollTo(double x, double y) const;
   void scrollTo(const ScrollToOptions&) const;
@@ -213,19 +214,23 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   MediaQueryList* matchMedia(const String&);
 
   // DOM Level 2 Style Interface
-  CSSStyleDeclaration* getComputedStyle(Element*,
-                                        const String& pseudo_elt) const;
+  CSSStyleDeclaration* getComputedStyle(
+      Element*,
+      const String& pseudo_elt = String()) const;
+
+  // Acessibility Object Model
+  ScriptPromise getComputedAccessibleNode(ScriptState*, Element*);
 
   // WebKit extension
   CSSRuleList* getMatchedCSSRules(Element*, const String& pseudo_elt) const;
 
   // WebKit animation extensions
-  int requestAnimationFrame(FrameRequestCallback*);
-  int webkitRequestAnimationFrame(FrameRequestCallback*);
+  int requestAnimationFrame(V8FrameRequestCallback*);
+  int webkitRequestAnimationFrame(V8FrameRequestCallback*);
   void cancelAnimationFrame(int id);
 
   // Idle callback extensions
-  int requestIdleCallback(IdleRequestCallback*, const IdleRequestOptions&);
+  int requestIdleCallback(V8IdleRequestCallback*, const IdleRequestOptions&);
   void cancelIdleCallback(int id);
 
   // Custom elements
@@ -266,6 +271,14 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   Element* frameElement() const;
 
+  DOMWindow* open(ExecutionContext*,
+                  LocalDOMWindow* current_window,
+                  LocalDOMWindow* entered_window,
+                  const String& url,
+                  const AtomicString& target,
+                  const String& features,
+                  ExceptionState&);
+
   DOMWindow* open(const String& url_string,
                   const AtomicString& frame_name,
                   const String& window_features_string,
@@ -280,7 +293,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void PostMessageTimerFired(PostMessageTimer*);
   void RemovePostMessageTimer(PostMessageTimer*);
   void DispatchMessageEventWithOriginCheck(
-      SecurityOrigin* intended_target_origin,
+      const SecurityOrigin* intended_target_origin,
       Event*,
       std::unique_ptr<SourceLocation>);
 
@@ -302,18 +315,16 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void EnqueueDocumentEvent(Event*);
   void EnqueuePageshowEvent(PageshowEventPersistence);
   void EnqueueHashchangeEvent(const String& old_url, const String& new_url);
-  void EnqueuePopstateEvent(PassRefPtr<SerializedScriptValue>);
+  void EnqueuePopstateEvent(scoped_refptr<SerializedScriptValue>);
   void DispatchWindowLoadEvent();
   void DocumentWasClosed();
-  void StatePopped(PassRefPtr<SerializedScriptValue>);
+  void StatePopped(scoped_refptr<SerializedScriptValue>);
 
   // FIXME: This shouldn't be public once LocalDOMWindow becomes
   // ExecutionContext.
   void ClearEventQueue();
 
   void AcceptLanguagesChanged();
-
-  FloatSize GetViewportSize(IncludeScrollbarsInRect) const;
 
  protected:
   // EventTarget overrides.
@@ -324,7 +335,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   // Protected DOMWindow overrides.
   void SchedulePostMessage(MessageEvent*,
-                           PassRefPtr<SecurityOrigin> target,
+                           scoped_refptr<const SecurityOrigin> target,
                            Document* source) override;
 
  private:
@@ -339,6 +350,9 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   void DispatchLoadEvent();
   void ClearDocument();
+
+  // Return the viewport size including scrollbars.
+  IntSize GetViewportSize() const;
 
   TraceWrapperMember<Document> document_;
   Member<DOMVisualViewport> visualViewport_;
@@ -355,7 +369,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   mutable Member<BarProp> scrollbars_;
   mutable Member<BarProp> statusbar_;
   mutable Member<BarProp> toolbar_;
-  mutable Member<Navigator> navigator_;
+  mutable TraceWrapperMember<Navigator> navigator_;
   mutable Member<StyleMedia> media_;
   mutable TraceWrapperMember<CustomElementRegistry> custom_elements_;
   // We store reference to Modulator here to have it TraceWrapper-ed.
@@ -373,7 +387,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   mutable Member<ApplicationCache> application_cache_;
 
   Member<DOMWindowEventQueue> event_queue_;
-  RefPtr<SerializedScriptValue> pending_state_object_;
+  scoped_refptr<SerializedScriptValue> pending_state_object_;
 
   HeapHashSet<Member<PostMessageTimer>> post_message_timers_;
   HeapHashSet<WeakMember<EventListenerObserver>> event_listener_observers_;

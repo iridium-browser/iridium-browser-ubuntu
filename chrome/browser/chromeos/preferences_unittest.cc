@@ -8,21 +8,19 @@
 
 #include "base/json/json_string_value_serializer.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager_impl.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/prefs/pref_member.h"
-#include "components/sync/model/attachments/attachment_id.h"
-#include "components/sync/model/attachments/attachment_service_proxy_for_test.h"
 #include "components/sync/model/fake_sync_change_processor.h"
 #include "components/sync/model/sync_change.h"
 #include "components/sync/model/sync_data.h"
@@ -32,6 +30,7 @@
 #include "components/sync/protocol/preference_specifics.pb.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -61,12 +60,7 @@ CreatePrefSyncData(const std::string& name, const base::Value& value) {
   sync_pb::PreferenceSpecifics* pref = specifics.mutable_preference();
   pref->set_name(name);
   pref->set_value(serialized);
-  return syncer::SyncData::CreateRemoteData(
-      1,
-      specifics,
-      base::Time(),
-      syncer::AttachmentIdList(),
-      syncer::AttachmentServiceProxyForTest::Create());
+  return syncer::SyncData::CreateRemoteData(1, specifics, base::Time());
 }
 
 }  // anonymous namespace
@@ -154,8 +148,8 @@ class PreferencesTest : public testing::Test {
 
     chromeos::FakeChromeUserManager* user_manager =
         new chromeos::FakeChromeUserManager();
-    user_manager_enabler_.reset(
-        new chromeos::ScopedUserManagerEnabler(user_manager));
+    user_manager_enabler_ = std::make_unique<user_manager::ScopedUserManager>(
+        base::WrapUnique(user_manager));
 
     const char test_user_email[] = "test_user@example.com";
     const AccountId test_account_id(AccountId::FromUserEmail(test_user_email));
@@ -197,7 +191,7 @@ class PreferencesTest : public testing::Test {
 
   content::TestBrowserThreadBundle thread_bundle_;
   std::unique_ptr<TestingProfileManager> profile_manager_;
-  std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
+  std::unique_ptr<user_manager::ScopedUserManager> user_manager_enabler_;
   std::unique_ptr<Preferences> prefs_;
   StringPrefMember previous_input_method_;
   StringPrefMember current_input_method_;
@@ -388,7 +382,7 @@ TEST_F(InputMethodPreferencesTest, TestOobeAndSync) {
                                      new syncer::FakeSyncChangeProcessor),
                                  std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
 
   // Note that we expect the preload_engines to have been translated to input
   // method IDs during the merge.
@@ -424,7 +418,7 @@ TEST_F(InputMethodPreferencesTest, TestOobeAndSync) {
       CreatePrefSyncData(prefs::kLanguageEnabledExtensionImesSyncable,
                          base::Value(kToUpperIMEID))));
   sync->ProcessSyncChanges(FROM_HERE, change_list);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
 
   {
     SCOPED_TRACE("Local preferences should have remained the same.");
@@ -439,7 +433,7 @@ TEST_F(InputMethodPreferencesTest, TestOobeAndSync) {
     SCOPED_TRACE("Global preferences should have been updated.");
     ExpectGlobalValues("ja", "xkb:jp::jpn", "ime2");
   }
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
 }
 
 // Tests that logging in after sync has completed changes nothing.
@@ -474,14 +468,14 @@ TEST_F(InputMethodPreferencesTest, TestLogIn) {
                                      new syncer::FakeSyncChangeProcessor),
                                  std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   {
     SCOPED_TRACE("Local preferences should have remained the same.");
     ExpectLocalValues(languages, preload_engines, extensions);
   }
   // Change local preferences.
   SetLocalValues("ja", ToInputMethodIds("xkb:jp::jpn"), kToUpperIMEID);
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   {
     SCOPED_TRACE("Global preferences should have been updated.");
     ExpectGlobalValues("ja", "xkb:jp::jpn", kToUpperIMEID);
@@ -514,7 +508,7 @@ TEST_F(InputMethodPreferencesTest, TestLogInLegacy) {
                                      new syncer::FakeSyncChangeProcessor),
                                  std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   {
     SCOPED_TRACE("Local preferences should have remained the same.");
     ExpectLocalValues("es", "xkb:es::spa", kIdentityIMEID);
@@ -572,7 +566,7 @@ TEST_F(InputMethodPreferencesTest, MergeStressTest) {
                                      new syncer::FakeSyncChangeProcessor),
                                  std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   {
     SCOPED_TRACE("Server values should have merged into local values.");
     ExpectLocalValues(
@@ -623,7 +617,7 @@ TEST_F(InputMethodPreferencesTest, MergeInvalidValues) {
                                      new syncer::FakeSyncChangeProcessor),
                                  std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   {
     SCOPED_TRACE("Only valid server values should have been merged in.");
     ExpectLocalValues(
@@ -663,9 +657,9 @@ TEST_F(InputMethodPreferencesTest, MergeAfterSyncing) {
                                      new syncer::FakeSyncChangeProcessor),
                                  std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   InitPreferences();
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
 
   {
     SCOPED_TRACE("Local values should have been merged on initialization.");

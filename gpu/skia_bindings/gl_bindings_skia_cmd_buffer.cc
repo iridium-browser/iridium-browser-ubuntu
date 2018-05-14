@@ -108,6 +108,8 @@ sk_sp<GrGLInterface> CreateGLES2InterfaceBindings(GLES2Interface* impl) {
       gles_bind(&GLES2Interface::GetBufferParameteriv, impl);
   functions->fGetError = gles_bind(&GLES2Interface::GetError, impl);
   functions->fGetIntegerv = get_integerv;
+  functions->fGetInternalformativ =
+      gles_bind(&GLES2Interface::GetInternalformativ, impl);
   functions->fGetProgramInfoLog =
       gles_bind(&GLES2Interface::GetProgramInfoLog, impl);
   functions->fGetProgramiv = gles_bind(&GLES2Interface::GetProgramiv, impl);
@@ -129,6 +131,7 @@ sk_sp<GrGLInterface> CreateGLES2InterfaceBindings(GLES2Interface* impl) {
       gles_bind(&GLES2Interface::InvalidateFramebuffer, impl);
   functions->fInvalidateSubFramebuffer =
       gles_bind(&GLES2Interface::InvalidateSubFramebuffer, impl);
+  functions->fIsSync = gles_bind(&GLES2Interface::IsSync, impl);
   functions->fIsTexture = gles_bind(&GLES2Interface::IsTexture, impl);
   functions->fLineWidth = gles_bind(&GLES2Interface::LineWidth, impl);
   functions->fLinkProgram = gles_bind(&GLES2Interface::LinkProgram, impl);
@@ -291,6 +294,8 @@ sk_sp<GrGLInterface> CreateGLES2InterfaceBindings(GLES2Interface* impl) {
       gles_bind(&GLES2Interface::BindFragmentInputLocationCHROMIUM, impl);
   functions->fCoverageModulation =
       gles_bind(&GLES2Interface::CoverageModulationCHROMIUM, impl);
+  functions->fWindowRectangles =
+      gles_bind(&GLES2Interface::WindowRectanglesEXT, impl);
   return interface;
 }
 

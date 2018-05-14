@@ -15,9 +15,9 @@
 #include "net/http/bidirectional_stream.h"
 #include "net/url_request/url_request_context_getter.h"
 
-namespace tracked_objects {
+namespace base {
 class Location;
-}  // namespace tracked_objects
+}  // namespace base
 
 namespace net {
 class HttpRequestHeaders;
@@ -192,8 +192,8 @@ class BidirectionalStream : public net::BidirectionalStream::Delegate {
   void DestroyOnNetworkThread();
 
   bool IsOnNetworkThread();
-  void PostToNetworkThread(const tracked_objects::Location& from_here,
-                           const base::Closure& task);
+  void PostToNetworkThread(const base::Location& from_here,
+                           base::OnceClosure task);
 
   // Read state is tracking reading flow. Only accessed on network thread.
   //                         | <--- READING <--- |

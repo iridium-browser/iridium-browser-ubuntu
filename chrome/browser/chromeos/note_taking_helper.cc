@@ -8,12 +8,11 @@
 #include <utility>
 
 #include "apps/launcher.h"
-#include "ash/system/palette/palette_utils.h"
+#include "ash/public/cpp/stylus_utils.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
@@ -23,6 +22,7 @@
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/chromeos/lock_screen_apps/state_controller.h"
+#include "chrome/browser/chromeos/note_taking_controller_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
@@ -116,7 +116,7 @@ std::unique_ptr<std::set<std::string>> GetAllowedLockScreenApps(
     return nullptr;
   }
 
-  auto allowed_apps = base::MakeUnique<std::set<std::string>>();
+  auto allowed_apps = std::make_unique<std::set<std::string>>();
   for (const base::Value& app_value : allowed_apps_list->GetList()) {
     if (!app_value.is_string()) {
       LOG(ERROR) << "Invalid app ID value " << app_value;
@@ -204,10 +204,13 @@ NoteTakingAppInfos NoteTakingHelper::GetAvailableApps(Profile* profile) {
 
 std::unique_ptr<NoteTakingAppInfo> NoteTakingHelper::GetPreferredChromeAppInfo(
     Profile* profile) {
-  const std::string preferred_app_id =
+  std::string preferred_app_id =
       profile->GetPrefs()->GetString(prefs::kNoteTakingAppId);
   if (LooksLikeAndroidPackageName(preferred_app_id))
     return nullptr;
+
+  if (preferred_app_id.empty())
+    preferred_app_id = kProdKeepExtensionId;
 
   const extensions::Extension* preferred_app =
       extensions::ExtensionRegistry::Get(profile)->GetExtensionById(
@@ -222,7 +225,7 @@ std::unique_ptr<NoteTakingAppInfo> NoteTakingHelper::GetPreferredChromeAppInfo(
   }
 
   std::unique_ptr<NoteTakingAppInfo> info =
-      base::MakeUnique<NoteTakingAppInfo>();
+      std::make_unique<NoteTakingAppInfo>();
   info->name = preferred_app->name();
   info->app_id = preferred_app->id();
   info->preferred = true;
@@ -279,7 +282,7 @@ bool NoteTakingHelper::SetPreferredAppEnabledOnLockScreen(Profile* profile,
 bool NoteTakingHelper::IsAppAvailable(Profile* profile) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(profile);
-  return ash::palette_utils::HasStylusInput() &&
+  return ash::stylus_utils::HasStylusInput() &&
          !GetAvailableApps(profile).empty();
 }
 
@@ -344,6 +347,8 @@ NoteTakingHelper::NoteTakingHelper()
     : launch_chrome_app_callback_(
           base::Bind(&apps::LaunchPlatformAppWithAction)),
       extension_registry_observer_(this),
+      note_taking_controller_client_(
+          std::make_unique<NoteTakingControllerClient>(this)),
       weak_ptr_factory_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -389,7 +394,7 @@ NoteTakingHelper::NoteTakingHelper()
   if (play_store_enabled_ && arc::ArcServiceManager::Get()
                                  ->arc_bridge_service()
                                  ->intent_helper()
-                                 ->has_instance()) {
+                                 ->IsConnected()) {
     UpdateAndroidApps();
   }
 }
@@ -523,7 +528,7 @@ NoteTakingHelper::LaunchResult NoteTakingHelper::LaunchAppInternal(
       LOG(WARNING) << "Failed to find Chrome note-taking app " << app_id;
       return LaunchResult::CHROME_APP_MISSING;
     }
-    auto action_data = base::MakeUnique<app_runtime::ActionData>();
+    auto action_data = std::make_unique<app_runtime::ActionData>();
     action_data->action_type = app_runtime::ActionType::ACTION_TYPE_NEW_NOTE;
     launch_chrome_app_callback_.Run(profile, app, std::move(action_data), path);
     return LaunchResult::CHROME_SUCCESS;

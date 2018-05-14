@@ -31,7 +31,7 @@ CopyTexImageResourceManager::CopyTexImageResourceManager(
   DCHECK(feature_info->gl_version_info().is_desktop_core_profile);
 }
 
-CopyTexImageResourceManager::~CopyTexImageResourceManager() {}
+CopyTexImageResourceManager::~CopyTexImageResourceManager() = default;
 
 void CopyTexImageResourceManager::Initialize(
     const gles2::GLES2Decoder* decoder) {
@@ -235,6 +235,9 @@ void CopyTexImageResourceManager::DoCopyTexSubImageToLUMACompatibilityTexture(
   glDepthMask(GL_FALSE);
   glDisable(GL_BLEND);
   glDisable(GL_DITHER);
+  if (decoder->GetFeatureInfo()->feature_flags().ext_window_rectangles) {
+    glWindowRectanglesEXT(GL_EXCLUSIVE_EXT, 0, nullptr);
+  }
 
   glBindTexture(GL_TEXTURE_2D, scratch_textures_[0]);
   glBindVertexArrayOES(vao_);

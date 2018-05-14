@@ -16,9 +16,8 @@
 
 #include <libaddressinput/callback.h>
 #include <libaddressinput/null_storage.h>
-#include <libaddressinput/util/basictypes.h>
-#include <libaddressinput/util/scoped_ptr.h>
 
+#include <memory>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -34,11 +33,14 @@ using i18n::addressinput::NullStorage;
 using i18n::addressinput::Retriever;
 using i18n::addressinput::Rule;
 using i18n::addressinput::RuleRetriever;
-using i18n::addressinput::scoped_ptr;
 using i18n::addressinput::TestdataSource;
 
 // Tests for RuleRetriever object.
 class RuleRetrieverTest : public testing::Test {
+ public:
+  RuleRetrieverTest(const RuleRetrieverTest&) = delete;
+  RuleRetrieverTest& operator=(const RuleRetrieverTest&) = delete;
+
  protected:
   RuleRetrieverTest()
       : rule_retriever_(
@@ -52,7 +54,7 @@ class RuleRetrieverTest : public testing::Test {
   bool success_;
   std::string key_;
   Rule rule_;
-  const scoped_ptr<const RuleRetriever::Callback> rule_ready_;
+  const std::unique_ptr<const RuleRetriever::Callback> rule_ready_;
 
  private:
   void OnRuleReady(bool success,
@@ -62,8 +64,6 @@ class RuleRetrieverTest : public testing::Test {
     key_ = key;
     rule_.CopyFrom(rule);
   }
-
-  DISALLOW_COPY_AND_ASSIGN(RuleRetrieverTest);
 };
 
 TEST_F(RuleRetrieverTest, ExistingRule) {

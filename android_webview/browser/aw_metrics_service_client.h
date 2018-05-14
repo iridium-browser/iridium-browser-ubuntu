@@ -5,7 +5,6 @@
 #ifndef ANDROID_WEBVIEW_BROWSER_AW_METRICS_SERVICE_CLIENT_H_
 #define ANDROID_WEBVIEW_BROWSER_AW_METRICS_SERVICE_CLIENT_H_
 
-#include <jni.h>
 #include <memory>
 #include <string>
 
@@ -45,19 +44,23 @@ class AwMetricsServiceClient : public metrics::MetricsServiceClient,
  public:
   static AwMetricsServiceClient* GetInstance();
 
-  // Retrieve the client ID or generate one if none exists
-  static void GetOrCreateGUID();
+  // Retrieve the client ID or generate one if none exists.
+  static void LoadOrCreateClientId();
+
+  // Return the cached client id.
+  static std::string GetClientId();
 
   void Initialize(PrefService* pref_service,
                   net::URLRequestContextGetter* request_context);
 
   // metrics::EnabledStateProvider implementation
-  bool IsConsentGiven() override;
+  bool IsConsentGiven() const override;
+  bool IsReportingEnabled() const override;
 
   // The below functions must not be called until initialization has
   // asynchronously finished.
 
-  void SetMetricsEnabled(bool enabled);
+  void SetHaveMetricsConsent(bool consent);
 
   // metrics::MetricsServiceClient implementation
   metrics::MetricsService* GetMetricsService() override;
@@ -67,11 +70,10 @@ class AwMetricsServiceClient : public metrics::MetricsServiceClient,
   bool GetBrand(std::string* brand_code) override;
   metrics::SystemProfileProto::Channel GetChannel() override;
   std::string GetVersionString() override;
-  void InitializeSystemProfileMetrics(
-      const base::Closure& done_callback) override;
   void CollectFinalMetricsForLog(const base::Closure& done_callback) override;
   std::unique_ptr<metrics::MetricsLogUploader> CreateUploader(
       base::StringPiece server_url,
+      base::StringPiece insecure_server_url,
       base::StringPiece mime_type,
       metrics::MetricsLogUploader::MetricServiceType service_type,
       const metrics::MetricsLogUploader::UploadCallback& on_upload_complete)
@@ -82,19 +84,17 @@ class AwMetricsServiceClient : public metrics::MetricsServiceClient,
   AwMetricsServiceClient();
   ~AwMetricsServiceClient() override;
 
-  void InitializeWithGUID();
+  void InitializeWithClientId();
 
-  bool is_enabled_;
-  PrefService* pref_service_;
-  net::URLRequestContextGetter* request_context_;
   std::unique_ptr<metrics::MetricsStateManager> metrics_state_manager_;
   std::unique_ptr<metrics::MetricsService> metrics_service_;
-  version_info::Channel channel_;
+  PrefService* pref_service_;
+  net::URLRequestContextGetter* request_context_;
+  bool consent_;    // = (user has consented) && !(app has opted out)
+  bool in_sample_;  // Is this client enabled by sampling?
 
   DISALLOW_COPY_AND_ASSIGN(AwMetricsServiceClient);
 };
-
-bool RegisterAwMetricsServiceClient(JNIEnv* env);
 
 }  // namespace android_webview
 

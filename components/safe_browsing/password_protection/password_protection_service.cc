@@ -5,13 +5,15 @@
 #include "components/safe_browsing/password_protection/password_protection_service.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <string>
 
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -19,11 +21,13 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/password_manager/core/browser/password_reuse_detector.h"
+#include "components/safe_browsing/db/database_manager.h"
+#include "components/safe_browsing/db/whitelist_checker_client.h"
+#include "components/safe_browsing/features.h"
+#include "components/safe_browsing/password_protection/password_protection_navigation_throttle.h"
 #include "components/safe_browsing/password_protection/password_protection_request.h"
-#include "components/safe_browsing_db/database_manager.h"
-#include "components/safe_browsing_db/v4_protocol_manager_util.h"
-#include "components/safe_browsing_db/whitelist_checker_client.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
@@ -74,21 +78,23 @@ GURL GetHostNameWithHTTPScheme(const GURL& url) {
 
 }  // namespace
 
-const base::Feature kPasswordFieldOnFocusPinging{
-    "PasswordFieldOnFocusPinging", base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kProtectedPasswordEntryPinging{
-    "ProtectedPasswordEntryPinging", base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kPasswordProtectionInterstitial{
-    "PasswordProtectionInterstitial", base::FEATURE_DISABLED_BY_DEFAULT};
-
-const char kPasswordOnFocusRequestOutcomeHistogramName[] =
+const char kPasswordOnFocusRequestOutcomeHistogram[] =
     "PasswordProtection.RequestOutcome.PasswordFieldOnFocus";
-const char kPasswordEntryRequestOutcomeHistogramName[] =
-    "PasswordProtection.RequestOutcome.ProtectedPasswordEntry";
-const char kSyncPasswordEntryRequestOutcomeHistogramName[] =
+// Matches sync and/or saved password
+const char kAnyPasswordEntryRequestOutcomeHistogram[] =
+    "PasswordProtection.RequestOutcome.AnyPasswordEntry";
+// Matches sync and maybe also saved password
+const char kSyncPasswordEntryRequestOutcomeHistogram[] =
     "PasswordProtection.RequestOutcome.SyncPasswordEntry";
+// Matches saved but NOT sync password
+const char kProtectedPasswordEntryRequestOutcomeHistogram[] =
+    "PasswordProtection.RequestOutcome.ProtectedPasswordEntry";
+const char kSyncPasswordWarningDialogHistogram[] =
+    "PasswordProtection.ModalWarningDialogAction.SyncPasswordEntry";
+const char kSyncPasswordPageInfoHistogram[] =
+    "PasswordProtection.PageInfoAction.SyncPasswordEntry";
+const char kSyncPasswordChromeSettingsHistogram[] =
+    "PasswordProtection.ChromeSettingsAction.SyncPasswordEntry";
 
 PasswordProtectionService::PasswordProtectionService(
     const scoped_refptr<SafeBrowsingDatabaseManager>& database_manager,
@@ -115,16 +121,62 @@ PasswordProtectionService::~PasswordProtectionService() {
 }
 
 bool PasswordProtectionService::CanGetReputationOfURL(const GURL& url) {
-  if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS())
+  if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS() || net::IsLocalhost(url))
     return false;
 
   const std::string hostname = url.HostNoBrackets();
-  return !net::IsLocalhost(hostname) && !net::IsHostnameNonUnique(hostname) &&
+  return !net::IsHostnameNonUnique(hostname) &&
          hostname.find('.') != std::string::npos;
 }
 
+void PasswordProtectionService::RecordWarningAction(WarningUIType ui_type,
+                                                    WarningAction action) {
+  switch (ui_type) {
+    case PAGE_INFO:
+      UMA_HISTOGRAM_ENUMERATION(kSyncPasswordPageInfoHistogram, action,
+                                MAX_ACTION);
+      break;
+    case MODAL_DIALOG:
+      UMA_HISTOGRAM_ENUMERATION(kSyncPasswordWarningDialogHistogram, action,
+                                MAX_ACTION);
+      break;
+    case CHROME_SETTINGS:
+      UMA_HISTOGRAM_ENUMERATION(kSyncPasswordChromeSettingsHistogram, action,
+                                MAX_ACTION);
+      break;
+    case NOT_USED:
+    case MAX_UI_TYPE:
+      NOTREACHED();
+      break;
+  }
+}
+
+bool PasswordProtectionService::ShouldShowModalWarning(
+    LoginReputationClientRequest::TriggerType trigger_type,
+    bool matches_sync_password,
+    LoginReputationClientResponse::VerdictType verdict_type) {
+  if (trigger_type != LoginReputationClientRequest::PASSWORD_REUSE_EVENT ||
+      !matches_sync_password ||
+      GetSyncAccountType() ==
+          LoginReputationClientRequest::PasswordReuseEvent::NOT_SIGNED_IN) {
+    return false;
+  }
+
+  return (verdict_type == LoginReputationClientResponse::PHISHING ||
+          (verdict_type == LoginReputationClientResponse::LOW_REPUTATION &&
+           base::GetFieldTrialParamByFeatureAsBool(
+               kGoogleBrandedPhishingWarning, "warn_on_low_reputation",
+               false))) &&
+         IsWarningEnabled();
+}
+
+bool PasswordProtectionService::ShouldShowSofterWarning() {
+  return base::GetFieldTrialParamByFeatureAsBool(kGoogleBrandedPhishingWarning,
+                                                 "softer_warning", false);
+}
+
 // We cache both types of pings under the same content settings type (
-// CONTENT_SETTINGS_TYPE_PASSWORD_PROTECTION). Since UNFAMILIAR_LOGING_PAGE
+// CONTENT_SETTINGS_TYPE_PASSWORD_PROTECTION). Since UNFAMILIAR_LOGIN_PAGE
 // verdicts are only enabled on extended reporting users, we cache them one
 // layer lower in the content setting DictionaryValue than PASSWORD_REUSE_EVENT
 // verdicts.
@@ -136,7 +188,7 @@ bool PasswordProtectionService::CanGetReputationOfURL(const GURL& url) {
 LoginReputationClientResponse::VerdictType
 PasswordProtectionService::GetCachedVerdict(
     const GURL& url,
-    TriggerType trigger_type,
+    LoginReputationClientRequest::TriggerType trigger_type,
     LoginReputationClientResponse* out_response) {
   DCHECK(trigger_type == LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE ||
          trigger_type == LoginReputationClientRequest::PASSWORD_REUSE_EVENT);
@@ -212,7 +264,7 @@ PasswordProtectionService::GetCachedVerdict(
 
 void PasswordProtectionService::CacheVerdict(
     const GURL& url,
-    TriggerType trigger_type,
+    LoginReputationClientRequest::TriggerType trigger_type,
     LoginReputationClientResponse* verdict,
     const base::Time& receive_time) {
   DCHECK(verdict);
@@ -231,20 +283,20 @@ void PasswordProtectionService::CacheVerdict(
           std::string(), nullptr));
 
   if (!cache_dictionary || !cache_dictionary.get())
-    cache_dictionary = base::MakeUnique<base::DictionaryValue>();
+    cache_dictionary = std::make_unique<base::DictionaryValue>();
 
   std::unique_ptr<base::DictionaryValue> verdict_entry(
       CreateDictionaryFromVerdict(verdict, receive_time));
 
-  base::DictionaryValue* verdict_dictionary = nullptr;
+  base::Value* verdict_dictionary = nullptr;
   if (trigger_type == LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE) {
     // All UNFAMILIAR_LOGIN_PAGE verdicts (a.k.a password on focus ping)
     // are cached under |kPasswordOnFocusCacheKey|.
-    if (!cache_dictionary->GetDictionaryWithoutPathExpansion(
-            base::StringPiece(kPasswordOnFocusCacheKey), &verdict_dictionary)) {
-      verdict_dictionary = cache_dictionary->SetDictionaryWithoutPathExpansion(
-          base::StringPiece(kPasswordOnFocusCacheKey),
-          base::MakeUnique<base::DictionaryValue>());
+    verdict_dictionary = cache_dictionary->FindKeyOfType(
+        kPasswordOnFocusCacheKey, base::Value::Type::DICTIONARY);
+    if (!verdict_dictionary) {
+      verdict_dictionary = cache_dictionary->SetKey(
+          kPasswordOnFocusCacheKey, base::Value(base::Value::Type::DICTIONARY));
     }
   } else {
     verdict_dictionary = cache_dictionary.get();
@@ -252,13 +304,14 @@ void PasswordProtectionService::CacheVerdict(
 
   // Increases stored verdict count if we haven't seen this cache expression
   // before.
-  if (!verdict_dictionary->HasKey(verdict->cache_expression()))
+  if (!verdict_dictionary->FindKey(verdict->cache_expression()))
     *stored_verdict_count = GetStoredVerdictCount(trigger_type) + 1;
 
   // If same cache_expression is already in this verdict_dictionary, we simply
   // override it.
-  verdict_dictionary->SetWithoutPathExpansion(verdict->cache_expression(),
-                                              std::move(verdict_entry));
+  verdict_dictionary->SetKey(
+      verdict->cache_expression(),
+      base::Value::FromUniquePtrValue(std::move(verdict_entry)));
   content_settings_->SetWebsiteSettingDefaultScope(
       hostname, GURL(), CONTENT_SETTINGS_TYPE_PASSWORD_PROTECTION,
       std::string(), std::move(cache_dictionary));
@@ -314,19 +367,19 @@ void PasswordProtectionService::StartRequest(
     const GURL& main_frame_url,
     const GURL& password_form_action,
     const GURL& password_form_frame_url,
-    const std::string& saved_domain,
-    TriggerType trigger_type,
+    bool matches_sync_password,
+    const std::vector<std::string>& matching_domains,
+    LoginReputationClientRequest::TriggerType trigger_type,
     bool password_field_exists) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   scoped_refptr<PasswordProtectionRequest> request(
       new PasswordProtectionRequest(
           web_contents, main_frame_url, password_form_action,
-          password_form_frame_url, saved_domain, trigger_type,
-          password_field_exists, this, GetRequestTimeoutInMS()));
+          password_form_frame_url, matches_sync_password, matching_domains,
+          trigger_type, password_field_exists, this, GetRequestTimeoutInMS()));
 
-  DCHECK(request);
   request->Start();
-  requests_.insert(std::move(request));
+  pending_requests_.insert(std::move(request));
 }
 
 void PasswordProtectionService::MaybeStartPasswordFieldOnFocusRequest(
@@ -335,10 +388,12 @@ void PasswordProtectionService::MaybeStartPasswordFieldOnFocusRequest(
     const GURL& password_form_action,
     const GURL& password_form_frame_url) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (CanSendPing(kPasswordFieldOnFocusPinging, main_frame_url, false)) {
+  if (CanSendPing(LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE,
+                  main_frame_url, false)) {
     StartRequest(web_contents, main_frame_url, password_form_action,
                  password_form_frame_url,
-                 std::string(), /* saved_domain: not used for this type */
+                 false, /* matches_sync_password: not used for this type */
+                 {},    /* matching_domains: not used for this type */
                  LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE, true);
   }
 }
@@ -346,27 +401,30 @@ void PasswordProtectionService::MaybeStartPasswordFieldOnFocusRequest(
 void PasswordProtectionService::MaybeStartProtectedPasswordEntryRequest(
     WebContents* web_contents,
     const GURL& main_frame_url,
-    const std::string& saved_domain,
+    bool matches_sync_password,
+    const std::vector<std::string>& matching_domains,
     bool password_field_exists) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (CanSendPing(
-          kProtectedPasswordEntryPinging, main_frame_url,
-          saved_domain == std::string(password_manager::kSyncPasswordDomain))) {
-    StartRequest(web_contents, main_frame_url, GURL(), GURL(), saved_domain,
+  if (CanSendPing(LoginReputationClientRequest::PASSWORD_REUSE_EVENT,
+                  main_frame_url, matches_sync_password)) {
+    StartRequest(web_contents, main_frame_url, GURL(), GURL(),
+                 matches_sync_password, matching_domains,
                  LoginReputationClientRequest::PASSWORD_REUSE_EVENT,
                  password_field_exists);
   }
 }
 
-bool PasswordProtectionService::CanSendPing(const base::Feature& feature,
-                                            const GURL& main_frame_url,
-                                            bool is_sync_password) {
+bool PasswordProtectionService::CanSendPing(
+    LoginReputationClientRequest::TriggerType trigger_type,
+    const GURL& main_frame_url,
+    bool matches_sync_password) {
   RequestOutcome request_outcome = URL_NOT_VALID_FOR_REPUTATION_COMPUTING;
-  if (IsPingingEnabled(feature, &request_outcome) &&
+  if (IsPingingEnabled(trigger_type, &request_outcome) &&
+      !IsURLWhitelistedForPasswordEntry(main_frame_url, &request_outcome) &&
       CanGetReputationOfURL(main_frame_url)) {
     return true;
   }
-  RecordNoPingingReason(feature, request_outcome, is_sync_password);
+  RecordNoPingingReason(trigger_type, request_outcome, matches_sync_password);
   return false;
 }
 
@@ -382,21 +440,24 @@ void PasswordProtectionService::RequestFinished(
       CacheVerdict(request->main_frame_url(), request->trigger_type(),
                    response.get(), base::Time::Now());
     }
-
-    if (request->trigger_type() ==
-            LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE &&
-        response->verdict_type() == LoginReputationClientResponse::PHISHING &&
-        base::FeatureList::IsEnabled(kPasswordProtectionInterstitial)) {
-      ShowPhishingInterstitial(request->main_frame_url(),
-                               response->verdict_token(),
-                               request->web_contents());
+    if (ShouldShowModalWarning(request->trigger_type(),
+                               request->matches_sync_password(),
+                               response->verdict_type())) {
+      ShowModalWarning(request->web_contents(), response->verdict_token());
+      request->set_is_modal_warning_showing(true);
     }
   }
 
-  // Finished processing this request. Remove it from pending list.
-  for (auto it = requests_.begin(); it != requests_.end(); it++) {
+  request->HandleDeferredNavigations();
+
+  // Remove request from |pending_requests_| list. If it triggers warning, add
+  // it into the !warning_reqeusts_| list.
+  for (auto it = pending_requests_.begin(); it != pending_requests_.end();
+       it++) {
     if (it->get() == request) {
-      requests_.erase(it);
+      if (request->is_modal_warning_showing())
+        warning_requests_.insert(std::move(request));
+      pending_requests_.erase(it);
       break;
     }
   }
@@ -404,14 +465,15 @@ void PasswordProtectionService::RequestFinished(
 
 void PasswordProtectionService::CancelPendingRequests() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  for (auto it = requests_.begin(); it != requests_.end();) {
+  for (auto it = pending_requests_.begin(); it != pending_requests_.end();) {
+    PasswordProtectionRequest* request = it->get();
+    // These are the requests for whom we're still waiting for verdicts.
     // We need to advance the iterator before we cancel because canceling
     // the request will invalidate it when RequestFinished is called.
-    PasswordProtectionRequest* request = it->get();
     it++;
     request->Cancel(false);
   }
-  DCHECK(requests_.empty());
+  DCHECK(pending_requests_.empty());
 }
 
 scoped_refptr<SafeBrowsingDatabaseManager>
@@ -426,7 +488,8 @@ GURL PasswordProtectionService::GetPasswordProtectionRequestUrl() {
   return url.Resolve("?key=" + net::EscapeQueryParamValue(api_key, true));
 }
 
-int PasswordProtectionService::GetStoredVerdictCount(TriggerType trigger_type) {
+int PasswordProtectionService::GetStoredVerdictCount(
+    LoginReputationClientRequest::TriggerType trigger_type) {
   DCHECK(content_settings_);
   DCHECK(trigger_type == LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE ||
          trigger_type == LoginReputationClientRequest::PASSWORD_REUSE_EVENT);
@@ -476,28 +539,13 @@ int PasswordProtectionService::GetRequestTimeoutInMS() {
 }
 
 void PasswordProtectionService::FillUserPopulation(
-    TriggerType trigger_type,
+    LoginReputationClientRequest::TriggerType trigger_type,
     LoginReputationClientRequest* request_proto) {
   ChromeUserPopulation* user_population = request_proto->mutable_population();
   user_population->set_user_population(
       IsExtendedReporting() ? ChromeUserPopulation::EXTENDED_REPORTING
                             : ChromeUserPopulation::SAFE_BROWSING);
   user_population->set_is_history_sync_enabled(IsHistorySyncEnabled());
-
-  base::FieldTrial* low_reputation_field_trial =
-      base::FeatureList::GetFieldTrial(kPasswordFieldOnFocusPinging);
-  if (low_reputation_field_trial) {
-    user_population->add_finch_active_groups(
-        low_reputation_field_trial->trial_name() + "|" +
-        low_reputation_field_trial->group_name());
-  }
-  base::FieldTrial* password_entry_field_trial =
-      base::FeatureList::GetFieldTrial(kProtectedPasswordEntryPinging);
-  if (password_entry_field_trial) {
-    user_population->add_finch_active_groups(
-        low_reputation_field_trial->trial_name() + "|" +
-        low_reputation_field_trial->group_name());
-  }
 }
 
 void PasswordProtectionService::OnURLsDeleted(
@@ -506,14 +554,14 @@ void PasswordProtectionService::OnURLsDeleted(
     bool expired,
     const history::URLRows& deleted_rows,
     const std::set<GURL>& favicon_urls) {
-  if (stored_verdict_count_password_on_focus_ <= 0 &&
-      stored_verdict_count_password_entry_ <= 0) {
-    return;
-  }
-
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&PasswordProtectionService::RemoveContentSettingsOnURLsDeleted,
+                 GetWeakPtr(), all_history, deleted_rows));
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&PasswordProtectionService::
+                     RemoveUnhandledSyncPasswordReuseOnURLsDeleted,
                  GetWeakPtr(), all_history, deleted_rows));
 }
 
@@ -561,8 +609,9 @@ void PasswordProtectionService::RemoveContentSettingsOnURLsDeleted(
   }
 }
 
-int PasswordProtectionService::GetVerdictCountForURL(const GURL& url,
-                                                     TriggerType trigger_type) {
+int PasswordProtectionService::GetVerdictCountForURL(
+    const GURL& url,
+    LoginReputationClientRequest::TriggerType trigger_type) {
   DCHECK(trigger_type == LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE ||
          trigger_type == LoginReputationClientRequest::PASSWORD_REUSE_EVENT);
   std::unique_ptr<base::DictionaryValue> cache_dictionary =
@@ -587,7 +636,7 @@ int PasswordProtectionService::GetVerdictCountForURL(const GURL& url,
 }
 
 bool PasswordProtectionService::RemoveExpiredVerdicts(
-    TriggerType trigger_type,
+    LoginReputationClientRequest::TriggerType trigger_type,
     base::DictionaryValue* cache_dictionary) {
   DCHECK(trigger_type == LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE ||
          trigger_type == LoginReputationClientRequest::PASSWORD_REUSE_EVENT);
@@ -661,11 +710,8 @@ bool PasswordProtectionService::ParseVerdictEntry(
 bool PasswordProtectionService::PathVariantsMatchCacheExpression(
     const std::vector<std::string>& generated_paths,
     const std::string& cache_expression_path) {
-  for (const auto& path : generated_paths) {
-    if (cache_expression_path == path)
-      return true;
-  }
-  return false;
+  return std::find(generated_paths.begin(), generated_paths.end(),
+                   cache_expression_path) != generated_paths.end();
 }
 
 bool PasswordProtectionService::IsCacheExpired(int cache_creation_time,
@@ -689,23 +735,16 @@ void PasswordProtectionService::GeneratePathVariantsWithoutQuery(
 }
 
 // Return the path of the cache expression. e.g.:
-// "www.google.com"     -> "/"
-// "www.google.com/abc" -> "/abc/"
+// "www.google.com"     -> ""
+// "www.google.com/abc" -> "/abc"
 // "foo.com/foo/bar/"  -> "/foo/bar/"
 std::string PasswordProtectionService::GetCacheExpressionPath(
     const std::string& cache_expression) {
-  // TODO(jialiul): Change this to a DCHECk when SB server is ready.
-  if (cache_expression.empty())
-    return std::string("/");
-
-  std::string out_put(cache_expression);
-  // Append a trailing slash if needed.
-  if (out_put[out_put.length() - 1] != '/')
-    out_put.append("/");
-
-  size_t first_slash_pos = out_put.find_first_of("/");
-  DCHECK_NE(std::string::npos, first_slash_pos);
-  return out_put.substr(first_slash_pos);
+  DCHECK(!cache_expression.empty());
+  size_t first_slash_pos = cache_expression.find_first_of("/");
+  if (first_slash_pos == std::string::npos)
+    return "";
+  return cache_expression.substr(first_slash_pos);
 }
 
 // Convert a LoginReputationClientResponse proto into a DictionaryValue.
@@ -714,7 +753,7 @@ PasswordProtectionService::CreateDictionaryFromVerdict(
     const LoginReputationClientResponse* verdict,
     const base::Time& receive_time) {
   std::unique_ptr<base::DictionaryValue> result =
-      base::MakeUnique<base::DictionaryValue>();
+      std::make_unique<base::DictionaryValue>();
   result->SetInteger(kCacheCreationTime,
                      static_cast<int>(receive_time.ToDoubleT()));
   std::string serialized_proto(verdict->SerializeAsString());
@@ -725,27 +764,95 @@ PasswordProtectionService::CreateDictionaryFromVerdict(
 }
 
 void PasswordProtectionService::RecordNoPingingReason(
-    const base::Feature& feature,
+    LoginReputationClientRequest::TriggerType trigger_type,
     RequestOutcome reason,
-    bool is_sync_password) {
-  DCHECK(feature.name == kProtectedPasswordEntryPinging.name ||
-         feature.name == kPasswordFieldOnFocusPinging.name);
+    bool matches_sync_password) {
+  DCHECK(trigger_type == LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE ||
+         trigger_type == LoginReputationClientRequest::PASSWORD_REUSE_EVENT);
 
-  bool is_password_entry_ping =
-      feature.name == kProtectedPasswordEntryPinging.name;
+  if (trigger_type == LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE) {
+    UMA_HISTOGRAM_ENUMERATION(kPasswordOnFocusRequestOutcomeHistogram, reason,
+                              MAX_OUTCOME);
+    return;
+  }
 
-  if (is_password_entry_ping) {
-    if (is_sync_password) {
-      UMA_HISTOGRAM_ENUMERATION(kSyncPasswordEntryRequestOutcomeHistogramName,
-                                reason, MAX_OUTCOME);
-    } else {
-      UMA_HISTOGRAM_ENUMERATION(kPasswordEntryRequestOutcomeHistogramName,
-                                reason, MAX_OUTCOME);
-    }
+  LogPasswordEntryRequestOutcome(reason, matches_sync_password);
+}
+
+// static
+void PasswordProtectionService::LogPasswordEntryRequestOutcome(
+    RequestOutcome reason,
+    bool matches_sync_password) {
+  UMA_HISTOGRAM_ENUMERATION(kAnyPasswordEntryRequestOutcomeHistogram, reason,
+                            MAX_OUTCOME);
+  if (matches_sync_password) {
+    UMA_HISTOGRAM_ENUMERATION(kSyncPasswordEntryRequestOutcomeHistogram, reason,
+                              MAX_OUTCOME);
   } else {
-    UMA_HISTOGRAM_ENUMERATION(kPasswordOnFocusRequestOutcomeHistogramName,
+    UMA_HISTOGRAM_ENUMERATION(kProtectedPasswordEntryRequestOutcomeHistogram,
                               reason, MAX_OUTCOME);
   }
+}
+
+std::unique_ptr<PasswordProtectionNavigationThrottle>
+PasswordProtectionService::MaybeCreateNavigationThrottle(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsRendererInitiated())
+    return nullptr;
+
+  content::WebContents* web_contents = navigation_handle->GetWebContents();
+  for (scoped_refptr<PasswordProtectionRequest> request : pending_requests_) {
+    if (request->web_contents() == web_contents &&
+        request->trigger_type() ==
+            safe_browsing::LoginReputationClientRequest::PASSWORD_REUSE_EVENT &&
+        request->matches_sync_password()) {
+      return std::make_unique<PasswordProtectionNavigationThrottle>(
+          navigation_handle, request, /*is_warning_showing=*/false);
+    }
+  }
+
+  for (scoped_refptr<PasswordProtectionRequest> request : warning_requests_) {
+    if (request->web_contents() == web_contents) {
+      return std::make_unique<PasswordProtectionNavigationThrottle>(
+          navigation_handle, request, /*is_warning_showing=*/true);
+    }
+  }
+  return nullptr;
+}
+
+void PasswordProtectionService::RemoveWarningRequestsByWebContents(
+    content::WebContents* web_contents) {
+  for (auto it = warning_requests_.begin(); it != warning_requests_.end();) {
+    if (it->get()->web_contents() == web_contents)
+      it = warning_requests_.erase(it);
+    else
+      ++it;
+  }
+}
+
+bool PasswordProtectionService::IsModalWarningShowingInWebContents(
+    content::WebContents* web_contents) {
+  for (const auto& request : warning_requests_) {
+    if (request->web_contents() == web_contents)
+      return true;
+  }
+  return false;
+}
+
+bool PasswordProtectionService::IsWarningEnabled() {
+  return base::FeatureList::IsEnabled(kGoogleBrandedPhishingWarning) &&
+         GetSyncAccountType() !=
+             LoginReputationClientRequest::PasswordReuseEvent::NOT_SIGNED_IN &&
+         GetPasswordProtectionTriggerPref(
+             prefs::kPasswordProtectionWarningTrigger) == PHISHING_REUSE;
+}
+
+bool PasswordProtectionService::IsEventLoggingEnabled() {
+  return base::FeatureList::IsEnabled(kGaiaPasswordReuseReporting) &&
+         GetSyncAccountType() !=
+             LoginReputationClientRequest::PasswordReuseEvent::NOT_SIGNED_IN &&
+         GetPasswordProtectionTriggerPref(
+             prefs::kPasswordProtectionRiskTrigger) == PHISHING_REUSE;
 }
 
 }  // namespace safe_browsing

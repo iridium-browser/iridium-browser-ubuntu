@@ -17,7 +17,7 @@ class TrayNetworkStateObserver : public chromeos::NetworkStateHandlerObserver {
    public:
     // Called when any interesting network changes occur. The frequency of this
     // event is limited to kUpdateFrequencyMs.
-    virtual void NetworkStateChanged() = 0;
+    virtual void NetworkStateChanged(bool notify_a11y) = 0;
 
    protected:
     virtual ~Delegate() {}
@@ -34,10 +34,11 @@ class TrayNetworkStateObserver : public chromeos::NetworkStateHandlerObserver {
   void NetworkConnectionStateChanged(
       const chromeos::NetworkState* network) override;
   void NetworkPropertiesUpdated(const chromeos::NetworkState* network) override;
+  void DevicePropertiesUpdated(const chromeos::DeviceState* device) override;
 
  private:
-  void SignalUpdate();
-  void SendNetworkStateChanged();
+  void SignalUpdate(bool notify_a11y);
+  void SendNetworkStateChanged(bool notify_a11y);
 
   // Unowned Delegate pointer (must outlive this instance).
   Delegate* delegate_;
@@ -52,6 +53,10 @@ class TrayNetworkStateObserver : public chromeos::NetworkStateHandlerObserver {
 
   // Timer used to limit the frequency of NetworkStateChanged updates.
   base::OneShotTimer timer_;
+
+  // The previous state of the wifi network, used to immediately send
+  // NetworkStateChanged update when wifi changed from enabled->disabled.
+  bool wifi_enabled_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(TrayNetworkStateObserver);
 };

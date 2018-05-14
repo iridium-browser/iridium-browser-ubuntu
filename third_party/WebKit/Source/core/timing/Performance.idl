@@ -35,8 +35,10 @@
 // would allow the WorkerPerformance interface to be merged into this.
 // TODO(foolip): None of the optional DOMString arguments in this interface
 // should have a default value.
+[ImplementedAs=WindowPerformance]
 interface Performance : EventTarget {
     DOMHighResTimeStamp now();
+    readonly attribute DOMHighResTimeStamp timeOrigin;
 
     // Performance Timeline
     // https://w3c.github.io/performance-timeline/#the-performance-interface
@@ -58,7 +60,8 @@ interface Performance : EventTarget {
 
     // User Timing
     // https://w3c.github.io/user-timing/#extensions-performance-interface
-    [MeasureAs=UnprefixedUserTiming, RaisesException] void mark(DOMString markName);
+    [MeasureAs=UnprefixedUserTiming, CallWith=ScriptState, RaisesException] void mark(DOMString markName);
+    [MeasureAs=UnprefixedUserTiming, CallWith=ScriptState, RuntimeEnabled=CustomUserTiming, RaisesException] void mark(DOMString markName, (DOMHighResTimeStamp or PerformanceMarkOptions) startTimeOrPerformanceMarkOptions);
     [MeasureAs=UnprefixedUserTiming] void clearMarks(optional DOMString markName = null);
 
     [MeasureAs=UnprefixedUserTiming, RaisesException] void measure(DOMString measureName, optional DOMString startMark = null, optional DOMString endMark = null);

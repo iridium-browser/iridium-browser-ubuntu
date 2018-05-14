@@ -4,11 +4,13 @@
 
 #include "core/layout/ng/ng_base_layout_algorithm_test.h"
 
-#include "core/layout/ng/inline/ng_inline_layout_algorithm.h"
+#include "core/layout/ng/inline/ng_inline_break_token.h"
 #include "core/layout/ng/inline/ng_inline_node.h"
 #include "core/layout/ng/inline/ng_line_breaker.h"
 #include "core/layout/ng/layout_ng_block_flow.h"
 #include "core/layout/ng/ng_constraint_space_builder.h"
+#include "core/layout/ng/ng_fragment_builder.h"
+#include "core/layout/ng/ng_positioned_float.h"
 #include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
@@ -28,26 +30,37 @@ class NGLineBreakerTest : public NGBaseLayoutAlgorithmTest {
                                          LayoutUnit available_width) {
     DCHECK(node);
 
-    if (!node.IsPrepareLayoutFinished())
-      node.PrepareLayout();
+    node.PrepareLayoutIfNeeded();
 
-    RefPtr<NGConstraintSpace> space =
-        NGConstraintSpaceBuilder(NGWritingMode::kHorizontalTopBottom)
+    scoped_refptr<NGConstraintSpace> space =
+        NGConstraintSpaceBuilder(
+            WritingMode::kHorizontalTb,
+            /* icb_size */ {NGSizeIndefinite, NGSizeIndefinite})
             .SetAvailableSize({available_width, NGSizeIndefinite})
-            .ToConstraintSpace(NGWritingMode::kHorizontalTopBottom);
+            .ToConstraintSpace(WritingMode::kHorizontalTb);
 
-    NGFragmentBuilder container_builder(
-        NGPhysicalFragment::NGFragmentType::kFragmentBox, node);
-    container_builder.SetBfcOffset(NGLogicalOffset{LayoutUnit(), LayoutUnit()});
+    Vector<NGPositionedFloat> positioned_floats;
+    Vector<scoped_refptr<NGUnpositionedFloat>> unpositioned_floats;
 
-    Vector<RefPtr<NGUnpositionedFloat>> unpositioned_floats;
-    NGLineBreaker line_breaker(node, space.Get(), &container_builder,
-                               &unpositioned_floats);
+    scoped_refptr<NGInlineBreakToken> break_token;
 
     Vector<NGInlineItemResults> lines;
+    NGExclusionSpace exclusion_space;
+    NGLayoutOpportunity opportunity;
+    opportunity.rect =
+        NGBfcRect(NGBfcOffset(), {available_width, LayoutUnit::Max()});
     NGLineInfo line_info;
-    while (line_breaker.NextLine(&line_info, NGLogicalOffset()))
+    while (!break_token || !break_token->IsFinished()) {
+      NGLineBreaker line_breaker(node, NGLineBreakerMode::kContent, *space,
+                                 &positioned_floats, &unpositioned_floats,
+                                 &exclusion_space, 0u, break_token.get());
+      if (!line_breaker.NextLine(opportunity, &line_info))
+        break;
+
+      break_token = line_breaker.CreateBreakToken(nullptr);
       lines.push_back(std::move(line_info.Results()));
+    }
+
     return lines;
   }
 };
@@ -113,14 +126,7 @@ TEST_F(NGLineBreakerTest, OverflowWord) {
   EXPECT_EQ("678", ToString(lines[1], node));
 }
 
-// The test leaks memory in CopyFragmentDataToLayoutBox. Re-enable when
-// LayoutNGPaintFragments is ready. crbug.com/732574
-#if defined(ADDRESS_SANITIZER)
-#define MAYBE_OverflowAtomicInline DISABLED_OverflowAtomicInline
-#else
-#define MAYBE_OverflowAtomicInline OverflowAtomicInline
-#endif
-TEST_F(NGLineBreakerTest, MAYBE_OverflowAtomicInline) {
+TEST_F(NGLineBreakerTest, OverflowAtomicInline) {
   LoadAhem();
   NGInlineNode node = CreateInlineNode(R"HTML(
     <!DOCTYPE html>
@@ -276,5 +282,6 @@ TEST_F(NGLineBreakerTest, BoundaryInFirstWord) {
   EXPECT_EQ("789", ToString(lines[1], node));
 }
 
+#undef MAYBE_OverflowAtomicInline
 }  // namespace
 }  // namespace blink

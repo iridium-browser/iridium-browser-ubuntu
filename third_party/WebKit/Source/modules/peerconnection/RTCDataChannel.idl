@@ -36,7 +36,7 @@ enum RTCDataChannelState {
 
 [
     ActiveScriptWrappable,
-    DependentLifetime
+    Exposed=Window
 ] interface RTCDataChannel : EventTarget {
     readonly attribute USVString label;
     readonly attribute boolean ordered;
@@ -57,8 +57,7 @@ enum RTCDataChannelState {
     void close();
              attribute EventHandler onmessage;
     [RaisesException=Setter] attribute DOMString binaryType;
-    // TODO(foolip): |data| should be USVString.
-    [RaisesException] void send(DOMString data);
+    [RaisesException] void send(USVString data);
     [RaisesException] void send(Blob data);
     [RaisesException] void send(ArrayBuffer data);
     [RaisesException] void send(ArrayBufferView data);

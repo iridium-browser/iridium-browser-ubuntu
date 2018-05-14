@@ -5,13 +5,13 @@
 #ifndef CHROME_BROWSER_UI_APP_LIST_ARC_ARC_APP_ITEM_H_
 #define CHROME_BROWSER_UI_APP_LIST_ARC_ARC_APP_ITEM_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "chrome/browser/ui/app_list/app_context_menu_delegate.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_icon.h"
 #include "chrome/browser/ui/app_list/chrome_app_list_item.h"
-#include "ui/app_list/app_list_item.h"
 
 class ArcAppContextMenu;
 class Profile;
@@ -24,6 +24,7 @@ class ArcAppItem : public ChromeAppListItem,
   static const char kItemType[];
 
   ArcAppItem(Profile* profile,
+             AppListModelUpdater* model_updater,
              const app_list::AppListSyncableService::SyncItem* sync_item,
              const std::string& id,
              const std::string& name);
@@ -31,7 +32,7 @@ class ArcAppItem : public ChromeAppListItem,
 
   void SetName(const std::string& name);
 
-  // AppListItem overrides:
+  // ChromeAppListItem overrides:
   void Activate(int event_flags) override;
   ui::MenuModel* GetContextMenuModel() override;
   const char* GetItemType() const override;
@@ -47,6 +48,9 @@ class ArcAppItem : public ChromeAppListItem,
  private:
   // Updates the app item's icon, if necessary making it gray.
   void UpdateIcon();
+
+  // ChromeAppListItem overrides:
+  app_list::AppContextMenu* GetAppContextMenu() override;
 
   std::unique_ptr<ArcAppIcon> arc_app_icon_;
   std::unique_ptr<ArcAppContextMenu> context_menu_;

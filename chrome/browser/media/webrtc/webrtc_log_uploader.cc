@@ -18,14 +18,14 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/media/media_url_constants.h"
-#include "chrome/browser/media/webrtc/webrtc_log_list.h"
-#include "chrome/browser/media/webrtc/webrtc_log_util.h"
-#include "chrome/common/partial_circular_buffer.h"
 #include "components/version_info/version_info.h"
+#include "components/webrtc_logging/browser/log_cleanup.h"
+#include "components/webrtc_logging/browser/log_list.h"
+#include "components/webrtc_logging/common/partial_circular_buffer.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/load_flags.h"
 #include "net/base/mime_util.h"
+#include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "third_party/zlib/zlib.h"
@@ -38,17 +38,15 @@ const int kLogCountLimit = 5;
 const uint32_t kIntermediateCompressionBufferBytes = 256 * 1024;  // 256 KB
 const int kLogListLimitLines = 50;
 
-const char kUploadContentType[] = "multipart/form-data";
-const char kMultipartBoundary[] =
+const char kWebrtcLogUploadContentType[] = "multipart/form-data";
+const char kWebrtcLogMultipartBoundary[] =
     "----**--yradnuoBgoLtrapitluMklaTelgooG--**----";
-
-const int kHttpResponseOk = 200;
 
 // Adds the header section for a gzip file to the multipart |post_data|.
 void AddMultipartFileContentHeader(std::string* post_data,
                                    const std::string& content_name) {
   post_data->append("--");
-  post_data->append(kMultipartBoundary);
+  post_data->append(kWebrtcLogMultipartBoundary);
   post_data->append("\r\nContent-Disposition: form-data; name=\"");
   post_data->append(content_name);
   post_data->append("\"; filename=\"");
@@ -123,16 +121,16 @@ void WebRtcLogUploader::LoggingStoppedDoUpload(
   std::string local_log_id;
 
   if (base::PathExists(upload_done_data.log_path)) {
-    WebRtcLogUtil::DeleteOldWebRtcLogFiles(upload_done_data.log_path);
+    webrtc_logging::DeleteOldWebRtcLogFiles(upload_done_data.log_path);
 
-    local_log_id = base::DoubleToString(base::Time::Now().ToDoubleT());
+    local_log_id = base::NumberToString(base::Time::Now().ToDoubleT());
     base::FilePath log_file_path =
         upload_done_data.log_path.AppendASCII(local_log_id)
             .AddExtension(FILE_PATH_LITERAL(".gz"));
     WriteCompressedLogToFile(compressed_log, log_file_path);
 
     base::FilePath log_list_path =
-        WebRtcLogList::GetWebRtcLogListFileForDirectory(
+        webrtc_logging::LogList::GetWebRtcLogListFileForDirectory(
             upload_done_data.log_path);
     AddLocallyStoredLogInfoToUploadListFile(log_list_path, local_log_id);
   }
@@ -165,7 +163,7 @@ void WebRtcLogUploader::PrepareMultipartPostData(
   // implemented according to the test plan. http://crbug.com/257329.
   if (post_data_) {
     *post_data_ = *post_data;
-    NotifyUploadDone(kHttpResponseOk, "", upload_done_data);
+    NotifyUploadDone(net::HTTP_OK, "", upload_done_data);
     return;
   }
 
@@ -173,7 +171,7 @@ void WebRtcLogUploader::PrepareMultipartPostData(
       BrowserThread::IO, FROM_HERE,
       base::BindOnce(&WebRtcLogUploader::UploadCompressedLog,
                      base::Unretained(this), upload_done_data,
-                     base::Passed(&post_data)));
+                     std::move(post_data)));
 }
 
 void WebRtcLogUploader::UploadStoredLog(
@@ -237,10 +235,11 @@ void WebRtcLogUploader::LoggingStoppedDoStore(
   DCHECK(log_buffer.get());
   DCHECK(!log_paths.log_path.empty());
 
-  WebRtcLogUtil::DeleteOldWebRtcLogFiles(log_paths.log_path);
+  webrtc_logging::DeleteOldWebRtcLogFiles(log_paths.log_path);
 
   base::FilePath log_list_path =
-      WebRtcLogList::GetWebRtcLogListFileForDirectory(log_paths.log_path);
+      webrtc_logging::LogList::GetWebRtcLogListFileForDirectory(
+          log_paths.log_path);
 
   // Store the native log with a ".gz" extension.
   std::string compressed_log;
@@ -303,12 +302,13 @@ void WebRtcLogUploader::OnURLFetchComplete(
     // The log path can be empty here if we failed getting it before. We still
     // upload the log if that's the case.
     std::string report_id;
-    if (response_code == kHttpResponseOk &&
+    if (response_code == net::HTTP_OK &&
         source->GetResponseAsString(&report_id) &&
         !it->second.log_path.empty()) {
       // TODO(jiayl): Add the RTP dump records to chrome://webrtc-logs.
       base::FilePath log_list_path =
-          WebRtcLogList::GetWebRtcLogListFileForDirectory(it->second.log_path);
+          webrtc_logging::LogList::GetWebRtcLogListFileForDirectory(
+              it->second.log_path);
       background_task_runner_->PostTask(
           FROM_HERE,
           base::BindOnce(&WebRtcLogUploader::AddUploadedLogInfoToUploadListFile,
@@ -348,20 +348,20 @@ void WebRtcLogUploader::SetupMultipart(
 #else
 #error Platform not supported.
 #endif
-  net::AddMultipartValueForUpload("prod", product, kMultipartBoundary,
+  net::AddMultipartValueForUpload("prod", product, kWebrtcLogMultipartBoundary,
                                   "", post_data);
   net::AddMultipartValueForUpload("ver",
                                   version_info::GetVersionNumber() + "-webrtc",
-                                  kMultipartBoundary, "", post_data);
-  net::AddMultipartValueForUpload("guid", "0", kMultipartBoundary,
-                                  "", post_data);
-  net::AddMultipartValueForUpload("type", "webrtc_log", kMultipartBoundary,
-                                  "", post_data);
+                                  kWebrtcLogMultipartBoundary, "", post_data);
+  net::AddMultipartValueForUpload("guid", "0", kWebrtcLogMultipartBoundary, "",
+                                  post_data);
+  net::AddMultipartValueForUpload("type", "webrtc_log",
+                                  kWebrtcLogMultipartBoundary, "", post_data);
 
   // Add custom meta data.
   for (const auto& it : meta_data) {
-    net::AddMultipartValueForUpload(it.first, it.second, kMultipartBoundary, "",
-                                    post_data);
+    net::AddMultipartValueForUpload(it.first, it.second,
+                                    kWebrtcLogMultipartBoundary, "", post_data);
   }
 
   AddLogData(post_data, compressed_log);
@@ -378,7 +378,8 @@ void WebRtcLogUploader::SetupMultipart(
     }
   }
 
-  net::AddMultipartFinalDelimiterForUpload(kMultipartBoundary, post_data);
+  net::AddMultipartFinalDelimiterForUpload(kWebrtcLogMultipartBoundary,
+                                           post_data);
 }
 
 void WebRtcLogUploader::CompressLog(std::string* compressed_log,
@@ -396,7 +397,7 @@ void WebRtcLogUploader::CompressLog(std::string* compressed_log,
   ResizeForNextOutput(compressed_log, &stream);
   uint32_t read = 0;
 
-  PartialCircularBuffer read_buffer(buffer->Read());
+  webrtc_logging::PartialCircularBuffer read_buffer(buffer->Read());
   do {
     if (stream.avail_in == 0) {
       read = read_buffer.Read(&intermediate_buffer[0],
@@ -444,9 +445,9 @@ void WebRtcLogUploader::UploadCompressedLog(
   if (shutting_down_)
     return;
 
-  std::string content_type = kUploadContentType;
+  std::string content_type = kWebrtcLogUploadContentType;
   content_type.append("; boundary=");
-  content_type.append(kMultipartBoundary);
+  content_type.append(kWebrtcLogMultipartBoundary);
 
   // Create traffic annotation tag.
   net::NetworkTrafficAnnotationTag traffic_annotation =
@@ -464,7 +465,7 @@ void WebRtcLogUploader::UploadCompressedLog(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "This feature can be disabled by unchecking 'Report additional "
             "diagnostics to help improve Hangouts.' in Hangouts settings."
@@ -472,9 +473,9 @@ void WebRtcLogUploader::UploadCompressedLog(
             "Not implemented, it would be good to do so."
         })");
 
-  std::unique_ptr<net::URLFetcher> url_fetcher(
-      net::URLFetcher::Create(GURL(chrome::kUploadURL), net::URLFetcher::POST,
-                              this, traffic_annotation));
+  constexpr char kUploadURL[] = "https://clients2.google.com/cr/report";
+  std::unique_ptr<net::URLFetcher> url_fetcher(net::URLFetcher::Create(
+      GURL(kUploadURL), net::URLFetcher::POST, this, traffic_annotation));
   url_fetcher->SetUploadData(content_type, *post_data);
   url_fetcher->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                             net::LOAD_DO_NOT_SAVE_COOKIES);
@@ -562,8 +563,8 @@ void WebRtcLogUploader::AddLocallyStoredLogInfoToUploadListFile(
 
   // Write the capture time and log ID to the log list file. Leave the upload
   // time and report ID empty.
-  contents += ",," + local_log_id +
-              "," + base::DoubleToString(base::Time::Now().ToDoubleT()) + '\n';
+  contents += ",," + local_log_id + "," +
+              base::NumberToString(base::Time::Now().ToDoubleT()) + '\n';
 
   int written =
       base::WriteFile(upload_list_path, &contents[0], contents.size());
@@ -595,7 +596,7 @@ void WebRtcLogUploader::AddUploadedLogInfoToUploadListFile(
   // to find the local log ID, in that case insert the data into the existing
   // line. Otherwise add it in the end.
   base::Time time_now = base::Time::Now();
-  std::string time_now_str = base::DoubleToString(time_now.ToDoubleT());
+  std::string time_now_str = base::NumberToString(time_now.ToDoubleT());
   size_t pos = contents.find(",," + local_log_id);
   if (pos != std::string::npos) {
     contents.insert(pos, time_now_str);
@@ -621,7 +622,7 @@ void WebRtcLogUploader::NotifyUploadDone(
       base::BindOnce(&WebRtcLoggingHandlerHost::UploadLogDone,
                      upload_done_data.host));
   if (!upload_done_data.callback.is_null()) {
-    bool success = response_code == kHttpResponseOk;
+    bool success = response_code == net::HTTP_OK;
     std::string error_message;
     if (!success) {
       error_message = "Uploading failed, response code: " +

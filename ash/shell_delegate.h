@@ -13,14 +13,9 @@
 #include "base/strings/string16.h"
 
 class GURL;
-class PrefService;
 
 namespace aura {
 class Window;
-}
-
-namespace gfx {
-class Image;
 }
 
 namespace keyboard {
@@ -32,21 +27,14 @@ class Connector;
 }
 
 namespace ui {
-#if defined(USE_OZONE)
 class InputDeviceControllerClient;
-#endif
-class MenuModel;
 }
 
 namespace ash {
 
 class AccessibilityDelegate;
-class GPUSupport;
-class PaletteDelegate;
-class Shelf;
-struct ShelfItem;
-class SystemTrayDelegate;
-class WallpaperDelegate;
+class NetworkingConfigDelegate;
+class ScreenshotDelegate;
 
 // Delegate of the Shell.
 class ASH_EXPORT ShellDelegate {
@@ -56,13 +44,6 @@ class ASH_EXPORT ShellDelegate {
 
   // Returns the connector for the mojo service manager. Returns null in tests.
   virtual service_manager::Connector* GetShellConnector() const = 0;
-
-  // Returns true if multi-profiles feature is enabled.
-  virtual bool IsMultiProfilesEnabled() const = 0;
-
-  // Returns true if incognito mode is allowed for the user.
-  // Incognito windows are restricted for supervised users.
-  virtual bool IsIncognitoAllowed() const = 0;
 
   // Returns true if we're running in forced app mode.
   virtual bool IsRunningInForcedAppMode() const = 0;
@@ -84,73 +65,25 @@ class ASH_EXPORT ShellDelegate {
   // delegate can use Shell instance to perform cleanup tasks.
   virtual void PreShutdown() = 0;
 
-  // Invoked when the user uses Ctrl-Shift-Q to close chrome.
-  virtual void Exit() = 0;
-
   // Create a shell-specific keyboard::KeyboardUI.
   virtual std::unique_ptr<keyboard::KeyboardUI> CreateKeyboardUI() = 0;
 
   // Opens the |url| in a new browser tab.
   virtual void OpenUrlFromArc(const GURL& url) = 0;
 
-  // Functions called when the shelf is initialized and shut down.
-  // TODO(msw): Refine ChromeLauncherController lifetime management.
-  virtual void ShelfInit() = 0;
-  virtual void ShelfShutdown() = 0;
+  // Returns the delegate. May be null in tests.
+  virtual NetworkingConfigDelegate* GetNetworkingConfigDelegate() = 0;
 
-  // Creates a system-tray delegate. Shell takes ownership of the delegate.
-  virtual SystemTrayDelegate* CreateSystemTrayDelegate() = 0;
-
-  // Creates a wallpaper delegate. Shell takes ownership of the delegate.
-  virtual std::unique_ptr<WallpaperDelegate> CreateWallpaperDelegate() = 0;
+  // TODO(jamescook): Replace with a mojo-compatible interface.
+  virtual std::unique_ptr<ScreenshotDelegate> CreateScreenshotDelegate() = 0;
 
   // Creates a accessibility delegate. Shell takes ownership of the delegate.
   virtual AccessibilityDelegate* CreateAccessibilityDelegate() = 0;
 
-  virtual std::unique_ptr<PaletteDelegate> CreatePaletteDelegate() = 0;
-
-  // Creates a menu model for the |shelf| and optional shelf |item|.
-  // If |item| is null, this creates a context menu for the wallpaper or shelf.
-  virtual ui::MenuModel* CreateContextMenu(Shelf* shelf,
-                                           const ShelfItem* item) = 0;
-
-  // Creates a GPU support object. Shell takes ownership of the object.
-  virtual GPUSupport* CreateGPUSupport() = 0;
-
-  // Get the product name.
-  virtual base::string16 GetProductName() const = 0;
-
   virtual void OpenKeyboardShortcutHelpPage() const {}
 
-  virtual gfx::Image GetDeprecatedAcceleratorImage() const = 0;
-
-  virtual PrefService* GetActiveUserPrefService() const = 0;
-
-  virtual PrefService* GetLocalStatePrefService() const = 0;
-
-  // If |use_local_state| is true, returns the touchscreen status from local
-  // state, otherwise from user prefs.
-  virtual bool IsTouchscreenEnabledInPrefs(bool use_local_state) const = 0;
-
-  // Sets the status of touchscreen to |enabled| in prefs. If |use_local_state|,
-  // pref is set in local state, otherwise in user prefs.
-  virtual void SetTouchscreenEnabledInPrefs(bool enabled,
-                                            bool use_local_state) = 0;
-
-  // Updates the enabled/disabled status of the touchscreen from prefs. Enabled
-  // if both local state and user prefs are enabled, otherwise disabled.
-  virtual void UpdateTouchscreenStatusFromPrefs() = 0;
-
-  // Toggles the status of touchpad between enabled and disabled.
-  virtual void ToggleTouchpad() {}
-
-  // Suspends all WebContents-associated media sessions to stop managed players.
-  virtual void SuspendMediaSessions() {}
-
-#if defined(USE_OZONE)
   // Creator of Shell owns this; it's assumed this outlives Shell.
   virtual ui::InputDeviceControllerClient* GetInputDeviceControllerClient() = 0;
-#endif
 };
 
 }  // namespace ash

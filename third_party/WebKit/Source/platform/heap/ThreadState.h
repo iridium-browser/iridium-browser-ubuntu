@@ -32,6 +32,8 @@
 #define ThreadState_h
 
 #include <memory>
+
+#include "base/macros.h"
 #include "platform/PlatformExport.h"
 #include "platform/heap/BlinkGC.h"
 #include "platform/heap/ThreadingTraits.h"
@@ -41,6 +43,7 @@
 #include "platform/wtf/Functional.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/HashSet.h"
+#include "platform/wtf/LinkedHashSet.h"
 #include "platform/wtf/ThreadSpecific.h"
 #include "platform/wtf/Threading.h"
 #include "platform/wtf/ThreadingPrimitives.h"
@@ -52,14 +55,20 @@ class Isolate;
 
 namespace blink {
 
-class BasePage;
-class GarbageCollectedMixinConstructorMarker;
+namespace incremental_marking_test {
+class IncrementalMarkingScope;
+}  // namespace incremental_marking_test
+
+class GarbageCollectedMixinConstructorMarkerBase;
+class MarkingVisitor;
 class PersistentNode;
 class PersistentRegion;
-class BaseArena;
 class ThreadHeap;
 class ThreadState;
 class Visitor;
+
+template <ThreadAffinity affinity>
+class ThreadStateFor;
 
 // Declare that a class has a pre-finalizer. The pre-finalizer is called
 // before any object gets swept, so it is safe to touch on-heap objects
@@ -108,15 +117,35 @@ class Visitor;
   ThreadState::PrefinalizerRegistration<Class> prefinalizer_dummy_ = this; \
   using UsingPreFinalizerMacroNeedsTrailingSemiColon = char
 
+class PLATFORM_EXPORT BlinkGCObserver {
+ public:
+  // The constructor automatically register this object to ThreadState's
+  // observer lists. The argument must not be null.
+  explicit BlinkGCObserver(ThreadState*);
+
+  // The destructor automatically unregister this object from ThreadState's
+  // observer lists.
+  virtual ~BlinkGCObserver();
+
+  virtual void OnCompleteSweepDone() = 0;
+
+ private:
+  // As a ThreadState must live when a BlinkGCObserver lives, holding a raw
+  // pointer is safe.
+  ThreadState* thread_state_;
+};
+
 class PLATFORM_EXPORT ThreadState {
   USING_FAST_MALLOC(ThreadState);
-  WTF_MAKE_NONCOPYABLE(ThreadState);
 
  public:
   // See setGCState() for possible state transitions.
   enum GCState {
     kNoGCScheduled,
     kIdleGCScheduled,
+    kIncrementalMarkingStartScheduled,
+    kIncrementalMarkingStepScheduled,
+    kIncrementalMarkingFinalizeScheduled,
     kPreciseGCScheduled,
     kFullGCScheduled,
     kPageNavigationGCScheduled,
@@ -200,6 +229,7 @@ class PLATFORM_EXPORT ThreadState {
   bool CheckThread() const { return thread_ == CurrentThread(); }
 
   ThreadHeap& Heap() const { return *heap_; }
+  ThreadIdentifier ThreadId() const { return thread_; }
 
   // When ThreadState is detaching from non-main thread its
   // heap is expected to be empty (because it is going away).
@@ -230,6 +260,21 @@ class PLATFORM_EXPORT ThreadState {
            GcState() == kSweepingAndIdleGCScheduled;
   }
 
+  // Incremental GC.
+
+  void ScheduleIncrementalMarkingStart();
+  void ScheduleIncrementalMarkingStep();
+  void ScheduleIncrementalMarkingFinalize();
+
+  void IncrementalMarkingStart();
+  void IncrementalMarkingStep();
+  void IncrementalMarkingFinalize();
+
+  bool IsIncrementalMarkingInProgress() const {
+    return GcState() == kIncrementalMarkingStepScheduled ||
+           GcState() == kIncrementalMarkingFinalizeScheduled;
+  }
+
   // A GC runs in the following sequence.
   //
   // 1) preGC() is called.
@@ -246,18 +291,15 @@ class PLATFORM_EXPORT ThreadState {
   // - isInGC() returns true between 1) and 3).
   // - isSweepingInProgress() returns true while any sweeping operation is
   //   running.
-  void MakeConsistentForGC();
-  void PreGC();
-  void PostGC(BlinkGC::GCType);
+  void MarkPhasePrologue(BlinkGC::StackState,
+                         BlinkGC::GCType,
+                         BlinkGC::GCReason);
+  void MarkPhaseVisitRoots();
+  bool MarkPhaseAdvanceMarking(double deadline_seconds);
+  void MarkPhaseEpilogue();
   void CompleteSweep();
   void PreSweep(BlinkGC::GCType);
   void PostSweep();
-  // makeConsistentForMutator() drops marks from marked objects and rebuild
-  // free lists. This is called after taking a snapshot and before resuming
-  // the executions of mutators.
-  void MakeConsistentForMutator();
-
-  void Compact();
 
   // Support for disallowing allocation. Mainly used for sanity
   // checks asserts.
@@ -291,6 +333,16 @@ class PLATFORM_EXPORT ThreadState {
     DCHECK(object_resurrection_forbidden_);
     object_resurrection_forbidden_ = false;
   }
+
+  bool WrapperTracingInProgress() const { return wrapper_tracing_in_progress_; }
+  void SetWrapperTracingInProgress(bool value) {
+    wrapper_tracing_in_progress_ = value;
+  }
+
+  bool IsIncrementalMarking() const { return incremental_marking_; }
+  void SetIncrementalMarking(bool value) { incremental_marking_ = value; }
+
+  void CheckObjectNotInCallbackStacks(const void*);
 
   class MainThreadGCForbiddenScope final {
     STACK_ALLOCATED();
@@ -354,41 +406,29 @@ class PLATFORM_EXPORT ThreadState {
   void RecordStackEnd(intptr_t* end_of_stack) { end_of_stack_ = end_of_stack; }
   NO_SANITIZE_ADDRESS void CopyStackUntilSafePointScope();
 
-  // Get one of the heap structures for this thread.
-  // The thread heap is split into multiple heap parts based on object types
-  // and object sizes.
-  BaseArena* Arena(int arena_index) const {
-    DCHECK_LE(0, arena_index);
-    DCHECK_LT(arena_index, BlinkGC::kNumberOfArenas);
-    return arenas_[arena_index];
-  }
-
-#if DCHECK_IS_ON()
-  // Infrastructure to determine if an address is within one of the
-  // address ranges for the Blink heap. If the address is in the Blink
-  // heap the containing heap page is returned.
-  BasePage* FindPageFromAddress(Address);
-  BasePage* FindPageFromAddress(const void* pointer) {
-    return FindPageFromAddress(
-        reinterpret_cast<Address>(const_cast<void*>(pointer)));
-  }
-#endif
-
-  // A region of PersistentNodes allocated on the given thread.
+  // A region of non-weak PersistentNodes allocated on the given thread.
   PersistentRegion* GetPersistentRegion() const {
     return persistent_region_.get();
   }
-  // A region of PersistentNodes not owned by any particular thread.
+
+  // A region of PersistentNodes for WeakPersistents allocated on the given
+  // thread.
+  PersistentRegion* GetWeakPersistentRegion() const {
+    return weak_persistent_region_.get();
+  }
 
   // Visit local thread stack and trace all pointers conservatively.
-  void VisitStack(Visitor*);
+  void VisitStack(MarkingVisitor*);
 
   // Visit the asan fake stack frame corresponding to a slot on the
   // real machine stack if there is one.
-  void VisitAsanFakeStackForPointer(Visitor*, Address);
+  void VisitAsanFakeStackForPointer(MarkingVisitor*, Address);
 
-  // Visit all persistents allocated on this thread.
+  // Visit all non-weak persistents allocated on this thread.
   void VisitPersistents(Visitor*);
+
+  // Visit all weak persistents allocated on this thread.
+  void VisitWeakPersistents(Visitor*);
 
   struct GCSnapshotInfo {
     STACK_ALLOCATED();
@@ -400,14 +440,6 @@ class PLATFORM_EXPORT ThreadState {
     Vector<size_t> live_size;
     Vector<size_t> dead_size;
   };
-
-  size_t ObjectPayloadSizeForTesting();
-
-  void ShouldFlushHeapDoesNotContainCache() {
-    should_flush_heap_does_not_contain_cache_ = true;
-  }
-
-  bool IsAddressInHeapDoesNotContainCache(Address);
 
   void RegisterTraceDOMWrappers(
       v8::Isolate* isolate,
@@ -431,7 +463,7 @@ class PLATFORM_EXPORT ThreadState {
   // fully should a GC be allowed while its subclasses are being
   // constructed.
   void EnterGCForbiddenScopeIfNeeded(
-      GarbageCollectedMixinConstructorMarker* gc_mixin_marker) {
+      GarbageCollectedMixinConstructorMarkerBase* gc_mixin_marker) {
     DCHECK(CheckThread());
     if (!gc_mixin_marker_) {
       EnterMixinConstructionScope();
@@ -439,7 +471,7 @@ class PLATFORM_EXPORT ThreadState {
     }
   }
   void LeaveGCForbiddenScopeIfNeeded(
-      GarbageCollectedMixinConstructorMarker* gc_mixin_marker) {
+      GarbageCollectedMixinConstructorMarkerBase* gc_mixin_marker) {
     DCHECK(CheckThread());
     if (gc_mixin_marker_ == gc_mixin_marker) {
       LeaveMixinConstructionScope();
@@ -447,62 +479,11 @@ class PLATFORM_EXPORT ThreadState {
     }
   }
 
-  // vectorBackingArena() returns an arena that the vector allocation should
-  // use.  We have four vector arenas and want to choose the best arena here.
-  //
-  // The goal is to improve the succession rate where expand and
-  // promptlyFree happen at an allocation point. This is a key for reusing
-  // the same memory as much as possible and thus improves performance.
-  // To achieve the goal, we use the following heuristics:
-  //
-  // - A vector that has been expanded recently is likely to be expanded
-  //   again soon.
-  // - A vector is likely to be promptly freed if the same type of vector
-  //   has been frequently promptly freed in the past.
-  // - Given the above, when allocating a new vector, look at the four vectors
-  //   that are placed immediately prior to the allocation point of each arena.
-  //   Choose the arena where the vector is least likely to be expanded
-  //   nor promptly freed.
-  //
-  // To implement the heuristics, we add an arenaAge to each arena. The arenaAge
-  // is updated if:
-  //
-  // - a vector on the arena is expanded; or
-  // - a vector that meets the condition (*) is allocated on the arena
-  //
-  //   (*) More than 33% of the same type of vectors have been promptly
-  //       freed since the last GC.
-  //
-  BaseArena* VectorBackingArena(size_t gc_info_index) {
-    DCHECK(CheckThread());
-    size_t entry_index = gc_info_index & kLikelyToBePromptlyFreedArrayMask;
-    --likely_to_be_promptly_freed_[entry_index];
-    int arena_index = vector_backing_arena_index_;
-    // If likely_to_be_promptly_freed_[entryIndex] > 0, that means that
-    // more than 33% of vectors of the type have been promptly freed
-    // since the last GC.
-    if (likely_to_be_promptly_freed_[entry_index] > 0) {
-      arena_ages_[arena_index] = ++current_arena_ages_;
-      vector_backing_arena_index_ =
-          ArenaIndexOfVectorArenaLeastRecentlyExpanded(
-              BlinkGC::kVector1ArenaIndex, BlinkGC::kVector4ArenaIndex);
-    }
-    DCHECK(IsVectorArenaIndex(arena_index));
-    return arenas_[arena_index];
-  }
-  BaseArena* ExpandedVectorBackingArena(size_t gc_info_index);
-  static bool IsVectorArenaIndex(int arena_index) {
-    return BlinkGC::kVector1ArenaIndex <= arena_index &&
-           arena_index <= BlinkGC::kVector4ArenaIndex;
-  }
-  void AllocationPointAdjusted(int arena_index);
-  void PromptlyFreed(size_t gc_info_index);
-
   void AccumulateSweepingTime(double time) {
     accumulated_sweeping_time_ += time;
   }
 
-  void FreePersistentNode(PersistentNode*);
+  void FreePersistentNode(PersistentRegion*, PersistentNode*);
 
   using PersistentClearCallback = void (*)(void*);
 
@@ -513,11 +494,6 @@ class PLATFORM_EXPORT ThreadState {
   void enterStaticReferenceRegistrationDisabledScope();
   void leaveStaticReferenceRegistrationDisabledScope();
 #endif
-
-  void ResetHeapCounters();
-  void IncreaseAllocatedObjectSize(size_t);
-  void DecreaseAllocatedObjectSize(size_t);
-  void IncreaseMarkedObjectSize(size_t);
 
   v8::Isolate* GetIsolate() const { return isolate_; }
 
@@ -534,7 +510,8 @@ class PLATFORM_EXPORT ThreadState {
     PrefinalizerRegistration(T* self) {
       static_assert(sizeof(&T::InvokePreFinalizer) > 0,
                     "USING_PRE_FINALIZER(T) must be defined.");
-      ThreadState* state = ThreadState::Current();
+      ThreadState* state =
+          ThreadStateFor<ThreadingTrait<T>::kAffinity>::GetState();
 #if DCHECK_IS_ON()
       DCHECK(state->CheckThread());
 #endif
@@ -546,8 +523,6 @@ class PLATFORM_EXPORT ThreadState {
     }
   };
 
-  static const char* GcReasonString(BlinkGC::GCReason);
-
   // Returns |true| if |object| resides on this thread's heap.
   // It is well-defined to call this method on any heap allocated
   // reference, provided its associated heap hasn't been detached
@@ -557,10 +532,15 @@ class PLATFORM_EXPORT ThreadState {
     return &FromObject(object)->Heap() == &Heap();
   }
 
+  int GcAge() const { return gc_age_; }
+
+  MarkingVisitor* CurrentVisitor() { return current_gc_data_.visitor.get(); }
+
  private:
+  // Needs to set up visitor for testing purposes.
+  friend class incremental_marking_test::IncrementalMarkingScope;
   template <typename T>
   friend class PrefinalizerRegistration;
-  enum SnapshotType { kHeapSnapshot, kFreelistSnapshot };
 
   ThreadState();
   ~ThreadState();
@@ -570,7 +550,7 @@ class PLATFORM_EXPORT ThreadState {
     safe_point_scope_marker_ = nullptr;
   }
 
-  // shouldSchedule{Precise,Idle}GC and shouldForceConservativeGC
+  // shouldScheduleIdleGC and shouldForceConservativeGC
   // implement the heuristics that are used to determine when to collect
   // garbage.
   // If shouldForceConservativeGC returns true, we force the garbage
@@ -579,8 +559,8 @@ class PLATFORM_EXPORT ThreadState {
   // to the event loop. If both return false, we don't need to
   // collect garbage at this point.
   bool ShouldScheduleIdleGC();
-  bool ShouldSchedulePreciseGC();
   bool ShouldForceConservativeGC();
+  bool ShouldScheduleIncrementalMarking() const;
   // V8 minor or major GC is likely to drop a lot of references to objects
   // on Oilpan's heap. We give a chance to schedule a GC.
   bool ShouldScheduleV8FollowupGC();
@@ -612,23 +592,23 @@ class PLATFORM_EXPORT ThreadState {
 
   void EagerSweep();
 
-#if defined(ADDRESS_SANITIZER)
-  void PoisonEagerArena();
-  void PoisonAllHeaps();
-#endif
-
-  void RemoveAllPages();
-
   void InvokePreFinalizers();
-
-  void TakeSnapshot(SnapshotType);
-  void ClearArenaAges();
-  int ArenaIndexOfVectorArenaLeastRecentlyExpanded(int begin_arena_index,
-                                                   int end_arena_index);
 
   void ReportMemoryToV8();
 
   friend class SafePointScope;
+
+  friend class BlinkGCObserver;
+
+  // Adds the given observer to the ThreadState's observer list. This doesn't
+  // take ownership of the argument. The argument must not be null. The argument
+  // must not be registered before calling this.
+  void AddObserver(BlinkGCObserver*);
+
+  // Removes the given observer from the ThreadState's observer list. This
+  // doesn't take ownership of the argument. The argument must not be null.
+  // The argument must be registered before calling this.
+  void RemoveObserver(BlinkGCObserver*);
 
   static WTF::ThreadSpecific<ThreadState*>* thread_specific_;
 
@@ -644,6 +624,7 @@ class PLATFORM_EXPORT ThreadState {
   std::unique_ptr<ThreadHeap> heap_;
   ThreadIdentifier thread_;
   std::unique_ptr<PersistentRegion> persistent_region_;
+  std::unique_ptr<PersistentRegion> weak_persistent_region_;
   BlinkGC::StackState stack_state_;
   intptr_t* start_of_stack_;
   intptr_t* end_of_stack_;
@@ -657,14 +638,8 @@ class PLATFORM_EXPORT ThreadState {
   double accumulated_sweeping_time_;
   bool object_resurrection_forbidden_;
 
-  BaseArena* arenas_[BlinkGC::kNumberOfArenas];
-  int vector_backing_arena_index_;
-  size_t arena_ages_[BlinkGC::kNumberOfArenas];
-  size_t current_arena_ages_;
+  GarbageCollectedMixinConstructorMarkerBase* gc_mixin_marker_;
 
-  GarbageCollectedMixinConstructorMarker* gc_mixin_marker_;
-
-  bool should_flush_heap_does_not_contain_cache_;
   GCState gc_state_;
 
   using PreFinalizerCallback = bool (*)(void*);
@@ -673,16 +648,20 @@ class PLATFORM_EXPORT ThreadState {
   // Pre-finalizers are called in the reverse order in which they are
   // registered by the constructors (including constructors of Mixin objects)
   // for an object, by processing the ordered_pre_finalizers_ back-to-front.
-  ListHashSet<PreFinalizer> ordered_pre_finalizers_;
+  LinkedHashSet<PreFinalizer> ordered_pre_finalizers_;
 
   v8::Isolate* isolate_;
   void (*trace_dom_wrappers_)(v8::Isolate*, Visitor*);
   void (*invalidate_dead_objects_in_wrappers_marking_deque_)(v8::Isolate*);
   void (*perform_cleanup_)(v8::Isolate*);
+  bool wrapper_tracing_in_progress_;
+  bool incremental_marking_;
 
 #if defined(ADDRESS_SANITIZER)
   void* asan_fake_stack_;
 #endif
+
+  HashSet<BlinkGCObserver*> observers_;
 
   // PersistentNodes that are stored in static references;
   // references that either have to be cleared upon the thread
@@ -695,23 +674,22 @@ class PLATFORM_EXPORT ThreadState {
   size_t disabled_static_persistent_registration_;
 #endif
 
-  // Ideally we want to allocate an array of size |gcInfoTableMax| but it will
-  // waste memory. Thus we limit the array size to 2^8 and share one entry
-  // with multiple types of vectors. This won't be an issue in practice,
-  // since there will be less than 2^8 types of objects in common cases.
-  static const int kLikelyToBePromptlyFreedArraySize = (1 << 8);
-  static const int kLikelyToBePromptlyFreedArrayMask =
-      kLikelyToBePromptlyFreedArraySize - 1;
-  std::unique_ptr<int[]> likely_to_be_promptly_freed_;
-
-  // Stats for heap memory of this thread.
-  size_t allocated_object_size_;
-  size_t marked_object_size_;
   size_t reported_memory_to_v8_;
-};
 
-template <ThreadAffinity affinity>
-class ThreadStateFor;
+  int gc_age_ = 0;
+
+  struct GCData {
+    BlinkGC::StackState stack_state;
+    BlinkGC::GCType gc_type;
+    BlinkGC::GCReason reason;
+    double marking_time_in_milliseconds;
+    size_t marked_object_size;
+    std::unique_ptr<MarkingVisitor> visitor;
+  };
+  GCData current_gc_data_;
+
+  DISALLOW_COPY_AND_ASSIGN(ThreadState);
+};
 
 template <>
 class ThreadStateFor<kMainThreadOnly> {

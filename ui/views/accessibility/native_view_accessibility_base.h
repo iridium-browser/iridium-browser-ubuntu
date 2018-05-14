@@ -14,8 +14,9 @@
 #include "ui/accessibility/ax_tree_data.h"
 #include "ui/accessibility/platform/ax_platform_node.h"
 #include "ui/accessibility/platform/ax_platform_node_delegate.h"
+#include "ui/accessibility/platform/ax_unique_id.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/views/accessibility/native_view_accessibility.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/views_export.h"
 #include "ui/views/widget/widget_observer.h"
 
@@ -26,16 +27,16 @@ class Widget;
 
 // Shared base class for platforms that require an implementation of
 // NativeViewAccessibility to interface with the native accessibility toolkit.
+// This class owns the AXPlatformNode, which implements those native APIs.
 class VIEWS_EXPORT NativeViewAccessibilityBase
-    : public NativeViewAccessibility,
-      public ui::AXPlatformNodeDelegate,
-      public WidgetObserver {
+    : public ViewAccessibility,
+      public ui::AXPlatformNodeDelegate {
  public:
   ~NativeViewAccessibilityBase() override;
 
-  // NativeViewAccessibility:
+  // ViewAccessibility:
   gfx::NativeViewAccessible GetNativeObject() override;
-  void NotifyAccessibilityEvent(ui::AXEvent event_type) override;
+  void NotifyAccessibilityEvent(ax::mojom::Event event_type) override;
 
   // ui::AXPlatformNodeDelegate
   const ui::AXNodeData& GetData() const override;
@@ -44,33 +45,25 @@ class VIEWS_EXPORT NativeViewAccessibilityBase
   gfx::NativeViewAccessible ChildAtIndex(int index) override;
   gfx::NativeWindow GetTopLevelWidget() override;
   gfx::NativeViewAccessible GetParent() override;
-  gfx::Rect GetScreenBoundsRect() const override;
+  gfx::Rect GetClippedScreenBoundsRect() const override;
+  gfx::Rect GetUnclippedScreenBoundsRect() const override;
   gfx::NativeViewAccessible HitTestSync(int x, int y) override;
   gfx::NativeViewAccessible GetFocus() override;
   ui::AXPlatformNode* GetFromNodeID(int32_t id) override;
+  int GetIndexInParent() const override;
   gfx::AcceleratedWidget GetTargetForNativeAccessibilityEvent() override;
   bool AccessibilityPerformAction(const ui::AXActionData& data) override;
   bool ShouldIgnoreHoveredStateForTesting() override;
-
-  // WidgetObserver
-  void OnWidgetDestroying(Widget* widget) override;
-
-  Widget* parent_widget() const { return parent_widget_; }
-  void SetParentWidget(Widget* parent_widget);
+  bool IsOffscreen() const override;
+  const ui::AXUniqueId& GetUniqueId()
+      const override;  // Also in ViewAccessibility
+  std::set<int32_t> GetReverseRelations(ax::mojom::IntAttribute attr,
+                                        int32_t dst_id) override;
+  std::set<int32_t> GetReverseRelations(ax::mojom::IntListAttribute attr,
+                                        int32_t dst_id) override;
 
  protected:
   explicit NativeViewAccessibilityBase(View* view);
-
-  // Weak. Owns this.
-  View* view_;
-
-  // Weak. Uses WidgetObserver to clear. This is set on the root view for
-  // a widget that's owned by another widget, so we can walk back up the
-  // tree.
-  Widget* parent_widget_;
-
- protected:
-  virtual gfx::RectF GetBoundsInScreen() const;
 
  private:
   void PopulateChildWidgetVector(std::vector<Widget*>* result_child_widgets);

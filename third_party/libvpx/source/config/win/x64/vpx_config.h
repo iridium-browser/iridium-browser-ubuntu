@@ -9,7 +9,7 @@
 #ifndef VPX_CONFIG_H
 #define VPX_CONFIG_H
 #define RESTRICT    
-#define INLINE      __forceinline
+#define INLINE      __inline
 #define ARCH_ARM 0
 #define ARCH_MIPS 0
 #define ARCH_X86 0
@@ -29,7 +29,9 @@
 #define HAVE_SSE4_1 1
 #define HAVE_AVX 1
 #define HAVE_AVX2 1
+#define HAVE_AVX512 0
 #define HAVE_VSX 0
+#define HAVE_MMI 0
 #define HAVE_VPX_PORTS 1
 #define HAVE_PTHREAD_H 0
 #define HAVE_UNISTD_H 0

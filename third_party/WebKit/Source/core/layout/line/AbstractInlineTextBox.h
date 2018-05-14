@@ -31,13 +31,13 @@
 #ifndef AbstractInlineTextBox_h
 #define AbstractInlineTextBox_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/dom/Range.h"
 #include "core/layout/api/LineLayoutText.h"
 #include "core/layout/line/InlineTextBox.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/RefCounted.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -53,8 +53,8 @@ class CORE_EXPORT AbstractInlineTextBox
       : line_layout_item_(line_layout_item),
         inline_text_box_(inline_text_box) {}
 
-  static PassRefPtr<AbstractInlineTextBox> GetOrCreate(LineLayoutText,
-                                                       InlineTextBox*);
+  static scoped_refptr<AbstractInlineTextBox> GetOrCreate(LineLayoutText,
+                                                          InlineTextBox*);
   static void WillDestroy(InlineTextBox*);
 
   friend class LayoutText;
@@ -75,18 +75,18 @@ class CORE_EXPORT AbstractInlineTextBox
 
   LineLayoutText GetLineLayoutItem() const { return line_layout_item_; }
 
-  PassRefPtr<AbstractInlineTextBox> NextInlineTextBox() const;
+  scoped_refptr<AbstractInlineTextBox> NextInlineTextBox() const;
   LayoutRect LocalBounds() const;
   unsigned Len() const;
   Direction GetDirection() const;
-  Node* GetNode() const { return line_layout_item_.GetNode(); }
+  Node* GetNode() const;
   void CharacterWidths(Vector<float>&) const;
   void GetWordBoundaries(Vector<WordBoundaries>&) const;
   String GetText() const;
   bool IsFirst() const;
   bool IsLast() const;
-  PassRefPtr<AbstractInlineTextBox> NextOnLine() const;
-  PassRefPtr<AbstractInlineTextBox> PreviousOnLine() const;
+  scoped_refptr<AbstractInlineTextBox> NextOnLine() const;
+  scoped_refptr<AbstractInlineTextBox> PreviousOnLine() const;
 
  private:
   void Detach();
@@ -96,7 +96,7 @@ class CORE_EXPORT AbstractInlineTextBox
   LineLayoutText line_layout_item_;
   InlineTextBox* inline_text_box_;
 
-  typedef HashMap<InlineTextBox*, RefPtr<AbstractInlineTextBox>>
+  typedef HashMap<InlineTextBox*, scoped_refptr<AbstractInlineTextBox>>
       InlineToAbstractInlineTextBoxHashMap;
   static InlineToAbstractInlineTextBoxHashMap* g_abstract_inline_text_box_map_;
 };

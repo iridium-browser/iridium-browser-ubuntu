@@ -100,10 +100,11 @@ std::unique_ptr<HistoryData::Associations> Parse(
     association_data.primary = primary;
     association_data.secondary.swap(secondary);
 
+    // Parse time as microseconds since Windows epoch (year 1601).
     int64_t update_time_val;
     base::StringToInt64(update_time_string, &update_time_val);
     association_data.update_time =
-        base::Time::FromInternalValue(update_time_val);
+        base::Time() + base::TimeDelta::FromMicroseconds(update_time_val);
   }
 
   return data;
@@ -128,7 +129,7 @@ HistoryDataStore::~HistoryDataStore() {
 void HistoryDataStore::Init(base::DictionaryValue* cached_dict) {
   DCHECK(cached_dict);
   cached_dict->SetString(kKeyVersion, kCurrentVersion);
-  cached_dict->Set(kKeyAssociations, base::MakeUnique<base::DictionaryValue>());
+  cached_dict->Set(kKeyAssociations, std::make_unique<base::DictionaryValue>());
 }
 
 void HistoryDataStore::Flush(
@@ -151,8 +152,8 @@ void HistoryDataStore::Load(
 
 void HistoryDataStore::SetPrimary(const std::string& query,
                                   const std::string& result) {
-  base::DictionaryValue* entry_dict = GetEntryDict(query);
-  entry_dict->SetStringWithoutPathExpansion(kKeyPrimary, result);
+  base::Value* entry_dict = GetEntryDict(query);
+  entry_dict->SetKey(kKeyPrimary, base::Value(result));
   if (data_store_.get())
     data_store_->ScheduleWrite();
 }
@@ -160,33 +161,35 @@ void HistoryDataStore::SetPrimary(const std::string& query,
 void HistoryDataStore::SetSecondary(
     const std::string& query,
     const HistoryData::SecondaryDeque& results) {
-  std::unique_ptr<base::ListValue> results_list(new base::ListValue);
+  base::Value results_list(base::Value::Type::LIST);
   for (size_t i = 0; i < results.size(); ++i)
-    results_list->AppendString(results[i]);
+    results_list.GetList().emplace_back(results[i]);
 
-  base::DictionaryValue* entry_dict = GetEntryDict(query);
-  entry_dict->SetWithoutPathExpansion(kKeySecondary, std::move(results_list));
+  base::Value* entry_dict = GetEntryDict(query);
+  entry_dict->SetKey(kKeySecondary, std::move(results_list));
   if (data_store_.get())
     data_store_->ScheduleWrite();
 }
 
 void HistoryDataStore::SetUpdateTime(const std::string& query,
                                      const base::Time& update_time) {
-  base::DictionaryValue* entry_dict = GetEntryDict(query);
-  entry_dict->SetStringWithoutPathExpansion(
-      kKeyUpdateTime, base::Int64ToString(update_time.ToInternalValue()));
+  base::Value* entry_dict = GetEntryDict(query);
+  // Persist time as microseconds since Windows epoch (year 1601).
+  const int64_t update_time_val = update_time.since_origin().InMicroseconds();
+  entry_dict->SetKey(kKeyUpdateTime,
+                     base::Value(base::Int64ToString(update_time_val)));
   if (data_store_.get())
     data_store_->ScheduleWrite();
 }
 
 void HistoryDataStore::Delete(const std::string& query) {
-  base::DictionaryValue* assoc_dict = GetAssociationDict();
-  assoc_dict->RemoveWithoutPathExpansion(query, NULL);
+  base::Value* assoc_dict = GetAssociationDict();
+  assoc_dict->RemoveKey(query);
   if (data_store_.get())
     data_store_->ScheduleWrite();
 }
 
-base::DictionaryValue* HistoryDataStore::GetAssociationDict() {
+base::Value* HistoryDataStore::GetAssociationDict() {
   base::DictionaryValue* cached_dict =
       cached_dict_ ? cached_dict_.get() : data_store_->cached_dict();
   DCHECK(cached_dict);
@@ -198,15 +201,15 @@ base::DictionaryValue* HistoryDataStore::GetAssociationDict() {
   return assoc_dict;
 }
 
-base::DictionaryValue* HistoryDataStore::GetEntryDict(
-    const std::string& query) {
-  base::DictionaryValue* assoc_dict = GetAssociationDict();
+base::Value* HistoryDataStore::GetEntryDict(const std::string& query) {
+  base::Value* assoc_dict = GetAssociationDict();
 
-  base::DictionaryValue* entry_dict = nullptr;
-  if (!assoc_dict->GetDictionaryWithoutPathExpansion(query, &entry_dict)) {
+  base::Value* entry_dict =
+      assoc_dict->FindKeyOfType(query, base::Value::Type::DICTIONARY);
+  if (!entry_dict) {
     // Creates one if none exists.
-    entry_dict = assoc_dict->SetDictionaryWithoutPathExpansion(
-        query, base::MakeUnique<base::DictionaryValue>());
+    entry_dict =
+        assoc_dict->SetKey(query, base::Value(base::Value::Type::DICTIONARY));
   }
 
   return entry_dict;

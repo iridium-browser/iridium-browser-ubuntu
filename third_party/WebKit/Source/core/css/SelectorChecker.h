@@ -30,6 +30,7 @@
 #ifndef SelectorChecker_h
 #define SelectorChecker_h
 
+#include "base/macros.h"
 #include "core/css/CSSSelector.h"
 #include "core/dom/Element.h"
 #include "platform/scroll/ScrollTypes.h"
@@ -43,7 +44,6 @@ class LayoutScrollbar;
 class ComputedStyle;
 
 class SelectorChecker {
-  WTF_MAKE_NONCOPYABLE(SelectorChecker);
   STACK_ALLOCATED();
 
  public:
@@ -73,12 +73,6 @@ class SelectorChecker {
     // disables the special handling for positional selectors during parsing
     // and also enables static profile only selectors like >>>.
     kQueryingRules,
-
-    // Used when matching selectors for style sharing inside SharedStyleFinder.
-    // During style sharing we match selectors from a global list without having
-    // the correct owning scope for the rules. In this mode we'll consider
-    // selectors which require scope matching (ex. :host) as always matching.
-    kSharingRules
   };
 
   struct Init {
@@ -185,6 +179,7 @@ class SelectorChecker {
   ComputedStyle* element_style_;
   Member<LayoutScrollbar> scrollbar_;
   ScrollbarPart scrollbar_part_;
+  DISALLOW_COPY_AND_ASSIGN(SelectorChecker);
 };
 
 }  // namespace blink

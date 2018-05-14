@@ -40,6 +40,7 @@ using extensions::Extension;
 
 ExtensionAppItem::ExtensionAppItem(
     Profile* profile,
+    AppListModelUpdater* model_updater,
     const app_list::AppListSyncableService::SyncItem* sync_item,
     const std::string& extension_id,
     const std::string& extension_name,
@@ -55,6 +56,9 @@ ExtensionAppItem::ExtensionAppItem(
     UpdateFromSync(sync_item);
   else
     SetDefaultPositionIfApplicable();
+
+  // Set model updater last to avoid being called during construction.
+  set_model_updater(model_updater);
 }
 
 ExtensionAppItem::~ExtensionAppItem() {
@@ -101,8 +105,7 @@ bool ExtensionAppItem::RunExtensionEnableFlow() {
 
     extension_enable_flow_.reset(new ExtensionEnableFlow(
         profile(), extension_id(), this));
-    extension_enable_flow_->StartForNativeWindow(
-        extension_enable_flow_controller_->GetAppListWindow());
+    extension_enable_flow_->StartForNativeWindow(nullptr);
   }
   return true;
 }
@@ -153,7 +156,6 @@ void ExtensionAppItem::Activate(int event_flags) {
   if (RunExtensionEnableFlow())
     return;
 
-  base::RecordAction(base::UserMetricsAction("AppList_ClickOnApp"));
   extensions::RecordAppListMainLaunch(extension);
   GetController()->ActivateApp(profile(),
                                extension,
@@ -175,6 +177,14 @@ const char ExtensionAppItem::kItemType[] = "ExtensionAppItem";
 
 const char* ExtensionAppItem::GetItemType() const {
   return ExtensionAppItem::kItemType;
+}
+
+bool ExtensionAppItem::IsBadged() const {
+  return icon_ && icon_->icon_is_badged();
+}
+
+app_list::AppContextMenu* ExtensionAppItem::GetAppContextMenu() {
+  return context_menu_.get();
 }
 
 void ExtensionAppItem::ExecuteLaunchCommand(int event_flags) {

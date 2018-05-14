@@ -7,10 +7,10 @@
 #include "base/mac/foundation_util.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/payments/payment_request_test_util.h"
+#import "ios/chrome/browser/payments/payment_request_unittest_base.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller_test.h"
 #import "ios/chrome/browser/ui/payments/cells/price_item.h"
 #import "ios/chrome/browser/ui/payments/payment_items_display_view_controller_data_source.h"
-#import "ios/chrome/browser/ui/payments/payment_request_unittest_base.h"
 #include "ios/chrome/grit/ios_strings.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -25,6 +25,10 @@
 @implementation TestPaymentItemsDisplayMediator
 
 #pragma mark - PaymentItemsDisplayViewControllerDataSource
+
+- (BOOL)canPay {
+  return YES;
+}
 
 - (CollectionViewItem*)totalItem {
   return [[PriceItem alloc] init];
@@ -49,8 +53,8 @@ class PaymentRequestPaymentItemsDisplayViewControllerTest
 
   CollectionViewController* InstantiateController() override {
     mediator_ = [[TestPaymentItemsDisplayMediator alloc] init];
-    PaymentItemsDisplayViewController* viewController = [
-        [PaymentItemsDisplayViewController alloc] initWithPayButtonEnabled:YES];
+    PaymentItemsDisplayViewController* viewController =
+        [[PaymentItemsDisplayViewController alloc] init];
     [viewController setDataSource:mediator_];
     return viewController;
   }

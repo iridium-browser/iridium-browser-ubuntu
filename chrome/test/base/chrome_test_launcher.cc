@@ -24,9 +24,11 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/install_static/test/scoped_install_details.h"
 #include "chrome/test/base/chrome_test_suite.h"
+#include "chrome/utility/chrome_content_utility_client.h"
 #include "components/crash/content/app/crashpad.h"
 #include "content/public/app/content_main.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/network_service_test_helper.h"
 #include "content/public/test/test_launcher.h"
 #include "content/public/test/test_utils.h"
 #include "services/service_manager/runner/common/switches.h"
@@ -42,6 +44,8 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "ash/mojo_interface_factory.h"
+#include "ash/mojo_test_interface_factory.h"
 #include "ash/test/ui_controls_factory_ash.h"
 #endif
 
@@ -59,12 +63,6 @@ ChromeTestSuiteRunner::ChromeTestSuiteRunner() {}
 ChromeTestSuiteRunner::~ChromeTestSuiteRunner() {}
 
 int ChromeTestSuiteRunner::RunTestSuite(int argc, char** argv) {
-#if defined(USE_AURA)
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(service_manager::switches::kServicePipeToken))
-    content::GetContentMainParams()->env_mode = aura::Env::Mode::MUS;
-#endif  // defined(USE_AURA)
-
   return ChromeTestSuite(argc, argv).Run();
 }
 
@@ -144,6 +142,30 @@ int LaunchChromeTests(size_t parallel_jobs,
   ChromeCrashReporterClient* crash_client = new ChromeCrashReporterClient();
   ANNOTATE_LEAKING_OBJECT_PTR(crash_client);
   crash_reporter::SetCrashReporterClient(crash_client);
+#endif
+
+  // Setup a working test environment for the network service in case it's used.
+  // Only create this object in the utility process, so that its members don't
+  // interfere with other test objects in the browser process.
+  std::unique_ptr<content::NetworkServiceTestHelper>
+      network_service_test_helper;
+  if (base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kProcessType) == switches::kUtilityProcess) {
+    network_service_test_helper =
+        std::make_unique<content::NetworkServiceTestHelper>();
+    ChromeContentUtilityClient::SetNetworkBinderCreationCallback(base::Bind(
+        [](content::NetworkServiceTestHelper* helper,
+           service_manager::BinderRegistry* registry) {
+          helper->RegisterNetworkBinders(registry);
+        },
+        network_service_test_helper.get()));
+  }
+
+#if defined(OS_CHROMEOS)
+  // Inject the test interfaces for ash. Use a callback to avoid linking test
+  // interface support into production code.
+  ash::mojo_interface_factory::SetRegisterInterfacesCallback(
+      base::Bind(&ash::mojo_test_interface_factory::RegisterInterfaces));
 #endif
 
   return content::LaunchTests(delegate, parallel_jobs, argc, argv);

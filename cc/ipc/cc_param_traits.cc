@@ -9,71 +9,32 @@
 
 #include "base/numerics/safe_conversions.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/unguessable_token.h"
-#include "cc/base/filter_operations.h"
-#include "cc/output/compositor_frame.h"
-#include "cc/quads/debug_border_draw_quad.h"
-#include "cc/quads/draw_quad.h"
-#include "cc/quads/largest_draw_quad.h"
-#include "cc/quads/render_pass_draw_quad.h"
-#include "cc/quads/solid_color_draw_quad.h"
-#include "cc/quads/surface_draw_quad.h"
-#include "cc/quads/tile_draw_quad.h"
-#include "cc/quads/yuv_video_draw_quad.h"
+#include "cc/paint/filter_operations.h"
+#include "cc/paint/paint_filter.h"
+#include "cc/paint/paint_op_buffer.h"
+#include "cc/paint/paint_op_reader.h"
+#include "cc/paint/paint_op_writer.h"
+#include "components/viz/common/quads/compositor_frame.h"
+#include "components/viz/common/quads/debug_border_draw_quad.h"
+#include "components/viz/common/quads/draw_quad.h"
+#include "components/viz/common/quads/largest_draw_quad.h"
+#include "components/viz/common/quads/render_pass_draw_quad.h"
+#include "components/viz/common/quads/solid_color_draw_quad.h"
+#include "components/viz/common/quads/surface_draw_quad.h"
+#include "components/viz/common/quads/tile_draw_quad.h"
+#include "components/viz/common/quads/yuv_video_draw_quad.h"
 #include "components/viz/common/surfaces/surface_id.h"
-#include "third_party/skia/include/core/SkData.h"
-#include "third_party/skia/include/core/SkFlattenableSerialization.h"
-#include "third_party/skia/include/core/SkImageFilter.h"
-#include "third_party/skia/include/core/SkRefCnt.h"
-#include "third_party/skia/include/effects/SkBlurImageFilter.h"
 #include "ui/gfx/ipc/geometry/gfx_param_traits.h"
 #include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
 
 namespace IPC {
 
-void ParamTraits<cc::FilterOperation>::GetSize(base::PickleSizer* s,
-                                               const param_type& p) {
-  GetParamSize(s, p.type());
-  switch (p.type()) {
-    case cc::FilterOperation::GRAYSCALE:
-    case cc::FilterOperation::SEPIA:
-    case cc::FilterOperation::SATURATE:
-    case cc::FilterOperation::HUE_ROTATE:
-    case cc::FilterOperation::INVERT:
-    case cc::FilterOperation::BRIGHTNESS:
-    case cc::FilterOperation::SATURATING_BRIGHTNESS:
-    case cc::FilterOperation::CONTRAST:
-    case cc::FilterOperation::OPACITY:
-      GetParamSize(s, p.amount());
-      break;
-    case cc::FilterOperation::BLUR:
-      GetParamSize(s, p.amount());
-      GetParamSize(s, p.blur_tile_mode());
-      break;
-    case cc::FilterOperation::DROP_SHADOW:
-      GetParamSize(s, p.drop_shadow_offset());
-      GetParamSize(s, p.amount());
-      GetParamSize(s, p.drop_shadow_color());
-      break;
-    case cc::FilterOperation::COLOR_MATRIX:
-      for (int i = 0; i < 20; ++i)
-        GetParamSize(s, p.matrix()[i]);
-      break;
-    case cc::FilterOperation::ZOOM:
-      GetParamSize(s, p.amount());
-      GetParamSize(s, p.zoom_inset());
-      break;
-    case cc::FilterOperation::REFERENCE:
-      GetParamSize(s, p.image_filter());
-      break;
-    case cc::FilterOperation::ALPHA_THRESHOLD:
-      NOTREACHED();
-      break;
-  }
-}
-
 void ParamTraits<cc::FilterOperation>::Write(base::Pickle* m,
                                              const param_type& p) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::FilterOperation::Write");
   WriteParam(m, p.type());
   switch (p.type()) {
     case cc::FilterOperation::GRAYSCALE:
@@ -108,7 +69,9 @@ void ParamTraits<cc::FilterOperation>::Write(base::Pickle* m,
       WriteParam(m, p.image_filter());
       break;
     case cc::FilterOperation::ALPHA_THRESHOLD:
-      NOTREACHED();
+      WriteParam(m, p.amount());
+      WriteParam(m, p.outer_threshold());
+      WriteParam(m, p.shape());
       break;
   }
 }
@@ -116,11 +79,15 @@ void ParamTraits<cc::FilterOperation>::Write(base::Pickle* m,
 bool ParamTraits<cc::FilterOperation>::Read(const base::Pickle* m,
                                             base::PickleIterator* iter,
                                             param_type* r) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::FilterOperation::Read");
   cc::FilterOperation::FilterType type;
   float amount;
+  float outer_threshold;
   gfx::Point drop_shadow_offset;
   SkColor drop_shadow_color;
   SkScalar matrix[20];
+  cc::FilterOperation::ShapeRects shape;
   int zoom_inset;
   SkBlurImageFilter::TileMode tile_mode;
 
@@ -182,7 +149,7 @@ bool ParamTraits<cc::FilterOperation>::Read(const base::Pickle* m,
       }
       break;
     case cc::FilterOperation::REFERENCE: {
-      sk_sp<SkImageFilter> filter;
+      sk_sp<cc::PaintFilter> filter;
       if (!ReadParam(m, iter, &filter)) {
         success = false;
         break;
@@ -192,6 +159,14 @@ bool ParamTraits<cc::FilterOperation>::Read(const base::Pickle* m,
       break;
     }
     case cc::FilterOperation::ALPHA_THRESHOLD:
+      if (ReadParam(m, iter, &amount) && ReadParam(m, iter, &outer_threshold) &&
+          ReadParam(m, iter, &shape) && amount >= 0.f &&
+          outer_threshold >= 0.f) {
+        r->set_amount(amount);
+        r->set_outer_threshold(amount);
+        r->set_shape(shape);
+        success = true;
+      }
       break;
   }
   return success;
@@ -243,22 +218,20 @@ void ParamTraits<cc::FilterOperation>::Log(const param_type& p,
       LogParam(p.image_filter(), l);
       break;
     case cc::FilterOperation::ALPHA_THRESHOLD:
-      NOTREACHED();
+      LogParam(p.amount(), l);
+      l->append(", ");
+      LogParam(p.outer_threshold(), l);
+      l->append(", ");
+      LogParam(p.shape(), l);
       break;
   }
   l->append(")");
 }
 
-void ParamTraits<cc::FilterOperations>::GetSize(base::PickleSizer* s,
-                                                const param_type& p) {
-  GetParamSize(s, base::checked_cast<uint32_t>(p.size()));
-  for (std::size_t i = 0; i < p.size(); ++i) {
-    GetParamSize(s, p.at(i));
-  }
-}
-
 void ParamTraits<cc::FilterOperations>::Write(base::Pickle* m,
                                               const param_type& p) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::FilterOperations::Write");
   WriteParam(m, base::checked_cast<uint32_t>(p.size()));
   for (std::size_t i = 0; i < p.size(); ++i) {
     WriteParam(m, p.at(i));
@@ -268,6 +241,8 @@ void ParamTraits<cc::FilterOperations>::Write(base::Pickle* m,
 bool ParamTraits<cc::FilterOperations>::Read(const base::Pickle* m,
                                              base::PickleIterator* iter,
                                              param_type* r) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::FilterOperations::Read");
   uint32_t count;
   if (!ReadParam(m, iter, &count))
     return false;
@@ -292,54 +267,59 @@ void ParamTraits<cc::FilterOperations>::Log(const param_type& p,
   l->append(")");
 }
 
-void ParamTraits<sk_sp<SkImageFilter>>::GetSize(base::PickleSizer* s,
+void ParamTraits<sk_sp<cc::PaintFilter>>::Write(base::Pickle* m,
                                                 const param_type& p) {
-  SkImageFilter* filter = p.get();
-  if (filter) {
-    sk_sp<SkData> data(SkValidatingSerializeFlattenable(filter));
-    s->AddData(base::checked_cast<int>(data->size()));
-  } else {
-    s->AddData(0);
-  }
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::PaintFilter::Write");
+  std::vector<uint8_t> memory;
+  memory.resize(cc::PaintOpWriter::HeaderBytes() +
+                cc::PaintFilter::GetFilterSize(p.get()));
+  cc::PaintOpWriter writer(memory.data(), memory.size(), nullptr, nullptr,
+                           true /* enable_security_constraints */);
+  writer.Write(p.get());
+  if (writer.size() == 0u)
+    m->WriteData(nullptr, 0);
+  else
+    m->WriteData(reinterpret_cast<const char*>(memory.data()), writer.size());
 }
 
-void ParamTraits<sk_sp<SkImageFilter>>::Write(base::Pickle* m,
-                                              const param_type& p) {
-  SkImageFilter* filter = p.get();
-  if (filter) {
-    sk_sp<SkData> data(SkValidatingSerializeFlattenable(filter));
-    m->WriteData(static_cast<const char*>(data->data()),
-                 base::checked_cast<int>(data->size()));
-  } else {
-    m->WriteData(0, 0);
-  }
-}
-
-bool ParamTraits<sk_sp<SkImageFilter>>::Read(const base::Pickle* m,
-                                             base::PickleIterator* iter,
-                                             param_type* r) {
-  const char* data = 0;
+bool ParamTraits<sk_sp<cc::PaintFilter>>::Read(const base::Pickle* m,
+                                               base::PickleIterator* iter,
+                                               param_type* r) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::PaintFilter::Read");
+  const char* data = nullptr;
   int length = 0;
   if (!iter->ReadData(&data, &length))
     return false;
-  if (length > 0) {
-    SkFlattenable* flattenable = SkValidatingDeserializeFlattenable(
-        data, length, SkImageFilter::GetFlattenableType());
-    *r = sk_sp<SkImageFilter>(static_cast<SkImageFilter*>(flattenable));
-  } else {
+
+  if (length <= 0) {
     r->reset();
+    return true;
   }
+
+  cc::PaintOpReader reader(data, length, nullptr,
+                           true /* enable_security_constraints */);
+  sk_sp<cc::PaintFilter> filter;
+  reader.Read(&filter);
+  if (!filter)
+    return false;
+
+  *r = std::move(filter);
   return true;
 }
 
-void ParamTraits<sk_sp<SkImageFilter>>::Log(const param_type& p,
-                                            std::string* l) {
+void ParamTraits<sk_sp<cc::PaintFilter>>::Log(const param_type& p,
+                                              std::string* l) {
   l->append("(");
-  LogParam(p.get() ? p->countInputs() : 0, l);
+  auto type = p ? p->type() : cc::PaintFilter::Type::kNullFilter;
+  LogParam(cc::PaintFilter::TypeToString(type), l);
   l->append(")");
 }
 
-void ParamTraits<cc::RenderPass>::Write(base::Pickle* m, const param_type& p) {
+void ParamTraits<viz::RenderPass>::Write(base::Pickle* m, const param_type& p) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::RenderPass::Write");
   WriteParam(m, p.id);
   WriteParam(m, p.output_rect);
   WriteParam(m, p.damage_rect);
@@ -350,50 +330,45 @@ void ParamTraits<cc::RenderPass>::Write(base::Pickle* m, const param_type& p) {
   WriteParam(m, p.has_transparent_background);
   WriteParam(m, p.cache_render_pass);
   WriteParam(m, p.has_damage_from_contributing_content);
+  WriteParam(m, p.generate_mipmap);
   WriteParam(m, base::checked_cast<uint32_t>(p.quad_list.size()));
 
-  cc::SharedQuadStateList::ConstIterator shared_quad_state_iter =
-      p.shared_quad_state_list.begin();
-  cc::SharedQuadStateList::ConstIterator last_shared_quad_state_iter =
-      p.shared_quad_state_list.end();
+  auto shared_quad_state_iter = p.shared_quad_state_list.cbegin();
+  auto last_shared_quad_state_iter = p.shared_quad_state_list.cend();
   for (auto* quad : p.quad_list) {
     DCHECK(quad->rect.Contains(quad->visible_rect))
         << quad->material << " rect: " << quad->rect.ToString()
         << " visible_rect: " << quad->visible_rect.ToString();
-    DCHECK(quad->opaque_rect.IsEmpty() ||
-           quad->rect.Contains(quad->opaque_rect))
-        << quad->material << " rect: " << quad->rect.ToString()
-        << " opaque_rect: " << quad->opaque_rect.ToString();
 
     switch (quad->material) {
-      case cc::DrawQuad::DEBUG_BORDER:
-        WriteParam(m, *cc::DebugBorderDrawQuad::MaterialCast(quad));
+      case viz::DrawQuad::DEBUG_BORDER:
+        WriteParam(m, *viz::DebugBorderDrawQuad::MaterialCast(quad));
         break;
-      case cc::DrawQuad::PICTURE_CONTENT:
+      case viz::DrawQuad::PICTURE_CONTENT:
         NOTREACHED();
         break;
-      case cc::DrawQuad::TEXTURE_CONTENT:
-        WriteParam(m, *cc::TextureDrawQuad::MaterialCast(quad));
+      case viz::DrawQuad::TEXTURE_CONTENT:
+        WriteParam(m, *viz::TextureDrawQuad::MaterialCast(quad));
         break;
-      case cc::DrawQuad::RENDER_PASS:
-        WriteParam(m, *cc::RenderPassDrawQuad::MaterialCast(quad));
+      case viz::DrawQuad::RENDER_PASS:
+        WriteParam(m, *viz::RenderPassDrawQuad::MaterialCast(quad));
         break;
-      case cc::DrawQuad::SOLID_COLOR:
-        WriteParam(m, *cc::SolidColorDrawQuad::MaterialCast(quad));
+      case viz::DrawQuad::SOLID_COLOR:
+        WriteParam(m, *viz::SolidColorDrawQuad::MaterialCast(quad));
         break;
-      case cc::DrawQuad::SURFACE_CONTENT:
-        WriteParam(m, *cc::SurfaceDrawQuad::MaterialCast(quad));
+      case viz::DrawQuad::SURFACE_CONTENT:
+        WriteParam(m, *viz::SurfaceDrawQuad::MaterialCast(quad));
         break;
-      case cc::DrawQuad::TILED_CONTENT:
-        WriteParam(m, *cc::TileDrawQuad::MaterialCast(quad));
+      case viz::DrawQuad::TILED_CONTENT:
+        WriteParam(m, *viz::TileDrawQuad::MaterialCast(quad));
         break;
-      case cc::DrawQuad::STREAM_VIDEO_CONTENT:
-        WriteParam(m, *cc::StreamVideoDrawQuad::MaterialCast(quad));
+      case viz::DrawQuad::STREAM_VIDEO_CONTENT:
+        WriteParam(m, *viz::StreamVideoDrawQuad::MaterialCast(quad));
         break;
-      case cc::DrawQuad::YUV_VIDEO_CONTENT:
-        WriteParam(m, *cc::YUVVideoDrawQuad::MaterialCast(quad));
+      case viz::DrawQuad::YUV_VIDEO_CONTENT:
+        WriteParam(m, *viz::YUVVideoDrawQuad::MaterialCast(quad));
         break;
-      case cc::DrawQuad::INVALID:
+      case viz::DrawQuad::INVALID:
         break;
     }
 
@@ -419,40 +394,44 @@ void ParamTraits<cc::RenderPass>::Write(base::Pickle* m, const param_type& p) {
   }
 }
 
-static size_t ReserveSizeForRenderPassWrite(const cc::RenderPass& p) {
-  size_t to_reserve = sizeof(cc::RenderPass);
+static size_t ReserveSizeForRenderPassWrite(const viz::RenderPass& p) {
+  size_t to_reserve = sizeof(viz::RenderPass);
 
   // Whether the quad points to a new shared quad state for each quad.
   to_reserve += p.quad_list.size() * sizeof(bool);
 
   // Shared quad state is only written when a quad contains a shared quad state
   // that has not been written.
-  to_reserve += p.shared_quad_state_list.size() * sizeof(cc::SharedQuadState);
+  to_reserve += p.shared_quad_state_list.size() * sizeof(viz::SharedQuadState);
 
   // The largest quad type, verified by a unit test.
-  to_reserve += p.quad_list.size() * cc::LargestDrawQuadSize();
+  to_reserve += p.quad_list.size() * viz::LargestDrawQuadSize();
 
-  base::PickleSizer sizer;
-  GetParamSize(&sizer, p.filters);
-  GetParamSize(&sizer, p.background_filters);
-  to_reserve += sizer.payload_size();
+  to_reserve +=
+      sizeof(uint32_t) + p.filters.size() * sizeof(cc::FilterOperation);
+  to_reserve += sizeof(uint32_t) +
+                p.background_filters.size() * sizeof(cc::FilterOperation);
 
   return to_reserve;
 }
 
 template <typename QuadType>
-static cc::DrawQuad* ReadDrawQuad(const base::Pickle* m,
-                                  base::PickleIterator* iter,
-                                  cc::RenderPass* render_pass) {
+static viz::DrawQuad* ReadDrawQuad(const base::Pickle* m,
+                                   base::PickleIterator* iter,
+                                   viz::RenderPass* render_pass) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::ReadDrawQuad");
   QuadType* quad = render_pass->CreateAndAppendDrawQuad<QuadType>();
   if (!ReadParam(m, iter, quad))
     return nullptr;
   return quad;
 }
 
-bool ParamTraits<cc::RenderPass>::Read(const base::Pickle* m,
-                                       base::PickleIterator* iter,
-                                       param_type* p) {
+bool ParamTraits<viz::RenderPass>::Read(const base::Pickle* m,
+                                        base::PickleIterator* iter,
+                                        param_type* p) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::RenderPass::Read");
   uint64_t id;
   gfx::Rect output_rect;
   gfx::Rect damage_rect;
@@ -463,6 +442,7 @@ bool ParamTraits<cc::RenderPass>::Read(const base::Pickle* m,
   bool has_transparent_background;
   bool cache_render_pass;
   bool has_damage_from_contributing_content;
+  bool generate_mipmap;
 
   uint32_t quad_list_size;
 
@@ -475,50 +455,51 @@ bool ParamTraits<cc::RenderPass>::Read(const base::Pickle* m,
       !ReadParam(m, iter, &has_transparent_background) ||
       !ReadParam(m, iter, &cache_render_pass) ||
       !ReadParam(m, iter, &has_damage_from_contributing_content) ||
+      !ReadParam(m, iter, &generate_mipmap) ||
       !ReadParam(m, iter, &quad_list_size))
     return false;
 
   p->SetAll(id, output_rect, damage_rect, transform_to_root_target, filters,
             background_filters, color_space, has_transparent_background,
-            cache_render_pass, has_damage_from_contributing_content);
+            cache_render_pass, has_damage_from_contributing_content,
+            generate_mipmap);
 
-  cc::DrawQuad* last_draw_quad = nullptr;
   for (uint32_t i = 0; i < quad_list_size; ++i) {
-    cc::DrawQuad::Material material;
+    viz::DrawQuad::Material material;
     base::PickleIterator temp_iter = *iter;
     if (!ReadParam(m, &temp_iter, &material))
       return false;
 
-    cc::DrawQuad* draw_quad = nullptr;
+    viz::DrawQuad* draw_quad = nullptr;
     switch (material) {
-      case cc::DrawQuad::DEBUG_BORDER:
-        draw_quad = ReadDrawQuad<cc::DebugBorderDrawQuad>(m, iter, p);
+      case viz::DrawQuad::DEBUG_BORDER:
+        draw_quad = ReadDrawQuad<viz::DebugBorderDrawQuad>(m, iter, p);
         break;
-      case cc::DrawQuad::PICTURE_CONTENT:
+      case viz::DrawQuad::PICTURE_CONTENT:
         NOTREACHED();
         return false;
-      case cc::DrawQuad::SURFACE_CONTENT:
-        draw_quad = ReadDrawQuad<cc::SurfaceDrawQuad>(m, iter, p);
+      case viz::DrawQuad::SURFACE_CONTENT:
+        draw_quad = ReadDrawQuad<viz::SurfaceDrawQuad>(m, iter, p);
         break;
-      case cc::DrawQuad::TEXTURE_CONTENT:
-        draw_quad = ReadDrawQuad<cc::TextureDrawQuad>(m, iter, p);
+      case viz::DrawQuad::TEXTURE_CONTENT:
+        draw_quad = ReadDrawQuad<viz::TextureDrawQuad>(m, iter, p);
         break;
-      case cc::DrawQuad::RENDER_PASS:
-        draw_quad = ReadDrawQuad<cc::RenderPassDrawQuad>(m, iter, p);
+      case viz::DrawQuad::RENDER_PASS:
+        draw_quad = ReadDrawQuad<viz::RenderPassDrawQuad>(m, iter, p);
         break;
-      case cc::DrawQuad::SOLID_COLOR:
-        draw_quad = ReadDrawQuad<cc::SolidColorDrawQuad>(m, iter, p);
+      case viz::DrawQuad::SOLID_COLOR:
+        draw_quad = ReadDrawQuad<viz::SolidColorDrawQuad>(m, iter, p);
         break;
-      case cc::DrawQuad::TILED_CONTENT:
-        draw_quad = ReadDrawQuad<cc::TileDrawQuad>(m, iter, p);
+      case viz::DrawQuad::TILED_CONTENT:
+        draw_quad = ReadDrawQuad<viz::TileDrawQuad>(m, iter, p);
         break;
-      case cc::DrawQuad::STREAM_VIDEO_CONTENT:
-        draw_quad = ReadDrawQuad<cc::StreamVideoDrawQuad>(m, iter, p);
+      case viz::DrawQuad::STREAM_VIDEO_CONTENT:
+        draw_quad = ReadDrawQuad<viz::StreamVideoDrawQuad>(m, iter, p);
         break;
-      case cc::DrawQuad::YUV_VIDEO_CONTENT:
-        draw_quad = ReadDrawQuad<cc::YUVVideoDrawQuad>(m, iter, p);
+      case viz::DrawQuad::YUV_VIDEO_CONTENT:
+        draw_quad = ReadDrawQuad<viz::YUVVideoDrawQuad>(m, iter, p);
         break;
-      case cc::DrawQuad::INVALID:
+      case viz::DrawQuad::INVALID:
         break;
     }
     if (!draw_quad)
@@ -529,13 +510,6 @@ bool ParamTraits<cc::RenderPass>::Read(const base::Pickle* m,
                  << " visible_rect: " << draw_quad->visible_rect.ToString();
       return false;
     }
-    if (!draw_quad->opaque_rect.IsEmpty() &&
-        !draw_quad->rect.Contains(draw_quad->opaque_rect)) {
-      LOG(ERROR) << "Quad with invalid opaque rect " << draw_quad->material
-                 << " rect: " << draw_quad->rect.ToString()
-                 << " opaque_rect: " << draw_quad->opaque_rect.ToString();
-      return false;
-    }
 
     bool has_new_shared_quad_state;
     if (!ReadParam(m, iter, &has_new_shared_quad_state))
@@ -543,41 +517,18 @@ bool ParamTraits<cc::RenderPass>::Read(const base::Pickle* m,
 
     // If the quad has a new shared quad state, read it in.
     if (has_new_shared_quad_state) {
-      cc::SharedQuadState* state = p->CreateAndAppendSharedQuadState();
+      viz::SharedQuadState* state = p->CreateAndAppendSharedQuadState();
       if (!ReadParam(m, iter, state))
         return false;
     }
 
     draw_quad->shared_quad_state = p->shared_quad_state_list.back();
-    // If this quad is a fallback SurfaceDrawQuad then update the previous
-    // primary SurfaceDrawQuad to point to this quad.
-    if (draw_quad->material == cc::DrawQuad::SURFACE_CONTENT) {
-      const cc::SurfaceDrawQuad* surface_draw_quad =
-          cc::SurfaceDrawQuad::MaterialCast(draw_quad);
-      if (surface_draw_quad->surface_draw_quad_type ==
-          cc::SurfaceDrawQuadType::FALLBACK) {
-        // A fallback quad must immediately follow a primary SurfaceDrawQuad.
-        if (!last_draw_quad ||
-            last_draw_quad->material != cc::DrawQuad::SURFACE_CONTENT) {
-          return false;
-        }
-        cc::SurfaceDrawQuad* last_surface_draw_quad =
-            static_cast<cc::SurfaceDrawQuad*>(last_draw_quad);
-        // Only one fallback quad is currently supported.
-        if (last_surface_draw_quad->surface_draw_quad_type !=
-            cc::SurfaceDrawQuadType::PRIMARY) {
-          return false;
-        }
-        last_surface_draw_quad->fallback_quad = surface_draw_quad;
-      }
-    }
-    last_draw_quad = draw_quad;
   }
 
   return true;
 }
 
-void ParamTraits<cc::RenderPass>::Log(const param_type& p, std::string* l) {
+void ParamTraits<viz::RenderPass>::Log(const param_type& p, std::string* l) {
   l->append("RenderPass((");
   LogParam(p.id, l);
   l->append("), ");
@@ -611,48 +562,87 @@ void ParamTraits<cc::RenderPass>::Log(const param_type& p, std::string* l) {
     if (quad != p.quad_list.front())
       l->append(", ");
     switch (quad->material) {
-      case cc::DrawQuad::DEBUG_BORDER:
-        LogParam(*cc::DebugBorderDrawQuad::MaterialCast(quad), l);
+      case viz::DrawQuad::DEBUG_BORDER:
+        LogParam(*viz::DebugBorderDrawQuad::MaterialCast(quad), l);
         break;
-      case cc::DrawQuad::PICTURE_CONTENT:
+      case viz::DrawQuad::PICTURE_CONTENT:
         NOTREACHED();
         break;
-      case cc::DrawQuad::TEXTURE_CONTENT:
-        LogParam(*cc::TextureDrawQuad::MaterialCast(quad), l);
+      case viz::DrawQuad::TEXTURE_CONTENT:
+        LogParam(*viz::TextureDrawQuad::MaterialCast(quad), l);
         break;
-      case cc::DrawQuad::RENDER_PASS:
-        LogParam(*cc::RenderPassDrawQuad::MaterialCast(quad), l);
+      case viz::DrawQuad::RENDER_PASS:
+        LogParam(*viz::RenderPassDrawQuad::MaterialCast(quad), l);
         break;
-      case cc::DrawQuad::SOLID_COLOR:
-        LogParam(*cc::SolidColorDrawQuad::MaterialCast(quad), l);
+      case viz::DrawQuad::SOLID_COLOR:
+        LogParam(*viz::SolidColorDrawQuad::MaterialCast(quad), l);
         break;
-      case cc::DrawQuad::SURFACE_CONTENT:
-        LogParam(*cc::SurfaceDrawQuad::MaterialCast(quad), l);
+      case viz::DrawQuad::SURFACE_CONTENT:
+        LogParam(*viz::SurfaceDrawQuad::MaterialCast(quad), l);
         break;
-      case cc::DrawQuad::TILED_CONTENT:
-        LogParam(*cc::TileDrawQuad::MaterialCast(quad), l);
+      case viz::DrawQuad::TILED_CONTENT:
+        LogParam(*viz::TileDrawQuad::MaterialCast(quad), l);
         break;
-      case cc::DrawQuad::STREAM_VIDEO_CONTENT:
-        LogParam(*cc::StreamVideoDrawQuad::MaterialCast(quad), l);
+      case viz::DrawQuad::STREAM_VIDEO_CONTENT:
+        LogParam(*viz::StreamVideoDrawQuad::MaterialCast(quad), l);
         break;
-      case cc::DrawQuad::YUV_VIDEO_CONTENT:
-        LogParam(*cc::YUVVideoDrawQuad::MaterialCast(quad), l);
+      case viz::DrawQuad::YUV_VIDEO_CONTENT:
+        LogParam(*viz::YUVVideoDrawQuad::MaterialCast(quad), l);
         break;
-      case cc::DrawQuad::INVALID:
+      case viz::DrawQuad::INVALID:
         break;
     }
   }
   l->append("])");
 }
 
-void ParamTraits<viz::FrameSinkId>::GetSize(base::PickleSizer* s,
+void ParamTraits<viz::FrameDeadline>::Write(base::Pickle* m,
                                             const param_type& p) {
-  GetParamSize(s, p.client_id());
-  GetParamSize(s, p.sink_id());
+  WriteParam(m, p.frame_start_time());
+  WriteParam(m, p.deadline_in_frames());
+  WriteParam(m, p.frame_interval());
+  WriteParam(m, p.use_default_lower_bound_deadline());
+}
+
+bool ParamTraits<viz::FrameDeadline>::Read(const base::Pickle* m,
+                                           base::PickleIterator* iter,
+                                           param_type* p) {
+  base::TimeTicks frame_start_time;
+  if (!ReadParam(m, iter, &frame_start_time))
+    return false;
+
+  uint32_t deadline_in_frames;
+  if (!ReadParam(m, iter, &deadline_in_frames))
+    return false;
+
+  base::TimeDelta frame_interval;
+  if (!ReadParam(m, iter, &frame_interval))
+    return false;
+
+  bool use_default_lower_bound_deadline;
+  if (!ReadParam(m, iter, &use_default_lower_bound_deadline))
+    return false;
+
+  *p = viz::FrameDeadline(frame_start_time, deadline_in_frames, frame_interval,
+                          use_default_lower_bound_deadline);
+  return true;
+}
+
+void ParamTraits<viz::FrameDeadline>::Log(const param_type& p, std::string* l) {
+  l->append("viz::FrameDeadline(");
+  LogParam(p.frame_start_time(), l);
+  l->append(", ");
+  LogParam(p.deadline_in_frames(), l);
+  l->append(", ");
+  LogParam(p.frame_interval(), l);
+  l->append(", ");
+  LogParam(p.use_default_lower_bound_deadline(), l);
+  l->append(")");
 }
 
 void ParamTraits<viz::FrameSinkId>::Write(base::Pickle* m,
                                           const param_type& p) {
+  DCHECK(p.is_valid());
   WriteParam(m, p.client_id());
   WriteParam(m, p.sink_id());
 }
@@ -669,7 +659,7 @@ bool ParamTraits<viz::FrameSinkId>::Read(const base::Pickle* m,
     return false;
 
   *p = viz::FrameSinkId(client_id, sink_id);
-  return true;
+  return p->is_valid();
 }
 
 void ParamTraits<viz::FrameSinkId>::Log(const param_type& p, std::string* l) {
@@ -680,46 +670,43 @@ void ParamTraits<viz::FrameSinkId>::Log(const param_type& p, std::string* l) {
   l->append(")");
 }
 
-void ParamTraits<viz::LocalSurfaceId>::GetSize(base::PickleSizer* s,
-                                               const param_type& p) {
-  GetParamSize(s, p.local_id());
-  GetParamSize(s, p.nonce());
-}
-
 void ParamTraits<viz::LocalSurfaceId>::Write(base::Pickle* m,
                                              const param_type& p) {
-  WriteParam(m, p.local_id());
+  DCHECK(p.is_valid());
+  WriteParam(m, p.parent_sequence_number());
+  WriteParam(m, p.child_sequence_number());
   WriteParam(m, p.nonce());
 }
 
 bool ParamTraits<viz::LocalSurfaceId>::Read(const base::Pickle* m,
                                             base::PickleIterator* iter,
                                             param_type* p) {
-  uint32_t local_id;
-  if (!ReadParam(m, iter, &local_id))
+  uint32_t parent_sequence_number;
+  if (!ReadParam(m, iter, &parent_sequence_number))
+    return false;
+
+  uint32_t child_sequence_number;
+  if (!ReadParam(m, iter, &child_sequence_number))
     return false;
 
   base::UnguessableToken nonce;
   if (!ReadParam(m, iter, &nonce))
     return false;
 
-  *p = viz::LocalSurfaceId(local_id, nonce);
-  return true;
+  *p =
+      viz::LocalSurfaceId(parent_sequence_number, child_sequence_number, nonce);
+  return p->is_valid();
 }
 
 void ParamTraits<viz::LocalSurfaceId>::Log(const param_type& p,
                                            std::string* l) {
   l->append("viz::LocalSurfaceId(");
-  LogParam(p.local_id(), l);
+  LogParam(p.parent_sequence_number(), l);
+  l->append(", ");
+  LogParam(p.child_sequence_number(), l);
   l->append(", ");
   LogParam(p.nonce(), l);
   l->append(")");
-}
-
-void ParamTraits<viz::SurfaceId>::GetSize(base::PickleSizer* s,
-                                          const param_type& p) {
-  GetParamSize(s, p.frame_sink_id());
-  GetParamSize(s, p.local_surface_id());
 }
 
 void ParamTraits<viz::SurfaceId>::Write(base::Pickle* m, const param_type& p) {
@@ -748,13 +735,6 @@ void ParamTraits<viz::SurfaceId>::Log(const param_type& p, std::string* l) {
   l->append(", ");
   LogParam(p.local_surface_id(), l);
   l->append(")");
-}
-
-void ParamTraits<viz::SurfaceInfo>::GetSize(base::PickleSizer* s,
-                                            const param_type& p) {
-  GetParamSize(s, p.id());
-  GetParamSize(s, p.device_scale_factor());
-  GetParamSize(s, p.size_in_pixels());
 }
 
 void ParamTraits<viz::SurfaceInfo>::Write(base::Pickle* m,
@@ -793,11 +773,13 @@ void ParamTraits<viz::SurfaceInfo>::Log(const param_type& p, std::string* l) {
   l->append(")");
 }
 
-void ParamTraits<cc::CompositorFrame>::Write(base::Pickle* m,
-                                             const param_type& p) {
+void ParamTraits<viz::CompositorFrame>::Write(base::Pickle* m,
+                                              const param_type& p) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::CompositorFrame::Write");
   WriteParam(m, p.metadata);
   size_t to_reserve = 0u;
-  to_reserve += p.resource_list.size() * sizeof(cc::TransferableResource);
+  to_reserve += p.resource_list.size() * sizeof(viz::TransferableResource);
   for (const auto& pass : p.render_pass_list) {
     to_reserve += sizeof(size_t) * 2;
     to_reserve += ReserveSizeForRenderPassWrite(*pass);
@@ -814,9 +796,11 @@ void ParamTraits<cc::CompositorFrame>::Write(base::Pickle* m,
   }
 }
 
-bool ParamTraits<cc::CompositorFrame>::Read(const base::Pickle* m,
-                                            base::PickleIterator* iter,
-                                            param_type* p) {
+bool ParamTraits<viz::CompositorFrame>::Read(const base::Pickle* m,
+                                             base::PickleIterator* iter,
+                                             param_type* p) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::CompositorFrame::Read");
   if (!ReadParam(m, iter, &p->metadata))
     return false;
 
@@ -824,7 +808,7 @@ bool ParamTraits<cc::CompositorFrame>::Read(const base::Pickle* m,
   const size_t kMaxSharedQuadStateListSize = 100000;
   const size_t kMaxQuadListSize = 1000000;
 
-  std::set<cc::RenderPassId> pass_id_set;
+  std::set<viz::RenderPassId> pass_id_set;
 
   uint32_t num_render_passes;
   if (!ReadParam(m, iter, &p->resource_list) ||
@@ -839,18 +823,18 @@ bool ParamTraits<cc::CompositorFrame>::Read(const base::Pickle* m,
         quad_list_size > kMaxQuadListSize ||
         shared_quad_state_list_size > kMaxSharedQuadStateListSize)
       return false;
-    std::unique_ptr<cc::RenderPass> render_pass =
-        cc::RenderPass::Create(static_cast<size_t>(shared_quad_state_list_size),
-                               static_cast<size_t>(quad_list_size));
+    std::unique_ptr<viz::RenderPass> render_pass = viz::RenderPass::Create(
+        static_cast<size_t>(shared_quad_state_list_size),
+        static_cast<size_t>(quad_list_size));
     if (!ReadParam(m, iter, render_pass.get()))
       return false;
-    // Validate that each RenderPassDrawQuad points at a valid RenderPass
+    // Validate that each viz::RenderPassDrawQuad points at a valid RenderPass
     // earlier in the frame.
     for (const auto* quad : render_pass->quad_list) {
-      if (quad->material != cc::DrawQuad::RENDER_PASS)
+      if (quad->material != viz::DrawQuad::RENDER_PASS)
         continue;
-      const cc::RenderPassDrawQuad* rpdq =
-          cc::RenderPassDrawQuad::MaterialCast(quad);
+      const viz::RenderPassDrawQuad* rpdq =
+          viz::RenderPassDrawQuad::MaterialCast(quad);
       if (!pass_id_set.count(rpdq->render_pass_id))
         return false;
     }
@@ -858,11 +842,14 @@ bool ParamTraits<cc::CompositorFrame>::Read(const base::Pickle* m,
     p->render_pass_list.push_back(std::move(render_pass));
   }
 
+  if (p->render_pass_list.back()->output_rect.size().IsEmpty())
+    return false;
+
   return true;
 }
 
-void ParamTraits<cc::CompositorFrame>::Log(const param_type& p,
-                                           std::string* l) {
+void ParamTraits<viz::CompositorFrame>::Log(const param_type& p,
+                                            std::string* l) {
   l->append("CompositorFrame(");
   LogParam(p.metadata, l);
   l->append(", ");
@@ -876,27 +863,24 @@ void ParamTraits<cc::CompositorFrame>::Log(const param_type& p,
   l->append("])");
 }
 
-void ParamTraits<cc::DrawQuad::Resources>::GetSize(base::PickleSizer* s,
-                                                   const param_type& p) {
-  GetParamSize(s, p.count);
-  for (size_t i = 0; i < p.count; ++i)
-    GetParamSize(s, p.ids[i]);
-}
-
-void ParamTraits<cc::DrawQuad::Resources>::Write(base::Pickle* m,
-                                                 const param_type& p) {
-  DCHECK_LE(p.count, cc::DrawQuad::Resources::kMaxResourceIdCount);
+void ParamTraits<viz::DrawQuad::Resources>::Write(base::Pickle* m,
+                                                  const param_type& p) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::DrawQuad::Resources::Write");
+  DCHECK_LE(p.count, viz::DrawQuad::Resources::kMaxResourceIdCount);
   WriteParam(m, p.count);
   for (size_t i = 0; i < p.count; ++i)
     WriteParam(m, p.ids[i]);
 }
 
-bool ParamTraits<cc::DrawQuad::Resources>::Read(const base::Pickle* m,
-                                                base::PickleIterator* iter,
-                                                param_type* p) {
+bool ParamTraits<viz::DrawQuad::Resources>::Read(const base::Pickle* m,
+                                                 base::PickleIterator* iter,
+                                                 param_type* p) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
+               "ParamTraits::DrawQuad::Resources::Read");
   if (!ReadParam(m, iter, &p->count))
     return false;
-  if (p->count > cc::DrawQuad::Resources::kMaxResourceIdCount)
+  if (p->count > viz::DrawQuad::Resources::kMaxResourceIdCount)
     return false;
   for (size_t i = 0; i < p->count; ++i) {
     if (!ReadParam(m, iter, &p->ids[i]))
@@ -905,12 +889,12 @@ bool ParamTraits<cc::DrawQuad::Resources>::Read(const base::Pickle* m,
   return true;
 }
 
-void ParamTraits<cc::DrawQuad::Resources>::Log(const param_type& p,
-                                               std::string* l) {
+void ParamTraits<viz::DrawQuad::Resources>::Log(const param_type& p,
+                                                std::string* l) {
   l->append("DrawQuad::Resources(");
   LogParam(p.count, l);
   l->append(", [");
-  if (p.count > cc::DrawQuad::Resources::kMaxResourceIdCount) {
+  if (p.count > viz::DrawQuad::Resources::kMaxResourceIdCount) {
     l->append("])");
     return;
   }
@@ -923,55 +907,39 @@ void ParamTraits<cc::DrawQuad::Resources>::Log(const param_type& p,
   l->append("])");
 }
 
-void ParamTraits<cc::YUVVideoDrawQuad>::GetSize(base::PickleSizer* s,
-                                                const param_type& p) {
-  ParamTraits<cc::DrawQuad>::GetSize(s, p);
-  GetParamSize(s, p.ya_tex_coord_rect);
-  GetParamSize(s, p.uv_tex_coord_rect);
-  GetParamSize(s, p.ya_tex_size);
-  GetParamSize(s, p.uv_tex_size);
-  GetParamSize(s, p.color_space);
-  GetParamSize(s, p.video_color_space);
-  GetParamSize(s, p.resource_offset);
-  GetParamSize(s, p.resource_multiplier);
-  GetParamSize(s, p.bits_per_channel);
-}
-
-void ParamTraits<cc::YUVVideoDrawQuad>::Write(base::Pickle* m,
-                                              const param_type& p) {
-  ParamTraits<cc::DrawQuad>::Write(m, p);
+void ParamTraits<viz::YUVVideoDrawQuad>::Write(base::Pickle* m,
+                                               const param_type& p) {
+  ParamTraits<viz::DrawQuad>::Write(m, p);
   WriteParam(m, p.ya_tex_coord_rect);
   WriteParam(m, p.uv_tex_coord_rect);
   WriteParam(m, p.ya_tex_size);
   WriteParam(m, p.uv_tex_size);
-  WriteParam(m, p.color_space);
   WriteParam(m, p.video_color_space);
   WriteParam(m, p.resource_offset);
   WriteParam(m, p.resource_multiplier);
   WriteParam(m, p.bits_per_channel);
 }
 
-bool ParamTraits<cc::YUVVideoDrawQuad>::Read(const base::Pickle* m,
-                                             base::PickleIterator* iter,
-                                             param_type* p) {
-  return ParamTraits<cc::DrawQuad>::Read(m, iter, p) &&
+bool ParamTraits<viz::YUVVideoDrawQuad>::Read(const base::Pickle* m,
+                                              base::PickleIterator* iter,
+                                              param_type* p) {
+  return ParamTraits<viz::DrawQuad>::Read(m, iter, p) &&
          ReadParam(m, iter, &p->ya_tex_coord_rect) &&
          ReadParam(m, iter, &p->uv_tex_coord_rect) &&
          ReadParam(m, iter, &p->ya_tex_size) &&
          ReadParam(m, iter, &p->uv_tex_size) &&
-         ReadParam(m, iter, &p->color_space) &&
          ReadParam(m, iter, &p->video_color_space) &&
          ReadParam(m, iter, &p->resource_offset) &&
          ReadParam(m, iter, &p->resource_multiplier) &&
          ReadParam(m, iter, &p->bits_per_channel) &&
-         p->bits_per_channel >= cc::YUVVideoDrawQuad::kMinBitsPerChannel &&
-         p->bits_per_channel <= cc::YUVVideoDrawQuad::kMaxBitsPerChannel;
+         p->bits_per_channel >= viz::YUVVideoDrawQuad::kMinBitsPerChannel &&
+         p->bits_per_channel <= viz::YUVVideoDrawQuad::kMaxBitsPerChannel;
 }
 
-void ParamTraits<cc::YUVVideoDrawQuad>::Log(const param_type& p,
-                                            std::string* l) {
+void ParamTraits<viz::YUVVideoDrawQuad>::Log(const param_type& p,
+                                             std::string* l) {
   l->append("(");
-  ParamTraits<cc::DrawQuad>::Log(p, l);
+  ParamTraits<viz::DrawQuad>::Log(p, l);
   l->append(", ");
   LogParam(p.ya_tex_coord_rect, l);
   l->append(", ");
@@ -980,8 +948,6 @@ void ParamTraits<cc::YUVVideoDrawQuad>::Log(const param_type& p,
   LogParam(p.ya_tex_size, l);
   l->append(", ");
   LogParam(p.uv_tex_size, l);
-  l->append(", ");
-  LogParam(p.color_space, l);
   l->append(", ");
   LogParam(p.video_color_space, l);
   l->append(", ");
@@ -993,28 +959,22 @@ void ParamTraits<cc::YUVVideoDrawQuad>::Log(const param_type& p,
   l->append("])");
 }
 
-void ParamTraits<cc::BeginFrameAck>::GetSize(base::PickleSizer* s,
-                                             const param_type& p) {
-  GetParamSize(s, p.sequence_number);
-  GetParamSize(s, p.source_id);
-}
-
-void ParamTraits<cc::BeginFrameAck>::Write(base::Pickle* m,
-                                           const param_type& p) {
+void ParamTraits<viz::BeginFrameAck>::Write(base::Pickle* m,
+                                            const param_type& p) {
   m->WriteUInt64(p.sequence_number);
-  m->WriteUInt32(p.source_id);
+  m->WriteUInt64(p.source_id);
   // |has_damage| is implicit through IPC message name, so not transmitted.
 }
 
-bool ParamTraits<cc::BeginFrameAck>::Read(const base::Pickle* m,
-                                          base::PickleIterator* iter,
-                                          param_type* p) {
+bool ParamTraits<viz::BeginFrameAck>::Read(const base::Pickle* m,
+                                           base::PickleIterator* iter,
+                                           param_type* p) {
   return iter->ReadUInt64(&p->sequence_number) &&
-         p->sequence_number >= cc::BeginFrameArgs::kStartingFrameNumber &&
-         iter->ReadUInt32(&p->source_id);
+         p->sequence_number >= viz::BeginFrameArgs::kStartingFrameNumber &&
+         iter->ReadUInt64(&p->source_id);
 }
 
-void ParamTraits<cc::BeginFrameAck>::Log(const param_type& p, std::string* l) {
+void ParamTraits<viz::BeginFrameAck>::Log(const param_type& p, std::string* l) {
   l->append("(");
   LogParam(p.sequence_number, l);
   l->append(", ");
@@ -1023,13 +983,6 @@ void ParamTraits<cc::BeginFrameAck>::Log(const param_type& p, std::string* l) {
 }
 
 }  // namespace IPC
-
-// Generate param traits size methods.
-#include "ipc/param_traits_size_macros.h"
-namespace IPC {
-#undef CC_IPC_CC_PARAM_TRAITS_MACROS_H_
-#include "cc/ipc/cc_param_traits_macros.h"
-}
 
 // Generate param traits write methods.
 #include "ipc/param_traits_write_macros.h"

@@ -10,8 +10,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autofill/risk_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/views/autofill/view_util.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view_ids.h"
@@ -25,8 +24,6 @@
 #include "components/grit/components_scaled_resources.h"
 #include "components/payments/content/payment_request_state.h"
 #include "components/payments/core/payment_request_delegate.h"
-#include "components/signin/core/browser/profile_identity_provider.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/web_contents.h"
@@ -61,7 +58,13 @@ CvcUnmaskViewController::CvcUnmaskViewController(
       payments_client_(
           Profile::FromBrowserContext(web_contents_->GetBrowserContext())
               ->GetRequestContext(),
-          this),
+          Profile::FromBrowserContext(web_contents_->GetBrowserContext())
+              ->GetPrefs(),
+          IdentityManagerFactory::GetForProfile(
+              Profile::FromBrowserContext(web_contents_->GetBrowserContext())
+                  ->GetOriginalProfile()),
+          /*unmask_delegate=*/this,
+          /*save_delegate=*/nullptr),
       full_card_request_(this,
                          &payments_client_,
                          state->GetPersonalDataManager()),
@@ -74,37 +77,10 @@ CvcUnmaskViewController::CvcUnmaskViewController(
 
 CvcUnmaskViewController::~CvcUnmaskViewController() {}
 
-IdentityProvider* CvcUnmaskViewController::GetIdentityProvider() {
-  if (!identity_provider_) {
-    Profile* profile =
-        Profile::FromBrowserContext(web_contents_->GetBrowserContext())
-            ->GetOriginalProfile();
-    identity_provider_.reset(new ProfileIdentityProvider(
-        SigninManagerFactory::GetForProfile(profile),
-        ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
-        base::Closure()));
-  }
-
-  return identity_provider_.get();
-}
-
 void CvcUnmaskViewController::OnDidGetRealPan(
     autofill::AutofillClient::PaymentsRpcResult result,
     const std::string& real_pan) {
   full_card_request_.OnDidGetRealPan(result, real_pan);
-}
-
-void CvcUnmaskViewController::OnDidGetUploadDetails(
-    autofill::AutofillClient::PaymentsRpcResult result,
-    const base::string16& context_token,
-    std::unique_ptr<base::DictionaryValue> legal_message) {
-  NOTIMPLEMENTED();
-}
-
-void CvcUnmaskViewController::OnDidUploadCard(
-    autofill::AutofillClient::PaymentsRpcResult result,
-    const std::string& server_id) {
-  NOTIMPLEMENTED();
 }
 
 void CvcUnmaskViewController::LoadRiskData(
@@ -124,6 +100,7 @@ void CvcUnmaskViewController::OnUnmaskVerificationResult(
   switch (result) {
     case autofill::AutofillClient::NONE:
       NOTREACHED();
+      FALLTHROUGH;
     case autofill::AutofillClient::SUCCESS:
       // In the success case, don't show any error and don't hide the spinner
       // because the dialog is about to close when the merchant completes the
@@ -150,13 +127,14 @@ void CvcUnmaskViewController::OnUnmaskVerificationResult(
 }
 
 base::string16 CvcUnmaskViewController::GetSheetTitle() {
-  return l10n_util::GetStringFUTF16(IDS_AUTOFILL_CARD_UNMASK_PROMPT_TITLE,
-                                    credit_card_.NetworkAndLastFourDigits());
+  return l10n_util::GetStringFUTF16(
+      IDS_AUTOFILL_CARD_UNMASK_PROMPT_TITLE,
+      credit_card_.NetworkOrBankNameAndLastFourDigits());
 }
 
 void CvcUnmaskViewController::FillContentView(views::View* content_view) {
-  std::unique_ptr<views::GridLayout> layout =
-      base::MakeUnique<views::GridLayout>(content_view);
+  views::GridLayout* layout = content_view->SetLayoutManager(
+      std::make_unique<views::GridLayout>(content_view));
   content_view->SetBorder(views::CreateEmptyBorder(
       kPaymentRequestRowVerticalInsets, kPaymentRequestRowHorizontalInsets,
       kPaymentRequestRowVerticalInsets, kPaymentRequestRowHorizontalInsets));
@@ -167,8 +145,13 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
                                   views::GridLayout::SizeType::USE_PREF, 0, 0);
 
   layout->StartRow(0, 0);
-  std::unique_ptr<views::Label> instructions = base::MakeUnique<views::Label>(
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS));
+  // The prompt for server cards should reference Google Payments, whereas the
+  // prompt for local cards should not.
+  std::unique_ptr<views::Label> instructions =
+      std::make_unique<views::Label>(l10n_util::GetStringUTF16(
+          credit_card_.record_type() == autofill::CreditCard::LOCAL_CARD
+              ? IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS_LOCAL_CARD
+              : IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS));
   instructions->SetMultiLine(true);
   instructions->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   layout->AddView(instructions.release());
@@ -205,14 +188,14 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
 
   layout->StartRow(0, 1);
   if (requesting_expiration) {
-    auto month = base::MakeUnique<views::Combobox>(&month_combobox_model_);
+    auto month = std::make_unique<views::Combobox>(&month_combobox_model_);
     month->set_listener(this);
     month->set_id(static_cast<int>(DialogViewID::CVC_MONTH));
     month->SelectValue(credit_card_.ExpirationMonthAsString());
     month->SetInvalid(true);
     layout->AddView(month.release());
 
-    auto year = base::MakeUnique<views::Combobox>(&year_combobox_model_);
+    auto year = std::make_unique<views::Combobox>(&year_combobox_model_);
     year->set_listener(this);
     year->set_id(static_cast<int>(DialogViewID::CVC_YEAR));
     year->SelectValue(credit_card_.Expiration4DigitYearAsString());
@@ -221,7 +204,7 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
   }
 
   std::unique_ptr<views::ImageView> cvc_image =
-      base::MakeUnique<views::ImageView>();
+      std::make_unique<views::ImageView>();
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   // TODO(anthonyvd): Consider using
   // CardUnmaskPromptControllerImpl::GetCvcImageRid.
@@ -229,6 +212,8 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
       credit_card_.network() == autofill::kAmericanExpressCard
           ? IDR_CREDIT_CARD_CVC_HINT_AMEX
           : IDR_CREDIT_CARD_CVC_HINT));
+  cvc_image->SetTooltipText(l10n_util::GetStringUTF16(
+      IDS_AUTOFILL_CARD_UNMASK_CVC_IMAGE_DESCRIPTION));
   layout->AddView(cvc_image.release());
 
   std::unique_ptr<views::Textfield> cvc_field =
@@ -254,7 +239,7 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
 
   layout->StartRow(0, 2);
   std::unique_ptr<views::ImageView> error_icon =
-      base::MakeUnique<views::ImageView>();
+      std::make_unique<views::ImageView>();
   error_icon->set_id(static_cast<int>(DialogViewID::CVC_ERROR_ICON));
   error_icon->SetImage(
       gfx::CreateVectorIcon(vector_icons::kWarningIcon, 16,
@@ -263,7 +248,7 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
   error_icon->SetVisible(false);
   layout->AddView(error_icon.release());
 
-  std::unique_ptr<views::Label> error_label = base::MakeUnique<views::Label>();
+  std::unique_ptr<views::Label> error_label = std::make_unique<views::Label>();
   error_label->set_id(static_cast<int>(DialogViewID::CVC_ERROR_LABEL));
   error_label->SetMultiLine(true);
   error_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -272,8 +257,6 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
   error_label->SetVisible(false);
 
   layout->AddView(error_label.release());
-
-  content_view->SetLayoutManager(layout.release());
 }
 
 std::unique_ptr<views::Button> CvcUnmaskViewController::CreatePrimaryButton() {
@@ -288,6 +271,9 @@ std::unique_ptr<views::Button> CvcUnmaskViewController::CreatePrimaryButton() {
 
 void CvcUnmaskViewController::ButtonPressed(views::Button* sender,
                                             const ui::Event& event) {
+  if (!dialog()->IsInteractive())
+    return;
+
   switch (sender->tag()) {
     case static_cast<int>(Tags::CONFIRM_TAG):
       CvcConfirmed();
@@ -398,6 +384,9 @@ void CvcUnmaskViewController::ContentsChanged(
 }
 
 void CvcUnmaskViewController::OnPerformAction(views::Combobox* combobox) {
+  if (!dialog()->IsInteractive())
+    return;
+
   UpdatePayButtonState();
 }
 

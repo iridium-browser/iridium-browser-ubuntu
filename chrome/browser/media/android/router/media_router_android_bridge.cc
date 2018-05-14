@@ -24,7 +24,14 @@ MediaRouterAndroidBridge::MediaRouterAndroidBridge(MediaRouterAndroid* router)
       Java_ChromeMediaRouter_create(env, reinterpret_cast<jlong>(this)));
 }
 
-MediaRouterAndroidBridge::~MediaRouterAndroidBridge() = default;
+MediaRouterAndroidBridge::~MediaRouterAndroidBridge() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  // When |this| is destroyed, there might still pending runnables on the Java
+  // side, that are keeping the Java object alive. These runnables might try to
+  // call back to the native side when executed. We need to signal to the Java
+  // counterpart that it can't call back into native anymore.
+  Java_ChromeMediaRouter_teardown(env, java_media_router_);
+}
 
 void MediaRouterAndroidBridge::CreateRoute(const MediaSource::Id& source_id,
                                            const MediaSink::Id& sink_id,
@@ -40,8 +47,6 @@ void MediaRouterAndroidBridge::CreateRoute(const MediaSource::Id& source_id,
       base::android::ConvertUTF8ToJavaString(env, sink_id);
   ScopedJavaLocalRef<jstring> jpresentation_id =
       base::android::ConvertUTF8ToJavaString(env, presentation_id);
-  // TODO(crbug.com/685358): Unique origins should not be considered
-  // same-origin.
   ScopedJavaLocalRef<jstring> jorigin =
       base::android::ConvertUTF8ToJavaString(env, origin.GetURL().spec());
 

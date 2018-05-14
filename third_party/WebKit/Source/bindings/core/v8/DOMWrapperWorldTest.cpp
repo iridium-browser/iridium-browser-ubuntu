@@ -4,12 +4,12 @@
 
 #include "platform/bindings/DOMWrapperWorld.h"
 
+#include "base/single_thread_task_runner.h"
 #include "bindings/core/v8/V8BindingForTesting.h"
 #include "bindings/core/v8/V8Initializer.h"
 #include "core/workers/WorkerBackingThread.h"
 #include "core/workers/WorkerBackingThreadStartupData.h"
 #include "platform/CrossThreadFunctional.h"
-#include "platform/WebTaskRunner.h"
 #include "platform/WebThreadSupportingGC.h"
 #include "platform/bindings/V8PerIsolateData.h"
 #include "platform/testing/UnitTestHelpers.h"
@@ -19,8 +19,9 @@
 namespace blink {
 namespace {
 
-Vector<RefPtr<DOMWrapperWorld>> CreateIsolatedWorlds(v8::Isolate* isolate) {
-  Vector<RefPtr<DOMWrapperWorld>> worlds;
+Vector<scoped_refptr<DOMWrapperWorld>> CreateIsolatedWorlds(
+    v8::Isolate* isolate) {
+  Vector<scoped_refptr<DOMWrapperWorld>> worlds;
   worlds.push_back(DOMWrapperWorld::EnsureIsolatedWorld(
       isolate, DOMWrapperWorld::WorldId::kMainWorldId + 1));
   worlds.push_back(DOMWrapperWorld::EnsureIsolatedWorld(
@@ -30,8 +31,8 @@ Vector<RefPtr<DOMWrapperWorld>> CreateIsolatedWorlds(v8::Isolate* isolate) {
   return worlds;
 }
 
-Vector<RefPtr<DOMWrapperWorld>> CreateWorlds(v8::Isolate* isolate) {
-  Vector<RefPtr<DOMWrapperWorld>> worlds;
+Vector<scoped_refptr<DOMWrapperWorld>> CreateWorlds(v8::Isolate* isolate) {
+  Vector<scoped_refptr<DOMWrapperWorld>> worlds;
   worlds.push_back(
       DOMWrapperWorld::Create(isolate, DOMWrapperWorld::WorldType::kWorker));
   worlds.push_back(
@@ -51,18 +52,20 @@ Vector<RefPtr<DOMWrapperWorld>> CreateWorlds(v8::Isolate* isolate) {
   return worlds;
 }
 
-void WorkerThreadFunc(WorkerBackingThread* thread,
-                      RefPtr<WebTaskRunner> main_thread_task_runner) {
+void WorkerThreadFunc(
+    WorkerBackingThread* thread,
+    scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner) {
   thread->InitializeOnBackingThread(
       WorkerBackingThreadStartupData::CreateDefault());
 
   // Worlds on the main thread should not be visible from the worker thread.
-  Vector<RefPtr<DOMWrapperWorld>> retrieved_worlds;
+  Vector<scoped_refptr<DOMWrapperWorld>> retrieved_worlds;
   DOMWrapperWorld::AllWorldsInCurrentThread(retrieved_worlds);
   EXPECT_TRUE(retrieved_worlds.IsEmpty());
 
   // Create worlds on the worker thread and verify them.
-  Vector<RefPtr<DOMWrapperWorld>> worlds = CreateWorlds(thread->GetIsolate());
+  Vector<scoped_refptr<DOMWrapperWorld>> worlds =
+      CreateWorlds(thread->GetIsolate());
   DOMWrapperWorld::AllWorldsInCurrentThread(retrieved_worlds);
   EXPECT_EQ(worlds.size(), retrieved_worlds.size());
   retrieved_worlds.clear();
@@ -73,15 +76,15 @@ void WorkerThreadFunc(WorkerBackingThread* thread,
   EXPECT_EQ(worlds.size(), retrieved_worlds.size());
 
   // Dispose of remaining worlds.
-  for (RefPtr<DOMWrapperWorld>& world : worlds) {
+  for (scoped_refptr<DOMWrapperWorld>& world : worlds) {
     if (world->IsWorkerWorld())
       world->Dispose();
   }
   worlds.clear();
 
   thread->ShutdownOnBackingThread();
-  main_thread_task_runner->PostTask(BLINK_FROM_HERE,
-                                    CrossThreadBind(&testing::ExitRunLoop));
+  PostCrossThreadTask(*main_thread_task_runner, FROM_HERE,
+                      CrossThreadBind(&testing::ExitRunLoop));
 }
 
 TEST(DOMWrapperWorldTest, Basic) {
@@ -89,7 +92,7 @@ TEST(DOMWrapperWorldTest, Basic) {
   DOMWrapperWorld& main_world = DOMWrapperWorld::MainWorld();
   EXPECT_TRUE(main_world.IsMainWorld());
   EXPECT_FALSE(DOMWrapperWorld::NonMainWorldsExistInMainThread());
-  Vector<RefPtr<DOMWrapperWorld>> retrieved_worlds;
+  Vector<scoped_refptr<DOMWrapperWorld>> retrieved_worlds;
   DOMWrapperWorld::AllWorldsInCurrentThread(retrieved_worlds);
   EXPECT_EQ(1u, retrieved_worlds.size());
   EXPECT_TRUE(retrieved_worlds[0]->IsMainWorld());
@@ -97,14 +100,15 @@ TEST(DOMWrapperWorldTest, Basic) {
 
   // Create isolated worlds and verify them.
   V8TestingScope scope;
-  Vector<RefPtr<DOMWrapperWorld>> isolated_worlds =
+  Vector<scoped_refptr<DOMWrapperWorld>> isolated_worlds =
       CreateIsolatedWorlds(scope.GetIsolate());
   EXPECT_TRUE(DOMWrapperWorld::NonMainWorldsExistInMainThread());
   DOMWrapperWorld::AllWorldsInCurrentThread(retrieved_worlds);
   EXPECT_EQ(isolated_worlds.size() + 1, retrieved_worlds.size());
 
   // Create other worlds and verify them.
-  Vector<RefPtr<DOMWrapperWorld>> worlds = CreateWorlds(scope.GetIsolate());
+  Vector<scoped_refptr<DOMWrapperWorld>> worlds =
+      CreateWorlds(scope.GetIsolate());
   EXPECT_TRUE(DOMWrapperWorld::NonMainWorldsExistInMainThread());
   retrieved_worlds.clear();
   DOMWrapperWorld::AllWorldsInCurrentThread(retrieved_worlds);
@@ -113,12 +117,13 @@ TEST(DOMWrapperWorldTest, Basic) {
   retrieved_worlds.clear();
 
   // Start a worker thread and create worlds on that.
-  std::unique_ptr<WorkerBackingThread> thread =
-      WorkerBackingThread::Create("DOMWrapperWorld test thread");
-  RefPtr<WebTaskRunner> main_thread_task_runner =
-      Platform::Current()->CurrentThread()->GetWebTaskRunner();
+  std::unique_ptr<WorkerBackingThread> thread = WorkerBackingThread::Create(
+      WebThreadCreationParams(WebThreadType::kTestThread)
+          .SetThreadName("DOMWrapperWorld test thread"));
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner =
+      Platform::Current()->CurrentThread()->GetTaskRunner();
   thread->BackingThread().PostTask(
-      BLINK_FROM_HERE,
+      FROM_HERE,
       CrossThreadBind(&WorkerThreadFunc, CrossThreadUnretained(thread.get()),
                       std::move(main_thread_task_runner)));
   testing::EnterRunLoop();
@@ -138,7 +143,7 @@ TEST(DOMWrapperWorldTest, Basic) {
   retrieved_worlds.clear();
 
   // Dispose of the other worlds.
-  for (RefPtr<DOMWrapperWorld>& world : worlds) {
+  for (scoped_refptr<DOMWrapperWorld>& world : worlds) {
     if (world->IsWorkerWorld())
       world->Dispose();
   }

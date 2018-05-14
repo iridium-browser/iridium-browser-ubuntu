@@ -13,13 +13,13 @@
 #include "base/memory/ref_counted.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "components/viz/common/surfaces/surface_id.h"
-#include "components/viz/service/frame_sinks/compositor_frame_sink_support_client.h"
+#include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom.h"
 
 struct AwDrawGLInfo;
 
 namespace viz {
 class CompositorFrameSinkSupport;
-class LocalSurfaceIdAllocator;
+class ParentLocalSurfaceIdAllocator;
 }
 
 namespace android_webview {
@@ -28,7 +28,7 @@ class ChildFrame;
 class RenderThreadManager;
 class SurfacesInstance;
 
-class HardwareRenderer : public viz::CompositorFrameSinkSupportClient {
+class HardwareRenderer : public viz::mojom::CompositorFrameSinkClient {
  public:
   // Two rules:
   // 1) Never wait on |new_frame| on the UI thread, or in kModeSync. Otherwise
@@ -49,19 +49,22 @@ class HardwareRenderer : public viz::CompositorFrameSinkSupportClient {
   void CommitFrame();
 
  private:
-  // viz::CompositorFrameSinkSupportClient implementation.
+  // viz::mojom::CompositorFrameSinkClient implementation.
   void DidReceiveCompositorFrameAck(
-      const std::vector<cc::ReturnedResource>& resources) override;
-  void OnBeginFrame(const cc::BeginFrameArgs& args) override;
+      const std::vector<viz::ReturnedResource>& resources) override;
+  void DidPresentCompositorFrame(uint32_t presentation_token,
+                                 base::TimeTicks time,
+                                 base::TimeDelta refresh,
+                                 uint32_t flags) override;
+  void DidDiscardCompositorFrame(uint32_t presentation_token) override;
+  void OnBeginFrame(const viz::BeginFrameArgs& args) override;
   void ReclaimResources(
-      const std::vector<cc::ReturnedResource>& resources) override;
-  void WillDrawSurface(const viz::LocalSurfaceId& local_surface_id,
-                       const gfx::Rect& damage_rect) override;
+      const std::vector<viz::ReturnedResource>& resources) override;
   void OnBeginFramePausedChanged(bool paused) override;
 
   void ReturnChildFrame(std::unique_ptr<ChildFrame> child_frame);
   void ReturnResourcesToCompositor(
-      const std::vector<cc::ReturnedResource>& resources,
+      const std::vector<viz::ReturnedResource>& resources,
       const CompositorID& compositor_id,
       uint32_t layer_tree_frame_sink_id);
 
@@ -91,8 +94,8 @@ class HardwareRenderer : public viz::CompositorFrameSinkSupportClient {
 
   const scoped_refptr<SurfacesInstance> surfaces_;
   viz::FrameSinkId frame_sink_id_;
-  const std::unique_ptr<viz::LocalSurfaceIdAllocator>
-      local_surface_id_allocator_;
+  const std::unique_ptr<viz::ParentLocalSurfaceIdAllocator>
+      parent_local_surface_id_allocator_;
   std::unique_ptr<viz::CompositorFrameSinkSupport> support_;
   viz::LocalSurfaceId child_id_;
   CompositorID compositor_id_;

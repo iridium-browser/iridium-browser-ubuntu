@@ -18,7 +18,7 @@ namespace {
 // ShelfModelObserver implementation that tracks what message are invoked.
 class TestShelfModelObserver : public ShelfModelObserver {
  public:
-  TestShelfModelObserver() {}
+  TestShelfModelObserver() = default;
 
   // Returns a string description of the changes that have occurred since this
   // was last invoked. Resets state to initial state.
@@ -37,7 +37,6 @@ class TestShelfModelObserver : public ShelfModelObserver {
   void ShelfItemRemoved(int, const ShelfItem&) override { removed_count_++; }
   void ShelfItemChanged(int, const ShelfItem&) override { changed_count_++; }
   void ShelfItemMoved(int, int) override { moved_count_++; }
-  void ShelfItemDelegateChanged(const ShelfID&, ShelfItemDelegate*) override {}
 
  private:
   void AddToResult(const std::string& format, int count, std::string* result) {
@@ -60,8 +59,8 @@ class TestShelfModelObserver : public ShelfModelObserver {
 
 class ShelfModelTest : public testing::Test {
  public:
-  ShelfModelTest() {}
-  ~ShelfModelTest() override {}
+  ShelfModelTest() = default;
+  ~ShelfModelTest() override = default;
 
   void SetUp() override {
     model_.reset(new ShelfModel);
@@ -81,17 +80,15 @@ class ShelfModelTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(ShelfModelTest);
 };
 
-TEST_F(ShelfModelTest, IntializesAppListAndBrowserShortcutItems) {
+TEST_F(ShelfModelTest, InitializesAppListItem) {
   EXPECT_EQ(2, model_->item_count());
-  EXPECT_EQ(kAppListId, model_->items()[0].id.app_id);
-  EXPECT_EQ(TYPE_APP_LIST, model_->items()[0].type);
-  const char kChromeAppId[] = "mgndgikekgjfcpckkfioiadnlibdjbkf";
-  EXPECT_EQ(kChromeAppId, model_->items()[1].id.app_id);
-  EXPECT_EQ(TYPE_BROWSER_SHORTCUT, model_->items()[1].type);
-  // The ShelfModel does not init either ShelfItemDelegate. ShelfController
-  // creates the app list delegate, and Chrome creates the browser delegate.
+  EXPECT_EQ(kBackButtonId, model_->items()[0].id.app_id);
+  EXPECT_EQ(kAppListId, model_->items()[1].id.app_id);
+  // The ShelfModel does not initialize the back button's or AppList's
+  // ShelfItemDelegate. ShelfController does that to prevent Chrome from
+  // creating its own delegate.
+  EXPECT_FALSE(model_->GetShelfItemDelegate(ShelfID(kBackButtonId)));
   EXPECT_FALSE(model_->GetShelfItemDelegate(ShelfID(kAppListId)));
-  EXPECT_FALSE(model_->GetShelfItemDelegate(ShelfID(kChromeAppId)));
 }
 
 TEST_F(ShelfModelTest, BasicAssertions) {
@@ -166,17 +163,23 @@ TEST_F(ShelfModelTest, BasicAssertions) {
 
 // Assertions around where items are added.
 TEST_F(ShelfModelTest, AddIndices) {
+  // Insert a browser shortcut, like Chrome does, it should be added at index 2.
+  ShelfItem browser_shortcut;
+  browser_shortcut.id = ShelfID("browser");
+  browser_shortcut.type = TYPE_BROWSER_SHORTCUT;
+  EXPECT_EQ(2, model_->Add(browser_shortcut));
+
   // App items should be after the browser shortcut.
   ShelfItem item;
   item.type = TYPE_APP;
   item.id = ShelfID("id1");
   int platform_app_index1 = model_->Add(item);
-  EXPECT_EQ(2, platform_app_index1);
+  EXPECT_EQ(3, platform_app_index1);
 
   // Add another platform app item, it should follow first.
   item.id = ShelfID("id2");
   int platform_app_index2 = model_->Add(item);
-  EXPECT_EQ(3, platform_app_index2);
+  EXPECT_EQ(4, platform_app_index2);
 
   // TYPE_PINNED_APP priority is higher than TYPE_APP but same as
   // TYPE_BROWSER_SHORTCUT. So TYPE_PINNED_APP is located after
@@ -184,26 +187,26 @@ TEST_F(ShelfModelTest, AddIndices) {
   item.type = TYPE_PINNED_APP;
   item.id = ShelfID("id3");
   int app_shortcut_index1 = model_->Add(item);
-  EXPECT_EQ(2, app_shortcut_index1);
+  EXPECT_EQ(3, app_shortcut_index1);
 
   item.type = TYPE_PINNED_APP;
   item.id = ShelfID("id4");
   int app_shortcut_index2 = model_->Add(item);
-  EXPECT_EQ(3, app_shortcut_index2);
+  EXPECT_EQ(4, app_shortcut_index2);
 
   // Check that AddAt() figures out the correct indexes for app shortcuts.
   // TYPE_PINNED_APP and TYPE_BROWSER_SHORTCUT has the same weight.
-  // So TYPE_PINNED_APP is located at index 0. And, TYPE_BROWSER_SHORTCUT is
-  // located at index 1.
+  // So TYPE_PINNED_APP is located at index 2. And, TYPE_BROWSER_SHORTCUT is
+  // located at index 3.
   item.type = TYPE_PINNED_APP;
   item.id = ShelfID("id5");
-  int app_shortcut_index3 = model_->AddAt(1, item);
-  EXPECT_EQ(1, app_shortcut_index3);
+  int app_shortcut_index3 = model_->AddAt(2, item);
+  EXPECT_EQ(2, app_shortcut_index3);
 
   item.type = TYPE_PINNED_APP;
   item.id = ShelfID("id6");
-  int app_shortcut_index4 = model_->AddAt(6, item);
-  EXPECT_EQ(5, app_shortcut_index4);
+  int app_shortcut_index4 = model_->AddAt(7, item);
+  EXPECT_EQ(6, app_shortcut_index4);
 
   item.type = TYPE_PINNED_APP;
   item.id = ShelfID("id7");
@@ -216,76 +219,80 @@ TEST_F(ShelfModelTest, AddIndices) {
   // Check that AddAt() figures out the correct indexes for apps and panels.
   item.type = TYPE_APP;
   item.id = ShelfID("id8");
-  int platform_app_index3 = model_->AddAt(3, item);
-  EXPECT_EQ(7, platform_app_index3);
+  int platform_app_index3 = model_->AddAt(4, item);
+  EXPECT_EQ(8, platform_app_index3);
 
   item.type = TYPE_APP_PANEL;
   item.id = ShelfID("id9");
-  int app_panel_index1 = model_->AddAt(2, item);
-  EXPECT_EQ(10, app_panel_index1);
+  int app_panel_index1 = model_->AddAt(3, item);
+  EXPECT_EQ(11, app_panel_index1);
 
   item.type = TYPE_APP;
   item.id = ShelfID("id10");
-  int platform_app_index4 = model_->AddAt(11, item);
-  EXPECT_EQ(10, platform_app_index4);
+  int platform_app_index4 = model_->AddAt(12, item);
+  EXPECT_EQ(11, platform_app_index4);
 
   item.type = TYPE_APP_PANEL;
   item.id = ShelfID("id11");
-  int app_panel_index2 = model_->AddAt(12, item);
-  EXPECT_EQ(12, app_panel_index2);
+  int app_panel_index2 = model_->AddAt(13, item);
+  EXPECT_EQ(13, app_panel_index2);
 
   item.type = TYPE_APP;
   item.id = ShelfID("id12");
-  int platform_app_index5 = model_->AddAt(7, item);
-  EXPECT_EQ(7, platform_app_index5);
+  int platform_app_index5 = model_->AddAt(8, item);
+  EXPECT_EQ(8, platform_app_index5);
 
   item.type = TYPE_APP_PANEL;
   item.id = ShelfID("id13");
-  int app_panel_index3 = model_->AddAt(13, item);
-  EXPECT_EQ(13, app_panel_index3);
+  int app_panel_index3 = model_->AddAt(14, item);
+  EXPECT_EQ(14, app_panel_index3);
 
   // Right aligned index should be the first app panel index.
-  EXPECT_EQ(12, model_->FirstPanelIndex());
+  EXPECT_EQ(13, model_->FirstPanelIndex());
 
-  EXPECT_EQ(TYPE_BROWSER_SHORTCUT, model_->items()[2].type);
-  EXPECT_EQ(TYPE_APP_LIST, model_->items()[0].type);
+  EXPECT_EQ(TYPE_BACK_BUTTON, model_->items()[0].type);
+  EXPECT_EQ(TYPE_APP_LIST, model_->items()[1].type);
+  EXPECT_EQ(TYPE_BROWSER_SHORTCUT, model_->items()[4].type);
 }
 
 // Test that the indexes for the running applications are properly determined.
 TEST_F(ShelfModelTest, FirstRunningAppIndex) {
-  // Check that the running application index is after the browser shortcut.
-  EXPECT_EQ(TYPE_BROWSER_SHORTCUT, model_->items()[1].type);
-  EXPECT_EQ(2, model_->FirstRunningAppIndex());
+  // Insert the browser shortcut at index 2 and check that the running
+  // application index would be behind it.
+  ShelfItem item;
+  item.id = ShelfID("browser");
+  item.type = TYPE_BROWSER_SHORTCUT;
+  EXPECT_EQ(2, model_->Add(item));
+  EXPECT_EQ(3, model_->FirstRunningAppIndex());
 
   // Insert a panel application at the end and check that the running
   // application index would be at / before the application panel.
-  ShelfItem item;
   item.type = TYPE_APP_PANEL;
   item.id = ShelfID("app panel");
-  EXPECT_EQ(2, model_->Add(item));
-  EXPECT_EQ(2, model_->FirstRunningAppIndex());
+  EXPECT_EQ(3, model_->Add(item));
+  EXPECT_EQ(3, model_->FirstRunningAppIndex());
 
   // Insert an application shortcut and make sure that the running application
   // index would be behind it.
   item.type = TYPE_PINNED_APP;
   item.id = ShelfID("pinned app");
-  EXPECT_EQ(2, model_->Add(item));
-  EXPECT_EQ(3, model_->FirstRunningAppIndex());
+  EXPECT_EQ(3, model_->Add(item));
+  EXPECT_EQ(4, model_->FirstRunningAppIndex());
 
   // Insert a two app items and check the first running app index.
   item.type = TYPE_APP;
   item.id = ShelfID("app1");
-  EXPECT_EQ(3, model_->Add(item));
-  EXPECT_EQ(3, model_->FirstRunningAppIndex());
-  item.id = ShelfID("app2");
   EXPECT_EQ(4, model_->Add(item));
-  EXPECT_EQ(3, model_->FirstRunningAppIndex());
+  EXPECT_EQ(4, model_->FirstRunningAppIndex());
+  item.id = ShelfID("app2");
+  EXPECT_EQ(5, model_->Add(item));
+  EXPECT_EQ(4, model_->FirstRunningAppIndex());
 }
 
 // Test item reordering on type/weight (eg. pinning) changes. crbug.com/248769.
 TEST_F(ShelfModelTest, ReorderOnTypeChanges) {
-  EXPECT_EQ(TYPE_APP_LIST, model_->items()[0].type);
-  EXPECT_EQ(TYPE_BROWSER_SHORTCUT, model_->items()[1].type);
+  EXPECT_EQ(TYPE_BACK_BUTTON, model_->items()[0].type);
+  EXPECT_EQ(TYPE_APP_LIST, model_->items()[1].type);
 
   // Add three pinned items.
   ShelfItem item1;
@@ -423,6 +430,116 @@ TEST_F(ShelfModelTest, RunningAppPinning) {
   EXPECT_EQ(3, model_->item_count());
   EXPECT_EQ(TYPE_APP, model_->items()[index].type);
   EXPECT_EQ(item.id, model_->items()[index].id);
+}
+
+// Tests that apps are updated properly when notifications are added or removed.
+TEST_F(ShelfModelTest, AddRemoveNotification) {
+  const std::string app_id("app_id");
+  const std::string notification_id("notification_id");
+
+  // Add an example running app.
+  ShelfItem item;
+  item.type = TYPE_APP;
+  item.status = STATUS_RUNNING;
+  item.id = ShelfID(app_id);
+  const int index = model_->Add(item);
+
+  EXPECT_FALSE(model_->items()[index].has_notification);
+
+  // Add a notification for the app.
+  model_->AddNotificationRecord(app_id, notification_id);
+
+  EXPECT_TRUE(model_->items()[index].has_notification);
+
+  // Remove the notification.
+  model_->RemoveNotificationRecord(notification_id);
+
+  EXPECT_FALSE(model_->items()[index].has_notification);
+}
+
+// Tests that apps pick up their notifications when they are added.
+TEST_F(ShelfModelTest, AddAppAfterNotification) {
+  const std::string app_id("app_id");
+  const std::string notification_id("notification_id");
+
+  ShelfItem item;
+  item.type = TYPE_APP;
+  item.status = STATUS_RUNNING;
+  item.id = ShelfID(app_id);
+
+  // Add a notification for the app.
+  model_->AddNotificationRecord(app_id, notification_id);
+
+  // Add an app with a matching app id.
+  const int index = model_->Add(item);
+
+  EXPECT_TRUE(model_->items()[index].has_notification);
+
+  // Remove and re-add the app.
+  model_->RemoveItemAt(index);
+  EXPECT_EQ(index, model_->Add(item));
+
+  // Test that the notification persists.
+  EXPECT_TRUE(model_->items()[index].has_notification);
+}
+
+// Tests that pinned apps pick up their notifications if they were recieved
+// before the app existed on the shelf.
+TEST_F(ShelfModelTest, PinAppAfterNotification) {
+  const std::string app_id("app_id");
+  const std::string notification_id("notification_id");
+
+  // Add an example app, but don't pin it.
+  ShelfItem item;
+  item.type = TYPE_APP;
+  item.status = STATUS_RUNNING;
+  item.id = ShelfID(app_id);
+
+  // Add a notification for the app.
+  model_->AddNotificationRecord(app_id, notification_id);
+
+  // Pin the app after the notification posts.
+  model_->PinAppWithID(app_id);
+
+  const int index = model_->ItemIndexByAppID(app_id);
+  EXPECT_TRUE(model_->items()[index].has_notification);
+
+  // Un-pin and re-pin the app.
+  model_->UnpinAppWithID(app_id);
+  model_->PinAppWithID(app_id);
+  EXPECT_EQ(index, model_->ItemIndexByAppID(app_id));
+
+  // Test that the notification persists.
+  EXPECT_TRUE(model_->items()[index].has_notification);
+}
+
+// Tests that the ShelfItem.has_notification is set to false only when there are
+// 0 notifications.
+TEST_F(ShelfModelTest, MultipleNotificationsPerAppBasic) {
+  const std::string app_id("app_id");
+  const std::string notification_id_0("notification_id_0");
+  // Add an example app.
+  ShelfItem item;
+  item.type = TYPE_APP;
+  item.status = STATUS_RUNNING;
+  item.id = ShelfID(app_id);
+  const int index = model_->Add(item);
+  EXPECT_EQ(index, model_->ItemIndexByAppID(app_id));
+
+  // Add the first notification for this app.
+  model_->AddNotificationRecord(app_id, notification_id_0);
+  // Add the second notification on the same app.
+  const std::string notification_id_1("notification_id_1");
+  model_->AddNotificationRecord(app_id, notification_id_1);
+  EXPECT_TRUE(model_->items()[index].has_notification);
+
+  // Remove one notification.
+  model_->RemoveNotificationRecord(notification_id_1);
+  EXPECT_TRUE(model_->items()[index].has_notification);
+
+  // Remove the last notification.
+  model_->RemoveNotificationRecord(notification_id_0);
+  EXPECT_FALSE(model_->items()[index].has_notification);
 }
 
 }  // namespace ash

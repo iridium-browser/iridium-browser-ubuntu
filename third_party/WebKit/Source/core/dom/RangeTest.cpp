@@ -4,28 +4,30 @@
 
 #include "core/dom/Range.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/StringOrArrayBufferOrArrayBufferView.h"
 #include "bindings/core/v8/V8BindingForTesting.h"
+#include "bindings/core/v8/string_or_array_buffer_or_array_buffer_view.h"
 #include "core/css/FontFaceDescriptors.h"
-#include "core/css/FontFaceSet.h"
+#include "core/css/FontFaceSetDocument.h"
 #include "core/dom/Element.h"
 #include "core/dom/NodeList.h"
 #include "core/dom/Text.h"
-#include "core/editing/EditingTestBase.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameSelection.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/VisibleUnits.h"
+#include "core/editing/testing/EditingTestBase.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLDivElement.h"
 #include "core/html/HTMLDocument.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLHtmlElement.h"
-#include "core/html/HTMLTextAreaElement.h"
+#include "core/html/forms/HTMLTextAreaElement.h"
 #include "platform/heap/Handle.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/wtf/Compiler.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/AtomicString.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,23 +35,11 @@ namespace blink {
 
 class RangeTest : public EditingTestBase {};
 
-TEST_F(RangeTest, createAdjustedToTreeScopeWithPositionInShadowTree) {
-  GetDocument().body()->setInnerHTML("<div><select><option>012</option></div>");
-  Element* const select_element = GetDocument().QuerySelector("select");
-  const Position& position =
-      Position::AfterNode(*select_element->UserAgentShadowRoot());
-  Range* const range =
-      Range::CreateAdjustedToTreeScope(GetDocument(), position);
-  EXPECT_EQ(range->startContainer(), select_element->parentNode());
-  EXPECT_EQ(static_cast<unsigned>(range->startOffset()),
-            select_element->NodeIndex());
-  EXPECT_TRUE(range->collapsed());
-}
-
 TEST_F(RangeTest, extractContentsWithDOMMutationEvent) {
-  GetDocument().body()->setInnerHTML("<span><b>abc</b>def</span>");
+  GetDocument().body()->SetInnerHTMLFromString("<span><b>abc</b>def</span>");
   GetDocument().GetSettings()->SetScriptEnabled(true);
-  Element* const script_element = GetDocument().createElement("script");
+  Element* const script_element =
+      GetDocument().CreateRawElement(HTMLNames::scriptTag);
   script_element->setTextContent(
       "let count = 0;"
       "const span = document.querySelector('span');"
@@ -63,19 +53,19 @@ TEST_F(RangeTest, extractContentsWithDOMMutationEvent) {
   Element* const span_element = GetDocument().QuerySelector("span");
   Range* const range =
       Range::Create(GetDocument(), span_element, 0, span_element, 1);
-  Element* const result = GetDocument().createElement("div");
+  Element* const result = GetDocument().CreateRawElement(HTMLNames::divTag);
   result->AppendChild(range->extractContents(ASSERT_NO_EXCEPTION));
 
-  EXPECT_EQ("<b>abc</b>", result->innerHTML())
+  EXPECT_EQ("<b>abc</b>", result->InnerHTMLAsString())
       << "DOM mutation event handler should not affect result.";
-  EXPECT_EQ("<span>DEF</span>", span_element->outerHTML())
+  EXPECT_EQ("<span>DEF</span>", span_element->OuterHTMLAsString())
       << "DOM mutation event handler should be executed.";
 }
 
 TEST_F(RangeTest, SplitTextNodeRangeWithinText) {
   V8TestingScope scope;
 
-  GetDocument().body()->setInnerHTML("1234");
+  GetDocument().body()->SetInnerHTMLFromString("1234");
   Text* old_text = ToText(GetDocument().body()->firstChild());
 
   Range* range04 = Range::Create(GetDocument(), old_text, 0, old_text, 4);
@@ -116,7 +106,7 @@ TEST_F(RangeTest, SplitTextNodeRangeWithinText) {
 TEST_F(RangeTest, SplitTextNodeRangeOutsideText) {
   V8TestingScope scope;
 
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLFromString(
       "<span id=\"outer\">0<span id=\"inner-left\">1</span>SPLITME<span "
       "id=\"inner-right\">2</span>3</span>");
 
@@ -182,14 +172,14 @@ TEST_F(RangeTest, SplitTextNodeRangeOutsideText) {
 }
 
 TEST_F(RangeTest, updateOwnerDocumentIfNeeded) {
-  Element* foo = GetDocument().createElement("foo");
-  Element* bar = GetDocument().createElement("bar");
+  Element* foo = GetDocument().CreateElementForBinding("foo");
+  Element* bar = GetDocument().CreateElementForBinding("bar");
   foo->AppendChild(bar);
 
   Range* range =
       Range::Create(GetDocument(), Position(bar, 0), Position(foo, 1));
 
-  Document* another_document = Document::Create();
+  Document* another_document = Document::CreateForTest();
   another_document->AppendChild(foo);
 
   EXPECT_EQ(bar, range->startContainer());
@@ -200,7 +190,7 @@ TEST_F(RangeTest, updateOwnerDocumentIfNeeded) {
 
 // Regression test for crbug.com/639184
 TEST_F(RangeTest, NotMarkedValidByIrrelevantTextInsert) {
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLFromString(
       "<div><span id=span1>foo</span>bar<span id=span2>baz</span></div>");
 
   Element* div = GetDocument().QuerySelector("div");
@@ -222,7 +212,7 @@ TEST_F(RangeTest, NotMarkedValidByIrrelevantTextInsert) {
 
 // Regression test for crbug.com/639184
 TEST_F(RangeTest, NotMarkedValidByIrrelevantTextRemove) {
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLFromString(
       "<div><span id=span1>foofoo</span>bar<span id=span2>baz</span></div>");
 
   Element* div = GetDocument().QuerySelector("div");
@@ -259,25 +249,9 @@ TEST_F(RangeTest, ToPosition) {
   EXPECT_EQ(position, range.EndPosition());
 }
 
-static void LoadAhem(DummyPageHolder& page_holder, Document& document) {
-  RefPtr<SharedBuffer> shared_buffer =
-      testing::ReadFromFile(testing::CoreTestDataPath("Ahem.ttf"));
-  StringOrArrayBufferOrArrayBufferView buffer =
-      StringOrArrayBufferOrArrayBufferView::fromArrayBuffer(
-          DOMArrayBuffer::Create(shared_buffer));
-  FontFace* ahem =
-      FontFace::Create(&document, "Ahem", buffer, FontFaceDescriptors());
-
-  ScriptState* script_state =
-      ToScriptStateForMainWorld(&page_holder.GetFrame());
-  DummyExceptionStateForTesting exception_state;
-  FontFaceSet::From(document)->addForBinding(script_state, ahem,
-                                             exception_state);
-}
-
 TEST_F(RangeTest, BoundingRectMustIndependentFromSelection) {
-  LoadAhem(GetDummyPageHolder(), GetDocument());
-  GetDocument().body()->setInnerHTML(
+  LoadAhem();
+  GetDocument().body()->SetInnerHTMLFromString(
       "<div style='font: Ahem; width: 2em;letter-spacing: 5px;'>xx xx </div>");
   Node* const div = GetDocument().QuerySelector("div");
   // "x^x
@@ -287,13 +261,153 @@ TEST_F(RangeTest, BoundingRectMustIndependentFromSelection) {
   const FloatRect rect_before = range->BoundingRect();
   EXPECT_GT(rect_before.Width(), 0);
   EXPECT_GT(rect_before.Height(), 0);
-  Selection().SetSelection(SelectionInDOMTree::Builder()
-                               .SetBaseAndExtent(EphemeralRange(range))
-                               .Build());
+  Selection().SetSelectionAndEndTyping(
+      SelectionInDOMTree::Builder()
+          .SetBaseAndExtent(EphemeralRange(range))
+          .Build());
   GetDocument().View()->UpdateAllLifecyclePhases();
   EXPECT_EQ(Selection().SelectedText(), "x x");
   const FloatRect rect_after = range->BoundingRect();
   EXPECT_EQ(rect_before, rect_after);
+}
+
+// Regression test for crbug.com/681536
+TEST_F(RangeTest, BorderAndTextQuadsWithInputInBetween) {
+  GetDocument().body()->SetInnerHTMLFromString(
+      "<div>foo <u><input> bar</u></div>");
+  GetDocument().UpdateStyleAndLayout();
+
+  Node* foo = GetDocument().QuerySelector("div")->firstChild();
+  Node* bar = GetDocument().QuerySelector("u")->lastChild();
+  Range* range = Range::Create(GetDocument(), foo, 2, bar, 2);
+
+  Vector<FloatQuad> quads;
+  range->GetBorderAndTextQuads(quads);
+
+  // Should get one quad for "o ", <input> and " b", respectively.
+  ASSERT_EQ(3u, quads.size());
+}
+
+static Vector<FloatQuad> GetBorderAndTextQuads(const Position& start,
+                                               const Position& end) {
+  DCHECK_LE(start, end);
+  Range* const range = Range::Create(*start.GetDocument(), start, end);
+  Vector<FloatQuad> quads;
+  range->GetBorderAndTextQuads(quads);
+  return quads;
+}
+
+static Vector<IntSize> ComputeSizesOfQuads(const Vector<FloatQuad>& quads) {
+  Vector<IntSize> sizes;
+  for (const auto& quad : quads)
+    sizes.push_back(quad.EnclosingBoundingBox().Size());
+  return sizes;
+}
+
+TEST_F(RangeTest, GetBorderAndTextQuadsWithFirstLetterOne) {
+  GetDocument().body()->SetInnerHTMLFromString(R"HTML(
+    <style>
+      body { font-size: 20px; }
+      #sample::first-letter { font-size: 500%; }
+    </style>
+    <p id=sample>abc</p>
+    <p id=expected><span style='font-size: 500%'>a</span>bc</p>
+  )HTML");
+  GetDocument().UpdateStyleAndLayout();
+
+  Element* const expected = GetDocument().getElementById("expected");
+  Element* const sample = GetDocument().getElementById("sample");
+
+  const Vector<FloatQuad> expected_quads =
+      GetBorderAndTextQuads(Position(expected, 0), Position(expected, 2));
+  const Vector<FloatQuad> sample_quads =
+      GetBorderAndTextQuads(Position(sample, 0), Position(sample, 1));
+  ASSERT_EQ(2u, sample_quads.size());
+  ASSERT_EQ(3u, expected_quads.size())
+      << "expected_quads has SPAN, SPAN.firstChild and P.lastChild";
+  EXPECT_EQ(expected_quads[0].EnclosingBoundingBox().Size(),
+            sample_quads[0].EnclosingBoundingBox().Size())
+      << "Check size of first-letter part";
+  EXPECT_EQ(expected_quads[2].EnclosingBoundingBox().Size(),
+            sample_quads[1].EnclosingBoundingBox().Size())
+      << "Check size of first-letter part";
+
+  EXPECT_EQ(ComputeSizesOfQuads(
+                GetBorderAndTextQuads(Position(expected->firstChild(), 0),
+                                      Position(expected->firstChild(), 1))),
+            ComputeSizesOfQuads(
+                GetBorderAndTextQuads(Position(sample->firstChild(), 0),
+                                      Position(sample->firstChild(), 1))))
+      << "All first-letter part";
+
+  EXPECT_EQ(ComputeSizesOfQuads(
+                GetBorderAndTextQuads(Position(expected->lastChild(), 0),
+                                      Position(expected->lastChild(), 2))),
+            ComputeSizesOfQuads(
+                GetBorderAndTextQuads(Position(sample->firstChild(), 1),
+                                      Position(sample->firstChild(), 3))))
+      << "All remaining part";
+}
+
+TEST_F(RangeTest, GetBorderAndTextQuadsWithFirstLetterThree) {
+  GetDocument().body()->SetInnerHTMLFromString(R"HTML(
+    <style>
+      body { font-size: 20px; }
+      #sample::first-letter { font-size: 500%; }
+    </style>
+    <p id=sample>(a)bc</p>
+    <p id=expected><span style='font-size: 500%'>(a)</span>bc</p>
+  )HTML");
+  GetDocument().UpdateStyleAndLayout();
+
+  Element* const expected = GetDocument().getElementById("expected");
+  Element* const sample = GetDocument().getElementById("sample");
+
+  const Vector<FloatQuad> expected_quads =
+      GetBorderAndTextQuads(Position(expected, 0), Position(expected, 2));
+  const Vector<FloatQuad> sample_quads =
+      GetBorderAndTextQuads(Position(sample, 0), Position(sample, 1));
+  ASSERT_EQ(2u, sample_quads.size());
+  ASSERT_EQ(3u, expected_quads.size())
+      << "expected_quads has SPAN, SPAN.firstChild and P.lastChild";
+  EXPECT_EQ(expected_quads[0].EnclosingBoundingBox().Size(),
+            sample_quads[0].EnclosingBoundingBox().Size())
+      << "Check size of first-letter part";
+  EXPECT_EQ(expected_quads[2].EnclosingBoundingBox().Size(),
+            sample_quads[1].EnclosingBoundingBox().Size())
+      << "Check size of first-letter part";
+
+  EXPECT_EQ(ComputeSizesOfQuads(
+                GetBorderAndTextQuads(Position(expected->firstChild(), 0),
+                                      Position(expected->firstChild(), 1))),
+            ComputeSizesOfQuads(
+                GetBorderAndTextQuads(Position(sample->firstChild(), 0),
+                                      Position(sample->firstChild(), 3))))
+      << "All first-letter part";
+
+  EXPECT_EQ(ComputeSizesOfQuads(
+                GetBorderAndTextQuads(Position(expected->lastChild(), 0),
+                                      Position(expected->lastChild(), 2))),
+            ComputeSizesOfQuads(
+                GetBorderAndTextQuads(Position(sample->firstChild(), 3),
+                                      Position(sample->firstChild(), 5))))
+      << "All remaining part";
+
+  EXPECT_EQ(ComputeSizesOfQuads(GetBorderAndTextQuads(
+                Position(expected->firstChild()->firstChild(), 1),
+                Position(expected->firstChild()->firstChild(), 2))),
+            ComputeSizesOfQuads(
+                GetBorderAndTextQuads(Position(sample->firstChild(), 1),
+                                      Position(sample->firstChild(), 2))))
+      << "Partial first-letter part";
+
+  EXPECT_EQ(ComputeSizesOfQuads(GetBorderAndTextQuads(
+                Position(expected->firstChild()->firstChild(), 1),
+                Position(expected->lastChild(), 1))),
+            ComputeSizesOfQuads(
+                GetBorderAndTextQuads(Position(sample->firstChild(), 1),
+                                      Position(sample->firstChild(), 4))))
+      << "Partial first-letter part and remaining part";
 }
 
 }  // namespace blink

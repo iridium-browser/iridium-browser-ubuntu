@@ -9,9 +9,11 @@
 
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "content/browser/webrtc/webrtc_internals_ui_observer.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -69,26 +71,30 @@ class MockWakeLock : public device::mojom::WakeLock {
   bool has_wakelock_;
 };
 
+}  // namespace
+
 // Derived class for testing only.  Allows the tests to have their own instance
 // for testing and control the period for which WebRTCInternals will bulk up
 // updates (changes down from 500ms to 1ms).
-class WebRTCInternalsForTest : public NON_EXPORTED_BASE(WebRTCInternals) {
+class WebRTCInternalsForTest : public WebRTCInternals {
  public:
   WebRTCInternalsForTest()
       : WebRTCInternals(1, true),
         mock_wake_lock_(mojo::MakeRequest(&wake_lock_)) {}
+
   ~WebRTCInternalsForTest() override {}
+
   bool HasWakeLock() { return mock_wake_lock_.HasWakeLock(); }
 
  private:
   MockWakeLock mock_wake_lock_;
 };
 
-}  // namespace
-
 class WebRtcInternalsTest : public testing::Test {
  public:
-  WebRtcInternalsTest() : io_thread_(BrowserThread::UI, &io_loop_) {}
+  WebRtcInternalsTest()
+      : synchronous_webrtc_event_log_manager_(
+            base::ThreadTaskRunnerHandle::Get()) {}
 
  protected:
   void VerifyString(const base::DictionaryValue* dict,
@@ -110,7 +116,7 @@ class WebRtcInternalsTest : public testing::Test {
   void VerifyList(const base::DictionaryValue* dict,
                   const std::string& key,
                   const base::ListValue& expected) {
-    const base::ListValue* actual = NULL;
+    const base::ListValue* actual = nullptr;
     EXPECT_TRUE(dict->GetList(key, &actual));
     EXPECT_TRUE(expected.Equals(actual));
   }
@@ -121,7 +127,7 @@ class WebRtcInternalsTest : public testing::Test {
                               const std::string& origin,
                               const std::string& audio,
                               const std::string& video) {
-    base::DictionaryValue* dict = NULL;
+    base::DictionaryValue* dict = nullptr;
     EXPECT_TRUE(actual_data->GetAsDictionary(&dict));
 
     VerifyInt(dict, "rid", rid);
@@ -131,8 +137,10 @@ class WebRtcInternalsTest : public testing::Test {
     VerifyString(dict, "video", video);
   }
 
-  base::MessageLoop io_loop_;
-  TestBrowserThread io_thread_;
+  TestBrowserThreadBundle test_browser_thread_bundle_;
+
+  // Must be constructed before the unit under test.
+  WebRtcEventLogManager synchronous_webrtc_event_log_manager_;
 };
 
 TEST_F(WebRtcInternalsTest, AddRemoveObserver) {
@@ -152,6 +160,8 @@ TEST_F(WebRtcInternalsTest, AddRemoveObserver) {
   EXPECT_EQ("", observer.command());
 
   webrtc_internals.OnRemovePeerConnection(3, 4);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, EnsureNoLogWhenNoObserver) {
@@ -177,6 +187,8 @@ TEST_F(WebRtcInternalsTest, EnsureNoLogWhenNoObserver) {
   ASSERT_FALSE(dict->GetList("log", &log));
 
   webrtc_internals.OnRemovePeerConnection(3, 4);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, EnsureLogIsRemovedWhenObserverIsRemoved) {
@@ -213,6 +225,8 @@ TEST_F(WebRtcInternalsTest, EnsureLogIsRemovedWhenObserverIsRemoved) {
   ASSERT_FALSE(dict->GetList("log", &log));
 
   webrtc_internals.OnRemovePeerConnection(3, 4);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, SendAddPeerConnectionUpdate) {
@@ -227,7 +241,7 @@ TEST_F(WebRtcInternalsTest, SendAddPeerConnectionUpdate) {
 
   ASSERT_EQ("addPeerConnection", observer.command());
 
-  base::DictionaryValue* dict = NULL;
+  base::DictionaryValue* dict = nullptr;
   EXPECT_TRUE(observer.value()->GetAsDictionary(&dict));
 
   VerifyInt(dict, "pid", 1);
@@ -238,6 +252,8 @@ TEST_F(WebRtcInternalsTest, SendAddPeerConnectionUpdate) {
 
   webrtc_internals.RemoveObserver(&observer);
   webrtc_internals.OnRemovePeerConnection(1, 2);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, SendRemovePeerConnectionUpdate) {
@@ -253,13 +269,15 @@ TEST_F(WebRtcInternalsTest, SendRemovePeerConnectionUpdate) {
 
   ASSERT_EQ("removePeerConnection", observer.command());
 
-  base::DictionaryValue* dict = NULL;
+  base::DictionaryValue* dict = nullptr;
   EXPECT_TRUE(observer.value()->GetAsDictionary(&dict));
 
   VerifyInt(dict, "pid", 1);
   VerifyInt(dict, "lid", 2);
 
   webrtc_internals.RemoveObserver(&observer);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, SendUpdatePeerConnectionUpdate) {
@@ -278,7 +296,7 @@ TEST_F(WebRtcInternalsTest, SendUpdatePeerConnectionUpdate) {
 
   ASSERT_EQ("updatePeerConnection", observer.command());
 
-  base::DictionaryValue* dict = NULL;
+  base::DictionaryValue* dict = nullptr;
   EXPECT_TRUE(observer.value()->GetAsDictionary(&dict));
 
   VerifyInt(dict, "pid", 1);
@@ -292,6 +310,8 @@ TEST_F(WebRtcInternalsTest, SendUpdatePeerConnectionUpdate) {
 
   webrtc_internals.OnRemovePeerConnection(1, 2);
   webrtc_internals.RemoveObserver(&observer);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, AddGetUserMedia) {
@@ -316,6 +336,8 @@ TEST_F(WebRtcInternalsTest, AddGetUserMedia) {
                          video_constraint);
 
   webrtc_internals.RemoveObserver(&observer);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, SendAllUpdateWithGetUserMedia) {
@@ -337,6 +359,8 @@ TEST_F(WebRtcInternalsTest, SendAllUpdateWithGetUserMedia) {
                          video_constraint);
 
   webrtc_internals.RemoveObserver(&observer);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, SendAllUpdatesWithPeerConnectionUpdate) {
@@ -358,11 +382,11 @@ TEST_F(WebRtcInternalsTest, SendAllUpdatesWithPeerConnectionUpdate) {
   EXPECT_EQ("updateAllPeerConnections", observer.command());
   ASSERT_TRUE(observer.value());
 
-  base::ListValue* list = NULL;
+  base::ListValue* list = nullptr;
   EXPECT_TRUE(observer.value()->GetAsList(&list));
   EXPECT_EQ(1U, list->GetSize());
 
-  base::DictionaryValue* dict = NULL;
+  base::DictionaryValue* dict = nullptr;
   EXPECT_TRUE((*list->begin()).GetAsDictionary(&dict));
 
   VerifyInt(dict, "rid", rid);
@@ -372,7 +396,7 @@ TEST_F(WebRtcInternalsTest, SendAllUpdatesWithPeerConnectionUpdate) {
   VerifyString(dict, "rtcConfiguration", kRtcConfiguration);
   VerifyString(dict, "constraints", kContraints);
 
-  base::ListValue* log = NULL;
+  base::ListValue* log = nullptr;
   ASSERT_TRUE(dict->GetList("log", &log));
   EXPECT_EQ(1U, log->GetSize());
 
@@ -382,6 +406,8 @@ TEST_F(WebRtcInternalsTest, SendAllUpdatesWithPeerConnectionUpdate) {
   std::string time;
   EXPECT_TRUE(dict->GetString("time", &time));
   EXPECT_FALSE(time.empty());
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, OnAddStats) {
@@ -403,12 +429,14 @@ TEST_F(WebRtcInternalsTest, OnAddStats) {
   EXPECT_EQ("addStats", observer.command());
   ASSERT_TRUE(observer.value());
 
-  base::DictionaryValue* dict = NULL;
+  base::DictionaryValue* dict = nullptr;
   EXPECT_TRUE(observer.value()->GetAsDictionary(&dict));
 
   VerifyInt(dict, "pid", pid);
   VerifyInt(dict, "lid", lid);
   VerifyList(dict, "reports", list);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, AudioDebugRecordingsFileSelectionCanceled) {
@@ -424,6 +452,8 @@ TEST_F(WebRtcInternalsTest, AudioDebugRecordingsFileSelectionCanceled) {
 
   EXPECT_EQ("audioDebugRecordingsFileSelectionCancelled", observer.command());
   EXPECT_EQ(nullptr, observer.value());
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebRtcInternalsTest, WakeLock) {
@@ -473,6 +503,8 @@ TEST_F(WebRtcInternalsTest, WakeLock) {
   webrtc_internals.OnRemovePeerConnection(pid, lid[0]);
   EXPECT_EQ(0, webrtc_internals.num_open_connections());
   EXPECT_FALSE(webrtc_internals.HasWakeLock());
+
+  base::RunLoop().RunUntilIdle();
 }
 
 }  // namespace content

@@ -4,14 +4,12 @@
 
 #import "ios/chrome/browser/ui/main/browser_view_wrangler.h"
 
+#include "base/files/file_path.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#import "ios/chrome/browser/browsing_data/browsing_data_removal_controller.h"
-#include "ios/chrome/browser/browsing_data/ios_chrome_browsing_data_remover.h"
 #include "ios/chrome/browser/crash_report/crash_report_helper.h"
 #import "ios/chrome/browser/device_sharing/device_sharing_manager.h"
-#import "ios/chrome/browser/physical_web/start_physical_web_discovery.h"
 #import "ios/chrome/browser/sessions/session_ios.h"
 #import "ios/chrome/browser/sessions/session_service_ios.h"
 #import "ios/chrome/browser/sessions/session_window_ios.h"
@@ -21,6 +19,7 @@
 #import "ios/chrome/browser/ui/browser_view_controller.h"
 #import "ios/chrome/browser/ui/browser_view_controller_dependency_factory.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
+#import "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -28,7 +27,7 @@
 
 @interface BrowserViewWrangler ()<TabModelObserver> {
   ios::ChromeBrowserState* _browserState;
-  __unsafe_unretained id<TabModelObserver> _tabModelObserver;
+  __weak id<TabModelObserver> _tabModelObserver;
   __weak id<ApplicationCommands> _applicationCommandEndpoint;
   BOOL _isShutdown;
 }
@@ -79,11 +78,6 @@
   return self;
 }
 
-- (instancetype)init {
-  NOTREACHED();
-  return nil;
-}
-
 - (void)dealloc {
   DCHECK(_isShutdown) << "-shutdown must be called before -dealloc";
 }
@@ -119,7 +113,7 @@
     self.mainTabModel = [self tabModelForBrowserState:_browserState empty:NO];
     // Follow loaded URLs in the main tab model to send those in case of
     // crashes.
-    ios_internal::breakpad::MonitorURLsForTabModel(_mainTabModel);
+    breakpad::MonitorURLsForTabModel(_mainTabModel);
     ios::GetChromeBrowserProvider()->InitializeCastService(_mainTabModel);
   }
   return _mainTabModel;
@@ -212,12 +206,6 @@
 
   // The internal state of the Handoff Manager depends on the current BVC.
   [self updateDeviceSharingManager];
-
-  // By default, Physical Web discovery will not be started if the browser
-  // launches into an Incognito tab. On switching modes, check if discovery
-  // should be started.
-  StartPhysicalWebDiscovery(GetApplicationContext()->GetLocalState(),
-                            [self currentBrowserState]);
 }
 
 #pragma mark - BrowserViewInformation methods
@@ -228,11 +216,6 @@
 
 - (ios::ChromeBrowserState*)currentBrowserState {
   return self.currentBVC.browserState;
-}
-
-- (void)haltAllTabs {
-  [self.mainTabModel haltAllTabs];
-  [self.otrTabModel haltAllTabs];
 }
 
 - (void)cleanDeviceSharingManager {
@@ -263,14 +246,13 @@
   GURL activeURL;
   Tab* currentTab = [self.currentBVC tabModel].currentTab;
   // Set the active URL if there's a current tab and the current BVC is not OTR.
-  if (currentTab && self.currentBVC != self.otrBVC) {
-    activeURL = currentTab.visibleURL;
+  if (currentTab.webState && self.currentBVC != self.otrBVC) {
+    activeURL = currentTab.webState->GetVisibleURL();
   }
   [self.deviceSharingManager updateActiveURL:activeURL];
 }
 
-- (void)deleteIncognitoTabModelState:
-    (BrowsingDataRemovalController*)removalController {
+- (void)deleteIncognitoTabModelState {
   // It is theoretically possible that a Tab has been added to |_otrTabModel|
   // since the deletion has been scheduled. It is unlikely to happen for real
   // because it would require superhuman speed.
@@ -278,16 +260,13 @@
   DCHECK(_browserState);
 
   // Stop watching the OTR tab model's state for crashes.
-  ios_internal::breakpad::StopMonitoringTabStateForTabModel(self.otrTabModel);
+  breakpad::StopMonitoringTabStateForTabModel(self.otrTabModel);
 
   // At this stage, a new OTR BVC shouldn't be lazily constructed by calling the
   // .otrBVC property getter. Instead, the ivar is accessed directly through the
   // following code.
   BOOL otrBVCIsCurrent = self.currentBVC == _otrBVC;
   @autoreleasepool {
-    ios::ChromeBrowserState* otrBrowserState =
-        _browserState->GetOffTheRecordChromeBrowserState();
-    [removalController browserStateDestroyed:otrBrowserState];
     self.otrBVC = nil;
     // There's no guarantee the tab model was ever added to the BVC (or even
     // that the BVC was created), so ensure the tab model gets notified.
@@ -326,11 +305,11 @@
   [_otrTabModel removeObserver:self];
 
   // Stop URL monitoring of the main tab model.
-  ios_internal::breakpad::StopMonitoringURLsForTabModel(_mainTabModel);
+  breakpad::StopMonitoringURLsForTabModel(_mainTabModel);
 
   // Stop Breakpad state monitoring of both tab models (if necessary).
-  ios_internal::breakpad::StopMonitoringTabStateForTabModel(_mainTabModel);
-  ios_internal::breakpad::StopMonitoringTabStateForTabModel(_otrTabModel);
+  breakpad::StopMonitoringTabStateForTabModel(_mainTabModel);
+  breakpad::StopMonitoringTabStateForTabModel(_otrTabModel);
 
   // Normally other objects will take care of unhooking the tab models from
   // the browser state, but this code should ensure that it happens regardless.
@@ -379,7 +358,7 @@
     [tabModel addObserver:_tabModelObserver];
     [tabModel addObserver:self];
   }
-  ios_internal::breakpad::MonitorTabStateForTabModel(tabModel);
+  breakpad::MonitorTabStateForTabModel(tabModel);
 
   return tabModel;
 }
@@ -389,7 +368,8 @@
                                     tabModel:(TabModel*)tabModel {
   BrowserViewControllerDependencyFactory* factory =
       [[BrowserViewControllerDependencyFactory alloc]
-          initWithBrowserState:browserState];
+          initWithBrowserState:browserState
+                  webStateList:[tabModel webStateList]];
   return [[BrowserViewController alloc]
                 initWithTabModel:tabModel
                     browserState:browserState

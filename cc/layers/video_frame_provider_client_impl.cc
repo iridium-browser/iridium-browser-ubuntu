@@ -15,7 +15,8 @@ namespace cc {
 scoped_refptr<VideoFrameProviderClientImpl>
 VideoFrameProviderClientImpl::Create(VideoFrameProvider* provider,
                                      VideoFrameControllerClient* client) {
-  return make_scoped_refptr(new VideoFrameProviderClientImpl(provider, client));
+  return base::WrapRefCounted(
+      new VideoFrameProviderClientImpl(provider, client));
 }
 
 VideoFrameProviderClientImpl::VideoFrameProviderClientImpl(
@@ -142,7 +143,8 @@ void VideoFrameProviderClientImpl::DidReceiveFrame() {
     active_video_layer_->SetNeedsRedraw();
 }
 
-void VideoFrameProviderClientImpl::OnBeginFrame(const BeginFrameArgs& args) {
+void VideoFrameProviderClientImpl::OnBeginFrame(
+    const viz::BeginFrameArgs& args) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(rendering_);
   DCHECK(!stopped_);

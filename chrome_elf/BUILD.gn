@@ -26,17 +26,29 @@ windows_manifest("chrome_elf_manifest") {
   sources = [
     as_invoker_manifest,
   ]
-  type = "dll"
+}
+
+# Users of chrome_elf exports can depend on this target, which doesn't
+# pin them to linking either chrome_elf.dll or test_stubs.
+source_set("chrome_elf_main_include") {
+  sources = [
+    "chrome_elf_main.h",
+  ]
 }
 
 # We should move chrome_result_codes.h to another target which does not bring
 # in the world.
 shared_library("chrome_elf") {
   sources = [
-    "chrome_elf.def",
     "chrome_elf_main.cc",
     "chrome_elf_main.h",
   ]
+  if (target_cpu == "x86") {
+    sources += [ "chrome_elf_x86.def" ]
+  } else {
+    sources += [ "chrome_elf_x64.def" ]
+  }
+
   deps = [
     ":blacklist",
     ":chrome_elf_manifest",
@@ -46,10 +58,13 @@ shared_library("chrome_elf") {
     ":hook_util",
     ":nt_registry",
     ":security",
+    ":third_party_dlls",
     "//build/config:exe_and_shlib_deps",
     "//chrome/install_static:install_static_util",
     "//chrome/install_static:primary_module",
+    "//components/crash/content/app:crash_export_thunks",
   ]
+
   configs += [ "//build/config/win:windowed" ]
   configs -= [ "//build/config/win:console" ]
 
@@ -67,21 +82,25 @@ shared_library("chrome_elf") {
   }
 }
 
+# For code that isn't Chrome-the browser, like test binaries, these stubs stand
+# in for chrome_elf.;
+static_library("test_stubs") {
+  testonly = true
+
+  sources = [
+    "chrome_elf_main.h",
+    "chrome_elf_test_stubs.cc",
+  ]
+
+  deps = [
+    "//base",
+    "//chrome/common:constants",
+  ]
+}
+
 ##------------------------------------------------------------------------------
 ## source sets
 ##------------------------------------------------------------------------------
-
-source_set("security") {
-  sources = [
-    "chrome_elf_security.cc",
-    "chrome_elf_security.h",
-  ]
-  deps = [
-    ":constants",
-    ":nt_registry",
-    "//chrome/install_static:install_static_util",
-  ]
-}
 
 source_set("constants") {
   sources = [
@@ -97,6 +116,36 @@ source_set("dll_hash") {
   sources = [
     "dll_hash/dll_hash.cc",
     "dll_hash/dll_hash.h",
+  ]
+}
+
+source_set("security") {
+  sources = [
+    "chrome_elf_security.cc",
+    "chrome_elf_security.h",
+  ]
+  deps = [
+    ":constants",
+    ":nt_registry",
+    "//chrome/install_static:install_static_util",
+  ]
+}
+
+source_set("sha1") {
+  sources = [
+    "sha1/sha1.cc",
+    "sha1/sha1.h",
+  ]
+}
+
+# This source_set defines third-party-related structures and APIs used from
+# outside chrome_elf.dll.  The APIs are exported from chrome_elf (add a
+# data_dep on //chrome_elf:chrome_elf), which will always be loaded before
+# chrome.dll.
+source_set("third_party_packed_list_format") {
+  sources = [
+    "third_party_dlls/packed_list_format.cc",
+    "third_party_dlls/packed_list_format.h",
   ]
 }
 
@@ -145,15 +194,14 @@ static_library("crash") {
   ]
   deps = [
     ":hook_util",
-    "//base:base",  # This needs to go.  DEP of app, crash_keys, client.
+    "//base",  # This needs to go.  DEP of app, crash_keys, client.
     "//base:base_static",  # pe_image
     "//chrome/install_static:install_static_util",
-    "//components/crash/content/app:app",
+    "//components/crash/content/app",
     "//components/crash/core/common",  # crash_keys
     "//components/version_info:channel",
     "//content/public/common:result_codes",
-    "//gpu/config:crash_keys",
-    "//third_party/crashpad/crashpad/client:client",  # DumpWithoutCrash
+    "//third_party/crashpad/crashpad/client",  # DumpWithoutCrash
   ]
 }
 
@@ -189,6 +237,26 @@ static_library("nt_registry") {
   libs = [ "kernel32.lib" ]
 }
 
+static_library("third_party_dlls") {
+  visibility = [ ":*" ]  # Only targets in this file can depend on this.
+  sources = [
+    "third_party_dlls/imes.cc",
+    "third_party_dlls/imes.h",
+    "third_party_dlls/logs.cc",
+    "third_party_dlls/logs.h",
+    "third_party_dlls/main.cc",
+    "third_party_dlls/main.h",
+    "third_party_dlls/packed_list_file.cc",
+    "third_party_dlls/packed_list_file.h",
+  ]
+  deps = [
+    ":nt_registry",
+    ":sha1",
+    ":third_party_packed_list_format",
+    "//chrome/install_static:install_static_util",
+  ]
+}
+
 ##------------------------------------------------------------------------------
 ## tests
 ##------------------------------------------------------------------------------
@@ -198,10 +266,13 @@ test("chrome_elf_unittests") {
   sources = [
     "blacklist/test/blacklist_test.cc",
     "chrome_elf_util_unittest.cc",
-    "elf_imports_unittest.cc",
     "hook_util/test/hook_util_test.cc",
     "nt_registry/nt_registry_unittest.cc",
     "run_all_unittests.cc",
+    "sha1/sha1_unittest.cc",
+    "third_party_dlls/imes_unittest.cc",
+    "third_party_dlls/logs_unittest.cc",
+    "third_party_dlls/packed_list_file_unittest.cc",
   ]
   include_dirs = [ "$target_gen_dir" ]
   deps = [
@@ -213,13 +284,38 @@ test("chrome_elf_unittests") {
     ":hook_util_test_dll",
     ":nt_registry",
     ":security",
+    ":sha1",
+    ":third_party_dlls",
+    ":third_party_packed_list_format",
     "//base",
     "//base/test:test_support",
-    "//chrome",
     "//chrome/common:version_header",
     "//chrome/install_static:install_static_util",
     "//chrome/install_static/test:test_support",
+    "//components/crash/content/app:test_support",
     "//sandbox",
+    "//testing/gtest",
+  ]
+  data_deps = [
+    ":blacklist_test_dll_1",
+    ":blacklist_test_dll_2",
+    ":blacklist_test_dll_3",
+    ":chrome_elf",
+  ]
+}
+
+test("chrome_elf_import_unittests") {
+  output_name = "chrome_elf_import_unittests"
+  sources = [
+    "elf_imports_unittest.cc",
+  ]
+  include_dirs = [ "$target_gen_dir" ]
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//chrome",
+    "//chrome/install_static:install_static_util",
+    "//chrome/install_static/test:test_support",
     "//testing/gtest",
   ]
 
@@ -231,9 +327,6 @@ test("chrome_elf_unittests") {
     "$root_out_dir/chrome.exe",
   ]
   data_deps = [
-    ":blacklist_test_dll_1",
-    ":blacklist_test_dll_2",
-    ":blacklist_test_dll_3",
     ":chrome_elf",
   ]
 
@@ -262,6 +355,7 @@ shared_library("blacklist_test_main_dll") {
     "//base",
     "//build/config:exe_and_shlib_deps",
     "//chrome/install_static:install_static_util",
+    "//components/crash/content/app:test_support",
   ]
 }
 

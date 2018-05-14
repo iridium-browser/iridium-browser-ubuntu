@@ -4,28 +4,36 @@
 
 #include "chrome/renderer/sandbox_status_extension_android.h"
 
+#include <utility>
+
 #include "base/android/build_info.h"
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/memory/ptr_util.h"
 #include "base/task_scheduler/post_task.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/chrome_object_extensions_utils.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/seccomp_sandbox_status_android.h"
+#include "content/public/renderer/v8_value_converter.h"
 #include "gin/arguments.h"
 #include "gin/function_template.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
-#include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "v8/include/v8.h"
 
 SandboxStatusExtension::SandboxStatusExtension(content::RenderFrame* frame)
-    : content::RenderFrameObserver(frame) {}
+    : content::RenderFrameObserver(frame), binding_(this) {
+  // Don't do anything else for subframes.
+  if (!frame->IsMainFrame())
+    return;
+  frame->GetAssociatedInterfaceRegistry()->AddInterface(
+      base::Bind(&SandboxStatusExtension::OnSandboxStatusExtensionRequest,
+                 base::RetainedRef(this)));
+}
 
 SandboxStatusExtension::~SandboxStatusExtension() {}
 
@@ -40,24 +48,17 @@ void SandboxStatusExtension::OnDestruct() {
   Release();
 }
 
-bool SandboxStatusExtension::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-
-  IPC_BEGIN_MESSAGE_MAP(SandboxStatusExtension, message)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_AddSandboxStatusExtension,
-                        OnAddSandboxStatusExtension)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-
-  return handled;
-}
-
 void SandboxStatusExtension::DidClearWindowObject() {
   Install();
 }
 
-void SandboxStatusExtension::OnAddSandboxStatusExtension() {
+void SandboxStatusExtension::AddSandboxStatusExtension() {
   should_install_ = true;
+}
+
+void SandboxStatusExtension::OnSandboxStatusExtensionRequest(
+    chrome::mojom::SandboxStatusExtensionAssociatedRequest request) {
+  binding_.Bind(std::move(request));
 }
 
 void SandboxStatusExtension::Install() {
@@ -102,7 +103,7 @@ void SandboxStatusExtension::GetSandboxStatus(gin::Arguments* args) {
   }
 
   auto global_callback =
-      base::MakeUnique<v8::Global<v8::Function>>(args->isolate(), callback);
+      std::make_unique<v8::Global<v8::Function>>(args->isolate(), callback);
 
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE, {base::MayBlock()},
@@ -120,7 +121,7 @@ std::unique_ptr<base::Value> SandboxStatusExtension::ReadSandboxStatus() {
   path = base::FilePath(FILE_PATH_LITERAL("/proc/self/status"));
   base::ReadFileToString(path, &proc_status);
 
-  auto status = base::MakeUnique<base::DictionaryValue>();
+  auto status = std::make_unique<base::DictionaryValue>();
   status->SetInteger("uid", getuid());
   status->SetInteger("pid", getpid());
   status->SetString("secontext", secontext);

@@ -11,7 +11,7 @@
 
 #include "device/bluetooth/bluetooth_remote_gatt_service.h"
 #include "device/bluetooth/bluetooth_uuid.h"
-#include "device/bluetooth/public/interfaces/test/fake_bluetooth.mojom.h"
+#include "device/bluetooth/public/mojom/test/fake_bluetooth.mojom.h"
 #include "device/bluetooth/test/fake_remote_gatt_characteristic.h"
 
 namespace device {
@@ -24,6 +24,8 @@ namespace bluetooth {
 
 // Implements device::BluetoothRemoteGattService. Meant to be used by
 // FakePeripheral to keep track of the service's state and attributes.
+//
+// Not intended for direct use by clients.  See README.md.
 class FakeRemoteGattService : public device::BluetoothRemoteGattService {
  public:
   FakeRemoteGattService(const std::string& service_id,
@@ -32,11 +34,17 @@ class FakeRemoteGattService : public device::BluetoothRemoteGattService {
                         device::BluetoothDevice* device);
   ~FakeRemoteGattService() override;
 
+  // Returns true if there are no pending responses for any characterstics.
+  bool AllResponsesConsumed();
+
   // Adds a fake characteristic with |characteristic_uuid| and |properties|
   // to this service. Returns the characteristic's Id.
   std::string AddFakeCharacteristic(
       const device::BluetoothUUID& characteristic_uuid,
       mojom::CharacteristicPropertiesPtr properties);
+
+  // Removes a fake characteristic with |identifier| from this service.
+  bool RemoveFakeCharacteristic(const std::string& identifier);
 
   // device::BluetoothGattService overrides:
   std::string GetIdentifier() const override;

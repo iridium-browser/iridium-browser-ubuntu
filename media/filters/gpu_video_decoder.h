@@ -8,7 +8,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <list>
 #include <map>
 #include <set>
@@ -51,6 +50,7 @@ class MEDIA_EXPORT GpuVideoDecoder
  public:
   GpuVideoDecoder(GpuVideoAcceleratorFactories* factories,
                   const RequestOverlayInfoCB& request_overlay_info_cb,
+                  const gfx::ColorSpace& target_color_space,
                   MediaLog* media_log);
   ~GpuVideoDecoder() override;
 
@@ -153,9 +153,12 @@ class MEDIA_EXPORT GpuVideoDecoder
 
   GpuVideoAcceleratorFactories* factories_;
 
-  // For requesting a suface to render to. If this is null the VDA will return
-  // normal video frames and not render them to a surface.
+  // For requesting overlay info updates. If this is null, overlays are not
+  // supported.
   RequestOverlayInfoCB request_overlay_info_cb_;
+  bool overlay_info_requested_;
+
+  gfx::ColorSpace target_color_space_;
 
   MediaLog* media_log_;
 

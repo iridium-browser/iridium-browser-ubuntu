@@ -4,7 +4,7 @@
 
 #include "core/html/track/VideoTrackList.h"
 
-#include "core/html/HTMLMediaElement.h"
+#include "core/html/media/HTMLMediaElement.h"
 #include "core/html/track/VideoTrack.h"
 
 namespace blink {
@@ -13,7 +13,7 @@ VideoTrackList* VideoTrackList::Create(HTMLMediaElement& media_element) {
   return new VideoTrackList(media_element);
 }
 
-VideoTrackList::~VideoTrackList() {}
+VideoTrackList::~VideoTrackList() = default;
 
 VideoTrackList::VideoTrackList(HTMLMediaElement& media_element)
     : TrackListBase<VideoTrack>(&media_element) {}

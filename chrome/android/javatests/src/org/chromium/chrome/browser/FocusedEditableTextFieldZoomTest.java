@@ -21,7 +21,7 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content.browser.test.util.Coordinates;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
@@ -32,8 +32,9 @@ import org.chromium.net.test.EmbeddedTestServer;
  * Tests for zooming into & out of a selected & deselected editable text field.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({
+        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+})
 public class FocusedEditableTextFieldZoomTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -45,13 +46,15 @@ public class FocusedEditableTextFieldZoomTest {
     private static final float INITIAL_SCALE = 0.5f;
 
     private EmbeddedTestServer mTestServer;
+    private Coordinates mCoordinates;
 
     @Before
     public void setUp() throws Exception {
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mActivityTestRule.startMainActivityWithURL(
                 mTestServer.getURL("/chrome/test/data/android/focused_editable_zoom.html"));
+        mCoordinates = Coordinates.createFor(
+                mActivityTestRule.getActivity().getActivityTab().getWebContents());
         waitForInitialZoom();
     }
 
@@ -60,27 +63,24 @@ public class FocusedEditableTextFieldZoomTest {
         mTestServer.stopAndDestroyServer();
     }
 
-    void waitForInitialZoom() {
+    private void waitForInitialZoom() {
         // The zoom level sometimes changes immediately after the page loads which makes grabbing
         // the initial value problematic. We solve this by explicitly specifying the initial zoom
         // level via the viewport tag and waiting for the zoom level to reach that value before we
         // proceed with the rest of the test.
-        final ContentViewCore contentViewCore =
-                mActivityTestRule.getActivity().getActivityTab().getContentViewCore();
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return contentViewCore.getScale() - INITIAL_SCALE < FLOAT_DELTA;
+                return mCoordinates.getPageScaleFactor() - INITIAL_SCALE < FLOAT_DELTA;
             }
         }, TEST_TIMEOUT, DEFAULT_POLLING_INTERVAL);
     }
 
-    private void waitForZoomIn(final ContentViewCore contentViewCore,
-            final float initialZoomLevel) {
+    private void waitForZoomIn(final float initialZoomLevel) {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return contentViewCore.getScale() > initialZoomLevel;
+                return mCoordinates.getPageScaleFactor() > initialZoomLevel;
             }
         }, TEST_TIMEOUT, DEFAULT_POLLING_INTERVAL);
     }
@@ -94,13 +94,12 @@ public class FocusedEditableTextFieldZoomTest {
     public void testZoomInToSelected() throws Throwable {
         // This should focus the text field and initiate a zoom in.
         Tab tab = mActivityTestRule.getActivity().getActivityTab();
-        final ContentViewCore contentViewCore = tab.getContentViewCore();
-        float initialZoomLevel = contentViewCore.getScale();
+        float initialZoomLevel = mCoordinates.getPageScaleFactor();
 
-        DOMUtils.clickNode(contentViewCore, TEXTFIELD_DOM_ID);
+        DOMUtils.clickNode(tab.getContentViewCore(), TEXTFIELD_DOM_ID);
 
         // Wait for the zoom in to complete.
-        waitForZoomIn(contentViewCore, initialZoomLevel);
+        waitForZoomIn(initialZoomLevel);
     }
 
     /*
@@ -111,14 +110,13 @@ public class FocusedEditableTextFieldZoomTest {
     @Feature({"TabContents"})
     public void testZoomOutOfSelectedIfOnlyBackPressed() throws Throwable {
         final Tab tab = mActivityTestRule.getActivity().getActivityTab();
-        final ContentViewCore contentViewCore = tab.getContentViewCore();
-        final float initialZoomLevel = contentViewCore.getScale();
+        final float initialZoomLevel = mCoordinates.getPageScaleFactor();
 
         // This should focus the text field and initiate a zoom in.
-        DOMUtils.clickNode(contentViewCore, TEXTFIELD_DOM_ID);
+        DOMUtils.clickNode(tab.getContentViewCore(), TEXTFIELD_DOM_ID);
 
         // Wait for the zoom in to complete.
-        waitForZoomIn(contentViewCore, initialZoomLevel);
+        waitForZoomIn(initialZoomLevel);
 
         KeyUtils.singleKeyEventView(
                 InstrumentationRegistry.getInstrumentation(), tab.getView(), KeyEvent.KEYCODE_BACK);
@@ -127,7 +125,7 @@ public class FocusedEditableTextFieldZoomTest {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return (contentViewCore.getScale() - initialZoomLevel) < FLOAT_DELTA;
+                return (mCoordinates.getPageScaleFactor() - initialZoomLevel) < FLOAT_DELTA;
             }
         }, TEST_TIMEOUT, DEFAULT_POLLING_INTERVAL);
     }

@@ -82,17 +82,14 @@ public class ChildConnectionAllocator {
      * AndroidManifest.xml.
      */
     public static ChildConnectionAllocator create(Context context, Handler launcherHandler,
-            String packageName, String serviceClassNameManifestKey,
-            String numChildServicesManifestKey, boolean bindToCaller, boolean bindAsExternalService,
-            boolean useStrongBinding) {
-        String serviceClassName = null;
+            String packageName, String serviceClassName, String numChildServicesManifestKey,
+            boolean bindToCaller, boolean bindAsExternalService, boolean useStrongBinding) {
         int numServices = -1;
         PackageManager packageManager = context.getPackageManager();
         try {
             ApplicationInfo appInfo =
                     packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA);
             if (appInfo.metaData != null) {
-                serviceClassName = appInfo.metaData.getString(serviceClassNameManifestKey);
                 numServices = appInfo.metaData.getInt(numChildServicesManifestKey, -1);
             }
         } catch (PackageManager.NameNotFoundException e) {
@@ -198,16 +195,17 @@ public class ChildConnectionAllocator {
                     }
 
                     @Override
-                    public void onChildStartFailed() {
+                    public void onChildStartFailed(final ChildProcessConnection connection) {
                         assert isRunningOnLauncherThread();
                         if (serviceCallback != null) {
                             mLauncherHandler.post(new Runnable() {
                                 @Override
                                 public void run() {
-                                    serviceCallback.onChildStartFailed();
+                                    serviceCallback.onChildStartFailed(connection);
                                 }
                             });
                         }
+                        freeConnectionWithDelay(connection);
                     }
 
                     @Override
@@ -221,7 +219,10 @@ public class ChildConnectionAllocator {
                                 }
                             });
                         }
+                        freeConnectionWithDelay(connection);
+                    }
 
+                    private void freeConnectionWithDelay(final ChildProcessConnection connection) {
                         // Freeing a service should be delayed. This is so that we avoid immediately
                         // reusing the freed service (see http://crbug.com/164069): the framework
                         // might keep a service process alive when it's been unbound for a short
@@ -245,7 +246,7 @@ public class ChildConnectionAllocator {
             listener.onConnectionAllocated(this, connection);
         }
 
-        connection.start(mUseStrongBinding, serviceCallbackWrapper, false /* retryOnTimeout */);
+        connection.start(mUseStrongBinding, serviceCallbackWrapper);
         Log.d(TAG, "Allocator allocated and bound a connection, name: %s, slot: %d",
                 mServiceClassName, slot);
         return connection;

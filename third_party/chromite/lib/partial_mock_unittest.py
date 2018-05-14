@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -99,6 +100,24 @@ class ListContainsTest(cros_test_lib.TestCase):
   def testUnicode(self):
     """Test ListContains with unicode and non-unicode strings."""
     self.assertTrue(partial_mock.ListContains(['foo'], [u'foo']))
+
+
+class HasStringTest(cros_test_lib.TestCase):
+  """Unittests for HasString."""
+  def testEqual(self):
+    self.assertTrue(
+        partial_mock.HasString('substring') ==
+        'sentence with substring...')
+    self.assertTrue(
+        partial_mock.HasString('tr') == 'it should be true')
+    self.assertTrue(
+        partial_mock.HasString('') == 'match any string')
+
+  def testUneuqal(self):
+    self.assertFalse(
+        partial_mock.HasString('not there') == 'typo no there')
+    self.assertFalse(
+        partial_mock.HasString('Uppercase matters') == 'uppercase matters')
 
 
 class MockedCallResultsTest(cros_test_lib.TestCase):
@@ -207,3 +226,22 @@ class MockedCallResultsTest(cros_test_lib.TestCase):
         2, self.mr.LookupResult(self.ARGS, hook_args=self.LIST_ARGS,
                                 hook_kwargs=self.KWARGS))
     self.assertEquals(3, self.mr.LookupResult(('test',)))
+
+  class _DummyException(Exception):
+    """A do-nothing exception class for test."""
+
+  def testExceptionInstanceRaise(self):
+    """Verify that exception is raised."""
+    expected_msg = 'expected exception'
+    self.mr.AddResultForParams(
+        (partial_mock.In('test'),), 3,
+        side_effect=self._DummyException(expected_msg))
+    with self.assertRaisesRegexp(self._DummyException, expected_msg):
+      self.mr.LookupResult(('test',))
+
+  def testExceptionClassRaise(self):
+    """Verify that exception is raised."""
+    self.mr.AddResultForParams((partial_mock.In('test'),), 3,
+                               side_effect=self._DummyException)
+    with self.assertRaises(self._DummyException):
+      self.mr.LookupResult(('test',))

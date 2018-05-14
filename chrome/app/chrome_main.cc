@@ -9,8 +9,8 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_main_delegate.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/features.h"
 #include "content/public/app/content_main.h"
 #include "content/public/common/content_switches.h"
 #include "headless/public/headless_shell.h"
@@ -18,16 +18,6 @@
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
 #	include "net/url_request/url_request.h"
 #	include "iridium/trknotify.h"
-#endif
-
-#if BUILDFLAG(ENABLE_OOP_HEAP_PROFILING)
-#include "chrome/browser/profiling_host/profiling_process_host.h"
-#include "chrome/common/profiling/memlog_sender.h"
-#include "chrome/profiling/profiling_main.h"
-#endif
-
-#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
-#include "services/service_manager/runner/common/client_util.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -125,37 +115,6 @@ int ChromeMain(int argc, const char** argv) {
   }
 #endif  // defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_WIN)
 
-#if BUILDFLAG(ENABLE_OOP_HEAP_PROFILING)
-#if !defined(OS_WIN) || defined(COMPONENT_BUILD) || \
-    defined(CHROME_MULTIPLE_DLL_BROWSER)
-  // The profiling server is only compiled into the browser process. On Windows,
-  // non-component builds, browser code is only used for
-  // CHROME_MULTIPLE_DLL_BROWSER.
-  if (command_line->HasSwitch(switches::kMemlog))
-    profiling::ProfilingProcessHost::EnsureStarted();
-#endif
-#if !defined(OS_WIN) || defined(COMPONENT_BUILD) || \
-    defined(CHROME_MULTIPLE_DLL_CHILD)
-  // The profiling process is only compiled into the child process. On Windows,
-  // non-component builds, child code is only used for
-  // CHROME_MULTIPLE_DLL_CHILD.
-  //
-  // This is a child process type implemented at the
-  // Chrome layer rather than the content layer (like the other child procs.).
-  if (command_line->GetSwitchValueASCII(switches::kProcessType) ==
-      switches::kProfiling)
-    return profiling::ProfilingMain(*command_line);
-#endif
-#endif  // ENABLE_OOP_HEAP_PROFILING
-
-#if defined(OS_CHROMEOS) && BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
-  if (service_manager::ServiceManagerIsRemote())
-    params.env_mode = aura::Env::Mode::MUS;
-#endif  // BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
-
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
-  net::trace_urlreq_cb = &trace_url_request;
-#endif
   int rv = content::ContentMain(params);
 
   return rv;

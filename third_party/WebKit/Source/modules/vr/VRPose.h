@@ -6,14 +6,14 @@
 #define VRPose_h
 
 #include "core/typed_arrays/DOMTypedArray.h"
-#include "device/vr/vr_service.mojom-blink.h"
+#include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
 
 namespace blink {
 
-class VRPose final : public GarbageCollected<VRPose>, public ScriptWrappable {
+class VRPose final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -28,7 +28,7 @@ class VRPose final : public GarbageCollected<VRPose>, public ScriptWrappable {
 
   void SetPose(const device::mojom::blink::VRPosePtr&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   VRPose();

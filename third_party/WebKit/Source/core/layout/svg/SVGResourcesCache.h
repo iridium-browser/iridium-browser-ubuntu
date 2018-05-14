@@ -21,49 +21,50 @@
 #define SVGResourcesCache_h
 
 #include <memory>
+#include "base/macros.h"
 #include "core/style/StyleDifference.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
 class LayoutObject;
 class ComputedStyle;
-class LayoutSVGResourceContainer;
 class SVGResources;
 
 class SVGResourcesCache {
-  WTF_MAKE_NONCOPYABLE(SVGResourcesCache);
   USING_FAST_MALLOC(SVGResourcesCache);
 
  public:
   SVGResourcesCache();
   ~SVGResourcesCache();
 
-  static SVGResources* CachedResourcesForLayoutObject(const LayoutObject*);
+  static SVGResources* CachedResourcesForLayoutObject(const LayoutObject&);
 
   // Called from all SVG layoutObjects addChild() methods.
-  static void ClientWasAddedToTree(LayoutObject*,
+  static void ClientWasAddedToTree(LayoutObject&,
                                    const ComputedStyle& new_style);
 
   // Called from all SVG layoutObjects removeChild() methods.
-  static void ClientWillBeRemovedFromTree(LayoutObject*);
+  static void ClientWillBeRemovedFromTree(LayoutObject&);
 
   // Called from all SVG layoutObjects destroy() methods - except for
   // LayoutSVGResourceContainer.
-  static void ClientDestroyed(LayoutObject*);
+  static void ClientDestroyed(LayoutObject&);
 
   // Called from all SVG layoutObjects layout() methods.
-  static void ClientLayoutChanged(LayoutObject*);
+  static void ClientLayoutChanged(LayoutObject&);
 
   // Called from all SVG layoutObjects styleDidChange() methods.
-  static void ClientStyleChanged(LayoutObject*,
+  static void ClientStyleChanged(LayoutObject&,
                                  StyleDifference,
                                  const ComputedStyle& new_style);
 
+  // Called when the target element of a resource referenced by the
+  // LayoutObject may have changed.
+  static void ResourceReferenceChanged(LayoutObject&);
+
   class TemporaryStyleScope {
-    WTF_MAKE_NONCOPYABLE(TemporaryStyleScope);
     STACK_ALLOCATED();
 
    public:
@@ -78,14 +79,16 @@ class SVGResourcesCache {
     LayoutObject& layout_object_;
     const ComputedStyle& original_style_;
     const bool styles_are_equal_;
+    DISALLOW_COPY_AND_ASSIGN(TemporaryStyleScope);
   };
 
  private:
-  void AddResourcesFromLayoutObject(LayoutObject*, const ComputedStyle&);
-  void RemoveResourcesFromLayoutObject(LayoutObject*);
+  void AddResourcesFromLayoutObject(LayoutObject&, const ComputedStyle&);
+  void RemoveResourcesFromLayoutObject(LayoutObject&);
 
   typedef HashMap<const LayoutObject*, std::unique_ptr<SVGResources>> CacheMap;
   CacheMap cache_;
+  DISALLOW_COPY_AND_ASSIGN(SVGResourcesCache);
 };
 
 }  // namespace blink

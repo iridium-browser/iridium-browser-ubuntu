@@ -16,7 +16,7 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/test/views_test_base.h"
 
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
 #include "ui/aura/window.h"
 #endif
 
@@ -41,11 +41,10 @@ class TestIconLabelBubbleView : public IconLabelBubbleView {
   };
 
   explicit TestIconLabelBubbleView(const gfx::FontList& font_list)
-      : IconLabelBubbleView(font_list, false),
-        value_(0),
-        is_bubble_showing_(false) {
+      : IconLabelBubbleView(font_list), value_(0), is_bubble_showing_(false) {
     GetImageView()->SetImageSize(gfx::Size(kImageSize, kImageSize));
     SetLabel(base::ASCIIToUTF16("Label"));
+    separator_view()->set_disable_animation_for_test(true);
   }
 
   void SetCurrentAnimationValue(int value) {
@@ -82,9 +81,10 @@ class TestIconLabelBubbleView : public IconLabelBubbleView {
 
   bool ShouldShowLabel() const override {
     return !IsShrinking() ||
-           (width() > (image()->GetPreferredSize().width() +
-                       2 * LocationBarView::kIconInteriorPadding +
-                       2 * GetLayoutConstant(LOCATION_BAR_ELEMENT_PADDING)));
+           (width() >
+            (image()->GetPreferredSize().width() +
+             2 * GetLayoutConstant(LOCATION_BAR_ICON_INTERIOR_PADDING) +
+             2 * GetLayoutConstant(LOCATION_BAR_ELEMENT_PADDING)));
   }
 
   double WidthMultiplier() const override {
@@ -327,6 +327,32 @@ TEST_F(IconLabelBubbleViewTest, MouseInkDropState) {
             ink_drop()->GetTargetInkDropState());
 }
 
+// Tests the separator opacity. The separator should disappear when there's
+// an ink drop. Otherwise, it should be visible.
+TEST_F(IconLabelBubbleViewTest, SeparatorOpacity) {
+  views::View* separator_view = view()->separator_view();
+  separator_view->SetPaintToLayer();
+  view()->SetLabel(base::ASCIIToUTF16("x"));
+  EXPECT_EQ(1.0f, separator_view->layer()->opacity());
+
+  AttachInkDrop();
+  generator()->PressLeftButton();
+  view()->InkDropAnimationStarted();
+  EXPECT_EQ(views::InkDropState::ACTION_PENDING,
+            ink_drop()->GetTargetInkDropState());
+  EXPECT_EQ(0.0f, separator_view->layer()->opacity());
+
+  generator()->ReleaseLeftButton();
+  EXPECT_EQ(views::InkDropState::ACTIVATED,
+            ink_drop()->GetTargetInkDropState());
+  EXPECT_EQ(0.0f, separator_view->layer()->opacity());
+
+  view()->HideBubble();
+  view()->InkDropAnimationStarted();
+  EXPECT_EQ(views::InkDropState::HIDDEN, ink_drop()->GetTargetInkDropState());
+  EXPECT_EQ(1.0f, separator_view->layer()->opacity());
+}
+
 #if !defined(OS_MACOSX)
 TEST_F(IconLabelBubbleViewTest, GestureInkDropState) {
   AttachInkDrop();
@@ -347,7 +373,7 @@ TEST_F(IconLabelBubbleViewTest, GestureInkDropState) {
 }
 #endif
 
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
 // Verifies IconLabelBubbleView::CalculatePreferredSize() doesn't crash when
 // there is a widget but no compositor.
 using IconLabelBubbleViewCrashTest = views::ViewsTestBase;

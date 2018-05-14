@@ -67,11 +67,12 @@ BackgroundPrintingManager::~BackgroundPrintingManager() {
 void BackgroundPrintingManager::OwnPrintPreviewDialog(
     WebContents* preview_dialog) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(PrintPreviewDialogController::IsPrintPreviewDialog(preview_dialog));
+  DCHECK(PrintPreviewDialogController::IsPrintPreviewURL(
+      preview_dialog->GetURL()));
   CHECK(!HasPrintPreviewDialog(preview_dialog));
 
   printing_contents_map_[preview_dialog] =
-      base::MakeUnique<Observer>(this, preview_dialog);
+      std::make_unique<Observer>(this, preview_dialog);
 
   // Watch for print jobs finishing. Everything else is watched for by the
   // Observer. TODO(avi, cait): finish the job of removing this last

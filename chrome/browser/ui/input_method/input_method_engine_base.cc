@@ -4,13 +4,9 @@
 
 #include "chrome/browser/ui/input_method/input_method_engine_base.h"
 
-#include <memory>
-
-#undef FocusIn
-#undef FocusOut
-#undef RootWindow
 #include <algorithm>
 #include <map>
+#include <memory>
 
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -210,26 +206,26 @@ bool InputMethodEngineBase::SetComposition(
   // TODO: Add support for displaying selected text in the composition string.
   for (std::vector<SegmentInfo>::const_iterator segment = segments.begin();
        segment != segments.end(); ++segment) {
-    ui::CompositionUnderline underline;
+    ui::ImeTextSpan ime_text_span;
 
     switch (segment->style) {
       case SEGMENT_STYLE_UNDERLINE:
-        underline.color = SK_ColorBLACK;
+        ime_text_span.underline_color = SK_ColorBLACK;
         break;
       case SEGMENT_STYLE_DOUBLE_UNDERLINE:
-        underline.color = SK_ColorBLACK;
-        underline.thick = true;
+        ime_text_span.underline_color = SK_ColorBLACK;
+        ime_text_span.thick = true;
         break;
       case SEGMENT_STYLE_NO_UNDERLINE:
-        underline.color = SK_ColorTRANSPARENT;
+        ime_text_span.underline_color = SK_ColorTRANSPARENT;
         break;
       default:
         continue;
     }
 
-    underline.start_offset = segment->start;
-    underline.end_offset = segment->end;
-    composition_text_->underlines.push_back(underline);
+    ime_text_span.start_offset = segment->start;
+    ime_text_span.end_offset = segment->end;
+    composition_text_->ime_text_spans.push_back(ime_text_span);
   }
 
   // TODO(nona): Makes focus out mode configuable, if necessary.
@@ -335,21 +331,18 @@ void InputMethodEngineBase::Enable(const std::string& component_id) {
 }
 
 void InputMethodEngineBase::Disable() {
+  std::string last_component_id{active_component_id_};
   active_component_id_.clear();
   if (ui::IMEBridge::Get()->GetInputContextHandler())
     ui::IMEBridge::Get()->GetInputContextHandler()->CommitText(
         base::UTF16ToUTF8(composition_text_->text));
   composition_text_.reset(new ui::CompositionText());
-  observer_->OnDeactivated(active_component_id_);
+  observer_->OnDeactivated(last_component_id);
 }
 
 void InputMethodEngineBase::Reset() {
   composition_text_.reset(new ui::CompositionText());
   observer_->OnReset(active_component_id_);
-}
-
-void InputMethodEngineBase::MaybeSwitchEngine() {
-  observer_->OnRequestEngineSwitch();
 }
 
 bool InputMethodEngineBase::IsInterestedInKeyEvent() const {
@@ -412,7 +405,7 @@ void InputMethodEngineBase::KeyEventHandled(const std::string& extension_id,
       input_context->UpdateCompositionText(
           composition_, composition_.selection.start(), true);
     }
-    composition_.Clear();
+    composition_ = ui::CompositionText();
     composition_changed_ = false;
   }
 

@@ -11,9 +11,9 @@
 #include "base/strings/string_util.h"
 #include "media/base/decrypt_config.h"
 #include "media/base/stream_parser_buffer.h"
-#include "media/filters/h264_parser.h"
 #include "media/formats/mp4/avc.h"
 #include "media/formats/mp4/box_definitions.h"
+#include "media/video/h264_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace media {
@@ -448,7 +448,7 @@ TEST_F(AVCConversionTest, InsertParamSetsAnnexB) {
 
     StringToAnnexB(test_cases[i].input, &buf, &subsamples);
 
-    EXPECT_TRUE(AVC::InsertParamSetsAnnexB(avc_config, &buf, &subsamples, true))
+    EXPECT_TRUE(AVC::InsertParamSetsAnnexB(avc_config, &buf, &subsamples))
         << "'" << test_cases[i].input << "' insert failed.";
     EXPECT_TRUE(AVC::IsValidAnnexB(buf, subsamples))
         << "'" << test_cases[i].input << "' created invalid AnnexB.";

@@ -2,82 +2,289 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import copy
 import unittest
 
 import mock
 
+from dashboard.common import namespaced_stored_object
+from dashboard.common import testing_common
 from dashboard.pinpoint.models.quest import run_test
 
 
-_SWARMING_TASK_EXTRA_ARGS = [
-    'test_suite', '--story-filter', 'test',
+_MIN_TELEMETRY_ARGUMENTS = [
+    'speedometer', '--pageset-repeat', '1', '--browser', 'release',
+    '-v', '--upload-results', '--output-format', 'histograms',
+    '--results-label', '',
+    '--isolated-script-test-output', '${ISOLATED_OUTDIR}/output.json',
+    '--isolated-script-test-chartjson-output',
+    '${ISOLATED_OUTDIR}/chartjson-output.json',
+]
+
+
+_ALL_TELEMETRY_ARGUMENTS = [
+    'speedometer', '--story-filter', 'http://www.fifa.com/',
+    '--pageset-repeat', '1', '--browser', 'release',
+    '--custom-arg', 'custom value',
+    '-v', '--upload-results', '--output-format', 'histograms',
+    '--results-label', '',
+    '--isolated-script-test-output', '${ISOLATED_OUTDIR}/output.json',
+    '--isolated-script-test-chartjson-output',
+    '${ISOLATED_OUTDIR}/chartjson-output.json',
+]
+
+
+_STARTUP_BENCHMARK_ARGUMENTS = [
+    'start_with_url.warm.startup_pages',
+    '--pageset-repeat', '2', '--browser', 'release',
+    '-v', '--upload-results', '--output-format', 'histograms',
+    '--results-label', '',
+    '--isolated-script-test-output', '${ISOLATED_OUTDIR}/output.json',
+    '--isolated-script-test-chartjson-output',
+    '${ISOLATED_OUTDIR}/chartjson-output.json',
+]
+
+
+_WEBVIEW_ARGUMENTS = [
+    'speedometer', '--pageset-repeat', '1', '--browser', 'android-webview',
+    '-v', '--upload-results', '--output-format', 'histograms',
+    '--results-label', '',
+    '--isolated-script-test-output', '${ISOLATED_OUTDIR}/output.json',
+    '--isolated-script-test-chartjson-output',
+    '${ISOLATED_OUTDIR}/chartjson-output.json',
+    '--webview-embedder-apk', '../../out/Release/apks/SystemWebViewShell.apk',
+]
+
+
+_MIN_GTEST_ARGUMENTS = [
+    '--gtest_repeat=1',
+    '--isolated-script-test-output', '${ISOLATED_OUTDIR}/output.json',
+    '--isolated-script-test-chartjson-output',
+    '${ISOLATED_OUTDIR}/chartjson-output.json',
+]
+
+
+_ALL_GTEST_ARGUMENTS = [
+    '--gtest_filter=test_name', '--gtest_repeat=1',
+    '--custom-arg', 'custom value',
+    '--isolated-script-test-output', '${ISOLATED_OUTDIR}/output.json',
+    '--isolated-script-test-chartjson-output',
+    '${ISOLATED_OUTDIR}/chartjson-output.json',
+]
+
+
+_SWARMING_EXTRA_ARGS = [
+    'benchmark', '--story-filter', 'story',
     '-v', '--upload-results',
     '--output-format=chartjson', '--browser=release',
+    '--results-label', '',
     '--isolated-script-test-output=${ISOLATED_OUTDIR}/output.json',
     '--isolated-script-test-chartjson-output='
     '${ISOLATED_OUTDIR}/chartjson-output.json',
 ]
 
+_SWARMING_DIMENSIONS = [
+    {"key": "cores", "value": "8"},
+    {"key": "gpu", "value": "1002:6821"},
+    {"key": "os", "value": "Mac-10.11"},
+]
 
-class _RunTestTest(unittest.TestCase):
 
-  def assertNewTaskHasDimensions(self, swarming_tasks_new):
+class _QuestTest(testing_common.TestCase):
+
+  def setUp(self):
+    super(_QuestTest, self).setUp()
+    self.SetCurrentUser('internal@chromium.org', is_admin=True)
+    namespaced_stored_object.Set('bot_configurations', {
+        'chromium-rel-mac11-pro': {
+            'browser': 'release',
+            'dimensions': {'key': 'value'},
+        },
+    })
+
+
+class TelemetryQuestTest(_QuestTest):
+
+  def testMissingArguments(self):
+    arguments = {
+        'configuration': 'chromium-rel-mac11-pro',
+        'target': 'telemetry_perf_tests',
+        # benchmark is missing.
+    }
+    with self.assertRaises(TypeError):
+      run_test.RunTest.FromDict(arguments)
+
+  def testUnknownConfiguration(self):
+    arguments = {
+        'configuration': 'unknown configuration',
+        'target': 'telemetry_perf_tests',
+        'benchmark': 'speedometer',
+    }
+    with self.assertRaises(KeyError):
+      run_test.RunTest.FromDict(arguments)
+
+  def testMinimumArguments(self):
+    arguments = {
+        'configuration': 'chromium-rel-mac11-pro',
+        'target': 'telemetry_perf_tests',
+        'benchmark': 'speedometer',
+    }
+
+    expected = run_test.RunTest({'key': 'value'}, _MIN_TELEMETRY_ARGUMENTS)
+    self.assertEqual(run_test.RunTest.FromDict(arguments), expected)
+
+  def testAllArguments(self):
+    arguments = {
+        'target': 'telemetry_perf_tests',
+        'dimensions': '{"key": "value"}',
+        'benchmark': 'speedometer',
+        'browser': 'release',
+        'story': 'http://www.fifa.com/',
+        'extra_test_args': '["--custom-arg", "custom value"]',
+    }
+
+    expected = run_test.RunTest(
+        {'key': 'value'}, _ALL_TELEMETRY_ARGUMENTS)
+    self.assertEqual(run_test.RunTest.FromDict(arguments), expected)
+
+  def testStringExtraTestArgs(self):
+    arguments = {
+        'target': 'telemetry_perf_tests',
+        'dimensions': '{"key": "value"}',
+        'benchmark': 'speedometer',
+        'browser': 'release',
+        'story': 'http://www.fifa.com/',
+        'extra_test_args': '--custom-arg "custom value"',
+    }
+
+    expected = run_test.RunTest(
+        {'key': 'value'}, _ALL_TELEMETRY_ARGUMENTS)
+    self.assertEqual(run_test.RunTest.FromDict(arguments), expected)
+
+  def testInvalidExtraTestArgs(self):
+    arguments = {
+        'configuration': 'chromium-rel-mac11-pro',
+        'target': 'telemetry_perf_tests',
+        'benchmark': 'speedometer',
+        'extra_test_args': '"this is a string"',
+    }
+
+    with self.assertRaises(TypeError):
+      run_test.RunTest.FromDict(arguments)
+
+  def testWithNoConfiguration(self):
+    arguments = {
+        'target': 'telemetry_perf_tests',
+        'dimensions': '{"key": "value"}',
+        'benchmark': 'speedometer',
+        'browser': 'release',
+    }
+
+    expected = run_test.RunTest({'key': 'value'}, _MIN_TELEMETRY_ARGUMENTS)
+    self.assertEqual(run_test.RunTest.FromDict(arguments), expected)
+
+  def testStartupBenchmarkRepeatCount(self):
+    arguments = {
+        'configuration': 'chromium-rel-mac11-pro',
+        'target': 'telemetry_perf_tests',
+        'benchmark': 'start_with_url.warm.startup_pages',
+    }
+
+    expected = run_test.RunTest({'key': 'value'}, _STARTUP_BENCHMARK_ARGUMENTS)
+    self.assertEqual(run_test.RunTest.FromDict(arguments), expected)
+
+  def testWebviewFlag(self):
+    arguments = {
+        'configuration': 'chromium-rel-mac11-pro',
+        'target': 'telemetry_perf_webview_tests',
+        'benchmark': 'speedometer',
+        'browser': 'android-webview',
+    }
+
+    expected = run_test.RunTest({'key': 'value'}, _WEBVIEW_ARGUMENTS)
+    self.assertEqual(run_test.RunTest.FromDict(arguments), expected)
+
+
+class GTestQuestTest(_QuestTest):
+
+  def testMinimumArguments(self):
+    arguments = {
+        'configuration': 'chromium-rel-mac11-pro',
+        'target': 'net_perftests',
+    }
+
+    expected = run_test.RunTest({'key': 'value'}, _MIN_GTEST_ARGUMENTS)
+    self.assertEqual(run_test.RunTest.FromDict(arguments), expected)
+
+  def testAllArguments(self):
+    arguments = {
+        'target': 'net_perftests',
+        'dimensions': '{"key": "value"}',
+        'test': 'test_name',
+        'extra_test_args': '["--custom-arg", "custom value"]',
+    }
+
+    expected = run_test.RunTest(
+        {'key': 'value'}, _ALL_GTEST_ARGUMENTS)
+    self.assertEqual(run_test.RunTest.FromDict(arguments), expected)
+
+
+class _RunTestExecutionTest(unittest.TestCase):
+
+  def assertNewTaskHasDimensions(self, swarming_tasks_new, label):
     body = {
-        'name': 'Pinpoint job on chromium-rel-mac11-pro',
+        'name': 'Pinpoint job',
         'user': 'Pinpoint',
         'priority': '100',
-        'expiration_secs': '600',
+        'expiration_secs': '86400',
         'properties': {
             'inputs_ref': {'isolated': 'input isolate hash'},
-            'extra_args': _SWARMING_TASK_EXTRA_ARGS,
-            'dimensions': [
-                {'key': 'pool', 'value': 'Chrome-perf-pinpoint'},
-                {"key": "cores", "value": "8"},
-                {"key": "gpu", "value": "1002:6821"},
-                {"key": "os", "value": "Mac-10.11"},
-            ],
-            'execution_timeout_secs': '3600',
-            'io_timeout_secs': '3600',
+            'extra_args': _CreateSwarmingArgs(label),
+            'dimensions': [{'key': 'pool', 'value': 'Chrome-perf-pinpoint'}] +
+                          _SWARMING_DIMENSIONS,
+            'execution_timeout_secs': '7200',
+            'io_timeout_secs': '1200',
         },
-        'tags': [
-            'configuration:chromium-rel-mac11-pro',
-        ],
     }
     swarming_tasks_new.assert_called_with(body)
 
-  def assertNewTaskHasBotId(self, swarming_tasks_new):
+  def assertNewTaskHasBotId(self, swarming_tasks_new, label):
     body = {
-        'name': 'Pinpoint job on chromium-rel-mac11-pro',
+        'name': 'Pinpoint job',
         'user': 'Pinpoint',
         'priority': '100',
-        'expiration_secs': '600',
+        'expiration_secs': '86400',
         'properties': {
             'inputs_ref': {'isolated': 'input isolate hash'},
-            'extra_args': _SWARMING_TASK_EXTRA_ARGS,
+            'extra_args': _CreateSwarmingArgs(label),
             'dimensions': [
                 {'key': 'pool', 'value': 'Chrome-perf-pinpoint'},
                 {'key': 'id', 'value': 'bot id'},
             ],
-            'execution_timeout_secs': '3600',
-            'io_timeout_secs': '3600',
+            'execution_timeout_secs': '7200',
+            'io_timeout_secs': '1200',
         },
-        'tags': [
-            'configuration:chromium-rel-mac11-pro',
-        ],
     }
     swarming_tasks_new.assert_called_with(body)
 
 
+def _CreateSwarmingArgs(label):
+  i = _SWARMING_EXTRA_ARGS.index('--results-label')
+  swarming_args_with_results_label = copy.copy(_SWARMING_EXTRA_ARGS)
+  swarming_args_with_results_label[i+1] = label
+  return swarming_args_with_results_label
+
+
 @mock.patch('dashboard.services.swarming_service.Tasks.New')
 @mock.patch('dashboard.services.swarming_service.Task.Result')
-class RunTestFullTest(_RunTestTest):
+class RunTestFullTest(_RunTestExecutionTest):
 
   def testSuccess(self, swarming_task_result, swarming_tasks_new):
     # Goes through a full run of two Executions.
 
     # Call RunTest.Start() to create an Execution.
-    quest = run_test.RunTest('chromium-rel-mac11-pro', 'test_suite', 'test')
-    execution = quest.Start('input isolate hash')
+    quest = run_test.RunTest(_SWARMING_DIMENSIONS, _SWARMING_EXTRA_ARGS)
+    execution = quest.Start('change_1', 'input isolate hash')
 
     swarming_task_result.assert_not_called()
     swarming_tasks_new.assert_not_called()
@@ -87,8 +294,8 @@ class RunTestFullTest(_RunTestTest):
     execution.Poll()
 
     swarming_task_result.assert_not_called()
-    swarming_tasks_new.assert_called_once()
-    self.assertNewTaskHasDimensions(swarming_tasks_new)
+    self.assertEqual(swarming_tasks_new.call_count, 1)
+    self.assertNewTaskHasDimensions(swarming_tasks_new, 'change_1')
     self.assertFalse(execution.completed)
     self.assertFalse(execution.failed)
 
@@ -110,54 +317,53 @@ class RunTestFullTest(_RunTestTest):
 
     self.assertTrue(execution.completed)
     self.assertFalse(execution.failed)
-    self.assertEqual(execution.result_values, (0,))
+    self.assertEqual(execution.result_values, ())
     self.assertEqual(execution.result_arguments,
                      {'isolate_hash': 'output isolate hash'})
+    self.assertEqual(
+        {
+            'completed': True,
+            'exception': None,
+            'details': {
+                'bot_id': 'bot id',
+                'task_id': 'task id',
+            },
+            'result_arguments': {'isolate_hash': 'output isolate hash'},
+            'result_values': (),
+        },
+        execution.AsDict())
 
-    # Start a second Execution to check bot_id handling. We get a bot_id from
-    # Swarming from the first Execution and reuse it in subsequent Executions.
-    execution = quest.Start('input isolate hash')
+    # Start a second Execution on another Change. It should use the bot_id
+    # from the first execution.
+    execution = quest.Start('change_2', 'input isolate hash')
     execution.Poll()
 
-    self.assertNewTaskHasBotId(swarming_tasks_new)
+    self.assertNewTaskHasBotId(swarming_tasks_new, 'change_2')
+
+    # Start an Execution on the same Change. It should use a new bot_id.
+    execution = quest.Start('change_2', 'input isolate hash')
+    execution.Poll()
+
+    self.assertNewTaskHasDimensions(swarming_tasks_new, 'change_2')
 
 
 @mock.patch('dashboard.services.swarming_service.Tasks.New')
 @mock.patch('dashboard.services.swarming_service.Task.Result')
-class SwarmingTaskStartTest(_RunTestTest):
-
-  def testUnknownConfig(self, swarming_task_result, swarming_tasks_new):
-    quest = run_test.RunTest('configuration', 'test_suite', 'test')
-    execution = quest.Start('input isolate hash')
-    execution.Poll()
-
-    swarming_task_result.assert_not_called()
-    swarming_tasks_new.assert_not_called()
-    self.assertTrue(execution.completed)
-    self.assertTrue(execution.failed)
-    self.assertEqual(len(execution.result_values), 1)
-    self.assertIsInstance(execution.result_values[0],
-                          run_test.UnknownConfigError)
-
-
-@mock.patch('dashboard.services.swarming_service.Tasks.New')
-@mock.patch('dashboard.services.swarming_service.Task.Result')
-class SwarmingTaskStatusTest(_RunTestTest):
+class SwarmingTaskStatusTest(_RunTestExecutionTest):
 
   def testSwarmingError(self, swarming_task_result, swarming_tasks_new):
     swarming_task_result.return_value = {'state': 'BOT_DIED'}
     swarming_tasks_new.return_value = {'task_id': 'task id'}
 
-    quest = run_test.RunTest('chromium-rel-mac11-pro', 'test_suite', 'test')
-    execution = quest.Start('input isolate hash')
+    quest = run_test.RunTest(_SWARMING_DIMENSIONS, _SWARMING_EXTRA_ARGS)
+    execution = quest.Start(None, 'input isolate hash')
     execution.Poll()
     execution.Poll()
 
     self.assertTrue(execution.completed)
     self.assertTrue(execution.failed)
-    self.assertEqual(len(execution.result_values), 1)
-    self.assertIsInstance(execution.result_values[0],
-                          run_test.SwarmingTaskError)
+    last_exception_line = execution.exception.splitlines()[-1]
+    self.assertTrue(last_exception_line.startswith('SwarmingTaskError'))
 
   def testTestError(self, swarming_task_result, swarming_tasks_new):
     swarming_task_result.return_value = {
@@ -168,21 +374,20 @@ class SwarmingTaskStatusTest(_RunTestTest):
     }
     swarming_tasks_new.return_value = {'task_id': 'task id'}
 
-    quest = run_test.RunTest('chromium-rel-mac11-pro', 'test_suite', 'test')
-    execution = quest.Start('isolate_hash')
+    quest = run_test.RunTest(_SWARMING_DIMENSIONS, _SWARMING_EXTRA_ARGS)
+    execution = quest.Start(None, 'isolate_hash')
     execution.Poll()
     execution.Poll()
 
     self.assertTrue(execution.completed)
     self.assertTrue(execution.failed)
-    self.assertEqual(len(execution.result_values), 1)
-    self.assertIsInstance(execution.result_values[0],
-                          run_test.SwarmingTestError)
+    last_exception_line = execution.exception.splitlines()[-1]
+    self.assertTrue(last_exception_line.startswith('SwarmingTestError'))
 
 
 @mock.patch('dashboard.services.swarming_service.Tasks.New')
 @mock.patch('dashboard.services.swarming_service.Task.Result')
-class BotIdHandlingTest(_RunTestTest):
+class BotIdHandlingTest(_RunTestExecutionTest):
 
   def testFirstExecutionFailedWithNoBotId(
       self, swarming_task_result, swarming_tasks_new):
@@ -193,8 +398,8 @@ class BotIdHandlingTest(_RunTestTest):
     swarming_tasks_new.return_value = {'task_id': 'task id'}
     swarming_task_result.return_value = {'state': 'EXPIRED'}
 
-    quest = run_test.RunTest('chromium-rel-mac11-pro', 'test_suite', 'test')
-    execution = quest.Start('input isolate hash')
+    quest = run_test.RunTest(_SWARMING_DIMENSIONS, _SWARMING_EXTRA_ARGS)
+    execution = quest.Start('change_1', 'input isolate hash')
     execution.Poll()
     execution.Poll()
 
@@ -205,21 +410,21 @@ class BotIdHandlingTest(_RunTestTest):
         'outputs_ref': {'isolated': 'output isolate hash'},
         'state': 'COMPLETED',
     }
-    execution = quest.Start('input isolate hash')
+    execution = quest.Start('change_2', 'input isolate hash')
     execution.Poll()
 
     self.assertTrue(execution.completed)
     self.assertTrue(execution.failed)
-    self.assertEqual(len(execution.result_values), 1)
-    self.assertIsInstance(execution.result_values[0], run_test.RunTestError)
+    last_exception_line = execution.exception.splitlines()[-1]
+    self.assertTrue(last_exception_line.startswith('RunTestError'))
 
   def testSimultaneousExecutions(self, swarming_task_result,
                                  swarming_tasks_new):
     # Executions after the first must wait for the first execution to get a bot
     # ID. To preserve device affinity, they must use the same bot.
-    quest = run_test.RunTest('chromium-rel-mac11-pro', 'test_suite', 'test')
-    execution_1 = quest.Start('input isolate hash')
-    execution_2 = quest.Start('input isolate hash')
+    quest = run_test.RunTest(_SWARMING_DIMENSIONS, _SWARMING_EXTRA_ARGS)
+    execution_1 = quest.Start('change_1', 'input isolate hash')
+    execution_2 = quest.Start('change_2', 'input isolate hash')
 
     swarming_tasks_new.return_value = {'task_id': 'task id'}
     swarming_task_result.return_value = {'state': 'PENDING'}

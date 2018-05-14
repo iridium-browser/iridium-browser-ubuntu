@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "remoting/base/constants.h"
 #include "remoting/protocol/channel_authenticator.h"
 
@@ -20,7 +21,7 @@ const buzz::StaticQName kPairingErrorAttribute = { "", "error" };
 }  // namespace
 
 PairingAuthenticatorBase::PairingAuthenticatorBase() : weak_factory_(this) {}
-PairingAuthenticatorBase::~PairingAuthenticatorBase() {}
+PairingAuthenticatorBase::~PairingAuthenticatorBase() = default;
 
 Authenticator::State PairingAuthenticatorBase::state() const {
   DCHECK(spake2_authenticator_);

@@ -12,7 +12,6 @@
 #include "base/logging.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
@@ -54,7 +53,7 @@ class TestURLRequestFileJob : public URLRequestFileJob {
     observed_content_->clear();
   }
 
-  ~TestURLRequestFileJob() override {}
+  ~TestURLRequestFileJob() override = default;
 
  protected:
   void OnOpenComplete(int result) override {
@@ -105,7 +104,7 @@ class TestJobFactory : public URLRequestJobFactory {
     CHECK(observed_content_);
   }
 
-  ~TestJobFactory() override {}
+  ~TestJobFactory() override = default;
 
   URLRequestJob* MaybeCreateJobWithProtocolHandler(
       const std::string& scheme,
@@ -219,7 +218,7 @@ class URLRequestFileJobEventsTest : public testing::Test {
   TestDelegate delegate_;
 };
 
-URLRequestFileJobEventsTest::URLRequestFileJobEventsTest() {}
+URLRequestFileJobEventsTest::URLRequestFileJobEventsTest() = default;
 
 void URLRequestFileJobEventsTest::TearDown() {
   // Gives a chance to close the opening file.

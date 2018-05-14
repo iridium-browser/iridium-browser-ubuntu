@@ -3,11 +3,13 @@
 // found in the LICENSE file.
 
 // https://drafts.css-houdini.org/css-typed-om/#the-stylepropertymap
+
 [
-    Exposed=(Window,PaintWorklet),
-    RuntimeEnabled=CSSTypedOM
-] interface StylePropertyMap : StylePropertyMapReadonly {
-    [RaisesException] void append(DOMString property, (CSSStyleValue or sequence<CSSStyleValue> or DOMString) value);
+    RuntimeEnabled=CSSTypedOM,
+    Exposed=(Window)
+] interface StylePropertyMap : StylePropertyMapReadOnly {
+    [RaisesException, CallWith=ExecutionContext] void set(DOMString property, (CSSStyleValue or DOMString)... values);
+    [RaisesException, CallWith=ExecutionContext] void append(DOMString property, (CSSStyleValue or DOMString)... values);
     [RaisesException, ImplementedAs=remove] void delete(DOMString property);
-    [RaisesException] void set(DOMString property, (CSSStyleValue or sequence<CSSStyleValue> or DOMString) value);
+    void clear();
 };

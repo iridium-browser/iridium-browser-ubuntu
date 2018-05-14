@@ -4,13 +4,18 @@
 
 #import "ios/chrome/browser/web_state_list/web_state_list_observer.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 WebStateListObserver::WebStateListObserver() = default;
 
 WebStateListObserver::~WebStateListObserver() = default;
 
 void WebStateListObserver::WebStateInsertedAt(WebStateList* web_state_list,
                                               web::WebState* web_state,
-                                              int index) {}
+                                              int index,
+                                              bool activating) {}
 
 void WebStateListObserver::WebStateMoved(WebStateList* web_state_list,
                                          web::WebState* web_state,
@@ -32,10 +37,11 @@ void WebStateListObserver::WebStateDetachedAt(WebStateList* web_state_list,
 
 void WebStateListObserver::WillCloseWebStateAt(WebStateList* web_state_list,
                                                web::WebState* web_state,
-                                               int index) {}
+                                               int index,
+                                               bool user_action) {}
 
 void WebStateListObserver::WebStateActivatedAt(WebStateList* web_state_list,
                                                web::WebState* old_web_state,
                                                web::WebState* new_web_state,
                                                int active_index,
-                                               bool user_action) {}
+                                               int reason) {}

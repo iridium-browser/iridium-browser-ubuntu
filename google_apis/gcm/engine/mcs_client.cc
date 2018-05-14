@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/circular_deque.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
@@ -265,7 +266,7 @@ void MCSClient::Initialize(
     ReliablePacketInfo* packet_info = new ReliablePacketInfo();
     packet_info->protobuf.reset(iter->second);
     packet_info->tag = GetMCSProtoTag(*iter->second);
-    packet_info->persistent_id = base::Uint64ToString(iter->first);
+    packet_info->persistent_id = base::NumberToString(iter->first);
     to_send_.push_back(make_linked_ptr(packet_info));
 
     if (packet_info->tag == kDataMessageStanzaTag) {
@@ -481,7 +482,7 @@ void MCSClient::ResetStateAndBuildLoginRequest(
   }
 
   // Drop all TTL == 0 or expired TTL messages from the queue.
-  std::deque<MCSPacketInternal> new_to_send;
+  base::circular_deque<MCSPacketInternal> new_to_send;
   std::vector<PersistentId> expired_ttl_ids;
   while (!to_send_.empty()) {
     MCSPacketInternal packet = PopMessageForSend();

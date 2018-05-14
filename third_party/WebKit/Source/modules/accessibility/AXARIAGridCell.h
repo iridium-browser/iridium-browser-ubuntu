@@ -29,6 +29,7 @@
 #ifndef AXARIAGridCell_h
 #define AXARIAGridCell_h
 
+#include "base/macros.h"
 #include "modules/accessibility/AXTableCell.h"
 
 namespace blink {
@@ -36,8 +37,6 @@ namespace blink {
 class AXObjectCacheImpl;
 
 class AXARIAGridCell final : public AXTableCell {
-  WTF_MAKE_NONCOPYABLE(AXARIAGridCell);
-
  private:
   AXARIAGridCell(LayoutObject*, AXObjectCacheImpl&);
 
@@ -46,18 +45,23 @@ class AXARIAGridCell final : public AXTableCell {
   ~AXARIAGridCell() override;
 
   // fills in the start location and row span of cell
-  void RowIndexRange(std::pair<unsigned, unsigned>& row_range) override;
+  bool RowIndexRange(std::pair<unsigned, unsigned>& row_range) const override;
   // fills in the start location and column span of cell
-  void ColumnIndexRange(std::pair<unsigned, unsigned>& column_range) override;
+  bool ColumnIndexRange(
+      std::pair<unsigned, unsigned>& column_range) const override;
   AccessibilityRole ScanToDecideHeaderRole() final;
-  bool CanSetSelectedAttribute() const final {
-    return Restriction() != kDisabled;
-  }
+  AXRestriction Restriction() const final;
 
  protected:
   bool IsAriaColumnHeader() const;
   bool IsAriaRowHeader() const;
   AXObject* ParentTable() const override;
+  AXObject* ParentRow() const override;
+  bool CanSetSelectedAttribute() const final {
+    return Restriction() != kDisabled;
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(AXARIAGridCell);
 };
 
 }  // namespace blink

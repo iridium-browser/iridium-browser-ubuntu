@@ -10,6 +10,7 @@
 #include "components/sync/protocol/app_setting_specifics.pb.h"
 #include "components/sync/protocol/app_specifics.pb.h"
 #include "components/sync/protocol/arc_package_specifics.pb.h"
+#include "components/sync/protocol/attachments.pb.h"
 #include "components/sync/protocol/autofill_specifics.pb.h"
 #include "components/sync/protocol/bookmark_specifics.pb.h"
 #include "components/sync/protocol/dictionary_specifics.pb.h"
@@ -124,6 +125,8 @@ VISIT_PROTO_FIELDS(const sync_pb::AppSpecifics& proto) {
   VISIT(bookmark_app_description);
   VISIT(bookmark_app_icon_color);
   VISIT_REP(linked_app_icons);
+  VISIT(bookmark_app_scope);
+  VISIT(bookmark_app_theme_color);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::ArcPackageSpecifics& proto) {
@@ -131,10 +134,6 @@ VISIT_PROTO_FIELDS(const sync_pb::ArcPackageSpecifics& proto) {
   VISIT(package_version);
   VISIT(last_backup_android_id);
   VISIT(last_backup_time);
-}
-
-VISIT_PROTO_FIELDS(const sync_pb::ArticleAttachments& proto) {
-  VISIT(distilled_article);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::ArticlePage& proto) {
@@ -145,7 +144,6 @@ VISIT_PROTO_FIELDS(const sync_pb::ArticleSpecifics& proto) {
   VISIT(entry_id);
   VISIT(title);
   VISIT_REP(pages);
-  VISIT(attachments);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::AttachmentIdProto& proto) {
@@ -187,6 +185,7 @@ VISIT_PROTO_FIELDS(const sync_pb::AutofillProfileSpecifics& proto) {
   VISIT(address_home_dependent_locality);
   VISIT(address_home_language_code);
   VISIT_REP(phone_home_whole_number);
+  VISIT(validity_state_bitfield);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::AutofillSpecifics& proto) {
@@ -345,6 +344,7 @@ VISIT_PROTO_FIELDS(const sync_pb::DeviceInfoSpecifics& proto) {
   VISIT(sync_user_agent);
   VISIT(chrome_version);
   VISIT(signin_scoped_device_id);
+  VISIT(last_updated_timestamp);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::DictionarySpecifics& proto) {
@@ -472,14 +472,8 @@ VISIT_PROTO_FIELDS(const sync_pb::FaviconTrackingSpecifics& proto) {
   VISIT(is_bookmarked);
 }
 
-VISIT_PROTO_FIELDS(
-    const sync_pb::UserEventSpecifics::FieldTrial::FieldTrialPair& proto) {
-  VISIT(name_id);
-  VISIT(group_id);
-}
-
 VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics::FieldTrial& proto) {
-  VISIT_REP(field_trial_pairs);
+  VISIT_REP(variation_ids);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::GcmChannelFlags& proto) {
@@ -602,6 +596,12 @@ VISIT_PROTO_FIELDS(const sync_pb::NavigationRedirect& proto) {
   VISIT(url);
 }
 
+VISIT_PROTO_FIELDS(const sync_pb::ReplacedNavigation& proto) {
+  VISIT(first_committed_url);
+  VISIT(first_timestamp_msec);
+  VISIT_ENUM(first_page_transition);
+}
+
 VISIT_PROTO_FIELDS(const sync_pb::NigoriSpecifics& proto) {
   VISIT(encryption_keybag);
   VISIT(keybag_is_frozen);
@@ -698,6 +698,8 @@ VISIT_PROTO_FIELDS(const sync_pb::ReadingListSpecifics& proto) {
   VISIT(creation_time_us);
   VISIT(update_time_us);
   VISIT_ENUM(status);
+  VISIT(first_read_time_us);
+  VISIT(update_title_time_us);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::SearchEngineSpecifics& proto) {
@@ -712,15 +714,12 @@ VISIT_PROTO_FIELDS(const sync_pb::SearchEngineSpecifics& proto) {
   VISIT(suggestions_url);
   VISIT(prepopulate_id);
   VISIT(autogenerate_keyword);
-  VISIT(instant_url);
   VISIT(last_modified);
   VISIT(sync_guid);
   VISIT_REP(alternate_urls);
-  VISIT(search_terms_replacement_key);
   VISIT(image_url);
   VISIT(search_url_post_params);
   VISIT(suggestions_url_post_params);
-  VISIT(instant_url_post_params);
   VISIT(image_url_post_params);
   VISIT(new_tab_url);
 }
@@ -794,7 +793,6 @@ VISIT_PROTO_FIELDS(const sync_pb::SyncEntity& proto) {
   VISIT(specifics);
   VISIT(folder);
   VISIT(client_defined_unique_tag);
-  VISIT_REP(attachment_id);
   VISIT_BYTES(ordinal_in_parent);
   VISIT(bookmarkdata);
 }
@@ -808,6 +806,38 @@ VISIT_PROTO_FIELDS(const sync_pb::SyncEntity::BookmarkData& proto) {
 VISIT_PROTO_FIELDS(const sync_pb::SyncedNotificationAppInfoSpecifics& proto) {}
 
 VISIT_PROTO_FIELDS(const sync_pb::SyncedNotificationSpecifics& proto) {}
+
+VISIT_PROTO_FIELDS(
+    const sync_pb::UserEventSpecifics::GaiaPasswordReuse& proto) {
+  VISIT(reuse_detected);
+  VISIT(reuse_lookup);
+  VISIT(dialog_interaction);
+}
+
+VISIT_PROTO_FIELDS(
+    const sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordReuseDetected&
+        proto) {
+  VISIT(status);
+}
+
+VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics::GaiaPasswordReuse::
+                       PasswordReuseDetected::SafeBrowsingStatus& proto) {
+  VISIT(enabled);
+  VISIT_ENUM(safe_browsing_reporting_population);
+}
+
+VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics::GaiaPasswordReuse::
+                       PasswordReuseDialogInteraction& proto) {
+  VISIT_ENUM(interaction_result);
+}
+
+VISIT_PROTO_FIELDS(
+    const sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordReuseLookup&
+        proto) {
+  VISIT_ENUM(lookup_result);
+  VISIT_ENUM(verdict);
+  VISIT(verdict_token);
+}
 
 VISIT_PROTO_FIELDS(const sync_pb::TabNavigation& proto) {
   VISIT(virtual_url);
@@ -823,7 +853,6 @@ VISIT_PROTO_FIELDS(const sync_pb::TabNavigation& proto) {
   VISIT(navigation_chain_start);
   VISIT(navigation_chain_end);
   VISIT(global_id);
-  VISIT(search_terms);
   VISIT(favicon_url);
   VISIT_ENUM(blocked_state);
   VISIT_REP(content_pack_categories);
@@ -836,6 +865,7 @@ VISIT_PROTO_FIELDS(const sync_pb::TabNavigation& proto) {
   VISIT_ENUM(password_state);
   VISIT(task_id);
   VISIT_REP(ancestor_task_id);
+  VISIT(replaced_navigation);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::ThemeSpecifics& proto) {
@@ -855,6 +885,14 @@ VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics::Translation& proto) {
   VISIT(from_language_code);
   VISIT(to_language_code);
   VISIT_ENUM(interaction);
+}
+
+VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics::UserConsent& proto) {
+  VISIT_ENUM(feature);
+  VISIT_REP(description_grd_ids);
+  VISIT(confirmation_grd_id);
+  VISIT(locale);
+  VISIT_ENUM(status);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::TypeHint& proto) {
@@ -885,6 +923,8 @@ VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics& proto) {
   VISIT(field_trial_event);
   VISIT(language_detection_event);
   VISIT(translation_event);
+  VISIT(user_consent);
+  VISIT(gaia_password_reuse_event);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics::Test& proto) {}

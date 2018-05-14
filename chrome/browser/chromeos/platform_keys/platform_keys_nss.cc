@@ -18,7 +18,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -36,13 +35,20 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/nss_key_util.h"
+#include "crypto/openssl_util.h"
 #include "crypto/scoped_nss_types.h"
 #include "net/base/net_errors.h"
+#include "net/cert/asn1_util.h"
 #include "net/cert/cert_database.h"
 #include "net/cert/nss_cert_database.h"
+#include "net/cert/x509_util.h"
 #include "net/cert/x509_util_nss.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/third_party/mozilla_security_manager/nsNSSCertificateDB.h"
+#include "third_party/boringssl/src/include/openssl/bn.h"
+#include "third_party/boringssl/src/include/openssl/bytestring.h"
+#include "third_party/boringssl/src/include/openssl/evp.h"
+#include "third_party/boringssl/src/include/openssl/rsa.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -74,7 +80,7 @@ class NSSOperationState {
 
   // Called if an error occurred during the execution of the NSS operation
   // described by this object.
-  virtual void OnError(const tracked_objects::Location& from,
+  virtual void OnError(const base::Location& from,
                        const std::string& error_message) = 0;
 
   crypto::ScopedPK11Slot slot_;
@@ -157,12 +163,12 @@ class GenerateRSAKeyState : public NSSOperationState {
                       const subtle::GenerateKeyCallback& callback);
   ~GenerateRSAKeyState() override {}
 
-  void OnError(const tracked_objects::Location& from,
+  void OnError(const base::Location& from,
                const std::string& error_message) override {
     CallBack(from, std::string() /* no public key */, error_message);
   }
 
-  void CallBack(const tracked_objects::Location& from,
+  void CallBack(const base::Location& from,
                 const std::string& public_key_spki_der,
                 const std::string& error_message) {
     origin_task_runner_->PostTask(
@@ -179,18 +185,18 @@ class GenerateRSAKeyState : public NSSOperationState {
 class SignRSAState : public NSSOperationState {
  public:
   SignRSAState(const std::string& data,
-               const std::string& public_key,
+               const std::string& public_key_spki_der,
                bool sign_direct_pkcs_padded,
                HashAlgorithm hash_algorithm,
                const subtle::SignCallback& callback);
   ~SignRSAState() override {}
 
-  void OnError(const tracked_objects::Location& from,
+  void OnError(const base::Location& from,
                const std::string& error_message) override {
     CallBack(from, std::string() /* no signature */, error_message);
   }
 
-  void CallBack(const tracked_objects::Location& from,
+  void CallBack(const base::Location& from,
                 const std::string& signature,
                 const std::string& error_message) {
     origin_task_runner_->PostTask(
@@ -201,7 +207,7 @@ class SignRSAState : public NSSOperationState {
   const std::string data_;
 
   // Must be the DER encoding of a SubjectPublicKeyInfo.
-  const std::string public_key_;
+  const std::string public_key_spki_der_;
 
   // If true, |data_| will not be hashed before signing. Only PKCS#1 v1.5
   // padding will be applied before signing.
@@ -226,13 +232,13 @@ class SelectCertificatesState : public NSSOperationState {
       const subtle::SelectCertificatesCallback& callback);
   ~SelectCertificatesState() override {}
 
-  void OnError(const tracked_objects::Location& from,
+  void OnError(const base::Location& from,
                const std::string& error_message) override {
     CallBack(from, std::unique_ptr<net::CertificateList>() /* no matches */,
              error_message);
   }
 
-  void CallBack(const tracked_objects::Location& from,
+  void CallBack(const base::Location& from,
                 std::unique_ptr<net::CertificateList> matches,
                 const std::string& error_message) {
     origin_task_runner_->PostTask(
@@ -254,21 +260,21 @@ class GetCertificatesState : public NSSOperationState {
   explicit GetCertificatesState(const GetCertificatesCallback& callback);
   ~GetCertificatesState() override {}
 
-  void OnError(const tracked_objects::Location& from,
+  void OnError(const base::Location& from,
                const std::string& error_message) override {
     CallBack(from,
              std::unique_ptr<net::CertificateList>() /* no certificates */,
              error_message);
   }
 
-  void CallBack(const tracked_objects::Location& from,
+  void CallBack(const base::Location& from,
                 std::unique_ptr<net::CertificateList> certs,
                 const std::string& error_message) {
     origin_task_runner_->PostTask(
         from, base::Bind(callback_, base::Passed(&certs), error_message));
   }
 
-  std::unique_ptr<net::CertificateList> certs_;
+  net::ScopedCERTCertificateList certs_;
 
  private:
   // Must be called on origin thread, therefore use CallBack().
@@ -281,13 +287,12 @@ class ImportCertificateState : public NSSOperationState {
                          const ImportCertificateCallback& callback);
   ~ImportCertificateState() override {}
 
-  void OnError(const tracked_objects::Location& from,
+  void OnError(const base::Location& from,
                const std::string& error_message) override {
     CallBack(from, error_message);
   }
 
-  void CallBack(const tracked_objects::Location& from,
-                const std::string& error_message) {
+  void CallBack(const base::Location& from, const std::string& error_message) {
     origin_task_runner_->PostTask(from, base::Bind(callback_, error_message));
   }
 
@@ -304,13 +309,12 @@ class RemoveCertificateState : public NSSOperationState {
                          const RemoveCertificateCallback& callback);
   ~RemoveCertificateState() override {}
 
-  void OnError(const tracked_objects::Location& from,
+  void OnError(const base::Location& from,
                const std::string& error_message) override {
     CallBack(from, error_message);
   }
 
-  void CallBack(const tracked_objects::Location& from,
-                const std::string& error_message) {
+  void CallBack(const base::Location& from, const std::string& error_message) {
     origin_task_runner_->PostTask(from, base::Bind(callback_, error_message));
   }
 
@@ -326,14 +330,14 @@ class GetTokensState : public NSSOperationState {
   explicit GetTokensState(const GetTokensCallback& callback);
   ~GetTokensState() override {}
 
-  void OnError(const tracked_objects::Location& from,
+  void OnError(const base::Location& from,
                const std::string& error_message) override {
     CallBack(from,
              std::unique_ptr<std::vector<std::string>>() /* no token ids */,
              error_message);
   }
 
-  void CallBack(const tracked_objects::Location& from,
+  void CallBack(const base::Location& from,
                 std::unique_ptr<std::vector<std::string>> token_ids,
                 const std::string& error_message) {
     origin_task_runner_->PostTask(
@@ -343,6 +347,32 @@ class GetTokensState : public NSSOperationState {
  private:
   // Must be called on origin thread, therefore use CallBack().
   GetTokensCallback callback_;
+};
+
+class GetKeyLocationsState : public NSSOperationState {
+ public:
+  GetKeyLocationsState(const std::string& public_key_spki_der,
+                       const GetKeyLocationsCallback& callback);
+  ~GetKeyLocationsState() override {}
+
+  void OnError(const base::Location& from,
+               const std::string& error_message) override {
+    CallBack(from, std::vector<std::string>(), error_message);
+  }
+
+  void CallBack(const base::Location& from,
+                const std::vector<std::string>& token_ids,
+                const std::string& error_message) {
+    origin_task_runner_->PostTask(
+        from, base::BindOnce(callback_, token_ids, error_message));
+  }
+
+  // Must be a DER encoding of a SubjectPublicKeyInfo.
+  const std::string public_key_spki_der_;
+
+ private:
+  // Must be called on origin thread, therefore use CallBack().
+  GetKeyLocationsCallback callback_;
 };
 
 NSSOperationState::NSSOperationState()
@@ -356,16 +386,15 @@ GenerateRSAKeyState::GenerateRSAKeyState(
 }
 
 SignRSAState::SignRSAState(const std::string& data,
-                           const std::string& public_key,
+                           const std::string& public_key_spki_der,
                            bool sign_direct_pkcs_padded,
                            HashAlgorithm hash_algorithm,
                            const subtle::SignCallback& callback)
     : data_(data),
-      public_key_(public_key),
+      public_key_spki_der_(public_key_spki_der),
       sign_direct_pkcs_padded_(sign_direct_pkcs_padded),
       hash_algorithm_(hash_algorithm),
-      callback_(callback) {
-}
+      callback_(callback) {}
 
 SelectCertificatesState::SelectCertificatesState(
     const std::string& username_hash,
@@ -398,6 +427,11 @@ RemoveCertificateState::RemoveCertificateState(
 GetTokensState::GetTokensState(const GetTokensCallback& callback)
     : callback_(callback) {
 }
+
+GetKeyLocationsState::GetKeyLocationsState(
+    const std::string& public_key_spki_der,
+    const GetKeyLocationsCallback& callback)
+    : public_key_spki_der_(public_key_spki_der), callback_(callback) {}
 
 // Does the actual key generation on a worker thread. Used by
 // GenerateRSAKeyWithDB().
@@ -450,9 +484,9 @@ void GenerateRSAKeyWithDB(std::unique_ptr<GenerateRSAKeyState> state,
 // Does the actual signing on a worker thread. Used by SignRSAWithDB().
 void SignRSAOnWorkerThread(std::unique_ptr<SignRSAState> state) {
   const uint8_t* public_key_uint8 =
-      reinterpret_cast<const uint8_t*>(state->public_key_.data());
+      reinterpret_cast<const uint8_t*>(state->public_key_spki_der_.data());
   std::vector<uint8_t> public_key_vector(
-      public_key_uint8, public_key_uint8 + state->public_key_.size());
+      public_key_uint8, public_key_uint8 + state->public_key_spki_der_.size());
 
   crypto::ScopedSECKEYPrivateKey rsa_key;
   if (state->slot_) {
@@ -553,7 +587,7 @@ void DidSelectCertificatesOnIOThread(
   // api. This assumes that the necessary keys can be found later with
   // crypto::FindNSSKeyFromPublicKeyInfo.
   std::unique_ptr<net::CertificateList> certs =
-      base::MakeUnique<net::CertificateList>();
+      std::make_unique<net::CertificateList>();
   for (const std::unique_ptr<net::ClientCertIdentity>& identity : identities)
     certs->push_back(identity->certificate());
   state->CallBack(FROM_HERE, std::move(certs), std::string() /* no error */);
@@ -566,7 +600,7 @@ void SelectCertificatesOnIOThread(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   state->cert_store_.reset(new ClientCertStoreChromeOS(
       nullptr,  // no additional provider
-      base::MakeUnique<ClientCertFilterChromeOS>(state->use_system_key_slot_,
+      std::make_unique<ClientCertFilterChromeOS>(state->use_system_key_slot_,
                                                  state->username_hash_),
       ClientCertStoreChromeOS::PasswordDelegateFactory()));
 
@@ -581,10 +615,10 @@ void SelectCertificatesOnIOThread(
 void FilterCertificatesOnWorkerThread(
     std::unique_ptr<GetCertificatesState> state) {
   std::unique_ptr<net::CertificateList> client_certs(new net::CertificateList);
-  for (net::CertificateList::const_iterator it = state->certs_->begin();
-       it != state->certs_->end();
-       ++it) {
-    net::X509Certificate::OSCertHandle cert_handle = (*it)->os_cert_handle();
+  for (net::ScopedCERTCertificateList::const_iterator it =
+           state->certs_.begin();
+       it != state->certs_.end(); ++it) {
+    CERTCertificate* cert_handle = it->get();
     crypto::ScopedPK11Slot cert_slot(PK11_KeyForCertExists(cert_handle,
                                                            NULL,    // keyPtr
                                                            NULL));  // wincx
@@ -594,7 +628,17 @@ void FilterCertificatesOnWorkerThread(
     if (cert_slot != state->slot_)
       continue;
 
-    client_certs->push_back(*it);
+    // Allow UTF-8 inside PrintableStrings in client certificates. See
+    // crbug.com/770323 and crbug.com/788655.
+    net::X509Certificate::UnsafeCreateOptions options;
+    options.printable_string_is_utf8 = true;
+    scoped_refptr<net::X509Certificate> cert =
+        net::x509_util::CreateX509CertificateFromCERTCertificate(cert_handle,
+                                                                 {}, options);
+    if (!cert)
+      continue;
+
+    client_certs->push_back(std::move(cert));
   }
 
   state->CallBack(FROM_HERE, std::move(client_certs),
@@ -604,7 +648,7 @@ void FilterCertificatesOnWorkerThread(
 // Passes the obtained certificates to the worker thread for filtering. Used by
 // GetCertificatesWithDB().
 void DidGetCertificates(std::unique_ptr<GetCertificatesState> state,
-                        std::unique_ptr<net::CertificateList> all_certs) {
+                        net::ScopedCERTCertificateList all_certs) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   state->certs_ = std::move(all_certs);
   // This task interacts with the TPM, hence MayBlock().
@@ -641,16 +685,24 @@ void ImportCertificateWithDB(std::unique_ptr<ImportCertificateState> state,
     return;
   }
 
+  net::ScopedCERTCertificate nss_cert =
+      net::x509_util::CreateCERTCertificateFromX509Certificate(
+          state->certificate_.get());
+  if (!nss_cert) {
+    state->OnError(FROM_HERE, net::ErrorToString(net::ERR_CERT_INVALID));
+    return;
+  }
+
   // Check that the private key is in the correct slot.
   crypto::ScopedPK11Slot slot(
-      PK11_KeyForCertExists(state->certificate_->os_cert_handle(), NULL, NULL));
+      PK11_KeyForCertExists(nss_cert.get(), NULL, NULL));
   if (slot.get() != state->slot_.get()) {
     state->OnError(FROM_HERE, kErrorKeyNotFound);
     return;
   }
 
-  const net::Error import_status = static_cast<net::Error>(
-      cert_db->ImportUserCert(state->certificate_.get()));
+  const net::Error import_status =
+      static_cast<net::Error>(cert_db->ImportUserCert(nss_cert.get()));
   if (import_status != net::OK) {
     LOG(ERROR) << "Could not import certificate.";
     state->OnError(FROM_HERE, net::ErrorToString(import_status));
@@ -683,13 +735,19 @@ void DidRemoveCertificate(std::unique_ptr<RemoveCertificateState> state,
 void RemoveCertificateWithDB(std::unique_ptr<RemoveCertificateState> state,
                              net::NSSCertDatabase* cert_db) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  // Get the pointer before base::Passed clears |state|.
-  scoped_refptr<net::X509Certificate> certificate = state->certificate_;
-  bool certificate_found = certificate->os_cert_handle()->isperm;
+
+  net::ScopedCERTCertificate nss_cert =
+      net::x509_util::CreateCERTCertificateFromX509Certificate(
+          state->certificate_.get());
+  if (!nss_cert) {
+    state->OnError(FROM_HERE, net::ErrorToString(net::ERR_CERT_INVALID));
+    return;
+  }
+
+  bool certificate_found = nss_cert->isperm;
   cert_db->DeleteCertAndKeyAsync(
-      certificate,
-      base::Bind(
-          &DidRemoveCertificate, base::Passed(&state), certificate_found));
+      std::move(nss_cert), base::Bind(&DidRemoveCertificate,
+                                      base::Passed(&state), certificate_found));
 }
 
 // Does the actual work to determine which tokens are available.
@@ -703,6 +761,37 @@ void GetTokensWithDB(std::unique_ptr<GetTokensState> state,
   token_ids->push_back(kTokenIdUser);
   if (cert_db->GetSystemSlot())
     token_ids->push_back(kTokenIdSystem);
+
+  state->CallBack(FROM_HERE, std::move(token_ids),
+                  std::string() /* no error */);
+}
+
+// Does the actual work to determine which key is on which token.
+void GetKeyLocationsWithDB(std::unique_ptr<GetKeyLocationsState> state,
+                           net::NSSCertDatabase* cert_db) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  std::vector<std::string> token_ids;
+
+  const uint8_t* public_key_uint8 =
+      reinterpret_cast<const uint8_t*>(state->public_key_spki_der_.data());
+  std::vector<uint8_t> public_key_vector(
+      public_key_uint8, public_key_uint8 + state->public_key_spki_der_.size());
+
+  if (cert_db->GetPrivateSlot().get()) {
+    crypto::ScopedSECKEYPrivateKey rsa_key =
+        crypto::FindNSSKeyFromPublicKeyInfoInSlot(
+            public_key_vector, cert_db->GetPrivateSlot().get());
+    if (rsa_key)
+      token_ids.push_back(kTokenIdUser);
+  }
+  if (cert_db->GetSystemSlot().get()) {
+    crypto::ScopedSECKEYPrivateKey rsa_key =
+        crypto::FindNSSKeyFromPublicKeyInfoInSlot(
+            public_key_vector, cert_db->GetSystemSlot().get());
+    if (rsa_key)
+      token_ids.push_back(kTokenIdSystem);
+  }
 
   state->CallBack(FROM_HERE, std::move(token_ids),
                   std::string() /* no error */);
@@ -735,14 +824,14 @@ void GenerateRSAKey(const std::string& token_id,
 
 void SignRSAPKCS1Digest(const std::string& token_id,
                         const std::string& data,
-                        const std::string& public_key,
+                        const std::string& public_key_spki_der,
                         HashAlgorithm hash_algorithm,
                         const SignCallback& callback,
                         content::BrowserContext* browser_context) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  std::unique_ptr<SignRSAState> state(
-      new SignRSAState(data, public_key, false /* digest before signing */,
-                       hash_algorithm, callback));
+  std::unique_ptr<SignRSAState> state(new SignRSAState(
+      data, public_key_spki_der, false /* digest before signing */,
+      hash_algorithm, callback));
   // Get the pointer to |state| before base::Passed releases |state|.
   NSSOperationState* state_ptr = state.get();
 
@@ -755,12 +844,12 @@ void SignRSAPKCS1Digest(const std::string& token_id,
 
 void SignRSAPKCS1Raw(const std::string& token_id,
                      const std::string& data,
-                     const std::string& public_key,
+                     const std::string& public_key_spki_der,
                      const SignCallback& callback,
                      content::BrowserContext* browser_context) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::unique_ptr<SignRSAState> state(new SignRSAState(
-      data, public_key, true /* sign directly without hashing */,
+      data, public_key_spki_der, true /* sign directly without hashing */,
       HASH_ALGORITHM_NONE, callback));
   // Get the pointer to |state| before base::Passed releases |state|.
   NSSOperationState* state_ptr = state.get();
@@ -807,8 +896,12 @@ void SelectClientCertificates(
 
 std::string GetSubjectPublicKeyInfo(
     const scoped_refptr<net::X509Certificate>& certificate) {
-  const SECItem& spki_der = certificate->os_cert_handle()->derPublicKey;
-  return std::string(spki_der.data, spki_der.data + spki_der.len);
+  base::StringPiece spki_bytes;
+  if (!net::asn1::ExtractSPKIFromDERCert(
+          net::x509_util::CryptoBufferAsStringPiece(certificate->cert_buffer()),
+          &spki_bytes))
+    return {};
+  return spki_bytes.as_string();
 }
 
 bool GetPublicKey(const scoped_refptr<net::X509Certificate>& certificate,
@@ -817,7 +910,7 @@ bool GetPublicKey(const scoped_refptr<net::X509Certificate>& certificate,
   net::X509Certificate::PublicKeyType key_type_tmp =
       net::X509Certificate::kPublicKeyTypeUnknown;
   size_t key_size_bits_tmp = 0;
-  net::X509Certificate::GetPublicKeyInfo(certificate->os_cert_handle(),
+  net::X509Certificate::GetPublicKeyInfo(certificate->cert_buffer(),
                                          &key_size_bits_tmp, &key_type_tmp);
 
   if (key_type_tmp == net::X509Certificate::kPublicKeyTypeUnknown) {
@@ -829,14 +922,24 @@ bool GetPublicKey(const scoped_refptr<net::X509Certificate>& certificate,
     return false;
   }
 
-  crypto::ScopedSECKEYPublicKey public_key(
-      CERT_ExtractPublicKey(certificate->os_cert_handle()));
-  if (!public_key) {
+  std::string spki = GetSubjectPublicKeyInfo(certificate);
+  crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
+  CBS cbs;
+  CBS_init(&cbs, reinterpret_cast<const uint8_t*>(spki.data()), spki.size());
+  bssl::UniquePtr<EVP_PKEY> pkey(EVP_parse_public_key(&cbs));
+  if (!pkey) {
     LOG(WARNING) << "Could not extract public key of certificate.";
     return false;
   }
-  long public_exponent = DER_GetInteger(&public_key->u.rsa.publicExponent);
-  if (public_exponent != 65537L) {
+  RSA* rsa = EVP_PKEY_get0_RSA(pkey.get());
+  if (!rsa) {
+    LOG(WARNING) << "Could not get RSA from PKEY.";
+    return false;
+  }
+
+  const BIGNUM* public_exponent;
+  RSA_get0_key(rsa, nullptr /* out_n */, &public_exponent, nullptr /* out_d */);
+  if (BN_get_word(public_exponent) != 65537L) {
     LOG(ERROR) << "Rejecting RSA public exponent that is unequal 65537.";
     return false;
   }
@@ -907,6 +1010,20 @@ void GetTokens(const GetTokensCallback& callback,
                   base::Bind(&GetTokensWithDB, base::Passed(&state)),
                   browser_context,
                   state_ptr);
+}
+
+void GetKeyLocations(const std::string& public_key_spki_der,
+                     const GetKeyLocationsCallback& callback,
+                     content::BrowserContext* browser_context) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  auto state =
+      std::make_unique<GetKeyLocationsState>(public_key_spki_der, callback);
+  NSSOperationState* state_ptr = state.get();
+
+  GetCertDatabase(
+      std::string() /* don't get any specific slot - we need all slots */,
+      base::BindRepeating(&GetKeyLocationsWithDB, base::Passed(&state)),
+      browser_context, state_ptr);
 }
 
 }  // namespace platform_keys

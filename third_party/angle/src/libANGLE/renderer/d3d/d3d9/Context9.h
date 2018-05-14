@@ -36,7 +36,7 @@ class Context9 : public ContextImpl
     TextureImpl *createTexture(const gl::TextureState &state) override;
 
     // Renderbuffer creation
-    RenderbufferImpl *createRenderbuffer() override;
+    RenderbufferImpl *createRenderbuffer(const gl::RenderbufferState &state) override;
 
     // Buffer creation
     BufferImpl *createBuffer(const gl::BufferState &state) override;
@@ -47,21 +47,24 @@ class Context9 : public ContextImpl
     // Query and Fence creation
     QueryImpl *createQuery(GLenum type) override;
     FenceNVImpl *createFenceNV() override;
-    FenceSyncImpl *createFenceSync() override;
+    SyncImpl *createSync() override;
 
     // Transform Feedback creation
     TransformFeedbackImpl *createTransformFeedback(
         const gl::TransformFeedbackState &state) override;
 
     // Sampler object creation
-    SamplerImpl *createSampler() override;
+    SamplerImpl *createSampler(const gl::SamplerState &state) override;
+
+    // Program Pipeline object creation
+    ProgramPipelineImpl *createProgramPipeline(const gl::ProgramPipelineState &data) override;
 
     // Path object creation
     std::vector<PathImpl *> createPaths(GLsizei) override;
 
     // Flush and finish.
-    gl::Error flush() override;
-    gl::Error finish() override;
+    gl::Error flush(const gl::Context *context) override;
+    gl::Error finish(const gl::Context *context) override;
 
     // Drawing methods.
     gl::Error drawArrays(const gl::Context *context,
@@ -78,23 +81,20 @@ class Context9 : public ContextImpl
                            GLenum mode,
                            GLsizei count,
                            GLenum type,
-                           const void *indices,
-                           const gl::IndexRange &indexRange) override;
+                           const void *indices) override;
     gl::Error drawElementsInstanced(const gl::Context *context,
                                     GLenum mode,
                                     GLsizei count,
                                     GLenum type,
                                     const void *indices,
-                                    GLsizei instances,
-                                    const gl::IndexRange &indexRange) override;
+                                    GLsizei instances) override;
     gl::Error drawRangeElements(const gl::Context *context,
                                 GLenum mode,
                                 GLuint start,
                                 GLuint end,
                                 GLsizei count,
                                 GLenum type,
-                                const void *indices,
-                                const gl::IndexRange &indexRange) override;
+                                const void *indices) override;
     gl::Error drawArraysIndirect(const gl::Context *context,
                                  GLenum mode,
                                  const void *indirect) override;
@@ -110,10 +110,14 @@ class Context9 : public ContextImpl
     std::string getVendorString() const override;
     std::string getRendererDescription() const override;
 
-    // Debug markers.
+    // EXT_debug_marker
     void insertEventMarker(GLsizei length, const char *marker) override;
     void pushGroupMarker(GLsizei length, const char *marker) override;
     void popGroupMarker() override;
+
+    // KHR_debug
+    void pushDebugGroup(GLenum source, GLuint id, GLsizei length, const char *message) override;
+    void popDebugGroup() override;
 
     // State sync with dirty bits.
     void syncState(const gl::Context *context, const gl::State::DirtyBits &dirtyBits) override;
@@ -135,6 +139,12 @@ class Context9 : public ContextImpl
                               GLuint numGroupsX,
                               GLuint numGroupsY,
                               GLuint numGroupsZ) override;
+    gl::Error dispatchComputeIndirect(const gl::Context *context, GLintptr indirect) override;
+
+    gl::Error memoryBarrier(const gl::Context *context, GLbitfield barriers) override;
+    gl::Error memoryBarrierByRegion(const gl::Context *context, GLbitfield barriers) override;
+
+    Renderer9 *getRenderer() const { return mRenderer; }
 
   private:
     Renderer9 *mRenderer;

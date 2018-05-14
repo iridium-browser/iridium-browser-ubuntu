@@ -9,6 +9,7 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.os.Handler;
 import android.text.TextUtils;
 import android.util.Pair;
@@ -20,14 +21,16 @@ import android.view.inputmethod.InputConnection;
 import org.junit.Assert;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.SelectionPopupController;
+import org.chromium.content.browser.selection.SelectionPopupControllerImpl;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content.browser.test.util.JavaScriptUtils;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content.browser.test.util.TestInputMethodManagerWrapper;
+import org.chromium.content.browser.test.util.TestInputMethodManagerWrapper.InputConnectionProvider;
+import org.chromium.content_public.browser.ContentViewCore;
+import org.chromium.content_public.browser.ImeAdapter;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 import org.chromium.ui.base.ime.TextInputType;
@@ -45,20 +48,27 @@ import java.util.concurrent.TimeoutException;
 class ImeActivityTestRule extends ContentShellActivityTestRule {
     private ChromiumBaseInputConnection mConnection;
     private TestInputConnectionFactory mConnectionFactory;
-    private ImeAdapter mImeAdapter;
+    private ImeAdapterImpl mImeAdapter;
 
     static final String INPUT_FORM_HTML = "content/test/data/android/input/input_forms.html";
+    static final String PASSWORD_FORM_HTML = "content/test/data/android/input/password_form.html";
+    static final String INPUT_MODE_HTML = "content/test/data/android/input/input_mode.html";
 
     private ContentViewCore mContentViewCore;
-    private SelectionPopupController mSelectionPopupController;
+    private SelectionPopupControllerImpl mSelectionPopupController;
     private TestCallbackHelperContainer mCallbackContainer;
     private TestInputMethodManagerWrapper mInputMethodManagerWrapper;
 
-    public void setUp() throws Exception {
-        launchContentShellWithUrlSync(INPUT_FORM_HTML);
+    public void setUpForUrl(String url) throws Exception {
+        launchContentShellWithUrlSync(url);
         mContentViewCore = getContentViewCore();
-        mSelectionPopupController = mContentViewCore.getSelectionPopupControllerForTesting();
-        mInputMethodManagerWrapper = new TestInputMethodManagerWrapper(mContentViewCore) {
+        mSelectionPopupController =
+                SelectionPopupControllerImpl.fromWebContents(mContentViewCore.getWebContents());
+
+        final ImeAdapter imeAdapter = getImeAdapter();
+        InputConnectionProvider provider =
+                TestInputMethodManagerWrapper.defaultInputConnectionProvider(imeAdapter);
+        mInputMethodManagerWrapper = new TestInputMethodManagerWrapper(provider) {
             private boolean mExpectsSelectionOutsideComposition;
 
             @Override
@@ -91,7 +101,7 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
                 }
             }
         };
-        getImeAdapter().setInputMethodManagerWrapperForTest(mInputMethodManagerWrapper);
+        getImeAdapter().setInputMethodManagerWrapper(mInputMethodManagerWrapper);
         Assert.assertEquals(0, mInputMethodManagerWrapper.getShowSoftInputCounter());
         mConnectionFactory =
                 new TestInputConnectionFactory(getImeAdapter().getInputConnectionFactoryForTest());
@@ -118,7 +128,7 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
         resetAllStates();
     }
 
-    SelectionPopupController getSelectionPopupController() {
+    SelectionPopupControllerImpl getSelectionPopupController() {
         return mSelectionPopupController;
     }
 
@@ -169,32 +179,54 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
         Assert.assertEquals(after, getTextAfterCursor(100, 0));
     }
 
-    void waitForKeyboardStates(int show, int hide, int restart, Integer[] history) {
-        final String expected = stringifyKeyboardStates(show, hide, restart, history);
+    void waitForKeyboardStates(int show, int hide, int restart, Integer[] textInputTypeHistory) {
+        final String expected =
+                stringifyKeyboardStates(show, hide, restart, textInputTypeHistory, null);
         CriteriaHelper.pollUiThread(Criteria.equals(expected, new Callable<String>() {
             @Override
             public String call() {
-                return getKeyboardStates();
+                return getKeyboardStates(false);
+            }
+        }));
+    }
+
+    void waitForKeyboardStates(int show, int hide, int restart, Integer[] textInputTypeHistory,
+            Integer[] textInputModeHistory) {
+        final String expected = stringifyKeyboardStates(
+                show, hide, restart, textInputTypeHistory, textInputModeHistory);
+        CriteriaHelper.pollUiThread(Criteria.equals(expected, new Callable<String>() {
+            @Override
+            public String call() {
+                return getKeyboardStates(true);
             }
         }));
     }
 
     void resetAllStates() {
         mInputMethodManagerWrapper.reset();
-        mConnectionFactory.clearTextInputTypeHistory();
+        mConnectionFactory.resetAllStates();
     }
 
-    String getKeyboardStates() {
+    String getKeyboardStates(boolean includeInputMode) {
         int showCount = mInputMethodManagerWrapper.getShowSoftInputCounter();
         int hideCount = mInputMethodManagerWrapper.getHideSoftInputCounter();
         int restartCount = mInputMethodManagerWrapper.getRestartInputCounter();
-        Integer[] history = mConnectionFactory.getTextInputTypeHistory();
-        return stringifyKeyboardStates(showCount, hideCount, restartCount, history);
+        Integer[] textInputTypeHistory = mConnectionFactory.getTextInputTypeHistory();
+        Integer[] textInputModeHistory = null;
+        if (includeInputMode) textInputModeHistory = mConnectionFactory.getTextInputModeHistory();
+        return stringifyKeyboardStates(
+                showCount, hideCount, restartCount, textInputTypeHistory, textInputModeHistory);
     }
 
-    String stringifyKeyboardStates(int show, int hide, int restart, Integer[] history) {
+    String stringifyKeyboardStates(int show, int hide, int restart, Integer[] inputTypeHistory,
+            Integer[] inputModeHistory) {
         return "show count: " + show + ", hide count: " + hide + ", restart count: " + restart
-                + ", input type history: " + Arrays.deepToString(history);
+                + ", input type history: " + Arrays.deepToString(inputTypeHistory)
+                + ", input mode history: " + Arrays.deepToString(inputModeHistory);
+    }
+
+    void performEditorAction(final int action) {
+        mConnection.performEditorAction(action);
     }
 
     void performGo(TestCallbackHelperContainer testCallbackHelperContainer) throws Throwable {
@@ -241,7 +273,7 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
         CriteriaHelper.pollUiThread(Criteria.equals(show, new Callable<Boolean>() {
             @Override
             public Boolean call() {
-                return mContentViewCore.isSelectActionBarShowing();
+                return mSelectionPopupController.isSelectActionBarShowing();
             }
         }));
     }
@@ -279,8 +311,8 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
         });
     }
 
-    ImeAdapter getImeAdapter() {
-        return mContentViewCore.getImeAdapterForTest();
+    ImeAdapterImpl getImeAdapter() {
+        return ImeAdapterImpl.fromWebContents(getWebContents());
     }
 
     ChromiumBaseInputConnection getInputConnection() {
@@ -288,7 +320,8 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
             return ThreadUtils.runOnUiThreadBlocking(new Callable<ChromiumBaseInputConnection>() {
                 @Override
                 public ChromiumBaseInputConnection call() {
-                    return mContentViewCore.getImeAdapterForTest().getInputConnectionForTest();
+                    return (ChromiumBaseInputConnection) getImeAdapter()
+                            .getInputConnectionForTest();
                 }
             });
         } catch (ExecutionException e) {
@@ -524,16 +557,43 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
         });
     }
 
+    void attachPhysicalKeyboard() {
+        Configuration hardKeyboardConfig = new Configuration(
+                getContentViewCore().getContext().getResources().getConfiguration());
+        hardKeyboardConfig.keyboard = Configuration.KEYBOARD_QWERTY;
+        hardKeyboardConfig.keyboardHidden = Configuration.KEYBOARDHIDDEN_YES;
+        hardKeyboardConfig.hardKeyboardHidden = Configuration.HARDKEYBOARDHIDDEN_NO;
+        onConfigurationChanged(hardKeyboardConfig);
+    }
+
+    void detachPhysicalKeyboard() {
+        Configuration softKeyboardConfig = new Configuration(
+                getContentViewCore().getContext().getResources().getConfiguration());
+        softKeyboardConfig.keyboard = Configuration.KEYBOARD_NOKEYS;
+        softKeyboardConfig.keyboardHidden = Configuration.KEYBOARDHIDDEN_NO;
+        softKeyboardConfig.hardKeyboardHidden = Configuration.HARDKEYBOARDHIDDEN_YES;
+        onConfigurationChanged(softKeyboardConfig);
+    }
+
+    private void onConfigurationChanged(final Configuration config) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                getContentViewCore().onConfigurationChanged(config);
+            }
+        });
+    }
+
     /**
      * Focus element, wait for a single state update, reset state update list.
      * @param id ID of the element to focus.
      */
     void focusElementAndWaitForStateUpdate(String id)
             throws InterruptedException, TimeoutException {
-        resetUpdateSelectionList();
+        resetAllStates();
         focusElement(id);
         waitAndVerifyUpdateSelection(0, 0, 0, -1, -1);
-        resetUpdateSelectionList();
+        resetAllStates();
     }
 
     void focusElement(final String id) throws InterruptedException, TimeoutException {
@@ -558,6 +618,7 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
         private final ChromiumBaseInputConnection.Factory mFactory;
 
         private final List<Integer> mTextInputTypeList = new ArrayList<>();
+        private final List<Integer> mTextInputModeList = new ArrayList<>();
         private EditorInfo mOutAttrs;
 
         public TestInputConnectionFactory(ChromiumBaseInputConnection.Factory factory) {
@@ -565,12 +626,13 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
         }
 
         @Override
-        public ChromiumBaseInputConnection initializeAndGet(View view, ImeAdapter imeAdapter,
+        public ChromiumBaseInputConnection initializeAndGet(View view, ImeAdapterImpl imeAdapter,
                 int inputType, int inputFlags, int inputMode, int selectionStart, int selectionEnd,
                 EditorInfo outAttrs) {
             mTextInputTypeList.add(inputType);
+            mTextInputModeList.add(inputMode);
             mOutAttrs = outAttrs;
-            return mFactory.initializeAndGet(view, imeAdapter, inputType, inputMode, inputFlags,
+            return mFactory.initializeAndGet(view, imeAdapter, inputType, inputFlags, inputMode,
                     selectionStart, selectionEnd, outAttrs);
         }
 
@@ -585,8 +647,15 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
             return result;
         }
 
-        public void clearTextInputTypeHistory() {
+        public void resetAllStates() {
             mTextInputTypeList.clear();
+            mTextInputModeList.clear();
+        }
+
+        public Integer[] getTextInputModeHistory() {
+            Integer[] result = new Integer[mTextInputModeList.size()];
+            mTextInputModeList.toArray(result);
+            return result;
         }
 
         public EditorInfo getOutAttrs() {

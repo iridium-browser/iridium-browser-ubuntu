@@ -32,22 +32,21 @@
 #define MediaSource_h
 
 #include <memory>
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/fileapi/URLRegistry.h"
 #include "core/html/TimeRanges.h"
-#include "core/html/URLRegistry.h"
 #include "core/html/media/HTMLMediaSource.h"
 #include "modules/EventTargetModules.h"
 #include "modules/mediasource/SourceBuffer.h"
 #include "modules/mediasource/SourceBufferList.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
-#include "platform/wtf/Vector.h"
 #include "public/platform/WebMediaSource.h"
 
 namespace blink {
 
 class ExceptionState;
-class GenericEventQueue;
+class MediaElementEventQueue;
 class WebSourceBuffer;
 
 class MediaSource final : public EventTargetWithInlineData,
@@ -125,7 +124,7 @@ class MediaSource final : public EventTargetWithInlineData,
   void AddedToRegistry();
   void RemovedFromRegistry();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit MediaSource(ExecutionContext*);
@@ -146,7 +145,7 @@ class MediaSource final : public EventTargetWithInlineData,
 
   std::unique_ptr<WebMediaSource> web_media_source_;
   AtomicString ready_state_;
-  Member<GenericEventQueue> async_event_queue_;
+  Member<MediaElementEventQueue> async_event_queue_;
   WeakMember<HTMLMediaElement> attached_element_;
 
   Member<SourceBufferList> source_buffers_;

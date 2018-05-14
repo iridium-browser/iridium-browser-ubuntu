@@ -11,9 +11,9 @@
 
 // Ignore errors in auto-generated code.
 #if defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wswitch-enum"
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-variable"
-#pragma GCC diagnostic ignored "-Wswitch-enum"
 #elif defined(_MSC_VER)
 #pragma warning(disable: 4005)
 #pragma warning(disable: 4065)
@@ -22,6 +22,9 @@
 #pragma warning(disable: 4505)
 #pragma warning(disable: 4701)
 #pragma warning(disable: 4702)
+#endif
+#if defined(__clang__)
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
 #endif
 
 
@@ -63,13 +66,37 @@
 
 
 
-    #define yyget_lval yyget_lval
-    #define yyset_lval yyset_lval
+    
+#ifdef yyget_lval
+#define yyget_lval_ALREADY_DEFINED
+#else
+#define yyget_lval yyget_lval
+#endif
+
+    
+#ifdef yyset_lval
+#define yyset_lval_ALREADY_DEFINED
+#else
+#define yyset_lval yyset_lval
+#endif
 
 
 
-    #define yyget_lloc yyget_lloc
-    #define yyset_lloc yyset_lloc
+
+    
+#ifdef yyget_lloc
+#define yyget_lloc_ALREADY_DEFINED
+#else
+#define yyget_lloc yyget_lloc
+#endif
+
+    
+#ifdef yyset_lloc
+#define yyset_lloc_ALREADY_DEFINED
+#else
+#define yyset_lloc yyset_lloc
+#endif
+
 
 
 
@@ -1195,7 +1222,7 @@ static int ES2_ident_ES3_keyword_multiview_keyword(TParseContext *context, int t
 static int ES2_ident_ES3_reserved_ES3_1_keyword(TParseContext *context, int token);
 static int ES2_and_ES3_reserved_ES3_1_keyword(TParseContext *context, int token);
 static int ES2_and_ES3_ident_ES3_1_keyword(TParseContext *context, int token);
-static int ES3_extension_keyword_else_ident(TParseContext *context, const char *extension, int token);
+static int ES3_extension_keyword_else_ident(TParseContext *context, TExtension extension, int token);
 static int uint_constant(TParseContext *context);
 static int int_constant(TParseContext *context);
 static int float_constant(yyscan_t yyscanner);
@@ -1995,7 +2022,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 82:
 YY_RULE_SETUP
-{ return ES3_extension_keyword_else_ident(context, "GL_EXT_YUV_target", SAMPLEREXTERNAL2DY2YEXT); }
+{ return ES3_extension_keyword_else_ident(context, TExtension::EXT_YUV_target, SAMPLEREXTERNAL2DY2YEXT); }
 	YY_BREAK
 case 83:
 YY_RULE_SETUP
@@ -2007,7 +2034,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 85:
 YY_RULE_SETUP
-{ return ES3_extension_keyword_else_ident(context, "GL_EXT_YUV_target", YUVCSCSTANDARDEXT); }
+{ return ES3_extension_keyword_else_ident(context, TExtension::EXT_YUV_target, YUVCSCSTANDARDEXT); }
 	YY_BREAK
 case 86:
 YY_RULE_SETUP
@@ -2133,10 +2160,10 @@ case 142:
 YY_RULE_SETUP
 { 
     if (context->getShaderVersion() < 300) {
-		yylval->lex.string = NewPoolTString(yytext); 
-	    return check_type(yyscanner); 
-	}
-	return reserved_word(yyscanner);
+        yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
+        return check_type(yyscanner);
+    }
+    return reserved_word(yyscanner);
 }
 	YY_BREAK
 /* Reserved keywords in GLSL ES 1.00 that are not reserved in GLSL ES 3.00 */
@@ -2145,7 +2172,7 @@ YY_RULE_SETUP
 {
     if (context->getShaderVersion() >= 300)
     {
-        yylval->lex.string = NewPoolTString(yytext);
+        yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
         return check_type(yyscanner);
     }
 
@@ -2199,7 +2226,7 @@ YY_RULE_SETUP
 case 184:
 YY_RULE_SETUP
 {
-   yylval->lex.string = NewPoolTString(yytext); 
+   yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
    return check_type(yyscanner);
 }
 	YY_BREAK
@@ -2435,7 +2462,7 @@ case 242:
 YY_RULE_SETUP
 {
     BEGIN(INITIAL);
-    yylval->lex.string = NewPoolTString(yytext);
+    yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
     return FIELD_SELECTION;
 }
 	YY_BREAK
@@ -2736,6 +2763,8 @@ static int yy_get_next_buffer (yyscan_t yyscanner)
 			(void *) YY_CURRENT_BUFFER_LVALUE->yy_ch_buf, (yy_size_t) new_size , yyscanner );
 		if ( ! YY_CURRENT_BUFFER_LVALUE->yy_ch_buf )
 			YY_FATAL_ERROR( "out of dynamic memory in yy_get_next_buffer()" );
+		/* "- 2" to take care of EOB's */
+		YY_CURRENT_BUFFER_LVALUE->yy_buf_size = (int) (new_size - 2);
 	}
 
 	yyg->yy_n_chars += number_to_move;
@@ -3769,14 +3798,13 @@ yy_size_t string_input(char* buf, yy_size_t max_size, yyscan_t yyscanner) {
 
 int check_type(yyscan_t yyscanner) {
     struct yyguts_t* yyg = (struct yyguts_t*) yyscanner;
-    
+
     int token = IDENTIFIER;
-    TSymbol* symbol = yyextra->symbolTable.find(yytext, yyextra->getShaderVersion());
-    if (symbol && symbol->isVariable()) {
-        TVariable* variable = static_cast<TVariable*>(symbol);
-        if (variable->isUserType()) {
-            token = TYPE_NAME;
-        }
+    // Note that the ImmutableString used here isn't static or pool allocated - but it's fine since yytext is valid for the duration of its use.
+    const TSymbol* symbol = yyextra->symbolTable.find(ImmutableString(yytext, yyleng), yyextra->getShaderVersion());
+    if (symbol && symbol->isStruct())
+    {
+        token = TYPE_NAME;
     }
     yylval->lex.symbol = symbol;
     return token;
@@ -3820,7 +3848,7 @@ int ES2_ident_ES3_reserved_ES3_1_keyword(TParseContext *context, int token)
 
     if (context->getShaderVersion() < 300)
     {
-        yylval->lex.string = NewPoolTString(yytext);
+        yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
         return check_type(yyscanner);
     }
     else if (context->getShaderVersion() == 300)
@@ -3839,7 +3867,7 @@ int ES2_ident_ES3_keyword(TParseContext *context, int token)
     // not a reserved word in GLSL ES 1.00, so could be used as an identifier/type name
     if (context->getShaderVersion() < 300)
     {
-        yylval->lex.string = NewPoolTString(yytext);
+        yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
         return check_type(yyscanner);
     }
 
@@ -3853,9 +3881,9 @@ int ES2_ident_ES3_keyword_multiview_keyword(TParseContext *context, int token)
 
     // not a reserved word in GLSL ES 1.00, so could be used as an identifier/type name
     // except when multiview extension is enabled
-    if (context->getShaderVersion() < 300 && !context->isMultiviewExtensionEnabled())
+    if (context->getShaderVersion() < 300 && !context->isExtensionEnabled(TExtension::OVR_multiview))
     {
-        yylval->lex.string = NewPoolTString(yytext);
+        yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
         return check_type(yyscanner);
     }
 
@@ -3882,14 +3910,14 @@ int ES2_and_ES3_ident_ES3_1_keyword(TParseContext *context, int token)
     // not a reserved word in GLSL ES 1.00 and GLSL ES 3.00, so could be used as an identifier/type name
     if (context->getShaderVersion() < 310)
     {
-        yylval->lex.string = NewPoolTString(yytext);
+        yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
         return check_type(yyscanner);
     }
 
     return token;
 }
 
-int ES3_extension_keyword_else_ident(TParseContext *context, const char* extension, int token)
+int ES3_extension_keyword_else_ident(TParseContext *context, TExtension extension, int token)
 {
     struct yyguts_t* yyg = (struct yyguts_t*) context->getScanner();
     yyscan_t yyscanner = (yyscan_t) context->getScanner();
@@ -3900,7 +3928,7 @@ int ES3_extension_keyword_else_ident(TParseContext *context, const char* extensi
         return token;
     }
 
-    yylval->lex.string = NewPoolTString(yytext);
+    yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
     return check_type(yyscanner);
 }
 
@@ -3971,13 +3999,13 @@ int yuvcscstandardext_constant(TParseContext *context)
     yyscan_t yyscanner = (yyscan_t) context->getScanner();
 
     // a reserved word in GLSL ES 3.00 with enabled extension, otherwise could be used as an identifier/type name
-    if (context->getShaderVersion() >= 300 && context->isExtensionEnabled("GL_EXT_YUV_target"))
+    if (context->getShaderVersion() >= 300 && context->isExtensionEnabled(TExtension::EXT_YUV_target))
     {
-        yylval->lex.string = NewPoolTString(yytext);
+        yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
         return YUVCSCSTANDARDEXTCONSTANT;
     }
 
-    yylval->lex.string = NewPoolTString(yytext);
+    yylval->lex.string = AllocatePoolCharArray(yytext, yyleng);
     return check_type(yyscanner);
 }
 
@@ -4016,7 +4044,7 @@ int glslang_scan(size_t count, const char* const string[], const int length[],
     const TExtensionBehavior& extBehavior = context->extensionBehavior();
     for (TExtensionBehavior::const_iterator iter = extBehavior.begin();
          iter != extBehavior.end(); ++iter) {
-        preprocessor->predefineMacro(iter->first.c_str(), 1);
+        preprocessor->predefineMacro(GetExtensionNameString(iter->first), 1);
     }
     if (context->getFragmentPrecisionHigh())
         preprocessor->predefineMacro("GL_FRAGMENT_PRECISION_HIGH", 1);

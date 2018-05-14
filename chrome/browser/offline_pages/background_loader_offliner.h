@@ -26,6 +26,9 @@ namespace offline_pages {
 class OfflinerPolicy;
 class OfflinePageModel;
 
+class PageRenovationLoader;
+class PageRenovator;
+
 struct RequestStats {
   int requested;
   int completed;
@@ -36,10 +39,12 @@ struct RequestStats {
 // An Offliner implementation that attempts client-side rendering and saving
 // of an offline page. It uses the BackgroundLoader to load the page and the
 // OfflinePageModel to save it. Only one request may be active at a time.
-class BackgroundLoaderOffliner : public Offliner,
-                                 public content::WebContentsObserver,
-                                 public SnapshotController::Client,
-                                 public ResourceLoadingObserver {
+class BackgroundLoaderOffliner
+    : public Offliner,
+      public background_loader::BackgroundLoaderContents::Delegate,
+      public content::WebContentsObserver,
+      public SnapshotController::Client,
+      public ResourceLoadingObserver {
  public:
   BackgroundLoaderOffliner(
       content::BrowserContext* browser_context,
@@ -59,6 +64,12 @@ class BackgroundLoaderOffliner : public Offliner,
   void TerminateLoadIfInProgress() override;
   bool HandleTimeout(int64_t request_id) override;
 
+  // BackgroundLoaderContents::Delegate implementation.
+  // Called when a navigation resulted in a single-file download. e.g.
+  // When user navigated to a pdf page while offline and clicks on the
+  // "Download page later" button.
+  void CanDownload(const base::Callback<void(bool)>& callback) override;
+
   // WebContentsObserver implementation.
   void DocumentAvailableInMainFrame() override;
   void DocumentOnLoadCompletedInMainFrame() override;
@@ -69,6 +80,7 @@ class BackgroundLoaderOffliner : public Offliner,
 
   // SnapshotController::Client implementation.
   void StartSnapshot() override;
+  void RunRenovations() override;
 
   void SetSnapshotControllerForTest(
       std::unique_ptr<SnapshotController> controller);
@@ -104,6 +116,9 @@ class BackgroundLoaderOffliner : public Offliner,
   // Called to add a loading signal as we observe it.
   void AddLoadingSignal(const char* signal_name);
 
+  // Called by PageRenovator callback when renovations complete.
+  void RenovationsCompleted();
+
   void DeleteOfflinePageCallback(const SavePageRequest& request,
                                  DeletePageResult result);
 
@@ -130,6 +145,11 @@ class BackgroundLoaderOffliner : public Offliner,
   std::unique_ptr<LoadTerminationListener> load_termination_listener_;
   // Whether we are on a low-end device.
   bool is_low_end_device_;
+
+  // PageRenovationLoader must live longer than the PageRenovator.
+  std::unique_ptr<PageRenovationLoader> page_renovation_loader_;
+  // Per-offliner PageRenovator instance.
+  std::unique_ptr<PageRenovator> page_renovator_;
 
   // Save state.
   SaveState save_state_;

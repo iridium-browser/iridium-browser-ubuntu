@@ -49,8 +49,8 @@ Polymer({
 
   /** @private */
   onQueryParamsChanged_: function() {
-    var searchTerm = this.queryParams_.q || '';
-    var selectedId = this.queryParams_.id;
+    const searchTerm = this.queryParams_.q || '';
+    let selectedId = this.queryParams_.id;
     if (!selectedId && !searchTerm)
       selectedId = BOOKMARKS_BAR_ID;
 
@@ -63,10 +63,10 @@ Polymer({
       this.selectedId_ = selectedId;
       // Need to dispatch a deferred action so that during page load
       // `this.getState()` will only evaluate after the Store is initialized.
-      this.dispatchAsync(function(dispatch) {
+      this.dispatchAsync((dispatch) => {
         dispatch(
             bookmarks.actions.selectFolder(selectedId, this.getState().nodes));
-      }.bind(this));
+      });
     }
   },
 

@@ -23,9 +23,9 @@ ViewportScrollCallback::ViewportScrollCallback(
       overscroll_controller_(overscroll_controller),
       root_frame_viewport_(&root_frame_viewport) {}
 
-ViewportScrollCallback::~ViewportScrollCallback() {}
+ViewportScrollCallback::~ViewportScrollCallback() = default;
 
-DEFINE_TRACE(ViewportScrollCallback) {
+void ViewportScrollCallback::Trace(blink::Visitor* visitor) {
   visitor->Trace(browser_controls_);
   visitor->Trace(overscroll_controller_);
   visitor->Trace(root_frame_viewport_);
@@ -71,7 +71,7 @@ bool ViewportScrollCallback::ScrollBrowserControls(ScrollState& state) {
   return false;
 }
 
-void ViewportScrollCallback::handleEvent(ScrollState* state) {
+void ViewportScrollCallback::Invoke(ScrollState* state) {
   DCHECK(state);
   if (!root_frame_viewport_)
     return;

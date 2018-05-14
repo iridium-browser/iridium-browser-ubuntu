@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <vector>
+
 #include "base/macros.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/cras_audio_client.h"
@@ -24,9 +26,9 @@ class CHROMEOS_EXPORT FakeCrasAudioClient : public CrasAudioClient {
   void AddObserver(Observer* observer) override;
   void RemoveObserver(Observer* observer) override;
   bool HasObserver(const Observer* observer) const override;
-  void GetVolumeState(const GetVolumeStateCallback& callback) override;
-  void GetNodes(const GetNodesCallback& callback,
-                const ErrorCallback& error_callback) override;
+  void GetVolumeState(DBusMethodCallback<VolumeState> callback) override;
+  void GetDefaultOutputBufferSize(DBusMethodCallback<int> callback) override;
+  void GetNodes(DBusMethodCallback<AudioNodeList> callback) override;
   void SetOutputNodeVolume(uint64_t node_id, int32_t volume) override;
   void SetOutputUserMute(bool mute_on) override;
   void SetInputNodeGain(uint64_t node_id, int32_t gain) override;
@@ -41,7 +43,7 @@ class CHROMEOS_EXPORT FakeCrasAudioClient : public CrasAudioClient {
   void SetGlobalOutputChannelRemix(int32_t channels,
                                    const std::vector<double>& mixer) override;
   void WaitForServiceToBeAvailable(
-      const WaitForServiceToBeAvailableCallback& callback) override;
+      WaitForServiceToBeAvailableCallback callback) override;
 
   // Modifies an AudioNode from |node_list_| based on |audio_node.id|.
   // if the |audio_node.id| cannot be found in list, Add an
@@ -60,6 +62,9 @@ class CHROMEOS_EXPORT FakeCrasAudioClient : public CrasAudioClient {
 
   // Generates fake signal for OutputNodeVolumeChanged.
   void NotifyOutputNodeVolumeChangedForTesting(uint64_t node_id, int volume);
+
+  // Generates fake hotword signal for HotwordTriggered.
+  void NotifyHotwordTriggeredForTesting(uint64_t tv_sec, uint64_t tv_nsec);
 
   const AudioNodeList& node_list() const { return node_list_; }
   const uint64_t& active_input_node_id() const { return active_input_node_id_; }

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "services/ui/public/interfaces/window_server_test.mojom.h"
 #include "services/ui/public/interfaces/window_tree_constants.mojom.h"
@@ -83,20 +84,20 @@ class TargetView : public views::View {
 };
 
 std::unique_ptr<ui::PointerEvent> CreateMouseMoveEvent(int x, int y) {
-  return base::MakeUnique<ui::PointerEvent>(ui::MouseEvent(
+  return std::make_unique<ui::PointerEvent>(ui::MouseEvent(
       ui::ET_MOUSE_MOVED, gfx::Point(x, y), gfx::Point(x, y),
       ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON, ui::EF_NONE));
 }
 
 std::unique_ptr<ui::PointerEvent> CreateMouseDownEvent(int x, int y) {
-  return base::MakeUnique<ui::PointerEvent>(
+  return std::make_unique<ui::PointerEvent>(
       ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::Point(x, y), gfx::Point(x, y),
                      ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                      ui::EF_LEFT_MOUSE_BUTTON));
 }
 
 std::unique_ptr<ui::PointerEvent> CreateMouseUpEvent(int x, int y) {
-  return base::MakeUnique<ui::PointerEvent>(
+  return std::make_unique<ui::PointerEvent>(
       ui::MouseEvent(ui::ET_MOUSE_RELEASED, gfx::Point(x, y), gfx::Point(x, y),
                      ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                      ui::EF_LEFT_MOUSE_BUTTON));
@@ -123,9 +124,9 @@ void DragTest_Part2(int64_t display_id,
   if (!result)
     quit_closure.Run();
 
-  ui::mojom::WindowServerTest* server_test =
-      MusClient::Get()->GetTestingInterface();
-  server_test->DispatchEvent(
+  ui::mojom::RemoteEventDispatcher* dispatcher =
+      MusClient::Get()->GetTestingEventDispater();
+  dispatcher->DispatchEvent(
       display_id, CreateMouseUpEvent(30, 30),
       base::Bind(&DragTest_Part3, display_id, quit_closure));
 }
@@ -137,9 +138,9 @@ void DragTest_Part1(int64_t display_id,
   if (!result)
     quit_closure.Run();
 
-  ui::mojom::WindowServerTest* server_test =
-      MusClient::Get()->GetTestingInterface();
-  server_test->DispatchEvent(
+  ui::mojom::RemoteEventDispatcher* dispatcher =
+      MusClient::Get()->GetTestingEventDispater();
+  dispatcher->DispatchEvent(
       display_id, CreateMouseMoveEvent(30, 30),
       base::Bind(&DragTest_Part2, display_id, quit_closure));
 }
@@ -150,20 +151,20 @@ TEST_F(DragTestInteractive, DragTest) {
   source_widget->SetContentsView(source_view);
   source_widget->Show();
 
-  aura::test::ChangeCompletionWaiter source_waiter(
-      MusClient::Get()->window_tree_client(), aura::ChangeType::BOUNDS, false);
+  aura::test::ChangeCompletionWaiter source_waiter(aura::ChangeType::BOUNDS,
+                                                   false);
   source_widget->SetBounds(gfx::Rect(0, 0, 20, 20));
-  source_waiter.Wait();
+  ASSERT_TRUE(source_waiter.Wait());
 
   Widget* target_widget = CreateTopLevelFramelessPlatformWidget();
   TargetView* target_view = new TargetView;
   target_widget->SetContentsView(target_view);
   target_widget->Show();
 
-  aura::test::ChangeCompletionWaiter target_waiter(
-      MusClient::Get()->window_tree_client(), aura::ChangeType::BOUNDS, false);
+  aura::test::ChangeCompletionWaiter target_waiter(aura::ChangeType::BOUNDS,
+                                                   false);
   target_widget->SetBounds(gfx::Rect(20, 20, 20, 20));
-  target_waiter.Wait();
+  ASSERT_TRUE(target_waiter.Wait());
 
   auto* dnwa =
       static_cast<DesktopNativeWidgetAura*>(source_widget->native_widget());
@@ -174,9 +175,9 @@ TEST_F(DragTestInteractive, DragTest) {
 
   {
     base::RunLoop run_loop;
-    ui::mojom::WindowServerTest* server_test =
-        MusClient::Get()->GetTestingInterface();
-    server_test->DispatchEvent(
+    ui::mojom::RemoteEventDispatcher* dispatcher =
+        MusClient::Get()->GetTestingEventDispater();
+    dispatcher->DispatchEvent(
         display_id, CreateMouseDownEvent(10, 10),
         base::Bind(&DragTest_Part1, display_id, run_loop.QuitClosure()));
 

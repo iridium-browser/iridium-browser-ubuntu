@@ -9,7 +9,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
@@ -46,15 +45,17 @@ bool WillDispatchTabUpdatedEvent(
     Event* event,
     const base::DictionaryValue* listener_filter) {
   std::unique_ptr<api::tabs::Tab> tab_object =
-      ExtensionTabUtil::CreateTabObject(contents, extension);
+      ExtensionTabUtil::CreateTabObject(contents, ExtensionTabUtil::kScrubTab,
+                                        extension);
 
   std::unique_ptr<base::DictionaryValue> tab_value = tab_object->ToValue();
 
-  auto changed_properties = base::MakeUnique<base::DictionaryValue>();
+  auto changed_properties = std::make_unique<base::DictionaryValue>();
   const base::Value* value = nullptr;
   for (const auto& property : changed_property_names) {
     if (tab_value->Get(property, &value))
-      changed_properties->Set(property, base::MakeUnique<base::Value>(*value));
+      changed_properties->Set(property,
+                              std::make_unique<base::Value>(value->Clone()));
   }
 
   event->event_args->Set(1, std::move(changed_properties));
@@ -116,8 +117,7 @@ void TabsEventRouter::TabEntry::NavigationEntryCommitted(
   router_->TabUpdated(this, std::move(changed_property_names));
 }
 
-void TabsEventRouter::TabEntry::TitleWasSet(content::NavigationEntry* entry,
-                                            bool explicit_set) {
+void TabsEventRouter::TabEntry::TitleWasSet(content::NavigationEntry* entry) {
   std::set<std::string> changed_property_names;
   changed_property_names.insert(tabs_constants::kTitleKey);
   router_->TabUpdated(this, std::move(changed_property_names));
@@ -160,7 +160,7 @@ void TabsEventRouter::RegisterForTabNotifications(WebContents* contents) {
 
   int tab_id = ExtensionTabUtil::GetTabId(contents);
   DCHECK(tab_entries_.find(tab_id) == tab_entries_.end());
-  tab_entries_[tab_id] = base::MakeUnique<TabEntry>(this, contents);
+  tab_entries_[tab_id] = std::make_unique<TabEntry>(this, contents);
 }
 
 void TabsEventRouter::UnregisterForTabNotifications(WebContents* contents) {
@@ -191,7 +191,9 @@ static bool WillDispatchTabCreatedEvent(
     const base::DictionaryValue* listener_filter) {
   event->event_args->Clear();
   std::unique_ptr<base::DictionaryValue> tab_value =
-      ExtensionTabUtil::CreateTabObject(contents, extension)->ToValue();
+      ExtensionTabUtil::CreateTabObject(contents, ExtensionTabUtil::kScrubTab,
+                                        extension)
+          ->ToValue();
   tab_value->SetBoolean(tabs_constants::kSelectedKey, active);
   tab_value->SetBoolean(tabs_constants::kActiveKey, active);
   event->event_args->Append(std::move(tab_value));
@@ -203,7 +205,7 @@ void TabsEventRouter::TabCreatedAt(WebContents* contents,
                                    bool active) {
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
   std::unique_ptr<base::ListValue> args(new base::ListValue);
-  auto event = base::MakeUnique<Event>(events::TABS_ON_CREATED,
+  auto event = std::make_unique<Event>(events::TABS_ON_CREATED,
                                        tabs::OnCreated::kEventName,
                                        std::move(args), profile);
   event->user_gesture = EventRouter::USER_GESTURE_NOT_ENABLED;
@@ -236,9 +238,9 @@ void TabsEventRouter::TabInsertedAt(TabStripModel* tab_strip_model,
       new base::DictionaryValue());
   object_args->Set(
       tabs_constants::kNewWindowIdKey,
-      base::MakeUnique<Value>(ExtensionTabUtil::GetWindowIdOfTab(contents)));
+      std::make_unique<Value>(ExtensionTabUtil::GetWindowIdOfTab(contents)));
   object_args->Set(tabs_constants::kNewPositionKey,
-                   base::MakeUnique<Value>(index));
+                   std::make_unique<Value>(index));
   args->Append(std::move(object_args));
 
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
@@ -259,9 +261,9 @@ void TabsEventRouter::TabDetachedAt(WebContents* contents, int index) {
       new base::DictionaryValue());
   object_args->Set(
       tabs_constants::kOldWindowIdKey,
-      base::MakeUnique<Value>(ExtensionTabUtil::GetWindowIdOfTab(contents)));
+      std::make_unique<Value>(ExtensionTabUtil::GetWindowIdOfTab(contents)));
   object_args->Set(tabs_constants::kOldPositionKey,
-                   base::MakeUnique<Value>(index));
+                   std::make_unique<Value>(index));
   args->Append(std::move(object_args));
 
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
@@ -296,13 +298,13 @@ void TabsEventRouter::ActiveTabChanged(WebContents* old_contents,
                                        WebContents* new_contents,
                                        int index,
                                        int reason) {
-  auto args = base::MakeUnique<base::ListValue>();
+  auto args = std::make_unique<base::ListValue>();
   int tab_id = ExtensionTabUtil::GetTabId(new_contents);
   args->AppendInteger(tab_id);
 
-  auto object_args = base::MakeUnique<base::DictionaryValue>();
+  auto object_args = std::make_unique<base::DictionaryValue>();
   object_args->Set(tabs_constants::kWindowIdKey,
-                   base::MakeUnique<Value>(
+                   std::make_unique<Value>(
                        ExtensionTabUtil::GetWindowIdOfTab(new_contents)));
   args->Append(object_args->CreateDeepCopy());
 
@@ -321,8 +323,8 @@ void TabsEventRouter::ActiveTabChanged(WebContents* old_contents,
                 tabs::OnActiveChanged::kEventName, std::move(args), gesture);
 
   // The onActivated event takes one argument: {windowId, tabId}.
-  auto on_activated_args = base::MakeUnique<base::ListValue>();
-  object_args->Set(tabs_constants::kTabIdKey, base::MakeUnique<Value>(tab_id));
+  auto on_activated_args = std::make_unique<base::ListValue>();
+  object_args->Set(tabs_constants::kTabIdKey, std::make_unique<Value>(tab_id));
   on_activated_args->Append(std::move(object_args));
   DispatchEvent(profile, events::TABS_ON_ACTIVATED,
                 tabs::OnActivated::kEventName, std::move(on_activated_args),
@@ -350,7 +352,7 @@ void TabsEventRouter::TabSelectionChanged(
 
   select_info->Set(
       tabs_constants::kWindowIdKey,
-      base::MakeUnique<Value>(
+      std::make_unique<Value>(
           ExtensionTabUtil::GetWindowIdOfTabStripModel(tab_strip_model)));
 
   select_info->Set(tabs_constants::kTabIdsKey, std::move(all_tabs));
@@ -377,11 +379,11 @@ void TabsEventRouter::TabMoved(WebContents* contents,
       new base::DictionaryValue());
   object_args->Set(
       tabs_constants::kWindowIdKey,
-      base::MakeUnique<Value>(ExtensionTabUtil::GetWindowIdOfTab(contents)));
+      std::make_unique<Value>(ExtensionTabUtil::GetWindowIdOfTab(contents)));
   object_args->Set(tabs_constants::kFromIndexKey,
-                   base::MakeUnique<Value>(from_index));
+                   std::make_unique<Value>(from_index));
   object_args->Set(tabs_constants::kToIndexKey,
-                   base::MakeUnique<Value>(to_index));
+                   std::make_unique<Value>(to_index));
   args->Append(std::move(object_args));
 
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
@@ -426,7 +428,7 @@ void TabsEventRouter::DispatchEvent(
   if (!profile_->IsSameProfile(profile) || !event_router)
     return;
 
-  auto event = base::MakeUnique<Event>(histogram_value, event_name,
+  auto event = std::make_unique<Event>(histogram_value, event_name,
                                        std::move(args), profile);
   event->user_gesture = user_gesture;
   event_router->BroadcastEvent(std::move(event));
@@ -453,7 +455,7 @@ void TabsEventRouter::DispatchTabUpdatedEvent(
   // WillDispatchTabUpdatedEvent.
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
 
-  auto event = base::MakeUnique<Event>(events::TABS_ON_UPDATED,
+  auto event = std::make_unique<Event>(events::TABS_ON_UPDATED,
                                        tabs::OnUpdated::kEventName,
                                        std::move(args_base), profile);
   event->user_gesture = EventRouter::USER_GESTURE_NOT_ENABLED;

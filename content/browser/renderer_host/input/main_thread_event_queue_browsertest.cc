@@ -112,8 +112,8 @@ class MainThreadEventQueueBrowserTest : public ContentBrowserTest {
     // event as ExecuteScript is synchronous.
     SimulateMouseClick(shell()->web_contents(), 0,
                        blink::WebPointerProperties::Button::kLeft);
-    scoped_refptr<InputMsgWatcher> input_msg_watcher(
-        new InputMsgWatcher(GetWidgetHost(), blink::WebInputEvent::kMouseMove));
+    auto input_msg_watcher = std::make_unique<InputMsgWatcher>(
+        GetWidgetHost(), blink::WebInputEvent::kMouseMove);
     GetWidgetHost()->ForwardMouseEvent(SyntheticWebMouseEventBuilder::Build(
         blink::WebInputEvent::kMouseMove, 10, 10, 0));
     GetWidgetHost()->ForwardMouseEvent(SyntheticWebMouseEventBuilder::Build(
@@ -154,8 +154,8 @@ class MainThreadEventQueueBrowserTest : public ContentBrowserTest {
     // event as ExecuteScript is synchronous.
     SimulateMouseClick(shell()->web_contents(), 0,
                        blink::WebPointerProperties::Button::kLeft);
-    scoped_refptr<InputMsgWatcher> input_msg_watcher(
-        new InputMsgWatcher(GetWidgetHost(), blink::WebInputEvent::kTouchMove));
+    auto input_msg_watcher = std::make_unique<InputMsgWatcher>(
+        GetWidgetHost(), blink::WebInputEvent::kTouchMove);
 
     for (const auto& event : kEvents)
       GetWidgetHost()->ForwardEmulatedTouchEvent(event);
@@ -184,8 +184,13 @@ class MainThreadEventQueueBrowserTest : public ContentBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(MainThreadEventQueueBrowserTest);
 };
 
+// Disabled due to flaky test results: crbug.com/805666.
+#if defined(OS_WIN)
+#define MAYBE_MouseMove DISABLED_MouseMove
+#else
 #define MAYBE_MouseMove MouseMove
-IN_PROC_BROWSER_TEST_F(MainThreadEventQueueBrowserTest, MouseMove) {
+#endif
+IN_PROC_BROWSER_TEST_F(MainThreadEventQueueBrowserTest, MAYBE_MouseMove) {
   LoadURL(kJankyPageURL);
   DoMouseMove();
 }

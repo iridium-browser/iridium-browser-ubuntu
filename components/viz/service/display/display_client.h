@@ -5,7 +5,11 @@
 #ifndef COMPONENTS_VIZ_SERVICE_DISPLAY_DISPLAY_CLIENT_H_
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_DISPLAY_CLIENT_H_
 
-#include "cc/quads/render_pass.h"
+#include "components/viz/common/quads/render_pass.h"
+
+namespace gfx {
+struct CALayerParams;
+}  // namespace gfx
 
 namespace viz {
 
@@ -13,10 +17,11 @@ class DisplayClient {
  public:
   virtual ~DisplayClient() {}
   virtual void DisplayOutputSurfaceLost() = 0;
-  virtual void DisplayWillDrawAndSwap(
-      bool will_draw_and_swap,
-      const cc::RenderPassList& render_passes) = 0;
+  virtual void DisplayWillDrawAndSwap(bool will_draw_and_swap,
+                                      const RenderPassList& render_passes) = 0;
   virtual void DisplayDidDrawAndSwap() = 0;
+  virtual void DisplayDidReceiveCALayerParams(
+      const gfx::CALayerParams& ca_layer_params) = 0;
 };
 
 }  // namespace viz

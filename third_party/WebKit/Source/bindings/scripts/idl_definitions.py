@@ -64,7 +64,6 @@ Design doc: http://www.chromium.org/developers/design-documents/idl-compiler
 
 import abc
 
-from idl_types import IdlArrayType
 from idl_types import IdlFrozenArrayType
 from idl_types import IdlNullableType
 from idl_types import IdlRecordType
@@ -72,7 +71,7 @@ from idl_types import IdlSequenceType
 from idl_types import IdlType
 from idl_types import IdlUnionType
 
-SPECIAL_KEYWORD_LIST = ['LEGACYCALLER', 'GETTER', 'SETTER', 'DELETER']
+SPECIAL_KEYWORD_LIST = ['GETTER', 'SETTER', 'DELETER']
 
 
 ################################################################################
@@ -101,6 +100,7 @@ class IdlDefinitions(object):
         self.enumerations = {}
         self.implements = []
         self.interfaces = {}
+        self.first_name = None
         self.typedefs = {}
 
         node_class = node.GetClass()
@@ -113,6 +113,8 @@ class IdlDefinitions(object):
             if child_class == 'Interface':
                 interface = IdlInterface(child)
                 self.interfaces[interface.name] = interface
+                if not self.first_name:
+                    self.first_name = interface.name
             elif child_class == 'Typedef':
                 typedef = IdlTypedef(child)
                 self.typedefs[typedef.name] = typedef
@@ -127,6 +129,8 @@ class IdlDefinitions(object):
             elif child_class == 'Dictionary':
                 dictionary = IdlDictionary(child)
                 self.dictionaries[dictionary.name] = dictionary
+                if not self.first_name:
+                    self.first_name = dictionary.name
             else:
                 raise ValueError('Unrecognized node class: %s' % child_class)
 
@@ -205,7 +209,7 @@ class IdlCallbackFunction(TypedObject):
 class IdlDictionary(object):
     def __init__(self, node):
         self.extended_attributes = {}
-        self.is_partial = bool(node.GetProperty('Partial'))
+        self.is_partial = bool(node.GetProperty('PARTIAL'))
         self.name = node.GetName()
         self.members = []
         self.parent = None
@@ -297,14 +301,14 @@ class IdlInterface(object):
         self.stringifier = None
         self.iterable = None
         self.has_indexed_elements = False
+        self.has_named_property_getter = False
         self.maplike = None
         self.setlike = None
         self.original_interface = None
         self.partial_interfaces = []
 
         self.is_callback = bool(node.GetProperty('CALLBACK'))
-        # FIXME: uppercase 'Partial' => 'PARTIAL' in base IDL parser
-        self.is_partial = bool(node.GetProperty('Partial'))
+        self.is_partial = bool(node.GetProperty('PARTIAL'))
         self.name = node.GetName()
         self.idl_type = IdlType(self.name)
 
@@ -337,8 +341,11 @@ class IdlInterface(object):
                 self.extended_attributes = extended_attributes
             elif child_class == 'Operation':
                 op = IdlOperation(child)
-                if 'getter' in op.specials and str(op.arguments[0].idl_type) == 'unsigned long':
-                    has_indexed_property_getter = True
+                if 'getter' in op.specials:
+                    if str(op.arguments[0].idl_type) == 'unsigned long':
+                        has_indexed_property_getter = True
+                    elif str(op.arguments[0].idl_type) == 'DOMString':
+                        self.has_named_property_getter = True
                 self.operations.append(op)
             elif child_class == 'Inherit':
                 self.parent = child.GetName()
@@ -359,6 +366,15 @@ class IdlInterface(object):
 
         if len(filter(None, [self.iterable, self.maplike, self.setlike])) > 1:
             raise ValueError('Interface can only have one of iterable<>, maplike<> and setlike<>.')
+
+        # TODO(rakuco): This validation logic should be in v8_interface according to bashi@.
+        # At the moment, doing so does not work because several IDL files are partial Window
+        # interface definitions, and interface_dependency_resolver.py doesn't seem to have any logic
+        # to prevent these partial interfaces from resetting has_named_property to False.
+        if 'LegacyUnenumerableNamedProperties' in self.extended_attributes and \
+           not self.has_named_property_getter:
+            raise ValueError('[LegacyUnenumerableNamedProperties] can be used only in interfaces '
+                             'that support named properties.')
 
         if has_integer_typed_length and has_indexed_property_getter:
             self.has_indexed_elements = True
@@ -458,13 +474,7 @@ class IdlConstant(TypedObject):
         # ConstType is more limited than Type, so subtree is smaller and
         # we don't use the full type_node_to_type function.
         self.idl_type = type_node_inner_to_type(type_node)
-        # FIXME: This code is unnecessarily complicated due to the rather
-        # inconsistent way the upstream IDL parser outputs default values.
-        # http://crbug.com/374178
-        if value_node.GetProperty('TYPE') == 'float':
-            self.value = value_node.GetProperty('VALUE')
-        else:
-            self.value = value_node.GetName()
+        self.value = value_node.GetProperty('VALUE')
 
         if num_children == 3:
             ext_attributes_node = children[2]
@@ -512,21 +522,18 @@ class IdlLiteralNull(IdlLiteral):
 
 
 def default_node_to_idl_literal(node):
-    # FIXME: This code is unnecessarily complicated due to the rather
-    # inconsistent way the upstream IDL parser outputs default values.
-    # http://crbug.com/374178
     idl_type = node.GetProperty('TYPE')
+    value = node.GetProperty('VALUE')
     if idl_type == 'DOMString':
-        value = node.GetProperty('NAME')
         if '"' in value or '\\' in value:
             raise ValueError('Unsupported string value: %r' % value)
         return IdlLiteral(idl_type, value)
     if idl_type == 'integer':
-        return IdlLiteral(idl_type, int(node.GetProperty('NAME'), base=0))
+        return IdlLiteral(idl_type, int(value, base=0))
     if idl_type == 'float':
-        return IdlLiteral(idl_type, float(node.GetProperty('VALUE')))
+        return IdlLiteral(idl_type, float(value))
     if idl_type in ['boolean', 'sequence']:
-        return IdlLiteral(idl_type, node.GetProperty('VALUE'))
+        return IdlLiteral(idl_type, value)
     if idl_type == 'NULL':
         return IdlLiteralNull()
     raise ValueError('Unrecognized default value type: %s' % idl_type)
@@ -548,10 +555,7 @@ class IdlOperation(TypedObject):
         if not node:
             return
 
-        self.name = node.GetName()  # FIXME: should just be: or ''
-        # FIXME: AST should use None internally
-        if self.name == '_unnamed_':
-            self.name = ''
+        self.name = node.GetName()
 
         self.is_static = bool(node.GetProperty('STATIC'))
         property_dictionary = node.GetProperties()
@@ -932,23 +936,16 @@ def clear_constructor_attributes(extended_attributes):
 
 def type_node_to_type(node):
     children = node.GetChildren()
-    if len(children) < 1 or len(children) > 2:
-        raise ValueError('Type node expects 1 or 2 children (type + optional array []), got %s (multi-dimensional arrays are not supported).' % len(children))
+    if len(children) != 1 and len(children) != 2:
+        raise ValueError('Type node expects 1 or 2 child(ren), got %d.' % len(children))
 
     base_type = type_node_inner_to_type(children[0])
+    if len(children) == 2:
+        extended_attributes = ext_attributes_node_to_extended_attributes(children[1])
+        base_type.set_extended_attributes(extended_attributes)
 
     if node.GetProperty('NULLABLE'):
         base_type = IdlNullableType(base_type)
-
-    if len(children) == 2:
-        array_node = children[1]
-        array_node_class = array_node.GetClass()
-        if array_node_class != 'Array':
-            raise ValueError('Expected Array node as TypeSuffix, got %s node.' % array_node_class)
-        array_type = IdlArrayType(base_type)
-        if array_node.GetProperty('NULLABLE'):
-            return IdlNullableType(array_type)
-        return array_type
 
     return base_type
 

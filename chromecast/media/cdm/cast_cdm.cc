@@ -4,16 +4,18 @@
 
 #include "chromecast/media/cdm/cast_cdm.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromecast/media/base/decrypt_context_impl.h"
+#include "chromecast/media/base/media_caps.h"
 #include "chromecast/media/base/media_resource_tracker.h"
 #include "media/base/cdm_key_information.h"
+#include "media/base/cdm_promise.h"
 #include "media/base/decryptor.h"
 #include "media/cdm/player_tracker_impl.h"
 #include "url/gurl.h"
@@ -21,6 +23,8 @@
 namespace chromecast {
 namespace media {
 namespace {
+constexpr size_t kKeyStatusCount =
+    static_cast<size_t>(::media::CdmKeyInformation::KEY_STATUS_MAX) + 1;
 
 class CastCdmContextImpl : public CastCdmContext {
  public:
@@ -61,6 +65,34 @@ class CastCdmContextImpl : public CastCdmContext {
 
   DISALLOW_COPY_AND_ASSIGN(CastCdmContextImpl);
 };
+
+// Returns the HDCP version multiplied by ten.
+int HdcpVersionX10(::media::HdcpVersion hdcp_version) {
+  switch (hdcp_version) {
+    case ::media::HdcpVersion::kHdcpVersionNone:
+      return 0;
+    case ::media::HdcpVersion::kHdcpVersion1_0:
+      return 10;
+    case ::media::HdcpVersion::kHdcpVersion1_1:
+      return 11;
+    case ::media::HdcpVersion::kHdcpVersion1_2:
+      return 12;
+    case ::media::HdcpVersion::kHdcpVersion1_3:
+      return 13;
+    case ::media::HdcpVersion::kHdcpVersion1_4:
+      return 14;
+    case ::media::HdcpVersion::kHdcpVersion2_0:
+      return 20;
+    case ::media::HdcpVersion::kHdcpVersion2_1:
+      return 21;
+    case ::media::HdcpVersion::kHdcpVersion2_2:
+      return 22;
+
+    default:
+      NOTREACHED();
+      return 0;
+  }
+}
 
 }  // namespace
 
@@ -111,6 +143,17 @@ void CastCdm::UnregisterPlayer(int registration_id) {
   return cast_cdm_context_.get();
 }
 
+void CastCdm::GetStatusForPolicy(
+    ::media::HdcpVersion min_hdcp_version,
+    std::unique_ptr<::media::KeyStatusCdmPromise> promise) {
+  int min_hdcp_x10 = HdcpVersionX10(min_hdcp_version);
+  int cur_hdcp_x10 = MediaCapabilities::GetHdcpVersion();
+  promise->resolve(
+      cur_hdcp_x10 >= min_hdcp_x10
+          ? ::media::CdmKeyInformation::KeyStatus::USABLE
+          : ::media::CdmKeyInformation::KeyStatus::OUTPUT_RESTRICTED);
+}
+
 void CastCdm::OnSessionMessage(const std::string& session_id,
                                const std::vector<uint8_t>& message,
                                ::media::CdmMessageType message_type) {
@@ -126,7 +169,7 @@ void CastCdm::OnSessionKeysChange(const std::string& session_id,
                                   ::media::CdmKeysInfo keys_info) {
   logging::LogMessage log_message(__FILE__, __LINE__, logging::LOG_INFO);
   log_message.stream() << "keystatuseschange ";
-  int status_count[::media::CdmKeyInformation::KEY_STATUS_MAX] = {0};
+  int status_count[kKeyStatusCount] = {0};
   for (const auto& key_info : keys_info) {
     status_count[key_info->status]++;
   }
@@ -156,7 +199,7 @@ void CastCdm::KeyIdAndKeyPairsToInfo(const ::media::KeyIdAndKeyPairs& keys,
                                      ::media::CdmKeysInfo* keys_info) {
   DCHECK(keys_info);
   for (const std::pair<std::string, std::string>& key : keys) {
-    keys_info->push_back(base::MakeUnique<::media::CdmKeyInformation>(
+    keys_info->push_back(std::make_unique<::media::CdmKeyInformation>(
         key.first, ::media::CdmKeyInformation::USABLE, 0));
   }
 }

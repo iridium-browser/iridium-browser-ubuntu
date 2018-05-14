@@ -5,14 +5,15 @@
 #ifndef WorkletGlobalScopeProxy_h
 #define WorkletGlobalScopeProxy_h
 
+#include "base/single_thread_task_runner.h"
 #include "core/CoreExport.h"
-#include "platform/WebTaskRunner.h"
 #include "platform/heap/GarbageCollected.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
+class WorkletModuleResponsesMap;
 class WorkletPendingTasks;
 
 // Abstracts communication from (Main/Threaded)Worklet on the main thread to
@@ -20,14 +21,15 @@ class WorkletPendingTasks;
 // about the thread WorkletGlobalScope runs on.
 class CORE_EXPORT WorkletGlobalScopeProxy : public GarbageCollectedMixin {
  public:
-  virtual ~WorkletGlobalScopeProxy() {}
+  virtual ~WorkletGlobalScopeProxy() = default;
 
   // Runs the "fetch and invoke a worklet script" algorithm:
   // https://drafts.css-houdini.org/worklets/#fetch-and-invoke-a-worklet-script
   virtual void FetchAndInvokeScript(
       const KURL& module_url_record,
-      WebURLRequest::FetchCredentialsMode,
-      RefPtr<WebTaskRunner> outside_settings_task_runner,
+      WorkletModuleResponsesMap*,
+      network::mojom::FetchCredentialsMode,
+      scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
       WorkletPendingTasks*) = 0;
 
   // Notifies that the Worklet object is destroyed. This should be called in the

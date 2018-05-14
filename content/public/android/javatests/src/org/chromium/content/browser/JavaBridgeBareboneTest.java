@@ -18,7 +18,6 @@ import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageFinishedHelper;
-import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 
 /**
  * Common functionality for testing the Java Bridge.
@@ -26,7 +25,8 @@ import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 @RunWith(BaseJUnit4ClassRunner.class)
 public class JavaBridgeBareboneTest {
     @Rule
-    public ContentShellActivityTestRule mActivityTestRule = new ContentShellActivityTestRule();
+    public JavaBridgeActivityTestRule mActivityTestRule =
+            new JavaBridgeActivityTestRule().shouldSetUp(false);
 
     private TestCallbackHelperContainer mTestCallbackHelperContainer;
 
@@ -43,7 +43,7 @@ public class JavaBridgeBareboneTest {
         mActivityTestRule.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                mActivityTestRule.getContentViewCore().addPossiblyUnsafeJavascriptInterface(
+                mActivityTestRule.getJavascriptInjector().addPossiblyUnsafeInterface(
                         new Object(), name, null);
             }
         });

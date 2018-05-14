@@ -44,7 +44,7 @@ bool g_got_message = false;
 base::FilePath GetFilePathForJSResource(const std::string& path) {
   base::ThreadRestrictions::ScopedAllowIO allow_io_from_test_callbacks;
 
-  std::string binding_path = "gen/" + path + ".js";
+  std::string binding_path = "gen/" + path;
 #if defined(OS_WIN)
   base::ReplaceChars(binding_path, "//", "\\", &binding_path);
 #endif
@@ -60,7 +60,7 @@ bool GetResource(const std::string& id,
   base::ThreadRestrictions::ScopedAllowIO allow_io_from_test_callbacks;
 
   std::string contents;
-  if (base::EndsWith(id, ".mojom", base::CompareCase::SENSITIVE)) {
+  if (base::EndsWith(id, ".mojom.js", base::CompareCase::SENSITIVE)) {
     CHECK(base::ReadFileToString(GetFilePathForJSResource(id), &contents))
         << id;
   } else {
@@ -120,25 +120,33 @@ class TestWebUIController : public WebUIController {
 
 // TestWebUIController that additionally creates the ping test BrowserTarget
 // implementation at the right time.
-class PingTestWebUIController : public TestWebUIController {
+class PingTestWebUIController : public TestWebUIController,
+                                public WebContentsObserver {
  public:
   PingTestWebUIController(WebUI* web_ui, base::RunLoop* run_loop)
-      : TestWebUIController(web_ui, run_loop) {}
+      : TestWebUIController(web_ui, run_loop),
+        WebContentsObserver(web_ui->GetWebContents()) {
+    registry_.AddInterface(base::Bind(&PingTestWebUIController::CreateHandler,
+                                      base::Unretained(this)));
+  }
   ~PingTestWebUIController() override {}
 
-  // WebUIController overrides:
-  void RenderFrameCreated(RenderFrameHost* render_frame_host) override {
-    render_frame_host->GetInterfaceRegistry()->AddInterface(
-        base::Bind(&PingTestWebUIController::CreateHandler,
-                   base::Unretained(this)));
+  // WebContentsObserver implementation:
+  void OnInterfaceRequestFromFrame(
+      RenderFrameHost* render_frame_host,
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle* interface_pipe) override {
+    registry_.TryBindInterface(interface_name, interface_pipe);
   }
 
   void CreateHandler(mojom::BrowserTargetRequest request) {
     browser_target_ =
-        base::MakeUnique<BrowserTargetImpl>(run_loop_, std::move(request));
+        std::make_unique<BrowserTargetImpl>(run_loop_, std::move(request));
   }
 
  private:
+  service_manager::BinderRegistry registry_;
+
   DISALLOW_COPY_AND_ASSIGN(PingTestWebUIController);
 };
 
@@ -214,7 +222,7 @@ bool IsGeneratedResourceAvailable(const std::string& resource_path) {
 // it from the browser to the page and back.
 IN_PROC_BROWSER_TEST_F(WebUIMojoTest, EndToEndPing) {
   if (!IsGeneratedResourceAvailable(
-          "content/test/data/web_ui_test_mojo_bindings.mojom"))
+          "content/test/data/web_ui_test_mojo_bindings.mojom.js"))
     return;
 
   g_got_message = false;
@@ -237,8 +245,8 @@ IN_PROC_BROWSER_TEST_F(WebUIMojoTest, EndToEndPing) {
   // RunLoop is quit when message received from page.
   other_run_loop.Run();
   EXPECT_TRUE(g_got_message);
-  EXPECT_EQ(shell()->web_contents()->GetRenderProcessHost(),
-            other_shell->web_contents()->GetRenderProcessHost());
+  EXPECT_EQ(shell()->web_contents()->GetMainFrame()->GetProcess(),
+            other_shell->web_contents()->GetMainFrame()->GetProcess());
 }
 
 IN_PROC_BROWSER_TEST_F(WebUIMojoTest, NativeMojoAvailable) {

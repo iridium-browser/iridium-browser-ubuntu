@@ -16,21 +16,19 @@ ServiceWorkerRegistrationBackgroundFetch::
 ServiceWorkerRegistrationBackgroundFetch::
     ~ServiceWorkerRegistrationBackgroundFetch() = default;
 
-const char* ServiceWorkerRegistrationBackgroundFetch::SupplementName() {
-  return "ServiceWorkerRegistrationBackgroundFetch";
-}
+const char ServiceWorkerRegistrationBackgroundFetch::kSupplementName[] =
+    "ServiceWorkerRegistrationBackgroundFetch";
 
 ServiceWorkerRegistrationBackgroundFetch&
 ServiceWorkerRegistrationBackgroundFetch::From(
     ServiceWorkerRegistration& registration) {
   ServiceWorkerRegistrationBackgroundFetch* supplement =
-      static_cast<ServiceWorkerRegistrationBackgroundFetch*>(
-          Supplement<ServiceWorkerRegistration>::From(registration,
-                                                      SupplementName()));
+      Supplement<ServiceWorkerRegistration>::From<
+          ServiceWorkerRegistrationBackgroundFetch>(registration);
 
   if (!supplement) {
     supplement = new ServiceWorkerRegistrationBackgroundFetch(&registration);
-    ProvideTo(registration, SupplementName(), supplement);
+    ProvideTo(registration, supplement);
   }
 
   return *supplement;
@@ -51,7 +49,7 @@ ServiceWorkerRegistrationBackgroundFetch::backgroundFetch() {
   return background_fetch_manager_.Get();
 }
 
-DEFINE_TRACE(ServiceWorkerRegistrationBackgroundFetch) {
+void ServiceWorkerRegistrationBackgroundFetch::Trace(blink::Visitor* visitor) {
   visitor->Trace(registration_);
   visitor->Trace(background_fetch_manager_);
   Supplement<ServiceWorkerRegistration>::Trace(visitor);

@@ -7,8 +7,10 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/common/chrome_render_frame.mojom.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
@@ -19,6 +21,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_provider.h"
 
 using content::RenderViewHost;
 
@@ -33,8 +36,10 @@ WebUITestHandler::WebUITestHandler()
 void WebUITestHandler::PreloadJavaScript(const base::string16& js_text,
                                          RenderViewHost* preload_host) {
   DCHECK(preload_host);
-  preload_host->Send(new ChromeViewMsg_WebUIJavaScript(
-      preload_host->GetRoutingID(), js_text));
+  chrome::mojom::ChromeRenderFrameAssociatedPtr chrome_render_frame;
+  preload_host->GetMainFrame()->GetRemoteAssociatedInterfaces()->GetInterface(
+      &chrome_render_frame);
+  chrome_render_frame->ExecuteWebUIJavaScript(js_text);
 }
 
 void WebUITestHandler::RunJavaScript(const base::string16& js_text) {
@@ -62,7 +67,7 @@ void WebUITestHandler::HandleTestResult(const base::ListValue* test_result) {
   // Quit the message loop if |is_waiting_| so waiting process can get result or
   // error. To ensure this gets done, do this before ASSERT* calls.
   if (is_waiting_)
-    base::MessageLoopForUI::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
 
   SCOPED_TRACE("WebUITestHandler::HandleTestResult");
 
@@ -82,7 +87,7 @@ void WebUITestHandler::JavaScriptComplete(const base::Value* result) {
   // Quit the message loop if |is_waiting_| so waiting process can get result or
   // error. To ensure this gets done, do this before ASSERT* calls.
   if (is_waiting_)
-    base::MessageLoopForUI::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
 
   SCOPED_TRACE("WebUITestHandler::JavaScriptComplete");
 

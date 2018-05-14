@@ -31,15 +31,10 @@
 #ifndef WebBlob_h
 #define WebBlob_h
 
-#include "public/platform/WebBlobData.h"
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebPrivatePtr.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
-
-#if BLINK_IMPLEMENTATION
-#include "platform/heap/Handle.h"
-#endif
 
 namespace v8 {
 class Isolate;
@@ -57,7 +52,7 @@ class WebBlob {
  public:
   ~WebBlob() { Reset(); }
 
-  WebBlob() {}
+  WebBlob() = default;
   WebBlob(const WebBlob& b) { Assign(b); }
   WebBlob& operator=(const WebBlob& b) {
     Assign(b);
@@ -81,7 +76,7 @@ class WebBlob {
       v8::Local<v8::Object> creation_context,
       v8::Isolate*);
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebBlob(Blob*);
   WebBlob& operator=(Blob*);
 #endif

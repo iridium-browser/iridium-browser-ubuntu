@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -177,7 +178,7 @@ def _MyUserInfo():
   return [git.GetProjectUserEmail(constants.CHROMITE_DIR)]
 
 
-def _Query(opts, query, raw=True):
+def _Query(opts, query, raw=True, helper=None):
   """Queries Gerrit with a query string built from the commandline options"""
   if opts.branch is not None:
     query += ' branch:%s' % opts.branch
@@ -186,16 +187,17 @@ def _Query(opts, query, raw=True):
   if opts.topic is not None:
     query += ' topic: %s' % opts.topic
 
-  helper, _ = GetGerrit(opts)
+  if helper is None:
+    helper, _ = GetGerrit(opts)
   return helper.Query(query, raw=raw, bypass_cache=False)
 
 
-def FilteredQuery(opts, query):
+def FilteredQuery(opts, query, helper=None):
   """Query gerrit and filter/clean up the results"""
   ret = []
 
   logging.debug('Running query: %s', query)
-  for cl in _Query(opts, query, raw=True):
+  for cl in _Query(opts, query, raw=True, helper=helper):
     # Gerrit likes to return a stats record too.
     if not 'project' in cl:
       continue
@@ -291,19 +293,47 @@ def UserActDeps(opts, query):
   cls = _Query(opts, query, raw=False)
 
   @cros_build_lib.Memoize
-  def _QueryChange(cl):
-    return _Query(opts, cl, raw=False)
+  def _QueryChange(cl, helper=None):
+    return _Query(opts, cl, raw=False, helper=helper)
+
+  def _ProcessDeps(cl, deps, required):
+    """Yields matching dependencies for a patch"""
+    # We need to query the change to guarantee that we have a .gerrit_number
+    for dep in deps:
+      if not dep.remote in opts.gerrit:
+        opts.gerrit[dep.remote] = gerrit.GetGerritHelper(
+            remote=dep.remote, print_cmd=opts.debug)
+      helper = opts.gerrit[dep.remote]
+
+      # TODO(phobbs) this should maybe catch network errors.
+      changes = _QueryChange(dep.ToGerritQueryText(), helper=helper)
+
+      # Handle empty results.  If we found a commit that was pushed directly
+      # (e.g. a bot commit), then gerrit won't know about it.
+      if not changes:
+        if required:
+          logging.error('CL %s depends on %s which cannot be found',
+                        cl, dep.ToGerritQueryText())
+        continue
+
+      # Our query might have matched more than one result.  This can come up
+      # when CQ-DEPEND uses a Gerrit Change-Id, but that Change-Id shows up
+      # across multiple repos/branches.  We blindly check all of them in the
+      # hopes that all open ones are what the user wants, but then again the
+      # CQ-DEPEND syntax itself is unable to differeniate.  *shrug*
+      if len(changes) > 1:
+        logging.warning('CL %s has an ambiguous CQ dependency %s',
+                        cl, dep.ToGerritQueryText())
+      for change in changes:
+        if change.status == 'NEW':
+          yield change
 
   def _Children(cl):
-    """Returns the Gerrit and CQ-Depends dependencies of a patch"""
-    cq_deps = cl.PaladinDependencies(None)
-    direct_deps = cl.GerritDependencies() + cq_deps
-    # We need to query the change to guarantee that we have a .gerrit_number
-    for dep in direct_deps:
-      # TODO(phobbs) this should maybe catch network errors.
-      change = _QueryChange(dep.ToGerritQueryText())[-1]
-      if change.status == 'NEW':
-        yield change
+    """Yields the Gerrit and CQ-Depends dependencies of a patch"""
+    for change in _ProcessDeps(cl, cl.PaladinDependencies(None), True):
+      yield change
+    for change in _ProcessDeps(cl, cl.GerritDependencies(), False):
+      yield change
 
   transitives = _BreadthFirstSearch(
       cls, _Children,
@@ -317,9 +347,10 @@ def UserActInspect(opts, *args):
   """Inspect CL number <n> [n ...]"""
   cls = []
   for arg in args:
-    cl = FilteredQuery(opts, arg)
-    if cl:
-      cls.extend(cl)
+    helper, cl = GetGerrit(opts, arg)
+    change = FilteredQuery(opts, 'change:%s' % cl, helper=helper)
+    if change:
+      cls.extend(change)
     else:
       logging.warning('no results found for CL %s', arg)
   PrintCls(opts, cls)

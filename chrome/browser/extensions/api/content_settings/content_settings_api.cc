@@ -32,6 +32,7 @@
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/common/webplugininfo.h"
 #include "extensions/browser/extension_prefs_scope.h"
 #include "extensions/common/error_utils.h"
 
@@ -204,6 +205,9 @@ ContentSettingsContentSettingSetFunction::Run() {
   ContentSetting setting;
   EXTENSION_FUNCTION_VALIDATE(
       content_settings::ContentSettingFromString(setting_str, &setting));
+  // The content settings extensions API does not support setting any content
+  // settings to |CONTENT_SETTING_DEFAULT|.
+  EXTENSION_FUNCTION_VALIDATE(CONTENT_SETTING_DEFAULT != setting);
   EXTENSION_FUNCTION_VALIDATE(
       content_settings::ContentSettingsRegistry::GetInstance()
           ->Get(content_type)

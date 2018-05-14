@@ -8,7 +8,6 @@
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "components/safe_json/safe_json_parser.h"
 #include "net/base/load_flags.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
@@ -16,6 +15,7 @@
 #include "net/http/http_util.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request_status.h"
+#include "services/data_decoder/public/cpp/safe_json_parser.h"
 
 namespace {
 const char kDigitalAssetLinksBaseURL[] =
@@ -70,7 +70,8 @@ void DigitalAssetLinksHandler::OnURLFetchComplete(
   std::string response_body;
   source->GetResponseAsString(&response_body);
 
-  safe_json::SafeJsonParser::Parse(
+  data_decoder::SafeJsonParser::Parse(
+      /* connector=*/nullptr,  // Connector is unused on Android.
       response_body,
       base::Bind(&DigitalAssetLinksHandler::OnJSONParseSucceeded,
                  weak_ptr_factory_.GetWeakPtr()),
@@ -126,7 +127,7 @@ bool DigitalAssetLinksHandler::CheckDigitalAssetLinkRelationship(
           destination: WEBSITE
         }
         policy {
-          cookies_allowed: true
+          cookies_allowed: YES
           cookies_store: "user"
           setting: "Not user controlled. But the verification is a trusted API"
                    "that doesn't use user data"

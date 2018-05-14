@@ -62,8 +62,8 @@
 #include "ui/base/win/shell.h"
 #endif
 
-DECLARE_EXPORTED_UI_CLASS_PROPERTY_TYPE(VIEWS_EXPORT,
-                                      views::DesktopNativeWidgetAura*);
+DEFINE_EXPORTED_UI_CLASS_PROPERTY_TYPE(VIEWS_EXPORT,
+                                       views::DesktopNativeWidgetAura*);
 
 namespace views {
 
@@ -147,7 +147,8 @@ class DesktopNativeWidgetTopLevelHandler : public aura::WindowObserver {
 
   void OnWindowBoundsChanged(aura::Window* window,
                              const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds) override {
+                             const gfx::Rect& new_bounds,
+                             ui::PropertyChangeReason reason) override {
     // The position of the window may have changed. Hence we use SetBounds in
     // place of SetSize. We need to pass the bounds in screen coordinates to
     // the Widget::SetBounds function.
@@ -361,7 +362,7 @@ void DesktopNativeWidgetAura::HandleActivationChanged(bool active) {
       View* view_for_activation = focus_manager->GetFocusedView()
                                       ? focus_manager->GetFocusedView()
                                       : focus_manager->GetStoredFocusView();
-      if (!view_for_activation) {
+      if (!view_for_activation || !view_for_activation->GetWidget()) {
         view_for_activation = GetWidget()->GetRootView();
       } else if (view_for_activation == focus_manager->GetStoredFocusView()) {
         // When desktop native widget has modal transient child, we don't
@@ -412,7 +413,7 @@ void DesktopNativeWidgetAura::InitNativeWidget(
   NativeWidgetAura::RegisterNativeWidgetForWindow(this, content_window_);
   content_window_->SetType(GetAuraWindowTypeForWidgetType(params.type));
   content_window_->Init(params.layer_type);
-  wm::SetShadowElevation(content_window_, wm::ShadowElevation::NONE);
+  wm::SetShadowElevation(content_window_, wm::kShadowElevationNone);
 
   if (!desktop_window_tree_host_) {
     if (params.desktop_window_tree_host) {
@@ -516,14 +517,14 @@ void DesktopNativeWidgetAura::InitNativeWidget(
 
   if (params.opacity == Widget::InitParams::TRANSLUCENT_WINDOW &&
       desktop_window_tree_host_->ShouldCreateVisibilityController()) {
-    visibility_controller_ = base::MakeUnique<wm::VisibilityController>();
+    visibility_controller_ = std::make_unique<wm::VisibilityController>();
     aura::client::SetVisibilityClient(host_->window(),
                                       visibility_controller_.get());
     wm::SetChildWindowVisibilityChangesAnimated(host_->window());
   }
 
   if (params.type == Widget::InitParams::TYPE_WINDOW) {
-    focus_manager_event_handler_ = base::MakeUnique<FocusManagerEventHandler>(
+    focus_manager_event_handler_ = std::make_unique<FocusManagerEventHandler>(
         GetWidget(), host_->window());
   }
 
@@ -710,7 +711,8 @@ void DesktopNativeWidgetAura::StackAtTop() {
     desktop_window_tree_host_->StackAtTop();
 }
 
-void DesktopNativeWidgetAura::SetShape(std::unique_ptr<SkRegion> shape) {
+void DesktopNativeWidgetAura::SetShape(
+    std::unique_ptr<Widget::ShapeRects> shape) {
   if (content_window_)
     desktop_window_tree_host_->SetShape(std::move(shape));
 }
@@ -1000,8 +1002,8 @@ void DesktopNativeWidgetAura::OnPaint(const ui::PaintContext& context) {
 }
 
 void DesktopNativeWidgetAura::OnDeviceScaleFactorChanged(
-    float device_scale_factor) {
-}
+    float old_device_scale_factor,
+    float new_device_scale_factor) {}
 
 void DesktopNativeWidgetAura::OnWindowDestroying(aura::Window* window) {
   // Cleanup happens in OnHostClosed().
@@ -1102,8 +1104,8 @@ void DesktopNativeWidgetAura::OnWindowActivated(
   }
 
   // Give the native widget a chance to handle any specific changes it needs.
-  desktop_window_tree_host_->OnNativeWidgetActivationChanged(
-      content_window_ == gained_active);
+  desktop_window_tree_host_->OnActiveWindowChanged(content_window_ ==
+                                                   gained_active);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1150,12 +1152,11 @@ int DesktopNativeWidgetAura::OnPerformDrop(const ui::DropTargetEvent& event) {
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopNativeWidgetAura, aura::WindowTreeHostObserver implementation:
 
-void DesktopNativeWidgetAura::OnHostCloseRequested(
-    const aura::WindowTreeHost* host) {
+void DesktopNativeWidgetAura::OnHostCloseRequested(aura::WindowTreeHost* host) {
   GetWidget()->Close();
 }
 
-void DesktopNativeWidgetAura::OnHostResized(const aura::WindowTreeHost* host) {
+void DesktopNativeWidgetAura::OnHostResized(aura::WindowTreeHost* host) {
   // Don't update the bounds of the child layers when animating closed. If we
   // did it would force a paint, which we don't want. We don't want the paint
   // as we can't assume any of the children are valid.
@@ -1168,12 +1169,12 @@ void DesktopNativeWidgetAura::OnHostResized(const aura::WindowTreeHost* host) {
 }
 
 void DesktopNativeWidgetAura::OnHostWorkspaceChanged(
-    const aura::WindowTreeHost* host) {
+    aura::WindowTreeHost* host) {
   native_widget_delegate_->OnNativeWidgetWorkspaceChanged();
 }
 
 void DesktopNativeWidgetAura::OnHostMovedInPixels(
-    const aura::WindowTreeHost* host,
+    aura::WindowTreeHost* host,
     const gfx::Point& new_origin_in_pixels) {
   TRACE_EVENT1("views", "DesktopNativeWidgetAura::OnHostMovedInPixels",
                "new_origin_in_pixels", new_origin_in_pixels.ToString());

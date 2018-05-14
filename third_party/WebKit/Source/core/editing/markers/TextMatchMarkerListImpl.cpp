@@ -7,8 +7,10 @@
 #include "core/dom/Node.h"
 #include "core/dom/Range.h"
 #include "core/editing/EphemeralRange.h"
-#include "core/editing/markers/DocumentMarkerListEditor.h"
+#include "core/editing/markers/SortedDocumentMarkerListEditor.h"
 #include "core/editing/markers/TextMatchMarker.h"
+#include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameView.h"
 #include "third_party/WebKit/Source/core/editing/VisibleUnits.h"
 
 namespace blink {
@@ -22,8 +24,9 @@ bool TextMatchMarkerListImpl::IsEmpty() const {
 }
 
 void TextMatchMarkerListImpl::Add(DocumentMarker* marker) {
-  DocumentMarkerListEditor::AddMarkerWithoutMergingOverlapping(&markers_,
-                                                               marker);
+  DCHECK_EQ(DocumentMarker::kTextMatch, marker->GetType());
+  SortedDocumentMarkerListEditor::AddMarkerWithoutMergingOverlapping(&markers_,
+                                                                     marker);
 }
 
 void TextMatchMarkerListImpl::Clear() {
@@ -35,31 +38,40 @@ const HeapVector<Member<DocumentMarker>>& TextMatchMarkerListImpl::GetMarkers()
   return markers_;
 }
 
+DocumentMarker* TextMatchMarkerListImpl::FirstMarkerIntersectingRange(
+    unsigned start_offset,
+    unsigned end_offset) const {
+  return SortedDocumentMarkerListEditor::FirstMarkerIntersectingRange(
+      markers_, start_offset, end_offset);
+}
+
 HeapVector<Member<DocumentMarker>>
 TextMatchMarkerListImpl::MarkersIntersectingRange(unsigned start_offset,
                                                   unsigned end_offset) const {
-  return DocumentMarkerListEditor::MarkersIntersectingRange(
+  return SortedDocumentMarkerListEditor::MarkersIntersectingRange(
       markers_, start_offset, end_offset);
 }
 
 bool TextMatchMarkerListImpl::MoveMarkers(int length,
                                           DocumentMarkerList* dst_list) {
-  return DocumentMarkerListEditor::MoveMarkers(&markers_, length, dst_list);
+  return SortedDocumentMarkerListEditor::MoveMarkers(&markers_, length,
+                                                     dst_list);
 }
 
 bool TextMatchMarkerListImpl::RemoveMarkers(unsigned start_offset, int length) {
-  return DocumentMarkerListEditor::RemoveMarkers(&markers_, start_offset,
-                                                 length);
+  return SortedDocumentMarkerListEditor::RemoveMarkers(&markers_, start_offset,
+                                                       length);
 }
 
-bool TextMatchMarkerListImpl::ShiftMarkers(unsigned offset,
+bool TextMatchMarkerListImpl::ShiftMarkers(const String&,
+                                           unsigned offset,
                                            unsigned old_length,
                                            unsigned new_length) {
-  return DocumentMarkerListEditor::ShiftMarkersContentDependent(
+  return SortedDocumentMarkerListEditor::ShiftMarkersContentDependent(
       &markers_, offset, old_length, new_length);
 }
 
-DEFINE_TRACE(TextMatchMarkerListImpl) {
+void TextMatchMarkerListImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(markers_);
   DocumentMarkerList::Trace(visitor);
 }
@@ -68,7 +80,13 @@ static void UpdateMarkerLayoutRect(const Node& node, TextMatchMarker& marker) {
   const Position start_position(node, marker.StartOffset());
   const Position end_position(node, marker.EndOffset());
   EphemeralRange range(start_position, end_position);
-  marker.SetLayoutRect(LayoutRect(ComputeTextRect(range)));
+
+  DCHECK(node.GetDocument().GetFrame());
+  LocalFrameView* frame_view = node.GetDocument().GetFrame()->View();
+
+  DCHECK(frame_view);
+  marker.SetLayoutRect(
+      frame_view->AbsoluteToDocument(LayoutRect(ComputeTextRect(range))));
 }
 
 Vector<IntRect> TextMatchMarkerListImpl::LayoutRects(const Node& node) const {

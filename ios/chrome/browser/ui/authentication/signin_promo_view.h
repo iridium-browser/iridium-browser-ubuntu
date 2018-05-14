@@ -20,6 +20,11 @@ typedef NS_ENUM(NSInteger, SigninPromoViewMode) {
   SigninPromoViewModeWarmState,
 };
 
+extern NSString* const kSigninPromoViewId;
+extern NSString* const kSigninPromoPrimaryButtonId;
+extern NSString* const kSigninPromoSecondaryButtonId;
+extern NSString* const kSigninPromoCloseButtonId;
+
 // This class creates an image view, a label and 2 buttons. This view can be
 // configured with 2 modes : "Cold State" and "Warm State".
 // + "Cold State" mode displays the chomium icon in the image view, and only
@@ -54,6 +59,9 @@ typedef NS_ENUM(NSInteger, SigninPromoViewMode) {
 // using CircularImageFromImage() (so if the image is not squared, it will be
 // cropped first). Must only be called in the "Warm State" mode.
 - (void)setProfileImage:(UIImage*)image;
+
+// Resets the view to be reused.
+- (void)prepareForReuse;
 
 @end
 

@@ -23,6 +23,7 @@
 [
     ActiveScriptWrappable,
     ConstructorCallWith=Document,
+    HTMLConstructor,
     NamedConstructor=Image(optional unsigned long width, optional unsigned long height)
 ] interface HTMLImageElement : HTMLElement {
     [CEReactions, Reflect] attribute DOMString alt;
@@ -39,6 +40,7 @@
     readonly attribute boolean complete;
     readonly attribute DOMString currentSrc;
     [CEReactions, Reflect, ReflectOnly=("","no-referrer","origin","no-referrer-when-downgrade","origin-when-cross-origin","unsafe-url"), ReflectMissing="", ReflectInvalid=""] attribute DOMString referrerPolicy;
+    [RuntimeEnabled=ImageDecodingAttribute, CEReactions, Reflect, ReflectOnly=("async", "sync", "auto"), ReflectMissing="auto", ReflectInvalid="auto"] attribute DOMString decoding;
 
     // obsolete members
     // https://html.spec.whatwg.org/#HTMLImageElement-partial
@@ -52,7 +54,7 @@
     [CEReactions, Reflect, TreatNullAs=EmptyString] attribute DOMString border;
 
     // CSSOM View Module
-    // https://dev.w3.org/csswg/cssom-view/#extensions-to-the-htmlimageelement-interface
+    // https://drafts.csswg.org/cssom-view/#extensions-to-the-htmlimageelement-interface
     [MeasureAs=HTMLImageElementX] readonly attribute long x;
     [MeasureAs=HTMLImageElementY] readonly attribute long y;
 

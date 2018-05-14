@@ -41,11 +41,13 @@ class JSInliner final : public AdvancedReducer {
   Reduction ReduceJSCall(Node* node);
 
  private:
+  Zone* zone() const { return local_zone_; }
   CommonOperatorBuilder* common() const;
   JSOperatorBuilder* javascript() const;
   SimplifiedOperatorBuilder* simplified() const;
   Graph* graph() const;
   JSGraph* jsgraph() const { return jsgraph_; }
+  Handle<Context> native_context() const;
 
   Zone* const local_zone_;
   CompilationInfo* info_;

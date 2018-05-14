@@ -91,20 +91,20 @@ URLPatternSet URLPatternSet::CreateUnion(
   return result;
 }
 
-URLPatternSet::URLPatternSet() {}
+URLPatternSet::URLPatternSet() = default;
 
-URLPatternSet::URLPatternSet(const URLPatternSet& rhs)
-    : patterns_(rhs.patterns_) {}
+URLPatternSet::URLPatternSet(const URLPatternSet& rhs) = default;
+
+URLPatternSet::URLPatternSet(URLPatternSet&& rhs) = default;
 
 URLPatternSet::URLPatternSet(const std::set<URLPattern>& patterns)
     : patterns_(patterns) {}
 
-URLPatternSet::~URLPatternSet() {}
+URLPatternSet::~URLPatternSet() = default;
 
-URLPatternSet& URLPatternSet::operator=(const URLPatternSet& rhs) {
-  patterns_ = rhs.patterns_;
-  return *this;
-}
+URLPatternSet& URLPatternSet::operator=(const URLPatternSet& rhs) = default;
+
+URLPatternSet& URLPatternSet::operator=(URLPatternSet&& rhs) = default;
 
 bool URLPatternSet::operator==(const URLPatternSet& other) const {
   return patterns_ == other.patterns_;
@@ -155,8 +155,8 @@ void URLPatternSet::ClearPatterns() {
 bool URLPatternSet::AddOrigin(int valid_schemes, const GURL& origin) {
   if (origin.is_empty())
     return false;
-  const url::Origin real_origin(origin);
-  DCHECK(real_origin.IsSameOriginWith(url::Origin(origin.GetOrigin())));
+  const url::Origin real_origin = url::Origin::Create(origin);
+  DCHECK(real_origin.IsSameOriginWith(url::Origin::Create(origin.GetOrigin())));
   URLPattern origin_pattern(valid_schemes);
   // Origin adding could fail if |origin| does not match |valid_schemes|.
   if (origin_pattern.Parse(origin.spec()) != URLPattern::PARSE_SUCCESS) {
@@ -233,7 +233,7 @@ std::unique_ptr<base::ListValue> URLPatternSet::ToValue() const {
   std::unique_ptr<base::ListValue> value(new base::ListValue);
   for (URLPatternSet::const_iterator i = patterns_.begin();
        i != patterns_.end(); ++i)
-    value->AppendIfNotPresent(base::MakeUnique<base::Value>(i->GetAsString()));
+    value->AppendIfNotPresent(std::make_unique<base::Value>(i->GetAsString()));
   return value;
 }
 

@@ -22,7 +22,6 @@
 #include "cc/paint/display_item_list.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_host_common.h"
-#include "skia/ext/analysis_canvas.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace cc {
@@ -69,8 +68,8 @@ RecordingModeToPaintingControlSetting(RecordingSource::RecordingMode mode) {
 
 RasterizeAndRecordBenchmark::RasterizeAndRecordBenchmark(
     std::unique_ptr<base::Value> value,
-    const MicroBenchmark::DoneCallback& callback)
-    : MicroBenchmark(callback),
+    MicroBenchmark::DoneCallback callback)
+    : MicroBenchmark(std::move(callback)),
       record_repeat_count_(kDefaultRecordRepeatCount),
       settings_(std::move(value)),
       main_thread_benchmark_done_(false),
@@ -160,7 +159,8 @@ void RasterizeAndRecordBenchmark::RunOnLayer(PictureLayer* layer) {
       do {
         display_list = painter->PaintContentsToDisplayList(painting_control);
         recording_source.UpdateDisplayItemList(
-            display_list, painter->GetApproximateUnsharedMemoryUsage());
+            display_list, painter->GetApproximateUnsharedMemoryUsage(),
+            layer_tree_host_->recording_scale_factor());
 
         if (memory_used) {
           // Verify we are recording the same thing each time.
@@ -190,6 +190,6 @@ void RasterizeAndRecordBenchmark::RunOnLayer(PictureLayer* layer) {
 RasterizeAndRecordBenchmark::RecordResults::RecordResults()
     : pixels_recorded(0), bytes_used(0) {}
 
-RasterizeAndRecordBenchmark::RecordResults::~RecordResults() {}
+RasterizeAndRecordBenchmark::RecordResults::~RecordResults() = default;
 
 }  // namespace cc

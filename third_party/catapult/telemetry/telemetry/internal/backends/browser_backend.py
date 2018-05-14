@@ -7,6 +7,7 @@ import sys
 from py_utils import cloud_storage  # pylint: disable=import-error
 
 from telemetry import decorators
+from telemetry.core import exceptions
 from telemetry.internal.backends import app_backend
 from telemetry.internal.browser import web_contents
 from telemetry.internal.platform import profiling_controller_backend
@@ -19,17 +20,18 @@ class ExtensionsNotSupportedException(Exception):
 class BrowserBackend(app_backend.AppBackend):
   """A base class for browser backends."""
 
-  def __init__(self, platform_backend, supports_extensions, browser_options,
-               tab_list_backend):
+  def __init__(self, platform_backend, browser_options,
+               supports_extensions, tab_list_backend):
     assert browser_options.browser_type
-    super(BrowserBackend, self).__init__(
-        browser_options.browser_type, platform_backend)
-    self._supports_extensions = supports_extensions
+    super(BrowserBackend, self).__init__(browser_options.browser_type,
+                                         platform_backend)
     self.browser_options = browser_options
+    self._supports_extensions = supports_extensions
     self._tab_list_backend_class = tab_list_backend
+
     self._profiling_controller_backend = (
         profiling_controller_backend.ProfilingControllerBackend(
-          platform_backend, self))
+            platform_backend, self))
 
   def SetBrowser(self, browser):
     super(BrowserBackend, self).SetApp(app=browser)
@@ -102,7 +104,8 @@ class BrowserBackend(app_backend.AppBackend):
   def supports_system_info(self):
     return False
 
-  def StartTracing(self, trace_options,
+  def StartTracing(self,
+                   trace_options,
                    timeout=web_contents.DEFAULT_WEB_CONTENTS_TIMEOUT):
     raise NotImplementedError()
 
@@ -112,7 +115,7 @@ class BrowserBackend(app_backend.AppBackend):
   def CollectTracingData(self, trace_data_builder):
     raise NotImplementedError()
 
-  def Start(self):
+  def Start(self, startup_args, startup_url=None):
     raise NotImplementedError()
 
   def IsBrowserRunning(self):
@@ -149,6 +152,7 @@ class BrowserBackend(app_backend.AppBackend):
   def DumpMemory(self, timeout=None):
     raise NotImplementedError()
 
+# pylint: disable=invalid-name
   @property
   def supports_overriding_memory_pressure_notifications(self):
     return False
@@ -172,3 +176,13 @@ class BrowserBackend(app_backend.AppBackend):
   @property
   def supports_power_metrics(self):
     raise NotImplementedError()
+
+  @property
+  def supports_overview_mode(self): # pylint: disable=invalid-name
+    return False
+
+  def EnterOverviewMode(self, timeout): # pylint: disable=unused-argument
+    raise exceptions.StoryActionError('Overview mode is not supported')
+
+  def ExitOverviewMode(self, timeout): # pylint: disable=unused-argument
+    raise exceptions.StoryActionError('Overview mode is not supported')

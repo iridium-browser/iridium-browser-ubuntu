@@ -103,7 +103,7 @@
     <item type="id" name="contextmenu_save_video" />
 
     <!-- Menu item IDs for FullscreenActivities -->
-    <item type="id" name="menu_id_open_in_chrome" />
+    <item type="id" name="contextmenu_open_in_chrome" />
 
     <!-- App menu item custom tags -->
     <item type="id" name="menu_item_enter_anim_id" />
@@ -121,5 +121,11 @@
     <item type="id" name="browser_actions_custom_item_three" />
     <item type="id" name="browser_actions_custom_item_four" />
     <item type="id" name="browser_actions_custom_item_five" />
+
+    <!-- VR constants -->
+    <item type="id" name="vr_overlay_view" />
+
+    <!-- Tags -->
+    <item type="id" name="highlight_state" />
 
 </resources>

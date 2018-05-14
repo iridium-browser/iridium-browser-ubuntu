@@ -32,7 +32,9 @@
 #define ApplicationCacheHost_h
 
 #include <memory>
+
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
@@ -48,15 +50,13 @@ class ResourceResponse;
 
 class CORE_EXPORT ApplicationCacheHost final
     : public GarbageCollectedFinalized<ApplicationCacheHost>,
-      NON_EXPORTED_BASE(public WebApplicationCacheHostClient) {
-  WTF_MAKE_NONCOPYABLE(ApplicationCacheHost);
-
+      public WebApplicationCacheHostClient {
  public:
   static ApplicationCacheHost* Create(DocumentLoader* loader) {
     return new ApplicationCacheHost(loader);
   }
 
-  virtual ~ApplicationCacheHost();
+  ~ApplicationCacheHost() override;
   void DetachFromDocumentLoader();
 
   // The Status numeric values are specified in the HTML5 spec.
@@ -157,13 +157,12 @@ class CORE_EXPORT ApplicationCacheHost final
   CacheInfo ApplicationCacheInfo();
   int GetHostID() const;
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   explicit ApplicationCacheHost(DocumentLoader*);
 
-  void WillStartLoadingMainResource(ResourceRequest&);
-  void WillStartLoadingResource(ResourceRequest&);
+  void WillStartLoadingMainResource(const KURL&, const String&);
 
   // WebApplicationCacheHostClient implementation
   void DidChangeCacheAssociation() final;
@@ -219,7 +218,8 @@ class CORE_EXPORT ApplicationCacheHost final
   std::unique_ptr<WebApplicationCacheHost> host_;
 
   FRIEND_TEST_ALL_PREFIXES(DocumentTest, SandboxDisablesAppCache);
-  FRIEND_TEST_ALL_PREFIXES(DocumentTest, SuboriginDisablesAppCache);
+
+  DISALLOW_COPY_AND_ASSIGN(ApplicationCacheHost);
 };
 
 }  // namespace blink

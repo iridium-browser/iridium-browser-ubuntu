@@ -6,6 +6,7 @@
 #define ContentSettingCallbacks_h
 
 #include <memory>
+#include "base/callback.h"
 #include "platform/PlatformExport.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Functional.h"
@@ -19,19 +20,18 @@ class PLATFORM_EXPORT ContentSettingCallbacks {
 
  public:
   static std::unique_ptr<ContentSettingCallbacks> Create(
-      std::unique_ptr<WTF::Closure> allowed,
-      std::unique_ptr<WTF::Closure> denied);
-  virtual ~ContentSettingCallbacks() {}
+      base::OnceClosure allowed,
+      base::OnceClosure denied);
+  virtual ~ContentSettingCallbacks() = default;
 
-  void OnAllowed() { (*allowed_)(); }
-  void OnDenied() { (*denied_)(); }
+  void OnAllowed() { std::move(allowed_).Run(); }
+  void OnDenied() { std::move(denied_).Run(); }
 
  private:
-  ContentSettingCallbacks(std::unique_ptr<WTF::Closure> allowed,
-                          std::unique_ptr<WTF::Closure> denied);
+  ContentSettingCallbacks(base::OnceClosure allowed, base::OnceClosure denied);
 
-  std::unique_ptr<WTF::Closure> allowed_;
-  std::unique_ptr<WTF::Closure> denied_;
+  base::OnceClosure allowed_;
+  base::OnceClosure denied_;
 };
 
 }  // namespace blink

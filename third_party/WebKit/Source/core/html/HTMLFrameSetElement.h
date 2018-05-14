@@ -49,6 +49,8 @@ class HTMLFrameSetElement final : public HTMLElement {
   const Vector<HTMLDimension>& RowLengths() const { return row_lengths_; }
   const Vector<HTMLDimension>& ColLengths() const { return col_lengths_; }
 
+  bool HasNonInBodyInsertionMode() const override { return true; }
+
   LocalDOMWindow* AnonymousNamedGetter(const AtomicString&);
 
   DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(blur);
@@ -64,9 +66,10 @@ class HTMLFrameSetElement final : public HTMLElement {
 
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 
   void AttachLayoutTree(AttachContext&) override;
   bool LayoutObjectIsNeeded(const ComputedStyle&) override;

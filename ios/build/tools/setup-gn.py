@@ -96,7 +96,9 @@ class GnGenerator(object):
     args.append(('is_official_build', self._config == 'Official'))
     args.append(('is_chrome_branded', 'is_official_build'))
     args.append(('use_xcode_clang', 'is_official_build'))
-    args.append(('ios_enable_coverage', self._config == 'Coverage'))
+    args.append(('use_clang_coverage', self._config == 'Coverage'))
+    args.append(('is_component_build', False))
+
     if os.environ.get('FORCE_MAC_TOOLCHAIN', '0') == '1':
       args.append(('use_system_xcode', False))
 
@@ -230,7 +232,7 @@ def WriteToFileIfChanged(filename, content, overwrite):
 
 
 def NinjaNeedEscape(arg):
-  '''Returns True if |arg| need to be escaped when writen to .ninja file.'''
+  '''Returns True if |arg| needs to be escaped when written to .ninja file.'''
   return ':' in arg or '*' in arg or ';' in arg
 
 

@@ -44,7 +44,7 @@ class FunctionsGLWindows : public FunctionsGL
     ~FunctionsGLWindows() override {}
 
   private:
-    void *loadProcAddress(const std::string &function) override
+    void *loadProcAddress(const std::string &function) const override
     {
         void *proc = reinterpret_cast<void*>(mGetProcAddressWGL(function.c_str()));
         if (!proc)
@@ -104,7 +104,10 @@ egl::Error DisplayWGL::initialize(egl::Display *display)
     // Work around compile error from not defining "UNICODE" while Chromium does
     const LPSTR idcArrow = MAKEINTRESOURCEA(32512);
 
-    std::string className = FormatString("ANGLE DisplayWGL 0x%0.8p Intermediate Window Class", mDisplay);
+    std::ostringstream stream;
+    stream << "ANGLE DisplayWGL " << std::internal << std::setw(10) << std::setfill('0') << mDisplay
+           << " Intermediate Window Class";
+    std::string className = stream.str();
 
     WNDCLASSA intermediateClassDesc = { 0 };
     intermediateClassDesc.style = CS_OWNDC;
@@ -274,7 +277,7 @@ egl::Error DisplayWGL::initialize(egl::Display *display)
     mCurrentDC = mDeviceContext;
 
     mFunctionsGL = new FunctionsGLWindows(mOpenGLModule, mFunctionsWGL->getProcAddress);
-    mFunctionsGL->initialize();
+    mFunctionsGL->initialize(displayAttributes);
 
     mHasRobustness = mFunctionsGL->getGraphicsResetStatus != nullptr;
     if (mHasWGLCreateContextRobustness != mHasRobustness)
@@ -429,10 +432,10 @@ SurfaceImpl *DisplayWGL::createPixmapSurface(const egl::SurfaceState &state,
     return nullptr;
 }
 
-egl::Error DisplayWGL::getDevice(DeviceImpl **device)
+DeviceImpl *DisplayWGL::createDevice()
 {
-    UNIMPLEMENTED();
-    return egl::EglBadDisplay();
+    UNREACHABLE();
+    return nullptr;
 }
 
 egl::ConfigSet DisplayWGL::generateConfigs()
@@ -622,6 +625,8 @@ void DisplayWGL::generateExtensions(egl::DisplayExtensions *outExtensions) const
     outExtensions->displayTextureShareGroup = true;
 
     outExtensions->surfacelessContext = true;
+
+    DisplayGL::generateExtensions(outExtensions);
 }
 
 void DisplayWGL::generateCaps(egl::Caps *outCaps) const
@@ -770,6 +775,8 @@ HGLRC DisplayWGL::createContextAttribs(const gl::Version &version, int profileMa
 
     if (mHasWGLCreateContextRobustness)
     {
+        attribs.push_back(WGL_CONTEXT_FLAGS_ARB);
+        attribs.push_back(WGL_CONTEXT_ROBUST_ACCESS_BIT_ARB);
         attribs.push_back(WGL_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB);
         attribs.push_back(WGL_LOSE_CONTEXT_ON_RESET_ARB);
     }

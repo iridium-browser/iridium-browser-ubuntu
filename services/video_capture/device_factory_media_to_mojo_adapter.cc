@@ -20,10 +20,10 @@ namespace {
 
 // Translates a set of device infos reported by a VideoCaptureSystem to a set
 // of device infos that the video capture service exposes to its client.
-// The Video Capture Service instances of VideoCaptureDeviceClient to
-// convert the formats provided by the VideoCaptureDevice instances. Here, we
-// translate the set of supported formats as reported by the |device_factory_|
-// to what will be output by the VideoCaptureDeviceClient we connect to it.
+// A translation is needed, because the actual video frames, on their way
+// from the VideoCaptureSystem to clients of the Video Capture Service, will
+// pass through an instance of VideoCaptureDeviceClient, which performs certain
+// format conversions.
 // TODO(chfremer): A cleaner design would be to have this translation
 // happen in VideoCaptureDeviceClient, and talk only to VideoCaptureDeviceClient
 // instead of VideoCaptureSystem.
@@ -42,14 +42,14 @@ static void TranslateDeviceInfos(
               : media::PIXEL_FORMAT_I420;
       translated_format.frame_size = format.frame_size;
       translated_format.frame_rate = format.frame_rate;
-      translated_format.pixel_storage = media::PIXEL_STORAGE_CPU;
+      translated_format.pixel_storage = media::VideoPixelStorage::CPU;
       if (base::ContainsValue(translated_device_info.supported_formats,
                               translated_format))
         continue;
       translated_device_info.supported_formats.push_back(translated_format);
     }
-    if (translated_device_info.supported_formats.empty())
-      continue;
+    // We explicitly need to include device infos for which there are zero
+    // supported formats reported until https://crbug.com/792260 is resolved.
     translated_device_infos.push_back(translated_device_info);
   }
   std::move(callback).Run(translated_device_infos);
@@ -132,6 +132,13 @@ void DeviceFactoryMediaToMojoAdapter::CreateDevice(
                  base::Passed(&create_and_add_new_device_cb)));
 }
 
+void DeviceFactoryMediaToMojoAdapter::AddVirtualDevice(
+    const media::VideoCaptureDeviceInfo& device_info,
+    mojom::ProducerPtr producer,
+    mojom::VirtualDeviceRequest virtual_device_request) {
+  NOTIMPLEMENTED();
+}
+
 void DeviceFactoryMediaToMojoAdapter::CreateAndAddNewDevice(
     const std::string& device_id,
     mojom::DeviceRequest device_request,
@@ -146,10 +153,10 @@ void DeviceFactoryMediaToMojoAdapter::CreateAndAddNewDevice(
 
   // Add entry to active_devices to keep track of it
   ActiveDeviceEntry device_entry;
-  device_entry.device = base::MakeUnique<DeviceMediaToMojoAdapter>(
+  device_entry.device = std::make_unique<DeviceMediaToMojoAdapter>(
       service_ref_->Clone(), std::move(media_device),
       jpeg_decoder_factory_callback_);
-  device_entry.binding = base::MakeUnique<mojo::Binding<mojom::Device>>(
+  device_entry.binding = std::make_unique<mojo::Binding<mojom::Device>>(
       device_entry.device.get(), std::move(device_request));
   device_entry.binding->set_connection_error_handler(base::Bind(
       &DeviceFactoryMediaToMojoAdapter::OnClientConnectionErrorOrClose,

@@ -17,6 +17,7 @@
 #include "content/public/renderer/render_view.h"
 #include "gin/converter.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/public/mojom/page/page_visibility_state.mojom.h"
 #include "third_party/WebKit/public/platform/WebCoalescedInputEvent.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
@@ -252,10 +253,12 @@ void WebViewPlugin::DidFailLoading(const WebURLError& error) {
   error_.reset(new WebURLError(error));
 }
 
-WebViewPlugin::WebViewHelper::WebViewHelper(
-    WebViewPlugin* plugin,
-    const WebPreferences& preferences) : plugin_(plugin) {
-  web_view_ = WebView::Create(this, blink::kWebPageVisibilityStateVisible);
+WebViewPlugin::WebViewHelper::WebViewHelper(WebViewPlugin* plugin,
+                                            const WebPreferences& preferences)
+    : plugin_(plugin) {
+  web_view_ = WebView::Create(/* client = */ this,
+                              blink::mojom::PageVisibilityState::kVisible,
+                              /* opener = */ nullptr);
   // ApplyWebPreferences before making a WebLocalFrame so that the frame sees a
   // consistent view of our preferences.
   content::RenderView::ApplyWebPreferences(preferences, web_view_);
@@ -333,12 +336,9 @@ void WebViewPlugin::WebViewHelper::ScheduleAnimation() {
   }
 }
 
-std::unique_ptr<blink::WebURLLoader>
-WebViewPlugin::WebViewHelper::CreateURLLoader(
-    const blink::WebURLRequest& request,
-    base::SingleThreadTaskRunner* task_runner) {
-  // TODO(yhirano): Stop using Platform::CreateURLLoader() here.
-  return blink::Platform::Current()->CreateURLLoader(request, task_runner);
+std::unique_ptr<blink::WebURLLoaderFactory>
+WebViewPlugin::WebViewHelper::CreateURLLoaderFactory() {
+  return blink::Platform::Current()->CreateDefaultURLLoaderFactory();
 }
 
 void WebViewPlugin::WebViewHelper::DidClearWindowObject() {
@@ -357,12 +357,9 @@ void WebViewPlugin::WebViewHelper::DidClearWindowObject() {
               plugin_->delegate_->GetV8Handle(isolate));
 }
 
-void WebViewPlugin::WebViewHelper::FrameDetached(blink::WebLocalFrame* frame,
-                                                 DetachType type) {
-  if (frame->FrameWidget())
-    frame->FrameWidget()->Close();
-
-  frame->Close();
+void WebViewPlugin::WebViewHelper::FrameDetached(DetachType type) {
+  main_frame()->FrameWidget()->Close();
+  main_frame()->Close();
 }
 
 void WebViewPlugin::OnZoomLevelChanged() {

@@ -63,7 +63,7 @@ HpackEntry& HpackEntry::operator=(const HpackEntry& other) {
   return *this;
 }
 
-HpackEntry::~HpackEntry() {}
+HpackEntry::~HpackEntry() = default;
 
 // static
 size_t HpackEntry::Size(SpdyStringPiece name, SpdyStringPiece value) {
@@ -77,7 +77,7 @@ size_t HpackEntry::Size() const {
 SpdyString HpackEntry::GetDebugString() const {
   return "{ name: \"" + SpdyString(name_ref_) + "\", value: \"" +
          SpdyString(value_ref_) +
-         "\", index: " + base::SizeTToString(insertion_index_) +
+         "\", index: " + base::NumberToString(insertion_index_) +
          (IsStatic() ? " static" : (IsLookup() ? " lookup" : " dynamic")) +
          " }";
 }

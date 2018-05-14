@@ -19,6 +19,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/time/default_clock.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
@@ -35,6 +36,7 @@
 #include "content/public/common/content_switches.h"
 #include "storage/browser/database/database_util.h"
 #include "storage/common/database/database_identifier.h"
+#include "third_party/WebKit/public/mojom/quota/quota_types.mojom.h"
 #include "ui/base/text/bytes_formatting.h"
 #include "url/origin.h"
 
@@ -74,15 +76,17 @@ void GetAllOriginsAndPaths(const base::FilePath& indexeddb_path,
         file_path.RemoveExtension().Extension() == kIndexedDBExtension) {
       std::string origin_id = file_path.BaseName().RemoveExtension()
           .RemoveExtension().MaybeAsASCII();
-      origins->push_back(Origin(storage::GetOriginFromIdentifier(origin_id)));
+      origins->push_back(storage::GetOriginFromIdentifier(origin_id));
       if (file_paths)
         file_paths->push_back(file_path);
     }
   }
 }
 
+}  // namespace
+
 // This will be called after the IndexedDBContext is destroyed.
-void ClearSessionOnlyOrigins(
+void IndexedDBContextImpl::ClearSessionOnlyOrigins(
     const base::FilePath& indexeddb_path,
     scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy) {
   // TODO(jsbell): DCHECK that this is running on an IndexedDB sequence,
@@ -102,8 +106,6 @@ void ClearSessionOnlyOrigins(
     base::DeleteFile(*file_path, true);
   }
 }
-
-}  // namespace
 
 IndexedDBContextImpl::IndexedDBContextImpl(
     const base::FilePath& data_path,
@@ -128,7 +130,8 @@ IndexedDBFactory* IndexedDBContextImpl::GetIDBFactory() {
     // Prime our cache of origins with existing databases so we can
     // detect when dbs are newly created.
     GetOriginSet();
-    factory_ = new IndexedDBFactoryImpl(this);
+    factory_ =
+        new IndexedDBFactoryImpl(this, base::DefaultClock::GetInstance());
   }
   return factory_.get();
 }
@@ -168,16 +171,16 @@ base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
 
   std::sort(origins.begin(), origins.end(), HostNameComparator);
 
-  std::unique_ptr<base::ListValue> list(base::MakeUnique<base::ListValue>());
+  std::unique_ptr<base::ListValue> list(std::make_unique<base::ListValue>());
   for (const auto& origin : origins) {
     std::unique_ptr<base::DictionaryValue> info(
-        base::MakeUnique<base::DictionaryValue>());
+        std::make_unique<base::DictionaryValue>());
     info->SetString("url", origin.Serialize());
     info->SetString("size", ui::FormatBytes(GetOriginDiskUsage(origin)));
     info->SetDouble("last_modified", GetOriginLastModified(origin).ToJsTime());
     if (!is_incognito()) {
       std::unique_ptr<base::ListValue> paths(
-          base::MakeUnique<base::ListValue>());
+          std::make_unique<base::ListValue>());
       for (const base::FilePath& path : GetStoragePaths(origin))
         paths->AppendString(path.value());
       info->Set("paths", std::move(paths));
@@ -194,14 +197,14 @@ base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
           range = factory_->GetOpenDatabasesForOrigin(origin);
       // TODO(jsbell): Sort by name?
       std::unique_ptr<base::ListValue> database_list(
-          base::MakeUnique<base::ListValue>());
+          std::make_unique<base::ListValue>());
 
       for (IndexedDBFactory::OriginDBMapIterator it = range.first;
            it != range.second;
            ++it) {
         const IndexedDBDatabase* db = it->second;
         std::unique_ptr<base::DictionaryValue> db_info(
-            base::MakeUnique<base::DictionaryValue>());
+            std::make_unique<base::DictionaryValue>());
 
         db_info->SetString("name", db->name());
         db_info->SetDouble("connection_count", db->ConnectionCount());
@@ -209,12 +212,12 @@ base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
         db_info->SetDouble("pending_open_delete", db->PendingOpenDeleteCount());
 
         std::unique_ptr<base::ListValue> transaction_list(
-            base::MakeUnique<base::ListValue>());
+            std::make_unique<base::ListValue>());
         std::vector<const IndexedDBTransaction*> transactions =
             db->transaction_coordinator().GetTransactions();
         for (const auto* transaction : transactions) {
           std::unique_ptr<base::DictionaryValue> transaction_info(
-              base::MakeUnique<base::DictionaryValue>());
+              std::make_unique<base::DictionaryValue>());
 
           const char* const kModes[] =
               { "readonly", "readwrite", "versionchange" };
@@ -254,11 +257,11 @@ base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
               "tasks_completed", transaction->diagnostics().tasks_completed);
 
           std::unique_ptr<base::ListValue> scope(
-              base::MakeUnique<base::ListValue>());
+              std::make_unique<base::ListValue>());
           for (const auto& id : transaction->scope()) {
-            const auto& it = db->metadata().object_stores.find(id);
-            if (it != db->metadata().object_stores.end())
-              scope->AppendString(it->second.name);
+            const auto& stores_it = db->metadata().object_stores.find(id);
+            if (stores_it != db->metadata().object_stores.end())
+              scope->AppendString(stores_it->second.name);
           }
 
           transaction_info->Set("scope", std::move(scope));
@@ -288,11 +291,6 @@ int IndexedDBContextImpl::GetOriginBlobFileCount(const Origin& origin) {
   return count;
 }
 
-// TODO(jsbell): Update callers to use url::Origin overload and remove.
-int64_t IndexedDBContextImpl::GetOriginDiskUsage(const GURL& origin_url) {
-  return GetOriginDiskUsage(Origin(origin_url));
-}
-
 int64_t IndexedDBContextImpl::GetOriginDiskUsage(const Origin& origin) {
   DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   if (data_path_.empty() || !HasOrigin(origin))
@@ -314,7 +312,7 @@ base::Time IndexedDBContextImpl::GetOriginLastModified(const Origin& origin) {
 
 // TODO(jsbell): Update callers to use url::Origin overload and remove.
 void IndexedDBContextImpl::DeleteForOrigin(const GURL& origin_url) {
-  DeleteForOrigin(Origin(origin_url));
+  DeleteForOrigin(Origin::Create(origin_url));
 }
 
 void IndexedDBContextImpl::DeleteForOrigin(const Origin& origin) {
@@ -347,7 +345,7 @@ void IndexedDBContextImpl::DeleteForOrigin(const Origin& origin) {
 // TODO(jsbell): Update callers to use url::Origin overload and remove.
 void IndexedDBContextImpl::CopyOriginData(const GURL& origin_url,
                                           IndexedDBContext* dest_context) {
-  CopyOriginData(Origin(origin_url), dest_context);
+  CopyOriginData(Origin::Create(origin_url), dest_context);
 }
 
 void IndexedDBContextImpl::CopyOriginData(const Origin& origin,
@@ -418,7 +416,7 @@ std::vector<base::FilePath> IndexedDBContextImpl::GetStoragePaths(
 // TODO(jsbell): Update callers to use url::Origin overload and remove.
 base::FilePath IndexedDBContextImpl::GetFilePathForTesting(
     const GURL& origin_url) const {
-  return GetFilePathForTesting(Origin(origin_url));
+  return GetFilePathForTesting(Origin::Create(origin_url));
 }
 
 base::FilePath IndexedDBContextImpl::GetFilePathForTesting(
@@ -440,8 +438,8 @@ void IndexedDBContextImpl::ConnectionOpened(const Origin& origin,
                                             IndexedDBConnection* connection) {
   DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   quota_manager_proxy()->NotifyStorageAccessed(
-      storage::QuotaClient::kIndexedDatabase, origin.GetURL(),
-      storage::kStorageTypeTemporary);
+      storage::QuotaClient::kIndexedDatabase, origin,
+      blink::mojom::StorageType::kTemporary);
   if (AddToOriginSet(origin)) {
     // A newly created db, notify the quota system.
     QueryDiskAndUpdateQuotaUsage(origin);
@@ -454,8 +452,8 @@ void IndexedDBContextImpl::ConnectionClosed(const Origin& origin,
                                             IndexedDBConnection* connection) {
   DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   quota_manager_proxy()->NotifyStorageAccessed(
-      storage::QuotaClient::kIndexedDatabase, origin.GetURL(),
-      storage::kStorageTypeTemporary);
+      storage::QuotaClient::kIndexedDatabase, origin,
+      blink::mojom::StorageType::kTemporary);
   if (factory_.get() && factory_->GetConnectionCount(origin) == 0)
     QueryDiskAndUpdateQuotaUsage(origin);
 }
@@ -470,11 +468,41 @@ void IndexedDBContextImpl::DatabaseDeleted(const Origin& origin) {
   QueryDiskAndUpdateQuotaUsage(origin);
 }
 
+void IndexedDBContextImpl::AddObserver(
+    IndexedDBContextImpl::Observer* observer) {
+  DCHECK(!observers_.HasObserver(observer));
+  observers_.AddObserver(observer);
+}
+
+void IndexedDBContextImpl::RemoveObserver(
+    IndexedDBContextImpl::Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
+void IndexedDBContextImpl::NotifyIndexedDBListChanged(const Origin& origin) {
+  for (auto& observer : observers_)
+    observer.OnIndexedDBListChanged(origin);
+}
+
+void IndexedDBContextImpl::NotifyIndexedDBContentChanged(
+    const Origin& origin,
+    const base::string16& database_name,
+    const base::string16& object_store_name) {
+  for (auto& observer : observers_) {
+    observer.OnIndexedDBContentChanged(origin, database_name,
+                                       object_store_name);
+  }
+}
+
+void IndexedDBContextImpl::BlobFilesCleaned(const url::Origin& origin) {
+  QueryDiskAndUpdateQuotaUsage(origin);
+}
+
 IndexedDBContextImpl::~IndexedDBContextImpl() {
   if (factory_.get()) {
     TaskRunner()->PostTask(FROM_HERE,
                            base::BindOnce(&IndexedDBFactory::ContextDestroyed,
-                                          base::Passed(&factory_)));
+                                          std::move(factory_)));
   }
 
   if (data_path_.empty())
@@ -499,7 +527,7 @@ IndexedDBContextImpl::~IndexedDBContextImpl() {
 // static
 base::FilePath IndexedDBContextImpl::GetBlobStoreFileName(
     const Origin& origin) {
-  std::string origin_id = storage::GetIdentifierFromOrigin(origin.GetURL());
+  std::string origin_id = storage::GetIdentifierFromOrigin(origin);
   return base::FilePath()
       .AppendASCII(origin_id)
       .AddExtension(kIndexedDBExtension)
@@ -508,7 +536,7 @@ base::FilePath IndexedDBContextImpl::GetBlobStoreFileName(
 
 // static
 base::FilePath IndexedDBContextImpl::GetLevelDBFileName(const Origin& origin) {
-  std::string origin_id = storage::GetIdentifierFromOrigin(origin.GetURL());
+  std::string origin_id = storage::GetIdentifierFromOrigin(origin);
   return base::FilePath()
       .AppendASCII(origin_id)
       .AddExtension(kIndexedDBExtension)
@@ -549,17 +577,18 @@ void IndexedDBContextImpl::QueryDiskAndUpdateQuotaUsage(const Origin& origin) {
   if (difference) {
     origin_size_map_[origin] = current_disk_usage;
     quota_manager_proxy()->NotifyStorageModified(
-        storage::QuotaClient::kIndexedDatabase, origin.GetURL(),
-        storage::kStorageTypeTemporary, difference);
+        storage::QuotaClient::kIndexedDatabase, origin,
+        blink::mojom::StorageType::kTemporary, difference);
+    NotifyIndexedDBListChanged(origin);
   }
 }
 
 std::set<Origin>* IndexedDBContextImpl::GetOriginSet() {
   if (!origin_set_) {
     std::vector<Origin> origins;
-    GetAllOriginsAndPaths(data_path_, &origins, NULL);
+    GetAllOriginsAndPaths(data_path_, &origins, nullptr);
     origin_set_ =
-        base::MakeUnique<std::set<Origin>>(origins.begin(), origins.end());
+        std::make_unique<std::set<Origin>>(origins.begin(), origins.end());
   }
   return origin_set_.get();
 }

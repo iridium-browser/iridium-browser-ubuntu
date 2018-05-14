@@ -63,10 +63,10 @@ Polymer({
    * @private
    */
   getLanguages_: function() {
-    var filterValue =
+    const filterValue =
         this.filterValue_ ? this.filterValue_.toLowerCase() : null;
-    return this.languages.supported.filter(function(language) {
-      var isAvailableLanguage =
+    return this.languages.supported.filter(language => {
+      const isAvailableLanguage =
           !this.languageHelper.isLanguageEnabled(language.code);
 
       if (!isAvailableLanguage)
@@ -77,7 +77,7 @@ Polymer({
 
       return language.displayName.toLowerCase().includes(filterValue) ||
           language.nativeDisplayName.toLowerCase().includes(filterValue);
-    }.bind(this));
+    });
   },
 
   /**
@@ -86,7 +86,7 @@ Polymer({
    * @private
    */
   getDisplayText_: function(language) {
-    var displayText = language.displayName;
+    let displayText = language.displayName;
     // If the native name is different, add it.
     if (language.displayName != language.nativeDisplayName)
       displayText += ' - ' + language.nativeDisplayName;
@@ -114,7 +114,7 @@ Polymer({
     // willAdd_ is called to initialize the checkbox state (in case the
     // iron-list re-uses a previous checkbox), and the checkbox can only be
     // changed after that by user action.
-    var language = e.model.item;
+    const language = e.model.item;
     if (e.target.checked)
       this.languagesToAdd_.add(language.code);
     else
@@ -134,8 +134,8 @@ Polymer({
    */
   onActionButtonTap_: function() {
     this.$.dialog.close();
-    this.languagesToAdd_.forEach(function(languageCode) {
+    this.languagesToAdd_.forEach(languageCode => {
       this.languageHelper.enableLanguage(languageCode);
-    }.bind(this));
+    });
   },
 });

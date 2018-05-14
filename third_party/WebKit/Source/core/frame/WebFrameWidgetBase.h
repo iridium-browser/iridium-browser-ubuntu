@@ -13,6 +13,7 @@
 #include "platform/wtf/Assertions.h"
 #include "public/platform/WebCoalescedInputEvent.h"
 #include "public/platform/WebDragData.h"
+#include "public/platform/WebGestureCurveTarget.h"
 #include "public/web/WebFrameWidget.h"
 
 namespace blink {
@@ -20,21 +21,28 @@ namespace blink {
 class CompositorAnimationHost;
 class CompositorMutatorImpl;
 class GraphicsLayer;
+struct IntrinsicSizingInfo;
+class PageWidgetEventHandler;
+class WebActiveGestureAnimation;
 class WebImage;
 class WebLayer;
 class WebLayerTreeView;
-class WebViewBase;
+class WebLocalFrame;
+class WebViewImpl;
 class HitTestResult;
-struct WebPoint;
+struct WebFloatPoint;
 
 class CORE_EXPORT WebFrameWidgetBase
     : public GarbageCollectedFinalized<WebFrameWidgetBase>,
-      public NON_EXPORTED_BASE(WebFrameWidget) {
+      public WebFrameWidget,
+      public WebGestureCurveTarget {
  public:
-  virtual ~WebFrameWidgetBase() {}
+  WebFrameWidgetBase();
+  virtual ~WebFrameWidgetBase();
 
   virtual bool ForSubframe() const = 0;
   virtual void ScheduleAnimation() = 0;
+  virtual void IntrinsicSizingInfoChanged(const IntrinsicSizingInfo&) {}
   virtual CompositorMutatorImpl* CompositorMutator() = 0;
 
   virtual WebWidgetClient* Client() const = 0;
@@ -52,26 +60,37 @@ class CORE_EXPORT WebFrameWidgetBase
 
   virtual HitTestResult CoreHitTestResultAt(const WebPoint&) = 0;
 
+  // Fling operations.
+  bool EndActiveFlingAnimation();
+  WebInputEventResult HandleGestureFlingEvent(const WebGestureEvent&);
+  void UpdateGestureAnimation(double last_frame_time_monotonic);
+
+  // WebGestureCurveTarget implementation.
+  bool ScrollBy(const WebFloatSize& delta,
+                const WebFloatSize& velocity) override;
+
   // WebFrameWidget implementation.
   WebDragOperation DragTargetDragEnter(const WebDragData&,
-                                       const WebPoint& point_in_viewport,
-                                       const WebPoint& screen_point,
+                                       const WebFloatPoint& point_in_viewport,
+                                       const WebFloatPoint& screen_point,
                                        WebDragOperationsMask operations_allowed,
                                        int modifiers) override;
-  WebDragOperation DragTargetDragOver(const WebPoint& point_in_viewport,
-                                      const WebPoint& screen_point,
+  WebDragOperation DragTargetDragOver(const WebFloatPoint& point_in_viewport,
+                                      const WebFloatPoint& screen_point,
                                       WebDragOperationsMask operations_allowed,
                                       int modifiers) override;
-  void DragTargetDragLeave(const WebPoint& point_in_viewport,
-                           const WebPoint& screen_point) override;
+  void DragTargetDragLeave(const WebFloatPoint& point_in_viewport,
+                           const WebFloatPoint& screen_point) override;
   void DragTargetDrop(const WebDragData&,
-                      const WebPoint& point_in_viewport,
-                      const WebPoint& screen_point,
+                      const WebFloatPoint& point_in_viewport,
+                      const WebFloatPoint& screen_point,
                       int modifiers) override;
-  void DragSourceEndedAt(const WebPoint& point_in_viewport,
-                         const WebPoint& screen_point,
+  void DragSourceEndedAt(const WebFloatPoint& point_in_viewport,
+                         const WebFloatPoint& screen_point,
                          WebDragOperation) override;
   void DragSourceSystemDragEnded() override;
+
+  WebLocalFrame* FocusedWebLocalFrameInWidget() const override;
 
   // Called when a drag-n-drop operation should begin.
   void StartDragging(WebReferrerPolicy,
@@ -89,12 +108,21 @@ class CORE_EXPORT WebFrameWidgetBase
   void DidNotAcquirePointerLock() override;
   void DidLosePointerLock() override;
   void ShowContextMenu(WebMenuSourceType) override;
+  bool IsFlinging() const override;
 
   // Image decode functionality.
-  void RequestDecode(const PaintImage&,
-                     std::unique_ptr<WTF::Function<void(bool)>> callback);
+  void RequestDecode(const PaintImage&, base::OnceCallback<void(bool)>);
 
-  DECLARE_VIRTUAL_TRACE();
+  // Called when the FrameView for this Widget's local root is created.
+  virtual void DidCreateLocalRootView() {}
+
+  // This method returns the focused frame belonging to this WebWidget, that
+  // is, a focused frame with the same local root as the one corresponding
+  // to this widget. It will return nullptr if no frame is focused or, the
+  // focused frame has a different local root.
+  LocalFrame* FocusedLocalFrameInWidget() const;
+
+  virtual void Trace(blink::Visitor*);
 
  protected:
   enum DragAction { kDragEnter, kDragOver };
@@ -102,15 +130,17 @@ class CORE_EXPORT WebFrameWidgetBase
   // Consolidate some common code between starting a drag over a target and
   // updating a drag over a target. If we're starting a drag, |isEntering|
   // should be true.
-  WebDragOperation DragTargetDragEnterOrOver(const WebPoint& point_in_viewport,
-                                             const WebPoint& screen_point,
-                                             DragAction,
-                                             int modifiers);
+  WebDragOperation DragTargetDragEnterOrOver(
+      const WebFloatPoint& point_in_viewport,
+      const WebFloatPoint& screen_point,
+      DragAction,
+      int modifiers);
 
   // Helper function to call VisualViewport::viewportToRootFrame().
-  WebPoint ViewportToRootFrame(const WebPoint& point_in_viewport) const;
+  WebFloatPoint ViewportToRootFrame(
+      const WebFloatPoint& point_in_viewport) const;
 
-  WebViewBase* View() const;
+  WebViewImpl* View() const;
 
   // Returns the page object associated with this widget. This may be null when
   // the page is shutting down, but will be valid at all other times.
@@ -118,6 +148,8 @@ class CORE_EXPORT WebFrameWidgetBase
 
   // Helper function to process events while pointer locked.
   void PointerLockMouseEvent(const WebCoalescedInputEvent&);
+
+  virtual PageWidgetEventHandler* GetPageWidgetEventHandler() = 0;
 
   // A copy of the web drop data object we received from the browser.
   Member<DataObject> current_drag_data_;
@@ -133,11 +165,19 @@ class CORE_EXPORT WebFrameWidgetBase
   WebDragOperation drag_operation_ = kWebDragOperationNone;
 
  private:
+  // Fling local.
+  WebGestureEvent CreateGestureScrollEventFromFling(WebInputEvent::Type,
+                                                    WebGestureDevice) const;
   void CancelDrag();
-  LocalFrame* FocusedLocalFrameInWidget() const;
+
+  std::unique_ptr<WebActiveGestureAnimation> gesture_animation_;
+  WebPoint position_on_fling_start_;
+  WebPoint global_position_on_fling_start_;
+  int fling_modifier_;
+  WebGestureDevice fling_source_device_;
 
   static bool ignore_input_events_;
-  RefPtr<UserGestureToken> pointer_lock_gesture_token_;
+  scoped_refptr<UserGestureToken> pointer_lock_gesture_token_;
 
   friend class WebViewImpl;
 };

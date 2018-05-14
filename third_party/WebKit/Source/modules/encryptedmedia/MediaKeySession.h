@@ -27,13 +27,13 @@
 #define MediaKeySession_h
 
 #include <memory>
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromiseProperty.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/typed_arrays/DOMArrayPiece.h"
 #include "modules/EventTargetModules.h"
 #include "modules/encryptedmedia/MediaKeyStatusMap.h"
 #include "platform/Timer.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebContentDecryptionModuleSession.h"
 #include "public/platform/WebEncryptedMediaTypes.h"
@@ -41,7 +41,7 @@
 namespace blink {
 
 class DOMException;
-class GenericEventQueue;
+class MediaElementEventQueue;
 class MediaKeys;
 
 // References are held by JS only. However, even if all JS references are
@@ -102,7 +102,7 @@ class MediaKeySession final
   // ContextLifecycleObserver
   void ContextDestroyed(ExecutionContext*) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   class PendingAction;
@@ -135,7 +135,7 @@ class MediaKeySession final
   void KeysStatusesChange(const WebVector<WebEncryptedMediaKeyInformation>&,
                           bool has_additional_usable_key) override;
 
-  Member<GenericEventQueue> async_event_queue_;
+  Member<MediaElementEventQueue> async_event_queue_;
   std::unique_ptr<WebContentDecryptionModuleSession> session_;
 
   // Used to determine if MediaKeys is still active.

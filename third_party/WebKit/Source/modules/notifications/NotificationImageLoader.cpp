@@ -14,8 +14,8 @@
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/weborigin/KURL.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/Threading.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/modules/notifications/WebNotificationConstants.h"
 #include "skia/ext/image_operations.h"
@@ -50,7 +50,7 @@ namespace blink {
 NotificationImageLoader::NotificationImageLoader(Type type)
     : type_(type), stopped_(false), start_time_(0.0) {}
 
-NotificationImageLoader::~NotificationImageLoader() {}
+NotificationImageLoader::~NotificationImageLoader() = default;
 
 // static
 SkBitmap NotificationImageLoader::ScaleDownIfNeeded(const SkBitmap& image,
@@ -81,27 +81,26 @@ SkBitmap NotificationImageLoader::ScaleDownIfNeeded(const SkBitmap& image,
     double scale =
         std::min(static_cast<double>(max_width_px) / image.width(),
                  static_cast<double>(max_height_px) / image.height());
-    double start_time = MonotonicallyIncreasingTimeMS();
+    double start_time = CurrentTimeTicksInMilliseconds();
     // TODO(peter): Try using RESIZE_BETTER for large images.
     SkBitmap scaled_image =
         skia::ImageOperations::Resize(image, skia::ImageOperations::RESIZE_BEST,
                                       std::lround(scale * image.width()),
                                       std::lround(scale * image.height()));
     NOTIFICATION_HISTOGRAM_COUNTS(LoadScaleDownTime, type,
-                                  MonotonicallyIncreasingTimeMS() - start_time,
+                                  CurrentTimeTicksInMilliseconds() - start_time,
                                   1000 * 10 /* 10 seconds max */);
     return scaled_image;
   }
   return image;
 }
 
-void NotificationImageLoader::Start(
-    ExecutionContext* execution_context,
-    const KURL& url,
-    std::unique_ptr<ImageCallback> image_callback) {
+void NotificationImageLoader::Start(ExecutionContext* execution_context,
+                                    const KURL& url,
+                                    ImageCallback image_callback) {
   DCHECK(!stopped_);
 
-  start_time_ = MonotonicallyIncreasingTimeMS();
+  start_time_ = CurrentTimeTicksInMilliseconds();
   image_callback_ = std::move(image_callback);
 
   ThreadableLoaderOptions threadable_loader_options;
@@ -115,7 +114,7 @@ void NotificationImageLoader::Start(
 
   ResourceRequest resource_request(url);
   resource_request.SetRequestContext(WebURLRequest::kRequestContextImage);
-  resource_request.SetPriority(kResourceLoadPriorityMedium);
+  resource_request.SetPriority(ResourceLoadPriority::kMedium);
   resource_request.SetRequestorOrigin(execution_context->GetSecurityOrigin());
 
   threadable_loader_ = ThreadableLoader::Create(*execution_context, this,
@@ -151,7 +150,7 @@ void NotificationImageLoader::DidFinishLoading(
     return;
 
   NOTIFICATION_HISTOGRAM_COUNTS(LoadFinishTime, type_,
-                                MonotonicallyIncreasingTimeMS() - start_time_,
+                                CurrentTimeTicksInMilliseconds() - start_time_,
                                 1000 * 60 * 60 /* 1 hour max */);
 
   if (data_) {
@@ -160,12 +159,12 @@ void NotificationImageLoader::DidFinishLoading(
 
     std::unique_ptr<ImageDecoder> decoder = ImageDecoder::Create(
         data_, true /* dataComplete */, ImageDecoder::kAlphaPremultiplied,
-        ColorBehavior::TransformToGlobalTarget());
+        ColorBehavior::TransformToSRGB());
     if (decoder) {
       // The |ImageFrame*| is owned by the decoder.
-      ImageFrame* image_frame = decoder->FrameBufferAtIndex(0);
+      ImageFrame* image_frame = decoder->DecodeFrameBufferAtIndex(0);
       if (image_frame) {
-        (*image_callback_)(image_frame->Bitmap());
+        std::move(image_callback_).Run(image_frame->Bitmap());
         return;
       }
     }
@@ -175,7 +174,7 @@ void NotificationImageLoader::DidFinishLoading(
 
 void NotificationImageLoader::DidFail(const ResourceError& error) {
   NOTIFICATION_HISTOGRAM_COUNTS(LoadFailTime, type_,
-                                MonotonicallyIncreasingTimeMS() - start_time_,
+                                CurrentTimeTicksInMilliseconds() - start_time_,
                                 1000 * 60 * 60 /* 1 hour max */);
 
   RunCallbackWithEmptyBitmap();
@@ -191,7 +190,7 @@ void NotificationImageLoader::RunCallbackWithEmptyBitmap() {
   if (stopped_)
     return;
 
-  (*image_callback_)(SkBitmap());
+  std::move(image_callback_).Run(SkBitmap());
 }
 
 }  // namespace blink

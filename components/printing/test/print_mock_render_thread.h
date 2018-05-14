@@ -24,7 +24,7 @@ class DictionaryValue;
 class MockPrinter;
 struct PrintHostMsg_DidGetPreviewPageCount_Params;
 struct PrintHostMsg_DidPreviewPage_Params;
-struct PrintHostMsg_DidPrintPage_Params;
+struct PrintHostMsg_DidPrintDocument_Params;
 struct PrintHostMsg_ScriptedPrint_Params;
 struct PrintMsg_PrintPages_Params;
 struct PrintMsg_Print_Params;
@@ -64,15 +64,15 @@ class PrintMockRenderThread : public content::MockRenderThread {
   bool OnMessageReceived(const IPC::Message& msg) override;
 
 #if BUILDFLAG(ENABLE_PRINTING)
-  // PrintWebViewHelper expects default print settings.
+  // PrintRenderFrameHelper expects default print settings.
   void OnGetDefaultPrintSettings(PrintMsg_Print_Params* setting);
 
-  // PrintWebViewHelper expects final print settings from the user.
+  // PrintRenderFrameHelper expects final print settings from the user.
   void OnScriptedPrint(const PrintHostMsg_ScriptedPrint_Params& params,
                        PrintMsg_PrintPages_Params* settings);
 
   void OnDidGetPrintedPagesCount(int cookie, int number_pages);
-  void OnDidPrintPage(const PrintHostMsg_DidPrintPage_Params& params);
+  void OnDidPrintDocument(const PrintHostMsg_DidPrintDocument_Params& params);
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   void OnDidGetPreviewPageCount(
       const PrintHostMsg_DidGetPreviewPageCount_Params& params);
@@ -82,7 +82,7 @@ class PrintMockRenderThread : public content::MockRenderThread {
                         bool* cancel);
 #endif
 
-  // For print preview, PrintWebViewHelper will update settings.
+  // For print preview, PrintRenderFrameHelper will update settings.
   void OnUpdatePrintSettings(int document_cookie,
                              const base::DictionaryValue& job_settings,
                              PrintMsg_PrintPages_Params* params,

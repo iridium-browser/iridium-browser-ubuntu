@@ -21,13 +21,13 @@
 #include "ui/android/view_android.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
-namespace cc {
-class BeginFrameSource;
-}  // namespace cc
-
 namespace display {
 class DisplayAndroidManager;
 }  // namespace display
+
+namespace viz {
+class BeginFrameSource;
+}  // namespace viz
 
 namespace ui {
 
@@ -38,13 +38,16 @@ class WindowAndroidObserver;
 // WindowAndroid is also the root of a ViewAndroid tree.
 class UI_ANDROID_EXPORT WindowAndroid : public ViewAndroid {
  public:
+  static WindowAndroid* FromJavaWindowAndroid(
+      const base::android::JavaParamRef<jobject>& jwindow_android);
+
   WindowAndroid(JNIEnv* env, jobject obj, int display_id);
+
+  ~WindowAndroid() override;
 
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
 
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject();
-
-  static bool RegisterWindowAndroid(JNIEnv* env);
 
   // Compositor callback relay.
   void OnCompositingDidCommit();
@@ -56,7 +59,7 @@ class UI_ANDROID_EXPORT WindowAndroid : public ViewAndroid {
   void RemoveObserver(WindowAndroidObserver* observer);
 
   WindowAndroidCompositor* GetCompositor() { return compositor_; }
-  cc::BeginFrameSource* GetBeginFrameSource();
+  viz::BeginFrameSource* GetBeginFrameSource();
 
   // Runs the provided callback as soon as the current vsync was handled.
   void AddVSyncCompleteCallback(const base::Closure& callback);
@@ -84,7 +87,6 @@ class UI_ANDROID_EXPORT WindowAndroid : public ViewAndroid {
   bool CanRequestPermission(const std::string& permission);
 
   static WindowAndroid* CreateForTesting();
-  void DestroyForTesting();
 
   // Return the window token for this window, if one exists.
   base::android::ScopedJavaLocalRef<jobject> GetWindowToken();
@@ -93,8 +95,6 @@ class UI_ANDROID_EXPORT WindowAndroid : public ViewAndroid {
   class WindowBeginFrameSource;
   friend class DisplayAndroidManager;
   friend class WindowBeginFrameSource;
-
-  ~WindowAndroid() override;
 
   void SetNeedsBeginFrames(bool needs_begin_frames);
   void RequestVSyncUpdate();

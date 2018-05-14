@@ -13,12 +13,9 @@ namespace blink {
 
 Vector<double> OrientationSensor::quaternion(bool& is_null) {
   reading_dirty_ = false;
-  is_null = !CanReturnReadings();
-  return is_null ? Vector<double>()
-                 : Vector<double>({ReadingValueUnchecked(0),    // Vx
-                                   ReadingValueUnchecked(1),    // Vy
-                                   ReadingValueUnchecked(2),    // Vz
-                                   ReadingValueUnchecked(3)});  // W
+  INIT_IS_NULL_AND_RETURN(is_null, Vector<double>());
+  const auto& quat = GetReading().orientation_quat;
+  return Vector<double>({quat.x, quat.y, quat.z, quat.w});
 }
 
 template <typename T>
@@ -89,42 +86,41 @@ void OrientationSensor::PopulateMatrixInternal(
         "Target buffer must have at least 16 elements.");
     return;
   }
-  if (!CanReturnReadings()) {
+  if (!hasReading()) {
     exception_state.ThrowDOMException(kNotReadableError,
                                       "Sensor data is not available.");
     return;
   }
 
-  double x = ReadingValueUnchecked(0);
-  double y = ReadingValueUnchecked(1);
-  double z = ReadingValueUnchecked(2);
-  double w = ReadingValueUnchecked(3);
+  const auto& quat = GetReading().orientation_quat;
 
-  DoPopulateMatrix(target_matrix, x, y, z, w);
+  DoPopulateMatrix(target_matrix, quat.x, quat.y, quat.z, quat.w);
 }
 
 void OrientationSensor::populateMatrix(
     Float32ArrayOrFloat64ArrayOrDOMMatrix& matrix,
     ExceptionState& exception_state) {
-  if (matrix.isFloat32Array())
-    PopulateMatrixInternal(matrix.getAsFloat32Array().View(), exception_state);
-  else if (matrix.isFloat64Array())
-    PopulateMatrixInternal(matrix.getAsFloat64Array().View(), exception_state);
-  else if (matrix.isDOMMatrix())
-    PopulateMatrixInternal(matrix.getAsDOMMatrix(), exception_state);
+  if (matrix.IsFloat32Array())
+    PopulateMatrixInternal(matrix.GetAsFloat32Array().View(), exception_state);
+  else if (matrix.IsFloat64Array())
+    PopulateMatrixInternal(matrix.GetAsFloat64Array().View(), exception_state);
+  else if (matrix.IsDOMMatrix())
+    PopulateMatrixInternal(matrix.GetAsDOMMatrix(), exception_state);
   else
     NOTREACHED() << "Unexpected rotation matrix type.";
 }
 
 bool OrientationSensor::isReadingDirty() const {
-  return reading_dirty_ || !CanReturnReadings();
+  return reading_dirty_ || !hasReading();
 }
 
-OrientationSensor::OrientationSensor(ExecutionContext* execution_context,
-                                     const SensorOptions& options,
-                                     ExceptionState& exception_state,
-                                     device::mojom::blink::SensorType type)
-    : Sensor(execution_context, options, exception_state, type),
+OrientationSensor::OrientationSensor(
+    ExecutionContext* execution_context,
+    const SpatialSensorOptions& options,
+    ExceptionState& exception_state,
+    device::mojom::blink::SensorType type,
+    const Vector<mojom::FeaturePolicyFeature>& features)
+    : Sensor(execution_context, options, exception_state, type, features),
       reading_dirty_(true) {}
 
 void OrientationSensor::OnSensorReadingChanged() {
@@ -132,7 +128,7 @@ void OrientationSensor::OnSensorReadingChanged() {
   Sensor::OnSensorReadingChanged();
 }
 
-DEFINE_TRACE(OrientationSensor) {
+void OrientationSensor::Trace(blink::Visitor* visitor) {
   Sensor::Trace(visitor);
 }
 

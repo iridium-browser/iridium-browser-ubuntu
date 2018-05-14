@@ -31,8 +31,7 @@ import java.util.HashSet;
  * Test to make sure browser and renderer are seperated process.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ProcessIsolationTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -48,7 +47,7 @@ public class ProcessIsolationTest {
     @DisableIf.Build(sdk_is_greater_than = 22, message = "crbug.com/517611")
     @Feature({"Browser", "Security"})
     @RetryOnFailure
-    public void testProcessIsolationForRenderers() throws InterruptedException {
+    public void testProcessIsolationForRenderers() throws InterruptedException, IOException {
         int tabsCount = mActivityTestRule.getActivity().getCurrentTabModel().getCount();
         // The ActivityManager can be used to retrieve the current processes, but the reported UID
         // in the RunningAppProcessInfo for isolated processes is the same as the parent process
@@ -102,8 +101,6 @@ public class ProcessIsolationTest {
                     }
                 }
             }
-        } catch (IOException ioe) {
-            Assert.fail("Failed to read ps output.");
         } finally {
             if (reader != null) {
                 try {

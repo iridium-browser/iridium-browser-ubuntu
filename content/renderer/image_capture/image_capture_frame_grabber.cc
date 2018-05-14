@@ -56,9 +56,8 @@ void ImageCaptureFrameGrabber::SingleShotFrameHandler::OnVideoFrameOnIOThread(
     SkImageDeliverCB callback,
     const scoped_refptr<media::VideoFrame>& frame,
     base::TimeTicks /* current_time */) {
-  DCHECK(frame->format() == media::PIXEL_FORMAT_YV12 ||
-         frame->format() == media::PIXEL_FORMAT_I420 ||
-         frame->format() == media::PIXEL_FORMAT_YV12A);
+  DCHECK(frame->format() == media::PIXEL_FORMAT_I420 ||
+         frame->format() == media::PIXEL_FORMAT_I420A);
 
   if (first_frame_received_)
     return;
@@ -94,7 +93,7 @@ void ImageCaptureFrameGrabber::SingleShotFrameHandler::OnVideoFrameOnIOThread(
                           pixmap.width() * 4, pixmap.width(), pixmap.height(),
                           destination_pixel_format);
 
-  if (frame->format() == media::PIXEL_FORMAT_YV12A) {
+  if (frame->format() == media::PIXEL_FORMAT_I420A) {
     DCHECK(!info.isOpaque());
     // This function copies any plane into the alpha channel of an ARGB image.
     libyuv::ARGBCopyYToAlpha(frame->visible_data(media::VideoFrame::kAPlane),
@@ -139,12 +138,13 @@ void ImageCaptureFrameGrabber::GrabFrame(
   // https://crbug.com/623042.
   frame_grab_in_progress_ = true;
   MediaStreamVideoSink::ConnectToTrack(
-      *track, base::Bind(&SingleShotFrameHandler::OnVideoFrameOnIOThread,
-                         make_scoped_refptr(new SingleShotFrameHandler),
-                         media::BindToCurrentLoop(
-                             base::Bind(&ImageCaptureFrameGrabber::OnSkImage,
-                                        weak_factory_.GetWeakPtr(),
-                                        base::Passed(&scoped_callbacks)))),
+      *track,
+      base::Bind(
+          &SingleShotFrameHandler::OnVideoFrameOnIOThread,
+          base::MakeRefCounted<SingleShotFrameHandler>(),
+          media::BindToCurrentLoop(base::Bind(
+              &ImageCaptureFrameGrabber::OnSkImage, weak_factory_.GetWeakPtr(),
+              base::Passed(&scoped_callbacks)))),
       false);
 }
 

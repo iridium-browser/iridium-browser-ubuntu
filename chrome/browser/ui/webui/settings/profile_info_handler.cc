@@ -5,12 +5,11 @@
 #include "chrome/browser/ui/webui/settings/profile_info_handler.h"
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
-#include "chrome/browser/ui/user_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "ui/base/webui/web_ui_util.h"
 
@@ -33,9 +32,6 @@ namespace settings {
 // static
 const char ProfileInfoHandler::kProfileInfoChangedEventName[] =
     "profile-info-changed";
-const char
-    ProfileInfoHandler::kProfileManagesSupervisedUsersChangedEventName[] =
-        "profile-manages-supervised-users-changed";
 const char ProfileInfoHandler::kProfileStatsCountReadyEventName[] =
     "profile-stats-count-ready";
 
@@ -64,22 +60,11 @@ void ProfileInfoHandler::RegisterMessages() {
       base::Bind(&ProfileInfoHandler::HandleGetProfileStats,
                  base::Unretained(this)));
 #endif
-  web_ui()->RegisterMessageCallback(
-      "getProfileManagesSupervisedUsers",
-      base::Bind(&ProfileInfoHandler::HandleGetProfileManagesSupervisedUsers,
-                 base::Unretained(this)));
 }
 
 void ProfileInfoHandler::OnJavascriptAllowed() {
   profile_observer_.Add(
       &g_browser_process->profile_manager()->GetProfileAttributesStorage());
-
-  PrefService* prefs = profile_->GetPrefs();
-  profile_pref_registrar_.Init(prefs);
-  profile_pref_registrar_.Add(
-      prefs::kSupervisedUsers,
-      base::Bind(&ProfileInfoHandler::PushProfileManagesSupervisedUsersStatus,
-                 base::Unretained(this)));
 
 #if defined(OS_CHROMEOS)
   user_manager_observer_.Add(user_manager::UserManager::Get());
@@ -91,8 +76,6 @@ void ProfileInfoHandler::OnJavascriptDisallowed() {
 
   profile_observer_.Remove(
       &g_browser_process->profile_manager()->GetProfileAttributesStorage());
-
-  profile_pref_registrar_.RemoveAll();
 
 #if defined(OS_CHROMEOS)
   user_manager_observer_.Remove(user_manager::UserManager::Get());
@@ -148,27 +131,8 @@ void ProfileInfoHandler::PushProfileStatsCount(
 }
 #endif
 
-void ProfileInfoHandler::HandleGetProfileManagesSupervisedUsers(
-    const base::ListValue* args) {
-  AllowJavascript();
-
-  CHECK_EQ(1U, args->GetSize());
-  const base::Value* callback_id;
-  CHECK(args->Get(0, &callback_id));
-
-  ResolveJavascriptCallback(*callback_id,
-                            base::Value(IsProfileManagingSupervisedUsers()));
-}
-
 void ProfileInfoHandler::PushProfileInfo() {
   FireWebUIListener(kProfileInfoChangedEventName, *GetAccountNameAndIcon());
-}
-
-void ProfileInfoHandler::PushProfileManagesSupervisedUsersStatus() {
-  CallJavascriptFunction(
-      "cr.webUIListenerCallback",
-      base::Value(kProfileManagesSupervisedUsersChangedEventName),
-      base::Value(IsProfileManagingSupervisedUsers()));
 }
 
 std::unique_ptr<base::DictionaryValue>
@@ -203,14 +167,10 @@ ProfileInfoHandler::GetAccountNameAndIcon() const {
   }
 #endif  // defined(OS_CHROMEOS)
 
-  auto response = base::MakeUnique<base::DictionaryValue>();
+  auto response = std::make_unique<base::DictionaryValue>();
   response->SetString("name", name);
   response->SetString("iconUrl", icon_url);
   return response;
-}
-
-bool ProfileInfoHandler::IsProfileManagingSupervisedUsers() const {
-  return !profile_->GetPrefs()->GetDictionary(prefs::kSupervisedUsers)->empty();
 }
 
 }  // namespace settings

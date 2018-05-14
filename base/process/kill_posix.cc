@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "base/debug/activity_tracker.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
@@ -27,23 +28,22 @@ namespace {
 TerminationStatus GetTerminationStatusImpl(ProcessHandle handle,
                                            bool can_block,
                                            int* exit_code) {
+  DCHECK(exit_code);
+
   int status = 0;
   const pid_t result = HANDLE_EINTR(waitpid(handle, &status,
                                             can_block ? 0 : WNOHANG));
   if (result == -1) {
     DPLOG(ERROR) << "waitpid(" << handle << ")";
-    if (exit_code)
-      *exit_code = 0;
+    *exit_code = 0;
     return TERMINATION_STATUS_NORMAL_TERMINATION;
   } else if (result == 0) {
     // the child hasn't exited yet.
-    if (exit_code)
-      *exit_code = 0;
+    *exit_code = 0;
     return TERMINATION_STATUS_STILL_RUNNING;
   }
 
-  if (exit_code)
-    *exit_code = status;
+  *exit_code = status;
 
   if (WIFSIGNALED(status)) {
     switch (WTERMSIG(status)) {
@@ -136,21 +136,6 @@ bool CleanupProcesses(const FilePath::StringType& executable_name,
 
 namespace {
 
-// Return true if the given child is dead. This will also reap the process.
-// Doesn't block.
-static bool IsChildDead(pid_t child) {
-  const pid_t result = HANDLE_EINTR(waitpid(child, NULL, WNOHANG));
-  if (result == -1) {
-    DPLOG(ERROR) << "waitpid(" << child << ")";
-    NOTREACHED();
-  } else if (result > 0) {
-    // The child has died.
-    return true;
-  }
-
-  return false;
-}
-
 // A thread class which waits for the given child to exit and reaps it.
 // If the child doesn't exit within a couple of seconds, kill it.
 class BackgroundReaper : public PlatformThread::Delegate {
@@ -169,7 +154,7 @@ class BackgroundReaper : public PlatformThread::Delegate {
   void WaitForChildToDie() {
     // Wait forever case.
     if (timeout_ == 0) {
-      pid_t r = HANDLE_EINTR(waitpid(child_, NULL, 0));
+      pid_t r = HANDLE_EINTR(waitpid(child_, nullptr, 0));
       if (r != child_) {
         DPLOG(ERROR) << "While waiting for " << child_
                      << " to terminate, we got the following result: " << r;
@@ -183,15 +168,14 @@ class BackgroundReaper : public PlatformThread::Delegate {
     // Wait for 2 * timeout_ 500 milliseconds intervals.
     for (unsigned i = 0; i < 2 * timeout_; ++i) {
       PlatformThread::Sleep(TimeDelta::FromMilliseconds(500));
-      if (IsChildDead(child_))
+      if (Process(child_).WaitForExitWithTimeout(TimeDelta(), nullptr))
         return;
     }
 
     if (kill(child_, SIGKILL) == 0) {
       // SIGKILL is uncatchable. Since the signal was delivered, we can
       // just wait for the process to die now in a blocking manner.
-      if (HANDLE_EINTR(waitpid(child_, NULL, 0)) < 0)
-        DPLOG(WARNING) << "waitpid";
+      Process(child_).WaitForExit(nullptr);
     } else {
       DLOG(ERROR) << "While waiting for " << child_ << " to terminate we"
                   << " failed to deliver a SIGKILL signal (" << errno << ").";
@@ -211,7 +195,7 @@ class BackgroundReaper : public PlatformThread::Delegate {
 
 void EnsureProcessTerminated(Process process) {
   // If the child is already dead, then there's nothing to do.
-  if (IsChildDead(process.Pid()))
+  if (process.WaitForExitWithTimeout(TimeDelta(), nullptr))
     return;
 
   const unsigned timeout = 2;  // seconds
@@ -221,7 +205,7 @@ void EnsureProcessTerminated(Process process) {
 
 void EnsureProcessGetsReaped(ProcessId pid) {
   // If the child is already dead, then there's nothing to do.
-  if (IsChildDead(pid))
+  if (Process(pid).WaitForExitWithTimeout(TimeDelta(), nullptr))
     return;
 
   BackgroundReaper* reaper = new BackgroundReaper(pid, 0);

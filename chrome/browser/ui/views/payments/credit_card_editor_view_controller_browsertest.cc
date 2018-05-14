@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/ui/views/payments/editor_view_controller.h"
@@ -41,9 +42,7 @@ const base::Time kJune2017 = base::Time::FromDoubleT(1497552271);
 class PaymentRequestCreditCardEditorTest
     : public PaymentRequestBrowserTestBase {
  protected:
-  PaymentRequestCreditCardEditorTest()
-      : PaymentRequestBrowserTestBase(
-            "/payment_request_no_shipping_test.html") {}
+  PaymentRequestCreditCardEditorTest() {}
 
   PersonalDataLoadedObserverMock personal_data_observer_;
 
@@ -52,6 +51,7 @@ class PaymentRequestCreditCardEditorTest
 };
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EnteringValidData) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::TestAutofillClock test_clock;
   test_clock.SetNow(kJune2017);
 
@@ -81,7 +81,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EnteringValidData) {
   autofill::PersonalDataManager* personal_data_manager = GetDataManager();
   personal_data_manager->AddObserver(&personal_data_observer_);
 
-  ResetEventObserver(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
+  ResetEventWaiter(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
 
   // Wait until the web database has been updated and the notification sent.
   base::RunLoop data_loop;
@@ -107,6 +107,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EnteringValidData) {
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        EnterConfirmsValidData) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::TestAutofillClock test_clock;
   test_clock.SetNow(kJune2017);
 
@@ -136,7 +137,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
   autofill::PersonalDataManager* personal_data_manager = GetDataManager();
   personal_data_manager->AddObserver(&personal_data_observer_);
 
-  ResetEventObserver(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
+  ResetEventWaiter(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
 
   // Wait until the web database has been updated and the notification sent.
   base::RunLoop data_loop;
@@ -164,11 +165,12 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, CancelFromEditor) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   InvokePaymentRequestUI();
 
   OpenCreditCardEditorScreen();
 
-  ResetEventObserver(DialogEvent::DIALOG_CLOSED);
+  ResetEventWaiter(DialogEvent::DIALOG_CLOSED);
 
   ClickOnDialogViewAndWait(DialogViewID::CANCEL_BUTTON,
                            /*wait_for_animation=*/false);
@@ -176,6 +178,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, CancelFromEditor) {
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        EnteringExpiredCard) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::TestAutofillClock test_clock;
   test_clock.SetNow(kJune2017);
 
@@ -221,6 +224,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EditingMaskedCard) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::TestAutofillClock test_clock;
   test_clock.SetNow(kJune2017);
 
@@ -246,7 +250,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EditingMaskedCard) {
   views::View* edit_button = list_view->child_at(0)->GetViewByID(
       static_cast<int>(DialogViewID::EDIT_ITEM_BUTTON));
 
-  ResetEventObserver(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
+  ResetEventWaiter(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
   ClickOnDialogViewAndWait(edit_button);
 
   // Name, number and expiration are readonly labels.
@@ -283,7 +287,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EditingMaskedCard) {
   autofill::PersonalDataManager* personal_data_manager = GetDataManager();
   personal_data_manager->AddObserver(&personal_data_observer_);
 
-  ResetEventObserver(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
+  ResetEventWaiter(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
 
   // Wait until the web database has been updated and the notification sent.
   base::RunLoop data_loop;
@@ -301,6 +305,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EditingMaskedCard) {
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        EditingMaskedCard_ClickOnPaymentsLink) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::TestAutofillClock test_clock;
   test_clock.SetNow(kJune2017);
 
@@ -326,7 +331,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
   views::View* edit_button = list_view->child_at(0)->GetViewByID(
       static_cast<int>(DialogViewID::EDIT_ITEM_BUTTON));
 
-  ResetEventObserver(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
+  ResetEventWaiter(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
   ClickOnDialogViewAndWait(edit_button);
 
   views::StyledLabel* styled_label =
@@ -346,6 +351,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        EnteringNothingInARequiredField) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::TestAutofillClock test_clock;
   test_clock.SetNow(kJune2017);
 
@@ -378,6 +384,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        EnteringInvalidCardNumber) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::TestAutofillClock test_clock;
   test_clock.SetNow(kJune2017);
 
@@ -409,6 +416,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        EnteringUnsupportedCardType) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::TestAutofillClock test_clock;
   test_clock.SetNow(kJune2017);
 
@@ -442,6 +450,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        EnteringInvalidCardNumber_AndFixingIt) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::TestAutofillClock test_clock;
   test_clock.SetNow(kJune2017);
   autofill::AutofillProfile billing_profile(autofill::test::GetFullProfile());
@@ -480,7 +489,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
   autofill::PersonalDataManager* personal_data_manager = GetDataManager();
   personal_data_manager->AddObserver(&personal_data_observer_);
 
-  ResetEventObserver(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
+  ResetEventWaiter(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
 
   // Wait until the web database has been updated and the notification sent.
   base::RunLoop data_loop;
@@ -500,6 +509,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EditingExpiredCard) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   // Add expired card.
   autofill::CreditCard card = autofill::test::GetCreditCard();
   card.set_use_count(5U);
@@ -535,7 +545,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EditingExpiredCard) {
   views::View* edit_button = list_view->child_at(0)->GetViewByID(
       static_cast<int>(DialogViewID::EDIT_ITEM_BUTTON));
 
-  ResetEventObserver(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
+  ResetEventWaiter(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
   ClickOnDialogViewAndWait(edit_button);
 
   EXPECT_EQ(base::ASCIIToUTF16("Test User"),
@@ -563,7 +573,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EditingExpiredCard) {
   autofill::PersonalDataManager* personal_data_manager = GetDataManager();
   personal_data_manager->AddObserver(&personal_data_observer_);
 
-  ResetEventObserver(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
+  ResetEventWaiter(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
 
   // Wait until the web database has been updated and the notification sent.
   base::RunLoop data_loop;
@@ -593,6 +603,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EditingExpiredCard) {
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        EditingCardWithoutBillingAddress) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::CreditCard card = autofill::test::GetCreditCard();
   // Make sure to clear billing address.
   card.set_billing_address_id("");
@@ -612,7 +623,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
   OpenPaymentMethodScreen();
 
-  ResetEventObserver(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
+  ResetEventWaiter(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
   ClickOnChildInListViewAndWait(/*child_index=*/0, /*num_children=*/1,
                                 DialogViewID::PAYMENT_METHOD_SHEET_LIST_VIEW);
 
@@ -627,7 +638,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
   autofill::PersonalDataManager* personal_data_manager = GetDataManager();
   personal_data_manager->AddObserver(&personal_data_observer_);
 
-  ResetEventObserver(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
+  ResetEventWaiter(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
 
   // Wait until the web database has been updated and the notification sent.
   base::RunLoop data_loop;
@@ -654,6 +665,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        EditingCardWithoutCardholderName) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::CreditCard card = autofill::test::GetCreditCard();
   autofill::AutofillProfile billing_profile(autofill::test::GetFullProfile());
   AddAutofillProfile(billing_profile);
@@ -672,7 +684,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
   OpenPaymentMethodScreen();
 
-  ResetEventObserver(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
+  ResetEventWaiter(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
   ClickOnChildInListViewAndWait(/*child_index=*/0, /*num_children=*/1,
                                 DialogViewID::PAYMENT_METHOD_SHEET_LIST_VIEW);
 
@@ -689,7 +701,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
   autofill::PersonalDataManager* personal_data_manager = GetDataManager();
   personal_data_manager->AddObserver(&personal_data_observer_);
 
-  ResetEventObserver(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
+  ResetEventWaiter(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
 
   // Wait until the web database has been updated and the notification sent.
   base::RunLoop data_loop;
@@ -716,6 +728,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        ChangeCardholderName) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::AutofillProfile billing_profile(autofill::test::GetFullProfile());
   AddAutofillProfile(billing_profile);
   autofill::CreditCard card = autofill::test::GetCreditCard();
@@ -736,7 +749,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
   OpenPaymentMethodScreen();
 
-  ResetEventObserver(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
+  ResetEventWaiter(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
   ClickOnChildInListViewAndWait(/*child_index=*/0, /*num_children=*/1,
                                 DialogViewID::PAYMENT_METHOD_SHEET_LIST_VIEW);
   // Change the name.
@@ -749,7 +762,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
   autofill::PersonalDataManager* personal_data_manager = GetDataManager();
   personal_data_manager->AddObserver(&personal_data_observer_);
 
-  ResetEventObserver(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
+  ResetEventWaiter(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
 
   // Wait until the web database has been updated and the notification sent.
   base::RunLoop data_loop;
@@ -767,6 +780,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        CreateNewBillingAddress) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::CreditCard card = autofill::test::GetCreditCard();
   // Make sure to clear billing address and have none available.
   card.set_billing_address_id("");
@@ -784,7 +798,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
   OpenPaymentMethodScreen();
 
-  ResetEventObserver(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
+  ResetEventWaiter(DialogEvent::CREDIT_CARD_EDITOR_OPENED);
   ClickOnChildInListViewAndWait(/*child_index=*/0, /*num_children=*/1,
                                 DialogViewID::PAYMENT_METHOD_SHEET_LIST_VIEW);
   // Billing address combobox must be disabled since there are no saved address.
@@ -804,7 +818,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
   test_region_data_loader_.SetRegionData(regions1);
 
   // Click to open the address editor
-  ResetEventObserver(DialogEvent::SHIPPING_ADDRESS_EDITOR_OPENED);
+  ResetEventWaiter(DialogEvent::SHIPPING_ADDRESS_EDITOR_OPENED);
   ClickOnDialogViewAndWait(DialogViewID::ADD_BILLING_ADDRESS_BUTTON);
 
   // Set valid address values.
@@ -817,11 +831,11 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                    autofill::ADDRESS_HOME_STATE);
   SetEditorTextfieldValue(base::ASCIIToUTF16("BobZip"),
                           autofill::ADDRESS_HOME_ZIP);
-  SetEditorTextfieldValue(base::ASCIIToUTF16("5755555555"),
+  SetEditorTextfieldValue(base::ASCIIToUTF16("+15755555555"),
                           autofill::PHONE_HOME_WHOLE_NUMBER);
 
   // Come back to credit card editor.
-  ResetEventObserver(DialogEvent::BACK_NAVIGATION);
+  ResetEventWaiter(DialogEvent::BACK_NAVIGATION);
   ClickOnDialogViewAndWait(DialogViewID::SAVE_ADDRESS_BUTTON);
 
   // The billing address must be properly selected and valid.
@@ -830,9 +844,10 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
           autofill::ADDRESS_BILLING_LINE1)));
   ASSERT_NE(nullptr, billing_combobox);
   EXPECT_FALSE(billing_combobox->invalid());
+  EXPECT_TRUE(billing_combobox->enabled());
 
   // And then save credit card state and come back to payment sheet.
-  ResetEventObserver(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
+  ResetEventWaiter(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
 
   // Verifying the data is in the DB.
   autofill::PersonalDataManager* personal_data_manager = GetDataManager();
@@ -854,6 +869,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        NonexistentBillingAddres) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::CreditCard card = autofill::test::GetCreditCard();
   // Set a billing address that is not yet added to the personal data.
   autofill::AutofillProfile billing_profile(autofill::test::GetFullProfile());
@@ -874,7 +890,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
   AddAutofillProfile(billing_profile);
 
   // Go back and re-invoke.
-  ResetEventObserver(DialogEvent::DIALOG_CLOSED);
+  ResetEventWaiter(DialogEvent::DIALOG_CLOSED);
   ClickOnDialogViewAndWait(DialogViewID::CANCEL_BUTTON,
                            /*wait_for_animation=*/false);
   InvokePaymentRequestUI();
@@ -888,6 +904,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
                        RefuseExistingCardNumber) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::CreditCard card = autofill::test::GetCreditCard();
   AddCreditCard(card);
 
@@ -913,6 +930,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EnteringEmptyData) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   InvokePaymentRequestUI();
 
   OpenCreditCardEditorScreen();
@@ -930,6 +948,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, EnteringEmptyData) {
 }
 
 IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, DoneButtonDisabled) {
+  NavigateTo("/payment_request_no_shipping_test.html");
   autofill::TestAutofillClock test_clock;
   test_clock.SetNow(kJune2017);
   InvokePaymentRequestUI();
@@ -968,6 +987,53 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest, DoneButtonDisabled) {
 
   // Back to being disabled.
   EXPECT_FALSE(save_button->enabled());
+}
+
+IN_PROC_BROWSER_TEST_F(PaymentRequestCreditCardEditorTest,
+                       EnteringValidDataInIncognito) {
+  SetIncognito();
+  NavigateTo("/payment_request_no_shipping_test.html");
+  autofill::TestAutofillClock test_clock;
+  test_clock.SetNow(kJune2017);
+
+  InvokePaymentRequestUI();
+
+  // No instruments are available.
+  PaymentRequest* request = GetPaymentRequests(GetActiveWebContents()).front();
+  EXPECT_EQ(0U, request->state()->available_instruments().size());
+  EXPECT_EQ(nullptr, request->state()->selected_instrument());
+
+  // But there must be at least one address available for billing.
+  autofill::AutofillProfile billing_profile(autofill::test::GetFullProfile());
+  AddAutofillProfile(billing_profile);
+
+  OpenCreditCardEditorScreen();
+
+  SetEditorTextfieldValue(base::ASCIIToUTF16("Bob Jones"),
+                          autofill::CREDIT_CARD_NAME_FULL);
+  SetEditorTextfieldValue(base::ASCIIToUTF16(" 4111 1111-1111 1111-"),
+                          autofill::CREDIT_CARD_NUMBER);
+  SetComboboxValue(base::ASCIIToUTF16("05"), autofill::CREDIT_CARD_EXP_MONTH);
+  SetComboboxValue(base::ASCIIToUTF16("2026"),
+                   autofill::CREDIT_CARD_EXP_4_DIGIT_YEAR);
+  SelectBillingAddress(billing_profile.guid());
+
+  autofill::PersonalDataManager* personal_data_manager = GetDataManager();
+  personal_data_manager->AddObserver(&personal_data_observer_);
+
+  ResetEventWaiter(DialogEvent::BACK_TO_PAYMENT_SHEET_NAVIGATION);
+
+  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged()).Times(0);
+  ClickOnDialogViewAndWait(DialogViewID::EDITOR_SAVE_BUTTON);
+
+  // Since this is incognito, the credit card shouldn't have been added to the
+  // PersonalDataManager but it should be available in available_instruments.
+  EXPECT_EQ(0U, personal_data_manager->GetCreditCards().size());
+
+  // One instrument is available and selected.
+  EXPECT_EQ(1U, request->state()->available_instruments().size());
+  EXPECT_EQ(request->state()->available_instruments().back().get(),
+            request->state()->selected_instrument());
 }
 
 }  // namespace payments

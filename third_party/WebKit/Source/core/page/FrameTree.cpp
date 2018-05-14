@@ -23,13 +23,13 @@
 #include "core/dom/Document.h"
 #include "core/frame/FrameClient.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/RemoteFrameView.h"
 #include "core/frame/UseCounter.h"
 #include "core/page/Page.h"
 #include "platform/wtf/Assertions.h"
-#include "platform/wtf/Vector.h"
 #include "platform/wtf/text/CString.h"
 #include "platform/wtf/text/StringBuilder.h"
 
@@ -46,7 +46,7 @@ const unsigned kInvalidChildCount = ~0U;
 FrameTree::FrameTree(Frame* this_frame)
     : this_frame_(this_frame), scoped_child_count_(kInvalidChildCount) {}
 
-FrameTree::~FrameTree() {}
+FrameTree::~FrameTree() = default;
 
 const AtomicString& FrameTree::GetName() const {
   // TODO(andypaicu): remove this once we have gathered the data
@@ -72,7 +72,24 @@ void FrameTree::ExperimentalSetNulledName() {
   experimental_set_nulled_name_ = true;
 }
 
-void FrameTree::SetName(const AtomicString& name) {
+void FrameTree::SetName(const AtomicString& name,
+                        ReplicationPolicy replication) {
+  if (replication == kReplicate) {
+    // Avoid calling out to notify the embedder if the browsing context name
+    // didn't change. This is important to avoid violating the browser
+    // assumption that the unique name doesn't change if the browsing context
+    // name doesn't change.
+    // TODO(dcheng): This comment is indicative of a problematic layering
+    // violation. The browser should not be relying on the renderer to get this
+    // correct; unique name calculation should be moved up into the browser.
+    if (name != name_) {
+      // TODO(lukasza): https://crbug.com/660485: Eventually we need to also
+      // support replication of name changes that originate in a *remote* frame.
+      DCHECK(this_frame_->IsLocalFrame());
+      ToLocalFrame(this_frame_)->Client()->DidChangeName(name);
+    }
+  }
+
   // TODO(andypaicu): remove this once we have gathered the data
   experimental_set_nulled_name_ = false;
   name_ = name;
@@ -122,6 +139,9 @@ Frame* FrameTree::ScopedChild(unsigned index) const {
 }
 
 Frame* FrameTree::ScopedChild(const AtomicString& name) const {
+  if (name.IsEmpty())
+    return nullptr;
+
   for (Frame* child = FirstChild(); child;
        child = child->Tree().NextSibling()) {
     if (child->Client()->InShadowTree())
@@ -198,8 +218,7 @@ Frame* FrameTree::Find(const AtomicString& name) const {
   }
 
   // Search the entire tree of each of the other pages in this namespace.
-  // FIXME: Is random order OK?
-  for (const Page* other_page : Page::OrdinaryPages()) {
+  for (const Page* other_page : page->RelatedPages()) {
     if (other_page == page || other_page->IsClosing())
       continue;
     for (Frame* frame = other_page->MainFrame(); frame;
@@ -209,7 +228,8 @@ Frame* FrameTree::Find(const AtomicString& name) const {
     }
   }
 
-  return nullptr;
+  // Ask the embedder as a fallback.
+  return ToLocalFrame(this_frame_)->Client()->FindFrame(name);
 }
 
 bool FrameTree::IsDescendantOf(const Frame* ancestor) const {
@@ -260,7 +280,7 @@ Frame* FrameTree::TraverseNext(const Frame* stay_within) const {
   return nullptr;
 }
 
-DEFINE_TRACE(FrameTree) {
+void FrameTree::Trace(blink::Visitor* visitor) {
   visitor->Trace(this_frame_);
 }
 
@@ -284,7 +304,7 @@ static void printFrames(const blink::Frame* frame,
   }
 
   blink::LocalFrameView* view =
-      frame->IsLocalFrame() ? ToLocalFrame(frame)->View() : 0;
+      frame->IsLocalFrame() ? ToLocalFrame(frame)->View() : nullptr;
   printf("Frame %p %dx%d\n", frame, view ? view->Width() : 0,
          view ? view->Height() : 0);
   printIndent(indent);
@@ -293,13 +313,13 @@ static void printFrames(const blink::Frame* frame,
   printf("  frameView=%p\n", view);
   printIndent(indent);
   printf("  document=%p\n",
-         frame->IsLocalFrame() ? ToLocalFrame(frame)->GetDocument() : 0);
+         frame->IsLocalFrame() ? ToLocalFrame(frame)->GetDocument() : nullptr);
   printIndent(indent);
   printf(
       "  uri=%s\n\n",
       frame->IsLocalFrame()
           ? ToLocalFrame(frame)->GetDocument()->Url().GetString().Utf8().data()
-          : 0);
+          : nullptr);
 
   for (blink::Frame* child = frame->Tree().FirstChild(); child;
        child = child->Tree().NextSibling())

@@ -17,10 +17,10 @@
 #include "core/fpdfapi/render/cpdf_pagerendercache.h"
 #include "core/fpdfapi/render/cpdf_rendercontext.h"
 #include "core/fpdfapi/render/cpdf_renderstatus.h"
+#include "core/fxge/dib/cfx_dibitmap.h"
 
-CPDF_ImageCacheEntry::CPDF_ImageCacheEntry(
-    CPDF_Document* pDoc,
-    const CFX_RetainPtr<CPDF_Image>& pImage)
+CPDF_ImageCacheEntry::CPDF_ImageCacheEntry(CPDF_Document* pDoc,
+                                           const RetainPtr<CPDF_Image>& pImage)
     : m_dwTimeCount(0),
       m_MatteColor(0),
       m_pDocument(pDoc),
@@ -29,7 +29,7 @@ CPDF_ImageCacheEntry::CPDF_ImageCacheEntry(
 
 CPDF_ImageCacheEntry::~CPDF_ImageCacheEntry() {}
 
-void CPDF_ImageCacheEntry::Reset(const CFX_RetainPtr<CFX_DIBitmap>& pBitmap) {
+void CPDF_ImageCacheEntry::Reset(const RetainPtr<CFX_DIBitmap>& pBitmap) {
   m_pCachedBitmap.Reset();
   if (pBitmap)
     m_pCachedBitmap = pBitmap->Clone(nullptr);
@@ -37,18 +37,18 @@ void CPDF_ImageCacheEntry::Reset(const CFX_RetainPtr<CFX_DIBitmap>& pBitmap) {
 }
 
 static uint32_t FPDF_ImageCache_EstimateImageSize(
-    const CFX_RetainPtr<CFX_DIBSource>& pDIB) {
+    const RetainPtr<CFX_DIBSource>& pDIB) {
   return pDIB && pDIB->GetBuffer()
              ? (uint32_t)pDIB->GetHeight() * pDIB->GetPitch() +
                    (uint32_t)pDIB->GetPaletteSize() * 4
              : 0;
 }
 
-CFX_RetainPtr<CFX_DIBSource> CPDF_ImageCacheEntry::DetachBitmap() {
+RetainPtr<CFX_DIBSource> CPDF_ImageCacheEntry::DetachBitmap() {
   return std::move(m_pCurBitmap);
 }
 
-CFX_RetainPtr<CFX_DIBSource> CPDF_ImageCacheEntry::DetachMask() {
+RetainPtr<CFX_DIBSource> CPDF_ImageCacheEntry::DetachMask() {
   return std::move(m_pCurMask);
 }
 
@@ -105,7 +105,7 @@ void CPDF_ImageCacheEntry::ContinueGetCachedBitmap(
   CalcSize();
 }
 
-int CPDF_ImageCacheEntry::Continue(IFX_Pause* pPause,
+int CPDF_ImageCacheEntry::Continue(IFX_PauseIndicator* pPause,
                                    CPDF_RenderStatus* pRenderStatus) {
   int ret = m_pCurBitmap.As<CPDF_DIBSource>()->ContinueLoadDIBSource(pPause);
   if (!ret) {

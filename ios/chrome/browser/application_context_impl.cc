@@ -16,7 +16,6 @@
 #include "base/task_scheduler/post_task.h"
 #include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
-#include "base/tracked_objects.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/gcm_driver/gcm_client_factory.h"
 #include "components/gcm_driver/gcm_desktop_utils.h"
@@ -27,7 +26,6 @@
 #include "components/metrics_services_manager/metrics_services_manager.h"
 #include "components/net_log/chrome_net_log.h"
 #include "components/network_time/network_time_tracker.h"
-#include "components/physical_web/data_source/physical_web_data_source.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/translate/core/browser/translate_download_manager.h"
@@ -42,8 +40,6 @@
 #include "ios/chrome/browser/history/history_service_factory.h"
 #include "ios/chrome/browser/ios_chrome_io_thread.h"
 #include "ios/chrome/browser/metrics/ios_chrome_metrics_services_manager_client.h"
-#include "ios/chrome/browser/net/crl_set_fetcher.h"
-#include "ios/chrome/browser/physical_web/create_physical_web_data_source.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/prefs/browser_prefs.h"
 #include "ios/chrome/browser/prefs/ios_chrome_pref_service_factory.h"
@@ -62,9 +58,7 @@ ApplicationContextImpl::ApplicationContextImpl(
     const base::CommandLine& command_line,
     const std::string& locale)
     : local_state_task_runner_(local_state_task_runner),
-      was_last_shutdown_clean_(false),
-      is_shutting_down_(false),
-      created_local_state_(false) {
+      was_last_shutdown_clean_(false) {
   DCHECK(!GetApplicationContext());
   SetApplicationContext(this);
 
@@ -78,7 +72,6 @@ ApplicationContextImpl::ApplicationContextImpl(
 
 ApplicationContextImpl::~ApplicationContextImpl() {
   DCHECK_EQ(this, GetApplicationContext());
-  tracked_objects::ThreadData::EnsureCleanupWasCalled(4);
   SetApplicationContext(nullptr);
 }
 
@@ -185,19 +178,9 @@ bool ApplicationContextImpl::WasLastShutdownClean() {
   return was_last_shutdown_clean_;
 }
 
-void ApplicationContextImpl::SetIsShuttingDown() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  is_shutting_down_ = true;
-}
-
-bool ApplicationContextImpl::IsShuttingDown() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return is_shutting_down_;
-}
-
 PrefService* ApplicationContextImpl::GetLocalState() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!created_local_state_)
+  if (!local_state_)
     CreateLocalState();
   return local_state_.get();
 }
@@ -228,7 +211,7 @@ ApplicationContextImpl::GetMetricsServicesManager() {
   if (!metrics_services_manager_) {
     metrics_services_manager_.reset(
         new metrics_services_manager::MetricsServicesManager(
-            base::MakeUnique<IOSChromeMetricsServicesManagerClient>(
+            std::make_unique<IOSChromeMetricsServicesManagerClient>(
                 GetLocalState())));
   }
   return metrics_services_manager_.get();
@@ -293,29 +276,9 @@ ApplicationContextImpl::GetComponentUpdateService() {
     // be registered and Start() needs to be called.
     component_updater_ = component_updater::ComponentUpdateServiceFactory(
         component_updater::MakeIOSComponentUpdaterConfigurator(
-            base::CommandLine::ForCurrentProcess(),
-            GetSystemURLRequestContext()));
+            base::CommandLine::ForCurrentProcess()));
   }
   return component_updater_.get();
-}
-
-CRLSetFetcher* ApplicationContextImpl::GetCRLSetFetcher() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (!crl_set_fetcher_) {
-    crl_set_fetcher_ = new CRLSetFetcher;
-  }
-  return crl_set_fetcher_.get();
-}
-
-physical_web::PhysicalWebDataSource*
-ApplicationContextImpl::GetPhysicalWebDataSource() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (!physical_web_data_source_) {
-    physical_web_data_source_ =
-        CreateIOSChromePhysicalWebDataSource(GetLocalState());
-    DCHECK(physical_web_data_source_);
-  }
-  return physical_web_data_source_.get();
 }
 
 void ApplicationContextImpl::SetApplicationLocale(const std::string& locale) {
@@ -327,8 +290,7 @@ void ApplicationContextImpl::SetApplicationLocale(const std::string& locale) {
 
 void ApplicationContextImpl::CreateLocalState() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!created_local_state_ && !local_state_);
-  created_local_state_ = true;
+  DCHECK(!local_state_);
 
   base::FilePath local_state_path;
   CHECK(PathService::Get(ios::FILE_LOCAL_STATE, &local_state_path));
@@ -339,6 +301,7 @@ void ApplicationContextImpl::CreateLocalState() {
 
   local_state_ = ::CreateLocalState(
       local_state_path, local_state_task_runner_.get(), pref_registry);
+  DCHECK(local_state_);
 
   net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(
       net::HttpNetworkSession::NORMAL_SOCKET_POOL,

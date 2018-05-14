@@ -57,7 +57,7 @@ void MediaDrmCredentialManager::ResetCredentials(
 }
 
 // static
-void ResetCredentials(
+void JNI_MediaDrmCredentialManager_ResetCredentials(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz,
     const JavaParamRef<jobject>& j_media_drm_credential_manager_callback) {
@@ -92,14 +92,15 @@ void MediaDrmCredentialManager::ResetCredentialsInternal(
   // Create provision fetcher for the default browser http request context.
   media::CreateFetcherCB create_fetcher_cb =
       base::Bind(&content::CreateProvisionFetcher,
-                 g_browser_process->system_request_context());
+                 base::Unretained(g_browser_process->system_request_context()));
 
   ResetCredentialsCB reset_credentials_cb =
       base::Bind(&MediaDrmCredentialManager::OnResetCredentialsCompleted,
                  base::Unretained(this), security_level);
 
   media_drm_bridge_ = media::MediaDrmBridge::CreateWithoutSessionSupport(
-      kWidevineKeySystem, security_level, create_fetcher_cb);
+      kWidevineKeySystem, "" /* origin_id */, security_level,
+      create_fetcher_cb);
 
   // No need to reset credentials for unsupported |security_level|.
   if (!media_drm_bridge_) {

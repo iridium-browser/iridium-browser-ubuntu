@@ -10,42 +10,43 @@
 
 namespace blink {
 
-static const char kSupplementNameTiming[] = "DocumentParserTiming";
+// static
+const char DocumentParserTiming::kSupplementName[] = "DocumentParserTiming";
 
 DocumentParserTiming& DocumentParserTiming::From(Document& document) {
-  DocumentParserTiming* timing = static_cast<DocumentParserTiming*>(
-      Supplement<Document>::From(document, kSupplementNameTiming));
+  DocumentParserTiming* timing =
+      Supplement<Document>::From<DocumentParserTiming>(document);
   if (!timing) {
     timing = new DocumentParserTiming(document);
-    Supplement<Document>::ProvideTo(document, kSupplementNameTiming, timing);
+    ProvideTo(document, timing);
   }
   return *timing;
 }
 
 void DocumentParserTiming::MarkParserStart() {
-  if (parser_detached_ || parser_start_ > 0.0)
+  if (parser_detached_ || !parser_start_.is_null())
     return;
-  DCHECK_EQ(parser_stop_, 0.0);
-  parser_start_ = MonotonicallyIncreasingTime();
+  DCHECK(parser_stop_.is_null());
+  parser_start_ = CurrentTimeTicks();
   NotifyDocumentParserTimingChanged();
 }
 
 void DocumentParserTiming::MarkParserStop() {
-  if (parser_detached_ || parser_start_ == 0.0 || parser_stop_ > 0.0)
+  if (parser_detached_ || parser_start_.is_null() || !parser_stop_.is_null())
     return;
-  parser_stop_ = MonotonicallyIncreasingTime();
+  parser_stop_ = CurrentTimeTicks();
   NotifyDocumentParserTimingChanged();
 }
 
 void DocumentParserTiming::MarkParserDetached() {
-  DCHECK_GT(parser_start_, 0.0);
+  DCHECK(!parser_start_.is_null());
   parser_detached_ = true;
 }
 
 void DocumentParserTiming::RecordParserBlockedOnScriptLoadDuration(
     double duration,
     bool script_inserted_via_document_write) {
-  if (parser_detached_ || parser_start_ == 0.0 || parser_stop_ > 0.0)
+  if (parser_detached_ || parser_start_.is_null() || !parser_stop_.is_null())
     return;
   parser_blocked_on_script_load_duration_ += duration;
   if (script_inserted_via_document_write)
@@ -56,7 +57,7 @@ void DocumentParserTiming::RecordParserBlockedOnScriptLoadDuration(
 void DocumentParserTiming::RecordParserBlockedOnScriptExecutionDuration(
     double duration,
     bool script_inserted_via_document_write) {
-  if (parser_detached_ || parser_start_ == 0.0 || parser_stop_ > 0.0)
+  if (parser_detached_ || parser_start_.is_null() || !parser_stop_.is_null())
     return;
   parser_blocked_on_script_execution_duration_ += duration;
   if (script_inserted_via_document_write)
@@ -65,7 +66,7 @@ void DocumentParserTiming::RecordParserBlockedOnScriptExecutionDuration(
   NotifyDocumentParserTimingChanged();
 }
 
-DEFINE_TRACE(DocumentParserTiming) {
+void DocumentParserTiming::Trace(blink::Visitor* visitor) {
   Supplement<Document>::Trace(visitor);
 }
 

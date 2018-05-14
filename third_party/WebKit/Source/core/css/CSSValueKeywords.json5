@@ -77,6 +77,19 @@
     "unicase",
     "titling-caps",
 
+    // font-variant-caps:
+    //
+    // normal
+    "jis78",
+    "jis83",
+    "jis90",
+    "jis04",
+    "simplified",
+    "traditional",
+    "full-width",
+    "proportional-width",
+    "ruby",
+
     // font-variant-numeric
     // normal
     "lining-nums",
@@ -95,15 +108,6 @@
     "bold",
     "bolder",
     "lighter",
-    "100",
-    "200",
-    "300",
-    "400",
-    "500",
-    "600",
-    "700",
-    "800",
-    "900",
 
     //
     // font-stretch
@@ -369,6 +373,8 @@
     //none
     "-webkit-flex",
     "-webkit-inline-flex",
+    "layout",
+    "inline-layout",
     //
     // cursor
     // The order of this enum must match the order found in CSSPropertyParser::ConsumeCursor().
@@ -594,10 +600,10 @@
     "ellipsis",
 
     //
-    // text-decoration-skip
+    // text-decoration-skip-ink
     //
-    "objects",
-    "ink",
+    // auto
+    // none
 
     //
     // -webkit-margin-collapse
@@ -669,6 +675,7 @@
     "-internal-media-overflow-button",
     "-internal-media-download-button",
     "-internal-media-remoting-cast-icon",
+    "-internal-media-control",
     "menulist",
     "menulist-button",
     "menulist-text",
@@ -847,6 +854,8 @@
     // -webkit-text-emphasis-position
     "over",
     "under",
+    //right
+    //left
 
     // -webkit-text-emphasis-style
     "filled",
@@ -1103,6 +1112,11 @@
     "translateZ",
     "translate3d",
 
+    // scale
+    "x",
+    "y",
+    "z",
+
     // offset-path
     "path",
     "ray",
@@ -1113,8 +1127,8 @@
 
     // scroll-snap-type
     // none
-    "x",
-    "y",
+    // x
+    // y
     // block
     // inline
     // both
@@ -1135,7 +1149,7 @@
     // containment
     // paint
     "style",
-    "layout",
+    // layout
     "size",
 
     // grid auto-repeat
@@ -1161,9 +1175,19 @@
     "p3",
     "rec2020",
 
-    // scroll-boundary-behavior
+    // overscroll-behavior
     // auto,
     // contain
+    // none
+
+    //scroll-customization
+    // auto
+    // pan-x,
+    // pan-left,
+    // pan-right,
+    // pan-y,
+    // pan-up,
+    // pan-down
     // none
   ],
 }

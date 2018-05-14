@@ -82,15 +82,10 @@ void InterstitialPageDelegateAndroid::CommandReceived(
   }
 }
 
-// static
-bool InterstitialPageDelegateAndroid
-    ::RegisterInterstitialPageDelegateAndroid(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
-
-static jlong Init(JNIEnv* env,
-                  const JavaParamRef<jobject>& obj,
-                  const JavaParamRef<jstring>& html_content) {
+static jlong JNI_InterstitialPageDelegateAndroid_Init(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& html_content) {
   InterstitialPageDelegateAndroid* delegate =
       new InterstitialPageDelegateAndroid(
           env, obj, base::android::ConvertJavaStringToUTF8(env, html_content));

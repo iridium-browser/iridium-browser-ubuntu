@@ -28,8 +28,8 @@
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/customization/customization_wallpaper_downloader.h"
+#include "chrome/browser/chromeos/customization/customization_wallpaper_util.h"
 #include "chrome/browser/chromeos/extensions/default_app_order.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/net/delay_network_call.h"
 #include "chrome/browser/extensions/external_loader.h"
@@ -151,7 +151,7 @@ void CheckWallpaperCacheExists(const base::FilePath& path, bool* exists) {
 }
 
 std::string ReadFileInBackground(const base::FilePath& file) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   std::string manifest;
   if (!base::ReadFileToString(file, &manifest)) {
@@ -201,10 +201,9 @@ class ServicesCustomizationExternalLoader
         return;
     }
 
-    prefs_.reset(apps_.DeepCopy());
     VLOG(1) << "ServicesCustomization extension loader publishing "
             << apps_.size() << " apps.";
-    LoadFinished();
+    LoadFinished(apps_.CreateDeepCopy());
   }
 
  protected:
@@ -931,9 +930,8 @@ void ServicesCustomizationDocument::OnOEMWallpaperDownloaded(
     VLOG(1) << "Setting default wallpaper to '"
             << GetCustomizedWallpaperDownloadedFileName().value() << "' ('"
             << wallpaper_url.spec() << "')";
-    WallpaperManager::Get()->SetCustomizedDefaultWallpaper(
-        wallpaper_url,
-        GetCustomizedWallpaperDownloadedFileName(),
+    customization_wallpaper_util::StartSettingCustomizedDefaultWallpaper(
+        wallpaper_url, GetCustomizedWallpaperDownloadedFileName(),
         GetCustomizedWallpaperCacheDir());
   }
   wallpaper_downloader_.reset();

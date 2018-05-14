@@ -5,8 +5,8 @@
 #include "core/editing/VisiblePosition.h"
 
 #include "core/css/CSSStyleDeclaration.h"
-#include "core/editing/EditingTestBase.h"
 #include "core/editing/VisibleUnits.h"
+#include "core/editing/testing/EditingTestBase.h"
 
 namespace blink {
 
@@ -69,7 +69,7 @@ TEST_F(VisiblePositionTest, NonNullInvalidatedAfterDOMChange) {
   VisiblePosition null_visible_position;
   VisiblePosition non_null_visible_position = CreateVisiblePosition(position);
 
-  Element* div = GetDocument().createElement("div");
+  Element* div = GetDocument().CreateRawElement(HTMLNames::divTag);
   GetDocument().body()->AppendChild(div);
 
   EXPECT_TRUE(null_visible_position.IsValid());
@@ -89,13 +89,14 @@ TEST_F(VisiblePositionTest, NonNullInvalidatedAfterStyleChange) {
   Position position(paragraph->firstChild(), 1);
 
   VisiblePosition visible_position1 = CreateVisiblePosition(position);
-  div->style()->setProperty("color", "red", "important", ASSERT_NO_EXCEPTION);
+  div->style()->setProperty(&GetDocument(), "color", "red", "important",
+                            ASSERT_NO_EXCEPTION);
   EXPECT_FALSE(visible_position1.IsValid());
 
   UpdateAllLifecyclePhases();
 
   VisiblePosition visible_position2 = CreateVisiblePosition(position);
-  div->style()->setProperty("display", "none", "important",
+  div->style()->setProperty(&GetDocument(), "display", "none", "important",
                             ASSERT_NO_EXCEPTION);
   EXPECT_FALSE(visible_position2.IsValid());
 

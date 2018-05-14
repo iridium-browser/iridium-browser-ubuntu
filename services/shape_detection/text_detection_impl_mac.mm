@@ -8,26 +8,17 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/strings/sys_string_conversions.h"
-#include "media/capture/video/scoped_result_callback.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/shape_detection/detection_utils_mac.h"
 #include "services/shape_detection/text_detection_impl.h"
 
 namespace shape_detection {
 
-namespace {
-
-void RunCallbackWithNoResults(mojom::TextDetection::DetectCallback callback) {
-  std::move(callback).Run({});
-}
-
-}  // anonymous namespace
-
 // static
 void TextDetectionImpl::Create(mojom::TextDetectionRequest request) {
   // Text detection needs at least MAC OS X 10.11.
   if (@available(macOS 10.11, *)) {
-    mojo::MakeStrongBinding(base::MakeUnique<TextDetectionImplMac>(),
+    mojo::MakeStrongBinding(std::make_unique<TextDetectionImplMac>(),
                             std::move(request));
   }
 }
@@ -44,12 +35,12 @@ TextDetectionImplMac::~TextDetectionImplMac() {}
 void TextDetectionImplMac::Detect(const SkBitmap& bitmap,
                                   DetectCallback callback) {
   DCHECK(base::mac::IsAtLeastOS10_11());
-  media::ScopedResultCallback<DetectCallback> scoped_callback(
-      std::move(callback), base::Bind(&RunCallbackWithNoResults));
 
   base::scoped_nsobject<CIImage> ci_image = CreateCIImageFromSkBitmap(bitmap);
-  if (!ci_image)
+  if (!ci_image) {
+    std::move(callback).Run({});
     return;
+  }
 
   NSArray* const features = [detector_ featuresInImage:ci_image];
 
@@ -65,9 +56,18 @@ void TextDetectionImplMac::Detect(const SkBitmap& bitmap,
                            height - f.bounds.origin.y - f.bounds.size.height,
                            f.bounds.size.width, f.bounds.size.height);
     result->bounding_box = std::move(boundingbox);
+
+    // Enumerate corner points starting from top-left in clockwise fashion:
+    // https://wicg.github.io/shape-detection-api/text.html#dom-detectedtext-cornerpoints
+    result->corner_points.emplace_back(f.topLeft.x, height - f.topLeft.y);
+    result->corner_points.emplace_back(f.topRight.x, height - f.topRight.y);
+    result->corner_points.emplace_back(f.bottomRight.x,
+                                       height - f.bottomRight.y);
+    result->corner_points.emplace_back(f.bottomLeft.x, height - f.bottomLeft.y);
+
     results.push_back(std::move(result));
   }
-  scoped_callback.Run(std::move(results));
+  std::move(callback).Run(std::move(results));
 }
 
 }  // namespace shape_detection

@@ -5,6 +5,7 @@
 #include "ui/views/mus/desktop_window_tree_host_mus.h"
 
 #include "base/debug/stack_trace.h"
+#include "base/run_loop.h"
 
 #include "base/memory/ptr_util.h"
 #include "ui/aura/client/cursor_client.h"
@@ -17,7 +18,10 @@
 #include "ui/aura/mus/window_mus.h"
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/test/mus/change_completion_waiter.h"
+#include "ui/aura/test/mus/window_tree_client_private.h"
 #include "ui/aura/window.h"
+#include "ui/events/base_event_utils.h"
+#include "ui/events/event.h"
 #include "ui/views/mus/mus_client.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/widget/widget.h"
@@ -31,15 +35,13 @@ class DesktopWindowTreeHostMusTest : public ViewsTestBase,
                                      public WidgetObserver {
  public:
   DesktopWindowTreeHostMusTest()
-      : widget_activated_(nullptr),
-        widget_deactivated_(nullptr),
-        waiting_for_deactivate_(nullptr) {}
+      : widget_activated_(nullptr), widget_deactivated_(nullptr) {}
   ~DesktopWindowTreeHostMusTest() override {}
 
   // Creates a test widget. Takes ownership of |delegate|.
   std::unique_ptr<Widget> CreateWidget(WidgetDelegate* delegate = nullptr,
                                        aura::Window* parent = nullptr) {
-    std::unique_ptr<Widget> widget = base::MakeUnique<Widget>();
+    std::unique_ptr<Widget> widget = std::make_unique<Widget>();
     Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
     params.delegate = delegate;
     params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
@@ -53,18 +55,6 @@ class DesktopWindowTreeHostMusTest : public ViewsTestBase,
   const Widget* widget_activated() const { return widget_activated_; }
   const Widget* widget_deactivated() const { return widget_deactivated_; }
 
-  void DeactivateAndWait(Widget* to_deactivate) {
-    waiting_for_deactivate_ = to_deactivate;
-
-    base::RunLoop loop;
-    on_deactivate_ = loop.QuitClosure();
-
-    to_deactivate->Deactivate();
-    loop.Run();
-
-    waiting_for_deactivate_ = nullptr;
-  }
-
  private:
   void OnWidgetActivationChanged(Widget* widget, bool active) override {
     if (active) {
@@ -73,17 +63,11 @@ class DesktopWindowTreeHostMusTest : public ViewsTestBase,
       if (widget_activated_ == widget)
         widget_activated_ = nullptr;
       widget_deactivated_ = widget;
-
-      if (waiting_for_deactivate_ && waiting_for_deactivate_ == widget)
-        on_deactivate_.Run();
     }
   }
 
   Widget* widget_activated_;
   Widget* widget_deactivated_;
-
-  Widget* waiting_for_deactivate_;
-  base::Closure on_deactivate_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopWindowTreeHostMusTest);
 };
@@ -190,8 +174,50 @@ TEST_F(DesktopWindowTreeHostMusTest, Deactivate) {
   EXPECT_TRUE(widget1->GetNativeWindow()->HasFocus());
   EXPECT_EQ(widget_activated(), widget1.get());
 
-  DeactivateAndWait(widget1.get());
+  widget1->Deactivate();
   EXPECT_FALSE(widget1->IsActive());
+}
+
+TEST_F(DesktopWindowTreeHostMusTest, HideWindowTreeHostWindowChangesActive) {
+  std::unique_ptr<Widget> widget1(CreateWidget());
+  widget1->Show();
+  widget1->Activate();
+  EXPECT_TRUE(widget1->IsActive());
+  EXPECT_TRUE(widget1->GetNativeWindow()->HasFocus());
+  ASSERT_TRUE(widget1->GetNativeWindow()->parent());
+
+  // This simulates what happens when a hide happens from the server.
+  widget1->GetNativeWindow()->GetHost()->Hide();
+  EXPECT_FALSE(widget1->GetNativeWindow()->HasFocus());
+  EXPECT_FALSE(widget1->IsActive());
+}
+
+TEST_F(DesktopWindowTreeHostMusTest, BecomesActiveOnMousePress) {
+  std::unique_ptr<Widget> widget(CreateWidget());
+  widget->ShowInactive();
+  aura::test::WaitForAllChangesToComplete();
+
+  EXPECT_FALSE(widget->IsActive());
+  EXPECT_FALSE(widget->GetNativeWindow()->HasFocus());
+
+  ui::MouseEvent mouse_event(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
+                             ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
+  ignore_result(
+      widget->GetNativeWindow()->GetHost()->event_sink()->OnEventFromSource(
+          &mouse_event));
+  EXPECT_TRUE(widget->IsActive());
+  EXPECT_TRUE(widget->GetNativeWindow()->HasFocus());
+  aura::client::FocusClient* widget_focus_client =
+      aura::client::GetFocusClient(widget->GetNativeWindow());
+  EXPECT_EQ(widget_focus_client, MusClient::Get()
+                                     ->window_tree_client()
+                                     ->focus_synchronizer()
+                                     ->active_focus_client());
+
+  // The mouse event should generate a focus request to the server.
+  EXPECT_TRUE(
+      aura::WindowTreeClientPrivate(MusClient::Get()->window_tree_client())
+          .HasChangeInFlightOfType(aura::ChangeType::FOCUS));
 }
 
 TEST_F(DesktopWindowTreeHostMusTest, ActivateBeforeShow) {
@@ -234,7 +260,6 @@ TEST_F(DesktopWindowTreeHostMusTest, StackAtTop) {
   widget2->Show();
 
   aura::test::ChangeCompletionWaiter waiter(
-      MusClient::Get()->window_tree_client(),
       aura::ChangeType::REORDER, true);
   widget1->StackAtTop();
   waiter.Wait();
@@ -252,7 +277,6 @@ TEST_F(DesktopWindowTreeHostMusTest, StackAtTopAlreadyOnTop) {
   widget2->Show();
 
   aura::test::ChangeCompletionWaiter waiter(
-      MusClient::Get()->window_tree_client(),
       aura::ChangeType::REORDER, true);
   widget2->StackAtTop();
   waiter.Wait();
@@ -266,7 +290,6 @@ TEST_F(DesktopWindowTreeHostMusTest, StackAbove) {
   widget2->Show();
 
   aura::test::ChangeCompletionWaiter waiter(
-      MusClient::Get()->window_tree_client(),
       aura::ChangeType::REORDER, true);
   widget1->StackAboveWidget(widget2.get());
   waiter.Wait();
@@ -276,8 +299,7 @@ TEST_F(DesktopWindowTreeHostMusTest, SetOpacity) {
   std::unique_ptr<Widget> widget1(CreateWidget(nullptr));
   widget1->Show();
 
-  aura::test::ChangeCompletionWaiter waiter(
-      MusClient::Get()->window_tree_client(), aura::ChangeType::OPACITY, true);
+  aura::test::ChangeCompletionWaiter waiter(aura::ChangeType::OPACITY, true);
   widget1->SetOpacity(0.5f);
   waiter.Wait();
 }
@@ -306,10 +328,10 @@ TEST_F(DesktopWindowTreeHostMusTest, ShadowDefaults) {
   widget.Init(params);
   // |DesktopNativeWidgetAura::content_window_| should have no shadow; the wm
   // should provide it if it so desires.
-  EXPECT_EQ(wm::ShadowElevation::NONE,
+  EXPECT_EQ(wm::kShadowElevationNone,
             widget.GetNativeView()->GetProperty(wm::kShadowElevationKey));
   // The wm honors the shadow property from the WindowTreeHost's window.
-  EXPECT_EQ(wm::ShadowElevation::DEFAULT,
+  EXPECT_EQ(wm::kShadowElevationDefault,
             widget.GetNativeView()->GetHost()->window()->GetProperty(
                 wm::kShadowElevationKey));
 }
@@ -320,9 +342,9 @@ TEST_F(DesktopWindowTreeHostMusTest, NoShadow) {
   params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.shadow_type = Widget::InitParams::SHADOW_TYPE_NONE;
   widget.Init(params);
-  EXPECT_EQ(wm::ShadowElevation::NONE,
+  EXPECT_EQ(wm::kShadowElevationNone,
             widget.GetNativeView()->GetProperty(wm::kShadowElevationKey));
-  EXPECT_EQ(wm::ShadowElevation::NONE,
+  EXPECT_EQ(wm::kShadowElevationNone,
             widget.GetNativeView()->GetHost()->window()->GetProperty(
                 wm::kShadowElevationKey));
 }

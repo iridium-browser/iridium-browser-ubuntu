@@ -77,7 +77,8 @@ void LockLayoutManager::OnWindowDestroying(aura::Window* window) {
 
 void LockLayoutManager::OnWindowBoundsChanged(aura::Window* window,
                                               const gfx::Rect& old_bounds,
-                                              const gfx::Rect& new_bounds) {
+                                              const gfx::Rect& new_bounds,
+                                              ui::PropertyChangeReason reason) {
   if (root_window_ == window) {
     const wm::WMEvent wm_event(wm::WM_EVENT_DISPLAY_BOUNDS_CHANGED);
     AdjustWindowsForWorkAreaChange(&wm_event);
@@ -98,15 +99,15 @@ void LockLayoutManager::WillChangeVisibilityState(
   //    height.
   //  * LockActionHandlerLayoutManager windows bounds depend on the work area
   //    bound defined by the shelf layout (see
-  //    ScreenUtil::GetDisplayWorkAreaBoundsInParentForLockScreen).
+  //    screen_util::GetDisplayWorkAreaBoundsInParentForLockScreen).
   // In short, when shelf bounds change, the windows in this layout manager
   // should be updated, too.
   const wm::WMEvent event(wm::WM_EVENT_WORKAREA_BOUNDS_CHANGED);
   AdjustWindowsForWorkAreaChange(&event);
 }
 
-void LockLayoutManager::OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) {
-  keyboard_bounds_ = new_bounds;
+void LockLayoutManager::OnKeyboardWorkspaceOccludedBoundsChanged(
+    const gfx::Rect& new_bounds) {
   OnWindowResized();
 }
 

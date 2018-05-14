@@ -4,23 +4,23 @@
 
 #import "ios/chrome/browser/ui/payments/credit_card_edit_coordinator.h"
 
+#include <memory>
+
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/ios/wait_util.h"
-#include "base/test/scoped_task_environment.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/test_personal_data_manager.h"
 #include "components/payments/core/autofill_payment_instrument.h"
 #include "components/payments/core/payment_instrument.h"
-#include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #include "ios/chrome/browser/payments/payment_request_test_util.h"
+#include "ios/chrome/browser/payments/payment_request_unittest_base.h"
 #include "ios/chrome/browser/payments/test_payment_request.h"
 #import "ios/chrome/browser/ui/autofill/autofill_ui_type.h"
 #import "ios/chrome/browser/ui/payments/payment_request_editor_field.h"
+#import "ios/chrome/browser/ui/payments/payment_request_navigation_controller.h"
 #import "ios/chrome/test/scoped_key_window.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -32,16 +32,12 @@
 #endif
 
 namespace {
-class MockTestPersonalDataManager : public autofill::TestPersonalDataManager {
- public:
-  MockTestPersonalDataManager() : TestPersonalDataManager() {}
-  MOCK_METHOD1(AddCreditCard, void(const autofill::CreditCard&));
-  MOCK_METHOD1(UpdateCreditCard, void(const autofill::CreditCard&));
-};
+
+using ::testing::_;
 
 class MockPaymentRequest : public payments::TestPaymentRequest {
  public:
-  MockPaymentRequest(web::PaymentRequest web_payment_request,
+  MockPaymentRequest(payments::WebPaymentRequest web_payment_request,
                      ios::ChromeBrowserState* browser_state,
                      web::WebState* web_state,
                      autofill::PersonalDataManager* personal_data_manager)
@@ -50,8 +46,10 @@ class MockPaymentRequest : public payments::TestPaymentRequest {
                                      web_state,
                                      personal_data_manager) {}
   MOCK_METHOD1(
-      AddAutofillPaymentInstrument,
+      CreateAndAddAutofillPaymentInstrument,
       payments::AutofillPaymentInstrument*(const autofill::CreditCard&));
+  MOCK_METHOD1(UpdateAutofillPaymentInstrument,
+               void(const autofill::CreditCard&));
 };
 
 MATCHER_P5(CreditCardMatches,
@@ -109,24 +107,25 @@ NSArray<EditorField*>* GetEditorFields(bool save_card) {
                       required:YES],
   ];
 }
-
-using ::testing::_;
 }  // namespace
 
-class PaymentRequestCreditCardEditCoordinatorTest : public PlatformTest {
+class PaymentRequestCreditCardEditCoordinatorTest
+    : public PaymentRequestUnitTestBase,
+      public PlatformTest {
  protected:
-  PaymentRequestCreditCardEditCoordinatorTest()
-      : chrome_browser_state_(TestChromeBrowserState::Builder().Build()) {
-    payment_request_ = base::MakeUnique<MockPaymentRequest>(
+  PaymentRequestCreditCardEditCoordinatorTest() {}
+
+  void SetUp() override {
+    PaymentRequestUnitTestBase::SetUp();
+
+    payment_request_ = std::make_unique<MockPaymentRequest>(
         payment_request_test_util::CreateTestWebPaymentRequest(),
-        chrome_browser_state_.get(), &web_state_, &personal_data_manager_);
+        browser_state(), web_state(), &personal_data_manager_);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_evironment_;
+  void TearDown() override { PaymentRequestUnitTestBase::TearDown(); }
 
-  web::TestWebState web_state_;
-  MockTestPersonalDataManager personal_data_manager_;
-  std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
+  autofill::TestPersonalDataManager personal_data_manager_;
   std::unique_ptr<MockPaymentRequest> payment_request_;
 };
 
@@ -147,9 +146,9 @@ TEST_F(PaymentRequestCreditCardEditCoordinatorTest, StartAndStop) {
   // Spin the run loop to trigger the animation.
   base::test::ios::SpinRunLoopWithMaxDelay(base::TimeDelta::FromSecondsD(1.0));
   EXPECT_TRUE([base_view_controller.presentedViewController
-      isMemberOfClass:[UINavigationController class]]);
-  UINavigationController* navigation_controller =
-      base::mac::ObjCCastStrict<UINavigationController>(
+      isMemberOfClass:[PaymentRequestNavigationController class]]);
+  PaymentRequestNavigationController* navigation_controller =
+      base::mac::ObjCCastStrict<PaymentRequestNavigationController>(
           base_view_controller.presentedViewController);
   EXPECT_TRUE([navigation_controller.visibleViewController
       isMemberOfClass:[PaymentRequestEditViewController class]]);
@@ -196,22 +195,18 @@ TEST_F(PaymentRequestCreditCardEditCoordinatorTest, DidFinishCreatingWithSave) {
 
   // Expect a payment method to be added to the PaymentRequest.
   EXPECT_CALL(*payment_request_,
-              AddAutofillPaymentInstrument(CreditCardMatches(
+              CreateAndAddAutofillPaymentInstrument(CreditCardMatches(
                   "4111111111111111", "John Doe", "12", "2090", "12345")))
       .Times(1);
-  // Expect a payment method to be added to the PersonalDataManager.
-  EXPECT_CALL(personal_data_manager_,
-              AddCreditCard(CreditCardMatches("4111111111111111", "John Doe",
-                                              "12", "2090", "12345")))
-      .Times(1);
-  // No payment method should get updated in the PersonalDataManager.
-  EXPECT_CALL(personal_data_manager_, UpdateCreditCard(_)).Times(0);
+
+  // No payment method should get updated in the PaymentRequest.
+  EXPECT_CALL(*payment_request_, UpdateAutofillPaymentInstrument(_)).Times(0);
 
   // Call the controller delegate method.
   EXPECT_TRUE([base_view_controller.presentedViewController
-      isMemberOfClass:[UINavigationController class]]);
-  UINavigationController* navigation_controller =
-      base::mac::ObjCCastStrict<UINavigationController>(
+      isMemberOfClass:[PaymentRequestNavigationController class]]);
+  PaymentRequestNavigationController* navigation_controller =
+      base::mac::ObjCCastStrict<PaymentRequestNavigationController>(
           base_view_controller.presentedViewController);
   PaymentRequestEditViewController* view_controller =
       base::mac::ObjCCastStrict<PaymentRequestEditViewController>(
@@ -253,21 +248,17 @@ TEST_F(PaymentRequestCreditCardEditCoordinatorTest, DidFinishCreatingNoSave) {
   base::test::ios::SpinRunLoopWithMaxDelay(base::TimeDelta::FromSecondsD(1.0));
   EXPECT_NE(nil, base_view_controller.presentedViewController);
 
-  // Expect a payment method to be added to the PaymentRequest.
-  EXPECT_CALL(*payment_request_,
-              AddAutofillPaymentInstrument(CreditCardMatches(
-                  "4111111111111111", "John Doe", "12", "2090", "12345")))
-      .Times(1);
-  // No payment method should get added to the PersonalDataManager.
-  EXPECT_CALL(personal_data_manager_, AddCreditCard(_)).Times(0);
-  // No payment method should get updated in the PersonalDataManager.
-  EXPECT_CALL(personal_data_manager_, UpdateCreditCard(_)).Times(0);
+  // No payment method should get added to the PaymentRequest.
+  EXPECT_CALL(*payment_request_, CreateAndAddAutofillPaymentInstrument(_))
+      .Times(0);
+  // No payment method should get updated in the PaymentRequest.
+  EXPECT_CALL(*payment_request_, UpdateAutofillPaymentInstrument(_)).Times(0);
 
   // Call the controller delegate method.
   EXPECT_TRUE([base_view_controller.presentedViewController
-      isMemberOfClass:[UINavigationController class]]);
-  UINavigationController* navigation_controller =
-      base::mac::ObjCCastStrict<UINavigationController>(
+      isMemberOfClass:[PaymentRequestNavigationController class]]);
+  PaymentRequestNavigationController* navigation_controller =
+      base::mac::ObjCCastStrict<PaymentRequestNavigationController>(
           base_view_controller.presentedViewController);
   PaymentRequestEditViewController* view_controller =
       base::mac::ObjCCastStrict<PaymentRequestEditViewController>(
@@ -315,20 +306,19 @@ TEST_F(PaymentRequestCreditCardEditCoordinatorTest, DidFinishEditing) {
   EXPECT_NE(nil, base_view_controller.presentedViewController);
 
   // No payment method should get added to the PaymentRequest.
-  EXPECT_CALL(*payment_request_, AddAutofillPaymentInstrument(_)).Times(0);
-  // No payment method should get added to the PersonalDataManager.
-  EXPECT_CALL(personal_data_manager_, AddCreditCard(_)).Times(0);
-  // Expect a payment method to be updated in the PersonalDataManager.
-  EXPECT_CALL(personal_data_manager_,
-              UpdateCreditCard(CreditCardMatches("4111111111111111", "John Doe",
-                                                 "12", "2090", "12345")))
+  EXPECT_CALL(*payment_request_, CreateAndAddAutofillPaymentInstrument(_))
+      .Times(0);
+  // No payment method should get updated in the PaymentRequest.
+  EXPECT_CALL(*payment_request_,
+              UpdateAutofillPaymentInstrument(CreditCardMatches(
+                  "4111111111111111", "John Doe", "12", "2090", "12345")))
       .Times(1);
 
   // Call the controller delegate method.
   EXPECT_TRUE([base_view_controller.presentedViewController
-      isMemberOfClass:[UINavigationController class]]);
-  UINavigationController* navigation_controller =
-      base::mac::ObjCCastStrict<UINavigationController>(
+      isMemberOfClass:[PaymentRequestNavigationController class]]);
+  PaymentRequestNavigationController* navigation_controller =
+      base::mac::ObjCCastStrict<PaymentRequestNavigationController>(
           base_view_controller.presentedViewController);
   PaymentRequestEditViewController* view_controller =
       base::mac::ObjCCastStrict<PaymentRequestEditViewController>(
@@ -366,9 +356,9 @@ TEST_F(PaymentRequestCreditCardEditCoordinatorTest, DidCancel) {
 
   // Call the controller delegate method.
   EXPECT_TRUE([base_view_controller.presentedViewController
-      isMemberOfClass:[UINavigationController class]]);
-  UINavigationController* navigation_controller =
-      base::mac::ObjCCastStrict<UINavigationController>(
+      isMemberOfClass:[PaymentRequestNavigationController class]]);
+  PaymentRequestNavigationController* navigation_controller =
+      base::mac::ObjCCastStrict<PaymentRequestNavigationController>(
           base_view_controller.presentedViewController);
   PaymentRequestEditViewController* view_controller =
       base::mac::ObjCCastStrict<PaymentRequestEditViewController>(

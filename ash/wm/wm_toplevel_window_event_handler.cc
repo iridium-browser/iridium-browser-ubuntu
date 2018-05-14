@@ -7,6 +7,7 @@
 #include "ash/public/cpp/config.h"
 #include "ash/shell.h"
 #include "ash/wm/resize_shadow_controller.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_resizer.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_state_observer.h"
@@ -63,6 +64,14 @@ void ShowResizeShadow(aura::Window* window, int component) {
     // TODO: http://crbug.com/640773.
     return;
   }
+
+  // Window resize in tablet mode is disabled (except in splitscreen).
+  if (Shell::Get()
+          ->tablet_mode_controller()
+          ->IsTabletModeWindowManagerEnabled()) {
+    return;
+  }
+
   ResizeShadowController* resize_shadow_controller =
       Shell::Get()->resize_shadow_controller();
   if (resize_shadow_controller)
@@ -74,6 +83,7 @@ void HideResizeShadow(aura::Window* window) {
     // TODO: http://crbug.com/640773.
     return;
   }
+
   ResizeShadowController* resize_shadow_controller =
       Shell::Get()->resize_shadow_controller();
   if (resize_shadow_controller)
@@ -105,7 +115,7 @@ class WmToplevelWindowEventHandler::ScopedWindowResizer
 
   // WindowStateObserver overrides:
   void OnPreWindowStateTypeChange(wm::WindowState* window_state,
-                                  wm::WindowStateType type) override;
+                                  mojom::WindowStateType type) override;
 
  private:
   WmToplevelWindowEventHandler* handler_;
@@ -146,7 +156,7 @@ bool WmToplevelWindowEventHandler::ScopedWindowResizer::IsMove() const {
 
 void WmToplevelWindowEventHandler::ScopedWindowResizer::
     OnPreWindowStateTypeChange(wm::WindowState* window_state,
-                               wm::WindowStateType old) {
+                               mojom::WindowStateType old) {
   handler_->CompleteDrag(DragResult::SUCCESS);
 }
 
@@ -177,6 +187,8 @@ void WmToplevelWindowEventHandler::OnKeyEvent(ui::KeyEvent* event) {
 
 void WmToplevelWindowEventHandler::OnMouseEvent(ui::MouseEvent* event,
                                                 aura::Window* target) {
+  UpdateGestureTarget(nullptr);
+
   if (event->handled())
     return;
   if ((event->flags() &
@@ -216,6 +228,11 @@ void WmToplevelWindowEventHandler::OnMouseEvent(ui::MouseEvent* event,
 
 void WmToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event,
                                                   aura::Window* target) {
+  if (event->type() == ui::ET_GESTURE_END)
+    UpdateGestureTarget(nullptr);
+  else if (event->type() == ui::ET_GESTURE_BEGIN)
+    UpdateGestureTarget(target);
+
   if (event->handled())
     return;
   if (!target->delegate())
@@ -327,7 +344,7 @@ void WmToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event,
     case ui::ET_SCROLL_FLING_START:
       CompleteDrag(DragResult::SUCCESS);
 
-      // TODO(pkotwicz): Fix tests which inadvertantly start flings and check
+      // TODO(pkotwicz): Fix tests which inadvertently start flings and check
       // window_resizer_->IsMove() instead of the hittest component at |event|'s
       // location.
       if (GetNonClientComponent(target, event->location()) != HTCAPTION ||
@@ -336,18 +353,20 @@ void WmToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event,
       }
 
       if (event->details().velocity_y() > kMinVertVelocityForWindowMinimize) {
-        SetWindowStateTypeFromGesture(target, wm::WINDOW_STATE_TYPE_MINIMIZED);
+        SetWindowStateTypeFromGesture(target,
+                                      mojom::WindowStateType::MINIMIZED);
       } else if (event->details().velocity_y() <
                  -kMinVertVelocityForWindowMinimize) {
-        SetWindowStateTypeFromGesture(target, wm::WINDOW_STATE_TYPE_MAXIMIZED);
+        SetWindowStateTypeFromGesture(target,
+                                      mojom::WindowStateType::MAXIMIZED);
       } else if (event->details().velocity_x() >
                  kMinHorizVelocityForWindowSwipe) {
         SetWindowStateTypeFromGesture(target,
-                                      wm::WINDOW_STATE_TYPE_RIGHT_SNAPPED);
+                                      mojom::WindowStateType::RIGHT_SNAPPED);
       } else if (event->details().velocity_x() <
                  -kMinHorizVelocityForWindowSwipe) {
         SetWindowStateTypeFromGesture(target,
-                                      wm::WINDOW_STATE_TYPE_LEFT_SNAPPED);
+                                      mojom::WindowStateType::LEFT_SNAPPED);
       }
       event->StopPropagation();
       return;
@@ -361,15 +380,17 @@ void WmToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event,
       CompleteDrag(DragResult::SUCCESS);
 
       if (event->details().swipe_down()) {
-        SetWindowStateTypeFromGesture(target, wm::WINDOW_STATE_TYPE_MINIMIZED);
+        SetWindowStateTypeFromGesture(target,
+                                      mojom::WindowStateType::MINIMIZED);
       } else if (event->details().swipe_up()) {
-        SetWindowStateTypeFromGesture(target, wm::WINDOW_STATE_TYPE_MAXIMIZED);
+        SetWindowStateTypeFromGesture(target,
+                                      mojom::WindowStateType::MAXIMIZED);
       } else if (event->details().swipe_right()) {
         SetWindowStateTypeFromGesture(target,
-                                      wm::WINDOW_STATE_TYPE_RIGHT_SNAPPED);
+                                      mojom::WindowStateType::RIGHT_SNAPPED);
       } else {
         SetWindowStateTypeFromGesture(target,
-                                      wm::WINDOW_STATE_TYPE_LEFT_SNAPPED);
+                                      mojom::WindowStateType::LEFT_SNAPPED);
       }
       event->StopPropagation();
       return;
@@ -404,6 +425,8 @@ void WmToplevelWindowEventHandler::RevertDrag() {
 }
 
 bool WmToplevelWindowEventHandler::CompleteDrag(DragResult result) {
+  UpdateGestureTarget(nullptr);
+
   if (!window_resizer_)
     return false;
 
@@ -526,33 +549,33 @@ void WmToplevelWindowEventHandler::HandleCaptureLost(ui::LocatedEvent* event) {
 
 void WmToplevelWindowEventHandler::SetWindowStateTypeFromGesture(
     aura::Window* window,
-    wm::WindowStateType new_state_type) {
+    mojom::WindowStateType new_state_type) {
   wm::WindowState* window_state = GetWindowState(window);
   // TODO(oshima): Move extra logic (set_unminimize_to_restore_bounds,
   // SetRestoreBoundsInParent) that modifies the window state
   // into WindowState.
   switch (new_state_type) {
-    case wm::WINDOW_STATE_TYPE_MINIMIZED:
+    case mojom::WindowStateType::MINIMIZED:
       if (window_state->CanMinimize()) {
         window_state->Minimize();
         window_state->set_unminimize_to_restore_bounds(true);
         window_state->SetRestoreBoundsInParent(pre_drag_window_bounds_);
       }
       break;
-    case wm::WINDOW_STATE_TYPE_MAXIMIZED:
+    case mojom::WindowStateType::MAXIMIZED:
       if (window_state->CanMaximize()) {
         window_state->SetRestoreBoundsInParent(pre_drag_window_bounds_);
         window_state->Maximize();
       }
       break;
-    case wm::WINDOW_STATE_TYPE_LEFT_SNAPPED:
+    case mojom::WindowStateType::LEFT_SNAPPED:
       if (window_state->CanSnap()) {
         window_state->SetRestoreBoundsInParent(pre_drag_window_bounds_);
         const wm::WMEvent event(wm::WM_EVENT_SNAP_LEFT);
         window_state->OnWMEvent(&event);
       }
       break;
-    case wm::WINDOW_STATE_TYPE_RIGHT_SNAPPED:
+    case mojom::WindowStateType::RIGHT_SNAPPED:
       if (window_state->CanSnap()) {
         window_state->SetRestoreBoundsInParent(pre_drag_window_bounds_);
         const wm::WMEvent event(wm::WM_EVENT_SNAP_RIGHT);
@@ -570,6 +593,23 @@ void WmToplevelWindowEventHandler::ResizerWindowDestroyed() {
 
 void WmToplevelWindowEventHandler::OnDisplayConfigurationChanging() {
   CompleteDrag(DragResult::REVERT);
+}
+
+void WmToplevelWindowEventHandler::OnWindowDestroying(aura::Window* window) {
+  DCHECK_EQ(gesture_target_, window);
+  if (gesture_target_ == window)
+    UpdateGestureTarget(nullptr);
+}
+
+void WmToplevelWindowEventHandler::UpdateGestureTarget(aura::Window* target) {
+  if (gesture_target_ == target)
+    return;
+
+  if (gesture_target_)
+    gesture_target_->RemoveObserver(this);
+  gesture_target_ = target;
+  if (gesture_target_)
+    gesture_target_->AddObserver(this);
 }
 
 }  // namespace wm

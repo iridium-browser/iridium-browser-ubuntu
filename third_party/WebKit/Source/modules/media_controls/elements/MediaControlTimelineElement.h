@@ -5,17 +5,20 @@
 #ifndef MediaControlTimelineElement_h
 #define MediaControlTimelineElement_h
 
-#include "modules/media_controls/elements/MediaControlInputElement.h"
+#include "modules/ModulesExport.h"
+#include "modules/media_controls/elements/MediaControlSliderElement.h"
 #include "modules/media_controls/elements/MediaControlTimelineMetrics.h"
 
 namespace blink {
 
 class Event;
+class HTMLDivElement;
+class MediaControlCurrentTimeDisplayElement;
 class MediaControlsImpl;
 
-class MediaControlTimelineElement final : public MediaControlInputElement {
+class MediaControlTimelineElement : public MediaControlSliderElement {
  public:
-  explicit MediaControlTimelineElement(MediaControlsImpl&);
+  MODULES_EXPORT explicit MediaControlTimelineElement(MediaControlsImpl&);
 
   // MediaControlInputElement overrides.
   bool WillRespondToMouseClickEvents() override;
@@ -29,6 +32,14 @@ class MediaControlTimelineElement final : public MediaControlInputElement {
 
   void OnMediaKeyboardEvent(Event* event) { DefaultEventHandler(event); }
 
+  void RenderBarSegments();
+
+  // Inform the timeline that the Media Controls have been shown or hidden.
+  void OnControlsShown();
+  void OnControlsHidden();
+
+  virtual void Trace(blink::Visitor*);
+
  protected:
   const char* GetNameForHistograms() const override;
 
@@ -36,11 +47,20 @@ class MediaControlTimelineElement final : public MediaControlInputElement {
   void DefaultEventHandler(Event*) override;
   bool KeepEventInNode(Event*) override;
 
-  // Width in CSS pixels * pageZoomFactor (ignores CSS transforms for
-  // simplicity; deliberately ignores pinch zoom's pageScaleFactor).
-  int TimelineWidth();
+  // Checks if we can begin or end a scrubbing event. If the event is a pointer
+  // event then it needs to start and end with valid pointer events. If the
+  // event is a pointer event followed by a touch event then it can only be
+  // ended when the touch has ended.
+  bool BeginScrubbingEvent(Event&);
+  bool EndScrubbingEvent(Event&);
 
   MediaControlTimelineMetrics metrics_;
+
+  Member<MediaControlCurrentTimeDisplayElement> current_time_display_;
+
+  bool is_touching_ = false;
+
+  bool controls_hidden_ = false;
 };
 
 }  // namespace blink

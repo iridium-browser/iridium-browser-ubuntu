@@ -21,7 +21,7 @@
 #include "SkImageFilterCache.h"
 #include "SkJpegEncoder.h"
 #include "SkMakeUnique.h"
-#include "SkMaskFilter.h"
+#include "SkMaskFilterBase.h"
 #include "SkPDFBitmap.h"
 #include "SkPDFCanon.h"
 #include "SkPDFDocument.h"
@@ -209,8 +209,7 @@ public:
         fEntries[0].fClipStack = existingClipStack;
     }
 
-    void updateClip(const SkClipStack& clipStack,
-                    const SkPoint& translation, const SkRect& bounds);
+    void updateClip(const SkClipStack& clipStack, const SkIRect& bounds);
     void updateMatrix(const SkMatrix& matrix);
     void updateDrawingState(const SkPDFDevice::GraphicStateEntry& state);
 
@@ -283,56 +282,11 @@ bool apply_clip(SkClipOp op, const SkPath& u, const SkPath& v, SkPath* r)  {
     }
 }
 
-/* Uses Path Ops to calculate a vector SkPath clip from a clip stack.
- * Returns true if successful, or false if not successful.
- * If successful, the resulting clip is stored in outClipPath.
- * If not successful, outClipPath is undefined, and a fallback method
- * should be used.
- */
-static bool get_clip_stack_path(const SkMatrix& transform,
-                                const SkClipStack& clipStack,
-                                const SkRect& bounds,
-                                SkPath* outClipPath) {
-    outClipPath->reset();
-    outClipPath->setFillType(SkPath::kInverseWinding_FillType);
-
-    const SkClipStack::Element* clipEntry;
-    SkClipStack::Iter iter;
-    iter.reset(clipStack, SkClipStack::Iter::kBottom_IterStart);
-    for (clipEntry = iter.next(); clipEntry; clipEntry = iter.next()) {
-        SkPath entryPath;
-        if (SkClipStack::Element::kEmpty_Type == clipEntry->getType()) {
-            outClipPath->reset();
-            outClipPath->setFillType(SkPath::kInverseWinding_FillType);
-            continue;
-        } else {
-            clipEntry->asPath(&entryPath);
-        }
-        entryPath.transform(transform);
-        if (!apply_clip(clipEntry->getOp(), *outClipPath, entryPath, outClipPath)) {
-            return false;
-        }
-    }
-
-    if (outClipPath->isInverseFillType()) {
-        // The bounds are slightly outset to ensure this is correct in the
-        // face of floating-point accuracy and possible SkRegion bitmap
-        // approximations.
-        SkRect clipBounds = bounds;
-        clipBounds.outset(SK_Scalar1, SK_Scalar1);
-        if (!calculate_inverse_path(clipBounds, *outClipPath, outClipPath)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 // TODO(vandebo): Take advantage of SkClipStack::getSaveCount(), the PDF
 // graphic state stack, and the fact that we can know all the clips used
 // on the page to optimize this.
 void GraphicStackState::updateClip(const SkClipStack& clipStack,
-                                   const SkPoint& translation,
-                                   const SkRect& bounds) {
+                                   const SkIRect& bounds) {
     if (clipStack == currentEntry()->fClipStack) {
         return;
     }
@@ -347,11 +301,16 @@ void GraphicStackState::updateClip(const SkClipStack& clipStack,
 
     currentEntry()->fClipStack = clipStack;
 
-    SkMatrix transform;
-    transform.setTranslate(translation.fX, translation.fY);
-
     SkPath clipPath;
-    if (get_clip_stack_path(transform, clipStack, bounds, &clipPath)) {
+    (void)clipStack.asPath(&clipPath);
+
+    // The bounds are slightly outset to ensure this is correct in the
+    // face of floating-point accuracy and possible SkRegion bitmap
+    // approximations.
+    SkPath clipBoundsPath;
+    clipBoundsPath.addRect(SkRect::Make(bounds.makeOutset(1, 1)));
+
+    if (Op(clipPath, clipBoundsPath, kIntersect_SkPathOp, &clipPath)) {
         SkPDFUtils::EmitPath(clipPath, SkPaint::kFill_Style, fContentStream);
         SkPath::FillType clipFill = clipPath.getFillType();
         NOT_IMPLEMENTED(clipFill == SkPath::kInverseEvenOdd_FillType, false);
@@ -414,7 +373,7 @@ void GraphicStackState::updateDrawingState(const SkPDFDevice::GraphicStateEntry&
 
     if (state.fTextScaleX) {
         if (state.fTextScaleX != currentEntry()->fTextScaleX) {
-            SkScalar pdfScale = state.fTextScaleX * 1000;
+            SkScalar pdfScale = state.fTextScaleX * 100;
             SkPDFUtils::AppendScalar(pdfScale, fContentStream);
             fContentStream->writeText(" Tz\n");
             currentEntry()->fTextScaleX = state.fTextScaleX;
@@ -841,7 +800,7 @@ void SkPDFDevice::internalDrawPathWithFilter(const SkClipStack& clipStack,
     SkAutoMaskFreeImage srcAutoMaskFreeImage(sourceMask.fImage);
     SkMask dstMask;
     SkIPoint margin;
-    if (!paint->getMaskFilter()->filterMask(&dstMask, sourceMask, ctm, &margin)) {
+    if (!as_MFB(paint->getMaskFilter())->filterMask(&dstMask, sourceMask, ctm, &margin)) {
         return;
     }
     SkIRect dstMaskBounds = dstMask.fBounds;
@@ -952,8 +911,9 @@ void SkPDFDevice::internalDrawPath(const SkClipStack& clipStack,
     if (!content.entry()) {
         return;
     }
+    constexpr SkScalar kToleranceScale = 0.0625f;  // smaller = better conics (circles).
     SkScalar matrixScale = matrix.mapRadius(1.0f);
-    SkScalar tolerance = matrixScale > 0.0f ? 0.25f / matrixScale : 0.25f;
+    SkScalar tolerance = matrixScale > 0.0f ? kToleranceScale / matrixScale : kToleranceScale;
     bool consumeDegeratePathSegments =
            paint.getStyle() == SkPaint::kFill_Style ||
            (paint.getStrokeCap() != SkPaint::kRound_Cap &&
@@ -1385,7 +1345,7 @@ void SkPDFDevice::internalDrawText(
         const SkScalar pos[], SkTextBlob::GlyphPositioning positioning,
         SkPoint offset, const SkPaint& srcPaint, const uint32_t* clusters,
         uint32_t textByteLength, const char* utf8Text) {
-    if (0 == sourceByteCount || !sourceText) {
+    if (0 == sourceByteCount || !sourceText || srcPaint.getTextSize() <= 0) {
         return;
     }
     if (this->cs().isEmpty(this->bounds())) {
@@ -1775,8 +1735,7 @@ std::unique_ptr<SkStreamAsset> SkPDFDevice::content() const {
 
     GraphicStackState gsState(fExistingClipStack, &buffer);
     for (const auto& entry : fContentEntries) {
-        gsState.updateClip(entry.fState.fClipStack,
-                {0, 0}, SkRect::Make(this->bounds()));
+        gsState.updateClip(entry.fState.fClipStack, this->bounds());
         gsState.updateMatrix(entry.fState.fMatrix);
         gsState.updateDrawingState(entry.fState);
 
@@ -2287,11 +2246,8 @@ void SkPDFDevice::internalDrawImageRect(SkKeyedImage imageSubset,
         return;
     }
 
+    // First, figure out the src->dst transform and subset the image if needed.
     SkIRect bounds = imageSubset.image()->bounds();
-    SkPaint paint = srcPaint;
-    if (imageSubset.image()->isOpaque()) {
-        replace_srcmode_on_opaque_paint(&paint);
-    }
     SkRect srcRect = src ? *src : SkRect::Make(bounds);
     SkMatrix transform;
     transform.setRectToRect(srcRect, dst, SkMatrix::kFill_ScaleToFit);
@@ -2310,21 +2266,36 @@ void SkPDFDevice::internalDrawImageRect(SkKeyedImage imageSubset,
         }
     }
 
-    // TODO(halcanary) support isAlphaOnly & getMaskFilter.
-    bool imageAlphaOnly = imageSubset.image()->isAlphaOnly() && !paint.getMaskFilter();
-    if (imageAlphaOnly) {
-        if (SkColorFilter* colorFilter = paint.getColorFilter()) {
-            sk_sp<SkImage> img = color_filter(imageSubset.image().get(), colorFilter);
-            paint.setColorFilter(nullptr);
-            imageSubset = SkKeyedImage(std::move(img));
-            if (!imageSubset) {
-                return;
-            }
-            imageAlphaOnly = imageSubset.image()->isAlphaOnly();
-            // The colorfilter can make a alphonly image no longer be alphaonly.
-        }
+    // If the image is opaque and the paint's alpha is too, replace
+    // kSrc blendmode with kSrcOver.
+    SkPaint paint = srcPaint;
+    if (imageSubset.image()->isOpaque()) {
+        replace_srcmode_on_opaque_paint(&paint);
     }
-    if (imageAlphaOnly) {
+
+    // Alpha-only images need to get their color from the shader, before
+    // applying the colorfilter.
+    if (imageSubset.image()->isAlphaOnly() && paint.getColorFilter()) {
+        // must blend alpha image and shader before applying colorfilter.
+        auto surface =
+            SkSurface::MakeRaster(SkImageInfo::MakeN32Premul(imageSubset.image()->dimensions()));
+        SkCanvas* canvas = surface->getCanvas();
+        SkPaint tmpPaint;
+        // In the case of alpha images with shaders, the shader's coordinate
+        // system is the image's coordiantes.
+        tmpPaint.setShader(sk_ref_sp(paint.getShader()));
+        tmpPaint.setColor(paint.getColor());
+        canvas->clear(0x00000000);
+        canvas->drawImage(imageSubset.image().get(), 0, 0, &tmpPaint);
+        paint.setShader(nullptr);
+        imageSubset = SkKeyedImage(surface->makeImageSnapshot());
+        SkASSERT(!imageSubset.image()->isAlphaOnly());
+    }
+
+    if (imageSubset.image()->isAlphaOnly()) {
+        // The ColorFilter applies to the paint color/shader, not the alpha layer.
+        SkASSERT(nullptr == paint.getColorFilter());
+
         sk_sp<SkImage> mask = alpha_image_to_greyscale_image(imageSubset.image().get());
         if (!mask) {
             return;
@@ -2334,12 +2305,24 @@ void SkPDFDevice::internalDrawImageRect(SkKeyedImage imageSubset,
         sk_sp<SkPDFDevice> maskDevice = this->makeCongruentDevice();
         {
             SkCanvas canvas(maskDevice.get());
-            canvas.concat(transform);
-            canvas.concat(ctm);
-            // TODO(halcanary): investigate sub-pixel clipping.
-            canvas.drawImage(mask, 0, 0);
+            if (paint.getMaskFilter()) {
+                // This clip prevents the mask image shader from covering
+                // entire device if unnecessary.
+                canvas.clipRect(this->cs().bounds(this->bounds()));
+                canvas.concat(ctm);
+                SkPaint tmpPaint;
+                tmpPaint.setShader(mask->makeShader(&transform));
+                tmpPaint.setMaskFilter(sk_ref_sp(paint.getMaskFilter()));
+                canvas.drawRect(dst, tmpPaint);
+            } else {
+                canvas.concat(ctm);
+                if (src && !is_integral(*src)) {
+                    canvas.clipRect(dst);
+                }
+                canvas.concat(transform);
+                canvas.drawImage(mask, 0, 0);
+            }
         }
-        remove_color_filter(&paint);
         if (!ctm.isIdentity() && paint.getShader()) {
             transform_shader(&paint, ctm); // Since we are using identity matrix.
         }
@@ -2356,8 +2339,8 @@ void SkPDFDevice::internalDrawImageRect(SkKeyedImage imageSubset,
     if (paint.getMaskFilter()) {
         paint.setShader(imageSubset.image()->makeShader(&transform));
         SkPath path;
-        path.addRect(SkRect::Make(imageSubset.image()->bounds()));
-        this->internalDrawPath(this->cs(), this->ctm(), path, paint, &transform, true);
+        path.addRect(dst);  // handles non-integral clipping.
+        this->internalDrawPath(this->cs(), this->ctm(), path, paint, nullptr, true);
         return;
     }
     transform.postConcat(ctm);
@@ -2472,11 +2455,6 @@ void SkPDFDevice::internalDrawImageRect(SkKeyedImage imageSubset,
     }
 
     if (SkColorFilter* colorFilter = paint.getColorFilter()) {
-        // TODO(https://bug.skia.org/4378): implement colorfilter on other
-        // draw calls.  This code here works for all
-        // drawBitmap*()/drawImage*() calls amd ImageFilters (which
-        // rasterize a layer on this backend).  Fortuanely, this seems
-        // to be how Chromium impements most color-filters.
         sk_sp<SkImage> img = color_filter(imageSubset.image().get(), colorFilter);
         imageSubset = SkKeyedImage(std::move(img));
         if (!imageSubset) {
@@ -2492,7 +2470,7 @@ void SkPDFDevice::internalDrawImageRect(SkKeyedImage imageSubset,
     if (!pdfimage) {
         SkASSERT(imageSubset);
         pdfimage = SkPDFCreateBitmapObject(imageSubset.release(),
-                                           fDocument->canon()->fPixelSerializer.get());
+                                           fDocument->metadata().fEncodingQuality);
         if (!pdfimage) {
             return;
         }

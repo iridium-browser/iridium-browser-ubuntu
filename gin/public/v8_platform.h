@@ -8,17 +8,27 @@
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
+#include "base/partition_alloc_buildflags.h"
 #include "gin/gin_export.h"
 #include "v8/include/v8-platform.h"
 
 namespace gin {
 
 // A v8::Platform implementation to use with gin.
-class GIN_EXPORT V8Platform : public NON_EXPORTED_BASE(v8::Platform) {
+class GIN_EXPORT V8Platform : public v8::Platform {
  public:
   static V8Platform* Get();
 
-  // v8::Platform implementation.
+// v8::Platform implementation.
+// Some configurations do not use page_allocator.
+#if BUILDFLAG(USE_PARTITION_ALLOC)
+  v8::PageAllocator* GetPageAllocator() override;
+  void OnCriticalMemoryPressure() override;
+#endif
+  std::shared_ptr<v8::TaskRunner> GetForegroundTaskRunner(
+      v8::Isolate*) override;
+  std::shared_ptr<v8::TaskRunner> GetBackgroundTaskRunner(
+      v8::Isolate*) override;
   size_t NumberOfAvailableBackgroundThreads() override;
   void CallOnBackgroundThread(
       v8::Task* task,
@@ -31,6 +41,7 @@ class GIN_EXPORT V8Platform : public NON_EXPORTED_BASE(v8::Platform) {
                                   v8::IdleTask* task) override;
   bool IdleTasksEnabled(v8::Isolate* isolate) override;
   double MonotonicallyIncreasingTime() override;
+  double CurrentClockTimeMillis() override;
   StackTracePrinter GetStackTracePrinter() override;
   v8::TracingController* GetTracingController() override;
 

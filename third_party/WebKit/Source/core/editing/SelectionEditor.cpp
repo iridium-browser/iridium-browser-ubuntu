@@ -38,7 +38,7 @@ SelectionEditor::SelectionEditor(LocalFrame& frame) : frame_(frame) {
   ClearVisibleSelection();
 }
 
-SelectionEditor::~SelectionEditor() {}
+SelectionEditor::~SelectionEditor() = default;
 
 void SelectionEditor::AssertSelectionValid() const {
 #if DCHECK_IS_ON()
@@ -56,9 +56,6 @@ void SelectionEditor::ClearVisibleSelection() {
   cached_visible_selection_in_flat_tree_ = VisibleSelectionInFlatTree();
   cached_visible_selection_in_dom_tree_is_dirty_ = false;
   cached_visible_selection_in_flat_tree_is_dirty_ = false;
-  if (!ShouldAlwaysUseDirectionalSelection())
-    return;
-  selection_.is_directional_ = true;
 }
 
 void SelectionEditor::Dispose() {
@@ -71,8 +68,7 @@ Document& SelectionEditor::GetDocument() const {
   return *LifecycleContext();
 }
 
-const VisibleSelection& SelectionEditor::ComputeVisibleSelectionInDOMTree()
-    const {
+VisibleSelection SelectionEditor::ComputeVisibleSelectionInDOMTree() const {
   DCHECK_EQ(GetFrame()->GetDocument(), GetDocument());
   DCHECK_EQ(GetFrame(), GetDocument().GetFrame());
   UpdateCachedVisibleSelectionIfNeeded();
@@ -83,8 +79,8 @@ const VisibleSelection& SelectionEditor::ComputeVisibleSelectionInDOMTree()
   return cached_visible_selection_in_dom_tree_;
 }
 
-const VisibleSelectionInFlatTree&
-SelectionEditor::ComputeVisibleSelectionInFlatTree() const {
+VisibleSelectionInFlatTree SelectionEditor::ComputeVisibleSelectionInFlatTree()
+    const {
   DCHECK_EQ(GetFrame()->GetDocument(), GetDocument());
   DCHECK_EQ(GetFrame(), GetDocument().GetFrame());
   UpdateCachedVisibleSelectionInFlatTreeIfNeeded();
@@ -95,21 +91,9 @@ SelectionEditor::ComputeVisibleSelectionInFlatTree() const {
   return cached_visible_selection_in_flat_tree_;
 }
 
-const SelectionInDOMTree& SelectionEditor::GetSelectionInDOMTree() const {
+SelectionInDOMTree SelectionEditor::GetSelectionInDOMTree() const {
   AssertSelectionValid();
   return selection_;
-}
-
-bool SelectionEditor::HasEditableStyle() const {
-  return ComputeVisibleSelectionInDOMTree().HasEditableStyle();
-}
-
-bool SelectionEditor::IsContentEditable() const {
-  return ComputeVisibleSelectionInDOMTree().IsContentEditable();
-}
-
-bool SelectionEditor::IsContentRichlyEditable() const {
-  return ComputeVisibleSelectionInDOMTree().IsContentRichlyEditable();
 }
 
 void SelectionEditor::MarkCacheDirty() {
@@ -123,16 +107,17 @@ void SelectionEditor::MarkCacheDirty() {
   }
 }
 
-void SelectionEditor::SetSelection(const SelectionInDOMTree& new_selection) {
+void SelectionEditor::SetSelectionAndEndTyping(
+    const SelectionInDOMTree& new_selection) {
   new_selection.AssertValidFor(GetDocument());
-  if (selection_ == new_selection)
-    return;
+  DCHECK_NE(selection_, new_selection);
   ClearDocumentCachedRange();
   MarkCacheDirty();
   selection_ = new_selection;
 }
 
 void SelectionEditor::DidChangeChildren(const ContainerNode&) {
+  selection_.ResetDirectionCache();
   MarkCacheDirty();
   DidFinishDOMMutation();
 }
@@ -145,6 +130,7 @@ void SelectionEditor::DidFinishTextChange(const Position& new_base,
   }
   selection_.base_ = new_base;
   selection_.extent_ = new_extent;
+  selection_.ResetDirectionCache();
   MarkCacheDirty();
   DidFinishDOMMutation();
 }
@@ -194,7 +180,6 @@ void SelectionEditor::NodeChildrenWillBeRemoved(ContainerNode& container) {
     return;
   selection_ = SelectionInDOMTree::Builder()
                    .SetBaseAndExtent(new_base, new_extent)
-                   .SetIsHandleVisible(selection_.IsHandleVisible())
                    .Build();
   MarkCacheDirty();
 }
@@ -212,7 +197,6 @@ void SelectionEditor::NodeWillBeRemoved(Node& node_to_be_removed) {
     return;
   selection_ = SelectionInDOMTree::Builder()
                    .SetBaseAndExtent(new_base, new_extent)
-                   .SetIsHandleVisible(selection_.IsHandleVisible())
                    .Build();
   MarkCacheDirty();
 }
@@ -414,8 +398,7 @@ void SelectionEditor::UpdateCachedVisibleSelectionInFlatTreeIfNeeded() const {
     builder.Collapse(base);
   else if (extent.IsNotNull())
     builder.Collapse(extent);
-  builder.SetAffinity(selection_.Affinity())
-      .SetIsDirectional(selection_.IsDirectional());
+  builder.SetAffinity(selection_.Affinity());
   cached_visible_selection_in_flat_tree_ =
       CreateVisibleSelection(builder.Build());
   if (!cached_visible_selection_in_flat_tree_.IsNone())
@@ -437,7 +420,7 @@ void SelectionEditor::ClearDocumentCachedRange() {
   cached_range_ = nullptr;
 }
 
-DEFINE_TRACE(SelectionEditor) {
+void SelectionEditor::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(selection_);
   visitor->Trace(cached_visible_selection_in_dom_tree_);

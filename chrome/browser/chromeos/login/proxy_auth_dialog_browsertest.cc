@@ -63,9 +63,7 @@ class ProxyAuthOnUserBoardScreenTest : public LoginManagerTest {
   ProxyAuthOnUserBoardScreenTest()
       : LoginManagerTest(true /* should_launch_browser */),
         proxy_server_(net::SpawnedTestServer::TYPE_BASIC_AUTH_PROXY,
-                      net::SpawnedTestServer::kLocalhost,
-                      base::FilePath()) {
-  }
+                      base::FilePath()) {}
 
   ~ProxyAuthOnUserBoardScreenTest() override {}
 
@@ -88,19 +86,14 @@ class ProxyAuthOnUserBoardScreenTest : public LoginManagerTest {
 
 IN_PROC_BROWSER_TEST_F(ProxyAuthOnUserBoardScreenTest,
                        PRE_ProxyAuthDialogOnUserBoardScreen) {
-  RegisterUser("test-user@gmail.com");
+  RegisterUser(
+      AccountId::FromUserEmailGaiaId("test-user@gmail.com", "1234567890"));
   StartupUtils::MarkOobeCompleted();
 }
 
-// Times out under MSan, and is flaky for ASan: https://crbug.com/481651
-#if defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER)
-#define MAYBE_ProxyAuthDialogOnUserBoardScreen \
-  DISABLED_ProxyAuthDialogOnUserBoardScreen
-#else
-#define MAYBE_ProxyAuthDialogOnUserBoardScreen ProxyAuthDialogOnUserBoardScreen
-#endif
+// Flaky: https://crbug.com/481651 and https://crbug.com/772072
 IN_PROC_BROWSER_TEST_F(ProxyAuthOnUserBoardScreenTest,
-                       MAYBE_ProxyAuthDialogOnUserBoardScreen) {
+                       DISABLED_ProxyAuthDialogOnUserBoardScreen) {
   LoginDisplayHost* login_display_host = LoginDisplayHost::default_host();
   WebUILoginView* web_ui_login_view = login_display_host->GetWebUILoginView();
   OobeUI* oobe_ui = web_ui_login_view->GetOobeUI();
@@ -123,7 +116,9 @@ IN_PROC_BROWSER_TEST_F(ProxyAuthOnUserBoardScreenTest,
     screen_waiter.Wait();
     auth_dialog_waiter.Wait();
     ASSERT_TRUE(auth_dialog_waiter.login_handler());
+    auth_dialog_waiter.login_handler()->CancelAuth();
   }
+  base::RunLoop().RunUntilIdle();
 }
 
 }  // namespace chromeos

@@ -26,12 +26,10 @@
 
 ToolbarButton::ToolbarButton(Profile* profile,
                              views::ButtonListener* listener,
-                             ui::MenuModel* model)
+                             std::unique_ptr<ui::MenuModel> model)
     : views::ImageButton(listener),
       profile_(profile),
-      model_(model),
-      menu_showing_(false),
-      y_position_on_lbuttondown_(0),
+      model_(std::move(model)),
       show_menu_factory_(this) {
   set_has_ink_drop_action_on_click(true);
   set_context_menu_controller(this);
@@ -128,13 +126,11 @@ void ToolbarButton::OnGestureEvent(ui::GestureEvent* event) {
 }
 
 void ToolbarButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  CustomButton::GetAccessibleNodeData(node_data);
-  node_data->role = ui::AX_ROLE_BUTTON_DROP_DOWN;
-  node_data->AddState(ui::AX_STATE_HASPOPUP);
-  if (enabled()) {
-    node_data->AddIntAttribute(ui::AX_ATTR_DEFAULT_ACTION_VERB,
-                               ui::AX_DEFAULT_ACTION_VERB_PRESS);
-  }
+  Button::GetAccessibleNodeData(node_data);
+  node_data->role = ax::mojom::Role::kButton;
+  node_data->AddState(ax::mojom::State::kHaspopup);
+  if (enabled())
+    node_data->SetDefaultActionVerb(ax::mojom::DefaultActionVerb::kPress);
 }
 
 void ToolbarButton::ShowContextMenuForView(View* source,

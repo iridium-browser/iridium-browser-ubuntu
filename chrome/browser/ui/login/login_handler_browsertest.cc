@@ -24,7 +24,6 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/base/auth.h"
@@ -366,11 +365,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth_OnNavigation) {
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller));
 
-  // One LOAD_STOP event for LoginInterstitial, second for kAuthURL and third
-  // for kNoAuthURL, unless PlzNavigate is active, in which case the
-  // interrupted ongoing navigation does not receive LOAD_STOP.
-  const int kLoadStopEvents = content::IsBrowserSideNavigationEnabled() ? 2 : 3;
-  WindowedLoadStopObserver load_stop_waiter(controller, kLoadStopEvents);
+  // One LOAD_STOP event for kAuthURL and second  for kNoAuthURL.
+  WindowedLoadStopObserver load_stop_waiter(controller, 2);
   WindowedAuthNeededObserver auth_needed_waiter(controller);
   browser()->OpenURL(OpenURLParams(kAuthURL, Referrer(),
                                    WindowOpenDisposition::CURRENT_TAB,
@@ -402,11 +398,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth_OnBack) {
   // go back to.
   ui_test_utils::NavigateToURL(browser(), kNoAuthURL);
 
-  // Non-PlzNavigate: one LOAD_STOP event for kAuthURL and one for kNoAuthURL.
-  // PlzNavigate: one LOAD_STOP event for kAuthURL.
-  const int kLoadStopEvents =
-      content::IsBrowserSideNavigationEnabled() ? 1 : 2;
-  WindowedLoadStopObserver load_stop_waiter(controller, kLoadStopEvents);
+  WindowedLoadStopObserver load_stop_waiter(controller, 1);
   WindowedAuthNeededObserver auth_needed_waiter(controller);
   browser()->OpenURL(OpenURLParams(kAuthURL, Referrer(),
                                    WindowOpenDisposition::CURRENT_TAB,
@@ -445,11 +437,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth_OnForward) {
     load_stop_waiter.Wait();
   }
 
-  // Non-PlzNavigate: one LOAD_STOP event for kAuthURL and one for kNoAuthURL.
-  // PlzNavigate: one LOAD_STOP event for kAuthURL.
-  const int kLoadStopEvents =
-      content::IsBrowserSideNavigationEnabled() ? 1 : 2;
-  WindowedLoadStopObserver load_stop_waiter(controller, kLoadStopEvents);
+  WindowedLoadStopObserver load_stop_waiter(controller, 1);
   WindowedAuthNeededObserver auth_needed_waiter(controller);
   browser()->OpenURL(OpenURLParams(kAuthURL, Referrer(),
                                    WindowOpenDisposition::CURRENT_TAB,
@@ -752,6 +740,40 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
   }
 
   EXPECT_EQ(1, observer.auth_needed_count());
+}
+
+// Block same domain image resource if the top level frame is HTTPS and the
+// image resource is HTTP.
+// E.g. Top level: https://example.com, Image resource: http://example.com/image
+IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
+                       BlockCrossdomainPromptForSubresourcesMixedContent) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server.SetSSLConfig(net::EmbeddedTestServer::CERT_OK);
+  https_server.ServeFilesFromSourceDirectory("chrome/test/data");
+  ASSERT_TRUE(https_server.Start());
+
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  NavigationController* controller = &contents->GetController();
+  LoginPromptBrowserTestObserver observer;
+  observer.Register(content::Source<NavigationController>(controller));
+
+  GURL image_url = embedded_test_server()->GetURL("/auth-basic/index.html");
+  GURL test_page = https_server.GetURL(
+      std::string("/login/load_img_from_same_domain_mixed_content.html?") +
+      image_url.spec());
+  GURL::Replacements replacements;
+  replacements.SetHostStr("a.com");
+  test_page = test_page.ReplaceComponents(replacements);
+  image_url = image_url.ReplaceComponents(replacements);
+
+  WindowedLoadStopObserver load_stop_waiter(controller, 1);
+  browser()->OpenURL(OpenURLParams(test_page, Referrer(),
+                                   WindowOpenDisposition::CURRENT_TAB,
+                                   ui::PAGE_TRANSITION_TYPED, false));
+  load_stop_waiter.Wait();
+  EXPECT_EQ(0, observer.auth_needed_count());
 }
 
 // Allow crossdomain iframe login prompting despite the above.

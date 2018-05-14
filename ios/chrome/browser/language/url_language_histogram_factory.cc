@@ -4,10 +4,10 @@
 
 #include "ios/chrome/browser/language/url_language_histogram_factory.h"
 
-#include "base/memory/ptr_util.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "components/language/core/browser/url_language_histogram.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 
 // static
@@ -31,9 +31,14 @@ UrlLanguageHistogramFactory::~UrlLanguageHistogramFactory() {}
 
 std::unique_ptr<KeyedService>
 UrlLanguageHistogramFactory::BuildServiceInstanceFor(
-    web::BrowserState* context) const {
+    web::BrowserState* const context) const {
   ios::ChromeBrowserState* browser_state =
       ios::ChromeBrowserState::FromBrowserState(context);
-  return base::MakeUnique<language::UrlLanguageHistogram>(
+  return std::make_unique<language::UrlLanguageHistogram>(
       browser_state->GetPrefs());
+}
+
+void UrlLanguageHistogramFactory::RegisterBrowserStatePrefs(
+    user_prefs::PrefRegistrySyncable* const registry) {
+  language::UrlLanguageHistogram::RegisterProfilePrefs(registry);
 }

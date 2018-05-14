@@ -31,18 +31,19 @@ class AcceleratorManagerDelegate;
 namespace ash {
 
 struct AcceleratorData;
-class AcceleratorControllerDelegate;
 class ExitWarningHandler;
+
+// Identifier for the high contrast toggle accelerator notification.
+ASH_EXPORT extern const char kHighContrastToggleAccelNotificationId[];
 
 // AcceleratorController provides functions for registering or unregistering
 // global keyboard accelerators, which are handled earlier than any windows. It
 // also implements several handlers as an accelerator target.
-class ASH_EXPORT AcceleratorController
-    : public ui::AcceleratorTarget,
-      NON_EXPORTED_BASE(public mojom::AcceleratorController) {
+class ASH_EXPORT AcceleratorController : public ui::AcceleratorTarget,
+                                         public mojom::AcceleratorController {
  public:
-  AcceleratorController(AcceleratorControllerDelegate* delegate,
-                        ui::AcceleratorManagerDelegate* manager_delegate);
+  explicit AcceleratorController(
+      ui::AcceleratorManagerDelegate* manager_delegate);
   ~AcceleratorController() override;
 
   // A list of possible ways in which an accelerator should be restricted before
@@ -175,8 +176,6 @@ class ASH_EXPORT AcceleratorController
   AcceleratorProcessingStatus MaybeDeprecatedAcceleratorPressed(
       AcceleratorAction action,
       const ui::Accelerator& accelerator) const;
-
-  AcceleratorControllerDelegate* delegate_;
 
   std::unique_ptr<ui::AcceleratorManager> accelerator_manager_;
 

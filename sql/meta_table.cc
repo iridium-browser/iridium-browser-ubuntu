@@ -58,12 +58,11 @@ namespace sql {
 MetaTable::MetaTable() : db_(NULL) {
 }
 
-MetaTable::~MetaTable() {
-}
+MetaTable::~MetaTable() = default;
 
 // static
-int64_t MetaTable::kMmapFailure = -2;
-int64_t MetaTable::kMmapSuccess = -1;
+constexpr int64_t MetaTable::kMmapFailure;
+constexpr int64_t MetaTable::kMmapSuccess;
 
 // static
 bool MetaTable::DoesTableExist(sql::Connection* db) {

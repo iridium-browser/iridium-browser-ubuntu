@@ -33,16 +33,15 @@
 
 #include "modules/filesystem/DOMFileSystem.h"
 #include "modules/filesystem/DirectoryReaderBase.h"
-#include "modules/filesystem/EntriesCallback.h"
-#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
-class ErrorCallback;
+class V8EntriesCallback;
+class V8ErrorCallback;
 
-class DirectoryReader : public DirectoryReaderBase, public ScriptWrappable {
+class DirectoryReader : public DirectoryReaderBase {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -51,15 +50,15 @@ class DirectoryReader : public DirectoryReaderBase, public ScriptWrappable {
     return new DirectoryReader(file_system, full_path);
   }
 
-  ~DirectoryReader() override;
+  ~DirectoryReader() override = default;
 
-  void readEntries(EntriesCallback*, ErrorCallback* = nullptr);
+  void readEntries(V8EntriesCallback*, V8ErrorCallback* = nullptr);
 
   DOMFileSystem* Filesystem() const {
     return static_cast<DOMFileSystem*>(file_system_.Get());
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   class EntriesCallbackHelper;
@@ -74,8 +73,8 @@ class DirectoryReader : public DirectoryReaderBase, public ScriptWrappable {
   bool is_reading_;
   EntryHeapVector entries_;
   FileError::ErrorCode error_ = FileError::ErrorCode::kOK;
-  Member<EntriesCallback> entries_callback_;
-  Member<ErrorCallback> error_callback_;
+  Member<V8EntriesCallback> entries_callback_;
+  Member<V8ErrorCallback> error_callback_;
 };
 
 }  // namespace blink

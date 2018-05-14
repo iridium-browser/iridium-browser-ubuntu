@@ -67,29 +67,24 @@ int SVGInlineTextBox::OffsetForPosition(LayoutUnit, bool) const {
 
 int SVGInlineTextBox::OffsetForPositionInFragment(
     const SVGTextFragment& fragment,
-    LayoutUnit position,
-    bool include_partial_glyphs) const {
+    float position) const {
   LineLayoutSVGInlineText line_layout_item =
-      LineLayoutSVGInlineText(this->GetLineLayoutItem());
+      LineLayoutSVGInlineText(GetLineLayoutItem());
 
-  float scaling_factor = line_layout_item.ScalingFactor();
-  DCHECK(scaling_factor);
+  // Adjust position for the scaled font size.
+  DCHECK(line_layout_item.ScalingFactor());
+  position *= line_layout_item.ScalingFactor();
 
-  const ComputedStyle& style = line_layout_item.StyleRef();
+  // If this fragment is subjected to 'textLength' glyph adjustments, then
+  // apply the inverse to the position within the fragment.
+  if (fragment.AffectedByTextLength())
+    position /= fragment.length_adjust_scale;
 
-  TextRun text_run = ConstructTextRun(style, fragment);
-
-  // Eventually handle lengthAdjust="spacingAndGlyphs".
-  // FIXME: Handle vertical text.
-  if (fragment.IsTransformed()) {
-    AffineTransform fragment_transform = fragment.BuildFragmentTransform();
-    text_run.SetHorizontalGlyphStretch(
-        clampTo<float>(fragment_transform.XScale()));
-  }
-
+  const bool include_partial_glyphs = true;
+  TextRun text_run = ConstructTextRun(line_layout_item.StyleRef(), fragment);
   return fragment.character_offset - Start() +
          line_layout_item.ScaledFont().OffsetForPosition(
-             text_run, position * scaling_factor, include_partial_glyphs);
+             text_run, position, include_partial_glyphs);
 }
 
 LayoutUnit SVGInlineTextBox::PositionForOffset(int) const {
@@ -106,7 +101,7 @@ FloatRect SVGInlineTextBox::SelectionRectForTextFragment(
   DCHECK_LT(start_position, end_position);
 
   LineLayoutSVGInlineText line_layout_item =
-      LineLayoutSVGInlineText(this->GetLineLayoutItem());
+      LineLayoutSVGInlineText(GetLineLayoutItem());
 
   float scaling_factor = line_layout_item.ScalingFactor();
   DCHECK(scaling_factor);
@@ -261,23 +256,21 @@ void SVGInlineTextBox::PaintTextMatchMarkerBackground(
       paint_info, point, marker, style, font);
 }
 
-LayoutRect SVGInlineTextBox::CalculateBoundaries() const {
+FloatRect SVGInlineTextBox::CalculateBoundaries() const {
   LineLayoutSVGInlineText line_layout_item =
-      LineLayoutSVGInlineText(this->GetLineLayoutItem());
+      LineLayoutSVGInlineText(GetLineLayoutItem());
   const SimpleFontData* font_data = line_layout_item.ScaledFont().PrimaryFont();
   DCHECK(font_data);
   if (!font_data)
-    return LayoutRect();
+    return FloatRect();
 
   float scaling_factor = line_layout_item.ScalingFactor();
   DCHECK(scaling_factor);
-  LayoutUnit baseline(font_data->GetFontMetrics().FloatAscent() /
-                      scaling_factor);
+  float baseline = font_data->GetFontMetrics().FloatAscent() / scaling_factor;
 
-  LayoutRect text_bounding_rect;
+  FloatRect text_bounding_rect;
   for (const SVGTextFragment& fragment : text_fragments_)
-    text_bounding_rect.Unite(
-        LayoutRect(fragment.OverflowBoundingBox(baseline)));
+    text_bounding_rect.Unite(fragment.OverflowBoundingBox(baseline));
 
   return text_bounding_rect;
 }
@@ -307,7 +300,7 @@ bool SVGInlineTextBox::NodeAtPoint(HitTestResult& result,
       rect.MoveBy(accumulated_offset);
       if (location_in_container.Intersects(rect)) {
         LineLayoutSVGInlineText line_layout_item =
-            LineLayoutSVGInlineText(this->GetLineLayoutItem());
+            LineLayoutSVGInlineText(GetLineLayoutItem());
         const SimpleFontData* font_data =
             line_layout_item.ScaledFont().PrimaryFont();
         DCHECK(font_data);

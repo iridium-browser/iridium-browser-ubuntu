@@ -18,7 +18,7 @@ class ExampleAppListViewDelegateFactory
  public:
   ExampleAppListViewDelegateFactory()
       : app_list_view_delegate_(ash::shell::CreateAppListViewDelegate()) {}
-  ~ExampleAppListViewDelegateFactory() override {}
+  ~ExampleAppListViewDelegateFactory() override = default;
 
   // app_list::AppListViewDelegateFactory:
   app_list::AppListViewDelegate* GetDelegate() override {
@@ -39,13 +39,13 @@ namespace shell {
 ExampleAppListPresenter::ExampleAppListPresenter()
     : binding_(this),
       app_list_presenter_impl_(
-          base::MakeUnique<AppListPresenterDelegateFactory>(
-              base::MakeUnique<ExampleAppListViewDelegateFactory>())) {
+          std::make_unique<AppListPresenterDelegateFactory>(
+              std::make_unique<ExampleAppListViewDelegateFactory>())) {
   // Note: This example |app_list_presenter_impl_| does not report visibility
   // changes to the app_list::mojom::AppList implementation owned by ShellPort.
 }
 
-ExampleAppListPresenter::~ExampleAppListPresenter() {}
+ExampleAppListPresenter::~ExampleAppListPresenter() = default;
 
 app_list::mojom::AppListPresenterPtr
 ExampleAppListPresenter::CreateInterfacePtrAndBind() {
@@ -72,8 +72,12 @@ void ExampleAppListPresenter::ToggleVoiceInteractionSession() {}
 
 void ExampleAppListPresenter::UpdateYPositionAndOpacity(
     int new_y_position,
-    float background_opacity,
-    bool is_end_gesture) {}
+    float background_opacity) {}
+
+void ExampleAppListPresenter::EndDragFromShelf(
+    app_list::mojom::AppListState app_list_state) {}
+
+void ExampleAppListPresenter::ProcessMouseWheelOffset(int offset) {}
 
 }  // namespace shell
 }  // namespace ash

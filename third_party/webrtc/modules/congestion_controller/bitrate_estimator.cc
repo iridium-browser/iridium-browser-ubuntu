@@ -8,12 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/congestion_controller/bitrate_estimator.h"
+#include "modules/congestion_controller/bitrate_estimator.h"
 
 #include <cmath>
 
-#include "webrtc/modules/remote_bitrate_estimator/test/bwe_test_logging.h"
-#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/remote_bitrate_estimator/test/bwe_test_logging.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 
 namespace webrtc {
 
@@ -94,8 +94,8 @@ float BitrateEstimator::UpdateWindow(int64_t now_ms,
 
 rtc::Optional<uint32_t> BitrateEstimator::bitrate_bps() const {
   if (bitrate_estimate_ < 0.f)
-    return rtc::Optional<uint32_t>();
-  return rtc::Optional<uint32_t>(bitrate_estimate_ * 1000);
+    return rtc::nullopt;
+  return bitrate_estimate_ * 1000;
 }
 
 void BitrateEstimator::ExpectFastRateChange() {

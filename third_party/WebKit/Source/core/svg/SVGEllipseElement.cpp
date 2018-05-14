@@ -20,7 +20,6 @@
 
 #include "core/svg/SVGEllipseElement.h"
 
-#include "core/dom/StyleChangeReason.h"
 #include "core/layout/svg/LayoutSVGEllipse.h"
 #include "core/svg/SVGLength.h"
 
@@ -50,7 +49,7 @@ inline SVGEllipseElement::SVGEllipseElement(Document& document)
   AddToPropertyMap(ry_);
 }
 
-DEFINE_TRACE(SVGEllipseElement) {
+void SVGEllipseElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(cx_);
   visitor->Trace(cy_);
   visitor->Trace(rx_);
@@ -68,32 +67,22 @@ Path SVGEllipseElement::AsPath() const {
   const ComputedStyle& style = GetLayoutObject()->StyleRef();
   const SVGComputedStyle& svg_style = style.SvgStyle();
 
-  float rx = length_context.ValueForLength(svg_style.Rx(), style,
-                                           SVGLengthMode::kWidth);
-  if (rx < 0)
-    return path;
-  float ry = length_context.ValueForLength(svg_style.Ry(), style,
-                                           SVGLengthMode::kHeight);
-  if (ry < 0)
-    return path;
-  if (!rx && !ry)
+  FloatSize radii(ToFloatSize(
+      length_context.ResolveLengthPair(svg_style.Rx(), svg_style.Ry(), style)));
+  if (radii.Width() < 0 || radii.Height() < 0 ||
+      (!radii.Width() && !radii.Height()))
     return path;
 
-  path.AddEllipse(FloatRect(length_context.ValueForLength(
-                                svg_style.Cx(), style, SVGLengthMode::kWidth) -
-                                rx,
-                            length_context.ValueForLength(
-                                svg_style.Cy(), style, SVGLengthMode::kHeight) -
-                                ry,
-                            rx * 2, ry * 2));
-
+  FloatPoint center(
+      length_context.ResolveLengthPair(svg_style.Cx(), svg_style.Cy(), style));
+  path.AddEllipse(FloatRect(center - radii, radii.ScaledBy(2)));
   return path;
 }
 
 void SVGEllipseElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   SVGAnimatedPropertyBase* property = PropertyFromAttribute(name);
   if (property == cx_) {
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
@@ -116,19 +105,8 @@ void SVGEllipseElement::CollectStyleForPresentationAttribute(
 void SVGEllipseElement::SvgAttributeChanged(const QualifiedName& attr_name) {
   if (attr_name == SVGNames::cxAttr || attr_name == SVGNames::cyAttr ||
       attr_name == SVGNames::rxAttr || attr_name == SVGNames::ryAttr) {
-    SVGElement::InvalidationGuard invalidation_guard(this);
-
-    InvalidateSVGPresentationAttributeStyle();
-    SetNeedsStyleRecalc(kLocalStyleChange,
-                        StyleChangeReasonForTracing::FromAttribute(attr_name));
     UpdateRelativeLengthsInformation();
-
-    LayoutSVGShape* layout_object = ToLayoutSVGShape(this->GetLayoutObject());
-    if (!layout_object)
-      return;
-
-    layout_object->SetNeedsShapeUpdate();
-    MarkForLayoutAndParentResourceInvalidation(layout_object);
+    GeometryPresentationAttributeChanged(attr_name);
     return;
   }
 

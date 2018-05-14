@@ -7,15 +7,15 @@
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/V8GCController.h"
-#include "core/exported/WebViewBase.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/resize_observer/ResizeObservation.h"
 #include "core/resize_observer/ResizeObserverController.h"
 #include "core/testing/sim/SimCompositor.h"
-#include "core/testing/sim/SimDisplayItemList.h"
 #include "core/testing/sim/SimRequest.h"
 #include "core/testing/sim/SimTest.h"
+#include "platform/loader/fetch/ScriptFetchOptions.h"
 #include "platform/testing/UnitTestHelpers.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
 #include "public/web/WebHeap.h"
 
 namespace blink {
@@ -33,7 +33,7 @@ class TestResizeObserverDelegate : public ResizeObserver::Delegate {
   ExecutionContext* GetExecutionContext() const { return document_; }
   int CallCount() const { return call_count_; }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     ResizeObserver::Delegate::Trace(visitor);
     visitor->Trace(document_);
   }
@@ -59,11 +59,12 @@ TEST_F(ResizeObserverUnitTest, ResizeObservationSize) {
   LoadURL("https://example.com/");
 
   main_resource.Start();
-  main_resource.Write(
-      "<div id='domTarget' style='width:100px;height:100px'>yo</div>"
-      "<svg height='200' width='200'>"
-      "<circle id='svgTarget' cx='100' cy='100' r='100'/>"
-      "</svg>");
+  main_resource.Write(R"HTML(
+    <div id='domTarget' style='width:100px;height:100px'>yo</div>
+    <svg height='200' width='200'>
+    <circle id='svgTarget' cx='100' cy='100' r='100'/>
+    </svg>
+  )HTML");
   main_resource.Finish();
 
   ResizeObserver::Delegate* delegate =
@@ -114,11 +115,12 @@ TEST_F(ResizeObserverUnitTest, TestMemoryLeaks) {
   // Test whether ResizeObserver is kept alive by direct JS reference
   //
   script_controller.ExecuteScriptInMainWorldAndReturnValue(
-      ScriptSourceCode("var ro = new ResizeObserver( entries => {});"),
+      ScriptSourceCode("var ro = new ResizeObserver( entries => {});"), KURL(),
+      ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   ASSERT_EQ(observers.size(), 1U);
   script_controller.ExecuteScriptInMainWorldAndReturnValue(
-      ScriptSourceCode("ro = undefined;"),
+      ScriptSourceCode("ro = undefined;"), KURL(), ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   V8GCController::CollectAllGarbageForTesting(v8::Isolate::GetCurrent());
   WebHeap::CollectAllGarbageForTesting();
@@ -132,13 +134,14 @@ TEST_F(ResizeObserverUnitTest, TestMemoryLeaks) {
                        "var el = document.createElement('div');"
                        "ro.observe(el);"
                        "ro = undefined;"),
+      KURL(), ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   ASSERT_EQ(observers.size(), 1U);
   V8GCController::CollectAllGarbageForTesting(v8::Isolate::GetCurrent());
   WebHeap::CollectAllGarbageForTesting();
   ASSERT_EQ(observers.size(), 1U);
   script_controller.ExecuteScriptInMainWorldAndReturnValue(
-      ScriptSourceCode("el = undefined;"),
+      ScriptSourceCode("el = undefined;"), KURL(), ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   V8GCController::CollectAllGarbageForTesting(v8::Isolate::GetCurrent());
   WebHeap::CollectAllGarbageForTesting();

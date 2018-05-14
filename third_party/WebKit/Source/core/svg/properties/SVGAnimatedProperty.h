@@ -31,21 +31,18 @@ G*     * Redistributions in binary form must reproduce the above
 #ifndef SVGAnimatedProperty_h
 #define SVGAnimatedProperty_h
 
+#include "base/macros.h"
 #include "core/svg/SVGParsingError.h"
 #include "core/svg/properties/SVGPropertyInfo.h"
 #include "core/svg/properties/SVGPropertyTearOff.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
 class ExceptionState;
 class SVGElement;
 
-class SVGAnimatedPropertyBase
-    : public GarbageCollectedFinalized<SVGAnimatedPropertyBase> {
-  WTF_MAKE_NONCOPYABLE(SVGAnimatedPropertyBase);
-
+class SVGAnimatedPropertyBase : public GarbageCollectedMixin {
  public:
   virtual ~SVGAnimatedPropertyBase();
 
@@ -79,9 +76,8 @@ class SVGAnimatedPropertyBase
 
   bool IsSpecified() const;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
-
-  DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
+  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
     visitor->TraceWrappersWithManualWriteBarrier(context_element_.Get());
   }
 
@@ -107,6 +103,7 @@ class SVGAnimatedPropertyBase
   UntracedMember<SVGElement> context_element_;
 
   const QualifiedName& attribute_name_;
+  DISALLOW_COPY_AND_ASSIGN(SVGAnimatedPropertyBase);
 };
 
 template <typename Property>
@@ -147,7 +144,7 @@ class SVGAnimatedPropertyCommon : public SVGAnimatedPropertyBase {
     SVGAnimatedPropertyBase::AnimationEnded();
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(base_value_);
     visitor->Trace(current_value_);
     SVGAnimatedPropertyBase::Trace(visitor);
@@ -279,7 +276,7 @@ class SVGAnimatedProperty<Property, TearOffType, void>
     return anim_val_tear_off_;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(base_val_tear_off_);
     visitor->Trace(anim_val_tear_off_);
     SVGAnimatedPropertyCommon<Property>::Trace(visitor);

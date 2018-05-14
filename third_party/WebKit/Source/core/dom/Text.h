@@ -69,7 +69,7 @@ class CORE_EXPORT Text : public CharacterData {
   bool CanContainRangeEndPoint() const final { return true; }
   NodeType getNodeType() const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   Text(TreeScope& tree_scope, const String& data, ConstructionType type)
@@ -77,14 +77,14 @@ class CORE_EXPORT Text : public CharacterData {
 
  private:
   String nodeName() const override;
-  Node* cloneNode(bool deep, ExceptionState&) final;
+  Node* Clone(Document&, CloneChildrenFlag) const override;
 
   bool IsTextNode() const =
       delete;  // This will catch anyone doing an unnecessary check.
 
   bool NeedsWhitespaceLayoutObject();
 
-  virtual Text* CloneWithData(const String&);
+  virtual Text* CloneWithData(Document&, const String&) const;
 };
 
 DEFINE_NODE_TYPE_CASTS(Text, IsTextNode());

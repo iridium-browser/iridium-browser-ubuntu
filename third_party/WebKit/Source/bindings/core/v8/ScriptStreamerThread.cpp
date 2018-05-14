@@ -5,21 +5,20 @@
 #include "bindings/core/v8/ScriptStreamerThread.h"
 
 #include <memory>
+#include "base/location.h"
 #include "bindings/core/v8/ScriptStreamer.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 
-static ScriptStreamerThread* g_shared_thread = 0;
+static ScriptStreamerThread* g_shared_thread = nullptr;
 // Guards s_sharedThread. s_sharedThread is initialized and deleted in the main
 // thread, but also used by the streamer thread. Races can occur during
 // shutdown.
-static Mutex* g_mutex = 0;
+static Mutex* g_mutex = nullptr;
 
 void ScriptStreamerThread::Init() {
   DCHECK(!g_shared_thread);
@@ -34,13 +33,13 @@ ScriptStreamerThread* ScriptStreamerThread::Shared() {
   return g_shared_thread;
 }
 
-void ScriptStreamerThread::PostTask(std::unique_ptr<CrossThreadClosure> task) {
+void ScriptStreamerThread::PostTask(CrossThreadClosure task) {
   DCHECK(IsMainThread());
   MutexLocker locker(mutex_);
   DCHECK(!running_task_);
   running_task_ = true;
-  PlatformThread().GetWebTaskRunner()->PostTask(BLINK_FROM_HERE,
-                                                std::move(task));
+  PostCrossThreadTask(*PlatformThread().GetTaskRunner(), FROM_HERE,
+                      std::move(task));
 }
 
 void ScriptStreamerThread::TaskDone() {
@@ -51,7 +50,8 @@ void ScriptStreamerThread::TaskDone() {
 
 WebThread& ScriptStreamerThread::PlatformThread() {
   if (!IsRunning()) {
-    thread_ = Platform::Current()->CreateThread("ScriptStreamerThread");
+    thread_ = Platform::Current()->CreateThread(
+        WebThreadCreationParams(WebThreadType::kScriptStreamerThread));
   }
   return *thread_;
 }

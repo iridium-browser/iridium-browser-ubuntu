@@ -8,12 +8,15 @@
 #import <EarlGrey/EarlGrey.h>
 #import <XCTest/XCTest.h>
 
-#include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #import "ios/web_view/shell/shell_view_controller.h"
 #import "ios/web_view/shell/test/earl_grey/web_view_shell_matchers.h"
 #import "ios/web_view/test/web_view_test_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -64,7 +67,7 @@ void WaitForWebViewContainingText(NSString* text) {
 - (void)setUp {
   [super setUp];
 
-  _testServer = base::MakeUnique<net::EmbeddedTestServer>(
+  _testServer = std::make_unique<net::EmbeddedTestServer>(
       net::test_server::EmbeddedTestServer::TYPE_HTTP);
   _testServer->ServeFilesFromSourceDirectory(
       base::FilePath(FILE_PATH_LITERAL("ios/testing/data/http_server_files/")));

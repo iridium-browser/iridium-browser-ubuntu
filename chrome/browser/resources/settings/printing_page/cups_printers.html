@@ -46,13 +46,22 @@
         width: 350px;
       }
 
+      #noSearchResultsMessage {
+        color: var(--md-loading-message-color);
+        font-size: 16px;
+        font-weight: 500;
+        margin-top: 80px;
+        text-align: center;
+      }
+
       #addPrinterErrorMessage {
         display: flex;
         justify-content: space-around;
       }
 
-      #addPrinterErrorMessage a[is='action-link'] {
-        text-transform: uppercase;
+      #addPrinterFailedMessage {
+        padding: 0 15px;
+        text-align: justify;
       }
     </style>
 
@@ -67,7 +76,7 @@
         </div>
       </div>
       <paper-button class="primary-button" id="addPrinter"
-          on-tap="onAddPrinterTap_" disabled="[[!canAddPrinter_]]">
+          on-click="onAddPrinterTap_" disabled="[[!canAddPrinter_]]">
         $i18n{addCupsPrinter}
       </paper-button>
     </div>
@@ -87,15 +96,19 @@
         search-term="[[searchTerm]]">
     </settings-cups-printers-list>
 
+    <div id="noSearchResultsMessage"
+        hidden="[[!showNoSearchResultsMessage_(searchTerm)]]">
+      $i18n{noSearchResults}
+    </div>
+
     <div id="message">
       <div class="center" id="addPrinterDoneMessage" hidden>
         $i18n{printerAddedSuccessfulMessage}
       </div>
       <div class="center" id="addPrinterErrorMessage" hidden>
-        <span>$i18n{printerAddedFailedMessage}</span>
-        <a is="action-link" on-tap="onAddPrinterTap_">
-          $i18n{printerAddedTryAgainMessage}
-        </a>
+        <span id="addPrinterFailedMessage">
+          $i18n{printerAddedFailedMessage}
+        </span>
       </div>
     </div>
   </template>

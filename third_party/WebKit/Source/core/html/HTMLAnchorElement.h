@@ -25,9 +25,10 @@
 #define HTMLAnchorElement_h
 
 #include "core/CoreExport.h"
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/html/HTMLElement.h"
+#include "core/html/RelList.h"
+#include "core/html_names.h"
 #include "core/url/DOMURLUtils.h"
 #include "platform/LinkHash.h"
 
@@ -82,11 +83,17 @@ class CORE_EXPORT HTMLAnchorElement : public HTMLElement, public DOMURLUtils {
 
   bool HasRel(uint32_t relation) const;
   void SetRel(const AtomicString&);
+  DOMTokenList& relList() const {
+    return static_cast<DOMTokenList&>(*rel_list_);
+  }
 
   LinkHash VisitedLinkHash() const;
   void InvalidateCachedVisitedLinkHash() { cached_visited_link_hash_ = 0; }
 
   void SendPings(const KURL& destination_url) const;
+
+  void Trace(blink::Visitor*) override;
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  protected:
   HTMLAnchorElement(const QualifiedName&, Document&);
@@ -120,9 +127,10 @@ class CORE_EXPORT HTMLAnchorElement : public HTMLElement, public DOMURLUtils {
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void HandleClick(Event*);
 
-  uint32_t link_relations_;
+  unsigned link_relations_ : 31;
+  unsigned was_focused_by_mouse_ : 1;
   mutable LinkHash cached_visited_link_hash_;
-  bool was_focused_by_mouse_;
+  TraceWrapperMember<RelList> rel_list_;
 };
 
 inline LinkHash HTMLAnchorElement::VisitedLinkHash() const {

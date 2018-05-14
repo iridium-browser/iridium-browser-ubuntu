@@ -66,6 +66,7 @@ void ShowConflicts(Browser* browser);
 void ShowFeedbackPage(Browser* browser,
                       FeedbackSource source,
                       const std::string& description_template,
+                      const std::string& description_placeholder_text,
                       const std::string& category_tag,
                       const std::string& extra_diagnostics);
 
@@ -77,9 +78,6 @@ void ShowSlow(Browser* browser);
 
 // Constructs a settings GURL for the specified |sub_page|.
 GURL GetSettingsUrl(const std::string& sub_page);
-
-// Returns true if |url| is the URL for the settings subpage |sub_page|.
-bool IsSettingsSubPage(const GURL& url, const std::string& sub_page);
 
 // Returns true if |browser| is a trusted popup window containing a page with
 // matching |scheme| (or any trusted popup if |scheme| is empty).
@@ -94,9 +92,13 @@ void ShowSettingsSubPageForProfile(Profile* profile,
                                    const std::string& sub_page);
 void ShowContentSettingsExceptions(Browser* browser,
                                    ContentSettingsType content_settings_type);
-void ShowContentSettingsExceptionsInWindow(
+void ShowContentSettingsExceptionsForProfile(
     Profile* profile,
     ContentSettingsType content_settings_type);
+
+void ShowSiteSettings(Profile* profile, const GURL& url);
+void ShowSiteSettings(Browser* browser, const GURL& url);
+
 void ShowContentSettings(Browser* browser,
                          ContentSettingsType content_settings_type);
 void ShowSettingsSubPageInTabbedBrowser(Browser* browser,

@@ -4,12 +4,14 @@
 
 #include "core/frame/WebFrameWidgetBase.h"
 
+#include "core/dom/Element.h"
 #include "core/dom/UserGestureIndicator.h"
 #include "core/events/WebInputEventConversion.h"
-#include "core/exported/WebViewBase.h"
+#include "core/events/WheelEvent.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/VisualViewport.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "core/input/ContextMenuAllowedScope.h"
 #include "core/input/EventHandler.h"
 #include "core/page/ContextMenuController.h"
@@ -20,7 +22,11 @@
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/page/PointerLockController.h"
+#include "platform/exported/WebActiveGestureAnimation.h"
 #include "platform/wtf/Assertions.h"
+#include "public/platform/Platform.h"
+#include "public/platform/WebGestureCurve.h"
+#include "public/web/WebLocalFrame.h"
 #include "public/web/WebWidgetClient.h"
 
 namespace blink {
@@ -30,7 +36,7 @@ namespace {
 // Helper to get LocalFrame* from WebLocalFrame*.
 // TODO(dcheng): This should be moved into WebLocalFrame.
 LocalFrame* ToCoreFrame(WebLocalFrame* frame) {
-  return ToWebLocalFrameBase(frame)->GetFrame();
+  return ToWebLocalFrameImpl(frame)->GetFrame();
 }
 
 }  // namespace
@@ -48,10 +54,16 @@ STATIC_ASSERT_ENUM(kDragOperationEvery, kWebDragOperationEvery);
 
 bool WebFrameWidgetBase::ignore_input_events_ = false;
 
+WebFrameWidgetBase::WebFrameWidgetBase()
+    : fling_modifier_(0),
+      fling_source_device_(kWebGestureDeviceUninitialized) {}
+
+WebFrameWidgetBase::~WebFrameWidgetBase() = default;
+
 WebDragOperation WebFrameWidgetBase::DragTargetDragEnter(
     const WebDragData& web_drag_data,
-    const WebPoint& point_in_viewport,
-    const WebPoint& screen_point,
+    const WebFloatPoint& point_in_viewport,
+    const WebFloatPoint& screen_point,
     WebDragOperationsMask operations_allowed,
     int modifiers) {
   DCHECK(!current_drag_data_);
@@ -64,8 +76,8 @@ WebDragOperation WebFrameWidgetBase::DragTargetDragEnter(
 }
 
 WebDragOperation WebFrameWidgetBase::DragTargetDragOver(
-    const WebPoint& point_in_viewport,
-    const WebPoint& screen_point,
+    const WebFloatPoint& point_in_viewport,
+    const WebFloatPoint& screen_point,
     WebDragOperationsMask operations_allowed,
     int modifiers) {
   operations_allowed_ = operations_allowed;
@@ -74,8 +86,9 @@ WebDragOperation WebFrameWidgetBase::DragTargetDragOver(
                                    modifiers);
 }
 
-void WebFrameWidgetBase::DragTargetDragLeave(const WebPoint& point_in_viewport,
-                                             const WebPoint& screen_point) {
+void WebFrameWidgetBase::DragTargetDragLeave(
+    const WebFloatPoint& point_in_viewport,
+    const WebFloatPoint& screen_point) {
   DCHECK(current_drag_data_);
 
   // TODO(paulmeyer): It shouldn't be possible for |m_currentDragData| to be
@@ -88,7 +101,7 @@ void WebFrameWidgetBase::DragTargetDragLeave(const WebPoint& point_in_viewport,
     return;
   }
 
-  WebPoint point_in_root_frame(ViewportToRootFrame(point_in_viewport));
+  WebFloatPoint point_in_root_frame(ViewportToRootFrame(point_in_viewport));
   DragData drag_data(current_drag_data_.Get(), point_in_root_frame,
                      screen_point,
                      static_cast<DragOperation>(operations_allowed_));
@@ -103,10 +116,10 @@ void WebFrameWidgetBase::DragTargetDragLeave(const WebPoint& point_in_viewport,
 }
 
 void WebFrameWidgetBase::DragTargetDrop(const WebDragData& web_drag_data,
-                                        const WebPoint& point_in_viewport,
-                                        const WebPoint& screen_point,
+                                        const WebFloatPoint& point_in_viewport,
+                                        const WebFloatPoint& screen_point,
                                         int modifiers) {
-  WebPoint point_in_root_frame(ViewportToRootFrame(point_in_viewport));
+  WebFloatPoint point_in_root_frame(ViewportToRootFrame(point_in_viewport));
 
   DCHECK(current_drag_data_);
   current_drag_data_ = DataObject::Create(web_drag_data);
@@ -137,9 +150,16 @@ void WebFrameWidgetBase::DragTargetDrop(const WebDragData& web_drag_data,
   current_drag_data_ = nullptr;
 }
 
-void WebFrameWidgetBase::DragSourceEndedAt(const WebPoint& point_in_viewport,
-                                           const WebPoint& screen_point,
-                                           WebDragOperation operation) {
+void WebFrameWidgetBase::DragSourceEndedAt(
+    const WebFloatPoint& point_in_viewport,
+    const WebFloatPoint& screen_point,
+    WebDragOperation operation) {
+  if (!LocalRoot()) {
+    // We should figure out why |local_root_| could be nullptr
+    // (https://crbug.com/792345).
+    return;
+  }
+
   if (IgnoreInputEvents()) {
     CancelDrag();
     return;
@@ -147,11 +167,10 @@ void WebFrameWidgetBase::DragSourceEndedAt(const WebPoint& point_in_viewport,
   WebFloatPoint point_in_root_frame(
       GetPage()->GetVisualViewport().ViewportToRootFrame(point_in_viewport));
 
-  WebMouseEvent fake_mouse_move(WebInputEvent::kMouseMove, point_in_root_frame,
-                                WebFloatPoint(screen_point.x, screen_point.y),
-                                WebPointerProperties::Button::kLeft, 0,
-                                WebInputEvent::kNoModifiers,
-                                TimeTicks::Now().InSeconds());
+  WebMouseEvent fake_mouse_move(
+      WebInputEvent::kMouseMove, point_in_root_frame, screen_point,
+      WebPointerProperties::Button::kLeft, 0, WebInputEvent::kNoModifiers,
+      CurrentTimeTicksInSeconds());
   fake_mouse_move.SetFrameScale(1);
   ToCoreFrame(LocalRoot())
       ->GetEventHandler()
@@ -182,8 +201,8 @@ void WebFrameWidgetBase::StartDragging(WebReferrerPolicy policy,
 }
 
 WebDragOperation WebFrameWidgetBase::DragTargetDragEnterOrOver(
-    const WebPoint& point_in_viewport,
-    const WebPoint& screen_point,
+    const WebFloatPoint& point_in_viewport,
+    const WebFloatPoint& screen_point,
     DragAction drag_action,
     int modifiers) {
   DCHECK(current_drag_data_);
@@ -197,7 +216,7 @@ WebDragOperation WebFrameWidgetBase::DragTargetDragEnterOrOver(
     return kWebDragOperationNone;
   }
 
-  WebPoint point_in_root_frame(ViewportToRootFrame(point_in_viewport));
+  WebFloatPoint point_in_root_frame(ViewportToRootFrame(point_in_viewport));
 
   current_drag_data_->SetModifiers(modifiers);
   DragData drag_data(current_drag_data_.Get(), point_in_root_frame,
@@ -220,13 +239,13 @@ WebDragOperation WebFrameWidgetBase::DragTargetDragEnterOrOver(
   return drag_operation_;
 }
 
-WebPoint WebFrameWidgetBase::ViewportToRootFrame(
-    const WebPoint& point_in_viewport) const {
+WebFloatPoint WebFrameWidgetBase::ViewportToRootFrame(
+    const WebFloatPoint& point_in_viewport) const {
   return GetPage()->GetVisualViewport().ViewportToRootFrame(point_in_viewport);
 }
 
-WebViewBase* WebFrameWidgetBase::View() const {
-  return ToWebLocalFrameBase(LocalRoot())->ViewImpl();
+WebViewImpl* WebFrameWidgetBase::View() const {
+  return ToWebLocalFrameImpl(LocalRoot())->ViewImpl();
 }
 
 Page* WebFrameWidgetBase::GetPage() const {
@@ -247,17 +266,23 @@ void WebFrameWidgetBase::DidNotAcquirePointerLock() {
 }
 
 void WebFrameWidgetBase::DidLosePointerLock() {
-  pointer_lock_gesture_token_.Clear();
+  pointer_lock_gesture_token_ = nullptr;
   GetPage()->GetPointerLockController().DidLosePointerLock();
 }
 
 void WebFrameWidgetBase::RequestDecode(
     const PaintImage& image,
-    std::unique_ptr<WTF::Function<void(bool)>> callback) {
-  View()->RequestDecode(image, std::move(callback));
+    base::OnceCallback<void(bool)> callback) {
+  // If we have a LayerTreeView, propagate the request, otherwise fail it since
+  // otherwise it would remain in a unresolved and unrejected state.
+  if (WebLayerTreeView* layer_tree_view = GetLayerTreeView()) {
+    layer_tree_view->RequestDecode(image, std::move(callback));
+  } else {
+    std::move(callback).Run(false);
+  }
 }
 
-DEFINE_TRACE(WebFrameWidgetBase) {
+void WebFrameWidgetBase::Trace(blink::Visitor* visitor) {
   visitor->Trace(current_drag_data_);
 }
 
@@ -269,7 +294,7 @@ void WebFrameWidgetBase::PointerLockMouseEvent(
   const WebMouseEvent& mouse_event =
       static_cast<const WebMouseEvent&>(input_event);
   WebMouseEvent transformed_event = TransformWebMouseEvent(
-      ToWebLocalFrameBase(LocalRoot())->GetFrameView(), mouse_event);
+      ToWebLocalFrameImpl(LocalRoot())->GetFrameView(), mouse_event);
 
   LocalFrame* focusedFrame = FocusedLocalFrameInWidget();
   if (focusedFrame) {
@@ -284,12 +309,13 @@ void WebFrameWidgetBase::PointerLockMouseEvent(
       event_type = EventTypeNames::mousedown;
       if (!GetPage() || !GetPage()->GetPointerLockController().GetElement())
         break;
-      gesture_indicator = WTF::WrapUnique(new UserGestureIndicator(
-          UserGestureToken::Create(&GetPage()
-                                        ->GetPointerLockController()
-                                        .GetElement()
-                                        ->GetDocument(),
-                                   UserGestureToken::kNewGesture)));
+      gesture_indicator =
+          Frame::NotifyUserActivation(GetPage()
+                                          ->GetPointerLockController()
+                                          .GetElement()
+                                          ->GetDocument()
+                                          .GetFrame(),
+                                      UserGestureToken::kNewGesture);
       pointer_lock_gesture_token_ = gesture_indicator->CurrentToken();
       break;
     case WebInputEvent::kMouseUp:
@@ -326,10 +352,197 @@ void WebFrameWidgetBase::ShowContextMenu(WebMenuSourceType source_type) {
 }
 
 LocalFrame* WebFrameWidgetBase::FocusedLocalFrameInWidget() const {
+  if (!LocalRoot()) {
+    // WebFrameWidget is created in the call to CreateFrame. The corresponding
+    // RenderWidget, however, might not swap in right away (InstallNewDocument()
+    // will lead to it swapping in). During this interval LocalRoot() is nullptr
+    // (see https://crbug.com/792345).
+    return nullptr;
+  }
+
   LocalFrame* frame = GetPage()->GetFocusController().FocusedFrame();
   return (frame && frame->LocalFrameRoot() == ToCoreFrame(LocalRoot()))
              ? frame
              : nullptr;
+}
+
+bool WebFrameWidgetBase::EndActiveFlingAnimation() {
+  if (gesture_animation_) {
+    gesture_animation_.reset();
+    fling_source_device_ = kWebGestureDeviceUninitialized;
+    if (WebLayerTreeView* layer_tree_view = GetLayerTreeView())
+      layer_tree_view->DidStopFlinging();
+    return true;
+  }
+  return false;
+}
+
+bool WebFrameWidgetBase::ScrollBy(const WebFloatSize& delta,
+                                  const WebFloatSize& velocity) {
+  DCHECK_NE(fling_source_device_, kWebGestureDeviceUninitialized);
+
+  if (fling_source_device_ == kWebGestureDeviceTouchpad) {
+    bool enable_touchpad_scroll_latching =
+        RuntimeEnabledFeatures::TouchpadAndWheelScrollLatchingEnabled();
+    WebMouseWheelEvent synthetic_wheel(WebInputEvent::kMouseWheel,
+                                       fling_modifier_,
+                                       WTF::CurrentTimeTicksInSeconds());
+    const float kTickDivisor = WheelEvent::kTickMultiplier;
+
+    synthetic_wheel.delta_x = delta.width;
+    synthetic_wheel.delta_y = delta.height;
+    synthetic_wheel.wheel_ticks_x = delta.width / kTickDivisor;
+    synthetic_wheel.wheel_ticks_y = delta.height / kTickDivisor;
+    synthetic_wheel.has_precise_scrolling_deltas = true;
+    synthetic_wheel.phase = WebMouseWheelEvent::kPhaseChanged;
+    synthetic_wheel.SetPositionInWidget(position_on_fling_start_.x,
+                                        position_on_fling_start_.y);
+    synthetic_wheel.SetPositionInScreen(global_position_on_fling_start_.x,
+                                        global_position_on_fling_start_.y);
+
+    // TODO(wjmaclean): Is LocalRoot() the right frame to use here?
+    if (GetPageWidgetEventHandler()->HandleMouseWheel(*ToCoreFrame(LocalRoot()),
+                                                      synthetic_wheel) !=
+        WebInputEventResult::kNotHandled) {
+      return true;
+    }
+
+    if (!enable_touchpad_scroll_latching) {
+      WebGestureEvent synthetic_scroll_begin =
+          CreateGestureScrollEventFromFling(WebInputEvent::kGestureScrollBegin,
+                                            kWebGestureDeviceTouchpad);
+      synthetic_scroll_begin.data.scroll_begin.delta_x_hint = delta.width;
+      synthetic_scroll_begin.data.scroll_begin.delta_y_hint = delta.height;
+      synthetic_scroll_begin.data.scroll_begin.inertial_phase =
+          WebGestureEvent::kMomentumPhase;
+      GetPageWidgetEventHandler()->HandleGestureEvent(synthetic_scroll_begin);
+    }
+
+    WebGestureEvent synthetic_scroll_update = CreateGestureScrollEventFromFling(
+        WebInputEvent::kGestureScrollUpdate, kWebGestureDeviceTouchpad);
+    synthetic_scroll_update.data.scroll_update.delta_x = delta.width;
+    synthetic_scroll_update.data.scroll_update.delta_y = delta.height;
+    synthetic_scroll_update.data.scroll_update.velocity_x = velocity.width;
+    synthetic_scroll_update.data.scroll_update.velocity_y = velocity.height;
+    synthetic_scroll_update.data.scroll_update.inertial_phase =
+        WebGestureEvent::kMomentumPhase;
+    bool scroll_update_handled =
+        GetPageWidgetEventHandler()->HandleGestureEvent(
+            synthetic_scroll_update) != WebInputEventResult::kNotHandled;
+
+    if (!enable_touchpad_scroll_latching) {
+      WebGestureEvent synthetic_scroll_end = CreateGestureScrollEventFromFling(
+          WebInputEvent::kGestureScrollEnd, kWebGestureDeviceTouchpad);
+      synthetic_scroll_end.data.scroll_end.inertial_phase =
+          WebGestureEvent::kMomentumPhase;
+      GetPageWidgetEventHandler()->HandleGestureEvent(synthetic_scroll_end);
+    }
+
+    return scroll_update_handled;
+  }
+
+  WebGestureEvent synthetic_gesture_event = CreateGestureScrollEventFromFling(
+      WebInputEvent::kGestureScrollUpdate, fling_source_device_);
+  synthetic_gesture_event.data.scroll_update.delta_x = delta.width;
+  synthetic_gesture_event.data.scroll_update.delta_y = delta.height;
+  synthetic_gesture_event.data.scroll_update.velocity_x = velocity.width;
+  synthetic_gesture_event.data.scroll_update.velocity_y = velocity.height;
+  synthetic_gesture_event.data.scroll_update.inertial_phase =
+      WebGestureEvent::kMomentumPhase;
+
+  return GetPageWidgetEventHandler()->HandleGestureEvent(
+             synthetic_gesture_event) != WebInputEventResult::kNotHandled;
+}
+
+WebInputEventResult WebFrameWidgetBase::HandleGestureFlingEvent(
+    const WebGestureEvent& event) {
+  WebInputEventResult event_result = WebInputEventResult::kNotHandled;
+  switch (event.GetType()) {
+    case WebInputEvent::kGestureFlingStart: {
+      if (event.source_device != kWebGestureDeviceSyntheticAutoscroll)
+        EndActiveFlingAnimation();
+      position_on_fling_start_ = WebPoint(event.x, event.y);
+      global_position_on_fling_start_ =
+          WebPoint(event.global_x, event.global_y);
+      fling_modifier_ = event.GetModifiers();
+      fling_source_device_ = event.source_device;
+      DCHECK_NE(fling_source_device_, kWebGestureDeviceUninitialized);
+      std::unique_ptr<WebGestureCurve> fling_curve =
+          Platform::Current()->CreateFlingAnimationCurve(
+              event.source_device,
+              WebFloatPoint(event.data.fling_start.velocity_x,
+                            event.data.fling_start.velocity_y),
+              WebSize());
+      DCHECK(fling_curve);
+      gesture_animation_ = WebActiveGestureAnimation::CreateWithTimeOffset(
+          std::move(fling_curve), this, event.TimeStampSeconds());
+      ScheduleAnimation();
+
+      WebGestureEvent scaled_event =
+          TransformWebGestureEvent(ToCoreFrame(LocalRoot())->View(), event);
+      // Plugins may need to see GestureFlingStart to balance
+      // GestureScrollBegin (since the former replaces GestureScrollEnd when
+      // transitioning to a fling).
+      // TODO(dtapuska): Why isn't the response used?
+      ToCoreFrame(LocalRoot())
+          ->GetEventHandler()
+          .HandleGestureScrollEvent(scaled_event);
+
+      event_result = WebInputEventResult::kHandledSystem;
+      break;
+    }
+    case WebInputEvent::kGestureFlingCancel:
+      if (EndActiveFlingAnimation())
+        event_result = WebInputEventResult::kHandledSuppressed;
+
+      break;
+    default:
+      NOTREACHED();
+  }
+  return event_result;
+}
+
+WebLocalFrame* WebFrameWidgetBase::FocusedWebLocalFrameInWidget() const {
+  return WebLocalFrameImpl::FromFrame(FocusedLocalFrameInWidget());
+}
+
+WebGestureEvent WebFrameWidgetBase::CreateGestureScrollEventFromFling(
+    WebInputEvent::Type type,
+    WebGestureDevice source_device) const {
+  WebGestureEvent gesture_event(type, fling_modifier_,
+                                WTF::CurrentTimeTicksInSeconds());
+  gesture_event.source_device = source_device;
+  gesture_event.x = position_on_fling_start_.x;
+  gesture_event.y = position_on_fling_start_.y;
+  gesture_event.global_x = global_position_on_fling_start_.x;
+  gesture_event.global_y = global_position_on_fling_start_.y;
+  return gesture_event;
+}
+
+bool WebFrameWidgetBase::IsFlinging() const {
+  return !!gesture_animation_;
+}
+
+void WebFrameWidgetBase::UpdateGestureAnimation(
+    double last_frame_time_monotonic) {
+  if (!gesture_animation_)
+    return;
+
+  if (gesture_animation_->Animate(last_frame_time_monotonic)) {
+    ScheduleAnimation();
+  } else {
+    DCHECK_NE(fling_source_device_, kWebGestureDeviceUninitialized);
+    WebGestureDevice last_fling_source_device = fling_source_device_;
+    EndActiveFlingAnimation();
+
+    if (last_fling_source_device != kWebGestureDeviceSyntheticAutoscroll) {
+      WebGestureEvent end_scroll_event = CreateGestureScrollEventFromFling(
+          WebInputEvent::kGestureScrollEnd, last_fling_source_device);
+      ToCoreFrame(LocalRoot())
+          ->GetEventHandler()
+          .HandleGestureScrollEnd(end_scroll_event);
+    }
+  }
 }
 
 }  // namespace blink

@@ -53,7 +53,7 @@ RTCPeerConnectionIceEvent::RTCPeerConnectionIceEvent(
     const RTCPeerConnectionIceEventInit& initializer)
     : Event(type, initializer), candidate_(initializer.candidate()) {}
 
-RTCPeerConnectionIceEvent::~RTCPeerConnectionIceEvent() {}
+RTCPeerConnectionIceEvent::~RTCPeerConnectionIceEvent() = default;
 
 RTCIceCandidate* RTCPeerConnectionIceEvent::candidate() const {
   return candidate_.Get();
@@ -63,7 +63,7 @@ const AtomicString& RTCPeerConnectionIceEvent::InterfaceName() const {
   return EventNames::RTCPeerConnectionIceEvent;
 }
 
-DEFINE_TRACE(RTCPeerConnectionIceEvent) {
+void RTCPeerConnectionIceEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(candidate_);
   Event::Trace(visitor);
 }

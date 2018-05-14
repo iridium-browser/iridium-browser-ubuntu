@@ -25,13 +25,13 @@ login.createScreen('NetworkScreen', 'connect', function() {
 
     /** @override */
     decorate: function() {
-      Oobe.setupSelect(
+      setupSelect(
           $('language-select'), loadTimeData.getValue('languageList'),
           this.onLanguageSelected_.bind(this));
-      Oobe.setupSelect(
+      setupSelect(
           $('keyboard-select'), loadTimeData.getValue('inputMethodsList'),
           this.onKeyboardSelected_.bind(this));
-      Oobe.setupSelect(
+      setupSelect(
           $('timezone-select'), loadTimeData.getValue('timezoneList'),
           this.onTimezoneSelected_.bind(this));
 
@@ -173,6 +173,21 @@ login.createScreen('NetworkScreen', 'connect', function() {
     updateLocalizedContent: function() {
       this.setMDMode_();
       $('oobe-welcome-md').updateLocalizedContent();
+    },
+
+    /**
+     * Updates "device in tablet mode" state when tablet mode is changed.
+     * @param {Boolean} isInTabletMode True when in tablet mode.
+     */
+    setTabletModeState: function(isInTabletMode) {
+      $('oobe-welcome-md').setTabletModeState(isInTabletMode);
+    },
+
+    /**
+     * Window-resize event listener (delivered through the display_manager).
+     */
+    onWindowResize: function() {
+      $('oobe-welcome-md').onWindowResize();
     },
 
     /**

@@ -4,12 +4,11 @@
 
 #include "net/reporting/reporting_service.h"
 
-#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -18,7 +17,7 @@
 #include "net/reporting/reporting_context.h"
 #include "net/reporting/reporting_delegate.h"
 #include "net/reporting/reporting_header_parser.h"
-#include "net/reporting/reporting_persister.h"
+#include "net/reporting/reporting_uploader.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -28,15 +27,20 @@ namespace {
 class ReportingServiceImpl : public ReportingService {
  public:
   ReportingServiceImpl(std::unique_ptr<ReportingContext> context)
-      : context_(std::move(context)) {}
+      : context_(std::move(context)), weak_factory_(this) {}
 
-  ~ReportingServiceImpl() override {}
+  // ReportingService implementation:
+
+  ~ReportingServiceImpl() override = default;
 
   void QueueReport(const GURL& url,
                    const std::string& group,
                    const std::string& type,
                    std::unique_ptr<const base::Value> body) override {
-    if (!context_->delegate()->CanQueueReport(url::Origin(url)))
+    DCHECK(context_);
+    DCHECK(context_->delegate());
+
+    if (!context_->delegate()->CanQueueReport(url::Origin::Create(url)))
       return;
 
     context_->cache()->AddReport(url, group, type, std::move(body),
@@ -45,38 +49,56 @@ class ReportingServiceImpl : public ReportingService {
 
   void ProcessHeader(const GURL& url,
                      const std::string& header_value) override {
-    ReportingHeaderParser::ParseHeader(context_.get(), url, header_value);
+    context_->delegate()->ParseJson(
+        "[" + header_value + "]",
+        base::BindRepeating(&ReportingServiceImpl::ProcessHeaderValue,
+                            weak_factory_.GetWeakPtr(), url),
+        base::BindRepeating(
+            &ReportingHeaderParser::RecordHeaderDiscardedForInvalidJson));
   }
 
-  void RemoveBrowsingData(
-      int data_type_mask,
-      base::Callback<bool(const GURL&)> origin_filter) override {
+  void RemoveBrowsingData(int data_type_mask,
+                          const base::RepeatingCallback<bool(const GURL&)>&
+                              origin_filter) override {
     ReportingBrowsingDataRemover::RemoveBrowsingData(
         context_->cache(), data_type_mask, origin_filter);
   }
 
+  bool RequestIsUpload(const URLRequest& request) override {
+    return context_->uploader()->RequestIsUpload(request);
+  }
+
+  const ReportingPolicy& GetPolicy() const override {
+    return context_->policy();
+  }
+
  private:
+  void ProcessHeaderValue(const GURL& url, std::unique_ptr<base::Value> value) {
+    ReportingHeaderParser::ParseHeader(context_.get(), url, std::move(value));
+  }
+
   std::unique_ptr<ReportingContext> context_;
+  base::WeakPtrFactory<ReportingServiceImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ReportingServiceImpl);
 };
 
 }  // namespace
 
-ReportingService::~ReportingService() {}
+ReportingService::~ReportingService() = default;
 
 // static
 std::unique_ptr<ReportingService> ReportingService::Create(
     const ReportingPolicy& policy,
     URLRequestContext* request_context) {
-  return base::MakeUnique<ReportingServiceImpl>(
+  return std::make_unique<ReportingServiceImpl>(
       ReportingContext::Create(policy, request_context));
 }
 
 // static
 std::unique_ptr<ReportingService> ReportingService::CreateForTesting(
     std::unique_ptr<ReportingContext> reporting_context) {
-  return base::MakeUnique<ReportingServiceImpl>(std::move(reporting_context));
+  return std::make_unique<ReportingServiceImpl>(std::move(reporting_context));
 }
 
 }  // namespace net

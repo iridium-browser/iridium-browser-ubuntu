@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -86,9 +87,9 @@ class _PuppetRunSummary(object):
   @property
   def times(self):
     """Return mapping of time information."""
-    times = self._data.get('time', {})
+    times = self._data.get('time', {}).copy()
     times.pop('last_run', None)
-    total = times.pop('total', None)
+    total = times.pop('total', 0)
     times['other'] = max(0, total - sum(times.itervalues()))
     return times
 

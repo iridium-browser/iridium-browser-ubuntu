@@ -45,7 +45,7 @@ SVGTransformListTearOff::SVGTransformListTearOff(
           property_is_anim_val,
           attribute_name) {}
 
-SVGTransformListTearOff::~SVGTransformListTearOff() {}
+SVGTransformListTearOff::~SVGTransformListTearOff() = default;
 
 SVGTransformTearOff* SVGTransformListTearOff::createSVGTransformFromMatrix(
     SVGMatrixTearOff* matrix) const {
@@ -59,12 +59,6 @@ SVGTransformTearOff* SVGTransformListTearOff::consolidate(
     return nullptr;
   }
   return CreateItemTearOff(Target()->Consolidate());
-}
-
-DEFINE_TRACE_WRAPPERS(SVGTransformListTearOff) {
-  SVGListPropertyTearOffHelper<SVGTransformListTearOff,
-                               SVGTransformList>::TraceWrappers(visitor);
-  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

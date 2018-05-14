@@ -21,7 +21,7 @@ SharedBitmapAllocationNotifierImpl::~SharedBitmapAllocationNotifierImpl() {
 }
 
 void SharedBitmapAllocationNotifierImpl::Bind(
-    cc::mojom::SharedBitmapAllocationNotifierRequest request) {
+    mojom::SharedBitmapAllocationNotifierRequest request) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (binding_.is_bound()) {
     DLOG(ERROR) << "Only one SharedBitmapAllocationNotifierRequest is "
@@ -35,15 +35,10 @@ void SharedBitmapAllocationNotifierImpl::DidAllocateSharedBitmap(
     mojo::ScopedSharedBufferHandle buffer,
     const SharedBitmapId& id) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  base::SharedMemoryHandle memory_handle;
-  size_t size;
-  MojoResult result = mojo::UnwrapSharedMemoryHandle(
-      std::move(buffer), &memory_handle, &size, NULL);
-  DCHECK_EQ(result, MOJO_RESULT_OK);
-  this->ChildAllocatedSharedBitmap(size, memory_handle, id);
+  this->ChildAllocatedSharedBitmap(std::move(buffer), id);
   last_sequence_number_++;
   for (SharedBitmapAllocationObserver& observer : observers_)
-    observer.DidAllocateSharedBitmap(last_sequence_number_);
+    observer.OnSharedBitmapAllocatedByChild(last_sequence_number_);
 }
 
 void SharedBitmapAllocationNotifierImpl::DidDeleteSharedBitmap(
@@ -54,11 +49,10 @@ void SharedBitmapAllocationNotifierImpl::DidDeleteSharedBitmap(
 }
 
 void SharedBitmapAllocationNotifierImpl::ChildAllocatedSharedBitmap(
-    size_t buffer_size,
-    const base::SharedMemoryHandle& handle,
+    mojo::ScopedSharedBufferHandle buffer,
     const SharedBitmapId& id) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (manager_->ChildAllocatedSharedBitmap(buffer_size, handle, id))
+  if (manager_->ChildAllocatedSharedBitmap(std::move(buffer), id))
     owned_bitmaps_.insert(id);
 }
 

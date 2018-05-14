@@ -30,6 +30,10 @@ bool ShellSpecialStoragePolicy::IsStorageSessionOnly(const GURL& origin) {
   return false;
 }
 
+bool ShellSpecialStoragePolicy::ShouldDeleteCookieOnExit(const GURL& origin) {
+  return false;
+}
+
 bool ShellSpecialStoragePolicy::HasSessionOnlyOrigins() {
   return false;
 }

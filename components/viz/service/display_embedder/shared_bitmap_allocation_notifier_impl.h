@@ -9,21 +9,21 @@
 
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
-#include "cc/ipc/shared_bitmap_allocation_notifier.mojom.h"
 #include "components/viz/common/quads/shared_bitmap.h"
 #include "components/viz/service/viz_service_export.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "services/viz/public/interfaces/compositing/shared_bitmap_allocation_notifier.mojom.h"
 
 namespace viz {
 class ServerSharedBitmapManager;
 
 class SharedBitmapAllocationObserver {
  public:
-  virtual void DidAllocateSharedBitmap(uint32_t sequence_number) = 0;
+  virtual void OnSharedBitmapAllocatedByChild(uint32_t sequence_number) = 0;
 };
 
 class VIZ_SERVICE_EXPORT SharedBitmapAllocationNotifierImpl
-    : NON_EXPORTED_BASE(public cc::mojom::SharedBitmapAllocationNotifier) {
+    : public mojom::SharedBitmapAllocationNotifier {
  public:
   explicit SharedBitmapAllocationNotifierImpl(
       ServerSharedBitmapManager* manager);
@@ -33,15 +33,14 @@ class VIZ_SERVICE_EXPORT SharedBitmapAllocationNotifierImpl
   void AddObserver(SharedBitmapAllocationObserver* observer);
   void RemoveObserver(SharedBitmapAllocationObserver* observer);
 
-  void Bind(cc::mojom::SharedBitmapAllocationNotifierRequest request);
+  void Bind(mojom::SharedBitmapAllocationNotifierRequest request);
 
-  // cc::mojom::SharedBitmapAllocationNotifier overrides:
+  // mojom::SharedBitmapAllocationNotifier overrides:
   void DidAllocateSharedBitmap(mojo::ScopedSharedBufferHandle buffer,
                                const SharedBitmapId& id) override;
   void DidDeleteSharedBitmap(const SharedBitmapId& id) override;
 
-  void ChildAllocatedSharedBitmap(size_t buffer_size,
-                                  const base::SharedMemoryHandle& handle,
+  void ChildAllocatedSharedBitmap(mojo::ScopedSharedBufferHandle buffer,
                                   const SharedBitmapId& id);
 
   void ChildDied();
@@ -51,7 +50,7 @@ class VIZ_SERVICE_EXPORT SharedBitmapAllocationNotifierImpl
  private:
   THREAD_CHECKER(thread_checker_);
   ServerSharedBitmapManager* const manager_;
-  mojo::Binding<cc::mojom::SharedBitmapAllocationNotifier> binding_;
+  mojo::Binding<mojom::SharedBitmapAllocationNotifier> binding_;
   std::unordered_set<SharedBitmapId, SharedBitmapIdHash> owned_bitmaps_;
   base::ObserverList<SharedBitmapAllocationObserver> observers_;
   uint32_t last_sequence_number_ = 0;

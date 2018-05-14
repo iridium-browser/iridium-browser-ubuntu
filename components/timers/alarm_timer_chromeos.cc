@@ -8,13 +8,13 @@
 #include <sys/timerfd.h>
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/debug/task_annotator.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/pending_task.h"
 #include "base/trace_event/trace_event.h"
 
@@ -72,9 +72,9 @@ void AlarmTimer::Reset() {
   // Set up the pending task.
   base::Timer::set_desired_run_time(
       delay.is_zero() ? base::TimeTicks() : base::TimeTicks::Now() + delay);
-  pending_task_ = base::MakeUnique<base::PendingTask>(
+  pending_task_ = std::make_unique<base::PendingTask>(
       base::Timer::posted_from(), base::Timer::user_task(),
-      base::Timer::desired_run_time(), true /* nestable */);
+      base::Timer::desired_run_time());
 
   // Set |alarm_fd_| to be signaled when the delay expires. If the delay is
   // zero, |alarm_fd_| will never be signaled. This overrides the previous

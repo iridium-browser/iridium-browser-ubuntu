@@ -13,7 +13,6 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -21,13 +20,13 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/titled_url_match.h"
 #include "components/bookmarks/test/test_bookmark_client.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/mock_autocomplete_provider_client.h"
 #include "components/omnibox/browser/test_scheme_classifier.h"
 #include "components/omnibox/browser/titled_url_match_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 
 using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
@@ -95,8 +94,8 @@ std::string TestBookmarkPositionsAsString(
        i != positions.end(); ++i) {
     if (i != positions.begin())
       position_string += ", ";
-    position_string += "{" + base::SizeTToString(i->begin) + ", " +
-        base::SizeTToString(i->end) + "}";
+    position_string += "{" + base::NumberToString(i->begin) + ", " +
+                       base::NumberToString(i->end) + "}";
   }
   position_string += "}\n";
   return position_string;
@@ -173,7 +172,6 @@ class BookmarkProviderTest : public testing::Test {
  protected:
   void SetUp() override;
 
-  base::MessageLoop message_loop_;
   std::unique_ptr<MockAutocompleteProviderClient> provider_client_;
   std::unique_ptr<BookmarkModel> model_;
   scoped_refptr<BookmarkProvider> provider_;
@@ -188,8 +186,7 @@ BookmarkProviderTest::BookmarkProviderTest() {
 }
 
 void BookmarkProviderTest::SetUp() {
-  provider_client_.reset(
-      new testing::NiceMock<MockAutocompleteProviderClient>());
+  provider_client_.reset(new MockAutocompleteProviderClient());
   EXPECT_CALL(*provider_client_, GetBookmarkModel())
       .WillRepeatedly(testing::Return(model_.get()));
   EXPECT_CALL(*provider_client_, GetSchemeClassifier())
@@ -278,10 +275,8 @@ TEST_F(BookmarkProviderTest, Positions) {
 
   for (size_t i = 0; i < arraysize(query_data); ++i) {
     AutocompleteInput input(base::ASCIIToUTF16(query_data[i].query),
-                            base::string16::npos, std::string(), GURL(),
-                            base::string16(),
-                            metrics::OmniboxEventProto::INVALID_SPEC, false,
-                            false, false, true, false, TestSchemeClassifier());
+                            metrics::OmniboxEventProto::OTHER,
+                            TestSchemeClassifier());
     provider_->Start(input, false);
     const ACMatches& matches(provider_->matches());
     // Validate number of results is as expected.
@@ -359,10 +354,8 @@ TEST_F(BookmarkProviderTest, Rankings) {
 
   for (size_t i = 0; i < arraysize(query_data); ++i) {
     AutocompleteInput input(base::ASCIIToUTF16(query_data[i].query),
-                            base::string16::npos, std::string(), GURL(),
-                            base::string16(),
-                            metrics::OmniboxEventProto::INVALID_SPEC, false,
-                            false, false, true, false, TestSchemeClassifier());
+                            metrics::OmniboxEventProto::OTHER,
+                            TestSchemeClassifier());
     provider_->Start(input, false);
     const ACMatches& matches(provider_->matches());
     // Validate number and content of results is as expected.
@@ -380,7 +373,7 @@ TEST_F(BookmarkProviderTest, Rankings) {
         continue;
       EXPECT_EQ(query_data[i].matches[j],
                 base::UTF16ToUTF8(matches[j].description))
-          << "    Mismatch at [" << base::SizeTToString(j) << "] for query '"
+          << "    Mismatch at [" << base::NumberToString(j) << "] for query '"
           << query_data[i].query << "'.";
     }
   }
@@ -416,10 +409,8 @@ TEST_F(BookmarkProviderTest, InlineAutocompletion) {
     const std::string description = "for query=" + query_data[i].query +
         " and url=" + query_data[i].url;
     AutocompleteInput input(base::ASCIIToUTF16(query_data[i].query),
-                            base::string16::npos, std::string(), GURL(),
-                            base::string16(),
-                            metrics::OmniboxEventProto::INVALID_SPEC, false,
-                            false, false, true, false, TestSchemeClassifier());
+                            metrics::OmniboxEventProto::OTHER,
+                            TestSchemeClassifier());
     const base::string16 fixed_up_input(
         provider_->FixupUserInput(input).second);
     BookmarkNode node(GURL(query_data[i].url));
@@ -445,26 +436,25 @@ TEST_F(BookmarkProviderTest, StripHttpAndAdjustOffsets) {
     // |expected_contents_class| is in format offset:style,offset:style,...
     const std::string expected_contents_class;
   } query_data[] = {
-    { "foo",       "www.foobar.com",             "0:1,4:3,7:1"           },
-    { "www foo",   "www.foobar.com",             "0:3,3:1,4:3,7:1"       },
-    { "foo www",   "www.foobar.com",             "0:3,3:1,4:3,7:1"       },
-    { "foo http",  "http://www.foobar.com",      "0:3,4:1,11:3,14:1"     },
-    { "blah",      "blah.com",                   "0:3,4:1"               },
-    { "http blah", "http://blah.com",            "0:3,4:1,7:3,11:1"      },
-    { "dom",       "www.domain.com/http/",       "0:1,4:3,7:1"           },
-    { "dom http",  "http://www.domain.com/http/",
-      "0:3,4:1,11:3,14:1,22:3,26:1"                                      },
-    { "rep",       "www.repeat.com/1/repeat/2/", "0:1,4:3,7:1,17:3,20:1" },
-    { "versi",     "chrome://version",           "0:1,9:3,14:1"          }
+      // clang-format off
+    { "foo",       "foobar.com",              "0:3,3:1"                    },
+    { "www foo",   "www.foobar.com",          "0:3,3:1,4:3,7:1"            },
+    { "foo www",   "www.foobar.com",          "0:3,3:1,4:3,7:1"            },
+    { "foo http",  "http://foobar.com",       "0:3,4:1,7:3,10:1"           },
+    { "blah",      "blah.com",                "0:3,4:1"                    },
+    { "http blah", "http://blah.com",         "0:3,4:1,7:3,11:1"           },
+    { "dom",       "domain.com/http/",        "0:3,3:1"                    },
+    { "dom http",  "http://domain.com/http/", "0:3,4:1,7:3,10:1,18:3,22:1" },
+    { "rep",       "repeat.com/1/repeat/2/",  "0:3,3:1,13:3,16:1"          },
+    { "versi",     "chrome://version",        "0:1,9:3,14:1"               },
+      // clang-format on
   };
 
   for (size_t i = 0; i < arraysize(query_data); ++i) {
     std::string description = "for query=" + query_data[i].query;
     AutocompleteInput input(base::ASCIIToUTF16(query_data[i].query),
-                            base::string16::npos, std::string(), GURL(),
-                            base::string16(),
-                            metrics::OmniboxEventProto::INVALID_SPEC, false,
-                            false, false, true, false, TestSchemeClassifier());
+                            metrics::OmniboxEventProto::OTHER,
+                            TestSchemeClassifier());
     provider_->Start(input, false);
     const ACMatches& matches(provider_->matches());
     ASSERT_EQ(1U, matches.size()) << description;
@@ -491,10 +481,10 @@ TEST_F(BookmarkProviderTest, StripHttpAndAdjustOffsets) {
 }
 
 TEST_F(BookmarkProviderTest, DoesNotProvideMatchesOnFocus) {
-  AutocompleteInput input(base::ASCIIToUTF16("foo"), base::string16::npos,
-                          std::string(), GURL(), base::string16(),
-                          metrics::OmniboxEventProto::INVALID_SPEC, false,
-                          false, false, true, true, TestSchemeClassifier());
+  AutocompleteInput input(base::ASCIIToUTF16("foo"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  input.set_from_omnibox_focus(true);
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->matches().empty());
 }

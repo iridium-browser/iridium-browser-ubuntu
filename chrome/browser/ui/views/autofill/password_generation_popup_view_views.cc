@@ -6,10 +6,14 @@
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
+#include "build/build_config.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/autofill/password_generation_popup_controller.h"
 #include "chrome/browser/ui/autofill/popup_constants.h"
+#include "chrome/browser/ui/views/harmony/chrome_typography.h"
+#include "chrome/browser/ui/views_mode_controller.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
@@ -40,27 +44,24 @@ class PasswordTextBox : public views::View {
   ~PasswordTextBox() override {}
 
   // |suggestion_text| prompts the user to select the password,
-  // |generated_password| is the generated password, and |font_list| is the font
-  // used for all text in this class.
+  // |generated_password| is the generated password.
   void Init(const base::string16& suggestion_text,
-            const base::string16& generated_password,
-            const gfx::FontList& font_list) {
-    views::BoxLayout* box_layout = new views::BoxLayout(
+            const base::string16& generated_password) {
+    auto box_layout = std::make_unique<views::BoxLayout>(
         views::BoxLayout::kVertical, gfx::Insets(12, 0), 5);
     box_layout->set_main_axis_alignment(
         views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
-    SetLayoutManager(box_layout);
+    SetLayoutManager(std::move(box_layout));
 
     views::Label* suggestion_label = new views::Label(
-        suggestion_text, views::Label::CustomFont{font_list.DeriveWithWeight(
-                             gfx::Font::Weight::BOLD)});
+        suggestion_text, CONTEXT_DEPRECATED_SMALL, STYLE_EMPHASIZED);
     suggestion_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     suggestion_label->SetEnabledColor(
         PasswordGenerationPopupView::kPasswordTextColor);
     AddChildView(suggestion_label);
 
     views::Label* password_label =
-        new views::Label(generated_password, {font_list});
+        new views::Label(generated_password, CONTEXT_DEPRECATED_SMALL);
     password_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     password_label->SetEnabledColor(
         PasswordGenerationPopupView::kPasswordTextColor);
@@ -87,26 +88,23 @@ class PasswordGenerationPopupViewViews::PasswordBox : public views::View {
   ~PasswordBox() override {}
 
   // |password| is the generated password, |suggestion| is the text prompting
-  // the user to select the password, and |font_list| is the font used for all
-  // the text.
-  void Init(const base::string16& password,
-            const base::string16& suggestion,
-            const gfx::FontList& font_list) {
-    views::BoxLayout* box_layout = new views::BoxLayout(
+  // the user to select the password.
+  void Init(const base::string16& password, const base::string16& suggestion) {
+    auto box_layout = std::make_unique<views::BoxLayout>(
         views::BoxLayout::kHorizontal,
         gfx::Insets(0, PasswordGenerationPopupController::kHorizontalPadding),
         PasswordGenerationPopupController::kHorizontalPadding);
     box_layout->set_main_axis_alignment(
         views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
-    SetLayoutManager(box_layout);
+    SetLayoutManager(std::move(box_layout));
 
     views::ImageView* key_image = new views::ImageView();
     key_image->SetImage(
-        gfx::CreateVectorIcon(kAutologinIcon, 32, gfx::kChromeIconGrey));
+        gfx::CreateVectorIcon(kKeyIcon, 16, gfx::kChromeIconGrey));
     AddChildView(key_image);
 
     PasswordTextBox* password_text_box = new PasswordTextBox();
-    password_text_box->Init(suggestion, password, font_list);
+    password_text_box->Init(suggestion, password);
     AddChildView(password_text_box);
   }
 
@@ -126,18 +124,19 @@ PasswordGenerationPopupViewViews::PasswordGenerationPopupViewViews(
     views::Widget* parent_widget)
     : AutofillPopupBaseView(controller, parent_widget),
       password_view_(NULL),
-      font_list_(ResourceBundle::GetSharedInstance().GetFontList(
-          ResourceBundle::SmallFont)),
       controller_(controller) {
   if (controller_->display_password())
     CreatePasswordView();
 
   help_label_ = new views::StyledLabel(controller_->HelpText(), this);
-  help_label_->SetBaseFontList(font_list_);
-  help_label_->SetLineHeight(20);
-  views::StyledLabel::RangeStyleInfo default_style;
-  default_style.color = kExplanatoryTextColor;
-  help_label_->SetDefaultStyle(default_style);
+
+  // With MD, the line spacing comes from the TextContext instead and this is
+  // unnecessary.
+  if (!ui::MaterialDesignController::IsSecondaryUiMaterial())
+    help_label_->SetLineHeight(20);
+
+  help_label_->SetTextContext(CONTEXT_DEPRECATED_SMALL);
+  help_label_->SetDefaultTextStyle(STYLE_HINT);
 
   views::StyledLabel::RangeStyleInfo link_style =
       views::StyledLabel::RangeStyleInfo::CreateForLink();
@@ -166,9 +165,7 @@ void PasswordGenerationPopupViewViews::CreatePasswordView() {
     return;
 
   password_view_ = new PasswordBox();
-  password_view_->Init(controller_->password(),
-                       controller_->SuggestedText(),
-                       font_list_);
+  password_view_->Init(controller_->password(), controller_->SuggestedText());
   password_view_->SetPosition(gfx::Point());
   password_view_->SizeToPreferredSize();
   AddChildView(password_view_);
@@ -207,7 +204,7 @@ void PasswordGenerationPopupViewViews::PasswordSelectionUpdated() {
     return;
 
   if (controller_->password_selected())
-    NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
+    NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
 
   password_view_->SetBackground(views::CreateThemedSolidBackground(
       password_view_,
@@ -266,6 +263,10 @@ bool PasswordGenerationPopupViewViews::IsPointInPasswordBounds(
 
 PasswordGenerationPopupView* PasswordGenerationPopupView::Create(
     PasswordGenerationPopupController* controller) {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa())
+    return CreateCocoa(controller);
+#endif
   views::Widget* observing_widget =
       views::Widget::GetTopLevelWidgetForNativeView(
           controller->container_view());
@@ -281,7 +282,7 @@ PasswordGenerationPopupView* PasswordGenerationPopupView::Create(
 void PasswordGenerationPopupViewViews::GetAccessibleNodeData(
     ui::AXNodeData* node_data) {
   node_data->SetName(controller_->SuggestedText());
-  node_data->role = ui::AX_ROLE_MENU_ITEM;
+  node_data->role = ax::mojom::Role::kMenuItem;
 }
 
 }  // namespace autofill

@@ -5,6 +5,8 @@
 #ifndef CHROME_INSTALLER_ZUCCHINI_IO_UTILS_H_
 #define CHROME_INSTALLER_ZUCCHINI_IO_UTILS_H_
 
+#include <stdint.h>
+
 #include <cctype>
 #include <istream>
 #include <ostream>
@@ -29,7 +31,7 @@ class LimitedOutputStream : public std::ostream {
   class StreamBuf : public std::stringbuf {
    public:
     StreamBuf(std::ostream& os, int limit);
-    ~StreamBuf();
+    ~StreamBuf() override;
 
     int sync() override;
     bool full() const { return counter_ >= limit_; }

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef V8_INSPECTOR_V8CONSOLEMESSAGE_H_
-#define V8_INSPECTOR_V8CONSOLEMESSAGE_H_
+#ifndef V8_INSPECTOR_V8_CONSOLE_MESSAGE_H_
+#define V8_INSPECTOR_V8_CONSOLE_MESSAGE_H_
 
 #include <deque>
 #include <map>
@@ -120,6 +120,7 @@ class V8ConsoleMessageStorage {
   int count(int contextId, const String16& id);
   void time(int contextId, const String16& id);
   double timeEnd(int contextId, const String16& id);
+  bool hasTimer(int contextId, const String16& id);
 
  private:
   V8InspectorImpl* m_inspector;
@@ -137,4 +138,4 @@ class V8ConsoleMessageStorage {
 
 }  // namespace v8_inspector
 
-#endif  // V8_INSPECTOR_V8CONSOLEMESSAGE_H_
+#endif  // V8_INSPECTOR_V8_CONSOLE_MESSAGE_H_

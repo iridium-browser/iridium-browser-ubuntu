@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_content_file_system_async_file_util.h"
@@ -18,6 +17,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
+#include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_file_system_instance.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -38,7 +38,7 @@ constexpr char kMimeType[] = "application/octet-stream";
 std::unique_ptr<KeyedService> CreateArcFileSystemOperationRunnerForTesting(
     content::BrowserContext* context) {
   return ArcFileSystemOperationRunner::CreateForTesting(
-      ArcServiceManager::Get()->arc_bridge_service());
+      context, ArcServiceManager::Get()->arc_bridge_service());
 }
 
 class ArcContentFileSystemAsyncFileUtilTest : public testing::Test {
@@ -50,14 +50,22 @@ class ArcContentFileSystemAsyncFileUtilTest : public testing::Test {
     fake_file_system_.AddFile(
         File(kArcUrl, kData, kMimeType, File::Seekable::NO));
 
-    arc_service_manager_ = base::MakeUnique<ArcServiceManager>();
-    arc_service_manager_->set_browser_context(&profile_);
+    arc_service_manager_ = std::make_unique<ArcServiceManager>();
+    profile_ = std::make_unique<TestingProfile>();
+    arc_service_manager_->set_browser_context(profile_.get());
     ArcFileSystemOperationRunner::GetFactory()->SetTestingFactoryAndUse(
-        &profile_, &CreateArcFileSystemOperationRunnerForTesting);
+        profile_.get(), &CreateArcFileSystemOperationRunnerForTesting);
     arc_service_manager_->arc_bridge_service()->file_system()->SetInstance(
         &fake_file_system_);
+    WaitForInstanceReady(
+        arc_service_manager_->arc_bridge_service()->file_system());
 
-    async_file_util_ = base::MakeUnique<ArcContentFileSystemAsyncFileUtil>();
+    async_file_util_ = std::make_unique<ArcContentFileSystemAsyncFileUtil>();
+  }
+
+  void TearDown() override {
+    arc_service_manager_->arc_bridge_service()->file_system()->CloseInstance(
+        &fake_file_system_);
   }
 
  protected:
@@ -74,9 +82,12 @@ class ArcContentFileSystemAsyncFileUtilTest : public testing::Test {
   }
 
   content::TestBrowserThreadBundle thread_bundle_;
-  TestingProfile profile_;
   FakeFileSystemInstance fake_file_system_;
+
+  // Use the same initialization/destruction order as
+  // ChromeBrowserMainPartsChromeos.
   std::unique_ptr<ArcServiceManager> arc_service_manager_;
+  std::unique_ptr<TestingProfile> profile_;
   std::unique_ptr<ArcContentFileSystemAsyncFileUtil> async_file_util_;
 
  private:

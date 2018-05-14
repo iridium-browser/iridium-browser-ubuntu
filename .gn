@@ -3,6 +3,7 @@
 # file, run "gn help dotfile" at the command line.
 
 import("//build/dotfile_settings.gni")
+import("//third_party/angle/dotfile_settings.gni")
 
 # The location of the build configuration file.
 buildconfig = "//build/config/BUILDCONFIG.gn"
@@ -36,6 +37,7 @@ default_args = {
   v8_extra_library_files = [
     # Dependencies used by the extra libraries. Putting them here causes them
     # to be executed first during snapshot creation.
+    "//third_party/WebKit/Source/core/streams/CommonOperations.js",
     "//third_party/WebKit/Source/core/streams/CommonStrings.js",
     "//third_party/WebKit/Source/core/streams/SimpleQueue.js",
 
@@ -45,13 +47,26 @@ default_args = {
     "//third_party/WebKit/Source/core/streams/ReadableStream.js",
     "//third_party/WebKit/Source/core/streams/WritableStream.js",
   ]
-  v8_experimental_extra_library_files = []
+  v8_experimental_extra_library_files =
+      [ "//third_party/WebKit/Source/core/streams/TransformStream.js" ]
   v8_enable_gdbjit = false
   v8_imminent_deprecation_warnings = false
 
   # TODO(jochen): Remove this. http://crbug.com/v8/5830,
   # http://crbug.com/728583.
   v8_check_microtasks_scopes_consistency = false
+
+  # Don't include webrtc's builtin task queue implementation.
+  rtc_link_task_queue_impl = false
+
+  # Don't include the iLBC audio codec.
+  # TODO(bugs.webrtc.org/8396): Once WebRTC gets rid of its internal
+  # deps on codecs, we can remove this.
+  rtc_include_ilbc = false
+
+  # Changes some setup for the Crashpad build to set them to build against
+  # Chromium's zlib, base, etc.
+  crashpad_dependencies = "chromium"
 }
 
 # These are the targets to check headers for by default. The files in targets
@@ -63,17 +78,18 @@ check_targets = [
   "//ash/*",
   "//base/*",
   "//blink/*",
-  "//breakpad/*",
   "//build/*",
   "//cc/*",
 
   #"//chrome/*",  # Epic number of errors.
   "//chrome/app/*",
+  "//chrome/app_shim/*",
   "//chrome/browser/chromeos/*",
   "//chrome/browser/extensions/*",
   "//chrome/browser/ui/*",
   "//chrome/common/*",
   "//chrome/installer/*",
+  "//chrome/profiling",
   "//chrome/third_party/mozilla_security_manager/*",
   "//chrome/tools/*",
   "//chrome/utility/*",
@@ -110,26 +126,8 @@ check_targets = [
   #"//jingle/*",
   "//mash/*",
 
-  #"//media/*",  # Lots of errors.
-  #"//media/base/*",
-  #"//media/capture/*",
-  "//media/cast/*",
-  "//media:media",
-  "//media:shared_memory_support",
-  "//media:media_unittests",
-  "//media:audio_unittests",
-  "//media:media_perftests",
-  "//media/audio/*",
-  "//media/blink/*",
-  "//media/cdm/*",
-  "//media/ffmpeg/*",
-  "//media/gpu/*",
-  "//media/midi/*",
-  "//media/mojo/*",
-  "//media/remoting/*",
-  "//media/test/*",
-
-  "mojo/*",
+  "//media/*",
+  "//mojo/*",
 
   #"//native_client/*",
   "//net/*",
@@ -143,7 +141,6 @@ check_targets = [
   "//rlz/*",
 
   #"//sandbox/*",  # Medium-hard.
-  "//sdch/*",
   "//services/*",
   "//skia/*",
   "//sql/*",
@@ -151,53 +148,24 @@ check_targets = [
   "//testing/*",
 
   #"//third_party/*",  # May not ever want this.
+  #"//third_party/breakpad/*",  # Small errors.
   "//third_party/brotli/*",
   "//third_party/hunspell/*",
   "//third_party/leveldatabase/*",
-  "//third_party/libaddressinput/*",
+
+  #"//third_party/libaddressinput/*",  # Small errors.
   "//third_party/libphonenumber/*",
-  "//third_party/libwebp/*",
+
+  #"//third_party/libwebp/*",  # Errors: https://crbug.com/800762
   "//third_party/snappy/*",
-  "//third_party/WebKit/*",
+
+  #"//third_party/WebKit/*",  # Errors: https://crbug.com/800764
   "//tools/*",
 
-  #"//ui/*",  # Work left on Chromeos w/ use_ozone. Some parts of UI that work:
-  "//ui/accessibility/*",
-  "//ui/android/*",
-  "//ui/app_list/*",
-  "//ui/arc/*",
-  "//ui/aura/*",
-  "//ui/aura_extra/*",
-  "//ui/base/*",
-  "//ui/chromeos/*",
-  "//ui/compositor/*",
-  "//ui/content_accelerators/*",
-  "//ui/display/*",
-  "//ui/events/*",
-  "//ui/file_manager/*",
-  "//ui/gfx/*",
-  "//ui/gl/*",
-  "//ui/keyboard/*",
-  "//ui/latency_info/*",
-  "//ui/login/*",
-  "//ui/message_center/*",
-  "//ui/mojo/*",
-  "//ui/native_theme/*",
-  "//ui/ozone/*",
-  "//ui/platform_window/*",
-  "//ui/resources/*",
-  "//ui/shell_dialogs/*",
-  "//ui/snapshot/*",
-  "//ui/strings/*",
-  "//ui/surface/*",
-  "//ui/touch_selection/*",
-  "//ui/views/*",
-  "//ui/views_content_client/*",
-  "//ui/web_dialogs/*",
-  "//ui/webui/*",
-  "//ui/wm/*",
+  "//ui/*",
   "//url/*",
-  "//v8/*",
+
+  #"//v8/*",  # Errors: https://bugs.chromium.org/p/v8/issues/detail?id=7330
   "//win8/*",
 ]
 
@@ -264,7 +232,9 @@ check_targets = [
 #      files and passes them to a script, it will always be correct.
 
 exec_script_whitelist =
-    build_dotfile_settings.exec_script_whitelist + [
+    build_dotfile_settings.exec_script_whitelist +
+    angle_dotfile_settings.exec_script_whitelist +
+    [
       # Whitelist entries for //build should go into
       # //build/dotfile_settings.gni instead, so that they can be shared
       # with other repos. The entries in this list should be only for files
@@ -281,14 +251,9 @@ exec_script_whitelist =
       "//remoting/host/installer/win/generate_clsids.gni",
 
       # TODO(dpranke): Get these from the appropriate repos instead.
-      "//third_party/angle/BUILD.gn",
-      "//third_party/angle/src/tests/BUILD.gn",
-      "//third_party/angle/src/vulkan_support/BUILD.gn",
       "//third_party/catapult/tracing/BUILD.gn",
       "//third_party/google_input_tools/inputview.gni",
 
-      # CLD2 should be removed soon, delete this when we do.
-      "//third_party/cld_2/BUILD.gn",
       "//tools/grit/grit_rule.gni",
 
       # Not gypi-to-gn.

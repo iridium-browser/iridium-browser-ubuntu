@@ -5,7 +5,7 @@
 #ifndef USBInterface_h
 #define USBInterface_h
 
-#include "device/usb/public/interfaces/device.mojom-blink.h"
+#include "device/usb/public/mojom/device.mojom-blink.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Heap.h"
 
@@ -16,8 +16,7 @@ class USBAlternateInterface;
 class USBConfiguration;
 class USBDevice;
 
-class USBInterface : public GarbageCollected<USBInterface>,
-                     public ScriptWrappable {
+class USBInterface : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -37,7 +36,7 @@ class USBInterface : public GarbageCollected<USBInterface>,
   HeapVector<Member<USBAlternateInterface>> alternates() const;
   bool claimed() const;
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   Member<const USBDevice> device_;

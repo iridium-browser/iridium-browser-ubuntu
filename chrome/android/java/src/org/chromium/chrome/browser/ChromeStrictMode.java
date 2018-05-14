@@ -7,7 +7,6 @@ package org.chromium.chrome.browser;
 import android.app.ApplicationErrorReport;
 import android.os.Build;
 import android.os.Looper;
-import android.os.MessageQueue;
 import android.os.StrictMode;
 import android.support.annotation.UiThread;
 
@@ -16,7 +15,6 @@ import org.chromium.base.CommandLine;
 import org.chromium.base.JavaExceptionReporter;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryLoader;
 
 import java.lang.reflect.Field;
@@ -106,23 +104,20 @@ public class ChromeStrictMode {
         }
         sNumUploads.set(0);
         // Delay handling StrictMode violations during initialization until the main loop is idle.
-        Looper.myQueue().addIdleHandler(new MessageQueue.IdleHandler() {
-            @Override
-            public boolean queueIdle() {
-                // Will retry if the native library has not been initialized.
-                if (!LibraryLoader.isInitialized()) return true;
-                // Check again next time if no more cached stack traces to upload, and we have not
-                // reached the max number of uploads for this session.
-                if (sCachedStackTraces.isEmpty()) {
-                    // TODO(wnwen): Add UMA count when this happens.
-                    // In case of races, continue checking an extra time (equal condition).
-                    return sNumUploads.get() <= MAX_UPLOADS_PER_SESSION;
-                }
-                // Since this is the only place we are removing elements, no need for additional
-                // synchronization to ensure it is still non-empty.
-                reportStrictModeViolation(sCachedStackTraces.remove(0));
-                return true;
+        Looper.myQueue().addIdleHandler(() -> {
+            // Will retry if the native library has not been initialized.
+            if (!LibraryLoader.isInitialized()) return true;
+            // Check again next time if no more cached stack traces to upload, and we have not
+            // reached the max number of uploads for this session.
+            if (sCachedStackTraces.isEmpty()) {
+                // TODO(wnwen): Add UMA count when this happens.
+                // In case of races, continue checking an extra time (equal condition).
+                return sNumUploads.get() <= MAX_UPLOADS_PER_SESSION;
             }
+            // Since this is the only place we are removing elements, no need for additional
+            // synchronization to ensure it is still non-empty.
+            reportStrictModeViolation(sCachedStackTraces.remove(0));
+            return true;
         });
     }
 
@@ -161,7 +156,6 @@ public class ChromeStrictMode {
      */
     @UiThread
     // FindBugs doesn't like conditionals with compile time results
-    @SuppressFBWarnings("UCF_USELESS_CONTROL_FLOW")
     public static void configureStrictMode() {
         assert ThreadUtils.runningOnUiThread();
         if (sIsStrictModeAlreadyConfigured) {

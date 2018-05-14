@@ -3,13 +3,13 @@
 // found in the LICENSE file.
 
 /**
- * @fileoverview 'settings-clear-browsing-data-dialog' allows the user to delete
- * browsing data that has been cached by Chromium.
+ * @fileoverview 'settings-clear-browsing-data-dialog' allows the user to
+ * delete browsing data that has been cached by Chromium.
  */
 Polymer({
   is: 'settings-clear-browsing-data-dialog',
 
-  behaviors: [WebUIListenerBehavior],
+  behaviors: [WebUIListenerBehavior, settings.RouteObserverBehavior],
 
   properties: {
     /**
@@ -42,11 +42,11 @@ Polymer({
       readOnly: true,
       type: Array,
       value: [
-        {value: 0, name: loadTimeData.getString('clearDataHour')},
-        {value: 1, name: loadTimeData.getString('clearDataDay')},
-        {value: 2, name: loadTimeData.getString('clearDataWeek')},
-        {value: 3, name: loadTimeData.getString('clearData4Weeks')},
-        {value: 4, name: loadTimeData.getString('clearDataEverything')},
+        {value: 0, name: loadTimeData.getString('clearPeriodHour')},
+        {value: 1, name: loadTimeData.getString('clearPeriod24Hours')},
+        {value: 2, name: loadTimeData.getString('clearPeriod7Days')},
+        {value: 3, name: loadTimeData.getString('clearPeriod4Weeks')},
+        {value: 4, name: loadTimeData.getString('clearPeriodEverything')},
       ],
     },
 
@@ -70,6 +70,18 @@ Polymer({
       value: false,
     },
 
+    /** @private */
+    isSignedIn_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /** @private */
+    isSyncingHistory_: {
+      type: Boolean,
+      value: false,
+    },
+
     /** @private {!Array<ImportantSite>} */
     importantSites_: {
       type: Array,
@@ -87,7 +99,25 @@ Polymer({
     },
 
     /** @private */
-    showImportantSitesDialog_: {type: Boolean, value: false},
+    showImportantSitesDialog_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /** @private */
+    showImportantSitesCacheSubtitle_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
+     * Time in ms, when the dialog was opened.
+     * @private
+     */
+    dialogOpenedTime_: {
+      type: Number,
+      value: 0,
+    }
   },
 
   /** @private {settings.ClearBrowsingDataBrowserProxy} */
@@ -95,8 +125,8 @@ Polymer({
 
   /** @override */
   ready: function() {
-    this.$.clearFrom.menuOptions = this.clearFromOptions_;
-    this.addWebUIListener('update-footer', this.updateFooter_.bind(this));
+    this.addWebUIListener(
+        'update-sync-state', this.updateSyncState_.bind(this));
     this.addWebUIListener(
         'update-counter-text', this.updateCounterText_.bind(this));
   },
@@ -105,29 +135,77 @@ Polymer({
   attached: function() {
     this.browserProxy_ =
         settings.ClearBrowsingDataBrowserProxyImpl.getInstance();
-    this.browserProxy_.initialize().then(function() {
+    this.dialogOpenedTime_ = Date.now();
+    this.browserProxy_.initialize().then(() => {
       this.$.clearBrowsingDataDialog.showModal();
-    }.bind(this));
+    });
 
     if (this.importantSitesFlagEnabled_) {
-      this.browserProxy_.getImportantSites().then(function(sites) {
+      this.browserProxy_.getImportantSites().then(sites => {
         this.importantSites_ = sites;
-      }.bind(this));
+      });
     }
   },
 
   /**
-   * Updates the footer to show only those sentences that are relevant to this
-   * user.
-   * @param {boolean} syncing Whether the user is syncing data.
-   * @param {boolean} otherFormsOfBrowsingHistory Whether the user has other
-   *     forms of browsing history in their account.
+   * Record visits to the CBD dialog.
+   *
+   * settings.RouteObserverBehavior
+   * @param {!settings.Route} currentRoute
+   * @protected
+   */
+  currentRouteChanged: function(currentRoute) {
+    if (currentRoute == settings.routes.CLEAR_BROWSER_DATA) {
+      chrome.metricsPrivate.recordUserAction('ClearBrowsingData_DialogCreated');
+      this.dialogOpenedTime_ = Date.now();
+    }
+  },
+
+  /**
+   * Updates the history description to show the relevant information
+   * depending on sync and signin state.
+   *
+   * @param {boolean} signedIn Whether the user is signed in.
+   * @param {boolean} syncing Whether the user is syncing history.
    * @private
    */
-  updateFooter_: function(syncing, otherFormsOfBrowsingHistory) {
-    this.$.googleFooter.hidden = !otherFormsOfBrowsingHistory;
-    this.$.syncedDataSentence.hidden = !syncing;
+  updateSyncState_: function(signedIn, syncing) {
+    this.isSignedIn_ = signedIn;
+    this.isSyncingHistory_ = syncing;
     this.$.clearBrowsingDataDialog.classList.add('fully-rendered');
+  },
+
+  /**
+   * Choose a summary checkbox label.
+   * @param {boolean} isSignedIn
+   * @param {boolean} isSyncingHistory
+   * @param {string} historySummary
+   * @param {string} historySummarySigned
+   * @param {string} historySummarySynced
+   * @return {string}
+   * @private
+   */
+  browsingCheckboxLabel_: function(
+      isSignedIn, isSyncingHistory, historySummary, historySummarySigned,
+      historySummarySynced) {
+    if (isSyncingHistory) {
+      return historySummarySynced;
+    } else if (isSignedIn) {
+      return historySummarySigned;
+    }
+    return historySummary;
+  },
+
+  /**
+   * Choose a content/site settings label.
+   * @param {string} siteSettings
+   * @param {string} contentSettings
+   * @return {string}
+   * @private
+   */
+  siteSettingsLabel_: function(siteSettings, contentSettings) {
+    return loadTimeData.getBoolean('enableSiteSettings') ? siteSettings :
+                                                           contentSettings;
   },
 
   /**
@@ -140,7 +218,7 @@ Polymer({
   updateCounterText_: function(prefName, text) {
     // Data type deletion preferences are named "browser.clear_data.<datatype>".
     // Strip the common prefix, i.e. use only "<datatype>".
-    var matches = prefName.match(/^browser\.clear_data\.(\w+)$/);
+    const matches = prefName.match(/^browser\.clear_data\.(\w+)$/);
     this.set('counters_.' + assert(matches[1]), text);
   },
 
@@ -151,10 +229,12 @@ Polymer({
   shouldShowImportantSites_: function() {
     if (!this.importantSitesFlagEnabled_)
       return false;
-    if (!this.$.cookiesCheckbox.checked)
+    const tab = this.$.tabs.selectedItem;
+    if (!tab.querySelector('.cookies-checkbox').checked) {
       return false;
+    }
 
-    var haveImportantSites = this.importantSites_.length > 0;
+    const haveImportantSites = this.importantSites_.length > 0;
     chrome.send(
         'metricsHandler:recordBooleanHistogram',
         ['History.ClearBrowsingData.ImportantDialogShown', haveImportantSites]);
@@ -167,12 +247,13 @@ Polymer({
    */
   onClearBrowsingDataTap_: function() {
     if (this.shouldShowImportantSites_()) {
+      const tab = this.$.tabs.selectedItem;
       this.showImportantSitesDialog_ = true;
+      this.showImportantSitesCacheSubtitle_ =
+          tab.querySelector('.cache-checkbox').checked;
       this.$.clearBrowsingDataDialog.close();
       // Show important sites dialog after dom-if is applied.
-      this.async(function() {
-        this.$$('#importantSitesDialog').showModal();
-      });
+      this.async(() => this.$$('#importantSitesDialog').showModal());
     } else {
       this.clearBrowsingData_();
     }
@@ -195,20 +276,34 @@ Polymer({
    */
   clearBrowsingData_: function() {
     this.clearingInProgress_ = true;
+    const tab = this.$.tabs.selectedItem;
 
-    this.browserProxy_.clearBrowsingData(this.importantSites_)
-        .then(
-            /**
-             * @param {boolean} shouldShowNotice Whether we should show the
-             * notice about other forms of browsing history before closing the
-             * dialog.
-             */
-            function(shouldShowNotice) {
-              this.clearingInProgress_ = false;
-              this.showHistoryDeletionDialog_ = shouldShowNotice;
-              if (!shouldShowNotice)
-                this.closeDialogs_();
-            }.bind(this));
+    const checkboxes = tab.querySelectorAll('settings-checkbox');
+    const dataTypes = [];
+    checkboxes.forEach((checkbox) => {
+      if (checkbox.checked)
+        dataTypes.push(checkbox.pref.key);
+    });
+
+    const timePeriod = tab.querySelector('.time-range-select').pref.value;
+
+    if (tab.id == 'basic-tab') {
+      chrome.metricsPrivate.recordUserAction('ClearBrowsingData_BasicTab');
+    } else {
+      chrome.metricsPrivate.recordUserAction('ClearBrowsingData_AdvancedTab');
+    }
+
+    this.browserProxy_
+        .clearBrowsingData(dataTypes, timePeriod, this.importantSites_)
+        .then(shouldShowNotice => {
+          this.clearingInProgress_ = false;
+          this.showHistoryDeletionDialog_ = shouldShowNotice;
+          chrome.metricsPrivate.recordMediumTime(
+              'History.ClearBrowsingData.TimeSpentInDialog',
+              Date.now() - this.dialogOpenedTime_);
+          if (!shouldShowNotice)
+            this.closeDialogs_();
+        });
   },
 
   /**
@@ -248,4 +343,20 @@ Polymer({
     this.showHistoryDeletionDialog_ = false;
     this.closeDialogs_();
   },
+
+  /**
+   * Records an action when the user changes between the basic and advanced tab.
+   * @param {!Event} event
+   * @private
+   */
+  recordTabChange_: function(event) {
+    if (event.detail.value == 0) {
+      chrome.metricsPrivate.recordUserAction(
+          'ClearBrowsingData_SwitchTo_BasicTab');
+    } else {
+      chrome.metricsPrivate.recordUserAction(
+          'ClearBrowsingData_SwitchTo_AdvancedTab');
+    }
+  },
+
 });

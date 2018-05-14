@@ -22,6 +22,9 @@ void UseCounterCallback(v8::Isolate* isolate,
     case v8::Isolate::kUseAsm:
       blink_feature = WebFeature::kUseAsm;
       break;
+    case v8::Isolate::kWebAssemblyInstantiation:
+      blink_feature = WebFeature::kWebAssemblyInstantiation;
+      break;
     case v8::Isolate::kBreakIterator:
       blink_feature = WebFeature::kBreakIterator;
       break;
@@ -123,6 +126,24 @@ void UseCounterCallback(v8::Isolate* isolate,
       break;
     case v8::Isolate::kConstructorNonUndefinedPrimitiveReturn:
       blink_feature = WebFeature::kV8ConstructorNonUndefinedPrimitiveReturn;
+      break;
+    case v8::Isolate::kLabeledExpressionStatement:
+      blink_feature = WebFeature::kV8LabeledExpressionStatement;
+      break;
+    case v8::Isolate::kErrorCaptureStackTrace:
+      blink_feature = WebFeature::kV8ErrorCaptureStackTrace;
+      break;
+    case v8::Isolate::kErrorPrepareStackTrace:
+      blink_feature = WebFeature::kV8ErrorPrepareStackTrace;
+      break;
+    case v8::Isolate::kErrorStackTraceLimit:
+      blink_feature = WebFeature::kV8ErrorStackTraceLimit;
+      break;
+    case v8::Isolate::kIndexAccessor:
+      blink_feature = WebFeature::kV8IndexAccessor;
+      break;
+    case v8::Isolate::kDeoptimizerDisableSpeculation:
+      blink_feature = WebFeature::kV8DeoptimizerDisableSpeculation;
       break;
     default:
       // This can happen if V8 has added counters that this version of Blink

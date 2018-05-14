@@ -28,7 +28,6 @@
 using ::testing::AssertionResult;
 using ::testing::AssertionSuccess;
 using ::testing::Combine;
-using ::testing::EndsWith;
 using ::testing::HasSubstr;
 using ::testing::MatchesRegex;
 using ::testing::Not;
@@ -411,6 +410,13 @@ TEST(Http2PushPromiseTest, Misc) {
 
   v.promised_stream_id = promised_stream_id;
   EXPECT_EQ(v, w);
+}
+
+TEST(Http2PingFieldsTest, Misc) {
+  Http2PingFields v{{'8', ' ', 'b', 'y', 't', 'e', 's', '\0'}};
+  std::stringstream s;
+  s << v;
+  EXPECT_EQ("opaque_bytes=0x3820627974657300", s.str());
 }
 
 TEST(Http2GoAwayFieldsTest, Misc) {

@@ -67,13 +67,14 @@ void AndroidLog(int priority, const char* format, ...) {
 
 }  // namespace
 
-static void RunTests(JNIEnv* env,
-                     const JavaParamRef<jobject>& obj,
-                     const JavaParamRef<jstring>& jcommand_line_flags,
-                     const JavaParamRef<jstring>& jcommand_line_file_path,
-                     const JavaParamRef<jstring>& jstdout_file_path,
-                     const JavaParamRef<jobject>& app_context,
-                     const JavaParamRef<jstring>& jtest_data_dir) {
+static void JNI_NativeTest_RunTests(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& jcommand_line_flags,
+    const JavaParamRef<jstring>& jcommand_line_file_path,
+    const JavaParamRef<jstring>& jstdout_file_path,
+    const JavaParamRef<jobject>& app_context,
+    const JavaParamRef<jstring>& jtest_data_dir) {
   // Command line initialized basically, will be fully initialized later.
   static const char* const kInitialArgv[] = { "ChromeTestActivity" };
   base::CommandLine::Init(arraysize(kInitialArgv), kInitialArgv);
@@ -128,12 +129,6 @@ static void RunTests(JNIEnv* env,
 
   ScopedMainEntryLogger scoped_main_entry_logger;
   main(argc, &argv[0]);
-}
-
-bool RegisterNativeTestJNI(JNIEnv* env) {
-  if (!RegisterMainRunnerJni(env))
-    return false;
-  return RegisterNativesImpl(env);
 }
 
 // TODO(nileshagrawal): now that we're using FIFO, test scripts can detect EOF.

@@ -6,9 +6,9 @@
 
 #include "base/command_line.h"
 #include "media/base/media_switches.h"
-#include "services/service_manager/public/interfaces/constants.mojom.h"
-#include "services/service_manager/public/interfaces/service_manager.mojom.h"
-#include "services/video_capture/public/interfaces/constants.mojom.h"
+#include "services/service_manager/public/mojom/constants.mojom.h"
+#include "services/service_manager/public/mojom/service_manager.mojom.h"
+#include "services/video_capture/public/mojom/constants.mojom.h"
 
 namespace video_capture {
 
@@ -35,7 +35,7 @@ void DeviceFactoryProviderTest::SetUp() {
                              &service_manager);
   service_manager::mojom::ServiceManagerListenerPtr listener;
   base::RunLoop loop;
-  service_state_observer_ = base::MakeUnique<ServiceManagerListenerImpl>(
+  service_state_observer_ = std::make_unique<ServiceManagerListenerImpl>(
       mojo::MakeRequest(&listener), &loop);
   service_manager->AddListener(std::move(listener));
   loop.Run();

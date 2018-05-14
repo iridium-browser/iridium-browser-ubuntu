@@ -14,13 +14,14 @@
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/media/router/mock_media_router.h"
+#include "chrome/browser/media/router/test/mock_media_router.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/cast_config_client_media_router.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chromeos/chromeos_switches.h"
 #include "components/drive/service/fake_drive_service.h"
 #include "components/session_manager/core/session_manager.h"
 #include "content/public/browser/browser_context.h"
@@ -33,6 +34,7 @@
 #include "google_apis/drive/time_util.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 #include "ui/shell_dialogs/select_file_dialog_factory.h"
+#include "ui/shell_dialogs/select_file_policy.h"
 
 // Tests for access to external file systems (as defined in
 // storage/common/fileapi/file_system_types.h) from extensions with
@@ -67,22 +69,23 @@ namespace {
 // NOTE: Root dir for drive file system is set by Chrome's drive implementation,
 // but the test will have to make sure the mount point is added before
 // starting a test extension using WaitUntilDriveMountPointIsAdded().
-const char kLocalMountPointName[] = "local";
-const char kRestrictedMountPointName[] = "restricted";
+constexpr char kLocalMountPointName[] = "local";
+constexpr char kRestrictedMountPointName[] = "restricted";
 
 // Default file content for the test files.
-const char kTestFileContent[] = "This is some test content.";
+constexpr char kTestFileContent[] = "This is some test content.";
 
 // User account email and directory hash for secondary account for multi-profile
 // sensitive test cases.
-const char kSecondProfileAccount[] = "profile2@test.com";
-const char kSecondProfileHash[] = "fileBrowserApiTestProfile2";
+constexpr char kSecondProfileAccount[] = "profile2@test.com";
+constexpr char kSecondProfileGiaId[] = "9876543210";
+constexpr char kSecondProfileHash[] = "fileBrowserApiTestProfile2";
 
 class FakeSelectFileDialog : public ui::SelectFileDialog {
  public:
   FakeSelectFileDialog(ui::SelectFileDialog::Listener* listener,
-                       ui::SelectFilePolicy* policy)
-      : ui::SelectFileDialog(listener, policy) {}
+                       std::unique_ptr<ui::SelectFilePolicy> policy)
+      : ui::SelectFileDialog(listener, std::move(policy)) {}
 
   void SelectFileImpl(Type type,
                       const base::string16& title,
@@ -110,9 +113,10 @@ class FakeSelectFileDialog : public ui::SelectFileDialog {
 
 class FakeSelectFileDialogFactory : public ui::SelectFileDialogFactory {
  private:
-  ui::SelectFileDialog* Create(ui::SelectFileDialog::Listener* listener,
-                               ui::SelectFilePolicy* policy) override {
-    return new FakeSelectFileDialog(listener, policy);
+  ui::SelectFileDialog* Create(
+      ui::SelectFileDialog::Listener* listener,
+      std::unique_ptr<ui::SelectFilePolicy> policy) override {
+    return new FakeSelectFileDialog(listener, std::move(policy));
   }
 };
 
@@ -328,8 +332,10 @@ class FileSystemExtensionApiTestBase : public ExtensionApiTest {
       BackgroundObserver page_complete;
       const Extension* file_handler =
           LoadExtension(test_data_dir_.AppendASCII(filehandler_path));
-      if (!file_handler)
+      if (!file_handler) {
+        message_ = "Error loading file handler extension";
         return false;
+      }
 
       if (flags & FLAGS_LAZY_FILE_HANDLER) {
         page_complete.WaitUntilClosed();
@@ -343,8 +349,10 @@ class FileSystemExtensionApiTestBase : public ExtensionApiTest {
     const Extension* file_browser = LoadExtensionAsComponentWithManifest(
         test_data_dir_.AppendASCII(filebrowser_path),
         filebrowser_manifest);
-    if (!file_browser)
+    if (!file_browser) {
+      message_ = "Could not create file browser";
       return false;
+    }
 
     if (!catcher.GetNextResult()) {
       message_ = catcher.message();
@@ -467,9 +475,12 @@ class DriveFileSystemExtensionApiTest : public FileSystemExtensionApiTestBase {
   // DriveIntegrationService factory function for this test.
   drive::DriveIntegrationService* CreateDriveIntegrationService(
       Profile* profile) {
-    // Ignore signin profile.
-    if (profile->GetPath() == chromeos::ProfileHelper::GetSigninProfileDir())
+    // Ignore signin and lock screen apps profile.
+    if (profile->GetPath() == chromeos::ProfileHelper::GetSigninProfileDir() ||
+        profile->GetPath() ==
+            chromeos::ProfileHelper::GetLockScreenAppProfilePath()) {
       return nullptr;
+    }
 
     // DriveFileSystemExtensionApiTest doesn't expect that several user profiles
     // could exist simultaneously.
@@ -494,11 +505,22 @@ class MultiProfileDriveFileSystemExtensionApiTest :
  public:
   MultiProfileDriveFileSystemExtensionApiTest() {}
 
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    FileSystemExtensionApiTestBase::SetUpCommandLine(command_line);
+    // Don't require policy for our sessions - this is required because
+    // this test creates a secondary profile synchronously, so we need to
+    // let the policy code know not to expect cached policy.
+    command_line->AppendSwitchASCII(chromeos::switches::kProfileRequiresPolicy,
+                                    "false");
+  }
+
   void SetUpOnMainThread() override {
     base::FilePath user_data_directory;
     PathService::Get(chrome::DIR_USER_DATA, &user_data_directory);
     session_manager::SessionManager::Get()->CreateSession(
-        AccountId::FromUserEmail(kSecondProfileAccount), kSecondProfileHash);
+        AccountId::FromUserEmailGaiaId(kSecondProfileAccount,
+                                       kSecondProfileGiaId),
+        kSecondProfileHash, false);
     // Set up the secondary profile.
     base::FilePath profile_dir =
         user_data_directory.Append(

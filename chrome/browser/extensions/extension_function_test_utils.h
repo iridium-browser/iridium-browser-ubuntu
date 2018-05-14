@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
+#include "extensions/browser/api_test_utils.h"
 #include "extensions/common/manifest.h"
 
 class Browser;
@@ -25,9 +26,7 @@ class ListValue;
 // extensions/browser/api_test_utils.h.
 namespace extension_function_test_utils {
 
-// Parse JSON and return as the specified type, or NULL if the JSON is invalid
-// or not the specified type.
-base::Value* ParseJSON(const std::string& data);
+// Parse JSON and return as a ListValue, or null if invalid.
 base::ListValue* ParseList(const std::string& data);
 
 // If |val| is a dictionary, return it as one, otherwise NULL.
@@ -40,18 +39,14 @@ base::ListValue* ToList(base::Value* val);
 // title, and faviconUrl.
 bool HasPrivacySensitiveFields(base::DictionaryValue* val);
 
-enum RunFunctionFlags {
-  NONE = 0,
-  INCLUDE_INCOGNITO = 1 << 0
-};
-
 // Run |function| with |args| and return the resulting error. Adds an error to
 // the current test if |function| returns a result. Takes ownership of
 // |function|.
-std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
-                                      const std::string& args,
-                                      Browser* browser,
-                                      RunFunctionFlags flags);
+std::string RunFunctionAndReturnError(
+    UIThreadExtensionFunction* function,
+    const std::string& args,
+    Browser* browser,
+    extensions::api_test_utils::RunFunctionFlags flags);
 std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
                                       const std::string& args,
                                       Browser* browser);
@@ -63,7 +58,7 @@ base::Value* RunFunctionAndReturnSingleResult(
     UIThreadExtensionFunction* function,
     const std::string& args,
     Browser* browser,
-    RunFunctionFlags flags);
+    extensions::api_test_utils::RunFunctionFlags flags);
 base::Value* RunFunctionAndReturnSingleResult(
     UIThreadExtensionFunction* function,
     const std::string& args,
@@ -82,11 +77,11 @@ base::Value* RunFunctionAndReturnSingleResult(
 bool RunFunction(UIThreadExtensionFunction* function,
                  const std::string& args,
                  Browser* browser,
-                 RunFunctionFlags flags);
+                 extensions::api_test_utils::RunFunctionFlags flags);
 bool RunFunction(UIThreadExtensionFunction* function,
                  std::unique_ptr<base::ListValue> args,
                  Browser* browser,
-                 RunFunctionFlags flags);
+                 extensions::api_test_utils::RunFunctionFlags flags);
 
 } // namespace extension_function_test_utils
 

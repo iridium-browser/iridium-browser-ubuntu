@@ -11,7 +11,6 @@
 #include "base/run_loop.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
@@ -22,6 +21,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
 #include "components/proxy_config/proxy_prefs.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -39,8 +39,8 @@ namespace chromeos {
 class NetworkPrefStateObserverTest : public testing::Test {
  public:
   NetworkPrefStateObserverTest()
-      : fake_user_manager_(new chromeos::FakeChromeUserManager),
-        user_manager_enabler_(fake_user_manager_),
+      : fake_user_manager_(new FakeChromeUserManager),
+        user_manager_enabler_(base::WrapUnique(fake_user_manager_)),
         profile_manager_(TestingBrowserProcess::GetGlobal()) {}
   ~NetworkPrefStateObserverTest() override {}
 
@@ -74,7 +74,7 @@ class NetworkPrefStateObserverTest : public testing::Test {
 
   content::TestBrowserThreadBundle thread_bundle_;
   FakeChromeUserManager* fake_user_manager_;
-  chromeos::ScopedUserManagerEnabler user_manager_enabler_;
+  user_manager::ScopedUserManager user_manager_enabler_;
   TestingProfileManager profile_manager_;
   std::unique_ptr<NetworkPrefStateObserver> network_pref_state_observer_;
 
@@ -106,7 +106,7 @@ TEST_F(NetworkPrefStateObserverTest, LoginUser) {
 
   // Set the profile pref to PAC script mode.
   std::unique_ptr<base::DictionaryValue> proxy_config(
-      base::MakeUnique<base::DictionaryValue>());
+      std::make_unique<base::DictionaryValue>());
   proxy_config->SetString("mode", ProxyPrefs::kPacScriptProxyModeName);
   proxy_config->SetString("pac_url", "http://proxy");
   profile->GetPrefs()->Set(proxy_config::prefs::kProxy, *proxy_config.get());

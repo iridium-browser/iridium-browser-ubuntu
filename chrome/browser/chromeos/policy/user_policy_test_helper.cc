@@ -15,6 +15,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_policy_manager_factory_chromeos.h"
+#include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/policy/test/local_policy_test_server.h"
@@ -51,8 +52,8 @@ std::string BuildPolicy(const base::DictionaryValue& mandatory,
   root_dict.SetWithoutPathExpansion(policyType, std::move(policy_type_dict));
   root_dict.SetWithoutPathExpansion("managed_users",
                                     std::move(managed_users_list));
-  root_dict.SetStringWithoutPathExpansion("policy_user", account_id);
-  root_dict.SetIntegerWithoutPathExpansion("current_key_index", 0);
+  root_dict.SetKey("policy_user", base::Value(account_id));
+  root_dict.SetKey("current_key_index", base::Value(0));
 
   std::string json_policy;
   base::JSONWriter::WriteWithOptions(
@@ -93,6 +94,7 @@ void UserPolicyTestHelper::WaitForInitialPolicy(Profile* profile) {
   UserCloudPolicyManagerChromeOS* const policy_manager =
       UserPolicyManagerFactoryChromeOS::GetCloudPolicyManagerForProfile(
           profile);
+  DCHECK(!policy_manager->IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
   // Give a bogus OAuth token to the |policy_manager|. This should make its
   // CloudPolicyClient fetch the DMToken.
@@ -102,6 +104,7 @@ void UserPolicyTestHelper::WaitForInitialPolicy(Profile* profile) {
   policy_manager->core()->client()->Register(
       registration_type,
       enterprise_management::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
+      enterprise_management::DeviceRegisterRequest::LIFETIME_INDEFINITE,
       enterprise_management::LicenseType::UNDEFINED, "bogus", std::string(),
       std::string(), std::string());
 

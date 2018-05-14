@@ -32,10 +32,11 @@
 
 #include <memory>
 #include "core/animation/AnimationClock.h"
-#include "core/animation/CompositorPendingAnimations.h"
 #include "core/animation/DocumentTimeline.h"
 #include "core/animation/ElementAnimations.h"
 #include "core/animation/KeyframeEffect.h"
+#include "core/animation/KeyframeEffectModel.h"
+#include "core/animation/PendingAnimations.h"
 #include "core/dom/DOMNodeIds.h"
 #include "core/dom/Document.h"
 #include "core/dom/QualifiedName.h"
@@ -65,27 +66,30 @@ class AnimationAnimationTest : public RenderingTest {
     document->GetAnimationClock().ResetTimeForTesting();
     timeline = DocumentTimeline::Create(document.Get());
     timeline->ResetForTesting();
-    animation = timeline->Play(0);
+    animation = timeline->Play(nullptr);
     animation->setStartTime(0, false);
     animation->setEffect(MakeAnimation());
   }
 
   void StartTimeline() { SimulateFrame(0); }
 
+  KeyframeEffectModelBase* MakeEmptyEffectModel() {
+    return StringKeyframeEffectModel::Create(StringKeyframeVector());
+  }
+
   KeyframeEffect* MakeAnimation(double duration = 30,
                                 double playback_rate = 1) {
     Timing timing;
     timing.iteration_duration = duration;
     timing.playback_rate = playback_rate;
-    return KeyframeEffect::Create(0, nullptr, timing);
+    return KeyframeEffect::Create(nullptr, MakeEmptyEffectModel(), timing);
   }
 
   bool SimulateFrame(double time,
                      Optional<CompositorElementIdSet> composited_element_ids =
                          Optional<CompositorElementIdSet>()) {
     document->GetAnimationClock().UpdateTime(time);
-    document->GetCompositorPendingAnimations().Update(composited_element_ids,
-                                                      false);
+    document->GetPendingAnimations().Update(composited_element_ids, false);
     // The timeline does not know about our animation, so we have to explicitly
     // call update().
     return animation->Update(kTimingUpdateForAnimationFrame);
@@ -99,7 +103,7 @@ class AnimationAnimationTest : public RenderingTest {
 
 TEST_F(AnimationAnimationTest, InitialState) {
   SetUpWithoutStartingTimeline();
-  animation = timeline->Play(0);
+  animation = timeline->Play(nullptr);
   EXPECT_EQ(Animation::kPending, animation->PlayStateInternal());
   EXPECT_EQ(0, animation->CurrentTimeInternal());
   EXPECT_FALSE(animation->Paused());
@@ -450,7 +454,8 @@ TEST_F(AnimationAnimationTest, FinishRaisesException) {
   Timing timing;
   timing.iteration_duration = 1;
   timing.iteration_count = std::numeric_limits<double>::infinity();
-  animation->setEffect(KeyframeEffect::Create(0, nullptr, timing));
+  animation->setEffect(
+      KeyframeEffect::Create(nullptr, MakeEmptyEffectModel(), timing));
   animation->SetCurrentTimeInternal(10);
 
   DummyExceptionStateForTesting exception_state;
@@ -482,7 +487,7 @@ TEST_F(AnimationAnimationTest, LimitingAtStart) {
 }
 
 TEST_F(AnimationAnimationTest, LimitingWithNoEffect) {
-  animation->setEffect(0);
+  animation->setEffect(nullptr);
   EXPECT_TRUE(animation->Limited());
   SimulateFrame(30);
   EXPECT_EQ(0, animation->CurrentTimeInternal());
@@ -544,7 +549,7 @@ TEST_F(AnimationAnimationTest, SetPlaybackRateMax) {
 }
 
 TEST_F(AnimationAnimationTest, SetEffect) {
-  animation = timeline->Play(0);
+  animation = timeline->Play(nullptr);
   animation->setStartTime(0, false);
   AnimationEffectReadOnly* effect1 = MakeAnimation();
   AnimationEffectReadOnly* effect2 = MakeAnimation();
@@ -554,8 +559,8 @@ TEST_F(AnimationAnimationTest, SetEffect) {
   animation->SetCurrentTimeInternal(15);
   animation->setEffect(effect2);
   EXPECT_EQ(15, animation->CurrentTimeInternal());
-  EXPECT_EQ(0, effect1->GetAnimation());
-  EXPECT_EQ(animation, effect2->GetAnimation());
+  EXPECT_EQ(nullptr, effect1->GetAnimationForTesting());
+  EXPECT_EQ(animation, effect2->GetAnimationForTesting());
   EXPECT_EQ(effect2, animation->effect());
 }
 
@@ -578,7 +583,7 @@ TEST_F(AnimationAnimationTest, SetEffectUnlimitsAnimation) {
 }
 
 TEST_F(AnimationAnimationTest, EmptyAnimationsDontUpdateEffects) {
-  animation = timeline->Play(0);
+  animation = timeline->Play(nullptr);
   animation->Update(kTimingUpdateOnDemand);
   EXPECT_EQ(std::numeric_limits<double>::infinity(),
             animation->TimeToEffectChange());
@@ -591,9 +596,9 @@ TEST_F(AnimationAnimationTest, EmptyAnimationsDontUpdateEffects) {
 TEST_F(AnimationAnimationTest, AnimationsDisassociateFromEffect) {
   AnimationEffectReadOnly* animation_node = animation->effect();
   Animation* animation2 = timeline->Play(animation_node);
-  EXPECT_EQ(0, animation->effect());
+  EXPECT_EQ(nullptr, animation->effect());
   animation->setEffect(animation_node);
-  EXPECT_EQ(0, animation2->effect());
+  EXPECT_EQ(nullptr, animation2->effect());
 }
 
 TEST_F(AnimationAnimationTest, AnimationsReturnTimeToNextEffect) {
@@ -601,7 +606,8 @@ TEST_F(AnimationAnimationTest, AnimationsReturnTimeToNextEffect) {
   timing.start_delay = 1;
   timing.iteration_duration = 1;
   timing.end_delay = 1;
-  KeyframeEffect* keyframe_effect = KeyframeEffect::Create(0, nullptr, timing);
+  KeyframeEffect* keyframe_effect =
+      KeyframeEffect::Create(nullptr, MakeEmptyEffectModel(), timing);
   animation = timeline->Play(keyframe_effect);
   animation->setStartTime(0, false);
 
@@ -702,11 +708,11 @@ TEST_F(AnimationAnimationTest, TimeToNextEffectSimpleCancelledBeforeStart) {
 }
 
 TEST_F(AnimationAnimationTest, AttachedAnimations) {
-  Persistent<Element> element = document->createElement("foo");
+  Persistent<Element> element = document->CreateElementForBinding("foo");
 
   Timing timing;
   KeyframeEffect* keyframe_effect =
-      KeyframeEffect::Create(element.Get(), nullptr, timing);
+      KeyframeEffect::Create(element.Get(), MakeEmptyEffectModel(), timing);
   Animation* animation = timeline->Play(keyframe_effect);
   SimulateFrame(0);
   timeline->ServiceAnimations(kTimingUpdateForAnimationFrame);
@@ -718,8 +724,8 @@ TEST_F(AnimationAnimationTest, AttachedAnimations) {
 }
 
 TEST_F(AnimationAnimationTest, HasLowerPriority) {
-  Animation* animation1 = timeline->Play(0);
-  Animation* animation2 = timeline->Play(0);
+  Animation* animation1 = timeline->Play(nullptr);
+  Animation* animation2 = timeline->Play(nullptr);
   EXPECT_TRUE(Animation::HasLowerPriority(animation1, animation2));
 }
 
@@ -807,7 +813,7 @@ TEST_F(AnimationAnimationTest, NoCompositeWithoutCompositedElementId) {
   Optional<CompositorElementIdSet> composited_element_ids =
       CompositorElementIdSet();
   CompositorElementId expected_compositor_element_id =
-      CompositorElementIdFromLayoutObjectId(
+      CompositorElementIdFromUniqueObjectId(
           ToLayoutBoxModelObject(object_composited)->UniqueId(),
           CompositorElementIdNamespace::kPrimary);
   composited_element_ids->insert(expected_compositor_element_id);
@@ -816,10 +822,11 @@ TEST_F(AnimationAnimationTest, NoCompositeWithoutCompositedElementId) {
   timing.iteration_duration = 30;
   timing.playback_rate = 1;
   KeyframeEffect* keyframe_effect_composited = KeyframeEffect::Create(
-      ToElement(object_composited->GetNode()), nullptr, timing);
+      ToElement(object_composited->GetNode()), MakeEmptyEffectModel(), timing);
   Animation* animation_composited = timeline->Play(keyframe_effect_composited);
-  KeyframeEffect* keyframe_effect_not_composited = KeyframeEffect::Create(
-      ToElement(object_not_composited->GetNode()), nullptr, timing);
+  KeyframeEffect* keyframe_effect_not_composited =
+      KeyframeEffect::Create(ToElement(object_not_composited->GetNode()),
+                             MakeEmptyEffectModel(), timing);
   Animation* animation_not_composited =
       timeline->Play(keyframe_effect_not_composited);
 

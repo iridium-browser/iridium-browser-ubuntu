@@ -4,15 +4,17 @@
 
 #include "core/frame/WebViewFrameWidget.h"
 
-#include "core/exported/WebViewBase.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/exported/WebViewImpl.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "core/layout/HitTestResult.h"
+#include "platform/exported/WebActiveGestureAnimation.h"
+#include "third_party/WebKit/public/mojom/page/page_visibility_state.mojom-blink.h"
 
 namespace blink {
 
 WebViewFrameWidget::WebViewFrameWidget(WebWidgetClient& client,
-                                       WebViewBase& web_view,
-                                       WebLocalFrameBase& main_frame)
+                                       WebViewImpl& web_view,
+                                       WebLocalFrameImpl& main_frame)
     : client_(&client),
       web_view_(&web_view),
       main_frame_(&main_frame),
@@ -21,7 +23,7 @@ WebViewFrameWidget::WebViewFrameWidget(WebWidgetClient& client,
   web_view_->SetCompositorVisibility(true);
 }
 
-WebViewFrameWidget::~WebViewFrameWidget() {}
+WebViewFrameWidget::~WebViewFrameWidget() = default;
 
 void WebViewFrameWidget::Close() {
   // Note: it's important to use the captured main frame pointer here. During
@@ -68,8 +70,12 @@ void WebViewFrameWidget::BeginFrame(double last_frame_time_monotonic) {
   return web_view_->BeginFrame(last_frame_time_monotonic);
 }
 
-void WebViewFrameWidget::UpdateAllLifecyclePhases() {
-  return web_view_->UpdateAllLifecyclePhases();
+void WebViewFrameWidget::UpdateLifecycle(LifecycleUpdate requested_update) {
+  return web_view_->UpdateLifecycle(requested_update);
+}
+
+void WebViewFrameWidget::UpdateAllLifecyclePhasesAndCompositeForTesting() {
+  web_view_->UpdateAllLifecyclePhasesAndCompositeForTesting();
 }
 
 void WebViewFrameWidget::Paint(WebCanvas* canvas, const WebRect& view_port) {
@@ -95,12 +101,12 @@ WebInputEventResult WebViewFrameWidget::HandleInputEvent(
   return web_view_->HandleInputEvent(event);
 }
 
-void WebViewFrameWidget::SetCursorVisibilityState(bool is_visible) {
-  return web_view_->SetCursorVisibilityState(is_visible);
+WebInputEventResult WebViewFrameWidget::DispatchBufferedTouchEvents() {
+  return web_view_->DispatchBufferedTouchEvents();
 }
 
-bool WebViewFrameWidget::HasTouchEventHandlersAt(const WebPoint& point) {
-  return web_view_->HasTouchEventHandlersAt(point);
+void WebViewFrameWidget::SetCursorVisibilityState(bool is_visible) {
+  return web_view_->SetCursorVisibilityState(is_visible);
 }
 
 void WebViewFrameWidget::ApplyViewportDeltas(
@@ -129,26 +135,9 @@ void WebViewFrameWidget::SetFocus(bool enable) {
   return web_view_->SetFocus(enable);
 }
 
-WebRange WebViewFrameWidget::CompositionRange() {
-  return web_view_->CompositionRange();
-}
-
 bool WebViewFrameWidget::SelectionBounds(WebRect& anchor,
                                          WebRect& focus) const {
   return web_view_->SelectionBounds(anchor, focus);
-}
-
-bool WebViewFrameWidget::SelectionTextDirection(WebTextDirection& start,
-                                                WebTextDirection& end) const {
-  return web_view_->SelectionTextDirection(start, end);
-}
-
-bool WebViewFrameWidget::IsSelectionAnchorFirst() const {
-  return web_view_->IsSelectionAnchorFirst();
-}
-
-void WebViewFrameWidget::SetTextDirection(WebTextDirection direction) {
-  return web_view_->SetTextDirection(direction);
 }
 
 bool WebViewFrameWidget::IsAcceleratedCompositingActive() const {
@@ -167,11 +156,6 @@ WebPagePopup* WebViewFrameWidget::GetPagePopup() const {
   return web_view_->GetPagePopup();
 }
 
-bool WebViewFrameWidget::GetCompositionCharacterBounds(
-    WebVector<WebRect>& bounds) {
-  return web_view_->GetCompositionCharacterBounds(bounds);
-}
-
 void WebViewFrameWidget::UpdateBrowserControlsState(
     WebBrowserControlsState constraints,
     WebBrowserControlsState current,
@@ -180,7 +164,7 @@ void WebViewFrameWidget::UpdateBrowserControlsState(
 }
 
 void WebViewFrameWidget::SetVisibilityState(
-    WebPageVisibilityState visibility_state) {
+    mojom::PageVisibilityState visibility_state) {
   return web_view_->SetVisibilityState(visibility_state, false);
 }
 
@@ -204,7 +188,7 @@ void WebViewFrameWidget::SetBaseBackgroundColor(WebColor color) {
   web_view_->SetBaseBackgroundColor(color);
 }
 
-WebLocalFrameBase* WebViewFrameWidget::LocalRoot() const {
+WebLocalFrameImpl* WebViewFrameWidget::LocalRoot() const {
   return web_view_->MainFrameImpl();
 }
 
@@ -241,13 +225,21 @@ CompositorAnimationHost* WebViewFrameWidget::AnimationHost() const {
   return web_view_->AnimationHost();
 }
 
+WebHitTestResult WebViewFrameWidget::HitTestResultAt(const WebPoint& point) {
+  return web_view_->HitTestResultAt(point);
+}
+
 HitTestResult WebViewFrameWidget::CoreHitTestResultAt(const WebPoint& point) {
   return web_view_->CoreHitTestResultAt(point);
 }
 
-DEFINE_TRACE(WebViewFrameWidget) {
+void WebViewFrameWidget::Trace(blink::Visitor* visitor) {
   visitor->Trace(main_frame_);
   WebFrameWidgetBase::Trace(visitor);
+}
+
+PageWidgetEventHandler* WebViewFrameWidget::GetPageWidgetEventHandler() {
+  return web_view_.get();
 }
 
 }  // namespace blink

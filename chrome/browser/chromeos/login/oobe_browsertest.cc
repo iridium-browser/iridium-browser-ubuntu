@@ -11,8 +11,8 @@
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
-#include "chrome/browser/chromeos/login/ui/webui_login_display.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
+#include "chrome/browser/chromeos/login/ui/login_display_webui.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
@@ -54,13 +54,13 @@ class OobeTest : public OobeBaseTest {
     OobeBaseTest::TearDownOnMainThread();
   }
 
-  WebUILoginDisplay* GetLoginDisplay() {
-    return static_cast<WebUILoginDisplay*>(
+  LoginDisplayWebUI* GetLoginDisplay() {
+    return static_cast<LoginDisplayWebUI*>(
         ExistingUserController::current_controller()->login_display());
   }
 
   views::Widget* GetLoginWindowWidget() {
-    return static_cast<LoginDisplayHostImpl*>(LoginDisplayHost::default_host())
+    return static_cast<LoginDisplayHostWebUI*>(LoginDisplayHost::default_host())
         ->login_window_for_test();
   }
 
@@ -86,8 +86,7 @@ IN_PROC_BROWSER_TEST_F(OobeTest, Accelerator) {
 
   gfx::NativeWindow login_window = GetLoginWindowWidget()->GetNativeWindow();
 
-  ui_controls::SendKeyPress(login_window,
-                            ui::VKEY_E,
+  ui_controls::SendKeyPress(login_window, ui::VKEY_E,
                             true,    // control
                             false,   // shift
                             true,    // alt

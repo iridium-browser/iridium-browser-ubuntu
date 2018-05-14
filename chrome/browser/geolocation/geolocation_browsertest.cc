@@ -9,9 +9,11 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_clock.h"
 #include "base/time/clock.h"
 #include "build/build_config.h"
@@ -23,6 +25,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/content_settings_usages_state.h"
@@ -33,13 +36,17 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
-#include "device/geolocation/geoposition.h"
+#include "device/geolocation/public/cpp/scoped_geolocation_overrider.h"
+#include "net/base/escape.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/url_request/test_url_fetcher_factory.h"
+#include "services/device/public/mojom/geoposition.mojom.h"
 
 namespace {
 
 std::string GetErrorCodePermissionDenied() {
-  return base::IntToString(device::Geoposition::ERROR_CODE_PERMISSION_DENIED);
+  return base::IntToString(static_cast<int>(
+      device::mojom::Geoposition::ErrorCode::PERMISSION_DENIED));
 }
 
 std::string RunScript(content::RenderFrameHost* render_frame_host,
@@ -124,7 +131,7 @@ void IFrameLoader::Observe(int type,
     javascript_completed_ = true;
   }
   if (javascript_completed_ && navigation_completed_)
-    base::MessageLoopForUI::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 // PermissionRequestObserver ---------------------------------------------------
@@ -164,6 +171,39 @@ class PermissionRequestObserver : public PermissionRequestManager::Observer {
   DISALLOW_COPY_AND_ASSIGN(PermissionRequestObserver);
 };
 
+// Observer that waits until a TestURLFetcher with the specified fetcher_id
+// starts, after which it is made available through .fetcher().
+class TestURLFetcherObserver : public net::TestURLFetcher::DelegateForTests {
+ public:
+  explicit TestURLFetcherObserver(int expected_fetcher_id)
+      : expected_fetcher_id_(expected_fetcher_id) {
+    factory_.SetDelegateForTests(this);
+  }
+  virtual ~TestURLFetcherObserver() {}
+
+  void Wait() { loop_.Run(); }
+
+  net::TestURLFetcher* fetcher() { return fetcher_; }
+
+  // net::TestURLFetcher::DelegateForTests:
+  void OnRequestStart(int fetcher_id) override {
+    if (fetcher_id == expected_fetcher_id_) {
+      fetcher_ = factory_.GetFetcherByID(fetcher_id);
+      fetcher_->SetDelegateForTests(nullptr);
+      factory_.SetDelegateForTests(nullptr);
+      loop_.Quit();
+    }
+  }
+  void OnChunkUpload(int fetcher_id) override {}
+  void OnRequestEnd(int fetcher_id) override {}
+
+ private:
+  const int expected_fetcher_id_;
+  net::TestURLFetcher* fetcher_ = nullptr;
+  net::TestURLFetcherFactory factory_;
+  base::RunLoop loop_;
+};
+
 }  // namespace
 
 
@@ -193,10 +233,9 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
   };
 
   GeolocationBrowserTest();
-  ~GeolocationBrowserTest() override;
+  ~GeolocationBrowserTest() override = default;
 
   // InProcessBrowserTest:
-  void SetUpOnMainThread() override;
   void TearDownInProcessBrowserTestFixture() override;
 
   Browser* current_browser() { return current_browser_; }
@@ -254,8 +293,11 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
   // Convenience method to look up the number of queued permission requests.
   int GetRequestQueueSize(PermissionRequestManager* manager);
 
-  // Toggle whether the prompt decision should be persisted.
-  void TogglePersist(bool persist);
+ protected:
+  // The values used for the position override.
+  double fake_latitude_ = 1.23;
+  double fake_longitude_ = 4.56;
+  std::unique_ptr<device::ScopedGeolocationOverrider> geolocation_overrider_;
 
  private:
   // Calls watchPosition() in JavaScript and accepts or denies the resulting
@@ -278,22 +320,17 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
   // The urls for the iframes loaded by LoadIFrames.
   std::vector<GURL> iframe_urls_;
 
-  // The values used for the position override.
-  double fake_latitude_ = 1.23;
-  double fake_longitude_ = 4.56;
 
   DISALLOW_COPY_AND_ASSIGN(GeolocationBrowserTest);
 };
 
-GeolocationBrowserTest::GeolocationBrowserTest() {
-}
-
-GeolocationBrowserTest::~GeolocationBrowserTest() {
-}
-
-void GeolocationBrowserTest::SetUpOnMainThread() {
-  ui_test_utils::OverrideGeolocation(fake_latitude_, fake_longitude_);
-}
+// WebContentImpl tries to connect Device Service earlier than
+// of SetUpOnMainThread(), so create the |geolocation_overrider_| here.
+GeolocationBrowserTest::GeolocationBrowserTest()
+    : geolocation_overrider_(
+          std::make_unique<device::ScopedGeolocationOverrider>(
+              fake_latitude_,
+              fake_longitude_)) {}
 
 void GeolocationBrowserTest::TearDownInProcessBrowserTestFixture() {
   LOG(WARNING) << "TearDownInProcessBrowserTestFixture. Test Finished.";
@@ -389,9 +426,9 @@ void GeolocationBrowserTest::WatchPositionAndObservePermissionRequest(
 void GeolocationBrowserTest::ExpectPosition(double latitude, double longitude) {
   // Checks we have no error.
   ExpectValueFromScript("0", "geoGetLastError()");
-  ExpectValueFromScript(base::DoubleToString(latitude),
+  ExpectValueFromScript(base::NumberToString(latitude),
                         "geoGetLastPositionLatitude()");
-  ExpectValueFromScript(base::DoubleToString(longitude),
+  ExpectValueFromScript(base::NumberToString(longitude),
                         "geoGetLastPositionLongitude()");
 }
 
@@ -416,7 +453,8 @@ bool GeolocationBrowserTest::SetPositionAndWaitUntilUpdated(double latitude,
 
   fake_latitude_ = latitude;
   fake_longitude_ = longitude;
-  ui_test_utils::OverrideGeolocation(latitude, longitude);
+
+  geolocation_overrider_->UpdateLocation(fake_latitude_, fake_longitude_);
 
   std::string result;
   if (!dom_message_queue.WaitForMessage(&result))
@@ -427,13 +465,6 @@ bool GeolocationBrowserTest::SetPositionAndWaitUntilUpdated(double latitude,
 int GeolocationBrowserTest::GetRequestQueueSize(
     PermissionRequestManager* manager) {
   return static_cast<int>(manager->requests_.size());
-}
-
-void GeolocationBrowserTest::TogglePersist(bool persist) {
-  content::WebContents* web_contents =
-      current_browser()->tab_strip_model()->GetActiveWebContents();
-  PermissionRequestManager::FromWebContents(web_contents)
-      ->TogglePersist(persist);
 }
 
 // Tests ----------------------------------------------------------------------
@@ -540,47 +571,14 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoLeakFromOffTheRecord) {
   ExpectPosition(fake_latitude(), fake_longitude());
 }
 
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, TogglePersistGranted) {
-  // Initialize and turn persistence off.
-  ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
-  TogglePersist(false);
-
-  ASSERT_TRUE(WatchPositionAndGrantPermission());
-  EXPECT_EQ(CONTENT_SETTING_ASK,
-            GetHostContentSettingsMap()->GetContentSetting(
-                current_url(), current_url(), CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                std::string()));
-
-  // Expect the grant to be remembered at the blink layer, so a second request
-  // on this page doesn't create a request.
-  WatchPositionAndObservePermissionRequest(false);
-
-  // Navigate and ensure that a prompt is shown when we request again.
-  ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
-  WatchPositionAndObservePermissionRequest(true);
-}
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, TogglePersistBlocked) {
-  // Initialize and turn persistence off.
-  ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
-  TogglePersist(false);
-
-  ASSERT_TRUE(WatchPositionAndDenyPermission());
-  EXPECT_EQ(CONTENT_SETTING_ASK,
-            GetHostContentSettingsMap()->GetContentSetting(
-                current_url(), current_url(), CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                std::string()));
-
-  // Expect the block to be remembered at the blink layer, so a second request
-  // on this page doesn't create a request.
-  WatchPositionAndObservePermissionRequest(false);
-
-  // Navigate and ensure that a prompt is shown when we request again.
-  ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
-  WatchPositionAndObservePermissionRequest(true);
-}
-
 IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, IFramesWithFreshPosition) {
+  // When permission delegation is enabled, there isn't a way to have a pending
+  // permission prompt when permission has already been granted in another frame
+  // on the same page. That means that this test isn't relevant and can be
+  // deleted after the feature is enabled by default.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(features::kPermissionDelegation);
+
   set_html_for_tests("/geolocation/two_iframes.html");
   ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
   LoadIFrames();
@@ -590,8 +588,8 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, IFramesWithFreshPosition) {
   ASSERT_TRUE(WatchPositionAndGrantPermission());
   ExpectPosition(fake_latitude(), fake_longitude());
 
-  // In a second iframe from a different origin with a cached position the user
-  // is prompted.
+  // In a second iframe from a different origin with a cached position the
+  // user is prompted.
   SetFrameForScriptExecution("iframe_1");
   WatchPositionAndObservePermissionRequest(true);
 
@@ -603,8 +601,8 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, IFramesWithFreshPosition) {
                                              fresh_position_longitude));
   ExpectPosition(fresh_position_latitude, fresh_position_longitude);
 
-  // When permission is granted to the second iframe the fresh position gets to
-  // the script.
+  // When permission is granted to the second iframe the fresh position gets
+  // to the script.
   SetFrameForScriptExecution("iframe_1");
   ASSERT_TRUE(WatchPositionAndGrantPermission());
   ExpectPosition(fresh_position_latitude, fresh_position_longitude);
@@ -635,6 +633,11 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, IFramesWithCachedPosition) {
 }
 
 IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, CancelPermissionForFrame) {
+  // When permission delegation is removed, iframe requests are made for the top
+  // level frame. Navigating the iframe should not cancel the request. This
+  // test can be removed after the feature is enabled by default.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(features::kPermissionDelegation);
   set_html_for_tests("/geolocation/two_iframes.html");
   ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
   LoadIFrames();

@@ -76,7 +76,7 @@ class MockBluetoothLowEnergyConnectionFinder
       : BluetoothLowEnergyConnectionFinder(
             cryptauth::CreateLERemoteDeviceForTest(),
             kBLEGattServiceUUID,
-            base::MakeUnique<FakeEidGenerator>(this)) {}
+            std::make_unique<FakeEidGenerator>(this)) {}
 
   ~MockBluetoothLowEnergyConnectionFinder() override {}
 
@@ -108,7 +108,7 @@ class MockBluetoothLowEnergyConnectionFinder
 
  protected:
   std::unique_ptr<cryptauth::Connection> CreateConnection(
-      const std::string& device_address) override {
+      device::BluetoothDevice* bluetooth_device) override {
     return base::WrapUnique(CreateConnectionProxy());
   }
 
@@ -205,9 +205,8 @@ class ProximityAuthBluetoothLowEnergyConnectionFinderTest
     uuid_list.push_back(advertisement_uuid);
     device::BluetoothDevice::ServiceDataMap service_data_map;
     service_data_map[advertisement_uuid] = eid_vector;
-
     device_->UpdateAdvertisementData(kRssi, uuid_list, service_data_map,
-                                     nullptr);
+                                     {} /* manufacturer_data */, nullptr);
   }
 
   scoped_refptr<device::MockBluetoothAdapter> adapter_;

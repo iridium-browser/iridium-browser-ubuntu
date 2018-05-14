@@ -35,6 +35,7 @@ class NetLog;
 
 namespace disk_cache {
 
+class BackendCleanupTracker;
 struct Index;
 
 enum BackendFlags {
@@ -55,13 +56,16 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   friend class Eviction;
  public:
   BackendImpl(const base::FilePath& path,
+              scoped_refptr<BackendCleanupTracker> cleanup_tracker,
               const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread,
               net::NetLog* net_log);
+
   // mask can be used to limit the usable size of the hash table, for testing.
   BackendImpl(const base::FilePath& path,
               uint32_t mask,
               const scoped_refptr<base::SingleThreadTaskRunner>& cache_thread,
               net::NetLog* net_log);
+
   ~BackendImpl() override;
 
   // Performs general initialization for this current instance of the cache.
@@ -84,6 +88,9 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
                         scoped_refptr<EntryImpl>* next_entry);
   void SyncEndEnumeration(std::unique_ptr<Rankings::Iterator> iterator);
   void SyncOnExternalCacheHit(const std::string& key);
+
+  // Called at end of any backend operation on the background thread.
+  void OnSyncBackendOpComplete();
 
   // Open or create an entry for the given |key| or |iter|.
   scoped_refptr<EntryImpl> OpenEntryImpl(const std::string& key);
@@ -265,6 +272,9 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   // Ensures the index is flushed to disk (a no-op on platforms with mmap).
   void FlushIndex();
 
+  // Ensures that the private cache thread completes work.
+  static void FlushForTesting();
+
   // Backend implementation.
   net::CacheType GetCacheType() const override;
   int32_t GetEntryCount() const override;
@@ -379,6 +389,9 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   // Returns the maximum total memory for the memory buffers.
   int MaxBuffersSize();
 
+  // We want this destroyed after every other field.
+  scoped_refptr<BackendCleanupTracker> cleanup_tracker_;
+
   InFlightBackendIO background_queue_;  // The controller of pending operations.
   scoped_refptr<MappedFile> index_;  // The main cache index.
   base::FilePath path_;  // Path to the folder used as backing storage.
@@ -407,6 +420,9 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   bool new_eviction_;  // What eviction algorithm should be used.
   bool first_timer_;  // True if the timer has not been called.
   bool user_load_;  // True if we see a high load coming from the caller.
+
+  // True if we should consider doing eviction at end of current operation.
+  bool consider_evicting_at_op_end_;
 
   net::NetLog* net_log_;
 

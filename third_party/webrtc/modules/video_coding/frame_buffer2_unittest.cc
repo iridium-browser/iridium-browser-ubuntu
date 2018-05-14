@@ -8,22 +8,22 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/video_coding/frame_buffer2.h"
+#include "modules/video_coding/frame_buffer2.h"
 
 #include <algorithm>
 #include <cstring>
 #include <limits>
 #include <vector>
 
-#include "webrtc/modules/video_coding/frame_object.h"
-#include "webrtc/modules/video_coding/jitter_estimator.h"
-#include "webrtc/modules/video_coding/sequence_number_util.h"
-#include "webrtc/modules/video_coding/timing.h"
-#include "webrtc/rtc_base/platform_thread.h"
-#include "webrtc/rtc_base/random.h"
-#include "webrtc/system_wrappers/include/clock.h"
-#include "webrtc/test/gmock.h"
-#include "webrtc/test/gtest.h"
+#include "modules/video_coding/frame_object.h"
+#include "modules/video_coding/jitter_estimator.h"
+#include "modules/video_coding/timing.h"
+#include "rtc_base/numerics/sequence_number_util.h"
+#include "rtc_base/platform_thread.h"
+#include "rtc_base/random.h"
+#include "system_wrappers/include/clock.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
 
 using testing::_;
 using testing::Return;
@@ -52,9 +52,9 @@ class VCMTimingFake : public VCMTiming {
     return last_ms_;
   }
 
-  uint32_t MaxWaitingTime(int64_t render_time_ms,
-                          int64_t now_ms) const override {
-    return std::max<int>(0, render_time_ms - now_ms - kDecodeTime);
+  int64_t MaxWaitingTime(int64_t render_time_ms,
+                         int64_t now_ms) const override {
+    return render_time_ms - now_ms - kDecodeTime;
   }
 
   bool GetTimings(int* decode_ms,
@@ -86,7 +86,7 @@ class VCMJitterEstimatorMock : public VCMJitterEstimator {
   MOCK_METHOD1(GetJitterEstimate, int(double rttMultiplier));
 };
 
-class FrameObjectFake : public FrameObject {
+class FrameObjectFake : public EncodedFrame {
  public:
   bool GetBitstream(uint8_t* destination) const override { return true; }
 
@@ -105,7 +105,10 @@ class VCMReceiveStatisticsCallbackMock : public VCMReceiveStatisticsCallback {
  public:
   MOCK_METHOD2(OnReceiveRatesUpdated,
                void(uint32_t bitRate, uint32_t frameRate));
-  MOCK_METHOD2(OnCompleteFrame, void(bool is_keyframe, size_t size_bytes));
+  MOCK_METHOD3(OnCompleteFrame,
+               void(bool is_keyframe,
+                    size_t size_bytes,
+                    VideoContentType content_type));
   MOCK_METHOD1(OnDiscardedPacketsUpdated, void(int discarded_packets));
   MOCK_METHOD1(OnFrameCountsUpdated, void(const FrameCounts& frame_counts));
   MOCK_METHOD7(OnFrameBufferTimingsUpdated,
@@ -152,8 +155,9 @@ class TestFrameBuffer2 : public ::testing::Test {
                   bool inter_layer_predicted,
                   T... refs) {
     static_assert(sizeof...(refs) <= kMaxReferences,
-                  "To many references specified for FrameObject.");
-    std::array<uint16_t, sizeof...(refs)> references = {{refs...}};
+                  "To many references specified for EncodedFrame.");
+    std::array<uint16_t, sizeof...(refs)> references = {
+        {rtc::checked_cast<uint16_t>(refs)...}};
 
     std::unique_ptr<FrameObjectFake> frame(new FrameObjectFake());
     frame->picture_id = picture_id;
@@ -167,11 +171,12 @@ class TestFrameBuffer2 : public ::testing::Test {
     return buffer_.InsertFrame(std::move(frame));
   }
 
-  void ExtractFrame(int64_t max_wait_time = 0) {
+  void ExtractFrame(int64_t max_wait_time = 0, bool keyframe_required = false) {
     crit_.Enter();
     if (max_wait_time == 0) {
-      std::unique_ptr<FrameObject> frame;
-      FrameBuffer::ReturnReason res = buffer_.NextFrame(0, &frame);
+      std::unique_ptr<EncodedFrame> frame;
+      FrameBuffer::ReturnReason res =
+          buffer_.NextFrame(0, &frame, keyframe_required);
       if (res != FrameBuffer::ReturnReason::kStopped)
         frames_.emplace_back(std::move(frame));
       crit_.Leave();
@@ -208,7 +213,7 @@ class TestFrameBuffer2 : public ::testing::Test {
         if (tfb->tear_down_)
           return;
 
-        std::unique_ptr<FrameObject> frame;
+        std::unique_ptr<EncodedFrame> frame;
         FrameBuffer::ReturnReason res =
             tfb->buffer_.NextFrame(tfb->max_wait_time_, &frame);
         if (res != FrameBuffer::ReturnReason::kStopped)
@@ -223,7 +228,7 @@ class TestFrameBuffer2 : public ::testing::Test {
   VCMTimingFake timing_;
   ::testing::NiceMock<VCMJitterEstimatorMock> jitter_estimator_;
   FrameBuffer buffer_;
-  std::vector<std::unique_ptr<FrameObject>> frames_;
+  std::vector<std::unique_ptr<EncodedFrame>> frames_;
   Random rand_;
   ::testing::NiceMock<VCMReceiveStatisticsCallbackMock> stats_callback_;
 
@@ -354,7 +359,7 @@ TEST_F(TestFrameBuffer2, DropTemporalLayerSlowDecoder) {
 
   for (int i = 0; i < 10; ++i) {
     ExtractFrame();
-    clock_.AdvanceTimeMilliseconds(60);
+    clock_.AdvanceTimeMilliseconds(70);
   }
 
   CheckFrame(0, pid, 0);
@@ -383,10 +388,10 @@ TEST_F(TestFrameBuffer2, DropSpatialLayerSlowDecoder) {
 
   ExtractFrame();
   ExtractFrame();
-  clock_.AdvanceTimeMilliseconds(55);
+  clock_.AdvanceTimeMilliseconds(57);
   for (int i = 2; i < 12; ++i) {
     ExtractFrame();
-    clock_.AdvanceTimeMilliseconds(55);
+    clock_.AdvanceTimeMilliseconds(57);
   }
 
   CheckFrame(0, pid, 0);
@@ -487,7 +492,8 @@ TEST_F(TestFrameBuffer2, StatsCallback) {
   uint32_t ts = Rand();
   const int kFrameSize = 5000;
 
-  EXPECT_CALL(stats_callback_, OnCompleteFrame(true, kFrameSize));
+  EXPECT_CALL(stats_callback_,
+              OnCompleteFrame(true, kFrameSize, VideoContentType::UNSPECIFIED));
   EXPECT_CALL(stats_callback_,
               OnFrameBufferTimingsUpdated(_, _, _, _, _, _, _));
 
@@ -538,6 +544,19 @@ TEST_F(TestFrameBuffer2, InvalidReferences) {
   EXPECT_EQ(1, InsertFrame(1, 0, 2000, false));
   ExtractFrame();
   EXPECT_EQ(2, InsertFrame(2, 0, 3000, false, 1));
+}
+
+TEST_F(TestFrameBuffer2, KeyframeRequired) {
+  EXPECT_EQ(1, InsertFrame(1, 0, 1000, false));
+  EXPECT_EQ(2, InsertFrame(2, 0, 2000, false, 1));
+  EXPECT_EQ(3, InsertFrame(3, 0, 3000, false));
+  ExtractFrame();
+  ExtractFrame(0, true);
+  ExtractFrame();
+
+  CheckFrame(0, 1, 0);
+  CheckFrame(1, 3, 0);
+  CheckNoFrame(2);
 }
 
 }  // namespace video_coding

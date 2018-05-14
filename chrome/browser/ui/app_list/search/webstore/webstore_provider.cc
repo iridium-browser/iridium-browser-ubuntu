@@ -7,6 +7,8 @@
 #include <string>
 #include <utility>
 
+#include "ash/public/cpp/app_list/tokenized_string.h"
+#include "ash/public/cpp/app_list/tokenized_string_match.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/strings/string_util.h"
@@ -20,8 +22,6 @@
 #include "chrome/browser/ui/app_list/search/search_webstore_result.h"
 #include "chrome/browser/ui/app_list/search/webstore/webstore_result.h"
 #include "extensions/common/extension_urls.h"
-#include "ui/app_list/search/tokenized_string.h"
-#include "ui/app_list/search/tokenized_string_match.h"
 #include "url/gurl.h"
 
 namespace app_list {
@@ -65,8 +65,10 @@ WebstoreProvider::WebstoreProvider(Profile* profile,
 
 WebstoreProvider::~WebstoreProvider() {}
 
-void WebstoreProvider::Start(bool /*is_voice_query*/,
-                             const base::string16& query) {
+void WebstoreProvider::Start(const base::string16& query) {
+  if (webstore_search_)
+    webstore_search_->Stop();
+
   ClearResults();
   if (!IsValidQuery(query)) {
     query_.clear();
@@ -87,7 +89,7 @@ void WebstoreProvider::Start(bool /*is_voice_query*/,
     webstore_search_.reset(new JSONResponseFetcher(
         base::Bind(&WebstoreProvider::OnWebstoreSearchFetched,
                    base::Unretained(this)),
-        profile_->GetRequestContext()));
+        profile_));
   }
 
   query_pending_ = true;
@@ -96,12 +98,7 @@ void WebstoreProvider::Start(bool /*is_voice_query*/,
 
   // Add a placeholder result which when clicked will run the user's query in a
   // browser. This placeholder is removed when the search results arrive.
-  Add(base::MakeUnique<SearchWebstoreResult>(profile_, controller_, query_));
-}
-
-void WebstoreProvider::Stop() {
-  if (webstore_search_)
-    webstore_search_->Stop();
+  Add(std::make_unique<SearchWebstoreResult>(profile_, controller_, query_));
 }
 
 void WebstoreProvider::StartQuery() {
@@ -191,7 +188,7 @@ std::unique_ptr<SearchResult> WebstoreProvider::CreateResult(
   if (!match.Calculate(query, title))
     return std::unique_ptr<SearchResult>();
 
-  std::unique_ptr<SearchResult> result = base::MakeUnique<WebstoreResult>(
+  std::unique_ptr<SearchResult> result = std::make_unique<WebstoreResult>(
       profile_, app_id, icon_url, is_paid, item_type, controller_);
   result->UpdateFromMatch(title, match);
   return result;

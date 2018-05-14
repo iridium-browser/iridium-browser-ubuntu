@@ -16,9 +16,10 @@
 #include "chrome/common/extensions/api/streams_private.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/download/public/common/download_item.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/download_request_utils.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/download_test_observer.h"
@@ -35,10 +36,10 @@
 
 using content::BrowserContext;
 using content::BrowserThread;
-using content::DownloadItem;
 using content::DownloadManager;
-using content::DownloadUrlParameters;
 using content::WebContents;
+using download::DownloadItem;
+using download::DownloadUrlParameters;
 using extensions::Event;
 using extensions::ExtensionSystem;
 using extensions::ResultCatcher;
@@ -152,7 +153,7 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
   }
 
   void InitializeDownloadSettings() {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(browser());
     ASSERT_TRUE(downloads_dir_.CreateUniqueTempDir());
 
@@ -227,10 +228,9 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
   // The |manager| should have |download| in its list of downloads.
   void DeleteDownloadAndWaitForFlush(DownloadItem* download,
                                      DownloadManager* manager) {
-    scoped_refptr<content::DownloadTestFlushObserver> flush_observer(
-        new content::DownloadTestFlushObserver(manager));
+    content::DownloadTestFlushObserver flush_observer(manager);
     download->Remove();
-    flush_observer->WaitForFlush();
+    flush_observer.WaitForFlush();
   }
 
  protected:
@@ -322,8 +322,8 @@ IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, NavigateCrossSite) {
   EXPECT_TRUE(catcher.GetNextResult());
 }
 
-// Flaky on ChromeOS: http://crbug.com/746526.
-#if defined(OS_CHROMEOS)
+// Flaky on Linux and ChromeOS: http://crbug.com/746526.
+#if defined(OS_LINUX)
 #define MAYBE_NavigateToAnAttachment DISABLED_NavigateToAnAttachment
 #else
 #define MAYBE_NavigateToAnAttachment NavigateToAnAttachment
@@ -367,8 +367,8 @@ IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, MAYBE_NavigateToAnAttachment) {
   EXPECT_TRUE(catcher.GetNextResult());
 }
 
-// Flaky on ChromeOS: http://crbug.com/746526.
-#if defined(OS_CHROMEOS)
+// Flaky on Linux and Win 10: http://crbug.com/746526.
+#if defined(OS_LINUX) || defined(OS_WIN)
 #define MAYBE_DirectDownload DISABLED_DirectDownload
 #else
 #define MAYBE_DirectDownload DirectDownload
@@ -400,7 +400,7 @@ IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, MAYBE_DirectDownload) {
       browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(web_contents);
   std::unique_ptr<DownloadUrlParameters> params(
-      DownloadUrlParameters::CreateForWebContentsMainFrame(
+      content::DownloadRequestUtils::CreateDownloadForWebContentsMainFrame(
           web_contents, url, TRAFFIC_ANNOTATION_FOR_TESTS));
   params->set_file_path(target_path);
 

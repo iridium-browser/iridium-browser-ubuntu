@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -126,7 +127,7 @@ class LKGMManagerTest(cros_test_lib.MockTempDirTestCase):
     self.manifest_repo = 'ssh://manifest/repo'
     self.version_file = 'version-file.sh'
     self.branch = 'master'
-    self.build_name = 'x86-generic'
+    self.build_name = 'amd64-generic'
     self.incr_type = 'branch'
 
     # Create tmp subdirs based on the one provided TempDirMixin.

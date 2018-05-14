@@ -10,9 +10,14 @@
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
+#include "build/buildflag.h"
+#include "media/media_features.h"
 #include "media/mojo/interfaces/remoting.mojom.h"
-#include "media/remoting/rpc_broker.h"
 #include "mojo/public/cpp/bindings/binding.h"
+
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING_RPC)
+#include "media/remoting/rpc_broker.h"  // nogncheck
+#endif
 
 namespace media {
 namespace remoting {
@@ -83,17 +88,21 @@ class SharedSession final : public mojom::RemotingSource,
     return state_;
   }
 
-  mojom::RemotingSinkCapabilities sink_capabilities() const {
-    return sink_capabilities_;
+  // Get the last stop reason reported by OnStopped().
+  mojom::RemotingStopReason get_last_stop_reason() const {
+    return stop_reason_;
   }
 
-  bool is_remote_decryption_available() const {
-    return sink_capabilities_ ==
-           mojom::RemotingSinkCapabilities::CONTENT_DECRYPTION_AND_RENDERING;
-  }
+  const std::string& sink_name() const { return sink_metadata_.friendly_name; }
+
+  // Queries on remoting sink capabilities.
+  bool HasVideoCapability(mojom::RemotingSinkVideoCapability capability) const;
+  bool HasAudioCapability(mojom::RemotingSinkAudioCapability capability) const;
+  bool HasFeatureCapability(mojom::RemotingSinkFeature capability) const;
+  bool IsRemoteDecryptionAvailable() const;
 
   // RemotingSource implementations.
-  void OnSinkAvailable(mojom::RemotingSinkCapabilities capabilities) override;
+  void OnSinkAvailable(mojom::RemotingSinkMetadataPtr metadata) override;
   void OnSinkGone() override;
   void OnStarted() override;
   void OnStartFailed(mojom::RemotingStartFailReason reason) override;
@@ -127,7 +136,12 @@ class SharedSession final : public mojom::RemotingSource,
   void AddClient(Client* client);
   void RemoveClient(Client* client);
 
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING_RPC)
   RpcBroker* rpc_broker() { return &rpc_broker_; }
+#endif
+
+  void EstimateTransmissionCapacity(
+      mojom::Remoter::EstimateTransmissionCapacityCallback callback);
 
  private:
   friend class base::RefCountedThreadSafe<SharedSession>;
@@ -140,16 +154,17 @@ class SharedSession final : public mojom::RemotingSource,
   // Callback from RpcBroker when sending message to remote sink.
   void SendMessageToSink(std::unique_ptr<std::vector<uint8_t>> message);
 
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING_RPC)
   // Handles dispatching of incoming and outgoing RPC messages.
   RpcBroker rpc_broker_;
+#endif
 
   const mojo::Binding<mojom::RemotingSource> binding_;
   const mojom::RemoterPtr remoter_;
 
-  // When the sink is available, this describes its capabilities. When not
-  // available, this is always NONE. Updated by OnSinkAvailable/Gone().
-  mojom::RemotingSinkCapabilities sink_capabilities_ =
-      mojom::RemotingSinkCapabilities::NONE;
+  // When the sink is available for remoting, this describes its metadata. When
+  // not available, this is empty. Updated by OnSinkAvailable/Gone().
+  mojom::RemotingSinkMetadata sink_metadata_;
 
   // The current state.
   SessionState state_ = SESSION_UNAVAILABLE;
@@ -158,6 +173,9 @@ class SharedSession final : public mojom::RemotingSource,
   // All the clients are not belong to this class. They are supposed to call
   // RemoveClient() before they are gone.
   std::vector<Client*> clients_;
+
+  mojom::RemotingStopReason stop_reason_ =
+      mojom::RemotingStopReason::LOCAL_PLAYBACK;
 
   // This is used to check all the methods are called on the current thread in
   // debug builds.

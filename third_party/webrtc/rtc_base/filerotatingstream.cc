@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/filerotatingstream.h"
+#include "rtc_base/filerotatingstream.h"
 
 #include <algorithm>
 #include <iostream>
 #include <string>
 
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/fileutils.h"
-#include "webrtc/rtc_base/pathutils.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/fileutils.h"
+#include "rtc_base/pathutils.h"
 
 // Note: We use std::cerr for logging in the write paths of this stream to avoid
 // infinite loops when logging.
@@ -115,8 +115,9 @@ StreamResult FileRotatingStream::Read(void* buffer,
   StreamResult result = file_stream_->Read(buffer, buffer_len, read, error);
   if (result == SR_EOS || result == SR_ERROR) {
     if (result == SR_ERROR) {
-      LOG(LS_ERROR) << "Failed to read from: "
-                    << file_names_[current_file_index_] << "Error: " << error;
+      RTC_LOG(LS_ERROR) << "Failed to read from: "
+                        << file_names_[current_file_index_]
+                        << "Error: " << error;
     }
     // Reached the end of the file, read next file. If there is an error return
     // the error status but allow for a next read by reading next file.

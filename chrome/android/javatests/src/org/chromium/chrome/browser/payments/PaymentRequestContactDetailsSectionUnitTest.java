@@ -39,10 +39,10 @@ public class PaymentRequestContactDetailsSectionUnitTest {
 
     private void createContactDetailsSectionWithProfiles(List<AutofillProfile> autofillProfiles,
             boolean requestPayerName, boolean requestPayerPhone, boolean requestPayerEmail) {
-        mContactEditor = new ContactEditor(requestPayerName, requestPayerPhone, requestPayerEmail);
+        mContactEditor = new ContactEditor(
+                requestPayerName, requestPayerPhone, requestPayerEmail, /*saveToDisk=*/true);
         mContactDetailsSection = new ContactDetailsSection(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(), autofillProfiles,
-                mContactEditor, null);
+                InstrumentationRegistry.getTargetContext(), autofillProfiles, mContactEditor, null);
     }
 
     /** Tests the creation of the contact list, with most complete first. */
@@ -159,8 +159,8 @@ public class PaymentRequestContactDetailsSectionUnitTest {
         AutofillProfile newProfile = new AutofillProfile("guid-2", "https://www.example.com",
                 "Jane Doe", "Edge corp.", "123 Main", "Washington", "Seattle", "", "10110", "",
                 "US", "555-212-1212", "jane@example.com", "");
-        mContactDetailsSection.addOrUpdateWithAutofillAddress(new AutofillAddress(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(), newProfile));
+        mContactDetailsSection.addOrUpdateWithAutofillAddress(
+                new AutofillAddress(InstrumentationRegistry.getTargetContext(), newProfile));
 
         // We now expect the new item to be last.
         items = mContactDetailsSection.getItemsForTesting();
@@ -204,8 +204,8 @@ public class PaymentRequestContactDetailsSectionUnitTest {
         AutofillProfile newProfile = new AutofillProfile("guid-2", "https://www.example.com",
                 "Jane Doe", "Edge corp.", "123 Main", "Washington", "Seattle", "", "10110", "",
                 "US", "555-212-1212", "" /* No email */, "");
-        mContactDetailsSection.addOrUpdateWithAutofillAddress(new AutofillAddress(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(), newProfile));
+        mContactDetailsSection.addOrUpdateWithAutofillAddress(
+                new AutofillAddress(InstrumentationRegistry.getTargetContext(), newProfile));
 
         // We now expect the new item, because it is incomplete, to be last.
         items = mContactDetailsSection.getItemsForTesting();
@@ -241,8 +241,8 @@ public class PaymentRequestContactDetailsSectionUnitTest {
         AutofillProfile newProfile = new AutofillProfile("guid-2", "https://www.example.com",
                 "Jane Doe", "Edge corp.", "123 Main", "Washington", "Seattle", "", "10110", "",
                 "US", "555-212-1212", "jane@example.com", "");
-        mContactDetailsSection.addOrUpdateWithAutofillAddress(new AutofillAddress(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(), newProfile));
+        mContactDetailsSection.addOrUpdateWithAutofillAddress(
+                new AutofillAddress(InstrumentationRegistry.getTargetContext(), newProfile));
 
         // We now expect the new item to be first. The selection is not changed.
         items = mContactDetailsSection.getItemsForTesting();
@@ -284,8 +284,8 @@ public class PaymentRequestContactDetailsSectionUnitTest {
         AutofillProfile newProfile = new AutofillProfile("guid-1", "https://www.example.com",
                 "John Major", "Acme Inc.", "456 Main", "California", "Los Angeles", "", "90210", "",
                 "US", "514-555-1212", "john@example.com", "");
-        mContactDetailsSection.addOrUpdateWithAutofillAddress(new AutofillAddress(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(), newProfile));
+        mContactDetailsSection.addOrUpdateWithAutofillAddress(
+                new AutofillAddress(InstrumentationRegistry.getTargetContext(), newProfile));
 
         items = mContactDetailsSection.getItemsForTesting();
         Assert.assertEquals(1, items.size());
@@ -316,8 +316,8 @@ public class PaymentRequestContactDetailsSectionUnitTest {
         AutofillProfile newProfile = new AutofillProfile("guid-2", "https://www.example.com",
                 "Jane Doe", "Edge corp.", "123 Main", "Washington", "Seattle", "", "10110", "",
                 "US", "555-212-1212", "" /* no email */, "");
-        mContactDetailsSection.addOrUpdateWithAutofillAddress(new AutofillAddress(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(), newProfile));
+        mContactDetailsSection.addOrUpdateWithAutofillAddress(
+                new AutofillAddress(InstrumentationRegistry.getTargetContext(), newProfile));
 
         // We now expect the new item to be first, but unselected because incomplete.
         items = mContactDetailsSection.getItemsForTesting();

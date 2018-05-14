@@ -14,7 +14,6 @@
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/controls/hyperlink_text_view.h"
-#include "ui/base/l10n/l10n_util.h"
 
 @implementation PendingPasswordViewController
 
@@ -53,12 +52,12 @@
 - (void)loadView {
   base::scoped_nsobject<NSView> view([[NSView alloc] initWithFrame:NSZeroRect]);
 
-  // -----------------------------------
-  // |  Title                        x |
-  // |  username   password            |
-  // |  Smart Lock  welcome (optional) |
-  // |            [Button1] [Button2]  |
-  // -----------------------------------
+  // -----------------------------------------
+  // |  Title                              x |
+  // |  username   password                  |
+  // |  Smart Lock  welcome (optional)       |
+  // |  ([Button3])     [Button1] [Button2]  |
+  // -----------------------------------------
 
   // The title text depends on whether the user is signed in and therefore syncs
   // their password
@@ -68,6 +67,9 @@
   // The bubble should be wide enough to fit the title row, the username and
   // password row, and the buttons row on one line each, but not smaller than
   // kDesiredBubbleWidth.
+
+  // The button 3 is optional and only rendered when child class returns 3
+  // buttons.
 
   // Create the elements and add them to the view.
 
@@ -110,11 +112,21 @@
 
   // Buttons go on the bottom row and are right-aligned.
   // Start with [Save].
-  CGFloat curX = width - kFramePadding + kRelatedControlHorizontalPadding;
-  CGFloat curY = kFramePadding;
+  CGFloat curX = 0;
+  CGFloat curY = 0;
 
   for (NSButton* button in buttons) {
-    curX -= kRelatedControlHorizontalPadding + NSWidth([button frame]);
+    if (button == buttons[0]) {
+      // The right side of the alignment rect is used for the padding.
+      curX = width - kFramePadding -
+             (NSMaxX([button alignmentRectForFrame:[button frame]]) -
+              NSMinX([button frame]));
+      curY = kFramePadding -
+             (NSMinY([button alignmentRectForFrame:[button frame]]) -
+              NSMinY([button frame]));
+    } else {
+      curX -= kRelatedControlHorizontalPadding + NSWidth([button frame]);
+    }
     [button setFrameOrigin:NSMakePoint(curX, curY)];
   }
 

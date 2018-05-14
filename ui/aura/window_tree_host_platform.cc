@@ -6,6 +6,8 @@
 
 #include <utility>
 
+#include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -23,19 +25,20 @@
 #endif
 
 #if defined(OS_WIN)
-#include "base/message_loop/message_loop.h"
 #include "ui/base/cursor/cursor_loader_win.h"
 #include "ui/platform_window/win/win_window.h"
 #endif
 
+#if defined(USE_X11)
+#include "ui/platform_window/x11/x11_window.h"
+#endif
+
 namespace aura {
 
-#if defined(OS_WIN) || defined(OS_ANDROID) || defined(USE_OZONE)
 // static
 WindowTreeHost* WindowTreeHost::Create(const gfx::Rect& bounds) {
   return new WindowTreeHostPlatform(bounds);
 }
-#endif
 
 WindowTreeHostPlatform::WindowTreeHostPlatform(const gfx::Rect& bounds)
     : WindowTreeHostPlatform() {
@@ -48,6 +51,8 @@ WindowTreeHostPlatform::WindowTreeHostPlatform(const gfx::Rect& bounds)
   platform_window_.reset(new ui::WinWindow(this, bounds));
 #elif defined(OS_ANDROID)
   platform_window_.reset(new ui::PlatformWindowAndroid(this));
+#elif defined(USE_X11)
+  platform_window_.reset(new ui::X11Window(this, bounds));
 #else
   NOTIMPLEMENTED();
 #endif
@@ -109,6 +114,14 @@ void WindowTreeHostPlatform::ReleaseCapture() {
   platform_window_->ReleaseCapture();
 }
 
+bool WindowTreeHostPlatform::CaptureSystemKeyEventsImpl(
+    base::Optional<base::flat_set<int>> native_key_codes) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+void WindowTreeHostPlatform::ReleaseSystemKeyEventCapture() {}
+
 void WindowTreeHostPlatform::SetCursorNative(gfx::NativeCursor cursor) {
   if (cursor == current_cursor_)
     return;
@@ -158,7 +171,7 @@ void WindowTreeHostPlatform::DispatchEvent(ui::Event* event) {
 void WindowTreeHostPlatform::OnCloseRequest() {
 #if defined(OS_WIN)
   // TODO: this obviously shouldn't be here.
-  base::MessageLoopForUI::current()->QuitWhenIdle();
+  base::RunLoop::QuitCurrentWhenIdleDeprecated();
 #else
   OnHostCloseRequested();
 #endif

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -24,12 +25,11 @@ class PendingTaskTest : public ::testing::Test {
  protected:
   using ExpectedTrace = std::vector<const void*>;
 
-  static void VerifyTraceAndPost(
-      const scoped_refptr<TaskRunner>& task_runner,
-      const tracked_objects::Location& posted_from,
-      const tracked_objects::Location& next_from_here,
-      const std::vector<const void*>& expected_trace,
-      Closure task) {
+  static void VerifyTraceAndPost(const scoped_refptr<TaskRunner>& task_runner,
+                                 const Location& posted_from,
+                                 const Location& next_from_here,
+                                 const std::vector<const void*>& expected_trace,
+                                 Closure task) {
     SCOPED_TRACE(StringPrintf("Callback Depth: %zu", expected_trace.size()));
 
     // Beyond depth + 1, the trace is nonsensical because there haven't been
@@ -57,19 +57,19 @@ class PendingTaskTest : public ::testing::Test {
 // Ensure the task backtrace populates correctly.
 TEST_F(PendingTaskTest, SingleThreadedSimple) {
   MessageLoop loop;
-  const tracked_objects::Location& location0 = FROM_HERE;
-  const tracked_objects::Location& location1 = FROM_HERE;
-  const tracked_objects::Location& location2 = FROM_HERE;
-  const tracked_objects::Location& location3 = FROM_HERE;
-  const tracked_objects::Location& location4 = FROM_HERE;
-  const tracked_objects::Location& location5 = FROM_HERE;
+  const Location& location0 = FROM_HERE;
+  const Location& location1 = FROM_HERE;
+  const Location& location2 = FROM_HERE;
+  const Location& location3 = FROM_HERE;
+  const Location& location4 = FROM_HERE;
+  const Location& location5 = FROM_HERE;
 
   Closure task5 = Bind(
       &PendingTaskTest::VerifyTraceAndPost, loop.task_runner(), location4,
       location5,
       ExpectedTrace({location3.program_counter(), location2.program_counter(),
                      location1.program_counter(), location0.program_counter()}),
-      Bind(&DoNothing));
+      DoNothing());
   Closure task4 = Bind(
       &PendingTaskTest::VerifyTraceAndPost, loop.task_runner(), location3,
       location4,
@@ -101,15 +101,15 @@ TEST_F(PendingTaskTest, MultipleThreads) {
   thread_b.StartAndWaitForTesting();
   thread_c.StartAndWaitForTesting();
 
-  const tracked_objects::Location& location_a0 = FROM_HERE;
-  const tracked_objects::Location& location_a1 = FROM_HERE;
-  const tracked_objects::Location& location_a2 = FROM_HERE;
-  const tracked_objects::Location& location_a3 = FROM_HERE;
+  const Location& location_a0 = FROM_HERE;
+  const Location& location_a1 = FROM_HERE;
+  const Location& location_a2 = FROM_HERE;
+  const Location& location_a3 = FROM_HERE;
 
-  const tracked_objects::Location& location_b0 = FROM_HERE;
-  const tracked_objects::Location& location_b1 = FROM_HERE;
+  const Location& location_b0 = FROM_HERE;
+  const Location& location_b1 = FROM_HERE;
 
-  const tracked_objects::Location& location_c0 = FROM_HERE;
+  const Location& location_c0 = FROM_HERE;
 
   // On thread c, post a task back to thread a that verifies its trace
   // and terminates after one more self-post.
@@ -119,7 +119,7 @@ TEST_F(PendingTaskTest, MultipleThreads) {
            ExpectedTrace(
                {location_c0.program_counter(), location_b0.program_counter(),
                 location_a1.program_counter(), location_a0.program_counter()}),
-           Bind(&DoNothing));
+           DoNothing());
   Closure task_c0 = Bind(&PendingTaskTest::VerifyTraceAndPost,
                          loop.task_runner(), location_c0, location_a2,
                          ExpectedTrace({location_b0.program_counter(),
@@ -143,7 +143,7 @@ TEST_F(PendingTaskTest, MultipleThreads) {
            thread_b.message_loop()->task_runner(), location_b0, location_b1,
            ExpectedTrace({location_a1.program_counter(),
                           location_a0.program_counter(), nullptr}),
-           Bind(&DoNothing));
+           DoNothing());
 
   // Push one frame onto the stack in thread a then pass to thread b.
   Closure task_a1 =

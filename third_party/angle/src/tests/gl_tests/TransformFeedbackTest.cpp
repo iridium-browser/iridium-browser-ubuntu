@@ -78,14 +78,21 @@ class TransformFeedbackTest : public TransformFeedbackTestBase
         ASSERT_EQ(0u, mProgram);
 
         const std::string vertexShaderSource =
-            SHADER_SOURCE(precision highp float; attribute vec4 position;
+            R"(precision highp float;
+            attribute vec4 position;
 
-                          void main() { gl_Position = position; });
+            void main()
+            {
+                gl_Position = position;
+            })";
 
         const std::string fragmentShaderSource =
-            SHADER_SOURCE(precision highp float;
+            R"(precision highp float;
 
-                          void main() { gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); });
+            void main()
+            {
+                gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+            })";
 
         mProgram = CompileProgramWithTransformFeedback(vertexShaderSource, fragmentShaderSource,
                                                        tfVaryings, bufferMode);
@@ -211,13 +218,6 @@ TEST_P(TransformFeedbackTest, BufferRebinding)
 // afterward.
 TEST_P(TransformFeedbackTest, RecordAndDraw)
 {
-    // TODO(jmadill): Figure out why this fails on Intel.
-    if (IsIntel() && GetParam().getRenderer() == EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE)
-    {
-        std::cout << "Test skipped on Intel." << std::endl;
-        return;
-    }
-
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -421,28 +421,24 @@ TEST_P(TransformFeedbackTest, MultiplePaused)
 
     const size_t transformFeedbackCount = 8;
 
-    // clang-format off
-    const std::string vertexShaderSource = SHADER_SOURCE
-    (  #version 300 es\n
-       in highp vec4 position;
-       in float transformFeedbackInput;
-       out float transformFeedbackOutput;
-       void main(void)
-       {
-           gl_Position = position;
-           transformFeedbackOutput = transformFeedbackInput;
-       }
-    );
+    const std::string vertexShaderSource =
+        R"(#version 300 es
+        in highp vec4 position;
+        in float transformFeedbackInput;
+        out float transformFeedbackOutput;
+        void main(void)
+        {
+            gl_Position = position;
+            transformFeedbackOutput = transformFeedbackInput;
+        })";
 
-    const std::string fragmentShaderSource = SHADER_SOURCE
-    (  #version 300 es\n
-       out mediump vec4 color;
-       void main(void)
-       {
-           color = vec4(1.0, 1.0, 1.0, 1.0);
-       }
-    );
-    // clang-format on
+    const std::string fragmentShaderSource =
+        R"(#version 300 es
+        out mediump vec4 color;
+        void main(void)
+        {
+            color = vec4(1.0, 1.0, 1.0, 1.0);
+        })";
 
     std::vector<std::string> tfVaryings;
     tfVaryings.push_back("transformFeedbackOutput");
@@ -502,17 +498,10 @@ TEST_P(TransformFeedbackTest, MultiplePaused)
 // contexts returns the correct results.  Helps expose bugs in ANGLE's virtual contexts.
 TEST_P(TransformFeedbackTest, MultiContext)
 {
-    if (IsOSX() && (IsNVIDIA() || IsAMD() || IsIntel()) && IsOpenGL())
-    {
-        std::cout << "Test skipped on NVIDIA, AMD and Intel OpenGL on OSX." << std::endl;
-        return;
-    }
+    // These tests are flaky, do not lift these unless you find the root cause and the fix.
+    ANGLE_SKIP_TEST_IF(IsOSX() && IsOpenGL());
 
-    if (IsLinux() && IsAMD() && IsOpenGL())
-    {
-        std::cout << "Test skipped on AMD OpenGL on Linux." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsLinux() && IsAMD() && IsOpenGL());
 
     EGLint contextAttributes[] = {
         EGL_CONTEXT_MAJOR_VERSION_KHR,
@@ -558,9 +547,8 @@ TEST_P(TransformFeedbackTest, MultiContext)
 
         eglMakeCurrent(display, surface, surface, context.context);
 
-        // clang-format off
-        const std::string vertexShaderSource = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string vertexShaderSource =
+            R"(#version 300 es
             in highp vec4 position;
             in float transformFeedbackInput;
             out float transformFeedbackOutput;
@@ -568,18 +556,15 @@ TEST_P(TransformFeedbackTest, MultiContext)
             {
                 gl_Position = position;
                 transformFeedbackOutput = transformFeedbackInput;
-            }
-        );
+            })";
 
-        const std::string fragmentShaderSource = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string fragmentShaderSource =
+            R"(#version 300 es
             out mediump vec4 color;
             void main(void)
             {
                 color = vec4(1.0, 1.0, 1.0, 1.0);
-            }
-        );
-        // clang-format on
+            })";
 
         std::vector<std::string> tfVaryings;
         tfVaryings.push_back("transformFeedbackOutput");
@@ -885,17 +870,9 @@ TEST_P(TransformFeedbackTest, TwoUnreferencedInFragShader)
 // glBeginTransformFeedback is called
 TEST_P(TransformFeedbackTest, OffsetResetOnBeginTransformFeedback)
 {
-    if (IsOSX() && IsAMD())
-    {
-        std::cout << "Test skipped on Mac AMD." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsOSX() && IsAMD());
 
-    if (IsAndroid())
-    {
-        std::cout << "Test skipped on Android." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsAndroid());
 
     const std::string &vertexShaderSource =
         "#version 300 es\n"
@@ -1059,13 +1036,6 @@ class TransformFeedbackLifetimeTest : public TransformFeedbackTest
 // Tests a bug with state syncing and deleted transform feedback buffers.
 TEST_P(TransformFeedbackLifetimeTest, DeletedBuffer)
 {
-    // TODO(ynovikov): Obscure driver error on Intel HD 530 http://anglebug.com/1879
-    if (IsWindows() && IsIntel() && IsDesktopOpenGL())
-    {
-        std::cout << "Test skipped on Intel OpenGL on Windows." << std::endl;
-        return;
-    }
-
     // First stream vertex data to mTransformFeedbackBuffer.
     glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, mTransformFeedback);
     glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, mTransformFeedbackBuffer);
@@ -1144,6 +1114,66 @@ TEST_P(TransformFeedbackTestES31, SameArrayElementVaryings)
     ASSERT_EQ(0u, mProgram);
 }
 
+// Test that program link fails in case to capture array element on a non-array varying.
+TEST_P(TransformFeedbackTestES31, ElementCaptureOnNonArrayVarying)
+{
+    const std::string &vertexShaderSource =
+        "#version 310 es\n"
+        "in vec3 position;\n"
+        "out vec3 outAttrib;\n"
+        "void main() {"
+        "  outAttrib = position;\n"
+        "  gl_Position = vec4(position, 1);\n"
+        "}";
+
+    const std::string &fragmentShaderSource =
+        "#version 310 es\n"
+        "precision mediump float;\n"
+        "out vec4 color;\n"
+        "in vec3 outAttrib;\n"
+        "void main() {\n"
+        "  color = vec4(0);\n"
+        "}";
+
+    std::vector<std::string> tfVaryings;
+    tfVaryings.push_back("outAttrib[1]");
+
+    mProgram = CompileProgramWithTransformFeedback(vertexShaderSource, fragmentShaderSource,
+                                                   tfVaryings, GL_INTERLEAVED_ATTRIBS);
+    ASSERT_EQ(0u, mProgram);
+}
+
+// Test that program link fails in case to capure an outbound array element.
+TEST_P(TransformFeedbackTestES31, CaptureOutboundElement)
+{
+    const std::string &vertexShaderSource =
+        "#version 310 es\n"
+        "in vec3 position;\n"
+        "out vec3 outAttribs[3];\n"
+        "void main() {"
+        "  outAttribs[0] = position;\n"
+        "  outAttribs[1] = vec3(0, 0, 0);\n"
+        "  outAttribs[2] = position;\n"
+        "  gl_Position = vec4(position, 1);\n"
+        "}";
+
+    const std::string &fragmentShaderSource =
+        "#version 310 es\n"
+        "precision mediump float;\n"
+        "out vec4 color;\n"
+        "in vec3 outAttribs[3];\n"
+        "void main() {\n"
+        "  color = vec4(0);\n"
+        "}";
+
+    std::vector<std::string> tfVaryings;
+    tfVaryings.push_back("outAttribs[3]");
+
+    mProgram = CompileProgramWithTransformFeedback(vertexShaderSource, fragmentShaderSource,
+                                                   tfVaryings, GL_INTERLEAVED_ATTRIBS);
+    ASSERT_EQ(0u, mProgram);
+}
+
 // Test transform feedback names can be specified using array element.
 TEST_P(TransformFeedbackTestES31, DifferentArrayElementVaryings)
 {
@@ -1205,6 +1235,286 @@ TEST_P(TransformFeedbackTestES31, DifferentArrayElementVaryings)
     glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
 
     ASSERT_GL_NO_ERROR();
+}
+
+// Test transform feedback varying for base-level members of struct.
+TEST_P(TransformFeedbackTestES31, StructMemberVaryings)
+{
+    const std::string &vertexShaderSource =
+        R"(#version 310 es
+
+        in vec3 position;
+        struct S {
+          vec3 field0;
+          vec3 field1;
+          vec3 field2;
+        };
+        out S s;
+
+        void main() {
+          s.field0 = position;
+          s.field1 = vec3(0, 0, 0);
+          s.field2 = position;
+          gl_Position = vec4(position, 1);
+        })";
+
+    const std::string &fragmentShaderSource =
+        R"(#version 310 es
+
+        precision mediump float;
+        struct S {
+          vec3 field0;
+          vec3 field1;
+          vec3 field2;
+        };
+        out vec4 color;
+        in S s;
+
+        void main() {
+          color = vec4(s.field1, 1);
+        })";
+
+    std::vector<std::string> tfVaryings;
+    tfVaryings.push_back("s.field0");
+    tfVaryings.push_back("s.field2");
+
+    mProgram = CompileProgramWithTransformFeedback(vertexShaderSource, fragmentShaderSource,
+                                                   tfVaryings, GL_INTERLEAVED_ATTRIBS);
+    ASSERT_NE(0u, mProgram);
+
+    glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, mTransformFeedbackBuffer);
+    glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, sizeof(Vector3) * 2 * 6, nullptr, GL_STREAM_DRAW);
+
+    glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, mTransformFeedback);
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, mTransformFeedbackBuffer);
+
+    glUseProgram(mProgram);
+    glBeginTransformFeedback(GL_TRIANGLES);
+    drawQuad(mProgram, "position", 0.5f);
+    glEndTransformFeedback();
+    glUseProgram(0);
+    ASSERT_GL_NO_ERROR();
+
+    const GLvoid *mapPointer =
+        glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(Vector3) * 2 * 6, GL_MAP_READ_BIT);
+    ASSERT_NE(nullptr, mapPointer);
+
+    const auto &quadVertices = GetQuadVertices();
+
+    const Vector3 *vecPointer = static_cast<const Vector3 *>(mapPointer);
+    for (unsigned int vectorIndex = 0; vectorIndex < 3; ++vectorIndex)
+    {
+        unsigned int stream1Index = vectorIndex * 2;
+        unsigned int stream2Index = vectorIndex * 2 + 1;
+        EXPECT_EQ(quadVertices[vectorIndex], vecPointer[stream1Index]);
+        EXPECT_EQ(quadVertices[vectorIndex], vecPointer[stream2Index]);
+    }
+    glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test transform feedback varying for struct is not allowed.
+TEST_P(TransformFeedbackTestES31, InvalidStructVaryings)
+{
+    const std::string &vertexShaderSource =
+        R"(#version 310 es
+
+        in vec3 position;
+        struct S {
+          vec3 field0;
+          vec3 field1;
+        };
+        out S s;
+
+        void main() {
+          s.field0 = position;
+          s.field1 = vec3(0, 0, 0);
+          gl_Position = vec4(position, 1);
+        })";
+
+    const std::string &fragmentShaderSource =
+        R"(#version 310 es
+
+        precision mediump float;
+        struct S {
+          vec3 field0;
+          vec3 field1;
+        };
+        out vec4 color;
+        in S s;
+
+        void main() {
+          color = vec4(s.field1, 1);
+        })";
+
+    std::vector<std::string> tfVaryings;
+    tfVaryings.push_back("s");
+
+    mProgram = CompileProgramWithTransformFeedback(vertexShaderSource, fragmentShaderSource,
+                                                   tfVaryings, GL_INTERLEAVED_ATTRIBS);
+    ASSERT_EQ(0u, mProgram);
+}
+
+// Test that nonexistent transform feedback varyings don't assert when linking.
+TEST_P(TransformFeedbackTest, NonExistentTransformFeedbackVarying)
+{
+    const std::string &vertexShaderSource =
+        "#version 300 es\n"
+        "in vec4 a_position;\n"
+        "void main()\n"
+        "{\n"
+        "    gl_Position = a_position;\n"
+        "}\n";
+
+    const std::string &fragmentShaderSource =
+        "#version 300 es\n"
+        "precision mediump float;\n"
+        "out vec4 fragColor;\n"
+        "void main()\n"
+        "{\n"
+        "    fragColor = vec4(0);\n"
+        "}\n";
+
+    std::vector<std::string> tfVaryings;
+    tfVaryings.push_back("bogus");
+
+    mProgram = CompileProgramWithTransformFeedback(vertexShaderSource, fragmentShaderSource,
+                                                   tfVaryings, GL_INTERLEAVED_ATTRIBS);
+    ASSERT_EQ(0u, mProgram);
+}
+
+// Test that nonexistent transform feedback varyings don't assert when linking. In this test the
+// nonexistent varying is prefixed with "gl_".
+TEST_P(TransformFeedbackTest, NonExistentTransformFeedbackVaryingWithGLPrefix)
+{
+    const std::string &vertexShaderSource =
+        "#version 300 es\n"
+        "in vec4 a_position;\n"
+        "void main()\n"
+        "{\n"
+        "    gl_Position = a_position;\n"
+        "}\n";
+
+    const std::string &fragmentShaderSource =
+        "#version 300 es\n"
+        "precision mediump float;\n"
+        "out vec4 fragColor;\n"
+        "void main()\n"
+        "{\n"
+        "    fragColor = vec4(0);\n"
+        "}\n";
+
+    std::vector<std::string> tfVaryings;
+    tfVaryings.push_back("gl_Bogus");
+
+    mProgram = CompileProgramWithTransformFeedback(vertexShaderSource, fragmentShaderSource,
+                                                   tfVaryings, GL_INTERLEAVED_ATTRIBS);
+    ASSERT_EQ(0u, mProgram);
+}
+
+// Test transform feedback names can be reserved names in GLSL, as long as they're not reserved in
+// GLSL ES.
+TEST_P(TransformFeedbackTest, VaryingReservedOpenGLName)
+{
+    const std::string &vertexShaderSource =
+        "#version 300 es\n"
+        "in vec3 position;\n"
+        "out vec3 buffer;\n"
+        "void main() {\n"
+        "  buffer = position;\n"
+        "  gl_Position = vec4(position, 1);\n"
+        "}";
+
+    const std::string &fragmentShaderSource =
+        "#version 300 es\n"
+        "precision highp float;\n"
+        "out vec4 color;\n"
+        "in vec3 buffer;\n"
+        "void main() {\n"
+        "  color = vec4(0);\n"
+        "}";
+
+    std::vector<std::string> tfVaryings;
+    tfVaryings.push_back("buffer");
+
+    mProgram = CompileProgramWithTransformFeedback(vertexShaderSource, fragmentShaderSource,
+                                                   tfVaryings, GL_INTERLEAVED_ATTRIBS);
+    ASSERT_NE(0u, mProgram);
+
+    glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, mTransformFeedbackBuffer);
+    glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, sizeof(Vector3) * 6, nullptr, GL_STREAM_DRAW);
+
+    glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, mTransformFeedback);
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, mTransformFeedbackBuffer);
+
+    glUseProgram(mProgram);
+    glBeginTransformFeedback(GL_TRIANGLES);
+    drawQuad(mProgram, "position", 0.5f);
+    glEndTransformFeedback();
+    glUseProgram(0);
+    ASSERT_GL_NO_ERROR();
+
+    const GLvoid *mapPointer =
+        glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(Vector3) * 6, GL_MAP_READ_BIT);
+    ASSERT_NE(nullptr, mapPointer);
+
+    const auto &quadVertices = GetQuadVertices();
+
+    const Vector3 *vecPointer = static_cast<const Vector3 *>(mapPointer);
+    for (unsigned int vectorIndex = 0; vectorIndex < 3; ++vectorIndex)
+    {
+        EXPECT_EQ(quadVertices[vectorIndex], vecPointer[vectorIndex]);
+    }
+    glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test that calling BeginTransformFeedback when no program is currentwill generate an
+// INVALID_OPERATION error.
+TEST_P(TransformFeedbackTest, NoCurrentProgram)
+{
+    glUseProgram(0);
+    glBeginTransformFeedback(GL_TRIANGLES);
+
+    // GLES 3.0.5 section 2.15.2: "The error INVALID_OPERATION is also generated by
+    // BeginTransformFeedback if no binding points would be used, either because no program object
+    // is active or because the active program object has specified no output variables to record."
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+}
+
+// Test that calling BeginTransformFeedback when no transform feedback varyings are in use will
+// generate an INVALID_OPERATION error.
+TEST_P(TransformFeedbackTest, NoTransformFeedbackVaryingsInUse)
+{
+    const std::string &vertexShaderSource =
+        "#version 300 es\n"
+        "in vec4 a_position;\n"
+        "void main()\n"
+        "{\n"
+        "    gl_Position = a_position;\n"
+        "}\n";
+
+    const std::string &fragmentShaderSource =
+        "#version 300 es\n"
+        "precision mediump float;\n"
+        "out vec4 fragColor;\n"
+        "void main()\n"
+        "{\n"
+        "    fragColor = vec4(0);\n"
+        "}\n";
+
+    ANGLE_GL_PROGRAM(program, vertexShaderSource, fragmentShaderSource);
+
+    glUseProgram(program);
+    glBeginTransformFeedback(GL_TRIANGLES);
+
+    // GLES 3.0.5 section 2.15.2: "The error INVALID_OPERATION is also generated by
+    // BeginTransformFeedback if no binding points would be used, either because no program object
+    // is active or because the active program object has specified no output variables to record."
+
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
 }
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these

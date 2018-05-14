@@ -21,6 +21,7 @@
 #ifndef WTF_HashCountedSet_h
 #define WTF_HashCountedSet_h
 
+#include "base/macros.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/Vector.h"
@@ -37,7 +38,6 @@ template <typename Value,
           typename Allocator = PartitionAllocator>
 class HashCountedSet {
   USE_ALLOCATOR(HashCountedSet, Allocator);
-  WTF_MAKE_NONCOPYABLE(HashCountedSet);
 
  private:
   typedef HashMap<Value,
@@ -105,13 +105,15 @@ class HashCountedSet {
 
   Vector<Value> AsVector() const;
 
-  template <typename VisitorDispatcher>
-  void Trace(VisitorDispatcher visitor) {
+  template <typename VisitorDispatcher, typename A = Allocator>
+  std::enable_if_t<A::kIsGarbageCollected> Trace(VisitorDispatcher visitor) {
     impl_.Trace(visitor);
   }
 
  private:
   ImplType impl_;
+
+  DISALLOW_COPY_AND_ASSIGN(HashCountedSet);
 };
 
 template <typename T, typename U, typename V, typename W>

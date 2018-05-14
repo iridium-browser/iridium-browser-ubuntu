@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
@@ -67,12 +68,12 @@ class SharedModelTypeProcessor : public ModelTypeProcessor,
   void DisableSync() override;
   bool IsTrackingMetadata() override;
   void ReportError(const ModelError& error) override;
-  void ReportError(const tracked_objects::Location& location,
-                   const std::string& message) override;
 
   // ModelTypeProcessor implementation.
   void ConnectSync(std::unique_ptr<CommitQueue> worker) override;
   void DisconnectSync() override;
+  void GetLocalChanges(size_t max_entries,
+                       const GetLocalChangesCallback& callback) override;
   void OnCommitCompleted(const sync_pb::ModelTypeState& type_state,
                          const CommitResponseDataList& response_list) override;
   void OnUpdateReceived(const sync_pb::ModelTypeState& type_state,
@@ -119,8 +120,8 @@ class SharedModelTypeProcessor : public ModelTypeProcessor,
   // Caches EntityData from the |data_batch| in the entity trackers.
   void ConsumeDataBatch(std::unique_ptr<DataBatch> data_batch);
 
-  // Sends all commit requests that are due to be sent to the sync thread.
-  void FlushPendingCommitRequests();
+  // Nudges worker if there are any local entities to be committed.
+  void NudgeForCommitIfNeeded();
 
   // Computes the client tag hash for the given client |tag|.
   std::string GetHashForTag(const std::string& tag);
@@ -149,6 +150,35 @@ class SharedModelTypeProcessor : public ModelTypeProcessor,
 
   // Returns true if all processor entity trackers have non-empty storage keys.
   bool AllStorageKeysPopulated() const;
+
+  // Expires entries according to garbage collection directives.
+  void ExpireEntriesIfNeeded(
+      const sync_pb::DataTypeProgressMarker& progress_marker);
+
+  // Clear metadata for the entries in |storage_key_to_be_deleted|.
+  void ClearMetadataForEntries(
+      const std::vector<std::string>& storage_key_to_be_deleted,
+      MetadataChangeList* metadata_changes);
+
+  // Tombstones all entries whose versions are older than
+  // |version_watermark| unless they are unsynced.
+  void ExpireEntriesByVersion(int64_t version_watermark,
+                              MetadataChangeList* metadata_changes);
+
+  // Tombstones all entries whose ages are older than
+  // |age_watermark_in_days| unless they are unsynced.
+  void ExpireEntriesByAge(int32_t age_watermark_in_days,
+                          MetadataChangeList* metadata_changes);
+
+  // If the number of |entities_| exceeds |max_number_of_items|, the
+  // processor will tombstone the extra sync entities based on the LRU rule.
+  void ExpireEntriesByItemLimit(int32_t max_number_of_items,
+                                MetadataChangeList* metadata_changes);
+
+  // Removes entity tracker and clears metadata for entity from
+  // MetadataChangeList.
+  void RemoveEntity(ProcessorEntityTracker* entity,
+                    MetadataChangeList* metadata_change_list);
 
   /////////////////////
   // Processor state //
@@ -225,6 +255,17 @@ class SharedModelTypeProcessor : public ModelTypeProcessor,
   // confirmation, we should delete local data, because the model side never
   // intends to read it. This includes both data and metadata.
   bool commit_only_;
+
+  // The version which processor already ran garbage collection against on.
+  // Cache this value is for saving resource purpose(ex. cpu, battery), so
+  // processor only run on each version once.
+  int64_t cached_gc_directive_version_;
+
+  // The day which processor already ran garbage collection against on.
+  // Cache this value is for saving resource purpose(ex. cpu, battery), we round
+  // up garbage collection age to day, so we only run GC once a day if server
+  // did not change the age out days.
+  base::Time cached_gc_directive_aged_out_day_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

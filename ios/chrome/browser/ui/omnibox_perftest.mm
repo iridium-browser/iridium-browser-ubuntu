@@ -6,19 +6,21 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
 #import "base/test/ios/wait_util.h"
 #include "base/time/time.h"
 #include "components/toolbar/test_toolbar_model.h"
+#include "components/toolbar/toolbar_model_impl.h"
 #include "ios/chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_text_field_ios.h"
+#import "ios/chrome/browser/ui/toolbar/clean/toolbar_coordinator.h"
+#import "ios/chrome/browser/ui/toolbar/clean/toolbar_coordinator_delegate.h"
 #include "ios/chrome/browser/ui/toolbar/toolbar_model_delegate_ios.h"
-#include "ios/chrome/browser/ui/toolbar/toolbar_model_impl_ios.h"
-#import "ios/chrome/browser/ui/toolbar/web_toolbar_controller.h"
+#import "ios/chrome/browser/ui/util/named_guide.h"
 #include "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
 #include "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/web_state_list/web_state_opener.h"
 #include "ios/chrome/test/base/perf_test_ios.h"
 #include "ios/web/public/test/fakes/test_navigation_manager.h"
 #include "ios/web/public/test/fakes/test_web_state.h"
@@ -31,6 +33,8 @@
 #endif
 
 namespace {
+
+const size_t kMaxURLDisplayChars = 32 * 1024;
 
 // Descends down a view hierarchy until the first view of |specificClass|
 // is found. Returns nil if a view of |specificClass| cannot be found.
@@ -78,44 +82,50 @@ class OmniboxPerfTest : public PerfTest {
 
     // Create a WebStateList that will always return the test WebState as
     // the active WebState.
-    web_state_list_ = base::MakeUnique<WebStateList>(&web_state_list_delegate_);
+    web_state_list_ = std::make_unique<WebStateList>(&web_state_list_delegate_);
     std::unique_ptr<web::TestWebState> web_state =
-        base::MakeUnique<web::TestWebState>();
+        std::make_unique<web::TestWebState>();
     std::unique_ptr<web::TestNavigationManager> navigation_manager =
-        base::MakeUnique<web::TestNavigationManager>();
+        std::make_unique<web::TestNavigationManager>();
     web_state->SetNavigationManager(std::move(navigation_manager));
-    web_state_list_->InsertWebState(0, std::move(web_state));
+    web_state_list_->InsertWebState(0, std::move(web_state),
+                                    WebStateList::INSERT_FORCE_INDEX,
+                                    WebStateOpener());
 
     // Creates the Toolbar for testing and sizes it to the width of the screen.
     toolbar_model_delegate_.reset(
         new ToolbarModelDelegateIOS(web_state_list_.get()));
-    toolbar_model_ios_.reset(
-        new ToolbarModelImplIOS(toolbar_model_delegate_.get()));
+    toolbar_model_ = std::make_unique<ToolbarModelImpl>(
+        toolbar_model_delegate_.get(), kMaxURLDisplayChars);
 
     // The OCMOCK_VALUE macro doesn't like std::unique_ptr, but it works just
     // fine if a temporary variable is used.
-    ToolbarModelIOS* model_for_mock = toolbar_model_ios_.get();
-    web::WebState* web_state_for_mock = web_state_list_->GetWebStateAt(0);
-    id webToolbarDelegate =
-        [OCMockObject niceMockForProtocol:@protocol(WebToolbarDelegate)];
-    [[[webToolbarDelegate stub] andReturnValue:OCMOCK_VALUE(model_for_mock)]
-        toolbarModelIOS];
-    [[[webToolbarDelegate stub] andReturnValue:OCMOCK_VALUE(web_state_for_mock)]
-        currentWebState];
-    id urlLoader = [OCMockObject niceMockForProtocol:@protocol(UrlLoader)];
-    toolbar_ = [[WebToolbarController alloc]
-        initWithDelegate:webToolbarDelegate
-               urlLoader:urlLoader
-            browserState:chrome_browser_state_.get()
-         preloadProvider:nil
-              dispatcher:nil];
-    UIView* toolbarView = [toolbar_ view];
+    ToolbarModel* model_for_mock = toolbar_model_.get();
+    id toolbarDelegate = OCMProtocolMock(@protocol(ToolbarCoordinatorDelegate));
+    [[[toolbarDelegate stub] andReturnValue:OCMOCK_VALUE(model_for_mock)]
+        toolbarModel];
+
+    coordinator_ = [[ToolbarCoordinator alloc]
+        initWithToolsMenuConfigurationProvider:nil
+                                    dispatcher:nil
+                                  browserState:chrome_browser_state_.get()];
+    coordinator_.delegate = toolbarDelegate;
+    coordinator_.webStateList = web_state_list_.get();
+    [coordinator_ start];
+
+    UIView* toolbarView = coordinator_.viewController.view;
     CGRect toolbarFrame = toolbarView.frame;
     toolbarFrame.origin = CGPointZero;
     toolbarFrame.size.width = screenBounds.size.width;
     toolbarView.frame = toolbarFrame;
     // Add toolbar to window.
     [window_ addSubview:toolbarView];
+    AddNamedGuide(kOmniboxGuide, window_);
+    AddNamedGuide(kBackButtonGuide, window_);
+    AddNamedGuide(kForwardButtonGuide, window_);
+    AddNamedGuide(kToolsMenuGuide, window_);
+    AddNamedGuide(kTabSwitcherGuide, window_);
+    [coordinator_.viewController didMoveToParentViewController:nil];
     base::test::ios::WaitUntilCondition(^bool() {
       return IsToolbarLoaded(window_);
     });
@@ -123,11 +133,11 @@ class OmniboxPerfTest : public PerfTest {
 
   void TearDown() override {
     // Remove toolbar from window.
-    [[toolbar_ view] removeFromSuperview];
+    [coordinator_.viewController.view removeFromSuperview];
     base::test::ios::WaitUntilCondition(^bool() {
       return !IsToolbarLoaded(window_);
     });
-    [toolbar_ browserStateDestroyed];
+    [coordinator_ stop];
     PerfTest::TearDown();
   }
 
@@ -215,8 +225,8 @@ class OmniboxPerfTest : public PerfTest {
   FakeWebStateListDelegate web_state_list_delegate_;
   std::unique_ptr<WebStateList> web_state_list_;
   std::unique_ptr<ToolbarModelDelegateIOS> toolbar_model_delegate_;
-  std::unique_ptr<ToolbarModelIOS> toolbar_model_ios_;
-  WebToolbarController* toolbar_;
+  std::unique_ptr<ToolbarModel> toolbar_model_;
+  ToolbarCoordinator* coordinator_;
   UIWindow* window_;
   KeyboardAppearanceListener* keyboard_listener_;
 };
@@ -226,7 +236,7 @@ class OmniboxPerfTest : public PerfTest {
 TEST_F(OmniboxPerfTest, TestTextFieldDidBeginEditing) {
   LogPerfTiming("Keyboard preload", PreLoadKeyboard());
   OmniboxTextFieldIOS* textField = (OmniboxTextFieldIOS*)FindViewByClass(
-      [toolbar_ view], [OmniboxTextFieldIOS class]);
+      coordinator_.viewController.view, [OmniboxTextFieldIOS class]);
 
   // Time how long it takes to "focus" on omnibox.
   RepeatTimedRuns("Begin editing",
@@ -242,7 +252,7 @@ TEST_F(OmniboxPerfTest, TestTextFieldDidBeginEditing) {
 // into the Omnibox.
 TEST_F(OmniboxPerfTest, TestTypeOneCharInTextField) {
   OmniboxTextFieldIOS* textField = (OmniboxTextFieldIOS*)FindViewByClass(
-      [toolbar_ view], [OmniboxTextFieldIOS class]);
+      coordinator_.viewController.view, [OmniboxTextFieldIOS class]);
   RepeatTimedRuns("Type first character",
                   ^base::TimeDelta(int index) {
                     EnableKeyboard(textField);
@@ -256,9 +266,10 @@ TEST_F(OmniboxPerfTest, TestTypeOneCharInTextField) {
 
 // Measures the amount of time it takes to type in the word "google" one
 // letter at a time.
-TEST_F(OmniboxPerfTest, TestTypingInTextField) {
+// TODO(crbug.com/799488): Re-enable this test.
+TEST_F(OmniboxPerfTest, DISABLED_TestTypingInTextField) {
   OmniboxTextFieldIOS* textField = (OmniboxTextFieldIOS*)FindViewByClass(
-      [toolbar_ view], [OmniboxTextFieldIOS class]);
+      coordinator_.viewController.view, [OmniboxTextFieldIOS class]);
   // The characters to type into the omnibox text field.
   NSArray* inputCharacters =
       [NSArray arrayWithObjects:@"g", @"o", @"o", @"g", @"l", @"e", nil];

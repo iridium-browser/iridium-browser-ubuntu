@@ -13,12 +13,15 @@
 
 namespace ash {
 
-EventClientImpl::EventClientImpl() {}
+EventClientImpl::EventClientImpl() = default;
 
-EventClientImpl::~EventClientImpl() {}
+EventClientImpl::~EventClientImpl() = default;
 
 bool EventClientImpl::CanProcessEventsWithinSubtree(
     const aura::Window* window) const {
+  if (skip_user_session_blocked_check_)
+    return true;
+
   // TODO(oshima): Migrate this logic to Shell::CanWindowReceieveEvents and
   // remove this.
   const aura::Window* root_window = window ? window->GetRootWindow() : NULL;
@@ -33,15 +36,11 @@ bool EventClientImpl::CanProcessEventsWithinSubtree(
       root_window, kShellWindowId_LockScreenWallpaperContainer);
   const aura::Window* lock_screen_related_containers = Shell::GetContainer(
       root_window, kShellWindowId_LockScreenRelatedContainersContainer);
-  const aura::Window* lock_action_handler_container = Shell::GetContainer(
-      root_window, kShellWindowId_LockActionHandlerContainer);
   bool can_process_events =
       (window->Contains(lock_screen_containers) &&
        window->Contains(lock_wallpaper_containers) &&
        window->Contains(lock_screen_related_containers)) ||
-      (lock_screen_containers->Contains(window) &&
-       (!lock_action_handler_container->Contains(window) ||
-        Shell::Get()->tray_action()->IsLockScreenNoteActive())) ||
+      lock_screen_containers->Contains(window) ||
       lock_wallpaper_containers->Contains(window) ||
       lock_screen_related_containers->Contains(window);
   if (keyboard::IsKeyboardEnabled()) {

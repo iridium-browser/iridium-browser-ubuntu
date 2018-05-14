@@ -8,10 +8,10 @@
 #include <stdint.h>
 
 #include <memory>
-#include <queue>
 #include <string>
 #include <vector>
 
+#include "base/containers/queue.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -26,7 +26,6 @@
 
 namespace content {
 class BrowserChildProcessHostImpl;
-class ResourceContext;
 struct PepperPluginInfo;
 
 // Process host for PPAPI plugin and broker processes.
@@ -60,10 +59,6 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
   };
 
   class PluginClient : public Client {
-   public:
-    // Returns the resource context for the renderer requesting the channel.
-    virtual ResourceContext* GetResourceContext() = 0;
-
    protected:
     ~PluginClient() override {}
   };
@@ -163,7 +158,7 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
 
   // Channel requests that we have already sent to the plugin process, but
   // haven't heard back about yet.
-  std::queue<Client*> sent_requests_;
+  base::queue<Client*> sent_requests_;
 
   // Path to the plugin library.
   base::FilePath plugin_path_;

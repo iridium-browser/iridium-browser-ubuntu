@@ -18,6 +18,7 @@ class AccountId;
 
 namespace ash {
 
+enum class AddUserSessionPolicy;
 class SessionController;
 
 // Implement SessionControllerClient mojo interface to simulate chrome behavior
@@ -41,11 +42,14 @@ class TestSessionControllerClient : public ash::mojom::SessionControllerClient {
   // Helpers to set SessionController state.
   void SetCanLockScreen(bool can_lock);
   void SetShouldLockScreenAutomatically(bool should_lock);
+  void SetAddUserSessionPolicy(AddUserSessionPolicy policy);
   void SetSessionState(session_manager::SessionState state);
+  void SetIsRunningInAppMode(bool app_mode);
 
   // Creates the |count| pre-defined user sessions. The users are named by
-  // numbers using "user%d@tray" template. Note that existing user sessions
-  // prior this call will be removed without sending out notifications.
+  // numbers using "user%d@tray" template. The first user is set as active user
+  // to be consistent with crash-and-restore scenario.  Note that existing user
+  // sessions prior this call will be removed without sending out notifications.
   void CreatePredefinedUserSessions(int count);
 
   // Adds a user session from a given display email. The display email will be
@@ -60,6 +64,9 @@ class TestSessionControllerClient : public ash::mojom::SessionControllerClient {
       bool provide_pref_service = true,
       bool is_new_profile = false);
 
+  // Creates a test PrefService and associates it with the user.
+  void ProvidePrefServiceForUser(const AccountId& account_id);
+
   // Simulates screen unlocking. It is virtual so that test cases can override
   // it. The default implementation sets the session state of SessionController
   // to be ACTIVE.
@@ -67,6 +74,7 @@ class TestSessionControllerClient : public ash::mojom::SessionControllerClient {
 
   // ash::mojom::SessionControllerClient:
   void RequestLockScreen() override;
+  void RequestSignOut() override;
   void SwitchActiveUser(const AccountId& account_id) override;
   void CycleActiveUser(CycleUserDirection direction) override;
   void ShowMultiProfileLogin() override;

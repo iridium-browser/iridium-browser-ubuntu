@@ -268,14 +268,14 @@ void Widget::ReparentNativeView(gfx::NativeView native_view,
 // static
 int Widget::GetLocalizedContentsWidth(int col_resource_id) {
   return ui::GetLocalizedContentsWidthForFont(
-      col_resource_id, ResourceBundle::GetSharedInstance().GetFontWithDelta(
+      col_resource_id, ui::ResourceBundle::GetSharedInstance().GetFontWithDelta(
                            ui::kMessageFontSizeDelta));
 }
 
 // static
 int Widget::GetLocalizedContentsHeight(int row_resource_id) {
   return ui::GetLocalizedContentsHeightForFont(
-      row_resource_id, ResourceBundle::GetSharedInstance().GetFontWithDelta(
+      row_resource_id, ui::ResourceBundle::GetSharedInstance().GetFontWithDelta(
                            ui::kMessageFontSizeDelta));
 }
 
@@ -525,6 +525,8 @@ void Widget::SetBoundsConstrained(const gfx::Rect& bounds) {
   if (work_area.IsEmpty()) {
     SetBounds(bounds);
   } else {
+    // TODO(https://crbug.com/806936): The following code doesn't actually do
+    // what the comment describing this function says it should.
     // Inset the work area slightly.
     work_area.Inset(10, 10, 10, 10);
     work_area.AdjustToFit(bounds);
@@ -567,7 +569,7 @@ void Widget::StackAtTop() {
   native_widget_->StackAtTop();
 }
 
-void Widget::SetShape(std::unique_ptr<SkRegion> shape) {
+void Widget::SetShape(std::unique_ptr<ShapeRects> shape) {
   native_widget_->SetShape(std::move(shape));
 }
 
@@ -592,7 +594,7 @@ void Widget::Close() {
   // |FocusManager::ViewRemoved()| calls are fouled.  We clear focus here
   // to avoid these redundant steps and to avoid accessing deleted views
   // that may have been in focus.
-  if (is_top_level() && focus_manager_.get())
+  if (is_top_level() && focus_manager_)
     focus_manager_->SetFocusedView(nullptr);
 
   for (WidgetObserver& observer : observers_)
@@ -857,12 +859,10 @@ void Widget::ThemeChanged() {
   root_view_->ThemeChanged();
 }
 
-void Widget::LocaleChanged() {
-  root_view_->LocaleChanged();
-}
-
-void Widget::DeviceScaleFactorChanged(float device_scale_factor) {
-  root_view_->DeviceScaleFactorChanged(device_scale_factor);
+void Widget::DeviceScaleFactorChanged(float old_device_scale_factor,
+                                      float new_device_scale_factor) {
+  root_view_->DeviceScaleFactorChanged(old_device_scale_factor,
+                                       new_device_scale_factor);
 }
 
 void Widget::SetFocusTraversableParent(FocusTraversable* parent) {
@@ -1433,6 +1433,8 @@ internal::RootView* Widget::CreateRootView() {
 }
 
 void Widget::DestroyRootView() {
+  if (is_top_level() && focus_manager_)
+    focus_manager_->SetFocusedView(nullptr);
   NotifyWillRemoveView(root_view_.get());
   non_client_view_ = NULL;
   root_view_.reset();

@@ -29,7 +29,11 @@ class NavigationContext {
   // The WebState the navigation is taking place in.
   virtual WebState* GetWebState() = 0;
 
-  // The URL the WebState is navigating to.
+  // Returns a unique ID for this navigation.
+  virtual int64_t GetNavigationId() const = 0;
+
+  // The URL the WebState is navigating to. This may change during the
+  // navigation when encountering a server redirect.
   virtual const GURL& GetUrl() const = 0;
 
   // Returns the page transition type for this navigation.
@@ -41,6 +45,19 @@ class NavigationContext {
   // * pushState/replaceState
   // * same document history navigation
   virtual bool IsSameDocument() const = 0;
+
+  // Whether the navigation has committed. Navigations that end up being
+  // downloads or return 204/205 response codes do not commit (i.e. the
+  // WebState stays at the existing URL).
+  // This returns true for either successful commits or error pages that
+  // replace the previous page, and false for errors that leave the user on the
+  // previous page.
+  virtual bool HasCommitted() const = 0;
+
+  // Returns true if this navigation resulted in a download. Returns false if
+  // this navigation did not result in a download, or if download status is not
+  // yet known for this navigation.
+  virtual bool IsDownload() const = 0;
 
   // Whether the initial navigation is done using HTTP POST method. This will
   // not change during the navigation (even after encountering a server
@@ -58,6 +75,14 @@ class NavigationContext {
   // response headers or they have not been received yet. The response headers
   // returned should not be modified, as modifications will not be reflected.
   virtual net::HttpResponseHeaders* GetResponseHeaders() const = 0;
+
+  // Whether the navigation was initiated by the renderer process. Examples of
+  // renderer-initiated navigations include:
+  //  * <a> link click
+  //  * changing window.location.href
+  //  * redirect via the <meta http-equiv="refresh"> tag
+  //  * using window.history.pushState
+  virtual bool IsRendererInitiated() const = 0;
 
   virtual ~NavigationContext() {}
 };

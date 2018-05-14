@@ -4,6 +4,8 @@
 
 #include "chrome/browser/extensions/api/developer_private/inspectable_views_finder.h"
 
+#include <set>
+
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/developer_private.h"
 #include "content/public/browser/render_frame_host.h"
@@ -67,9 +69,6 @@ InspectableViewsFinder::View InspectableViewsFinder::ConstructView(
       break;
     case VIEW_TYPE_EXTENSION_POPUP:
       view.type = api::developer_private::VIEW_TYPE_EXTENSION_POPUP;
-      break;
-    case VIEW_TYPE_LAUNCHER_PAGE:
-      view.type = api::developer_private::VIEW_TYPE_LAUNCHER_PAGE;
       break;
     case VIEW_TYPE_PANEL:
       view.type = api::developer_private::VIEW_TYPE_PANEL;
@@ -193,10 +192,10 @@ void InspectableViewsFinder::GetAppWindowViewsForExtension(
     if (url.is_empty())
       url = window->initial_url();
 
-    content::RenderProcessHost* process = web_contents->GetRenderProcessHost();
-    result->push_back(ConstructView(
-        url, process->GetID(), web_contents->GetMainFrame()->GetRoutingID(),
-        false, false, GetViewType(web_contents)));
+    content::RenderFrameHost* main_frame = web_contents->GetMainFrame();
+    result->push_back(ConstructView(url, main_frame->GetProcess()->GetID(),
+                                    main_frame->GetRoutingID(), false, false,
+                                    GetViewType(web_contents)));
   }
 }
 

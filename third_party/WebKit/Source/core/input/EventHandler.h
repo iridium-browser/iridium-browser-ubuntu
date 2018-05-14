@@ -26,6 +26,8 @@
 #ifndef EventHandler_h
 #define EventHandler_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/dom/UserGestureIndicator.h"
 #include "core/events/TextEventInputType.h"
@@ -46,7 +48,6 @@
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/HashTraits.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebInputEvent.h"
 #include "public/platform/WebInputEventResult.h"
 #include "public/platform/WebMenuSourceType.h"
@@ -67,7 +68,6 @@ class HitTestResult;
 class LayoutObject;
 class LocalFrame;
 class Node;
-class OptionalCursor;
 class ScrollableArea;
 class Scrollbar;
 class SelectionController;
@@ -75,15 +75,12 @@ class TextEvent;
 class WebGestureEvent;
 class WebMouseEvent;
 class WebMouseWheelEvent;
-class WebTouchEvent;
 
 class CORE_EXPORT EventHandler final
     : public GarbageCollectedFinalized<EventHandler> {
-  WTF_MAKE_NONCOPYABLE(EventHandler);
-
  public:
   explicit EventHandler(LocalFrame&);
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   void Clear();
 
@@ -149,6 +146,12 @@ class CORE_EXPORT EventHandler final
       const Vector<WebMouseEvent>& coalesced_events);
   void HandleMouseLeaveEvent(const WebMouseEvent&);
 
+  WebInputEventResult HandlePointerEvent(
+      const WebPointerEvent&,
+      const Vector<WebPointerEvent>& coalesced_events);
+
+  WebInputEventResult DispatchBufferedTouchEvents();
+
   WebInputEventResult HandleMousePressEvent(const WebMouseEvent&);
   WebInputEventResult HandleMouseReleaseEvent(const WebMouseEvent&);
   WebInputEventResult HandleWheelEvent(const WebMouseWheelEvent&);
@@ -189,12 +192,7 @@ class CORE_EXPORT EventHandler final
   bool BestContextMenuNodeForHitTestResult(const HitTestResult&,
                                            IntPoint& target_point,
                                            Node*& target_node);
-  // FIXME: This doesn't appear to be used outside tests anymore, what path are
-  // we using now and is it tested?
-  bool BestZoomableAreaForTouchPoint(const IntPoint& touch_center,
-                                     const IntSize& touch_radius,
-                                     IntRect& target_area,
-                                     Node*& target_node);
+  void CacheTouchAdjustmentResult(uint32_t, FloatPoint);
 
   WebInputEventResult SendContextMenuEvent(
       const WebMouseEvent&,
@@ -230,15 +228,11 @@ class CORE_EXPORT EventHandler final
 
   void CapsLockStateMayHaveChanged();  // Only called by FrameSelection
 
-  WebInputEventResult HandleTouchEvent(
-      const WebTouchEvent&,
-      const Vector<WebTouchEvent>& coalesced_events);
-
   bool UseHandCursor(Node*, bool is_over_link);
 
   void NotifyElementActivated();
 
-  PassRefPtr<UserGestureToken> TakeLastMouseDownGestureToken() {
+  scoped_refptr<UserGestureToken> TakeLastMouseDownGestureToken() {
     return std::move(last_mouse_down_user_gesture_token_);
   }
 
@@ -270,6 +264,25 @@ class CORE_EXPORT EventHandler final
   void ClearDragState();
 
  private:
+  enum NoCursorChangeType { kNoCursorChange };
+
+  class OptionalCursor {
+   public:
+    OptionalCursor(NoCursorChangeType) : is_cursor_change_(false) {}
+    OptionalCursor(const Cursor& cursor)
+        : is_cursor_change_(true), cursor_(cursor) {}
+
+    bool IsCursorChange() const { return is_cursor_change_; }
+    const Cursor& GetCursor() const {
+      DCHECK(is_cursor_change_);
+      return cursor_;
+    }
+
+   private:
+    bool is_cursor_change_;
+    Cursor cursor_;
+  };
+
   WebInputEventResult HandleMouseMoveOrLeaveEvent(
       const WebMouseEvent&,
       const Vector<WebMouseEvent>&,
@@ -290,8 +303,10 @@ class CORE_EXPORT EventHandler final
       const GestureEventWithHitTestResults&);
 
   bool ShouldApplyTouchAdjustment(const WebGestureEvent&) const;
-
+  bool GestureCorrespondsToAdjustedTouch(const WebGestureEvent&);
+  bool IsSelectingLink(const HitTestResult&);
   bool ShouldShowIBeamForNode(const Node*, const HitTestResult&);
+  bool ShouldShowResizeForNode(const Node*, const HitTestResult&);
   OptionalCursor SelectCursor(const HitTestResult&);
   OptionalCursor SelectAutoCursor(const HitTestResult&,
                                   Node*,
@@ -305,16 +320,11 @@ class CORE_EXPORT EventHandler final
 
   ScrollableArea* AssociatedScrollableArea(const PaintLayer*) const;
 
-  Node* UpdateMouseEventTargetNode(Node*);
+  Node* EffectiveMouseEventTargetNode(Node*);
 
   // Dispatches ME after corresponding PE provided the PE has not been canceled.
-  // The eventType arg must be a mouse event that can be gated though a
-  // preventDefaulted pointerdown (i.e., one of
-  // {mousedown, mousemove, mouseup}).
-  // TODO(mustaq): Can we avoid the clickCount param, instead use
-  // WebmMouseEvent's count?
-  //     Same applied to dispatchMouseEvent() above.
-  WebInputEventResult UpdatePointerTargetAndDispatchEvents(
+  // The |mouse_event_type| arg must be one of {mousedown, mousemove, mouseup}.
+  WebInputEventResult DispatchMousePointerEvent(
       const AtomicString& mouse_event_type,
       Node* target,
       const String& canvas_region_id,
@@ -374,7 +384,7 @@ class CORE_EXPORT EventHandler final
 
   Member<HTMLFrameSetElement> frame_set_being_resized_;
 
-  RefPtr<UserGestureToken> last_mouse_down_user_gesture_token_;
+  scoped_refptr<UserGestureToken> last_mouse_down_user_gesture_token_;
 
   Member<ScrollManager> scroll_manager_;
   Member<MouseEventManager> mouse_event_manager_;
@@ -391,13 +401,40 @@ class CORE_EXPORT EventHandler final
   double last_show_press_timestamp_;
   Member<Element> last_deferred_tap_element_;
 
-  // Set on GestureTapDown if the |pointerdown| event corresponding to the
-  // triggering |touchstart| event was canceled. This suppresses mouse event
-  // firing for the current gesture sequence (i.e. until next GestureTapDown).
-  bool suppress_mouse_events_from_gestures_;
+  // Set on GestureTapDown if unique_touch_event_id_ matches cached adjusted
+  // touchstart event id.
+  bool should_use_touch_event_adjusted_point_;
 
+  // Stored the last touch type primary pointer down adjustment result.
+  // This is used in gesture event hit test.
+  TouchAdjustmentResult touch_adjustment_result_;
+
+  // ShouldShowIBeamForNode's unit tests:
   FRIEND_TEST_ALL_PREFIXES(EventHandlerTest, HitOnNothingDoesNotShowIBeam);
   FRIEND_TEST_ALL_PREFIXES(EventHandlerTest, HitOnTextShowsIBeam);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest,
+                           HitOnUserSelectNoneDoesNotShowIBeam);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest,
+                           ShadowChildCanOverrideUserSelectNone);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest,
+                           UserSelectAllCanOverrideUserSelectNone);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest,
+                           UserSelectNoneCanOverrideUserSelectAll);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest,
+                           UserSelectTextCanOverrideUserSelectNone);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest,
+                           UserSelectNoneCanOverrideUserSelectText);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest,
+                           ShadowChildCanOverrideUserSelectText);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest, InputFieldsCanStartSelection);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest, ImagesCannotStartSelection);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest, AnchorTextCannotStartSelection);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest,
+                           EditableAnchorTextCanStartSelection);
+  FRIEND_TEST_ALL_PREFIXES(EventHandlerTest,
+                           ReadOnlyInputDoesNotInheritUserSelect);
+
+  DISALLOW_COPY_AND_ASSIGN(EventHandler);
 };
 
 }  // namespace blink

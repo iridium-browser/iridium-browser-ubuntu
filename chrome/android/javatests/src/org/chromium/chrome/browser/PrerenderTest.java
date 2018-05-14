@@ -8,7 +8,6 @@ import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_E
 
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.LargeTest;
-import android.test.MoreAsserts;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -26,7 +25,6 @@ import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.prerender.ExternalPrerenderHandler;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.PrerenderTestHelper;
@@ -42,10 +40,7 @@ import java.util.concurrent.TimeoutException;
  * Tests are disabled on low-end devices. These only support one renderer for performance reasons.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PrerenderTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
@@ -55,8 +50,7 @@ public class PrerenderTest {
     @Before
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
     }
 
     @After
@@ -113,7 +107,7 @@ public class PrerenderTest {
         PrerenderTestHelper.prerenderUrl(testUrl, tab);
 
         // Make sure the current tab title is NOT from the prerendered page.
-        MoreAsserts.assertNotEqual(newTitle, tab.getTitle());
+        Assert.assertNotEquals(newTitle, tab.getTitle());
 
         TabTitleObserver observer = new TabTitleObserver(tab, newTitle);
 
@@ -160,11 +154,6 @@ public class PrerenderTest {
 
         // Cancel the prerender. This will discard the prerendered WebContents and close the
         // infobars.
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                handler.cancelCurrentPrerender();
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(() -> handler.cancelCurrentPrerender());
     }
 }

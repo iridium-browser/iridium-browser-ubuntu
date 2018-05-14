@@ -17,13 +17,10 @@ using blink::WebStorageNamespace;
 
 namespace content {
 
-WebStorageNamespaceImpl::WebStorageNamespaceImpl()
-    : namespace_id_(kLocalStorageNamespaceId) {
-}
-
-WebStorageNamespaceImpl::WebStorageNamespaceImpl(int64_t namespace_id)
+WebStorageNamespaceImpl::WebStorageNamespaceImpl(
+    const std::string& namespace_id)
     : namespace_id_(namespace_id) {
-  DCHECK_NE(kInvalidSessionStorageNamespaceId, namespace_id);
+  DCHECK(!namespace_id.empty());
 }
 
 WebStorageNamespaceImpl::~WebStorageNamespaceImpl() {
@@ -39,7 +36,7 @@ WebStorageNamespace* WebStorageNamespaceImpl::copy() {
   // session storage is used.  In the WebViewClient::createView, we do the
   // book-keeping necessary to make it a true copy-on-write despite not doing
   // anything here, now.
-  return NULL;
+  return nullptr;
 }
 
 bool WebStorageNamespaceImpl::IsSameNamespace(

@@ -5,6 +5,9 @@
 #include "core/editing/spellcheck/SpellChecker.h"
 
 #include "core/editing/Editor.h"
+#include "core/editing/EphemeralRange.h"
+#include "core/editing/FrameSelection.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/markers/DocumentMarkerController.h"
 #include "core/editing/markers/SpellCheckMarker.h"
 #include "core/editing/spellcheck/SpellCheckRequester.h"
@@ -12,7 +15,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
-#include "core/html/HTMLInputElement.h"
+#include "core/html/forms/HTMLInputElement.h"
 
 namespace blink {
 
@@ -64,9 +67,10 @@ TEST_F(SpellCheckerTest, AdvancedToNextMisspellingWrapSearchNoCrash) {
 
   Element* div = GetDocument().QuerySelector("div");
   div->focus();
-  Selection().SetSelection(SelectionInDOMTree::Builder()
-                               .Collapse(Position::LastPositionInNode(*div))
-                               .Build());
+  Selection().SetSelectionAndEndTyping(
+      SelectionInDOMTree::Builder()
+          .Collapse(Position::LastPositionInNode(*div))
+          .Build());
   UpdateAllLifecyclePhases();
 
   GetSpellChecker().AdvanceToNextMisspelling(false);
@@ -75,26 +79,20 @@ TEST_F(SpellCheckerTest, AdvancedToNextMisspellingWrapSearchNoCrash) {
 TEST_F(SpellCheckerTest, SpellCheckDoesNotCauseUpdateLayout) {
   SetBodyContent("<input>");
   HTMLInputElement* input =
-      toHTMLInputElement(GetDocument().QuerySelector("input"));
+      ToHTMLInputElement(GetDocument().QuerySelector("input"));
   input->focus();
   input->setValue("Hello, input field");
   GetDocument().UpdateStyleAndLayout();
-  VisibleSelection old_selection =
-      GetDocument()
-          .GetFrame()
-          ->Selection()
-          .ComputeVisibleSelectionInDOMTreeDeprecated();
 
   Position new_position(input->InnerEditorElement()->firstChild(), 3);
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder().Collapse(new_position).Build());
   ASSERT_EQ(3u, input->selectionStart());
 
   EXPECT_TRUE(GetSpellChecker().IsSpellCheckingEnabled());
   ForceLayout();
   int start_count = LayoutCount();
-  GetSpellChecker().RespondToChangedSelection(old_selection.Start(),
-                                              TypingContinuation::kEnd);
+  GetSpellChecker().RespondToChangedSelection();
   EXPECT_EQ(start_count, LayoutCount());
 }
 
@@ -139,17 +137,17 @@ TEST_F(SpellCheckerTest, GetSpellCheckMarkerUnderSelection_FirstCharSelected) {
   GetDocument().Markers().AddSpellingMarker(
       EphemeralRange(Position(text, 0), Position(text, 8)));
 
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 0), Position(text, 1))
           .Build());
 
-  Optional<std::pair<Node*, SpellCheckMarker*>> result =
+  std::pair<Node*, SpellCheckMarker*> result =
       GetDocument()
           .GetFrame()
           ->GetSpellChecker()
           .GetSpellCheckMarkerUnderSelection();
-  EXPECT_TRUE(result);
+  EXPECT_NE(nullptr, result.first);
 }
 
 TEST_F(SpellCheckerTest, GetSpellCheckMarkerUnderSelection_LastCharSelected) {
@@ -163,17 +161,17 @@ TEST_F(SpellCheckerTest, GetSpellCheckMarkerUnderSelection_LastCharSelected) {
   GetDocument().Markers().AddSpellingMarker(
       EphemeralRange(Position(text, 0), Position(text, 8)));
 
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 7), Position(text, 8))
           .Build());
 
-  Optional<std::pair<Node*, SpellCheckMarker*>> result =
+  std::pair<Node*, SpellCheckMarker*> result =
       GetDocument()
           .GetFrame()
           ->GetSpellChecker()
           .GetSpellCheckMarkerUnderSelection();
-  EXPECT_TRUE(result);
+  EXPECT_NE(nullptr, result.first);
 }
 
 TEST_F(SpellCheckerTest,
@@ -188,17 +186,17 @@ TEST_F(SpellCheckerTest,
   GetDocument().Markers().AddSpellingMarker(
       EphemeralRange(Position(text, 0), Position(text, 1)));
 
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 0), Position(text, 1))
           .Build());
 
-  Optional<std::pair<Node*, SpellCheckMarker*>> result =
+  std::pair<Node*, SpellCheckMarker*> result =
       GetDocument()
           .GetFrame()
           ->GetSpellChecker()
           .GetSpellCheckMarkerUnderSelection();
-  EXPECT_TRUE(result);
+  EXPECT_NE(nullptr, result.first);
 }
 
 TEST_F(SpellCheckerTest,
@@ -213,17 +211,17 @@ TEST_F(SpellCheckerTest,
   GetDocument().Markers().AddSpellingMarker(
       EphemeralRange(Position(text, 0), Position(text, 1)));
 
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 0), Position(text, 0))
           .Build());
 
-  Optional<std::pair<Node*, SpellCheckMarker*>> result =
+  std::pair<Node*, SpellCheckMarker*> result =
       GetDocument()
           .GetFrame()
           ->GetSpellChecker()
           .GetSpellCheckMarkerUnderSelection();
-  EXPECT_FALSE(result);
+  EXPECT_EQ(nullptr, result.first);
 }
 
 TEST_F(SpellCheckerTest,
@@ -238,17 +236,17 @@ TEST_F(SpellCheckerTest,
   GetDocument().Markers().AddSpellingMarker(
       EphemeralRange(Position(text, 0), Position(text, 1)));
 
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 1), Position(text, 1))
           .Build());
 
-  Optional<std::pair<Node*, SpellCheckMarker*>> result =
+  std::pair<Node*, SpellCheckMarker*> result =
       GetDocument()
           .GetFrame()
           ->GetSpellChecker()
           .GetSpellCheckMarkerUnderSelection();
-  EXPECT_FALSE(result);
+  EXPECT_EQ(nullptr, result.first);
 }
 
 TEST_F(SpellCheckerTest,
@@ -263,17 +261,17 @@ TEST_F(SpellCheckerTest,
   GetDocument().Markers().AddSpellingMarker(
       EphemeralRange(Position(text, 0), Position(text, 8)));
 
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 0), Position(text, 0))
           .Build());
 
-  Optional<std::pair<Node*, SpellCheckMarker*>> result =
+  std::pair<Node*, SpellCheckMarker*> result =
       GetDocument()
           .GetFrame()
           ->GetSpellChecker()
           .GetSpellCheckMarkerUnderSelection();
-  EXPECT_FALSE(result);
+  EXPECT_EQ(nullptr, result.first);
 }
 
 TEST_F(SpellCheckerTest,
@@ -288,17 +286,17 @@ TEST_F(SpellCheckerTest,
   GetDocument().Markers().AddSpellingMarker(
       EphemeralRange(Position(text, 0), Position(text, 8)));
 
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 8), Position(text, 8))
           .Build());
 
-  Optional<std::pair<Node*, SpellCheckMarker*>> result =
+  std::pair<Node*, SpellCheckMarker*> result =
       GetDocument()
           .GetFrame()
           ->GetSpellChecker()
           .GetSpellCheckMarkerUnderSelection();
-  EXPECT_FALSE(result);
+  EXPECT_EQ(nullptr, result.first);
 }
 
 TEST_F(SpellCheckerTest, GetSpellCheckMarkerUnderSelection_CaretMiddleOfWord) {
@@ -312,17 +310,17 @@ TEST_F(SpellCheckerTest, GetSpellCheckMarkerUnderSelection_CaretMiddleOfWord) {
   GetDocument().Markers().AddSpellingMarker(
       EphemeralRange(Position(text, 0), Position(text, 8)));
 
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 4), Position(text, 4))
           .Build());
 
-  Optional<std::pair<Node*, SpellCheckMarker*>> result =
+  std::pair<Node*, SpellCheckMarker*> result =
       GetDocument()
           .GetFrame()
           ->GetSpellChecker()
           .GetSpellCheckMarkerUnderSelection();
-  EXPECT_TRUE(result);
+  EXPECT_NE(nullptr, result.first);
 }
 
 TEST_F(SpellCheckerTest,
@@ -337,17 +335,17 @@ TEST_F(SpellCheckerTest,
   GetDocument().Markers().AddSpellingMarker(
       EphemeralRange(Position(text, 2), Position(text, 10)));
 
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 1), Position(text, 1))
           .Build());
 
-  Optional<std::pair<Node*, SpellCheckMarker*>> result =
+  std::pair<Node*, SpellCheckMarker*> result =
       GetDocument()
           .GetFrame()
           ->GetSpellChecker()
           .GetSpellCheckMarkerUnderSelection();
-  EXPECT_FALSE(result);
+  EXPECT_EQ(nullptr, result.first);
 }
 
 TEST_F(SpellCheckerTest,
@@ -362,17 +360,17 @@ TEST_F(SpellCheckerTest,
   GetDocument().Markers().AddSpellingMarker(
       EphemeralRange(Position(text, 0), Position(text, 8)));
 
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 9), Position(text, 9))
           .Build());
 
-  Optional<std::pair<Node*, SpellCheckMarker*>> result =
+  std::pair<Node*, SpellCheckMarker*> result =
       GetDocument()
           .GetFrame()
           ->GetSpellChecker()
           .GetSpellCheckMarkerUnderSelection();
-  EXPECT_FALSE(result);
+  EXPECT_EQ(nullptr, result.first);
 }
 
 }  // namespace blink

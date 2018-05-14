@@ -70,12 +70,43 @@ bool FloatRect::MayNotHaveExactIntRectRepresentation() const {
          fabs(MaxX()) > kMaxExactlyExpressible ||
          fabs(MaxY()) > kMaxExactlyExpressible;
 }
+
+bool FloatRect::EqualWithinEpsilon(const FloatRect& other,
+                                   float epsilon) const {
+  return std::abs(other.X() - X()) <= epsilon &&
+         std::abs(other.Y() - Y()) <= epsilon &&
+         std::abs(other.Width() - Width()) <= epsilon &&
+         std::abs(other.Height() - Height()) <= epsilon;
+}
+
 #endif
 
 bool FloatRect::IsExpressibleAsIntRect() const {
   return isWithinIntRange(X()) && isWithinIntRange(Y()) &&
          isWithinIntRange(Width()) && isWithinIntRange(Height()) &&
          isWithinIntRange(MaxX()) && isWithinIntRange(MaxY());
+}
+
+void FloatRect::ShiftXEdgeTo(float edge) {
+  float delta = edge - X();
+  SetX(edge);
+  SetWidth(std::max(0.0f, Width() - delta));
+}
+
+void FloatRect::ShiftMaxXEdgeTo(float edge) {
+  float delta = edge - MaxX();
+  SetWidth(std::max(0.0f, Width() + delta));
+}
+
+void FloatRect::ShiftYEdgeTo(float edge) {
+  float delta = edge - Y();
+  SetY(edge);
+  SetHeight(std::max(0.0f, Height() - delta));
+}
+
+void FloatRect::ShiftMaxYEdgeTo(float edge) {
+  float delta = edge - MaxY();
+  SetHeight(std::max(0.0f, Height() + delta));
 }
 
 bool FloatRect::Intersects(const FloatRect& other) const {
@@ -170,6 +201,10 @@ float FloatRect::SquaredDistanceTo(const FloatPoint& point) const {
   return (point - closest_point).DiagonalLengthSquared();
 }
 
+FloatRect::operator SkRect() const {
+  return SkRect::MakeXYWH(X(), Y(), Width(), Height());
+}
+
 FloatRect::operator gfx::RectF() const {
   return gfx::RectF(X(), Y(), Width(), Height());
 }
@@ -184,13 +219,24 @@ FloatRect UnionRect(const Vector<FloatRect>& rects) {
   return result;
 }
 
-IntRect EnclosedIntRect(const FloatRect& rect) {
-  IntPoint location = CeiledIntPoint(rect.MinXMinYCorner());
-  IntPoint max_point = FlooredIntPoint(rect.MaxXMaxYCorner());
-  IntSize size = max_point - location;
-  size.ClampNegativeToZero();
+IntRect EnclosingIntRect(const FloatRect& rect) {
+  // Compute the enclosing rect using float types directly rather than
+  // FlooredIntPoint(...) et.c to avoid triggering integer overflows.
+  FloatPoint location(floorf(rect.X()), floorf(rect.Y()));
+  FloatPoint max_point(ceilf(rect.MaxX()), ceilf(rect.MaxY()));
+  FloatRect enclosing_rect(location, max_point - location);
+  return IntRect(enclosing_rect);
+}
 
-  return IntRect(location, size);
+IntRect EnclosedIntRect(const FloatRect& rect) {
+  // Compute the enclosed rect using float types directly rather than
+  // FlooredIntPoint(...) et.c to avoid triggering integer overflows.
+  FloatPoint location(ceilf(rect.X()), ceilf(rect.Y()));
+  FloatPoint max_point(floorf(rect.MaxX()), floorf(rect.MaxY()));
+  FloatSize size = max_point - location;
+  size.ClampNegativeToZero();
+  FloatRect enclosed_rect(location, size);
+  return IntRect(enclosed_rect);
 }
 
 IntRect RoundedIntRect(const FloatRect& rect) {
@@ -208,6 +254,10 @@ FloatRect MapRect(const FloatRect& r,
   return FloatRect(dest_rect.X() + (r.X() - src_rect.X()) * width_scale,
                    dest_rect.Y() + (r.Y() - src_rect.Y()) * height_scale,
                    r.Width() * width_scale, r.Height() * height_scale);
+}
+
+std::ostream& operator<<(std::ostream& ostream, const FloatRect& rect) {
+  return ostream << rect.ToString();
 }
 
 String FloatRect::ToString() const {

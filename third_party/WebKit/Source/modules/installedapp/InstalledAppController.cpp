@@ -38,7 +38,7 @@ class InstalledAppController::GetRelatedAppsCallbacks
   std::unique_ptr<AppInstalledCallbacks> callbacks_;
 };
 
-InstalledAppController::~InstalledAppController() {}
+InstalledAppController::~InstalledAppController() = default;
 
 void InstalledAppController::GetInstalledRelatedApps(
     std::unique_ptr<AppInstalledCallbacks> callbacks) {
@@ -56,27 +56,24 @@ void InstalledAppController::GetInstalledRelatedApps(
   // TODO(mgiuca): This roundtrip to content could be eliminated if the Manifest
   // class was moved from content into Blink.
   related_apps_fetcher_->GetManifestRelatedApplications(
-      WTF::MakeUnique<GetRelatedAppsCallbacks>(this, std::move(callbacks)));
+      std::make_unique<GetRelatedAppsCallbacks>(this, std::move(callbacks)));
 }
 
 void InstalledAppController::ProvideTo(
     LocalFrame& frame,
     WebRelatedAppsFetcher* related_apps_fetcher) {
-  InstalledAppController* controller =
-      new InstalledAppController(frame, related_apps_fetcher);
-  Supplement<LocalFrame>::ProvideTo(frame, SupplementName(), controller);
+  Supplement<LocalFrame>::ProvideTo(
+      frame, new InstalledAppController(frame, related_apps_fetcher));
 }
 
 InstalledAppController* InstalledAppController::From(LocalFrame& frame) {
-  InstalledAppController* controller = static_cast<InstalledAppController*>(
-      Supplement<LocalFrame>::From(frame, SupplementName()));
+  InstalledAppController* controller =
+      Supplement<LocalFrame>::From<InstalledAppController>(frame);
   DCHECK(controller);
   return controller;
 }
 
-const char* InstalledAppController::SupplementName() {
-  return "InstalledAppController";
-}
+const char InstalledAppController::kSupplementName[] = "InstalledAppController";
 
 InstalledAppController::InstalledAppController(
     LocalFrame& frame,
@@ -115,9 +112,8 @@ void InstalledAppController::FilterByInstalledApps(
 
   provider_->FilterInstalledApps(
       std::move(mojo_related_apps),
-      ConvertToBaseCallback(
-          WTF::Bind(&InstalledAppController::OnFilterInstalledApps,
-                    WrapPersistent(this), WTF::Passed(std::move(callbacks)))));
+      WTF::Bind(&InstalledAppController::OnFilterInstalledApps,
+                WrapPersistent(this), WTF::Passed(std::move(callbacks))));
 }
 
 void InstalledAppController::OnFilterInstalledApps(
@@ -135,7 +131,7 @@ void InstalledAppController::OnFilterInstalledApps(
       blink::WebVector<blink::WebRelatedApplication>(applications));
 }
 
-DEFINE_TRACE(InstalledAppController) {
+void InstalledAppController::Trace(blink::Visitor* visitor) {
   Supplement<LocalFrame>::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);
 }

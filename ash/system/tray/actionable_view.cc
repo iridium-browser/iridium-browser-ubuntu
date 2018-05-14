@@ -26,7 +26,7 @@ const char ActionableView::kViewClassName[] = "tray/ActionableView";
 
 ActionableView::ActionableView(SystemTrayItem* owner,
                                TrayPopupInkDropStyle ink_drop_style)
-    : views::CustomButton(this),
+    : views::Button(this),
       destroyed_(nullptr),
       owner_(owner),
       ink_drop_style_(ink_drop_style) {
@@ -59,20 +59,16 @@ bool ActionableView::OnKeyPressed(const ui::KeyEvent& event) {
     NotifyClick(event);
     return true;
   }
-  return CustomButton::OnKeyPressed(event);
-}
-
-void ActionableView::SetAccessibleName(const base::string16& name) {
-  accessible_name_ = name;
+  return Button::OnKeyPressed(event);
 }
 
 void ActionableView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  node_data->role = ui::AX_ROLE_BUTTON;
-  node_data->SetName(accessible_name_);
+  node_data->role = ax::mojom::Role::kButton;
+  node_data->SetName(accessible_name());
 }
 
 std::unique_ptr<views::InkDrop> ActionableView::CreateInkDrop() {
-  return TrayPopupUtils::CreateInkDrop(ink_drop_style_, this);
+  return TrayPopupUtils::CreateInkDrop(this);
 }
 
 std::unique_ptr<views::InkDropRipple> ActionableView::CreateInkDropRipple()

@@ -9,6 +9,8 @@
 #include <poll.h>
 #include <sys/uio.h>
 
+#include <vector>
+
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/posix/eintr_wrapper.h"
@@ -20,7 +22,6 @@
 #include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/embedder/platform_channel_utils_posix.h"
-#include "mojo/edk/embedder/platform_handle_vector.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
 
 namespace media {
@@ -87,7 +88,7 @@ class MojoCameraClientObserver : public CameraClientObserver {
 
 }  // namespace
 
-CameraClientObserver::~CameraClientObserver() {}
+CameraClientObserver::~CameraClientObserver() = default;
 
 // static
 CameraHalDispatcherImpl* CameraHalDispatcherImpl::GetInstance() {
@@ -112,10 +113,12 @@ bool CameraHalDispatcherImpl::StartThreads() {
   return true;
 }
 
-bool CameraHalDispatcherImpl::Start() {
+bool CameraHalDispatcherImpl::Start(
+    MojoJpegDecodeAcceleratorFactoryCB jda_factory) {
   if (!StartThreads()) {
     return false;
   }
+  jda_factory_ = jda_factory;
   base::WaitableEvent started(base::WaitableEvent::ResetPolicy::MANUAL,
                               base::WaitableEvent::InitialState::NOT_SIGNALED);
   blocking_io_task_runner_->PostTask(
@@ -183,12 +186,17 @@ void CameraHalDispatcherImpl::RegisterClient(
     arc::mojom::CameraHalClientPtr client) {
   DCHECK(proxy_task_runner_->BelongsToCurrentThread());
   auto client_observer =
-      base::MakeUnique<MojoCameraClientObserver>(std::move(client));
+      std::make_unique<MojoCameraClientObserver>(std::move(client));
   client_observer->client().set_connection_error_handler(base::Bind(
       &CameraHalDispatcherImpl::OnCameraHalClientConnectionError,
       base::Unretained(this), base::Unretained(client_observer.get())));
   AddClientObserver(std::move(client_observer));
   VLOG(1) << "Camera HAL client registered";
+}
+
+void CameraHalDispatcherImpl::GetJpegDecodeAccelerator(
+    media::mojom::JpegDecodeAcceleratorRequest jda_request) {
+  jda_factory_.Run(std::move(jda_request));
 }
 
 void CameraHalDispatcherImpl::CreateSocket(base::WaitableEvent* started) {
@@ -265,8 +273,7 @@ void CameraHalDispatcherImpl::StartServiceLoop(
     }
 
     mojo::edk::ScopedPlatformHandle accepted_fd;
-    if (mojo::edk::ServerAcceptConnection(proxy_fd_.get(), &accepted_fd,
-                                          false) &&
+    if (mojo::edk::ServerAcceptConnection(proxy_fd_, &accepted_fd, false) &&
         accepted_fd.is_valid()) {
       VLOG(1) << "Accepted a connection";
       // Hardcode pid 0 since it is unused in mojo.
@@ -282,13 +289,12 @@ void CameraHalDispatcherImpl::StartServiceLoop(
           mojo::edk::ConnectionParams(mojo::edk::TransportProtocol::kLegacy,
                                       channel_pair.PassServerHandle()));
 
-      mojo::edk::ScopedPlatformHandleVectorPtr handles(
-          new mojo::edk::PlatformHandleVector{
-              channel_pair.PassClientHandle().release()});
+      std::vector<mojo::edk::ScopedPlatformHandle> handles;
+      handles.emplace_back(channel_pair.PassClientHandle());
 
       struct iovec iov = {const_cast<char*>(token.c_str()), token.length()};
       ssize_t result = mojo::edk::PlatformChannelSendmsgWithHandles(
-          accepted_fd.get(), &iov, 1, handles->data(), handles->size());
+          accepted_fd, &iov, 1, handles);
       if (result == -1) {
         PLOG(ERROR) << "sendmsg()";
       } else {

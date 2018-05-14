@@ -27,7 +27,6 @@
 
 [
     DoNotCheckConstants,
-    Exposed(Worker ExperimentalCanvasFeatures, Window StableBlinkFeatures),
-    DependentLifetime
+    Exposed(Worker OffscreenCanvas, Window StableBlinkFeatures)
 ] interface WebGLRenderingContext { };
 WebGLRenderingContext implements WebGLRenderingContextBase;

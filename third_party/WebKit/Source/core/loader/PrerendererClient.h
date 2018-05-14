@@ -32,6 +32,7 @@
 #ifndef PrerendererClient_h
 #define PrerendererClient_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/page/Page.h"
 #include "platform/Supplementable.h"
@@ -46,19 +47,21 @@ class CORE_EXPORT PrerendererClient
     : public GarbageCollected<PrerendererClient>,
       public Supplement<Page> {
   USING_GARBAGE_COLLECTED_MIXIN(PrerendererClient);
-  WTF_MAKE_NONCOPYABLE(PrerendererClient);
 
  public:
+  static const char kSupplementName[];
+
   PrerendererClient(Page&, WebPrerendererClient*);
 
   virtual void WillAddPrerender(Prerender*);
   virtual bool IsPrefetchOnly();
 
-  static const char* SupplementName();
   static PrerendererClient* From(Page*);
 
  private:
   WebPrerendererClient* client_;
+
+  DISALLOW_COPY_AND_ASSIGN(PrerendererClient);
 };
 
 CORE_EXPORT void ProvidePrerendererClientTo(Page&, PrerendererClient*);

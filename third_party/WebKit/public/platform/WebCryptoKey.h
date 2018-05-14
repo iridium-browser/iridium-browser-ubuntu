@@ -85,12 +85,12 @@ class WebCryptoKeyHandle;
 // safely assume any details regarding the type of the wrapped
 // WebCryptoKeyHandle*.
 //
-// If WebCryptoKey "isNull()" then it is invalid to call any of the other
-// methods on it (other than destruction, assignment, or isNull()).
+// If WebCryptoKey "IsNull()" then it is invalid to call any of the other
+// methods on it (other than destruction, assignment, or IsNull()).
 class WebCryptoKey {
  public:
   // Constructs a "null" key (One for which isNull() returns true).
-  WebCryptoKey() {}
+  WebCryptoKey() = default;
   ~WebCryptoKey() { Reset(); }
 
   WebCryptoKey(const WebCryptoKey& other) { Assign(other); }
@@ -137,7 +137,7 @@ class WebCryptoKey {
 // of this object is controlled by WebCryptoKey using reference counting.
 class WebCryptoKeyHandle {
  public:
-  virtual ~WebCryptoKeyHandle() {}
+  virtual ~WebCryptoKeyHandle() = default;
 };
 
 }  // namespace blink

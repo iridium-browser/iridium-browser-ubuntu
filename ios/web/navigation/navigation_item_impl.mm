@@ -47,6 +47,7 @@ NavigationItemImpl::NavigationItemImpl()
       has_state_been_replaced_(false),
       is_created_from_hash_change_(false),
       should_skip_repost_form_confirmation_(false),
+      error_retry_state_(ErrorRetryState::kNoNavigationError),
       navigation_initiation_type_(web::NavigationInitiationType::NONE),
       is_unsafe_(false) {}
 
@@ -66,7 +67,7 @@ NavigationItemImpl::NavigationItemImpl(const NavigationItemImpl& item)
       ssl_(item.ssl_),
       timestamp_(item.timestamp_),
       user_agent_type_(item.user_agent_type_),
-      http_request_headers_([item.http_request_headers_ copy]),
+      http_request_headers_([item.http_request_headers_ mutableCopy]),
       serialized_state_object_([item.serialized_state_object_ copy]),
       is_created_from_push_state_(item.is_created_from_push_state_),
       has_state_been_replaced_(item.has_state_been_replaced_),
@@ -74,6 +75,7 @@ NavigationItemImpl::NavigationItemImpl(const NavigationItemImpl& item)
       should_skip_repost_form_confirmation_(
           item.should_skip_repost_form_confirmation_),
       post_data_([item.post_data_ copy]),
+      error_retry_state_(item.error_retry_state_),
       navigation_initiation_type_(item.navigation_initiation_type_),
       is_unsafe_(item.is_unsafe_),
       cached_display_title_(item.cached_display_title_) {}
@@ -193,7 +195,7 @@ UserAgentType NavigationItemImpl::GetUserAgentType() const {
 }
 
 bool NavigationItemImpl::HasPostData() const {
-  return post_data_.get() != nil;
+  return post_data_ != nil;
 }
 
 NSDictionary* NavigationItemImpl::GetHttpRequestHeaders() const {
@@ -208,16 +210,16 @@ void NavigationItemImpl::AddHttpRequestHeaders(
   if (http_request_headers_)
     [http_request_headers_ addEntriesFromDictionary:additional_headers];
   else
-    http_request_headers_.reset([additional_headers mutableCopy]);
+    http_request_headers_ = [additional_headers mutableCopy];
 }
 
 void NavigationItemImpl::SetSerializedStateObject(
     NSString* serialized_state_object) {
-  serialized_state_object_.reset(serialized_state_object);
+  serialized_state_object_ = serialized_state_object;
 }
 
 NSString* NavigationItemImpl::GetSerializedStateObject() const {
-  return serialized_state_object_.get();
+  return serialized_state_object_;
 }
 
 void NavigationItemImpl::SetIsCreatedFromPushState(bool push_state) {
@@ -263,28 +265,65 @@ bool NavigationItemImpl::ShouldSkipRepostFormConfirmation() const {
 }
 
 void NavigationItemImpl::SetPostData(NSData* post_data) {
-  post_data_.reset(post_data);
+  post_data_ = post_data;
 }
 
 NSData* NavigationItemImpl::GetPostData() const {
-  return post_data_.get();
+  return post_data_;
 }
 
 void NavigationItemImpl::RemoveHttpRequestHeaderForKey(NSString* key) {
   DCHECK(key);
   [http_request_headers_ removeObjectForKey:key];
   if (![http_request_headers_ count])
-    http_request_headers_.reset();
+    http_request_headers_ = nil;
 }
 
 void NavigationItemImpl::ResetHttpRequestHeaders() {
-  http_request_headers_.reset();
+  http_request_headers_ = nil;
 }
 
 void NavigationItemImpl::ResetForCommit() {
   // Navigation initiation type is only valid for pending navigations, thus
   // always reset to NONE after the item is committed.
   SetNavigationInitiationType(web::NavigationInitiationType::NONE);
+}
+
+void NavigationItemImpl::SetErrorRetryState(ErrorRetryState state) {
+  if (state == error_retry_state_)
+    return;
+
+  switch (state) {
+    case ErrorRetryState::kNoNavigationError:
+      DCHECK_EQ(ErrorRetryState::kRetryFailedNavigationItem,
+                error_retry_state_);
+      break;
+    case ErrorRetryState::kReadyToDisplayErrorForFailedNavigation:
+      DCHECK(error_retry_state_ == ErrorRetryState::kNoNavigationError ||
+             error_retry_state_ == ErrorRetryState::kRetryFailedNavigationItem)
+          << "Got unexpected state: " << static_cast<int>(error_retry_state_);
+      break;
+    case ErrorRetryState::kDisplayingErrorForFailedNavigation:
+      DCHECK_EQ(ErrorRetryState::kReadyToDisplayErrorForFailedNavigation,
+                error_retry_state_);
+      break;
+    case ErrorRetryState::kNavigatingToFailedNavigationItem:
+      DCHECK_EQ(ErrorRetryState::kDisplayingErrorForFailedNavigation,
+                error_retry_state_);
+      break;
+    case ErrorRetryState::kRetryFailedNavigationItem:
+      DCHECK_EQ(ErrorRetryState::kNavigatingToFailedNavigationItem,
+                error_retry_state_);
+      break;
+    default:
+      NOTREACHED();
+  }
+
+  error_retry_state_ = state;
+}
+
+ErrorRetryState NavigationItemImpl::GetErrorRetryState() const {
+  return error_retry_state_;
 }
 
 // static

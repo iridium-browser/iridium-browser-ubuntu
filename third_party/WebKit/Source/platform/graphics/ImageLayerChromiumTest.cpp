@@ -40,8 +40,8 @@ namespace {
 
 class TestImage : public Image {
  public:
-  static PassRefPtr<TestImage> Create(const IntSize& size, bool opaque) {
-    return AdoptRef(new TestImage(size, opaque));
+  static scoped_refptr<TestImage> Create(const IntSize& size, bool opaque) {
+    return base::AdoptRef(new TestImage(size, opaque));
   }
 
   bool CurrentFrameKnownToBeOpaque(
@@ -50,8 +50,6 @@ class TestImage : public Image {
   }
 
   IntSize Size() const override { return size_; }
-
-  sk_sp<SkImage> ImageForCurrentFrame() override { return image_; }
 
   void DestroyDecodedData() override {
     // Image pure virtual stub.
@@ -62,12 +60,19 @@ class TestImage : public Image {
             const FloatRect&,
             const FloatRect&,
             RespectImageOrientationEnum,
-            ImageClampingMode) override {
+            ImageClampingMode,
+            ImageDecodingMode) override {
     // Image pure virtual stub.
   }
 
+  PaintImage PaintImageForCurrentFrame() override {
+    return CreatePaintImageBuilder()
+        .set_image(image_, PaintImage::GetNextContentId())
+        .TakePaintImage();
+  }
+
  private:
-  TestImage(IntSize size, bool opaque) : Image(0), size_(size) {
+  TestImage(IntSize size, bool opaque) : Image(nullptr), size_(size) {
     sk_sp<SkSurface> surface = CreateSkSurface(size, opaque);
     if (!surface)
       return;
@@ -91,21 +96,21 @@ class TestImage : public Image {
 TEST(ImageLayerChromiumTest, imageLayerContentReset) {
   FakeGraphicsLayerClient client;
   std::unique_ptr<FakeGraphicsLayer> graphics_layer =
-      WTF::WrapUnique(new FakeGraphicsLayer(&client));
+      WTF::WrapUnique(new FakeGraphicsLayer(client));
   ASSERT_TRUE(graphics_layer.get());
 
   ASSERT_FALSE(graphics_layer->HasContentsLayer());
   ASSERT_FALSE(graphics_layer->ContentsLayer());
 
   bool opaque = false;
-  RefPtr<Image> image = TestImage::Create(IntSize(100, 100), opaque);
-  ASSERT_TRUE(image.Get());
+  scoped_refptr<Image> image = TestImage::Create(IntSize(100, 100), opaque);
+  ASSERT_TRUE(image.get());
 
-  graphics_layer->SetContentsToImage(image.Get());
+  graphics_layer->SetContentsToImage(image.get(), Image::kUnspecifiedDecode);
   ASSERT_TRUE(graphics_layer->HasContentsLayer());
   ASSERT_TRUE(graphics_layer->ContentsLayer());
 
-  graphics_layer->SetContentsToImage(0);
+  graphics_layer->SetContentsToImage(nullptr, Image::kUnspecifiedDecode);
   ASSERT_FALSE(graphics_layer->HasContentsLayer());
   ASSERT_FALSE(graphics_layer->ContentsLayer());
 }
@@ -113,22 +118,25 @@ TEST(ImageLayerChromiumTest, imageLayerContentReset) {
 TEST(ImageLayerChromiumTest, opaqueImages) {
   FakeGraphicsLayerClient client;
   std::unique_ptr<FakeGraphicsLayer> graphics_layer =
-      WTF::WrapUnique(new FakeGraphicsLayer(&client));
+      WTF::WrapUnique(new FakeGraphicsLayer(client));
   ASSERT_TRUE(graphics_layer.get());
 
   bool opaque = true;
-  RefPtr<Image> opaque_image = TestImage::Create(IntSize(100, 100), opaque);
-  ASSERT_TRUE(opaque_image.Get());
-  RefPtr<Image> non_opaque_image =
+  scoped_refptr<Image> opaque_image =
+      TestImage::Create(IntSize(100, 100), opaque);
+  ASSERT_TRUE(opaque_image.get());
+  scoped_refptr<Image> non_opaque_image =
       TestImage::Create(IntSize(100, 100), !opaque);
-  ASSERT_TRUE(non_opaque_image.Get());
+  ASSERT_TRUE(non_opaque_image.get());
 
   ASSERT_FALSE(graphics_layer->ContentsLayer());
 
-  graphics_layer->SetContentsToImage(opaque_image.Get());
+  graphics_layer->SetContentsToImage(opaque_image.get(),
+                                     Image::kUnspecifiedDecode);
   ASSERT_TRUE(graphics_layer->ContentsLayer()->Opaque());
 
-  graphics_layer->SetContentsToImage(non_opaque_image.Get());
+  graphics_layer->SetContentsToImage(non_opaque_image.get(),
+                                     Image::kUnspecifiedDecode);
   ASSERT_FALSE(graphics_layer->ContentsLayer()->Opaque());
 }
 

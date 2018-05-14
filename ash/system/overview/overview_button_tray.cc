@@ -16,6 +16,8 @@
 #include "ash/wm/overview/window_selector_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_state.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/border.h"
@@ -56,6 +58,14 @@ void OverviewButtonTray::UpdateAfterLoginStatusChange(LoginStatus status) {
   UpdateIconVisibility();
 }
 
+void OverviewButtonTray::OnGestureEvent(ui::GestureEvent* event) {
+  Button::OnGestureEvent(event);
+  if (event->type() == ui::ET_GESTURE_LONG_PRESS) {
+    Shell::Get()->window_selector_controller()->OnOverviewButtonTrayLongPressed(
+        event->location());
+  }
+}
+
 bool OverviewButtonTray::PerformAction(const ui::Event& event) {
   if (event.type() == ui::ET_GESTURE_TAP) {
     if (event.AsGestureEvent()->details().tap_count() == 2) {
@@ -65,6 +75,7 @@ bool OverviewButtonTray::PerformAction(const ui::Event& event) {
       if (!Shell::Get()->window_selector_controller()->IsSelecting())
         return true;
 
+      base::RecordAction(base::UserMetricsAction("Tablet_QuickSwitch"));
       MruWindowTracker::WindowList mru_window_list =
           Shell::Get()->mru_window_tracker()->BuildMruWindowList();
 
@@ -130,11 +141,9 @@ void OverviewButtonTray::UpdateIconVisibility() {
   Shell* shell = Shell::Get();
   SetVisible(
       shell->tablet_mode_controller()->IsTabletModeWindowManagerEnabled() &&
-      session_controller->IsActiveUserSessionStarted() &&
-      !session_controller->IsScreenLocked() &&
       session_controller->GetSessionState() ==
           session_manager::SessionState::ACTIVE &&
-      !session_controller->IsKioskSession());
+      !session_controller->IsRunningInAppMode());
 }
 
 }  // namespace ash

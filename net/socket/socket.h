@@ -10,6 +10,7 @@
 #include "base/feature_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
 
@@ -62,8 +63,12 @@ class NET_EXPORT Socket {
   // closed.  Implementations of this method should not modify the contents
   // of the actual buffer that is written to the socket.  If the socket is
   // Disconnected before the write completes, the callback will not be invoked.
-  virtual int Write(IOBuffer* buf, int buf_len,
-                    const CompletionCallback& callback) = 0;
+  // |traffic_annotation| provides the required description for auditing. Please
+  // refer to //docs/network_traffic_annotations.md for more details.
+  virtual int Write(IOBuffer* buf,
+                    int buf_len,
+                    const CompletionCallback& callback,
+                    const NetworkTrafficAnnotationTag& traffic_annotation) = 0;
 
   // Set the receive buffer size (in bytes) for the socket.
   // Note: changing this value can affect the TCP window size on some platforms.

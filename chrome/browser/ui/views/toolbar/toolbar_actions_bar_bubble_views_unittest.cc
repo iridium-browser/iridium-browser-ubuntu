@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/toolbar/test_toolbar_actions_bar_bubble_delegate.h"
@@ -22,6 +21,7 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_unittest_util.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/test/test_widget_observer.h"
@@ -134,7 +134,7 @@ TEST_F(ToolbarActionsBarBubbleViewsTest, TestBubbleLayoutNoButtons) {
                                                ActionString());
   std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
       extra_view_info =
-          base::MakeUnique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
+          std::make_unique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
   delegate.set_extra_view_info(std::move(extra_view_info));
   delegate.set_dismiss_button_text(base::string16());
   delegate.set_action_button_text(base::string16());
@@ -175,9 +175,9 @@ TEST_F(ToolbarActionsBarBubbleViewsTest,
   delegate.set_dismiss_button_text(DismissString());
   std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
       extra_view_info_linked_text =
-          base::MakeUnique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
+          std::make_unique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
   extra_view_info_linked_text->text = LearnMoreString();
-  extra_view_info_linked_text->is_text_linked = true;
+  extra_view_info_linked_text->is_learn_more = true;
   delegate.set_extra_view_info(std::move(extra_view_info_linked_text));
 
   ShowBubble(&delegate);
@@ -189,7 +189,10 @@ TEST_F(ToolbarActionsBarBubbleViewsTest,
   EXPECT_EQ(DismissString(),
             bubble()->GetDialogClientView()->cancel_button()->GetText());
   EXPECT_TRUE(bubble()->learn_more_button());
-  EXPECT_EQ(LearnMoreString(), bubble()->learn_more_button()->text());
+  base::string16 tooltip;
+  EXPECT_TRUE(bubble()->learn_more_button()->GetTooltipText(gfx::Point(0, 0),
+                                                            &tooltip));
+  EXPECT_EQ(LearnMoreString(), tooltip);
   EXPECT_FALSE(bubble()->item_list());
 
   CloseBubble();
@@ -330,7 +333,7 @@ TEST_F(ToolbarActionsBarBubbleViewsTest, TestCreateExtraViewIconOnly) {
                                                ActionString());
   std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
       extra_view_info =
-          base::MakeUnique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
+          std::make_unique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
   extra_view_info->resource = &vector_icons::kBusinessIcon;
   delegate.set_extra_view_info(std::move(extra_view_info));
   ShowBubble(&delegate);
@@ -349,19 +352,21 @@ TEST_F(ToolbarActionsBarBubbleViewsTest, TestCreateExtraViewLinkedTextOnly) {
                                                ActionString());
   std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
       extra_view_info_linked_text =
-          base::MakeUnique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
+          std::make_unique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
   extra_view_info_linked_text->text =
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSTALLED_BY_ADMIN);
-  extra_view_info_linked_text->is_text_linked = true;
+  extra_view_info_linked_text->is_learn_more = true;
   delegate.set_extra_view_info(std::move(extra_view_info_linked_text));
 
   ShowBubble(&delegate);
 
   std::unique_ptr<views::View> extra_view(TestCreateExtraView());
   ASSERT_TRUE(extra_view);
-  ASSERT_EQ("Link", std::string(extra_view->GetClassName()));
+  ASSERT_EQ("ImageButton", std::string(extra_view->GetClassName()));
+  base::string16 tooltip;
+  EXPECT_TRUE(extra_view->GetTooltipText(gfx::Point(0, 0), &tooltip));
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSTALLED_BY_ADMIN),
-            static_cast<views::Label*>(extra_view.get())->text());
+            tooltip);
   CloseBubble();
 }
 
@@ -370,10 +375,10 @@ TEST_F(ToolbarActionsBarBubbleViewsTest, TestCreateExtraViewLabelTextOnly) {
                                                ActionString());
   std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
       extra_view_info =
-          base::MakeUnique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
+          std::make_unique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
   extra_view_info->text =
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSTALLED_BY_ADMIN);
-  extra_view_info->is_text_linked = false;
+  extra_view_info->is_learn_more = false;
   delegate.set_extra_view_info(std::move(extra_view_info));
 
   ShowBubble(&delegate);
@@ -391,11 +396,11 @@ TEST_F(ToolbarActionsBarBubbleViewsTest, TestCreateExtraViewImageAndText) {
                                                ActionString());
   std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
       extra_view_info =
-          base::MakeUnique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
+          std::make_unique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
   extra_view_info->resource = &vector_icons::kBusinessIcon;
   extra_view_info->text =
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSTALLED_BY_ADMIN);
-  extra_view_info->is_text_linked = false;
+  extra_view_info->is_learn_more = false;
   delegate.set_extra_view_info(std::move(extra_view_info));
 
   ShowBubble(&delegate);

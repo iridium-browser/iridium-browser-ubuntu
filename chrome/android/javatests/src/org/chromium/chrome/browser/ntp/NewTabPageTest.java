@@ -9,6 +9,7 @@ import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.LargeTest;
 import android.support.test.filters.MediumTest;
 import android.support.test.filters.SmallTest;
+import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -18,6 +19,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
@@ -33,17 +35,26 @@ import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageRecyclerView;
 import org.chromium.chrome.browser.omnibox.LocationBarLayout;
 import org.chromium.chrome.browser.omnibox.UrlBar;
-import org.chromium.chrome.browser.suggestions.FakeMostVisitedSites;
+import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
+import org.chromium.chrome.browser.suggestions.SiteSuggestion;
+import org.chromium.chrome.browser.suggestions.TileSectionType;
 import org.chromium.chrome.browser.suggestions.TileSource;
+import org.chromium.chrome.browser.suggestions.TileTitleSource;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
+import org.chromium.chrome.browser.tabmodel.TabModel;
+import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.NewTabPageTestUtils;
 import org.chromium.chrome.test.util.OmniboxTestUtils;
 import org.chromium.chrome.test.util.RenderTestRule;
+import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
+import org.chromium.chrome.test.util.browser.RecyclerViewTestUtils;
+import org.chromium.chrome.test.util.browser.suggestions.FakeMostVisitedSites;
 import org.chromium.chrome.test.util.browser.suggestions.SuggestionsDependenciesRule;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -58,18 +69,19 @@ import org.chromium.ui.base.PageTransition;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Tests for the native android New Tab Page.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add(ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE)
+@DisableFeatures("NetworkPrediction")
 @RetryOnFailure
 public class NewTabPageTest {
     @Rule
@@ -81,38 +93,56 @@ public class NewTabPageTest {
     public RenderTestRule mRenderTestRule =
             new RenderTestRule("chrome/test/data/android/render_tests");
 
-    private static final String TEST_PAGE = "/chrome/test/data/android/navigate/simple.html";
+    @Rule
+    public TestRule mFeatureRule = new Features.InstrumentationProcessor();
 
-    private static final String[] FAKE_MOST_VISITED_TITLES =
-            new String[] {"TOP_SITES", "WHITELIST"};
-    private static final String[] FAKE_MOST_VISITED_WHITELIST_ICON_PATHS =
-            new String[] {"", "/test.png"};
-    private static final int[] FAKE_MOST_VISITED_SOURCES =
-            new int[] {TileSource.TOP_SITES, TileSource.WHITELIST};
+    private static final String TEST_PAGE = "/chrome/test/data/android/navigate/simple.html";
 
     private Tab mTab;
     private NewTabPage mNtp;
     private View mFakebox;
     private ViewGroup mTileGridLayout;
-    private String[] mSiteSuggestionUrls;
     private FakeMostVisitedSites mMostVisitedSites;
     private EmbeddedTestServer mTestServer;
+    private List<SiteSuggestion> mSiteSuggestions;
 
     @Before
     public void setUp() throws Exception {
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        // Disable peeking card animation.
+        ChromePreferenceManager.getInstance().setNewTabPageFirstCardAnimationRunCount(100);
 
-        // The URLs may not contain duplicates.
-        mSiteSuggestionUrls = new String[FAKE_MOST_VISITED_TITLES.length];
-        for (int i = 0; i < mSiteSuggestionUrls.length; i++) {
-            mSiteSuggestionUrls[i] = mTestServer.getURL(TEST_PAGE) + "#" + i;
-        }
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
+
+        mSiteSuggestions = new ArrayList<>();
+        mSiteSuggestions.add(new SiteSuggestion("0 TOP_SITES", mTestServer.getURL(TEST_PAGE) + "#0",
+                "", TileTitleSource.TITLE_TAG, TileSource.TOP_SITES, TileSectionType.PERSONALIZED,
+                new Date()));
+        mSiteSuggestions.add(new SiteSuggestion("1 WHITELIST", mTestServer.getURL(TEST_PAGE) + "#1",
+                "/test.png", TileTitleSource.UNKNOWN, TileSource.WHITELIST,
+                TileSectionType.PERSONALIZED, new Date()));
+        mSiteSuggestions.add(new SiteSuggestion("2 TOP_SITES", mTestServer.getURL(TEST_PAGE) + "#2",
+                "", TileTitleSource.TITLE_TAG, TileSource.TOP_SITES, TileSectionType.PERSONALIZED,
+                new Date()));
+        mSiteSuggestions.add(new SiteSuggestion("3 TOP_SITES", mTestServer.getURL(TEST_PAGE) + "#3",
+                "", TileTitleSource.TITLE_TAG, TileSource.TOP_SITES, TileSectionType.PERSONALIZED,
+                new Date()));
+        mSiteSuggestions.add(new SiteSuggestion("4 TOP_SITES", mTestServer.getURL(TEST_PAGE) + "#4",
+                "", TileTitleSource.TITLE_TAG, TileSource.TOP_SITES, TileSectionType.PERSONALIZED,
+                new Date()));
+        mSiteSuggestions.add(new SiteSuggestion("5 TOP_SITES", mTestServer.getURL(TEST_PAGE) + "#5",
+                "", TileTitleSource.TITLE_TAG, TileSource.TOP_SITES, TileSectionType.PERSONALIZED,
+                new Date()));
+        mSiteSuggestions.add(new SiteSuggestion("6 TOP_SITES", mTestServer.getURL(TEST_PAGE) + "#6",
+                "", TileTitleSource.TITLE_TAG, TileSource.TOP_SITES, TileSectionType.PERSONALIZED,
+                new Date()));
+        mSiteSuggestions.add(new SiteSuggestion("7 TOP_SITES", mTestServer.getURL(TEST_PAGE) + "#7",
+                "", TileTitleSource.TITLE_TAG, TileSource.TOP_SITES, TileSectionType.PERSONALIZED,
+                new Date()));
 
         mMostVisitedSites = new FakeMostVisitedSites();
-        mMostVisitedSites.setTileSuggestions(FAKE_MOST_VISITED_TITLES, mSiteSuggestionUrls,
-                FAKE_MOST_VISITED_WHITELIST_ICON_PATHS, FAKE_MOST_VISITED_SOURCES);
+        mMostVisitedSites.setTileSuggestions(mSiteSuggestions);
         mSuggestionsDeps.getFactory().mostVisitedSites = mMostVisitedSites;
+
         mActivityTestRule.startMainActivityWithURL(UrlConstants.NTP_URL);
         mTab = mActivityTestRule.getActivity().getActivityTab();
         NewTabPageTestUtils.waitForNtpLoaded(mTab);
@@ -120,8 +150,8 @@ public class NewTabPageTest {
         Assert.assertTrue(mTab.getNativePage() instanceof NewTabPage);
         mNtp = (NewTabPage) mTab.getNativePage();
         mFakebox = mNtp.getView().findViewById(R.id.search_box);
-        mTileGridLayout = (ViewGroup) mNtp.getView().findViewById(R.id.tile_grid_layout);
-        Assert.assertEquals(mSiteSuggestionUrls.length, mTileGridLayout.getChildCount());
+        mTileGridLayout = mNtp.getView().findViewById(R.id.tile_grid_layout);
+        Assert.assertEquals(mSiteSuggestions.size(), mTileGridLayout.getChildCount());
     }
 
     @After
@@ -133,27 +163,13 @@ public class NewTabPageTest {
     @MediumTest
     @Feature({"NewTabPage", "RenderTest"})
     public void testRender() throws IOException {
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        RenderTestRule.sanitize(mNtp.getView());
         mRenderTestRule.render(mTileGridLayout, "most_visited");
         mRenderTestRule.render(mFakebox, "fakebox");
         mRenderTestRule.render(mNtp.getView().getRootView(), "new_tab_page");
 
-        // Scroll to search bar
-        final NewTabPageRecyclerView recyclerView = mNtp.getNewTabPageView().getRecyclerView();
-
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                recyclerView.smoothScrollBy(0, mFakebox.getTop());
-            }
-        });
-
-        CriteriaHelper.pollUiThread(new Criteria(){
-            @Override
-            public boolean isSatisfied() {
-                return recyclerView.computeVerticalScrollOffset() == mFakebox.getTop();
-            }
-        });
-
+        RecyclerViewTestUtils.scrollToBottom(mNtp.getNewTabPageView().getRecyclerView());
         mRenderTestRule.render(mNtp.getView().getRootView(), "new_tab_page_scrolled");
     }
 
@@ -261,7 +277,7 @@ public class NewTabPageTest {
                 TouchCommon.singleClickView(mostVisitedItem);
             }
         });
-        Assert.assertEquals(mSiteSuggestionUrls[0], mTab.getUrl());
+        Assert.assertEquals(mSiteSuggestions.get(0).url, mTab.getUrl());
     }
 
     /**
@@ -272,8 +288,8 @@ public class NewTabPageTest {
     @SmallTest
     @Feature({"NewTabPage"})
     public void testOpenMostVisitedItemInNewTab() throws InterruptedException {
-        mActivityTestRule.invokeContextMenuAndOpenInANewTab(mTileGridLayout.getChildAt(0),
-                ContextMenuManager.ID_OPEN_IN_NEW_TAB, false, mSiteSuggestionUrls[0]);
+        invokeContextMenuAndOpenInANewTab(mTileGridLayout.getChildAt(0),
+                ContextMenuManager.ID_OPEN_IN_NEW_TAB, false, mSiteSuggestions.get(0).url);
     }
 
     /**
@@ -283,8 +299,8 @@ public class NewTabPageTest {
     @SmallTest
     @Feature({"NewTabPage"})
     public void testOpenMostVisitedItemInIncognitoTab() throws InterruptedException {
-        mActivityTestRule.invokeContextMenuAndOpenInANewTab(mTileGridLayout.getChildAt(0),
-                ContextMenuManager.ID_OPEN_IN_INCOGNITO_TAB, true, mSiteSuggestionUrls[0]);
+        invokeContextMenuAndOpenInANewTab(mTileGridLayout.getChildAt(0),
+                ContextMenuManager.ID_OPEN_IN_INCOGNITO_TAB, true, mSiteSuggestions.get(0).url);
     }
 
     /**
@@ -294,17 +310,17 @@ public class NewTabPageTest {
     @SmallTest
     @Feature({"NewTabPage"})
     public void testRemoveMostVisitedItem() {
+        SiteSuggestion testSite = mSiteSuggestions.get(0);
         View mostVisitedItem = mTileGridLayout.getChildAt(0);
         ArrayList<View> views = new ArrayList<>();
-        mTileGridLayout.findViewsWithText(
-                views, FAKE_MOST_VISITED_TITLES[0], View.FIND_VIEWS_WITH_TEXT);
+        mTileGridLayout.findViewsWithText(views, testSite.title, View.FIND_VIEWS_WITH_TEXT);
         Assert.assertEquals(1, views.size());
 
         TestTouchUtils.longClickView(InstrumentationRegistry.getInstrumentation(), mostVisitedItem);
         Assert.assertTrue(InstrumentationRegistry.getInstrumentation().invokeContextMenuAction(
                 mActivityTestRule.getActivity(), ContextMenuManager.ID_REMOVE, 0));
 
-        Assert.assertTrue(mMostVisitedSites.isUrlBlacklisted(mSiteSuggestionUrls[0]));
+        Assert.assertTrue(mMostVisitedSites.isUrlBlacklisted(testSite.url));
     }
 
     @Test
@@ -423,18 +439,17 @@ public class NewTabPageTest {
     @Test
     @SmallTest
     @Feature({"NewTabPage"})
-    @CommandLineFlags.Add("enable-features=NTPCondensedLayout")
     public void testSetSearchProviderInfoCondensedUi() throws Throwable {
         mActivityTestRule.runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 NewTabPageView ntpView = mNtp.getNewTabPageView();
                 View logoView = ntpView.findViewById(R.id.search_provider_logo);
-                Assert.assertEquals(View.GONE, logoView.getVisibility());
+                Assert.assertEquals(View.VISIBLE, logoView.getVisibility());
                 ntpView.setSearchProviderInfo(/* hasLogo = */ false, /* isGoogle */ true);
                 Assert.assertEquals(View.GONE, logoView.getVisibility());
                 ntpView.setSearchProviderInfo(/* hasLogo = */ true, /* isGoogle */ true);
-                Assert.assertEquals(View.GONE, logoView.getVisibility());
+                Assert.assertEquals(View.VISIBLE, logoView.getVisibility());
             }
         });
     }
@@ -455,7 +470,7 @@ public class NewTabPageTest {
         // and the placeholder has not been inflated yet.
         Assert.assertEquals(View.VISIBLE, logoView.getVisibility());
         Assert.assertEquals(View.VISIBLE, searchBoxView.getVisibility());
-        Assert.assertEquals(2, mTileGridLayout.getChildCount());
+        Assert.assertEquals(8, mTileGridLayout.getChildCount());
         Assert.assertNull(ntpView.getPlaceholder());
 
         // When the search provider has no logo and there are no tile suggestions, the placeholder
@@ -466,13 +481,9 @@ public class NewTabPageTest {
                 ntpView.setSearchProviderInfo(/* hasLogo = */ false, /* isGoogle */ true);
                 Assert.assertEquals(View.GONE, logoView.getVisibility());
                 Assert.assertEquals(View.GONE, searchBoxView.getVisibility());
-            }
-        });
-        mMostVisitedSites.setTileSuggestions(
-                new String[] {}, new String[] {}, new String[] {}, new int[] {});
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
+
+                mMostVisitedSites.setTileSuggestions(new String[] {});
+
                 ntpView.getTileGroup().onSwitchToForeground(false); // Force tile refresh.
             }
         });
@@ -603,5 +614,47 @@ public class NewTabPageTest {
                 return getFakeboxTop(ntp);
             }
         }));
+    }
+
+    /**
+     * Long presses the view, selects an item from the context menu, and
+     * asserts that a new tab is opened and is incognito if expectIncognito is true.
+     * @param view The View to long press.
+     * @param contextMenuItemId The context menu item to select on the view.
+     * @param expectIncognito Whether the opened tab is expected to be incognito.
+     * @param expectedUrl The expected url for the new tab.
+     */
+    private void invokeContextMenuAndOpenInANewTab(View view, int contextMenuItemId,
+            boolean expectIncognito, final String expectedUrl) throws InterruptedException {
+        final CallbackHelper createdCallback = new CallbackHelper();
+        final TabModel tabModel =
+                mActivityTestRule.getActivity().getTabModelSelector().getModel(expectIncognito);
+        tabModel.addObserver(new EmptyTabModelObserver() {
+            @Override
+            public void didAddTab(Tab tab, TabLaunchType type) {
+                if (TextUtils.equals(expectedUrl, tab.getUrl())) {
+                    createdCallback.notifyCalled();
+                    tabModel.removeObserver(this);
+                }
+            }
+        });
+
+        TestTouchUtils.longClickView(InstrumentationRegistry.getInstrumentation(), view);
+        Assert.assertTrue(InstrumentationRegistry.getInstrumentation().invokeContextMenuAction(
+                mActivityTestRule.getActivity(), contextMenuItemId, 0));
+
+        try {
+            createdCallback.waitForCallback(0);
+        } catch (TimeoutException e) {
+            Assert.fail("Never received tab creation event");
+        }
+
+        if (expectIncognito) {
+            Assert.assertTrue(
+                    mActivityTestRule.getActivity().getTabModelSelector().isIncognitoSelected());
+        } else {
+            Assert.assertFalse(
+                    mActivityTestRule.getActivity().getTabModelSelector().isIncognitoSelected());
+        }
     }
 }

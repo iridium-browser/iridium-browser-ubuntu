@@ -20,6 +20,10 @@ namespace gfx {
 class LinearAnimation;
 }
 
+namespace views {
+class Button;
+}
+
 namespace message_center {
 
 class MessageView;
@@ -55,8 +59,8 @@ class MESSAGE_CENTER_EXPORT NotificationControlButtonsView
   bool IsSettingsButtonFocused() const;
 
   // Methods for retrieving the control buttons directly.
-  message_center::PaddedButton* close_button() const;
-  message_center::PaddedButton* settings_button() const;
+  views::Button* close_button() const;
+  views::Button* settings_button() const;
 
   // views::View
   const char* GetClassName() const override;
@@ -73,8 +77,8 @@ class MESSAGE_CENTER_EXPORT NotificationControlButtonsView
  private:
   MessageView* message_view_;
 
-  std::unique_ptr<message_center::PaddedButton> close_button_;
-  std::unique_ptr<message_center::PaddedButton> settings_button_;
+  std::unique_ptr<PaddedButton> close_button_;
+  std::unique_ptr<PaddedButton> settings_button_;
 
   std::unique_ptr<gfx::LinearAnimation> bgcolor_animation_;
   SkColor bgcolor_origin_;

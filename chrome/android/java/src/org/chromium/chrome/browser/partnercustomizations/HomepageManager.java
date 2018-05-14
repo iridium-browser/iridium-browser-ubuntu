@@ -4,12 +4,14 @@
 
 package org.chromium.chrome.browser.partnercustomizations;
 
-import android.content.Context;
 import android.content.SharedPreferences;
 import android.text.TextUtils;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ObserverList;
+import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.chrome.browser.UrlConstants;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 
 /**
  * Provides information regarding homepage enabled states and URI.
@@ -37,18 +39,17 @@ public class HomepageManager {
     private final SharedPreferences mSharedPreferences;
     private final ObserverList<HomepageStateListener> mHomepageStateListeners;
 
-    private HomepageManager(Context context) {
+    private HomepageManager() {
         mSharedPreferences = ContextUtils.getAppSharedPreferences();
-        mHomepageStateListeners = new ObserverList<HomepageManager.HomepageStateListener>();
+        mHomepageStateListeners = new ObserverList<>();
     }
 
     /**
      * Returns the singleton instance of HomepageManager, creating it if needed.
-     * @param context Any old Context.
      */
-    public static HomepageManager getInstance(Context context) {
+    public static HomepageManager getInstance() {
         if (sInstance == null) {
-            sInstance = new HomepageManager(context);
+            sInstance = new HomepageManager();
         }
         return sInstance;
     }
@@ -80,29 +81,43 @@ public class HomepageManager {
     /**
      * @return Whether or not homepage is enabled.
      */
-    public static boolean isHomepageEnabled(Context context) {
-        return PartnerBrowserCustomizations.isHomepageProviderAvailableAndEnabled()
-                && getInstance(context).getPrefHomepageEnabled();
+    public static boolean isHomepageEnabled() {
+        if (PartnerBrowserCustomizations.isHomepageProviderAvailableAndEnabled()
+                || FeatureUtilities.isHomePageButtonForceEnabled()) {
+            return getInstance().getPrefHomepageEnabled();
+        }
+        return false;
     }
 
     /**
      * @return Whether or not homepage setting should be shown.
      */
     public static boolean shouldShowHomepageSetting() {
-        return PartnerBrowserCustomizations.isHomepageProviderAvailableAndEnabled();
+        return PartnerBrowserCustomizations.isHomepageProviderAvailableAndEnabled()
+                || FeatureUtilities.isHomePageButtonForceEnabled();
     }
 
     /**
      * @return Homepage URI string, if it's enabled. Null otherwise or uninitialized.
      */
-    public static String getHomepageUri(Context context) {
-        if (!isHomepageEnabled(context)) return null;
+    public static String getHomepageUri() {
+        if (!isHomepageEnabled()) return null;
 
-        HomepageManager manager = getInstance(context);
+        HomepageManager manager = getInstance();
         String homepageUri = manager.getPrefHomepageUseDefaultUri()
-                ? PartnerBrowserCustomizations.getHomePageUrl()
+                ? getDefaultHomepageUri()
                 : manager.getPrefHomepageCustomUri();
         return TextUtils.isEmpty(homepageUri) ? null : homepageUri;
+    }
+
+    /**
+     * @return The default homepage URI if the homepage is partner provided or the new tab page
+     *         if the homepage button is force enabled via flag.
+     */
+    public static String getDefaultHomepageUri() {
+        return PartnerBrowserCustomizations.isHomepageProviderAvailableAndEnabled()
+                ? PartnerBrowserCustomizations.getHomePageUrl()
+                : UrlConstants.NTP_NON_NATIVE_URL;
     }
 
     /**
@@ -122,6 +137,8 @@ public class HomepageManager {
         SharedPreferences.Editor sharedPreferencesEditor = mSharedPreferences.edit();
         sharedPreferencesEditor.putBoolean(PREF_HOMEPAGE_ENABLED, enabled);
         sharedPreferencesEditor.apply();
+        RecordHistogram.recordBooleanHistogram(
+                "Settings.ShowHomeButtonPreferenceStateChanged", enabled);
         notifyHomepageUpdated();
     }
 

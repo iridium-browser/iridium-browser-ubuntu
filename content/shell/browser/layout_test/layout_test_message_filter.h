@@ -10,6 +10,8 @@
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/optional.h"
+#include "base/strings/string16.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 
@@ -17,7 +19,6 @@ class GURL;
 
 namespace base {
 class DictionaryValue;
-class NullableString16;
 }
 
 namespace net {
@@ -45,8 +46,8 @@ class LayoutTestMessageFilter : public BrowserMessageFilter {
   ~LayoutTestMessageFilter() override;
 
   // BrowserMessageFilter implementation.
-  void OverrideThreadForMessage(const IPC::Message& message,
-                                BrowserThread::ID* thread) override;
+  base::TaskRunner* OverrideTaskRunnerForMessage(
+      const IPC::Message& message) override;
   bool OnMessageReceived(const IPC::Message& message) override;
 
   void OnReadFileToString(const base::FilePath& local_file,
@@ -59,9 +60,10 @@ class LayoutTestMessageFilter : public BrowserMessageFilter {
   void OnGrantWebNotificationPermission(const GURL& origin,
                                         bool permission_granted);
   void OnClearWebNotificationPermissions();
-  void OnSimulateWebNotificationClick(const std::string& title,
-                                      int action_index,
-                                      const base::NullableString16& reply);
+  void OnSimulateWebNotificationClick(
+      const std::string& title,
+      const base::Optional<int>& action_index,
+      const base::Optional<base::string16>& reply);
   void OnSimulateWebNotificationClose(const std::string& title, bool by_user);
   void OnSetPushMessagingPermission(const GURL& origin, bool allowed);
   void OnClearPushMessagingPermissions();
@@ -75,12 +77,13 @@ class LayoutTestMessageFilter : public BrowserMessageFilter {
   void OnLayoutTestRuntimeFlagsChanged(
       const base::DictionaryValue& changed_layout_test_runtime_flags);
   void OnTestFinishedInSecondaryRenderer();
+  void OnInspectSecondaryWindow();
 
   int render_process_id_;
 
-  storage::DatabaseTracker* database_tracker_;
-  storage::QuotaManager* quota_manager_;
-  net::URLRequestContextGetter* request_context_getter_;
+  scoped_refptr<storage::DatabaseTracker> database_tracker_;
+  scoped_refptr<storage::QuotaManager> quota_manager_;
+  scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
 
   DISALLOW_COPY_AND_ASSIGN(LayoutTestMessageFilter);
 };

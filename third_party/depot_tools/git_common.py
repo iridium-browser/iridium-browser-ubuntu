@@ -37,8 +37,20 @@ from StringIO import StringIO
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
 IS_WIN = sys.platform == 'win32'
-GIT_EXE = ROOT+'\\git.bat' if IS_WIN else 'git'
 TEST_MODE = False
+
+
+def win_find_git():
+  for elem in os.environ.get('PATH', '').split(os.pathsep):
+    for candidate in ('git.exe', 'git.bat'):
+      path = os.path.join(elem, candidate)
+      if os.path.isfile(path):
+        return path
+  raise ValueError('Could not find Git on PATH.')
+
+
+GIT_EXE = 'git' if not IS_WIN else win_find_git()
+
 
 FREEZE = 'FREEZE'
 FREEZE_SECTIONS = {
@@ -423,25 +435,25 @@ def freeze():
     if limit_mb > 0:
       if s.lstat == '?':
         untracked_bytes += os.stat(os.path.join(root_path, f)).st_size
-      if untracked_bytes > limit_mb * MB:
-        die("""\
-          You appear to have too much untracked+unignored data in your git
-          checkout: %.1f / %d MB.
+  if limit_mb > 0 and untracked_bytes > limit_mb * MB:
+    die("""\
+      You appear to have too much untracked+unignored data in your git
+      checkout: %.1f / %d MB.
 
-          Run `git status` to see what it is.
+      Run `git status` to see what it is.
 
-          In addition to making many git commands slower, this will prevent
-          depot_tools from freezing your in-progress changes.
+      In addition to making many git commands slower, this will prevent
+      depot_tools from freezing your in-progress changes.
 
-          You should add untracked data that you want to ignore to your repo's
-            .git/info/exclude
-          file. See `git help ignore` for the format of this file.
+      You should add untracked data that you want to ignore to your repo's
+        .git/info/exclude
+      file. See `git help ignore` for the format of this file.
 
-          If this data is indended as part of your commit, you may adjust the
-          freeze limit by running:
-            git config %s <new_limit>
-          Where <new_limit> is an integer threshold in megabytes.""",
-          untracked_bytes / (MB * 1.0), limit_mb, key)
+      If this data is indended as part of your commit, you may adjust the
+      freeze limit by running:
+        git config %s <new_limit>
+      Where <new_limit> is an integer threshold in megabytes.""",
+      untracked_bytes / (MB * 1.0), limit_mb, key)
 
   try:
     run('commit', '--no-verify', '-m', FREEZE + '.indexed')
@@ -942,6 +954,13 @@ def tree(treeref, recurse=False):
   return ret
 
 
+def get_remote_url(remote='origin'):
+  try:
+    return run('config', 'remote.%s.url' % remote)
+  except subprocess2.CalledProcessError:
+    return None
+
+
 def upstream(branch):
   try:
     return run('rev-parse', '--abbrev-ref', '--symbolic-full-name',
@@ -1028,4 +1047,7 @@ def clone_file(repository, new_workdir, link, operation):
   link_dir = os.path.dirname(os.path.join(new_workdir, link))
   if not os.path.exists(link_dir):
     os.makedirs(link_dir)
-  operation(os.path.join(repository, link), os.path.join(new_workdir, link))
+  src = os.path.join(repository, link)
+  if os.path.islink(src):
+    src = os.path.realpath(src)
+  operation(src, os.path.join(new_workdir, link))

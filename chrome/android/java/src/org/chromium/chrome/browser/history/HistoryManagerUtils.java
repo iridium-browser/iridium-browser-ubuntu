@@ -8,7 +8,6 @@ import android.content.Context;
 import android.content.Intent;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.UrlConstants;
@@ -29,9 +28,7 @@ public class HistoryManagerUtils {
      */
     public static void showHistoryManager(ChromeActivity activity, Tab tab) {
         Context appContext = ContextUtils.getApplicationContext();
-        if (activity.getBottomSheet() != null) {
-            activity.getBottomSheetContentController().showContentAndOpenSheet(R.id.action_history);
-        } else if (DeviceFormFactor.isTablet()) {
+        if (DeviceFormFactor.isTablet()) {
             // History shows up as a tab on tablets.
             LoadUrlParams params = new LoadUrlParams(UrlConstants.NATIVE_HISTORY_URL);
             tab.loadUrl(params);

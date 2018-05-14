@@ -7,11 +7,15 @@
 
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/events/EventListener.h"
+#include "core/dom/events/EventListener.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebMediaPlayerClient.h"
 
 #include <set>
+
+namespace ukm {
+class UkmEntryBuilder;
+}  // namespace ukm
 
 namespace blink {
 
@@ -65,7 +69,7 @@ class CORE_EXPORT AutoplayUmaHelper : public EventListener,
  public:
   static AutoplayUmaHelper* Create(HTMLMediaElement*);
 
-  ~AutoplayUmaHelper();
+  ~AutoplayUmaHelper() override;
 
   bool operator==(const EventListener&) const override;
 
@@ -83,7 +87,7 @@ class CORE_EXPORT AutoplayUmaHelper : public EventListener,
 
   bool HasSource() const { return !sources_.empty(); }
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   friend class MockAutoplayUmaHelper;
@@ -113,6 +117,10 @@ class CORE_EXPORT AutoplayUmaHelper : public EventListener,
 
   bool ShouldListenToContextDestroyed() const;
   bool ShouldRecordUserPausedAutoplayingCrossOriginVideo() const;
+
+  // Returns a ukm::UkmEntryBuilder created from the UkmRecorder associated with
+  // the Document.
+  std::unique_ptr<ukm::UkmEntryBuilder> CreateUkmBuilder(const char*);
 
   // The autoplay sources.
   std::set<AutoplaySource> sources_;

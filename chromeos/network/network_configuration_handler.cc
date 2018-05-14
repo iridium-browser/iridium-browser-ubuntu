@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/format_macros.h"
 #include "base/guid.h"
 #include "base/json/json_writer.h"
@@ -71,6 +72,16 @@ void LogConfigProperties(const std::string& desc,
       base::JSONWriter::Write(iter.value(), &v);
     NET_LOG(USER) << desc << ": " << path + "." + iter.key() + "=" + v;
   }
+}
+
+// Returns recognized dbus error names or |default_error_name|.
+// TODO(stevenjb): Expand this list and update
+// network_element::AddErrorLocalizedStrings.
+std::string GetErrorName(const std::string& dbus_error_name,
+                         const std::string& default_error_name) {
+  if (dbus_error_name == shill::kErrorResultInvalidPassphrase)
+    return dbus_error_name;
+  return default_error_name;
 }
 
 }  // namespace
@@ -232,16 +243,15 @@ void NetworkConfigurationHandler::GetShillProperties(
   const NetworkState* network_state =
       network_state_handler_->GetNetworkState(service_path);
   if (network_state &&
-      NetworkTypePattern::Tether().MatchesType(network_state->type())) {
-    // If this is a Tether network, use the properties present in the
-    // NetworkState object provided by NetworkStateHandler. Tether networks are
-    // not present in Shill, so the Shill call below will not work.
+      (NetworkTypePattern::Tether().MatchesType(network_state->type()) ||
+       network_state->IsDefaultCellular())) {
+    // This is a Tether network or a Cellular network with no Service.
+    // Provide properties from NetworkState.
     base::DictionaryValue dictionary;
     network_state->GetStateProperties(&dictionary);
     callback.Run(service_path, dictionary);
     return;
   }
-
   DBusThreadManager::Get()->GetShillServiceClient()->GetProperties(
       dbus::ObjectPath(service_path),
       base::Bind(&NetworkConfigurationHandler::GetPropertiesCallback,
@@ -272,11 +282,13 @@ void NetworkConfigurationHandler::SetShillProperties(
     const NetworkState* network_state =
         network_state_handler_->GetNetworkState(service_path);
     guid = network_state ? network_state->guid() : base::GenerateGUID();
-    properties_to_set->SetStringWithoutPathExpansion(shill::kGuidProperty,
-                                                     guid);
+    properties_to_set->SetKey(shill::kGuidProperty, base::Value(guid));
   }
 
   LogConfigProperties("SetProperty", service_path, *properties_to_set);
+
+  // Clear error state when setting Shill properties.
+  network_state_handler_->ClearLastErrorForNetwork(service_path);
 
   std::unique_ptr<base::DictionaryValue> properties_copy(
       properties_to_set->DeepCopy());
@@ -352,8 +364,7 @@ void NetworkConfigurationHandler::CreateShillConfiguration(
   properties_to_set->GetStringWithoutPathExpansion(shill::kGuidProperty, &guid);
   if (guid.empty()) {
     guid = base::GenerateGUID();
-    properties_to_set->SetStringWithoutPathExpansion(
-        ::onc::network_config::kGUID, guid);
+    properties_to_set->SetKey(shill::kGuidProperty, base::Value(guid));
   }
 
   LogConfigProperties("Configure", type, *properties_to_set);
@@ -365,8 +376,8 @@ void NetworkConfigurationHandler::CreateShillConfiguration(
       base::Bind(&NetworkConfigurationHandler::ConfigurationCompleted,
                  weak_ptr_factory_.GetWeakPtr(), profile_path, source,
                  base::Passed(&properties_copy), callback),
-      base::Bind(&network_handler::ShillErrorCallbackFunction,
-                 "Config.CreateConfiguration Failed", "", error_callback));
+      base::Bind(&NetworkConfigurationHandler::ConfigurationFailed,
+                 weak_ptr_factory_.GetWeakPtr(), error_callback));
 }
 
 void NetworkConfigurationHandler::RemoveConfiguration(
@@ -471,8 +482,7 @@ void NetworkConfigurationHandler::OnShuttingDown() {
 NetworkConfigurationHandler::NetworkConfigurationHandler()
     : network_state_handler_(nullptr), weak_ptr_factory_(this) {}
 
-NetworkConfigurationHandler::~NetworkConfigurationHandler() {
-}
+NetworkConfigurationHandler::~NetworkConfigurationHandler() = default;
 
 void NetworkConfigurationHandler::Init(
     NetworkStateHandler* network_state_handler,
@@ -482,6 +492,16 @@ void NetworkConfigurationHandler::Init(
 
   // Observer is removed in OnShuttingDown() observer override.
   network_state_handler_->AddObserver(this, FROM_HERE);
+}
+
+void NetworkConfigurationHandler::ConfigurationFailed(
+    const network_handler::ErrorCallback& error_callback,
+    const std::string& dbus_error_name,
+    const std::string& dbus_error_message) {
+  std::string error_name =
+      GetErrorName(dbus_error_name, "Config.CreateConfiguration Failed");
+  network_handler::ShillErrorCallbackFunction(
+      error_name, "", error_callback, dbus_error_name, dbus_error_message);
 }
 
 void NetworkConfigurationHandler::ConfigurationCompleted(
@@ -559,7 +579,7 @@ void NetworkConfigurationHandler::GetPropertiesCallback(
   std::string name =
       shill_property_util::GetNameFromProperties(service_path, properties);
   if (!name.empty())
-    properties_copy->SetStringWithoutPathExpansion(shill::kNameProperty, name);
+    properties_copy->SetKey(shill::kNameProperty, base::Value(name));
 
   // Get the GUID property from NetworkState if it is not set in Shill.
   std::string guid;
@@ -568,8 +588,8 @@ void NetworkConfigurationHandler::GetPropertiesCallback(
     const NetworkState* network_state =
         network_state_handler_->GetNetworkState(service_path);
     if (network_state) {
-      properties_copy->SetStringWithoutPathExpansion(
-          ::onc::network_config::kGUID, network_state->guid());
+      properties_copy->SetKey(::onc::network_config::kGUID,
+                              base::Value(network_state->guid()));
     }
   }
 
@@ -600,9 +620,11 @@ void NetworkConfigurationHandler::SetPropertiesErrorCallback(
     const network_handler::ErrorCallback& error_callback,
     const std::string& dbus_error_name,
     const std::string& dbus_error_message) {
-  network_handler::ShillErrorCallbackFunction(
-      "Config.SetProperties Failed", service_path, error_callback,
-      dbus_error_name, dbus_error_message);
+  std::string error_name =
+      GetErrorName(dbus_error_name, "Config.SetProperties Failed");
+  network_handler::ShillErrorCallbackFunction(error_name, service_path,
+                                              error_callback, dbus_error_name,
+                                              dbus_error_message);
   // Some properties may have changed so request an update regardless.
   network_state_handler_->RequestUpdateForNetwork(service_path);
 }
@@ -653,7 +675,7 @@ void NetworkConfigurationHandler::RequestRefreshIPConfigs(
   if (!network_state || network_state->device_path().empty())
     return;
   network_device_handler_->RequestRefreshIPConfigs(
-      network_state->device_path(), base::Bind(&base::DoNothing),
+      network_state->device_path(), base::DoNothing(),
       network_handler::ErrorCallback());
 }
 

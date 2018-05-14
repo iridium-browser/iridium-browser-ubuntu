@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_NS_NS_CORE_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_NS_NS_CORE_H_
+#ifndef MODULES_AUDIO_PROCESSING_NS_NS_CORE_H_
+#define MODULES_AUDIO_PROCESSING_NS_NS_CORE_H_
 
-#include "webrtc/modules/audio_processing/ns/defines.h"
+#include "modules/audio_processing/ns/defines.h"
 
 typedef struct NSParaExtract_ {
   // Bin size of histogram.
@@ -110,7 +110,6 @@ typedef struct NoiseSuppressionC_ {
   float speechProb[HALF_ANAL_BLOCKL];  // Final speech/noise prob: prior + LRT.
   // Buffering data for HB.
   float dataBufHB[NUM_HIGH_BANDS_MAX][ANAL_BLOCKL_MAX];
-
 } NoiseSuppressionC;
 
 #ifdef __cplusplus
@@ -187,4 +186,4 @@ void WebRtcNs_ProcessCore(NoiseSuppressionC* self,
 #ifdef __cplusplus
 }
 #endif
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_NS_NS_CORE_H_
+#endif  // MODULES_AUDIO_PROCESSING_NS_NS_CORE_H_

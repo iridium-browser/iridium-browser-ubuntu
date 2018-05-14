@@ -9,7 +9,9 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/test/test_io_thread.h"
 #include "base/test/trace_event_analyzer.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_manager_test_utils.h"
 #include "base/trace_event/memory_dump_scheduler.h"
@@ -20,13 +22,17 @@
 #include "base/trace_event/trace_log.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/coordinator.h"
-#include "services/resource_coordinator/public/interfaces/memory_instrumentation/memory_instrumentation.mojom.h"
+#include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using testing::_;
+using testing::AnyNumber;
+using testing::Invoke;
+using testing::Return;
+
 using base::trace_event::MemoryAllocatorDump;
 using base::trace_event::MemoryDumpArgs;
-using base::trace_event::MemoryDumpCallbackResult;
 using base::trace_event::MemoryDumpLevelOfDetail;
 using base::trace_event::MemoryDumpManager;
 using base::trace_event::MemoryDumpProvider;
@@ -37,10 +43,6 @@ using base::trace_event::ProcessMemoryDump;
 using base::trace_event::TraceConfig;
 using base::trace_event::TraceLog;
 using base::trace_event::TraceResultBuffer;
-using testing::_;
-using testing::AnyNumber;
-using testing::Invoke;
-using testing::Return;
 
 namespace memory_instrumentation {
 
@@ -52,9 +54,6 @@ const char* kBackgroundButNotSummaryWhitelistedMDPName =
     "BackgroundButNotSummaryWhitelistedTestDumpProvider";
 const char* const kTestMDPWhitelist[] = {
     kWhitelistedMDPName, kBackgroundButNotSummaryWhitelistedMDPName, nullptr};
-const char* const kTestMDPWhitelistForSummary[] = {kWhitelistedMDPName,
-                                                   nullptr};
-const uint64_t kTestGuid = 0;
 
 // GTest matchers for MemoryDumpRequestArgs arguments.
 MATCHER(IsDetailedDump, "") {
@@ -99,33 +98,6 @@ class MockMemoryDumpProvider : public MemoryDumpProvider {
   bool enable_mock_destructor;
 };
 
-std::unique_ptr<trace_analyzer::TraceAnalyzer> GetDeserializedTrace() {
-  // Flush the trace into JSON.
-  TraceResultBuffer buffer;
-  TraceResultBuffer::SimpleOutput trace_output;
-  buffer.SetOutputCallback(trace_output.GetCallback());
-  base::RunLoop run_loop;
-  buffer.Start();
-  auto on_trace_data_collected =
-      [](base::Closure quit_closure, TraceResultBuffer* buffer,
-         const scoped_refptr<base::RefCountedString>& json,
-         bool has_more_events) {
-        buffer->AddFragment(json->data());
-        if (!has_more_events)
-          quit_closure.Run();
-      };
-
-  TraceLog::GetInstance()->Flush(Bind(on_trace_data_collected,
-                                      run_loop.QuitClosure(),
-                                      base::Unretained(&buffer)));
-  run_loop.Run();
-  buffer.Finish();
-
-  // Analyze the JSON.
-  return base::WrapUnique(
-      trace_analyzer::TraceAnalyzer::Create(trace_output.json_output));
-}
-
 }  // namespace
 
 class MemoryTracingIntegrationTest;
@@ -143,9 +115,22 @@ class MockCoordinator : public Coordinator, public mojom::Coordinator {
   void RegisterClientProcess(mojom::ClientProcessPtr,
                              mojom::ProcessType) override {}
 
+  void RegisterHeapProfiler(mojom::HeapProfilerPtr heap_profiler) override {}
+
   void RequestGlobalMemoryDump(
-      const MemoryDumpRequestArgs& args,
-      const RequestGlobalMemoryDumpCallback& callback) override;
+      MemoryDumpType dump_type,
+      MemoryDumpLevelOfDetail level_of_detail,
+      const std::vector<std::string>& allocator_dump_names,
+      const RequestGlobalMemoryDumpCallback&) override;
+
+  void RequestGlobalMemoryDumpForPid(
+      base::ProcessId pid,
+      const RequestGlobalMemoryDumpForPidCallback&) override {}
+
+  void RequestGlobalMemoryDumpAndAppendToTrace(
+      MemoryDumpType dump_type,
+      MemoryDumpLevelOfDetail level_of_detail,
+      const RequestGlobalMemoryDumpAndAppendToTraceCallback&) override;
 
  private:
   mojo::BindingSet<mojom::Coordinator> bindings_;
@@ -155,8 +140,8 @@ class MockCoordinator : public Coordinator, public mojom::Coordinator {
 class MemoryTracingIntegrationTest : public testing::Test {
  public:
   void SetUp() override {
-    message_loop_ = base::MakeUnique<base::MessageLoop>();
-    coordinator_ = base::MakeUnique<MockCoordinator>(this);
+    message_loop_ = std::make_unique<base::MessageLoop>();
+    coordinator_ = std::make_unique<MockCoordinator>(this);
   }
 
   void InitializeClientProcess(mojom::ProcessType process_type) {
@@ -174,47 +159,46 @@ class MemoryTracingIntegrationTest : public testing::Test {
     client_process_.reset();
     coordinator_.reset();
     message_loop_.reset();
-    TraceLog::DeleteForTesting();
+    TraceLog::ResetForTesting();
   }
 
   // Blocks the current thread (spinning a nested message loop) until the
   // memory dump is complete. Returns:
-  // - return value: the |success| from the RequestProcessMemoryDump() callback.
-  bool RequestProcessDumpAndWait(
+  // - return value: the |success| from the RequestChromeMemoryDump() callback.
+  bool RequestChromeDumpAndWait(
       MemoryDumpType dump_type,
       MemoryDumpLevelOfDetail level_of_detail,
-      base::Optional<MemoryDumpCallbackResult>* result = nullptr) {
+      std::unique_ptr<base::trace_event::ProcessMemoryDump>* result = nullptr) {
     base::RunLoop run_loop;
     bool success = false;
-    MemoryDumpRequestArgs request_args{kTestGuid, dump_type, level_of_detail};
-    ClientProcessImpl::RequestProcessMemoryDumpCallback callback = base::Bind(
+    uint64_t req_guid = ++guid_counter_;
+    MemoryDumpRequestArgs request_args{req_guid, dump_type, level_of_detail};
+    ClientProcessImpl::RequestChromeMemoryDumpCallback callback = base::Bind(
         [](bool* curried_success, base::Closure curried_quit_closure,
-           base::Optional<MemoryDumpCallbackResult>* curried_result,
-           bool success, uint64_t dump_guid,
-           mojom::RawProcessMemoryDumpPtr result) {
-          EXPECT_EQ(kTestGuid, dump_guid);
+           std::unique_ptr<base::trace_event::ProcessMemoryDump>*
+               curried_result,
+           uint64_t curried_expected_guid, bool success, uint64_t dump_guid,
+           std::unique_ptr<base::trace_event::ProcessMemoryDump> result) {
+          EXPECT_EQ(curried_expected_guid, dump_guid);
           *curried_success = success;
-          if (curried_result) {
-            *curried_result = MemoryDumpCallbackResult();
-            (*curried_result)->os_dump = result->os_dump;
-            (*curried_result)->chrome_dump = result->chrome_dump;
-            EXPECT_TRUE(result->extra_processes_dumps.empty());
-          }
+          if (curried_result)
+            *curried_result = std::move(result);
           curried_quit_closure.Run();
         },
-        &success, run_loop.QuitClosure(), result);
-    client_process_->RequestProcessMemoryDump(request_args, callback);
+        &success, run_loop.QuitClosure(), result, req_guid);
+    client_process_->RequestChromeMemoryDump(request_args, callback);
     run_loop.Run();
     return success;
   }
 
-  void RequestProcessDump(MemoryDumpType dump_type,
-                          MemoryDumpLevelOfDetail level_of_detail) {
-    MemoryDumpRequestArgs request_args{kTestGuid, dump_type, level_of_detail};
-    ClientProcessImpl::RequestProcessMemoryDumpCallback callback =
-        base::Bind([](bool success, uint64_t dump_guid,
-                      mojom::RawProcessMemoryDumpPtr result) {});
-    client_process_->RequestProcessMemoryDump(request_args, callback);
+  void RequestChromeDump(MemoryDumpType dump_type,
+                         MemoryDumpLevelOfDetail level_of_detail) {
+    uint64_t req_guid = ++guid_counter_;
+    MemoryDumpRequestArgs request_args{req_guid, dump_type, level_of_detail};
+    ClientProcessImpl::RequestChromeMemoryDumpCallback callback = base::Bind(
+        [](bool success, uint64_t dump_guid,
+           std::unique_ptr<base::trace_event::ProcessMemoryDump> result) {});
+    client_process_->RequestChromeMemoryDump(request_args, callback);
   }
 
  protected:
@@ -258,94 +242,24 @@ class MemoryTracingIntegrationTest : public testing::Test {
   std::unique_ptr<base::MessageLoop> message_loop_;
   std::unique_ptr<MockCoordinator> coordinator_;
   std::unique_ptr<ClientProcessImpl> client_process_;
+  uint64_t guid_counter_ = 0;
 };
 
 void MockCoordinator::RequestGlobalMemoryDump(
-    const MemoryDumpRequestArgs& args,
+    MemoryDumpType dump_type,
+    MemoryDumpLevelOfDetail level_of_detail,
+    const std::vector<std::string>& allocator_dump_names,
     const RequestGlobalMemoryDumpCallback& callback) {
-  client_->RequestProcessDump(args.dump_type, args.level_of_detail);
-  callback.Run(args.dump_guid, true, mojom::GlobalMemoryDumpPtr());
+  client_->RequestChromeDump(dump_type, level_of_detail);
+  callback.Run(true, mojom::GlobalMemoryDumpPtr());
 }
 
-// Tests that the MemoryDumpProvider(s) are invoked even if tracing has not
-// been initialized.
-TEST_F(MemoryTracingIntegrationTest, DumpWithoutInitializingTracing) {
-  InitializeClientProcess(mojom::ProcessType::RENDERER);
-  MockMemoryDumpProvider mdp;
-  RegisterDumpProvider(&mdp, base::ThreadTaskRunnerHandle::Get(),
-                       MemoryDumpProvider::Options());
-  DisableTracing();
-  EXPECT_CALL(mdp, OnMemoryDump(_, _)).Times(3);
-  for (int i = 0; i < 3; ++i) {
-    // A non-SUMMARY_ONLY dump was requested when tracing was not enabled. So,
-    // the request should fail because dump was not added to the trace.
-    EXPECT_FALSE(RequestProcessDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
-                                           MemoryDumpLevelOfDetail::DETAILED));
-  }
-  mdm_->UnregisterDumpProvider(&mdp);
-}
-
-// Similar to DumpWithoutInitializingTracing. Tracing is initialized but not
-// enabled.
-TEST_F(MemoryTracingIntegrationTest,
-       DumpWithMDMInitializedForTracingButDisabled) {
-  InitializeClientProcess(mojom::ProcessType::RENDERER);
-  MockMemoryDumpProvider mdp;
-  RegisterDumpProvider(&mdp, base::ThreadTaskRunnerHandle::Get(),
-                       MemoryDumpProvider::Options());
-
-  DisableTracing();
-
-  const TraceConfig& trace_config =
-      TraceConfig(base::trace_event::TraceConfigMemoryTestUtil::
-                      GetTraceConfig_NoTriggers());
-  const TraceConfig::MemoryDumpConfig& memory_dump_config =
-      trace_config.memory_dump_config();
-  mdm_->SetupForTracing(memory_dump_config);
-
-  EXPECT_CALL(mdp, OnMemoryDump(_, _)).Times(3);
-  for (int i = 0; i < 3; ++i) {
-    // Same as the above. Even if the MDP(s) are invoked, this will return false
-    // while attempting to add the dump into the trace.
-    EXPECT_FALSE(RequestProcessDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
-                                           MemoryDumpLevelOfDetail::DETAILED));
-  }
-  mdm_->TeardownForTracing();
-  mdm_->UnregisterDumpProvider(&mdp);
-}
-
-TEST_F(MemoryTracingIntegrationTest, SummaryOnlyDumpsArentAddedToTrace) {
-  InitializeClientProcess(mojom::ProcessType::RENDERER);
-  using trace_analyzer::Query;
-
-  base::trace_event::SetDumpProviderSummaryWhitelistForTesting(
-      kTestMDPWhitelistForSummary);
-  base::trace_event::SetDumpProviderWhitelistForTesting(kTestMDPWhitelist);
-
-  // Standard provider with default options (create dump for current process).
-  MockMemoryDumpProvider mdp;
-  RegisterDumpProvider(&mdp, nullptr, MemoryDumpProvider::Options(),
-                       kWhitelistedMDPName);
-
-  EnableMemoryInfraTracing();
-
-  EXPECT_CALL(mdp, OnMemoryDump(_, _)).Times(2);
-  EXPECT_TRUE(RequestProcessDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
-                                        MemoryDumpLevelOfDetail::BACKGROUND));
-  EXPECT_TRUE(RequestProcessDumpAndWait(MemoryDumpType::SUMMARY_ONLY,
-                                        MemoryDumpLevelOfDetail::BACKGROUND));
-  DisableTracing();
-
-  std::unique_ptr<trace_analyzer::TraceAnalyzer> analyzer =
-      GetDeserializedTrace();
-  trace_analyzer::TraceEventVector events;
-  analyzer->FindEvents(Query::EventPhaseIs(TRACE_EVENT_PHASE_MEMORY_DUMP),
-                       &events);
-
-  ASSERT_EQ(1u, events.size());
-  ASSERT_TRUE(trace_analyzer::CountMatches(
-      events, Query::EventNameIs(MemoryDumpTypeToString(
-                  MemoryDumpType::EXPLICITLY_TRIGGERED))));
+void MockCoordinator::RequestGlobalMemoryDumpAndAppendToTrace(
+    MemoryDumpType dump_type,
+    MemoryDumpLevelOfDetail level_of_detail,
+    const RequestGlobalMemoryDumpAndAppendToTraceCallback& callback) {
+  client_->RequestChromeDump(dump_type, level_of_detail);
+  callback.Run(1, true);
 }
 
 // Checks that is the ClientProcessImpl is initialized after tracing already
@@ -363,8 +277,8 @@ TEST_F(MemoryTracingIntegrationTest, InitializedAfterStartOfTracing) {
   MockMemoryDumpProvider mdp;
   RegisterDumpProvider(&mdp, nullptr, MemoryDumpProvider::Options());
   EXPECT_CALL(mdp, OnMemoryDump(_, _)).Times(1);
-  EXPECT_TRUE(RequestProcessDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
-                                        MemoryDumpLevelOfDetail::DETAILED));
+  EXPECT_TRUE(RequestChromeDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
+                                       MemoryDumpLevelOfDetail::DETAILED));
   DisableTracing();
 }
 
@@ -374,7 +288,7 @@ TEST_F(MemoryTracingIntegrationTest, InitializedAfterStartOfTracing) {
 TEST_F(MemoryTracingIntegrationTest, TestBackgroundTracingSetup) {
   InitializeClientProcess(mojom::ProcessType::BROWSER);
   base::trace_event::SetDumpProviderWhitelistForTesting(kTestMDPWhitelist);
-  auto mdp = base::MakeUnique<MockMemoryDumpProvider>();
+  auto mdp = std::make_unique<MockMemoryDumpProvider>();
   RegisterDumpProvider(&*mdp, nullptr, MemoryDumpProvider::Options(),
                        kWhitelistedMDPName);
 
@@ -403,15 +317,14 @@ TEST_F(MemoryTracingIntegrationTest, TestBackgroundTracingSetup) {
 
   run_loop.Run();
 
-  // When requesting non-BACKGROUND dumps the MDP will be invoked but the
-  // data is expected to be dropped on the floor, hence the EXPECT_FALSE.
+  // When requesting non-BACKGROUND dumps the MDP will be invoked.
   EXPECT_CALL(*mdp, OnMemoryDump(IsLightDump(), _));
-  EXPECT_FALSE(RequestProcessDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
-                                         MemoryDumpLevelOfDetail::LIGHT));
+  EXPECT_TRUE(RequestChromeDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
+                                       MemoryDumpLevelOfDetail::LIGHT));
 
   EXPECT_CALL(*mdp, OnMemoryDump(IsDetailedDump(), _));
-  EXPECT_FALSE(RequestProcessDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
-                                         MemoryDumpLevelOfDetail::DETAILED));
+  EXPECT_TRUE(RequestChromeDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
+                                       MemoryDumpLevelOfDetail::DETAILED));
 
   ASSERT_TRUE(IsPeriodicDumpingEnabled());
   DisableTracing();
@@ -490,7 +403,7 @@ TEST_F(MemoryTracingIntegrationTest, PeriodicDumpingWithMultipleModes) {
   const int kHeavyDumpPeriodMs = kHeavyDumpRate * kLightDumpPeriodMs;
 
   // The expected sequence with light=1ms, heavy=5ms is H,L,L,L,L,H,...
-  auto mdp = base::MakeUnique<MockMemoryDumpProvider>();
+  auto mdp = std::make_unique<MockMemoryDumpProvider>();
   RegisterDumpProvider(&*mdp, nullptr, MemoryDumpProvider::Options(),
                        kWhitelistedMDPName);
 
@@ -532,120 +445,9 @@ TEST_F(MemoryTracingIntegrationTest, TestWhitelistingMDP) {
 
   EnableMemoryInfraTracing();
   EXPECT_FALSE(IsPeriodicDumpingEnabled());
-  EXPECT_TRUE(RequestProcessDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
-                                        MemoryDumpLevelOfDetail::BACKGROUND));
+  EXPECT_TRUE(RequestChromeDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
+                                       MemoryDumpLevelOfDetail::BACKGROUND));
   DisableTracing();
-}
-
-TEST_F(MemoryTracingIntegrationTest, TestSummaryComputation) {
-  InitializeClientProcess(mojom::ProcessType::RENDERER);
-  MockMemoryDumpProvider mdp;
-  RegisterDumpProvider(&mdp, base::ThreadTaskRunnerHandle::Get(),
-                       MemoryDumpProvider::Options());
-
-  EXPECT_CALL(mdp, OnMemoryDump(_, _))
-      .WillOnce(Invoke([](const MemoryDumpArgs&,
-                          ProcessMemoryDump* pmd) -> bool {
-        auto* size = MemoryAllocatorDump::kNameSize;
-        auto* bytes = MemoryAllocatorDump::kUnitsBytes;
-        const uint32_t kB = 1024;
-
-        pmd->CreateAllocatorDump("malloc")->AddScalar(size, bytes, 1 * kB);
-        pmd->CreateAllocatorDump("malloc/ignored")
-            ->AddScalar(size, bytes, 99 * kB);
-
-        pmd->CreateAllocatorDump("blink_gc")->AddScalar(size, bytes, 2 * kB);
-        pmd->CreateAllocatorDump("blink_gc/ignored")
-            ->AddScalar(size, bytes, 99 * kB);
-
-        pmd->CreateAllocatorDump("v8/foo")->AddScalar(size, bytes, 1 * kB);
-        pmd->CreateAllocatorDump("v8/bar")->AddScalar(size, bytes, 2 * kB);
-        pmd->CreateAllocatorDump("v8")->AddScalar(size, bytes, 99 * kB);
-
-        // All the 99 KB values here are expected to be ignored.
-        pmd->CreateAllocatorDump("partition_alloc")
-            ->AddScalar(size, bytes, 99 * kB);
-        pmd->CreateAllocatorDump("partition_alloc/allocated_objects")
-            ->AddScalar(size, bytes, 99 * kB);
-        pmd->CreateAllocatorDump("partition_alloc/allocated_objects/ignored")
-            ->AddScalar(size, bytes, 99 * kB);
-        pmd->CreateAllocatorDump("partition_alloc/partitions")
-            ->AddScalar(size, bytes, 99 * kB);
-        pmd->CreateAllocatorDump("partition_alloc/partitions/not_ignored_1")
-            ->AddScalar(size, bytes, 2 * kB);
-        pmd->CreateAllocatorDump("partition_alloc/partitions/not_ignored_2")
-            ->AddScalar(size, bytes, 2 * kB);
-        pmd->process_totals()->set_resident_set_bytes(5 * kB);
-        pmd->set_has_process_totals();
-        return true;
-      }));
-
-  EnableMemoryInfraTracing();
-  base::Optional<MemoryDumpCallbackResult> result;
-  EXPECT_TRUE(RequestProcessDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
-                                        MemoryDumpLevelOfDetail::LIGHT,
-                                        &result));
-  DisableTracing();
-
-  ASSERT_TRUE(result);
-
-  // For malloc we only count the root "malloc" not children "malloc/*".
-  EXPECT_EQ(1u, result->chrome_dump.malloc_total_kb);
-
-  // For blink_gc we only count the root "blink_gc" not children "blink_gc/*".
-  EXPECT_EQ(2u, result->chrome_dump.blink_gc_total_kb);
-
-  // For v8 we count the children ("v8/*") as the root total is not given.
-  EXPECT_EQ(3u, result->chrome_dump.v8_total_kb);
-
-  // partition_alloc has partition_alloc/allocated_objects/* which is a subset
-  // of partition_alloc/partitions/* so we only count the latter.
-  EXPECT_EQ(4u, result->chrome_dump.partition_alloc_total_kb);
-
-  // resident_set_kb should read from process_totals.
-  EXPECT_EQ(5u, result->os_dump.resident_set_kb);
-};
-
-TEST_F(MemoryTracingIntegrationTest, DumpOnBehalfOfOtherProcess) {
-  InitializeClientProcess(mojom::ProcessType::RENDERER);
-  using trace_analyzer::Query;
-
-  // Standard provider with default options (create dump for current process).
-  MemoryDumpProvider::Options options;
-  MockMemoryDumpProvider mdp1;
-  RegisterDumpProvider(&mdp1, nullptr, options);
-
-  // Provider with out-of-process dumping.
-  MockMemoryDumpProvider mdp2;
-  options.target_pid = 123;
-  RegisterDumpProvider(&mdp2, nullptr, options);
-
-  // Another provider with out-of-process dumping.
-  MockMemoryDumpProvider mdp3;
-  options.target_pid = 456;
-  RegisterDumpProvider(&mdp3, nullptr, options);
-
-  EnableMemoryInfraTracing();
-  EXPECT_CALL(mdp1, OnMemoryDump(_, _)).Times(1);
-  EXPECT_CALL(mdp2, OnMemoryDump(_, _)).Times(1);
-  EXPECT_CALL(mdp3, OnMemoryDump(_, _)).Times(1);
-  EXPECT_TRUE(RequestProcessDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
-                                        MemoryDumpLevelOfDetail::DETAILED));
-  DisableTracing();
-
-  std::unique_ptr<trace_analyzer::TraceAnalyzer> analyzer =
-      GetDeserializedTrace();
-  trace_analyzer::TraceEventVector events;
-  analyzer->FindEvents(Query::EventPhaseIs(TRACE_EVENT_PHASE_MEMORY_DUMP),
-                       &events);
-
-  ASSERT_EQ(3u, events.size());
-  ASSERT_EQ(1u, trace_analyzer::CountMatches(events, Query::EventPidIs(123)));
-  ASSERT_EQ(1u, trace_analyzer::CountMatches(events, Query::EventPidIs(456)));
-  ASSERT_EQ(1u, trace_analyzer::CountMatches(
-                    events, Query::EventPidIs(base::GetCurrentProcId())));
-  ASSERT_EQ(events[0]->id, events[1]->id);
-  ASSERT_EQ(events[0]->id, events[2]->id);
 }
 
 TEST_F(MemoryTracingIntegrationTest, TestPollingOnDumpThread) {
@@ -697,6 +499,60 @@ TEST_F(MemoryTracingIntegrationTest, TestPollingOnDumpThread) {
   run_loop.Run();
   DisableTracing();
   mdm_->UnregisterAndDeleteDumpProviderSoon(std::move(mdp1));
+}
+
+// Regression test for https://crbug.com/766274 .
+TEST_F(MemoryTracingIntegrationTest, GenerationChangeDoesntReenterMDM) {
+  InitializeClientProcess(mojom::ProcessType::RENDERER);
+
+  // We want the ThreadLocalEventBuffer MDPs to auto-register to repro this bug.
+  mdm_->set_dumper_registrations_ignored_for_testing(false);
+
+  // Disable any other tracing category, so we are likely to hit the
+  // ThreadLocalEventBuffer in MemoryDumpManager::InbokeOnMemoryDump() first.
+  const std::string kMemoryInfraTracingOnly =
+      std::string("-*,") + MemoryDumpManager::kTraceCategory;
+
+  auto thread =
+      std::make_unique<base::TestIOThread>(base::TestIOThread::kAutoStart);
+
+  TraceLog::GetInstance()->SetEnabled(
+      TraceConfig(kMemoryInfraTracingOnly,
+                  base::trace_event::RECORD_UNTIL_FULL),
+      TraceLog::RECORDING_MODE);
+
+  // Creating a new thread after tracing has started causes the posted
+  // TRACE_EVENT0 to initialize and register a new ThreadLocalEventBuffer.
+  base::RunLoop run_loop;
+  thread->PostTask(
+      FROM_HERE,
+      Bind(
+          [](scoped_refptr<base::SequencedTaskRunner> main_task_runner,
+             base::Closure quit_closure) {
+            TRACE_EVENT0(MemoryDumpManager::kTraceCategory, "foo");
+            main_task_runner->PostTask(FROM_HERE, quit_closure);
+          },
+          base::SequencedTaskRunnerHandle::Get(), run_loop.QuitClosure()));
+  run_loop.Run();
+
+  EXPECT_TRUE(RequestChromeDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
+                                       MemoryDumpLevelOfDetail::DETAILED));
+  DisableTracing();
+
+  // Now enable tracing again with a different RECORD_ mode. This will cause
+  // a TraceLog generation change. The generation change will be lazily detected
+  // in the |thread|'s ThreadLocalEventBuffer on its next TRACE_EVENT call (or
+  // whatever ends up calling InitializeThreadLocalEventBufferIfSupported()).
+  // The bug here conisted in MemoryDumpManager::InvokeOnMemoryDump() to hit
+  // that (which in turn causes an invalidation of the ThreadLocalEventBuffer)
+  // after having checked that the MDP is valid and having decided to invoke it.
+  TraceLog::GetInstance()->SetEnabled(
+      TraceConfig(kMemoryInfraTracingOnly,
+                  base::trace_event::RECORD_CONTINUOUSLY),
+      TraceLog::RECORDING_MODE);
+  EXPECT_TRUE(RequestChromeDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
+                                       MemoryDumpLevelOfDetail::DETAILED));
+  DisableTracing();
 }
 
 }  // namespace memory_instrumentation

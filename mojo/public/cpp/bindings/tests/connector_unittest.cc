@@ -100,7 +100,7 @@ class ConnectorTest : public testing::Test {
       std::vector<ScopedHandle> handles = std::vector<ScopedHandle>()) {
     const size_t size = strlen(text) + 1;  // Plus null terminator.
     Message message(1, 0, size, 0, &handles);
-    memcpy(message.payload_buffer()->Allocate(size), text, size);
+    memcpy(message.payload_buffer()->AllocateAndGet(size), text, size);
     return message;
   }
 
@@ -497,9 +497,7 @@ TEST_F(ConnectorTest, PauseWithQueuedMessages) {
 
 void AccumulateWithNestedLoop(MessageAccumulator* accumulator,
                               const base::Closure& closure) {
-  base::RunLoop nested_run_loop;
-  base::MessageLoop::ScopedNestableTaskAllower allow(
-      base::MessageLoop::current());
+  base::RunLoop nested_run_loop(base::RunLoop::Type::kNestableTasksAllowed);
   accumulator->set_closure(nested_run_loop.QuitClosure());
   nested_run_loop.Run();
   closure.Run();

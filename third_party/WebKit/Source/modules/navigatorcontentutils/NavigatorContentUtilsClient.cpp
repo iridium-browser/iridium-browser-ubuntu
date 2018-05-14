@@ -4,21 +4,22 @@
 
 #include "modules/navigatorcontentutils/NavigatorContentUtilsClient.h"
 
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
+#include "platform/weborigin/KURL.h"
 #include "public/web/WebFrameClient.h"
 
 namespace blink {
 
 NavigatorContentUtilsClient* NavigatorContentUtilsClient::Create(
-    WebLocalFrameBase* web_frame) {
+    WebLocalFrameImpl* web_frame) {
   return new NavigatorContentUtilsClient(web_frame);
 }
 
 NavigatorContentUtilsClient::NavigatorContentUtilsClient(
-    WebLocalFrameBase* web_frame)
+    WebLocalFrameImpl* web_frame)
     : web_frame_(web_frame) {}
 
-DEFINE_TRACE(NavigatorContentUtilsClient) {
+void NavigatorContentUtilsClient::Trace(blink::Visitor* visitor) {
   visitor->Trace(web_frame_);
 }
 
@@ -26,13 +27,6 @@ void NavigatorContentUtilsClient::RegisterProtocolHandler(const String& scheme,
                                                           const KURL& url,
                                                           const String& title) {
   web_frame_->Client()->RegisterProtocolHandler(scheme, url, title);
-}
-
-NavigatorContentUtilsClient::CustomHandlersState
-NavigatorContentUtilsClient::IsProtocolHandlerRegistered(const String& scheme,
-                                                         const KURL& url) {
-  return static_cast<NavigatorContentUtilsClient::CustomHandlersState>(
-      web_frame_->Client()->IsProtocolHandlerRegistered(scheme, url));
 }
 
 void NavigatorContentUtilsClient::UnregisterProtocolHandler(

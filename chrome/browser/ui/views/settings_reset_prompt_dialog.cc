@@ -6,50 +6,46 @@
 
 #include "chrome/browser/safe_browsing/settings_reset_prompt/settings_reset_prompt_controller.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/harmony/chrome_typography.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/styled_label.h"
-#include "ui/views/layout/box_layout.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
-namespace safe_browsing {
+namespace chrome {
 
-// static
-void SettingsResetPromptController::ShowSettingsResetPrompt(
+void ShowSettingsResetPrompt(
     Browser* browser,
-    SettingsResetPromptController* controller) {
+    safe_browsing::SettingsResetPromptController* controller) {
   SettingsResetPromptDialog* dialog = new SettingsResetPromptDialog(controller);
   // The dialog will delete itself, as implemented in
   // |DialogDelegateView::DeleteDelegate()|, when its widget is closed.
   dialog->Show(browser);
 }
 
-}  // namespace safe_browsing
-
-namespace {
-constexpr int kDialogWidth = 448;
-}  // namespace
+}  // namespace chrome
 
 SettingsResetPromptDialog::SettingsResetPromptDialog(
     safe_browsing::SettingsResetPromptController* controller)
     : browser_(nullptr), controller_(controller) {
   DCHECK(controller_);
 
-  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
-
-  SetLayoutManager(new views::BoxLayout(
-      views::BoxLayout::kVertical,
-      provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS), 0));
+  set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
+      views::TEXT, views::TEXT));
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 
   views::StyledLabel* dialog_label =
       new views::StyledLabel(controller_->GetMainText(), /*listener=*/nullptr);
+  dialog_label->SetTextContext(CONTEXT_BODY_TEXT_LARGE);
   views::StyledLabel::RangeStyleInfo url_style;
-  url_style.weight = gfx::Font::Weight::BOLD;
+  url_style.text_style = STYLE_EMPHASIZED;
   dialog_label->AddStyleRange(controller_->GetMainTextUrlRange(), url_style);
   AddChildView(dialog_label);
 }
@@ -80,6 +76,10 @@ ui::ModalType SettingsResetPromptDialog::GetModalType() const {
 }
 
 bool SettingsResetPromptDialog::ShouldShowWindowIcon() const {
+  return false;
+}
+
+bool SettingsResetPromptDialog::ShouldShowCloseButton() const {
   return false;
 }
 
@@ -127,5 +127,8 @@ bool SettingsResetPromptDialog::Close() {
 // View overrides.
 
 gfx::Size SettingsResetPromptDialog::CalculatePreferredSize() const {
-  return gfx::Size(kDialogWidth, GetHeightForWidth(kDialogWidth));
+  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
+                        DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH) -
+                    margins().width();
+  return gfx::Size(width, GetHeightForWidth(width));
 }

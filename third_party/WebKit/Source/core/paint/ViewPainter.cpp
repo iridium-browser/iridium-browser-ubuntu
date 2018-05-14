@@ -8,16 +8,17 @@
 #include "core/frame/Settings.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/compositing/CompositedLayerMapping.h"
 #include "core/paint/BackgroundImageGeometry.h"
 #include "core/paint/BlockPainter.h"
 #include "core/paint/BoxModelObjectPainter.h"
 #include "core/paint/BoxPainter.h"
-#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/PaintLayer.h"
 #include "core/paint/ScrollRecorder.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "core/paint/compositing/CompositedLayerMapping.h"
+#include "platform/graphics/paint/DrawingRecorder.h"
+#include "platform/graphics/paint/ScopedPaintChunkProperties.h"
+#include "platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -31,9 +32,12 @@ void ViewPainter::Paint(const PaintInfo& paint_info,
   DCHECK(LayoutPoint(IntPoint(paint_offset.X().ToInt(),
                               paint_offset.Y().ToInt())) == paint_offset);
 
-  const LocalFrameView* frame_view = layout_view_.GetFrameView();
-  if (frame_view->ShouldThrottleRendering())
+  DCHECK(!layout_view_.GetFrameView()->ShouldThrottleRendering());
+
+  if (RuntimeEnabledFeatures::RootLayerScrollingEnabled()) {
+    BlockPainter(layout_view_).Paint(paint_info, paint_offset);
     return;
+  }
 
   layout_view_.PaintObject(paint_info, paint_offset);
   BlockPainter(layout_view_)
@@ -60,27 +64,36 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
   GraphicsContext& context = paint_info.context;
 
   // The background rect always includes at least the visible content size.
-  IntRect background_rect(IntRect(layout_view_.ViewRect()));
+  IntRect background_rect(
+      IntRect(layout_view_.OverflowClipRect(LayoutPoint())));
 
-  if (!RuntimeEnabledFeatures::RootLayerScrollingEnabled())
+  // When printing with root layer scrolling, we will paint the entire
+  // unclipped scrolling content area.
+  if (!RuntimeEnabledFeatures::RootLayerScrollingEnabled() ||
+      paint_info.IsPrinting()) {
     background_rect.Unite(layout_view_.DocumentRect());
+  }
 
   const DisplayItemClient* display_item_client = &layout_view_;
 
+  Optional<ScopedPaintChunkProperties> scoped_scroll_property;
   Optional<ScrollRecorder> scroll_recorder;
   if (BoxModelObjectPainter::
           IsPaintingBackgroundOfPaintContainerIntoScrollingContentsLayer(
               &layout_view_, paint_info)) {
     // Layout overflow, combined with the visible content size.
     background_rect.Unite(layout_view_.DocumentRect());
-    display_item_client =
-        static_cast<const DisplayItemClient*>(layout_view_.Layer()
-                                                  ->GetCompositedLayerMapping()
-                                                  ->ScrollingContentsLayer());
+    display_item_client = layout_view_.Layer()->GraphicsLayerBacking();
     if (!layout_view_.ScrolledContentOffset().IsZero()) {
       scroll_recorder.emplace(paint_info.context, layout_view_,
                               paint_info.phase,
                               layout_view_.ScrolledContentOffset());
+    }
+    if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
+      scoped_scroll_property.emplace(
+          paint_info.context.GetPaintController(),
+          layout_view_.FirstFragment().ContentsProperties(),
+          *display_item_client, DisplayItem::kDocumentBackground);
     }
   }
 
@@ -99,18 +112,18 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
        document.GetSettings()->GetShouldClearDocumentBackground());
   Color base_background_color =
       paints_base_background ? frame_view.BaseBackgroundColor() : Color();
-  Color root_background_color =
-      layout_view_.Style()->VisitedDependentColor(CSSPropertyBackgroundColor);
+  Color root_background_color = layout_view_.Style()->VisitedDependentColor(
+      GetCSSPropertyBackgroundColor());
   const LayoutObject* root_object =
       document.documentElement() ? document.documentElement()->GetLayoutObject()
                                  : nullptr;
 
   DrawingRecorder recorder(context, *display_item_client,
-                           DisplayItem::kDocumentBackground, background_rect);
+                           DisplayItem::kDocumentBackground);
 
   // Special handling for print economy mode.
   bool force_background_to_white =
-      BoxPainter::ShouldForceWhiteBackgroundForPrintEconomy(
+      BoxModelObjectPainter::ShouldForceWhiteBackgroundForPrintEconomy(
           document, layout_view_.StyleRef());
   if (force_background_to_white) {
     // If for any reason the view background is not transparent, paint white
@@ -128,12 +141,21 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
   // The strategy is to apply root element transform on the context and issue
   // draw commands in the local space, therefore we need to apply inverse
   // transform on the document rect to get to the root element space.
+  // Local / scroll positioned background images will be painted into scrolling
+  // contents layer with root layer scrolling. Therefore we need to switch both
+  // the background_rect and context to documentElement visual space.
   bool background_renderable = true;
   TransformationMatrix transform;
   IntRect paint_rect = background_rect;
   if (!root_object || !root_object->IsBox()) {
     background_renderable = false;
   } else if (root_object->HasLayer()) {
+    if (BoxModelObjectPainter::
+            IsPaintingBackgroundOfPaintContainerIntoScrollingContentsLayer(
+                &layout_view_, paint_info)) {
+      transform.Translate(layout_view_.ScrolledContentOffset().Width(),
+                          layout_view_.ScrolledContentOffset().Height());
+    }
     const PaintLayer& root_layer =
         *ToLayoutBoxModelObject(root_object)->Layer();
     LayoutPoint offset;
@@ -164,12 +186,11 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
     return;
   }
 
-  BoxPainter::FillLayerOcclusionOutputList reversed_paint_list;
+  BoxPainterBase::FillLayerOcclusionOutputList reversed_paint_list;
   bool should_draw_background_in_separate_buffer =
-      BoxPainter(layout_view_)
+      BoxModelObjectPainter(layout_view_)
           .CalculateFillLayerOcclusionCulling(
-              reversed_paint_list, layout_view_.Style()->BackgroundLayers(),
-              layout_view_.GetDocument(), layout_view_.StyleRef());
+              reversed_paint_list, layout_view_.Style()->BackgroundLayers());
   DCHECK(reversed_paint_list.size());
 
   // If the root background color is opaque, isolation group can be skipped
@@ -218,10 +239,10 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
   BoxModelObjectPainter box_model_painter(layout_view_);
   for (auto it = reversed_paint_list.rbegin(); it != reversed_paint_list.rend();
        ++it) {
-    DCHECK((*it)->Clip() == kBorderFillBox);
+    DCHECK((*it)->Clip() == EFillBox::kBorder);
 
     bool should_paint_in_viewport_space =
-        (*it)->Attachment() == kFixedBackgroundAttachment;
+        (*it)->Attachment() == EFillAttachment::kFixed;
     if (should_paint_in_viewport_space) {
       box_model_painter.PaintFillLayer(
           paint_info, Color(), **it, LayoutRect(LayoutRect::InfiniteIntRect()),

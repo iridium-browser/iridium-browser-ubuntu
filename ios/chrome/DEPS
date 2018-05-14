@@ -3,6 +3,7 @@ include_rules = [
   "+ios/shared/chrome/common",
   "+ios/third_party",
   "+net",
+  "+services/network/test",
   "+sql",
   "+ui/base",
   "+ui/gfx",
@@ -19,4 +20,10 @@ include_rules = [
   "-ios/chrome",
   "+ios/chrome/common",
   "+ios/chrome/test",
+
+  # All code in ios/chrome assumes that web::BrowserState* can be safely
+  # casted to ios::ChromeBrowserState*. This mean that no code should use
+  # web::TestBrowserState in ios/chrome.
+  "+ios/web/public",
+  "-ios/web/public/test/fakes/test_browser_state.h",
 ]

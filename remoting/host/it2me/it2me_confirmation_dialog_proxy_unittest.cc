@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -126,13 +125,13 @@ It2MeConfirmationDialogProxyTest::It2MeConfirmationDialogProxyTest()
   dialog_thread_.Start();
 
   auto dialog =
-      base::MakeUnique<StubIt2MeConfirmationDialog>(dialog_task_runner());
+      std::make_unique<StubIt2MeConfirmationDialog>(dialog_task_runner());
   dialog_ = dialog.get();
   dialog_proxy_.reset(new It2MeConfirmationDialogProxy(dialog_task_runner(),
                                                        std::move(dialog)));
 }
 
-It2MeConfirmationDialogProxyTest::~It2MeConfirmationDialogProxyTest() {}
+It2MeConfirmationDialogProxyTest::~It2MeConfirmationDialogProxyTest() = default;
 
 TEST_F(It2MeConfirmationDialogProxyTest, Show) {
   ResultCallbackTarget callback_target(main_task_runner());

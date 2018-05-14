@@ -138,8 +138,9 @@ def attribute_context(interface, attribute, interfaces):
         'has_cross_origin_setter': has_extended_attribute_value(attribute, 'CrossOrigin', 'Setter'),
         'has_custom_getter': has_custom_getter(attribute),
         'has_custom_setter': has_custom_setter(attribute),
+        'has_promise_type': idl_type.name == 'Promise',
         'has_setter': has_setter(interface, attribute),
-        'idl_type': str(idl_type),  # need trailing [] on array for Dictionary::ConversionContext::setConversionType
+        'idl_type': str(idl_type),
         'is_cached_accessor': is_cached_accessor,
         'is_call_with_execution_context': has_extended_attribute_value(attribute, 'CallWith', 'ExecutionContext'),
         'is_call_with_script_state': has_extended_attribute_value(attribute, 'CallWith', 'ScriptState'),
@@ -171,7 +172,6 @@ def attribute_context(interface, attribute, interfaces):
         'on_instance': v8_utilities.on_instance(interface, attribute),
         'on_interface': v8_utilities.on_interface(interface, attribute),
         'on_prototype': v8_utilities.on_prototype(interface, attribute),
-        'origin_trial_enabled_function': v8_utilities.origin_trial_enabled_function_name(attribute),  # [OriginTrialEnabled]
         'origin_trial_feature_name': v8_utilities.origin_trial_feature_name(attribute),  # [OriginTrialEnabled]
         'use_output_parameter_for_result': idl_type.use_output_parameter_for_result,
         'measure_as': v8_utilities.measure_as(attribute, interface),  # [MeasureAs]
@@ -190,15 +190,13 @@ def attribute_context(interface, attribute, interfaces):
             else ['']),  # [PerWorldBindings]
     }
 
-    if is_constructor_attribute(attribute):
-        update_constructor_attribute_context(interface, attribute, context)
     if not has_custom_getter(attribute):
         getter_context(interface, attribute, context)
     if not has_custom_setter(attribute) and has_setter(interface, attribute):
         setter_context(interface, attribute, interfaces, context)
 
     # [RuntimeCallStatsCounter]
-    runtime_call_stats_context(context, extended_attributes)
+    runtime_call_stats_context(interface, attribute, context)
 
     # [CrossOrigin] is incompatible with a number of other attributes, so check
     # for them here.
@@ -213,41 +211,51 @@ def attribute_context(interface, attribute, interfaces):
     return context
 
 
-def runtime_call_stats_context(context, extended_attributes):
-    counter = ''
-    if 'RuntimeCallStatsCounter' in extended_attributes:
-        includes.add('platform/bindings/RuntimeCallStats.h')
-        counter = extended_attributes['RuntimeCallStatsCounter']
+def runtime_call_stats_context(interface, attribute, context):
+    includes.add('platform/bindings/RuntimeCallStats.h')
+    generic_counter_name = 'Blink_' + v8_utilities.cpp_name(interface) + '_' + attribute.name
+    (counter, extended_attribute_defined) = v8_utilities.rcs_counter_name(attribute, generic_counter_name)
     runtime_call_stats = {
-        'getter_counter': 'k%s_Getter' % counter if counter else '',
-        'setter_counter': 'k%s_Setter' % counter if counter else ''
+        'extended_attribute_defined': extended_attribute_defined,
+        'getter_counter': '%s_Getter' % counter,
+        'setter_counter': '%s_Setter' % counter,
+        'constructor_getter_callback_counter': '%s_ConstructorGetterCallback' % generic_counter_name,
     }
     context.update({
         'runtime_call_stats': runtime_call_stats
     })
 
 
+def is_origin_trial_enabled(attribute):
+    return bool(attribute['origin_trial_feature_name'])
+
+
+def is_secure_context(attribute):
+    return bool(attribute['secure_context_test'])
+
+
 def filter_accessors(attributes):
     return [attribute for attribute in attributes if
             not (attribute['exposed_test'] or
-                 attribute['secure_context_test'] or
+                 is_secure_context(attribute) or
                  attribute['context_enabled_feature_name'] or
-                 attribute['origin_trial_enabled_function'] or
+                 is_origin_trial_enabled(attribute) or
                  attribute['runtime_enabled_feature_name']) and
             not attribute['is_data_type_property']]
 
 
 def is_data_attribute(attribute):
     return (not (attribute['exposed_test'] or
-                 attribute['secure_context_test'] or
+                 is_secure_context(attribute) or
                  attribute['context_enabled_feature_name'] or
-                 attribute['origin_trial_enabled_function'] or
+                 is_origin_trial_enabled(attribute) or
                  attribute['runtime_enabled_feature_name']) and
             attribute['is_data_type_property'])
 
 
 def is_lazy_data_attribute(attribute):
-    return ((attribute['constructor_type'] and not attribute['needs_constructor_getter_callback']) or
+    return ((attribute['constructor_type'] and not
+             (attribute['measure_as'] or attribute['deprecate_as'])) or
             (attribute['idl_type'] == 'Window' and attribute['name'] == 'frames') or
             (attribute['idl_type'] == 'Window' and attribute['name'] == 'self') or
             (attribute['idl_type'] == 'Window' and attribute['name'] == 'window'))
@@ -264,15 +272,15 @@ def filter_lazy_data_attributes(attributes):
 def filter_runtime_enabled(attributes):
     return [attribute for attribute in attributes if
             not (attribute['exposed_test'] or
-                 attribute['secure_context_test']) and
+                 is_secure_context(attribute)) and
             attribute['runtime_enabled_feature_name']]
 
 
 def filter_conditionally_enabled(attributes):
     return [attribute for attribute in attributes if
             attribute['exposed_test'] or
-            (attribute['secure_context_test'] and
-             not attribute['origin_trial_feature_name'])]
+            (is_secure_context(attribute) and
+             not is_origin_trial_enabled(attribute))]
 
 
 ################################################################################
@@ -361,7 +369,9 @@ def getter_base_name(interface, attribute, arguments):
     extended_attributes = attribute.extended_attributes
 
     if 'Reflect' not in extended_attributes:
-        return uncapitalize(cpp_name(attribute))
+        name = cpp_name(attribute)
+        return name if 'ImplementedAs' in extended_attributes \
+            else uncapitalize(name)
 
     content_attribute_name = extended_attributes['Reflect'] or attribute.name.lower()
     if content_attribute_name in ['class', 'id', 'name']:
@@ -481,13 +491,15 @@ def setter_expression(interface, attribute, context):
                 attribute.name == 'onerror'):
             includes.add('bindings/core/v8/V8ErrorHandler.h')
             arguments.append(
-                'V8EventListenerHelper::EnsureEventListener<V8ErrorHandler>(' +
-                'v8Value, true, ScriptState::ForReceiverObject(info))')
+                'V8EventListenerHelper::EnsureErrorHandler(' +
+                'ScriptState::ForRelevantRealm(info), v8Value)')
         else:
             arguments.append(
                 'V8EventListenerHelper::GetEventListener(' +
-                'ScriptState::ForReceiverObject(info), v8Value, true, ' +
+                'ScriptState::ForRelevantRealm(info), v8Value, true, ' +
                 'kListenerFindOrCreate)')
+    elif idl_type.base_type == 'SerializedScriptValue':
+        arguments.append('std::move(cppValue)')
     else:
         arguments.append('cppValue')
     if idl_type.is_explicit_nullable:
@@ -520,9 +532,10 @@ def scoped_content_attribute_name(interface, attribute):
     content_attribute_name = attribute.extended_attributes['Reflect'] or attribute.name.lower()
     if interface.name.startswith('SVG'):
         namespace = 'SVGNames'
+        includes.add('core/svg_names.h')
     else:
         namespace = 'HTMLNames'
-    includes.add('core/%s.h' % namespace)
+        includes.add('core/html_names.h')
     return '%s::%sAttr' % (namespace, content_attribute_name)
 
 
@@ -597,7 +610,3 @@ def is_constructor_attribute(attribute):
 
 def is_named_constructor_attribute(attribute):
     return attribute.idl_type.name.endswith('ConstructorConstructor')
-
-
-def update_constructor_attribute_context(interface, attribute, context):
-    context['needs_constructor_getter_callback'] = context['measure_as'] or context['deprecate_as']

@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -16,14 +15,9 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model_factory.h"
-#include "components/crx_file/id_util.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_builder.h"
-#include "extensions/common/feature_switch.h"
-#include "extensions/common/manifest_constants.h"
-#include "extensions/common/value_builder.h"
 
 namespace extensions {
 namespace extension_action_test_util {
@@ -61,7 +55,7 @@ size_t GetPageActionCount(content::WebContents* web_contents,
 // Creates a new ToolbarActionsModel for the given |context|.
 std::unique_ptr<KeyedService> BuildToolbarModel(
     content::BrowserContext* context) {
-  return base::MakeUnique<ToolbarActionsModel>(
+  return std::make_unique<ToolbarActionsModel>(
       Profile::FromBrowserContext(context),
       extensions::ExtensionPrefs::Get(context));
 }
@@ -103,43 +97,6 @@ size_t GetVisiblePageActionCount(content::WebContents* web_contents) {
 
 size_t GetTotalPageActionCount(content::WebContents* web_contents) {
   return GetPageActionCount(web_contents, false);
-}
-
-scoped_refptr<const Extension> CreateActionExtension(const std::string& name,
-                                                     ActionType action_type) {
-  return CreateActionExtension(name, action_type, Manifest::INTERNAL);
-}
-
-scoped_refptr<const Extension> CreateActionExtension(
-    const std::string& name,
-    ActionType action_type,
-    Manifest::Location location) {
-  DictionaryBuilder manifest;
-  manifest.Set("name", name)
-          .Set("description", "An extension")
-          .Set("manifest_version", 2)
-          .Set("version", "1.0.0");
-
-  const char* action_key = nullptr;
-  switch (action_type) {
-    case NO_ACTION:
-      break;
-    case PAGE_ACTION:
-      action_key = manifest_keys::kPageAction;
-      break;
-    case BROWSER_ACTION:
-      action_key = manifest_keys::kBrowserAction;
-      break;
-  }
-
-  if (action_key)
-    manifest.Set(action_key, DictionaryBuilder().Build());
-
-  return ExtensionBuilder()
-      .SetManifest(manifest.Build())
-      .SetID(crx_file::id_util::GenerateId(name))
-      .SetLocation(location)
-      .Build();
 }
 
 ToolbarActionsModel* CreateToolbarModelForProfile(Profile* profile) {

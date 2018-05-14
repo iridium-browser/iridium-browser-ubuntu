@@ -5,8 +5,7 @@
 #ifndef COMPONENTS_CRYPTAUTH_SECURE_CHANNEL_H_
 #define COMPONENTS_CRYPTAUTH_SECURE_CHANNEL_H_
 
-#include <queue>
-
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/cryptauth/authenticator.h"
@@ -38,12 +37,15 @@ class SecureChannel : public ConnectionObserver {
   //       process of authenticating via a 3-message authentication handshake.
   //   AUTHENTICATED: The connection has been authenticated, and arbitrary
   //       messages can be sent/received to/from the device.
+  //   DISCONNECTING: The connection has started disconnecting but has not yet
+  //       finished.
   enum class Status {
     DISCONNECTED,
     CONNECTING,
     CONNECTED,
     AUTHENTICATING,
     AUTHENTICATED,
+    DISCONNECTING
   };
 
   static std::string StatusToString(const Status& status);
@@ -64,6 +66,14 @@ class SecureChannel : public ConnectionObserver {
     // corresponds to the value returned by an earlier call to SendMessage().
     virtual void OnMessageSent(SecureChannel* secure_channel,
                                int sequence_number) {}
+
+    // Called when GATT characteristics are not available. This observer
+    // function is a temporary work-around (see crbug.com/784968).
+    // TODO(khorimoto): This observer function is specific to only one
+    //     SecureChannel implementation, so it is hacky to include it as part of
+    //     the observer for SecureChannel. Remove this work-around when it is no
+    //     longer necessary.
+    virtual void OnGattCharacteristicsNotAvailable() {}
   };
 
   class Factory {
@@ -111,10 +121,13 @@ class SecureChannel : public ConnectionObserver {
   void OnSendCompleted(const cryptauth::Connection& connection,
                        const cryptauth::WireMessage& wire_message,
                        bool success) override;
+  void OnGattCharacteristicsNotAvailable() override;
 
  protected:
   SecureChannel(std::unique_ptr<Connection> connection,
                 CryptAuthService* cryptauth_service);
+
+  void NotifyGattCharacteristicsNotAvailable();
 
   Status status_;
 
@@ -151,7 +164,7 @@ class SecureChannel : public ConnectionObserver {
   CryptAuthService* cryptauth_service_;  // Outlives this instance.
   std::unique_ptr<Authenticator> authenticator_;
   std::unique_ptr<SecureContext> secure_context_;
-  std::queue<std::unique_ptr<PendingMessage>> queued_messages_;
+  base::queue<std::unique_ptr<PendingMessage>> queued_messages_;
   std::unique_ptr<PendingMessage> pending_message_;
   int next_sequence_number_ = 0;
   base::ObserverList<Observer> observer_list_;

@@ -250,6 +250,7 @@ void StateManager9::syncState(const gl::State &state, const gl::State::DirtyBits
                 {
                     mDirtyBits.set(DIRTY_BIT_DEPTH_BIAS);
                 }
+                break;
             }
             case gl::State::DIRTY_BIT_DEPTH_MASK:
                 if (state.getDepthStencilState().depthMask != mCurDepthStencilState.depthMask)
@@ -890,7 +891,7 @@ void StateManager9::setSampleMask(unsigned int sampleMask)
     mCurSampleMask = sampleMask;
 }
 
-void StateManager9::setCullMode(bool cullFace, GLenum cullMode, GLenum frontFace)
+void StateManager9::setCullMode(bool cullFace, gl::CullFaceMode cullMode, GLenum frontFace)
 {
     if (cullFace)
     {

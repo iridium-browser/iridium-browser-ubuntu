@@ -79,6 +79,16 @@ UI.TreeOutline = class extends Common.Object {
   }
 
   /**
+   * @return {?UI.TreeElement}
+   */
+  _lastDescendent() {
+    let last = this._rootElement.lastChild();
+    while (last.expanded && last.childCount())
+      last = last.lastChild();
+    return last;
+  }
+
+  /**
    * @param {!UI.TreeElement} child
    */
   appendChild(child) {
@@ -110,11 +120,11 @@ UI.TreeOutline = class extends Common.Object {
    * @return {?UI.TreeElement}
    */
   treeElementFromPoint(x, y) {
-    var node = this.contentElement.ownerDocument.deepElementFromPoint(x, y);
+    const node = this.contentElement.ownerDocument.deepElementFromPoint(x, y);
     if (!node)
       return null;
 
-    var listNode = node.enclosingNodeOrSelfWithNodeNameInArray(['ol', 'li']);
+    const listNode = node.enclosingNodeOrSelfWithNodeNameInArray(['ol', 'li']);
     if (listNode)
       return listNode.parentTreeElement || listNode.treeElement;
     return null;
@@ -185,7 +195,7 @@ UI.TreeOutline = class extends Common.Object {
    * @return {boolean}
    */
   selectPrevious() {
-    var nextSelectedElement = this.selectedTreeElement.traversePreviousTreeElement(true);
+    let nextSelectedElement = this.selectedTreeElement.traversePreviousTreeElement(true);
     while (nextSelectedElement && !nextSelectedElement.selectable)
       nextSelectedElement = nextSelectedElement.traversePreviousTreeElement(!this.expandTreeElementsWhenArrowing);
     if (!nextSelectedElement)
@@ -198,12 +208,38 @@ UI.TreeOutline = class extends Common.Object {
    * @return {boolean}
    */
   selectNext() {
-    var nextSelectedElement = this.selectedTreeElement.traverseNextTreeElement(true);
+    let nextSelectedElement = this.selectedTreeElement.traverseNextTreeElement(true);
     while (nextSelectedElement && !nextSelectedElement.selectable)
       nextSelectedElement = nextSelectedElement.traverseNextTreeElement(!this.expandTreeElementsWhenArrowing);
     if (!nextSelectedElement)
       return false;
     nextSelectedElement.select(false, true);
+    return true;
+  }
+
+  /**
+   * @return {boolean}
+   */
+  _selectFirst() {
+    let first = this.firstChild();
+    while (first && !first.selectable)
+      first = first.traverseNextTreeElement(true);
+    if (!first)
+      return false;
+    first.select(false, true);
+    return true;
+  }
+
+  /**
+   * @return {boolean}
+   */
+  _selectLast() {
+    let last = this._lastDescendent();
+    while (last && !last.selectable)
+      last = last.traversePreviousTreeElement(true);
+    if (!last)
+      return false;
+    last.select(false, true);
     return true;
   }
 
@@ -222,7 +258,7 @@ UI.TreeOutline = class extends Common.Object {
         event.metaKey || event.ctrlKey)
       return;
 
-    var handled = false;
+    let handled = false;
     if (event.key === 'ArrowUp' && !event.altKey) {
       handled = this.selectPrevious();
     } else if (event.key === 'ArrowDown' && !event.altKey) {
@@ -242,6 +278,10 @@ UI.TreeOutline = class extends Common.Object {
       handled = this.selectedTreeElement.onenter();
     } else if (event.keyCode === UI.KeyboardShortcut.Keys.Space.code) {
       handled = this.selectedTreeElement.onspace();
+    } else if (event.key === 'Home') {
+      handled = this._selectFirst();
+    } else if (event.key === 'End') {
+      handled = this._selectLast();
     }
 
     if (handled)
@@ -356,7 +396,7 @@ UI.TreeElement = class {
     if (!ancestor)
       return false;
 
-    var currentNode = this.parent;
+    let currentNode = this.parent;
     while (currentNode) {
       if (ancestor === currentNode)
         return true;
@@ -425,7 +465,7 @@ UI.TreeElement = class {
     if (!this._children)
       this._children = [];
 
-    var insertionIndex;
+    let insertionIndex;
     if (this.treeOutline && this.treeOutline._comparator)
       insertionIndex = this._children.lowerBound(child, this.treeOutline._comparator);
     else
@@ -447,7 +487,7 @@ UI.TreeElement = class {
     console.assert(
         !child.parent, 'Attempting to insert a child that is already in the tree, reparenting is not supported.');
 
-    var previousChild = (index > 0 ? this._children[index - 1] : null);
+    const previousChild = (index > 0 ? this._children[index - 1] : null);
     if (previousChild) {
       previousChild.nextSibling = child;
       child.previousSibling = previousChild;
@@ -455,7 +495,7 @@ UI.TreeElement = class {
       child.previousSibling = null;
     }
 
-    var nextChild = this._children[index];
+    const nextChild = this._children[index];
     if (nextChild) {
       nextChild.previousSibling = child;
       child.nextSibling = nextChild;
@@ -470,14 +510,14 @@ UI.TreeElement = class {
 
     if (this.treeOutline)
       this.treeOutline._bindTreeElement(child);
-    for (var current = child.firstChild(); this.treeOutline && current;
+    for (let current = child.firstChild(); this.treeOutline && current;
          current = current.traverseNextTreeElement(false, child, true))
       this.treeOutline._bindTreeElement(current);
     child.onattach();
     child._ensureSelection();
     if (this.treeOutline)
       this.treeOutline.dispatchEventToListeners(UI.TreeOutline.Events.ElementAttached, child);
-    var nextSibling = child.nextSibling ? child.nextSibling._listItemNode : null;
+    const nextSibling = child.nextSibling ? child.nextSibling._listItemNode : null;
     this._childrenListNode.insertBefore(child._listItemNode, nextSibling);
     this._childrenListNode.insertBefore(child._childrenListNode, nextSibling);
     if (child.selected)
@@ -493,10 +533,10 @@ UI.TreeElement = class {
     if (childIndex < 0 || childIndex >= this._children.length)
       throw 'childIndex out of range';
 
-    var child = this._children[childIndex];
+    const child = this._children[childIndex];
     this._children.splice(childIndex, 1);
 
-    var parent = child.parent;
+    const parent = child.parent;
     if (this.treeOutline && this.treeOutline.selectedTreeElement &&
         this.treeOutline.selectedTreeElement.hasAncestorOrSelf(child)) {
       if (child.nextSibling)
@@ -515,7 +555,7 @@ UI.TreeElement = class {
 
     if (this.treeOutline)
       this.treeOutline._unbindTreeElement(child);
-    for (var current = child.firstChild(); this.treeOutline && current;
+    for (let current = child.firstChild(); this.treeOutline && current;
          current = current.traverseNextTreeElement(false, child, true))
       this.treeOutline._unbindTreeElement(current);
 
@@ -531,7 +571,7 @@ UI.TreeElement = class {
     if (child.parent !== this)
       return;
 
-    var childIndex = this._children.indexOf(child);
+    const childIndex = this._children.indexOf(child);
     if (childIndex === -1)
       throw 'child not found in this node\'s children';
 
@@ -543,15 +583,15 @@ UI.TreeElement = class {
         this.treeOutline.selectedTreeElement.hasAncestorOrSelf(this))
       this.select(true);
 
-    for (var i = 0; this._children && i < this._children.length; ++i) {
-      var child = this._children[i];
+    for (let i = 0; this._children && i < this._children.length; ++i) {
+      const child = this._children[i];
       child.previousSibling = null;
       child.nextSibling = null;
       child.parent = null;
 
       if (this.treeOutline)
         this.treeOutline._unbindTreeElement(child);
-      for (var current = child.firstChild(); this.treeOutline && current;
+      for (let current = child.firstChild(); this.treeOutline && current;
            current = current.traverseNextTreeElement(false, child, true))
         this.treeOutline._unbindTreeElement(current);
       child._detach();
@@ -648,7 +688,7 @@ UI.TreeElement = class {
       this._ensureSelection();
     }
     this._leadingIconsElement.removeChildren();
-    for (var icon of icons)
+    for (const icon of icons)
       this._leadingIconsElement.appendChild(icon);
   }
 
@@ -665,7 +705,7 @@ UI.TreeElement = class {
       this._ensureSelection();
     }
     this._trailingIconsElement.removeChildren();
-    for (var icon of icons)
+    for (const icon of icons)
       this._trailingIconsElement.appendChild(icon);
   }
 
@@ -751,8 +791,8 @@ UI.TreeElement = class {
    * @return {number}
    */
   computeLeftMargin() {
-    var treeElement = this.parent;
-    var depth = 0;
+    let treeElement = this.parent;
+    let depth = 0;
     while (treeElement !== null) {
       depth++;
       treeElement = treeElement.parent;
@@ -775,12 +815,12 @@ UI.TreeElement = class {
    * @param {!Event} event
    */
   _treeElementToggled(event) {
-    var element = event.currentTarget;
+    const element = event.currentTarget;
     if (element.treeElement !== this || element.hasSelection())
       return;
 
-    var toggleOnClick = this.toggleOnClick && !this.selectable;
-    var isInTriangle = this.isEventWithinDisclosureTriangle(event);
+    const toggleOnClick = this.toggleOnClick && !this.selectable;
+    const isInTriangle = this.isEventWithinDisclosureTriangle(event);
     if (!toggleOnClick && !isInTriangle)
       return;
 
@@ -802,7 +842,7 @@ UI.TreeElement = class {
    * @param {!Event} event
    */
   _handleMouseDown(event) {
-    var element = event.currentTarget;
+    const element = event.currentTarget;
     if (!element)
       return;
     if (!this.selectable)
@@ -820,11 +860,11 @@ UI.TreeElement = class {
    * @param {!Event} event
    */
   _handleDoubleClick(event) {
-    var element = event.currentTarget;
+    const element = event.currentTarget;
     if (!element || element.treeElement !== this)
       return;
 
-    var handled = this.ondblclick(event);
+    const handled = this.ondblclick(event);
     if (handled)
       return;
     if (this._expandable && !this.expanded)
@@ -849,12 +889,19 @@ UI.TreeElement = class {
   }
 
   collapseRecursively() {
-    var item = this;
+    let item = this;
     while (item) {
       if (item.expanded)
         item.collapse();
       item = item.traverseNextTreeElement(false, this, true);
     }
+  }
+
+  collapseChildren() {
+    if (!this._children)
+      return;
+    for (const child of this._children)
+      child.collapseRecursively();
   }
 
   expand() {
@@ -882,9 +929,9 @@ UI.TreeElement = class {
    * @param {number=} maxDepth
    */
   expandRecursively(maxDepth) {
-    var item = this;
-    var info = {};
-    var depth = 0;
+    let item = this;
+    const info = {};
+    let depth = 0;
 
     // The Inspector uses TreeOutlines to represents object properties, so recursive expansion
     // in some case can be infinite, since JavaScript objects can hold circular references.
@@ -921,7 +968,7 @@ UI.TreeElement = class {
       return true;
     }
 
-    var nextSelectedElement = this.parent;
+    let nextSelectedElement = this.parent;
     while (nextSelectedElement && !nextSelectedElement.selectable)
       nextSelectedElement = nextSelectedElement.parent;
 
@@ -947,7 +994,7 @@ UI.TreeElement = class {
       return true;
     }
 
-    var nextSelectedElement = this.firstChild();
+    let nextSelectedElement = this.firstChild();
     while (nextSelectedElement && !nextSelectedElement.selectable)
       nextSelectedElement = nextSelectedElement.nextSibling;
 
@@ -961,7 +1008,7 @@ UI.TreeElement = class {
    * @param {boolean=} center
    */
   reveal(center) {
-    var currentAncestor = this.parent;
+    let currentAncestor = this.parent;
     while (currentAncestor && !currentAncestor.root) {
       if (!currentAncestor.expanded)
         currentAncestor.expand();
@@ -975,7 +1022,7 @@ UI.TreeElement = class {
    * @return {boolean}
    */
   revealed() {
-    var currentAncestor = this.parent;
+    let currentAncestor = this.parent;
     while (currentAncestor && !currentAncestor.root) {
       if (!currentAncestor.expanded)
         return false;
@@ -999,7 +1046,7 @@ UI.TreeElement = class {
     if (!this.treeOutline || !this.selectable || this.selected)
       return false;
     // Wait to deselect this element so that focus only changes once
-    var lastSelected = this.treeOutline.selectedTreeElement;
+    const lastSelected = this.treeOutline.selectedTreeElement;
     this.treeOutline.selectedTreeElement = null;
 
     if (this.treeOutline._rootElement === this) {
@@ -1055,7 +1102,7 @@ UI.TreeElement = class {
   }
 
   deselect() {
-    var hadFocus = this._listItemNode.hasFocus();
+    const hadFocus = this._listItemNode.hasFocus();
     this.selected = false;
     this._listItemNode.classList.remove('selected');
     this._setFocusable(false);
@@ -1144,7 +1191,7 @@ UI.TreeElement = class {
     if (info)
       info.depthChange = 0;
 
-    var element = skipUnrevealed ? (this.revealed() ? this.firstChild() : null) : this.firstChild();
+    let element = skipUnrevealed ? (this.revealed() ? this.firstChild() : null) : this.firstChild();
     if (element && (!skipUnrevealed || (skipUnrevealed && this.expanded))) {
       if (info)
         info.depthChange = 1;
@@ -1179,7 +1226,7 @@ UI.TreeElement = class {
    * @return {?UI.TreeElement}
    */
   traversePreviousTreeElement(skipUnrevealed, dontPopulate) {
-    var element = skipUnrevealed ? (this.revealed() ? this.previousSibling : null) : this.previousSibling;
+    let element = skipUnrevealed ? (this.revealed() ? this.previousSibling : null) : this.previousSibling;
     if (!dontPopulate && element)
       element._populateIfNeeded();
 
@@ -1206,10 +1253,10 @@ UI.TreeElement = class {
    */
   isEventWithinDisclosureTriangle(event) {
     // FIXME: We should not use getComputedStyle(). For that we need to get rid of using ::before for disclosure triangle. (http://webk.it/74446)
-    var paddingLeftValue = window.getComputedStyle(this._listItemNode).paddingLeft;
+    const paddingLeftValue = window.getComputedStyle(this._listItemNode).paddingLeft;
     console.assert(paddingLeftValue.endsWith('px'));
-    var computedLeftPadding = parseFloat(paddingLeftValue);
-    var left = this._listItemNode.totalOffsetLeft() + computedLeftPadding;
+    const computedLeftPadding = parseFloat(paddingLeftValue);
+    const left = this._listItemNode.totalOffsetLeft() + computedLeftPadding;
     return event.pageX >= left && event.pageX <= left + UI.TreeElement._ArrowToggleWidth && this._expandable;
   }
 };
@@ -1218,10 +1265,10 @@ UI.TreeElement = class {
 UI.TreeElement._ArrowToggleWidth = 10;
 
 (function() {
-  var img = new Image();
-  if (window.devicePixelRatio > 1)
-    img.src = 'Images/treeoutlineTriangles_2x.png';
-  else
-    img.src = 'Images/treeoutlineTriangles.png';
-  UI.TreeElement._imagePreload = img;
+const img = new Image();
+if (window.devicePixelRatio > 1)
+  img.src = 'Images/treeoutlineTriangles_2x.png';
+else
+  img.src = 'Images/treeoutlineTriangles.png';
+UI.TreeElement._imagePreload = img;
 })();

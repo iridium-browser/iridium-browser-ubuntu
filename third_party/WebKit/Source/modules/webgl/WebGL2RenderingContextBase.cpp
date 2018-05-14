@@ -6,10 +6,10 @@
 
 #include <memory>
 #include "bindings/modules/v8/WebGLAny.h"
-#include "core/html/HTMLCanvasElement.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/HTMLVideoElement.h"
-#include "core/html/ImageData.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
+#include "core/html/canvas/ImageData.h"
+#include "core/html/media/HTMLVideoElement.h"
 #include "core/imagebitmap/ImageBitmap.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "modules/webgl/WebGLActiveInfo.h"
@@ -27,7 +27,6 @@
 #include "modules/webgl/WebGLUniformLocation.h"
 #include "modules/webgl/WebGLVertexArrayObject.h"
 #include "platform/wtf/CheckedNumeric.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
 
@@ -38,10 +37,6 @@ namespace blink {
 namespace {
 
 const GLuint64 kMaxClientWaitTimeout = 0u;
-
-GLsync SyncObjectOrZero(const WebGLSync* object) {
-  return object ? object->Object() : nullptr;
-}
 
 // TODO(kainino): Change outByteLength to GLuint and change the associated
 // range checking (and all uses) - overflow becomes possible in cases below
@@ -143,21 +138,13 @@ const GLenum kSupportedInternalFormatsStorage[] = {
 WebGL2RenderingContextBase::WebGL2RenderingContextBase(
     CanvasRenderingContextHost* host,
     std::unique_ptr<WebGraphicsContext3DProvider> context_provider,
-    const CanvasContextCreationAttributes& requested_attributes)
+    bool using_gpu_compositing,
+    const CanvasContextCreationAttributesCore& requested_attributes)
     : WebGLRenderingContextBase(host,
                                 std::move(context_provider),
+                                using_gpu_compositing,
                                 requested_attributes,
-                                2),
-      read_framebuffer_binding_(this, nullptr),
-      transform_feedback_binding_(this, nullptr),
-      bound_copy_read_buffer_(this, nullptr),
-      bound_copy_write_buffer_(this, nullptr),
-      bound_pixel_pack_buffer_(this, nullptr),
-      bound_pixel_unpack_buffer_(this, nullptr),
-      bound_uniform_buffer_(this, nullptr),
-      current_boolean_occlusion_query_(this, nullptr),
-      current_transform_feedback_primitives_written_query_(this, nullptr),
-      current_elapsed_query_(this, nullptr) {
+                                2) {
   supported_internal_formats_storage_.insert(
       kSupportedInternalFormatsStorage,
       kSupportedInternalFormatsStorage +
@@ -403,10 +390,12 @@ void WebGL2RenderingContextBase::blitFramebuffer(GLint src_x0,
   if (isContextLost())
     return;
 
+  bool user_framebuffer_bound = GetFramebufferBinding(GL_DRAW_FRAMEBUFFER);
   DrawingBuffer::ScopedRGBEmulationForBlitFramebuffer emulation(
-      GetDrawingBuffer(), !!GetFramebufferBinding(GL_DRAW_FRAMEBUFFER));
+      GetDrawingBuffer(), user_framebuffer_bound);
   ContextGL()->BlitFramebufferCHROMIUM(src_x0, src_y0, src_x1, src_y1, dst_x0,
                                        dst_y0, dst_x1, dst_y1, mask, filter);
+  MarkContextChanged(kCanvasChanged);
 }
 
 bool WebGL2RenderingContextBase::ValidateTexFuncLayer(const char* function_name,
@@ -468,6 +457,12 @@ void WebGL2RenderingContextBase::framebufferTextureLayer(GLenum target,
   if (!framebuffer_binding || !framebuffer_binding->Object()) {
     SynthesizeGLError(GL_INVALID_OPERATION, "framebufferTextureLayer",
                       "no framebuffer bound");
+    return;
+  }
+  // Don't allow modifications to opaque framebuffer attachements.
+  if (framebuffer_binding && framebuffer_binding->Opaque()) {
+    SynthesizeGLError(GL_INVALID_OPERATION, "framebufferTextureLayer",
+                      "opaque framebuffer bound");
     return;
   }
   framebuffer_binding->SetAttachmentForBoundFramebuffer(
@@ -554,14 +549,13 @@ ScriptValue WebGL2RenderingContextBase::getInternalformatParameter(
 
   switch (pname) {
     case GL_SAMPLES: {
-      std::unique_ptr<GLint[]> values;
       GLint length = -1;
       ContextGL()->GetInternalformativ(target, internalformat,
                                        GL_NUM_SAMPLE_COUNTS, 1, &length);
       if (length <= 0)
         return WebGLAny(script_state, DOMInt32Array::Create(0));
 
-      values = WrapArrayUnique(new GLint[length]);
+      auto values = std::make_unique<GLint[]>(length);
       for (GLint ii = 0; ii < length; ++ii)
         values[ii] = 0;
       ContextGL()->GetInternalformativ(target, internalformat, GL_SAMPLES,
@@ -875,6 +869,7 @@ void WebGL2RenderingContextBase::RenderbufferStorageImpl(
                           "for integer formats, samples > 0");
         return;
       }
+      FALLTHROUGH;
     case GL_R8:
     case GL_RG8:
     case GL_RGB8:
@@ -1068,6 +1063,12 @@ void WebGL2RenderingContextBase::texImage2D(GLenum target,
                       "no bound PIXEL_UNPACK_BUFFER");
     return;
   }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texImage2D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed while uploading from PBO");
+    return;
+  }
   if (!ValidateTexFunc("texImage2D", kTexImage, kSourceUnpackBuffer, target,
                        level, internalformat, width, height, 1, border, format,
                        type, 0, 0, 0))
@@ -1096,6 +1097,12 @@ void WebGL2RenderingContextBase::texSubImage2D(GLenum target,
   if (!bound_pixel_unpack_buffer_) {
     SynthesizeGLError(GL_INVALID_OPERATION, "texSubImage2D",
                       "no bound PIXEL_UNPACK_BUFFER");
+    return;
+  }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texSubImage2D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed while uploading from PBO");
     return;
   }
   if (!ValidateTexFunc("texSubImage2D", kTexSubImage, kSourceUnpackBuffer,
@@ -1679,6 +1686,12 @@ void WebGL2RenderingContextBase::texImage3D(
     GLenum format,
     GLenum type,
     MaybeShared<DOMArrayBufferView> pixels) {
+  if ((unpack_flip_y_ || unpack_premultiply_alpha_) && pixels) {
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texImage3D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed for uploading 3D textures");
+    return;
+  }
   TexImageHelperDOMArrayBufferView(kTexImage3D, target, level, internalformat,
                                    width, height, depth, border, format, type,
                                    0, 0, 0, pixels.View(), kNullAllowed, 0);
@@ -1703,6 +1716,13 @@ void WebGL2RenderingContextBase::texImage3D(
                       "a buffer is bound to PIXEL_UNPACK_BUFFER");
     return;
   }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    DCHECK(pixels);
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texImage3D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed for uploading 3D textures");
+    return;
+  }
   TexImageHelperDOMArrayBufferView(
       kTexImage3D, target, level, internalformat, width, height, depth, border,
       format, type, 0, 0, 0, pixels.View(), kNullNotReachable, src_offset);
@@ -1725,6 +1745,12 @@ void WebGL2RenderingContextBase::texImage3D(GLenum target,
   if (!bound_pixel_unpack_buffer_) {
     SynthesizeGLError(GL_INVALID_OPERATION, "texImage3D",
                       "no bound PIXEL_UNPACK_BUFFER");
+    return;
+  }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texImage3D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed for uploading 3D textures");
     return;
   }
   if (!ValidateTexFunc("texImage3D", kTexImage, kSourceUnpackBuffer, target,
@@ -1885,6 +1911,14 @@ void WebGL2RenderingContextBase::texSubImage3D(
                       "a buffer is bound to PIXEL_UNPACK_BUFFER");
     return;
   }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    DCHECK(pixels);
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texSubImage3D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed for uploading 3D textures");
+    return;
+  }
+
   TexImageHelperDOMArrayBufferView(
       kTexSubImage3D, target, level, 0, width, height, depth, 0, format, type,
       xoffset, yoffset, zoffset, pixels.View(), kNullNotReachable, src_offset);
@@ -1908,6 +1942,12 @@ void WebGL2RenderingContextBase::texSubImage3D(GLenum target,
   if (!bound_pixel_unpack_buffer_) {
     SynthesizeGLError(GL_INVALID_OPERATION, "texSubImage3D",
                       "no bound PIXEL_UNPACK_BUFFER");
+    return;
+  }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texSubImage3D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed for uploading 3D textures");
     return;
   }
   if (!ValidateTexFunc("texSubImage3D", kTexSubImage, kSourceUnpackBuffer,
@@ -3386,7 +3426,7 @@ void WebGL2RenderingContextBase::drawArraysInstanced(GLenum mode,
   }
 
   ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
-                                                   drawing_buffer_.Get());
+                                                   drawing_buffer_.get());
   ClearIfComposited();
   ContextGL()->DrawArraysInstancedANGLE(mode, first, count, instance_count);
   MarkContextChanged(kCanvasChanged);
@@ -3407,7 +3447,7 @@ void WebGL2RenderingContextBase::drawElementsInstanced(GLenum mode,
   }
 
   ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
-                                                   drawing_buffer_.Get());
+                                                   drawing_buffer_.get());
   ClearIfComposited();
   ContextGL()->DrawElementsInstancedANGLE(
       mode, count, type, reinterpret_cast<void*>(static_cast<intptr_t>(offset)),
@@ -3431,7 +3471,7 @@ void WebGL2RenderingContextBase::drawRangeElements(GLenum mode,
   }
 
   ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
-                                                   drawing_buffer_.Get());
+                                                   drawing_buffer_.get());
   ClearIfComposited();
   ContextGL()->DrawRangeElements(
       mode, start, end, count, type,
@@ -3444,7 +3484,7 @@ void WebGL2RenderingContextBase::drawBuffers(const Vector<GLenum>& buffers) {
     return;
 
   ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
-                                                   drawing_buffer_.Get());
+                                                   drawing_buffer_.get());
   GLsizei n = buffers.size();
   const GLenum* bufs = buffers.data();
   for (GLsizei i = 0; i < n; ++i) {
@@ -3547,6 +3587,9 @@ void WebGL2RenderingContextBase::clearBufferiv(GLenum buffer,
                            src_offset))
     return;
 
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
+
   ContextGL()->ClearBufferiv(buffer, drawbuffer,
                              value.View()->DataMaybeShared() + src_offset);
 }
@@ -3558,6 +3601,9 @@ void WebGL2RenderingContextBase::clearBufferiv(GLenum buffer,
   if (isContextLost() ||
       !ValidateClearBuffer("clearBufferiv", buffer, value.size(), src_offset))
     return;
+
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
 
   ContextGL()->ClearBufferiv(buffer, drawbuffer, value.data() + src_offset);
 }
@@ -3572,6 +3618,9 @@ void WebGL2RenderingContextBase::clearBufferuiv(
                            src_offset))
     return;
 
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
+
   ContextGL()->ClearBufferuiv(buffer, drawbuffer,
                               value.View()->DataMaybeShared() + src_offset);
 }
@@ -3583,6 +3632,9 @@ void WebGL2RenderingContextBase::clearBufferuiv(GLenum buffer,
   if (isContextLost() ||
       !ValidateClearBuffer("clearBufferuiv", buffer, value.size(), src_offset))
     return;
+
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
 
   ContextGL()->ClearBufferuiv(buffer, drawbuffer, value.data() + src_offset);
 }
@@ -3597,8 +3649,22 @@ void WebGL2RenderingContextBase::clearBufferfv(
                            src_offset))
     return;
 
+  // As of this writing the default back buffer will always have an
+  // RGB(A)/UNSIGNED_BYTE color attachment, so only clearBufferfv can
+  // be used with it and consequently the emulation should only be
+  // needed here. However, as support for extended color spaces is
+  // added, the type of the back buffer might change, so do the
+  // emulation for all clearBuffer entry points instead of just here.
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
+
   ContextGL()->ClearBufferfv(buffer, drawbuffer,
                              value.View()->DataMaybeShared() + src_offset);
+  // The other clearBuffer entry points will currently generate an
+  // error if they're called against the default back buffer. If
+  // support for extended canvas color spaces is added, this call
+  // might need to be added to the other versions.
+  MarkContextChanged(kCanvasChanged);
 }
 
 void WebGL2RenderingContextBase::clearBufferfv(GLenum buffer,
@@ -3609,7 +3675,21 @@ void WebGL2RenderingContextBase::clearBufferfv(GLenum buffer,
       !ValidateClearBuffer("clearBufferfv", buffer, value.size(), src_offset))
     return;
 
+  // As of this writing the default back buffer will always have an
+  // RGB(A)/UNSIGNED_BYTE color attachment, so only clearBufferfv can
+  // be used with it and consequently the emulation should only be
+  // needed here. However, as support for extended color spaces is
+  // added, the type of the back buffer might change, so do the
+  // emulation for all clearBuffer entry points instead of just here.
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
+
   ContextGL()->ClearBufferfv(buffer, drawbuffer, value.data() + src_offset);
+  // The other clearBuffer entry points will currently generate an
+  // error if they're called against the default back buffer. If
+  // support for extended canvas color spaces is added, this call
+  // might need to be added to the other versions.
+  MarkContextChanged(kCanvasChanged);
 }
 
 void WebGL2RenderingContextBase::clearBufferfi(GLenum buffer,
@@ -3908,7 +3988,7 @@ void WebGL2RenderingContextBase::bindSampler(GLuint unit,
     return;
   }
 
-  sampler_units_[unit] = TraceWrapperMember<WebGLSampler>(this, sampler);
+  sampler_units_[unit] = sampler;
 
   ContextGL()->BindSampler(unit, ObjectOrZero(sampler));
 }
@@ -4082,7 +4162,25 @@ GLenum WebGL2RenderingContextBase::clientWaitSync(WebGLSync* sync,
     return GL_WAIT_FAILED;
   }
 
-  return ContextGL()->ClientWaitSync(SyncObjectOrZero(sync), flags, timeout);
+  // clientWaitSync must poll for updates no more than once per
+  // requestAnimationFrame, so all validation, and the implementation,
+  // must be done inline.
+  if (!(flags == 0 || flags == GL_SYNC_FLUSH_COMMANDS_BIT)) {
+    SynthesizeGLError(GL_INVALID_VALUE, "clientWaitSync", "invalid flags");
+    return GL_WAIT_FAILED;
+  }
+
+  if (sync->IsSignaled()) {
+    return GL_ALREADY_SIGNALED;
+  }
+
+  sync->UpdateCache(ContextGL());
+
+  if (sync->IsSignaled()) {
+    return GL_CONDITION_SATISFIED;
+  }
+
+  return GL_TIMEOUT_EXPIRED;
 }
 
 void WebGL2RenderingContextBase::waitSync(WebGLSync* sync,
@@ -4116,10 +4214,8 @@ ScriptValue WebGL2RenderingContextBase::getSyncParameter(
     case GL_SYNC_STATUS:
     case GL_SYNC_CONDITION:
     case GL_SYNC_FLAGS: {
-      GLint value = 0;
-      GLsizei length = -1;
-      ContextGL()->GetSynciv(SyncObjectOrZero(sync), pname, 1, &length, &value);
-      return WebGLAny(script_state, static_cast<unsigned>(value));
+      sync->UpdateCache(ContextGL());
+      return WebGLAny(script_state, sync->GetCachedResult(pname));
     }
     default:
       SynthesizeGLError(GL_INVALID_ENUM, "getSyncParameter",
@@ -4276,7 +4372,7 @@ WebGLActiveInfo* WebGL2RenderingContextBase::getTransformFeedbackVarying(
   if (max_name_length <= 0) {
     return nullptr;
   }
-  std::unique_ptr<GLchar[]> name = WrapArrayUnique(new GLchar[max_name_length]);
+  auto name = std::make_unique<GLchar[]>(max_name_length);
   GLsizei length = 0;
   GLsizei size = 0;
   GLenum type = 0;
@@ -4621,7 +4717,7 @@ String WebGL2RenderingContextBase::getActiveUniformBlockName(
                       "invalid uniform block index");
     return String();
   }
-  std::unique_ptr<GLchar[]> name = WrapArrayUnique(new GLchar[max_name_length]);
+  auto name = std::make_unique<GLchar[]>(max_name_length);
 
   GLsizei length = 0;
   ContextGL()->GetActiveUniformBlockName(ObjectOrZero(program),
@@ -4683,7 +4779,7 @@ void WebGL2RenderingContextBase::bindVertexArray(
     return;
 
   if (vertex_array &&
-      (vertex_array->IsDeleted() || !vertex_array->Validate(0, this))) {
+      (vertex_array->IsDeleted() || !vertex_array->Validate(nullptr, this))) {
     SynthesizeGLError(GL_INVALID_OPERATION, "bindVertexArray",
                       "invalid vertexArray");
     return;
@@ -4730,6 +4826,12 @@ void WebGL2RenderingContextBase::bindFramebuffer(GLenum target,
 
 void WebGL2RenderingContextBase::deleteFramebuffer(
     WebGLFramebuffer* framebuffer) {
+  // Don't allow the application to delete an opaque framebuffer.
+  if (framebuffer && framebuffer->Opaque()) {
+    SynthesizeGLError(GL_INVALID_OPERATION, "deleteFramebuffer",
+                      "cannot delete an opaque framebuffer");
+    return;
+  }
   if (!DeleteObject(framebuffer))
     return;
   GLenum target = 0;
@@ -5125,8 +5227,7 @@ bool WebGL2RenderingContextBase::ValidateAndUpdateBufferBindBaseTarget(
                           "index out of range");
         return false;
       }
-      bound_indexed_uniform_buffers_[index] =
-          TraceWrapperMember<WebGLBuffer>(this, buffer);
+      bound_indexed_uniform_buffers_[index] = buffer;
       bound_uniform_buffer_ = buffer;
 
       // Keep track of what the maximum bound uniform buffer index is
@@ -5342,9 +5443,9 @@ ScriptValue WebGL2RenderingContextBase::getFramebufferAttachmentParameter(
   if (!framebuffer_binding) {
     // We can use creationAttributes() because in WebGL 2, they are required to
     // be honored.
-    bool has_depth = CreationAttributes().depth();
-    bool has_stencil = CreationAttributes().stencil();
-    bool has_alpha = CreationAttributes().alpha();
+    bool has_depth = CreationAttributes().depth;
+    bool has_stencil = CreationAttributes().stencil;
+    bool has_alpha = CreationAttributes().alpha;
     bool missing_image = (attachment == GL_DEPTH && !has_depth) ||
                          (attachment == GL_STENCIL && !has_stencil);
     if (missing_image) {
@@ -5433,6 +5534,7 @@ ScriptValue WebGL2RenderingContextBase::getFramebufferAttachmentParameter(
     case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL:
       if (!attachment_object->IsTexture())
         break;
+      FALLTHROUGH;
     case GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE:
     case GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE:
     case GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE:
@@ -5451,6 +5553,7 @@ ScriptValue WebGL2RenderingContextBase::getFramebufferAttachmentParameter(
             "COMPONENT_TYPE can't be queried for DEPTH_STENCIL_ATTACHMENT");
         return ScriptValue::CreateNull(script_state);
       }
+      FALLTHROUGH;
     case GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING: {
       GLint value = 0;
       ContextGL()->GetFramebufferAttachmentParameteriv(target, attachment,
@@ -5464,7 +5567,7 @@ ScriptValue WebGL2RenderingContextBase::getFramebufferAttachmentParameter(
   return ScriptValue::CreateNull(script_state);
 }
 
-DEFINE_TRACE(WebGL2RenderingContextBase) {
+void WebGL2RenderingContextBase::Trace(blink::Visitor* visitor) {
   visitor->Trace(read_framebuffer_binding_);
   visitor->Trace(transform_feedback_binding_);
   visitor->Trace(default_transform_feedback_);
@@ -5482,7 +5585,8 @@ DEFINE_TRACE(WebGL2RenderingContextBase) {
   WebGLRenderingContextBase::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(WebGL2RenderingContextBase) {
+void WebGL2RenderingContextBase::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(read_framebuffer_binding_);
   visitor->TraceWrappers(transform_feedback_binding_);
   visitor->TraceWrappers(bound_copy_read_buffer_);

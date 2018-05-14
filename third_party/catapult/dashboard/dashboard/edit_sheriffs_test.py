@@ -65,6 +65,9 @@ class EditSheriffsTest(testing_common.TestCase):
         'summarize': 'true',
         'xsrf_token': xsrf.GenerateToken(users.get_current_user()),
     })
+
+    self.ExecuteDeferredTasks(edit_config_handler._TASK_QUEUE_NAME)
+
     sheriffs = sheriff.Sheriff.query().fetch()
     self.assertEqual(1, len(sheriffs))
     self.assertEqual('New Sheriff', sheriffs[0].key.string_id())
@@ -88,6 +91,7 @@ class EditSheriffsTest(testing_common.TestCase):
         'labels': '',
         'xsrf_token': xsrf.GenerateToken(users.get_current_user()),
     })
+
     sheriff_entity = sheriff.Sheriff.query().fetch()[0]
     self.assertEqual('bar@chromium.org', sheriff_entity.email)
     self.assertEqual('http://perf.com/mysheriff', sheriff_entity.url)
@@ -97,6 +101,7 @@ class EditSheriffsTest(testing_common.TestCase):
 
     # After the tasks get executed, the TestMetadata entities should also be
     # updated.
+    self.ExecuteDeferredTasks('default')
     self.ExecuteTaskQueueTasks(
         '/put_entities_task', edit_config_handler._TASK_QUEUE_NAME)
     aaa = utils.TestKey('TheMaster/TheBot/Suite1/aaa').get()
@@ -122,6 +127,7 @@ class EditSheriffsTest(testing_common.TestCase):
 
     # After the tasks get executed, the TestMetadata entities should also be
     # updated.
+    self.ExecuteDeferredTasks('default')
     self.ExecuteTaskQueueTasks(
         '/put_entities_task', edit_config_handler._TASK_QUEUE_NAME)
     aaa = utils.TestKey('TheMaster/TheBot/Suite1/aaa').get()
@@ -212,6 +218,43 @@ class EditSheriffsTest(testing_common.TestCase):
     }
     actual = self.GetEmbeddedVariable(response, 'SHERIFF_DATA')
     self.assertEqual(expected, actual)
+
+  def testPost_SendsNotificationEmail(self):
+    self._AddSampleTestData()
+    self._AddSheriff('Chromium Perf Sheriff', patterns=['*/*/*/*'])
+    self.testapp.post('/edit_sheriffs', {
+        'add-edit': 'edit',
+        'edit-name': 'Chromium Perf Sheriff',
+        'patterns': '*/*/*/ddd\n\n*/*/*/ccc',
+        'xsrf_token': xsrf.GenerateToken(users.get_current_user()),
+    })
+    sheriff_entity = sheriff.Sheriff.query().fetch()[0]
+    self.assertEqual(['*/*/*/ccc', '*/*/*/ddd'], sheriff_entity.patterns)
+
+    messages = self.mail_stub.get_sent_messages()
+    self.assertEqual(1, len(messages))
+    self.assertEqual('gasper-alerts@google.com', messages[0].sender)
+    self.assertEqual('chrome-performance-monitoring-alerts@google.com',
+                     messages[0].to)
+    self.assertEqual(
+        'Added or updated Sheriff: Chromium Perf Sheriff by foo@bar.com',
+        messages[0].subject)
+    expected_email = """The configuration of None was changed by foo@bar.com.
+
+Key: Chromium Perf Sheriff
+
+New test path patterns:
+[
+  "*/*/*/ccc",
+  "*/*/*/ddd"
+]
+
+Old test path patterns
+[
+  "*/*/*/*"
+]"""
+    print messages[0].body
+    self.assertIn(expected_email, str(messages[0].body))
 
 
 if __name__ == '__main__':

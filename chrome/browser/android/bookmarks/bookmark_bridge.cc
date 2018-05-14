@@ -7,11 +7,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/containers/stack.h"
 #include "base/containers/stack_container.h"
 #include "base/i18n/string_compare.h"
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
@@ -38,6 +40,7 @@ using base::android::AttachCurrentThread;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertUTF16ToJavaString;
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ToJavaIntArray;
@@ -86,7 +89,9 @@ std::unique_ptr<icu::Collator> GetICUCollator() {
 
 }  // namespace
 
-BookmarkBridge::BookmarkBridge(JNIEnv* env, jobject obj, jobject j_profile)
+BookmarkBridge::BookmarkBridge(JNIEnv* env,
+                               const JavaRef<jobject>& obj,
+                               const JavaRef<jobject>& j_profile)
     : weak_java_ref_(env, obj),
       bookmark_model_(NULL),
       managed_bookmark_service_(NULL),
@@ -130,9 +135,9 @@ void BookmarkBridge::Destroy(JNIEnv*, const JavaParamRef<jobject>&) {
   delete this;
 }
 
-static jlong Init(JNIEnv* env,
-                  const JavaParamRef<jobject>& obj,
-                  const JavaParamRef<jobject>& j_profile) {
+static jlong JNI_BookmarkBridge_Init(JNIEnv* env,
+                                     const JavaParamRef<jobject>& obj,
+                                     const JavaParamRef<jobject>& j_profile) {
   BookmarkBridge* delegate = new BookmarkBridge(env, obj, j_profile);
   return reinterpret_cast<intptr_t>(delegate);
 }
@@ -149,7 +154,7 @@ void BookmarkBridge::LoadEmptyPartnerBookmarkShimForTesting(
   if (partner_bookmarks_shim_->IsLoaded())
       return;
   partner_bookmarks_shim_->SetPartnerBookmarksRoot(
-      base::MakeUnique<BookmarkPermanentNode>(0));
+      std::make_unique<BookmarkPermanentNode>(0));
   DCHECK(partner_bookmarks_shim_->IsLoaded());
 }
 
@@ -222,10 +227,6 @@ void BookmarkBridge::GetTopLevelFolderIDs(
         managed_bookmark_service_->managed_node()->child_count() > 0) {
       top_level_folders.push_back(managed_bookmark_service_->managed_node());
     }
-    if (managed_bookmark_service_->supervised_node() &&
-        managed_bookmark_service_->supervised_node()->child_count() > 0) {
-      top_level_folders.push_back(managed_bookmark_service_->supervised_node());
-    }
     if (partner_bookmarks_shim_->HasPartnerBookmarks()
         && IsReachable(partner_bookmarks_shim_->GetPartnerBookmarksRoot())) {
       top_level_folders.push_back(
@@ -291,7 +292,7 @@ void BookmarkBridge::GetAllFoldersWithDepths(
 
   // Stack for Depth-First Search of bookmark model. It stores nodes and their
   // heights.
-  std::stack<std::pair<const BookmarkNode*, int> > stk;
+  base::stack<std::pair<const BookmarkNode*, int>> stk;
 
   bookmarkList.push_back(bookmark_model_->mobile_node());
   bookmarkList.push_back(bookmark_model_->bookmark_bar_node());
@@ -437,6 +438,36 @@ ScopedJavaLocalRef<jobject> BookmarkBridge::GetChildAt(
   const BookmarkNode* child = parent->GetChild(index);
   return JavaBookmarkIdCreateBookmarkId(
       env, child->id(), GetBookmarkType(child));
+}
+
+jint BookmarkBridge::GetTotalBookmarkCount(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj,
+    jlong id,
+    jint type) {
+  DCHECK(IsLoaded());
+
+  std::queue<const BookmarkNode*> nodes;
+  const BookmarkNode* parent = GetNodeByID(id, type);
+  DCHECK(parent->is_folder());
+
+  int count = 0;
+  nodes.push(parent);
+  while (!nodes.empty()) {
+    const BookmarkNode* node = nodes.front();
+    nodes.pop();
+
+    for (int i = 0; i < node->child_count(); ++i) {
+      const BookmarkNode* child = node->GetChild(i);
+      if (child->is_folder()) {
+        nodes.push(child);
+      } else {
+        count += 1;
+      }
+    }
+  }
+
+  return count;
 }
 
 void BookmarkBridge::SetBookmarkTitle(JNIEnv* env,
@@ -747,8 +778,9 @@ ScopedJavaLocalRef<jobject> BookmarkBridge::CreateJavaBookmark(
       GetBookmarkType(parent), IsEditable(node), IsManaged(node));
 }
 
-void BookmarkBridge::ExtractBookmarkNodeInformation(const BookmarkNode* node,
-                                                     jobject j_result_obj) {
+void BookmarkBridge::ExtractBookmarkNodeInformation(
+    const BookmarkNode* node,
+    const JavaRef<jobject>& j_result_obj) {
   JNIEnv* env = AttachCurrentThread();
   if (!IsReachable(node))
     return;
@@ -840,10 +872,6 @@ bool BookmarkBridge::IsFolderAvailable(
   // The managed bookmarks folder is not shown if there are no bookmarks
   // configured via policy.
   if (folder == managed_bookmark_service_->managed_node() && folder->empty())
-    return false;
-  // Similarly, the supervised bookmarks folder is not shown if there are no
-  // bookmarks configured by the custodian.
-  if (folder == managed_bookmark_service_->supervised_node() && folder->empty())
     return false;
 
   SigninManager* signin = SigninManagerFactory::GetForProfile(

@@ -4,7 +4,7 @@
 
 #include "ash/system/tiles/tray_tiles.h"
 
-#include "ash/ash_switches.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/session/test_session_controller_client.h"
 #include "ash/system/night_light/night_light_controller.h"
 #include "ash/system/night_light/night_light_toggle_button.h"
@@ -22,8 +22,8 @@ namespace ash {
 // Tests manually control their session state.
 class TrayTilesTest : public NoSessionAshTestBase {
  public:
-  TrayTilesTest() {}
-  ~TrayTilesTest() override {}
+  TrayTilesTest() = default;
+  ~TrayTilesTest() override = default;
 
   void SetUp() override {
     // Explicitly enable the NightLight feature for the tests.
@@ -39,11 +39,11 @@ class TrayTilesTest : public NoSessionAshTestBase {
     NoSessionAshTestBase::TearDown();
   }
 
-  views::CustomButton* GetSettingsButton() {
+  views::Button* GetSettingsButton() {
     return tray_tiles()->default_view_->settings_button_;
   }
 
-  views::CustomButton* GetHelpButton() {
+  views::Button* GetHelpButton() {
     return tray_tiles()->default_view_->help_button_;
   }
 
@@ -51,11 +51,11 @@ class TrayTilesTest : public NoSessionAshTestBase {
     return tray_tiles()->default_view_->night_light_button_;
   }
 
-  views::CustomButton* GetLockButton() {
+  views::Button* GetLockButton() {
     return tray_tiles()->default_view_->lock_button_;
   }
 
-  views::CustomButton* GetPowerButton() {
+  views::Button* GetPowerButton() {
     return tray_tiles()->default_view_->power_button_;
   }
 
@@ -80,7 +80,7 @@ TEST_F(TrayTilesTest, ButtonStatesNotLoggedIn) {
 
 // All buttons are enabled after login.
 TEST_F(TrayTilesTest, ButtonStatesLoggedIn) {
-  SetSessionStarted(true);
+  CreateUserSessions(1);
   std::unique_ptr<views::View> default_view(
       tray_tiles()->CreateDefaultViewForTesting());
   EXPECT_EQ(Button::STATE_NORMAL, GetSettingsButton()->state());

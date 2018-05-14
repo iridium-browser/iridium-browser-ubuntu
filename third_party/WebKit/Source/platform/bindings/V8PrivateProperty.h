@@ -38,11 +38,9 @@ class ScriptWrappable;
   X(FetchEvent, Request)                              \
   X(Global, Event)                                    \
   X(IDBCursor, Request)                               \
-  X(IDBObserver, Callback)                            \
   X(InternalBody, Buffer)                             \
   X(InternalBody, Stream)                             \
   X(IntersectionObserver, Callback)                   \
-  X(LazyEventListener, ToString)                      \
   X(MessageChannel, Port1)                            \
   X(MessageChannel, Port2)                            \
   X(MessageEvent, CachedData)                         \
@@ -56,6 +54,7 @@ class ScriptWrappable;
   X(SameObject, NotificationVibrate)                  \
   X(SameObject, PerformanceLongTaskTimingAttribution) \
   X(SameObject, PushManagerSupportedContentEncodings) \
+  X(V8ErrorHandler, ErrorHandler)                     \
   X(V8EventListener, AttributeListener)               \
   X(V8EventListener, Listener)                        \
   SCRIPT_PROMISE_PROPERTIES(X, Promise)               \
@@ -91,6 +90,11 @@ class PLATFORM_EXPORT V8PrivateProperty {
   WTF_MAKE_NONCOPYABLE(V8PrivateProperty);
 
  public:
+  enum CachedAccessorSymbol : unsigned {
+    kNoCachedAccessor = 0,
+    kWindowDocumentCachedAccessor,
+  };
+
   // Provides fast access to V8's private properties.
   //
   // Retrieving/creating a global private symbol from a string is very
@@ -190,12 +194,24 @@ class PLATFORM_EXPORT V8PrivateProperty {
                      isolate));
   }
 
+  static Symbol GetCachedAccessor(v8::Isolate* isolate,
+                                  CachedAccessorSymbol symbol_id) {
+    switch (symbol_id) {
+      case kWindowDocumentCachedAccessor:
+        return GetWindowDocumentCachedAccessor(isolate);
+      case kNoCachedAccessor:
+        break;
+    };
+    NOTREACHED();
+    return GetSymbol(isolate, "unexpected cached accessor");
+  }
+
   static Symbol GetSymbol(v8::Isolate* isolate, const char* symbol) {
     return Symbol(isolate, CreateCachedV8Private(isolate, symbol));
   }
 
  private:
-  V8PrivateProperty() {}
+  V8PrivateProperty() = default;
 
   static v8::Local<v8::Private> CreateV8Private(v8::Isolate*,
                                                 const char* symbol);

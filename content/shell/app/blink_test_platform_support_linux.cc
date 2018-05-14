@@ -44,28 +44,17 @@ bool BlinkTestPlatformInitialize() {
       return false;
     }
   }
+
+  for (size_t i = 0; i < gfx::kNumCloudStorageSyncedFonts; ++i) {
+    if (!gfx::LoadCloudStorageSyncedFontIntoFontConfig(
+            gfx::kCloudStorageSyncedFonts[i]))
+      return false;
+  }
+
   for (size_t i = 0; i < arraysize(kLocalFonts); ++i) {
     if (!gfx::LoadFontIntoFontconfig(base_path.Append(kLocalFonts[i])))
       return false;
   }
-
-  base::FilePath garuda_path("/usr/share/fonts/truetype/thai/Garuda.ttf");
-  if (!base::PathExists(garuda_path))
-    garuda_path = base::FilePath("/usr/share/fonts/truetype/tlwg/Garuda.ttf");
-  if (!base::PathExists(garuda_path))
-    garuda_path = base::FilePath("/usr/share/fonts/opentype/tlwg/Garuda.otf");
-  if (!gfx::LoadFontIntoFontconfig(garuda_path))
-    return false;
-
-  // We special case these fonts because they're only needed in a few layout
-  // tests.
-  base::FilePath lohit_path(
-      "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_pa.ttf");
-  if (!base::PathExists(lohit_path)) {
-    lohit_path = base::FilePath(
-        "/usr/share/fonts/truetype/ttf-punjabi-fonts/lohit_pa.ttf");
-  }
-  gfx::LoadFontIntoFontconfig(lohit_path);
 
   return true;
 }

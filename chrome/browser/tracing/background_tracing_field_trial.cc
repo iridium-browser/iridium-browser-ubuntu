@@ -9,6 +9,7 @@
 
 #include "base/json/json_reader.h"
 #include "base/metrics/field_trial.h"
+#include "base/trace_event/trace_log.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/tracing/crash_service_uploader.h"
@@ -29,18 +30,19 @@ const char kBackgroundTracingUploadUrl[] = "upload_url";
 
 ConfigTextFilterForTesting g_config_text_filter_for_testing = nullptr;
 
-void OnUploadComplete(TraceCrashServiceUploader* uploader,
-                      const base::Closure& done_callback,
-                      bool success,
-                      const std::string& feedback) {
+void OnBackgroundTracingUploadComplete(TraceCrashServiceUploader* uploader,
+                                       const base::Closure& done_callback,
+                                       bool success,
+                                       const std::string& feedback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   done_callback.Run();
 }
 
-void UploadCallback(const std::string& upload_url,
-                    const scoped_refptr<base::RefCountedString>& file_contents,
-                    std::unique_ptr<const base::DictionaryValue> metadata,
-                    base::Closure callback) {
+void BackgroundTracingUploadCallback(
+    const std::string& upload_url,
+    const scoped_refptr<base::RefCountedString>& file_contents,
+    std::unique_ptr<const base::DictionaryValue> metadata,
+    base::Closure callback) {
   TraceCrashServiceUploader* uploader = new TraceCrashServiceUploader(
       g_browser_process->system_request_context());
 
@@ -60,7 +62,8 @@ void UploadCallback(const std::string& upload_url,
   uploader->DoUpload(
       file_contents->data(), content::TraceUploader::UNCOMPRESSED_UPLOAD,
       std::move(metadata), content::TraceUploader::UploadProgressCallback(),
-      base::Bind(&OnUploadComplete, base::Owned(uploader), callback));
+      base::Bind(&OnBackgroundTracingUploadComplete, base::Owned(uploader),
+                 callback));
 }
 
 }  // namespace
@@ -70,6 +73,9 @@ void SetConfigTextFilterForTesting(ConfigTextFilterForTesting predicate) {
 }
 
 void SetupBackgroundTracingFieldTrial() {
+  if (base::trace_event::TraceLog::GetInstance()->IsEnabled())
+    return;
+
   std::string config_text = variations::GetVariationParamValue(
       kBackgroundTracingFieldTrial, kBackgroundTracingConfig);
   std::string upload_url = variations::GetVariationParamValue(
@@ -95,7 +101,8 @@ void SetupBackgroundTracingFieldTrial() {
     return;
 
   content::BackgroundTracingManager::GetInstance()->SetActiveScenario(
-      std::move(config), base::Bind(&UploadCallback, upload_url),
+      std::move(config),
+      base::Bind(&BackgroundTracingUploadCallback, upload_url),
       content::BackgroundTracingManager::ANONYMIZE_DATA);
 }
 

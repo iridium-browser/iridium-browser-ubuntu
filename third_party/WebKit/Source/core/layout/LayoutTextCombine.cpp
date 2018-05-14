@@ -26,7 +26,8 @@ namespace blink {
 
 const float kTextCombineMargin = 1.1f;  // Allow em + 10% margin
 
-LayoutTextCombine::LayoutTextCombine(Node* node, PassRefPtr<StringImpl> string)
+LayoutTextCombine::LayoutTextCombine(Node* node,
+                                     scoped_refptr<StringImpl> string)
     : LayoutText(node, std::move(string)),
       combined_text_width_(0),
       scale_x_(1.0f),
@@ -41,7 +42,7 @@ void LayoutTextCombine::StyleDidChange(StyleDifference diff,
   UpdateIsCombined();
 }
 
-void LayoutTextCombine::SetTextInternal(RefPtr<StringImpl> text) {
+void LayoutTextCombine::SetTextInternal(scoped_refptr<StringImpl> text) {
   LayoutText::SetTextInternal(std::move(text));
 
   UpdateIsCombined();
@@ -83,6 +84,10 @@ void LayoutTextCombine::TransformToInlineCoordinates(GraphicsContext& context,
                                                      bool clip) const {
   DCHECK_EQ(needs_font_update_, false);
   DCHECK(is_combined_);
+
+  // No transform needed if we don't have a font.
+  if (!StyleRef().GetFont().PrimaryFont())
+    return;
 
   // On input, the |boxRect| is:
   // 1. Horizontal flow, rotated from the main vertical flow coordinate using

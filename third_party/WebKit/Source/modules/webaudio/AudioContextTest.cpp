@@ -4,10 +4,11 @@
 
 #include "modules/webaudio/AudioContext.h"
 
+#include <memory>
+
 #include "core/dom/Document.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/testing/PageTestBase.h"
 #include "platform/testing/TestingPlatformSupport.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/WebAudioDevice.h"
 #include "public/platform/WebAudioLatencyHint.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -67,8 +68,13 @@ class AudioContextTestPlatform : public TestingPlatformSupport {
         break;
     }
 
-    return WTF::MakeUnique<MockWebAudioDeviceForAudioContext>(
+    return std::make_unique<MockWebAudioDeviceForAudioContext>(
         AudioHardwareSampleRate(), buffer_size);
+  }
+
+  std::unique_ptr<WebThread> CreateThread(
+      const WebThreadCreationParams& params) override {
+    return old_platform_->CreateThread(params);
   }
 
   double AudioHardwareSampleRate() override { return 44100; }
@@ -77,29 +83,33 @@ class AudioContextTestPlatform : public TestingPlatformSupport {
 
 }  // anonymous namespace
 
-class AudioContextTest : public ::testing::Test {
+class AudioContextTest : public PageTestBase {
  protected:
-  void SetUp() override { dummy_page_holder_ = DummyPageHolder::Create(); }
+  AudioContextTest() :
+      platform_(new ScopedTestingPlatformSupport<AudioContextTestPlatform>) {}
 
-  Document& GetDocument() { return dummy_page_holder_->GetDocument(); }
+  ~AudioContextTest() {
+    platform_.reset();
+  }
+
+  void SetUp() override { PageTestBase::SetUp(IntSize()); }
 
  private:
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
+  std::unique_ptr<ScopedTestingPlatformSupport<AudioContextTestPlatform>>
+      platform_;
 };
 
 TEST_F(AudioContextTest, AudioContextOptions_WebAudioLatencyHint) {
-  ScopedTestingPlatformSupport<AudioContextTestPlatform> platform;
-
   AudioContextOptions interactive_options;
   interactive_options.setLatencyHint(
-      AudioContextLatencyCategoryOrDouble::fromAudioContextLatencyCategory(
+      AudioContextLatencyCategoryOrDouble::FromAudioContextLatencyCategory(
           "interactive"));
   AudioContext* interactive_context = AudioContext::Create(
       GetDocument(), interactive_options, ASSERT_NO_EXCEPTION);
 
   AudioContextOptions balanced_options;
   balanced_options.setLatencyHint(
-      AudioContextLatencyCategoryOrDouble::fromAudioContextLatencyCategory(
+      AudioContextLatencyCategoryOrDouble::FromAudioContextLatencyCategory(
           "balanced"));
   AudioContext* balanced_context = AudioContext::Create(
       GetDocument(), balanced_options, ASSERT_NO_EXCEPTION);
@@ -108,7 +118,7 @@ TEST_F(AudioContextTest, AudioContextOptions_WebAudioLatencyHint) {
 
   AudioContextOptions playback_options;
   playback_options.setLatencyHint(
-      AudioContextLatencyCategoryOrDouble::fromAudioContextLatencyCategory(
+      AudioContextLatencyCategoryOrDouble::FromAudioContextLatencyCategory(
           "playback"));
   AudioContext* playback_context = AudioContext::Create(
       GetDocument(), playback_options, ASSERT_NO_EXCEPTION);
@@ -116,7 +126,7 @@ TEST_F(AudioContextTest, AudioContextOptions_WebAudioLatencyHint) {
 
   AudioContextOptions exact_too_small_options;
   exact_too_small_options.setLatencyHint(
-      AudioContextLatencyCategoryOrDouble::fromDouble(
+      AudioContextLatencyCategoryOrDouble::FromDouble(
           interactive_context->baseLatency() / 2));
   AudioContext* exact_too_small_context = AudioContext::Create(
       GetDocument(), exact_too_small_options, ASSERT_NO_EXCEPTION);
@@ -128,14 +138,14 @@ TEST_F(AudioContextTest, AudioContextOptions_WebAudioLatencyHint) {
       2;
   AudioContextOptions exact_ok_options;
   exact_ok_options.setLatencyHint(
-      AudioContextLatencyCategoryOrDouble::fromDouble(exact_latency_sec));
+      AudioContextLatencyCategoryOrDouble::FromDouble(exact_latency_sec));
   AudioContext* exact_ok_context = AudioContext::Create(
       GetDocument(), exact_ok_options, ASSERT_NO_EXCEPTION);
   EXPECT_EQ(exact_ok_context->baseLatency(), exact_latency_sec);
 
   AudioContextOptions exact_too_big_options;
   exact_too_big_options.setLatencyHint(
-      AudioContextLatencyCategoryOrDouble::fromDouble(
+      AudioContextLatencyCategoryOrDouble::FromDouble(
           playback_context->baseLatency() * 2));
   AudioContext* exact_too_big_context = AudioContext::Create(
       GetDocument(), exact_too_big_options, ASSERT_NO_EXCEPTION);

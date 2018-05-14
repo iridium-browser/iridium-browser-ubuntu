@@ -258,18 +258,14 @@ bool MockInputMethod::HasComposition() {
 }
 
 void MockInputMethod::ClearComposition() {
-  composition_.Clear();
+  composition_ = ui::CompositionText();
   result_text_.clear();
 }
 
 // A Textfield wrapper to intercept OnKey[Pressed|Released]() results.
 class TestTextfield : public views::Textfield {
  public:
-  TestTextfield()
-     : Textfield(),
-       key_handled_(false),
-       key_received_(false),
-       weak_ptr_factory_(this) {}
+  TestTextfield() = default;
 
   // ui::TextInputClient overrides:
   void InsertChar(const ui::KeyEvent& e) override {
@@ -283,13 +279,18 @@ class TestTextfield : public views::Textfield {
 
   bool key_handled() const { return key_handled_; }
   bool key_received() const { return key_received_; }
+  int event_flags() const { return event_flags_; }
 
-  void clear() { key_received_ = key_handled_ = false; }
+  void clear() {
+    key_received_ = key_handled_ = false;
+    event_flags_ = 0;
+  }
 
  private:
   // views::View override:
   void OnKeyEvent(ui::KeyEvent* event) override {
     key_received_ = true;
+    event_flags_ = event->flags();
 
     // Since Textfield::OnKeyPressed() might destroy |this|, get a weak pointer
     // and verify it isn't null before writing the bool value to key_handled_.
@@ -306,10 +307,11 @@ class TestTextfield : public views::Textfield {
       EXPECT_FALSE(key_handled_);
   }
 
-  bool key_handled_;
-  bool key_received_;
+  bool key_handled_ = false;
+  bool key_received_ = false;
+  int event_flags_ = 0;
 
-  base::WeakPtrFactory<TestTextfield> weak_ptr_factory_;
+  base::WeakPtrFactory<TestTextfield> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TestTextfield);
 };
@@ -759,11 +761,12 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
   // Indicates how many times OnAfterUserAction() is called.
   int on_after_user_action_;
 
- private:
   // Position of the mouse for synthetic mouse events.
   gfx::Point mouse_position_;
   ui::ClipboardType copied_to_clipboard_;
   std::unique_ptr<ui::test::EventGenerator> event_generator_;
+
+ private:
   DISALLOW_COPY_AND_ASSIGN(TextfieldTest);
 };
 
@@ -887,7 +890,13 @@ TEST_F(TextfieldTest, ControlAndSelectTest) {
 
   // Test word select.
   SendWordEvent(ui::VKEY_RIGHT, true);
+#if defined(OS_WIN)  // Windows breaks on word starts and includes spaces.
+  EXPECT_STR_EQ("one ", textfield_->GetSelectedText());
+  SendWordEvent(ui::VKEY_RIGHT, true);
+  EXPECT_STR_EQ("one two ", textfield_->GetSelectedText());
+#else  // Non-Windows breaks on word ends and does NOT include spaces.
   EXPECT_STR_EQ("one two", textfield_->GetSelectedText());
+#endif
   SendWordEvent(ui::VKEY_RIGHT, true);
   EXPECT_STR_EQ("one two three", textfield_->GetSelectedText());
   SendWordEvent(ui::VKEY_LEFT, true);
@@ -924,7 +933,11 @@ TEST_F(TextfieldTest, WordSelection) {
 
   // Select word towards right.
   SendWordEvent(ui::VKEY_RIGHT, true);
+#if defined(OS_WIN)  // Select word right includes space/punctuation.
+  EXPECT_STR_EQ("67 ", textfield_->GetSelectedText());
+#else  // Non-Win: select word right does NOT include space/punctuation.
   EXPECT_STR_EQ("67", textfield_->GetSelectedText());
+#endif
   SendWordEvent(ui::VKEY_RIGHT, true);
   EXPECT_STR_EQ("67 89", textfield_->GetSelectedText());
 
@@ -1158,8 +1171,11 @@ TEST_F(TextfieldTest, InsertionDeletionTest) {
   shift = false;
   SendHomeEvent(shift);
   SendWordEvent(ui::VKEY_DELETE, shift);
+#if defined(OS_WIN)  // Delete word incldes space/punctuation.
+  EXPECT_STR_EQ("two three four", textfield_->text());
+#else  // Non-Windows: delete word does NOT include space/punctuation.
   EXPECT_STR_EQ(" two three four", textfield_->text());
-
+#endif
   // Delete to a line break on Linux and ChromeOS, to a word break on Windows
   // and Mac.
   SendWordEvent(ui::VKEY_RIGHT, shift);
@@ -1167,6 +1183,8 @@ TEST_F(TextfieldTest, InsertionDeletionTest) {
   SendWordEvent(ui::VKEY_DELETE, shift);
 #if defined(OS_LINUX)
   EXPECT_STR_EQ(" two", textfield_->text());
+#elif defined(OS_WIN)
+  EXPECT_STR_EQ("two four", textfield_->text());
 #else
   EXPECT_STR_EQ(" two four", textfield_->text());
 #endif
@@ -1390,6 +1408,20 @@ TEST_F(TextfieldTest, CursorMovement) {
   EXPECT_STR_EQ("one two thre ", textfield_->text());
   EXPECT_STR_EQ("one two thre ", last_contents_);
 
+#if defined(OS_WIN)  // Move right by word includes space/punctuation.
+  // Ctrl+Right should move the cursor to the end of the last word.
+  SendWordEvent(ui::VKEY_RIGHT, shift);
+  SendKeyEvent(ui::VKEY_E);
+  EXPECT_STR_EQ("one two thre e", textfield_->text());
+  EXPECT_STR_EQ("one two thre e", last_contents_);
+
+  // Ctrl+Right again should not move the cursor, because
+  // it is aleady at the end.
+  SendWordEvent(ui::VKEY_RIGHT, shift);
+  SendKeyEvent(ui::VKEY_BACK);
+  EXPECT_STR_EQ("one two thre ", textfield_->text());
+  EXPECT_STR_EQ("one two thre ", last_contents_);
+#else  // Non-Windows: move right by word does NOT include space/punctuation.
   // Ctrl+Right should move the cursor to the end of the last word.
   SendWordEvent(ui::VKEY_RIGHT, shift);
   SendKeyEvent(ui::VKEY_E);
@@ -1401,7 +1433,7 @@ TEST_F(TextfieldTest, CursorMovement) {
   SendKeyEvent(ui::VKEY_BACK);
   EXPECT_STR_EQ("one two three", textfield_->text());
   EXPECT_STR_EQ("one two three", last_contents_);
-
+#endif
   // Test with leading whitespace.
   textfield_->SetText(ASCIIToUTF16(" ne two"));
 
@@ -1411,6 +1443,9 @@ TEST_F(TextfieldTest, CursorMovement) {
   // Ctrl+Right, then Ctrl+Left should move the cursor to the beginning of the
   // first word.
   SendWordEvent(ui::VKEY_RIGHT, shift);
+#if defined(OS_WIN)  // Windows breaks on word start, move further to pass "ne".
+  SendWordEvent(ui::VKEY_RIGHT, shift);
+#endif
   SendWordEvent(ui::VKEY_LEFT, shift);
   SendKeyEvent(ui::VKEY_O);
   EXPECT_STR_EQ(" one two", textfield_->text());
@@ -2299,6 +2334,29 @@ TEST_F(TextfieldTest, CutCopyPaste) {
   EXPECT_EQ(ui::CLIPBOARD_TYPE_LAST, GetAndResetCopiedToClipboard());
 }
 
+TEST_F(TextfieldTest, CutCopyPasteWithEditCommand) {
+  InitTextfield();
+  // Target the "WIDGET". This means that, on Mac, keystrokes will be sent to a
+  // dummy 'Edit' menu which will dispatch into the responder chain as a "cut:"
+  // selector rather than a keydown. This has no effect on other platforms
+  // (events elsewhere always dispatch via a ui::EventProcessor, which is
+  // responsible for finding targets).
+  event_generator_->set_target(ui::test::EventGenerator::Target::WIDGET);
+
+  SendKeyEvent(ui::VKEY_O, false, false);      // Type "o".
+  SendKeyEvent(ui::VKEY_A, false, true);       // Select it.
+  SendKeyEvent(ui::VKEY_C, false, true);       // Copy it.
+  SendKeyEvent(ui::VKEY_RIGHT, false, false);  // Deselect and navigate to end.
+  EXPECT_STR_EQ("o", textfield_->text());
+  SendKeyEvent(ui::VKEY_V, false, true);  // Paste it.
+  EXPECT_STR_EQ("oo", textfield_->text());
+  SendKeyEvent(ui::VKEY_H, false, false);  // Type "h".
+  EXPECT_STR_EQ("ooh", textfield_->text());
+  SendKeyEvent(ui::VKEY_LEFT, true, false);  // Select "h".
+  SendKeyEvent(ui::VKEY_X, false, true);     // Cut it.
+  EXPECT_STR_EQ("oo", textfield_->text());
+}
+
 TEST_F(TextfieldTest, OvertypeMode) {
   InitTextfield();
   // Overtype mode should be disabled (no-op [Insert]).
@@ -2430,11 +2488,11 @@ TEST_F(TextfieldTest, TextCursorPositionInRTLTest) {
 
   InitTextfield();
   // LTR-RTL string in RTL context.
-  int text_cursor_position_prev = test_api_->GetCursorViewOrigin().x();
+  int text_cursor_position_prev = test_api_->GetCursorViewRect().x();
   SendKeyEvent('a');
   SendKeyEvent('b');
   EXPECT_STR_EQ("ab", textfield_->text());
-  int text_cursor_position_new = test_api_->GetCursorViewOrigin().x();
+  int text_cursor_position_new = test_api_->GetCursorViewRect().x();
   // Text cursor stays at same place after inserting new charactors in RTL mode.
   EXPECT_EQ(text_cursor_position_prev, text_cursor_position_new);
 
@@ -2446,11 +2504,11 @@ TEST_F(TextfieldTest, TextCursorPositionInLTRTest) {
   InitTextfield();
 
   // LTR-RTL string in LTR context.
-  int text_cursor_position_prev = test_api_->GetCursorViewOrigin().x();
+  int text_cursor_position_prev = test_api_->GetCursorViewRect().x();
   SendKeyEvent('a');
   SendKeyEvent('b');
   EXPECT_STR_EQ("ab", textfield_->text());
-  int text_cursor_position_new = test_api_->GetCursorViewOrigin().x();
+  int text_cursor_position_new = test_api_->GetCursorViewRect().x();
   // Text cursor moves to right after inserting new charactors in LTR mode.
   EXPECT_LT(text_cursor_position_prev, text_cursor_position_new);
 }
@@ -3161,23 +3219,18 @@ TEST_F(TextfieldTest, AccessiblePasswordTest) {
 
   ui::AXNodeData node_data_regular;
   textfield_->GetAccessibleNodeData(&node_data_regular);
-  EXPECT_EQ(ui::AX_ROLE_TEXT_FIELD, node_data_regular.role);
-  EXPECT_EQ(ASCIIToUTF16("password"),
-            node_data_regular.GetString16Attribute(ui::AX_ATTR_VALUE));
-  EXPECT_FALSE(node_data_regular.HasState(ui::AX_STATE_PROTECTED));
+  EXPECT_EQ(ax::mojom::Role::kTextField, node_data_regular.role);
+  EXPECT_EQ(ASCIIToUTF16("password"), node_data_regular.GetString16Attribute(
+                                          ax::mojom::StringAttribute::kValue));
+  EXPECT_FALSE(node_data_regular.HasState(ax::mojom::State::kProtected));
 
   textfield_->SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
   ui::AXNodeData node_data_protected;
   textfield_->GetAccessibleNodeData(&node_data_protected);
-  EXPECT_EQ(ui::AX_ROLE_TEXT_FIELD, node_data_protected.role);
-#if defined(OS_MACOSX)
-  EXPECT_EQ(UTF8ToUTF16("••••••••"),
-            node_data_protected.GetString16Attribute(ui::AX_ATTR_VALUE));
-#else
-  EXPECT_EQ(ASCIIToUTF16("********"),
-            node_data_protected.GetString16Attribute(ui::AX_ATTR_VALUE));
-#endif
-  EXPECT_TRUE(node_data_protected.HasState(ui::AX_STATE_PROTECTED));
+  EXPECT_EQ(ax::mojom::Role::kTextField, node_data_protected.role);
+  EXPECT_EQ(UTF8ToUTF16("••••••••"), node_data_protected.GetString16Attribute(
+                                         ax::mojom::StringAttribute::kValue));
+  EXPECT_TRUE(node_data_protected.HasState(ax::mojom::State::kProtected));
 }
 
 // Verify that cursor visibility is controlled by SetCursorEnabled.
@@ -3189,6 +3242,47 @@ TEST_F(TextfieldTest, CursorVisibility) {
 
   textfield_->SetCursorEnabled(true);
   EXPECT_TRUE(test_api_->IsCursorVisible());
+}
+
+// Verify that cursor view height does not exceed the textfield height.
+TEST_F(TextfieldTest, CursorViewHeight) {
+  InitTextfield();
+  textfield_->SetBounds(0, 0, 100, 100);
+  textfield_->SetCursorEnabled(true);
+  SendKeyEvent('a');
+  EXPECT_TRUE(test_api_->IsCursorVisible());
+  EXPECT_GT(textfield_->GetVisibleBounds().height(),
+            test_api_->GetCursorViewRect().height());
+  EXPECT_LE(test_api_->GetCursorViewRect().height(),
+            GetCursorBounds().height());
+
+  // set the cursor height to be higher than the textfield height, verify that
+  // UpdateCursorViewPosition update cursor view height currectly.
+  gfx::Rect cursor_bound(test_api_->GetCursorViewRect());
+  cursor_bound.set_height(150);
+  test_api_->SetCursorViewRect(cursor_bound);
+  SendKeyEvent('b');
+  EXPECT_GT(textfield_->GetVisibleBounds().height(),
+            test_api_->GetCursorViewRect().height());
+  EXPECT_LE(test_api_->GetCursorViewRect().height(),
+            GetCursorBounds().height());
+}
+
+// Verify that cursor view height is independent of its parent view height.
+TEST_F(TextfieldTest, CursorViewHeightAtDiffDSF) {
+  InitTextfield();
+  textfield_->SetBounds(0, 0, 100, 100);
+  textfield_->SetCursorEnabled(true);
+  SendKeyEvent('a');
+  EXPECT_TRUE(test_api_->IsCursorVisible());
+  int height = test_api_->GetCursorViewRect().height();
+
+  // update the size of its parent view size and verify that the height of the
+  // cursor view stays the same.
+  View* parent = textfield_->parent();
+  parent->SetBounds(0, 0, 50, height - 2);
+  SendKeyEvent('b');
+  EXPECT_EQ(height, test_api_->GetCursorViewRect().height());
 }
 
 // Check if the text cursor is always at the end of the textfield after the
@@ -3269,5 +3363,79 @@ TEST_F(TextfieldTest, SwitchFocusInKeyDown) {
   EXPECT_EQ(textfield_, GetFocusedView());
   EXPECT_EQ(base::ASCIIToUTF16(" "), textfield_->text());
 }
+
+TEST_F(TextfieldTest, FocusChangesScrollToStart) {
+  const std::string& kText = "abcdef";
+  InitTextfield();
+  textfield_->SetText(ASCIIToUTF16(kText));
+  EXPECT_EQ(base::ASCIIToUTF16(std::string()), textfield_->GetSelectedText());
+  textfield_->AboutToRequestFocusFromTabTraversal(false);
+  EXPECT_EQ(base::ASCIIToUTF16(kText), textfield_->GetSelectedText());
+  if (PlatformStyle::kTextfieldScrollsToStartOnFocusChange)
+    EXPECT_EQ(0U, textfield_->GetCursorPosition());
+  else
+    EXPECT_EQ(kText.size(), textfield_->GetCursorPosition());
+
+  // The OnBlur() behavior below is only meaningful on platforms where textfield
+  // focus moves on focus change.
+  if (!PlatformStyle::kTextfieldScrollsToStartOnFocusChange)
+    return;
+
+  // The cursor is at the start (so that it scrolls in to view), but the
+  // "Select All" is currently undirected. Shift+right will give it a direction
+  // and scroll to the end.
+  SendKeyEvent(ui::VKEY_RIGHT, true, false);
+  EXPECT_EQ(kText.size(), textfield_->GetCursorPosition());
+
+  // And a focus loss should scroll back to the start.
+  textfield_->OnBlur();
+  EXPECT_EQ(0U, textfield_->GetCursorPosition());
+}
+
+TEST_F(TextfieldTest, SendingDeletePreservesShiftFlag) {
+  InitTextfield();
+  SendKeyPress(ui::VKEY_DELETE, 0);
+  EXPECT_EQ(0, textfield_->event_flags());
+  textfield_->clear();
+
+  // Ensure the shift modifier propagates for keys that may be subject to native
+  // key mappings. E.g., on Mac, Delete and Shift+Delete are both
+  // deleteForward:, but the shift modifier should propagate.
+  SendKeyPress(ui::VKEY_DELETE, ui::EF_SHIFT_DOWN);
+  EXPECT_EQ(ui::EF_SHIFT_DOWN, textfield_->event_flags());
+}
+
+#if defined(OS_MACOSX)
+// Tests to see if the BiDi submenu items are updated correctly when the
+// textfield's text direction is changed.
+TEST_F(TextfieldTest, TextServicesContextMenuTextDirectionTest) {
+  InitTextfield();
+  EXPECT_TRUE(textfield_->context_menu_controller());
+
+  EXPECT_TRUE(GetContextMenuModel());
+
+  textfield_->ChangeTextDirectionAndLayoutAlignment(
+      base::i18n::TextDirection::LEFT_TO_RIGHT);
+  test_api_->UpdateContextMenu();
+
+  EXPECT_FALSE(test_api_->IsTextDirectionCheckedInContextMenu(
+      base::i18n::TextDirection::UNKNOWN_DIRECTION));
+  EXPECT_TRUE(test_api_->IsTextDirectionCheckedInContextMenu(
+      base::i18n::TextDirection::LEFT_TO_RIGHT));
+  EXPECT_FALSE(test_api_->IsTextDirectionCheckedInContextMenu(
+      base::i18n::TextDirection::RIGHT_TO_LEFT));
+
+  textfield_->ChangeTextDirectionAndLayoutAlignment(
+      base::i18n::TextDirection::RIGHT_TO_LEFT);
+  test_api_->UpdateContextMenu();
+
+  EXPECT_FALSE(test_api_->IsTextDirectionCheckedInContextMenu(
+      base::i18n::TextDirection::UNKNOWN_DIRECTION));
+  EXPECT_FALSE(test_api_->IsTextDirectionCheckedInContextMenu(
+      base::i18n::TextDirection::LEFT_TO_RIGHT));
+  EXPECT_TRUE(test_api_->IsTextDirectionCheckedInContextMenu(
+      base::i18n::TextDirection::RIGHT_TO_LEFT));
+}
+#endif  // defined(OS_MACOSX)
 
 }  // namespace views

@@ -7,6 +7,7 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/utils/SkNoDrawCanvas.h"
 
 namespace cc {
@@ -20,6 +21,7 @@ class SaveCountingCanvas : public SkNoDrawCanvas {
   SaveLayerStrategy getSaveLayerStrategy(const SaveLayerRec& rec) override;
   void willRestore() override;
   void onDrawRect(const SkRect& rect, const SkPaint& paint) override;
+  void onDrawPaint(const SkPaint& paint) override;
 
   int save_count_ = 0;
   int restore_count_ = 0;
@@ -48,6 +50,22 @@ class MockCanvas : public SkNoDrawCanvas {
   MOCK_METHOD1(OnDrawRectWithColor, void(SkColor));
   MOCK_METHOD0(OnSaveLayer, void());
   MOCK_METHOD0(willRestore, void());
+  MOCK_METHOD0(willSave, void());
+  MOCK_METHOD2(onDrawPath, void(const SkPath&, const SkPaint&));
+  MOCK_METHOD4(onDrawImage,
+               void(const SkImage*, SkScalar, SkScalar, const SkPaint*));
+  MOCK_METHOD5(onDrawImageRect,
+               void(const SkImage*,
+                    const SkRect*,
+                    const SkRect&,
+                    const SkPaint*,
+                    SrcRectConstraint));
+  MOCK_METHOD5(onDrawArc,
+               void(const SkRect&, SkScalar, SkScalar, bool, const SkPaint&));
+  MOCK_METHOD1(didConcat, void(const SkMatrix&));
+  MOCK_METHOD2(onDrawOval, void(const SkRect&, const SkPaint&));
+  MOCK_METHOD2(onCustomCallback, void(SkCanvas*, uint32_t));
+  MOCK_METHOD0(getGrContext, GrContext*());
 };
 
 }  // namespace cc

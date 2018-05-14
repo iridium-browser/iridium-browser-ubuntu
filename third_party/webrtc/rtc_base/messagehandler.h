@@ -8,13 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_BASE_MESSAGEHANDLER_H_
-#define WEBRTC_RTC_BASE_MESSAGEHANDLER_H_
+#ifndef RTC_BASE_MESSAGEHANDLER_H_
+#define RTC_BASE_MESSAGEHANDLER_H_
 
 #include <memory>
 #include <utility>
 
-#include "webrtc/rtc_base/constructormagic.h"
+#include "rtc_base/constructormagic.h"
 
 namespace rtc {
 
@@ -38,8 +38,8 @@ class MessageHandler {
 template <class ReturnT, class FunctorT>
 class FunctorMessageHandler : public MessageHandler {
  public:
-  explicit FunctorMessageHandler(const FunctorT& functor)
-      : functor_(functor) {}
+  explicit FunctorMessageHandler(FunctorT&& functor)
+      : functor_(std::forward<FunctorT>(functor)) {}
   virtual void OnMessage(Message* msg) {
     result_ = functor_();
   }
@@ -72,4 +72,4 @@ class FunctorMessageHandler<void, FunctorT> : public MessageHandler {
 
 } // namespace rtc
 
-#endif // WEBRTC_RTC_BASE_MESSAGEHANDLER_H_
+#endif // RTC_BASE_MESSAGEHANDLER_H_

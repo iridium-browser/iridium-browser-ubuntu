@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_runner_util.h"
 #include "base/time/time.h"
@@ -30,15 +29,15 @@ namespace protocol {
 // must be smaller than the minimum RTO used in PseudoTCP, which is 250ms.
 static const int kKeepAlivePacketIntervalMs = 200;
 
-VideoFramePump::FrameTimestamps::FrameTimestamps() {}
-VideoFramePump::FrameTimestamps::~FrameTimestamps() {}
+VideoFramePump::FrameTimestamps::FrameTimestamps() = default;
+VideoFramePump::FrameTimestamps::~FrameTimestamps() = default;
 
 VideoFramePump::PacketWithTimestamps::PacketWithTimestamps(
     std::unique_ptr<VideoPacket> packet,
     std::unique_ptr<FrameTimestamps> timestamps)
     : packet(std::move(packet)), timestamps(std::move(timestamps)) {}
 
-VideoFramePump::PacketWithTimestamps::~PacketWithTimestamps() {}
+VideoFramePump::PacketWithTimestamps::~PacketWithTimestamps() = default;
 
 VideoFramePump::VideoFramePump(
     scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
@@ -175,7 +174,7 @@ VideoFramePump::EncodeFrame(VideoEncoder* encoder,
       (timestamps->encode_ended_time - timestamps->encode_started_time)
           .InMilliseconds());
 
-  return base::MakeUnique<PacketWithTimestamps>(std::move(packet),
+  return std::make_unique<PacketWithTimestamps>(std::move(packet),
                                                 std::move(timestamps));
 }
 
@@ -250,7 +249,7 @@ void VideoFramePump::SendKeepAlivePacket() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   video_stub_->ProcessVideoPacket(
-      base::MakeUnique<VideoPacket>(),
+      std::make_unique<VideoPacket>(),
       base::Bind(&VideoFramePump::OnKeepAlivePacketSent,
                  weak_factory_.GetWeakPtr()));
 }

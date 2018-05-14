@@ -41,13 +41,13 @@ PageTransitionEvent::PageTransitionEvent(
     persisted_ = initializer.persisted();
 }
 
-PageTransitionEvent::~PageTransitionEvent() {}
+PageTransitionEvent::~PageTransitionEvent() = default;
 
 const AtomicString& PageTransitionEvent::InterfaceName() const {
   return EventNames::PageTransitionEvent;
 }
 
-DEFINE_TRACE(PageTransitionEvent) {
+void PageTransitionEvent::Trace(blink::Visitor* visitor) {
   Event::Trace(visitor);
 }
 

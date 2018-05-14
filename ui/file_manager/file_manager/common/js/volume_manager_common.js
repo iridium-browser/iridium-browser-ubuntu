@@ -20,6 +20,34 @@ var AllowedPaths = {
 };
 
 /**
+ * Type of a file system.
+ * @enum {string}
+ * @const
+ */
+VolumeManagerCommon.FileSystemType = {
+  UNKNOWN: '',
+  VFAT: 'vfat',
+  EXFAT: 'exfat',
+  NTFS: 'ntfs',
+  HFSPLUS: 'hfsplus',
+  EXT2: 'ext2',
+  EXT3: 'ext3',
+  EXT4: 'ext4',
+  ISO9660: 'iso9660',
+  UDF: 'udf',
+};
+
+/**
+ * Volume name length limits by file system type
+ * @enum {number}
+ * @const
+ */
+VolumeManagerCommon.FileSystemTypeVolumeNameLengthLimit = {
+  VFAT: 11,
+  EXFAT: 15,
+};
+
+/**
  * Type of a root directory.
  * @enum {string}
  * @const
@@ -69,6 +97,36 @@ VolumeManagerCommon.RootType = {
   RECENT: 'recent',
 };
 Object.freeze(VolumeManagerCommon.RootType);
+
+/**
+ * Keep the order of this in sync with FileManagerRootType in
+ * tools/metrics/histograms/enums.xml.
+ * The array indices will be recorded in UMA as enum values. The index for each
+ * root type should never be renumbered nor reused in this array.
+ *
+ * @type {!Array<VolumeManagerCommon.RootType>}
+ * @const
+ */
+VolumeManagerCommon.RootTypesForUMA = [
+  VolumeManagerCommon.RootType.DOWNLOADS,
+  VolumeManagerCommon.RootType.ARCHIVE,
+  VolumeManagerCommon.RootType.REMOVABLE,
+  VolumeManagerCommon.RootType.DRIVE,
+  VolumeManagerCommon.RootType.TEAM_DRIVES_GRAND_ROOT,
+  VolumeManagerCommon.RootType.TEAM_DRIVE,
+  VolumeManagerCommon.RootType.MTP,
+  VolumeManagerCommon.RootType.PROVIDED,
+  VolumeManagerCommon.RootType.DRIVE_OTHER,
+  VolumeManagerCommon.RootType.DRIVE_OFFLINE,
+  VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME,
+  VolumeManagerCommon.RootType.DRIVE_RECENT,
+  VolumeManagerCommon.RootType.MEDIA_VIEW,
+  VolumeManagerCommon.RootType.RECENT,
+];
+console.assert(
+    Object.keys(VolumeManagerCommon.RootType).length ===
+        VolumeManagerCommon.RootTypesForUMA.length,
+    'Members in RootTypesForUMA do not match them in RootTypes.');
 
 /**
  * Error type of VolumeManager.
@@ -276,3 +334,21 @@ VolumeManagerCommon.VOLUME_ALREADY_MOUNTED = 'volume_already_mounted';
 VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_NAME = 'team_drives';
 VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_PATH =
     '/' + VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_NAME;
+
+/**
+ * @const
+ */
+VolumeManagerCommon.ARCHIVE_OPENED_EVENT_TYPE = 'archive_opened';
+
+/**
+ * Creates an CustomEvent object for changing current directory when an archive
+ * file is newly mounted, or when opened a one already mounted.
+ * @param {!DirectoryEntry} mountPoint The root directory of the mounted
+ *     volume.
+ * @return {!CustomEvent}
+ */
+VolumeManagerCommon.createArchiveOpenedEvent = function(mountPoint) {
+  return new CustomEvent(
+      VolumeManagerCommon.ARCHIVE_OPENED_EVENT_TYPE,
+      {detail: {mountPoint: mountPoint}});
+};

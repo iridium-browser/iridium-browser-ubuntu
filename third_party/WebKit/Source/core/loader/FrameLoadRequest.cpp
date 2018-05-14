@@ -23,7 +23,8 @@ FrameLoadRequest::FrameLoadRequest(Document* origin_document,
     : FrameLoadRequest(origin_document,
                        resource_request,
                        frame_name,
-                       kCheckContentSecurityPolicy) {}
+                       kCheckContentSecurityPolicy,
+                       base::UnguessableToken::Create()) {}
 
 FrameLoadRequest::FrameLoadRequest(Document* origin_document,
                                    const ResourceRequest& resource_request,
@@ -32,7 +33,8 @@ FrameLoadRequest::FrameLoadRequest(Document* origin_document,
                        resource_request,
                        AtomicString(),
                        substitute_data,
-                       kCheckContentSecurityPolicy) {}
+                       kCheckContentSecurityPolicy,
+                       base::UnguessableToken::Create()) {}
 
 FrameLoadRequest::FrameLoadRequest(
     Document* origin_document,
@@ -43,8 +45,22 @@ FrameLoadRequest::FrameLoadRequest(
     : FrameLoadRequest(origin_document,
                        resource_request,
                        frame_name,
+                       should_check_main_world_content_security_policy,
+                       base::UnguessableToken::Create()) {}
+
+FrameLoadRequest::FrameLoadRequest(
+    Document* origin_document,
+    const ResourceRequest& resource_request,
+    const AtomicString& frame_name,
+    ContentSecurityPolicyDisposition
+        should_check_main_world_content_security_policy,
+    const base::UnguessableToken& devtools_navigation_token)
+    : FrameLoadRequest(origin_document,
+                       resource_request,
+                       frame_name,
                        SubstituteData(),
-                       should_check_main_world_content_security_policy) {}
+                       should_check_main_world_content_security_policy,
+                       devtools_navigation_token) {}
 
 FrameLoadRequest::FrameLoadRequest(
     Document* origin_document,
@@ -52,7 +68,8 @@ FrameLoadRequest::FrameLoadRequest(
     const AtomicString& frame_name,
     const SubstituteData& substitute_data,
     ContentSecurityPolicyDisposition
-        should_check_main_world_content_security_policy)
+        should_check_main_world_content_security_policy,
+    const base::UnguessableToken& devtools_navigation_token)
     : origin_document_(origin_document),
       resource_request_(resource_request),
       frame_name_(frame_name),
@@ -62,35 +79,20 @@ FrameLoadRequest::FrameLoadRequest(
       should_send_referrer_(kMaybeSendReferrer),
       should_set_opener_(kMaybeSetOpener),
       should_check_main_world_content_security_policy_(
-          should_check_main_world_content_security_policy) {
+          should_check_main_world_content_security_policy),
+      devtools_navigation_token_(devtools_navigation_token) {
   // These flags are passed to a service worker which controls the page.
   resource_request_.SetFetchRequestMode(
-      WebURLRequest::kFetchRequestModeNavigate);
+      network::mojom::FetchRequestMode::kNavigate);
   resource_request_.SetFetchCredentialsMode(
-      WebURLRequest::kFetchCredentialsModeInclude);
+      network::mojom::FetchCredentialsMode::kInclude);
   resource_request_.SetFetchRedirectMode(
-      WebURLRequest::kFetchRedirectModeManual);
+      network::mojom::FetchRedirectMode::kManual);
 
   if (origin_document) {
+    DCHECK(!resource_request_.RequestorOrigin());
     resource_request_.SetRequestorOrigin(
         SecurityOrigin::Create(origin_document->Url()));
-    return;
-  }
-
-  // If we don't have an origin document, and we're going to throw away the
-  // response data regardless, set the requestor to a unique origin.
-  if (substitute_data_.IsValid()) {
-    resource_request_.SetRequestorOrigin(SecurityOrigin::CreateUnique());
-    return;
-  }
-
-  // If we're dealing with a top-level request, use the origin of the requested
-  // URL as the initiator.
-  // TODO(mkwst): This should be `nullptr`. https://crbug.com/625969
-  if (resource_request_.GetFrameType() == WebURLRequest::kFrameTypeTopLevel) {
-    resource_request_.SetRequestorOrigin(
-        SecurityOrigin::Create(resource_request.Url()));
-    return;
   }
 }
 

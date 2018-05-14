@@ -43,13 +43,12 @@ enum NotificationPermission {
     ActiveScriptWrappable,
     ConstructorCallWith=ExecutionContext,
     Constructor(DOMString title, optional NotificationOptions options),
-    DependentLifetime,
     Exposed=(Window,Worker),
     MeasureAs=NotificationCreated,
     RaisesException=Constructor,
     RuntimeEnabled=Notifications
 ] interface Notification : EventTarget {
-    [CallWith=ScriptState, MeasureAs=NotificationPermission] static readonly attribute NotificationPermission permission;
+    [CallWith=ExecutionContext, MeasureAs=NotificationPermission] static readonly attribute NotificationPermission permission;
 
     [CallWith=ScriptState, Exposed=Window, MeasureAs=NotificationPermissionRequested] static Promise<NotificationPermission> requestPermission(optional NotificationPermissionCallback deprecatedCallback);
 
@@ -67,7 +66,7 @@ enum NotificationPermission {
     readonly attribute DOMString tag;
     [RuntimeEnabled=NotificationContentImage] readonly attribute USVString image;
     readonly attribute USVString icon;
-    [RuntimeEnabled=NotificationBadge] readonly attribute USVString badge;
+    readonly attribute USVString badge;
 
     [SameObject, SaveSameObject] readonly attribute FrozenArray<unsigned long> vibrate;
     readonly attribute DOMTimeStamp timestamp;
@@ -79,3 +78,5 @@ enum NotificationPermission {
 
     [MeasureAs=NotificationClosed] void close();
 };
+
+callback NotificationPermissionCallback = void (NotificationPermission permission);

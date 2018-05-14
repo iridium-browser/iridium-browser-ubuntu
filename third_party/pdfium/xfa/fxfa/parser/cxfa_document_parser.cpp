@@ -12,20 +12,21 @@
 #include "xfa/fxfa/parser/cxfa_document.h"
 
 CXFA_DocumentParser::CXFA_DocumentParser(CXFA_FFNotify* pNotify)
-    : m_nodeParser(nullptr, true), m_pNotify(pNotify) {}
+    : m_pNotify(pNotify) {}
 
 CXFA_DocumentParser::~CXFA_DocumentParser() {
+  m_pDocument->ReleaseXMLNodesIfNeeded();
 }
 
 int32_t CXFA_DocumentParser::StartParse(
-    const CFX_RetainPtr<IFX_SeekableStream>& pStream,
-    XFA_XDPPACKET ePacketID) {
+    const RetainPtr<IFX_SeekableStream>& pStream,
+    XFA_PacketType ePacketID) {
   m_pDocument.reset();
   m_nodeParser.CloseParser();
 
   int32_t nRetStatus = m_nodeParser.StartParse(pStream, ePacketID);
   if (nRetStatus == XFA_PARSESTATUS_Ready) {
-    m_pDocument = pdfium::MakeUnique<CXFA_Document>(this);
+    m_pDocument = pdfium::MakeUnique<CXFA_Document>(GetNotify());
     m_nodeParser.SetFactory(m_pDocument.get());
   }
   return nRetStatus;
@@ -40,12 +41,8 @@ int32_t CXFA_DocumentParser::DoParse() {
   return nRetStatus;
 }
 
-CFX_XMLDoc* CXFA_DocumentParser::GetXMLDoc() const {
-  return m_nodeParser.GetXMLDoc();
-}
-
 CXFA_FFNotify* CXFA_DocumentParser::GetNotify() const {
-  return m_pNotify;
+  return m_pNotify.Get();
 }
 
 CXFA_Document* CXFA_DocumentParser::GetDocument() const {

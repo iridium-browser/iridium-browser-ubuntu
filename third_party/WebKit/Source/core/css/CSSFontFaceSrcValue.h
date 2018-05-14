@@ -26,18 +26,17 @@
 #ifndef CSSFontFaceSrcValue_h
 #define CSSFontFaceSrcValue_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/css/CSSValue.h"
 #include "core/loader/resource/FontResource.h"
-#include "platform/loader/fetch/ResourceOwner.h"
 #include "platform/weborigin/Referrer.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
-class Document;
+class ExecutionContext;
 
-class CSSFontFaceSrcValue : public CSSValue {
+class CORE_EXPORT CSSFontFaceSrcValue : public CSSValue {
  public:
   static CSSFontFaceSrcValue* Create(
       const String& specified_resource,
@@ -68,11 +67,11 @@ class CSSFontFaceSrcValue : public CSSValue {
 
   bool HasFailedOrCanceledSubresources() const;
 
-  FontResource* Fetch(Document*) const;
+  FontResource& Fetch(ExecutionContext*, FontResourceClient*) const;
 
   bool Equals(const CSSFontFaceSrcValue&) const;
 
-  DEFINE_INLINE_TRACE_AFTER_DISPATCH() {
+  void TraceAfterDispatch(blink::Visitor* visitor) {
     visitor->Trace(fetched_);
     CSSValue::TraceAfterDispatch(visitor);
   }
@@ -92,7 +91,7 @@ class CSSFontFaceSrcValue : public CSSValue {
         should_check_content_security_policy_(
             should_check_content_security_policy) {}
 
-  void RestoreCachedResourceIfNeeded(Document*) const;
+  void RestoreCachedResourceIfNeeded(ExecutionContext*) const;
 
   String absolute_resource_;
   String specified_resource_;
@@ -103,20 +102,25 @@ class CSSFontFaceSrcValue : public CSSValue {
 
   class FontResourceHelper
       : public GarbageCollectedFinalized<FontResourceHelper>,
-        public ResourceOwner<FontResource> {
+        public FontResourceClient {
     USING_GARBAGE_COLLECTED_MIXIN(FontResourceHelper);
 
    public:
-    static FontResourceHelper* Create(FontResource* resource) {
-      return new FontResourceHelper(resource);
+    static FontResourceHelper* Create(
+        FontResource* resource,
+        base::SingleThreadTaskRunner* task_runner) {
+      return new FontResourceHelper(resource, task_runner);
     }
 
-    DEFINE_INLINE_VIRTUAL_TRACE() {
-      ResourceOwner<FontResource>::Trace(visitor);
+    virtual void Trace(blink::Visitor* visitor) {
+      FontResourceClient::Trace(visitor);
     }
 
    private:
-    FontResourceHelper(FontResource* resource) { SetResource(resource); }
+    FontResourceHelper(FontResource* resource,
+                       base::SingleThreadTaskRunner* task_runner) {
+      SetResource(resource, task_runner);
+    }
 
     String DebugName() const override {
       return "CSSFontFaceSrcValue::FontResourceHelper";

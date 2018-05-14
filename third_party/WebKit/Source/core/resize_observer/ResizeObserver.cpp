@@ -4,9 +4,11 @@
 
 #include "core/resize_observer/ResizeObserver.h"
 
-#include "bindings/core/v8/ResizeObserverCallback.h"
+#include "bindings/core/v8/v8_resize_observer_callback.h"
 #include "core/dom/Element.h"
 #include "core/frame/LocalFrameView.h"
+#include "core/layout/AdjustForAbsoluteZoom.h"
+#include "core/layout/LayoutObject.h"
 #include "core/resize_observer/ResizeObservation.h"
 #include "core/resize_observer/ResizeObserverController.h"
 #include "core/resize_observer/ResizeObserverEntry.h"
@@ -14,7 +16,7 @@
 namespace blink {
 
 ResizeObserver* ResizeObserver::Create(Document& document,
-                                       ResizeObserverCallback* callback) {
+                                       V8ResizeObserverCallback* callback) {
   return new ResizeObserver(callback, document);
 }
 
@@ -22,9 +24,10 @@ ResizeObserver* ResizeObserver::Create(Document& document, Delegate* delegate) {
   return new ResizeObserver(delegate, document);
 }
 
-ResizeObserver::ResizeObserver(ResizeObserverCallback* callback,
+ResizeObserver::ResizeObserver(V8ResizeObserverCallback* callback,
                                Document& document)
-    : callback_(this, callback),
+    : ContextClient(&document),
+      callback_(callback),
       skipped_observations_(false),
       element_size_changed_(false) {
   DCHECK(callback_);
@@ -33,7 +36,7 @@ ResizeObserver::ResizeObserver(ResizeObserverCallback* callback,
 }
 
 ResizeObserver::ResizeObserver(Delegate* delegate, Document& document)
-    : callback_(this, nullptr),
+    : ContextClient(&document),
       delegate_(delegate),
       skipped_observations_(false),
       element_size_changed_(false) {
@@ -62,6 +65,10 @@ void ResizeObserver::unobserve(Element* target) {
   auto observation = observer_map->find(this);
   if (observation != observer_map->end()) {
     observations_.erase((*observation).value);
+    auto index = active_observations_.Find((*observation).value);
+    if (index != kNotFound) {
+      active_observations_.EraseAt(index);
+    }
     observer_map->erase(observation);
   }
 }
@@ -102,22 +109,54 @@ void ResizeObserver::DeliverObservations() {
   // We can only clear this flag after all observations have been
   // broadcast.
   element_size_changed_ = skipped_observations_;
-  if (active_observations_.size() == 0)
+  if (active_observations_.IsEmpty())
     return;
 
   HeapVector<Member<ResizeObserverEntry>> entries;
 
   for (auto& observation : active_observations_) {
+    // In case that the observer and the target belong to different execution
+    // contexts and the target's execution context is already gone, then skip
+    // such a target.
+    ExecutionContext* execution_context =
+        observation->Target()->GetExecutionContext();
+    if (!execution_context || execution_context->IsContextDestroyed())
+      continue;
+
     LayoutPoint location = observation->ComputeTargetLocation();
     LayoutSize size = observation->ComputeTargetSize();
     observation->SetObservationSize(size);
-    auto entry = new ResizeObserverEntry(observation->Target(),
-                                         LayoutRect(location, size));
+
+    LayoutRect content_rect(location, size);
+    if (observation->Target()->GetLayoutObject()) {
+      // Must adjust for zoom in order to report non-zoomed size.
+      const ComputedStyle& style =
+          observation->Target()->GetLayoutObject()->StyleRef();
+      content_rect.SetX(
+          AdjustForAbsoluteZoom::AdjustLayoutUnit(content_rect.X(), style));
+      content_rect.SetY(
+          AdjustForAbsoluteZoom::AdjustLayoutUnit(content_rect.Y(), style));
+      content_rect.SetWidth(
+          AdjustForAbsoluteZoom::AdjustLayoutUnit(content_rect.Width(), style));
+      content_rect.SetHeight(AdjustForAbsoluteZoom::AdjustLayoutUnit(
+          content_rect.Height(), style));
+    }
+    auto entry = new ResizeObserverEntry(observation->Target(), content_rect);
     entries.push_back(entry);
   }
+
+  if (entries.size() == 0) {
+    // No entry to report.
+    // Note that, if |active_observations_| is not empty but |entries| is empty,
+    // it means that it's possible that no target element is making |callback_|
+    // alive. In this case, we must not touch |callback_|.
+    ClearObservations();
+    return;
+  }
+
   DCHECK(callback_ || delegate_);
   if (callback_)
-    callback_->call(this, entries, this);
+    callback_->InvokeAndReportException(this, entries, this);
   if (delegate_)
     delegate_->OnResize(entries);
   ClearObservations();
@@ -134,16 +173,24 @@ void ResizeObserver::ElementSizeChanged() {
     controller_->ObserverChanged();
 }
 
-DEFINE_TRACE(ResizeObserver) {
+bool ResizeObserver::HasPendingActivity() const {
+  return !observations_.IsEmpty();
+}
+
+void ResizeObserver::Trace(blink::Visitor* visitor) {
   visitor->Trace(callback_);
   visitor->Trace(delegate_);
   visitor->Trace(observations_);
   visitor->Trace(active_observations_);
   visitor->Trace(controller_);
+  ScriptWrappable::Trace(visitor);
+  ContextClient::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(ResizeObserver) {
+void ResizeObserver::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(callback_);
+  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

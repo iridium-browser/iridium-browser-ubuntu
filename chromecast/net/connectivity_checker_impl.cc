@@ -12,7 +12,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chromecast/base/metrics/cast_metrics_helper.h"
-#include "chromecast/chromecast_features.h"
+#include "chromecast/chromecast_buildflags.h"
 #include "chromecast/net/net_switches.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_network_session.h"
@@ -173,10 +173,11 @@ void ConnectivityCheckerImpl::OnNetworkChangedInternal() {
   Check();
 }
 
-void ConnectivityCheckerImpl::OnResponseStarted(net::URLRequest* request) {
+void ConnectivityCheckerImpl::OnResponseStarted(net::URLRequest* request,
+                                                int net_error) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   int http_response_code =
-      (request->status().is_success() &&
+      (net_error == net::OK &&
        request->response_info().headers.get() != nullptr)
           ? request->response_info().headers->response_code()
           : net::HTTP_BAD_REQUEST;

@@ -12,14 +12,13 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
 #include "chrome/common/safe_browsing/client_model.pb.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
-#include "components/safe_browsing/common/safebrowsing_messages.h"
-#include "components/safe_browsing/common/safebrowsing_switches.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "components/variations/variations_associated_data.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
@@ -138,7 +137,7 @@ void ModelLoader::StartFetch() {
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "Users can enable or disable this feature by toggling 'Protect "
             "you and your device from dangerous sites' in Chromium settings "
@@ -237,9 +236,6 @@ void ModelLoader::EndFetch(ClientModelStatus status, base::TimeDelta max_age) {
 
 void ModelLoader::ScheduleFetch(int64_t delay_ms) {
   DCHECK(fetch_sequence_checker_.CalledOnValidSequence());
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          safe_browsing::switches::kSbDisableAutoUpdate))
-    return;
   base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&ModelLoader::StartFetch, weak_factory_.GetWeakPtr()),

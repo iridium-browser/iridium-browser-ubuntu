@@ -11,11 +11,10 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/search/omnibox_result.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_input.h"
-#include "ui/app_list/search_result.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "url/gurl.h"
 
 namespace app_list {
@@ -28,22 +27,16 @@ OmniboxProvider::OmniboxProvider(Profile* profile,
           base::WrapUnique(new ChromeAutocompleteProviderClient(profile)),
           this,
           AutocompleteClassifier::DefaultOmniboxProviders() &
-              ~AutocompleteProvider::TYPE_ZERO_SUGGEST)),
-      is_voice_query_(false) {}
+              ~AutocompleteProvider::TYPE_ZERO_SUGGEST)) {}
 
 OmniboxProvider::~OmniboxProvider() {}
 
-void OmniboxProvider::Start(bool is_voice_query, const base::string16& query) {
-  is_voice_query_ = is_voice_query;
-  controller_->Start(AutocompleteInput(
-      query, base::string16::npos, std::string(), GURL(), base::string16(),
-      metrics::OmniboxEventProto::INVALID_SPEC, false, false, true, true, false,
-      ChromeAutocompleteSchemeClassifier(profile_)));
-}
-
-void OmniboxProvider::Stop() {
+void OmniboxProvider::Start(const base::string16& query) {
   controller_->Stop(false);
-  is_voice_query_ = false;
+  AutocompleteInput input =
+      AutocompleteInput(query, metrics::OmniboxEventProto::INVALID_SPEC,
+                        ChromeAutocompleteSchemeClassifier(profile_));
+  controller_->Start(input);
 }
 
 void OmniboxProvider::PopulateFromACResult(const AutocompleteResult& result) {
@@ -53,8 +46,8 @@ void OmniboxProvider::PopulateFromACResult(const AutocompleteResult& result) {
     if (!match.destination_url.is_valid())
       continue;
 
-    new_results.emplace_back(base::MakeUnique<OmniboxResult>(
-        profile_, list_controller_, controller_.get(), is_voice_query_, match));
+    new_results.emplace_back(std::make_unique<OmniboxResult>(
+        profile_, list_controller_, controller_.get(), match));
   }
   SwapResults(&new_results);
 }

@@ -163,11 +163,7 @@ class VertexAttributeTest : public ANGLETest
     void runTest(const TestData &test, bool checkPixelEqual)
     {
         // TODO(geofflang): Figure out why this is broken on AMD OpenGL
-        if (IsAMD() && getPlatformRenderer() == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
-        {
-            std::cout << "Test skipped on AMD OpenGL." << std::endl;
-            return;
-        }
+        ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL());
 
         for (GLint i = 0; i < 4; i++)
         {
@@ -622,15 +618,85 @@ TEST_P(VertexAttributeTestES3, UnsignedIntNormalized)
     runTest(data);
 }
 
+void SetupColorsForUnitQuad(GLint location, const GLColor32F &color, GLenum usage, GLBuffer *vbo)
+{
+    glBindBuffer(GL_ARRAY_BUFFER, *vbo);
+    std::vector<GLColor32F> vertices(6, color);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLColor32F), vertices.data(), usage);
+    glEnableVertexAttribArray(location);
+    glVertexAttribPointer(location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+}
+
+// Tests that rendering works as expected with VAOs.
+TEST_P(VertexAttributeTestES3, VertexArrayObjectRendering)
+{
+    const std::string kVertexShader =
+        "attribute vec4 a_position;\n"
+        "attribute vec4 a_color;\n"
+        "varying vec4 v_color;\n"
+        "void main()\n"
+        "{\n"
+        "   gl_Position = a_position;\n"
+        "   v_color = a_color;\n"
+        "}";
+
+    const std::string kFragmentShader =
+        "precision mediump float;\n"
+        "varying vec4 v_color;\n"
+        "void main()\n"
+        "{\n"
+        "    gl_FragColor = v_color;\n"
+        "}";
+
+    ANGLE_GL_PROGRAM(program, kVertexShader, kFragmentShader);
+
+    GLint positionLoc = glGetAttribLocation(program, "a_position");
+    ASSERT_NE(-1, positionLoc);
+    GLint colorLoc = glGetAttribLocation(program, "a_color");
+    ASSERT_NE(-1, colorLoc);
+
+    GLVertexArray vaos[2];
+    GLBuffer positionBuffer;
+    GLBuffer colorBuffers[2];
+
+    const auto &quadVertices = GetQuadVertices();
+
+    glBindVertexArrayOES(vaos[0]);
+    glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
+    glBufferData(GL_ARRAY_BUFFER, quadVertices.size() * sizeof(Vector3), quadVertices.data(),
+                 GL_STATIC_DRAW);
+    glEnableVertexAttribArray(positionLoc);
+    glVertexAttribPointer(positionLoc, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    SetupColorsForUnitQuad(colorLoc, kFloatRed, GL_STREAM_DRAW, &colorBuffers[0]);
+
+    glBindVertexArrayOES(vaos[1]);
+    glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
+    glEnableVertexAttribArray(positionLoc);
+    glVertexAttribPointer(positionLoc, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    SetupColorsForUnitQuad(colorLoc, kFloatGreen, GL_STATIC_DRAW, &colorBuffers[1]);
+
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    for (int ii = 0; ii < 2; ++ii)
+    {
+        glBindVertexArrayOES(vaos[0]);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+
+        glBindVertexArrayOES(vaos[1]);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+    }
+
+    ASSERT_GL_NO_ERROR();
+}
+
 // Validate that we can support GL_MAX_ATTRIBS attribs
 TEST_P(VertexAttributeTest, MaxAttribs)
 {
-    // TODO(jmadill): Figure out why we get this error on AMD/OpenGL and Intel.
-    if ((IsIntel() || IsAMD()) && GetParam().getRenderer() == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
-    {
-        std::cout << "Test skipped on Intel and AMD." << std::endl;
-        return;
-    }
+    // TODO(jmadill): Figure out why we get this error on AMD/OpenGL.
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL());
 
     GLint maxAttribs;
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &maxAttribs);
@@ -653,11 +719,7 @@ TEST_P(VertexAttributeTest, MaxAttribs)
 TEST_P(VertexAttributeTest, MaxAttribsPlusOne)
 {
     // TODO(jmadill): Figure out why we get this error on AMD/ES2/OpenGL
-    if (IsAMD() && GetParam() == ES2_OPENGL())
-    {
-        std::cout << "Test disabled on AMD/ES2/OpenGL" << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsAMD() && GetParam() == ES2_OPENGL());
 
     GLint maxAttribs;
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &maxAttribs);
@@ -673,13 +735,6 @@ TEST_P(VertexAttributeTest, MaxAttribsPlusOne)
 // Simple test for when we use glBindAttribLocation
 TEST_P(VertexAttributeTest, SimpleBindAttribLocation)
 {
-    // TODO(jmadill): Figure out why this fails on Intel.
-    if (IsIntel() && GetParam().getRenderer() == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
-    {
-        std::cout << "Test skipped on Intel." << std::endl;
-        return;
-    }
-
     // Re-use the multi-attrib program, binding attribute 0
     GLuint program = compileMultiAttribProgram(1);
     glBindAttribLocation(program, 2, "position");
@@ -711,6 +766,9 @@ TEST_P(VertexAttributeTest, DrawArraysBufferTooSmall)
 // Verify that index draw with an out-of-range offset generates INVALID_OPERATION.
 TEST_P(VertexAttributeTest, DrawElementsBufferTooSmall)
 {
+    // Test skipped due to supporting GL_KHR_robust_buffer_access_behavior
+    ANGLE_SKIP_TEST_IF(extensionEnabled("GL_KHR_robust_buffer_access_behavior"));
+
     std::array<GLfloat, kVertexCount> inputData;
     std::array<GLfloat, kVertexCount> expectedData;
     InitTestData(inputData, expectedData);
@@ -727,18 +785,10 @@ TEST_P(VertexAttributeTest, DrawElementsBufferTooSmall)
 TEST_P(VertexAttributeTest, DrawArraysWithBufferOffset)
 {
     // TODO(jmadill): Diagnose this failure.
-    if (IsD3D11_FL93())
-    {
-        std::cout << "Test disabled on D3D11 FL 9_3" << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsD3D11_FL93());
 
     // TODO(geofflang): Figure out why this is broken on AMD OpenGL
-    if (IsAMD() && getPlatformRenderer() == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
-    {
-        std::cout << "Test skipped on AMD OpenGL." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL());
 
     initBasicProgram();
     glUseProgram(mProgram);
@@ -858,6 +908,60 @@ TEST_P(VertexAttributeTest, DrawArraysWithDisabledAttribute)
     checkPixels();
 
     EXPECT_GL_NO_ERROR();
+}
+
+// Test based on WebGL Test attribs/gl-disabled-vertex-attrib.html
+TEST_P(VertexAttributeTest, DisabledAttribArrays)
+{
+    // Known failure on Retina MBP: http://crbug.com/635081
+    ANGLE_SKIP_TEST_IF(IsOSX() && IsNVIDIA());
+
+    const std::string vsSource =
+        "attribute vec4 a_position;\n"
+        "attribute vec4 a_color;\n"
+        "varying vec4 v_color;\n"
+        "bool isCorrectColor(vec4 v) {\n"
+        "    return v.x == 0.0 && v.y == 0.0 && v.z == 0.0 && v.w == 1.0;\n"
+        "}"
+        "void main() {\n"
+        "    gl_Position = a_position;\n"
+        "    v_color = isCorrectColor(a_color) ? vec4(0, 1, 0, 1) : vec4(1, 0, 0, 1);\n"
+        "}";
+
+    const std::string fsSource =
+        "varying mediump vec4 v_color;\n"
+        "void main() {\n"
+        "    gl_FragColor = v_color;\n"
+        "}";
+
+    GLint maxVertexAttribs = 0;
+    glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &maxVertexAttribs);
+
+    for (GLint colorIndex = 0; colorIndex < maxVertexAttribs; ++colorIndex)
+    {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, vsSource);
+        ASSERT_NE(0u, vs);
+        GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fsSource);
+        ASSERT_NE(0u, fs);
+
+        GLuint program = glCreateProgram();
+        glBindAttribLocation(program, colorIndex, "a_color");
+
+        glAttachShader(program, vs);
+        glDeleteShader(vs);
+
+        glAttachShader(program, fs);
+        glDeleteShader(fs);
+
+        ASSERT_TRUE(LinkAttachedProgram(program));
+
+        drawQuad(program, "a_position", 0.5f);
+        ASSERT_GL_NO_ERROR();
+
+        EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+
+        glDeleteProgram(program);
+    }
 }
 
 class VertexAttributeTestES31 : public VertexAttributeTestES3
@@ -1242,11 +1346,7 @@ void VertexAttributeCachingTest::SetUp()
 // to stress-test the caching code.
 TEST_P(VertexAttributeCachingTest, BufferMulticaching)
 {
-    if (IsAMD() && IsDesktopOpenGL())
-    {
-        std::cout << "Test skipped on AMD OpenGL." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsDesktopOpenGL());
 
     initBasicProgram();
 
@@ -1280,11 +1380,7 @@ TEST_P(VertexAttributeCachingTest, BufferMulticaching)
 // after enough iterations. It validates the unchanged attributes don't get deleted incidentally.
 TEST_P(VertexAttributeCachingTest, BufferMulticachingWithOneUnchangedAttrib)
 {
-    if (IsAMD() && IsDesktopOpenGL())
-    {
-        std::cout << "Test skipped on AMD OpenGL." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsDesktopOpenGL());
 
     initDoubleAttribProgram();
 
@@ -1324,6 +1420,54 @@ TEST_P(VertexAttributeCachingTest, BufferMulticachingWithOneUnchangedAttrib)
 
         ASSERT_GL_NO_ERROR();
         EXPECT_PIXEL_EQ(getWindowWidth() / 2, getWindowHeight() / 2, 255, 255, 255, 255);
+    }
+}
+
+// Tests that repeatedly updating a disabled vertex attribute works as expected.
+// This covers an ANGLE bug where dirty bits for current values were ignoring repeated updates.
+TEST_P(VertexAttributeTest, DisabledAttribUpdates)
+{
+    constexpr char kVertexShader[] = R"(attribute vec2 position;
+attribute float actualValue;
+uniform float expectedValue;
+varying float result;
+void main()
+{
+    result = (actualValue == expectedValue) ? 1.0 : 0.0;
+    gl_Position = vec4(position, 0, 1);
+})";
+
+    constexpr char kFragmentShader[] = R"(varying mediump float result;
+void main()
+{
+    gl_FragColor = result > 0.0 ? vec4(0, 1, 0, 1) : vec4(1, 0, 0, 1);
+})";
+
+    ANGLE_GL_PROGRAM(program, kVertexShader, kFragmentShader);
+
+    glUseProgram(program);
+    GLint attribLoc = glGetAttribLocation(program, "actualValue");
+    ASSERT_NE(-1, attribLoc);
+
+    GLint uniLoc = glGetUniformLocation(program, "expectedValue");
+    ASSERT_NE(-1, uniLoc);
+
+    glVertexAttribPointer(attribLoc, 1, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    GLint positionLocation = glGetAttribLocation(program, "position");
+    ASSERT_NE(-1, positionLocation);
+    setupQuadVertexBuffer(0.5f, 1.0f);
+    glVertexAttribPointer(positionLocation, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(positionLocation);
+
+    std::array<GLfloat, 4> testValues = {{1, 2, 3, 4}};
+    for (GLfloat testValue : testValues)
+    {
+        glUniform1f(uniLoc, testValue);
+        glVertexAttrib1f(attribLoc, testValue);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        ASSERT_GL_NO_ERROR();
+        EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
     }
 }
 

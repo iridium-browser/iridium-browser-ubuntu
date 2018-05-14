@@ -49,7 +49,7 @@ class FontList;
 }
 
 namespace views {
-class CustomButton;
+class Button;
 class MenuButton;
 class MenuItemView;
 class LabelButton;
@@ -169,7 +169,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
   void Layout() override;
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
-  void PaintChildren(const ui::PaintContext& context) override;
+  void PaintChildren(const views::PaintInfo& paint_info) override;
   bool GetDropFormats(
       int* formats,
       std::set<ui::Clipboard::FormatType>* format_types) override;
@@ -301,9 +301,6 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // Creates the button showing the "Managed Bookmarks" folder.
   views::MenuButton* CreateManagedBookmarksButton();
 
-  // Creates the button showing the supervised bookmarks items.
-  views::MenuButton* CreateSupervisedBookmarksButton();
-
   // Creates the button used when not all bookmark buttons fit.
   views::MenuButton* CreateOverflowButton();
 
@@ -362,7 +359,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // Returns the view to throb when a node is removed. |parent| is the parent of
   // the node that was removed, and |old_index| the index of the node that was
   // removed.
-  views::CustomButton* DetermineViewToThrobFromRemove(
+  views::Button* DetermineViewToThrobFromRemove(
       const bookmarks::BookmarkNode* parent,
       int old_index);
 
@@ -370,9 +367,8 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // bookmarks bar.
   void UpdateAppearanceForTheme();
 
-  // Updates the visibility of |other_bookmarks_button_|,
-  // |managed_bookmarks_button_|, and |supervised_bookmarks_button_|. Also
-  // shows or hides the separator if required.
+  // Updates the visibility of |other_bookmarks_button_| and
+  // |managed_bookmarks_button_|. Also shows or hides the separator if required.
   // Returns true if something changed and a LayoutAndPaint() is needed.
   bool UpdateOtherAndManagedButtonsVisibility();
 
@@ -423,9 +419,6 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // Shows the managed bookmarks entries.
   views::MenuButton* managed_bookmarks_button_;
 
-  // Shows the supervised bookmarks entries.
-  views::MenuButton* supervised_bookmarks_button_;
-
   // Shows the Apps page shortcut.
   views::LabelButton* apps_page_shortcut_;
 
@@ -441,7 +434,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
 
   ButtonSeparatorView* bookmarks_separator_view_;
 
-  Browser* browser_;
+  Browser* const browser_;
   BrowserView* browser_view_;
 
   // True if the owning browser is showing an infobar.
@@ -453,7 +446,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // If the bookmark bubble is showing, this is the visible ancestor of the URL.
   // The visible ancestor is either the |other_bookmarks_button_|,
   // |overflow_button_| or a button on the bar.
-  views::CustomButton* throbbing_view_;
+  views::Button* throbbing_view_;
 
   BookmarkBar::State bookmark_bar_state_;
 

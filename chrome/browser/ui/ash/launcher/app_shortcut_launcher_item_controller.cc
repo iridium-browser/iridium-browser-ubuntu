@@ -6,9 +6,9 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <utility>
 
-#include "ash/wm/window_util.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
@@ -43,35 +43,17 @@ namespace {
 // The time delta between clicks in which clicks to launch V2 apps are ignored.
 const int kClickSuppressionInMS = 1000;
 
-// Check if a browser can be used for activation. This addresses a special use
-// case in the M31 multi profile mode where a user activates a V1 app which only
-// exists yet on another users desktop, but they expect to get only their own
-// app items and not the ones from other users through activation.
-// TODO(skuhne): Remove this function and replace the call with
-// ChromeLauncherController::IsBrowserFromActiveUser(browser) once this
-// experiment goes away.
-bool CanBrowserBeUsedForDirectActivation(Browser* browser,
-                                         ChromeLauncherController* launcher) {
-  if (chrome::MultiUserWindowManager::GetMultiProfileMode() ==
-          chrome::MultiUserWindowManager::MULTI_PROFILE_MODE_OFF)
-    return true;
-  return multi_user_util::IsProfileFromActiveUser(browser->profile());
-}
-
 }  // namespace
 
 // static
 std::unique_ptr<AppShortcutLauncherItemController>
 AppShortcutLauncherItemController::Create(const ash::ShelfID& shelf_id) {
   if (shelf_id.app_id == arc::kPlayStoreAppId)
-    return base::MakeUnique<ArcPlaystoreShortcutLauncherItemController>();
+    return std::make_unique<ArcPlaystoreShortcutLauncherItemController>();
   return base::WrapUnique<AppShortcutLauncherItemController>(
       new AppShortcutLauncherItemController(shelf_id));
 }
 
-// Item controller for an app shortcut. Shortcuts track app and launcher ids,
-// but do not have any associated windows (opening a shortcut will replace the
-// item with the appropriate ash::ShelfItemDelegate type).
 AppShortcutLauncherItemController::AppShortcutLauncherItemController(
     const ash::ShelfID& shelf_id)
     : ash::ShelfItemDelegate(shelf_id) {
@@ -114,12 +96,12 @@ void AppShortcutLauncherItemController::ItemSelected(
       return;
     }
 
-    // Launching some items replaces this item controller instance, which
-    // destroys its ShelfID string pair; making copies avoid crashes.
-    ChromeLauncherController::instance()->LaunchApp(
-        ash::ShelfID(shelf_id()), source, ui::EF_NONE, display_id);
+    // LaunchApp may replace and destroy this item controller instance. Run the
+    // callback before |binding_| is destroyed and copy the id to avoid crashes.
     std::move(callback).Run(ash::SHELF_ACTION_NEW_WINDOW_CREATED,
                             base::nullopt);
+    ChromeLauncherController::instance()->LaunchApp(
+        ash::ShelfID(shelf_id()), source, ui::EF_NONE, display_id);
     return;
   }
 
@@ -138,14 +120,26 @@ ash::MenuItemList AppShortcutLauncherItemController::GetAppMenuItems(
     ash::mojom::MenuItemPtr item(ash::mojom::MenuItem::New());
     item->command_id = base::checked_cast<uint32_t>(i);
     item->label = controller->GetAppListTitle(tab);
-    item->image = *controller->GetAppListIcon(tab).ToSkBitmap();
+    item->image = controller->GetAppListIcon(tab).AsImageSkia();
     items.push_back(std::move(item));
   }
   return items;
 }
 
-void AppShortcutLauncherItemController::ExecuteCommand(uint32_t command_id,
-                                                       int32_t event_flags) {
+std::unique_ptr<ui::MenuModel>
+AppShortcutLauncherItemController::GetContextMenu(int64_t display_id) {
+  ChromeLauncherController* controller = ChromeLauncherController::instance();
+  const ash::ShelfItem* item = controller->GetItem(shelf_id());
+  return LauncherContextMenu::Create(controller, item, display_id);
+}
+
+void AppShortcutLauncherItemController::ExecuteCommand(bool from_context_menu,
+                                                       int64_t command_id,
+                                                       int32_t event_flags,
+                                                       int64_t display_id) {
+  if (from_context_menu && ExecuteContextMenuCommand(command_id, event_flags))
+    return;
+
   if (static_cast<size_t>(command_id) >= app_menu_items_.size()) {
     app_menu_items_.clear();
     return;
@@ -180,7 +174,8 @@ void AppShortcutLauncherItemController::Close() {
           app_id());
   for (size_t i = 0; i < content.size(); i++) {
     Browser* browser = chrome::FindBrowserWithWebContents(content[i]);
-    if (!browser || !IsBrowserFromActiveUser(browser))
+    if (!browser ||
+        !multi_user_util::IsProfileFromActiveUser(browser->profile()))
       continue;
     TabStripModel* tab_strip = browser->tab_strip_model();
     int index = tab_strip->GetIndexOfWebContents(content[i]);
@@ -209,13 +204,13 @@ AppShortcutLauncherItemController::GetRunningApplications() {
     return items;
 
   for (auto* browser : *BrowserList::GetInstance()) {
-    if (!IsBrowserFromActiveUser(browser))
+    if (!multi_user_util::IsProfileFromActiveUser(browser->profile()))
       continue;
     TabStripModel* tab_strip = browser->tab_strip_model();
     for (int index = 0; index < tab_strip->count(); index++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(index);
-      if (WebContentMatchesApp(
-              extension, refocus_pattern, web_contents, browser))
+      if (WebContentMatchesApp(extension, refocus_pattern, web_contents,
+                               browser))
         items.push_back(web_contents);
     }
   }
@@ -244,7 +239,7 @@ content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
            browser_list->begin_last_active();
        it != browser_list->end_last_active(); ++it) {
     Browser* browser = *it;
-    if (!CanBrowserBeUsedForDirectActivation(browser, controller))
+    if (!multi_user_util::IsProfileFromActiveUser(browser->profile()))
       continue;
     TabStripModel* tab_strip = browser->tab_strip_model();
     // We start to enumerate from the active index.
@@ -252,8 +247,8 @@ content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
     for (int index = 0; index < tab_strip->count(); index++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(
           (index + active_index) % tab_strip->count());
-      if (WebContentMatchesApp(
-              extension, refocus_pattern, web_contents, browser))
+      if (WebContentMatchesApp(extension, refocus_pattern, web_contents,
+                               browser))
         return web_contents;
     }
   }
@@ -263,14 +258,13 @@ content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
   for (BrowserList::const_iterator it = browser_list->begin();
        it != browser_list->end(); ++it) {
     Browser* browser = *it;
-    if (!CanBrowserBeUsedForDirectActivation(
-            browser, ChromeLauncherController::instance()))
+    if (!multi_user_util::IsProfileFromActiveUser(browser->profile()))
       continue;
     TabStripModel* tab_strip = browser->tab_strip_model();
     for (int index = 0; index < tab_strip->count(); index++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(index);
-      if (WebContentMatchesApp(
-              extension, refocus_pattern, web_contents, browser))
+      if (WebContentMatchesApp(extension, refocus_pattern, web_contents,
+                               browser))
         return web_contents;
     }
   }
@@ -286,9 +280,10 @@ bool AppShortcutLauncherItemController::WebContentMatchesApp(
   // then the contents match the app.
   if (browser->is_app()) {
     const extensions::Extension* browser_extension =
-        ExtensionRegistry::Get(browser->profile())->GetExtensionById(
-            web_app::GetExtensionIdFromApplicationName(browser->app_name()),
-            ExtensionRegistry::EVERYTHING);
+        ExtensionRegistry::Get(browser->profile())
+            ->GetExtensionById(
+                web_app::GetExtensionIdFromApplicationName(browser->app_name()),
+                ExtensionRegistry::EVERYTHING);
     return browser_extension == extension;
   }
 
@@ -330,12 +325,13 @@ ash::ShelfAction AppShortcutLauncherItemController::ActivateContent(
 bool AppShortcutLauncherItemController::AdvanceToNextApp() {
   std::vector<content::WebContents*> items = GetRunningApplications();
   if (items.size() >= 1) {
-    Browser* browser = chrome::FindBrowserWithWindow(
-        ash::wm::GetActiveWindow());
-    if (browser) {
+    Browser* browser = chrome::FindLastActive();
+    // The last active browser is not necessarily the active window. The window
+    // could be a v2 app or ARC app.
+    if (browser && browser->window()->IsActive()) {
       TabStripModel* tab_strip = browser->tab_strip_model();
-      content::WebContents* active = tab_strip->GetWebContentsAt(
-          tab_strip->active_index());
+      content::WebContents* active =
+          tab_strip->GetWebContentsAt(tab_strip->active_index());
       std::vector<content::WebContents*>::const_iterator i(
           std::find(items.begin(), items.end(), active));
       if (i != items.end()) {
@@ -343,7 +339,7 @@ bool AppShortcutLauncherItemController::AdvanceToNextApp() {
           // If there is only a single item available, we animate it upon key
           // action.
           AnimateWindow(browser->window()->GetNativeWindow(),
-              wm::WINDOW_ANIMATION_TYPE_BOUNCE);
+                        wm::WINDOW_ANIMATION_TYPE_BOUNCE);
         } else {
           int index = (static_cast<int>(i - items.begin()) + 1) % items.size();
           ActivateContent(items[index]);
@@ -363,8 +359,9 @@ bool AppShortcutLauncherItemController::IsV2App() {
 
 bool AppShortcutLauncherItemController::AllowNextLaunchAttempt() {
   if (last_launch_attempt_.is_null() ||
-      last_launch_attempt_ + base::TimeDelta::FromMilliseconds(
-          kClickSuppressionInMS) < base::Time::Now()) {
+      last_launch_attempt_ +
+              base::TimeDelta::FromMilliseconds(kClickSuppressionInMS) <
+          base::Time::Now()) {
     last_launch_attempt_ = base::Time::Now();
     return true;
   }

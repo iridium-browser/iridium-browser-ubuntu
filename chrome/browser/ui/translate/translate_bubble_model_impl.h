@@ -45,11 +45,13 @@ class TranslateBubbleModelImpl : public TranslateBubbleModel {
   void SetNeverTranslateSite(bool value) override;
   bool ShouldAlwaysTranslate() const override;
   bool ShouldAlwaysTranslateBeCheckedByDefault() const override;
+  bool ShouldShowAlwaysTranslateShortcut() const override;
   void SetAlwaysTranslate(bool value) override;
   void Translate() override;
   void RevertTranslation() override;
   void OnBubbleClosing() override;
   bool IsPageTranslatedInCurrentLanguages() const override;
+  bool CanBlacklistSite() override;
 
  private:
   std::unique_ptr<translate::TranslateUIDelegate> ui_delegate_;

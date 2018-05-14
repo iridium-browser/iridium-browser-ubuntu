@@ -9,6 +9,7 @@ import calendar
 import collections
 import datetime
 import gzip
+import itertools
 import logging
 import os
 import posixpath
@@ -19,6 +20,7 @@ import tempfile
 import zipfile
 
 import concurrent
+import demangle
 import describe
 import file_format
 import function_signature
@@ -26,16 +28,33 @@ import linker_map_parser
 import models
 import ninja_parser
 import nm
-import paths
+import path_util
+
+sys.path.insert(1, os.path.join(path_util.SRC_ROOT, 'tools', 'grit'))
+from grit.format import data_pack
 
 
-def _OpenMaybeGz(path, mode=None):
+# Effect of _MAX_SAME_NAME_ALIAS_COUNT (as of Oct 2017, with min_pss = max):
+# 1: shared .text symbols = 1772874 bytes, file size = 9.43MiB (645476 symbols).
+# 2: shared .text symbols = 1065654 bytes, file size = 9.58MiB (669952 symbols).
+# 6: shared .text symbols = 464058 bytes, file size = 10.11MiB (782693 symbols).
+# 10: shared .text symbols = 365648 bytes, file size =10.24MiB (813758 symbols).
+# 20: shared .text symbols = 86202 bytes, file size = 10.38MiB (854548 symbols).
+# 40: shared .text symbols = 48424 bytes, file size = 10.50MiB (890396 symbols).
+# 50: shared .text symbols = 41860 bytes, file size = 10.54MiB (902304 symbols).
+# max: shared .text symbols = 0 bytes, file size = 11.10MiB (1235449 symbols).
+_MAX_SAME_NAME_ALIAS_COUNT = 40  # 50kb is basically negligable.
+
+# This is an estimate of pak translation compression ratio to make comparisons
+# between .size files reasonable. Otherwise this can differ every pak change.
+_PAK_COMPRESSION_RATIO = 0.33
+
+
+def _OpenMaybeGz(path):
   """Calls `gzip.open()` if |path| ends in ".gz", otherwise calls `open()`."""
   if path.endswith('.gz'):
-    if mode and 'w' in mode:
-      return gzip.GzipFile(path, mode, 1)
-    return gzip.open(path, mode)
-  return open(path, mode or 'r')
+    return gzip.open(path, 'rb')
+  return open(path, 'rb')
 
 
 def _StripLinkerAddedSymbolPrefixes(raw_symbols):
@@ -57,22 +76,9 @@ def _StripLinkerAddedSymbolPrefixes(raw_symbols):
     elif full_name.startswith('rel.'):
       symbol.flags |= models.FLAG_REL
       symbol.full_name = full_name[4:]
-
-
-def _UnmangleRemainingSymbols(raw_symbols, tool_prefix):
-  """Uses c++filt to unmangle any symbols that need it."""
-  to_process = [s for s in raw_symbols if s.full_name.startswith('_Z')]
-  if not to_process:
-    return
-
-  logging.info('Unmangling %d names', len(to_process))
-  proc = subprocess.Popen([tool_prefix + 'c++filt'], stdin=subprocess.PIPE,
-                          stdout=subprocess.PIPE)
-  stdout = proc.communicate('\n'.join(s.full_name for s in to_process))[0]
-  assert proc.returncode == 0
-
-  for i, line in enumerate(stdout.splitlines()):
-    to_process[i].full_name = line
+    elif full_name.startswith('hot.'):
+      symbol.flags |= models.FLAG_HOT
+      symbol.full_name = full_name[4:]
 
 
 def _NormalizeNames(raw_symbols):
@@ -180,76 +186,133 @@ def _NormalizeSourcePath(path):
   return True, path
 
 
-def _SourcePathForObjectPath(object_path, source_mapper):
-  """Returns (is_generated, normalized_path)"""
-  # We don't have source info for prebuilt .a files.
-  if not os.path.isabs(object_path) and not object_path.startswith('..'):
-    source_path = source_mapper.FindSourceForPath(object_path)
-    if source_path:
-      return _NormalizeSourcePath(source_path)
-  return False, ''
+def _ExtractSourcePathsAndNormalizeObjectPaths(raw_symbols, source_mapper):
+  """Fills in the |source_path| attribute and normalizes |object_path|."""
+  if source_mapper:
+    logging.info('Looking up source paths from ninja files')
+    for symbol in raw_symbols:
+      object_path = symbol.object_path
+      if object_path:
+        # We don't have source info for prebuilt .a files.
+        if not os.path.isabs(object_path) and not object_path.startswith('..'):
+          source_path = source_mapper.FindSourceForPath(object_path)
+          if source_path:
+            symbol.generated_source, symbol.source_path = (
+                _NormalizeSourcePath(source_path))
+        symbol.object_path = _NormalizeObjectPath(object_path)
+    assert source_mapper.unmatched_paths_count == 0, (
+        'One or more source file paths could not be found. Likely caused by '
+        '.ninja files being generated at a different time than the .map file.')
+  else:
+    logging.info('Normalizing object paths')
+    for symbol in raw_symbols:
+      if symbol.object_path:
+        symbol.object_path = _NormalizeObjectPath(symbol.object_path)
 
 
-def _ExtractSourcePaths(raw_symbols, source_mapper):
-  """Fills in the |source_path| attribute."""
-  for symbol in raw_symbols:
-    object_path = symbol.object_path
-    if object_path and not symbol.source_path:
-      symbol.generated_source, symbol.source_path = (
-          _SourcePathForObjectPath(object_path, source_mapper))
-
-
-def _ComputeAncestorPath(path_list):
+def _ComputeAncestorPath(path_list, symbol_count):
   """Returns the common ancestor of the given paths."""
-  # Ignore missing paths.
-  path_list = [p for p in path_list if p]
+  if not path_list:
+    return ''
+
   prefix = os.path.commonprefix(path_list)
-  # Put the path count as a subdirectory to allow for better grouping when
-  # path-based breakdowns.
-  if not prefix:
-    if len(path_list) < 2:
-      return ''
-    return os.path.join('{shared}', str(len(path_list)))
+  # Check if all paths were the same.
   if prefix == path_list[0]:
     return prefix
-  assert len(path_list) > 1, 'path_list: ' + repr(path_list)
-  return os.path.join(os.path.dirname(prefix), '{shared}', str(len(path_list)))
+
+  # Put in buckets to cut down on the number of unique paths.
+  if symbol_count >= 100:
+    symbol_count_str = '100+'
+  elif symbol_count >= 50:
+    symbol_count_str = '50-99'
+  elif symbol_count >= 20:
+    symbol_count_str = '20-49'
+  elif symbol_count >= 10:
+    symbol_count_str = '10-19'
+  else:
+    symbol_count_str = str(symbol_count)
+
+  # Put the path count as a subdirectory so that grouping by path will show
+  # "{shared}" as a bucket, and the symbol counts as leafs.
+  if not prefix:
+    return os.path.join('{shared}', symbol_count_str)
+  return os.path.join(os.path.dirname(prefix), '{shared}', symbol_count_str)
 
 
-# This must normalize object paths at the same time because normalization
-# needs to occur before finding common ancestor.
-def _ComputeAncestorPathsAndNormalizeObjectPaths(
-    raw_symbols, object_paths_by_name, source_mapper):
+def _CompactLargeAliasesIntoSharedSymbols(raw_symbols):
+  """Converts symbols with large number of aliases into single symbols.
+
+  The merged symbol's path fields are changed to common-ancestor paths in
+  the form: common/dir/{shared}/$SYMBOL_COUNT
+
+  Assumes aliases differ only by path (not by name).
+  """
+  num_raw_symbols = len(raw_symbols)
+  num_shared_symbols = 0
+  src_cursor = 0
+  dst_cursor = 0
+  while src_cursor < num_raw_symbols:
+    symbol = raw_symbols[src_cursor]
+    raw_symbols[dst_cursor] = symbol
+    dst_cursor += 1
+    aliases = symbol.aliases
+    if aliases and len(aliases) > _MAX_SAME_NAME_ALIAS_COUNT:
+      symbol.source_path = _ComputeAncestorPath(
+          [s.source_path for s in aliases if s.source_path], len(aliases))
+      symbol.object_path = _ComputeAncestorPath(
+          [s.object_path for s in aliases if s.object_path], len(aliases))
+      symbol.generated_source = all(s.generated_source for s in aliases)
+      symbol.aliases = None
+      num_shared_symbols += 1
+      src_cursor += len(aliases)
+    else:
+      src_cursor += 1
+  raw_symbols[dst_cursor:] = []
+  num_removed = src_cursor - dst_cursor
+  logging.debug('Converted %d aliases into %d shared-path symbols',
+                num_removed, num_shared_symbols)
+
+
+def _ConnectNmAliases(raw_symbols):
+  """Ensures |aliases| is set correctly for all symbols."""
+  prev_sym = raw_symbols[0]
+  for sym in raw_symbols[1:]:
+    # Don't merge bss symbols.
+    if sym.address > 0 and prev_sym.address == sym.address:
+      # Don't merge padding-only symbols (** symbol gaps).
+      if prev_sym.size > 0:
+        # Don't merge if already merged.
+        if prev_sym.aliases is None or prev_sym.aliases is not sym.aliases:
+          if prev_sym.aliases:
+            prev_sym.aliases.append(sym)
+          else:
+            prev_sym.aliases = [prev_sym, sym]
+          sym.aliases = prev_sym.aliases
+    prev_sym = sym
+
+
+def _AssignNmAliasPathsAndCreatePathAliases(raw_symbols, object_paths_by_name):
   num_found_paths = 0
   num_unknown_names = 0
   num_path_mismatches = 0
-  num_unmatched_aliases = 0
+  num_aliases_created = 0
+  ret = []
   for symbol in raw_symbols:
+    ret.append(symbol)
     full_name = symbol.full_name
     if (symbol.IsBss() or
         not full_name or
         full_name[0] in '*.' or  # e.g. ** merge symbols, .Lswitch.table
         full_name == 'startup'):
-      symbol.object_path = _NormalizeObjectPath(symbol.object_path)
       continue
 
     object_paths = object_paths_by_name.get(full_name)
     if object_paths:
       num_found_paths += 1
     else:
-      if not symbol.object_path and symbol.aliases:
-        # Happens when aliases are from object files where all symbols were
-        # pruned or de-duped as aliases. Since we are only scanning .o files
-        # referenced by included symbols, such files are missed.
-        # TODO(agrieve): This could be fixed by retrieving linker inputs from
-        #     build.ninja, or by looking for paths within the .map file's
-        #     discarded sections.
-        num_unmatched_aliases += 1
-        continue
       if num_unknown_names < 10:
         logging.warning('Symbol not found in any .o files: %r', symbol)
       num_unknown_names += 1
-      symbol.object_path = _NormalizeObjectPath(symbol.object_path)
       continue
 
     if symbol.object_path and symbol.object_path not in object_paths:
@@ -257,21 +320,30 @@ def _ComputeAncestorPathsAndNormalizeObjectPaths(
         logging.warning('Symbol path reported by .map not found by nm.')
         logging.warning('sym=%r', symbol)
         logging.warning('paths=%r', object_paths)
+      object_paths.append(symbol.object_path)
+      object_paths.sort()
       num_path_mismatches += 1
 
-    if source_mapper:
-      tups = [
-          _SourcePathForObjectPath(p, source_mapper) for p in object_paths]
-      symbol.source_path = _ComputeAncestorPath(t[1] for t in tups)
-      symbol.generated_source = all(t[0] for t in tups)
+    symbol.object_path = object_paths[0]
 
-    object_paths = [_NormalizeObjectPath(p) for p in object_paths]
-    symbol.object_path = _ComputeAncestorPath(object_paths)
+    if len(object_paths) > 1:
+      # Create one symbol for each object_path.
+      aliases = symbol.aliases or [symbol]
+      symbol.aliases = aliases
+      num_aliases_created += len(object_paths) - 1
+      for object_path in object_paths[1:]:
+        new_sym = models.Symbol(
+            symbol.section_name, symbol.size, address=symbol.address,
+            full_name=full_name, object_path=object_path, aliases=aliases)
+        aliases.append(new_sym)
+        ret.append(new_sym)
 
   logging.debug('Cross-referenced %d symbols with nm output. '
                 'num_unknown_names=%d num_path_mismatches=%d '
-                'num_unused_aliases=%d', num_found_paths, num_unknown_names,
-                num_path_mismatches, num_unmatched_aliases)
+                'num_aliases_created=%d',
+                num_found_paths, num_unknown_names, num_path_mismatches,
+                num_aliases_created)
+  return ret
 
 
 def _DiscoverMissedObjectPaths(raw_symbols, elf_object_paths):
@@ -289,6 +361,77 @@ def _DiscoverMissedObjectPaths(raw_symbols, elf_object_paths):
   return missed_inputs
 
 
+def _CreateMergeStringsReplacements(merge_string_syms,
+                                    list_of_positions_by_object_path):
+  """Creates replacement symbols for |merge_syms|."""
+  ret = []
+  STRING_LITERAL_NAME = models.STRING_LITERAL_NAME
+  assert len(merge_string_syms) == len(list_of_positions_by_object_path)
+  tups = itertools.izip(merge_string_syms, list_of_positions_by_object_path)
+  for merge_sym, positions_by_object_path in tups:
+    merge_sym_address = merge_sym.address
+    new_symbols = []
+    ret.append(new_symbols)
+    for object_path, positions in positions_by_object_path.iteritems():
+      for offset, size in positions:
+        address = merge_sym_address + offset
+        symbol = models.Symbol(
+            models.SECTION_RODATA, size, address, STRING_LITERAL_NAME,
+            object_path=object_path)
+        new_symbols.append(symbol)
+
+  logging.debug('Created %d string literal symbols', sum(len(x) for x in ret))
+  logging.debug('Sorting string literals')
+  for symbols in ret:
+    # In order to achieve a total ordering in the presense of aliases, need to
+    # include both |address| and |object_path|.
+    # In order to achieve consistent deduping, need to include |size|.
+    symbols.sort(key=lambda x: (x.address, -x.size, x.object_path))
+
+  logging.debug('Deduping string literals')
+  num_removed = 0
+  size_removed = 0
+  num_aliases = 0
+  for i, symbols in enumerate(ret):
+    if not symbols:
+      continue
+    prev_symbol = symbols[0]
+    new_symbols = [prev_symbol]
+    for symbol in symbols[1:]:
+      padding = symbol.address - prev_symbol.end_address
+      if (prev_symbol.address == symbol.address and
+          prev_symbol.size == symbol.size):
+        # String is an alias.
+        num_aliases += 1
+        aliases = prev_symbol.aliases
+        if aliases:
+          aliases.append(symbol)
+          symbol.aliases = aliases
+        else:
+          aliases = [prev_symbol, symbol]
+          prev_symbol.aliases = aliases
+          symbol.aliases = aliases
+      elif padding + symbol.size <= 0:
+        # String is a substring of prior one.
+        num_removed += 1
+        size_removed += symbol.size
+        continue
+      elif padding < 0:
+        # String overlaps previous one. Adjust to not overlap.
+        symbol.address -= padding
+        symbol.size += padding
+      new_symbols.append(symbol)
+      prev_symbol = symbol
+    ret[i] = new_symbols
+    # Aliases come out in random order, so sort to be deterministic.
+    ret[i].sort(key=lambda s: (s.address, s.object_path))
+
+  logging.debug(
+      'Removed %d overlapping string literals (%d bytes) & created %d aliases',
+                num_removed, size_removed, num_aliases)
+  return ret
+
+
 def _CalculatePadding(raw_symbols):
   """Populates the |padding| field based on symbol addresses.
 
@@ -302,7 +445,12 @@ def _CalculatePadding(raw_symbols):
           'Input symbols must be sorted by section, then address.')
       seen_sections.append(symbol.section_name)
       continue
-    if symbol.address <= 0 or prev_symbol.address <= 0:
+    if symbol.full_name.startswith('Overhead: '):
+      # Overhead symbols are not actionable so should be padding-only.
+      symbol.padding = symbol.size
+      continue
+    if (symbol.address <= 0 or prev_symbol.address <= 0 or
+        symbol.IsPak() or prev_symbol.IsPak()):
       continue
 
     if symbol.address == prev_symbol.address:
@@ -319,9 +467,10 @@ def _CalculatePadding(raw_symbols):
     # E.g.: Set them to 0 and see what warnings get logged, then take max value.
     # TODO(agrieve): See if these thresholds make sense for architectures
     #     other than arm32.
-    if not symbol.full_name.startswith('*') and (
+    if (not symbol.full_name.startswith('*') and
+        not symbol.IsStringLiteral() and (
         symbol.section in 'rd' and padding >= 256 or
-        symbol.section in 't' and padding >= 64):
+        symbol.section in 't' and padding >= 64)):
       # Should not happen.
       logging.warning('Large padding of %d between:\n  A) %r\n  B) %r' % (
                       padding, prev_symbol, symbol))
@@ -332,58 +481,60 @@ def _CalculatePadding(raw_symbols):
         '%r\nprev symbol: %r' % (symbol, prev_symbol))
 
 
-def _AddSymbolAliases(raw_symbols, aliases_by_address):
+def _AddNmAliases(raw_symbols, names_by_address):
+  """Adds symbols that were removed by identical code folding."""
   # Step 1: Create list of (index_of_symbol, name_list).
   logging.debug('Creating alias list')
   replacements = []
   num_new_symbols = 0
+  missing_names = collections.defaultdict(list)
   for i, s in enumerate(raw_symbols):
     # Don't alias padding-only symbols (e.g. ** symbol gap)
     if s.size_without_padding == 0:
       continue
-    name_list = aliases_by_address.get(s.address)
+    name_list = names_by_address.get(s.address)
     if name_list:
       if s.full_name not in name_list:
+        missing_names[s.full_name].append(s.address)
         logging.warning('Name missing from aliases: %s %s', s.full_name,
                         name_list)
         continue
       replacements.append((i, name_list))
       num_new_symbols += len(name_list) - 1
 
+  if missing_names and logging.getLogger().isEnabledFor(logging.INFO):
+    for address, names in names_by_address.iteritems():
+      for name in names:
+        if name in missing_names:
+          logging.info('Missing name %s is at address %x instead of [%s]' %
+              (name, address, ','.join('%x' % a for a in missing_names[name])))
+
   if float(num_new_symbols) / len(raw_symbols) < .05:
-    # TODO(agrieve): Figure out if there's a way to get alias information from
-    # clang-compiled nm.
     logging.warning('Number of aliases is oddly low (%.0f%%). It should '
-                    'usually be around 25%%. Ensure --tool-prefix is correct. '
-                    'Ignore this if you compiled with clang.',
+                    'usually be around 25%%. Ensure --tool-prefix is correct. ',
                     float(num_new_symbols) / len(raw_symbols) * 100)
 
   # Step 2: Create new symbols as siblings to each existing one.
-  logging.debug('Creating %d aliases', num_new_symbols)
-  src_cursor_end = len(raw_symbols)
-  raw_symbols += [None] * num_new_symbols
-  dst_cursor_end = len(raw_symbols)
-  for src_index, name_list in reversed(replacements):
-    # Copy over symbols that come after the current one.
-    chunk_size = src_cursor_end - src_index - 1
-    dst_cursor_end -= chunk_size
-    src_cursor_end -= chunk_size
-    raw_symbols[dst_cursor_end:dst_cursor_end + chunk_size] = (
-        raw_symbols[src_cursor_end:src_cursor_end + chunk_size])
-    sym = raw_symbols[src_index]
-    src_cursor_end -= 1
-
-    # Create aliases (does not bother reusing the existing symbol).
-    aliases = [None] * len(name_list)
-    for i, full_name in enumerate(name_list):
-      aliases[i] = models.Symbol(
-          sym.section_name, sym.size, address=sym.address, full_name=full_name,
-          aliases=aliases)
-
-    dst_cursor_end -= len(aliases)
-    raw_symbols[dst_cursor_end:dst_cursor_end + len(aliases)] = aliases
-
-  assert dst_cursor_end == src_cursor_end
+  logging.debug('Creating %d new symbols from nm output', num_new_symbols)
+  expected_num_symbols = len(raw_symbols) + num_new_symbols
+  ret = []
+  prev_src = 0
+  for cur_src, name_list in replacements:
+    ret += raw_symbols[prev_src:cur_src]
+    prev_src = cur_src + 1
+    sym = raw_symbols[cur_src]
+    # Create symbols (|sym| gets recreated and discarded).
+    new_syms = []
+    for full_name in name_list:
+      # Do not set |aliases| in order to avoid being pruned by
+      # _CompactLargeAliasesIntoSharedSymbols(), which assumes aliases differ
+      # only by path. The field will be set afterwards by _ConnectNmAliases().
+      new_syms.append(models.Symbol(
+          sym.section_name, sym.size, address=sym.address, full_name=full_name))
+    ret += new_syms
+  ret += raw_symbols[prev_src:]
+  assert expected_num_symbols == len(ret)
+  return ret
 
 
 def LoadAndPostProcessSizeInfo(path):
@@ -408,7 +559,7 @@ def CreateMetadata(map_path, elf_path, apk_path, tool_prefix, output_directory):
     timestamp_obj = datetime.datetime.utcfromtimestamp(os.path.getmtime(
         elf_path))
     timestamp = calendar.timegm(timestamp_obj.timetuple())
-    relative_tool_prefix = paths.ToSrcRootRelative(tool_prefix)
+    relative_tool_prefix = path_util.ToSrcRootRelative(tool_prefix)
 
     metadata = {
         models.METADATA_GIT_REVISION: git_rev,
@@ -427,33 +578,13 @@ def CreateMetadata(map_path, elf_path, apk_path, tool_prefix, output_directory):
 
       if apk_path:
         metadata[models.METADATA_APK_FILENAME] = relative_to_out(apk_path)
+        metadata[models.METADATA_APK_SIZE] = os.path.getsize(apk_path)
   return metadata
 
 
-def CreateSizeInfo(map_path, elf_path, tool_prefix, output_directory,
-                   normalize_names=True):
-  """Creates a SizeInfo.
-
-  Args:
-    map_path: Path to the linker .map(.gz) file to parse.
-    elf_path: Path to the corresponding unstripped ELF file. Used to find symbol
-        aliases and inlined functions. Can be None.
-    tool_prefix: Prefix for c++filt & nm (required).
-    output_directory: Build output directory. If None, source_paths and symbol
-        alias information will not be recorded.
-  """
-  source_mapper = None
-  if output_directory:
-    # Start by finding the elf_object_paths, so that nm can run on them while
-    # the linker .map is being parsed.
-    logging.info('Parsing ninja files.')
-    source_mapper, elf_object_paths = ninja_parser.Parse(
-        output_directory, elf_path)
-    logging.debug('Parsed %d .ninja files.', source_mapper.parsed_file_count)
-    assert not elf_path or elf_object_paths, (
-        'Failed to find link command in ninja files for ' +
-        os.path.relpath(elf_path, output_directory))
-
+def _ParseElfInfo(map_path, elf_path, tool_prefix, output_directory,
+    track_string_literals, elf_object_paths):
+  """Adds Elf section sizes and symbols."""
   if elf_path:
     # Run nm on the elf file to retrieve the list of symbol names per-address.
     # This list is required because the .map file contains only a single name
@@ -493,43 +624,315 @@ def CreateSizeInfo(map_path, elf_path, tool_prefix, output_directory,
     missed_object_paths = _DiscoverMissedObjectPaths(
         raw_symbols, elf_object_paths)
     bulk_analyzer.AnalyzePaths(missed_object_paths)
-    bulk_analyzer.Close()
-
-  if source_mapper:
-    logging.info('Looking up source paths from ninja files')
-    _ExtractSourcePaths(raw_symbols, source_mapper)
-    assert source_mapper.unmatched_paths_count == 0, (
-        'One or more source file paths could not be found. Likely caused by '
-        '.ninja files being generated at a different time than the .map file.')
+    bulk_analyzer.SortPaths()
+    if track_string_literals:
+      merge_string_syms = [s for s in raw_symbols if
+                           s.full_name == '** merge strings' or
+                           s.full_name == '** lld merge strings']
+      # More likely for there to be a bug in supersize than an ELF to not have a
+      # single string literal.
+      assert merge_string_syms
+      string_positions = [(s.address, s.size) for s in merge_string_syms]
+      bulk_analyzer.AnalyzeStringLiterals(elf_path, string_positions)
 
   logging.info('Stripping linker prefixes from symbol names')
   _StripLinkerAddedSymbolPrefixes(raw_symbols)
-  # Map file for some reason doesn't unmangle all names.
-  # Unmangle prints its own log statement.
-  _UnmangleRemainingSymbols(raw_symbols, tool_prefix)
+  # Map file for some reason doesn't demangle all names.
+  # Demangle prints its own log statement.
+  demangle.DemangleRemainingSymbols(raw_symbols, tool_prefix)
 
   if elf_path:
-    logging.info('Adding aliased symbols, as reported by nm')
+    logging.info(
+        'Adding symbols removed by identical code folding (as reported by nm)')
     # This normally does not block (it's finished by this time).
-    aliases_by_address = elf_nm_result.get()
-    _AddSymbolAliases(raw_symbols, aliases_by_address)
+    names_by_address = elf_nm_result.get()
+    raw_symbols = _AddNmAliases(raw_symbols, names_by_address)
 
     if output_directory:
-      # For aliases, this provides path information where there wasn't any.
-      logging.info('Computing ancestor paths for inline functions and '
-                   'normalizing object paths')
-
-      object_paths_by_name = bulk_analyzer.Get()
+      object_paths_by_name = bulk_analyzer.GetSymbolNames()
       logging.debug('Fetched path information for %d symbols from %d files',
                     len(object_paths_by_name),
                     len(elf_object_paths) + len(missed_object_paths))
-      _ComputeAncestorPathsAndNormalizeObjectPaths(
-          raw_symbols, object_paths_by_name, source_mapper)
 
-  if not elf_path or not output_directory:
-    logging.info('Normalizing object paths.')
-    for symbol in raw_symbols:
-      symbol.object_path = _NormalizeObjectPath(symbol.object_path)
+      # For aliases, this provides path information where there wasn't any.
+      logging.info('Creating aliases for symbols shared by multiple paths')
+      raw_symbols = _AssignNmAliasPathsAndCreatePathAliases(
+          raw_symbols, object_paths_by_name)
+
+      if track_string_literals:
+        logging.info('Waiting for string literal extraction to complete.')
+        list_of_positions_by_object_path = bulk_analyzer.GetStringPositions()
+      bulk_analyzer.Close()
+
+      if track_string_literals:
+        logging.info('Deconstructing ** merge strings into literals')
+        replacements = _CreateMergeStringsReplacements(merge_string_syms,
+            list_of_positions_by_object_path)
+        for merge_sym, literal_syms in itertools.izip(
+            merge_string_syms, replacements):
+          # Don't replace if no literals were found.
+          if literal_syms:
+            # Re-find the symbols since aliases cause their indices to change.
+            idx = raw_symbols.index(merge_sym)
+            # This assignment is a bit slow (causes array to be shifted), but
+            # is fast enough since len(merge_string_syms) < 10.
+            raw_symbols[idx:idx + 1] = literal_syms
+
+  logging.debug('Connecting nm aliases')
+  _ConnectNmAliases(raw_symbols)
+  return section_sizes, raw_symbols
+
+
+def _ComputePakFileSymbols(
+    file_name, contents, res_info, symbols_by_id, compression_ratio=1):
+  id_map = {id(v): k
+            for k, v in sorted(contents.resources.items(), reverse=True)}
+  alias_map = {k: id_map[id(v)] for k, v in contents.resources.iteritems()
+               if id_map[id(v)] != k}
+  # Longest locale pak is es-419.pak
+  if len(os.path.basename(file_name)) <= 9:
+    section_name = models.SECTION_PAK_TRANSLATIONS
+  else:
+    section_name = models.SECTION_PAK_NONTRANSLATED
+  overhead = (12 + 6) * compression_ratio  # Header size plus extra offset
+  symbols_by_id[file_name] = models.Symbol(
+      section_name, overhead, full_name='{}: overhead'.format(file_name))
+  for resource_id in sorted(contents.resources):
+    if resource_id in alias_map:
+      # 4 extra bytes of metadata (2 16-bit ints)
+      size = 4
+      resource_id = alias_map[resource_id]
+    else:
+      # 6 extra bytes of metadata (1 32-bit int, 1 16-bit int)
+      size = len(contents.resources[resource_id]) + 6
+      name, source_path = res_info[resource_id]
+      if resource_id not in symbols_by_id:
+        full_name = '{}: {}'.format(source_path, name)
+        symbols_by_id[resource_id] = models.Symbol(
+            section_name, 0, address=resource_id, full_name=full_name)
+    size *= compression_ratio
+    symbols_by_id[resource_id].size += size
+
+
+def _ParsePakInfoFile(pak_info_path):
+  with open(pak_info_path, 'r') as info_file:
+    res_info = {}
+    for line in info_file.readlines():
+      name, res_id, path = line.split(',')
+      res_info[int(res_id)] = (name, path.strip())
+  return res_info
+
+
+def _ParsePakSymbols(
+    section_sizes, object_paths, output_directory, symbols_by_id):
+  for path in object_paths:
+    whitelist_path = os.path.join(output_directory, path + '.whitelist')
+    if (not os.path.exists(whitelist_path)
+        or os.path.getsize(whitelist_path) == 0):
+      continue
+    with open(whitelist_path, 'r') as f:
+      for line in f:
+        resource_id = int(line.rstrip())
+        # There may be object files in static libraries that are removed by the
+        # linker when there are no external references to its symbols. These
+        # files may be included in object_paths which our apk does not use,
+        # resulting in resource_ids that don't end up being in the final apk.
+        if resource_id not in symbols_by_id:
+          continue
+        symbols_by_id[resource_id].object_path = path
+
+  raw_symbols = sorted(symbols_by_id.values(),
+                       key=lambda s: (s.section_name, s.address))
+  raw_total = 0.0
+  int_total = 0
+  for symbol in raw_symbols:
+    raw_total += symbol.size
+    # We truncate rather than round to ensure that we do not over attribute. It
+    # is easier to add another symbol to make up the difference.
+    symbol.size = int(symbol.size)
+    int_total += symbol.size
+  # Attribute excess to translations since only those are compressed.
+  raw_symbols.append(models.Symbol(
+      models.SECTION_PAK_TRANSLATIONS, int(round(raw_total - int_total)),
+      full_name='Pak compression leftover artifacts'))
+
+  for symbol in raw_symbols:
+    prev = section_sizes.setdefault(symbol.section_name, 0)
+    section_sizes[symbol.section_name] = prev + symbol.size
+  return raw_symbols
+
+
+def _ParseApkElfSectionSize(section_sizes, metadata, apk_elf_result):
+  if metadata:
+    logging.debug('Extracting section sizes from .so within .apk')
+    apk_build_id, apk_section_sizes, elf_overhead_size = apk_elf_result.get()
+    assert apk_build_id == metadata[models.METADATA_ELF_BUILD_ID], (
+        'BuildID from apk_elf_result did not match')
+
+    packed_section_name = None
+    architecture = metadata[models.METADATA_ELF_ARCHITECTURE]
+    # Packing occurs enabled only arm32 & arm64.
+    if architecture == 'arm':
+      packed_section_name = '.rel.dyn'
+    elif architecture == 'arm64':
+      packed_section_name = '.rela.dyn'
+
+    if packed_section_name:
+      logging.debug('Recording size of unpacked relocations')
+      if packed_section_name not in section_sizes:
+        logging.warning('Packed section not present: %s', packed_section_name)
+      else:
+        apk_section_sizes['%s (unpacked)' % packed_section_name] = (
+            section_sizes.get(packed_section_name))
+    return apk_section_sizes, elf_overhead_size
+  return section_sizes
+
+
+def _ParseApkOtherSymbols(section_sizes, apk_path):
+  apk_symbols = []
+  zip_info_total = 0
+  with zipfile.ZipFile(apk_path) as z:
+    for zip_info in z.infolist():
+      zip_info_total += zip_info.compress_size
+      # Skip shared library and pak files as they are already accounted for.
+      if (zip_info.filename.endswith('.so')
+          or zip_info.filename.endswith('.pak')):
+        continue
+      apk_symbols.append(models.Symbol(
+            models.SECTION_OTHER, zip_info.compress_size,
+            full_name=zip_info.filename))
+  overhead_size = os.path.getsize(apk_path) - zip_info_total
+  zip_overhead_symbol = models.Symbol(
+      models.SECTION_OTHER, overhead_size, full_name='Overhead: APK file')
+  apk_symbols.append(zip_overhead_symbol)
+  prev = section_sizes.setdefault(models.SECTION_OTHER, 0)
+  section_sizes[models.SECTION_OTHER] = prev + sum(s.size for s in apk_symbols)
+  return apk_symbols
+
+
+def _FindPakSymbolsFromApk(apk_path, output_directory):
+  with zipfile.ZipFile(apk_path) as z:
+    pak_zip_infos = (f for f in z.infolist() if f.filename.endswith('.pak'))
+    apk_info_name = os.path.basename(apk_path) + '.pak.info'
+    pak_info_path = os.path.join(output_directory, 'size-info', apk_info_name)
+    res_info = _ParsePakInfoFile(pak_info_path)
+    symbols_by_id = {}
+    total_compressed_size = 0
+    total_uncompressed_size = 0
+    for zip_info in pak_zip_infos:
+      contents = data_pack.ReadDataPackFromString(z.read(zip_info))
+      compression_ratio = 1.0
+      if zip_info.compress_size < zip_info.file_size:
+        total_compressed_size += zip_info.compress_size
+        total_uncompressed_size += zip_info.file_size
+        compression_ratio = _PAK_COMPRESSION_RATIO
+      _ComputePakFileSymbols(
+          os.path.relpath(zip_info.filename, output_directory), contents,
+          res_info, symbols_by_id, compression_ratio=compression_ratio)
+    if total_uncompressed_size > 0:
+      actual_ratio = (
+          float(total_compressed_size) / total_uncompressed_size)
+      logging.info('Pak Compression Ratio: %f Actual: %f Diff: %.0f',
+          _PAK_COMPRESSION_RATIO, actual_ratio,
+          (_PAK_COMPRESSION_RATIO - actual_ratio) * total_uncompressed_size)
+  return symbols_by_id
+
+
+def _FindPakSymbolsFromFiles(pak_files, pak_info_path, output_directory):
+  """Uses files from args to find and add pak symbols."""
+  res_info = _ParsePakInfoFile(pak_info_path)
+  symbols_by_id = {}
+  for pak_file_path in pak_files:
+    with open(pak_file_path, 'r') as f:
+      contents = data_pack.ReadDataPackFromString(f.read())
+      _ComputePakFileSymbols(
+          os.path.relpath(pak_file_path, output_directory), contents, res_info,
+          symbols_by_id)
+  return symbols_by_id
+
+
+def _CalculateElfOverhead(section_sizes, elf_path):
+  if elf_path:
+    section_sizes_total_without_bss = sum(
+        s for k, s in section_sizes.iteritems() if k != models.SECTION_BSS)
+    elf_overhead_size = (
+        os.path.getsize(elf_path) - section_sizes_total_without_bss)
+    assert elf_overhead_size >= 0, (
+        'Negative ELF overhead {}'.format(elf_overhead_size))
+    return elf_overhead_size
+  return 0
+
+
+def CreateSectionSizesAndSymbols(
+      map_path=None, tool_prefix=None, output_directory=None, elf_path=None,
+      apk_path=None, track_string_literals=True, metadata=None,
+      apk_elf_result=None, pak_files=None, pak_info_file=None):
+  """Creates sections sizes and symbols for a SizeInfo.
+
+  Args:
+    map_path: Path to the linker .map(.gz) file to parse.
+    elf_path: Path to the corresponding unstripped ELF file. Used to find symbol
+        aliases and inlined functions. Can be None.
+    tool_prefix: Prefix for c++filt & nm (required).
+    output_directory: Build output directory. If None, source_paths and symbol
+        alias information will not be recorded.
+    track_string_literals: Whether to break down "** merge string" sections into
+        smaller symbols (requires output_directory).
+  """
+  source_mapper = None
+  elf_object_paths = None
+  if output_directory:
+    # Start by finding the elf_object_paths, so that nm can run on them while
+    # the linker .map is being parsed.
+    logging.info('Parsing ninja files.')
+    source_mapper, elf_object_paths = ninja_parser.Parse(
+        output_directory, elf_path)
+    logging.debug('Parsed %d .ninja files.', source_mapper.parsed_file_count)
+    assert not elf_path or elf_object_paths, (
+        'Failed to find link command in ninja files for ' +
+        os.path.relpath(elf_path, output_directory))
+
+  section_sizes, raw_symbols = _ParseElfInfo(
+      map_path, elf_path, tool_prefix, output_directory, track_string_literals,
+      elf_object_paths)
+  elf_overhead_size = _CalculateElfOverhead(section_sizes, elf_path)
+
+  pak_symbols_by_id = None
+  if apk_path:
+    pak_symbols_by_id = _FindPakSymbolsFromApk(apk_path, output_directory)
+    section_sizes, elf_overhead_size = _ParseApkElfSectionSize(
+        section_sizes, metadata, apk_elf_result)
+    raw_symbols.extend(_ParseApkOtherSymbols(section_sizes, apk_path))
+  elif pak_files and pak_info_file:
+    pak_symbols_by_id = _FindPakSymbolsFromFiles(
+        pak_files, pak_info_file, output_directory)
+
+  if elf_path:
+    elf_overhead_symbol = models.Symbol(
+        models.SECTION_OTHER, elf_overhead_size, full_name='Overhead: ELF file')
+    prev = section_sizes.setdefault(models.SECTION_OTHER, 0)
+    section_sizes[models.SECTION_OTHER] = prev + elf_overhead_size
+    raw_symbols.append(elf_overhead_symbol)
+
+  if pak_symbols_by_id:
+    object_paths = (p for p in source_mapper.IterAllPaths() if p.endswith('.o'))
+    pak_raw_symbols = _ParsePakSymbols(
+        section_sizes, object_paths, output_directory, pak_symbols_by_id)
+    raw_symbols.extend(pak_raw_symbols)
+
+  _ExtractSourcePathsAndNormalizeObjectPaths(raw_symbols, source_mapper)
+  logging.info('Converting excessive aliases into shared-path symbols')
+  _CompactLargeAliasesIntoSharedSymbols(raw_symbols)
+  return section_sizes, raw_symbols
+
+
+def CreateSizeInfo(
+    section_sizes, raw_symbols, metadata=None, normalize_names=True):
+  """Performs operations on all symbols and creates a SizeInfo object."""
+  logging.debug('Sorting %d symbols', len(raw_symbols))
+  raw_symbols.sort(key=lambda s: (
+      s.IsPak(), s.IsBss(), s.section_name, s.address))
+  logging.info('Processed %d symbols', len(raw_symbols))
 
   # Padding not really required, but it is useful to check for large padding and
   # log a warning.
@@ -542,14 +945,7 @@ def CreateSizeInfo(map_path, elf_path, tool_prefix, output_directory,
   if normalize_names:
     _NormalizeNames(raw_symbols)
 
-  logging.info('Processed %d symbols', len(raw_symbols))
-  size_info = models.SizeInfo(section_sizes, raw_symbols)
-
-  if logging.getLogger().isEnabledFor(logging.INFO):
-    for line in describe.DescribeSizeInfoCoverage(size_info):
-      logging.info(line)
-  logging.info('Recorded info for %d symbols', len(size_info.raw_symbols))
-  return size_info
+  return models.SizeInfo(section_sizes, raw_symbols, metadata=metadata)
 
 
 def _DetectGitRevision(directory):
@@ -563,7 +959,7 @@ def _DetectGitRevision(directory):
 
 
 def BuildIdFromElf(elf_path, tool_prefix):
-  args = [tool_prefix + 'readelf', '-n', elf_path]
+  args = [path_util.GetReadElfPath(tool_prefix), '-n', elf_path]
   stdout = subprocess.check_output(args)
   match = re.search(r'Build ID: (\w+)', stdout)
   assert match, 'Build ID not found from running: ' + ' '.join(args)
@@ -571,7 +967,7 @@ def BuildIdFromElf(elf_path, tool_prefix):
 
 
 def _SectionSizesFromElf(elf_path, tool_prefix):
-  args = [tool_prefix + 'readelf', '-S', '--wide', elf_path]
+  args = [path_util.GetReadElfPath(tool_prefix), '-S', '--wide', elf_path]
   stdout = subprocess.check_output(args)
   section_sizes = {}
   # Matches  [ 2] .hash HASH 00000000006681f0 0001f0 003154 04   A  3   0  8
@@ -582,7 +978,7 @@ def _SectionSizesFromElf(elf_path, tool_prefix):
 
 
 def _ArchFromElf(elf_path, tool_prefix):
-  args = [tool_prefix + 'readelf', '-h', elf_path]
+  args = [path_util.GetReadElfPath(tool_prefix), '-h', elf_path]
   stdout = subprocess.check_output(args)
   machine = re.search('Machine:\s*(.+)', stdout).group(1)
   if machine == 'Intel 80386':
@@ -609,6 +1005,11 @@ def _ParseGnArgs(args_path):
   return ["%s=%s" % x for x in sorted(args.iteritems())]
 
 
+def _DetectLinkerName(map_path):
+  with _OpenMaybeGz(map_path) as map_file:
+    return linker_map_parser.DetectLinkerNameFromMapFileHeader(next(map_file))
+
+
 def _ElfInfoFromApk(apk_path, apk_so_path, tool_prefix):
   """Returns a tuple of (build_id, section_sizes)."""
   with zipfile.ZipFile(apk_path) as apk, \
@@ -617,11 +1018,12 @@ def _ElfInfoFromApk(apk_path, apk_so_path, tool_prefix):
     f.flush()
     build_id = BuildIdFromElf(f.name, tool_prefix)
     section_sizes = _SectionSizesFromElf(f.name, tool_prefix)
-    return build_id, section_sizes
+    elf_overhead_size = _CalculateElfOverhead(section_sizes, f.name)
+    return build_id, section_sizes, elf_overhead_size
 
 
-def AddArguments(parser):
-  parser.add_argument('size_file', help='Path to output .size file.')
+def AddMainPathsArguments(parser):
+  """Add arguments for DeduceMainPaths()."""
   parser.add_argument('--apk-file',
                       help='.apk file to measure. When set, --elf-file will be '
                             'derived (if unset). Providing the .apk allows '
@@ -636,25 +1038,39 @@ def AddArguments(parser):
   parser.add_argument('--no-source-paths', action='store_true',
                       help='Do not use .ninja files to map '
                            'object_path -> source_path')
-  parser.add_argument('--tool-prefix',
-                      help='Path prefix for c++filt, nm, readelf.')
   parser.add_argument('--output-directory',
                       help='Path to the root build directory.')
+  parser.add_argument('--tool-prefix',
+                      help='Path prefix for c++filt, nm, readelf.')
 
 
-def Run(args, parser):
-  if not args.size_file.endswith('.size'):
-    parser.error('size_file must end with .size')
+def AddArguments(parser):
+  parser.add_argument('size_file', help='Path to output .size file.')
+  parser.add_argument('--pak-file', action='append',
+                      help='Paths to pak files.')
+  parser.add_argument('--pak-info-file',
+                      help='This file should contain all ids found in the pak '
+                           'files that have been passed in.')
+  parser.add_argument('--no-string-literals', dest='track_string_literals',
+                      default=True, action='store_false',
+                      help='Disable breaking down "** merge strings" into more '
+                           'granular symbols.')
+  AddMainPathsArguments(parser)
 
+
+def DeduceMainPaths(args, parser):
+  """Computes main paths based on input, and deduces them if needed."""
+  apk_path = args.apk_file
   elf_path = args.elf_file
   map_path = args.map_file
-  apk_path = args.apk_file
   any_input = apk_path or elf_path or map_path
   if not any_input:
-    parser.error('Most pass at least one of --apk-file, --elf-file, --map-file')
-  lazy_paths = paths.LazyPaths(tool_prefix=args.tool_prefix,
-                               output_directory=args.output_directory,
-                               any_path_within_output_directory=any_input)
+    parser.error('Must pass at least one of --apk-file, --elf-file, --map-file')
+  output_directory_finder = path_util.OutputDirectoryFinder(
+      value=args.output_directory,
+      any_path_within_output_directory=any_input)
+
+  apk_so_path = None
   if apk_path:
     with zipfile.ZipFile(apk_path) as z:
       lib_infos = [f for f in z.infolist()
@@ -664,9 +1080,9 @@ def Run(args, parser):
     #     secondary architectures.
     apk_so_path = max(lib_infos, key=lambda x:x.file_size).filename
     logging.debug('Sub-apk path=%s', apk_so_path)
-    if not elf_path and lazy_paths.output_directory:
+    if not elf_path and output_directory_finder.Tentative():
       elf_path = os.path.join(
-          lazy_paths.output_directory, 'lib.unstripped',
+          output_directory_finder.Tentative(), 'lib.unstripped',
           os.path.basename(apk_so_path.replace('crazy.', '')))
       logging.debug('Detected --elf-file=%s', elf_path)
 
@@ -678,52 +1094,55 @@ def Run(args, parser):
     if not os.path.exists(map_path):
       map_path += '.gz'
     if not os.path.exists(map_path):
-      parser.error('Could not find .map(.gz)? file. Use --map-file.')
+      parser.error('Could not find .map(.gz)? file. Ensure you have built with '
+                   'is_official_build=true, or use --map-file to point me a '
+                   'linker map file.')
 
-  tool_prefix = lazy_paths.VerifyToolPrefix()
+  linker_name = _DetectLinkerName(map_path)
+  tool_prefix_finder = path_util.ToolPrefixFinder(
+      value=args.tool_prefix,
+      output_directory_finder=output_directory_finder,
+      linker_name=linker_name)
+  tool_prefix = tool_prefix_finder.Finalized()
   output_directory = None
   if not args.no_source_paths:
-    output_directory = lazy_paths.VerifyOutputDirectory()
+    output_directory = output_directory_finder.Finalized()
+  return (output_directory, tool_prefix, apk_path, apk_so_path, elf_path,
+          map_path)
+
+
+def Run(args, parser):
+  if not args.size_file.endswith('.size'):
+    parser.error('size_file must end with .size')
+
+  (output_directory, tool_prefix, apk_path, apk_so_path, elf_path, map_path) = (
+      DeduceMainPaths(args, parser))
 
   metadata = CreateMetadata(map_path, elf_path, apk_path, tool_prefix,
                             output_directory)
+
+  apk_elf_result = None
   if apk_path and elf_path:
     # Extraction takes around 1 second, so do it in parallel.
     apk_elf_result = concurrent.ForkAndCall(
         _ElfInfoFromApk, (apk_path, apk_so_path, tool_prefix))
 
-  size_info = CreateSizeInfo(map_path, elf_path, tool_prefix, output_directory,
-                             normalize_names=False)
+  section_sizes, raw_symbols = CreateSectionSizesAndSymbols(
+      map_path=map_path, tool_prefix=tool_prefix, elf_path=elf_path,
+      apk_path=apk_path, output_directory=output_directory,
+      track_string_literals=args.track_string_literals,
+      metadata=metadata, apk_elf_result=apk_elf_result,
+      pak_files=args.pak_file, pak_info_file=args.pak_info_file)
+  size_info = CreateSizeInfo(
+      section_sizes, raw_symbols, metadata=metadata, normalize_names=False)
 
-  if metadata:
-    size_info.metadata = metadata
-
-    if apk_path:
-      logging.debug('Extracting section sizes from .so within .apk')
-      unstripped_section_sizes = size_info.section_sizes
-      apk_build_id, size_info.section_sizes = apk_elf_result.get()
-      assert apk_build_id == metadata[models.METADATA_ELF_BUILD_ID], (
-          'BuildID for %s within %s did not match the one at %s' %
-          (apk_so_path, apk_path, elf_path))
-
-      packed_section_name = None
-      architecture = metadata[models.METADATA_ELF_ARCHITECTURE]
-      # Packing occurs enabled only arm32 & arm64.
-      if architecture == 'arm':
-        packed_section_name = '.rel.dyn'
-      elif architecture == 'arm64':
-        packed_section_name = '.rela.dyn'
-
-      if packed_section_name:
-        logging.debug('Recording size of unpacked relocations')
-        if packed_section_name not in size_info.section_sizes:
-          logging.warning('Packed section not present: %s', packed_section_name)
-        else:
-          size_info.section_sizes['%s (unpacked)' % packed_section_name] = (
-              unstripped_section_sizes.get(packed_section_name))
-
+  if logging.getLogger().isEnabledFor(logging.INFO):
+    for line in describe.DescribeSizeInfoCoverage(size_info):
+      logging.info(line)
+  logging.info('Recorded info for %d symbols', len(size_info.raw_symbols))
   logging.info('Recording metadata: \n  %s',
                '\n  '.join(describe.DescribeMetadata(size_info.metadata)))
   logging.info('Saving result to %s', args.size_file)
   file_format.SaveSizeInfo(size_info, args.size_file)
-  logging.info('Done')
+  size_in_mb = os.path.getsize(args.size_file) / 1024.0 / 1024.0
+  logging.info('Done. File size is %.2fMiB.', size_in_mb)

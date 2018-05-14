@@ -10,13 +10,23 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <algorithm>
+#include <atomic>
+#include <memory>
 #include <utility>
 #include <vector>
 
+#include "base/android/library_loader/anchor_functions.h"
+#include "base/bits.h"
+#include "base/files/file.h"
+#include "base/format_macros.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "build/build_config.h"
+
+#if BUILDFLAG(SUPPORTS_CODE_ORDERING)
 
 namespace base {
 namespace android {
@@ -25,29 +35,12 @@ namespace {
 
 // Android defines the background priority to this value since at least 2009
 // (see Process.java).
-const int kBackgroundPriority = 10;
-// Valid for all the Android architectures.
-const size_t kPageSize = 4096;
-const char* kLibchromeSuffix = "libchrome.so";
-// "base.apk" is a suffix because the library may be loaded directly from the
-// APK.
-const char* kSuffixesToMatch[] = {kLibchromeSuffix, "base.apk"};
+constexpr int kBackgroundPriority = 10;
+// Valid for all Android architectures.
+constexpr size_t kPageSize = 4096;
 
-bool IsReadableAndPrivate(const base::debug::MappedMemoryRegion& region) {
-  return region.permissions & base::debug::MappedMemoryRegion::READ &&
-         region.permissions & base::debug::MappedMemoryRegion::PRIVATE;
-}
-
-bool PathMatchesSuffix(const std::string& path) {
-  for (size_t i = 0; i < arraysize(kSuffixesToMatch); i++) {
-    if (EndsWith(path, kSuffixesToMatch[i], CompareCase::SENSITIVE)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// For each range, reads a byte per page to force it into the page cache.
+// Reads a byte per page between |start| and |end| to force it into the page
+// cache.
 // Heap allocations, syscalls and library functions are not allowed in this
 // function.
 // Returns true for success.
@@ -58,74 +51,136 @@ bool PathMatchesSuffix(const std::string& path) {
 // for the context.
 __attribute__((no_sanitize_address))
 #endif
-bool Prefetch(const std::vector<std::pair<uintptr_t, uintptr_t>>& ranges) {
-  for (const auto& range : ranges) {
-    const uintptr_t page_mask = kPageSize - 1;
-    // If start or end is not page-aligned, parsing went wrong. It is better to
-    // exit with an error.
-    if ((range.first & page_mask) || (range.second & page_mask)) {
-      return false;  // CHECK() is not allowed here.
-    }
-    unsigned char* start_ptr = reinterpret_cast<unsigned char*>(range.first);
-    unsigned char* end_ptr = reinterpret_cast<unsigned char*>(range.second);
-    unsigned char dummy = 0;
-    for (unsigned char* ptr = start_ptr; ptr < end_ptr; ptr += kPageSize) {
-      // Volatile is required to prevent the compiler from eliminating this
-      // loop.
-      dummy ^= *static_cast<volatile unsigned char*>(ptr);
-    }
+bool Prefetch(size_t start, size_t end) {
+  unsigned char* start_ptr = reinterpret_cast<unsigned char*>(start);
+  unsigned char* end_ptr = reinterpret_cast<unsigned char*>(end);
+  unsigned char dummy = 0;
+  for (unsigned char* ptr = start_ptr; ptr < end_ptr; ptr += kPageSize) {
+    // Volatile is required to prevent the compiler from eliminating this
+    // loop.
+    dummy ^= *static_cast<volatile unsigned char*>(ptr);
   }
   return true;
 }
 
+// Populates the per-page residency between |start| and |end| in |residency|. If
+// successful, |residency| has the size of |end| - |start| in pages.
+// Returns true for success.
+bool Mincore(size_t start, size_t end, std::vector<unsigned char>* residency) {
+  if (start % kPageSize || end % kPageSize)
+    return false;
+  size_t size = end - start;
+  size_t size_in_pages = size / kPageSize;
+  if (residency->size() != size_in_pages)
+    residency->resize(size_in_pages);
+  int err = HANDLE_EINTR(
+      mincore(reinterpret_cast<void*>(start), size, &(*residency)[0]));
+  PLOG_IF(ERROR, err) << "mincore() failed";
+  return !err;
+}
+
+// Returns the start and end of .text, aligned to the lower and upper page
+// boundaries, respectively.
+std::pair<size_t, size_t> GetTextRange() {
+  // |kStartOfText| may not be at the beginning of a page, since .plt can be
+  // before it, yet in the same mapping for instance.
+  size_t start_page = kStartOfText - kStartOfText % kPageSize;
+  // Set the end to the page on which the beginning of the last symbol is. The
+  // actual symbol may spill into the next page by a few bytes, but this is
+  // outside of the executable code range anyway.
+  size_t end_page = base::bits::Align(kEndOfText, kPageSize);
+  return {start_page, end_page};
+}
+
+// Returns the start and end pages of the unordered section of .text, aligned to
+// lower and upper page boundaries, respectively.
+std::pair<size_t, size_t> GetOrderedTextRange() {
+  size_t start_page = kStartOfOrderedText - kStartOfOrderedText % kPageSize;
+  // kEndOfUnorderedText is not considered ordered, but the byte immediately
+  // before is considered ordered and so can not be contained in the start page.
+  size_t end_page = base::bits::Align(kEndOfOrderedText, kPageSize);
+  return {start_page, end_page};
+}
+
+// Calls madvise(advice) on the specified range. Does nothing if the range is
+// empty.
+void MadviseOnRange(const std::pair<size_t, size_t>& range, int advice) {
+  if (range.first >= range.second) {
+    return;
+  }
+  size_t size = range.second - range.first;
+  int err = madvise(reinterpret_cast<void*>(range.first), size, advice);
+  if (err) {
+    PLOG(ERROR) << "madvise() failed";
+  }
+}
+
+// Timestamp in ns since Unix Epoch, and residency, as returned by mincore().
+struct TimestampAndResidency {
+  uint64_t timestamp_nanos;
+  std::vector<unsigned char> residency;
+
+  TimestampAndResidency(uint64_t timestamp_nanos,
+                        std::vector<unsigned char>&& residency)
+      : timestamp_nanos(timestamp_nanos), residency(residency) {}
+};
+
+// Returns true for success.
+bool CollectResidency(size_t start,
+                      size_t end,
+                      std::vector<TimestampAndResidency>* data) {
+  // Not using base::TimeTicks() to not call too many base:: symbol that would
+  // pollute the reached symbols dumps.
+  struct timespec ts;
+  if (HANDLE_EINTR(clock_gettime(CLOCK_MONOTONIC, &ts))) {
+    PLOG(ERROR) << "Cannot get the time.";
+    return false;
+  }
+  uint64_t now =
+      static_cast<uint64_t>(ts.tv_sec) * 1000 * 1000 * 1000 + ts.tv_nsec;
+  std::vector<unsigned char> residency;
+  if (!Mincore(start, end, &residency))
+    return false;
+
+  data->emplace_back(now, std::move(residency));
+  return true;
+}
+
+void DumpResidency(size_t start,
+                   size_t end,
+                   std::unique_ptr<std::vector<TimestampAndResidency>> data) {
+  auto path = base::FilePath(
+      base::StringPrintf("/data/local/tmp/chrome/residency-%d.txt", getpid()));
+  auto file =
+      base::File(path, base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
+  if (!file.IsValid()) {
+    PLOG(ERROR) << "Cannot open file to dump the residency data "
+                << path.value();
+    return;
+  }
+
+  // First line: start-end of text range.
+  CHECK(IsOrderingSane());
+  CHECK_LT(start, kStartOfText);
+  CHECK_LT(kEndOfText, end);
+  auto start_end = base::StringPrintf("%" PRIuS " %" PRIuS "\n",
+                                      kStartOfText - start, kEndOfText - start);
+  file.WriteAtCurrentPos(start_end.c_str(), start_end.size());
+
+  for (const auto& data_point : *data) {
+    auto timestamp =
+        base::StringPrintf("%" PRIu64 " ", data_point.timestamp_nanos);
+    file.WriteAtCurrentPos(timestamp.c_str(), timestamp.size());
+
+    std::vector<char> dump;
+    dump.reserve(data_point.residency.size() + 1);
+    for (auto c : data_point.residency)
+      dump.push_back(c ? '1' : '0');
+    dump[dump.size() - 1] = '\n';
+    file.WriteAtCurrentPos(&dump[0], dump.size());
+  }
+}
 }  // namespace
-
-// static
-bool NativeLibraryPrefetcher::IsGoodToPrefetch(
-    const base::debug::MappedMemoryRegion& region) {
-  return PathMatchesSuffix(region.path) &&
-         IsReadableAndPrivate(region);  // .text and .data mappings are private.
-}
-
-// static
-void NativeLibraryPrefetcher::FilterLibchromeRangesOnlyIfPossible(
-    const std::vector<base::debug::MappedMemoryRegion>& regions,
-    std::vector<AddressRange>* ranges) {
-  bool has_libchrome_region = false;
-  for (const base::debug::MappedMemoryRegion& region : regions) {
-    if (EndsWith(region.path, kLibchromeSuffix, CompareCase::SENSITIVE)) {
-      has_libchrome_region = true;
-      break;
-    }
-  }
-  for (const base::debug::MappedMemoryRegion& region : regions) {
-    if (has_libchrome_region &&
-        !EndsWith(region.path, kLibchromeSuffix, CompareCase::SENSITIVE)) {
-      continue;
-    }
-    ranges->push_back(std::make_pair(region.start, region.end));
-  }
-}
-
-// static
-bool NativeLibraryPrefetcher::FindRanges(std::vector<AddressRange>* ranges) {
-  std::string proc_maps;
-  if (!base::debug::ReadProcMaps(&proc_maps))
-    return false;
-  std::vector<base::debug::MappedMemoryRegion> regions;
-  if (!base::debug::ParseProcMaps(proc_maps, &regions))
-    return false;
-
-  std::vector<base::debug::MappedMemoryRegion> regions_to_prefetch;
-  for (const auto& region : regions) {
-    if (IsGoodToPrefetch(region)) {
-      regions_to_prefetch.push_back(region);
-    }
-  }
-
-  FilterLibchromeRangesOnlyIfPossible(regions_to_prefetch, ranges);
-  return true;
-}
 
 // static
 bool NativeLibraryPrefetcher::ForkAndPrefetchNativeLibrary() {
@@ -135,20 +190,23 @@ bool NativeLibraryPrefetcher::ForkAndPrefetchNativeLibrary() {
   return false;
 #endif
 
+  if (!IsOrderingSane()) {
+    LOG(WARNING) << "Incorrect code ordering";
+    return false;
+  }
+
   // Looking for ranges is done before the fork, to avoid syscalls and/or memory
   // allocations in the forked process. The child process inherits the lock
   // state of its parent thread. It cannot rely on being able to acquire any
   // lock (unless special care is taken in a pre-fork handler), including being
   // able to call malloc().
-  std::vector<AddressRange> ranges;
-  if (!FindRanges(&ranges))
-    return false;
+  const auto& range = GetTextRange();
 
   pid_t pid = fork();
   if (pid == 0) {
     setpriority(PRIO_PROCESS, 0, kBackgroundPriority);
     // _exit() doesn't call the atexit() handlers.
-    _exit(Prefetch(ranges) ? 0 : 1);
+    _exit(Prefetch(range.first, range.second) ? 0 : 1);
   } else {
     if (pid < 0) {
       return false;
@@ -165,28 +223,18 @@ bool NativeLibraryPrefetcher::ForkAndPrefetchNativeLibrary() {
 }
 
 // static
-int NativeLibraryPrefetcher::PercentageOfResidentCode(
-    const std::vector<AddressRange>& ranges) {
+int NativeLibraryPrefetcher::PercentageOfResidentCode(size_t start,
+                                                      size_t end) {
   size_t total_pages = 0;
   size_t resident_pages = 0;
-  const uintptr_t page_mask = kPageSize - 1;
 
-  for (const auto& range : ranges) {
-    if (range.first & page_mask || range.second & page_mask)
-      return -1;
-    size_t length = range.second - range.first;
-    size_t pages = length / kPageSize;
-    total_pages += pages;
-    std::vector<unsigned char> is_page_resident(pages);
-    int err = mincore(reinterpret_cast<void*>(range.first), length,
-                      &is_page_resident[0]);
-    DPCHECK(!err);
-    if (err)
-      return -1;
-    resident_pages +=
-        std::count_if(is_page_resident.begin(), is_page_resident.end(),
-                      [](unsigned char x) { return x & 1; });
-  }
+  std::vector<unsigned char> residency;
+  bool ok = Mincore(start, end, &residency);
+  if (!ok)
+    return -1;
+  total_pages += residency.size();
+  resident_pages += std::count_if(residency.begin(), residency.end(),
+                                  [](unsigned char x) { return x & 1; });
   if (total_pages == 0)
     return -1;
   return static_cast<int>((100 * resident_pages) / total_pages);
@@ -194,11 +242,38 @@ int NativeLibraryPrefetcher::PercentageOfResidentCode(
 
 // static
 int NativeLibraryPrefetcher::PercentageOfResidentNativeLibraryCode() {
-  std::vector<AddressRange> ranges;
-  if (!FindRanges(&ranges))
+  if (!IsOrderingSane()) {
+    LOG(WARNING) << "Incorrect code ordering";
     return -1;
-  return PercentageOfResidentCode(ranges);
+  }
+  const auto& range = GetTextRange();
+  return PercentageOfResidentCode(range.first, range.second);
+}
+
+// static
+void NativeLibraryPrefetcher::PeriodicallyCollectResidency() {
+  CHECK_EQ(static_cast<long>(kPageSize), sysconf(_SC_PAGESIZE));
+
+  const auto& range = GetTextRange();
+  auto data = std::make_unique<std::vector<TimestampAndResidency>>();
+  for (int i = 0; i < 60; ++i) {
+    if (!CollectResidency(range.first, range.second, data.get()))
+      return;
+    usleep(2e5);
+  }
+  DumpResidency(range.first, range.second, std::move(data));
+}
+
+// static
+void NativeLibraryPrefetcher::MadviseForOrderfile() {
+  CHECK(IsOrderingSane());
+  LOG(WARNING) << "Performing experimental madvise from orderfile information";
+  // First MADV_RANDOM on all of text, then turn the ordered text range back to
+  // normal. The ordered range may be placed anywhere within .text.
+  MadviseOnRange(GetTextRange(), MADV_RANDOM);
+  MadviseOnRange(GetOrderedTextRange(), MADV_NORMAL);
 }
 
 }  // namespace android
 }  // namespace base
+#endif  // BUILDFLAG(SUPPORTS_CODE_ORDERING)

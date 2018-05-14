@@ -39,8 +39,7 @@ import org.chromium.net.test.EmbeddedTestServer;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @TargetApi(Build.VERSION_CODES.KITKAT)
 @MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
-@CommandLineFlags.Add({"enable-site-engagement", ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({"enable-site-engagement", ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ManageSpaceActivityTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -53,8 +52,7 @@ public class ManageSpaceActivityTest {
         if (!mActivityTestRule.getName().equals("testClearUnimporantWithoutChromeStart")) {
             mActivityTestRule.startMainActivityOnBlankPage();
         }
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
     }
 
     @After
@@ -63,8 +61,8 @@ public class ManageSpaceActivityTest {
     }
 
     private ManageSpaceActivity startManageSpaceActivity() {
-        Intent intent = new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(),
-                ManageSpaceActivity.class);
+        Intent intent =
+                new Intent(InstrumentationRegistry.getTargetContext(), ManageSpaceActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
         return (ManageSpaceActivity) InstrumentationRegistry.getInstrumentation().startActivitySync(

@@ -5,11 +5,13 @@
 #ifndef IntersectionObserver_h
 #define IntersectionObserver_h
 
+#include "base/callback.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/intersection_observer/IntersectionObservation.h"
 #include "core/intersection_observer/IntersectionObserverEntry.h"
 #include "platform/Length.h"
 #include "platform/bindings/ScriptWrappable.h"
+#include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/HashSet.h"
 #include "platform/wtf/Vector.h"
@@ -19,26 +21,29 @@ namespace blink {
 class Document;
 class Element;
 class ExceptionState;
-class IntersectionObserverCallback;
+class IntersectionObserverDelegate;
 class IntersectionObserverInit;
+class ScriptState;
+class V8IntersectionObserverCallback;
 
-class CORE_EXPORT IntersectionObserver final
-    : public GarbageCollectedFinalized<IntersectionObserver>,
-      public ScriptWrappable {
+class CORE_EXPORT IntersectionObserver final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  using EventCallback =
-      Function<void(const HeapVector<Member<IntersectionObserverEntry>>&),
-               WTF::kSameThreadAffinity>;
+  using EventCallback = base::RepeatingCallback<void(
+      const HeapVector<Member<IntersectionObserverEntry>>&)>;
 
   static IntersectionObserver* Create(const IntersectionObserverInit&,
-                                      IntersectionObserverCallback&,
+                                      IntersectionObserverDelegate&,
+                                      ExceptionState&);
+  static IntersectionObserver* Create(ScriptState*,
+                                      V8IntersectionObserverCallback*,
+                                      const IntersectionObserverInit&,
                                       ExceptionState&);
   static IntersectionObserver* Create(const Vector<Length>& root_margin,
                                       const Vector<float>& thresholds,
                                       Document*,
-                                      std::unique_ptr<EventCallback>,
+                                      EventCallback,
                                       ExceptionState& = ASSERT_NO_EXCEPTION);
   static void ResumeSuspendedObservers();
 
@@ -62,7 +67,8 @@ class CORE_EXPORT IntersectionObserver final
 
   // This is the document which is responsible for running
   // computeIntersectionObservations at frame generation time.
-  Document& TrackingDocument() const;
+  // This can return nullptr when no tracking document is available.
+  Document* TrackingDocument() const;
 
   const Length& TopMargin() const { return top_margin_; }
   const Length& RightMargin() const { return right_margin_; }
@@ -78,10 +84,11 @@ class CORE_EXPORT IntersectionObserver final
     return observations_;
   }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
-  explicit IntersectionObserver(IntersectionObserverCallback&,
+  explicit IntersectionObserver(IntersectionObserverDelegate&,
                                 Element*,
                                 const Vector<Length>& root_margin,
                                 const Vector<float>& thresholds);
@@ -91,7 +98,7 @@ class CORE_EXPORT IntersectionObserver final
   // deleted; true otherwise.
   bool RootIsValid() const;
 
-  Member<IntersectionObserverCallback> callback_;
+  const TraceWrapperMember<IntersectionObserverDelegate> delegate_;
   WeakMember<Element> root_;
   HeapLinkedHashSet<WeakMember<IntersectionObservation>> observations_;
   HeapVector<Member<IntersectionObserverEntry>> entries_;

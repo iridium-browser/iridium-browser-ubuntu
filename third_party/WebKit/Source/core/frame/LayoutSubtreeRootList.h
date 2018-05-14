@@ -8,7 +8,6 @@
 #include "core/layout/DepthOrderedLayoutObjectList.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/Vector.h"
 
 namespace blink {
 
@@ -30,7 +29,7 @@ class LayoutSubtreeRootList : public DepthOrderedLayoutObjectList {
   DISALLOW_NEW();
 
  public:
-  LayoutSubtreeRootList() {}
+  LayoutSubtreeRootList() = default;
 
   void ClearAndMarkContainingBlocksForLayout();
 

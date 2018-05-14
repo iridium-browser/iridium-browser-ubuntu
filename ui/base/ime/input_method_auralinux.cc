@@ -15,11 +15,7 @@
 
 namespace {
 
-ui::IMEEngineHandlerInterface* GetEngine() {
-  if (ui::IMEBridge::Get())
-    return ui::IMEBridge::Get()->GetCurrentEngineHandler();
-  return nullptr;
-}
+const int kIgnoreCommitsDurationInMilliseconds = 100;
 
 }  // namespace
 
@@ -30,7 +26,6 @@ InputMethodAuraLinux::InputMethodAuraLinux(
     : text_input_type_(TEXT_INPUT_TYPE_NONE),
       is_sync_mode_(false),
       composition_changed_(false),
-      suppress_next_result_(false),
       weak_ptr_factory_(this) {
   SetDelegate(delegate);
   context_ =
@@ -65,7 +60,7 @@ ui::EventDispatchDetails InputMethodAuraLinux::DispatchKeyEvent(
   if (!GetTextInputClient())
     return DispatchKeyEventPostIME(event);
 
-  if (!event->HasNativeEvent() && sending_key_event_) {
+  if (!event->HasNativeEvent() && sending_key_event()) {
     // Faked key events that are sent from input.ime.sendKeyEvents.
     ui::EventDispatchDetails details = DispatchKeyEventPostIME(event);
     if (details.dispatcher_destroyed || details.target_destroyed ||
@@ -79,7 +74,7 @@ ui::EventDispatchDetails InputMethodAuraLinux::DispatchKeyEvent(
     return details;
   }
 
-  suppress_next_result_ = false;
+  suppress_non_key_input_until_ = base::TimeTicks::UnixEpoch();
   composition_changed_ = false;
   result_text_.clear();
 
@@ -125,7 +120,7 @@ void InputMethodAuraLinux::ProcessKeyEventByEngineDone(
     base::string16* result_text,
     bool is_handled) {
   composition_changed_ = composition_changed;
-  composition_.CopyFrom(*composition);
+  composition_ = *composition;
   result_text_ = *result_text;
   ignore_result(ProcessKeyEventDone(event, filtered, is_handled));
 }
@@ -201,7 +196,7 @@ ui::EventDispatchDetails InputMethodAuraLinux::ProcessKeyEventDone(
   // Makes sure the cached composition is cleared after committing any text or
   // cleared composition.
   if (client && !client->HasCompositionText())
-    composition_.Clear();
+    composition_ = CompositionText();
 
   if (!filtered) {
     details = DispatchKeyEventPostIME(event);
@@ -303,9 +298,15 @@ void InputMethodAuraLinux::ResetContext() {
   if (!GetTextInputClient())
     return;
 
-  // To prevent any text from being committed when resetting the |context_|;
   is_sync_mode_ = true;
-  suppress_next_result_ = true;
+
+  if (!composition_.text.empty()) {
+    // If the IME has an open composition, ignore non-synchronous attempts to
+    // commit text for a brief duration of time.
+    suppress_non_key_input_until_ =
+        base::TimeTicks::Now() +
+        base::TimeDelta::FromMilliseconds(kIgnoreCommitsDurationInMilliseconds);
+  }
 
   context_->Reset();
   context_simple_->Reset();
@@ -317,10 +318,15 @@ void InputMethodAuraLinux::ResetContext() {
     context_->Focus();
   }
 
-  composition_.Clear();
+  composition_ = CompositionText();
   result_text_.clear();
   is_sync_mode_ = false;
   composition_changed_ = false;
+}
+
+bool InputMethodAuraLinux::IgnoringNonKeyInput() const {
+  return !is_sync_mode_ &&
+         base::TimeTicks::Now() < suppress_non_key_input_until_;
 }
 
 bool InputMethodAuraLinux::IsCandidatePopupOpen() const {
@@ -331,10 +337,8 @@ bool InputMethodAuraLinux::IsCandidatePopupOpen() const {
 // Overriden from ui::LinuxInputMethodContextDelegate
 
 void InputMethodAuraLinux::OnCommit(const base::string16& text) {
-  if (suppress_next_result_ || !GetTextInputClient()) {
-    suppress_next_result_ = false;
+  if (IgnoringNonKeyInput() || !GetTextInputClient())
     return;
-  }
 
   if (is_sync_mode_) {
     // Append the text to the buffer, because commit signal might be fired
@@ -349,13 +353,13 @@ void InputMethodAuraLinux::OnCommit(const base::string16& text) {
       return;
     if (!event.stopped_propagation() && !details.target_destroyed)
       GetTextInputClient()->InsertText(text);
-    composition_.Clear();
+    composition_ = CompositionText();
   }
 }
 
 void InputMethodAuraLinux::OnPreeditChanged(
     const CompositionText& composition_text) {
-  if (suppress_next_result_ || IsTextInputTypeNone())
+  if (IgnoringNonKeyInput() || IsTextInputTypeNone())
     return;
 
   if (is_sync_mode_) {
@@ -374,12 +378,12 @@ void InputMethodAuraLinux::OnPreeditChanged(
 }
 
 void InputMethodAuraLinux::OnPreeditEnd() {
-  if (suppress_next_result_ || IsTextInputTypeNone())
+  if (IgnoringNonKeyInput() || IsTextInputTypeNone())
     return;
 
   if (is_sync_mode_) {
     if (!composition_.text.empty()) {
-      composition_.Clear();
+      composition_ = CompositionText();
       composition_changed_ = true;
     }
   } else {
@@ -392,7 +396,7 @@ void InputMethodAuraLinux::OnPreeditEnd() {
       if (!event.stopped_propagation() && !details.target_destroyed)
         client->ClearCompositionText();
     }
-    composition_.Clear();
+    composition_ = CompositionText();
   }
 }
 

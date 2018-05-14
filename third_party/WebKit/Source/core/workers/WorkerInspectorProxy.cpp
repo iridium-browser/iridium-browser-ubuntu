@@ -4,6 +4,7 @@
 
 #include "core/workers/WorkerInspectorProxy.h"
 
+#include "base/location.h"
 #include "core/frame/FrameConsole.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectorTraceEvents.h"
@@ -13,10 +14,8 @@
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerThread.h"
 #include "platform/CrossThreadFunctional.h"
-#include "platform/WebTaskRunner.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/weborigin/KURL.h"
-#include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 
@@ -42,20 +41,22 @@ WorkerInspectorProxy* WorkerInspectorProxy::Create() {
   return new WorkerInspectorProxy();
 }
 
-WorkerInspectorProxy::~WorkerInspectorProxy() {}
+WorkerInspectorProxy::~WorkerInspectorProxy() = default;
 
 const String& WorkerInspectorProxy::InspectorId() {
-  if (inspector_id_.IsEmpty())
-    inspector_id_ = "dedicated:" + IdentifiersFactory::CreateIdentifier();
+  if (inspector_id_.IsEmpty() && worker_thread_) {
+    inspector_id_ = IdentifiersFactory::IdFromToken(
+        worker_thread_->GetDevToolsWorkerToken());
+  }
   return inspector_id_;
 }
 
-WorkerThreadStartMode WorkerInspectorProxy::WorkerStartMode(
+WorkerInspectorProxy::PauseOnWorkerStart
+WorkerInspectorProxy::ShouldPauseOnWorkerStart(
     ExecutionContext* execution_context) {
   bool result = false;
   probe::shouldWaitForDebuggerOnWorkerStart(execution_context, &result);
-  return result ? kPauseWorkerGlobalScopeOnStart
-                : kDontPauseWorkerGlobalScopeOnStart;
+  return result ? PauseOnWorkerStart::kPause : PauseOnWorkerStart::kDontPause;
 }
 
 void WorkerInspectorProxy::WorkerThreadCreated(
@@ -67,7 +68,7 @@ void WorkerInspectorProxy::WorkerThreadCreated(
   url_ = url.GetString();
   InspectorProxies().insert(this);
   // We expect everyone starting worker thread to synchronously ask for
-  // WorkerStartMode() right before.
+  // ShouldPauseOnWorkerStart() right before.
   bool waiting_for_debugger = false;
   probe::shouldWaitForDebuggerOnWorkerStart(execution_context_,
                                             &waiting_for_debugger);
@@ -91,14 +92,6 @@ void WorkerInspectorProxy::DispatchMessageFromWorker(int session_id,
   auto it = page_inspectors_.find(session_id);
   if (it != page_inspectors_.end())
     it->value->DispatchMessageFromWorker(this, session_id, message);
-}
-
-void WorkerInspectorProxy::AddConsoleMessageFromWorker(
-    MessageLevel level,
-    const String& message,
-    std::unique_ptr<SourceLocation> location) {
-  execution_context_->AddConsoleMessage(ConsoleMessage::CreateFromWorker(
-      level, message, std::move(location), inspector_id_));
 }
 
 static void ConnectToWorkerGlobalScopeInspectorTask(WorkerThread* worker_thread,
@@ -160,18 +153,7 @@ void WorkerInspectorProxy::SendMessageToInspector(int session_id,
   }
 }
 
-void WorkerInspectorProxy::WriteTimelineStartedEvent(
-    const String& tracing_session_id) {
-  if (!worker_thread_)
-    return;
-  TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
-                       "TracingSessionIdForWorker", TRACE_EVENT_SCOPE_THREAD,
-                       "data",
-                       InspectorTracingSessionIdForWorkerEvent::Data(
-                           tracing_session_id, InspectorId(), worker_thread_));
-}
-
-DEFINE_TRACE(WorkerInspectorProxy) {
+void WorkerInspectorProxy::Trace(blink::Visitor* visitor) {
   visitor->Trace(execution_context_);
 }
 

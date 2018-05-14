@@ -40,6 +40,7 @@
 #include "core/dom/Document.h"
 #include "core/dom/ScriptableDocumentParser.h"
 #include "core/dom/UserGestureIndicator.h"
+#include "core/exported/WebPluginContainerImpl.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
 #include "core/frame/Settings.h"
@@ -53,20 +54,21 @@
 #include "core/loader/FrameLoader.h"
 #include "core/loader/NavigationScheduler.h"
 #include "core/loader/ProgressTracker.h"
-#include "core/plugins/PluginView.h"
 #include "core/probe/CoreProbes.h"
 #include "platform/Histogram.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Assertions.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "platform/wtf/StringExtras.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/CString.h"
 #include "platform/wtf/text/StringBuilder.h"
+#include "public/web/WebSettings.h"
 
 namespace blink {
 
-DEFINE_TRACE(ScriptController) {
+void ScriptController::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(window_proxy_manager_);
 }
@@ -76,31 +78,25 @@ void ScriptController::ClearForClose() {
   MainThreadDebugger::Instance()->DidClearContextsForFrame(GetFrame());
 }
 
-void ScriptController::UpdateSecurityOrigin(SecurityOrigin* security_origin) {
+void ScriptController::UpdateSecurityOrigin(
+    const SecurityOrigin* security_origin) {
   window_proxy_manager_->UpdateSecurityOrigin(security_origin);
 }
 
 namespace {
 
-V8CacheOptions CacheOptions(const ScriptResource* resource,
+V8CacheOptions CacheOptions(const CachedMetadataHandler* cache_handler,
                             const Settings* settings) {
   V8CacheOptions v8_cache_options(kV8CacheOptionsDefault);
-  if (settings)
+  if (settings) {
     v8_cache_options = settings->GetV8CacheOptions();
-  if (resource && !resource->GetResponse().CacheStorageCacheName().IsNull()) {
-    switch (settings->GetV8CacheStrategiesForCacheStorage()) {
-      case V8CacheStrategiesForCacheStorage::kNone:
-        v8_cache_options = kV8CacheOptionsNone;
-        break;
-      case V8CacheStrategiesForCacheStorage::kNormal:
-        v8_cache_options = kV8CacheOptionsCode;
-        break;
-      case V8CacheStrategiesForCacheStorage::kDefault:
-      case V8CacheStrategiesForCacheStorage::kAggressive:
-        v8_cache_options = kV8CacheOptionsAlways;
-        break;
-    }
+    if (v8_cache_options == kV8CacheOptionsNone)
+      return kV8CacheOptionsNone;
   }
+  // If the resource is served from CacheStorage, generate the V8 code cache in
+  // the first load.
+  if (cache_handler && cache_handler->IsServedFromCacheStorage())
+    return kV8CacheOptionsCodeWithoutHeatCheck;
   return v8_cache_options;
 }
 
@@ -109,6 +105,8 @@ V8CacheOptions CacheOptions(const ScriptResource* resource,
 v8::Local<v8::Value> ScriptController::ExecuteScriptAndReturnValue(
     v8::Local<v8::Context> context,
     const ScriptSourceCode& source,
+    const KURL& base_url,
+    const ScriptFetchOptions& fetch_options,
     AccessControlStatus access_control_status) {
   TRACE_EVENT1(
       "devtools.timeline", "EvaluateScript", "data",
@@ -116,8 +114,10 @@ v8::Local<v8::Value> ScriptController::ExecuteScriptAndReturnValue(
                                          source.StartPosition()));
   v8::Local<v8::Value> result;
   {
+    CachedMetadataHandler* cache_handler = source.CacheHandler();
+
     V8CacheOptions v8_cache_options =
-        CacheOptions(source.GetResource(), GetFrame()->GetSettings());
+        CacheOptions(cache_handler, GetFrame()->GetSettings());
 
     // Isolate exceptions that occur when compiling and executing
     // the code. These exceptions should not interfere with
@@ -126,16 +126,41 @@ v8::Local<v8::Value> ScriptController::ExecuteScriptAndReturnValue(
     v8::TryCatch try_catch(GetIsolate());
     try_catch.SetVerbose(true);
 
+    // Omit storing base URL if it is same as source URL.
+    // Note: This improves chance of getting into a fast path in
+    //       ReferrerScriptInfo::ToV8HostDefinedOptions.
+    KURL stored_base_url = (base_url == source.Url()) ? KURL() : base_url;
+    const ReferrerScriptInfo referrer_info(stored_base_url, fetch_options);
+
     v8::Local<v8::Script> script;
-    if (!V8ScriptRunner::CompileScript(source, GetIsolate(),
-                                       access_control_status, v8_cache_options)
+
+    v8::ScriptCompiler::CompileOptions compile_options;
+    V8ScriptRunner::ProduceCacheOptions produce_cache_options;
+    v8::ScriptCompiler::NoCacheReason no_cache_reason;
+    std::tie(compile_options, produce_cache_options, no_cache_reason) =
+        V8ScriptRunner::GetCompileOptions(v8_cache_options, source);
+    if (!V8ScriptRunner::CompileScript(ScriptState::From(context), source,
+                                       access_control_status, compile_options,
+                                       no_cache_reason, referrer_info)
              .ToLocal(&script))
       return result;
 
-    if (!V8ScriptRunner::RunCompiledScript(GetIsolate(), script,
-                                           GetFrame()->GetDocument())
-             .ToLocal(&result))
+    v8::MaybeLocal<v8::Value> maybe_result;
+    if (RuntimeEnabledFeatures::CodeCacheAfterExecuteEnabled()) {
+      maybe_result = V8ScriptRunner::RunCompiledScript(
+          GetIsolate(), script, GetFrame()->GetDocument());
+      V8ScriptRunner::ProduceCache(GetIsolate(), script, source,
+                                   produce_cache_options, compile_options);
+    } else {
+      V8ScriptRunner::ProduceCache(GetIsolate(), script, source,
+                                   produce_cache_options, compile_options);
+      maybe_result = V8ScriptRunner::RunCompiledScript(
+          GetIsolate(), script, GetFrame()->GetDocument());
+    }
+
+    if (!maybe_result.ToLocal(&result)) {
       return result;
+    }
   }
 
   return result;
@@ -242,8 +267,17 @@ bool ScriptController::ExecuteScriptIfJavaScriptURL(const KURL& url,
       GetFrame()->GetNavigationScheduler().LocationChangePending();
 
   v8::HandleScope handle_scope(GetIsolate());
+
+  // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate
+  // Step 12.8 "Let base URL be settings object's API base URL." [spec text]
+  KURL base_url = owner_document->BaseURL();
+
+  // Step 12.9 "Let script be result of creating a classic script given script
+  // source, settings, base URL, and the default classic script fetch options."
+  // [spec text]
   v8::Local<v8::Value> result = EvaluateScriptInMainWorld(
-      ScriptSourceCode(script_source), kNotSharableCrossOrigin,
+      ScriptSourceCode(script_source, ScriptSourceLocationType::kJavascriptUrl),
+      base_url, ScriptFetchOptions(), kNotSharableCrossOrigin,
       kDoNotExecuteScriptWhenScriptsDisabled);
 
   // If executing script caused this frame to be removed from the page, we
@@ -269,30 +303,40 @@ bool ScriptController::ExecuteScriptIfJavaScriptURL(const KURL& url,
   return true;
 }
 
-void ScriptController::ExecuteScriptInMainWorld(const String& script,
-                                                ExecuteScriptPolicy policy) {
+void ScriptController::ExecuteScriptInMainWorld(
+    const String& script,
+    ScriptSourceLocationType source_location_type,
+    ExecuteScriptPolicy policy) {
   v8::HandleScope handle_scope(GetIsolate());
-  EvaluateScriptInMainWorld(ScriptSourceCode(script), kNotSharableCrossOrigin,
-                            policy);
+  EvaluateScriptInMainWorld(ScriptSourceCode(script, source_location_type),
+                            KURL(), ScriptFetchOptions(),
+                            kNotSharableCrossOrigin, policy);
 }
 
 void ScriptController::ExecuteScriptInMainWorld(
     const ScriptSourceCode& source_code,
+    const KURL& base_url,
+    const ScriptFetchOptions& fetch_options,
     AccessControlStatus access_control_status) {
   v8::HandleScope handle_scope(GetIsolate());
-  EvaluateScriptInMainWorld(source_code, access_control_status,
+  EvaluateScriptInMainWorld(source_code, base_url, fetch_options,
+                            access_control_status,
                             kDoNotExecuteScriptWhenScriptsDisabled);
 }
 
 v8::Local<v8::Value> ScriptController::ExecuteScriptInMainWorldAndReturnValue(
     const ScriptSourceCode& source_code,
+    const KURL& base_url,
+    const ScriptFetchOptions& fetch_options,
     ExecuteScriptPolicy policy) {
-  return EvaluateScriptInMainWorld(source_code, kNotSharableCrossOrigin,
-                                   policy);
+  return EvaluateScriptInMainWorld(source_code, base_url, fetch_options,
+                                   kNotSharableCrossOrigin, policy);
 }
 
 v8::Local<v8::Value> ScriptController::EvaluateScriptInMainWorld(
     const ScriptSourceCode& source_code,
+    const KURL& base_url,
+    const ScriptFetchOptions& fetch_options,
     AccessControlStatus access_control_status,
     ExecuteScriptPolicy policy) {
   if (policy == kDoNotExecuteScriptWhenScriptsDisabled &&
@@ -311,7 +355,8 @@ v8::Local<v8::Value> ScriptController::EvaluateScriptInMainWorld(
     GetFrame()->Loader().DidAccessInitialDocument();
 
   v8::Local<v8::Value> object = ExecuteScriptAndReturnValue(
-      script_state->GetContext(), source_code, access_control_status);
+      script_state->GetContext(), source_code, base_url, fetch_options,
+      access_control_status);
 
   if (object.IsEmpty())
     return v8::Local<v8::Value>();
@@ -325,7 +370,7 @@ void ScriptController::ExecuteScriptInIsolatedWorld(
     Vector<v8::Local<v8::Value>>* results) {
   DCHECK_GT(world_id, 0);
 
-  RefPtr<DOMWrapperWorld> world =
+  scoped_refptr<DOMWrapperWorld> world =
       DOMWrapperWorld::EnsureIsolatedWorld(GetIsolate(), world_id);
   LocalWindowProxy* isolated_world_window_proxy = WindowProxy(*world);
   // TODO(dcheng): Context must always be initialized here, due to the call to
@@ -359,9 +404,9 @@ void ScriptController::ExecuteScriptInIsolatedWorld(
   }
 }
 
-PassRefPtr<DOMWrapperWorld> ScriptController::CreateNewInspectorIsolatedWorld(
-    const String& world_name) {
-  RefPtr<DOMWrapperWorld> world = DOMWrapperWorld::Create(
+scoped_refptr<DOMWrapperWorld>
+ScriptController::CreateNewInspectorIsolatedWorld(const String& world_name) {
+  scoped_refptr<DOMWrapperWorld> world = DOMWrapperWorld::Create(
       GetIsolate(), DOMWrapperWorld::WorldType::kInspectorIsolated);
   // Bail out if we could not create an isolated world.
   if (!world)

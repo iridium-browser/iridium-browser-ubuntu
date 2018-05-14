@@ -52,23 +52,23 @@ class CFWL_ComboBox : public CFWL_Widget {
   void RemoveStates(uint32_t dwStates) override;
   void Update() override;
   FWL_WidgetHit HitTest(const CFX_PointF& point) override;
-  void DrawWidget(CXFA_Graphics* pGraphics, const CFX_Matrix* pMatrix) override;
+  void DrawWidget(CXFA_Graphics* pGraphics, const CFX_Matrix& matrix) override;
   void SetThemeProvider(IFWL_ThemeProvider* pThemeProvider) override;
   void OnProcessMessage(CFWL_Message* pMessage) override;
   void OnProcessEvent(CFWL_Event* pEvent) override;
   void OnDrawWidget(CXFA_Graphics* pGraphics,
-                    const CFX_Matrix* pMatrix) override;
+                    const CFX_Matrix& matrix) override;
 
-  CFX_WideString GetTextByIndex(int32_t iIndex) const;
+  WideString GetTextByIndex(int32_t iIndex) const;
   int32_t GetCurSel() const { return m_iCurSel; }
   void SetCurSel(int32_t iSel);
 
-  void AddString(const CFX_WideStringC& wsText);
+  void AddString(const WideStringView& wsText);
   void RemoveAt(int32_t iIndex);
   void RemoveAll();
 
-  void SetEditText(const CFX_WideString& wsText);
-  CFX_WideString GetEditText() const;
+  void SetEditText(const WideString& wsText);
+  WideString GetEditText() const;
 
   void OpenDropDownList(bool bActivate);
 
@@ -76,21 +76,19 @@ class CFWL_ComboBox : public CFWL_Widget {
   bool EditCanRedo() const { return m_pEdit->CanRedo(); }
   bool EditUndo() { return m_pEdit->Undo(); }
   bool EditRedo() { return m_pEdit->Redo(); }
-  bool EditCanCopy() const { return m_pEdit->CountSelRanges() > 0; }
+  bool EditCanCopy() const { return m_pEdit->HasSelection(); }
   bool EditCanCut() const {
     if (m_pEdit->GetStylesEx() & FWL_STYLEEXT_EDT_ReadOnly)
       return false;
     return EditCanCopy();
   }
   bool EditCanSelectAll() const { return m_pEdit->GetTextLength() > 0; }
-  bool EditCopy(CFX_WideString& wsCopy) const { return m_pEdit->Copy(wsCopy); }
-  bool EditCut(CFX_WideString& wsCut) { return m_pEdit->Cut(wsCut); }
-  bool EditPaste(const CFX_WideString& wsPaste) {
-    return m_pEdit->Paste(wsPaste);
-  }
-  void EditSelectAll() { m_pEdit->AddSelRange(0); }
+  Optional<WideString> EditCopy() const { return m_pEdit->Copy(); }
+  Optional<WideString> EditCut() { return m_pEdit->Cut(); }
+  bool EditPaste(const WideString& wsPaste) { return m_pEdit->Paste(wsPaste); }
+  void EditSelectAll() { m_pEdit->SelectAll(); }
   void EditDelete() { m_pEdit->ClearText(); }
-  void EditDeSelect() { m_pEdit->ClearSelections(); }
+  void EditDeSelect() { m_pEdit->ClearSelection(); }
 
   CFX_RectF GetBBox() const;
   void EditModifyStylesEx(uint32_t dwStylesExAdded, uint32_t dwStylesExRemoved);

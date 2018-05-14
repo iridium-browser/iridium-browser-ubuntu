@@ -7,6 +7,7 @@
 #include "net/quic/core/quic_crypto_server_stream.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
 #include "net/quic/platform/api/quic_flags.h"
+#include "net/quic/platform/api/quic_string.h"
 
 namespace net {
 
@@ -18,7 +19,7 @@ class StatelessRejector::ValidateCallback
       std::unique_ptr<StatelessRejector::ProcessDoneCallback> cb)
       : rejector_(std::move(rejector)), cb_(std::move(cb)) {}
 
-  ~ValidateCallback() override {}
+  ~ValidateCallback() override = default;
 
   void Run(QuicReferenceCountedPointer<Result> result,
            std::unique_ptr<ProofSource::Details> /* proof_source_details */)
@@ -34,8 +35,8 @@ class StatelessRejector::ValidateCallback
 };
 
 StatelessRejector::StatelessRejector(
-    QuicVersion version,
-    const QuicVersionVector& versions,
+    QuicTransportVersion version,
+    const QuicTransportVersionVector& versions,
     const QuicCryptoServerConfig* crypto_config,
     QuicCompressedCertsCache* compressed_certs_cache,
     const QuicClock* clock,
@@ -58,9 +59,9 @@ StatelessRejector::StatelessRejector(
       signed_config_(new QuicSignedServerConfig),
       params_(new QuicCryptoNegotiatedParameters) {}
 
-StatelessRejector::~StatelessRejector() {}
+StatelessRejector::~StatelessRejector() = default;
 
-void StatelessRejector::OnChlo(QuicVersion version,
+void StatelessRejector::OnChlo(QuicTransportVersion version,
                                QuicConnectionId connection_id,
                                QuicConnectionId server_designated_connection_id,
                                const CryptoHandshakeMessage& message) {
@@ -68,8 +69,8 @@ void StatelessRejector::OnChlo(QuicVersion version,
   DCHECK_NE(connection_id, server_designated_connection_id);
   DCHECK_EQ(state_, UNKNOWN);
 
-  if (!FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support ||
-      !FLAGS_quic_reloadable_flag_quic_use_cheap_stateless_rejects ||
+  if (!GetQuicReloadableFlag(enable_quic_stateless_reject_support) ||
+      !GetQuicReloadableFlag(quic_use_cheap_stateless_rejects) ||
       !QuicCryptoServerStream::DoesPeerSupportStatelessRejects(message)) {
     state_ = UNSUPPORTED;
     return;
@@ -103,7 +104,7 @@ class StatelessRejector::ProcessClientHelloCallback
       : rejector_(std::move(rejector)), done_cb_(std::move(done_cb)) {}
 
   void Run(QuicErrorCode error,
-           const std::string& error_details,
+           const QuicString& error_details,
            std::unique_ptr<CryptoHandshakeMessage> message,
            std::unique_ptr<DiversificationNonce> diversification_nonce,
            std::unique_ptr<ProofSource::Details> /* proof_source_details */)
@@ -138,7 +139,7 @@ void StatelessRejector::ProcessClientHello(
 
 void StatelessRejector::ProcessClientHelloDone(
     QuicErrorCode error,
-    const std::string& error_details,
+    const QuicString& error_details,
     std::unique_ptr<CryptoHandshakeMessage> message,
     std::unique_ptr<StatelessRejector> rejector,
     std::unique_ptr<StatelessRejector::ProcessDoneCallback> done_cb) {

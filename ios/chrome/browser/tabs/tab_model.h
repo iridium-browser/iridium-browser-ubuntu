@@ -14,7 +14,6 @@
 #include "ui/base/page_transition_types.h"
 
 class GURL;
-class SessionID;
 @class SessionServiceIOS;
 @class SessionWindowIOS;
 @class Tab;
@@ -32,40 +31,6 @@ struct Referrer;
 class WebState;
 }
 
-// A list of notifications about changes in the model or changes in tab
-// state.
-
-// A tab is about to load a URL. The tab in question is in the userInfo under
-// kTabModelTabKey. This may fire multiple times during a load, for example, on
-// redirects.
-extern NSString* const kTabModelTabWillStartLoadingNotification;
-// A tab started to load a URL. The tab in question is in the userInfo under
-// kTabModelTabKey.
-extern NSString* const kTabModelTabDidStartLoadingNotification;
-// A tab finished loading a URL. The tab in question is in the userInfo under
-// kTabModelTabKey.
-extern NSString* const kTabModelTabDidFinishLoadingNotification;
-// All tabs have finished their shutdown sequences.
-// NOTE: This notification is not sent when closing a single tab that happens
-// to be the last tab.
-extern NSString* const kTabModelAllTabsDidCloseNotification;
-// A tab has lost its status as the currently selected tab. The tab in question
-// is in the userInfo under kTabModelTabKey.
-extern NSString* const kTabModelTabDeselectedNotification;
-// A new tab has been created from a link.
-extern NSString* const kTabModelNewTabWillOpenNotification;
-
-// Keys for the userInfo included with the above notifications:
-
-// Key that indicates whether to open the next tab in the background.
-extern NSString* const kTabModelOpenInBackgroundKey;
-// Key for the tab.
-extern NSString* const kTabModelTabKey;
-// Key for the status of the page load. The value is a NSNumber.
-extern NSString* const kTabModelPageLoadSuccess;
-
-// ---------------------------------------------------------------------------
-
 namespace TabModelConstants {
 
 // Position the tab automatically. This value is used as index parameter in
@@ -80,7 +45,7 @@ NSUInteger const kTabPositionAutomatically = NSNotFound;
 // The model knows about the currently selected tab in order to maintain
 // consistency between multiple views that need the current tab to be
 // synchronized.
-@interface TabModel : NSObject<NSFastEnumeration>
+@interface TabModel : NSObject
 
 // Currently active tab.
 @property(nonatomic, weak) Tab* currentTab;
@@ -91,11 +56,6 @@ NSUInteger const kTabPositionAutomatically = NSNotFound;
 
 // BrowserState associated with this TabModel.
 @property(nonatomic, readonly) ios::ChromeBrowserState* browserState;
-
-// Unique identifier of this browser for session restore. This ID is only
-// unique within the current session, and is not guaranteed to be unique
-// across sessions.
-@property(nonatomic, readonly) const SessionID& sessionID;
 
 // Records UMA metrics about Tab usage.
 @property(nonatomic, readonly) TabUsageRecorder* tabUsageRecorder;
@@ -145,29 +105,6 @@ NSUInteger const kTabPositionAutomatically = NSNotFound;
 - (Tab*)tabAtIndex:(NSUInteger)index;
 - (NSUInteger)indexOfTab:(Tab*)tab;
 
-// Returns the next Tab, starting after |tab|, spawned by the specified Tab, If
-// |after| is a valid tab, will only look at tabs following it (in tab ordering,
-// not order opened) in the list, even if it comes before |tab|. Returns nil if
-// no tab meets this constraint.
-- (Tab*)nextTabWithOpener:(Tab*)tab afterTab:(Tab*)afterTab;
-
-// TODO(crbug.com/661980): Make these |firstTabOpenedBy| and |lastTabOpenedBy|
-// better mimic what desktop chrome does. Or, better yet, use shared code.
-// Placing anew tab in its proper location along the tab strip is based on the
-// tab's 'opener' tab, the tab from which the new tab was opened. For the user,
-// that does not mean the tab in UI terms, but the page from which the new tab
-// is opened. Currently, to best provide this behavior, the session ID of the
-// tab is supplemented with its navigation index. If both those items match, it
-// is assumed that the tabs belong to the same owner's group. Note that using
-// navigation index is a limited solution, and may in some cases be incorrect,
-// as forward or back navigations (incrementing/decrementing the navigation
-// index) may result in incorrect tab pairings.
-
-// Returns the last tab in the model opened by the specified tab at its current
-// navigation index. The search starts at |tab|. Returns nil if no tab meets
-// these constraints.
-- (Tab*)lastTabWithOpener:(Tab*)tab;
-
 // Returns the tab which opened this tab, or nil if it's not a child.
 - (Tab*)openerOfTab:(Tab*)tab;
 
@@ -195,6 +132,10 @@ NSUInteger const kTabPositionAutomatically = NSNotFound;
                         atIndex:(NSUInteger)index
                    inBackground:(BOOL)inBackground;
 
+// Opens a new blank tab in response to DOM window opening action. Creates a web
+// state with empty navigation manager.
+- (Tab*)insertOpenByDOMTabWithOpener:(Tab*)parentTab;
+
 // Moves |tab| to the given |index|. |index| must be valid for this tab model
 // (must be less than the current number of tabs). |tab| must already be in this
 // tab model. If |tab| is already at |index|, this method does nothing and will
@@ -217,9 +158,23 @@ NSUInteger const kTabPositionAutomatically = NSNotFound;
 // Notifies observers that the given |tab| was changed.
 - (void)notifyTabChanged:(Tab*)tab;
 
+// Notifies observers that the given tab is loading a new URL.
+- (void)notifyTabLoading:(Tab*)tab;
+
+// Notifies observers that the given tab finished loading. |success| is YES if
+// the load was successful, NO otherwise.
+- (void)notifyTabFinishedLoading:(Tab*)tab success:(BOOL)success;
+
+// Notifies observers that the given tab will open. If it isn't the active tab,
+// |background| is YES, NO otherwise.
+- (void)notifyNewTabWillOpen:(Tab*)tab inBackground:(BOOL)background;
+
 // Notifies observers that the snapshot for the given |tab| changed was changed
 // to |image|.
 - (void)notifyTabSnapshotChanged:(Tab*)tab withImage:(UIImage*)image;
+
+// Notifies observers that |tab| was deselected.
+- (void)notifyTabWasDeselected:(Tab*)tab;
 
 // Adds |observer| to the list of observers. |observer| is not retained. Does
 // nothing if |observer| is already in the list. Any added observers must be
@@ -234,11 +189,6 @@ NSUInteger const kTabPositionAutomatically = NSNotFound;
 
 // Records tab session metrics.
 - (void)recordSessionMetrics;
-
-// Purges the web views on all the tabs and reloads the frontmost one if there
-// is one. This is used when a userdefault changes and the web views need to be
-// re-created to pick it up.
-- (void)resetAllWebViews;
 
 // Sets whether the user is primarily interacting with this tab model.
 - (void)setPrimary:(BOOL)primary;

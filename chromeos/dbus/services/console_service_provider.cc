@@ -24,24 +24,22 @@ void OnDisplayOwnershipChanged(
 
 }  // namespace
 
-ConsoleServiceProvider::ConsoleServiceProvider(
-    std::unique_ptr<Delegate> delegate)
-    : delegate_(std::move(delegate)), weak_ptr_factory_(this) {}
+ConsoleServiceProvider::ConsoleServiceProvider(Delegate* delegate)
+    : delegate_(delegate), weak_ptr_factory_(this) {}
 
-ConsoleServiceProvider::~ConsoleServiceProvider() {
-}
+ConsoleServiceProvider::~ConsoleServiceProvider() = default;
 
 void ConsoleServiceProvider::Start(
     scoped_refptr<dbus::ExportedObject> exported_object) {
   exported_object->ExportMethod(
-      kLibCrosServiceInterface, kTakeDisplayOwnership,
+      kDisplayServiceInterface, kDisplayServiceTakeOwnershipMethod,
       base::Bind(&ConsoleServiceProvider::TakeDisplayOwnership,
                  weak_ptr_factory_.GetWeakPtr()),
       base::Bind(&ConsoleServiceProvider::OnExported,
                  weak_ptr_factory_.GetWeakPtr()));
 
   exported_object->ExportMethod(
-      kLibCrosServiceInterface, kReleaseDisplayOwnership,
+      kDisplayServiceInterface, kDisplayServiceReleaseOwnershipMethod,
       base::Bind(&ConsoleServiceProvider::ReleaseDisplayOwnership,
                  weak_ptr_factory_.GetWeakPtr()),
       base::Bind(&ConsoleServiceProvider::OnExported,

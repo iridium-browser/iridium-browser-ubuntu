@@ -24,7 +24,7 @@ FakePeripheral::FakePeripheral(FakeCentral* fake_central,
       pending_gatt_discovery_(false),
       weak_ptr_factory_(this) {}
 
-FakePeripheral::~FakePeripheral() {}
+FakePeripheral::~FakePeripheral() = default;
 
 void FakePeripheral::SetName(base::Optional<std::string> name) {
   name_ = std::move(name);
@@ -49,6 +49,27 @@ void FakePeripheral::SetNextGATTDiscoveryResponse(uint16_t code) {
   next_discovery_response_ = code;
 }
 
+bool FakePeripheral::AllResponsesConsumed() {
+  return !next_connection_response_ && !next_discovery_response_ &&
+         std::all_of(gatt_services_.begin(), gatt_services_.end(),
+                     [](const auto& e) {
+                       FakeRemoteGattService* fake_remote_gatt_service =
+                           static_cast<FakeRemoteGattService*>(e.second.get());
+                       return fake_remote_gatt_service->AllResponsesConsumed();
+                     });
+}
+
+void FakePeripheral::SimulateGATTDisconnection() {
+  gatt_services_.clear();
+  // TODO(crbug.com/728870): Only set get_connected_ to false once system
+  // connected peripherals are supported and Web Bluetooth uses them. See issue
+  // for more details.
+  system_connected_ = false;
+  gatt_connected_ = false;
+  SetGattServicesDiscoveryComplete(false);
+  DidDisconnectGatt();
+}
+
 std::string FakePeripheral::AddFakeService(
     const device::BluetoothUUID& service_uuid) {
   // Attribute instance Ids need to be unique.
@@ -60,11 +81,21 @@ std::string FakePeripheral::AddFakeService(
 
   std::tie(it, inserted) = gatt_services_.emplace(
       new_service_id,
-      base::MakeUnique<FakeRemoteGattService>(new_service_id, service_uuid,
+      std::make_unique<FakeRemoteGattService>(new_service_id, service_uuid,
                                               true /* is_primary */, this));
 
   DCHECK(inserted);
   return it->second->GetIdentifier();
+}
+
+bool FakePeripheral::RemoveFakeService(const std::string& identifier) {
+  auto it = gatt_services_.find(identifier);
+  if (it == gatt_services_.end()) {
+    return false;
+  }
+
+  gatt_services_.erase(it);
+  return true;
 }
 
 uint32_t FakePeripheral::GetBluetoothClass() const {

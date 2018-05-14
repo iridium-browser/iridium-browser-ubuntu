@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -17,6 +18,7 @@ from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot import chromeos_config
 from chromite.cbuildbot import commands
 from chromite.cbuildbot.stages import generic_stages
+from chromite.lib.const import waterfall
 from chromite.lib import auth
 from chromite.lib import buildbucket_lib
 from chromite.lib import config_lib
@@ -55,7 +57,7 @@ class StageTestCase(cros_test_lib.MockOutputTestCase,
 
   # Subclass should override this to default to a different build config
   # for its tests.
-  BOT_ID = 'x86-generic-paladin'
+  BOT_ID = 'amd64-generic-paladin'
 
   # Subclasses can override this.  If non-None, value is inserted into
   # self._run.attrs.release_tag.
@@ -74,10 +76,12 @@ class StageTestCase(cros_test_lib.MockOutputTestCase,
     self._current_board = None
     self._boards = None
     self._run = None
+    self._model = None
+
 
   def _Prepare(self, bot_id=None, extra_config=None, cmd_args=None,
                extra_cmd_args=None, build_id=DEFAULT_BUILD_ID,
-               waterfall=constants.WATERFALL_INTERNAL,
+               wfall=waterfall.WATERFALL_INTERNAL,
                waterfall_url=constants.BUILD_INT_DASHBOARD,
                master_build_id=None,
                site_config=None):
@@ -99,43 +103,36 @@ class StageTestCase(cros_test_lib.MockOutputTestCase,
       bot_id: Name of build config to use, defaults to self.BOT_ID.
       extra_config: Dict used to add to the build config for the given
         bot_id.  Example: {'push_image': True}.
-      cmd_args: List to override the default cbuildbot command args.
+      cmd_args: List to override the default cbuildbot command args, including
+        the bot_id.
       extra_cmd_args: List to add to default cbuildbot command args.  This
         is a good way to adjust an options value for your test.
         Example: ['branch-name', 'some-branch-name'] will effectively cause
         self._run.options.branch_name to be set to 'some-branch-name'.
       build_id: mock build id
-      waterfall: Name of the current waterfall.
-                 Possibly from constants.CIDB_KNOWN_WATERFALLS.
+      wfall: Name of the current waterfall.
+             Possibly from waterfall.CIDB_KNOWN_WATERFALLS.
       waterfall_url: Url for the current waterfall.
       master_build_id: mock build id of master build.
       site_config: SiteConfig to use (or MockSiteConfig)
     """
+    assert not bot_id or not cmd_args
+
     # Use cbuildbot parser to create options object and populate default values.
-    parser = cbuildbot._CreateParser()
     if not cmd_args:
       # Fill in default command args.
       cmd_args = [
           '-r', self.build_root, '--buildbot', '--noprebuilts',
           '--buildnumber', str(DEFAULT_BUILD_NUMBER),
           '--branch', self.TARGET_MANIFEST_BRANCH,
+          bot_id or self.BOT_ID
       ]
     if extra_cmd_args:
       cmd_args += extra_cmd_args
-    (options, args) = parser.parse_args(cmd_args)
 
-    # The bot_id can either be specified as arg to _Prepare method or in the
-    # cmd_args (as cbuildbot normally accepts it from command line).
-    if args:
-      self._bot_id = args[0]
-      if bot_id:
-        # This means bot_id was specified as _Prepare arg and in cmd_args.
-        # Make sure they are the same.
-        self.assertEquals(self._bot_id, bot_id)
-    else:
-      self._bot_id = bot_id or self.BOT_ID
-      args = [self._bot_id]
-    cbuildbot._FinishParsing(options, args)
+    parser = cbuildbot._CreateParser()
+    options = cbuildbot.ParseCommandLine(parser, cmd_args)
+    self._bot_id = options.build_config_name
 
     if site_config is None:
       site_config = chromeos_config.GetConfig()
@@ -152,6 +149,7 @@ class StageTestCase(cros_test_lib.MockOutputTestCase,
 
     self._boards = build_config['boards']
     self._current_board = self._boards[0] if self._boards else None
+    self._model = self._current_board
 
     # Some preliminary sanity checks.
     self.assertEquals(options.buildroot, self.build_root)
@@ -166,7 +164,7 @@ class StageTestCase(cros_test_lib.MockOutputTestCase,
     if master_build_id is not None:
       self._run.options.master_build_id = master_build_id
 
-    self._run.attrs.metadata.UpdateWithDict({'buildbot-master-name': waterfall})
+    self._run.attrs.metadata.UpdateWithDict({'buildbot-master-name': wfall})
     self._run.attrs.metadata.UpdateWithDict({'buildbot-url': waterfall_url})
 
     if self.RELEASE_TAG is not None:
@@ -283,7 +281,7 @@ class BuilderStageTest(AbstractStageTestCase):
   """Tests for BuilderStage class."""
 
   def setUp(self):
-    self._Prepare(waterfall=constants.WATERFALL_EXTERNAL)
+    self._Prepare(wfall=waterfall.WATERFALL_EXTERNAL)
     self.mock_cidb = mock.MagicMock()
     cidb.CIDBConnectionFactory.SetupMockCidb(self.mock_cidb)
     # Many tests modify the global results_lib.Results instance.
@@ -343,12 +341,12 @@ class BuilderStageTest(AbstractStageTestCase):
     stage = self.ConstructStage()
 
     exp_url = ('https://luci-milo.appspot.com/buildbot/chromiumos/'
-               'x86-generic-paladin/%s' % DEFAULT_BUILD_NUMBER)
+               'amd64-generic-paladin/%s' % DEFAULT_BUILD_NUMBER)
     self.assertEqual(stage.ConstructDashboardURL(), exp_url)
 
     stage_name = 'Archive'
     exp_url = ('https://uberchromegw.corp.google.com/i/chromeos/builders/'
-               'x86-generic-paladin/builds/1234321/steps/Archive/logs/stdio')
+               'amd64-generic-paladin/builds/1234321/steps/Archive/logs/stdio')
     self.assertEqual(stage.ConstructDashboardURL(stage=stage_name), exp_url)
 
   def test_ExtractOverlaysSmoke(self):
@@ -504,7 +502,7 @@ class BuilderStageGetBuildFailureMessage(AbstractStageTestCase):
   """Test GetBuildFailureMessage in BuilderStage."""
 
   def setUp(self):
-    self._Prepare(waterfall=constants.WATERFALL_EXTERNAL)
+    self._Prepare(wfall=waterfall.WATERFALL_EXTERNAL)
     # Many tests modify the global results_lib.Results instance.
     results_lib.Results.Clear()
 
@@ -519,7 +517,7 @@ class BuilderStageGetBuildFailureMessage(AbstractStageTestCase):
     db = fake_cidb.FakeCIDBConnection()
     cidb.CIDBConnectionFactory.SetupMockCidb(db)
 
-    build_id = db.InsertBuild('lumpy-pre-cq', constants.WATERFALL_INTERNAL, 1,
+    build_id = db.InsertBuild('lumpy-pre-cq', waterfall.WATERFALL_INTERNAL, 1,
                               'lumpy-pre-cq', 'bot_hostname',
                               status=constants.BUILDER_STATUS_INFLIGHT)
     stage_id = db.InsertBuildStage(build_id, 'BuildPackages', status='fail')
@@ -600,7 +598,7 @@ class MasterConfigBuilderStageTest(AbstractStageTestCase):
   BOT_ID = 'master-paladin'
 
   def setUp(self):
-    self._Prepare(waterfall=constants.WATERFALL_EXTERNAL)
+    self._Prepare(wfall=waterfall.WATERFALL_EXTERNAL)
     self.mock_cidb = mock.MagicMock()
     cidb.CIDBConnectionFactory.SetupMockCidb(self.mock_cidb)
     results_lib.Results.Clear()
@@ -651,7 +649,7 @@ class MasterConfigBuilderStageTest(AbstractStageTestCase):
     scheduled_slave_builds = [('slave1', 'bb_id1', 0),
                               ('slave2', 'bb_id2', 0)]
     self._run.attrs.metadata.ExtendKeyListWithList(
-        constants.METADATA_SCHEDULED_SLAVES, scheduled_slave_builds)
+        constants.METADATA_SCHEDULED_IMPORTANT_SLAVES, scheduled_slave_builds)
     self.assertEqual(set(stage.GetScheduledSlaveBuildbucketIds()),
                      {'bb_id1', 'bb_id2'})
 
@@ -662,7 +660,7 @@ class MasterConfigBuilderStageTest(AbstractStageTestCase):
                               ('slave2', 'bb_id2', 0),
                               ('slave1', 'bb_id3', 3)]
     self._run.attrs.metadata.ExtendKeyListWithList(
-        constants.METADATA_SCHEDULED_SLAVES, scheduled_slave_builds)
+        constants.METADATA_SCHEDULED_IMPORTANT_SLAVES, scheduled_slave_builds)
     self.assertEqual(set(stage.GetScheduledSlaveBuildbucketIds()),
                      {'bb_id3', 'bb_id2'})
 
@@ -746,8 +744,8 @@ class RunCommandAbstractStageTestCase(
 
   # pylint: disable=abstract-method
 
-  FULL_BOT_ID = 'x86-generic-full'
-  BIN_BOT_ID = 'x86-generic-paladin'
+  FULL_BOT_ID = 'amd64-generic-full'
+  BIN_BOT_ID = 'amd64-generic-paladin'
 
   def _Prepare(self, bot_id, **kwargs):
     super(RunCommandAbstractStageTestCase, self)._Prepare(bot_id, **kwargs)

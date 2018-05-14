@@ -108,7 +108,12 @@ class TranslateUIDelegate {
   // Returns true if the current webpage is blacklisted.
   bool IsSiteBlacklisted();
 
-  // Sets the value if the current webpage is blacklisted.
+  // Returns true if the site of the current webpage can be blacklisted.
+  bool CanBlacklistSite();
+
+  // Sets the blacklisted state for the host of the current page. If
+  // value is true, the current host will be blacklisted and translations
+  // will not be offered for that site.
   void SetSiteBlacklist(bool value);
 
   // Returns true if the webpage in the current original language should be
@@ -121,6 +126,14 @@ class TranslateUIDelegate {
 
   // Returns true if the Always Translate checkbox should be checked by default.
   bool ShouldAlwaysTranslateBeCheckedByDefault();
+
+  // Returns true if the UI should offer the user a shortcut to always translate
+  // the language, when we think the user wants that functionality.
+  bool ShouldShowAlwaysTranslateShortcut();
+
+  // Returns true if the UI should offer the user a shortcut to never translate
+  // the language, when we think the user wants that functionality.
+  bool ShouldShowNeverTranslateShortcut();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(TranslateUIDelegateTest, GetPageHost);

@@ -31,7 +31,7 @@
 #define ServiceWorkerGlobalScope_h
 
 #include <memory>
-#include "bindings/modules/v8/RequestOrUSVString.h"
+#include "bindings/core/v8/request_or_usv_string.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "modules/ModulesExport.h"
 #include "platform/heap/Handle.h"
@@ -65,9 +65,18 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final : public WorkerGlobalScope {
   ~ServiceWorkerGlobalScope() override;
   bool IsServiceWorkerGlobalScope() const override { return true; }
 
-  // Counts an evaluated script and its size. Called for each of the main
-  // worker script and imported scripts.
-  void CountScript(size_t script_size, size_t cached_metadata_size);
+  // Implements WorkerGlobalScope.
+  void EvaluateClassicScript(
+      const KURL& script_url,
+      String source_code,
+      std::unique_ptr<Vector<char>> cached_meta_data) override;
+
+  // Counts an evaluated script and its size. Called for the main worker script.
+  void CountWorkerScript(size_t script_size, size_t cached_metadata_size);
+
+  // Counts an evaluated script and its size. Called for each of imported
+  // scripts.
+  void CountImportedScript(size_t script_size, size_t cached_metadata_size);
 
   // Called when the main worker script is evaluated.
   void DidEvaluateWorkerScript();
@@ -95,13 +104,18 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final : public WorkerGlobalScope {
                                               WaitUntilObserver*,
                                               RespondWithObserver*);
 
+  bool IsInstalling() const { return is_installing_; }
+  void SetIsInstalling(bool is_installing);
+
+  void CountCacheStorageInstalledScript(uint64_t script_size,
+                                        uint64_t script_metadata_size);
+
   DEFINE_ATTRIBUTE_EVENT_LISTENER(install);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(activate);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(fetch);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(foreignfetch);
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  protected:
   // EventTarget
@@ -111,24 +125,29 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final : public WorkerGlobalScope {
       const AddEventListenerOptionsResolved&) override;
 
  private:
-  ServiceWorkerGlobalScope(const KURL&,
-                           const String& user_agent,
+  ServiceWorkerGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
                            ServiceWorkerThread*,
-                           double time_origin,
-                           std::unique_ptr<SecurityOrigin::PrivilegeData>,
-                           WorkerClients*);
+                           double time_origin);
   void importScripts(const Vector<String>& urls, ExceptionState&) override;
   CachedMetadataHandler* CreateWorkerScriptCachedMetadataHandler(
       const KURL& script_url,
       const Vector<char>* meta_data) override;
   void ExceptionThrown(ErrorEvent*) override;
 
+  // Records the |script_size| and |cached_metadata_size| for UMA to measure the
+  // number of scripts and the total bytes of scripts.
+  void RecordScriptSize(size_t script_size, size_t cached_metadata_size);
+
   Member<ServiceWorkerClients> clients_;
   Member<ServiceWorkerRegistration> registration_;
-  bool did_evaluate_script_;
-  size_t script_count_;
-  size_t script_total_size_;
-  size_t script_cached_metadata_total_size_;
+  bool did_evaluate_script_ = false;
+  size_t script_count_ = 0;
+  size_t script_total_size_ = 0;
+  size_t script_cached_metadata_total_size_ = 0;
+  bool is_installing_ = false;
+  size_t cache_storage_installed_script_count_ = 0;
+  uint64_t cache_storage_installed_script_total_size_ = 0;
+  uint64_t cache_storage_installed_script_metadata_total_size_ = 0;
 };
 
 DEFINE_TYPE_CASTS(ServiceWorkerGlobalScope,

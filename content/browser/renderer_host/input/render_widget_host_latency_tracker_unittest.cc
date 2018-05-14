@@ -5,7 +5,6 @@
 #include "content/browser/renderer_host/input/render_widget_host_latency_tracker.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/test/histogram_tester.h"
-#include "components/metrics/proto/ukm/entry.pb.h"
 #include "components/rappor/public/rappor_utils.h"
 #include "components/rappor/test_rappor_service.h"
 #include "components/ukm/test_ukm_recorder.h"
@@ -78,18 +77,9 @@ class RenderWidgetHostLatencyTrackerTestBrowserClient
   RenderWidgetHostLatencyTrackerTestBrowserClient() {}
   ~RenderWidgetHostLatencyTrackerTestBrowserClient() override {}
 
-  rappor::RapporService* GetRapporService() override {
-    return &rappor_service_;
-  }
-
-  rappor::TestRapporServiceImpl* getTestRapporService() {
-    return &rappor_service_;
-  }
-
   ukm::TestUkmRecorder* GetTestUkmRecorder() { return &test_ukm_recorder_; }
 
  private:
-  rappor::TestRapporServiceImpl rappor_service_;
   ukm::TestAutoSetUkmRecorder test_ukm_recorder_;
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostLatencyTrackerTestBrowserClient);
 };
@@ -97,92 +87,24 @@ class RenderWidgetHostLatencyTrackerTestBrowserClient
 class RenderWidgetHostLatencyTrackerTest
     : public RenderViewHostImplTestHarness {
  public:
-  RenderWidgetHostLatencyTrackerTest()
-      : tracker_(false), old_browser_client_(NULL) {
-    tracker_.Initialize(kTestRoutingId, kTestProcessId);
+  RenderWidgetHostLatencyTrackerTest() : old_browser_client_(nullptr) {
     ResetHistograms();
   }
 
-  ::testing::AssertionResult RapporSampleAssert(const char* rappor_name,
-                                                int count) {
-    rappor::TestSample::Shadow* sample_obj =
-        test_browser_client_.getTestRapporService()->GetRecordedSampleForMetric(
-            rappor_name);
-    if (count) {
-      if (!sample_obj)
-        return ::testing::AssertionFailure()
-               << rappor_name << " rappor sample should not be null";
-
-      const auto& domain_it = sample_obj->string_fields.find("Domain");
-      if (domain_it == sample_obj->string_fields.end())
-        return ::testing::AssertionFailure()
-               << rappor_name << " rappor sample should contain the string "
-                                 "attribute \"Domain\"";
-      const auto& domain = domain_it->second;
-      if (domain != "bar.com")
-        return ::testing::AssertionFailure()
-               << rappor_name << " rappor expected bar.com domain but had "
-               << domain << " domain";
-
-      const auto& latency_it = sample_obj->uint64_fields.find("Latency");
-      if (latency_it == sample_obj->uint64_fields.end())
-        return ::testing::AssertionFailure()
-               << rappor_name << " rappor sample should contain the uint64 "
-                                 "attribute \"Latency\"";
-      const auto& latency_noise = latency_it->second.second;
-      if (latency_noise != rappor::NO_NOISE)
-        return ::testing::AssertionFailure()
-               << rappor_name
-               << " rappor expected rappor::NO_NOISE latency but had "
-               << latency_noise << " latency";
-
-      return ::testing::AssertionSuccess();
-    } else {
-      if (!sample_obj)
-        return ::testing::AssertionSuccess();
-      else
-        return ::testing::AssertionFailure() << rappor_name
-                                             << " rappor sample should be null";
-    }
-  }
-
-  ::testing::AssertionResult AssertUkmReported(const char* event_name,
-                                               const char* metric_name) {
+  void ExpectUkmReported(const char* event_name,
+                         const std::vector<std::string>& metric_names,
+                         size_t expected_count) {
     const ukm::TestUkmRecorder* ukm_recoder =
         test_browser_client_.GetTestUkmRecorder();
 
-    size_t actual_event_count = 0;
-    for (size_t i = 0; i < ukm_recoder->entries_count(); ++i) {
-      const ukm::mojom::UkmEntry* entry = ukm_recoder->GetEntry(i);
-      if (entry->event_hash != base::HashMetricName(event_name))
-        continue;
-
-      const ukm::UkmSource* source =
-          ukm_recoder->GetSourceForSourceId(entry->source_id);
-      if (!source)
-        return ::testing::AssertionFailure() << "Source should not be null";
-
-      if (actual_event_count >= 1)
-        break;
-
-      if (GURL(kUrl) != source->url())
-        return ::testing::AssertionFailure() << "Incorrect URL is reported.";
-
-      actual_event_count++;
-      if (entry->metrics.size() != 1)
-        return ::testing::AssertionFailure()
-               << event_name << " entry expected only 1 metric but got "
-               << entry->metrics.size();
-
-      if (entry->metrics[0]->metric_hash != base::HashMetricName(metric_name))
-        return ::testing::AssertionFailure()
-               << "Expected a metric named " << metric_name;
+    auto entries = ukm_recoder->GetEntriesByName(event_name);
+    EXPECT_EQ(expected_count, entries.size());
+    for (const auto* const entry : entries) {
+      ukm_recoder->ExpectEntrySourceHasUrl(entry, GURL(kUrl));
+      for (const auto& metric_name : metric_names) {
+        EXPECT_TRUE(ukm_recoder->EntryHasMetric(entry, metric_name.c_str()));
+      }
     }
-    if (actual_event_count != 1)
-      return ::testing::AssertionFailure()
-             << event_name << " expected " << 1 << " entry but got "
-             << actual_event_count;
-    return ::testing::AssertionSuccess();
   }
 
   ::testing::AssertionResult HistogramSizeEq(const char* histogram_name,
@@ -198,7 +120,7 @@ class RenderWidgetHostLatencyTrackerTest
     }
   }
 
-  RenderWidgetHostLatencyTracker* tracker() { return &tracker_; }
+  RenderWidgetHostLatencyTracker* tracker() { return tracker_.get(); }
   void ResetHistograms() {
     histogram_tester_.reset(new base::HistogramTester());
   }
@@ -210,7 +132,9 @@ class RenderWidgetHostLatencyTrackerTest
   void SetUp() override {
     RenderViewHostImplTestHarness::SetUp();
     old_browser_client_ = SetBrowserClientForTesting(&test_browser_client_);
-    tracker_.SetDelegate(contents());
+    tracker_ =
+        std::make_unique<RenderWidgetHostLatencyTracker>(false, contents());
+    tracker_->Initialize(kTestRoutingId, kTestProcessId);
   }
 
   void TearDown() override {
@@ -224,10 +148,67 @@ class RenderWidgetHostLatencyTrackerTest
   const int kTestRoutingId = 3;
   const int kTestProcessId = 1;
   std::unique_ptr<base::HistogramTester> histogram_tester_;
-  RenderWidgetHostLatencyTracker tracker_;
+  std::unique_ptr<RenderWidgetHostLatencyTracker> tracker_;
   RenderWidgetHostLatencyTrackerTestBrowserClient test_browser_client_;
   ContentBrowserClient* old_browser_client_;
 };
+
+TEST_F(RenderWidgetHostLatencyTrackerTest, TestValidEventTiming) {
+  base::TimeTicks now = base::TimeTicks::Now();
+
+  ui::LatencyInfo latency_info;
+  latency_info.set_trace_id(kTraceEventId);
+  latency_info.set_source_event_type(ui::SourceEventType::WHEEL);
+
+  latency_info.AddLatencyNumberWithTimestamp(
+      ui::INPUT_EVENT_LATENCY_FIRST_SCROLL_UPDATE_ORIGINAL_COMPONENT, 0, 0,
+      now + base::TimeDelta::FromMilliseconds(60), 1);
+
+  latency_info.AddLatencyNumberWithTimestamp(
+      ui::INPUT_EVENT_LATENCY_RENDERING_SCHEDULED_IMPL_COMPONENT, 0, 0,
+      now + base::TimeDelta::FromMilliseconds(50), 1);
+
+  latency_info.AddLatencyNumberWithTimestamp(
+      ui::INPUT_EVENT_LATENCY_RENDERER_SWAP_COMPONENT, 0, 0,
+      now + base::TimeDelta::FromMilliseconds(40), 1);
+
+  latency_info.AddLatencyNumberWithTimestamp(
+      ui::DISPLAY_COMPOSITOR_RECEIVED_FRAME_COMPONENT, 0, 0,
+      now + base::TimeDelta::FromMilliseconds(30), 1);
+
+  latency_info.AddLatencyNumberWithTimestamp(
+      ui::INPUT_EVENT_LATENCY_BEGIN_RWH_COMPONENT,
+      tracker()->latency_component_id(), 0,
+      now + base::TimeDelta::FromMilliseconds(20), 1);
+
+  latency_info.AddLatencyNumberWithTimestamp(
+      ui::INPUT_EVENT_GPU_SWAP_BUFFER_COMPONENT, 0, 0,
+      now + base::TimeDelta::FromMilliseconds(10), 1);
+
+  latency_info.AddLatencyNumberWithTimestamp(
+      ui::INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT, 0, 0, now, 1);
+
+  tracker()->OnGpuSwapBuffersCompleted(latency_info);
+
+  // When last_event_time of the end_component is less than the first_event_time
+  // of the start_component, zero is recorded instead of a negative value.
+  histogram_tester().ExpectUniqueSample(
+      "Event.Latency.ScrollBegin.Wheel.TimeToScrollUpdateSwapBegin2", 0, 1);
+  histogram_tester().ExpectUniqueSample(
+      "Event.Latency.Scroll.Wheel.TimeToScrollUpdateSwapBegin2", 0, 1);
+  histogram_tester().ExpectUniqueSample(
+      "Event.Latency.ScrollBegin.Wheel.TimeToHandled2_Impl", 0, 1);
+  histogram_tester().ExpectUniqueSample(
+      "Event.Latency.Scroll.Wheel.TimeToHandled2_Impl", 0, 1);
+  histogram_tester().ExpectUniqueSample(
+      "Event.Latency.ScrollBegin.Wheel.HandledToRendererSwap2_Impl", 0, 1);
+  histogram_tester().ExpectUniqueSample(
+      "Event.Latency.ScrollBegin.Wheel.RendererSwapToBrowserNotified2", 0, 1);
+  histogram_tester().ExpectUniqueSample(
+      "Event.Latency.ScrollBegin.Wheel.BrowserNotifiedToBeforeGpuSwap2", 0, 1);
+  histogram_tester().ExpectUniqueSample(
+      "Event.Latency.ScrollBegin.Wheel.GpuSwap2", 0, 1);
+}
 
 TEST_F(RenderWidgetHostLatencyTrackerTest, TestWheelToFirstScrollHistograms) {
   const GURL url(kUrl);
@@ -258,37 +239,35 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, TestWheelToFirstScrollHistograms) {
 
       // UKM metrics.
       total_ukm_entry_count++;
-      EXPECT_TRUE(AssertUkmReported("Event.ScrollBegin.Wheel",
-                                    "TimeToScrollUpdateSwapBegin"));
-      // Rappor metrics.
-      EXPECT_TRUE(
-          RapporSampleAssert("Event.Latency.ScrollUpdate.Touch."
-                             "TimeToScrollUpdateSwapBegin2",
-                             0));
-      EXPECT_TRUE(
-          RapporSampleAssert("Event.Latency.ScrollBegin.Touch."
-                             "TimeToScrollUpdateSwapBegin2",
-                             0));
-      EXPECT_TRUE(
-          RapporSampleAssert("Event.Latency.ScrollBegin.Wheel."
-                             "TimeToScrollUpdateSwapBegin2",
-                             2));
-      EXPECT_EQ(2,
-                test_browser_client_.getTestRapporService()->GetReportsCount());
+      ExpectUkmReported(
+          "Event.ScrollBegin.Wheel",
+          {"TimeToScrollUpdateSwapBegin", "TimeToHandled", "IsMainThread"},
+          total_ukm_entry_count);
 
       // UMA histograms.
-      EXPECT_TRUE(HistogramSizeEq("Event.Latency.Browser.WheelUI", 1));
-      EXPECT_TRUE(HistogramSizeEq("Event.Latency.Browser.WheelAcked", 1));
-
       EXPECT_TRUE(
           HistogramSizeEq("Event.Latency.ScrollBegin.Wheel."
                           "TimeToScrollUpdateSwapBegin2",
                           1));
       EXPECT_TRUE(
+          HistogramSizeEq("Event.Latency.Scroll.Wheel."
+                          "TimeToScrollUpdateSwapBegin2",
+                          1));
+      EXPECT_TRUE(
+          HistogramSizeEq("Event.Latency.ScrollUpdate.Wheel."
+                          "TimeToScrollUpdateSwapBegin2",
+                          0));
+      EXPECT_TRUE(
           HistogramSizeEq("Event.Latency.ScrollBegin.Wheel.TimeToHandled2_Main",
                           rendering_on_main ? 1 : 0));
       EXPECT_TRUE(
           HistogramSizeEq("Event.Latency.ScrollBegin.Wheel.TimeToHandled2_Impl",
+                          rendering_on_main ? 0 : 1));
+      EXPECT_TRUE(
+          HistogramSizeEq("Event.Latency.Scroll.Wheel.TimeToHandled2_Main",
+                          rendering_on_main ? 1 : 0));
+      EXPECT_TRUE(
+          HistogramSizeEq("Event.Latency.Scroll.Wheel.TimeToHandled2_Impl",
                           rendering_on_main ? 0 : 1));
       EXPECT_TRUE(HistogramSizeEq(
           "Event.Latency.ScrollBegin.Wheel.HandledToRendererSwap2_Main",
@@ -323,16 +302,14 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, TestWheelToFirstScrollHistograms) {
           0));
       EXPECT_TRUE(
           HistogramSizeEq("Event.Latency.ScrollUpdate.Wheel.GpuSwap2", 0));
-
-      ukm::TestUkmRecorder* test_ukm_recorder =
-          test_browser_client_.GetTestUkmRecorder();
-      EXPECT_EQ(1U, test_ukm_recorder->sources_count());
-      EXPECT_EQ(total_ukm_entry_count, test_ukm_recorder->entries_count());
     }
   }
 }
 
 TEST_F(RenderWidgetHostLatencyTrackerTest, TestWheelToScrollHistograms) {
+  const GURL url(kUrl);
+  size_t total_ukm_entry_count = 0;
+  contents()->NavigateAndCommit(url);
   for (bool rendering_on_main : {false, true}) {
     ResetHistograms();
     {
@@ -355,13 +332,28 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, TestWheelToScrollHistograms) {
       tracker()->OnInputEventAck(wheel, &wheel_latency,
                                  INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
       tracker()->OnGpuSwapBuffersCompleted(wheel_latency);
-      EXPECT_TRUE(HistogramSizeEq("Event.Latency.Browser.WheelUI", 1));
-      EXPECT_TRUE(HistogramSizeEq("Event.Latency.Browser.WheelAcked", 1));
 
+      // UKM metrics.
+      total_ukm_entry_count++;
+      ExpectUkmReported(
+          "Event.ScrollUpdate.Wheel",
+          {"TimeToScrollUpdateSwapBegin", "TimeToHandled", "IsMainThread"},
+          total_ukm_entry_count);
+
+      // UMA histograms.
       EXPECT_TRUE(
           HistogramSizeEq("Event.Latency.ScrollBegin.Wheel."
                           "TimeToScrollUpdateSwapBegin2",
                           0));
+      EXPECT_TRUE(
+          HistogramSizeEq("Event.Latency.Scroll.Wheel."
+                          "TimeToScrollUpdateSwapBegin2",
+                          1));
+      EXPECT_TRUE(
+          HistogramSizeEq("Event.Latency.ScrollUpdate.Wheel."
+                          "TimeToScrollUpdateSwapBegin2",
+                          1));
+
       EXPECT_TRUE(HistogramSizeEq(
           "Event.Latency.ScrollBegin.Wheel.TimeToHandled2_Main", 0));
       EXPECT_TRUE(HistogramSizeEq(
@@ -387,6 +379,12 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, TestWheelToScrollHistograms) {
       EXPECT_TRUE(HistogramSizeEq(
           "Event.Latency.ScrollUpdate.Wheel.TimeToHandled2_Impl",
           rendering_on_main ? 0 : 1));
+      EXPECT_TRUE(
+          HistogramSizeEq("Event.Latency.Scroll.Wheel.TimeToHandled2_Main",
+                          rendering_on_main ? 1 : 0));
+      EXPECT_TRUE(
+          HistogramSizeEq("Event.Latency.Scroll.Wheel.TimeToHandled2_Impl",
+                          rendering_on_main ? 0 : 1));
       EXPECT_TRUE(HistogramSizeEq(
           "Event.Latency.ScrollUpdate.Wheel.HandledToRendererSwap2_Main",
           rendering_on_main ? 1 : 0));
@@ -456,31 +454,12 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, TestTouchToFirstScrollHistograms) {
 
     // UKM metrics.
     total_ukm_entry_count++;
-    EXPECT_TRUE(AssertUkmReported("Event.ScrollBegin.Touch",
-                                  "TimeToScrollUpdateSwapBegin"));
-    // Rappor metrics.
-    EXPECT_TRUE(
-        RapporSampleAssert("Event.Latency.ScrollUpdate.Touch."
-                           "TimeToScrollUpdateSwapBegin2",
-                           0));
-    EXPECT_TRUE(
-        RapporSampleAssert("Event.Latency.ScrollBegin.Touch."
-                           "TimeToScrollUpdateSwapBegin2",
-                           2));
-    EXPECT_TRUE(
-        RapporSampleAssert("Event.Latency.ScrollBegin.Wheel."
-                           "TimeToScrollUpdateSwapBegin2",
-                           0));
-    EXPECT_EQ(2,
-              test_browser_client_.getTestRapporService()->GetReportsCount());
+    ExpectUkmReported(
+        "Event.ScrollBegin.Touch",
+        {"TimeToScrollUpdateSwapBegin", "TimeToHandled", "IsMainThread"},
+        total_ukm_entry_count);
 
     // UMA histograms.
-    EXPECT_TRUE(HistogramSizeEq("Event.Latency.Browser.TouchUI", 1));
-    EXPECT_TRUE(HistogramSizeEq("Event.Latency.Browser.TouchAcked", 1));
-    EXPECT_TRUE(
-        HistogramSizeEq("Event.Latency.TouchToFirstScrollUpdateSwapBegin", 1));
-    EXPECT_TRUE(
-        HistogramSizeEq("Event.Latency.TouchToScrollUpdateSwapBegin", 1));
     EXPECT_TRUE(HistogramSizeEq(
         "Event.Latency.ScrollBegin.Touch.TimeToScrollUpdateSwapBegin2", 1));
 
@@ -523,11 +502,6 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, TestTouchToFirstScrollHistograms) {
         "Event.Latency.ScrollUpdate.Touch.BrowserNotifiedToBeforeGpuSwap2", 0));
     EXPECT_TRUE(
         HistogramSizeEq("Event.Latency.ScrollUpdate.Touch.GpuSwap2", 0));
-
-    ukm::TestUkmRecorder* test_ukm_recorder =
-        test_browser_client_.GetTestUkmRecorder();
-    EXPECT_EQ(1U, test_ukm_recorder->sources_count());
-    EXPECT_EQ(total_ukm_entry_count, test_ukm_recorder->entries_count());
   }
 }
 
@@ -537,8 +511,6 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, TestTouchToScrollHistograms) {
   size_t total_ukm_entry_count = 0;
   for (bool rendering_on_main : {false, true}) {
     ResetHistograms();
-    EXPECT_EQ(0,
-              test_browser_client_.getTestRapporService()->GetReportsCount());
     {
       auto scroll = SyntheticWebGestureEventBuilder::BuildScrollUpdate(
           5.f, -5.f, 0, blink::kWebGestureDeviceTouchscreen);
@@ -584,25 +556,10 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, TestTouchToScrollHistograms) {
 
     // UKM metrics.
     total_ukm_entry_count++;
-    EXPECT_TRUE(AssertUkmReported("Event.ScrollUpdate.Touch",
-                                  "TimeToScrollUpdateSwapBegin"));
-
-    // Rappor metrics.
-    EXPECT_TRUE(
-        RapporSampleAssert("Event.Latency.ScrollUpdate.Touch."
-                           "TimeToScrollUpdateSwapBegin2",
-                           2));
-    EXPECT_TRUE(
-        RapporSampleAssert("Event.Latency.ScrollBegin.Touch."
-                           "TimeToScrollUpdateSwapBegin2",
-                           0));
-    EXPECT_TRUE(
-        RapporSampleAssert("Event.Latency.ScrollBegin.Wheel."
-                           "TimeToScrollUpdateSwapBegin2",
-                           0));
-
-    EXPECT_EQ(2,
-              test_browser_client_.getTestRapporService()->GetReportsCount());
+    ExpectUkmReported(
+        "Event.ScrollUpdate.Touch",
+        {"TimeToScrollUpdateSwapBegin", "TimeToHandled", "IsMainThread"},
+        total_ukm_entry_count);
 
     // UMA histograms.
     EXPECT_TRUE(HistogramSizeEq(
@@ -645,11 +602,6 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, TestTouchToScrollHistograms) {
         "Event.Latency.ScrollUpdate.Touch.BrowserNotifiedToBeforeGpuSwap2", 1));
     EXPECT_TRUE(
         HistogramSizeEq("Event.Latency.ScrollUpdate.Touch.GpuSwap2", 1));
-
-    ukm::TestUkmRecorder* test_ukm_recorder =
-        test_browser_client_.GetTestUkmRecorder();
-    EXPECT_EQ(1U, test_ukm_recorder->sources_count());
-    EXPECT_EQ(total_ukm_entry_count, test_ukm_recorder->entries_count());
   }
 }
 
@@ -696,7 +648,6 @@ TEST_F(RenderWidgetHostLatencyTrackerTest,
     EXPECT_TRUE(touch_latency.FindLatency(
         ui::INPUT_EVENT_LATENCY_TERMINATED_NO_SWAP_COMPONENT, 0, nullptr));
     EXPECT_TRUE(touch_latency.terminated());
-    tracker()->OnGpuSwapBuffersCompleted(touch_latency);
   }
 
   {
@@ -726,13 +677,6 @@ TEST_F(RenderWidgetHostLatencyTrackerTest,
     EXPECT_TRUE(key_latency.terminated());
   }
 
-  EXPECT_TRUE(HistogramSizeEq("Event.Latency.Browser.WheelUI", 1));
-  EXPECT_TRUE(HistogramSizeEq("Event.Latency.Browser.TouchUI", 1));
-  EXPECT_TRUE(HistogramSizeEq("Event.Latency.Browser.WheelAcked", 1));
-  EXPECT_TRUE(HistogramSizeEq("Event.Latency.Browser.TouchAcked", 1));
-  EXPECT_TRUE(
-      HistogramSizeEq("Event.Latency.TouchToFirstScrollUpdateSwapBegin", 1));
-  EXPECT_TRUE(HistogramSizeEq("Event.Latency.TouchToScrollUpdateSwapBegin", 1));
   EXPECT_TRUE(
       HistogramSizeEq("Event.Latency.ScrollUpdate.TouchToHandled_Main", 0));
   EXPECT_TRUE(
@@ -1060,77 +1004,6 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, KeyBlockingAndQueueingTime) {
       ElementsAre(Bucket(event_timestamps_ms[2] - event_timestamps_ms[1], 1)));
 }
 
-TEST_F(RenderWidgetHostLatencyTrackerTest, KeyUILatency) {
-  // These numbers are sensitive to where the histogram buckets are.
-  int event_timestamps_microseconds[] = {100, 185};
-
-  NativeWebKeyboardEvent event(blink::WebKeyboardEvent::kChar,
-                               blink::WebInputEvent::kNoModifiers,
-                               base::TimeTicks::Now());
-  ui::LatencyInfo latency_info;
-  latency_info.set_trace_id(kTraceEventId);
-  latency_info.set_source_event_type(ui::SourceEventType::KEY_PRESS);
-  latency_info.AddLatencyNumberWithTimestamp(
-      ui::INPUT_EVENT_LATENCY_UI_COMPONENT, 0, 0,
-      base::TimeTicks() +
-          base::TimeDelta::FromMicroseconds(event_timestamps_microseconds[0]),
-      1);
-
-  latency_info.AddLatencyNumberWithTimestamp(
-      ui::INPUT_EVENT_LATENCY_BEGIN_RWH_COMPONENT,
-      tracker()->latency_component_id(), 0,
-      base::TimeTicks() +
-          base::TimeDelta::FromMicroseconds(event_timestamps_microseconds[1]),
-      1);
-
-  tracker()->OnInputEvent(event, &latency_info);
-  tracker()->OnInputEventAck(event, &latency_info,
-                             InputEventAckState::INPUT_EVENT_ACK_STATE_UNKNOWN);
-  EXPECT_THAT(
-      histogram_tester().GetAllSamples("Event.Latency.Browser.KeyPressUI"),
-      ElementsAre(Bucket(
-          event_timestamps_microseconds[1] - event_timestamps_microseconds[0],
-          1)));
-}
-
-TEST_F(RenderWidgetHostLatencyTrackerTest, KeyAckedLatency) {
-  // These numbers are sensitive to where the histogram buckets are.
-  int event_timestamps_microseconds[] = {11, 24};
-
-  NativeWebKeyboardEvent event(blink::WebKeyboardEvent::kRawKeyDown,
-                               blink::WebInputEvent::kNoModifiers,
-                               base::TimeTicks::Now());
-  ui::LatencyInfo latency_info;
-  latency_info.set_trace_id(kTraceEventId);
-  latency_info.set_source_event_type(ui::SourceEventType::KEY_PRESS);
-
-  latency_info.AddLatencyNumberWithTimestamp(
-      ui::INPUT_EVENT_LATENCY_BEGIN_RWH_COMPONENT,
-      tracker()->latency_component_id(), 0,
-      base::TimeTicks() +
-          base::TimeDelta::FromMicroseconds(event_timestamps_microseconds[0]),
-      1);
-
-  latency_info.AddLatencyNumberWithTimestamp(
-      ui::INPUT_EVENT_LATENCY_ACK_RWH_COMPONENT, 0, 0,
-      base::TimeTicks() +
-          base::TimeDelta::FromMicroseconds(event_timestamps_microseconds[1]),
-      1);
-
-  tracker()->OnInputEvent(event, &latency_info);
-  // Call ComputeInputLatencyHistograms directly to avoid OnInputEventAck
-  // overwriting components.
-  tracker()->ComputeInputLatencyHistograms(
-      event.GetType(), tracker()->latency_component_id(), latency_info,
-      InputEventAckState::INPUT_EVENT_ACK_STATE_UNKNOWN);
-
-  EXPECT_THAT(
-      histogram_tester().GetAllSamples("Event.Latency.Browser.KeyPressAcked"),
-      ElementsAre(Bucket(
-          event_timestamps_microseconds[1] - event_timestamps_microseconds[0],
-          1)));
-}
-
 TEST_F(RenderWidgetHostLatencyTrackerTest, KeyEndToEndLatency) {
   // These numbers are sensitive to where the histogram buckets are.
   int event_timestamps_microseconds[] = {11, 24};
@@ -1300,11 +1173,15 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, WheelDuringMultiFingerTouch) {
 
 TEST_F(RenderWidgetHostLatencyTrackerTest, ExpectedQueueingTimeAccuracy) {
   // These numbers are sensitive to where the histogram buckets are.
-  int event_timestamps_ms[] = {11, 25, 35};
+  base::TimeTicks event_timestamp =
+      base::TimeTicks() + base::TimeDelta::FromMilliseconds(11);
+  int expected_queueing_time_ms = 1;
+  base::TimeDelta expected_queueing_time =
+      base::TimeDelta::FromMilliseconds(expected_queueing_time_ms);
 
-  for (float expected_queueing_time_ms : {2, 15, 200, 400}) {
-    base::TimeDelta expected_queueing_time =
-        base::TimeDelta::FromMilliseconds(expected_queueing_time_ms);
+  for (float queueing_time_ms : {2, 15, 200, 400}) {
+    base::TimeDelta queueing_time =
+        base::TimeDelta::FromMilliseconds(queueing_time_ms);
     SyntheticWebTouchEvent event;
     // Touch start.
     event.PressPoint(1, 1);
@@ -1319,22 +1196,15 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, ExpectedQueueingTimeAccuracy) {
     fake_latency.set_source_event_type(ui::SourceEventType::TOUCH);
     fake_latency.AddLatencyNumberWithTimestamp(
         ui::INPUT_EVENT_LATENCY_BEGIN_RWH_COMPONENT,
-        tracker()->latency_component_id(), 0,
-        base::TimeTicks() +
-            base::TimeDelta::FromMilliseconds(event_timestamps_ms[0]),
-        1);
+        tracker()->latency_component_id(), 0, event_timestamp, 1);
 
     fake_latency.AddLatencyNumberWithTimestamp(
         ui::INPUT_EVENT_LATENCY_RENDERER_MAIN_COMPONENT, 0, 0,
-        base::TimeTicks() +
-            base::TimeDelta::FromMilliseconds(event_timestamps_ms[1]),
-        1);
+        event_timestamp + queueing_time, 1);
 
     fake_latency.AddLatencyNumberWithTimestamp(
         ui::INPUT_EVENT_LATENCY_ACK_RWH_COMPONENT, 0, 0,
-        base::TimeTicks() +
-            base::TimeDelta::FromMilliseconds(event_timestamps_ms[2]),
-        1);
+        event_timestamp + queueing_time, 1);
 
     // Call ComputeInputLatencyHistograms directly to avoid OnInputEventAck
     // overwriting components.
@@ -1346,51 +1216,44 @@ TEST_F(RenderWidgetHostLatencyTrackerTest, ExpectedQueueingTimeAccuracy) {
                                INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   }
 
-  EXPECT_THAT(
-      histogram_tester().GetAllSamples(
-          "RendererScheduler."
-          "QueueingDurationWhenExpectedQueueingTime_LessThan.10ms"),
-      ElementsAre(Bucket(event_timestamps_ms[1] - event_timestamps_ms[0], 1)));
-
-  EXPECT_THAT(
-      histogram_tester().GetAllSamples(
-          "RendererScheduler."
-          "QueueingDurationWhenExpectedQueueingTime_LessThan.150ms"),
-      ElementsAre(Bucket(event_timestamps_ms[1] - event_timestamps_ms[0], 2)));
-
-  EXPECT_THAT(
-      histogram_tester().GetAllSamples(
-          "RendererScheduler."
-          "QueueingDurationWhenExpectedQueueingTime_LessThan.300ms"),
-      ElementsAre(Bucket(event_timestamps_ms[1] - event_timestamps_ms[0], 3)));
-
-  EXPECT_THAT(
-      histogram_tester().GetAllSamples(
-          "RendererScheduler."
-          "QueueingDurationWhenExpectedQueueingTime_LessThan.450ms"),
-      ElementsAre(Bucket(event_timestamps_ms[1] - event_timestamps_ms[0], 4)));
-
-  EXPECT_THAT(
-      histogram_tester().GetAllSamples(
-          "RendererScheduler."
-          "QueueingDurationWhenExpectedQueueingTime_GreaterThan.10ms"),
-      ElementsAre(Bucket(event_timestamps_ms[1] - event_timestamps_ms[0], 3)));
-
-  EXPECT_THAT(
-      histogram_tester().GetAllSamples(
-          "RendererScheduler."
-          "QueueingDurationWhenExpectedQueueingTime_GreaterThan.150ms"),
-      ElementsAre(Bucket(event_timestamps_ms[1] - event_timestamps_ms[0], 2)));
-
-  EXPECT_THAT(
-      histogram_tester().GetAllSamples(
-          "RendererScheduler."
-          "QueueingDurationWhenExpectedQueueingTime_GreaterThan.300ms"),
-      ElementsAre(Bucket(event_timestamps_ms[1] - event_timestamps_ms[0], 1)));
+  EXPECT_THAT(histogram_tester().GetAllSamples(
+                  "RendererScheduler."
+                  "ExpectedQueueingTimeWhenQueueingTime_LessThan.10ms"),
+              ElementsAre(Bucket(expected_queueing_time_ms, 1)));
 
   EXPECT_THAT(histogram_tester().GetAllSamples(
                   "RendererScheduler."
-                  "QueueingDurationWhenExpectedQueueingTime_GreaterThan.450ms"),
+                  "ExpectedQueueingTimeWhenQueueingTime_LessThan.150ms"),
+              ElementsAre(Bucket(expected_queueing_time_ms, 2)));
+
+  EXPECT_THAT(histogram_tester().GetAllSamples(
+                  "RendererScheduler."
+                  "ExpectedQueueingTimeWhenQueueingTime_LessThan.300ms"),
+              ElementsAre(Bucket(expected_queueing_time_ms, 3)));
+
+  EXPECT_THAT(histogram_tester().GetAllSamples(
+                  "RendererScheduler."
+                  "ExpectedQueueingTimeWhenQueueingTime_LessThan.450ms"),
+              ElementsAre(Bucket(expected_queueing_time_ms, 4)));
+
+  EXPECT_THAT(histogram_tester().GetAllSamples(
+                  "RendererScheduler."
+                  "ExpectedQueueingTimeWhenQueueingTime_GreaterThan.10ms"),
+              ElementsAre(Bucket(expected_queueing_time_ms, 3)));
+
+  EXPECT_THAT(histogram_tester().GetAllSamples(
+                  "RendererScheduler."
+                  "ExpectedQueueingTimeWhenQueueingTime_GreaterThan.150ms"),
+              ElementsAre(Bucket(expected_queueing_time_ms, 2)));
+
+  EXPECT_THAT(histogram_tester().GetAllSamples(
+                  "RendererScheduler."
+                  "ExpectedQueueingTimeWhenQueueingTime_GreaterThan.300ms"),
+              ElementsAre(Bucket(expected_queueing_time_ms, 1)));
+
+  EXPECT_THAT(histogram_tester().GetAllSamples(
+                  "RendererScheduler."
+                  "ExpectedQueueingTimeWhenQueueingTime_GreaterThan.450ms"),
               ElementsAre());
 }
 

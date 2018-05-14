@@ -8,7 +8,9 @@ import android.app.Activity;
 
 import org.chromium.chrome.browser.infobar.InfoBarIdentifier;
 import org.chromium.chrome.browser.infobar.SimpleConfirmInfoBarBuilder;
+import org.chromium.chrome.browser.metrics.WebApkUma;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.webapps.WebApkActivity;
 import org.chromium.ui.base.ActivityWindowAndroid;
 
 /**
@@ -24,6 +26,15 @@ public class ChromeWindow extends ActivityWindowAndroid {
         super(activity);
     }
 
+    @Override
+    protected void logUMAOnRequestPermissionDenied(String permission) {
+        Activity activity = getActivity().get();
+        if (activity instanceof WebApkActivity
+                && ((ChromeActivity) activity).didFinishNativeInitialization()) {
+            WebApkUma.recordAndroidRuntimePermissionDeniedInWebApk(new String[] {permission});
+        }
+    }
+
     /**
      * Shows an infobar error message overriding the WindowAndroid implementation.
      */
@@ -37,7 +48,7 @@ public class ChromeWindow extends ActivityWindowAndroid {
 
         if (tab != null) {
             SimpleConfirmInfoBarBuilder.create(
-                    tab, InfoBarIdentifier.CHROME_WINDOW_ERROR, error, false);
+                    tab, InfoBarIdentifier.WINDOW_ERROR_INFOBAR_DELEGATE_ANDROID, error, false);
         } else {
             super.showCallbackNonExistentError(error);
         }

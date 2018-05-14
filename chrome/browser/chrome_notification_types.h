@@ -116,13 +116,6 @@ enum NotificationType {
   // Details<InfoBar::RemovedDetails>.
   NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // This notification is sent when extensions::TabHelper::SetExtensionApp is
-  // invoked. The source is the extensions::TabHelper SetExtensionApp was
-  // invoked on.
-  NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
-#endif
-
   // Tabs --------------------------------------------------------------------
 
   // Sent when a tab is added to a WebContentsDelegate. The source is the
@@ -240,11 +233,6 @@ enum NotificationType {
 
   // Non-history storage services --------------------------------------------
 
-  // A safe browsing database update completed.  Source is the
-  // SafeBrowsingService and the details are a bool indicating whether the
-  // update was successful.
-  NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE,
-
   // Autocomplete ------------------------------------------------------------
 
   // Sent by the autocomplete controller when done.  The source is the
@@ -274,13 +262,6 @@ enum NotificationType {
   // Sent when content settings change for a tab. The source is a
   // content::WebContents object, the details are None.
   NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
-
-  // Sync --------------------------------------------------------------------
-
-  // The session service has been saved.  This notification type is only sent
-  // if there were new SessionService commands to save, and not for no-op save
-  // operations.
-  NOTIFICATION_SESSION_SERVICE_SAVED,
 
   // Cookies -----------------------------------------------------------------
 
@@ -337,12 +318,7 @@ enum NotificationType {
   //    NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE
   // 4. Boot into retail mode
   //    NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE
-  // 5. Boot into kiosk mode
-  //    NOTIFICATION_KIOSK_APP_LAUNCHED
   NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
-
-  // Sent when proxy dialog is closed.
-  NOTIFICATION_LOGIN_PROXY_CHANGED,
 
   // Send when kiosk auto-launch warning screen is visible.
   NOTIFICATION_KIOSK_AUTOLAUNCH_WARNING_VISIBLE,
@@ -362,9 +338,6 @@ enum NotificationType {
   // Sent when kiosk app list is loaded in UI.
   NOTIFICATION_KIOSK_APPS_LOADED,
 
-  // Sent when a kiosk app is launched.
-  NOTIFICATION_KIOSK_APP_LAUNCHED,
-
   // Sent when the user list has changed.
   NOTIFICATION_USER_LIST_CHANGED,
 
@@ -374,12 +347,6 @@ enum NotificationType {
   // is being deleted, so the receiver shouldn't use the screen locker
   // object.
   NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
-
-  // Sent by DeviceSettingsService to indicate that the ownership status
-  // changed. If you can, please use DeviceSettingsService::Observer instead.
-  // Other singleton-based services can't use that because Observer
-  // unregistration is impossible due to unpredictable deletion order.
-  NOTIFICATION_OWNERSHIP_STATUS_CHANGED,
 #endif
 
 #if defined(TOOLKIT_VIEWS)
@@ -411,7 +378,7 @@ enum NotificationType {
   // which was installed.
   NOTIFICATION_APP_INSTALLED_TO_NTP,
 
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
   // Sent when wallpaper show animation has finished.
   NOTIFICATION_WALLPAPER_ANIMATION_FINISHED,
 #endif

@@ -13,15 +13,16 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_metrics.h"
-#include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/chrome_render_thread_observer.h"
 #include "chrome/renderer/extensions/chrome_extensions_dispatcher_delegate.h"
+#include "chrome/renderer/extensions/extension_process_policy.h"
 #include "chrome/renderer/extensions/renderer_permissions_policy_delegate.h"
 #include "chrome/renderer/extensions/resource_request_policy.h"
 #include "chrome/renderer/media/cast_ipc_dispatcher.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -29,7 +30,6 @@
 #include "extensions/common/switches.h"
 #include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/extension_frame_helper.h"
-#include "extensions/renderer/extension_helper.h"
 #include "extensions/renderer/extensions_render_frame_observer.h"
 #include "extensions/renderer/guest_view/extensions_guest_view_container.h"
 #include "extensions/renderer/guest_view/extensions_guest_view_container_dispatcher.h"
@@ -129,7 +129,7 @@ bool ChromeExtensionsRendererClient::IsIncognitoProcess() const {
 }
 
 int ChromeExtensionsRendererClient::GetLowestIsolatedWorldId() const {
-  return chrome::ISOLATED_WORLD_ID_EXTENSIONS;
+  return ISOLATED_WORLD_ID_EXTENSIONS;
 }
 
 extensions::Dispatcher* ChromeExtensionsRendererClient::GetDispatcher() {
@@ -148,13 +148,11 @@ void ChromeExtensionsRendererClient::OnExtensionUnloaded(
 
 void ChromeExtensionsRendererClient::RenderThreadStarted() {
   content::RenderThread* thread = content::RenderThread::Get();
-  extension_dispatcher_delegate_.reset(
-      new ChromeExtensionsDispatcherDelegate());
   // ChromeRenderViewTest::SetUp() creates its own ExtensionDispatcher and
   // injects it using SetExtensionDispatcher(). Don't overwrite it.
   if (!extension_dispatcher_) {
-    extension_dispatcher_.reset(
-        new extensions::Dispatcher(extension_dispatcher_delegate_.get()));
+    extension_dispatcher_ = std::make_unique<extensions::Dispatcher>(
+        std::make_unique<ChromeExtensionsDispatcherDelegate>());
   }
   permissions_policy_delegate_.reset(
       new extensions::RendererPermissionsPolicyDelegate(
@@ -170,16 +168,12 @@ void ChromeExtensionsRendererClient::RenderThreadStarted() {
 }
 
 void ChromeExtensionsRendererClient::RenderFrameCreated(
-    content::RenderFrame* render_frame) {
-  new extensions::ExtensionsRenderFrameObserver(render_frame);
+    content::RenderFrame* render_frame,
+    service_manager::BinderRegistry* registry) {
+  new extensions::ExtensionsRenderFrameObserver(render_frame, registry);
   new extensions::ExtensionFrameHelper(render_frame,
                                        extension_dispatcher_.get());
   extension_dispatcher_->OnRenderFrameCreated(render_frame);
-}
-
-void ChromeExtensionsRendererClient::RenderViewCreated(
-    content::RenderView* render_view) {
-  new extensions::ExtensionHelper(render_view, extension_dispatcher_.get());
 }
 
 bool ChromeExtensionsRendererClient::OverrideCreatePlugin(
@@ -311,6 +305,15 @@ ChromeExtensionsRendererClient::CreateBrowserPluginDelegate(
     return new extensions::ExtensionsGuestViewContainer(render_frame);
   return new extensions::MimeHandlerViewContainer(render_frame, mime_type,
                                                   original_url);
+}
+
+// static
+blink::WebFrame* ChromeExtensionsRendererClient::FindFrame(
+    blink::WebLocalFrame* relative_to_frame,
+    const std::string& name) {
+  content::RenderFrame* result = extensions::ExtensionFrameHelper::FindFrame(
+      content::RenderFrame::FromWebFrame(relative_to_frame), name);
+  return result ? result->GetWebFrame() : nullptr;
 }
 
 void ChromeExtensionsRendererClient::RunScriptsAtDocumentStart(

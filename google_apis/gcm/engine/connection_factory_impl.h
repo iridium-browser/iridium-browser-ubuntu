@@ -18,8 +18,8 @@
 #include "net/base/backoff_entry.h"
 #include "net/base/network_change_notifier.h"
 #include "net/log/net_log_with_source.h"
-#include "net/proxy/proxy_info.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_info.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/socket/client_socket_handle.h"
 #include "url/gurl.h"
 
@@ -159,8 +159,9 @@ class GCM_EXPORT ConnectionFactoryImpl :
   net::HttpNetworkSession* http_network_session_;
   // Net log to use in connection attempts.
   net::NetLogWithSource net_log_;
-  // The current PAC request, if one exists. Owned by the proxy service.
-  net::ProxyService::PacRequest* pac_request_;
+  // The current proxy resolution request, if one exists. Owned by the proxy
+  // service.
+  net::ProxyResolutionService::Request* proxy_resolve_request_;
   // The current proxy info.
   net::ProxyInfo proxy_info_;
   // The handle to the socket for the current connection, if one exists.

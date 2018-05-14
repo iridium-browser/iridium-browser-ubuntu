@@ -8,6 +8,8 @@
 #include <map>
 #include <set>
 
+#include "base/containers/flat_set.h"
+#include "base/memory/weak_ptr.h"
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
 #include "content/browser/devtools/protocol/target.h"
 #include "content/browser/devtools/protocol/target_auto_attacher.h"
@@ -16,6 +18,8 @@
 namespace content {
 
 class DevToolsAgentHostImpl;
+class NavigationHandle;
+class NavigationThrottle;
 class RenderFrameHostImpl;
 
 namespace protocol {
@@ -24,23 +28,25 @@ class TargetHandler : public DevToolsDomainHandler,
                       public Target::Backend,
                       public DevToolsAgentHostObserver {
  public:
-  TargetHandler();
+  explicit TargetHandler(bool browser_only);
   ~TargetHandler() override;
 
   static std::vector<TargetHandler*> ForAgentHost(DevToolsAgentHostImpl* host);
 
   void Wire(UberDispatcher* dispatcher) override;
-  void SetRenderFrameHost(RenderFrameHostImpl* host) override;
+  void SetRenderer(int process_host_id,
+                   RenderFrameHostImpl* frame_host) override;
   Response Disable() override;
 
   void DidCommitNavigation();
   void RenderFrameHostChanged();
+  std::unique_ptr<NavigationThrottle> CreateThrottleForNavigation(
+      NavigationHandle* navigation_handle);
 
   // Domain implementation.
   Response SetDiscoverTargets(bool discover) override;
   Response SetAutoAttach(bool auto_attach,
                          bool wait_for_debugger_on_start) override;
-  Response SetAttachToFrames(bool value) override;
   Response SetRemoteLocations(
       std::unique_ptr<protocol::Array<Target::RemoteLocation>>) override;
   Response AttachToTarget(const std::string& target_id,
@@ -63,6 +69,7 @@ class TargetHandler : public DevToolsDomainHandler,
                         Maybe<int> width,
                         Maybe<int> height,
                         Maybe<std::string> context_id,
+                        Maybe<bool> enable_begin_frame_control,
                         std::string* out_target_id) override;
   Response GetTargets(
       std::unique_ptr<protocol::Array<Target::TargetInfo>>* target_infos)
@@ -70,6 +77,7 @@ class TargetHandler : public DevToolsDomainHandler,
 
  private:
   class Session;
+  class Throttle;
 
   void AutoAttach(DevToolsAgentHost* host, bool waiting_for_debugger);
   void AutoDetach(DevToolsAgentHost* host);
@@ -77,10 +85,12 @@ class TargetHandler : public DevToolsDomainHandler,
                        Maybe<std::string> target_id,
                        Session** session,
                        bool fall_through);
+  void ClearThrottles();
 
   // DevToolsAgentHostObserver implementation.
   bool ShouldForceDevToolsAgentHostCreation() override;
   void DevToolsAgentHostCreated(DevToolsAgentHost* agent_host) override;
+  void DevToolsAgentHostNavigated(DevToolsAgentHost* agent_host) override;
   void DevToolsAgentHostDestroyed(DevToolsAgentHost* agent_host) override;
   void DevToolsAgentHostAttached(DevToolsAgentHost* agent_host) override;
   void DevToolsAgentHostDetached(DevToolsAgentHost* agent_host) override;
@@ -92,6 +102,9 @@ class TargetHandler : public DevToolsDomainHandler,
   std::map<DevToolsAgentHost*, Session*> auto_attached_sessions_;
   std::set<DevToolsAgentHost*> reported_hosts_;
   int last_session_id_ = 0;
+  bool browser_only_;
+  base::flat_set<Throttle*> throttles_;
+  base::WeakPtrFactory<TargetHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TargetHandler);
 };

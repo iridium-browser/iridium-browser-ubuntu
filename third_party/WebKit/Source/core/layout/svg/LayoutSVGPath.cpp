@@ -31,52 +31,24 @@
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCache.h"
 #include "core/svg/SVGGeometryElement.h"
-#include "platform/wtf/MathExtras.h"
 
 namespace blink {
 
 LayoutSVGPath::LayoutSVGPath(SVGGeometryElement* node) : LayoutSVGShape(node) {}
 
-LayoutSVGPath::~LayoutSVGPath() {}
+LayoutSVGPath::~LayoutSVGPath() = default;
 
 void LayoutSVGPath::UpdateShapeFromElement() {
   LayoutSVGShape::UpdateShapeFromElement();
   ProcessMarkerPositions();
 
   stroke_bounding_box_ = CalculateUpdatedStrokeBoundingBox();
-  if (GetElement())
-    GetElement()->SetNeedsResizeObserverUpdate();
 }
 
 FloatRect LayoutSVGPath::HitTestStrokeBoundingBox() const {
-  const SVGComputedStyle& svg_style = Style()->SvgStyle();
-  if (svg_style.HasStroke())
+  if (StyleRef().SvgStyle().HasStroke())
     return stroke_bounding_box_;
-
-  // Implementation of
-  // http://dev.w3.org/fxtf/css-masking-1/#compute-stroke-bounding-box
-  // except that we ignore whether the stroke is none.
-
-  FloatRect box = fill_bounding_box_;
-
-  const float stroke_width = this->StrokeWidth();
-  if (stroke_width <= 0)
-    return box;
-
-  float delta = stroke_width / 2;
-
-  if (svg_style.HasMiterJoinStyle()) {
-    const float miter = svg_style.StrokeMiterLimit();
-    if (miter < M_SQRT2 && svg_style.HasSquareCapStyle())
-      delta *= M_SQRT2;
-    else
-      delta *= miter;
-  } else if (svg_style.HasSquareCapStyle()) {
-    delta *= M_SQRT2;
-  }
-
-  box.Inflate(delta);
-  return box;
+  return ApproximateStrokeBoundingBox(fill_bounding_box_);
 }
 
 FloatRect LayoutSVGPath::CalculateUpdatedStrokeBoundingBox() const {
@@ -90,7 +62,7 @@ FloatRect LayoutSVGPath::MarkerRect(float stroke_width) const {
   DCHECK(!marker_positions_.IsEmpty());
 
   SVGResources* resources =
-      SVGResourcesCache::CachedResourcesForLayoutObject(this);
+      SVGResourcesCache::CachedResourcesForLayoutObject(*this);
   DCHECK(resources);
 
   LayoutSVGResourceMarker* marker_start = resources->MarkerStart();
@@ -118,7 +90,7 @@ bool LayoutSVGPath::ShouldGenerateMarkerPositions() const {
     return false;
 
   SVGResources* resources =
-      SVGResourcesCache::CachedResourcesForLayoutObject(this);
+      SVGResourcesCache::CachedResourcesForLayoutObject(*this);
   if (!resources)
     return false;
 
@@ -133,7 +105,7 @@ void LayoutSVGPath::ProcessMarkerPositions() {
     return;
 
   SVGResources* resources =
-      SVGResourcesCache::CachedResourcesForLayoutObject(this);
+      SVGResourcesCache::CachedResourcesForLayoutObject(*this);
   DCHECK(resources);
 
   LayoutSVGResourceMarker* marker_start = resources->MarkerStart();

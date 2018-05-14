@@ -32,9 +32,8 @@ void MockVideoCaptureClient::SetQuitCb(base::OnceClosure quit_cb) {
   quit_cb_ = std::move(quit_cb);
 }
 
-void MockVideoCaptureClient::DumpError(
-    const tracked_objects::Location& location,
-    const std::string& message) {
+void MockVideoCaptureClient::DumpError(const base::Location& location,
+                                       const std::string& message) {
   DPLOG(ERROR) << location.ToString() << " " << message;
 }
 
@@ -56,8 +55,8 @@ void MockVideoCaptureClient::OnIncomingCapturedData(
 // Trampoline methods to workaround GMOCK problems with std::unique_ptr<>.
 VideoCaptureDevice::Client::Buffer MockVideoCaptureClient::ReserveOutputBuffer(
     const gfx::Size& dimensions,
-    media::VideoPixelFormat format,
-    media::VideoPixelStorage storage,
+    VideoPixelFormat format,
+    VideoPixelStorage storage,
     int frame_feedback_id) {
   DoReserveOutputBuffer();
   NOTREACHED() << "This should never be called";
@@ -83,11 +82,10 @@ void MockVideoCaptureClient::OnIncomingCapturedBufferExt(
 }
 
 VideoCaptureDevice::Client::Buffer
-MockVideoCaptureClient::ResurrectLastOutputBuffer(
-    const gfx::Size& dimensions,
-    media::VideoPixelFormat format,
-    media::VideoPixelStorage storage,
-    int frame_feedback_id) {
+MockVideoCaptureClient::ResurrectLastOutputBuffer(const gfx::Size& dimensions,
+                                                  VideoPixelFormat format,
+                                                  VideoPixelStorage storage,
+                                                  int frame_feedback_id) {
   DoResurrectLastOutputBuffer();
   NOTREACHED() << "This should never be called";
   return Buffer();

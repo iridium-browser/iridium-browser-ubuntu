@@ -8,7 +8,9 @@ mojom("mojo") {
   sources = [
     "accelerated_widget.mojom",
     "buffer_types.mojom",
+    "ca_layer_params.mojom",
     "color_space.mojom",
+    "gpu_fence_handle.mojom",
     "icc_profile.mojom",
     "overlay_transform.mojom",
     "selection_bound.mojom",
@@ -27,17 +29,5 @@ mojom("test_interfaces") {
 
   public_deps = [
     ":mojo",
-  ]
-}
-
-source_set("struct_traits") {
-  sources = [
-    "selection_bound_struct_traits.h",
-    "transform_struct_traits.h",
-  ]
-  public_deps = [
-    ":mojo_shared_cpp_sources",
-    "//mojo/public/cpp/bindings",
-    "//ui/gfx",
   ]
 }

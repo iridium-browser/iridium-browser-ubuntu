@@ -4,7 +4,8 @@
 
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_collection_utils.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #import "ios/chrome/test/base/scoped_block_swizzler.h"
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
@@ -18,28 +19,28 @@ namespace content_suggestions {
 class ContentSuggestionsCollectionUtilsTest : public PlatformTest {
  public:
   void SetAsIPad() {
-    device_type_swizzler_ = base::MakeUnique<ScopedBlockSwizzler>(
+    device_type_swizzler_ = std::make_unique<ScopedBlockSwizzler>(
         [UIDevice class], @selector(userInterfaceIdiom),
         ^UIUserInterfaceIdiom(id self) {
           return UIUserInterfaceIdiomPad;
         });
   }
   void SetAsIPhone() {
-    device_type_swizzler_ = base::MakeUnique<ScopedBlockSwizzler>(
+    device_type_swizzler_ = std::make_unique<ScopedBlockSwizzler>(
         [UIDevice class], @selector(userInterfaceIdiom),
         ^UIUserInterfaceIdiom(id self) {
           return UIUserInterfaceIdiomPhone;
         });
   }
   void SetAsPortrait() {
-    orientation_swizzler_ = base::MakeUnique<ScopedBlockSwizzler>(
+    orientation_swizzler_ = std::make_unique<ScopedBlockSwizzler>(
         [UIApplication class], @selector(statusBarOrientation),
         ^UIInterfaceOrientation(id self) {
           return UIInterfaceOrientationPortrait;
         });
   }
   void SetAsLandscape() {
-    orientation_swizzler_ = base::MakeUnique<ScopedBlockSwizzler>(
+    orientation_swizzler_ = std::make_unique<ScopedBlockSwizzler>(
         [UIApplication class], @selector(statusBarOrientation),
         ^UIInterfaceOrientation(id self) {
           return UIInterfaceOrientationLandscapeLeft;
@@ -79,11 +80,13 @@ TEST_F(ContentSuggestionsCollectionUtilsTest, doodleFrameIPad) {
 
   // Action.
   CGFloat height = doodleHeight(YES);
-  CGFloat topMargin = doodleTopMargin();
+  CGFloat topMargin = doodleTopMargin(YES);
+  CGFloat topMarginNoToolbar = doodleTopMargin(NO);
 
   // Test.
   EXPECT_EQ(120, height);
   EXPECT_EQ(82, topMargin);
+  EXPECT_EQ(82, topMarginNoToolbar);
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, doodleFrameIPhonePortrait) {
@@ -94,12 +97,14 @@ TEST_F(ContentSuggestionsCollectionUtilsTest, doodleFrameIPhonePortrait) {
   // Action.
   CGFloat heightLogo = doodleHeight(YES);
   CGFloat heightNoLogo = doodleHeight(NO);
-  CGFloat topMargin = doodleTopMargin();
+  CGFloat topMargin = doodleTopMargin(YES);
+  CGFloat topMarginNoToolbar = doodleTopMargin(NO);
 
   // Test.
   EXPECT_EQ(120, heightLogo);
   EXPECT_EQ(60, heightNoLogo);
   EXPECT_EQ(56, topMargin);
+  EXPECT_EQ(0, topMarginNoToolbar);
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, doodleFrameIPhoneLandscape) {
@@ -110,12 +115,14 @@ TEST_F(ContentSuggestionsCollectionUtilsTest, doodleFrameIPhoneLandscape) {
   // Action.
   CGFloat heightLogo = doodleHeight(YES);
   CGFloat heightNoLogo = doodleHeight(NO);
-  CGFloat topMargin = doodleTopMargin();
+  CGFloat topMargin = doodleTopMargin(YES);
+  CGFloat topMarginNoToolbar = doodleTopMargin(NO);
 
   // Test.
   EXPECT_EQ(120, heightLogo);
   EXPECT_EQ(60, heightNoLogo);
   EXPECT_EQ(56, topMargin);
+  EXPECT_EQ(0, topMarginNoToolbar);
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, searchFieldFrameIPad) {
@@ -148,7 +155,7 @@ TEST_F(ContentSuggestionsCollectionUtilsTest, searchFieldFrameIPhonePortrait) {
   CGFloat topMargin = searchFieldTopMargin();
 
   // Test.
-  EXPECT_EQ(16, topMargin);
+  EXPECT_EQ(32, topMargin);
   EXPECT_EQ(width - 2 * margin, resultWidth);
 }
 
@@ -164,7 +171,7 @@ TEST_F(ContentSuggestionsCollectionUtilsTest, searchFieldFrameIPhoneLandscape) {
   CGFloat topMargin = searchFieldTopMargin();
 
   // Test.
-  EXPECT_EQ(16, topMargin);
+  EXPECT_EQ(32, topMargin);
   EXPECT_EQ(width - 2 * margin, resultWidth);
 }
 
@@ -173,8 +180,10 @@ TEST_F(ContentSuggestionsCollectionUtilsTest, heightForLogoHeaderIPad) {
   SetAsIPad();
 
   // Action, tests.
-  EXPECT_EQ(350, heightForLogoHeader(YES, YES));
-  EXPECT_EQ(406, heightForLogoHeader(YES, NO));
+  EXPECT_EQ(350, heightForLogoHeader(YES, YES, YES));
+  EXPECT_EQ(374, heightForLogoHeader(YES, NO, YES));
+  EXPECT_EQ(350, heightForLogoHeader(YES, YES, NO));
+  EXPECT_EQ(374, heightForLogoHeader(YES, NO, NO));
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, heightForLogoHeaderIPhone) {
@@ -182,8 +191,10 @@ TEST_F(ContentSuggestionsCollectionUtilsTest, heightForLogoHeaderIPhone) {
   SetAsIPhone();
 
   // Action, tests.
-  EXPECT_EQ(258, heightForLogoHeader(YES, YES));
-  EXPECT_EQ(258, heightForLogoHeader(YES, NO));
+  EXPECT_EQ(274, heightForLogoHeader(YES, YES, YES));
+  EXPECT_EQ(274, heightForLogoHeader(YES, NO, YES));
+  EXPECT_EQ(218, heightForLogoHeader(YES, YES, NO));
+  EXPECT_EQ(218, heightForLogoHeader(YES, NO, NO));
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, SizeIPhone6) {

@@ -26,13 +26,12 @@
 
 #include "core/CoreExport.h"
 #include "core/html/HTMLFrameElementBase.h"
-#include "core/html/HTMLIFrameElementAllow.h"
 #include "core/html/HTMLIFrameElementSandbox.h"
 #include "platform/Supplementable.h"
-#include "public/platform/WebFeaturePolicy.h"
-#include "public/platform/WebVector.h"
+#include "third_party/WebKit/public/common/feature_policy/feature_policy.h"
 
 namespace blink {
+class Policy;
 
 class CORE_EXPORT HTMLIFrameElement final
     : public HTMLFrameElementBase,
@@ -42,13 +41,15 @@ class CORE_EXPORT HTMLIFrameElement final
 
  public:
   DECLARE_NODE_FACTORY(HTMLIFrameElement);
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
   ~HTMLIFrameElement() override;
   DOMTokenList* sandbox() const;
-  DOMTokenList* allow() const;
+  // Support JS introspection of frame policy (e.g. feature policy)
+  Policy* policy();
 
-  Vector<WebParsedFeaturePolicyDeclaration> ConstructContainerPolicy()
-      const override;
+  ParsedFeaturePolicy ConstructContainerPolicy(
+      Vector<String>* /* messages */,
+      bool* /* old_syntax */) const override;
 
  private:
   explicit HTMLIFrameElement(Document&);
@@ -57,9 +58,10 @@ class CORE_EXPORT HTMLIFrameElement final
 
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;
@@ -67,12 +69,6 @@ class CORE_EXPORT HTMLIFrameElement final
   bool LayoutObjectIsNeeded(const ComputedStyle&) override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
 
-  bool LoadedNonEmptyDocument() const override {
-    return did_load_non_empty_document_;
-  }
-  void DidLoadNonEmptyDocument() override {
-    did_load_non_empty_document_ = true;
-  }
   bool IsInteractiveContent() const override;
 
   ReferrerPolicy ReferrerPolicyAttribute() override;
@@ -80,21 +76,16 @@ class CORE_EXPORT HTMLIFrameElement final
   // FrameOwner overrides:
   bool AllowFullscreen() const override { return allow_fullscreen_; }
   bool AllowPaymentRequest() const override { return allow_payment_request_; }
-  AtomicString Csp() const override { return csp_; }
-  const WebVector<WebFeaturePolicyFeature>& AllowedFeatures() const override {
-    return allowed_features_;
-  }
+  AtomicString RequiredCsp() const override { return required_csp_; }
 
   AtomicString name_;
-  AtomicString csp_;
-  bool did_load_non_empty_document_;
+  AtomicString required_csp_;
+  AtomicString allow_;
   bool allow_fullscreen_;
   bool allow_payment_request_;
   bool collapsed_by_client_;
   Member<HTMLIFrameElementSandbox> sandbox_;
-  Member<HTMLIFrameElementAllow> allow_;
-
-  WebVector<WebFeaturePolicyFeature> allowed_features_;
+  Member<Policy> policy_;
 
   ReferrerPolicy referrer_policy_;
 };

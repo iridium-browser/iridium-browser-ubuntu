@@ -39,22 +39,22 @@ namespace blink {
 class LocalFrameView;
 class PageOverlay;
 class ValidationMessageOverlayDelegate;
-class WebViewBase;
+class WebViewImpl;
 
 class CORE_EXPORT ValidationMessageClientImpl final
     : public GarbageCollectedFinalized<ValidationMessageClientImpl>,
-      public NON_EXPORTED_BASE(ValidationMessageClient),
+      public ValidationMessageClient,
       private PopupOpeningObserver {
   USING_GARBAGE_COLLECTED_MIXIN(ValidationMessageClientImpl);
 
  public:
-  static ValidationMessageClientImpl* Create(WebViewBase&);
+  static ValidationMessageClientImpl* Create(WebViewImpl&);
   ~ValidationMessageClientImpl() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
-  ValidationMessageClientImpl(WebViewBase&);
+  ValidationMessageClientImpl(WebViewImpl&);
   void CheckAnchorStatus(TimerBase*);
   LocalFrameView* CurrentView();
   void HideValidationMessageImmediately(const Element& anchor);
@@ -75,11 +75,9 @@ class CORE_EXPORT ValidationMessageClientImpl final
   // PopupOpeningObserver function
   void WillOpenPopup() override;
 
-  WebViewBase& web_view_;
+  WebViewImpl& web_view_;
   Member<const Element> current_anchor_;
   String message_;
-  IntRect last_anchor_rect_in_screen_;
-  float last_page_scale_factor_;
   double finish_time_;
   std::unique_ptr<TimerBase> timer_;
   std::unique_ptr<PageOverlay> overlay_;

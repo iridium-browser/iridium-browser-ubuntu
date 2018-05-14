@@ -42,36 +42,36 @@ ArcTtsService* ArcTtsService::GetForBrowserContext(
   return ArcTtsServiceFactory::GetForBrowserContext(context);
 }
 
+// static
+ArcTtsService* ArcTtsService::GetForBrowserContextForTesting(
+    content::BrowserContext* context) {
+  return ArcTtsServiceFactory::GetForBrowserContextForTesting(context);
+}
+
 ArcTtsService::ArcTtsService(content::BrowserContext* context,
                              ArcBridgeService* bridge_service)
-    : arc_bridge_service_(bridge_service), binding_(this) {
-  arc_bridge_service_->tts()->AddObserver(this);
+    : arc_bridge_service_(bridge_service),
+      tts_controller_(nullptr) {
+  arc_bridge_service_->tts()->SetHost(this);
 }
 
 ArcTtsService::~ArcTtsService() {
-  // TODO(hidehiko): Currently, the lifetime of ArcBridgeService and
-  // BrowserContextKeyedService is not nested.
-  // If ArcServiceManager::Get() returns nullptr, it is already destructed,
-  // so do not touch it.
-  if (ArcServiceManager::Get())
-    arc_bridge_service_->tts()->RemoveObserver(this);
-}
-
-void ArcTtsService::OnInstanceReady() {
-  mojom::TtsInstance* tts_instance =
-      ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service_->tts(), Init);
-  DCHECK(tts_instance);
-  mojom::TtsHostPtr host_proxy;
-  binding_.Bind(mojo::MakeRequest(&host_proxy));
-  tts_instance->Init(std::move(host_proxy));
+  arc_bridge_service_->tts()->SetHost(nullptr);
 }
 
 void ArcTtsService::OnTtsEvent(uint32_t id,
                                mojom::TtsEventType event_type,
                                uint32_t char_index,
                                const std::string& error_msg) {
-  if (!TtsController::GetInstance())
-    return;
+  if (!tts_controller_) {
+    // GetInstance() returns a base::Singleton<> object which always outlives
+    // |this| object.
+    tts_controller_ = TtsController::GetInstance();
+    if (!tts_controller_) {
+      LOG(WARNING) << "TtsController is not available.";
+      return;
+    }
+  }
 
   TtsEventType chrome_event_type;
   switch (event_type) {
@@ -88,8 +88,7 @@ void ArcTtsService::OnTtsEvent(uint32_t id,
       chrome_event_type = TTS_EVENT_ERROR;
       break;
   }
-  TtsController::GetInstance()->OnTtsEvent(id, chrome_event_type, char_index,
-                                           error_msg);
+  tts_controller_->OnTtsEvent(id, chrome_event_type, char_index, error_msg);
 }
 
 }  // namespace arc

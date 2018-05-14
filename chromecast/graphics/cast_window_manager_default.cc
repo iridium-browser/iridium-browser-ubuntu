@@ -22,8 +22,19 @@ void CastWindowManagerDefault::TearDown() {}
 void CastWindowManagerDefault::AddWindow(gfx::NativeView window) {}
 void CastWindowManagerDefault::SetWindowId(gfx::NativeView window,
                                            WindowId window_id) {}
+void CastWindowManagerDefault::InjectEvent(ui::Event* event) {}
 gfx::NativeView CastWindowManagerDefault::GetRootWindow() {
   return nullptr;
 }
+
+void CastWindowManagerDefault::AddSideSwipeGestureHandler(
+    CastSideSwipeGestureHandlerInterface* handler) {}
+
+void CastWindowManagerDefault::SetColorInversion(bool enable) {}
+
+// Remove the registration of a system side swipe event handler.
+void CastWindowManagerDefault::CastWindowManagerDefault::
+    RemoveSideSwipeGestureHandler(
+        CastSideSwipeGestureHandlerInterface* handler) {}
 
 }  // namespace chromecast

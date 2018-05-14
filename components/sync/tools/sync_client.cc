@@ -17,7 +17,6 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -81,7 +80,7 @@ class MyTestURLRequestContext : public net::TestURLRequestContext {
     context_storage_.set_host_resolver(
         net::HostResolver::CreateDefaultResolver(nullptr));
     context_storage_.set_transport_security_state(
-        base::MakeUnique<net::TransportSecurityState>());
+        std::make_unique<net::TransportSecurityState>());
     Init();
   }
 
@@ -98,7 +97,7 @@ class MyTestURLRequestContextGetter : public net::TestURLRequestContextGetter {
     // Construct |context_| lazily so it gets constructed on the right
     // thread (the IO thread).
     if (!context_)
-      context_ = base::MakeUnique<MyTestURLRequestContext>();
+      context_ = std::make_unique<MyTestURLRequestContext>();
     return context_.get();
   }
 
@@ -150,7 +149,7 @@ class LoggingChangeDelegate : public SyncManager::ChangeDelegate {
                 << "): " << ValueToString(*change_value);
       if (it->action != ChangeRecord::ACTION_DELETE) {
         ReadNode node(trans);
-        CHECK_EQ(node.InitByIdLookup(it->id), BaseNode::INIT_OK);
+        DCHECK_EQ(node.InitByIdLookup(it->id), BaseNode::INIT_OK);
         std::unique_ptr<base::DictionaryValue> details(node.ToValue());
         VLOG(1) << "Details: " << ValueToString(*details);
       }
@@ -167,7 +166,7 @@ class LoggingUnrecoverableErrorHandler : public UnrecoverableErrorHandler {
  public:
   ~LoggingUnrecoverableErrorHandler() override {}
 
-  void OnUnrecoverableError(const tracked_objects::Location& from_here,
+  void OnUnrecoverableError(const base::Location& from_here,
                             const std::string& message) override {
     if (LOG_IS_ON(ERROR)) {
       logging::LogMessage(from_here.file_name(), from_here.line_number(),
@@ -348,7 +347,8 @@ int SyncClientMain(int argc, char* argv[]) {
 
   // Set up database directory for the syncer.
   base::ScopedTempDir database_dir;
-  CHECK(database_dir.CreateUniqueTempDir());
+  bool success = database_dir.CreateUniqueTempDir();
+  DCHECK(success);
 
   // Developers often add types to ModelTypeSet::All() before the server
   // supports them.  We need to be explicit about which types we want here.
@@ -423,7 +423,7 @@ int SyncClientMain(int argc, char* argv[]) {
   args.restored_keystore_key_for_bootstrapping =
       kRestoredKeystoreKeyForBootstrapping;
   args.engine_components_factory =
-      base::MakeUnique<EngineComponentsFactoryImpl>(factory_switches);
+      std::make_unique<EngineComponentsFactoryImpl>(factory_switches);
   args.encryptor = &null_encryptor;
   args.unrecoverable_error_handler = WeakHandle<UnrecoverableErrorHandler>();
   args.report_unrecoverable_error_function =
@@ -436,8 +436,9 @@ int SyncClientMain(int argc, char* argv[]) {
   std::unique_ptr<InvalidatorShim> shim(
       new InvalidatorShim(sync_manager.get()));
   invalidator->RegisterHandler(shim.get());
-  CHECK(invalidator->UpdateRegisteredIds(
-      shim.get(), ModelTypeSetToObjectIdSet(model_types)));
+  success = invalidator->UpdateRegisteredIds(
+      shim.get(), ModelTypeSetToObjectIdSet(model_types));
+  DCHECK(success);
   ModelTypeConnector* model_type_connector =
       sync_manager->GetModelTypeConnector();
   for (ModelTypeSet::Iterator it = model_types.First(); it.Good(); it.Inc()) {

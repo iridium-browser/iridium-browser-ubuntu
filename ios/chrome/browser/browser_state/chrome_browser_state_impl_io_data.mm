@@ -11,10 +11,8 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task_scheduler/post_task.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "components/cookie_config/cookie_store_util.h"
 #include "components/net_log/chrome_net_log.h"
 #include "components/prefs/json_pref_store.h"
@@ -29,7 +27,9 @@
 #include "ios/chrome/browser/net/ios_chrome_network_delegate.h"
 #include "ios/chrome/browser/net/ios_chrome_url_request_context_getter.h"
 #include "ios/chrome/browser/pref_names.h"
-#include "ios/net/cookies/cookie_store_ios.h"
+#import "ios/net/cookies/cookie_store_ios.h"
+#import "ios/net/cookies/ns_http_system_cookie_store.h"
+#import "ios/net/cookies/system_cookie_store.h"
 #include "ios/web/public/web_thread.h"
 #include "net/base/cache_type.h"
 #include "net/cookies/cookie_store.h"
@@ -57,8 +57,6 @@ ChromeBrowserStateImplIOData::Handle::Handle(
 
 ChromeBrowserStateImplIOData::Handle::~Handle() {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  if (io_data_->http_server_properties_manager_)
-    io_data_->http_server_properties_manager_->ShutdownOnPrefSequence();
 
   io_data_->ShutdownOnUIThread(GetAllContextGetters());
 }
@@ -86,11 +84,6 @@ void ChromeBrowserStateImplIOData::Handle::Init(
   io_data_->app_cache_max_size_ = cache_max_size;
 
   io_data_->InitializeMetricsEnabledStateOnUIThread();
-
-  scoped_refptr<base::SequencedTaskRunner> db_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
-           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 }
 
 scoped_refptr<IOSChromeURLRequestContextGetter>
@@ -156,13 +149,6 @@ void ChromeBrowserStateImplIOData::Handle::LazyInitialize() const {
   // Set initialized_ to true at the beginning in case any of the objects
   // below try to get the ResourceContext pointer.
   initialized_ = true;
-  PrefService* pref_service = browser_state_->GetPrefs();
-  io_data_->http_server_properties_manager_ =
-      HttpServerPropertiesManagerFactory::CreateManager(
-          pref_service,
-          GetApplicationContext()->GetIOSChromeIOThread()->net_log());
-  io_data_->set_http_server_properties(
-      base::WrapUnique(io_data_->http_server_properties_manager_));
   io_data_->InitializeOnUIThread(browser_state_);
 }
 
@@ -190,7 +176,6 @@ ChromeBrowserStateImplIOData::LazyParams::~LazyParams() {}
 ChromeBrowserStateImplIOData::ChromeBrowserStateImplIOData()
     : ChromeBrowserStateIOData(
           ios::ChromeBrowserStateType::REGULAR_BROWSER_STATE),
-      http_server_properties_manager_(nullptr),
       app_cache_max_size_(0) {}
 
 ChromeBrowserStateImplIOData::~ChromeBrowserStateImplIOData() {}
@@ -202,11 +187,12 @@ void ChromeBrowserStateImplIOData::InitializeInternal(
   // Set up a persistent store for use by the network stack on the IO thread.
   base::FilePath network_json_store_filepath(
       profile_path_.Append(kIOSChromeNetworkPersistentStateFilename));
-  network_json_store_ = new JsonPrefStore(
-      network_json_store_filepath,
-      JsonPrefStore::GetTaskRunnerForFile(network_json_store_filepath,
-                                          web::WebThread::GetBlockingPool()),
-      std::unique_ptr<PrefFilter>());
+  network_json_store_ =
+      new JsonPrefStore(network_json_store_filepath,
+                        base::CreateSequencedTaskRunnerWithTraits(
+                            {base::MayBlock(), base::TaskPriority::BACKGROUND,
+                             base::TaskShutdownBehavior::BLOCK_SHUTDOWN}),
+                        std::unique_ptr<PrefFilter>());
   network_json_store_->ReadPrefsAsync(nullptr);
 
   net::URLRequestContext* main_context = main_request_context();
@@ -216,8 +202,8 @@ void ChromeBrowserStateImplIOData::InitializeInternal(
 
   ApplyProfileParamsToContext(main_context);
 
-  if (http_server_properties_manager_)
-    http_server_properties_manager_->InitializeOnNetworkSequence();
+  set_http_server_properties(HttpServerPropertiesManagerFactory::CreateManager(
+      network_json_store_, io_thread->net_log()));
 
   main_context->set_transport_security_state(transport_security_state());
 
@@ -234,7 +220,7 @@ void ChromeBrowserStateImplIOData::InitializeInternal(
   main_context->set_http_auth_handler_factory(
       io_thread_globals->http_auth_handler_factory.get());
 
-  main_context->set_proxy_service(proxy_service());
+  main_context->set_proxy_resolution_service(proxy_resolution_service());
 
   net::ChannelIDService* channel_id_service = NULL;
 
@@ -244,7 +230,8 @@ void ChromeBrowserStateImplIOData::InitializeInternal(
       cookie_util::CookieStoreConfig::RESTORED_SESSION_COOKIES,
       cookie_util::CookieStoreConfig::COOKIE_STORE_IOS,
       cookie_config::GetCookieCryptoDelegate());
-  main_cookie_store_ = cookie_util::CreateCookieStore(ios_cookie_config);
+  main_cookie_store_ = cookie_util::CreateCookieStore(
+      ios_cookie_config, std::move(profile_params->system_cookie_store));
 
   if (profile_params->path.BaseName().value() ==
       kIOSChromeInitialBrowserState) {
@@ -275,8 +262,7 @@ void ChromeBrowserStateImplIOData::InitializeInternal(
   std::unique_ptr<net::HttpCache::BackendFactory> main_backend(
       new net::HttpCache::DefaultBackend(
           net::DISK_CACHE, net::CACHE_BACKEND_BLOCKFILE,
-          lazy_params_->cache_path, lazy_params_->cache_max_size,
-          web::WebThread::GetTaskRunnerForThread(web::WebThread::CACHE)));
+          lazy_params_->cache_path, lazy_params_->cache_max_size));
   http_network_session_ = CreateHttpNetworkSession(*profile_params);
   main_http_factory_ = CreateMainHttpFactory(http_network_session_.get(),
                                              std::move(main_backend));
@@ -322,8 +308,10 @@ ChromeBrowserStateImplIOData::InitializeAppRequestContext(
       base::FilePath(),
       cookie_util::CookieStoreConfig::EPHEMERAL_SESSION_COOKIES,
       cookie_util::CookieStoreConfig::COOKIE_STORE_IOS, nullptr);
+  // TODO(crbug.com/779106): Check if cookiestore type should be changed.
   std::unique_ptr<net::CookieStore> cookie_store =
-      cookie_util::CreateCookieStore(ios_cookie_config);
+      cookie_util::CreateCookieStore(
+          ios_cookie_config, std::make_unique<net::NSHTTPSystemCookieStore>());
 
   // Transfer ownership of the ChannelIDStore, HttpNetworkSession, cookies, and
   // cache to AppRequestContext.
@@ -361,6 +349,9 @@ void ChromeBrowserStateImplIOData::ClearNetworkingHistorySinceOnIOThread(
   DCHECK(transport_security_state());
   // Completes synchronously.
   transport_security_state()->DeleteAllDynamicDataSince(time);
-  DCHECK(http_server_properties_manager_);
-  http_server_properties_manager_->Clear(completion);
+  http_server_properties()->Clear(base::BindOnce(
+      [](const base::Closure& completion) {
+        web::WebThread::PostTask(web::WebThread::UI, FROM_HERE, completion);
+      },
+      completion));
 }

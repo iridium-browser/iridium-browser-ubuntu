@@ -8,6 +8,7 @@
 
 #include <utility>
 
+#include "base/files/platform_file.h"
 #include "base/memory/ptr_util.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/display/types/display_snapshot.h"
@@ -115,7 +116,7 @@ void ScreenManager::AddDisplayController(const scoped_refptr<DrmDevice>& drm,
     return;
   }
 
-  controllers_.push_back(base::MakeUnique<HardwareDisplayController>(
+  controllers_.push_back(std::make_unique<HardwareDisplayController>(
       std::unique_ptr<CrtcController>(new CrtcController(drm, crtc, connector)),
       gfx::Point()));
 }
@@ -183,7 +184,7 @@ bool ScreenManager::ActualConfigureDisplayController(
   // mirror mode, subsequent calls configuring the other controllers will
   // restore mirror mode.
   if (controller->IsMirrored()) {
-    controllers_.push_back(base::MakeUnique<HardwareDisplayController>(
+    controllers_.push_back(std::make_unique<HardwareDisplayController>(
         controller->RemoveCrtc(drm, crtc), controller->origin()));
     it = controllers_.end() - 1;
     controller = it->get();
@@ -205,7 +206,7 @@ bool ScreenManager::DisableDisplayController(
   if (it != controllers_.end()) {
     HardwareDisplayController* controller = it->get();
     if (controller->IsMirrored()) {
-      controllers_.push_back(base::MakeUnique<HardwareDisplayController>(
+      controllers_.push_back(std::make_unique<HardwareDisplayController>(
           controller->RemoveCrtc(drm, crtc), controller->origin()));
       controller = controllers_.back().get();
     }
@@ -377,11 +378,11 @@ OverlayPlane ScreenManager::GetModesetBuffer(
   if (!buffer) {
     LOG(ERROR) << "Failed to create scanout buffer";
     return OverlayPlane(nullptr, 0, gfx::OVERLAY_TRANSFORM_INVALID, gfx::Rect(),
-                        gfx::RectF());
+                        gfx::RectF(), base::kInvalidPlatformFile);
   }
 
   FillModesetBuffer(drm, controller, buffer.get());
-  return OverlayPlane(buffer);
+  return OverlayPlane(buffer, base::kInvalidPlatformFile);
 }
 
 bool ScreenManager::EnableController(HardwareDisplayController* controller) {

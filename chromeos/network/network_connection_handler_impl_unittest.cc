@@ -12,10 +12,8 @@
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_task_scheduler.h"
+#include "base/test/scoped_task_environment.h"
 #include "chromeos/cert_loader.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/network/managed_network_configuration_handler_impl.h"
@@ -46,8 +44,8 @@ const char kTetherGuid[] = "tether-guid";
 
 class TestNetworkConnectionObserver : public NetworkConnectionObserver {
  public:
-  TestNetworkConnectionObserver() {}
-  ~TestNetworkConnectionObserver() override {}
+  TestNetworkConnectionObserver() = default;
+  ~TestNetworkConnectionObserver() override = default;
 
   // NetworkConnectionObserver
   void ConnectToNetworkRequested(const std::string& service_path) override {
@@ -89,7 +87,7 @@ class FakeTetherDelegate : public NetworkConnectionHandler::TetherDelegate {
  public:
   FakeTetherDelegate()
       : last_delegate_function_type_(DelegateFunctionType::NONE) {}
-  ~FakeTetherDelegate() override {}
+  ~FakeTetherDelegate() override = default;
 
   enum class DelegateFunctionType { NONE, CONNECT, DISCONNECT };
 
@@ -136,9 +134,11 @@ class FakeTetherDelegate : public NetworkConnectionHandler::TetherDelegate {
 
 class NetworkConnectionHandlerImplTest : public NetworkStateTest {
  public:
-  NetworkConnectionHandlerImplTest() : scoped_task_scheduler_(&message_loop_) {}
+  NetworkConnectionHandlerImplTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
 
-  ~NetworkConnectionHandlerImplTest() override {}
+  ~NetworkConnectionHandlerImplTest() override = default;
 
   void SetUp() override {
     ASSERT_TRUE(test_nssdb_.is_open());
@@ -147,7 +147,6 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
     test_nsscertdb_.reset(new net::NSSCertDatabaseChromeOS(
         crypto::ScopedPK11Slot(PK11_ReferenceSlot(test_nssdb_.slot())),
         crypto::ScopedPK11Slot(PK11_ReferenceSlot(test_nssdb_.slot()))));
-    test_nsscertdb_->SetSlowTaskRunnerForTest(message_loop_.task_runner());
 
     CertLoader::Initialize();
     CertLoader::ForceHardwareBackedForTesting();
@@ -179,7 +178,7 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
     network_connection_handler_->AddObserver(
         network_connection_observer_.get());
 
-    base::RunLoop().RunUntilIdle();
+    scoped_task_environment_.RunUntilIdle();
 
     fake_tether_delegate_.reset(new FakeTetherDelegate());
   }
@@ -207,15 +206,14 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
 
  protected:
   void Connect(const std::string& service_path) {
-    const bool check_error_state = true;
     network_connection_handler_->ConnectToNetwork(
         service_path,
         base::Bind(&NetworkConnectionHandlerImplTest::SuccessCallback,
                    base::Unretained(this)),
         base::Bind(&NetworkConnectionHandlerImplTest::ErrorCallback,
                    base::Unretained(this)),
-        check_error_state);
-    base::RunLoop().RunUntilIdle();
+        true /* check_error_state */, ConnectCallbackMode::ON_COMPLETED);
+    scoped_task_environment_.RunUntilIdle();
   }
 
   void Disconnect(const std::string& service_path) {
@@ -225,7 +223,7 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
                    base::Unretained(this)),
         base::Bind(&NetworkConnectionHandlerImplTest::ErrorCallback,
                    base::Unretained(this)));
-    base::RunLoop().RunUntilIdle();
+    scoped_task_environment_.RunUntilIdle();
   }
 
   void SuccessCallback() { result_ = kSuccessResult; }
@@ -243,19 +241,20 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
 
   void StartCertLoader() {
     CertLoader::Get()->SetUserNSSDB(test_nsscertdb_.get());
-    base::RunLoop().RunUntilIdle();
+    scoped_task_environment_.RunUntilIdle();
   }
 
   void LoginToRegularUser() {
     LoginState::Get()->SetLoggedInState(LoginState::LOGGED_IN_ACTIVE,
                                         LoginState::LOGGED_IN_USER_REGULAR);
-    base::RunLoop().RunUntilIdle();
+    scoped_task_environment_.RunUntilIdle();
   }
 
   scoped_refptr<net::X509Certificate> ImportTestClientCert() {
-    net::CertificateList ca_cert_list(net::CreateCertificateListFromFile(
-        net::GetTestCertsDirectory(), "client_1_ca.pem",
-        net::X509Certificate::FORMAT_AUTO));
+    net::ScopedCERTCertificateList ca_cert_list =
+        net::CreateCERTCertificateListFromFile(
+            net::GetTestCertsDirectory(), "client_1_ca.pem",
+            net::X509Certificate::FORMAT_AUTO);
     if (ca_cert_list.empty()) {
       LOG(ERROR) << "No CA cert loaded.";
       return nullptr;
@@ -298,9 +297,10 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
                                          std::string(),  // no username hash
                                          *network_configs, global_config);
     }
-    base::RunLoop().RunUntilIdle();
+    scoped_task_environment_.RunUntilIdle();
   }
 
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<NetworkConfigurationHandler> network_config_handler_;
   std::unique_ptr<NetworkConnectionHandler> network_connection_handler_;
   std::unique_ptr<TestNetworkConnectionObserver> network_connection_observer_;
@@ -309,13 +309,10 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
   std::unique_ptr<NetworkProfileHandler> network_profile_handler_;
   crypto::ScopedTestNSSDB test_nssdb_;
   std::unique_ptr<net::NSSCertDatabaseChromeOS> test_nsscertdb_;
-  base::MessageLoopForUI message_loop_;
   std::string result_;
   std::unique_ptr<FakeTetherDelegate> fake_tether_delegate_;
 
  private:
-  base::test::ScopedTaskScheduler scoped_task_scheduler_;
-
   DISALLOW_COPY_AND_ASSIGN(NetworkConnectionHandlerImplTest);
 };
 
@@ -361,8 +358,9 @@ TEST_F(NetworkConnectionHandlerImplTest,
        NetworkConnectionHandlerConnectProhibited) {
   EXPECT_FALSE(ConfigureService(kConfigConnectable).empty());
   base::DictionaryValue global_config;
-  global_config.SetBooleanWithoutPathExpansion(
-      ::onc::global_network_config::kAllowOnlyPolicyNetworksToConnect, true);
+  global_config.SetKey(
+      ::onc::global_network_config::kAllowOnlyPolicyNetworksToConnect,
+      base::Value(true));
   SetupPolicy("[]", global_config, false /* load as device policy */);
   LoginToRegularUser();
   Connect(kWifi0);

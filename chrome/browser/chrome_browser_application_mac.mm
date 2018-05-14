@@ -6,7 +6,6 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
-#include "base/debug/crash_logging.h"
 #include "base/logging.h"
 #include "base/mac/call_with_eh_frame.h"
 #include "base/strings/stringprintf.h"
@@ -15,7 +14,7 @@
 #import "chrome/browser/app_controller_mac.h"
 #import "chrome/browser/mac/exception_processor.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/crash_keys.h"
+#include "components/crash/core/common/crash_key.h"
 #import "components/crash/core/common/objc_zombie.h"
 #include "content/public/browser/browser_accessibility_state.h"
 
@@ -166,19 +165,7 @@ void CancelTerminate() {
   [appController stopTryingToTerminateApplication:self];
 }
 
-// The event |mask| has historically been declared as an NSUInteger
-// (unsigned long). Starting in the 10.12 SDK, the mask type changed to
-// NSEventMask (unsigned long long) if __LP64__ and NSUInteger otherwise.
-// These types are incompatible, which creates an issue for suppporting
-// both 10.10/10.11 and 10.12 SDKs. Work around it using the #if below.
-- (NSEvent*)nextEventMatchingMask:
-#if !defined(MAC_OS_X_VERSION_10_12) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_12 || \
-    !defined(__LP64__)
-                                  (NSUInteger)mask
-#else
-                                  (NSEventMask)mask
-#endif
+- (NSEvent*)nextEventMatchingMask:(NSEventMask)mask
                         untilDate:(NSDate*)expiration
                            inMode:(NSString*)mode
                           dequeue:(BOOL)dequeue {
@@ -236,7 +223,9 @@ void CancelTerminate() {
       static_cast<long>(tag),
       [actionString UTF8String],
       aTarget);
-  base::debug::ScopedCrashKey key(crash_keys::mac::kSendAction, value);
+
+  static crash_reporter::CrashKeyString<256> sendActionKey("sendaction");
+  crash_reporter::ScopedCrashKeyString scopedKey(&sendActionKey, value);
 
   __block BOOL rv;
   base::mac::CallWithEHFrame(^{
@@ -255,8 +244,9 @@ void CancelTerminate() {
 
 - (void)sendEvent:(NSEvent*)event {
   TRACE_EVENT0("toplevel", "BrowserCrApplication::sendEvent");
-  base::debug::ScopedCrashKey crash_key(
-      crash_keys::mac::kNSEvent, base::SysNSStringToUTF8([event description]));
+  static crash_reporter::CrashKeyString<256> nseventKey("nsevent");
+  crash_reporter::ScopedCrashKeyString scopedKey(
+      &nseventKey, base::SysNSStringToUTF8([event description]));
 
   base::mac::CallWithEHFrame(^{
     switch (event.type) {
@@ -270,6 +260,7 @@ void CancelTerminate() {
         bool ctrlDown = [event modifierFlags] & NSControlKeyMask;
         if (kioskMode && ([event type] == NSRightMouseDown || ctrlDown))
           break;
+        FALLTHROUGH;  // Not menu-generating, so pass on the event.
       }
 
       default: {

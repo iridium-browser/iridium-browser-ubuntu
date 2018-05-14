@@ -66,13 +66,11 @@ The below is a list of major libraries. For a complete list, look at
 
   [Compiler.h] (e.g. `COMPILER(GCC)`),
   [CPU.h] (e.g. `WTF_CPU_ARM_NEON`),
-  [build_config.h] (e.g. `USE(APPLE_SYSTEM_LOG)`)
 
 * **Miscellaneous**
 
-  [Noncopyable.h] (`WTF_MAKE_NONCOPYABLE`),
   [StdLibExtras.h] (`DEFINE_STATIC_LOCAL` etc.),
-  [CurrentTime.h],
+  [Time.h],
   [CryptographicallyRandomNumber.h],
   [AutoReset.h],
   [Optional.h]
@@ -106,7 +104,6 @@ current location][4] Source/platform/wtf.
 [StringBuilder]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/text/StringBuilder.h
 [CString]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/text/CString.h
 [RefCounted]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/RefCounted.h
-[RefPtr]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/RefPtr.h
 [PtrUtil.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/PtrUtil.h
 [Allocator.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/Allocator.h
 [Functional.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/Functional.h
@@ -117,7 +114,7 @@ current location][4] Source/platform/wtf.
 [build_config.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/build_config.h
 [Noncopyable.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/Noncopyable.h
 [StdLibExtras.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/StdLibExtras.h
-[CurrentTime.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/CurrentTime.h
+[Time.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/Time.h
 [CryptographicallyRandomNumber.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/CryptographicallyRandomNumber.h
 [AutoReset.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/AutoReset.h
 [Optional.h]: https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/wtf/Optional.h

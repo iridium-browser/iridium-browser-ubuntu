@@ -37,13 +37,29 @@ enum NoPromptReasonHistogramValue {
   NO_PROMPT_REASON_BROWSER_NOT_AVAILABLE = 5,
   NO_PROMPT_REASON_NOT_ON_IDLE_STATE = 6,
   NO_PROMPT_REASON_IPC_CONNECTION_BROKEN = 7,
+  NO_PROMPT_REASON_WAITING_FOR_BROWSER = 8,
 
   NO_PROMPT_REASON_MAX,
 };
 
-// When enabled, all user interaction with the Chrome Cleaner will happen from
-// within Chrome.
-extern const base::Feature kInBrowserCleanerUIFeature;
+// These values are used to send UMA information about the histogram type
+// and are replicated in the histograms.xml file, so the order MUST NOT CHANGE.
+enum PromptTypeHistogramValue {
+  PROMPT_TYPE_LEGACY_PROMPT_SHOWN = 0,
+  PROMPT_TYPE_ON_TRANSITION_TO_INFECTED_STATE = 1,
+  PROMPT_TYPE_ON_BROWSER_WINDOW_AVAILABLE = 2,
+
+  PROMPT_TYPE_MAX,
+};
+
+// When enabled, shows a prompt dialog if a cleanup requires a reboot and the
+// Settings page is not the current active tab.
+extern const base::Feature kRebootPromptDialogFeature;
+
+// When enabled, users can initiate cleanups from the Settings page.
+extern const base::Feature kUserInitiatedChromeCleanupsFeature;
+
+extern const char kSRTPromptTrial[];
 
 // Returns true if this Chrome is in a field trial group which shows the SRT
 // prompt.
@@ -53,9 +69,8 @@ bool IsInSRTPromptFieldTrialGroups();
 // elevation icon, i.e., the SRT won't ask for elevation on startup.
 bool SRTPromptNeedsElevationIcon();
 
-// Returns true if this Chrome is in a field trial group which enables running
-// the SwReporter.
-bool IsSwReporterEnabled();
+// Returns true if feature kUserInitiatedChromeCleanupsFeature is enabled.
+bool UserInitiatedCleanupsEnabled();
 
 // Returns the correct SRT download URL for the current field trial.
 GURL GetSRTDownloadURL();
@@ -63,11 +78,18 @@ GURL GetSRTDownloadURL();
 // Returns the value of the incoming SRT seed.
 std::string GetIncomingSRTSeed();
 
+// Returns the group name in the SRTPrompt field trial.
+std::string GetSRTFieldTrialGroupName();
+
+// Returns true if the kRebootPromptDialogFeature is enabled and the prompt
+// dialog is modal.
+bool IsRebootPromptModal();
+
 // Records a value for the SRT Prompt Histogram.
 void RecordSRTPromptHistogram(SRTPromptHistogramValue value);
 
-// Records a SoftwareReporter.PromptShown histogram with value true.
-void RecordPromptShownHistogram();
+// Records a value for SoftwareReporter.PromptShownWithType Histogram
+void RecordPromptShownWithTypeHistogram(PromptTypeHistogramValue value);
 
 // Records a SoftwareReporter.PromptShown histogram with value false and
 // a SoftwareReporter.NoPromptReason histogram with the reason corresponding

@@ -14,21 +14,18 @@ namespace blink {
 
 class ExceptionState;
 
-class CORE_EXPORT Iterator : public GarbageCollectedFinalized<Iterator>,
-                             public ScriptWrappable {
+class CORE_EXPORT Iterator : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  Iterator() {}
-  virtual ~Iterator() {}
+  Iterator() = default;
+  virtual ~Iterator() = default;
 
   virtual ScriptValue next(ScriptState*, ExceptionState&) = 0;
   virtual ScriptValue next(ScriptState*,
                            ScriptValue /* value */,
                            ExceptionState&) = 0;
   Iterator* GetIterator(ScriptState*, ExceptionState&) { return this; }
-
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
 };
 
 }  // namespace blink

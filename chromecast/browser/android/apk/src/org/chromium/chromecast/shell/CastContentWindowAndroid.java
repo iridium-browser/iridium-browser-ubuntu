@@ -35,23 +35,26 @@ public class CastContentWindowAndroid implements CastWebContentsComponent.OnComp
 
     @SuppressWarnings("unused")
     @CalledByNative
-    private static CastContentWindowAndroid create(long nativeCastContentWindowAndroid) {
-        return new CastContentWindowAndroid(
-                nativeCastContentWindowAndroid, ContextUtils.getApplicationContext());
+    private static CastContentWindowAndroid create(
+            long nativeCastContentWindowAndroid, boolean isHeadless, boolean enableTouchInput) {
+        return new CastContentWindowAndroid(nativeCastContentWindowAndroid,
+                ContextUtils.getApplicationContext(), isHeadless, enableTouchInput);
     }
 
-    private CastContentWindowAndroid(long nativeCastContentWindowAndroid, final Context context) {
+    private CastContentWindowAndroid(long nativeCastContentWindowAndroid, final Context context,
+            boolean isHeadless, boolean enableTouchInput) {
         mNativeCastContentWindowAndroid = nativeCastContentWindowAndroid;
         mContext = context;
         mInstanceId = Integer.toString(sInstanceId++);
 
-        mComponent = new CastWebContentsComponent(mInstanceId, this, this);
+        mComponent =
+                new CastWebContentsComponent(mInstanceId, this, this, isHeadless, enableTouchInput);
     }
 
     @SuppressWarnings("unused")
     @CalledByNative
-    private void showWebContents(WebContents webContents) {
-        if (DEBUG) Log.d(TAG, "showWebContents");
+    private void createWindowForWebContents(WebContents webContents) {
+        if (DEBUG) Log.d(TAG, "createWindowForWebContents");
 
         mComponent.start(mContext, webContents);
     }
@@ -63,8 +66,8 @@ public class CastContentWindowAndroid implements CastWebContentsComponent.OnComp
         mNativeCastContentWindowAndroid = 0;
 
         // Note: there is a potential race condition when this function is called after
-        // showWebContents. If the stop intent is received after the start intent but before
-        // onCreate, the activity won't shutdown.
+        // createWindowForWebContents. If the stop intent is received after the start intent but
+        // before onCreate, the activity won't shutdown.
         // TODO(derekjchow): Add a unittest to check this behaviour. Also consider using
         // Instrumentation.startActivitySync to guarentee onCreate is run.
 

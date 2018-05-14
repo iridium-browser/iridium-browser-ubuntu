@@ -5,6 +5,10 @@
 #include "mojo/edk/embedder/platform_handle.h"
 
 #include "build/build_config.h"
+#if defined(OS_FUCHSIA)
+#include <zircon/status.h>
+#include <zircon/syscalls.h>
+#endif
 #if defined(OS_POSIX)
 #include <unistd.h>
 #elif defined(OS_WIN)
@@ -22,7 +26,19 @@ void PlatformHandle::CloseIfNecessary() {
   if (!is_valid())
     return;
 
-#if defined(OS_POSIX)
+#if defined(OS_FUCHSIA)
+  if (handle != ZX_HANDLE_INVALID) {
+    zx_status_t result = zx_handle_close(handle);
+    DCHECK_EQ(ZX_OK, result) << "CloseIfNecessary(zx_handle_close): "
+                             << zx_status_get_string(result);
+    handle = ZX_HANDLE_INVALID;
+  }
+  if (fd >= 0) {
+    bool success = (close(fd) == 0);
+    DPCHECK(success);
+    fd = -1;
+  }
+#elif defined(OS_POSIX)
   if (type == Type::POSIX) {
     bool success = (close(handle) == 0);
     DPCHECK(success);

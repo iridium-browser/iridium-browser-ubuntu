@@ -5,9 +5,9 @@
 #ifndef UI_APP_LIST_VIEWS_APP_LIST_PAGE_H_
 #define UI_APP_LIST_VIEWS_APP_LIST_PAGE_H_
 
+#include "ash/app_list/model/app_list_model.h"
 #include "base/macros.h"
 #include "ui/app_list/app_list_export.h"
-#include "ui/app_list/app_list_model.h"
 #include "ui/views/view.h"
 
 namespace app_list {
@@ -30,25 +30,21 @@ class APP_LIST_EXPORT AppListPage : public views::View {
 
   // Triggered after the animation has updated.
   virtual void OnAnimationUpdated(double progress,
-                                  AppListModel::State from_state,
-                                  AppListModel::State to_state);
+                                  ash::AppListState from_state,
+                                  ash::AppListState to_state);
 
   // Returns where the search box should be when this page is shown. Is at the
   // top of the app list by default, in the contents view's coordinate space.
   virtual gfx::Rect GetSearchBoxBounds() const;
 
   // Returns the bounds of the search box according to |state|.
-  virtual gfx::Rect GetSearchBoxBoundsForState(AppListModel::State state) const;
+  virtual gfx::Rect GetSearchBoxBoundsForState(ash::AppListState state) const;
 
   // Returns where this page should move to when the given state is active.
-  virtual gfx::Rect GetPageBoundsForState(AppListModel::State state) const = 0;
+  virtual gfx::Rect GetPageBoundsForState(ash::AppListState state) const = 0;
 
   // Returns the bounds of the page during dragging.
-  virtual gfx::Rect GetPageBoundsDuringDragging(
-      AppListModel::State state) const;
-
-  // Returns the z height of the search box for this page.
-  virtual int GetSearchBoxZHeight() const;
+  virtual gfx::Rect GetPageBoundsDuringDragging(ash::AppListState state) const;
 
   const ContentsView* contents_view() const { return contents_view_; }
   void set_contents_view(ContentsView* contents_view) {
@@ -57,6 +53,12 @@ class APP_LIST_EXPORT AppListPage : public views::View {
 
   // Returns selected view in this page.
   virtual views::View* GetSelectedView() const;
+
+  // Returns the first focusable view in this page.
+  virtual views::View* GetFirstFocusableView();
+
+  // Returns the last focusable view in this page.
+  virtual views::View* GetLastFocusableView();
 
  protected:
   AppListPage();
@@ -78,8 +80,6 @@ class APP_LIST_EXPORT AppListPage : public views::View {
   // contents view's coordinate space. This is the area of the contents view
   // below the search box.
   gfx::Rect GetDefaultContentsBounds() const;
-
-  bool IsCustomLauncherPageActive() const;
 
  private:
   ContentsView* contents_view_;

@@ -24,16 +24,19 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #include "chrome/browser/ui/cocoa/history_menu_bridge.h"
 #include "chrome/browser/ui/cocoa/test/run_loop_testing.h"
+#include "chrome/browser/ui/search/local_ntp_test_utils.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/chrome_constants.h"
@@ -53,6 +56,9 @@
 #include "extensions/common/extension.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#import "ui/events/test/cocoa_test_event_utils.h"
+
+using base::SysUTF16ToNSString;
 
 namespace {
 
@@ -112,6 +118,44 @@ void RunClosureWhenProfileInitialized(const base::Closure& closure,
 @end
 
 namespace {
+
+using AppControllerBrowserTest = InProcessBrowserTest;
+
+size_t CountVisibleWindows() {
+  size_t count = 0;
+  for (NSWindow* w in [NSApp windows])
+    count = count + ([w isVisible] ? 1 : 0);
+  return count;
+}
+
+// Test browser shutdown with a command in the message queue.
+IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest, CommandDuringShutdown) {
+  EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
+  EXPECT_EQ(1u, CountVisibleWindows());
+
+  chrome::AttemptExit();  // Set chrome::IsTryingToQuit and close all windows.
+
+  // Opening a new window here is fine (unload handlers can also interrupt
+  // exit). But closing the window posts an autorelease on
+  // BrowserWindowController, which calls ~Browser() and, if that was the last
+  // Browser, it invokes applicationWillTerminate: (because IsTryingToQuit is
+  // set). So, verify assumptions then process that autorelease.
+
+  EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
+  EXPECT_EQ(0u, CountVisibleWindows());
+
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(0u, chrome::GetTotalBrowserCount());
+  EXPECT_EQ(0u, CountVisibleWindows());
+
+  NSEvent* cmd_n = cocoa_test_event_utils::KeyEventWithKeyCode(
+      'n', 'n', NSKeyDown, NSCommandKeyMask);
+  [[NSApp mainMenu] performSelector:@selector(performKeyEquivalent:)
+                         withObject:cmd_n
+                         afterDelay:0];
+  // Let the run loop get flushed, during process cleanup and try not to crash.
+}
 
 class AppControllerPlatformAppBrowserTest
     : public extensions::PlatformAppBrowserTest {
@@ -259,7 +303,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerNewProfileManagementBrowserTest,
   base::scoped_nsobject<AppController> ac([[AppController alloc] init]);
 
   // Lock the active profile.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   Profile* profile = [ac lastProfile];
   ProfileAttributesEntry* entry;
   ASSERT_TRUE(g_browser_process->profile_manager()->
@@ -295,7 +339,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerNewProfileManagementBrowserTest,
 
   base::scoped_nsobject<AppController> ac([[AppController alloc] init]);
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   Profile* profile = [ac lastProfile];
   EXPECT_EQ(ProfileManager::GetGuestProfilePath(), profile->GetPath());
   EXPECT_TRUE(profile->IsGuestSession());
@@ -330,7 +374,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerNewProfileManagementBrowserTest,
   // Prohibiting guest mode forces the user manager flow for About Chrome.
   local_state->SetBoolean(prefs::kBrowserGuestModeEnabled, false);
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   Profile* guest_profile = [ac lastProfile];
   EXPECT_EQ(ProfileManager::GetGuestProfilePath(), guest_profile->GetPath());
   EXPECT_TRUE(guest_profile->IsGuestSession());
@@ -419,11 +463,17 @@ class AppControllerReplaceNTPBrowserTest : public InProcessBrowserTest {
 // Tests that when a GURL is opened after startup, it replaces the NTP.
 IN_PROC_BROWSER_TEST_F(AppControllerReplaceNTPBrowserTest,
                        ReplaceNTPAfterStartup) {
+  // Depending on network connectivity, the NTP URL can either be
+  // chrome://newtab/ or chrome-search://local-ntp/local-ntp.html. See
+  // local_ntp_test_utils::GetFinalNtpUrl for more details.
+  std::string expected_url =
+      local_ntp_test_utils::GetFinalNtpUrl(browser()->profile()).spec();
+
   // Ensure that there is exactly 1 tab showing, and the tab is the NTP.
-  GURL ntp(chrome::kChromeUINewTabURL);
+  GURL ntp(expected_url);
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
   browser()->tab_strip_model()->GetActiveWebContents()->GetController().LoadURL(
-      GURL(chrome::kChromeUINewTabURL), content::Referrer(),
+      GURL(expected_url), content::Referrer(),
       ui::PageTransition::PAGE_TRANSITION_LINK, std::string());
 
   // Wait for one navigation on the active web contents.
@@ -543,7 +593,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerMainMenuBrowserTest,
       BookmarkModelFactory::GetForBrowserContext(profile1));
 
   // Create profile 2.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::FilePath path2 = profile_manager->GenerateNextProfileDirectoryPath();
   Profile* profile2 =
       Profile::CreateProfile(path2, NULL, Profile::CREATE_MODE_SYNCHRONOUS);
@@ -556,14 +606,17 @@ IN_PROC_BROWSER_TEST_F(AppControllerMainMenuBrowserTest,
   [ac bookmarkMenuBridge]->GetBookmarkModel()->AddURL(
       [ac bookmarkMenuBridge]->GetBookmarkModel()->bookmark_bar_node(),
       0, title1, url1);
-  [ac bookmarkMenuBridge]->BuildMenu();
+  NSMenu* profile1_submenu = [ac bookmarkMenuBridge]->BookmarkMenu();
+  [[profile1_submenu delegate] menuNeedsUpdate:profile1_submenu];
 
   // Switch to profile 2, create bookmark 2 and force the menu to build.
   [ac windowChangedToProfile:profile2];
   [ac bookmarkMenuBridge]->GetBookmarkModel()->AddURL(
       [ac bookmarkMenuBridge]->GetBookmarkModel()->bookmark_bar_node(),
       0, title2, url2);
-  [ac bookmarkMenuBridge]->BuildMenu();
+  NSMenu* profile2_submenu = [ac bookmarkMenuBridge]->BookmarkMenu();
+  [[profile2_submenu delegate] menuNeedsUpdate:profile2_submenu];
+  EXPECT_NE(profile1_submenu, profile2_submenu);
 
   // Test that only bookmark 2 is shown.
   EXPECT_FALSE([[ac bookmarkMenuBridge]->BookmarkMenu() itemWithTitle:
@@ -579,6 +632,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerMainMenuBrowserTest,
       SysUTF16ToNSString(title1)]);
   EXPECT_FALSE([[ac bookmarkMenuBridge]->BookmarkMenu() itemWithTitle:
       SysUTF16ToNSString(title2)]);
+
+  // Ensure a cached menu was used.
+  EXPECT_EQ(profile1_submenu, [ac bookmarkMenuBridge]->BookmarkMenu());
 }
 
 }  // namespace
@@ -664,7 +720,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerHandoffBrowserTest, TestHandoffURLs) {
 
   // Test that opening a new tab updates the handoff URL.
   GURL test_url2 = embedded_test_server()->GetURL("/title2.html");
-  chrome::NavigateParams params(browser(), test_url2, ui::PAGE_TRANSITION_LINK);
+  NavigateParams params(browser(), test_url2, ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   ui_test_utils::NavigateToURL(&params);
   EXPECT_EQ(g_handoff_url, test_url2);

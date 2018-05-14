@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://w3c.github.io/server-timing/
+// https://w3c.github.io/server-timing/#dom-performanceservertiming
 
 [
-    RuntimeEnabled=ServerTiming
+    RuntimeEnabled=ServerTiming,
+    Exposed=(Window,Worker)
 ] interface PerformanceServerTiming {
-    readonly attribute DOMString metric;
-    readonly attribute double value;
+    readonly attribute DOMString name;
+    readonly attribute DOMHighResTimeStamp duration;
     readonly attribute DOMString description;
+    serializer = {attribute};
 };

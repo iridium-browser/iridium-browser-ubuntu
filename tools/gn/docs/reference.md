@@ -19,9 +19,9 @@
 *   [Target declarations](#targets)
     *   [action: Declare a target that runs a script a single time.](#action)
     *   [action_foreach: Declare a target that runs a script over a set of files.](#action_foreach)
-    *   [bundle_data: [iOS/OS X] Declare a target without output.](#bundle_data)
+    *   [bundle_data: [iOS/macOS] Declare a target without output.](#bundle_data)
     *   [copy: Declare a target that copies files.](#copy)
-    *   [create_bundle: [iOS/OS X] Build an OS X / iOS bundle.](#create_bundle)
+    *   [create_bundle: [iOS/macOS] Build an iOS or macOS bundle.](#create_bundle)
     *   [executable: Declare an executable target.](#executable)
     *   [group: Declare a named group of targets.](#group)
     *   [loadable_module: Declare a loadable module target.](#loadable_module)
@@ -80,6 +80,7 @@
     *   [args: [string list] Arguments passed to an action.](#args)
     *   [asmflags: [string list] Flags passed to the assembler.](#asmflags)
     *   [assert_no_deps: [label pattern list] Ensure no deps on these targets.](#assert_no_deps)
+    *   [bundle_contents_dir: Expansion of {{bundle_contents_dir}} in create_bundle.](#bundle_contents_dir)
     *   [bundle_deps_filter: [label list] A list of labels that are filtered out.](#bundle_deps_filter)
     *   [bundle_executable_dir: Expansion of {{bundle_executable_dir}} in create_bundle](#bundle_executable_dir)
     *   [bundle_plugins_dir: Expansion of {{bundle_plugins_dir}} in create_bundle.](#bundle_plugins_dir)
@@ -102,7 +103,6 @@
     *   [defines: [string list] C preprocessor defines.](#defines)
     *   [depfile: [string] File name for input dependencies for actions.](#depfile)
     *   [deps: [label list] Private linked dependencies.](#deps)
-    *   [xcode_extra_attributes: [scope] Extra attributes for Xcode projects.](#depfile)
     *   [include_dirs: [directory list] Additional include directories.](#include_dirs)
     *   [inputs: [file list] Additional compile-time dependencies.](#inputs)
     *   [ldflags: [string list] Flags passed to the linker.](#ldflags)
@@ -113,6 +113,7 @@
     *   [output_name: [string] Name for the output file other than the default.](#output_name)
     *   [output_prefix_override: [boolean] Don't use prefix for output name.](#output_prefix_override)
     *   [outputs: [file list] Output files for actions and copy targets.](#outputs)
+    *   [partial_info_plist: [filename] Path plist from asset catalog compiler.](#partial_info_plist)
     *   [pool: [string] Label of the pool used by the action.](#pool)
     *   [precompiled_header: [string] Header file to precompile.](#precompiled_header)
     *   [precompiled_header_type: [string] "gcc" or "msvc".](#precompiled_header_type)
@@ -124,10 +125,11 @@
     *   [response_file_contents: [string list] Contents of .rsp file for actions.](#response_file_contents)
     *   [script: [file name] Script file for actions.](#script)
     *   [sources: [file list] Source files for a target.](#sources)
-    *   [xcode_test_application_name: [string] Xcode test application name for unit or ui test.](#xcode_test_application_name)
     *   [testonly: [boolean] Declares a target must only be used for testing.](#testonly)
     *   [visibility: [label list] A list of labels that can depend on a target.](#visibility)
     *   [write_runtime_deps: Writes the target's runtime_deps to the given path.](#write_runtime_deps)
+    *   [xcode_extra_attributes: [scope] Extra attributes for Xcode projects.](#xcode_extra_attributes)
+    *   [test_application_name: [string] Test application name for unit or ui test target.](#test_application_name)
 *   [Other help topics](#other)
     *   [all: Print all the help at once](#all)
     *   [buildargs: How build arguments work.](#buildargs)
@@ -215,7 +217,7 @@
   tries really hard to always write something to the output JSON and convey
   errors that way rather than via return codes.
 ```
-### <a name="args"></a>**gn args <out_dir> [\--list] [\--short] [\--args]**
+### <a name="args"></a>**gn args <out_dir> [\--list] [\--short] [\--args] [\--overrides-only]**
 
 ```
   See also "gn help buildargs" for a more high-level overview of how
@@ -240,17 +242,21 @@
       Note: you can edit the build args manually by editing the file "args.gn"
       in the build directory and then running "gn gen <out_dir>".
 
-  gn args <out_dir> --list[=<exact_arg>] [--short]
+  gn args <out_dir> --list[=<exact_arg>] [--short] [--overrides-only]
       Lists all build arguments available in the current configuration, or, if
       an exact_arg is specified for the list flag, just that one build
       argument.
 
       The output will list the declaration location, current value for the
       build, default value (if different than the current value), and comment
-      preceeding the declaration.
+      preceding the declaration.
 
       If --short is specified, only the names and current values will be
       printed.
+
+      If --overrides-only is specified, only the names and current values of
+      arguments that have been overridden (i.e. non-default arguments) will
+      be printed. Overrides come from the <out_dir>/args.gn file and //.gn
 ```
 
 #### **Examples**
@@ -262,6 +268,9 @@
   gn args out/Debug --list --short
     Prints all arguments with their default values for the out/Debug
     build.
+
+  gn args out/Debug --list --short --overrides-only
+    Prints overridden arguments for the out/Debug build.
 
   gn args out/Debug --list=target_cpu
     Prints information about the "target_cpu" argument for the "
@@ -344,7 +353,7 @@
       included by other targets. Anything in the sources will be considered
       private and will not be includable regardless of dependency paths.
 
-    - Ouptuts from actions are treated like public sources on that target.
+    - Outputs from actions are treated like public sources on that target.
 
     - A target can include headers from a target that depends on it if the
       other target is annotated accordingly. See "gn help
@@ -562,7 +571,7 @@
 
   The contents of some lists ('sources', 'deps', etc.) will be sorted to a
   canonical order. To suppress this, you can add a comment of the form "#
-  NOSORT" immediately preceeding the assignment. e.g.
+  NOSORT" immediately preceding the assignment. e.g.
 
   # NOSORT
   sources = [
@@ -598,11 +607,9 @@
   gn format /abspath/some/BUILD.gn
   gn format --stdin
 ```
-### <a name="gen:"></a>**gn gen**: Generate ninja files.
+### <a name="gen"></a>**gn gen [\--check] [<ide options>] <out_dir>**
 
 ```
-  gn gen [--check] [<ide options>] <out_dir>
-
   Generates ninja files from the current tree and puts them in the given output
   directory.
 
@@ -626,7 +633,7 @@
       Generate files for an IDE. Currently supported values:
       "eclipse" - Eclipse CDT settings file.
       "vs" - Visual Studio project/solution files.
-             (default Visual Studio version: 2015)
+             (default Visual Studio version: 2017)
       "vs2013" - Visual Studio 2013 project/solution files.
       "vs2015" - Visual Studio 2015 project/solution files.
       "vs2017" - Visual Studio 2017 project/solution files.
@@ -656,6 +663,10 @@
       Use the specified Windows 10 SDK version to generate project files.
       As an example, "10.0.15063.0" can be specified to use Creators Update SDK
       instead of the default one.
+
+  --ninja-extra-args=<string>
+      This string is passed without any quoting to the ninja invocation
+      command-line. Can be used to configure ninja flags, like "-j".
 ```
 
 #### **Xcode Flags**
@@ -667,8 +678,7 @@
 
   --ninja-extra-args=<string>
       This string is passed without any quoting to the ninja invocation
-      command-line. Can be used to configure ninja flags, like "-j" if using
-      goma for example.
+      command-line. Can be used to configure ninja flags, like "-j".
 
   --root-target=<target_name>
       Name of the target corresponding to "All" target in Xcode. If unset,
@@ -1152,7 +1162,7 @@
         "/{{source_name_part}}.h" ]
   }
 ```
-### <a name="bundle_data"></a>**bundle_data**: [iOS/OS X] Declare a target without output.
+### <a name="bundle_data"></a>**bundle_data**: [iOS/macOS] Declare a target without output.
 
 ```
   This target type allows to declare data that is required at runtime. It is
@@ -1164,8 +1174,8 @@
   output. The output must reference a file inside of {{bundle_root_dir}}.
 
   This target can be used on all platforms though it is designed only to
-  generate iOS/OS X bundle. In cross-platform projects, it is advised to put it
-  behind iOS/Mac conditionals.
+  generate iOS/macOS bundle. In cross-platform projects, it is advised to put it
+  behind iOS/macOS conditionals.
 
   See "gn help create_bundle" for more information.
 ```
@@ -1243,10 +1253,10 @@
     outputs = [ "$target_gen_dir/{{source_file_part}}" ]
   }
 ```
-### <a name="create_bundle"></a>**create_bundle**: [iOS/OS X] Build an OS X / iOS bundle.
+### <a name="create_bundle"></a>**create_bundle**: [ios/macOS] Build an iOS or macOS bundle.
 
 ```
-  This target generates an iOS/OS X bundle (which is a directory with a
+  This target generates an iOS or macOS bundle (which is a directory with a
   well-know structure). This target does not define any sources, instead they
   are computed from all "bundle_data" target this one depends on transitively
   (the recursion stops at "create_bundle" targets).
@@ -1255,8 +1265,8 @@
   expansion of {{bundle_*_dir}} rules in "bundle_data" outputs.
 
   This target can be used on all platforms though it is designed only to
-  generate iOS/OS X bundle. In cross-platform projects, it is advised to put it
-  behind iOS/Mac conditionals.
+  generate iOS or macOS bundle. In cross-platform projects, it is advised to put
+  it behind iOS/macOS conditionals.
 
   If a create_bundle is specified as a data_deps for another target, the bundle
   is considered a leaf, and its public and private dependencies will not
@@ -1286,10 +1296,11 @@
 #### **Variables**
 
 ```
-  bundle_root_dir*, bundle_resources_dir*, bundle_executable_dir*,
-  bundle_plugins_dir*, bundle_deps_filter, deps, data_deps, public_deps,
-  visibility, product_type, code_signing_args, code_signing_script,
-  code_signing_sources, code_signing_outputs
+  bundle_root_dir*, bundle_contents_dir*, bundle_resources_dir*,
+  bundle_executable_dir*, bundle_plugins_dir*, bundle_deps_filter, deps,
+  data_deps, public_deps, visibility, product_type, code_signing_args,
+  code_signing_script, code_signing_sources, code_signing_outputs,
+  xcode_extra_attributes, xcode_test_application_name, partial_info_plist
   * = required
 ```
 
@@ -1297,7 +1308,7 @@
 
 ```
   # Defines a template to create an application. On most platform, this is just
-  # an alias for an "executable" target, but on iOS/OS X, it builds an
+  # an alias for an "executable" target, but on iOS/macOS, it builds an
   # application bundle.
   template("app") {
     if (!is_ios && !is_mac) {
@@ -1319,7 +1330,7 @@
       bundle_data("${app_name}_bundle_info_plist") {
         deps = [ ":${app_name}_generate_info_plist" ]
         sources = [ "$gen_path/Info.plist" ]
-        outputs = [ "{{bundle_root_dir}}/Info.plist" ]
+        outputs = [ "{{bundle_contents_dir}}/Info.plist" ]
       }
 
       executable("${app_name}_generate_executable") {
@@ -1344,21 +1355,24 @@
 
       create_bundle("${app_name}.app") {
         product_type = "com.apple.product-type.application"
+
         if (is_ios) {
           bundle_root_dir = "${root_build_dir}/$target_name"
-          bundle_resources_dir = bundle_root_dir
-          bundle_executable_dir = bundle_root_dir
-          bundle_plugins_dir = bundle_root_dir + "/Plugins"
+          bundle_contents_dir = bundle_root_dir
+          bundle_resources_dir = bundle_contents_dir
+          bundle_executable_dir = bundle_contents_dir
+          bundle_plugins_dir = "${bundle_contents_dir}/Plugins"
 
-          xcode_extra_attributes = {
+          extra_attributes = {
             ONLY_ACTIVE_ARCH = "YES"
             DEBUG_INFORMATION_FORMAT = "dwarf"
           }
         } else {
-          bundle_root_dir = "${root_build_dir}/target_name/Contents"
-          bundle_resources_dir = bundle_root_dir + "/Resources"
-          bundle_executable_dir = bundle_root_dir + "/MacOS"
-          bundle_plugins_dir = bundle_root_dir + "/Plugins"
+          bundle_root_dir = "${root_build_dir}/target_name"
+          bundle_contents_dir  = "${bundle_root_dir}/Contents"
+          bundle_resources_dir = "${bundle_contents_dir}/Resources"
+          bundle_executable_dir = "${bundle_contents_dir}/MacOS"
+          bundle_plugins_dir = "${bundle_contents_dir}/Plugins"
         }
         deps = [ ":${app_name}_bundle_info_plist" ]
         if (is_ios && code_signing) {
@@ -1402,8 +1416,7 @@
   Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, inputs, output_name,
-           output_extension, public, sources, testonly, visibility,
-           xcode_extra_attributes
+           output_extension, public, sources, testonly, visibility
 ```
 ### <a name="group"></a>**group**: Declare a named group of targets.
 
@@ -2095,7 +2108,7 @@
 ```
   value = getenv(env_var_name)
 
-  Returns the value of the given enironment variable. If the value is not
+  Returns the value of the given environment variable. If the value is not
   found, it will try to look up the variable with the "opposite" case (based on
   the case of the first letter of the variable), but is otherwise
   case-sensitive.
@@ -2744,8 +2757,8 @@
       "action": Defaults for actions
 
     Platform specific tools:
-      "copy_bundle_data": [iOS, OS X] Tool to copy files in a bundle.
-      "compile_xcassets": [iOS, OS X] Tool to compile asset catalogs.
+      "copy_bundle_data": [iOS, macOS] Tool to copy files in a bundle.
+      "compile_xcassets": [iOS, macOS] Tool to compile asset catalogs.
 ```
 
 #### **Tool variables**
@@ -3051,10 +3064,10 @@
 
     {{libs}}
         Expands to the list of system libraries to link to. Each will be
-        prefixed by the "lib_prefix".
+        prefixed by the "lib_switch".
 
         As a special case to support Mac, libraries with names ending in
-        ".framework" will be added to the {{libs}} with "-framework" preceeding
+        ".framework" will be added to the {{libs}} with "-framework" preceding
         it, and the lib prefix will be ignored.
 
         Example: "-lfoo -lbar"
@@ -3081,7 +3094,7 @@
         Example: ".so"
 
     {{solibs}}
-        Extra libraries from shared library dependencide not specified in the
+        Extra libraries from shared library dependencies not specified in the
         {{inputs}}. This is the list of link_output files from shared libraries
         (if the solink tool specifies a "link_output" variable separate from
         the "depend_output").
@@ -3098,7 +3111,7 @@
   common tool substitutions.
 
   The copy_bundle_data and compile_xcassets tools only allows the common tool
-  substitutions. Both tools are required to create iOS/OS X bundles and need
+  substitutions. Both tools are required to create iOS/macOS bundles and need
   only be defined on those platforms.
 
   The copy_bundle_data tool will be called with one source and needs to copy
@@ -3107,7 +3120,7 @@
 
   The compile_xcassets tool will be called with one or more source (each an
   asset catalog) that needs to be compiled to a single output. The following
-  substitutions are avaiable:
+  substitutions are available:
 
     {{inputs}}
         Expands to the list of .xcassets to use as input to compile the asset
@@ -3117,6 +3130,11 @@
         Expands to the product_type of the bundle that will contain the
         compiled asset catalog. Usually corresponds to the product_type
         property of the corresponding create_bundle target.
+
+    {{bundle_partial_info_plist}}
+        Expands to the path to the partial Info.plist generated by the
+        assets catalog compiler. Usually based on the target_name of
+        the create_bundle target.
 ```
 
 #### **Separate linking and dependencies for shared libraries**
@@ -3159,8 +3177,8 @@
 ```
   toolchain("my_toolchain") {
     # Put these at the top to apply to all tools below.
-    lib_prefix = "-l"
-    lib_dir_prefix = "-L"
+    lib_switch = "-l"
+    lib_dir_switch = "-L"
 
     tool("cc") {
       command = "gcc {{source}} -o {{output}}"
@@ -3198,7 +3216,7 @@
   When a target has a dependency on a target using different toolchain (see "gn
   help labels" for how to specify this), GN will start a build using that
   secondary toolchain to resolve the target. GN will load the build config file
-  with the build arguements overridden as specified in the toolchain_args.
+  with the build arguments overridden as specified in the toolchain_args.
   Because the default toolchain is already known, calls to
   set_default_toolchain() are ignored.
 
@@ -3323,7 +3341,7 @@
   that depend on this file.
 
   One use for write_file is to write a list of inputs to an script that might
-  be too long for the command line. However, it is preferrable to use response
+  be too long for the command line. However, it is preferable to use response
   files for this purpose. See "gn help response_file_contents".
 
   TODO(brettw) we probably need an optional third argument to control list
@@ -3703,7 +3721,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -3809,7 +3827,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -3844,7 +3862,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -3888,6 +3906,18 @@
       "//foo:test_support",  # This target is also disallowed.
     ]
   }
+```
+### <a name="bundle_contents_dir"></a>**bundle_contents_dir**: Expansion of {{bundle_contents_dir}} in
+```
+                             create_bundle.
+
+  A string corresponding to a path in $root_build_dir.
+
+  This string is used by the "create_bundle" target to expand the
+  {{bundle_contents_dir}} of the "bundle_data" target it depends on. This must
+  correspond to a path under "bundle_root_dir".
+
+  See "gn help bundle_root_dir" for examples.
 ```
 ### <a name="bundle_deps_filter"></a>**bundle_deps_filter**: [label list] A list of labels that are filtered out.
 
@@ -3970,15 +4000,16 @@
 ```
   bundle_data("info_plist") {
     sources = [ "Info.plist" ]
-    outputs = [ "{{bundle_root_dir}}/Info.plist" ]
+    outputs = [ "{{bundle_contents_dir}}/Info.plist" ]
   }
 
   create_bundle("doom_melon.app") {
     deps = [ ":info_plist" ]
-    bundle_root_dir = root_build_dir + "/doom_melon.app/Contents"
-    bundle_resources_dir = bundle_root_dir + "/Resources"
-    bundle_executable_dir = bundle_root_dir + "/MacOS"
-    bundle_plugins_dir = bundle_root_dir + "/PlugIns"
+    bundle_root_dir = "${root_build_dir}/doom_melon.app"
+    bundle_contents_dir = "${bundle_root_dir}/Contents"
+    bundle_resources_dir = "${bundle_contents_dir}/Resources"
+    bundle_executable_dir = "${bundle_contents_dir}/MacOS"
+    bundle_plugins_dir = "${bundle_contents_dir}/PlugIns"
   }
 ```
 ### <a name="cflags*"></a>**cflags***: Flags passed to the C compiler.
@@ -4009,7 +4040,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4042,7 +4073,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4075,7 +4106,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4108,7 +4139,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4141,7 +4172,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4303,7 +4334,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4360,7 +4391,7 @@
   However, no verification is done on these so GN doesn't enforce this. The
   paths are just rebased and passed along when requested.
 
-  Note: On iOS and OS X, create_bundle targets will not be recursed into when
+  Note: On iOS and macOS, create_bundle targets will not be recursed into when
   gathering data. See "gn help create_bundle" for details.
 
   See "gn help runtime_deps" for how these are used.
@@ -4377,7 +4408,7 @@
   This is normally used for things like plugins or helper programs that a
   target needs at runtime.
 
-  Note: On iOS and OS X, create_bundle targets will not be recursed into when
+  Note: On iOS and macOS, create_bundle targets will not be recursed into when
   gathering data_deps. See "gn help create_bundle" for details.
 
   See also "gn help deps" and "gn help data".
@@ -4412,7 +4443,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4468,7 +4499,7 @@
   A list of target labels.
 
   Specifies private dependencies of a target. Private dependencies are
-  propagated up the dependency tree and linked to dependant targets, but do not
+  propagated up the dependency tree and linked to dependent targets, but do not
   grant the ability to include headers from the dependency. Public configs are
   not forwarded.
 ```
@@ -4483,7 +4514,7 @@
   Executables, shared libraries, and complete static libraries will link all
   propagated targets and stop propagation. Actions and copy steps also stop
   propagation, allowing them to take a library as an input but not force
-  dependants to link to it.
+  dependents to link to it.
 
   Propagation of all_dependent_configs and public_configs happens independently
   of target type. all_dependent_configs are always propagated across all types
@@ -4494,26 +4525,6 @@
   "gn help runtime_deps".
 
   See also "public_deps".
-```
-### <a name="xcode_extra_attributes"></a>**xcode_extra_attributes**: Extra attributes for Xcode projects.
-
-```
-  The value defined in this scope will be copied to the EXTRA_ATTRIBUTES
-  property of the generated Xcode project. They are only meaningful when
-  generating with --ide=xcode.
-
-  See "gn help create_bundle" for more information.
-```
-
-#### **Example**
-
-```
-  create_bundle("chrome") {
-    xcode_extra_attributes = {
-      ONLY_ACTIVE_ARCH = "YES"
-    }
-    ...
-  }
 ```
 ### <a name="include_dirs"></a>**include_dirs**: Additional include directories.
 
@@ -4536,7 +4547,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4644,7 +4655,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4677,7 +4688,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4722,14 +4733,14 @@
   System libraries
       Values not containing '/' will be treated as system library names. These
       will be passed unmodified to the linker and prefixed with the
-      "lib_prefix" attribute of the linker tool. Generally you would set the
+      "lib_switch" attribute of the linker tool. Generally you would set the
       "lib_dirs" so the given library is found. Your BUILD.gn file should not
-      specify the switch (like "-l"): this will be encoded in the "lib_prefix"
+      specify the switch (like "-l"): this will be encoded in the "lib_switch"
       of the tool.
 
   Apple frameworks
       System libraries ending in ".framework" will be special-cased: the switch
-      "-framework" will be prepended instead of the lib_prefix, and the
+      "-framework" will be prepended instead of the lib_switch, and the
       ".framework" suffix will be trimmed. This is to support the way Mac links
       framework dependencies.
 ```
@@ -4746,7 +4757,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -4900,6 +4911,16 @@
   action
     Action targets (excluding action_foreach) must list literal output file(s)
     with no source expansions. See "gn help action".
+```
+### <a name="partial_info_plist"></a>**partial_info_plist**: [filename] Path plist from asset catalog compiler.
+
+```
+  Valid for create_bundle target, corresponds to the path for the partial
+  Info.plist created by the asset catalog compiler that needs to be merged
+  with the application Info.plist (usually done by the code signing script).
+
+  The file will be generated regardless of whether the asset compiler has
+  been invoked or not. See "gn help create_bundle".
 ```
 ### <a name="pool"></a>**pool**: Label of the pool used by the action.
 
@@ -5070,7 +5091,7 @@
      those configs appear in the list.
   5. all_dependent_configs pulled from dependencies, in the order of
      the "deps" list. This is done recursively. If a config appears
-     more than once, only the first occurance will be used.
+     more than once, only the first occurence will be used.
   6. public_configs pulled from dependencies, in the order of the
      "deps" list. If a dependency is public, they will be applied
      recursively.
@@ -5187,7 +5208,7 @@
 
   As a special case, a file ending in ".def" will be treated as a Windows
   module definition file. It will be appended to the link line with a
-  preceeding "/DEF:" string. There must be at most one .def file in a target
+  preceding "/DEF:" string. There must be at most one .def file in a target
   and they do not cross dependency boundaries (so specifying a .def file in a
   static library or source set will have no effect on the executable or shared
   library they're linked into).
@@ -5206,24 +5227,6 @@
 
   copy
     The source are the source files to copy.
-```
-### <a name="xcode_test_application_name"></a>**xcode_test_application_name**: Xcode test application name for unit or ui test target.
-
-```
-  Each Xcode unit and ui test target must have a test application target, and
-  this value is used to specify the relationship. Only meaningful to Xcode
-  (used as part of the Xcode project generation).
-
-  See "gn help create_bundle" for more information.
-```
-
-#### **Example**
-
-```
-  create_bundle("chrome_xctest") {
-    xcode_test_application_name = "chrome"
-    ...
-  }
 ```
 ### <a name="testonly"></a>**testonly**: Declares a target must only be used for testing.
 
@@ -5320,6 +5323,33 @@
   be the main output file of the target itself. The file contents will be the
   same as requesting the runtime deps be written on the command line (see "gn
   help --runtime-deps-list-file").
+```
+### <a name="xcode_extra_attributes"></a>**xcode_extra_attributes**: [scope] Extra attributes for Xcode projects.
+
+```
+  The value defined in this scope will be copied to the EXTRA_ATTRIBUTES
+  property of the generated Xcode project. They are only meaningful when
+  generating with --ide=xcode.
+
+  See "gn help create_bundle" for more information.
+```
+### <a name="test_application_name"></a>**test_application_name**: Test application name for unit or ui test target.
+
+```
+  Each unit and ui test target must have a test application target, and this
+  value is used to specify the relationship. Only meaningful to Xcode (used as
+  part of the Xcode project generation).
+
+  See "gn help create_bundle" for more information.
+```
+
+#### **Exmaple**
+
+```
+  create_bundle("chrome_xctest") {
+    test_application_name = "chrome"
+    ...
+  }
 ```
 ## <a name="other"></a>Other help topics
 
@@ -5536,7 +5566,7 @@
       ... target parameter definitions ...
     }
 
-  There is also a generic "target" function for programatically defined types
+  There is also a generic "target" function for programmatically defined types
   (see "gn help target"). You can define new types using templates (see "gn
   help template"). A template defines some custom code that expands to one or
   more other targets.
@@ -5841,6 +5871,20 @@
 
       Note that if the input is empty, the result will be a null value which
       will produce an error if assigned to a variable.
+
+  "json"
+      Parse the input as a JSON and convert it to equivalent GN rvalue. The data
+      type mapping is:
+        a string in JSON maps to string in GN
+        an integer in JSON maps to integer in GN
+        a float in JSON is unsupported and will result in an error
+        an object in JSON maps to scope in GN
+        an array in JSON maps to list in GN
+        a boolean in JSON maps to boolean in GN
+        a null in JSON is unsupported and will result in an error
+
+      Nota that the dictionary keys have to be valid GN identifiers otherwise
+      they will produce an error.
 
   "trim ..."
       Prefixing any of the other transformations with the word "trim" will

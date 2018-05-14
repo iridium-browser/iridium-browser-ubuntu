@@ -31,9 +31,10 @@
 #ifndef DataTransferItem_h
 #define DataTransferItem_h
 
+#include "base/macros.h"
+#include "bindings/core/v8/v8_function_string_callback.h"
 #include "core/CoreExport.h"
 #include "platform/bindings/ScriptWrappable.h"
-#include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
 
@@ -43,14 +44,10 @@ class DataObjectItem;
 class DataTransfer;
 class ExecutionContext;
 class File;
-class FunctionStringCallback;
 class ScriptState;
 
-class CORE_EXPORT DataTransferItem final
-    : public GarbageCollected<DataTransferItem>,
-      public ScriptWrappable {
+class CORE_EXPORT DataTransferItem final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
-  WTF_MAKE_NONCOPYABLE(DataTransferItem);
 
  public:
   static DataTransferItem* Create(DataTransfer*, DataObjectItem*);
@@ -58,25 +55,25 @@ class CORE_EXPORT DataTransferItem final
   String kind() const;
   String type() const;
 
-  void getAsString(ScriptState*, FunctionStringCallback*);
+  void getAsString(ScriptState*, V8FunctionStringCallback*);
   File* getAsFile() const;
 
   DataTransfer* GetDataTransfer() { return data_transfer_.Get(); }
   DataObjectItem* GetDataObjectItem() { return item_.Get(); }
 
-  DECLARE_TRACE();
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  void Trace(blink::Visitor*) override;
 
  private:
   DataTransferItem(DataTransfer*, DataObjectItem*);
 
-  void RunGetAsStringTask(ExecutionContext*,
-                          FunctionStringCallback*,
-                          const String& data);
+  void RunGetAsStringTask(
+      ExecutionContext*,
+      V8PersistentCallbackFunction<V8FunctionStringCallback>*,
+      const String& data);
 
   Member<DataTransfer> data_transfer_;
   Member<DataObjectItem> item_;
-  HeapVector<TraceWrapperMember<FunctionStringCallback>> callbacks_;
+  DISALLOW_COPY_AND_ASSIGN(DataTransferItem);
 };
 
 }  // namespace blink

@@ -12,12 +12,6 @@ Polymer({
       notify: true,
     },
 
-    /** @type {!Array<!CupsPrinterInfo>} */
-    cupsPrinters: {
-      type: Array,
-      notify: true,
-    },
-
     searchTerm: {
       type: String,
     },
@@ -26,7 +20,7 @@ Polymer({
     focusConfig_: {
       type: Object,
       value: function() {
-        var map = new Map();
+        const map = new Map();
         if (settings.routes.CLOUD_PRINTERS) {
           map.set(
               settings.routes.CLOUD_PRINTERS.path,
@@ -48,6 +42,12 @@ Polymer({
   /** @private */
   onTapCupsPrinters_: function() {
     settings.navigateTo(settings.routes.CUPS_PRINTERS);
+  },
+  // </if>
+
+  // <if expr="not chromeos">
+  onTapLocalPrinters_: function() {
+    settings.PrintingBrowserProxyImpl.getInstance().openSystemPrintDialog();
   },
   // </if>
 

@@ -7,6 +7,7 @@
 
 #include <memory>
 #include "core/CoreExport.h"
+#include "core/script/Script.h"
 #include "platform/CrossOriginAttributeValue.h"
 #include "platform/loader/fetch/ClientHintsPreferences.h"
 #include "platform/loader/fetch/FetchParameters.h"
@@ -20,6 +21,7 @@
 
 namespace blink {
 
+class CSSPreloaderResourceClient;
 class Document;
 
 class CORE_EXPORT PreloadRequest {
@@ -66,9 +68,8 @@ class CORE_EXPORT PreloadRequest {
 
   bool IsSafeToSendToAnotherThread() const;
 
-  Resource* Start(Document*);
+  Resource* Start(Document*, CSSPreloaderResourceClient*);
 
-  double DiscoveryTime() const { return discovery_time_; }
   void SetDefer(FetchParameters::DeferOption defer) { defer_ = defer; }
   void SetCharset(const String& charset) { charset_ = charset.IsolatedCopy(); }
   void SetCrossOrigin(CrossOriginAttributeValue cross_origin) {
@@ -94,11 +95,15 @@ class CORE_EXPORT PreloadRequest {
     return client_hints_preferences_;
   }
   ReferrerPolicy GetReferrerPolicy() const { return referrer_policy_; }
+
+  void SetScriptType(ScriptType script_type) { script_type_ = script_type; }
+
+  // Only scripts and css stylesheets need to have integrity set on preloads.
+  // This is because neither resource keeps raw data around to redo an
+  // integrity check. A resource in memory cache needs integrity
+  // data cached to match an outgoing request.
   void SetIntegrityMetadata(const IntegrityMetadataSet& metadata_set) {
     integrity_metadata_ = metadata_set;
-  }
-  const IntegrityMetadataSet& IntegrityMetadata() const {
-    return integrity_metadata_;
   }
   void SetFromInsertionScanner(const bool from_insertion_scanner) {
     from_insertion_scanner_ = from_insertion_scanner;
@@ -125,8 +130,9 @@ class CORE_EXPORT PreloadRequest {
         resource_url_(resource_url.IsolatedCopy()),
         base_url_(base_url.Copy()),
         resource_type_(resource_type),
+        script_type_(ScriptType::kClassic),
         cross_origin_(kCrossOriginAttributeNotSet),
-        discovery_time_(MonotonicallyIncreasingTime()),
+        discovery_time_(CurrentTimeTicksInSeconds()),
         defer_(FetchParameters::kNoDefer),
         resource_width_(resource_width),
         client_hints_preferences_(client_hints_preferences),
@@ -144,6 +150,7 @@ class CORE_EXPORT PreloadRequest {
   KURL base_url_;
   String charset_;
   Resource::Type resource_type_;
+  ScriptType script_type_;
   CrossOriginAttributeValue cross_origin_;
   String nonce_;
   double discovery_time_;

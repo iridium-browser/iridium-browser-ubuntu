@@ -12,9 +12,7 @@
 #include "ash/system/network/network_icon_animation_observer.h"
 #include "ash/system/network/network_list.h"
 #include "ash/system/network/tray_network_state_observer.h"
-#include "ash/system/system_notifier.h"
 #include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_item_more.h"
@@ -30,7 +28,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/notification.h"
+#include "ui/message_center/public/cpp/notification.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/link_listener.h"
@@ -48,6 +46,7 @@ namespace tray {
 namespace {
 
 constexpr char kWifiToggleNotificationId[] = "wifi-toggle";
+constexpr char kNotifierWifiToggle[] = "ash.wifi-toggle";
 
 // Returns the connected, non-virtual (aka VPN), network.
 const NetworkState* GetConnectedNetwork() {
@@ -65,7 +64,7 @@ std::unique_ptr<Notification> CreateNotification(bool wifi_enabled) {
       gfx::Image(network_icon::GetImageForWiFiEnabledState(wifi_enabled)),
       base::string16() /* display_source */, GURL(),
       message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
-                                 system_notifier::kNotifierWifiToggle),
+                                 kNotifierWifiToggle),
       message_center::RichNotificationData(), nullptr));
   return notification;
 }
@@ -79,6 +78,7 @@ class NetworkTrayView : public TrayItemView,
       : TrayItemView(network_tray) {
     CreateImageView();
     UpdateNetworkStateHandlerIcon();
+    UpdateConnectionStatus(GetConnectedNetwork(), true /* notify_a11y */);
   }
 
   ~NetworkTrayView() override {
@@ -99,41 +99,67 @@ class NetworkTrayView : public TrayItemView,
       network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
     else
       network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
-    // Update accessibility.
-    const NetworkState* connected_network = GetConnectedNetwork();
-    if (connected_network) {
-      UpdateConnectionStatus(base::UTF8ToUTF16(connected_network->name()),
-                             true);
-    } else {
-      UpdateConnectionStatus(base::string16(), false);
-    }
   }
 
   // views::View:
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
     node_data->SetName(connection_status_string_);
-    node_data->role = ui::AX_ROLE_BUTTON;
+    node_data->role = ax::mojom::Role::kButton;
   }
 
   // network_icon::AnimationObserver:
-  void NetworkIconChanged() override { UpdateNetworkStateHandlerIcon(); }
+  void NetworkIconChanged() override {
+    UpdateNetworkStateHandlerIcon();
+    UpdateConnectionStatus(GetConnectedNetwork(), false /* notify_a11y */);
+  }
 
- private:
   // Updates connection status and notifies accessibility event when necessary.
-  void UpdateConnectionStatus(const base::string16& network_name,
-                              bool connected) {
+  void UpdateConnectionStatus(const NetworkState* connected_network,
+                              bool notify_a11y) {
+    using SignalStrength = network_icon::SignalStrength;
+
     base::string16 new_connection_status_string;
-    if (connected) {
+    if (connected_network) {
       new_connection_status_string = l10n_util::GetStringFUTF16(
-          IDS_ASH_STATUS_TRAY_NETWORK_CONNECTED, network_name);
+          IDS_ASH_STATUS_TRAY_NETWORK_CONNECTED,
+          base::UTF8ToUTF16(connected_network->name()));
+
+      // Retrieve the string describing the signal strength, if it is applicable
+      // to |connected_network|.
+      base::string16 signal_strength_string;
+      switch (network_icon::GetSignalStrengthForNetwork(connected_network)) {
+        case SignalStrength::NONE:
+        case SignalStrength::NOT_WIRELESS:
+          break;
+        case SignalStrength::WEAK:
+          signal_strength_string = l10n_util::GetStringUTF16(
+              IDS_ASH_STATUS_TRAY_NETWORK_SIGNAL_WEAK);
+          break;
+        case SignalStrength::MEDIUM:
+          signal_strength_string = l10n_util::GetStringUTF16(
+              IDS_ASH_STATUS_TRAY_NETWORK_SIGNAL_MEDIUM);
+          break;
+        case SignalStrength::STRONG:
+          signal_strength_string = l10n_util::GetStringUTF16(
+              IDS_ASH_STATUS_TRAY_NETWORK_SIGNAL_STRONG);
+          break;
+      }
+
+      if (!signal_strength_string.empty()) {
+        new_connection_status_string = l10n_util::GetStringFUTF16(
+            IDS_ASH_STATUS_TRAY_NETWORK_CONNECTED_ACCESSIBLE,
+            base::UTF8ToUTF16(connected_network->name()),
+            signal_strength_string);
+      }
     }
     if (new_connection_status_string != connection_status_string_) {
       connection_status_string_ = new_connection_status_string;
-      if (!connection_status_string_.empty())
-        NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, true);
+      if (notify_a11y && !connection_status_string_.empty())
+        NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
     }
   }
 
+ private:
   void UpdateIcon(bool tray_icon_visible, const gfx::ImageSkia& image) {
     image_view()->SetImage(image);
     SetVisible(tray_icon_visible);
@@ -281,12 +307,14 @@ void TrayNetwork::RequestToggleWifi() {
 }
 
 void TrayNetwork::OnCaptivePortalDetected(const std::string& /* guid */) {
-  NetworkStateChanged();
+  NetworkStateChanged(true /* notify_a11y */);
 }
 
-void TrayNetwork::NetworkStateChanged() {
-  if (tray_)
+void TrayNetwork::NetworkStateChanged(bool notify_a11y) {
+  if (tray_) {
     tray_->UpdateNetworkStateHandlerIcon();
+    tray_->UpdateConnectionStatus(tray::GetConnectedNetwork(), notify_a11y);
+  }
   if (default_)
     default_->Update();
   if (detailed_)

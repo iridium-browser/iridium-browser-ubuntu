@@ -18,20 +18,28 @@ namespace metrics {
 
 namespace {
 
-RendererUptimeTracker* g_instance = nullptr;
+RendererUptimeTracker* g_renderer_uptime_tracker_instance = nullptr;
 
 }  // namespace
 
 // static
 void RendererUptimeTracker::Initialize() {
-  DCHECK(!g_instance);
-  g_instance = new RendererUptimeTracker;
+  DCHECK(!g_renderer_uptime_tracker_instance);
+  g_renderer_uptime_tracker_instance = new RendererUptimeTracker;
+}
+
+// static
+RendererUptimeTracker* RendererUptimeTracker::SetMockRendererUptimeTracker(
+    RendererUptimeTracker* tracker) {
+  RendererUptimeTracker* old_tracker = g_renderer_uptime_tracker_instance;
+  g_renderer_uptime_tracker_instance = tracker;
+  return old_tracker;
 }
 
 // static
 RendererUptimeTracker* RendererUptimeTracker::Get() {
-  DCHECK(g_instance);
-  return g_instance;
+  DCHECK(g_renderer_uptime_tracker_instance);
+  return g_renderer_uptime_tracker_instance;
 }
 
 RendererUptimeTracker::RendererUptimeTracker() {
@@ -47,6 +55,15 @@ RendererUptimeTracker::~RendererUptimeTracker() {}
 
 void RendererUptimeTracker::OnRendererStarted(int pid) {
   info_map_[pid] = RendererInfo{base::TimeTicks::Now(), 0};
+}
+
+base::TimeDelta RendererUptimeTracker::GetProcessUptime(int pid) {
+  auto it = info_map_.find(pid);
+  // The pid may not exist when process fails to start up or when process is
+  // terminated without reuse.
+  if (it == info_map_.end())
+    return base::TimeDelta();
+  return base::TimeTicks::Now() - it->second.launched_at_;
 }
 
 void RendererUptimeTracker::OnRendererTerminated(int pid) {

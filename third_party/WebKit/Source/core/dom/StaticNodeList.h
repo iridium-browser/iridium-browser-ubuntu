@@ -49,8 +49,8 @@ class StaticNodeTypeList final : public NodeList {
   unsigned length() const override;
   NodeType* item(unsigned index) const override;
 
-  DECLARE_VIRTUAL_TRACE();
-  DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
+  virtual void Trace(blink::Visitor*);
+  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
     for (unsigned i = 0; i < length(); i++)
       visitor->TraceWrappers(nodes_[i]);
     NodeList::TraceWrappers(visitor);
@@ -66,12 +66,12 @@ template <typename NodeType>
 StaticNodeTypeList<NodeType>* StaticNodeTypeList<NodeType>::Adopt(
     HeapVector<Member<NodeType>>& nodes) {
   StaticNodeTypeList<NodeType>* node_list = new StaticNodeTypeList<NodeType>;
-  swap(node_list->nodes_, nodes, node_list);
+  swap(node_list->nodes_, nodes);
   return node_list;
 }
 
 template <typename NodeType>
-StaticNodeTypeList<NodeType>::~StaticNodeTypeList() {}
+StaticNodeTypeList<NodeType>::~StaticNodeTypeList() = default;
 
 template <typename NodeType>
 unsigned StaticNodeTypeList<NodeType>::length() const {
@@ -82,7 +82,7 @@ template <typename NodeType>
 NodeType* StaticNodeTypeList<NodeType>::item(unsigned index) const {
   if (index < nodes_.size())
     return nodes_[index].Get();
-  return 0;
+  return nullptr;
 }
 
 template <typename NodeType>

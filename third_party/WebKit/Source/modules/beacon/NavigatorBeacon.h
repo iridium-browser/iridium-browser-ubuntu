@@ -21,6 +21,8 @@ class NavigatorBeacon final : public GarbageCollectedFinalized<NavigatorBeacon>,
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorBeacon);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorBeacon& From(Navigator&);
   virtual ~NavigatorBeacon();
 
@@ -30,22 +32,16 @@ class NavigatorBeacon final : public GarbageCollectedFinalized<NavigatorBeacon>,
                          const ArrayBufferViewOrBlobOrStringOrFormData&,
                          ExceptionState&);
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit NavigatorBeacon(Navigator&);
-
-  static const char* SupplementName();
 
   bool SendBeaconImpl(ScriptState*,
                       const String&,
                       const ArrayBufferViewOrBlobOrStringOrFormData&,
                       ExceptionState&);
   bool CanSendBeacon(ExecutionContext*, const KURL&, ExceptionState&);
-  int MaxAllowance() const;
-  void AddTransmittedBytes(size_t sent_bytes);
-
-  size_t transmitted_bytes_;
 };
 
 }  // namespace blink

@@ -24,7 +24,7 @@ struct SliceTypes {
     is_number[kSideLeft] = slice.slices.Left().IsFixed();
     fill = slice.fill;
   }
-  explicit SliceTypes(const CSSBorderImageSliceValue& slice) {
+  explicit SliceTypes(const cssvalue::CSSBorderImageSliceValue& slice) {
     is_number[kSideTop] = slice.Slices().Top()->IsPrimitiveValue() &&
                           ToCSSPrimitiveValue(slice.Slices().Top())->IsNumber();
     is_number[kSideRight] =
@@ -57,9 +57,9 @@ struct SliceTypes {
 
 class CSSImageSliceNonInterpolableValue : public NonInterpolableValue {
  public:
-  static PassRefPtr<CSSImageSliceNonInterpolableValue> Create(
+  static scoped_refptr<CSSImageSliceNonInterpolableValue> Create(
       const SliceTypes& types) {
-    return AdoptRef(new CSSImageSliceNonInterpolableValue(types));
+    return base::AdoptRef(new CSSImageSliceNonInterpolableValue(types));
   }
 
   const SliceTypes& Types() const { return types_; }
@@ -108,14 +108,14 @@ class InheritedSliceTypesChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
   static std::unique_ptr<InheritedSliceTypesChecker> Create(
-      CSSPropertyID property,
+      const CSSProperty& property,
       const SliceTypes& inherited_types) {
     return WTF::WrapUnique(
         new InheritedSliceTypesChecker(property, inherited_types));
   }
 
  private:
-  InheritedSliceTypesChecker(CSSPropertyID property,
+  InheritedSliceTypesChecker(const CSSProperty& property,
                              const SliceTypes& inherited_types)
       : property_(property), inherited_types_(inherited_types) {}
 
@@ -126,7 +126,7 @@ class InheritedSliceTypesChecker
                property_, *state.ParentStyle()));
   }
 
-  const CSSPropertyID property_;
+  const CSSProperty& property_;
   const SliceTypes inherited_types_;
 };
 
@@ -193,7 +193,8 @@ InterpolationValue CSSImageSliceInterpolationType::MaybeConvertValue(
   if (!value.IsBorderImageSliceValue())
     return nullptr;
 
-  const CSSBorderImageSliceValue& slice = ToCSSBorderImageSliceValue(value);
+  const cssvalue::CSSBorderImageSliceValue& slice =
+      cssvalue::ToCSSBorderImageSliceValue(value);
   std::unique_ptr<InterpolableList> list =
       InterpolableList::Create(kSideIndexCount);
   const CSSValue* sides[kSideIndexCount];

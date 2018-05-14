@@ -10,6 +10,7 @@ action("embed_js_in_cpp") {
 
   js_files = [
     "js/call_function.js",
+    "js/dispatch_touch_event.js",
     "js/execute_async_script.js",
     "js/focus.js",
     "js/get_element_region.js",
@@ -184,7 +185,7 @@ source_set("automation_client_lib") {
     "//third_party/WebKit/public:features",
     "//third_party/zlib:minizip",
     "//third_party/zlib/google:zip",
-    "//ui/accessibility:ax_gen",
+    "//ui/accessibility:ax_enums_mojo",
     "//ui/base",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -197,6 +198,11 @@ action("embed_version_in_cpp") {
   inputs = [
     "cpp_source.py",
     "VERSION",
+
+    # We don't actually use LASTCHANGE as an input file. It is updated
+    # whenever a different Git revision is checked out, at which point
+    # version.cc needs to be updated with the new revision info.
+    "//build/util/LASTCHANGE",
   ]
   outputs = [
     "$target_gen_dir/version.cc",
@@ -243,9 +249,7 @@ source_set("lib") {
     "key_converter.h",
     "keycode_text_conversion.h",
     "keycode_text_conversion_mac.mm",
-    "keycode_text_conversion_ozone.cc",
     "keycode_text_conversion_win.cc",
-    "keycode_text_conversion_x.cc",
     "logging.cc",
     "logging.h",
     "performance_logger.cc",
@@ -269,12 +273,13 @@ source_set("lib") {
   # Also compile the generated version files.
   sources += get_target_outputs(":embed_version_in_cpp")
 
-  # These aren't automatically filtered out.
-  if (!use_x11) {
-    sources -= [ "keycode_text_conversion_x.cc" ]
+  if (use_x11) {
+    sources += [ "keycode_text_conversion_x.cc" ]
   }
-  if (!use_ozone && !use_x11) {
-    sources -= [ "keycode_text_conversion_ozone.cc" ]
+
+  # The X11 implementation uses part of Ozone implementation.
+  if (use_ozone || use_x11) {
+    sources += [ "keycode_text_conversion_ozone.cc" ]
   }
 
   deps = [
@@ -319,6 +324,37 @@ executable("chromedriver") {
     "//build/config:exe_and_shlib_deps",
     "//build/win:default_exe_manifest",
   ]
+}
+
+group("chromedriver_py_tests") {
+  testonly = true
+  deps = [
+    ":chromedriver",
+    "//chrome:chrome",
+  ]
+
+  _py_files = read_file("test/run_py_tests.pydeps", "list lines")
+
+  # Filter out comments.
+  set_sources_assignment_filter([ "#*" ])
+  sources = _py_files
+  data = sources + [
+           "test/run_py_tests.pydeps",
+           "//chrome/test/data/chromedriver/",
+           "//testing/xvfb.py",
+         ]
+
+  data_deps = [
+    "//chrome/test/chromedriver",
+  ]
+  if (is_component_build && is_mac) {
+    data_deps += [ "//chrome:chrome_framework" ]
+  }
+
+  if (is_win) {
+    # On Windows, the following target produces the final chrome.exe
+    data_deps += [ "//chrome:reorder_imports" ]
+  }
 }
 
 test("chromedriver_unittests") {

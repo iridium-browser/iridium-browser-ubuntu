@@ -31,26 +31,62 @@
 #ifndef InspectorMemoryAgent_h
 #define InspectorMemoryAgent_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/protocol/Memory.h"
+#include "core/leak_detector/BlinkLeakDetector.h"
+#include "core/leak_detector/BlinkLeakDetectorClient.h"
 
 namespace blink {
 
-class CORE_EXPORT InspectorMemoryAgent final
-    : public InspectorBaseAgent<protocol::Memory::Metainfo> {
-  WTF_MAKE_NONCOPYABLE(InspectorMemoryAgent);
+class InspectedFrames;
 
+class CORE_EXPORT InspectorMemoryAgent final
+    : public InspectorBaseAgent<protocol::Memory::Metainfo>,
+      public BlinkLeakDetectorClient {
  public:
-  static InspectorMemoryAgent* Create() { return new InspectorMemoryAgent(); }
+  static InspectorMemoryAgent* Create(InspectedFrames* frames) {
+    return new InspectorMemoryAgent(frames);
+  }
   ~InspectorMemoryAgent() override;
+
+  void Trace(blink::Visitor*) override;
+  void Restore() override;
 
   protocol::Response getDOMCounters(int* documents,
                                     int* nodes,
                                     int* js_event_listeners) override;
+  void prepareForLeakDetection(
+      std::unique_ptr<PrepareForLeakDetectionCallback>) override;
+
+  // BlinkLeakDetectorClient:
+  void OnLeakDetectionComplete() override;
+
+  // Memory protocol domain:
+  protocol::Response startSampling(
+      protocol::Maybe<int> in_samplingInterval,
+      protocol::Maybe<bool> in_suppressRandomness) override;
+  protocol::Response stopSampling() override;
+  protocol::Response getSamplingProfile(
+      std::unique_ptr<protocol::Memory::SamplingProfile>*) override;
+  protocol::Response getAllTimeSamplingProfile(
+      std::unique_ptr<protocol::Memory::SamplingProfile>*) override;
 
  private:
-  InspectorMemoryAgent();
+  explicit InspectorMemoryAgent(InspectedFrames*);
+
+  std::vector<std::string> Symbolize(const std::vector<void*>& addresses);
+  std::unique_ptr<protocol::Memory::SamplingProfile> GetSamplingProfileById(
+      uint32_t id);
+
+  std::unique_ptr<BlinkLeakDetector> detector_;
+  std::unique_ptr<PrepareForLeakDetectionCallback> callback_;
+  Member<InspectedFrames> frames_;
+  uint32_t profile_id_ = 0;
+  HashMap<void*, std::string> symbols_cache_;
+
+  DISALLOW_COPY_AND_ASSIGN(InspectorMemoryAgent);
 };
 
 }  // namespace blink

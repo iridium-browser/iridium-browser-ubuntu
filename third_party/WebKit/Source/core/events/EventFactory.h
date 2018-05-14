@@ -27,9 +27,9 @@
 #define EventFactory_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/AtomicString.h"
 
@@ -43,16 +43,16 @@ class EventFactoryBase {
 
  public:
   virtual Event* Create(ExecutionContext*, const String& event_type) = 0;
-  virtual ~EventFactoryBase() {}
+  virtual ~EventFactoryBase() = default;
 
  protected:
-  EventFactoryBase() {}
+  EventFactoryBase() = default;
 };
 
 class EventFactory final : public EventFactoryBase {
  public:
   static std::unique_ptr<EventFactory> Create() {
-    return WTF::MakeUnique<EventFactory>();
+    return std::make_unique<EventFactory>();
   }
 
   Event* Create(ExecutionContext*, const String& event_type) override;

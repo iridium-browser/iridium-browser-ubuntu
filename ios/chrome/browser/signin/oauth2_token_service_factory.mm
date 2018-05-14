@@ -4,12 +4,10 @@
 
 #include "ios/chrome/browser/signin/oauth2_token_service_factory.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "components/signin/core/common/signin_pref_names.h"
 #include "components/signin/ios/browser/profile_oauth2_token_service_ios_delegate.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/signin/account_tracker_service_factory.h"
@@ -45,9 +43,7 @@ OAuth2TokenServiceFactory* OAuth2TokenServiceFactory::GetInstance() {
 
 void OAuth2TokenServiceFactory::RegisterBrowserStatePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterBooleanPref(prefs::kTokenServiceExcludeAllSecondaryAccounts,
-                                false);
-  registry->RegisterListPref(prefs::kTokenServiceExcludedSecondaryAccounts);
+  ProfileOAuth2TokenService::RegisterProfilePrefs(registry);
 }
 
 std::unique_ptr<KeyedService>
@@ -55,12 +51,12 @@ OAuth2TokenServiceFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
   ios::ChromeBrowserState* chrome_browser_state =
       ios::ChromeBrowserState::FromBrowserState(context);
-  auto delegate = base::MakeUnique<ProfileOAuth2TokenServiceIOSDelegate>(
+  auto delegate = std::make_unique<ProfileOAuth2TokenServiceIOSDelegate>(
       SigninClientFactory::GetForBrowserState(chrome_browser_state),
-      base::MakeUnique<ProfileOAuth2TokenServiceIOSProviderImpl>(),
+      std::make_unique<ProfileOAuth2TokenServiceIOSProviderImpl>(),
       ios::AccountTrackerServiceFactory::GetForBrowserState(
           chrome_browser_state),
       ios::SigninErrorControllerFactory::GetForBrowserState(
           chrome_browser_state));
-  return base::MakeUnique<ProfileOAuth2TokenService>(std::move(delegate));
+  return std::make_unique<ProfileOAuth2TokenService>(std::move(delegate));
 }

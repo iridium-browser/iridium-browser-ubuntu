@@ -6,18 +6,22 @@
 #define GlobalScopeCreationParams_h
 
 #include <memory>
+#include "base/macros.h"
+#include "base/unguessable_token.h"
 #include "bindings/core/v8/V8CacheOptions.h"
 #include "core/CoreExport.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/workers/WorkerClients.h"
 #include "core/workers/WorkerSettings.h"
-#include "core/workers/WorkerThread.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
+#include "platform/network/ContentSecurityPolicyResponseHeaders.h"
 #include "platform/weborigin/KURL.h"
+#include "platform/weborigin/ReferrerPolicy.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/Optional.h"
 #include "platform/wtf/PtrUtil.h"
-#include "public/platform/WebAddressSpace.h"
+#include "public/mojom/net/ip_address_space.mojom-blink.h"
+#include "services/service_manager/public/mojom/interface_provider.mojom-blink.h"
 
 namespace blink {
 
@@ -26,46 +30,63 @@ class WorkerClients;
 // GlobalScopeCreationParams contains parameters for initializing
 // WorkerGlobalScope or WorkletGlobalScope.
 struct CORE_EXPORT GlobalScopeCreationParams final {
-  WTF_MAKE_NONCOPYABLE(GlobalScopeCreationParams);
   USING_FAST_MALLOC(GlobalScopeCreationParams);
 
  public:
   GlobalScopeCreationParams(
       const KURL& script_url,
       const String& user_agent,
-      const String& source_code,
-      std::unique_ptr<Vector<char>> cached_meta_data,
-      WorkerThreadStartMode,
-      const Vector<CSPHeaderAndType>* content_security_policy_headers,
-      const String& referrer_policy,
+      const Vector<CSPHeaderAndType>* content_security_policy_parsed_headers,
+      ReferrerPolicy referrer_policy,
       const SecurityOrigin*,
+      bool starter_secure_context,
       WorkerClients*,
-      WebAddressSpace,
+      mojom::IPAddressSpace,
       const Vector<String>* origin_trial_tokens,
+      const base::UnguessableToken& parent_devtools_token,
       std::unique_ptr<WorkerSettings>,
-      V8CacheOptions);
+      V8CacheOptions,
+      service_manager::mojom::blink::InterfaceProviderPtrInfo = {});
 
   ~GlobalScopeCreationParams() = default;
 
   KURL script_url;
   String user_agent;
-  String source_code;
-  std::unique_ptr<Vector<char>> cached_meta_data;
-  WorkerThreadStartMode start_mode;
-  std::unique_ptr<Vector<CSPHeaderAndType>> content_security_policy_headers;
-  String referrer_policy;
+
+  // |content_security_policy_parsed_headers| and
+  // |content_security_policy_raw_headers| are mutually exclusive.
+  // |content_security_policy_parsed_headers| is an empty vector
+  // when |content_security_policy_raw_headers| is set.
+  std::unique_ptr<Vector<CSPHeaderAndType>>
+      content_security_policy_parsed_headers;
+  WTF::Optional<ContentSecurityPolicyResponseHeaders>
+      content_security_policy_raw_headers;
+
+  ReferrerPolicy referrer_policy;
   std::unique_ptr<Vector<String>> origin_trial_tokens;
 
-  // The SecurityOrigin of the Document creating a Worker may have
-  // been configured with extra policy privileges when it was created
-  // (e.g., enforce path-based file:// origins.)
-  // To ensure that these are transferred to the origin of a new worker
-  // global scope, supply the Document's SecurityOrigin as the
-  // 'starter origin'.
+  // The SecurityOrigin of the Document creating a Worker/Worklet.
   //
-  // See SecurityOrigin::transferPrivilegesFrom() for details on what
-  // privileges are transferred.
-  std::unique_ptr<SecurityOrigin::PrivilegeData> starter_origin_privilege_data;
+  // For Workers, the origin may have been configured with extra policy
+  // privileges when it was created (e.g., enforce path-based file:// origins.)
+  // To ensure that these are transferred to the origin of a new worker global
+  // scope, supply the Document's SecurityOrigin as the 'starter origin'. See
+  // SecurityOrigin::TransferPrivilegesFrom() for details on what privileges are
+  // transferred.
+  //
+  // For Worklets, the origin is used for fetching module scripts. Worklet
+  // scripts need to be fetched as sub-resources of the Document, and a module
+  // script loader uses Document's SecurityOrigin for security checks.
+  scoped_refptr<const SecurityOrigin> starter_origin;
+
+  // Indicates if the Document creating a Worker/Worklet is a secure context.
+  //
+  // Worklets are defined to have a unique, opaque origin, so are not secure:
+  // https://drafts.css-houdini.org/worklets/#script-settings-for-worklets
+  // Origin trials are only enabled in secure contexts, and the trial tokens are
+  // inherited from the document, so also consider the context of the document.
+  // The value should be supplied as the result of Document.IsSecureContext().
+  bool starter_secure_context;
 
   // This object is created and initialized on the thread creating
   // a new worker context, but ownership of it and this
@@ -78,11 +99,17 @@ struct CORE_EXPORT GlobalScopeCreationParams final {
   // supplies no extra 'clients', m_workerClients can be left as empty/null.
   CrossThreadPersistent<WorkerClients> worker_clients;
 
-  WebAddressSpace address_space;
+  mojom::IPAddressSpace address_space;
+
+  base::UnguessableToken parent_devtools_token;
 
   std::unique_ptr<WorkerSettings> worker_settings;
 
   V8CacheOptions v8_cache_options;
+
+  service_manager::mojom::blink::InterfaceProviderPtrInfo interface_provider;
+
+  DISALLOW_COPY_AND_ASSIGN(GlobalScopeCreationParams);
 };
 
 }  // namespace blink

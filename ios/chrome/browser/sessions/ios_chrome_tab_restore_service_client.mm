@@ -16,8 +16,9 @@
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/tabs/tab_model_list.h"
+#include "ios/chrome/browser/tabs/tab_model_synced_window_delegate.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
-#include "ios/web/public/web_thread.h"
 #include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -26,7 +27,7 @@
 
 namespace {
 sessions::LiveTabContext* FindLiveTabContextWithCondition(
-    const base::Callback<bool(TabModel*)>& condition) {
+    base::RepeatingCallback<bool(TabModel*)> condition) {
   std::vector<ios::ChromeBrowserState*> browser_states =
       GetApplicationContext()
           ->GetChromeBrowserStateManager()
@@ -36,7 +37,7 @@ sessions::LiveTabContext* FindLiveTabContextWithCondition(
     DCHECK(!browser_state->IsOffTheRecord());
     NSArray<TabModel*>* tab_models;
 
-    tab_models = GetTabModelsForChromeBrowserState(browser_state);
+    tab_models = TabModelList::GetTabModelsForChromeBrowserState(browser_state);
     for (TabModel* tab_model : tab_models) {
       if (condition.Run(tab_model)) {
         return TabRestoreServiceDelegateImplIOSFactory::GetForBrowserState(
@@ -50,7 +51,8 @@ sessions::LiveTabContext* FindLiveTabContextWithCondition(
     ios::ChromeBrowserState* otr_browser_state =
         browser_state->GetOffTheRecordChromeBrowserState();
 
-    tab_models = GetTabModelsForChromeBrowserState(otr_browser_state);
+    tab_models =
+        TabModelList::GetTabModelsForChromeBrowserState(otr_browser_state);
     for (TabModel* tab_model : tab_models) {
       if (condition.Run(tab_model)) {
         return TabRestoreServiceDelegateImplIOSFactory::GetForBrowserState(
@@ -71,7 +73,10 @@ IOSChromeTabRestoreServiceClient::~IOSChromeTabRestoreServiceClient() {}
 
 sessions::LiveTabContext*
 IOSChromeTabRestoreServiceClient::CreateLiveTabContext(
-    const std::string& app_name) {
+    const std::string& /* app_name */,
+    const gfx::Rect& /* bounds */,
+    ui::WindowShowState /* show_state */,
+    const std::string& /* workspace */) {
   return TabRestoreServiceDelegateImplIOSFactory::GetForBrowserState(
       browser_state_);
 }
@@ -84,12 +89,9 @@ IOSChromeTabRestoreServiceClient::FindLiveTabContextForTab(
 
   return FindLiveTabContextWithCondition(base::Bind(
       [](const web::WebState* web_state, TabModel* tab_model) {
-        for (Tab* current_tab in tab_model) {
-          if (current_tab.webState && current_tab.webState == web_state) {
-            return true;
-          }
-        }
-        return false;
+        WebStateList* web_state_list = tab_model.webStateList;
+        const int index = web_state_list->GetIndexOfWebState(web_state);
+        return index != WebStateList::kInvalidIndex;
       },
       requested_tab->web_state()));
 }
@@ -99,7 +101,8 @@ IOSChromeTabRestoreServiceClient::FindLiveTabContextWithID(
     SessionID::id_type desired_id) {
   return FindLiveTabContextWithCondition(base::Bind(
       [](SessionID::id_type desired_id, TabModel* tab_model) {
-        return tab_model.sessionID.id() == desired_id;
+        DCHECK(tab_model.syncedWindowDelegate);
+        return tab_model.syncedWindowDelegate->GetSessionId() == desired_id;
       },
       desired_id));
 }
@@ -116,11 +119,6 @@ bool IOSChromeTabRestoreServiceClient::ShouldTrackURLForRestore(
 std::string IOSChromeTabRestoreServiceClient::GetExtensionAppIDForTab(
     sessions::LiveTab* tab) {
   return std::string();
-}
-
-base::SequencedWorkerPool* IOSChromeTabRestoreServiceClient::GetBlockingPool() {
-  DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  return web::WebThread::GetBlockingPool();
 }
 
 base::FilePath IOSChromeTabRestoreServiceClient::GetPathToSaveTo() {

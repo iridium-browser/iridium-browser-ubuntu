@@ -7,7 +7,6 @@
 #import "base/mac/foundation_util.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #import "chrome/browser/ui/cocoa/test/cocoa_test_helper.h"
 #include "chrome/browser/ui/cocoa/test/run_loop_testing.h"
@@ -114,9 +113,9 @@ void ToolbarActionsBarBubbleMacTest::TestBubbleButton(
 
   std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
       extra_view_info_linked_text =
-          base::MakeUnique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
+          std::make_unique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
   extra_view_info_linked_text->text = LearnMoreString();
-  extra_view_info_linked_text->is_text_linked = true;
+  extra_view_info_linked_text->is_learn_more = true;
   delegate.set_extra_view_info(std::move(extra_view_info_linked_text));
 
   ToolbarActionsBarBubbleMac* bubble = CreateAndShowBubble(&delegate);
@@ -205,9 +204,9 @@ TEST_F(ToolbarActionsBarBubbleMacTest, ToolbarActionsBarBubbleLayout) {
 
     std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
         extra_view_info_linked_text =
-            base::MakeUnique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
+            std::make_unique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
     extra_view_info_linked_text->text = LearnMoreString();
-    extra_view_info_linked_text->is_text_linked = true;
+    extra_view_info_linked_text->is_learn_more = true;
     delegate.set_extra_view_info(std::move(extra_view_info_linked_text));
 
     delegate.set_dismiss_button_text(DismissString());
@@ -280,11 +279,11 @@ TEST_F(ToolbarActionsBarBubbleMacTest, ToolbarActionsBarBubbleLayout) {
 
     std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
         extra_view_info =
-            base::MakeUnique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
+            std::make_unique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
     extra_view_info->resource = &vector_icons::kBusinessIcon;
     extra_view_info->text =
         l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSTALLED_BY_ADMIN);
-    extra_view_info->is_text_linked = false;
+    extra_view_info->is_learn_more = false;
     delegate.set_extra_view_info(std::move(extra_view_info));
 
     ToolbarActionsBarBubbleMac* bubble = CreateAndShowBubble(&delegate);
@@ -306,9 +305,9 @@ TEST_F(ToolbarActionsBarBubbleMacTest, ToolbarActionsBarBubbleLayout) {
 
     std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
         extra_view_info_linked_text =
-            base::MakeUnique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
+            std::make_unique<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>();
     extra_view_info_linked_text->text = LearnMoreString();
-    extra_view_info_linked_text->is_text_linked = true;
+    extra_view_info_linked_text->is_learn_more = true;
     delegate.set_extra_view_info(std::move(extra_view_info_linked_text));
 
     delegate.set_dismiss_button_text(DismissString());

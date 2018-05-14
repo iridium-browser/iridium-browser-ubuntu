@@ -6,10 +6,8 @@
 #define SurfaceLayerBridge_h
 
 #include <memory>
-#include "base/memory/ref_counted.h"
-#include "base/memory/weak_ptr.h"
+#include "base/memory/scoped_refptr.h"
 #include "components/viz/common/surfaces/surface_id.h"
-#include "components/viz/common/surfaces/surface_reference_factory.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "platform/PlatformExport.h"
 #include "public/platform/WebSurfaceLayerBridge.h"
@@ -28,44 +26,32 @@ namespace blink {
 class WebLayer;
 class WebLayerTreeView;
 
-class PLATFORM_EXPORT SurfaceLayerBridgeObserver {
- public:
-  SurfaceLayerBridgeObserver() {}
-  virtual ~SurfaceLayerBridgeObserver() {}
-
-  virtual void OnWebLayerReplaced() = 0;
-};
-
+// The SurfaceLayerBridge facilitates communication about changes to a Surface
+// between the Render and Browser processes.
 class PLATFORM_EXPORT SurfaceLayerBridge
-    : public NON_EXPORTED_BASE(
-          blink::mojom::blink::OffscreenCanvasSurfaceClient),
+    : public blink::mojom::blink::OffscreenCanvasSurfaceClient,
       public WebSurfaceLayerBridge {
  public:
-  SurfaceLayerBridge(SurfaceLayerBridgeObserver*, WebLayerTreeView*);
+  SurfaceLayerBridge(WebLayerTreeView*, WebSurfaceLayerBridgeObserver*);
   virtual ~SurfaceLayerBridge();
 
   void CreateSolidColorLayer();
 
   // Implementation of blink::mojom::blink::OffscreenCanvasSurfaceClient
-  void OnSurfaceCreated(const viz::SurfaceInfo&) override;
-  void SatisfyCallback(const viz::SurfaceSequence&);
-  void RequireCallback(const viz::SurfaceId&, const viz::SurfaceSequence&);
+  void OnFirstSurfaceActivation(const viz::SurfaceInfo&) override;
 
   // Implementation of WebSurfaceLayerBridge.
   WebLayer* GetWebLayer() const override { return web_layer_.get(); }
 
-  const viz::FrameSinkId& GetFrameSinkId() const { return frame_sink_id_; }
+  const viz::FrameSinkId& GetFrameSinkId() const override {
+    return frame_sink_id_;
+  }
 
  private:
-  mojom::blink::OffscreenCanvasSurfacePtr service_;
-
   scoped_refptr<cc::Layer> cc_layer_;
   std::unique_ptr<WebLayer> web_layer_;
 
-  scoped_refptr<viz::SurfaceReferenceFactory> ref_factory_;
-  base::WeakPtrFactory<SurfaceLayerBridge> weak_factory_;
-
-  SurfaceLayerBridgeObserver* observer_;
+  WebSurfaceLayerBridgeObserver* observer_;
 
   mojo::Binding<blink::mojom::blink::OffscreenCanvasSurfaceClient> binding_;
 

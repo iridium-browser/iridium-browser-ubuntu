@@ -6,30 +6,27 @@
 
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chromeos/login/ui/webui_login_display.h"
+#include "chrome/browser/chromeos/login/ui/login_display_webui.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/user_policy_test_helper.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "google_apis/gaia/fake_gaia.h"
-#include "google_apis/gaia/gaia_constants.h"
-#include "google_apis/gaia/gaia_urls.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace policy {
 
 namespace {
 
-const char kTestAuthCode[] = "fake-auth-code";
-const char kTestGaiaUberToken[] = "fake-uber-token";
-const char kTestAuthLoginAccessToken[] = "fake-access-token";
-const char kTestRefreshToken[] = "fake-refresh-token";
-const char kTestAuthSIDCookie[] = "fake-auth-SID-cookie";
-const char kTestAuthLSIDCookie[] = "fake-auth-LSID-cookie";
-const char kTestSessionSIDCookie[] = "fake-session-SID-cookie";
-const char kTestSessionLSIDCookie[] = "fake-session-LSID-cookie";
-const char kTestUserinfoToken[] = "fake-userinfo-token";
+constexpr char kTestAuthCode[] = "fake-auth-code";
+constexpr char kTestGaiaUberToken[] = "fake-uber-token";
+constexpr char kTestAuthLoginAccessToken[] = "fake-access-token";
+constexpr char kTestRefreshToken[] = "fake-refresh-token";
+constexpr char kTestAuthSIDCookie[] = "fake-auth-SID-cookie";
+constexpr char kTestAuthLSIDCookie[] = "fake-auth-LSID-cookie";
+constexpr char kTestSessionSIDCookie[] = "fake-session-SID-cookie";
+constexpr char kTestSessionLSIDCookie[] = "fake-session-LSID-cookie";
 
 }  // namespace
 
@@ -60,8 +57,12 @@ void LoginPolicyTestBase::SetUpCommandLine(base::CommandLine* command_line) {
 
 void LoginPolicyTestBase::SetUpOnMainThread() {
   SetMergeSessionParams();
-  SetUpGaiaServerWithAccessTokens();
+  SetupFakeGaiaForLogin(kAccountId, "", kTestRefreshToken);
   OobeBaseTest::SetUpOnMainThread();
+}
+
+std::string LoginPolicyTestBase::GetAccount() const {
+  return kAccountId;
 }
 
 void LoginPolicyTestBase::GetMandatoryPoliciesValue(
@@ -70,16 +71,6 @@ void LoginPolicyTestBase::GetMandatoryPoliciesValue(
 
 void LoginPolicyTestBase::GetRecommendedPoliciesValue(
     base::DictionaryValue* policy) const {
-}
-
-void LoginPolicyTestBase::SetUpGaiaServerWithAccessTokens() {
-  FakeGaia::AccessTokenInfo token_info;
-  token_info.token = kTestUserinfoToken;
-  token_info.scopes.insert(GaiaConstants::kDeviceManagementServiceOAuth);
-  token_info.scopes.insert(GaiaConstants::kOAuthWrapBridgeUserInfoScope);
-  token_info.audience = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
-  token_info.email = kAccountId;
-  fake_gaia_->IssueOAuthToken(kTestRefreshToken, token_info);
 }
 
 void LoginPolicyTestBase::SetMergeSessionParams() {

@@ -26,8 +26,6 @@
 #include "core/dom/DOMImplementation.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
-#include "core/SVGNames.h"
 #include "core/css/CSSStyleSheet.h"
 #include "core/css/MediaList.h"
 #include "core/css/StyleSheetContents.h"
@@ -41,16 +39,18 @@
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLDocument.h"
 #include "core/html/HTMLHeadElement.h"
-#include "core/html/HTMLMediaElement.h"
 #include "core/html/HTMLTitleElement.h"
 #include "core/html/HTMLViewSourceDocument.h"
 #include "core/html/ImageDocument.h"
 #include "core/html/PluginDocument.h"
 #include "core/html/TextDocument.h"
 #include "core/html/custom/V0CustomElementRegistrationContext.h"
+#include "core/html/media/HTMLMediaElement.h"
 #include "core/html/media/MediaDocument.h"
+#include "core/html_names.h"
 #include "core/loader/FrameLoader.h"
 #include "core/page/Page.h"
+#include "core/svg_names.h"
 #include "platform/graphics/Image.h"
 #include "platform/network/mime/ContentType.h"
 #include "platform/network/mime/MIMETypeRegistry.h"
@@ -83,18 +83,18 @@ XMLDocument* DOMImplementation::createDocument(
     ExceptionState& exception_state) {
   XMLDocument* doc = nullptr;
   DocumentInit init =
-      DocumentInit::FromContext(GetDocument().ContextDocument());
+      DocumentInit::Create().WithContextDocument(document_->ContextDocument());
   if (namespace_uri == SVGNames::svgNamespaceURI) {
     doc = XMLDocument::CreateSVG(init);
   } else if (namespace_uri == HTMLNames::xhtmlNamespaceURI) {
     doc = XMLDocument::CreateXHTML(
-        init.WithRegistrationContext(GetDocument().RegistrationContext()));
+        init.WithRegistrationContext(document_->RegistrationContext()));
   } else {
     doc = XMLDocument::Create(init);
   }
 
-  doc->SetSecurityOrigin(GetDocument().GetSecurityOrigin());
-  doc->SetContextFeatures(GetDocument().GetContextFeatures());
+  doc->SetSecurityOrigin(document_->GetMutableSecurityOrigin());
+  doc->SetContextFeatures(document_->GetContextFeatures());
 
   Node* document_element = nullptr;
   if (!qualified_name.IsEmpty()) {
@@ -201,10 +201,11 @@ bool DOMImplementation::IsTextMIMEType(const String& mime_type) {
          IsJSONMIMEType(mime_type) || IsTextPlainType(mime_type);
 }
 
-HTMLDocument* DOMImplementation::createHTMLDocument(const String& title) {
+Document* DOMImplementation::createHTMLDocument(const String& title) {
   DocumentInit init =
-      DocumentInit::FromContext(GetDocument().ContextDocument())
-          .WithRegistrationContext(GetDocument().RegistrationContext());
+      DocumentInit::Create()
+          .WithContextDocument(document_->ContextDocument())
+          .WithRegistrationContext(document_->RegistrationContext());
   HTMLDocument* d = HTMLDocument::Create(init);
   d->open();
   d->write("<!doctype html><html><head></head><body></body></html>");
@@ -215,8 +216,8 @@ HTMLDocument* DOMImplementation::createHTMLDocument(const String& title) {
     head_element->AppendChild(title_element);
     title_element->AppendChild(d->createTextNode(title), ASSERT_NO_EXCEPTION);
   }
-  d->SetSecurityOrigin(GetDocument().GetSecurityOrigin());
-  d->SetContextFeatures(GetDocument().GetContextFeatures());
+  d->SetSecurityOrigin(document_->GetMutableSecurityOrigin());
+  d->SetContextFeatures(document_->GetContextFeatures());
   return d;
 }
 
@@ -240,8 +241,9 @@ Document* DOMImplementation::createDocument(const String& type,
     // init.frame()->tree().top()->securityContext() returns nullptr.
     // For that reason, the origin must be retrieved directly from init.url().
     if (init.GetFrame()->IsMainFrame()) {
-      RefPtr<SecurityOrigin> origin = SecurityOrigin::Create(init.Url());
-      plugin_data = init.GetFrame()->GetPage()->GetPluginData(origin.Get());
+      scoped_refptr<const SecurityOrigin> origin =
+          SecurityOrigin::Create(init.Url());
+      plugin_data = init.GetFrame()->GetPage()->GetPluginData(origin.get());
     } else {
       plugin_data =
           init.GetFrame()->GetPage()->GetPluginData(init.GetFrame()
@@ -284,8 +286,9 @@ Document* DOMImplementation::createDocument(const String& type,
   return HTMLDocument::Create(init);
 }
 
-DEFINE_TRACE(DOMImplementation) {
+void DOMImplementation::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

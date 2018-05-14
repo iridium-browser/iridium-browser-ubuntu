@@ -8,6 +8,7 @@
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_text_item.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/suggested_content.h"
+#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_data_source.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_view_controller.h"
 #import "ios/chrome/browser/ui/content_suggestions/identifier/content_suggestion_identifier.h"
 #import "ios/chrome/browser/ui/content_suggestions/identifier/content_suggestions_section_information.h"
@@ -21,11 +22,15 @@
 
 namespace {
 
-TEST(ContentSuggestionsCollectionUpdaterTest, addEmptyItemToEmptySection) {
+using ContentSuggestionsCollectionUpdaterTest = PlatformTest;
+
+TEST_F(ContentSuggestionsCollectionUpdaterTest, addEmptyItemToEmptySection) {
   // Setup.
   NSString* emptyString = @"test empty";
+  id mockDataSource = OCMProtocolMock(@protocol(ContentSuggestionsDataSource));
   ContentSuggestionsCollectionUpdater* updater =
-      [[ContentSuggestionsCollectionUpdater alloc] initWithDataSource:nil];
+      [[ContentSuggestionsCollectionUpdater alloc] init];
+  updater.dataSource = mockDataSource;
   CollectionViewModel* model = [[CollectionViewModel alloc] init];
   id mockCollection = OCMClassMock([ContentSuggestionsViewController class]);
   OCMStub([mockCollection collectionViewModel]).andReturn(model);
@@ -56,11 +61,13 @@ TEST(ContentSuggestionsCollectionUpdaterTest, addEmptyItemToEmptySection) {
   EXPECT_EQ(emptyString, item.detailText);
 }
 
-TEST(ContentSuggestionsCollectionUpdaterTest,
-     addEmptyItemToSectionWithoutText) {
+TEST_F(ContentSuggestionsCollectionUpdaterTest,
+       addEmptyItemToSectionWithoutText) {
   // Setup.
+  id mockDataSource = OCMProtocolMock(@protocol(ContentSuggestionsDataSource));
   ContentSuggestionsCollectionUpdater* updater =
-      [[ContentSuggestionsCollectionUpdater alloc] initWithDataSource:nil];
+      [[ContentSuggestionsCollectionUpdater alloc] init];
+  updater.dataSource = mockDataSource;
   CollectionViewModel* model = [[CollectionViewModel alloc] init];
   id mockCollection = OCMClassMock([ContentSuggestionsViewController class]);
   OCMStub([mockCollection collectionViewModel]).andReturn(model);
@@ -87,10 +94,12 @@ TEST(ContentSuggestionsCollectionUpdaterTest,
   ASSERT_EQ(0, [model numberOfItemsInSection:0]);
 }
 
-TEST(ContentSuggestionsCollectionUpdaterTest, addEmptyItemToSection) {
+TEST_F(ContentSuggestionsCollectionUpdaterTest, addEmptyItemToSection) {
   // Setup.
+  id mockDataSource = OCMProtocolMock(@protocol(ContentSuggestionsDataSource));
   ContentSuggestionsCollectionUpdater* updater =
-      [[ContentSuggestionsCollectionUpdater alloc] initWithDataSource:nil];
+      [[ContentSuggestionsCollectionUpdater alloc] init];
+  updater.dataSource = mockDataSource;
   CollectionViewModel* model = [[CollectionViewModel alloc] init];
   id mockCollection = OCMClassMock([ContentSuggestionsViewController class]);
   OCMStub([mockCollection collectionViewModel]).andReturn(model);

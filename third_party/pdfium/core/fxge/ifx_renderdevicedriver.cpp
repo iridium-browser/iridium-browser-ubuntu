@@ -8,7 +8,7 @@
 
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxge/cfx_pathdata.h"
-#include "core/fxge/cfx_renderdevice.h"
+#include "core/fxge/dib/cfx_dibitmap.h"
 
 IFX_RenderDeviceDriver::~IFX_RenderDeviceDriver() {}
 
@@ -39,28 +39,25 @@ bool IFX_RenderDeviceDriver::FillRectWithBlend(const FX_RECT* pRect,
   return false;
 }
 
-bool IFX_RenderDeviceDriver::DrawCosmeticLine(float x1,
-                                              float y1,
-                                              float x2,
-                                              float y2,
+bool IFX_RenderDeviceDriver::DrawCosmeticLine(const CFX_PointF& ptMoveTo,
+                                              const CFX_PointF& ptLineTo,
                                               uint32_t color,
                                               int blend_type) {
   return false;
 }
 
-bool IFX_RenderDeviceDriver::GetDIBits(
-    const CFX_RetainPtr<CFX_DIBitmap>& pBitmap,
-    int left,
-    int top) {
+bool IFX_RenderDeviceDriver::GetDIBits(const RetainPtr<CFX_DIBitmap>& pBitmap,
+                                       int left,
+                                       int top) {
   return false;
 }
 
-CFX_RetainPtr<CFX_DIBitmap> IFX_RenderDeviceDriver::GetBackDrop() {
-  return CFX_RetainPtr<CFX_DIBitmap>();
+RetainPtr<CFX_DIBitmap> IFX_RenderDeviceDriver::GetBackDrop() {
+  return RetainPtr<CFX_DIBitmap>();
 }
 
 bool IFX_RenderDeviceDriver::ContinueDIBits(CFX_ImageRenderer* handle,
-                                            IFX_Pause* pPause) {
+                                            IFX_PauseIndicator* pPause) {
   return false;
 }
 
@@ -88,8 +85,8 @@ bool IFX_RenderDeviceDriver::DrawShading(const CPDF_ShadingPattern* pPattern,
 }
 
 bool IFX_RenderDeviceDriver::SetBitsWithMask(
-    const CFX_RetainPtr<CFX_DIBSource>& pBitmap,
-    const CFX_RetainPtr<CFX_DIBSource>& pMask,
+    const RetainPtr<CFX_DIBSource>& pBitmap,
+    const RetainPtr<CFX_DIBSource>& pMask,
     int left,
     int top,
     int bitmap_alpha,

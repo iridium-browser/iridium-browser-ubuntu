@@ -16,7 +16,7 @@ namespace blink {
 
 class PLATFORM_EXPORT MemoryCoordinatorClient : public GarbageCollectedMixin {
  public:
-  virtual ~MemoryCoordinatorClient() {}
+  virtual ~MemoryCoordinatorClient() = default;
 
   // TODO(bashi): Deprecating. Remove this when MemoryPressureListener is
   // gone.
@@ -39,12 +39,6 @@ class PLATFORM_EXPORT MemoryCoordinator final
   // Whether the device Blink runs on is a low-end device.
   // Can be overridden in layout tests via internals.
   static bool IsLowEndDevice();
-
-  // Returns the amount of physical memory in megabytes on the device.
-  static int64_t GetPhysicalMemoryMB();
-
-  // Override the value of the physical memory for testing.
-  static void SetPhysicalMemoryMBForTesting(int64_t);
 
   // Returns true when available memory is low.
   // This is not cheap and should not be called repeatedly.
@@ -71,7 +65,7 @@ class PLATFORM_EXPORT MemoryCoordinator final
 
   void OnPurgeMemory();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   friend class Internals;
@@ -84,7 +78,6 @@ class PLATFORM_EXPORT MemoryCoordinator final
   static void ClearThreadSpecificMemory();
 
   static bool is_low_end_device_;
-  static int64_t physical_memory_mb_;
 
   HeapHashSet<WeakMember<MemoryCoordinatorClient>> clients_;
   HashSet<WebThread*> web_threads_;

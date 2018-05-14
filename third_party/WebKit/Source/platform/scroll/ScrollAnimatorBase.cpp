@@ -30,7 +30,6 @@
 
 #include "platform/scroll/ScrollAnimatorBase.h"
 
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "platform/wtf/MathExtras.h"
 
@@ -39,7 +38,7 @@ namespace blink {
 ScrollAnimatorBase::ScrollAnimatorBase(ScrollableArea* scrollable_area)
     : scrollable_area_(scrollable_area) {}
 
-ScrollAnimatorBase::~ScrollAnimatorBase() {}
+ScrollAnimatorBase::~ScrollAnimatorBase() = default;
 
 ScrollOffset ScrollAnimatorBase::ComputeDeltaToConsume(
     const ScrollOffset& delta) const {
@@ -82,7 +81,7 @@ void ScrollAnimatorBase::NotifyOffsetChanged() {
   ScrollOffsetChanged(current_offset_, kUserScroll);
 }
 
-DEFINE_TRACE(ScrollAnimatorBase) {
+void ScrollAnimatorBase::Trace(blink::Visitor* visitor) {
   visitor->Trace(scrollable_area_);
   ScrollAnimatorCompositorCoordinator::Trace(visitor);
 }

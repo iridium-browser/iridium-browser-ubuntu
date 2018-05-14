@@ -15,7 +15,7 @@
 
 #include "base/allocator/allocator_check.h"
 #include "base/allocator/allocator_extension.h"
-#include "base/allocator/features.h"
+#include "base/allocator/buildflags.h"
 #include "base/at_exit.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
@@ -29,13 +29,11 @@
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_base.h"
-#include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/memory.h"
 #include "base/process/process.h"
 #include "base/process/process_handle.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -54,16 +52,15 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/sandbox_init.h"
+#include "content/public/common/zygote_features.h"
+#include "gin/v8_initializer.h"
 #include "media/base/media.h"
+#include "media/media_features.h"
 #include "ppapi/features/features.h"
 #include "services/service_manager/embedder/switches.h"
+#include "services/service_manager/sandbox/sandbox_type.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/ui_base_switches.h"
-
-#if defined(V8_USE_EXTERNAL_STARTUP_DATA) && \
-    !defined(CHROME_MULTIPLE_DLL_BROWSER)
-#include "gin/v8_initializer.h"
-#endif
 
 #if defined(OS_WIN)
 #include <malloc.h>
@@ -76,7 +73,6 @@
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "content/browser/mach_broker_mac.h"
-#include "content/common/sandbox_init_mac.h"
 #endif  // OS_WIN
 
 #if defined(OS_POSIX)
@@ -91,6 +87,7 @@
 #endif
 #if !defined(OS_MACOSX) && !defined(OS_ANDROID)
 #include "content/zygote/zygote_main.h"
+#include "sandbox/linux/services/libc_interceptor.h"
 #endif
 
 #endif  // OS_POSIX
@@ -113,10 +110,6 @@
 #include "content/gpu/in_process_gpu_thread.h"
 #include "content/renderer/in_process_renderer_thread.h"
 #include "content/utility/in_process_utility_thread.h"
-#endif
-
-#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
-#include "content/common/media/cdm_host_files.h"
 #endif
 
 namespace content {
@@ -177,39 +170,66 @@ void InitializeFieldTrialAndFeatureList(
   base::FeatureList::SetInstance(std::move(feature_list));
 }
 
-void InitializeV8IfNeeded(
-    const base::CommandLine& command_line,
-    const std::string& process_type) {
-  if (process_type == switches::kGpuProcess)
-    return;
-
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
+void LoadV8SnapshotFile() {
+#if defined(USE_V8_CONTEXT_SNAPSHOT)
+  static constexpr gin::V8Initializer::V8SnapshotFileType kSnapshotType =
+      gin::V8Initializer::V8SnapshotFileType::kWithAdditionalContext;
+  static const char* snapshot_data_descriptor =
+      kV8ContextSnapshotDataDescriptor;
+#else
+  static constexpr gin::V8Initializer::V8SnapshotFileType kSnapshotType =
+      gin::V8Initializer::V8SnapshotFileType::kDefault;
+  static const char* snapshot_data_descriptor = kV8SnapshotDataDescriptor;
+#endif  // USE_V8_CONTEXT_SNAPSHOT
+  ALLOW_UNUSED_LOCAL(kSnapshotType);
+  ALLOW_UNUSED_LOCAL(snapshot_data_descriptor);
+
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   base::FileDescriptorStore& file_descriptor_store =
       base::FileDescriptorStore::GetInstance();
   base::MemoryMappedFile::Region region;
-  base::ScopedFD v8_snapshot_fd =
-      file_descriptor_store.MaybeTakeFD(kV8SnapshotDataDescriptor, &region);
-  if (v8_snapshot_fd.is_valid()) {
-    gin::V8Initializer::LoadV8SnapshotFromFD(v8_snapshot_fd.get(),
-                                             region.offset, region.size);
-    } else {
-      gin::V8Initializer::LoadV8Snapshot();
-    }
-    base::ScopedFD v8_natives_fd =
-        file_descriptor_store.MaybeTakeFD(kV8NativesDataDescriptor, &region);
-    if (v8_natives_fd.is_valid()) {
-      gin::V8Initializer::LoadV8NativesFromFD(v8_natives_fd.get(),
-                                              region.offset, region.size);
-    } else {
-      gin::V8Initializer::LoadV8Natives();
-    }
-#else
-#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
-    gin::V8Initializer::LoadV8Snapshot();
-    gin::V8Initializer::LoadV8Natives();
-#endif  // !CHROME_MULTIPLE_DLL_BROWSER
+  base::ScopedFD fd =
+      file_descriptor_store.MaybeTakeFD(snapshot_data_descriptor, &region);
+  if (fd.is_valid()) {
+    gin::V8Initializer::LoadV8SnapshotFromFD(fd.get(), region.offset,
+                                             region.size, kSnapshotType);
+    return;
+  }
 #endif  // OS_POSIX && !OS_MACOSX
+
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
+  gin::V8Initializer::LoadV8Snapshot(kSnapshotType);
+#endif  // !CHROME_MULTIPLE_DLL_BROWSER
+}
+
+void LoadV8NativesFile() {
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  base::FileDescriptorStore& file_descriptor_store =
+      base::FileDescriptorStore::GetInstance();
+  base::MemoryMappedFile::Region region;
+  base::ScopedFD fd =
+      file_descriptor_store.MaybeTakeFD(kV8NativesDataDescriptor, &region);
+  if (fd.is_valid()) {
+    gin::V8Initializer::LoadV8NativesFromFD(fd.get(), region.offset,
+                                            region.size);
+    return;
+  }
+#endif  // OS_POSIX && !OS_MACOSX
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
+  gin::V8Initializer::LoadV8Natives();
+#endif  // !CHROME_MULTIPLE_DLL_BROWSER
+}
+#endif  // V8_USE_EXTERNAL_STARTUP_DATA
+
+void InitializeV8IfNeeded(const base::CommandLine& command_line,
+                          const std::string& process_type) {
+  if (process_type == switches::kGpuProcess)
+    return;
+
+#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
+  LoadV8SnapshotFile();
+  LoadV8NativesFile();
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 }
 
@@ -281,19 +301,18 @@ struct MainFunction {
   int (*function)(const MainFunctionParams&);
 };
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
 // On platforms that use the zygote, we have a special subset of
 // subprocesses that are launched via the zygote.  This function
 // fills in some process-launching bits around ZygoteMain().
 // Returns the exit code of the subprocess.
-int RunZygote(const MainFunctionParams& main_function_params,
-              ContentMainDelegate* delegate) {
+int RunZygote(ContentMainDelegate* delegate) {
   static const MainFunction kMainFunctions[] = {
-    { switches::kRendererProcess,    RendererMain },
+    {switches::kRendererProcess, RendererMain},
+    {switches::kUtilityProcess, UtilityMain},
 #if BUILDFLAG(ENABLE_PLUGINS)
-    { switches::kPpapiPluginProcess, PpapiPluginMain },
+    {switches::kPpapiPluginProcess, PpapiPluginMain},
 #endif
-    { switches::kUtilityProcess,     UtilityMain },
   };
 
   std::vector<std::unique_ptr<ZygoteForkDelegate>> zygote_fork_delegates;
@@ -303,10 +322,11 @@ int RunZygote(const MainFunctionParams& main_function_params,
   }
 
   // This function call can return multiple times, once per fork().
-  if (!ZygoteMain(main_function_params, std::move(zygote_fork_delegates)))
+  if (!ZygoteMain(std::move(zygote_fork_delegates)))
     return 1;
 
-  if (delegate) delegate->ZygoteForked();
+  if (delegate)
+    delegate->ZygoteForked();
 
   // Zygote::HandleForkRequest may have reallocated the command
   // line so update it here with the new version.
@@ -316,20 +336,16 @@ int RunZygote(const MainFunctionParams& main_function_params,
       command_line.GetSwitchValueASCII(switches::kProcessType);
   ContentClientInitializer::Set(process_type, delegate);
 
-#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
-  if (process_type != switches::kPpapiPluginProcess) {
-    DVLOG(1) << "Closing CDM files for non-ppapi process.";
-    CdmHostFiles::TakeGlobalInstance().reset();
-  } else {
-    DVLOG(1) << "Not closing CDM files for ppapi process.";
-  }
-#endif
-
   MainFunctionParams main_params(command_line);
   main_params.zygote_child = true;
 
   std::unique_ptr<base::FieldTrialList> field_trial_list;
   InitializeFieldTrialAndFeatureList(&field_trial_list);
+
+  service_manager::SandboxType sandbox_type =
+      service_manager::SandboxTypeFromCommandLine(command_line);
+  if (sandbox_type == service_manager::SANDBOX_TYPE_PROFILING)
+    sandbox::SetUseLocaltimeOverride(false);
 
   for (size_t i = 0; i < arraysize(kMainFunctions); ++i) {
     if (process_type == kMainFunctions[i].name)
@@ -342,7 +358,7 @@ int RunZygote(const MainFunctionParams& main_function_params,
   NOTREACHED() << "Unknown zygote process type: " << process_type;
   return 1;
 }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
 
 static void RegisterMainThreadFactories() {
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER) && !defined(CHROME_MULTIPLE_DLL_CHILD)
@@ -408,12 +424,12 @@ int RunNamedProcessTypeMain(
     }
   }
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
   // Zygote startup is special -- see RunZygote comments above
   // for why we don't use ZygoteMain directly.
   if (process_type == switches::kZygoteProcess)
-    return RunZygote(main_function_params, delegate);
-#endif
+    return RunZygote(delegate);
+#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
 
   // If it's a process we don't know about, the embedder should know.
   if (delegate)
@@ -425,12 +441,7 @@ int RunNamedProcessTypeMain(
 
 class ContentMainRunnerImpl : public ContentMainRunner {
  public:
-  ContentMainRunnerImpl()
-      : is_initialized_(false),
-        is_shutdown_(false),
-        completed_basic_startup_(false),
-        delegate_(NULL),
-        ui_task_(NULL) {
+  ContentMainRunnerImpl() {
 #if defined(OS_WIN)
     memset(&sandbox_info_, 0, sizeof(sandbox_info_));
 #endif
@@ -441,12 +452,17 @@ class ContentMainRunnerImpl : public ContentMainRunner {
       Shutdown();
   }
 
+  int TerminateForFatalInitializationError() {
+    if (delegate_)
+      return delegate_->TerminateForFatalInitializationError();
+
+    CHECK(false);
+    return 0;
+  }
+
   int Initialize(const ContentMainParams& params) override {
     ui_task_ = params.ui_task;
-
-#if defined(USE_AURA)
-    env_mode_ = params.env_mode;
-#endif
+    created_main_parts_closure_ = params.created_main_parts_closure;
 
 #if defined(OS_WIN)
     sandbox_info_ = *params.sandbox_info;
@@ -497,11 +513,6 @@ class ContentMainRunnerImpl : public ContentMainRunner {
       // called are destructed when it returns.
       exit_manager_.reset(new base::AtExitManager);
     }
-#endif  // !OS_ANDROID
-
-#if !defined(OS_ANDROID)
-    if (delegate_ && delegate_->ShouldEnableProfilerRecording())
-      tracked_objects::ScopedTracker::Enable();
 #endif  // !OS_ANDROID
 
     int exit_code = 0;
@@ -602,16 +613,17 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     int icudata_fd = g_fds->MaybeGet(kAndroidICUDataDescriptor);
     if (icudata_fd != -1) {
       auto icudata_region = g_fds->GetRegion(kAndroidICUDataDescriptor);
-      CHECK(base::i18n::InitializeICUWithFileDescriptor(icudata_fd,
-                                                        icudata_region));
+      if (!base::i18n::InitializeICUWithFileDescriptor(icudata_fd,
+                                                       icudata_region))
+        return TerminateForFatalInitializationError();
     } else {
-      CHECK(base::i18n::InitializeICU());
+      if (!base::i18n::InitializeICU())
+        return TerminateForFatalInitializationError();
     }
 #else
-    CHECK(base::i18n::InitializeICU());
+    if (!base::i18n::InitializeICU())
+      return TerminateForFatalInitializationError();
 #endif  // OS_ANDROID && (ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE)
-
-    base::StatisticsRecorder::Initialize();
 
     InitializeV8IfNeeded(command_line, process_type);
 
@@ -637,15 +649,24 @@ class ContentMainRunnerImpl : public ContentMainRunner {
       delegate_->PreSandboxStartup();
 
 #if defined(OS_WIN)
-    CHECK(InitializeSandbox(params.sandbox_info));
+    if (!InitializeSandbox(
+            service_manager::SandboxTypeFromCommandLine(command_line),
+            params.sandbox_info))
+      return TerminateForFatalInitializationError();
 #elif defined(OS_MACOSX)
+    // Do not initialize the sandbox at this point if the V2
+    // sandbox is enabled for the process type.
+    bool v2_enabled = base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableV2Sandbox);
+
     if (process_type == switches::kRendererProcess ||
-        process_type == switches::kPpapiPluginProcess ||
+        process_type == switches::kPpapiPluginProcess || v2_enabled ||
         (delegate_ && delegate_->DelaySandboxInitialization(process_type))) {
       // On OS X the renderer sandbox needs to be initialized later in the
       // startup sequence in RendererMainPlatformDelegate::EnableSandbox().
     } else {
-      CHECK(InitializeSandbox());
+      if (!InitializeSandbox())
+        return TerminateForFatalInitializationError();
     }
 #endif
 
@@ -670,17 +691,13 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     if (!process_type.empty() && process_type != switches::kZygoteProcess)
       InitializeFieldTrialAndFeatureList(&field_trial_list);
 
-    base::HistogramBase::EnableActivityReportHistogram(process_type);
-
     MainFunctionParams main_params(command_line);
     main_params.ui_task = ui_task_;
+    main_params.created_main_parts_closure = created_main_parts_closure_;
 #if defined(OS_WIN)
     main_params.sandbox_info = &sandbox_info_;
 #elif defined(OS_MACOSX)
     main_params.autorelease_pool = autorelease_pool_;
-#endif
-#if defined(USE_AURA)
-    main_params.env_mode = env_mode_;
 #endif
 
     return RunNamedProcessTypeMain(process_type, main_params, delegate_);
@@ -705,27 +722,27 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 #endif  // _CRTDBG_MAP_ALLOC
 #endif  // OS_WIN
 
-    exit_manager_.reset(NULL);
+    exit_manager_.reset(nullptr);
 
-    delegate_ = NULL;
+    delegate_ = nullptr;
     is_shutdown_ = true;
   }
 
  private:
   // True if the runner has been initialized.
-  bool is_initialized_;
+  bool is_initialized_ = false;
 
   // True if the runner has been shut down.
-  bool is_shutdown_;
+  bool is_shutdown_ = false;
 
   // True if basic startup was completed.
-  bool completed_basic_startup_;
+  bool completed_basic_startup_ = false;
 
   // Used if the embedder doesn't set one.
   ContentClient empty_content_client_;
 
   // The delegate will outlive this object.
-  ContentMainDelegate* delegate_;
+  ContentMainDelegate* delegate_ = nullptr;
 
   std::unique_ptr<base::AtExitManager> exit_manager_;
 #if defined(OS_WIN)
@@ -734,11 +751,9 @@ class ContentMainRunnerImpl : public ContentMainRunner {
   base::mac::ScopedNSAutoreleasePool* autorelease_pool_ = nullptr;
 #endif
 
-  base::Closure* ui_task_;
+  base::Closure* ui_task_ = nullptr;
 
-#if defined(USE_AURA)
-  aura::Env::Mode env_mode_ = aura::Env::Mode::LOCAL;
-#endif
+  CreatedMainPartsClosure* created_main_parts_closure_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(ContentMainRunnerImpl);
 };

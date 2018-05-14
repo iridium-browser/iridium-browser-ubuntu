@@ -11,6 +11,8 @@
 #include "core/css/CSSVariableReferenceValue.h"
 #include "core/css/PropertyDescriptor.h"
 #include "core/css/PropertyRegistry.h"
+#include "core/css/StyleChangeReason.h"
+#include "core/css/StyleEngine.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/parser/CSSParserContext.h"
 #include "core/css/parser/CSSTokenizer.h"
@@ -18,7 +20,6 @@
 #include "core/css/resolver/StyleBuilderConverter.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/dom/StyleChangeReason.h"
 
 namespace blink {
 
@@ -27,7 +28,7 @@ PropertyRegistration::PropertyRegistration(
     const CSSSyntaxDescriptor& syntax,
     bool inherits,
     const CSSValue* initial,
-    PassRefPtr<CSSVariableData> initial_variable_data)
+    scoped_refptr<CSSVariableData> initial_variable_data)
     : syntax_(syntax),
       inherits_(inherits),
       initial_(initial),
@@ -110,12 +111,13 @@ void PropertyRegistration::registerProperty(
   }
 
   const CSSValue* initial = nullptr;
-  RefPtr<CSSVariableData> initial_variable_data;
+  scoped_refptr<CSSVariableData> initial_variable_data;
   if (descriptor.hasInitialValue()) {
     CSSTokenizer tokenizer(descriptor.initialValue());
+    const auto tokens = tokenizer.TokenizeToEOF();
     bool is_animation_tainted = false;
     initial = syntax_descriptor.Parse(
-        tokenizer.TokenRange(),
+        CSSParserTokenRange(tokens),
         document->ElementSheet().Contents()->ParserContext(),
         is_animation_tainted);
     if (!initial) {
@@ -133,7 +135,7 @@ void PropertyRegistration::registerProperty(
     initial =
         &StyleBuilderConverter::ConvertRegisteredPropertyInitialValue(*initial);
     initial_variable_data = CSSVariableData::Create(
-        tokenizer.TokenRange(), is_animation_tainted, false);
+        CSSParserTokenRange(tokens), is_animation_tainted, false);
   } else {
     if (!syntax_descriptor.IsTokenStream()) {
       exception_state.ThrowDOMException(
@@ -147,10 +149,7 @@ void PropertyRegistration::registerProperty(
                                              descriptor.inherits(), initial,
                                              std::move(initial_variable_data)));
 
-  // TODO(timloh): Invalidate only elements with this custom property set
-  document->SetNeedsStyleRecalc(kSubtreeStyleChange,
-                                StyleChangeReasonForTracing::Create(
-                                    StyleChangeReason::kPropertyRegistration));
+  document->GetStyleEngine().CustomPropertyRegistered();
 }
 
 }  // namespace blink

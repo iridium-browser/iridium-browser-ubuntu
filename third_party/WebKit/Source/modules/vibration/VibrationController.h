@@ -28,11 +28,11 @@
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/Vector.h"
-#include "services/device/public/interfaces/vibration_manager.mojom-blink.h"
+#include "services/device/public/mojom/vibration_manager.mojom-blink.h"
 
 namespace blink {
 
-class Document;
+class LocalFrame;
 class UnsignedLongOrUnsignedLongSequence;
 
 class MODULES_EXPORT VibrationController final
@@ -45,7 +45,7 @@ class MODULES_EXPORT VibrationController final
  public:
   using VibrationPattern = Vector<unsigned>;
 
-  explicit VibrationController(Document&);
+  explicit VibrationController(LocalFrame&);
   virtual ~VibrationController();
 
   static VibrationPattern SanitizeVibrationPattern(
@@ -65,7 +65,7 @@ class MODULES_EXPORT VibrationController final
 
   VibrationPattern Pattern() const { return pattern_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   // Inherited from ContextLifecycleObserver.

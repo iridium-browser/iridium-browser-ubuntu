@@ -7,12 +7,11 @@
 #include "ash/shell.h"
 #include "ash/system/cast/tray_cast_test_api.h"
 #include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_test_api.h"
 #include "base/macros.h"
 #include "chrome/browser/media/router/media_routes_observer.h"
 #include "chrome/browser/media/router/media_sinks_observer.h"
-#include "chrome/browser/media/router/mock_media_router.h"
+#include "chrome/browser/media/router/test/mock_media_router.h"
 #include "chrome/browser/ui/ash/cast_config_client_media_router.h"
 #include "chrome/common/media_router/media_source_helper.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -35,7 +34,7 @@ media_router::MediaRoute MakeRoute(const std::string& route_id,
                                    bool is_local) {
   return media_router::MediaRoute(
       route_id, media_router::MediaSourceForDesktop(), sink_id, "description",
-      is_local, std::string() /*custom_controller_path*/, true /*for_display*/);
+      is_local, true /*for_display*/);
 }
 
 // Returns the cast tray instance.
@@ -44,7 +43,8 @@ ash::TrayCast* GetTrayCast() {
 
   // Make sure we actually popup the tray, otherwise the TrayCast instance will
   // not be created.
-  tray->ShowDefaultView(ash::BubbleCreationType::BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(ash::BubbleCreationType::BUBBLE_CREATE_NEW,
+                        false /* show_by_click */);
 
   return ash::SystemTrayTestApi(tray).tray_cast();
 }

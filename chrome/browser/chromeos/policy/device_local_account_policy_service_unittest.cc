@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -13,7 +14,6 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -24,7 +24,6 @@
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_provider.h"
 #include "chrome/browser/chromeos/policy/fake_affiliated_invalidation_service_provider.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
@@ -43,6 +42,7 @@
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/core/common/schema_registry.h"
 #include "components/policy/policy_constants.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/cloud_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -145,7 +145,7 @@ void DeviceLocalAccountPolicyServiceTestBase::SetUp() {
 
   expected_policy_map_.Set(key::kSearchSuggestEnabled, POLICY_LEVEL_MANDATORY,
                            POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                           base::MakeUnique<base::Value>(true), nullptr);
+                           std::make_unique<base::Value>(true), nullptr);
 
   device_local_account_policy_.payload()
       .mutable_searchsuggestenabled()
@@ -163,7 +163,7 @@ void DeviceLocalAccountPolicyServiceTestBase::TearDown() {
 
 void DeviceLocalAccountPolicyServiceTestBase::CreatePolicyService() {
   service_.reset(new DeviceLocalAccountPolicyService(
-      &device_settings_test_helper_, &device_settings_service_, &cros_settings_,
+      &session_manager_client_, &device_settings_service_, &cros_settings_,
       &affiliated_invalidation_service_provider_,
       base::ThreadTaskRunnerHandle::Get(), extension_cache_task_runner_,
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
@@ -176,7 +176,7 @@ void DeviceLocalAccountPolicyServiceTestBase::
   device_local_account_policy_.policy_data().set_settings_entity_id(account_id);
   device_local_account_policy_.policy_data().set_username(account_id);
   device_local_account_policy_.Build();
-  device_settings_test_helper_.set_device_local_account_policy_blob(
+  session_manager_client_.set_device_local_account_policy(
       account_id, device_local_account_policy_.GetBlob());
 }
 
@@ -191,7 +191,7 @@ void DeviceLocalAccountPolicyServiceTestBase::AddDeviceLocalAccountToPolicy(
 
 void DeviceLocalAccountPolicyServiceTestBase::InstallDevicePolicy() {
   device_policy_.Build();
-  device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
+  session_manager_client_.set_device_policy(device_policy_.GetBlob());
   ReloadDeviceSettings();
 }
 
@@ -806,21 +806,17 @@ void DeviceLocalAccountPolicyProviderTest::SetUp() {
   expected_policy_map_.Set(
       key::kLidCloseAction, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
       POLICY_SOURCE_PUBLIC_SESSION_OVERRIDE,
-      base::MakeUnique<base::Value>(
+      std::make_unique<base::Value>(
           chromeos::PowerPolicyController::ACTION_STOP_SESSION),
       nullptr);
   expected_policy_map_.Set(key::kShelfAutoHideBehavior, POLICY_LEVEL_MANDATORY,
                            POLICY_SCOPE_MACHINE,
                            POLICY_SOURCE_PUBLIC_SESSION_OVERRIDE,
-                           base::MakeUnique<base::Value>("Never"), nullptr);
+                           std::make_unique<base::Value>("Never"), nullptr);
   expected_policy_map_.Set(key::kShowLogoutButtonInTray, POLICY_LEVEL_MANDATORY,
                            POLICY_SCOPE_MACHINE,
                            POLICY_SOURCE_PUBLIC_SESSION_OVERRIDE,
-                           base::MakeUnique<base::Value>(true), nullptr);
-  expected_policy_map_.Set(key::kFullscreenAllowed, POLICY_LEVEL_MANDATORY,
-                           POLICY_SCOPE_MACHINE,
-                           POLICY_SOURCE_PUBLIC_SESSION_OVERRIDE,
-                           base::MakeUnique<base::Value>(false), nullptr);
+                           std::make_unique<base::Value>(true), nullptr);
 
   // Policy defaults (for policies not set by admin).
   SetEnterpriseUsersDefaults(&expected_policy_map_);
@@ -898,7 +894,7 @@ TEST_F(DeviceLocalAccountPolicyProviderTest, Policy) {
       .Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
       .Set(key::kSearchSuggestEnabled, POLICY_LEVEL_MANDATORY,
            POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-           base::MakeUnique<base::Value>(false), nullptr);
+           std::make_unique<base::Value>(false), nullptr);
   EXPECT_TRUE(expected_policy_bundle.Equals(provider_->policies()));
 
   // Any values set for the |ShelfAutoHideBehavior|, |ShowLogoutButtonInTray|

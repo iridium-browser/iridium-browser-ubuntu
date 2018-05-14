@@ -36,7 +36,7 @@
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/frame/VisualViewport.h"
-#include "core/html/HTMLTextAreaElement.h"
+#include "core/html/forms/HTMLTextAreaElement.h"
 #include "core/layout/LayoutBlock.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutListItem.h"
@@ -46,9 +46,9 @@
 #include "core/layout/LayoutTable.h"
 #include "core/layout/LayoutTableCell.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/api/LayoutAPIShim.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
+#include "platform/geometry/IntRect.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
@@ -73,7 +73,7 @@ static bool IsNonTextAreaFormControl(const LayoutObject* layout_object) {
     return false;
   const Element* element = ToElement(node);
 
-  return (element->IsFormControlElement() && !isHTMLTextAreaElement(element));
+  return (element->IsFormControlElement() && !IsHTMLTextAreaElement(element));
 }
 
 static bool IsPotentialClusterRoot(const LayoutObject* layout_object) {
@@ -165,7 +165,8 @@ static bool BlockHeightConstrained(const LayoutBlock* block) {
   // the content is already overflowing before autosizing kicks in.
   for (; block; block = block->ContainingBlock()) {
     const ComputedStyle& style = block->StyleRef();
-    if (style.OverflowY() >= EOverflow::kScroll)
+    if (style.OverflowY() != EOverflow::kVisible
+        && style.OverflowY() != EOverflow::kHidden)
       return false;
     if (style.Height().IsSpecified() || style.MaxHeight().IsSpecified() ||
         block->IsOutOfFlowPositioned()) {
@@ -239,7 +240,7 @@ TextAutosizer::TextAutosizer(const Document* document)
       update_page_info_deferred_(false) {
 }
 
-TextAutosizer::~TextAutosizer() {}
+TextAutosizer::~TextAutosizer() = default;
 
 void TextAutosizer::Record(LayoutBlock* block) {
   if (!page_info_.setting_enabled_)
@@ -557,9 +558,9 @@ void TextAutosizer::UpdatePageInfo() {
   if (!page_info_.setting_enabled_ || document_->Printing()) {
     page_info_.page_needs_autosizing_ = false;
   } else {
-    LayoutViewItem layout_view_item = document_->GetLayoutViewItem();
+    auto* layout_view = document_->GetLayoutView();
     bool horizontal_writing_mode =
-        IsHorizontalWritingMode(layout_view_item.Style()->GetWritingMode());
+        IsHorizontalWritingMode(layout_view->StyleRef().GetWritingMode());
 
     // FIXME: With out-of-process iframes, the top frame can be remote and
     // doesn't have sizing information. Just return if this is the case.
@@ -634,8 +635,7 @@ IntSize TextAutosizer::WindowSize() const {
 }
 
 void TextAutosizer::ResetMultipliers() {
-  LayoutObject* layout_object =
-      LayoutAPIShim::LayoutObjectFrom(document_->GetLayoutViewItem());
+  LayoutObject* layout_object = document_->GetLayoutView();
   while (layout_object) {
     if (const ComputedStyle* style = layout_object->Style()) {
       if (style->TextAutosizingMultiplier() != 1)
@@ -725,6 +725,14 @@ bool TextAutosizer::ClusterHasEnoughTextToAutosize(
 
   // 4 lines of text is considered enough to autosize.
   float minimum_text_length_to_autosize = WidthFromBlock(width_provider) * 4;
+  if (LocalFrameView* view = document_->View()) {
+    minimum_text_length_to_autosize =
+        document_->GetPage()
+            ->GetChromeClient()
+            .ViewportToScreen(IntRect(0, 0, minimum_text_length_to_autosize, 0),
+                              view)
+            .Width();
+  }
 
   float length = 0;
   LayoutObject* descendant = root->FirstChild();
@@ -1120,7 +1128,7 @@ void TextAutosizer::ApplyMultiplier(LayoutObject* layout_object,
     return;
 
   // We need to clone the layoutObject style to avoid breaking style sharing.
-  RefPtr<ComputedStyle> style = ComputedStyle::Clone(current_style);
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Clone(current_style);
   style->SetTextAutosizingMultiplier(multiplier);
   style->SetUnique();
 
@@ -1400,7 +1408,7 @@ void TextAutosizer::CheckSuperclusterConsistency() {
   potentially_inconsistent_superclusters.clear();
 }
 
-DEFINE_TRACE(TextAutosizer) {
+void TextAutosizer::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
 }
 

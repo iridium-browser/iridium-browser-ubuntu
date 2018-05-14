@@ -17,7 +17,6 @@
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -44,7 +43,7 @@
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
@@ -70,7 +69,7 @@ std::unique_ptr<KeyedService> BuildHistoryService(
 
   std::unique_ptr<history::HistoryService> history_service(
       new history::HistoryService(
-          base::MakeUnique<ChromeHistoryClient>(
+          std::make_unique<ChromeHistoryClient>(
               BookmarkModelFactory::GetForBrowserContext(profile)),
           std::unique_ptr<history::VisitDelegate>()));
   if (history_service->Init(
@@ -166,18 +165,6 @@ class LastDownloadFinderTest : public testing::Test {
     ASSERT_TRUE(profile_manager_->SetUp());
   }
 
-  void TearDown() override {
-    // Shut down the history service on all profiles.
-    std::vector<Profile*> profiles(
-        profile_manager_->profile_manager()->GetLoadedProfiles());
-    for (size_t i = 0; i < profiles.size(); ++i) {
-      profiles[0]->AsTestingProfile()->DestroyHistoryService();
-    }
-    profile_manager_.reset();
-    TestingBrowserProcess::DeleteInstance();
-    testing::Test::TearDown();
-  }
-
   TestingProfile* CreateProfile(SafeBrowsingDisposition safe_browsing_opt_in) {
     std::string profile_name("profile");
     profile_name.append(base::IntToString(++profile_number_));
@@ -196,7 +183,7 @@ class LastDownloadFinderTest : public testing::Test {
     // Create prefs for the profile with safe browsing enabled or not.
     std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> prefs(
         new sync_preferences::TestingPrefServiceSyncable);
-    chrome::RegisterUserProfilePrefs(prefs->registry());
+    RegisterUserProfilePrefs(prefs->registry());
     prefs->SetBoolean(
         prefs::kSafeBrowsingEnabled,
         safe_browsing_opt_in == SAFE_BROWSING_ONLY ||
@@ -235,25 +222,6 @@ class LastDownloadFinderTest : public testing::Test {
     run_loop.Run();
   }
 
-  // Wait for the history backend thread to process any outstanding tasks.
-  // This is needed because HistoryService::QueryDownloads uses PostTaskAndReply
-  // to do work on the backend thread and then invoke the caller's callback on
-  // the originating thread. The PostTaskAndReplyRelay holds a reference to the
-  // backend until its RunReplyAndSelfDestruct is called on the originating
-  // thread. This reference MUST be released (on the originating thread,
-  // remember) _before_ calling DestroyHistoryService in TearDown(). See the
-  // giant comment in HistoryService::Cleanup explaining where the backend's
-  // dtor must be run.
-  void FlushHistoryBackend(Profile* profile) {
-    base::RunLoop run_loop;
-    HistoryServiceFactory::GetForProfile(profile,
-                                         ServiceAccessType::EXPLICIT_ACCESS)
-        ->FlushForTest(run_loop.QuitClosure());
-    run_loop.Run();
-    // Then make sure anything bounced back to the main thread has been handled.
-    base::RunLoop().RunUntilIdle();
-  }
-
   // Runs the last download finder on all loaded profiles.
   void RunLastDownloadFinder(
       std::unique_ptr<ClientIncidentReport_DownloadDetails>*
@@ -275,39 +243,33 @@ class LastDownloadFinderTest : public testing::Test {
   history::DownloadRow CreateTestDownloadRow(
       const base::FilePath::CharType* file_path) {
     base::Time now(base::Time::Now());
-    return history::DownloadRow(
-        base::FilePath(file_path), base::FilePath(file_path),
-        std::vector<GURL>(1, GURL("http://www.google.com")),  // url_chain
-        GURL("http://referrer.example.com/"),                 // referrer
-        GURL("http://site-url.example.com/"),        // site instance URL
-        GURL("http://tab-url.example.com/"),         // tab URL
-        GURL("http://tab-referrer.example.com/"),    // tab referrer URL
-        std::string(),                               // HTTP method
-        "application/octet-stream",                  // mime_type
-        "application/octet-stream",                  // original_mime_type
-        now - base::TimeDelta::FromMinutes(10),      // start
-        now - base::TimeDelta::FromMinutes(9),       // end
-        std::string(),                               // etag
-        std::string(),                               // last_modified
-        47LL,                                        // received
-        47LL,                                        // total
-        history::DownloadState::COMPLETE,            // download_state
-        history::DownloadDangerType::NOT_DANGEROUS,  // danger_type
-        history::ToHistoryDownloadInterruptReason(
-            content::DOWNLOAD_INTERRUPT_REASON_NONE),  // interrupt_reason,
-        std::string(),                                 // hash
-        download_id_++,                                // id
-        base::GenerateGUID(),                          // GUID
-        false,                                         // download_opened
-        now - base::TimeDelta::FromMinutes(5),         // last_access_time
-        false,                                         // transient
-        std::string(),                                 // ext_id
-        std::string(),                                 // ext_name
-        std::vector<history::DownloadSliceInfo>());    // download_slice_info
-  }
 
-  content::TestBrowserThreadBundle browser_thread_bundle_;
-  std::unique_ptr<TestingProfileManager> profile_manager_;
+    history::DownloadRow row;
+    row.current_path = base::FilePath(file_path);
+    row.target_path = base::FilePath(file_path);
+    row.url_chain.push_back(GURL("http://www.google.com/"));
+    row.referrer_url = GURL("http://referrer.example.com/");
+    row.site_url = GURL("http://site-url.example.com/");
+    row.tab_url = GURL("http://tab-url.example.com/");
+    row.tab_referrer_url = GURL("http://tab-referrer.example.com/");
+    row.mime_type = "application/octet-stream";
+    row.original_mime_type = "application/octet-stream";
+    row.start_time = now - base::TimeDelta::FromMinutes(10);
+    row.end_time = now - base::TimeDelta::FromMinutes(9);
+    row.received_bytes = 47;
+    row.total_bytes = 47;
+    row.state = history::DownloadState::COMPLETE;
+    row.danger_type = history::DownloadDangerType::NOT_DANGEROUS;
+    row.interrupt_reason = history::ToHistoryDownloadInterruptReason(
+        download::DOWNLOAD_INTERRUPT_REASON_NONE);
+    row.id = download_id_++;
+    row.guid = base::GenerateGUID();
+    row.opened = false;
+    row.last_access_time = now - base::TimeDelta::FromMinutes(5);
+    row.transient = false;
+
+    return row;
+  }
 
  private:
   // A HistoryService::DownloadCreateCallback that asserts that the download was
@@ -327,6 +289,8 @@ class LastDownloadFinderTest : public testing::Test {
     callback.Run(std::unique_ptr<ClientIncidentReport_DownloadDetails>());
   }
 
+  content::TestBrowserThreadBundle browser_thread_bundle_;
+  std::unique_ptr<TestingProfileManager> profile_manager_;
   int profile_number_;
 
   // Incremented on every download addition to avoid downloads with the same id.
@@ -440,9 +404,6 @@ TEST_F(LastDownloadFinderTest, DeleteBeforeResults) {
   LastDownloadFinder::Create(GetDownloadDetailsGetter(),
                              base::Bind(&LastDownloadFinderTest::NeverCalled,
                                         base::Unretained(this))).reset();
-
-  // Flush tasks on the history backend thread.
-  FlushHistoryBackend(profile);
 }
 
 // Tests that a download in profile added after the search is begun is found.

@@ -5,115 +5,87 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
+<link rel="import" href="/components/google-signin/google-signin.html">
 <link rel="import" href="/components/iron-icons/iron-icons.html">
-
-<link rel="import" href="/dashboard/static/simple_xhr.html">
+<link rel="import" href="/components/paper-icon-button/paper-icon-button.html">
+<link rel="import" href="/components/paper-tooltip/paper-tooltip.html">
 
 <dom-module id="navigation-bar">
   <template>
     <style>
-      #navbar {
-        width: 100%;
-      }
-
-      #navbar ul {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-        border: 0;
-        font-size: 100%;
-        font: inherit;
-        vertical-align: baseline;
-        z-index: 1000;
-        margin-left: -10px; /* Ignore body's padding left. */
-        padding-right: 20px; /* Ignore body's padding right. */
-      }
-
-      #navbar > ul {
+      nav {
+        background-color: var(--paper-indigo-500);
         display: flex;
-        display: -webkit-flex;
-        width: 100%;
-        background-color: #2D2D2D;
-        border-bottom: black;
-        margin-bottom: 6px;
-      }
-
-      #navbar li {
-        padding: 6px 10px;
-      }
-
-      #navbar li > a {
-        cursor: pointer;
-        text-decoration: none;
-      }
-
-      #navbar > ul > li, #navbar > ul > li > a {
-        color: #ddd;
         font-weight: bold;
+        width: 100%;
       }
 
-      /* The addition of the icons to the <iron-icon> elements to the submenus
-       * makes the submenu title text lower; the below style rule is intended
-       * to align the other menu items. */
-      #navbar .menu > li a {
-        display: inline-block;
-        padding-top: 3px;
+      #spacer {
+          margin: auto;
       }
 
-      /* This is a spacer in the navbar list that pushes the items after it
-       * all the way to the right side. */
-      .spacer {
-        flex: 100;
+      a {
+        color: var(--paper-indigo-50);
       }
 
-      #navbar .menu li:hover > ul {
-        margin-top: 6px;
-        background-color: #2D2D2D;
-        border: 1px solid rgba(0, 0, 0, .2);
-      }
-
-      #navbar li:hover, #navbar a:hover {
+      a:hover {
         color: white;
       }
 
-      /* Basic select menus. */
-      .menu ul {
-        display: none;
-      }
-
-      .menu li:hover > ul {
-        display: block;
-        position: absolute;
+      google-signin {
+        margin: 0;
+        padding: 8px;
       }
     </style>
-    <nav id="navbar">
-      <ul class="menu">
-        <li><a href="/">Pinpoint</a></li>
-        <li><a href="/jobs">Jobs</a></li>
-        <li><a href="/new">Create Job</a></li>
-        <li><a href="https://github.com/catapult-project/catapult/tree/master/dashboard/dashboard/pinpoint">Pinpoint in Github</a></li>
 
-        <li class="spacer"></li>
-        <li><a href$="{{loginUrl}}" title="switch user">{{displayUsername}}</a></li>
-      </ul>
+    <nav id="navbar">
+      <a href="/">
+        <paper-icon-button src="/static/logo.svg"></paper-icon-button>
+      </a>
+      <span id="spacer"></span>
+      <a href="https://github.com/catapult-project/catapult/tree/master/dashboard/dashboard/pinpoint" target="_blank">
+        <paper-icon-button icon="help"></paper-icon-button>
+        <paper-tooltip>Documentation</paper-tooltip>
+      </a>
+      <a href="https://github.com/catapult-project/catapult/issues/new?title=[📍]+&assignees=dave-2&labels=Bisect" target="_blank">
+        <paper-icon-button icon="feedback"></paper-icon-button>
+        <paper-tooltip>File a bug</paper-tooltip>
+      </a>
+      <google-signin
+          client-id="62121018386-aqdfougp0ddn93knqj6g79vvn42ajmrg.apps.googleusercontent.com"
+          height="short" theme="dark"
+          scopes="email"
+          on-google-signin-success="handleSignIn"
+          on-google-signed-out="handleSignOut"></google-signin>
     </nav>
   </template>
+
   <script>
     'use strict';
     Polymer({
       is: 'navigation-bar',
-      ready() {
-        simple_xhr.send('/api/login',
-                        {'path': location.pathname + location.search},
-            function(response) {
-              this.loginUrl = response.login_url;
-              if ('display_username' in response) {
-                this.displayUsername = response.display_username;
-              } else {
-                this.displayUsername = 'Sign in';
-              }
-            }.bind(this));
-      }
+
+      properties: {
+        authHeaders: {
+          type: Object,
+          notify: true,
+          readonly: true
+        }
+      },
+
+      handleSignIn() {
+        const user = gapi.auth2.getAuthInstance().currentUser.get();
+        const tokenType = user.getAuthResponse().token_type;
+        const accessToken = user.getAuthResponse().access_token;
+
+        this.authHeaders = {
+          Authorization: tokenType + ' ' + accessToken
+        };
+      },
+
+      handleSignOut() {
+        this.authHeaders = null;
+      },
     });
   </script>
 </dom-module>

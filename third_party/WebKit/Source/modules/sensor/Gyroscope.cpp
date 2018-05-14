@@ -10,7 +10,7 @@ using device::mojom::blink::SensorType;
 namespace blink {
 
 Gyroscope* Gyroscope::Create(ExecutionContext* execution_context,
-                             const SensorOptions& options,
+                             const SpatialSensorOptions& options,
                              ExceptionState& exception_state) {
   return new Gyroscope(execution_context, options, exception_state);
 }
@@ -18,30 +18,34 @@ Gyroscope* Gyroscope::Create(ExecutionContext* execution_context,
 // static
 Gyroscope* Gyroscope::Create(ExecutionContext* execution_context,
                              ExceptionState& exception_state) {
-  return Create(execution_context, SensorOptions(), exception_state);
+  return Create(execution_context, SpatialSensorOptions(), exception_state);
 }
 
 Gyroscope::Gyroscope(ExecutionContext* execution_context,
-                     const SensorOptions& options,
+                     const SpatialSensorOptions& options,
                      ExceptionState& exception_state)
     : Sensor(execution_context,
              options,
              exception_state,
-             SensorType::GYROSCOPE) {}
+             SensorType::GYROSCOPE,
+             {mojom::FeaturePolicyFeature::kGyroscope}) {}
 
 double Gyroscope::x(bool& is_null) const {
-  return ReadingValue(0, is_null);
+  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
+  return GetReading().gyro.x;
 }
 
 double Gyroscope::y(bool& is_null) const {
-  return ReadingValue(1, is_null);
+  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
+  return GetReading().gyro.y;
 }
 
 double Gyroscope::z(bool& is_null) const {
-  return ReadingValue(2, is_null);
+  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
+  return GetReading().gyro.z;
 }
 
-DEFINE_TRACE(Gyroscope) {
+void Gyroscope::Trace(blink::Visitor* visitor) {
   Sensor::Trace(visitor);
 }
 

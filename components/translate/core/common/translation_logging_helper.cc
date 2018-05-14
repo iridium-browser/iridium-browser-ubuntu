@@ -6,8 +6,8 @@
 
 #include "base/logging.h"
 #include "base/time/time.h"
-#include "components/metrics/proto/translate_event.pb.h"
 #include "components/sync/protocol/user_event_specifics.pb.h"
+#include "third_party/metrics_proto/translate_event.pb.h"
 
 using Translation = sync_pb::UserEventSpecifics::Translation;
 
@@ -21,8 +21,6 @@ bool ConstructTranslateEvent(const int64_t navigation_id,
                              sync_pb::UserEventSpecifics* const specifics) {
   specifics->set_event_time_usec(base::Time::Now().ToInternalValue());
 
-  // TODO(renjieliu): Revisit this field when the best way to identify
-  // navigations is determined.
   specifics->set_navigation_id(navigation_id);
   auto* const translation = specifics->mutable_translation_event();
   translation->set_from_language_code(translate_event.source_language());
@@ -67,6 +65,9 @@ bool ConstructTranslateEvent(const int64_t navigation_id,
       break;
     case TranslateEventProto::AUTO_TRANSLATION_BY_LINK:
       translation->set_interaction(Translation::AUTO_TRANSLATION_BY_LINK);
+      break;
+    case TranslateEventProto::INITIALIZATION_ERROR:
+      translation->set_interaction(Translation::INITIALIZATION_ERROR);
       break;
     default:  // We don't care about other events.
       return false;

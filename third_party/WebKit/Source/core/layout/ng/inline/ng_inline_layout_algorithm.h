@@ -8,15 +8,13 @@
 #include "core/CoreExport.h"
 #include "core/layout/ng/geometry/ng_logical_offset.h"
 #include "core/layout/ng/inline/ng_inline_box_state.h"
-#include "core/layout/ng/inline/ng_inline_break_token.h"
 #include "core/layout/ng/inline/ng_inline_item_result.h"
-#include "core/layout/ng/inline/ng_line_height_metrics.h"
+#include "core/layout/ng/inline/ng_inline_node.h"
+#include "core/layout/ng/inline/ng_line_box_fragment_builder.h"
 #include "core/layout/ng/ng_constraint_space_builder.h"
 #include "core/layout/ng/ng_fragment_builder.h"
 #include "core/layout/ng/ng_layout_algorithm.h"
-#include "core/layout/ng/ng_layout_opportunity_iterator.h"
 #include "platform/fonts/FontBaseline.h"
-#include "platform/heap/Handle.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -26,64 +24,66 @@ class NGInlineBreakToken;
 class NGInlineNode;
 class NGInlineItem;
 class NGLineBoxFragmentBuilder;
-class NGTextFragmentBuilder;
+struct NGPositionedFloat;
 
-// A class for inline layout (e.g. a <span> with no special style).
+// A class for laying out an inline formatting context, i.e. a block with inline
+// children.
 //
 // This class determines the position of NGInlineItem and build line boxes.
 //
 // Uses NGLineBreaker to find NGInlineItems to form a line.
 class CORE_EXPORT NGInlineLayoutAlgorithm final
-    : public NGLayoutAlgorithm<NGInlineNode, NGInlineBreakToken> {
+    : public NGLayoutAlgorithm<NGInlineNode,
+                               NGLineBoxFragmentBuilder,
+                               NGInlineBreakToken> {
  public:
   NGInlineLayoutAlgorithm(NGInlineNode,
-                          NGConstraintSpace*,
+                          const NGConstraintSpace&,
                           NGInlineBreakToken* = nullptr);
 
-  // Create a line.
-  // @return false if the line does not fit in the constraint space in block
-  //         direction.
-  bool CreateLine(NGLineInfo*, RefPtr<NGInlineBreakToken> = nullptr);
+  void CreateLine(NGLineInfo*, NGExclusionSpace*);
 
-  RefPtr<NGLayoutResult> Layout() override;
+  scoped_refptr<NGLayoutResult> Layout() override;
 
  private:
+  unsigned PositionLeadingItems(NGExclusionSpace*);
+  void PositionPendingFloats(LayoutUnit content_size, NGExclusionSpace*);
+
   bool IsHorizontalWritingMode() const { return is_horizontal_writing_mode_; }
 
-  void BidiReorder(NGInlineItemResults*);
+  void BidiReorder();
 
-  bool PlaceItems(NGLineInfo*, RefPtr<NGInlineBreakToken>);
+  void PlaceGeneratedContent(scoped_refptr<NGPhysicalFragment>,
+                             UBiDiLevel,
+                             NGInlineBoxState*);
   NGInlineBoxState* PlaceAtomicInline(const NGInlineItem&,
                                       NGInlineItemResult*,
-                                      const NGLineInfo&,
-                                      LayoutUnit position,
-                                      NGLineBoxFragmentBuilder*,
-                                      NGTextFragmentBuilder*);
+                                      const NGLineInfo&);
+  void PlaceLayoutResult(NGInlineItemResult*,
+                         NGInlineBoxState*,
+                         LayoutUnit inline_offset = LayoutUnit());
+  bool PlaceOutOfFlowObjects(const NGLineInfo&, const NGLineHeightMetrics&);
+  void PlaceListMarker(const NGInlineItem&,
+                       NGInlineItemResult*,
+                       const NGLineInfo&);
 
-  void ApplyTextAlign(ETextAlign,
-                      LayoutUnit* line_left,
-                      LayoutUnit inline_size,
-                      LayoutUnit available_width);
+  LayoutUnit OffsetForTextAlign(const NGLineInfo&, ETextAlign) const;
+  bool ApplyJustify(NGLineInfo*);
 
-  LayoutUnit ComputeContentSize(const NGLineInfo&, LayoutUnit line_bottom);
+  LayoutUnit ComputeContentSize(const NGLineInfo&,
+                                const NGExclusionSpace&,
+                                LayoutUnit line_height);
 
-  void PropagateBaselinesFromChildren();
-  bool AddBaseline(const NGBaselineRequest&,
-                   const NGPhysicalFragment*,
-                   LayoutUnit child_offset);
+  NGLineBoxFragmentBuilder::ChildList line_box_;
+  std::unique_ptr<NGInlineLayoutStateStack> box_states_;
 
-  NGInlineLayoutStateStack box_states_;
-  LayoutUnit content_size_;
-  LayoutUnit max_inline_size_;
   FontBaseline baseline_type_ = FontBaseline::kAlphabeticBaseline;
 
-  NGLogicalOffset bfc_offset_;
-  NGLogicalRect current_opportunity_;
-
   unsigned is_horizontal_writing_mode_ : 1;
+  unsigned quirks_mode_ : 1;
 
-  NGConstraintSpaceBuilder space_builder_;
-  Vector<RefPtr<NGUnpositionedFloat>> unpositioned_floats_;
+  Vector<NGPositionedFloat> positioned_floats_;
+  Vector<scoped_refptr<NGUnpositionedFloat>> unpositioned_floats_;
 };
 
 }  // namespace blink

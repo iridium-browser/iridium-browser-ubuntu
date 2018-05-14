@@ -25,7 +25,7 @@
 #define LayoutInline_h
 
 #include "core/CoreExport.h"
-#include "core/editing/PositionWithAffinity.h"
+#include "core/editing/Forward.h"
 #include "core/layout/LayoutBoxModelObject.h"
 #include "core/layout/api/LineLayoutItem.h"
 #include "core/layout/line/InlineFlowBox.h"
@@ -115,6 +115,8 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
  public:
   explicit LayoutInline(Element*);
 
+  static LayoutInline* CreateAnonymous(Document*);
+
   LayoutObject* FirstChild() const {
     DCHECK_EQ(Children(), VirtualChildren());
     return Children()->FirstChild();
@@ -135,20 +137,10 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
     return ToElement(LayoutBoxModelObject::GetNode());
   }
 
-  LayoutRectOutsets MarginBoxOutsets() const final;
   LayoutUnit MarginLeft() const final;
   LayoutUnit MarginRight() const final;
   LayoutUnit MarginTop() const final;
   LayoutUnit MarginBottom() const final;
-  LayoutUnit MarginBefore(
-      const ComputedStyle* other_style = nullptr) const final;
-  LayoutUnit MarginAfter(
-      const ComputedStyle* other_style = nullptr) const final;
-  LayoutUnit MarginStart(
-      const ComputedStyle* other_style = nullptr) const final;
-  LayoutUnit MarginEnd(const ComputedStyle* other_style = nullptr) const final;
-  LayoutUnit MarginOver() const final;
-  LayoutUnit MarginUnder() const final;
 
   void AbsoluteRects(Vector<IntRect>&,
                      const LayoutPoint& accumulated_offset) const final;
@@ -207,15 +199,19 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
   }
   void UpdateAlwaysCreateLineBoxes(bool full_layout);
 
-  LayoutRect LocalCaretRect(InlineBox*,
+  LayoutRect LocalCaretRect(const InlineBox*,
                             int,
-                            LayoutUnit* extra_width_to_end_of_line) final;
+                            LayoutUnit* extra_width_to_end_of_line) const final;
 
   bool HitTestCulledInline(HitTestResult&,
                            const HitTestLocation& location_in_container,
                            const LayoutPoint& accumulated_offset);
 
   LayoutPoint FirstLineBoxTopLeft() const;
+
+  void MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
+                          TransformState&,
+                          MapCoordinatesFlags mode) const override;
 
   const char* GetName() const override { return "LayoutInline"; }
 
@@ -297,14 +293,14 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
   // This method differs from visualOverflowRect in that it doesn't include the
   // rects for culled inline boxes, which aren't necessary for paint
   // invalidation.
-  LayoutRect LocalVisualRect() const override;
+  LayoutRect LocalVisualRectIgnoringVisibility() const override;
 
   bool MapToVisualRectInAncestorSpaceInternal(
       const LayoutBoxModelObject* ancestor,
       TransformState&,
       VisualRectFlags = kDefaultVisualRectFlags) const final;
 
-  PositionWithAffinity PositionForPoint(const LayoutPoint&) final;
+  PositionWithAffinity PositionForPoint(const LayoutPoint&) const final;
 
   IntRect BorderBoundingBox() const final {
     IntRect bounding_box = EnclosingIntRect(LinesBoundingBox());
@@ -313,13 +309,7 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
 
   virtual InlineFlowBox* CreateInlineFlowBox();  // Subclassed by SVG and Ruby
 
-  void DirtyLinesFromChangedChild(
-      LayoutObject* child,
-      MarkingBehavior marking_behaviour = kMarkContainerChain) final {
-    line_boxes_.DirtyLinesFromChangedChild(
-        LineLayoutItem(this), LineLayoutItem(child),
-        marking_behaviour == kMarkContainerChain);
-  }
+  void DirtyLinesFromChangedChild(LayoutObject*, MarkingBehavior) final;
 
   // TODO(leviw): This should probably be an int. We don't snap equivalent lines
   // to different heights.
@@ -327,7 +317,7 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
       bool first_line,
       LineDirectionMode,
       LinePositionMode = kPositionOnContainingLine) const final;
-  int BaselinePosition(
+  LayoutUnit BaselinePosition(
       FontBaseline,
       bool first_line,
       LineDirectionMode,
@@ -337,11 +327,14 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
 
   void UpdateHitTestResult(HitTestResult&, const LayoutPoint&) final;
 
-  void ImageChanged(WrappedImagePtr, const IntRect* = nullptr) final;
+  void ImageChanged(WrappedImagePtr,
+                    CanDeferInvalidation,
+                    const IntRect* = nullptr) final;
 
   void AddAnnotatedRegions(Vector<AnnotatedRegionValue>&) final;
 
   void UpdateFromStyle() final;
+  bool AnonymousHasStylePropagationOverride() final { return true; }
 
   LayoutInline* Clone() const;
 

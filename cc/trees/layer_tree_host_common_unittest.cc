@@ -14,8 +14,8 @@
 #include "base/memory/ptr_util.h"
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_id_provider.h"
-#include "cc/animation/animation_player.h"
 #include "cc/animation/keyframed_animation_curve.h"
+#include "cc/animation/single_keyframe_effect_animation.h"
 #include "cc/animation/transform_operations.h"
 #include "cc/base/math_util.h"
 #include "cc/input/main_thread_scrolling_reason.h"
@@ -26,8 +26,6 @@
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/render_surface_impl.h"
 #include "cc/layers/texture_layer_impl.h"
-#include "cc/output/copy_output_request.h"
-#include "cc/output/copy_output_result.h"
 #include "cc/test/animation_test_common.h"
 #include "cc/test/fake_content_layer_client.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
@@ -47,10 +45,9 @@
 #include "cc/trees/single_thread_proxy.h"
 #include "cc/trees/task_runner_provider.h"
 #include "cc/trees/transform_node.h"
+#include "components/viz/common/frame_sinks/copy_output_request.h"
+#include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/skia/include/core/SkImageFilter.h"
-#include "third_party/skia/include/effects/SkOffsetImageFilter.h"
-#include "third_party/skia/include/effects/SkXfermodeImageFilter.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
 #include "ui/gfx/transform.h"
@@ -60,8 +57,7 @@ namespace {
 
 class VerifyTreeCalcsLayerTreeSettings : public LayerTreeSettings {
  public:
-  VerifyTreeCalcsLayerTreeSettings() {
-  }
+  VerifyTreeCalcsLayerTreeSettings() = default;
 };
 
 class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
@@ -230,7 +226,7 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
     gfx::Size device_viewport_size =
         gfx::Size(root_layer->bounds().width() * device_scale_factor,
                   root_layer->bounds().height() * device_scale_factor);
-    update_layer_list_impl_.reset(new LayerImplList);
+    update_layer_impl_list_.reset(new LayerImplList);
     root_layer->layer_tree_impl()->BuildLayerListForTesting();
     PropertyTrees* property_trees =
         root_layer->layer_tree_impl()->property_trees();
@@ -243,9 +239,9 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
         root_layer, property_trees, can_adjust_raster_scales);
     draw_property_utils::FindLayersThatNeedUpdates(
         root_layer->layer_tree_impl(), property_trees,
-        update_layer_list_impl_.get());
+        update_layer_impl_list_.get());
     draw_property_utils::ComputeDrawPropertiesOfVisibleLayers(
-        update_layer_list_impl(), property_trees);
+        update_layer_impl_list(), property_trees);
   }
 
   void ExecuteCalculateDrawPropertiesWithoutAdjustingRasterScales(
@@ -262,8 +258,8 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
     LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
   }
 
-  bool UpdateLayerListImplContains(int id) const {
-    for (auto* layer : *update_layer_list_impl_) {
+  bool UpdateLayerImplListContains(int id) const {
+    for (auto* layer : *update_layer_impl_list_) {
       if (layer->id() == id)
         return true;
     }
@@ -281,8 +277,8 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
   const RenderSurfaceList* render_surface_list_impl() const {
     return render_surface_list_impl_.get();
   }
-  const LayerImplList* update_layer_list_impl() const {
-    return update_layer_list_impl_.get();
+  const LayerImplList* update_layer_impl_list() const {
+    return update_layer_impl_list_.get();
   }
   const LayerList& update_layer_list() const { return update_layer_list_; }
 
@@ -295,7 +291,7 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
  private:
   std::unique_ptr<RenderSurfaceList> render_surface_list_impl_;
   LayerList update_layer_list_;
-  std::unique_ptr<LayerImplList> update_layer_list_impl_;
+  std::unique_ptr<LayerImplList> update_layer_impl_list_;
 };
 
 class LayerTreeHostCommonTest : public LayerTreeHostCommonTestBase,
@@ -303,12 +299,12 @@ class LayerTreeHostCommonTest : public LayerTreeHostCommonTestBase,
 
 class LayerWithForcedDrawsContent : public Layer {
  public:
-  LayerWithForcedDrawsContent() {}
+  LayerWithForcedDrawsContent() = default;
 
   bool DrawsContent() const override { return true; }
 
  private:
-  ~LayerWithForcedDrawsContent() override {}
+  ~LayerWithForcedDrawsContent() override = default;
 };
 
 class LayerTreeSettingsScaleContent : public VerifyTreeCalcsLayerTreeSettings {
@@ -548,10 +544,9 @@ TEST_F(LayerTreeHostCommonTest, TransformsAboutScrollOffset) {
                                  nullptr, nullptr);
   gfx::Transform expected_transform;
   gfx::PointF sub_layer_screen_position = kScrollLayerPosition - kScrollDelta;
-  expected_transform.Translate(MathUtil::Round(sub_layer_screen_position.x() *
-                                               page_scale * kDeviceScale),
-                               MathUtil::Round(sub_layer_screen_position.y() *
-                                               page_scale * kDeviceScale));
+  expected_transform.Translate(
+      std::round(sub_layer_screen_position.x() * page_scale * kDeviceScale),
+      std::round(sub_layer_screen_position.y() * page_scale * kDeviceScale));
   expected_transform.Scale(page_scale * kDeviceScale,
                            page_scale * kDeviceScale);
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_transform,
@@ -570,12 +565,10 @@ TEST_F(LayerTreeHostCommonTest, TransformsAboutScrollOffset) {
                                  nullptr, nullptr);
   expected_transform.MakeIdentity();
   expected_transform.Translate(
-      MathUtil::Round(kTranslateX * page_scale * kDeviceScale +
-                      sub_layer_screen_position.x() * page_scale *
-                          kDeviceScale),
-      MathUtil::Round(kTranslateY * page_scale * kDeviceScale +
-                      sub_layer_screen_position.y() * page_scale *
-                          kDeviceScale));
+      std::round(kTranslateX * page_scale * kDeviceScale +
+                 sub_layer_screen_position.x() * page_scale * kDeviceScale),
+      std::round(kTranslateY * page_scale * kDeviceScale +
+                 sub_layer_screen_position.y() * page_scale * kDeviceScale));
   expected_transform.Scale(page_scale * kDeviceScale,
                            page_scale * kDeviceScale);
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_transform,
@@ -595,12 +588,10 @@ TEST_F(LayerTreeHostCommonTest, TransformsAboutScrollOffset) {
 
   expected_transform.MakeIdentity();
   expected_transform.Translate(
-      MathUtil::Round(kTranslateX * page_scale * kDeviceScale +
-                      sub_layer_screen_position.x() * page_scale *
-                          kDeviceScale),
-      MathUtil::Round(kTranslateY * page_scale * kDeviceScale +
-                      sub_layer_screen_position.y() * page_scale *
-                          kDeviceScale));
+      std::round(kTranslateX * page_scale * kDeviceScale +
+                 sub_layer_screen_position.x() * page_scale * kDeviceScale),
+      std::round(kTranslateY * page_scale * kDeviceScale +
+                 sub_layer_screen_position.y() * page_scale * kDeviceScale));
   expected_transform.Scale(page_scale * kDeviceScale,
                            page_scale * kDeviceScale);
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_transform,
@@ -1399,7 +1390,7 @@ TEST_F(LayerTreeHostCommonTest, RenderSurfaceListForTransparentChild) {
   ASSERT_TRUE(GetRenderSurface(root));
   EXPECT_EQ(0, GetRenderSurface(root)->num_contributors());
   EXPECT_EQ(1U, render_surface_list.size());
-  EXPECT_EQ(static_cast<RenderPassId>(root->id()),
+  EXPECT_EQ(static_cast<viz::RenderPassId>(root->id()),
             render_surface_list.at(0)->id());
   EXPECT_EQ(gfx::Rect(), root->drawable_content_rect());
 }
@@ -1509,7 +1500,7 @@ TEST_F(LayerTreeHostCommonTest, DrawableContentRectForReferenceFilter) {
   child->test_properties()->force_render_surface = true;
   FilterOperations filters;
   filters.Append(FilterOperation::CreateReferenceFilter(
-      SkOffsetImageFilter::Make(50, 50, nullptr)));
+      sk_make_sp<OffsetPaintFilter>(50, 50, nullptr)));
   child->test_properties()->filters = filters;
   ExecuteCalculateDrawProperties(root);
 
@@ -1534,7 +1525,7 @@ TEST_F(LayerTreeHostCommonTest, DrawableContentRectForReferenceFilterHighDpi) {
 
   FilterOperations filters;
   filters.Append(FilterOperation::CreateReferenceFilter(
-      SkOffsetImageFilter::Make(50, 50, nullptr)));
+      sk_make_sp<OffsetPaintFilter>(50, 50, nullptr)));
   child->test_properties()->filters = filters;
 
   ExecuteCalculateDrawProperties(root, device_scale_factor);
@@ -2064,24 +2055,24 @@ TEST_F(LayerTreeHostCommonTest, AnimationsForRenderSurfaceHierarchy) {
   root->layer_tree_impl()->BuildLayerListAndPropertyTreesForTesting();
 
   // Put an animated opacity on the render surface.
-  AddOpacityTransitionToElementWithPlayer(
+  AddOpacityTransitionToElementWithAnimation(
       render_surface1->element_id(), timeline_impl(), 10.0, 1.f, 0.f, false);
 
   // Also put an animated opacity on a layer without descendants.
-  AddOpacityTransitionToElementWithPlayer(grand_child_of_root->element_id(),
-                                          timeline_impl(), 10.0, 1.f, 0.f,
-                                          false);
+  AddOpacityTransitionToElementWithAnimation(grand_child_of_root->element_id(),
+                                             timeline_impl(), 10.0, 1.f, 0.f,
+                                             false);
 
   // Put a transform animation on the render surface.
-  AddAnimatedTransformToElementWithPlayer(render_surface2->element_id(),
-                                          timeline_impl(), 10.0, 30, 0);
+  AddAnimatedTransformToElementWithAnimation(render_surface2->element_id(),
+                                             timeline_impl(), 10.0, 30, 0);
 
   // Also put transform animations on grand_child_of_root, and
   // grand_child_of_rs2
-  AddAnimatedTransformToElementWithPlayer(grand_child_of_root->element_id(),
-                                          timeline_impl(), 10.0, 30, 0);
-  AddAnimatedTransformToElementWithPlayer(grand_child_of_rs2->element_id(),
-                                          timeline_impl(), 10.0, 30, 0);
+  AddAnimatedTransformToElementWithAnimation(grand_child_of_root->element_id(),
+                                             timeline_impl(), 10.0, 30, 0);
+  AddAnimatedTransformToElementWithAnimation(grand_child_of_rs2->element_id(),
+                                             timeline_impl(), 10.0, 30, 0);
 
   root->layer_tree_impl()->property_trees()->needs_rebuild = true;
   ExecuteCalculateDrawProperties(root);
@@ -2178,6 +2169,11 @@ static bool TransformIsAnimating(LayerImpl* layer) {
       layer->element_id(), layer->GetElementTypeForAnimation());
 }
 
+static bool HasPotentiallyRunningTransformAnimation(LayerImpl* layer) {
+  return layer->GetMutatorHost()->HasPotentiallyRunningTransformAnimation(
+      layer->element_id(), layer->GetElementTypeForAnimation());
+}
+
 TEST_F(LayerTreeHostCommonTest,
        ScreenSpaceTransformIsAnimatingWithDelayedAnimation) {
   LayerImpl* root = root_layer_for_testing();
@@ -2198,20 +2194,20 @@ TEST_F(LayerTreeHostCommonTest,
   SetElementIdsForTesting();
 
   // Add a transform animation with a start delay to |grand_child|.
-  std::unique_ptr<Animation> animation = Animation::Create(
+  std::unique_ptr<KeyframeModel> keyframe_model = KeyframeModel::Create(
       std::unique_ptr<AnimationCurve>(new FakeTransformTransition(1.0)), 0, 1,
       TargetProperty::TRANSFORM);
-  animation->set_fill_mode(Animation::FillMode::NONE);
-  animation->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
-  AddAnimationToElementWithPlayer(grand_child->element_id(), timeline_impl(),
-                                  std::move(animation));
+  keyframe_model->set_fill_mode(KeyframeModel::FillMode::NONE);
+  keyframe_model->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
+  AddKeyframeModelToElementWithAnimation(
+      grand_child->element_id(), timeline_impl(), std::move(keyframe_model));
   ExecuteCalculateDrawProperties(root);
 
   EXPECT_FALSE(root->screen_space_transform_is_animating());
   EXPECT_FALSE(child->screen_space_transform_is_animating());
 
   EXPECT_FALSE(TransformIsAnimating(grand_child));
-  EXPECT_TRUE(grand_child->HasPotentiallyRunningTransformAnimation());
+  EXPECT_TRUE(HasPotentiallyRunningTransformAnimation(grand_child));
   EXPECT_TRUE(grand_child->screen_space_transform_is_animating());
   EXPECT_TRUE(great_grand_child->screen_space_transform_is_animating());
 }
@@ -2683,12 +2679,12 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectWithClippingAndFilters) {
 
   gfx::Transform vertical_flip;
   vertical_flip.Scale(1, -1);
-  sk_sp<SkImageFilter> flip_filter = SkImageFilter::MakeMatrixFilter(
+  sk_sp<PaintFilter> flip_filter = sk_make_sp<MatrixPaintFilter>(
       vertical_flip.matrix(), kLow_SkFilterQuality, nullptr);
   FilterOperations reflection_filter;
   reflection_filter.Append(
-      FilterOperation::CreateReferenceFilter(SkXfermodeImageFilter::Make(
-          SkBlendMode::kSrcOver, std::move(flip_filter))));
+      FilterOperation::CreateReferenceFilter(sk_make_sp<XfermodePaintFilter>(
+          SkBlendMode::kSrcOver, std::move(flip_filter), nullptr)));
   filter->test_properties()->filters = reflection_filter;
   host_impl()->active_tree()->property_trees()->needs_rebuild = true;
 
@@ -2736,12 +2732,12 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectWithScalingClippingAndFilters) {
 
   gfx::Transform vertical_flip;
   vertical_flip.Scale(1, -1);
-  sk_sp<SkImageFilter> flip_filter = SkImageFilter::MakeMatrixFilter(
+  sk_sp<PaintFilter> flip_filter = sk_make_sp<MatrixPaintFilter>(
       vertical_flip.matrix(), kLow_SkFilterQuality, nullptr);
   FilterOperations reflection_filter;
   reflection_filter.Append(
-      FilterOperation::CreateReferenceFilter(SkXfermodeImageFilter::Make(
-          SkBlendMode::kSrcOver, std::move(flip_filter))));
+      FilterOperation::CreateReferenceFilter(sk_make_sp<XfermodePaintFilter>(
+          SkBlendMode::kSrcOver, std::move(flip_filter), nullptr)));
   filter->test_properties()->filters = reflection_filter;
   host_impl()->active_tree()->property_trees()->needs_rebuild = true;
 
@@ -2772,7 +2768,7 @@ TEST_F(LayerTreeHostCommonTest, ClipRectWithClipParentAndFilters) {
   clip->SetMasksToBounds(true);
 
   root->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   root->test_properties()->clip_children->insert(filter_child_1);
   filter_child_1->test_properties()->clip_parent = root;
 
@@ -3335,7 +3331,7 @@ TEST_F(LayerTreeHostCommonTest,
   clip_parent->SetBounds(gfx::Size(50, 50));
   clip_parent->SetMasksToBounds(true);
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   render_surface1->SetBounds(gfx::Size(20, 20));
@@ -3370,7 +3366,7 @@ TEST_F(LayerTreeHostCommonTest, ClipRectOfSurfaceWhoseParentIsAClipChild) {
   clip_parent->SetPosition(gfx::PointF(2.f, 2.f));
   clip_parent->SetBounds(gfx::Size(50, 50));
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   clip_layer->SetBounds(gfx::Size(50, 50));
@@ -3440,7 +3436,7 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectsMultipleSurfaces) {
 
   clip_parent->SetBounds(gfx::Size(50, 50));
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   unclipped_desc_surface->SetBounds(gfx::Size(20, 20));
@@ -3481,7 +3477,7 @@ TEST_F(LayerTreeHostCommonTest, RootClipPropagationToClippedSurface) {
 
   clip_parent->SetBounds(gfx::Size(50, 50));
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   unclipped_desc_surface->SetBounds(gfx::Size(100, 100));
@@ -3750,10 +3746,10 @@ TEST_F(LayerTreeHostCommonTest, BackFaceCullingWithoutPreserves3d) {
   EXPECT_EQ(GetRenderSurface(back_facing_child_of_back_facing_surface),
             GetRenderSurface(back_facing_surface));
 
-  EXPECT_EQ(3u, update_layer_list_impl()->size());
-  EXPECT_TRUE(UpdateLayerListImplContains(front_facing_child->id()));
-  EXPECT_TRUE(UpdateLayerListImplContains(front_facing_surface->id()));
-  EXPECT_TRUE(UpdateLayerListImplContains(
+  EXPECT_EQ(3u, update_layer_impl_list()->size());
+  EXPECT_TRUE(UpdateLayerImplListContains(front_facing_child->id()));
+  EXPECT_TRUE(UpdateLayerImplListContains(front_facing_surface->id()));
+  EXPECT_TRUE(UpdateLayerImplListContains(
       front_facing_child_of_front_facing_surface->id()));
 }
 
@@ -3865,11 +3861,11 @@ TEST_F(LayerTreeHostCommonTest, BackFaceCullingWithPreserves3d) {
   EXPECT_EQ(GetRenderSurface(back_facing_child_of_back_facing_surface),
             GetRenderSurface(back_facing_surface));
 
-  EXPECT_EQ(3u, update_layer_list_impl()->size());
+  EXPECT_EQ(3u, update_layer_impl_list()->size());
 
-  EXPECT_TRUE(UpdateLayerListImplContains(front_facing_child->id()));
-  EXPECT_TRUE(UpdateLayerListImplContains(front_facing_surface->id()));
-  EXPECT_TRUE(UpdateLayerListImplContains(
+  EXPECT_TRUE(UpdateLayerImplListContains(front_facing_child->id()));
+  EXPECT_TRUE(UpdateLayerImplListContains(front_facing_surface->id()));
+  EXPECT_TRUE(UpdateLayerImplListContains(
       front_facing_child_of_front_facing_surface->id()));
 }
 
@@ -3909,11 +3905,11 @@ TEST_F(LayerTreeHostCommonTest, BackFaceCullingWithAnimatingTransforms) {
   SetElementIdsForTesting();
 
   // Animate the transform on the render surface.
-  AddAnimatedTransformToElementWithPlayer(animating_surface->element_id(),
-                                          timeline_impl(), 10.0, 30, 0);
+  AddAnimatedTransformToElementWithAnimation(animating_surface->element_id(),
+                                             timeline_impl(), 10.0, 30, 0);
   // This is just an animating layer, not a surface.
-  AddAnimatedTransformToElementWithPlayer(animating_child->element_id(),
-                                          timeline_impl(), 10.0, 30, 0);
+  AddAnimatedTransformToElementWithAnimation(animating_child->element_id(),
+                                             timeline_impl(), 10.0, 30, 0);
 
   root->SetBounds(gfx::Size(100, 100));
   child->SetBounds(gfx::Size(100, 100));
@@ -3936,11 +3932,11 @@ TEST_F(LayerTreeHostCommonTest, BackFaceCullingWithAnimatingTransforms) {
   EXPECT_EQ(GetRenderSurface(animating_child), GetRenderSurface(root));
   EXPECT_EQ(GetRenderSurface(child2), GetRenderSurface(root));
 
-  EXPECT_EQ(1u, update_layer_list_impl()->size());
+  EXPECT_EQ(1u, update_layer_impl_list()->size());
 
   // The back facing layers are culled from the layer list, and have an empty
   // visible rect.
-  EXPECT_TRUE(UpdateLayerListImplContains(child2->id()));
+  EXPECT_TRUE(UpdateLayerImplListContains(child2->id()));
   EXPECT_TRUE(child->visible_layer_rect().IsEmpty());
   EXPECT_TRUE(animating_surface->visible_layer_rect().IsEmpty());
   EXPECT_TRUE(child_of_animating_surface->visible_layer_rect().IsEmpty());
@@ -3997,9 +3993,9 @@ TEST_F(LayerTreeHostCommonTest,
   EXPECT_EQ(GetRenderSurface(child1), GetRenderSurface(front_facing_surface));
   EXPECT_EQ(GetRenderSurface(child2), GetRenderSurface(back_facing_surface));
 
-  EXPECT_EQ(2u, update_layer_list_impl()->size());
-  EXPECT_TRUE(UpdateLayerListImplContains(front_facing_surface->id()));
-  EXPECT_TRUE(UpdateLayerListImplContains(child1->id()));
+  EXPECT_EQ(2u, update_layer_impl_list()->size());
+  EXPECT_TRUE(UpdateLayerImplListContains(front_facing_surface->id()));
+  EXPECT_TRUE(UpdateLayerImplListContains(child1->id()));
 }
 
 TEST_F(LayerTreeHostCommonScalingTest, LayerTransformsInHighDPI) {
@@ -4019,7 +4015,6 @@ TEST_F(LayerTreeHostCommonScalingTest, LayerTransformsInHighDPI) {
   child2->SetDrawsContent(true);
 
   float device_scale_factor = 2.5f;
-  gfx::Size viewport_size(100, 100);
   ExecuteCalculateDrawProperties(root, device_scale_factor);
 
   EXPECT_FLOAT_EQ(device_scale_factor, root->GetIdealContentsScale());
@@ -4429,8 +4424,8 @@ TEST_F(LayerTreeHostCommonTest, OpacityAnimatingOnPendingTree) {
   ElementId child_element_id =
       host_impl.pending_tree()->LayerById(child_id)->element_id();
 
-  AddOpacityTransitionToElementWithPlayer(child_element_id, timeline, 10.0,
-                                          0.0f, 1.0f, false);
+  AddOpacityTransitionToElementWithAnimation(child_element_id, timeline, 10.0,
+                                             0.0f, 1.0f, false);
 
   RenderSurfaceList render_surface_list;
   LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
@@ -4678,8 +4673,8 @@ TEST_P(LCDTextTest, CanUseLCDTextWithAnimation) {
 
   SetElementIdsForTesting();
 
-  AddOpacityTransitionToElementWithPlayer(child_->element_id(), timeline(),
-                                          10.0, 0.9f, 0.1f, false);
+  AddOpacityTransitionToElementWithAnimation(child_->element_id(), timeline(),
+                                             10.0, 0.9f, 0.1f, false);
   ExecuteCalculateDrawProperties(root_, 1.f, 1.f, nullptr, nullptr, nullptr);
   // Text LCD should be adjusted while animation is active.
   EXPECT_EQ(expect_lcd_text, root_->CanUseLCDText());
@@ -4700,8 +4695,8 @@ TEST_P(LCDTextTest, CanUseLCDTextWithAnimationContentsOpaque) {
 
   // Mark contents non-opaque within the first animation frame.
   child_->SetContentsOpaque(false);
-  AddOpacityTransitionToElementWithPlayer(child_->element_id(), timeline(),
-                                          10.0, 0.9f, 0.1f, false);
+  AddOpacityTransitionToElementWithAnimation(child_->element_id(), timeline(),
+                                             10.0, 0.9f, 0.1f, false);
   ExecuteCalculateDrawProperties(root_, 1.f, 1.f, nullptr, nullptr, nullptr);
   // LCD text should be disabled for non-opaque layers even during animations.
   EXPECT_EQ(expect_lcd_text, root_->CanUseLCDText());
@@ -4803,8 +4798,6 @@ TEST_F(LayerTreeHostCommonTest, SubtreeHidden_TwoLayersImpl) {
   EXPECT_FALSE(grand_child_layer->contributes_to_drawn_render_surface());
 }
 
-void EmptyCopyOutputCallback(std::unique_ptr<CopyOutputResult> result) {}
-
 TEST_F(LayerTreeHostCommonTest, SubtreeHiddenWithCopyRequest) {
   FakeImplTaskRunnerProvider task_runner_provider;
   TestTaskGraphRunner task_graph_runner;
@@ -4884,8 +4877,7 @@ TEST_F(LayerTreeHostCommonTest, SubtreeHiddenWithCopyRequest) {
   copy_grand_child_layer->test_properties()->hide_layer_and_subtree = true;
 
   copy_layer->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateRequest(
-          base::BindOnce(&EmptyCopyOutputCallback)));
+      viz::CopyOutputRequest::CreateStubForTesting());
 
   RenderSurfaceList render_surface_list;
   LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
@@ -4981,8 +4973,7 @@ TEST_F(LayerTreeHostCommonTest, ClippedOutCopyRequest) {
   copy_child->SetDrawsContent(true);
 
   copy_layer->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateRequest(
-          base::BindOnce(&EmptyCopyOutputCallback)));
+      viz::CopyOutputRequest::CreateStubForTesting());
 
   copy_layer->test_properties()->AddChild(std::move(copy_child));
   copy_parent->test_properties()->AddChild(std::move(copy_layer));
@@ -5023,8 +5014,7 @@ TEST_F(LayerTreeHostCommonTest, SingularTransformAndCopyRequests) {
   copy_layer->SetBounds(gfx::Size(100, 100));
   copy_layer->SetDrawsContent(true);
   copy_layer->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateRequest(
-          base::BindOnce(&EmptyCopyOutputCallback)));
+      viz::CopyOutputRequest::CreateStubForTesting());
 
   LayerImpl* copy_child = AddChild<LayerImpl>(copy_layer);
   copy_child->SetBounds(gfx::Size(100, 100));
@@ -5084,8 +5074,7 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectInNonRootCopyRequest) {
   copy_surface->test_properties()->force_render_surface = true;
 
   copy_layer->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateRequest(
-          base::BindOnce(&EmptyCopyOutputCallback)));
+      viz::CopyOutputRequest::CreateStubForTesting());
 
   DCHECK(!copy_layer->test_properties()->copy_requests.empty());
   ExecuteCalculateDrawProperties(root);
@@ -5100,8 +5089,7 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectInNonRootCopyRequest) {
   copy_layer->SetBounds(gfx::Size(50, 50));
   copy_layer->SetMasksToBounds(true);
   copy_layer->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateRequest(
-          base::BindOnce(&EmptyCopyOutputCallback)));
+      viz::CopyOutputRequest::CreateStubForTesting());
   root->layer_tree_impl()->property_trees()->needs_rebuild = true;
 
   DCHECK(!copy_layer->test_properties()->copy_requests.empty());
@@ -5116,8 +5104,7 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectInNonRootCopyRequest) {
   // Case 3: When there is device scale factor.
   float device_scale_factor = 2.f;
   copy_layer->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateRequest(
-          base::BindOnce(&EmptyCopyOutputCallback)));
+      viz::CopyOutputRequest::CreateStubForTesting());
 
   DCHECK(!copy_layer->test_properties()->copy_requests.empty());
   ExecuteCalculateDrawProperties(root, device_scale_factor);
@@ -5383,7 +5370,7 @@ TEST_F(LayerTreeHostCommonTest, DescendantsOfClipChildren) {
 
   clip_child->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   root->SetBounds(gfx::Size(50, 50));
@@ -5430,7 +5417,7 @@ TEST_F(LayerTreeHostCommonTest,
 
   clip_child->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   clip_parent->SetMasksToBounds(true);
@@ -5704,9 +5691,6 @@ TEST_F(LayerTreeHostCommonTest, ClippedByScrollParent) {
   scroll_parent_clip->SetMasksToBounds(true);
 
   scroll_child->test_properties()->scroll_parent = scroll_parent;
-  scroll_parent->test_properties()->scroll_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
-  scroll_parent->test_properties()->scroll_children->insert(scroll_child);
 
   root->SetBounds(gfx::Size(50, 50));
   scroll_parent_border->SetBounds(gfx::Size(40, 40));
@@ -5734,9 +5718,6 @@ TEST_F(LayerTreeHostCommonTest, ScrollChildAndScrollParentDifferentTargets) {
   scroll_child->SetDrawsContent(true);
 
   scroll_child->test_properties()->scroll_parent = scroll_parent;
-  scroll_parent->test_properties()->scroll_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
-  scroll_parent->test_properties()->scroll_children->insert(scroll_child);
 
   root->SetBounds(gfx::Size(50, 50));
   scroll_child_target->SetBounds(gfx::Size(50, 50));
@@ -5836,9 +5817,6 @@ TEST_F(LayerTreeHostCommonTest, ClippedByOutOfOrderScrollParent) {
   scroll_child->SetBounds(gfx::Size(50, 50));
 
   scroll_child->test_properties()->scroll_parent = scroll_parent;
-  scroll_parent->test_properties()->scroll_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
-  scroll_parent->test_properties()->scroll_children->insert(scroll_child);
 
   ExecuteCalculateDrawProperties(root);
 
@@ -5879,15 +5857,8 @@ TEST_F(LayerTreeHostCommonTest, ClippedByOutOfOrderScrollGrandparent) {
   scroll_grandparent_clip->SetMasksToBounds(true);
 
   scroll_child->test_properties()->scroll_parent = scroll_parent;
-  scroll_parent->test_properties()->scroll_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
-  scroll_parent->test_properties()->scroll_children->insert(scroll_child);
 
   scroll_parent_border->test_properties()->scroll_parent = scroll_grandparent;
-  scroll_grandparent->test_properties()->scroll_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
-  scroll_grandparent->test_properties()->scroll_children->insert(
-      scroll_parent_border);
 
   root->SetBounds(gfx::Size(50, 50));
   scroll_grandparent_border->SetBounds(gfx::Size(40, 40));
@@ -5952,15 +5923,8 @@ TEST_F(LayerTreeHostCommonTest, OutOfOrderClippingRequiresRSLLSorting) {
   scroll_grandparent_clip->SetMasksToBounds(true);
 
   scroll_child->test_properties()->scroll_parent = scroll_parent;
-  scroll_parent->test_properties()->scroll_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
-  scroll_parent->test_properties()->scroll_children->insert(scroll_child);
 
   scroll_parent_border->test_properties()->scroll_parent = scroll_grandparent;
-  scroll_grandparent->test_properties()->scroll_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
-  scroll_grandparent->test_properties()->scroll_children->insert(
-      scroll_parent_border);
 
   root->SetBounds(gfx::Size(50, 50));
   scroll_grandparent_border->SetBounds(gfx::Size(40, 40));
@@ -6225,9 +6189,9 @@ TEST_F(LayerTreeHostCommonTest,
   end_operations.AppendMatrix(end_scale);
   SetElementIdsForTesting();
 
-  AddAnimatedTransformToElementWithPlayer(animated_layer->element_id(),
-                                          timeline_impl(), 1.0,
-                                          start_operations, end_operations);
+  AddAnimatedTransformToElementWithAnimation(animated_layer->element_id(),
+                                             timeline_impl(), 1.0,
+                                             start_operations, end_operations);
   BuildPropertyTreesForTesting();
   gfx::Vector2dF scroll_delta(5.f, 9.f);
   SetScrollOffsetDelta(scroller, scroll_delta);
@@ -6558,78 +6522,6 @@ TEST_F(LayerTreeHostCommonTest, StickyPositionBottom) {
   ExecuteCalculateDrawProperties(root_impl);
   EXPECT_VECTOR2DF_EQ(
       gfx::Vector2dF(0.f, 0.f),
-      sticky_pos_impl->ScreenSpaceTransform().To2dTranslation());
-}
-
-TEST_F(LayerTreeHostCommonTest, StickyPositionBottomInnerViewportDelta) {
-  scoped_refptr<Layer> root = Layer::Create();
-  scoped_refptr<Layer> scroller = Layer::Create();
-  scoped_refptr<Layer> sticky_pos = Layer::Create();
-  root->AddChild(scroller);
-  scroller->AddChild(sticky_pos);
-  host()->SetRootLayer(root);
-  scroller->SetElementId(LayerIdToElementIdForTesting(scroller->id()));
-  LayerTreeHost::ViewportLayers viewport_layers;
-  viewport_layers.page_scale = root;
-  viewport_layers.inner_viewport_container = root;
-  viewport_layers.inner_viewport_scroll = scroller;
-  host()->RegisterViewportLayers(viewport_layers);
-
-  LayerStickyPositionConstraint sticky_position;
-  sticky_position.is_sticky = true;
-  sticky_position.is_anchored_bottom = true;
-  sticky_position.bottom_offset = 10.0f;
-  sticky_position.scroll_container_relative_sticky_box_rect =
-      gfx::Rect(0, 70, 10, 10);
-  sticky_position.scroll_container_relative_containing_block_rect =
-      gfx::Rect(0, 60, 100, 100);
-  sticky_pos->SetStickyPositionConstraint(sticky_position);
-
-  root->SetBounds(gfx::Size(100, 100));
-  scroller->SetScrollable(gfx::Size(100, 100));
-  scroller->SetBounds(gfx::Size(100, 1000));
-  sticky_pos->SetBounds(gfx::Size(10, 10));
-  sticky_pos->SetPosition(gfx::PointF(0, 70));
-
-  ExecuteCalculateDrawProperties(root.get(), 1.f, 1.f, root.get(),
-                                 scroller.get(), nullptr);
-  host()->CommitAndCreateLayerImplTree();
-  LayerTreeImpl* layer_tree_impl = host()->host_impl()->active_tree();
-  LayerImpl* root_impl = layer_tree_impl->LayerById(root->id());
-  ASSERT_EQ(scroller->id(), layer_tree_impl->InnerViewportScrollLayer()->id());
-
-  LayerImpl* inner_scroll = layer_tree_impl->InnerViewportScrollLayer();
-  LayerImpl* sticky_pos_impl = layer_tree_impl->LayerById(sticky_pos->id());
-
-  // Initially the sticky element is moved to the bottom of the container.
-  EXPECT_VECTOR2DF_EQ(
-      gfx::Vector2dF(0.f, 70.f),
-      sticky_pos_impl->ScreenSpaceTransform().To2dTranslation());
-
-  // We start to hide the toolbar, but not far enough that the sticky element
-  // should be moved up yet.
-  root_impl->SetViewportBoundsDelta(gfx::Vector2dF(0.f, -10.f));
-  ExecuteCalculateDrawProperties(root_impl, 1.f, 1.f, root_impl, inner_scroll,
-                                 nullptr);
-  EXPECT_VECTOR2DF_EQ(
-      gfx::Vector2dF(0.f, 70.f),
-      sticky_pos_impl->ScreenSpaceTransform().To2dTranslation());
-
-  // On hiding more of the toolbar the sticky element starts to stick.
-  root_impl->SetViewportBoundsDelta(gfx::Vector2dF(0.f, -20.f));
-  ExecuteCalculateDrawProperties(root_impl, 1.f, 1.f, root_impl, inner_scroll,
-                                 nullptr);
-  EXPECT_VECTOR2DF_EQ(
-      gfx::Vector2dF(0.f, 60.f),
-      sticky_pos_impl->ScreenSpaceTransform().To2dTranslation());
-
-  // On hiding more the sticky element stops moving as it has reached its
-  // limit.
-  root_impl->SetViewportBoundsDelta(gfx::Vector2dF(0.f, -30.f));
-  ExecuteCalculateDrawProperties(root_impl, 1.f, 1.f, root_impl, inner_scroll,
-                                 nullptr);
-  EXPECT_VECTOR2DF_EQ(
-      gfx::Vector2dF(0.f, 60.f),
       sticky_pos_impl->ScreenSpaceTransform().To2dTranslation());
 }
 
@@ -7182,6 +7074,7 @@ TEST_F(LayerTreeHostCommonTest, StickyPositionNested) {
   outer_sticky->AddChild(inner_sticky);
   host()->SetRootLayer(root);
   scroller->SetElementId(LayerIdToElementIdForTesting(scroller->id()));
+  outer_sticky->SetElementId(LayerIdToElementIdForTesting(outer_sticky->id()));
 
   root->SetBounds(gfx::Size(100, 100));
   container->SetBounds(gfx::Size(100, 100));
@@ -7210,7 +7103,8 @@ TEST_F(LayerTreeHostCommonTest, StickyPositionNested) {
       gfx::Rect(0, 50, 10, 10);
   inner_sticky_pos.scroll_container_relative_containing_block_rect =
       gfx::Rect(0, 50, 10, 50);
-  inner_sticky_pos.nearest_layer_shifting_containing_block = outer_sticky->id();
+  inner_sticky_pos.nearest_element_shifting_containing_block =
+      outer_sticky->element_id();
   inner_sticky->SetStickyPositionConstraint(inner_sticky_pos);
 
   ExecuteCalculateDrawProperties(root.get());
@@ -7371,7 +7265,7 @@ class AnimationScaleFactorTrackingLayerImpl : public LayerImpl {
         new AnimationScaleFactorTrackingLayerImpl(tree_impl, id));
   }
 
-  ~AnimationScaleFactorTrackingLayerImpl() override {}
+  ~AnimationScaleFactorTrackingLayerImpl() override = default;
 
  private:
   explicit AnimationScaleFactorTrackingLayerImpl(LayerTreeImpl* tree_impl,
@@ -7434,28 +7328,32 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
 
   host_impl.active_tree()->SetElementIdsForTesting();
 
-  scoped_refptr<AnimationPlayer> grand_parent_player =
-      AnimationPlayer::Create(AnimationIdProvider::NextPlayerId());
-  timeline->AttachPlayer(grand_parent_player);
-  grand_parent_player->AttachElement(grand_parent_raw->element_id());
+  scoped_refptr<SingleKeyframeEffectAnimation> grand_parent_animation =
+      SingleKeyframeEffectAnimation::Create(
+          AnimationIdProvider::NextAnimationId());
+  timeline->AttachAnimation(grand_parent_animation);
+  grand_parent_animation->AttachElement(grand_parent_raw->element_id());
 
-  scoped_refptr<AnimationPlayer> parent_player =
-      AnimationPlayer::Create(AnimationIdProvider::NextPlayerId());
-  timeline->AttachPlayer(parent_player);
-  parent_player->AttachElement(parent_raw->element_id());
+  scoped_refptr<SingleKeyframeEffectAnimation> parent_animation =
+      SingleKeyframeEffectAnimation::Create(
+          AnimationIdProvider::NextAnimationId());
+  timeline->AttachAnimation(parent_animation);
+  parent_animation->AttachElement(parent_raw->element_id());
 
-  scoped_refptr<AnimationPlayer> child_player =
-      AnimationPlayer::Create(AnimationIdProvider::NextPlayerId());
-  timeline->AttachPlayer(child_player);
-  child_player->AttachElement(child_raw->element_id());
+  scoped_refptr<SingleKeyframeEffectAnimation> child_animation =
+      SingleKeyframeEffectAnimation::Create(
+          AnimationIdProvider::NextAnimationId());
+  timeline->AttachAnimation(child_animation);
+  child_animation->AttachElement(child_raw->element_id());
 
-  scoped_refptr<AnimationPlayer> grand_child_player =
-      AnimationPlayer::Create(AnimationIdProvider::NextPlayerId());
-  timeline->AttachPlayer(grand_child_player);
-  grand_child_player->AttachElement(grand_child_raw->element_id());
+  scoped_refptr<SingleKeyframeEffectAnimation> grand_child_animation =
+      SingleKeyframeEffectAnimation::Create(
+          AnimationIdProvider::NextAnimationId());
+  timeline->AttachAnimation(grand_child_animation);
+  grand_child_animation->AttachElement(grand_child_raw->element_id());
 
-  AddAnimatedTransformToPlayer(parent_player.get(), 1.0, TransformOperations(),
-                               translation);
+  AddAnimatedTransformToAnimation(parent_animation.get(), 1.0,
+                                  TransformOperations(), translation);
 
   // No layers have scale-affecting animations.
   EXPECT_EQ(0.f, GetMaximumAnimationScale(grand_parent_raw));
@@ -7471,8 +7369,8 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
   TransformOperations scale;
   scale.AppendScale(5.f, 4.f, 3.f);
 
-  AddAnimatedTransformToPlayer(child_player.get(), 1.0, TransformOperations(),
-                               scale);
+  AddAnimatedTransformToAnimation(child_animation.get(), 1.0,
+                                  TransformOperations(), scale);
   child_raw->layer_tree_impl()->property_trees()->needs_rebuild = true;
   ExecuteCalculateDrawProperties(grand_parent_raw);
 
@@ -7487,8 +7385,8 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
   EXPECT_EQ(1.f, GetStartingAnimationScale(child_raw));
   EXPECT_EQ(1.f, GetStartingAnimationScale(grand_child_raw));
 
-  AddAnimatedTransformToPlayer(grand_parent_player.get(), 1.0,
-                               TransformOperations(), scale);
+  AddAnimatedTransformToAnimation(grand_parent_animation.get(), 1.0,
+                                  TransformOperations(), scale);
   grand_parent_raw->layer_tree_impl()->property_trees()->needs_rebuild = true;
   ExecuteCalculateDrawProperties(grand_parent_raw);
 
@@ -7505,8 +7403,8 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
   EXPECT_EQ(0.f, GetStartingAnimationScale(child_raw));
   EXPECT_EQ(0.f, GetStartingAnimationScale(grand_child_raw));
 
-  AddAnimatedTransformToPlayer(parent_player.get(), 1.0, TransformOperations(),
-                               scale);
+  AddAnimatedTransformToAnimation(parent_animation.get(), 1.0,
+                                  TransformOperations(), scale);
   parent_raw->layer_tree_impl()->property_trees()->needs_rebuild = true;
   ExecuteCalculateDrawProperties(grand_parent_raw);
 
@@ -7521,15 +7419,15 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
   EXPECT_EQ(0.f, GetStartingAnimationScale(child_raw));
   EXPECT_EQ(0.f, GetStartingAnimationScale(grand_child_raw));
 
-  grand_parent_player->AbortAnimations(TargetProperty::TRANSFORM, false);
-  parent_player->AbortAnimations(TargetProperty::TRANSFORM, false);
-  child_player->AbortAnimations(TargetProperty::TRANSFORM, false);
+  grand_parent_animation->AbortKeyframeModels(TargetProperty::TRANSFORM, false);
+  parent_animation->AbortKeyframeModels(TargetProperty::TRANSFORM, false);
+  child_animation->AbortKeyframeModels(TargetProperty::TRANSFORM, false);
 
   TransformOperations perspective;
   perspective.AppendPerspective(10.f);
 
-  AddAnimatedTransformToPlayer(child_player.get(), 1.0, TransformOperations(),
-                               perspective);
+  AddAnimatedTransformToAnimation(child_animation.get(), 1.0,
+                                  TransformOperations(), perspective);
   child_raw->layer_tree_impl()->property_trees()->needs_rebuild = true;
   ExecuteCalculateDrawProperties(grand_parent_raw);
 
@@ -7545,7 +7443,7 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
   EXPECT_EQ(0.f, GetStartingAnimationScale(child_raw));
   EXPECT_EQ(0.f, GetStartingAnimationScale(grand_child_raw));
 
-  child_player->AbortAnimations(TargetProperty::TRANSFORM, false);
+  child_animation->AbortKeyframeModels(TargetProperty::TRANSFORM, false);
 
   gfx::Transform scale_matrix;
   scale_matrix.Scale(1.f, 2.f);
@@ -7553,8 +7451,8 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
   parent_raw->test_properties()->transform = scale_matrix;
   grand_parent_raw->layer_tree_impl()->property_trees()->needs_rebuild = true;
 
-  AddAnimatedTransformToPlayer(parent_player.get(), 1.0, TransformOperations(),
-                               scale);
+  AddAnimatedTransformToAnimation(parent_animation.get(), 1.0,
+                                  TransformOperations(), scale);
   ExecuteCalculateDrawProperties(grand_parent_raw);
 
   // |grand_parent| and |parent| each have scale 2.f. |parent| has a  scale
@@ -7908,8 +7806,8 @@ TEST_F(LayerTreeHostCommonTest, DrawPropertyScales) {
   child2_layer->test_properties()->transform = scale_transform_child2;
   child2_layer->SetBounds(gfx::Size(1, 1));
   child2_layer->SetDrawsContent(true);
-  AddAnimatedTransformToElementWithPlayer(child2_layer->element_id(), timeline,
-                                          1.0, TransformOperations(), scale);
+  AddAnimatedTransformToElementWithAnimation(
+      child2_layer->element_id(), timeline, 1.0, TransformOperations(), scale);
 
   root_layer->layer_tree_impl()->property_trees()->needs_rebuild = true;
   ExecuteCalculateDrawProperties(root_layer);
@@ -8015,8 +7913,8 @@ TEST_F(LayerTreeHostCommonTest, AnimationScales) {
       AnimationTimeline::Create(AnimationIdProvider::NextTimelineId());
   host_impl.animation_host()->AddAnimationTimeline(timeline);
 
-  AddAnimatedTransformToElementWithPlayer(child2_layer->element_id(), timeline,
-                                          1.0, TransformOperations(), scale);
+  AddAnimatedTransformToElementWithAnimation(
+      child2_layer->element_id(), timeline, 1.0, TransformOperations(), scale);
 
   // Correctly computes animation scale when rebuilding property trees.
   root_layer->layer_tree_impl()->property_trees()->needs_rebuild = true;
@@ -8083,8 +7981,8 @@ TEST_F(LayerTreeHostCommonTest,
       AnimationTimeline::Create(AnimationIdProvider::NextTimelineId());
   host_impl.animation_host()->AddAnimationTimeline(timeline);
 
-  AddAnimatedTransformToElementWithPlayer(child_layer->element_id(), timeline,
-                                          1.0, TransformOperations(), scale);
+  AddAnimatedTransformToElementWithAnimation(
+      child_layer->element_id(), timeline, 1.0, TransformOperations(), scale);
 
   root_layer->layer_tree_impl()->property_trees()->needs_rebuild = true;
   ExecuteCalculateDrawProperties(root_layer);
@@ -8197,6 +8095,7 @@ TEST_F(LayerTreeHostCommonTest, NodesAffectedByViewportBoundsDeltaGetUpdated) {
 
   inner_viewport_scroll_layer->SetIsContainerForFixedPositionLayers(true);
   outer_viewport_scroll_layer->SetIsContainerForFixedPositionLayers(true);
+  outer_viewport_scroll_layer->SetIsResizedByBrowserControls(true);
 
   host()->SetRootLayer(root);
   LayerTreeHost::ViewportLayers viewport_layers;
@@ -8223,7 +8122,6 @@ TEST_F(LayerTreeHostCommonTest, NodesAffectedByViewportBoundsDeltaGetUpdated) {
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
 
   TransformTree& transform_tree = host()->property_trees()->transform_tree;
-  EXPECT_TRUE(transform_tree.HasNodesAffectedByInnerViewportBoundsDelta());
   EXPECT_TRUE(transform_tree.HasNodesAffectedByOuterViewportBoundsDelta());
 
   LayerPositionConstraint fixed_to_left;
@@ -8231,13 +8129,11 @@ TEST_F(LayerTreeHostCommonTest, NodesAffectedByViewportBoundsDeltaGetUpdated) {
   fixed_to_inner->SetPositionConstraint(fixed_to_left);
 
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
-  EXPECT_FALSE(transform_tree.HasNodesAffectedByInnerViewportBoundsDelta());
   EXPECT_TRUE(transform_tree.HasNodesAffectedByOuterViewportBoundsDelta());
 
   fixed_to_outer->SetPositionConstraint(fixed_to_left);
 
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
-  EXPECT_FALSE(transform_tree.HasNodesAffectedByInnerViewportBoundsDelta());
   EXPECT_FALSE(transform_tree.HasNodesAffectedByOuterViewportBoundsDelta());
 }
 
@@ -8261,7 +8157,7 @@ TEST_F(LayerTreeHostCommonTest, VisibleContentRectForAnimatedLayer) {
   animated->test_properties()->opacity = 0.f;
   animated->SetBounds(gfx::Size(20, 20));
 
-  AddOpacityTransitionToElementWithPlayer(
+  AddOpacityTransitionToElementWithAnimation(
       animated->element_id(), timeline_impl(), 10.0, 0.f, 1.f, false);
   animated->test_properties()->opacity_can_animate = true;
   root->layer_tree_impl()->property_trees()->needs_rebuild = true;
@@ -8289,17 +8185,19 @@ TEST_F(LayerTreeHostCommonTest,
       LayerImpl::Create(host_impl()->pending_tree(), 4);
   LayerImpl* surface = surface_ptr.get();
   animated->test_properties()->AddChild(std::move(surface_ptr));
-  std::unique_ptr<LayerImpl> descendant_of_animation_ptr =
+  std::unique_ptr<LayerImpl> descendant_of_keyframe_model_ptr =
       LayerImpl::Create(host_impl()->pending_tree(), 5);
-  LayerImpl* descendant_of_animation = descendant_of_animation_ptr.get();
-  surface->test_properties()->AddChild(std::move(descendant_of_animation_ptr));
+  LayerImpl* descendant_of_keyframe_model =
+      descendant_of_keyframe_model_ptr.get();
+  surface->test_properties()->AddChild(
+      std::move(descendant_of_keyframe_model_ptr));
 
   host_impl()->pending_tree()->SetElementIdsForTesting();
 
   root->SetDrawsContent(true);
   animated->SetDrawsContent(true);
   surface->SetDrawsContent(true);
-  descendant_of_animation->SetDrawsContent(true);
+  descendant_of_keyframe_model->SetDrawsContent(true);
 
   gfx::Transform uninvertible_matrix;
   uninvertible_matrix.Scale3d(6.f, 6.f, 0.f);
@@ -8311,13 +8209,13 @@ TEST_F(LayerTreeHostCommonTest,
   animated->SetBounds(gfx::Size(120, 120));
   surface->SetBounds(gfx::Size(100, 100));
   surface->test_properties()->force_render_surface = true;
-  descendant_of_animation->SetBounds(gfx::Size(200, 200));
+  descendant_of_keyframe_model->SetBounds(gfx::Size(200, 200));
 
   TransformOperations start_transform_operations;
   start_transform_operations.AppendMatrix(uninvertible_matrix);
   TransformOperations end_transform_operations;
 
-  AddAnimatedTransformToElementWithPlayer(
+  AddAnimatedTransformToElementWithAnimation(
       animated->element_id(), timeline_impl(), 10.0, start_transform_operations,
       end_transform_operations);
   ExecuteCalculateDrawProperties(root);
@@ -8333,7 +8231,8 @@ TEST_F(LayerTreeHostCommonTest,
   // The singular transform on |animated| is flattened when inherited by
   // |surface|, and this happens to make it invertible.
   EXPECT_EQ(gfx::Rect(2, 2), surface->visible_layer_rect());
-  EXPECT_EQ(gfx::Rect(2, 2), descendant_of_animation->visible_layer_rect());
+  EXPECT_EQ(gfx::Rect(2, 2),
+            descendant_of_keyframe_model->visible_layer_rect());
 
   gfx::Transform zero_matrix;
   zero_matrix.Scale3d(0.f, 0.f, 0.f);
@@ -8349,7 +8248,8 @@ TEST_F(LayerTreeHostCommonTest,
   // means the clip cannot be projected into |surface|'s space, so we treat
   // |surface| and layers that draw into it as having empty visible rect.
   EXPECT_EQ(gfx::Rect(100, 100), surface->visible_layer_rect());
-  EXPECT_EQ(gfx::Rect(200, 200), descendant_of_animation->visible_layer_rect());
+  EXPECT_EQ(gfx::Rect(200, 200),
+            descendant_of_keyframe_model->visible_layer_rect());
 
   host_impl()->ActivateSyncTree();
   LayerImpl* active_root = host_impl()->active_tree()->LayerById(root->id());
@@ -8382,8 +8282,8 @@ TEST_F(LayerTreeHostCommonTest, AnimatedOpacityCreatesRenderSurface) {
   grandchild->SetDrawsContent(true);
 
   SetElementIdsForTesting();
-  AddOpacityTransitionToElementWithPlayer(child->element_id(), timeline_impl(),
-                                          10.0, 1.f, 0.2f, false);
+  AddOpacityTransitionToElementWithAnimation(
+      child->element_id(), timeline_impl(), 10.0, 1.f, 0.2f, false);
   ExecuteCalculateDrawProperties(root);
 
   EXPECT_EQ(1.f, child->Opacity());
@@ -8409,8 +8309,8 @@ TEST_F(LayerTreeHostCommonTest, AnimatedFilterCreatesRenderSurface) {
   grandchild->SetBounds(gfx::Size(50, 50));
 
   SetElementIdsForTesting();
-  AddAnimatedFilterToElementWithPlayer(child->element_id(), timeline_impl(),
-                                       10.0, 0.1f, 0.2f);
+  AddAnimatedFilterToElementWithAnimation(child->element_id(), timeline_impl(),
+                                          10.0, 0.1f, 0.2f);
   ExecuteCalculateDrawProperties(root);
 
   EXPECT_TRUE(GetRenderSurface(root));
@@ -8423,6 +8323,11 @@ TEST_F(LayerTreeHostCommonTest, AnimatedFilterCreatesRenderSurface) {
   EXPECT_FALSE(FilterIsAnimating(root));
   EXPECT_TRUE(FilterIsAnimating(child));
   EXPECT_FALSE(FilterIsAnimating(grandchild));
+}
+
+bool HasPotentiallyRunningFilterAnimation(const LayerImpl& layer) {
+  return layer.GetMutatorHost()->HasPotentiallyRunningFilterAnimation(
+      layer.element_id(), layer.GetElementTypeForAnimation());
 }
 
 // Verify that having a filter animation with a delayed start time creates a
@@ -8448,13 +8353,13 @@ TEST_F(LayerTreeHostCommonTest, DelayedFilterAnimationCreatesRenderSurface) {
       FilterKeyframe::Create(base::TimeDelta(), start_filters, nullptr));
   curve->AddKeyframe(FilterKeyframe::Create(
       base::TimeDelta::FromMilliseconds(100), end_filters, nullptr));
-  std::unique_ptr<Animation> animation =
-      Animation::Create(std::move(curve), 0, 1, TargetProperty::FILTER);
-  animation->set_fill_mode(Animation::FillMode::NONE);
-  animation->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
+  std::unique_ptr<KeyframeModel> keyframe_model =
+      KeyframeModel::Create(std::move(curve), 0, 1, TargetProperty::FILTER);
+  keyframe_model->set_fill_mode(KeyframeModel::FillMode::NONE);
+  keyframe_model->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
 
-  AddAnimationToElementWithPlayer(child->element_id(), timeline_impl(),
-                                  std::move(animation));
+  AddKeyframeModelToElementWithAnimation(child->element_id(), timeline_impl(),
+                                         std::move(keyframe_model));
   ExecuteCalculateDrawProperties(root);
 
   EXPECT_TRUE(GetRenderSurface(root));
@@ -8465,11 +8370,11 @@ TEST_F(LayerTreeHostCommonTest, DelayedFilterAnimationCreatesRenderSurface) {
   EXPECT_TRUE(GetRenderSurface(child)->Filters().IsEmpty());
 
   EXPECT_FALSE(FilterIsAnimating(root));
-  EXPECT_FALSE(root->HasPotentiallyRunningFilterAnimation());
+  EXPECT_FALSE(HasPotentiallyRunningFilterAnimation(*root));
   EXPECT_FALSE(FilterIsAnimating(child));
-  EXPECT_TRUE(child->HasPotentiallyRunningFilterAnimation());
+  EXPECT_TRUE(HasPotentiallyRunningFilterAnimation(*child));
   EXPECT_FALSE(FilterIsAnimating(grandchild));
-  EXPECT_FALSE(grandchild->HasPotentiallyRunningFilterAnimation());
+  EXPECT_FALSE(HasPotentiallyRunningFilterAnimation(*grandchild));
 }
 
 // Ensures that the property tree code accounts for offsets between fixed
@@ -8655,9 +8560,6 @@ TEST_F(LayerTreeHostCommonTest, UpdateScrollChildPosition) {
   scroll_parent->SetDrawsContent(true);
 
   scroll_child->test_properties()->scroll_parent = scroll_parent;
-  scroll_parent->test_properties()->scroll_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
-  scroll_parent->test_properties()->scroll_children->insert(scroll_child);
 
   ExecuteCalculateDrawProperties(root);
   EXPECT_EQ(gfx::Rect(25, 25), scroll_child->visible_layer_rect());
@@ -8672,8 +8574,6 @@ TEST_F(LayerTreeHostCommonTest, UpdateScrollChildPosition) {
   EXPECT_EQ(gfx::Rect(0, 10, 25, 25), scroll_child->visible_layer_rect());
 }
 
-static void CopyOutputCallback(std::unique_ptr<CopyOutputResult> result) {}
-
 TEST_F(LayerTreeHostCommonTest, HasCopyRequestsInTargetSubtree) {
   scoped_refptr<Layer> root = Layer::Create();
   scoped_refptr<Layer> child1 = Layer::Create();
@@ -8687,10 +8587,9 @@ TEST_F(LayerTreeHostCommonTest, HasCopyRequestsInTargetSubtree) {
   grandchild->AddChild(greatgrandchild);
   host()->SetRootLayer(root);
 
-  child1->RequestCopyOfOutput(CopyOutputRequest::CreateBitmapRequest(
-      base::BindOnce(&CopyOutputCallback)));
-  greatgrandchild->RequestCopyOfOutput(CopyOutputRequest::CreateBitmapRequest(
-      base::BindOnce(&CopyOutputCallback)));
+  child1->RequestCopyOfOutput(viz::CopyOutputRequest::CreateStubForTesting());
+  greatgrandchild->RequestCopyOfOutput(
+      viz::CopyOutputRequest::CreateStubForTesting());
   child2->SetOpacity(0.f);
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
 
@@ -8706,9 +8605,9 @@ TEST_F(LayerTreeHostCommonTest, SkippingSubtreeMain) {
   FakeContentLayerClient client;
   client.set_bounds(root->bounds());
   scoped_refptr<LayerWithForcedDrawsContent> child =
-      make_scoped_refptr(new LayerWithForcedDrawsContent());
+      base::MakeRefCounted<LayerWithForcedDrawsContent>();
   scoped_refptr<LayerWithForcedDrawsContent> grandchild =
-      make_scoped_refptr(new LayerWithForcedDrawsContent());
+      base::MakeRefCounted<LayerWithForcedDrawsContent>();
   scoped_refptr<FakePictureLayer> greatgrandchild(
       FakePictureLayer::Create(&client));
 
@@ -8753,20 +8652,20 @@ TEST_F(LayerTreeHostCommonTest, SkippingSubtreeMain) {
 
   // Add a transform animation with a start delay. Now, even though |child| has
   // a singular transform, the subtree should still get processed.
-  int animation_id = 0;
-  std::unique_ptr<Animation> animation = Animation::Create(
+  int keyframe_model_id = 0;
+  std::unique_ptr<KeyframeModel> keyframe_model = KeyframeModel::Create(
       std::unique_ptr<AnimationCurve>(new FakeTransformTransition(1.0)),
-      animation_id, 1, TargetProperty::TRANSFORM);
-  animation->set_fill_mode(Animation::FillMode::NONE);
-  animation->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
-  AddAnimationToElementWithPlayer(child->element_id(), timeline(),
-                                  std::move(animation));
+      keyframe_model_id, 1, TargetProperty::TRANSFORM);
+  keyframe_model->set_fill_mode(KeyframeModel::FillMode::NONE);
+  keyframe_model->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
+  AddKeyframeModelToElementWithAnimation(child->element_id(), timeline(),
+                                         std::move(keyframe_model));
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
   update_list = GetUpdateLayerList();
   EXPECT_TRUE(VerifyLayerInList(grandchild, update_list));
 
-  RemoveAnimationFromElementWithExistingPlayer(child->element_id(), timeline(),
-                                               animation_id);
+  RemoveKeyframeModelFromElementWithExistingKeyframeEffect(
+      child->element_id(), timeline(), keyframe_model_id);
   child->SetTransform(gfx::Transform());
   child->SetOpacity(0.f);
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
@@ -8776,21 +8675,21 @@ TEST_F(LayerTreeHostCommonTest, SkippingSubtreeMain) {
   // Now, even though child has zero opacity, we will configure |grandchild| and
   // |greatgrandchild| in several ways that should force the subtree to be
   // processed anyhow.
-  grandchild->RequestCopyOfOutput(CopyOutputRequest::CreateBitmapRequest(
-      base::BindOnce(&CopyOutputCallback)));
+  grandchild->RequestCopyOfOutput(
+      viz::CopyOutputRequest::CreateStubForTesting());
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
   update_list = GetUpdateLayerList();
   EXPECT_TRUE(VerifyLayerInList(grandchild, update_list));
 
   // Add an opacity animation with a start delay.
-  animation_id = 1;
-  animation = Animation::Create(
+  keyframe_model_id = 1;
+  keyframe_model = KeyframeModel::Create(
       std::unique_ptr<AnimationCurve>(new FakeFloatTransition(1.0, 0.f, 1.f)),
-      animation_id, 1, TargetProperty::OPACITY);
-  animation->set_fill_mode(Animation::FillMode::NONE);
-  animation->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
-  AddAnimationToElementWithExistingPlayer(child->element_id(), timeline(),
-                                          std::move(animation));
+      keyframe_model_id, 1, TargetProperty::OPACITY);
+  keyframe_model->set_fill_mode(KeyframeModel::FillMode::NONE);
+  keyframe_model->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
+  AddKeyframeModelToElementWithExistingKeyframeEffect(
+      child->element_id(), timeline(), std::move(keyframe_model));
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
   update_list = GetUpdateLayerList();
   EXPECT_TRUE(VerifyLayerInList(grandchild, update_list));
@@ -8890,7 +8789,7 @@ TEST_F(LayerTreeHostCommonTest, SkippingLayerImpl) {
   // |greatgrandchild| in several ways that should force the subtree to be
   // processed anyhow.
   grandchild_ptr->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateEmptyRequest());
+      viz::CopyOutputRequest::CreateStubForTesting());
   root_ptr->layer_tree_impl()->property_trees()->needs_rebuild = true;
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root_ptr);
   EXPECT_EQ(gfx::Rect(10, 10), grandchild_ptr->visible_layer_rect());
@@ -8920,12 +8819,16 @@ TEST_F(LayerTreeHostCommonTest, SkippingLayerImpl) {
       TransformKeyframe::Create(base::TimeDelta(), start, nullptr));
   curve->AddKeyframe(TransformKeyframe::Create(
       base::TimeDelta::FromSecondsD(1.0), operation, nullptr));
-  std::unique_ptr<Animation> transform_animation(
-      Animation::Create(std::move(curve), 3, 3, TargetProperty::TRANSFORM));
-  scoped_refptr<AnimationPlayer> player(AnimationPlayer::Create(1));
-  host_impl.animation_host()->RegisterPlayerForElement(root_ptr->element_id(),
-                                                       player.get());
-  player->AddAnimation(std::move(transform_animation));
+  std::unique_ptr<KeyframeModel> transform_animation(
+      KeyframeModel::Create(std::move(curve), 3, 3, TargetProperty::TRANSFORM));
+  scoped_refptr<SingleKeyframeEffectAnimation> animation(
+      SingleKeyframeEffectAnimation::Create(1));
+  timeline()->AttachAnimation(animation);
+  // TODO(smcgruer): Should attach a timeline and element rather than call this
+  // directly. See http://crbug.com/771316
+  host_impl.animation_host()->RegisterKeyframeEffectForElement(
+      root_ptr->element_id(), animation->keyframe_effect());
+  animation->AddKeyframeModel(std::move(transform_animation));
   grandchild_ptr->set_visible_layer_rect(gfx::Rect());
   root_ptr->test_properties()->transform = singular;
   child_ptr->test_properties()->transform = singular;
@@ -8933,8 +8836,10 @@ TEST_F(LayerTreeHostCommonTest, SkippingLayerImpl) {
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root_ptr);
   EXPECT_EQ(gfx::Rect(0, 0), grandchild_ptr->visible_layer_rect());
 
-  host_impl.animation_host()->UnregisterPlayerForElement(root_ptr->element_id(),
-                                                         player.get());
+  host_impl.animation_host()->UnregisterKeyframeEffectForElement(
+      root_ptr->element_id(), animation->keyframe_effect());
+  host_impl.animation_host()->RemoveFromTicking(animation.get());
+  timeline()->DetachAnimation(animation);
 }
 
 TEST_F(LayerTreeHostCommonTest, LayerSkippingInSubtreeOfSingularTransform) {
@@ -8967,19 +8872,25 @@ TEST_F(LayerTreeHostCommonTest, LayerSkippingInSubtreeOfSingularTransform) {
       TransformKeyframe::Create(base::TimeDelta(), start, nullptr));
   curve->AddKeyframe(TransformKeyframe::Create(
       base::TimeDelta::FromSecondsD(1.0), operation, nullptr));
-  std::unique_ptr<Animation> transform_animation(
-      Animation::Create(std::move(curve), 3, 3, TargetProperty::TRANSFORM));
-  scoped_refptr<AnimationPlayer> player(AnimationPlayer::Create(1));
-  host_impl()->animation_host()->RegisterPlayerForElement(
-      grand_child->element_id(), player.get());
-  player->AddAnimation(std::move(transform_animation));
+  std::unique_ptr<KeyframeModel> transform_animation(
+      KeyframeModel::Create(std::move(curve), 3, 3, TargetProperty::TRANSFORM));
+  scoped_refptr<SingleKeyframeEffectAnimation> animation(
+      SingleKeyframeEffectAnimation::Create(1));
+  timeline()->AttachAnimation(animation);
+  // TODO(smcgruer): Should attach a timeline and element rather than call this
+  // directly. See http://crbug.com/771316
+  host_impl()->animation_host()->RegisterKeyframeEffectForElement(
+      grand_child->element_id(), animation->keyframe_effect());
+  animation->AddKeyframeModel(std::move(transform_animation));
 
   ExecuteCalculateDrawProperties(root);
   EXPECT_EQ(gfx::Rect(0, 0), grand_child->visible_layer_rect());
   EXPECT_EQ(gfx::Rect(0, 0), child->visible_layer_rect());
 
-  host_impl()->animation_host()->UnregisterPlayerForElement(
-      grand_child->element_id(), player.get());
+  host_impl()->animation_host()->UnregisterKeyframeEffectForElement(
+      grand_child->element_id(), animation->keyframe_effect());
+  host_impl()->animation_host()->RemoveFromTicking(animation.get());
+  timeline()->DetachAnimation(animation);
 }
 
 TEST_F(LayerTreeHostCommonTest, SkippingPendingLayerImpl) {
@@ -9027,20 +8938,26 @@ TEST_F(LayerTreeHostCommonTest, SkippingPendingLayerImpl) {
       FloatKeyframe::Create(base::TimeDelta(), 0.9f, std::move(func)));
   curve->AddKeyframe(
       FloatKeyframe::Create(base::TimeDelta::FromSecondsD(1.0), 0.3f, nullptr));
-  std::unique_ptr<Animation> animation(
-      Animation::Create(std::move(curve), 3, 3, TargetProperty::OPACITY));
-  scoped_refptr<AnimationPlayer> player(AnimationPlayer::Create(1));
-  host_impl.animation_host()->RegisterPlayerForElement(root_ptr->element_id(),
-                                                       player.get());
-  player->AddAnimation(std::move(animation));
+  std::unique_ptr<KeyframeModel> keyframe_model(
+      KeyframeModel::Create(std::move(curve), 3, 3, TargetProperty::OPACITY));
+  scoped_refptr<SingleKeyframeEffectAnimation> animation(
+      SingleKeyframeEffectAnimation::Create(1));
+  timeline()->AttachAnimation(animation);
+  // TODO(smcgruer): Should attach a timeline and element rather than call this
+  // directly. See http://crbug.com/771316
+  host_impl.animation_host()->RegisterKeyframeEffectForElement(
+      root_ptr->element_id(), animation->keyframe_effect());
+  animation->AddKeyframeModel(std::move(keyframe_model));
   root_ptr->test_properties()->opacity = 0.f;
   grandchild_ptr->set_visible_layer_rect(gfx::Rect());
   root_ptr->layer_tree_impl()->property_trees()->needs_rebuild = true;
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root_ptr);
   EXPECT_EQ(gfx::Rect(10, 10), grandchild_ptr->visible_layer_rect());
 
-  host_impl.animation_host()->UnregisterPlayerForElement(root_ptr->element_id(),
-                                                         player.get());
+  host_impl.animation_host()->UnregisterKeyframeEffectForElement(
+      root_ptr->element_id(), animation->keyframe_effect());
+  host_impl.animation_host()->RemoveFromTicking(animation.get());
+  timeline()->DetachAnimation(animation);
 }
 
 TEST_F(LayerTreeHostCommonTest, SkippingLayer) {
@@ -9099,8 +9016,7 @@ TEST_F(LayerTreeHostCommonTest, LayerTreeRebuildTest) {
   parent->AddChild(child);
   host()->SetRootLayer(root);
 
-  child->RequestCopyOfOutput(CopyOutputRequest::CreateRequest(
-      base::BindOnce(&EmptyCopyOutputCallback)));
+  child->RequestCopyOfOutput(viz::CopyOutputRequest::CreateStubForTesting());
 
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
   EXPECT_TRUE(root->has_copy_requests_in_target_subtree());
@@ -9236,7 +9152,7 @@ TEST_F(LayerTreeHostCommonTest,
 
   render_surface->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(render_surface);
 
   ExecuteCalculateDrawProperties(root);
@@ -9269,7 +9185,7 @@ TEST_F(LayerTreeHostCommonTest,
 
   clip_child->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   ExecuteCalculateDrawProperties(root);
@@ -9301,7 +9217,7 @@ TEST_F(LayerTreeHostCommonTest,
 
   clip_child->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   ExecuteCalculateDrawProperties(root);
@@ -9329,7 +9245,7 @@ TEST_F(LayerTreeHostCommonTest, UnclippedClipParent) {
 
   clip_child->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   ExecuteCalculateDrawProperties(root);
@@ -9377,7 +9293,7 @@ TEST_F(LayerTreeHostCommonTest, RenderSurfaceContentRectWithMultipleSurfaces) {
 
   clip_child->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   ExecuteCalculateDrawProperties(root);
@@ -9424,7 +9340,7 @@ TEST_F(LayerTreeHostCommonTest, ClipBetweenClipChildTargetAndClipParentTarget) {
 
   clip_child->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   ExecuteCalculateDrawProperties(root);
@@ -9461,7 +9377,7 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectForDescendantOfScaledSurface) {
 
   clip_child->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   ExecuteCalculateDrawProperties(root);
@@ -9520,7 +9436,7 @@ TEST_F(LayerTreeHostCommonTest, ClipParentDrawsIntoScaledRootSurface) {
 
   clip_child->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   float device_scale_factor = 1.f;
@@ -9552,7 +9468,7 @@ TEST_F(LayerTreeHostCommonTest, ClipChildVisibleRect) {
 
   clip_child->test_properties()->clip_parent = clip_parent;
   clip_parent->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   clip_parent->test_properties()->clip_children->insert(clip_child);
 
   ExecuteCalculateDrawProperties(root);
@@ -9629,7 +9545,7 @@ TEST_F(LayerTreeHostCommonTest, TwoUnclippedRenderSurfaces) {
 
   clip_child->test_properties()->clip_parent = root;
   root->test_properties()->clip_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
+      std::make_unique<std::set<LayerImpl*>>();
   root->test_properties()->clip_children->insert(clip_child);
 
   ExecuteCalculateDrawProperties(root);
@@ -9729,9 +9645,6 @@ TEST_F(LayerTreeHostCommonTest, NoisyTransform) {
   LayerImpl* scroll_parent = AddChild<LayerImpl>(scroll_clip);
 
   scroll_child->test_properties()->scroll_parent = scroll_parent;
-  scroll_parent->test_properties()->scroll_children =
-      base::MakeUnique<std::set<LayerImpl*>>();
-  scroll_parent->test_properties()->scroll_children->insert(scroll_child);
 
   scroll_parent->SetDrawsContent(true);
   scroll_child->SetDrawsContent(true);
@@ -9809,7 +9722,7 @@ TEST_F(LayerTreeHostCommonTest, LargeTransformTest) {
 TEST_F(LayerTreeHostCommonTest, PropertyTreesRebuildWithOpacityChanges) {
   scoped_refptr<Layer> root = Layer::Create();
   scoped_refptr<LayerWithForcedDrawsContent> child =
-      make_scoped_refptr(new LayerWithForcedDrawsContent());
+      base::MakeRefCounted<LayerWithForcedDrawsContent>();
   root->AddChild(child);
   host()->SetRootLayer(root);
 
@@ -9851,7 +9764,7 @@ TEST_F(LayerTreeHostCommonTest, PropertyTreesRebuildWithOpacityChanges) {
 TEST_F(LayerTreeHostCommonTest, OpacityAnimationsTrackingTest) {
   scoped_refptr<Layer> root = Layer::Create();
   scoped_refptr<LayerWithForcedDrawsContent> animated =
-      make_scoped_refptr(new LayerWithForcedDrawsContent());
+      base::MakeRefCounted<LayerWithForcedDrawsContent>();
   root->AddChild(animated);
   host()->SetRootLayer(root);
   host()->SetElementIdsForTesting();
@@ -9861,21 +9774,22 @@ TEST_F(LayerTreeHostCommonTest, OpacityAnimationsTrackingTest) {
   animated->SetBounds(gfx::Size(20, 20));
   animated->SetOpacity(0.f);
 
-  scoped_refptr<AnimationPlayer> player =
-      AnimationPlayer::Create(AnimationIdProvider::NextPlayerId());
-  timeline()->AttachPlayer(player);
+  scoped_refptr<SingleKeyframeEffectAnimation> animation =
+      SingleKeyframeEffectAnimation::Create(
+          AnimationIdProvider::NextAnimationId());
+  timeline()->AttachAnimation(animation);
 
-  player->AttachElement(animated->element_id());
+  animation->AttachElement(animated->element_id());
 
-  int animation_id = 0;
-  std::unique_ptr<Animation> animation = Animation::Create(
+  int keyframe_model_id = 0;
+  std::unique_ptr<KeyframeModel> keyframe_model = KeyframeModel::Create(
       std::unique_ptr<AnimationCurve>(new FakeFloatTransition(1.0, 0.f, 1.f)),
-      animation_id, 1, TargetProperty::OPACITY);
-  animation->set_fill_mode(Animation::FillMode::NONE);
-  animation->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
-  Animation* animation_ptr = animation.get();
-  AddAnimationToElementWithExistingPlayer(animated->element_id(), timeline(),
-                                          std::move(animation));
+      keyframe_model_id, 1, TargetProperty::OPACITY);
+  keyframe_model->set_fill_mode(KeyframeModel::FillMode::NONE);
+  keyframe_model->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
+  KeyframeModel* keyframe_model_ptr = keyframe_model.get();
+  AddKeyframeModelToElementWithExistingKeyframeEffect(
+      animated->element_id(), timeline(), std::move(keyframe_model));
 
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
 
@@ -9884,14 +9798,14 @@ TEST_F(LayerTreeHostCommonTest, OpacityAnimationsTrackingTest) {
   EXPECT_FALSE(node->is_currently_animating_opacity);
   EXPECT_TRUE(node->has_potential_opacity_animation);
 
-  animation_ptr->set_time_offset(base::TimeDelta::FromMilliseconds(0));
-  host()->AnimateLayers(
-      base::TimeTicks::FromInternalValue(std::numeric_limits<int64_t>::max()));
+  keyframe_model_ptr->set_time_offset(base::TimeDelta::FromMilliseconds(0));
+  host()->AnimateLayers(base::TimeTicks::Max());
   node = tree.Node(animated->effect_tree_index());
   EXPECT_TRUE(node->is_currently_animating_opacity);
   EXPECT_TRUE(node->has_potential_opacity_animation);
 
-  player->AbortAnimations(TargetProperty::OPACITY, false /*needs_completion*/);
+  animation->AbortKeyframeModels(TargetProperty::OPACITY,
+                                 false /*needs_completion*/);
   node = tree.Node(animated->effect_tree_index());
   EXPECT_FALSE(node->is_currently_animating_opacity);
   EXPECT_FALSE(node->has_potential_opacity_animation);
@@ -9900,7 +9814,7 @@ TEST_F(LayerTreeHostCommonTest, OpacityAnimationsTrackingTest) {
 TEST_F(LayerTreeHostCommonTest, TransformAnimationsTrackingTest) {
   scoped_refptr<Layer> root = Layer::Create();
   scoped_refptr<LayerWithForcedDrawsContent> animated =
-      make_scoped_refptr(new LayerWithForcedDrawsContent());
+      base::MakeRefCounted<LayerWithForcedDrawsContent>();
   root->AddChild(animated);
   host()->SetRootLayer(root);
   host()->SetElementIdsForTesting();
@@ -9909,10 +9823,11 @@ TEST_F(LayerTreeHostCommonTest, TransformAnimationsTrackingTest) {
   root->SetForceRenderSurfaceForTesting(true);
   animated->SetBounds(gfx::Size(20, 20));
 
-  scoped_refptr<AnimationPlayer> player =
-      AnimationPlayer::Create(AnimationIdProvider::NextPlayerId());
-  timeline()->AttachPlayer(player);
-  player->AttachElement(animated->element_id());
+  scoped_refptr<SingleKeyframeEffectAnimation> animation =
+      SingleKeyframeEffectAnimation::Create(
+          AnimationIdProvider::NextAnimationId());
+  timeline()->AttachAnimation(animation);
+  animation->AttachElement(animated->element_id());
 
   std::unique_ptr<KeyframedTransformAnimationCurve> curve(
       KeyframedTransformAnimationCurve::Create());
@@ -9926,13 +9841,13 @@ TEST_F(LayerTreeHostCommonTest, TransformAnimationsTrackingTest) {
       TransformKeyframe::Create(base::TimeDelta(), start, nullptr));
   curve->AddKeyframe(TransformKeyframe::Create(
       base::TimeDelta::FromSecondsD(1.0), operation, nullptr));
-  std::unique_ptr<Animation> animation(
-      Animation::Create(std::move(curve), 3, 3, TargetProperty::TRANSFORM));
-  animation->set_fill_mode(Animation::FillMode::NONE);
-  animation->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
-  Animation* animation_ptr = animation.get();
-  AddAnimationToElementWithExistingPlayer(animated->element_id(), timeline(),
-                                          std::move(animation));
+  std::unique_ptr<KeyframeModel> keyframe_model(
+      KeyframeModel::Create(std::move(curve), 3, 3, TargetProperty::TRANSFORM));
+  keyframe_model->set_fill_mode(KeyframeModel::FillMode::NONE);
+  keyframe_model->set_time_offset(base::TimeDelta::FromMilliseconds(-1000));
+  KeyframeModel* keyframe_model_ptr = keyframe_model.get();
+  AddKeyframeModelToElementWithExistingKeyframeEffect(
+      animated->element_id(), timeline(), std::move(keyframe_model));
 
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
 
@@ -9942,15 +9857,14 @@ TEST_F(LayerTreeHostCommonTest, TransformAnimationsTrackingTest) {
   EXPECT_FALSE(node->is_currently_animating);
   EXPECT_TRUE(node->has_potential_animation);
 
-  animation_ptr->set_time_offset(base::TimeDelta::FromMilliseconds(0));
-  host()->AnimateLayers(
-      base::TimeTicks::FromInternalValue(std::numeric_limits<int64_t>::max()));
+  keyframe_model_ptr->set_time_offset(base::TimeDelta::FromMilliseconds(0));
+  host()->AnimateLayers(base::TimeTicks::Max());
   node = tree.Node(animated->transform_tree_index());
   EXPECT_TRUE(node->is_currently_animating);
   EXPECT_TRUE(node->has_potential_animation);
 
-  player->AbortAnimations(TargetProperty::TRANSFORM,
-                          false /*needs_completion*/);
+  animation->AbortKeyframeModels(TargetProperty::TRANSFORM,
+                                 false /*needs_completion*/);
   node = tree.Node(animated->transform_tree_index());
   EXPECT_FALSE(node->is_currently_animating);
   EXPECT_FALSE(node->has_potential_animation);
@@ -10208,7 +10122,7 @@ TEST_F(LayerTreeHostCommonTest, SurfaceContentsScaleChangeWithCopyRequestTest) {
   // Need to persist the render surface after copy request is cleared.
   copy_layer->test_properties()->force_render_surface = true;
   copy_layer->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateRequest(base::Bind(&EmptyCopyOutputCallback)));
+      viz::CopyOutputRequest::CreateStubForTesting());
 
   clip_layer->SetDrawsContent(true);
   clip_layer->SetMasksToBounds(true);
@@ -10458,7 +10372,7 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectInNonRootCacheRenderSurface) {
   // Case 4: When the non root cache render surface layer is clipped and there
   // is a copy request layer beneath it.
   copy_layer->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateRequest(base::Bind(&EmptyCopyOutputCallback)));
+      viz::CopyOutputRequest::CreateStubForTesting());
   root->layer_tree_impl()->property_trees()->needs_rebuild = true;
   DCHECK(!copy_layer->test_properties()->copy_requests.empty());
   ExecuteCalculateDrawProperties(root);
@@ -10474,7 +10388,7 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectInNonRootCacheRenderSurface) {
   // request layer.
   cache_surface->test_properties()->cache_render_surface = true;
   copy_layer->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateRequest(base::Bind(&EmptyCopyOutputCallback)));
+      viz::CopyOutputRequest::CreateStubForTesting());
   root->layer_tree_impl()->property_trees()->needs_rebuild = true;
   DCHECK(!copy_layer->test_properties()->copy_requests.empty());
   ExecuteCalculateDrawProperties(root);
@@ -10485,6 +10399,88 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectInNonRootCacheRenderSurface) {
   EXPECT_EQ(gfx::Rect(20, 20), copy_child->visible_layer_rect());
   EXPECT_EQ(gfx::Rect(15, 15), copy_clipped_child->visible_layer_rect());
   EXPECT_EQ(gfx::Rect(20, 20), cache_surface->visible_layer_rect());
+}
+
+TEST_F(LayerTreeHostCommonTest, BuildPropertyNodesForScrollChildrenInOrder) {
+  // This test is intended to test against a bug that scroll children were
+  // visited in unspecified order, which can cause data dependency to fail
+  // while resolving clip parent.
+
+  // Try multiple times because in the original bug the probability to fail
+  // was 50%, depends on the hash values.
+  int trial = 10;
+  while (trial--) {
+    scoped_refptr<Layer> root = Layer::Create();
+    scoped_refptr<Layer> scroller = Layer::Create();
+    scoped_refptr<Layer> scroll_sibling_1 = Layer::Create();
+    scoped_refptr<Layer> scroll_sibling_2 = Layer::Create();
+    scoped_refptr<Layer> clip_escaper = Layer::Create();
+
+    root->SetBounds(gfx::Size(100, 100));
+    scroll_sibling_1->SetBounds(gfx::Size(10, 20));
+    scroll_sibling_1->SetMasksToBounds(true);
+    scroll_sibling_2->SetBounds(gfx::Size(20, 10));
+    scroll_sibling_2->SetMasksToBounds(true);
+    clip_escaper->SetBounds(gfx::Size(30, 30));
+    clip_escaper->SetIsDrawable(true);
+
+    host()->SetRootLayer(root);
+    root->AddChild(scroller.get());
+    root->AddChild(scroll_sibling_1.get());
+    root->AddChild(scroll_sibling_2.get());
+    scroll_sibling_2->AddChild(clip_escaper.get());
+
+    // Also randomize scroll children insertion order.
+    if (trial & 1) {
+      scroll_sibling_1->SetScrollParent(scroller.get());
+      scroll_sibling_2->SetScrollParent(scroller.get());
+    } else {
+      scroll_sibling_2->SetScrollParent(scroller.get());
+      scroll_sibling_1->SetScrollParent(scroller.get());
+    }
+    clip_escaper->SetClipParent(scroll_sibling_1.get());
+
+    ExecuteCalculateDrawProperties(root.get());
+
+    EXPECT_EQ(scroll_sibling_1->clip_tree_index(),
+              clip_escaper->clip_tree_index());
+  }
+}
+
+TEST_F(LayerTreeHostCommonTest, RenderSurfaceListForTrilinearFiltering) {
+  LayerImpl* root = root_layer_for_testing();
+  LayerImpl* parent = AddChild<LayerImpl>(root);
+  LayerImpl* child1 = AddChild<LayerImpl>(parent);
+  LayerImpl* child2 = AddChild<LayerImpl>(parent);
+
+  gfx::Transform scale_matrix;
+  scale_matrix.Scale(.25f, .25f);
+
+  root->SetBounds(gfx::Size(200, 200));
+  parent->test_properties()->transform = scale_matrix;
+  parent->test_properties()->trilinear_filtering = true;
+  child1->SetBounds(gfx::Size(50, 50));
+  child1->SetDrawsContent(true);
+  child1->test_properties()->force_render_surface = true;
+  child2->SetPosition(gfx::PointF(50, 50));
+  child2->SetBounds(gfx::Size(50, 50));
+  child2->SetDrawsContent(true);
+  child2->test_properties()->force_render_surface = true;
+
+  RenderSurfaceList render_surface_list;
+  LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
+      root, root->bounds(), &render_surface_list);
+  inputs.can_adjust_raster_scales = true;
+  LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
+
+  ASSERT_TRUE(GetRenderSurface(parent));
+  EXPECT_EQ(2, GetRenderSurface(parent)->num_contributors());
+  EXPECT_EQ(4U, render_surface_list.size());
+
+  // The rectangle enclosing child1 and child2 (0,0 100x100), scaled by the
+  // scale matrix to (0,0 25x25).
+  EXPECT_EQ(gfx::RectF(0, 0, 25, 25),
+            GetRenderSurface(parent)->DrawableContentRect());
 }
 
 }  // namespace

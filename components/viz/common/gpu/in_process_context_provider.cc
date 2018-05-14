@@ -14,12 +14,12 @@
 #include "components/viz/common/resources/platform_color.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
-#include "gpu/command_buffer/common/gles2_cmd_utils.h"
-#include "gpu/command_buffer/service/framebuffer_completeness_cache.h"
+#include "gpu/command_buffer/client/raster_implementation_gles.h"
+#include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
-#include "gpu/command_buffer/service/shader_translator_cache.h"
 #include "gpu/command_buffer/service/sync_point_manager.h"
+#include "gpu/config/gpu_feature_info.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "gpu/ipc/gl_in_process_context.h"
 #include "gpu/ipc/gpu_in_process_thread_service.h"
@@ -29,14 +29,13 @@
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
-#include "ui/gfx/native_widget_types.h"
 
 namespace viz {
 
 namespace {
 
-gpu::gles2::ContextCreationAttribHelper CreateAttributes() {
-  gpu::gles2::ContextCreationAttribHelper attributes;
+gpu::ContextCreationAttribs CreateAttributes() {
+  gpu::ContextCreationAttribs attributes;
   attributes.alpha_size = -1;
   attributes.depth_size = 0;
   attributes.stencil_size = 8;
@@ -47,47 +46,46 @@ gpu::gles2::ContextCreationAttribHelper CreateAttributes() {
   return attributes;
 }
 
-std::unique_ptr<gpu::GLInProcessContext> CreateInProcessContext(
-    scoped_refptr<gpu::InProcessCommandBuffer::Service> service,
-    const gpu::gles2::ContextCreationAttribHelper& attributes,
-    gpu::SurfaceHandle widget,
-    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-    gpu::ImageFactory* image_factory,
-    const gpu::SharedMemoryLimits& limits,
-    gpu::GLInProcessContext* shared_context) {
-  const bool is_offscreen = widget == gpu::kNullSurfaceHandle;
-  return base::WrapUnique(gpu::GLInProcessContext::Create(
-      service, nullptr, is_offscreen, widget, shared_context, attributes,
-      limits, gpu_memory_buffer_manager, image_factory,
-      base::ThreadTaskRunnerHandle::Get()));
-}
-
 }  // namespace
 
 InProcessContextProvider::InProcessContextProvider(
     scoped_refptr<gpu::InProcessCommandBuffer::Service> service,
-    gpu::SurfaceHandle widget,
+    gpu::SurfaceHandle surface_handle,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     gpu::ImageFactory* image_factory,
+    gpu::GpuChannelManagerDelegate* gpu_channel_manager_delegate,
     const gpu::SharedMemoryLimits& limits,
     InProcessContextProvider* shared_context)
     : attributes_(CreateAttributes()),
-      context_(CreateInProcessContext(
-          service,
+      context_(gpu::GLInProcessContext::CreateWithoutInit()),
+      context_result_(context_->Initialize(
+          std::move(service),
+          nullptr,
+          (surface_handle == gpu::kNullSurfaceHandle),
+          surface_handle,
+          (shared_context ? shared_context->context_.get() : nullptr),
           attributes_,
-          widget,
+          limits,
           gpu_memory_buffer_manager,
           image_factory,
-          limits,
-          (shared_context ? shared_context->context_.get() : nullptr))) {
-  cache_controller_.reset(new ContextCacheController(
-      context_->GetImplementation(), base::ThreadTaskRunnerHandle::Get()));
-}
+          gpu_channel_manager_delegate,
+          base::ThreadTaskRunnerHandle::Get())),
+      cache_controller_(std::make_unique<ContextCacheController>(
+          context_->GetImplementation(),
+          base::ThreadTaskRunnerHandle::Get())) {}
 
 InProcessContextProvider::~InProcessContextProvider() = default;
 
-bool InProcessContextProvider::BindToCurrentThread() {
-  return !!context_;
+void InProcessContextProvider::AddRef() const {
+  base::RefCountedThreadSafe<InProcessContextProvider>::AddRef();
+}
+
+void InProcessContextProvider::Release() const {
+  base::RefCountedThreadSafe<InProcessContextProvider>::Release();
+}
+
+gpu::ContextResult InProcessContextProvider::BindToCurrentThread() {
+  return context_result_;
 }
 
 gpu::gles2::GLES2Interface* InProcessContextProvider::ContextGL() {
@@ -102,8 +100,15 @@ class GrContext* InProcessContextProvider::GrContext() {
   if (gr_context_)
     return gr_context_->get();
 
+  size_t max_resource_cache_bytes;
+  size_t max_glyph_cache_texture_bytes;
+  skia_bindings::GrContextForGLES2Interface::
+      DetermineCacheLimitsFromAvailableMemory(&max_resource_cache_bytes,
+                                              &max_glyph_cache_texture_bytes);
+
   gr_context_.reset(new skia_bindings::GrContextForGLES2Interface(
-      ContextGL(), ContextCapabilities()));
+      ContextGL(), ContextCapabilities(), max_resource_cache_bytes,
+      max_glyph_cache_texture_bytes));
   return gr_context_->get();
 }
 
@@ -120,15 +125,17 @@ base::Lock* InProcessContextProvider::GetLock() {
   return &context_lock_;
 }
 
-gpu::Capabilities InProcessContextProvider::ContextCapabilities() {
+const gpu::Capabilities& InProcessContextProvider::ContextCapabilities() const {
   return context_->GetCapabilities();
 }
 
-void InProcessContextProvider::SetLostContextCallback(
-    const LostContextCallback& lost_context_callback) {
-  // This code lives in the GPU process and so this would go away
-  // if the context is lost?
+const gpu::GpuFeatureInfo& InProcessContextProvider::GetGpuFeatureInfo() const {
+  return context_->GetGpuFeatureInfo();
 }
+
+void InProcessContextProvider::AddObserver(ContextLostObserver* obs) {}
+
+void InProcessContextProvider::RemoveObserver(ContextLostObserver* obs) {}
 
 uint32_t InProcessContextProvider::GetCopyTextureInternalFormat() {
   if (attributes_.alpha_size > 0)
@@ -151,4 +158,8 @@ void InProcessContextProvider::SetUpdateVSyncParametersCallback(
   context_->SetUpdateVSyncParametersCallback(callback);
 }
 
+void InProcessContextProvider::SetPresentationCallback(
+    const gpu::InProcessCommandBuffer::PresentationCallback& callback) {
+  context_->SetPresentationCallback(callback);
+}
 }  // namespace viz

@@ -4,11 +4,10 @@
 
 #import "ios/web/net/crw_ssl_status_updater.h"
 
-#import "base/mac/scoped_nsobject.h"
 #import "base/strings/sys_string_conversions.h"
+#import "ios/web/navigation/navigation_item_impl.h"
+#import "ios/web/navigation/navigation_manager_impl.h"
 #include "ios/web/navigation/navigation_manager_util.h"
-#import "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/ssl_status.h"
 #import "ios/web/web_state/wk_web_view_security_util.h"
 #include "net/cert/x509_certificate.h"
@@ -28,7 +27,7 @@ using web::SecurityStyle;
 }
 
 // Unowned pointer to web::NavigationManager.
-@property(nonatomic, readonly) web::NavigationManager* navigationManager;
+@property(nonatomic, readonly) web::NavigationManagerImpl* navigationManager;
 
 // Updates |security_style| and |cert_status| for the NavigationItem with ID
 // |navigationItemID|, if URL and certificate chain still match |host| and
@@ -57,7 +56,8 @@ using web::SecurityStyle;
 #pragma mark - Public
 
 - (instancetype)initWithDataSource:(id<CRWSSLStatusUpdaterDataSource>)dataSource
-                 navigationManager:(web::NavigationManager*)navigationManager {
+                 navigationManager:
+                     (web::NavigationManagerImpl*)navigationManager {
   DCHECK(dataSource);
   DCHECK(navigationManager);
   if (self = [super init]) {
@@ -108,6 +108,7 @@ using web::SecurityStyle;
     if (!item->GetURL().SchemeIsCryptographic()) {
       // HTTP or other non-secure connection.
       item->GetSSL().security_style = web::SECURITY_STYLE_UNAUTHENTICATED;
+      item->GetSSL().content_status = web::SSLStatus::NORMAL_CONTENT;
     } else {
       // HTTPS, no certificate (this use-case has not been observed).
       item->GetSSL().security_style = web::SECURITY_STYLE_UNKNOWN;

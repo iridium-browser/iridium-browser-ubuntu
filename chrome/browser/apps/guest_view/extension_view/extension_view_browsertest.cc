@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/guest_view/browser/guest_view_manager.h"
@@ -22,10 +21,11 @@ using guest_view::GuestViewManager;
 using guest_view::TestGuestViewManager;
 using guest_view::TestGuestViewManagerFactory;
 
-class ExtensionViewTest : public extensions::PlatformAppBrowserTest,
-                          public testing::WithParamInterface<bool> {
+class ExtensionViewTest : public extensions::PlatformAppBrowserTest {
  public:
   ExtensionViewTest() {
+    CHECK(
+        base::FeatureList::IsEnabled(::features::kGuestViewCrossProcessFrames));
     GuestViewManager::set_factory_for_testing(&factory_);
   }
 
@@ -74,27 +74,11 @@ class ExtensionViewTest : public extensions::PlatformAppBrowserTest,
   }
 
  private:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    extensions::PlatformAppBrowserTest::SetUpCommandLine(command_line);
-
-    bool use_cross_process_frames_for_guests = GetParam();
-    if (use_cross_process_frames_for_guests) {
-      scoped_feature_list_.InitAndEnableFeature(
-          features::kGuestViewCrossProcessFrames);
-    } else {
-      scoped_feature_list_.InitAndDisableFeature(
-          features::kGuestViewCrossProcessFrames);
-    }
-  }
-
   TestGuestViewManagerFactory factory_;
-  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-INSTANTIATE_TEST_CASE_P(ExtensionViewTests, ExtensionViewTest, testing::Bool());
-
 // Tests that <extensionview> can be created and added to the DOM.
-IN_PROC_BROWSER_TEST_P(ExtensionViewTest,
+IN_PROC_BROWSER_TEST_F(ExtensionViewTest,
                        TestExtensionViewCreationShouldSucceed) {
   TestHelper("testExtensionViewCreationShouldSucceed",
              "extension_view/creation", "", "");
@@ -102,7 +86,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionViewTest,
 
 // Tests that verify that <extensionview> does not change extension ID if
 // someone tries to change it in JavaScript.
-IN_PROC_BROWSER_TEST_P(ExtensionViewTest, ShimExtensionAttribute) {
+IN_PROC_BROWSER_TEST_F(ExtensionViewTest, ShimExtensionAttribute) {
   const extensions::Extension* skeleton_app =
       InstallPlatformApp("extension_view/skeleton");
   TestHelper("testExtensionAttribute", "extension_view/extension_attribute",
@@ -111,35 +95,58 @@ IN_PROC_BROWSER_TEST_P(ExtensionViewTest, ShimExtensionAttribute) {
 
 // Tests that verify that <extensionview> does not change src if
 // someone tries to change it in JavaScript.
-IN_PROC_BROWSER_TEST_P(ExtensionViewTest, ShimSrcAttribute) {
+IN_PROC_BROWSER_TEST_F(ExtensionViewTest, ShimSrcAttribute) {
   const extensions::Extension* skeleton_app =
       InstallPlatformApp("extension_view/skeleton");
   TestHelper("testSrcAttribute", "extension_view/src_attribute",
              skeleton_app->id(), "");
 }
 
-// Tests that verify that <extensionview> can call the load function.
-// Flaky under MemorySanitizer: https://crbug.com/545656
-IN_PROC_BROWSER_TEST_P(ExtensionViewTest, DISABLED_LoadAPICall) {
-  const extensions::Extension* skeleton_app =
-      InstallPlatformApp("extension_view/skeleton");
-  const extensions::Extension* skeleton_app_two =
-      InstallPlatformApp("extension_view/skeleton_two");
-  TestHelper("testLoadAPIFunction", "extension_view/load_api",
-             skeleton_app->id(),
-             skeleton_app_two->id());
+class ExtensionViewLoadApiTest : public ExtensionViewTest {
+ public:
+  void TestLoadApiHelper(const std::string& test_name) {
+    const extensions::Extension* skeleton_app =
+        InstallPlatformApp("extension_view/skeleton");
+    const extensions::Extension* skeleton_app_two =
+        InstallPlatformApp("extension_view/skeleton_two");
+    TestHelper(test_name, "extension_view/load_api", skeleton_app->id(),
+               skeleton_app_two->id());
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(ExtensionViewLoadApiTest, LoadAPIFunction) {
+  TestLoadApiHelper("testLoadAPIFunction");
 }
 
-// Flaky under MemorySanitizer: https://crbug.com/512092
-// Flaky elsewhere: https://crbug.com/538114
-// Tests that verify that <extensionview> can queue up multiple calls to the
-// load function.
-IN_PROC_BROWSER_TEST_P(ExtensionViewTest, DISABLED_QueuedLoadAPICall) {
-  const extensions::Extension* skeleton_app =
-      InstallPlatformApp("extension_view/skeleton");
-  const extensions::Extension* skeleton_app_two =
-      InstallPlatformApp("extension_view/skeleton_two");
-  TestHelper("testQueuedLoadAPIFunction", "extension_view/load_api",
-             skeleton_app->id(),
-             skeleton_app_two->id());
+IN_PROC_BROWSER_TEST_F(ExtensionViewLoadApiTest, LoadAPISameIdAndSrc) {
+  TestLoadApiHelper("testLoadAPISameIdAndSrc");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionViewLoadApiTest, LoadAPISameIdDifferentSrc) {
+  TestLoadApiHelper("testLoadAPISameIdDifferentSrc");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionViewLoadApiTest, LoadAPILoadOtherExtension) {
+  TestLoadApiHelper("testLoadAPILoadOtherExtension");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionViewLoadApiTest, LoadAPIInvalidExtension) {
+  TestLoadApiHelper("testLoadAPIInvalidExtension");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionViewLoadApiTest, LoadAPIAfterInvalidCall) {
+  TestLoadApiHelper("testLoadAPIAfterInvalidCall");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionViewLoadApiTest, LoadAPINullExtension) {
+  TestLoadApiHelper("testLoadAPINullExtension");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionViewLoadApiTest, QueuedLoadAPIFunction) {
+  TestLoadApiHelper("testQueuedLoadAPIFunction");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionViewLoadApiTest,
+                       QueuedLoadAPILoadOtherExtension) {
+  TestLoadApiHelper("testQueuedLoadAPILoadOtherExtension");
 }

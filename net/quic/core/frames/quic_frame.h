@@ -11,7 +11,6 @@
 #include "net/quic/core/frames/quic_ack_frame.h"
 #include "net/quic/core/frames/quic_blocked_frame.h"
 #include "net/quic/core/frames/quic_connection_close_frame.h"
-#include "net/quic/core/frames/quic_frame.h"
 #include "net/quic/core/frames/quic_goaway_frame.h"
 #include "net/quic/core/frames/quic_mtu_discovery_frame.h"
 #include "net/quic/core/frames/quic_padding_frame.h"
@@ -70,9 +69,28 @@ typedef std::vector<QuicFrame> QuicFrames;
 // Deletes all the sub-frames contained in |frames|.
 QUIC_EXPORT_PRIVATE void DeleteFrames(QuicFrames* frames);
 
+// Delete the sub-frame contained in |frame|.
+QUIC_EXPORT_PRIVATE void DeleteFrame(QuicFrame* frame);
+
 // Deletes all the QuicStreamFrames for the specified |stream_id|.
 QUIC_EXPORT_PRIVATE void RemoveFramesForStream(QuicFrames* frames,
                                                QuicStreamId stream_id);
+
+// Returns true if |type| is a retransmittable control frame.
+QUIC_EXPORT_PRIVATE bool IsControlFrame(QuicFrameType type);
+
+// Returns control_frame_id of |frame|. Returns kInvalidControlFrameId if
+// |frame| does not have a valid control_frame_id.
+QUIC_EXPORT_PRIVATE QuicControlFrameId
+GetControlFrameId(const QuicFrame& frame);
+
+// Sets control_frame_id of |frame| to |control_frame_id|.
+QUIC_EXPORT_PRIVATE void SetControlFrameId(QuicControlFrameId control_frame_id,
+                                           QuicFrame* frame);
+
+// Returns a copy of |frame|.
+QUIC_EXPORT_PRIVATE QuicFrame
+CopyRetransmittableControlFrame(const QuicFrame& frame);
 
 }  // namespace net
 

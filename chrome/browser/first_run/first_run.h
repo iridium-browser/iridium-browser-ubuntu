@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/time/time.h"
 #include "build/build_config.h"
 
 class GURL;
@@ -44,21 +45,6 @@ enum AutoImportState {
   AUTO_IMPORT_CALLED = 1 << 0,
   AUTO_IMPORT_PROFILE_IMPORTED = 1 << 1,
   AUTO_IMPORT_BOOKMARKS_FILE_IMPORTED = 1 << 2,
-};
-
-enum FirstRunBubbleMetric {
-  FIRST_RUN_BUBBLE_SHOWN = 0,       // The search engine bubble was shown.
-  FIRST_RUN_BUBBLE_CHANGE_INVOKED,  // The bubble's "Change" was invoked.
-  NUM_FIRST_RUN_BUBBLE_METRICS
-};
-
-// Options for the first run bubble. The default is FIRST_RUN_BUBBLE_DONT_SHOW.
-// FIRST_RUN_BUBBLE_SUPPRESS is stronger in that FIRST_RUN_BUBBLE_SHOW should
-// never be set once FIRST_RUN_BUBBLE_SUPPRESS is set.
-enum FirstRunBubbleOptions {
-  FIRST_RUN_BUBBLE_DONT_SHOW,
-  FIRST_RUN_BUBBLE_SUPPRESS,
-  FIRST_RUN_BUBBLE_SHOW,
 };
 
 enum ProcessMasterPreferencesResult {
@@ -114,12 +100,9 @@ bool IsMetricsReportingOptIn();
 // (http://crbug.com/264694).
 void CreateSentinelIfNeeded();
 
-// Sets the kShowFirstRunBubbleOption local state pref so that the browser
-// shows the bubble once the main message loop gets going (or refrains from
-// showing the bubble, if |show_bubble| is not FIRST_RUN_BUBBLE_SHOW).
-// Once FIRST_RUN_BUBBLE_SUPPRESS is set, no other value can be set.
-// Returns false if the pref service could not be retrieved.
-bool SetShowFirstRunBubblePref(FirstRunBubbleOptions show_bubble_option);
+// Returns the first run sentinel creation time. This only requires I/O
+// permission on the sequence it is first called on.
+base::Time GetFirstRunSentinelCreationTime();
 
 // Sets a flag that will cause ShouldShowWelcomePage to return true
 // exactly once, so that the browser loads the welcome tab once the
@@ -150,9 +133,6 @@ void SetShouldDoPersonalDataManagerFirstRun();
 // This will return true only once, the first time it is called after
 // SetShouldDoPersonalDataManagerFirstRun() is called.
 bool ShouldDoPersonalDataManagerFirstRun();
-
-// Log a metric for the "FirstRun.SearchEngineBubble" histogram.
-void LogFirstRunMetric(FirstRunBubbleMetric metric);
 
 // Automatically imports items requested by |profile|'s configuration (sum of
 // policies and master prefs). Also imports bookmarks from file if

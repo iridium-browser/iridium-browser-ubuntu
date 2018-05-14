@@ -39,10 +39,10 @@ namespace blink {
 class PLATFORM_EXPORT FontCacheClient
     : public GarbageCollectedFinalized<FontCacheClient> {
  public:
-  virtual ~FontCacheClient() {}
+  virtual ~FontCacheClient() = default;
 
   virtual void FontCacheInvalidated() = 0;
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
 };
 
 }  // namespace blink

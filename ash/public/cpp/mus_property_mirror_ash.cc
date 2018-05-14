@@ -24,8 +24,8 @@ void MirrorOwnedProperty(aura::Window* window,
 
 namespace ash {
 
-MusPropertyMirrorAsh::MusPropertyMirrorAsh() {}
-MusPropertyMirrorAsh::~MusPropertyMirrorAsh() {}
+MusPropertyMirrorAsh::MusPropertyMirrorAsh() = default;
+MusPropertyMirrorAsh::~MusPropertyMirrorAsh() = default;
 
 void MusPropertyMirrorAsh::MirrorPropertyFromWidgetWindowToRootWindow(
     aura::Window* window,
@@ -37,11 +37,21 @@ void MusPropertyMirrorAsh::MirrorPropertyFromWidgetWindowToRootWindow(
   } else if (key == kShelfItemTypeKey) {
     int32_t value = window->GetProperty(kShelfItemTypeKey);
     root_window->SetProperty(kShelfItemTypeKey, value);
+  } else if (key == kWindowStateTypeKey) {
+    ash::mojom::WindowStateType value =
+        window->GetProperty(kWindowStateTypeKey);
+    root_window->SetProperty(kWindowStateTypeKey, value);
   } else if (key == kWindowPinTypeKey) {
     ash::mojom::WindowPinType value = window->GetProperty(kWindowPinTypeKey);
     root_window->SetProperty(kWindowPinTypeKey, value);
   } else if (key == aura::client::kAppIconKey) {
     MirrorOwnedProperty(window, root_window, aura::client::kAppIconKey);
+  } else if (key == kRestoreBoundsOverrideKey) {
+    MirrorOwnedProperty(window, root_window, kRestoreBoundsOverrideKey);
+  } else if (key == kRestoreWindowStateTypeOverrideKey) {
+    ash::mojom::WindowStateType value =
+        window->GetProperty(kRestoreWindowStateTypeOverrideKey);
+    root_window->SetProperty(kRestoreWindowStateTypeOverrideKey, value);
   } else if (key == kShelfIDKey) {
     MirrorOwnedProperty(window, root_window, kShelfIDKey);
   } else if (key == aura::client::kDrawAttentionKey) {

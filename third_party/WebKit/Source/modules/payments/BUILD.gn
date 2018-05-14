@@ -8,6 +8,10 @@ blink_modules_sources("payments") {
   sources = [
     "AbortPaymentEvent.cpp",
     "AbortPaymentEvent.h",
+    "AbortPaymentRespondWithObserver.cpp",
+    "AbortPaymentRespondWithObserver.h",
+    "BasicCardHelper.cpp",
+    "BasicCardHelper.h",
     "CanMakePaymentEvent.cpp",
     "CanMakePaymentEvent.h",
     "CanMakePaymentRespondWithObserver.cpp",
@@ -41,5 +45,9 @@ blink_modules_sources("payments") {
     "PaymentUpdater.h",
     "PaymentsValidators.cpp",
     "PaymentsValidators.h",
+  ]
+
+  deps = [
+    "//components/payments/mojom:mojom_blink",
   ]
 }

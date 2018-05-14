@@ -54,15 +54,9 @@ namespace gles2 {
 using namespace cmds;
 
 void GLES2DecoderRGBBackbufferTest::SetUp() {
-  // Test codepath with workaround clear_alpha_in_readpixels because
-  // ReadPixelsEmulator emulates the incorrect driver behavior.
-  base::CommandLine command_line(0, NULL);
-  command_line.AppendSwitchASCII(
-      switches::kGpuDriverBugWorkarounds,
-      base::IntToString(gpu::CLEAR_ALPHA_IN_READPIXELS));
   InitState init;
   init.bind_generates_resource = true;
-  InitDecoderWithCommandLine(init, &command_line);
+  InitDecoder(init);
   SetupDefaultProgram();
 }
 
@@ -534,6 +528,31 @@ TEST_P(GLES2DecoderManualInitTest, BeginEndQueryEXT) {
   EXPECT_EQ(error::kNoError, ExecuteCmd(end_cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(query->IsPending());
+
+  // Begin should fail if using a different target
+  begin_cmd.Init(GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT, kNewClientId,
+                 shared_memory_id_, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(begin_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  // Begin should fail if using a different sync
+  begin_cmd.Init(GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT, kNewClientId,
+                 shared_memory_id_, kSharedMemoryOffset + sizeof(QuerySync));
+  EXPECT_EQ(error::kNoError, ExecuteCmd(begin_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  // QueryCounter should fail if using a different target
+  QueryCounterEXT query_counter_cmd;
+  query_counter_cmd.Init(kNewClientId, GL_TIMESTAMP, shared_memory_id_,
+                         kSharedMemoryOffset, 1);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(query_counter_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  // QueryCounter should fail if using a different sync
+  query_counter_cmd.Init(kNewClientId, GL_TIMESTAMP, shared_memory_id_,
+                         kSharedMemoryOffset + sizeof(QuerySync), 1);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(query_counter_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
 
   EXPECT_CALL(*gl_, DeleteQueries(1, _)).Times(1).RetiresOnSaturation();
 }
@@ -1078,7 +1097,7 @@ class SizeOnlyMemoryTracker : public MemoryTracker {
   uint64_t ShareGroupTracingGUID() const override { return 0; }
 
  private:
-  virtual ~SizeOnlyMemoryTracker() {}
+  virtual ~SizeOnlyMemoryTracker() = default;
   struct PoolInfo {
     PoolInfo() : initial_size(0), size(0) {}
     size_t initial_size;
@@ -1558,13 +1577,16 @@ TEST_P(GLES2DecoderDoCommandsTest, DoCommandsBadArgSize) {
             decoder_->DoCommands(
                 2, &cmds_, entries_per_cmd_ * 2 + 1, &num_processed));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  EXPECT_EQ(entries_per_cmd_ + cmds_[1].header.size, num_processed);
+  // gpu::CommandHeader::size is a 21-bit field, so casting it to int is safe.
+  // Without the explicit cast, Visual Studio ends up promoting the left hand
+  // side to unsigned, and emits a sign mismatch warning.
+  EXPECT_EQ(entries_per_cmd_ + static_cast<int>(cmds_[1].header.size),
+            num_processed);
 }
 
 class GLES2DecoderDescheduleUntilFinishedTest : public GLES2DecoderTest {
  public:
-  GLES2DecoderDescheduleUntilFinishedTest() {
-  }
+  GLES2DecoderDescheduleUntilFinishedTest() = default;
 
   void SetUp() override {
     InitState init;
@@ -1661,15 +1683,11 @@ void GLES3DecoderWithShaderTest::SetUp() {
 }
 
 void GLES3DecoderRGBBackbufferTest::SetUp() {
-  base::CommandLine command_line(0, nullptr);
-  command_line.AppendSwitchASCII(
-      switches::kGpuDriverBugWorkarounds,
-      base::IntToString(gpu::CLEAR_ALPHA_IN_READPIXELS));
   InitState init;
   init.gl_version = "OpenGL ES 3.0";
   init.bind_generates_resource = true;
   init.context_type = CONTEXT_TYPE_OPENGLES3;
-  InitDecoderWithCommandLine(init, &command_line);
+  InitDecoder(init);
   SetupDefaultProgram();
 }
 

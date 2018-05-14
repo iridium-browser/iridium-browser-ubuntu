@@ -24,9 +24,10 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
-#include "core/HTMLNames.h"
 #include "core/frame/UseCounter.h"
+#include "core/html/ListItemOrdinal.h"
 #include "core/html/parser/HTMLParserIdioms.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutListItem.h"
 
 namespace blink {
@@ -53,7 +54,7 @@ bool HTMLOListElement::IsPresentationAttribute(
 void HTMLOListElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == typeAttr) {
     if (value == "a")
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType,
@@ -78,12 +79,12 @@ void HTMLOListElement::CollectStyleForPresentationAttribute(
 void HTMLOListElement::ParseAttribute(
     const AttributeModificationParams& params) {
   if (params.name == startAttr) {
-    int old_start = start();
+    int old_start = StartConsideringItemCount();
     int parsed_start = 0;
     bool can_parse = ParseHTMLInteger(params.new_value, parsed_start);
     has_explicit_start_ = can_parse;
     start_ = can_parse ? parsed_start : 0xBADBEEF;
-    if (old_start == start())
+    if (old_start == StartConsideringItemCount())
       return;
     UpdateItemValues();
   } else if (params.name == reversedAttr) {
@@ -97,20 +98,6 @@ void HTMLOListElement::ParseAttribute(
   }
 }
 
-int HTMLOListElement::start() const {
-  if (has_explicit_start_)
-    return start_;
-
-  if (is_reversed_) {
-    UseCounter::Count(
-        GetDocument(),
-        WebFeature::kHTMLOListElementStartGetterReversedWithoutStartAttribute);
-    return ItemCount();
-  }
-
-  return 1;
-}
-
 void HTMLOListElement::setStart(int start) {
   SetIntegralAttribute(startAttr, start);
 }
@@ -119,11 +106,11 @@ void HTMLOListElement::UpdateItemValues() {
   if (!GetLayoutObject())
     return;
   UpdateDistribution();
-  LayoutListItem::UpdateItemValuesForOrderedList(this);
+  ListItemOrdinal::InvalidateAllItemsForOrderedList(this);
 }
 
 void HTMLOListElement::RecalculateItemCount() {
-  item_count_ = LayoutListItem::ItemCountForOrderedList(this);
+  item_count_ = ListItemOrdinal::ItemCountForOrderedList(this);
   should_recalculate_item_count_ = false;
 }
 

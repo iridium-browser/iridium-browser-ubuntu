@@ -20,7 +20,7 @@ namespace crash_reporter {
 
 namespace {
 
-CrashReporterClient* g_client = NULL;
+CrashReporterClient* g_client = nullptr;
 
 }  // namespace
 
@@ -116,10 +116,6 @@ bool CrashReporterClient::GetCrashMetricsLocation(base::string16* crash_dir) {
 bool CrashReporterClient::GetCrashMetricsLocation(base::FilePath* crash_dir) {
 #endif
   return false;
-}
-
-size_t CrashReporterClient::RegisterCrashKeys() {
-  return 0;
 }
 
 bool CrashReporterClient::UseCrashKeysWhiteList() {

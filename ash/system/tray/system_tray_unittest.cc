@@ -4,11 +4,12 @@
 
 #include "ash/system/tray/system_tray.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "ash/accelerators/accelerator_controller.h"
-#include "ash/accessibility_delegate.h"
+#include "ash/accessibility/accessibility_controller.h"
 #include "ash/ash_view_ids.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
@@ -30,7 +31,10 @@
 #include "ash/wm/window_util.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/test/histogram_tester.h"
+#include "ui/app_list/presenter/app_list.h"
+#include "ui/app_list/presenter/test/test_app_list_presenter.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/events/test/event_generator.h"
@@ -50,8 +54,8 @@ const char kVisibleRowsHistogramName[] =
 
 class ModalWidgetDelegate : public views::WidgetDelegateView {
  public:
-  ModalWidgetDelegate() {}
-  ~ModalWidgetDelegate() override {}
+  ModalWidgetDelegate() = default;
+  ~ModalWidgetDelegate() override = default;
 
   ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_SYSTEM; }
 
@@ -64,7 +68,7 @@ class KeyEventConsumerView : public views::View {
   KeyEventConsumerView() : number_of_consumed_key_events_(0) {
     SetFocusBehavior(FocusBehavior::ALWAYS);
   }
-  ~KeyEventConsumerView() override {}
+  ~KeyEventConsumerView() override = default;
 
   // Overriden from views::View
   bool SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) override {
@@ -88,8 +92,8 @@ class KeyEventConsumerView : public views::View {
 // TraybackgroundView / TrayDragController. crbug.com/745073
 class SystemTrayTest : public AshTestBase {
  public:
-  SystemTrayTest() {}
-  ~SystemTrayTest() override {}
+  SystemTrayTest() = default;
+  ~SystemTrayTest() override = default;
 
   // Swiping on the system tray and ends with finger released. Note, |start| is
   // based on the system tray or system tray bubble's coordinate space.
@@ -146,7 +150,7 @@ class SystemTrayTest : public AshTestBase {
   // then close it.
   float GetSystemBubbleHeight() {
     SystemTray* system_tray = GetPrimarySystemTray();
-    system_tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+    system_tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
     gfx::Rect bounds = GetSystemBubbleBoundsInScreen();
     system_tray->CloseBubble();
     return bounds.height();
@@ -164,9 +168,12 @@ class SystemTrayTest : public AshTestBase {
   DISALLOW_COPY_AND_ASSIGN(SystemTrayTest);
 };
 
+// TODO(minch): Swiping the status area tray or associated bubble in tablet mode
+// has been disabled currently, it may be added back in the future.
+// http://crbug.com/767679.
 // Swiping on the overlap area of shelf and system tray bubble during the
 // animation should close the bubble.
-TEST_F(SystemTrayTest, SwipingOnShelfDuringAnimation) {
+TEST_F(SystemTrayTest, DISABLED_SwipingOnShelfDuringAnimation) {
   Shelf* shelf = GetPrimaryShelf();
   SystemTray* system_tray = GetPrimarySystemTray();
   gfx::Point start = system_tray->GetLocalBounds().CenterPoint();
@@ -176,7 +183,7 @@ TEST_F(SystemTrayTest, SwipingOnShelfDuringAnimation) {
   gfx::Rect shelf_bounds_in_screen =
       shelf->shelf_widget()->GetWindowBoundsInScreen();
 
-  system_tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  system_tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   gfx::Rect original_bounds = GetSystemBubbleBoundsInScreen();
   system_tray->CloseBubble();
 
@@ -218,8 +225,11 @@ TEST_F(SystemTrayTest, SwipingOnShelfDuringAnimation) {
   }
 }
 
+// TODO(minch): Swiping the status area tray or associated bubble in tablet mode
+// has been disabled currently, it may be added back in the future.
+// http://crbug.com/767679.
 // Swiping on the system tray ends with fling event.
-TEST_F(SystemTrayTest, FlingOnSystemTray) {
+TEST_F(SystemTrayTest, DISABLED_FlingOnSystemTray) {
   Shelf* shelf = GetPrimaryShelf();
   SystemTray* system_tray = GetPrimarySystemTray();
   gfx::Point start = system_tray->GetLocalBounds().CenterPoint();
@@ -288,8 +298,11 @@ TEST_F(SystemTrayTest, FlingOnSystemTray) {
   EXPECT_FALSE(system_tray->HasSystemBubble());
 }
 
+// TODO(minch): Swiping the status area tray or associated bubble in tablet mode
+// has been disabled currently, it may be added back in the future.
+// http://crbug.com/767679.
 // Touch outside the system tray bubble during swiping should close the bubble.
-TEST_F(SystemTrayTest, TapOutsideCloseBubble) {
+TEST_F(SystemTrayTest, DISABLED_TapOutsideCloseBubble) {
   Shelf* shelf = GetPrimaryShelf();
   SystemTray* system_tray = GetPrimarySystemTray();
   gfx::Point start = system_tray->GetLocalBounds().CenterPoint();
@@ -308,8 +321,11 @@ TEST_F(SystemTrayTest, TapOutsideCloseBubble) {
   EXPECT_FALSE(system_tray->HasSystemBubble());
 }
 
+// TODO(minch): Swiping the status area tray or associated bubble in tablet mode
+// has been disabled currently, it may be added back in the future.
+// http://crbug.com/767679.
 // Swiping on the system tray ends with scroll event.
-TEST_F(SystemTrayTest, SwipingOnSystemTray) {
+TEST_F(SystemTrayTest, DISABLED_SwipingOnSystemTray) {
   Shelf* shelf = GetPrimaryShelf();
   SystemTray* system_tray = GetPrimarySystemTray();
   gfx::Point start = system_tray->GetLocalBounds().CenterPoint();
@@ -362,9 +378,12 @@ TEST_F(SystemTrayTest, SwipingOnSystemTray) {
   EXPECT_FALSE(system_tray->HasSystemBubble());
 }
 
+// TODO(minch): Swiping the status area tray or associated bubble in tablet mode
+// has been disabled currently, it may be added back in the future.
+// http://crbug.com/767679.
 // Tests for swiping down on an open system tray bubble in order to
 // close it.
-TEST_F(SystemTrayTest, SwipingOnSystemTrayBubble) {
+TEST_F(SystemTrayTest, DISABLED_SwipingOnSystemTrayBubble) {
   Shelf* shelf = GetPrimaryShelf();
   SystemTray* system_tray = GetPrimarySystemTray();
   EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
@@ -373,7 +392,7 @@ TEST_F(SystemTrayTest, SwipingOnSystemTrayBubble) {
   // the bubble's height should close the bubble. This only takes effect in
   // maximize mode.
   Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
-  system_tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  system_tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   gfx::Rect bounds =
       system_tray->GetSystemBubble()->bubble_view()->GetLocalBounds();
   float delta = bounds.height() / 2;
@@ -383,15 +402,48 @@ TEST_F(SystemTrayTest, SwipingOnSystemTrayBubble) {
 
   // Beginning to scroll upward and then swiping down more than one third of the
   // bubble's height should also close the bubble.
-  system_tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  system_tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   SendGestureEvent(start, delta, false, 0, -1, true);
   EXPECT_FALSE(system_tray->HasSystemBubble());
 
   // Swiping on the bubble has no effect if it is not in maximize mode.
   Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
-  system_tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  system_tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   SendGestureEvent(start, delta, false, 0, -1, true);
   EXPECT_TRUE(system_tray->HasSystemBubble());
+}
+
+// Tests that press the search key can toggle the launcher when all the windows
+// are minimized after open the system tray bubble in tablet mode.
+TEST_F(SystemTrayTest, ToggleAppListAfterOpenSystemTrayBubbleInTabletMode) {
+  EXPECT_FALSE(wm::GetActiveWindow());
+  SystemTray* system_tray = GetPrimarySystemTray();
+
+  // Open the system tray bubble in tablet mode.
+  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  EXPECT_FALSE(system_tray->clipping_window_for_test());
+  system_tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
+  ASSERT_FALSE(system_tray->drag_controller());
+  EXPECT_FALSE(system_tray->clipping_window_for_test());
+
+  app_list::test::TestAppListPresenter test_app_list_presenter;
+  Shell::Get()->app_list()->SetAppListPresenter(
+      test_app_list_presenter.CreateInterfacePtrAndBind());
+
+  // Convert from tablet mode to clamshell.
+  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  EXPECT_EQ(0u, test_app_list_presenter.toggle_count());
+
+  // Press the search key should toggle the launcher.
+  ui::test::EventGenerator& generator = GetEventGenerator();
+  generator.PressKey(ui::VKEY_BROWSER_SEARCH, ui::EF_NONE);
+  RunAllPendingInMessageLoop();
+  EXPECT_EQ(1u, test_app_list_presenter.toggle_count());
+
+  // Press the search key again should still toggle the launcher.
+  generator.PressKey(ui::VKEY_BROWSER_SEARCH, ui::EF_NONE);
+  RunAllPendingInMessageLoop();
+  EXPECT_EQ(2u, test_app_list_presenter.toggle_count());
 }
 
 // Verifies only the visible default views are recorded in the
@@ -405,7 +457,7 @@ TEST_F(SystemTrayTest, OnlyVisibleItemsRecorded) {
 
   base::HistogramTester histogram_tester;
 
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   RunAllPendingInMessageLoop();
   histogram_tester.ExpectBucketCount(kVisibleRowsHistogramName,
                                      SystemTrayItem::UMA_TEST, 1);
@@ -414,7 +466,7 @@ TEST_F(SystemTrayTest, OnlyVisibleItemsRecorded) {
   tray->CloseBubble();
   RunAllPendingInMessageLoop();
 
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   RunAllPendingInMessageLoop();
   histogram_tester.ExpectBucketCount(kVisibleRowsHistogramName,
                                      SystemTrayItem::UMA_TEST, 2);
@@ -425,7 +477,7 @@ TEST_F(SystemTrayTest, OnlyVisibleItemsRecorded) {
 
   test_item->set_views_are_visible(false);
 
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   RunAllPendingInMessageLoop();
   histogram_tester.ExpectBucketCount(kVisibleRowsHistogramName,
                                      SystemTrayItem::UMA_TEST, 2);
@@ -441,13 +493,12 @@ TEST_F(SystemTrayTest, NotRecordedtemsAreNotRecorded) {
   SystemTray* tray = GetPrimarySystemTray();
   ASSERT_TRUE(tray->GetWidget());
 
-  TestSystemTrayItem* test_item =
-      new TestSystemTrayItem(SystemTrayItem::UMA_NOT_RECORDED);
-  tray->AddTrayItem(base::WrapUnique(test_item));
+  tray->AddTrayItem(
+      std::make_unique<TestSystemTrayItem>(SystemTrayItem::UMA_NOT_RECORDED));
 
   base::HistogramTester histogram_tester;
 
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   RunAllPendingInMessageLoop();
   histogram_tester.ExpectBucketCount(kVisibleRowsHistogramName,
                                      SystemTrayItem::UMA_NOT_RECORDED, 0);
@@ -463,13 +514,13 @@ TEST_F(SystemTrayTest, NullDefaultViewIsNotRecorded) {
   SystemTray* tray = GetPrimarySystemTray();
   ASSERT_TRUE(tray->GetWidget());
 
-  TestSystemTrayItem* test_item = new TestSystemTrayItem();
+  auto test_item = std::make_unique<TestSystemTrayItem>();
   test_item->set_has_views(false);
-  tray->AddTrayItem(base::WrapUnique(test_item));
+  tray->AddTrayItem(std::move(test_item));
 
   base::HistogramTester histogram_tester;
 
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   RunAllPendingInMessageLoop();
   histogram_tester.ExpectBucketCount(kVisibleRowsHistogramName,
                                      SystemTrayItem::UMA_TEST, 0);
@@ -490,7 +541,7 @@ TEST_F(SystemTrayTest, VisibleDetailedViewsIsNotRecorded) {
 
   base::HistogramTester histogram_tester;
 
-  tray->ShowDetailedView(test_item, 0, false, BUBBLE_CREATE_NEW);
+  tray->ShowDetailedView(test_item, 0, BUBBLE_CREATE_NEW);
   RunAllPendingInMessageLoop();
 
   histogram_tester.ExpectTotalCount(kVisibleRowsHistogramName, 0);
@@ -511,17 +562,17 @@ TEST_F(SystemTrayTest, VisibleDefaultViewIsNotRecordedOnReshow) {
 
   base::HistogramTester histogram_tester;
 
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   RunAllPendingInMessageLoop();
   histogram_tester.ExpectBucketCount(kVisibleRowsHistogramName,
                                      SystemTrayItem::UMA_TEST, 1);
 
-  tray->ShowDetailedView(test_item, 0, false, BUBBLE_USE_EXISTING);
+  tray->ShowDetailedView(test_item, 0, BUBBLE_USE_EXISTING);
   RunAllPendingInMessageLoop();
   histogram_tester.ExpectBucketCount(kVisibleRowsHistogramName,
                                      SystemTrayItem::UMA_TEST, 1);
 
-  tray->ShowDefaultView(BUBBLE_USE_EXISTING);
+  tray->ShowDefaultView(BUBBLE_USE_EXISTING, false /* show_by_click */);
   RunAllPendingInMessageLoop();
   histogram_tester.ExpectBucketCount(kVisibleRowsHistogramName,
                                      SystemTrayItem::UMA_TEST, 1);
@@ -535,7 +586,7 @@ TEST_F(SystemTrayTest, SystemTrayDefaultView) {
   SystemTray* tray = GetPrimarySystemTray();
   ASSERT_TRUE(tray->GetWidget());
 
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
 
   // Ensure that closing the bubble destroys it.
   ASSERT_TRUE(tray->HasSystemBubble());
@@ -553,7 +604,7 @@ TEST_F(SystemTrayTest, Activation) {
   EXPECT_TRUE(widget->IsActive());
 
   // The window stays active after the bubble opens.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   ASSERT_TRUE(tray->GetWidget());
   EXPECT_FALSE(tray->GetSystemBubble()->bubble_view()->GetWidget()->IsActive());
   EXPECT_TRUE(widget->IsActive());
@@ -583,7 +634,7 @@ TEST_F(SystemTrayTest, CloseOnActivation) {
   SystemTray* tray = GetPrimarySystemTray();
 
   // Show the system bubble.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   EXPECT_FALSE(tray->GetSystemBubble()->bubble_view()->GetWidget()->IsActive());
 
   // Test 1: no crash when there's no active window to begin with.
@@ -601,7 +652,7 @@ TEST_F(SystemTrayTest, CloseOnActivation) {
   EXPECT_TRUE(second_widget->IsActive());
 
   // Re-show the system bubble.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   EXPECT_FALSE(tray->GetSystemBubble()->bubble_view()->GetWidget()->IsActive());
 
   // Test 2: also no crash when there is a previously active window.
@@ -620,7 +671,7 @@ TEST_F(SystemTrayTest, SystemTrayColoring) {
   ASSERT_FALSE(tray->is_active());
 
   // Showing the system bubble should show the background as active.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   ASSERT_TRUE(tray->is_active());
 
   // Closing the system menu should change the coloring back to normal.
@@ -641,7 +692,7 @@ TEST_F(SystemTrayTest, SystemTrayColoringAfterAlignmentChange) {
   ASSERT_FALSE(tray->is_active());
 
   // Showing the system bubble should show the background as active.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   ASSERT_TRUE(tray->is_active());
 
   // Changing the alignment should close the system bubble and change the
@@ -664,27 +715,26 @@ TEST_F(SystemTrayTest, SystemTrayTestItems) {
 
   // Check items have been added.
   std::vector<SystemTrayItem*> items = tray->GetTrayItems();
-  ASSERT_TRUE(std::find(items.begin(), items.end(), test_item) != items.end());
-  ASSERT_TRUE(std::find(items.begin(), items.end(), detailed_item) !=
-              items.end());
+  ASSERT_TRUE(base::ContainsValue(items, test_item));
+  ASSERT_TRUE(base::ContainsValue(items, detailed_item));
 
   // Ensure the tray views are created.
   ASSERT_TRUE(test_item->tray_view() != NULL);
   ASSERT_TRUE(detailed_item->tray_view() != NULL);
 
   // Ensure a default views are created.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   ASSERT_TRUE(test_item->default_view() != NULL);
   ASSERT_TRUE(detailed_item->default_view() != NULL);
 
   // Show the detailed view, ensure it's created and the default view destroyed.
-  tray->ShowDetailedView(detailed_item, 0, false, BUBBLE_CREATE_NEW);
+  tray->ShowDetailedView(detailed_item, 0, BUBBLE_CREATE_NEW);
   RunAllPendingInMessageLoop();
   ASSERT_TRUE(test_item->default_view() == NULL);
   ASSERT_TRUE(detailed_item->detailed_view() != NULL);
 
   // Show the default view, ensure it's created and the detailed view destroyed.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   RunAllPendingInMessageLoop();
   ASSERT_TRUE(test_item->default_view() != NULL);
   ASSERT_TRUE(detailed_item->detailed_view() == NULL);
@@ -698,8 +748,8 @@ TEST_F(SystemTrayTest, SystemTrayNoViewItems) {
   TestSystemTrayItem* no_view_item = new TestSystemTrayItem();
   no_view_item->set_has_views(false);
   tray->AddTrayItem(base::WrapUnique(no_view_item));
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
-  tray->ShowDetailedView(no_view_item, 0, false, BUBBLE_USE_EXISTING);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
+  tray->ShowDetailedView(no_view_item, 0, BUBBLE_USE_EXISTING);
   RunAllPendingInMessageLoop();
 }
 
@@ -744,13 +794,13 @@ TEST_F(SystemTrayTest, DISABLED_BubbleCreationTypesTest) {
   ASSERT_TRUE(test_item->tray_view() != NULL);
 
   // Show the default view, ensure the notification view is destroyed.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   RunAllPendingInMessageLoop();
 
   views::Widget* widget = test_item->default_view()->GetWidget();
   gfx::Rect bubble_bounds = widget->GetWindowBoundsInScreen();
 
-  tray->ShowDetailedView(test_item, 0, true, BUBBLE_USE_EXISTING);
+  tray->ShowDetailedView(test_item, 0, BUBBLE_USE_EXISTING);
   RunAllPendingInMessageLoop();
 
   EXPECT_FALSE(test_item->default_view());
@@ -761,7 +811,7 @@ TEST_F(SystemTrayTest, DISABLED_BubbleCreationTypesTest) {
                                           .ToString());
   EXPECT_EQ(widget, test_item->detailed_view()->GetWidget());
 
-  tray->ShowDefaultView(BUBBLE_USE_EXISTING);
+  tray->ShowDefaultView(BUBBLE_USE_EXISTING, false /* show_by_click */);
   RunAllPendingInMessageLoop();
 
   EXPECT_EQ(bubble_bounds.ToString(), test_item->default_view()
@@ -809,14 +859,13 @@ TEST_F(SystemTrayTest, PersistentBubble) {
   SystemTray* tray = GetPrimarySystemTray();
   ASSERT_TRUE(tray->GetWidget());
 
-  TestSystemTrayItem* test_item = new TestSystemTrayItem();
-  tray->AddTrayItem(base::WrapUnique(test_item));
+  tray->AddTrayItem(std::make_unique<TestSystemTrayItem>());
 
   std::unique_ptr<views::Widget> widget(CreateTestWidget(
       nullptr, kShellWindowId_DefaultContainer, gfx::Rect(0, 0, 100, 100)));
 
   // Tests for usual default view while activating a window.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   tray->ActivateBubble();
   ASSERT_TRUE(tray->HasSystemBubble());
   widget->Activate();
@@ -824,7 +873,7 @@ TEST_F(SystemTrayTest, PersistentBubble) {
   ASSERT_FALSE(tray->HasSystemBubble());
 
   // Clicking outside the bubble should close it.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   ASSERT_TRUE(tray->HasSystemBubble());
   {
     ui::test::EventGenerator& generator = GetEventGenerator();
@@ -864,13 +913,13 @@ TEST_F(SystemTrayTest, PersistentBubble) {
 // status.
 TEST_F(SystemTrayTest, WithSystemModal) {
   // The accessiblity item is created and is visible either way.
-  Shell::Get()->accessibility_delegate()->SetVirtualKeyboardEnabled(true);
+  Shell::Get()->accessibility_controller()->SetVirtualKeyboardEnabled(true);
   std::unique_ptr<views::Widget> widget(CreateTestWidget(
       new ModalWidgetDelegate, kShellWindowId_SystemModalContainer,
       gfx::Rect(0, 0, 100, 100)));
 
   SystemTray* tray = GetPrimarySystemTray();
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
 
   ASSERT_TRUE(tray->HasSystemBubble());
   const views::View* accessibility =
@@ -890,7 +939,7 @@ TEST_F(SystemTrayTest, WithSystemModal) {
   widget.reset();
 
   // System modal is gone. The bluetooth item should be enabled now.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   accessibility = tray->GetSystemBubble()->bubble_view()->GetViewByID(
       VIEW_ID_ACCESSIBILITY_TRAY_ITEM);
   ASSERT_TRUE(accessibility);
@@ -932,7 +981,7 @@ TEST_F(SystemTrayTest, SystemTrayHeightWithBubble) {
   EXPECT_EQ(0, notification_tray->tray_bubble_height_for_test());
 
   // Show the default view, ensure the tray bubble height is changed.
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
   RunAllPendingInMessageLoop();
   EXPECT_LT(0, notification_tray->tray_bubble_height_for_test());
 
@@ -948,8 +997,8 @@ TEST_F(SystemTrayTest, SeparatorThickness) {
   EXPECT_EQ(kSeparatorWidth, views::Separator::kThickness);
 }
 
-// System tray is not activated by default. But it should be activated when user
-// presses tab key.
+// System tray is not activated by default. If it is opened by user click on
+// system tray, it should be activated when user presses tab key.
 TEST_F(SystemTrayTest, KeyboardNavigationWithOtherWindow) {
   std::unique_ptr<views::Widget> widget(CreateTestWidget(
       nullptr, kShellWindowId_DefaultContainer, gfx::Rect(0, 0, 100, 100)));
@@ -963,9 +1012,11 @@ TEST_F(SystemTrayTest, KeyboardNavigationWithOtherWindow) {
   EXPECT_EQ(&key_event_consumer_view,
             key_event_consumer_view.GetFocusManager()->GetFocusedView());
 
-  // Show system tray.
+  // Show system tray by performing a gesture tap at tray.
   SystemTray* tray = GetPrimarySystemTray();
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  ui::GestureEvent tap(0, 0, 0, base::TimeTicks(),
+                       ui::GestureEventDetails(ui::ET_GESTURE_TAP));
+  tray->PerformAction(tap);
   ASSERT_TRUE(tray->GetWidget());
 
   // Confirms that system tray is not activated at this time.
@@ -995,10 +1046,24 @@ TEST_F(SystemTrayTest, KeyboardNavigationWithOtherWindow) {
   EXPECT_FALSE(widget->IsActive());
   EXPECT_EQ(number_of_consumed_key_events,
             key_event_consumer_view.number_of_consumed_key_events());
+
+  // Close system tray and reopen it by not explicit user click.
+  tray->CloseBubble();
+  ASSERT_FALSE(tray->IsSystemBubbleVisible());
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, false /* show_by_click */);
+  ASSERT_TRUE(tray->GetWidget());
+
+  // Confirms that system tray is not activated by tab key event to verify that
+  // RerouteEventHandler is not installed in this case.
+  event_generator.PressKey(ui::VKEY_TAB, ui::EF_NONE);
+  event_generator.ReleaseKey(ui::VKEY_TAB, ui::EF_NONE);
+  EXPECT_FALSE(tray->GetSystemBubble()->bubble_view()->GetWidget()->IsActive());
+  EXPECT_TRUE(widget->IsActive());
 }
 
-// System tray passes a key event to ViewsDelegate if it's not handled by the
-// tray. It closes the tray if ViewsDelegate returns CLOSE_MENU.
+// When System tray is opened by explicit user click, it passes a key event to
+// ViewsDelegate if it's not handled by the tray. It closes the tray if
+// ViewsDelegate returns CLOSE_MENU.
 TEST_F(SystemTrayTest, AcceleratorController) {
   // Register A key as an accelerator which closes the menu.
   ui::Accelerator accelerator(ui::VKEY_A, ui::EF_NONE);
@@ -1006,9 +1071,11 @@ TEST_F(SystemTrayTest, AcceleratorController) {
       ash_test_helper()->test_views_delegate();
   views_delegate->set_close_menu_accelerator(accelerator);
 
-  // Show system tray.
+  // Show system tray by performing a gesture tap at tray.
   SystemTray* tray = GetPrimarySystemTray();
-  tray->ShowDefaultView(BUBBLE_CREATE_NEW);
+  ui::GestureEvent tap(0, 0, 0, base::TimeTicks(),
+                       ui::GestureEventDetails(ui::ET_GESTURE_TAP));
+  tray->PerformAction(tap);
   ASSERT_TRUE(tray->GetWidget());
   ASSERT_TRUE(tray->IsSystemBubbleVisible());
 
@@ -1022,6 +1089,45 @@ TEST_F(SystemTrayTest, AcceleratorController) {
   // Send A key event and confirms that system tray becomes invisible.
   event_generator.PressKey(ui::VKEY_A, ui::EF_NONE);
   event_generator.ReleaseKey(ui::VKEY_A, ui::EF_NONE);
+  EXPECT_FALSE(tray->IsSystemBubbleVisible());
+}
+
+// When system tray has an active child widget, the child widget should consume
+// key event and the tray shouldn't consume key event, i.e. RerouteEventHandler
+// in TrayBubbleView should not reroute key events to the tray in this case.
+TEST_F(SystemTrayTest, ActiveChildWidget) {
+  SystemTray* tray = GetPrimarySystemTray();
+  tray->ShowDefaultView(BUBBLE_CREATE_NEW, true /* show_by_click */);
+
+  // Create a child widget on system tray and focus it.
+  views::Widget* child_widget = views::Widget::CreateWindowWithParent(
+      nullptr, tray->GetBubbleView()->GetWidget()->GetNativeView());
+  std::unique_ptr<KeyEventConsumerView> consumer_view(
+      new KeyEventConsumerView());
+  child_widget->GetContentsView()->AddChildView(consumer_view.get());
+  child_widget->Show();
+  consumer_view->RequestFocus();
+
+  ASSERT_FALSE(tray->GetBubbleView()->GetWidget()->IsActive());
+  ASSERT_TRUE(child_widget->IsActive());
+
+  ui::test::EventGenerator& event_generator = GetEventGenerator();
+
+  // Press ESC key and confirm that child widget consumes it. Also confirm that
+  // the tray does not consume the key event.
+  ASSERT_EQ(0, consumer_view->number_of_consumed_key_events());
+  ASSERT_TRUE(tray->IsSystemBubbleVisible());
+  event_generator.PressKey(ui::VKEY_ESCAPE, ui::EF_NONE);
+  event_generator.ReleaseKey(ui::VKEY_ESCAPE, ui::EF_NONE);
+  EXPECT_EQ(2, consumer_view->number_of_consumed_key_events());
+  EXPECT_TRUE(tray->IsSystemBubbleVisible());
+
+  // Hide child widget and press ESC key. Confirm that the tray consumes it and
+  // the tray is closed even if the tray is not active.
+  child_widget->Hide();
+  ASSERT_FALSE(tray->GetBubbleView()->GetWidget()->IsActive());
+  event_generator.PressKey(ui::VKEY_ESCAPE, ui::EF_NONE);
+  event_generator.ReleaseKey(ui::VKEY_ESCAPE, ui::EF_NONE);
   EXPECT_FALSE(tray->IsSystemBubbleVisible());
 }
 

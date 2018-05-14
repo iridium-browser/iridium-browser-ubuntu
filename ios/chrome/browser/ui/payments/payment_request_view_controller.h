@@ -71,6 +71,9 @@ extern NSString* const kPaymentRequestCollectionViewID;
 // Whether or not the view is in a pending state.
 @property(nonatomic, assign, getter=isPending) BOOL pending;
 
+// Whether or not the user can cancel out of the view.
+@property(nonatomic, assign, getter=isCancellable) BOOL cancellable;
+
 // The delegate to be notified when the user confirms or cancels the request.
 @property(nonatomic, weak) id<PaymentRequestViewControllerDelegate> delegate;
 
@@ -81,14 +84,17 @@ extern NSString* const kPaymentRequestCollectionViewID;
 // Updates the payment summary item in the summary section.
 - (void)updatePaymentSummaryItem;
 
-// Updates the shipping section.
-- (void)updateShippingSection;
+// Reloads the shipping, payment method and contact info sections.
+- (void)reloadSections;
 
-// Updates the payment method section.
-- (void)updatePaymentMethodSection;
+// Reloads the shipping section.
+- (void)reloadShippingSection;
 
-// Updates the contact info section.
-- (void)updateContactInfoSection;
+// Reloads the payment method section.
+- (void)reloadPaymentMethodSection;
+
+// Reloads the contact info section.
+- (void)reloadContactInfoSection;
 
 - (instancetype)init NS_DESIGNATED_INITIALIZER;
 

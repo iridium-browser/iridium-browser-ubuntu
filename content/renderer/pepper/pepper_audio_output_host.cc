@@ -23,20 +23,12 @@
 
 namespace content {
 
-namespace {
-
-base::PlatformFile ConvertSyncSocketHandle(const base::SyncSocket& socket) {
-  return socket.handle();
-}
-
-}  // namespace
-
 PepperAudioOutputHost::PepperAudioOutputHost(RendererPpapiHostImpl* host,
                                              PP_Instance instance,
                                              PP_Resource resource)
     : ResourceHost(host->GetPpapiHost(), instance, resource),
       renderer_ppapi_host_(host),
-      audio_output_(NULL),
+      audio_output_(nullptr),
       playback_throttled_(false),
       enumeration_helper_(this,
                           PepperMediaDeviceManager::GetForRenderFrame(
@@ -205,8 +197,8 @@ int32_t PepperAudioOutputHost::GetRemoteHandles(
     const base::SharedMemory& shared_memory,
     IPC::PlatformFileForTransit* remote_socket_handle,
     base::SharedMemoryHandle* remote_shared_memory_handle) {
-  *remote_socket_handle = renderer_ppapi_host_->ShareHandleWithRemote(
-      ConvertSyncSocketHandle(socket), false);
+  *remote_socket_handle =
+      renderer_ppapi_host_->ShareHandleWithRemote(socket.handle(), false);
   if (*remote_socket_handle == IPC::InvalidPlatformFileForTransit())
     return PP_ERROR_FAILED;
 
@@ -224,7 +216,7 @@ void PepperAudioOutputHost::Close() {
     return;
 
   audio_output_->ShutDown();
-  audio_output_ = NULL;
+  audio_output_ = nullptr;
 
   if (open_context_.is_valid())
     SendOpenReply(PP_ERROR_ABORTED);

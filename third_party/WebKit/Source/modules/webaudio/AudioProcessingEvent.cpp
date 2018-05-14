@@ -44,7 +44,7 @@ AudioProcessingEvent* AudioProcessingEvent::Create(
   return new AudioProcessingEvent(type, initializer);
 }
 
-AudioProcessingEvent::AudioProcessingEvent() {}
+AudioProcessingEvent::AudioProcessingEvent() = default;
 
 AudioProcessingEvent::AudioProcessingEvent(AudioBuffer* input_buffer,
                                            AudioBuffer* output_buffer,
@@ -63,13 +63,13 @@ AudioProcessingEvent::AudioProcessingEvent(
   playback_time_ = initializer.playbackTime();
 }
 
-AudioProcessingEvent::~AudioProcessingEvent() {}
+AudioProcessingEvent::~AudioProcessingEvent() = default;
 
 const AtomicString& AudioProcessingEvent::InterfaceName() const {
   return EventNames::AudioProcessingEvent;
 }
 
-DEFINE_TRACE(AudioProcessingEvent) {
+void AudioProcessingEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(input_buffer_);
   visitor->Trace(output_buffer_);
   Event::Trace(visitor);

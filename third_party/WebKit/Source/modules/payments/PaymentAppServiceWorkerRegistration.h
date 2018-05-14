@@ -22,6 +22,8 @@ class PaymentAppServiceWorkerRegistration final
   WTF_MAKE_NONCOPYABLE(PaymentAppServiceWorkerRegistration);
 
  public:
+  static const char kSupplementName[];
+
   virtual ~PaymentAppServiceWorkerRegistration();
   static PaymentAppServiceWorkerRegistration& From(ServiceWorkerRegistration&);
 
@@ -29,11 +31,10 @@ class PaymentAppServiceWorkerRegistration final
                                         ServiceWorkerRegistration&);
   PaymentManager* paymentManager(ScriptState*);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit PaymentAppServiceWorkerRegistration(ServiceWorkerRegistration*);
-  static const char* SupplementName();
 
   Member<ServiceWorkerRegistration> registration_;
   Member<PaymentManager> payment_manager_;

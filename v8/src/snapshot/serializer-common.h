@@ -9,6 +9,7 @@
 #include "src/base/bits.h"
 #include "src/external-reference-table.h"
 #include "src/globals.h"
+#include "src/utils.h"
 #include "src/visitors.h"
 
 namespace v8 {
@@ -18,16 +19,38 @@ class Isolate;
 
 class ExternalReferenceEncoder {
  public:
-  explicit ExternalReferenceEncoder(Isolate* isolate);
+  class Value {
+   public:
+    explicit Value(uint32_t raw) : value_(raw) {}
+    Value() : value_(0) {}
+    static uint32_t Encode(uint32_t index, bool is_from_api) {
+      return Index::encode(index) | IsFromAPI::encode(is_from_api);
+    }
 
-  uint32_t Encode(Address key) const;
+    bool is_from_api() const { return IsFromAPI::decode(value_); }
+    uint32_t index() const { return Index::decode(value_); }
+    uint32_t raw() const { return value_; }
+
+   private:
+    class Index : public BitField<uint32_t, 0, 31> {};
+    class IsFromAPI : public BitField<bool, 31, 1> {};
+    uint32_t value_;
+  };
+
+  explicit ExternalReferenceEncoder(Isolate* isolate);
+  ~ExternalReferenceEncoder();
+
+  Value Encode(Address key);
+  Maybe<Value> TryEncode(Address key);
 
   const char* NameOfAddress(Isolate* isolate, Address address) const;
 
  private:
   AddressToIndexHashMap* map_;
+
 #ifdef DEBUG
-  ExternalReferenceTable* table_;
+  std::vector<int> count_;
+  const intptr_t* api_references_;
 #endif  // DEBUG
 
   DISALLOW_COPY_AND_ASSIGN(ExternalReferenceEncoder);
@@ -36,7 +59,7 @@ class ExternalReferenceEncoder {
 class HotObjectsList {
  public:
   HotObjectsList() : index_(0) {
-    for (int i = 0; i < kSize; i++) circular_queue_[i] = NULL;
+    for (int i = 0; i < kSize; i++) circular_queue_[i] = nullptr;
   }
 
   void Add(HeapObject* object) {
@@ -88,7 +111,44 @@ class SerializerDeserializer : public RootVisitor {
  protected:
   static bool CanBeDeferred(HeapObject* o);
 
-  void RestoreExternalReferenceRedirectors(List<AccessorInfo*>* accessor_infos);
+  void RestoreExternalReferenceRedirectors(
+      const std::vector<AccessorInfo*>& accessor_infos);
+  void RestoreExternalReferenceRedirectors(
+      const std::vector<CallHandlerInfo*>& call_handler_infos);
+
+#define UNUSED_SERIALIZER_BYTE_CODES(V) \
+  V(0x1d)                               \
+  V(0x1e)                               \
+  V(0x55)                               \
+  V(0x56)                               \
+  V(0x57)                               \
+  V(0x75)                               \
+  V(0x76)                               \
+  V(0x77)                               \
+  V(0x78)                               \
+  V(0x79)                               \
+  V(0x7a)                               \
+  V(0x7b)                               \
+  V(0x7c)                               \
+  V(0x7d)                               \
+  V(0x7e)                               \
+  V(0x7f)                               \
+  V(0xf0)                               \
+  V(0xf1)                               \
+  V(0xf2)                               \
+  V(0xf3)                               \
+  V(0xf4)                               \
+  V(0xf5)                               \
+  V(0xf6)                               \
+  V(0xf7)                               \
+  V(0xf8)                               \
+  V(0xf9)                               \
+  V(0xfa)                               \
+  V(0xfb)                               \
+  V(0xfc)                               \
+  V(0xfd)                               \
+  V(0xfe)                               \
+  V(0xff)
 
   // ---------- byte code range 0x00..0x7f ----------
   // Byte codes in this range represent Where, HowToCode and WhereToPoint.
@@ -164,15 +224,21 @@ class SerializerDeserializer : public RootVisitor {
   // Repeats of variable length.
   static const int kVariableRepeat = 0x19;
   // Raw data of variable length.
-  static const int kVariableRawData = 0x1a;
-  // Internal reference encoded as offsets of pc and target from code entry.
-  static const int kInternalReference = 0x1b;
-  static const int kInternalReferenceEncoded = 0x1c;
-  // Used to encode deoptimizer entry code.
-  static const int kDeoptimizerEntryPlain = 0x1d;
-  static const int kDeoptimizerEntryFromCode = 0x1e;
+  static const int kVariableRawCode = 0x1a;
+  static const int kVariableRawData = 0x1b;
+
+  // Used for embedder-allocated backing stores for TypedArrays.
+  static const int kOffHeapBackingStore = 0x1c;
+
   // Used for embedder-provided serialization data for embedder fields.
   static const int kEmbedderFieldsData = 0x1f;
+
+  // Internal reference encoded as offsets of pc and target from code entry.
+  static const int kInternalReference = 0x35;
+  static const int kInternalReferenceEncoded = 0x36;
+
+  // Used to encode external referenced provided through the API.
+  static const int kApiReference = 0x37;
 
   // 8 hot (recently seen or back-referenced) objects with optional skip.
   static const int kNumberOfHotObjects = 8;
@@ -182,8 +248,6 @@ class SerializerDeserializer : public RootVisitor {
   // 0x58..0x5f
   static const int kHotObjectWithSkip = 0x58;
   static const int kHotObjectMask = 0x07;
-
-  // 0x35..0x37, 0x55..0x57, 0x75..0x7f unused.
 
   // ---------- byte code range 0x80..0xff ----------
   // First 32 root array items.
@@ -207,8 +271,6 @@ class SerializerDeserializer : public RootVisitor {
   static const int kFixedRepeat = 0xe0;
   static const int kFixedRepeatStart = kFixedRepeat - 1;
 
-  // 0xf0..0xff unused.
-
   // ---------- special values ----------
   static const int kAnyOldSpace = -1;
 
@@ -223,6 +285,7 @@ class SerializedData {
  public:
   class Reservation {
    public:
+    Reservation() : reservation_(0) {}
     explicit Reservation(uint32_t size)
         : reservation_(ChunkSizeBits::encode(size)) {}
 
@@ -237,66 +300,50 @@ class SerializedData {
 
   SerializedData(byte* data, int size)
       : data_(data), size_(size), owns_data_(false) {}
-  SerializedData() : data_(NULL), size_(0), owns_data_(false) {}
+  SerializedData() : data_(nullptr), size_(0), owns_data_(false) {}
   SerializedData(SerializedData&& other)
       : data_(other.data_), size_(other.size_), owns_data_(other.owns_data_) {
     // Ensure |other| will not attempt to destroy our data in destructor.
     other.owns_data_ = false;
   }
 
-  ~SerializedData() {
+  virtual ~SerializedData() {
     if (owns_data_) DeleteArray<byte>(data_);
   }
 
   uint32_t GetMagicNumber() const { return GetHeaderValue(kMagicNumberOffset); }
-  uint32_t GetExtraReferences() const {
-    return GetHeaderValue(kExtraExternalReferencesOffset);
-  }
 
   class ChunkSizeBits : public BitField<uint32_t, 0, 31> {};
   class IsLastChunkBits : public BitField<bool, 31, 1> {};
 
   static uint32_t ComputeMagicNumber(ExternalReferenceTable* table) {
-    uint32_t external_refs = table->size() - table->num_api_references();
+    uint32_t external_refs = table->size();
     return 0xC0DE0000 ^ external_refs;
   }
-  static uint32_t GetExtraReferences(ExternalReferenceTable* table) {
-    return table->num_api_references();
-  }
 
-  static const int kMagicNumberOffset = 0;
-  static const int kExtraExternalReferencesOffset =
-      kMagicNumberOffset + kInt32Size;
-  static const int kVersionHashOffset =
-      kExtraExternalReferencesOffset + kInt32Size;
+  static const uint32_t kMagicNumberOffset = 0;
 
  protected:
-  void SetHeaderValue(int offset, uint32_t value) {
-    memcpy(data_ + offset, &value, sizeof(value));
+  void SetHeaderValue(uint32_t offset, uint32_t value) {
+    WriteLittleEndianValue(data_ + offset, value);
   }
 
-  uint32_t GetHeaderValue(int offset) const {
-    uint32_t value;
-    memcpy(&value, data_ + offset, sizeof(value));
-    return value;
+  uint32_t GetHeaderValue(uint32_t offset) const {
+    return ReadLittleEndianValue<uint32_t>(data_ + offset);
   }
 
-  void AllocateData(int size);
+  void AllocateData(uint32_t size);
 
   static uint32_t ComputeMagicNumber(Isolate* isolate) {
     return ComputeMagicNumber(ExternalReferenceTable::instance(isolate));
   }
-  static uint32_t GetExtraReferences(Isolate* isolate) {
-    return GetExtraReferences(ExternalReferenceTable::instance(isolate));
-  }
 
   void SetMagicNumber(Isolate* isolate) {
     SetHeaderValue(kMagicNumberOffset, ComputeMagicNumber(isolate));
-    SetHeaderValue(kExtraExternalReferencesOffset, GetExtraReferences(isolate));
   }
 
   byte* data_;
-  int size_;
+  uint32_t size_;
   bool owns_data_;
 
  private:

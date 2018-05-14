@@ -6,18 +6,19 @@
 #define ParentFrameTaskRunners_h
 
 #include <memory>
+#include "base/macros.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_annotations.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/dom/TaskRunnerHelper.h"
+#include "core/dom/TaskTypeTraits.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
 class LocalFrame;
-class WebTaskRunner;
 
 // Represents a set of task runners of the parent (or associated) document's
 // frame, or default task runners of the main thread.
@@ -27,7 +28,6 @@ class CORE_EXPORT ParentFrameTaskRunners final
     : public GarbageCollectedFinalized<ParentFrameTaskRunners>,
       public ContextLifecycleObserver {
   USING_GARBAGE_COLLECTED_MIXIN(ParentFrameTaskRunners);
-  WTF_MAKE_NONCOPYABLE(ParentFrameTaskRunners);
 
  public:
   // Returns task runners associated with a given frame. This must be called on
@@ -42,13 +42,14 @@ class CORE_EXPORT ParentFrameTaskRunners final
 
   // Might return nullptr for unsupported task types. This can be called from
   // any threads.
-  RefPtr<WebTaskRunner> Get(TaskType);
+  scoped_refptr<base::SingleThreadTaskRunner> Get(TaskType)
+      LOCKS_EXCLUDED(mutex_);
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   using TaskRunnerHashMap = HashMap<TaskType,
-                                    RefPtr<WebTaskRunner>,
+                                    scoped_refptr<base::SingleThreadTaskRunner>,
                                     WTF::IntHash<TaskType>,
                                     TaskTypeTraits>;
 
@@ -56,10 +57,12 @@ class CORE_EXPORT ParentFrameTaskRunners final
   // particular local frame.
   explicit ParentFrameTaskRunners(LocalFrame*);
 
-  void ContextDestroyed(ExecutionContext*) override;
+  void ContextDestroyed(ExecutionContext*) LOCKS_EXCLUDED(mutex_) override;
 
-  Mutex task_runners_mutex_;
-  TaskRunnerHashMap task_runners_;
+  Mutex mutex_;
+  TaskRunnerHashMap task_runners_ GUARDED_BY(mutex_);
+
+  DISALLOW_COPY_AND_ASSIGN(ParentFrameTaskRunners);
 };
 
 }  // namespace blink

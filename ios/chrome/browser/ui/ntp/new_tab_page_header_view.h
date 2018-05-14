@@ -7,6 +7,7 @@
 
 #import <UIKit/UIKit.h>
 
+#import "ios/chrome/browser/ui/ntp/ntp_header_view_adapter.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_owner.h"
 
 class ReadingListModel;
@@ -14,43 +15,7 @@ class ReadingListModel;
 // Header view for the Material Design NTP. The header view contains all views
 // that are displayed above the list of most visited sites, which includes the
 // toolbar buttons, Google doodle, and fake omnibox.
-@interface NewTabPageHeaderView : UICollectionReusableView<ToolbarOwner>
-
-// Return the toolbar view;
-@property(nonatomic, readonly) UIView* toolBarView;
-
-// Creates a NewTabPageToolbarController using the given |dispatcher|,
-// |readingListModel|, and adds the toolbar view to self.
-- (void)addToolbarWithReadingListModel:(ReadingListModel*)readingListModel
-                            dispatcher:(id)dispatcher;
-
-// Changes the constraints of searchField based on its initialFrame and the
-// scroll view's y |offset|. Also adjust the alpha values for |_searchBoxBorder|
-// and |_shadow| and the constant values for the |constraints|.
-- (void)updateSearchFieldWidth:(NSLayoutConstraint*)widthConstraint
-                        height:(NSLayoutConstraint*)heightConstraint
-                     topMargin:(NSLayoutConstraint*)topMarginConstraint
-            subviewConstraints:(NSArray*)constraints
-                 logoIsShowing:(BOOL)logoIsShowing
-                     forOffset:(CGFloat)offset;
-
-// Initializes |_searchBoxBorder| and |_shadow| and adds them to |searchField|.
-- (void)addViewsToSearchField:(UIView*)searchField;
-
-// Animates |_shadow|'s alpha to 0.
-- (void)fadeOutShadow;
-
-// Hide toolbar subviews that should not be displayed on the new tab page.
-- (void)hideToolbarViewsForNewTabPage;
-
-// Updates the toolbar tab count;
-- (void)setToolbarTabCount:(int)tabCount;
-
-// |YES| if the toolbar can show the forward arrow.
-- (void)setCanGoForward:(BOOL)canGoForward;
-
-// |YES| if the toolbar can show the back arrow.
-- (void)setCanGoBack:(BOOL)canGoBack;
+@interface NewTabPageHeaderView : UIView<NTPHeaderViewAdapter>
 
 @end
 

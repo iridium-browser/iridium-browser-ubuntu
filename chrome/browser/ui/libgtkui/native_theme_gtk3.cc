@@ -153,7 +153,7 @@ SkColor SkColorFromColorId(ui::NativeTheme::ColorId color_id) {
     case ui::NativeTheme::kColorId_LinkPressed:
       if (GtkVersionCheck(3, 12))
         return GetFgColor("GtkLabel.link:link:hover:active");
-    // fallthrough
+      FALLTHROUGH;
     case ui::NativeTheme::kColorId_LinkEnabled: {
       if (GtkVersionCheck(3, 12)) {
         return GetFgColor("GtkLabel.link:link");
@@ -218,6 +218,15 @@ SkColor SkColorFromColorId(ui::NativeTheme::ColorId color_id) {
       return GetFgColor(
           "GtkTreeView#treeview.view "
           "GtkTreeView#treeview.view.cell:selected:focus GtkLabel");
+
+    // TabbedPane
+    case ui::NativeTheme::kColorId_TabTitleColorActive:
+      return GetFgColor("GtkLabel");
+    case ui::NativeTheme::kColorId_TabTitleColorInactive:
+      return GetFgColor("GtkLabel:disabled");
+    case ui::NativeTheme::kColorId_TabBottomBorder:
+      return GetBorderColor(GtkVersionCheck(3, 20) ? "GtkFrame#frame #border"
+                                                   : "GtkFrame#frame");
 
     // Textfield
     case ui::NativeTheme::kColorId_TextfieldDefaultColor:
@@ -404,6 +413,9 @@ NativeThemeGtk3::NativeThemeGtk3() {
   // doesn't optimize away this code.
   g_type_class_unref(g_type_class_ref(gtk_button_get_type()));
   g_type_class_unref(g_type_class_ref(gtk_entry_get_type()));
+  g_type_class_unref(g_type_class_ref(gtk_frame_get_type()));
+  g_type_class_unref(g_type_class_ref(gtk_header_bar_get_type()));
+  g_type_class_unref(g_type_class_ref(gtk_image_get_type()));
   g_type_class_unref(g_type_class_ref(gtk_info_bar_get_type()));
   g_type_class_unref(g_type_class_ref(gtk_label_get_type()));
   g_type_class_unref(g_type_class_ref(gtk_menu_get_type()));
@@ -415,6 +427,7 @@ NativeThemeGtk3::NativeThemeGtk3() {
   g_type_class_unref(g_type_class_ref(gtk_separator_get_type()));
   g_type_class_unref(g_type_class_ref(gtk_spinner_get_type()));
   g_type_class_unref(g_type_class_ref(gtk_text_view_get_type()));
+  g_type_class_unref(g_type_class_ref(gtk_toggle_button_get_type()));
   g_type_class_unref(g_type_class_ref(gtk_tree_view_get_type()));
   g_type_class_unref(g_type_class_ref(gtk_window_get_type()));
 

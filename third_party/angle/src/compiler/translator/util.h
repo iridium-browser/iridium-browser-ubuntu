@@ -12,6 +12,8 @@
 #include "angle_gl.h"
 #include <GLSLANG/ShaderLang.h>
 
+#include "compiler/translator/HashNames.h"
+#include "compiler/translator/ImmutableString.h"
 #include "compiler/translator/Operator.h"
 #include "compiler/translator/Types.h"
 
@@ -38,8 +40,14 @@ GLenum GLVariablePrecision(const TType &type);
 bool IsVaryingIn(TQualifier qualifier);
 bool IsVaryingOut(TQualifier qualifier);
 bool IsVarying(TQualifier qualifier);
+bool IsGeometryShaderInput(GLenum shaderType, TQualifier qualifier);
 InterpolationType GetInterpolationType(TQualifier qualifier);
+
+// Returns array brackets including size with outermost array size first, as specified in GLSL ES
+// 3.10 section 4.1.9.
 TString ArrayString(const TType &type);
+
+ImmutableString GetTypeName(const TType &type, ShHashFunction64 hashFunction, NameMap *nameMap);
 
 TType GetShaderVariableBasicType(const sh::ShaderVariable &var);
 

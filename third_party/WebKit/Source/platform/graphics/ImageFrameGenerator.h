@@ -27,14 +27,13 @@
 #define ImageFrameGenerator_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "platform/PlatformExport.h"
 #include "platform/image-decoders/ImageDecoder.h"
 #include "platform/image-decoders/SegmentReader.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/RefCounted.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/ThreadSafeRefCounted.h"
 #include "platform/wtf/ThreadingPrimitives.h"
 #include "platform/wtf/Vector.h"
@@ -53,8 +52,8 @@ class PLATFORM_EXPORT ImageDecoderFactory {
   WTF_MAKE_NONCOPYABLE(ImageDecoderFactory);
 
  public:
-  ImageDecoderFactory() {}
-  virtual ~ImageDecoderFactory() {}
+  ImageDecoderFactory() = default;
+  virtual ~ImageDecoderFactory() = default;
   virtual std::unique_ptr<ImageDecoder> Create() = 0;
 };
 
@@ -63,12 +62,13 @@ class PLATFORM_EXPORT ImageFrameGenerator final
   WTF_MAKE_NONCOPYABLE(ImageFrameGenerator);
 
  public:
-  static PassRefPtr<ImageFrameGenerator> Create(
+  static scoped_refptr<ImageFrameGenerator> Create(
       const SkISize& full_size,
       bool is_multi_frame,
-      const ColorBehavior& color_behavior) {
-    return AdoptRef(
-        new ImageFrameGenerator(full_size, is_multi_frame, color_behavior));
+      const ColorBehavior& color_behavior,
+      std::vector<SkISize> supported_sizes) {
+    return base::AdoptRef(new ImageFrameGenerator(
+        full_size, is_multi_frame, color_behavior, std::move(supported_sizes)));
   }
 
   ~ImageFrameGenerator();
@@ -98,6 +98,8 @@ class PLATFORM_EXPORT ImageFrameGenerator final
 
   const SkISize& GetFullSize() const { return full_size_; }
 
+  SkISize GetSupportedDecodeSize(const SkISize& requested_size) const;
+
   bool IsMultiFrame() const { return is_multi_frame_; }
   bool DecodeFailed() const { return decode_failed_; }
 
@@ -111,7 +113,8 @@ class PLATFORM_EXPORT ImageFrameGenerator final
  private:
   ImageFrameGenerator(const SkISize& full_size,
                       bool is_multi_frame,
-                      const ColorBehavior&);
+                      const ColorBehavior&,
+                      std::vector<SkISize> supported_sizes);
 
   friend class ImageFrameGeneratorTest;
   friend class DeferredImageDecoderTest;
@@ -127,16 +130,20 @@ class PLATFORM_EXPORT ImageFrameGenerator final
                              bool all_data_received,
                              size_t index,
                              const SkISize& scaled_size,
-                             SkBitmap::Allocator*,
+                             SkBitmap::Allocator&,
                              ImageDecoder::AlphaOption);
-  // This method should only be called while m_decodeMutex is locked.
-  bool Decode(SegmentReader*,
-              bool all_data_received,
-              size_t index,
-              ImageDecoder**,
-              SkBitmap*,
-              SkBitmap::Allocator*,
-              ImageDecoder::AlphaOption);
+  // This method should only be called while decode_mutex_ is locked.
+  // Returns a pointer to frame |index|'s ImageFrame, if available.
+  // Sets |used_external_allocator| to true if the the image was decoded into
+  // |external_allocator|'s memory.
+  ImageFrame* Decode(SegmentReader*,
+                     bool all_data_received,
+                     size_t index,
+                     ImageDecoder**,
+                     SkBitmap::Allocator& external_allocator,
+                     ImageDecoder::AlphaOption,
+                     const SkISize& scaled_size,
+                     bool& used_external_allocator);
 
   const SkISize full_size_;
 
@@ -148,13 +155,14 @@ class PLATFORM_EXPORT ImageFrameGenerator final
   bool yuv_decoding_failed_;
   size_t frame_count_;
   Vector<bool> has_alpha_;
+  std::vector<SkISize> supported_sizes_;
 
   std::unique_ptr<ImageDecoderFactory> image_decoder_factory_;
 
   // Prevents multiple decode operations on the same data.
   Mutex decode_mutex_;
 
-  // Protect concurrent access to m_hasAlpha.
+  // Protect concurrent access to has_alpha_.
   Mutex alpha_mutex_;
 };
 

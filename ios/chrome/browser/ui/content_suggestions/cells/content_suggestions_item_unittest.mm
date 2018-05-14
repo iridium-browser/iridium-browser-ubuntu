@@ -8,6 +8,7 @@
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_cell.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/gtest_support.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -19,9 +20,11 @@
 
 namespace {
 
+using ContentSuggestionsItemTest = PlatformTest;
+
 // Tests that configureCell: sets all the fields of the cell except the image
 // and fetches the image through the delegate.
-TEST(ContentSuggestionsItemTest, CellIsConfiguredWithoutImage) {
+TEST_F(ContentSuggestionsItemTest, CellIsConfiguredWithoutImage) {
   // Setup.
   NSString* title = @"testTitle";
   GURL url = GURL("http://chromium.org");
@@ -37,7 +40,7 @@ TEST(ContentSuggestionsItemTest, CellIsConfiguredWithoutImage) {
   item.hasImage = YES;
   item.publisher = publisher;
   item.publishDate = publishTime;
-  item.availableOffline = YES;
+  item.readLaterAction = YES;
   OCMExpect([delegateMock loadImageForSuggestedItem:item]);
   ContentSuggestionsCell* cell = [[[item cellClass] alloc] init];
   ASSERT_EQ([ContentSuggestionsCell class], [cell class]);
@@ -45,9 +48,8 @@ TEST(ContentSuggestionsItemTest, CellIsConfiguredWithoutImage) {
   ASSERT_EQ(nil, item.image);
   id cellMock = OCMPartialMock(cell);
   OCMExpect([cellMock setContentImage:item.image animated:NO]);
-  OCMExpect([cellMock setAdditionalInformationWithPublisherName:publisher
-                                                           date:date
-                                            offlineAvailability:YES]);
+  OCMExpect(
+      [cellMock setAdditionalInformationWithPublisherName:publisher date:date]);
 
   // Action.
   [item configureCell:cell];
@@ -56,11 +58,12 @@ TEST(ContentSuggestionsItemTest, CellIsConfiguredWithoutImage) {
   EXPECT_OCMOCK_VERIFY(cellMock);
   EXPECT_EQ(title, cell.titleLabel.text);
   EXPECT_OCMOCK_VERIFY(delegateMock);
+  EXPECT_EQ(4U, [cell.accessibilityCustomActions count]);
 }
 
 // Tests that configureCell: does not call the delegate if it fetched the image
 // once.
-TEST(ContentSuggestionsItemTest, DontFetchImageIfImageIsBeingFetched) {
+TEST_F(ContentSuggestionsItemTest, DontFetchImageIfImageIsBeingFetched) {
   // Setup.
   NSString* title = @"testTitle";
   GURL url = GURL("http://chromium.org");
@@ -96,7 +99,7 @@ TEST(ContentSuggestionsItemTest, DontFetchImageIfImageIsBeingFetched) {
 
 // Tests that the delegate is not called when |hasImage| is set to NO. If the
 // delegate is called an exception is raised.
-TEST(ContentSuggestionsItemTest, NoDelegateCallWhenHasNotImage) {
+TEST_F(ContentSuggestionsItemTest, NoDelegateCallWhenHasNotImage) {
   // Setup.
   NSString* title = @"testTitle";
   GURL url = GURL("http://chromium.org");
@@ -116,7 +119,7 @@ TEST(ContentSuggestionsItemTest, NoDelegateCallWhenHasNotImage) {
 }
 
 // Tests that the display of the image is animated only for the first time.
-TEST(ContentSuggestionsItemTest, ImageAnimatedOnlyTheFirstTime) {
+TEST_F(ContentSuggestionsItemTest, ImageAnimatedOnlyTheFirstTime) {
   // Setup.
   NSString* title = @"testTitle";
   GURL url = GURL("http://chromium.org");
@@ -141,4 +144,24 @@ TEST(ContentSuggestionsItemTest, ImageAnimatedOnlyTheFirstTime) {
   EXPECT_OCMOCK_VERIFY(cell1);
   EXPECT_OCMOCK_VERIFY(cell2);
 }
+
+// Tests the custom actions when there is no read later actions.
+TEST_F(ContentSuggestionsItemTest, NoReadLaterAction) {
+  // Setup.
+  NSString* title = @"testTitle";
+  GURL url = GURL("http://chromium.org");
+  ContentSuggestionsItem* item =
+      [[ContentSuggestionsItem alloc] initWithType:0 title:title url:url];
+  item.readLaterAction = NO;
+  item.image = [[UIImage alloc] init];
+
+  ContentSuggestionsCell* cell = [[[item cellClass] alloc] init];
+
+  // Action.
+  [item configureCell:cell];
+
+  // Tests.
+  EXPECT_EQ(3U, [cell.accessibilityCustomActions count]);
+}
+
 }  // namespace

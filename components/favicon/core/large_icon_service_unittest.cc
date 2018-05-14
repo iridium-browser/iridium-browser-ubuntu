@@ -4,18 +4,17 @@
 
 #include "components/favicon/core/large_icon_service.h"
 
-#include <deque>
 #include <memory>
+#include <string>
 
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/test/histogram_tester.h"
 #include "base/test/mock_callback.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/favicon/core/favicon_client.h"
 #include "components/favicon/core/test/mock_favicon_service.h"
@@ -38,6 +37,7 @@
 namespace favicon {
 namespace {
 
+using testing::ElementsAre;
 using testing::IsEmpty;
 using testing::IsNull;
 using testing::Eq;
@@ -64,8 +64,8 @@ ACTION_P2(PostFetchReplyWithMetadata, p0, p1) {
 }
 
 ACTION_P(PostBoolReply, p0) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                base::Bind(arg4, p0));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(*arg4), p0));
 }
 
 SkBitmap CreateTestSkBitmap(int w, int h, SkColor color) {
@@ -91,8 +91,16 @@ favicon_base::FaviconRawBitmapResult CreateTestBitmapResult(int w,
 
   result.pixel_size = gfx::Size(w, h);
   result.icon_url = GURL(kDummyIconUrl);
-  result.icon_type = favicon_base::TOUCH_ICON;
+  result.icon_type = favicon_base::IconType::kTouchIcon;
   CHECK(result.is_valid());
+  return result;
+}
+
+favicon_base::FaviconRawBitmapResult CreateTestBitmapResultWithIconUrl(
+    const GURL& icon_url) {
+  favicon_base::FaviconRawBitmapResult result =
+      CreateTestBitmapResult(64, 64, kTestColor);
+  result.icon_url = icon_url;
   return result;
 }
 
@@ -126,14 +134,12 @@ class LargeIconServiceTest : public testing::Test {
   LargeIconServiceTest()
       : mock_image_fetcher_(new NiceMock<MockImageFetcher>()),
         large_icon_service_(&mock_favicon_service_,
-                            base::ThreadTaskRunnerHandle::Get(),
                             base::WrapUnique(mock_image_fetcher_)) {}
 
   ~LargeIconServiceTest() override {}
 
  protected:
-  base::MessageLoopForIO loop_;
-
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   NiceMock<MockImageFetcher>* mock_image_fetcher_;
   testing::NiceMock<MockFaviconService> mock_favicon_service_;
   LargeIconService large_icon_service_;
@@ -146,7 +152,7 @@ class LargeIconServiceTest : public testing::Test {
 TEST_F(LargeIconServiceTest, ShouldGetFromGoogleServer) {
   const GURL kExpectedServerUrl(
       "https://t0.gstatic.com/faviconV2?client=chrome&drop_404_icon=true"
-      "&check_seen=true&size=61&min_size=42&max_size=122"
+      "&check_seen=true&size=61&min_size=42&max_size=256"
       "&fallback_opts=TYPE,SIZE,URL&url=http://www.example.com/");
 
   EXPECT_CALL(mock_favicon_service_, UnableToDownloadFavicon(_)).Times(0);
@@ -158,7 +164,7 @@ TEST_F(LargeIconServiceTest, ShouldGetFromGoogleServer) {
           CreateTestSkBitmap(64, 64, kTestColor))));
   EXPECT_CALL(mock_favicon_service_,
               SetOnDemandFavicons(GURL(kDummyUrl), kExpectedServerUrl,
-                                  favicon_base::IconType::TOUCH_ICON, _, _))
+                                  favicon_base::IconType::kTouchIcon, _, _))
       .WillOnce(PostBoolReply(true));
 
   large_icon_service_
@@ -169,7 +175,7 @@ TEST_F(LargeIconServiceTest, ShouldGetFromGoogleServer) {
 
   EXPECT_CALL(callback,
               Run(favicon_base::GoogleFaviconServerRequestStatus::SUCCESS));
-  base::RunLoop().RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
   histogram_tester_.ExpectUniqueSample(
       "Favicons.LargeIconService.DownloadedSize", 64, /*expected_count=*/1);
 }
@@ -181,11 +187,11 @@ TEST_F(LargeIconServiceTest, ShouldGetFromGoogleServerWithCustomUrl) {
         "https://t0.gstatic.com/"
         "faviconV2?%ssize=%d&min_size=%d&max_size=%d&url=%s"},
        {"enforced_min_size_in_pixel", "43"},
-       {"desired_to_max_size_factor", "1.5"}},
+       {"desired_to_max_size_factor", "6.5"}},
       {"LargeIconServiceFetching"});
   const GURL kExpectedServerUrl(
       "https://t0.gstatic.com/faviconV2?check_seen=true&"
-      "size=61&min_size=43&max_size=91&url=http://www.example.com/");
+      "size=61&min_size=43&max_size=396&url=http://www.example.com/");
 
   EXPECT_CALL(mock_favicon_service_, UnableToDownloadFavicon(_)).Times(0);
 
@@ -196,7 +202,7 @@ TEST_F(LargeIconServiceTest, ShouldGetFromGoogleServerWithCustomUrl) {
           CreateTestSkBitmap(64, 64, kTestColor))));
   EXPECT_CALL(mock_favicon_service_,
               SetOnDemandFavicons(GURL(kDummyUrl), kExpectedServerUrl,
-                                  favicon_base::IconType::TOUCH_ICON, _, _))
+                                  favicon_base::IconType::kTouchIcon, _, _))
       .WillOnce(PostBoolReply(true));
 
   large_icon_service_
@@ -207,13 +213,13 @@ TEST_F(LargeIconServiceTest, ShouldGetFromGoogleServerWithCustomUrl) {
 
   EXPECT_CALL(callback,
               Run(favicon_base::GoogleFaviconServerRequestStatus::SUCCESS));
-  base::RunLoop().RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
 }
 
 TEST_F(LargeIconServiceTest, ShouldGetFromGoogleServerWithOriginalUrl) {
   const GURL kExpectedServerUrl(
       "https://t0.gstatic.com/faviconV2?client=chrome&drop_404_icon=true"
-      "&check_seen=true&size=61&min_size=42&max_size=122"
+      "&check_seen=true&size=61&min_size=42&max_size=256"
       "&fallback_opts=TYPE,SIZE,URL&url=http://www.example.com/");
   const GURL kExpectedOriginalUrl("http://www.example.com/favicon.png");
 
@@ -227,7 +233,7 @@ TEST_F(LargeIconServiceTest, ShouldGetFromGoogleServerWithOriginalUrl) {
           expected_metadata));
   EXPECT_CALL(mock_favicon_service_,
               SetOnDemandFavicons(GURL(kDummyUrl), kExpectedOriginalUrl,
-                                  favicon_base::IconType::TOUCH_ICON, _, _))
+                                  favicon_base::IconType::kTouchIcon, _, _))
       .WillOnce(PostBoolReply(true));
 
   base::MockCallback<favicon_base::GoogleFaviconServerCallback> callback;
@@ -239,14 +245,14 @@ TEST_F(LargeIconServiceTest, ShouldGetFromGoogleServerWithOriginalUrl) {
 
   EXPECT_CALL(callback,
               Run(favicon_base::GoogleFaviconServerRequestStatus::SUCCESS));
-  base::RunLoop().RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
 }
 
 TEST_F(LargeIconServiceTest, ShouldTrimQueryParametersForGoogleServer) {
   const GURL kDummyUrlWithQuery("http://www.example.com?foo=1");
   const GURL kExpectedServerUrl(
       "https://t0.gstatic.com/faviconV2?client=chrome&drop_404_icon=true"
-      "&check_seen=true&size=61&min_size=42&max_size=122"
+      "&check_seen=true&size=61&min_size=42&max_size=256"
       "&fallback_opts=TYPE,SIZE,URL&url=http://www.example.com/");
 
   EXPECT_CALL(*mock_image_fetcher_,
@@ -264,7 +270,7 @@ TEST_F(LargeIconServiceTest, ShouldTrimQueryParametersForGoogleServer) {
           TRAFFIC_ANNOTATION_FOR_TESTS,
           favicon_base::GoogleFaviconServerCallback());
 
-  base::RunLoop().RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
 }
 
 TEST_F(LargeIconServiceTest, ShouldNotCheckOnPublicUrls) {
@@ -285,7 +291,7 @@ TEST_F(LargeIconServiceTest, ShouldNotCheckOnPublicUrls) {
 
   EXPECT_CALL(callback, Run(favicon_base::GoogleFaviconServerRequestStatus::
                                 FAILURE_CONNECTION_ERROR));
-  base::RunLoop().RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
 }
 
 TEST_F(LargeIconServiceTest, ShouldNotQueryGoogleServerIfInvalidScheme) {
@@ -302,10 +308,31 @@ TEST_F(LargeIconServiceTest, ShouldNotQueryGoogleServerIfInvalidScheme) {
           /*desired_size_in_pixel=*/61, /*may_page_url_be_private=*/true,
           TRAFFIC_ANNOTATION_FOR_TESTS, callback.Get());
 
-  EXPECT_CALL(
-      callback,
-      Run(favicon_base::GoogleFaviconServerRequestStatus::FAILURE_INVALID));
-  base::RunLoop().RunUntilIdle();
+  EXPECT_CALL(callback, Run(favicon_base::GoogleFaviconServerRequestStatus::
+                                FAILURE_TARGET_URL_SKIPPED));
+  scoped_task_environment_.RunUntilIdle();
+  EXPECT_THAT(histogram_tester_.GetAllSamples(
+                  "Favicons.LargeIconService.DownloadedSize"),
+              IsEmpty());
+}
+
+TEST_F(LargeIconServiceTest, ShouldNotQueryGoogleServerIfInvalidURL) {
+  const GURL kDummyInvalidUrl("htt");
+
+  EXPECT_CALL(*mock_image_fetcher_, StartOrQueueNetworkRequest(_, _, _, _))
+      .Times(0);
+
+  base::MockCallback<favicon_base::GoogleFaviconServerCallback> callback;
+
+  large_icon_service_
+      .GetLargeIconOrFallbackStyleFromGoogleServerSkippingLocalCache(
+          GURL(kDummyInvalidUrl), /*min_source_size_in_pixel=*/42,
+          /*desired_size_in_pixel=*/61, /*may_page_url_be_private=*/true,
+          TRAFFIC_ANNOTATION_FOR_TESTS, callback.Get());
+
+  EXPECT_CALL(callback, Run(favicon_base::GoogleFaviconServerRequestStatus::
+                                FAILURE_TARGET_URL_INVALID));
+  scoped_task_environment_.RunUntilIdle();
   EXPECT_THAT(histogram_tester_.GetAllSamples(
                   "Favicons.LargeIconService.DownloadedSize"),
               IsEmpty());
@@ -315,7 +342,7 @@ TEST_F(LargeIconServiceTest, ShouldReportUnavailableIfFetchFromServerFails) {
   const GURL kDummyUrlWithQuery("http://www.example.com?foo=1");
   const GURL kExpectedServerUrl(
       "https://t0.gstatic.com/faviconV2?client=chrome&drop_404_icon=true"
-      "&check_seen=true&size=61&min_size=42&max_size=122"
+      "&check_seen=true&size=61&min_size=42&max_size=256"
       "&fallback_opts=TYPE,SIZE,URL&url=http://www.example.com/");
 
   EXPECT_CALL(mock_favicon_service_, SetOnDemandFavicons(_, _, _, _, _))
@@ -336,7 +363,7 @@ TEST_F(LargeIconServiceTest, ShouldReportUnavailableIfFetchFromServerFails) {
 
   EXPECT_CALL(callback, Run(favicon_base::GoogleFaviconServerRequestStatus::
                                 FAILURE_CONNECTION_ERROR));
-  base::RunLoop().RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
   // Verify that download failure gets recorded.
   histogram_tester_.ExpectUniqueSample(
       "Favicons.LargeIconService.DownloadedSize", 0, /*expected_count=*/1);
@@ -347,7 +374,7 @@ TEST_F(LargeIconServiceTest, ShouldNotGetFromGoogleServerIfUnavailable) {
       mock_favicon_service_,
       WasUnableToDownloadFavicon(GURL(
           "https://t0.gstatic.com/faviconV2?client=chrome&drop_404_icon=true"
-          "&check_seen=true&size=61&min_size=42&max_size=122"
+          "&check_seen=true&size=61&min_size=42&max_size=256"
           "&fallback_opts=TYPE,SIZE,URL&url=http://www.example.com/")))
       .WillByDefault(Return(true));
 
@@ -366,7 +393,7 @@ TEST_F(LargeIconServiceTest, ShouldNotGetFromGoogleServerIfUnavailable) {
 
   EXPECT_CALL(callback, Run(favicon_base::GoogleFaviconServerRequestStatus::
                                 FAILURE_HTTP_ERROR_CACHED));
-  base::RunLoop().RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
   EXPECT_THAT(histogram_tester_.GetAllSamples(
                   "Favicons.LargeIconService.DownloadedSize"),
               IsEmpty());
@@ -396,13 +423,13 @@ class LargeIconServiceGetterTest : public LargeIconServiceTest,
                      base::Unretained(this)),
           &cancelable_task_tracker_);
     }
-    base::RunLoop().RunUntilIdle();
+    scoped_task_environment_.RunUntilIdle();
   }
 
   void RawBitmapResultCallback(const favicon_base::LargeIconResult& result) {
     if (result.bitmap.is_valid()) {
       returned_bitmap_size_ =
-          base::MakeUnique<gfx::Size>(result.bitmap.pixel_size);
+          std::make_unique<gfx::Size>(result.bitmap.pixel_size);
     }
     StoreFallbackStyle(result.fallback_icon_style.get());
   }
@@ -410,7 +437,7 @@ class LargeIconServiceGetterTest : public LargeIconServiceTest,
   void ImageResultCallback(const favicon_base::LargeIconImageResult& result) {
     if (!result.image.IsEmpty()) {
       returned_bitmap_size_ =
-          base::MakeUnique<gfx::Size>(result.image.ToImageSkia()->size());
+          std::make_unique<gfx::Size>(result.image.ToImageSkia()->size());
       ASSERT_TRUE(result.icon_url.is_valid());
     }
     StoreFallbackStyle(result.fallback_icon_style.get());
@@ -420,7 +447,7 @@ class LargeIconServiceGetterTest : public LargeIconServiceTest,
       const favicon_base::FallbackIconStyle* fallback_style) {
     if (fallback_style) {
       returned_fallback_style_ =
-          base::MakeUnique<favicon_base::FallbackIconStyle>(*fallback_style);
+          std::make_unique<favicon_base::FallbackIconStyle>(*fallback_style);
     }
   }
 
@@ -524,12 +551,118 @@ TEST_P(LargeIconServiceGetterTest, FallbackSinceTooPicky) {
                                        24, /*expected_count=*/1);
 }
 
+// Tests UMA metric BlacklistedURLMismatch ignores unknown page URLs.
+TEST_P(LargeIconServiceGetterTest,
+       ShouldNotRecordUrlMismatchesForUnknownPages) {
+  const std::string kUmaMetricName =
+      "Favicons.LargeIconService.BlacklistedURLMismatch";
+  const GURL kUnknownPageUrl1("http://www.foo.com/path");
+  const GURL kUnknownPageUrl2("http://www.bar.com/path");
+  const GURL kUnknownPageUrl3("http://com/path");
+  const GURL kUnknownIconUrl1("http://www.foo.com/favicon.ico");
+  const GURL kUnknownIconUrl2("http://www.bar.com/favicon.ico");
+  const GURL kUnknownIconUrl3("http://com/favicon.ico");
+  const GURL kKnownIconUrl("http://www.google.com/favicon.ico");
+
+  // Only URLs in the list of known organizations contribute to the histogram,
+  // so neither of the sites below should be logged.
+  InjectMockResult(kUnknownPageUrl1,
+                   CreateTestBitmapResultWithIconUrl(kUnknownIconUrl1));
+  InjectMockResult(kUnknownPageUrl3,
+                   CreateTestBitmapResultWithIconUrl(kUnknownIconUrl3));
+  GetLargeIconOrFallbackStyleAndWaitForCallback(kUnknownPageUrl1, 1, 0);
+  GetLargeIconOrFallbackStyleAndWaitForCallback(kUnknownPageUrl3, 1, 0);
+  EXPECT_THAT(histogram_tester_.GetAllSamples(kUmaMetricName), IsEmpty());
+
+  // Even if there is a mismatch, it's irrelevant if none of the URLs are known.
+  InjectMockResult(kUnknownPageUrl1,
+                   CreateTestBitmapResultWithIconUrl(kUnknownIconUrl2));
+  GetLargeIconOrFallbackStyleAndWaitForCallback(kUnknownPageUrl1, 1, 0);
+  EXPECT_THAT(histogram_tester_.GetAllSamples(kUmaMetricName), IsEmpty());
+
+  // If a unknown site uses a known icon, it's still ignored.
+  InjectMockResult(kUnknownPageUrl1,
+                   CreateTestBitmapResultWithIconUrl(kKnownIconUrl));
+  GetLargeIconOrFallbackStyleAndWaitForCallback(kUnknownPageUrl1, 1, 0);
+  EXPECT_THAT(histogram_tester_.GetAllSamples(kUmaMetricName), IsEmpty());
+}
+
+// Tests UMA metric BlacklistedURLMismatch emits records for known page URLs.
+TEST_P(LargeIconServiceGetterTest, ShouldRecordUrlMismatchesForKnownPages) {
+  const std::string kUmaMetricName =
+      "Favicons.LargeIconService.BlacklistedURLMismatch";
+  const GURL kKnownPageUrl1("http://www.google.com/path");
+  const GURL kKnownPageUrl2("http://www.youtube.com/path");
+  const GURL kKnownIconUrl1("http://www.google.com/favicon.ico");
+  const GURL kKnownIconUrl2("http://www.youtube.com/favicon.ico");
+  const GURL kUnknownIconUrl("http://www.foo.com/favicon.ico");
+
+  // Mismatch between a known organization and an unknown one should contribute
+  // to bucket 0, although we're unsure if it's legit (false positives ok).
+  InjectMockResult(kKnownPageUrl1,
+                   CreateTestBitmapResultWithIconUrl(kUnknownIconUrl));
+  GetLargeIconOrFallbackStyleAndWaitForCallback(kKnownPageUrl1, 1, 0);
+  EXPECT_THAT(histogram_tester_.GetAllSamples(kUmaMetricName),
+              ElementsAre(base::Bucket(/*min=*/0, /*count=*/1)));
+
+  // Matching pairs within known organizations should contribute to bucket 0.
+  InjectMockResult(kKnownPageUrl1,
+                   CreateTestBitmapResultWithIconUrl(kKnownIconUrl1));
+  InjectMockResult(kKnownPageUrl2,
+                   CreateTestBitmapResultWithIconUrl(kKnownIconUrl2));
+  GetLargeIconOrFallbackStyleAndWaitForCallback(kKnownPageUrl1, 1, 0);
+  GetLargeIconOrFallbackStyleAndWaitForCallback(kKnownPageUrl2, 1, 0);
+  EXPECT_THAT(histogram_tester_.GetAllSamples(kUmaMetricName),
+              ElementsAre(base::Bucket(/*min=*/0, /*count=*/3)));
+
+  // Mismatch between a known organization and another known one should
+  // contribute to bucket 1.
+  InjectMockResult(kKnownPageUrl1,
+                   CreateTestBitmapResultWithIconUrl(kKnownIconUrl2));
+  GetLargeIconOrFallbackStyleAndWaitForCallback(kKnownPageUrl1, 1, 0);
+  EXPECT_THAT(histogram_tester_.GetAllSamples(kUmaMetricName),
+              ElementsAre(base::Bucket(/*min=*/0, /*count=*/3),
+                          base::Bucket(/*min=*/1, /*count=*/1)));
+}
+
+// Tests UMA metric BlacklistedURLMismatch treats different URLs corresponding
+// to the same organization as matches.
+TEST_P(LargeIconServiceGetterTest, ShouldRecordMatchesDespiteDifferentUrls) {
+  const std::string kUmaMetricName =
+      "Favicons.LargeIconService.BlacklistedURLMismatch";
+  const GURL kKnownPageUrl("http://www.google.de/path");
+  const GURL kKnownIconUrl("http://www.google.com/favicon.ico");
+
+  // Matching pairs within known organizations should contribute to bucket 0.
+  InjectMockResult(kKnownPageUrl,
+                   CreateTestBitmapResultWithIconUrl(kKnownIconUrl));
+  GetLargeIconOrFallbackStyleAndWaitForCallback(kKnownPageUrl, 1, 0);
+  EXPECT_THAT(histogram_tester_.GetAllSamples(kUmaMetricName),
+              ElementsAre(base::Bucket(/*min=*/0, /*count=*/1)));
+}
+
 // Every test will appear with suffix /0 (param false) and /1 (param true), e.g.
 //  LargeIconServiceGetterTest.FallbackSinceTooPicky/0: get image.
 //  LargeIconServiceGetterTest.FallbackSinceTooPicky/1: get raw bitmap.
 INSTANTIATE_TEST_CASE_P(,  // Empty instatiation name.
                         LargeIconServiceGetterTest,
                         ::testing::Values(false, true));
+
+TEST(LargeIconServiceOrganizationNameTest, ShouldGetOrganizationNameForUma) {
+  EXPECT_EQ("", LargeIconService::GetOrganizationNameForUma(GURL()));
+  EXPECT_EQ("", LargeIconService::GetOrganizationNameForUma(GURL("http://")));
+  EXPECT_EQ("", LargeIconService::GetOrganizationNameForUma(GURL("com")));
+  EXPECT_EQ("",
+            LargeIconService::GetOrganizationNameForUma(GURL("http://com")));
+  EXPECT_EQ("",
+            LargeIconService::GetOrganizationNameForUma(GURL("http://google")));
+  EXPECT_EQ("google", LargeIconService::GetOrganizationNameForUma(
+                          GURL("http://google.com")));
+  EXPECT_EQ("google", LargeIconService::GetOrganizationNameForUma(
+                          GURL("http://google.de")));
+  EXPECT_EQ("google", LargeIconService::GetOrganizationNameForUma(
+                          GURL("http://foo.google.com")));
+}
 
 }  // namespace
 }  // namespace favicon

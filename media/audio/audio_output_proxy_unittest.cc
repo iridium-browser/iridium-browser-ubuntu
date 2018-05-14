@@ -6,8 +6,8 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -80,7 +80,7 @@ class MockAudioOutputStream : public AudioOutputStream {
     fake_output_stream_->Stop();
   }
 
-  ~MockAudioOutputStream() {}
+  ~MockAudioOutputStream() = default;
 
   bool start_called() { return start_called_; }
   bool stop_called() { return stop_called_; }
@@ -100,7 +100,7 @@ class MockAudioOutputStream : public AudioOutputStream {
 class MockAudioManager : public AudioManagerBase {
  public:
   MockAudioManager()
-      : AudioManagerBase(base::MakeUnique<TestAudioThread>(),
+      : AudioManagerBase(std::make_unique<TestAudioThread>(),
                          &fake_audio_log_factory_) {}
   ~MockAudioManager() override { Shutdown(); }
 
@@ -139,8 +139,6 @@ class MockAudioManager : public AudioManagerBase {
  protected:
   MOCK_METHOD0(HasAudioOutputDevices, bool());
   MOCK_METHOD0(HasAudioInputDevices, bool());
-  MOCK_METHOD0(GetAudioInputDeviceModel, base::string16());
-  MOCK_METHOD0(ShowAudioInputSettings, void());
   MOCK_METHOD1(GetAudioInputDeviceNames,
                void(media::AudioDeviceNames* device_name));
   MOCK_METHOD2(GetPreferredOutputStreamParameters, AudioParameters(
@@ -184,7 +182,7 @@ class AudioOutputProxyTest : public testing::Test {
   }
 
   virtual void InitDispatcher(base::TimeDelta close_delay) {
-    dispatcher_impl_ = base::MakeUnique<AudioOutputDispatcherImpl>(
+    dispatcher_impl_ = std::make_unique<AudioOutputDispatcherImpl>(
         &manager(), params_, std::string(), close_delay);
   }
 
@@ -489,8 +487,8 @@ class AudioOutputProxyTest : public testing::Test {
   }
 
   base::MessageLoop message_loop_;
-  std::unique_ptr<AudioOutputDispatcherImpl> dispatcher_impl_;
   MockAudioManager manager_;
+  std::unique_ptr<AudioOutputDispatcherImpl> dispatcher_impl_;
   MockAudioSourceCallback callback_;
   AudioParameters params_;
 };
@@ -506,7 +504,7 @@ class AudioOutputResamplerTest : public AudioOutputProxyTest {
     resampler_params_ = AudioParameters(
         AudioParameters::AUDIO_PCM_LOW_LATENCY, CHANNEL_LAYOUT_STEREO,
         16000, 16, 1024);
-    resampler_ = base::MakeUnique<AudioOutputResampler>(
+    resampler_ = std::make_unique<AudioOutputResampler>(
         &manager(), params_, resampler_params_, std::string(), close_delay,
         base::BindRepeating(&RegisterDebugRecording));
   }

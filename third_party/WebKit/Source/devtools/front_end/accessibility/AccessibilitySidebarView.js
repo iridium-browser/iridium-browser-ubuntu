@@ -9,6 +9,7 @@ Accessibility.AccessibilitySidebarView = class extends UI.ThrottledWidget {
     super();
     this._node = null;
     this._axNode = null;
+    this._skipNextPullNode = false;
     this._sidebarPaneStack = UI.viewManager.createStackLocation();
     this._breadcrumbsSubPane = new Accessibility.AXBreadcrumbsPane(this);
     this._sidebarPaneStack.showView(this._breadcrumbsSubPane);
@@ -37,8 +38,10 @@ Accessibility.AccessibilitySidebarView = class extends UI.ThrottledWidget {
 
   /**
    * @param {?SDK.DOMNode} node
+   * @param {boolean=} fromAXTree
    */
-  setNode(node) {
+  setNode(node, fromAXTree) {
+    this._skipNextPullNode = !!fromAXTree;
     this._node = node;
     this.update();
   }
@@ -69,12 +72,13 @@ Accessibility.AccessibilitySidebarView = class extends UI.ThrottledWidget {
    * @return {!Promise.<?>}
    */
   doUpdate() {
-    var node = this.node();
+    const node = this.node();
     this._axNodeSubPane.setNode(node);
     this._ariaSubPane.setNode(node);
+    this._breadcrumbsSubPane.setNode(node);
     if (!node)
       return Promise.resolve();
-    var accessibilityModel = node.domModel().target().model(Accessibility.AccessibilityModel);
+    const accessibilityModel = node.domModel().target().model(Accessibility.AccessibilityModel);
     accessibilityModel.clear();
     return accessibilityModel.requestPartialAXTree(node).then(() => {
       this.accessibilityNodeCallback(accessibilityModel.axNodeForDOMNode(node));
@@ -114,6 +118,10 @@ Accessibility.AccessibilitySidebarView = class extends UI.ThrottledWidget {
   }
 
   _pullNode() {
+    if (this._skipNextPullNode) {
+      this._skipNextPullNode = false;
+      return;
+    }
     this.setNode(UI.context.flavor(SDK.DOMNode));
   }
 
@@ -123,7 +131,7 @@ Accessibility.AccessibilitySidebarView = class extends UI.ThrottledWidget {
   _onAttrChange(event) {
     if (!this.node())
       return;
-    var node = event.data.node;
+    const node = event.data.node;
     if (this.node() !== node)
       return;
     this.update();
@@ -135,7 +143,7 @@ Accessibility.AccessibilitySidebarView = class extends UI.ThrottledWidget {
   _onNodeChange(event) {
     if (!this.node())
       return;
-    var node = event.data;
+    const node = event.data;
     if (this.node() !== node)
       return;
     this.update();
@@ -183,8 +191,8 @@ Accessibility.AccessibilitySubPane = class extends UI.SimpleView {
    * @return {!Element}
    */
   createInfo(textContent, className) {
-    var classNameOrDefault = className || 'gray-info-message';
-    var info = this.element.createChild('div', classNameOrDefault);
+    const classNameOrDefault = className || 'gray-info-message';
+    const info = this.element.createChild('div', classNameOrDefault);
     info.textContent = textContent;
     return info;
   }
@@ -193,7 +201,7 @@ Accessibility.AccessibilitySubPane = class extends UI.SimpleView {
    * @return {!UI.TreeOutline}
    */
   createTreeOutline() {
-    var treeOutline = new UI.TreeOutlineInShadow();
+    const treeOutline = new UI.TreeOutlineInShadow();
     treeOutline.registerRequiredCSS('accessibility/accessibilityNode.css');
     treeOutline.registerRequiredCSS('accessibility/accessibilityProperties.css');
     treeOutline.registerRequiredCSS('object_ui/objectValue.css');

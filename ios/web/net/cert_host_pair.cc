@@ -4,6 +4,8 @@
 
 #include "ios/web/net/cert_host_pair.h"
 
+#include <utility>
+
 #include "net/cert/x509_certificate.h"
 
 namespace web {
@@ -12,18 +14,14 @@ CertHostPair::CertHostPair(scoped_refptr<net::X509Certificate> cert,
                            std::string host)
     : cert_(std::move(cert)),
       host_(std::move(host)),
-      cert_hash_(net::X509Certificate::CalculateChainFingerprint256(
-          cert_->os_cert_handle(),
-          cert_->GetIntermediateCertificates())) {}
+      cert_hash_(cert_->CalculateChainFingerprint256()) {}
 
 CertHostPair::CertHostPair(const CertHostPair& other) = default;
 
 CertHostPair::~CertHostPair() {}
 
 bool CertHostPair::operator<(const CertHostPair& other) const {
-  if (host_ != other.host_)
-    return host_ < other.host_;
-  return net::SHA256HashValueLessThan()(cert_hash_, other.cert_hash_);
+  return std::tie(host_, cert_hash_) < std::tie(other.host_, other.cert_hash_);
 }
 
 }  // web

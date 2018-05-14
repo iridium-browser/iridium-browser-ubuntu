@@ -13,6 +13,7 @@
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_ui_utils.h"
+#include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/ui/collection_view/cells/MDCCollectionViewCell+Chrome.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_item.h"
@@ -22,6 +23,7 @@
 #import "ios/chrome/browser/ui/settings/cells/password_details_item.h"
 #import "ios/chrome/browser/ui/settings/reauthentication_module.h"
 #import "ios/chrome/browser/ui/settings/save_passwords_collection_view_controller.h"
+#import "ios/chrome/browser/ui/settings/settings_utils.h"
 #include "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/CollectionCells/src/MaterialCollectionCells.h"
@@ -139,6 +141,8 @@ reauthenticationModule:(id<ReauthenticationProtocol>)reauthenticationModule {
                           name:UIApplicationDidEnterBackgroundNotification
                         object:nil];
 
+    // TODO(crbug.com/764578): -loadModel should not be called from
+    // initializer. A possible fix is to move this call to -viewDidLoad.
     [self loadModel];
   }
   return self;
@@ -237,10 +241,6 @@ reauthenticationModule:(id<ReauthenticationProtocol>)reauthenticationModule {
       toSectionWithIdentifier:SectionIdentifierDelete];
 }
 
-- (void)dealloc {
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
-}
-
 #pragma mark - Items
 
 - (CollectionViewItem*)siteCopyButtonItem {
@@ -319,17 +319,17 @@ reauthenticationModule:(id<ReauthenticationProtocol>)reauthenticationModule {
 - (void)copySite {
   UIPasteboard* generalPasteboard = [UIPasteboard generalPasteboard];
   generalPasteboard.string = _site;
-  [self showCopyResultToast:l10n_util::GetNSString(
-                                IDS_IOS_SETTINGS_SITE_WAS_COPIED_MESSAGE)
-                 forSuccess:YES];
+  [self showToast:l10n_util::GetNSString(
+                      IDS_IOS_SETTINGS_SITE_WAS_COPIED_MESSAGE)
+       forSuccess:YES];
 }
 
 - (void)copyUsername {
   UIPasteboard* generalPasteboard = [UIPasteboard generalPasteboard];
   generalPasteboard.string = _username;
-  [self showCopyResultToast:l10n_util::GetNSString(
-                                IDS_IOS_SETTINGS_USERNAME_WAS_COPIED_MESSAGE)
-                 forSuccess:YES];
+  [self showToast:l10n_util::GetNSString(
+                      IDS_IOS_SETTINGS_USERNAME_WAS_COPIED_MESSAGE)
+       forSuccess:YES];
 }
 
 - (NSString*)showHideButtonText {
@@ -380,7 +380,10 @@ reauthenticationModule:(id<ReauthenticationProtocol>)reauthenticationModule {
     [_weakReauthenticationModule
         attemptReauthWithLocalizedReason:
             l10n_util::GetNSString(IDS_IOS_SETTINGS_PASSWORD_REAUTH_REASON_SHOW)
+                    canReusePreviousAuth:YES
                                  handler:showPasswordHandler];
+  } else {
+    [self showPasscodeDialog];
   }
 }
 
@@ -402,9 +405,9 @@ reauthenticationModule:(id<ReauthenticationProtocol>)reauthenticationModule {
   if (_plainTextPasswordShown) {
     UIPasteboard* generalPasteboard = [UIPasteboard generalPasteboard];
     generalPasteboard.string = _password;
-    [self showCopyResultToast:l10n_util::GetNSString(
-                                  IDS_IOS_SETTINGS_PASSWORD_WAS_COPIED_MESSAGE)
-                   forSuccess:YES];
+    [self showToast:l10n_util::GetNSString(
+                        IDS_IOS_SETTINGS_PASSWORD_WAS_COPIED_MESSAGE)
+         forSuccess:YES];
     UMA_HISTOGRAM_ENUMERATION(
         "PasswordManager.AccessPasswordInSettings",
         password_manager::metrics_util::ACCESS_PASSWORD_COPIED,
@@ -422,33 +425,61 @@ reauthenticationModule:(id<ReauthenticationProtocol>)reauthenticationModule {
       if (success) {
         UIPasteboard* generalPasteboard = [UIPasteboard generalPasteboard];
         generalPasteboard.string = strongSelf->_password;
-        [strongSelf showCopyResultToast:
-                        l10n_util::GetNSString(
-                            IDS_IOS_SETTINGS_PASSWORD_WAS_COPIED_MESSAGE)
-                             forSuccess:YES];
+        [strongSelf showToast:l10n_util::GetNSString(
+                                  IDS_IOS_SETTINGS_PASSWORD_WAS_COPIED_MESSAGE)
+                   forSuccess:YES];
         UMA_HISTOGRAM_ENUMERATION(
             "PasswordManager.AccessPasswordInSettings",
             password_manager::metrics_util::ACCESS_PASSWORD_COPIED,
             password_manager::metrics_util::ACCESS_PASSWORD_COUNT);
       } else {
-        [strongSelf showCopyResultToast:
-                        l10n_util::GetNSString(
-                            IDS_IOS_SETTINGS_PASSWORD_WAS_NOT_COPIED_MESSAGE)
-                             forSuccess:NO];
+        [strongSelf
+             showToast:l10n_util::GetNSString(
+                           IDS_IOS_SETTINGS_PASSWORD_WAS_NOT_COPIED_MESSAGE)
+            forSuccess:NO];
       }
     };
     [_weakReauthenticationModule
         attemptReauthWithLocalizedReason:
             l10n_util::GetNSString(IDS_IOS_SETTINGS_PASSWORD_REAUTH_REASON_COPY)
+                    canReusePreviousAuth:YES
                                  handler:copyPasswordHandler];
+  } else {
+    [self showPasscodeDialog];
   }
 }
 
-// Show a MD snack bar and provide haptic feedback. The haptic feedback is
-// either for success or for error, depending on |success|.
-- (void)showCopyResultToast:(NSString*)message forSuccess:(BOOL)success {
-  // TODO(crbug.com/159166): Route this through some delegate API to be able
-  // to mock it in the unittest, and avoid having an EGTest just for that?
+// Show a dialog offering the user to set a passcode in order to see the
+// passwords.
+- (void)showPasscodeDialog {
+  UIAlertController* alertController = [UIAlertController
+      alertControllerWithTitle:l10n_util::GetNSString(
+                                   IDS_IOS_SETTINGS_SET_UP_SCREENLOCK_TITLE)
+                       message:l10n_util::GetNSString(
+                                   IDS_IOS_SETTINGS_SET_UP_SCREENLOCK_CONTENT)
+                preferredStyle:UIAlertControllerStyleAlert];
+
+  ProceduralBlockWithURL blockOpenURL = BlockToOpenURL(self, self.dispatcher);
+  UIAlertAction* learnAction = [UIAlertAction
+      actionWithTitle:l10n_util::GetNSString(
+                          IDS_IOS_SETTINGS_SET_UP_SCREENLOCK_LEARN_HOW)
+                style:UIAlertActionStyleDefault
+              handler:^(UIAlertAction*) {
+                blockOpenURL(GURL(kPasscodeArticleURL));
+              }];
+  [alertController addAction:learnAction];
+  UIAlertAction* okAction =
+      [UIAlertAction actionWithTitle:l10n_util::GetNSString(IDS_OK)
+                               style:UIAlertActionStyleDefault
+                             handler:nil];
+  [alertController addAction:okAction];
+  alertController.preferredAction = okAction;
+  [self presentViewController:alertController animated:YES completion:nil];
+}
+
+// Show a MD snack bar with |message| and provide haptic feedback. The haptic
+// feedback is either for success or for error, depending on |success|.
+- (void)showToast:(NSString*)message forSuccess:(BOOL)success {
   TriggerHapticFeedbackForNotification(success
                                            ? UINotificationFeedbackTypeSuccess
                                            : UINotificationFeedbackTypeError);

@@ -23,19 +23,20 @@
 
 #include "core/html/HTMLCollection.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/ClassCollection.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeRareData.h"
+#include "core/html/DocumentAllNameCollection.h"
 #include "core/html/DocumentNameCollection.h"
-#include "core/html/HTMLDataListOptionsCollection.h"
 #include "core/html/HTMLElement.h"
-#include "core/html/HTMLFormControlElement.h"
 #include "core/html/HTMLObjectElement.h"
-#include "core/html/HTMLOptionElement.h"
-#include "core/html/HTMLOptionsCollection.h"
 #include "core/html/HTMLTagCollection.h"
 #include "core/html/WindowNameCollection.h"
+#include "core/html/forms/HTMLDataListOptionsCollection.h"
+#include "core/html/forms/HTMLFormControlElement.h"
+#include "core/html/forms/HTMLOptionElement.h"
+#include "core/html/forms/HTMLOptionsCollection.h"
+#include "core/html_names.h"
 #include "platform/wtf/HashSet.h"
 
 namespace blink {
@@ -57,6 +58,7 @@ static bool ShouldTypeOnlyIncludeDirectChildren(CollectionType type) {
     case kDocLinks:
     case kDocScripts:
     case kDocumentNamedItems:
+    case kDocumentAllNamedItems:
     case kMapAreas:
     case kTableRows:
     case kSelectOptions:
@@ -80,8 +82,9 @@ static bool ShouldTypeOnlyIncludeDirectChildren(CollectionType type) {
   return false;
 }
 
-static NodeListRootType RootTypeFromCollectionType(const ContainerNode& owner,
-                                                   CollectionType type) {
+static NodeListSearchRoot SearchRootFromCollectionType(
+    const ContainerNode& owner,
+    CollectionType type) {
   switch (type) {
     case kDocImages:
     case kDocApplets:
@@ -93,7 +96,7 @@ static NodeListRootType RootTypeFromCollectionType(const ContainerNode& owner,
     case kDocAll:
     case kWindowNamedItems:
     case kDocumentNamedItems:
-      return NodeListRootType::kTreeScope;
+    case kDocumentAllNamedItems:
     case kClassCollectionType:
     case kTagCollectionType:
     case kTagCollectionNSType:
@@ -107,12 +110,12 @@ static NodeListRootType RootTypeFromCollectionType(const ContainerNode& owner,
     case kSelectedOptions:
     case kDataListOptions:
     case kMapAreas:
-      return NodeListRootType::kNode;
+      return NodeListSearchRoot::kOwnerNode;
     case kFormControls:
-      if (isHTMLFieldSetElement(owner))
-        return NodeListRootType::kNode;
-      DCHECK(isHTMLFormElement(owner));
-      return NodeListRootType::kTreeScope;
+      if (IsHTMLFieldSetElement(owner))
+        return NodeListSearchRoot::kOwnerNode;
+      DCHECK(IsHTMLFormElement(owner));
+      return NodeListSearchRoot::kTreeScope;
     case kNameNodeListType:
     case kRadioNodeListType:
     case kRadioImgNodeListType:
@@ -120,7 +123,7 @@ static NodeListRootType RootTypeFromCollectionType(const ContainerNode& owner,
       break;
   }
   NOTREACHED();
-  return NodeListRootType::kNode;
+  return NodeListSearchRoot::kOwnerNode;
 }
 
 static NodeListInvalidationType InvalidationTypeExcludingIdAndNameAttributes(
@@ -155,6 +158,8 @@ static NodeListInvalidationType InvalidationTypeExcludingIdAndNameAttributes(
       return kInvalidateOnIdNameAttrChange;
     case kDocumentNamedItems:
       return kInvalidateOnIdNameAttrChange;
+    case kDocumentAllNamedItems:
+      return kInvalidateOnIdNameAttrChange;
     case kFormControls:
       return kInvalidateForFormControls;
     case kClassCollectionType:
@@ -173,7 +178,7 @@ HTMLCollection::HTMLCollection(ContainerNode& owner_node,
                                CollectionType type,
                                ItemAfterOverrideType item_after_override_type)
     : LiveNodeListBase(owner_node,
-                       RootTypeFromCollectionType(owner_node, type),
+                       SearchRootFromCollectionType(owner_node, type),
                        InvalidationTypeExcludingIdAndNameAttributes(type),
                        type),
       overrides_item_after_(item_after_override_type == kOverridesItemAfter),
@@ -190,7 +195,7 @@ HTMLCollection* HTMLCollection::Create(ContainerNode& base,
   return new HTMLCollection(base, type, kDoesNotOverrideItemAfter);
 }
 
-HTMLCollection::~HTMLCollection() {}
+HTMLCollection::~HTMLCollection() = default;
 
 void HTMLCollection::InvalidateCache(Document* old_document) const {
   collection_items_cache_.Invalidate();
@@ -216,6 +221,9 @@ static inline bool IsMatchingHTMLElement(const HTMLCollection& html_collection,
       return element.HasTagName(formTag);
     case kDocumentNamedItems:
       return ToDocumentNameCollection(html_collection).ElementMatches(element);
+    case kDocumentAllNamedItems:
+      return ToDocumentAllNameCollection(html_collection)
+          .ElementMatches(element);
     case kTableTBodies:
       return element.HasTagName(tbodyTag);
     case kTRCells:
@@ -225,16 +233,16 @@ static inline bool IsMatchingHTMLElement(const HTMLCollection& html_collection,
     case kSelectOptions:
       return ToHTMLOptionsCollection(html_collection).ElementMatches(element);
     case kSelectedOptions:
-      return isHTMLOptionElement(element) &&
-             toHTMLOptionElement(element).Selected();
+      return IsHTMLOptionElement(element) &&
+             ToHTMLOptionElement(element).Selected();
     case kDataListOptions:
       return ToHTMLDataListOptionsCollection(html_collection)
           .ElementMatches(element);
     case kMapAreas:
       return element.HasTagName(areaTag);
     case kDocApplets:
-      return isHTMLObjectElement(element) &&
-             toHTMLObjectElement(element).ContainsJavaApplet();
+      return IsHTMLObjectElement(element) &&
+             ToHTMLObjectElement(element).ContainsJavaApplet();
     case kDocEmbeds:
       return element.HasTagName(embedTag);
     case kDocLinks:
@@ -243,8 +251,8 @@ static inline bool IsMatchingHTMLElement(const HTMLCollection& html_collection,
     case kDocAnchors:
       return element.HasTagName(aTag) && element.FastHasAttribute(nameAttr);
     case kFormControls:
-      DCHECK(isHTMLFieldSetElement(html_collection.ownerNode()));
-      return isHTMLObjectElement(element) || IsHTMLFormControlElement(element);
+      DCHECK(IsHTMLFieldSetElement(html_collection.ownerNode()));
+      return IsHTMLObjectElement(element) || IsHTMLFormControlElement(element);
     case kClassCollectionType:
     case kTagCollectionType:
     case kTagCollectionNSType:
@@ -278,6 +286,8 @@ inline bool HTMLCollection::ElementMatches(const Element& element) const {
       return ToTagCollectionNS(*this).ElementMatches(element);
     case kWindowNamedItems:
       return ToWindowNameCollection(*this).ElementMatches(element);
+    case kDocumentAllNamedItems:
+      return ToDocumentAllNameCollection(*this).ElementMatches(element);
     default:
       break;
   }
@@ -322,14 +332,13 @@ Element* HTMLCollection::VirtualItemAfter(Element*) const {
 // although it returns any type of element by id.
 static inline bool NameShouldBeVisibleInDocumentAll(
     const HTMLElement& element) {
-  return element.HasTagName(aTag) || element.HasTagName(appletTag) ||
-         element.HasTagName(buttonTag) || element.HasTagName(embedTag) ||
-         element.HasTagName(formTag) || element.HasTagName(frameTag) ||
-         element.HasTagName(framesetTag) || element.HasTagName(iframeTag) ||
-         element.HasTagName(imgTag) || element.HasTagName(inputTag) ||
-         element.HasTagName(mapTag) || element.HasTagName(metaTag) ||
-         element.HasTagName(objectTag) || element.HasTagName(selectTag) ||
-         element.HasTagName(textareaTag);
+  return element.HasTagName(aTag) || element.HasTagName(buttonTag) ||
+         element.HasTagName(embedTag) || element.HasTagName(formTag) ||
+         element.HasTagName(frameTag) || element.HasTagName(framesetTag) ||
+         element.HasTagName(iframeTag) || element.HasTagName(imgTag) ||
+         element.HasTagName(inputTag) || element.HasTagName(mapTag) ||
+         element.HasTagName(metaTag) || element.HasTagName(objectTag) ||
+         element.HasTagName(selectTag) || element.HasTagName(textareaTag);
 }
 
 Element* HTMLCollection::TraverseToFirst() const {
@@ -342,7 +351,7 @@ Element* HTMLCollection::TraverseToFirst() const {
           RootNode(), MakeIsMatch(ToClassCollection(*this)));
     default:
       if (OverridesItemAfter())
-        return VirtualItemAfter(0);
+        return VirtualItemAfter(nullptr);
       if (ShouldOnlyIncludeDirectChildren())
         return ElementTraversal::FirstChild(RootNode(), MakeIsMatch(*this));
       return ElementTraversal::FirstWithin(RootNode(), MakeIsMatch(*this));
@@ -523,11 +532,12 @@ void HTMLCollection::NamedItems(const AtomicString& name,
     result.AppendVector(*name_results);
 }
 
-HTMLCollection::NamedItemCache::NamedItemCache() {}
+HTMLCollection::NamedItemCache::NamedItemCache() = default;
 
-DEFINE_TRACE(HTMLCollection) {
+void HTMLCollection::Trace(blink::Visitor* visitor) {
   visitor->Trace(named_item_cache_);
   visitor->Trace(collection_items_cache_);
+  ScriptWrappable::Trace(visitor);
   LiveNodeListBase::Trace(visitor);
 }
 

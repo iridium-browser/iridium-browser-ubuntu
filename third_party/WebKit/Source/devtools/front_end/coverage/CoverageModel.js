@@ -14,6 +14,7 @@ Coverage.CoverageSegment;
 Coverage.CoverageType = {
   CSS: (1 << 0),
   JavaScript: (1 << 1),
+  JavaScriptCoarse: (1 << 2),
 };
 
 Coverage.CoverageModel = class extends SDK.SDKModel {
@@ -30,6 +31,8 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
     this._coverageByURL = new Map();
     /** @type {!Map<!Common.ContentProvider, !Coverage.CoverageInfo>} */
     this._coverageByContentProvider = new Map();
+    /** @type {?Promise<!Array<!Protocol.Profiler.ScriptCoverage>>} */
+    this._bestEffortCoveragePromise = null;
   }
 
   /**
@@ -42,8 +45,10 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
       this._clearCSS();
       this._cssModel.startCoverage();
     }
-    if (this._cpuProfilerModel)
+    if (this._cpuProfilerModel) {
+      this._bestEffortCoveragePromise = this._cpuProfilerModel.bestEffortCoverage();
       this._cpuProfilerModel.startPreciseCoverage();
+    }
     return !!(this._cssModel || this._cpuProfilerModel);
   }
 
@@ -51,7 +56,7 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
    * @return {!Promise<!Array<!Coverage.CoverageInfo>>}
    */
   stop() {
-    var pollPromise = this.poll();
+    const pollPromise = this.poll();
     if (this._cpuProfilerModel)
       this._cpuProfilerModel.stopPreciseCoverage();
     if (this._cssModel)
@@ -59,11 +64,16 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
     return pollPromise;
   }
 
+  reset() {
+    this._coverageByURL = new Map();
+    this._coverageByContentProvider = new Map();
+  }
+
   /**
    * @return {!Promise<!Array<!Coverage.CoverageInfo>>}
    */
   async poll() {
-    var updates = await Promise.all([this._takeCSSCoverage(), this._takeJSCoverage()]);
+    const updates = await Promise.all([this._takeCSSCoverage(), this._takeJSCoverage()]);
     return updates[0].concat(updates[1]);
   }
 
@@ -81,18 +91,18 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
    * @return {boolean|undefined}
    */
   usageForRange(contentProvider, startOffset, endOffset) {
-    var coverageInfo = this._coverageByContentProvider.get(contentProvider);
+    const coverageInfo = this._coverageByContentProvider.get(contentProvider);
     return coverageInfo && coverageInfo.usageForRange(startOffset, endOffset);
   }
 
   _clearCSS() {
-    for (var entry of this._coverageByContentProvider.values()) {
+    for (const entry of this._coverageByContentProvider.values()) {
       if (entry.type() !== Coverage.CoverageType.CSS)
         continue;
-      var contentProvider = /** @type {!SDK.CSSStyleSheetHeader} */ (entry.contentProvider());
+      const contentProvider = /** @type {!SDK.CSSStyleSheetHeader} */ (entry.contentProvider());
       this._coverageByContentProvider.delete(contentProvider);
-      var key = `${contentProvider.startLine}:${contentProvider.startColumn}`;
-      var urlEntry = this._coverageByURL.get(entry.url());
+      const key = `${contentProvider.startLine}:${contentProvider.startColumn}`;
+      const urlEntry = this._coverageByURL.get(entry.url());
       if (!urlEntry || !urlEntry._coverageInfoByLocation.delete(key))
         continue;
       urlEntry._size -= entry._size;
@@ -108,7 +118,12 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
   async _takeJSCoverage() {
     if (!this._cpuProfilerModel)
       return [];
-    var rawCoverageData = await this._cpuProfilerModel.takePreciseCoverage();
+    let rawCoverageData = await this._cpuProfilerModel.takePreciseCoverage();
+    if (this._bestEffortCoveragePromise) {
+      const bestEffortCoverage = await this._bestEffortCoveragePromise;
+      this._bestEffortCoveragePromise = null;
+      rawCoverageData = bestEffortCoverage.concat(rawCoverageData);
+    }
     return this._processJSCoverage(rawCoverageData);
   }
 
@@ -117,19 +132,27 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
    * @return {!Array<!Coverage.CoverageInfo>}
    */
   _processJSCoverage(scriptsCoverage) {
-    var updatedEntries = [];
-    for (var entry of scriptsCoverage) {
-      var script = this._debuggerModel.scriptForId(entry.scriptId);
+    const updatedEntries = [];
+    for (const entry of scriptsCoverage) {
+      const script = this._debuggerModel.scriptForId(entry.scriptId);
       if (!script)
         continue;
-      var ranges = [];
-      for (var func of entry.functions) {
-        for (var range of func.ranges)
+      const ranges = [];
+      let type = Coverage.CoverageType.JavaScript;
+      for (const func of entry.functions) {
+        // Do not coerce undefined to false, i.e. only consider blockLevel to be false
+        // if back-end explicitly provides blockLevel field, otherwise presume blockLevel
+        // coverage is not available. Also, ignore non-block level functions that weren't
+        // ever called.
+        if (func.isBlockCoverage === false && !(func.ranges.length === 1 && !func.ranges[0].count))
+          type |= Coverage.CoverageType.JavaScriptCoarse;
+        for (const range of func.ranges)
           ranges.push(range);
       }
-      var entry = this._addCoverage(script, script.contentLength, script.lineOffset, script.columnOffset, ranges);
-      if (entry)
-        updatedEntries.push(entry);
+      const subentry =
+          this._addCoverage(script, script.contentLength, script.lineOffset, script.columnOffset, ranges, type);
+      if (subentry)
+        updatedEntries.push(subentry);
     }
     return updatedEntries;
   }
@@ -140,7 +163,7 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
   async _takeCSSCoverage() {
     if (!this._cssModel)
       return [];
-    var rawCoverageData = await this._cssModel.takeCoverageDelta();
+    const rawCoverageData = await this._cssModel.takeCoverageDelta();
     return this._processCSSCoverage(rawCoverageData);
   }
 
@@ -149,28 +172,28 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
    * @return {!Array<!Coverage.CoverageInfo>}
    */
   _processCSSCoverage(ruleUsageList) {
-    var updatedEntries = [];
+    const updatedEntries = [];
     /** @type {!Map<!SDK.CSSStyleSheetHeader, !Array<!Coverage.RangeUseCount>>} */
-    var rulesByStyleSheet = new Map();
-    for (var rule of ruleUsageList) {
-      var styleSheetHeader = this._cssModel.styleSheetHeaderForId(rule.styleSheetId);
+    const rulesByStyleSheet = new Map();
+    for (const rule of ruleUsageList) {
+      const styleSheetHeader = this._cssModel.styleSheetHeaderForId(rule.styleSheetId);
       if (!styleSheetHeader)
         continue;
-      var ranges = rulesByStyleSheet.get(styleSheetHeader);
+      let ranges = rulesByStyleSheet.get(styleSheetHeader);
       if (!ranges) {
         ranges = [];
         rulesByStyleSheet.set(styleSheetHeader, ranges);
       }
       ranges.push({startOffset: rule.startOffset, endOffset: rule.endOffset, count: Number(rule.used)});
     }
-    for (var entry of rulesByStyleSheet) {
-      var styleSheetHeader = /** @type {!SDK.CSSStyleSheetHeader} */ (entry[0]);
-      var ranges = /** @type {!Array<!Coverage.RangeUseCount>} */ (entry[1]);
-      var entry = this._addCoverage(
+    for (const entry of rulesByStyleSheet) {
+      const styleSheetHeader = /** @type {!SDK.CSSStyleSheetHeader} */ (entry[0]);
+      const ranges = /** @type {!Array<!Coverage.RangeUseCount>} */ (entry[1]);
+      const subentry = this._addCoverage(
           styleSheetHeader, styleSheetHeader.contentLength, styleSheetHeader.startLine, styleSheetHeader.startColumn,
-          ranges);
-      if (entry)
-        updatedEntries.push(entry);
+          ranges, Coverage.CoverageType.CSS);
+      if (subentry)
+        updatedEntries.push(subentry);
     }
     return updatedEntries;
   }
@@ -182,10 +205,10 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
   static _convertToDisjointSegments(ranges) {
     ranges.sort((a, b) => a.startOffset - b.startOffset);
 
-    var result = [];
-    var stack = [];
-    for (var entry of ranges) {
-      var top = stack.peekLast();
+    const result = [];
+    const stack = [];
+    for (const entry of ranges) {
+      let top = stack.peekLast();
       while (top && top.endOffset <= entry.startOffset) {
         append(top.endOffset, top.count);
         stack.pop();
@@ -196,7 +219,7 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
     }
 
     while (stack.length) {
-      var top = stack.pop();
+      const top = stack.pop();
       append(top.endOffset, top.count);
     }
 
@@ -205,7 +228,7 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
      * @param {number} count
      */
     function append(end, count) {
-      var last = result.peekLast();
+      const last = result.peekLast();
       if (last) {
         if (last.end === end)
           return;
@@ -226,23 +249,25 @@ Coverage.CoverageModel = class extends SDK.SDKModel {
    * @param {number} startLine
    * @param {number} startColumn
    * @param {!Array<!Coverage.RangeUseCount>} ranges
+   * @param {!Coverage.CoverageType} type
    * @return {?Coverage.CoverageInfo}
    */
-  _addCoverage(contentProvider, contentLength, startLine, startColumn, ranges) {
-    var url = contentProvider.contentURL();
+  _addCoverage(contentProvider, contentLength, startLine, startColumn, ranges, type) {
+    const url = contentProvider.contentURL();
     if (!url)
       return null;
-    var urlCoverage = this._coverageByURL.get(url);
+    let urlCoverage = this._coverageByURL.get(url);
     if (!urlCoverage) {
       urlCoverage = new Coverage.URLCoverageInfo(url);
       this._coverageByURL.set(url, urlCoverage);
     }
-    var coverageInfo = urlCoverage._ensureEntry(contentProvider, contentLength, startLine, startColumn);
+
+    const coverageInfo = urlCoverage._ensureEntry(contentProvider, contentLength, startLine, startColumn, type);
     this._coverageByContentProvider.set(contentProvider, coverageInfo);
-    var segments = Coverage.CoverageModel._convertToDisjointSegments(ranges);
+    const segments = Coverage.CoverageModel._convertToDisjointSegments(ranges);
     if (segments.length && segments.peekLast().end < contentLength)
       segments.push({end: contentLength});
-    var oldUsedSize = coverageInfo._usedSize;
+    const oldUsedSize = coverageInfo._usedSize;
     coverageInfo.mergeCoverage(segments);
     if (coverageInfo._usedSize === oldUsedSize)
       return null;
@@ -313,23 +338,29 @@ Coverage.URLCoverageInfo = class {
    * @param {number} contentLength
    * @param {number} lineOffset
    * @param {number} columnOffset
+   * @param {!Coverage.CoverageType} type
    * @return {!Coverage.CoverageInfo}
    */
-  _ensureEntry(contentProvider, contentLength, lineOffset, columnOffset) {
-    var key = `${lineOffset}:${columnOffset}`;
-    var entry = this._coverageInfoByLocation.get(key);
+  _ensureEntry(contentProvider, contentLength, lineOffset, columnOffset, type) {
+    const key = `${lineOffset}:${columnOffset}`;
+    let entry = this._coverageInfoByLocation.get(key);
 
-    if (entry)
+    if ((type & Coverage.CoverageType.JavaScript) && !this._coverageInfoByLocation.size)
+      this._isContentScript = /** @type {!SDK.Script} */ (contentProvider).isContentScript();
+    this._type |= type;
+
+    if (entry) {
+      entry._coverageType |= type;
       return entry;
+    }
 
-    entry = new Coverage.CoverageInfo(contentProvider, contentLength);
-
-    if (entry.type() === Coverage.CoverageType.JavaScript && !this._coverageInfoByLocation.size)
+    if ((type & Coverage.CoverageType.JavaScript) && !this._coverageInfoByLocation.size)
       this._isContentScript = /** @type {!SDK.Script} */ (contentProvider).isContentScript();
 
+    entry = new Coverage.CoverageInfo(contentProvider, contentLength, type);
     this._coverageInfoByLocation.set(key, entry);
     this._size += contentLength;
-    this._type |= entry.type();
+
     return entry;
   }
 };
@@ -338,20 +369,14 @@ Coverage.CoverageInfo = class {
   /**
    * @param {!Common.ContentProvider} contentProvider
    * @param {number} size
+   * @param {!Coverage.CoverageType} type
    */
-  constructor(contentProvider, size) {
+  constructor(contentProvider, size, type) {
     this._contentProvider = contentProvider;
     this._size = size;
     this._usedSize = 0;
+    this._coverageType = type;
 
-    if (contentProvider.contentType().isScript()) {
-      this._coverageType = Coverage.CoverageType.JavaScript;
-    } else if (contentProvider.contentType().isStyleSheet()) {
-      this._coverageType = Coverage.CoverageType.CSS;
-    } else {
-      console.assert(
-          false, `Unexpected resource type ${contentProvider.contentType().name} for ${contentProvider.contentURL()}`);
-    }
     /** !Array<!Coverage.CoverageSegment> */
     this._segments = [];
   }
@@ -391,7 +416,7 @@ Coverage.CoverageInfo = class {
    * @return {boolean}
    */
   usageForRange(start, end) {
-    var index = this._segments.upperBound(start, (position, segment) => position - segment.end);
+    let index = this._segments.upperBound(start, (position, segment) => position - segment.end);
     for (; index < this._segments.length && this._segments[index].end < end; ++index) {
       if (this._segments[index].count)
         return true;
@@ -404,17 +429,17 @@ Coverage.CoverageInfo = class {
    * @param {!Array<!Coverage.CoverageSegment>} segmentsB
    */
   static _mergeCoverage(segmentsA, segmentsB) {
-    var result = [];
+    const result = [];
 
-    var indexA = 0;
-    var indexB = 0;
+    let indexA = 0;
+    let indexB = 0;
     while (indexA < segmentsA.length && indexB < segmentsB.length) {
-      var a = segmentsA[indexA];
-      var b = segmentsB[indexB];
-      var count =
+      const a = segmentsA[indexA];
+      const b = segmentsB[indexB];
+      const count =
           typeof a.count === 'number' || typeof b.count === 'number' ? (a.count || 0) + (b.count || 0) : undefined;
-      var end = Math.min(a.end, b.end);
-      var last = result.peekLast();
+      const end = Math.min(a.end, b.end);
+      const last = result.peekLast();
       if (!last || last.count !== count)
         result.push({end: end, count: count});
       else
@@ -435,8 +460,8 @@ Coverage.CoverageInfo = class {
   _updateStats() {
     this._usedSize = 0;
 
-    var last = 0;
-    for (var segment of this._segments) {
+    let last = 0;
+    for (const segment of this._segments) {
       if (segment.count)
         this._usedSize += segment.end - last;
       last = segment.end;

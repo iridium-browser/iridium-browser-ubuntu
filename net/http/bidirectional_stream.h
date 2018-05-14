@@ -38,9 +38,8 @@ struct SSLConfig;
 // ReadData or SendData/SendvData should be in flight until the operation
 // completes. The BidirectionalStream must be torn down before the
 // HttpNetworkSession.
-class NET_EXPORT BidirectionalStream
-    : public NON_EXPORTED_BASE(BidirectionalStreamImpl::Delegate),
-      public NON_EXPORTED_BASE(HttpStreamRequest::Delegate) {
+class NET_EXPORT BidirectionalStream : public BidirectionalStreamImpl::Delegate,
+                                       public HttpStreamRequest::Delegate {
  public:
   // Delegate interface to get notified of success of failure. Callbacks will be
   // invoked asynchronously.
@@ -139,12 +138,12 @@ class NET_EXPORT BidirectionalStream
   // Reads at most |buf_len| bytes into |buf|. Returns the number of bytes read,
   // or ERR_IO_PENDING if the read is to be completed asynchronously, or an
   // error code if any error occurred. If returns 0, there is no more data to
-  // read. This should not be called before Delegate::OnHeadersReceived is
+  // read. This should not be called before Delegate::OnStreamReady is
   // invoked, and should not be called again unless it returns with number
   // greater than 0 or until Delegate::OnDataRead is invoked.
   int ReadData(IOBuffer* buf, int buf_len);
 
-  // Sends data. This should not be called before Delegate::OnHeadersSent is
+  // Sends data. This should not be called before Delegate::OnStreamReady is
   // invoked, and should not be called again until Delegate::OnDataSent is
   // invoked. If |end_stream| is true, the DATA frame will have an END_STREAM
   // flag.
@@ -197,7 +196,9 @@ class NET_EXPORT BidirectionalStream
       const SSLConfig& used_ssl_config,
       const ProxyInfo& used_proxy_info,
       std::unique_ptr<WebSocketHandshakeStreamBase> stream) override;
-  void OnStreamFailed(int status, const SSLConfig& used_ssl_config) override;
+  void OnStreamFailed(int status,
+                      const NetErrorDetails& net_error_details,
+                      const SSLConfig& used_ssl_config) override;
   void OnCertificateError(int status,
                           const SSLConfig& used_ssl_config,
                           const SSLInfo& ssl_info) override;

@@ -61,6 +61,7 @@
 #include <endpointvolume.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <wrl/client.h>
 
 #include <memory>
 #include <string>
@@ -72,9 +73,9 @@
 #include "base/threading/simple_thread.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_com_initializer.h"
-#include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
 #include "media/audio/agc_audio_stream.h"
+#include "media/audio/audio_manager.h"
 #include "media/base/audio_converter.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/media_export.h"
@@ -95,7 +96,8 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   // the audio manager who is creating this object.
   WASAPIAudioInputStream(AudioManagerWin* manager,
                          const AudioParameters& params,
-                         const std::string& device_id);
+                         const std::string& device_id,
+                         const AudioManager::LogCallback& log_callback);
 
   // The dtor is typically called by the AudioManager only and it is usually
   // triggered by calling AudioInputStream::Close().
@@ -117,15 +119,27 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   // DelegateSimpleThread::Delegate implementation.
   void Run() override;
 
+  // Pulls capture data from the endpoint device and pushes it to the sink.
+  void PullCaptureDataAndPushToSink();
+
   // Issues the OnError() callback to the |sink_|.
   void HandleError(HRESULT err);
 
   // The Open() method is divided into these sub methods.
   HRESULT SetCaptureDevice();
   HRESULT GetAudioEngineStreamFormat();
-  bool DesiredFormatIsSupported();
+  // Returns whether the desired format is supported or not and writes the
+  // result of a failing system call to |*hr|, or S_OK if successful. If this
+  // function returns false with |*hr| == S_FALSE, the OS supports a closest
+  // match but we don't support conversion to it.
+  bool DesiredFormatIsSupported(HRESULT* hr);
   HRESULT InitializeAudioEngine();
-  void ReportOpenResult() const;
+  void ReportOpenResult(HRESULT hr) const;
+
+  // Reports stats for format related audio client initilization
+  // (IAudioClient::Initialize) errors, that is if |hr| is an error related to
+  // the format.
+  void MaybeReportFormatRelatedInitError(HRESULT hr) const;
 
   // AudioConverter::InputCallback implementation.
   double ProvideInput(AudioBus* audio_bus, uint32_t frames_delayed) override;
@@ -162,8 +176,14 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   // All OnData() callbacks will be called from this thread.
   std::unique_ptr<base::DelegateSimpleThread> capture_thread_;
 
-  // Contains the desired audio format which is set up at construction.
-  WAVEFORMATEX format_;
+  // Contains the desired output audio format which is set up at construction,
+  // that is the audio format this class should output data to the sink in.
+  WAVEFORMATEX output_format_;
+
+  // Contains the audio format we get data from the audio engine in. Set to
+  // |output_format_| at construction and might be changed to a close match
+  // if the audio engine doesn't support the originally set format.
+  WAVEFORMATEX input_format_;
 
   bool opened_ = false;
   bool started_ = false;
@@ -188,27 +208,19 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   // device role and is not a valid ID as such.
   std::string device_id_;
 
-  // Conversion factor used in delay-estimation calculations.
-  // Converts a raw performance counter value to 100-nanosecond unit.
-  double perf_count_to_100ns_units_ = 0.0;
-
-  // Conversion factor used in delay-estimation calculations.
-  // Converts from milliseconds to audio frames.
-  double ms_to_frame_count_ = 0.0;
-
   // Pointer to the object that will receive the recorded audio samples.
   AudioInputCallback* sink_ = nullptr;
 
   // Windows Multimedia Device (MMDevice) API interfaces.
 
   // An IMMDevice interface which represents an audio endpoint device.
-  base::win::ScopedComPtr<IMMDevice> endpoint_device_;
+  Microsoft::WRL::ComPtr<IMMDevice> endpoint_device_;
 
   // Windows Audio Session API (WASAPI) interfaces.
 
   // An IAudioClient interface which enables a client to create and initialize
   // an audio stream between an audio application and the audio engine.
-  base::win::ScopedComPtr<IAudioClient> audio_client_;
+  Microsoft::WRL::ComPtr<IAudioClient> audio_client_;
 
   // Loopback IAudioClient doesn't support event-driven mode, so a separate
   // IAudioClient is needed to receive notifications when data is available in
@@ -216,21 +228,21 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   // while |audio_render_client_for_loopback_| is used to get notifications
   // when a new buffer is ready. See comment in InitializeAudioEngine() for
   // details.
-  base::win::ScopedComPtr<IAudioClient> audio_render_client_for_loopback_;
+  Microsoft::WRL::ComPtr<IAudioClient> audio_render_client_for_loopback_;
 
   // The IAudioCaptureClient interface enables a client to read input data
   // from a capture endpoint buffer.
-  base::win::ScopedComPtr<IAudioCaptureClient> audio_capture_client_;
+  Microsoft::WRL::ComPtr<IAudioCaptureClient> audio_capture_client_;
 
   // The ISimpleAudioVolume interface enables a client to control the
   // master volume level of an audio session.
   // The volume-level is a value in the range 0.0 to 1.0.
   // This interface does only work with shared-mode streams.
-  base::win::ScopedComPtr<ISimpleAudioVolume> simple_audio_volume_;
+  Microsoft::WRL::ComPtr<ISimpleAudioVolume> simple_audio_volume_;
 
   // The IAudioEndpointVolume allows a client to control the volume level of
   // the whole system.
-  base::win::ScopedComPtr<IAudioEndpointVolume> system_audio_volume_;
+  Microsoft::WRL::ComPtr<IAudioEndpointVolume> system_audio_volume_;
 
   // The audio engine will signal this event each time a buffer has been
   // recorded.
@@ -253,6 +265,9 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   std::unique_ptr<AudioConverter> converter_;
   std::unique_ptr<AudioBus> convert_bus_;
   bool imperfect_buffer_size_conversion_ = false;
+
+  // Callback to send log messages.
+  AudioManager::LogCallback log_callback_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

@@ -53,8 +53,8 @@ bool HTMLImport::Precedes(HTMLImport* import) {
 }
 
 bool HTMLImport::FormsCycle() const {
-  for (const HTMLImport* i = this->Parent(); i; i = i->Parent()) {
-    if (i->GetDocument() == this->GetDocument())
+  for (const HTMLImport* i = Parent(); i; i = i->Parent()) {
+    if (i->GetDocument() == GetDocument())
       return true;
   }
 
@@ -74,7 +74,7 @@ void HTMLImport::AppendImport(HTMLImport* child) {
 
 void HTMLImport::StateDidChange() {
   if (!GetState().ShouldBlockScriptExecution()) {
-    if (Document* document = this->GetDocument())
+    if (Document* document = GetDocument())
       document->DidLoadAllImports();
   }
 }
@@ -109,26 +109,5 @@ void HTMLImport::RecalcTreeState(HTMLImport* root) {
   for (const auto& import : updated)
     import->StateDidChange();
 }
-
-#if !defined(NDEBUG)
-void HTMLImport::Show() {
-  Root()->ShowTree(this, 0);
-}
-
-void HTMLImport::ShowTree(HTMLImport* highlight, unsigned depth) {
-  for (unsigned i = 0; i < depth * 4; ++i)
-    fprintf(stderr, " ");
-
-  fprintf(stderr, "%s", this == highlight ? "*" : " ");
-  ShowThis();
-  fprintf(stderr, "\n");
-  for (HTMLImport* child = FirstChild(); child; child = child->Next())
-    child->ShowTree(highlight, depth + 1);
-}
-
-void HTMLImport::ShowThis() {
-  fprintf(stderr, "%p state=%d", this, state_.PeekValueForDebug());
-}
-#endif
 
 }  // namespace blink

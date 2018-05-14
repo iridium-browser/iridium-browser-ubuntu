@@ -11,51 +11,48 @@
 #include "chrome/common/profiling/memlog_stream.h"
 #include "chrome/profiling/address.h"
 #include "chrome/profiling/backtrace.h"
-#include "chrome/profiling/profiling_globals.h"
 
 namespace profiling {
-
-namespace {
-
-using AddressVector = base::StackVector<Address, 128>;
-
-}  // namespace
 
 MemlogStreamParser::Block::Block(std::unique_ptr<char[]> d, size_t s)
     : data(std::move(d)), size(s) {}
 
-MemlogStreamParser::Block::~Block() {}
+MemlogStreamParser::Block::Block(Block&& other) noexcept = default;
 
-MemlogStreamParser::MemlogStreamParser(MemlogControlReceiver* control_receiver,
-                                       MemlogReceiver* receiver)
-    : control_receiver_(control_receiver), receiver_(receiver) {}
+MemlogStreamParser::Block::~Block() = default;
+
+MemlogStreamParser::MemlogStreamParser(MemlogReceiver* receiver)
+    : receiver_(receiver) {}
 
 MemlogStreamParser::~MemlogStreamParser() {}
 
 void MemlogStreamParser::DisconnectReceivers() {
+  base::AutoLock lock(lock_);
   receiver_ = nullptr;
-  control_receiver_ = nullptr;
 }
 
-void MemlogStreamParser::OnStreamData(std::unique_ptr<char[]> data, size_t sz) {
-  if (!receiver_)
-    return;  // When no receiver is connected, do nothing with incoming data.
+bool MemlogStreamParser::OnStreamData(std::unique_ptr<char[]> data, size_t sz) {
+  base::AutoLock l(lock_);
+  if (!receiver_ || error_)
+    return false;
 
   blocks_.emplace_back(std::move(data), sz);
 
   if (!received_header_) {
-    received_header_ = true;
     ReadStatus status = ParseHeader();
-    if (status != READ_OK) {
-      LOG(ERROR) << "Memlog header read error.";
-      return;
+    if (status == READ_NO_DATA)
+      return true;  // Wait for more data.
+    if (status == READ_ERROR) {
+      SetErrorState();
+      return false;
     }
+    received_header_ = true;
   }
 
   while (true) {
     uint32_t msg_type;
     if (!PeekBytes(sizeof(msg_type), &msg_type))
-      return;
+      return true;  // Not enough data for a message type field.
 
     ReadStatus status;
     switch (msg_type) {
@@ -65,24 +62,30 @@ void MemlogStreamParser::OnStreamData(std::unique_ptr<char[]> data, size_t sz) {
       case kFreePacketType:
         status = ParseFree();
         break;
-      case kStartMojoControlPacketType:
-        ConsumeBytes(sizeof(StartMojoControlPacket));
-        if (control_receiver_)
-          control_receiver_->OnStartMojoControl();
-        status = READ_OK;
+      case kBarrierPacketType:
+        status = ParseBarrier();
+        break;
+      case kStringMappingPacketType:
+        status = ParseStringMapping();
         break;
       default:
-        LOG(ERROR) << "Error reading memlog message stream" << msg_type;
-        return;
+        // Invalid message type.
+        status = READ_ERROR;
+        break;
     }
-    if (status != READ_OK) {
-      LOG_IF(ERROR, status == READ_ERROR) << "Memlog read error";
-      return;
+
+    if (status == READ_NO_DATA)
+      return true;  // Wait for more data.
+    if (status == READ_ERROR) {
+      SetErrorState();
+      return false;
     }
+    // Success, loop around for more data.
   }
 }
 
 void MemlogStreamParser::OnStreamComplete() {
+  base::AutoLock l(lock_);
   if (receiver_)
     receiver_->OnComplete();
 }
@@ -144,8 +147,9 @@ MemlogStreamParser::ReadStatus MemlogStreamParser::ParseHeader() {
   if (!ReadBytes(sizeof(StreamHeader), &header))
     return READ_NO_DATA;
 
-  if (header.signature != kStreamSignature)
+  if (header.signature != kStreamSignature) {
     return READ_ERROR;
+  }
 
   receiver_->OnHeader(header);
   return READ_OK;
@@ -158,19 +162,35 @@ MemlogStreamParser::ReadStatus MemlogStreamParser::ParseAlloc() {
   if (!PeekBytes(sizeof(AllocPacket), &alloc_packet))
     return READ_NO_DATA;
 
+  // Validate data.
+  if (alloc_packet.stack_len > kMaxStackEntries ||
+      alloc_packet.context_byte_len > kMaxContextLen ||
+      alloc_packet.allocator >= AllocatorType::kCount) {
+    return READ_ERROR;
+  }
+
   std::vector<Address> stack;
   stack.resize(alloc_packet.stack_len);
   size_t stack_byte_size = sizeof(Address) * alloc_packet.stack_len;
 
-  if (!AreBytesAvailable(sizeof(AllocPacket) + stack_byte_size))
+  if (!AreBytesAvailable(sizeof(AllocPacket) + stack_byte_size +
+                         alloc_packet.context_byte_len))
     return READ_NO_DATA;
 
-  // Everything will fit, mark packet consumed, read stack.
+  // Everything will fit, mark header consumed.
   ConsumeBytes(sizeof(AllocPacket));
+
+  // Read stack.
   if (!stack.empty())
     ReadBytes(stack_byte_size, stack.data());
 
-  receiver_->OnAlloc(alloc_packet, std::move(stack));
+  // Read context.
+  std::string context;
+  context.resize(alloc_packet.context_byte_len);
+  if (alloc_packet.context_byte_len)
+    ReadBytes(alloc_packet.context_byte_len, &context[0]);
+
+  receiver_->OnAlloc(alloc_packet, std::move(stack), std::move(context));
   return READ_OK;
 }
 
@@ -181,6 +201,44 @@ MemlogStreamParser::ReadStatus MemlogStreamParser::ParseFree() {
 
   receiver_->OnFree(free_packet);
   return READ_OK;
+}
+
+MemlogStreamParser::ReadStatus MemlogStreamParser::ParseBarrier() {
+  BarrierPacket barrier_packet;
+  if (!ReadBytes(sizeof(BarrierPacket), &barrier_packet))
+    return READ_NO_DATA;
+
+  receiver_->OnBarrier(barrier_packet);
+  return READ_OK;
+}
+
+MemlogStreamParser::ReadStatus MemlogStreamParser::ParseStringMapping() {
+  StringMappingPacket string_mapping_packet;
+  if (!PeekBytes(sizeof(StringMappingPacket), &string_mapping_packet))
+    return READ_NO_DATA;
+
+  if (!AreBytesAvailable(sizeof(StringMappingPacket) +
+                         string_mapping_packet.string_len))
+    return READ_NO_DATA;
+
+  // Everything will fit, mark header consumed.
+  ConsumeBytes(sizeof(StringMappingPacket));
+
+  // Treat the incoming characters as an opaque blob. It should not contain null
+  // characters but a malicious attacker could change that.
+  std::string str;
+
+  str.resize(string_mapping_packet.string_len);
+  ReadBytes(string_mapping_packet.string_len, &str[0]);
+
+  receiver_->OnStringMapping(string_mapping_packet, str);
+  return READ_OK;
+}
+
+void MemlogStreamParser::SetErrorState() {
+  LOG(ERROR) << "MemlogStreamParser parsing error";
+  error_ = true;
+  receiver_->OnComplete();
 }
 
 }  // namespace profiling

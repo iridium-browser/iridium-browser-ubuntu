@@ -20,20 +20,20 @@ import android.content.ContentValues;
 import android.database.Cursor;
 import android.net.Uri;
 
-import org.chromium.base.ContextUtils;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mockito;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.android.controller.ContentProviderController;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowContentResolver;
+
+import org.chromium.base.test.BaseRobolectricTestRunner;
 
 /**
  * Tests of WebRestrictionsClient.
  */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class WebRestrictionsClientTest {
     private static final String TEST_CONTENT_PROVIDER = "example.com";
@@ -42,7 +42,6 @@ public class WebRestrictionsClientTest {
 
     @Before
     public void setUp() {
-        ContextUtils.initApplicationContextForTests(RuntimeEnvironment.application);
         mTestClient = Mockito.spy(new WebRestrictionsClient());
         Mockito.doNothing().when(mTestClient).nativeOnWebRestrictionsChanged(anyLong());
         mProvider = Mockito.mock(ContentProvider.class);
@@ -54,7 +53,7 @@ public class WebRestrictionsClientTest {
     public void testSupportsRequest() {
         assertThat(mTestClient.supportsRequest(), is(false));
 
-        ShadowContentResolver.registerProvider(TEST_CONTENT_PROVIDER, mProvider);
+        ContentProviderController.of(mProvider).create(TEST_CONTENT_PROVIDER);
 
         when(mProvider.getType(any(Uri.class))).thenReturn(null);
         assertThat(mTestClient.supportsRequest(), is(false));
@@ -65,7 +64,7 @@ public class WebRestrictionsClientTest {
 
     @Test
     public void testShouldProceed() {
-        ShadowContentResolver.registerProvider(TEST_CONTENT_PROVIDER, mProvider);
+        ContentProviderController.of(mProvider).create(TEST_CONTENT_PROVIDER);
 
         when(mProvider.query(any(Uri.class), (String[]) isNull(), anyString(), (String[]) isNull(),
                 (String) isNull())).thenReturn(null);
@@ -98,7 +97,7 @@ public class WebRestrictionsClientTest {
 
     @Test
     public void testRequestPermission() {
-        ShadowContentResolver.registerProvider(TEST_CONTENT_PROVIDER, mProvider);
+        ContentProviderController.of(mProvider).create(TEST_CONTENT_PROVIDER);
 
         ContentValues expectedValues = new ContentValues();
         expectedValues.put("url", "http://example.com");
@@ -114,7 +113,7 @@ public class WebRestrictionsClientTest {
 
     @Test
     public void testNotifyChange() {
-        ShadowContentResolver.registerProvider(TEST_CONTENT_PROVIDER, mProvider);
+        ContentProviderController.of(mProvider).create(TEST_CONTENT_PROVIDER);
 
         ContentResolver resolver = RuntimeEnvironment.application.getContentResolver();
         resolver.notifyChange(Uri.parse("content://" + TEST_CONTENT_PROVIDER), null);

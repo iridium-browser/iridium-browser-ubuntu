@@ -48,6 +48,7 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
   void OnGestureEvent(ui::GestureEvent* event) override;
   void AboutToRequestFocusFromTabTraversal(bool reverse) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  void Layout() override;
   void ChildPreferredSizeChanged(views::View* child) override;
 
   // ActionableView:
@@ -67,8 +68,9 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
   // showing.
   virtual void CloseBubble();
 
-  // Shows the associated tray bubble if one exists.
-  virtual void ShowBubble();
+  // Shows the associated tray bubble if one exists. |show_by_click| indicates
+  // whether the showing operation is initiated by mouse or gesture click.
+  virtual void ShowBubble(bool show_by_click);
 
   // Called whenever the shelf alignment changes.
   virtual void UpdateAfterShelfAlignmentChange();
@@ -116,12 +118,25 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
   // tray_container().
   gfx::Insets GetBubbleAnchorInsets() const;
 
+  // Updates the |clipping_window_| bounds if the anchor moved or changed.
+  void UpdateClippingWindowBounds();
+
   // Returns the container window for the bubble (on the proper display).
   aura::Window* GetBubbleWindowContainer();
 
   // Update the bounds of the associated tray bubble. Close the bubble if
   // |close_bubble| is set.
   void AnimateToTargetBounds(const gfx::Rect& target_bounds, bool close_bubble);
+
+  // Helper function that calculates background bounds relative to local bounds
+  // based on background insets returned from GetBackgroundInsets().
+  gfx::Rect GetBackgroundBounds() const;
+
+  aura::Window* clipping_window_for_test() const {
+    return clipping_window_.get();
+  }
+
+  TrayDragController* drag_controller() { return drag_controller_.get(); }
 
  protected:
   // ActionableView:
@@ -130,8 +145,8 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
   bool PerformAction(const ui::Event& event) override;
   void HandlePerformActionResult(bool action_performed,
                                  const ui::Event& event) override;
+  views::PaintInfo::ScaleType GetPaintScaleType() const override;
 
-  TrayDragController* drag_controller() { return drag_controller_.get(); }
   void set_drag_controller(
       std::unique_ptr<TrayDragController> drag_controller) {
     drag_controller_ = std::move(drag_controller);
@@ -151,9 +166,6 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
   // Helper function that calculates background insets relative to local bounds.
   gfx::Insets GetBackgroundInsets() const;
 
-  // Helper function that calculates background bounds relative to local bounds
-  // based on background insets returned from GetBackgroundInsets().
-  gfx::Rect GetBackgroundBounds() const;
 
   // The shelf containing the system tray for this view.
   Shelf* shelf_;

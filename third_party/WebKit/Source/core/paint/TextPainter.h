@@ -13,7 +13,6 @@ namespace blink {
 class TextRun;
 struct TextRunPaintInfo;
 class LayoutTextCombine;
-class LineLayoutItem;
 
 // Text painter for legacy layout. Operates on TextRuns.
 class CORE_EXPORT TextPainter : public TextPainterBase {
@@ -28,29 +27,21 @@ class CORE_EXPORT TextPainter : public TextPainterBase {
               bool horizontal)
       : TextPainterBase(context, font, text_origin, text_bounds, horizontal),
         run_(run),
-        combined_text_(0) {}
-  ~TextPainter() {}
+        combined_text_(nullptr) {}
+  ~TextPainter() = default;
 
   void SetCombinedText(LayoutTextCombine* combined_text) {
     combined_text_ = combined_text;
+    has_combined_text_ = combined_text_ ? true : false;
   }
 
-  void ClipDecorationsStripe(float upper, float stripe_width, float dilation);
+  void ClipDecorationsStripe(float upper,
+                             float stripe_width,
+                             float dilation) override;
   void Paint(unsigned start_offset,
              unsigned end_offset,
              unsigned length,
-             const Style&);
-
-  void PaintDecorationUnderOrOverLine(GraphicsContext&,
-                                      const DecorationInfo&,
-                                      const AppliedTextDecoration&,
-                                      int line_offset,
-                                      float decoration_offset);
-
-  static Style SelectionPaintingStyle(LineLayoutItem,
-                                      bool have_selection,
-                                      const PaintInfo&,
-                                      const Style& text_style);
+             const TextPaintStyle&);
 
  private:
   template <PaintInternalStep step>

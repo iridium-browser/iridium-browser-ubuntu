@@ -8,21 +8,24 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/network.h"
+#include "rtc_base/network.h"
+
+#include <stdlib.h>
 
 #include <memory>
 #include <vector>
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/nethelpers.h"
-#include "webrtc/rtc_base/networkmonitor.h"
+
+#include "rtc_base/checks.h"
+#include "rtc_base/nethelpers.h"
+#include "rtc_base/networkmonitor.h"
 #if defined(WEBRTC_POSIX)
 #include <sys/types.h>
 #include <net/if.h>
-#include "webrtc/rtc_base/ifaddrs_converter.h"
+#include "rtc_base/ifaddrs_converter.h"
 #endif  // defined(WEBRTC_POSIX)
-#include "webrtc/rtc_base/gunit.h"
+#include "rtc_base/gunit.h"
 #if defined(WEBRTC_WIN)
-#include "webrtc/rtc_base/logging.h"  // For LOG_GLE
+#include "rtc_base/logging.h"  // For RTC_LOG_GLE
 #endif
 
 namespace rtc {
@@ -122,7 +125,8 @@ class NetworkTest : public testing::Test, public sigslot::has_slots<>  {
 
   struct sockaddr_in6* CreateIpv6Addr(const std::string& ip_string,
                                       uint32_t scope_id) {
-    struct sockaddr_in6* ipv6_addr = new struct sockaddr_in6;
+    struct sockaddr_in6* ipv6_addr = static_cast<struct sockaddr_in6*>(
+        malloc(sizeof(struct sockaddr_in6)));
     memset(ipv6_addr, 0, sizeof(struct sockaddr_in6));
     ipv6_addr->sin6_family = AF_INET6;
     ipv6_addr->sin6_scope_id = scope_id;
@@ -168,8 +172,8 @@ class NetworkTest : public testing::Test, public sigslot::has_slots<>  {
     struct ifaddrs* if_addr = list;
     while (if_addr != nullptr) {
       struct ifaddrs* next_addr = if_addr->ifa_next;
-      delete if_addr->ifa_addr;
-      delete if_addr->ifa_netmask;
+      free(if_addr->ifa_addr);
+      free(if_addr->ifa_netmask);
       delete if_addr;
       if_addr = next_addr;
     }
@@ -246,7 +250,8 @@ TEST_F(NetworkTest, DISABLED_TestCreateNetworks) {
                            reinterpret_cast<sockaddr*>(&storage),
                            static_cast<int>(ipsize));
 #if defined(WEBRTC_WIN)
-      if (success) LOG_GLE(LS_ERROR) << "Socket bind failed.";
+      if (success)
+        RTC_LOG_GLE(LS_ERROR) << "Socket bind failed.";
 #endif
       EXPECT_EQ(0, success);
 #if defined(WEBRTC_WIN)
@@ -429,45 +434,6 @@ TEST_F(NetworkTest, TestIPv6MergeNetworkList) {
        it != original_list.end(); ++it) {
     EXPECT_NE(list.end(), std::find(list.begin(), list.end(), *it));
   }
-}
-
-// Test that no more than manager.max_ipv6_networks() IPv6 networks get
-// returned.
-TEST_F(NetworkTest, TestIPv6MergeNetworkListTrimExcessive) {
-  BasicNetworkManager manager;
-  manager.SignalNetworksChanged.connect(static_cast<NetworkTest*>(this),
-                                        &NetworkTest::OnNetworksChanged);
-  NetworkManager::NetworkList original_list;
-
-  // Add twice the allowed number of IPv6 networks.
-  for (int i = 0; i < 2 * manager.max_ipv6_networks(); i++) {
-    // Make a network with different prefix length.
-    IPAddress ip;
-    EXPECT_TRUE(IPFromString("2401:fa01:4:1000:be30:faa:fee:faa", &ip));
-    IPAddress prefix = TruncateIP(ip, 64 - i);
-    Network* ipv6_network =
-        new Network("test_eth0", "Test Network Adapter 1", prefix, 64 - i);
-    ipv6_network->AddIP(ip);
-    original_list.push_back(ipv6_network);
-  }
-
-  // Add one IPv4 network.
-  Network* ipv4_network = new Network("test_eth0", "Test Network Adapter 1",
-                                      IPAddress(0x12345600U), 24);
-  ipv4_network->AddIP(IPAddress(0x12345600U));
-  original_list.push_back(ipv4_network);
-
-  bool changed = false;
-  MergeNetworkList(manager, original_list, &changed);
-  EXPECT_TRUE(changed);
-  NetworkManager::NetworkList list;
-  manager.GetNetworks(&list);
-
-  // List size should be the max allowed IPv6 networks plus one IPv4 network.
-  EXPECT_EQ(manager.max_ipv6_networks() + 1, (int)list.size());
-
-  // Verify that the IPv4 network is in the list.
-  EXPECT_NE(list.end(), std::find(list.begin(), list.end(), ipv4_network));
 }
 
 // Tests that when two network lists that describe the same set of networks are
@@ -703,7 +669,9 @@ TEST_F(NetworkTest, MAYBE_TestIPv6Toggle) {
   }
 }
 
-TEST_F(NetworkTest, TestNetworkListSorting) {
+// Test that when network interfaces are sorted and given preference values,
+// IPv6 comes first.
+TEST_F(NetworkTest, IPv6NetworksPreferredOverIPv4) {
   BasicNetworkManager manager;
   Network ipv4_network1("test_eth0", "Test Network Adapter 1",
                         IPAddress(0x12345600U), 24);
@@ -728,6 +696,29 @@ TEST_F(NetworkTest, TestNetworkListSorting) {
   ASSERT_TRUE(changed);
   // After sorting IPv6 network should be higher order than IPv4 networks.
   EXPECT_TRUE(net1->preference() < net2->preference());
+}
+
+// When two interfaces are equivalent in everything but name, they're expected
+// to be preference-ordered by name. For example, "eth0" before "eth1".
+TEST_F(NetworkTest, NetworksSortedByInterfaceName) {
+  BasicNetworkManager manager;
+  Network* eth0 = new Network("test_eth0", "Test Network Adapter 1",
+                              IPAddress(0x65432100U), 24);
+  eth0->AddIP(IPAddress(0x65432100U));
+  Network* eth1 = new Network("test_eth1", "Test Network Adapter 2",
+                              IPAddress(0x12345600U), 24);
+  eth1->AddIP(IPAddress(0x12345600U));
+  NetworkManager::NetworkList list;
+  // Add them to the list in the opposite of the expected sorted order, to
+  // ensure sorting actually occurs.
+  list.push_back(eth1);
+  list.push_back(eth0);
+
+  bool changed = false;
+  MergeNetworkList(manager, list, &changed);
+  ASSERT_TRUE(changed);
+  // "test_eth0" should be preferred over "test_eth1".
+  EXPECT_TRUE(eth0->preference() > eth1->preference());
 }
 
 TEST_F(NetworkTest, TestNetworkAdapterTypes) {
@@ -842,11 +833,17 @@ TEST_F(NetworkTest, TestGetAdapterTypeFromNameMatching) {
   std::string ipv6_mask = "FFFF:FFFF:FFFF:FFFF::";
   BasicNetworkManager manager;
 
-#if defined(WEBRTC_IOS)
-  char if_name[20] = "pdp_ip0";
+  // IPSec interface; name is in form "ipsec<index>".
+  char if_name[20] = "ipsec11";
   ifaddrs* addr_list =
       InstallIpv6Network(if_name, ipv6_address1, ipv6_mask, manager);
+  EXPECT_EQ(ADAPTER_TYPE_VPN, GetAdapterType(manager));
+  ClearNetworks(manager);
+  ReleaseIfAddrs(addr_list);
 
+#if defined(WEBRTC_IOS)
+  strcpy(if_name, "pdp_ip0");
+  addr_list = InstallIpv6Network(if_name, ipv6_address1, ipv6_mask, manager);
   EXPECT_EQ(ADAPTER_TYPE_CELLULAR, GetAdapterType(manager));
   ClearNetworks(manager);
   ReleaseIfAddrs(addr_list);
@@ -858,10 +855,8 @@ TEST_F(NetworkTest, TestGetAdapterTypeFromNameMatching) {
   ReleaseIfAddrs(addr_list);
 
 #elif defined(WEBRTC_ANDROID)
-  char if_name[20] = "rmnet0";
-  ifaddrs* addr_list =
-      InstallIpv6Network(if_name, ipv6_address1, ipv6_mask, manager);
-
+  strcpy(if_name, "rmnet0");
+  addr_list = InstallIpv6Network(if_name, ipv6_address1, ipv6_mask, manager);
   EXPECT_EQ(ADAPTER_TYPE_CELLULAR, GetAdapterType(manager));
   ClearNetworks(manager);
   ReleaseIfAddrs(addr_list);
@@ -878,9 +873,10 @@ TEST_F(NetworkTest, TestGetAdapterTypeFromNameMatching) {
   ClearNetworks(manager);
   ReleaseIfAddrs(addr_list);
 #else
-  char if_name[20] = "wlan0";
-  ifaddrs* addr_list =
-      InstallIpv6Network(if_name, ipv6_address1, ipv6_mask, manager);
+  // TODO(deadbeef): If not iOS or Android, "wlan0" should be treated as
+  // "unknown"? Why? This should be fixed if there's no good reason.
+  strcpy(if_name, "wlan0");
+  addr_list = InstallIpv6Network(if_name, ipv6_address1, ipv6_mask, manager);
 
   EXPECT_EQ(ADAPTER_TYPE_UNKNOWN, GetAdapterType(manager));
   ClearNetworks(manager);
@@ -904,10 +900,10 @@ TEST_F(NetworkTest, TestIgnoreNonDefaultRoutes) {
   NetworkManager::NetworkList list;
   list = GetNetworks(manager, false);
   bool found_dummy = false;
-  LOG(LS_INFO) << "Looking for dummy network: ";
+  RTC_LOG(LS_INFO) << "Looking for dummy network: ";
   for (NetworkManager::NetworkList::iterator it = list.begin();
        it != list.end(); ++it) {
-    LOG(LS_INFO) << "  Network name: " << (*it)->name();
+    RTC_LOG(LS_INFO) << "  Network name: " << (*it)->name();
     found_dummy |= (*it)->name().find("dummy0") != std::string::npos;
   }
   for (NetworkManager::NetworkList::iterator it = list.begin();
@@ -915,16 +911,16 @@ TEST_F(NetworkTest, TestIgnoreNonDefaultRoutes) {
     delete (*it);
   }
   if (!found_dummy) {
-    LOG(LS_INFO) << "No dummy found, quitting.";
+    RTC_LOG(LS_INFO) << "No dummy found, quitting.";
     return;
   }
-  LOG(LS_INFO) << "Found dummy, running again while ignoring non-default "
-               << "routes.";
+  RTC_LOG(LS_INFO) << "Found dummy, running again while ignoring non-default "
+                   << "routes.";
   manager.set_ignore_non_default_routes(true);
   list = GetNetworks(manager, false);
   for (NetworkManager::NetworkList::iterator it = list.begin();
        it != list.end(); ++it) {
-    LOG(LS_INFO) << "  Network name: " << (*it)->name();
+    RTC_LOG(LS_INFO) << "  Network name: " << (*it)->name();
     EXPECT_TRUE((*it)->name().find("dummy0") == std::string::npos);
   }
   for (NetworkManager::NetworkList::iterator it = list.begin();
@@ -1101,7 +1097,7 @@ TEST_F(NetworkTest, MAYBE_DefaultLocalAddress) {
   std::vector<Network*> networks;
   manager.GetNetworks(&networks);
   EXPECT_TRUE(!networks.empty());
-  for (auto& network : networks) {
+  for (const auto* network : networks) {
     if (network->GetBestIP().family() == AF_INET) {
       EXPECT_TRUE(manager.QueryDefaultLocalAddress(AF_INET) != IPAddress());
     } else if (network->GetBestIP().family() == AF_INET6 &&

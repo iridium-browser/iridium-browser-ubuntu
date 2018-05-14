@@ -11,7 +11,6 @@ from telemetry.internal.actions.drag import DragAction
 from telemetry.internal.actions.javascript_click import ClickElementAction
 from telemetry.internal.actions.key_event import KeyPressAction
 from telemetry.internal.actions.load_media import LoadMediaAction
-from telemetry.internal.actions.loop import LoopAction
 from telemetry.internal.actions.mouse_click import MouseClickAction
 from telemetry.internal.actions.navigate import NavigateAction
 from telemetry.internal.actions.page_action import GESTURE_SOURCE_DEFAULT
@@ -35,7 +34,14 @@ from py_trace_event import trace_event
 import py_utils
 
 
-_DUMP_WAIT_TIME = 3
+# Time to wait in seconds before requesting a memory dump in deterministic
+# mode, thus allowing metric values to stabilize a bit.
+_MEMORY_DUMP_WAIT_TIME = 3
+
+# Time to wait in seconds after forcing garbage collection to allow its
+# effects to propagate. Experimentally determined on an Android One device
+# that Java Heap garbage collection can take ~5 seconds to complete.
+_GARBAGE_COLLECTION_WAIT_TIME = 6
 
 
 class ActionRunner(object):
@@ -149,13 +155,19 @@ class ActionRunner(object):
       logging.warning('Tracing is off. No memory dumps are being recorded.')
       return None
     if deterministic_mode:
-      self.Wait(_DUMP_WAIT_TIME)
+      self.Wait(_MEMORY_DUMP_WAIT_TIME)
       self.ForceGarbageCollection()
-      self.Wait(_DUMP_WAIT_TIME)
     dump_id = self.tab.browser.DumpMemory()
     if not dump_id:
       raise exceptions.StoryActionError('Unable to obtain memory dump')
     return dump_id
+
+  def PrepareForLeakDetection(self):
+    """Prepares for Leak Detection.
+
+    Terminate workers, stopping spellcheckers, running GC etc.
+    """
+    self._tab.PrepareForLeakDetection()
 
   def Navigate(self, url, script_to_evaluate_on_commit=None,
                timeout_in_seconds=60):
@@ -355,43 +367,10 @@ class ActionRunner(object):
           gesture, as a ratio of the visible bounding rectangle for
           document.body.
       scale_factor: The ratio of the final span to the initial span.
-          The default scale factor is
-          3.0 / (window.outerWidth/window.innerWidth).
+          The default scale factor is 3.0 / (current scale factor).
       speed_in_pixels_per_second: The speed of the gesture (in pixels/s).
     """
     self._RunAction(PinchAction(
-        left_anchor_ratio=left_anchor_ratio, top_anchor_ratio=top_anchor_ratio,
-        scale_factor=scale_factor,
-        speed_in_pixels_per_second=speed_in_pixels_per_second))
-
-  def PinchElement(self, selector=None, text=None, element_function=None,
-                   left_anchor_ratio=0.5, top_anchor_ratio=0.5,
-                   scale_factor=None, speed_in_pixels_per_second=800):
-    """Perform the pinch gesture on an element.
-
-    It computes the pinch gesture automatically based on the anchor
-    coordinate and the scale factor. The scale factor is the ratio of
-    of the final span and the initial span of the gesture.
-
-    Args:
-      selector: A CSS selector describing the element.
-      text: The element must contains this exact text.
-      element_function: A JavaScript function (as string) that is used
-          to retrieve the element. For example:
-          'function() { return foo.element; }'.
-      left_anchor_ratio: The horizontal pinch anchor coordinate of the
-          gesture, as a ratio of the visible bounding rectangle for
-          the element.
-      top_anchor_ratio: The vertical pinch anchor coordinate of the
-          gesture, as a ratio of the visible bounding rectangle for
-          the element.
-      scale_factor: The ratio of the final span to the initial span.
-          The default scale factor is
-          3.0 / (window.outerWidth/window.innerWidth).
-      speed_in_pixels_per_second: The speed of the gesture (in pixels/s).
-    """
-    self._RunAction(PinchAction(
-        selector=selector, text=text, element_function=element_function,
         left_anchor_ratio=left_anchor_ratio, top_anchor_ratio=top_anchor_ratio,
         scale_factor=scale_factor,
         speed_in_pixels_per_second=speed_in_pixels_per_second))
@@ -765,26 +744,6 @@ class ActionRunner(object):
         timeout_in_seconds=timeout_in_seconds,
         log_time=log_time, label=label))
 
-  def LoopMedia(self, loop_count, selector=None, timeout_in_seconds=None):
-    """Loops a media playback.
-
-    Args:
-      loop_count: The number of times to loop the playback.
-      selector: A CSS selector describing the element. If none is
-          specified, loop the first media element on the page. If the
-          selector matches more than 1 media element, all of them will
-          be looped.
-      timeout_in_seconds: Maximum waiting time for the looped playback to
-          complete. 0 means do not wait. None (the default) means to
-          wait loop_count * 60 seconds.
-
-    Raises:
-      TimeoutException: If the maximum waiting time is exceeded.
-    """
-    self._RunAction(LoopAction(
-        loop_count=loop_count, selector=selector,
-        timeout_in_seconds=timeout_in_seconds))
-
   def ForceGarbageCollection(self):
     """Forces garbage collection on all relevant systems.
 
@@ -798,6 +757,8 @@ class ActionRunner(object):
     self._tab.CollectGarbage()
     if self._tab.browser.platform.SupportFlushEntireSystemCache():
       self._tab.browser.platform.FlushEntireSystemCache()
+    self.Wait(_GARBAGE_COLLECTION_WAIT_TIME)
+
 
   def SimulateMemoryPressureNotification(self, pressure_level):
     """Simulate memory pressure notification.
@@ -806,6 +767,16 @@ class ActionRunner(object):
       pressure_level: 'moderate' or 'critical'.
     """
     self._tab.browser.SimulateMemoryPressureNotification(pressure_level)
+
+  def EnterOverviewMode(self):
+    if not self._tab.browser.supports_overview_mode:
+      raise exceptions.StoryActionError('Overview mode is not supported')
+    self._tab.browser.EnterOverviewMode()
+
+  def ExitOverviewMode(self):
+    if not self._tab.browser.supports_overview_mode:
+      raise exceptions.StoryActionError('Overview mode is not supported')
+    self._tab.browser.ExitOverviewMode()
 
   def PauseInteractive(self):
     """Pause the page execution and wait for terminal interaction.

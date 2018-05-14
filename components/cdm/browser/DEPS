@@ -5,4 +5,7 @@ include_rules = [
   "+media/media_features.h",
   "+media/mojo",
   "+mojo/public/cpp/bindings",
+
+  # For testing
+  "+content/public/test",
 ]

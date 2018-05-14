@@ -40,16 +40,14 @@ namespace blink {
 ErrorEvent::ErrorEvent()
     : sanitized_message_(),
       location_(SourceLocation::Create(String(), 0, 0, nullptr)),
-      error_(this),
-      world_(DOMWrapperWorld::Current(v8::Isolate::GetCurrent())) {}
+      world_(&DOMWrapperWorld::Current(v8::Isolate::GetCurrent())) {}
 
 ErrorEvent::ErrorEvent(ScriptState* script_state,
                        const AtomicString& type,
                        const ErrorEventInit& initializer)
     : Event(type, initializer),
       sanitized_message_(),
-      error_(this),
-      world_(script_state->World()) {
+      world_(&script_state->World()) {
   if (initializer.hasMessage())
     sanitized_message_ = initializer.message();
   location_ = SourceLocation::Create(
@@ -68,7 +66,6 @@ ErrorEvent::ErrorEvent(const String& message,
     : Event(EventTypeNames::error, false, true),
       sanitized_message_(message),
       location_(std::move(location)),
-      error_(this),
       world_(world) {
   if (!error.IsEmpty())
     error_.Set(error.GetIsolate(), error.V8Value());
@@ -79,7 +76,7 @@ void ErrorEvent::SetUnsanitizedMessage(const String& message) {
   unsanitized_message_ = message;
 }
 
-ErrorEvent::~ErrorEvent() {}
+ErrorEvent::~ErrorEvent() = default;
 
 const AtomicString& ErrorEvent::InterfaceName() const {
   return EventNames::ErrorEvent;
@@ -97,11 +94,11 @@ ScriptValue ErrorEvent::error(ScriptState* script_state) const {
   return ScriptValue(script_state, error_.NewLocal(script_state->GetIsolate()));
 }
 
-DEFINE_TRACE(ErrorEvent) {
+void ErrorEvent::Trace(blink::Visitor* visitor) {
   Event::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(ErrorEvent) {
+void ErrorEvent::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(error_);
   Event::TraceWrappers(visitor);
 }

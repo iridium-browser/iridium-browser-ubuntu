@@ -20,10 +20,8 @@
 #include "storage/browser/test/async_file_test_helper.h"
 #include "storage/browser/test/sandbox_file_system_test_helper.h"
 #include "storage/common/fileapi/file_system_types.h"
-#include "storage/common/quota/quota_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/leveldatabase/src/helpers/memenv/memenv.h"
-#include "third_party/leveldatabase/src/include/leveldb/env.h"
+#include "third_party/leveldatabase/leveldb_chrome.h"
 
 using content::SandboxFileSystemTestHelper;
 using storage::FileSystemContext;
@@ -31,14 +29,13 @@ using storage::FileSystemOperationContext;
 using storage::FileSystemURL;
 using storage::FileSystemURLSet;
 using storage::QuotaManager;
-using storage::QuotaStatusCode;
 
 namespace sync_file_system {
 
 class SyncableFileSystemTest : public testing::Test {
  public:
   SyncableFileSystemTest()
-      : in_memory_env_(leveldb::NewMemEnv(leveldb::Env::Default())),
+      : in_memory_env_(leveldb_chrome::NewMemEnv(leveldb::Env::Default())),
         file_system_(GURL("http://example.com/"),
                      in_memory_env_.get(),
                      base::ThreadTaskRunnerHandle::Get().get(),
@@ -130,7 +127,7 @@ TEST_F(SyncableFileSystemTest, SyncableLocalSandboxCombined) {
   const int64_t kQuota = 12345 * 1024;
   QuotaManager::kSyncableStorageDefaultHostQuota = kQuota;
   int64_t usage, quota;
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system_.GetUsageAndQuota(&usage, &quota));
 
   // Returned quota must be what we overrode. Usage must be greater than 0
@@ -147,7 +144,7 @@ TEST_F(SyncableFileSystemTest, SyncableLocalSandboxCombined) {
             file_system_.TruncateFile(URL("dir/foo"), kFileSizeToExtend));
 
   int64_t new_usage;
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system_.GetUsageAndQuota(&new_usage, &quota));
   EXPECT_EQ(kFileSizeToExtend, new_usage - usage);
 
@@ -158,7 +155,7 @@ TEST_F(SyncableFileSystemTest, SyncableLocalSandboxCombined) {
             file_system_.TruncateFile(URL("dir/foo"), kFileSizeToExtend + 1));
 
   usage = new_usage;
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system_.GetUsageAndQuota(&new_usage, &quota));
   EXPECT_EQ(usage, new_usage);
 
@@ -167,7 +164,7 @@ TEST_F(SyncableFileSystemTest, SyncableLocalSandboxCombined) {
             file_system_.DeleteFileSystem());
 
   // Now the usage must be zero.
-  EXPECT_EQ(storage::kQuotaStatusOk,
+  EXPECT_EQ(blink::mojom::QuotaStatusCode::kOk,
             file_system_.GetUsageAndQuota(&usage, &quota));
   EXPECT_EQ(0, usage);
 

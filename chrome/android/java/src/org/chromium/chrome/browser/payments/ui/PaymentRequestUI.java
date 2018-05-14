@@ -42,6 +42,7 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.payments.ShippingStrings;
 import org.chromium.chrome.browser.payments.ui.PaymentRequestSection.LineItemBreakdownSection;
@@ -225,30 +226,9 @@ public class PaymentRequestUI implements DialogInterface.OnDismissListener, View
         void onPaymentRequestSelectionChecked(PaymentRequestUI ui);
 
         /**
-         * Called when edit dialog is showing.
-         */
-        void onPaymentRequestReadyToEdit();
-
-        /**
-         * Called when editor validation completes with error. This can happen, for example, when
-         * user enters an invalid email address.
-         */
-        void onPaymentRequestEditorValidationError();
-
-        /**
-         * Called when an editor field text has changed.
-         */
-        void onPaymentRequestEditorTextUpdate();
-
-        /**
          * Called when the result UI is showing.
          */
         void onPaymentRequestResultReady(PaymentRequestUI ui);
-
-        /**
-         * Called when the UI is gone.
-         */
-        void onPaymentRequestDismiss();
     }
 
     /** Helper to notify tests of an event only once. */
@@ -292,7 +272,8 @@ public class PaymentRequestUI implements DialogInterface.OnDismissListener, View
     /** Length of the animation to hide the bottom sheet UI. */
     private static final int DIALOG_EXIT_ANIMATION_MS = 195;
 
-    private static PaymentRequestObserverForTest sObserverForTest;
+    private static PaymentRequestObserverForTest sPaymentRequestObserverForTest;
+    private static EditorObserverForTest sEditorObserverForTest;
 
     /** Notifies tests that the [PAY] button can be clicked. */
     private final NotifierForTest mReadyToPayNotifierForTest;
@@ -385,8 +366,10 @@ public class PaymentRequestUI implements DialogInterface.OnDismissListener, View
         mReadyToPayNotifierForTest = new NotifierForTest(new Runnable() {
             @Override
             public void run() {
-                if (sObserverForTest != null && isAcceptingUserInput() && mPayButton.isEnabled()) {
-                    sObserverForTest.onPaymentRequestReadyToPay(PaymentRequestUI.this);
+                if (sPaymentRequestObserverForTest != null && isAcceptingUserInput()
+                        && mPayButton.isEnabled()) {
+                    sPaymentRequestObserverForTest.onPaymentRequestReadyToPay(
+                            PaymentRequestUI.this);
                 }
             }
         });
@@ -433,8 +416,10 @@ public class PaymentRequestUI implements DialogInterface.OnDismissListener, View
         bottomSheetParams.gravity = Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM;
         mFullContainer.addView(mRequestView, bottomSheetParams);
 
-        mEditorDialog = new EditorDialog(activity, sObserverForTest);
-        mCardEditorDialog = new EditorDialog(activity, sObserverForTest);
+        mEditorDialog = new EditorDialog(activity, sEditorObserverForTest,
+                /*deleteRunnable =*/null);
+        mCardEditorDialog = new EditorDialog(activity, sEditorObserverForTest,
+                /*deleteRunnable =*/null);
 
         // Allow screenshots of the credit card number in Canary, Dev, and developer builds.
         if (ChromeVersionInfo.isBetaBuild() || ChromeVersionInfo.isStableBuild()) {
@@ -551,25 +536,40 @@ public class PaymentRequestUI implements DialogInterface.OnDismissListener, View
         mShippingOptionSection.setCanAddItems(false);
         mPaymentMethodSection.setCanAddItems(canAddCards);
 
+        // Put payment method section on top of address section for
+        // WEB_PAYMENTS_METHOD_SECTION_ORDER_V2.
+        boolean methodSectionOrderV2 =
+                ChromeFeatureList.isEnabled(ChromeFeatureList.WEB_PAYMENTS_METHOD_SECTION_ORDER_V2);
+
         // Add the necessary sections to the layout.
         mPaymentContainerLayout.addView(mOrderSummarySection, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        mSectionSeparators.add(new SectionSeparator(mPaymentContainerLayout));
+        if (methodSectionOrderV2) {
+            mSectionSeparators.add(new SectionSeparator(mPaymentContainerLayout));
+            mPaymentContainerLayout.addView(mPaymentMethodSection,
+                    new LinearLayout.LayoutParams(
+                            LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        }
         if (mRequestShipping) {
+            mSectionSeparators.add(new SectionSeparator(mPaymentContainerLayout));
             // The shipping breakout sections are only added if they are needed.
             mPaymentContainerLayout.addView(mShippingAddressSection,
                     new LinearLayout.LayoutParams(
                             LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-            mSectionSeparators.add(new SectionSeparator(mPaymentContainerLayout));
         }
-        mPaymentContainerLayout.addView(mPaymentMethodSection, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        if (!methodSectionOrderV2) {
+            mSectionSeparators.add(new SectionSeparator(mPaymentContainerLayout));
+            mPaymentContainerLayout.addView(mPaymentMethodSection,
+                    new LinearLayout.LayoutParams(
+                            LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        }
         if (mRequestContactDetails) {
             // Contact details are optional, depending on the merchant website.
             mSectionSeparators.add(new SectionSeparator(mPaymentContainerLayout));
             mPaymentContainerLayout.addView(mContactDetailsSection, new LinearLayout.LayoutParams(
                     LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         }
+
         mRequestView.addOnLayoutChangeListener(new FadeInAnimator());
         mRequestView.addOnLayoutChangeListener(new PeekingAnimator());
 
@@ -618,7 +618,9 @@ public class PaymentRequestUI implements DialogInterface.OnDismissListener, View
             mErrorView.show(mFullContainer, dismissRunnable);
         }
 
-        if (sObserverForTest != null) sObserverForTest.onPaymentRequestResultReady(this);
+        if (sPaymentRequestObserverForTest != null) {
+            sPaymentRequestObserverForTest.onPaymentRequestResultReady(this);
+        }
     }
 
     /**
@@ -1122,7 +1124,7 @@ public class PaymentRequestUI implements DialogInterface.OnDismissListener, View
         mIsClosing = true;
         if (mEditorDialog.isShowing()) mEditorDialog.dismiss();
         if (mCardEditorDialog.isShowing()) mCardEditorDialog.dismiss();
-        if (sObserverForTest != null) sObserverForTest.onPaymentRequestDismiss();
+        if (sEditorObserverForTest != null) sEditorObserverForTest.onEditorDismiss();
         if (!mIsClientClosing) mClient.onDismiss();
     }
 
@@ -1341,8 +1343,14 @@ public class PaymentRequestUI implements DialogInterface.OnDismissListener, View
     }
 
     @VisibleForTesting
-    public static void setObserverForTest(PaymentRequestObserverForTest observerForTest) {
-        sObserverForTest = observerForTest;
+    public static void setEditorObserverForTest(EditorObserverForTest editorObserverForTest) {
+        sEditorObserverForTest = editorObserverForTest;
+    }
+
+    @VisibleForTesting
+    public static void setPaymentRequestObserverForTest(
+            PaymentRequestObserverForTest paymentRequestObserverForTest) {
+        sPaymentRequestObserverForTest = paymentRequestObserverForTest;
     }
 
     @VisibleForTesting
@@ -1376,14 +1384,14 @@ public class PaymentRequestUI implements DialogInterface.OnDismissListener, View
     }
 
     private void notifyReadyForInput() {
-        if (sObserverForTest != null && isAcceptingUserInput()) {
-            sObserverForTest.onPaymentRequestReadyForInput(this);
+        if (sPaymentRequestObserverForTest != null && isAcceptingUserInput()) {
+            sPaymentRequestObserverForTest.onPaymentRequestReadyForInput(this);
         }
     }
 
     private void notifySelectionChecked() {
-        if (sObserverForTest != null) {
-            sObserverForTest.onPaymentRequestSelectionChecked(this);
+        if (sPaymentRequestObserverForTest != null) {
+            sPaymentRequestObserverForTest.onPaymentRequestSelectionChecked(this);
         }
     }
 }

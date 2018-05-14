@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2014 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -13,13 +14,7 @@ import struct
 from chromite.scripts import lddtree
 
 from elftools.elf import elffile
-from elftools.elf import enums
 from elftools.common import utils
-
-
-# Reverse dict() from numeric values to strings used to lookup st_shndx.
-SH_TYPE_VALUES = dict((value, name)
-                      for name, value in enums.ENUM_SH_TYPE.iteritems())
 
 
 def ParseELFSymbols(elf):
@@ -29,15 +24,10 @@ def ParseELFSymbols(elf):
     elf: An elffile.ELFFile instance.
 
   Returns:
-    A 2-tuple of (imported, exported) symbols. |imported| is a set of strings
-    of undefined symbols. |exported| is a dict where the keys are defined
-    symbols and the values are 3-tuples (st_info_bind, st_size, st_shndx) with
-    the details of the corresponding exported symbol. Note that for imported
-    symbols this information is always ('STB_GLOBAL', 0, 'SHN_UNDEF') and thus
-    not included in the result.
+    A 2-tuple of (imported, exported) symbols, each of which is a set.
   """
   imp = set()
-  exp = dict()
+  exp = set()
 
   if elf.header.e_type not in ('ET_DYN', 'ET_EXEC'):
     return imp, exp
@@ -89,19 +79,18 @@ def ParseELFSymbols(elf):
         continue
       symbol_name = stringtable.get_string(symbol.st_name)
       if symbol['st_shndx'] == 'SHN_UNDEF':
-        if symbol['st_info']['bind'] == 'STB_GLOBAL' and symbol_name:
+        if symbol['st_info']['bind'] == 'STB_GLOBAL':
           # Global undefined --> required symbols.
-          # We ignore weak undefined symbols, and empty strings.
+          # We ignore weak undefined symbols.
           imp.add(symbol_name)
       elif symbol['st_other']['visibility'] == 'STV_DEFAULT':
         # Exported symbols must have default visibility.
-        st_shndx = SH_TYPE_VALUES.get(symbol['st_shndx'], symbol['st_shndx'])
-        exp[symbol_name] = (symbol['st_info']['bind'], symbol['st_size'],
-                            st_shndx)
+        exp.add(symbol_name)
+
   return imp, exp
 
 
-def ParseELF(root, rel_path, ldpaths=None, parse_symbols=True):
+def ParseELF(root, rel_path, ldpaths=None, parse_symbols=False):
   """Parse the ELF file.
 
   Loads and parses the passed elf file.

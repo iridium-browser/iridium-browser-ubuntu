@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
@@ -79,7 +78,7 @@ class TestConnectionListener
         did_read_from_socket_(false),
         task_runner_(base::ThreadTaskRunnerHandle::Get()) {}
 
-  ~TestConnectionListener() override {}
+  ~TestConnectionListener() override = default;
 
   // Get called from the EmbeddedTestServer thread to be notified that
   // a connection was accepted.
@@ -163,7 +162,7 @@ class EmbeddedTestServerTest
   void OnURLFetchComplete(const URLFetcher* source) override {
     ++num_responses_received_;
     if (num_responses_received_ == num_responses_expected_)
-      base::MessageLoop::current()->QuitWhenIdle();
+      base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
   // Waits until the specified number of responses are received.
@@ -244,13 +243,9 @@ TEST_P(EmbeddedTestServerTest, GetURLWithHostname) {
 }
 
 TEST_P(EmbeddedTestServerTest, RegisterRequestHandler) {
-  server_->RegisterRequestHandler(
-      base::Bind(&EmbeddedTestServerTest::HandleRequest,
-                 base::Unretained(this),
-                 "/test",
-                 "<b>Worked!</b>",
-                 "text/html",
-                 HTTP_OK));
+  server_->RegisterRequestHandler(base::BindRepeating(
+      &EmbeddedTestServerTest::HandleRequest, base::Unretained(this), "/test",
+      "<b>Worked!</b>", "text/html", HTTP_OK));
   ASSERT_TRUE(server_->Start());
 
   std::unique_ptr<URLFetcher> fetcher =
@@ -358,27 +353,15 @@ TEST_P(EmbeddedTestServerTest, ConnectionListenerRead) {
 }
 
 TEST_P(EmbeddedTestServerTest, ConcurrentFetches) {
-  server_->RegisterRequestHandler(
-      base::Bind(&EmbeddedTestServerTest::HandleRequest,
-                 base::Unretained(this),
-                 "/test1",
-                 "Raspberry chocolate",
-                 "text/html",
-                 HTTP_OK));
-  server_->RegisterRequestHandler(
-      base::Bind(&EmbeddedTestServerTest::HandleRequest,
-                 base::Unretained(this),
-                 "/test2",
-                 "Vanilla chocolate",
-                 "text/html",
-                 HTTP_OK));
-  server_->RegisterRequestHandler(
-      base::Bind(&EmbeddedTestServerTest::HandleRequest,
-                 base::Unretained(this),
-                 "/test3",
-                 "No chocolates",
-                 "text/plain",
-                 HTTP_NOT_FOUND));
+  server_->RegisterRequestHandler(base::BindRepeating(
+      &EmbeddedTestServerTest::HandleRequest, base::Unretained(this), "/test1",
+      "Raspberry chocolate", "text/html", HTTP_OK));
+  server_->RegisterRequestHandler(base::BindRepeating(
+      &EmbeddedTestServerTest::HandleRequest, base::Unretained(this), "/test2",
+      "Vanilla chocolate", "text/html", HTTP_OK));
+  server_->RegisterRequestHandler(base::BindRepeating(
+      &EmbeddedTestServerTest::HandleRequest, base::Unretained(this), "/test3",
+      "No chocolates", "text/plain", HTTP_NOT_FOUND));
   ASSERT_TRUE(server_->Start());
 
   std::unique_ptr<URLFetcher> fetcher1 =
@@ -420,8 +403,8 @@ namespace {
 
 class CancelRequestDelegate : public TestDelegate {
  public:
-  CancelRequestDelegate() {}
-  ~CancelRequestDelegate() override {}
+  CancelRequestDelegate() = default;
+  ~CancelRequestDelegate() override = default;
 
   void OnResponseStarted(URLRequest* request, int net_error) override {
     TestDelegate::OnResponseStarted(request, net_error);
@@ -464,7 +447,7 @@ class InfiniteResponse : public BasicHttpResponse {
 
 std::unique_ptr<HttpResponse> HandleInfiniteRequest(
     const HttpRequest& request) {
-  return base::WrapUnique(new InfiniteResponse);
+  return std::make_unique<InfiniteResponse>();
 }
 
 }  // anonymous namespace
@@ -477,8 +460,9 @@ TEST_P(EmbeddedTestServerTest, CloseDuringWrite) {
   CancelRequestDelegate cancel_delegate;
   TestURLRequestContext context;
   cancel_delegate.set_cancel_in_response_started(true);
-  server_->RegisterRequestHandler(base::Bind(
-      &HandlePrefixedRequest, "/infinite", base::Bind(&HandleInfiniteRequest)));
+  server_->RegisterRequestHandler(
+      base::BindRepeating(&HandlePrefixedRequest, "/infinite",
+                          base::BindRepeating(&HandleInfiniteRequest)));
   ASSERT_TRUE(server_->Start());
 
   std::unique_ptr<URLRequest> request =
@@ -502,11 +486,6 @@ const CertificateValuesEntry kCertificateValuesEntry[] = {
     {EmbeddedTestServer::CERT_COMMON_NAME_IS_DOMAIN, false, "localhost",
      "Test Root CA"},
     {EmbeddedTestServer::CERT_EXPIRED, true, "127.0.0.1", "Test Root CA"},
-    {EmbeddedTestServer::CERT_CHAIN_WRONG_ROOT, false, "127.0.0.1", "B CA"},
-#if !defined(OS_WIN) && !defined(OS_ANDROID)
-    {EmbeddedTestServer::CERT_BAD_VALIDITY, true, "Leaf Certificate",
-     "Test Root CA"},
-#endif
 };
 
 TEST_P(EmbeddedTestServerTest, GetCertificate) {
@@ -609,7 +588,7 @@ class EmbeddedTestServerThreadingTestDelegate
 
   // URLFetcherDelegate override.
   void OnURLFetchComplete(const URLFetcher* source) override {
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
  private:

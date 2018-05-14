@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_TOOLS_EVENT_LOG_VISUALIZER_ANALYZER_H_
-#define WEBRTC_RTC_TOOLS_EVENT_LOG_VISUALIZER_ANALYZER_H_
+#ifndef RTC_TOOLS_EVENT_LOG_VISUALIZER_ANALYZER_H_
+#define RTC_TOOLS_EVENT_LOG_VISUALIZER_ANALYZER_H_
 
 #include <map>
 #include <memory>
@@ -18,12 +18,13 @@
 #include <utility>
 #include <vector>
 
-#include "webrtc/logging/rtc_event_log/rtc_event_log_parser.h"
-#include "webrtc/modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor.h"
-#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet.h"
-#include "webrtc/rtc_base/function_view.h"
-#include "webrtc/rtc_tools/event_log_visualizer/plot_base.h"
+#include "logging/rtc_event_log/rtc_event_log_parser.h"
+#include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/rtcp_packet.h"
+#include "rtc_base/function_view.h"
+#include "rtc_tools/event_log_visualizer/plot_base.h"
+#include "rtc_tools/event_log_visualizer/triage_notifications.h"
 
 namespace webrtc {
 namespace plotting {
@@ -79,26 +80,28 @@ class EventLogAnalyzer {
 
   void CreateIncomingPacketLossGraph(Plot* plot);
 
-  void CreateDelayChangeGraph(Plot* plot);
-
-  void CreateAccumulatedDelayChangeGraph(Plot* plot);
+  void CreateIncomingDelayDeltaGraph(Plot* plot);
+  void CreateIncomingDelayGraph(Plot* plot);
 
   void CreateFractionLossGraph(Plot* plot);
 
   void CreateTotalBitrateGraph(PacketDirection desired_direction,
                                Plot* plot,
-                               bool show_detector_state = false);
+                               bool show_detector_state = false,
+                               bool show_alr_state = false);
 
   void CreateStreamBitrateGraph(PacketDirection desired_direction, Plot* plot);
 
-  void CreateBweSimulationGraph(Plot* plot);
+  void CreateSendSideBweSimulationGraph(Plot* plot);
+  void CreateReceiveSideBweSimulationGraph(Plot* plot);
 
   void CreateNetworkDelayFeedbackGraph(Plot* plot);
+  void CreatePacerDelayGraph(Plot* plot);
   void CreateTimestampGraph(Plot* plot);
 
   void CreateAudioEncoderTargetBitrateGraph(Plot* plot);
   void CreateAudioEncoderFrameLengthGraph(Plot* plot);
-  void CreateAudioEncoderUplinkPacketLossFractionGraph(Plot* plot);
+  void CreateAudioEncoderPacketLossGraph(Plot* plot);
   void CreateAudioEncoderEnableFecGraph(Plot* plot);
   void CreateAudioEncoderEnableDtxGraph(Plot* plot);
   void CreateAudioEncoderNumChannelsGraph(Plot* plot);
@@ -106,9 +109,15 @@ class EventLogAnalyzer {
                                     int file_sample_rate_hz,
                                     Plot* plot);
 
+  void CreateIceCandidatePairConfigGraph(Plot* plot);
+  void CreateIceConnectivityCheckGraph(Plot* plot);
+
   // Returns a vector of capture and arrival timestamps for the video frames
   // of the stream with the most number of frames.
   std::vector<std::pair<int64_t, int64_t>> GetFrameTimestamps() const;
+
+  void CreateTriageNotifications();
+  void PrintNotifications(FILE* file);
 
  private:
   class StreamId {
@@ -144,7 +153,16 @@ class EventLogAnalyzer {
 
   bool IsAudioSsrc(StreamId stream_id) const;
 
-  std::string GetStreamName(StreamId) const;
+  std::string GetStreamName(StreamId stream_id) const;
+
+  rtc::Optional<uint32_t> EstimateRtpClockFrequency(
+      const std::vector<LoggedRtpPacket>& packets) const;
+
+  float ToCallTime(int64_t timestamp) const;
+
+  void Notification(std::unique_ptr<TriageNotification> notification);
+
+  std::string GetCandidatePairLogDescriptionFromId(uint32_t candidate_pair_id);
 
   const ParsedRtcEventLog& parsed_log_;
 
@@ -187,6 +205,18 @@ class EventLogAnalyzer {
 
   std::vector<ParsedRtcEventLog::BweDelayBasedUpdate> bwe_delay_updates_;
 
+  std::vector<std::unique_ptr<TriageNotification>> notifications_;
+
+  std::vector<ParsedRtcEventLog::AlrStateEvent> alr_state_events_;
+
+  std::vector<ParsedRtcEventLog::IceCandidatePairConfig>
+      ice_candidate_pair_configs_;
+
+  std::vector<ParsedRtcEventLog::IceCandidatePairEvent>
+      ice_candidate_pair_events_;
+
+  std::map<uint32_t, std::string> candidate_pair_desc_by_id_;
+
   // Window and step size used for calculating moving averages, e.g. bitrate.
   // The generated data points will be |step_| microseconds apart.
   // Only events occuring at most |window_duration_| microseconds before the
@@ -205,4 +235,4 @@ class EventLogAnalyzer {
 }  // namespace plotting
 }  // namespace webrtc
 
-#endif  // WEBRTC_RTC_TOOLS_EVENT_LOG_VISUALIZER_ANALYZER_H_
+#endif  // RTC_TOOLS_EVENT_LOG_VISUALIZER_ANALYZER_H_

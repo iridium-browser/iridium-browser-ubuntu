@@ -6,8 +6,8 @@
 #define CHROME_BROWSER_SAFE_BROWSING_NOTIFICATION_IMAGE_REPORTER_H_
 
 #include <memory>
-#include <queue>
 
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -91,12 +91,18 @@ class NotificationImageReporter {
                       const gfx::Size& dimensions,
                       const gfx::Size& original_dimensions);
 
+  // Called when the asynchronous CSD whitelist check completes.
+  void OnWhitelistCheckDoneOnIO(Profile* profile,
+                                const GURL& origin,
+                                const SkBitmap& image,
+                                bool match_whitelist);
+
   std::unique_ptr<net::ReportSender> report_sender_;
 
   // Timestamps of when we sent notification images. Used to limit the number
   // of requests that we send in a day. Only access on the IO thread.
   // TODO(johnme): Serialize this so that it doesn't reset on browser restart.
-  std::queue<base::Time> report_times_;
+  base::queue<base::Time> report_times_;
 
   // Keep this last. Only dereference these pointers on the IO thread.
   base::WeakPtrFactory<NotificationImageReporter> weak_factory_on_io_;

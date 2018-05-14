@@ -34,6 +34,8 @@ const char kPostContentType[] = "application/protobuf";
 
 const char kServiceTokenAuthHeader[] = "Authorization: GoogleLogin auth=";
 const char kDMTokenAuthHeader[] = "Authorization: GoogleDMToken token=";
+const char kEnrollmentTokenAuthHeader[] =
+    "Authorization: GoogleEnrollmentToken token=";
 
 // Number of times to retry on ERR_NETWORK_CHANGED errors.
 const int kMaxRetries = 3;
@@ -158,6 +160,12 @@ const char* JobTypeToRequestType(DeviceManagementRequestJob::JobType type) {
       return dm_protocol::kValueRequestActiveDirectoryPlayActivity;
     case DeviceManagementRequestJob::TYPE_REQUEST_LICENSE_TYPES:
       return dm_protocol::kValueRequestCheckDeviceLicense;
+    case DeviceManagementRequestJob::TYPE_UPLOAD_APP_INSTALL_REPORT:
+      return dm_protocol::kValueRequestAppInstallReport;
+    case DeviceManagementRequestJob::TYPE_TOKEN_ENROLLMENT:
+      return dm_protocol::kValueRequestTokenEnrollment;
+    case DeviceManagementRequestJob::TYPE_CHROME_DESKTOP_REPORT:
+      return dm_protocol::kValueRequestChromeDesktopReport;
   }
   NOTREACHED() << "Invalid job type " << type;
   return "";
@@ -300,9 +308,9 @@ void DeviceManagementRequestJobImpl::HandleResponse(
     LOG(WARNING) << "DMServer sent an error response: " << response_code;
   } else {
     // Success with retries_count_ retries.
-    UMA_HISTOGRAM_ENUMERATION("Enterprise.DMServerRequestSuccess",
-                              retries_count_,
-                              DMServerRequestSuccess::REQUEST_MAX);
+    UMA_HISTOGRAM_EXACT_LINEAR(
+        "Enterprise.DMServerRequestSuccess", retries_count_,
+        static_cast<int>(DMServerRequestSuccess::REQUEST_MAX));
   }
 
   switch (response_code) {
@@ -410,6 +418,8 @@ void DeviceManagementRequestJobImpl::ConfigureRequest(
     extra_headers += kServiceTokenAuthHeader + gaia_token_ + "\n";
   if (!dm_token_.empty())
     extra_headers += kDMTokenAuthHeader + dm_token_ + "\n";
+  if (!enrollment_token_.empty())
+    extra_headers += kEnrollmentTokenAuthHeader + enrollment_token_ + "\n";
   fetcher->SetExtraRequestHeaders(extra_headers);
 }
 
@@ -481,6 +491,10 @@ void DeviceManagementRequestJob::SetDMToken(const std::string& dm_token) {
 
 void DeviceManagementRequestJob::SetClientID(const std::string& client_id) {
   AddParameter(dm_protocol::kParamDeviceID, client_id);
+}
+
+void DeviceManagementRequestJob::SetEnrollmentToken(const std::string& token) {
+  enrollment_token_ = token;
 }
 
 void DeviceManagementRequestJob::SetCritical(bool critical) {
@@ -613,7 +627,7 @@ void DeviceManagementService::StartJob(DeviceManagementRequestJobImpl* job) {
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "This feature cannot be controlled by Chrome settings, but users "
             "can sign out of Chrome to disable it."

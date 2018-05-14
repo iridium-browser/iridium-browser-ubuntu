@@ -11,7 +11,6 @@
 namespace blink {
 
 class ExecutionContext;
-class MediaKeysClient;
 class WebEncryptedMediaClient;
 
 class MODULES_EXPORT MediaKeysController final
@@ -20,24 +19,21 @@ class MODULES_EXPORT MediaKeysController final
   USING_GARBAGE_COLLECTED_MIXIN(MediaKeysController);
 
  public:
+  static const char kSupplementName[];
+
   WebEncryptedMediaClient* EncryptedMediaClient(ExecutionContext*);
 
-  static void ProvideMediaKeysTo(Page&, MediaKeysClient*);
+  static void ProvideMediaKeysTo(Page&);
   static MediaKeysController* From(Page* page) {
-    return static_cast<MediaKeysController*>(
-        Supplement<Page>::From(page, SupplementName()));
+    return Supplement<Page>::From<MediaKeysController>(page);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { Supplement<Page>::Trace(visitor); }
+  void Trace(blink::Visitor* visitor) override {
+    Supplement<Page>::Trace(visitor);
+  }
 
  private:
-  explicit MediaKeysController(MediaKeysClient*);
-  static const char* SupplementName();
-
-  // Raw reference to the client implementation, which is currently owned
-  // by the WebView. Its lifetime extends past any m_client accesses.
-  // It is not on the Oilpan heap.
-  MediaKeysClient* client_;
+  MediaKeysController();
 };
 
 }  // namespace blink

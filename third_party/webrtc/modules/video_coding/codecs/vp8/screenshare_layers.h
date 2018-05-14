@@ -1,21 +1,21 @@
 /* Copyright (c) 2013 The WebRTC project authors. All Rights Reserved.
-*
-*  Use of this source code is governed by a BSD-style license
-*  that can be found in the LICENSE file in the root of the source
-*  tree. An additional intellectual property rights grant can be found
-*  in the file PATENTS.  All contributing project authors may
-*  be found in the AUTHORS file in the root of the source tree.
-*/
-#ifndef WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_SCREENSHARE_LAYERS_H_
-#define WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_SCREENSHARE_LAYERS_H_
+ *
+ *  Use of this source code is governed by a BSD-style license
+ *  that can be found in the LICENSE file in the root of the source
+ *  tree. An additional intellectual property rights grant can be found
+ *  in the file PATENTS.  All contributing project authors may
+ *  be found in the AUTHORS file in the root of the source tree.
+ */
+#ifndef MODULES_VIDEO_CODING_CODECS_VP8_SCREENSHARE_LAYERS_H_
+#define MODULES_VIDEO_CODING_CODECS_VP8_SCREENSHARE_LAYERS_H_
 
 #include <vector>
 
-#include "webrtc/modules/video_coding/codecs/vp8/temporal_layers.h"
-#include "webrtc/modules/video_coding/utility/frame_dropper.h"
-#include "webrtc/rtc_base/rate_statistics.h"
-#include "webrtc/rtc_base/timeutils.h"
-#include "webrtc/typedefs.h"
+#include "modules/video_coding/codecs/vp8/temporal_layers.h"
+#include "modules/video_coding/utility/frame_dropper.h"
+#include "rtc_base/rate_statistics.h"
+#include "rtc_base/timeutils.h"
+#include "typedefs.h"  // NOLINT(build/include)
 
 namespace webrtc {
 
@@ -45,7 +45,7 @@ class ScreenshareLayers : public TemporalLayers {
 
   // Update the encoder configuration with target bitrates or other parameters.
   // Returns true iff the configuration was actually modified.
-  bool UpdateConfiguration(vpx_codec_enc_cfg_t* cfg) override;
+  bool UpdateConfiguration(Vp8EncoderConfig* cfg) override;
 
   void PopulateCodecSpecific(bool base_layer_sync,
                              const TemporalLayers::FrameConfig& tl_config,
@@ -53,9 +53,6 @@ class ScreenshareLayers : public TemporalLayers {
                              uint32_t timestamp) override;
 
   void FrameEncoded(unsigned int size, int qp) override;
-
-  int GetTemporalLayerId(
-      const TemporalLayers::FrameConfig& tl_config) const override;
 
   uint8_t Tl0PicIdx() const override;
 
@@ -74,6 +71,7 @@ class ScreenshareLayers : public TemporalLayers {
   int64_t last_timestamp_;
   int64_t last_sync_timestamp_;
   int64_t last_emitted_tl0_timestamp_;
+  int64_t last_frame_time_ms_;
   rtc::TimestampWrapAroundHandler time_wrap_handler_;
   int min_qp_;
   int max_qp_;
@@ -127,4 +125,4 @@ class ScreenshareLayers : public TemporalLayers {
 };
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_SCREENSHARE_LAYERS_H_
+#endif  // MODULES_VIDEO_CODING_CODECS_VP8_SCREENSHARE_LAYERS_H_

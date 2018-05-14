@@ -4,24 +4,34 @@
 
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 
+#include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/grit/theme_resources.h"
-#include "components/signin/core/common/profile_management_switches.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/theme_provider.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/gfx/scoped_canvas.h"
 #include "ui/views/background.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
 #include "chrome/browser/ui/views/frame/taskbar_decorator_win.h"
@@ -31,6 +41,7 @@ BrowserNonClientFrameView::BrowserNonClientFrameView(BrowserFrame* frame,
                                                      BrowserView* browser_view)
     : frame_(frame),
       browser_view_(browser_view),
+      profile_switcher_(this),
       profile_indicator_icon_(nullptr) {
   // The profile manager may by null in tests.
   if (g_browser_process->profile_manager()) {
@@ -51,6 +62,10 @@ void BrowserNonClientFrameView::OnBrowserViewInitViewsComplete() {
   UpdateMinimumSize();
 }
 
+void BrowserNonClientFrameView::OnMaximizedStateChanged() {}
+
+void BrowserNonClientFrameView::OnFullscreenStateChanged() {}
+
 gfx::ImageSkia BrowserNonClientFrameView::GetIncognitoAvatarIcon() const {
   const SkColor icon_color = color_utils::PickContrastingColor(
       SK_ColorWHITE, gfx::kChromeIconGrey, GetFrameColor());
@@ -68,6 +83,11 @@ SkColor BrowserNonClientFrameView::GetToolbarTopSeparatorColor() const {
 }
 
 views::View* BrowserNonClientFrameView::GetProfileSwitcherView() const {
+  return profile_switcher_.view();
+}
+
+views::View* BrowserNonClientFrameView::GetHostedAppMenuView() {
+  NOTREACHED();
   return nullptr;
 }
 
@@ -141,7 +161,38 @@ gfx::ImageSkia BrowserNonClientFrameView::GetFrameOverlayImage() const {
   return GetFrameOverlayImage(ShouldPaintAsActive());
 }
 
-void BrowserNonClientFrameView::UpdateProfileIndicatorIcon() {
+void BrowserNonClientFrameView::UpdateProfileIcons() {
+  const AvatarButtonStyle avatar_button_style = GetAvatarButtonStyle();
+  if (avatar_button_style != AvatarButtonStyle::NONE &&
+      browser_view()->IsRegularOrGuestSession()) {
+    // Platform supports a profile switcher that will be shown. Skip the rest.
+    profile_switcher_.Update(avatar_button_style);
+    return;
+  }
+
+  Browser* browser = browser_view()->browser();
+  const Profile* profile = browser->profile();
+  const bool is_incognito =
+      profile->GetProfileType() == Profile::INCOGNITO_PROFILE;
+
+  // In the touch-optimized UI, we don't show the incognito icon in the browser
+  // frame. It's instead shown in the new tab button. However, we still show an
+  // avatar icon for the teleported browser windows between multi-user sessions
+  // (Chrome OS only). Note that you can't teleport an incognito window.
+  if (is_incognito && ui::MaterialDesignController::IsTouchOptimizedUiEnabled())
+    return;
+
+#if defined(OS_CHROMEOS)
+  // Ash and MUS specific.
+  if (!browser->is_type_tabbed() && !browser->is_app())
+    return;
+
+  if (!is_incognito && !MultiUserWindowManager::ShouldShowAvatar(
+                           browser_view()->GetNativeWindow())) {
+    return;
+  }
+#endif  // defined(OS_CHROMEOS)
+
   if (!profile_indicator_icon_) {
     profile_indicator_icon_ = new ProfileIndicatorIcon();
     profile_indicator_icon_->set_id(VIEW_ID_PROFILE_INDICATOR_ICON);
@@ -152,8 +203,7 @@ void BrowserNonClientFrameView::UpdateProfileIndicatorIcon() {
   }
 
   gfx::Image icon;
-  const Profile* profile = browser_view()->browser()->profile();
-  if (profile->GetProfileType() == Profile::INCOGNITO_PROFILE) {
+  if (is_incognito) {
     icon = gfx::Image(GetIncognitoAvatarIcon());
   } else {
 #if defined(OS_CHROMEOS)
@@ -164,6 +214,65 @@ void BrowserNonClientFrameView::UpdateProfileIndicatorIcon() {
   }
 
   profile_indicator_icon_->SetIcon(icon);
+}
+
+void BrowserNonClientFrameView::LayoutIncognitoButton() {
+  DCHECK(profile_indicator_icon());
+#if !defined(OS_CHROMEOS)
+  // ChromeOS shows avatar on V1 app.
+  DCHECK(browser_view()->IsTabStripVisible());
+#endif
+  gfx::ImageSkia incognito_icon = GetIncognitoAvatarIcon();
+  int avatar_bottom = GetTopInset(false) + browser_view()->GetTabStripHeight() -
+                      kAvatarIconPadding;
+  int avatar_y = avatar_bottom - incognito_icon.height();
+  int avatar_height = incognito_icon.height();
+
+  gfx::Rect avatar_bounds(kAvatarIconPadding, avatar_y, incognito_icon.width(),
+                          avatar_height);
+  profile_indicator_icon()->SetBoundsRect(avatar_bounds);
+  profile_indicator_icon()->SetVisible(true);
+}
+
+void BrowserNonClientFrameView::PaintToolbarBackground(
+    gfx::Canvas* canvas) const {
+  gfx::Rect toolbar_bounds(browser_view()->GetToolbarBounds());
+  if (toolbar_bounds.IsEmpty())
+    return;
+  gfx::Point toolbar_origin(toolbar_bounds.origin());
+  ConvertPointToTarget(browser_view(), this, &toolbar_origin);
+  toolbar_bounds.set_origin(toolbar_origin);
+
+  const ui::ThemeProvider* tp = GetThemeProvider();
+  const int x = toolbar_bounds.x();
+  const int y = toolbar_bounds.y();
+  const int w = toolbar_bounds.width();
+
+  // Background.
+  if (tp->HasCustomImage(IDR_THEME_TOOLBAR)) {
+    canvas->TileImageInt(*tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR),
+                         x + GetThemeBackgroundXInset(),
+                         y - GetTopInset(false) - GetLayoutInsets(TAB).top(), x,
+                         y, w, toolbar_bounds.height());
+  } else {
+    canvas->FillRect(toolbar_bounds,
+                     tp->GetColor(ThemeProperties::COLOR_TOOLBAR));
+  }
+
+  // Top stroke.
+  gfx::ScopedCanvas scoped_canvas(canvas);
+  gfx::Rect tabstrip_bounds =
+      GetMirroredRect(GetBoundsForTabStrip(browser_view()->tabstrip()));
+  canvas->ClipRect(tabstrip_bounds, SkClipOp::kDifference);
+  gfx::Rect separator_rect(x, y, w, 0);
+  separator_rect.set_y(tabstrip_bounds.bottom());
+  BrowserView::Paint1pxHorizontalLine(canvas, GetToolbarTopSeparatorColor(),
+                                      separator_rect, true);
+
+  // Toolbar/content separator.
+  BrowserView::Paint1pxHorizontalLine(
+      canvas, tp->GetColor(ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR),
+      toolbar_bounds, true);
 }
 
 void BrowserNonClientFrameView::ViewHierarchyChanged(
@@ -254,6 +363,11 @@ void BrowserNonClientFrameView::OnProfileAvatarChanged(
   UpdateProfileIcons();
 }
 
+void BrowserNonClientFrameView::OnProfileHighResAvatarLoaded(
+    const base::FilePath& profile_path) {
+  UpdateTaskbarDecoration();
+}
+
 const ui::ThemeProvider*
 BrowserNonClientFrameView::GetThemeProviderForProfile() const {
   // Because the frame's accessor reads the ThemeProvider from the profile and
@@ -282,11 +396,21 @@ void BrowserNonClientFrameView::UpdateTaskbarDecoration() {
   // with the default shortcut being pinned, we add the runtime badge for
   // safety. See crbug.com/313800.
   gfx::Image decoration;
-  AvatarMenu::GetImageForMenuButton(
+  AvatarMenu::ImageLoadStatus status = AvatarMenu::GetImageForMenuButton(
       browser_view()->browser()->profile()->GetPath(), &decoration);
-  // This can happen if the user deletes the current profile.
-  if (decoration.IsEmpty())
+
+  UMA_HISTOGRAM_ENUMERATION(
+      "Profile.AvatarLoadStatus", status,
+      static_cast<int>(AvatarMenu::ImageLoadStatus::MAX) + 1);
+
+  // If the user is using a Gaia picture and the picture is still being loaded,
+  // wait until the load finishes. This taskbar decoration will be triggered
+  // again upon the finish of the picture load.
+  if (status == AvatarMenu::ImageLoadStatus::LOADING ||
+      status == AvatarMenu::ImageLoadStatus::PROFILE_DELETED) {
     return;
+  }
+
   chrome::DrawTaskbarDecoration(frame_->GetNativeWindow(), &decoration);
 #endif
 }

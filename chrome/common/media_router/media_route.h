@@ -14,6 +14,10 @@
 
 namespace media_router {
 
+// TODO(imcheng): Use the Mojo enum directly once we Mojo-ified
+// MediaRouterAndroid.
+enum class RouteControllerType { kNone, kGeneric, kHangouts, kMirroring };
+
 // MediaRoute objects contain the status and metadata of a routing
 // operation. The fields are immutable and reflect the route status
 // only at the time of object creation. Updated route statuses must
@@ -28,9 +32,8 @@ class MediaRoute {
   // |media_route_id|: ID of the route.
   // |media_source|: Description of source of the route.
   // |media_sink|: The sink that is receiving the media.
-  // |description|: Description of the route to be displayed.
+  // |description|: Human readable description of the casting activity.
   // |is_local|: true if the route was created from this browser.
-  // |custom_controller_path|: custom controller path if it is given by route
   //     provider. empty otherwise.
   // |for_display|: Set to true if this route should be displayed for
   //     |media_sink_id| in UI.
@@ -39,7 +42,6 @@ class MediaRoute {
              const MediaSink::Id& media_sink_id,
              const std::string& description,
              bool is_local,
-             const std::string& custom_controller_path,
              bool for_display);
   MediaRoute(const MediaRoute& other);
   MediaRoute();
@@ -50,6 +52,11 @@ class MediaRoute {
     media_route_id_ = media_route_id;
   }
   const MediaRoute::Id& media_route_id() const { return media_route_id_; }
+
+  void set_presentation_id(const std::string& presentation_id) {
+    presentation_id_ = presentation_id;
+  }
+  const std::string& presentation_id() const { return presentation_id_; }
 
   void set_media_source(const MediaSource& media_source) {
     media_source_ = media_source;
@@ -71,20 +78,10 @@ class MediaRoute {
   void set_local(bool is_local) { is_local_ = is_local; }
   bool is_local() const { return is_local_; }
 
-  void set_custom_controller_path(const std::string& custom_controller_path) {
-    custom_controller_path_ = custom_controller_path;
+  void set_controller_type(RouteControllerType controller_type) {
+    controller_type_ = controller_type;
   }
-  const std::string& custom_controller_path() const {
-    return custom_controller_path_;
-  }
-
-  void set_supports_media_route_controller(
-      bool supports_media_route_controller) {
-    supports_media_route_controller_ = supports_media_route_controller;
-  }
-  bool supports_media_route_controller() const {
-    return supports_media_route_controller_;
-  }
+  RouteControllerType controller_type() const { return controller_type_; }
 
   void set_for_display(bool for_display) { for_display_ = for_display; }
   bool for_display() const { return for_display_; }
@@ -92,10 +89,10 @@ class MediaRoute {
   void set_incognito(bool is_incognito) { is_incognito_ = is_incognito; }
   bool is_incognito() const { return is_incognito_; }
 
-  void set_offscreen_presentation(bool is_offscreen_presentation) {
-    is_offscreen_presentation_ = is_offscreen_presentation;
+  void set_local_presentation(bool is_local_presentation) {
+    is_local_presentation_ = is_local_presentation;
   }
-  bool is_offscreen_presentation() const { return is_offscreen_presentation_; }
+  bool is_local_presentation() const { return is_local_presentation_; }
 
   bool Equals(const MediaRoute& other) const;
 
@@ -103,27 +100,25 @@ class MediaRoute {
   // The media route identifier.
   MediaRoute::Id media_route_id_;
 
+  // The ID of the presentation that this route is associated with.
+  std::string presentation_id_;
+
   // The media source being routed.
   MediaSource media_source_;
 
   // The ID of sink being routed to.
   MediaSink::Id media_sink_id_;
 
-  // The description of the media route activity, for example
-  // "Playing Foo Bar Music All Access."
+  // Human readable description of the casting activity.  Examples:
+  // "Mirroring tab (www.example.com)", "Casting media", "Casting YouTube"
   std::string description_;
 
   // |true| if the route is created locally (versus discovered by a media route
   // provider.)
   bool is_local_ = false;
 
-  // The custom controller path. This allows route provider to have custom route
-  // detail as well as its own route control features route control features in
-  // the media router dialog.
-  std::string custom_controller_path_;
-
-  // Whether the provider for this route supports the Media Route Controller.
-  bool supports_media_route_controller_ = false;
+  // The type of MediaRouteController supported by this route.
+  RouteControllerType controller_type_ = RouteControllerType::kNone;
 
   // |true| if the route can be displayed in the UI.
   bool for_display_ = false;
@@ -131,9 +126,9 @@ class MediaRoute {
   // |true| if the route was created by an incognito profile.
   bool is_incognito_ = false;
 
-  // |true| if the presentation associated with this route is an offscreen
+  // |true| if the presentation associated with this route is a local
   // presentation.
-  bool is_offscreen_presentation_ = false;
+  bool is_local_presentation_ = false;
 };
 
 }  // namespace media_router

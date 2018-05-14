@@ -25,11 +25,12 @@
 #include "common/utilities.h"
 #include "libANGLE/Context.h"
 #include "libANGLE/Device.h"
-#include "libANGLE/histogram_macros.h"
 #include "libANGLE/Image.h"
-#include "libANGLE/Surface.h"
-#include "libANGLE/Stream.h"
 #include "libANGLE/ResourceManager.h"
+#include "libANGLE/Stream.h"
+#include "libANGLE/Surface.h"
+#include "libANGLE/histogram_macros.h"
+#include "libANGLE/renderer/DeviceImpl.h"
 #include "libANGLE/renderer/DisplayImpl.h"
 #include "libANGLE/renderer/ImageImpl.h"
 #include "third_party/trace_event/trace_event.h"
@@ -63,6 +64,8 @@
 #include "libANGLE/renderer/vulkan/win32/DisplayVkWin32.h"
 #elif defined(ANGLE_PLATFORM_LINUX)
 #include "libANGLE/renderer/vulkan/xcb/DisplayVkXcb.h"
+#elif defined(ANGLE_PLATFORM_ANDROID)
+#include "libANGLE/renderer/vulkan/android/DisplayVkAndroid.h"
 #else
 #error Unsupported Vulkan platform.
 #endif
@@ -209,6 +212,8 @@ rx::DisplayImpl *CreateDisplayFromAttribs(const AttributeMap &attribMap, const D
             impl = new rx::DisplayVkWin32(state);
 #elif defined(ANGLE_PLATFORM_LINUX)
             impl = new rx::DisplayVkXcb(state);
+#elif defined(ANGLE_PLATFORM_ANDROID)
+            impl = new rx::DisplayVkAndroid(state);
 #else
 #error Unsupported Vulkan platform.
 #endif
@@ -267,6 +272,14 @@ void ANGLESetDefaultDisplayPlatform(angle::EGLDisplayType display)
 }
 
 }  // anonymous namespace
+
+DisplayState::DisplayState()
+{
+}
+
+DisplayState::~DisplayState()
+{
+}
 
 // static
 Display *Display::GetDisplayFromNativeDisplay(EGLNativeDisplayType nativeDisplay,
@@ -467,6 +480,15 @@ Error Display::initialize()
         return EglNotInitialized();
     }
 
+    // OpenGL ES1 is implemented in the frontend, explicitly add ES1 support to all configs
+    for (auto &config : mConfigSet)
+    {
+        // TODO(geofflang): Enable the conformant bit once we pass enough tests
+        // config.second.conformant |= EGL_OPENGL_ES_BIT;
+
+        config.second.renderableType |= EGL_OPENGL_ES_BIT;
+    }
+
     initDisplayExtensions();
     initVendorString();
 
@@ -475,9 +497,10 @@ Error Display::initialize()
     {
         if (mDisplayExtensions.deviceQuery)
         {
-            rx::DeviceImpl *impl = nullptr;
-            ANGLE_TRY(mImplementation->getDevice(&impl));
-            ANGLE_TRY(Device::CreateDevice(this, impl, &mDevice));
+            std::unique_ptr<rx::DeviceImpl> impl(mImplementation->createDevice());
+            ASSERT(impl != nullptr);
+            ANGLE_TRY(impl->initialize());
+            mDevice = new Device(this, impl.release());
         }
         else
         {
@@ -493,7 +516,7 @@ Error Display::initialize()
 
     mProxyContext.reset(nullptr);
     gl::Context *proxyContext = new gl::Context(mImplementation, nullptr, nullptr, nullptr, nullptr,
-                                                egl::AttributeMap(), mDisplayExtensions, false);
+                                                egl::AttributeMap(), mDisplayExtensions);
     mProxyContext.reset(proxyContext);
 
     mInitialized = true;
@@ -757,7 +780,7 @@ Error Display::createContext(const Config *configuration,
 
     gl::Context *context =
         new gl::Context(mImplementation, configuration, shareContext, shareTextures, cachePointer,
-                        attribs, mDisplayExtensions, isRobustResourceInitEnabled());
+                        attribs, mDisplayExtensions);
 
     ASSERT(context != nullptr);
     mContextSet.insert(context);
@@ -980,9 +1003,6 @@ static ClientExtensions GenerateClientExtensions()
 
     extensions.clientGetAllProcAddresses = true;
 
-    // TODO(jmadill): Not fully implemented yet, but exposed everywhere.
-    extensions.displayRobustResourceInitialization = true;
-
     return extensions;
 }
 
@@ -1117,12 +1137,6 @@ Device *Display::getDevice() const
 gl::Version Display::getMaxSupportedESVersion() const
 {
     return mImplementation->getMaxSupportedESVersion();
-}
-
-bool Display::isRobustResourceInitEnabled() const
-{
-    return (mAttributeMap.get(EGL_DISPLAY_ROBUST_RESOURCE_INITIALIZATION_ANGLE, EGL_FALSE) ==
-            EGL_TRUE);
 }
 
 EGLint Display::programCacheGetAttrib(EGLenum attrib) const

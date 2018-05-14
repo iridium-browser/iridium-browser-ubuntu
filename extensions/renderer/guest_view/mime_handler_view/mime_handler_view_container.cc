@@ -7,13 +7,13 @@
 #include <map>
 #include <set>
 
+#include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "components/guest_view/common/guest_view_constants.h"
 #include "components/guest_view/common/guest_view_messages.h"
-#include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
-#include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_constants.h"
+#include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/guest_view/extensions_guest_view_messages.h"
 #include "gin/arguments.h"
@@ -62,8 +62,9 @@ class ScriptableObject : public gin::Wrappable<ScriptableObject>,
         post_message_function_template_.Reset(
             isolate,
             gin::CreateFunctionTemplate(
-                isolate, base::Bind(&MimeHandlerViewContainer::PostMessage,
-                                    container_, isolate)));
+                isolate,
+                base::Bind(&MimeHandlerViewContainer::PostJavaScriptMessage,
+                           container_, isolate)));
       }
       v8::Local<v8::FunctionTemplate> function_template =
           v8::Local<v8::FunctionTemplate>::New(isolate,
@@ -159,6 +160,10 @@ void MimeHandlerViewContainer::OnReady() {
   // "no-cors" and credentials mode "include".
   blink::WebURLRequest request(original_url_);
   request.SetRequestContext(blink::WebURLRequest::kRequestContextObject);
+  // The plugin resource request should skip service workers since "plug-ins
+  // may get their security origins from their own urls".
+  // https://w3c.github.io/ServiceWorker/#implementer-concerns
+  request.SetSkipServiceWorker(true);
   loader_->LoadAsynchronously(request, this);
 }
 
@@ -178,7 +183,7 @@ bool MimeHandlerViewContainer::OnMessage(const IPC::Message& message) {
 
 void MimeHandlerViewContainer::PluginDidFinishLoading() {
   DCHECK(!is_embedded_);
-  CreateMimeHandlerViewGuest();
+  CreateMimeHandlerViewGuestIfNecessary();
 }
 
 void MimeHandlerViewContainer::OnRenderFrameDestroyed() {
@@ -193,6 +198,15 @@ void MimeHandlerViewContainer::PluginDidReceiveData(const char* data,
 
 void MimeHandlerViewContainer::DidResizeElement(const gfx::Size& new_size) {
   element_size_ = new_size;
+
+  CreateMimeHandlerViewGuestIfNecessary();
+
+  // Don't try to resize a guest that hasn't been created yet. It is enough to
+  // initialise |element_size_| here and then we'll send that to the browser
+  // during guest creation.
+  if (!guest_created_)
+    return;
+
   render_frame()->Send(new ExtensionsGuestViewHostMsg_ResizeGuest(
       render_frame()->GetRoutingID(), element_instance_id(), new_size));
 }
@@ -214,11 +228,12 @@ void MimeHandlerViewContainer::DidReceiveData(const char* data,
 
 void MimeHandlerViewContainer::DidFinishLoading(double /* unused */) {
   DCHECK(is_embedded_);
-  CreateMimeHandlerViewGuest();
+  CreateMimeHandlerViewGuestIfNecessary();
 }
 
-void MimeHandlerViewContainer::PostMessage(v8::Isolate* isolate,
-                                           v8::Local<v8::Value> message) {
+void MimeHandlerViewContainer::PostJavaScriptMessage(
+    v8::Isolate* isolate,
+    v8::Local<v8::Value> message) {
   if (!guest_loaded_) {
     pending_messages_.push_back(v8::Global<v8::Value>(isolate, message));
     return;
@@ -261,8 +276,9 @@ void MimeHandlerViewContainer::PostMessageFromValue(
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(frame->MainWorldScriptContext());
-  PostMessage(isolate, content::V8ValueConverter::Create()->ToV8Value(
-                           &message, frame->MainWorldScriptContext()));
+  PostJavaScriptMessage(isolate,
+                        content::V8ValueConverter::Create()->ToV8Value(
+                            &message, frame->MainWorldScriptContext()));
 }
 
 void MimeHandlerViewContainer::OnCreateMimeHandlerViewGuestACK(
@@ -301,12 +317,16 @@ void MimeHandlerViewContainer::OnMimeHandlerViewGuestOnLoadCompleted(
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(frame->MainWorldScriptContext());
   for (const auto& pending_message : pending_messages_)
-    PostMessage(isolate, v8::Local<v8::Value>::New(isolate, pending_message));
+    PostJavaScriptMessage(isolate,
+                          v8::Local<v8::Value>::New(isolate, pending_message));
 
   pending_messages_.clear();
 }
 
-void MimeHandlerViewContainer::CreateMimeHandlerViewGuest() {
+void MimeHandlerViewContainer::CreateMimeHandlerViewGuestIfNecessary() {
+  if (guest_created_ || !element_size_.has_value() || view_id_.empty())
+    return;
+
   // The loader has completed loading |view_id_| so we can dispose it.
   if (loader_) {
     DCHECK(is_embedded_);
@@ -321,7 +341,9 @@ void MimeHandlerViewContainer::CreateMimeHandlerViewGuest() {
   render_frame()->Send(
       new ExtensionsGuestViewHostMsg_CreateMimeHandlerViewGuest(
           render_frame()->GetRoutingID(), view_id_, element_instance_id(),
-          element_size_));
+          *element_size_));
+
+  guest_created_ = true;
 }
 
 }  // namespace extensions

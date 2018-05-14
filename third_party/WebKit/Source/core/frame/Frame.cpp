@@ -30,17 +30,18 @@
 
 #include "core/frame/Frame.h"
 
+#include <memory>
+
 #include "bindings/core/v8/WindowProxyManager.h"
 #include "core/dom/DocumentType.h"
 #include "core/dom/UserGestureIndicator.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLFrameElementBase.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/LayoutEmbeddedContent.h"
-#include "core/layout/api/LayoutEmbeddedContentItem.h"
 #include "core/loader/EmptyClients.h"
 #include "core/loader/NavigationScheduler.h"
 #include "core/page/FocusController.h"
@@ -49,6 +50,9 @@
 #include "platform/InstanceCounters.h"
 #include "platform/feature_policy/FeaturePolicy.h"
 #include "platform/loader/fetch/ResourceError.h"
+#include "platform/wtf/Assertions.h"
+#include "public/web/WebFrameClient.h"
+#include "public/web/WebRemoteFrameClient.h"
 
 namespace blink {
 
@@ -60,7 +64,7 @@ Frame::~Frame() {
   DCHECK_EQ(lifecycle_.GetState(), FrameLifecycle::kDetached);
 }
 
-DEFINE_TRACE(Frame) {
+void Frame::Trace(blink::Visitor* visitor) {
   visitor->Trace(tree_node_);
   visitor->Trace(page_);
   visitor->Trace(owner_);
@@ -74,7 +78,7 @@ void Frame::Detach(FrameDetachType type) {
   // By the time this method is called, the subclasses should have already
   // advanced to the Detaching state.
   DCHECK_EQ(lifecycle_.GetState(), FrameLifecycle::kDetaching);
-  client_->SetOpener(0);
+  client_->SetOpener(nullptr);
   // After this, we must no longer talk to the client since this clears
   // its owning reference back to our owning LocalFrame.
   client_->Detached(type);
@@ -154,10 +158,6 @@ LayoutEmbeddedContent* Frame::OwnerLayoutObject() const {
   return DeprecatedLocalOwner()->GetLayoutEmbeddedContent();
 }
 
-LayoutEmbeddedContentItem Frame::OwnerLayoutItem() const {
-  return LayoutEmbeddedContentItem(OwnerLayoutObject());
-}
-
 Settings* Frame::GetSettings() const {
   if (GetPage())
     return &GetPage()->GetSettings();
@@ -177,14 +177,69 @@ void Frame::DidChangeVisibilityState() {
     child_frames[i]->DidChangeVisibilityState();
 }
 
-void Frame::SetDocumentHasReceivedUserGesture() {
-  has_received_user_gesture_ = true;
+// TODO(mustaq): Should be merged with NotifyUserActivation() below but
+// not sure why this one doesn't update frame clients.  Could be related to
+// crbug.com/775930 .
+void Frame::UpdateUserActivationInFrameTree() {
+  user_activation_state_.Activate();
   if (Frame* parent = Tree().Parent())
-    parent->SetDocumentHasReceivedUserGesture();
+    parent->UpdateUserActivationInFrameTree();
 }
 
-bool Frame::IsFeatureEnabled(WebFeaturePolicyFeature feature) const {
-  WebFeaturePolicy* feature_policy = GetSecurityContext()->GetFeaturePolicy();
+void Frame::NotifyUserActivation() {
+  bool had_gesture = HasBeenActivated();
+  if (RuntimeEnabledFeatures::UserActivationV2Enabled() || !had_gesture)
+    UpdateUserActivationInFrameTree();
+  if (IsLocalFrame())
+    ToLocalFrame(this)->Client()->SetHasReceivedUserGesture(had_gesture);
+}
+
+bool Frame::ConsumeTransientUserActivation() {
+  for (Frame* parent = Tree().Parent(); parent;
+       parent = parent->Tree().Parent()) {
+    parent->user_activation_state_.ConsumeIfActive();
+  }
+  for (Frame* child = Tree().FirstChild(); child;
+       child = child->Tree().TraverseNext(this)) {
+    child->user_activation_state_.ConsumeIfActive();
+  }
+  return user_activation_state_.ConsumeIfActive();
+}
+
+// static
+std::unique_ptr<UserGestureIndicator> Frame::NotifyUserActivation(
+    Frame* frame,
+    UserGestureToken::Status status) {
+  if (frame)
+    frame->NotifyUserActivation();
+  return std::make_unique<UserGestureIndicator>(status);
+}
+
+// static
+bool Frame::HasTransientUserActivation(Frame* frame, bool checkIfMainThread) {
+  if (RuntimeEnabledFeatures::UserActivationV2Enabled()) {
+    return frame ? frame->HasTransientUserActivation() : false;
+  }
+
+  return checkIfMainThread
+             ? UserGestureIndicator::ProcessingUserGestureThreadSafe()
+             : UserGestureIndicator::ProcessingUserGesture();
+}
+
+// static
+bool Frame::ConsumeTransientUserActivation(Frame* frame,
+                                           bool checkIfMainThread) {
+  if (RuntimeEnabledFeatures::UserActivationV2Enabled()) {
+    return frame ? frame->ConsumeTransientUserActivation() : false;
+  }
+
+  return checkIfMainThread
+             ? UserGestureIndicator::ConsumeUserGestureThreadSafe()
+             : UserGestureIndicator::ConsumeUserGesture();
+}
+
+bool Frame::IsFeatureEnabled(mojom::FeaturePolicyFeature feature) const {
+  FeaturePolicy* feature_policy = GetSecurityContext()->GetFeaturePolicy();
   // The policy should always be initialized before checking it to ensure we
   // properly inherit the parent policy.
   DCHECK(feature_policy);
@@ -215,7 +270,8 @@ Frame::Frame(FrameClient* client,
       owner_(owner),
       client_(client),
       window_proxy_manager_(window_proxy_manager),
-      is_loading_(false) {
+      is_loading_(false),
+      devtools_frame_token_(client->GetDevToolsFrameToken()) {
   InstanceCounters::IncrementCounter(InstanceCounters::kFrameCounter);
 
   if (owner_)
@@ -223,5 +279,13 @@ Frame::Frame(FrameClient* client,
   else
     page_->SetMainFrame(this);
 }
+
+STATIC_ASSERT_ENUM(FrameDetachType::kRemove,
+                   WebFrameClient::DetachType::kRemove);
+STATIC_ASSERT_ENUM(FrameDetachType::kSwap, WebFrameClient::DetachType::kSwap);
+STATIC_ASSERT_ENUM(FrameDetachType::kRemove,
+                   WebRemoteFrameClient::DetachType::kRemove);
+STATIC_ASSERT_ENUM(FrameDetachType::kSwap,
+                   WebRemoteFrameClient::DetachType::kSwap);
 
 }  // namespace blink

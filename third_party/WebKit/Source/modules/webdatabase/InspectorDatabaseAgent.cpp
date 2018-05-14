@@ -30,7 +30,6 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/frame/LocalFrame.h"
-#include "core/html/VoidCallback.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/page/Page.h"
 #include "modules/webdatabase/Database.h"
@@ -40,11 +39,7 @@
 #include "modules/webdatabase/SQLError.h"
 #include "modules/webdatabase/SQLResultSet.h"
 #include "modules/webdatabase/SQLResultSetRowList.h"
-#include "modules/webdatabase/SQLStatementCallback.h"
-#include "modules/webdatabase/SQLStatementErrorCallback.h"
 #include "modules/webdatabase/SQLTransaction.h"
-#include "modules/webdatabase/SQLTransactionCallback.h"
-#include "modules/webdatabase/SQLTransactionErrorCallback.h"
 #include "modules/webdatabase/sqlite/SQLValue.h"
 #include "platform/wtf/RefCounted.h"
 #include "platform/wtf/Vector.h"
@@ -65,11 +60,11 @@ namespace {
 
 class ExecuteSQLCallbackWrapper : public RefCounted<ExecuteSQLCallbackWrapper> {
  public:
-  static PassRefPtr<ExecuteSQLCallbackWrapper> Create(
+  static scoped_refptr<ExecuteSQLCallbackWrapper> Create(
       std::unique_ptr<ExecuteSQLCallback> callback) {
-    return AdoptRef(new ExecuteSQLCallbackWrapper(std::move(callback)));
+    return base::AdoptRef(new ExecuteSQLCallbackWrapper(std::move(callback)));
   }
-  ~ExecuteSQLCallbackWrapper() {}
+  ~ExecuteSQLCallbackWrapper() = default;
   ExecuteSQLCallback* Get() { return callback_.get(); }
 
   void ReportTransactionFailed(SQLError* error) {
@@ -90,18 +85,16 @@ class ExecuteSQLCallbackWrapper : public RefCounted<ExecuteSQLCallbackWrapper> {
   std::unique_ptr<ExecuteSQLCallback> callback_;
 };
 
-class StatementCallback final : public SQLStatementCallback {
+class StatementCallback final : public SQLStatement::OnSuccessCallback {
  public:
   static StatementCallback* Create(
-      PassRefPtr<ExecuteSQLCallbackWrapper> request_callback) {
+      scoped_refptr<ExecuteSQLCallbackWrapper> request_callback) {
     return new StatementCallback(std::move(request_callback));
   }
 
-  ~StatementCallback() override {}
+  ~StatementCallback() override = default;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { SQLStatementCallback::Trace(visitor); }
-
-  bool handleEvent(SQLTransaction*, SQLResultSet* result_set) override {
+  bool OnSuccess(SQLTransaction*, SQLResultSet* result_set) override {
     SQLResultSetRowList* row_list = result_set->rows();
 
     std::unique_ptr<protocol::Array<String>> column_names =
@@ -134,100 +127,85 @@ class StatementCallback final : public SQLStatementCallback {
   }
 
  private:
-  StatementCallback(PassRefPtr<ExecuteSQLCallbackWrapper> request_callback)
+  explicit StatementCallback(
+      scoped_refptr<ExecuteSQLCallbackWrapper> request_callback)
       : request_callback_(std::move(request_callback)) {}
-  RefPtr<ExecuteSQLCallbackWrapper> request_callback_;
+
+  scoped_refptr<ExecuteSQLCallbackWrapper> request_callback_;
 };
 
-class StatementErrorCallback final : public SQLStatementErrorCallback {
+class StatementErrorCallback final : public SQLStatement::OnErrorCallback {
  public:
   static StatementErrorCallback* Create(
-      PassRefPtr<ExecuteSQLCallbackWrapper> request_callback) {
+      scoped_refptr<ExecuteSQLCallbackWrapper> request_callback) {
     return new StatementErrorCallback(std::move(request_callback));
   }
 
-  ~StatementErrorCallback() override {}
+  ~StatementErrorCallback() override = default;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { SQLStatementErrorCallback::Trace(visitor); }
-
-  bool handleEvent(SQLTransaction*, SQLError* error) override {
+  bool OnError(SQLTransaction*, SQLError* error) override {
     request_callback_->ReportTransactionFailed(error);
     return true;
   }
 
  private:
-  StatementErrorCallback(PassRefPtr<ExecuteSQLCallbackWrapper> request_callback)
+  explicit StatementErrorCallback(
+      scoped_refptr<ExecuteSQLCallbackWrapper> request_callback)
       : request_callback_(std::move(request_callback)) {}
-  RefPtr<ExecuteSQLCallbackWrapper> request_callback_;
+
+  scoped_refptr<ExecuteSQLCallbackWrapper> request_callback_;
 };
 
-class TransactionCallback final : public SQLTransactionCallback {
+class TransactionCallback final : public SQLTransaction::OnProcessCallback {
  public:
   static TransactionCallback* Create(
       const String& sql_statement,
-      PassRefPtr<ExecuteSQLCallbackWrapper> request_callback) {
+      scoped_refptr<ExecuteSQLCallbackWrapper> request_callback) {
     return new TransactionCallback(sql_statement, std::move(request_callback));
   }
 
-  ~TransactionCallback() override {}
+  ~TransactionCallback() override = default;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { SQLTransactionCallback::Trace(visitor); }
-
-  bool handleEvent(SQLTransaction* transaction) override {
+  bool OnProcess(SQLTransaction* transaction) override {
     Vector<SQLValue> sql_values;
-    SQLStatementCallback* callback =
-        StatementCallback::Create(request_callback_);
-    SQLStatementErrorCallback* error_callback =
-        StatementErrorCallback::Create(request_callback_);
-    transaction->ExecuteSQL(sql_statement_, sql_values, callback,
-                            error_callback, IGNORE_EXCEPTION_FOR_TESTING);
+    transaction->ExecuteSQL(sql_statement_, sql_values,
+                            StatementCallback::Create(request_callback_),
+                            StatementErrorCallback::Create(request_callback_),
+                            IGNORE_EXCEPTION_FOR_TESTING);
     return true;
   }
 
  private:
-  TransactionCallback(const String& sql_statement,
-                      PassRefPtr<ExecuteSQLCallbackWrapper> request_callback)
+  explicit TransactionCallback(
+      const String& sql_statement,
+      scoped_refptr<ExecuteSQLCallbackWrapper> request_callback)
       : sql_statement_(sql_statement),
         request_callback_(std::move(request_callback)) {}
+
   String sql_statement_;
-  RefPtr<ExecuteSQLCallbackWrapper> request_callback_;
+  scoped_refptr<ExecuteSQLCallbackWrapper> request_callback_;
 };
 
-class TransactionErrorCallback final : public SQLTransactionErrorCallback {
+class TransactionErrorCallback final : public SQLTransaction::OnErrorCallback {
  public:
   static TransactionErrorCallback* Create(
-      PassRefPtr<ExecuteSQLCallbackWrapper> request_callback) {
+      scoped_refptr<ExecuteSQLCallbackWrapper> request_callback) {
     return new TransactionErrorCallback(std::move(request_callback));
   }
 
-  ~TransactionErrorCallback() override {}
+  ~TransactionErrorCallback() override = default;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { SQLTransactionErrorCallback::Trace(visitor); }
-
-  bool handleEvent(SQLError* error) override {
+  bool OnError(SQLError* error) override {
     request_callback_->ReportTransactionFailed(error);
     return true;
   }
 
  private:
-  TransactionErrorCallback(
-      PassRefPtr<ExecuteSQLCallbackWrapper> request_callback)
+  explicit TransactionErrorCallback(
+      scoped_refptr<ExecuteSQLCallbackWrapper> request_callback)
       : request_callback_(std::move(request_callback)) {}
-  RefPtr<ExecuteSQLCallbackWrapper> request_callback_;
-};
 
-class TransactionSuccessCallback final : public VoidCallback {
- public:
-  static TransactionSuccessCallback* Create() {
-    return new TransactionSuccessCallback();
-  }
-
-  ~TransactionSuccessCallback() override {}
-
-  void handleEvent() override {}
-
- private:
-  TransactionSuccessCallback() {}
+  scoped_refptr<ExecuteSQLCallbackWrapper> request_callback_;
 };
 
 }  // namespace
@@ -268,7 +246,7 @@ void InspectorDatabaseAgent::DidCommitLoadForLocalFrame(LocalFrame* frame) {
 InspectorDatabaseAgent::InspectorDatabaseAgent(Page* page)
     : page_(page), enabled_(false) {}
 
-InspectorDatabaseAgent::~InspectorDatabaseAgent() {}
+InspectorDatabaseAgent::~InspectorDatabaseAgent() = default;
 
 Response InspectorDatabaseAgent::enable() {
   if (enabled_)
@@ -278,8 +256,9 @@ Response InspectorDatabaseAgent::enable() {
   if (DatabaseClient* client = DatabaseClient::FromPage(page_))
     client->SetInspectorAgent(this);
   DatabaseTracker::Tracker().ForEachOpenDatabaseInPage(
-      page_, WTF::Bind(&InspectorDatabaseAgent::RegisterDatabaseOnCreation,
-                       WrapPersistent(this)));
+      page_,
+      WTF::BindRepeating(&InspectorDatabaseAgent::RegisterDatabaseOnCreation,
+                         WrapPersistent(this)));
   return Response::OK();
 }
 
@@ -338,14 +317,13 @@ void InspectorDatabaseAgent::executeSQL(
     return;
   }
 
-  RefPtr<ExecuteSQLCallbackWrapper> wrapper =
+  scoped_refptr<ExecuteSQLCallbackWrapper> wrapper =
       ExecuteSQLCallbackWrapper::Create(std::move(request_callback));
-  SQLTransactionCallback* callback =
-      TransactionCallback::Create(query, wrapper);
-  SQLTransactionErrorCallback* error_callback =
+  TransactionCallback* callback = TransactionCallback::Create(query, wrapper);
+  TransactionErrorCallback* error_callback =
       TransactionErrorCallback::Create(wrapper);
-  VoidCallback* success_callback = TransactionSuccessCallback::Create();
-  database->transaction(callback, error_callback, success_callback);
+  SQLTransaction::OnSuccessCallback* success_callback = nullptr;
+  database->PerformTransaction(callback, error_callback, success_callback);
 }
 
 InspectorDatabaseResource* InspectorDatabaseAgent::FindByFileName(
@@ -355,18 +333,18 @@ InspectorDatabaseResource* InspectorDatabaseAgent::FindByFileName(
     if (it->value->GetDatabase()->FileName() == file_name)
       return it->value.Get();
   }
-  return 0;
+  return nullptr;
 }
 
 blink::Database* InspectorDatabaseAgent::DatabaseForId(
     const String& database_id) {
   DatabaseResourcesHeapMap::iterator it = resources_.find(database_id);
   if (it == resources_.end())
-    return 0;
+    return nullptr;
   return it->value->GetDatabase();
 }
 
-DEFINE_TRACE(InspectorDatabaseAgent) {
+void InspectorDatabaseAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(page_);
   visitor->Trace(resources_);
   InspectorBaseAgent::Trace(visitor);

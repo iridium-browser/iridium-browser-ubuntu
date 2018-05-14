@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://w3c.github.io/performance-timeline/#the-performance-observer-interface
+// https://w3c.github.io/performance-timeline/#performanceobserverentrylist-interface
 
 [
-    RuntimeEnabled=PerformanceObserver,
     Exposed=(Window,Worker)
 ] interface PerformanceObserverEntryList {
     // TODO(foolip): getEntries() should take an optional FilterOptions argument.

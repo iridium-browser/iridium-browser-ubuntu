@@ -11,7 +11,7 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/frame/UseCounter.h"
 #include "modules/bluetooth/Bluetooth.h"
 #include "modules/bluetooth/BluetoothAttributeInstanceMap.h"
@@ -90,7 +90,7 @@ ExecutionContext* BluetoothDevice::GetExecutionContext() const {
   return ContextLifecycleObserver::GetExecutionContext();
 }
 
-DEFINE_TRACE(BluetoothDevice) {
+void BluetoothDevice::Trace(blink::Visitor* visitor) {
   visitor->Trace(attribute_instance_map_);
   visitor->Trace(gatt_);
   visitor->Trace(bluetooth_);

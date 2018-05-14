@@ -4,31 +4,43 @@
 
 #include "platform/scheduler/child/compositor_worker_scheduler.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/callback.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "platform/scheduler/base/task_queue.h"
 #include "platform/scheduler/child/scheduler_helper.h"
-#include "platform/scheduler/child/scheduler_tqm_delegate.h"
-#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 namespace scheduler {
 
 CompositorWorkerScheduler::CompositorWorkerScheduler(
     base::Thread* thread,
-    scoped_refptr<SchedulerTqmDelegate> main_task_runner)
-    : WorkerScheduler(WTF::MakeUnique<WorkerSchedulerHelper>(main_task_runner)),
+    std::unique_ptr<TaskQueueManager> task_queue_manager)
+    : WorkerScheduler(
+          std::make_unique<WorkerSchedulerHelper>(std::move(task_queue_manager),
+                                                  this)),
       thread_(thread) {}
 
-CompositorWorkerScheduler::~CompositorWorkerScheduler() {}
-
-void CompositorWorkerScheduler::Init() {}
+CompositorWorkerScheduler::~CompositorWorkerScheduler() = default;
 
 scoped_refptr<WorkerTaskQueue> CompositorWorkerScheduler::DefaultTaskQueue() {
   return helper_->DefaultWorkerTaskQueue();
+}
+
+void CompositorWorkerScheduler::Init() {}
+
+void CompositorWorkerScheduler::OnTaskCompleted(
+    WorkerTaskQueue* worker_task_queue,
+    const TaskQueue::Task& task,
+    base::TimeTicks start,
+    base::TimeTicks end,
+    base::Optional<base::TimeDelta> thread_time) {
+  compositor_metrics_helper_.RecordTaskMetrics(worker_task_queue, task, start,
+                                               end, thread_time);
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
@@ -42,8 +54,13 @@ CompositorWorkerScheduler::IdleTaskRunner() {
   // an idle task runner with the semantics we want for the compositor thread
   // which runs them after the current frame has been drawn before the next
   // vsync. https://crbug.com/609532
-  return make_scoped_refptr(
-      new SingleThreadIdleTaskRunner(thread_->task_runner(), this));
+  return base::MakeRefCounted<SingleThreadIdleTaskRunner>(
+      thread_->task_runner(), this);
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+CompositorWorkerScheduler::IPCTaskRunner() {
+  return base::ThreadTaskRunnerHandle::Get();
 }
 
 bool CompositorWorkerScheduler::CanExceedIdleDeadlineIfRequired() const {
@@ -80,6 +97,8 @@ void CompositorWorkerScheduler::DidProcessIdleTask() {}
 base::TimeTicks CompositorWorkerScheduler::NowTicks() {
   return base::TimeTicks::Now();
 }
+
+void CompositorWorkerScheduler::SetThreadType(WebThreadType thread_type) {}
 
 }  // namespace scheduler
 }  // namespace blink

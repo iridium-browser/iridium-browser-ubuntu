@@ -21,14 +21,14 @@
 #include "core/html/HTMLSummaryElement.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
 #include "core/dom/FlatTreeTraversal.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/events/KeyboardEvent.h"
-#include "core/html/HTMLContentElement.h"
 #include "core/html/HTMLDetailsElement.h"
+#include "core/html/HTMLSlotElement.h"
 #include "core/html/shadow/DetailsMarkerControl.h"
 #include "core/html/shadow/ShadowElementNames.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutBlockFlow.h"
 
 namespace blink {
@@ -46,9 +46,14 @@ HTMLSummaryElement::HTMLSummaryElement(Document& document)
 
 LayoutObject* HTMLSummaryElement::CreateLayoutObject(
     const ComputedStyle& style) {
+  // See: crbug.com/603928 - We manually check for other dislay types, then
+  // fallback to a regular LayoutBlockFlow as "display: inline;" should behave
+  // as an "inline-block".
   EDisplay display = style.Display();
   if (display == EDisplay::kFlex || display == EDisplay::kInlineFlex ||
-      display == EDisplay::kGrid || display == EDisplay::kInlineGrid)
+      display == EDisplay::kGrid || display == EDisplay::kInlineGrid ||
+      display == EDisplay::kLayoutCustom ||
+      display == EDisplay::kInlineLayoutCustom)
     return LayoutObject::CreateObject(this, style);
   return new LayoutBlockFlow(this);
 }
@@ -58,16 +63,14 @@ void HTMLSummaryElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
       DetailsMarkerControl::Create(GetDocument());
   marker_control->SetIdAttribute(ShadowElementNames::DetailsMarker());
   root.AppendChild(marker_control);
-  root.AppendChild(HTMLContentElement::Create(GetDocument()));
+  root.AppendChild(HTMLSlotElement::CreateUserAgentDefaultSlot(GetDocument()));
 }
 
 HTMLDetailsElement* HTMLSummaryElement::DetailsElement() const {
-  Node* parent = parentNode();
-  if (isHTMLDetailsElement(parent))
-    return toHTMLDetailsElement(parent);
-  Element* host = OwnerShadowHost();
-  if (isHTMLDetailsElement(host))
-    return toHTMLDetailsElement(host);
+  if (auto* details = ToHTMLDetailsElementOrNull(parentNode()))
+    return details;
+  if (auto* details = ToHTMLDetailsElementOrNull(OwnerShadowHost()))
+    return details;
   return nullptr;
 }
 
@@ -94,7 +97,7 @@ static bool IsClickableControl(Node* node) {
 }
 
 bool HTMLSummaryElement::SupportsFocus() const {
-  return IsMainSummary();
+  return IsMainSummary() || HTMLElement::SupportsFocus();
 }
 
 void HTMLSummaryElement::DefaultEventHandler(Event* event) {

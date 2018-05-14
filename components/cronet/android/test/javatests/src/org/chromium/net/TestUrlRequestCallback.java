@@ -4,16 +4,16 @@
 
 package org.chromium.net;
 
-import android.os.ConditionVariable;
-import android.os.StrictMode;
-
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertFalse;
 import static junit.framework.Assert.assertNotNull;
 import static junit.framework.Assert.assertNull;
 import static junit.framework.Assert.assertTrue;
 
-import static org.chromium.net.CronetTestBase.assertContains;
+import static org.chromium.net.CronetTestRule.assertContains;
+
+import android.os.ConditionVariable;
+import android.os.StrictMode;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -72,6 +72,7 @@ public class TestUrlRequestCallback extends UrlRequest.Callback {
     private int mBufferPositionBeforeRead;
 
     private class ExecutorThreadFactory implements ThreadFactory {
+        @Override
         public Thread newThread(final Runnable r) {
             mExecutorThread = new Thread(new Runnable() {
                 @Override
@@ -327,6 +328,7 @@ public class TestUrlRequestCallback extends UrlRequest.Callback {
             throw new IllegalStateException("Listener Exception.");
         }
         Runnable task = new Runnable() {
+            @Override
             public void run() {
                 request.cancel();
             }

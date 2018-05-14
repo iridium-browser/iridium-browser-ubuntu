@@ -6,6 +6,9 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/core/test_utils.html">
+<link rel="import" href="/tracing/extras/chrome/chrome_test_utils.html">
+<link rel="import"
+    href="/tracing/extras/chrome/chrome_user_friendly_category_driver.html">
 <link rel="import" href="/tracing/metrics/system_health/expected_queueing_time_metric.html">
 <link rel="import" href="/tracing/value/histogram_set.html">
 
@@ -34,17 +37,23 @@ tr.b.unittest.testSuite(function() {
       duration: 0.0,
       args: {frame: '0xdeadbeef'}
     }));
+    mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
+      cat: 'blink.user_timing',
+      title: 'domContentLoadedEventEnd',
+      start: timestamp,
+      duration: 0.0,
+      args: {frame: '0xdeadbeef'}
+    }));
   }
 
   test('expectedQueueingTime', function() {
-    const model = tr.c.TestUtils.newModel((model) => {
-      const rendererProcess = model.getOrCreateProcess(1984);
-      const mainThread = rendererProcess.getOrCreateThread(2);
-      mainThread.name = 'CrRendererMain';
+    const model = tr.e.chrome.ChromeTestUtils.newChromeModel(function(model) {
+      const rendererProcess = model.rendererProcess;
+      const mainThread = model.rendererMain;
       addInteractiveTimestamp(rendererProcess, mainThread, 200);
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 0,
         duration: 100,
         cpuStart: 0,
@@ -52,7 +61,7 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 3000,
         duration: 10,
         cpuStart: 3000,
@@ -60,7 +69,7 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 9000,
         duration: 10,
         cpuStart: 9000,
@@ -84,13 +93,12 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('expectedQueueingTime_noInteractive', function() {
-    const model = tr.c.TestUtils.newModel((model) => {
-      const rendererProcess = model.getOrCreateProcess(1984);
-      const mainThread = rendererProcess.getOrCreateThread(2);
-      mainThread.name = 'CrRendererMain';
+    const model = tr.e.chrome.ChromeTestUtils.newChromeModel(function(model) {
+      const rendererProcess = model.rendererProcess;
+      const mainThread = model.rendererMain;
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 0,
         duration: 100,
         cpuStart: 0,
@@ -98,7 +106,7 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 3000,
         duration: 10,
         cpuStart: 3000,
@@ -106,7 +114,7 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 9000,
         duration: 10,
         cpuStart: 9000,
@@ -121,15 +129,14 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('expectedQueueingTime_multipleInteractive', function() {
-    const model = tr.c.TestUtils.newModel((model) => {
-      const rendererProcess = model.getOrCreateProcess(1984);
-      const mainThread = rendererProcess.getOrCreateThread(2);
-      mainThread.name = 'CrRendererMain';
+    const model = tr.e.chrome.ChromeTestUtils.newChromeModel(function(model) {
+      const rendererProcess = model.rendererProcess;
+      const mainThread = model.rendererMain;
       addInteractiveTimestamp(rendererProcess, mainThread, 200);
-      addInteractiveTimestamp(rendererProcess, mainThread, 400);
+      addInteractiveTimestamp(rendererProcess, mainThread, 6000);
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 0,
         duration: 100,
         cpuStart: 0,
@@ -137,7 +144,7 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 3000,
         duration: 10,
         cpuStart: 3000,
@@ -145,8 +152,8 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
-        start: 9000,
+        title: 'ThreadControllerImpl::DoWork',
+        start: 12000,
         duration: 10,
         cpuStart: 9000,
         cpuDuration: 10,
@@ -162,14 +169,13 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('expectedQueueingTime_multipleRenderersAggregates', function() {
-    const model = tr.c.TestUtils.newModel(function(model) {
-      const rendererProcess = model.getOrCreateProcess(1984);
-      const mainThread = rendererProcess.getOrCreateThread(2);
-      mainThread.name = 'CrRendererMain';
+    const model = tr.e.chrome.ChromeTestUtils.newChromeModel(function(model) {
+      const rendererProcess = model.rendererProcess;
+      const mainThread = model.rendererMain;
       addInteractiveTimestamp(rendererProcess, mainThread, 200);
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 0,
         duration: 100,
         cpuStart: 0,
@@ -177,7 +183,7 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 3000,
         duration: 10,
         cpuStart: 3000,
@@ -185,7 +191,7 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 9000,
         duration: 10,
         cpuStart: 9000,
@@ -197,7 +203,7 @@ tr.b.unittest.testSuite(function() {
       addInteractiveTimestamp(rendererProcess2, mainThread2, 200);
       mainThread2.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 9000,
         duration: 0,
         cpuStart: 9000,
@@ -212,14 +218,13 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('expectedQueueingTime_relatedV8Histograms', function() {
-    const model = tr.c.TestUtils.newModel((model) => {
-      const rendererProcess = model.getOrCreateProcess(1984);
-      const mainThread = rendererProcess.getOrCreateThread(2);
-      mainThread.name = 'CrRendererMain';
+    const model = tr.e.chrome.ChromeTestUtils.newChromeModel(function(model) {
+      const rendererProcess = model.rendererProcess;
+      const mainThread = model.rendererMain;
       addInteractiveTimestamp(rendererProcess, mainThread, 200);
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 0,
         duration: 100,
         cpuStart: 0,
@@ -235,7 +240,7 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 3000,
         duration: 10,
         cpuStart: 3000,
@@ -251,7 +256,7 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 9000,
         duration: 10,
         cpuStart: 9000,
@@ -279,15 +284,14 @@ tr.b.unittest.testSuite(function() {
     assert.strictEqual(0.025, v8eqtCpu.average);
   });
 
-  test('expectedQueueingTimeCompileUnoptimized', function() {
-    const model = tr.c.TestUtils.newModel((model) => {
-      const rendererProcess = model.getOrCreateProcess(1984);
-      const mainThread = rendererProcess.getOrCreateThread(2);
-      mainThread.name = 'CrRendererMain';
+  test('expectedQueueingTimeRCS', function() {
+    const model = tr.e.chrome.ChromeTestUtils.newChromeModel(function(model) {
+      const rendererProcess = model.rendererProcess;
+      const mainThread = model.rendererMain;
       addInteractiveTimestamp(rendererProcess, mainThread, 200);
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 0,
         duration: 100,
         cpuStart: 0,
@@ -295,63 +299,71 @@ tr.b.unittest.testSuite(function() {
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'v8',
-        title: 'V8.GCFinalizeMC',
-        start: 50,
-        duration: 50,
-        cpuStart: 50,
-        cpuDuration: 50,
+        title: 'V8.newInstance',
+        type: tr.e.v8.V8ThreadSlice,
+        start: 12555,
+        duration: 990,
+        args: {
+          'runtime-call-stats': {
+            JS_Execution: [1, 11],
+            ParseLazy: [5, 3],
+          }
+        }
       }));
+
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 3000,
-        duration: 10,
+        duration: 100,
         cpuStart: 3000,
-        cpuDuration: 10,
+        cpuDuration: 100,
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
-        cat: 'disabled-by-default-v8.compile',
-        title: 'V8.RecompileSynchronous',
+        cat: 'v8',
+        title: 'V8.Execute',
+        type: tr.e.v8.V8ThreadSlice,
         start: 3000,
-        duration: 5,
+        duration: 100,
         cpuStart: 3000,
-        cpuDuration: 5,
+        cpuDuration: 100,
+        args: {
+          'runtime-call-stats': {
+            CompileIgnition: [3, 5000],
+            OptimizeCode: [6, 40000],
+            JS_Execution: [1, 11000],
+          }
+        }
       }));
+
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 4000,
         duration: 100,
         cpuStart: 4000,
         cpuDuration: 100,
       }));
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
-        cat: 'disabled-by-default-v8.compile',
-        title: 'V8.CompileCode',
+        cat: 'v8',
+        title: 'V8.Execute',
+        type: tr.e.v8.V8ThreadSlice,
         start: 4000,
-        duration: 20,
+        duration: 100,
         cpuStart: 4000,
-        cpuDuration: 20,
+        cpuDuration: 100,
+        args: {
+          'runtime-call-stats': {
+            CompileIgnition: [20, 20000],
+            ParseLazy: [5, 10000],
+            CompileBackgroundIgnition: [3, 30000]
+          }
+        }
       }));
-      mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
-        cat: 'disabled-by-default-v8.compile',
-        title: 'V8.ParseFunction',
-        start: 4000,
-        duration: 10,
-        cpuStart: 4000,
-        cpuDuration: 10,
-      }));
-      mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
-        cat: 'disabled-by-default-v8.compile',
-        title: 'V8.CompileCode',
-        start: 4030,
-        duration: 10,
-        cpuStart: 4030,
-        cpuDuration: 10,
-      }));
+
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'toplevel',
-        title: 'TaskQueueManager::ProcessTaskFromWorkQueue',
+        title: 'ThreadControllerImpl::DoWork',
         start: 9000,
         duration: 10,
         cpuStart: 9000,
@@ -363,12 +375,13 @@ tr.b.unittest.testSuite(function() {
     tr.metrics.sh.expectedQueueingTimeMetric(histograms, model);
     const eqt = histograms.getHistogramNamed(
         'total:500ms_window:renderer_eqt');
-    const optimizeEqt = eqt.diagnostics.get('v8').get('v8:compile:optimize');
-    assert.strictEqual(0.025, optimizeEqt.average);
-    const parseEqt = eqt.diagnostics.get('v8').get('v8:compile:parse');
+    const optimizeEqt = eqt.diagnostics.get('v8').get(
+        'v8:compile:optimize_rcs');
+    assert.strictEqual(1.6, optimizeEqt.average);
+    const parseEqt = eqt.diagnostics.get('v8').get('v8:compile:parse_rcs');
     assert.strictEqual(0.1, parseEqt.average);
     const compileUnoptimizeEqt = eqt.diagnostics.get('v8').get(
-        'v8:compile:compile-unoptimize');
+        'v8:compile:compile-unoptimize_rcs');
     assert.strictEqual(0.4, compileUnoptimizeEqt.average);
   });
 });

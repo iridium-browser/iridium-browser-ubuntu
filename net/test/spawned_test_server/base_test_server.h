@@ -193,16 +193,16 @@ class BaseTestServer {
     std::string GetOCSPProducedArgument() const;
 
     // The certificate to use when serving requests.
-    ServerCertificate server_certificate;
+    ServerCertificate server_certificate = CERT_OK;
 
     // If |server_certificate==CERT_AUTO| then this determines the type of OCSP
     // response returned. Ignored if |ocsp_responses| is non-empty.
-    OCSPStatus ocsp_status;
+    OCSPStatus ocsp_status = OCSP_OK;
 
     // If |server_certificate==CERT_AUTO| then this determines the date range
     // set on the OCSP response returned. Ignore if |ocsp_responses| is
     // non-empty.
-    OCSPDate ocsp_date;
+    OCSPDate ocsp_date = OCSP_DATE_VALID;
 
     // If |server_certificate==CERT_AUTO|, contains the status and validity for
     // multiple stapled responeses. Overrides |ocsp_status| and |ocsp_date| when
@@ -211,15 +211,19 @@ class BaseTestServer {
 
     // If |server_certificate==CERT_AUTO| then this determines the validity of
     // the producedAt field on the returned OCSP response.
-    OCSPProduced ocsp_produced;
+    OCSPProduced ocsp_produced = OCSP_PRODUCED_VALID;
 
     // If not zero, |cert_serial| will be the serial number of the
     // auto-generated leaf certificate when |server_certificate==CERT_AUTO|.
-    uint64_t cert_serial;
+    uint64_t cert_serial = 0;
+
+    // If not empty, |cert_common_name| will be the common name of the
+    // auto-generated leaf certificate when |server_certificate==CERT_AUTO|.
+    std::string cert_common_name;
 
     // True if a CertificateRequest should be sent to the client during
     // handshaking.
-    bool request_client_certificate;
+    bool request_client_certificate = false;
 
     // If |request_client_certificate| is true, an optional list of files,
     // each containing a single, PEM-encoded X.509 certificates. The subject
@@ -235,32 +239,32 @@ class BaseTestServer {
     // A bitwise-OR of KeyExchnage that should be used by the
     // HTTPS server, or KEY_EXCHANGE_ANY to indicate that all implemented
     // key exchange algorithms are acceptable.
-    int key_exchanges;
+    int key_exchanges = KEY_EXCHANGE_ANY;
 
     // A bitwise-OR of BulkCipher that should be used by the
     // HTTPS server, or BULK_CIPHER_ANY to indicate that all implemented
     // ciphers are acceptable.
-    int bulk_ciphers;
+    int bulk_ciphers = BULK_CIPHER_ANY;
 
     // If true, pass the --https-record-resume argument to testserver.py which
     // causes it to log session cache actions and echo the log on
     // /ssl-session-cache.
-    bool record_resume;
+    bool record_resume = false;
 
     // If not TLS_INTOLERANT_NONE, the server will abort any handshake that
     // negotiates an intolerant TLS version in order to test version fallback.
-    TLSIntolerantLevel tls_intolerant;
+    TLSIntolerantLevel tls_intolerant = TLS_INTOLERANT_NONE;
 
     // If |tls_intolerant| is not TLS_INTOLERANT_NONE, how the server reacts to
     // an intolerant TLS version.
-    TLSIntoleranceType tls_intolerance_type;
+    TLSIntoleranceType tls_intolerance_type = TLS_INTOLERANCE_ALERT;
 
     // fallback_scsv_enabled, if true, causes the server to process the
     // TLS_FALLBACK_SCSV cipher suite. This cipher suite is sent by Chrome
     // when performing TLS version fallback in response to an SSL handshake
     // failure. If this option is enabled then the server will reject fallback
     // connections.
-    bool fallback_scsv_enabled;
+    bool fallback_scsv_enabled = false;
 
     // Temporary glue for testing: validation of SCTs is application-controlled
     // and can be appropriately mocked out, so sending fake data here does not
@@ -271,11 +275,11 @@ class BaseTestServer {
     std::string signed_cert_timestamps_tls_ext;
 
     // Whether to staple the OCSP response.
-    bool staple_ocsp_response;
+    bool staple_ocsp_response = false;
 
     // Whether to make the OCSP server unavailable. This does not affect the
     // stapled OCSP response.
-    bool ocsp_server_unavailable;
+    bool ocsp_server_unavailable = false;
 
     // List of protocols to advertise in NPN extension.  NPN is not supported if
     // list is empty.  Note that regardless of what protocol is negotiated, the
@@ -286,26 +290,46 @@ class BaseTestServer {
     std::vector<std::string> alpn_protocols;
 
     // Whether to send a fatal alert immediately after completing the handshake.
-    bool alert_after_handshake;
+    bool alert_after_handshake = false;
 
     // If true, disables channel ID on the server.
-    bool disable_channel_id;
+    bool disable_channel_id = false;
 
     // If true, disables extended master secret tls extension.
-    bool disable_extended_master_secret;
+    bool disable_extended_master_secret = false;
 
     // List of token binding params that the server supports and will negotiate.
     std::vector<int> supported_token_binding_params;
   };
 
-  // Pass as the 'host' parameter during construction to server on 127.0.0.1
-  static const char kLocalhost[];
-
-  // Initialize a TestServer listening on a specific host (IP or hostname).
-  BaseTestServer(Type type,  const std::string& host);
+  // Initialize a TestServer.
+  explicit BaseTestServer(Type type);
 
   // Initialize a TestServer with a specific set of SSLOptions for HTTPS or WSS.
   BaseTestServer(Type type, const SSLOptions& ssl_options);
+
+  // Starts the server blocking until the server is ready.
+  bool Start() WARN_UNUSED_RESULT;
+
+  // Start the test server without blocking. Use this if you need multiple test
+  // servers (such as WebSockets and HTTP, or HTTP and HTTPS). You must call
+  // BlockUntilStarted on all servers your test requires before executing the
+  // test. For example:
+  //
+  //   // Start the servers in parallel.
+  //   ASSERT_TRUE(http_server.StartInBackground());
+  //   ASSERT_TRUE(websocket_server.StartInBackground());
+  //   // Wait for both servers to be ready.
+  //   ASSERT_TRUE(http_server.BlockUntilStarted());
+  //   ASSERT_TRUE(websocket_server.BlockUntilStarted());
+  //   RunMyTest();
+  //
+  // Returns true on success.
+  virtual bool StartInBackground() WARN_UNUSED_RESULT = 0;
+
+  // Block until the test server is ready. Returns true on success. See
+  // StartInBackground() documentation for more information.
+  virtual bool BlockUntilStarted() WARN_UNUSED_RESULT = 0;
 
   // Returns the host port pair used by current Python based test server only
   // if the server is started.
@@ -346,6 +370,11 @@ class BaseTestServer {
     no_anonymous_ftp_user_ = no_anonymous_ftp_user;
   }
 
+  // Redirect proxied CONNECT requests to localhost.
+  void set_redirect_connect_to_localhost(bool redirect_connect_to_localhost) {
+    redirect_connect_to_localhost_ = redirect_connect_to_localhost;
+  }
+
   // Marks the root certificate of an HTTPS test server as trusted for
   // the duration of tests.
   bool LoadTestRootCert() const WARN_UNUSED_RESULT;
@@ -356,6 +385,9 @@ class BaseTestServer {
  protected:
   virtual ~BaseTestServer();
   Type type() const { return type_; }
+  const SSLOptions& ssl_options() const { return ssl_options_; }
+
+  bool started() const { return started_; }
 
   // Gets port currently assigned to host_port_pair_ without checking
   // whether it's available (server started) or not.
@@ -374,9 +406,13 @@ class BaseTestServer {
   void SetResourcePath(const base::FilePath& document_root,
                        const base::FilePath& certificates_dir);
 
-  // Parses the server data read from the test server.  Returns true
-  // on success.
-  bool ParseServerData(const std::string& server_data) WARN_UNUSED_RESULT;
+  // Parses the server data read from the test server and sets |server_data_|.
+  // *port is set to the port number specified in server_data. The port may be
+  // different from the local port set in |host_port_pair_|, specifically when
+  // using RemoteTestServer (which proxies connections from 127.0.0.1 to a
+  // different IP). Returns true on success.
+  bool SetAndParseServerData(const std::string& server_data,
+                             int* port) WARN_UNUSED_RESULT;
 
   // Generates a DictionaryValue with the arguments for launching the external
   // Python test server.
@@ -397,7 +433,9 @@ class BaseTestServer {
   // Directory that contains the SSL certificates.
   base::FilePath certificates_dir_;
 
-  // Address the test server listens on.
+  // Address on which the tests should connect to the server. With
+  // RemoteTestServer it may be different from the address on which the server
+  // listens on.
   HostPortPair host_port_pair_;
 
   // Holds the data sent from the server (e.g., port number).
@@ -410,16 +448,19 @@ class BaseTestServer {
   Type type_;
 
   // Has the server been started?
-  bool started_;
+  bool started_ = false;
 
   // Enables logging of the server to the console.
-  bool log_to_console_;
+  bool log_to_console_ = false;
 
   // Is WebSocket basic HTTP authentication enabled?
-  bool ws_basic_auth_;
+  bool ws_basic_auth_ = false;
 
   // Disable creation of anonymous FTP user?
-  bool no_anonymous_ftp_user_;
+  bool no_anonymous_ftp_user_ = false;
+
+  // Redirect proxied CONNECT requests to localhost?
+  bool redirect_connect_to_localhost_ = false;
 
   std::unique_ptr<ScopedPortException> allowed_port_;
 

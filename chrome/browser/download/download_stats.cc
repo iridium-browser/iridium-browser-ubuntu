@@ -32,17 +32,15 @@ void RecordDownloadSource(ChromeDownloadSource source) {
 }
 
 void RecordDangerousDownloadWarningShown(
-    content::DownloadDangerType danger_type) {
-  UMA_HISTOGRAM_ENUMERATION("Download.DownloadWarningShown",
-                            danger_type,
-                            content::DOWNLOAD_DANGER_TYPE_MAX);
+    download::DownloadDangerType danger_type) {
+  UMA_HISTOGRAM_ENUMERATION("Download.DownloadWarningShown", danger_type,
+                            download::DOWNLOAD_DANGER_TYPE_MAX);
 }
 
 void RecordOpenedDangerousConfirmDialog(
-    content::DownloadDangerType danger_type) {
+    download::DownloadDangerType danger_type) {
   UMA_HISTOGRAM_ENUMERATION("Download.ShowDangerousDownloadConfirmationPrompt",
-                            danger_type,
-                            content::DOWNLOAD_DANGER_TYPE_MAX);
+                            danger_type, download::DOWNLOAD_DANGER_TYPE_MAX);
 }
 
 void RecordDownloadOpenMethod(ChromeDownloadOpenMethod open_method) {
@@ -53,4 +51,31 @@ void RecordDownloadOpenMethod(ChromeDownloadOpenMethod open_method) {
 
 void RecordDatabaseAvailability(bool is_available) {
   UMA_HISTOGRAM_BOOLEAN("Download.Database.IsAvailable", is_available);
+}
+
+void RecordDownloadPathGeneration(DownloadPathGenerationEvent event,
+                                  bool is_transient) {
+  if (is_transient) {
+    UMA_HISTOGRAM_ENUMERATION("Download.PathGenerationEvent.Transient", event,
+                              DownloadPathGenerationEvent::COUNT);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION("Download.PathGenerationEvent.UserDownload",
+                              event, DownloadPathGenerationEvent::COUNT);
+  }
+}
+
+void RecordDownloadPathValidation(PathValidationResult result,
+                                  bool is_transient) {
+  if (is_transient) {
+    UMA_HISTOGRAM_ENUMERATION("Download.PathValidationResult.Transient", result,
+                              PathValidationResult::COUNT);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION("Download.PathValidationResult.UserDownload",
+                              result, PathValidationResult::COUNT);
+  }
+}
+
+void RecordDownloadShelfDragEvent(DownloadShelfDragEvent drag_event) {
+  UMA_HISTOGRAM_ENUMERATION("Download.Shelf.DragEvent", drag_event,
+                            DownloadShelfDragEvent::COUNT);
 }

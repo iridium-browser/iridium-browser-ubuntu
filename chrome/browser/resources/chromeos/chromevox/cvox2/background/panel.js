@@ -8,7 +8,7 @@
 
 goog.provide('Panel');
 
-goog.require('BrailleCommandHandler');
+goog.require('BrailleCommandData');
 goog.require('ISearchUI');
 goog.require('Msgs');
 goog.require('PanelCommand');
@@ -302,6 +302,8 @@ Panel.setMode = function(mode) {
   $('main').hidden = (this.mode_ == Panel.Mode.FULLSCREEN_TUTORIAL);
   $('menus_background').hidden = (this.mode_ != Panel.Mode.FULLSCREEN_MENUS);
   $('tutorial').hidden = (this.mode_ != Panel.Mode.FULLSCREEN_TUTORIAL);
+
+  Panel.updateFromPrefs();
 };
 
 /**
@@ -390,8 +392,7 @@ Panel.onOpenMenus = function(opt_event, opt_activateMenuTitle) {
     if (binding.title && menu) {
       menu.addMenuItem(
           binding.title, binding.keySeq,
-          BrailleCommandHandler.getDotShortcut(binding.command, true),
-          function() {
+          BrailleCommandData.getDotShortcut(binding.command, true), function() {
             var CommandHandler =
                 chrome.extension.getBackgroundPage()['CommandHandler'];
             CommandHandler['onCommand'](binding.command);

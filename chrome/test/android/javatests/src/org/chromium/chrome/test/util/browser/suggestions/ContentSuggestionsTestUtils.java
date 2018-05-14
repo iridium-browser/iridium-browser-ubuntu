@@ -14,6 +14,7 @@ import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.suggestions.ContentSuggestionsAdditionalAction;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
@@ -24,8 +25,8 @@ public final class ContentSuggestionsTestUtils {
     public static SnippetArticle createDummySuggestion(
             @CategoryInt int category, String suffix, boolean isVideoSuggestion) {
         return new SnippetArticle(category, "https://site.com/url" + suffix, "title" + suffix,
-                "pub" + suffix, "txt" + suffix, "https://site.com/url" + suffix, 0, 0, 0,
-                isVideoSuggestion);
+                "pub" + suffix, "https://site.com/url" + suffix, 0, 0, 0, isVideoSuggestion,
+                /* thumbnailDominantColor = */ null);
     }
 
     public static SnippetArticle createDummySuggestion(@CategoryInt int category) {
@@ -44,6 +45,12 @@ public final class ContentSuggestionsTestUtils {
     public static List<SnippetArticle> createDummySuggestions(
             int count, @CategoryInt int category) {
         return createDummySuggestions(count, category, "");
+    }
+
+    /** Registers an empty category according to the provided category info. */
+    public static void registerCategory(
+            FakeSuggestionsSource suggestionsSource, @CategoryInt int category) {
+        registerCategory(suggestionsSource, category, 0);
     }
 
     /**
@@ -72,6 +79,8 @@ public final class ContentSuggestionsTestUtils {
         suggestionsSource.setStatusForCategory(
                 categoryInfo.getCategory(), CategoryStatus.AVAILABLE);
         suggestionsSource.setInfoForCategory(categoryInfo.getCategory(), categoryInfo);
+
+        if (suggestionCount == 0) return Collections.emptyList();
 
         List<SnippetArticle> suggestions =
                 createDummySuggestions(suggestionCount, categoryInfo.getCategory());
@@ -185,7 +194,12 @@ public final class ContentSuggestionsTestUtils {
 
             @Override
             public void visitTileGrid() {
-                describeItem("TILE_GRID");
+                describeItem("SITE_SECTION");
+            }
+
+            @Override
+            public void visitLogo() {
+                describeItem("LOGO");
             }
 
             private void describeItem(String description) {

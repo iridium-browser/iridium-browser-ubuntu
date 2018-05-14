@@ -12,7 +12,7 @@ Polymer({
   behaviors: [
     settings.RouteObserverBehavior, I18nBehavior, WebUIListenerBehavior,
     // <if expr="chromeos">
-    LockStateBehavior,
+    CrPngBehavior, LockStateBehavior,
     // </if>
   ],
 
@@ -25,6 +25,22 @@ Polymer({
       notify: true,
     },
 
+    // <if expr="not chromeos">
+    /**
+     * This flag is used to conditionally show a set of new sign-in UIs to the
+     * profiles that have been migrated to be consistent with the web sign-ins.
+     * TODO(scottchen): In the future when all profiles are completely migrated,
+     * this should be removed, and UIs hidden behind it should become default.
+     * @private
+     */
+    diceEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('diceEnabled');
+      },
+    },
+    // </if>
+
     /**
      * The current sync status, supplied by SyncBrowserProxy.
      * @type {?settings.SyncStatus}
@@ -33,33 +49,33 @@ Polymer({
 
     /**
      * The currently selected profile icon URL. May be a data URL.
+     * @private
      */
     profileIconUrl_: String,
 
     /**
      * The current profile name.
+     * @private
      */
     profileName_: String,
-
-    /**
-     * True if the current profile manages supervised users.
-     */
-    profileManagesSupervisedUsers_: Boolean,
 
     /**
      * The profile deletion warning. The message indicates the number of
      * profile stats that will be deleted if a non-zero count for the profile
      * stats is returned from the browser.
+     * @private
      */
     deleteProfileWarning_: String,
 
     /**
      * True if the profile deletion warning is visible.
+     * @private
      */
     deleteProfileWarningVisible_: Boolean,
 
     /**
      * True if the checkbox to delete the profile has been checked.
+     * @private
      */
     deleteProfile_: Boolean,
 
@@ -92,7 +108,7 @@ Polymer({
     focusConfig_: {
       type: Object,
       value: function() {
-        var map = new Map();
+        const map = new Map();
         if (settings.routes.SYNC)
           map.set(settings.routes.SYNC.path, '#sync-status .subpage-arrow');
         // <if expr="not chromeos">
@@ -129,16 +145,10 @@ Polymer({
 
   /** @override */
   attached: function() {
-    var profileInfoProxy = settings.ProfileInfoBrowserProxyImpl.getInstance();
+    const profileInfoProxy = settings.ProfileInfoBrowserProxyImpl.getInstance();
     profileInfoProxy.getProfileInfo().then(this.handleProfileInfo_.bind(this));
     this.addWebUIListener(
         'profile-info-changed', this.handleProfileInfo_.bind(this));
-
-    profileInfoProxy.getProfileManagesSupervisedUsers().then(
-        this.handleProfileManagesSupervisedUsers_.bind(this));
-    this.addWebUIListener(
-        'profile-manages-supervised-users-changed',
-        this.handleProfileManagesSupervisedUsers_.bind(this));
 
     this.addWebUIListener(
         'profile-stats-count-ready', this.handleProfileStatsCount_.bind(this));
@@ -156,6 +166,9 @@ Polymer({
         settings.getCurrentRoute() == settings.routes.IMPORT_DATA;
 
     if (settings.getCurrentRoute() == settings.routes.SIGN_OUT) {
+      // <if expr="not chromeos">
+      settings.ProfileInfoBrowserProxyImpl.getInstance().getProfileStatsCount();
+      // </if>
       // If the sync status has not been fetched yet, optimistically display
       // the disconnect dialog. There is another check when the sync status is
       // fetched. The dialog will be closed then the user is not signed in.
@@ -163,9 +176,9 @@ Polymer({
         settings.navigateToPreviousRoute();
       } else {
         this.showDisconnectDialog_ = true;
-        this.async(function() {
+        this.async(() => {
           this.$$('#disconnectDialog').showModal();
-        }.bind(this));
+        });
       }
     } else if (this.showDisconnectDialog_) {
       this.$$('#disconnectDialog').close();
@@ -190,16 +203,19 @@ Polymer({
    */
   handleProfileInfo_: function(info) {
     this.profileName_ = info.name;
-    this.profileIconUrl_ = info.iconUrl;
-  },
+    /**
+     * Extract first frame from image by creating a single frame PNG using
+     * url as input if base64 encoded and potentially animated.
+     */
+    // <if expr="chromeos">
+    if (info.iconUrl.startsWith('data:image/png;base64')) {
+      this.profileIconUrl_ =
+          CrPngBehavior.convertImageSequenceToPng([info.iconUrl]);
+      return;
+    }
+    // </if>
 
-  /**
-   * Handler for when the profile starts or stops managing supervised users.
-   * @private
-   * @param {boolean} managesSupervisedUsers
-   */
-  handleProfileManagesSupervisedUsers_: function(managesSupervisedUsers) {
-    this.profileManagesSupervisedUsers_ = managesSupervisedUsers;
+    this.profileIconUrl_ = info.iconUrl;
   },
 
   /**
@@ -229,11 +245,6 @@ Polymer({
     if (!this.syncStatus && syncStatus && !syncStatus.signedIn)
       chrome.metricsPrivate.recordUserAction('Signin_Impression_FromSettings');
 
-    // <if expr="not chromeos">
-    if (syncStatus.signedIn)
-      settings.ProfileInfoBrowserProxyImpl.getInstance().getProfileStatsCount();
-    // </if>
-
     if (!syncStatus.signedIn && this.showDisconnectDialog_)
       this.$$('#disconnectDialog').close();
 
@@ -241,7 +252,7 @@ Polymer({
   },
 
   /** @private */
-  onPictureTap_: function() {
+  onProfileTap_: function() {
     // <if expr="chromeos">
     settings.navigateTo(settings.routes.CHANGE_PICTURE);
     // </if>
@@ -249,13 +260,6 @@ Polymer({
     settings.navigateTo(settings.routes.MANAGE_PROFILE);
     // </if>
   },
-
-  // <if expr="not chromeos">
-  /** @private */
-  onProfileNameTap_: function() {
-    settings.navigateTo(settings.routes.MANAGE_PROFILE);
-  },
-  // </if>
 
   /** @private */
   onSigninTap_: function() {
@@ -265,7 +269,16 @@ Polymer({
   /** @private */
   onDisconnectClosed_: function() {
     this.showDisconnectDialog_ = false;
+    // <if expr="not chromeos">
+    if (!this.diceEnabled_) {
+      // If DICE-enabled, this button won't exist here.
+      cr.ui.focusWithoutInk(assert(this.$$('#disconnectButton')));
+    }
+    // </if>
+
+    // <if expr="chromeos">
     cr.ui.focusWithoutInk(assert(this.$$('#disconnectButton')));
+    // </if>
 
     if (settings.getCurrentRoute() == settings.routes.SIGN_OUT)
       settings.navigateToPreviousRoute();
@@ -284,16 +297,16 @@ Polymer({
 
   /** @private */
   onDisconnectConfirm_: function() {
-    var deleteProfile = !!this.syncStatus.domain || this.deleteProfile_;
+    const deleteProfile = !!this.syncStatus.domain || this.deleteProfile_;
     // Trigger the sign out event after the navigateToPreviousRoute().
     // So that the navigation to the setting page could be finished before the
     // sign out if navigateToPreviousRoute() returns synchronously even the
     // browser is closed after the sign out. Otherwise, the navigation will be
-    // finshed during session restore if the browser is closed before the async
+    // finished during session restore if the browser is closed before the async
     // callback executed.
-    listenOnce(this, 'signout-dialog-closed', function() {
+    listenOnce(this, 'signout-dialog-closed', () => {
       this.syncBrowserProxy_.signOut(deleteProfile);
-    }.bind(this));
+    });
 
     this.$$('#disconnectDialog').close();
   },
@@ -367,7 +380,7 @@ Polymer({
    * @return {string}
    */
   getDomainHtml_: function(domain) {
-    var innerSpan = '<span id="managed-by-domain-name">' + domain + '</span>';
+    const innerSpan = '<span id="managed-by-domain-name">' + domain + '</span>';
     return loadTimeData.getStringF('domainManagedProfile', innerSpan);
   },
 
@@ -380,6 +393,15 @@ Polymer({
   onImportDataDialogClosed_: function() {
     settings.navigateToPreviousRoute();
     cr.ui.focusWithoutInk(assert(this.$.importDataDialogTrigger));
+  },
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  shouldShowSyncAccountControl_: function() {
+    return !!this.diceEnabled_ && !!this.syncStatus.syncSystemEnabled &&
+        !!this.syncStatus.signinAllowed;
   },
   // </if>
 
@@ -431,7 +453,7 @@ Polymer({
     if (!syncStatus)
       return '';
 
-    var syncIcon = 'settings:sync';
+    let syncIcon = 'settings:sync';
 
     if (syncStatus.hasError)
       syncIcon = 'settings:sync-problem';
@@ -454,10 +476,10 @@ Polymer({
 
   /**
    * @param {string} iconUrl
-   * @return {string} A CSS imageset for multiple scale factors.
+   * @return {string} A CSS image-set for multiple scale factors.
    * @private
    */
-  getIconImageset_: function(iconUrl) {
+  getIconImageSet_: function(iconUrl) {
     return cr.icon.getImage(iconUrl);
   },
 

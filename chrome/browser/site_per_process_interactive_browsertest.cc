@@ -3,9 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_timeouts.h"
+#include "build/build_config.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -468,11 +470,11 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessInteractiveBrowserTest,
   EXPECT_EQ("\"root-focused-input1\"",
             click_element_and_wait_for_message(main_frame_input_coords[0]));
   EXPECT_EQ(main_frame, web_contents->GetFocusedFrame());
-  auto frame_focused = base::MakeUnique<content::FrameFocusedObserver>(child1);
+  auto frame_focused = std::make_unique<content::FrameFocusedObserver>(child1);
   EXPECT_EQ("\"child1-focused-input1\"",
             click_element_and_wait_for_message(child1_input_coords[0]));
   frame_focused->Wait();
-  frame_focused = base::MakeUnique<content::FrameFocusedObserver>(main_frame);
+  frame_focused = std::make_unique<content::FrameFocusedObserver>(main_frame);
   EXPECT_EQ("\"root-focused-input1\"", press_tab_and_wait_for_message(true));
   frame_focused->Wait();
 
@@ -480,37 +482,37 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessInteractiveBrowserTest,
   EXPECT_EQ("\"root-focused-input2\"",
             click_element_and_wait_for_message(main_frame_input_coords[1]));
   EXPECT_EQ(main_frame, web_contents->GetFocusedFrame());
-  frame_focused = base::MakeUnique<content::FrameFocusedObserver>(child2);
+  frame_focused = std::make_unique<content::FrameFocusedObserver>(child2);
   EXPECT_EQ("\"child2-focused-input2\"",
             click_element_and_wait_for_message(child2_input_coords[1]));
   frame_focused->Wait();
-  frame_focused = base::MakeUnique<content::FrameFocusedObserver>(main_frame);
+  frame_focused = std::make_unique<content::FrameFocusedObserver>(main_frame);
   EXPECT_EQ("\"root-focused-input2\"", press_tab_and_wait_for_message(false));
   frame_focused->Wait();
 
   // Tab forward from child1 to child2.
-  frame_focused = base::MakeUnique<content::FrameFocusedObserver>(child2);
+  frame_focused = std::make_unique<content::FrameFocusedObserver>(child2);
   EXPECT_EQ("\"child2-focused-input1\"",
             click_element_and_wait_for_message(child2_input_coords[0]));
   frame_focused->Wait();
-  frame_focused = base::MakeUnique<content::FrameFocusedObserver>(child1);
+  frame_focused = std::make_unique<content::FrameFocusedObserver>(child1);
   EXPECT_EQ("\"child1-focused-input2\"",
             click_element_and_wait_for_message(child1_input_coords[1]));
   frame_focused->Wait();
-  frame_focused = base::MakeUnique<content::FrameFocusedObserver>(child2);
+  frame_focused = std::make_unique<content::FrameFocusedObserver>(child2);
   EXPECT_EQ("\"child2-focused-input1\"", press_tab_and_wait_for_message(false));
   frame_focused->Wait();
 
   // Tab backward from child2 to child1.
-  frame_focused = base::MakeUnique<content::FrameFocusedObserver>(child1);
+  frame_focused = std::make_unique<content::FrameFocusedObserver>(child1);
   EXPECT_EQ("\"child1-focused-input2\"",
             click_element_and_wait_for_message(child1_input_coords[1]));
   frame_focused->Wait();
-  frame_focused = base::MakeUnique<content::FrameFocusedObserver>(child2);
+  frame_focused = std::make_unique<content::FrameFocusedObserver>(child2);
   EXPECT_EQ("\"child2-focused-input1\"",
             click_element_and_wait_for_message(child2_input_coords[0]));
   frame_focused->Wait();
-  frame_focused = base::MakeUnique<content::FrameFocusedObserver>(child1);
+  frame_focused = std::make_unique<content::FrameFocusedObserver>(child1);
   EXPECT_EQ("\"child1-focused-input2\"", press_tab_and_wait_for_message(true));
   // EXPECT_EQ(child1, web_contents->GetFocusedFrame());
   frame_focused->Wait();
@@ -864,8 +866,15 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessInteractiveBrowserTest,
 // The test also exits fullscreen by simulating pressing ESC rather than using
 // document.webkitExitFullscreen(), which tests the browser-initiated
 // fullscreen exit path.
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
+#define MAYBE_FullscreenElementInMultipleSubframes \
+  DISABLED_FullscreenElementInMultipleSubframes
+#else
+#define MAYBE_FullscreenElementInMultipleSubframes \
+  FullscreenElementInMultipleSubframes
+#endif
 IN_PROC_BROWSER_TEST_F(SitePerProcessInteractiveBrowserTest,
-                       FullscreenElementInMultipleSubframes) {
+                       MAYBE_FullscreenElementInMultipleSubframes) {
   // Allow fullscreen in all iframes descending to |c_middle|.
   GURL main_url(embedded_test_server()->GetURL(
       "a.com",
@@ -1454,3 +1463,59 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessInteractiveBrowserTest,
   EXPECT_EQ(cached_date, date) << "Cached date was '" << cached_date
                                << "' but current date is '" << date << "'.";
 }
+
+// There is a problem of missing keyup events with the command key after
+// the NSEvent is sent to NSApplication in ui/base/test/ui_controls_mac.mm .
+// This test is disabled on only the Mac until the problem is resolved.
+// See http://crbug.com/425859 for more information.
+#if !defined(OS_MACOSX)
+// Tests that ctrl-click in a subframe results in a background, not a foreground
+// tab - see https://crbug.com/804838.  This test is somewhat similar to
+// CtrlClickShouldEndUpIn*ProcessTest tests, but this test has to simulate an
+// actual mouse click.
+IN_PROC_BROWSER_TEST_F(SitePerProcessInteractiveBrowserTest,
+                       SubframeAnchorOpenedInBackgroundTab) {
+  // Setup the test page - the ctrl-clicked link should be in a subframe.
+  GURL main_url(embedded_test_server()->GetURL("foo.com", "/iframe.html"));
+  ui_test_utils::NavigateToURL(browser(), main_url);
+  GURL subframe_url(embedded_test_server()->GetURL(
+      "bar.com", "/frame_tree/anchor_to_same_site_location.html"));
+  content::WebContents* old_contents =
+      browser()->tab_strip_model()->GetWebContentsAt(0);
+  ASSERT_TRUE(NavigateIframeToURL(old_contents, "test", subframe_url));
+  EXPECT_LE(2u, old_contents->GetAllFrames().size());
+  content::RenderFrameHost* subframe = old_contents->GetAllFrames()[1];
+  EXPECT_EQ(subframe_url, subframe->GetLastCommittedURL());
+
+  // Simulate the ctrl-return to open the anchor's link in a new background tab.
+  EXPECT_TRUE(ExecuteScript(
+      subframe, "document.getElementById('test-anchor-no-target').focus();"));
+  content::WebContents* new_contents = nullptr;
+  {
+    content::WebContentsAddedObserver new_tab_observer;
+#if defined(OS_MACOSX)
+    ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+        old_contents->GetTopLevelNativeWindow(), ui::VKEY_RETURN, false, false,
+        false, true /* cmd */));
+#else
+    ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+        old_contents->GetTopLevelNativeWindow(), ui::VKEY_RETURN,
+        true /* ctrl */, false, false, false));
+#endif
+    new_contents = new_tab_observer.GetWebContents();
+  }
+
+  // Verify that the new content has loaded the expected contents.
+  GURL target_url(embedded_test_server()->GetURL("bar.com", "/title1.html"));
+  EXPECT_TRUE(WaitForLoadStop(new_contents));
+  EXPECT_EQ(target_url, new_contents->GetMainFrame()->GetLastCommittedURL());
+
+  // Verify that the anchor opened in a new background tab.
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
+  EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
+  EXPECT_EQ(0,
+            browser()->tab_strip_model()->GetIndexOfWebContents(old_contents));
+  EXPECT_EQ(1,
+            browser()->tab_strip_model()->GetIndexOfWebContents(new_contents));
+}
+#endif

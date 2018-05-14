@@ -78,7 +78,7 @@ ToolbarActionView::~ToolbarActionView() {
 
 void ToolbarActionView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   views::MenuButton::GetAccessibleNodeData(node_data);
-  node_data->role = ui::AX_ROLE_BUTTON;
+  node_data->role = ax::mojom::Role::kButton;
 }
 
 std::unique_ptr<LabelButtonBorder> ToolbarActionView::CreateDefaultBorder()
@@ -112,7 +112,7 @@ bool ToolbarActionView::ShouldUseFloodFillInkDrop() const {
 
 std::unique_ptr<views::InkDrop> ToolbarActionView::CreateInkDrop() {
   std::unique_ptr<views::InkDropImpl> ink_drop =
-      CustomButton::CreateDefaultInkDropImpl();
+      Button::CreateDefaultInkDropImpl();
   ink_drop->SetShowHighlightOnHover(!delegate_->ShownInsideMenu());
   ink_drop->SetShowHighlightOnFocus(true);
   return std::move(ink_drop);
@@ -124,14 +124,15 @@ content::WebContents* ToolbarActionView::GetCurrentWebContents() const {
 
 void ToolbarActionView::UpdateState() {
   content::WebContents* web_contents = GetCurrentWebContents();
+  SetAccessibleName(view_controller_->GetAccessibleName(web_contents));
   if (SessionTabHelper::IdForTab(web_contents) < 0)
     return;
 
   if (!view_controller_->IsEnabled(web_contents) &&
       !view_controller_->DisabledClickOpensMenu()) {
-      SetState(views::CustomButton::STATE_DISABLED);
-  } else if (state() == views::CustomButton::STATE_DISABLED) {
-    SetState(views::CustomButton::STATE_NORMAL);
+    SetState(views::Button::STATE_DISABLED);
+  } else if (state() == views::Button::STATE_DISABLED) {
+    SetState(views::Button::STATE_NORMAL);
   }
 
   wants_to_run_ = view_controller_->WantsToRun(web_contents);
@@ -144,7 +145,6 @@ void ToolbarActionView::UpdateState() {
     SetImage(views::Button::STATE_NORMAL, icon);
 
   SetTooltipText(view_controller_->GetTooltip(web_contents));
-  SetAccessibleName(view_controller_->GetAccessibleName(web_contents));
 
   Layout();  // We need to layout since we may have added an icon as a result.
   SchedulePaint();

@@ -36,9 +36,9 @@ namespace blink {
 
 SVGPaintContext::~SVGPaintContext() {
   if (filter_) {
-    DCHECK(SVGResourcesCache::CachedResourcesForLayoutObject(&object_));
+    DCHECK(SVGResourcesCache::CachedResourcesForLayoutObject(object_));
     DCHECK(
-        SVGResourcesCache::CachedResourcesForLayoutObject(&object_)->Filter() ==
+        SVGResourcesCache::CachedResourcesForLayoutObject(object_)->Filter() ==
         filter_);
     DCHECK(filter_recording_context_);
     SVGFilterPainter(*filter_).FinishEffect(object_,
@@ -49,9 +49,9 @@ SVGPaintContext::~SVGPaintContext() {
   }
 
   if (masker_) {
-    DCHECK(SVGResourcesCache::CachedResourcesForLayoutObject(&object_));
+    DCHECK(SVGResourcesCache::CachedResourcesForLayoutObject(object_));
     DCHECK(
-        SVGResourcesCache::CachedResourcesForLayoutObject(&object_)->Masker() ==
+        SVGResourcesCache::CachedResourcesForLayoutObject(object_)->Masker() ==
         masker_);
     SVGMaskPainter(*masker_).FinishEffect(object_, GetPaintInfo().context);
   }
@@ -95,7 +95,7 @@ bool SVGPaintContext::ApplyClipMaskAndFilterIfNecessary() {
   }
 
   SVGResources* resources =
-      SVGResourcesCache::CachedResourcesForLayoutObject(&object_);
+      SVGResourcesCache::CachedResourcesForLayoutObject(object_);
 
   if (!ApplyMaskIfNecessary(resources))
     return false;
@@ -116,7 +116,7 @@ bool SVGPaintContext::ApplyClipMaskAndFilterIfNecessary() {
 }
 
 void SVGPaintContext::ApplyPaintPropertyState() {
-  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
+  if (!RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
     return;
 
   // SVGRoot works like normal CSS replaced element and its effects are
@@ -124,17 +124,23 @@ void SVGPaintContext::ApplyPaintPropertyState() {
   if (object_.IsSVGRoot())
     return;
 
-  const auto* paint_properties = object_.PaintProperties();
-  const EffectPaintPropertyNode* effect =
-      paint_properties ? paint_properties->Effect() : nullptr;
-  if (!effect)
-    return;
-
-  auto& paint_controller = GetPaintInfo().context.GetPaintController();
-  PaintChunkProperties properties(
-      paint_controller.CurrentPaintChunkProperties());
-  properties.property_tree_state.SetEffect(effect);
-  scoped_paint_chunk_properties_.emplace(paint_controller, object_, properties);
+  if (const auto* properties = object_.FirstFragment().PaintProperties()) {
+    // MaskClip() implies Effect(), thus we don't need to check MaskClip().
+    if (properties->Effect() || properties->ClipPathClip()) {
+      auto& paint_controller = GetPaintInfo().context.GetPaintController();
+      PropertyTreeState state(paint_controller.CurrentPaintChunkProperties()
+                                  .property_tree_state.GetPropertyTreeState());
+      if (const auto* effect = properties->Effect())
+        state.SetEffect(effect);
+      if (const auto* mask_clip = properties->MaskClip())
+        state.SetClip(mask_clip);
+      else if (const auto* clip_path_clip = properties->ClipPathClip())
+        state.SetClip(clip_path_clip);
+      scoped_paint_chunk_properties_.emplace(
+          paint_controller, state, object_,
+          DisplayItem::PaintPhaseToSVGEffectType(GetPaintInfo().phase));
+    }
+  }
 }
 
 void SVGPaintContext::ApplyCompositingIfNecessary() {
@@ -156,14 +162,8 @@ void SVGPaintContext::ApplyCompositingIfNecessary() {
 }
 
 void SVGPaintContext::ApplyClipIfNecessary() {
-  ClipPathOperation* clip_path_operation = object_.StyleRef().ClipPath();
-  if (!clip_path_operation)
-    return;
-  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
-    clip_path_clipper_.emplace(GetPaintInfo().context, *clip_path_operation,
-                               object_, object_.ObjectBoundingBox(),
-                               FloatPoint());
-  }
+  if (object_.StyleRef().ClipPath())
+    clip_path_clipper_.emplace(GetPaintInfo().context, object_, LayoutPoint());
 }
 
 bool SVGPaintContext::ApplyMaskIfNecessary(SVGResources* resources) {
@@ -213,12 +213,16 @@ bool SVGPaintContext::ApplyFilterIfNecessary(SVGResources* resources) {
 }
 
 bool SVGPaintContext::IsIsolationInstalled() const {
+  // In SPv175+ isolation is modeled by effect nodes, and will be applied by
+  // PaintArtifactCompositor or PaintChunksToCcLayer depends on compositing
+  // state.
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
+    return true;
   if (compositing_recorder_)
     return true;
   if (masker_ || filter_)
     return true;
-  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled() && clip_path_clipper_ &&
-      clip_path_clipper_->UsingMask())
+  if (clip_path_clipper_ && clip_path_clipper_->IsIsolationInstalled())
     return true;
   return false;
 }
@@ -228,8 +232,8 @@ void SVGPaintContext::PaintResourceSubtree(GraphicsContext& context,
   DCHECK(item);
   DCHECK(!item->NeedsLayout());
 
-  PaintInfo info(context, LayoutRect::InfiniteIntRect(), kPaintPhaseForeground,
-                 kGlobalPaintNormalPhase,
+  PaintInfo info(context, LayoutRect::InfiniteIntRect(),
+                 PaintPhase::kForeground, kGlobalPaintNormalPhase,
                  kPaintLayerPaintingRenderingResourceSubtree);
   item->Paint(info, IntPoint());
 }
@@ -244,7 +248,7 @@ bool SVGPaintContext::PaintForLayoutObject(
   if (paint_info.IsRenderingClipPathAsMaskImage()) {
     if (resource_mode == kApplyToStrokeMode)
       return false;
-    flags.setColor(SVGComputedStyle::InitialFillPaintColor().Rgb());
+    flags.setColor(SK_ColorBLACK);
     flags.setShader(nullptr);
     return true;
   }

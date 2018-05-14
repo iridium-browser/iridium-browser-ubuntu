@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <initializer_list>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -12,7 +13,6 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "chrome/browser/profile_resetter/brandcoded_default_settings.h"
@@ -22,6 +22,7 @@
 #include "chrome/browser/safe_browsing/settings_reset_prompt/settings_reset_prompt_model.h"
 #include "chrome/browser/safe_browsing/settings_reset_prompt/settings_reset_prompt_test_utils.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -54,25 +55,23 @@ enum class SettingType {
 struct ModelParams {
   SettingType setting_to_reset;
   size_t startup_pages;
-  size_t extensions_to_disable;
 };
 
 class MockSettingsResetPromptModel
     : public safe_browsing::SettingsResetPromptModel {
  public:
   // Create a mock model that pretends that the settings passed in via
-  // |settings_to_reset| require resetting. |settings_to_reset| must not be
-  // empty or have |EXTENSIONS| as the only member.
+  // |settings_to_reset| require resetting.
   explicit MockSettingsResetPromptModel(Profile* profile,
                                         const ModelParams& params)
       : SettingsResetPromptModel(
             profile,
-            base::MakeUnique<NiceMock<MockSettingsResetPromptConfig>>(),
-            base::MakeUnique<NiceMock<MockProfileResetter>>(profile)) {
+            std::make_unique<NiceMock<MockSettingsResetPromptConfig>>(),
+            std::make_unique<NiceMock<MockProfileResetter>>(profile)) {
     EXPECT_LE(params.startup_pages, arraysize(kStartupUrls));
 
-    // Set up startup URLs and extensions to be returned by member functions
-    // based on the constructor arguments.
+    // Set up startup URLs to be returned by member functions based on the
+    // constructor arguments.
     for (size_t i = 0;
          i < std::min(arraysize(kStartupUrls), params.startup_pages); ++i) {
       startup_urls_.push_back(GURL(kStartupUrls[i]));
@@ -80,13 +79,6 @@ class MockSettingsResetPromptModel
 
     if (params.setting_to_reset == SettingType::STARTUP_PAGE)
       startup_urls_to_reset_ = startup_urls_;
-
-    for (size_t i = 0; i < params.extensions_to_disable; ++i) {
-      std::string id = "id" + base::IntToString(i);
-      extensions_.insert(
-          std::make_pair(id, safe_browsing::ExtensionInfo(
-                                 id, "Extension " + base::IntToString(i))));
-    }
 
     ON_CALL(*this, ShouldPromptForReset()).WillByDefault(Return(true));
     ON_CALL(*this, MockPerformReset(_, _)).WillByDefault(Return());
@@ -114,9 +106,6 @@ class MockSettingsResetPromptModel
             Return(params.setting_to_reset == SettingType::STARTUP_PAGE
                        ? RESET_REQUIRED
                        : NO_RESET_REQUIRED_DUE_TO_DOMAIN_NOT_MATCHED));
-
-    ON_CALL(*this, extensions_to_disable())
-        .WillByDefault(ReturnRef(extensions_));
   }
   ~MockSettingsResetPromptModel() override {}
 
@@ -135,80 +124,50 @@ class MockSettingsResetPromptModel
   MOCK_CONST_METHOD0(startup_urls, const std::vector<GURL>&());
   MOCK_CONST_METHOD0(startup_urls_to_reset, const std::vector<GURL>&());
   MOCK_CONST_METHOD0(startup_urls_reset_state, ResetState());
-  MOCK_CONST_METHOD0(extensions_to_disable, const ExtensionMap&());
 
  private:
   std::vector<GURL> startup_urls_;
   std::vector<GURL> startup_urls_to_reset_;
-  ExtensionMap extensions_;
 
   DISALLOW_COPY_AND_ASSIGN(MockSettingsResetPromptModel);
 };
 
 class SettingsResetPromptDialogTest : public DialogBrowserTest {
  public:
-  void ShowDialog(const std::string& name) override {
+  void ShowUi(const std::string& name) override {
     const std::map<std::string, ModelParams> name_to_model_params = {
-        {"dse", {SettingType::DEFAULT_SEARCH_ENGINE, 0, 0}},
-        {"sp1", {SettingType::STARTUP_PAGE, 1, 0}},
-        {"sp2", {SettingType::STARTUP_PAGE, 2, 0}},
-        {"hp", {SettingType::HOMEPAGE, 0, 0}},
-        {"dse_ext1", {SettingType::DEFAULT_SEARCH_ENGINE, 0, 1}},
-        {"sp1_ext1", {SettingType::STARTUP_PAGE, 1, 1}},
-        {"sp2_ext1", {SettingType::STARTUP_PAGE, 2, 1}},
-        {"hp_ext1", {SettingType::HOMEPAGE, 0, 1}},
-        {"dse_ext2", {SettingType::DEFAULT_SEARCH_ENGINE, 0, 2}},
-        {"sp1_ext2", {SettingType::STARTUP_PAGE, 1, 2}},
-        {"sp2_ext2", {SettingType::STARTUP_PAGE, 2, 2}},
-        {"hp_ext2", {SettingType::HOMEPAGE, 0, 2}},
+        {"DefaultSearchEngineChanged", {SettingType::DEFAULT_SEARCH_ENGINE, 0}},
+        {"SingleStartupPageChanged", {SettingType::STARTUP_PAGE, 1}},
+        {"MultipleStartupPagesChanged", {SettingType::STARTUP_PAGE, 2}},
+        {"HomePageChanged", {SettingType::HOMEPAGE, 0}},
     };
 
     ASSERT_NE(name_to_model_params.find(name), name_to_model_params.end());
-    auto model = base::MakeUnique<NiceMock<MockSettingsResetPromptModel>>(
+    auto model = std::make_unique<NiceMock<MockSettingsResetPromptModel>>(
         browser()->profile(), name_to_model_params.find(name)->second);
 
-    safe_browsing::SettingsResetPromptController::ShowSettingsResetPrompt(
+    chrome::ShowSettingsResetPrompt(
         browser(),
         new safe_browsing::SettingsResetPromptController(
-            std::move(model), base::MakeUnique<BrandcodedDefaultSettings>()));
+            std::move(model), std::make_unique<BrandcodedDefaultSettings>()));
   }
 };
 
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_dse) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest,
+                       InvokeUi_DefaultSearchEngineChanged) {
+  ShowAndVerifyUi();
 }
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_sp1) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest,
+                       InvokeUi_SingleStartupPageChanged) {
+  ShowAndVerifyUi();
 }
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_sp2) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest,
+                       InvokeUi_MultipleStartupPagesChanged) {
+  ShowAndVerifyUi();
 }
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_hp) {
-  RunDialog();
-}
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_dse_ext1) {
-  RunDialog();
-}
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_sp1_ext1) {
-  RunDialog();
-}
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_sp2_ext1) {
-  RunDialog();
-}
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_hp_ext1) {
-  RunDialog();
-}
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_dse_ext2) {
-  RunDialog();
-}
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_sp1_ext2) {
-  RunDialog();
-}
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_sp2_ext2) {
-  RunDialog();
-}
-IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest, InvokeDialog_hp_ext2) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(SettingsResetPromptDialogTest,
+                       InvokeUi_HomePageChanged) {
+  ShowAndVerifyUi();
 }
 
 }  // namespace

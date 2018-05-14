@@ -36,9 +36,8 @@ import java.util.concurrent.TimeoutException;
  * Tests for checking whether the media are paused when unplugging the headset
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({MediaSwitches.IGNORE_AUTOPLAY_RESTRICTIONS_FOR_TESTS,
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({MediaSwitches.AUTOPLAY_NO_GESTURE_REQUIRED_POLICY,
+        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PauseOnHeadsetUnplugTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -68,8 +67,7 @@ public class PauseOnHeadsetUnplugTest {
 
     @Before
     public void setUp() throws Exception {
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mActivityTestRule.startMainActivityWithURL(mTestServer.getURL(TEST_PATH));
     }
 
@@ -89,10 +87,10 @@ public class PauseOnHeadsetUnplugTest {
     }
 
     private void simulateHeadsetUnplug() {
-        Intent i = new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(),
+        Intent i = new Intent(InstrumentationRegistry.getTargetContext(),
                 MediaNotificationManager.PlaybackListenerService.class);
         i.setAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
 
-        InstrumentationRegistry.getInstrumentation().getContext().startService(i);
+        InstrumentationRegistry.getContext().startService(i);
     }
 }

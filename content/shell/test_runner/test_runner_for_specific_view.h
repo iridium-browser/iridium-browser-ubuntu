@@ -15,12 +15,16 @@
 #include "base/memory/weak_ptr.h"
 #include "v8/include/v8.h"
 
+class GURL;
 class SkBitmap;
 
 namespace blink {
 class WebLocalFrame;
-class WebURLResponse;
 class WebView;
+}
+
+namespace content {
+struct Manifest;
 }
 
 namespace gin {
@@ -93,8 +97,8 @@ class TestRunnerForSpecificView {
 
   void GetManifestThen(v8::Local<v8::Function> callback);
   void GetManifestCallback(v8::UniquePersistent<v8::Function> callback,
-                           const blink::WebURLResponse& response,
-                           const std::string& data);
+                           const GURL& manifest_url,
+                           const content::Manifest& manifest);
 
   // Calls |callback| with a DOMString[] representing the events recorded since
   // the last call to this function.
@@ -166,9 +170,6 @@ class TestRunnerForSpecificView {
 
   // Changes the direction of the focused element.
   void SetTextDirection(const std::string& direction_name);
-
-  // Dump current PageImportanceSignals for the page.
-  void DumpPageImportanceSignals();
 
   // Permits the adding and removing of only one opaque overlay.
   void AddWebPageOverlay();

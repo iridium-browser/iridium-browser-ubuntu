@@ -47,7 +47,7 @@ ExtendableEvent* ExtendableEvent::Create(const AtomicString& type,
   return new ExtendableEvent(type, event_init, observer);
 }
 
-ExtendableEvent::~ExtendableEvent() {}
+ExtendableEvent::~ExtendableEvent() = default;
 
 void ExtendableEvent::waitUntil(ScriptState* script_state,
                                 ScriptPromise script_promise,
@@ -75,7 +75,7 @@ const AtomicString& ExtendableEvent::InterfaceName() const {
   return EventNames::ExtendableEvent;
 }
 
-DEFINE_TRACE(ExtendableEvent) {
+void ExtendableEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(observer_);
   Event::Trace(visitor);
 }

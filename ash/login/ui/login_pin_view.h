@@ -5,16 +5,25 @@
 #ifndef ASH_LOGIN_UI_LOGIN_PIN_VIEW_H_
 #define ASH_LOGIN_UI_LOGIN_PIN_VIEW_H_
 
+#include <memory>
+
 #include "ash/ash_export.h"
+#include "ash/login/ui/non_accessible_view.h"
 #include "base/callback.h"
 #include "base/macros.h"
 #include "ui/views/view.h"
+
+namespace base {
+class Timer;
+}  // namespace base
 
 namespace ash {
 
 // Implements a PIN keyboard. The class emits high-level events that can be used
 // by the embedder. The PIN keyboard, while displaying letters, only emits
 // numbers.
+//
+// The view is always rendered via layers.
 //
 // The UI looks a little like this:
 //    _______    _______    _______
@@ -34,10 +43,8 @@ namespace ash {
 //              |   +   |  |       |
 //               -------    -------
 //
-class ASH_EXPORT LoginPinView : public views::View {
+class ASH_EXPORT LoginPinView : public NonAccessibleView {
  public:
-  // Spacing between each pin button.
-  static const int kButtonSeparatorSizeDp;
   // Size of each button.
   static const int kButtonSizeDp;
 
@@ -48,6 +55,11 @@ class ASH_EXPORT LoginPinView : public views::View {
 
     views::View* GetButton(int number) const;
     views::View* GetBackspaceButton() const;
+    // Sets the timers that are used for backspace auto-submit. |delay_timer| is
+    // the initial delay before an auto-submit, and |repeat_timer| fires
+    // whenever a new backspace event should run after the initial delay.
+    void SetBackspaceTimers(std::unique_ptr<base::Timer> delay_timer,
+                            std::unique_ptr<base::Timer> repeat_timer);
 
    private:
     LoginPinView* const view_;
@@ -63,11 +75,13 @@ class ASH_EXPORT LoginPinView : public views::View {
                         const OnPinBackspace& on_backspace);
   ~LoginPinView() override;
 
-  // views::View:
-  const char* GetClassName() const override;
-  bool OnKeyPressed(const ui::KeyEvent& event) override;
+  // Called when the password field text changed.
+  void OnPasswordTextChanged(bool is_empty);
 
  private:
+  class BackspacePinButton;
+
+  BackspacePinButton* backspace_;
   OnPinKey on_key_;
   OnPinBackspace on_backspace_;
 

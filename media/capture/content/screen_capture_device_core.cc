@@ -26,11 +26,9 @@ void DeleteCaptureMachine(
 
 }  // namespace
 
-VideoCaptureMachine::VideoCaptureMachine() {
-}
+VideoCaptureMachine::VideoCaptureMachine() = default;
 
-VideoCaptureMachine::~VideoCaptureMachine() {
-}
+VideoCaptureMachine::~VideoCaptureMachine() = default;
 
 bool VideoCaptureMachine::IsAutoThrottlingEnabled() const {
   return false;
@@ -47,7 +45,7 @@ void ScreenCaptureDeviceCore::AllocateAndStart(
   }
 
   if (params.requested_format.pixel_format != PIXEL_FORMAT_I420 ||
-      params.requested_format.pixel_storage != PIXEL_STORAGE_CPU) {
+      params.requested_format.pixel_storage != VideoPixelStorage::CPU) {
     client->OnError(
         FROM_HERE,
         base::StringPrintf(
@@ -72,18 +70,6 @@ void ScreenCaptureDeviceCore::RequestRefreshFrame() {
   if (state_ != kCapturing)
     return;
 
-  // Try to use the less resource-intensive "passive" refresh mechanism, unless
-  // this is the first refresh following a Resume().
-  if (force_active_refresh_once_) {
-    capture_machine_->MaybeCaptureForRefresh();
-    force_active_refresh_once_ = false;
-    return;
-  }
-
-  // Make a best-effort attempt at a passive refresh, but fall-back to an active
-  // refresh if that fails.
-  if (oracle_proxy_->AttemptPassiveRefresh())
-    return;
   capture_machine_->MaybeCaptureForRefresh();
 }
 
@@ -104,7 +90,6 @@ void ScreenCaptureDeviceCore::Resume() {
   if (state_ != kSuspended)
     return;
 
-  force_active_refresh_once_ = true;
   TransitionStateTo(kCapturing);
 
   capture_machine_->Resume();
@@ -121,7 +106,7 @@ void ScreenCaptureDeviceCore::StopAndDeAllocate() {
 
   TransitionStateTo(kIdle);
 
-  capture_machine_->Stop(base::Bind(&base::DoNothing));
+  capture_machine_->Stop(base::DoNothing());
 }
 
 void ScreenCaptureDeviceCore::OnConsumerReportingUtilization(
@@ -142,9 +127,7 @@ void ScreenCaptureDeviceCore::CaptureStarted(bool success) {
 
 ScreenCaptureDeviceCore::ScreenCaptureDeviceCore(
     std::unique_ptr<VideoCaptureMachine> capture_machine)
-    : state_(kIdle),
-      capture_machine_(std::move(capture_machine)),
-      force_active_refresh_once_(false) {
+    : state_(kIdle), capture_machine_(std::move(capture_machine)) {
   DCHECK(capture_machine_.get());
 }
 
@@ -173,7 +156,7 @@ void ScreenCaptureDeviceCore::TransitionStateTo(State next_state) {
   state_ = next_state;
 }
 
-void ScreenCaptureDeviceCore::Error(const tracked_objects::Location& from_here,
+void ScreenCaptureDeviceCore::Error(const base::Location& from_here,
                                     const std::string& reason) {
   DCHECK(thread_checker_.CalledOnValidThread());
 

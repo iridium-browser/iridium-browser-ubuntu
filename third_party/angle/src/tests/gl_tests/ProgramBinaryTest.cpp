@@ -11,6 +11,7 @@
 
 #include "EGLWindow.h"
 #include "OSWindow.h"
+#include "common/string_utils.h"
 #include "test_utils/angle_test_configs.h"
 #include "test_utils/gl_raii.h"
 
@@ -33,22 +34,18 @@ class ProgramBinaryTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        const std::string vertexShaderSource = SHADER_SOURCE
-        (
-            attribute vec4 inputAttribute;
+        const std::string vertexShaderSource =
+            R"(attribute vec4 inputAttribute;
             void main()
             {
                 gl_Position = inputAttribute;
-            }
-        );
+            })";
 
-        const std::string fragmentShaderSource = SHADER_SOURCE
-        (
-            void main()
+        const std::string fragmentShaderSource =
+            R"(void main()
             {
                 gl_FragColor = vec4(1,0,0,1);
-            }
-        );
+            })";
 
         mProgram = CompileProgram(vertexShaderSource, fragmentShaderSource);
         if (mProgram == 0)
@@ -270,11 +267,7 @@ void ProgramBinaryES3Test::testBinaryAndUBOBlockIndexes(bool drawWithProgramFirs
     // We can't run the test if no program binary formats are supported.
     GLint binaryFormatCount = 0;
     glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &binaryFormatCount);
-    if (binaryFormatCount == 0)
-    {
-        std::cout << "Test skipped because no program binary formats available." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(!binaryFormatCount);
 
     const std::string &vertexShader =
         "#version 300 es\n"
@@ -360,11 +353,7 @@ TEST_P(ProgramBinaryES3Test, UniformBlockBindingNoDraw)
 {
     // TODO(jmadill): Investigate Intel failure.
     // http://anglebug.com/1637
-    if (IsWindows() && IsOpenGL() && IsIntel())
-    {
-        std::cout << "Test skipped on Windows Intel OpenGL." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(IsWindows() && IsOpenGL() && IsIntel());
 
     testBinaryAndUBOBlockIndexes(false);
 }
@@ -391,11 +380,7 @@ TEST_P(ProgramBinaryES31Test, ProgramBinaryWithComputeShader)
     // We can't run the test if no program binary formats are supported.
     GLint binaryFormatCount = 0;
     glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &binaryFormatCount);
-    if (binaryFormatCount == 0)
-    {
-        std::cout << "Test skipped because no program binary formats available." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(!binaryFormatCount);
 
     const std::string &computeShader =
         "#version 310 es\n"
@@ -426,9 +411,11 @@ TEST_P(ProgramBinaryES31Test, ProgramBinaryWithComputeShader)
 
     // Load a new program with the binary.
     ANGLE_GL_BINARY_ES3_PROGRAM(binaryProgram, binary, binaryFormat);
+    ASSERT_GL_NO_ERROR();
 
-    // TODO(Xinghua): add dispatch support when available.
-
+    // Dispatch compute with the loaded binary program
+    glUseProgram(binaryProgram.get());
+    glDispatchCompute(8, 4, 2);
     ASSERT_GL_NO_ERROR();
 }
 
@@ -451,25 +438,23 @@ class ProgramBinaryTransformFeedbackTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        const std::string vertexShaderSource = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string vertexShaderSource =
+            R"(#version 300 es
             in vec4 inputAttribute;
             out vec4 outputVarying;
             void main()
             {
                 outputVarying = inputAttribute;
-            }
-        );
+            })";
 
-        const std::string fragmentShaderSource = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string fragmentShaderSource =
+            R"(#version 300 es
             precision highp float;
             out vec4 outputColor;
             void main()
             {
                 outputColor = vec4(1,0,0,1);
-            }
-        );
+            })";
 
         std::vector<std::string> transformFeedbackVaryings;
         transformFeedbackVaryings.push_back("outputVarying");
@@ -506,18 +491,9 @@ class ProgramBinaryTransformFeedbackTest : public ANGLETest
 // should not internally cause a vertex shader recompile (for conversion).
 TEST_P(ProgramBinaryTransformFeedbackTest, GetTransformFeedbackVarying)
 {
-    if (!extensionEnabled("GL_OES_get_program_binary"))
-    {
-        std::cout << "Test skipped because GL_OES_get_program_binary is not available."
-                  << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(!extensionEnabled("GL_OES_get_program_binary"));
 
-    if (getAvailableProgramBinaryFormatCount() == 0)
-    {
-        std::cout << "Test skipped because no program binary formats are available." << std::endl;
-        return;
-    }
+    ANGLE_SKIP_TEST_IF(!getAvailableProgramBinaryFormatCount());
 
     std::vector<uint8_t> binary(0);
     GLint programLength = 0;
@@ -632,50 +608,44 @@ class ProgramBinariesAcrossPlatforms : public testing::TestWithParam<PlatformsWi
 
     GLuint createES2ProgramFromSource()
     {
-        const std::string testVertexShaderSource = SHADER_SOURCE
-        (
-            attribute highp vec4 position;
+        const std::string testVertexShaderSource =
+            R"(attribute highp vec4 position;
 
             void main(void)
             {
                 gl_Position = position;
-            }
-        );
+            })";
 
-        const std::string testFragmentShaderSource = SHADER_SOURCE
-        (
-            void main(void)
+        const std::string testFragmentShaderSource =
+            R"(void main(void)
             {
                 gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-            }
-        );
+            })";
 
         return CompileProgram(testVertexShaderSource, testFragmentShaderSource);
     }
 
     GLuint createES3ProgramFromSource()
     {
-        const std::string testVertexShaderSource = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string testVertexShaderSource =
+            R"(#version 300 es
             precision highp float;
             in highp vec4 position;
 
             void main(void)
             {
                 gl_Position = position;
-            }
-        );
+            })";
 
-        const std::string testFragmentShaderSource = SHADER_SOURCE
-        (   #version 300 es \n
+        const std::string testFragmentShaderSource =
+            R"(#version 300 es
             precision highp float;
             out vec4 out_FragColor;
 
             void main(void)
             {
                 out_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-            }
-        );
+            })";
 
         return CompileProgram(testVertexShaderSource, testFragmentShaderSource);
     }
@@ -727,17 +697,11 @@ TEST_P(ProgramBinariesAcrossPlatforms, CreateAndReloadBinary)
     angle::PlatformParameters secondRenderer = GetParam().loadParams;
     bool expectedLinkResult                  = GetParam().expectedLinkResult;
 
-    if (!(IsPlatformAvailable(firstRenderer)))
-    {
-        std::cout << "First renderer not supported, skipping test";
-        return;
-    }
+    // First renderer not supported, skipping test.
+    ANGLE_SKIP_TEST_IF(!(IsPlatformAvailable(firstRenderer)));
 
-    if (!(IsPlatformAvailable(secondRenderer)))
-    {
-        std::cout << "Second renderer not supported, skipping test";
-        return;
-    }
+    // Second renderer not supported, skipping test.
+    ANGLE_SKIP_TEST_IF(!(IsPlatformAvailable(secondRenderer)));
 
     EGLWindow *eglWindow = nullptr;
     std::vector<uint8_t> binary(0);
@@ -757,22 +721,19 @@ TEST_P(ProgramBinariesAcrossPlatforms, CreateAndReloadBinary)
 
     // If the test is trying to use both the default GPU and WARP, but the default GPU *IS* WARP,
     // then our expectations for the test results will be invalid.
-    if (firstRenderer.eglParameters.deviceType != EGL_PLATFORM_ANGLE_DEVICE_TYPE_WARP_ANGLE &&
-        secondRenderer.eglParameters.deviceType == EGL_PLATFORM_ANGLE_DEVICE_TYPE_WARP_ANGLE)
+    if (firstRenderer.eglParameters.deviceType != EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_WARP_ANGLE &&
+        secondRenderer.eglParameters.deviceType == EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_WARP_ANGLE)
     {
         std::string rendererString = std::string(reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
-        std::transform(rendererString.begin(), rendererString.end(), rendererString.begin(), ::tolower);
+        angle::ToLower(&rendererString);
 
         auto basicRenderPos = rendererString.find(std::string("microsoft basic render"));
         auto softwareAdapterPos = rendererString.find(std::string("software adapter"));
 
-        if (basicRenderPos != std::string::npos || softwareAdapterPos != std::string::npos)
-        {
-            // The first renderer is using WARP, even though we didn't explictly request it
-            // We should skip this test
-            std::cout << "Test skipped on when default GPU is WARP." << std::endl;
-            return;
-        }
+        // The first renderer is using WARP, even though we didn't explictly request it
+        // We should skip this test
+        ANGLE_SKIP_TEST_IF(basicRenderPos != std::string::npos ||
+                           softwareAdapterPos != std::string::npos);
     }
 
     // Create a program

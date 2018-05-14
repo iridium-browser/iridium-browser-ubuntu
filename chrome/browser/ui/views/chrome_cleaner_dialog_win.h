@@ -52,9 +52,9 @@ class ChromeCleanerDialog
   ui::ModalType GetModalType() const override;
   base::string16 GetWindowTitle() const override;
   views::View* GetInitiallyFocusedView() override;
+  bool ShouldShowCloseButton() const override;
 
   // views::DialogDelegate overrides.
-  views::View* CreateFootnoteView() override;
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   views::View* CreateExtraView() override;
   bool Accept() override;
@@ -71,7 +71,9 @@ class ChromeCleanerDialog
   void OnIdle(
       safe_browsing::ChromeCleanerController::IdleReason idle_reason) override;
   void OnScanning() override;
-  void OnCleaning(const std::set<base::FilePath>& files_to_delete) override;
+  void OnCleaning(bool is_powered_by_partner,
+                  const safe_browsing::ChromeCleanerScannerResults&
+                      scanner_results) override;
   void OnRebootRequired() override;
 
  private:

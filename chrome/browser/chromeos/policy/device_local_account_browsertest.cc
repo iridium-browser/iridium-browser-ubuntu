@@ -26,7 +26,6 @@
 #include "base/json/json_writer.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -60,7 +59,7 @@
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/updater/chromeos_extension_cache_delegate.h"
@@ -104,6 +103,7 @@
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_switches.h"
 #include "components/policy/policy_constants.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
@@ -389,7 +389,7 @@ std::unique_ptr<net::FakeURLFetcher> RunCallbackAndReturnFakeURLFetcher(
     net::HttpStatusCode response_code,
     net::URLRequestStatus::Status status) {
   task_runner->PostTask(FROM_HERE, callback);
-  return base::MakeUnique<net::FakeURLFetcher>(url, delegate, response_data,
+  return std::make_unique<net::FakeURLFetcher>(url, delegate, response_data,
                                                response_code, status);
 }
 
@@ -407,7 +407,7 @@ void PolicyChangedCallback(const base::Closure& callback,
 
 class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
                                public user_manager::UserManager::Observer,
-                               public chrome::BrowserListObserver,
+                               public BrowserListObserver,
                                public extensions::AppWindowRegistry::Observer {
  protected:
   DeviceLocalAccountTest()
@@ -698,7 +698,7 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
   // handles the response on the main thread. This method flushes both the
   // thread pool backing the background task runner and the main thread.
   void WaitForGetKeyboardLayoutsForLocaleToFinish() {
-    content::RunAllBlockingPoolTasksUntilIdle();
+    content::RunAllTasksUntilIdle();
 
     // Verify that the construction of the keyboard layout list did not affect
     // the current ICU locale.
@@ -726,6 +726,7 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
   void WaitForSessionStart() {
     if (IsSessionStarted())
       return;
+    chromeos::WizardController::SkipPostLoginScreensForTesting();
     content::WindowedNotificationObserver(chrome::NOTIFICATION_SESSION_STARTED,
                                           base::Bind(IsSessionStarted)).Wait();
   }
@@ -833,6 +834,9 @@ class ExtensionInstallObserver : public content::NotificationObserver,
     DCHECK_EQ(chrome::NOTIFICATION_PROFILE_CREATED, type);
 
     Profile* profile = content::Source<Profile>(source).ptr();
+    // Ignore lock screen apps profile.
+    if (chromeos::ProfileHelper::IsLockScreenAppProfile(profile))
+      return;
     registry_ = extensions::ExtensionRegistry::Get(profile);
 
     // Check if extension is already installed with newly created profile.
@@ -1043,7 +1047,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, StartSession) {
       SigninManagerFactory::GetForProfile(profile)->IsAuthenticated());
 }
 
-IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, FullscreenDisallowed) {
+IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, FullscreenAllowed) {
   UploadAndInstallDeviceLocalAccountPolicy();
   AddPublicSessionToDevicePolicy(kAccountId1);
 
@@ -1059,10 +1063,10 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, FullscreenDisallowed) {
   BrowserWindow* browser_window = browser->window();
   ASSERT_TRUE(browser_window);
 
-  // Verify that an attempt to enter fullscreen mode is denied.
+  // Verify that an attempt to enter fullscreen mode is allowed.
   EXPECT_FALSE(browser_window->IsFullscreen());
   chrome::ToggleFullscreenMode(browser);
-  EXPECT_FALSE(browser_window->IsFullscreen());
+  EXPECT_TRUE(browser_window->IsFullscreen());
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExtensionsUncached) {
@@ -1260,7 +1264,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExtensionCacheImplTest) {
                  extensions::LocalExtensionCache::kCacheReadyFlagFileName),
              0, base::Time::Now());
   extensions::ExtensionCacheImpl cache_impl(
-      base::MakeUnique<extensions::ChromeOSExtensionCacheDelegate>(impl_path));
+      std::make_unique<extensions::ChromeOSExtensionCacheDelegate>(impl_path));
   std::unique_ptr<base::RunLoop> run_loop;
   run_loop.reset(new base::RunLoop);
   cache_impl.Start(base::Bind(&OnExtensionCacheImplInitialized, &run_loop));
@@ -1407,7 +1411,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExternalData) {
       PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
   policy_entry = policies.Get(key::kUserAvatarImage);
   ASSERT_TRUE(policy_entry);
-  EXPECT_TRUE(base::Value::Equals(metadata.get(), policy_entry->value.get()));
+  EXPECT_EQ(*metadata, *policy_entry->value);
   ASSERT_TRUE(policy_entry->external_data_fetcher);
 
   // Retrieve the external data via the ProfilePolicyConnector. The retrieval
@@ -2279,9 +2283,8 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, PolicyForExtensions) {
 
   // Verify that the app policy was set.
   base::Value expected_value("policy test value one");
-  EXPECT_TRUE(base::Value::Equals(
-      &expected_value,
-      policy_service->GetPolicies(ns).GetValue("string")));
+  EXPECT_EQ(expected_value,
+            *policy_service->GetPolicies(ns).GetValue("string"));
 
   // Now update the policy at the server.
   ASSERT_TRUE(test_server_.UpdatePolicyData(
@@ -2304,9 +2307,8 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, PolicyForExtensions) {
 
   // Verify that the app policy was updated.
   base::Value expected_new_value("policy test value two");
-  EXPECT_TRUE(base::Value::Equals(
-      &expected_new_value,
-      policy_service->GetPolicies(ns).GetValue("string")));
+  EXPECT_EQ(expected_new_value,
+            *policy_service->GetPolicies(ns).GetValue("string"));
 }
 
 class TermsOfServiceDownloadTest : public DeviceLocalAccountTest,
@@ -2354,7 +2356,8 @@ IN_PROC_BROWSER_TEST_P(TermsOfServiceDownloadTest, TermsOfServiceScreen) {
   // Wait for the Terms of Service to finish downloading, then get the status of
   // the screen's UI elements.
   std::string json;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(contents_,
+  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
+      contents_,
       "var screenElement = document.getElementById('terms-of-service');"
       "function SendReplyIfDownloadDone() {"
       "  if (screenElement.classList.contains('tos-loading'))"
@@ -2365,12 +2368,26 @@ IN_PROC_BROWSER_TEST_P(TermsOfServiceDownloadTest, TermsOfServiceScreen) {
       "      document.getElementById('tos-subheading').textContent;"
       "  status.contentHeading ="
       "      document.getElementById('tos-content-heading').textContent;"
-      "  status.content ="
-      "      document.getElementById('tos-content-main').textContent;"
       "  status.error = screenElement.classList.contains('error');"
       "  status.acceptEnabled ="
       "      !document.getElementById('tos-accept-button').disabled;"
-      "  domAutomationController.send(JSON.stringify(status));"
+      "  var tosWebview = document.getElementById('tos-content-main');"
+      "  if (status.error) {"
+      "    status.content = tosWebview.src;"
+      "    domAutomationController.send(JSON.stringify(status));"
+      "  } else {"
+      "    var extractTos = function() {"
+      "      tosWebview.executeScript("
+      "          {code:'document.body.textContent'},"
+      "          (results) => {"
+      "            status.content = results[0];"
+      "            domAutomationController.send(JSON.stringify(status));"
+      "            tosWebview.removeEventListener('contentload', extractTos);"
+      "          });"
+      "    };"
+      "    tosWebview.addEventListener('contentload', extractTos);"
+      "    extractTos();"
+      "  }"
       "  observer.disconnect();"
       "  return true;"
       "}"

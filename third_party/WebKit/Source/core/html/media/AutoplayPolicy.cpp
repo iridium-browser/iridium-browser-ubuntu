@@ -6,18 +6,31 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/ElementVisibilityObserver.h"
-#include "core/dom/UserGestureIndicator.h"
 #include "core/frame/ContentSettingsClient.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
-#include "core/html/HTMLMediaElement.h"
 #include "core/html/media/AutoplayUmaHelper.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "core/html/media/HTMLMediaElement.h"
+#include "core/inspector/ConsoleMessage.h"
+#include "platform/network/NetworkStateNotifier.h"
+#include "platform/runtime_enabled_features.h"
+#include "platform/wtf/Assertions.h"
 #include "public/platform/WebMediaPlayer.h"
+#include "public/web/WebSettings.h"
+#include "third_party/WebKit/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 
 namespace blink {
 
 namespace {
+
+const char kWarningUnmuteFailed[] =
+    "Unmuting failed and the element was paused instead because the user "
+    "didn't interact with the document before. https://goo.gl/xX8pDD";
+const char kErrorAutoplayFuncUnified[] =
+    "play() failed because the user didn't interact with the document first. "
+    "https://goo.gl/xX8pDD";
+const char kErrorAutoplayFuncMobile[] =
+    "play() can only be initiated by a user gesture.";
 
 bool IsDocumentCrossOrigin(const Document& document) {
   const LocalFrame* frame = document.GetFrame();
@@ -77,8 +90,30 @@ AutoplayPolicy::Type AutoplayPolicy::GetAutoplayPolicyForDocument(
 bool AutoplayPolicy::IsDocumentAllowedToPlay(const Document& document) {
   if (!document.GetFrame())
     return false;
-  return document.GetFrame()->HasReceivedUserGesture() ||
-         document.GetFrame()->HasReceivedUserGestureBeforeNavigation();
+
+  for (Frame* frame = document.GetFrame(); frame;
+       frame = frame->Tree().Parent()) {
+    if (frame->HasBeenActivated() ||
+        frame->HasReceivedUserGestureBeforeNavigation()) {
+      return true;
+    }
+
+    // TODO(mlamouri): checking HasHighMediaEngagement from the document as all
+    // documents are in this state if the main frame has a high media
+    // engagement. This allows OOPIF to work but a follow-up fix is in progress.
+    if (RuntimeEnabledFeatures::
+            MediaEngagementBypassAutoplayPoliciesEnabled() &&
+        frame->IsMainFrame() && document.HasHighMediaEngagement()) {
+      return true;
+    }
+
+    if (!RuntimeEnabledFeatures::FeaturePolicyAutoplayFeatureEnabled() ||
+        !frame->IsFeatureEnabled(mojom::FeaturePolicyFeature::kAutoplay)) {
+      return false;
+    }
+  }
+
+  return false;
 }
 
 AutoplayPolicy::AutoplayPolicy(HTMLMediaElement* element)
@@ -127,8 +162,9 @@ void AutoplayPolicy::StartAutoplayMutedWhenVisible() {
     return;
 
   autoplay_visibility_observer_ = new ElementVisibilityObserver(
-      element_, WTF::Bind(&AutoplayPolicy::OnVisibilityChangedForAutoplay,
-                          WrapWeakPersistent(this)));
+      element_,
+      WTF::BindRepeating(&AutoplayPolicy::OnVisibilityChangedForAutoplay,
+                         WrapWeakPersistent(this)));
   autoplay_visibility_observer_->Start();
 }
 
@@ -148,6 +184,11 @@ bool AutoplayPolicy::RequestAutoplayUnmute() {
 
   if (was_autoplaying_muted) {
     if (IsGestureNeededForPlayback()) {
+      if (IsUsingDocumentUserActivationRequiredPolicy()) {
+        element_->GetDocument().AddConsoleMessage(ConsoleMessage::Create(
+            kJSMessageSource, kWarningMessageLevel, kWarningUnmuteFailed));
+      }
+
       autoplay_uma_helper_->RecordAutoplayUnmuteStatus(
           AutoplayUnmuteActionStatus::kFailure);
       return false;
@@ -170,6 +211,9 @@ bool AutoplayPolicy::RequestAutoplayByAttribute() {
     return false;
   }
 
+  // If it's the first playback, track that it started because of autoplay.
+  MaybeSetAutoplayInitiated();
+
   if (IsGestureNeededForPlaybackIfCrossOriginExperimentEnabled()) {
     autoplay_uma_helper_->RecordCrossOriginAutoplayResult(
         CrossOriginAutoplayResult::kAutoplayBlocked);
@@ -189,8 +233,8 @@ bool AutoplayPolicy::RequestAutoplayByAttribute() {
   return false;
 }
 
-Nullable<ExceptionCode> AutoplayPolicy::RequestPlay() {
-  if (!UserGestureIndicator::ProcessingUserGesture()) {
+Optional<ExceptionCode> AutoplayPolicy::RequestPlay() {
+  if (!Frame::HasTransientUserActivation(element_->GetDocument().GetFrame())) {
     autoplay_uma_helper_->OnAutoplayInitiated(AutoplaySource::kMethod);
     if (IsGestureNeededForPlayback()) {
       autoplay_uma_helper_->RecordCrossOriginAutoplayResult(
@@ -211,7 +255,9 @@ Nullable<ExceptionCode> AutoplayPolicy::RequestPlay() {
     TryUnlockingUserGesture();
   }
 
-  return nullptr;
+  MaybeSetAutoplayInitiated();
+
+  return WTF::nullopt;
 }
 
 bool AutoplayPolicy::IsAutoplayingMuted() const {
@@ -236,17 +282,15 @@ bool AutoplayPolicy::IsOrWillBeAutoplayingMutedInternal(bool muted) const {
 }
 
 bool AutoplayPolicy::IsLockedPendingUserGesture() const {
-  if (GetAutoplayPolicyForDocument(element_->GetDocument()) ==
-      AutoplayPolicy::Type::kDocumentUserActivationRequired) {
+  if (IsUsingDocumentUserActivationRequiredPolicy())
     return !IsDocumentAllowedToPlay(element_->GetDocument());
-  }
 
   return locked_pending_user_gesture_;
 }
 
 void AutoplayPolicy::TryUnlockingUserGesture() {
   if (IsLockedPendingUserGesture() &&
-      UserGestureIndicator::ProcessingUserGesture()) {
+      Frame::HasTransientUserActivation(element_->GetDocument().GetFrame())) {
     UnlockUserGesture();
   }
 }
@@ -263,6 +307,17 @@ bool AutoplayPolicy::IsGestureNeededForPlayback() const {
   return IsGestureNeededForPlaybackIfPendingUserGestureIsLocked();
 }
 
+String AutoplayPolicy::GetPlayErrorMessage() const {
+  return IsUsingDocumentUserActivationRequiredPolicy()
+             ? kErrorAutoplayFuncUnified
+             : kErrorAutoplayFuncMobile;
+}
+
+bool AutoplayPolicy::WasAutoplayInitiated() const {
+  DCHECK(autoplay_initiated_.has_value());
+  return *autoplay_initiated_;
+}
+
 bool AutoplayPolicy::IsGestureNeededForPlaybackIfPendingUserGestureIsLocked()
     const {
   if (element_->GetLoadType() == WebMediaPlayer::kLoadTypeMediaStream)
@@ -276,7 +331,7 @@ bool AutoplayPolicy::IsGestureNeededForPlaybackIfPendingUserGestureIsLocked()
   if (element_->IsHTMLVideoElement() && element_->muted() &&
       RuntimeEnabledFeatures::AutoplayMutedVideosEnabled() &&
       !(element_->GetDocument().GetSettings() &&
-        element_->GetDocument().GetSettings()->GetDataSaverEnabled()) &&
+        GetNetworkStateNotifier().SaveDataEnabled()) &&
       !(element_->GetDocument().GetSettings() &&
         element_->GetDocument()
             .GetSettings()
@@ -306,6 +361,29 @@ void AutoplayPolicy::OnVisibilityChangedForAutoplay(bool is_visible) {
   }
 }
 
+bool AutoplayPolicy::IsUsingDocumentUserActivationRequiredPolicy() const {
+  return GetAutoplayPolicyForDocument(element_->GetDocument()) ==
+         AutoplayPolicy::Type::kDocumentUserActivationRequired;
+}
+
+void AutoplayPolicy::MaybeSetAutoplayInitiated() {
+  if (autoplay_initiated_.has_value())
+    return;
+
+  autoplay_initiated_ = true;
+  for (Frame* frame = element_->GetDocument().GetFrame(); frame;
+       frame = frame->Tree().Parent()) {
+    if (frame->HasBeenActivated() ||
+        frame->HasReceivedUserGestureBeforeNavigation()) {
+      autoplay_initiated_ = false;
+      break;
+    }
+
+    if (!frame->IsFeatureEnabled(mojom::FeaturePolicyFeature::kAutoplay))
+      break;
+  }
+}
+
 bool AutoplayPolicy::IsGestureNeededForPlaybackIfCrossOriginExperimentEnabled()
     const {
   if (!locked_pending_user_gesture_if_cross_origin_experiment_enabled_)
@@ -327,10 +405,20 @@ bool AutoplayPolicy::ShouldAutoplay() {
   return element_->can_autoplay_ && element_->paused_ && element_->Autoplay();
 }
 
-DEFINE_TRACE(AutoplayPolicy) {
+void AutoplayPolicy::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
   visitor->Trace(autoplay_visibility_observer_);
   visitor->Trace(autoplay_uma_helper_);
 }
+
+STATIC_ASSERT_ENUM(WebSettings::AutoplayPolicy::kNoUserGestureRequired,
+                   AutoplayPolicy::Type::kNoUserGestureRequired);
+STATIC_ASSERT_ENUM(WebSettings::AutoplayPolicy::kUserGestureRequired,
+                   AutoplayPolicy::Type::kUserGestureRequired);
+STATIC_ASSERT_ENUM(
+    WebSettings::AutoplayPolicy::kUserGestureRequiredForCrossOrigin,
+    AutoplayPolicy::Type::kUserGestureRequiredForCrossOrigin);
+STATIC_ASSERT_ENUM(WebSettings::AutoplayPolicy::kDocumentUserActivationRequired,
+                   AutoplayPolicy::Type::kDocumentUserActivationRequired);
 
 }  // namespace blink

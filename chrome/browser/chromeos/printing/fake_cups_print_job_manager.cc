@@ -9,12 +9,11 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/browser/chromeos/printing/cups_print_job.h"
 #include "chrome/browser/chromeos/printing/cups_print_job_manager.h"
-#include "chrome/browser/notifications/notification.h"
 #include "content/public/browser/browser_context.h"
+#include "ui/message_center/public/cpp/notification.h"
 
 namespace chromeos {
 
@@ -34,7 +33,7 @@ bool FakeCupsPrintJobManager::CreatePrintJob(const std::string& printer_name,
   Printer printer(printer_name);
   printer.set_display_name(printer_name);
   // Create a new print job.
-  std::unique_ptr<CupsPrintJob> new_job = base::MakeUnique<CupsPrintJob>(
+  std::unique_ptr<CupsPrintJob> new_job = std::make_unique<CupsPrintJob>(
       printer, next_job_id_++, title, total_page_number);
   print_jobs_.push_back(std::move(new_job));
 
@@ -50,7 +49,7 @@ bool FakeCupsPrintJobManager::CreatePrintJob(const std::string& printer_name,
 
 void FakeCupsPrintJobManager::CancelPrintJob(CupsPrintJob* job) {
   job->set_state(CupsPrintJob::State::STATE_CANCELLED);
-  NotifyJobCanceled(job);
+  NotifyJobCanceled(job->GetWeakPtr());
 
   // Note: |job| is deleted here.
   for (auto iter = print_jobs_.begin(); iter != print_jobs_.end(); ++iter) {
@@ -63,13 +62,13 @@ void FakeCupsPrintJobManager::CancelPrintJob(CupsPrintJob* job) {
 
 bool FakeCupsPrintJobManager::SuspendPrintJob(CupsPrintJob* job) {
   job->set_state(CupsPrintJob::State::STATE_SUSPENDED);
-  NotifyJobSuspended(job);
+  NotifyJobSuspended(job->GetWeakPtr());
   return true;
 }
 
 bool FakeCupsPrintJobManager::ResumePrintJob(CupsPrintJob* job) {
   job->set_state(CupsPrintJob::State::STATE_RESUMED);
-  NotifyJobResumed(job);
+  NotifyJobResumed(job->GetWeakPtr());
 
   base::SequencedTaskRunnerHandle::Get()->PostNonNestableDelayedTask(
       FROM_HERE, base::Bind(&FakeCupsPrintJobManager::ChangePrintJobState,
@@ -97,26 +96,26 @@ void FakeCupsPrintJobManager::ChangePrintJobState(CupsPrintJob* job) {
   switch (job->state()) {
     case CupsPrintJob::State::STATE_NONE:
       job->set_state(CupsPrintJob::State::STATE_WAITING);
-      NotifyJobCreated(job);
+      NotifyJobCreated(job->GetWeakPtr());
       break;
     case CupsPrintJob::State::STATE_WAITING:
       job->set_state(CupsPrintJob::State::STATE_STARTED);
-      NotifyJobStarted(job);
+      NotifyJobStarted(job->GetWeakPtr());
       break;
     case CupsPrintJob::State::STATE_STARTED:
       job->set_printed_page_number(job->printed_page_number() + 1);
       job->set_state(CupsPrintJob::State::STATE_PAGE_DONE);
-      NotifyJobStarted(job);
+      NotifyJobStarted(job->GetWeakPtr());
       break;
     case CupsPrintJob::State::STATE_PAGE_DONE:
     case CupsPrintJob::State::STATE_RESUMED:
       if (job->printed_page_number() == job->total_page_number()) {
         job->set_state(CupsPrintJob::State::STATE_DOCUMENT_DONE);
-        NotifyJobDone(job);
+        NotifyJobDone(job->GetWeakPtr());
       } else {
         job->set_printed_page_number(job->printed_page_number() + 1);
         job->set_state(CupsPrintJob::State::STATE_PAGE_DONE);
-        NotifyJobUpdated(job);
+        NotifyJobUpdated(job->GetWeakPtr());
       }
       break;
     case CupsPrintJob::State::STATE_DOCUMENT_DONE:

@@ -20,19 +20,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <list>
-#include <string>
 
 #include "base/macros.h"
 #include "net/base/iovec.h"
 #include "net/quic/core/quic_flow_controller.h"
-#include "net/quic/core/quic_iovector.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_stream_send_buffer.h"
 #include "net/quic/core/quic_stream_sequencer.h"
 #include "net/quic/core/quic_types.h"
-#include "net/quic/core/stream_notifier_interface.h"
+#include "net/quic/core/session_notifier_interface.h"
 #include "net/quic/platform/api/quic_export.h"
+#include "net/quic/platform/api/quic_mem_slice_span.h"
 #include "net/quic/platform/api/quic_reference_counted.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
@@ -43,11 +43,11 @@ class QuicStreamPeer;
 
 class QuicSession;
 
-class QUIC_EXPORT_PRIVATE QuicStream : public StreamNotifierInterface {
+class QUIC_EXPORT_PRIVATE QuicStream {
  public:
   QuicStream(QuicStreamId id, QuicSession* session);
 
-  ~QuicStream() override;
+  virtual ~QuicStream();
 
   // Not in use currently.
   void SetFromConfig();
@@ -91,13 +91,16 @@ class QUIC_EXPORT_PRIVATE QuicStream : public StreamNotifierInterface {
   // Called by the subclass or the sequencer to close the entire connection from
   // this end.
   virtual void CloseConnectionWithDetails(QuicErrorCode error,
-                                          const std::string& details);
+                                          const QuicString& details);
 
   // Returns true if this stream is still waiting for acks of sent data.
   // This will return false if all data has been acked, or if the stream
   // is no longer interested in data being acked (which happens when
   // a stream is reset because of an error).
   bool IsWaitingForAcks() const;
+
+  // Number of bytes available to read.
+  size_t ReadableBytes() const;
 
   QuicStreamId id() const { return id_; }
 
@@ -114,14 +117,10 @@ class QUIC_EXPORT_PRIVATE QuicStream : public StreamNotifierInterface {
   bool fin_received() { return fin_received_; }
   bool fin_sent() { return fin_sent_; }
 
-  uint64_t queued_data_bytes() const { return queued_data_bytes_; }
+  uint64_t BufferedDataBytes() const;
 
   uint64_t stream_bytes_read() const { return stream_bytes_read_; }
-  uint64_t stream_bytes_written() const { return stream_bytes_written_; }
-  // For tests that override WritevData.
-  void set_stream_bytes_written(uint64_t bytes_written) {
-    stream_bytes_written_ = bytes_written;
-  }
+  uint64_t stream_bytes_written() const;
 
   size_t busy_counter() const { return busy_counter_; }
   void set_busy_counter(size_t busy_counter) { busy_counter_ = busy_counter; }
@@ -170,7 +169,11 @@ class QUIC_EXPORT_PRIVATE QuicStream : public StreamNotifierInterface {
   bool HasBufferedData() const;
 
   // Returns the version of QUIC being used for this stream.
-  QuicVersion version() const;
+  QuicTransportVersion transport_version() const;
+
+  // Returns the crypto handshake protocol that was used on this stream's
+  // connection.
+  HandshakeProtocol handshake_protocol() const;
 
   bool fin_received() const { return fin_received_; }
 
@@ -197,47 +200,99 @@ class QUIC_EXPORT_PRIVATE QuicStream : public StreamNotifierInterface {
   // Adds random padding after the fin is consumed for this stream.
   void AddRandomPaddingAfterFin();
 
-  // Save |data_length| of data starts at |iov_offset| in |iov| to send buffer.
-  void SaveStreamData(QuicIOVector iov,
-                      size_t iov_offset,
-                      QuicStreamOffset offset,
-                      QuicByteCount data_length);
-
   // Write |data_length| of data starts at |offset| from send buffer.
   bool WriteStreamData(QuicStreamOffset offset,
                        QuicByteCount data_length,
                        QuicDataWriter* writer);
 
-  // StreamNotifierInterface methods:
-  void OnStreamFrameAcked(const QuicStreamFrame& frame,
-                          QuicTime::Delta ack_delay_time) override;
-  void OnStreamFrameRetransmitted(const QuicStreamFrame& frame) override;
-  void OnStreamFrameDiscarded(const QuicStreamFrame& frame) override;
+  // Called when data [offset, offset + data_length) is acked. |fin_acked|
+  // indicates whether the fin is acked. Returns true if any new stream data
+  // (including fin) gets acked.
+  virtual bool OnStreamFrameAcked(QuicStreamOffset offset,
+                                  QuicByteCount data_length,
+                                  bool fin_acked,
+                                  QuicTime::Delta ack_delay_time);
+
+  // Called when data [offset, offset + data_length) was retransmitted.
+  // |fin_retransmitted| indicates whether fin was retransmitted.
+  virtual void OnStreamFrameRetransmitted(QuicStreamOffset offset,
+                                          QuicByteCount data_length,
+                                          bool fin_retransmitted);
+
+  // Called when data [offset, offset + data_length) is considered as lost.
+  // |fin_lost| inidacates whether the fin is considered as lost.
+  void OnStreamFrameLost(QuicStreamOffset offset,
+                         QuicByteCount data_length,
+                         bool fin_lost);
+
+  // Called to retransmit outstanding portion in data [offset, offset +
+  // data_length) and |fin|. Returns true if all data gets retransmitted.
+  virtual bool RetransmitStreamData(QuicStreamOffset offset,
+                                    QuicByteCount data_length,
+                                    bool fin);
+
+  // Same as WritevData except data is provided in reference counted memory so
+  // that data copy is avoided.
+  QuicConsumedData WriteMemSlices(QuicMemSliceSpan span, bool fin);
+
+  // Returns true if any stream data is lost (including fin) and needs to be
+  // retransmitted.
+  virtual bool HasPendingRetransmission() const;
+
+  // Returns true if any portion of data [offset, offset + data_length) is
+  // outstanding or fin is outstanding (if |fin| is true). Returns false
+  // otherwise.
+  bool IsStreamFrameOutstanding(QuicStreamOffset offset,
+                                QuicByteCount data_length,
+                                bool fin) const;
 
  protected:
   // Sends as many bytes in the first |count| buffers of |iov| to the connection
-  // as the connection will consume.
-  // If |ack_listener| is provided, then it will be notified once all
-  // the ACKs for this write have been received.
+  // as the connection will consume. If FIN is consumed, the write side is
+  // immediately closed.
   // Returns the number of bytes consumed by the connection.
-  QuicConsumedData WritevData(
-      const struct iovec* iov,
-      int iov_count,
-      bool fin,
-      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+  // Please note: Returned consumed data is the amount of data saved in send
+  // buffer. The data is not necessarily consumed by the connection. So write
+  // side is closed when FIN is sent.
+  // TODO(fayang): Let WritevData return boolean.
+  QuicConsumedData WritevData(const struct iovec* iov, int iov_count, bool fin);
 
   // Allows override of the session level writev, for the force HOL
   // blocking experiment.
-  virtual QuicConsumedData WritevDataInner(
-      QuicIOVector iov,
-      QuicStreamOffset offset,
-      bool fin,
-      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+  virtual QuicConsumedData WritevDataInner(size_t write_length,
+                                           QuicStreamOffset offset,
+                                           bool fin);
 
   // Close the write side of the socket.  Further writes will fail.
   // Can be called by the subclass or internally.
   // Does not send a FIN.  May cause the stream to be closed.
   virtual void CloseWriteSide();
+
+  // Close the read side of the socket.  May cause the stream to be closed.
+  // Subclasses and consumers should use StopReading to terminate reading early
+  // if expecting a FIN. Can be used directly by subclasses if not expecting a
+  // FIN.
+  void CloseReadSide();
+
+  // Called when data of [offset, offset + data_length] is buffered in send
+  // buffer.
+  virtual void OnDataBuffered(
+      QuicStreamOffset offset,
+      QuicByteCount data_length,
+      const QuicReferenceCountedPointer<QuicAckListenerInterface>&
+          ack_listener) {}
+
+  // True if buffered data in send buffer is below buffered_data_threshold_.
+  bool CanWriteNewData() const;
+
+  // Called when upper layer can write new data.
+  virtual void OnCanWriteNewData() {}
+
+  // Called when |bytes_consumed| bytes has been consumed.
+  virtual void OnStreamDataConsumed(size_t bytes_consumed);
+
+  // Writes pending retransmissions if any.
+  virtual void WritePendingRetransmission();
 
   bool fin_buffered() const { return fin_buffered_; }
 
@@ -256,31 +311,18 @@ class QUIC_EXPORT_PRIVATE QuicStream : public StreamNotifierInterface {
     ack_listener_ = std::move(ack_listener);
   }
 
+  const QuicIntervalSet<QuicStreamOffset>& bytes_acked() const;
+
+  const QuicStreamSendBuffer& send_buffer() const { return send_buffer_; }
+
+  QuicStreamSendBuffer& send_buffer() { return send_buffer_; }
+
  private:
   friend class test::QuicStreamPeer;
   friend class QuicStreamUtils;
 
-  // Close the read side of the socket.  May cause the stream to be closed.
-  // Subclasses and consumers should use StopReading to terminate reading early.
-  void CloseReadSide();
-
   // Subclasses and consumers should use reading_stopped.
   bool read_side_closed() const { return read_side_closed_; }
-
-  struct PendingData {
-    PendingData(
-        std::string data_in,
-        QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
-    ~PendingData();
-
-    // Pending data to be written.
-    std::string data;
-    // Index of the first byte in data still to be written.
-    size_t offset;
-    // AckListener that should be notified when the pending data is acked.
-    // Can be nullptr.
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener;
-  };
 
   // Calls MaybeSendBlocked on the stream's flow controller and the connection
   // level flow controller.  If the stream is flow control blocked by the
@@ -288,20 +330,17 @@ class QUIC_EXPORT_PRIVATE QuicStream : public StreamNotifierInterface {
   // controller, marks this stream as connection-level write blocked.
   void MaybeSendBlocked();
 
-  std::list<PendingData> queued_data_;
-  // How many bytes are queued?
-  uint64_t queued_data_bytes_;
+  // Write buffered data in send buffer. TODO(fayang): Consider combine
+  // WriteOrBufferData, Writev and WriteBufferedData.
+  void WriteBufferedData();
 
   QuicStreamSequencer sequencer_;
   QuicStreamId id_;
   // Pointer to the owning QuicSession object.
   QuicSession* session_;
-  // Bytes read and written refer to payload bytes only: they do not include
-  // framing, encryption overhead etc.
+  // Bytes read refers to payload bytes only: they do not include framing,
+  // encryption overhead etc.
   uint64_t stream_bytes_read_;
-  uint64_t stream_bytes_written_;
-  // Written bytes which are waiting to be acked.
-  uint64_t stream_bytes_outstanding_;
 
   // Stream error code received from a RstStreamFrame or error code sent by the
   // visitor or sequencer in the RstStreamFrame.
@@ -323,6 +362,8 @@ class QUIC_EXPORT_PRIVATE QuicStream : public StreamNotifierInterface {
   bool fin_sent_;
   // True if a FIN is waiting to be acked.
   bool fin_outstanding_;
+  // True if a FIN is lost.
+  bool fin_lost_;
 
   // True if this stream has received (and the sequencer has accepted) a
   // StreamFrame with the FIN set.
@@ -365,6 +406,9 @@ class QUIC_EXPORT_PRIVATE QuicStream : public StreamNotifierInterface {
   // Send buffer of this stream. Send buffer is cleaned up when data gets acked
   // or discarded.
   QuicStreamSendBuffer send_buffer_;
+
+  // Latched value of FLAGS_quic_buffered_data_threshold.
+  const QuicByteCount buffered_data_threshold_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicStream);
 };

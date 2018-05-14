@@ -30,44 +30,55 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
-#include "core/HTMLNames.h"
 #include "core/clipboard/Pasteboard.h"
 #include "core/css/CSSComputedStyleDeclaration.h"
 #include "core/css/CSSIdentifierValue.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/CSSValueList.h"
-#include "core/css/StylePropertySet.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/TagCollection.h"
-#include "core/dom/UserGestureIndicator.h"
+#include "core/dom/events/Event.h"
 #include "core/editing/EditingStyleUtilities.h"
+#include "core/editing/EditingTriState.h"
 #include "core/editing/EditingUtilities.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/SelectionModifier.h"
+#include "core/editing/SelectionTemplate.h"
+#include "core/editing/SetSelectionOptions.h"
+#include "core/editing/VisiblePosition.h"
+#include "core/editing/commands/ApplyStyleCommand.h"
 #include "core/editing/commands/CreateLinkCommand.h"
+#include "core/editing/commands/EditingCommandsUtilities.h"
 #include "core/editing/commands/EditorCommandNames.h"
 #include "core/editing/commands/FormatBlockCommand.h"
 #include "core/editing/commands/IndentOutdentCommand.h"
 #include "core/editing/commands/InsertListCommand.h"
+#include "core/editing/commands/RemoveFormatCommand.h"
 #include "core/editing/commands/ReplaceSelectionCommand.h"
 #include "core/editing/commands/TypingCommand.h"
 #include "core/editing/commands/UnlinkCommand.h"
+#include "core/editing/iterators/TextIterator.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/editing/spellcheck/SpellChecker.h"
-#include "core/events/Event.h"
+#include "core/events/ClipboardEvent.h"
+#include "core/events/TextEvent.h"
+#include "core/frame/ContentSettingsClient.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLFontElement.h"
 #include "core/html/HTMLHRElement.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/TextControlElement.h"
+#include "core/html/forms/TextControlElement.h"
+#include "core/html_names.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/LayoutBox.h"
 #include "core/page/ChromeClient.h"
-#include "core/page/EditorClient.h"
 #include "core/page/Page.h"
 #include "platform/Histogram.h"
 #include "platform/KillRing.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/scroll/Scrollbar.h"
 #include "platform/wtf/StringExtras.h"
 #include "platform/wtf/text/AtomicString.h"
@@ -197,11 +208,13 @@ InputEvent::InputType InputTypeFromCommandType(
 
 StaticRangeVector* RangesFromCurrentSelectionOrExtendCaret(
     const LocalFrame& frame,
-    SelectionDirection direction,
+    SelectionModifyDirection direction,
     TextGranularity granularity) {
   frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
   SelectionModifier selection_modifier(
-      frame, frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated());
+      frame, frame.Selection().GetSelectionInDOMTree());
+  selection_modifier.SetSelectionIsDirectional(
+      frame.Selection().IsDirectional());
   if (selection_modifier.Selection().IsCaret())
     selection_modifier.Modify(SelectionModifyAlteration::kExtend, direction,
                               granularity);
@@ -214,6 +227,25 @@ StaticRangeVector* RangesFromCurrentSelectionOrExtendCaret(
   return ranges;
 }
 
+EphemeralRange ComputeRangeForTranspose(LocalFrame& frame) {
+  const VisibleSelection& selection =
+      frame.Selection().ComputeVisibleSelectionInDOMTree();
+  if (!selection.IsCaret())
+    return EphemeralRange();
+
+  // Make a selection that goes back one character and forward two characters.
+  const VisiblePosition& caret = selection.VisibleStart();
+  const VisiblePosition& next =
+      IsEndOfParagraph(caret) ? caret : NextPositionOf(caret);
+  const VisiblePosition& previous = PreviousPositionOf(next);
+  if (next.DeepEquivalent() == previous.DeepEquivalent())
+    return EphemeralRange();
+  const VisiblePosition& previous_of_previous = PreviousPositionOf(previous);
+  if (!InSameParagraph(next, previous_of_previous))
+    return EphemeralRange();
+  return MakeRange(previous_of_previous, next);
+}
+
 }  // anonymous namespace
 
 class EditorInternalCommand {
@@ -222,7 +254,7 @@ class EditorInternalCommand {
   bool (*execute)(LocalFrame&, Event*, EditorCommandSource, const String&);
   bool (*is_supported_from_dom)(LocalFrame*);
   bool (*is_enabled)(LocalFrame&, Event*, EditorCommandSource);
-  TriState (*state)(LocalFrame&, Event*);
+  EditingTriState (*state)(LocalFrame&, Event*);
   String (*value)(const EditorInternalCommand&, LocalFrame&, Event*);
   bool is_text_insertion;
   // TODO(yosin) We should have |canExecute()|, which checks clipboard
@@ -248,18 +280,47 @@ static LocalFrame* TargetFrame(LocalFrame& frame, Event* event) {
   return node->GetDocument().GetFrame();
 }
 
+static void ApplyStyle(LocalFrame& frame,
+                       CSSPropertyValueSet* style,
+                       InputEvent::InputType input_type) {
+  const VisibleSelection& selection =
+      frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated();
+  if (selection.IsNone())
+    return;
+  if (selection.IsCaret()) {
+    frame.GetEditor().ComputeAndSetTypingStyle(style, input_type);
+    return;
+  }
+  DCHECK(selection.IsRange()) << selection;
+  if (!style)
+    return;
+  DCHECK(frame.GetDocument());
+  ApplyStyleCommand::Create(*frame.GetDocument(), EditingStyle::Create(style),
+                            input_type)
+      ->Apply();
+}
+
+static void ApplyStyleToSelection(LocalFrame& frame,
+                                  CSSPropertyValueSet* style,
+                                  InputEvent::InputType input_type) {
+  if (!style || style->IsEmpty() || !frame.GetEditor().CanEditRichly())
+    return;
+
+  ApplyStyle(frame, style, input_type);
+}
+
 static bool ApplyCommandToFrame(LocalFrame& frame,
                                 EditorCommandSource source,
                                 InputEvent::InputType input_type,
-                                StylePropertySet* style) {
+                                CSSPropertyValueSet* style) {
   // FIXME: We don't call shouldApplyStyle when the source is DOM; is there a
   // good reason for that?
   switch (source) {
     case kCommandFromMenuOrKeyBinding:
-      frame.GetEditor().ApplyStyleToSelection(style, input_type);
+      ApplyStyleToSelection(frame, style, input_type);
       return true;
     case kCommandFromDOM:
-      frame.GetEditor().ApplyStyle(style, input_type);
+      ApplyStyle(frame, style, input_type);
       return true;
   }
   NOTREACHED();
@@ -271,9 +332,11 @@ static bool ExecuteApplyStyle(LocalFrame& frame,
                               InputEvent::InputType input_type,
                               CSSPropertyID property_id,
                               const String& property_value) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
-  style->SetProperty(property_id, property_value);
+  DCHECK(frame.GetDocument());
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
+  style->SetProperty(property_id, property_value, /* important */ false,
+                     frame.GetDocument()->GetSecureContextMode());
   return ApplyCommandToFrame(frame, source, input_type, style);
 }
 
@@ -282,16 +345,16 @@ static bool ExecuteApplyStyle(LocalFrame& frame,
                               InputEvent::InputType input_type,
                               CSSPropertyID property_id,
                               CSSValueID property_value) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
   style->SetProperty(property_id, property_value);
   return ApplyCommandToFrame(frame, source, input_type, style);
 }
 
 // FIXME: executeToggleStyleInList does not handle complicated cases such as
 // <b><u>hello</u>world</b> properly. This function must use
-// Editor::selectionHasStyle to determine the current style but we cannot fix
-// this until https://bugs.webkit.org/show_bug.cgi?id=27818 is resolved.
+// EditingStyle::SelectionHasStyle to determine the current style but we cannot
+// fix this until https://bugs.webkit.org/show_bug.cgi?id=27818 is resolved.
 static bool ExecuteToggleStyleInList(LocalFrame& frame,
                                      EditorCommandSource source,
                                      InputEvent::InputType input_type,
@@ -299,7 +362,7 @@ static bool ExecuteToggleStyleInList(LocalFrame& frame,
                                      CSSValue* value) {
   EditingStyle* selection_style =
       EditingStyleUtilities::CreateStyleAtSelectionStart(
-          frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated());
+          frame.Selection().ComputeVisibleSelectionInDOMTree());
   if (!selection_style || !selection_style->Style())
     return false;
 
@@ -320,10 +383,27 @@ static bool ExecuteToggleStyleInList(LocalFrame& frame,
 
   // FIXME: We shouldn't be having to convert new style into text.  We should
   // have setPropertyCSSValue.
-  MutableStylePropertySet* new_mutable_style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
-  new_mutable_style->SetProperty(property_id, new_style);
+  MutableCSSPropertyValueSet* new_mutable_style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
+  new_mutable_style->SetProperty(property_id, new_style, /* important */ false,
+                                 frame.GetDocument()->GetSecureContextMode());
   return ApplyCommandToFrame(frame, source, input_type, new_mutable_style);
+}
+
+static bool SelectionStartHasStyle(LocalFrame& frame,
+                                   CSSPropertyID property_id,
+                                   const String& value) {
+  const SecureContextMode secure_context_mode =
+      frame.GetDocument()->GetSecureContextMode();
+
+  EditingStyle* const style_to_check =
+      EditingStyle::Create(property_id, value, secure_context_mode);
+  EditingStyle* const style_at_start =
+      EditingStyleUtilities::CreateStyleAtSelectionStart(
+          frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated(),
+          property_id == CSSPropertyBackgroundColor, style_to_check->Style());
+  return style_to_check->TriStateOfStyle(style_at_start, secure_context_mode) !=
+         EditingTriState::kFalse;
 }
 
 static bool ExecuteToggleStyle(LocalFrame& frame,
@@ -337,15 +417,17 @@ static bool ExecuteToggleStyle(LocalFrame& frame,
   // other: present throughout the selection
 
   bool style_is_present;
-  if (frame.GetEditor().Behavior().ShouldToggleStyleBasedOnStartOfSelection())
+  if (frame.GetEditor().Behavior().ShouldToggleStyleBasedOnStartOfSelection()) {
+    style_is_present = SelectionStartHasStyle(frame, property_id, on_value);
+  } else {
     style_is_present =
-        frame.GetEditor().SelectionStartHasStyle(property_id, on_value);
-  else
-    style_is_present = frame.GetEditor().SelectionHasStyle(
-                           property_id, on_value) == kTrueTriState;
+        EditingStyle::SelectionHasStyle(frame, property_id, on_value) ==
+        EditingTriState::kTrue;
+  }
 
-  EditingStyle* style = EditingStyle::Create(
-      property_id, style_is_present ? off_value : on_value);
+  EditingStyle* style =
+      EditingStyle::Create(property_id, style_is_present ? off_value : on_value,
+                           frame.GetDocument()->GetSecureContextMode());
   return ApplyCommandToFrame(frame, source, input_type, style->Style());
 }
 
@@ -354,9 +436,10 @@ static bool ExecuteApplyParagraphStyle(LocalFrame& frame,
                                        InputEvent::InputType input_type,
                                        CSSPropertyID property_id,
                                        const String& property_value) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
-  style->SetProperty(property_id, property_value);
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
+  style->SetProperty(property_id, property_value, /* important */ false,
+                     frame.GetDocument()->GetSecureContextMode());
   // FIXME: We don't call shouldApplyStyle when the source is DOM; is there a
   // good reason for that?
   switch (source) {
@@ -395,12 +478,9 @@ static bool ExpandSelectionToGranularity(LocalFrame& frame,
                                          TextGranularity granularity) {
   const VisibleSelection& selection = CreateVisibleSelectionWithGranularity(
       SelectionInDOMTree::Builder()
-          .SetBaseAndExtent(frame.Selection()
-                                .ComputeVisibleSelectionInDOMTreeDeprecated()
-                                .Base(),
-                            frame.Selection()
-                                .ComputeVisibleSelectionInDOMTreeDeprecated()
-                                .Extent())
+          .SetBaseAndExtent(
+              frame.Selection().ComputeVisibleSelectionInDOMTree().Base(),
+              frame.Selection().ComputeVisibleSelectionInDOMTree().Extent())
           .Build(),
       granularity);
   const EphemeralRange new_range = selection.ToNormalizedEphemeralRange();
@@ -410,7 +490,7 @@ static bool ExpandSelectionToGranularity(LocalFrame& frame,
     return false;
   frame.Selection().SetSelection(
       SelectionInDOMTree::Builder().SetBaseAndExtent(new_range).Build(),
-      FrameSelection::kCloseTyping);
+      SetSelectionOptions::Builder().SetShouldCloseTyping(true).Build());
   return true;
 }
 
@@ -418,13 +498,13 @@ static bool HasChildTags(Element& element, const QualifiedName& tag_name) {
   return !element.getElementsByTagName(tag_name.LocalName())->IsEmpty();
 }
 
-static TriState SelectionListState(const FrameSelection& selection,
-                                   const QualifiedName& tag_name) {
+static EditingTriState SelectionListState(const FrameSelection& selection,
+                                          const QualifiedName& tag_name) {
   if (selection.ComputeVisibleSelectionInDOMTreeDeprecated().IsCaret()) {
     if (EnclosingElementWithTag(
             selection.ComputeVisibleSelectionInDOMTreeDeprecated().Start(),
             tag_name))
-      return kTrueTriState;
+      return EditingTriState::kTrue;
   } else if (selection.ComputeVisibleSelectionInDOMTreeDeprecated().IsRange()) {
     Element* start_element = EnclosingElementWithTag(
         selection.ComputeVisibleSelectionInDOMTreeDeprecated().Start(),
@@ -437,23 +517,38 @@ static TriState SelectionListState(const FrameSelection& selection,
       // |FalseTriState|.
       // See http://crbug.com/385374
       if (HasChildTags(*start_element, tag_name.Matches(ulTag) ? olTag : ulTag))
-        return kFalseTriState;
-      return kTrueTriState;
+        return EditingTriState::kFalse;
+      return EditingTriState::kTrue;
     }
   }
 
-  return kFalseTriState;
+  return EditingTriState::kFalse;
 }
 
-static TriState StateStyle(LocalFrame& frame,
-                           CSSPropertyID property_id,
-                           const char* desired_value) {
+static EditingTriState StateStyle(LocalFrame& frame,
+                                  CSSPropertyID property_id,
+                                  const char* desired_value) {
   frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
-  if (frame.GetEditor().Behavior().ShouldToggleStyleBasedOnStartOfSelection())
-    return frame.GetEditor().SelectionStartHasStyle(property_id, desired_value)
-               ? kTrueTriState
-               : kFalseTriState;
-  return frame.GetEditor().SelectionHasStyle(property_id, desired_value);
+  if (frame.GetEditor().Behavior().ShouldToggleStyleBasedOnStartOfSelection()) {
+    return SelectionStartHasStyle(frame, property_id, desired_value)
+               ? EditingTriState::kTrue
+               : EditingTriState::kFalse;
+  }
+  return EditingStyle::SelectionHasStyle(frame, property_id, desired_value);
+}
+
+static String SelectionStartCSSPropertyValue(LocalFrame& frame,
+                                             CSSPropertyID property_id) {
+  EditingStyle* const selection_style =
+      EditingStyleUtilities::CreateStyleAtSelectionStart(
+          frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated(),
+          property_id == CSSPropertyBackgroundColor);
+  if (!selection_style || !selection_style->Style())
+    return String();
+
+  if (property_id == CSSPropertyFontSize)
+    return String::Number(selection_style->LegacyFontSize(frame.GetDocument()));
+  return selection_style->Style()->GetPropertyValue(property_id);
 }
 
 static String ValueStyle(LocalFrame& frame, CSSPropertyID property_id) {
@@ -462,7 +557,7 @@ static String ValueStyle(LocalFrame& frame, CSSPropertyID property_id) {
   // FIXME: Rather than retrieving the style at the start of the current
   // selection, we should retrieve the style present throughout the selection
   // for non-Mac platforms.
-  return frame.GetEditor().SelectionStartCSSPropertyValue(property_id);
+  return SelectionStartCSSPropertyValue(frame, property_id);
 }
 
 static bool IsUnicodeBidiNestedOrMultipleEmbeddings(CSSValueID value_id) {
@@ -504,7 +599,7 @@ static WritingDirection TextDirectionForSelection(
       CSSComputedStyleDeclaration* style =
           CSSComputedStyleDeclaration::Create(&n);
       const CSSValue* unicode_bidi =
-          style->GetPropertyCSSValue(CSSPropertyUnicodeBidi);
+          style->GetPropertyCSSValue(GetCSSPropertyUnicodeBidi());
       if (!unicode_bidi || !unicode_bidi->IsIdentifierValue())
         continue;
 
@@ -540,7 +635,7 @@ static WritingDirection TextDirectionForSelection(
     CSSComputedStyleDeclaration* style =
         CSSComputedStyleDeclaration::Create(element);
     const CSSValue* unicode_bidi =
-        style->GetPropertyCSSValue(CSSPropertyUnicodeBidi);
+        style->GetPropertyCSSValue(GetCSSPropertyUnicodeBidi());
     if (!unicode_bidi || !unicode_bidi->IsIdentifierValue())
       continue;
 
@@ -555,7 +650,7 @@ static WritingDirection TextDirectionForSelection(
     DCHECK(EditingStyleUtilities::IsEmbedOrIsolate(unicode_bidi_value))
         << unicode_bidi_value;
     const CSSValue* direction =
-        style->GetPropertyCSSValue(CSSPropertyDirection);
+        style->GetPropertyCSSValue(GetCSSPropertyDirection());
     if (!direction || !direction->IsIdentifierValue())
       continue;
 
@@ -579,8 +674,8 @@ static WritingDirection TextDirectionForSelection(
   return found_direction;
 }
 
-static TriState StateTextWritingDirection(LocalFrame& frame,
-                                          WritingDirection direction) {
+static EditingTriState StateTextWritingDirection(LocalFrame& frame,
+                                                 WritingDirection direction) {
   frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   bool has_nested_or_multiple_embeddings;
@@ -591,8 +686,8 @@ static TriState StateTextWritingDirection(LocalFrame& frame,
   // direction && hasNestedOrMultipleEmbeddings
   return (selection_direction == direction &&
           !has_nested_or_multiple_embeddings)
-             ? kTrueTriState
-             : kFalseTriState;
+             ? EditingTriState::kTrue
+             : EditingTriState::kFalse;
 }
 
 static unsigned VerticalScrollDistance(LocalFrame& frame) {
@@ -610,11 +705,13 @@ static unsigned VerticalScrollDistance(LocalFrame& frame) {
         style->OverflowY() == EOverflow::kAuto ||
         HasEditableStyle(*focused_element)))
     return 0;
+  ScrollableArea* scrollable_area =
+      frame.View()->LayoutViewportScrollableArea();
   int height = std::min<int>(layout_box.ClientHeight().ToInt(),
-                             frame.View()->VisibleHeight());
+                             scrollable_area->VisibleHeight());
   return static_cast<unsigned>(
       max(max<int>(height * ScrollableArea::MinFractionToStepWhenPaging(),
-                   height - ScrollableArea::MaxOverlapBetweenPages()),
+                   height - scrollable_area->MaxOverlapBetweenPages()),
           1));
 }
 
@@ -647,8 +744,62 @@ static bool CanWriteClipboard(LocalFrame& frame, EditorCommandSource source) {
   Settings* settings = frame.GetSettings();
   bool default_value =
       (settings && settings->GetJavaScriptCanAccessClipboard()) ||
-      UserGestureIndicator::ProcessingUserGesture();
-  return frame.GetEditor().Client().CanCopyCut(&frame, default_value);
+      Frame::HasTransientUserActivation(&frame);
+  if (!frame.GetContentSettingsClient())
+    return default_value;
+  return frame.GetContentSettingsClient()->AllowWriteToClipboard(default_value);
+}
+
+// Returns true if Editor should continue with default processing.
+static bool DispatchClipboardEvent(LocalFrame& frame,
+                                   const AtomicString& event_type,
+                                   DataTransferAccessPolicy policy,
+                                   EditorCommandSource source,
+                                   PasteMode paste_mode) {
+  Element* const target =
+      frame.GetEditor().FindEventTargetForClipboardEvent(source);
+  if (!target)
+    return true;
+
+  DataTransfer* const data_transfer =
+      DataTransfer::Create(DataTransfer::kCopyAndPaste, policy,
+                           policy == kDataTransferWritable
+                               ? DataObject::Create()
+                               : DataObject::CreateFromPasteboard(paste_mode));
+
+  Event* const evt = ClipboardEvent::Create(event_type, data_transfer);
+  target->DispatchEvent(evt);
+  const bool no_default_processing = evt->defaultPrevented();
+  if (no_default_processing && policy == kDataTransferWritable) {
+    Pasteboard::GeneralPasteboard()->WriteDataObject(
+        data_transfer->GetDataObject());
+  }
+
+  // Invalidate clipboard here for security.
+  data_transfer->SetAccessPolicy(kDataTransferNumb);
+  return !no_default_processing;
+}
+
+static bool DispatchCopyOrCutEvent(LocalFrame& frame,
+                                   EditorCommandSource source,
+                                   const AtomicString& event_type) {
+  // TODO(editing-dev): The use of UpdateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+  if (IsInPasswordField(
+          frame.Selection().ComputeVisibleSelectionInDOMTree().Start()))
+    return true;
+
+  return DispatchClipboardEvent(frame, event_type, kDataTransferWritable,
+                                source, kAllMimeTypes);
+}
+
+static void WriteSelectionToPasteboard(LocalFrame& frame) {
+  const KURL& url = frame.GetDocument()->Url();
+  const String html = frame.Selection().SelectedHTMLForClipboard();
+  const String plain_text = frame.SelectedTextForClipboard();
+  Pasteboard::GeneralPasteboard()->WriteHTML(
+      html, url, plain_text, frame.GetEditor().CanSmartCopyOrDelete());
 }
 
 static bool ExecuteCopy(LocalFrame& frame,
@@ -662,7 +813,40 @@ static bool ExecuteCopy(LocalFrame& frame,
   // |canExecute()|. See also "Cut", and "Paste" command.
   if (!CanWriteClipboard(frame, source))
     return false;
-  frame.GetEditor().Copy(source);
+  if (!DispatchCopyOrCutEvent(frame, source, EventTypeNames::copy))
+    return true;
+  if (!frame.GetEditor().CanCopy())
+    return true;
+
+  // Since copy is a read-only operation it succeeds anytime a selection
+  // is *visible*. In contrast to cut or paste, the selection does not
+  // need to be focused - being visible is enough.
+  if (source == kCommandFromMenuOrKeyBinding && frame.Selection().IsHidden())
+    return true;
+
+  // TODO(editing-dev): The use of UpdateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // A 'copy' event handler might have dirtied the layout so we need to update
+  // before we obtain the selection.
+  frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  if (EnclosingTextControl(
+          frame.Selection().ComputeVisibleSelectionInDOMTree().Start())) {
+    Pasteboard::GeneralPasteboard()->WritePlainText(
+        frame.SelectedTextForClipboard(),
+        frame.GetEditor().CanSmartCopyOrDelete()
+            ? Pasteboard::kCanSmartReplace
+            : Pasteboard::kCannotSmartReplace);
+    return true;
+  }
+  const Document* const document = frame.GetDocument();
+  if (HTMLImageElement* image_element =
+          ImageElementFromImageDocument(document)) {
+    WriteImageNodeToPasteboard(Pasteboard::GeneralPasteboard(), *image_element,
+                               document->title());
+    return true;
+  }
+  WriteSelectionToPasteboard(frame);
   return true;
 }
 
@@ -676,6 +860,19 @@ static bool ExecuteCreateLink(LocalFrame& frame,
   return CreateLinkCommand::Create(*frame.GetDocument(), value)->Apply();
 }
 
+static bool CanDeleteRange(const EphemeralRange& range) {
+  if (range.IsCollapsed())
+    return false;
+
+  const Node* const start_container =
+      range.StartPosition().ComputeContainerNode();
+  const Node* const end_container = range.EndPosition().ComputeContainerNode();
+  if (!start_container || !end_container)
+    return false;
+
+  return HasEditableStyle(*start_container) && HasEditableStyle(*end_container);
+}
+
 static bool ExecuteCut(LocalFrame& frame,
                        Event*,
                        EditorCommandSource source,
@@ -687,7 +884,49 @@ static bool ExecuteCut(LocalFrame& frame,
   // |canExecute()|. See also "Copy", and "Paste" command.
   if (!CanWriteClipboard(frame, source))
     return false;
-  frame.GetEditor().Cut(source);
+  if (!DispatchCopyOrCutEvent(frame, source, EventTypeNames::cut))
+    return true;
+  if (!frame.GetEditor().CanCut())
+    return true;
+
+  // TODO(editing-dev): The use of UpdateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // A 'cut' event handler might have dirtied the layout so we need to update
+  // before we obtain the selection.
+  frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  if (source == kCommandFromMenuOrKeyBinding &&
+      !frame.Selection().SelectionHasFocus())
+    return true;
+
+  if (!CanDeleteRange(frame.GetEditor().SelectedRange()))
+    return true;
+  if (EnclosingTextControl(
+          frame.Selection().ComputeVisibleSelectionInDOMTree().Start())) {
+    const String plain_text = frame.SelectedTextForClipboard();
+    Pasteboard::GeneralPasteboard()->WritePlainText(
+        plain_text, frame.GetEditor().CanSmartCopyOrDelete()
+                        ? Pasteboard::kCanSmartReplace
+                        : Pasteboard::kCannotSmartReplace);
+  } else {
+    WriteSelectionToPasteboard(frame);
+  }
+
+  if (source == kCommandFromMenuOrKeyBinding) {
+    if (DispatchBeforeInputDataTransfer(
+            frame.GetEditor().FindEventTargetForClipboardEvent(source),
+            InputEvent::InputType::kDeleteByCut,
+            nullptr) != DispatchEventResult::kNotCanceled)
+      return true;
+    // 'beforeinput' event handler may destroy target frame.
+    if (frame.GetDocument()->GetFrame() != frame)
+      return true;
+  }
+  frame.GetEditor().DeleteSelectionWithSmartDelete(
+      frame.GetEditor().CanSmartCopyOrDelete() ? DeleteMode::kSmart
+                                               : DeleteMode::kSimple,
+      InputEvent::InputType::kDeleteByCut);
+
   return true;
 }
 
@@ -705,6 +944,28 @@ static bool ExecuteDefaultParagraphSeparator(LocalFrame& frame,
   return true;
 }
 
+static void PerformDelete(LocalFrame& frame) {
+  if (!frame.GetEditor().CanDelete())
+    return;
+
+  // TODO(editing-dev): The use of UpdateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // |SelectedRange| requires clean layout for visible selection normalization.
+  frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  frame.GetEditor().AddToKillRing(frame.GetEditor().SelectedRange());
+  // TODO(chongz): |Editor::performDelete()| has no direction.
+  // https://github.com/w3c/editing/issues/130
+  frame.GetEditor().DeleteSelectionWithSmartDelete(
+      frame.GetEditor().CanSmartCopyOrDelete() ? DeleteMode::kSmart
+                                               : DeleteMode::kSimple,
+      InputEvent::InputType::kDeleteContentBackward);
+
+  // clear the "start new kill ring sequence" setting, because it was set to
+  // true when the selection was updated by deleting the range
+  frame.GetEditor().SetStartNewKillRingSequence(false);
+}
+
 static bool ExecuteDelete(LocalFrame& frame,
                           Event*,
                           EditorCommandSource source,
@@ -712,7 +973,7 @@ static bool ExecuteDelete(LocalFrame& frame,
   switch (source) {
     case kCommandFromMenuOrKeyBinding: {
       // Doesn't modify the text if the current selection isn't a range.
-      frame.GetEditor().PerformDelete();
+      PerformDelete(frame);
       return true;
     }
     case kCommandFromDOM:
@@ -732,12 +993,73 @@ static bool ExecuteDelete(LocalFrame& frame,
   return false;
 }
 
+static bool DeleteWithDirection(LocalFrame& frame,
+                                DeleteDirection direction,
+                                TextGranularity granularity,
+                                bool kill_ring,
+                                bool is_typing_action) {
+  Editor& editor = frame.GetEditor();
+  if (!editor.CanEdit())
+    return false;
+
+  EditingState editing_state;
+  if (frame.Selection()
+          .ComputeVisibleSelectionInDOMTreeDeprecated()
+          .IsRange()) {
+    if (is_typing_action) {
+      DCHECK(frame.GetDocument());
+      TypingCommand::DeleteKeyPressed(
+          *frame.GetDocument(),
+          editor.CanSmartCopyOrDelete() ? TypingCommand::kSmartDelete : 0,
+          granularity);
+      editor.RevealSelectionAfterEditingOperation();
+    } else {
+      if (kill_ring)
+        editor.AddToKillRing(editor.SelectedRange());
+      editor.DeleteSelectionWithSmartDelete(
+          editor.CanSmartCopyOrDelete() ? DeleteMode::kSmart
+                                        : DeleteMode::kSimple,
+          DeletionInputTypeFromTextGranularity(direction, granularity));
+      // Implicitly calls revealSelectionAfterEditingOperation().
+    }
+  } else {
+    TypingCommand::Options options = 0;
+    if (editor.CanSmartCopyOrDelete())
+      options |= TypingCommand::kSmartDelete;
+    if (kill_ring)
+      options |= TypingCommand::kKillRing;
+    switch (direction) {
+      case DeleteDirection::kForward:
+        DCHECK(frame.GetDocument());
+        TypingCommand::ForwardDeleteKeyPressed(
+            *frame.GetDocument(), &editing_state, options, granularity);
+        if (editing_state.IsAborted())
+          return false;
+        break;
+      case DeleteDirection::kBackward:
+        DCHECK(frame.GetDocument());
+        TypingCommand::DeleteKeyPressed(*frame.GetDocument(), options,
+                                        granularity);
+        break;
+    }
+    editor.RevealSelectionAfterEditingOperation();
+  }
+
+  // FIXME: We should to move this down into deleteKeyPressed.
+  // clear the "start new kill ring sequence" setting, because it was set to
+  // true when the selection was updated by deleting the range
+  if (kill_ring)
+    editor.SetStartNewKillRingSequence(false);
+
+  return true;
+}
+
 static bool ExecuteDeleteBackward(LocalFrame& frame,
                                   Event*,
                                   EditorCommandSource,
                                   const String&) {
-  frame.GetEditor().DeleteWithDirection(
-      DeleteDirection::kBackward, TextGranularity::kCharacter, false, true);
+  DeleteWithDirection(frame, DeleteDirection::kBackward,
+                      TextGranularity::kCharacter, false, true);
   return true;
 }
 
@@ -748,8 +1070,8 @@ static bool ExecuteDeleteBackwardByDecomposingPreviousCharacter(
     const String&) {
   DLOG(ERROR) << "DeleteBackwardByDecomposingPreviousCharacter is not "
                  "implemented, doing DeleteBackward instead";
-  frame.GetEditor().DeleteWithDirection(
-      DeleteDirection::kBackward, TextGranularity::kCharacter, false, true);
+  DeleteWithDirection(frame, DeleteDirection::kBackward,
+                      TextGranularity::kCharacter, false, true);
   return true;
 }
 
@@ -757,8 +1079,8 @@ static bool ExecuteDeleteForward(LocalFrame& frame,
                                  Event*,
                                  EditorCommandSource,
                                  const String&) {
-  frame.GetEditor().DeleteWithDirection(
-      DeleteDirection::kForward, TextGranularity::kCharacter, false, true);
+  DeleteWithDirection(frame, DeleteDirection::kForward,
+                      TextGranularity::kCharacter, false, true);
   return true;
 }
 
@@ -766,8 +1088,8 @@ static bool ExecuteDeleteToBeginningOfLine(LocalFrame& frame,
                                            Event*,
                                            EditorCommandSource,
                                            const String&) {
-  frame.GetEditor().DeleteWithDirection(
-      DeleteDirection::kBackward, TextGranularity::kLineBoundary, true, false);
+  DeleteWithDirection(frame, DeleteDirection::kBackward,
+                      TextGranularity::kLineBoundary, true, false);
   return true;
 }
 
@@ -775,9 +1097,8 @@ static bool ExecuteDeleteToBeginningOfParagraph(LocalFrame& frame,
                                                 Event*,
                                                 EditorCommandSource,
                                                 const String&) {
-  frame.GetEditor().DeleteWithDirection(DeleteDirection::kBackward,
-                                        TextGranularity::kParagraphBoundary,
-                                        true, false);
+  DeleteWithDirection(frame, DeleteDirection::kBackward,
+                      TextGranularity::kParagraphBoundary, true, false);
   return true;
 }
 
@@ -788,8 +1109,8 @@ static bool ExecuteDeleteToEndOfLine(LocalFrame& frame,
   // Despite its name, this command should delete the newline at the end of a
   // paragraph if you are at the end of a paragraph (like
   // DeleteToEndOfParagraph).
-  frame.GetEditor().DeleteWithDirection(
-      DeleteDirection::kForward, TextGranularity::kLineBoundary, true, false);
+  DeleteWithDirection(frame, DeleteDirection::kForward,
+                      TextGranularity::kLineBoundary, true, false);
   return true;
 }
 
@@ -799,9 +1120,8 @@ static bool ExecuteDeleteToEndOfParagraph(LocalFrame& frame,
                                           const String&) {
   // Despite its name, this command should delete the newline at the end of
   // a paragraph if you are at the end of a paragraph.
-  frame.GetEditor().DeleteWithDirection(DeleteDirection::kForward,
-                                        TextGranularity::kParagraphBoundary,
-                                        true, false);
+  DeleteWithDirection(frame, DeleteDirection::kForward,
+                      TextGranularity::kParagraphBoundary, true, false);
   return true;
 }
 
@@ -817,11 +1137,14 @@ static bool ExecuteDeleteToMark(LocalFrame& frame,
             .SetBaseAndExtent(
                 UnionEphemeralRanges(mark, frame.GetEditor().SelectedRange()))
             .Build(),
-        FrameSelection::kCloseTyping);
+        SetSelectionOptions::Builder().SetShouldCloseTyping(true).Build());
   }
-  frame.GetEditor().PerformDelete();
-  frame.GetEditor().SetMark(
-      frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated());
+  PerformDelete(frame);
+
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+  frame.GetEditor().SetMark();
   return true;
 }
 
@@ -829,8 +1152,8 @@ static bool ExecuteDeleteWordBackward(LocalFrame& frame,
                                       Event*,
                                       EditorCommandSource,
                                       const String&) {
-  frame.GetEditor().DeleteWithDirection(DeleteDirection::kBackward,
-                                        TextGranularity::kWord, true, false);
+  DeleteWithDirection(frame, DeleteDirection::kBackward, TextGranularity::kWord,
+                      true, false);
   return true;
 }
 
@@ -838,8 +1161,8 @@ static bool ExecuteDeleteWordForward(LocalFrame& frame,
                                      Event*,
                                      EditorCommandSource,
                                      const String&) {
-  frame.GetEditor().DeleteWithDirection(DeleteDirection::kForward,
-                                        TextGranularity::kWord, true, false);
+  DeleteWithDirection(frame, DeleteDirection::kForward, TextGranularity::kWord,
+                      true, false);
   return true;
 }
 
@@ -913,8 +1236,8 @@ static bool ExecuteForwardDelete(LocalFrame& frame,
   EditingState editing_state;
   switch (source) {
     case kCommandFromMenuOrKeyBinding:
-      frame.GetEditor().DeleteWithDirection(
-          DeleteDirection::kForward, TextGranularity::kCharacter, false, true);
+      DeleteWithDirection(frame, DeleteDirection::kForward,
+                          TextGranularity::kCharacter, false, true);
       return true;
     case kCommandFromDOM:
       // Doesn't scroll to make the selection visible, or modify the kill ring.
@@ -1117,12 +1440,11 @@ static bool ExecuteMakeTextWritingDirectionLeftToRight(LocalFrame& frame,
                                                        Event*,
                                                        EditorCommandSource,
                                                        const String&) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
   style->SetProperty(CSSPropertyUnicodeBidi, CSSValueIsolate);
   style->SetProperty(CSSPropertyDirection, CSSValueLtr);
-  frame.GetEditor().ApplyStyle(
-      style, InputEvent::InputType::kFormatSetBlockTextDirection);
+  ApplyStyle(frame, style, InputEvent::InputType::kFormatSetBlockTextDirection);
   return true;
 }
 
@@ -1130,11 +1452,10 @@ static bool ExecuteMakeTextWritingDirectionNatural(LocalFrame& frame,
                                                    Event*,
                                                    EditorCommandSource,
                                                    const String&) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
   style->SetProperty(CSSPropertyUnicodeBidi, CSSValueNormal);
-  frame.GetEditor().ApplyStyle(
-      style, InputEvent::InputType::kFormatSetBlockTextDirection);
+  ApplyStyle(frame, style, InputEvent::InputType::kFormatSetBlockTextDirection);
   return true;
 }
 
@@ -1142,12 +1463,11 @@ static bool ExecuteMakeTextWritingDirectionRightToLeft(LocalFrame& frame,
                                                        Event*,
                                                        EditorCommandSource,
                                                        const String&) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
   style->SetProperty(CSSPropertyUnicodeBidi, CSSValueIsolate);
   style->SetProperty(CSSPropertyDirection, CSSValueRtl);
-  frame.GetEditor().ApplyStyle(
-      style, InputEvent::InputType::kFormatSetBlockTextDirection);
+  ApplyStyle(frame, style, InputEvent::InputType::kFormatSetBlockTextDirection);
   return true;
 }
 
@@ -1155,8 +1475,9 @@ static bool ExecuteMoveBackward(LocalFrame& frame,
                                 Event*,
                                 EditorCommandSource,
                                 const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionBackward,
-                           TextGranularity::kCharacter, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kMove,
+                           SelectionModifyDirection::kBackward,
+                           TextGranularity::kCharacter, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1165,8 +1486,8 @@ static bool ExecuteMoveBackwardAndModifySelection(LocalFrame& frame,
                                                   EditorCommandSource,
                                                   const String&) {
   frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionBackward, TextGranularity::kCharacter,
-                           kUserTriggered);
+                           SelectionModifyDirection::kBackward,
+                           TextGranularity::kCharacter, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1174,9 +1495,9 @@ static bool ExecuteMoveDown(LocalFrame& frame,
                             Event*,
                             EditorCommandSource,
                             const String&) {
-  return frame.Selection().Modify(SelectionModifyAlteration::kMove,
-                                  kDirectionForward, TextGranularity::kLine,
-                                  kUserTriggered);
+  return frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kForward,
+      TextGranularity::kLine, SetSelectionBy::kUser);
 }
 
 static bool ExecuteMoveDownAndModifySelection(LocalFrame& frame,
@@ -1184,8 +1505,8 @@ static bool ExecuteMoveDownAndModifySelection(LocalFrame& frame,
                                               EditorCommandSource,
                                               const String&) {
   frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionForward, TextGranularity::kLine,
-                           kUserTriggered);
+                           SelectionModifyDirection::kForward,
+                           TextGranularity::kLine, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1193,8 +1514,9 @@ static bool ExecuteMoveForward(LocalFrame& frame,
                                Event*,
                                EditorCommandSource,
                                const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionForward,
-                           TextGranularity::kCharacter, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kMove,
+                           SelectionModifyDirection::kForward,
+                           TextGranularity::kCharacter, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1203,8 +1525,8 @@ static bool ExecuteMoveForwardAndModifySelection(LocalFrame& frame,
                                                  EditorCommandSource,
                                                  const String&) {
   frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionForward, TextGranularity::kCharacter,
-                           kUserTriggered);
+                           SelectionModifyDirection::kForward,
+                           TextGranularity::kCharacter, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1212,40 +1534,50 @@ static bool ExecuteMoveLeft(LocalFrame& frame,
                             Event*,
                             EditorCommandSource,
                             const String&) {
-  return frame.Selection().Modify(SelectionModifyAlteration::kMove,
-                                  kDirectionLeft, TextGranularity::kCharacter,
-                                  kUserTriggered);
+  return frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kLeft,
+      TextGranularity::kCharacter, SetSelectionBy::kUser);
 }
 
 static bool ExecuteMoveLeftAndModifySelection(LocalFrame& frame,
                                               Event*,
                                               EditorCommandSource,
                                               const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend, kDirectionLeft,
-                           TextGranularity::kCharacter, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
+                           SelectionModifyDirection::kLeft,
+                           TextGranularity::kCharacter, SetSelectionBy::kUser);
   return true;
 }
 
 // Returns true if selection is modified.
-bool ModifySelectionyWithPageGranularity(
+bool ModifySelectionWithPageGranularity(
     LocalFrame& frame,
     SelectionModifyAlteration alter,
     unsigned vertical_distance,
     SelectionModifyVerticalDirection direction) {
   SelectionModifier selection_modifier(
-      frame, frame.Selection().ComputeVisibleSelectionInDOMTree());
+      frame, frame.Selection().GetSelectionInDOMTree());
+  selection_modifier.SetSelectionIsDirectional(
+      frame.Selection().IsDirectional());
   if (!selection_modifier.ModifyWithPageGranularity(alter, vertical_distance,
                                                     direction)) {
     return false;
   }
 
-  frame.Selection().SetSelection(selection_modifier.Selection().AsSelection(),
-                                 FrameSelection::kCloseTyping |
-                                     FrameSelection::kClearTypingStyle |
-                                     kUserTriggered,
-                                 alter == SelectionModifyAlteration::kMove
-                                     ? CursorAlignOnScroll::kAlways
-                                     : CursorAlignOnScroll::kIfNeeded);
+  frame.Selection().SetSelection(
+      selection_modifier.Selection().AsSelection(),
+      SetSelectionOptions::Builder()
+          .SetSetSelectionBy(SetSelectionBy::kUser)
+          .SetShouldCloseTyping(true)
+          .SetShouldClearTypingStyle(true)
+          .SetCursorAlignOnScroll(alter == SelectionModifyAlteration::kMove
+                                      ? CursorAlignOnScroll::kAlways
+                                      : CursorAlignOnScroll::kIfNeeded)
+          .SetIsDirectional(alter == SelectionModifyAlteration::kExtend ||
+                            frame.GetEditor()
+                                .Behavior()
+                                .ShouldConsiderSelectionAsDirectional())
+          .Build());
   return true;
 }
 
@@ -1256,7 +1588,7 @@ static bool ExecuteMovePageDown(LocalFrame& frame,
   unsigned distance = VerticalScrollDistance(frame);
   if (!distance)
     return false;
-  return ModifySelectionyWithPageGranularity(
+  return ModifySelectionWithPageGranularity(
       frame, SelectionModifyAlteration::kMove, distance,
       SelectionModifyVerticalDirection::kDown);
 }
@@ -1268,7 +1600,7 @@ static bool ExecuteMovePageDownAndModifySelection(LocalFrame& frame,
   unsigned distance = VerticalScrollDistance(frame);
   if (!distance)
     return false;
-  return ModifySelectionyWithPageGranularity(
+  return ModifySelectionWithPageGranularity(
       frame, SelectionModifyAlteration::kExtend, distance,
       SelectionModifyVerticalDirection::kDown);
 }
@@ -1280,7 +1612,7 @@ static bool ExecuteMovePageUp(LocalFrame& frame,
   unsigned distance = VerticalScrollDistance(frame);
   if (!distance)
     return false;
-  return ModifySelectionyWithPageGranularity(
+  return ModifySelectionWithPageGranularity(
       frame, SelectionModifyAlteration::kMove, distance,
       SelectionModifyVerticalDirection::kUp);
 }
@@ -1292,7 +1624,7 @@ static bool ExecuteMovePageUpAndModifySelection(LocalFrame& frame,
   unsigned distance = VerticalScrollDistance(frame);
   if (!distance)
     return false;
-  return ModifySelectionyWithPageGranularity(
+  return ModifySelectionWithPageGranularity(
       frame, SelectionModifyAlteration::kExtend, distance,
       SelectionModifyVerticalDirection::kUp);
 }
@@ -1301,17 +1633,18 @@ static bool ExecuteMoveRight(LocalFrame& frame,
                              Event*,
                              EditorCommandSource,
                              const String&) {
-  return frame.Selection().Modify(SelectionModifyAlteration::kMove,
-                                  kDirectionRight, TextGranularity::kCharacter,
-                                  kUserTriggered);
+  return frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kRight,
+      TextGranularity::kCharacter, SetSelectionBy::kUser);
 }
 
 static bool ExecuteMoveRightAndModifySelection(LocalFrame& frame,
                                                Event*,
                                                EditorCommandSource,
                                                const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend, kDirectionRight,
-                           TextGranularity::kCharacter, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
+                           SelectionModifyDirection::kRight,
+                           TextGranularity::kCharacter, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1319,8 +1652,9 @@ static bool ExecuteMoveToBeginningOfDocument(LocalFrame& frame,
                                              Event*,
                                              EditorCommandSource,
                                              const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionBackward,
-                           TextGranularity::kDocumentBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kBackward,
+      TextGranularity::kDocumentBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1329,9 +1663,9 @@ static bool ExecuteMoveToBeginningOfDocumentAndModifySelection(
     Event*,
     EditorCommandSource,
     const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionBackward,
-                           TextGranularity::kDocumentBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kExtend, SelectionModifyDirection::kBackward,
+      TextGranularity::kDocumentBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1339,8 +1673,9 @@ static bool ExecuteMoveToBeginningOfLine(LocalFrame& frame,
                                          Event*,
                                          EditorCommandSource,
                                          const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionBackward,
-                           TextGranularity::kLineBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kBackward,
+      TextGranularity::kLineBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1348,9 +1683,9 @@ static bool ExecuteMoveToBeginningOfLineAndModifySelection(LocalFrame& frame,
                                                            Event*,
                                                            EditorCommandSource,
                                                            const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionBackward, TextGranularity::kLineBoundary,
-                           kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kExtend, SelectionModifyDirection::kBackward,
+      TextGranularity::kLineBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1358,8 +1693,9 @@ static bool ExecuteMoveToBeginningOfParagraph(LocalFrame& frame,
                                               Event*,
                                               EditorCommandSource,
                                               const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionBackward,
-                           TextGranularity::kParagraphBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kBackward,
+      TextGranularity::kParagraphBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1368,9 +1704,9 @@ static bool ExecuteMoveToBeginningOfParagraphAndModifySelection(
     Event*,
     EditorCommandSource,
     const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionBackward,
-                           TextGranularity::kParagraphBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kExtend, SelectionModifyDirection::kBackward,
+      TextGranularity::kParagraphBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1378,8 +1714,9 @@ static bool ExecuteMoveToBeginningOfSentence(LocalFrame& frame,
                                              Event*,
                                              EditorCommandSource,
                                              const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionBackward,
-                           TextGranularity::kSentenceBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kBackward,
+      TextGranularity::kSentenceBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1388,9 +1725,9 @@ static bool ExecuteMoveToBeginningOfSentenceAndModifySelection(
     Event*,
     EditorCommandSource,
     const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionBackward,
-                           TextGranularity::kSentenceBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kExtend, SelectionModifyDirection::kBackward,
+      TextGranularity::kSentenceBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1398,8 +1735,9 @@ static bool ExecuteMoveToEndOfDocument(LocalFrame& frame,
                                        Event*,
                                        EditorCommandSource,
                                        const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionForward,
-                           TextGranularity::kDocumentBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kForward,
+      TextGranularity::kDocumentBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1407,9 +1745,9 @@ static bool ExecuteMoveToEndOfDocumentAndModifySelection(LocalFrame& frame,
                                                          Event*,
                                                          EditorCommandSource,
                                                          const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionForward,
-                           TextGranularity::kDocumentBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kExtend, SelectionModifyDirection::kForward,
+      TextGranularity::kDocumentBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1417,8 +1755,9 @@ static bool ExecuteMoveToEndOfSentence(LocalFrame& frame,
                                        Event*,
                                        EditorCommandSource,
                                        const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionForward,
-                           TextGranularity::kSentenceBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kForward,
+      TextGranularity::kSentenceBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1426,9 +1765,9 @@ static bool ExecuteMoveToEndOfSentenceAndModifySelection(LocalFrame& frame,
                                                          Event*,
                                                          EditorCommandSource,
                                                          const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionForward,
-                           TextGranularity::kSentenceBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kExtend, SelectionModifyDirection::kForward,
+      TextGranularity::kSentenceBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1436,8 +1775,9 @@ static bool ExecuteMoveToEndOfLine(LocalFrame& frame,
                                    Event*,
                                    EditorCommandSource,
                                    const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionForward,
-                           TextGranularity::kLineBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kForward,
+      TextGranularity::kLineBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1445,9 +1785,9 @@ static bool ExecuteMoveToEndOfLineAndModifySelection(LocalFrame& frame,
                                                      Event*,
                                                      EditorCommandSource,
                                                      const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionForward, TextGranularity::kLineBoundary,
-                           kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kExtend, SelectionModifyDirection::kForward,
+      TextGranularity::kLineBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1455,8 +1795,9 @@ static bool ExecuteMoveToEndOfParagraph(LocalFrame& frame,
                                         Event*,
                                         EditorCommandSource,
                                         const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionForward,
-                           TextGranularity::kParagraphBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kForward,
+      TextGranularity::kParagraphBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1464,9 +1805,9 @@ static bool ExecuteMoveToEndOfParagraphAndModifySelection(LocalFrame& frame,
                                                           Event*,
                                                           EditorCommandSource,
                                                           const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionForward,
-                           TextGranularity::kParagraphBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kExtend, SelectionModifyDirection::kForward,
+      TextGranularity::kParagraphBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1474,8 +1815,9 @@ static bool ExecuteMoveParagraphBackward(LocalFrame& frame,
                                          Event*,
                                          EditorCommandSource,
                                          const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionBackward,
-                           TextGranularity::kParagraph, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kMove,
+                           SelectionModifyDirection::kBackward,
+                           TextGranularity::kParagraph, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1484,8 +1826,8 @@ static bool ExecuteMoveParagraphBackwardAndModifySelection(LocalFrame& frame,
                                                            EditorCommandSource,
                                                            const String&) {
   frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionBackward, TextGranularity::kParagraph,
-                           kUserTriggered);
+                           SelectionModifyDirection::kBackward,
+                           TextGranularity::kParagraph, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1493,8 +1835,9 @@ static bool ExecuteMoveParagraphForward(LocalFrame& frame,
                                         Event*,
                                         EditorCommandSource,
                                         const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionForward,
-                           TextGranularity::kParagraph, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kMove,
+                           SelectionModifyDirection::kForward,
+                           TextGranularity::kParagraph, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1503,8 +1846,8 @@ static bool ExecuteMoveParagraphForwardAndModifySelection(LocalFrame& frame,
                                                           EditorCommandSource,
                                                           const String&) {
   frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionForward, TextGranularity::kParagraph,
-                           kUserTriggered);
+                           SelectionModifyDirection::kForward,
+                           TextGranularity::kParagraph, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1512,9 +1855,9 @@ static bool ExecuteMoveUp(LocalFrame& frame,
                           Event*,
                           EditorCommandSource,
                           const String&) {
-  return frame.Selection().Modify(SelectionModifyAlteration::kMove,
-                                  kDirectionBackward, TextGranularity::kLine,
-                                  kUserTriggered);
+  return frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kBackward,
+      TextGranularity::kLine, SetSelectionBy::kUser);
 }
 
 static bool ExecuteMoveUpAndModifySelection(LocalFrame& frame,
@@ -1522,8 +1865,8 @@ static bool ExecuteMoveUpAndModifySelection(LocalFrame& frame,
                                             EditorCommandSource,
                                             const String&) {
   frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionBackward, TextGranularity::kLine,
-                           kUserTriggered);
+                           SelectionModifyDirection::kBackward,
+                           TextGranularity::kLine, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1531,8 +1874,9 @@ static bool ExecuteMoveWordBackward(LocalFrame& frame,
                                     Event*,
                                     EditorCommandSource,
                                     const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionBackward,
-                           TextGranularity::kWord, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kMove,
+                           SelectionModifyDirection::kBackward,
+                           TextGranularity::kWord, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1541,8 +1885,8 @@ static bool ExecuteMoveWordBackwardAndModifySelection(LocalFrame& frame,
                                                       EditorCommandSource,
                                                       const String&) {
   frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionBackward, TextGranularity::kWord,
-                           kUserTriggered);
+                           SelectionModifyDirection::kBackward,
+                           TextGranularity::kWord, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1550,8 +1894,9 @@ static bool ExecuteMoveWordForward(LocalFrame& frame,
                                    Event*,
                                    EditorCommandSource,
                                    const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionForward,
-                           TextGranularity::kWord, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kMove,
+                           SelectionModifyDirection::kForward,
+                           TextGranularity::kWord, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1560,8 +1905,8 @@ static bool ExecuteMoveWordForwardAndModifySelection(LocalFrame& frame,
                                                      EditorCommandSource,
                                                      const String&) {
   frame.Selection().Modify(SelectionModifyAlteration::kExtend,
-                           kDirectionForward, TextGranularity::kWord,
-                           kUserTriggered);
+                           SelectionModifyDirection::kForward,
+                           TextGranularity::kWord, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1569,8 +1914,9 @@ static bool ExecuteMoveWordLeft(LocalFrame& frame,
                                 Event*,
                                 EditorCommandSource,
                                 const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionLeft,
-                           TextGranularity::kWord, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kMove,
+                           SelectionModifyDirection::kLeft,
+                           TextGranularity::kWord, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1578,8 +1924,9 @@ static bool ExecuteMoveWordLeftAndModifySelection(LocalFrame& frame,
                                                   Event*,
                                                   EditorCommandSource,
                                                   const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend, kDirectionLeft,
-                           TextGranularity::kWord, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
+                           SelectionModifyDirection::kLeft,
+                           TextGranularity::kWord, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1587,8 +1934,9 @@ static bool ExecuteMoveWordRight(LocalFrame& frame,
                                  Event*,
                                  EditorCommandSource,
                                  const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionRight,
-                           TextGranularity::kWord, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kMove,
+                           SelectionModifyDirection::kRight,
+                           TextGranularity::kWord, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1596,8 +1944,9 @@ static bool ExecuteMoveWordRightAndModifySelection(LocalFrame& frame,
                                                    Event*,
                                                    EditorCommandSource,
                                                    const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend, kDirectionRight,
-                           TextGranularity::kWord, kUserTriggered);
+  frame.Selection().Modify(SelectionModifyAlteration::kExtend,
+                           SelectionModifyDirection::kRight,
+                           TextGranularity::kWord, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1605,8 +1954,9 @@ static bool ExecuteMoveToLeftEndOfLine(LocalFrame& frame,
                                        Event*,
                                        EditorCommandSource,
                                        const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionLeft,
-                           TextGranularity::kLineBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kLeft,
+      TextGranularity::kLineBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1614,8 +1964,9 @@ static bool ExecuteMoveToLeftEndOfLineAndModifySelection(LocalFrame& frame,
                                                          Event*,
                                                          EditorCommandSource,
                                                          const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend, kDirectionLeft,
-                           TextGranularity::kLineBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kExtend, SelectionModifyDirection::kLeft,
+      TextGranularity::kLineBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1623,8 +1974,9 @@ static bool ExecuteMoveToRightEndOfLine(LocalFrame& frame,
                                         Event*,
                                         EditorCommandSource,
                                         const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kMove, kDirectionRight,
-                           TextGranularity::kLineBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kMove, SelectionModifyDirection::kRight,
+      TextGranularity::kLineBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1632,8 +1984,9 @@ static bool ExecuteMoveToRightEndOfLineAndModifySelection(LocalFrame& frame,
                                                           Event*,
                                                           EditorCommandSource,
                                                           const String&) {
-  frame.Selection().Modify(SelectionModifyAlteration::kExtend, kDirectionRight,
-                           TextGranularity::kLineBoundary, kUserTriggered);
+  frame.Selection().Modify(
+      SelectionModifyAlteration::kExtend, SelectionModifyDirection::kRight,
+      TextGranularity::kLineBoundary, SetSelectionBy::kUser);
   return true;
 }
 
@@ -1662,7 +2015,138 @@ static bool CanReadClipboard(LocalFrame& frame, EditorCommandSource source) {
   bool default_value = settings &&
                        settings->GetJavaScriptCanAccessClipboard() &&
                        settings->GetDOMPasteAllowed();
-  return frame.GetEditor().Client().CanPaste(&frame, default_value);
+  if (!frame.GetContentSettingsClient())
+    return default_value;
+  return frame.GetContentSettingsClient()->AllowReadFromClipboard(
+      default_value);
+}
+
+static bool CanSmartReplaceWithPasteboard(LocalFrame& frame,
+                                          Pasteboard* pasteboard) {
+  return frame.GetEditor().SmartInsertDeleteEnabled() &&
+         pasteboard->CanSmartReplace();
+}
+
+static void PasteAsPlainTextWithPasteboard(LocalFrame& frame,
+                                           Pasteboard* pasteboard,
+                                           EditorCommandSource source) {
+  Element* const target =
+      frame.GetEditor().FindEventTargetForClipboardEvent(source);
+  if (!target)
+    return;
+  target->DispatchEvent(TextEvent::CreateForPlainTextPaste(
+      frame.DomWindow(), pasteboard->PlainText(),
+      CanSmartReplaceWithPasteboard(frame, pasteboard)));
+}
+
+static bool DispatchPasteEvent(LocalFrame& frame,
+                               PasteMode paste_mode,
+                               EditorCommandSource source) {
+  return DispatchClipboardEvent(frame, EventTypeNames::paste,
+                                kDataTransferReadable, source, paste_mode);
+}
+
+static void PasteAsFragment(LocalFrame& frame,
+                            DocumentFragment* pasting_fragment,
+                            bool smart_replace,
+                            bool match_style,
+                            EditorCommandSource source) {
+  Element* const target =
+      frame.GetEditor().FindEventTargetForClipboardEvent(source);
+  if (!target)
+    return;
+  target->DispatchEvent(TextEvent::CreateForFragmentPaste(
+      frame.DomWindow(), pasting_fragment, smart_replace, match_style));
+}
+
+static void PasteWithPasteboard(LocalFrame& frame,
+                                Pasteboard* pasteboard,
+                                EditorCommandSource source) {
+  DocumentFragment* fragment = nullptr;
+  bool chose_plain_text = false;
+
+  if (pasteboard->IsHTMLAvailable()) {
+    unsigned fragment_start = 0;
+    unsigned fragment_end = 0;
+    KURL url;
+    const String markup =
+        pasteboard->ReadHTML(url, fragment_start, fragment_end);
+    if (!markup.IsEmpty()) {
+      DCHECK(frame.GetDocument());
+      fragment = CreateFragmentFromMarkupWithContext(
+          *frame.GetDocument(), markup, fragment_start, fragment_end, url,
+          kDisallowScriptingAndPluginContent);
+    }
+  }
+
+  if (!fragment) {
+    const String text = pasteboard->PlainText();
+    if (!text.IsEmpty()) {
+      chose_plain_text = true;
+
+      // TODO(editing-dev): Use of UpdateStyleAndLayoutIgnorePendingStylesheets
+      // needs to be audited.  See http://crbug.com/590369 for more details.
+      // |SelectedRange| requires clean layout for visible selection
+      // normalization.
+      frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+      fragment =
+          CreateFragmentFromText(frame.GetEditor().SelectedRange(), text);
+    }
+  }
+
+  if (!fragment)
+    return;
+
+  PasteAsFragment(frame, fragment,
+                  CanSmartReplaceWithPasteboard(frame, pasteboard),
+                  chose_plain_text, source);
+}
+
+static void Paste(LocalFrame& frame, EditorCommandSource source) {
+  DCHECK(frame.GetDocument());
+  if (!DispatchPasteEvent(frame, kAllMimeTypes, source))
+    return;
+  if (!frame.GetEditor().CanPaste())
+    return;
+
+  // TODO(editing-dev): The use of UpdateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // A 'paste' event handler might have dirtied the layout so we need to update
+  // before we obtain the selection.
+  frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  if (source == kCommandFromMenuOrKeyBinding &&
+      !frame.Selection().SelectionHasFocus())
+    return;
+
+  ResourceFetcher* const loader = frame.GetDocument()->Fetcher();
+  ResourceCacheValidationSuppressor validation_suppressor(loader);
+
+  const PasteMode paste_mode =
+      frame.GetEditor().CanEditRichly() ? kAllMimeTypes : kPlainTextOnly;
+
+  if (source == kCommandFromMenuOrKeyBinding) {
+    DataTransfer* data_transfer =
+        DataTransfer::Create(DataTransfer::kCopyAndPaste, kDataTransferReadable,
+                             DataObject::CreateFromPasteboard(paste_mode));
+
+    if (DispatchBeforeInputDataTransfer(
+            frame.GetEditor().FindEventTargetForClipboardEvent(source),
+            InputEvent::InputType::kInsertFromPaste,
+            data_transfer) != DispatchEventResult::kNotCanceled)
+      return;
+    // 'beforeinput' event handler may destroy target frame.
+    if (frame.GetDocument()->GetFrame() != frame)
+      return;
+  }
+
+  if (paste_mode == kAllMimeTypes) {
+    PasteWithPasteboard(frame, Pasteboard::GeneralPasteboard(), source);
+    return;
+  }
+  PasteAsPlainTextWithPasteboard(frame, Pasteboard::GeneralPasteboard(),
+                                 source);
 }
 
 static bool ExecutePaste(LocalFrame& frame,
@@ -1676,7 +2160,7 @@ static bool ExecutePaste(LocalFrame& frame,
   // |canExecute()|. See also "Copy", and "Cut" command.
   if (!CanReadClipboard(frame, source))
     return false;
-  frame.GetEditor().Paste(source);
+  Paste(frame, source);
   return true;
 }
 
@@ -1697,7 +2181,7 @@ static bool ExecutePasteGlobalSelection(LocalFrame& frame,
 
   bool old_selection_mode = Pasteboard::GeneralPasteboard()->IsSelectionMode();
   Pasteboard::GeneralPasteboard()->SetSelectionMode(true);
-  frame.GetEditor().Paste(source);
+  Paste(frame, source);
   Pasteboard::GeneralPasteboard()->SetSelectionMode(old_selection_mode);
   return true;
 }
@@ -1706,7 +2190,23 @@ static bool ExecutePasteAndMatchStyle(LocalFrame& frame,
                                       Event*,
                                       EditorCommandSource source,
                                       const String&) {
-  frame.GetEditor().PasteAsPlainText(source);
+  if (!DispatchPasteEvent(frame, kPlainTextOnly, source))
+    return false;
+  if (!frame.GetEditor().CanPaste())
+    return false;
+
+  // TODO(editing-dev): The use of UpdateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // A 'paste' event handler might have dirtied the layout so we need to update
+  // before we obtain the selection.
+  frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  if (source == kCommandFromMenuOrKeyBinding &&
+      !frame.Selection().SelectionHasFocus())
+    return false;
+
+  PasteAsPlainTextWithPasteboard(frame, Pasteboard::GeneralPasteboard(),
+                                 source);
   return true;
 }
 
@@ -1732,7 +2232,9 @@ static bool ExecuteRemoveFormat(LocalFrame& frame,
                                 Event*,
                                 EditorCommandSource,
                                 const String&) {
-  frame.GetEditor().RemoveFormattingAndStyle();
+  DCHECK(frame.GetDocument());
+  RemoveFormatCommand::Create(*frame.GetDocument())->Apply();
+
   return true;
 }
 
@@ -1788,10 +2290,10 @@ static bool ExecuteSelectAll(LocalFrame& frame,
                              Event*,
                              EditorCommandSource source,
                              const String&) {
-  const EUserTriggered user_triggered = source == kCommandFromMenuOrKeyBinding
-                                            ? kUserTriggered
-                                            : kNotUserTriggered;
-  frame.Selection().SelectAll(user_triggered);
+  const SetSelectionBy set_selection_by = source == kCommandFromMenuOrKeyBinding
+                                              ? SetSelectionBy::kUser
+                                              : SetSelectionBy::kSystem;
+  frame.Selection().SelectAll(set_selection_by);
   return true;
 }
 
@@ -1829,7 +2331,7 @@ static bool ExecuteSelectToMark(LocalFrame& frame,
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(UnionEphemeralRanges(mark, selection))
           .Build(),
-      FrameSelection::kCloseTyping);
+      SetSelectionOptions::Builder().SetShouldCloseTyping(true).Build());
   return true;
 }
 
@@ -1844,8 +2346,7 @@ static bool ExecuteSetMark(LocalFrame& frame,
                            Event*,
                            EditorCommandSource,
                            const String&) {
-  frame.GetEditor().SetMark(
-      frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated());
+  frame.GetEditor().SetMark();
   return true;
 }
 
@@ -1900,13 +2401,18 @@ static bool ExecuteSwapWithMark(LocalFrame& frame,
                                 Event*,
                                 EditorCommandSource,
                                 const String&) {
-  const VisibleSelection& mark = frame.GetEditor().Mark();
+  const VisibleSelection mark(frame.GetEditor().Mark());
   const VisibleSelection& selection =
       frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated();
+  const bool mark_is_directional = frame.GetEditor().MarkIsDirectional();
   if (mark.IsNone() || selection.IsNone())
     return false;
-  frame.Selection().SetSelection(mark.AsSelection());
-  frame.GetEditor().SetMark(selection);
+
+  frame.GetEditor().SetMark();
+  frame.Selection().SetSelection(mark.AsSelection(),
+                                 SetSelectionOptions::Builder()
+                                     .SetIsDirectional(mark_is_directional)
+                                     .Build());
   return true;
 }
 
@@ -1930,7 +2436,63 @@ static bool ExecuteTranspose(LocalFrame& frame,
                              Event*,
                              EditorCommandSource,
                              const String&) {
-  frame.GetEditor().Transpose();
+  Editor& editor = frame.GetEditor();
+  if (!editor.CanEdit())
+    return false;
+
+  Document* const document = frame.GetDocument();
+
+  // TODO(editing-dev): The use of UpdateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  document->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  const EphemeralRange& range = ComputeRangeForTranspose(frame);
+  if (range.IsNull())
+    return false;
+
+  // Transpose the two characters.
+  const String& text = PlainText(range);
+  if (text.length() != 2)
+    return false;
+  const String& transposed = text.Right(1) + text.Left(1);
+
+  if (DispatchBeforeInputInsertText(
+          EventTargetNodeForDocument(document), transposed,
+          InputEvent::InputType::kInsertTranspose,
+          new StaticRangeVector(1, StaticRange::Create(range))) !=
+      DispatchEventResult::kNotCanceled)
+    return false;
+
+  // 'beforeinput' event handler may destroy document->
+  if (frame.GetDocument() != document)
+    return false;
+
+  // TODO(editing-dev): The use of UpdateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  document->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  // 'beforeinput' event handler may change selection, we need to re-calculate
+  // range.
+  const EphemeralRange& new_range = ComputeRangeForTranspose(frame);
+  if (new_range.IsNull())
+    return false;
+
+  const String& new_text = PlainText(new_range);
+  if (new_text.length() != 2)
+    return false;
+  const String& new_transposed = new_text.Right(1) + new_text.Left(1);
+
+  const SelectionInDOMTree& new_selection =
+      SelectionInDOMTree::Builder().SetBaseAndExtent(new_range).Build();
+
+  // Select the two characters.
+  if (CreateVisibleSelection(new_selection) !=
+      frame.Selection().ComputeVisibleSelectionInDOMTree())
+    frame.Selection().SetSelectionAndEndTyping(new_selection);
+
+  // Insert the transposed characters.
+  editor.ReplaceSelectionWithText(new_transposed, false, false,
+                                  InputEvent::InputType::kInsertTranspose);
   return true;
 }
 
@@ -1996,7 +2558,7 @@ static bool ExecuteYank(LocalFrame& frame,
   frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   frame.GetEditor().InsertTextWithoutSendingTextEvent(
-      yank_string, false, 0, InputEvent::InputType::kInsertFromYank);
+      yank_string, false, nullptr, InputEvent::InputType::kInsertFromYank);
   frame.GetEditor().GetKillRing().SetToYankedState();
   return true;
 }
@@ -2021,7 +2583,7 @@ static bool ExecuteYankAndSelect(LocalFrame& frame,
   frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   frame.GetEditor().InsertTextWithoutSendingTextEvent(
-      frame.GetEditor().GetKillRing().Yank(), true, 0,
+      frame.GetEditor().GetKillRing().Yank(), true, nullptr,
       InputEvent::InputType::kInsertFromYank);
   frame.GetEditor().GetKillRing().SetToYankedState();
   return true;
@@ -2031,6 +2593,17 @@ static bool ExecuteYankAndSelect(LocalFrame& frame,
 
 static bool Supported(LocalFrame*) {
   return true;
+}
+
+static bool PasteSupported(LocalFrame* frame) {
+  const Settings* const settings = frame->GetSettings();
+  const bool default_value = settings &&
+                             settings->GetJavaScriptCanAccessClipboard() &&
+                             settings->GetDOMPasteAllowed();
+  if (!frame->GetContentSettingsClient())
+    return default_value;
+  return frame->GetContentSettingsClient()->AllowReadFromClipboard(
+      default_value);
 }
 
 static bool SupportedFromMenuOrKeyBinding(LocalFrame*) {
@@ -2055,7 +2628,7 @@ static bool EnabledVisibleSelection(LocalFrame& frame,
   // The term "visible" here includes a caret in editable text or a range in any
   // text.
   const VisibleSelection& selection =
-      frame.GetEditor().SelectionForCommand(event);
+      CreateVisibleSelection(frame.GetEditor().SelectionForCommand(event));
   return (selection.IsCaret() && selection.IsContentEditable()) ||
          selection.IsRange();
 }
@@ -2070,7 +2643,7 @@ static bool EnabledVisibleSelectionAndMark(LocalFrame& frame,
     return false;
 
   const VisibleSelection& selection =
-      frame.GetEditor().SelectionForCommand(event);
+      CreateVisibleSelection(frame.GetEditor().SelectionForCommand(event));
   return ((selection.IsCaret() && selection.IsContentEditable()) ||
           selection.IsRange()) &&
          !frame.GetEditor().Mark().IsNone();
@@ -2085,17 +2658,21 @@ static bool EnableCaretInEditableText(LocalFrame& frame,
       !frame.Selection().SelectionHasFocus())
     return false;
   const VisibleSelection& selection =
-      frame.GetEditor().SelectionForCommand(event);
+      CreateVisibleSelection(frame.GetEditor().SelectionForCommand(event));
   return selection.IsCaret() && selection.IsContentEditable();
 }
+
+// WinIE uses onbeforecut and onbeforepaste to enables the cut and paste menu
+// items. They also send onbeforecopy, apparently for symmetry, but it doesn't
+// affect the menu items. We need to use onbeforecopy as a real menu enabler
+// because we allow elements that are not normally selectable to implement
+// copy/paste (like divs, or a document body).
 
 static bool EnabledCopy(LocalFrame& frame, Event*, EditorCommandSource source) {
   if (!CanWriteClipboard(frame, source))
     return false;
-  if (source == kCommandFromMenuOrKeyBinding &&
-      !frame.Selection().SelectionHasFocus())
-    return false;
-  return frame.GetEditor().CanDHTMLCopy() || frame.GetEditor().CanCopy();
+  return !DispatchCopyOrCutEvent(frame, source, EventTypeNames::beforecopy) ||
+         frame.GetEditor().CanCopy();
 }
 
 static bool EnabledCut(LocalFrame& frame, Event*, EditorCommandSource source) {
@@ -2104,7 +2681,8 @@ static bool EnabledCut(LocalFrame& frame, Event*, EditorCommandSource source) {
   if (source == kCommandFromMenuOrKeyBinding &&
       !frame.Selection().SelectionHasFocus())
     return false;
-  return frame.GetEditor().CanDHTMLCut() || frame.GetEditor().CanCut();
+  return !DispatchCopyOrCutEvent(frame, source, EventTypeNames::beforecut) ||
+         frame.GetEditor().CanCut();
 }
 
 static bool EnabledInEditableText(LocalFrame& frame,
@@ -2114,7 +2692,10 @@ static bool EnabledInEditableText(LocalFrame& frame,
   if (source == kCommandFromMenuOrKeyBinding &&
       !frame.Selection().SelectionHasFocus())
     return false;
-  return frame.GetEditor().SelectionForCommand(event).RootEditableElement();
+  const SelectionInDOMTree selection =
+      frame.GetEditor().SelectionForCommand(event);
+  return RootEditableElementOf(
+      CreateVisiblePosition(selection.Base()).DeepEquivalent());
 }
 
 static bool EnabledDelete(LocalFrame& frame,
@@ -2140,15 +2721,10 @@ static bool EnabledInRichlyEditableText(LocalFrame& frame,
   if (source == kCommandFromMenuOrKeyBinding &&
       !frame.Selection().SelectionHasFocus())
     return false;
-  return !frame.Selection()
-              .ComputeVisibleSelectionInDOMTreeDeprecated()
-              .IsNone() &&
-         frame.Selection()
-             .ComputeVisibleSelectionInDOMTreeDeprecated()
-             .IsContentRichlyEditable() &&
-         frame.Selection()
-             .ComputeVisibleSelectionInDOMTreeDeprecated()
-             .RootEditableElement();
+  const VisibleSelection& selection =
+      frame.Selection().ComputeVisibleSelectionInDOMTree();
+  return !selection.IsNone() && IsRichlyEditablePosition(selection.Base()) &&
+         selection.RootEditableElement();
 }
 
 static bool EnabledPaste(LocalFrame& frame,
@@ -2184,12 +2760,9 @@ static bool EnabledRangeInRichlyEditableText(LocalFrame& frame,
   if (source == kCommandFromMenuOrKeyBinding &&
       !frame.Selection().SelectionHasFocus())
     return false;
-  return frame.Selection()
-             .ComputeVisibleSelectionInDOMTreeDeprecated()
-             .IsRange() &&
-         frame.Selection()
-             .ComputeVisibleSelectionInDOMTreeDeprecated()
-             .IsContentRichlyEditable();
+  const VisibleSelection& selection =
+      frame.Selection().ComputeVisibleSelectionInDOMTree();
+  return selection.IsRange() && IsRichlyEditablePosition(selection.Base());
 }
 
 static bool EnabledRedo(LocalFrame& frame, Event*, EditorCommandSource) {
@@ -2208,7 +2781,7 @@ static bool EnabledUnselect(LocalFrame& frame,
   // The term "visible" here includes a caret in editable text or a range in any
   // text.
   const VisibleSelection& selection =
-      frame.GetEditor().SelectionForCommand(event);
+      CreateVisibleSelection(frame.GetEditor().SelectionForCommand(event));
   return (selection.IsCaret() && selection.IsContentEditable()) ||
          selection.IsRange();
 }
@@ -2238,76 +2811,77 @@ static bool EnabledSelectAll(LocalFrame& frame,
 
 // State functions
 
-static TriState StateNone(LocalFrame&, Event*) {
-  return kFalseTriState;
+static EditingTriState StateNone(LocalFrame&, Event*) {
+  return EditingTriState::kFalse;
 }
 
-static TriState StateBold(LocalFrame& frame, Event*) {
+static EditingTriState StateBold(LocalFrame& frame, Event*) {
   return StateStyle(frame, CSSPropertyFontWeight, "bold");
 }
 
-static TriState StateItalic(LocalFrame& frame, Event*) {
+static EditingTriState StateItalic(LocalFrame& frame, Event*) {
   return StateStyle(frame, CSSPropertyFontStyle, "italic");
 }
 
-static TriState StateOrderedList(LocalFrame& frame, Event*) {
+static EditingTriState StateOrderedList(LocalFrame& frame, Event*) {
   return SelectionListState(frame.Selection(), olTag);
 }
 
-static TriState StateStrikethrough(LocalFrame& frame, Event*) {
+static EditingTriState StateStrikethrough(LocalFrame& frame, Event*) {
   return StateStyle(frame, CSSPropertyWebkitTextDecorationsInEffect,
                     "line-through");
 }
 
-static TriState StateStyleWithCSS(LocalFrame& frame, Event*) {
-  return frame.GetEditor().ShouldStyleWithCSS() ? kTrueTriState
-                                                : kFalseTriState;
+static EditingTriState StateStyleWithCSS(LocalFrame& frame, Event*) {
+  return frame.GetEditor().ShouldStyleWithCSS() ? EditingTriState::kTrue
+                                                : EditingTriState::kFalse;
 }
 
-static TriState StateSubscript(LocalFrame& frame, Event*) {
+static EditingTriState StateSubscript(LocalFrame& frame, Event*) {
   return StateStyle(frame, CSSPropertyVerticalAlign, "sub");
 }
 
-static TriState StateSuperscript(LocalFrame& frame, Event*) {
+static EditingTriState StateSuperscript(LocalFrame& frame, Event*) {
   return StateStyle(frame, CSSPropertyVerticalAlign, "super");
 }
 
-static TriState StateTextWritingDirectionLeftToRight(LocalFrame& frame,
-                                                     Event*) {
+static EditingTriState StateTextWritingDirectionLeftToRight(LocalFrame& frame,
+                                                            Event*) {
   return StateTextWritingDirection(frame, LeftToRightWritingDirection);
 }
 
-static TriState StateTextWritingDirectionNatural(LocalFrame& frame, Event*) {
+static EditingTriState StateTextWritingDirectionNatural(LocalFrame& frame,
+                                                        Event*) {
   return StateTextWritingDirection(frame, NaturalWritingDirection);
 }
 
-static TriState StateTextWritingDirectionRightToLeft(LocalFrame& frame,
-                                                     Event*) {
+static EditingTriState StateTextWritingDirectionRightToLeft(LocalFrame& frame,
+                                                            Event*) {
   return StateTextWritingDirection(frame, RightToLeftWritingDirection);
 }
 
-static TriState StateUnderline(LocalFrame& frame, Event*) {
+static EditingTriState StateUnderline(LocalFrame& frame, Event*) {
   return StateStyle(frame, CSSPropertyWebkitTextDecorationsInEffect,
                     "underline");
 }
 
-static TriState StateUnorderedList(LocalFrame& frame, Event*) {
+static EditingTriState StateUnorderedList(LocalFrame& frame, Event*) {
   return SelectionListState(frame.Selection(), ulTag);
 }
 
-static TriState StateJustifyCenter(LocalFrame& frame, Event*) {
+static EditingTriState StateJustifyCenter(LocalFrame& frame, Event*) {
   return StateStyle(frame, CSSPropertyTextAlign, "center");
 }
 
-static TriState StateJustifyFull(LocalFrame& frame, Event*) {
+static EditingTriState StateJustifyFull(LocalFrame& frame, Event*) {
   return StateStyle(frame, CSSPropertyTextAlign, "justify");
 }
 
-static TriState StateJustifyLeft(LocalFrame& frame, Event*) {
+static EditingTriState StateJustifyLeft(LocalFrame& frame, Event*) {
   return StateStyle(frame, CSSPropertyTextAlign, "left");
 }
 
-static TriState StateJustifyRight(LocalFrame& frame, Event*) {
+static EditingTriState StateJustifyRight(LocalFrame& frame, Event*) {
   return StateStyle(frame, CSSPropertyTextAlign, "right");
 }
 
@@ -2318,8 +2892,9 @@ static String ValueStateOrNull(const EditorInternalCommand& self,
                                Event* triggering_event) {
   if (self.state == StateNone)
     return String();
-  return self.state(frame, triggering_event) == kTrueTriState ? "true"
-                                                              : "false";
+  return self.state(frame, triggering_event) == EditingTriState::kTrue
+             ? "true"
+             : "false";
 }
 
 // The command has no value.
@@ -2378,7 +2953,8 @@ static String ValueFormatBlock(const EditorInternalCommand&,
                                Event*) {
   const VisibleSelection& selection =
       frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated();
-  if (!selection.IsNonOrphanedCaretOrRange() || !selection.IsContentEditable())
+  if (selection.IsNone() || !selection.IsValidFor(*(frame.GetDocument())) ||
+      !selection.IsContentEditable())
     return "";
   Element* format_block_element =
       FormatBlockCommand::ElementForFormatBlockCommand(
@@ -2747,8 +3323,8 @@ static const EditorInternalCommand* InternalCommand(
       {WebEditingCommandType::kOverWrite, ExecuteToggleOverwrite,
        SupportedFromMenuOrKeyBinding, EnabledInRichlyEditableText, StateNone,
        ValueStateOrNull, kNotTextInsertion, kDoNotAllowExecutionWhenDisabled},
-      {WebEditingCommandType::kPaste, ExecutePaste, Supported, EnabledPaste,
-       StateNone, ValueStateOrNull, kNotTextInsertion,
+      {WebEditingCommandType::kPaste, ExecutePaste, PasteSupported,
+       EnabledPaste, StateNone, ValueStateOrNull, kNotTextInsertion,
        kAllowExecutionWhenDisabled},
       {WebEditingCommandType::kPasteAndMatchStyle, ExecutePasteAndMatchStyle,
        Supported, EnabledPaste, StateNone, ValueStateOrNull, kNotTextInsertion,
@@ -2895,10 +3471,10 @@ bool Editor::ExecuteCommand(const String& command_name) {
   // support.
   DCHECK(GetFrame().GetDocument()->IsActive());
   if (command_name == "DeleteToEndOfParagraph") {
-    if (!DeleteWithDirection(DeleteDirection::kForward,
+    if (!DeleteWithDirection(GetFrame(), DeleteDirection::kForward,
                              TextGranularity::kParagraphBoundary, true,
                              false)) {
-      DeleteWithDirection(DeleteDirection::kForward,
+      DeleteWithDirection(GetFrame(), DeleteDirection::kForward,
                           TextGranularity::kCharacter, true, false);
     }
     return true;
@@ -2941,7 +3517,7 @@ bool Editor::ExecuteCommand(const String& command_name, const String& value) {
     return GetFrame().GetEventHandler().BubblingScroll(
         kScrollDownIgnoringWritingMode, kScrollByDocument);
 
-  if (command_name == "showGuessPanel") {
+  if (command_name == "ToggleSpellPanel") {
     // TODO(editing-dev): Use of updateStyleAndLayoutIgnorePendingStylesheets
     // needs to be audited. see http://crbug.com/590369 for more details.
     GetFrame().GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
@@ -2953,7 +3529,7 @@ bool Editor::ExecuteCommand(const String& command_name, const String& value) {
   return CreateCommand(command_name).Execute(value);
 }
 
-Editor::Command::Command() : command_(0) {}
+Editor::Command::Command() : command_(nullptr) {}
 
 Editor::Command::Command(const EditorInternalCommand* command,
                          EditorCommandSource source,
@@ -2987,12 +3563,11 @@ bool Editor::Command::Execute(const String& parameter,
               EventTargetNodeForDocument(frame_->GetDocument()), input_type,
               GetTargetRanges()) != DispatchEventResult::kNotCanceled)
         return true;
+      // 'beforeinput' event handler may destroy target frame.
+      if (frame_->GetDocument()->GetFrame() != frame_)
+        return false;
     }
   }
-
-  // 'beforeinput' event handler may destroy target frame.
-  if (frame_->GetDocument()->GetFrame() != frame_)
-    return false;
 
   GetFrame().GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
   DEFINE_STATIC_LOCAL(SparseHistogram, command_histogram,
@@ -3024,9 +3599,9 @@ bool Editor::Command::IsEnabled(Event* triggering_event) const {
   return command_->is_enabled(*frame_, triggering_event, source_);
 }
 
-TriState Editor::Command::GetState(Event* triggering_event) const {
+EditingTriState Editor::Command::GetState(Event* triggering_event) const {
   if (!IsSupported() || !frame_)
-    return kFalseTriState;
+    return EditingTriState::kFalse;
   return command_->state(*frame_, triggering_event);
 }
 
@@ -3053,28 +3628,32 @@ const StaticRangeVector* Editor::Command::GetTargetRanges() const {
     case WebEditingCommandType::kDelete:
     case WebEditingCommandType::kDeleteBackward:
       return RangesFromCurrentSelectionOrExtendCaret(
-          *frame_, kDirectionBackward, TextGranularity::kCharacter);
+          *frame_, SelectionModifyDirection::kBackward,
+          TextGranularity::kCharacter);
     case WebEditingCommandType::kDeleteForward:
       return RangesFromCurrentSelectionOrExtendCaret(
-          *frame_, kDirectionForward, TextGranularity::kCharacter);
+          *frame_, SelectionModifyDirection::kForward,
+          TextGranularity::kCharacter);
     case WebEditingCommandType::kDeleteToBeginningOfLine:
       return RangesFromCurrentSelectionOrExtendCaret(
-          *frame_, kDirectionBackward, TextGranularity::kLine);
+          *frame_, SelectionModifyDirection::kBackward, TextGranularity::kLine);
     case WebEditingCommandType::kDeleteToBeginningOfParagraph:
       return RangesFromCurrentSelectionOrExtendCaret(
-          *frame_, kDirectionBackward, TextGranularity::kParagraph);
+          *frame_, SelectionModifyDirection::kBackward,
+          TextGranularity::kParagraph);
     case WebEditingCommandType::kDeleteToEndOfLine:
-      return RangesFromCurrentSelectionOrExtendCaret(*frame_, kDirectionForward,
-                                                     TextGranularity::kLine);
+      return RangesFromCurrentSelectionOrExtendCaret(
+          *frame_, SelectionModifyDirection::kForward, TextGranularity::kLine);
     case WebEditingCommandType::kDeleteToEndOfParagraph:
       return RangesFromCurrentSelectionOrExtendCaret(
-          *frame_, kDirectionForward, TextGranularity::kParagraph);
+          *frame_, SelectionModifyDirection::kForward,
+          TextGranularity::kParagraph);
     case WebEditingCommandType::kDeleteWordBackward:
       return RangesFromCurrentSelectionOrExtendCaret(
-          *frame_, kDirectionBackward, TextGranularity::kWord);
+          *frame_, SelectionModifyDirection::kBackward, TextGranularity::kWord);
     case WebEditingCommandType::kDeleteWordForward:
-      return RangesFromCurrentSelectionOrExtendCaret(*frame_, kDirectionForward,
-                                                     TextGranularity::kWord);
+      return RangesFromCurrentSelectionOrExtendCaret(
+          *frame_, SelectionModifyDirection::kForward, TextGranularity::kWord);
     default:
       return TargetRangesForInputEvent(*target);
   }

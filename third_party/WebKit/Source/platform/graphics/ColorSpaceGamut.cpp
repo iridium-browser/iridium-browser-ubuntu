@@ -15,9 +15,10 @@ ColorSpaceGamut GetColorSpaceGamut(const WebScreenInfo& screen_info) {
   const gfx::ColorSpace& color_space = screen_info.color_space;
   if (!color_space.IsValid())
     return ColorSpaceGamut::kUnknown;
-
+  // Return the gamut of the color space used for raster (this will return a
+  // wide gamut for HDR profiles).
   return ColorSpaceUtilities::GetColorSpaceGamut(
-      color_space.ToSkColorSpace().get());
+      color_space.GetRasterColorSpace().ToSkColorSpace().get());
 }
 
 ColorSpaceGamut GetColorSpaceGamut(SkColorSpace* color_space) {
@@ -37,9 +38,10 @@ ColorSpaceGamut GetColorSpaceGamut(SkColorSpace* color_space) {
   in[0][3] = 255;
   in[1][3] = 255;
   in[2][3] = 255;
-  transform->apply(SkColorSpaceXform::kRGBA_F32_ColorFormat, out,
-                   SkColorSpaceXform::kRGBA_8888_ColorFormat, in, 3,
-                   kOpaque_SkAlphaType);
+  bool color_converison_successful = transform->apply(
+      SkColorSpaceXform::kRGBA_F32_ColorFormat, out,
+      SkColorSpaceXform::kRGBA_8888_ColorFormat, in, 3, kOpaque_SkAlphaType);
+  DCHECK(color_converison_successful);
   float score = out[0][0] * out[1][1] * out[2][2];
 
   if (score < 0.9)

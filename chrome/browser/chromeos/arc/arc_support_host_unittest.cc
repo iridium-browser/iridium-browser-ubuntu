@@ -4,11 +4,16 @@
 
 #include "chrome/browser/chromeos/arc/arc_support_host.h"
 
-#include "base/memory/ptr_util.h"
+#include <vector>
+
 #include "chrome/browser/chromeos/arc/extensions/fake_arc_support.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
+#include "chrome/browser/consent_auditor/consent_auditor_factory.h"
+#include "chrome/browser/sync/user_event_service_factory.h"
+#include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/consent_auditor/consent_auditor.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,9 +25,12 @@ using testing::_;
 
 namespace {
 
+constexpr char kFakeActiveDirectoryPrefix[] = "fake-prefix";
+constexpr char kFakeFederationUrl[] = "http://example.com/adfs/ls/awesome.aspx";
+
 class MockAuthDelegateNonStrict : public ArcSupportHost::AuthDelegate {
  public:
-  MOCK_METHOD1(OnAuthSucceeded, void(const std::string& auth_code));
+  MOCK_METHOD0(OnAuthSucceeded, void());
   MOCK_METHOD1(OnAuthFailed, void(const std::string& error_msg));
   MOCK_METHOD0(OnAuthRetryClicked, void());
 };
@@ -52,19 +60,44 @@ class MockErrorDelegateNonStrict : public ArcSupportHost::ErrorDelegate {
 
 using MockErrorDelegate = StrictMock<MockErrorDelegateNonStrict>;
 
-class ArcSupportHostTest : public testing::Test {
+// TODO(jhorwich): Integrate with centralized FakeConsentAuditor.
+class FakeConsentAuditor : public consent_auditor::ConsentAuditor {
+ public:
+  static std::unique_ptr<KeyedService> Build(content::BrowserContext* context) {
+    return std::make_unique<FakeConsentAuditor>(
+        Profile::FromBrowserContext(context));
+  }
+
+  explicit FakeConsentAuditor(Profile* profile)
+      : ConsentAuditor(
+            profile->GetPrefs(),
+            browser_sync::UserEventServiceFactory::GetForProfile(profile),
+            std::string(),
+            std::string()) {}
+
+  ~FakeConsentAuditor() override = default;
+
+  void RecordGaiaConsent(consent_auditor::Feature feature,
+                         const std::vector<int>& description_grd_ids,
+                         int confirmation_grd_id,
+                         consent_auditor::ConsentStatus status) override {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FakeConsentAuditor);
+};
+
+class ArcSupportHostTest : public BrowserWithTestWindowTest {
  public:
   ArcSupportHostTest() = default;
   ~ArcSupportHostTest() override = default;
 
   void SetUp() override {
-    user_manager_enabler_ =
-        base::MakeUnique<chromeos::ScopedUserManagerEnabler>(
-            new chromeos::FakeChromeUserManager());
+    BrowserWithTestWindowTest::SetUp();
+    user_manager_enabler_ = std::make_unique<user_manager::ScopedUserManager>(
+        std::make_unique<chromeos::FakeChromeUserManager>());
 
-    profile_ = base::MakeUnique<TestingProfile>();
-    support_host_ = base::MakeUnique<ArcSupportHost>(profile_.get());
-    fake_arc_support_ = base::MakeUnique<FakeArcSupport>(support_host_.get());
+    support_host_ = std::make_unique<ArcSupportHost>(profile());
+    fake_arc_support_ = std::make_unique<FakeArcSupport>(support_host_.get());
   }
 
   void TearDown() override {
@@ -74,39 +107,53 @@ class ArcSupportHostTest : public testing::Test {
 
     fake_arc_support_.reset();
     support_host_.reset();
-    profile_.reset();
     user_manager_enabler_.reset();
+
+    BrowserWithTestWindowTest::TearDown();
   }
 
   ArcSupportHost* support_host() { return support_host_.get(); }
   FakeArcSupport* fake_arc_support() { return fake_arc_support_.get(); }
 
   MockAuthDelegate* CreateMockAuthDelegate() {
-    auth_delegate_ = base::MakeUnique<MockAuthDelegate>();
+    auth_delegate_ = std::make_unique<MockAuthDelegate>();
     support_host_->SetAuthDelegate(auth_delegate_.get());
     return auth_delegate_.get();
   }
 
   MockTermsOfServiceDelegate* CreateMockTermsOfServiceDelegate() {
-    tos_delegate_ = base::MakeUnique<MockTermsOfServiceDelegate>();
+    tos_delegate_ = std::make_unique<MockTermsOfServiceDelegate>();
     support_host_->SetTermsOfServiceDelegate(tos_delegate_.get());
     return tos_delegate_.get();
   }
 
   MockErrorDelegate* CreateMockErrorDelegate() {
-    error_delegate_ = base::MakeUnique<MockErrorDelegate>();
+    error_delegate_ = std::make_unique<MockErrorDelegate>();
     support_host_->SetErrorDelegate(error_delegate_.get());
     return error_delegate_.get();
   }
 
- private:
-  // Fake as if the current testing thread is UI thread.
-  content::TestBrowserThreadBundle bundle_;
+  void ShowAuthPage() {
+    // Currently there is only Active Directory sign-in that provides an
+    // authorization inside the OptIn flow.
+    support_host()->ShowActiveDirectoryAuth(GURL(kFakeFederationUrl),
+                                            kFakeActiveDirectoryPrefix);
+  }
 
-  std::unique_ptr<TestingProfile> profile_;
+  FakeConsentAuditor* consent_auditor() {
+    return static_cast<FakeConsentAuditor*>(
+        ConsentAuditorFactory::GetForProfile(profile()));
+  }
+
+  // BrowserWithTestWindowTest:
+  TestingProfile::TestingFactories GetTestingFactories() override {
+    return {{ConsentAuditorFactory::GetInstance(), FakeConsentAuditor::Build}};
+  }
+
+ private:
   std::unique_ptr<ArcSupportHost> support_host_;
   std::unique_ptr<FakeArcSupport> fake_arc_support_;
-  std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
+  std::unique_ptr<user_manager::ScopedUserManager> user_manager_enabler_;
 
   std::unique_ptr<MockAuthDelegate> auth_delegate_;
   std::unique_ptr<MockTermsOfServiceDelegate> tos_delegate_;
@@ -116,14 +163,13 @@ class ArcSupportHostTest : public testing::Test {
 };
 
 TEST_F(ArcSupportHostTest, AuthSucceeded) {
-  constexpr char kFakeCode[] = "fake_code";
   MockAuthDelegate* auth_delegate = CreateMockAuthDelegate();
   support_host()->SetAuthDelegate(auth_delegate);
 
-  support_host()->ShowLso();
+  ShowAuthPage();
 
-  EXPECT_CALL(*auth_delegate, OnAuthSucceeded(Eq(kFakeCode)));
-  fake_arc_support()->EmulateAuthSuccess(kFakeCode);
+  EXPECT_CALL(*auth_delegate, OnAuthSucceeded());
+  fake_arc_support()->EmulateAuthSuccess();
 }
 
 TEST_F(ArcSupportHostTest, AuthFailed) {
@@ -131,7 +177,7 @@ TEST_F(ArcSupportHostTest, AuthFailed) {
   MockAuthDelegate* auth_delegate = CreateMockAuthDelegate();
   support_host()->SetAuthDelegate(auth_delegate);
 
-  support_host()->ShowLso();
+  ShowAuthPage();
 
   EXPECT_CALL(*auth_delegate, OnAuthFailed(kFakeError));
   fake_arc_support()->EmulateAuthFailure(kFakeError);

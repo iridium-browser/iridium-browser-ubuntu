@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
+#include "base/compiler_specific.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
@@ -40,10 +40,15 @@ namespace {
 const int kPollRate = 1000;
 
 // How long we'll wait to connect to a printer before declaring an error.
-const int kConnectingTimeout = 20;
+// TODO(crbug.com/786182): Increase to 120s to give pipeline more time to
+// complete.
+const int kConnectingTimeout = 120;
 
 // Threshold for giving up on communicating with CUPS.
 const int kRetryMax = 6;
+
+// job state reason values
+const char kJobCompletedWithErrors[] = "job-completed-with-errors";
 
 using State = chromeos::CupsPrintJob::State;
 using ErrorCode = chromeos::CupsPrintJob::ErrorCode;
@@ -57,6 +62,7 @@ enum JobResultForHistogram {
   TIMEOUT_CANCEL = 2,  // cancelled due to timeout
   PRINTER_CANCEL = 3,  // cancelled by printer
   LOST = 4,            // final state never received
+  FILTER_FAILED = 5,   // filter failed
   RESULT_MAX
 };
 
@@ -125,6 +131,12 @@ bool ContainsReason(const printing::PrinterStatus printer_status,
                       }) != printer_status.reasons.end();
 }
 
+// Returns true if |job|.state_reasons contains |reason|
+bool JobContainsReason(const ::printing::CupsJob& job,
+                       base::StringPiece reason) {
+  return base::ContainsValue(job.state_reasons, reason);
+}
+
 // Extracts an ErrorCode from PrinterStatus#reasons.  Returns NO_ERROR if there
 // are no reasons which indicate an error.
 chromeos::CupsPrintJob::ErrorCode ErrorCodeFromReasons(
@@ -147,19 +159,12 @@ chromeos::CupsPrintJob::ErrorCode ErrorCodeFromReasons(
 }
 
 // Check if the job should timeout.  Returns true if the job has timed out.
-bool EnforceTimeout(const printing::CupsJob& job,
-                    chromeos::CupsPrintJob* print_job) {
+bool DidTimeout(const printing::CupsJob& job,
+                chromeos::CupsPrintJob* print_job) {
   // Check to see if we should time out.
   base::TimeDelta time_waiting =
       base::Time::Now() - base::Time::FromTimeT(job.processing_started);
-  if (time_waiting > base::TimeDelta::FromSeconds(kConnectingTimeout)) {
-    print_job->set_state(chromeos::CupsPrintJob::State::STATE_ERROR);
-    print_job->set_error_code(
-        chromeos::CupsPrintJob::ErrorCode::PRINTER_UNREACHABLE);
-    return true;
-  }
-
-  return false;
+  return time_waiting > base::TimeDelta::FromSeconds(kConnectingTimeout);
 }
 
 // Update the current printed page.  Returns true of the page has been updated.
@@ -191,8 +196,11 @@ bool UpdatePrintJob(const ::printing::PrinterStatus& printer_status,
   switch (job.state) {
     case ::printing::CupsJob::PROCESSING:
       if (ContainsReason(printer_status, PrinterReason::CONNECTING_TO_DEVICE)) {
-        if (EnforceTimeout(job, print_job)) {
+        if (DidTimeout(job, print_job)) {
           LOG(WARNING) << "Connecting to printer timed out";
+          print_job->set_state(chromeos::CupsPrintJob::State::STATE_ERROR);
+          print_job->set_error_code(
+              chromeos::CupsPrintJob::ErrorCode::PRINTER_UNREACHABLE);
           print_job->set_expired(true);
         }
       } else {
@@ -203,10 +211,20 @@ bool UpdatePrintJob(const ::printing::PrinterStatus& printer_status,
       DCHECK_GE(job.current_pages, print_job->total_page_number());
       print_job->set_state(State::STATE_DOCUMENT_DONE);
       break;
+    case ::printing::CupsJob::STOPPED:
+      // If cups job STOPPED but with filter failure, treat as ERROR
+      if (JobContainsReason(job, kJobCompletedWithErrors)) {
+        print_job->set_error_code(
+            chromeos::CupsPrintJob::ErrorCode::FILTER_FAILED);
+        print_job->set_state(chromeos::CupsPrintJob::State::STATE_ERROR);
+      } else {
+        print_job->set_state(ConvertState(job.state));
+      }
+      break;
     case ::printing::CupsJob::ABORTED:
     case ::printing::CupsJob::CANCELED:
       print_job->set_error_code(ErrorCodeFromReasons(printer_status));
-    // fall through
+      FALLTHROUGH;
     default:
       print_job->set_state(ConvertState(job.state));
       break;
@@ -234,7 +252,7 @@ class CupsWrapper {
   void QueryCups(const std::vector<std::string>& printer_ids,
                  QueryResult* result) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    base::ThreadRestrictions::AssertIOAllowed();
+    base::AssertBlockingAllowed();
 
     result->success = cups_connection_.GetJobs(printer_ids, &result->queues);
   }
@@ -242,7 +260,7 @@ class CupsWrapper {
   // Cancel the print job on the blocking thread.
   void CancelJobImpl(const std::string& printer_id, const int job_id) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    base::ThreadRestrictions::AssertIOAllowed();
+    base::AssertBlockingAllowed();
 
     std::unique_ptr<::printing::CupsPrinter> printer =
         cups_connection_.GetPrinter(printer_id);
@@ -288,18 +306,10 @@ class CupsPrintJobManagerImpl : public CupsPrintJobManager,
   // Must be run from the UI thread.
   void CancelPrintJob(CupsPrintJob* job) override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-    // Copy job_id and printer_id.  |job| is about to be freed.
-    const int job_id = job->job_id();
-    const std::string printer_id = job->printer().id();
-
-    // Stop montioring jobs after we cancel them.  The user no longer cares.
-    jobs_.erase(job->GetUniqueId());
-
-    query_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&CupsWrapper::CancelJobImpl,
-                   base::Unretained(cups_wrapper_.get()), printer_id, job_id));
+    job->set_state(CupsPrintJob::State::STATE_CANCELLED);
+    NotifyJobCanceled(job->GetWeakPtr());
+    // Ideally we should wait for IPP response.
+    FinishPrintJob(job);
   }
 
   bool SuspendPrintJob(CupsPrintJob* job) override {
@@ -356,17 +366,17 @@ class CupsPrintJobManagerImpl : public CupsPrintJobManager,
                                20);
 
     // Create a new print job.
-    auto cpj = base::MakeUnique<CupsPrintJob>(*printer, job_id, title,
+    auto cpj = std::make_unique<CupsPrintJob>(*printer, job_id, title,
                                               total_page_number);
     std::string key = cpj->GetUniqueId();
     jobs_[key] = std::move(cpj);
 
     CupsPrintJob* job = jobs_[key].get();
-    NotifyJobCreated(job);
+    NotifyJobCreated(job->GetWeakPtr());
 
     // Always start jobs in the waiting state.
     job->set_state(CupsPrintJob::State::STATE_WAITING);
-    NotifyJobUpdated(job);
+    NotifyJobUpdated(job->GetWeakPtr());
 
     // Run a query now.
     content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI)
@@ -376,6 +386,20 @@ class CupsPrintJobManagerImpl : public CupsPrintJobManager,
     ScheduleQuery();
 
     return true;
+  }
+
+  void FinishPrintJob(CupsPrintJob* job) {
+    // Copy job_id and printer_id.  |job| is about to be freed.
+    const int job_id = job->job_id();
+    const std::string printer_id = job->printer().id();
+
+    // Stop montioring jobs after we cancel them.  The user no longer cares.
+    jobs_.erase(job->GetUniqueId());
+
+    query_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&CupsWrapper::CancelJobImpl,
+                                  base::Unretained(cups_wrapper_.get()),
+                                  printer_id, job_id));
   }
 
   // Schedule a query of CUPS for print job status with a delay of |delay|.
@@ -398,7 +422,7 @@ class CupsPrintJobManagerImpl : public CupsPrintJobManager,
     }
     std::vector<std::string> ids{printer_ids.begin(), printer_ids.end()};
 
-    auto result = base::MakeUnique<QueryResult>();
+    auto result = std::make_unique<QueryResult>();
     QueryResult* result_ptr = result.get();
     // Runs a query on |query_runner_| which will rejoin this sequnece on
     // completion.
@@ -449,16 +473,20 @@ class CupsPrintJobManagerImpl : public CupsPrintJobManager,
 
         if (UpdatePrintJob(queue.printer_status, job, print_job)) {
           // The state of the job changed, notify observers.
-          NotifyJobStateUpdate(print_job);
+          NotifyJobStateUpdate(print_job->GetWeakPtr());
         }
 
         if (print_job->expired()) {
           // Job needs to be forcibly cancelled.
           RecordJobResult(TIMEOUT_CANCEL);
-          CancelPrintJob(print_job);
+          FinishPrintJob(print_job);
           // Beware, print_job was removed from jobs_ and deleted.
+        } else if (print_job->PipelineDead()) {
+          RecordJobResult(FILTER_FAILED);
+          FinishPrintJob(print_job);
         } else if (print_job->IsJobFinished()) {
           // Cleanup completed jobs.
+          VLOG(1) << "Removing Job " << print_job->document_title();
           RecordJobResult(ResultForHistogram(print_job->state()));
           jobs_.erase(entry);
         } else {
@@ -488,15 +516,18 @@ class CupsPrintJobManagerImpl : public CupsPrintJobManager,
       RecordJobResult(LOST);
       CupsPrintJob* job = entry.second.get();
       job->set_state(CupsPrintJob::State::STATE_ERROR);
-      NotifyJobStateUpdate(job);
+      NotifyJobStateUpdate(job->GetWeakPtr());
     }
 
     jobs_.clear();
   }
 
   // Notify observers that a state update has occured for |job|.
-  void NotifyJobStateUpdate(CupsPrintJob* job) {
+  void NotifyJobStateUpdate(base::WeakPtr<CupsPrintJob> job) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+    if (!job)
+      return;
 
     switch (job->state()) {
       case State::STATE_NONE:

@@ -11,13 +11,11 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_api_unittest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
-#include "chrome/browser/extensions/test_extension_prefs.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_app_manager.h"
@@ -31,11 +29,10 @@
 #include "components/proximity_auth/switches.h"
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "extensions/browser/api_test_utils.h"
-#include "extensions/browser/event_router.h"
-#include "extensions/browser/event_router_factory.h"
-#include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/test_event_router.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
+#include "ui/aura/env.h"
 
 namespace {
 
@@ -133,9 +130,11 @@ class EasyUnlockPrivateApiTest : public extensions::ExtensionApiUnittest {
         proximity_auth::switches::kDisableBluetoothLowEnergyDiscovery);
 
     chromeos::DBusThreadManager::Initialize();
-    bluez::BluezDBusManager::Initialize(
-        chromeos::DBusThreadManager::Get()->GetSystemBus(),
-        chromeos::DBusThreadManager::Get()->IsUsingFakes());
+    if (aura::Env::GetInstance()->mode() == aura::Env::Mode::LOCAL) {
+      bluez::BluezDBusManager::Initialize(
+          chromeos::DBusThreadManager::Get()->GetSystemBus(),
+          chromeos::DBusThreadManager::Get()->IsUsingFakes());
+    }
     client_ = chromeos::DBusThreadManager::Get()->GetEasyUnlockClient();
 
     extensions::ExtensionApiUnittest::SetUp();
@@ -144,7 +143,8 @@ class EasyUnlockPrivateApiTest : public extensions::ExtensionApiUnittest {
   void TearDown() override {
     extensions::ExtensionApiUnittest::TearDown();
 
-    bluez::BluezDBusManager::Shutdown();
+    if (aura::Env::GetInstance()->mode() == aura::Env::Mode::LOCAL)
+      bluez::BluezDBusManager::Shutdown();
     chromeos::DBusThreadManager::Shutdown();
   }
 
@@ -157,23 +157,22 @@ class EasyUnlockPrivateApiTest : public extensions::ExtensionApiUnittest {
     const base::ListValue* result_list = function->GetResultList();
     if (!result_list) {
       LOG(ERROR) << "Function has no result list.";
-      return "";
+      return std::string();
     }
 
     if (result_list->GetSize() != 1u) {
       LOG(ERROR) << "Invalid number of results.";
-      return "";
+      return std::string();
     }
 
-    const base::Value* result_binary_value;
-    if (!result_list->GetBinary(0, &result_binary_value) ||
-        !result_binary_value) {
+    const auto& result_binary_value = result_list->GetList()[0];
+    if (!result_binary_value.is_blob()) {
       LOG(ERROR) << "Result not a binary value.";
-      return "";
+      return std::string();
     }
 
-    return std::string(result_binary_value->GetBlob().data(),
-                       result_binary_value->GetBlob().size());
+    return std::string(result_binary_value.GetBlob().data(),
+                       result_binary_value.GetBlob().size());
   }
 
   chromeos::EasyUnlockClient* client_;
@@ -185,26 +184,20 @@ TEST_F(EasyUnlockPrivateApiTest, GenerateEcP256KeyPair) {
   function->set_has_callback(true);
 
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
-      function.get(),
-      "[]",
-      browser(),
-      extension_function_test_utils::NONE));
+      function.get(), "[]", browser(), extensions::api_test_utils::NONE));
 
   const base::ListValue* result_list = function->GetResultList();
   ASSERT_TRUE(result_list);
   ASSERT_EQ(2u, result_list->GetSize());
 
-  const base::Value* public_key;
-  ASSERT_TRUE(result_list->GetBinary(0, &public_key));
-  ASSERT_TRUE(public_key);
-
-  const base::Value* private_key;
-  ASSERT_TRUE(result_list->GetBinary(1, &private_key));
-  ASSERT_TRUE(private_key);
+  const base::Value& public_key = result_list->GetList()[0];
+  const base::Value& private_key = result_list->GetList()[1];
+  ASSERT_TRUE(public_key.is_blob());
+  ASSERT_TRUE(private_key.is_blob());
 
   EXPECT_TRUE(chromeos::FakeEasyUnlockClient::IsEcP256KeyPair(
-      std::string(private_key->GetBlob().data(), private_key->GetBlob().size()),
-      std::string(public_key->GetBlob().data(), public_key->GetBlob().size())));
+      std::string(private_key.GetBlob().data(), private_key.GetBlob().size()),
+      std::string(public_key.GetBlob().data(), public_key.GetBlob().size())));
 }
 
 TEST_F(EasyUnlockPrivateApiTest, PerformECDHKeyAgreement) {
@@ -235,7 +228,7 @@ TEST_F(EasyUnlockPrivateApiTest, PerformECDHKeyAgreement) {
 
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
       function.get(), std::move(args), browser(),
-      extension_function_test_utils::NONE));
+      extensions::api_test_utils::NONE));
 
   EXPECT_EQ(expected_result, GetSingleBinaryResultAsString(function.get()));
 }
@@ -264,7 +257,7 @@ TEST_F(EasyUnlockPrivateApiTest, CreateSecureMessage) {
   std::unique_ptr<base::ListValue> args(new base::ListValue);
   args->Append(StringToBinaryValue("PAYLOAD"));
   args->Append(StringToBinaryValue("KEY"));
-  auto options = base::MakeUnique<base::DictionaryValue>();
+  auto options = std::make_unique<base::DictionaryValue>();
   options->Set("associatedData", StringToBinaryValue("ASSOCIATED_DATA"));
   options->Set("publicMetadata", StringToBinaryValue("PUBLIC_METADATA"));
   options->Set("verificationKeyId",
@@ -281,7 +274,7 @@ TEST_F(EasyUnlockPrivateApiTest, CreateSecureMessage) {
 
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
       function.get(), std::move(args), browser(),
-      extension_function_test_utils::NONE));
+      extensions::api_test_utils::NONE));
 
   EXPECT_EQ(expected_result, GetSingleBinaryResultAsString(function.get()));
 }
@@ -306,12 +299,12 @@ TEST_F(EasyUnlockPrivateApiTest, CreateSecureMessage_EmptyOptions) {
   std::unique_ptr<base::ListValue> args(new base::ListValue);
   args->Append(StringToBinaryValue("PAYLOAD"));
   args->Append(StringToBinaryValue("KEY"));
-  auto options = base::MakeUnique<base::DictionaryValue>();
+  auto options = std::make_unique<base::DictionaryValue>();
   args->Append(std::move(options));
 
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
       function.get(), std::move(args), browser(),
-      extension_function_test_utils::NONE));
+      extensions::api_test_utils::NONE));
 
   EXPECT_EQ(expected_result, GetSingleBinaryResultAsString(function.get()));
 }
@@ -338,7 +331,7 @@ TEST_F(EasyUnlockPrivateApiTest, CreateSecureMessage_AsymmetricSign) {
   std::unique_ptr<base::ListValue> args(new base::ListValue);
   args->Append(StringToBinaryValue("PAYLOAD"));
   args->Append(StringToBinaryValue("KEY"));
-  auto options = base::MakeUnique<base::DictionaryValue>();
+  auto options = std::make_unique<base::DictionaryValue>();
   options->Set("associatedData",
                StringToBinaryValue("ASSOCIATED_DATA"));
   options->Set("verificationKeyId",
@@ -350,7 +343,7 @@ TEST_F(EasyUnlockPrivateApiTest, CreateSecureMessage_AsymmetricSign) {
 
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
       function.get(), std::move(args), browser(),
-      extension_function_test_utils::NONE));
+      extensions::api_test_utils::NONE));
 
   EXPECT_EQ(expected_result, GetSingleBinaryResultAsString(function.get()));
 }
@@ -376,7 +369,7 @@ TEST_F(EasyUnlockPrivateApiTest, UnwrapSecureMessage) {
   std::unique_ptr<base::ListValue> args(new base::ListValue);
   args->Append(StringToBinaryValue("MESSAGE"));
   args->Append(StringToBinaryValue("KEY"));
-  auto options = base::MakeUnique<base::DictionaryValue>();
+  auto options = std::make_unique<base::DictionaryValue>();
   options->Set("associatedData", StringToBinaryValue("ASSOCIATED_DATA"));
   options->SetString(
       "encryptType",
@@ -388,7 +381,7 @@ TEST_F(EasyUnlockPrivateApiTest, UnwrapSecureMessage) {
 
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
       function.get(), std::move(args), browser(),
-      extension_function_test_utils::NONE));
+      extensions::api_test_utils::NONE));
 
   EXPECT_EQ(expected_result, GetSingleBinaryResultAsString(function.get()));
 }
@@ -413,12 +406,12 @@ TEST_F(EasyUnlockPrivateApiTest, UnwrapSecureMessage_EmptyOptions) {
   std::unique_ptr<base::ListValue> args(new base::ListValue);
   args->Append(StringToBinaryValue("MESSAGE"));
   args->Append(StringToBinaryValue("KEY"));
-  auto options = base::MakeUnique<base::DictionaryValue>();
+  auto options = std::make_unique<base::DictionaryValue>();
   args->Append(std::move(options));
 
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
       function.get(), std::move(args), browser(),
-      extension_function_test_utils::NONE));
+      extensions::api_test_utils::NONE));
 
   EXPECT_EQ(expected_result, GetSingleBinaryResultAsString(function.get()));
 }
@@ -444,7 +437,7 @@ TEST_F(EasyUnlockPrivateApiTest, UnwrapSecureMessage_AsymmetricSign) {
   std::unique_ptr<base::ListValue> args(new base::ListValue);
   args->Append(StringToBinaryValue("MESSAGE"));
   args->Append(StringToBinaryValue("KEY"));
-  auto options = base::MakeUnique<base::DictionaryValue>();
+  auto options = std::make_unique<base::DictionaryValue>();
   options->Set("associatedData",
                StringToBinaryValue("ASSOCIATED_DATA"));
   options->SetString(
@@ -454,7 +447,7 @@ TEST_F(EasyUnlockPrivateApiTest, UnwrapSecureMessage_AsymmetricSign) {
 
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
       function.get(), std::move(args), browser(),
-      extension_function_test_utils::NONE));
+      extensions::api_test_utils::NONE));
 
   EXPECT_EQ(expected_result, GetSingleBinaryResultAsString(function.get()));
 }
@@ -482,48 +475,10 @@ std::unique_ptr<KeyedService> BuildTestEasyUnlockService(
   return std::move(service);
 }
 
-// A fake EventRouter that logs event it dispatches for testing.
-class FakeEventRouter : public extensions::EventRouter {
- public:
-  FakeEventRouter(
-      Profile* profile,
-      std::unique_ptr<extensions::TestExtensionPrefs> extension_prefs)
-      : EventRouter(profile, extension_prefs->prefs()),
-        extension_prefs_(std::move(extension_prefs)),
-        event_count_(0) {}
-
-  void DispatchEventToExtension(
-      const std::string& extension_id,
-      std::unique_ptr<extensions::Event> event) override {
-    ++event_count_;
-    last_extension_id_ = extension_id;
-    last_event_name_ = event ? event->event_name : std::string();
-  }
-
-  int event_count() const { return event_count_; }
-  const std::string& last_extension_id() const { return last_extension_id_; }
-  const std::string& last_event_name() const { return last_event_name_; }
-
- private:
-  std::unique_ptr<extensions::TestExtensionPrefs> extension_prefs_;
-  int event_count_;
-  std::string last_extension_id_;
-  std::string last_event_name_;
-};
-
-// FakeEventRouter factory function
-std::unique_ptr<KeyedService> FakeEventRouterFactoryFunction(
-    content::BrowserContext* profile) {
-  std::unique_ptr<extensions::TestExtensionPrefs> extension_prefs(
-      new extensions::TestExtensionPrefs(base::ThreadTaskRunnerHandle::Get()));
-  return base::MakeUnique<FakeEventRouter>(static_cast<Profile*>(profile),
-                                           std::move(extension_prefs));
-}
-
 TEST_F(EasyUnlockPrivateApiTest, AutoPairing) {
-  FakeEventRouter* event_router = static_cast<FakeEventRouter*>(
-      extensions::EventRouterFactory::GetInstance()->SetTestingFactoryAndUse(
-          profile(), &FakeEventRouterFactoryFunction));
+  extensions::TestEventRouter* event_router =
+      extensions::CreateAndUseTestEventRouter(profile());
+  event_router->set_expected_extension_id(extension_misc::kEasyUnlockAppId);
 
   EasyUnlockServiceFactory::GetInstance()->SetTestingFactoryAndUse(
       profile(), &BuildTestEasyUnlockService);
@@ -534,21 +489,16 @@ TEST_F(EasyUnlockPrivateApiTest, AutoPairing) {
   EasyUnlockService* service = EasyUnlockService::Get(profile());
   service->StartAutoPairing(base::Bind(&AutoPairingResult::SetResult,
                                        base::Unretained(&result)));
-  EXPECT_EQ(1, event_router->event_count());
-  EXPECT_EQ(extension_misc::kEasyUnlockAppId,
-            event_router->last_extension_id());
-  EXPECT_EQ(
-      extensions::api::easy_unlock_private::OnStartAutoPairing::kEventName,
-      event_router->last_event_name());
+  EXPECT_EQ(1,
+            event_router->GetEventCount(extensions::api::easy_unlock_private::
+                                            OnStartAutoPairing::kEventName));
 
   // Test SetAutoPairingResult call with failure.
   scoped_refptr<EasyUnlockPrivateSetAutoPairingResultFunction> function(
       new EasyUnlockPrivateSetAutoPairingResultFunction());
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
-      function.get(),
-      "[{\"success\":false, \"errorMessage\":\"fake_error\"}]",
-      browser(),
-      extension_function_test_utils::NONE));
+      function.get(), "[{\"success\":false, \"errorMessage\":\"fake_error\"}]",
+      browser(), extensions::api_test_utils::NONE));
   EXPECT_FALSE(result.success);
   EXPECT_EQ("fake_error", result.error);
 
@@ -557,10 +507,8 @@ TEST_F(EasyUnlockPrivateApiTest, AutoPairing) {
                                        base::Unretained(&result)));
   function = new EasyUnlockPrivateSetAutoPairingResultFunction();
   ASSERT_TRUE(extension_function_test_utils::RunFunction(
-      function.get(),
-      "[{\"success\":true}]",
-      browser(),
-      extension_function_test_utils::NONE));
+      function.get(), "[{\"success\":true}]", browser(),
+      extensions::api_test_utils::NONE));
   EXPECT_TRUE(result.success);
   EXPECT_TRUE(result.error.empty());
 }
@@ -577,7 +525,7 @@ TEST_F(EasyUnlockPrivateApiTest, GetRemoteDevicesNonExperimental) {
       extensions::api_test_utils::RunFunctionAndReturnSingleResult(
           function.get(), "[]", profile()));
   ASSERT_TRUE(value.get());
-  ASSERT_EQ(base::Value::Type::LIST, value->GetType());
+  ASSERT_EQ(base::Value::Type::LIST, value->type());
 
   base::ListValue* list_value = static_cast<base::ListValue*>(value.get());
   EXPECT_EQ(0u, list_value->GetSize());

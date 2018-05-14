@@ -204,7 +204,7 @@ class TestPatternReceiver : public media::cast::InProcessReceiver {
 
     CHECK(video_frame->format() == media::PIXEL_FORMAT_YV12 ||
           video_frame->format() == media::PIXEL_FORMAT_I420 ||
-          video_frame->format() == media::PIXEL_FORMAT_YV12A);
+          video_frame->format() == media::PIXEL_FORMAT_I420A);
 
     if (done_callback_.is_null() || expected_yuv_colors_.empty())
       return;  // No need to waste CPU doing analysis on the frame.
@@ -337,13 +337,10 @@ class CastStreamingApiTestWithPixelOutput : public CastStreamingApiTest {
 // use the API to send it out.  At the same time, this test launches an
 // in-process Cast receiver, listening on a localhost UDP socket, to receive the
 // content and check whether it matches expectations.
-//
-// TODO(miu): Now that this test has been long-stable on Release build bots, it
-// should be enabled for the Debug build bots.  http://crbug.com/396413
 #if defined(NDEBUG)
 #define MAYBE_EndToEnd EndToEnd
 #else
-#define MAYBE_EndToEnd DISABLED_EndToEnd
+#define MAYBE_EndToEnd DISABLED_EndToEnd  // crbug.com/396413
 #endif
 IN_PROC_BROWSER_TEST_F(CastStreamingApiTestWithPixelOutput, MAYBE_EndToEnd) {
   std::unique_ptr<net::UDPServerSocket> receive_socket(
@@ -389,7 +386,7 @@ IN_PROC_BROWSER_TEST_F(CastStreamingApiTestWithPixelOutput, MAYBE_EndToEnd) {
   receiver->Stop();
 
   delete receiver;
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   cast_environment->Shutdown();
 }
 

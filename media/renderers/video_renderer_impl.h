@@ -8,7 +8,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <memory>
 
 #include "base/macros.h"
@@ -29,8 +28,8 @@
 #include "media/filters/decoder_stream.h"
 #include "media/filters/video_renderer_algorithm.h"
 #include "media/renderers/default_renderer_factory.h"
-#include "media/renderers/gpu_video_accelerator_factories.h"
 #include "media/video/gpu_memory_buffer_video_frame_pool.h"
+#include "media/video/gpu_video_accelerator_factories.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -44,7 +43,7 @@ namespace media {
 // ready for rendering.
 class MEDIA_EXPORT VideoRendererImpl
     : public VideoRenderer,
-      public NON_EXPORTED_BASE(VideoRendererSink::RenderCallback) {
+      public VideoRendererSink::RenderCallback {
  public:
   // |decoders| contains the VideoDecoders to use when initializing.
   //
@@ -74,7 +73,7 @@ class MEDIA_EXPORT VideoRendererImpl
   void OnTimeProgressing() override;
   void OnTimeStopped() override;
 
-  void SetTickClockForTesting(std::unique_ptr<base::TickClock> tick_clock);
+  void SetTickClockForTesting(base::TickClock* tick_clock);
   void SetGpuMemoryBufferVideoForTesting(
       std::unique_ptr<GpuMemoryBufferVideoFramePool> gpu_memory_buffer_pool);
   size_t frames_queued_for_testing() const {
@@ -140,7 +139,7 @@ class MEDIA_EXPORT VideoRendererImpl
 
   // Returns true if the renderer has enough data for playback purposes.
   // Note that having enough data may be due to reaching end of stream.
-  bool HaveEnoughData_Locked();
+  bool HaveEnoughData_Locked() const;
   void TransitionToHaveEnough_Locked();
   void TransitionToHaveNothing();
   void TransitionToHaveNothing_Locked();
@@ -150,7 +149,7 @@ class MEDIA_EXPORT VideoRendererImpl
   void UpdateStats_Locked();
 
   // Returns true if there is no more room for additional buffered frames.
-  bool HaveReachedBufferingCap();
+  bool HaveReachedBufferingCap() const;
 
   // Starts or stops |sink_| respectively. Do not call while |lock_| is held.
   void StartSink();
@@ -294,10 +293,9 @@ class MEDIA_EXPORT VideoRendererImpl
 
   // Keeps track of the number of frames decoded and dropped since the
   // last call to |statistics_cb_|. These must be accessed under lock.
-  int frames_decoded_;
-  int frames_dropped_;
+  PipelineStatistics stats_;
 
-  std::unique_ptr<base::TickClock> tick_clock_;
+  base::TickClock* tick_clock_;
 
   // Algorithm for selecting which frame to render; manages frames and all
   // timing related information. Ensure this is destructed before
@@ -313,10 +311,6 @@ class MEDIA_EXPORT VideoRendererImpl
   // Indicates whether or not media time is currently progressing or not.  Must
   // only be accessed from |task_runner_|.
   bool time_progressing_;
-
-  // Memory usage of |algorithm_| recorded during the last UpdateStats_Locked()
-  // call.
-  int64_t last_video_memory_usage_;
 
   // Indicates if a frame has been processed by CheckForMetadataChanges().
   bool have_renderered_frames_;
@@ -342,6 +336,11 @@ class MEDIA_EXPORT VideoRendererImpl
   size_t min_buffered_frames_;
   size_t max_buffered_frames_;
   MovingAverage read_durations_;
+
+  // Last Render() and last FrameReady() times respectively. Used to avoid
+  // triggering underflow when background rendering.
+  base::TimeTicks last_render_time_;
+  base::TimeTicks last_frame_ready_time_;
 
   // Indicates that the playback has been ongoing for at least
   // limits::kMinimumElapsedWatchTimeSecs.

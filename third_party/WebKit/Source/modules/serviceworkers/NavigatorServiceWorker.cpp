@@ -9,6 +9,7 @@
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Navigator.h"
+#include "core/frame/UseCounter.h"
 #include "modules/serviceworkers/ServiceWorkerContainer.h"
 #include "platform/bindings/ScriptState.h"
 
@@ -27,7 +28,7 @@ NavigatorServiceWorker& NavigatorServiceWorker::From(Navigator& navigator) {
   NavigatorServiceWorker* supplement = ToNavigatorServiceWorker(navigator);
   if (!supplement) {
     supplement = new NavigatorServiceWorker(navigator);
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   if (navigator.GetFrame() && navigator.GetFrame()
                                   ->GetSecurityContext()
@@ -43,13 +44,10 @@ NavigatorServiceWorker& NavigatorServiceWorker::From(Navigator& navigator) {
 
 NavigatorServiceWorker* NavigatorServiceWorker::ToNavigatorServiceWorker(
     Navigator& navigator) {
-  return static_cast<NavigatorServiceWorker*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  return Supplement<Navigator>::From<NavigatorServiceWorker>(navigator);
 }
 
-const char* NavigatorServiceWorker::SupplementName() {
-  return "NavigatorServiceWorker";
-}
+const char NavigatorServiceWorker::kSupplementName[] = "NavigatorServiceWorker";
 
 ServiceWorkerContainer* NavigatorServiceWorker::serviceWorker(
     ScriptState* script_state,
@@ -97,16 +95,14 @@ ServiceWorkerContainer* NavigatorServiceWorker::serviceWorker(
       error_message =
           "Service worker is disabled because the context is sandboxed and "
           "lacks the 'allow-same-origin' flag.";
-    } else if (frame->GetSecurityContext()
-                   ->GetSecurityOrigin()
-                   ->HasSuborigin()) {
-      error_message =
-          "Service worker is disabled because the context is in a suborigin.";
     } else {
       error_message =
           "Access to service workers is denied in this document origin.";
     }
     return nullptr;
+  } else if (frame &&
+             frame->GetSecurityContext()->GetSecurityOrigin()->IsLocal()) {
+    UseCounter::Count(frame, WebFeature::kFileAccessedServiceWorker);
   }
   if (!service_worker_ && frame) {
     // We need to create a new ServiceWorkerContainer when the frame
@@ -123,7 +119,7 @@ void NavigatorServiceWorker::ClearServiceWorker() {
   service_worker_ = nullptr;
 }
 
-DEFINE_TRACE(NavigatorServiceWorker) {
+void NavigatorServiceWorker::Trace(blink::Visitor* visitor) {
   visitor->Trace(service_worker_);
   Supplement<Navigator>::Trace(visitor);
 }

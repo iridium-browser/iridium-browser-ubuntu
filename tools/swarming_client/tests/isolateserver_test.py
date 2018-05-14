@@ -278,6 +278,46 @@ class UtilsTest(TestCase):
       if tmpoutdir:
         file_path.rmtree(tmpoutdir)
 
+  def test_fetch_stream_verifier_success(self):
+    def teststream():
+      yield 'abc'
+      yield '123'
+    d = hashlib.sha1('abc123').hexdigest()
+    verifier = isolateserver.FetchStreamVerifier(teststream(),
+                                                 hashlib.sha1, d, 6)
+    for _ in verifier.run():
+      pass
+
+  def test_fetch_stream_verifier_bad_size(self):
+    def teststream():
+      yield 'abc'
+      yield '123'
+    d = hashlib.sha1('abc123').hexdigest()
+    verifier = isolateserver.FetchStreamVerifier(teststream(),
+                                                 hashlib.sha1, d, 7)
+    failed = False
+    try:
+      for _ in verifier.run():
+        pass
+    except IOError:
+      failed = True
+    self.assertEqual(True, failed)
+
+  def test_fetch_stream_verifier_bad_digest(self):
+    def teststream():
+      yield 'abc'
+      yield '123'
+    d = hashlib.sha1('def456').hexdigest()
+    verifier = isolateserver.FetchStreamVerifier(teststream(),
+                                                 hashlib.sha1, d, 6)
+    failed = False
+    try:
+      for _ in verifier.run():
+        pass
+    except IOError:
+      failed = True
+    self.assertEqual(True, failed)
+
 
 class StorageTest(TestCase):
   """Tests for Storage methods."""
@@ -549,7 +589,7 @@ class IsolateServerStorageApiTest(TestCase):
     self.expected_requests(
         [self.mock_fetch_request(server, namespace, item, data)])
     storage = isolate_storage.IsolateServer(server, namespace)
-    fetched = ''.join(storage.fetch(item))
+    fetched = ''.join(storage.fetch(item, 0, 0))
     self.assertEqual(data, fetched)
 
   def test_fetch_failure(self):
@@ -560,7 +600,7 @@ class IsolateServerStorageApiTest(TestCase):
         [self.mock_fetch_request(server, namespace, item)[:-1] + (None,)])
     storage = isolate_storage.IsolateServer(server, namespace)
     with self.assertRaises(IOError):
-      _ = ''.join(storage.fetch(item))
+      _ = ''.join(storage.fetch(item, 0, 0))
 
   def test_fetch_offset_success(self):
     server = 'http://example.com'
@@ -579,7 +619,7 @@ class IsolateServerStorageApiTest(TestCase):
       self.expected_requests([self.mock_fetch_request(
           server, namespace, item, data, offset=offset)])
       storage = isolate_storage.IsolateServer(server, namespace)
-      fetched = ''.join(storage.fetch(item, offset))
+      fetched = ''.join(storage.fetch(item, 0, offset))
       self.assertEqual(data[offset:], fetched)
 
   def test_fetch_offset_bad_header(self):
@@ -614,7 +654,7 @@ class IsolateServerStorageApiTest(TestCase):
       ])
       storage = isolate_storage.IsolateServer(server, namespace)
       with self.assertRaises(IOError):
-        _ = ''.join(storage.fetch(item, offset))
+        _ = ''.join(storage.fetch(item, 0, offset))
 
   def test_push_success(self):
     server = 'http://example.com'
@@ -772,9 +812,8 @@ class IsolateServerStorageSmokeTest(unittest.TestCase):
 
   def tearDown(self):
     try:
-      self.server.close_start()
       file_path.rmtree(self.tempdir)
-      self.server.close_end()
+      self.server.close()
     finally:
       super(IsolateServerStorageSmokeTest, self).tearDown()
 
@@ -937,6 +976,8 @@ class IsolateServerDownloadTest(TestCase):
       actual[key] = ''.join(generator)
     self.mock(isolateserver, 'file_write', out)
     server = 'http://example.com'
+    coucou_sha1 = hashlib.sha1('Coucou').hexdigest()
+    byebye_sha1 = hashlib.sha1('Bye Bye').hexdigest()
     requests = [
       (
         server + '/api/isolateservice/v1/retrieve',
@@ -953,15 +994,15 @@ class IsolateServerDownloadTest(TestCase):
             'read_timeout': 60,
         },
         {'content': base64.b64encode(zlib.compress(v))},
-      ) for h, v in [('sha-1', 'Coucou'), ('sha-2', 'Bye Bye')]
+      ) for h, v in [(coucou_sha1, 'Coucou'), (byebye_sha1, 'Bye Bye')]
     ]
     self.expected_requests(requests)
     cmd = [
       'download',
       '--isolate-server', server,
       '--target', net_utils.ROOT_DIR,
-      '--file', 'sha-1', 'path/to/a',
-      '--file', 'sha-2', 'path/to/b',
+      '--file', coucou_sha1, 'path/to/a',
+      '--file', byebye_sha1, 'path/to/b',
     ]
     self.assertEqual(0, isolateserver.main(cmd))
     expected = {
@@ -994,108 +1035,6 @@ class IsolateServerDownloadTest(TestCase):
     isolated_data = json.dumps(isolated, sort_keys=True, separators=(',',':'))
     isolated_hash = isolateserver_mock.hash_content(isolated_data)
     requests = [(v['h'], files[k]) for k, v in isolated['files'].iteritems()]
-    requests.append((isolated_hash, isolated_data))
-    requests = [
-      (
-        server + '/api/isolateservice/v1/retrieve',
-        {
-            'data': {
-                'digest': h.encode('utf-8'),
-                'namespace': {
-                    'namespace': 'default-gzip',
-                    'digest_hash': 'sha-1',
-                    'compression': 'flate',
-                },
-                'offset': 0,
-            },
-            'read_timeout': 60,
-        },
-        {'content': base64.b64encode(zlib.compress(v))},
-      ) for h, v in requests
-    ]
-    cmd = [
-      'download',
-      '--isolate-server', server,
-      '--target', self.tempdir,
-      '--isolated', isolated_hash,
-    ]
-    self.expected_requests(requests)
-    self.assertEqual(0, isolateserver.main(cmd))
-    expected = dict(
-        (os.path.join(self.tempdir, k), v) for k, v in files.iteritems())
-    self.assertEqual(expected, actual)
-    expected_stdout = (
-        'To run this test please run from the directory %s:\n  Absurb command\n'
-        % os.path.join(self.tempdir, 'a'))
-    self.checkOutput(expected_stdout, '')
-
-  def test_download_isolated_ar_archive(self):
-    # Test downloading an isolated tree.
-    actual = {}
-    def putfile_mock(
-        srcfileobj, dstpath, file_mode=None, size=-1, use_symlink=False):
-      actual[dstpath] = srcfileobj.read(size)
-    self.mock(isolateserver, 'putfile', putfile_mock)
-    self.mock(os, 'makedirs', lambda _: None)
-    server = 'http://example.com'
-
-    files = {
-      os.path.join('a', 'foo'): 'Content',
-      'b': 'More content',
-      'c': 'Even more content!',
-    }
-
-    archive = (
-      # ar file header
-      '!<arch>\n'
-      # File 1 -------------------------
-      # (16 bytes) filename len
-      '#1/5            '
-      # file metadata
-      '1447140471  1000  1000  100640  '
-      # (10 bytes) Data size
-      '12        '
-      # (2 bytes) File magic
-      '\x60\n'
-      # (5 bytes) File name
-      'a/foo'
-      # (7 bytes) File data
-      'Content'
-      # File 2 -------------------------
-      # (16 bytes) filename
-      'b               '
-      # file metadata
-      '1447140471  1000  1000  100640  '
-      # (12 bytes) Data size
-      '12        '
-      # (2 bytes) File magic
-      '\x60\n'
-      # (12 bytes) File data
-      'More content'
-      '')
-
-    isolated = {
-      'command': ['Absurb', 'command'],
-      'relative_cwd': 'a',
-      'files': {
-        'archive1': {
-          'h': isolateserver_mock.hash_content(archive),
-          's': len(archive),
-          't': 'ar',
-        },
-        'c': {
-          'h': isolateserver_mock.hash_content(files['c']),
-          's': len(files['c']),
-        },
-      },
-      'version': isolated_format.ISOLATED_FILE_VERSION,
-    }
-    isolated_data = json.dumps(isolated, sort_keys=True, separators=(',',':'))
-    isolated_hash = isolateserver_mock.hash_content(isolated_data)
-    requests = [
-      (isolated['files']['archive1']['h'], archive),
-      (isolated['files']['c']['h'], files['c']),
-    ]
     requests.append((isolated_hash, isolated_data))
     requests = [
       (
@@ -1375,11 +1314,22 @@ class DiskCacheTest(TestCase):
       cache.write(*self.to_hash('e'))
 
   def test_cleanup(self):
-    # Inject an item without a state.json. It will be deleted on cleanup.
+    # Inject an item without a state.json, one is lost. Both will be deleted on
+    # cleanup.
+    self._free_disk = 1003
+    cache = self.get_cache()
+    h_foo = hashlib.sha1('foo').hexdigest()
+    self.assertEqual([], sorted(cache._lru._items.iteritems()))
+    with cache:
+      cache.write(h_foo, ['foo'])
+    self.assertEqual([h_foo], [i[0] for i in cache._lru._items.iteritems()])
+
     h_a = self.to_hash('a')[0]
     isolateserver.file_write(os.path.join(self.tempdir, h_a), 'a')
-    cache = self.get_cache()
-    self.assertEqual([], sorted(cache._lru._items.iteritems()))
+    os.remove(os.path.join(self.tempdir, h_foo))
+
+    # Still hasn't realized that the file is missing.
+    self.assertEqual([h_foo], [i[0] for i in cache._lru._items.iteritems()])
     self.assertEqual(
         sorted([h_a, u'state.json']), sorted(os.listdir(self.tempdir)))
     cache.cleanup()

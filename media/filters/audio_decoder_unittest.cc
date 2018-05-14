@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/containers/circular_deque.h"
 #include "base/format_macros.h"
 #include "base/macros.h"
 #include "base/md5.h"
@@ -250,9 +251,6 @@ class AudioDecoderTest
     AVPacket packet;
     ASSERT_TRUE(reader_->ReadPacketForTesting(&packet));
 
-    // Split out packet metadata before making a copy.
-    av_packet_split_side_data(&packet);
-
     scoped_refptr<DecoderBuffer> buffer =
         DecoderBuffer::CopyFrom(packet.data, packet.size);
     buffer->set_timestamp(ConvertFromTimeBase(
@@ -401,7 +399,7 @@ class AudioDecoderTest
   bool pending_reset_;
   DecodeStatus last_decode_status_;
 
-  std::deque<scoped_refptr<AudioBuffer> > decoded_audio_;
+  base::circular_deque<scoped_refptr<AudioBuffer>> decoded_audio_;
   base::TimeDelta start_timestamp_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioDecoderTest);
@@ -447,13 +445,20 @@ const TestParams kMediaCodecTestParams[] = {
 
 #endif  // defined(OS_ANDROID)
 
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 const DecodedBufferExpectations kSfxMp3Expectations[] = {
     {0, 1065, "2.81,3.99,4.53,4.10,3.08,2.46,"},
     {1065, 26122, "-3.81,-4.14,-3.90,-3.36,-3.03,-3.23,"},
     {27188, 26122, "4.24,3.95,4.22,4.78,5.13,4.93,"},
 };
 
+// File has trailing garbage, but should still decode without error.
+const DecodedBufferExpectations kTrailingGarbageMp3Expectations[] = {
+    {0, 26122, "-0.57,-0.77,-0.39,0.27,0.74,0.65,"},
+    {26122, 26122, "-0.57,-0.77,-0.39,0.27,0.74,0.65,"},
+    {52244, 26122, "-0.57,-0.77,-0.39,0.27,0.74,0.65,"},
+};
+
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 const DecodedBufferExpectations kSfxAdtsExpectations[] = {
     {0, 23219, "-1.90,-1.53,-0.15,1.28,1.23,-0.33,"},
     {23219, 23219, "0.54,0.88,2.19,3.54,3.24,1.63,"},
@@ -506,11 +511,15 @@ const DecodedBufferExpectations kSfxOpusExpectations[] = {
 #endif
 
 const TestParams kFFmpegTestParams[] = {
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
     {kCodecMP3, "sfx.mp3", kSfxMp3Expectations, 0, 44100, CHANNEL_LAYOUT_MONO},
+    {kCodecMP3, "trailing-garbage.mp3", kTrailingGarbageMp3Expectations, 0,
+     44100, CHANNEL_LAYOUT_MONO},
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
     {kCodecAAC, "sfx.adts", kSfxAdtsExpectations, 0, 44100,
      CHANNEL_LAYOUT_MONO},
 #endif
+    {kCodecFLAC, "sfx-flac.mp4", kSfxFlacExpectations, 0, 44100,
+     CHANNEL_LAYOUT_MONO},
     {kCodecFLAC, "sfx.flac", kSfxFlacExpectations, 0, 44100,
      CHANNEL_LAYOUT_MONO},
     {kCodecPCM, "sfx_f32le.wav", kSfxWaveExpectations, 0, 44100,
@@ -586,7 +595,7 @@ TEST_P(AudioDecoderTest, ProduceAudioSamples) {
     // the predefined number of output buffers are produced without draining
     // (i.e. decoding EOS).
     do {
-      Decode();
+      ASSERT_NO_FATAL_FAILURE(Decode());
       ASSERT_EQ(last_decode_status(), DecodeStatus::OK);
     } while (decoded_audio_size() < kDecodeRuns);
 

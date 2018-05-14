@@ -23,9 +23,8 @@ enum FillLightMode {
     "flash",
 };
 
-[
-    RuntimeEnabled=ImageCapture
-] interface PhotoCapabilities {
+[Exposed=Window]
+interface PhotoCapabilities {
   readonly attribute RedEyeReduction            redEyeReduction;
   readonly attribute MediaSettingsRange         imageHeight;
   readonly attribute MediaSettingsRange         imageWidth;

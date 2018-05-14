@@ -19,6 +19,7 @@
 #include "content/public/browser/browsing_data_remover.h"
 
 class ArcAppTest;
+class IndependentOTRProfileManagerTest;
 class SessionControllerClientTest;
 class Profile;
 
@@ -32,6 +33,7 @@ class ExtensionGarbageCollectorChromeOSUnitTest;
 
 namespace arc {
 class ArcAuthServiceTest;
+class ArcCertStoreBridgeTest;
 class ArcSessionManagerTest;
 }
 
@@ -138,10 +140,6 @@ class ProfileHelper
   // Should called once after UserManager instance has been created.
   void Initialize();
 
-  // Returns hash for active user ID which is used to identify that user profile
-  // on Chrome OS.
-  std::string active_user_id_hash() { return active_user_id_hash_; }
-
   // Clears site data (cookies, history, etc) for signin profile.
   // Callback can be empty. Not thread-safe.
   void ClearSigninProfile(const base::Closure& on_clear_callback);
@@ -187,13 +185,14 @@ class ProfileHelper
   friend class PrinterDetectorAppSearchEnabledTest;
   friend class ProfileHelperTest;
   friend class ProfileListChromeOSTest;
-  friend class SystemTrayDelegateChromeOSTest;
   friend class ash::MultiUserWindowManagerChromeOSTest;
   friend class arc::ArcSessionManagerTest;
   friend class arc::ArcAuthServiceTest;
+  friend class arc::ArcCertStoreBridgeTest;
   friend class ::ArcAppTest;
   friend class ::SessionControllerClientTest;
   friend class ::test::BrowserFinderChromeOSTest;
+  friend class ::IndependentOTRProfileManagerTest;
 
   // Called when signin profile is cleared.
   void OnSigninProfileCleared();

@@ -147,12 +147,13 @@ void ReplayProcess::OpenChannel() {
       io_thread_.task_runner());
   mojo::MessagePipe ipc_pipe;
   service_manager_connection_->AddConnectionFilter(
-      base::MakeUnique<IPCChannelBootstrapper>(std::move(ipc_pipe.handle0)));
+      std::make_unique<IPCChannelBootstrapper>(std::move(ipc_pipe.handle0)));
   service_manager_connection_->Start();
   channel_ = IPC::ChannelProxy::Create(
-      IPC::ChannelMojo::CreateClientFactory(std::move(ipc_pipe.handle1),
-                                            io_thread_.task_runner()),
-      this, io_thread_.task_runner());
+      IPC::ChannelMojo::CreateClientFactory(
+          std::move(ipc_pipe.handle1), io_thread_.task_runner(),
+          base::ThreadTaskRunnerHandle::Get()),
+      this, io_thread_.task_runner(), base::ThreadTaskRunnerHandle::Get());
 }
 
 bool ReplayProcess::OpenTestcase() {
@@ -164,7 +165,7 @@ bool ReplayProcess::OpenTestcase() {
 
 void ReplayProcess::SendNextMessage() {
   if (message_index_ >= messages_.size()) {
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
     return;
   }
 
@@ -174,7 +175,7 @@ void ReplayProcess::SendNextMessage() {
   if (!channel_->Send(message.release())) {
     LOG(ERROR) << "ChannelProxy::Send() failed after "
                << message_index_ << " messages";
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 }
 
@@ -194,7 +195,7 @@ bool ReplayProcess::OnMessageReceived(const IPC::Message& msg) {
 void ReplayProcess::OnChannelError() {
   LOG(ERROR) << "Channel error, quitting after "
              << message_index_ << " messages";
-  base::MessageLoop::current()->QuitWhenIdle();
+  base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 }  // namespace ipc_fuzzer

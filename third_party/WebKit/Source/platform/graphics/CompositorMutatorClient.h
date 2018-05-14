@@ -5,40 +5,34 @@
 #ifndef CompositorMutatorClient_h
 #define CompositorMutatorClient_h
 
+#include <memory>
+#include "cc/trees/layer_tree_mutator.h"
 #include "platform/PlatformExport.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/WebCompositorMutatorClient.h"
-#include <memory>
 
 namespace blink {
 
 class CompositorMutator;
-struct CompositorMutations;
-class CompositorMutationsTarget;
 
-class PLATFORM_EXPORT CompositorMutatorClient
-    : public WebCompositorMutatorClient {
+class PLATFORM_EXPORT CompositorMutatorClient : public cc::LayerTreeMutator {
  public:
-  CompositorMutatorClient(CompositorMutator*, CompositorMutationsTarget*);
+  explicit CompositorMutatorClient(CompositorMutator*);
   virtual ~CompositorMutatorClient();
 
-  void SetNeedsMutate();
+  void SetMutationUpdate(std::unique_ptr<cc::MutatorOutputState>);
 
   // cc::LayerTreeMutator
-  bool Mutate(base::TimeTicks monotonic_time, cc::LayerTreeImpl*) override;
-  void SetClient(cc::LayerTreeMutatorClient*) override;
-  base::Closure TakeMutations() override;
+  void SetClient(cc::LayerTreeMutatorClient*);
+  void Mutate(std::unique_ptr<cc::MutatorInputState>) override;
+  // TODO(majidvp): Remove this when CC knows about timeline input.
+  bool HasAnimators() override;
 
   CompositorMutator* Mutator() { return mutator_.Get(); }
 
-  void SetMutationsForTesting(std::unique_ptr<CompositorMutations>);
-
  private:
-  cc::LayerTreeMutatorClient* client_;
-  CompositorMutationsTarget* mutations_target_;
   // Accessed by main and compositor threads.
   CrossThreadPersistent<CompositorMutator> mutator_;
-  std::unique_ptr<CompositorMutations> mutations_;
+  cc::LayerTreeMutatorClient* client_;
 };
 
 }  // namespace blink

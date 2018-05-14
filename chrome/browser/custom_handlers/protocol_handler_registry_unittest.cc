@@ -39,7 +39,6 @@ namespace {
 void AssertInterceptedIO(
     const GURL& url,
     net::URLRequestJobFactory* interceptor) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   net::URLRequestContext context;
   std::unique_ptr<net::URLRequest> request(context.CreateRequest(
       url, net::DEFAULT_PRIORITY, nullptr, TRAFFIC_ANNOTATION_FOR_TESTS));
@@ -52,7 +51,6 @@ void AssertInterceptedIO(
 void AssertIntercepted(
     const GURL& url,
     net::URLRequestJobFactory* interceptor) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::BindOnce(AssertInterceptedIO, url, base::Unretained(interceptor)));
@@ -98,7 +96,6 @@ void AssertWillHandleIO(
     const std::string& scheme,
     bool expected,
     ProtocolHandlerRegistry::JobInterceptorFactory* interceptor) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   interceptor->Chain(std::unique_ptr<net::URLRequestJobFactory>(
       new FakeURLRequestJobFactory()));
   ASSERT_EQ(expected, interceptor->IsHandledProtocol(scheme));
@@ -109,7 +106,6 @@ void AssertWillHandle(
     const std::string& scheme,
     bool expected,
     ProtocolHandlerRegistry::JobInterceptorFactory* interceptor) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           base::BindOnce(AssertWillHandleIO, scheme, expected,
                                          base::Unretained(interceptor)));
@@ -119,7 +115,7 @@ void AssertWillHandle(
 std::unique_ptr<base::DictionaryValue> GetProtocolHandlerValue(
     const std::string& protocol,
     const std::string& url) {
-  auto value = base::MakeUnique<base::DictionaryValue>();
+  auto value = std::make_unique<base::DictionaryValue>();
   value->SetString("protocol", protocol);
   value->SetString("url", url);
   return value;
@@ -496,6 +492,14 @@ TEST_F(ProtocolHandlerRegistryTest, TestRemoveHandler) {
   registry()->RemoveHandler(ph1);
   ASSERT_FALSE(registry()->IsRegistered(ph1));
   ASSERT_FALSE(registry()->IsHandledProtocol("test"));
+
+  registry()->OnIgnoreRegisterProtocolHandler(ph1);
+  ASSERT_FALSE(registry()->IsRegistered(ph1));
+  ASSERT_TRUE(registry()->IsIgnored(ph1));
+
+  registry()->RemoveHandler(ph1);
+  ASSERT_FALSE(registry()->IsRegistered(ph1));
+  ASSERT_FALSE(registry()->IsIgnored(ph1));
 }
 
 TEST_F(ProtocolHandlerRegistryTest, TestIsRegistered) {
@@ -994,4 +998,81 @@ TEST_F(ProtocolHandlerRegistryTest, TestPrefPolicyOverlapIgnore) {
   // p2u1 installed by user and policy, so it is removed from pref alone.
   ASSERT_EQ(InPrefIgnoredHandlerCount(), 1);
   ASSERT_EQ(InMemoryIgnoredHandlerCount(), 4);
+}
+
+TEST_F(ProtocolHandlerRegistryTest, TestURIPercentEncoding) {
+  ProtocolHandler ph =
+      CreateProtocolHandler("web+custom", GURL("https://test.com/url=%s"));
+  registry()->OnAcceptRegisterProtocolHandler(ph);
+
+  // Normal case.
+  GURL translated_url = ph.TranslateUrl(GURL("web+custom://custom/handler"));
+  ASSERT_EQ(translated_url,
+            GURL("https://test.com/url=web%2Bcustom%3A%2F%2Fcustom%2Fhandler"));
+
+  // Percent-encoding.
+  translated_url = ph.TranslateUrl(GURL("web+custom://custom/%20handler"));
+  ASSERT_EQ(
+      translated_url,
+      GURL("https://test.com/url=web%2Bcustom%3A%2F%2Fcustom%2F%2520handler"));
+
+  // Space character.
+  translated_url = ph.TranslateUrl(GURL("web+custom://custom handler"));
+  // TODO(mgiuca): Check whether this(' ') should be encoded as '%20'.
+  ASSERT_EQ(translated_url,
+            GURL("https://test.com/url=web%2Bcustom%3A%2F%2Fcustom+handler"));
+
+  // Query parameters.
+  translated_url = ph.TranslateUrl(GURL("web+custom://custom?foo=bar&bar=baz"));
+  ASSERT_EQ(translated_url,
+            GURL("https://test.com/"
+                 "url=web%2Bcustom%3A%2F%2Fcustom%3Ffoo%3Dbar%26bar%3Dbaz"));
+
+  // Non-ASCII characters.
+  translated_url = ph.TranslateUrl(GURL("web+custom://custom/<>`{}#?\"'😂"));
+  ASSERT_EQ(translated_url, GURL("https://test.com/"
+                                 "url=web%2Bcustom%3A%2F%2Fcustom%2F%3C%3E%60%"
+                                 "7B%7D%23%3F%22'%25F0%259F%2598%2582"));
+
+  // C0 characters. GURL constructor encodes U+001F as "%1F" first, because
+  // U+001F is an illegal char. Then the protocol handler translator encodes it
+  // to "%251F" again. That's why the expected result has double-encoded URL.
+  translated_url = ph.TranslateUrl(GURL("web+custom://custom/\x1fhandler"));
+  ASSERT_EQ(
+      translated_url,
+      GURL("https://test.com/url=web%2Bcustom%3A%2F%2Fcustom%2F%251Fhandler"));
+
+  // Control characters.
+  // TODO(crbug.com/809852): Check why non-special URLs don't encode any
+  // characters above U+001F.
+  translated_url = ph.TranslateUrl(GURL("web+custom://custom/\x7Fhandler"));
+  ASSERT_EQ(
+      translated_url,
+      GURL("https://test.com/url=web%2Bcustom%3A%2F%2Fcustom%2F%7Fhandler"));
+
+  // Path percent-encode set.
+  translated_url =
+      ph.TranslateUrl(GURL("web+custom://custom/handler=#download"));
+  ASSERT_EQ(translated_url,
+            GURL("https://test.com/"
+                 "url=web%2Bcustom%3A%2F%2Fcustom%2Fhandler%3D%23download"));
+
+  // Userinfo percent-encode set.
+  translated_url = ph.TranslateUrl(GURL("web+custom://custom/handler:@id="));
+  ASSERT_EQ(translated_url,
+            GURL("https://test.com/"
+                 "url=web%2Bcustom%3A%2F%2Fcustom%2Fhandler%3A%40id%3D"));
+}
+
+TEST_F(ProtocolHandlerRegistryTest, TestMultiplePlaceholders) {
+  ProtocolHandler ph =
+      CreateProtocolHandler("test", GURL("http://example.com/%s/url=%s"));
+  registry()->OnAcceptRegisterProtocolHandler(ph);
+
+  GURL translated_url = ph.TranslateUrl(GURL("test:duplicated_placeholders"));
+
+  // When URL contains multiple placeholders, only the first placeholder should
+  // be changed to the given URL.
+  ASSERT_EQ(translated_url,
+            GURL("http://example.com/test%3Aduplicated_placeholders/url=%s"));
 }

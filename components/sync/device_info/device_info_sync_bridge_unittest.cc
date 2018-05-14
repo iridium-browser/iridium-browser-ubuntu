@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -37,7 +36,6 @@ using sync_pb::ModelTypeState;
 using DeviceInfoList = std::vector<std::unique_ptr<DeviceInfo>>;
 using StorageKeyList = ModelTypeSyncBridge::StorageKeyList;
 using RecordList = ModelTypeStore::RecordList;
-using Result = ModelTypeStore::Result;
 using StartCallback = ModelTypeChangeProcessor::StartCallback;
 using WriteBatch = ModelTypeStore::WriteBatch;
 
@@ -77,7 +75,7 @@ DeviceInfoSpecifics CreateSpecifics(int suffix, Time last_updated_timestamp) {
 }
 
 std::unique_ptr<DeviceInfo> CreateModel(int suffix) {
-  return base::MakeUnique<DeviceInfo>(
+  return std::make_unique<DeviceInfo>(
       base::StringPrintf(kGuidFormat, suffix),
       base::StringPrintf(kClientNameFormat, suffix),
       base::StringPrintf(kChromeVersionFormat, suffix),
@@ -91,8 +89,8 @@ ModelTypeState StateWithEncryption(const std::string& encryption_key_name) {
   return state;
 }
 
-void VerifyResultIsSuccess(Result result) {
-  EXPECT_EQ(Result::SUCCESS, result);
+void VerifyResultIsSuccess(const base::Optional<ModelError>& result) {
+  EXPECT_FALSE(result.has_value()) << result->ToString();
 }
 
 void VerifyEqual(const DeviceInfoSpecifics& s1, const DeviceInfoSpecifics& s2) {
@@ -184,10 +182,10 @@ class DeviceInfoSyncBridgeTest : public testing::Test,
   // only be called once per run, as it passes |store_|.
   void InitializeBridge() {
     ASSERT_TRUE(store_);
-    bridge_ = base::MakeUnique<DeviceInfoSyncBridge>(
+    bridge_ = std::make_unique<DeviceInfoSyncBridge>(
         provider_.get(),
-        base::Bind(&ModelTypeStoreTestUtil::MoveStoreToCallback,
-                   base::Passed(&store_)),
+        base::BindOnce(&ModelTypeStoreTestUtil::MoveStoreToCallback,
+                       std::move(store_)),
         RecordingModelTypeChangeProcessor::FactoryForBridgeTest(&processor_));
     bridge_->AddObserver(this);
   }
@@ -308,7 +306,7 @@ TEST_F(DeviceInfoSyncBridgeTest, EmptyDataReconciliationSlowLoad) {
 }
 
 TEST_F(DeviceInfoSyncBridgeTest, LocalProviderSubscription) {
-  set_provider(base::MakeUnique<LocalDeviceInfoProviderMock>());
+  set_provider(std::make_unique<LocalDeviceInfoProviderMock>());
   InitializeAndPump();
 
   EXPECT_EQ(0u, bridge()->GetAllDeviceInfo().size());
@@ -322,7 +320,7 @@ TEST_F(DeviceInfoSyncBridgeTest, LocalProviderSubscription) {
 
 // Metadata shouldn't be loaded before the provider is initialized.
 TEST_F(DeviceInfoSyncBridgeTest, LocalProviderInitRace) {
-  set_provider(base::MakeUnique<LocalDeviceInfoProviderMock>());
+  set_provider(std::make_unique<LocalDeviceInfoProviderMock>());
   InitializeAndPump();
   EXPECT_FALSE(processor().metadata());
 
@@ -696,7 +694,7 @@ TEST_F(DeviceInfoSyncBridgeTest, CountActiveDevices) {
 }
 
 TEST_F(DeviceInfoSyncBridgeTest, MultipleOnProviderInitialized) {
-  set_provider(base::MakeUnique<LocalDeviceInfoProviderMock>());
+  set_provider(std::make_unique<LocalDeviceInfoProviderMock>());
   InitializeAndPump();
   EXPECT_EQ(nullptr, processor().metadata());
 

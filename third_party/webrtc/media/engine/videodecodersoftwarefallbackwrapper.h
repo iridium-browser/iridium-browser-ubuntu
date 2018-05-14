@@ -8,23 +8,24 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MEDIA_ENGINE_VIDEODECODERSOFTWAREFALLBACKWRAPPER_H_
-#define WEBRTC_MEDIA_ENGINE_VIDEODECODERSOFTWAREFALLBACKWRAPPER_H_
+#ifndef MEDIA_ENGINE_VIDEODECODERSOFTWAREFALLBACKWRAPPER_H_
+#define MEDIA_ENGINE_VIDEODECODERSOFTWAREFALLBACKWRAPPER_H_
 
 #include <memory>
 #include <string>
 
-#include "webrtc/api/video_codecs/video_decoder.h"
+#include "api/video_codecs/video_decoder.h"
 
 namespace webrtc {
 
 // Class used to wrap external VideoDecoders to provide a fallback option on
 // software decoding when a hardware decoder fails to decode a stream due to
 // hardware restrictions, such as max resolution.
-class VideoDecoderSoftwareFallbackWrapper : public webrtc::VideoDecoder {
+class VideoDecoderSoftwareFallbackWrapper : public VideoDecoder {
  public:
-  VideoDecoderSoftwareFallbackWrapper(VideoCodecType codec_type,
-                                      VideoDecoder* decoder);
+  VideoDecoderSoftwareFallbackWrapper(
+      std::unique_ptr<VideoDecoder> sw_fallback_decoder,
+      std::unique_ptr<VideoDecoder> hw_decoder);
 
   int32_t InitDecode(const VideoCodec* codec_settings,
                      int32_t number_of_cores) override;
@@ -45,18 +46,25 @@ class VideoDecoderSoftwareFallbackWrapper : public webrtc::VideoDecoder {
 
  private:
   bool InitFallbackDecoder();
+  int32_t InitHwDecoder();
 
-  const VideoCodecType codec_type_;
-  VideoDecoder* const decoder_;
-  bool decoder_initialized_;
+  VideoDecoder& active_decoder() const;
+
+  // Determines if we are trying to use the HW or SW decoder.
+  enum class DecoderType {
+    kNone,
+    kHardware,
+    kFallback,
+  } decoder_type_;
+  std::unique_ptr<VideoDecoder> hw_decoder_;
 
   VideoCodec codec_settings_;
   int32_t number_of_cores_;
-  std::string fallback_implementation_name_;
-  std::unique_ptr<VideoDecoder> fallback_decoder_;
+  const std::unique_ptr<VideoDecoder> fallback_decoder_;
+  const std::string fallback_implementation_name_;
   DecodedImageCallback* callback_;
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MEDIA_ENGINE_VIDEODECODERSOFTWAREFALLBACKWRAPPER_H_
+#endif  // MEDIA_ENGINE_VIDEODECODERSOFTWAREFALLBACKWRAPPER_H_

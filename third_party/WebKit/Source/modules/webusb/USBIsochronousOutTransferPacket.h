@@ -11,9 +11,7 @@
 
 namespace blink {
 
-class USBIsochronousOutTransferPacket final
-    : public GarbageCollectedFinalized<USBIsochronousOutTransferPacket>,
-      public ScriptWrappable {
+class USBIsochronousOutTransferPacket final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -29,12 +27,10 @@ class USBIsochronousOutTransferPacket final
   USBIsochronousOutTransferPacket(const String& status, unsigned bytes_written)
       : status_(status), bytes_written_(bytes_written) {}
 
-  virtual ~USBIsochronousOutTransferPacket() {}
+  virtual ~USBIsochronousOutTransferPacket() = default;
 
   String status() const { return status_; }
   unsigned bytesWritten() const { return bytes_written_; }
-
-  DEFINE_INLINE_TRACE() {}
 
  private:
   const String status_;

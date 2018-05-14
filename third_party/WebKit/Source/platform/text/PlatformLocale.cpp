@@ -31,6 +31,8 @@
 #include "platform/text/PlatformLocale.h"
 
 #include <memory>
+
+#include "base/macros.h"
 #include "platform/text/DateTimeFormat.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "public/platform/Platform.h"
@@ -42,8 +44,6 @@ Locale* g_default_locale;
 }
 
 class DateTimeStringBuilder : private DateTimeFormat::TokenHandler {
-  WTF_MAKE_NONCOPYABLE(DateTimeStringBuilder);
-
  public:
   // The argument objects must be alive until this object dies.
   DateTimeStringBuilder(Locale&, const DateComponents&);
@@ -62,6 +62,8 @@ class DateTimeStringBuilder : private DateTimeFormat::TokenHandler {
   StringBuilder builder_;
   Locale& localizer_;
   const DateComponents& date_;
+
+  DISALLOW_COPY_AND_ASSIGN(DateTimeStringBuilder);
 };
 
 DateTimeStringBuilder::DateTimeStringBuilder(Locale& localizer,
@@ -186,14 +188,14 @@ Locale& Locale::DefaultLocale() {
   return *g_default_locale;
 }
 
-void Locale::ResetDefautlLocale() {
+void Locale::ResetDefaultLocale() {
   // This is safe because no one owns a Locale object returned by
   // DefaultLocale().
   delete g_default_locale;
   g_default_locale = nullptr;
 }
 
-Locale::~Locale() {}
+Locale::~Locale() = default;
 
 String Locale::QueryString(WebLocalizedString::Name name) {
   // FIXME: Returns a string locazlied for this locale.

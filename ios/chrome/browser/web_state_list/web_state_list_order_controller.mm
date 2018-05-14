@@ -10,6 +10,10 @@
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 WebStateListOrderController::WebStateListOrderController(
     WebStateList* web_state_list)
     : web_state_list_(web_state_list) {
@@ -19,12 +23,8 @@ WebStateListOrderController::WebStateListOrderController(
 WebStateListOrderController::~WebStateListOrderController() = default;
 
 int WebStateListOrderController::DetermineInsertionIndex(
-    ui::PageTransition transition,
     web::WebState* opener) const {
   if (!opener)
-    return web_state_list_->count();
-
-  if (!PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_LINK))
     return web_state_list_->count();
 
   int opener_index = web_state_list_->GetIndexOfWebState(opener);
@@ -54,19 +54,19 @@ int WebStateListOrderController::DetermineNewActiveIndex(
   if (index != WebStateList::kInvalidIndex)
     return GetValidIndex(index, removing_index);
 
-  WebStateOpener opener =
-      web_state_list_->GetOpenerOfWebStateAt(removing_index);
-  if (opener.opener) {
+  web::WebState* opener =
+      web_state_list_->GetOpenerOfWebStateAt(removing_index).opener;
+  if (opener) {
     // If the WebState was in a group, shift selection to the next WebState in
     // the group.
     int index = web_state_list_->GetIndexOfNextWebStateOpenedBy(
-        opener.opener, removing_index, false);
+        opener, removing_index, false);
 
     if (index != WebStateList::kInvalidIndex)
       return GetValidIndex(index, removing_index);
 
     // If there is no subsequent group member, just fall back to opener itself.
-    index = web_state_list_->GetIndexOfWebState(opener.opener);
+    index = web_state_list_->GetIndexOfWebState(opener);
     return GetValidIndex(index, removing_index);
   }
 

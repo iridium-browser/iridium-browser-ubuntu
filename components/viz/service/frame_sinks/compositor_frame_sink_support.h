@@ -6,89 +6,145 @@
 #define COMPONENTS_VIZ_SERVICE_FRAME_SINKS_COMPOSITOR_FRAME_SINK_SUPPORT_H_
 
 #include <memory>
-#include <unordered_set>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "cc/output/compositor_frame.h"
-#include "cc/scheduler/begin_frame_source.h"
-#include "cc/surfaces/surface_client.h"
+#include "components/viz/common/frame_sinks/begin_frame_source.h"
+#include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/surfaces/surface_info.h"
-#include "components/viz/service/frame_sinks/frame_sink_manager_client.h"
 #include "components/viz/service/frame_sinks/referenced_surface_tracker.h"
 #include "components/viz/service/frame_sinks/surface_resource_holder.h"
 #include "components/viz/service/frame_sinks/surface_resource_holder_client.h"
+#include "components/viz/service/frame_sinks/video_capture/capturable_frame_sink.h"
+#include "components/viz/service/hit_test/hit_test_aggregator.h"
+#include "components/viz/service/surfaces/surface_client.h"
 #include "components/viz/service/viz_service_export.h"
-
-namespace cc {
-class Surface;
-class SurfaceManager;
-}  // namespace cc
+#include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom.h"
+#include "services/viz/public/interfaces/hit_test/hit_test_region_list.mojom.h"
 
 namespace viz {
 
 class FrameSinkManagerImpl;
-class CompositorFrameSinkSupportClient;
+class Surface;
+class SurfaceManager;
 
 class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
-    : public cc::BeginFrameObserver,
+    : public BeginFrameObserver,
       public SurfaceResourceHolderClient,
-      public FrameSinkManagerClient,
-      public cc::SurfaceClient {
+      public SurfaceClient,
+      public CapturableFrameSink {
  public:
-  static std::unique_ptr<CompositorFrameSinkSupport> Create(
-      CompositorFrameSinkSupportClient* client,
-      FrameSinkManagerImpl* frame_sink_manager,
-      const FrameSinkId& frame_sink_id,
-      bool is_root,
-      bool handles_frame_sink_id_invalidation,
-      bool needs_sync_tokens);
+  // Possible outcomes of MaybeSubmitCompositorFrame().
+  enum SubmitResult {
+    ACCEPTED,
+    COPY_OUTPUT_REQUESTS_NOT_ALLOWED,
+    SURFACE_INVARIANTS_VIOLATION,
+  };
 
+  using AggregatedDamageCallback =
+      base::RepeatingCallback<void(const LocalSurfaceId& local_surface_id,
+                                   const gfx::Rect& damage_rect)>;
+
+  static const uint64_t kFrameIndexStart = 2;
+
+  CompositorFrameSinkSupport(mojom::CompositorFrameSinkClient* client,
+                             FrameSinkManagerImpl* frame_sink_manager,
+                             const FrameSinkId& frame_sink_id,
+                             bool is_root,
+                             bool needs_sync_tokens);
   ~CompositorFrameSinkSupport() override;
 
   const FrameSinkId& frame_sink_id() const { return frame_sink_id_; }
 
-  FrameSinkManagerImpl* frame_sink_manager() { return frame_sink_manager_; }
-  cc::SurfaceManager* surface_manager() { return surface_manager_; }
+  const SurfaceId& last_activated_surface_id() const {
+    return last_activated_surface_id_;
+  }
 
-  void SetDestructionCallback(base::OnceCallback<void()> callback);
+  const LocalSurfaceId& last_activated_local_surface_id() const {
+    return last_activated_surface_id_.local_surface_id();
+  }
+
+  FrameSinkManagerImpl* frame_sink_manager() { return frame_sink_manager_; }
+
+  // Viz hit-test setup is only called when |is_root_| is true (except on
+  // android webview).
+  void SetUpHitTest();
+
+  // The provided callback will be run every time a surface owned by this object
+  // or one of its descendents is determined to be damaged at aggregation time.
+  void SetAggregatedDamageCallbackForTesting(AggregatedDamageCallback callback);
+
+  // Sets callback called on destruction.
+  void SetDestructionCallback(base::OnceClosure callback);
+
+  // This allows the FrameSinkManagerImpl to pass a BeginFrameSource to use.
+  void SetBeginFrameSource(BeginFrameSource* begin_frame_source);
 
   // SurfaceClient implementation.
-  void OnSurfaceActivated(cc::Surface* surface) override;
+  void OnSurfaceActivated(Surface* surface) override;
+  void OnSurfaceDiscarded(Surface* surface) override;
   void RefResources(
-      const std::vector<cc::TransferableResource>& resources) override;
-  void UnrefResources(
-      const std::vector<cc::ReturnedResource>& resources) override;
-  void ReturnResources(
-      const std::vector<cc::ReturnedResource>& resources) override;
+      const std::vector<TransferableResource>& resources) override;
+  void UnrefResources(const std::vector<ReturnedResource>& resources) override;
+  void ReturnResources(const std::vector<ReturnedResource>& resources) override;
   void ReceiveFromChild(
-      const std::vector<cc::TransferableResource>& resources) override;
+      const std::vector<TransferableResource>& resources) override;
 
-  // FrameSinkManagerClient implementation.
-  void SetBeginFrameSource(cc::BeginFrameSource* begin_frame_source) override;
-
-  void EvictCurrentSurface();
+  // mojom::CompositorFrameSink helpers.
   void SetNeedsBeginFrame(bool needs_begin_frame);
-  void DidNotProduceFrame(const cc::BeginFrameAck& ack);
-  bool SubmitCompositorFrame(const LocalSurfaceId& local_surface_id,
-                             cc::CompositorFrame frame);
-  void RequestCopyOfSurface(std::unique_ptr<cc::CopyOutputRequest> request);
-  void ClaimTemporaryReference(const SurfaceId& surface_id);
+  void SetWantsAnimateOnlyBeginFrames();
+  void DidNotProduceFrame(const BeginFrameAck& ack);
+  void SubmitCompositorFrame(
+      const LocalSurfaceId& local_surface_id,
+      CompositorFrame frame,
+      mojom::HitTestRegionListPtr hit_test_region_list = nullptr,
+      uint64_t submit_time = 0);
+  // Returns false if the notification was not valid (a duplicate).
+  bool DidAllocateSharedBitmap(mojo::ScopedSharedBufferHandle buffer,
+                               const SharedBitmapId& id);
+  void DidDeleteSharedBitmap(const SharedBitmapId& id);
 
-  cc::Surface* GetCurrentSurfaceForTesting();
+  void EvictLastActivatedSurface();
 
- protected:
-  CompositorFrameSinkSupport(CompositorFrameSinkSupportClient* client,
-                             const FrameSinkId& frame_sink_id,
-                             bool is_root,
-                             bool handles_frame_sink_id_invalidation,
-                             bool needs_sync_tokens);
+  // Attempts to submit a new CompositorFrame to |local_surface_id| and returns
+  // whether the frame was accepted or the reason why it was rejected. If
+  // |local_surface_id| hasn't been submitted before then a new Surface will be
+  // created for it.
+  //
+  // This is called by SubmitCompositorFrame(), which DCHECK-fails on a
+  // non-accepted result. Prefer calling SubmitCompositorFrame() instead of this
+  // method unless the result value affects what the caller will do next.
+  SubmitResult MaybeSubmitCompositorFrame(
+      const LocalSurfaceId& local_surface_id,
+      CompositorFrame frame,
+      mojom::HitTestRegionListPtr hit_test_region_list);
 
-  void Init(FrameSinkManagerImpl* frame_sink_manager);
+  // CapturableFrameSink implementation.
+  void AttachCaptureClient(CapturableFrameSink::Client* client) override;
+  void DetachCaptureClient(CapturableFrameSink::Client* client) override;
+  gfx::Size GetActiveFrameSize() override;
+  void RequestCopyOfSurface(
+      std::unique_ptr<CopyOutputRequest> request) override;
+
+  HitTestAggregator* GetHitTestAggregator();
+
+  // Permits submitted CompositorFrames to contain CopyOutputRequests, for
+  // special-case testing purposes only.
+  void set_allow_copy_output_requests_for_testing() {
+    allow_copy_output_requests_ = true;
+  }
+
+  Surface* GetLastCreatedSurfaceForTesting();
+
+  // Maps the |result| from MaybeSubmitCompositorFrame() to a human-readable
+  // string.
+  static const char* GetSubmitResultAsString(SubmitResult result);
 
  private:
+  friend class FrameSinkManagerTest;
+
   // Updates surface references using |active_referenced_surfaces| from the most
   // recent CompositorFrame. This will add and remove top-level root references
   // if |is_root_| is true and |local_surface_id| has changed. Modifies surface
@@ -98,27 +154,35 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
       const std::vector<SurfaceId>& active_referenced_surfaces);
 
   // Creates a surface reference from the top-level root to |surface_id|.
-  cc::SurfaceReference MakeTopLevelRootReference(const SurfaceId& surface_id);
+  SurfaceReference MakeTopLevelRootReference(const SurfaceId& surface_id);
 
   void DidReceiveCompositorFrameAck();
-  void WillDrawSurface(const LocalSurfaceId& local_surface_id,
-                       const gfx::Rect& damage_rect);
+  void DidPresentCompositorFrame(uint32_t presentation_token,
+                                 base::TimeTicks time,
+                                 base::TimeDelta refresh,
+                                 uint32_t flags);
 
   // BeginFrameObserver implementation.
-  void OnBeginFrame(const cc::BeginFrameArgs& args) override;
-  const cc::BeginFrameArgs& LastUsedBeginFrameArgs() const override;
+  void OnBeginFrame(const BeginFrameArgs& args) override;
+  const BeginFrameArgs& LastUsedBeginFrameArgs() const override;
   void OnBeginFrameSourcePausedChanged(bool paused) override;
+  bool WantsAnimateOnlyBeginFrames() const override;
 
   void UpdateNeedsBeginFramesInternal();
-  cc::Surface* CreateSurface(const SurfaceInfo& surface_info);
+  Surface* CreateSurface(const SurfaceInfo& surface_info);
 
-  CompositorFrameSinkSupportClient* const client_;
+  void OnAggregatedDamage(const LocalSurfaceId& local_surface_id,
+                          const gfx::Rect& damage_rect,
+                          const CompositorFrame& frame) const;
 
-  FrameSinkManagerImpl* frame_sink_manager_ = nullptr;
-  cc::SurfaceManager* surface_manager_ = nullptr;
+  mojom::CompositorFrameSinkClient* const client_;
+
+  FrameSinkManagerImpl* const frame_sink_manager_;
+  SurfaceManager* const surface_manager_;
 
   const FrameSinkId frame_sink_id_;
-  SurfaceId current_surface_id_;
+  SurfaceId last_activated_surface_id_;
+  SurfaceId last_created_surface_id_;
 
   // If this contains a value then a surface reference from the top-level root
   // to SurfaceId(frame_sink_id_, referenced_local_surface_id_.value()) was
@@ -127,16 +191,19 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
 
   SurfaceResourceHolder surface_resource_holder_;
 
+  // This has a HitTestAggregator if and only if |is_root_| is true.
+  std::unique_ptr<HitTestAggregator> hit_test_aggregator_;
+
   // Counts the number of CompositorFrames that have been submitted and have not
   // yet received an ACK.
   int ack_pending_count_ = 0;
-  std::vector<cc::ReturnedResource> surface_returned_resources_;
+  std::vector<ReturnedResource> surface_returned_resources_;
 
   // The begin frame source being observered. Null if none.
-  cc::BeginFrameSource* begin_frame_source_ = nullptr;
+  BeginFrameSource* begin_frame_source_ = nullptr;
 
   // The last begin frame args generated by the begin frame source.
-  cc::BeginFrameArgs last_begin_frame_args_;
+  BeginFrameArgs last_begin_frame_args_;
 
   // Whether a request for begin frames has been issued.
   bool needs_begin_frame_ = false;
@@ -144,24 +211,34 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   // Whether or not a frame observer has been added.
   bool added_frame_observer_ = false;
 
+  bool wants_animate_only_begin_frames_ = false;
+
   const bool is_root_;
   const bool needs_sync_tokens_;
-  bool seen_first_frame_activation_ = false;
 
-  // TODO(staraz): Remove this flag once ui::Compositor no longer needs to call
-  // RegisterFrameSinkId().
-  // A surfaceSequence's validity is bound to the lifetime of the parent
-  // FrameSink that created it. We track the lifetime of FrameSinks through
-  // RegisterFrameSinkId and InvalidateFrameSinkId. During startup and GPU
-  // restart, a SurfaceSequence created by the top most layer compositor may be
-  // used prior to the creation of the associated CompositorFrameSinkSupport.
-  // CompositorFrameSinkSupport is created asynchronously when a new GPU channel
-  // is established. Once we switch to SurfaceReferences, this ordering concern
-  // goes away and we can remove this bool.
-  const bool handles_frame_sink_id_invalidation_;
+  // By default, this is equivalent to |is_root_|, but may be overridden for
+  // testing. Generally, for non-roots, there must not be any CopyOutputRequests
+  // contained within submitted CompositorFrames. Otherwise, unprivileged
+  // clients would be able to capture content for which they are not authorized.
+  bool allow_copy_output_requests_;
 
   // A callback that will be run at the start of the destructor if set.
-  base::OnceCallback<void()> destruction_callback_;
+  base::OnceClosure destruction_callback_;
+
+  // TODO(crbug.com/754872): Remove once tab capture has moved into VIZ.
+  AggregatedDamageCallback aggregated_damage_callback_;
+
+  uint64_t last_frame_index_ = kFrameIndexStart;
+
+  // The video capture clients hooking into this instance to observe frame
+  // begins and damage, and then make CopyOutputRequests on the appropriate
+  // frames.
+  std::vector<CapturableFrameSink::Client*> capture_clients_;
+
+  // The set of SharedBitmapIds that have been reported as allocated to this
+  // interface. On closing this interface, the display compositor should drop
+  // ownership of the bitmaps with these ids to avoid leaking them.
+  std::set<SharedBitmapId> owned_bitmaps_;
 
   base::WeakPtrFactory<CompositorFrameSinkSupport> weak_factory_;
 

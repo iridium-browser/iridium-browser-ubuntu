@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2011-2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -41,14 +42,6 @@ from chromite.lib import triage_lib
 site_config = config_lib.GetConfig()
 
 
-# We import mox so that w/in ApplyPoolIntoRepo, if a mox exception is
-# thrown, we don't cover it up.
-try:
-  import mox
-except ImportError:
-  mox = None
-
-
 PRE_CQ = constants.PRE_CQ
 CQ = constants.CQ
 
@@ -67,6 +60,9 @@ SUBMITTED_WAIT_TIMEOUT = 3 * 60 # Time in seconds.
 
 # Default timeout (second) for computing dependency map.
 COMPUTE_DEPENDENCY_MAP_TIMEOUT = 5 * 60
+
+# The url prefix of the CL status page.
+CL_STATUS_URL_PREFIX = 'https://chromeos-cl-viewer-ui.googleplex.com/cl_status'
 
 class TreeIsClosedException(Exception):
   """Raised when the tree is closed and we wanted to submit changes."""
@@ -489,10 +485,14 @@ class ValidationPool(object):
       gerrit_query, ready_fn = query
       tree_was_open = (status == constants.TREE_OPEN)
 
-      experimental_builders = tree_status.GetExperimentalBuilders()
-      builder_run.attrs.metadata.UpdateWithDict({
-          constants.METADATA_EXPERIMENTAL_BUILDERS: experimental_builders
-      })
+      try:
+        experimental_builders = tree_status.GetExperimentalBuilders()
+        builder_run.attrs.metadata.UpdateWithDict({
+            constants.METADATA_EXPERIMENTAL_BUILDERS: experimental_builders
+        })
+      except timeout_util.TimeoutError:
+        logging.error('Timeout getting experimental builders from the tree'
+                      'status.')
 
       pool = ValidationPool(overlays, repo.directory, build_number,
                             builder_name, True, dryrun, builder_run=builder_run,
@@ -614,7 +614,8 @@ class ValidationPool(object):
     def IsCrosReview(change):
       return (change.project.startswith('chromiumos/') or
               change.project.startswith('chromeos/') or
-              change.project.startswith('aosp/'))
+              change.project.startswith('aosp/') or
+              change.project.startswith('weave/'))
 
     # First we filter to only Chromium OS repositories.
     changes = [c for c in changes if IsCrosReview(c)]
@@ -805,9 +806,6 @@ class ValidationPool(object):
       except (KeyboardInterrupt, RuntimeError, SystemExit):
         raise
       except Exception as e:
-        if mox is not None and isinstance(e, mox.Error):
-          raise
-
         msg = (
             'Unhandled exception occurred while applying changes: %s\n\n'
             'To be safe, we have kicked out all of the CLs, so that the '
@@ -1020,7 +1018,9 @@ class ValidationPool(object):
   # Basically all code from this point forward.
   def _SubmitChangeWithDeps(self, patches, change, errors, limit_to,
                             reason=None):
-    """Submit |change| and its dependencies.
+    """Submit |change| and its dependencies via Gerrit Submit API.
+
+    This method is only used for non-manifest changes.
 
     If you call this function multiple times with the same PatchSeries, each
     CL will only be submitted once.
@@ -1177,7 +1177,9 @@ class ValidationPool(object):
     errors.update(local_submission_errors)
     errors.update(remote_errors)
     for patch, error in errors.iteritems():
-      logging.error('Could not submit %s', patch)
+      logging.error("Could not submit %s, error: %s", patch, error)
+      logging.PrintBuildbotLink(
+          "Could not submit %s, error: %s" % (patch, error), patch.url)
       self._HandleCouldNotSubmit(patch, error)
 
     return submitted_locals | submitted_remotes, errors
@@ -1295,10 +1297,14 @@ class ValidationPool(object):
     project_url = next(iter(changes)).project_url
     remote_ref = git.GetTrackingBranch(repo)
     push_to = git.RemoteRef(project_url, branch)
+
+    use_merge = any(c.IsMerge(repo) for c in changes)
+
     for _ in range(3):
       # try to resync and push.
       try:
-        git.SyncPushBranch(repo, remote_ref.remote, remote_ref.ref)
+        git.SyncPushBranch(repo, remote_ref.remote, remote_ref.ref,
+                           use_merge=use_merge, print_cmd=True)
       except cros_build_lib.RunCommandError:
         # TODO(phobbs) parse the sync failure output and find which change was
         # at fault.
@@ -1308,7 +1314,7 @@ class ValidationPool(object):
         break
 
       try:
-        git.GitPush(repo, 'HEAD', push_to, skip=self.dryrun)
+        git.GitPush(repo, 'HEAD', push_to, skip=self.dryrun, print_cmd=True)
         return {}
       except cros_build_lib.RunCommandError:
         logging.warn('git push failed for %s:%s; was a change chumped in the '
@@ -1320,7 +1326,7 @@ class ValidationPool(object):
         for change in changes)
 
     sha1s = dict(
-        (change, change.GetLocalSHA1(repo, branch))
+        (change, change.GetLocalSHA1(repo, remote_ref.ref))
         for change in changes)
 
     return sha1s, errors
@@ -1922,6 +1928,20 @@ class ValidationPool(object):
                lab_fail, no_stat] for change in candidates]
     parallel.RunTasksInProcessPool(self._ChangeFailedValidation, inputs)
 
+  def _GetCLStatusURL(self, change):
+    """Construct and return the CL Status URL.
+
+    Args:
+      change: GerritPatch instance to query CL status.
+
+    Returns:
+      The URL string of the CL Status page.
+    """
+    host = (constants.INTERNAL_GERRIT_HOST if change.internal
+            else constants.EXTERNAL_GERRIT_HOST)
+    return '%s/%s/%s/%s' % (CL_STATUS_URL_PREFIX, host, change.gerrit_number,
+                            change.patch_number)
+
   def HandleApplySuccess(self, change, build_log=None):
     """Handler for when Paladin successfully applies (picks up) a change.
 
@@ -1933,17 +1953,30 @@ class ValidationPool(object):
       action_history: List of CLAction instances.
       build_log: The URL to the build log.
     """
-    msg = ('%(queue)s has picked up your change. '
-           'You can follow along at %(build_log)s .')
-    self.SendNotification(change, msg, build_log=build_log)
+    cl_status_url = self._GetCLStatusURL(change)
+    msg = ('%(queue)s has picked up your change.\n'
+           'You can follow along at %(build_log)s.\n'
+           'You can find the CL status and build information at '
+           '%(cl_status_url)s.')
+    self.SendNotification(change, msg, build_log=build_log,
+                          cl_status_url=cl_status_url)
 
+  # Note: This function doesn't need to be a ValidationPool instance method.
   def UpdateCLPreCQStatus(self, change, status):
     """Update the pre-CQ |status| of |change|."""
     action = clactions.TranslatePreCQStatusToAction(status)
     self._InsertCLActionToDatabase(change, action)
 
+  # Note: Only the PreCQLauncherStage still uses this function. The commit queue
+  # goes directly to AcquirePool -> patch_series.CreateDisjointTransactions.
+  # It's possible that this function, which is basically a wrapper around
+  # patch_series with a bit of failure handling, can be eliminated or folded
+  # into PreCQLauncherStage for clarity.
   def CreateDisjointTransactions(self, manifest, changes, max_txn_length=None):
     """Create a list of disjoint transactions from the changes in the pool.
+
+    Side effect: Reject and comment (on Gerrit) on changes that failed to
+    apply.
 
     Args:
       manifest: Manifest to use.
@@ -1952,10 +1985,17 @@ class ValidationPool(object):
         do not limit the length of transactions.
 
     Returns:
-      A list of disjoint transactions. Each transaction can be tried
+      a tuple of (plans, failures) where
+
+      plans = A list of disjoint transactions. Each transaction can be tried
       independently, without involving patches from other transactions.
       Each change in the pool will included in exactly one of transactions,
       unless the patch does not apply for some reason.
+
+      failures = A list of cros_patch.PatchException instances for patches that
+      failed to apply. Note: this ignores patches that dependencies on
+      not-yet-ready patches, for up to REJECTION_GRACE_PERIOD from their last
+      approval.
     """
     patches = patch_series.PatchSeries(
         self.build_root, forced_manifest=manifest)
@@ -1964,4 +2004,4 @@ class ValidationPool(object):
     failed = self._FilterDependencyErrors(failed)
     if failed:
       self._HandleApplyFailure(failed)
-    return plans
+    return plans, failed

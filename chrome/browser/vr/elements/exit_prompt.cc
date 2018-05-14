@@ -4,18 +4,22 @@
 
 #include "chrome/browser/vr/elements/exit_prompt.h"
 
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/vr/elements/exit_prompt_texture.h"
 
 namespace vr {
 
 ExitPrompt::ExitPrompt(int preferred_width,
-                       const base::Callback<void()>& primary_button_callback,
-                       const base::Callback<void()>& secondary_buttton_callback)
+                       const ExitPromptCallback& result_callback)
     : TexturedElement(preferred_width),
-      texture_(base::MakeUnique<ExitPromptTexture>()),
-      primary_button_callback_(primary_button_callback),
-      secondary_buttton_callback_(secondary_buttton_callback) {}
+      texture_(std::make_unique<ExitPromptTexture>()),
+      result_callback_(result_callback) {}
+
+ExitPrompt::ExitPrompt(int preferred_width,
+                       const ExitPromptCallback& result_callback,
+                       std::unique_ptr<ExitPromptTexture> texture)
+    : TexturedElement(preferred_width),
+      texture_(std::move(texture)),
+      result_callback_(result_callback) {}
 
 ExitPrompt::~ExitPrompt() = default;
 
@@ -23,8 +27,9 @@ void ExitPrompt::SetContentMessageId(int message_id) {
   texture_->SetContentMessageId(message_id);
 }
 
-void ExitPrompt::SetTextureForTesting(ExitPromptTexture* texture) {
-  texture_.reset(texture);
+void ExitPrompt::SetTextureForTesting(
+    std::unique_ptr<ExitPromptTexture> texture) {
+  texture_ = std::move(texture);
 }
 
 void ExitPrompt::OnHoverEnter(const gfx::PointF& position) {
@@ -50,14 +55,34 @@ void ExitPrompt::OnButtonDown(const gfx::PointF& position) {
 
 void ExitPrompt::OnButtonUp(const gfx::PointF& position) {
   if (primary_down_ && texture_->HitsPrimaryButton(position))
-    primary_button_callback_.Run();
+    result_callback_.Run(PRIMARY, reason_);
   else if (secondary_down_ && texture_->HitsSecondaryButton(position))
-    secondary_buttton_callback_.Run();
+    result_callback_.Run(SECONDARY, reason_);
 
   primary_down_ = false;
   secondary_down_ = false;
 
   OnStateUpdated(position);
+}
+
+void ExitPrompt::SetPrimaryButtonColors(const ButtonColors& colors) {
+  texture_->SetPrimaryButtonColors(colors);
+}
+
+void ExitPrompt::SetSecondaryButtonColors(const ButtonColors& colors) {
+  texture_->SetSecondaryButtonColors(colors);
+}
+
+void ExitPrompt::ClickPrimaryButtonForTesting() {
+  result_callback_.Run(PRIMARY, reason_);
+}
+
+void ExitPrompt::ClickSecondaryButtonForTesting() {
+  result_callback_.Run(SECONDARY, reason_);
+}
+
+void ExitPrompt::Cancel() {
+  result_callback_.Run(NONE, reason_);
 }
 
 void ExitPrompt::OnStateUpdated(const gfx::PointF& position) {
@@ -69,7 +94,6 @@ void ExitPrompt::OnStateUpdated(const gfx::PointF& position) {
   texture_->SetSecondaryButtonHovered(secondary_hovered);
   texture_->SetSecondaryButtonPressed(secondary_hovered ? secondary_down_
                                                         : false);
-  UpdateTexture();
 }
 
 UiTexture* ExitPrompt::GetTexture() const {

@@ -4,6 +4,7 @@
 
 #include "content/common/service_manager/service_manager_connection_impl.h"
 
+#include <map>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -24,8 +25,8 @@
 #include "services/service_manager/embedder/embedded_service_runner.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
-#include "services/service_manager/public/interfaces/constants.mojom.h"
-#include "services/service_manager/public/interfaces/service_factory.mojom.h"
+#include "services/service_manager/public/mojom/constants.mojom.h"
+#include "services/service_manager/public/mojom/service_factory.mojom.h"
 #include "services/service_manager/runner/common/client_util.h"
 
 namespace content {
@@ -70,7 +71,7 @@ class ServiceManagerConnectionImpl::IOThreadContext
     callback_task_runner_ = base::ThreadTaskRunnerHandle::Get();
     stop_callback_ = stop_callback;
     io_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&IOThreadContext::StartOnIOThread, this));
+        FROM_HERE, base::BindOnce(&IOThreadContext::StartOnIOThread, this));
   }
 
   // Safe to call from whichever thread called Start() (or may have called
@@ -80,7 +81,7 @@ class ServiceManagerConnectionImpl::IOThreadContext
       return;
 
     bool posted = io_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&IOThreadContext::ShutDownOnIOThread, this));
+        FROM_HERE, base::BindOnce(&IOThreadContext::ShutDownOnIOThread, this));
     DCHECK(posted);
   }
 
@@ -101,24 +102,33 @@ class ServiceManagerConnectionImpl::IOThreadContext
   void RemoveConnectionFilter(int filter_id) {
     io_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&IOThreadContext::RemoveConnectionFilterOnIOThread, this,
-                   filter_id));
+        base::BindOnce(&IOThreadContext::RemoveConnectionFilterOnIOThread, this,
+                       filter_id));
   }
 
   void AddEmbeddedService(const std::string& name,
                           const service_manager::EmbeddedServiceInfo& info) {
     io_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&ServiceManagerConnectionImpl::IOThreadContext::
-                                  AddEmbeddedServiceRequestHandlerOnIoThread,
-                              this, name, info));
+        FROM_HERE,
+        base::BindOnce(&ServiceManagerConnectionImpl::IOThreadContext::
+                           AddEmbeddedServiceRequestHandlerOnIoThread,
+                       this, name, info));
   }
 
   void AddServiceRequestHandler(const std::string& name,
                                 const ServiceRequestHandler& handler) {
+    AddServiceRequestHandlerWithPID(
+        name, base::BindRepeating(&WrapServiceRequestHandlerNoPID, handler));
+  }
+
+  void AddServiceRequestHandlerWithPID(
+      const std::string& name,
+      const ServiceRequestHandlerWithPID& handler) {
     io_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&ServiceManagerConnectionImpl::IOThreadContext::
-                                  AddServiceRequestHandlerOnIoThread,
-                              this, name, handler));
+        FROM_HERE,
+        base::BindOnce(&ServiceManagerConnectionImpl::IOThreadContext::
+                           AddServiceRequestHandlerOnIoThread,
+                       this, name, handler));
   }
 
  private:
@@ -162,13 +172,19 @@ class ServiceManagerConnectionImpl::IOThreadContext
 
   ~IOThreadContext() override {}
 
+  static void WrapServiceRequestHandlerNoPID(
+      const ServiceRequestHandler& handler,
+      service_manager::mojom::ServiceRequest request,
+      service_manager::mojom::PIDReceiverPtr pid_receiver) {
+    handler.Run(std::move(request));
+  }
+
   void StartOnIOThread() {
     // Should bind |io_thread_checker_| to the context's thread.
     DCHECK(io_thread_checker_.CalledOnValidThread());
     service_context_.reset(new service_manager::ServiceContext(
-        base::MakeUnique<service_manager::ForwardingService>(this),
-        std::move(pending_service_request_),
-        std::move(io_thread_connector_),
+        std::make_unique<service_manager::ForwardingService>(this),
+        std::move(pending_service_request_), std::move(io_thread_connector_),
         std::move(pending_connector_request_)));
 
     // MessageLoopObserver owns itself.
@@ -226,8 +242,11 @@ class ServiceManagerConnectionImpl::IOThreadContext
         new service_manager::EmbeddedServiceRunner(name, info));
     AddServiceRequestHandlerOnIoThread(
         name,
-        base::Bind(&service_manager::EmbeddedServiceRunner::BindServiceRequest,
-                   base::Unretained(service.get())));
+        base::BindRepeating(
+            &WrapServiceRequestHandlerNoPID,
+            base::BindRepeating(
+                &service_manager::EmbeddedServiceRunner::BindServiceRequest,
+                base::Unretained(service.get()))));
     auto result =
         embedded_services_.insert(std::make_pair(name, std::move(service)));
     DCHECK(result.second);
@@ -235,7 +254,7 @@ class ServiceManagerConnectionImpl::IOThreadContext
 
   void AddServiceRequestHandlerOnIoThread(
       const std::string& name,
-      const ServiceRequestHandler& handler) {
+      const ServiceRequestHandlerWithPID& handler) {
     DCHECK(io_thread_checker_.CalledOnValidThread());
     auto result = request_handlers_.insert(std::make_pair(name, handler));
     DCHECK(result.second) << "ServiceRequestHandler for " << name
@@ -280,15 +299,17 @@ class ServiceManagerConnectionImpl::IOThreadContext
   /////////////////////////////////////////////////////////////////////////////
   // service_manager::mojom::ServiceFactory:
 
-  void CreateService(service_manager::mojom::ServiceRequest request,
-                     const std::string& name) override {
+  void CreateService(
+      service_manager::mojom::ServiceRequest request,
+      const std::string& name,
+      service_manager::mojom::PIDReceiverPtr pid_receiver) override {
     DCHECK(io_thread_checker_.CalledOnValidThread());
     auto it = request_handlers_.find(name);
     if (it == request_handlers_.end()) {
       LOG(ERROR) << "Can't create service " << name << ". No handler found.";
       return;
     }
-    it->second.Run(std::move(request));
+    it->second.Run(std::move(request), std::move(pid_receiver));
   }
 
   base::ThreadChecker io_thread_checker_;
@@ -319,10 +340,9 @@ class ServiceManagerConnectionImpl::IOThreadContext
   base::Lock lock_;
   std::map<int, std::unique_ptr<ConnectionFilter>> connection_filters_;
 
-  std::unordered_map<std::string,
-                     std::unique_ptr<service_manager::EmbeddedServiceRunner>>
+  std::map<std::string, std::unique_ptr<service_manager::EmbeddedServiceRunner>>
       embedded_services_;
-  std::unordered_map<std::string, ServiceRequestHandler> request_handlers_;
+  std::map<std::string, ServiceRequestHandlerWithPID> request_handlers_;
 
   mojo::Binding<mojom::Child> child_binding_;
 
@@ -364,8 +384,8 @@ std::unique_ptr<ServiceManagerConnection> ServiceManagerConnection::Create(
     scoped_refptr<base::SequencedTaskRunner> io_task_runner) {
   if (service_manager_connection_factory)
     return service_manager_connection_factory->Run();
-  return base::MakeUnique<ServiceManagerConnectionImpl>(
-      std::move(request), io_task_runner);
+  return std::make_unique<ServiceManagerConnectionImpl>(std::move(request),
+                                                        io_task_runner);
 }
 
 ServiceManagerConnection::~ServiceManagerConnection() {}
@@ -428,6 +448,12 @@ void ServiceManagerConnectionImpl::AddServiceRequestHandler(
     const std::string& name,
     const ServiceRequestHandler& handler) {
   context_->AddServiceRequestHandler(name, handler);
+}
+
+void ServiceManagerConnectionImpl::AddServiceRequestHandlerWithPID(
+    const std::string& name,
+    const ServiceRequestHandlerWithPID& handler) {
+  context_->AddServiceRequestHandlerWithPID(name, handler);
 }
 
 void ServiceManagerConnectionImpl::OnConnectionLost() {

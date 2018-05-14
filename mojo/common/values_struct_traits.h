@@ -5,6 +5,7 @@
 #ifndef MOJO_COMMON_VALUES_STRUCT_TRAITS_H_
 #define MOJO_COMMON_VALUES_STRUCT_TRAITS_H_
 
+#include "base/containers/span.h"
 #include "base/values.h"
 #include "mojo/common/values.mojom-shared.h"
 #include "mojo/public/cpp/bindings/array_traits.h"
@@ -58,6 +59,12 @@ struct StructTraits<common::mojom::ListValueDataView,
 
   static bool Read(common::mojom::ListValueDataView data,
                    std::unique_ptr<base::ListValue>* value);
+};
+
+template <>
+struct CloneTraits<std::unique_ptr<base::ListValue>, false> {
+  static std::unique_ptr<base::ListValue> Clone(
+      const std::unique_ptr<base::ListValue>& input);
 };
 
 template <>
@@ -127,7 +134,7 @@ struct StructTraits<common::mojom::NullValueDataView, void*> {
 template <>
 struct UnionTraits<common::mojom::ValueDataView, base::Value> {
   static common::mojom::ValueDataView::Tag GetTag(const base::Value& data) {
-    switch (data.GetType()) {
+    switch (data.type()) {
       case base::Value::Type::NONE:
         return common::mojom::ValueDataView::Tag::NULL_VALUE;
       case base::Value::Type::BOOLEAN:
@@ -179,12 +186,12 @@ struct UnionTraits<common::mojom::ValueDataView, base::Value> {
     return string_piece;
   }
 
-  static mojo::ConstCArray<uint8_t> binary_value(const base::Value& value) {
+  static base::span<const uint8_t> binary_value(const base::Value& value) {
     if (!value.is_blob())
       NOTREACHED();
-    return mojo::ConstCArray<uint8_t>(
-        value.GetBlob().size(),
-        reinterpret_cast<const uint8_t*>(value.GetBlob().data()));
+    return base::make_span(
+        reinterpret_cast<const uint8_t*>(value.GetBlob().data()),
+        value.GetBlob().size());
   }
 
   static const base::ListValue& list_value(const base::Value& value) {
@@ -237,7 +244,7 @@ struct UnionTraits<common::mojom::ValueDataView, std::unique_ptr<base::Value>> {
     return UnionTraits<common::mojom::ValueDataView, base::Value>::string_value(
         *value);
   }
-  static mojo::ConstCArray<uint8_t> binary_value(
+  static base::span<const uint8_t> binary_value(
       const std::unique_ptr<base::Value>& value) {
     return UnionTraits<common::mojom::ValueDataView, base::Value>::binary_value(
         *value);

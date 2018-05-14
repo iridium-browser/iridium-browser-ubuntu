@@ -22,6 +22,7 @@
 <translation id="158809615184981282">מקלדת פארואזית</translation>
 <translation id="1646136617204068573">מקלדת הונגרית</translation>
 <translation id="164729547906544836">‏מקלדת טמילית (itrans)</translation>
+<translation id="164969095109328410">‏מכשיר Chrome</translation>
 <translation id="1829129547161959350">פינגווין</translation>
 <translation id="184633654410729720">‏מקלדת תאילנדית (Kedmanee)</translation>
 <translation id="1921986354447415460">‏מקלדת טורקית-F</translation>
@@ -114,6 +115,7 @@
 <translation id="4694604912444486114">קוף</translation>
 <translation id="4711094779914110278">טורקית</translation>
 <translation id="4725511304875193254">קורגי</translation>
+<translation id="4737050008115666127">נחיתה</translation>
 <translation id="4747271164117300400">מקדונית</translation>
 <translation id="4749157430980974800">מקלדת גיאורגית</translation>
 <translation id="4755240240651974342">מקלדת פינית</translation>
@@ -125,6 +127,7 @@
 <translation id="4943368462779413526">פוטבול</translation>
 <translation id="497244430928947428">מקלדת מליאלאם (פונטית)</translation>
 <translation id="498902553138568924">פרפר אדום</translation>
+<translation id="5011233892417813670">Chromebook</translation>
 <translation id="5068919226082848014">פיצה</translation>
 <translation id="5098629044894065541">עברית</translation>
 <translation id="5123433949759960244">כדורסל</translation>
@@ -146,6 +149,7 @@
 <translation id="5465122519792752163">‏מקלדת נפאלית (InScript)</translation>
 <translation id="5469868506864199649">איטלקית</translation>
 <translation id="5500122897333236901">איסלנדית</translation>
+<translation id="5508696409934741614">נקודות</translation>
 <translation id="5533555070048896610">‏תעתוק (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">‏ארה"ב - Dvorak</translation>
 <translation id="5640179856859982418">מקלדת שוויצרית</translation>
@@ -157,7 +161,9 @@
 <translation id="5819442873484330149">Hangul 3 Set (Final)‎</translation>
 <translation id="5838825566232597749">‏US Workman בינלאומית</translation>
 <translation id="5892290200158927959">‏מקלדת צרפתית בפריסת BÉPO</translation>
+<translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">מקלדת של אמריקה הלטינית</translation>
+<translation id="6012987430370760224">מקלדת מראטהי (פונטית)</translation>
 <translation id="60357267506638014">‏צ'כית - QWERTY</translation>
 <translation id="6054173164583630569">מקלדת צרפתית</translation>
 <translation id="6111770213269631447">‏תעתוק (namaskar → নমস্কার)</translation>
@@ -183,17 +189,20 @@
 <translation id="6876155724392614295">אופניים</translation>
 <translation id="6878261347041253038">מקלדת דוונגארי (פונטית)</translation>
 <translation id="6885780034956018177">שבלול</translation>
+<translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">US Workman</translation>
 <translation id="6935521024859866267">פרפר הפוך</translation>
 <translation id="6937152069980083337">‏קלט יפני של Google (למקלדת אמריקאית)</translation>
 <translation id="6939777852457331078">‏מקלדת US Workman</translation>
 <translation id="6970230597523682626">בולגרית</translation>
+<translation id="714034171374937760">Chromebase</translation>
 <translation id="7170467426996704624">‏תעתוק (salam → ሰላም)</translation>
 <translation id="7172053773111046550">מקלדת אסטונית</translation>
 <translation id="719009910964971313">‏מקלדת US Programmer Dvorak</translation>
 <translation id="7222624196722476520">מקלדת בולגרית פונטית</translation>
 <translation id="7348749398828259943">‏מקלדת US Workman בינלאומית</translation>
 <translation id="7389722738210761877">‏מקלדת תאילנדית (TIS 820-2531)</translation>
+<translation id="7396038720194014279">מקלדת הינדי (פונטית)</translation>
 <translation id="7417453074306512035">מקלדת אתיופית</translation>
 <translation id="7419631653042041064">מקלדת קטלאנית</translation>
 <translation id="7434823369735508263">‏מקלדת Dvorak אנגלית (בריטניה)</translation>
@@ -201,12 +210,14 @@
 <translation id="7474889694310679759">מקלדת אנגלית (קנדה)</translation>
 <translation id="751507702149411736">ביילורוסית</translation>
 <translation id="7547811415869834682">הולנדית</translation>
+<translation id="7603724359189955920">רשתות</translation>
 <translation id="770015031906360009">יוונית</translation>
 <translation id="7706319470528945664">מקלדת פורטוגזית</translation>
 <translation id="7774365994322694683">ציפור</translation>
 <translation id="7825423931463735974">‏מקלדת טמילית (Tamil99)</translation>
 <translation id="7853966320808728790">‏BÉPO - צרפתית</translation>
 <translation id="7896906914454843592">מקלדת מורחבת של ארה"ב</translation>
+<translation id="7898607018410277265">מקלדת גוג'אראטי (פונטית חדשה)</translation>
 <translation id="7917972308273378936">מקלדת ליטאית </translation>
 <translation id="7943385054491506837">‏ארה"ב - Colemak</translation>
 <translation id="7969525169268594403">סלובנית</translation>
@@ -230,6 +241,7 @@
 <translation id="8432745813735585631">‏מקלדת Colemak אנגלית (ארה"ב)</translation>
 <translation id="8437209419043462667">ארה"ב</translation>
 <translation id="8467473010914675605">שיטת קלט קוריאנית</translation>
+<translation id="8477649328507734757">סיבוב</translation>
 <translation id="8521441079177373948">בריטניה</translation>
 <translation id="8551494947769799688">לטבית</translation>
 <translation id="8561206103590473338">פיל</translation>
@@ -248,4 +260,5 @@
 <translation id="913758436357682283">‏מקדלת Myanmar Myansan</translation>
 <translation id="9153744823707037316">שיטת קלט של מערך</translation>
 <translation id="9206487995878691001">‏שיטת קלט Cangjie</translation>
+<translation id="9219908252191632183">נוף ירח</translation>
 </translationbundle>

@@ -5,11 +5,11 @@
 #ifndef MEDIA_FILTERS_ANDROID_MEDIA_CODEC_AUDIO_DECODER_H_
 #define MEDIA_FILTERS_ANDROID_MEDIA_CODEC_AUDIO_DECODER_H_
 
-#include <deque>
 #include <memory>
 #include <utility>
 #include <vector>
 
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
@@ -127,10 +127,9 @@ class MEDIA_EXPORT MediaCodecAudioDecoder : public AudioDecoder,
   void SetCdm(CdmContext* cdm_context, const InitCB& init_cb);
 
   // This callback is called after CDM obtained a MediaCrypto object.
-  void OnMediaCryptoReady(
-      const InitCB& init_cb,
-      media::MediaDrmBridgeCdmContext::JavaObjectPtr media_crypto,
-      bool requires_secure_video_codec);
+  void OnMediaCryptoReady(const InitCB& init_cb,
+                          JavaObjectPtr media_crypto,
+                          bool requires_secure_video_codec);
 
   // Callback called when a new key is available.
   void OnKeyAdded();
@@ -162,7 +161,7 @@ class MEDIA_EXPORT MediaCodecAudioDecoder : public AudioDecoder,
   // not be able to accept the input at the time of Decode(), thus all
   // DecoderBuffers first go to |input_queue_|.
   using BufferCBPair = std::pair<scoped_refptr<DecoderBuffer>, DecodeCB>;
-  using InputQueue = std::deque<BufferCBPair>;
+  using InputQueue = base::circular_deque<BufferCBPair>;
   InputQueue input_queue_;
 
   // Cached decoder config.
@@ -204,7 +203,7 @@ class MEDIA_EXPORT MediaCodecAudioDecoder : public AudioDecoder,
 
   // The MediaCrypto object is used in the MediaCodec.configure() in case of
   // an encrypted stream.
-  media::MediaDrmBridgeCdmContext::JavaObjectPtr media_crypto_;
+  JavaObjectPtr media_crypto_;
 
   base::WeakPtrFactory<MediaCodecAudioDecoder> weak_factory_;
 

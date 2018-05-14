@@ -42,7 +42,7 @@ OfflineAudioCompletionEvent* OfflineAudioCompletionEvent::Create(
   return new OfflineAudioCompletionEvent(event_type, event_init);
 }
 
-OfflineAudioCompletionEvent::OfflineAudioCompletionEvent() {}
+OfflineAudioCompletionEvent::OfflineAudioCompletionEvent() = default;
 
 OfflineAudioCompletionEvent::OfflineAudioCompletionEvent(
     AudioBuffer* rendered_buffer)
@@ -56,13 +56,13 @@ OfflineAudioCompletionEvent::OfflineAudioCompletionEvent(
   rendered_buffer_ = event_init.renderedBuffer();
 }
 
-OfflineAudioCompletionEvent::~OfflineAudioCompletionEvent() {}
+OfflineAudioCompletionEvent::~OfflineAudioCompletionEvent() = default;
 
 const AtomicString& OfflineAudioCompletionEvent::InterfaceName() const {
   return EventNames::OfflineAudioCompletionEvent;
 }
 
-DEFINE_TRACE(OfflineAudioCompletionEvent) {
+void OfflineAudioCompletionEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(rendered_buffer_);
   Event::Trace(visitor);
 }

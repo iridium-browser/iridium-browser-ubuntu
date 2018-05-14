@@ -42,10 +42,14 @@ class ASH_EXPORT SessionObserver {
   // Called when the limit becomes available and when it changes.
   virtual void OnSessionLengthLimitChanged() {}
 
-  // HACK for M61. This method was moved from ShellObserver to SessionObserver
-  // in trunk in https://chromium-review.googlesource.com/c/605027 but that CL
-  // is not safe to backport. Adding it here allows newer changes in trunk to
-  // be backported without modification.
+  // Called when the signin screen profile |prefs| are ready.
+  virtual void OnSigninScreenPrefServiceInitialized(PrefService* prefs) {}
+
+  // Called when the PrefService for the active user session changes, i.e.
+  // after the first user logs in, after a multiprofile user is added, and after
+  // switching to a different multiprofile user. Happens later than
+  // OnActiveUserSessionChanged() because the PrefService is asynchronously
+  // initialized. Never called with null.
   virtual void OnActiveUserPrefServiceChanged(PrefService* pref_service) {}
 
  protected:

@@ -28,38 +28,49 @@
 
 #include "modules/ModulesExport.h"
 #include "platform/bindings/ScriptWrappable.h"
-#include "platform/heap/Handle.h"
-#include "public/platform/WebMediaDeviceInfo.h"
+#include "platform/heap/HeapAllocator.h"
+#include "platform/wtf/text/WTFString.h"
+#include "public/platform/modules/mediastream/media_devices.mojom-blink.h"
+
+using blink::mojom::blink::MediaDeviceType;
 
 namespace blink {
 
 class ScriptState;
 class ScriptValue;
 
-class MODULES_EXPORT MediaDeviceInfo final
-    : public GarbageCollectedFinalized<MediaDeviceInfo>,
-      public ScriptWrappable {
+class MODULES_EXPORT MediaDeviceInfo final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static MediaDeviceInfo* Create(const WebMediaDeviceInfo&);
+  static MediaDeviceInfo* Create(const String& device_id,
+                                 const String& label,
+                                 const String& group_id,
+                                 MediaDeviceType);
 
   String deviceId() const;
   String kind() const;
   String label() const;
   String groupId() const;
 
+  // Used for testing only.
+  MediaDeviceType DeviceType() const;
+
   ScriptValue toJSONForBinding(ScriptState*);
 
-  DEFINE_INLINE_TRACE() {}
-
  private:
-  explicit MediaDeviceInfo(const WebMediaDeviceInfo&);
+  MediaDeviceInfo(const String& device_id,
+                  const String& label,
+                  const String& group_id,
+                  MediaDeviceType);
 
-  WebMediaDeviceInfo web_media_device_info_;
+  String device_id_;
+  String label_;
+  String group_id_;
+  MediaDeviceType device_type_;
 };
 
-typedef HeapVector<Member<MediaDeviceInfo>> MediaDeviceInfoVector;
+using MediaDeviceInfoVector = HeapVector<Member<MediaDeviceInfo>>;
 
 }  // namespace blink
 

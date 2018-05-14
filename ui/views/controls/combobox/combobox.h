@@ -27,7 +27,7 @@ class ComboboxTestApi;
 }
 
 class ComboboxListener;
-class CustomButton;
+class Button;
 class MenuRunner;
 class Painter;
 class PrefixSelector;
@@ -80,6 +80,9 @@ class VIEWS_EXPORT Combobox : public View,
   bool SelectValue(const base::string16& value);
 
   ui::ComboboxModel* model() const { return model_; }
+
+  // Set the tooltip text, and the accessible name if it is currently empty.
+  void SetTooltipText(const base::string16& tooltip_text);
 
   // Set the accessible name of the combobox.
   void SetAccessibleName(const base::string16& name);
@@ -214,8 +217,8 @@ class VIEWS_EXPORT Combobox : public View,
   // STYLE_NOTIFY_ON_CLICK, a Combobox renders the button images according to
   // these button states.
   // The base View takes the ownerships of these as child views.
-  CustomButton* text_button_;
-  CustomButton* arrow_button_;
+  Button* text_button_;
+  Button* arrow_button_;
 
   // Set while the dropdown is showing. Ensures the menu is closed if |this| is
   // destroyed.

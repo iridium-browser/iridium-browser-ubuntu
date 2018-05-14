@@ -53,11 +53,11 @@ class RevokeButton : public views::ImageButton, public views::ButtonListener {
                         base::string16 permission_message)
       : views::ImageButton(this), callback_(callback) {
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    SetImage(views::CustomButton::STATE_NORMAL,
+    SetImage(views::Button::STATE_NORMAL,
              rb.GetImageNamed(IDR_DISABLE).ToImageSkia());
-    SetImage(views::CustomButton::STATE_HOVERED,
+    SetImage(views::Button::STATE_HOVERED,
              rb.GetImageNamed(IDR_DISABLE_H).ToImageSkia());
-    SetImage(views::CustomButton::STATE_PRESSED,
+    SetImage(views::Button::STATE_PRESSED,
              rb.GetImageNamed(IDR_DISABLE_P).ToImageSkia());
     SetBorder(std::unique_ptr<views::Border>());
     SetSize(GetPreferredSize());
@@ -90,8 +90,7 @@ class RevokeButton : public views::ImageButton, public views::ButtonListener {
 class BulletedPermissionsList : public views::View {
  public:
   BulletedPermissionsList() {
-    layout_ = new views::GridLayout(this);
-    SetLayoutManager(layout_);
+    layout_ = SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
     // Create 3 columns: the bullet, the bullet text, and the revoke button.
     views::ColumnSet* column_set = layout_->AddColumnSet(kBulletColumnSetId);
@@ -203,10 +202,10 @@ AppInfoPermissionsPanel::AppInfoPermissionsPanel(
     Profile* profile,
     const extensions::Extension* app)
     : AppInfoPanel(profile, app) {
-  SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kVertical, gfx::Insets(),
-                           ChromeLayoutProvider::Get()->GetDistanceMetric(
-                               views::DISTANCE_RELATED_CONTROL_VERTICAL)));
+  SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kVertical, gfx::Insets(),
+      ChromeLayoutProvider::Get()->GetDistanceMetric(
+          views::DISTANCE_RELATED_CONTROL_VERTICAL)));
 
   CreatePermissionsList();
 }

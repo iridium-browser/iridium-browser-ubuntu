@@ -9,6 +9,7 @@
 #include "core/fxcodec/JBig2_DocumentContext.h"
 #include "core/fxcodec/codec/ccodec_jbig2module.h"
 #include "core/fxcodec/jbig2/JBig2_Context.h"
+#include "core/fxcrt/fx_safe_types.h"
 #include "core/fxge/dib/cfx_dibitmap.h"
 #include "core/fxge/fx_dib.h"
 #include "third_party/base/ptr_util.h"
@@ -27,6 +28,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   size -= kParameterSize;
   data += kParameterSize;
 
+  static constexpr uint32_t kMemLimit = 512000000;   // 512 MB
+  static constexpr uint32_t k1bppRgbComponents = 4;  // From CFX_DIBitmap impl.
+  FX_SAFE_UINT32 mem = width;
+  mem *= height;
+  mem *= k1bppRgbComponents;
+  if (!mem.IsValid() || mem.ValueOrDie() > kMemLimit)
+    return 0;
+
   auto bitmap = pdfium::MakeRetain<CFX_DIBitmap>();
   if (!bitmap->Create(width, height, FXDIB_1bppRgb))
     return 0;
@@ -35,7 +44,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   stream->AsStream()->SetData(data, size);
 
   auto src_stream = pdfium::MakeRetain<CPDF_StreamAcc>(stream->AsStream());
-  src_stream->LoadAllData(true);
+  src_stream->LoadAllDataRaw();
 
   CCodec_Jbig2Module module;
   CCodec_Jbig2Context jbig2_context;

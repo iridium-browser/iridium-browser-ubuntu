@@ -13,6 +13,7 @@
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/subresource_filter/core/common/memory_mapped_ruleset.h"
+#include "components/subresource_filter/core/common/scoped_timers.h"
 #include "components/subresource_filter/core/common/time_measurements.h"
 #include "components/url_pattern_index/proto/rules.pb.h"
 
@@ -24,16 +25,22 @@ ActivationState ComputeActivationState(
     const ActivationState& parent_activation_state,
     const MemoryMappedRuleset* ruleset) {
   DCHECK(ruleset);
+
   SCOPED_UMA_HISTOGRAM_MICRO_TIMER(
       "SubresourceFilter.DocumentLoad.Activation.WallDuration");
   SCOPED_UMA_HISTOGRAM_MICRO_THREAD_TIMER(
       "SubresourceFilter.DocumentLoad.Activation.CPUDuration");
-  if (parent_document_origin.unique()) {
-    SCOPED_UMA_HISTOGRAM_MICRO_TIMER(
-        "SubresourceFilter.PageLoad.Activation.WallDuration");
-    SCOPED_UMA_HISTOGRAM_MICRO_THREAD_TIMER(
-        "SubresourceFilter.PageLoad.Activation.CPUDuration");
-  }
+
+  auto page_wall_duration_timer = ScopedTimers::StartIf(
+      parent_document_origin.unique(), [](base::TimeDelta delta) {
+        UMA_HISTOGRAM_MICRO_TIMES(
+            "SubresourceFilter.PageLoad.Activation.WallDuration", delta);
+      });
+  auto page_cpu_duration_timer = ScopedThreadTimers::StartIf(
+      parent_document_origin.unique(), [](base::TimeDelta delta) {
+        UMA_HISTOGRAM_MICRO_TIMES(
+            "SubresourceFilter.PageLoad.Activation.CPUDuration", delta);
+      });
 
   IndexedRulesetMatcher matcher(ruleset->data(), ruleset->length());
   ActivationState activation_state = parent_activation_state;
@@ -104,11 +111,11 @@ AsyncDocumentSubresourceFilter::AsyncDocumentSubresourceFilter(
   // below task is posted.
   base::PostTaskAndReplyWithResult(
       task_runner_, FROM_HERE,
-      base::Bind(&Core::Initialize, base::Unretained(core_.get()),
-                 base::Passed(&params), ruleset_handle->ruleset_.get()),
-      base::Bind(&AsyncDocumentSubresourceFilter::OnActivateStateCalculated,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 std::move(activation_state_callback)));
+      base::BindOnce(&Core::Initialize, base::Unretained(core_.get()),
+                     std::move(params), ruleset_handle->ruleset_.get()),
+      base::BindOnce(&AsyncDocumentSubresourceFilter::OnActivateStateCalculated,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     std::move(activation_state_callback)));
 }
 
 AsyncDocumentSubresourceFilter::~AsyncDocumentSubresourceFilter() {
@@ -181,7 +188,7 @@ ActivationState AsyncDocumentSubresourceFilter::Core::Initialize(
       params.parent_activation_state, verified_ruleset->Get());
 
   DCHECK_NE(ActivationLevel::DISABLED, activation_state.activation_level);
-  filter_.emplace(url::Origin(params.document_url), activation_state,
+  filter_.emplace(url::Origin::Create(params.document_url), activation_state,
                   verified_ruleset->Get());
 
   return activation_state;

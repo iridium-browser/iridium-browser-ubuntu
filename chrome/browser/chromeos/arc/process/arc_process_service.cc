@@ -10,19 +10,20 @@
 #include "chrome/browser/chromeos/arc/process/arc_process_service.h"
 
 #include <algorithm>
-#include <queue>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
 #include "base/callback.h"
+#include "base/containers/queue.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/process/process.h"
 #include "base/process/process_iterator.h"
 #include "base/task_runner_util.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/task_scheduler/task_traits.h"
 #include "base/trace_event/trace_event.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
@@ -113,7 +114,7 @@ void UpdateNspidToPidMap(
 
   // Enumerate all processes under ARC init and create nspid -> pid map.
   if (arc_init_pid != kNullProcessId) {
-    std::queue<ProcessId> queue;
+    base::queue<ProcessId> queue;
     std::unordered_set<ProcessId> visited;
     queue.push(arc_init_pid);
     while (!queue.empty()) {
@@ -233,20 +234,14 @@ ArcProcessService::ArcProcessService(content::BrowserContext* context,
       nspid_to_pid_(new NSPidToPidMap()),
       weak_ptr_factory_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  auto* blocking_pool = content::BrowserThread::GetBlockingPool();
-  task_runner_ = blocking_pool->GetSequencedTaskRunnerWithShutdownBehavior(
-      blocking_pool->GetSequenceToken(),
-      base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+  task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN,
+       base::TaskPriority::USER_VISIBLE});
   arc_bridge_service_->process()->AddObserver(this);
 }
 
 ArcProcessService::~ArcProcessService() {
-  // TODO(hidehiko): Currently, the lifetime of ArcBridgeService and
-  // BrowserContextKeyedService is not nested.
-  // If ArcServiceManager::Get() returns nullptr, it is already destructed,
-  // so do not touch it.
-  if (ArcServiceManager::Get())
-    arc_bridge_service_->process()->RemoveObserver(this);
+  arc_bridge_service_->process()->RemoveObserver(this);
 }
 
 // static
@@ -280,7 +275,7 @@ bool ArcProcessService::RequestAppProcessList(
   // process list, it can produce a lot of logspam when the board is ARC-ready
   // but the user has not opted into ARC. This redundant check avoids that
   // logspam.
-  if (!instance_ready_)
+  if (!connection_ready_)
     return false;
 
   mojom::ProcessInstance* process_instance = ARC_GET_INSTANCE_FOR_METHOD(
@@ -306,15 +301,15 @@ void ArcProcessService::OnReceiveProcessList(
       callback);
 }
 
-void ArcProcessService::OnInstanceReady() {
+void ArcProcessService::OnConnectionReady() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   task_runner_->PostTask(FROM_HERE, base::BindOnce(&Reset, nspid_to_pid_));
-  instance_ready_ = true;
+  connection_ready_ = true;
 }
 
-void ArcProcessService::OnInstanceClosed() {
+void ArcProcessService::OnConnectionClosed() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  instance_ready_ = false;
+  connection_ready_ = false;
 }
 
 inline ArcProcessService::NSPidToPidMap::NSPidToPidMap() {}

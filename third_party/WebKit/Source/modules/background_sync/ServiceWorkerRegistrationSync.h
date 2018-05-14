@@ -21,17 +21,18 @@ class ServiceWorkerRegistrationSync final
   WTF_MAKE_NONCOPYABLE(ServiceWorkerRegistrationSync);
 
  public:
+  static const char kSupplementName[];
+
   virtual ~ServiceWorkerRegistrationSync();
   static ServiceWorkerRegistrationSync& From(ServiceWorkerRegistration&);
 
   static SyncManager* sync(ServiceWorkerRegistration&);
   SyncManager* sync();
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit ServiceWorkerRegistrationSync(ServiceWorkerRegistration*);
-  static const char* SupplementName();
 
   Member<ServiceWorkerRegistration> registration_;
   Member<SyncManager> sync_manager_;

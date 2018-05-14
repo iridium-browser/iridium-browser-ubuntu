@@ -6,12 +6,15 @@
 
 #include "base/sys_info.h"
 #include "build/build_config.h"
+#include "platform/CrossThreadFunctional.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/fonts/FontGlobalContext.h"
 #include "platform/graphics/ImageDecodingStore.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/wtf/allocator/Partitions.h"
 #include "public/platform/WebThread.h"
+#include "public/web/WebKit.h"
+#include "third_party/WebKit/public/common/device_memory/approximated_device_memory.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/sys_utils.h"
@@ -19,24 +22,17 @@
 
 namespace blink {
 
+// Wrapper function defined in WebKit.h
+void DecommitFreeableMemory() {
+  WTF::Partitions::DecommitFreeableMemory();
+}
+
 // static
 bool MemoryCoordinator::is_low_end_device_ = false;
-int64_t MemoryCoordinator::physical_memory_mb_ = 0;
 
 // static
 bool MemoryCoordinator::IsLowEndDevice() {
   return is_low_end_device_;
-}
-
-// static
-int64_t MemoryCoordinator::GetPhysicalMemoryMB() {
-  return physical_memory_mb_;
-}
-
-// static
-void MemoryCoordinator::SetPhysicalMemoryMBForTesting(
-    int64_t physical_memory_mb) {
-  physical_memory_mb_ = physical_memory_mb;
 }
 
 // static
@@ -51,7 +47,7 @@ bool MemoryCoordinator::IsCurrentlyLowMemory() {
 // static
 void MemoryCoordinator::Initialize() {
   is_low_end_device_ = ::base::SysInfo::IsLowEndDevice();
-  physical_memory_mb_ = ::base::SysInfo::AmountOfPhysicalMemoryMB();
+  ApproximatedDeviceMemory::Initialize();
 }
 
 // static
@@ -75,7 +71,7 @@ void MemoryCoordinator::UnregisterThread(WebThread* thread) {
   MemoryCoordinator::Instance().web_threads_.erase(thread);
 }
 
-MemoryCoordinator::MemoryCoordinator() {}
+MemoryCoordinator::MemoryCoordinator() = default;
 
 void MemoryCoordinator::RegisterClient(MemoryCoordinatorClient* client) {
   DCHECK(IsMainThread());
@@ -115,11 +111,12 @@ void MemoryCoordinator::OnPurgeMemory() {
 
   // Thread-specific data never issues a layout, so we are safe here.
   for (auto thread : web_threads_) {
-    if (!thread->GetWebTaskRunner())
+    if (!thread->GetTaskRunner())
       continue;
 
-    thread->GetWebTaskRunner()->PostTask(
-        FROM_HERE, WTF::Bind(MemoryCoordinator::ClearThreadSpecificMemory));
+    PostCrossThreadTask(
+        *thread->GetTaskRunner(), FROM_HERE,
+        CrossThreadBind(MemoryCoordinator::ClearThreadSpecificMemory));
   }
 }
 
@@ -135,7 +132,7 @@ void MemoryCoordinator::ClearThreadSpecificMemory() {
   FontGlobalContext::ClearMemory();
 }
 
-DEFINE_TRACE(MemoryCoordinator) {
+void MemoryCoordinator::Trace(blink::Visitor* visitor) {
   visitor->Trace(clients_);
 }
 

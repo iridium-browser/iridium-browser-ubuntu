@@ -110,6 +110,9 @@ public class PickerBitmapView extends SelectableItemView<PickerBitmap> {
 
     @Override
     public void onClick() {
+        if (mBitmapDetails == null)
+            return; // Clicks are disabled until initialize() has been called.
+
         if (isGalleryTile()) {
             mCategoryView.showGallery();
             return;
@@ -141,6 +144,13 @@ public class PickerBitmapView extends SelectableItemView<PickerBitmap> {
 
     @Override
     public void onSelectionStateChange(List<PickerBitmap> selectedItems) {
+        // If the user cancels the dialog before this object has initialized,
+        // the SelectionDelegate will try to notify us that all selections have
+        // been cleared. However, we don't need to process that message and, in
+        // fact, we can't do so because isPictureTile relies on mBitmapDetails
+        // being initialized.
+        if (mBitmapDetails == null) return;
+
         updateSelectionState();
 
         if (!isPictureTile()) return;
@@ -239,7 +249,8 @@ public class PickerBitmapView extends SelectableItemView<PickerBitmap> {
         Resources resources = mContext.getResources();
 
         if (isCameraTile()) {
-            image = ApiCompatibilityUtils.getDrawable(resources, R.drawable.ic_photo_camera);
+            image = VectorDrawableCompat.create(
+                    resources, R.drawable.ic_photo_camera_grey, mContext.getTheme());
             labelStringId = R.string.photo_picker_camera;
         } else {
             image = VectorDrawableCompat.create(
@@ -340,6 +351,7 @@ public class PickerBitmapView extends SelectableItemView<PickerBitmap> {
                 fgColorId = R.color.photo_picker_special_tile_disabled_color;
             }
 
+            setEnabled(!anySelection);
             mSpecialTileLabel.setTextColor(ApiCompatibilityUtils.getColor(resources, fgColorId));
             Drawable drawable = mSpecialTileIcon.getDrawable();
             int color = ApiCompatibilityUtils.getColor(resources, fgColorId);

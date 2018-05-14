@@ -21,7 +21,6 @@
 #include "ui/base/cocoa/base_view.h"
 #include "ui/gfx/geometry/size.h"
 
-@class FocusTracker;
 @class WebDragDest;
 @class WebDragSource;
 
@@ -49,7 +48,6 @@ CONTENT_EXPORT
 }
 
 - (void)setMouseDownCanMoveWindow:(BOOL)canMove;
-- (void)setOpaque:(BOOL)opaque;
 
 // Returns the available drag operations. This is a required method for
 // NSDraggingSource. It is supposedly deprecated, but the non-deprecated API
@@ -76,13 +74,13 @@ class WebContentsViewMac : public WebContentsView,
   gfx::NativeView GetNativeView() const override;
   gfx::NativeView GetContentNativeView() const override;
   gfx::NativeWindow GetTopLevelNativeWindow() const override;
-  void GetScreenInfo(ScreenInfo* screen_info) const override;
   void GetContainerBounds(gfx::Rect* out) const override;
   void SizeContents(const gfx::Size& size) override;
   void Focus() override;
   void SetInitialFocus() override;
   void StoreFocus() override;
   void RestoreFocus() override;
+  void FocusThroughTabTraversal(bool reverse) override;
   DropData* GetDropData() const override;
   gfx::Rect GetViewBounds() const override;
   void SetAllowOtherViews(bool allow) override;
@@ -151,10 +149,6 @@ class WebContentsViewMac : public WebContentsView,
 
   // The Cocoa NSView that lives in the view hierarchy.
   base::scoped_nsobject<WebContentsViewCocoa> cocoa_view_;
-
-  // Keeps track of which NSView has focus so we can restore the focus when
-  // focus returns.
-  base::scoped_nsobject<FocusTracker> focus_tracker_;
 
   // Our optional delegate.
   std::unique_ptr<WebContentsViewDelegate> delegate_;

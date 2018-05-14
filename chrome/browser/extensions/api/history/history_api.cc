@@ -173,7 +173,7 @@ void HistoryEventRouter::DispatchEvent(
     const std::string& event_name,
     std::unique_ptr<base::ListValue> event_args) {
   if (profile && EventRouter::Get(profile)) {
-    auto event = base::MakeUnique<Event>(histogram_value, event_name,
+    auto event = std::make_unique<Event>(histogram_value, event_name,
                                          std::move(event_args), profile);
     EventRouter::Get(profile)->BroadcastEvent(std::move(event));
   }
@@ -195,13 +195,12 @@ void HistoryAPI::Shutdown() {
   EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
-static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<HistoryAPI>>::DestructorAtExit g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<HistoryAPI>>::
+    DestructorAtExit g_history_api_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<HistoryAPI>* HistoryAPI::GetFactoryInstance() {
-  return g_factory.Pointer();
+  return g_history_api_factory.Pointer();
 }
 
 template <>

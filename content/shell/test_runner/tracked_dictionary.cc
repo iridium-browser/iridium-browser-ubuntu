@@ -31,7 +31,7 @@ void TrackedDictionary::Set(const std::string& path,
   // Is this truly a *new* value?
   const base::Value* old_value;
   if (current_values_.Get(path, &old_value)) {
-    if (base::Value::Equals(old_value, new_value.get()))
+    if (*old_value == *new_value)
       return;
   }
 
@@ -40,12 +40,12 @@ void TrackedDictionary::Set(const std::string& path,
 }
 
 void TrackedDictionary::SetBoolean(const std::string& path, bool new_value) {
-  Set(path, base::MakeUnique<base::Value>(new_value));
+  Set(path, std::make_unique<base::Value>(new_value));
 }
 
 void TrackedDictionary::SetString(const std::string& path,
                                   const std::string& new_value) {
-  Set(path, base::MakeUnique<base::Value>(new_value));
+  Set(path, std::make_unique<base::Value>(new_value));
 }
 
 }  // namespace test_runner

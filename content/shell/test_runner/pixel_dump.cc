@@ -75,9 +75,10 @@ void DrawSelectionRect(
 void CapturePixelsForPrinting(
     blink::WebLocalFrame* web_frame,
     base::OnceCallback<void(const SkBitmap&)> callback) {
-  web_frame->FrameWidget()->UpdateAllLifecyclePhases();
+  auto* frame_widget = web_frame->LocalRoot()->FrameWidget();
+  frame_widget->UpdateAllLifecyclePhases();
 
-  blink::WebSize page_size_in_pixels = web_frame->FrameWidget()->Size();
+  blink::WebSize page_size_in_pixels = frame_widget->Size();
 
   int page_count = web_frame->PrintBegin(page_size_in_pixels);
   int totalHeight = page_count * (page_size_in_pixels.height + 1) - 1;
@@ -153,10 +154,10 @@ void PrintFrameAsync(blink::WebLocalFrame* web_frame,
                      base::OnceCallback<void(const SkBitmap&)> callback) {
   DCHECK(web_frame);
   DCHECK(!callback.is_null());
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(&CapturePixelsForPrinting, base::Unretained(web_frame),
-                 base::Passed(std::move(callback))));
+  web_frame->GetTaskRunner(blink::TaskType::kInternalTest)
+      ->PostTask(FROM_HERE, base::BindOnce(&CapturePixelsForPrinting,
+                                           base::Unretained(web_frame),
+                                           std::move(callback)));
 }
 
 base::OnceCallback<void(const SkBitmap&)>
@@ -171,8 +172,7 @@ CreateSelectionBoundsRectDrawingCallback(
   if (wr.IsEmpty())
     return original_callback;
 
-  return base::Bind(&DrawSelectionRect, wr,
-                    base::Passed(std::move(original_callback)));
+  return base::BindOnce(&DrawSelectionRect, wr, std::move(original_callback));
 }
 
 void CopyImageAtAndCapturePixels(
@@ -183,19 +183,20 @@ void CopyImageAtAndCapturePixels(
   DCHECK(!callback.is_null());
   uint64_t sequence_number =
       blink::Platform::Current()->Clipboard()->SequenceNumber(
-          blink::WebClipboard::Buffer());
+          blink::mojom::ClipboardBuffer::kStandard);
   web_frame->CopyImageAt(blink::WebPoint(x, y));
   if (sequence_number ==
       blink::Platform::Current()->Clipboard()->SequenceNumber(
-          blink::WebClipboard::Buffer())) {
+          blink::mojom::ClipboardBuffer::kStandard)) {
     SkBitmap emptyBitmap;
     std::move(callback).Run(emptyBitmap);
     return;
   }
 
-  blink::WebImage image = static_cast<blink::WebMockClipboard*>(
-                              blink::Platform::Current()->Clipboard())
-                              ->ReadRawImage(blink::WebClipboard::Buffer());
+  blink::WebImage image =
+      static_cast<blink::WebMockClipboard*>(
+          blink::Platform::Current()->Clipboard())
+          ->ReadRawImage(blink::mojom::ClipboardBuffer::kStandard);
   std::move(callback).Run(image.GetSkBitmap());
 }
 

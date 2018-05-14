@@ -32,12 +32,6 @@
 
 #define LAYOUT_GEOMETRY_MAP_LOGGING 0
 
-#if LAYOUT_GEOMETRY_MAP_LOGGING
-#define LAYOUT_GEOMETRY_MAP_LOG(...) WTFLogAlways(__VA_ARGS__)
-#else
-#define LAYOUT_GEOMETRY_MAP_LOG(...) ((void)0)
-#endif
-
 namespace blink {
 
 LayoutGeometryMap::LayoutGeometryMap(MapCoordinatesFlags flags)
@@ -47,7 +41,7 @@ LayoutGeometryMap::LayoutGeometryMap(MapCoordinatesFlags flags)
       fixed_steps_count_(0),
       map_coordinates_flags_(flags) {}
 
-LayoutGeometryMap::~LayoutGeometryMap() {}
+LayoutGeometryMap::~LayoutGeometryMap() = default;
 
 void LayoutGeometryMap::MapToAncestor(
     TransformState& transform_state,
@@ -183,13 +177,14 @@ FloatQuad LayoutGeometryMap::MapToAncestor(
             ->LocalToAncestorQuad(rect, ancestor, map_coordinates_flags_)
             .BoundingBox();
 
-    // Inspector creates layoutObjects with negative width
-    // <https://bugs.webkit.org/show_bug.cgi?id=87194>.
-    // Taking FloatQuad bounds avoids spurious assertions because of that.
-    DCHECK(EnclosingIntRect(layout_object_mapped_result) ==
-               EnclosingIntRect(result.BoundingBox()) ||
+    DCHECK(layout_object_mapped_result.EqualWithinEpsilon(result.BoundingBox(),
+                                                          0.1f) ||
            layout_object_mapped_result.MayNotHaveExactIntRectRepresentation() ||
-           result.BoundingBox().MayNotHaveExactIntRectRepresentation());
+           result.BoundingBox().MayNotHaveExactIntRectRepresentation())
+        << "Rounded: " << RoundedIntRect(layout_object_mapped_result) << " vs "
+        << RoundedIntRect(result.BoundingBox())
+        << ". Original: " << layout_object_mapped_result << " vs "
+        << result.BoundingBox();
   }
 #endif
 
@@ -254,11 +249,11 @@ void LayoutGeometryMap::PushMappingsToAncestor(
           ? CanMapBetweenLayoutObjects(layout_object,
                                        ancestor_layer->GetLayoutObject())
           : false;
-
-  LAYOUT_GEOMETRY_MAP_LOG(
-      "LayoutGeometryMap::pushMappingsToAncestor from layer %p to layer %p, "
-      "canConvertInLayerTree=%d\n",
-      layer, ancestorLayer, canConvertInLayerTree);
+#if LAYOUT_GEOMETRY_MAP_LOGGING
+  DLOG(INFO) << "LayoutGeometryMap::pushMappingsToAncestor from layer " << layer
+             << " to layer " << ancestor_layer
+             << ", canConvertInLayerTree=" << can_convert_in_layer_tree;
+#endif
 
   if (can_convert_in_layer_tree) {
     LayoutPoint layer_offset;
@@ -267,7 +262,7 @@ void LayoutGeometryMap::PushMappingsToAncestor(
     // The LayoutView must be pushed first.
     if (!mapping_.size()) {
       DCHECK(ancestor_layer->GetLayoutObject().IsLayoutView());
-      PushMappingsToAncestor(&ancestor_layer->GetLayoutObject(), 0);
+      PushMappingsToAncestor(&ancestor_layer->GetLayoutObject(), nullptr);
     }
 
     AutoReset<size_t> position_change(&insertion_position_, mapping_.size());
@@ -279,7 +274,7 @@ void LayoutGeometryMap::PushMappingsToAncestor(
     return;
   }
   const LayoutBoxModelObject* ancestor_layout_object =
-      ancestor_layer ? &ancestor_layer->GetLayoutObject() : 0;
+      ancestor_layer ? &ancestor_layer->GetLayoutObject() : nullptr;
   PushMappingsToAncestor(&layout_object, ancestor_layout_object);
 }
 
@@ -287,9 +282,12 @@ void LayoutGeometryMap::Push(const LayoutObject* layout_object,
                              const LayoutSize& offset_from_container,
                              GeometryInfoFlags flags,
                              LayoutSize offset_for_fixed_position) {
-  LAYOUT_GEOMETRY_MAP_LOG("LayoutGeometryMap::push %p %d,%d isNonUniform=%d\n",
-                          layoutObject, offsetFromContainer.width().toInt(),
-                          offsetFromContainer.height().toInt(), isNonUniform);
+#if LAYOUT_GEOMETRY_MAP_LOGGING
+  DLOG(INFO) << "LayoutGeometryMap::push" << layout_object << " "
+             << offset_from_container.Width().ToInt() << ","
+             << offset_from_container.Height().ToInt()
+             << " isNonUniform=" << kIsNonUniform;
+#endif
 
   DCHECK_NE(insertion_position_, kNotFound);
   DCHECK(!layout_object->IsLayoutView() || !insertion_position_ ||
@@ -353,7 +351,7 @@ void LayoutGeometryMap::PopMappingsToAncestor(
 void LayoutGeometryMap::PopMappingsToAncestor(
     const PaintLayer* ancestor_layer) {
   const LayoutBoxModelObject* ancestor_layout_object =
-      ancestor_layer ? &ancestor_layer->GetLayoutObject() : 0;
+      ancestor_layer ? &ancestor_layer->GetLayoutObject() : nullptr;
   PopMappingsToAncestor(ancestor_layout_object);
 }
 

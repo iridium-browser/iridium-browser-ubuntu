@@ -54,10 +54,24 @@ class CallStackProfileMetricsProvider : public MetricsProvider {
   ~CallStackProfileMetricsProvider() override;
 
   // Returns a callback for use with StackSamplingProfiler that sets up
-  // parameters for browser process startup sampling. The callback should be
+  // parameters for general browser process sampling. The callback should be
   // immediately passed to the StackSamplingProfiler, and should not be reused.
   static base::StackSamplingProfiler::CompletedCallback
-  GetProfilerCallbackForBrowserProcessStartup();
+  GetProfilerCallbackForBrowserProcess(CallStackProfileParams* params);
+
+  // Returns a callback for use with StackSamplingProfiler that sets up
+  // parameters for UI thread of browser process startup sampling. The callback
+  // should be immediately passed to the StackSamplingProfiler, and should not
+  // be reused.
+  static base::StackSamplingProfiler::CompletedCallback
+  GetProfilerCallbackForBrowserProcessUIThreadStartup();
+
+  // Returns a callback for use with StackSamplingProfiler that sets up
+  // parameters for IO thread of browser process startup sampling. The callback
+  // should be immediately passed to the StackSamplingProfiler, and should not
+  // be reused.
+  static base::StackSamplingProfiler::CompletedCallback
+  GetProfilerCallbackForBrowserProcessIOThreadStartup();
 
   // Provides completed stack profiles to the metrics provider. Intended for use
   // when receiving profiles over IPC. In-process StackSamplingProfiler users
@@ -71,9 +85,11 @@ class CallStackProfileMetricsProvider : public MetricsProvider {
   static bool IsPeriodicSamplingEnabled();
 
   // MetricsProvider:
+  void Init() override;
   void OnRecordingEnabled() override;
   void OnRecordingDisabled() override;
-  void ProvideGeneralMetrics(ChromeUserMetricsExtension* uma_proto) override;
+  void ProvideCurrentSessionData(
+      ChromeUserMetricsExtension* uma_proto) override;
 
  protected:
   // base::Feature for reporting profiles. Provided here for test use.
@@ -83,10 +99,6 @@ class CallStackProfileMetricsProvider : public MetricsProvider {
   static void ResetStaticStateForTesting();
 
  private:
-  // Returns true if reporting of profiles is enabled according to the
-  // controlling Finch field trial.
-  static bool IsReportingEnabledByFieldTrial();
-
   DISALLOW_COPY_AND_ASSIGN(CallStackProfileMetricsProvider);
 };
 

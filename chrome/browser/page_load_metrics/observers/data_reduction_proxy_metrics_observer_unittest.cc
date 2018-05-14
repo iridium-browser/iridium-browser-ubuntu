@@ -14,22 +14,33 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/optional.h"
+#include "base/process/kill.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/loader/chrome_navigation_data.h"
+#include "chrome/browser/page_load_metrics/metrics_web_contents_observer.h"
+#include "chrome/browser/page_load_metrics/observers/histogram_suffixes.h"
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_test_harness.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
+#include "chrome/browser/page_load_metrics/page_load_tracker.h"
+#include "chrome/browser/previews/previews_infobar_delegate.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
+#include "chrome/common/page_load_metrics/test/page_load_metrics_test_util.h"
 #include "chrome/test/base/testing_browser_process.h"
+#include "components/data_reduction_proxy/content/browser/data_reduction_proxy_pingback_client_impl.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_pingback_client.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_page_load_timing.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "content/public/test/web_contents_tester.h"
+#include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
+#include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
 
 namespace data_reduction_proxy {
 
 namespace {
 
 const char kDefaultTestUrl[] = "http://google.com";
+const int kMemoryKb = 1024;
 
 data_reduction_proxy::DataReductionProxyData* DataForNavigationHandle(
     content::WebContents* web_contents,
@@ -48,10 +59,12 @@ data_reduction_proxy::DataReductionProxyData* DataForNavigationHandle(
 // Pingback client responsible for recording the timing information it receives
 // from a SendPingback call.
 class TestPingbackClient
-    : public data_reduction_proxy::DataReductionProxyPingbackClient {
+    : public data_reduction_proxy::DataReductionProxyPingbackClientImpl {
  public:
   TestPingbackClient()
-      : data_reduction_proxy::DataReductionProxyPingbackClient(nullptr),
+      : data_reduction_proxy::DataReductionProxyPingbackClientImpl(
+            nullptr,
+            base::ThreadTaskRunnerHandle::Get()),
         send_pingback_called_(false) {}
   ~TestPingbackClient() override {}
 
@@ -124,6 +137,25 @@ class TestDataReductionProxyMetricsObserver
     return pingback_client_;
   }
 
+  void RequestProcessDump(
+      base::ProcessId pid,
+      memory_instrumentation::MemoryInstrumentation::RequestGlobalDumpCallback
+          callback) override {
+    memory_instrumentation::mojom::GlobalMemoryDumpPtr global_dump(
+        memory_instrumentation::mojom::GlobalMemoryDump::New());
+
+    memory_instrumentation::mojom::ProcessMemoryDumpPtr pmd(
+        memory_instrumentation::mojom::ProcessMemoryDump::New());
+    pmd->pid = pid;
+    pmd->process_type = memory_instrumentation::mojom::ProcessType::RENDERER;
+    pmd->os_dump = memory_instrumentation::mojom::OSMemDump::New();
+    pmd->os_dump->private_footprint_kb = kMemoryKb;
+
+    global_dump->process_dumps.push_back(std::move(pmd));
+    callback.Run(true, memory_instrumentation::GlobalMemoryDump::MoveFrom(
+                           std::move(global_dump)));
+  }
+
  private:
   content::WebContents* web_contents_;
   TestPingbackClient* pingback_client_;
@@ -139,7 +171,8 @@ class DataReductionProxyMetricsObserverTest
   DataReductionProxyMetricsObserverTest()
       : pingback_client_(new TestPingbackClient()),
         data_reduction_proxy_used_(false),
-        is_using_lofi_(false) {}
+        is_using_lofi_(false),
+        opt_out_expected_(false) {}
 
   void ResetTest() {
     page_load_metrics::InitPageLoadTimingForTest(&timing_);
@@ -161,18 +194,27 @@ class DataReductionProxyMetricsObserverTest
     PopulateRequiredTimingFields(&timing_);
   }
 
-  void RunTest(bool data_reduction_proxy_used, bool is_using_lofi) {
+  void RunTest(bool data_reduction_proxy_used,
+               bool is_using_lofi,
+               bool opt_out_expected) {
     data_reduction_proxy_used_ = data_reduction_proxy_used;
     is_using_lofi_ = is_using_lofi;
+    opt_out_expected_ = opt_out_expected;
     NavigateAndCommit(GURL(kDefaultTestUrl));
     SimulateTimingUpdate(timing_);
     pingback_client_->Reset();
   }
 
   void RunTestAndNavigateToUntrackedUrl(bool data_reduction_proxy_used,
-                                        bool is_using_lofi) {
-    RunTest(data_reduction_proxy_used, is_using_lofi);
+                                        bool is_using_lofi,
+                                        bool opt_out_expected) {
+    RunTest(data_reduction_proxy_used, is_using_lofi, opt_out_expected);
     NavigateToUntrackedUrl();
+  }
+
+  void SimulateRendererCrash() {
+    observer()->RenderProcessGone(
+        base::TerminationStatus::TERMINATION_STATUS_ABNORMAL_TERMINATION);
   }
 
   // Verify that, if expected and actual are set, their values are equal.
@@ -202,6 +244,11 @@ class DataReductionProxyMetricsObserverTest
                        pingback_client_->timing()->load_event_start);
     ExpectEqualOrUnset(timing_.paint_timing->first_image_paint,
                        pingback_client_->timing()->first_image_paint);
+    EXPECT_EQ(opt_out_expected_, pingback_client_->timing()->opt_out_occurred);
+    EXPECT_EQ(timing_.document_timing->load_event_start
+                  ? static_cast<int64_t>(kMemoryKb)
+                  : 0,
+              pingback_client_->timing()->renderer_memory_usage_kb);
   }
 
   void ValidateLoFiInPingback(bool lofi_expected) {
@@ -209,30 +256,39 @@ class DataReductionProxyMetricsObserverTest
     EXPECT_EQ(lofi_expected, pingback_client_->data().lofi_received());
   }
 
+  void ValidateRendererCrash(bool renderer_crashed) {
+    EXPECT_TRUE(pingback_client_->send_pingback_called());
+    EXPECT_EQ(renderer_crashed,
+              pingback_client_->timing()->host_id !=
+                  content::ChildProcessHost::kInvalidUniqueID);
+  }
+
   void ValidateHistograms() {
     ValidateHistogramsForSuffix(
-        internal::kHistogramDOMContentLoadedEventFiredSuffix,
+        ::internal::kHistogramDOMContentLoadedEventFiredSuffix,
         timing_.document_timing->dom_content_loaded_event_start);
-    ValidateHistogramsForSuffix(internal::kHistogramFirstLayoutSuffix,
+    ValidateHistogramsForSuffix(::internal::kHistogramFirstLayoutSuffix,
                                 timing_.document_timing->first_layout);
-    ValidateHistogramsForSuffix(internal::kHistogramLoadEventFiredSuffix,
+    ValidateHistogramsForSuffix(::internal::kHistogramLoadEventFiredSuffix,
                                 timing_.document_timing->load_event_start);
-    ValidateHistogramsForSuffix(internal::kHistogramFirstContentfulPaintSuffix,
-                                timing_.paint_timing->first_contentful_paint);
-    ValidateHistogramsForSuffix(internal::kHistogramFirstMeaningfulPaintSuffix,
-                                timing_.paint_timing->first_meaningful_paint);
-    ValidateHistogramsForSuffix(internal::kHistogramFirstImagePaintSuffix,
+    ValidateHistogramsForSuffix(
+        ::internal::kHistogramFirstContentfulPaintSuffix,
+        timing_.paint_timing->first_contentful_paint);
+    ValidateHistogramsForSuffix(
+        ::internal::kHistogramFirstMeaningfulPaintSuffix,
+        timing_.paint_timing->first_meaningful_paint);
+    ValidateHistogramsForSuffix(::internal::kHistogramFirstImagePaintSuffix,
                                 timing_.paint_timing->first_image_paint);
-    ValidateHistogramsForSuffix(internal::kHistogramFirstPaintSuffix,
+    ValidateHistogramsForSuffix(::internal::kHistogramFirstPaintSuffix,
                                 timing_.paint_timing->first_paint);
-    ValidateHistogramsForSuffix(internal::kHistogramFirstTextPaintSuffix,
+    ValidateHistogramsForSuffix(::internal::kHistogramFirstTextPaintSuffix,
                                 timing_.paint_timing->first_text_paint);
-    ValidateHistogramsForSuffix(internal::kHistogramParseStartSuffix,
+    ValidateHistogramsForSuffix(::internal::kHistogramParseStartSuffix,
                                 timing_.parse_timing->parse_start);
     ValidateHistogramsForSuffix(
-        internal::kHistogramParseBlockedOnScriptLoadSuffix,
+        ::internal::kHistogramParseBlockedOnScriptLoadSuffix,
         timing_.parse_timing->parse_blocked_on_script_load_duration);
-    ValidateHistogramsForSuffix(internal::kHistogramParseDurationSuffix,
+    ValidateHistogramsForSuffix(::internal::kHistogramParseDurationSuffix,
                                 timing_.parse_timing->parse_stop.value() -
                                     timing_.parse_timing->parse_start.value());
   }
@@ -339,7 +395,7 @@ class DataReductionProxyMetricsObserverTest
  protected:
   void RegisterObservers(page_load_metrics::PageLoadTracker* tracker) override {
     tracker->AddObserver(
-        base::MakeUnique<TestDataReductionProxyMetricsObserver>(
+        std::make_unique<TestDataReductionProxyMetricsObserver>(
             web_contents(), pingback_client_.get(), data_reduction_proxy_used_,
             is_using_lofi_));
   }
@@ -350,6 +406,7 @@ class DataReductionProxyMetricsObserverTest
  private:
   bool data_reduction_proxy_used_;
   bool is_using_lofi_;
+  bool opt_out_expected_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyMetricsObserverTest);
 };
@@ -357,7 +414,7 @@ class DataReductionProxyMetricsObserverTest
 TEST_F(DataReductionProxyMetricsObserverTest, DataReductionProxyOff) {
   ResetTest();
   // Verify that when the data reduction proxy was not used, no UMA is reported.
-  RunTest(false, false);
+  RunTest(false, false, false);
   ValidateHistograms();
 }
 
@@ -365,7 +422,7 @@ TEST_F(DataReductionProxyMetricsObserverTest, DataReductionProxyOn) {
   ResetTest();
   // Verify that when the data reduction proxy was used, but lofi was not used,
   // the correpsonding UMA is reported.
-  RunTest(true, false);
+  RunTest(true, false, false);
   ValidateHistograms();
 }
 
@@ -373,7 +430,7 @@ TEST_F(DataReductionProxyMetricsObserverTest, LofiEnabled) {
   ResetTest();
   // Verify that when the data reduction proxy was used and lofi was used, both
   // histograms are reported.
-  RunTest(true, true);
+  RunTest(true, true, false);
   ValidateHistograms();
 }
 
@@ -381,42 +438,51 @@ TEST_F(DataReductionProxyMetricsObserverTest, OnCompletePingback) {
   ResetTest();
   // Verify that when data reduction proxy was used the correct timing
   // information is sent to SendPingback.
-  RunTestAndNavigateToUntrackedUrl(true, false);
+  RunTestAndNavigateToUntrackedUrl(true, false, false);
   ValidateTimes();
 
   ResetTest();
   // Verify that when data reduction proxy was used but first image paint is
   // unset, the correct timing information is sent to SendPingback.
   timing_.paint_timing->first_image_paint = base::nullopt;
-  RunTestAndNavigateToUntrackedUrl(true, false);
+  RunTestAndNavigateToUntrackedUrl(true, false, false);
   ValidateTimes();
 
   ResetTest();
   // Verify that when data reduction proxy was used but first contentful paint
   // is unset, SendPingback is not called.
   timing_.paint_timing->first_contentful_paint = base::nullopt;
-  RunTestAndNavigateToUntrackedUrl(true, false);
+  RunTestAndNavigateToUntrackedUrl(true, false, false);
   ValidateTimes();
 
   ResetTest();
   // Verify that when data reduction proxy was used but first meaningful paint
   // is unset, SendPingback is not called.
   timing_.paint_timing->first_meaningful_paint = base::nullopt;
-  RunTestAndNavigateToUntrackedUrl(true, false);
+  RunTestAndNavigateToUntrackedUrl(true, false, false);
   ValidateTimes();
 
   ResetTest();
   // Verify that when data reduction proxy was used but load event start is
   // unset, SendPingback is not called.
   timing_.document_timing->load_event_start = base::nullopt;
-  RunTestAndNavigateToUntrackedUrl(true, false);
+  RunTestAndNavigateToUntrackedUrl(true, false, false);
   ValidateTimes();
   ValidateLoFiInPingback(false);
 
   ResetTest();
+  // Verify that when an opt out occurs, that it is reported in the pingback.
+  timing_.document_timing->load_event_start = base::nullopt;
+  RunTest(true, true, true);
+  observer()->BroadcastEventToObservers(
+      PreviewsInfoBarDelegate::OptOutEventKey());
+  NavigateToUntrackedUrl();
+  ValidateTimes();
+  ValidateLoFiInPingback(false);
 
+  ResetTest();
   std::unique_ptr<DataReductionProxyData> data =
-      base::MakeUnique<DataReductionProxyData>();
+      std::make_unique<DataReductionProxyData>();
   data->set_used_data_reduction_proxy(true);
   data->set_request_url(GURL(kDefaultTestUrl));
   data->set_lofi_received(true);
@@ -432,9 +498,10 @@ TEST_F(DataReductionProxyMetricsObserverTest, OnCompletePingback) {
       0 /* original_network_content_length */,
       std::move(data),
       content::ResourceType::RESOURCE_TYPE_SCRIPT,
-      0};
+      0,
+      {} /* load_timing_info */};
 
-  RunTest(true, false);
+  RunTest(true, false, false);
   SimulateLoadedResource(resource);
   NavigateToUntrackedUrl();
   ValidateTimes();
@@ -443,7 +510,7 @@ TEST_F(DataReductionProxyMetricsObserverTest, OnCompletePingback) {
   ResetTest();
   // Verify that when data reduction proxy was not used, SendPingback is not
   // called.
-  RunTestAndNavigateToUntrackedUrl(false, false);
+  RunTestAndNavigateToUntrackedUrl(false, false, false);
   EXPECT_FALSE(pingback_client_->send_pingback_called());
 
   ResetTest();
@@ -451,44 +518,66 @@ TEST_F(DataReductionProxyMetricsObserverTest, OnCompletePingback) {
   base::FieldTrialList field_trial_list(nullptr);
   ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
       "DataCompressionProxyHoldback", "Enabled"));
-  RunTestAndNavigateToUntrackedUrl(true, false);
+  RunTestAndNavigateToUntrackedUrl(true, false, false);
   EXPECT_TRUE(pingback_client_->send_pingback_called());
 }
 
 TEST_F(DataReductionProxyMetricsObserverTest, ByteInformationCompression) {
   ResetTest();
 
-  RunTest(true, false);
+  RunTest(true, false, false);
 
   std::unique_ptr<DataReductionProxyData> data =
-      base::MakeUnique<DataReductionProxyData>();
+      std::make_unique<DataReductionProxyData>();
   data->set_used_data_reduction_proxy(true);
   data->set_request_url(GURL(kDefaultTestUrl));
 
   // Prepare 4 resources of varying size and configurations.
   page_load_metrics::ExtraRequestCompleteInfo resources[] = {
       // Cached request.
-      {GURL(kResourceUrl), net::HostPortPair(), -1 /* frame_tree_node_id */,
-       true /*was_cached*/, 1024 * 40 /* raw_body_bytes */,
+      {GURL(kResourceUrl),
+       net::HostPortPair(),
+       -1 /* frame_tree_node_id */,
+       true /*was_cached*/,
+       1024 * 40 /* raw_body_bytes */,
        0 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+       content::ResourceType::RESOURCE_TYPE_SCRIPT,
+       0,
+       {} /* load_timing_info */},
       // Uncached non-proxied request.
-      {GURL(kResourceUrl), net::HostPortPair(), -1 /* frame_tree_node_id */,
-       false /*was_cached*/, 1024 * 40 /* raw_body_bytes */,
+      {GURL(kResourceUrl),
+       net::HostPortPair(),
+       -1 /* frame_tree_node_id */,
+       false /*was_cached*/,
+       1024 * 40 /* raw_body_bytes */,
        1024 * 40 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+       content::ResourceType::RESOURCE_TYPE_SCRIPT,
+       0,
+       {} /* load_timing_info */},
       // Uncached proxied request with .1 compression ratio.
-      {GURL(kResourceUrl), net::HostPortPair(), -1 /* frame_tree_node_id */,
-       false /*was_cached*/, 1024 * 40 /* raw_body_bytes */,
-       1024 * 40 * 10 /* original_network_content_length */, data->DeepCopy(),
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+      {GURL(kResourceUrl),
+       net::HostPortPair(),
+       -1 /* frame_tree_node_id */,
+       false /*was_cached*/,
+       1024 * 40 /* raw_body_bytes */,
+       1024 * 40 * 10 /* original_network_content_length */,
+       data->DeepCopy(),
+       content::ResourceType::RESOURCE_TYPE_SCRIPT,
+       0,
+       {} /* load_timing_info */},
       // Uncached proxied request with .5 compression ratio.
-      {GURL(kResourceUrl), net::HostPortPair(), -1 /* frame_tree_node_id */,
-       false /*was_cached*/, 1024 * 40 /* raw_body_bytes */,
-       1024 * 40 * 5 /* original_network_content_length */, std::move(data),
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+      {GURL(kResourceUrl),
+       net::HostPortPair(),
+       -1 /* frame_tree_node_id */,
+       false /*was_cached*/,
+       1024 * 40 /* raw_body_bytes */,
+       1024 * 40 * 5 /* original_network_content_length */,
+       std::move(data),
+       content::ResourceType::RESOURCE_TYPE_SCRIPT,
+       0,
+       {} /* load_timing_info */},
   };
 
   int network_resources = 0;
@@ -519,37 +608,59 @@ TEST_F(DataReductionProxyMetricsObserverTest, ByteInformationCompression) {
 TEST_F(DataReductionProxyMetricsObserverTest, ByteInformationInflation) {
   ResetTest();
 
-  RunTest(true, false);
+  RunTest(true, false, false);
 
   std::unique_ptr<DataReductionProxyData> data =
-      base::MakeUnique<DataReductionProxyData>();
+      std::make_unique<DataReductionProxyData>();
   data->set_used_data_reduction_proxy(true);
   data->set_request_url(GURL(kDefaultTestUrl));
 
   // Prepare 4 resources of varying size and configurations.
   page_load_metrics::ExtraRequestCompleteInfo resources[] = {
       // Cached request.
-      {GURL(kResourceUrl), net::HostPortPair(), -1 /* frame_tree_node_id */,
-       true /*was_cached*/, 1024 * 40 /* raw_body_bytes */,
+      {GURL(kResourceUrl),
+       net::HostPortPair(),
+       -1 /* frame_tree_node_id */,
+       true /*was_cached*/,
+       1024 * 40 /* raw_body_bytes */,
        0 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+       content::ResourceType::RESOURCE_TYPE_SCRIPT,
+       0,
+       {} /* load_timing_info */},
       // Uncached non-proxied request.
-      {GURL(kResourceUrl), net::HostPortPair(), -1 /* frame_tree_node_id */,
-       false /*was_cached*/, 1024 * 40 /* raw_body_bytes */,
+      {GURL(kResourceUrl),
+       net::HostPortPair(),
+       -1 /* frame_tree_node_id */,
+       false /*was_cached*/,
+       1024 * 40 /* raw_body_bytes */,
        1024 * 40 /* original_network_content_length */,
        nullptr /* data_reduction_proxy_data */,
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+       content::ResourceType::RESOURCE_TYPE_SCRIPT,
+       0,
+       {} /* load_timing_info */},
       // Uncached proxied request with .1 compression ratio.
-      {GURL(kResourceUrl), net::HostPortPair(), -1 /* frame_tree_node_id */,
-       false /*was_cached*/, 1024 * 40 * 10 /* raw_body_bytes */,
-       1024 * 40 /* original_network_content_length */, data->DeepCopy(),
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+      {GURL(kResourceUrl),
+       net::HostPortPair(),
+       -1 /* frame_tree_node_id */,
+       false /*was_cached*/,
+       1024 * 40 * 10 /* raw_body_bytes */,
+       1024 * 40 /* original_network_content_length */,
+       data->DeepCopy(),
+       content::ResourceType::RESOURCE_TYPE_SCRIPT,
+       0,
+       {} /* load_timing_info */},
       // Uncached proxied request with .5 compression ratio.
-      {GURL(kResourceUrl), net::HostPortPair(), -1 /* frame_tree_node_id */,
-       false /*was_cached*/, 1024 * 40 * 5 /* raw_body_bytes */,
-       1024 * 40 /* original_network_content_length */, std::move(data),
-       content::ResourceType::RESOURCE_TYPE_SCRIPT, 0},
+      {GURL(kResourceUrl),
+       net::HostPortPair(),
+       -1 /* frame_tree_node_id */,
+       false /*was_cached*/,
+       1024 * 40 * 5 /* raw_body_bytes */,
+       1024 * 40 /* original_network_content_length */,
+       std::move(data),
+       content::ResourceType::RESOURCE_TYPE_SCRIPT,
+       0,
+       {} /* load_timing_info */},
   };
 
   int network_resources = 0;
@@ -575,6 +686,29 @@ TEST_F(DataReductionProxyMetricsObserverTest, ByteInformationInflation) {
 
   ValidateDataHistograms(network_resources, drp_resources, network_bytes,
                          drp_bytes, ocl_bytes);
+}
+
+TEST_F(DataReductionProxyMetricsObserverTest, ProcessIdSentOnRendererCrash) {
+  ResetTest();
+  RunTest(true, false, false);
+  std::unique_ptr<DataReductionProxyData> data =
+      std::make_unique<DataReductionProxyData>();
+  data->set_used_data_reduction_proxy(true);
+  data->set_request_url(GURL(kDefaultTestUrl));
+  SimulateRendererCrash();
+
+  // When the renderer crashes, the pingback should report that.
+  ValidateRendererCrash(true);
+
+  ResetTest();
+  RunTest(true, false, false);
+  data = std::make_unique<DataReductionProxyData>();
+  data->set_used_data_reduction_proxy(true);
+  data->set_request_url(GURL(kDefaultTestUrl));
+  NavigateToUntrackedUrl();
+
+  // When the renderer does not crash, the pingback should report that.
+  ValidateRendererCrash(false);
 }
 
 }  //  namespace data_reduction_proxy

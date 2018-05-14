@@ -6,6 +6,7 @@
 #define Magnetometer_h
 
 #include "modules/sensor/Sensor.h"
+#include "modules/sensor/SpatialSensorOptions.h"
 
 namespace blink {
 
@@ -14,7 +15,7 @@ class Magnetometer final : public Sensor {
 
  public:
   static Magnetometer* Create(ExecutionContext*,
-                              const SensorOptions&,
+                              const SpatialSensorOptions&,
                               ExceptionState&);
   static Magnetometer* Create(ExecutionContext*, ExceptionState&);
 
@@ -22,10 +23,10 @@ class Magnetometer final : public Sensor {
   double y(bool& is_null) const;
   double z(bool& is_null) const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
-  Magnetometer(ExecutionContext*, const SensorOptions&, ExceptionState&);
+  Magnetometer(ExecutionContext*, const SpatialSensorOptions&, ExceptionState&);
 };
 
 }  // namespace blink

@@ -11,16 +11,19 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/net/nss_context.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chromeos/network/managed_network_configuration_handler.h"
 #include "chromeos/network/onc/onc_certificate_importer_impl.h"
+#include "chromeos/network/onc/onc_parsed_certificates.h"
 #include "chromeos/network/onc/onc_utils.h"
 #include "components/policy/policy_constants.h"
 #include "components/user_manager/user.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util_nss.h"
 
 namespace policy {
 
@@ -87,10 +90,13 @@ void UserNetworkConfigurationUpdater::GetWebTrustedCertificates(
 
 void UserNetworkConfigurationUpdater::OnCertificatesImported(
     bool /* unused success */,
-    const net::CertificateList& onc_trusted_certificates) {
+    net::ScopedCERTCertificateList onc_trusted_certificates) {
   web_trust_certs_.clear();
-  if (allow_trusted_certificates_from_policy_)
-    web_trust_certs_ = onc_trusted_certificates;
+  if (allow_trusted_certificates_from_policy_) {
+    web_trust_certs_ =
+        net::x509_util::CreateX509CertificateListFromCERTCertificates(
+            onc_trusted_certificates);
+  }
   NotifyTrustAnchorsChanged();
 }
 
@@ -104,7 +110,7 @@ void UserNetworkConfigurationUpdater::ImportCertificates(
   }
 
   certificate_importer_->ImportCertificates(
-      certificates_onc,
+      std::make_unique<chromeos::onc::OncParsedCertificates>(certificates_onc),
       onc_source_,
       base::Bind(&UserNetworkConfigurationUpdater::OnCertificatesImported,
                  base::Unretained(this)));
@@ -116,6 +122,14 @@ void UserNetworkConfigurationUpdater::ApplyNetworkPolicy(
   DCHECK(user_);
   chromeos::onc::ExpandStringPlaceholdersInNetworksForUser(user_,
                                                            network_configs_onc);
+
+  // Call on UserSessionManager to send the user's password to session manager
+  // if the password substitution variable exists in the ONC.
+  bool send_password =
+      chromeos::onc::HasUserPasswordSubsitutionVariable(network_configs_onc);
+  chromeos::UserSessionManager::GetInstance()->OnUserNetworkPolicyParsed(
+      send_password);
+
   network_config_handler_->SetPolicy(onc_source_,
                                      user_->username_hash(),
                                      *network_configs_onc,

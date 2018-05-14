@@ -10,7 +10,6 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_local.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/tracked_objects.h"
 #include "build/build_config.h"
 
 namespace base {
@@ -33,7 +32,12 @@ void ProxyToTaskRunner(scoped_refptr<SequencedTaskRunner> task_runner,
 
 }  // namespace
 
-RunLoop::Delegate::Delegate() {
+RunLoop::Delegate::Delegate()
+    : should_quit_when_idle_callback_(base::BindRepeating(
+          [](Delegate* self) {
+            return self->active_run_loops_.top()->quit_when_idle_received_;
+          },
+          Unretained(this))) {
   // The Delegate can be created on another thread. It is only bound in
   // RegisterDelegateForCurrentThread().
   DETACH_FROM_THREAD(bound_thread_checker_);
@@ -48,42 +52,60 @@ RunLoop::Delegate::~Delegate() {
     tls_delegate.Get().Set(nullptr);
 }
 
-RunLoop* RunLoop::Delegate::Client::GetTopMostRunLoop() const {
-  DCHECK_CALLED_ON_VALID_THREAD(outer_->bound_thread_checker_);
-  DCHECK(outer_->bound_);
-  return outer_->active_run_loops_.empty() ? nullptr
-                                           : outer_->active_run_loops_.top();
+bool RunLoop::Delegate::ShouldQuitWhenIdle() {
+  return should_quit_when_idle_callback_.Run();
 }
 
-bool RunLoop::Delegate::Client::IsNested() const {
-  DCHECK_CALLED_ON_VALID_THREAD(outer_->bound_thread_checker_);
-  DCHECK(outer_->bound_);
-  return outer_->active_run_loops_.size() > 1;
-}
-
-RunLoop::Delegate::Client::Client(Delegate* outer) : outer_(outer) {}
-
-RunLoop::Delegate::Client* RunLoop::RegisterDelegateForCurrentThread(
-    Delegate* delegate) {
+// static
+void RunLoop::RegisterDelegateForCurrentThread(Delegate* delegate) {
   // Bind |delegate| to this thread.
   DCHECK(!delegate->bound_);
   DCHECK_CALLED_ON_VALID_THREAD(delegate->bound_thread_checker_);
 
   // There can only be one RunLoop::Delegate per thread.
-  DCHECK(!tls_delegate.Get().Get());
+  DCHECK(!tls_delegate.Get().Get())
+      << "Error: Multiple RunLoop::Delegates registered on the same thread.\n\n"
+         "Hint: You perhaps instantiated a second "
+         "MessageLoop/ScopedTaskEnvironment on a thread that already had one?";
+  tls_delegate.Get().Set(delegate);
+  delegate->bound_ = true;
+}
+
+// static
+RunLoop::Delegate* RunLoop::OverrideDelegateForCurrentThreadForTesting(
+    Delegate* delegate,
+    Delegate::ShouldQuitWhenIdleCallback
+        overriding_should_quit_when_idle_callback) {
+  // Bind |delegate| to this thread.
+  DCHECK(!delegate->bound_);
+  DCHECK_CALLED_ON_VALID_THREAD(delegate->bound_thread_checker_);
+
+  // Overriding cannot be performed while running.
+  DCHECK(!IsRunningOnCurrentThread());
+
+  // Override the current Delegate (there must be one).
+  Delegate* overridden_delegate = tls_delegate.Get().Get();
+  DCHECK(overridden_delegate);
+  DCHECK(overridden_delegate->bound_);
+  overridden_delegate->should_quit_when_idle_callback_ =
+      std::move(overriding_should_quit_when_idle_callback);
   tls_delegate.Get().Set(delegate);
   delegate->bound_ = true;
 
-  return &delegate->client_interface_;
+  return overridden_delegate;
 }
 
-RunLoop::RunLoop()
+RunLoop::RunLoop(Type type)
     : delegate_(tls_delegate.Get().Get()),
+      type_(type),
       origin_task_runner_(ThreadTaskRunnerHandle::Get()),
       weak_factory_(this) {
-  // A RunLoop::Delegate must be bound to this thread prior to using RunLoop.
-  DCHECK(delegate_);
+  DCHECK(delegate_) << "A RunLoop::Delegate must be bound to this thread prior "
+                       "to using RunLoop.";
   DCHECK(origin_task_runner_);
+
+  DCHECK(IsNestingAllowedOnCurrentThread() ||
+         type_ != Type::kNestableTasksAllowed);
 }
 
 RunLoop::~RunLoop() {
@@ -104,12 +126,11 @@ void RunLoop::Run() {
   // multiple sequences is still disallowed).
   DETACH_FROM_SEQUENCE(sequence_checker_);
 
-  // Use task stopwatch to exclude the loop run time from the current task, if
-  // any.
-  tracked_objects::TaskStopwatch stopwatch;
-  stopwatch.Start();
-  delegate_->Run();
-  stopwatch.Stop();
+  DCHECK_EQ(this, delegate_->active_run_loops_.top());
+  const bool application_tasks_allowed =
+      delegate_->active_run_loops_.size() == 1U ||
+      type_ == Type::kNestableTasksAllowed;
+  delegate_->Run(application_tasks_allowed);
 
   // Rebind this RunLoop to the current thread after Run().
   DETACH_FROM_SEQUENCE(sequence_checker_);
@@ -220,10 +241,52 @@ void RunLoop::DisallowNestingOnCurrentThread() {
   tls_delegate.Get().Get()->allow_nesting_ = false;
 }
 
+// static
+void RunLoop::QuitCurrentDeprecated() {
+  DCHECK(IsRunningOnCurrentThread());
+  tls_delegate.Get().Get()->active_run_loops_.top()->Quit();
+}
+
+// static
+void RunLoop::QuitCurrentWhenIdleDeprecated() {
+  DCHECK(IsRunningOnCurrentThread());
+  tls_delegate.Get().Get()->active_run_loops_.top()->QuitWhenIdle();
+}
+
+#if DCHECK_IS_ON()
+RunLoop::ScopedDisallowRunningForTesting::ScopedDisallowRunningForTesting()
+    : current_delegate_(tls_delegate.Get().Get()),
+      previous_run_allowance_(
+          current_delegate_ ? current_delegate_->allow_running_for_testing_
+                            : false) {
+  if (current_delegate_)
+    current_delegate_->allow_running_for_testing_ = false;
+}
+
+RunLoop::ScopedDisallowRunningForTesting::~ScopedDisallowRunningForTesting() {
+  DCHECK_EQ(current_delegate_, tls_delegate.Get().Get());
+  if (current_delegate_)
+    current_delegate_->allow_running_for_testing_ = previous_run_allowance_;
+}
+#else   // DCHECK_IS_ON()
+// Defined out of line so that the compiler doesn't inline these and realize
+// the scope has no effect and then throws an "unused variable" warning in
+// non-dcheck builds.
+RunLoop::ScopedDisallowRunningForTesting::ScopedDisallowRunningForTesting() =
+    default;
+RunLoop::ScopedDisallowRunningForTesting::~ScopedDisallowRunningForTesting() =
+    default;
+#endif  // DCHECK_IS_ON()
+
 bool RunLoop::BeforeRun() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
 #if DCHECK_IS_ON()
+  DCHECK(delegate_->allow_running_for_testing_)
+      << "RunLoop::Run() isn't allowed in the scope of a "
+         "ScopedDisallowRunningForTesting. Hint: if mixing "
+         "TestMockTimeTaskRunners on same thread, use TestMockTimeTaskRunner's "
+         "API instead of RunLoop to drive individual task runners.";
   DCHECK(!run_called_);
   run_called_ = true;
 #endif  // DCHECK_IS_ON()
@@ -241,6 +304,8 @@ bool RunLoop::BeforeRun() {
     CHECK(delegate_->allow_nesting_);
     for (auto& observer : delegate_->nesting_observers_)
       observer.OnBeginNestedRunLoop();
+    if (type_ == Type::kNestableTasksAllowed)
+      delegate_->EnsureWorkScheduled();
   }
 
   running_ = true;
@@ -259,7 +324,12 @@ void RunLoop::AfterRun() {
   RunLoop* previous_run_loop =
       active_run_loops_.empty() ? nullptr : active_run_loops_.top();
 
-  // Execute deferred QuitNow, if any:
+  if (previous_run_loop) {
+    for (auto& observer : delegate_->nesting_observers_)
+      observer.OnExitNestedRunLoop();
+  }
+
+  // Execute deferred Quit, if any:
   if (previous_run_loop && previous_run_loop->quit_called_)
     delegate_->Quit();
 }

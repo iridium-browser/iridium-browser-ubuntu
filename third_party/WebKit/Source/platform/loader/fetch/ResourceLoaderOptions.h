@@ -31,13 +31,14 @@
 #ifndef ResourceLoaderOptions_h
 #define ResourceLoaderOptions_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/CrossThreadCopier.h"
 #include "platform/loader/fetch/FetchInitiatorInfo.h"
 #include "platform/loader/fetch/IntegrityMetadata.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/WTFString.h"
+#include "services/network/public/mojom/url_loader_factory.mojom-blink.h"
 
 namespace blink {
 
@@ -99,19 +100,26 @@ struct ResourceLoaderOptions {
   RequestInitiatorContext request_initiator_context;
   SynchronousPolicy synchronous_policy;
 
-  // When set to true, the ResourceFetcher suppresses part of its CORS handling
-  // logic. Used by DocumentThreadableLoader which does CORS handling by
-  // itself.
+  // When set to kDisableCORSHandlingByResourceFetcher, the ResourceFetcher
+  // suppresses part of its CORS handling logic.
+  // Used by DocumentThreadableLoader which does CORS handling by itself.
   CORSHandlingByResourceFetcher cors_handling_by_resource_fetcher;
 
   // Corresponds to the CORS flag in the Fetch spec.
   bool cors_flag;
 
-  RefPtr<SecurityOrigin> security_origin;
+  scoped_refptr<const SecurityOrigin> security_origin;
   String content_security_policy_nonce;
   IntegrityMetadataSet integrity_metadata;
   ParserDisposition parser_disposition;
   CacheAwareLoadingEnabled cache_aware_loading_enabled;
+
+  // If not null, this URLLoaderFactory should be used to load this resource
+  // rather than whatever factory the system might otherwise use.
+  // Used for example for loading blob: URLs and for prefetch loading.
+  scoped_refptr<
+      base::RefCountedData<network::mojom::blink::URLLoaderFactoryPtr>>
+      url_loader_factory;
 };
 
 // Encode AtomicString (in FetchInitiatorInfo) as String to cross threads.
@@ -134,7 +142,15 @@ struct CrossThreadResourceLoaderOptionsData {
             options.content_security_policy_nonce.IsolatedCopy()),
         integrity_metadata(options.integrity_metadata),
         parser_disposition(options.parser_disposition),
-        cache_aware_loading_enabled(options.cache_aware_loading_enabled) {}
+        cache_aware_loading_enabled(options.cache_aware_loading_enabled) {
+    if (options.url_loader_factory) {
+      DCHECK(options.url_loader_factory->data.is_bound());
+      url_loader_factory = base::MakeRefCounted<base::RefCountedData<
+          network::mojom::blink::URLLoaderFactoryPtrInfo>>();
+      options.url_loader_factory->data->Clone(
+          MakeRequest(&url_loader_factory->data));
+    }
+  }
 
   operator ResourceLoaderOptions() const {
     ResourceLoaderOptions options;
@@ -151,6 +167,13 @@ struct CrossThreadResourceLoaderOptionsData {
     options.integrity_metadata = integrity_metadata;
     options.parser_disposition = parser_disposition;
     options.cache_aware_loading_enabled = cache_aware_loading_enabled;
+    if (url_loader_factory) {
+      DCHECK(url_loader_factory->data.is_valid());
+      options.url_loader_factory = base::MakeRefCounted<
+          base::RefCountedData<network::mojom::blink::URLLoaderFactoryPtr>>(
+          network::mojom::blink::URLLoaderFactoryPtr(
+              std::move(url_loader_factory->data)));
+    }
     return options;
   }
 
@@ -162,12 +185,15 @@ struct CrossThreadResourceLoaderOptionsData {
 
   CORSHandlingByResourceFetcher cors_handling_by_resource_fetcher;
   bool cors_flag;
-  RefPtr<SecurityOrigin> security_origin;
+  scoped_refptr<const SecurityOrigin> security_origin;
 
   String content_security_policy_nonce;
   IntegrityMetadataSet integrity_metadata;
   ParserDisposition parser_disposition;
   CacheAwareLoadingEnabled cache_aware_loading_enabled;
+  scoped_refptr<
+      base::RefCountedData<network::mojom::blink::URLLoaderFactoryPtrInfo>>
+      url_loader_factory;
 };
 
 template <>

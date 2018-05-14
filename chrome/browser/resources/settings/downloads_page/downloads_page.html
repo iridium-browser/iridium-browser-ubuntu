@@ -29,24 +29,22 @@
       <div class="separator"></div>
       <controlled-button class="secondary-button" id="changeDownloadsPath"
           label="$i18n{changeDownloadLocation}"
-          on-tap="selectDownloadLocation_"
+          on-click="selectDownloadLocation_"
           pref="[[prefs.download.default_directory]]"
           end-justified>
       </controlled-button>
     </div>
-    <div class="settings-box block">
-      <settings-toggle-button
-          pref="{{prefs.download.prompt_for_download}}"
-          label="$i18n{promptForDownload}">
-      </settings-toggle-button>
+    <settings-toggle-button
+        pref="{{prefs.download.prompt_for_download}}"
+        label="$i18n{promptForDownload}">
+    </settings-toggle-button>
 <if expr="chromeos">
-      <settings-toggle-button
-          pref="{{prefs.gdata.disabled}}"
-          label="$i18n{disconnectGoogleDriveAccount}"
-          hidden="[[!pageVisibility.googleDrive]]">
-      </settings-toggle-button>
+    <settings-toggle-button class="continuation"
+        pref="{{prefs.gdata.disabled}}"
+        label="$i18n{disconnectGoogleDriveAccount}"
+        hidden="[[!pageVisibility.googleDrive]]">
+    </settings-toggle-button>
 </if>
-    </div>
     <template is="dom-if" if="[[autoOpenDownloads_]]" restamp>
       <div class="settings-box">
         <div class="start">
@@ -54,7 +52,7 @@
         </div>
         <div class="separator"></div>
         <paper-button id="resetAutoOpenFileTypes" class="secondary-button"
-            on-tap="onClearAutoOpenFileTypesTap_">
+            on-click="onClearAutoOpenFileTypesTap_">
           $i18n{clear}
         </paper-button>
       </div>

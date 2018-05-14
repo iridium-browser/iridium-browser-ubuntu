@@ -10,10 +10,12 @@ import android.graphics.PixelFormat;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.View;
 import android.widget.FrameLayout;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 
@@ -28,9 +30,13 @@ public class ContentViewRenderView extends FrameLayout {
     // The native side of this object.
     private long mNativeContentViewRenderView;
     private SurfaceHolder.Callback mSurfaceCallback;
+    private WindowAndroid mWindowAndroid;
 
     private final SurfaceView mSurfaceView;
     protected ContentViewCore mContentViewCore;
+
+    private int mWidth;
+    private int mHeight;
 
     /**
      * Constructs a new ContentViewRenderView.
@@ -62,8 +68,9 @@ public class ContentViewRenderView extends FrameLayout {
         assert !mSurfaceView.getHolder().getSurface().isValid() :
                 "Surface created before native library loaded.";
         assert rootWindow != null;
-        mNativeContentViewRenderView = nativeInit(rootWindow.getNativePointer());
+        mNativeContentViewRenderView = nativeInit(rootWindow);
         assert mNativeContentViewRenderView != 0;
+        mWindowAndroid = rootWindow;
         mSurfaceCallback = new SurfaceHolder.Callback() {
             @Override
             public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
@@ -81,6 +88,13 @@ public class ContentViewRenderView extends FrameLayout {
                 assert mNativeContentViewRenderView != 0;
                 nativeSurfaceCreated(mNativeContentViewRenderView);
 
+                // On pre-M Android, layers start in the hidden state until a relayout happens.
+                // There is a bug that manifests itself when entering overlay mode on pre-M devices,
+                // where a relayout never happens. This bug is out of Chromium's control, but can be
+                // worked around by forcibly re-setting the visibility of the surface view.
+                // Otherwise, the screen stays black, and some tests fail.
+                mSurfaceView.setVisibility(mSurfaceView.getVisibility());
+
                 onReadyToRender();
             }
 
@@ -92,6 +106,31 @@ public class ContentViewRenderView extends FrameLayout {
         };
         mSurfaceView.getHolder().addCallback(mSurfaceCallback);
         mSurfaceView.setVisibility(VISIBLE);
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        mWidth = w;
+        mHeight = h;
+        WebContents webContents =
+                mContentViewCore != null ? mContentViewCore.getWebContents() : null;
+        if (webContents != null) webContents.setSize(w, h);
+    }
+
+    /**
+     * View's method override to notify WindowAndroid about changes in its visibility.
+     */
+    @Override
+    protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+
+        if (mWindowAndroid == null) return;
+
+        if (visibility == View.GONE) {
+            mWindowAndroid.onVisibilityChanged(false);
+        } else if (visibility == View.VISIBLE) {
+            mWindowAndroid.onVisibilityChanged(true);
+        }
     }
 
     /**
@@ -119,6 +158,7 @@ public class ContentViewRenderView extends FrameLayout {
      */
     public void destroy() {
         mSurfaceView.getHolder().removeCallback(mSurfaceCallback);
+        mWindowAndroid = null;
         nativeDestroy(mNativeContentViewRenderView);
         mNativeContentViewRenderView = 0;
     }
@@ -130,7 +170,7 @@ public class ContentViewRenderView extends FrameLayout {
         WebContents webContents = contentViewCore != null ? contentViewCore.getWebContents() : null;
         if (webContents != null) {
             nativeOnPhysicalBackingSizeChanged(
-                    mNativeContentViewRenderView, webContents, getWidth(), getHeight());
+                    mNativeContentViewRenderView, webContents, mWidth, mHeight);
         }
         nativeSetCurrentWebContents(mNativeContentViewRenderView, webContents);
     }
@@ -180,7 +220,7 @@ public class ContentViewRenderView extends FrameLayout {
         }
     }
 
-    private native long nativeInit(long rootWindowNativePointer);
+    private native long nativeInit(WindowAndroid rootWindow);
     private native void nativeDestroy(long nativeContentViewRenderView);
     private native void nativeSetCurrentWebContents(
             long nativeContentViewRenderView, WebContents webContents);

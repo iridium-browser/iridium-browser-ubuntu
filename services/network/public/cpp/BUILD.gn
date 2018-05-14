@@ -1,0 +1,127 @@
+# Copyright 2017 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//mojo/public/tools/bindings/mojom.gni")
+
+component("cpp") {
+  output_name = "network_cpp"
+
+  sources = [
+    "cors/cors.cc",
+    "cors/cors.h",
+    "cors/cors_legacy.cc",
+    "cors/cors_legacy.h",
+    "cors/cors_url_loader.cc",
+    "cors/cors_url_loader.h",
+    "cors/cors_url_loader_factory.cc",
+    "cors/cors_url_loader_factory.h",
+    "cors/preflight_cache.cc",
+    "cors/preflight_cache.h",
+    "cors/preflight_result.cc",
+    "cors/preflight_result.h",
+    "features.cc",
+    "features.h",
+    "mutable_network_traffic_annotation_tag_mojom_traits.h",
+    "mutable_partial_network_traffic_annotation_tag_mojom_traits.h",
+    "net_adapters.cc",
+    "net_adapters.h",
+    "network_switches.cc",
+    "network_switches.h",
+    "simple_url_loader.cc",
+    "simple_url_loader.h",
+    "simple_url_loader_stream_consumer.h",
+  ]
+
+  public_deps = [
+    ":cpp_base",
+    "//services/network/public/mojom",
+    "//url/ipc:url_ipc",
+  ]
+
+  deps = [
+    "//base",
+    "//components/prefs",
+    "//ipc",
+    "//mojo/common",
+    "//net",
+    "//services/proxy_resolver/public/mojom",
+  ]
+
+  defines = [ "IS_NETWORK_CPP_IMPL" ]
+}
+
+component("cpp_base") {
+  output_name = "network_cpp_base"
+
+  sources = [
+    "cors/cors_error_status.cc",
+    "cors/cors_error_status.h",
+    "data_element.cc",
+    "data_element.h",
+    "http_raw_request_response_info.cc",
+    "http_raw_request_response_info.h",
+    "network_param_ipc_traits.cc",
+    "network_param_ipc_traits.h",
+    "proxy_config_mojom_traits.cc",
+    "proxy_config_mojom_traits.h",
+    "resource_request.cc",
+    "resource_request.h",
+    "resource_request_body.cc",
+    "resource_request_body.h",
+    "resource_response.cc",
+    "resource_response.h",
+    "resource_response_info.cc",
+    "resource_response_info.h",
+    "url_loader_completion_status.cc",
+    "url_loader_completion_status.h",
+    "url_request_mojom_traits.cc",
+    "url_request_mojom_traits.h",
+  ]
+  public_deps = [
+    "//services/network/public/mojom:data_pipe_interface",
+    "//url/ipc:url_ipc",
+    "//url/mojom:url_mojom_gurl",
+  ]
+  deps = [
+    "//base",
+    "//ipc",
+    "//net",
+    "//services/network/public/mojom:mojom_shared",
+  ]
+  defines = [ "IS_NETWORK_CPP_BASE_IMPL" ]
+}
+
+mojom("test_interfaces") {
+  sources = [
+    "network_traits_test_service.mojom",
+  ]
+  public_deps = [
+    "//services/network/public/mojom",
+  ]
+}
+
+source_set("tests") {
+  testonly = true
+
+  sources = [
+    "cors/cors_unittest.cc",
+    "cors/preflight_cache_unittest.cc",
+    "cors/preflight_result_unittest.cc",
+    "mutable_network_traffic_annotation_tag_mojom_traits_unittest.cc",
+    "mutable_partial_network_traffic_annotation_tag_mojom_traits_unittest.cc",
+    "network_mojom_traits_unittest.cc",
+    "proxy_config_mojom_traits_unittest.cc",
+    "simple_url_loader_unittest.cc",
+  ]
+  deps = [
+    ":cpp",
+    ":test_interfaces",
+    "//base",
+    "//mojo/public/cpp/bindings",
+    "//net",
+    "//net:test_support",
+    "//services/network:network_service",
+    "//testing/gtest",
+  ]
+}

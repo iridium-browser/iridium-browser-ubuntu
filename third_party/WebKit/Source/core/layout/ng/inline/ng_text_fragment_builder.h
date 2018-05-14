@@ -7,38 +7,48 @@
 
 #include "core/layout/ng/geometry/ng_logical_size.h"
 #include "core/layout/ng/inline/ng_inline_node.h"
-#include "core/layout/ng/inline/ng_line_height_metrics.h"
-#include "platform/text/TextDirection.h"
+#include "core/layout/ng/inline/ng_text_end_effect.h"
+#include "core/layout/ng/ng_base_fragment_builder.h"
 #include "platform/wtf/Allocator.h"
 
 namespace blink {
 
+class LayoutObject;
 class NGPhysicalTextFragment;
 class ShapeResult;
+struct NGInlineItemResult;
 
-class CORE_EXPORT NGTextFragmentBuilder final {
+class CORE_EXPORT NGTextFragmentBuilder final : public NGBaseFragmentBuilder {
   STACK_ALLOCATED();
 
  public:
-  NGTextFragmentBuilder(NGInlineNode);
+  NGTextFragmentBuilder(NGInlineNode, WritingMode);
 
-  NGTextFragmentBuilder& SetSize(const NGLogicalSize&);
-
-  NGTextFragmentBuilder& SetShapeResult(RefPtr<const ShapeResult>);
+  // NOTE: Takes ownership of the shape result within the item result.
+  void SetItem(NGInlineItemResult*, LayoutUnit line_height);
+  void SetText(LayoutObject*,
+               const String& text,
+               scoped_refptr<const ComputedStyle>,
+               scoped_refptr<const ShapeResult>);
 
   // Creates the fragment. Can only be called once.
-  RefPtr<NGPhysicalTextFragment> ToTextFragment(unsigned index,
-                                                unsigned start_offset,
-                                                unsigned end_offset);
+  scoped_refptr<NGPhysicalTextFragment> ToTextFragment();
 
  private:
-  NGInlineNode node_;
-
+  NGInlineNode inline_node_;
+  String text_;
+  unsigned item_index_;
+  unsigned start_offset_;
+  unsigned end_offset_;
   NGLogicalSize size_;
+  scoped_refptr<const ShapeResult> shape_result_;
+  NGTextEndEffect end_effect_ = NGTextEndEffect::kNone;
 
-  RefPtr<const ShapeResult> shape_result_;
+  // TODO(eae): Replace with Node pointer.
+  LayoutObject* layout_object_ = nullptr;
 
-  NGWritingMode writing_mode_;
+  // Not used in NG paint, only to copy to InlineTextBox::SetExpansion().
+  int expansion_ = 0;
 };
 
 }  // namespace blink

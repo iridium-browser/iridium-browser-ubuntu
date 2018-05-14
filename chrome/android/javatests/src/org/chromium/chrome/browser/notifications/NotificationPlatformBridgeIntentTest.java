@@ -24,7 +24,6 @@ import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.website.SingleCategoryPreferences;
 import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ActivityUtils;
 import org.chromium.content.browser.test.util.Criteria;
@@ -39,8 +38,7 @@ import org.chromium.content.browser.test.util.CriteriaHelper;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class NotificationPlatformBridgeIntentTest {
     /**
      * Name of the Intent extra holding the notification id. This is set by the framework when a
@@ -109,9 +107,7 @@ public class NotificationPlatformBridgeIntentTest {
                         .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         .putExtra(EXTRA_NOTIFICATION_ID, NotificationPlatformBridge.PLATFORM_ID)
                         .putExtra(NotificationConstants.EXTRA_NOTIFICATION_TAG,
-                                NotificationPlatformBridge.makePlatformTag(
-                                        "42" /* notificationId */, "https://example.com",
-                                        null /* tag */));
+                                "p#https://example.com#0" /* notificationId */);
 
         Preferences activity = ActivityUtils.waitForActivity(
                 InstrumentationRegistry.getInstrumentation(), Preferences.class, new Runnable() {
@@ -154,7 +150,6 @@ public class NotificationPlatformBridgeIntentTest {
         intent.putExtra(NotificationConstants.EXTRA_NOTIFICATION_INFO_PROFILE_ID, "Default");
         intent.putExtra(
                 NotificationConstants.EXTRA_NOTIFICATION_INFO_ORIGIN, "https://example.com");
-        intent.putExtra(NotificationConstants.EXTRA_NOTIFICATION_INFO_TAG, "tag");
 
         PendingIntent pendingIntent = PendingIntent.getBroadcast(
                 context, 0 /* request code */, intent, PendingIntent.FLAG_UPDATE_CURRENT);

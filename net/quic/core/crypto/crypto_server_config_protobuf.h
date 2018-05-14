@@ -14,7 +14,6 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
 #include "net/quic/platform/api/quic_export.h"
 #include "net/quic/platform/api/quic_string_piece.h"
@@ -56,7 +55,7 @@ class QUIC_EXPORT_PRIVATE QuicServerConfigProtobuf {
   void set_config(QuicStringPiece config) { config.CopyToString(&config_); }
 
   QuicServerConfigProtobuf::PrivateKey* add_key() {
-    keys_.push_back(base::MakeUnique<PrivateKey>());
+    keys_.push_back(std::make_unique<PrivateKey>());
     return keys_.back().get();
   }
 

@@ -25,6 +25,7 @@
 #include <net/if_dl.h>
 #endif
 
+namespace media_router {
 namespace {
 
 #if !defined(OS_MACOSX)
@@ -51,6 +52,9 @@ void GetDiscoveryNetworkInfoListImpl(
     }
 
     const struct sockaddr* addr = if_list->ifa_addr;
+    if (addr == nullptr) {
+      continue;
+    }
     if (addr->sa_family != AF_PACKET) {
       continue;
     }
@@ -102,3 +106,5 @@ std::vector<DiscoveryNetworkInfo> GetDiscoveryNetworkInfoList() {
   freeifaddrs(if_list);
   return network_ids;
 }
+
+}  // namespace media_router

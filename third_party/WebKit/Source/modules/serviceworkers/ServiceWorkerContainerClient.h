@@ -21,11 +21,14 @@ class WebServiceWorkerProvider;
 class MODULES_EXPORT ServiceWorkerContainerClient final
     : public GarbageCollectedFinalized<ServiceWorkerContainerClient>,
       public Supplement<Document>,
-      public Supplement<WorkerClients> {
+      public Supplement<WorkerClients>,
+      public TraceWrapperBase {
   USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerContainerClient);
   WTF_MAKE_NONCOPYABLE(ServiceWorkerContainerClient);
 
  public:
+  static const char kSupplementName[];
+
   ServiceWorkerContainerClient(Document&,
                                std::unique_ptr<WebServiceWorkerProvider>);
   ServiceWorkerContainerClient(WorkerClients&,
@@ -34,12 +37,16 @@ class MODULES_EXPORT ServiceWorkerContainerClient final
 
   WebServiceWorkerProvider* Provider() { return provider_.get(); }
 
-  static const char* SupplementName();
   static ServiceWorkerContainerClient* From(ExecutionContext*);
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     Supplement<Document>::Trace(visitor);
     Supplement<WorkerClients>::Trace(visitor);
+  }
+
+  void TraceWrappers(const ScriptWrappableVisitor* visitor) const override {
+    Supplement<Document>::TraceWrappers(visitor);
+    Supplement<WorkerClients>::TraceWrappers(visitor);
   }
 
  private:

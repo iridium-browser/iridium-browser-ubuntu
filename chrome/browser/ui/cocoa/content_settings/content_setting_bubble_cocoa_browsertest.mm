@@ -17,6 +17,7 @@
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
 #import "chrome/browser/ui/cocoa/subresource_filter/subresource_filter_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/test/cocoa_test_helper.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
@@ -26,7 +27,10 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/subresource_filter/core/browser/subresource_filter_constants.h"
+#include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "content/public/common/media_stream_request.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "testing/gtest_mac.h"
 #include "ui/base/cocoa/touch_bar_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -93,16 +97,24 @@ IN_PROC_BROWSER_TEST_F(ContentSettingBubbleControllerTest, Init) {
       BlockAllContentForTesting();
 
   // Automatic downloads are handled by DownloadRequestLimiter.
-  g_browser_process->download_request_limiter()
-      ->GetDownloadState(web_contents(), web_contents(), true)
-      ->SetDownloadStatusAndNotify(
-          DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED);
+  DownloadRequestLimiter::TabDownloadState* tab_download_state =
+      g_browser_process->download_request_limiter()->GetDownloadState(
+          web_contents(), web_contents(), true);
+  tab_download_state->set_download_seen();
+  tab_download_state->SetDownloadStatusAndNotify(
+      DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED);
 
   std::vector<std::unique_ptr<ContentSettingImageModel>> models =
       ContentSettingImageModel::GenerateContentSettingImageModels();
   for (const auto& model : models) {
     ContentSettingBubbleModel* bubble =
         model->CreateBubbleModel(nullptr, web_contents(), profile());
+
+    // Skip this test for the ContentSettingFramebustBlockBubbleModel, which
+    // doesn't have a Cocoa version.
+    if (bubble->AsFramebustBlockBubbleModel())
+      continue;
+
     ContentSettingBubbleController* controller = CreateBubbleController(bubble);
     // No bubble except the one for media should have media menus.
     if (!bubble->AsMediaStreamBubbleModel())
@@ -141,6 +153,9 @@ IN_PROC_BROWSER_TEST_F(ContentSettingBubbleControllerTest, MediaStreamBubble) {
 
 IN_PROC_BROWSER_TEST_F(ContentSettingBubbleControllerTest,
                        InitSubresourceFilter) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      subresource_filter::kSafeBrowsingSubresourceFilterExperimentalUI);
   ContentSettingBubbleController* controller =
       CreateBubbleController(new ContentSettingSubresourceFilterBubbleModel(
           nullptr, web_contents(), profile()));
@@ -159,7 +174,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingBubbleControllerTest,
   EXPECT_NSEQ([[filterController learnMoreLink] title], link);
 
   EXPECT_TRUE([filterController manageCheckbox]);
-  label = base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_ALLOW_ADS));
+  label =
+      base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_ALWAYS_ALLOW_ADS));
   EXPECT_NSEQ([[filterController manageCheckbox] title], label);
 
   EXPECT_TRUE([filterController doneButton]);
@@ -194,6 +210,33 @@ IN_PROC_BROWSER_TEST_F(ContentSettingBubbleControllerTest,
   label =
       base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_APP_MENU_RELOAD));
   EXPECT_NSEQ([doneButton title], label);
+
+  [parent_ close];
+}
+
+IN_PROC_BROWSER_TEST_F(ContentSettingBubbleControllerTest,
+                       LearnMoreLinkClicked) {
+  ContentSettingBubbleController* controller =
+      CreateBubbleController(new ContentSettingSubresourceFilterBubbleModel(
+          browser()->content_setting_bubble_model_delegate(), web_contents(),
+          profile()));
+  EXPECT_TRUE(controller);
+
+  SubresourceFilterBubbleController* filter_controller =
+      base::mac::ObjCCast<SubresourceFilterBubbleController>(controller);
+
+  NSString* link =
+      base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+  EXPECT_NSEQ([[filter_controller learnMoreLink] title], link);
+
+  NSButton* learn_more_link = [filter_controller learnMoreLink];
+  [filter_controller learnMoreLinkClicked:learn_more_link];
+
+  content::TestNavigationObserver observer(web_contents());
+  observer.Wait();
+
+  std::string link_value(subresource_filter::kLearnMoreLink);
+  EXPECT_EQ(link_value, web_contents()->GetLastCommittedURL().spec());
 
   [parent_ close];
 }

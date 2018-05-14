@@ -10,8 +10,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/test/base/testing_browser_process.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/variations/service/variations_service.h"
 #include "net/base/url_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -50,7 +50,8 @@ IN_PROC_BROWSER_TEST_F(VariationsServiceDevicePolicyTest, VariationsURLValid) {
   // Device policy has updated the cros settings.
   const GURL url =
       g_browser_process->variations_service()->GetVariationsServerURL(
-          g_browser_process->local_state(), std::string());
+          g_browser_process->local_state(), std::string(),
+          variations::VariationsService::HttpOptions::USE_HTTPS);
   EXPECT_TRUE(base::StartsWith(url.spec(), default_variations_url,
                                base::CompareCase::SENSITIVE));
   std::string value;

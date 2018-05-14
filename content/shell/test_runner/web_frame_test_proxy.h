@@ -8,8 +8,10 @@
 #include <memory>
 #include <utility>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "content/public/common/content_switches.h"
 #include "content/shell/test_runner/test_runner_export.h"
 #include "content/shell/test_runner/web_frame_test_client.h"
 #include "third_party/WebKit/public/platform/WebEffectiveConnectionType.h"
@@ -52,7 +54,7 @@ class TEST_RUNNER_EXPORT WebFrameTestProxyBase {
 template <class Base, typename P>
 class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
  public:
-  explicit WebFrameTestProxy(P p) : Base(p) {}
+  explicit WebFrameTestProxy(P p) : Base(std::move(p)) {}
 
   virtual ~WebFrameTestProxy() {}
 
@@ -63,10 +65,6 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
     if (plugin)
       return plugin;
     return Base::CreatePlugin(params);
-  }
-
-  blink::WebScreenOrientationClient* GetWebScreenOrientationClient() override {
-    return test_client()->GetWebScreenOrientationClient();
   }
 
   void DidAddMessageToConsole(const blink::WebConsoleMessage& message,
@@ -91,21 +89,11 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
     Base::DownloadURL(request, suggested_name);
   }
 
-  void LoadURLExternally(const blink::WebURLRequest& request,
-                         blink::WebNavigationPolicy policy,
-                         blink::WebTriggeringEventInfo triggering_event_info,
-                         bool replaces_current_history_item) override {
-    DCHECK_NE(policy, blink::kWebNavigationPolicyDownload);
-    test_client()->LoadURLExternally(request, policy, triggering_event_info,
-                                     replaces_current_history_item);
-    Base::LoadURLExternally(request, policy, triggering_event_info,
-                            replaces_current_history_item);
-  }
 
-  void DidStartProvisionalLoad(blink::WebDataSource* data_source,
+  void DidStartProvisionalLoad(blink::WebDocumentLoader* document_loader,
                                blink::WebURLRequest& request) override {
-    test_client()->DidStartProvisionalLoad(data_source, request);
-    Base::DidStartProvisionalLoad(data_source, request);
+    test_client()->DidStartProvisionalLoad(document_loader, request);
+    Base::DidStartProvisionalLoad(document_loader, request);
   }
 
   void DidReceiveServerRedirectForProvisionalLoad() override {
@@ -119,16 +107,26 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
     test_client()->DidFailProvisionalLoad(error, commit_type);
     // If the test finished, don't notify the embedder of the failed load,
     // as we already destroyed the document loader.
-    if (!web_frame()->ProvisionalDataSource())
+    if (!web_frame()->GetProvisionalDocumentLoader())
       return;
     Base::DidFailProvisionalLoad(error, commit_type);
   }
 
   void DidCommitProvisionalLoad(
       const blink::WebHistoryItem& item,
-      blink::WebHistoryCommitType commit_type) override {
-    test_client()->DidCommitProvisionalLoad(item, commit_type);
-    Base::DidCommitProvisionalLoad(item, commit_type);
+      blink::WebHistoryCommitType commit_type,
+      blink::WebGlobalObjectReusePolicy global_object_reuse_policy) override {
+    test_client()->DidCommitProvisionalLoad(item, commit_type,
+                                            global_object_reuse_policy);
+    Base::DidCommitProvisionalLoad(item, commit_type,
+                                   global_object_reuse_policy);
+  }
+
+  void DidNavigateWithinPage(const blink::WebHistoryItem& item,
+                             blink::WebHistoryCommitType commit_type,
+                             bool content_initiated) {
+    test_client()->DidNavigateWithinPage(item, commit_type, content_initiated);
+    Base::DidNavigateWithinPage(item, commit_type, content_initiated);
   }
 
   void DidReceiveTitle(const blink::WebString& title,
@@ -163,14 +161,6 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
     test_client()->DidFinishLoad();
   }
 
-  void DidNavigateWithinPage(const blink::WebHistoryItem& history_item,
-                             blink::WebHistoryCommitType commit_type,
-                             bool content_initiated) override {
-    Base::DidNavigateWithinPage(history_item, commit_type, content_initiated);
-    test_client()->DidNavigateWithinPage(history_item, commit_type,
-                                         content_initiated);
-  }
-
   void DidStopLoading() override {
     Base::DidStopLoading();
     test_client()->DidStopLoading();
@@ -181,12 +171,9 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
     Base::DidChangeSelection(is_selection_empty);
   }
 
-  blink::WebColorChooser* CreateColorChooser(
-      blink::WebColorChooserClient* client,
-      const blink::WebColor& initial_color,
-      const blink::WebVector<blink::WebColorSuggestion>& suggestions) override {
-    return test_client()->CreateColorChooser(client, initial_color,
-                                             suggestions);
+  void DidChangeContents() override {
+    test_client()->DidChangeContents();
+    Base::DidChangeContents();
   }
 
   blink::WebEffectiveConnectionType GetEffectiveConnectionType() override {
@@ -255,21 +242,6 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
       return policy;
 
     return Base::DecidePolicyForNavigation(info);
-  }
-
-  void DidStartLoading(bool to_different_document) override {
-    Base::DidStartLoading(to_different_document);
-    test_client()->DidStartLoading(to_different_document);
-  }
-
-  void WillStartUsingPeerConnectionHandler(
-      blink::WebRTCPeerConnectionHandler* handler) override {
-    // RenderFrameImpl::willStartUsingPeerConnectionHandler can not be mocked.
-    // See http://crbug/363285.
-  }
-
-  blink::WebUserMediaClient* UserMediaClient() override {
-    return test_client()->UserMediaClient();
   }
 
   void PostAccessibilityEvent(const blink::WebAXObject& object,

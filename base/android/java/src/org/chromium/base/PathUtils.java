@@ -8,13 +8,13 @@ import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.os.AsyncTask;
 import android.os.Environment;
-import android.os.StrictMode;
 import android.os.SystemClock;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.MainDex;
 import org.chromium.base.metrics.RecordHistogram;
 
+import java.io.File;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -25,14 +25,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @MainDex
 public abstract class PathUtils {
     private static final String THUMBNAIL_DIRECTORY_NAME = "textures";
-    private static final String DOWNLOAD_INTERNAL_DIRECTORY_NAME = "download_internal";
 
     private static final int DATA_DIRECTORY = 0;
     private static final int THUMBNAIL_DIRECTORY = 1;
-    private static final int DATABASE_DIRECTORY = 2;
-    private static final int CACHE_DIRECTORY = 3;
-    private static final int DOWNLOAD_INTERNAL_DIRECTORY = 4;
-    private static final int NUM_DIRECTORIES = 5;
+    private static final int CACHE_DIRECTORY = 2;
+    private static final int NUM_DIRECTORIES = 3;
     private static final AtomicBoolean sInitializationStarted = new AtomicBoolean();
     private static AsyncTask<Void, Void, String[]> sDirPathFetchTask;
 
@@ -40,6 +37,7 @@ public abstract class PathUtils {
     // need the values, we will need the suffix so that we can restart the task synchronously on
     // the UI thread.
     private static String sDataDirectorySuffix;
+    private static String sCacheSubDirectory;
 
     // Prevent instantiation.
     private PathUtils() {}
@@ -68,13 +66,10 @@ public abstract class PathUtils {
             // already finished.
             if (sDirPathFetchTask.cancel(false)) {
                 // Allow disk access here because we have no other choice.
-                StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
-                try {
+                try (StrictModeContext unused = StrictModeContext.allowDiskWrites()) {
                     // sDirPathFetchTask did not complete. We have to run the code it was supposed
                     // to be responsible for synchronously on the UI thread.
                     return PathUtils.setPrivateDataDirectorySuffixInternal();
-                } finally {
-                    StrictMode.setThreadPolicy(oldPolicy);
                 }
             } else {
                 // sDirPathFetchTask succeeded, and the values we need should be ready to access
@@ -103,11 +98,13 @@ public abstract class PathUtils {
                 sDataDirectorySuffix, Context.MODE_PRIVATE).getPath();
         paths[THUMBNAIL_DIRECTORY] = appContext.getDir(
                 THUMBNAIL_DIRECTORY_NAME, Context.MODE_PRIVATE).getPath();
-        paths[DOWNLOAD_INTERNAL_DIRECTORY] =
-                appContext.getDir(DOWNLOAD_INTERNAL_DIRECTORY_NAME, Context.MODE_PRIVATE).getPath();
-        paths[DATABASE_DIRECTORY] = appContext.getDatabasePath("foo").getParent();
         if (appContext.getCacheDir() != null) {
-            paths[CACHE_DIRECTORY] = appContext.getCacheDir().getPath();
+            if (sCacheSubDirectory == null) {
+                paths[CACHE_DIRECTORY] = appContext.getCacheDir().getPath();
+            } else {
+                paths[CACHE_DIRECTORY] =
+                        new File(appContext.getCacheDir(), sCacheSubDirectory).getPath();
+            }
         }
         return paths;
     }
@@ -122,14 +119,16 @@ public abstract class PathUtils {
      * need to try to re-execute later.
      *
      * @param suffix The private data directory suffix.
+     * @param cacheSubDir The subdirectory in the cache directory to use, if non-null.
      * @see Context#getDir(String, int)
      */
-    public static void setPrivateDataDirectorySuffix(String suffix) {
+    public static void setPrivateDataDirectorySuffix(String suffix, String cacheSubDir) {
         // This method should only be called once, but many tests end up calling it multiple times,
         // so adding a guard here.
         if (!sInitializationStarted.getAndSet(true)) {
             assert ContextUtils.getApplicationContext() != null;
             sDataDirectorySuffix = suffix;
+            sCacheSubDirectory = cacheSubDir;
             sDirPathFetchTask = new AsyncTask<Void, Void, String[]>() {
                 @Override
                 protected String[] doInBackground(Void... unused) {
@@ -137,6 +136,10 @@ public abstract class PathUtils {
                 }
             }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
         }
+    }
+
+    public static void setPrivateDataDirectorySuffix(String suffix) {
+        setPrivateDataDirectorySuffix(suffix, null);
     }
 
     /**
@@ -157,15 +160,6 @@ public abstract class PathUtils {
     }
 
     /**
-     * @return the private directory that is used to store application database.
-     */
-    @CalledByNative
-    public static String getDatabaseDirectory() {
-        assert sDirPathFetchTask != null : "setDataDirectorySuffix must be called first.";
-        return getDirectoryPath(DATABASE_DIRECTORY);
-    }
-
-    /**
      * @return the cache directory.
      */
     @CalledByNative
@@ -180,12 +174,6 @@ public abstract class PathUtils {
         return getDirectoryPath(THUMBNAIL_DIRECTORY);
     }
 
-    @CalledByNative
-    public static String getDownloadInternalDirectory() {
-        assert sDirPathFetchTask != null : "setDataDirectorySuffix must be called first.";
-        return getDirectoryPath(DOWNLOAD_INTERNAL_DIRECTORY);
-    }
-
     /**
      * @return the public downloads directory.
      */
@@ -193,18 +181,15 @@ public abstract class PathUtils {
     @CalledByNative
     private static String getDownloadsDirectory() {
         // Temporarily allowing disk access while fixing. TODO: http://crbug.com/508615
-        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        String downloadsPath;
-        try {
+        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
             long time = SystemClock.elapsedRealtime();
-            downloadsPath = Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_DOWNLOADS).getPath();
+            String downloadsPath =
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                            .getPath();
             RecordHistogram.recordTimesHistogram("Android.StrictMode.DownloadsDir",
                     SystemClock.elapsedRealtime() - time, TimeUnit.MILLISECONDS);
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
+            return downloadsPath;
         }
-        return downloadsPath;
     }
 
     /**

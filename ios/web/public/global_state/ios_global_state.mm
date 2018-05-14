@@ -8,7 +8,6 @@
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/statistics_recorder.h"
 #include "base/task_scheduler/initialization_util.h"
 #include "net/base/network_change_notifier.h"
 
@@ -23,23 +22,17 @@ base::MessageLoopForUI* g_message_loop = nullptr;
 net::NetworkChangeNotifier* g_network_change_notifer = nullptr;
 
 base::TaskScheduler::InitParams GetDefaultTaskSchedulerInitParams() {
-  using StandbyThreadPolicy =
-      base::SchedulerWorkerPoolParams::StandbyThreadPolicy;
   return base::TaskScheduler::InitParams(
       base::SchedulerWorkerPoolParams(
-          StandbyThreadPolicy::ONE,
           base::RecommendedMaxNumberOfThreadsInPool(2, 8, 0.1, 0),
           base::TimeDelta::FromSeconds(30)),
       base::SchedulerWorkerPoolParams(
-          StandbyThreadPolicy::ONE,
           base::RecommendedMaxNumberOfThreadsInPool(2, 8, 0.1, 0),
           base::TimeDelta::FromSeconds(30)),
       base::SchedulerWorkerPoolParams(
-          StandbyThreadPolicy::ONE,
           base::RecommendedMaxNumberOfThreadsInPool(3, 8, 0.3, 0),
           base::TimeDelta::FromSeconds(30)),
       base::SchedulerWorkerPoolParams(
-          StandbyThreadPolicy::ONE,
           base::RecommendedMaxNumberOfThreadsInPool(3, 8, 0.3, 0),
           base::TimeDelta::FromSeconds(60)));
 }
@@ -54,14 +47,9 @@ void Create(const CreateParams& create_params) {
     if (create_params.install_at_exit_manager) {
       g_exit_manager = new base::AtExitManager();
     }
-
-    // Use an empty string as TaskScheduler name to match the suffix of browser
-    // process TaskScheduler histograms.
-    base::TaskScheduler::Create("");
-
     base::CommandLine::Init(create_params.argc, create_params.argv);
 
-    base::StatisticsRecorder::Initialize();
+    base::TaskScheduler::Create("Browser");
   });
 }
 

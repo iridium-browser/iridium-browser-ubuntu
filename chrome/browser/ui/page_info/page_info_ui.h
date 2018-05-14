@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/strings/string16.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/page_info/page_info.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -22,10 +23,6 @@
 class GURL;
 class Profile;
 class PageInfo;
-
-namespace gfx {
-class Image;
-}
 
 namespace net {
 class X509Certificate;
@@ -47,12 +44,15 @@ class PageInfoUI {
     NUM_TAB_IDS,
   };
 
-  // The security summary is styled depending on the security state. At the
-  // moment, the only styling we apply is color, but it could also include e.g.
-  // bolding.
-  enum SecuritySummaryStyle { STYLE_UNSTYLED = 0, STYLE_COLOR = 1 << 1 };
+  enum class SecuritySummaryColor {
+    RED,
+    GREEN,
+  };
 
   struct SecurityDescription {
+    // The text style for |summary| used to color it. This provides an
+    // opinionated guide to the user on the overall security state of the site.
+    SecuritySummaryColor summary_style;
     // A one-line summary of the security state.
     base::string16 summary;
     // A short paragraph with more details about the state, and how
@@ -133,6 +133,11 @@ class PageInfoUI {
     // connection area of the page info will include an option for the user to
     // revoke their decision to bypass the SSL error for this host.
     bool show_ssl_decision_revoke_button;
+    // Set when the user ignored the password reuse modal warning dialog. When
+    // |show_change_password_buttons| is true, the page identity area of the
+    // page info will include buttons to change corresponding password, and
+    // to whitelist current site.
+    bool show_change_password_buttons;
   };
 
   using CookieInfoList = std::vector<CookieInfo>;
@@ -163,23 +168,10 @@ class PageInfoUI {
       const GURL& url);
 
   // Returns the color to use for the permission decision reason strings.
-  static SkColor GetPermissionDecisionTextColor();
-
-  // Returns the icon resource ID for the given permission |type| and |setting|.
-  static int GetPermissionIconID(ContentSettingsType type,
-                                 ContentSetting setting);
-
-  // Returns the icon for the given permissionInfo |info|.  If |info|'s current
-  // setting is CONTENT_SETTING_DEFAULT, it will return the icon for |info|'s
-  // default setting.
-  static const gfx::Image& GetPermissionIcon(const PermissionInfo& info);
+  static SkColor GetSecondaryTextColor();
 
   // Returns the UI string describing the given object |info|.
   static base::string16 ChosenObjectToUIString(const ChosenObjectInfo& info);
-
-  // Returns the icon for the given object |info|.
-  static const gfx::Image& GetChosenObjectIcon(const ChosenObjectInfo& info,
-                                               bool deleted);
 
 #if defined(OS_ANDROID)
   // Returns the identity icon ID for the given identity |status|.
@@ -188,12 +180,27 @@ class PageInfoUI {
   // Returns the connection icon ID for the given connection |status|.
   static int GetConnectionIconID(PageInfo::SiteConnectionStatus status);
 #else
-  // Returns the icon for the Certificate area.
-  static const gfx::ImageSkia GetCertificateIcon();
-#endif
+  // Returns icons for the given PermissionInfo |info|. If |info|'s current
+  // setting is CONTENT_SETTING_DEFAULT, it will return the icon for |info|'s
+  // default setting.
+  static const gfx::ImageSkia GetPermissionIcon(
+      const PermissionInfo& info,
+      const SkColor related_text_color);
 
-  // Returns true if the Certificate Viewer link should be shown.
-  static bool ShouldShowCertificateLink();
+  // Returns the icon for the given object |info|.
+  static const gfx::ImageSkia GetChosenObjectIcon(
+      const ChosenObjectInfo& info,
+      bool deleted,
+      const SkColor related_text_color);
+
+  // Returns the icon for the page Certificate.
+  static const gfx::ImageSkia GetCertificateIcon(
+      const SkColor related_text_color);
+
+  // Returns the icon for the button / link to Site settings.
+  static const gfx::ImageSkia GetSiteSettingsIcon(
+      const SkColor related_text_color);
+#endif
 
   // Return true if the given ContentSettingsType is in PageInfoUI.
   static bool ContentSettingsTypeInPageInfo(ContentSettingsType type);

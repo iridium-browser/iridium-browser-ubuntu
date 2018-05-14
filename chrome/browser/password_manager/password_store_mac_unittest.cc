@@ -9,10 +9,10 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/run_loop.h"
 #include "base/scoped_observer.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
+#include "base/test/scoped_task_environment.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "components/os_crypt/os_crypt_mocker.h"
 #include "components/password_manager/core/browser/login_database.h"
@@ -20,15 +20,12 @@
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
-#include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
 using autofill::PasswordForm;
-using content::BrowserThread;
 using password_manager::MigrationStatus;
 using password_manager::PasswordStore;
 using password_manager::PasswordStoreChange;
@@ -43,13 +40,6 @@ class MockPasswordStoreConsumer
  public:
   MockPasswordStoreConsumer() = default;
 
-  void WaitForResult() {
-    base::RunLoop run_loop;
-    nested_loop_ = &run_loop;
-    run_loop.Run();
-    nested_loop_ = nullptr;
-  }
-
   const std::vector<std::unique_ptr<PasswordForm>>& forms() const {
     return forms_;
   }
@@ -58,12 +48,9 @@ class MockPasswordStoreConsumer
   void OnGetPasswordStoreResults(
       std::vector<std::unique_ptr<PasswordForm>> results) override {
     forms_.swap(results);
-    if (nested_loop_)
-      nested_loop_->Quit();
   }
 
   std::vector<std::unique_ptr<PasswordForm>> forms_;
-  base::RunLoop* nested_loop_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(MockPasswordStoreConsumer);
 };
@@ -107,8 +94,7 @@ class PasswordStoreMacTest : public testing::TestWithParam<MigrationStatus> {
 
   void ClosePasswordStore();
 
-  // Do a store-level query to wait for all the previously enqueued operations
-  // to finish.
+  // Wait for all the previously enqueued operations to finish.
   void FinishAsyncProcessing();
 
   // Add/Update/Remove |form| and verify the operation succeeded.
@@ -128,8 +114,7 @@ class PasswordStoreMacTest : public testing::TestWithParam<MigrationStatus> {
   PasswordStoreMac* store() { return store_.get(); }
 
  protected:
-  content::TestBrowserThreadBundle ui_thread_;
-
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   base::ScopedTempDir db_dir_;
   scoped_refptr<PasswordStoreMac> store_;
   sync_preferences::TestingPrefServiceSyncable testing_prefs_;
@@ -137,12 +122,12 @@ class PasswordStoreMacTest : public testing::TestWithParam<MigrationStatus> {
 
 PasswordStoreMacTest::PasswordStoreMacTest() {
   EXPECT_TRUE(db_dir_.CreateUniqueTempDir());
-  chrome::RegisterUserProfilePrefs(testing_prefs_.registry());
+  RegisterUserProfilePrefs(testing_prefs_.registry());
   testing_prefs_.SetInteger(password_manager::prefs::kKeychainMigrationStatus,
                             static_cast<int>(GetParam()));
   // Ensure that LoginDatabase will use the mock keychain if it needs to
   // encrypt/decrypt a password.
-  OSCryptMocker::SetUpWithSingleton();
+  OSCryptMocker::SetUp();
 }
 
 PasswordStoreMacTest::~PasswordStoreMacTest() {
@@ -152,9 +137,7 @@ PasswordStoreMacTest::~PasswordStoreMacTest() {
 
 void PasswordStoreMacTest::CreateAndInitPasswordStore(
     std::unique_ptr<password_manager::LoginDatabase> login_db) {
-  store_ = new PasswordStoreMac(
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
-      std::move(login_db), &testing_prefs_);
+  store_ = new PasswordStoreMac(std::move(login_db), &testing_prefs_);
   ASSERT_TRUE(store_->Init(syncer::SyncableService::StartSyncFlare(), nullptr));
 }
 
@@ -162,17 +145,11 @@ void PasswordStoreMacTest::ClosePasswordStore() {
   if (!store_)
     return;
   store_->ShutdownOnUIThread();
-  EXPECT_FALSE(store_->GetBackgroundTaskRunner());
   store_ = nullptr;
 }
 
 void PasswordStoreMacTest::FinishAsyncProcessing() {
-  // Do a store-level query to wait for all the previously enqueued operations
-  // to finish.
-  MockPasswordStoreConsumer consumer;
-  store_->GetLogins({PasswordForm::SCHEME_HTML, std::string(), GURL()},
-                    &consumer);
-  consumer.WaitForResult();
+  scoped_task_environment_.RunUntilIdle();
 }
 
 base::FilePath PasswordStoreMacTest::test_login_db_file_path() const {
@@ -226,7 +203,7 @@ void PasswordStoreMacTest::RemoveForm(const PasswordForm& form) {
 TEST_P(PasswordStoreMacTest, Sanity) {
   base::HistogramTester histogram_tester;
 
-  CreateAndInitPasswordStore(base::MakeUnique<password_manager::LoginDatabase>(
+  CreateAndInitPasswordStore(std::make_unique<password_manager::LoginDatabase>(
       test_login_db_file_path()));
   FinishAsyncProcessing();
   ClosePasswordStore();
@@ -243,9 +220,11 @@ TEST_P(PasswordStoreMacTest, StartAndStop) {
   // PasswordStore::ShutdownOnUIThread() immediately follows
   // PasswordStore::Init(). The message loop isn't running in between. Anyway,
   // PasswordStore should not collapse.
-  CreateAndInitPasswordStore(base::MakeUnique<password_manager::LoginDatabase>(
+  CreateAndInitPasswordStore(std::make_unique<password_manager::LoginDatabase>(
       test_login_db_file_path()));
   ClosePasswordStore();
+
+  FinishAsyncProcessing();
 
   histogram_tester.ExpectUniqueSample(
       "PasswordManager.KeychainMigration.Status",
@@ -256,7 +235,7 @@ TEST_P(PasswordStoreMacTest, OperationsOnABadDatabaseSilentlyFail) {
   // Verify that operations on a PasswordStore with a bad database cause no
   // explosions, but fail without side effect, return no data and trigger no
   // notifications.
-  CreateAndInitPasswordStore(base::MakeUnique<BadLoginDatabase>());
+  CreateAndInitPasswordStore(std::make_unique<BadLoginDatabase>());
   FinishAsyncProcessing();
   EXPECT_FALSE(login_db());
 
@@ -278,8 +257,7 @@ TEST_P(PasswordStoreMacTest, OperationsOnABadDatabaseSilentlyFail) {
       L"12345",
       true,
       1};
-  std::unique_ptr<PasswordForm> form =
-      CreatePasswordFormFromDataForTesting(www_form_data);
+  std::unique_ptr<PasswordForm> form = FillPasswordFormWithData(www_form_data);
   std::unique_ptr<PasswordForm> blacklisted_form(new PasswordForm(*form));
   blacklisted_form->signon_realm = "http://foo.example.com";
   blacklisted_form->origin = GURL("http://foo.example.com/origin");
@@ -292,15 +270,15 @@ TEST_P(PasswordStoreMacTest, OperationsOnABadDatabaseSilentlyFail) {
   // Get all logins; autofillable logins; blacklisted logins.
   MockPasswordStoreConsumer mock_consumer;
   store()->GetLogins(PasswordStore::FormDigest(*form), &mock_consumer);
-  mock_consumer.WaitForResult();
+  FinishAsyncProcessing();
   EXPECT_THAT(mock_consumer.forms(), IsEmpty());
 
   store()->GetAutofillableLogins(&mock_consumer);
-  mock_consumer.WaitForResult();
+  FinishAsyncProcessing();
   EXPECT_THAT(mock_consumer.forms(), IsEmpty());
 
   store()->GetBlacklistLogins(&mock_consumer);
-  mock_consumer.WaitForResult();
+  FinishAsyncProcessing();
   EXPECT_THAT(mock_consumer.forms(), IsEmpty());
 
   // Report metrics.

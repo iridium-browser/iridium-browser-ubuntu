@@ -4,12 +4,13 @@
 
 #include "chrome/browser/ui/views/frame/test_with_browser_view.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/search_engines/chrome_template_url_service_client.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
@@ -17,9 +18,7 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/web_data_service_factory.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
-#include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_io_thread_state.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/test_scheme_classifier.h"
@@ -32,33 +31,33 @@
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager_impl.h"
 #endif
 
+#if defined(OS_MACOSX)
+#include "chrome/common/chrome_features.h"
+#endif
+
 namespace {
 
 std::unique_ptr<KeyedService> CreateTemplateURLService(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return base::MakeUnique<TemplateURLService>(
-      profile->GetPrefs(),
-      std::unique_ptr<SearchTermsData>(new UIThreadSearchTermsData(profile)),
+  return std::make_unique<TemplateURLService>(
+      profile->GetPrefs(), std::make_unique<UIThreadSearchTermsData>(profile),
       WebDataServiceFactory::GetKeywordWebDataForProfile(
           profile, ServiceAccessType::EXPLICIT_ACCESS),
-      std::unique_ptr<TemplateURLServiceClient>(
-          new ChromeTemplateURLServiceClient(
-              HistoryServiceFactory::GetForProfile(
-                  profile, ServiceAccessType::EXPLICIT_ACCESS))),
+      std::make_unique<ChromeTemplateURLServiceClient>(
+          HistoryServiceFactory::GetForProfile(
+              profile, ServiceAccessType::EXPLICIT_ACCESS)),
       nullptr, nullptr, base::Closure());
 }
 
 std::unique_ptr<KeyedService> CreateAutocompleteClassifier(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return base::MakeUnique<AutocompleteClassifier>(
-      base::WrapUnique(new AutocompleteController(
-          base::WrapUnique(new ChromeAutocompleteProviderClient(profile)),
-
-          nullptr, AutocompleteClassifier::DefaultOmniboxProviders())),
-      std::unique_ptr<AutocompleteSchemeClassifier>(
-          new TestSchemeClassifier()));
+  return std::make_unique<AutocompleteClassifier>(
+      std::make_unique<AutocompleteController>(
+          std::make_unique<ChromeAutocompleteProviderClient>(profile), nullptr,
+          AutocompleteClassifier::DefaultOmniboxProviders()),
+      std::make_unique<TestSchemeClassifier>());
 }
 
 }  // namespace
@@ -74,15 +73,14 @@ TestWithBrowserView::~TestWithBrowserView() {
 }
 
 void TestWithBrowserView::SetUp() {
-  local_state_.reset(
-      new ScopedTestingLocalState(TestingBrowserProcess::GetGlobal()));
 #if defined(OS_CHROMEOS)
   chromeos::input_method::InitializeForTesting(
       new chromeos::input_method::MockInputMethodManagerImpl);
 #endif
-  testing_io_thread_state_.reset(new chrome::TestingIOThreadState());
+#if defined(OS_MACOSX)
+  feature_list_.InitAndEnableFeature(features::kViewsBrowserWindows);
+#endif
   BrowserWithTestWindowTest::SetUp();
-  predictor_db_.reset(new predictors::PredictorDatabase(GetProfile()));
   browser_view_ = static_cast<BrowserView*>(browser()->window());
 }
 
@@ -97,14 +95,11 @@ void TestWithBrowserView::TearDown() {
   // the Profile.
   browser_view_->GetWidget()->CloseNow();
   browser_view_ = nullptr;
-  content::RunAllPendingInMessageLoop(content::BrowserThread::DB);
+  content::RunAllTasksUntilIdle();
   BrowserWithTestWindowTest::TearDown();
-  testing_io_thread_state_.reset();
-  predictor_db_.reset();
 #if defined(OS_CHROMEOS)
   chromeos::input_method::Shutdown();
 #endif
-  local_state_.reset(nullptr);
 }
 
 TestingProfile* TestWithBrowserView::CreateProfile() {

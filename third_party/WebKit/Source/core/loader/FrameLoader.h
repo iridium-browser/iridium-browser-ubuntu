@@ -33,6 +33,7 @@
 #ifndef FrameLoader_h
 #define FrameLoader_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/IconURL.h"
 #include "core/dom/SandboxFlags.h"
@@ -50,6 +51,7 @@
 #include "platform/wtf/HashSet.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "public/web/WebTriggeringEventInfo.h"
+#include "public/web/commit_result.mojom-shared.h"
 
 #include <memory>
 
@@ -57,6 +59,7 @@ namespace blink {
 
 class Document;
 class DocumentLoader;
+class Event;
 class HTMLFormElement;
 class LocalFrame;
 class Frame;
@@ -71,7 +74,6 @@ CORE_EXPORT bool IsBackForwardLoadType(FrameLoadType);
 CORE_EXPORT bool IsReloadLoadType(FrameLoadType);
 
 class CORE_EXPORT FrameLoader final {
-  WTF_MAKE_NONCOPYABLE(FrameLoader);
   DISALLOW_NEW();
 
  public:
@@ -97,6 +99,17 @@ class CORE_EXPORT FrameLoader final {
             HistoryItem* = nullptr,
             HistoryLoadType = kHistoryDifferentDocumentLoad);
 
+  // Called when the browser process has asked this renderer process to commit a
+  // same document navigation in that frame. Returns false if the navigation
+  // cannot commit, true otherwise.
+  mojom::CommitResult CommitSameDocumentNavigation(
+      const KURL&,
+      FrameLoadType,
+      HistoryItem*,
+      ClientRedirectPolicy,
+      Document* origin_document = nullptr,
+      Event* triggering_event = nullptr);
+
   // Warning: stopAllLoaders can and will detach the LocalFrame out from under
   // you. All callers need to either protect the LocalFrame or guarantee they
   // won't in any way access the LocalFrame after stopAllLoaders returns.
@@ -111,7 +124,7 @@ class CORE_EXPORT FrameLoader final {
   void DidAccessInitialDocument();
 
   DocumentLoader* GetDocumentLoader() const { return document_loader_.Get(); }
-  DocumentLoader* ProvisionalDocumentLoader() const {
+  DocumentLoader* GetProvisionalDocumentLoader() const {
     return provisional_document_loader_.Get();
   }
 
@@ -171,11 +184,13 @@ class CORE_EXPORT FrameLoader final {
 
   void UpdateForSameDocumentNavigation(const KURL&,
                                        SameDocumentNavigationSource,
-                                       PassRefPtr<SerializedScriptValue>,
+                                       scoped_refptr<SerializedScriptValue>,
                                        HistoryScrollRestorationType,
                                        FrameLoadType,
                                        Document*);
 
+  bool ShouldSerializeScrollAnchor();
+  void SaveScrollAnchor();
   void SaveScrollState();
   void RestoreScrollPositionAndViewState();
 
@@ -210,13 +225,16 @@ class CORE_EXPORT FrameLoader final {
   // Note: When a PlzNavigtate navigation is handled by the client, we will
   // have created a dummy provisional DocumentLoader, so this will return true
   // while the client handles the navigation.
-  bool HasProvisionalNavigation() const { return ProvisionalDocumentLoader(); }
+  bool HasProvisionalNavigation() const {
+    return GetProvisionalDocumentLoader();
+  }
 
   void DetachProvisionalDocumentLoader(DocumentLoader*);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   static void SetReferrerForFrameRequest(FrameLoadRequest&);
+  static void UpgradeInsecureRequest(ResourceRequest&, Document*);
 
   void ClientDroppedNavigation();
 
@@ -241,8 +259,10 @@ class CORE_EXPORT FrameLoader final {
                  NavigationPolicy,
                  HistoryItem*);
 
+  void ClearInitialScrollState();
+
   void LoadInSameDocument(const KURL&,
-                          PassRefPtr<SerializedScriptValue> state_object,
+                          scoped_refptr<SerializedScriptValue> state_object,
                           FrameLoadType,
                           HistoryItem*,
                           ClientRedirectPolicy,
@@ -255,8 +275,6 @@ class CORE_EXPORT FrameLoader final {
   void ScheduleCheckCompleted();
 
   void DetachDocumentLoader(Member<DocumentLoader>&);
-
-  void UpgradeInsecureRequest(ResourceRequest&, Document*) const;
 
   std::unique_ptr<TracedValue> ToTracedValue() const;
   void TakeObjectSnapshot() const;
@@ -293,6 +311,8 @@ class CORE_EXPORT FrameLoader final {
   bool dispatching_did_clear_window_object_in_main_world_;
   bool protect_provisional_loader_;
   bool detached_;
+
+  DISALLOW_COPY_AND_ASSIGN(FrameLoader);
 };
 
 }  // namespace blink

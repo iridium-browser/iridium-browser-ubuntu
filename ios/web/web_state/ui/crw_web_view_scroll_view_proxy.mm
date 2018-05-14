@@ -6,10 +6,11 @@
 
 #import <objc/runtime.h>
 
+#include <memory>
+
 #include "base/auto_reset.h"
 #import "base/ios/crb_protocol_observers.h"
 #include "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -17,7 +18,10 @@
 
 @interface CRWWebViewScrollViewProxy () {
   __weak UIScrollView* _scrollView;
-  base::scoped_nsobject<id> _observers;
+  id _observers;
+  std::unique_ptr<UIScrollViewContentInsetAdjustmentBehavior>
+      _pendingContentInsetAdjustmentBehavior API_AVAILABLE(ios(11.0));
+  std::unique_ptr<BOOL> _pendingClipsToBounds;
 }
 
 // Returns the key paths that need to be observed for UIScrollView.
@@ -36,7 +40,7 @@
   self = [super init];
   if (self) {
     Protocol* protocol = @protocol(CRWWebViewScrollViewProxyObserver);
-    _observers.reset([CRBProtocolObservers observersWithProtocol:protocol]);
+    _observers = [CRBProtocolObservers observersWithProtocol:protocol];
   }
   return self;
 }
@@ -70,6 +74,21 @@
   scrollView.delegate = self;
   [self startObservingScrollView:scrollView];
   _scrollView = scrollView;
+  if (_pendingClipsToBounds) {
+    scrollView.clipsToBounds = *_pendingClipsToBounds;
+    _pendingClipsToBounds.reset();
+  }
+
+  // Assigns |contentInsetAdjustmentBehavior| which was set before setting the
+  // scroll view.
+  if (@available(iOS 11, *)) {
+    if (_pendingContentInsetAdjustmentBehavior) {
+      _scrollView.contentInsetAdjustmentBehavior =
+          *_pendingContentInsetAdjustmentBehavior;
+      _pendingContentInsetAdjustmentBehavior.reset();
+    }
+  }
+
   [_observers webViewScrollViewProxyDidSetScrollView:self];
 }
 
@@ -93,12 +112,31 @@
   [_scrollView setBounces:bounces];
 }
 
+- (BOOL)clipsToBounds {
+  if (_pendingClipsToBounds) {
+    return *_pendingClipsToBounds;
+  }
+  return _scrollView.clipsToBounds;
+}
+
+- (void)setClipsToBounds:(BOOL)clipsToBounds {
+  if (_scrollView) {
+    _scrollView.clipsToBounds = clipsToBounds;
+  } else {
+    _pendingClipsToBounds = std::make_unique<BOOL>(clipsToBounds);
+  }
+}
+
 - (BOOL)isDecelerating {
   return [_scrollView isDecelerating];
 }
 
 - (BOOL)isDragging {
   return [_scrollView isDragging];
+}
+
+- (BOOL)isTracking {
+  return [_scrollView isTracking];
 }
 
 - (BOOL)isZooming {
@@ -153,12 +191,40 @@
   [_scrollView setScrollsToTop:scrollsToTop];
 }
 
+- (UIScrollViewContentInsetAdjustmentBehavior)contentInsetAdjustmentBehavior
+    API_AVAILABLE(ios(11.0)) {
+  if (_scrollView) {
+    return [_scrollView contentInsetAdjustmentBehavior];
+  } else if (_pendingContentInsetAdjustmentBehavior) {
+    return *_pendingContentInsetAdjustmentBehavior;
+  } else {
+    return UIScrollViewContentInsetAdjustmentAutomatic;
+  }
+}
+
+- (void)setContentInsetAdjustmentBehavior:
+    (UIScrollViewContentInsetAdjustmentBehavior)contentInsetAdjustmentBehavior
+    API_AVAILABLE(ios(11.0)) {
+  if (_scrollView) {
+    [_scrollView
+        setContentInsetAdjustmentBehavior:contentInsetAdjustmentBehavior];
+  } else {
+    _pendingContentInsetAdjustmentBehavior =
+        std::make_unique<UIScrollViewContentInsetAdjustmentBehavior>(
+            contentInsetAdjustmentBehavior);
+  }
+}
+
 - (UIPanGestureRecognizer*)panGestureRecognizer {
   return [_scrollView panGestureRecognizer];
 }
 
 - (NSArray*)gestureRecognizers {
   return [_scrollView gestureRecognizers];
+}
+
+- (NSArray<__kindof UIView*>*)subviews {
+  return _scrollView ? [_scrollView subviews] : @[];
 }
 
 #pragma mark -
@@ -172,10 +238,6 @@
 - (void)scrollViewWillBeginDragging:(UIScrollView*)scrollView {
   DCHECK_EQ(_scrollView, scrollView);
   [_observers webViewScrollViewWillBeginDragging:self];
-
-  // TODO(crbug.com/555723) Remove this once the fix to
-  // https://bugs.webkit.org/show_bug.cgi?id=148086 makes it's way in to iOS.
-  scrollView.decelerationRate = UIScrollViewDecelerationRateNormal;
 }
 
 - (void)scrollViewWillEndDragging:(UIScrollView*)scrollView
@@ -227,10 +289,17 @@
   [_observers webViewScrollViewWillBeginZooming:self];
 }
 
+- (void)scrollViewDidEndZooming:(UIScrollView*)scrollView
+                       withView:(UIView*)view
+                        atScale:(CGFloat)scale {
+  DCHECK_EQ(_scrollView, scrollView);
+  [_observers webViewScrollViewDidEndZooming:self atScale:scale];
+}
+
 #pragma mark -
 
 + (NSArray*)scrollViewObserverKeyPaths {
-  return @[ @"contentSize" ];
+  return @[ @"frame", @"contentSize", @"contentInset" ];
 }
 
 - (void)startObservingScrollView:(UIScrollView*)scrollView {
@@ -248,8 +317,12 @@
                         change:(NSDictionary*)change
                        context:(void*)context {
   DCHECK_EQ(object, _scrollView);
+  if ([keyPath isEqualToString:@"frame"])
+    [_observers webViewScrollViewFrameDidChange:self];
   if ([keyPath isEqualToString:@"contentSize"])
     [_observers webViewScrollViewDidResetContentSize:self];
+  if ([keyPath isEqualToString:@"contentInset"])
+    [_observers webViewScrollViewDidResetContentInset:self];
 }
 
 @end

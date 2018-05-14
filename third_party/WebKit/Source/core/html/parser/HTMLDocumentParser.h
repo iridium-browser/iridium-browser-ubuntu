@@ -27,6 +27,8 @@
 #define HTMLDocumentParser_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "core/CoreExport.h"
 #include "core/dom/ParserContentPolicy.h"
 #include "core/dom/ScriptableDocumentParser.h"
@@ -34,7 +36,6 @@
 #include "core/html/parser/HTMLInputStream.h"
 #include "core/html/parser/HTMLParserOptions.h"
 #include "core/html/parser/HTMLParserReentryPermit.h"
-#include "core/html/parser/HTMLParserScriptRunnerHost.h"
 #include "core/html/parser/HTMLPreloadScanner.h"
 #include "core/html/parser/HTMLSourceTracker.h"
 #include "core/html/parser/HTMLToken.h"
@@ -45,10 +46,9 @@
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/html/parser/XSSAuditor.h"
 #include "core/html/parser/XSSAuditorDelegate.h"
+#include "core/script/HTMLParserScriptRunnerHost.h"
 #include "platform/bindings/TraceWrapperMember.h"
 #include "platform/wtf/Deque.h"
-#include "platform/wtf/RefPtr.h"
-#include "platform/wtf/WeakPtr.h"
 #include "platform/wtf/text/TextPosition.h"
 
 namespace blink {
@@ -65,9 +65,7 @@ class HTMLParserScriptRunner;
 class HTMLPreloadScanner;
 class HTMLResourcePreloader;
 class HTMLTreeBuilder;
-class SegmentedString;
 class TokenizedChunkQueue;
-class DocumentWriteEvaluator;
 
 class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
                                        private HTMLParserScriptRunnerHost {
@@ -81,8 +79,8 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
     return new HTMLDocumentParser(document, background_parsing_policy);
   }
   ~HTMLDocumentParser() override;
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_TRACE_WRAPPERS();
+  void Trace(blink::Visitor*) override;
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
   // TODO(alexclarke): Remove when background parser goes away.
   void Dispose();
@@ -107,10 +105,10 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   bool IsParsingAtLineNumber() const final;
   OrdinalNumber LineNumber() const final;
 
-  void SuspendScheduledTasks() final;
-  void ResumeScheduledTasks() final;
+  void PauseScheduledTasks() final;
+  void UnpauseScheduledTasks() final;
 
-  HTMLParserReentryPermit* ReentryPermit() { return reentry_permit_.Get(); }
+  HTMLParserReentryPermit* ReentryPermit() { return reentry_permit_.get(); }
 
   struct TokenizedChunk {
     USING_FAST_MALLOC(TokenizedChunk);
@@ -125,8 +123,6 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
     HTMLInputCheckpoint input_checkpoint;
     TokenPreloadScannerCheckpoint preload_scanner_checkpoint;
     bool starting_script;
-    // Indices into |tokens|.
-    Vector<int> likely_document_write_script_indices;
     // Index into |tokens| of the last <meta> csp tag in |tokens|. Preloads will
     // be deferred until this token is parsed. Will be noPendingToken if there
     // are no csp tokens.
@@ -142,7 +138,7 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   void SetDecoder(std::unique_ptr<TextResourceDecoder>) final;
 
  protected:
-  void insert(const SegmentedString&) final;
+  void insert(const String&) final;
   void Append(const String&) override;
   void Finish() final;
 
@@ -218,10 +214,10 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   bool ShouldUseThreading() const { return should_use_threading_; }
 
   bool IsParsingFragment() const;
-  bool IsScheduledForResume() const;
+  bool IsScheduledForUnpause() const;
   bool InPumpSession() const { return pump_session_nesting_level_ > 0; }
   bool ShouldDelayEnd() const {
-    return InPumpSession() || IsPaused() || IsScheduledForResume() ||
+    return InPumpSession() || IsPaused() || IsScheduledForUnpause() ||
            IsExecutingScript();
   }
 
@@ -233,13 +229,11 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   void ScanAndPreload(HTMLPreloadScanner*);
   void FetchQueuedPreloads();
 
-  void EvaluateAndPreloadScriptForDocumentWrite(const String& source);
-
   HTMLToken& Token() { return *token_; }
 
   HTMLParserOptions options_;
   HTMLInputStream input_;
-  RefPtr<HTMLParserReentryPermit> reentry_permit_;
+  scoped_refptr<HTMLParserReentryPermit> reentry_permit_;
 
   std::unique_ptr<HTMLToken> token_;
   std::unique_ptr<HTMLTokenizer> tokenizer_;
@@ -250,7 +244,7 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   // A scanner used only for input provided to the insert() method.
   std::unique_ptr<HTMLPreloadScanner> insertion_preload_scanner_;
 
-  RefPtr<WebTaskRunner> loading_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner_;
   Member<HTMLParserScheduler> parser_scheduler_;
   HTMLSourceTracker source_tracker_;
   TextPosition text_position_;
@@ -265,13 +259,11 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   // Using WeakPtr for GarbageCollected is discouraged. But in this case this is
   // ok because HTMLDocumentParser guarantees to revoke all WeakPtrs in the pre
   // finalizer.
-  WeakPtrFactory<HTMLDocumentParser> weak_factory_;
-  WeakPtr<BackgroundHTMLParser> background_parser_;
+  base::WeakPtrFactory<HTMLDocumentParser> weak_factory_;
+  base::WeakPtr<BackgroundHTMLParser> background_parser_;
   Member<HTMLResourcePreloader> preloader_;
   PreloadRequestStream queued_preloads_;
-  Vector<String> queued_document_write_scripts_;
-  RefPtr<TokenizedChunkQueue> tokenized_chunk_queue_;
-  std::unique_ptr<DocumentWriteEvaluator> evaluator_;
+  scoped_refptr<TokenizedChunkQueue> tokenized_chunk_queue_;
 
   // If this is non-null, then there is a meta CSP token somewhere in the
   // speculation buffer. Preloads will be deferred until a token matching this
@@ -286,7 +278,7 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   bool should_use_threading_;
   bool end_was_delayed_;
   bool have_background_parser_;
-  bool tasks_were_suspended_;
+  bool tasks_were_paused_;
   unsigned pump_session_nesting_level_;
   unsigned pump_speculations_session_nesting_level_;
   bool is_parsing_at_line_number_;

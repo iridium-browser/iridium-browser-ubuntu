@@ -10,7 +10,10 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
 #include "components/payments/core/payment_address.h"
-#include "ios/web/public/payments/payment_request.h"
+#include "components/payments/core/payment_response.h"
+#include "components/payments/core/payment_shipping_option.h"
+#include "components/payments/core/web_payment_request.h"
+#import "ios/chrome/browser/payments/payment_request_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -43,12 +46,31 @@ NSString* JSONEscape(NSString* JSON) {
   [self executeScript:@"Function.prototype()" completionHandler:nil];
 }
 
+- (void)setContextSecure:(BOOL)contextSecure
+       completionHandler:(ProceduralBlockWithBool)completionHandler {
+  NSString* script =
+      [NSString stringWithFormat:
+                    @"__gCrWeb['paymentRequestManager'].isContextSecure = %@;",
+                    contextSecure ? @"true" : @"false"];
+  [self executeScript:script completionHandler:completionHandler];
+}
+
+- (void)throwDOMExceptionWithErrorName:(NSString*)errorName
+                          errorMessage:(NSString*)errorMessage
+                     completionHandler:
+                         (ProceduralBlockWithBool)completionHandler {
+  NSString* script = [NSString
+      stringWithFormat:@"throw new DOMException(%@, %@);",
+                       JSONEscape(errorMessage), JSONEscape(errorName)];
+  [self executeScript:script completionHandler:completionHandler];
+}
+
 - (void)resolveRequestPromiseWithPaymentResponse:
-            (const web::PaymentResponse&)paymentResponse
+            (const payments::PaymentResponse&)paymentResponse
                                completionHandler:
                                    (ProceduralBlockWithBool)completionHandler {
   std::unique_ptr<base::DictionaryValue> paymentResponseData =
-      paymentResponse.ToDictionaryValue();
+      payment_request_util::PaymentResponseToDictionaryValue(paymentResponse);
   std::string paymentResponseDataJSON;
   base::JSONWriter::Write(*paymentResponseData, &paymentResponseDataJSON);
   NSString* script = [NSString
@@ -58,13 +80,15 @@ NSString* JSONEscape(NSString* JSON) {
   [self executeScript:script completionHandler:completionHandler];
 }
 
-- (void)rejectRequestPromiseWithErrorMessage:(NSString*)errorMessage
-                           completionHandler:
-                               (ProceduralBlockWithBool)completionHandler {
-  NSString* script = [NSString
-      stringWithFormat:
-          @"__gCrWeb['paymentRequestManager'].rejectRequestPromise(%@)",
-          JSONEscape(errorMessage)];
+- (void)rejectRequestPromiseWithErrorName:(NSString*)errorName
+                             errorMessage:(NSString*)errorMessage
+                        completionHandler:
+                            (ProceduralBlockWithBool)completionHandler {
+  NSString* script =
+      [NSString stringWithFormat:
+                    @"__gCrWeb['paymentRequestManager'].rejectRequestPromise("
+                    @"new DOMException(%@, %@))",
+                    JSONEscape(errorMessage), JSONEscape(errorName)];
   [self executeScript:script completionHandler:completionHandler];
 }
 
@@ -78,13 +102,15 @@ NSString* JSONEscape(NSString* JSON) {
   [self executeScript:script completionHandler:completionHandler];
 }
 
-- (void)rejectCanMakePaymentPromiseWithErrorMessage:(NSString*)errorMessage
-                                  completionHandler:(ProceduralBlockWithBool)
-                                                        completionHandler {
+- (void)rejectCanMakePaymentPromiseWithErrorName:(NSString*)errorName
+                                    errorMessage:(NSString*)errorMessage
+                               completionHandler:
+                                   (ProceduralBlockWithBool)completionHandler {
   NSString* script = [NSString
       stringWithFormat:
-          @"__gCrWeb['paymentRequestManager'].rejectCanMakePaymentPromise(%@)",
-          JSONEscape(errorMessage)];
+          @"__gCrWeb['paymentRequestManager'].rejectCanMakePaymentPromise(new "
+          @"DOMException(%@, %@))",
+          JSONEscape(errorMessage), JSONEscape(errorName)];
   [self executeScript:script completionHandler:completionHandler];
 }
 
@@ -101,10 +127,11 @@ NSString* JSONEscape(NSString* JSON) {
   [self executeScript:script completionHandler:completionHandler];
 }
 
-- (void)updateShippingAddress:(const payments::PaymentAddress&)shippingAddress
+- (void)updateShippingAddress:
+            (const payments::mojom::PaymentAddress&)shippingAddress
             completionHandler:(ProceduralBlockWithBool)completionHanlder {
   std::unique_ptr<base::DictionaryValue> shippingAddressData =
-      shippingAddress.ToDictionaryValue();
+      payments::PaymentAddressToDictionaryValue(shippingAddress);
   std::string shippingAddressDataJSON;
   base::JSONWriter::Write(*shippingAddressData, &shippingAddressDataJSON);
   NSString* script = [NSString
@@ -114,12 +141,14 @@ NSString* JSONEscape(NSString* JSON) {
   [self executeScript:script completionHandler:completionHanlder];
 }
 
-- (void)updateShippingOption:(const web::PaymentShippingOption&)shippingOption
+- (void)updateShippingOption:
+            (const payments::PaymentShippingOption&)shippingOption
            completionHandler:(ProceduralBlockWithBool)completionHanlder {
   NSString* script =
-      [NSString stringWithFormat:@"__gCrWeb['paymentRequestManager']."
-                                 @"updateShippingOptionAndDispatchEvent('%@')",
-                                 base::SysUTF16ToNSString(shippingOption.id)];
+      [NSString stringWithFormat:
+                    @"__gCrWeb['paymentRequestManager']."
+                    @"updateShippingOptionAndDispatchEvent(%@)",
+                    JSONEscape(base::SysUTF8ToNSString(shippingOption.id))];
   [self executeScript:script completionHandler:completionHanlder];
 }
 

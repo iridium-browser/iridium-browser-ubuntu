@@ -4,17 +4,20 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/eula_screen_handler.h"
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/screens/core_oobe_view.h"
 #include "chrome/browser/chromeos/login/screens/eula_screen.h"
+#include "chrome/browser/chromeos/login/ui/login_display_webui.h"
 #include "chrome/browser/chromeos/login/ui/login_web_dialog.h"
-#include "chrome/browser/chromeos/login/ui/webui_login_display.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
@@ -30,7 +33,7 @@
 
 namespace {
 
-const char kJsScreenPath[] = "login.EulaScreen";
+constexpr char kJsScreenPath[] = "login.EulaScreen";
 
 // Helper class to tweak display details of credits pages in the context
 // of OOBE/EULA step.
@@ -148,6 +151,11 @@ void EulaScreenHandler::DeclareLocalizedValues(
                 IDS_SHORT_PRODUCT_OS_NAME);
 #endif
 
+  builder->Add(
+      "eulaOnlineUrl",
+      base::StringPrintf(chrome::kOnlineEulaURLPath,
+                         g_browser_process->GetApplicationLocale().c_str()));
+
   builder->Add("chromeCreditsLink", IDS_ABOUT_VERSION_LICENSE_EULA);
   builder->Add("chromeosCreditsLink", IDS_ABOUT_CROS_VERSION_LICENSE_EULA);
 
@@ -229,7 +237,7 @@ void EulaScreenHandler::HandleOnInstallationSettingsPopupOpened() {
 void EulaScreenHandler::UpdateLocalizedValues(
     ::login::SecureModuleUsed secure_module_used) {
   base::DictionaryValue updated_secure_module_strings;
-  auto builder = base::MakeUnique<::login::LocalizedValuesBuilder>(
+  auto builder = std::make_unique<::login::LocalizedValuesBuilder>(
       &updated_secure_module_strings);
   if (secure_module_used == ::login::SecureModuleUsed::TPM) {
     builder->Add("eulaTpmDesc", IDS_EULA_TPM_DESCRIPTION);

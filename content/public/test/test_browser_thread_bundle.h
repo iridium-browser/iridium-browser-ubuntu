@@ -2,18 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TestBrowserThreadBundle is a convenience class for creating a set of
-// TestBrowserThreads, a blocking pool, and a task scheduler in unit tests. For
-// most tests, it is sufficient to just instantiate the TestBrowserThreadBundle
-// as a member variable. It is a good idea to put the TestBrowserThreadBundle as
-// the first member variable in test classes, so it is destroyed last, and the
-// test threads always exist from the perspective of other classes.
+// TestBrowserThreadBundle is a convenience class which allows usage of these
+// APIs within its scope:
+// - Same APIs as base::test::ScopedTaskEnvironment.
+// - content::BrowserThread.
 //
-// By default, all of the created TestBrowserThreads will be backed by a single
-// shared MessageLoop. If a test truly needs separate threads, it can do so by
-// passing the appropriate combination of option values during the
-// TestBrowserThreadBundle construction. TaskScheduler and blocking pool tasks
-// always run on dedicated threads.
+// Only tests that need the BrowserThread API should instantiate a
+// TestBrowserThreadBundle. Use base::test::ScopedTaskEnvironment otherwise.
+//
+// By default, BrowserThread::UI/IO are backed by a single shared MessageLoop on
+// the main thread. If a test truly needs BrowserThread::IO tasks to run on a
+// separate thread, it can pass the REAL_IO_THREAD option to the constructor.
+// TaskScheduler tasks always run on dedicated threads.
 //
 // To synchronously run tasks from the shared MessageLoop:
 //
@@ -21,9 +21,9 @@
 //    base::RunLoop::RunUntilIdle();
 //
 // ... until there are no undelayed tasks in the shared MessageLoop, in
-// TaskScheduler or in the blocking pool (excluding tasks not posted from the
-// shared MessageLoop's thread, TaskScheduler or the blocking pool):
-//    content::RunAllBlockingPoolTasksUntilIdle();
+// TaskScheduler (excluding tasks not posted from the shared MessageLoop's
+// thread or TaskScheduler):
+//    content::RunAllTasksUntilIdle();
 //
 // ... until a condition is met:
 //    base::RunLoop run_loop;
@@ -32,27 +32,25 @@
 //    // run_loop.QuitClosure() must be kept somewhere accessible by that task).
 //    run_loop.Run();
 //
-// To wait until there are no pending undelayed tasks in TaskScheduler or in the
-// blocking pool, without running tasks from the shared MessageLoop:
+// To wait until there are no pending undelayed tasks in TaskScheduler, without
+// running tasks from the shared MessageLoop:
 //    base::TaskScheduler::GetInstance()->FlushForTesting();
-//    // Note: content::BrowserThread::GetBlockingPool()->FlushForTesting() is
-//    // equivalent but deprecated.
 //
-// The destructor of TestBrowserThreadBundle runs remaining TestBrowserThreads
-// tasks, remaining blocking pool tasks, and remaining BLOCK_SHUTDOWN task
-// scheduler tasks.
+// The destructor of TestBrowserThreadBundle runs remaining UI/IO tasks and
+// remaining task scheduler tasks.
 //
-// If a test needs a MessageLoopForIO on the main thread, it should use the
+// If a test needs to pump IO messages on the main thread, it should use the
 // IO_MAINLOOP option. Most of the time, IO_MAINLOOP avoids needing to use a
 // REAL_IO_THREAD.
 //
 // For some tests it is important to emulate real browser startup. During real
-// browser startup, the main MessageLoop is created before other threads.
-// Passing DONT_CREATE_THREADS to constructor will delay creating other threads
-// until the test explicitly calls CreateThreads().
+// browser startup, the main MessageLoop and the TaskScheduler are created
+// before browser threads. Passing DONT_CREATE_BROWSER_THREADS to constructor
+// will delay creating browser threads until the test explicitly calls
+// CreateBrowserThreads().
 //
-// DONT_CREATE_THREADS should only be used when the options specify at least
-// one real thread other than the main thread.
+// DONT_CREATE_BROWSER_THREADS should only be used when the options specify at
+// least one real thread other than the main thread.
 //
 // TestBrowserThreadBundle may be instantiated in a scope where there is already
 // a base::test::ScopedTaskEnvironment. In that case, it will use the
@@ -90,9 +88,8 @@
 #include "build/build_config.h"
 
 namespace base {
-class MessageLoop;
 namespace test {
-class ScopedAsyncTaskScheduler;
+class ScopedTaskEnvironment;
 }  // namespace test
 #if defined(OS_WIN)
 namespace win {
@@ -105,6 +102,8 @@ namespace content {
 
 class TestBrowserThread;
 
+// Note: to drive these threads (e.g. run all tasks until idle), see
+// content/public/test/test_utils.h.
 class TestBrowserThreadBundle {
  public:
   // Used to specify the type of MessageLoop that backs the UI thread, and
@@ -113,33 +112,25 @@ class TestBrowserThreadBundle {
   enum Options {
     DEFAULT = 0,
     IO_MAINLOOP = 1 << 0,
-    REAL_DB_THREAD = 1 << 1,
-    REAL_FILE_THREAD = 1 << 2,
-    REAL_IO_THREAD = 1 << 3,
-    DONT_CREATE_THREADS = 1 << 4,
+    REAL_IO_THREAD = 1 << 1,
+    DONT_CREATE_BROWSER_THREADS = 1 << 2,
   };
 
   TestBrowserThreadBundle();
   explicit TestBrowserThreadBundle(int options);
 
-  // Creates threads; should only be called from other classes if the
-  // DONT_CREATE_THREADS option was used when the bundle was created.
-  void CreateThreads();
+  // Creates browser threads; should only be called from other classes if the
+  // DONT_CREATE_BROWSER_THREADS option was used when the bundle was created.
+  void CreateBrowserThreads();
 
   ~TestBrowserThreadBundle();
 
  private:
   void Init();
 
-  std::unique_ptr<base::MessageLoop> message_loop_;
-  std::unique_ptr<base::test::ScopedAsyncTaskScheduler>
-      scoped_async_task_scheduler_;
+  std::unique_ptr<base::test::ScopedTaskEnvironment> scoped_task_environment_;
   std::unique_ptr<TestBrowserThread> ui_thread_;
-  std::unique_ptr<TestBrowserThread> db_thread_;
-  std::unique_ptr<TestBrowserThread> file_thread_;
-  std::unique_ptr<TestBrowserThread> file_user_blocking_thread_;
   std::unique_ptr<TestBrowserThread> process_launcher_thread_;
-  std::unique_ptr<TestBrowserThread> cache_thread_;
   std::unique_ptr<TestBrowserThread> io_thread_;
 
   int options_;

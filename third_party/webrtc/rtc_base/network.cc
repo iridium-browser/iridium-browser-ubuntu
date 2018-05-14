@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/network.h"
+#include "rtc_base/network.h"
 
 #if defined(WEBRTC_POSIX)
 // linux/if.h can't be included at the same time as the posix sys/if.h, and
@@ -23,10 +23,10 @@
 #endif  // WEBRTC_POSIX
 
 #if defined(WEBRTC_WIN)
-#include "webrtc/rtc_base/win32.h"
+#include "rtc_base/win32.h"
 #include <Iphlpapi.h>
 #elif !defined(__native_client__)
-#include "webrtc/rtc_base/ifaddrs_converter.h"
+#include "rtc_base/ifaddrs_converter.h"
 #endif
 
 #include <stdio.h>
@@ -34,21 +34,16 @@
 #include <algorithm>
 #include <memory>
 
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/networkmonitor.h"
-#include "webrtc/rtc_base/socket.h"  // includes something that makes windows happy
-#include "webrtc/rtc_base/stream.h"
-#include "webrtc/rtc_base/stringencode.h"
-#include "webrtc/rtc_base/thread.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/networkmonitor.h"
+#include "rtc_base/socket.h"  // includes something that makes windows happy
+#include "rtc_base/stream.h"
+#include "rtc_base/stringencode.h"
+#include "rtc_base/thread.h"
 
 namespace rtc {
 namespace {
-
-// Turning on IPv6 could make many IPv6 interfaces available for connectivity
-// check and delay the call setup time. kMaxIPv6Networks is the default upper
-// limit of IPv6 networks but could be changed by set_max_ipv6_networks().
-const int kMaxIPv6Networks = 5;
 
 const uint32_t kUpdateNetworksMessage = 1;
 const uint32_t kSignalNetworksMessage = 2;
@@ -93,7 +88,7 @@ bool SortNetworks(const Network* a, const Network* b) {
   // TODO(mallinath) - Add VPN and Link speed conditions while sorting.
 
   // Networks are sorted last by key.
-  return a->key() > b->key();
+  return a->key() < b->key();
 }
 
 std::string AdapterTypeToString(AdapterType type) {
@@ -158,6 +153,38 @@ std::string MakeNetworkKey(const std::string& name, const IPAddress& prefix,
   return ost.str();
 }
 
+AdapterType GetAdapterTypeFromName(const char* network_name) {
+  if (strncmp(network_name, "ipsec", 5) == 0 ||
+      strncmp(network_name, "tun", 3) == 0 ||
+      strncmp(network_name, "utun", 4) == 0 ||
+      strncmp(network_name, "tap", 3) == 0) {
+    return ADAPTER_TYPE_VPN;
+  }
+#if defined(WEBRTC_IOS)
+  // Cell networks are pdp_ipN on iOS.
+  if (strncmp(network_name, "pdp_ip", 6) == 0) {
+    return ADAPTER_TYPE_CELLULAR;
+  }
+  if (strncmp(network_name, "en", 2) == 0) {
+    // This may not be most accurate because sometimes Ethernet interface
+    // name also starts with "en" but it is better than showing it as
+    // "unknown" type.
+    // TODO(honghaiz): Write a proper IOS network manager.
+    return ADAPTER_TYPE_WIFI;
+  }
+#elif defined(WEBRTC_ANDROID)
+  if (strncmp(network_name, "rmnet", 5) == 0 ||
+      strncmp(network_name, "v4-rmnet", 8) == 0) {
+    return ADAPTER_TYPE_CELLULAR;
+  }
+  if (strncmp(network_name, "wlan", 4) == 0) {
+    return ADAPTER_TYPE_WIFI;
+  }
+#endif
+
+  return ADAPTER_TYPE_UNKNOWN;
+}
+
 NetworkManager::NetworkManager() {
 }
 
@@ -175,7 +202,6 @@ bool NetworkManager::GetDefaultLocalAddress(int family, IPAddress* addr) const {
 
 NetworkManagerBase::NetworkManagerBase()
     : enumeration_permission_(NetworkManager::ENUMERATION_ALLOWED),
-      max_ipv6_networks_(kMaxIPv6Networks),
       ipv6_enabled_(true) {
 }
 
@@ -213,18 +239,8 @@ void NetworkManagerBase::GetAnyAddressNetworks(NetworkList* networks) {
 }
 
 void NetworkManagerBase::GetNetworks(NetworkList* result) const {
-  int ipv6_networks = 0;
   result->clear();
-  for (Network* network : networks_) {
-    // Keep the number of IPv6 networks under |max_ipv6_networks_|.
-    if (network->prefix().family() == AF_INET6) {
-      if (ipv6_networks >= max_ipv6_networks_) {
-        continue;
-      }
-      ++ipv6_networks;
-    }
-    result->push_back(network);
-  }
+  result->insert(result->begin(), networks_.begin(), networks_.end());
 }
 
 void NetworkManagerBase::MergeNetworkList(const NetworkList& new_networks,
@@ -340,7 +356,7 @@ void NetworkManagerBase::MergeNetworkList(const NetworkList& new_networks,
       if (pref > 0) {
         --pref;
       } else {
-        LOG(LS_ERROR) << "Too many network interfaces to handle!";
+        RTC_LOG(LS_ERROR) << "Too many network interfaces to handle!";
         break;
       }
     }
@@ -401,7 +417,7 @@ BasicNetworkManager::~BasicNetworkManager() {
 }
 
 void BasicNetworkManager::OnNetworksChanged() {
-  LOG(LS_INFO) << "Network change was observed";
+  RTC_LOG(LS_INFO) << "Network change was observed";
   UpdateNetworksOnce();
 }
 
@@ -410,7 +426,7 @@ void BasicNetworkManager::OnNetworksChanged() {
 bool BasicNetworkManager::CreateNetworks(bool include_ignored,
                                          NetworkList* networks) const {
   RTC_NOTREACHED();
-  LOG(LS_WARNING) << "BasicNetworkManager doesn't work on NaCl yet";
+  RTC_LOG(LS_WARNING) << "BasicNetworkManager doesn't work on NaCl yet";
   return false;
 }
 
@@ -463,7 +479,14 @@ void BasicNetworkManager::ConvertIfAddrs(struct ifaddrs* interfaces,
     if (cursor->ifa_flags & IFF_LOOPBACK) {
       adapter_type = ADAPTER_TYPE_LOOPBACK;
     } else {
-      adapter_type = GetAdapterTypeFromName(cursor->ifa_name);
+      // If there is a network_monitor, use it to get the adapter type.
+      // Otherwise, get the adapter type based on a few name matching rules.
+      if (network_monitor_) {
+        adapter_type = network_monitor_->GetAdapterType(cursor->ifa_name);
+      }
+      if (adapter_type == ADAPTER_TYPE_UNKNOWN) {
+        adapter_type = GetAdapterTypeFromName(cursor->ifa_name);
+      }
     }
     int prefix_length = CountIPMaskBits(mask);
     prefix = TruncateIP(ip, prefix_length);
@@ -498,7 +521,8 @@ bool BasicNetworkManager::CreateNetworks(bool include_ignored,
   struct ifaddrs* interfaces;
   int error = getifaddrs(&interfaces);
   if (error != 0) {
-    LOG_ERR(LERROR) << "getifaddrs failed to gather interface data: " << error;
+    RTC_LOG_ERR(LERROR) << "getifaddrs failed to gather interface data: "
+                        << error;
     return false;
   }
 
@@ -662,8 +686,9 @@ bool BasicNetworkManager::CreateNetworks(bool include_ignored,
 bool IsDefaultRoute(const std::string& network_name) {
   FileStream fs;
   if (!fs.Open("/proc/net/route", "r", nullptr)) {
-    LOG(LS_WARNING) << "Couldn't read /proc/net/route, skipping default "
-                    << "route check (assuming everything is a default route).";
+    RTC_LOG(LS_WARNING)
+        << "Couldn't read /proc/net/route, skipping default "
+        << "route check (assuming everything is a default route).";
     return true;
   } else {
     std::string line;
@@ -791,41 +816,6 @@ void BasicNetworkManager::OnMessage(Message* msg) {
   }
 }
 
-AdapterType BasicNetworkManager::GetAdapterTypeFromName(
-    const char* network_name) const {
-  // If there is a network_monitor, use it to get the adapter type.
-  // Otherwise, get the adapter type based on a few name matching rules.
-  if (network_monitor_) {
-    AdapterType type = network_monitor_->GetAdapterType(network_name);
-    if (type != ADAPTER_TYPE_UNKNOWN) {
-      return type;
-    }
-  }
-#if defined(WEBRTC_IOS)
-  // Cell networks are pdp_ipN on iOS.
-  if (strncmp(network_name, "pdp_ip", 6) == 0) {
-    return ADAPTER_TYPE_CELLULAR;
-  }
-  if (strncmp(network_name, "en", 2) == 0) {
-    // This may not be most accurate because sometimes Ethernet interface
-    // name also starts with "en" but it is better than showing it as
-    // "unknown" type.
-    // TODO(honghaiz): Write a proper IOS network manager.
-    return ADAPTER_TYPE_WIFI;
-  }
-#elif defined(WEBRTC_ANDROID)
-  if (strncmp(network_name, "rmnet", 5) == 0 ||
-      strncmp(network_name, "v4-rmnet", 8) == 0) {
-    return ADAPTER_TYPE_CELLULAR;
-  }
-  if (strncmp(network_name, "wlan", 4) == 0) {
-    return ADAPTER_TYPE_WIFI;
-  }
-#endif
-
-  return ADAPTER_TYPE_UNKNOWN;
-}
-
 IPAddress BasicNetworkManager::QueryDefaultLocalAddress(int family) const {
   RTC_DCHECK(thread_ == Thread::Current());
   RTC_DCHECK(thread_->socketserver() != nullptr);
@@ -834,7 +824,7 @@ IPAddress BasicNetworkManager::QueryDefaultLocalAddress(int family) const {
   std::unique_ptr<AsyncSocket> socket(
       thread_->socketserver()->CreateAsyncSocket(family, SOCK_DGRAM));
   if (!socket) {
-    LOG_ERR(LERROR) << "Socket creation failed";
+    RTC_LOG_ERR(LERROR) << "Socket creation failed";
     return IPAddress();
   }
 
@@ -845,7 +835,7 @@ IPAddress BasicNetworkManager::QueryDefaultLocalAddress(int family) const {
         && socket->GetError() != EHOSTUNREACH) {
       // Ignore the expected case of "host/net unreachable" - which happens if
       // the network is V4- or V6-only.
-      LOG(LS_INFO) << "Connect failed with " << socket->GetError();
+      RTC_LOG(LS_INFO) << "Connect failed with " << socket->GetError();
     }
     return IPAddress();
   }
@@ -883,11 +873,11 @@ void BasicNetworkManager::UpdateNetworksContinually() {
 void BasicNetworkManager::DumpNetworks() {
   NetworkList list;
   GetNetworks(&list);
-  LOG(LS_INFO) << "NetworkManager detected " << list.size() << " networks:";
+  RTC_LOG(LS_INFO) << "NetworkManager detected " << list.size() << " networks:";
   for (const Network* network : list) {
-    LOG(LS_INFO) << network->ToString() << ": " << network->description()
-                 << ", active ? " << network->active()
-                 << ((network->ignored()) ? ", Ignored" : "");
+    RTC_LOG(LS_INFO) << network->ToString() << ": " << network->description()
+                     << ", active ? " << network->active()
+                     << ((network->ignored()) ? ", Ignored" : "");
   }
 }
 
@@ -919,6 +909,8 @@ Network::Network(const std::string& name,
       ignored_(false),
       type_(type),
       preference_(0) {}
+
+Network::Network(const Network&) = default;
 
 Network::~Network() = default;
 

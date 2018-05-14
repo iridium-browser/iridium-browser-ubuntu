@@ -43,6 +43,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
+#include "base/task_scheduler/task_scheduler.h"
 #include "net/base/net_errors.h"
 #include "net/base/privacy_mode.h"
 #include "net/cert/cert_verifier.h"
@@ -54,6 +55,7 @@
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_server_id.h"
 #include "net/quic/platform/api/quic_flags.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 #include "net/quic/platform/api/quic_str_cat.h"
 #include "net/quic/platform/api/quic_string_piece.h"
@@ -111,7 +113,7 @@ class FakeProofVerifier : public ProofVerifier {
       const string& /*hostname*/,
       const uint16_t /*port*/,
       const string& /*server_config*/,
-      net::QuicVersion /*quic_version*/,
+      net::QuicTransportVersion /*quic_version*/,
       QuicStringPiece /*chlo_hash*/,
       const std::vector<string>& /*certs*/,
       const string& /*cert_sct*/,
@@ -135,6 +137,7 @@ class FakeProofVerifier : public ProofVerifier {
 };
 
 int main(int argc, char* argv[]) {
+  base::TaskScheduler::CreateAndStartWithDefaultParams("quic_client");
   base::CommandLine::Init(argc, argv);
   base::CommandLine* line = base::CommandLine::ForCurrentProcess();
   const base::CommandLine::StringVector& urls = line->GetArgs();
@@ -253,10 +256,12 @@ int main(int argc, char* argv[]) {
   net::EpollServer epoll_server;
   net::QuicServerId server_id(url.host(), url.port(),
                               net::PRIVACY_MODE_DISABLED);
-  net::QuicVersionVector versions = net::AllSupportedVersions();
+  net::ParsedQuicVersionVector versions = net::AllSupportedVersions();
   if (FLAGS_quic_version != -1) {
     versions.clear();
-    versions.push_back(static_cast<net::QuicVersion>(FLAGS_quic_version));
+    versions.push_back(net::ParsedQuicVersion(
+        net::PROTOCOL_QUIC_CRYPTO,
+        static_cast<net::QuicTransportVersion>(FLAGS_quic_version)));
   }
   // For secure QUIC we need to verify the cert chain.
   std::unique_ptr<CertVerifier> cert_verifier(CertVerifier::CreateDefault());
@@ -267,11 +272,11 @@ int main(int argc, char* argv[]) {
   std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer(new CTPolicyEnforcer());
   std::unique_ptr<ProofVerifier> proof_verifier;
   if (line->HasSwitch("disable-certificate-verification")) {
-    proof_verifier.reset(new FakeProofVerifier());
+    proof_verifier = net::QuicMakeUnique<FakeProofVerifier>();
   } else {
-    proof_verifier.reset(new ProofVerifierChromium(
+    proof_verifier = net::QuicMakeUnique<ProofVerifierChromium>(
         cert_verifier.get(), ct_policy_enforcer.get(),
-        transport_security_state.get(), ct_verifier.get()));
+        transport_security_state.get(), ct_verifier.get());
   }
   net::QuicClient client(net::QuicSocketAddress(ip_addr, port), server_id,
                          versions, &epoll_server, std::move(proof_verifier));
@@ -285,7 +290,8 @@ int main(int argc, char* argv[]) {
     net::QuicErrorCode error = client.session()->error();
     if (FLAGS_version_mismatch_ok && error == net::QUIC_INVALID_VERSION) {
       cout << "Server talks QUIC, but none of the versions supported by "
-           << "this client: " << QuicVersionVectorToString(versions) << endl;
+           << "this client: " << ParsedQuicVersionVectorToString(versions)
+           << endl;
       // Version mismatch is not deemed a failure.
       return 0;
     }

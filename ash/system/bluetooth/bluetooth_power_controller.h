@@ -8,13 +8,12 @@
 #include "ash/ash_export.h"
 #include "ash/session/session_observer.h"
 #include "ash/shell_observer.h"
+#include "base/containers/queue.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "components/prefs/pref_change_registrar.h"
-#include "components/user_manager/user_manager.h"
+#include "components/user_manager/user_type.h"
 #include "device/bluetooth/bluetooth_adapter.h"
-
-#include <queue>
 
 class PrefRegistrySimple;
 class PrefService;
@@ -56,11 +55,16 @@ class ASH_EXPORT BluetoothPowerController
   // SessionObserver:
   void OnActiveUserPrefServiceChanged(PrefService* pref_service) override;
 
-  void OnLocalStatePrefServiceInitialized(PrefService* pref_service);
+  // ShellObserver:
+  void OnLocalStatePrefServiceInitialized(PrefService* pref_service) override;
 
   // BluetoothAdapter::Observer:
   void AdapterPresentChanged(device::BluetoothAdapter* adapter,
                              bool present) override;
+
+  device::BluetoothAdapter* bluetooth_adapter_for_test() {
+    return bluetooth_adapter_.get();
+  }
 
  private:
   friend class BluetoothPowerControllerTest;
@@ -85,7 +89,7 @@ class ASH_EXPORT BluetoothPowerController
   void SetBluetoothPower(bool enabled);
 
   // Sets the bluetooth power given the ready adapter.
-  void SetBluetoothPowerOnAdapterReady(bool enabled);
+  void SetBluetoothPowerOnAdapterReady();
 
   using BluetoothTask = base::OnceClosure;
 
@@ -128,7 +132,7 @@ class ASH_EXPORT BluetoothPowerController
 
   // Contains pending tasks which depend on the availability of bluetooth
   // adapter.
-  std::queue<BluetoothTask> pending_bluetooth_tasks_;
+  base::queue<BluetoothTask> pending_bluetooth_tasks_;
 
   // The registrar used to watch prefs changes in the above
   // |active_user_pref_service_| from outside ash.
@@ -140,6 +144,11 @@ class ASH_EXPORT BluetoothPowerController
   // True indicates that pending_bluetooth_tasks_ is being executed and
   // waiting for complete callback.
   bool pending_tasks_busy_ = false;
+
+  // If not empty this indicates the pending target bluetooth power to be set.
+  // This needs to be tracked so that we can combine multiple pending power
+  // change requests.
+  base::Optional<bool> pending_bluetooth_power_target_;
 
   scoped_refptr<device::BluetoothAdapter> bluetooth_adapter_;
 

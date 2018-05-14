@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/guid.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_context.h"
@@ -83,8 +82,9 @@ HeadlessBrowserContextImpl::HeadlessBrowserContextImpl(
     std::unique_ptr<HeadlessBrowserContextOptions> context_options)
     : browser_(browser),
       context_options_(std::move(context_options)),
-      resource_context_(new HeadlessResourceContext),
-      permission_manager_(new HeadlessPermissionManager()),
+      resource_context_(std::make_unique<HeadlessResourceContext>()),
+      should_remove_headers_(true),
+      permission_manager_(std::make_unique<HeadlessPermissionManager>(this)),
       id_(base::GenerateGUID()) {
   InitWhileIOAllowed();
 }
@@ -92,14 +92,29 @@ HeadlessBrowserContextImpl::HeadlessBrowserContextImpl(
 HeadlessBrowserContextImpl::~HeadlessBrowserContextImpl() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
+  // Inform observers that we're going away.
+  {
+    base::AutoLock lock(observers_lock_);
+    for (auto& observer : observers_)
+      observer.OnHeadlessBrowserContextDestruct();
+  }
+
   // Destroy all web contents before shutting down storage partitions.
   web_contents_map_.clear();
-
-  ShutdownStoragePartitions();
 
   if (resource_context_) {
     content::BrowserThread::DeleteSoon(content::BrowserThread::IO, FROM_HERE,
                                        resource_context_.release());
+  }
+
+  ShutdownStoragePartitions();
+
+  if (url_request_getter_) {
+    content::BrowserThread::PostTask(
+        content::BrowserThread::IO, FROM_HERE,
+        base::BindOnce(
+            &HeadlessURLRequestContextGetter::NotifyContextShuttingDown,
+            url_request_getter_));
   }
 }
 
@@ -142,30 +157,48 @@ HeadlessBrowserContextImpl::GetAllWebContents() {
   return result;
 }
 
-void HeadlessBrowserContextImpl::SetFrameTreeNodeId(int render_process_id,
-                                                    int render_frame_routing_id,
-                                                    int frame_tree_node_id) {
-  base::AutoLock lock(frame_tree_node_map_lock_);
-  frame_tree_node_map_[std::make_pair(
-      render_process_id, render_frame_routing_id)] = frame_tree_node_id;
-}
-
-void HeadlessBrowserContextImpl::RemoveFrameTreeNode(
+void HeadlessBrowserContextImpl::SetDevToolsFrameToken(
     int render_process_id,
-    int render_frame_routing_id) {
-  base::AutoLock lock(frame_tree_node_map_lock_);
-  frame_tree_node_map_.erase(
-      std::make_pair(render_process_id, render_frame_routing_id));
+    int render_frame_routing_id,
+    const base::UnguessableToken& devtools_frame_token,
+    int frame_tree_node_id) {
+  base::AutoLock lock(devtools_frame_token_map_lock_);
+  devtools_frame_token_map_[std::make_pair(
+      render_process_id, render_frame_routing_id)] = devtools_frame_token;
+  frame_tree_node_id_to_devtools_frame_token_map_[frame_tree_node_id] =
+      devtools_frame_token;
 }
 
-int HeadlessBrowserContextImpl::GetFrameTreeNodeId(int render_process_id,
-                                                   int render_frame_id) const {
-  base::AutoLock lock(frame_tree_node_map_lock_);
-  const auto& find_it = frame_tree_node_map_.find(
+void HeadlessBrowserContextImpl::RemoveDevToolsFrameToken(
+    int render_process_id,
+    int render_frame_routing_id,
+    int frame_tree_node_id) {
+  base::AutoLock lock(devtools_frame_token_map_lock_);
+  devtools_frame_token_map_.erase(
+      std::make_pair(render_process_id, render_frame_routing_id));
+  frame_tree_node_id_to_devtools_frame_token_map_.erase(frame_tree_node_id);
+}
+
+const base::UnguessableToken* HeadlessBrowserContextImpl::GetDevToolsFrameToken(
+    int render_process_id,
+    int render_frame_id) const {
+  base::AutoLock lock(devtools_frame_token_map_lock_);
+  const auto& find_it = devtools_frame_token_map_.find(
       std::make_pair(render_process_id, render_frame_id));
-  if (find_it == frame_tree_node_map_.end())
-    return -1;
-  return find_it->second;
+  if (find_it == devtools_frame_token_map_.end())
+    return nullptr;
+  return &find_it->second;
+}
+
+const base::UnguessableToken*
+HeadlessBrowserContextImpl::GetDevToolsFrameTokenForFrameTreeNodeId(
+    int frame_tree_node_id) const {
+  base::AutoLock lock(devtools_frame_token_map_lock_);
+  const auto& find_it =
+      frame_tree_node_id_to_devtools_frame_token_map_.find(frame_tree_node_id);
+  if (find_it == frame_tree_node_id_to_devtools_frame_token_map_.end())
+    return nullptr;
+  return &find_it->second;
 }
 
 void HeadlessBrowserContextImpl::Close() {
@@ -175,7 +208,8 @@ void HeadlessBrowserContextImpl::Close() {
 
 void HeadlessBrowserContextImpl::InitWhileIOAllowed() {
   if (!context_options_->user_data_dir().empty()) {
-    path_ = context_options_->user_data_dir();
+    path_ =
+        context_options_->user_data_dir().Append(FILE_PATH_LITERAL("Default"));
   } else {
     PathService::Get(base::DIR_EXE, &path_);
   }
@@ -227,9 +261,12 @@ HeadlessBrowserContextImpl::GetSSLHostStateDelegate() {
 }
 
 content::PermissionManager* HeadlessBrowserContextImpl::GetPermissionManager() {
-  if (!permission_manager_.get())
-    permission_manager_.reset(new HeadlessPermissionManager());
   return permission_manager_.get();
+}
+
+content::BackgroundFetchDelegate*
+HeadlessBrowserContextImpl::GetBackgroundFetchDelegate() {
+  return nullptr;
 }
 
 content::BackgroundSyncController*
@@ -245,15 +282,14 @@ HeadlessBrowserContextImpl::GetBrowsingDataRemoverDelegate() {
 net::URLRequestContextGetter* HeadlessBrowserContextImpl::CreateRequestContext(
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) {
-  scoped_refptr<HeadlessURLRequestContextGetter> url_request_context_getter(
-      new HeadlessURLRequestContextGetter(
-          content::BrowserThread::GetTaskRunnerForThread(
-              content::BrowserThread::IO),
-          protocol_handlers, context_options_->TakeProtocolHandlers(),
-          std::move(request_interceptors), context_options_.get(),
-          browser_->browser_main_parts()->net_log(), this));
-  resource_context_->set_url_request_context_getter(url_request_context_getter);
-  return url_request_context_getter.get();
+  url_request_getter_ = base::MakeRefCounted<HeadlessURLRequestContextGetter>(
+      content::BrowserThread::GetTaskRunnerForThread(
+          content::BrowserThread::IO),
+      protocol_handlers, context_options_->TakeProtocolHandlers(),
+      std::move(request_interceptors), context_options_.get(),
+      browser_->net_log(), this);
+  resource_context_->set_url_request_context_getter(url_request_getter_);
+  return url_request_getter_.get();
 }
 
 net::URLRequestContextGetter*
@@ -327,6 +363,14 @@ const HeadlessBrowserContextOptions* HeadlessBrowserContextImpl::options()
   return context_options_.get();
 }
 
+void HeadlessBrowserContextImpl::SetRemoveHeaders(bool should_remove_headers) {
+  should_remove_headers_ = should_remove_headers;
+}
+
+bool HeadlessBrowserContextImpl::ShouldRemoveHeaders() const {
+  return should_remove_headers_;
+}
+
 const std::string& HeadlessBrowserContextImpl::Id() const {
   return id_;
 }
@@ -351,10 +395,20 @@ void HeadlessBrowserContextImpl::NotifyChildContentsCreated(
 
 void HeadlessBrowserContextImpl::NotifyUrlRequestFailed(
     net::URLRequest* request,
-    int net_error) {
+    int net_error,
+    bool canceled_by_devtools) {
   base::AutoLock lock(observers_lock_);
   for (auto& observer : observers_)
-    observer.UrlRequestFailed(request, net_error);
+    observer.UrlRequestFailed(request, net_error, canceled_by_devtools);
+}
+
+void HeadlessBrowserContextImpl::SetNetworkConditions(
+    HeadlessNetworkConditions conditions) {
+  network_conditions_ = conditions;
+}
+
+HeadlessNetworkConditions HeadlessBrowserContextImpl::GetNetworkConditions() {
+  return network_conditions_;
 }
 
 HeadlessBrowserContext::Builder::Builder(HeadlessBrowserImpl* browser)
@@ -377,6 +431,19 @@ HeadlessBrowserContext::Builder&
 HeadlessBrowserContext::Builder::SetProductNameAndVersion(
     const std::string& product_name_and_version) {
   options_->product_name_and_version_ = product_name_and_version;
+  return *this;
+}
+
+HeadlessBrowserContext::Builder& HeadlessBrowserContext::Builder::SetUserAgent(
+    const std::string& user_agent) {
+  options_->user_agent_ = user_agent;
+  return *this;
+}
+
+HeadlessBrowserContext::Builder&
+HeadlessBrowserContext::Builder::SetAcceptLanguage(
+    const std::string& accept_language) {
+  options_->accept_language_ = accept_language;
   return *this;
 }
 
@@ -414,6 +481,32 @@ HeadlessBrowserContext::Builder::SetIncognitoMode(bool incognito_mode) {
 }
 
 HeadlessBrowserContext::Builder&
+HeadlessBrowserContext::Builder::SetSitePerProcess(bool site_per_process) {
+  options_->site_per_process_ = site_per_process;
+  return *this;
+}
+
+HeadlessBrowserContext::Builder&
+HeadlessBrowserContext::Builder::SetBlockNewWebContents(
+    bool block_new_web_contents) {
+  options_->block_new_web_contents_ = block_new_web_contents;
+  return *this;
+}
+
+HeadlessBrowserContext::Builder&
+HeadlessBrowserContext::Builder::SetInitialVirtualTime(
+    base::Time initial_virtual_time) {
+  options_->initial_virtual_time_ = initial_virtual_time;
+  return *this;
+}
+
+HeadlessBrowserContext::Builder&
+HeadlessBrowserContext::Builder::SetAllowCookies(bool allow_cookies) {
+  options_->allow_cookies_ = allow_cookies;
+  return *this;
+}
+
+HeadlessBrowserContext::Builder&
 HeadlessBrowserContext::Builder::AddTabSocketMojoBindings() {
   std::string js_bindings =
       ui::ResourceBundle::GetSharedInstance()
@@ -443,22 +536,22 @@ HeadlessBrowserContext* HeadlessBrowserContext::Builder::Build() {
     // context with mojo bindings.
     if (!enable_http_and_https_if_mojo_used_) {
       options_->protocol_handlers_[url::kHttpScheme] =
-          base::MakeUnique<BlackHoleProtocolHandler>();
+          std::make_unique<BlackHoleProtocolHandler>();
       options_->protocol_handlers_[url::kHttpsScheme] =
-          base::MakeUnique<BlackHoleProtocolHandler>();
+          std::make_unique<BlackHoleProtocolHandler>();
     }
   }
 
   return browser_->CreateBrowserContext(this);
 }
 
-HeadlessBrowserContext::Builder::MojoBindings::MojoBindings() {}
+HeadlessBrowserContext::Builder::MojoBindings::MojoBindings() = default;
 
 HeadlessBrowserContext::Builder::MojoBindings::MojoBindings(
     const std::string& mojom_name,
     const std::string& js_bindings)
     : mojom_name(mojom_name), js_bindings(js_bindings) {}
 
-HeadlessBrowserContext::Builder::MojoBindings::~MojoBindings() {}
+HeadlessBrowserContext::Builder::MojoBindings::~MojoBindings() = default;
 
 }  // namespace headless

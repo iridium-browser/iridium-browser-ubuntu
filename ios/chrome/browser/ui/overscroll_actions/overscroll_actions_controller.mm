@@ -7,14 +7,22 @@
 #import <QuartzCore/QuartzCore.h>
 
 #include <algorithm>
+#include <memory>
+
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
+#import "ios/chrome/browser/ui/fullscreen/fullscreen_controller.h"
+#import "ios/chrome/browser/ui/fullscreen/fullscreen_controller_factory.h"
+#import "ios/chrome/browser/ui/fullscreen/scoped_fullscreen_disabler.h"
+#import "ios/chrome/browser/ui/history_popup/requirements/tab_history_constants.h"
+#import "ios/chrome/browser/ui/location_bar_notification_names.h"
 #import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_gesture_recognizer.h"
 #import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_view.h"
+#import "ios/chrome/browser/ui/page_info/page_info_legacy_coordinator.h"
 #include "ios/chrome/browser/ui/rtl_geometry.h"
-#import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
-#import "ios/chrome/browser/ui/toolbar/web_toolbar_controller.h"
+#import "ios/chrome/browser/ui/toolbar/legacy/toolbar_controller_constants.h"
+#import "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
 #include "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/browser/ui/voice/voice_search_notification_names.h"
 #import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
@@ -157,7 +165,7 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
   // Overscroll actions locking and unlocking works by listening to balanced
   // notifications. One notification lock and it's counterpart unlock. This
   // dictionary is used to retrieve the notification name from it's notification
-  // counterpart name. Exemple:
+  // counterpart name. Example:
   // UIKeyboardWillShowNotification trigger a lock. Its counterpart notification
   // name is UIKeyboardWillHideNotification.
   NSDictionary* _lockNotificationsCounterparts;
@@ -168,8 +176,11 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
   // The proxy used to interact with the webview's scrollview.
   CRWWebViewScrollViewProxy* _webViewScrollViewProxy;
   // The scrollview driving the OverscrollActionsController when not using
-  // the scrollview from the CRWWebControllerObserver.
+  // the scrollview from the WebState.
   UIScrollView* _scrollview;
+  // The disabler that prevents fullscreen calculations from occurring while
+  // overscroll actions are being recognized.
+  std::unique_ptr<ScopedFullscreenDisabler> _fullscreenDisabler;
 }
 
 // The view displayed over the header view holding the actions.
@@ -183,8 +194,7 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
 // call. The cached value is reset when the webview proxy is set.
 @property(nonatomic, readonly) CGFloat initialHeaderInset;
 // Initial height of the header view.
-// This property is set from the delegate headerHeight and cached on first
-// call. The cached value is reset when the webview proxy is set.
+// This property is set everytime the user starts pulling.
 @property(nonatomic, readonly) CGFloat initialHeaderHeight;
 // Redefined to be read-write.
 @property(nonatomic, assign, readwrite) OverscrollState overscrollState;
@@ -228,6 +238,10 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
 // Applies bounce state to the scroll view.
 - (void)applyBounceState;
 
+- (instancetype)initWithScrollView:(UIScrollView*)scrollView
+                      webViewProxy:(id<CRWWebViewProxy>)webViewProxy
+    NS_DESIGNATED_INITIALIZER;
+
 @end
 
 @implementation OverscrollActionsController
@@ -237,43 +251,59 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
 @synthesize initialHeaderHeight = _initialHeaderHeight;
 @synthesize overscrollState = _overscrollState;
 @synthesize delegate = _delegate;
+@synthesize browserState = _browserState;
 @synthesize panPointScreenOrigin = _panPointScreenOrigin;
 @synthesize panGestureRecognizer = _panGestureRecognizer;
 
-- (instancetype)init {
-  return [self initWithScrollView:nil];
-}
+- (instancetype)initWithScrollView:(UIScrollView*)scrollView
+                      webViewProxy:(id<CRWWebViewProxy>)webViewProxy {
+  DCHECK_NE(!!scrollView, !!webViewProxy)
+      << "exactly one of scrollView and webViewProxy must be non-nil";
 
-- (instancetype)initWithScrollView:(UIScrollView*)scrollView {
-  self = [super init];
-  if (self) {
+  if ((self = [super init])) {
     _overscrollActionView =
         [[OverscrollActionsView alloc] initWithFrame:CGRectZero];
     _overscrollActionView.delegate = self;
-    _scrollview = scrollView;
-    if (_scrollview) {
-      [self setup];
+    if (scrollView) {
+      _scrollview = scrollView;
+    } else {
+      _webViewProxy = webViewProxy;
+      _webViewScrollViewProxy = [_webViewProxy scrollViewProxy];
+      [_webViewScrollViewProxy addObserver:self];
     }
-    _lockIncrementNotifications = [[NSMutableSet alloc] init];
 
+    _lockIncrementNotifications = [[NSMutableSet alloc] init];
     _lockNotificationsCounterparts = @{
       UIKeyboardWillHideNotification : UIKeyboardWillShowNotification,
-      kMenuWillHideNotification : kMenuWillShowNotification,
+      kToolsMenuWillHideNotification : kToolsMenuWillShowNotification,
       kTabHistoryPopupWillHideNotification :
           kTabHistoryPopupWillShowNotification,
       kVoiceSearchWillHideNotification : kVoiceSearchWillShowNotification,
-      kVoiceSearchBarViewButtonDeselectedNotification :
-          kVoiceSearchBarViewButtonSelectedNotification,
-      ios_internal::kPageInfoWillHideNotification :
-          ios_internal::kPageInfoWillShowNotification,
-      ios_internal::kLocationBarResignsFirstResponderNotification :
-          ios_internal::kLocationBarBecomesFirstResponderNotification,
-      ios_internal::kSideSwipeDidStopNotification :
-          ios_internal::kSideSwipeWillStartNotification
+      kPageInfoWillHideNotification : kPageInfoWillShowNotification,
+      kLocationBarResignsFirstResponderNotification :
+          kLocationBarBecomesFirstResponderNotification,
+      kSideSwipeDidStopNotification : kSideSwipeWillStartNotification
+
     };
     [self registerNotifications];
+
+    if (_webViewProxy) {
+      // -enableOverscrollAction calls -setup, so it must not be called again
+      // if _webViewProxy is non-nil
+      [self enableOverscrollActions];
+    } else {
+      [self setup];
+    }
   }
   return self;
+}
+
+- (instancetype)initWithWebViewProxy:(id<CRWWebViewProxy>)webViewProxy {
+  return [self initWithScrollView:nil webViewProxy:webViewProxy];
+}
+
+- (instancetype)initWithScrollView:(UIScrollView*)scrollView {
+  return [self initWithScrollView:scrollView webViewProxy:nil];
 }
 
 - (void)dealloc {
@@ -330,11 +360,11 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
       UIEdgeInsetsMake(-[self scrollView].contentOffset.y, 0, 0, 0);
   // Start pulling (on top).
   CGFloat contentOffsetFromTheTop = [self scrollView].contentOffset.y;
-  if (![_webViewProxy shouldUseInsetForTopPadding]) {
+  if (![_webViewProxy shouldUseViewContentInset]) {
     // Content offset is shifted for WKWebView when the web view's
-    // |shouldUseInsetForTopPadding| is NO, to workaround bug with
+    // |shouldUseViewContentInset| is NO, to workaround bug with
     // UIScollView.contentInset (rdar://23584409).
-    contentOffsetFromTheTop -= [_webViewProxy topContentPadding];
+    contentOffsetFromTheTop -= _webViewProxy.contentInset.top;
   }
   CGFloat contentOffsetFromExpandedHeader =
       contentOffsetFromTheTop + self.initialHeaderInset;
@@ -349,6 +379,7 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
       // Set the contentInset to remove the bounce that would fight with drag.
       [self setScrollViewContentInset:insets];
       [self scrollView].scrollIndicatorInsets = insets;
+      _initialHeaderHeight = [[self delegate] overscrollHeaderHeight];
       self.overscrollState = OverscrollState::STARTED_PULLING;
     }
     [self updateWithVerticalOffset:-contentOffsetFromExpandedHeader];
@@ -506,26 +537,6 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
   return YES;
 }
 
-#pragma mark - CRWWebControllerObserver methods
-
-- (void)setWebViewProxy:(id<CRWWebViewProxy>)webViewProxy
-             controller:(CRWWebController*)webController {
-  DCHECK([webViewProxy scrollViewProxy]);
-  _initialHeaderInset = 0;
-  _initialHeaderHeight = 0;
-  _webViewProxy = webViewProxy;
-  [_webViewScrollViewProxy removeObserver:self];
-  _webViewScrollViewProxy = [webViewProxy scrollViewProxy];
-  [_webViewScrollViewProxy addObserver:self];
-  [self enableOverscrollActions];
-}
-
-- (void)webControllerWillClose:(CRWWebController*)webController {
-  [self disableOverscrollActions];
-  [_webViewScrollViewProxy removeObserver:self];
-  _webViewScrollViewProxy = nil;
-}
-
 #pragma mark - Private
 
 - (void)recordMetricForTriggeredAction:(OverscrollAction)action {
@@ -580,7 +591,7 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
 
 - (void)setup {
   UIPanGestureRecognizer* panGesture;
-  // Workaround a bug occuring when Speak Selection is enabled.
+  // Workaround a bug occurring when Speak Selection is enabled.
   // See crbug.com/699655.
   if (UIAccessibilityIsSpeakSelectionEnabled()) {
     panGesture = [[OverscrollActionsGestureRecognizer alloc]
@@ -730,6 +741,8 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
       [[NSNotificationCenter defaultCenter]
           postNotificationName:kOverscrollActionsDidEnd
                         object:self];
+      [self resetScrollViewTopContentInset];
+      _fullscreenDisabler = nullptr;
       if (_shouldInvalidate) {
         [self invalidate];
       }
@@ -742,6 +755,13 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
           [[NSNotificationCenter defaultCenter]
               postNotificationName:kOverscrollActionsWillStart
                             object:self];
+          if (self.browserState) {
+            FullscreenController* fullscreenController =
+                FullscreenControllerFactory::GetInstance()->GetForBrowserState(
+                    self.browserState);
+            _fullscreenDisabler = std::make_unique<ScopedFullscreenDisabler>(
+                fullscreenController);
+          }
         }
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
@@ -805,9 +825,9 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
 
 - (CGFloat)initialContentInset {
   // Content inset is not used for displaying header if the web view's
-  // |shouldUseInsetForTopPadding| is NO, instead the whole web view
-  // frame is changed.
-  if (!_scrollview && ![_webViewProxy shouldUseInsetForTopPadding])
+  // |shouldUseViewContentInset| is NO, instead the whole web view frame is
+  // changed.
+  if (!_scrollview && ![_webViewProxy shouldUseViewContentInset])
     return 0;
   return self.initialHeaderInset;
 }
@@ -818,13 +838,6 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
         [[self delegate] overscrollActionsControllerHeaderInset:self];
   }
   return _initialHeaderInset;
-}
-
-- (CGFloat)initialHeaderHeight {
-  if (_initialHeaderHeight == 0) {
-    _initialHeaderHeight = [[self delegate] overscrollHeaderHeight];
-  }
-  return _initialHeaderHeight;
 }
 
 #pragma mark - Bounce dynamic

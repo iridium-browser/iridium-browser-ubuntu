@@ -7,6 +7,7 @@
 #include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/test/histogram_tester.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/test/test_utils.h"
@@ -15,8 +16,7 @@ namespace {
 
 class TestMemoryDetails : public MetricsMemoryDetails {
  public:
-  TestMemoryDetails()
-      : MetricsMemoryDetails(base::Bind(&base::DoNothing), nullptr) {}
+  TestMemoryDetails() : MetricsMemoryDetails(base::DoNothing(), nullptr) {}
 
   void StartFetchAndWait() {
     StartFetch();
@@ -29,7 +29,7 @@ class TestMemoryDetails : public MetricsMemoryDetails {
   void OnDetailsAvailable() override {
     MetricsMemoryDetails::OnDetailsAvailable();
     // Exit the loop initiated by StartFetchAndWait().
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
   DISALLOW_COPY_AND_ASSIGN(TestMemoryDetails);
@@ -51,15 +51,6 @@ IN_PROC_BROWSER_TEST_F(MetricsMemoryDetailsBrowserTest, TestMemoryDetails) {
 
   scoped_refptr<TestMemoryDetails> details(new TestMemoryDetails);
   details->StartFetchAndWait();
-
-  // Memory.Browser.Large2 and Memory.Browser.Committed histograms should each
-  // have a single non-0 sample recorded.
-  histogram_tester.ExpectTotalCount("Memory.Browser.Large2", 1);
-  std::unique_ptr<base::HistogramSamples> samples(
-      histogram_tester.GetHistogramSamplesSinceCreation(
-          "Memory.Browser.Large2"));
-  ASSERT_TRUE(samples);
-  EXPECT_NE(0, samples->sum());
 
   histogram_tester.ExpectTotalCount("Memory.Browser.Committed", 1);
   std::unique_ptr<base::HistogramSamples> committed_samples(

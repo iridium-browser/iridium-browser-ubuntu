@@ -38,7 +38,7 @@ bool CreateTeamDriveResourceFromValue(
 // Converts |url_string| to |result|.  Always returns true to be used
 // for JSONValueConverter::RegisterCustomField method.
 // TODO(mukai): make it return false in case of invalid |url_string|.
-bool GetGURLFromString(const base::StringPiece& url_string, GURL* result) {
+bool GetGURLFromString(base::StringPiece url_string, GURL* result) {
   *result = GURL(url_string);
   return true;
 }
@@ -150,6 +150,7 @@ const char kMimeType[] = "mimeType";
 const char kCreatedDate[] = "createdDate";
 const char kModificationDate[] = "modificationDate";
 const char kModifiedDate[] = "modifiedDate";
+const char kModifiedByMeDate[] = "modifiedByMeDate";
 const char kLastViewedByMeDate[] = "lastViewedByMeDate";
 const char kSharedWithMeDate[] = "sharedWithMeDate";
 const char kMd5Checksum[] = "md5Checksum";
@@ -335,7 +336,7 @@ bool DriveAppIcon::Parse(const base::Value& value) {
 }
 
 // static
-bool DriveAppIcon::GetIconCategory(const base::StringPiece& category,
+bool DriveAppIcon::GetIconCategory(base::StringPiece category,
                                    DriveAppIcon::IconCategory* result) {
   for (size_t i = 0; i < arraysize(kAppIconCategoryMap); i++) {
     if (category == kAppIconCategoryMap[i].category_name) {
@@ -624,6 +625,9 @@ void FileResource::RegisterJSONConverter(
       &FileResource::modified_date_,
       &util::GetTimeFromString);
   converter->RegisterCustomField<base::Time>(
+      kModifiedByMeDate, &FileResource::modified_by_me_date_,
+      &util::GetTimeFromString);
+  converter->RegisterCustomField<base::Time>(
       kLastViewedByMeDate,
       &FileResource::last_viewed_by_me_date_,
       &util::GetTimeFromString);
@@ -770,7 +774,7 @@ bool ChangeResource::Parse(const base::Value& value) {
 }
 
 // static
-bool ChangeResource::GetType(const base::StringPiece& type_name,
+bool ChangeResource::GetType(base::StringPiece type_name,
                              ChangeResource::ChangeType* result) {
   for (size_t i = 0; i < arraysize(kChangeTypeMap); i++) {
     if (type_name == kChangeTypeMap[i].type_name) {

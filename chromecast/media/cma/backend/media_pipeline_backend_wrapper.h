@@ -18,6 +18,8 @@
 namespace chromecast {
 namespace media {
 
+enum class AudioContentType;
+class AudioDecoderWrapper;
 class MediaPipelineBackendManager;
 
 class MediaPipelineBackendWrapper : public MediaPipelineBackend {
@@ -43,11 +45,18 @@ class MediaPipelineBackendWrapper : public MediaPipelineBackend {
  private:
   void SetPlaying(bool playing);
 
+  bool IsSfx() {
+    return audio_stream_type_ ==
+           media::MediaPipelineDeviceParams::kAudioStreamSoundEffects;
+  }
+
   const std::unique_ptr<MediaPipelineBackend> backend_;
   MediaPipelineBackendManager* const backend_manager_;
+  const MediaPipelineDeviceParams::AudioStreamType audio_stream_type_;
+  const AudioContentType content_type_;
 
-  bool sfx_backend_;
-  bool have_audio_decoder_;
+  std::unique_ptr<AudioDecoderWrapper> audio_decoder_;
+
   bool have_video_decoder_;
   bool playing_;
 

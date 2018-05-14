@@ -5,7 +5,6 @@
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.h"
 
 #include <algorithm>
-#include <stack>
 #include <utility>
 
 #include "base/bind.h"
@@ -39,7 +38,6 @@
 #include "storage/common/fileapi/file_system_util.h"
 #include "third_party/leveldatabase/env_chromium.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
-#include "third_party/leveldatabase/src/include/leveldb/env.h"
 #include "third_party/leveldatabase/src/include/leveldb/status.h"
 #include "third_party/leveldatabase/src/include/leveldb/write_batch.h"
 
@@ -210,16 +208,15 @@ SyncStatusCode OpenDatabase(const base::FilePath& path,
                             leveldb::Env* env_override,
                             std::unique_ptr<LevelDBWrapper>* db_out,
                             bool* created) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(db_out);
   DCHECK(created);
   DCHECK(path.IsAbsolute());
 
-  leveldb::Options options;
+  leveldb_env::Options options;
   options.max_open_files = 0;  // Use minimum.
   options.create_if_missing = true;
   options.paranoid_checks = true;
-  options.reuse_logs = leveldb_env::kDefaultLogReuseOptionValue;
   if (env_override)
     options.env = env_override;
   std::unique_ptr<leveldb::DB> db;
@@ -240,7 +237,7 @@ SyncStatusCode OpenDatabase(const base::FilePath& path,
 
 SyncStatusCode MigrateDatabaseIfNeeded(LevelDBWrapper* db) {
   // See metadata_database_index.cc for the database schema.
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(db);
   std::string value;
   leveldb::Status status = db->Get(kDatabaseVersionKey, &value);
@@ -1549,7 +1546,7 @@ void MetadataDatabase::RemoveUnneededTrackersForMissingFile(
 }
 
 void MetadataDatabase::UpdateByFileMetadata(
-    const tracked_objects::Location& from_where,
+    const base::Location& from_where,
     std::unique_ptr<FileMetadata> metadata,
     UpdateOption option) {
   DCHECK(metadata);
@@ -1611,7 +1608,7 @@ std::unique_ptr<base::ListValue> MetadataDatabase::DumpFiles(
                       FileKindToString(tracker.synced_details().file_kind()));
     }
 
-    auto details = base::MakeUnique<base::DictionaryValue>();
+    auto details = std::make_unique<base::DictionaryValue>();
     details->SetString("file_id", tracker.file_id());
     if (tracker.has_synced_details() &&
         tracker.synced_details().file_kind() == FILE_KIND_FILE)
@@ -1655,7 +1652,7 @@ std::unique_ptr<base::ListValue> MetadataDatabase::DumpTrackers() {
   };
   std::vector<std::string> key_strings(
       trackerKeys, trackerKeys + arraysize(trackerKeys));
-  auto keys = base::MakeUnique<base::ListValue>();
+  auto keys = std::make_unique<base::ListValue>();
   keys->AppendStrings(key_strings);
   metadata->SetString("title", "Trackers");
   metadata->Set("keys", std::move(keys));
@@ -1717,7 +1714,7 @@ std::unique_ptr<base::ListValue> MetadataDatabase::DumpMetadata() {
   };
   std::vector<std::string> key_strings(
       fileKeys, fileKeys + arraysize(fileKeys));
-  auto keys = base::MakeUnique<base::ListValue>();
+  auto keys = std::make_unique<base::ListValue>();
   keys->AppendStrings(key_strings);
   metadata->SetString("title", "Metadata");
   metadata->Set("keys", std::move(keys));

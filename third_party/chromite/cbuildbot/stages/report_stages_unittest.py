@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -19,6 +20,7 @@ from chromite.cbuildbot import topology
 from chromite.cbuildbot import topology_unittest
 from chromite.cbuildbot.stages import generic_stages_unittest
 from chromite.cbuildbot.stages import report_stages
+from chromite.lib.const import waterfall
 from chromite.lib import alerts
 from chromite.lib import cidb
 from chromite.lib import constants
@@ -35,6 +37,7 @@ from chromite.lib import osutils
 from chromite.lib import patch_unittest
 from chromite.lib import results_lib
 from chromite.lib import retry_stats
+from chromite.lib import risk_report
 from chromite.lib import toolchain
 from chromite.lib import triage_lib
 
@@ -77,7 +80,7 @@ class BuildReexecutionStageTest(generic_stages_unittest.AbstractStageTestCase):
     """Test that master/slave version mismatch causes failure."""
     master_release_tag = '9999.0.0-rc1'
     master_build_id = self.fake_db.InsertBuild(
-        'master', constants.WATERFALL_INTERNAL, 2, 'master config',
+        'master', waterfall.WATERFALL_INTERNAL, 2, 'master config',
         'master hostname')
     master_metadata = metadata_lib.CBuildbotMetadata()
     master_metadata.UpdateKeyDictWithDict(
@@ -130,7 +133,7 @@ class SlaveFailureSummaryStageTest(
         failure_message_lib_unittest.StageFailureHelper.CreateStageFailure(
             build_id=10,
             build_stage_id=11,
-            waterfall=constants.WATERFALL_EXTERNAL,
+            waterfall=waterfall.WATERFALL_EXTERNAL,
             builder_name='builder_name',
             build_number=12,
             build_config='build-config',
@@ -150,21 +153,16 @@ class BuildStartStageTest(generic_stages_unittest.AbstractStageTestCase):
     self.db = fake_cidb.FakeCIDBConnection()
     cidb.CIDBConnectionFactory.SetupMockCidb(self.db)
     retry_stats.SetupStats()
-    os.environ['BUILDBOT_MASTERNAME'] = constants.WATERFALL_EXTERNAL
+    os.environ['BUILDBOT_MASTERNAME'] = waterfall.WATERFALL_EXTERNAL
 
     master_build_id = self.db.InsertBuild(
-        'master_build', constants.WATERFALL_EXTERNAL, 1,
+        'master_build', waterfall.WATERFALL_EXTERNAL, 1,
         'master_build_config', 'bot_hostname')
 
     self.PatchObject(toolchain, 'GetToolchainsForBoard')
     self.PatchObject(toolchain, 'GetArchForTarget', return_value='x86')
 
     self._Prepare(build_id=None, master_build_id=master_build_id)
-
-  def testUnknownWaterfall(self):
-    """Test that an assertion is thrown if master name is not valid."""
-    os.environ['BUILDBOT_MASTERNAME'] = 'gibberish'
-    self.assertRaises(failures_lib.StepFailure, self.RunStage)
 
   def testPerformStage(self):
     """Test that a normal run of the stage does a database insert."""
@@ -178,7 +176,7 @@ class BuildStartStageTest(generic_stages_unittest.AbstractStageTestCase):
   def testSuiteSchedulingEqualsFalse(self):
     """Test that a run of the stage makes suite_scheduling False."""
     # Test suite_scheduling for **-paladin
-    self._Prepare(bot_id='x86-generic-paladin')
+    self._Prepare(bot_id='amd64-generic-paladin')
     self.RunStage()
     self.assertFalse(self._run.attrs.metadata.GetValue('suite_scheduling'))
 
@@ -237,6 +235,10 @@ class AbstractReportStageTestCase(
                      return_value=1000)
     self.PatchObject(toolchain, 'GetToolchainsForBoard')
     self.PatchObject(toolchain, 'GetArchForTarget', return_value='x86')
+
+    # We need to mock out the function in risk_report that calls the real
+    # CL-Scanner API to avoid relying on external dependencies in the test.
+    self.PatchObject(risk_report, '_GetCLRisks', return_value={'1234': 1.0})
 
     # Set up a general purpose cidb mock. Tests with more specific
     # mock requirements can replace this with a separate call to
@@ -348,6 +350,7 @@ class ReportStageTest(AbstractReportStageTestCase):
     self.PatchObject(results_lib.Results, 'BuildSucceededSoFar',
                      return_value=False)
     stage = self.ConstructStage()
+    self.PatchObject(stage, 'GetBuildFailureMessage')
     stage.Run()
     calls = [mock.call(mock.ANY, mock.ANY, 'metadata.json', False,
                        update_list=True, acl=mock.ANY)]
@@ -422,18 +425,6 @@ class ReportStageTest(AbstractReportStageTestCase):
         child_configs, config_status_map)
     self.assertEqual(expected, child_config_list)
 
-  def testIsSheriffOMaticDispatchBuildTrue(self):
-    """Test IsSheriffOMaticDispatchBuild with important build."""
-    os.environ['BUILDBOT_MASTERNAME'] = constants.WATERFALL_INTERNAL
-    self._Prepare('master-paladin')
-    stage = self.ConstructStage()
-    self.assertEqual(stage.IsSheriffOMaticDispatchBuild(), 'chromeos')
-
-  def testIsSheriffOMaticImportantBuild(self):
-    """Test IsSheriffOMaticImportantBuild with unimportant build."""
-    stage = self.ConstructStage()
-    self.assertIsNone(stage.IsSheriffOMaticDispatchBuild())
-
   def testPerformStage(self):
     """Test PerformStage."""
     mock_sd = self.PatchObject(metrics, 'SecondsDistribution')
@@ -473,12 +464,12 @@ class ReportStageNoSyncTest(AbstractReportStageTestCase):
 
 
 class DetectRelevantChangesStageTest(
-    generic_stages_unittest.AbstractStageTestCase,
-    patch_unittest.MockPatchBase):
+    generic_stages_unittest.AbstractStageTestCase):
   """Test the DetectRelevantChangesStage."""
 
   def setUp(self):
-    self.changes = self.GetPatches(how_many=2)
+    self._patch_factory = patch_unittest.MockPatchFactory()
+    self.changes = self._patch_factory.GetPatches(how_many=2)
 
     self._Prepare()
 

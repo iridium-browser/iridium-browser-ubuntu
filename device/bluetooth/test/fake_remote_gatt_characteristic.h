@@ -12,7 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "device/bluetooth/bluetooth_remote_gatt_characteristic.h"
 #include "device/bluetooth/bluetooth_uuid.h"
-#include "device/bluetooth/public/interfaces/test/fake_bluetooth.mojom.h"
+#include "device/bluetooth/public/mojom/test/fake_bluetooth.mojom.h"
 #include "device/bluetooth/test/fake_read_response.h"
 #include "device/bluetooth/test/fake_remote_gatt_descriptor.h"
 
@@ -26,6 +26,8 @@ namespace bluetooth {
 // Implements device::BluetoothRemoteGattCharacteristics. Meant to be used
 // by FakeRemoteGattService to keep track of the characteristic's state and
 // attributes.
+//
+// Not intended for direct use by clients.  See README.md.
 class FakeRemoteGattCharacteristic
     : public device::BluetoothRemoteGattCharacteristic {
  public:
@@ -48,6 +50,15 @@ class FakeRemoteGattCharacteristic
   // If |gatt_code| is mojom::kGATTSuccess the next write with response request
   // will call its success callback. Otherwise it will call its error callback.
   void SetNextWriteResponse(uint16_t gatt_code);
+
+  // If |gatt_code| is mojom::kGATTSuccess the next subscribe to notifications
+  // with response request will call its success callback.  Otherwise it will
+  // call its error callback.
+  void SetNextSubscribeToNotificationsResponse(uint16_t gatt_code);
+
+  // Returns true if there are no pending responses for this characteristc or
+  // any of its descriptors.
+  bool AllResponsesConsumed();
 
   // Returns the last sucessfully written value to the characteristic. Returns
   // nullopt if no value has been written yet.
@@ -91,6 +102,9 @@ class FakeRemoteGattCharacteristic
   void DispatchWriteResponse(const base::Closure& callback,
                              const ErrorCallback& error_callback,
                              const std::vector<uint8_t>& value);
+  void DispatchSubscribeToNotificationsResponse(
+      const base::Closure& callback,
+      const ErrorCallback& error_callback);
 
   const std::string characteristic_id_;
   const device::BluetoothUUID characteristic_uuid_;
@@ -108,6 +122,10 @@ class FakeRemoteGattCharacteristic
   // Used to decide which callback should be called when
   // WriteRemoteCharacteristic is called.
   base::Optional<uint16_t> next_write_response_;
+
+  // Used to decide which callback should be called when
+  // SubscribeToNotifications is called.
+  base::Optional<uint16_t> next_subscribe_to_notifications_response_;
 
   size_t last_descriptor_id_;
 

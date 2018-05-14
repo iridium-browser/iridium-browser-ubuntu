@@ -4,6 +4,7 @@
 
 #include "base/auto_reset.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/api/input_ime/input_ime_api_nonchromeos.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -90,9 +91,9 @@ IN_PROC_BROWSER_TEST_F(InputImeApiTest, BasicApiTest) {
   // Test the input.ime.setComposition API.
   ui::CompositionText composition;
   composition.text = base::UTF8ToUTF16("test_set_composition");
-  composition.underlines.push_back(
-      ui::CompositionUnderline(0, composition.text.length(), SK_ColorBLACK,
-                               false /* thick */, SK_ColorTRANSPARENT));
+  composition.ime_text_spans.push_back(ui::ImeTextSpan(
+      ui::ImeTextSpan::Type::kComposition, 0, composition.text.length(),
+      SK_ColorBLACK, false /* thick */, SK_ColorTRANSPARENT));
   composition.selection = gfx::Range(2, 2);
   const std::vector<ui::CompositionText>& composition_history =
       client->composition_history();
@@ -145,7 +146,12 @@ IN_PROC_BROWSER_TEST_F(InputImeApiTest, SendKeyEventsOnNormalPage) {
   input_method->DetachTextInputClient(client.get());
 }
 
+// TODO(https://crbug.com/795631): This test is failing on the Linux bot.
+#if defined(OS_LINUX)
+IN_PROC_BROWSER_TEST_F(InputImeApiTest, DISABLED_SendKeyEventsOnSpecialPage) {
+#else
 IN_PROC_BROWSER_TEST_F(InputImeApiTest, SendKeyEventsOnSpecialPage) {
+#endif
   // Navigates to special page that sendKeyEvents API has limition with.
   ui_test_utils::NavigateToURL(browser(), GURL("chrome://flags"));
 

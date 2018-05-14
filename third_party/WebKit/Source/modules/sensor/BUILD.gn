@@ -30,13 +30,13 @@ blink_modules_sources("sensor") {
     "SensorProviderProxy.h",
     "SensorProxy.cpp",
     "SensorProxy.h",
+    "SensorReadingRemapper.cpp",
+    "SensorReadingRemapper.h",
   ]
 
   deps = [
     "//device/base/synchronization",
     "//services/device/public/cpp/generic_sensor",
-    "//services/device/public/interfaces:constants_blink",
-    "//services/device/public/interfaces:generic_sensor_blink",
     "//services/service_manager/public/cpp",
   ]
 }

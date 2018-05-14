@@ -4,80 +4,140 @@
 
 #include "chrome/browser/vr/elements/linear_layout.h"
 
+#include <memory>
+
+#include "chrome/browser/vr/test/animation_utils.h"
+#include "chrome/browser/vr/test/constants.h"
+#include "chrome/browser/vr/ui_scene.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace vr {
 
+namespace {
+
+// Helper class supplying convenient layout-related accessors.
+class TestElement : public UiElement {
+ public:
+  float x() const { return world_space_transform().To2dTranslation().x(); }
+  float y() const { return world_space_transform().To2dTranslation().y(); }
+  float local_x() const { return LocalTransform().To2dTranslation().x(); }
+  float local_y() const { return LocalTransform().To2dTranslation().y(); }
+};
+
+}  // namespace
+
 TEST(LinearLayout, HorizontalLayout) {
-  LinearLayout layout(LinearLayout::kHorizontal);
+  LinearLayout layout(LinearLayout::kRight);
   layout.set_margin(10);
-  UiElement rect_a;
-  rect_a.SetSize(10, 10);
-  rect_a.SetVisible(true);
-  layout.AddChild(&rect_a);
+  auto element = std::make_unique<UiElement>();
+  UiElement* rect_a = element.get();
+  rect_a->SetSize(10, 10);
+  layout.AddChild(std::move(element));
 
   // One element should require no position adjustment at all.
   layout.LayOutChildren();
-  EXPECT_TRUE(rect_a.transform_operations().Apply().IsIdentity());
+  EXPECT_TRUE(rect_a->LocalTransform().IsIdentity());
 
   // Two elements should be centered and separated by the margin.
-  UiElement rect_b;
-  rect_b.SetSize(20, 20);
-  rect_b.SetVisible(true);
-  layout.AddChild(&rect_b);
+  element = std::make_unique<UiElement>();
+  UiElement* rect_b = element.get();
+  rect_b->SetSize(10, 10);
+  rect_b->SetScale(2.0f, 2.0f, 0.0f);
+  layout.AddChild(std::move(element));
   layout.LayOutChildren();
 
-  EXPECT_FLOAT_EQ(-15.0f, rect_a.transform_operations().at(0).translate.x);
-  EXPECT_FLOAT_EQ(0.0f, rect_a.transform_operations().at(0).translate.y);
-  EXPECT_FLOAT_EQ(0.0f, rect_a.transform_operations().at(0).translate.z);
+  gfx::Point3F position_a;
+  rect_a->LocalTransform().TransformPoint(&position_a);
 
-  EXPECT_FLOAT_EQ(10.0f, rect_b.transform_operations().at(0).translate.x);
-  EXPECT_FLOAT_EQ(0.0f, rect_b.transform_operations().at(0).translate.y);
-  EXPECT_FLOAT_EQ(0.0f, rect_b.transform_operations().at(0).translate.z);
+  gfx::Point3F position_b;
+  rect_b->LocalTransform().TransformPoint(&position_b);
 
-  rect_a.SetVisible(false);
+  EXPECT_FLOAT_EQ(-15.0f, position_a.x());
+  EXPECT_FLOAT_EQ(0.0f, position_a.y());
+  EXPECT_FLOAT_EQ(0.0f, position_a.z());
+
+  EXPECT_FLOAT_EQ(10.0f, position_b.x());
+  EXPECT_FLOAT_EQ(0.0f, position_b.y());
+  EXPECT_FLOAT_EQ(0.0f, position_b.z());
+
+  rect_a->set_requires_layout(false);
   layout.LayOutChildren();
-  // The invisible child should not be accounted for in the layout.
-  EXPECT_TRUE(rect_b.transform_operations().Apply().IsIdentity());
 }
 
-TEST(LinearLayout, VerticalLayout) {
-  LinearLayout layout(LinearLayout::kVertical);
-  layout.set_margin(10);
-  UiElement rect_a;
-  rect_a.SetSize(10, 10);
-  rect_a.SetVisible(true);
-  layout.AddChild(&rect_a);
+TEST(LinearLayout, Orientations) {
+  LinearLayout layout(LinearLayout::kUp);
 
-  // One element should require no position adjustment at all.
+  TestElement* rect;
+  for (int i = 0; i < 2; i++) {
+    auto element = std::make_unique<TestElement>();
+    rect = element.get();
+    element->SetSize(10, 10);
+    layout.AddChild(std::move(element));
+  }
+
+  layout.set_direction(LinearLayout::kUp);
   layout.LayOutChildren();
-  EXPECT_TRUE(rect_a.transform_operations().Apply().IsIdentity());
+  EXPECT_FLOAT_EQ(0.0f, rect->local_x());
+  EXPECT_FLOAT_EQ(5.0f, rect->local_y());
 
-  // Two elements should be centered and separated by the margin.
-  UiElement rect_b;
-  rect_b.SetSize(20, 20);
-  rect_b.SetVisible(true);
-  layout.AddChild(&rect_b);
+  layout.set_direction(LinearLayout::kDown);
   layout.LayOutChildren();
+  EXPECT_FLOAT_EQ(0.0f, rect->local_x());
+  EXPECT_FLOAT_EQ(-5.0f, rect->local_y());
 
-  const cc::TransformOperation& op_a =
-      rect_a.transform_operations().at(UiElement::kLayoutOffsetIndex);
-
-  EXPECT_FLOAT_EQ(0.0f, op_a.translate.x);
-  EXPECT_FLOAT_EQ(-15.0f, op_a.translate.y);
-  EXPECT_FLOAT_EQ(0.0f, op_a.translate.z);
-
-  const cc::TransformOperation& op_b =
-      rect_b.transform_operations().at(UiElement::kLayoutOffsetIndex);
-
-  EXPECT_FLOAT_EQ(0.0f, op_b.translate.x);
-  EXPECT_FLOAT_EQ(10.0f, op_b.translate.y);
-  EXPECT_FLOAT_EQ(0.0f, op_b.translate.z);
-
-  rect_a.SetVisible(false);
+  layout.set_direction(LinearLayout::kLeft);
   layout.LayOutChildren();
-  // The invisible child should not be accounted for in the layout.
-  EXPECT_TRUE(rect_b.transform_operations().Apply().IsIdentity());
+  EXPECT_FLOAT_EQ(-5.0f, rect->local_x());
+  EXPECT_FLOAT_EQ(0.0f, rect->local_y());
+
+  layout.set_direction(LinearLayout::kRight);
+  layout.LayOutChildren();
+  EXPECT_FLOAT_EQ(5.0f, rect->local_x());
+  EXPECT_FLOAT_EQ(0.0f, rect->local_y());
+}
+
+TEST(LinearLayout, NestedLayouts) {
+  // Build a tree of elements, including nested layouts:
+  //   parent_layout
+  //     child_layout
+  //       rect_a
+  //       rect_b
+  //     rect_c
+  auto parent_layout = std::make_unique<LinearLayout>(LinearLayout::kDown);
+  UiElement* p_parent_layout = parent_layout.get();
+  auto child_layout = std::make_unique<LinearLayout>(LinearLayout::kDown);
+  UiElement* p_child_layout = child_layout.get();
+  auto rect_a = std::make_unique<TestElement>();
+  TestElement* p_rect_a = rect_a.get();
+  rect_a->SetSize(10, 10);
+  child_layout->AddChild(std::move(rect_a));
+  auto rect_b = std::make_unique<TestElement>();
+  TestElement* p_rect_b = rect_b.get();
+  rect_b->SetSize(10, 10);
+  child_layout->AddChild(std::move(rect_b));
+  auto rect_c = std::make_unique<TestElement>();
+  TestElement* p_rect_c = rect_c.get();
+  rect_c->SetSize(999, 10);
+  parent_layout->AddChild(std::move(child_layout));
+  parent_layout->AddChild(std::move(rect_c));
+
+  auto scene = std::make_unique<UiScene>();
+  scene->AddUiElement(kRoot, std::move(parent_layout));
+  scene->OnBeginFrame(MicrosecondsToTicks(1), kStartHeadPose);
+
+  // Ensure that layouts expand to include the cumulative size of children.
+  EXPECT_FLOAT_EQ(p_parent_layout->size().width(), 999.f);
+  EXPECT_FLOAT_EQ(p_parent_layout->size().height(), 30.f);
+  EXPECT_FLOAT_EQ(p_child_layout->size().width(), 10.f);
+  EXPECT_FLOAT_EQ(p_child_layout->size().height(), 20.f);
+
+  // Ensure that children are at correct positions.
+  EXPECT_FLOAT_EQ(p_rect_a->x(), 0);
+  EXPECT_FLOAT_EQ(p_rect_a->y(), 10);
+  EXPECT_FLOAT_EQ(p_rect_b->x(), 0);
+  EXPECT_FLOAT_EQ(p_rect_b->y(), 0);
+  EXPECT_FLOAT_EQ(p_rect_c->x(), 0);
+  EXPECT_FLOAT_EQ(p_rect_c->y(), -10);
 }
 
 }  // namespace vr

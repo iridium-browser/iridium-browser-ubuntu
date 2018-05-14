@@ -24,6 +24,38 @@ const char* GetAudioContentTypeName(const AudioContentType type) {
   }
 }
 
+// static
+bool AudioSinkAndroid::GetSessionIds(SinkType sink_type,
+                                     int* media_id,
+                                     int* communication_id) {
+  switch (sink_type) {
+    case AudioSinkAndroid::kSinkTypeNativeBased:
+      // TODO(ckuiper): implement a sink using native code.
+      NOTREACHED() << "Native-based audio sink is not implemented yet!";
+      break;
+    case AudioSinkAndroid::kSinkTypeJavaBased:
+      return AudioSinkAndroidAudioTrackImpl::GetSessionIds(media_id,
+                                                           communication_id);
+  }
+  return false;
+}
+
+// static
+int64_t AudioSinkAndroid::GetMinimumBufferedTime(SinkType sink_type,
+                                                 const AudioConfig& config) {
+  const int64_t kDefaultMinBufferTimeUs = 50000;
+  switch (sink_type) {
+    case AudioSinkAndroid::kSinkTypeNativeBased:
+      // TODO(ckuiper): implement a sink using native code.
+      NOTREACHED() << "Native-based audio sink is not implemented yet!";
+      break;
+    case AudioSinkAndroid::kSinkTypeJavaBased:
+      return AudioSinkAndroidAudioTrackImpl::GetMinimumBufferedTime(
+          config.samples_per_second);
+  }
+  return kDefaultMinBufferTimeUs;
+}
+
 ManagedAudioSink::ManagedAudioSink(SinkType sink_type)
     : sink_type_(sink_type), sink_(nullptr) {}
 

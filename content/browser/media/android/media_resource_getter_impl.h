@@ -45,7 +45,7 @@ class MediaResourceGetterImpl : public media::MediaResourceGetter {
   void GetAuthCredentials(const GURL& url,
                           GetAuthCredentialsCB callback) override;
   void GetCookies(const GURL& url,
-                  const GURL& first_party_for_cookies,
+                  const GURL& site_for_cookies,
                   GetCookieCB callback) override;
   void GetPlatformPathFromURL(const GURL& url,
                               GetPlatformPathCB callback) override;
@@ -64,7 +64,8 @@ class MediaResourceGetterImpl : public media::MediaResourceGetter {
                                   const net::AuthCredentials& credentials);
 
   // Called when GetCookies() finishes.
-  void GetCookiesCallback(GetCookieCB callback, const std::string& cookies);
+  void GetCookiesCallback(GetCookieCB callback,
+                          const net::CookieList& cookie_list);
 
   // Called when GetPlatformPathFromFileSystemURL() finishes.
   void GetPlatformPathCallback(GetPlatformPathCB callback,

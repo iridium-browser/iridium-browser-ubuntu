@@ -14,12 +14,16 @@
 #include "build/build_config.h"
 #include "chrome/service/service_process.h"
 #include "components/version_info/version_info.h"
-#include "net/proxy/proxy_config_service.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_config_service.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/url_request/url_request_context_builder.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include <sys/utsname.h>
+#endif
+
+#if defined(OS_CHROMEOS)
+#error "Not supported on ChromeOS"
 #endif
 
 namespace {
@@ -30,7 +34,7 @@ namespace {
 std::string BuildOSCpuInfo() {
   std::string os_cpu;
 
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   int32_t os_major_version = 0;
   int32_t os_minor_version = 0;
   int32_t os_bugfix_version = 0;
@@ -61,12 +65,6 @@ std::string BuildOSCpuInfo() {
       os_minor_version
 #elif defined(OS_MACOSX)
       "Intel Mac OS X %d_%d_%d",
-      os_major_version,
-      os_minor_version,
-      os_bugfix_version
-#elif defined(OS_CHROMEOS)
-      "CrOS %s %d.%d.%d",
-      cputype.c_str(),  // e.g. i686
       os_major_version,
       os_minor_version,
       os_bugfix_version
@@ -101,8 +99,9 @@ ServiceURLRequestContextGetter::ServiceURLRequestContextGetter()
     : user_agent_(MakeUserAgentForServiceProcess()),
       network_task_runner_(g_service_process->io_task_runner()) {
   DCHECK(g_service_process);
-  proxy_config_service_ = net::ProxyService::CreateSystemProxyConfigService(
-      g_service_process->io_task_runner());
+  proxy_config_service_ =
+      net::ProxyResolutionService::CreateSystemProxyConfigService(
+          g_service_process->io_task_runner());
 }
 
 net::URLRequestContext*

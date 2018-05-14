@@ -2,18 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "DocumentStatisticsCollector.h"
+#include "core/dom/DocumentStatisticsCollector.h"
 
-#include "core/HTMLNames.h"
-#include "core/InputTypeNames.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/Text.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/VisualViewport.h"
 #include "core/html/HTMLHeadElement.h"
-#include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLMetaElement.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html_names.h"
+#include "core/input_type_names.h"
 #include "core/page/Page.h"
 #include "platform/Histogram.h"
 #include "public/platform/Platform.h"
@@ -129,7 +129,7 @@ void CollectFeatures(Element& root,
     } else if (element.HasTagName(formTag)) {
       features.form_count++;
     } else if (element.HasTagName(inputTag)) {
-      const HTMLInputElement& input = toHTMLInputElement(element);
+      const HTMLInputElement& input = ToHTMLInputElement(element);
       if (input.type() == InputTypeNames::text) {
         features.text_input_count++;
       } else if (input.type() == InputTypeNames::password) {
@@ -168,9 +168,9 @@ bool HasOpenGraphArticle(const Element& head) {
   DEFINE_STATIC_LOCAL(AtomicString, property_attr, ("property"));
   for (const Element* child = ElementTraversal::FirstChild(head); child;
        child = ElementTraversal::NextSibling(*child)) {
-    if (!isHTMLMetaElement(*child))
+    if (!IsHTMLMetaElement(*child))
       continue;
-    const HTMLMetaElement& meta = toHTMLMetaElement(*child);
+    const HTMLMetaElement& meta = ToHTMLMetaElement(*child);
 
     if (meta.GetName() == og_type ||
         meta.getAttribute(property_attr) == og_type) {
@@ -209,7 +209,7 @@ WebDistillabilityFeatures DocumentStatisticsCollector::CollectStatistics(
 
   features.is_mobile_friendly = IsMobileFriendly(document);
 
-  double start_time = MonotonicallyIncreasingTime();
+  double start_time = CurrentTimeTicksInSeconds();
 
   // This should be cheap since collectStatistics is only called right after
   // layout.
@@ -219,7 +219,7 @@ WebDistillabilityFeatures DocumentStatisticsCollector::CollectStatistics(
   CollectFeatures(*body, features);
   features.open_graph = HasOpenGraphArticle(*head);
 
-  double elapsed_time = MonotonicallyIncreasingTime() - start_time;
+  double elapsed_time = CurrentTimeTicksInSeconds() - start_time;
 
   DEFINE_STATIC_LOCAL(CustomCountHistogram, distillability_histogram,
                       ("WebCore.DistillabilityUs", 1, 1000000, 50));

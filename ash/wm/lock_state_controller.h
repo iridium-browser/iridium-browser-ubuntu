@@ -13,6 +13,7 @@
 #include "ash/wm/session_state_animator.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/timer/timer.h"
@@ -110,7 +111,7 @@ class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
   void SetLockScreenDisplayedCallback(base::OnceClosure callback);
 
   // aura::WindowTreeHostObserver override:
-  void OnHostCloseRequested(const aura::WindowTreeHost* host) override;
+  void OnHostCloseRequested(aura::WindowTreeHost* host) override;
 
   // SessionObserver overrides:
   void OnChromeTerminating() override;
@@ -160,6 +161,8 @@ class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
   // these cases an additional lock request is undesirable.)
   void StartImmediatePreLockAnimation(bool request_lock_on_completion);
   void StartCancellablePreLockAnimation();
+  void PreLockAnimation(SessionStateAnimator::AnimationSpeed speed,
+                        bool request_lock_on_completion);
   void CancelPreLockAnimation();
   void StartPostLockAnimation();
   // This method calls |callback| when animation completes.
@@ -195,7 +198,7 @@ class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
   bool shutting_down_ = false;
 
   // The reason (e.g. user action) for a pending shutdown.
-  ShutdownReason shutdown_reason_ = ShutdownReason::UNKNOWN;
+  base::Optional<ShutdownReason> shutdown_reason_;
 
   // Indicates whether controller should proceed to (cancellable) shutdown after
   // locking.
@@ -206,6 +209,9 @@ class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
 
   // Indicates that lock animation can be undone.
   bool can_cancel_lock_animation_ = false;
+
+  // Indicates whether post lock animation should be immediate.
+  bool post_lock_immediate_animation_ = false;
 
   std::unique_ptr<UnlockedStateProperties> unlocked_properties_;
 

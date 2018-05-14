@@ -26,34 +26,30 @@
 #include "core/paint/LinkHighlightImpl.h"
 
 #include <memory>
-#include "core/dom/DOMNodeIds.h"
 #include "core/dom/LayoutTreeBuilderTraversal.h"
 #include "core/dom/Node.h"
 #include "core/exported/WebSettingsImpl.h"
-#include "core/exported/WebViewBase.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "core/layout/LayoutBoxModelObject.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/compositing/CompositedLayerMapping.h"
 #include "core/paint/PaintLayer.h"
+#include "core/paint/compositing/CompositedLayerMapping.h"
 #include "platform/LayoutTestSupport.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/animation/CompositorAnimation.h"
 #include "platform/animation/CompositorAnimationCurve.h"
 #include "platform/animation/CompositorFloatAnimationCurve.h"
+#include "platform/animation/CompositorKeyframeModel.h"
 #include "platform/animation/CompositorTargetProperty.h"
 #include "platform/animation/TimingFunction.h"
 #include "platform/graphics/Color.h"
-#include "platform/graphics/CompositorElementId.h"
-#include "platform/graphics/CompositorMutableProperties.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/graphics/paint/PaintCanvas.h"
 #include "platform/graphics/paint/PaintRecorder.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/Vector.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
@@ -71,18 +67,19 @@ namespace blink {
 
 std::unique_ptr<LinkHighlightImpl> LinkHighlightImpl::Create(
     Node* node,
-    WebViewBase* owning_web_view) {
+    WebViewImpl* owning_web_view) {
   return WTF::WrapUnique(new LinkHighlightImpl(node, owning_web_view));
 }
 
-LinkHighlightImpl::LinkHighlightImpl(Node* node, WebViewBase* owning_web_view)
+LinkHighlightImpl::LinkHighlightImpl(Node* node, WebViewImpl* owning_web_view)
     : node_(node),
       owning_web_view_(owning_web_view),
-      current_graphics_layer_(0),
+      current_graphics_layer_(nullptr),
       is_scrolling_graphics_layer_(false),
       geometry_needs_update_(false),
       is_animating_(false),
-      start_time_(MonotonicallyIncreasingTime()) {
+      start_time_(CurrentTimeTicksInSeconds()),
+      unique_id_(NewUniqueObjectId()) {
   DCHECK(node_);
   DCHECK(owning_web_view);
   WebCompositorSupport* compositor_support =
@@ -93,16 +90,15 @@ LinkHighlightImpl::LinkHighlightImpl(Node* node, WebViewBase* owning_web_view)
   clip_layer_->SetTransformOrigin(WebFloatPoint3D());
   clip_layer_->AddChild(content_layer_->Layer());
 
-  compositor_player_ = CompositorAnimationPlayer::Create();
-  DCHECK(compositor_player_);
-  compositor_player_->SetAnimationDelegate(this);
+  compositor_animation_ = CompositorAnimation::Create();
+  DCHECK(compositor_animation_);
+  compositor_animation_->SetAnimationDelegate(this);
   if (owning_web_view_->LinkHighlightsTimeline())
-    owning_web_view_->LinkHighlightsTimeline()->PlayerAttached(*this);
+    owning_web_view_->LinkHighlightsTimeline()->AnimationAttached(*this);
 
-  CompositorElementId element_id = CompositorElementIdFromDOMNodeId(
-      DOMNodeIds::IdForNode(node),
-      CompositorElementIdNamespace::kLinkHighlight);
-  compositor_player_->AttachElement(element_id);
+  CompositorElementId element_id =
+      CompositorElementIdFromUniqueObjectId(unique_id_);
+  compositor_animation_->AttachElement(element_id);
   content_layer_->Layer()->SetDrawsContent(true);
   content_layer_->Layer()->SetOpacity(1);
   content_layer_->Layer()->SetElementId(element_id);
@@ -110,12 +106,12 @@ LinkHighlightImpl::LinkHighlightImpl(Node* node, WebViewBase* owning_web_view)
 }
 
 LinkHighlightImpl::~LinkHighlightImpl() {
-  if (compositor_player_->IsElementAttached())
-    compositor_player_->DetachElement();
+  if (compositor_animation_->IsElementAttached())
+    compositor_animation_->DetachElement();
   if (owning_web_view_->LinkHighlightsTimeline())
-    owning_web_view_->LinkHighlightsTimeline()->PlayerDestroyed(*this);
-  compositor_player_->SetAnimationDelegate(nullptr);
-  compositor_player_.reset();
+    owning_web_view_->LinkHighlightsTimeline()->AnimationDestroyed(*this);
+  compositor_animation_->SetAnimationDelegate(nullptr);
+  compositor_animation_.reset();
 
   ClearGraphicsLayerLinkHighlightPointer();
   ReleaseResources();
@@ -292,9 +288,7 @@ void LinkHighlightImpl::PaintContents(
   web_display_item_list->AppendDrawingItem(
       WebRect(record_bounds.x(), record_bounds.y(), record_bounds.width(),
               record_bounds.height()),
-      recorder.finishRecordingAsPicture(),
-      WebRect(record_bounds.x(), record_bounds.y(), record_bounds.width(),
-              record_bounds.height()));
+      recorder.finishRecordingAsPicture());
 }
 
 void LinkHighlightImpl::StartHighlightAnimationIfNeeded() {
@@ -321,7 +315,7 @@ void LinkHighlightImpl::StartHighlightAnimationIfNeeded() {
   // to fade out.
   float extra_duration_required = std::max(
       0.f, kMinPreFadeDuration -
-               static_cast<float>(MonotonicallyIncreasingTime() - start_time_));
+               static_cast<float>(CurrentTimeTicksInSeconds() - start_time_));
   if (extra_duration_required) {
     curve->AddKeyframe(CompositorFloatKeyframe(extra_duration_required,
                                                kStartOpacity, timing_function));
@@ -332,11 +326,12 @@ void LinkHighlightImpl::StartHighlightAnimationIfNeeded() {
       LayoutTestSupport::IsRunningLayoutTest() ? kStartOpacity : 0,
       timing_function));
 
-  std::unique_ptr<CompositorAnimation> animation = CompositorAnimation::Create(
-      *curve, CompositorTargetProperty::OPACITY, 0, 0);
+  std::unique_ptr<CompositorKeyframeModel> keyframe_model =
+      CompositorKeyframeModel::Create(*curve, CompositorTargetProperty::OPACITY,
+                                      0, 0);
 
   content_layer_->Layer()->SetDrawsContent(true);
-  compositor_player_->AddAnimation(std::move(animation));
+  compositor_animation_->AddKeyframeModel(std::move(keyframe_model));
 
   Invalidate();
   owning_web_view_->MainFrameImpl()->FrameWidget()->ScheduleAnimation();
@@ -345,7 +340,7 @@ void LinkHighlightImpl::StartHighlightAnimationIfNeeded() {
 void LinkHighlightImpl::ClearGraphicsLayerLinkHighlightPointer() {
   if (current_graphics_layer_) {
     current_graphics_layer_->RemoveLinkHighlight(this);
-    current_graphics_layer_ = 0;
+    current_graphics_layer_ = nullptr;
   }
 }
 
@@ -398,7 +393,7 @@ void LinkHighlightImpl::UpdateGeometry() {
 }
 
 void LinkHighlightImpl::ClearCurrentGraphicsLayer() {
-  current_graphics_layer_ = 0;
+  current_graphics_layer_ = nullptr;
   geometry_needs_update_ = true;
 }
 
@@ -412,8 +407,8 @@ WebLayer* LinkHighlightImpl::Layer() {
   return ClipLayer();
 }
 
-CompositorAnimationPlayer* LinkHighlightImpl::CompositorPlayer() const {
-  return compositor_player_.get();
+CompositorAnimation* LinkHighlightImpl::GetCompositorAnimation() const {
+  return compositor_animation_.get();
 }
 
 }  // namespace blink

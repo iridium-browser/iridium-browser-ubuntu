@@ -20,7 +20,7 @@
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
-#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/browser/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
@@ -85,6 +85,8 @@ BOOL gSignedInAccountsViewControllerIsShown = NO;
     _avatarCache = [[ResizedAvatarCache alloc] init];
     _identityServiceObserver.reset(
         new ChromeIdentityServiceObserverBridge(self));
+    // TODO(crbug.com/764578): -loadModel should not be called from
+    // initializer. A possible fix is to move this call to -viewDidLoad.
     [self loadModel];
   }
   return self;
@@ -226,9 +228,9 @@ BOOL gSignedInAccountsViewControllerIsShown = NO;
   return self;
 }
 
-- (void)dismiss {
+- (void)dismissWithCompletion:(ProceduralBlock)completion {
   [self.presentingViewController dismissViewControllerAnimated:YES
-                                                    completion:nil];
+                                                    completion:completion];
 }
 
 - (void)dealloc {
@@ -299,7 +301,8 @@ BOOL gSignedInAccountsViewControllerIsShown = NO;
       forState:UIControlStateNormal];
   [_primaryButton setBackgroundColor:[[MDCPalette cr_bluePalette] tint500]
                             forState:UIControlStateNormal];
-  _primaryButton.customTitleColor = [UIColor whiteColor];
+  [_primaryButton setTitleColor:[UIColor whiteColor]
+                       forState:UIControlStateNormal];
   _primaryButton.underlyingColorHint = [UIColor blackColor];
   _primaryButton.inkColor = [UIColor colorWithWhite:1 alpha:0.2f];
   _primaryButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -315,7 +318,8 @@ BOOL gSignedInAccountsViewControllerIsShown = NO;
       forState:UIControlStateNormal];
   [_secondaryButton setBackgroundColor:[UIColor whiteColor]
                               forState:UIControlStateNormal];
-  _secondaryButton.customTitleColor = [[MDCPalette cr_bluePalette] tint500];
+  [_secondaryButton setTitleColor:[[MDCPalette cr_bluePalette] tint500]
+                         forState:UIControlStateNormal];
   _secondaryButton.underlyingColorHint = [UIColor whiteColor];
   _secondaryButton.inkColor = [UIColor colorWithWhite:0 alpha:0.06f];
   _secondaryButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -370,12 +374,17 @@ BOOL gSignedInAccountsViewControllerIsShown = NO;
 #pragma mark Events
 
 - (void)onPrimaryButtonPressed:(id)sender {
-  [self dismiss];
+  [self dismissWithCompletion:nil];
 }
 
 - (void)onSecondaryButtonPressed:(id)sender {
-  [self dismiss];
-  [self.dispatcher showAccountsSettings];
+  __weak id<ApplicationSettingsCommands> weakDispatcher = self.dispatcher;
+  __weak UIViewController* weakPresentingViewController =
+      self.presentingViewController;
+  [self dismissWithCompletion:^{
+    [weakDispatcher
+        showAccountsSettingsFromViewController:weakPresentingViewController];
+  }];
 }
 
 #pragma mark OAuth2TokenServiceObserverBridgeDelegate
@@ -384,7 +393,7 @@ BOOL gSignedInAccountsViewControllerIsShown = NO;
   ProfileOAuth2TokenService* tokenService =
       OAuth2TokenServiceFactory::GetForBrowserState(_browserState);
   if (tokenService->GetAccounts().empty()) {
-    [self dismiss];
+    [self dismissWithCompletion:nil];
     return;
   }
   [_accountsCollection loadModel];

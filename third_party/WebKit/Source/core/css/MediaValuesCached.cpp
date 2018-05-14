@@ -8,7 +8,6 @@
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/api/LayoutViewItem.h"
 #include "platform/graphics/ColorSpaceGamut.h"
 
 namespace blink {
@@ -27,6 +26,7 @@ MediaValuesCached::MediaValuesCachedData::MediaValuesCachedData()
       available_hover_types(kHoverTypeNone),
       default_font_size(16),
       three_d_enabled(false),
+      immersive_mode(false),
       strict_mode(true),
       display_mode(kWebDisplayModeBrowser),
       display_shape(kDisplayShapeRect),
@@ -36,12 +36,12 @@ MediaValuesCached::MediaValuesCachedData::MediaValuesCachedData(
     Document& document)
     : MediaValuesCached::MediaValuesCachedData() {
   DCHECK(IsMainThread());
-  LocalFrame* frame = MediaValues::FrameFrom(document);
+  LocalFrame* frame = document.GetFrameOfMasterDocument();
   // TODO(hiroshige): Clean up |frame->view()| conditions.
   DCHECK(!frame || frame->View());
   if (frame && frame->View()) {
     DCHECK(frame->GetDocument());
-    DCHECK(!frame->GetDocument()->GetLayoutViewItem().IsNull());
+    DCHECK(frame->GetDocument()->GetLayoutView());
 
     // In case that frame is missing (e.g. for images that their document does
     // not have a frame)
@@ -63,6 +63,7 @@ MediaValuesCached::MediaValuesCachedData::MediaValuesCachedData(
     available_hover_types = MediaValues::CalculateAvailableHoverTypes(frame);
     default_font_size = MediaValues::CalculateDefaultFontSize(frame);
     three_d_enabled = MediaValues::CalculateThreeDEnabled(frame);
+    immersive_mode = MediaValues::CalculateInImmersiveMode(frame);
     strict_mode = MediaValues::CalculateStrictMode(frame);
     display_mode = MediaValues::CalculateDisplayMode(frame);
     media_type = MediaValues::CalculateMediaType(frame);
@@ -80,7 +81,7 @@ MediaValuesCached* MediaValuesCached::Create(
   return new MediaValuesCached(data);
 }
 
-MediaValuesCached::MediaValuesCached() {}
+MediaValuesCached::MediaValuesCached() = default;
 
 MediaValuesCached::MediaValuesCached(const MediaValuesCachedData& data)
     : data_(data) {}
@@ -151,6 +152,10 @@ int MediaValuesCached::AvailableHoverTypes() const {
 
 bool MediaValuesCached::ThreeDEnabled() const {
   return data_.three_d_enabled;
+}
+
+bool MediaValuesCached::InImmersiveMode() const {
+  return data_.immersive_mode;
 }
 
 bool MediaValuesCached::StrictMode() const {

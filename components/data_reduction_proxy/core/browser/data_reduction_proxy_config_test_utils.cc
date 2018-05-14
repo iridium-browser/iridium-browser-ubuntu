@@ -8,7 +8,6 @@
 
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/time/tick_clock.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_mutable_config_values.h"
@@ -31,7 +30,7 @@ TestDataReductionProxyConfig::TestDataReductionProxyConfig(
     DataReductionProxyConfigurator* configurator,
     DataReductionProxyEventCreator* event_creator)
     : TestDataReductionProxyConfig(
-          base::MakeUnique<TestDataReductionProxyParams>(),
+          std::make_unique<TestDataReductionProxyParams>(),
           io_task_runner,
           net_log,
           configurator,
@@ -49,25 +48,14 @@ TestDataReductionProxyConfig::TestDataReductionProxyConfig(
                                configurator,
                                event_creator),
       tick_clock_(nullptr),
-      network_quality_prohibitively_slow_set_(false),
-      network_quality_prohibitively_slow_(false),
-      lofi_accuracy_recording_intervals_set_(false),
-      is_captive_portal_(false) {
-}
+      is_captive_portal_(false),
+      add_default_proxy_bypass_rules_(true) {}
 
 TestDataReductionProxyConfig::~TestDataReductionProxyConfig() {
 }
 
-bool TestDataReductionProxyConfig::IsNetworkQualityProhibitivelySlow(
-    const net::NetworkQualityEstimator* network_quality_estimator) {
-  if (network_quality_prohibitively_slow_set_)
-    return network_quality_prohibitively_slow_;
-  return DataReductionProxyConfig::IsNetworkQualityProhibitivelySlow(
-      network_quality_estimator);
-}
-
 void TestDataReductionProxyConfig::ResetParamFlagsForTest() {
-  config_values_ = base::MakeUnique<TestDataReductionProxyParams>();
+  config_values_ = std::make_unique<TestDataReductionProxyParams>();
 }
 
 TestDataReductionProxyParams* TestDataReductionProxyConfig::test_params() {
@@ -76,29 +64,6 @@ TestDataReductionProxyParams* TestDataReductionProxyConfig::test_params() {
 
 DataReductionProxyConfigValues* TestDataReductionProxyConfig::config_values() {
   return config_values_.get();
-}
-
-void TestDataReductionProxyConfig::ResetLoFiStatusForTest() {
-  lofi_off_ = false;
-}
-
-void TestDataReductionProxyConfig::SetNetworkProhibitivelySlow(
-    bool network_quality_prohibitively_slow) {
-  network_quality_prohibitively_slow_set_ = true;
-  network_quality_prohibitively_slow_ = network_quality_prohibitively_slow;
-}
-
-void TestDataReductionProxyConfig::SetLofiAccuracyRecordingIntervals(
-    const std::vector<base::TimeDelta>& lofi_accuracy_recording_intervals) {
-  lofi_accuracy_recording_intervals_set_ = true;
-  lofi_accuracy_recording_intervals_ = lofi_accuracy_recording_intervals;
-}
-
-const std::vector<base::TimeDelta>&
-TestDataReductionProxyConfig::GetLofiAccuracyRecordingIntervals() const {
-  if (lofi_accuracy_recording_intervals_set_)
-    return lofi_accuracy_recording_intervals_;
-  return DataReductionProxyConfig::GetLofiAccuracyRecordingIntervals();
 }
 
 void TestDataReductionProxyConfig::SetTickClock(base::TickClock* tick_clock) {
@@ -147,6 +112,62 @@ bool TestDataReductionProxyConfig::GetIsCaptivePortal() const {
   return is_captive_portal_;
 }
 
+bool TestDataReductionProxyConfig::ShouldAddDefaultProxyBypassRules() const {
+  return add_default_proxy_bypass_rules_;
+}
+
+void TestDataReductionProxyConfig::SetShouldAddDefaultProxyBypassRules(
+    bool add_default_proxy_bypass_rules) {
+  add_default_proxy_bypass_rules_ = add_default_proxy_bypass_rules;
+}
+
+std::string TestDataReductionProxyConfig::GetCurrentNetworkID() const {
+  if (current_network_id_) {
+    return current_network_id_.value();
+  }
+  return DataReductionProxyConfig::GetCurrentNetworkID();
+}
+
+void TestDataReductionProxyConfig::SetCurrentNetworkID(
+    const std::string& network_id) {
+  current_network_id_ = network_id;
+}
+
+base::Optional<std::pair<bool /* is_secure_proxy */, bool /*is_core_proxy */>>
+TestDataReductionProxyConfig::GetInFlightWarmupProxyDetails() const {
+  if (in_flight_warmup_proxy_details_)
+    return in_flight_warmup_proxy_details_;
+  return DataReductionProxyConfig::GetInFlightWarmupProxyDetails();
+}
+
+void TestDataReductionProxyConfig::SetInFlightWarmupProxyDetails(
+    base::Optional<
+        std::pair<bool /* is_secure_proxy */, bool /*is_core_proxy */>>
+        in_flight_warmup_proxy_details) {
+  in_flight_warmup_proxy_details_ = in_flight_warmup_proxy_details;
+}
+
+bool TestDataReductionProxyConfig::IsFetchInFlight() const {
+  if (fetch_in_flight_)
+    return fetch_in_flight_.value();
+  return DataReductionProxyConfig::IsFetchInFlight();
+}
+
+void TestDataReductionProxyConfig::SetIsFetchInFlight(bool fetch_in_flight) {
+  fetch_in_flight_ = fetch_in_flight;
+}
+
+size_t TestDataReductionProxyConfig::GetWarmupURLFetchAttemptCounts() const {
+  if (!previous_attempt_counts_)
+    return DataReductionProxyConfig::GetWarmupURLFetchAttemptCounts();
+  return previous_attempt_counts_.value();
+}
+
+void TestDataReductionProxyConfig::SetWarmupURLFetchAttemptCounts(
+    base::Optional<size_t> previous_attempt_counts) {
+  previous_attempt_counts_ = previous_attempt_counts;
+}
+
 MockDataReductionProxyConfig::MockDataReductionProxyConfig(
     std::unique_ptr<DataReductionProxyConfigValues> config_values,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
@@ -160,10 +181,6 @@ MockDataReductionProxyConfig::MockDataReductionProxyConfig(
                                    event_creator) {}
 
 MockDataReductionProxyConfig::~MockDataReductionProxyConfig() {
-}
-
-void MockDataReductionProxyConfig::ResetLoFiStatusForTest() {
-  lofi_off_ = false;
 }
 
 }  // namespace data_reduction_proxy

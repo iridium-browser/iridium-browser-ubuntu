@@ -14,19 +14,55 @@
 #include "net/quic/core/crypto/quic_random.h"
 #include "net/quic/core/quic_time.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_arraysize.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_string.h"
+#include "third_party/boringssl/src/include/openssl/bytestring.h"
+#include "third_party/boringssl/src/include/openssl/hkdf.h"
 #include "third_party/boringssl/src/include/openssl/sha.h"
 
-using std::string;
 
 namespace net {
+
+// static
+std::vector<uint8_t> CryptoUtils::HkdfExpandLabel(
+    const EVP_MD* prf,
+    const std::vector<uint8_t>& secret,
+    const QuicString& label,
+    size_t out_len) {
+  CBB hkdf_label, inner_label;
+  const char label_prefix[] = "tls13 ";
+  if (!CBB_init(&hkdf_label, 1) || !CBB_add_u16(&hkdf_label, out_len) ||
+      !CBB_add_u8_length_prefixed(&hkdf_label, &inner_label) ||
+      !CBB_add_bytes(&inner_label,
+                     reinterpret_cast<const uint8_t*>(label_prefix),
+                     QUIC_ARRAYSIZE(label_prefix) - 1) ||
+      !CBB_add_bytes(&inner_label,
+                     reinterpret_cast<const uint8_t*>(label.data()),
+                     label.size()) ||
+      !CBB_add_u8(&hkdf_label, 0) || !CBB_flush(&hkdf_label)) {
+    QUIC_LOG(ERROR) << "Building HKDF label failed";
+    CBB_cleanup(&hkdf_label);
+    std::vector<uint8_t>();
+  }
+  std::vector<uint8_t> out;
+  out.resize(out_len);
+  if (!HKDF_expand(out.data(), out_len, prf, secret.data(), secret.size(),
+                   CBB_data(&hkdf_label), CBB_len(&hkdf_label))) {
+    QUIC_LOG(ERROR) << "Running HKDF-Expand-Label failed";
+    CBB_cleanup(&hkdf_label);
+    std::vector<uint8_t>();
+  }
+  CBB_cleanup(&hkdf_label);
+  return out;
+}
 
 // static
 void CryptoUtils::GenerateNonce(QuicWallTime now,
                                 QuicRandom* random_generator,
                                 QuicStringPiece orbit,
-                                string* nonce) {
+                                QuicString* nonce) {
   // a 4-byte timestamp + 28 random bytes.
   nonce->reserve(kNonceSize);
   nonce->resize(kNonceSize);
@@ -54,20 +90,20 @@ bool CryptoUtils::DeriveKeys(QuicStringPiece premaster_secret,
                              QuicTag aead,
                              QuicStringPiece client_nonce,
                              QuicStringPiece server_nonce,
-                             const string& hkdf_input,
+                             const QuicString& hkdf_input,
                              Perspective perspective,
                              Diversification diversification,
                              CrypterPair* crypters,
-                             string* subkey_secret) {
-  crypters->encrypter.reset(QuicEncrypter::Create(aead));
-  crypters->decrypter.reset(QuicDecrypter::Create(aead));
+                             QuicString* subkey_secret) {
+  crypters->encrypter = QuicEncrypter::Create(aead);
+  crypters->decrypter = QuicDecrypter::Create(aead);
   size_t key_bytes = crypters->encrypter->GetKeySize();
   size_t nonce_prefix_bytes = crypters->encrypter->GetNoncePrefixSize();
   size_t subkey_secret_bytes =
       subkey_secret == nullptr ? 0 : premaster_secret.length();
 
   QuicStringPiece nonce = client_nonce;
-  string nonce_storage;
+  QuicString nonce_storage;
   if (!server_nonce.empty()) {
     nonce_storage = client_nonce.as_string() + server_nonce.as_string();
     nonce = nonce_storage;
@@ -119,7 +155,7 @@ bool CryptoUtils::DeriveKeys(QuicStringPiece premaster_secret,
         return false;
       }
 
-      string key, nonce_prefix;
+      QuicString key, nonce_prefix;
       QuicDecrypter::DiversifyPreliminaryKey(
           hkdf.server_write_key(), hkdf.server_write_iv(),
           *diversification.nonce(), key_bytes, nonce_prefix_bytes, &key,
@@ -137,7 +173,7 @@ bool CryptoUtils::DeriveKeys(QuicStringPiece premaster_secret,
   }
 
   if (subkey_secret != nullptr) {
-    *subkey_secret = string(hkdf.subkey_secret());
+    *subkey_secret = QuicString(hkdf.subkey_secret());
   }
 
   return true;
@@ -148,7 +184,7 @@ bool CryptoUtils::ExportKeyingMaterial(QuicStringPiece subkey_secret,
                                        QuicStringPiece label,
                                        QuicStringPiece context,
                                        size_t result_len,
-                                       string* result) {
+                                       QuicString* result) {
   for (size_t i = 0; i < label.length(); i++) {
     if (label[i] == '\0') {
       QUIC_LOG(ERROR) << "ExportKeyingMaterial label may not contain NULs";
@@ -161,14 +197,14 @@ bool CryptoUtils::ExportKeyingMaterial(QuicStringPiece subkey_secret,
     return false;
   }
   uint32_t context_length = static_cast<uint32_t>(context.length());
-  string info = label.as_string();
+  QuicString info = label.as_string();
   info.push_back('\0');
   info.append(reinterpret_cast<char*>(&context_length), sizeof(context_length));
   info.append(context.data(), context.length());
 
   crypto::HKDF hkdf(subkey_secret, QuicStringPiece() /* no salt */, info,
                     result_len, 0 /* no fixed IV */, 0 /* no subkey secret */);
-  *result = string(hkdf.client_write_key());
+  *result = QuicString(hkdf.client_write_key());
   return true;
 }
 
@@ -179,8 +215,8 @@ uint64_t CryptoUtils::ComputeLeafCertHash(QuicStringPiece cert) {
 
 QuicErrorCode CryptoUtils::ValidateServerHello(
     const CryptoHandshakeMessage& server_hello,
-    const QuicVersionVector& negotiated_versions,
-    string* error_details) {
+    const QuicTransportVersionVector& negotiated_versions,
+    QuicString* error_details) {
   DCHECK(error_details != nullptr);
 
   if (server_hello.tag() != kSHLO) {
@@ -188,15 +224,17 @@ QuicErrorCode CryptoUtils::ValidateServerHello(
     return QUIC_INVALID_CRYPTO_MESSAGE_TYPE;
   }
 
-  QuicTagVector supported_version_tags;
-  if (server_hello.GetTaglist(kVER, &supported_version_tags) != QUIC_NO_ERROR) {
+  QuicVersionLabelVector supported_version_labels;
+  if (server_hello.GetVersionLabelList(kVER, &supported_version_labels) !=
+      QUIC_NO_ERROR) {
     *error_details = "server hello missing version list";
     return QUIC_INVALID_CRYPTO_MESSAGE_PARAMETER;
   }
   if (!negotiated_versions.empty()) {
-    bool mismatch = supported_version_tags.size() != negotiated_versions.size();
-    for (size_t i = 0; i < supported_version_tags.size() && !mismatch; ++i) {
-      mismatch = QuicTagToQuicVersion(supported_version_tags[i]) !=
+    bool mismatch =
+        supported_version_labels.size() != negotiated_versions.size();
+    for (size_t i = 0; i < supported_version_labels.size() && !mismatch; ++i) {
+      mismatch = QuicVersionLabelToQuicVersion(supported_version_labels[i]) !=
                  negotiated_versions[i];
     }
     // The server sent a list of supported versions, and the connection
@@ -212,9 +250,9 @@ QuicErrorCode CryptoUtils::ValidateServerHello(
 
 QuicErrorCode CryptoUtils::ValidateClientHello(
     const CryptoHandshakeMessage& client_hello,
-    QuicVersion version,
-    const QuicVersionVector& supported_versions,
-    string* error_details) {
+    QuicTransportVersion version,
+    const QuicTransportVersionVector& supported_versions,
+    QuicString* error_details) {
   if (client_hello.tag() != kCHLO) {
     *error_details = "Bad tag";
     return QUIC_INVALID_CRYPTO_MESSAGE_TYPE;
@@ -224,12 +262,14 @@ QuicErrorCode CryptoUtils::ValidateClientHello(
   // speaking, then the client went through a version negotiation.  In this
   // case, we need to make sure that we actually do not support this version
   // and that it wasn't a downgrade attack.
-  QuicTag client_version_tag;
-  if (client_hello.GetUint32(kVER, &client_version_tag) != QUIC_NO_ERROR) {
+  QuicVersionLabel client_version_label;
+  if (client_hello.GetVersionLabel(kVER, &client_version_label) !=
+      QUIC_NO_ERROR) {
     *error_details = "client hello missing version list";
     return QUIC_INVALID_CRYPTO_MESSAGE_PARAMETER;
   }
-  QuicVersion client_version = QuicTagToQuicVersion(client_version_tag);
+  QuicTransportVersion client_version =
+      QuicVersionLabelToQuicVersion(client_version_label);
   if (client_version != version) {
     // Just because client_version is a valid version enum doesn't mean that
     // this server actually supports that version, so we check to see if
@@ -289,7 +329,7 @@ const char* CryptoUtils::HandshakeFailureReasonToString(
 
 // static
 void CryptoUtils::HashHandshakeMessage(const CryptoHandshakeMessage& message,
-                                       string* output,
+                                       QuicString* output,
                                        Perspective perspective) {
   const QuicData& serialized = message.GetSerialized(perspective);
   uint8_t digest[SHA256_DIGEST_LENGTH];

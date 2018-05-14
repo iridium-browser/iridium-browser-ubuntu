@@ -17,14 +17,8 @@ namespace ash {
 // Both implements mojom::SystemTray and wraps the mojom::SystemTrayClient
 // interface. Implements both because it caches state pushed down from the
 // browser process via SystemTray so it can be synchronously queried inside ash.
-//
-// Conceptually similar to historical ash-to-chrome interfaces like
-// SystemTrayDelegate. Lives on the main thread.
-//
-// TODO: Consider renaming this to SystemTrayClient or renaming the current
-// SystemTray to SystemTrayView and making this class SystemTray.
-class ASH_EXPORT SystemTrayController
-    : NON_EXPORTED_BASE(public mojom::SystemTray) {
+// Lives on the main thread.
+class ASH_EXPORT SystemTrayController : public mojom::SystemTray {
  public:
   SystemTrayController();
   ~SystemTrayController() override;
@@ -59,9 +53,8 @@ class ASH_EXPORT SystemTrayController
   void ShowNetworkConfigure(const std::string& network_id);
   void ShowNetworkCreate(const std::string& type);
   void ShowThirdPartyVpnCreate(const std::string& extension_id);
+  void ShowArcVpnCreate(const std::string& app_id);
   void ShowNetworkSettings(const std::string& network_id);
-  void ShowProxySettings();
-  void SignOut();
   void RequestRestartForUpdate();
 
   // Binds the mojom::SystemTray interface to this object.
@@ -78,13 +71,13 @@ class ASH_EXPORT SystemTrayController
   void ShowUpdateIcon(mojom::UpdateSeverity severity,
                       bool factory_reset_required,
                       mojom::UpdateType update_type) override;
-  void ShowUpdateOverCellularAvailableIcon() override;
+  void SetUpdateOverCellularAvailableIconVisible(bool visible) override;
 
  private:
   // Client interface in chrome browser. May be null in tests.
   mojom::SystemTrayClientPtr system_tray_client_;
 
-  // Bindings for the SystemTray interface.
+  // Bindings for users of the mojo interface.
   mojo::BindingSet<mojom::SystemTray> bindings_;
 
   // The type of clock hour display: 12 or 24 hour.

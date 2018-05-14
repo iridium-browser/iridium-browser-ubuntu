@@ -11,23 +11,24 @@
 #include "base/memory/weak_ptr.h"
 #include "content/browser/media/capture/cursor_renderer_aura.h"
 #include "media/capture/content/screen_capture_device_core.h"
-#include "services/device/public/interfaces/wake_lock.mojom.h"
+#include "services/device/public/mojom/wake_lock.mojom.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/cursor/cursors_aura.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_animation_observer.h"
 
-namespace cc {
-class CopyOutputResult;
-}  // namespace cc
-
 namespace viz {
+class CopyOutputResult;
 class ReadbackYUVInterface;
 }
 
 namespace content {
 
+// AuraWindowCaptureMachine uses the compositor to capture Aura windows.
+//
+// It is used for browser window capture on platforms that use Aura (Windows,
+// Linux, and Chrome OS) and additionally for desktop capture on Chrome OS.
 class AuraWindowCaptureMachine : public media::VideoCaptureMachine,
                                  public aura::WindowObserver,
                                  public ui::ContextFactoryObserver,
@@ -48,7 +49,8 @@ class AuraWindowCaptureMachine : public media::VideoCaptureMachine,
   // Implements aura::WindowObserver.
   void OnWindowBoundsChanged(aura::Window* window,
                              const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds) override;
+                             const gfx::Rect& new_bounds,
+                             ui::PropertyChangeReason reason) override;
   void OnWindowDestroying(aura::Window* window) override;
   void OnWindowAddedToRootWindow(aura::Window* window) override;
   void OnWindowRemovingFromRootWindow(aura::Window* window,
@@ -84,7 +86,7 @@ class AuraWindowCaptureMachine : public media::VideoCaptureMachine,
                      base::TimeTicks event_time,
                      base::TimeTicks start_time,
                      const CaptureFrameCallback& capture_frame_cb,
-                     std::unique_ptr<cc::CopyOutputResult> result);
+                     std::unique_ptr<viz::CopyOutputResult> result);
 
   // A helper which does the real work for DidCopyOutput. Returns true if
   // succeeded and |capture_frame_cb| will be run at some future point. Returns
@@ -93,7 +95,7 @@ class AuraWindowCaptureMachine : public media::VideoCaptureMachine,
   bool ProcessCopyOutputResponse(scoped_refptr<media::VideoFrame> video_frame,
                                  base::TimeTicks event_time,
                                  const CaptureFrameCallback& capture_frame_cb,
-                                 std::unique_ptr<cc::CopyOutputResult> result);
+                                 std::unique_ptr<viz::CopyOutputResult> result);
 
   // ui::ContextFactoryObserver implementation.
   void OnLostResources() override;
@@ -104,7 +106,8 @@ class AuraWindowCaptureMachine : public media::VideoCaptureMachine,
       base::TimeTicks event_time,
       const CaptureFrameCallback& capture_frame_cb,
       scoped_refptr<media::VideoFrame> target,
-      std::unique_ptr<cc::SingleReleaseCallback> release_callback,
+      const gfx::Rect& region_in_frame,
+      std::unique_ptr<viz::SingleReleaseCallback> release_callback,
       bool result);
 
   // The window associated with the desktop.

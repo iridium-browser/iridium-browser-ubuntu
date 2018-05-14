@@ -6,9 +6,10 @@
 #define ImageCapture_h
 
 #include <memory>
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/events/EventTarget.h"
+#include "core/dom/events/EventTarget.h"
 #include "media/capture/mojo/image_capture.mojom-blink.h"
 #include "modules/EventTargetModules.h"
 #include "modules/ModulesExport.h"
@@ -17,13 +18,11 @@
 #include "modules/mediastream/MediaTrackConstraintSet.h"
 #include "modules/mediastream/MediaTrackSettings.h"
 #include "platform/AsyncMethodRunner.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 
 namespace blink {
 
 class ExceptionState;
 class MediaStreamTrack;
-class MediaTrackConstraints;
 class PhotoCapabilities;
 class ScriptPromiseResolver;
 class WebImageCaptureFrameGrabber;
@@ -71,17 +70,14 @@ class MODULES_EXPORT ImageCapture final
   void SetMediaTrackConstraints(ScriptPromiseResolver*,
                                 const HeapVector<MediaTrackConstraintSet>&);
   const MediaTrackConstraintSet& GetMediaTrackConstraints() const;
-  void ClearMediaTrackConstraints(ScriptPromiseResolver*);
+  void ClearMediaTrackConstraints();
   void GetMediaTrackSettings(MediaTrackSettings&) const;
 
-  // TODO(mcasas): Remove this service method, https://crbug.com/338503.
-  bool HasNonImageCaptureConstraints(const MediaTrackConstraints&) const;
-
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   using PromiseResolverFunction =
-      std::unique_ptr<Function<void(ScriptPromiseResolver*)>>;
+      base::OnceCallback<void(ScriptPromiseResolver*)>;
 
   ImageCapture(ExecutionContext*, MediaStreamTrack*);
 
@@ -90,7 +86,6 @@ class MODULES_EXPORT ImageCapture final
                            bool trigger_take_photo,
                            media::mojom::blink::PhotoStatePtr);
   void OnMojoSetOptions(ScriptPromiseResolver*,
-                        PromiseResolverFunction,
                         bool trigger_take_photo,
                         bool result);
   void OnMojoTakePhoto(ScriptPromiseResolver*, media::mojom::blink::BlobPtr);
@@ -101,8 +96,6 @@ class MODULES_EXPORT ImageCapture final
   void ResolveWithNothing(ScriptPromiseResolver*);
   void ResolveWithPhotoSettings(ScriptPromiseResolver*);
   void ResolveWithPhotoCapabilities(ScriptPromiseResolver*);
-  void ResolveWithMediaTrackConstraints(MediaTrackConstraints,
-                                        ScriptPromiseResolver*);
 
   Member<MediaStreamTrack> stream_track_;
   std::unique_ptr<WebImageCaptureFrameGrabber> frame_grabber_;

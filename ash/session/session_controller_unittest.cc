@@ -13,11 +13,24 @@
 #include "ash/public/interfaces/session_controller.mojom.h"
 #include "ash/session/session_controller.h"
 #include "ash/session/session_observer.h"
+#include "ash/session/test_session_controller_client.h"
+#include "ash/shell.h"
+#include "ash/system/screen_security/screen_tray_item.h"
+#include "ash/system/tray/system_tray.h"
+#include "ash/system/web_notification/web_notification_tray.h"
+#include "ash/test/ash_test_base.h"
+#include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/window_util.h"
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "components/prefs/testing_pref_service.h"
 #include "components/user_manager/user_type.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/aura/window.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_delegate.h"
 
 using session_manager::SessionState;
 
@@ -27,7 +40,7 @@ namespace {
 class TestSessionObserver : public SessionObserver {
  public:
   TestSessionObserver() : active_account_id_(EmptyAccountId()) {}
-  ~TestSessionObserver() override {}
+  ~TestSessionObserver() override = default;
 
   // SessionObserver:
   void OnActiveUserSessionChanged(const AccountId& account_id) override {
@@ -39,6 +52,10 @@ class TestSessionObserver : public SessionObserver {
   }
 
   void OnSessionStateChanged(SessionState state) override { state_ = state; }
+
+  void OnActiveUserPrefServiceChanged(PrefService* pref_service) override {
+    last_user_pref_service_ = pref_service;
+  }
 
   std::string GetUserSessionEmails() const {
     std::string emails;
@@ -53,11 +70,16 @@ class TestSessionObserver : public SessionObserver {
   const std::vector<AccountId>& user_session_account_ids() const {
     return user_session_account_ids_;
   }
+  PrefService* last_user_pref_service() const {
+    return last_user_pref_service_;
+  }
+  void clear_last_user_pref_service() { last_user_pref_service_ = nullptr; }
 
  private:
   SessionState state_ = SessionState::UNKNOWN;
   AccountId active_account_id_;
   std::vector<AccountId> user_session_account_ids_;
+  PrefService* last_user_pref_service_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(TestSessionObserver);
 };
@@ -65,18 +87,19 @@ class TestSessionObserver : public SessionObserver {
 void FillDefaultSessionInfo(mojom::SessionInfo* info) {
   info->can_lock_screen = true;
   info->should_lock_screen_automatically = true;
+  info->is_running_in_app_mode = false;
   info->add_user_session_policy = AddUserSessionPolicy::ALLOWED;
   info->state = SessionState::LOGIN_PRIMARY;
 }
 
 class SessionControllerTest : public testing::Test {
  public:
-  SessionControllerTest() {}
-  ~SessionControllerTest() override {}
+  SessionControllerTest() = default;
+  ~SessionControllerTest() override = default;
 
   // testing::Test:
   void SetUp() override {
-    controller_ = base::MakeUnique<SessionController>();
+    controller_ = std::make_unique<SessionController>(nullptr);
     controller_->AddObserver(&observer_);
   }
 
@@ -128,16 +151,25 @@ TEST_F(SessionControllerTest, SimpleSessionInfo) {
 
   EXPECT_TRUE(controller()->CanLockScreen());
   EXPECT_TRUE(controller()->ShouldLockScreenAutomatically());
+  EXPECT_FALSE(controller()->IsRunningInAppMode());
 
   info.can_lock_screen = false;
   SetSessionInfo(info);
   EXPECT_FALSE(controller()->CanLockScreen());
   EXPECT_TRUE(controller()->ShouldLockScreenAutomatically());
+  EXPECT_FALSE(controller()->IsRunningInAppMode());
 
   info.should_lock_screen_automatically = false;
   SetSessionInfo(info);
   EXPECT_FALSE(controller()->CanLockScreen());
   EXPECT_FALSE(controller()->ShouldLockScreenAutomatically());
+  EXPECT_FALSE(controller()->IsRunningInAppMode());
+
+  info.is_running_in_app_mode = true;
+  SetSessionInfo(info);
+  EXPECT_FALSE(controller()->CanLockScreen());
+  EXPECT_FALSE(controller()->ShouldLockScreenAutomatically());
+  EXPECT_TRUE(controller()->IsRunningInAppMode());
 }
 
 // Tests that the CanLockScreen is only true with an active user session.
@@ -278,11 +310,15 @@ TEST_F(SessionControllerTest, UserSessions) {
   EXPECT_TRUE(controller()->IsActiveUserSessionStarted());
   EXPECT_EQ("user1@test.com,", GetUserSessionEmails());
   EXPECT_EQ(GetUserSessionEmails(), observer()->GetUserSessionEmails());
+  EXPECT_EQ("user1@test.com",
+            controller()->GetPrimaryUserSession()->user_info->display_email);
 
   UpdateSession(2u, "user2@test.com");
   EXPECT_TRUE(controller()->IsActiveUserSessionStarted());
   EXPECT_EQ("user1@test.com,user2@test.com,", GetUserSessionEmails());
   EXPECT_EQ(GetUserSessionEmails(), observer()->GetUserSessionEmails());
+  EXPECT_EQ("user1@test.com",
+            controller()->GetPrimaryUserSession()->user_info->display_email);
 
   UpdateSession(1u, "user1_changed@test.com");
   EXPECT_EQ("user1_changed@test.com,user2@test.com,", GetUserSessionEmails());
@@ -293,21 +329,29 @@ TEST_F(SessionControllerTest, UserSessions) {
 TEST_F(SessionControllerTest, ActiveSession) {
   UpdateSession(1u, "user1@test.com");
   UpdateSession(2u, "user2@test.com");
+  EXPECT_EQ("user1@test.com",
+            controller()->GetPrimaryUserSession()->user_info->display_email);
 
   std::vector<uint32_t> order = {1u, 2u};
   controller()->SetUserSessionOrder(order);
   EXPECT_EQ("user1@test.com,user2@test.com,", GetUserSessionEmails());
   EXPECT_EQ("user1@test.com", observer()->active_account_id().GetUserEmail());
+  EXPECT_EQ("user1@test.com",
+            controller()->GetPrimaryUserSession()->user_info->display_email);
 
   order = {2u, 1u};
   controller()->SetUserSessionOrder(order);
   EXPECT_EQ("user2@test.com,user1@test.com,", GetUserSessionEmails());
   EXPECT_EQ("user2@test.com", observer()->active_account_id().GetUserEmail());
+  EXPECT_EQ("user1@test.com",
+            controller()->GetPrimaryUserSession()->user_info->display_email);
 
   order = {1u, 2u};
   controller()->SetUserSessionOrder(order);
   EXPECT_EQ("user1@test.com,user2@test.com,", GetUserSessionEmails());
   EXPECT_EQ("user1@test.com", observer()->active_account_id().GetUserEmail());
+  EXPECT_EQ("user1@test.com",
+            controller()->GetPrimaryUserSession()->user_info->display_email);
 }
 
 // Tests that user session is unblocked with a running unlock animation so that
@@ -372,6 +416,76 @@ TEST_F(SessionControllerTest, IsUserChild) {
   EXPECT_TRUE(controller()->IsUserSupervised());
 }
 
+using SessionControllerPrefsTest = NoSessionAshTestBase;
+
+// Verifies that ShellObserver is notified for PrefService changes.
+TEST_F(SessionControllerPrefsTest, Observer) {
+  constexpr char kUser1[] = "user1@test.com";
+  constexpr char kUser2[] = "user2@test.com";
+  const AccountId kUserAccount1 = AccountId::FromUserEmail(kUser1);
+  const AccountId kUserAccount2 = AccountId::FromUserEmail(kUser2);
+
+  TestSessionObserver observer;
+  SessionController* controller = Shell::Get()->session_controller();
+  controller->AddObserver(&observer);
+
+  // Setup 2 users.
+  TestSessionControllerClient* session = GetSessionControllerClient();
+  // Disable auto-provision of PrefService for each user.
+  constexpr bool kEnableSettings = true;
+  constexpr bool kProvidePrefService = false;
+  session->AddUserSession(kUser1, user_manager::USER_TYPE_REGULAR,
+                          kEnableSettings, kProvidePrefService);
+  session->AddUserSession(kUser2, user_manager::USER_TYPE_REGULAR,
+                          kEnableSettings, kProvidePrefService);
+
+  // The observer is not notified because the PrefService for kUser1 is not yet
+  // ready.
+  session->SwitchActiveUser(kUserAccount1);
+  EXPECT_EQ(nullptr, observer.last_user_pref_service());
+
+  auto pref_service = std::make_unique<TestingPrefServiceSimple>();
+  Shell::RegisterProfilePrefs(pref_service->registry(), true /* for_test */);
+  controller->ProvideUserPrefServiceForTest(kUserAccount1,
+                                            std::move(pref_service));
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
+            observer.last_user_pref_service());
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
+            controller->GetLastActiveUserPrefService());
+
+  observer.clear_last_user_pref_service();
+
+  // Switching to a user for which prefs are not ready does not notify and
+  // GetLastActiveUserPrefService() returns the old PrefService.
+  session->SwitchActiveUser(AccountId::FromUserEmail(kUser2));
+  EXPECT_EQ(nullptr, observer.last_user_pref_service());
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
+            controller->GetLastActiveUserPrefService());
+
+  session->SwitchActiveUser(AccountId::FromUserEmail(kUser1));
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
+            observer.last_user_pref_service());
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
+            controller->GetLastActiveUserPrefService());
+
+  // There should be no notification about a PrefService for an inactive user
+  // becoming initialized.
+  observer.clear_last_user_pref_service();
+  pref_service = std::make_unique<TestingPrefServiceSimple>();
+  Shell::RegisterProfilePrefs(pref_service->registry(), true /* for_test */);
+  controller->ProvideUserPrefServiceForTest(kUserAccount2,
+                                            std::move(pref_service));
+  EXPECT_EQ(nullptr, observer.last_user_pref_service());
+
+  session->SwitchActiveUser(AccountId::FromUserEmail(kUser2));
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount2),
+            observer.last_user_pref_service());
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount2),
+            controller->GetLastActiveUserPrefService());
+
+  controller->RemoveObserver(&observer);
+}
+
 TEST_F(SessionControllerTest, GetUserType) {
   // Child accounts
   mojom::UserSessionPtr session = mojom::UserSession::New();
@@ -428,6 +542,247 @@ TEST_F(SessionControllerTest, IsUserFirstLogin) {
   session->user_info->is_new_profile = true;
   controller()->UpdateUserSession(std::move(session));
   EXPECT_TRUE(controller()->IsUserFirstLogin());
+}
+
+class CanSwitchUserTest : public AshTestBase {
+ public:
+  // The action type to perform / check for upon user switching.
+  enum ActionType {
+    NO_DIALOG,       // No dialog should be shown.
+    ACCEPT_DIALOG,   // A dialog should be shown and we should accept it.
+    DECLINE_DIALOG,  // A dialog should be shown and we do not accept it.
+  };
+  CanSwitchUserTest() = default;
+  ~CanSwitchUserTest() override = default;
+
+  void SetUp() override {
+    AshTestBase::SetUp();
+    SystemTray* system_tray = GetPrimarySystemTray();
+    share_item_ = system_tray->GetScreenShareItem();
+    capture_item_ = system_tray->GetScreenCaptureItem();
+    EXPECT_TRUE(share_item_);
+    EXPECT_TRUE(capture_item_);
+    WebNotificationTray::DisableAnimationsForTest(true);
+  }
+
+  void TearDown() override {
+    RunAllPendingInMessageLoop();
+    WebNotificationTray::DisableAnimationsForTest(false);
+    AshTestBase::TearDown();
+  }
+
+  // Accessing the capture session functionality.
+  // Simulates a screen capture session start.
+  void StartCaptureSession() {
+    capture_item_->Start(base::Bind(&CanSwitchUserTest::StopCaptureCallback,
+                                    base::Unretained(this)));
+  }
+
+  // The callback which gets called when the screen capture gets stopped.
+  void StopCaptureSession() { capture_item_->Stop(); }
+
+  // Simulates a screen capture session stop.
+  void StopCaptureCallback() { stop_capture_callback_hit_count_++; }
+
+  // Accessing the share session functionality.
+  // Simulate a Screen share session start.
+  void StartShareSession() {
+    share_item_->Start(base::Bind(&CanSwitchUserTest::StopShareCallback,
+                                  base::Unretained(this)));
+  }
+
+  // Simulates a screen share session stop.
+  void StopShareSession() { share_item_->Stop(); }
+
+  // The callback which gets called when the screen share gets stopped.
+  void StopShareCallback() { stop_share_callback_hit_count_++; }
+
+  // Issuing a switch user call which might or might not create a dialog.
+  // The passed |action| type parameter defines the outcome (which will be
+  // checked) and the action the user will choose.
+  void SwitchUser(ActionType action) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(&CloseMessageBox, action));
+    Shell::Get()->session_controller()->CanSwitchActiveUser(
+        base::Bind(&CanSwitchUserTest::SwitchCallback, base::Unretained(this)));
+    base::RunLoop().RunUntilIdle();
+  }
+
+  // Called when the user will get actually switched.
+  void SwitchCallback(bool switch_user) {
+    if (switch_user)
+      switch_callback_hit_count_++;
+  }
+
+  // Methods needed to test with overview mode.
+  bool ToggleOverview() {
+    return Shell::Get()->window_selector_controller()->ToggleOverview();
+  }
+  bool IsSelecting() const {
+    return Shell::Get()->window_selector_controller()->IsSelecting();
+  }
+
+  // Various counter accessors.
+  int stop_capture_callback_hit_count() const {
+    return stop_capture_callback_hit_count_;
+  }
+  int stop_share_callback_hit_count() const {
+    return stop_share_callback_hit_count_;
+  }
+  int switch_callback_hit_count() const { return switch_callback_hit_count_; }
+
+ private:
+  static void CloseMessageBox(ActionType action) {
+    aura::Window* active_window = ash::wm::GetActiveWindow();
+    views::DialogDelegate* dialog =
+        active_window ? views::Widget::GetWidgetForNativeWindow(active_window)
+                            ->widget_delegate()
+                            ->AsDialogDelegate()
+                      : nullptr;
+
+    switch (action) {
+      case NO_DIALOG:
+        EXPECT_FALSE(dialog);
+        return;
+      case ACCEPT_DIALOG:
+        ASSERT_TRUE(dialog);
+        EXPECT_TRUE(dialog->Accept());
+        return;
+      case DECLINE_DIALOG:
+        ASSERT_TRUE(dialog);
+        EXPECT_TRUE(dialog->Close());
+        return;
+    }
+  }
+
+  // The two items from the SystemTray for the screen capture / share
+  // functionality.
+  ScreenTrayItem* capture_item_ = nullptr;
+  ScreenTrayItem* share_item_ = nullptr;
+
+  // Various counters to query for.
+  int stop_capture_callback_hit_count_ = 0;
+  int stop_share_callback_hit_count_ = 0;
+  int switch_callback_hit_count_ = 0;
+
+  DISALLOW_COPY_AND_ASSIGN(CanSwitchUserTest);
+};
+
+// Test that when there is no screen operation going on the user switch will be
+// performed as planned.
+TEST_F(CanSwitchUserTest, NoLock) {
+  EXPECT_EQ(0, switch_callback_hit_count());
+  SwitchUser(CanSwitchUserTest::NO_DIALOG);
+  EXPECT_EQ(1, switch_callback_hit_count());
+}
+
+// Test that with a screen capture operation going on, the user will need to
+// confirm. Declining will neither change the running state or switch users.
+TEST_F(CanSwitchUserTest, CaptureActiveDeclined) {
+  EXPECT_EQ(0, switch_callback_hit_count());
+  StartCaptureSession();
+  SwitchUser(CanSwitchUserTest::DECLINE_DIALOG);
+  EXPECT_EQ(0, switch_callback_hit_count());
+  EXPECT_EQ(0, stop_capture_callback_hit_count());
+  EXPECT_EQ(0, stop_share_callback_hit_count());
+  StopCaptureSession();
+  EXPECT_EQ(0, switch_callback_hit_count());
+  EXPECT_EQ(1, stop_capture_callback_hit_count());
+  EXPECT_EQ(0, stop_share_callback_hit_count());
+}
+
+// Test that with a screen share operation going on, the user will need to
+// confirm. Declining will neither change the running state or switch users.
+TEST_F(CanSwitchUserTest, ShareActiveDeclined) {
+  EXPECT_EQ(0, switch_callback_hit_count());
+  StartShareSession();
+  SwitchUser(CanSwitchUserTest::DECLINE_DIALOG);
+  EXPECT_EQ(0, switch_callback_hit_count());
+  EXPECT_EQ(0, stop_capture_callback_hit_count());
+  EXPECT_EQ(0, stop_share_callback_hit_count());
+  StopShareSession();
+  EXPECT_EQ(0, switch_callback_hit_count());
+  EXPECT_EQ(0, stop_capture_callback_hit_count());
+  EXPECT_EQ(1, stop_share_callback_hit_count());
+}
+
+// Test that with both operations going on, the user will need to confirm.
+// Declining will neither change the running state or switch users.
+TEST_F(CanSwitchUserTest, BothActiveDeclined) {
+  EXPECT_EQ(0, switch_callback_hit_count());
+  StartShareSession();
+  StartCaptureSession();
+  SwitchUser(CanSwitchUserTest::DECLINE_DIALOG);
+  EXPECT_EQ(0, switch_callback_hit_count());
+  EXPECT_EQ(0, stop_capture_callback_hit_count());
+  EXPECT_EQ(0, stop_share_callback_hit_count());
+  StopShareSession();
+  StopCaptureSession();
+  EXPECT_EQ(0, switch_callback_hit_count());
+  EXPECT_EQ(1, stop_capture_callback_hit_count());
+  EXPECT_EQ(1, stop_share_callback_hit_count());
+}
+
+// Test that with a screen capture operation going on, the user will need to
+// confirm. Accepting will change to stopped state and switch users.
+TEST_F(CanSwitchUserTest, CaptureActiveAccepted) {
+  EXPECT_EQ(0, switch_callback_hit_count());
+  StartCaptureSession();
+  SwitchUser(CanSwitchUserTest::ACCEPT_DIALOG);
+  EXPECT_EQ(1, switch_callback_hit_count());
+  EXPECT_EQ(1, stop_capture_callback_hit_count());
+  EXPECT_EQ(0, stop_share_callback_hit_count());
+  // Another stop should have no effect.
+  StopCaptureSession();
+  EXPECT_EQ(1, switch_callback_hit_count());
+  EXPECT_EQ(1, stop_capture_callback_hit_count());
+  EXPECT_EQ(0, stop_share_callback_hit_count());
+}
+
+// Test that with a screen share operation going on, the user will need to
+// confirm. Accepting will change to stopped state and switch users.
+TEST_F(CanSwitchUserTest, ShareActiveAccepted) {
+  EXPECT_EQ(0, switch_callback_hit_count());
+  StartShareSession();
+  SwitchUser(CanSwitchUserTest::ACCEPT_DIALOG);
+  EXPECT_EQ(1, switch_callback_hit_count());
+  EXPECT_EQ(0, stop_capture_callback_hit_count());
+  EXPECT_EQ(1, stop_share_callback_hit_count());
+  // Another stop should have no effect.
+  StopShareSession();
+  EXPECT_EQ(1, switch_callback_hit_count());
+  EXPECT_EQ(0, stop_capture_callback_hit_count());
+  EXPECT_EQ(1, stop_share_callback_hit_count());
+}
+
+// Test that with both operations going on, the user will need to confirm.
+// Accepting will change to stopped state and switch users.
+TEST_F(CanSwitchUserTest, BothActiveAccepted) {
+  EXPECT_EQ(0, switch_callback_hit_count());
+  StartShareSession();
+  StartCaptureSession();
+  SwitchUser(CanSwitchUserTest::ACCEPT_DIALOG);
+  EXPECT_EQ(1, switch_callback_hit_count());
+  EXPECT_EQ(1, stop_capture_callback_hit_count());
+  EXPECT_EQ(1, stop_share_callback_hit_count());
+  // Another stop should have no effect.
+  StopShareSession();
+  StopCaptureSession();
+  EXPECT_EQ(1, switch_callback_hit_count());
+  EXPECT_EQ(1, stop_capture_callback_hit_count());
+  EXPECT_EQ(1, stop_share_callback_hit_count());
+}
+
+// Test that overview mode is dismissed before switching user profile.
+TEST_F(CanSwitchUserTest, OverviewModeDismissed) {
+  EXPECT_EQ(0, switch_callback_hit_count());
+  gfx::Rect bounds(0, 0, 100, 100);
+  std::unique_ptr<aura::Window> w(CreateTestWindowInShellWithBounds(bounds));
+  ASSERT_TRUE(ToggleOverview());
+  ASSERT_TRUE(IsSelecting());
+  SwitchUser(CanSwitchUserTest::NO_DIALOG);
+  ASSERT_FALSE(IsSelecting());
+  EXPECT_EQ(1, switch_callback_hit_count());
 }
 
 }  // namespace

@@ -9,6 +9,7 @@
 #include <set>
 
 #include "base/macros.h"
+#include "base/test/scoped_feature_list.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
 #include "services/ui/ws/window_server_service_test_base.h"
@@ -88,6 +89,9 @@ class WindowServerTestBase : public WindowServerServiceTestBase,
   // WindowManagerDelegate:
   void SetWindowManagerClient(aura::WindowManagerClient* client) override;
   void OnWmConnected() override;
+  void OnWmAcceleratedWidgetAvailableForDisplay(
+      int64_t display_id,
+      gfx::AcceleratedWidget widget) override {}
   void OnWmSetBounds(aura::Window* window, const gfx::Rect& bounds) override;
   bool OnWmSetProperty(
       aura::Window* window,
@@ -116,6 +120,7 @@ class WindowServerTestBase : public WindowServerServiceTestBase,
       const ui::Event& event,
       std::unordered_map<std::string, std::vector<uint8_t>>* properties)
       override;
+  void OnCursorTouchVisibleChanged(bool enabled) override;
   void OnWmPerformMoveLoop(aura::Window* window,
                            mojom::MoveLoopSource source,
                            const gfx::Point& cursor_location,
@@ -136,6 +141,8 @@ class WindowServerTestBase : public WindowServerServiceTestBase,
   // Returns true on success, and false if not found, in which case
   // |window_tree_host| is not deleted.
   bool DeleteWindowTreeHost(aura::WindowTreeHostMus* window_tree_host);
+
+  base::test::ScopedFeatureList feature_list_;
 
   std::unique_ptr<aura::Env> env_;
   ::wm::WMState wm_state_;

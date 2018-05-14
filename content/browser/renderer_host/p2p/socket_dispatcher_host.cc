@@ -26,7 +26,9 @@
 #include "net/log/net_log_with_source.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/datagram_client_socket.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/network/proxy_resolving_client_socket_factory.h"
 
 using content::BrowserMessageFilter;
 using content::BrowserThread;
@@ -131,7 +133,7 @@ void P2PSocketDispatcherHost::OnChannelClosing() {
   dns_requests_.clear();
 
   if (monitoring_networks_) {
-    net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
+    net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
     monitoring_networks_ = false;
   }
 }
@@ -159,10 +161,17 @@ bool P2PSocketDispatcherHost::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void P2PSocketDispatcherHost::OnIPAddressChanged() {
+void P2PSocketDispatcherHost::OnNetworkChanged(
+    net::NetworkChangeNotifier::ConnectionType type) {
+  // NetworkChangeNotifier always emits CONNECTION_NONE notification whenever
+  // network configuration changes. All other notifications can be ignored.
+  if (type != net::NetworkChangeNotifier::CONNECTION_NONE)
+    return;
+
   // Notify the renderer about changes to list of network interfaces.
   network_list_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&P2PSocketDispatcherHost::DoGetNetworkList, this));
+      FROM_HERE,
+      base::BindOnce(&P2PSocketDispatcherHost::DoGetNetworkList, this));
 }
 
 void P2PSocketDispatcherHost::StartRtpDump(
@@ -189,12 +198,9 @@ void P2PSocketDispatcherHost::StopRtpDumpOnUIThread(bool incoming,
                                                     bool outgoing) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&P2PSocketDispatcherHost::StopRtpDumpOnIOThread,
-                 this,
-                 incoming,
-                 outgoing));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&P2PSocketDispatcherHost::StopRtpDumpOnIOThread, this,
+                     incoming, outgoing));
 }
 
 P2PSocketDispatcherHost::~P2PSocketDispatcherHost() {
@@ -202,7 +208,7 @@ P2PSocketDispatcherHost::~P2PSocketDispatcherHost() {
   DCHECK(dns_requests_.empty());
 
   if (monitoring_networks_)
-    net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
+    net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
 }
 
 P2PSocketHost* P2PSocketDispatcherHost::LookupSocket(int socket_id) {
@@ -212,24 +218,25 @@ P2PSocketHost* P2PSocketDispatcherHost::LookupSocket(int socket_id) {
 
 void P2PSocketDispatcherHost::OnStartNetworkNotifications() {
   if (!monitoring_networks_) {
-    net::NetworkChangeNotifier::AddIPAddressObserver(this);
+    net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
     monitoring_networks_ = true;
   }
 
   network_list_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&P2PSocketDispatcherHost::DoGetNetworkList, this));
+      FROM_HERE,
+      base::BindOnce(&P2PSocketDispatcherHost::DoGetNetworkList, this));
 }
 
 void P2PSocketDispatcherHost::OnStopNetworkNotifications() {
   if (monitoring_networks_) {
-    net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
+    net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
     monitoring_networks_ = false;
   }
 }
 
 void P2PSocketDispatcherHost::OnGetHostAddress(const std::string& host_name,
                                                int32_t request_id) {
-  std::unique_ptr<DnsRequest> request = base::MakeUnique<DnsRequest>(
+  std::unique_ptr<DnsRequest> request = std::make_unique<DnsRequest>(
       request_id, resource_context_->GetHostResolver());
   DnsRequest* request_ptr = request.get();
   dns_requests_.insert(std::move(request));
@@ -256,8 +263,14 @@ void P2PSocketDispatcherHost::OnCreateSocket(
     return;
   }
 
+  if (!proxy_resolving_socket_factory_) {
+    proxy_resolving_socket_factory_ =
+        std::make_unique<network::ProxyResolvingClientSocketFactory>(
+            nullptr, url_context_->GetURLRequestContext());
+  }
   std::unique_ptr<P2PSocketHost> socket(P2PSocketHost::Create(
-      this, socket_id, type, url_context_.get(), &throttler_));
+      this, socket_id, type, url_context_.get(),
+      proxy_resolving_socket_factory_.get(), &throttler_));
 
   if (!socket) {
     Send(new P2PMsg_OnError(socket_id));
@@ -298,11 +311,11 @@ void P2PSocketDispatcherHost::OnAcceptIncomingTcpConnection(
   }
 }
 
-void P2PSocketDispatcherHost::OnSend(int socket_id,
-                                     const net::IPEndPoint& socket_address,
-                                     const std::vector<char>& data,
-                                     const rtc::PacketOptions& options,
-                                     uint64_t packet_id) {
+void P2PSocketDispatcherHost::OnSend(
+    int socket_id,
+    const std::vector<char>& data,
+    const P2PPacketInfo& packet_info,
+    const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
   P2PSocketHost* socket = LookupSocket(socket_id);
   if (!socket) {
     LOG(ERROR) << "Received P2PHostMsg_Send for invalid socket_id.";
@@ -317,7 +330,9 @@ void P2PSocketDispatcherHost::OnSend(int socket_id,
     return;
   }
 
-  socket->Send(socket_address, data, options, packet_id);
+  socket->Send(packet_info.destination, data, packet_info.packet_options,
+               packet_info.packet_id,
+               net::NetworkTrafficAnnotationTag(traffic_annotation));
 }
 
 void P2PSocketDispatcherHost::OnSetOption(int socket_id,
@@ -351,8 +366,8 @@ void P2PSocketDispatcherHost::DoGetNetworkList() {
   default_ipv6_local_address_ = GetDefaultLocalAddress(AF_INET6);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&P2PSocketDispatcherHost::SendNetworkList, this, list,
-                 default_ipv4_local_address_, default_ipv6_local_address_));
+      base::BindOnce(&P2PSocketDispatcherHost::SendNetworkList, this, list,
+                     default_ipv4_local_address_, default_ipv6_local_address_));
 }
 
 void P2PSocketDispatcherHost::SendNetworkList(

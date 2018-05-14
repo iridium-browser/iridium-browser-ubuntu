@@ -26,23 +26,27 @@
 #ifndef FontSelector_h
 #define FontSelector_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/PlatformExport.h"
 #include "platform/fonts/FontCacheClient.h"
 #include "platform/fonts/SegmentedFontData.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
 
+class ExecutionContext;
 class FontData;
 class FontDescription;
+class FontFaceCache;
+class FontSelectorClient;
+class GenericFontFamilySettings;
 
 class PLATFORM_EXPORT FontSelector : public FontCacheClient {
  public:
-  virtual ~FontSelector() {}
-  virtual PassRefPtr<FontData> GetFontData(const FontDescription&,
-                                           const AtomicString& family_name) = 0;
+  virtual ~FontSelector() = default;
+  virtual scoped_refptr<FontData> GetFontData(const FontDescription&,
+                                       const AtomicString& family_name) = 0;
 
   // TODO crbug.com/542629 - The String variant of this method shouldbe replaced
   // with a better approach, now that we only have complex text.
@@ -56,6 +60,25 @@ class PLATFORM_EXPORT FontSelector : public FontCacheClient {
   virtual unsigned Version() const = 0;
 
   virtual void ReportNotDefGlyph() const = 0;
+
+  virtual void RegisterForInvalidationCallbacks(FontSelectorClient*) = 0;
+  virtual void UnregisterForInvalidationCallbacks(FontSelectorClient*) = 0;
+
+  virtual void FontFaceInvalidated(){};
+
+  virtual ExecutionContext* GetExecutionContext() const = 0;
+
+  virtual FontFaceCache* GetFontFaceCache() = 0;
+
+  virtual bool IsPlatformFamilyMatchAvailable(
+      const FontDescription&,
+      const AtomicString& passed_family) = 0;
+
+ protected:
+  static AtomicString FamilyNameFromSettings(
+      const GenericFontFamilySettings&,
+      const FontDescription&,
+      const AtomicString& generic_family_name);
 };
 
 }  // namespace blink

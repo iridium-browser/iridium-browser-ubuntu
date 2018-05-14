@@ -6,17 +6,29 @@
 #define NGLayoutInputNode_h
 
 #include "core/CoreExport.h"
-#include "platform/heap/Handle.h"
+#include "platform/LayoutUnit.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
 class ComputedStyle;
+class Document;
 class LayoutObject;
 class LayoutBox;
 class NGBreakToken;
 class NGConstraintSpace;
 class NGLayoutResult;
-struct MinMaxContentSize;
+struct MinMaxSize;
+struct NGLogicalSize;
+struct NGPhysicalSize;
+
+// Input to the min/max inline size calculation algorithm for child nodes. Child
+// nodes within the same formatting context need to know which floats are beside
+// them.
+struct MinMaxSizeInput {
+  LayoutUnit float_left_inline_size;
+  LayoutUnit float_right_inline_size;
+};
 
 // Represents the input to a layout algorithm for a given node. The layout
 // engine should use the style, node type to determine which type of layout
@@ -35,18 +47,47 @@ class CORE_EXPORT NGLayoutInputNode {
 
   bool IsInline() const;
   bool IsBlock() const;
+
+  bool IsColumnSpanAll() const;
   bool IsFloating() const;
   bool IsOutOfFlowPositioned() const;
+  bool IsReplaced() const;
+  bool IsAbsoluteContainer() const;
+  bool IsFixedContainer() const;
+  bool IsBody() const;
+  bool IsDocumentElement() const;
+  bool ShouldBeConsideredAsReplaced() const;
+  bool IsListItem() const;
+  bool IsListMarker() const;
+
+  // If the node is a quirky container for margin collapsing, see:
+  // https://html.spec.whatwg.org/#margin-collapsing-quirks
+  // NOTE: The spec appears to only somewhat match reality.
+  bool IsQuirkyContainer() const;
 
   bool CreatesNewFormattingContext() const;
 
   // Performs layout on this input node, will return the layout result.
-  RefPtr<NGLayoutResult> Layout(NGConstraintSpace*, NGBreakToken*);
+  scoped_refptr<NGLayoutResult> Layout(const NGConstraintSpace&, NGBreakToken*);
 
-  MinMaxContentSize ComputeMinMaxContentSize();
+  MinMaxSize ComputeMinMaxSize(const MinMaxSizeInput&);
+
+  // Returns intrinsic sizing information for replaced elements.
+  // ComputeReplacedSize can use it to compute actual replaced size.
+  // The function arguments return values from LegacyLayout intrinsic size
+  // computations: LayoutReplaced::IntrinsicSizingInfo,
+  // and LayoutReplaced::IntrinsicSize.
+  void IntrinsicSize(NGLogicalSize* default_intrinsic_size,
+                     Optional<LayoutUnit>* computed_inline_size,
+                     Optional<LayoutUnit>* computed_block_size,
+                     NGLogicalSize* aspect_ratio) const;
 
   // Returns the next sibling.
   NGLayoutInputNode NextSibling();
+
+  Document& GetDocument() const;
+
+  NGPhysicalSize InitialContainingBlockSize() const;
 
   // Returns the LayoutObject which is associated with this node.
   LayoutObject* GetLayoutObject() const;
@@ -55,7 +96,7 @@ class CORE_EXPORT NGLayoutInputNode {
 
   String ToString() const;
 
-  explicit operator bool() { return box_ != nullptr; }
+  explicit operator bool() const { return box_ != nullptr; }
 
   bool operator==(const NGLayoutInputNode& other) const {
     return box_ == other.box_;

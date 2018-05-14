@@ -199,10 +199,10 @@ public class TemplateUrlService {
      * the list of search engines returned here to match the underlying TemplateUrlService in
      * native.
      *
-     * @param disableFiltering Whether to disable filtering.
+     * @param enableFiltering Whether to enable filtering.
      */
-    public void setFilteringDisabled(boolean disableFiltering) {
-        nativeSetFilteringDisabled(mNativeTemplateUrlServiceAndroid, disableFiltering);
+    public void setFilteringEnabled(boolean enableFiltering) {
+        nativeSetFilteringEnabled(mNativeTemplateUrlServiceAndroid, enableFiltering);
     }
 
     /**
@@ -435,6 +435,15 @@ public class TemplateUrlService {
         return nativeGetSearchEngineUrlFromTemplateUrl(mNativeTemplateUrlServiceAndroid, keyword);
     }
 
+    /**
+     * Extracts the search query terms from a SRP URL.
+     * @param url The SRP URL.
+     * @return A string containing just the search terms stripped from the SRP URL.
+     */
+    public String extractSearchTermsFromUrl(String url) {
+        return nativeExtractSearchTermsFromUrl(mNativeTemplateUrlServiceAndroid, url);
+    }
+
     @VisibleForTesting
     public String addSearchEngineForTesting(String keyword, int ageInDays) {
         return nativeAddSearchEngineForTesting(
@@ -449,7 +458,7 @@ public class TemplateUrlService {
     private native long nativeInit();
     private native void nativeLoad(long nativeTemplateUrlServiceAndroid);
     private native boolean nativeIsLoaded(long nativeTemplateUrlServiceAndroid);
-    private native void nativeSetFilteringDisabled(
+    private native void nativeSetFilteringEnabled(
             long nativeTemplateUrlServiceAndroid, boolean disableFiltering);
     private native int nativeGetTemplateUrlCount(long nativeTemplateUrlServiceAndroid);
     private native TemplateUrl nativeGetTemplateUrlAt(long nativeTemplateUrlServiceAndroid, int i);
@@ -477,4 +486,6 @@ public class TemplateUrlService {
             long nativeTemplateUrlServiceAndroid, String keyword, int offset);
     private native String nativeUpdateLastVisitedForTesting(
             long nativeTemplateUrlServiceAndroid, String keyword);
+    private native String nativeExtractSearchTermsFromUrl(
+            long nativeTemplateUrlServiceAndroid, String url);
 }

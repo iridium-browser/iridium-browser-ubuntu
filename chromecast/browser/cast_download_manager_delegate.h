@@ -6,12 +6,14 @@
 #define CHROMECAST_BROWSER_CAST_DOWNLOAD_MANAGER_DELEGATE_H_
 
 #include "base/macros.h"
+#include "base/supports_user_data.h"
 #include "content/public/browser/download_manager_delegate.h"
 
 namespace chromecast {
 namespace shell {
 
-class CastDownloadManagerDelegate : public content::DownloadManagerDelegate {
+class CastDownloadManagerDelegate : public content::DownloadManagerDelegate,
+                                    public base::SupportsUserData::Data {
  public:
   CastDownloadManagerDelegate();
   ~CastDownloadManagerDelegate() override;
@@ -19,14 +21,13 @@ class CastDownloadManagerDelegate : public content::DownloadManagerDelegate {
   // content::DownloadManagerDelegate implementation:
   void GetNextId(const content::DownloadIdCallback& callback) override;
   bool DetermineDownloadTarget(
-      content::DownloadItem* item,
+      download::DownloadItem* item,
       const content::DownloadTargetCallback& callback) override;
   bool ShouldOpenFileBasedOnExtension(const base::FilePath& path) override;
-  bool ShouldCompleteDownload(
-      content::DownloadItem* item,
-      const base::Closure& complete_callback) override;
+  bool ShouldCompleteDownload(download::DownloadItem* item,
+                              const base::Closure& complete_callback) override;
   bool ShouldOpenDownload(
-      content::DownloadItem* item,
+      download::DownloadItem* item,
       const content::DownloadOpenDelayedCallback& callback) override;
 
  private:

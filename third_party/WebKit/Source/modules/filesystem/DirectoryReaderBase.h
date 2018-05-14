@@ -31,23 +31,28 @@
 #ifndef DirectoryReaderBase_h
 #define DirectoryReaderBase_h
 
-#include "modules/filesystem/DOMFileSystemBase.h"
+#include "modules/filesystem/EntryHeapVector.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
-class DirectoryReaderBase
-    : public GarbageCollectedFinalized<DirectoryReaderBase> {
+class DOMFileSystemBase;
+
+class DirectoryReaderBase : public ScriptWrappable {
  public:
   DOMFileSystemBase* Filesystem() const { return file_system_.Get(); }
   void SetHasMoreEntries(bool has_more_entries) {
     has_more_entries_ = has_more_entries;
   }
 
-  virtual ~DirectoryReaderBase() {}
+  virtual ~DirectoryReaderBase() = default;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { visitor->Trace(file_system_); }
+  void Trace(blink::Visitor* visitor) override {
+    visitor->Trace(file_system_);
+    ScriptWrappable::Trace(visitor);
+  }
 
  protected:
   DirectoryReaderBase(DOMFileSystemBase* file_system, const String& full_path)

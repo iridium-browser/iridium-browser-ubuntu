@@ -6,6 +6,7 @@
 #define V8_OBJECTS_SHARED_FUNCTION_INFO_INL_H_
 
 #include "src/heap/heap-inl.h"
+#include "src/objects/scope-info.h"
 #include "src/objects/shared-function-info.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -15,7 +16,7 @@ namespace v8 {
 namespace internal {
 
 CAST_ACCESSOR(PreParsedScopeData)
-ACCESSORS(PreParsedScopeData, scope_data, PodArray<uint32_t>, kScopeDataOffset)
+ACCESSORS(PreParsedScopeData, scope_data, PodArray<uint8_t>, kScopeDataOffset)
 ACCESSORS(PreParsedScopeData, child_data, FixedArray, kChildDataOffset)
 
 TYPE_CHECKER(SharedFunctionInfo, SHARED_FUNCTION_INFO_TYPE)
@@ -26,15 +27,11 @@ ACCESSORS(SharedFunctionInfo, raw_name, Object, kNameOffset)
 ACCESSORS(SharedFunctionInfo, construct_stub, Code, kConstructStubOffset)
 ACCESSORS(SharedFunctionInfo, feedback_metadata, FeedbackMetadata,
           kFeedbackMetadataOffset)
-ACCESSORS(SharedFunctionInfo, instance_class_name, Object,
-          kInstanceClassNameOffset)
 ACCESSORS(SharedFunctionInfo, function_data, Object, kFunctionDataOffset)
 ACCESSORS(SharedFunctionInfo, script, Object, kScriptOffset)
 ACCESSORS(SharedFunctionInfo, debug_info, Object, kDebugInfoOffset)
 ACCESSORS(SharedFunctionInfo, function_identifier, Object,
           kFunctionIdentifierOffset)
-ACCESSORS(SharedFunctionInfo, preparsed_scope_data, Object,
-          kPreParsedScopeDataOffset)
 
 BIT_FIELD_ACCESSORS(SharedFunctionInfo, start_position_and_type,
                     is_named_expression,
@@ -57,11 +54,6 @@ INT_ACCESSORS(SharedFunctionInfo, start_position_and_type,
 INT_ACCESSORS(SharedFunctionInfo, function_token_position,
               kFunctionTokenPositionOffset)
 INT_ACCESSORS(SharedFunctionInfo, compiler_hints, kCompilerHintsOffset)
-INT_ACCESSORS(SharedFunctionInfo, opt_count_and_bailout_reason,
-              kOptCountAndBailoutReasonOffset)
-INT_ACCESSORS(SharedFunctionInfo, counters, kCountersOffset)
-INT_ACCESSORS(SharedFunctionInfo, ast_node_count, kAstNodeCountOffset)
-INT_ACCESSORS(SharedFunctionInfo, profiler_ticks, kProfilerTicksOffset)
 
 bool SharedFunctionInfo::has_shared_name() const {
   return raw_name() != kNoSharedNameSentinel;
@@ -86,34 +78,39 @@ AbstractCode* SharedFunctionInfo::abstract_code() {
   }
 }
 
+BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints, is_wrapped,
+                    SharedFunctionInfo::IsWrappedBit)
 BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints, allows_lazy_compilation,
                     SharedFunctionInfo::AllowLazyCompilationBit)
-BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints, uses_arguments,
-                    SharedFunctionInfo::UsesArgumentsBit)
 BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints,
                     has_duplicate_parameters,
                     SharedFunctionInfo::HasDuplicateParametersBit)
-BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints, asm_function,
-                    SharedFunctionInfo::IsAsmFunctionBit)
 BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints, is_declaration,
                     SharedFunctionInfo::IsDeclarationBit)
 
 BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints, native,
                     SharedFunctionInfo::IsNativeBit)
-BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints, force_inline,
-                    SharedFunctionInfo::ForceInlineBit)
 BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints, is_asm_wasm_broken,
                     SharedFunctionInfo::IsAsmWasmBrokenBit)
-BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints, optimization_disabled,
-                    SharedFunctionInfo::OptimizationDisabledBit)
+BIT_FIELD_ACCESSORS(SharedFunctionInfo, compiler_hints,
+                    requires_instance_fields_initializer,
+                    SharedFunctionInfo::RequiresInstanceFieldsInitializer)
+
+bool SharedFunctionInfo::optimization_disabled() const {
+  return disable_optimization_reason() != BailoutReason::kNoReason;
+}
+
+BailoutReason SharedFunctionInfo::disable_optimization_reason() const {
+  return DisabledOptimizationReasonBits::decode(compiler_hints());
+}
 
 LanguageMode SharedFunctionInfo::language_mode() {
-  STATIC_ASSERT(LANGUAGE_END == 2);
+  STATIC_ASSERT(LanguageModeSize == 2);
   return construct_language_mode(IsStrictBit::decode(compiler_hints()));
 }
 
 void SharedFunctionInfo::set_language_mode(LanguageMode language_mode) {
-  STATIC_ASSERT(LANGUAGE_END == 2);
+  STATIC_ASSERT(LanguageModeSize == 2);
   // We only allow language mode transitions that set the same language mode
   // again or go up in the chain:
   DCHECK(is_sloppy(this->language_mode()) || is_strict(language_mode));
@@ -128,9 +125,10 @@ FunctionKind SharedFunctionInfo::kind() const {
 }
 
 void SharedFunctionInfo::set_kind(FunctionKind kind) {
-  DCHECK(IsValidFunctionKind(kind));
   int hints = compiler_hints();
   hints = FunctionKindBits::update(hints, kind);
+  hints = IsClassConstructorBit::update(hints, IsClassConstructor(kind));
+  hints = IsDerivedConstructorBit::update(hints, IsDerivedConstructor(kind));
   set_compiler_hints(hints);
   UpdateFunctionMapIndex();
 }
@@ -163,9 +161,13 @@ void SharedFunctionInfo::set_function_map_index(int index) {
   set_compiler_hints(FunctionMapIndexBits::update(compiler_hints(), index));
 }
 
+void SharedFunctionInfo::clear_padding() {
+  memset(this->address() + kSize, 0, kAlignedSize - kSize);
+}
+
 void SharedFunctionInfo::UpdateFunctionMapIndex() {
   int map_index = Context::FunctionMapIndex(
-      language_mode(), kind(), has_shared_name(), needs_home_object());
+      language_mode(), kind(), true, has_shared_name(), needs_home_object());
   set_function_map_index(map_index);
 }
 
@@ -212,20 +214,8 @@ void SharedFunctionInfo::set_code(Code* value, WriteBarrierMode mode) {
   CONDITIONAL_WRITE_BARRIER(value->GetHeap(), this, kCodeOffset, value, mode);
 }
 
-void SharedFunctionInfo::ReplaceCode(Code* value) {
-#ifdef DEBUG
-  Code::VerifyRecompiledCode(code(), value);
-#endif  // DEBUG
-
-  set_code(value);
-}
-
 bool SharedFunctionInfo::IsInterpreted() const {
   return code()->is_interpreter_trampoline_builtin();
-}
-
-bool SharedFunctionInfo::HasBaselineCode() const {
-  return code()->kind() == Code::FUNCTION;
 }
 
 ScopeInfo* SharedFunctionInfo::scope_info() const {
@@ -267,11 +257,6 @@ bool SharedFunctionInfo::HasDebugInfo() const {
   bool has_debug_info = !debug_info()->IsSmi();
   DCHECK_EQ(debug_info()->IsStruct(), has_debug_info);
   return has_debug_info;
-}
-
-bool SharedFunctionInfo::HasDebugCode() const {
-  if (HasBaselineCode()) return code()->has_debug_break_slots();
-  return HasBytecodeArray();
 }
 
 bool SharedFunctionInfo::IsApiFunction() {
@@ -326,6 +311,37 @@ void SharedFunctionInfo::ClearAsmWasmData() {
   set_function_data(GetHeap()->undefined_value());
 }
 
+bool SharedFunctionInfo::HasLazyDeserializationBuiltinId() const {
+  return function_data()->IsSmi();
+}
+
+int SharedFunctionInfo::lazy_deserialization_builtin_id() const {
+  DCHECK(HasLazyDeserializationBuiltinId());
+  int id = Smi::ToInt(function_data());
+  DCHECK(Builtins::IsBuiltinId(id));
+  return id;
+}
+
+bool SharedFunctionInfo::HasPreParsedScopeData() const {
+  return function_data()->IsPreParsedScopeData();
+}
+
+PreParsedScopeData* SharedFunctionInfo::preparsed_scope_data() const {
+  DCHECK(HasPreParsedScopeData());
+  return PreParsedScopeData::cast(function_data());
+}
+
+void SharedFunctionInfo::set_preparsed_scope_data(
+    PreParsedScopeData* preparsed_scope_data) {
+  DCHECK(function_data()->IsUndefined(GetIsolate()));
+  set_function_data(preparsed_scope_data);
+}
+
+void SharedFunctionInfo::ClearPreParsedScopeData() {
+  DCHECK(function_data()->IsUndefined(GetIsolate()) || HasPreParsedScopeData());
+  set_function_data(GetHeap()->undefined_value());
+}
+
 bool SharedFunctionInfo::HasBuiltinFunctionId() {
   return function_identifier()->IsSmi();
 }
@@ -347,50 +363,14 @@ String* SharedFunctionInfo::inferred_name() {
   if (HasInferredName()) {
     return String::cast(function_identifier());
   }
-  Isolate* isolate = GetIsolate();
-  DCHECK(function_identifier()->IsUndefined(isolate) || HasBuiltinFunctionId());
-  return isolate->heap()->empty_string();
+  DCHECK(function_identifier()->IsUndefined(GetIsolate()) ||
+         HasBuiltinFunctionId());
+  return GetHeap()->empty_string();
 }
 
 void SharedFunctionInfo::set_inferred_name(String* inferred_name) {
   DCHECK(function_identifier()->IsUndefined(GetIsolate()) || HasInferredName());
   set_function_identifier(inferred_name);
-}
-
-BIT_FIELD_ACCESSORS(SharedFunctionInfo, counters, ic_age,
-                    SharedFunctionInfo::ICAgeBits)
-
-BIT_FIELD_ACCESSORS(SharedFunctionInfo, counters, deopt_count,
-                    SharedFunctionInfo::DeoptCountBits)
-
-void SharedFunctionInfo::increment_deopt_count() {
-  int value = counters();
-  int deopt_count = DeoptCountBits::decode(value);
-  // Saturate the deopt count when incrementing, rather than overflowing.
-  if (deopt_count < DeoptCountBits::kMax) {
-    set_counters(DeoptCountBits::update(value, deopt_count + 1));
-  }
-}
-
-BIT_FIELD_ACCESSORS(SharedFunctionInfo, counters, opt_reenable_tries,
-                    SharedFunctionInfo::OptReenableTriesBits)
-
-BIT_FIELD_ACCESSORS(SharedFunctionInfo, opt_count_and_bailout_reason, opt_count,
-                    SharedFunctionInfo::OptCountBits)
-
-BIT_FIELD_ACCESSORS(SharedFunctionInfo, opt_count_and_bailout_reason,
-                    disable_optimization_reason,
-                    SharedFunctionInfo::DisabledOptimizationReasonBits)
-
-void SharedFunctionInfo::TryReenableOptimization() {
-  int tries = opt_reenable_tries();
-  set_opt_reenable_tries((tries + 1) & OptReenableTriesBits::kMax);
-  // We reenable optimization whenever the number of tries is a large
-  // enough power of 2.
-  if (tries >= 16 && (((tries - 1) & tries) == 0)) {
-    set_optimization_disabled(false);
-    set_deopt_count(0);
-  }
 }
 
 bool SharedFunctionInfo::IsUserJavaScript() {
@@ -402,10 +382,6 @@ bool SharedFunctionInfo::IsUserJavaScript() {
 
 bool SharedFunctionInfo::IsSubjectToDebugging() {
   return IsUserJavaScript() && !HasAsmWasmData();
-}
-
-bool SharedFunctionInfo::HasPreParsedScopeData() const {
-  return preparsed_scope_data()->IsPreParsedScopeData();
 }
 
 }  // namespace internal

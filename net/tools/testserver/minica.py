@@ -93,37 +93,14 @@ class RSA(object):
     return asn1.ToDER(asn1.SEQUENCE([self.m, self.e]))
 
 
-def Name(cn = None, c = None, o = None):
-  names = asn1.SEQUENCE([])
-
-  if cn is not None:
-    names.children.append(
-      asn1.SET([
-        asn1.SEQUENCE([
-          COMMON_NAME, cn,
-        ])
+def Name(cn):
+  return asn1.SEQUENCE([
+    asn1.SET([
+      asn1.SEQUENCE([
+        COMMON_NAME, cn,
       ])
-    )
-
-  if c is not None:
-    names.children.append(
-      asn1.SET([
-        asn1.SEQUENCE([
-          COUNTRY, c,
-        ])
-      ])
-    )
-
-  if o is not None:
-    names.children.append(
-      asn1.SET([
-        asn1.SEQUENCE([
-          ORGANIZATION, o,
-        ])
-      ])
-    )
-
-  return names
+    ])
+  ])
 
 
 # The private key and root certificate name are hard coded here:
@@ -225,10 +202,6 @@ def MakeCertificate(
   '''MakeCertificate returns a DER encoded certificate, signed by privkey.'''
   extensions = asn1.SEQUENCE([])
 
-  # Default subject name fields
-  c = "XX"
-  o = "Testing Org"
-
   if is_ca:
     # Root certificate.
     c = None
@@ -242,7 +215,6 @@ def MakeCertificate(
         ] + ([path_len] if path_len is not None else []) # Path len
         ))),
       ]))
-
   if ip_sans is not None or dns_sans is not None:
     sans = []
     if dns_sans is not None:
@@ -306,7 +278,7 @@ def MakeCertificate(
         asn1.UTCTime("100101060000Z"), # NotBefore
         asn1.UTCTime("321201060000Z"), # NotAfter
       ]),
-      Name(cn = subject_cn, c = c, o = o), # Subject
+      Name(cn = subject_cn), # Subject
       asn1.SEQUENCE([ # SubjectPublicKeyInfo
         asn1.SEQUENCE([ # Algorithm
           PUBLIC_KEY_RSA,
@@ -502,7 +474,11 @@ def GenerateCertKeyAndOCSP(subject = "127.0.0.1",
   return (cert_pem + LEAF_KEY_PEM, ocsp_der)
 
 
-def GenerateCertKeyAndIntermediate(subject, ca_issuers_url, serial=0):
+def GenerateCertKeyAndIntermediate(subject,
+                                   ca_issuers_url,
+                                   ip_sans=None,
+                                   dns_sans=None,
+                                   serial=0):
   '''Returns a (cert_and_key_pem, intermediate_cert_pem) where:
        * cert_and_key_pem contains a certificate and private key in PEM format
          with the given subject common name and caIssuers URL.
@@ -510,8 +486,10 @@ def GenerateCertKeyAndIntermediate(subject, ca_issuers_url, serial=0):
          cert_and_key_pem and was signed by ocsp-test-root.pem.'''
   if serial == 0:
     serial = RandomNumber(16)
+
   target_cert_der = MakeCertificate(INTERMEDIATE_CN, bytes(subject), serial,
                                     LEAF_KEY, INTERMEDIATE_KEY,
+                                    ip_sans=ip_sans, dns_sans=dns_sans,
                                     ca_issuers_url=bytes(ca_issuers_url))
   target_cert_pem = DERToPEM(target_cert_der)
 

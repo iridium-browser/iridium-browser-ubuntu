@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_SIGNIN_VIEW_CONTROLLER_DELEGATE_H_
 #define CHROME_BROWSER_UI_SIGNIN_VIEW_CONTROLLER_DELEGATE_H_
 
+#include "build/build_config.h"
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
 #include "chrome/browser/ui/profile_chooser_constants.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -49,6 +50,22 @@ class SigninViewControllerDelegate
       SigninViewController* signin_view_controller,
       Browser* browser);
 
+#if defined(OS_MACOSX)
+  // Temporary shim for Polychrome. See bottom of first comment in
+  // https://crbug.com/80495 for details.
+  static SigninViewControllerDelegate* CreateModalSigninDelegateCocoa(
+      SigninViewController* signin_view_controller,
+      profiles::BubbleViewMode mode,
+      Browser* browser,
+      signin_metrics::AccessPoint access_point);
+  static SigninViewControllerDelegate* CreateSyncConfirmationDelegateCocoa(
+      SigninViewController* signin_view_controller,
+      Browser* browser);
+  static SigninViewControllerDelegate* CreateSigninErrorDelegateCocoa(
+      SigninViewController* signin_view_controller,
+      Browser* browser);
+#endif
+
   // Attaches a dialog manager to this sign-in view controller dialog.
   // Should be called by subclasses when a different dialog may need to be
   // presented on top of the sign-in dialog.
@@ -78,7 +95,7 @@ class SigninViewControllerDelegate
 
   // WebContents is used for executing javascript in the context of a modal sync
   // confirmation dialog.
-  content::WebContents* web_contents_for_testing() { return web_contents_; }
+  content::WebContents* web_contents() { return web_contents_; }
 
  protected:
   SigninViewControllerDelegate(SigninViewController* signin_view_controller,
@@ -106,8 +123,9 @@ class SigninViewControllerDelegate
   bool CanGoBack(content::WebContents* web_ui_web_contents) const;
 
   SigninViewController* signin_view_controller_;  // Not owned.
-  content::WebContents* web_contents_;            // Not owned.
-  Browser* browser_;                              // Not owned.
+  content::WebContents* const web_contents_;      // Not owned.
+  Browser* const browser_;                        // Not owned.
+
   DISALLOW_COPY_AND_ASSIGN(SigninViewControllerDelegate);
 };
 

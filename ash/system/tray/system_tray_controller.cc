@@ -6,6 +6,7 @@
 
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/update/tray_update.h"
@@ -15,7 +16,7 @@ namespace ash {
 SystemTrayController::SystemTrayController()
     : hour_clock_type_(base::GetHourClockType()) {}
 
-SystemTrayController::~SystemTrayController() {}
+SystemTrayController::~SystemTrayController() = default;
 
 void SystemTrayController::ShowSettings() {
   if (system_tray_client_)
@@ -124,19 +125,14 @@ void SystemTrayController::ShowThirdPartyVpnCreate(
     system_tray_client_->ShowThirdPartyVpnCreate(extension_id);
 }
 
+void SystemTrayController::ShowArcVpnCreate(const std::string& app_id) {
+  if (system_tray_client_)
+    system_tray_client_->ShowArcVpnCreate(app_id);
+}
+
 void SystemTrayController::ShowNetworkSettings(const std::string& network_id) {
   if (system_tray_client_)
     system_tray_client_->ShowNetworkSettings(network_id);
-}
-
-void SystemTrayController::ShowProxySettings() {
-  if (system_tray_client_)
-    system_tray_client_->ShowProxySettings();
-}
-
-void SystemTrayController::SignOut() {
-  if (system_tray_client_)
-    system_tray_client_->SignOut();
 }
 
 void SystemTrayController::RequestRestartForUpdate() {
@@ -172,18 +168,10 @@ void SystemTrayController::SetPrimaryTrayEnabled(bool enabled) {
 }
 
 void SystemTrayController::SetPrimaryTrayVisible(bool visible) {
-  ash::SystemTray* tray =
-      Shell::GetPrimaryRootWindowController()->GetSystemTray();
-  if (!tray)
-    return;
-
-  tray->SetVisible(visible);
-  tray->GetWidget()->SetOpacity(visible ? 1.f : 0.f);
-  if (visible) {
-    tray->GetWidget()->Show();
-  } else {
-    tray->GetWidget()->Hide();
-  }
+  auto* status_area =
+      Shell::GetPrimaryRootWindowController()->GetStatusAreaWidget();
+  if (status_area)
+    status_area->SetSystemTrayVisibility(visible);
 }
 
 void SystemTrayController::SetUse24HourClock(bool use_24_hour) {
@@ -217,14 +205,15 @@ void SystemTrayController::ShowUpdateIcon(mojom::UpdateSeverity severity,
   }
 }
 
-void SystemTrayController::ShowUpdateOverCellularAvailableIcon() {
+void SystemTrayController::SetUpdateOverCellularAvailableIconVisible(
+    bool visible) {
   // Show the icon on all displays.
   for (auto* root_window_controller : Shell::GetAllRootWindowControllers()) {
     ash::SystemTray* tray = root_window_controller->GetSystemTray();
     // External monitors might not have a tray yet.
     if (!tray)
       continue;
-    tray->tray_update()->ShowUpdateOverCellularAvailableIcon();
+    tray->tray_update()->SetUpdateOverCellularAvailableIconVisible(visible);
   }
 }
 

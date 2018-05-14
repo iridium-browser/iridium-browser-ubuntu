@@ -11,7 +11,6 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/process/process_metrics.h"
@@ -53,12 +52,9 @@ EmbeddedTestServer::EmbeddedTestServer(Type type)
       weak_factory_(this) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (is_using_ssl_) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_importing_test_cert;
-    TestRootCerts* root_certs = TestRootCerts::GetInstance();
-    base::FilePath certs_dir(GetTestCertsDirectory());
-    root_certs->AddFromFile(certs_dir.AppendASCII("root_ca_cert.pem"));
-  }
+  if (!is_using_ssl_)
+    return;
+  RegisterTestCerts();
 }
 
 EmbeddedTestServer::~EmbeddedTestServer() {
@@ -74,6 +70,14 @@ EmbeddedTestServer::~EmbeddedTestServer() {
 
     io_thread_.reset();
   }
+}
+
+void EmbeddedTestServer::RegisterTestCerts() {
+  base::ThreadRestrictions::ScopedAllowIO allow_io_for_importing_test_cert;
+  TestRootCerts* root_certs = TestRootCerts::GetInstance();
+  bool added_root_certs = root_certs->AddFromFile(GetRootCertPemPath());
+  DCHECK(added_root_certs)
+      << "Failed to install root cert from EmbeddedTestServer";
 }
 
 void EmbeddedTestServer::SetConnectionListener(
@@ -184,6 +188,11 @@ bool EmbeddedTestServer::ShutdownAndWaitUntilComplete() {
       &EmbeddedTestServer::ShutdownOnIOThread, base::Unretained(this)));
 }
 
+// static
+base::FilePath EmbeddedTestServer::GetRootCertPemPath() {
+  return GetTestCertsDirectory().AppendASCII("root_ca_cert.pem");
+}
+
 void EmbeddedTestServer::ShutdownOnIOThread() {
   DCHECK(io_thread_->task_runner()->BelongsToCurrentThread());
   weak_factory_.InvalidateWeakPtrs();
@@ -272,10 +281,10 @@ std::string EmbeddedTestServer::GetCertificateName() const {
       return "localhost_cert.pem";
     case CERT_EXPIRED:
       return "expired_cert.pem";
-    case CERT_CHAIN_WRONG_ROOT:
-      return "redundant-server-chain.pem";
-    case CERT_BAD_VALIDITY:
-      return "bad_validity.pem";
+    case CERT_COMMON_NAME_ONLY:
+      return "common_name_only.pem";
+    case CERT_SHA1_LEAF:
+      return "sha1_leaf.pem";
   }
 
   return "ok_cert.pem";
@@ -386,7 +395,7 @@ void EmbeddedTestServer::HandleAcceptResult(
     socket = DoSSLUpgrade(std::move(socket));
 
   std::unique_ptr<HttpConnection> http_connection_ptr =
-      base::MakeUnique<HttpConnection>(
+      std::make_unique<HttpConnection>(
           std::move(socket), base::Bind(&EmbeddedTestServer::HandleRequest,
                                         base::Unretained(this)));
   HttpConnection* http_connection = http_connection_ptr.get();

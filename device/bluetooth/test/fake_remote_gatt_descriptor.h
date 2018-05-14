@@ -19,6 +19,8 @@ namespace bluetooth {
 // Implements device::BluetoothRemoteGattDescriptors. Meant to be used
 // by FakeRemoteGattCharacteristic to keep track of the descriptor's state and
 // attributes.
+//
+// Not intended for direct use by clients.  See README.md.
 class FakeRemoteGattDescriptor : public device::BluetoothRemoteGattDescriptor {
  public:
   FakeRemoteGattDescriptor(
@@ -32,6 +34,9 @@ class FakeRemoteGattDescriptor : public device::BluetoothRemoteGattDescriptor {
   // callback.
   void SetNextReadResponse(uint16_t gatt_code,
                            const base::Optional<std::vector<uint8_t>>& value);
+
+  // Returns true if there are no pending responses for this descriptor.
+  bool AllResponsesConsumed();
 
   // device::BluetoothGattDescriptor overrides:
   std::string GetIdentifier() const override;

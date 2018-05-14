@@ -11,12 +11,12 @@
 #include "ash/system/network/network_icon.h"
 #include "ash/system/network/network_icon_animation.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
+#include "chrome/browser/ui/webui/chromeos/internet_detail_dialog.h"
 #include "chromeos/network/network_state_handler.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/models/menu_model.h"
@@ -83,7 +83,7 @@ void NetworkMenuWebUI::OnItemChosen(int id) {
 
 std::unique_ptr<base::ListValue> NetworkMenuWebUI::ConvertMenuModel(
     ui::MenuModel* model) {
-  auto list = base::MakeUnique<base::ListValue>();
+  auto list = std::make_unique<base::ListValue>();
   for (int i = 0; i < model->GetItemCount(); ++i) {
     ui::MenuModel::ItemType type = model->GetTypeAt(i);
     int id;
@@ -91,7 +91,7 @@ std::unique_ptr<base::ListValue> NetworkMenuWebUI::ConvertMenuModel(
       id = -2;
     else
       id = model->GetCommandIdAt(i);
-    auto item = base::MakeUnique<base::DictionaryValue>();
+    auto item = std::make_unique<base::DictionaryValue>();
     item->SetInteger("id", id);
     base::string16 label = model->GetLabelAt(i);
     base::ReplaceSubstringsAfterOffset(&label, 0, base::ASCIIToUTF16("&&"),
@@ -125,7 +125,7 @@ NetworkDropdown::NetworkDropdown(View* view, content::WebUI* web_ui, bool oobe)
   network_menu_.reset(new NetworkMenuWebUI(this, web_ui));
   DCHECK(NetworkHandler::IsInitialized());
   NetworkStateHandler* handler = NetworkHandler::Get()->network_state_handler();
-  handler->RequestScan();
+  handler->RequestScan(NetworkTypePattern::WiFi());
   handler->AddObserver(this, FROM_HERE);
   Refresh();
   network_scan_timer_.Start(
@@ -151,7 +151,8 @@ gfx::NativeWindow NetworkDropdown::GetNativeWindow() const {
 }
 
 void NetworkDropdown::OpenButtonOptions() {
-  LoginDisplayHost::default_host()->OpenProxySettings();
+  // Empty string opens the internet detail dialog for the default network.
+  InternetDetailDialog::ShowDialog("");
 }
 
 bool NetworkDropdown::ShouldOpenButtonOptions() const {
@@ -208,7 +209,8 @@ void NetworkDropdown::SetNetworkIconAndText() {
 }
 
 void NetworkDropdown::RequestNetworkScan() {
-  NetworkHandler::Get()->network_state_handler()->RequestScan();
+  NetworkHandler::Get()->network_state_handler()->RequestScan(
+      NetworkTypePattern::WiFi());
   Refresh();
 }
 

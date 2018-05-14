@@ -60,6 +60,11 @@
                     "description": "The port on which the test WebSocket server is listening.",
                     "minimum": 0,
                     "maximum": 65535
+                  },
+                  "nativeCrxBindingsEnabled": {
+                    "type": "boolean",
+                    "optional": true,
+                    "description": "Whether native extension bindings are enabled."
                   }
                 }
               }

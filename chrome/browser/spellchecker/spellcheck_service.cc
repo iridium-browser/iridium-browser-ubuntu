@@ -11,9 +11,12 @@
 #include "base/strings/string_split.h"
 #include "base/supports_user_data.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/chrome_service.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_hunspell_dictionary.h"
+#include "chrome/common/constants.mojom.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
@@ -31,6 +34,7 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
+#include "services/service_manager/public/cpp/connector.h"
 
 using content::BrowserThread;
 
@@ -83,19 +87,24 @@ SpellcheckService::SpellcheckService(content::BrowserContext* context)
 
   pref_change_registrar_.Add(
       spellcheck::prefs::kSpellCheckDictionaries,
-      base::Bind(&SpellcheckService::OnSpellCheckDictionariesChanged,
-                 base::Unretained(this)));
+      base::BindRepeating(&SpellcheckService::OnSpellCheckDictionariesChanged,
+                          base::Unretained(this)));
+  pref_change_registrar_.Add(
+      spellcheck::prefs::kSpellCheckForcedDictionaries,
+      base::BindRepeating(&SpellcheckService::OnSpellCheckDictionariesChanged,
+                          base::Unretained(this)));
   pref_change_registrar_.Add(
       spellcheck::prefs::kSpellCheckUseSpellingService,
-      base::Bind(&SpellcheckService::OnUseSpellingServiceChanged,
-                 base::Unretained(this)));
+      base::BindRepeating(&SpellcheckService::OnUseSpellingServiceChanged,
+                          base::Unretained(this)));
   pref_change_registrar_.Add(
       prefs::kAcceptLanguages,
-      base::Bind(&SpellcheckService::OnAcceptLanguagesChanged,
-                 base::Unretained(this)));
-  pref_change_registrar_.Add(spellcheck::prefs::kEnableSpellcheck,
-                             base::Bind(&SpellcheckService::InitForAllRenderers,
-                                        base::Unretained(this)));
+      base::BindRepeating(&SpellcheckService::OnAcceptLanguagesChanged,
+                          base::Unretained(this)));
+  pref_change_registrar_.Add(
+      spellcheck::prefs::kSpellCheckEnable,
+      base::BindRepeating(&SpellcheckService::InitForAllRenderers,
+                          base::Unretained(this)));
 
   custom_dictionary_.reset(new SpellcheckCustomDictionary(context_->GetPath()));
   custom_dictionary_->AddObserver(this);
@@ -161,15 +170,18 @@ bool SpellcheckService::SignalStatusEvent(
 }
 
 void SpellcheckService::StartRecordingMetrics(bool spellcheck_enabled) {
-  metrics_.reset(new SpellCheckHostMetrics());
+  metrics_ = std::make_unique<SpellCheckHostMetrics>();
   metrics_->RecordEnabledStats(spellcheck_enabled);
   OnUseSpellingServiceChanged();
 }
 
-void SpellcheckService::InitForRenderer(content::RenderProcessHost* process) {
+void SpellcheckService::InitForRenderer(
+    const service_manager::Identity& renderer_identity) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  content::BrowserContext* context = process->GetBrowserContext();
+  content::BrowserContext* context =
+      content::BrowserContext::GetBrowserContextForServiceUserId(
+          renderer_identity.user_id());
   if (SpellcheckServiceFactory::GetForContext(context) != this)
     return;
 
@@ -182,7 +194,7 @@ void SpellcheckService::InitForRenderer(content::RenderProcessHost* process) {
         hunspell_dictionary->GetLanguage()));
   }
 
-  bool enable = prefs->GetBoolean(spellcheck::prefs::kEnableSpellcheck) &&
+  bool enable = prefs->GetBoolean(spellcheck::prefs::kSpellCheckEnable) &&
                 !dictionaries.empty();
 
   std::vector<std::string> custom_words;
@@ -192,7 +204,11 @@ void SpellcheckService::InitForRenderer(content::RenderProcessHost* process) {
   }
 
   spellcheck::mojom::SpellCheckerPtr spellchecker;
-  content::BindInterface(process, &spellchecker);
+  ChromeService::GetInstance()->connector()->BindInterface(
+      service_manager::Identity(chrome::mojom::kRendererServiceName,
+                                renderer_identity.user_id(),
+                                renderer_identity.instance()),
+      &spellchecker);
   spellchecker->Initialize(std::move(dictionaries), custom_words, enable);
 }
 
@@ -210,14 +226,21 @@ void SpellcheckService::LoadHunspellDictionaries() {
   PrefService* prefs = user_prefs::UserPrefs::Get(context_);
   DCHECK(prefs);
 
-  const base::ListValue* dictionary_values =
+  const base::ListValue* user_dictionaries =
       prefs->GetList(spellcheck::prefs::kSpellCheckDictionaries);
+  const base::ListValue* forced_dictionaries =
+      prefs->GetList(spellcheck::prefs::kSpellCheckForcedDictionaries);
 
-  for (const auto& dictionary_value : *dictionary_values) {
-    std::string dictionary;
-    dictionary_value.GetAsString(&dictionary);
+  // Merge both lists of dictionaries. Use a set to avoid duplicates.
+  std::set<std::string> dictionaries;
+  for (const auto& dictionary_value : user_dictionaries->GetList())
+    dictionaries.insert(dictionary_value.GetString());
+  for (const auto& dictionary_value : forced_dictionaries->GetList())
+    dictionaries.insert(dictionary_value.GetString());
+
+  for (const auto& dictionary : dictionaries) {
     hunspell_dictionaries_.push_back(
-        base::MakeUnique<SpellcheckHunspellDictionary>(
+        std::make_unique<SpellcheckHunspellDictionary>(
             dictionary,
             content::BrowserContext::GetDefaultStoragePartition(context_)
                 ->GetURLRequestContext(),
@@ -248,7 +271,9 @@ void SpellcheckService::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
   DCHECK_EQ(content::NOTIFICATION_RENDERER_PROCESS_CREATED, type);
-  InitForRenderer(content::Source<content::RenderProcessHost>(source).ptr());
+  InitForRenderer(content::Source<content::RenderProcessHost>(source)
+                      .ptr()
+                      ->GetChildIdentity());
 }
 
 void SpellcheckService::OnCustomDictionaryLoaded() {
@@ -266,8 +291,14 @@ void SpellcheckService::OnCustomDictionaryChanged(
   const std::vector<std::string> deletions(change.to_remove().begin(),
                                            change.to_remove().end());
   while (!process_hosts.IsAtEnd()) {
+    service_manager::Identity renderer_identity =
+        process_hosts.GetCurrentValue()->GetChildIdentity();
     spellcheck::mojom::SpellCheckerPtr spellchecker;
-    content::BindInterface(process_hosts.GetCurrentValue(), &spellchecker);
+    ChromeService::GetInstance()->connector()->BindInterface(
+        service_manager::Identity(chrome::mojom::kRendererServiceName,
+                                  renderer_identity.user_id(),
+                                  renderer_identity.instance()),
+        &spellchecker);
     spellchecker->CustomDictionaryChanged(additions, deletions);
     process_hosts.Advance();
   }
@@ -310,7 +341,7 @@ void SpellcheckService::InitForAllRenderers() {
        !i.IsAtEnd(); i.Advance()) {
     content::RenderProcessHost* process = i.GetCurrentValue();
     if (process && process->GetHandle())
-      InitForRenderer(process);
+      InitForRenderer(process->GetChildIdentity());
   }
 }
 

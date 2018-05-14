@@ -22,6 +22,7 @@
 <translation id="158809615184981282">Фарска тастатура</translation>
 <translation id="1646136617204068573">Језик тастатуре: мађарски</translation>
 <translation id="164729547906544836">Тамилска тастатура (itrans)</translation>
+<translation id="164969095109328410">Chrome уређај</translation>
 <translation id="1829129547161959350">Пингвин</translation>
 <translation id="184633654410729720">Тајска тастатура (Kedmanee)</translation>
 <translation id="1921986354447415460">турска F тастатура</translation>
@@ -114,6 +115,7 @@
 <translation id="4694604912444486114">Мајмун</translation>
 <translation id="4711094779914110278">турски</translation>
 <translation id="4725511304875193254">Корги</translation>
+<translation id="4737050008115666127">Слетање</translation>
 <translation id="4747271164117300400">македонски</translation>
 <translation id="4749157430980974800">Грузијска тастатура</translation>
 <translation id="4755240240651974342">Језик тастатуре: фински</translation>
@@ -125,6 +127,7 @@
 <translation id="4943368462779413526">Фудбалска лопта</translation>
 <translation id="497244430928947428">Малајалам тастатура (фонетска)</translation>
 <translation id="498902553138568924">Црвени лептир</translation>
+<translation id="5011233892417813670">Chromebook</translation>
 <translation id="5068919226082848014">Пица</translation>
 <translation id="5098629044894065541">хебрејски</translation>
 <translation id="5123433949759960244">Кошаркашка лопта</translation>
@@ -146,6 +149,7 @@
 <translation id="5465122519792752163">Непалска тастатура (индијско писмо)</translation>
 <translation id="5469868506864199649">италијански</translation>
 <translation id="5500122897333236901">исландски</translation>
+<translation id="5508696409934741614">Тачке</translation>
 <translation id="5533555070048896610">Транслитерација (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">америчка Дворак</translation>
 <translation id="5640179856859982418">Језик тастатуре: швајцарски</translation>
@@ -157,7 +161,9 @@
 <translation id="5819442873484330149">Хангул, 3 реда (Final)</translation>
 <translation id="5838825566232597749">Америчка Workman интернационална</translation>
 <translation id="5892290200158927959">Француска BÉPO тастатура</translation>
+<translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">Латиноамеричка тастатура</translation>
+<translation id="6012987430370760224">Марати тастатура (фонетска)</translation>
 <translation id="60357267506638014">чешка QWERTY</translation>
 <translation id="6054173164583630569">Језик тастатуре: француски</translation>
 <translation id="6111770213269631447">Транслитерација (namaskar → নমস্কার)</translation>
@@ -183,17 +189,20 @@
 <translation id="6876155724392614295">Бицикл</translation>
 <translation id="6878261347041253038">Деванагари тастатура (фонетска)</translation>
 <translation id="6885780034956018177">Пуж</translation>
+<translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">Америчка Workman</translation>
 <translation id="6935521024859866267">Наопачке</translation>
 <translation id="6937152069980083337">Google јапански метод уноса (за америчку тастатуру)</translation>
 <translation id="6939777852457331078">Америчка Workman тастатура</translation>
 <translation id="6970230597523682626">бугарски</translation>
+<translation id="714034171374937760">Chromebase</translation>
 <translation id="7170467426996704624">Транслитерација (salam → ሰላም)</translation>
 <translation id="7172053773111046550">Језик тастатуре: естонски</translation>
 <translation id="719009910964971313">Америчка Дворак тастатура за програмере</translation>
 <translation id="7222624196722476520">Бугарска фонетска тастатура</translation>
 <translation id="7348749398828259943">Америчка Workman интернационална тастатура</translation>
 <translation id="7389722738210761877">Тајска тастатура (TIS 820-2531)</translation>
+<translation id="7396038720194014279">Хинди тастатура (фонетска)</translation>
 <translation id="7417453074306512035">Етиопљанска тастатура</translation>
 <translation id="7419631653042041064">Језик тастатуре: каталонски</translation>
 <translation id="7434823369735508263">Језик тастатуре: енглески (УК дворак)</translation>
@@ -201,12 +210,14 @@
 <translation id="7474889694310679759">Језик тастатуре: енглески (Канада)</translation>
 <translation id="751507702149411736">белоруски</translation>
 <translation id="7547811415869834682">холандски</translation>
+<translation id="7603724359189955920">Мреже</translation>
 <translation id="770015031906360009">грчки</translation>
 <translation id="7706319470528945664">Језик тастатуре: португалски</translation>
 <translation id="7774365994322694683">Птица</translation>
 <translation id="7825423931463735974">Тамилска тастатура (Tamil99)</translation>
 <translation id="7853966320808728790">Француска BÉPO</translation>
 <translation id="7896906914454843592">Америчка проширена тастатура</translation>
+<translation id="7898607018410277265">Гуџарати тастатура (нова фонетска)</translation>
 <translation id="7917972308273378936">Језик тастатуре: литвански</translation>
 <translation id="7943385054491506837">америчка Colemak</translation>
 <translation id="7969525169268594403">словеначки</translation>
@@ -230,6 +241,7 @@
 <translation id="8432745813735585631">Језик тастатуре: енглески (САД Colemak)</translation>
 <translation id="8437209419043462667">америчка</translation>
 <translation id="8467473010914675605">Корејски метод уноса</translation>
+<translation id="8477649328507734757">Окретање</translation>
 <translation id="8521441079177373948">УК</translation>
 <translation id="8551494947769799688">летонски</translation>
 <translation id="8561206103590473338">Слон</translation>
@@ -248,4 +260,5 @@
 <translation id="913758436357682283">Мјанмарска мјансан тастатура</translation>
 <translation id="9153744823707037316">Метод уноса Array</translation>
 <translation id="9206487995878691001">Метод уноса чангчије</translation>
+<translation id="9219908252191632183">Месечева површина</translation>
 </translationbundle>

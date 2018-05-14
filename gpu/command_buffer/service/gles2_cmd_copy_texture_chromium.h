@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/gl_utils.h"
-#include "gpu/gpu_export.h"
+#include "gpu/gpu_gles2_export.h"
 
 namespace gpu {
 namespace gles2 {
@@ -44,7 +44,7 @@ enum CopyTextureMethod {
 // GL_CHROMIUM_copy_texture extension.  The copy operation is performed
 // via glCopyTexImage2D() or a blit to a framebuffer object.
 // The target of |dest_id| texture must be GL_TEXTURE_2D.
-class GPU_EXPORT CopyTextureCHROMIUMResourceManager {
+class GPU_GLES2_EXPORT CopyTextureCHROMIUMResourceManager {
  public:
   CopyTextureCHROMIUMResourceManager();
   ~CopyTextureCHROMIUMResourceManager();
@@ -67,6 +67,7 @@ class GPU_EXPORT CopyTextureCHROMIUMResourceManager {
                      bool flip_y,
                      bool premultiply_alpha,
                      bool unpremultiply_alpha,
+                     bool dither,
                      CopyTextureMethod method,
                      CopyTexImageResourceManager* luma_emulation_blitter);
 
@@ -92,6 +93,7 @@ class GPU_EXPORT CopyTextureCHROMIUMResourceManager {
                         bool flip_y,
                         bool premultiply_alpha,
                         bool unpremultiply_alpha,
+                        bool dither,
                         CopyTextureMethod method,
                         CopyTexImageResourceManager* luma_emulation_blitter);
 
@@ -118,6 +120,7 @@ class GPU_EXPORT CopyTextureCHROMIUMResourceManager {
       bool flip_y,
       bool premultiply_alpha,
       bool unpremultiply_alpha,
+      bool dither,
       const GLfloat transform_matrix[16],
       CopyTexImageResourceManager* luma_emulation_blitter);
 
@@ -140,6 +143,7 @@ class GPU_EXPORT CopyTextureCHROMIUMResourceManager {
       bool flip_y,
       bool premultiply_alpha,
       bool unpremultiply_alpha,
+      bool dither,
       const GLfloat transform_matrix[16],
       CopyTexImageResourceManager* luma_emulation_blitter);
 
@@ -196,6 +200,7 @@ class GPU_EXPORT CopyTextureCHROMIUMResourceManager {
       bool flip_y,
       bool premultiply_alpha,
       bool unpremultiply_alpha,
+      bool dither,
       const GLfloat transform_matrix[16],
       CopyTexImageResourceManager* luma_emulation_blitter);
 

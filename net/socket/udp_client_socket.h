@@ -12,6 +12,7 @@
 #include "net/base/rand_callback.h"
 #include "net/socket/datagram_client_socket.h"
 #include "net/socket/udp_socket.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
 
@@ -33,12 +34,14 @@ class NET_EXPORT_PRIVATE UDPClientSocket : public DatagramClientSocket {
                           const IPEndPoint& address) override;
   int ConnectUsingDefaultNetwork(const IPEndPoint& address) override;
   NetworkChangeNotifier::NetworkHandle GetBoundNetwork() const override;
+  void ApplySocketTag(const SocketTag& tag) override;
   int Read(IOBuffer* buf,
            int buf_len,
            const CompletionCallback& callback) override;
   int Write(IOBuffer* buf,
             int buf_len,
-            const CompletionCallback& callback) override;
+            const CompletionCallback& callback,
+            const NetworkTrafficAnnotationTag& traffic_annotation) override;
   void Close() override;
   int GetPeerAddress(IPEndPoint* address) const override;
   int GetLocalAddress(IPEndPoint* address) const override;
@@ -47,12 +50,14 @@ class NET_EXPORT_PRIVATE UDPClientSocket : public DatagramClientSocket {
   int SetSendBufferSize(int32_t size) override;
   int SetDoNotFragment() override;
   const NetLogWithSource& NetLog() const override;
+  void EnableRecvOptimization() override;
 
   // Switch to use non-blocking IO. Must be called right after construction and
   // before other calls.
  private:
   UDPSocket socket_;
   NetworkChangeNotifier::NetworkHandle network_;
+
   DISALLOW_COPY_AND_ASSIGN(UDPClientSocket);
 };
 

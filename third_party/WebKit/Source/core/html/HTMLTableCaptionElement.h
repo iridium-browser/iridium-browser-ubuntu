@@ -36,12 +36,15 @@ class HTMLTableCaptionElement final : public HTMLElement {
  public:
   DECLARE_NODE_FACTORY(HTMLTableCaptionElement);
 
+  bool HasNonInBodyInsertionMode() const override { return true; }
+
  private:
   HTMLTableCaptionElement(Document&);
 
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 };
 
 }  // namespace blink

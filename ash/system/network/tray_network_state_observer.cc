@@ -21,6 +21,11 @@ namespace {
 
 const int kUpdateFrequencyMs = 1000;
 
+bool IsWifiEnabled() {
+  return NetworkHandler::Get()->network_state_handler()->IsTechnologyEnabled(
+      chromeos::NetworkTypePattern::WiFi());
+}
+
 }  // namespace
 
 namespace ash {
@@ -36,6 +41,7 @@ TrayNetworkStateObserver::TrayNetworkStateObserver(Delegate* delegate)
   if (NetworkHandler::IsInitialized()) {
     NetworkHandler::Get()->network_state_handler()->AddObserver(this,
                                                                 FROM_HERE);
+    wifi_enabled_ = IsWifiEnabled();
   }
 }
 
@@ -48,18 +54,18 @@ TrayNetworkStateObserver::~TrayNetworkStateObserver() {
 
 void TrayNetworkStateObserver::NetworkListChanged() {
   purge_icons_ = true;
-  SignalUpdate();
+  SignalUpdate(false /* notify_a11y */);
 }
 
 void TrayNetworkStateObserver::DeviceListChanged() {
-  SignalUpdate();
+  SignalUpdate(false /* notify_a11y */);
 }
 
 // Any change to the Default (primary connected) network, including Strength
 // changes, should trigger a NetworkStateChanged update.
 void TrayNetworkStateObserver::DefaultNetworkChanged(
     const chromeos::NetworkState* network) {
-  SignalUpdate();
+  SignalUpdate(true /* notify_a11y */);
 }
 
 // Any change to the Connection State should trigger a NetworkStateChanged
@@ -67,7 +73,7 @@ void TrayNetworkStateObserver::DefaultNetworkChanged(
 // connected.
 void TrayNetworkStateObserver::NetworkConnectionStateChanged(
     const chromeos::NetworkState* network) {
-  SignalUpdate();
+  SignalUpdate(true /* notify_a11y */);
 }
 
 // This tracks Strength and other property changes for all networks. It will
@@ -75,18 +81,33 @@ void TrayNetworkStateObserver::NetworkConnectionStateChanged(
 // changes.
 void TrayNetworkStateObserver::NetworkPropertiesUpdated(
     const chromeos::NetworkState* network) {
-  SignalUpdate();
+  SignalUpdate(false /* notify_a11y */);
 }
 
-void TrayNetworkStateObserver::SignalUpdate() {
+void TrayNetworkStateObserver::DevicePropertiesUpdated(
+    const chromeos::DeviceState* device) {
+  SignalUpdate(false /* notify_a11y */);
+}
+
+void TrayNetworkStateObserver::SignalUpdate(bool notify_a11y) {
+  bool old_state = wifi_enabled_;
+  wifi_enabled_ = IsWifiEnabled();
+
+  // Update immediately when wifi network changed from enabled->disabled.
+  if (old_state && !wifi_enabled_) {
+    SendNetworkStateChanged(notify_a11y);
+    return;
+  }
+
   if (timer_.IsRunning())
     return;
   timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(update_frequency_),
-               this, &TrayNetworkStateObserver::SendNetworkStateChanged);
+               base::Bind(&TrayNetworkStateObserver::SendNetworkStateChanged,
+                          base::Unretained(this), notify_a11y));
 }
 
-void TrayNetworkStateObserver::SendNetworkStateChanged() {
-  delegate_->NetworkStateChanged();
+void TrayNetworkStateObserver::SendNetworkStateChanged(bool notify_a11y) {
+  delegate_->NetworkStateChanged(notify_a11y);
   if (purge_icons_) {
     network_icon::PurgeNetworkIconCache();
     purge_icons_ = false;

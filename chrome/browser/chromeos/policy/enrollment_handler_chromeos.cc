@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -21,7 +20,6 @@
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
 #include "chrome/browser/chromeos/policy/dm_token_storage.h"
 #include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service.h"
@@ -33,6 +31,7 @@
 #include "chromeos/dbus/cryptohome/rpc.pb.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/upstart_client.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/http/http_status_code.h"
@@ -69,8 +68,15 @@ em::DeviceRegisterRequest::Flavor EnrollmentModeToRegistrationFlavor(
       return em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_RECOVERY;
     case EnrollmentConfig::MODE_ATTESTATION:
       return em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_ATTESTATION;
-    case EnrollmentConfig::MODE_ATTESTATION_FORCED:
-      return em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_ATTESTATION_FORCED;
+    case EnrollmentConfig::MODE_ATTESTATION_LOCAL_FORCED:
+      return em::DeviceRegisterRequest::
+          FLAVOR_ENROLLMENT_ATTESTATION_LOCAL_FORCED;
+    case EnrollmentConfig::MODE_ATTESTATION_SERVER_FORCED:
+      return em::DeviceRegisterRequest::
+          FLAVOR_ENROLLMENT_ATTESTATION_SERVER_FORCED;
+    case EnrollmentConfig::MODE_ATTESTATION_MANUAL_FALLBACK:
+      return em::DeviceRegisterRequest::
+          FLAVOR_ENROLLMENT_ATTESTATION_MANUAL_FALLBACK;
   }
 
   NOTREACHED() << "Bad enrollment mode: " << mode;
@@ -137,7 +143,10 @@ EnrollmentHandlerChromeOS::EnrollmentHandlerChromeOS(
   CHECK_EQ(DM_STATUS_SUCCESS, client_->status());
   CHECK((enrollment_config_.mode == EnrollmentConfig::MODE_ATTESTATION ||
          enrollment_config_.mode ==
-             EnrollmentConfig::MODE_ATTESTATION_FORCED) == auth_token_.empty());
+             EnrollmentConfig::MODE_ATTESTATION_LOCAL_FORCED ||
+         enrollment_config.mode ==
+             EnrollmentConfig::MODE_ATTESTATION_SERVER_FORCED) ==
+        auth_token_.empty());
   CHECK(enrollment_config_.auth_mechanism !=
             EnrollmentConfig::AUTH_MECHANISM_ATTESTATION ||
         attestation_flow_);
@@ -166,11 +175,14 @@ void EnrollmentHandlerChromeOS::HandleAvailableLicensesResult(
     bool success,
     const CloudPolicyClient::LicenseMap& license_map) {
   if (!success) {
-    ReportResult(
-        EnrollmentStatus::ForStatus(EnrollmentStatus::LICENSE_REQUEST_FAILED));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&EnrollmentHandlerChromeOS::ReportResult,
+            weak_ptr_factory_.GetWeakPtr(),
+            EnrollmentStatus::ForStatus(
+                EnrollmentStatus::LICENSE_REQUEST_FAILED)));
     return;
   }
-  if (!available_licenses_callback_)
+  if (available_licenses_callback_)
     available_licenses_callback_.Run(license_map);
 }
 
@@ -237,7 +249,7 @@ void EnrollmentHandlerChromeOS::OnPolicyFetched(CloudPolicyClient* client) {
 
   std::unique_ptr<DeviceCloudPolicyValidator> validator(
       DeviceCloudPolicyValidator::Create(
-          base::MakeUnique<em::PolicyFetchResponse>(*policy),
+          std::make_unique<em::PolicyFetchResponse>(*policy),
           background_task_runner_));
 
   validator->ValidateTimestamp(base::Time(),
@@ -364,8 +376,8 @@ void EnrollmentHandlerChromeOS::StartRegistration() {
     client_->Register(
         em::DeviceRegisterRequest::DEVICE,
         EnrollmentModeToRegistrationFlavor(enrollment_config_.mode),
-        license_type_, auth_token_, client_id_, requisition_,
-        current_state_key_);
+        em::DeviceRegisterRequest::LIFETIME_INDEFINITE, license_type_,
+        auth_token_, client_id_, requisition_, current_state_key_);
   }
 }
 
@@ -381,17 +393,18 @@ void EnrollmentHandlerChromeOS::StartAttestationBasedEnrollmentFlow() {
 }
 
 void EnrollmentHandlerChromeOS::HandleRegistrationCertificateResult(
-    bool success,
+    chromeos::attestation::AttestationStatus status,
     const std::string& pem_certificate_chain) {
-  if (success)
+  if (status == chromeos::attestation::ATTESTATION_SUCCESS) {
     client_->RegisterWithCertificate(
         em::DeviceRegisterRequest::DEVICE,
         EnrollmentModeToRegistrationFlavor(enrollment_config_.mode),
-        license_type_, pem_certificate_chain, client_id_, requisition_,
-        current_state_key_);
-  else
+        em::DeviceRegisterRequest::LIFETIME_INDEFINITE, license_type_,
+        pem_certificate_chain, client_id_, requisition_, current_state_key_);
+  } else {
     ReportResult(EnrollmentStatus::ForStatus(
         EnrollmentStatus::REGISTRATION_CERT_FETCH_FAILED));
+  }
 }
 
 void EnrollmentHandlerChromeOS::HandlePolicyValidationResult(
@@ -474,20 +487,18 @@ void EnrollmentHandlerChromeOS::SetFirmwareManagementParametersData() {
 
   install_attributes_->SetBlockDevmodeInTpm(
       GetBlockdevmodeFromPolicy(policy_.get()),
-      base::Bind(
+      base::BindOnce(
           &EnrollmentHandlerChromeOS::OnFirmwareManagementParametersDataSet,
           weak_ptr_factory_.GetWeakPtr()));
 }
 
 void EnrollmentHandlerChromeOS::OnFirmwareManagementParametersDataSet(
-    chromeos::DBusMethodCallStatus call_status,
-    bool result,
-    const cryptohome::BaseReply& reply) {
+    base::Optional<cryptohome::BaseReply> reply) {
   DCHECK_EQ(STEP_SET_FWMP_DATA, enrollment_step_);
-  if (!result) {
+  if (!reply.has_value()) {
     LOG(ERROR)
         << "Failed to update firmware management parameters in TPM, error: "
-        << reply.error();
+        << reply->error();
   }
 
   SetStep(STEP_LOCK_DEVICE);
@@ -608,7 +619,7 @@ void EnrollmentHandlerChromeOS::HandleLockDeviceResult(
 void EnrollmentHandlerChromeOS::StartStoreDMToken() {
   DCHECK(device_mode_ == DEVICE_MODE_ENTERPRISE_AD);
   SetStep(STEP_STORE_TOKEN);
-  dm_token_storage_ = base::MakeUnique<policy::DMTokenStorage>(
+  dm_token_storage_ = std::make_unique<policy::DMTokenStorage>(
       g_browser_process->local_state());
   dm_token_storage_->StoreDMToken(
       client_->dm_token(),
@@ -659,10 +670,10 @@ void EnrollmentHandlerChromeOS::HandleStoreRobotAuthTokenResult(bool result) {
 }
 
 void EnrollmentHandlerChromeOS::HandleActiveDirectoryPolicyRefreshed(
-    bool success) {
+    authpolicy::ErrorType error) {
   DCHECK_EQ(STEP_STORE_POLICY, enrollment_step_);
 
-  if (!success) {
+  if (error != authpolicy::ERROR_NONE) {
     LOG(ERROR) << "Failed to load Active Directory policy.";
     ReportResult(EnrollmentStatus::ForStatus(
         EnrollmentStatus::ACTIVE_DIRECTORY_POLICY_FETCH_FAILED));

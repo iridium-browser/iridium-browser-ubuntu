@@ -29,14 +29,14 @@
 
 #include "core/html/track/vtt/VTTCue.h"
 
-#include "bindings/core/v8/DoubleOrAutoKeyword.h"
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/double_or_auto_keyword.h"
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/NodeTraversal.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLDivElement.h"
@@ -47,7 +47,7 @@
 #include "core/html/track/vtt/VTTRegion.h"
 #include "core/html/track/vtt/VTTScanner.h"
 #include "core/layout/LayoutVTTCue.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/text/BidiResolver.h"
 #include "platform/text/TextRunIterator.h"
 #include "platform/wtf/MathExtras.h"
@@ -193,27 +193,6 @@ void VTTCueBox::ApplyCSSProperties(
   // text alignment:
   SetInlineStyleProperty(CSSPropertyTextAlign, display_parameters.text_align);
 
-  // TODO(foolip): The position adjustment for non-snap-to-lines cues has
-  // been removed from the spec:
-  // https://www.w3.org/Bugs/Public/show_bug.cgi?id=19178
-  if (std::isnan(display_parameters.snap_to_lines_position)) {
-    // 10.13.1 Set up x and y:
-    // Note: x and y are set through the CSS left and top above.
-
-    // 10.13.2 Position the boxes in boxes such that the point x% along the
-    // width of the bounding box of the boxes in boxes is x% of the way
-    // across the width of the video's rendering area, and the point y%
-    // along the height of the bounding box of the boxes in boxes is y%
-    // of the way across the height of the video's rendering area, while
-    // maintaining the relative positions of the boxes in boxes to each
-    // other.
-    SetInlineStyleProperty(CSSPropertyTransform,
-                           String::Format("translate(-%.2f%%, -%.2f%%)",
-                                          position.X(), position.Y()));
-
-    SetInlineStyleProperty(CSSPropertyWhiteSpace, CSSValuePre);
-  }
-
   // The snap-to-lines position is propagated to LayoutVTTCue.
   snap_to_lines_position_ = display_parameters.snap_to_lines_position;
 }
@@ -235,8 +214,8 @@ VTTCue::VTTCue(Document& document,
                const String& text)
     : TextTrackCue(start_time, end_time),
       text_(text),
-      line_position_(std::numeric_limits<float>::quiet_NaN()),
-      text_position_(std::numeric_limits<float>::quiet_NaN()),
+      line_position_(std::numeric_limits<double>::quiet_NaN()),
+      text_position_(std::numeric_limits<double>::quiet_NaN()),
       cue_size_(100),
       writing_direction_(kHorizontal),
       cue_alignment_(kCenter),
@@ -248,7 +227,7 @@ VTTCue::VTTCue(Document& document,
   cue_background_box_->SetShadowPseudoId(CueShadowPseudoId());
 }
 
-VTTCue::~VTTCue() {}
+VTTCue::~VTTCue() = default;
 
 #ifndef NDEBUG
 String VTTCue::ToString() const {
@@ -258,8 +237,8 @@ String VTTCue::ToString() const {
 }
 #endif
 
-void VTTCue::CueDidChange() {
-  TextTrackCue::CueDidChange();
+void VTTCue::CueDidChange(CueMutationAffectsOrder affects_order) {
+  TextTrackCue::CueDidChange(affects_order);
   display_tree_should_change_ = true;
 }
 
@@ -311,9 +290,9 @@ bool VTTCue::LineIsAuto() const {
 
 void VTTCue::line(DoubleOrAutoKeyword& result) const {
   if (LineIsAuto())
-    result.setAutoKeyword(AutoKeyword());
+    result.SetAutoKeyword(AutoKeyword());
   else
-    result.setDouble(line_position_);
+    result.SetDouble(line_position_);
 }
 
 void VTTCue::setLine(const DoubleOrAutoKeyword& position) {
@@ -321,20 +300,19 @@ void VTTCue::setLine(const DoubleOrAutoKeyword& position) {
   // On setting, the WebVTT cue line must be set to the new value; if the new
   // value is the string "auto", then it must be interpreted as the special
   // value auto.  ("auto" is translated to NaN.)
-  float float_position;
-  if (position.isAutoKeyword()) {
+  double line_position;
+  if (position.IsAutoKeyword()) {
     if (LineIsAuto())
       return;
-    float_position = std::numeric_limits<float>::quiet_NaN();
+    line_position = std::numeric_limits<double>::quiet_NaN();
   } else {
-    DCHECK(position.isDouble());
-    float_position = clampTo<float>(position.getAsDouble());
-    if (line_position_ == float_position)
+    DCHECK(position.IsDouble());
+    line_position = position.GetAsDouble();
+    if (line_position_ == line_position)
       return;
   }
-
   CueWillChange();
-  line_position_ = float_position;
+  line_position_ = line_position;
   CueDidChange();
 }
 
@@ -344,9 +322,9 @@ bool VTTCue::TextPositionIsAuto() const {
 
 void VTTCue::position(DoubleOrAutoKeyword& result) const {
   if (TextPositionIsAuto())
-    result.setAutoKeyword(AutoKeyword());
+    result.SetAutoKeyword(AutoKeyword());
   else
-    result.setDouble(text_position_);
+    result.SetDouble(text_position_);
 }
 
 void VTTCue::setPosition(const DoubleOrAutoKeyword& position,
@@ -356,22 +334,22 @@ void VTTCue::setPosition(const DoubleOrAutoKeyword& position,
   // IndexSizeError exception must be thrown. Otherwise, the WebVTT cue
   // position must be set to the new value; if the new value is the string
   // "auto", then it must be interpreted as the special value auto.
-  float float_position;
-  if (position.isAutoKeyword()) {
+  double text_position;
+  if (position.IsAutoKeyword()) {
     if (TextPositionIsAuto())
       return;
-    float_position = std::numeric_limits<float>::quiet_NaN();
+    text_position = std::numeric_limits<double>::quiet_NaN();
   } else {
-    DCHECK(position.isDouble());
-    if (IsInvalidPercentage(position.getAsDouble(), exception_state))
+    DCHECK(position.IsDouble());
+    if (IsInvalidPercentage(position.GetAsDouble(), exception_state))
       return;
-    float_position = clampTo<float>(position.getAsDouble());
-    if (text_position_ == float_position)
+    text_position = position.GetAsDouble();
+    if (text_position_ == text_position)
       return;
   }
 
   CueWillChange();
-  text_position_ = float_position;
+  text_position_ = text_position;
   CueDidChange();
 }
 
@@ -383,12 +361,11 @@ void VTTCue::setSize(double size, ExceptionState& exception_state) {
     return;
 
   // Otherwise, set the WebVTT cue size to the new value.
-  float float_size = clampTo<float>(size);
-  if (cue_size_ == float_size)
+  if (cue_size_ == size)
     return;
 
   CueWillChange();
-  cue_size_ = float_size;
+  cue_size_ = size;
   CueDidChange();
 }
 
@@ -481,7 +458,7 @@ void VTTCue::setRegion(VTTRegion* region) {
   CueDidChange();
 }
 
-float VTTCue::CalculateComputedLinePosition() const {
+double VTTCue::CalculateComputedLinePosition() const {
   // http://dev.w3.org/html5/webvtt/#dfn-cue-computed-line
   // A WebVTT cue has a computed line whose value is that returned by the
   // following algorithm, which is defined in terms of the other aspects of
@@ -527,7 +504,7 @@ float VTTCue::CalculateComputedLinePosition() const {
 
 class VTTTextRunIterator : public TextRunIterator {
  public:
-  VTTTextRunIterator() {}
+  VTTTextRunIterator() = default;
   VTTTextRunIterator(const TextRun* text_run, unsigned offset)
       : TextRunIterator(text_run, offset) {}
 
@@ -581,7 +558,7 @@ static CSSValueID DetermineTextDirection(DocumentFragment* vtt_root) {
   return IsLtr(text_direction) ? CSSValueLtr : CSSValueRtl;
 }
 
-float VTTCue::CalculateComputedTextPosition() const {
+double VTTCue::CalculateComputedTextPosition() const {
   // http://dev.w3.org/html5/webvtt/#dfn-cue-computed-position
 
   // 1. If the position is numeric, then return the value of the position and
@@ -653,8 +630,8 @@ VTTDisplayParameters VTTCue::CalculateDisplayParameters() const {
 
   // 4. Determine the value of maximum size for cue as per the appropriate
   // rules from the following list:
-  float computed_text_position = CalculateComputedTextPosition();
-  float maximum_size = computed_text_position;
+  double computed_text_position = CalculateComputedTextPosition();
+  double maximum_size = computed_text_position;
   if (computed_cue_alignment == kStart) {
     maximum_size = 100 - computed_text_position;
   } else if (computed_cue_alignment == kEnd) {
@@ -717,7 +694,7 @@ VTTDisplayParameters VTTCue::CalculateDisplayParameters() const {
 
   // A cue has a computed line whose value is defined in terms of
   // the other aspects of the cue.
-  float computed_line_position = CalculateComputedLinePosition();
+  double computed_line_position = CalculateComputedLinePosition();
 
   // 8. Determine the value of whichever of x-position or y-position is not
   // yet calculated for cue as per the appropriate rules from the following
@@ -811,7 +788,7 @@ VTTCueBox* VTTCue::GetDisplayTree() {
   CreateVTTNodeTree();
 
   cue_background_box_->RemoveChildren();
-  vtt_node_tree_->CloneChildNodes(cue_background_box_.Get());
+  cue_background_box_->CloneChildNodesFrom(*vtt_node_tree_);
 
   if (!region()) {
     VTTDisplayParameters display_parameters = CalculateDisplayParameters();
@@ -830,13 +807,14 @@ VTTCueBox* VTTCue::GetDisplayTree() {
 }
 
 void VTTCue::RemoveDisplayTree(RemovalNotification removal_notification) {
-  if (region() && removal_notification == kNotifyRegion) {
+  if (!display_tree_)
+    return;
+  if (removal_notification == kNotifyRegion) {
     // The region needs to be informed about the cue removal.
-    region()->WillRemoveVTTCueBox(display_tree_);
+    if (region())
+      region()->WillRemoveVTTCueBox(display_tree_);
   }
-
-  if (display_tree_)
-    display_tree_->remove(ASSERT_NO_EXCEPTION);
+  display_tree_->remove(ASSERT_NO_EXCEPTION);
 }
 
 void VTTCue::UpdateDisplay(HTMLDivElement& container) {
@@ -901,7 +879,7 @@ VTTCue::CueSetting VTTCue::SettingName(VTTScanner& input) const {
   return kNone;
 }
 
-static bool ScanPercentage(VTTScanner& input, float& number) {
+static bool ScanPercentage(VTTScanner& input, double& number) {
   // http://dev.w3.org/html5/webvtt/#dfn-parse-a-percentage-string
 
   // 1. Let input be the string being parsed.
@@ -976,7 +954,7 @@ void VTTCue::ParseSettings(const VTTRegionMap* region_map,
       case kLine: {
         // If name is a case-sensitive match for "line"
         // Steps 1 - 2 skipped.
-        float number;
+        double number;
         // 3. If linepos does not contain at least one ASCII digit, then
         //    jump to the step labeled next setting.
         // 4. If the last character in linepos is a U+0025 PERCENT SIGN
@@ -1011,7 +989,7 @@ void VTTCue::ParseSettings(const VTTRegionMap* region_map,
           // 5. Interpret linepos as a (potentially signed) real number, and
           //    let number be that number.
           bool is_negative = input.Scan('-');
-          if (!input.ScanFloat(number))
+          if (!input.ScanDouble(number))
             break;
           // Negate number if it was preceded by a hyphen-minus - unless it's
           // zero.
@@ -1031,7 +1009,7 @@ void VTTCue::ParseSettings(const VTTRegionMap* region_map,
       }
       case kPosition: {
         // If name is a case-sensitive match for "position".
-        float number;
+        double number;
         // Steps 1 - 2 skipped.
         // 3. If parse a percentage string from colpos doesn't fail, let
         //    number be the returned percentage, otherwise jump to the step
@@ -1048,7 +1026,7 @@ void VTTCue::ParseSettings(const VTTRegionMap* region_map,
       }
       case kSize: {
         // If name is a case-sensitive match for "size"
-        float number;
+        double number;
         // 1. If parse a percentage string from value doesn't fail, let
         //    number be the returned percentage, otherwise jump to the step
         //    labeled next setting.
@@ -1133,7 +1111,7 @@ Document& VTTCue::GetDocument() const {
   return cue_background_box_->GetDocument();
 }
 
-DEFINE_TRACE(VTTCue) {
+void VTTCue::Trace(blink::Visitor* visitor) {
   visitor->Trace(region_);
   visitor->Trace(vtt_node_tree_);
   visitor->Trace(cue_background_box_);

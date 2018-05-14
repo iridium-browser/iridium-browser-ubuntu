@@ -9,44 +9,48 @@
 #include "base/macros.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/core/spdy_utils.h"
+#include "net/quic/core/tls_client_handshaker.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_socket_address.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/quic_spdy_session_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
-#include "net/tools/quic/quic_client_session.h"
+#include "net/tools/quic/quic_spdy_client_session.h"
 
 using base::IntToString;
-using std::string;
+using testing::_;
 using testing::StrictMock;
-using testing::TestWithParam;
 
 namespace net {
 namespace test {
 
 namespace {
 
-class MockQuicClientSession : public QuicClientSession {
+class MockQuicSpdyClientSession : public QuicSpdyClientSession {
  public:
-  explicit MockQuicClientSession(QuicConnection* connection,
-                                 QuicClientPushPromiseIndex* push_promise_index)
-      : QuicClientSession(
+  explicit MockQuicSpdyClientSession(
+      QuicConnection* connection,
+      QuicClientPushPromiseIndex* push_promise_index)
+      : QuicSpdyClientSession(
             DefaultQuicConfig(),
             connection,
             QuicServerId("example.com", 443, PRIVACY_MODE_DISABLED),
             &crypto_config_,
             push_promise_index),
-        crypto_config_(crypto_test_utils::ProofVerifierForTesting()) {}
-  ~MockQuicClientSession() override {}
+        crypto_config_(crypto_test_utils::ProofVerifierForTesting(),
+                       TlsClientHandshaker::CreateSslCtx()) {}
+  ~MockQuicSpdyClientSession() override = default;
 
   MOCK_METHOD1(CloseStream, void(QuicStreamId stream_id));
 
  private:
   QuicCryptoClientConfig crypto_config_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockQuicClientSession);
+  DISALLOW_COPY_AND_ASSIGN(MockQuicSpdyClientSession);
 };
 
 class QuicSpdyClientStreamTest : public QuicTest {
@@ -64,10 +68,10 @@ class QuicSpdyClientStreamTest : public QuicTest {
     headers_[":status"] = "200";
     headers_["content-length"] = "11";
 
-    stream_.reset(new QuicSpdyClientStream(
+    stream_ = QuicMakeUnique<QuicSpdyClientStream>(
         QuicSpdySessionPeer::GetNthClientInitiatedStreamId(session_, 0),
-        &session_));
-    stream_visitor_.reset(new StreamVisitor());
+        &session_);
+    stream_visitor_ = QuicMakeUnique<StreamVisitor>();
     stream_->set_visitor(stream_visitor_.get());
   }
 
@@ -82,18 +86,24 @@ class QuicSpdyClientStreamTest : public QuicTest {
   StrictMock<MockQuicConnection>* connection_;
   QuicClientPushPromiseIndex push_promise_index_;
 
-  MockQuicClientSession session_;
+  MockQuicSpdyClientSession session_;
   std::unique_ptr<QuicSpdyClientStream> stream_;
   std::unique_ptr<StreamVisitor> stream_visitor_;
   SpdyHeaderBlock headers_;
-  string body_;
+  QuicString body_;
 };
 
 TEST_F(QuicSpdyClientStreamTest, TestReceivingIllegalResponseStatusCode) {
   headers_[":status"] = "200 ok";
 
-  EXPECT_CALL(*connection_,
-              SendRstStream(stream_->id(), QUIC_BAD_APPLICATION_PAYLOAD, 0));
+  if (session_.use_control_frame_manager()) {
+    EXPECT_CALL(*connection_, SendControlFrame(_));
+    EXPECT_CALL(*connection_,
+                OnStreamReset(stream_->id(), QUIC_BAD_APPLICATION_PAYLOAD));
+  } else {
+    EXPECT_CALL(*connection_,
+                SendRstStream(stream_->id(), QUIC_BAD_APPLICATION_PAYLOAD, 0));
+  }
   auto headers = AsHeaderList(headers_);
   stream_->OnStreamHeaderList(false, headers.uncompressed_header_bytes(),
                               headers);
@@ -136,7 +146,7 @@ TEST_F(QuicSpdyClientStreamTest, TestFramingOnePacket) {
 }
 
 TEST_F(QuicSpdyClientStreamTest, DISABLED_TestFramingExtraData) {
-  string large_body = "hello world!!!!!!";
+  QuicString large_body = "hello world!!!!!!";
 
   auto headers = AsHeaderList(headers_);
   stream_->OnStreamHeaderList(false, headers.uncompressed_header_bytes(),
@@ -146,8 +156,14 @@ TEST_F(QuicSpdyClientStreamTest, DISABLED_TestFramingExtraData) {
   EXPECT_EQ("200", stream_->response_headers().find(":status")->second);
   EXPECT_EQ(200, stream_->response_code());
 
-  EXPECT_CALL(*connection_,
-              SendRstStream(stream_->id(), QUIC_BAD_APPLICATION_PAYLOAD, 0));
+  if (session_.use_control_frame_manager()) {
+    EXPECT_CALL(*connection_, SendControlFrame(_));
+    EXPECT_CALL(*connection_,
+                OnStreamReset(stream_->id(), QUIC_BAD_APPLICATION_PAYLOAD));
+  } else {
+    EXPECT_CALL(*connection_,
+                SendRstStream(stream_->id(), QUIC_BAD_APPLICATION_PAYLOAD, 0));
+  }
   stream_->OnStreamFrame(
       QuicStreamFrame(stream_->id(), /*fin=*/false, /*offset=*/0, large_body));
 

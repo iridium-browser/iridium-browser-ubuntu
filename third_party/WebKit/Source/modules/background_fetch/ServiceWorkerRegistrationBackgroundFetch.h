@@ -22,6 +22,8 @@ class ServiceWorkerRegistrationBackgroundFetch final
   WTF_MAKE_NONCOPYABLE(ServiceWorkerRegistrationBackgroundFetch);
 
  public:
+  static const char kSupplementName[];
+
   virtual ~ServiceWorkerRegistrationBackgroundFetch();
 
   static ServiceWorkerRegistrationBackgroundFetch& From(
@@ -30,11 +32,10 @@ class ServiceWorkerRegistrationBackgroundFetch final
   static BackgroundFetchManager* backgroundFetch(ServiceWorkerRegistration&);
   BackgroundFetchManager* backgroundFetch();
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit ServiceWorkerRegistrationBackgroundFetch(ServiceWorkerRegistration*);
-  static const char* SupplementName();
 
   Member<ServiceWorkerRegistration> registration_;
   Member<BackgroundFetchManager> background_fetch_manager_;

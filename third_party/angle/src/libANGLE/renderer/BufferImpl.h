@@ -12,6 +12,7 @@
 #include "common/angleutils.h"
 #include "common/mathutil.h"
 #include "libANGLE/Error.h"
+#include "libANGLE/PackedGLEnums.h"
 
 #include <stdint.h>
 
@@ -31,15 +32,15 @@ class BufferImpl : angle::NonCopyable
     virtual void destroy(const gl::Context *context) {}
 
     virtual gl::Error setData(const gl::Context *context,
-                              GLenum target,
+                              gl::BufferBinding target,
                               const void *data,
                               size_t size,
-                              GLenum usage) = 0;
+                              gl::BufferUsage usage)                                = 0;
     virtual gl::Error setSubData(const gl::Context *context,
-                                 GLenum target,
+                                 gl::BufferBinding target,
                                  const void *data,
                                  size_t size,
-                                 size_t offset) = 0;
+                                 size_t offset)                                     = 0;
     virtual gl::Error copySubData(const gl::Context *context,
                                   BufferImpl *source,
                                   GLintptr sourceOffset,
@@ -53,7 +54,8 @@ class BufferImpl : angle::NonCopyable
                                void **mapPtr) = 0;
     virtual gl::Error unmap(const gl::Context *context, GLboolean *result) = 0;
 
-    virtual gl::Error getIndexRange(GLenum type,
+    virtual gl::Error getIndexRange(const gl::Context *context,
+                                    GLenum type,
                                     size_t offset,
                                     size_t count,
                                     bool primitiveRestartEnabled,

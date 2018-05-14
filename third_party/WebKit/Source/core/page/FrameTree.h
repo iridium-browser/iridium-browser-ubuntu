@@ -20,6 +20,7 @@
 #ifndef FrameTree_h
 #define FrameTree_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/text/AtomicString.h"
@@ -29,7 +30,6 @@ namespace blink {
 class Frame;
 
 class CORE_EXPORT FrameTree final {
-  WTF_MAKE_NONCOPYABLE(FrameTree);
   DISALLOW_NEW();
 
  public:
@@ -37,7 +37,15 @@ class CORE_EXPORT FrameTree final {
   ~FrameTree();
 
   const AtomicString& GetName() const;
-  void SetName(const AtomicString&);
+
+  enum ReplicationPolicy {
+    // Does not propagate name changes beyond this FrameTree object.
+    kDoNotReplicate,
+
+    // Kicks-off propagation of name changes to other renderers.
+    kReplicate,
+  };
+  void SetName(const AtomicString&, ReplicationPolicy = kDoNotReplicate);
 
   // TODO(andypaicu): remove this once we have gathered the data
   void ExperimentalSetNulledName();
@@ -54,11 +62,16 @@ class CORE_EXPORT FrameTree final {
   unsigned ChildCount() const;
 
   Frame* ScopedChild(unsigned index) const;
+  // https://whatwg.org/C/window-object.html#named-access-on-the-window-object
+  // This implements the steps needed for looking up a child browsing context
+  // that matches |name|. If |name.IsEmpty()| is true, this is guaranteed to
+  // return null: the spec specifically states that browsing contexts with a
+  // name are never considered.
   Frame* ScopedChild(const AtomicString& name) const;
   unsigned ScopedChildCount() const;
   void InvalidateScopedChildCount();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   Member<Frame> this_frame_;
@@ -69,6 +82,8 @@ class CORE_EXPORT FrameTree final {
 
   // TODO(andypaicu): remove this once we have gathered the data
   bool experimental_set_nulled_name_;
+
+  DISALLOW_COPY_AND_ASSIGN(FrameTree);
 };
 
 }  // namespace blink

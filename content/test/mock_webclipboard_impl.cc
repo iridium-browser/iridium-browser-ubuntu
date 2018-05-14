@@ -14,7 +14,6 @@
 #include "build/build_config.h"
 #include "content/renderer/clipboard_utils.h"
 #include "third_party/WebKit/public/platform/Platform.h"
-#include "third_party/WebKit/public/platform/WebBlobRegistry.h"
 #include "third_party/WebKit/public/platform/WebCommon.h"
 #include "third_party/WebKit/public/platform/WebDragData.h"
 #include "third_party/WebKit/public/platform/WebImage.h"
@@ -37,29 +36,31 @@ MockWebClipboardImpl::MockWebClipboardImpl()
 
 MockWebClipboardImpl::~MockWebClipboardImpl() {}
 
-uint64_t MockWebClipboardImpl::SequenceNumber(Buffer) {
+uint64_t MockWebClipboardImpl::SequenceNumber(blink::mojom::ClipboardBuffer) {
   return m_sequenceNumber;
 }
 
-bool MockWebClipboardImpl::IsFormatAvailable(Format format, Buffer buffer) {
+bool MockWebClipboardImpl::IsFormatAvailable(
+    blink::mojom::ClipboardFormat format,
+    blink::mojom::ClipboardBuffer buffer) {
   switch (format) {
-    case kFormatPlainText:
+    case blink::mojom::ClipboardFormat::kPlaintext:
       return !m_plainText.is_null();
 
-    case kFormatHTML:
+    case blink::mojom::ClipboardFormat::kHtml:
       return !m_htmlText.is_null();
 
-    case kFormatSmartPaste:
+    case blink::mojom::ClipboardFormat::kSmartPaste:
       return m_writeSmartPaste;
 
-    default:
-      NOTREACHED();
+    case blink::mojom::ClipboardFormat::kBookmark:
       return false;
   }
+  return false;
 }
 
 WebVector<WebString> MockWebClipboardImpl::ReadAvailableTypes(
-    Buffer buffer,
+    blink::mojom::ClipboardBuffer buffer,
     bool* containsFilenames) {
   *containsFilenames = false;
   std::vector<WebString> results;
@@ -83,13 +84,13 @@ WebVector<WebString> MockWebClipboardImpl::ReadAvailableTypes(
 }
 
 blink::WebString MockWebClipboardImpl::ReadPlainText(
-    blink::WebClipboard::Buffer buffer) {
+    blink::mojom::ClipboardBuffer buffer) {
   return WebString::FromUTF16(m_plainText);
 }
 
 // TODO(wtc): set output argument *url.
 blink::WebString MockWebClipboardImpl::ReadHTML(
-    blink::WebClipboard::Buffer buffer,
+    blink::mojom::ClipboardBuffer buffer,
     blink::WebURL* url,
     unsigned* fragmentStart,
     unsigned* fragmentEnd) {
@@ -99,31 +100,24 @@ blink::WebString MockWebClipboardImpl::ReadHTML(
 }
 
 blink::WebBlobInfo MockWebClipboardImpl::ReadImage(
-    blink::WebClipboard::Buffer buffer) {
+    blink::mojom::ClipboardBuffer buffer) {
   std::vector<unsigned char> output;
   const SkBitmap& bitmap = m_image.GetSkBitmap();
   if (!gfx::PNGCodec::FastEncodeBGRASkBitmap(
           bitmap, false /* discard_transparency */, &output)) {
     return blink::WebBlobInfo();
   }
-  const WebString& uuid = WebString::FromASCII(base::GenerateGUID());
-  std::unique_ptr<blink::WebBlobRegistry::Builder> blob_builder(
-      blink::Platform::Current()->GetBlobRegistry()->CreateBuilder(
-          uuid, blink::WebString()));
-  blob_builder->AppendData(blink::WebThreadSafeData(
-      reinterpret_cast<char*>(output.data()), output.size()));
-  blob_builder->Build();
-  return blink::WebBlobInfo(
-      uuid, WebString::FromASCII(ui::Clipboard::kMimeTypePNG), output.size());
+  return CreateBlobFromData(output,
+                            WebString::FromASCII(ui::Clipboard::kMimeTypePNG));
 }
 
 blink::WebImage MockWebClipboardImpl::ReadRawImage(
-    blink::WebClipboard::Buffer buffer) {
+    blink::mojom::ClipboardBuffer buffer) {
   return m_image;
 }
 
 blink::WebString MockWebClipboardImpl::ReadCustomData(
-    blink::WebClipboard::Buffer buffer,
+    blink::mojom::ClipboardBuffer buffer,
     const blink::WebString& type) {
   std::map<base::string16, base::string16>::const_iterator it =
       m_customData.find(type.Utf16());
@@ -148,16 +142,6 @@ void MockWebClipboardImpl::WritePlainText(const blink::WebString& plain_text) {
   clear();
 
   m_plainText = WebString::ToNullableString16(plain_text);
-  ++m_sequenceNumber;
-}
-
-void MockWebClipboardImpl::writeURL(const blink::WebURL& url,
-                                    const blink::WebString& title) {
-  clear();
-
-  m_htmlText = base::NullableString16(
-      base::UTF8ToUTF16(URLToMarkup(url, title)), false /* is_null */);
-  m_plainText = WebString::ToNullableString16(url.GetString());
   ++m_sequenceNumber;
 }
 

@@ -4,7 +4,7 @@
 /*                                                                         */
 /*    SFNT object management (base).                                       */
 /*                                                                         */
-/*  Copyright 1996-2017 by                                                 */
+/*  Copyright 1996-2018 by                                                 */
 /*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
 /*                                                                         */
 /*  This file is part of the FreeType project, and may only be used,       */
@@ -787,6 +787,8 @@
          tag != TTAG_OTTO    &&
          tag != TTAG_true    &&
          tag != TTAG_typ1    &&
+         tag != TTAG_0xA5kbd &&
+         tag != TTAG_0xA5lst &&
          tag != 0x00020000UL )
     {
       FT_TRACE2(( "  not a font using the SFNT container format\n" ));
@@ -959,8 +961,6 @@
       FT_Byte*  default_values  = NULL;
       FT_Byte*  instance_values = NULL;
 
-
-      face->is_default_instance = 1;
 
       instance_index = FT_ABS( face_instance_index ) >> 16;
 
@@ -1144,6 +1144,8 @@
     FT_Bool       has_outline;
     FT_Bool       is_apple_sbit;
     FT_Bool       is_apple_sbix;
+    FT_Bool       has_CBLC;
+    FT_Bool       has_CBDT;
     FT_Bool       ignore_typographic_family    = FALSE;
     FT_Bool       ignore_typographic_subfamily = FALSE;
 
@@ -1224,7 +1226,17 @@
         goto Exit;
     }
 
-    if ( face->header.Units_Per_EM == 0 )
+    has_CBLC = !face->goto_table( face, TTAG_CBLC, stream, 0 );
+    has_CBDT = !face->goto_table( face, TTAG_CBDT, stream, 0 );
+
+    /* Ignore outlines for CBLC/CBDT fonts. */
+    if ( has_CBLC || has_CBDT )
+      has_outline = FALSE;
+
+    /* OpenType 1.8.2 introduced limits to this value;    */
+    /* however, they make sense for older SFNT fonts also */
+    if ( face->header.Units_Per_EM <    16 ||
+         face->header.Units_Per_EM > 16384 )
     {
       error = FT_THROW( Invalid_Table );
 
@@ -1489,7 +1501,8 @@
 
 #ifdef FT_CONFIG_OPTION_POSTSCRIPT_NAMES
 
-          if ( charmap->encoding == FT_ENCODING_UNICODE )
+          if ( charmap->encoding == FT_ENCODING_UNICODE   ||
+               charmap->encoding == FT_ENCODING_MS_SYMBOL )  /* PUA */
             has_unicode = TRUE;
         }
 
@@ -1680,9 +1693,9 @@
           (FT_Short)( face->vertical_info ? face->vertical.advance_Height_Max
                                           : root->height );
 
-        /* See http://www.microsoft.com/OpenType/OTSpec/post.htm -- */
-        /* Adjust underline position from top edge to centre of     */
-        /* stroke to convert TrueType meaning to FreeType meaning.  */
+        /* See https://www.microsoft.com/typography/otspec/post.htm -- */
+        /* Adjust underline position from top edge to centre of        */
+        /* stroke to convert TrueType meaning to FreeType meaning.     */
         root->underline_position  = face->postscript.underlinePosition -
                                     face->postscript.underlineThickness / 2;
         root->underline_thickness = face->postscript.underlineThickness;

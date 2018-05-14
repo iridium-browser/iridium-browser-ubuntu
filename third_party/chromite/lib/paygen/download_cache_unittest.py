@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -140,7 +141,7 @@ class DownloadCacheTest(cros_test_lib.TempDirTestCase):
     cache_file = cache._UriToCacheFile(uri)
 
     self.assertTrue(cache_file.startswith(self.cache_dir))
-    self.assertTrue(os.path.exists(cache_file))
+    self.assertExists(cache_file)
 
   def _validateCacheContents(self, cache, expected_contents):
     """Test helper to make sure the cache holds what we expect."""

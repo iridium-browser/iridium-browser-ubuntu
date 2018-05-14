@@ -8,13 +8,13 @@
 #include <memory>
 #include <utility>
 
-#include "android_webview/browser/aw_contents_background_thread_client.h"
 #include "android_webview/browser/net/aw_web_resource_request.h"
 #include "android_webview/browser/net/aw_web_resource_response.h"
 #include "android_webview/common/devtools_instrumentation.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/android/jni_weak_ref.h"
+#include "base/containers/flat_set.h"
 #include "base/lazy_instance.h"
 #include "base/synchronization/lock.h"
 #include "content/public/browser/browser_thread.h"
@@ -24,7 +24,9 @@
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "jni/AwContentsBackgroundThreadClient_jni.h"
 #include "jni/AwContentsIoThreadClient_jni.h"
+#include "net/base/data_url.h"
 #include "net/url_request/url_request.h"
 
 using base::android::AttachCurrentThread;
@@ -57,10 +59,16 @@ IoThreadClientData::IoThreadClientData() : pending_association(false) {}
 typedef map<pair<int, int>, IoThreadClientData>
     RenderFrameHostToIoThreadClientType;
 
+typedef pair<base::flat_set<RenderFrameHost*>, IoThreadClientData>
+    HostsAndClientDataPair;
+
 // When browser side navigation is enabled, RenderFrameIDs do not have
 // valid render process host and render frame ids for frame navigations.
-// We need to identify these by using Frame Tree Node ids.
-typedef map<int, IoThreadClientData> FrameTreeNodeToIoThreadClientType;
+// We need to identify these by using FrameTreeNodeIds. Furthermore, we need
+// to keep track of which RenderFrameHosts are associated with each
+// FrameTreeNodeId, so we know when the last RenderFrameHost is deleted (and
+// therefore the FrameTreeNodeId should be removed).
+typedef map<int, HostsAndClientDataPair> FrameTreeNodeToIoThreadClientType;
 
 static pair<int, int> GetRenderFrameHostIdPair(RenderFrameHost* rfh) {
   return pair<int, int>(rfh->GetProcess()->GetID(), rfh->GetRoutingID());
@@ -72,14 +80,19 @@ class RfhToIoThreadClientMap {
   static RfhToIoThreadClientMap* GetInstance();
   void Set(pair<int, int> rfh_id, const IoThreadClientData& client);
   bool Get(pair<int, int> rfh_id, IoThreadClientData* client);
-  void Erase(pair<int, int> rfh_id);
 
-  void Set(int frame_tree_node_id, const IoThreadClientData& client);
   bool Get(int frame_tree_node_id, IoThreadClientData* client);
-  void Erase(int frame_tree_node_id);
+
+  // Prefer to call these when RenderFrameHost* is available, because they
+  // update both maps at the same time.
+  void Set(RenderFrameHost* rfh, const IoThreadClientData& client);
+  void Erase(RenderFrameHost* rfh);
 
  private:
   base::Lock map_lock_;
+  // We maintain two maps simultaneously so that we can always get the correct
+  // IoThreadClientData, even when only HostIdPair or FrameTreeNodeId is
+  // available.
   RenderFrameHostToIoThreadClientType rfh_to_io_thread_client_;
   FrameTreeNodeToIoThreadClientType frame_tree_node_to_io_thread_client_;
 };
@@ -115,17 +128,6 @@ bool RfhToIoThreadClientMap::Get(pair<int, int> rfh_id,
   return true;
 }
 
-void RfhToIoThreadClientMap::Erase(pair<int, int> rfh_id) {
-  base::AutoLock lock(map_lock_);
-  rfh_to_io_thread_client_.erase(rfh_id);
-}
-
-void RfhToIoThreadClientMap::Set(int frame_tree_node_id,
-                                 const IoThreadClientData& client) {
-  base::AutoLock lock(map_lock_);
-  frame_tree_node_to_io_thread_client_[frame_tree_node_id] = client;
-}
-
 bool RfhToIoThreadClientMap::Get(int frame_tree_node_id,
                                  IoThreadClientData* client) {
   base::AutoLock lock(map_lock_);
@@ -134,13 +136,47 @@ bool RfhToIoThreadClientMap::Get(int frame_tree_node_id,
   if (iterator == frame_tree_node_to_io_thread_client_.end())
     return false;
 
-  *client = iterator->second;
+  *client = iterator->second.second;
   return true;
 }
 
-void RfhToIoThreadClientMap::Erase(int frame_tree_node_id) {
+void RfhToIoThreadClientMap::Set(RenderFrameHost* rfh,
+                                 const IoThreadClientData& client) {
+  int frame_tree_node_id = rfh->GetFrameTreeNodeId();
+  pair<int, int> rfh_id = GetRenderFrameHostIdPair(rfh);
   base::AutoLock lock(map_lock_);
-  frame_tree_node_to_io_thread_client_.erase(frame_tree_node_id);
+
+  // If this FrameTreeNodeId already has an associated IoThreadClientData, add
+  // this RenderFrameHost to the hosts set (it's harmless to overwrite the
+  // IoThreadClientData). Otherwise, operator[] creates a new map entry and we
+  // add this RenderFrameHost to the hosts set and insert |client| in the pair.
+  HostsAndClientDataPair& current_entry =
+      frame_tree_node_to_io_thread_client_[frame_tree_node_id];
+  current_entry.second = client;
+  current_entry.first.insert(rfh);
+
+  // Always add the entry to the HostIdPair map, since entries are 1:1 with
+  // RenderFrameHosts.
+  rfh_to_io_thread_client_[rfh_id] = client;
+}
+
+void RfhToIoThreadClientMap::Erase(RenderFrameHost* rfh) {
+  int frame_tree_node_id = rfh->GetFrameTreeNodeId();
+  pair<int, int> rfh_id = GetRenderFrameHostIdPair(rfh);
+  base::AutoLock lock(map_lock_);
+  HostsAndClientDataPair& current_entry =
+      frame_tree_node_to_io_thread_client_[frame_tree_node_id];
+  size_t num_erased = current_entry.first.erase(rfh);
+  DCHECK(num_erased == 1);
+  // Only remove this entry from the FrameTreeNodeId map if there are no more
+  // live RenderFrameHosts.
+  if (current_entry.first.empty()) {
+    frame_tree_node_to_io_thread_client_.erase(frame_tree_node_id);
+  }
+
+  // Always safe to remove the entry from the HostIdPair map, since entries are
+  // 1:1 with RenderFrameHosts.
+  rfh_to_io_thread_client_.erase(rfh_id);
 }
 
 // ClientMapEntryUpdater ------------------------------------------------------
@@ -174,15 +210,11 @@ void ClientMapEntryUpdater::RenderFrameCreated(RenderFrameHost* rfh) {
   IoThreadClientData client_data;
   client_data.io_thread_client = jdelegate_;
   client_data.pending_association = false;
-  RfhToIoThreadClientMap::GetInstance()->Set(GetRenderFrameHostIdPair(rfh),
-                                             client_data);
-  RfhToIoThreadClientMap::GetInstance()->Set(rfh->GetFrameTreeNodeId(),
-                                             client_data);
+  RfhToIoThreadClientMap::GetInstance()->Set(rfh, client_data);
 }
 
 void ClientMapEntryUpdater::RenderFrameDeleted(RenderFrameHost* rfh) {
-  RfhToIoThreadClientMap::GetInstance()->Erase(GetRenderFrameHostIdPair(rfh));
-  RfhToIoThreadClientMap::GetInstance()->Erase(rfh->GetFrameTreeNodeId());
+  RfhToIoThreadClientMap::GetInstance()->Erase(rfh);
 }
 
 void ClientMapEntryUpdater::WebContentsDestroyed() {
@@ -310,7 +342,8 @@ namespace {
 std::unique_ptr<AwWebResourceResponse> RunShouldInterceptRequest(
     const AwWebResourceRequest& request,
     JavaObjectWeakGlobalRef ref) {
-  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
+  base::AssertBlockingAllowed();
+
   JNIEnv* env = AttachCurrentThread();
   base::android::ScopedJavaLocalRef<jobject> obj = ref.get(env);
   if (obj.is_null())
@@ -322,7 +355,7 @@ std::unique_ptr<AwWebResourceResponse> RunShouldInterceptRequest(
   devtools_instrumentation::ScopedEmbedderCallbackTask embedder_callback(
       "shouldInterceptRequest");
   ScopedJavaLocalRef<jobject> ret =
-      AwContentsBackgroundThreadClient::shouldInterceptRequest(
+      Java_AwContentsBackgroundThreadClient_shouldInterceptRequestFromNative(
           env, obj, java_web_resource_request.jurl, request.is_main_frame,
           request.has_user_gesture, java_web_resource_request.jmethod,
           java_web_resource_request.jheader_names,
@@ -354,8 +387,8 @@ void AwContentsIoThreadClient::ShouldInterceptRequestAsync(
         &RunShouldInterceptRequest, AwWebResourceRequest(*request),
         JavaObjectWeakGlobalRef(env, bg_thread_client_object_.obj()));
   }
-  BrowserThread::PostTaskAndReplyWithResult(BrowserThread::FILE, FROM_HERE,
-                                            get_response, callback);
+  base::PostTaskAndReplyWithResult(sequenced_task_runner_.get(), FROM_HERE,
+                                   get_response, callback);
 }
 
 bool AwContentsIoThreadClient::ShouldBlockContentUrls() const {

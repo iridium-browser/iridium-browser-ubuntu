@@ -47,8 +47,7 @@ class PluginServiceFilter;
 class ResourceContext;
 struct PepperPluginInfo;
 
-class CONTENT_EXPORT PluginServiceImpl
-    : NON_EXPORTED_BASE(public PluginService) {
+class CONTENT_EXPORT PluginServiceImpl : public PluginService {
  public:
   // Returns the PluginServiceImpl singleton.
   static PluginServiceImpl* GetInstance();
@@ -107,6 +106,7 @@ class CONTENT_EXPORT PluginServiceImpl
                                 const base::FilePath& profile_data_directory,
                                 PpapiPluginProcessHost::PluginClient* client);
   void OpenChannelToPpapiBroker(int render_process_id,
+                                int render_frame_id,
                                 const base::FilePath& path,
                                 PpapiPluginProcessHost::BrokerClient* client);
 
@@ -115,6 +115,9 @@ class CONTENT_EXPORT PluginServiceImpl
 
  private:
   friend struct base::DefaultSingletonTraits<PluginServiceImpl>;
+
+  // Helper for recording URLs to UKM.
+  static void RecordBrokerUsage(int render_process_id, int render_frame_id);
 
   // Creates the PluginServiceImpl object, but doesn't actually build the plugin
   // list yet.  It's generated lazily.

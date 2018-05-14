@@ -15,13 +15,16 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
+#include "chrome/browser/ui/views/autofill/dialog_event_waiter.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view.h"
 #include "chrome/browser/ui/views/payments/test_chrome_payment_request_delegate.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "components/payments/content/payment_request.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/WebKit/public/platform/modules/payments/payment_request.mojom.h"
 
@@ -31,6 +34,7 @@ class CreditCard;
 }  // namespace autofill
 
 namespace content {
+class RenderFrameHost;
 class WebContents;
 }  // namespace content
 
@@ -56,9 +60,10 @@ class PersonalDataLoadedObserverMock
 class PaymentRequestBrowserTestBase
     : public InProcessBrowserTest,
       public PaymentRequest::ObserverForTest,
-      public PaymentRequestDialogView::ObserverForTest {
+      public PaymentRequestDialogView::ObserverForTest,
+      public content::WebContentsObserver {
  public:
-  // Various events that can be waited on by the DialogEventObserver.
+  // Various events that can be waited on by the DialogEventWaiter.
   enum DialogEvent : int {
     DIALOG_OPENED,
     DIALOG_CLOSED,
@@ -74,29 +79,34 @@ class PaymentRequestBrowserTestBase
     CONTACT_INFO_OPENED,
     EDITOR_VIEW_UPDATED,
     CAN_MAKE_PAYMENT_CALLED,
+    CAN_MAKE_PAYMENT_RETURNED,
     ERROR_MESSAGE_SHOWN,
     SPEC_DONE_UPDATING,
     CVC_PROMPT_SHOWN,
     NOT_SUPPORTED_ERROR,
     ABORT_CALLED,
+    PROCESSING_SPINNER_SHOWN,
+    PROCESSING_SPINNER_HIDDEN,
   };
 
  protected:
-  // Test will open a browser window to |test_file_path| (relative to
-  // components/test/data/payments).
-  explicit PaymentRequestBrowserTestBase(const std::string& test_file_path);
+  PaymentRequestBrowserTestBase();
   ~PaymentRequestBrowserTestBase() override;
 
   void SetUpCommandLine(base::CommandLine* command_line) override;
   void SetUpOnMainThread() override;
 
+  // Test will open a browser window to |file_path| (relative to
+  // components/test/data/payments).
   void NavigateTo(const std::string& file_path);
 
   void SetIncognito();
   void SetInvalidSsl();
+  void SetBrowserWindowInactive();
 
   // PaymentRequest::ObserverForTest:
   void OnCanMakePaymentCalled() override;
+  void OnCanMakePaymentReturned() override;
   void OnNotSupportedError() override;
   void OnConnectionTerminated() override;
   void OnAbortCalled() override;
@@ -117,9 +127,17 @@ class PaymentRequestBrowserTestBase
   void OnErrorMessageShown() override;
   void OnSpecDoneUpdating() override;
   void OnCvcPromptShown() override;
+  void OnProcessingSpinnerShown() override;
+  void OnProcessingSpinnerHidden() override;
+
+  // content::WebContentsObserver implementation.
+  void OnInterfaceRequestFromFrame(
+      content::RenderFrameHost* render_frame_host,
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle* interface_pipe) override;
 
   // Will call JavaScript to invoke the PaymentRequest dialog and verify that
-  // it's open.
+  // it's open and ready for input.
   void InvokePaymentRequestUI();
 
   // Will expect that all strings in |expected_strings| are present in output.
@@ -156,8 +174,8 @@ class PaymentRequestBrowserTestBase
   void AddCreditCard(const autofill::CreditCard& card);
 
   void CreatePaymentRequestForTest(
-      content::WebContents* web_contents,
-      payments::mojom::PaymentRequestRequest request);
+      payments::mojom::PaymentRequestRequest request,
+      content::RenderFrameHost* render_frame_host);
 
   // Click on a view from within the dialog and waits for an observed event
   // to be observed.
@@ -227,52 +245,22 @@ class PaymentRequestBrowserTestBase
     delegate_->SetRegionDataLoader(region_data_loader);
   }
 
-  // DialogEventObserver is used to wait on specific events that may have
-  // occured before the call to Wait(), or after, in which case a RunLoop is
-  // used.
-  //
-  // Usage:
-  // observer_ =
-  // base::MakeUnique<DialogEventObserver>(std:list<DialogEvent>(...));
-  //
-  // Do stuff, which (a)synchronously calls observer_->Observe(...).
-  //
-  // observer_->Wait();  <- Will either return right away if events were
-  //                     <- observed, or use a RunLoop's Run/Quit to wait.
-  class DialogEventObserver {
-   public:
-    explicit DialogEventObserver(std::list<DialogEvent> event_sequence);
-    ~DialogEventObserver();
-
-    // Either returns right away if all events were observed between this
-    // object's construction and this call to Wait(), or use a RunLoop to wait
-    // for them.
-    void Wait();
-
-    // Observes and event (quits the RunLoop if we are done waiting).
-    void Observe(DialogEvent event);
-
-   private:
-    std::list<DialogEvent> events_;
-    base::RunLoop run_loop_;
-
-    DISALLOW_COPY_AND_ASSIGN(DialogEventObserver);
-  };
-
-  // Resets the event observer for a given |event| or |event_sequence|.
-  void ResetEventObserver(DialogEvent event);
-  void ResetEventObserverForSequence(std::list<DialogEvent> event_sequence);
-  // Wait for the event(s) passed to ResetEventObserver*() to occur.
+  // Resets the event waiter for a given |event| or |event_sequence|.
+  void ResetEventWaiter(DialogEvent event);
+  void ResetEventWaiterForSequence(std::list<DialogEvent> event_sequence);
+  // Wait for the event(s) passed to ResetEventWaiter*() to occur.
   void WaitForObservedEvent();
 
  private:
-  std::unique_ptr<DialogEventObserver> event_observer_;
-  const std::string test_file_path_;
+  std::unique_ptr<DialogEventWaiter<DialogEvent>> event_waiter_;
   std::unique_ptr<net::EmbeddedTestServer> https_server_;
   // Weak, owned by the PaymentRequest object.
   TestChromePaymentRequestDelegate* delegate_;
   bool is_incognito_;
   bool is_valid_ssl_;
+  bool is_browser_window_active_;
+
+  service_manager::BinderRegistryWithArgs<content::RenderFrameHost*> registry_;
 
   DISALLOW_COPY_AND_ASSIGN(PaymentRequestBrowserTestBase);
 };

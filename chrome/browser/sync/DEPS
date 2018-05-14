@@ -4,15 +4,7 @@ include_rules = [
   "+components/sync_sessions",
   "+components/sync_wifi",
   "+google/cacheinvalidation",
+
+  # TODO(hejq): Remove this once app_list is migrated. http://crbug.com/733662
+  "+ash/app_list/model",
 ]
-specific_include_rules = {
-  "sync_error_notifier_ash\.cc": [
-    "+ash/system/system_notifier.h",
-  ],
-  "sync_error_notifier_factory_ash\.cc": [
-    "+ash/shell.h",
-  ],
-  ".*_unittest\.cc": [
-    "+ash/test/ash_test_base.h",
-  ]
-}

@@ -36,6 +36,7 @@ class ActiveHost {
     CONNECTING = 1,
     CONNECTED = 2
   };
+  static std::string StatusToString(const ActiveHostStatus& status);
 
   struct ActiveHostChangeInfo {
     ActiveHostChangeInfo();
@@ -140,7 +141,7 @@ class ActiveHost {
       const std::string& new_wifi_network_guid);
 
  private:
-  friend class CrashRecoveryManager;
+  friend class CrashRecoveryManagerImpl;
 
   void SetActiveHost(ActiveHostStatus active_host_status,
                      const std::string& active_host_device_id,

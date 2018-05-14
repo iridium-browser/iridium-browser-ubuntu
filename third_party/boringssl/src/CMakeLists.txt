@@ -1,5 +1,11 @@
 cmake_minimum_required (VERSION 2.8.11)
 
+# Report AppleClang separately from Clang. Their version numbers are different.
+# https://cmake.org/cmake/help/v3.0/policy/CMP0025.html
+if(POLICY CMP0025)
+  cmake_policy(SET CMP0025 NEW)
+endif()
+
 # Defer enabling C and CXX languages.
 project (BoringSSL NONE)
 
@@ -32,17 +38,67 @@ if (NOT GO_EXECUTABLE)
   message(FATAL_ERROR "Could not find Go")
 endif()
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  set(C_CXX_FLAGS "-Wall -Werror -Wformat=2 -Wsign-compare -Wmissing-field-initializers -Wwrite-strings -ggdb -fvisibility=hidden -fno-common")
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wnewline-eof")
+if (BORINGSSL_ALLOW_CXX_RUNTIME)
+  add_definitions(-DBORINGSSL_ALLOW_CXX_RUNTIME)
+endif()
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  set(CLANG 1)
+endif()
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CLANG)
+  # Note clang-cl is odd and sets both CLANG and MSVC. We base our configuration
+  # primarily on our normal Clang one.
+  set(C_CXX_FLAGS "-Werror -Wformat=2 -Wsign-compare -Wmissing-field-initializers -Wwrite-strings")
+  if(MSVC)
+    # clang-cl sets different default warnings than clang. It also treats -Wall
+    # as -Weverything, to match MSVC. Instead -W3 is the alias for -Wall.
+    # See http://llvm.org/viewvc/llvm-project?view=revision&revision=319116
+    set(C_CXX_FLAGS "${C_CXX_FLAGS} -W3 -Wno-unused-parameter -fmsc-version=1900")
+    # googletest suppresses warning C4996 via a pragma, but clang-cl does not
+    # honor it. Suppress it here to compensate. See https://crbug.com/772117.
+    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wno-deprecated-declarations")
+  else()
+    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wall -ggdb -fvisibility=hidden -fno-common")
+  endif()
+
+  if(CLANG)
+    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wnewline-eof -fcolor-diagnostics")
   else()
     # GCC (at least 4.8.4) has a bug where it'll find unreachable free() calls
     # and declare that the code is trying to free a stack pointer.
     set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wno-free-nonheap-object")
   endif()
+
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
+     NOT "6.0.0" VERSION_GREATER CMAKE_C_COMPILER_VERSION)
+    # Clang's -Wtautological-constant-compare is far too aggressive and does not
+    # account for, say, wanting the same code to work on both 32-bit and 64-bit
+    # platforms.
+    #
+    # Note "Clang" and "AppleClang" version differently, so we check for an
+    # exact match on the COMPILER_ID. As of writing, the warning is not in any
+    # release of AppleClang yet.
+    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wno-tautological-constant-compare -Wtautological-constant-out-of-range-compare")
+  endif()
+
+  if(CLANG OR NOT "7.0.0" VERSION_GREATER CMAKE_C_COMPILER_VERSION)
+    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wimplicit-fallthrough")
+  endif()
+
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${C_CXX_FLAGS} -Wmissing-prototypes -Wold-style-definition -Wstrict-prototypes")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ${C_CXX_FLAGS} -Wmissing-declarations -fno-exceptions")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${C_CXX_FLAGS} -Wmissing-declarations")
+
+  if(NOT MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+    if(APPLE)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+    endif()
+    if(NOT BORINGSSL_ALLOW_CXX_RUNTIME)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-exceptions -fno-rtti")
+    endif()
+  endif()
+
   # In GCC, -Wmissing-declarations is the C++ spelling of -Wmissing-prototypes
   # and using the wrong one is an error. In Clang, -Wmissing-prototypes is the
   # spelling for both and -Wmissing-declarations is some other warning.
@@ -50,9 +106,14 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # https://gcc.gnu.org/onlinedocs/gcc-7.1.0/gcc/Warning-Options.html#Warning-Options
   # https://clang.llvm.org/docs/DiagnosticsReference.html#wmissing-prototypes
   # https://clang.llvm.org/docs/DiagnosticsReference.html#wmissing-declarations
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wmissing-prototypes -Wimplicit-fallthrough")
+  if(CLANG)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wmissing-prototypes")
   endif()
+
+  if(CMAKE_COMPILER_IS_GNUCXX AND "4.8" VERSION_GREATER CMAKE_C_COMPILER_VERSION)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-array-bounds")
+  endif()
+
 elseif(MSVC)
   set(MSVC_DISABLED_WARNINGS_LIST
       "C4061" # enumerator 'identifier' in switch of enum 'enumeration' is not
@@ -69,8 +130,6 @@ elseif(MSVC)
               # possible loss of data
       "C4244" # 'function' : conversion from 'int' to 'uint8_t',
               # possible loss of data
-      "C4245" # 'initializing' : conversion from 'long' to
-              # 'unsigned long', signed/unsigned mismatch
       "C4267" # conversion from 'size_t' to 'int', possible loss of data
       "C4371" # layout of class may have changed from a previous version of the
               # compiler due to better packing of member '...'
@@ -115,7 +174,9 @@ elseif(MSVC)
                             ${MSVC_LEVEL4_WARNINGS_LIST})
   set(CMAKE_C_FLAGS   "-Wall -WX ${MSVC_DISABLED_WARNINGS_STR} ${MSVC_LEVEL4_WARNINGS_STR}")
   set(CMAKE_CXX_FLAGS "-Wall -WX ${MSVC_DISABLED_WARNINGS_STR} ${MSVC_LEVEL4_WARNINGS_STR}")
-  set(CMAKE_ASM_NASM_FLAGS "-g cv8")
+endif()
+
+if(WIN32)
   add_definitions(-D_HAS_EXCEPTIONS=0)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
   add_definitions(-DNOMINMAX)
@@ -126,14 +187,13 @@ elseif(MSVC)
 endif()
 
 if((CMAKE_COMPILER_IS_GNUCXX AND CMAKE_C_COMPILER_VERSION VERSION_GREATER "4.7.99") OR
-   CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+   CLANG)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wshadow")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wshadow")
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX)
-  if ((CMAKE_C_COMPILER_VERSION VERSION_GREATER "4.8.99") OR
-      CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  if ((CMAKE_C_COMPILER_VERSION VERSION_GREATER "4.8.99") OR CLANG)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
   else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99")
@@ -146,7 +206,7 @@ if(NOT WIN32)
 endif()
 
 if(FUZZ)
-  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  if(NOT CLANG)
     message(FATAL_ERROR "You need to build with Clang for fuzzing to work")
   endif()
 
@@ -174,7 +234,7 @@ if (BUILD_SHARED_LIBS)
 endif()
 
 if (MSAN)
-  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  if(NOT CLANG)
     message(FATAL_ERROR "Cannot enable MSAN unless using Clang")
   endif()
 
@@ -188,12 +248,30 @@ if (MSAN)
 endif()
 
 if (ASAN)
-  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  if(NOT CLANG)
     message(FATAL_ERROR "Cannot enable ASAN unless using Clang")
   endif()
 
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
+  set(OPENSSL_NO_ASM "1")
+endif()
+
+if(CFI)
+  if(NOT CLANG)
+    message(FATAL_ERROR "Cannot enable CFI unless using Clang")
+  endif()
+
+  # TODO(crbug.com/785442): Remove -fsanitize-cfi-icall-generalize-pointers.
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=cfi -fno-sanitize-trap=cfi -fsanitize-cfi-icall-generalize-pointers -flto")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=cfi -fno-sanitize-trap=cfi -fsanitize-cfi-icall-generalize-pointers -flto")
+  # We use Chromium's copy of clang, which requires -fuse-ld=lld if building
+  # with -flto. That, in turn, can't handle -ggdb.
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
+  string(REPLACE "-ggdb" "-g" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+  string(REPLACE "-ggdb" "-g" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  # -flto causes object files to contain LLVM bitcode. Mixing those with
+  # assembly output in the same static library breaks the linker.
   set(OPENSSL_NO_ASM "1")
 endif()
 
@@ -262,14 +340,14 @@ else()
   message(FATAL_ERROR "Unknown processor:" ${CMAKE_SYSTEM_PROCESSOR})
 endif()
 
-if (ANDROID AND ${ARCH} STREQUAL "arm")
-  # The Android-NDK CMake files somehow fail to set the -march flag for
-  # assembly files. Without this flag, the compiler believes that it's
+if (ANDROID AND NOT ANDROID_NDK_REVISION AND ${ARCH} STREQUAL "arm")
+  # The third-party Android-NDK CMake files somehow fail to set the -march flag
+  # for assembly files. Without this flag, the compiler believes that it's
   # building for ARMv5.
-  set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -march=${CMAKE_SYSTEM_PROCESSOR}")
+  set(CMAKE_ASM_FLAGS "-march=${CMAKE_SYSTEM_PROCESSOR} ${CMAKE_ASM_FLAGS}")
 endif()
 
-if (${ARCH} STREQUAL "x86" AND APPLE)
+if (${ARCH} STREQUAL "x86" AND APPLE AND ${CMAKE_VERSION} VERSION_LESS "3.0")
   # With CMake 2.8.x, ${CMAKE_SYSTEM_PROCESSOR} evalutes to i386 on OS X,
   # but clang defaults to 64-bit builds on OS X unless otherwise told.
   # Set ARCH to x86_64 so clang and CMake agree. This is fixed in CMake 3.
@@ -278,8 +356,8 @@ endif()
 
 # Add minimal googletest targets. The provided one has many side-effects, and
 # googletest has a very straightforward build.
-add_library(gtest third_party/googletest/src/gtest-all.cc)
-target_include_directories(gtest PRIVATE third_party/googletest)
+add_library(boringssl_gtest third_party/googletest/src/gtest-all.cc)
+target_include_directories(boringssl_gtest PRIVATE third_party/googletest)
 
 include_directories(third_party/googletest/include)
 
@@ -297,6 +375,7 @@ add_custom_command(
 add_library(crypto_test_data OBJECT crypto_test_data.cc)
 
 add_subdirectory(crypto)
+add_subdirectory(third_party/fiat)
 add_subdirectory(ssl)
 add_subdirectory(ssl/test)
 add_subdirectory(fipstools)

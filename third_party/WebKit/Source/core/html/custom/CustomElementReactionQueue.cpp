@@ -12,9 +12,9 @@ namespace blink {
 
 CustomElementReactionQueue::CustomElementReactionQueue() : index_(0u) {}
 
-CustomElementReactionQueue::~CustomElementReactionQueue() {}
+CustomElementReactionQueue::~CustomElementReactionQueue() = default;
 
-DEFINE_TRACE(CustomElementReactionQueue) {
+void CustomElementReactionQueue::Trace(blink::Visitor* visitor) {
   visitor->Trace(reactions_);
 }
 

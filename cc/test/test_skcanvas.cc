@@ -4,6 +4,8 @@
 
 #include "cc/test/test_skcanvas.h"
 
+#include "third_party/skia/include/gpu/gl/GrGLInterface.h"
+
 namespace cc {
 
 SaveCountingCanvas::SaveCountingCanvas() : SkNoDrawCanvas(100, 100) {}
@@ -20,6 +22,10 @@ void SaveCountingCanvas::willRestore() {
 
 void SaveCountingCanvas::onDrawRect(const SkRect& rect, const SkPaint& paint) {
   draw_rect_ = rect;
+  paint_ = paint;
+}
+
+void SaveCountingCanvas::onDrawPaint(const SkPaint& paint) {
   paint_ = paint;
 }
 

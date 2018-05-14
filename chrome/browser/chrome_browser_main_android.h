@@ -18,7 +18,7 @@ class ChromeBrowserMainPartsAndroid : public ChromeBrowserMainParts {
   // content::BrowserMainParts overrides.
   int PreCreateThreads() override;
   void PostProfileInit() override;
-  void PreEarlyInitialization() override;
+  int PreEarlyInitialization() override;
 
   // ChromeBrowserMainParts overrides.
   void PostBrowserStart() override;
@@ -26,7 +26,7 @@ class ChromeBrowserMainPartsAndroid : public ChromeBrowserMainParts {
 
  private:
   std::unique_ptr<base::MessageLoop> main_message_loop_;
-  std::unique_ptr<chrome::android::ChromeBackupWatcher> backup_watcher_;
+  std::unique_ptr<android::ChromeBackupWatcher> backup_watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsAndroid);
 };

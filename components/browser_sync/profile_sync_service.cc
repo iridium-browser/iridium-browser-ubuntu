@@ -17,28 +17,24 @@
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram.h"
-#include "base/profiler/scoped_tracker.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/browser_sync/browser_sync_switches.h"
-#include "components/history/core/browser/typed_url_data_type_controller.h"
 #include "components/invalidation/impl/invalidation_prefs.h"
 #include "components/invalidation/public/invalidation_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/json_pref_store.h"
-#include "components/reading_list/features/reading_list_enable_flags.h"
+#include "components/reading_list/features/reading_list_buildflags.h"
 #include "components/signin/core/browser/about_signin_internals.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_metrics.h"
-#include "components/signin/core/common/profile_management_switches.h"
-#include "components/strings/grit/components_strings.h"
 #include "components/sync/base/bind_to_task_runner.h"
 #include "components/sync/base/cryptographer.h"
 #include "components/sync/base/passphrase_type.h"
@@ -48,7 +44,6 @@
 #include "components/sync/base/system_encryptor.h"
 #include "components/sync/device_info/device_info.h"
 #include "components/sync/device_info/device_info_sync_bridge.h"
-#include "components/sync/device_info/device_info_sync_service.h"
 #include "components/sync/device_info/device_info_tracker.h"
 #include "components/sync/driver/backend_migrator.h"
 #include "components/sync/driver/directory_data_type_controller.h"
@@ -83,8 +78,6 @@
 #include "components/version_info/version_info_values.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/base/l10n/time_format.h"
 
 #if defined(OS_ANDROID)
 #include "components/sync/syncable/read_transaction.h"
@@ -97,7 +90,6 @@ using syncer::DataTypeController;
 using syncer::DataTypeManager;
 using syncer::DataTypeStatusTable;
 using syncer::DeviceInfoSyncBridge;
-using syncer::DeviceInfoSyncService;
 using syncer::JsBackend;
 using syncer::JsController;
 using syncer::JsEventDetails;
@@ -198,6 +190,12 @@ ProfileSyncService::ProfileSyncService(InitParams init_params)
       current_version.substr(0, current_version.find('.'))) {
     passphrase_prompt_triggered_by_version_ = true;
   }
+
+  if (init_params.model_type_store_factory.is_null()) {
+    model_type_store_factory_ = GetModelTypeStoreFactory(base_directory_);
+  } else {
+    model_type_store_factory_ = init_params.model_type_store_factory;
+  }
 }
 
 ProfileSyncService::~ProfileSyncService() {
@@ -206,7 +204,7 @@ ProfileSyncService::~ProfileSyncService() {
     gaia_cookie_manager_service_->RemoveObserver(this);
   sync_prefs_.RemoveSyncPrefObserver(this);
   // Shutdown() should have been called before destruction.
-  CHECK(!engine_initialized_);
+  DCHECK(!engine_initialized_);
 }
 
 bool ProfileSyncService::CanSyncStart() const {
@@ -221,7 +219,7 @@ void ProfileSyncService::Initialize() {
 
   // We don't pass StartupController an Unretained reference to future-proof
   // against the controller impl changing to post tasks.
-  startup_controller_ = base::MakeUnique<syncer::StartupController>(
+  startup_controller_ = std::make_unique<syncer::StartupController>(
       &sync_prefs_,
       base::Bind(&ProfileSyncService::CanEngineStart, base::Unretained(this)),
       base::Bind(&ProfileSyncService::StartUpSlowEngineComponents,
@@ -230,30 +228,20 @@ void ProfileSyncService::Initialize() {
       sync_client_->GetSyncSessionsClient()->GetLocalSessionEventRouter();
   local_device_ = sync_client_->GetSyncApiComponentFactory()
                       ->CreateLocalDeviceInfoProvider();
-  sync_stopped_reporter_ = base::MakeUnique<syncer::SyncStoppedReporter>(
+  sync_stopped_reporter_ = std::make_unique<syncer::SyncStoppedReporter>(
       sync_service_url_, local_device_->GetSyncUserAgent(),
       url_request_context_, syncer::SyncStoppedReporter::ResultCallback());
-  sessions_sync_manager_ = base::MakeUnique<SessionsSyncManager>(
+  sessions_sync_manager_ = std::make_unique<SessionsSyncManager>(
       sync_client_->GetSyncSessionsClient(), &sync_prefs_, local_device_.get(),
       router,
       base::Bind(&ProfileSyncService::NotifyForeignSessionUpdated,
-                 sync_enabled_weak_factory_.GetWeakPtr()),
-      base::Bind(&ProfileSyncService::TriggerRefresh,
-                 sync_enabled_weak_factory_.GetWeakPtr(),
-                 syncer::ModelTypeSet(syncer::SESSIONS)));
+                 sync_enabled_weak_factory_.GetWeakPtr()));
 
-  if (base::FeatureList::IsEnabled(switches::kSyncUSSDeviceInfo)) {
-    const syncer::ModelTypeStoreFactory& store_factory =
-        GetModelTypeStoreFactory(syncer::DEVICE_INFO, base_directory_);
-    device_info_sync_bridge_ = base::MakeUnique<DeviceInfoSyncBridge>(
-        local_device_.get(), store_factory,
-        base::BindRepeating(
-            &ModelTypeChangeProcessor::Create,
-            base::BindRepeating(&syncer::ReportUnrecoverableError, channel_)));
-  } else {
-    device_info_sync_service_ =
-        base::MakeUnique<DeviceInfoSyncService>(local_device_.get());
-  }
+  device_info_sync_bridge_ = std::make_unique<DeviceInfoSyncBridge>(
+      local_device_.get(), model_type_store_factory_,
+      base::BindRepeating(
+          &ModelTypeChangeProcessor::Create,
+          base::BindRepeating(&syncer::ReportUnrecoverableError, channel_)));
 
   syncer::SyncApiComponentFactory::RegisterDataTypesMethod
       register_platform_types_callback =
@@ -319,11 +307,11 @@ void ProfileSyncService::Initialize() {
 #if !defined(OS_ANDROID)
   DCHECK(sync_error_controller_ == nullptr)
       << "Initialize() called more than once.";
-  sync_error_controller_ = base::MakeUnique<syncer::SyncErrorController>(this);
+  sync_error_controller_ = std::make_unique<syncer::SyncErrorController>(this);
   AddObserver(sync_error_controller_.get());
 #endif
 
-  memory_pressure_listener_ = base::MakeUnique<base::MemoryPressureListener>(
+  memory_pressure_listener_ = std::make_unique<base::MemoryPressureListener>(
       base::Bind(&ProfileSyncService::OnMemoryPressure,
                  sync_enabled_weak_factory_.GetWeakPtr()));
   startup_controller_->Reset(GetRegisteredDataTypes());
@@ -393,9 +381,12 @@ sync_sessions::OpenTabsUIDelegate* ProfileSyncService::GetOpenTabsUIDelegate() {
   DCHECK(thread_checker_.CalledOnValidThread());
   // Although the backing data actually is of type |SESSIONS|, the desire to use
   // open tabs functionality is tracked by the state of the |PROXY_TABS| type.
-  return IsDataTypeControllerRunning(syncer::PROXY_TABS)
-             ? sessions_sync_manager_.get()
-             : nullptr;
+  if (!IsDataTypeControllerRunning(syncer::PROXY_TABS)) {
+    return nullptr;
+  }
+
+  DCHECK(sessions_sync_manager_);
+  return sessions_sync_manager_->GetOpenTabsUIDelegate();
 }
 
 sync_sessions::FaviconCache* ProfileSyncService::GetFaviconCache() {
@@ -405,12 +396,7 @@ sync_sessions::FaviconCache* ProfileSyncService::GetFaviconCache() {
 
 syncer::DeviceInfoTracker* ProfileSyncService::GetDeviceInfoTracker() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // One of the two should always be non-null after initialization is done.
-  if (device_info_sync_bridge_) {
-    return device_info_sync_bridge_.get();
-  } else {
-    return device_info_sync_service_.get();
-  }
+  return device_info_sync_bridge_.get();
 }
 
 syncer::LocalDeviceInfoProvider*
@@ -619,7 +605,7 @@ void ProfileSyncService::OnGetTokenFailure(
         UMA_HISTOGRAM_ENUMERATION("Sync.SyncAuthError", AUTH_ERROR_ENCOUNTERED,
                                   AUTH_ERROR_LIMIT);
       }
-      // Fallthrough.
+      FALLTHROUGH;
     }
     default: {
       if (error.state() != GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS) {
@@ -634,12 +620,6 @@ void ProfileSyncService::OnGetTokenFailure(
 void ProfileSyncService::OnRefreshTokenAvailable(
     const std::string& account_id) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
-  // fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "422460 ProfileSyncService::OnRefreshTokenAvailable"));
-
   if (account_id == signin_->GetAccountIdToUse())
     OnRefreshTokensLoaded();
 }
@@ -823,14 +803,13 @@ void ProfileSyncService::ClearStaleErrors() {
 void ProfileSyncService::ClearUnrecoverableError() {
   unrecoverable_error_reason_ = ERROR_REASON_UNSET;
   unrecoverable_error_message_.clear();
-  unrecoverable_error_location_ = tracked_objects::Location();
+  unrecoverable_error_location_ = base::Location();
 }
 
 // An invariant has been violated.  Transition to an error state where we try
 // to do as little work as possible, to avoid further corruption or crashes.
-void ProfileSyncService::OnUnrecoverableError(
-    const tracked_objects::Location& from_here,
-    const std::string& message) {
+void ProfileSyncService::OnUnrecoverableError(const base::Location& from_here,
+                                              const std::string& message) {
   DCHECK(thread_checker_.CalledOnValidThread());
   // Unrecoverable errors that arrive via the syncer::UnrecoverableErrorHandler
   // interface are assumed to originate within the syncer.
@@ -839,7 +818,7 @@ void ProfileSyncService::OnUnrecoverableError(
 }
 
 void ProfileSyncService::OnUnrecoverableErrorImpl(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const std::string& message,
     bool delete_sync_database) {
   DCHECK(HasUnrecoverableError());
@@ -848,9 +827,7 @@ void ProfileSyncService::OnUnrecoverableErrorImpl(
 
   UMA_HISTOGRAM_ENUMERATION(kSyncUnrecoverableErrorHistogram,
                             unrecoverable_error_reason_, ERROR_REASON_LIMIT);
-  std::string location;
-  from_here.Write(true, true, &location);
-  LOG(ERROR) << "Unrecoverable error detected at " << location
+  LOG(ERROR) << "Unrecoverable error detected at " << from_here.ToString()
              << " -- ProfileSyncService unusable: " << message;
 
   // Shut all data types down.
@@ -926,8 +903,7 @@ void ProfileSyncService::OnEngineInitialized(
   } else {
     SigninClient* signin_client = signin_->GetOriginal()->signin_client();
     DCHECK(signin_client);
-    std::string signin_scoped_device_id =
-        signin_client->GetSigninScopedDeviceId();
+    signin_scoped_device_id = signin_client->GetSigninScopedDeviceId();
   }
 
   // Initialize local device info.
@@ -1145,9 +1121,11 @@ void ProfileSyncService::OnActionableError(const SyncProtocolError& error) {
 #if !defined(OS_CHROMEOS)
       // On every platform except ChromeOS, sign out the user after a dashboard
       // clear.
-      static_cast<SigninManager*>(signin_->GetOriginal())
-          ->SignOut(signin_metrics::SERVER_FORCED_DISABLE,
-                    signin_metrics::SignoutDelete::IGNORE_METRIC);
+      if (!IsLocalSyncEnabled()) {
+        SigninManager::FromSigninManagerBase(signin_->GetOriginal())
+            ->SignOut(signin_metrics::SERVER_FORCED_DISABLE,
+                      signin_metrics::SignoutDelete::IGNORE_METRIC);
+      }
 #endif
       break;
     case syncer::STOP_SYNC_FOR_DISABLED_ACCOUNT:
@@ -1307,18 +1285,18 @@ void ProfileSyncService::OnConfigureStart() {
 ProfileSyncService::SyncStatusSummary
 ProfileSyncService::QuerySyncStatusSummary() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (HasUnrecoverableError()) {
+  if (HasUnrecoverableError())
     return UNRECOVERABLE_ERROR;
-  } else if (!engine_) {
+  if (!engine_)
     return NOT_ENABLED;
-  } else if (engine_ && !IsFirstSetupComplete()) {
+  if (engine_ && !IsFirstSetupComplete())
     return SETUP_INCOMPLETE;
-  } else if (engine_ && IsFirstSetupComplete() && data_type_manager_ &&
-             data_type_manager_->state() == DataTypeManager::STOPPED) {
+  if (engine_ && IsFirstSetupComplete() && data_type_manager_ &&
+      data_type_manager_->state() == DataTypeManager::STOPPED) {
     return DATATYPES_NOT_INITIALIZED;
-  } else if (IsSyncActive()) {
-    return INITIALIZED;
   }
+  if (IsSyncActive())
+    return INITIALIZED;
   return UNKNOWN_ERROR;
 }
 
@@ -1362,12 +1340,11 @@ bool ProfileSyncService::QueryDetailedSyncStatus(SyncEngine::Status* result) {
   if (engine_ && engine_initialized_) {
     *result = engine_->GetDetailedStatus();
     return true;
-  } else {
-    SyncEngine::Status status;
-    status.sync_protocol_error = last_actionable_error_;
-    *result = status;
-    return false;
   }
+  SyncEngine::Status status;
+  status.sync_protocol_error = last_actionable_error_;
+  *result = status;
+  return false;
 }
 
 const AuthError& ProfileSyncService::GetAuthError() const {
@@ -1476,20 +1453,8 @@ bool ProfileSyncService::IsPassphraseRequiredForDecryption() const {
   return IsEncryptedDatatypeEnabled() && IsPassphraseRequired();
 }
 
-base::string16 ProfileSyncService::GetLastSyncedTimeString() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  const base::Time last_synced_time = sync_prefs_.GetLastSyncedTime();
-  if (last_synced_time.is_null())
-    return l10n_util::GetStringUTF16(IDS_SYNC_TIME_NEVER);
-
-  base::TimeDelta time_since_last_sync = base::Time::Now() - last_synced_time;
-
-  if (time_since_last_sync < base::TimeDelta::FromMinutes(1))
-    return l10n_util::GetStringUTF16(IDS_SYNC_TIME_JUST_NOW);
-
-  return ui::TimeFormat::Simple(ui::TimeFormat::FORMAT_ELAPSED,
-                                ui::TimeFormat::LENGTH_SHORT,
-                                time_since_last_sync);
+base::Time ProfileSyncService::GetLastSyncedTime() const {
+  return sync_prefs_.GetLastSyncedTime();
 }
 
 void ProfileSyncService::UpdateSelectedTypesHistogram(
@@ -1657,14 +1622,13 @@ void ProfileSyncService::SetPlatformSyncAllowedProvider(
 }
 
 // static
-syncer::ModelTypeStoreFactory ProfileSyncService::GetModelTypeStoreFactory(
-    ModelType type,
-    const base::FilePath& base_path) {
+syncer::RepeatingModelTypeStoreFactory
+ProfileSyncService::GetModelTypeStoreFactory(const base::FilePath& base_path) {
   // TODO(skym): Verify using AsUTF8Unsafe is okay here. Should work as long
   // as the Local State file is guaranteed to be UTF-8.
   const std::string path =
       FormatSharedModelTypeStorePath(base_path).AsUTF8Unsafe();
-  return base::Bind(&ModelTypeStore::CreateStore, type, path);
+  return base::BindRepeating(&ModelTypeStore::CreateStore, path);
 }
 
 void ProfileSyncService::ConfigureDataTypeManager() {
@@ -1685,7 +1649,7 @@ void ProfileSyncService::ConfigureDataTypeManager() {
     restart = true;
 
     // We create the migrator at the same time.
-    migrator_ = base::MakeUnique<BackendMigrator>(
+    migrator_ = std::make_unique<BackendMigrator>(
         debug_identifier_, GetUserShare(), this, data_type_manager_.get(),
         base::Bind(&ProfileSyncService::StartSyncingWithServer,
                    base::Unretained(this)));
@@ -1749,7 +1713,7 @@ void ProfileSyncService::GetModelSafeRoutingInfo(
 
 std::unique_ptr<base::Value> ProfileSyncService::GetTypeStatusMap() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  auto result = base::MakeUnique<base::ListValue>();
+  auto result = std::make_unique<base::ListValue>();
 
   if (!engine_ || !engine_initialized_) {
     return std::move(result);
@@ -1778,7 +1742,7 @@ std::unique_ptr<base::Value> ProfileSyncService::GetTypeStatusMap() {
   for (ModelTypeSet::Iterator it = registered.First(); it.Good(); it.Inc()) {
     ModelType type = it.Get();
 
-    auto type_status = base::MakeUnique<base::DictionaryValue>();
+    auto type_status = std::make_unique<base::DictionaryValue>();
     type_status->SetString("name", ModelTypeToString(type));
     type_status->SetString("group_type",
                            ModelSafeGroupToString(routing_info[type]));
@@ -1868,11 +1832,10 @@ bool ProfileSyncService::SetDecryptionPassphrase(
     bool result = crypto_->SetDecryptionPassphrase(passphrase);
     UMA_HISTOGRAM_BOOLEAN("Sync.PassphraseDecryptionSucceeded", result);
     return result;
-  } else {
-    NOTREACHED() << "SetDecryptionPassphrase must not be called when "
-                    "IsPassphraseRequired() is false.";
-    return false;
   }
+  NOTREACHED() << "SetDecryptionPassphrase must not be called when "
+                  "IsPassphraseRequired() is false.";
+  return false;
 }
 
 bool ProfileSyncService::IsEncryptEverythingAllowed() const {
@@ -1926,13 +1889,8 @@ void ProfileSyncService::GoogleSigninSucceeded(const std::string& account_id,
     is_auth_in_progress_ = true;
   }
 
-  if (switches::IsAccountConsistencyDiceEnabled() &&
-      oauth2_token_service_->RefreshTokenIsAvailable(account_id)) {
-    // When Dice is enabled, the refresh token may be available before the user
-    // enables sync. Start sync if the refresh token is already available in the
-    // token service when the authenticated account is set.
+  if (oauth2_token_service_->RefreshTokenIsAvailable(account_id))
     OnRefreshTokenAvailable(account_id);
-  }
 }
 
 void ProfileSyncService::GoogleSignedOut(const std::string& account_id,
@@ -1948,34 +1906,33 @@ void ProfileSyncService::OnGaiaAccountsInCookieUpdated(
     const std::vector<gaia::ListedAccount>& accounts,
     const std::vector<gaia::ListedAccount>& signed_out_accounts,
     const GoogleServiceAuthError& error) {
-  OnGaiaAccountsInCookieUpdatedWithCallback(accounts, signed_out_accounts,
-                                            error, base::Closure());
+  OnGaiaAccountsInCookieUpdatedWithCallback(accounts, base::Closure());
 }
 
 void ProfileSyncService::OnGaiaAccountsInCookieUpdatedWithCallback(
     const std::vector<gaia::ListedAccount>& accounts,
-    const std::vector<gaia::ListedAccount>& signed_out_accounts,
-    const GoogleServiceAuthError& error,
     const base::Closure& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!IsEngineInitialized())
     return;
 
-  bool cookie_jar_mismatch = true;
+  bool cookie_jar_mismatch = HasCookieJarMismatch(accounts);
   bool cookie_jar_empty = accounts.size() == 0;
-  std::string account_id = signin_->GetAccountIdToUse();
-
-  // Iterate through list of accounts, looking for current sync account.
-  for (const auto& account : accounts) {
-    if (account.id == account_id) {
-      cookie_jar_mismatch = false;
-      break;
-    }
-  }
 
   DVLOG(1) << "Cookie jar mismatch: " << cookie_jar_mismatch;
   DVLOG(1) << "Cookie jar empty: " << cookie_jar_empty;
   engine_->OnCookieJarChanged(cookie_jar_mismatch, cookie_jar_empty, callback);
+}
+
+bool ProfileSyncService::HasCookieJarMismatch(
+    const std::vector<gaia::ListedAccount>& cookie_jar_accounts) {
+  std::string account_id = signin_->GetAccountIdToUse();
+  // Iterate through list of accounts, looking for current sync account.
+  for (const auto& account : cookie_jar_accounts) {
+    if (account.id == account_id)
+      return false;
+  }
+  return true;
 }
 
 void ProfileSyncService::AddProtocolEventObserver(
@@ -2113,7 +2070,7 @@ void ProfileSyncService::GetAllNodes(
     // If there's no engine available to fulfill the request, handle it here.
     for (ModelTypeSet::Iterator it = all_types.First(); it.Good(); it.Inc()) {
       helper->OnReceivedNodesForType(it.Get(),
-                                     base::MakeUnique<base::ListValue>());
+                                     std::make_unique<base::ListValue>());
     }
     return;
   }
@@ -2131,6 +2088,10 @@ void ProfileSyncService::GetAllNodes(
               it.Get(), GetUserShare()->directory.get()));
     }
   }
+}
+
+syncer::GlobalIdMapper* ProfileSyncService::GetGlobalIdMapper() const {
+  return sessions_sync_manager_->GetGlobalIdMapper();
 }
 
 base::WeakPtr<syncer::JsController> ProfileSyncService::GetJsController() {
@@ -2223,7 +2184,7 @@ const DataTypeStatusTable& ProfileSyncService::data_type_status_table() const {
 }
 
 void ProfileSyncService::OnInternalUnrecoverableError(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const std::string& message,
     bool delete_sync_database,
     UnrecoverableErrorReason reason) {
@@ -2245,11 +2206,6 @@ std::string ProfileSyncService::GetAccessTokenForTest() const {
 syncer::SyncableService* ProfileSyncService::GetSessionsSyncableService() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return sessions_sync_manager_.get();
-}
-
-syncer::SyncableService* ProfileSyncService::GetDeviceInfoSyncableService() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return device_info_sync_service_.get();
 }
 
 syncer::ModelTypeSyncBridge* ProfileSyncService::GetDeviceInfoSyncBridge() {
@@ -2305,22 +2261,12 @@ base::FilePath ProfileSyncService::GetDirectoryPathForTest() const {
 
 base::MessageLoop* ProfileSyncService::GetSyncLoopForTest() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (sync_thread_) {
-    return sync_thread_->message_loop();
-  } else {
-    return nullptr;
-  }
+  return sync_thread_ ? sync_thread_->message_loop() : nullptr;
 }
 
 syncer::SyncEncryptionHandler::Observer*
 ProfileSyncService::GetEncryptionObserverForTest() const {
   return crypto_.get();
-}
-
-void ProfileSyncService::RefreshTypesForTest(syncer::ModelTypeSet types) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (engine_initialized_)
-    engine_->RefreshTypesForTest(types);
 }
 
 void ProfileSyncService::RemoveClientFromServer() const {
@@ -2386,8 +2332,7 @@ std::string ProfileSyncService::unrecoverable_error_message() const {
   return unrecoverable_error_message_;
 }
 
-tracked_objects::Location ProfileSyncService::unrecoverable_error_location()
-    const {
+base::Location ProfileSyncService::unrecoverable_error_location() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   return unrecoverable_error_location_;
 }

@@ -4,8 +4,12 @@
   "interface_provider_specs": {
     "service_manager:connector": {
       "provides": {
-        "browser": [ 
+        "browser": [
           "content::mojom::Child",
+          "content::mojom::ChildControl",
+          "content::mojom::ChildHistogramFetcher",
+          "content::mojom::ChildHistogramFetcherFactory",
+          "content::mojom::ResourceUsageReporter",
           "IPC::mojom::ChannelBootstrap"
         ],
         "service_manager:service_factory": [
@@ -13,7 +17,13 @@
         ]
       },
       "requires": {
-        "content_browser": [ "plugin" ],
+        "*": [ "app" ],
+        "content_browser": [
+          "dwrite_font_proxy",
+          "field_trials",
+          "font_cache",
+          "plugin"
+        ],
         "device": [ "device:power_monitor" ],
         "ui": [ "discardable_memory" ]
       }

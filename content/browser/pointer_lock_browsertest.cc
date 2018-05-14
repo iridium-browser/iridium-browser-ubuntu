@@ -31,7 +31,9 @@ namespace {
 class MockRenderWidgetHostView : public RenderWidgetHostViewAura {
  public:
   MockRenderWidgetHostView(RenderWidgetHost* host, bool is_guest_view_hack)
-      : RenderWidgetHostViewAura(host, is_guest_view_hack),
+      : RenderWidgetHostViewAura(host,
+                                 is_guest_view_hack,
+                                 false /* is_mus_browser_plugin_guest */),
         host_(RenderWidgetHostImpl::From(host)) {}
   ~MockRenderWidgetHostView() override {
     if (mouse_locked_)
@@ -113,7 +115,7 @@ class PointerLockBrowserTest : public ContentBrowserTest {
     return static_cast<WebContentsImpl*>(shell()->web_contents());
   }
 
- private:
+ protected:
   MockPointerLockWebContentsDelegate web_contents_delegate_;
 };
 
@@ -177,6 +179,8 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockEventRouting) {
   RenderWidgetHostViewBase* child_view = static_cast<RenderWidgetHostViewBase*>(
       child->current_frame_host()->GetView());
 
+  WaitForChildFrameSurfaceReady(child->current_frame_host());
+
   // Request a pointer lock on the root frame's body.
   EXPECT_TRUE(ExecuteScript(root, "document.body.requestPointerLock()"));
 
@@ -195,9 +199,9 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockEventRouting) {
       "var x; var y; var mX; var mY; document.addEventListener('mousemove', "
       "function(e) {x = e.x; y = e.y; mX = e.movementX; mY = e.movementY;});"));
 
-  blink::WebMouseEvent mouse_event(blink::WebInputEvent::kMouseMove,
-                                   blink::WebInputEvent::kNoModifiers,
-                                   blink::WebInputEvent::kTimeStampForTesting);
+  blink::WebMouseEvent mouse_event(
+      blink::WebInputEvent::kMouseMove, blink::WebInputEvent::kNoModifiers,
+      blink::WebInputEvent::GetStaticTimeStampForTests());
   mouse_event.SetPositionInWidget(10, 11);
   mouse_event.movement_x = 12;
   mouse_event.movement_y = 13;
@@ -241,8 +245,8 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockEventRouting) {
       "var x; var y; var mX; var mY; document.addEventListener('mousemove', "
       "function(e) {x = e.x; y = e.y; mX = e.movementX; mY = e.movementY;});"));
 
-  gfx::Point transformed_point;
-  root_view->TransformPointToCoordSpaceForView(gfx::Point(0, 0), child_view,
+  gfx::PointF transformed_point;
+  root_view->TransformPointToCoordSpaceForView(gfx::PointF(0, 0), child_view,
                                                &transformed_point);
 
   mouse_event.SetPositionInWidget(-transformed_point.x() + 14,
@@ -320,6 +324,8 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockWheelEventRouting) {
   RenderWidgetHostViewBase* child_view = static_cast<RenderWidgetHostViewBase*>(
       child->current_frame_host()->GetView());
 
+  WaitForChildFrameSurfaceReady(child->current_frame_host());
+
   // Request a pointer lock on the root frame's body.
   EXPECT_TRUE(ExecuteScript(root, "document.body.requestPointerLock()"));
 
@@ -342,7 +348,7 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockWheelEventRouting) {
 
   blink::WebMouseWheelEvent wheel_event(
       blink::WebInputEvent::kMouseWheel, blink::WebInputEvent::kNoModifiers,
-      blink::WebInputEvent::kTimeStampForTesting);
+      blink::WebInputEvent::GetStaticTimeStampForTests());
   wheel_event.SetPositionInWidget(10, 11);
   wheel_event.delta_x = -12;
   wheel_event.delta_y = -13;
@@ -351,6 +357,19 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockWheelEventRouting) {
 
   // Make sure that the renderer handled the input event.
   root_observer.Wait();
+
+  if (root_view->wheel_scroll_latching_enabled()) {
+    // When wheel scroll latching is enabled all wheel events during a scroll
+    // sequence will be sent to a single target. Send a wheel end event to the
+    // current target before sending wheel events to a new target.
+    wheel_event.delta_x = 0;
+    wheel_event.delta_y = 0;
+    wheel_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
+    router->RouteMouseWheelEvent(root_view, &wheel_event, ui::LatencyInfo());
+
+    // Make sure that the renderer handled the input event.
+    root_observer.Wait();
+  }
 
   int x, y, deltaX, deltaY;
   EXPECT_TRUE(ExecuteScriptAndExtractInt(
@@ -388,14 +407,16 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockWheelEventRouting) {
   MainThreadFrameObserver child_observer(child_view->GetRenderWidgetHost());
   child_observer.Wait();
 
-  gfx::Point transformed_point;
-  root_view->TransformPointToCoordSpaceForView(gfx::Point(0, 0), child_view,
+  gfx::PointF transformed_point;
+  root_view->TransformPointToCoordSpaceForView(gfx::PointF(0, 0), child_view,
                                                &transformed_point);
 
   wheel_event.SetPositionInWidget(-transformed_point.x() + 14,
                                   -transformed_point.y() + 15);
   wheel_event.delta_x = -16;
   wheel_event.delta_y = -17;
+  if (root_view->wheel_scroll_latching_enabled())
+    wheel_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
   // We use root_view intentionally as the RenderWidgetHostInputEventRouter is
   // responsible for correctly routing the event to the child frame.
   router->RouteMouseWheelEvent(root_view, &wheel_event, ui::LatencyInfo());

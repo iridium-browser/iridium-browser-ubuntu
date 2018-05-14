@@ -10,6 +10,7 @@
 #include "core/fxcrt/fx_codepage.h"
 #include "core/fxge/apple/apple_int.h"
 #include "core/fxge/cfx_folderfontinfo.h"
+#include "core/fxge/cfx_fontmgr.h"
 #include "core/fxge/cfx_gemodule.h"
 #include "core/fxge/ifx_systemfontinfo.h"
 #include "third_party/base/ptr_util.h"
@@ -44,33 +45,30 @@ class CFX_MacFontInfo : public CFX_FolderFontInfo {
                 bool bItalic,
                 int charset,
                 int pitch_family,
-                const char* family,
-                int& iExact) override;
+                const char* family) override;
 };
 
 const char JAPAN_GOTHIC[] = "Hiragino Kaku Gothic Pro W6";
 const char JAPAN_MINCHO[] = "Hiragino Mincho Pro W6";
 
-void GetJapanesePreference(CFX_ByteString* face, int weight, int pitch_family) {
-  if (face->Find("Gothic") >= 0) {
+void GetJapanesePreference(ByteString* face, int weight, int pitch_family) {
+  if (face->Contains("Gothic")) {
     *face = JAPAN_GOTHIC;
     return;
   }
-  *face = ((pitch_family & FXFONT_FF_ROMAN) || weight <= 400) ? JAPAN_MINCHO
-                                                              : JAPAN_GOTHIC;
+  *face = (FontFamilyIsRoman(pitch_family) || weight <= 400) ? JAPAN_MINCHO
+                                                             : JAPAN_GOTHIC;
 }
 
 void* CFX_MacFontInfo::MapFont(int weight,
                                bool bItalic,
                                int charset,
                                int pitch_family,
-                               const char* cstr_face,
-                               int& iExact) {
-  CFX_ByteString face = cstr_face;
-  for (size_t i = 0; i < FX_ArraySize(g_Base14Substs); ++i) {
-    if (face == CFX_ByteStringC(g_Base14Substs[i].m_pName)) {
-      face = g_Base14Substs[i].m_pSubstName;
-      iExact = true;
+                               const char* cstr_face) {
+  ByteString face = cstr_face;
+  for (const auto& sub : g_Base14Substs) {
+    if (face == ByteStringView(sub.m_pName)) {
+      face = sub.m_pSubstName;
       return GetFont(face.c_str());
     }
   }
@@ -82,8 +80,8 @@ void* CFX_MacFontInfo::MapFont(int weight,
   // Times New Roman. A more sophisticated approach would be to find all the
   // fonts in |m_FontList| with |face| in the name, and examine the fonts to
   // see which best matches the requested characteristics.
-  if (face.Find("Bold") == -1 && face.Find("Italic") == -1) {
-    CFX_ByteString new_face = face;
+  if (!face.Contains("Bold") && !face.Contains("Italic")) {
+    ByteString new_face = face;
     if (weight > 400)
       new_face += " Bold";
     if (bItalic)
@@ -97,7 +95,7 @@ void* CFX_MacFontInfo::MapFont(int weight,
   if (it != m_FontList.end())
     return it->second.get();
 
-  if (charset == FX_CHARSET_ANSI && (pitch_family & FXFONT_FF_FIXEDPITCH))
+  if (charset == FX_CHARSET_ANSI && FontFamilyIsFixedPitch(pitch_family))
     return GetFont("Courier New");
 
   if (charset == FX_CHARSET_ANSI || charset == FX_CHARSET_Symbol)

@@ -31,17 +31,16 @@
 #include "platform/network/HTTPHeaderMap.h"
 
 #include <memory>
-#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
-HTTPHeaderMap::HTTPHeaderMap() {}
+HTTPHeaderMap::HTTPHeaderMap() = default;
 
-HTTPHeaderMap::~HTTPHeaderMap() {}
+HTTPHeaderMap::~HTTPHeaderMap() = default;
 
 std::unique_ptr<CrossThreadHTTPHeaderMapData> HTTPHeaderMap::CopyData() const {
   std::unique_ptr<CrossThreadHTTPHeaderMapData> data =
-      WTF::MakeUnique<CrossThreadHTTPHeaderMapData>();
+      std::make_unique<CrossThreadHTTPHeaderMapData>();
   data->ReserveInitialCapacity(size());
 
   HTTPHeaderMap::const_iterator end_it = end();

@@ -5,6 +5,8 @@
 #ifndef V8_DEBUG_DEBUG_SCOPES_H_
 #define V8_DEBUG_DEBUG_SCOPES_H_
 
+#include <vector>
+
 #include "src/debug/debug-frames.h"
 #include "src/frames.h"
 
@@ -75,6 +77,11 @@ class ScopeIterator {
   // Populate the set with collected non-local variable names.
   Handle<StringSet> GetNonLocals();
 
+  // Return function which represents closure for current scope.
+  Handle<JSFunction> GetClosure();
+  int start_position();
+  int end_position();
+
 #ifdef DEBUG
   // Debug print of the content of the current scope.
   void DebugPrint();
@@ -96,7 +103,7 @@ class ScopeIterator {
   FrameInspector* const frame_inspector_ = nullptr;
   Handle<JSGeneratorObject> generator_;
   Handle<Context> context_;
-  List<ExtendedScopeInfo> nested_scope_chain_;
+  std::vector<ExtendedScopeInfo> nested_scope_chain_;
   Handle<StringSet> non_locals_;
   bool seen_script_scope_;
 
@@ -168,6 +175,9 @@ class ScopeIterator {
   // and will be returned, but no inner function scopes.
   void GetNestedScopeChain(Isolate* isolate, Scope* scope,
                            int statement_position);
+
+  bool HasNestedScopeChain();
+  ExtendedScopeInfo& LastNestedScopeChain();
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ScopeIterator);
 };

@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/stl_util.h"
-#include "net/base/completion_callback.h"
 #include "net/spdy/chromium/spdy_stream.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,7 +20,7 @@ ClosingDelegate::ClosingDelegate(
   DCHECK(stream_);
 }
 
-ClosingDelegate::~ClosingDelegate() {}
+ClosingDelegate::~ClosingDelegate() = default;
 
 void ClosingDelegate::OnHeadersSent() {}
 
@@ -51,8 +50,7 @@ StreamDelegateBase::StreamDelegateBase(
       send_headers_completed_(false) {
 }
 
-StreamDelegateBase::~StreamDelegateBase() {
-}
+StreamDelegateBase::~StreamDelegateBase() = default;
 
 void StreamDelegateBase::OnHeadersSent() {
   stream_id_ = stream_->stream_id();
@@ -114,16 +112,14 @@ StreamDelegateDoNothing::StreamDelegateDoNothing(
     const base::WeakPtr<SpdyStream>& stream)
     : StreamDelegateBase(stream) {}
 
-StreamDelegateDoNothing::~StreamDelegateDoNothing() {
-}
+StreamDelegateDoNothing::~StreamDelegateDoNothing() = default;
 
 StreamDelegateSendImmediate::StreamDelegateSendImmediate(
     const base::WeakPtr<SpdyStream>& stream,
     SpdyStringPiece data)
     : StreamDelegateBase(stream), data_(data) {}
 
-StreamDelegateSendImmediate::~StreamDelegateSendImmediate() {
-}
+StreamDelegateSendImmediate::~StreamDelegateSendImmediate() = default;
 
 void StreamDelegateSendImmediate::OnHeadersReceived(
     const SpdyHeaderBlock& response_headers) {
@@ -139,8 +135,7 @@ StreamDelegateWithBody::StreamDelegateWithBody(
     SpdyStringPiece data)
     : StreamDelegateBase(stream), buf_(new StringIOBuffer(data.as_string())) {}
 
-StreamDelegateWithBody::~StreamDelegateWithBody() {
-}
+StreamDelegateWithBody::~StreamDelegateWithBody() = default;
 
 void StreamDelegateWithBody::OnHeadersSent() {
   StreamDelegateBase::OnHeadersSent();
@@ -152,8 +147,7 @@ StreamDelegateCloseOnHeaders::StreamDelegateCloseOnHeaders(
     : StreamDelegateBase(stream) {
 }
 
-StreamDelegateCloseOnHeaders::~StreamDelegateCloseOnHeaders() {
-}
+StreamDelegateCloseOnHeaders::~StreamDelegateCloseOnHeaders() = default;
 
 void StreamDelegateCloseOnHeaders::OnHeadersReceived(
     const SpdyHeaderBlock& response_headers) {

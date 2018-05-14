@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -27,6 +28,10 @@ class AnnotationsForm(forms.ModelForm):
     fields = ['failure_category', 'failure_message', 'blame_url', 'notes',
               'deleted']
 
+class FinalizeForm(forms.Form):
+  """Form to add/remove an annotations_finalized buildMessage."""
+  finalize = forms.BooleanField(
+      required=False, initial=False, label='Annotations Finalized')
 
 # NB: Explicitly set can_delete=False for clarity.
 # Due to a bug in (< django-1.7), models get deleted when the formset is saved

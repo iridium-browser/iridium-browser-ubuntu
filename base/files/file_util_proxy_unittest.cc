@@ -28,14 +28,14 @@ class FileUtilProxyTest : public testing::Test {
 
   void DidFinish(File::Error error) {
     error_ = error;
-    MessageLoop::current()->QuitWhenIdle();
+    RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
   void DidGetFileInfo(File::Error error,
                       const File::Info& file_info) {
     error_ = error;
     file_info_ = file_info;
-    MessageLoop::current()->QuitWhenIdle();
+    RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
  protected:
@@ -65,7 +65,7 @@ TEST_F(FileUtilProxyTest, GetFileInfo_File) {
   // Run.
   FileUtilProxy::GetFileInfo(
       file_task_runner(), TestPath(),
-      Bind(&FileUtilProxyTest::DidGetFileInfo, weak_factory_.GetWeakPtr()));
+      BindOnce(&FileUtilProxyTest::DidGetFileInfo, weak_factory_.GetWeakPtr()));
   RunLoop().Run();
 
   // Verify.
@@ -87,7 +87,7 @@ TEST_F(FileUtilProxyTest, GetFileInfo_Directory) {
   // Run.
   FileUtilProxy::GetFileInfo(
       file_task_runner(), TestPath(),
-      Bind(&FileUtilProxyTest::DidGetFileInfo, weak_factory_.GetWeakPtr()));
+      BindOnce(&FileUtilProxyTest::DidGetFileInfo, weak_factory_.GetWeakPtr()));
   RunLoop().Run();
 
   // Verify.
@@ -107,7 +107,7 @@ TEST_F(FileUtilProxyTest, Touch) {
 
   FileUtilProxy::Touch(
       file_task_runner(), TestPath(), last_accessed_time, last_modified_time,
-      Bind(&FileUtilProxyTest::DidFinish, weak_factory_.GetWeakPtr()));
+      BindOnce(&FileUtilProxyTest::DidFinish, weak_factory_.GetWeakPtr()));
   RunLoop().Run();
   EXPECT_EQ(File::FILE_OK, error_);
 

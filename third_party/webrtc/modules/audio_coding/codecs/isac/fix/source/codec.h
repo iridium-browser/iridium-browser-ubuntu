@@ -16,10 +16,10 @@
  *
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_CODEC_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_CODEC_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_CODEC_H_
+#define MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_CODEC_H_
 
-#include "structs.h"
+#include "modules/audio_coding/codecs/isac/fix/source/structs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -225,4 +225,4 @@ extern FilterMaLoopFix WebRtcIsacfix_FilterMaLoopFix;
 }  // extern "C"
 #endif
 
-#endif /* WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_CODEC_H_ */
+#endif /* MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_CODEC_H_ */

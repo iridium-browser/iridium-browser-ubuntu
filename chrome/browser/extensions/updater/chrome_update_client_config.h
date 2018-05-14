@@ -7,21 +7,26 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "components/component_updater/configurator_impl.h"
-#include "extensions/browser/updater/update_client_config.h"
+#include "components/update_client/configurator.h"
 
 namespace content {
 class BrowserContext;
 }
 
+namespace update_client {
+class ActivityDataService;
+}
+
 namespace extensions {
 
-class ChromeUpdateClientConfig : public UpdateClientConfig {
+class ChromeUpdateClientConfig : public update_client::Configurator {
  public:
   explicit ChromeUpdateClientConfig(content::BrowserContext* context);
 
@@ -39,14 +44,15 @@ class ChromeUpdateClientConfig : public UpdateClientConfig {
   std::string GetOSLongName() const override;
   std::string ExtraRequestParams() const override;
   std::string GetDownloadPreference() const override;
-  net::URLRequestContextGetter* RequestContext() const override;
-  scoped_refptr<update_client::OutOfProcessPatcher> CreateOutOfProcessPatcher()
+  scoped_refptr<net::URLRequestContextGetter> RequestContext() const override;
+  std::unique_ptr<service_manager::Connector> CreateServiceManagerConnector()
       const override;
   bool EnabledDeltas() const override;
   bool EnabledComponentUpdates() const override;
   bool EnabledBackgroundDownloader() const override;
   bool EnabledCupSigning() const override;
   PrefService* GetPrefService() const override;
+  update_client::ActivityDataService* GetActivityDataService() const override;
   bool IsPerUserInstall() const override;
   std::vector<uint8_t> GetRunActionKeyHash() const override;
 
@@ -55,7 +61,10 @@ class ChromeUpdateClientConfig : public UpdateClientConfig {
   ~ChromeUpdateClientConfig() override;
 
  private:
+  content::BrowserContext* context_ = nullptr;
   component_updater::ConfiguratorImpl impl_;
+  PrefService* pref_service_;
+  std::unique_ptr<update_client::ActivityDataService> activity_data_service_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeUpdateClientConfig);
 };

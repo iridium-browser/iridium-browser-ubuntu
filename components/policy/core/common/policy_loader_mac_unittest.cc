@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "components/policy/core/common/policy_loader_mac.h"
+#include <memory>
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -12,7 +13,6 @@
 #include "base/files/file_path.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
@@ -150,7 +150,8 @@ class PolicyLoaderMacTest : public PolicyTestBase {
   void SetUp() override {
     PolicyTestBase::SetUp();
     std::unique_ptr<AsyncPolicyLoader> loader(
-        new PolicyLoaderMac(loop_.task_runner(), base::FilePath(), prefs_));
+        new PolicyLoaderMac(scoped_task_environment_.GetMainThreadTaskRunner(),
+                            base::FilePath(), prefs_));
     provider_.reset(
         new AsyncPolicyProvider(&schema_registry_, std::move(loader)));
     provider_->Init(&schema_registry_);
@@ -179,8 +180,7 @@ TEST_F(PolicyLoaderMacTest, Invalid) {
 
   // Make the provider read the updated |prefs_|.
   provider_->RefreshPolicies();
-  ASSERT_TRUE(base::MessageLoopForIO::IsCurrent());
-  base::RunLoop().RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
   const PolicyBundle kEmptyBundle;
   EXPECT_TRUE(provider_->policies().Equals(kEmptyBundle));
 }
@@ -195,13 +195,12 @@ TEST_F(PolicyLoaderMacTest, TestNonForcedValue) {
 
   // Make the provider read the updated |prefs_|.
   provider_->RefreshPolicies();
-  ASSERT_TRUE(base::MessageLoopForIO::IsCurrent());
-  base::RunLoop().RunUntilIdle();
+  scoped_task_environment_.RunUntilIdle();
   PolicyBundle expected_bundle;
   expected_bundle.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
       .Set(test_keys::kKeyString, POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_USER,
            POLICY_SOURCE_PLATFORM,
-           base::MakeUnique<base::Value>("string value"), nullptr);
+           std::make_unique<base::Value>("string value"), nullptr);
   EXPECT_TRUE(provider_->policies().Equals(expected_bundle));
 }
 

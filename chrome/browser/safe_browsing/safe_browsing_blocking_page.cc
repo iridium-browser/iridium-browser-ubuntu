@@ -6,19 +6,22 @@
 
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 
+#include <memory>
+
 #include "base/lazy_instance.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/interstitials/chrome_controller_client.h"
 #include "chrome/browser/interstitials/chrome_metrics_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
+#include "chrome/browser/safe_browsing/safe_browsing_controller_client.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/browser/threat_details.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/triggers/trigger_manager.h"
+#include "components/security_interstitials/content/security_interstitial_controller_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_entry.h"
@@ -33,15 +36,7 @@ using security_interstitials::SecurityInterstitialControllerClient;
 namespace safe_browsing {
 
 namespace {
-
-// Constants for the Experience Sampling instrumentation.
-const char kEventNameMalware[] = "safebrowsing_interstitial_";
-const char kEventNameHarmful[] = "harmful_interstitial_";
-const char kEventNamePhishing[] = "phishing_interstitial_";
-const char kEventNameOther[] = "safebrowsing_other_interstitial_";
-
 const char kHelpCenterLink[] = "cpn_safe_browsing";
-
 }  // namespace
 
 // static
@@ -76,8 +71,9 @@ class SafeBrowsingBlockingPageFactoryImpl
         is_extended_reporting_opt_in_allowed,
         web_contents->GetBrowserContext()->IsOffTheRecord(),
         IsExtendedReportingEnabled(*prefs), IsScout(*prefs),
-        is_proceed_anyway_disabled,
+        IsExtendedReportingPolicyManaged(*prefs), is_proceed_anyway_disabled,
         true,  // should_open_links_in_new_tab
+        true,  // always_show_back_to_safety
         kHelpCenterLink);
 
     return new SafeBrowsingBlockingPage(ui_manager, web_contents,
@@ -98,7 +94,7 @@ static base::LazyInstance<SafeBrowsingBlockingPageFactoryImpl>::DestructorAtExit
     g_safe_browsing_blocking_page_factory_impl = LAZY_INSTANCE_INITIALIZER;
 
 // static
-content::InterstitialPageDelegate::TypeID
+const content::InterstitialPageDelegate::TypeID
     SafeBrowsingBlockingPage::kTypeForTesting =
         &SafeBrowsingBlockingPage::kTypeForTesting;
 
@@ -249,21 +245,6 @@ void SafeBrowsingBlockingPage::ShowBlockingPage(
 }
 
 // static
-std::string SafeBrowsingBlockingPage::GetSamplingEventName(
-    BaseSafeBrowsingErrorUI::SBInterstitialReason interstitial_reason) {
-  switch (interstitial_reason) {
-    case BaseSafeBrowsingErrorUI::SB_REASON_MALWARE:
-      return kEventNameMalware;
-    case BaseSafeBrowsingErrorUI::SB_REASON_HARMFUL:
-      return kEventNameHarmful;
-    case BaseSafeBrowsingErrorUI::SB_REASON_PHISHING:
-      return kEventNamePhishing;
-    default:
-      return kEventNameOther;
-  }
-}
-
-// static
 std::unique_ptr<SecurityInterstitialControllerClient>
 SafeBrowsingBlockingPage::CreateControllerClient(
     WebContents* web_contents,
@@ -274,12 +255,11 @@ SafeBrowsingBlockingPage::CreateControllerClient(
   DCHECK(profile);
 
   std::unique_ptr<ChromeMetricsHelper> metrics_helper =
-      base::MakeUnique<ChromeMetricsHelper>(
-          web_contents, unsafe_resources[0].url,
-          GetReportingInfo(unsafe_resources),
-          GetSamplingEventName(GetInterstitialReason(unsafe_resources)));
+      std::make_unique<ChromeMetricsHelper>(web_contents,
+                                            unsafe_resources[0].url,
+                                            GetReportingInfo(unsafe_resources));
 
-  return base::MakeUnique<SecurityInterstitialControllerClient>(
+  return std::make_unique<SafeBrowsingControllerClient>(
       web_contents, std::move(metrics_helper), profile->GetPrefs(),
       ui_manager->app_locale(), ui_manager->default_safe_page());
 }

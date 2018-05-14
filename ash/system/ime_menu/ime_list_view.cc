@@ -15,7 +15,6 @@
 #include "ash/system/tray/system_menu_button.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_details_view.h"
-#include "ash/system/tray/tray_popup_header_button.h"
 #include "ash/system/tray/tray_popup_item_style.h"
 #include "ash/system/tray/tray_popup_utils.h"
 #include "ash/system/tray/tri_view.h"
@@ -59,7 +58,7 @@ class ImeListItemView : public ActionableView {
 
     TriView* tri_view = TrayPopupUtils::CreateDefaultRowView();
     AddChildView(tri_view);
-    SetLayoutManager(new views::FillLayout);
+    SetLayoutManager(std::make_unique<views::FillLayout>());
 
     // |id_label| contains the IME short name (e.g., 'US', 'GB', 'IT').
     views::Label* id_label = TrayPopupUtils::CreateDefaultLabel();
@@ -101,7 +100,7 @@ class ImeListItemView : public ActionableView {
     SetAccessibleName(label_view->text());
   }
 
-  ~ImeListItemView() override {}
+  ~ImeListItemView() override = default;
 
   // ActionableView:
   bool PerformAction(const ui::Event& event) override {
@@ -120,10 +119,9 @@ class ImeListItemView : public ActionableView {
 
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
     ActionableView::GetAccessibleNodeData(node_data);
-    node_data->role = ui::AX_ROLE_CHECK_BOX;
-    const ui::AXCheckedState checked_state =
-        selected_ ? ui::AX_CHECKED_STATE_TRUE : ui::AX_CHECKED_STATE_FALSE;
-    node_data->AddIntAttribute(ui::AX_ATTR_CHECKED_STATE, checked_state);
+    node_data->role = ax::mojom::Role::kCheckBox;
+    node_data->SetCheckedState(selected_ ? ax::mojom::CheckedState::kTrue
+                                         : ax::mojom::CheckedState::kFalse);
   }
 
  private:
@@ -138,18 +136,18 @@ class ImeListItemView : public ActionableView {
 // Contains a toggle button to let the user enable/disable whether the
 // on-screen keyboard should be shown when focusing a textfield. This row is
 // shown only under certain conditions, e.g., when an external keyboard is
-// attached and the user is in TouchView mode.
+// attached and the user is in TabletMode mode.
 class KeyboardStatusRow : public views::View {
  public:
-  KeyboardStatusRow() {}
-  ~KeyboardStatusRow() override {}
+  KeyboardStatusRow() = default;
+  ~KeyboardStatusRow() override = default;
 
   views::ToggleButton* toggle() const { return toggle_; }
   bool is_toggled() const { return toggle_->is_on(); }
 
   void Init(views::ButtonListener* listener) {
     TrayPopupUtils::ConfigureAsStickyHeader(this);
-    SetLayoutManager(new views::FillLayout);
+    SetLayoutManager(std::make_unique<views::FillLayout>());
 
     TriView* tri_view = TrayPopupUtils::CreateDefaultRowView();
     AddChildView(tri_view);
@@ -189,7 +187,7 @@ ImeListView::ImeListView(SystemTrayItem* owner)
       should_focus_ime_after_selection_with_keyboard_(false),
       current_ime_view_(nullptr) {}
 
-ImeListView::~ImeListView() {}
+ImeListView::~ImeListView() = default;
 
 void ImeListView::Init(bool show_keyboard_toggle,
                        SingleImeBehavior single_ime_behavior) {
@@ -361,7 +359,7 @@ void ImeListView::FocusCurrentImeIfNeeded() {
 ImeListViewTestApi::ImeListViewTestApi(ImeListView* ime_list_view)
     : ime_list_view_(ime_list_view) {}
 
-ImeListViewTestApi::~ImeListViewTestApi() {}
+ImeListViewTestApi::~ImeListViewTestApi() = default;
 
 views::View* ImeListViewTestApi::GetToggleView() const {
   return ime_list_view_->keyboard_status_row_->toggle();

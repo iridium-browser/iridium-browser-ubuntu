@@ -4,22 +4,24 @@
 
 #include "content/browser/zygote_host/zygote_host_impl_linux.h"
 
+#include <stdlib.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 
 #include "base/allocator/allocator_extension.h"
 #include "base/files/file_enumerator.h"
-#include "base/posix/unix_domain_socket_linux.h"
+#include "base/posix/unix_domain_socket.h"
 #include "base/process/kill.h"
 #include "base/process/memory.h"
 #include "base/strings/string_number_conversions.h"
-#include "content/browser/renderer_host/render_sandbox_host_linux.h"
-#include "content/common/sandbox_linux/sandbox_linux.h"
 #include "content/common/zygote_commands_linux.h"
 #include "content/public/common/content_switches.h"
 #include "sandbox/linux/services/credentials.h"
 #include "sandbox/linux/services/namespace_sandbox.h"
 #include "sandbox/linux/suid/client/setuid_sandbox_host.h"
 #include "sandbox/linux/suid/common/sandbox.h"
+#include "services/service_manager/sandbox/linux/sandbox_linux.h"
+#include "services/service_manager/sandbox/switches.h"
 
 namespace content {
 
@@ -74,6 +76,20 @@ void ZygoteHostImpl::Init(const base::CommandLine& command_line) {
     return;
   }
 
+  // Exit early if running as root without --no-sandbox. See crbug.com/638180.
+  // When running as root with the sandbox enabled, the browser process
+  // crashes on zygote initialization. Running as root with the sandbox
+  // is not supported, and if Chrome were able to display UI it would be showing
+  // an error message. With the zygote crashing it doesn't even get to that,
+  // so print an error message on the console.
+  uid_t uid = 0;
+  gid_t gid = 0;
+  if (!sandbox::Credentials::GetRESIds(&uid, &gid) || uid == 0) {
+    LOG(ERROR) << "Running as root without --" << switches::kNoSandbox
+               << " is not supported. See https://crbug.com/638180.";
+    exit(EXIT_FAILURE);
+  }
+
   {
     std::unique_ptr<sandbox::SetuidSandboxHost> setuid_sandbox_host(
         sandbox::SetuidSandboxHost::Create());
@@ -94,7 +110,8 @@ void ZygoteHostImpl::Init(const base::CommandLine& command_line) {
                     "OOM scores.";
     }
 #endif
-  } else if (!command_line.HasSwitch(switches::kDisableSetuidSandbox) &&
+  } else if (!command_line.HasSwitch(
+                 service_manager::switches::kDisableSetuidSandbox) &&
              !sandbox_binary_.empty()) {
     use_suid_sandbox_ = true;
 
@@ -133,31 +150,27 @@ int ZygoteHostImpl::GetRendererSandboxStatus() const {
   return renderer_sandbox_status_;
 }
 
-pid_t ZygoteHostImpl::LaunchZygote(base::CommandLine* cmd_line,
-                                   base::ScopedFD* control_fd) {
+pid_t ZygoteHostImpl::LaunchZygote(
+    base::CommandLine* cmd_line,
+    base::ScopedFD* control_fd,
+    base::FileHandleMappingVector additional_remapped_fds) {
   int fds[2];
   CHECK_EQ(0, socketpair(AF_UNIX, SOCK_SEQPACKET, 0, fds));
   CHECK(base::UnixDomainSocket::EnableReceiveProcessId(fds[0]));
 
-  base::FileHandleMappingVector fds_to_map;
-  fds_to_map.push_back(std::make_pair(fds[1], kZygoteSocketPairFd));
-
-  // Start up the sandbox host process and get the file descriptor for the
-  // renderers to talk to it.
-  const int sfd = RenderSandboxHostLinux::GetInstance()->GetRendererSocket();
-  fds_to_map.push_back(std::make_pair(sfd, GetSandboxFD()));
-
   base::LaunchOptions options;
+  options.fds_to_remap = std::move(additional_remapped_fds);
+  options.fds_to_remap.emplace_back(fds[1], kZygoteSocketPairFd);
+
   base::ScopedFD dummy_fd;
   if (use_suid_sandbox_) {
     std::unique_ptr<sandbox::SetuidSandboxHost> sandbox_host(
         sandbox::SetuidSandboxHost::Create());
     sandbox_host->PrependWrapper(cmd_line);
-    sandbox_host->SetupLaunchOptions(&options, &fds_to_map, &dummy_fd);
+    sandbox_host->SetupLaunchOptions(&options, &dummy_fd);
     sandbox_host->SetupLaunchEnvironment();
   }
 
-  options.fds_to_remap = &fds_to_map;
   base::Process process =
       use_namespace_sandbox_
           ? sandbox::NamespaceSandbox::LaunchProcess(*cmd_line, options)

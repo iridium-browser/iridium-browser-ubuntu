@@ -32,6 +32,8 @@ using QuicLinkedHashMap = QuicLinkedHashMapImpl<Key, Value>;
 // Used for maps that are typically small, then it is faster than (for example)
 // hash_map which is optimized for large data sets. QuicSmallMap upgrades itself
 // automatically to a QuicSmallMapImpl-specified map when it runs out of space.
+//
+// DOES NOT GUARANTEE POINTER OR ITERATOR STABILITY!
 template <typename Key, typename Value, int Size>
 using QuicSmallMap = QuicSmallMapImpl<Key, Value, Size>;
 
@@ -39,6 +41,20 @@ using QuicSmallMap = QuicSmallMapImpl<Key, Value, Size>;
 // and mutually disjoint intervals.
 template <typename T>
 using QuicIntervalSet = QuicIntervalSetImpl<T>;
+
+// Represents a simple queue which may be backed by a list or
+// a flat circular buffer.
+//
+// DOES NOT GUARANTEE POINTER OR ITERATOR STABILITY!
+template <typename T>
+using QuicQueue = QuicQueueImpl<T>;
+
+// Represents a double-ended queue which may be backed by a list or
+// a flat circular buffer.
+//
+// DOES NOT GUARANTEE POINTER OR ITERATOR STABILITY!
+template <typename T>
+using QuicDeque = QuicDequeImpl<T>;
 
 }  // namespace net
 

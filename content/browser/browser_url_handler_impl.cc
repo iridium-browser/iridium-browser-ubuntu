@@ -12,6 +12,7 @@
 #include "content/browser/webui/web_ui_impl.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/common/url_utils.h"
 #include "url/gurl.h"
 #include "net/url_request/url_request.h"
 
@@ -47,7 +48,6 @@ static bool HandleViewSource(GURL* url, BrowserContext* browser_context) {
         url::kHttpScheme,
         url::kHttpsScheme,
         url::kFtpScheme,
-        kChromeDevToolsScheme,
         kChromeUIScheme,
         url::kFileScheme,
         url::kFileSystemScheme
@@ -102,7 +102,7 @@ BrowserURLHandler* BrowserURLHandler::GetInstance() {
 // static
 BrowserURLHandler::URLHandler BrowserURLHandler::null_handler() {
   // Required for VS2010: http://connect.microsoft.com/VisualStudio/feedback/details/520043/error-converting-from-null-to-a-pointer-type-in-std-pair
-  return NULL;
+  return nullptr;
 }
 
 // static

@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "components/policy/core/common/schema_internal.h"
@@ -154,7 +153,7 @@ void TestSchemaValidationHelper(const std::string& source,
 
   // Test that Schema::Validate() works as expected.
   error = kNoErrorReturned;
-  bool returned = schema.Validate(value, strategy, NULL, &error);
+  bool returned = schema.Validate(value, strategy, nullptr, &error);
   ASSERT_EQ(expected_return_value, returned) << source << ": " << error;
 
   // Test that Schema::Normalize() will return the same value as
@@ -163,20 +162,20 @@ void TestSchemaValidationHelper(const std::string& source,
   std::unique_ptr<base::Value> cloned_value(value.DeepCopy());
   bool touched = false;
   returned =
-      schema.Normalize(cloned_value.get(), strategy, NULL, &error, &touched);
+      schema.Normalize(cloned_value.get(), strategy, nullptr, &error, &touched);
   EXPECT_EQ(expected_return_value, returned) << source << ": " << error;
 
-  bool strictly_valid = schema.Validate(value, SCHEMA_STRICT, NULL, &error);
+  bool strictly_valid = schema.Validate(value, SCHEMA_STRICT, nullptr, &error);
   EXPECT_EQ(touched, !strictly_valid && returned) << source;
 
   // Test that Schema::Normalize() have actually dropped invalid and unknown
   // properties.
   if (expected_return_value) {
     EXPECT_TRUE(
-        schema.Validate(*cloned_value.get(), SCHEMA_STRICT, NULL, &error))
+        schema.Validate(*cloned_value.get(), SCHEMA_STRICT, nullptr, &error))
         << source;
-    EXPECT_TRUE(
-        schema.Normalize(cloned_value.get(), SCHEMA_STRICT, NULL, &error, NULL))
+    EXPECT_TRUE(schema.Normalize(cloned_value.get(), SCHEMA_STRICT, nullptr,
+                                 &error, nullptr))
         << source;
   }
 }
@@ -620,7 +619,7 @@ TEST(SchemaTest, Validate) {
     bundle.Clear();
     base::ListValue list;
     list.AppendInteger(1);
-    bundle.Set("Array", base::MakeUnique<base::Value>(list));
+    bundle.SetKey("Array", std::move(list));
     TestSchemaValidation(schema, bundle, SCHEMA_STRICT, false);
   }
 
@@ -629,7 +628,7 @@ TEST(SchemaTest, Validate) {
     bundle.Clear();
     base::DictionaryValue dict;
     dict.SetString("one", "one");
-    bundle.Set("Object", base::MakeUnique<base::Value>(dict));
+    bundle.SetKey("Object", std::move(dict));
     TestSchemaValidation(schema, bundle, SCHEMA_STRICT, false);
   }
 
@@ -642,7 +641,7 @@ TEST(SchemaTest, Validate) {
   bundle.Clear();
   bundle.SetBoolean("Boolean", true);
   bundle.SetInteger("Integer", 123);
-  bundle.Set("Null", base::MakeUnique<base::Value>());
+  bundle.Set("Null", std::make_unique<base::Value>());
   bundle.SetDouble("Number", 3.14);
   bundle.SetString("String", "omg");
 
@@ -650,7 +649,7 @@ TEST(SchemaTest, Validate) {
     base::ListValue list;
     list.AppendString("a string");
     list.AppendString("another string");
-    bundle.Set("Array", base::MakeUnique<base::Value>(list));
+    bundle.SetKey("Array", std::move(list));
   }
 
   {
@@ -658,9 +657,9 @@ TEST(SchemaTest, Validate) {
     dict.SetString("one", "string");
     dict.SetInteger("two", 2);
     base::ListValue list;
-    list.GetList().push_back(dict);
-    list.GetList().push_back(dict);
-    bundle.Set("ArrayOfObjects", base::MakeUnique<base::Value>(list));
+    list.GetList().push_back(dict.Clone());
+    list.GetList().push_back(std::move(dict));
+    bundle.SetKey("ArrayOfObjects", std::move(list));
   }
 
   {
@@ -668,9 +667,9 @@ TEST(SchemaTest, Validate) {
     list.AppendString("a string");
     list.AppendString("another string");
     base::ListValue listlist;
-    listlist.GetList().push_back(list);
-    listlist.GetList().push_back(list);
-    bundle.Set("ArrayOfArray", base::MakeUnique<base::Value>(listlist));
+    listlist.GetList().push_back(list.Clone());
+    listlist.GetList().push_back(std::move(list));
+    bundle.SetKey("ArrayOfArray", std::move(listlist));
   }
 
   {
@@ -679,7 +678,7 @@ TEST(SchemaTest, Validate) {
     dict.SetInteger("two", 2);
     dict.SetString("additionally", "a string");
     dict.SetString("and also", "another string");
-    bundle.Set("Object", base::MakeUnique<base::Value>(dict));
+    bundle.SetKey("Object", std::move(dict));
   }
 
   bundle.SetInteger("IntegerWithEnums", 1);
@@ -729,7 +728,7 @@ TEST(SchemaTest, Validate) {
   TestSchemaValidation(schema, bundle, SCHEMA_ALLOW_UNKNOWN_TOPLEVEL, true);
   TestSchemaValidation(schema, bundle, SCHEMA_ALLOW_UNKNOWN, true);
   TestSchemaValidationWithPath(schema, bundle, "");
-  bundle.Remove("boom", NULL);
+  bundle.Remove("boom", nullptr);
 
   // Invalid top level property.
   bundle.SetInteger("Boolean", 12345);
@@ -753,7 +752,7 @@ TEST(SchemaTest, Validate) {
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_INVALID_TOPLEVEL, true);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_INVALID, true);
     TestSchemaValidationWithPath(subschema, root, "Object");
-    root.Remove("Object.three", NULL);
+    root.Remove("Object.three", nullptr);
 
     // Invalid property.
     root.SetInteger("Object.one", 12345);
@@ -763,7 +762,7 @@ TEST(SchemaTest, Validate) {
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_INVALID_TOPLEVEL, true);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_INVALID, true);
     TestSchemaValidationWithPath(subschema, root, "Object.one");
-    root.Remove("Object.one", NULL);
+    root.Remove("Object.one", nullptr);
   }
 
   // Tests on ArrayOfObjects.
@@ -783,7 +782,7 @@ TEST(SchemaTest, Validate) {
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_INVALID_TOPLEVEL, true);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_INVALID, true);
     TestSchemaValidationWithPath(subschema, root, "items[0]");
-    root.Remove(root.GetSize() - 1, NULL);
+    root.Remove(root.GetSize() - 1, nullptr);
 
     // Invalid property.
     dict_value.reset(new base::DictionaryValue());
@@ -795,7 +794,7 @@ TEST(SchemaTest, Validate) {
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_INVALID_TOPLEVEL, true);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_INVALID, true);
     TestSchemaValidationWithPath(subschema, root, "items[0].two");
-    root.Remove(root.GetSize() - 1, NULL);
+    root.Remove(root.GetSize() - 1, nullptr);
   }
 
   // Tests on ObjectOfArray.
@@ -805,7 +804,7 @@ TEST(SchemaTest, Validate) {
     base::DictionaryValue root;
 
     base::ListValue* list_value =
-        root.SetList("List", base::MakeUnique<base::ListValue>());
+        root.SetList("List", std::make_unique<base::ListValue>());
 
     // Test that there are not errors here.
     list_value->AppendInteger(12345);
@@ -831,9 +830,9 @@ TEST(SchemaTest, Validate) {
     ASSERT_TRUE(subschema.valid());
     base::ListValue root;
 
-    auto dict_value = base::MakeUnique<base::DictionaryValue>();
+    auto dict_value = std::make_unique<base::DictionaryValue>();
     base::ListValue* list_value =
-        dict_value->SetList("List", base::MakeUnique<base::ListValue>());
+        dict_value->SetList("List", std::make_unique<base::ListValue>());
     root.Append(std::move(dict_value));
 
     // Test that there are not errors here.
@@ -888,13 +887,13 @@ TEST(SchemaTest, Validate) {
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, true);
     root.SetBoolean("fooo", false);
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
-    root.Remove("fooo", NULL);
+    root.Remove("fooo", nullptr);
 
     root.SetInteger("foo", 123);
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, true);
     root.SetBoolean("foo", false);
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
-    root.Remove("foo", NULL);
+    root.Remove("foo", nullptr);
 
     root.SetString("barr", "one");
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, true);
@@ -902,7 +901,7 @@ TEST(SchemaTest, Validate) {
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
     root.SetBoolean("barr", false);
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
-    root.Remove("barr", NULL);
+    root.Remove("barr", nullptr);
 
     root.SetString("bar", "one");
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, true);
@@ -910,12 +909,12 @@ TEST(SchemaTest, Validate) {
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
     root.SetString("bar", "three");
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
-    root.Remove("bar", NULL);
+    root.Remove("bar", nullptr);
 
     root.SetInteger("foobar", 123);
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN, true);
-    root.Remove("foobar", NULL);
+    root.Remove("foobar", nullptr);
   }
 
   // Test that integer to double promotion is allowed.

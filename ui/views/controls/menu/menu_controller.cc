@@ -55,7 +55,6 @@
 #include "ui/views/controls/menu/menu_pre_target_handler.h"
 #endif
 
-using base::Time;
 using base::TimeDelta;
 using ui::OSExchangeData;
 
@@ -103,15 +102,15 @@ bool TitleMatchesMnemonic(MenuItemView* menu, base::char16 key) {
 }
 
 // Returns the first descendant of |view| that is hot tracked.
-CustomButton* GetFirstHotTrackedView(View* view) {
+Button* GetFirstHotTrackedView(View* view) {
   if (!view)
     return NULL;
-  CustomButton* button = CustomButton::AsCustomButton(view);
+  Button* button = Button::AsButton(view);
   if (button && button->IsHotTracked())
     return button;
 
   for (int i = 0; i < view->child_count(); ++i) {
-    CustomButton* hot_view = GetFirstHotTrackedView(view->child_at(i));
+    Button* hot_view = GetFirstHotTrackedView(view->child_at(i));
     if (hot_view)
       return hot_view;
   }
@@ -570,7 +569,7 @@ bool MenuController::OnMousePressed(SubmenuView* source,
     ConvertLocatedEventForRootView(source, forward_to_root, &event_for_root);
     View* view =
         forward_to_root->GetEventHandlerForPoint(event_for_root.location());
-    CustomButton* button = CustomButton::AsCustomButton(view);
+    Button* button = Button::AsButton(view);
     if (hot_button_ != button)
       SetHotTrackedButton(button);
 
@@ -756,7 +755,7 @@ void MenuController::OnMouseMoved(SubmenuView* source,
     ConvertLocatedEventForRootView(source, root_view, &event_for_root);
     View* view =
         root_view->GetEventHandlerForPoint(event_for_root.location());
-    CustomButton* button = CustomButton::AsCustomButton(view);
+    Button* button = Button::AsButton(view);
     if (button && button->IsHotTracked())
       SetHotTrackedButton(button);
   }
@@ -778,6 +777,20 @@ bool MenuController::OnMouseWheel(SubmenuView* source,
 
 void MenuController::OnGestureEvent(SubmenuView* source,
                                     ui::GestureEvent* event) {
+  if (owner_ && send_gesture_events_to_owner()) {
+#if defined(OS_MACOSX)
+    NOTIMPLEMENTED();
+#else   // !defined(OS_MACOSX)
+    event->ConvertLocationToTarget(source->GetWidget()->GetNativeWindow(),
+                                   owner()->GetNativeWindow());
+#endif  // defined(OS_MACOSX)
+    owner()->OnGestureEvent(event);
+    // Reset |send_gesture_events_to_owner_| when the first gesture ends.
+    if (event->type() == ui::ET_GESTURE_END)
+      send_gesture_events_to_owner_ = false;
+    return;
+  }
+
   MenuHostRootView* root_view = GetRootView(source, event->location());
   if (root_view) {
     // Reset hot-tracking if a different view is getting a touch event.
@@ -785,7 +798,7 @@ void MenuController::OnGestureEvent(SubmenuView* source,
     ConvertLocatedEventForRootView(source, root_view, &event_for_root);
     View* view =
         root_view->GetEventHandlerForPoint(event_for_root.location());
-    CustomButton* button = CustomButton::AsCustomButton(view);
+    Button* button = Button::AsButton(view);
     if (hot_button_ && hot_button_ != button)
       SetHotTrackedButton(nullptr);
   }
@@ -829,7 +842,7 @@ void MenuController::OnGestureEvent(SubmenuView* source,
   }
 
   if (event->stopped_propagation())
-      return;
+    return;
 
   if (!part.submenu)
     return;
@@ -1187,8 +1200,7 @@ void MenuController::SetSelection(MenuItemView* menu_item,
   if (menu_item &&
       (MenuDepth(menu_item) != 1 ||
        menu_item->GetType() != MenuItemView::SUBMENU)) {
-    menu_item->NotifyAccessibilityEvent(
-        ui::AX_EVENT_SELECTION, true);
+    menu_item->NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
   }
 }
 
@@ -1315,7 +1327,8 @@ void MenuController::OnKeyDown(ui::KeyboardCode key_code) {
     case ui::VKEY_F4:
       if (!is_combobox_)
         break;
-    // Fallthrough to accept or dismiss combobox menus on F4, like windows.
+      // Fallthrough to accept or dismiss combobox menus on F4, like windows.
+      FALLTHROUGH;
     case ui::VKEY_RETURN:
 #if defined(OS_MACOSX)
     case ui::VKEY_SPACE:
@@ -1350,7 +1363,7 @@ void MenuController::OnKeyDown(ui::KeyboardCode key_code) {
       break;
 
     case ui::VKEY_APPS: {
-      CustomButton* hot_view = GetFirstHotTrackedView(pending_state_.item);
+      Button* hot_view = GetFirstHotTrackedView(pending_state_.item);
       if (hot_view) {
         hot_view->ShowContextMenu(hot_view->GetKeyboardContextMenuLocation(),
                                   ui::MENU_SOURCE_KEYBOARD);
@@ -1386,27 +1399,8 @@ void MenuController::OnKeyDown(ui::KeyboardCode key_code) {
 MenuController::MenuController(bool blocking,
                                internal::MenuControllerDelegate* delegate)
     : blocking_run_(blocking),
-      showing_(false),
-      exit_type_(EXIT_NONE),
-      did_capture_(false),
-      result_(NULL),
-      accept_event_flags_(0),
-      drop_target_(NULL),
-      drop_position_(MenuDelegate::DROP_UNKNOWN),
-      owner_(NULL),
-      possible_drag_(false),
-      drag_in_progress_(false),
-      did_initiate_drag_(false),
-      valid_drop_coordinates_(false),
-      last_drop_operation_(MenuDelegate::DROP_UNKNOWN),
-      showing_submenu_(false),
-      active_mouse_view_tracker_(base::MakeUnique<ViewTracker>()),
-      hot_button_(nullptr),
-      delegate_(delegate),
-      is_combobox_(false),
-      item_selected_by_touch_(false),
-      current_mouse_event_target_(nullptr),
-      current_mouse_pressed_state_(0) {
+      active_mouse_view_tracker_(std::make_unique<ViewTracker>()),
+      delegate_(delegate) {
   delegate_stack_.push_back(delegate_);
   active_instance_ = this;
 }
@@ -1422,7 +1416,7 @@ MenuController::~MenuController() {
 }
 
 bool MenuController::SendAcceleratorToHotTrackedView() {
-  CustomButton* hot_view = GetFirstHotTrackedView(pending_state_.item);
+  Button* hot_view = GetFirstHotTrackedView(pending_state_.item);
   if (!hot_view)
     return false;
 
@@ -1431,7 +1425,7 @@ bool MenuController::SendAcceleratorToHotTrackedView() {
   hot_view->AcceleratorPressed(accelerator);
   // An accelerator may have canceled the menu after activation.
   if (this_ref) {
-    CustomButton* button = static_cast<CustomButton*>(hot_view);
+    Button* button = static_cast<Button*>(hot_view);
     SetHotTrackedButton(button);
   }
   return true;
@@ -2203,7 +2197,7 @@ void MenuController::IncrementSelection(
   }
 
   if (item->has_children()) {
-    CustomButton* button = GetFirstHotTrackedView(item);
+    Button* button = GetFirstHotTrackedView(item);
     if (button) {
       DCHECK_EQ(hot_button_, button);
       SetHotTrackedButton(nullptr);
@@ -2212,7 +2206,7 @@ void MenuController::IncrementSelection(
     View* to_make_hot = button
         ? GetNextFocusableView(item, button, direction_is_down)
         : GetInitialFocusableView(item, direction_is_down);
-    CustomButton* hot_button = CustomButton::AsCustomButton(to_make_hot);
+    Button* hot_button = Button::AsButton(to_make_hot);
     if (hot_button) {
       SetHotTrackedButton(hot_button);
       return;
@@ -2695,15 +2689,15 @@ void MenuController::SetInitialHotTrackedView(
   SetSelection(item, SELECTION_DEFAULT);
   View* hot_view =
       GetInitialFocusableView(item, direction == INCREMENT_SELECTION_DOWN);
-  SetHotTrackedButton(CustomButton::AsCustomButton(hot_view));
+  SetHotTrackedButton(Button::AsButton(hot_view));
 }
 
-void MenuController::SetHotTrackedButton(CustomButton* hot_button) {
+void MenuController::SetHotTrackedButton(Button* hot_button) {
   if (hot_button == hot_button_) {
     // Hot-tracked state may change outside of the MenuController. Correct it.
     if (hot_button && !hot_button->IsHotTracked()) {
       hot_button->SetHotTracked(true);
-      hot_button->NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
+      hot_button->NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
     }
     return;
   }
@@ -2712,7 +2706,7 @@ void MenuController::SetHotTrackedButton(CustomButton* hot_button) {
   hot_button_ = hot_button;
   if (hot_button) {
     hot_button->SetHotTracked(true);
-    hot_button->NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
+    hot_button->NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
   }
 }
 

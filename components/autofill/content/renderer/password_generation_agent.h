@@ -19,6 +19,7 @@
 #include "components/autofill/content/renderer/renderer_save_password_progress_logger.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "url/gurl.h"
 
@@ -35,7 +36,8 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
                                 public mojom::PasswordGenerationAgent {
  public:
   PasswordGenerationAgent(content::RenderFrame* render_frame,
-                          PasswordAutofillAgent* password_agent);
+                          PasswordAutofillAgent* password_agent,
+                          service_manager::BinderRegistry* registry);
   ~PasswordGenerationAgent() override;
 
   void BindRequest(mojom::PasswordGenerationAgentRequest request);
@@ -48,6 +50,8 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
   // Sets |generation_element_| to the focused password field and shows a
   // generation popup at this field.
   void UserTriggeredGeneratePassword() override;
+  void UserSelectedManualGenerationOption() override;
+
   // Enables the form classifier.
   void AllowToRunFormClassifier() override;
 
@@ -60,6 +64,9 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
 
   // Called when new form controls are inserted.
   void OnDynamicFormsSeen();
+
+  // Called right before PasswordAutofillAgent filled |password_element|.
+  void OnFieldAutofilled(const blink::WebInputElement& password_element);
 
   // The length that a password can be before the UI is hidden.
   static const size_t kMaximumOfferSize = 5;
@@ -103,6 +110,11 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
   // an account creation form. Sets |generation_element_| to the field that
   // we want to trigger the generation UI on.
   void DetermineGenerationElement();
+
+  // Helper function which takes care of the form processing and collecting the
+  // information which is required to show the generation popup. Returns true if
+  // all required information is collected.
+  bool SetUpUserTriggeredGeneration();
 
   // Show password generation UI anchored at |generation_element_|.
   void ShowGenerationPopup();

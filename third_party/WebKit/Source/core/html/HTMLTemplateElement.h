@@ -39,20 +39,24 @@ namespace blink {
 class DocumentFragment;
 class TemplateContentDocumentFragment;
 
-class HTMLTemplateElement final : public HTMLElement {
+class CORE_EXPORT HTMLTemplateElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   DECLARE_NODE_FACTORY(HTMLTemplateElement);
   ~HTMLTemplateElement() override;
-  DECLARE_VIRTUAL_TRACE();
+
+  bool HasNonInBodyInsertionMode() const override { return true; }
+
+  virtual void Trace(blink::Visitor*);
 
   DocumentFragment* content() const;
 
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
-  Node* cloneNode(bool deep, ExceptionState&) override;
+  void CloneNonAttributePropertiesFrom(const Element&,
+                                       CloneChildrenFlag) override;
   void DidMoveToNewDocument(Document& old_document) override;
 
   explicit HTMLTemplateElement(Document&);

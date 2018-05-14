@@ -20,6 +20,7 @@ import org.chromium.base.process_launcher.FileDescriptorInfo;
 import org.chromium.base.process_launcher.IChildProcessService;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
@@ -134,12 +135,12 @@ public final class MultiprocessTestClientLauncher {
         if (sConnectionAllocator == null) {
             sConnectionAllocator = ChildConnectionAllocator.create(
                     ContextUtils.getApplicationContext(), sLauncherHandler,
-                    "org.chromium.native_test", "org.chromium.native_test.TEST_CLIENT_SERVICE_NAME",
+                    "org.chromium.native_test", "org.chromium.base.MultiprocessTestClientService",
                     "org.chromium.native_test.NUM_TEST_CLIENT_SERVICES", false /* bindToCaller */,
                     false /* bindAsExternalService */, false /* useStrongBinding */);
         }
         mLauncher = new ChildProcessLauncher(sLauncherHandler, mLauncherDelegate, commandLine,
-                filesToMap, sConnectionAllocator, mCallback);
+                filesToMap, sConnectionAllocator, Arrays.asList(mCallback));
     }
 
     private boolean waitForConnection(long timeoutMs) {

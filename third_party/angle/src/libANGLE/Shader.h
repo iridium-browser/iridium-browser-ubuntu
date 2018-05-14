@@ -62,9 +62,14 @@ class ShaderState final : angle::NonCopyable
     GLenum getShaderType() const { return mShaderType; }
     int getShaderVersion() const { return mShaderVersion; }
 
-    const std::vector<sh::Varying> &getVaryings() const { return mVaryings; }
+    const std::vector<sh::Varying> &getInputVaryings() const { return mInputVaryings; }
+    const std::vector<sh::Varying> &getOutputVaryings() const { return mOutputVaryings; }
     const std::vector<sh::Uniform> &getUniforms() const { return mUniforms; }
-    const std::vector<sh::InterfaceBlock> &getInterfaceBlocks() const { return mInterfaceBlocks; }
+    const std::vector<sh::InterfaceBlock> &getUniformBlocks() const { return mUniformBlocks; }
+    const std::vector<sh::InterfaceBlock> &getShaderStorageBlocks() const
+    {
+        return mShaderStorageBlocks;
+    }
     const std::vector<sh::Attribute> &getActiveAttributes() const { return mActiveAttributes; }
     const std::vector<sh::OutputVariable> &getActiveOutputVariables() const
     {
@@ -85,11 +90,22 @@ class ShaderState final : angle::NonCopyable
 
     sh::WorkGroupSize mLocalSize;
 
-    std::vector<sh::Varying> mVaryings;
+    std::vector<sh::Varying> mInputVaryings;
+    std::vector<sh::Varying> mOutputVaryings;
     std::vector<sh::Uniform> mUniforms;
-    std::vector<sh::InterfaceBlock> mInterfaceBlocks;
+    std::vector<sh::InterfaceBlock> mUniformBlocks;
+    std::vector<sh::InterfaceBlock> mShaderStorageBlocks;
     std::vector<sh::Attribute> mActiveAttributes;
     std::vector<sh::OutputVariable> mActiveOutputVariables;
+
+    // ANGLE_multiview.
+    int mNumViews;
+
+    // Geometry Shader.
+    Optional<GLenum> mGeometryShaderInputPrimitiveType;
+    Optional<GLenum> mGeometryShaderOutputPrimitiveType;
+    Optional<GLint> mGeometryShaderMaxVertices;
+    int mGeometryShaderInvocations;
 
     // Indicates if this shader has been successfully compiled
     CompileStatus mCompileStatus;
@@ -143,18 +159,33 @@ class Shader final : angle::NonCopyable, public LabeledObject
 
     int getShaderVersion(const Context *context);
 
-    const std::vector<sh::Varying> &getVaryings(const Context *context);
+    const std::vector<sh::Varying> &getInputVaryings(const Context *context);
+    const std::vector<sh::Varying> &getOutputVaryings(const Context *context);
     const std::vector<sh::Uniform> &getUniforms(const Context *context);
-    const std::vector<sh::InterfaceBlock> &getInterfaceBlocks(const Context *context);
+    const std::vector<sh::InterfaceBlock> &getUniformBlocks(const Context *context);
+    const std::vector<sh::InterfaceBlock> &getShaderStorageBlocks(const Context *context);
     const std::vector<sh::Attribute> &getActiveAttributes(const Context *context);
     const std::vector<sh::OutputVariable> &getActiveOutputVariables(const Context *context);
 
+    // Returns mapped name of a transform feedback varying. The original name may contain array
+    // brackets with an index inside, which will get copied to the mapped name. The varying must be
+    // known to be declared in the shader.
+    std::string getTransformFeedbackVaryingMappedName(const std::string &tfVaryingName,
+                                                      const Context *context);
+
     const sh::WorkGroupSize &getWorkGroupSize(const Context *context);
+
+    int getNumViews(const Context *context);
+
+    Optional<GLenum> getGeometryShaderInputPrimitiveType(const Context *context);
+    Optional<GLenum> getGeometryShaderOutputPrimitiveType(const Context *context);
+    int getGeometryShaderInvocations(const Context *context);
+    Optional<GLint> getGeometryShaderMaxVertices(const Context *context);
 
     const std::string &getCompilerResourcesString() const;
 
   private:
-    virtual ~Shader();
+    ~Shader() override;
     static void GetSourceImpl(const std::string &source,
                               GLsizei bufSize,
                               GLsizei *length,
@@ -181,6 +212,8 @@ class Shader final : angle::NonCopyable, public LabeledObject
 };
 
 bool CompareShaderVar(const sh::ShaderVariable &x, const sh::ShaderVariable &y);
+
+const char *GetShaderTypeString(GLenum type);
 }  // namespace gl
 
 #endif   // LIBANGLE_SHADER_H_

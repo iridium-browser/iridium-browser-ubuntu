@@ -4,11 +4,11 @@
 
 #include "ios/chrome/browser/ui/tab_switcher/tab_switcher_transition_context.h"
 
+#import "ios/chrome/browser/snapshots/snapshot_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
 #include "ios/chrome/browser/ui/tab_switcher/tab_switcher_transition_context.h"
-#import "ios/chrome/browser/ui/tabs/tab_strip_controller+tab_switcher_animation.h"
-#import "ios/chrome/browser/ui/tabs/tab_strip_controller.h"
+#import "ios/chrome/browser/ui/toolbar/toolbar_snapshot_providing.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -18,7 +18,7 @@
 @class BrowserViewController;
 
 @interface TabSwitcherTransitionContextContent () {
-  TabSwitcherTabStripPlaceholderView* _tabStripPlaceholderView;
+  UIView<TabStripFoldAnimation>* _tabStripPlaceholderView;
   __weak BrowserViewController* _bvc;
 }
 
@@ -39,23 +39,15 @@
     [bvc.view setFrame:[[UIScreen mainScreen] bounds]];
   }
 
-  UIView* toolbarView = [[bvc toolbarController] view];
-  UIView* toolbarSnapshotView;
-  if ([toolbarView window]) {
-    toolbarSnapshotView = [toolbarView snapshotViewAfterScreenUpdates:NO];
-  } else {
-    toolbarSnapshotView = [[UIView alloc] initWithFrame:toolbarView.frame];
-    [toolbarSnapshotView layer].contents = static_cast<id>(
-        CaptureViewWithOption(toolbarView, 1, kClientSideRendering).CGImage);
-  }
+  UIView* toolbarSnapshotView =
+      [bvc.toolbarSnapshotProvider snapshotForTabSwitcher];
   transitionContextContent.toolbarSnapshotView = toolbarSnapshotView;
   transitionContextContent->_bvc = bvc;
   return transitionContextContent;
 }
 
-- (TabSwitcherTabStripPlaceholderView*)generateTabStripPlaceholderView {
-  TabStripController* tsc = [_bvc tabStripController];
-  return [tsc placeholderView];
+- (UIView<TabStripFoldAnimation>*)generateTabStripPlaceholderView {
+  return [_bvc tabStripPlaceholderView];
 }
 
 @synthesize toolbarSnapshotView = _toolbarSnapshotView;
@@ -80,9 +72,13 @@ tabSwitcherTransitionContextWithCurrent:(BrowserViewController*)currentBVC
   TabSwitcherTransitionContext* transitionContext =
       [[TabSwitcherTransitionContext alloc] init];
   Tab* currentTab = [[currentBVC tabModel] currentTab];
-  UIImage* tabSnapshotImage =
-      [currentTab generateSnapshotWithOverlay:YES visibleFrameOnly:YES];
-  [transitionContext setTabSnapshotImage:tabSnapshotImage];
+  if (currentTab) {
+    UIImage* tabSnapshotImage =
+        SnapshotTabHelper::FromWebState(currentTab.webState)
+            ->GenerateSnapshot(/*with_overlays=*/true,
+                               /*visible_frame_only=*/true);
+    [transitionContext setTabSnapshotImage:tabSnapshotImage];
+  }
   [transitionContext
       setIncognitoContent:
           [TabSwitcherTransitionContextContent

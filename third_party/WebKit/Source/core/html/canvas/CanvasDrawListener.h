@@ -5,20 +5,25 @@
 #ifndef CanvasDrawListener_h
 #define CanvasDrawListener_h
 
+#include <memory>
+
+#include "base/memory/weak_ptr.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebCanvasCaptureHandler.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-#include <memory>
 
 class SkImage;
 
 namespace blink {
 
+class WebGraphicsContext3DProviderWrapper;
+
 class CORE_EXPORT CanvasDrawListener : public GarbageCollectedMixin {
  public:
   virtual ~CanvasDrawListener();
-  virtual void SendNewFrame(sk_sp<SkImage>);
+  virtual void SendNewFrame(sk_sp<SkImage>,
+                            base::WeakPtr<WebGraphicsContext3DProviderWrapper>);
   bool NeedsNewFrame() const;
   void RequestFrame();
 

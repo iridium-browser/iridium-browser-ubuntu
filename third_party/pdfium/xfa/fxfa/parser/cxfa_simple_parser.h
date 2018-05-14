@@ -22,41 +22,38 @@ class CFX_SeekableStreamProxy;
 
 class CXFA_SimpleParser {
  public:
-  CXFA_SimpleParser(CXFA_Document* pFactory, bool bDocumentParser);
+  CXFA_SimpleParser();
+  explicit CXFA_SimpleParser(CXFA_Document* pFactory);
   ~CXFA_SimpleParser();
 
-  int32_t StartParse(const CFX_RetainPtr<IFX_SeekableStream>& pStream,
-                     XFA_XDPPACKET ePacketID);
+  int32_t StartParse(const RetainPtr<IFX_SeekableStream>& pStream,
+                     XFA_PacketType ePacketID);
   int32_t DoParse();
-  CFX_XMLNode* ParseXMLData(const CFX_ByteString& wsXML);
+  CFX_XMLNode* ParseXMLData(const ByteString& wsXML);
   void ConstructXFANode(CXFA_Node* pXFANode, CFX_XMLNode* pXMLNode);
   CXFA_Node* GetRootNode() const;
-  CFX_XMLDoc* GetXMLDoc() const;
   void CloseParser();
 
+  // Called later for the ctor with no parameters.
   void SetFactory(CXFA_Document* pFactory);
 
  private:
   CXFA_Node* ParseAsXDPPacket(CFX_XMLNode* pXMLDocumentNode,
-                              XFA_XDPPACKET ePacketID);
-  CXFA_Node* ParseAsXDPPacket_XDP(CFX_XMLNode* pXMLDocumentNode,
-                                  XFA_XDPPACKET ePacketID);
-  CXFA_Node* ParseAsXDPPacket_Config(CFX_XMLNode* pXMLDocumentNode,
-                                     XFA_XDPPACKET ePacketID);
-  CXFA_Node* ParseAsXDPPacket_TemplateForm(CFX_XMLNode* pXMLDocumentNode,
-                                           XFA_XDPPACKET ePacketID);
-  CXFA_Node* ParseAsXDPPacket_Data(CFX_XMLNode* pXMLDocumentNode,
-                                   XFA_XDPPACKET ePacketID);
+                              XFA_PacketType ePacketID);
+  CXFA_Node* ParseAsXDPPacket_XDP(CFX_XMLNode* pXMLDocumentNode);
+  CXFA_Node* ParseAsXDPPacket_Config(CFX_XMLNode* pXMLDocumentNode);
+  CXFA_Node* ParseAsXDPPacket_Template(CFX_XMLNode* pXMLDocumentNode);
+  CXFA_Node* ParseAsXDPPacket_Form(CFX_XMLNode* pXMLDocumentNode);
+  CXFA_Node* ParseAsXDPPacket_Data(CFX_XMLNode* pXMLDocumentNode);
   CXFA_Node* ParseAsXDPPacket_LocaleConnectionSourceSet(
       CFX_XMLNode* pXMLDocumentNode,
-      XFA_XDPPACKET ePacketID);
-  CXFA_Node* ParseAsXDPPacket_Xdc(CFX_XMLNode* pXMLDocumentNode,
-                                  XFA_XDPPACKET ePacketID);
-  CXFA_Node* ParseAsXDPPacket_User(CFX_XMLNode* pXMLDocumentNode,
-                                   XFA_XDPPACKET ePacketID);
+      XFA_PacketType packet_type,
+      XFA_Element element);
+  CXFA_Node* ParseAsXDPPacket_Xdc(CFX_XMLNode* pXMLDocumentNode);
+  CXFA_Node* ParseAsXDPPacket_User(CFX_XMLNode* pXMLDocumentNode);
   CXFA_Node* NormalLoader(CXFA_Node* pXFANode,
                           CFX_XMLNode* pXMLDoc,
-                          XFA_XDPPACKET ePacketID,
+                          XFA_PacketType ePacketID,
                           bool bUseAttribute);
   CXFA_Node* DataLoader(CXFA_Node* pXFANode,
                         CFX_XMLNode* pXMLDoc,
@@ -64,25 +61,27 @@ class CXFA_SimpleParser {
   CXFA_Node* UserPacketLoader(CXFA_Node* pXFANode, CFX_XMLNode* pXMLDoc);
   void ParseContentNode(CXFA_Node* pXFANode,
                         CFX_XMLNode* pXMLNode,
-                        XFA_XDPPACKET ePacketID);
+                        XFA_PacketType ePacketID);
   void ParseDataValue(CXFA_Node* pXFANode,
                       CFX_XMLNode* pXMLNode,
-                      XFA_XDPPACKET ePacketID);
+                      XFA_PacketType ePacketID);
   void ParseDataGroup(CXFA_Node* pXFANode,
                       CFX_XMLNode* pXMLNode,
-                      XFA_XDPPACKET ePacketID);
+                      XFA_PacketType ePacketID);
   void ParseInstruction(CXFA_Node* pXFANode,
                         CFX_XMLInstruction* pXMLInstruction,
-                        XFA_XDPPACKET ePacketID);
+                        XFA_PacketType ePacketID);
 
-  CFX_XMLParser* m_pXMLParser;
   std::unique_ptr<CFX_XMLDoc> m_pXMLDoc;
-  CFX_RetainPtr<CFX_SeekableStreamProxy> m_pStream;
-  CFX_RetainPtr<IFX_SeekableStream> m_pFileRead;
-  CXFA_Document* m_pFactory;
-  CXFA_Node* m_pRootNode;
-  XFA_XDPPACKET m_ePacketID;
-  bool m_bDocumentParser;
+  UnownedPtr<CFX_XMLParser> m_pXMLParser;  // Owned by |m_pXMLDoc|
+  RetainPtr<CFX_SeekableStreamProxy> m_pStream;
+  RetainPtr<IFX_SeekableStream> m_pFileRead;
+  UnownedPtr<CXFA_Document> m_pFactory;
+  // TODO(dsinclair): Figure out who owns this.
+  CXFA_Node* m_pRootNode = nullptr;
+  XFA_PacketType m_ePacketID = XFA_PacketType::User;
+  bool m_bParseStarted = false;
+  const bool m_bDocumentParser;
 };
 
 #endif  // XFA_FXFA_PARSER_CXFA_SIMPLE_PARSER_H_

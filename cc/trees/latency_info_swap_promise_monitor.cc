@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 #include "base/threading/platform_thread.h"
-#include "cc/output/latency_info_swap_promise.h"
+#include "cc/trees/latency_info_swap_promise.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/swap_promise_manager.h"
@@ -43,12 +43,10 @@ namespace cc {
 LatencyInfoSwapPromiseMonitor::LatencyInfoSwapPromiseMonitor(
     ui::LatencyInfo* latency,
     SwapPromiseManager* swap_promise_manager,
-    LayerTreeHostImpl* layer_tree_host_impl)
-    : SwapPromiseMonitor(swap_promise_manager, layer_tree_host_impl),
-      latency_(latency) {}
+    LayerTreeHostImpl* host_impl)
+    : SwapPromiseMonitor(swap_promise_manager, host_impl), latency_(latency) {}
 
-LatencyInfoSwapPromiseMonitor::~LatencyInfoSwapPromiseMonitor() {
-}
+LatencyInfoSwapPromiseMonitor::~LatencyInfoSwapPromiseMonitor() = default;
 
 void LatencyInfoSwapPromiseMonitor::OnSetNeedsCommitOnMain() {
   if (AddRenderingScheduledComponent(latency_, true /* on_main */)) {
@@ -66,8 +64,7 @@ void LatencyInfoSwapPromiseMonitor::OnSetNeedsRedrawOnImpl() {
     // measurement of the time to the next SwapBuffers(). The swap
     // promise is pinned so that it is not interrupted by new incoming
     // activations (which would otherwise break the swap promise).
-    layer_tree_host_impl_->active_tree()->QueuePinnedSwapPromise(
-        std::move(swap_promise));
+    host_impl_->active_tree()->QueuePinnedSwapPromise(std::move(swap_promise));
   }
 }
 
@@ -98,7 +95,7 @@ void LatencyInfoSwapPromiseMonitor::OnForwardScrollUpdateToMainThreadOnImpl() {
         new_sequence_number, "ScrollUpdate");
     std::unique_ptr<SwapPromise> swap_promise(
         new LatencyInfoSwapPromise(new_latency));
-    layer_tree_host_impl_->QueueSwapPromiseForMainThreadScrollUpdate(
+    host_impl_->QueueSwapPromiseForMainThreadScrollUpdate(
         std::move(swap_promise));
   }
 }

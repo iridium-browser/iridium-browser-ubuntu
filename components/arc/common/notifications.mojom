@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Next MinVersion: 11
+// Next MinVersion: 16
 
 module arc.mojom;
 
 import "bitmap.mojom";
+import "gfx.mojom";
 
 // These values must be matched with the NOTIFICATION_EVENT_* constants in
 // com.android.server.ArcNotificationListenerService.
@@ -24,13 +25,12 @@ enum ArcNotificationEvent {
   [MinVersion=10] TOGGLE_EXPANSION = 7,
 };
 
-// These values must be matched with the NOTIFICATION_TYPE_* constants in
-// com.android.server.ArcNotificationListenerService.
+[Extensible]
 enum ArcNotificationType {
-  BASIC = 0,
-  IMAGE = 1,
-  PROGRESS = 2,
-  LIST = 3,
+  SIMPLE = 0,
+  DEPRECATED_IMAGE = 1,
+  DEPRECATED_PROGRESS = 2,
+  DEPRECATED_LIST = 3,
 };
 
 // These values are corresponding to the priorities of Android notification.
@@ -43,7 +43,8 @@ enum ArcNotificationPriority {
   MAX = 2,  // same value as Notification.PRIORITY_MAX
 };
 
-struct ArcNotificationButton {
+// DEPRECATED
+struct DeprecatedArcNotificationButton {
   // Title
   string label;
 };
@@ -53,6 +54,12 @@ enum ArcNotificationExpandState {
   FIXED_SIZE = 0,
   COLLAPSED = 1,
   EXPANDED = 2,
+};
+
+[Extensible, MinVersion=12]
+enum ArcNotificationRemoteInputState {
+  CLOSED = 0,
+  OPENED = 1,
 };
 
 // These values represent what shows in an ARC custom notification.
@@ -73,37 +80,36 @@ struct ArcNotificationData {
   string message;
   // Title of notification
   string title;
-  // Mimetype of |icon_data|
-  string icon_mimetype;
-  // Binary data of the icon
-  array<uint8> icon_data;
+  // DEPRECATED: Mimetype of |icon_data|
+  string? deprecated_icon_mimetype;
+  // DEPRECATED: Binary data of the icon
+  array<uint8>? deprecated_icon_data;
   // Priority of notification
   ArcNotificationPriority priority;
   // Timestamp related to the notification
   int64 time;
-  // The current value of progress, must be [0, progress_max].
-  int32 progress_current;
-  // The maximum value of progress.
-  int32 progress_max;
-  // Action buttons
-  array<ArcNotificationButton> buttons;
+  // DEPRECATED: The current value of progress, must be [0, progress_max].
+  int32 deprecated_progress_current;
+  // DEPRECATED: The maximum value of progress.
+  int32 deprecated_progress_max;
+  // DEPRECATED: Action buttons
+  array<DeprecatedArcNotificationButton>? deprecated_buttons;
   // Flag if the notification has FLAG_NO_CLEAR.
   [MinVersion=1]
   bool no_clear;
   // Flag if the notification has FLAG_ONGOING_EVENT.
   [MinVersion=1]
   bool ongoing_event;
-  // Subtexts for list notifications.
+  // DEPRECATED: Subtexts for list notifications.
   [MinVersion=3]
-  array<string>? texts;
-  // Image for image notifications.
+  array<string>? deprecated_texts;
+  // DEPRECATED: Image for image notifications.
   [MinVersion=3]
-  ArcBitmap? big_picture;
-  // Flag if a notification is a custom notification backed by a notification
-  // surface. Note the flag is only used on creation. Change of the flag
-  // on notification update is ignored.
+  ArcBitmap? deprecated_big_picture;
+  // DEPRECATED: Flag if a notification is a custom notification backed by a
+  // notification surface.
   [MinVersion=5]
-  bool use_custom_notification;
+  bool deprecated_use_custom_notification;
   [MinVersion=6]
   ArcBitmap? small_icon;
   // A snapshot image to show before the notification window is created.
@@ -120,6 +126,16 @@ struct ArcNotificationData {
   // Flag for what shows in a notification.
   [MinVersion=11]
   ArcNotificationShownContents shown_contents;
+  [MinVersion=12]
+  ArcNotificationRemoteInputState remote_input_state;
+  // Indicates a rect for which Android wants to handle swipe events for by
+  // itself. The coordinates in this Rect are in Android pixels and represent
+  // a sub-rectangle of the notification, with the origin being the top left
+  // of the notification.
+  [MinVersion=14]
+  Rect? swipe_input_rect;
+  [MinVersion=15]
+  string? package_name;
 };
 
 [MinVersion=2]
@@ -137,9 +153,11 @@ struct ArcToastData {
   string? dismiss_text;
 };
 
+// Next Method ID: 6
 interface NotificationsHost {
   // Tells the Chrome that a notification is posted (created or updated) on
-  // Android.
+  // Android. If you know that the notification exists, please consider to use
+  // OnNotificationUpdate instead.
   // |notification_data| is the data of notification (id, texts, icon and ...).
   OnNotificationPosted@0(ArcNotificationData notification_data);
 
@@ -154,12 +172,20 @@ interface NotificationsHost {
   [MinVersion=2]
   // Hides the visible toast immediately, or cancels the scheduled one.
   OnToastCancelled@3(ArcToastData data);
+
+  [MinVersion=13]
+  // Notifies that an existing notiication is updated on Android.
+  OnNotificationUpdated@5(ArcNotificationData notification_data);
 };
 
+// Next Method ID: 6
 // TODO(lhchavez): Migrate all request/response messages to Mojo.
 interface NotificationsInstance {
+  // DEPRECATED: Please use Init@5 instead.
+  InitDeprecated@0(NotificationsHost host_ptr);
+
   // Establishes full-duplex communication with the host.
-  Init@0(NotificationsHost host_ptr);
+  [MinVersion=14] Init@5(NotificationsHost host_ptr) => ();
 
   // Sends an event from Chrome notification UI to Android.
   // |event| is a type of occured event.

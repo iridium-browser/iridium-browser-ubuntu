@@ -36,7 +36,6 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   int GetThemeBackgroundXInset() const override;
   void UpdateThrobber(bool running) override;
   gfx::Size GetMinimumSize() const override;
-  views::View* GetProfileSwitcherView() const override;
   void OnBrowserViewInitViewsComplete() override;
 
   // views::NonClientFrameView:
@@ -76,7 +75,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   void Layout() override;
 
   // BrowserNonClientFrameView:
-  void UpdateProfileIcons() override;
+  AvatarButtonStyle GetAvatarButtonStyle() const override;
 
  private:
   // views::NonClientFrameView:
@@ -136,7 +135,6 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
 
   // Paint various sub-components of this view.
   void PaintTitlebar(gfx::Canvas* canvas) const;
-  void PaintToolbarBackground(gfx::Canvas* canvas) const;
   void PaintClientEdge(gfx::Canvas* canvas) const;
   void FillClientEdgeRects(int x,
                            int y,
@@ -183,9 +181,6 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   // Icon and title. Only used when custom-drawing the titlebar for popups.
   TabIconView* window_icon_;
   views::Label* window_title_;
-
-  // Wrapper around the in-frame profile switcher.
-  AvatarButtonManager profile_switcher_;
 
   // Custom-drawn caption buttons. Only used when custom-drawing the titlebar.
   Windows10CaptionButton* minimize_button_;

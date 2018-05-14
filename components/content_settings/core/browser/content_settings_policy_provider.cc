@@ -73,6 +73,7 @@ struct PolicyProvider::PrefsForManagedDefaultMapEntry {
 // static
 const PolicyProvider::PrefsForManagedDefaultMapEntry
     PolicyProvider::kPrefsForManagedDefault[] = {
+        {CONTENT_SETTINGS_TYPE_ADS, prefs::kManagedDefaultAdsSetting},
         {CONTENT_SETTINGS_TYPE_COOKIES, prefs::kManagedDefaultCookiesSetting},
         {CONTENT_SETTINGS_TYPE_IMAGES, prefs::kManagedDefaultImagesSetting},
         {CONTENT_SETTINGS_TYPE_GEOLOCATION,
@@ -110,6 +111,8 @@ void PolicyProvider::RegisterProfilePrefs(
   registry->RegisterListPref(prefs::kManagedPopupsBlockedForUrls);
   // Preferences for default content setting policies. If a policy is not set of
   // the corresponding preferences below is set to CONTENT_SETTING_DEFAULT.
+  registry->RegisterIntegerPref(prefs::kManagedDefaultAdsSetting,
+                                CONTENT_SETTING_DEFAULT);
   registry->RegisterIntegerPref(prefs::kManagedDefaultCookiesSetting,
                                 CONTENT_SETTING_DEFAULT);
   registry->RegisterIntegerPref(prefs::kManagedDefaultGeolocationSetting,
@@ -162,6 +165,7 @@ PolicyProvider::PolicyProvider(PrefService* prefs) : prefs_(prefs) {
   // the preference default content settings. If a default content settings type
   // is managed any user defined exceptions (patterns) for this type are
   // ignored.
+  pref_change_registrar_.Add(prefs::kManagedDefaultAdsSetting, callback);
   pref_change_registrar_.Add(prefs::kManagedDefaultCookiesSetting, callback);
   pref_change_registrar_.Add(
       prefs::kManagedDefaultGeolocationSetting, callback);
@@ -200,7 +204,7 @@ void PolicyProvider::GetContentSettingsFromPreferences(
 
     const PrefService::Preference* pref = prefs_->FindPreference(pref_name);
     DCHECK(pref);
-    DCHECK(pref->IsManaged());
+    DCHECK(!pref->HasUserSetting() && !pref->HasExtensionSetting());
 
     const base::ListValue* pattern_str_list = nullptr;
     if (!pref->GetValue()->GetAsList(&pattern_str_list)) {
@@ -257,7 +261,7 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
 
   const PrefService::Preference* pref = prefs_->FindPreference(pref_name);
   DCHECK(pref);
-  DCHECK(pref->IsManaged());
+  DCHECK(!pref->HasUserSetting() && !pref->HasExtensionSetting());
 
   const base::ListValue* pattern_filter_str_list = nullptr;
   if (!pref->GetValue()->GetAsList(&pattern_filter_str_list)) {
@@ -291,7 +295,7 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
 
     std::unique_ptr<base::Value> value = base::JSONReader::Read(
         pattern_filter_json, base::JSON_ALLOW_TRAILING_COMMAS);
-    if (!value || !value->IsType(base::Value::Type::DICTIONARY)) {
+    if (!value || !value->is_dict()) {
       VLOG(1) << "Ignoring invalid certificate auto select setting. Reason:"
                  " Invalid JSON object: " << pattern_filter_json;
       continue;

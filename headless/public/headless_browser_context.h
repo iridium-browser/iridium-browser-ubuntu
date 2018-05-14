@@ -14,9 +14,10 @@
 #include "base/callback.h"
 #include "base/optional.h"
 #include "content/public/common/web_preferences.h"
+#include "headless/lib/browser/headless_network_conditions.h"
 #include "headless/public/headless_export.h"
 #include "headless/public/headless_web_contents.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/url_request/url_request_job_factory.h"
 
 namespace base {
@@ -69,6 +70,8 @@ class HEADLESS_EXPORT HeadlessBrowserContext {
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;
 
+  virtual HeadlessNetworkConditions GetNetworkConditions() = 0;
+
   // TODO(skyostil): Allow saving and restoring contexts (crbug.com/617931).
 
  protected:
@@ -84,9 +87,14 @@ class HEADLESS_EXPORT HeadlessBrowserContext::Observer {
   virtual void OnChildContentsCreated(HeadlessWebContents* parent,
                                       HeadlessWebContents* child) {}
 
-  // Indicates that a network request failed. This will be delivered on the IO
-  // thread.
-  virtual void UrlRequestFailed(net::URLRequest* request, int net_error) {}
+  // Indicates that a network request failed or was canceled. This will be
+  // delivered on the IO thread.
+  virtual void UrlRequestFailed(net::URLRequest* request,
+                                int net_error,
+                                bool canceled_by_devtools) {}
+
+  // Indicates the HeadlessBrowserContext is about to be deleted.
+  virtual void OnHeadlessBrowserContextDestruct() {}
 
  protected:
   virtual ~Observer() {}
@@ -120,12 +128,17 @@ class HEADLESS_EXPORT HeadlessBrowserContext::Builder {
   // settings. See HeadlessBrowser::Options for their meaning.
   Builder& SetProductNameAndVersion(
       const std::string& product_name_and_version);
+  Builder& SetAcceptLanguage(const std::string& accept_language);
   Builder& SetUserAgent(const std::string& user_agent);
   Builder& SetProxyConfig(std::unique_ptr<net::ProxyConfig> proxy_config);
   Builder& SetHostResolverRules(const std::string& host_resolver_rules);
   Builder& SetWindowSize(const gfx::Size& window_size);
   Builder& SetUserDataDir(const base::FilePath& user_data_dir);
   Builder& SetIncognitoMode(bool incognito_mode);
+  Builder& SetSitePerProcess(bool site_per_process);
+  Builder& SetBlockNewWebContents(bool block_new_web_contents);
+  Builder& SetInitialVirtualTime(base::Time initial_virtual_time);
+  Builder& SetAllowCookies(bool incognito_mode);
   Builder& SetOverrideWebPreferencesCallback(
       base::Callback<void(WebPreferences*)> callback);
 

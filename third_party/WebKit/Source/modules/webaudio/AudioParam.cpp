@@ -40,11 +40,13 @@ const double AudioParamHandler::kSnapThreshold = 0.001;
 
 AudioParamHandler::AudioParamHandler(BaseAudioContext& context,
                                      AudioParamType param_type,
+                                     String param_name,
                                      double default_value,
                                      float min_value,
                                      float max_value)
     : AudioSummingJunction(context.GetDeferredTaskHandler()),
       param_type_(param_type),
+      param_name_(param_name),
       intrinsic_value_(default_value),
       default_value_(default_value),
       min_value_(min_value),
@@ -66,85 +68,7 @@ void AudioParamHandler::SetParamType(AudioParamType param_type) {
 }
 
 String AudioParamHandler::GetParamName() const {
-  // The returned string should be the name of the node and the name of the
-  // AudioParam for that node.
-  switch (param_type_) {
-    case kParamTypeAudioBufferSourcePlaybackRate:
-      return "AudioBufferSource.playbackRate";
-    case kParamTypeAudioBufferSourceDetune:
-      return "AudioBufferSource.detune";
-    case kParamTypeBiquadFilterFrequency:
-      return "BiquadFilter.frequency";
-    case kParamTypeBiquadFilterQ:
-    case kParamTypeBiquadFilterQLowpass:
-    case kParamTypeBiquadFilterQHighpass:
-      // We don't really need separate names for the Q parameter for lowpass and
-      // highpass filters.  The difference is only for the histograms.
-      return "BiquadFilter.Q";
-    case kParamTypeBiquadFilterGain:
-      return "BiquadFilter.gain";
-    case kParamTypeBiquadFilterDetune:
-      return "BiquadFilter.detune";
-    case kParamTypeDelayDelayTime:
-      return "Delay.delayTime";
-    case kParamTypeDynamicsCompressorThreshold:
-      return "DynamicsCompressor.threshold";
-    case kParamTypeDynamicsCompressorKnee:
-      return "DynamicsCompressor.knee";
-    case kParamTypeDynamicsCompressorRatio:
-      return "DynamicsCompressor.ratio";
-    case kParamTypeDynamicsCompressorAttack:
-      return "DynamicsCompressor.attack";
-    case kParamTypeDynamicsCompressorRelease:
-      return "DynamicsCompressor.release";
-    case kParamTypeGainGain:
-      return "Gain.gain";
-    case kParamTypeOscillatorFrequency:
-      return "Oscillator.frequency";
-    case kParamTypeOscillatorDetune:
-      return "Oscillator.detune";
-    case kParamTypeStereoPannerPan:
-      return "StereoPanner.pan";
-    case kParamTypePannerPositionX:
-      return "Panner.positionX";
-    case kParamTypePannerPositionY:
-      return "Panner.positionY";
-    case kParamTypePannerPositionZ:
-      return "Panner.positionZ";
-    case kParamTypePannerOrientationX:
-      return "Panner.orientationX";
-    case kParamTypePannerOrientationY:
-      return "Panner.orientationY";
-    case kParamTypePannerOrientationZ:
-      return "Panner.orientationZ";
-    case kParamTypeAudioListenerPositionX:
-      return "AudioListener.positionX";
-    case kParamTypeAudioListenerPositionY:
-      return "AudioListener.positionY";
-    case kParamTypeAudioListenerPositionZ:
-      return "AudioListener.positionZ";
-    case kParamTypeAudioListenerForwardX:
-      return "AudioListener.forwardX";
-    case kParamTypeAudioListenerForwardY:
-      return "AudioListener.forwardY";
-    case kParamTypeAudioListenerForwardZ:
-      return "AudioListener.forwardZ";
-    case kParamTypeAudioListenerUpX:
-      return "AudioListener.upX";
-    case kParamTypeAudioListenerUpY:
-      return "AudioListener.upY";
-    case kParamTypeAudioListenerUpZ:
-      return "AudioListener.upZ";
-    case kParamTypeConstantSourceValue:
-      return "ConstantSource.sourceValue";
-    // TODO(hongchan): We can try to return the actual parameter name here if
-    // possible.
-    case kParamTypeAudioWorklet:
-      return "AudioWorklet.customParameter";
-  };
-
-  NOTREACHED();
-  return "UnknownNode.unknownAudioParam";
+  return param_name_;
 }
 
 float AudioParamHandler::Value() {
@@ -170,7 +94,6 @@ void AudioParamHandler::SetIntrinsicValue(float new_value) {
 
 void AudioParamHandler::SetValue(float value) {
   SetIntrinsicValue(value);
-  UpdateHistograms(value);
 }
 
 float AudioParamHandler::SmoothedValue() {
@@ -260,7 +183,8 @@ void AudioParamHandler::CalculateFinalValues(float* values,
   // Now sum all of the audio-rate connections together (unity-gain summing
   // junction).  Note that connections would normally be mono, but we mix down
   // to mono if necessary.
-  RefPtr<AudioBus> summing_bus = AudioBus::Create(1, number_of_values, false);
+  scoped_refptr<AudioBus> summing_bus =
+      AudioBus::Create(1, number_of_values, false);
   summing_bus->SetChannelMemory(0, values, number_of_values);
 
   for (unsigned i = 0; i < NumberOfRenderingConnections(); ++i) {
@@ -269,7 +193,7 @@ void AudioParamHandler::CalculateFinalValues(float* values,
 
     // Render audio from this output.
     AudioBus* connection_bus =
-        output->Pull(0, AudioUtilities::kRenderQuantumFrames);
+        output->Pull(nullptr, AudioUtilities::kRenderQuantumFrames);
 
     // Sum, with unity-gain.
     summing_bus->SumFrom(*connection_bus);
@@ -321,37 +245,17 @@ int AudioParamHandler::ComputeQHistogramValue(float new_value) const {
   return static_cast<int>(4 * new_value + 0.5);
 }
 
-void AudioParamHandler::UpdateHistograms(float new_value) {
-  switch (param_type_) {
-    case kParamTypeBiquadFilterQLowpass: {
-      // The histogram for the Q value for a lowpass biquad filter.
-      DEFINE_STATIC_LOCAL(SparseHistogram, lowpass_q_histogram,
-                          ("WebAudio.BiquadFilter.Q.Lowpass"));
-
-      lowpass_q_histogram.Sample(ComputeQHistogramValue(new_value));
-    } break;
-    case kParamTypeBiquadFilterQHighpass: {
-      // The histogram for the Q value for a highpass biquad filter.
-      DEFINE_STATIC_LOCAL(SparseHistogram, highpass_q_histogram,
-                          ("WebAudio.BiquadFilter.Q.Highpass"));
-
-      highpass_q_histogram.Sample(ComputeQHistogramValue(new_value));
-    } break;
-    default:
-      // Nothing to do for all other types.
-      break;
-  }
-}
-
 // ----------------------------------------------------------------
 
 AudioParam::AudioParam(BaseAudioContext& context,
                        AudioParamType param_type,
+                       String param_name,
                        double default_value,
                        float min_value,
                        float max_value)
     : handler_(AudioParamHandler::Create(context,
                                          param_type,
+                                         param_name,
                                          default_value,
                                          min_value,
                                          max_value)),
@@ -359,26 +263,18 @@ AudioParam::AudioParam(BaseAudioContext& context,
 
 AudioParam* AudioParam::Create(BaseAudioContext& context,
                                AudioParamType param_type,
-                               double default_value) {
-  // Default nominal range is most negative float to most positive.  This
-  // basically means any value is valid, except that floating-point infinities
-  // are excluded.
-  float limit = std::numeric_limits<float>::max();
-  return new AudioParam(context, param_type, default_value, -limit, limit);
-}
-
-AudioParam* AudioParam::Create(BaseAudioContext& context,
-                               AudioParamType param_type,
+                               String param_name,
                                double default_value,
                                float min_value,
                                float max_value) {
   DCHECK_LE(min_value, max_value);
-  return new AudioParam(context, param_type, default_value, min_value,
-                        max_value);
+  return new AudioParam(context, param_type, param_name, default_value,
+                        min_value, max_value);
 }
 
-DEFINE_TRACE(AudioParam) {
+void AudioParam::Trace(blink::Visitor* visitor) {
   visitor->Trace(context_);
+  ScriptWrappable::Trace(visitor);
 }
 
 float AudioParam::value() const {
@@ -398,6 +294,17 @@ void AudioParam::WarnIfOutsideRange(const String& param_method, float value) {
 
 void AudioParam::setValue(float value) {
   WarnIfOutsideRange("value", value);
+  Handler().SetValue(value);
+}
+
+void AudioParam::setValue(float value, ExceptionState& exception_state) {
+  WarnIfOutsideRange("value", value);
+
+  // This is to signal any errors, if necessary, about conflicting
+  // automations.
+  setValueAtTime(value, Context()->currentTime(), exception_state);
+  // This is to change the value so that an immediate query for the
+  // value returns the expected values.
   Handler().SetValue(value);
 }
 
@@ -422,7 +329,6 @@ AudioParam* AudioParam::setValueAtTime(float value,
                                        ExceptionState& exception_state) {
   WarnIfOutsideRange("setValueAtTime value", value);
   Handler().Timeline().SetValueAtTime(value, time, exception_state);
-  Handler().UpdateHistograms(value);
   return this;
 }
 
@@ -435,11 +341,6 @@ AudioParam* AudioParam::linearRampToValueAtTime(
       value, time, Handler().IntrinsicValue(), Context()->currentTime(),
       exception_state);
 
-  // This is probably the best we can do for the histogram.  We don't want to
-  // run the automation to get all the values and use them to update the
-  // histogram.
-  Handler().UpdateHistograms(value);
-
   return this;
 }
 
@@ -451,11 +352,6 @@ AudioParam* AudioParam::exponentialRampToValueAtTime(
   Handler().Timeline().ExponentialRampToValueAtTime(
       value, time, Handler().IntrinsicValue(), Context()->currentTime(),
       exception_state);
-
-  // This is probably the best we can do for the histogram.  We don't want to
-  // run the automation to get all the values and use them to update the
-  // histogram.
-  Handler().UpdateHistograms(value);
 
   return this;
 }

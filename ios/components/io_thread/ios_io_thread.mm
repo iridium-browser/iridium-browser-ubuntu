@@ -17,13 +17,11 @@
 #include "base/environment.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -37,7 +35,6 @@
 #include "ios/web/public/user_agent.h"
 #include "ios/web/public/web_client.h"
 #include "ios/web/public/web_thread.h"
-#include "net/base/sdch_manager.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_known_logs.h"
 #include "net/cert/ct_log_verifier.h"
@@ -55,9 +52,9 @@
 #include "net/http/http_network_layer.h"
 #include "net/http/http_server_properties_impl.h"
 #include "net/log/net_log_event_type.h"
-#include "net/proxy/proxy_config_service.h"
-#include "net/proxy/proxy_script_fetcher_impl.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_config_service.h"
+#include "net/proxy_resolution/pac_file_fetcher_impl.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/spdy/chromium/spdy_session.h"
 #include "net/ssl/channel_id_service.h"
@@ -333,7 +330,7 @@ void IOSIOThread::Init() {
   CreateDefaultAuthHandlerFactory();
   globals_->http_server_properties.reset(new net::HttpServerPropertiesImpl());
   // In-memory cookie store.
-  globals_->system_cookie_store.reset(new net::CookieMonster(nullptr, nullptr));
+  globals_->system_cookie_store.reset(new net::CookieMonster(nullptr));
   // In-memory channel ID store.
   globals_->system_channel_id_service.reset(
       new net::ChannelIDService(new net::DefaultChannelIDStore(nullptr)));
@@ -359,7 +356,7 @@ void IOSIOThread::Init() {
       base::CommandLine(base::CommandLine::NO_PROGRAM),
       /*is_quic_force_disabled=*/false, quic_user_agent_id, &params_);
 
-  globals_->system_proxy_service = ProxyServiceFactory::CreateProxyService(
+  globals_->system_proxy_resolution_service = ProxyServiceFactory::CreateProxyService(
       net_log_, nullptr, globals_->system_network_delegate.get(),
       std::move(system_proxy_config_service_), true /* quick_check_enabled */);
 
@@ -439,7 +436,8 @@ net::URLRequestContext* IOSIOThread::ConstructSystemRequestContext(
   context->set_ssl_config_service(globals->ssl_config_service.get());
   context->set_http_auth_handler_factory(
       globals->http_auth_handler_factory.get());
-  context->set_proxy_service(globals->system_proxy_service.get());
+  context->set_proxy_resolution_service(
+      globals->system_proxy_resolution_service.get());
   context->set_ct_policy_enforcer(globals->ct_policy_enforcer.get());
 
   net::URLRequestJobFactoryImpl* system_job_factory =
@@ -447,7 +445,7 @@ net::URLRequestContext* IOSIOThread::ConstructSystemRequestContext(
   // Data URLs are always loaded through the system request context on iOS
   // (due to UIWebView limitations).
   bool set_protocol = system_job_factory->SetProtocolHandler(
-      url::kDataScheme, base::MakeUnique<net::DataProtocolHandler>());
+      url::kDataScheme, std::make_unique<net::DataProtocolHandler>());
   DCHECK(set_protocol);
   globals->system_url_request_job_factory.reset(system_job_factory);
   context->set_job_factory(globals->system_url_request_job_factory.get());

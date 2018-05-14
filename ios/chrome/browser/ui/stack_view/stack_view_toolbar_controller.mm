@@ -7,11 +7,15 @@
 #include "base/mac/foundation_util.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
-#import "ios/chrome/browser/ui/image_util.h"
+#import "ios/chrome/browser/ui/image_util/image_util.h"
 #import "ios/chrome/browser/ui/rtl_geometry.h"
-#import "ios/chrome/browser/ui/toolbar/new_tab_button.h"
+#import "ios/chrome/browser/ui/stack_view/new_tab_button.h"
+#import "ios/chrome/browser/ui/toolbar/buttons/toolbar_constants.h"
+#import "ios/chrome/browser/ui/toolbar/legacy/toolbar_controller+protected.h"
+#import "ios/chrome/browser/ui/toolbar/legacy/toolbar_controller_constants.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -32,15 +36,18 @@ const CGFloat kBackgroundViewColorAlpha = 0.95;
   __weak id<ApplicationCommands, BrowserCommands> _dispatcher;
 }
 
+@synthesize delegate = _delegate;
+
 - (instancetype)initWithDispatcher:
-    (id<ApplicationCommands, BrowserCommands>)dispatcher {
+    (id<ApplicationCommands, BrowserCommands, OmniboxFocuser, ToolbarCommands>)
+        dispatcher {
   self = [super initWithStyle:ToolbarControllerStyleDarkMode
                    dispatcher:dispatcher];
   if (self) {
     _dispatcher = dispatcher;
     _stackViewToolbar =
         [[UIView alloc] initWithFrame:[self specificControlsArea]];
-    [_stackViewToolbar setAutoresizingMask:UIViewAutoresizingFlexibleHeight |
+    [_stackViewToolbar setAutoresizingMask:UIViewAutoresizingFlexibleTopMargin |
                                            UIViewAutoresizingFlexibleWidth];
 
     _openNewTabButton = [[NewTabButton alloc] initWithFrame:CGRectZero];
@@ -68,10 +75,16 @@ const CGFloat kBackgroundViewColorAlpha = 0.95;
         UIColorFromRGB(kBackgroundViewColor, kBackgroundViewColorAlpha);
 
     [_stackViewToolbar addSubview:_openNewTabButton];
-    [self.view addSubview:_stackViewToolbar];
+    [self.contentView addSubview:_stackViewToolbar];
+
+    [[self stackButton] addTarget:self
+                           action:@selector(shouldDismissTabSwitcher:)
+                 forControlEvents:UIControlEventTouchUpInside];
   }
   return self;
 }
+
+#pragma mark - Private methods.
 
 - (NewTabButton*)openNewTabButton {
   return _openNewTabButton;
@@ -89,6 +102,12 @@ const CGFloat kBackgroundViewColorAlpha = 0.95;
                                        originPoint:center];
   [_dispatcher openNewTab:command];
 }
+
+- (void)shouldDismissTabSwitcher:(id)sender {
+  [self.delegate stackViewToolbarControllerShouldDismiss:self];
+}
+
+#pragma mark - Overridden protected superclass methods.
 
 - (IBAction)recordUserMetrics:(id)sender {
   if (sender == _openNewTabButton)

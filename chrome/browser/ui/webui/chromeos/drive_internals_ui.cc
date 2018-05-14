@@ -15,7 +15,6 @@
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
@@ -87,7 +86,7 @@ void GetGCacheContents(const base::FilePath& root_path,
     const bool is_symbolic_link = base::IsLink(info.GetName());
     const base::Time last_modified = info.GetLastModifiedTime();
 
-    auto entry = base::MakeUnique<base::DictionaryValue>();
+    auto entry = std::make_unique<base::DictionaryValue>();
     entry->SetString("path", current.value());
     // Use double instead of integer for large files.
     entry->SetDouble("size", size);
@@ -149,12 +148,17 @@ std::string FormatEntry(const base::FilePath& path,
 
   const base::Time last_modified = base::Time::FromInternalValue(
       file_info.last_modified());
+  const base::Time last_modified_by_me =
+      base::Time::FromInternalValue(entry.last_modified_by_me());
   const base::Time last_accessed = base::Time::FromInternalValue(
       file_info.last_accessed());
   const base::Time creation_time = base::Time::FromInternalValue(
       file_info.creation_time());
   StringAppendF(&out, "    last_modified: %s\n",
                 google_apis::util::FormatTimeAsString(last_modified).c_str());
+  StringAppendF(
+      &out, "    last_modified_by_me: %s\n",
+      google_apis::util::FormatTimeAsString(last_modified_by_me).c_str());
   StringAppendF(&out, "    last_accessed: %s\n",
                 google_apis::util::FormatTimeAsString(last_accessed).c_str());
   StringAppendF(&out, "    creation_time: %s\n",
@@ -203,7 +207,7 @@ std::string SeverityToString(logging::LogSeverity severity) {
 void AppendKeyValue(base::ListValue* list,
                     const std::string& key,
                     const std::string& value) {
-  auto dict = base::MakeUnique<base::DictionaryValue>();
+  auto dict = std::make_unique<base::DictionaryValue>();
   dict->SetString("key", key);
   dict->SetString("value", value);
   list->Append(std::move(dict));
@@ -352,10 +356,10 @@ void DriveInternalsWebUIHandler::OnGetAppList(
   base::DictionaryValue app_list;
   app_list.SetString("etag", parsed_app_list->etag());
 
-  auto items = base::MakeUnique<base::ListValue>();
+  auto items = std::make_unique<base::ListValue>();
   for (size_t i = 0; i < parsed_app_list->items().size(); ++i) {
     const google_apis::AppResource* app = parsed_app_list->items()[i].get();
-    auto app_data = base::MakeUnique<base::DictionaryValue>();
+    auto app_data = std::make_unique<base::DictionaryValue>();
     app_data->SetString("name", app->name());
     app_data->SetString("application_id", app->application_id());
     app_data->SetString("object_type", app->object_type());
@@ -649,7 +653,7 @@ void DriveInternalsWebUIHandler::UpdateInFlightOperationsSection(
   for (size_t i = 0; i < info_list.size(); ++i) {
     const drive::JobInfo& info = info_list[i];
 
-    auto dict = base::MakeUnique<base::DictionaryValue>();
+    auto dict = std::make_unique<base::DictionaryValue>();
     dict->SetInteger("id", info.job_id);
     dict->SetString("type", drive::JobTypeToString(info.job_type));
     dict->SetString("file_path", info.file_path.AsUTF8Unsafe());
@@ -729,7 +733,7 @@ void DriveInternalsWebUIHandler::UpdateCacheContentsSection(
   debug_info_collector->IterateFileCache(
       base::Bind(&DriveInternalsWebUIHandler::UpdateCacheEntry,
                  weak_ptr_factory_.GetWeakPtr()),
-      base::Bind(&base::DoNothing));
+      base::DoNothing());
 }
 
 void DriveInternalsWebUIHandler::UpdateEventLogSection() {
@@ -751,7 +755,7 @@ void DriveInternalsWebUIHandler::UpdateEventLogSection() {
 
     std::string severity = SeverityToString(log[i].severity);
 
-    auto dict = base::MakeUnique<base::DictionaryValue>();
+    auto dict = std::make_unique<base::DictionaryValue>();
     dict->SetString("key",
         google_apis::util::FormatTimeAsStringLocaltime(log[i].when));
     dict->SetString("value", "[" + severity + "] " + log[i].what);
@@ -892,7 +896,7 @@ void DriveInternalsWebUIHandler::OnPeriodicUpdate(const base::ListValue* args) {
 
 DriveInternalsUI::DriveInternalsUI(content::WebUI* web_ui)
     : WebUIController(web_ui) {
-  web_ui->AddMessageHandler(base::MakeUnique<DriveInternalsWebUIHandler>());
+  web_ui->AddMessageHandler(std::make_unique<DriveInternalsWebUIHandler>());
 
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIDriveInternalsHost);

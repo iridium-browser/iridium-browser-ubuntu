@@ -34,14 +34,15 @@
 #include "platform/Histogram.h"
 #include "platform/SharedBuffer.h"
 #include "platform/fonts/FontCache.h"
+#include "platform/fonts/WebFontTypefaceFactory.h"
 #include "platform/graphics/skia/SkiaUtils.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/Platform.h"
-#include "third_party/harfbuzz-ng/src/hb.h"
 #include "third_party/ots/include/ots-memory-stream.h"
 #include "third_party/skia/include/core/SkStream.h"
 
+#include <hb.h>
 #include <stdarg.h>
 
 namespace blink {
@@ -96,6 +97,8 @@ ots::TableAction BlinkOTSContext::GetTableAction(uint32_t tag) {
   const uint32_t kCblcTag = OTS_TAG('C', 'B', 'L', 'C');
   const uint32_t kColrTag = OTS_TAG('C', 'O', 'L', 'R');
   const uint32_t kCpalTag = OTS_TAG('C', 'P', 'A', 'L');
+  const uint32_t kCff2Tag = OTS_TAG('C', 'F', 'F', '2');
+  const uint32_t kSbixTag = OTS_TAG('s', 'b', 'i', 'x');
 #if HB_VERSION_ATLEAST(1, 0, 0)
   const uint32_t kGdefTag = OTS_TAG('G', 'D', 'E', 'F');
   const uint32_t kGposTag = OTS_TAG('G', 'P', 'O', 'S');
@@ -120,6 +123,8 @@ ots::TableAction BlinkOTSContext::GetTableAction(uint32_t tag) {
     // Windows Color Emoji Tables
     case kColrTag:
     case kCpalTag:
+    case kCff2Tag:
+    case kSbixTag:
 #if HB_VERSION_ATLEAST(1, 0, 0)
     // Let HarfBuzz handle how to deal with broken tables.
     case kAvarTag:
@@ -173,12 +178,6 @@ void RecordDecodeSpeedHistogram(const char* data,
 
 }  // namespace
 
-// static
-bool WebFontDecoder::SupportsFormat(const String& format) {
-  return DeprecatedEqualIgnoringCase(format, "woff") ||
-         DeprecatedEqualIgnoringCase(format, "woff2");
-}
-
 sk_sp<SkTypeface> WebFontDecoder::Decode(SharedBuffer* buffer) {
   if (!buffer) {
     SetErrorString("Empty Buffer");
@@ -198,7 +197,8 @@ sk_sp<SkTypeface> WebFontDecoder::Decode(SharedBuffer* buffer) {
   ots::ExpandingMemoryStream output(buffer->size(), kMaxWebFontSize);
   double start = CurrentTime();
   BlinkOTSContext ots_context;
-  const char* data = buffer->Data();
+  SharedBuffer::DeprecatedFlatData flattened_buffer(buffer);
+  const char* data = flattened_buffer.Data();
 
   TRACE_EVENT_BEGIN0("blink", "DecodeFont");
   bool ok = ots_context.Process(&output, reinterpret_cast<const uint8_t*>(data),
@@ -215,20 +215,17 @@ sk_sp<SkTypeface> WebFontDecoder::Decode(SharedBuffer* buffer) {
                              decoded_length);
 
   sk_sp<SkData> sk_data = SkData::MakeWithCopy(output.get(), decoded_length);
-  SkMemoryStream* stream = new SkMemoryStream(sk_data);
-#if defined(OS_WIN)
-  sk_sp<SkTypeface> typeface(
-      FontCache::GetFontCache()->FontManager()->createFromStream(stream));
-#else
-  sk_sp<SkTypeface> typeface = SkTypeface::MakeFromStream(stream);
-#endif
-  if (!typeface) {
-    SetErrorString("Not a valid font data");
+
+  sk_sp<SkTypeface> new_typeface;
+
+  if (!WebFontTypefaceFactory::CreateTypeface(sk_data, new_typeface)) {
+    SetErrorString("Unable to instantiate font face from font data.");
     return nullptr;
   }
 
   decoded_size_ = decoded_length;
-  return typeface;
+
+  return new_typeface;
 }
 
 }  // namespace blink

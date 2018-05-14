@@ -1,8 +1,10 @@
 {
   settings: {
+    export_header: "core/CoreExport.h",
     export_symbol: "CORE_EXPORT",
     include_path: "core/inspector",
     includes: [
+      "core/CoreProbeSink.h",
       "core/probe/CoreProbes.h",
     ],
   },
@@ -27,6 +29,7 @@
         "fontsUpdated",
         "forcePseudoState",
         "mediaQueryResultChanged",
+        "willChangeStyleElement",
       ]
     },
     DOM: {
@@ -42,6 +45,7 @@
         "didRemoveDOMAttr",
         "domContentLoadedEventFired",
         "frameDocumentUpdated",
+        "frameOwnerContentUpdated",
         "pseudoElementCreated",
         "pseudoElementDestroyed",
         "willModifyDOMAttr",
@@ -65,6 +69,11 @@
         "willModifyDOMAttr",
         "willRemoveDOMNode",
         "willSendXMLHttpOrFetchNetworkRequest",
+      ]
+    },
+    Emulation: {
+      probes: [
+        "frameStartedLoading",
       ]
     },
     LayerTree: {
@@ -113,6 +122,7 @@
         "markResourceAsCached",
         "scriptImported",
         "shouldBlockRequest",
+        "shouldBypassServiceWorker",
         "shouldForceCORSPreflight",
         "willDispatchEventSourceEvent",
         "willLoadXHR",
@@ -126,7 +136,7 @@
       probes: [
         "didChangeViewport",
         "didClearDocumentOfWindowObject",
-        "didCommitLoad",
+        "willCommitLoad",
         "didResizeMainFrame",
         "didRunJavaScriptDialog",
         "domContentLoadedEventFired",
@@ -136,11 +146,13 @@
         "frameScheduledNavigation",
         "frameStartedLoading",
         "frameStoppedLoading",
+        "lifecycleEvent",
         "loadEventFired",
+        "paintTiming",
         "RecalculateStyle",
         "UpdateLayout",
         "willRunJavaScriptDialog",
-        "windowCreated",
+        "windowOpen",
       ]
     },
     Performance: {
@@ -148,23 +160,34 @@
       include_path: "core/frame",
       probes: [
         "CallFunction",
-        "documentWriteFetchScript",
         "ExecuteScript",
         "RecalculateStyle",
         "UpdateLayout",
         "UserCallback",
         "V8Compile",
+        "documentWriteFetchScript",
+      ]
+    },
+    PerformanceMetrics: {
+      class: "InspectorPerformanceAgent",
+      probes: [
+        "consoleTimeStamp",
+        "CallFunction",
+        "ExecuteScript",
+        "RecalculateStyle",
+        "UpdateLayout",
       ]
     },
     TraceEvents: {
       class: "InspectorTraceEvents",
       probes: [
         "CallFunction",
+        "ParseHTML",
         "didFailLoading",
         "didFinishLoading",
         "didReceiveData",
         "didReceiveResourceResponse",
-        "ParseHTML",
+        "paintTiming",
         "willSendRequest",
       ]
     },
@@ -172,6 +195,7 @@
       probes: [
         "frameStartedLoading",
         "frameStoppedLoading",
+        "didStartWorker",
       ]
     },
     Worker: {

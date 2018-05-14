@@ -44,7 +44,8 @@ class AURA_EXPORT WindowPort {
   // Called from Window::Init().
   virtual void OnPreInit(Window* window) = 0;
 
-  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) = 0;
+  virtual void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                          float new_device_scale_factor) = 0;
 
   // Called when a window is being added as a child. |child| may already have
   // a parent, but its parent is not the Window this WindowPort is associated
@@ -84,11 +85,20 @@ class AURA_EXPORT WindowPort {
   virtual std::unique_ptr<cc::LayerTreeFrameSink>
   CreateLayerTreeFrameSink() = 0;
 
-  // Get the current viz::SurfaceId.
-  virtual viz::SurfaceId GetSurfaceId() const = 0;
+  // Forces the window to allocate a new viz::LocalSurfaceId for the next
+  // CompositorFrame submission in anticipation of a synchronization operation
+  // that does not involve a resize or a device scale factor change.
+  virtual void AllocateLocalSurfaceId() = 0;
 
-  virtual void OnWindowAddedToRootWindow() = 0;
-  virtual void OnWillRemoveWindowFromRootWindow() = 0;
+  // Gets the current viz::LocalSurfaceId. The viz::LocalSurfaceId is allocated
+  // lazily on call, and will be updated on changes to size or device scale
+  // factor.
+  virtual const viz::LocalSurfaceId& GetLocalSurfaceId() = 0;
+
+  virtual void OnEventTargetingPolicyChanged() = 0;
+
+  // See description of function with same name in transient_window_client.
+  virtual bool ShouldRestackTransientChildren() = 0;
 
  protected:
   // Returns the WindowPort associated with a Window.

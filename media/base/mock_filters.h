@@ -39,6 +39,7 @@
 #include "media/base/video_frame.h"
 #include "media/base/video_renderer.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "url/origin.h"
 
 namespace media {
 
@@ -60,6 +61,8 @@ class MockPipelineClient : public Pipeline::Client {
   MOCK_METHOD1(OnVideoNaturalSizeChange, void(const gfx::Size&));
   MOCK_METHOD1(OnVideoOpacityChange, void(bool));
   MOCK_METHOD0(OnVideoAverageKeyframeDistanceUpdate, void());
+  MOCK_METHOD1(OnAudioDecoderChange, void(const std::string&));
+  MOCK_METHOD1(OnVideoDecoderChange, void(const std::string&));
 };
 
 class MockPipeline : public Pipeline {
@@ -71,8 +74,9 @@ class MockPipeline : public Pipeline {
   // take unique_ptr* instead of unique_ptr so that they can be mock methods.
   // Private stubs for Start() and Resume() implement the actual Pipeline
   // interface by forwarding to these mock methods.
-  MOCK_METHOD4(Start,
-               void(Demuxer*,
+  MOCK_METHOD5(Start,
+               void(StartType start_type,
+                    Demuxer*,
                     std::unique_ptr<Renderer>*,
                     Client*,
                     const PipelineStatusCB&));
@@ -93,6 +97,8 @@ class MockPipeline : public Pipeline {
   // Stop(). (Or better, remove it from the interface entirely.)
   MOCK_CONST_METHOD0(IsRunning, bool());
 
+  MOCK_CONST_METHOD0(IsSuspended, bool());
+
   // TODO(sandersd): These should be regular getters/setters.
   MOCK_CONST_METHOD0(GetPlaybackRate, double());
   MOCK_METHOD1(SetPlaybackRate, void(double));
@@ -110,7 +116,8 @@ class MockPipeline : public Pipeline {
 
  private:
   // Forwarding stubs (see comment above).
-  void Start(Demuxer* demuxer,
+  void Start(StartType start_type,
+             Demuxer* demuxer,
              std::unique_ptr<Renderer> renderer,
              Client* client,
              const PipelineStatusCB& seek_cb) override;
@@ -167,8 +174,6 @@ class MockDemuxerStream : public DemuxerStream {
   void set_audio_decoder_config(const AudioDecoderConfig& config);
   void set_video_decoder_config(const VideoDecoderConfig& config);
   void set_liveness(Liveness liveness);
-
-  VideoRotation video_rotation() override;
 
  private:
   Type type_;
@@ -459,7 +464,9 @@ class MockCdmSessionPromise : public NewSessionCdmPromise {
 
 class MockCdm : public ContentDecryptionModule {
  public:
-  MockCdm(const SessionMessageCB& session_message_cb,
+  MockCdm(const std::string& key_system,
+          const url::Origin& security_origin,
+          const SessionMessageCB& session_message_cb,
           const SessionClosedCB& session_closed_cb,
           const SessionKeysChangeCB& session_keys_change_cb,
           const SessionExpirationUpdateCB& session_expiration_update_cb);
@@ -524,10 +531,16 @@ class MockCdm : public ContentDecryptionModule {
   void CallSessionExpirationUpdateCB(const std::string& session_id,
                                      base::Time new_expiry_time);
 
+  const std::string& GetKeySystem() const { return key_system_; }
+  const url::Origin& GetSecurityOrigin() const { return security_origin_; }
+
  protected:
   ~MockCdm() override;
 
  private:
+  std::string key_system_;
+  url::Origin security_origin_;
+
   // Callbacks.
   SessionMessageCB session_message_cb_;
   SessionClosedCB session_closed_cb_;
@@ -547,7 +560,7 @@ class MockCdmFactory : public CdmFactory {
   // created CDM is passed to |cdm_created_cb|, a copy is kept (and available
   // using Cdm()). If |key_system| is empty, no CDM will be created.
   void Create(const std::string& key_system,
-              const GURL& security_origin,
+              const url::Origin& security_origin,
               const CdmConfig& cdm_config,
               const SessionMessageCB& session_message_cb,
               const SessionClosedCB& session_closed_cb,

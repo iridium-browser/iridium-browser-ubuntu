@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/policy/remote_commands/screenshot_delegate.h"
 
+#include <string>
+
 #include "base/memory/ptr_util.h"
 #include "base/syslog_logging.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -18,10 +20,7 @@
 
 namespace policy {
 
-ScreenshotDelegate::ScreenshotDelegate(
-    scoped_refptr<base::TaskRunner> blocking_task_runner)
-    : blocking_task_runner_(blocking_task_runner), weak_ptr_factory_(this) {
-}
+ScreenshotDelegate::ScreenshotDelegate() : weak_ptr_factory_(this) {}
 
 ScreenshotDelegate::~ScreenshotDelegate() {
 }
@@ -43,7 +42,7 @@ void ScreenshotDelegate::TakeSnapshot(
     const gfx::Rect& source_rect,
     const ui::GrabWindowSnapshotAsyncPNGCallback& callback) {
   ui::GrabWindowSnapshotAsyncPNG(
-      window, source_rect, blocking_task_runner_,
+      window, source_rect,
       base::Bind(&ScreenshotDelegate::StoreScreenshot,
                  weak_ptr_factory_.GetWeakPtr(), callback));
 }
@@ -60,11 +59,30 @@ std::unique_ptr<UploadJob> ScreenshotDelegate::CreateUploadJob(
       device_oauth2_token_service->GetRobotAccountId();
 
   SYSLOG(INFO) << "Creating upload job for screenshot";
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("remote_command_screenshot", R"(
+        semantics {
+          sender: "Chrome OS Remote Commands"
+          description: "Admins of kiosks are able to request screenshots "
+              "of the current screen shown on the kiosk, which is uploaded to "
+              "the device management server."
+          trigger: "Admin requests remote screenshot on the Admin Console."
+          data: "Screenshot of the current screen shown on the kiosk."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: NO
+          setting: "This feature cannot be disabled in settings, however this "
+              "request will only happen on explicit admin request and when no "
+              "user interaction or media capture happened since last reboot."
+          policy_exception_justification: "Requires explicit admin action."
+        }
+      )");
   return std::unique_ptr<UploadJob>(new UploadJobImpl(
       upload_url, robot_account_id, device_oauth2_token_service,
       system_request_context, delegate,
       base::WrapUnique(new UploadJobImpl::RandomMimeBoundaryGenerator),
-      base::ThreadTaskRunnerHandle::Get()));
+      traffic_annotation, base::ThreadTaskRunnerHandle::Get()));
 }
 
 void ScreenshotDelegate::StoreScreenshot(

@@ -37,12 +37,14 @@ Persistence.IsolatedFileSystem = class {
    * @param {string} path
    * @param {string} embedderPath
    * @param {!DOMFileSystem} domFileSystem
+   * @param {string} type
    */
-  constructor(manager, path, embedderPath, domFileSystem) {
+  constructor(manager, path, embedderPath, domFileSystem, type) {
     this._manager = manager;
     this._path = path;
     this._embedderPath = embedderPath;
     this._domFileSystem = domFileSystem;
+    this._type = type;
     this._excludedFoldersSetting = Common.settings.createLocalSetting('workspaceExcludedFolders', {});
     /** @type {!Set<string>} */
     this._excludedFolders = new Set(this._excludedFoldersSetting.get()[path] || []);
@@ -57,16 +59,17 @@ Persistence.IsolatedFileSystem = class {
    * @param {!Persistence.IsolatedFileSystemManager} manager
    * @param {string} path
    * @param {string} embedderPath
+   * @param {string} type
    * @param {string} name
    * @param {string} rootURL
    * @return {!Promise<?Persistence.IsolatedFileSystem>}
    */
-  static create(manager, path, embedderPath, name, rootURL) {
-    var domFileSystem = InspectorFrontendHost.isolatedFileSystem(name, rootURL);
+  static create(manager, path, embedderPath, type, name, rootURL) {
+    const domFileSystem = InspectorFrontendHost.isolatedFileSystem(name, rootURL);
     if (!domFileSystem)
       return Promise.resolve(/** @type {?Persistence.IsolatedFileSystem} */ (null));
 
-    var fileSystem = new Persistence.IsolatedFileSystem(manager, path, embedderPath, domFileSystem);
+    const fileSystem = new Persistence.IsolatedFileSystem(manager, path, embedderPath, domFileSystem, type);
     return fileSystem._initializeFilePaths()
         .then(() => fileSystem)
         .catchException(/** @type {?Persistence.IsolatedFileSystem} */ (null));
@@ -85,8 +88,8 @@ Persistence.IsolatedFileSystem = class {
    * @return {!Promise<?{modificationTime: !Date, size: number}>}
    */
   getMetadata(path) {
-    var fulfill;
-    var promise = new Promise(f => fulfill = f);
+    let fulfill;
+    const promise = new Promise(f => fulfill = f);
     this._domFileSystem.root.getFile(path, undefined, fileEntryLoaded, errorHandler);
     return promise;
 
@@ -101,7 +104,7 @@ Persistence.IsolatedFileSystem = class {
      * @param {!FileError} error
      */
     function errorHandler(error) {
-      var errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
+      const errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
       console.error(errorMessage + ' when getting file metadata \'' + path);
       fulfill(null);
     }
@@ -136,13 +139,20 @@ Persistence.IsolatedFileSystem = class {
   }
 
   /**
+   * @return {string}
+   */
+  type() {
+    return this._type;
+  }
+
+  /**
    * @return {!Promise}
    */
   _initializeFilePaths() {
-    var fulfill;
-    var promise = new Promise(x => fulfill = x);
-    var pendingRequests = 1;
-    var boundInnerCallback = innerCallback.bind(this);
+    let fulfill;
+    const promise = new Promise(x => fulfill = x);
+    let pendingRequests = 1;
+    const boundInnerCallback = innerCallback.bind(this);
     this._requestEntries('', boundInnerCallback);
     return promise;
 
@@ -151,19 +161,19 @@ Persistence.IsolatedFileSystem = class {
      * @this {Persistence.IsolatedFileSystem}
      */
     function innerCallback(entries) {
-      for (var i = 0; i < entries.length; ++i) {
-        var entry = entries[i];
+      for (let i = 0; i < entries.length; ++i) {
+        const entry = entries[i];
         if (!entry.isDirectory) {
-          if (this._isFileExcluded(entry.fullPath))
+          if (this.isFileExcluded(entry.fullPath))
             continue;
           this._initialFilePaths.add(entry.fullPath.substr(1));
         } else {
           if (entry.fullPath.endsWith('/.git')) {
-            var lastSlash = entry.fullPath.lastIndexOf('/');
-            var parentFolder = entry.fullPath.substring(1, lastSlash);
+            const lastSlash = entry.fullPath.lastIndexOf('/');
+            const parentFolder = entry.fullPath.substring(1, lastSlash);
             this._initialGitFolders.add(parentFolder);
           }
-          if (this._isFileExcluded(entry.fullPath + '/'))
+          if (this.isFileExcluded(entry.fullPath + '/'))
             continue;
           ++pendingRequests;
           this._requestEntries(entry.fullPath, boundInnerCallback);
@@ -175,66 +185,87 @@ Persistence.IsolatedFileSystem = class {
   }
 
   /**
+   * @param {string} folderPath
+   * @return {!Promise<?DirectoryEntry>}
+   */
+  async _createFoldersIfNotExist(folderPath) {
+    // Fast-path. If parent directory already exists we return it immidiatly.
+    let dirEntry = await new Promise(
+        resolve => this._domFileSystem.root.getDirectory(folderPath, undefined, resolve, () => resolve(null)));
+    if (dirEntry)
+      return dirEntry;
+    const paths = folderPath.split('/');
+    let activePath = '';
+    for (const path of paths) {
+      activePath = activePath + '/' + path;
+      dirEntry = await this._innerCreateFolderIfNeeded(activePath);
+      if (!dirEntry)
+        return null;
+    }
+    return dirEntry;
+  }
+
+  /**
+   * @param {string} path
+   * @return {!Promise<?DirectoryEntry>}
+   */
+  _innerCreateFolderIfNeeded(path) {
+    return new Promise(resolve => {
+      this._domFileSystem.root.getDirectory(path, {create: true}, dirEntry => resolve(dirEntry), error => {
+        const errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
+        console.error(errorMessage + ' trying to create directory \'' + path + '\'');
+        resolve(null);
+      });
+    });
+  }
+
+  /**
    * @param {string} path
    * @param {?string} name
-   * @param {function(?string)} callback
+   * @return {!Promise<?string>}
    */
-  createFile(path, name, callback) {
-    var newFileIndex = 1;
-    if (!name)
-      name = 'NewFile';
-    var nameCandidate;
-
-    this._domFileSystem.root.getDirectory(path, undefined, dirEntryLoaded.bind(this), errorHandler.bind(this));
-
-    /**
-     * @param {!DirectoryEntry} dirEntry
-     * @this {Persistence.IsolatedFileSystem}
-     */
-    function dirEntryLoaded(dirEntry) {
-      var nameCandidate = name;
-      if (newFileIndex > 1)
-        nameCandidate += newFileIndex;
-      ++newFileIndex;
-      dirEntry.getFile(nameCandidate, {create: true, exclusive: true}, fileCreated, fileCreationError.bind(this));
-
-      function fileCreated(entry) {
-        callback(entry.fullPath.substr(1));
-      }
-
-      /**
-       * @this {Persistence.IsolatedFileSystem}
-       */
-      function fileCreationError(error) {
-        if (error.name === 'InvalidModificationError') {
-          dirEntryLoaded.call(this, dirEntry);
-          return;
-        }
-        var errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
-        console.error(
-            errorMessage + ' when testing if file exists \'' + (this._path + '/' + path + '/' + nameCandidate) + '\'');
-        callback(null);
-      }
-    }
+  async createFile(path, name) {
+    const dirEntry = await this._createFoldersIfNotExist(path);
+    if (!dirEntry)
+      return null;
+    const fileEntry = await createFileCandidate.call(this, name || 'NewFile');
+    if (!fileEntry)
+      return null;
+    return fileEntry.fullPath.substr(1);
 
     /**
+     * @param {string} name
+     * @param {number=} newFileIndex
+     * @return {!Promise<?FileEntry>}
      * @this {Persistence.IsolatedFileSystem}
      */
-    function errorHandler(error) {
-      var errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
-      var filePath = this._path + '/' + path;
-      if (nameCandidate)
-        filePath += '/' + nameCandidate;
-      console.error(errorMessage + ' when getting content for file \'' + (filePath) + '\'');
-      callback(null);
+    function createFileCandidate(name, newFileIndex) {
+      return new Promise(resolve => {
+        const nameCandidate = name + (newFileIndex || '');
+        dirEntry.getFile(nameCandidate, {create: true, exclusive: true}, resolve, error => {
+          if (error.name === 'InvalidModificationError') {
+            resolve(createFileCandidate.call(this, name, (newFileIndex ? newFileIndex + 1 : 1)));
+            return;
+          }
+          const errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
+          console.error(
+              errorMessage + ' when testing if file exists \'' + (this._path + '/' + path + '/' + nameCandidate) +
+              '\'');
+          resolve(null);
+        });
+      });
     }
   }
 
   /**
    * @param {string} path
+   * @return {!Promise<boolean>}
    */
   deleteFile(path) {
+    let resolveCallback;
+    const promise = new Promise(resolve => resolveCallback = resolve);
     this._domFileSystem.root.getFile(path, undefined, fileEntryLoaded.bind(this), errorHandler.bind(this));
+    return promise;
 
     /**
      * @param {!FileEntry} fileEntry
@@ -245,6 +276,7 @@ Persistence.IsolatedFileSystem = class {
     }
 
     function fileEntryRemoved() {
+      resolveCallback(true);
     }
 
     /**
@@ -254,84 +286,83 @@ Persistence.IsolatedFileSystem = class {
      * TODO(jsbell): Update externs replacing FileError with DOMException. https://crbug.com/496901
      */
     function errorHandler(error) {
-      var errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
+      const errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
       console.error(errorMessage + ' when deleting file \'' + (this._path + '/' + path) + '\'');
+      resolveCallback(false);
     }
   }
 
   /**
    * @param {string} path
-   * @return {!Promise<?string>}
+   * @return {!Promise<?Blob>}
    */
-  requestFileContentPromise(path) {
-    var fulfill;
-    var promise = new Promise(x => fulfill = x);
-    this.requestFileContent(path, fulfill);
-    return promise;
-  }
+  requestFileBlob(path) {
+    return new Promise(resolve => {
+      this._domFileSystem.root.getFile(path, undefined, entry => {
+        entry.file(resolve, errorHandler.bind(this));
+      }, errorHandler.bind(this));
 
-  /**
-   * @param {string} path
-   * @param {function(?string)} callback
-   */
-  requestFileContent(path, callback) {
-    this._domFileSystem.root.getFile(path, undefined, fileEntryLoaded.bind(this), errorHandler.bind(this));
+      /**
+       * @this {Persistence.IsolatedFileSystem}
+       */
+      function errorHandler(error) {
+        if (error.name === 'NotFoundError') {
+          resolve(null);
+          return;
+        }
 
-    /**
-     * @param {!FileEntry} entry
-     * @this {Persistence.IsolatedFileSystem}
-     */
-    function fileEntryLoaded(entry) {
-      entry.file(fileLoaded, errorHandler.bind(this));
-    }
-
-    /**
-     * @param {!Blob} file
-     */
-    function fileLoaded(file) {
-      var reader = new FileReader();
-      reader.onloadend = readerLoadEnd;
-      if (Persistence.IsolatedFileSystem.ImageExtensions.has(Common.ParsedURL.extractExtension(path)))
-        reader.readAsDataURL(file);
-      else
-        reader.readAsText(file);
-    }
-
-    /**
-     * @this {!FileReader}
-     */
-    function readerLoadEnd() {
-      /** @type {?string} */
-      var string = null;
-      try {
-        string = /** @type {string} */ (this.result);
-      } catch (e) {
-        console.error('Can\'t read file: ' + path + ': ' + e);
+        const errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
+        console.error(errorMessage + ' when getting content for file \'' + (this._path + '/' + path) + '\'');
+        resolve(null);
       }
-      callback(string);
-    }
+    });
+  }
 
-    /**
-     * @this {Persistence.IsolatedFileSystem}
-     */
-    function errorHandler(error) {
-      if (error.name === 'NotFoundError') {
-        callback(null);
+  /**
+   * @param {string} path
+   * @param {function(?string,boolean)} callback
+   */
+  async requestFileContent(path, callback) {
+    const blob = await this.requestFileBlob(path);
+    if (!blob)
+      return null;
+
+    const reader = new FileReader();
+    const extension = Common.ParsedURL.extractExtension(path);
+    const encoded = Persistence.IsolatedFileSystem.BinaryExtensions.has(extension);
+    reader.onloadend = content => {
+      if (reader.error) {
+        console.error('Can\'t read file: ' + path + ': ' + reader.error);
+        callback(null, false);
         return;
       }
+      let result;
+      try {
+        result = reader.result;
+      } catch (e) {
+        result = null;
+        console.error('Can\'t read file: ' + path + ': ' + e);
+      }
+      if (result === undefined || result === null) {
+        callback(null, false);
+        return;
+      }
+      callback(encoded ? btoa(result) : result, encoded);
+    };
 
-      var errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
-      console.error(errorMessage + ' when getting content for file \'' + (this._path + '/' + path) + '\'');
-      callback(null);
-    }
+    if (encoded)
+      reader.readAsBinaryString(blob);
+    else
+      reader.readAsText(blob);
   }
 
   /**
    * @param {string} path
    * @param {string} content
+   * @param {boolean} isBase64
    * @param {function()} callback
    */
-  setFileContent(path, content, callback) {
+  setFileContent(path, content, isBase64, callback) {
     Host.userMetrics.actionTaken(Host.UserMetrics.Action.FileSavedInWorkspace);
     this._domFileSystem.root.getFile(path, {create: true}, fileEntryLoaded.bind(this), errorHandler.bind(this));
 
@@ -347,10 +378,14 @@ Persistence.IsolatedFileSystem = class {
      * @param {!FileWriter} fileWriter
      * @this {Persistence.IsolatedFileSystem}
      */
-    function fileWriterCreated(fileWriter) {
+    async function fileWriterCreated(fileWriter) {
       fileWriter.onerror = errorHandler.bind(this);
       fileWriter.onwriteend = fileWritten;
-      var blob = new Blob([content], {type: 'text/plain'});
+      let blob;
+      if (isBase64)
+        blob = await(await fetch(`data:application/octet-stream;base64,${content}`)).blob();
+      else
+        blob = new Blob([content], {type: 'text/plain'});
       fileWriter.write(blob);
 
       function fileWritten() {
@@ -363,7 +398,7 @@ Persistence.IsolatedFileSystem = class {
      * @this {Persistence.IsolatedFileSystem}
      */
     function errorHandler(error) {
-      var errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
+      const errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
       console.error(errorMessage + ' when setting content for file \'' + (this._path + '/' + path) + '\'');
       callback();
     }
@@ -380,8 +415,8 @@ Persistence.IsolatedFileSystem = class {
       callback(false);
       return;
     }
-    var fileEntry;
-    var dirEntry;
+    let fileEntry;
+    let dirEntry;
 
     this._domFileSystem.root.getFile(path, undefined, fileEntryLoaded.bind(this), errorHandler.bind(this));
 
@@ -437,7 +472,7 @@ Persistence.IsolatedFileSystem = class {
      * @this {Persistence.IsolatedFileSystem}
      */
     function errorHandler(error) {
-      var errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
+      const errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
       console.error(errorMessage + ' when renaming file \'' + (this._path + '/' + path) + '\' to \'' + newName + '\'');
       callback(false);
     }
@@ -448,8 +483,8 @@ Persistence.IsolatedFileSystem = class {
    * @param {function(!Array.<!FileEntry>)} callback
    */
   _readDirectory(dirEntry, callback) {
-    var dirReader = dirEntry.createReader();
-    var entries = [];
+    const dirReader = dirEntry.createReader();
+    let entries = [];
 
     function innerCallback(results) {
       if (!results.length) {
@@ -467,7 +502,7 @@ Persistence.IsolatedFileSystem = class {
     dirReader.readEntries(innerCallback, errorHandler);
 
     function errorHandler(error) {
-      var errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
+      const errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
       console.error(errorMessage + ' when reading directory \'' + dirEntry.fullPath + '\'');
       callback([]);
     }
@@ -489,14 +524,14 @@ Persistence.IsolatedFileSystem = class {
     }
 
     function errorHandler(error) {
-      var errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
+      const errorMessage = Persistence.IsolatedFileSystem.errorMessage(error);
       console.error(errorMessage + ' when requesting entry \'' + path + '\'');
       callback([]);
     }
   }
 
   _saveExcludedFolders() {
-    var settingValue = this._excludedFoldersSetting.get();
+    const settingValue = this._excludedFoldersSetting.get();
     settingValue[this._path] = this._excludedFolders.valuesArray();
     this._excludedFoldersSetting.set(settingValue);
   }
@@ -520,7 +555,7 @@ Persistence.IsolatedFileSystem = class {
   }
 
   fileSystemRemoved() {
-    var settingValue = this._excludedFoldersSetting.get();
+    const settingValue = this._excludedFoldersSetting.get();
     delete settingValue[this._path];
     this._excludedFoldersSetting.set(settingValue);
   }
@@ -529,10 +564,10 @@ Persistence.IsolatedFileSystem = class {
    * @param {string} folderPath
    * @return {boolean}
    */
-  _isFileExcluded(folderPath) {
+  isFileExcluded(folderPath) {
     if (this._excludedFolders.has(folderPath))
       return true;
-    var regex = this._manager.workspaceFolderExcludePatternSetting().asRegExp();
+    const regex = this._manager.workspaceFolderExcludePatternSetting().asRegExp();
     return !!(regex && regex.test(folderPath));
   }
 
@@ -550,7 +585,7 @@ Persistence.IsolatedFileSystem = class {
    */
   searchInPath(query, progress) {
     return new Promise(resolve => {
-      var requestId = this._manager.registerCallback(innerCallback);
+      const requestId = this._manager.registerCallback(innerCallback);
       InspectorFrontendHost.searchInPath(requestId, this._embedderPath, query);
 
       /**
@@ -568,10 +603,23 @@ Persistence.IsolatedFileSystem = class {
    */
   indexContent(progress) {
     progress.setTotalWork(1);
-    var requestId = this._manager.registerProgress(progress);
+    const requestId = this._manager.registerProgress(progress);
     InspectorFrontendHost.indexPath(requestId, this._embedderPath);
   }
 };
 
 Persistence.IsolatedFileSystem.ImageExtensions =
     new Set(['jpeg', 'jpg', 'svg', 'gif', 'webp', 'png', 'ico', 'tiff', 'tif', 'bmp']);
+
+Persistence.IsolatedFileSystem.BinaryExtensions = new Set([
+  // Executable extensions, roughly taken from https://en.wikipedia.org/wiki/Comparison_of_executable_file_formats
+  'cmd', 'com', 'exe',
+  // Archive extensions, roughly taken from https://en.wikipedia.org/wiki/List_of_archive_formats
+  'a', 'ar', 'iso', 'tar', 'bz2', 'gz', 'lz', 'lzma', 'z', '7z', 'apk', 'arc', 'cab', 'dmg', 'jar', 'pak', 'rar', 'zip',
+  // Audio file extensions, roughly taken from https://en.wikipedia.org/wiki/Audio_file_format#List_of_formats
+  '3gp', 'aac', 'aiff', 'flac', 'm4a', 'mmf', 'mp3', 'ogg', 'oga', 'raw', 'sln', 'wav', 'wma', 'webm',
+  // Video file extensions, roughly taken from https://en.wikipedia.org/wiki/Video_file_format
+  'mkv', 'flv', 'vob', 'ogv', 'gifv', 'avi', 'mov', 'qt', 'mp4', 'm4p', 'm4v', 'mpg', 'mpeg',
+  // Image file extensions
+  'jpeg', 'jpg', 'gif', 'webp', 'png', 'ico', 'tiff', 'tif', 'bmp'
+]);

@@ -28,12 +28,12 @@
 #ifndef LayoutTreeBuilder_h
 #define LayoutTreeBuilder_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/dom/Document.h"
 #include "core/dom/LayoutTreeBuilderTraversal.h"
 #include "core/dom/Node.h"
 #include "core/dom/Text.h"
 #include "core/layout/LayoutObject.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -75,7 +75,19 @@ class LayoutTreeBuilder {
         layout_object_parent_->GetNode()->NeedsAttach())
       return nullptr;
 
-    return LayoutTreeBuilderTraversal::NextSiblingLayoutObject(*node_);
+    LayoutObject* next =
+        LayoutTreeBuilderTraversal::NextSiblingLayoutObject(*node_);
+
+    // If a text node is wrapped in an anonymous inline for display:contents
+    // (see CreateInlineWrapperForDisplayContents()), use the wrapper as the
+    // next layout object. Otherwise we would need to add code to various
+    // AddChild() implementations to walk up the tree to find the correct
+    // layout tree parent/siblings.
+    if (next && next->IsText() && next->Parent()->IsAnonymous() &&
+        next->Parent()->IsInline()) {
+      return next->Parent();
+    }
+    return next;
   }
 
   Member<NodeType> node_;
@@ -91,7 +103,7 @@ class LayoutTreeBuilderForElement : public LayoutTreeBuilder<Element> {
       CreateLayoutObject();
   }
 
-  ComputedStyle* ResolvedStyle() const { return style_.Get(); }
+  ComputedStyle* ResolvedStyle() const { return style_.get(); }
 
  private:
   LayoutObject* ParentLayoutObject() const;
@@ -100,7 +112,7 @@ class LayoutTreeBuilderForElement : public LayoutTreeBuilder<Element> {
   ComputedStyle& Style() const;
   void CreateLayoutObject();
 
-  mutable RefPtr<ComputedStyle> style_;
+  mutable scoped_refptr<ComputedStyle> style_;
 };
 
 class LayoutTreeBuilderForText : public LayoutTreeBuilder<Text> {
@@ -110,8 +122,12 @@ class LayoutTreeBuilderForText : public LayoutTreeBuilder<Text> {
                            ComputedStyle* style_from_parent)
       : LayoutTreeBuilder(text, layout_parent), style_(style_from_parent) {}
 
-  RefPtr<ComputedStyle> style_;
   void CreateLayoutObject();
+
+ private:
+  LayoutObject* CreateInlineWrapperForDisplayContentsIfNeeded();
+
+  scoped_refptr<ComputedStyle> style_;
 };
 
 }  // namespace blink

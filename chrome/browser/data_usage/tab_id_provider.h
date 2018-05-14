@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-#include "base/callback_forward.h"
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/supports_user_data.h"
@@ -15,11 +15,8 @@
 #include "content/public/browser/global_request_id.h"
 
 namespace base {
-class TaskRunner;
-}
-
-namespace tracked_objects {
 class Location;
+class TaskRunner;
 }
 
 namespace chrome_browser_data_usage {
@@ -53,14 +50,14 @@ class TabIdProvider : public base::SupportsUserData::Data {
   // Constructs a tab ID provider, posting the |tab_id_getter| task onto
   // |task_runner|.
   TabIdProvider(base::TaskRunner* task_runner,
-                const tracked_objects::Location& from_here,
-                const base::Callback<int32_t(void)>& tab_id_getter);
+                const base::Location& from_here,
+                base::OnceCallback<int32_t(void)> tab_id_getter);
 
   ~TabIdProvider() override;
 
   // Calls |callback| with the tab ID, either immediately if it's already
   // available, or later once it becomes available.
-  void ProvideTabId(const base::Callback<void(int32_t)>& callback);
+  void ProvideTabId(base::OnceCallback<void(int32_t)> callback);
 
   base::WeakPtr<TabIdProvider> GetWeakPtr();
 

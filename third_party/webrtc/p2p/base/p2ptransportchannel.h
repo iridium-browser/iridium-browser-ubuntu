@@ -17,8 +17,8 @@
 // When all of the available connections become invalid (non-writable), we
 // kick off a process of determining more candidates and more connections.
 //
-#ifndef WEBRTC_P2P_BASE_P2PTRANSPORTCHANNEL_H_
-#define WEBRTC_P2P_BASE_P2PTRANSPORTCHANNEL_H_
+#ifndef P2P_BASE_P2PTRANSPORTCHANNEL_H_
+#define P2P_BASE_P2PTRANSPORTCHANNEL_H_
 
 #include <map>
 #include <memory>
@@ -26,15 +26,21 @@
 #include <string>
 #include <vector>
 
-#include "webrtc/p2p/base/candidate.h"
-#include "webrtc/p2p/base/candidatepairinterface.h"
-#include "webrtc/p2p/base/icetransportinternal.h"
-#include "webrtc/p2p/base/portallocator.h"
-#include "webrtc/p2p/base/portinterface.h"
-#include "webrtc/rtc_base/asyncpacketsocket.h"
-#include "webrtc/rtc_base/constructormagic.h"
-#include "webrtc/rtc_base/random.h"
-#include "webrtc/rtc_base/sigslot.h"
+#include "api/candidate.h"
+#include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.h"
+#include "logging/rtc_event_log/icelogger.h"
+#include "p2p/base/candidatepairinterface.h"
+#include "p2p/base/icetransportinternal.h"
+#include "p2p/base/portallocator.h"
+#include "p2p/base/portinterface.h"
+#include "rtc_base/asyncpacketsocket.h"
+#include "rtc_base/constructormagic.h"
+#include "rtc_base/random.h"
+#include "rtc_base/sigslot.h"
+
+namespace webrtc {
+class RtcEventLog;
+}  // namespace webrtc
 
 namespace cricket {
 
@@ -47,6 +53,11 @@ extern const int STRONG_PING_INTERVAL;
 extern const int WEAK_OR_STABILIZING_WRITABLE_CONNECTION_PING_INTERVAL;
 extern const int STRONG_AND_STABLE_WRITABLE_CONNECTION_PING_INTERVAL;
 static const int MIN_PINGS_AT_WEAK_PING_INTERVAL = 3;
+
+bool IceCredentialsChanged(const std::string& old_ufrag,
+                           const std::string& old_pwd,
+                           const std::string& new_ufrag,
+                           const std::string& new_pwd);
 
 // Adds the port on which the candidate originated.
 class RemoteCandidate : public Candidate {
@@ -67,17 +78,18 @@ class P2PTransportChannel : public IceTransportInternal,
  public:
   P2PTransportChannel(const std::string& transport_name,
                       int component,
-                      PortAllocator* allocator);
-  virtual ~P2PTransportChannel();
+                      PortAllocator* allocator,
+                      webrtc::RtcEventLog* event_log = nullptr);
+  ~P2PTransportChannel() override;
 
   // From TransportChannelImpl:
   IceTransportState GetState() const override;
-  const std::string& transport_name() const override { return transport_name_; }
-  int component() const override { return component_; }
-  bool writable() const override { return writable_; }
-  bool receiving() const override { return receiving_; }
+  const std::string& transport_name() const override;
+  int component() const override;
+  bool writable() const override;
+  bool receiving() const override;
   void SetIceRole(IceRole role) override;
-  IceRole GetIceRole() const override { return ice_role_; }
+  IceRole GetIceRole() const override;
   void SetIceTiebreaker(uint64_t tiebreaker) override;
   void SetIceParameters(const IceParameters& ice_params) override;
   void SetRemoteIceParameters(const IceParameters& ice_params) override;
@@ -86,9 +98,7 @@ class P2PTransportChannel : public IceTransportInternal,
   // IceTransportChannel does not depend on this.
   void Connect() {}
   void MaybeStartGathering() override;
-  IceGatheringState gathering_state() const override {
-    return gathering_state_;
-  }
+  IceGatheringState gathering_state() const override;
   void AddRemoteCandidate(const Candidate& candidate) override;
   void RemoveRemoteCandidate(const Candidate& candidate) override;
   // Sets the parameters in IceConfig. We do not set them blindly. Instead, we
@@ -107,8 +117,9 @@ class P2PTransportChannel : public IceTransportInternal,
                  int flags) override;
   int SetOption(rtc::Socket::Option opt, int value) override;
   bool GetOption(rtc::Socket::Option opt, int* value) override;
-  int GetError() override { return error_; }
-  bool GetStats(std::vector<ConnectionInfo>* stats) override;
+  int GetError() override;
+  bool GetStats(std::vector<ConnectionInfo>* candidate_pair_stats_list,
+                std::vector<CandidateStats>* candidate_stats_list) override;
   rtc::Optional<int> GetRttEstimate() override;
 
   // TODO(honghaiz): Remove this method once the reference of it in
@@ -128,6 +139,8 @@ class P2PTransportChannel : public IceTransportInternal,
   void PruneAllPorts();
   int receiving_timeout() const { return config_.receiving_timeout; }
   int check_receiving_interval() const { return check_receiving_interval_; }
+
+  rtc::Optional<rtc::NetworkRoute> network_route() const override;
 
   // Helper method used only in unittest.
   rtc::DiffServCodePoint DefaultDscpValue() const;
@@ -189,6 +202,11 @@ class P2PTransportChannel : public IceTransportInternal,
   // Start pinging if we haven't already started, and we now have a connection
   // that's pingable.
   void MaybeStartPinging();
+
+  int CompareCandidatePairNetworks(
+      const Connection* a,
+      const Connection* b,
+      rtc::Optional<rtc::AdapterType> network_preference) const;
 
   // The methods below return a positive value if |a| is preferable to |b|,
   // a negative value if |b| is preferable, and 0 if they're equally preferable.
@@ -282,6 +300,9 @@ class P2PTransportChannel : public IceTransportInternal,
   void OnCheckAndPing();
   void OnRegatherOnFailedNetworks();
   void OnRegatherOnAllNetworks();
+
+  void LogCandidatePairEvent(Connection* conn,
+                             webrtc::IceCandidatePairEventType type);
 
   uint32_t GetNominationAttr(Connection* conn) const;
   bool GetUseCandidateAttr(Connection* conn, NominationMode mode) const;
@@ -402,9 +423,13 @@ class P2PTransportChannel : public IceTransportInternal,
 
   webrtc::MetricsObserverInterface* metrics_observer_ = nullptr;
 
+  rtc::Optional<rtc::NetworkRoute> network_route_;
+
+  webrtc::IceEventLog ice_event_log_;
+
   RTC_DISALLOW_COPY_AND_ASSIGN(P2PTransportChannel);
 };
 
 }  // namespace cricket
 
-#endif  // WEBRTC_P2P_BASE_P2PTRANSPORTCHANNEL_H_
+#endif  // P2P_BASE_P2PTRANSPORTCHANNEL_H_

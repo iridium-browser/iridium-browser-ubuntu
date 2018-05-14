@@ -3,12 +3,13 @@
 // found in the LICENSE file.
 
 #include "cc/test/fake_layer_tree_frame_sink_client.h"
-#include "cc/output/layer_tree_frame_sink.h"
+
+#include "cc/trees/layer_tree_frame_sink.h"
 
 namespace cc {
 
 void FakeLayerTreeFrameSinkClient::SetBeginFrameSource(
-    BeginFrameSource* source) {
+    viz::BeginFrameSource* source) {
   begin_frame_source_ = source;
 }
 

@@ -4,13 +4,15 @@
 
 #include "modules/serviceworkers/FetchEvent.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ToV8ForCore.h"
+#include "core/dom/AbortSignal.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/fetch/BytesConsumerForDataConsumerHandle.h"
+#include "core/fetch/Request.h"
+#include "core/fetch/Response.h"
 #include "core/frame/UseCounter.h"
 #include "core/timing/WorkerGlobalScopePerformance.h"
-#include "modules/fetch/BytesConsumerForDataConsumerHandle.h"
-#include "modules/fetch/Request.h"
-#include "modules/fetch/Response.h"
 #include "modules/serviceworkers/FetchRespondWithObserver.h"
 #include "modules/serviceworkers/ServiceWorkerError.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
@@ -18,8 +20,6 @@
 #include "platform/bindings/V8PrivateProperty.h"
 #include "platform/loader/fetch/ResourceTimingInfo.h"
 #include "platform/network/NetworkUtils.h"
-#include "platform/wtf/PtrUtil.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebURLResponse.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerError.h"
 
@@ -74,10 +74,12 @@ const AtomicString& FetchEvent::InterfaceName() const {
 bool FetchEvent::HasPendingActivity() const {
   // Prevent V8 from garbage collecting the wrapper object while waiting for the
   // preload response. This is in order to keep the resolver of preloadResponse
-  // Promise alive.
-  return preload_response_property_->GetState() ==
-             PreloadResponseProperty::kPending &&
-         GetExecutionContext();
+  // Promise alive. Note that |preload_response_property_| can be nullptr as
+  // GC can run while running the FetchEvent constructor, before the member is
+  // set. If it isn't set we treat it as a pending state.
+  return !preload_response_property_ ||
+         preload_response_property_->GetState() ==
+             PreloadResponseProperty::kPending;
 }
 
 FetchEvent::FetchEvent(ScriptState* script_state,
@@ -121,7 +123,7 @@ FetchEvent::FetchEvent(ScriptState* script_state,
   }
 }
 
-FetchEvent::~FetchEvent() {}
+FetchEvent::~FetchEvent() = default;
 
 void FetchEvent::OnNavigationPreloadResponse(
     ScriptState* script_state,
@@ -133,12 +135,15 @@ void FetchEvent::OnNavigationPreloadResponse(
   DCHECK(!preload_response_);
   ScriptState::Scope scope(script_state);
   preload_response_ = std::move(response);
+  // TODO(ricea): Verify that this response can't be aborted from JS.
   FetchResponseData* response_data =
       data_consume_handle
           ? FetchResponseData::CreateWithBuffer(new BodyStreamBuffer(
-                script_state, new BytesConsumerForDataConsumerHandle(
-                                  ExecutionContext::From(script_state),
-                                  std::move(data_consume_handle))))
+                script_state,
+                new BytesConsumerForDataConsumerHandle(
+                    ExecutionContext::From(script_state),
+                    std::move(data_consume_handle)),
+                new AbortSignal(ExecutionContext::From(script_state))))
           : FetchResponseData::Create();
   Vector<KURL> url_list(1);
   url_list[0] = preload_response_->Url();
@@ -189,8 +194,10 @@ void FetchEvent::OnNavigationPreloadComplete(
   // According to the current spec of Resource Timing, the initiator type of
   // navigation preload request must be "other". But it may change when the spec
   // discussion is settled. https://github.com/w3c/resource-timing/issues/110
-  RefPtr<ResourceTimingInfo> info = ResourceTimingInfo::Create(
-      "other", resource_response.GetResourceLoadTiming()->RequestTime(),
+  scoped_refptr<ResourceTimingInfo> info = ResourceTimingInfo::Create(
+      "other",
+      TimeTicksInSeconds(
+          resource_response.GetResourceLoadTiming()->RequestTime()),
       false /* is_main_resource */);
   info->SetNegativeAllowed(true);
   info->SetLoadFinishTime(completion_time);
@@ -198,10 +205,10 @@ void FetchEvent::OnNavigationPreloadComplete(
   info->SetFinalResponse(resource_response);
   info->AddFinalTransferSize(encoded_data_length);
   WorkerGlobalScopePerformance::performance(*worker_global_scope)
-      ->AddResourceTiming(*info);
+      ->GenerateAndAddResourceTiming(*info);
 }
 
-DEFINE_TRACE(FetchEvent) {
+void FetchEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(observer_);
   visitor->Trace(request_);
   visitor->Trace(preload_response_property_);

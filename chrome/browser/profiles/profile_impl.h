@@ -18,7 +18,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl_io_data.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "content/public/browser/content_browser_client.h"
 #include "extensions/features/features.h"
@@ -91,6 +91,7 @@ class ProfileImpl : public Profile {
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
       override;
   content::PermissionManager* GetPermissionManager() override;
+  content::BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   net::URLRequestContextGetter* CreateRequestContext(
       content::ProtocolHandlerMap* protocol_handlers,
@@ -118,6 +119,7 @@ class ProfileImpl : public Profile {
   void DestroyOffTheRecordProfile() override;
   bool HasOffTheRecordProfile() override;
   Profile* GetOriginalProfile() override;
+  const Profile* GetOriginalProfile() const override;
   bool IsSupervised() const override;
   bool IsChild() const override;
   bool IsLegacySupervised() const override;
@@ -137,22 +139,18 @@ class ProfileImpl : public Profile {
   base::FilePath last_selected_directory() override;
   void set_last_selected_directory(const base::FilePath& path) override;
   chrome_browser_net::Predictor* GetNetworkPredictor() override;
-  DevToolsNetworkControllerHandle* GetDevToolsNetworkControllerHandle()
-      override;
-  void ClearNetworkingHistorySince(base::Time time,
-                                   const base::Closure& completion) override;
   GURL GetHomePage() override;
   bool WasCreatedByVersionOrLater(const std::string& version) override;
   void SetExitType(ExitType exit_type) override;
   ExitType GetLastSessionExitType() override;
+  bool ShouldRestoreOldSessionCookies() override;
+  bool ShouldPersistSessionCookies() override;
 
 #if defined(OS_CHROMEOS)
   void ChangeAppLocale(const std::string& locale, AppLocaleChangedVia) override;
   void OnLogin() override;
   void InitChromeOSPreferences() override;
 #endif  // defined(OS_CHROMEOS)
-
-  PrefProxyConfigTracker* GetProxyConfigTracker() override;
 
  private:
 #if defined(OS_CHROMEOS)
@@ -170,7 +168,7 @@ class ProfileImpl : public Profile {
   ProfileImpl(const base::FilePath& path,
               Delegate* delegate,
               CreateMode create_mode,
-              base::SequencedTaskRunner* sequenced_task_runner);
+              scoped_refptr<base::SequencedTaskRunner> io_task_runner);
 
   // Does final initialization. Should be called after prefs were loaded.
   void DoFinalInit();
@@ -193,11 +191,7 @@ class ProfileImpl : public Profile {
   void UpdateAvatarInStorage();
   void UpdateIsEphemeralInStorage();
 
-  void GetCacheParameters(bool is_media_context,
-                          base::FilePath* cache_path,
-                          int* max_size);
-
-  PrefProxyConfigTracker* CreateProxyConfigTracker();
+  void GetMediaCacheParameters(base::FilePath* cache_path, int* max_size);
 
   std::unique_ptr<domain_reliability::DomainReliabilityMonitor>
   CreateDomainReliabilityMonitor(PrefService* local_state);
@@ -210,6 +204,9 @@ class ProfileImpl : public Profile {
 
   base::FilePath path_;
   base::FilePath base_cache_path_;
+
+  // Task runner used for file access in the profile path.
+  scoped_refptr<base::SequencedTaskRunner> io_task_runner_;
 
   // !!! BIG HONKING WARNING !!!
   //  The order of the members below is important. Do not change it unless
@@ -262,8 +259,6 @@ class ProfileImpl : public Profile {
 
   std::unique_ptr<chromeos::LocaleChangeGuard> locale_change_guard_;
 #endif
-
-  std::unique_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   // TODO(mmenke):  This should be removed from the Profile, and use a
   // BrowserContextKeyedService instead.

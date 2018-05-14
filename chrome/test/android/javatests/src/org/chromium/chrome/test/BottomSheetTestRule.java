@@ -4,29 +4,30 @@
 
 package org.chromium.chrome.test;
 
+import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 import static org.chromium.chrome.browser.ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE;
-import static org.chromium.chrome.test.BottomSheetTestRule.ENABLE_CHROME_HOME;
-import static org.chromium.chrome.test.ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG;
 
-import android.support.v7.widget.RecyclerView;
+import android.support.test.InstrumentationRegistry;
+import android.support.test.uiautomator.UiDevice;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.BottomSheetContent;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.StateChangeReason;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContentController;
 import org.chromium.chrome.browser.widget.bottomsheet.EmptyBottomSheetObserver;
+import org.chromium.chrome.test.util.browser.ChromeHome;
+import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.chrome.test.util.browser.RecyclerViewTestUtils;
 
 /**
  * Junit4 rule for tests testing the Chrome Home bottom sheet.
  */
-@CommandLineFlags.Add({ENABLE_CHROME_HOME, DISABLE_FIRST_RUN_EXPERIENCE,
-        DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({DISABLE_FIRST_RUN_EXPERIENCE})
 public class BottomSheetTestRule extends ChromeTabbedActivityTestRule {
     /** An observer used to record events that occur with respect to the bottom sheet. */
     public static class Observer extends EmptyBottomSheetObserver {
@@ -64,12 +65,12 @@ public class BottomSheetTestRule extends ChromeTabbedActivityTestRule {
         }
 
         @Override
-        public void onSheetOpened() {
+        public void onSheetOpened(@StateChangeReason int reason) {
             mOpenedCallbackHelper.notifyCalled();
         }
 
         @Override
-        public void onSheetClosed() {
+        public void onSheetClosed(@StateChangeReason int reason) {
             mClosedCallbackHelper.notifyCalled();
         }
 
@@ -89,54 +90,42 @@ public class BottomSheetTestRule extends ChromeTabbedActivityTestRule {
         }
     }
 
-    public static final String ENABLE_CHROME_HOME =
-            "enable-features=" + ChromeFeatureList.CHROME_HOME;
-
     /** A handle to the sheet's observer. */
     private Observer mObserver;
 
-    /** A handle to the bottom sheet. */
-    private BottomSheet mBottomSheet;
+    private ChromeHome.Processor mChromeHomeEnabler = new ChromeHome.Processor();
 
-    /** A handle to the {@link BottomSheetContentController}. */
-    private BottomSheetContentController mBottomSheetContentController;
-
-    private boolean mOldChromeHomeFlagValue;
+    private @BottomSheet.SheetState int mStartingBottomSheetState = BottomSheet.SHEET_STATE_FULL;
 
     protected void beforeStartingActivity() {
-        // Chrome relies on a shared preference to determine if the ChromeHome feature is enabled
-        // during start up, so we need to manually set the preference to enable ChromeHome before
-        // starting Chrome.
-        ChromePreferenceManager prefManager = ChromePreferenceManager.getInstance();
-        mOldChromeHomeFlagValue = prefManager.isChromeHomeEnabled();
-        prefManager.setChromeHomeEnabled(true);
+        Features.getInstance().enable(ChromeFeatureList.CHROME_HOME);
+        mChromeHomeEnabler.setPrefs(true);
     }
 
     protected void afterStartingActivity() {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                getActivity().getBottomSheet().setSheetState(
-                        BottomSheet.SHEET_STATE_FULL, /* animate = */ false);
-            }
-        });
+        mObserver = new Observer();
+        getBottomSheet().addObserver(mObserver);
+
+        if (mStartingBottomSheetState == BottomSheet.SHEET_STATE_PEEK) return;
+
+        setSheetState(mStartingBottomSheetState, /* animate = */ false);
+
         // The default BottomSheetContent is SuggestionsBottomSheetContent, whose content view is a
         // RecyclerView.
         RecyclerViewTestUtils.waitForStableRecyclerView(
-                ((RecyclerView) getBottomSheetContent().getContentView().findViewById(
-                        R.id.recycler_view)));
-
-        mBottomSheet = getActivity().getBottomSheet();
-        mBottomSheetContentController = getActivity().getBottomSheetContentController();
-
-        mObserver = new Observer();
-        mBottomSheet.addObserver(mObserver);
+                getBottomSheetContent().getContentView().findViewById(R.id.recycler_view));
     }
 
     @Override
     protected void afterActivityFinished() {
         super.afterActivityFinished();
-        ChromePreferenceManager.getInstance().setChromeHomeEnabled(mOldChromeHomeFlagValue);
+        mChromeHomeEnabler.clearTestState();
+    }
+
+    public void startMainActivityOnBottomSheet(@BottomSheet.SheetState int startingSheetState)
+            throws InterruptedException {
+        mStartingBottomSheetState = startingSheetState;
+        startMainActivityOnBlankPage();
     }
 
     // TODO (aberent): The Chrome test rules currently bypass ActivityTestRule.launchActivity, hence
@@ -155,11 +144,11 @@ public class BottomSheetTestRule extends ChromeTabbedActivityTestRule {
     }
 
     public BottomSheet getBottomSheet() {
-        return mBottomSheet;
+        return getActivity().getBottomSheet();
     }
 
     public BottomSheetContentController getBottomSheetContentController() {
-        return mBottomSheetContentController;
+        return getActivity().getBottomSheetContentController();
     }
 
     /**
@@ -168,13 +157,8 @@ public class BottomSheetTestRule extends ChromeTabbedActivityTestRule {
      * @param state   The state to set the sheet to.
      * @param animate If the sheet should animate to the provided state.
      */
-    public void setSheetState(final int state, final boolean animate) {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mBottomSheet.setSheetState(state, animate);
-            }
-        });
+    public void setSheetState(int state, boolean animate) {
+        ThreadUtils.runOnUiThreadBlocking(() -> getBottomSheet().setSheetState(state, animate));
     }
 
     /**
@@ -182,29 +166,31 @@ public class BottomSheetTestRule extends ChromeTabbedActivityTestRule {
      *
      * @param offset The offset from the bottom that the sheet should be.
      */
-    public void setSheetOffsetFromBottom(final float offset) {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mBottomSheet.setSheetOffsetFromBottomForTesting(offset);
-            }
-        });
+    public void setSheetOffsetFromBottom(float offset) {
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> getBottomSheet().setSheetOffsetFromBottomForTesting(offset));
     }
 
     public BottomSheetContent getBottomSheetContent() {
-        return getActivity().getBottomSheet().getCurrentSheetContent();
+        return getBottomSheet().getCurrentSheetContent();
     }
 
     /**
      * @param itemId The id of the MenuItem corresponding to the {@link BottomSheetContent} to
      *               select.
      */
-    public void selectBottomSheetContent(final int itemId) {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mBottomSheetContentController.selectItem(itemId);
-            }
-        });
+    public void selectBottomSheetContent(int itemId) {
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> getBottomSheetContentController().selectItem(itemId));
+    }
+
+    /**
+     * Wait for an update to start and finish.
+     */
+    public static void waitForWindowUpdates() {
+        final long maxWindowUpdateTimeMs = scaleTimeout(1000);
+        UiDevice device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
+        device.waitForWindowUpdate(null, maxWindowUpdateTimeMs);
+        device.waitForIdle(maxWindowUpdateTimeMs);
     }
 }

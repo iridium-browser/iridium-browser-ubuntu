@@ -33,7 +33,7 @@ class EventInjector {
   EventInjector() : processed_events_(0) {
     source_ = static_cast<Source*>(g_source_new(&SourceFuncs, sizeof(Source)));
     source_->injector = this;
-    g_source_attach(source_, NULL);
+    g_source_attach(source_, nullptr);
     g_source_set_can_recurse(source_, TRUE);
   }
 
@@ -135,12 +135,9 @@ class EventInjector {
   DISALLOW_COPY_AND_ASSIGN(EventInjector);
 };
 
-GSourceFuncs EventInjector::SourceFuncs = {
-  EventInjector::Prepare,
-  EventInjector::Check,
-  EventInjector::Dispatch,
-  NULL
-};
+GSourceFuncs EventInjector::SourceFuncs = {EventInjector::Prepare,
+                                           EventInjector::Check,
+                                           EventInjector::Dispatch, nullptr};
 
 void IncrementInt(int *value) {
   ++*value;
@@ -152,15 +149,14 @@ void ExpectProcessedEvents(EventInjector* injector, int count) {
 }
 
 // Posts a task on the current message loop.
-void PostMessageLoopTask(const tracked_objects::Location& from_here,
-                         OnceClosure task) {
+void PostMessageLoopTask(const Location& from_here, OnceClosure task) {
   ThreadTaskRunnerHandle::Get()->PostTask(from_here, std::move(task));
 }
 
 // Test fixture.
 class MessagePumpGLibTest : public testing::Test {
  public:
-  MessagePumpGLibTest() : loop_(NULL), injector_(NULL) { }
+  MessagePumpGLibTest() : loop_(nullptr), injector_(nullptr) {}
 
   // Overridden from testing::Test:
   void SetUp() override {
@@ -169,9 +165,9 @@ class MessagePumpGLibTest : public testing::Test {
   }
   void TearDown() override {
     delete injector_;
-    injector_ = NULL;
+    injector_ = nullptr;
     delete loop_;
-    loop_ = NULL;
+    loop_ = nullptr;
   }
 
   MessageLoop* loop() const { return loop_; }
@@ -207,24 +203,24 @@ TEST_F(MessagePumpGLibTest, TestEventTaskInterleave) {
   // If changes cause this test to fail, it is reasonable to change it, but
   // TestWorkWhileWaitingForEvents and TestEventsWhileWaitingForWork have to be
   // changed accordingly, otherwise they can become flaky.
-  injector()->AddEventAsTask(0, BindOnce(&DoNothing));
+  injector()->AddEventAsTask(0, DoNothing());
   OnceClosure check_task =
       BindOnce(&ExpectProcessedEvents, Unretained(injector()), 2);
   OnceClosure posted_task =
       BindOnce(&PostMessageLoopTask, FROM_HERE, std::move(check_task));
   injector()->AddEventAsTask(0, std::move(posted_task));
-  injector()->AddEventAsTask(0, BindOnce(&DoNothing));
+  injector()->AddEventAsTask(0, DoNothing());
   injector()->AddEvent(0, MessageLoop::QuitWhenIdleClosure());
   RunLoop().Run();
   EXPECT_EQ(4, injector()->processed_events());
 
   injector()->Reset();
-  injector()->AddEventAsTask(0, BindOnce(&DoNothing));
+  injector()->AddEventAsTask(0, DoNothing());
   check_task = BindOnce(&ExpectProcessedEvents, Unretained(injector()), 2);
   posted_task =
       BindOnce(&PostMessageLoopTask, FROM_HERE, std::move(check_task));
   injector()->AddEventAsTask(0, std::move(posted_task));
-  injector()->AddEventAsTask(10, BindOnce(&DoNothing));
+  injector()->AddEventAsTask(10, DoNothing());
   injector()->AddEvent(0, MessageLoop::QuitWhenIdleClosure());
   RunLoop().Run();
   EXPECT_EQ(4, injector()->processed_events());
@@ -309,7 +305,7 @@ class ConcurrentHelper : public RefCounted<ConcurrentHelper>  {
       --task_count_;
     }
     if (task_count_ == 0 && event_count_ == 0) {
-        MessageLoop::current()->QuitWhenIdle();
+      RunLoop::QuitCurrentWhenIdleDeprecated();
     } else {
       ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE, BindOnce(&ConcurrentHelper::FromTask, this));
@@ -321,7 +317,7 @@ class ConcurrentHelper : public RefCounted<ConcurrentHelper>  {
       --event_count_;
     }
     if (task_count_ == 0 && event_count_ == 0) {
-        MessageLoop::current()->QuitWhenIdle();
+      RunLoop::QuitCurrentWhenIdleDeprecated();
     } else {
       injector_->AddEventAsTask(0,
                                 BindOnce(&ConcurrentHelper::FromEvent, this));
@@ -380,12 +376,12 @@ void AddEventsAndDrainGLib(EventInjector* injector) {
   injector->AddEvent(0, MessageLoop::QuitWhenIdleClosure());
 
   // Post a couple of dummy tasks
-  ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, BindOnce(&DoNothing));
-  ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, BindOnce(&DoNothing));
+  ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, DoNothing());
+  ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, DoNothing());
 
   // Drain the events
-  while (g_main_context_pending(NULL)) {
-    g_main_context_iteration(NULL, FALSE);
+  while (g_main_context_pending(nullptr)) {
+    g_main_context_iteration(nullptr, FALSE);
   }
 }
 
@@ -409,13 +405,13 @@ class GLibLoopRunner : public RefCounted<GLibLoopRunner> {
 
   void RunGLib() {
     while (!quit_) {
-      g_main_context_iteration(NULL, TRUE);
+      g_main_context_iteration(nullptr, TRUE);
     }
   }
 
   void RunLoop() {
     while (!quit_) {
-      g_main_context_iteration(NULL, TRUE);
+      g_main_context_iteration(nullptr, TRUE);
     }
   }
 
@@ -465,7 +461,7 @@ void TestGLibLoopInternal(EventInjector* injector) {
 
   ASSERT_EQ(3, task_count);
   EXPECT_EQ(4, injector->processed_events());
-  MessageLoop::current()->QuitWhenIdle();
+  RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 void TestGtkLoopInternal(EventInjector* injector) {
@@ -498,7 +494,7 @@ void TestGtkLoopInternal(EventInjector* injector) {
 
   ASSERT_EQ(3, task_count);
   EXPECT_EQ(4, injector->processed_events());
-  MessageLoop::current()->QuitWhenIdle();
+  RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 }  // namespace

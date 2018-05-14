@@ -8,11 +8,13 @@
 
 #include "base/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "cc/output/output_surface_client.h"
-#include "cc/output/output_surface_frame.h"
+#include "components/viz/service/display/output_surface_client.h"
+#include "components/viz/service/display/output_surface_frame.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/khronos/GLES2/gl2.h"
+#include "ui/gfx/presentation_feedback.h"
 #include "ui/gfx/transform.h"
+#include "ui/gl/gl_utils.h"
 
 namespace cc {
 
@@ -25,14 +27,14 @@ PixelTestOutputSurface::PixelTestOutputSurface(
 }
 
 PixelTestOutputSurface::PixelTestOutputSurface(
-    std::unique_ptr<SoftwareOutputDevice> software_device)
+    std::unique_ptr<viz::SoftwareOutputDevice> software_device)
     : OutputSurface(std::move(software_device)), weak_ptr_factory_(this) {
   capabilities_.supports_stencil = true;
 }
 
 PixelTestOutputSurface::~PixelTestOutputSurface() = default;
 
-void PixelTestOutputSurface::BindToClient(OutputSurfaceClient* client) {
+void PixelTestOutputSurface::BindToClient(viz::OutputSurfaceClient* client) {
   client_ = client;
 }
 
@@ -55,7 +57,8 @@ void PixelTestOutputSurface::Reshape(const gfx::Size& size,
   DCHECK(!use_stencil || !external_stencil_test_);
   if (context_provider()) {
     context_provider()->ContextGL()->ResizeCHROMIUM(
-        size.width(), size.height(), device_scale_factor, has_alpha);
+        size.width(), size.height(), device_scale_factor,
+        gl::GetGLColorSpace(color_space), has_alpha);
   } else {
     software_device()->Resize(size, device_scale_factor);
   }
@@ -67,17 +70,18 @@ bool PixelTestOutputSurface::HasExternalStencilTest() const {
 
 void PixelTestOutputSurface::ApplyExternalStencil() {}
 
-void PixelTestOutputSurface::SwapBuffers(OutputSurfaceFrame frame) {
+void PixelTestOutputSurface::SwapBuffers(viz::OutputSurfaceFrame frame) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(&PixelTestOutputSurface::SwapBuffersCallback,
-                                weak_ptr_factory_.GetWeakPtr()));
+                                weak_ptr_factory_.GetWeakPtr(), ++swap_id_));
 }
 
-void PixelTestOutputSurface::SwapBuffersCallback() {
-  client_->DidReceiveSwapBuffersAck();
+void PixelTestOutputSurface::SwapBuffersCallback(uint64_t swap_id) {
+  client_->DidReceiveSwapBuffersAck(swap_id);
+  client_->DidReceivePresentationFeedback(swap_id, gfx::PresentationFeedback());
 }
 
-OverlayCandidateValidator*
+viz::OverlayCandidateValidator*
 PixelTestOutputSurface::GetOverlayCandidateValidator() const {
   return nullptr;
 }
@@ -104,5 +108,12 @@ uint32_t PixelTestOutputSurface::GetFramebufferCopyTextureFormat() {
   // the root render pass.
   return GL_RGB;
 }
+
+#if BUILDFLAG(ENABLE_VULKAN)
+gpu::VulkanSurface* PixelTestOutputSurface::GetVulkanSurface() {
+  NOTIMPLEMENTED();
+  return nullptr;
+}
+#endif
 
 }  // namespace cc

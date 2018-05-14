@@ -29,6 +29,7 @@
 #include "core/css/CSSPrimitiveValue.h"
 
 namespace blink {
+namespace cssvalue {
 
 String CSSReflectValue::CustomCSSText() const {
   if (mask_)
@@ -43,11 +44,12 @@ bool CSSReflectValue::Equals(const CSSReflectValue& other) const {
          DataEquivalent(mask_, other.mask_);
 }
 
-DEFINE_TRACE_AFTER_DISPATCH(CSSReflectValue) {
+void CSSReflectValue::TraceAfterDispatch(blink::Visitor* visitor) {
   visitor->Trace(direction_);
   visitor->Trace(offset_);
   visitor->Trace(mask_);
   CSSValue::TraceAfterDispatch(visitor);
 }
 
+}  // namespace cssvalue
 }  // namespace blink

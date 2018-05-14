@@ -42,7 +42,7 @@ SpeechSynthesisUtterance::SpeechSynthesisUtterance(ExecutionContext* context,
   platform_utterance_->SetText(text);
 }
 
-SpeechSynthesisUtterance::~SpeechSynthesisUtterance() {}
+SpeechSynthesisUtterance::~SpeechSynthesisUtterance() = default;
 
 const AtomicString& SpeechSynthesisUtterance::InterfaceName() const {
   return EventTargetNames::SpeechSynthesisUtterance;
@@ -62,7 +62,7 @@ void SpeechSynthesisUtterance::setVoice(SpeechSynthesisVoice* voice) {
     platform_utterance_->SetVoice(voice->PlatformVoice());
 }
 
-DEFINE_TRACE(SpeechSynthesisUtterance) {
+void SpeechSynthesisUtterance::Trace(blink::Visitor* visitor) {
   visitor->Trace(platform_utterance_);
   visitor->Trace(voice_);
   ContextClient::Trace(visitor);

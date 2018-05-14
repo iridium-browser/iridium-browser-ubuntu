@@ -10,14 +10,14 @@
 
 #include <algorithm>
 
-#include "webrtc/rtc_base/httpcommon-inl.h"
+#include "rtc_base/httpcommon-inl.h"
 
-#include "webrtc/rtc_base/asyncsocket.h"
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/httpserver.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/socketstream.h"
-#include "webrtc/rtc_base/thread.h"
+#include "rtc_base/asyncsocket.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/httpserver.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/socketstream.h"
+#include "rtc_base/thread.h"
 
 namespace rtc {
 
@@ -30,7 +30,7 @@ HttpServer::HttpServer() : next_connection_id_(1), closing_(false) {
 
 HttpServer::~HttpServer() {
   if (closing_) {
-    LOG(LS_WARNING) << "HttpServer::CloseAll has not completed";
+    RTC_LOG(LS_WARNING) << "HttpServer::CloseAll has not completed";
   }
   for (ConnectionMap::iterator it = connections_.begin();
        it != connections_.end();
@@ -272,7 +272,6 @@ void HttpListenServer::OnReadEvent(AsyncSocket* socket) {
   AsyncSocket* incoming = listener_->Accept(nullptr);
   if (incoming) {
     StreamInterface* stream = new SocketStream(incoming);
-    //stream = new LoggingAdapter(stream, LS_VERBOSE, "HttpServer", false);
     HandleConnection(stream);
   }
 }

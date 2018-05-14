@@ -74,8 +74,8 @@ skia::mojom::ColorType SkColorTypeToMojo(SkColorType type) {
       return skia::mojom::ColorType::BGRA_8888;
     case kGray_8_SkColorType:
       return skia::mojom::ColorType::GRAY_8;
-    case kRGBA_F16_SkColorType:
-      // these are unsupported
+    default:
+      // Skia has color types not used by Chrome.
       break;
   }
   NOTREACHED();
@@ -157,7 +157,8 @@ uint64_t StructTraits<skia::mojom::BitmapDataView, SkBitmap>::row_bytes(
 // static
 BitmapBuffer StructTraits<skia::mojom::BitmapDataView, SkBitmap>::pixel_data(
     const SkBitmap& b) {
-  return {b.getSize(), b.getSize(), static_cast<uint8_t*>(b.getPixels())};
+  return BitmapBuffer(static_cast<uint8_t*>(b.getPixels()),
+                      b.computeByteSize());
 }
 
 // static
@@ -184,13 +185,14 @@ bool StructTraits<skia::mojom::BitmapDataView, SkBitmap>::Read(
   if (static_cast<uint32_t>(b->width()) != data.width() ||
       static_cast<uint32_t>(b->height()) != data.height() ||
       static_cast<uint64_t>(b->rowBytes()) != data.row_bytes() ||
-      b->getSize() != data_view.size() || !b->readyToDraw()) {
+      b->computeByteSize() != data_view.size() || !b->readyToDraw()) {
     return false;
   }
 
-  BitmapBuffer bitmap_buffer = {0, b->getSize(),
-                                static_cast<uint8_t*>(b->getPixels())};
-  if (!data.ReadPixelData(&bitmap_buffer) || bitmap_buffer.size != b->getSize())
+  BitmapBuffer bitmap_buffer(static_cast<uint8_t*>(b->getPixels()),
+                             b->computeByteSize());
+  if (!data.ReadPixelData(&bitmap_buffer) ||
+      bitmap_buffer.size() != b->computeByteSize())
     return false;
 
   b->notifyPixelsChanged();

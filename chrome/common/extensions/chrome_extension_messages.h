@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef CHROME_COMMON_EXTENSIONS_CHROME_EXTENSION_MESSAGES_H_
+#define CHROME_COMMON_EXTENSIONS_CHROME_EXTENSION_MESSAGES_H_
+
 // Chrome-specific IPC messages for extensions.
 // Extension-related messages that aren't specific to Chrome live in
 // extensions/common/extension_messages.h.
-//
-// Multiply-included message file, hence no include guard.
 
 #include <stdint.h>
 
@@ -17,7 +18,7 @@
 #include "chrome/common/extensions/api/automation_internal.h"
 #include "extensions/common/stack_frame.h"
 #include "ipc/ipc_message_macros.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_relative_bounds.h"
 #include "ui/accessibility/ax_tree_data.h"
@@ -82,16 +83,19 @@ IPC_STRUCT_BEGIN(ExtensionMsg_AccessibilityEventParams)
   IPC_STRUCT_MEMBER(ui::AXTreeUpdate, update)
 
   // Type of event.
-  IPC_STRUCT_MEMBER(ui::AXEvent, event_type)
+  IPC_STRUCT_MEMBER(ax::mojom::Event, event_type)
 
   // ID of the node that the event applies to.
   IPC_STRUCT_MEMBER(int, id)
 
   // The source of this event.
-  IPC_STRUCT_MEMBER(ui::AXEventFrom, event_from)
+  IPC_STRUCT_MEMBER(ax::mojom::EventFrom, event_from)
 
   // The mouse location in screen coordinates.
   IPC_STRUCT_MEMBER(gfx::Point, mouse_location)
+
+  // ID of the action request triggering this event.
+  IPC_STRUCT_MEMBER(int, action_request_id)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(ExtensionMsg_AccessibilityLocationChangeParams)
@@ -107,13 +111,14 @@ IPC_STRUCT_END()
 
 // Forward an accessibility message to an extension process where an
 // extension is using the automation API to listen for accessibility events.
-IPC_MESSAGE_ROUTED2(ExtensionMsg_AccessibilityEvent,
-                    ExtensionMsg_AccessibilityEventParams,
-                    bool /* is_active_profile */)
+IPC_MESSAGE_CONTROL2(ExtensionMsg_AccessibilityEvent,
+                     ExtensionMsg_AccessibilityEventParams,
+                     bool /* is_active_profile */)
 
 // Forward an accessibility location change message to an extension process
 // where an extension is using the automation API to listen for
 // accessibility events.
-IPC_MESSAGE_ROUTED1(ExtensionMsg_AccessibilityLocationChange,
-                    ExtensionMsg_AccessibilityLocationChangeParams)
+IPC_MESSAGE_CONTROL1(ExtensionMsg_AccessibilityLocationChange,
+                     ExtensionMsg_AccessibilityLocationChangeParams)
 
+#endif  // CHROME_COMMON_EXTENSIONS_CHROME_EXTENSION_MESSAGES_H_

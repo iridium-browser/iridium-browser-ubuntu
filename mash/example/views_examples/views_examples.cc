@@ -7,7 +7,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "mash/public/interfaces/launchable.mojom.h"
+#include "mash/public/mojom/launchable.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/service_manager/public/c/main.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
@@ -26,7 +26,7 @@ class ViewsExamples : public service_manager::Service,
     registry_.AddInterface<mash::mojom::Launchable>(
         base::Bind(&ViewsExamples::Create, base::Unretained(this)));
   }
-  ~ViewsExamples() override {}
+  ~ViewsExamples() override = default;
 
  private:
   // service_manager::Service:

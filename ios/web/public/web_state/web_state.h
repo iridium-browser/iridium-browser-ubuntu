@@ -7,7 +7,9 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/callback_forward.h"
@@ -15,6 +17,8 @@
 #include "base/supports_user_data.h"
 #include "ios/web/public/referrer.h"
 #include "ios/web/public/web_state/url_verification_constants.h"
+#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/size.h"
@@ -49,7 +53,6 @@ class WebStateDelegate;
 class WebStateInterfaceProvider;
 class WebStateObserver;
 class WebStatePolicyDecider;
-class WebStateWeakPtrFactory;
 
 // Core interface for interaction with the web.
 class WebState : public base::SupportsUserData {
@@ -122,6 +125,10 @@ class WebState : public base::SupportsUserData {
   // caller to size the view.
   virtual UIView* GetView() = 0;
 
+  // Must be called when the WebState becomes shown/hidden.
+  virtual void WasShown() = 0;
+  virtual void WasHidden() = 0;
+
   // Gets the BrowserState associated with this WebState. Can never return null.
   virtual BrowserState* GetBrowserState() const = 0;
 
@@ -160,11 +167,12 @@ class WebState : public base::SupportsUserData {
   virtual void ExecuteJavaScript(const base::string16& javascript,
                                  const JavaScriptResultCallback& callback) = 0;
 
+  // Asynchronously executes |javaScript| in the main frame's context,
+  // registering user interaction.
+  virtual void ExecuteUserJavaScript(NSString* javaScript) = 0;
+
   // Gets the contents MIME type.
   virtual const std::string& GetContentsMimeType() const = 0;
-
-  // Gets the value of the "Content-Language" HTTP header.
-  virtual const std::string& GetContentLanguageHeader() const = 0;
 
   // Returns true if the current page is a web view with HTML.
   virtual bool ContentIsHTML() const = 0;
@@ -179,6 +187,21 @@ class WebState : public base::SupportsUserData {
   // The fraction of the page load that has completed as a number between 0.0
   // (nothing loaded) and 1.0 (fully loaded).
   virtual double GetLoadingProgress() const = 0;
+
+  // Whether the WebState is visible. Returns true after WasShown() call and
+  // false after WasHidden() call.
+  virtual bool IsVisible() const = 0;
+
+  // Returns true if the web process backing this WebState is believed to
+  // currently be crashed.
+  virtual bool IsCrashed() const = 0;
+
+  // Returns true if the web process backing this WebState is believed to
+  // currently be crashed or was evicted (by calling SetWebUsageEnabled
+  // with false).
+  // TODO(crbug.com/619971): Remove once all code has been ported to use
+  // IsCrashed() instead of IsEvicted().
+  virtual bool IsEvicted() const = 0;
 
   // Whether this instance is in the process of being destroyed.
   virtual bool IsBeingDestroyed() const = 0;
@@ -212,16 +235,6 @@ class WebState : public base::SupportsUserData {
   // Returns the currently visible WebInterstitial if one is shown.
   virtual WebInterstitial* GetWebInterstitial() const = 0;
 
-  // Called when the WebState has displayed a password field on an HTTP page.
-  // This method modifies the appropriate NavigationEntry's SSLStatus to record
-  // the sensitive input field, so that embedders can adjust the UI if desired.
-  virtual void OnPasswordInputShownOnHttp() = 0;
-
-  // Called when the WebState has displayed a credit card field on an HTTP page.
-  // This method modifies the appropriate NavigationEntry's SSLStatus to record
-  // the sensitive input field, so that embedders can adjust the UI if desired.
-  virtual void OnCreditCardInputShownOnHttp() = 0;
-
   // Callback used to handle script commands.
   // The callback must return true if the command was handled, and false
   // otherwise.
@@ -248,9 +261,37 @@ class WebState : public base::SupportsUserData {
   // Returns Mojo interface registry for this WebState.
   virtual WebStateInterfaceProvider* GetWebStateInterfaceProvider() = 0;
 
-  // Returns whether this WebState was created with an opener.  See
-  // CreateParams::created_with_opener for more details.
+  // Typically an embedder will:
+  //    - Implement this method to receive notification of changes to the page's
+  //      |VisibleSecurityState|, updating security UI (e.g. a lock icon) to
+  //      reflect the current security state of the page.
+  // ...and optionally:
+  //    - Invoke this method upon detection of an event that will change
+  //      the security state (e.g. a non-secure form element is edited).
+  virtual void DidChangeVisibleSecurityState() = 0;
+
+ protected:
+  // Binds |interface_pipe| to an implementation of |interface_name| that is
+  // scoped to this WebState instance (if that such an implementation is
+  // present). Embedders of //ios/web can inject interface implementations by
+  // overriding WebClient::BindInterfaceRequestFromMainFrame().
+  // NOTE: Callers should use the more-friendly wrapper below.
+  virtual void BindInterfaceRequestFromMainFrame(
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle interface_pipe) {}
+
+ public:
+  template <class Interface>
+  void BindInterfaceRequestFromMainFrame(
+      mojo::InterfaceRequest<Interface> request) {
+    BindInterfaceRequestFromMainFrame(Interface::Name_,
+                                      std::move(request.PassMessagePipe()));
+  }
+
+  // Whether this WebState was created with an opener.
+  // See CreateParams::created_with_opener for more details.
   virtual bool HasOpener() const = 0;
+  virtual void SetHasOpener(bool has_opener) = 0;
 
   // Callback used to handle snapshots. The parameter is the snapshot image.
   typedef base::Callback<void(const gfx::Image&)> SnapshotCallback;
@@ -260,16 +301,14 @@ class WebState : public base::SupportsUserData {
   virtual void TakeSnapshot(const SnapshotCallback& callback,
                             CGSize target_size) const = 0;
 
- protected:
-  friend class WebStateObserver;
-  friend class WebStatePolicyDecider;
-
   // Adds and removes observers for page navigation notifications. The order in
   // which notifications are sent to observers is undefined. Clients must be
   // sure to remove the observer before they go away.
-  // TODO(droger): Move these methods to WebStateImpl once it is in ios/.
   virtual void AddObserver(WebStateObserver* observer) = 0;
   virtual void RemoveObserver(WebStateObserver* observer) = 0;
+
+ protected:
+  friend class WebStatePolicyDecider;
 
   // Adds and removes policy deciders for navigation actions. The order in which
   // deciders are called is undefined, and will stop on the first decider that
@@ -281,12 +320,7 @@ class WebState : public base::SupportsUserData {
   WebState() {}
 
  private:
-  friend class WebStateWeakPtrFactory;  // For AsWeakPtr.
-
-  // Returns a WeakPtr<WebState> to the current WebState. Must remain private
-  // and only call must be in WebStateWeakPtrFactory. Please consult that class
-  // for more details. Remove as part of http://crbug.com/556736.
-  virtual base::WeakPtr<WebState> AsWeakPtr() = 0;
+  DISALLOW_COPY_AND_ASSIGN(WebState);
 };
 
 }  // namespace web

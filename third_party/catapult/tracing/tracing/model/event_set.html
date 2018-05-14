@@ -7,8 +7,8 @@ found in the LICENSE file.
 
 <link rel="import" href="/tracing/base/event.html">
 <link rel="import" href="/tracing/base/guid.html">
-<link rel="import" href="/tracing/base/iteration_helpers.html">
 <link rel="import" href="/tracing/base/math/range.html">
+<link rel="import" href="/tracing/base/utils.html">
 <link rel="import" href="/tracing/model/event_registry.html">
 
 <script>
@@ -177,7 +177,7 @@ tr.exportTo('tr.model', function() {
     /**
      * @param {!function(!tr.model.Event):string} cb
      * @param {*=} opt_this
-     * @return {!Object} TODO(benjhayden) return Map
+     * @return {!Object}  TODO(#3432) Return Map.
      */
     getEventsOrganizedByCallback(cb, opt_this) {
       const groupedEvents = tr.b.groupIntoMap(this, cb, opt_this || this);

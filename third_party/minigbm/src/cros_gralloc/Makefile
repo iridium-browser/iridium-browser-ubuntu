@@ -19,7 +19,11 @@ LIBDRM_LIBS := $(shell $(PKG_CONFIG) --libs libdrm)
 CPPFLAGS += -Wall -fPIC -Werror -flto $(LIBDRM_CFLAGS)
 CXXFLAGS += -std=c++14
 CFLAGS   += -std=c99
-LIBS     += -shared -lcutils -lhardware $(LIBDRM_LIBS)
+LIBS     += -shared -lcutils -lhardware -lsync $(LIBDRM_LIBS)
+
+ifdef DRV_AMDGPU
+	LIBS += -lamdgpuaddr
+endif
 
 OBJS =  $(foreach source, $(SOURCES), $(addsuffix .o, $(basename $(source))))
 

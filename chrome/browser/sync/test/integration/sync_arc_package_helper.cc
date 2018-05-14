@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
@@ -17,6 +16,8 @@
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_package_syncable_service.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/arc/connection_holder.h"
+#include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_app_instance.h"
 
 namespace arc {
@@ -24,7 +25,7 @@ namespace arc {
 namespace {
 
 std::string GetTestPackageName(size_t id) {
-  return "testarcpackage" + base::SizeTToString(id);
+  return "testarcpackage" + base::NumberToString(id);
 }
 
 }  // namespace
@@ -125,11 +126,11 @@ void SyncArcPackageHelper::SetupArcService(Profile* profile) {
   run_loop.Run();
 
   instance_map_[profile] =
-      base::MakeUnique<FakeAppInstance>(arc_app_list_prefs);
+      std::make_unique<FakeAppInstance>(arc_app_list_prefs);
   DCHECK(instance_map_[profile].get());
-  arc_app_list_prefs->app_instance_holder()->SetInstance(nullptr);
-  arc_app_list_prefs->app_instance_holder()->SetInstance(
+  arc_app_list_prefs->app_connection_holder()->SetInstance(
       instance_map_[profile].get());
+  WaitForInstanceReady(arc_app_list_prefs->app_connection_holder());
   // OnPackageListRefreshed will be called when AppInstance is ready.
   // For fakeAppInstance we use SendRefreshPackageList to make sure that
   // OnPackageListRefreshed will be called.
@@ -143,7 +144,7 @@ void SyncArcPackageHelper::InstallPackage(
   ArcAppListPrefs* arc_app_list_prefs = ArcAppListPrefs::Get(profile);
   DCHECK(arc_app_list_prefs);
   mojom::AppInstance* app_instance = ARC_GET_INSTANCE_FOR_METHOD(
-      arc_app_list_prefs->app_instance_holder(), InstallPackage);
+      arc_app_list_prefs->app_connection_holder(), InstallPackage);
 
   DCHECK(app_instance);
   // After this function, new package should be added to local sync service
@@ -156,7 +157,7 @@ void SyncArcPackageHelper::UninstallPackage(Profile* profile,
   ArcAppListPrefs* arc_app_list_prefs = ArcAppListPrefs::Get(profile);
   DCHECK(arc_app_list_prefs);
   mojom::AppInstance* app_instance = ARC_GET_INSTANCE_FOR_METHOD(
-      arc_app_list_prefs->app_instance_holder(), UninstallPackage);
+      arc_app_list_prefs->app_connection_holder(), UninstallPackage);
   DCHECK(app_instance);
   // After this function, package should be removed from local sync service
   // and uninstall event should be sent to sync server.

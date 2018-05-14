@@ -62,22 +62,6 @@ void ClearTestRootCertificates() {
   Java_AndroidNetworkLibrary_clearTestRootCertificates(env);
 }
 
-bool StoreKeyPair(const uint8_t* public_key,
-                  size_t public_len,
-                  const uint8_t* private_key,
-                  size_t private_len) {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jbyteArray> public_array =
-      ToJavaByteArray(env, public_key, public_len);
-  ScopedJavaLocalRef<jbyteArray> private_array =
-      ToJavaByteArray(env, private_key, private_len);
-  jboolean ret =
-      Java_AndroidNetworkLibrary_storeKeyPair(env, public_array, private_array);
-  LOG_IF(WARNING, !ret) <<
-      "Call to Java_AndroidNetworkLibrary_storeKeyPair failed";
-  return ret;
-}
-
 bool IsCleartextPermitted(const std::string& host) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jstring> host_string = ConvertUTF8ToJavaString(env, host);
@@ -152,6 +136,10 @@ void GetDnsServers(std::vector<IPEndPoint>* dns_servers) {
     IPEndPoint dns_server(dns_address, dns_protocol::kDefaultPort);
     dns_servers->push_back(dns_server);
   }
+}
+
+void TagSocket(SocketDescriptor socket, uid_t uid, int32_t tag) {
+  Java_AndroidNetworkLibrary_tagSocket(AttachCurrentThread(), socket, uid, tag);
 }
 
 }  // namespace android

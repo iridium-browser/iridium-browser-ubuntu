@@ -11,10 +11,14 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "mojo/public/cpp/bindings/type_converter.h"
+#include "services/ui/public/cpp/property_type_converters.h"
+#include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "ui/chromeos/ime/candidate_view.h"
 #include "ui/chromeos/ime/candidate_window_constants.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
+#include "ui/display/types/display_constants.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/insets.h"
@@ -106,7 +110,7 @@ class InformationTextArea : public views::View {
     label_->SetHorizontalAlignment(align);
     label_->SetBorder(views::CreateEmptyBorder(2, 2, 2, 4));
 
-    SetLayoutManager(new views::FillLayout());
+    SetLayoutManager(std::make_unique<views::FillLayout>());
     AddChildView(label_);
     SetBackground(views::CreateSolidBackground(
         color_utils::AlphaBlend(SK_ColorBLACK,
@@ -147,11 +151,13 @@ class InformationTextArea : public views::View {
   DISALLOW_COPY_AND_ASSIGN(InformationTextArea);
 };
 
-CandidateWindowView::CandidateWindowView(gfx::NativeView parent)
+CandidateWindowView::CandidateWindowView(gfx::NativeView parent,
+                                         int window_shell_id)
     : selected_candidate_index_in_page_(-1),
       should_show_at_composition_head_(false),
       should_show_upper_side_(false),
-      was_candidate_window_open_(false) {
+      was_candidate_window_open_(false),
+      window_shell_id_(window_shell_id) {
   set_can_activate(false);
   set_parent_window(parent);
   set_margins(gfx::Insets());
@@ -160,7 +166,8 @@ CandidateWindowView::CandidateWindowView(gfx::NativeView parent)
       1, GetNativeTheme()->GetSystemColor(
              ui::NativeTheme::kColorId_MenuBorderColor)));
 
-  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kVertical));
+  SetLayoutManager(
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
   auxiliary_text_ = new InformationTextArea(gfx::ALIGN_RIGHT, 0);
   preedit_ = new InformationTextArea(gfx::ALIGN_LEFT, kMinPreeditAreaWidth);
   candidate_area_ = new views::View;
@@ -174,7 +181,7 @@ CandidateWindowView::CandidateWindowView(gfx::NativeView parent)
     AddChildView(auxiliary_text_);
     auxiliary_text_->SetBorderFromPosition(InformationTextArea::TOP);
     candidate_area_->SetLayoutManager(
-        new views::BoxLayout(views::BoxLayout::kVertical));
+        std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
   } else {
     AddChildView(preedit_);
     AddChildView(auxiliary_text_);
@@ -182,7 +189,7 @@ CandidateWindowView::CandidateWindowView(gfx::NativeView parent)
     auxiliary_text_->SetAlignment(gfx::ALIGN_LEFT);
     auxiliary_text_->SetBorderFromPosition(InformationTextArea::BOTTOM);
     candidate_area_->SetLayoutManager(
-        new views::BoxLayout(views::BoxLayout::kHorizontal));
+        std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal));
   }
 }
 
@@ -249,13 +256,13 @@ void CandidateWindowView::UpdateCandidates(
         auxiliary_text_->SetAlignment(gfx::ALIGN_RIGHT);
         auxiliary_text_->SetBorderFromPosition(InformationTextArea::TOP);
         candidate_area_->SetLayoutManager(
-            new views::BoxLayout(views::BoxLayout::kVertical));
+            std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
       } else {
         ReorderChildView(auxiliary_text_, 1);
         auxiliary_text_->SetAlignment(gfx::ALIGN_LEFT);
         auxiliary_text_->SetBorderFromPosition(InformationTextArea::BOTTOM);
         candidate_area_->SetLayoutManager(
-            new views::BoxLayout(views::BoxLayout::kHorizontal));
+            std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal));
       }
     }
 
@@ -364,7 +371,7 @@ void CandidateWindowView::MaybeInitializeCandidateViews(
 
   while (page_size > candidate_views_.size()) {
     std::unique_ptr<CandidateView> new_candidate =
-        base::MakeUnique<CandidateView>(this, orientation);
+        std::make_unique<CandidateView>(this, orientation);
     candidate_area_->AddChildView(new_candidate.get());
     candidate_views_.push_back(std::move(new_candidate));
   }
@@ -401,6 +408,15 @@ const char* CandidateWindowView::GetClassName() const {
 
 int CandidateWindowView::GetDialogButtons() const {
   return ui::DIALOG_BUTTON_NONE;
+}
+
+void CandidateWindowView::OnBeforeBubbleWidgetInit(
+    views::Widget::InitParams* params,
+    views::Widget* widget) const {
+  using ui::mojom::WindowManager;
+  params->mus_properties[WindowManager::kContainerId_InitProperty] =
+      mojo::ConvertTo<std::vector<uint8_t>>(
+          static_cast<int32_t>(window_shell_id_));
 }
 
 void CandidateWindowView::ButtonPressed(views::Button* sender,

@@ -41,32 +41,114 @@
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/CryptographicallyRandomNumber.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/DateMath.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/Base64.h"
 #include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
 
-const char* const kQuotedPrintable = "quoted-printable";
-const char* const kBase64 = "base64";
-const char* const kBinary = "binary";
+namespace {
 
-static String ReplaceNonPrintableCharacters(const String& text) {
-  StringBuilder string_builder;
-  for (size_t i = 0; i < text.length(); ++i) {
-    if (IsASCIIPrintable(text[i]))
-      string_builder.Append(text[i]);
-    else
-      string_builder.Append('?');
+const size_t kMaximumLineLength = 76;
+
+const char kRFC2047EncodingPrefix[] = "=?utf-8?Q?";
+const size_t kRFC2047EncodingPrefixLength = 10;
+const char kRFC2047EncodingSuffix[] = "?=";
+const size_t kRFC2047EncodingSuffixLength = 2;
+
+const char kQuotedPrintable[] = "quoted-printable";
+const char kBase64[] = "base64";
+const char kBinary[] = "binary";
+
+}  // namespace
+
+// Controls quoted-printable encoding characters in body, per RFC 2045.
+class QuotedPrintableEncodeBodyDelegate : public QuotedPrintableEncodeDelegate {
+ public:
+  QuotedPrintableEncodeBodyDelegate() = default;
+  ~QuotedPrintableEncodeBodyDelegate() override = default;
+
+  size_t GetMaxLineLengthForEncodedContent() const override {
+    return kMaximumLineLength;
   }
-  return string_builder.ToString();
+
+  bool ShouldEncodeWhiteSpaceCharacters(bool end_of_line) const override {
+    // They should be encoded only if they appear at the end of a body line.
+    return end_of_line;
+  }
+
+  void DidStartLine(Vector<char>& out) override {
+    // Nothing to add.
+  }
+
+  void DidFinishLine(bool last_line, Vector<char>& out) override {
+    if (!last_line) {
+      out.push_back('=');
+      out.Append("\r\n", 2);
+    }
+  }
+};
+
+// Controls quoted-printable encoding characters in headers, per RFC 2047.
+class QuotedPrintableEncodeHeaderDelegate
+    : public QuotedPrintableEncodeDelegate {
+ public:
+  QuotedPrintableEncodeHeaderDelegate() = default;
+  ~QuotedPrintableEncodeHeaderDelegate() override = default;
+
+  size_t GetMaxLineLengthForEncodedContent() const override {
+    return kMaximumLineLength - kRFC2047EncodingPrefixLength -
+           kRFC2047EncodingSuffixLength;
+  }
+
+  bool ShouldEncodeWhiteSpaceCharacters(bool end_of_line) const override {
+    // They should always be encoded if they appear anywhere in the header.
+    return true;
+  }
+
+  void DidStartLine(Vector<char>& out) override {
+    out.Append(kRFC2047EncodingPrefix, kRFC2047EncodingPrefixLength);
+  }
+
+  void DidFinishLine(bool last_line, Vector<char>& out) override {
+    out.Append(kRFC2047EncodingSuffix, kRFC2047EncodingSuffixLength);
+    if (!last_line) {
+      out.Append("\r\n", 2);
+      out.push_back(' ');
+    }
+  }
+};
+
+static String ConvertToPrintableCharacters(const String& text) {
+  // If the text contains all printable ASCII characters, no need for encoding.
+  bool found_non_printable_char = false;
+  for (size_t i = 0; i < text.length(); ++i) {
+    if (!IsASCIIPrintable(text[i])) {
+      found_non_printable_char = true;
+      break;
+    }
+  }
+  if (!found_non_printable_char)
+    return text;
+
+  // Encode the text as sequences of printable ASCII characters per RFC 2047
+  // (https://tools.ietf.org/html/rfc2047). Specially, the encoded text will be
+  // as:   =?utf-8?Q?encoded_text?=
+  // where, "utf-8" is the chosen charset to represent the text and "Q" is the
+  // Quoted-Printable format to convert to 7-bit printable ASCII characters.
+  CString utf8_text = text.Utf8();
+  QuotedPrintableEncodeHeaderDelegate header_delegate;
+  Vector<char> encoded_text;
+  QuotedPrintableEncode(utf8_text.data(), utf8_text.length(), &header_delegate,
+                        encoded_text);
+  return String(encoded_text.data(), encoded_text.size());
 }
 
-MHTMLArchive::MHTMLArchive() {}
+MHTMLArchive::MHTMLArchive() = default;
 
 MHTMLArchive* MHTMLArchive::Create(const KURL& url,
-                                   PassRefPtr<const SharedBuffer> data) {
+                                   scoped_refptr<const SharedBuffer> data) {
   // MHTML pages can only be loaded from local URLs, http/https URLs, and
   // content URLs(Android specific).  The latter is now allowed due to full
   // sandboxing enforcement on MHTML pages.
@@ -127,6 +209,7 @@ bool MHTMLArchive::CanLoadArchive(const KURL& url) {
 }
 
 void MHTMLArchive::GenerateMHTMLHeader(const String& boundary,
+                                       const KURL& url,
                                        const String& title,
                                        const String& mime_type,
                                        Vector<char>& output_buffer) {
@@ -142,9 +225,14 @@ void MHTMLArchive::GenerateMHTMLHeader(const String& boundary,
 
   StringBuilder string_builder;
   string_builder.Append("From: <Saved by Blink>\r\n");
-  string_builder.Append("Subject: ");
-  // We replace non ASCII characters with '?' characters to match IE's behavior.
-  string_builder.Append(ReplaceNonPrintableCharacters(title));
+
+  // Add the document URL in the MHTML headers in order to avoid complicated
+  // parsing to locate it in the multipart body headers.
+  string_builder.Append("Snapshot-Content-Location: ");
+  string_builder.Append(url.GetString());
+
+  string_builder.Append("\r\nSubject: ");
+  string_builder.Append(ConvertToPrintableCharacters(title));
   string_builder.Append("\r\nDate: ");
   string_builder.Append(date_string);
   string_builder.Append("\r\nMIME-Version: 1.0\r\n");
@@ -173,7 +261,8 @@ void MHTMLArchive::GenerateMHTMLPart(const String& boundary,
   DCHECK(content_id.IsEmpty() || content_id[0] == '<');
 
   StringBuilder string_builder;
-  string_builder.Append("--");
+  // Per the spec, the boundary must occur at the beginning of a line.
+  string_builder.Append("\r\n--");
   string_builder.Append(boundary);
   string_builder.Append("\r\n");
 
@@ -187,7 +276,7 @@ void MHTMLArchive::GenerateMHTMLPart(const String& boundary,
     string_builder.Append("\r\n");
   }
 
-  const char* content_encoding = 0;
+  const char* content_encoding = nullptr;
   if (encoding_policy == kUseBinaryEncoding)
     content_encoding = kBinary;
   else if (MIMETypeRegistry::IsSupportedJavaScriptMIMEType(
@@ -227,15 +316,14 @@ void MHTMLArchive::GenerateMHTMLPart(const String& boundary,
     size_t data_length = flat_data.size();
     Vector<char> encoded_data;
     if (!strcmp(content_encoding, kQuotedPrintable)) {
-      QuotedPrintableEncode(data, data_length, encoded_data);
+      QuotedPrintableEncodeBodyDelegate body_delegate;
+      QuotedPrintableEncode(data, data_length, &body_delegate, encoded_data);
       output_buffer.Append(encoded_data.data(), encoded_data.size());
-      output_buffer.Append("\r\n", 2u);
     } else {
       DCHECK(!strcmp(content_encoding, kBase64));
       // We are not specifying insertLFs = true below as it would cut the lines
       // with LFs and MHTML requires CRLFs.
       Base64Encode(data, data_length, encoded_data);
-      const size_t kMaximumLineLength = 76;
       size_t index = 0;
       size_t encoded_data_length = encoded_data.size();
       do {
@@ -252,7 +340,7 @@ void MHTMLArchive::GenerateMHTMLPart(const String& boundary,
 void MHTMLArchive::GenerateMHTMLFooterForTesting(const String& boundary,
                                                  Vector<char>& output_buffer) {
   DCHECK(!boundary.IsEmpty());
-  CString ascii_string = String("--" + boundary + "--\r\n").Utf8();
+  CString ascii_string = String("\r\n--" + boundary + "--\r\n").Utf8();
   output_buffer.Append(ascii_string.data(), ascii_string.length());
 }
 
@@ -272,7 +360,7 @@ ArchiveResource* MHTMLArchive::SubresourceForURL(const KURL& url) const {
   return subresources_.at(url.GetString());
 }
 
-DEFINE_TRACE(MHTMLArchive) {
+void MHTMLArchive::Trace(blink::Visitor* visitor) {
   visitor->Trace(main_resource_);
   visitor->Trace(subresources_);
 }

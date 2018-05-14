@@ -4,18 +4,19 @@
 
 #import "ios/chrome/browser/ui/reading_list/reading_list_coordinator.h"
 
-#include "base/memory/ptr_util.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include <memory>
+
 #include "base/time/default_clock.h"
 #include "components/favicon/core/large_icon_service.h"
 #include "components/favicon/core/test/mock_favicon_service.h"
-#include "components/feature_engagement_tracker/public/event_constants.h"
-#include "components/feature_engagement_tracker/public/feature_constants.h"
-#include "components/feature_engagement_tracker/public/feature_engagement_tracker.h"
+#include "components/feature_engagement/public/event_constants.h"
+#include "components/feature_engagement/public/feature_constants.h"
+#include "components/feature_engagement/public/tracker.h"
+#include "components/feature_engagement/test/mock_tracker.h"
 #include "components/reading_list/core/reading_list_entry.h"
 #include "components/reading_list/core/reading_list_model_impl.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
-#include "ios/chrome/browser/feature_engagement_tracker/feature_engagement_tracker_factory.h"
+#include "ios/chrome/browser/feature_engagement/tracker_factory.h"
 #include "ios/chrome/browser/reading_list/offline_url_utils.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_collection_view_controller.h"
@@ -100,21 +101,6 @@ using testing::_;
 
 @end
 
-#pragma mark - FeatureEngagementTracker
-namespace {
-
-class FeatureEngagementTrackerStub
-    : public feature_engagement_tracker::FeatureEngagementTracker {
- public:
-  MOCK_METHOD1(NotifyEvent, void(const std::string&));
-  MOCK_METHOD1(ShouldTriggerHelpUI, bool(const base::Feature& feature));
-  MOCK_METHOD1(Dismissed, void(const base::Feature& feature));
-  MOCK_METHOD0(IsInitialized, bool());
-  MOCK_METHOD1(AddOnInitializedCallback, void(OnInitializedCallback callback));
-};
-
-}  //  namespace
-
 #pragma mark - ReadingListCoordinatorTest
 
 class ReadingListCoordinatorTest : public web::WebTestWithWebState {
@@ -124,15 +110,14 @@ class ReadingListCoordinatorTest : public web::WebTestWithWebState {
 
     TestChromeBrowserState::Builder builder;
     builder.AddTestingFactory(
-        FeatureEngagementTrackerFactory::GetInstance(),
-        ReadingListCoordinatorTest::BuildFeatureEngagementTrackerStub);
+        feature_engagement::TrackerFactory::GetInstance(),
+        ReadingListCoordinatorTest::BuildFeatureEngagementMockTracker);
     browser_state_ = builder.Build();
 
     reading_list_model_.reset(new ReadingListModelImpl(
-        nullptr, nullptr, base::MakeUnique<base::DefaultClock>()));
+        nullptr, nullptr, std::make_unique<base::DefaultClock>()));
     large_icon_service_.reset(new favicon::LargeIconService(
-        &mock_favicon_service_, base::ThreadTaskRunnerHandle::Get(),
-        /*image_fetcher=*/nullptr));
+        &mock_favicon_service_, /*image_fetcher=*/nullptr));
     mediator_ =
         [[ReadingListMediator alloc] initWithModel:reading_list_model_.get()
                                   largeIconService:large_icon_service_.get()];
@@ -163,9 +148,9 @@ class ReadingListCoordinatorTest : public web::WebTestWithWebState {
                    toolbar:nil];
   }
 
-  static std::unique_ptr<KeyedService> BuildFeatureEngagementTrackerStub(
+  static std::unique_ptr<KeyedService> BuildFeatureEngagementMockTracker(
       web::BrowserState*) {
-    return base::MakeUnique<FeatureEngagementTrackerStub>();
+    return std::make_unique<feature_engagement::test::MockTracker>();
   }
 
  private:
@@ -262,14 +247,13 @@ TEST_F(ReadingListCoordinatorTest, OpenItemInNewTab) {
 
 TEST_F(ReadingListCoordinatorTest, SendViewedReadingListEventInStart) {
   // Setup.
-  FeatureEngagementTrackerStub* tracker =
-      static_cast<FeatureEngagementTrackerStub*>(
-          FeatureEngagementTrackerFactory::GetForBrowserState(
+  feature_engagement::test::MockTracker* tracker =
+      static_cast<feature_engagement::test::MockTracker*>(
+          feature_engagement::TrackerFactory::GetForBrowserState(
               GetBrowserState()));
 
   // Actions and Tests.
-  EXPECT_CALL(
-      (*tracker),
-      NotifyEvent(feature_engagement_tracker::events::kViewedReadingList));
+  EXPECT_CALL((*tracker),
+              NotifyEvent(feature_engagement::events::kViewedReadingList));
   [GetCoordinator() start];
 }

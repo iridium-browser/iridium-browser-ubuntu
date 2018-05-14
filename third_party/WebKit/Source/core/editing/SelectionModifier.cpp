@@ -28,6 +28,11 @@
 
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
+#include "core/editing/EphemeralRange.h"
+#include "core/editing/InlineBoxPosition.h"
+#include "core/editing/LocalCaretRect.h"
+#include "core/editing/SelectionTemplate.h"
+#include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
@@ -53,37 +58,87 @@ VisiblePosition RightBoundaryOfLine(const VisiblePosition& c,
                                           : LogicalStartOfLine(c);
 }
 
+VisiblePosition PreviousParagraphPosition(
+    const VisiblePosition& passed_position,
+    LayoutUnit x_point) {
+  DCHECK(passed_position.IsValid()) << passed_position;
+  VisiblePosition position = passed_position;
+  do {
+    const VisiblePosition& new_position =
+        PreviousLinePosition(position, x_point);
+    if (new_position.IsNull() ||
+        new_position.DeepEquivalent() == position.DeepEquivalent())
+      break;
+    position = new_position;
+  } while (InSameParagraph(passed_position, position));
+  return position;
+}
+
+VisiblePosition NextParagraphPosition(const VisiblePosition& passed_position,
+                                      LayoutUnit x_point) {
+  DCHECK(passed_position.IsValid()) << passed_position;
+  VisiblePosition position = passed_position;
+  do {
+    const VisiblePosition& new_position = NextLinePosition(position, x_point);
+    if (new_position.IsNull() ||
+        new_position.DeepEquivalent() == position.DeepEquivalent())
+      break;
+    position = new_position;
+  } while (InSameParagraph(passed_position, position));
+  return position;
+}
+
 }  // namespace
 
 LayoutUnit NoXPosForVerticalArrowNavigation() {
   return LayoutUnit::Min();
 }
 
-bool SelectionModifier::ShouldAlwaysUseDirectionalSelection(LocalFrame* frame) {
-  return !frame ||
-         frame->GetEditor().Behavior().ShouldConsiderSelectionAsDirectional();
+bool SelectionModifier::ShouldAlwaysUseDirectionalSelection(
+    const LocalFrame& frame) {
+  return frame.GetEditor().Behavior().ShouldConsiderSelectionAsDirectional();
 }
 
 SelectionModifier::SelectionModifier(
     const LocalFrame& frame,
-    const VisibleSelection& selection,
+    const SelectionInDOMTree& selection,
     LayoutUnit x_pos_for_vertical_arrow_navigation)
-    : frame_(const_cast<LocalFrame*>(&frame)),
-      selection_(selection),
+    : frame_(&frame),
+      current_selection_(selection),
       x_pos_for_vertical_arrow_navigation_(
           x_pos_for_vertical_arrow_navigation) {}
 
 SelectionModifier::SelectionModifier(const LocalFrame& frame,
-                                     const VisibleSelection& selection)
+                                     const SelectionInDOMTree& selection)
     : SelectionModifier(frame, selection, NoXPosForVerticalArrowNavigation()) {}
 
+VisibleSelection SelectionModifier::Selection() const {
+  return CreateVisibleSelection(current_selection_);
+}
+
+static VisiblePosition ComputeVisibleExtent(
+    const VisibleSelection& visible_selection) {
+  return CreateVisiblePosition(visible_selection.Extent(),
+                               visible_selection.Affinity());
+}
+
 TextDirection SelectionModifier::DirectionOfEnclosingBlock() const {
-  return DirectionOfEnclosingBlockOf(selection_.Extent());
+  const Position& selection_extent = selection_.Extent();
+
+  // TODO(editing-dev): Check for Position::IsNotNull is an easy fix for few
+  // editing/ layout tests, that didn't expect that (e.g.
+  // editing/selection/extend-byline-withfloat.html).
+  // That should be fixed in a more appropriate manner.
+  // We should either have SelectionModifier aborted earlier for null selection,
+  // or do not allow null selection in SelectionModifier at all.
+  return selection_extent.IsNotNull()
+             ? DirectionOfEnclosingBlockOf(selection_extent)
+             : TextDirection::kLtr;
 }
 
 static TextDirection DirectionOf(const VisibleSelection& visible_selection) {
-  InlineBox* start_box = nullptr;
-  InlineBox* end_box = nullptr;
+  const InlineBox* start_box = nullptr;
+  const InlineBox* end_box = nullptr;
   // Cache the VisiblePositions because visibleStart() and visibleEnd()
   // can cause layout, which has the potential to invalidate lineboxes.
   const VisiblePosition& start_position = visible_selection.VisibleStart();
@@ -103,50 +158,57 @@ TextDirection SelectionModifier::DirectionOfSelection() const {
 }
 
 static bool IsBaseStart(const VisibleSelection& visible_selection,
-                        SelectionDirection direction) {
-  if (visible_selection.IsDirectional()) {
-    // Make base and extent match start and end so we extend the user-visible
-    // selection. This only matters for cases where base and extend point to
-    // different positions than start and end (e.g. after a double-click to
-    // select a word).
-    return visible_selection.IsBaseFirst();
-  }
+                        SelectionModifyDirection direction) {
   switch (direction) {
-    case kDirectionRight:
+    case SelectionModifyDirection::kRight:
       return DirectionOf(visible_selection) == TextDirection::kLtr;
-    case kDirectionForward:
+    case SelectionModifyDirection::kForward:
       return true;
-    case kDirectionLeft:
+    case SelectionModifyDirection::kLeft:
       return DirectionOf(visible_selection) != TextDirection::kLtr;
-    case kDirectionBackward:
+    case SelectionModifyDirection::kBackward:
       return false;
   }
-  NOTREACHED() << "We should handle " << direction;
+  NOTREACHED() << "We should handle " << static_cast<int>(direction);
   return true;
 }
 
-// This function returns |SelectionInDOMTree| from start and end position of
-// |visibleSelection| with |direction| and ordering of base and extent to
-// handle base/extent don't match to start/end, e.g. granularity != character,
-// and start/end adjustment in |visibleSelection::validate()| for range
-// selection.
-static SelectionInDOMTree PrepareToExtendSeelction(
-    const VisibleSelection& visible_selection,
-    SelectionDirection direction) {
-  if (visible_selection.Start().IsNull())
-    return visible_selection.AsSelection();
-  const bool base_is_start = IsBaseStart(visible_selection, direction);
-  return SelectionInDOMTree::Builder(visible_selection.AsSelection())
-      .Collapse(base_is_start ? visible_selection.Start()
-                              : visible_selection.End())
-      .Extend(base_is_start ? visible_selection.End()
-                            : visible_selection.Start())
-      .Build();
+// This function returns |VisibleSelection| from start and end position of
+// current_selection_'s |VisibleSelection| with |direction| and ordering of base
+// and extent to handle base/extent don't match to start/end, e.g. granularity
+// != character, and start/end adjustment in |visibleSelection::validate()| for
+// range selection.
+VisibleSelection SelectionModifier::PrepareToModifySelection(
+    SelectionModifyAlteration alter,
+    SelectionModifyDirection direction) const {
+  const VisibleSelection& visible_selection =
+      CreateVisibleSelection(current_selection_);
+  if (alter != SelectionModifyAlteration::kExtend)
+    return visible_selection;
+  if (visible_selection.IsNone())
+    return visible_selection;
+
+  const EphemeralRange& range = visible_selection.AsSelection().ComputeRange();
+  if (range.IsCollapsed())
+    return visible_selection;
+  SelectionInDOMTree::Builder builder;
+  // Make base and extent match start and end so we extend the user-visible
+  // selection. This only matters for cases where base and extend point to
+  // different positions than start and end (e.g. after a double-click to
+  // select a word).
+  const bool base_is_start = selection_is_directional_
+                                 ? visible_selection.IsBaseFirst()
+                                 : IsBaseStart(visible_selection, direction);
+  if (base_is_start)
+    builder.SetAsForwardSelection(range);
+  else
+    builder.SetAsBackwardSelection(range);
+  return CreateVisibleSelection(builder.Build());
 }
 
 VisiblePosition SelectionModifier::PositionForPlatform(
     bool is_get_start) const {
-  Settings* settings = GetFrame() ? GetFrame()->GetSettings() : nullptr;
+  Settings* settings = GetFrame().GetSettings();
   if (settings && settings->GetEditingBehaviorType() == kEditingMacBehavior)
     return is_get_start ? selection_.VisibleStart() : selection_.VisibleEnd();
   // Linux and Windows always extend selections from the extent endpoint.
@@ -171,8 +233,7 @@ VisiblePosition SelectionModifier::NextWordPositionForPlatform(
   VisiblePosition position_after_current_word =
       NextWordPosition(original_position);
 
-  if (!GetFrame() ||
-      !GetFrame()->GetEditor().Behavior().ShouldSkipSpaceWhenMovingRight())
+  if (!GetFrame().GetEditor().Behavior().ShouldSkipSpaceWhenMovingRight())
     return position_after_current_word;
   return CreateVisiblePosition(
       SkipWhitespace(position_after_current_word.DeepEquivalent()));
@@ -198,11 +259,8 @@ static VisiblePosition AdjustBackwardPositionForUserSelectAll(
       Position::BeforeNode(*root_user_select_all), kCanCrossEditingBoundary));
 }
 
-VisiblePosition SelectionModifier::ModifyExtendingRight(
+VisiblePosition SelectionModifier::ModifyExtendingRightInternal(
     TextGranularity granularity) {
-  VisiblePosition pos =
-      CreateVisiblePosition(selection_.Extent(), selection_.Affinity());
-
   // The difference between modifyExtendingRight and modifyExtendingForward is:
   // modifyExtendingForward always extends forward logically.
   // modifyExtendingRight behaves the same as modifyExtendingForward except for
@@ -211,33 +269,37 @@ VisiblePosition SelectionModifier::ModifyExtendingRight(
   // block is RTL direction.
   switch (granularity) {
     case TextGranularity::kCharacter:
-      if (DirectionOfEnclosingBlock() == TextDirection::kLtr)
-        pos = NextPositionOf(pos, kCanSkipOverEditingBoundary);
-      else
-        pos = PreviousPositionOf(pos, kCanSkipOverEditingBoundary);
-      break;
+      if (DirectionOfEnclosingBlock() == TextDirection::kLtr) {
+        return NextPositionOf(ComputeVisibleExtent(selection_),
+                              kCanSkipOverEditingBoundary);
+      }
+      return PreviousPositionOf(ComputeVisibleExtent(selection_),
+                                kCanSkipOverEditingBoundary);
     case TextGranularity::kWord:
-      if (DirectionOfEnclosingBlock() == TextDirection::kLtr)
-        pos = NextWordPositionForPlatform(pos);
-      else
-        pos = PreviousWordPosition(pos);
-      break;
+      if (DirectionOfEnclosingBlock() == TextDirection::kLtr) {
+        return NextWordPositionForPlatform(ComputeVisibleExtent(selection_));
+      }
+      return PreviousWordPosition(ComputeVisibleExtent(selection_));
     case TextGranularity::kLineBoundary:
       if (DirectionOfEnclosingBlock() == TextDirection::kLtr)
-        pos = ModifyExtendingForward(granularity);
-      else
-        pos = ModifyExtendingBackward(granularity);
-      break;
+        return ModifyExtendingForwardInternal(granularity);
+      return ModifyExtendingBackwardInternal(granularity);
     case TextGranularity::kSentence:
     case TextGranularity::kLine:
     case TextGranularity::kParagraph:
     case TextGranularity::kSentenceBoundary:
     case TextGranularity::kParagraphBoundary:
     case TextGranularity::kDocumentBoundary:
-      // FIXME: implement all of the above?
-      pos = ModifyExtendingForward(granularity);
-      break;
+      // TODO(editing-dev): implement all of the above?
+      return ModifyExtendingForwardInternal(granularity);
   }
+  NOTREACHED() << static_cast<int>(granularity);
+  return VisiblePosition();
+}
+
+VisiblePosition SelectionModifier::ModifyExtendingRight(
+    TextGranularity granularity) {
+  const VisiblePosition& pos = ModifyExtendingRightInternal(granularity);
   if (DirectionOfEnclosingBlock() == TextDirection::kLtr)
     return AdjustForwardPositionForUserSelectAll(pos);
   return AdjustBackwardPositionForUserSelectAll(pos);
@@ -247,22 +309,19 @@ VisiblePosition SelectionModifier::ModifyExtendingForwardInternal(
     TextGranularity granularity) {
   switch (granularity) {
     case TextGranularity::kCharacter:
-      return NextPositionOf(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()),
-          kCanSkipOverEditingBoundary);
+      return NextPositionOf(ComputeVisibleExtent(selection_),
+                            kCanSkipOverEditingBoundary);
     case TextGranularity::kWord:
-      return NextWordPositionForPlatform(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()));
+      return NextWordPositionForPlatform(ComputeVisibleExtent(selection_));
     case TextGranularity::kSentence:
-      return NextSentencePosition(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()));
+      return NextSentencePosition(ComputeVisibleExtent(selection_));
     case TextGranularity::kLine:
       return NextLinePosition(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()),
+          ComputeVisibleExtent(selection_),
           LineDirectionPointForBlockDirectionNavigation(selection_.Extent()));
     case TextGranularity::kParagraph:
       return NextParagraphPosition(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()),
+          ComputeVisibleExtent(selection_),
           LineDirectionPointForBlockDirectionNavigation(selection_.Extent()));
     case TextGranularity::kSentenceBoundary:
       return EndOfSentence(EndForPlatform());
@@ -295,19 +354,16 @@ VisiblePosition SelectionModifier::ModifyMovingRight(
   switch (granularity) {
     case TextGranularity::kCharacter:
       if (!selection_.IsRange()) {
-        return RightPositionOf(
-            CreateVisiblePosition(selection_.Extent(), selection_.Affinity()));
+        return RightPositionOf(ComputeVisibleExtent(selection_));
       }
       if (DirectionOfSelection() == TextDirection::kLtr)
         return CreateVisiblePosition(selection_.End(), selection_.Affinity());
       return CreateVisiblePosition(selection_.Start(), selection_.Affinity());
     case TextGranularity::kWord: {
       const bool skips_space_when_moving_right =
-          GetFrame() &&
-          GetFrame()->GetEditor().Behavior().ShouldSkipSpaceWhenMovingRight();
-      return RightWordPosition(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()),
-          skips_space_when_moving_right);
+          GetFrame().GetEditor().Behavior().ShouldSkipSpaceWhenMovingRight();
+      return RightWordPosition(ComputeVisibleExtent(selection_),
+                               skips_space_when_moving_right);
     }
     case TextGranularity::kSentence:
     case TextGranularity::kLine:
@@ -333,15 +389,12 @@ VisiblePosition SelectionModifier::ModifyMovingForward(
     case TextGranularity::kCharacter:
       if (selection_.IsRange())
         return CreateVisiblePosition(selection_.End(), selection_.Affinity());
-      return NextPositionOf(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()),
-          kCanSkipOverEditingBoundary);
+      return NextPositionOf(ComputeVisibleExtent(selection_),
+                            kCanSkipOverEditingBoundary);
     case TextGranularity::kWord:
-      return NextWordPositionForPlatform(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()));
+      return NextWordPositionForPlatform(ComputeVisibleExtent(selection_));
     case TextGranularity::kSentence:
-      return NextSentencePosition(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()));
+      return NextSentencePosition(ComputeVisibleExtent(selection_));
     case TextGranularity::kLine: {
       // down-arrowing from a range selection that ends at the start of a line
       // needs to leave the selection at that line start (no need to call
@@ -374,11 +427,8 @@ VisiblePosition SelectionModifier::ModifyMovingForward(
   return VisiblePosition();
 }
 
-VisiblePosition SelectionModifier::ModifyExtendingLeft(
+VisiblePosition SelectionModifier::ModifyExtendingLeftInternal(
     TextGranularity granularity) {
-  VisiblePosition pos =
-      CreateVisiblePosition(selection_.Extent(), selection_.Affinity());
-
   // The difference between modifyExtendingLeft and modifyExtendingBackward is:
   // modifyExtendingBackward always extends backward logically.
   // modifyExtendingLeft behaves the same as modifyExtendingBackward except for
@@ -387,83 +437,83 @@ VisiblePosition SelectionModifier::ModifyExtendingLeft(
   // block is RTL direction.
   switch (granularity) {
     case TextGranularity::kCharacter:
-      if (DirectionOfEnclosingBlock() == TextDirection::kLtr)
-        pos = PreviousPositionOf(pos, kCanSkipOverEditingBoundary);
-      else
-        pos = NextPositionOf(pos, kCanSkipOverEditingBoundary);
-      break;
+      if (DirectionOfEnclosingBlock() == TextDirection::kLtr) {
+        return PreviousPositionOf(ComputeVisibleExtent(selection_),
+                                  kCanSkipOverEditingBoundary);
+      }
+      return NextPositionOf(ComputeVisibleExtent(selection_),
+                            kCanSkipOverEditingBoundary);
     case TextGranularity::kWord:
-      if (DirectionOfEnclosingBlock() == TextDirection::kLtr)
-        pos = PreviousWordPosition(pos);
-      else
-        pos = NextWordPositionForPlatform(pos);
-      break;
+      if (DirectionOfEnclosingBlock() == TextDirection::kLtr) {
+        return PreviousWordPosition(ComputeVisibleExtent(selection_));
+      }
+      return NextWordPositionForPlatform(ComputeVisibleExtent(selection_));
     case TextGranularity::kLineBoundary:
       if (DirectionOfEnclosingBlock() == TextDirection::kLtr)
-        pos = ModifyExtendingBackward(granularity);
-      else
-        pos = ModifyExtendingForward(granularity);
-      break;
+        return ModifyExtendingBackwardInternal(granularity);
+      return ModifyExtendingForwardInternal(granularity);
     case TextGranularity::kSentence:
     case TextGranularity::kLine:
     case TextGranularity::kParagraph:
     case TextGranularity::kSentenceBoundary:
     case TextGranularity::kParagraphBoundary:
     case TextGranularity::kDocumentBoundary:
-      pos = ModifyExtendingBackward(granularity);
-      break;
+      return ModifyExtendingBackwardInternal(granularity);
   }
+  NOTREACHED() << static_cast<int>(granularity);
+  return VisiblePosition();
+}
+
+VisiblePosition SelectionModifier::ModifyExtendingLeft(
+    TextGranularity granularity) {
+  const VisiblePosition& pos = ModifyExtendingLeftInternal(granularity);
   if (DirectionOfEnclosingBlock() == TextDirection::kLtr)
     return AdjustBackwardPositionForUserSelectAll(pos);
   return AdjustForwardPositionForUserSelectAll(pos);
 }
 
-VisiblePosition SelectionModifier::ModifyExtendingBackward(
+VisiblePosition SelectionModifier::ModifyExtendingBackwardInternal(
     TextGranularity granularity) {
-  VisiblePosition pos =
-      CreateVisiblePosition(selection_.Extent(), selection_.Affinity());
-
   // Extending a selection backward by word or character from just after a table
   // selects the table.  This "makes sense" from the user perspective, esp. when
   // deleting. It was done here instead of in VisiblePosition because we want
   // VPs to iterate over everything.
   switch (granularity) {
     case TextGranularity::kCharacter:
-      pos = PreviousPositionOf(pos, kCanSkipOverEditingBoundary);
-      break;
+      return PreviousPositionOf(ComputeVisibleExtent(selection_),
+                                kCanSkipOverEditingBoundary);
     case TextGranularity::kWord:
-      pos = PreviousWordPosition(pos);
-      break;
+      return PreviousWordPosition(ComputeVisibleExtent(selection_));
     case TextGranularity::kSentence:
-      pos = PreviousSentencePosition(pos);
-      break;
+      return PreviousSentencePosition(ComputeVisibleExtent(selection_));
     case TextGranularity::kLine:
-      pos = PreviousLinePosition(
-          pos,
+      return PreviousLinePosition(
+          ComputeVisibleExtent(selection_),
           LineDirectionPointForBlockDirectionNavigation(selection_.Extent()));
-      break;
     case TextGranularity::kParagraph:
-      pos = PreviousParagraphPosition(
-          pos,
+      return PreviousParagraphPosition(
+          ComputeVisibleExtent(selection_),
           LineDirectionPointForBlockDirectionNavigation(selection_.Extent()));
-      break;
     case TextGranularity::kSentenceBoundary:
-      pos = StartOfSentence(StartForPlatform());
-      break;
+      return StartOfSentence(StartForPlatform());
     case TextGranularity::kLineBoundary:
-      pos = LogicalStartOfLine(StartForPlatform());
-      break;
+      return LogicalStartOfLine(StartForPlatform());
     case TextGranularity::kParagraphBoundary:
-      pos = StartOfParagraph(StartForPlatform());
-      break;
-    case TextGranularity::kDocumentBoundary:
-      pos = StartForPlatform();
+      return StartOfParagraph(StartForPlatform());
+    case TextGranularity::kDocumentBoundary: {
+      const VisiblePosition pos = StartForPlatform();
       if (IsEditablePosition(pos.DeepEquivalent()))
-        pos = StartOfEditableContent(pos);
-      else
-        pos = StartOfDocument(pos);
-      break;
+        return StartOfEditableContent(pos);
+      return StartOfDocument(pos);
+    }
   }
+  NOTREACHED() << static_cast<int>(granularity);
+  return VisiblePosition();
+}
+
+VisiblePosition SelectionModifier::ModifyExtendingBackward(
+    TextGranularity granularity) {
+  const VisiblePosition pos = ModifyExtendingBackwardInternal(granularity);
   if (DirectionOfEnclosingBlock() == TextDirection::kLtr)
     return AdjustBackwardPositionForUserSelectAll(pos);
   return AdjustForwardPositionForUserSelectAll(pos);
@@ -474,19 +524,16 @@ VisiblePosition SelectionModifier::ModifyMovingLeft(
   switch (granularity) {
     case TextGranularity::kCharacter:
       if (!selection_.IsRange()) {
-        return LeftPositionOf(
-            CreateVisiblePosition(selection_.Extent(), selection_.Affinity()));
+        return LeftPositionOf(ComputeVisibleExtent(selection_));
       }
       if (DirectionOfSelection() == TextDirection::kLtr)
         return CreateVisiblePosition(selection_.Start(), selection_.Affinity());
       return CreateVisiblePosition(selection_.End(), selection_.Affinity());
     case TextGranularity::kWord: {
       const bool skips_space_when_moving_right =
-          GetFrame() &&
-          GetFrame()->GetEditor().Behavior().ShouldSkipSpaceWhenMovingRight();
-      return LeftWordPosition(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()),
-          skips_space_when_moving_right);
+          GetFrame().GetEditor().Behavior().ShouldSkipSpaceWhenMovingRight();
+      return LeftWordPosition(ComputeVisibleExtent(selection_),
+                              skips_space_when_moving_right);
     }
     case TextGranularity::kSentence:
     case TextGranularity::kLine:
@@ -509,20 +556,18 @@ VisiblePosition SelectionModifier::ModifyMovingBackward(
   VisiblePosition pos;
   switch (granularity) {
     case TextGranularity::kCharacter:
-      if (selection_.IsRange())
+      if (selection_.IsRange()) {
         pos = CreateVisiblePosition(selection_.Start(), selection_.Affinity());
-      else
-        pos = PreviousPositionOf(
-            CreateVisiblePosition(selection_.Extent(), selection_.Affinity()),
-            kCanSkipOverEditingBoundary);
+      } else {
+        pos = PreviousPositionOf(ComputeVisibleExtent(selection_),
+                                 kCanSkipOverEditingBoundary);
+      }
       break;
     case TextGranularity::kWord:
-      pos = PreviousWordPosition(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()));
+      pos = PreviousWordPosition(ComputeVisibleExtent(selection_));
       break;
     case TextGranularity::kSentence:
-      pos = PreviousSentencePosition(
-          CreateVisiblePosition(selection_.Extent(), selection_.Affinity()));
+      pos = PreviousSentencePosition(ComputeVisibleExtent(selection_));
       break;
     case TextGranularity::kLine:
       pos = PreviousLinePosition(
@@ -560,52 +605,49 @@ static bool IsBoundary(TextGranularity granularity) {
          granularity == TextGranularity::kDocumentBoundary;
 }
 
-bool SelectionModifier::Modify(SelectionModifyAlteration alter,
-                               SelectionDirection direction,
-                               TextGranularity granularity) {
-  DCHECK(!GetFrame()->GetDocument()->NeedsLayoutTreeUpdate());
-  DocumentLifecycle::DisallowTransitionScope disallow_transition(
-      GetFrame()->GetDocument()->Lifecycle());
-
-  if (alter == SelectionModifyAlteration::kExtend) {
-    selection_ =
-        CreateVisibleSelection(PrepareToExtendSeelction(selection_, direction));
+VisiblePosition SelectionModifier::ComputeModifyPosition(
+    SelectionModifyAlteration alter,
+    SelectionModifyDirection direction,
+    TextGranularity granularity) {
+  switch (direction) {
+    case SelectionModifyDirection::kRight:
+      if (alter == SelectionModifyAlteration::kMove)
+        return ModifyMovingRight(granularity);
+      return ModifyExtendingRight(granularity);
+    case SelectionModifyDirection::kForward:
+      if (alter == SelectionModifyAlteration::kExtend)
+        return ModifyExtendingForward(granularity);
+      return ModifyMovingForward(granularity);
+    case SelectionModifyDirection::kLeft:
+      if (alter == SelectionModifyAlteration::kMove)
+        return ModifyMovingLeft(granularity);
+      return ModifyExtendingLeft(granularity);
+    case SelectionModifyDirection::kBackward:
+      if (alter == SelectionModifyAlteration::kExtend)
+        return ModifyExtendingBackward(granularity);
+      return ModifyMovingBackward(granularity);
   }
+  NOTREACHED() << static_cast<int>(direction);
+  return VisiblePosition();
+}
+
+bool SelectionModifier::Modify(SelectionModifyAlteration alter,
+                               SelectionModifyDirection direction,
+                               TextGranularity granularity) {
+  DCHECK(!GetFrame().GetDocument()->NeedsLayoutTreeUpdate());
+  DocumentLifecycle::DisallowTransitionScope disallow_transition(
+      GetFrame().GetDocument()->Lifecycle());
+
+  selection_ = PrepareToModifySelection(alter, direction);
 
   bool was_range = selection_.IsRange();
   VisiblePosition original_start_position = selection_.VisibleStart();
-  VisiblePosition position;
-  switch (direction) {
-    case kDirectionRight:
-      if (alter == SelectionModifyAlteration::kMove)
-        position = ModifyMovingRight(granularity);
-      else
-        position = ModifyExtendingRight(granularity);
-      break;
-    case kDirectionForward:
-      if (alter == SelectionModifyAlteration::kExtend)
-        position = ModifyExtendingForward(granularity);
-      else
-        position = ModifyMovingForward(granularity);
-      break;
-    case kDirectionLeft:
-      if (alter == SelectionModifyAlteration::kMove)
-        position = ModifyMovingLeft(granularity);
-      else
-        position = ModifyExtendingLeft(granularity);
-      break;
-    case kDirectionBackward:
-      if (alter == SelectionModifyAlteration::kExtend)
-        position = ModifyExtendingBackward(granularity);
-      else
-        position = ModifyMovingBackward(granularity);
-      break;
-  }
-
+  VisiblePosition position =
+      ComputeModifyPosition(alter, direction, granularity);
   if (position.IsNull())
     return false;
 
-  if (IsSpatialNavigationEnabled(GetFrame())) {
+  if (IsSpatialNavigationEnabled(&GetFrame())) {
     if (!was_range && alter == SelectionModifyAlteration::kMove &&
         position.DeepEquivalent() == original_start_position.DeepEquivalent())
       return false;
@@ -621,11 +663,10 @@ bool SelectionModifier::Modify(SelectionModifyAlteration alter,
 
   switch (alter) {
     case SelectionModifyAlteration::kMove:
-      selection_ = CreateVisibleSelection(
+      current_selection_ =
           SelectionInDOMTree::Builder()
               .Collapse(position.ToPositionWithAffinity())
-              .SetIsDirectional(ShouldAlwaysUseDirectionalSelection(GetFrame()))
-              .Build());
+              .Build();
       break;
     case SelectionModifyAlteration::kExtend:
 
@@ -633,9 +674,8 @@ bool SelectionModifier::Modify(SelectionModifyAlteration alter,
           (granularity == TextGranularity::kWord ||
            granularity == TextGranularity::kParagraph ||
            granularity == TextGranularity::kLine) &&
-          GetFrame() &&
           !GetFrame()
-               ->GetEditor()
+               .GetEditor()
                .Behavior()
                .ShouldExtendSelectionByWordOrLineAcrossCaret()) {
         // Don't let the selection go across the base position directly. Needed
@@ -654,43 +694,38 @@ bool SelectionModifier::Modify(SelectionModifyAlteration alter,
       // Standard Mac behavior when extending to a boundary is grow the
       // selection rather than leaving the base in place and moving the
       // extent. Matches NSTextView.
-      if (!GetFrame() ||
-          !GetFrame()
-               ->GetEditor()
+      if (!GetFrame()
+               .GetEditor()
                .Behavior()
                .ShouldAlwaysGrowSelectionWhenExtendingToBoundary() ||
           selection_.IsCaret() || !IsBoundary(granularity)) {
-        selection_ =
-            CreateVisibleSelection(SelectionInDOMTree::Builder()
-                                       .Collapse(selection_.Base())
-                                       .Extend(position.DeepEquivalent())
-                                       .SetIsDirectional(true)
-                                       .Build());
+        current_selection_ = SelectionInDOMTree::Builder()
+                                 .Collapse(selection_.Base())
+                                 .Extend(position.DeepEquivalent())
+                                 .Build();
       } else {
         TextDirection text_direction = DirectionOfEnclosingBlock();
-        if (direction == kDirectionForward ||
+        if (direction == SelectionModifyDirection::kForward ||
             (text_direction == TextDirection::kLtr &&
-             direction == kDirectionRight) ||
+             direction == SelectionModifyDirection::kRight) ||
             (text_direction == TextDirection::kRtl &&
-             direction == kDirectionLeft)) {
-          selection_ = CreateVisibleSelection(
+             direction == SelectionModifyDirection::kLeft)) {
+          current_selection_ =
               SelectionInDOMTree::Builder()
                   .Collapse(selection_.IsBaseFirst()
                                 ? selection_.Base()
                                 : position.DeepEquivalent())
                   .Extend(selection_.IsBaseFirst() ? position.DeepEquivalent()
                                                    : selection_.Extent())
-                  .SetIsDirectional(true)
-                  .Build());
+                  .Build();
         } else {
-          selection_ = CreateVisibleSelection(
+          current_selection_ =
               SelectionInDOMTree::Builder()
                   .Collapse(selection_.IsBaseFirst() ? position.DeepEquivalent()
                                                      : selection_.Base())
                   .Extend(selection_.IsBaseFirst() ? selection_.Extent()
                                                    : position.DeepEquivalent())
-                  .SetIsDirectional(true)
-                  .Build());
+                  .Build();
         }
       }
       break;
@@ -719,16 +754,14 @@ bool SelectionModifier::ModifyWithPageGranularity(
   if (!vertical_distance)
     return false;
 
-  DCHECK(!GetFrame()->GetDocument()->NeedsLayoutTreeUpdate());
+  DCHECK(!GetFrame().GetDocument()->NeedsLayoutTreeUpdate());
   DocumentLifecycle::DisallowTransitionScope disallow_transition(
-      GetFrame()->GetDocument()->Lifecycle());
+      GetFrame().GetDocument()->Lifecycle());
 
-  if (alter == SelectionModifyAlteration::kExtend) {
-    selection_ = CreateVisibleSelection(PrepareToExtendSeelction(
-        selection_, direction == SelectionModifyVerticalDirection::kUp
-                        ? kDirectionBackward
-                        : kDirectionForward));
-  }
+  selection_ = PrepareToModifySelection(
+      alter, direction == SelectionModifyVerticalDirection::kUp
+                 ? SelectionModifyDirection::kBackward
+                 : SelectionModifyDirection::kForward);
 
   VisiblePosition pos;
   LayoutUnit x_pos;
@@ -745,7 +778,7 @@ bool SelectionModifier::ModifyWithPageGranularity(
               : selection_.End());
       break;
     case SelectionModifyAlteration::kExtend:
-      pos = CreateVisiblePosition(selection_.Extent(), selection_.Affinity());
+      pos = ComputeVisibleExtent(selection_);
       x_pos =
           LineDirectionPointForBlockDirectionNavigation(selection_.Extent());
       break;
@@ -786,21 +819,19 @@ bool SelectionModifier::ModifyWithPageGranularity(
 
   switch (alter) {
     case SelectionModifyAlteration::kMove:
-      selection_ = CreateVisibleSelection(
+      current_selection_ =
           SelectionInDOMTree::Builder()
               .Collapse(result.ToPositionWithAffinity())
-              .SetIsDirectional(ShouldAlwaysUseDirectionalSelection(GetFrame()))
               .SetAffinity(direction == SelectionModifyVerticalDirection::kUp
                                ? TextAffinity::kUpstream
                                : TextAffinity::kDownstream)
-              .Build());
+              .Build();
       break;
     case SelectionModifyAlteration::kExtend: {
-      selection_ = CreateVisibleSelection(SelectionInDOMTree::Builder()
-                                              .Collapse(selection_.Base())
-                                              .Extend(result.DeepEquivalent())
-                                              .SetIsDirectional(true)
-                                              .Build());
+      current_selection_ = SelectionInDOMTree::Builder()
+                               .Collapse(selection_.Base())
+                               .Extend(result.DeepEquivalent())
+                               .Build();
       break;
     }
   }
@@ -825,11 +856,11 @@ static LayoutUnit LineDirectionPointForBlockDirectionNavigationOf(
   // relative to the text, not absolute 'up'.
   const FloatPoint& caret_point = caret_rect.layout_object->LocalToAbsolute(
       FloatPoint(caret_rect.rect.Location()));
-  LayoutObject* const containing_block =
+  const LayoutObject* const containing_block =
       caret_rect.layout_object->ContainingBlock();
   // Just use ourselves to determine the writing mode if we have no containing
   // block.
-  LayoutObject* const layout_object =
+  const LayoutObject* const layout_object =
       containing_block ? containing_block : caret_rect.layout_object;
   return LayoutUnit(layout_object->IsHorizontalWritingMode() ? caret_point.X()
                                                              : caret_point.Y());
@@ -840,10 +871,6 @@ LayoutUnit SelectionModifier::LineDirectionPointForBlockDirectionNavigation(
   LayoutUnit x;
 
   if (selection_.IsNone())
-    return x;
-
-  LocalFrame* frame = pos.GetDocument()->GetFrame();
-  if (!frame)
     return x;
 
   if (x_pos_for_vertical_arrow_navigation_ ==

@@ -1,7 +1,7 @@
 {% filter format_blink_cpp_source_code %}
 
 {% include 'copyright_block.txt' %}
-#include "{{v8_class_or_partial}}.h"
+#include "{{this_include_header_name}}"
 
 {% for filename in cpp_includes if filename != '%s.h' % cpp_class_or_partial %}
 #include "{{filename}}"
@@ -27,15 +27,12 @@ namespace blink {
 {{wrapper_type_info_const}}WrapperTypeInfo {{v8_class}}::wrapperTypeInfo = {
     gin::kEmbedderBlink,
     {{dom_template}},
-    {{v8_class}}::Trace,
-    {{v8_class}}::TraceWrappers,
-    {{prepare_prototype_and_interface_object_func or 'nullptr'}},
+    {{install_conditional_features_func or 'nullptr'}},
     "{{interface_name}}",
     {{parent_wrapper_type_info}},
     WrapperTypeInfo::kWrapperTypeObjectPrototype,
     WrapperTypeInfo::{{wrapper_class_id}},
     WrapperTypeInfo::{{active_scriptwrappable_inheritance}},
-    WrapperTypeInfo::{{lifetime}},
 };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && defined(__clang__)
 #pragma clang diagnostic pop
@@ -143,6 +140,7 @@ static void (*{{method.name}}MethodForPartialInterface)(const v8::FunctionCallba
 {% block named_property_setter %}{% endblock %}
 {% block named_property_deleter %}{% endblock %}
 {% block named_property_query %}{% endblock %}
+{% block named_property_descriptor %}{% endblock %}
 {% block named_property_enumerator %}{% endblock %}
 {% block indexed_property_getter %}{% endblock %}
 {% block indexed_property_descriptor %}{% endblock %}
@@ -191,16 +189,12 @@ static const struct {
 
 {# Attributes #}
 {% from 'attributes.cpp.tmpl' import constructor_getter_callback,
-       attribute_getter_callback, attribute_setter_callback,
-       attribute_cached_property_key with context %}
+       attribute_getter_callback, attribute_setter_callback with context %}
 {% for attribute in attributes %}
-{% if attribute.is_cached_accessor %}
-{{attribute_cached_property_key(attribute)}}
-{% endif %}
 {% for world_suffix in attribute.world_suffixes %}
 {% if not attribute.constructor_type %}
 {{attribute_getter_callback(attribute, world_suffix)}}
-{% elif attribute.needs_constructor_getter_callback %}
+{% else %}
 {{constructor_getter_callback(attribute, world_suffix)}}
 {% endif %}
 {% if attribute.has_setter %}
@@ -254,10 +248,10 @@ bool {{v8_class_or_partial}}::securityCheck(v8::Local<v8::Context> accessingCont
   if (window.IsEmpty())
     return false;  // the frame is gone.
 
-  const DOMWindow* targetWindow = V8Window::toImpl(window);
+  const DOMWindow* targetWindow = V8Window::ToImpl(window);
   return BindingSecurity::ShouldAllowAccessTo(ToLocalDOMWindow(accessingContext), targetWindow, BindingSecurity::ErrorReportOption::kDoNotReport);
   {% elif interface_name == 'Location' %}
-  {{cpp_class}}* impl = {{v8_class}}::toImpl(accessedObject);
+  {{cpp_class}}* impl = {{v8_class}}::ToImpl(accessedObject);
   return BindingSecurity::ShouldAllowAccessTo(ToLocalDOMWindow(accessingContext), impl, BindingSecurity::ErrorReportOption::kDoNotReport);
   {% else %}
   #error "Unexpected security check for interface {{interface_name}}"
@@ -266,6 +260,7 @@ bool {{v8_class_or_partial}}::securityCheck(v8::Local<v8::Context> accessingCont
 
 {% if has_cross_origin_named_getter %}
 void {{v8_class_or_partial}}::crossOriginNamedGetter(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
+  {{ runtime_timer_scope_disabled_by_default(runtime_call_stats.cross_origin_named_getter_counter) }}
   if (!name->IsString())
     return;
   const AtomicString& propertyName = ToCoreAtomicString(name.As<v8::String>());
@@ -284,6 +279,17 @@ void {{v8_class_or_partial}}::crossOriginNamedGetter(v8::Local<v8::Name> name, c
   {{cpp_class}}V8Internal::namedPropertyGetter(propertyName, info);
   {% endif %}
   {% else %}
+  // HTML 7.2.3.3 CrossOriginGetOwnPropertyHelper ( O, P )
+  // https://html.spec.whatwg.org/multipage/browsers.html#crossorigingetownpropertyhelper-(-o,-p-)
+  // step 3. If P is "then", @@toStringTag, @@hasInstance, or
+  //   @@isConcatSpreadable, then return PropertyDescriptor{ [[Value]]:
+  //   undefined, [[Writable]]: false, [[Enumerable]]: false,
+  //   [[Configurable]]: true }.
+  if (propertyName == "then") {
+    V8SetReturnValue(info, v8::Undefined(info.GetIsolate()));
+    return;
+  }
+
   BindingSecurity::FailedAccessCheckFor(
       info.GetIsolate(),
       &{{v8_class}}::wrapperTypeInfo,
@@ -294,6 +300,7 @@ void {{v8_class_or_partial}}::crossOriginNamedGetter(v8::Local<v8::Name> name, c
 
 {% if has_cross_origin_named_setter %}
 void {{v8_class_or_partial}}::crossOriginNamedSetter(v8::Local<v8::Name> name, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info) {
+  {{ runtime_timer_scope_disabled_by_default(runtime_call_stats.cross_origin_named_setter_counter) }}
   if (!name->IsString())
     return;
   const AtomicString& propertyName = ToCoreAtomicString(name.As<v8::String>());
@@ -637,9 +644,7 @@ static void install{{v8_class}}Template(
                             v8::ReadOnly | v8::DontEnum | v8::DontDelete));
   {% endif %}
 
-  {% if legacy_caller and not is_partial %}
-  instanceTemplate->SetCallAsFunctionHandler({{cpp_class_or_partial}}V8Internal::{{legacy_caller.name}}MethodCallback);
-  {% elif has_custom_legacy_call_as_function and not is_partial %}
+  {% if has_custom_legacy_call_as_function and not is_partial %}
   instanceTemplate->SetCallAsFunctionHandler({{v8_class}}::legacyCallCustom);
   {% endif %}
 
@@ -780,11 +785,10 @@ void {{v8_class_or_partial}}::InstallRuntimeEnabledFeaturesOnTemplate(
 {##############################################################################}
 {% block install_runtime_enabled %}
 {% if needs_runtime_enabled_installer %}
-{% from 'attributes.cpp.tmpl' import accessor_configuration,
-        attribute_configuration,
-        with context %}
+{% from 'attributes.cpp.tmpl' import accessor_configuration, attribute_configuration with context %}
 {% from 'methods.cpp.tmpl' import install_custom_signature with context %}
-void {{v8_class_or_partial}}::InstallRuntimeEnabledFeatures(
+{% if not is_partial %}
+void {{v8_class}}::InstallRuntimeEnabledFeatures(
     v8::Isolate* isolate,
     const DOMWrapperWorld& world,
     v8::Local<v8::Object> instance,
@@ -794,8 +798,23 @@ void {{v8_class_or_partial}}::InstallRuntimeEnabledFeatures(
 #error "We don't expect a runtime enabled interface {{v8_class_or_partial}} to have InstallRuntimeEnabledFeatures()."
   {% endif %}
 
-  {% if is_partial %}
-  {{v8_class}}::InstallRuntimeEnabledFeatures(isolate, world, instance, prototype, interface);
+  InstallRuntimeEnabledFeaturesImpl(isolate, world, instance, prototype, interface);
+  {% if has_partial_interface %}
+
+  // Call partial interface's installer.
+  install_runtime_enabled_features_function_(isolate, world, instance, prototype, interface);
+  {% endif %}
+}
+{% endif %}{# not is_partial #}
+
+void {{v8_class_or_partial}}::InstallRuntimeEnabledFeaturesImpl(
+    v8::Isolate* isolate,
+    const DOMWrapperWorld& world,
+    v8::Local<v8::Object> instance,
+    v8::Local<v8::Object> prototype,
+    v8::Local<v8::Function> interface) {
+  {% if runtime_enabled_feature_name %}
+#error "We don't expect a runtime enabled interface {{v8_class_or_partial}} to have InstallRuntimeEnabledFeatures()."
   {% endif %}
 
   v8::Local<v8::FunctionTemplate> interface_template = {{v8_class}}::wrapperTypeInfo.domTemplate(isolate, world);
@@ -911,7 +930,7 @@ void {{v8_class_or_partial}}::install{{feature.name}}(v8::Isolate* isolate, cons
 }
 
 void {{v8_class_or_partial}}::install{{feature.name}}(ScriptState* scriptState, v8::Local<v8::Object> instance) {
-  V8PerContextData* perContextData = V8PerContextData::From(scriptState->GetContext());
+  V8PerContextData* perContextData = scriptState->PerContextData();
   v8::Local<v8::Object> prototype = perContextData->PrototypeForType(&{{v8_class}}::wrapperTypeInfo);
   v8::Local<v8::Function> interface = perContextData->ConstructorForType(&{{v8_class}}::wrapperTypeInfo);
   ALLOW_UNUSED_LOCAL(interface);
@@ -934,46 +953,78 @@ void {{v8_class_or_partial}}::install{{feature.name}}(ScriptState* scriptState) 
 {% block to_impl_with_type_check %}{% endblock %}
 {% block native_value_traits %}{% endblock %}
 {##############################################################################}
-{% block prepare_prototype_and_interface_object %}
-{% from 'attributes.cpp.tmpl' import install_conditionally_enabled_attributes_on_prototype with context %}
-{% from 'methods.cpp.tmpl' import install_conditionally_enabled_methods with context %}
-{% if prepare_prototype_and_interface_object_func %}
-void {{v8_class_or_partial}}::preparePrototypeAndInterfaceObject(v8::Local<v8::Context> context, const DOMWrapperWorld& world, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate) {
+{% block install_conditional_features %}
+{% from 'attributes.cpp.tmpl' import install_conditional_attributes,
+      install_conditional_interface_objects with context %}
+{% from 'methods.cpp.tmpl' import install_conditional_methods with context %}
+{% if install_conditional_features_func %}
+void {{v8_class_or_partial}}::InstallConditionalFeatures(
+    v8::Local<v8::Context> context,
+    const DOMWrapperWorld& world,
+    v8::Local<v8::Object> instanceObject,
+    v8::Local<v8::Object> prototypeObject,
+    v8::Local<v8::Function> interfaceObject,
+    v8::Local<v8::FunctionTemplate> interfaceTemplate) {
+  CHECK(!interfaceTemplate.IsEmpty());
+  DCHECK((!prototypeObject.IsEmpty() && !interfaceObject.IsEmpty()) ||
+         !instanceObject.IsEmpty());
   {% if is_partial %}
-  {{v8_class}}::preparePrototypeAndInterfaceObject(context, world, prototypeObject, interfaceObject, interfaceTemplate);
+  {{v8_class}}::InstallConditionalFeatures(
+      context, world, instanceObject, prototypeObject, interfaceObject, interfaceTemplate);
   {% endif %}
 
   v8::Isolate* isolate = context->GetIsolate();
-  {% if has_conditional_attributes_on_prototype or conditionally_enabled_methods %}
+
+  {% if unscopables %}
+  if (!prototypeObject.IsEmpty()) {
+    v8::Local<v8::Name> unscopablesSymbol(v8::Symbol::GetUnscopables(isolate));
+    v8::Local<v8::Object> unscopables;
+    bool has_unscopables;
+    if (prototypeObject->HasOwnProperty(context, unscopablesSymbol).To(&has_unscopables) && has_unscopables) {
+      unscopables = prototypeObject->Get(context, unscopablesSymbol).ToLocalChecked().As<v8::Object>();
+    } else {
+      unscopables = v8::Object::New(isolate);
+    }
+    {% for name, runtime_enabled_feature_name in unscopables %}
+    {% filter runtime_enabled(runtime_enabled_feature_name) %}
+    unscopables->CreateDataProperty(
+        context, V8AtomicString(isolate, "{{name}}"), v8::True(isolate))
+        .FromJust();
+    {% endfilter %}
+    {% endfor %}
+    prototypeObject->CreateDataProperty(context, unscopablesSymbol, unscopables).FromJust();
+  }
+  {% endif %}{# unscopables #}
+
+  {% if conditional_attributes or conditional_methods %}
   v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
+  {% endif %}
+  {% if conditional_attributes or conditional_methods or conditional_interface_objects %}
   ExecutionContext* executionContext = ToExecutionContext(context);
   DCHECK(executionContext);
+  {% if has_conditional_secure_attributes or has_conditional_secure_methods %}
+  bool isSecureContext = (executionContext && executionContext->IsSecureContext());
   {% endif %}
 
-{% if unscopables %}
-  v8::Local<v8::Name> unscopablesSymbol(v8::Symbol::GetUnscopables(isolate));
-  v8::Local<v8::Object> unscopables;
-  if (V8CallBoolean(prototypeObject->HasOwnProperty(context, unscopablesSymbol)))
-    unscopables = prototypeObject->Get(context, unscopablesSymbol).ToLocalChecked().As<v8::Object>();
-  else
-    unscopables = v8::Object::New(isolate);
-  {% for name, runtime_enabled_feature_name in unscopables %}
-  {% filter runtime_enabled(runtime_enabled_feature_name) %}
-  unscopables->CreateDataProperty(context, V8AtomicString(isolate, "{{name}}"), v8::True(isolate)).FromJust();
-  {% endfilter %}
-  {% endfor %}
-  prototypeObject->CreateDataProperty(context, unscopablesSymbol, unscopables).FromJust();
-{% endif %}{# unscopables #}
-{% if has_conditional_attributes_on_prototype %}
-  {{install_conditionally_enabled_attributes_on_prototype() | indent(2)}}
-{% endif %}
-{% if conditionally_enabled_methods %}
-  {{install_conditionally_enabled_methods() | indent(2)}}
-{% endif %}
+  {% set attributes_on_instance = conditional_attributes | selectattr('on_instance') | list  %}
+  {% if attributes_on_instance or conditional_interface_objects %}
+  if (!instanceObject.IsEmpty()) {
+    {{install_conditional_attributes('isSecureContext', attributes_on_instance) | indent(4)}}
+    {{install_conditional_interface_objects('isSecureContext', conditional_interface_objects) | indent(4)}}
+  }
+  {% endif %}
+
+  {% set attributes_on_prototype = conditional_attributes | selectattr('on_prototype') | list  %}
+  {% set attributes_on_interface = conditional_attributes | selectattr('on_interface') | list  %}
+  if (!prototypeObject.IsEmpty() || !interfaceObject.IsEmpty()) {
+    {{install_conditional_attributes('isSecureContext', attributes_on_prototype + attributes_on_interface) | indent(4)}}
+    {{install_conditional_methods('isSecureContext') | indent(4)}}
+  }
+  {% endif %}{# conditional_attributes or conditional_methods #}
 }
 {% endif %}
 
-{% endblock %}
+{% endblock %}{# install_conditional_features #}
 {##############################################################################}
 {% block partial_interface %}{% endblock %}
 }  // namespace blink

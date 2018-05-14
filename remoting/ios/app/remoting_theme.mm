@@ -8,7 +8,19 @@
 
 #import "remoting/ios/app/remoting_theme.h"
 
+#import "ios/third_party/material_components_ios/src/components/Dialogs/src/ColorThemer/MDCAlertColorThemer.h"
+#import "ios/third_party/material_components_ios/src/components/Themes/src/MDCColorScheme.h"
+
+#include "remoting/base/string_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+
 @implementation RemotingTheme
+
++ (void)applyColorSchemes {
+  MDCBasicColorScheme* colorScheme = [[MDCBasicColorScheme alloc]
+      initWithPrimaryColor:RemotingTheme.flatButtonTextColor];
+  [MDCAlertColorThemer applyColorScheme:colorScheme];
+}
 
 #pragma mark - Colors
 
@@ -25,6 +37,10 @@
   return color;
 }
 
++ (UIColor*)connectionViewForegroundColor {
+  return UIColor.whiteColor;
+}
+
 + (UIColor*)hostListBackgroundColor {
   static UIColor* color;
   static dispatch_once_t onceToken;
@@ -34,28 +50,54 @@
   return color;
 }
 
-+ (UIColor*)hostListRefreshIndicatorColor {
-  static UIColor* color;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    color = [UIColor colorWithRed:0.50f green:0.87f blue:0.92f alpha:1.f];
-  });
-  return color;
++ (UIColor*)hostListForegroundColor {
+  return UIColor.whiteColor;
+}
+
++ (UIColor*)hostListHeaderTitleColor {
+  return UIColor.whiteColor;
 }
 
 + (UIColor*)menuBlueColor {
   static UIColor* color;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
-    color = [UIColor colorWithRed:52.f / 255.f
-                            green:174.f / 255.f
-                             blue:249.f / 255.f
-                            alpha:1.f];
+    color = [UIColor colorWithRed:0.29 green:0.58 blue:0.96 alpha:1.0];
   });
   return color;
 }
 
-+ (UIColor*)offlineHostColor {
++ (UIColor*)menuTextColor {
+  return UIColor.whiteColor;
+}
+
++ (UIColor*)menuSeparatorColor {
+  static UIColor* color;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    color = [UIColor colorWithWhite:1.f alpha:0.4f];
+  });
+  return color;
+}
+
++ (UIColor*)pinEntryPairingColor {
+  return UIColor.whiteColor;
+}
+
++ (UIColor*)pinEntryPlaceholderColor {
+  static UIColor* color;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    color = [UIColor colorWithWhite:1.f alpha:0.5f];
+  });
+  return color;
+}
+
++ (UIColor*)pinEntryTextColor {
+  return UIColor.whiteColor;
+}
+
++ (UIColor*)hostOfflineColor {
   static UIColor* color;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
@@ -64,11 +106,32 @@
   return color;
 }
 
-+ (UIColor*)onlineHostColor {
++ (UIColor*)hostOnlineColor {
   static UIColor* color;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
     color = [UIColor colorWithRed:0.40f green:0.75f blue:0.40f alpha:1.f];
+  });
+  return color;
+}
+
++ (UIColor*)hostWarningColor {
+  static UIColor* color;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    color = [UIColor colorWithRed:1.f green:0.60f blue:0.f alpha:1.f];
+  });
+  return color;
+}
+
++ (UIColor*)hostErrorColor {
+  static UIColor* color;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    color = [UIColor colorWithRed:249.f / 255.f
+                            green:146.f / 255.f
+                             blue:34.f / 255.f
+                            alpha:1.f];
   });
   return color;
 }
@@ -95,6 +158,28 @@
   return color;
 }
 
++ (UIColor*)refreshIndicatorColor {
+  static UIColor* color;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    color = UIColor.whiteColor;
+  });
+  return color;
+}
+
++ (UIColor*)hostCellTitleColor {
+  static UIColor* color;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    color = [UIColor colorWithWhite:0 alpha:0.87f];
+  });
+  return color;
+}
+
++ (UIColor*)hostCellStatusTextColor {
+  return UIColor.blackColor;
+}
+
 + (UIColor*)setupListBackgroundColor {
   static UIColor* color;
   static dispatch_once_t onceToken;
@@ -105,7 +190,12 @@
 }
 
 + (UIColor*)setupListTextColor {
-  return UIColor.grayColor;
+  static UIColor* color;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    color = [UIColor colorWithWhite:0.38f alpha:1.f];
+  });
+  return color;
 }
 
 + (UIColor*)setupListNumberColor {
@@ -164,6 +254,7 @@
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
     icon = [UIImage imageNamed:@"ic_close_white"];
+    icon.accessibilityLabel = l10n_util::GetNSString(IDS_CLOSE);
   });
   return icon;
 }
@@ -182,6 +273,7 @@
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
     icon = [UIImage imageNamed:@"ic_menu_white"];
+    icon.accessibilityLabel = l10n_util::GetNSString(IDS_ACTIONBAR_MENU);
   });
   return icon;
 }

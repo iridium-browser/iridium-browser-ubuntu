@@ -8,56 +8,11 @@ import page_sets
 
 from core import perf_benchmark
 from telemetry import benchmark
-from telemetry import story
-from telemetry.page import legacy_page_test
-from telemetry.value import scalar
-from telemetry.value import improvement_direction
 from telemetry.timeline import chrome_trace_category_filter
 from telemetry.timeline import chrome_trace_config
 from telemetry.web_perf import timeline_based_measurement
 
 
-class _OortOnlineMeasurement(legacy_page_test.LegacyPageTest):
-
-  def __init__(self):
-    super(_OortOnlineMeasurement, self).__init__()
-
-  def ValidateAndMeasurePage(self, page, tab, results):
-    del page  # unused
-    tab.WaitForJavaScriptCondition('window.benchmarkFinished', timeout=1000)
-    scores = tab.EvaluateJavaScript('window.benchmarkScore')
-    for score in scores:
-      valid = score['valid']
-      if valid:
-        results.AddValue(scalar.ScalarValue(
-            results.current_page, score['name'], 'score', score['score'],
-            important=True, improvement_direction=improvement_direction.UP))
-
-
-@benchmark.Disabled('android')
-@benchmark.Owner(emails=['ulan@chromium.org'])
-class OortOnline(perf_benchmark.PerfBenchmark):
-  """OortOnline benchmark that measures WebGL and V8 performance.
-  URL: http://oortonline.gl/#run
-  Info: http://v8project.blogspot.de/2015/10/jank-busters-part-one.html
-  """
-  test = _OortOnlineMeasurement
-
-  @classmethod
-  def Name(cls):
-    return 'oortonline'
-
-  def CreateStorySet(self, options):
-    return page_sets.OortOnlinePageSet()
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        pass # http://oortonline.gl/#run not disabled.
-    return StoryExpectations()
-
-# Disabled on Linux due to timeouts; crbug.com/727850
-@benchmark.Disabled('linux', 'win')
 @benchmark.Owner(emails=['ulan@chromium.org'])
 class OortOnlineTBMv2(perf_benchmark.PerfBenchmark):
   """OortOnline benchmark that measures WebGL and V8 performance.
@@ -72,12 +27,6 @@ class OortOnlineTBMv2(perf_benchmark.PerfBenchmark):
       r'(reported_by_chrome:v8|reported_by_os:system_memory:[^:]+$)')
 
   page_set = page_sets.OortOnlineTBMPageSet
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        pass # http://oortonline.gl/#run not disabled.
-    return StoryExpectations()
 
   def CreateCoreTimelineBasedMeasurementOptions(self):
     categories = [
@@ -110,17 +59,13 @@ class OortOnlineTBMv2(perf_benchmark.PerfBenchmark):
     return options
 
   @classmethod
-  def ShouldDisable(cls, possible_browser):
-    return possible_browser.platform.GetDeviceTypeName() == 'Nexus 9'
-
-  @classmethod
   def Name(cls):
     return 'oortonline_tbmv2'
 
   @classmethod
-  def ValueCanBeAddedPredicate(cls, value, _):
-    if 'memory:chrome' in value.name:
-      return bool(cls._V8_AND_OVERALL_MEMORY_RE.search(value.name))
-    if 'animation ' in value.name:
-      return 'throughput' in value.name or 'frameTimeDiscrepancy' in value.name
-    return 'v8' in value.name
+  def ShouldAddValue(cls, name, _):
+    if 'memory:chrome' in name:
+      return bool(cls._V8_AND_OVERALL_MEMORY_RE.search(name))
+    if 'animation ' in name:
+      return 'throughput' in name or 'frameTimeDiscrepancy' in name
+    return 'v8' in name

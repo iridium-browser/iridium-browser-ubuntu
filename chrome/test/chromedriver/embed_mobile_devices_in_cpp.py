@@ -13,19 +13,40 @@ parsed with JSONReader.
 
 import json
 import optparse
+import os
 import re
 import subprocess
 import sys
 
+import chrome_paths
 import cpp_source
 
 
 def main():
   parser = optparse.OptionParser()
   parser.add_option(
+      '', '--version-file', type='string',
+      default=os.path.join(chrome_paths.GetSrc(), 'chrome', 'VERSION'),
+      help='Path to Chrome version file')
+  parser.add_option(
       '', '--directory', type='string', default='.',
       help='Path to directory where the cc/h files should be created')
   options, args = parser.parse_args()
+
+  # The device userAgent string may contain '%s', which should be replaced with
+  # current Chrome version. First we read the version file.
+  version_parts = ['MAJOR', 'MINOR', 'BUILD', 'PATCH']
+  version = []
+  version_file = open(options.version_file, 'r')
+  for part in version_parts:
+    # The version file should have 4 lines, with format like MAJOR=63
+    components = version_file.readline().split('=')
+    if len(components) != 2 or components[0].strip() != part:
+      print 'Bad version file'
+      return 1
+    version.append(components[1].strip())
+  # Join parts of version together using '.' as separator
+  version = '.'.join(version)
 
   devices = {}
   file_name = args[0]
@@ -36,14 +57,29 @@ def main():
   for extension in extensions:
     if extension['type'] == 'emulated-device':
       device = extension['device']
-      devices[device['title']] = {
-        'userAgent': device['user-agent'],
-        'width': device['screen']['vertical']['width'],
-        'height': device['screen']['vertical']['height'],
-        'deviceScaleFactor': device['screen']['device-pixel-ratio'],
-        'touch': 'touch' in device['capabilities'],
-        'mobile': 'mobile' in device['capabilities'],
-      }
+      title = device['title']
+      titles = [title]
+      # For 'iPhone 6/7/8', also add ['iPhone 6', 'iPhone 7', 'iPhone 8'] for
+      # backward compatibility.
+      if '/' in title:
+        words = title.split()
+        for i in range(len(words)):
+          if '/' in words[i]:
+            # Only support one word containing '/'
+            break
+        tokens = words[i].split('/')
+        for token in tokens:
+          words[i] = token
+          titles.append(' '.join(words))
+      for title in titles:
+        devices[title] = {
+          'userAgent': device['user-agent'].replace('%s', version),
+          'width': device['screen']['vertical']['width'],
+          'height': device['screen']['vertical']['height'],
+          'deviceScaleFactor': device['screen']['device-pixel-ratio'],
+          'touch': 'touch' in device['capabilities'],
+          'mobile': 'mobile' in device['capabilities'],
+        }
 
   output_dir = 'chrome/test/chromedriver/chrome'
   cpp_source.WriteSource('mobile_device_list',

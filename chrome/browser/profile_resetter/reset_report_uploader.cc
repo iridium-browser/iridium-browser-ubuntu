@@ -18,7 +18,7 @@
 
 namespace {
 const char kResetReportUrl[] =
-    "https://sb-ssl.google.com/safebrowsing/clientreport/chrome-reset";
+    "trk:275:about:blank"; //https://sb-ssl.google.com/safebrowsing/clientreport/chrome-reset";
 
 GURL GetClientReportUrl(const std::string& report_url) {
   GURL url(report_url);
@@ -65,7 +65,7 @@ void ResetReportUploader::DispatchReport(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting: "None, the user needs to actively send the data."
           policy_exception_justification:
             "None, considered not useful because the user needs to actively "

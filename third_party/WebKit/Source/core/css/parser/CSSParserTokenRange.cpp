@@ -62,7 +62,7 @@ String CSSParserTokenRange::Serialize() const {
   // as per spec, but since this is currently only used for @supports CSSOM
   // we just get these cases wrong and avoid the additional complexity.
   StringBuilder builder;
-  for (const CSSParserToken* it = first_; it < last_; ++it)
+  for (const CSSParserToken* it = first_; it != last_; ++it)
     it->Serialize(builder);
   return builder.ToString();
 }

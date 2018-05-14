@@ -131,10 +131,8 @@ void SVGTextLayoutEngine::ComputeCurrentFragmentMetrics(
     return;
 
   float width = scaled_font.Width(run, nullptr, &glyph_overflow_bounds);
-  float ascent = font_data->GetFontMetrics().FloatAscent();
-  float descent = font_data->GetFontMetrics().FloatDescent();
   current_text_fragment_.glyph_overflow.SetFromBounds(glyph_overflow_bounds,
-                                                      ascent, descent, width);
+                                                      scaled_font, width);
   current_text_fragment_.glyph_overflow.top /= scaling_factor;
   current_text_fragment_.glyph_overflow.left /= scaling_factor;
   current_text_fragment_.glyph_overflow.right /= scaling_factor;
@@ -174,8 +172,7 @@ void SVGTextLayoutEngine::BeginTextPathLayout(SVGInlineFlowBox* flow_box) {
   text_path_ = text_path.LayoutPath();
   if (!text_path_)
     return;
-  text_path_start_offset_ =
-      text_path.CalculateStartOffset(text_path_->length());
+  text_path_start_offset_ = text_path_->StartOffset();
 
   SVGTextPathChunkBuilder text_path_chunk_layout_builder;
   text_path_chunk_layout_builder.ProcessTextChunks(
@@ -276,7 +273,7 @@ void SVGTextLayoutEngine::LayoutCharactersInTextBoxes(InlineFlowBox* start) {
         continue;
 
       SVGInlineFlowBox* flow_box = ToSVGInlineFlowBox(child);
-      bool is_text_path = isSVGTextPathElement(*node);
+      bool is_text_path = IsSVGTextPathElement(*node);
       if (is_text_path)
         BeginTextPathLayout(flow_box);
 

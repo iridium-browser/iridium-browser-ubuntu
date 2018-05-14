@@ -6,6 +6,9 @@
 
 #include <stddef.h>
 
+#include <memory>
+#include <utility>
+
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/macros.h"
@@ -35,7 +38,7 @@
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model_delegate.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/insecure_content_renderer.mojom.h"
+#include "chrome/common/content_settings_renderer.mojom.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/grit/generated_resources.h"
@@ -59,9 +62,11 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/origin_util.h"
 #include "ppapi/features/features.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_provider.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/resources/grit/ui_resources.h"
 
 using base::UserMetricsAction;
@@ -72,14 +77,6 @@ using content_settings::SETTING_SOURCE_USER;
 using content_settings::SETTING_SOURCE_NONE;
 
 namespace {
-
-// These states must match the order of appearance of the radio buttons
-// in the XIB file for the Mac port.
-enum RPHState {
-  RPH_ALLOW = 0,
-  RPH_BLOCK,
-  RPH_IGNORE,
-};
 
 struct ContentSettingsTypeIdEntry {
   ContentSettingsType type;
@@ -96,24 +93,13 @@ int GetIdForContentType(const ContentSettingsTypeIdEntry* entries,
   return 0;
 }
 
-const content::MediaStreamDevice& GetMediaDeviceById(
-    const std::string& device_id,
-    const content::MediaStreamDevices& devices) {
-  DCHECK(!devices.empty());
-  for (const content::MediaStreamDevice& device : devices) {
-    if (device.id == device_id)
-      return device;
-  }
-
-  // A device with the |device_id| was not found. It is likely that the device
-  // has been unplugged from the OS. Return the first device as the default
-  // device.
-  return *devices.begin();
+void SetAllowRunningInsecureContent(content::RenderFrameHost* frame) {
+  chrome::mojom::ContentSettingsRendererAssociatedPtr renderer;
+  frame->GetRemoteAssociatedInterfaces()->GetInterface(&renderer);
+  renderer->SetAllowRunningInsecureContent();
 }
 
 }  // namespace
-
-const int ContentSettingBubbleModel::kAllowButtonIndex = 0;
 
 // ContentSettingSimpleBubbleModel ---------------------------------------------
 
@@ -127,6 +113,7 @@ ContentSettingSimpleBubbleModel::ContentSettingSimpleBubbleModel(
   // Notifications do not have a bubble.
   DCHECK_NE(content_type, CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
   SetTitle();
+  SetMessage();
   SetManageText();
   SetCustomLink();
 }
@@ -143,20 +130,22 @@ void ContentSettingSimpleBubbleModel::SetTitle() {
           : nullptr;
 
   static const ContentSettingsTypeIdEntry kBlockedTitleIDs[] = {
-    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_TITLE},
-    {CONTENT_SETTINGS_TYPE_IMAGES, IDS_BLOCKED_IMAGES_TITLE},
-    {CONTENT_SETTINGS_TYPE_JAVASCRIPT, IDS_BLOCKED_JAVASCRIPT_TITLE},
-    {CONTENT_SETTINGS_TYPE_PLUGINS, IDS_BLOCKED_PLUGINS_TITLE},
-    {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_TITLE},
-    {CONTENT_SETTINGS_TYPE_MIXEDSCRIPT,
-        IDS_BLOCKED_DISPLAYING_INSECURE_CONTENT},
-    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER,
-        IDS_BLOCKED_PPAPI_BROKER_TITLE},
+      {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_TITLE},
+      {CONTENT_SETTINGS_TYPE_IMAGES, IDS_BLOCKED_IMAGES_TITLE},
+      {CONTENT_SETTINGS_TYPE_JAVASCRIPT, IDS_BLOCKED_JAVASCRIPT_TITLE},
+      {CONTENT_SETTINGS_TYPE_PLUGINS, IDS_BLOCKED_PLUGINS_TITLE},
+      {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_TITLE},
+      {CONTENT_SETTINGS_TYPE_MIXEDSCRIPT,
+       IDS_BLOCKED_DISPLAYING_INSECURE_CONTENT_TITLE},
+      {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_BLOCKED_PPAPI_BROKER_TITLE},
+      {CONTENT_SETTINGS_TYPE_SOUND, IDS_BLOCKED_SOUND_TITLE},
+      {CONTENT_SETTINGS_TYPE_CLIPBOARD_READ, IDS_BLOCKED_CLIPBOARD_TITLE},
   };
   // Fields as for kBlockedTitleIDs, above.
   static const ContentSettingsTypeIdEntry kAccessedTitleIDs[] = {
-    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_ACCESSED_COOKIES_TITLE},
-    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_ALLOWED_PPAPI_BROKER_TITLE},
+      {CONTENT_SETTINGS_TYPE_COOKIES, IDS_ACCESSED_COOKIES_TITLE},
+      {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_ALLOWED_PPAPI_BROKER_TITLE},
+      {CONTENT_SETTINGS_TYPE_CLIPBOARD_READ, IDS_ALLOWED_CLIPBOARD_TITLE},
   };
   const ContentSettingsTypeIdEntry* title_ids = kBlockedTitleIDs;
   size_t num_title_ids = arraysize(kBlockedTitleIDs);
@@ -170,24 +159,46 @@ void ContentSettingSimpleBubbleModel::SetTitle() {
     set_title(l10n_util::GetStringUTF16(title_id));
 }
 
-void ContentSettingSimpleBubbleModel::SetManageText() {
-  static const ContentSettingsTypeIdEntry kLinkIDs[] = {
-    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_LINK},
-    {CONTENT_SETTINGS_TYPE_IMAGES, IDS_BLOCKED_IMAGES_LINK},
-    {CONTENT_SETTINGS_TYPE_JAVASCRIPT, IDS_BLOCKED_JAVASCRIPT_LINK},
-    {CONTENT_SETTINGS_TYPE_PLUGINS, IDS_BLOCKED_PLUGINS_LINK},
-    {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_LINK},
-    {CONTENT_SETTINGS_TYPE_GEOLOCATION, IDS_GEOLOCATION_BUBBLE_MANAGE_LINK},
-    {CONTENT_SETTINGS_TYPE_MIXEDSCRIPT, IDS_LEARN_MORE},
-    {CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS, IDS_HANDLERS_BUBBLE_MANAGE_LINK},
-    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_PPAPI_BROKER_BUBBLE_MANAGE_LINK},
-    {CONTENT_SETTINGS_TYPE_MIDI_SYSEX, IDS_MIDI_SYSEX_BUBBLE_MANAGE_LINK},
+void ContentSettingSimpleBubbleModel::SetMessage() {
+  TabSpecificContentSettings* content_settings =
+      web_contents()
+          ? TabSpecificContentSettings::FromWebContents(web_contents())
+          : nullptr;
+
+  static const ContentSettingsTypeIdEntry kBlockedMessageIDs[] = {
+      {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_MESSAGE},
+      {CONTENT_SETTINGS_TYPE_IMAGES, IDS_BLOCKED_IMAGES_MESSAGE},
+      {CONTENT_SETTINGS_TYPE_JAVASCRIPT, IDS_BLOCKED_JAVASCRIPT_MESSAGE},
+      {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_MESSAGE},
+      {CONTENT_SETTINGS_TYPE_MIXEDSCRIPT,
+       IDS_BLOCKED_DISPLAYING_INSECURE_CONTENT},
+      {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_BLOCKED_PPAPI_BROKER_MESSAGE},
+      {CONTENT_SETTINGS_TYPE_CLIPBOARD_READ, IDS_BLOCKED_CLIPBOARD_MESSAGE},
   };
-  set_manage_text(l10n_util::GetStringUTF16(
-      GetIdForContentType(kLinkIDs, arraysize(kLinkIDs), content_type())));
+  // Fields as for kBlockedMessageIDs, above.
+  static const ContentSettingsTypeIdEntry kAccessedMessageIDs[] = {
+      {CONTENT_SETTINGS_TYPE_COOKIES, IDS_ACCESSED_COOKIES_MESSAGE},
+      {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_ALLOWED_PPAPI_BROKER_MESSAGE},
+      {CONTENT_SETTINGS_TYPE_CLIPBOARD_READ, IDS_ALLOWED_CLIPBOARD_MESSAGE},
+  };
+  const ContentSettingsTypeIdEntry* message_ids = kBlockedMessageIDs;
+  size_t num_message_ids = arraysize(kBlockedMessageIDs);
+  if (content_settings && content_settings->IsContentAllowed(content_type()) &&
+      !content_settings->IsContentBlocked(content_type())) {
+    message_ids = kAccessedMessageIDs;
+    num_message_ids = arraysize(kAccessedMessageIDs);
+  }
+  int message_id =
+      GetIdForContentType(message_ids, num_message_ids, content_type());
+  if (message_id)
+    set_message(l10n_util::GetStringUTF16(message_id));
 }
 
-void ContentSettingSimpleBubbleModel::OnManageLinkClicked() {
+void ContentSettingSimpleBubbleModel::SetManageText() {
+  set_manage_text(l10n_util::GetStringUTF16(IDS_MANAGE));
+}
+
+void ContentSettingSimpleBubbleModel::OnManageButtonClicked() {
   if (delegate())
     delegate()->ShowContentSettingsPage(content_type());
 
@@ -214,6 +225,512 @@ void ContentSettingSimpleBubbleModel::SetCustomLink() {
 }
 
 void ContentSettingSimpleBubbleModel::OnCustomLinkClicked() {
+}
+
+// ContentSettingMixedScriptBubbleModel ----------------------------------------
+
+class ContentSettingMixedScriptBubbleModel
+    : public ContentSettingSimpleBubbleModel {
+ public:
+  ContentSettingMixedScriptBubbleModel(Delegate* delegate,
+                                       WebContents* web_contents,
+                                       Profile* profile);
+
+  ~ContentSettingMixedScriptBubbleModel() override {}
+
+ private:
+  void SetManageText();
+
+  // ContentSettingBubbleModel:
+  void OnLearnMoreClicked() override;
+  void OnCustomLinkClicked() override;
+
+  DISALLOW_COPY_AND_ASSIGN(ContentSettingMixedScriptBubbleModel);
+};
+
+ContentSettingMixedScriptBubbleModel::ContentSettingMixedScriptBubbleModel(
+    Delegate* delegate,
+    WebContents* web_contents,
+    Profile* profile)
+    : ContentSettingSimpleBubbleModel(delegate,
+                                      web_contents,
+                                      profile,
+                                      CONTENT_SETTINGS_TYPE_MIXEDSCRIPT) {
+  content_settings::RecordMixedScriptAction(
+      content_settings::MIXED_SCRIPT_ACTION_DISPLAYED_BUBBLE);
+  set_custom_link_enabled(true);
+  set_show_learn_more(true);
+  SetManageText();
+}
+
+void ContentSettingMixedScriptBubbleModel::OnLearnMoreClicked() {
+  if (delegate())
+    delegate()->ShowLearnMorePage(content_type());
+
+  content_settings::RecordMixedScriptAction(
+      content_settings::MIXED_SCRIPT_ACTION_CLICKED_LEARN_MORE);
+}
+
+void ContentSettingMixedScriptBubbleModel::OnCustomLinkClicked() {
+  DCHECK(rappor_service());
+  if (!web_contents())
+    return;
+
+  MixedContentSettingsTabHelper* mixed_content_settings =
+      MixedContentSettingsTabHelper::FromWebContents(web_contents());
+  if (mixed_content_settings) {
+    // Update browser side settings to allow active mixed content.
+    mixed_content_settings->AllowRunningOfInsecureContent();
+  }
+
+  // Update renderer side settings to allow active mixed content.
+  web_contents()->ForEachFrame(
+      base::BindRepeating(&::SetAllowRunningInsecureContent));
+
+  content_settings::RecordMixedScriptAction(
+      content_settings::MIXED_SCRIPT_ACTION_CLICKED_ALLOW);
+
+  rappor::SampleDomainAndRegistryFromGURL(
+      rappor_service(), "ContentSettings.MixedScript.UserClickedAllow",
+      web_contents()->GetLastCommittedURL());
+}
+
+// Don't set any manage text since none is displayed.
+void ContentSettingMixedScriptBubbleModel::SetManageText() {
+  set_manage_text_style(ContentSettingBubbleModel::ManageTextStyle::kNone);
+}
+
+// ContentSettingRPHBubbleModel ------------------------------------------------
+
+namespace {
+
+// These states must match the order of appearance of the radio buttons
+// in the XIB file for the Mac port.
+enum RPHState {
+  RPH_ALLOW = 0,
+  RPH_BLOCK,
+  RPH_IGNORE,
+};
+
+}  // namespace
+
+ContentSettingRPHBubbleModel::ContentSettingRPHBubbleModel(
+    Delegate* delegate,
+    WebContents* web_contents,
+    Profile* profile,
+    ProtocolHandlerRegistry* registry)
+    : ContentSettingSimpleBubbleModel(delegate,
+                                      web_contents,
+                                      profile,
+                                      CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS),
+      selected_item_(0),
+      interacted_(false),
+      registry_(registry),
+      pending_handler_(ProtocolHandler::EmptyProtocolHandler()),
+      previous_handler_(ProtocolHandler::EmptyProtocolHandler()) {
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents);
+  pending_handler_ = content_settings->pending_protocol_handler();
+  previous_handler_ = content_settings->previous_protocol_handler();
+
+  base::string16 protocol;
+  if (pending_handler_.protocol() == "mailto") {
+    protocol =
+        l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_MAILTO_NAME);
+  } else if (pending_handler_.protocol() == "webcal") {
+    protocol =
+        l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_WEBCAL_NAME);
+  } else {
+    protocol = base::UTF8ToUTF16(pending_handler_.protocol());
+  }
+
+  // Note that we ignore the |title| parameter.
+  if (previous_handler_.IsEmpty()) {
+    set_title(l10n_util::GetStringFUTF16(
+        IDS_REGISTER_PROTOCOL_HANDLER_CONFIRM,
+        base::UTF8ToUTF16(pending_handler_.url().host()), protocol));
+  } else {
+    set_title(l10n_util::GetStringFUTF16(
+        IDS_REGISTER_PROTOCOL_HANDLER_CONFIRM_REPLACE,
+        base::UTF8ToUTF16(pending_handler_.url().host()), protocol,
+        base::UTF8ToUTF16(previous_handler_.url().host())));
+  }
+
+  base::string16 radio_allow_label =
+      l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_ACCEPT);
+  base::string16 radio_deny_label =
+      l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_DENY);
+  base::string16 radio_ignore_label =
+      l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_IGNORE);
+
+  const GURL& url = web_contents->GetURL();
+  RadioGroup radio_group;
+  radio_group.url = url;
+
+  radio_group.radio_items.push_back(radio_allow_label);
+  radio_group.radio_items.push_back(radio_deny_label);
+  radio_group.radio_items.push_back(radio_ignore_label);
+  ContentSetting setting = content_settings->pending_protocol_handler_setting();
+  if (setting == CONTENT_SETTING_ALLOW)
+    radio_group.default_item = RPH_ALLOW;
+  else if (setting == CONTENT_SETTING_BLOCK)
+    radio_group.default_item = RPH_BLOCK;
+  else
+    radio_group.default_item = RPH_IGNORE;
+
+  selected_item_ = radio_group.default_item;
+  set_radio_group_enabled(true);
+  set_radio_group(radio_group);
+}
+
+ContentSettingRPHBubbleModel::~ContentSettingRPHBubbleModel() {
+  if (!web_contents() || !interacted_)
+    return;
+
+  // The user has one chance to deal with the RPH content setting UI,
+  // then we remove it.
+  auto* settings = TabSpecificContentSettings::FromWebContents(web_contents());
+  settings->ClearPendingProtocolHandler();
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
+      content::Source<WebContents>(web_contents()),
+      content::NotificationService::NoDetails());
+}
+
+void ContentSettingRPHBubbleModel::OnRadioClicked(int radio_index) {
+  if (selected_item_ == radio_index)
+    return;
+
+  interacted_ = true;
+  selected_item_ = radio_index;
+
+  if (radio_index == RPH_ALLOW)
+    RegisterProtocolHandler();
+  else if (radio_index == RPH_BLOCK)
+    UnregisterProtocolHandler();
+  else if (radio_index == RPH_IGNORE)
+    IgnoreProtocolHandler();
+  else
+    NOTREACHED();
+}
+
+void ContentSettingRPHBubbleModel::OnDoneClicked() {
+  interacted_ = true;
+}
+
+void ContentSettingRPHBubbleModel::RegisterProtocolHandler() {
+  if (!web_contents())
+    return;
+
+  // A no-op if the handler hasn't been ignored, but needed in case the user
+  // selects sequences like register/ignore/register.
+  registry_->RemoveIgnoredHandler(pending_handler_);
+
+  registry_->OnAcceptRegisterProtocolHandler(pending_handler_);
+  TabSpecificContentSettings::FromWebContents(web_contents())
+      ->set_pending_protocol_handler_setting(CONTENT_SETTING_ALLOW);
+}
+
+void ContentSettingRPHBubbleModel::UnregisterProtocolHandler() {
+  if (!web_contents())
+    return;
+
+  registry_->OnDenyRegisterProtocolHandler(pending_handler_);
+  auto* settings = TabSpecificContentSettings::FromWebContents(web_contents());
+  settings->set_pending_protocol_handler_setting(CONTENT_SETTING_BLOCK);
+  ClearOrSetPreviousHandler();
+}
+
+void ContentSettingRPHBubbleModel::IgnoreProtocolHandler() {
+  if (!web_contents())
+    return;
+
+  registry_->OnIgnoreRegisterProtocolHandler(pending_handler_);
+  auto* settings = TabSpecificContentSettings::FromWebContents(web_contents());
+  settings->set_pending_protocol_handler_setting(CONTENT_SETTING_DEFAULT);
+  ClearOrSetPreviousHandler();
+}
+
+void ContentSettingRPHBubbleModel::ClearOrSetPreviousHandler() {
+  if (previous_handler_.IsEmpty()) {
+    registry_->ClearDefault(pending_handler_.protocol());
+  } else {
+    registry_->OnAcceptRegisterProtocolHandler(previous_handler_);
+  }
+}
+
+// ContentSettingMidiSysExBubbleModel ------------------------------------------
+
+class ContentSettingMidiSysExBubbleModel
+    : public ContentSettingSimpleBubbleModel {
+ public:
+  ContentSettingMidiSysExBubbleModel(Delegate* delegate,
+                                     WebContents* web_contents,
+                                     Profile* profile);
+  ~ContentSettingMidiSysExBubbleModel() override {}
+
+ private:
+  void MaybeAddDomainList(const std::set<std::string>& hosts, int title_id);
+  void SetDomainsAndCustomLink();
+  void OnCustomLinkClicked() override;
+
+  DISALLOW_COPY_AND_ASSIGN(ContentSettingMidiSysExBubbleModel);
+};
+
+ContentSettingMidiSysExBubbleModel::ContentSettingMidiSysExBubbleModel(
+    Delegate* delegate,
+    WebContents* web_contents,
+    Profile* profile)
+    : ContentSettingSimpleBubbleModel(delegate,
+                                      web_contents,
+                                      profile,
+                                      CONTENT_SETTINGS_TYPE_MIDI_SYSEX) {
+  SetDomainsAndCustomLink();
+}
+
+void ContentSettingMidiSysExBubbleModel::MaybeAddDomainList(
+    const std::set<std::string>& hosts,
+    int title_id) {
+  if (!hosts.empty()) {
+    DomainList domain_list;
+    domain_list.title = l10n_util::GetStringUTF16(title_id);
+    domain_list.hosts = hosts;
+    add_domain_list(domain_list);
+  }
+}
+
+void ContentSettingMidiSysExBubbleModel::SetDomainsAndCustomLink() {
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  const ContentSettingsUsagesState& usages_state =
+      content_settings->midi_usages_state();
+  ContentSettingsUsagesState::FormattedHostsPerState formatted_hosts_per_state;
+  unsigned int tab_state_flags = 0;
+  usages_state.GetDetailedInfo(&formatted_hosts_per_state, &tab_state_flags);
+  // Divide the tab's current MIDI sysex users into sets according to their
+  // permission state.
+  MaybeAddDomainList(formatted_hosts_per_state[CONTENT_SETTING_ALLOW],
+                     IDS_MIDI_SYSEX_BUBBLE_ALLOWED);
+
+  MaybeAddDomainList(formatted_hosts_per_state[CONTENT_SETTING_BLOCK],
+                     IDS_MIDI_SYSEX_BUBBLE_DENIED);
+
+  if (tab_state_flags & ContentSettingsUsagesState::TABSTATE_HAS_EXCEPTION) {
+    set_custom_link(
+        l10n_util::GetStringUTF16(IDS_MIDI_SYSEX_BUBBLE_CLEAR_LINK));
+    set_custom_link_enabled(true);
+  } else if (tab_state_flags &
+             ContentSettingsUsagesState::TABSTATE_HAS_CHANGED) {
+    set_custom_link(l10n_util::GetStringUTF16(
+        IDS_MIDI_SYSEX_BUBBLE_REQUIRE_RELOAD_TO_CLEAR));
+  }
+}
+
+void ContentSettingMidiSysExBubbleModel::OnCustomLinkClicked() {
+  if (!web_contents())
+    return;
+  // Reset this embedder's entry to default for each of the requesting
+  // origins currently on the page.
+  const GURL& embedder_url = web_contents()->GetURL();
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  const ContentSettingsUsagesState::StateMap& state_map =
+      content_settings->midi_usages_state().state_map();
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile());
+  for (const std::pair<GURL, ContentSetting>& map_entry : state_map) {
+    PermissionUtil::ScopedRevocationReporter(
+        profile(), map_entry.first, embedder_url,
+        CONTENT_SETTINGS_TYPE_MIDI_SYSEX, PermissionSourceUI::PAGE_ACTION);
+    map->SetContentSettingDefaultScope(map_entry.first, embedder_url,
+                                       CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
+                                       std::string(), CONTENT_SETTING_DEFAULT);
+  }
+}
+
+// ContentSettingDomainListBubbleModel -----------------------------------------
+
+class ContentSettingDomainListBubbleModel
+    : public ContentSettingSimpleBubbleModel {
+ public:
+  ContentSettingDomainListBubbleModel(Delegate* delegate,
+                                      WebContents* web_contents,
+                                      Profile* profile,
+                                      ContentSettingsType content_type);
+  ~ContentSettingDomainListBubbleModel() override {}
+
+ private:
+  void MaybeAddDomainList(const std::set<std::string>& hosts, int title_id);
+  void SetDomainsAndCustomLink();
+  void OnCustomLinkClicked() override;
+
+  DISALLOW_COPY_AND_ASSIGN(ContentSettingDomainListBubbleModel);
+};
+
+ContentSettingDomainListBubbleModel::ContentSettingDomainListBubbleModel(
+    Delegate* delegate,
+    WebContents* web_contents,
+    Profile* profile,
+    ContentSettingsType content_type)
+    : ContentSettingSimpleBubbleModel(delegate,
+                                      web_contents,
+                                      profile,
+                                      content_type) {
+  DCHECK_EQ(CONTENT_SETTINGS_TYPE_GEOLOCATION, content_type)
+      << "SetDomains currently only supports geolocation content type";
+  SetDomainsAndCustomLink();
+}
+
+void ContentSettingDomainListBubbleModel::MaybeAddDomainList(
+    const std::set<std::string>& hosts,
+    int title_id) {
+  if (!hosts.empty()) {
+    DomainList domain_list;
+    domain_list.title = l10n_util::GetStringUTF16(title_id);
+    domain_list.hosts = hosts;
+    add_domain_list(domain_list);
+  }
+}
+
+void ContentSettingDomainListBubbleModel::SetDomainsAndCustomLink() {
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  const ContentSettingsUsagesState& usages =
+      content_settings->geolocation_usages_state();
+  ContentSettingsUsagesState::FormattedHostsPerState formatted_hosts_per_state;
+  unsigned int tab_state_flags = 0;
+  usages.GetDetailedInfo(&formatted_hosts_per_state, &tab_state_flags);
+  // Divide the tab's current geolocation users into sets according to their
+  // permission state.
+  MaybeAddDomainList(formatted_hosts_per_state[CONTENT_SETTING_ALLOW],
+                     IDS_GEOLOCATION_BUBBLE_SECTION_ALLOWED);
+
+  MaybeAddDomainList(formatted_hosts_per_state[CONTENT_SETTING_BLOCK],
+                     IDS_GEOLOCATION_BUBBLE_SECTION_DENIED);
+
+  if (tab_state_flags & ContentSettingsUsagesState::TABSTATE_HAS_EXCEPTION) {
+    set_custom_link(
+        l10n_util::GetStringUTF16(IDS_GEOLOCATION_BUBBLE_CLEAR_LINK));
+    set_custom_link_enabled(true);
+  } else if (tab_state_flags &
+             ContentSettingsUsagesState::TABSTATE_HAS_CHANGED) {
+    set_custom_link(l10n_util::GetStringUTF16(
+        IDS_GEOLOCATION_BUBBLE_REQUIRE_RELOAD_TO_CLEAR));
+  }
+}
+
+void ContentSettingDomainListBubbleModel::OnCustomLinkClicked() {
+  if (!web_contents())
+    return;
+  // Reset this embedder's entry to default for each of the requesting
+  // origins currently on the page.
+  const GURL& embedder_url = web_contents()->GetURL();
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  const ContentSettingsUsagesState::StateMap& state_map =
+      content_settings->geolocation_usages_state().state_map();
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile());
+  for (const std::pair<GURL, ContentSetting>& map_entry : state_map) {
+    PermissionUtil::ScopedRevocationReporter(
+        profile(), map_entry.first, embedder_url,
+        CONTENT_SETTINGS_TYPE_GEOLOCATION, PermissionSourceUI::PAGE_ACTION);
+    map->SetContentSettingDefaultScope(map_entry.first, embedder_url,
+                                       CONTENT_SETTINGS_TYPE_GEOLOCATION,
+                                       std::string(), CONTENT_SETTING_DEFAULT);
+  }
+}
+
+// ContentSettingPluginBubbleModel ---------------------------------------------
+
+class ContentSettingPluginBubbleModel : public ContentSettingSimpleBubbleModel {
+ public:
+  ContentSettingPluginBubbleModel(Delegate* delegate,
+                                  WebContents* web_contents,
+                                  Profile* profile);
+
+ private:
+  void OnLearnMoreClicked() override;
+  void OnCustomLinkClicked() override;
+
+  void RunPluginsOnPage();
+
+  DISALLOW_COPY_AND_ASSIGN(ContentSettingPluginBubbleModel);
+};
+
+ContentSettingPluginBubbleModel::ContentSettingPluginBubbleModel(
+    Delegate* delegate,
+    WebContents* web_contents,
+    Profile* profile)
+    : ContentSettingSimpleBubbleModel(delegate,
+                                      web_contents,
+                                      profile,
+                                      CONTENT_SETTINGS_TYPE_PLUGINS) {
+  SettingInfo info;
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile);
+  GURL url = web_contents->GetURL();
+  std::unique_ptr<base::Value> value =
+      map->GetWebsiteSetting(url, url, content_type(), std::string(), &info);
+  ContentSetting setting = content_settings::ValueToContentSetting(value.get());
+
+  // If the setting is not managed by the user, hide the "Manage" button.
+  if (info.source != SETTING_SOURCE_USER)
+    set_manage_text_style(ContentSettingBubbleModel::ManageTextStyle::kNone);
+
+  // The user cannot manually run Flash on the BLOCK setting when either holds:
+  //  - The setting is from Policy. User cannot override admin intent.
+  //  - HTML By Default is on - Flash has been hidden from the plugin list, so
+  //    it's impossible to dynamically run the nonexistent plugin.
+  bool run_blocked = setting == CONTENT_SETTING_BLOCK &&
+                     (info.source != SETTING_SOURCE_USER ||
+                      PluginUtils::ShouldPreferHtmlOverPlugins(map));
+
+  if (!run_blocked) {
+    set_custom_link(l10n_util::GetStringUTF16(IDS_BLOCKED_PLUGINS_LOAD_ALL));
+    // Disable the "Run all plugins this time" link if the user already clicked
+    // on the link and ran all plugins.
+    set_custom_link_enabled(
+        web_contents &&
+        TabSpecificContentSettings::FromWebContents(web_contents)
+            ->load_plugins_link_enabled());
+  }
+
+  set_show_learn_more(true);
+
+  content_settings::RecordPluginsAction(
+      content_settings::PLUGINS_ACTION_DISPLAYED_BUBBLE);
+}
+
+void ContentSettingPluginBubbleModel::OnLearnMoreClicked() {
+  if (delegate())
+    delegate()->ShowLearnMorePage(CONTENT_SETTINGS_TYPE_PLUGINS);
+
+  content_settings::RecordPluginsAction(
+      content_settings::PLUGINS_ACTION_CLICKED_LEARN_MORE);
+}
+
+void ContentSettingPluginBubbleModel::OnCustomLinkClicked() {
+  base::RecordAction(UserMetricsAction("ClickToPlay_LoadAll_Bubble"));
+  content_settings::RecordPluginsAction(
+      content_settings::PLUGINS_ACTION_CLICKED_RUN_ALL_PLUGINS_THIS_TIME);
+
+  RunPluginsOnPage();
+}
+
+void ContentSettingPluginBubbleModel::RunPluginsOnPage() {
+  // Web contents can be NULL if the tab was closed while the plugins
+  // settings bubble is visible.
+  if (!web_contents())
+    return;
+#if BUILDFLAG(ENABLE_PLUGINS)
+  // TODO(bauerb): We should send the identifiers of blocked plugins here.
+  ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
+      web_contents(), true, std::string());
+#endif
+  set_custom_link_enabled(false);
+  TabSpecificContentSettings::FromWebContents(web_contents())
+      ->set_load_plugins_link_enabled(false);
 }
 
 // ContentSettingSingleRadioGroup ----------------------------------------------
@@ -257,10 +774,9 @@ ContentSettingSingleRadioGroup::ContentSettingSingleRadioGroup(
 
 ContentSettingSingleRadioGroup::~ContentSettingSingleRadioGroup() {
   if (settings_changed()) {
-    ContentSetting setting =
-        selected_item_ == kAllowButtonIndex ?
-                          CONTENT_SETTING_ALLOW :
-                          block_setting_;
+    ContentSetting setting = selected_item_ == kAllowButtonIndex
+                                 ? CONTENT_SETTING_ALLOW
+                                 : block_setting_;
     SetNarrowestContentSetting(setting);
   }
 }
@@ -273,8 +789,7 @@ bool ContentSettingSingleRadioGroup::settings_changed() const {
 // content type and setting the default value based on the content setting.
 void ContentSettingSingleRadioGroup::SetRadioGroup() {
   GURL url = web_contents()->GetURL();
-  base::string16 display_host =
-      url_formatter::FormatUrlForSecurityDisplay(url);
+  base::string16 display_host = url_formatter::FormatUrlForSecurityDisplay(url);
   if (display_host.empty())
     display_host = base::ASCIIToUTF16(url.spec());
 
@@ -287,24 +802,25 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
   radio_group.url = url;
 
   static const ContentSettingsTypeIdEntry kBlockedAllowIDs[] = {
-    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_UNBLOCK},
-    {CONTENT_SETTINGS_TYPE_IMAGES, IDS_BLOCKED_IMAGES_UNBLOCK},
-    {CONTENT_SETTINGS_TYPE_JAVASCRIPT, IDS_BLOCKED_JAVASCRIPT_UNBLOCK},
-    {CONTENT_SETTINGS_TYPE_PLUGINS, IDS_BLOCKED_PLUGINS_UNBLOCK_ALL},
-    {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_UNBLOCK},
-    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_BLOCKED_PPAPI_BROKER_UNBLOCK},
+      {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_UNBLOCK},
+      {CONTENT_SETTINGS_TYPE_IMAGES, IDS_BLOCKED_IMAGES_UNBLOCK},
+      {CONTENT_SETTINGS_TYPE_JAVASCRIPT, IDS_BLOCKED_JAVASCRIPT_UNBLOCK},
+      {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_UNBLOCK},
+      {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_BLOCKED_PPAPI_BROKER_UNBLOCK},
+      {CONTENT_SETTINGS_TYPE_SOUND, IDS_BLOCKED_SOUND_UNBLOCK},
+      {CONTENT_SETTINGS_TYPE_CLIPBOARD_READ, IDS_BLOCKED_CLIPBOARD_UNBLOCK},
   };
   // Fields as for kBlockedAllowIDs, above.
   static const ContentSettingsTypeIdEntry kAllowedAllowIDs[] = {
-    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_ALLOWED_COOKIES_NO_ACTION},
-    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_ALLOWED_PPAPI_BROKER_NO_ACTION},
+      {CONTENT_SETTINGS_TYPE_COOKIES, IDS_ALLOWED_COOKIES_NO_ACTION},
+      {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_ALLOWED_PPAPI_BROKER_NO_ACTION},
+      {CONTENT_SETTINGS_TYPE_CLIPBOARD_READ, IDS_ALLOWED_CLIPBOARD_NO_ACTION},
   };
 
   base::string16 radio_allow_label;
   if (allowed) {
-    int resource_id = GetIdForContentType(kAllowedAllowIDs,
-                                          arraysize(kAllowedAllowIDs),
-                                          content_type());
+    int resource_id = GetIdForContentType(
+        kAllowedAllowIDs, arraysize(kAllowedAllowIDs), content_type());
     radio_allow_label = l10n_util::GetStringUTF16(resource_id);
   } else {
     radio_allow_label = l10n_util::GetStringFUTF16(
@@ -314,16 +830,18 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
   }
 
   static const ContentSettingsTypeIdEntry kBlockedBlockIDs[] = {
-    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_NO_ACTION},
-    {CONTENT_SETTINGS_TYPE_IMAGES, IDS_BLOCKED_IMAGES_NO_ACTION},
-    {CONTENT_SETTINGS_TYPE_JAVASCRIPT, IDS_BLOCKED_JAVASCRIPT_NO_ACTION},
-    {CONTENT_SETTINGS_TYPE_PLUGINS, IDS_BLOCKED_PLUGINS_NO_ACTION},
-    {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_NO_ACTION},
-    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_BLOCKED_PPAPI_BROKER_NO_ACTION},
+      {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_NO_ACTION},
+      {CONTENT_SETTINGS_TYPE_IMAGES, IDS_BLOCKED_IMAGES_NO_ACTION},
+      {CONTENT_SETTINGS_TYPE_JAVASCRIPT, IDS_BLOCKED_JAVASCRIPT_NO_ACTION},
+      {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_NO_ACTION},
+      {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_BLOCKED_PPAPI_BROKER_NO_ACTION},
+      {CONTENT_SETTINGS_TYPE_SOUND, IDS_BLOCKED_SOUND_NO_ACTION},
+      {CONTENT_SETTINGS_TYPE_CLIPBOARD_READ, IDS_BLOCKED_CLIPBOARD_NO_ACTION},
   };
   static const ContentSettingsTypeIdEntry kAllowedBlockIDs[] = {
-    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_ALLOWED_COOKIES_BLOCK},
-    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_ALLOWED_PPAPI_BROKER_BLOCK},
+      {CONTENT_SETTINGS_TYPE_COOKIES, IDS_ALLOWED_COOKIES_BLOCK},
+      {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_ALLOWED_PPAPI_BROKER_BLOCK},
+      {CONTENT_SETTINGS_TYPE_CLIPBOARD_READ, IDS_ALLOWED_CLIPBOARD_BLOCK},
   };
 
   base::string16 radio_block_label;
@@ -434,129 +952,35 @@ void ContentSettingCookiesBubbleModel::OnCustomLinkClicked() {
   delegate()->ShowCollectedCookiesDialog(web_contents());
 }
 
-// ContentSettingPluginBubbleModel ---------------------------------------------
-
-class ContentSettingPluginBubbleModel : public ContentSettingSimpleBubbleModel {
- public:
-  ContentSettingPluginBubbleModel(Delegate* delegate,
-                                  WebContents* web_contents,
-                                  Profile* profile);
-
- private:
-  void OnLearnMoreLinkClicked() override;
-  void OnCustomLinkClicked() override;
-
-  void RunPluginsOnPage();
-
-  DISALLOW_COPY_AND_ASSIGN(ContentSettingPluginBubbleModel);
-};
-
-ContentSettingPluginBubbleModel::ContentSettingPluginBubbleModel(
-    Delegate* delegate,
-    WebContents* web_contents,
-    Profile* profile)
-    : ContentSettingSimpleBubbleModel(delegate,
-                                      web_contents,
-                                      profile,
-                                      CONTENT_SETTINGS_TYPE_PLUGINS) {
-  SettingInfo info;
-  HostContentSettingsMap* map =
-      HostContentSettingsMapFactory::GetForProfile(profile);
-  GURL url = web_contents->GetURL();
-  std::unique_ptr<base::Value> value =
-      map->GetWebsiteSetting(url, url, content_type(), std::string(), &info);
-  ContentSetting setting = content_settings::ValueToContentSetting(value.get());
-
-  // If the setting is not managed by the user, hide the "Manage..." link.
-  if (info.source != SETTING_SOURCE_USER)
-    set_manage_text(base::string16());
-
-  // The user cannot manually run Flash on the BLOCK setting when either holds:
-  //  - The setting is from Policy. User cannot override admin intent.
-  //  - HTML By Default is on - Flash has been hidden from the plugin list, so
-  //    it's impossible to dynamically run the nonexistent plugin.
-  bool run_blocked = setting == CONTENT_SETTING_BLOCK &&
-                     (info.source != SETTING_SOURCE_USER ||
-                      PluginUtils::ShouldPreferHtmlOverPlugins(map));
-
-  if (!run_blocked) {
-    set_custom_link(l10n_util::GetStringUTF16(IDS_BLOCKED_PLUGINS_LOAD_ALL));
-    // Disable the "Run all plugins this time" link if the user already clicked
-    // on the link and ran all plugins.
-    set_custom_link_enabled(
-        web_contents &&
-        TabSpecificContentSettings::FromWebContents(web_contents)
-            ->load_plugins_link_enabled());
-  }
-
-  // Build blocked plugin list.
-  if (web_contents) {
-    TabSpecificContentSettings* content_settings =
-        TabSpecificContentSettings::FromWebContents(web_contents);
-
-    const std::vector<base::string16>& blocked_plugins =
-        content_settings->blocked_plugin_names();
-    for (const base::string16& blocked_plugin : blocked_plugins) {
-      ListItem plugin_item(
-          ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-              IDR_BLOCKED_PLUGINS),
-          blocked_plugin, false, 0);
-      add_list_item(plugin_item);
-    }
-  }
-
-  set_learn_more_link(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
-
-  content_settings::RecordPluginsAction(
-      content_settings::PLUGINS_ACTION_DISPLAYED_BUBBLE);
-}
-
-void ContentSettingPluginBubbleModel::OnLearnMoreLinkClicked() {
-  if (delegate())
-    delegate()->ShowLearnMorePage(CONTENT_SETTINGS_TYPE_PLUGINS);
-
-  content_settings::RecordPluginsAction(
-      content_settings::PLUGINS_ACTION_CLICKED_LEARN_MORE);
-}
-
-void ContentSettingPluginBubbleModel::OnCustomLinkClicked() {
-  base::RecordAction(UserMetricsAction("ClickToPlay_LoadAll_Bubble"));
-  content_settings::RecordPluginsAction(
-      content_settings::PLUGINS_ACTION_CLICKED_RUN_ALL_PLUGINS_THIS_TIME);
-
-  RunPluginsOnPage();
-}
-
-void ContentSettingPluginBubbleModel::RunPluginsOnPage() {
-  // Web contents can be NULL if the tab was closed while the plugins
-  // settings bubble is visible.
-  if (!web_contents())
-    return;
-#if BUILDFLAG(ENABLE_PLUGINS)
-  // TODO(bauerb): We should send the identifiers of blocked plugins here.
-  ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
-      web_contents(), true, std::string());
-#endif
-  set_custom_link_enabled(false);
-  TabSpecificContentSettings::FromWebContents(web_contents())
-      ->set_load_plugins_link_enabled(false);
-}
-
 // ContentSettingPopupBubbleModel ----------------------------------------------
 
-class ContentSettingPopupBubbleModel : public ContentSettingSingleRadioGroup {
+class ContentSettingPopupBubbleModel : public ContentSettingSingleRadioGroup,
+                                       public PopupBlockerTabHelper::Observer {
  public:
   ContentSettingPopupBubbleModel(Delegate* delegate,
                                  WebContents* web_contents,
                                  Profile* profile);
   ~ContentSettingPopupBubbleModel() override;
 
+  // PopupBlockerTabHelper::Observer:
+  void BlockedPopupAdded(int32_t id, const GURL& url) override;
+
+  // content::NotificationObserver:
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
+
  private:
-  void OnListItemClicked(int index) override;
+  ListItem CreateListItem(int32_t id, const GURL& id_and_url);
+
+  void OnListItemClicked(int index, int event_flags) override;
 
   int32_t item_id_from_item_index(int index) const {
     return bubble_content().list_items[index].item_id;
   }
+
+  ScopedObserver<PopupBlockerTabHelper, PopupBlockerTabHelper::Observer>
+      popup_blocker_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingPopupBubbleModel);
 };
@@ -568,50 +992,105 @@ ContentSettingPopupBubbleModel::ContentSettingPopupBubbleModel(
     : ContentSettingSingleRadioGroup(delegate,
                                      web_contents,
                                      profile,
-                                     CONTENT_SETTINGS_TYPE_POPUPS) {
+                                     CONTENT_SETTINGS_TYPE_POPUPS),
+      popup_blocker_observer_(this) {
   if (!web_contents)
     return;
 
   // Build blocked popup list.
   auto* helper = PopupBlockerTabHelper::FromWebContents(web_contents);
   std::map<int32_t, GURL> blocked_popups = helper->GetBlockedPopupRequests();
-  for (const std::pair<int32_t, GURL>& blocked_popup : blocked_popups) {
-    base::string16 title;
-    // The pop-up may not have a valid URL.
-    if (blocked_popup.second.spec().empty())
-      title = l10n_util::GetStringUTF16(IDS_TAB_LOADING_TITLE);
-    else
-      title = base::UTF8ToUTF16(blocked_popup.second.spec());
+  for (const auto& blocked_popup : blocked_popups)
+    AddListItem(CreateListItem(blocked_popup.first, blocked_popup.second));
 
-    ListItem popup_item(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-                            IDR_DEFAULT_FAVICON),
-                        title, true, blocked_popup.first);
-    add_list_item(popup_item);
-  }
+  popup_blocker_observer_.Add(helper);
   content_settings::RecordPopupsAction(
       content_settings::POPUPS_ACTION_DISPLAYED_BUBBLE);
 }
 
-void ContentSettingPopupBubbleModel::OnListItemClicked(int index) {
+void ContentSettingPopupBubbleModel::BlockedPopupAdded(int32_t id,
+                                                       const GURL& url) {
+  AddListItem(CreateListItem(id, url));
+}
+
+void ContentSettingPopupBubbleModel::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  ContentSettingSingleRadioGroup::Observe(type, source, details);
+  if (type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED)
+    popup_blocker_observer_.RemoveAll();
+}
+
+ContentSettingBubbleModel::ListItem
+ContentSettingPopupBubbleModel::CreateListItem(int32_t id, const GURL& url) {
+  base::string16 title;
+  // The pop-up may not have a valid URL.
+  if (url.spec().empty())
+    title = l10n_util::GetStringUTF16(IDS_TAB_LOADING_TITLE);
+  else
+    title = base::UTF8ToUTF16(url.spec());
+
+  const bool use_md = ui::MaterialDesignController::IsSecondaryUiMaterial();
+  if (use_md) {
+    // Format the title to include the unicode single dot bullet code-point
+    // \u2022 and two spaces.
+    title = l10n_util::GetStringFUTF16(IDS_LIST_BULLET, title);
+  }
+
+  return ListItem(use_md
+                      ? gfx::Image()
+                      : ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+                            IDR_DEFAULT_FAVICON),
+                  title, true, id);
+}
+
+void ContentSettingPopupBubbleModel::OnListItemClicked(int index,
+                                                       int event_flags) {
   if (web_contents()) {
     auto* helper = PopupBlockerTabHelper::FromWebContents(web_contents());
-    helper->ShowBlockedPopup(item_id_from_item_index(index));
-
+    helper->ShowBlockedPopup(item_id_from_item_index(index),
+                             ui::DispositionFromEventFlags(event_flags));
+    RemoveListItem(index);
     content_settings::RecordPopupsAction(
         content_settings::POPUPS_ACTION_CLICKED_LIST_ITEM_CLICKED);
   }
 }
 
-ContentSettingPopupBubbleModel::~ContentSettingPopupBubbleModel(){
+ContentSettingPopupBubbleModel::~ContentSettingPopupBubbleModel() {
   // User selected to always allow pop-ups from.
   if (settings_changed() && selected_item() == kAllowButtonIndex) {
     // Increases the counter.
     content_settings::RecordPopupsAction(
         content_settings::POPUPS_ACTION_SELECTED_ALWAYS_ALLOW_POPUPS_FROM);
   }
+
+  if (web_contents()) {
+    auto* helper = PopupBlockerTabHelper::FromWebContents(web_contents());
+    helper->RemoveObserver(this);
+  }
 }
 
 // ContentSettingMediaStreamBubbleModel ----------------------------------------
+
+namespace {
+
+const content::MediaStreamDevice& GetMediaDeviceById(
+    const std::string& device_id,
+    const content::MediaStreamDevices& devices) {
+  DCHECK(!devices.empty());
+  for (const content::MediaStreamDevice& device : devices) {
+    if (device.id == device_id)
+      return device;
+  }
+
+  // A device with the |device_id| was not found. It is likely that the device
+  // has been unplugged from the OS. Return the first device as the default
+  // device.
+  return *devices.begin();
+}
+
+}  // namespace
 
 ContentSettingMediaStreamBubbleModel::ContentSettingMediaStreamBubbleModel(
     Delegate* delegate,
@@ -637,6 +1116,7 @@ ContentSettingMediaStreamBubbleModel::ContentSettingMediaStreamBubbleModel(
   DCHECK(CameraAccessed() || MicrophoneAccessed());
 
   SetTitle();
+  SetMessage();
   SetRadioGroup();
   SetMediaMenus();
   SetManageText();
@@ -661,20 +1141,20 @@ ContentSettingMediaStreamBubbleModel::~ContentSettingMediaStreamBubbleModel() {
 }
 
 ContentSettingMediaStreamBubbleModel*
-    ContentSettingMediaStreamBubbleModel::AsMediaStreamBubbleModel() {
+ContentSettingMediaStreamBubbleModel::AsMediaStreamBubbleModel() {
   return this;
 }
 
-void ContentSettingMediaStreamBubbleModel::OnManageLinkClicked() {
+void ContentSettingMediaStreamBubbleModel::OnManageButtonClicked() {
   if (!delegate())
     return;
 
   if (MicrophoneAccessed() && CameraAccessed()) {
     delegate()->ShowMediaSettingsPage();
   } else {
-    delegate()->ShowContentSettingsPage(CameraAccessed()
-        ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA
-        : CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
+    delegate()->ShowContentSettingsPage(
+        CameraAccessed() ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA
+                         : CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
   }
 }
 
@@ -686,21 +1166,52 @@ bool ContentSettingMediaStreamBubbleModel::CameraAccessed() const {
   return (state_ & TabSpecificContentSettings::CAMERA_ACCESSED) != 0;
 }
 
+bool ContentSettingMediaStreamBubbleModel::MicrophoneBlocked() const {
+  return (state_ & TabSpecificContentSettings::MICROPHONE_BLOCKED) != 0;
+}
+
+bool ContentSettingMediaStreamBubbleModel::CameraBlocked() const {
+  return (state_ & TabSpecificContentSettings::CAMERA_BLOCKED) != 0;
+}
+
 void ContentSettingMediaStreamBubbleModel::SetTitle() {
   DCHECK(CameraAccessed() || MicrophoneAccessed());
   int title_id = 0;
-  if (state_ & TabSpecificContentSettings::MICROPHONE_BLOCKED) {
-    title_id = (state_ & TabSpecificContentSettings::CAMERA_BLOCKED) ?
-        IDS_MICROPHONE_CAMERA_BLOCKED : IDS_MICROPHONE_BLOCKED;
-  } else if (state_ & TabSpecificContentSettings::CAMERA_BLOCKED) {
-    title_id = IDS_CAMERA_BLOCKED;
-  } else if (MicrophoneAccessed()) {
-    title_id = CameraAccessed() ? IDS_MICROPHONE_CAMERA_ALLOWED
-                                : IDS_MICROPHONE_ACCESSED;
-  } else if (CameraAccessed()) {
-    title_id = IDS_CAMERA_ACCESSED;
-  }
+  if (MicrophoneBlocked() && CameraBlocked())
+    title_id = IDS_MICROPHONE_CAMERA_BLOCKED_TITLE;
+  else if (MicrophoneBlocked())
+    title_id = IDS_MICROPHONE_BLOCKED_TITLE;
+  else if (CameraBlocked())
+    title_id = IDS_CAMERA_BLOCKED_TITLE;
+  else if (MicrophoneAccessed() && CameraAccessed())
+    title_id = IDS_MICROPHONE_CAMERA_ALLOWED_TITLE;
+  else if (MicrophoneAccessed())
+    title_id = IDS_MICROPHONE_ACCESSED_TITLE;
+  else if (CameraAccessed())
+    title_id = IDS_CAMERA_ACCESSED_TITLE;
+  else
+    NOTREACHED();
   set_title(l10n_util::GetStringUTF16(title_id));
+}
+
+void ContentSettingMediaStreamBubbleModel::SetMessage() {
+  DCHECK(CameraAccessed() || MicrophoneAccessed());
+  int message_id = 0;
+  if (MicrophoneBlocked() && CameraBlocked())
+    message_id = IDS_MICROPHONE_CAMERA_BLOCKED;
+  else if (MicrophoneBlocked())
+    message_id = IDS_MICROPHONE_BLOCKED;
+  else if (CameraBlocked())
+    message_id = IDS_CAMERA_BLOCKED;
+  else if (MicrophoneAccessed() && CameraAccessed())
+    message_id = IDS_MICROPHONE_CAMERA_ALLOWED;
+  else if (MicrophoneAccessed())
+    message_id = IDS_MICROPHONE_ACCESSED;
+  else if (CameraAccessed())
+    message_id = IDS_CAMERA_ACCESSED;
+  else
+    NOTREACHED();
+  set_message(l10n_util::GetStringUTF16(message_id));
 }
 
 void ContentSettingMediaStreamBubbleModel::SetRadioGroup() {
@@ -723,21 +1234,21 @@ void ContentSettingMediaStreamBubbleModel::SetRadioGroup() {
       radio_item_setting_[0] = CONTENT_SETTING_ALLOW;
       radio_allow_label_id = IDS_BLOCKED_MEDIASTREAM_CAMERA_ALLOW;
       if (MicrophoneAccessed())
-        radio_allow_label_id = CameraAccessed() ?
-            IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_ALLOW :
-            IDS_BLOCKED_MEDIASTREAM_MIC_ALLOW;
+        radio_allow_label_id =
+            CameraAccessed() ? IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_ALLOW
+                             : IDS_BLOCKED_MEDIASTREAM_MIC_ALLOW;
     } else {
       radio_allow_label_id = IDS_BLOCKED_MEDIASTREAM_CAMERA_ASK;
       if (MicrophoneAccessed())
-        radio_allow_label_id = CameraAccessed() ?
-            IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_ASK :
-            IDS_BLOCKED_MEDIASTREAM_MIC_ASK;
+        radio_allow_label_id = CameraAccessed()
+                                   ? IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_ASK
+                                   : IDS_BLOCKED_MEDIASTREAM_MIC_ASK;
     }
     radio_block_label_id = IDS_BLOCKED_MEDIASTREAM_CAMERA_NO_ACTION;
     if (MicrophoneAccessed())
-      radio_block_label_id = CameraAccessed() ?
-          IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_NO_ACTION :
-          IDS_BLOCKED_MEDIASTREAM_MIC_NO_ACTION;
+      radio_block_label_id =
+          CameraAccessed() ? IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_NO_ACTION
+                           : IDS_BLOCKED_MEDIASTREAM_MIC_NO_ACTION;
   } else {
     if (MicrophoneAccessed() && CameraAccessed()) {
       radio_allow_label_id = IDS_ALLOWED_MEDIASTREAM_MIC_AND_CAMERA_NO_ACTION;
@@ -752,9 +1263,12 @@ void ContentSettingMediaStreamBubbleModel::SetRadioGroup() {
   }
   selected_item_ =
       (MicrophoneAccessed() && content_settings->IsContentBlocked(
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC)) ||
-      (CameraAccessed() && content_settings->IsContentBlocked(
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA)) ? 1 : 0;
+                                   CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC)) ||
+              (CameraAccessed() &&
+               content_settings->IsContentBlocked(
+                   CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA))
+          ? 1
+          : 0;
 
   base::string16 radio_allow_label =
       l10n_util::GetStringFUTF16(radio_allow_label_id, display_host);
@@ -817,7 +1331,7 @@ void ContentSettingMediaStreamBubbleModel::SetMediaMenus() {
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents());
   const std::string& requested_microphone =
-       content_settings->media_stream_requested_audio_device();
+      content_settings->media_stream_requested_audio_device();
   const std::string& requested_camera =
       content_settings->media_stream_requested_video_device();
 
@@ -877,21 +1391,8 @@ void ContentSettingMediaStreamBubbleModel::SetMediaMenus() {
 }
 
 void ContentSettingMediaStreamBubbleModel::SetManageText() {
-  // By default, the manage link refers to both media types. We only need
-  // to change the link text if only one media type was accessed.
-  int link_id;
-  if (CameraAccessed() && MicrophoneAccessed()) {
-    link_id = IDS_MEDIASTREAM_BUBBLE_MANAGE_LINK;
-  } else if (CameraAccessed()) {
-    link_id = IDS_MEDIASTREAM_CAMERA_BUBBLE_MANAGE_LINK;
-  } else if (MicrophoneAccessed()) {
-    link_id = IDS_MEDIASTREAM_MICROPHONE_BUBBLE_MANAGE_LINK;
-  } else {
-    NOTREACHED();
-    return;
-  }
-
-  set_manage_text(l10n_util::GetStringUTF16(link_id));
+  DCHECK(CameraAccessed() || MicrophoneAccessed());
+  set_manage_text(l10n_util::GetStringUTF16(IDS_MANAGE));
 }
 
 void ContentSettingMediaStreamBubbleModel::SetCustomLink() {
@@ -916,314 +1417,10 @@ void ContentSettingMediaStreamBubbleModel::OnMediaMenuClicked(
   MediaCaptureDevicesDispatcher* dispatcher =
       MediaCaptureDevicesDispatcher::GetInstance();
   const content::MediaStreamDevices& devices =
-      (type == content::MEDIA_DEVICE_AUDIO_CAPTURE) ?
-          dispatcher->GetAudioCaptureDevices() :
-          dispatcher->GetVideoCaptureDevices();
+      (type == content::MEDIA_DEVICE_AUDIO_CAPTURE)
+          ? dispatcher->GetAudioCaptureDevices()
+          : dispatcher->GetVideoCaptureDevices();
   set_selected_device(GetMediaDeviceById(selected_device_id, devices));
-}
-
-// ContentSettingDomainListBubbleModel -----------------------------------------
-
-class ContentSettingDomainListBubbleModel
-    : public ContentSettingSimpleBubbleModel {
- public:
-  ContentSettingDomainListBubbleModel(Delegate* delegate,
-                                      WebContents* web_contents,
-                                      Profile* profile,
-                                      ContentSettingsType content_type);
-  ~ContentSettingDomainListBubbleModel() override {}
-
- private:
-  void MaybeAddDomainList(const std::set<std::string>& hosts, int title_id);
-  void SetDomainsAndCustomLink();
-  void OnCustomLinkClicked() override;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentSettingDomainListBubbleModel);
-};
-
-ContentSettingDomainListBubbleModel::ContentSettingDomainListBubbleModel(
-    Delegate* delegate,
-    WebContents* web_contents,
-    Profile* profile,
-    ContentSettingsType content_type)
-    : ContentSettingSimpleBubbleModel(
-        delegate, web_contents, profile, content_type) {
-  DCHECK_EQ(CONTENT_SETTINGS_TYPE_GEOLOCATION, content_type) <<
-      "SetDomains currently only supports geolocation content type";
-  SetDomainsAndCustomLink();
-}
-
-void ContentSettingDomainListBubbleModel::MaybeAddDomainList(
-    const std::set<std::string>& hosts, int title_id) {
-  if (!hosts.empty()) {
-    DomainList domain_list;
-    domain_list.title = l10n_util::GetStringUTF16(title_id);
-    domain_list.hosts = hosts;
-    add_domain_list(domain_list);
-  }
-}
-
-void ContentSettingDomainListBubbleModel::SetDomainsAndCustomLink() {
-  TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(web_contents());
-  const ContentSettingsUsagesState& usages =
-      content_settings->geolocation_usages_state();
-  ContentSettingsUsagesState::FormattedHostsPerState formatted_hosts_per_state;
-  unsigned int tab_state_flags = 0;
-  usages.GetDetailedInfo(&formatted_hosts_per_state, &tab_state_flags);
-  // Divide the tab's current geolocation users into sets according to their
-  // permission state.
-  MaybeAddDomainList(formatted_hosts_per_state[CONTENT_SETTING_ALLOW],
-                     IDS_GEOLOCATION_BUBBLE_SECTION_ALLOWED);
-
-  MaybeAddDomainList(formatted_hosts_per_state[CONTENT_SETTING_BLOCK],
-                     IDS_GEOLOCATION_BUBBLE_SECTION_DENIED);
-
-  if (tab_state_flags & ContentSettingsUsagesState::TABSTATE_HAS_EXCEPTION) {
-    set_custom_link(
-        l10n_util::GetStringUTF16(IDS_GEOLOCATION_BUBBLE_CLEAR_LINK));
-    set_custom_link_enabled(true);
-  } else if (tab_state_flags &
-             ContentSettingsUsagesState::TABSTATE_HAS_CHANGED) {
-    set_custom_link(l10n_util::GetStringUTF16(
-        IDS_GEOLOCATION_BUBBLE_REQUIRE_RELOAD_TO_CLEAR));
-  }
-}
-
-void ContentSettingDomainListBubbleModel::OnCustomLinkClicked() {
-  if (!web_contents())
-    return;
-  // Reset this embedder's entry to default for each of the requesting
-  // origins currently on the page.
-  const GURL& embedder_url = web_contents()->GetURL();
-  TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(web_contents());
-  const ContentSettingsUsagesState::StateMap& state_map =
-      content_settings->geolocation_usages_state().state_map();
-  HostContentSettingsMap* map =
-      HostContentSettingsMapFactory::GetForProfile(profile());
-  for (const std::pair<GURL, ContentSetting>& map_entry : state_map) {
-    PermissionUtil::ScopedRevocationReporter(
-        profile(), map_entry.first, embedder_url,
-        CONTENT_SETTINGS_TYPE_GEOLOCATION, PermissionSourceUI::PAGE_ACTION);
-    map->SetContentSettingDefaultScope(map_entry.first, embedder_url,
-                                       CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                                       std::string(), CONTENT_SETTING_DEFAULT);
-  }
-}
-
-// ContentSettingMixedScriptBubbleModel ----------------------------------------
-
-namespace {
-
-void SetAllowRunningInsecureContent(content::RenderFrameHost* frame) {
-  chrome::mojom::InsecureContentRendererPtr renderer;
-  frame->GetRemoteInterfaces()->GetInterface(&renderer);
-  renderer->SetAllowRunningInsecureContent();
-}
-
-}  // namespace
-
-class ContentSettingMixedScriptBubbleModel
-    : public ContentSettingSimpleBubbleModel {
- public:
-  ContentSettingMixedScriptBubbleModel(Delegate* delegate,
-                                       WebContents* web_contents,
-                                       Profile* profile);
-
-  ~ContentSettingMixedScriptBubbleModel() override {}
-
- private:
-  void OnCustomLinkClicked() override;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentSettingMixedScriptBubbleModel);
-};
-
-ContentSettingMixedScriptBubbleModel::ContentSettingMixedScriptBubbleModel(
-    Delegate* delegate,
-    WebContents* web_contents,
-    Profile* profile)
-    : ContentSettingSimpleBubbleModel(
-          delegate,
-          web_contents,
-          profile,
-          CONTENT_SETTINGS_TYPE_MIXEDSCRIPT) {
-  content_settings::RecordMixedScriptAction(
-      content_settings::MIXED_SCRIPT_ACTION_DISPLAYED_BUBBLE);
-  set_custom_link_enabled(true);
-}
-
-void ContentSettingMixedScriptBubbleModel::OnCustomLinkClicked() {
-  DCHECK(rappor_service());
-  if (!web_contents())
-    return;
-
-  MixedContentSettingsTabHelper* mixed_content_settings =
-      MixedContentSettingsTabHelper::FromWebContents(web_contents());
-  if (mixed_content_settings) {
-    // Update browser side settings to allow active mixed content.
-    mixed_content_settings->AllowRunningOfInsecureContent();
-  }
-
-  // Update renderer side settings to allow active mixed content.
-  web_contents()->ForEachFrame(base::Bind(&::SetAllowRunningInsecureContent));
-
-  content_settings::RecordMixedScriptAction(
-      content_settings::MIXED_SCRIPT_ACTION_CLICKED_ALLOW);
-
-  rappor::SampleDomainAndRegistryFromGURL(
-      rappor_service(), "ContentSettings.MixedScript.UserClickedAllow",
-      web_contents()->GetLastCommittedURL());
-}
-
-// ContentSettingRPHBubbleModel ------------------------------------------------
-
-ContentSettingRPHBubbleModel::ContentSettingRPHBubbleModel(
-    Delegate* delegate,
-    WebContents* web_contents,
-    Profile* profile,
-    ProtocolHandlerRegistry* registry)
-    : ContentSettingSimpleBubbleModel(delegate,
-                                      web_contents,
-                                      profile,
-                                      CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS),
-      selected_item_(0),
-      interacted_(false),
-      registry_(registry),
-      pending_handler_(ProtocolHandler::EmptyProtocolHandler()),
-      previous_handler_(ProtocolHandler::EmptyProtocolHandler()) {
-  TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(web_contents);
-  pending_handler_ = content_settings->pending_protocol_handler();
-  previous_handler_ = content_settings->previous_protocol_handler();
-
-  base::string16 protocol;
-  if (pending_handler_.protocol() == "mailto") {
-    protocol = l10n_util::GetStringUTF16(
-        IDS_REGISTER_PROTOCOL_HANDLER_MAILTO_NAME);
-  } else if (pending_handler_.protocol() == "webcal") {
-    protocol = l10n_util::GetStringUTF16(
-        IDS_REGISTER_PROTOCOL_HANDLER_WEBCAL_NAME);
-  } else {
-    protocol = base::UTF8ToUTF16(pending_handler_.protocol());
-  }
-
-  // Note that we ignore the |title| parameter.
-  if (previous_handler_.IsEmpty()) {
-    set_title(l10n_util::GetStringFUTF16(
-        IDS_REGISTER_PROTOCOL_HANDLER_CONFIRM,
-        base::UTF8ToUTF16(pending_handler_.url().host()),
-        protocol));
-  } else {
-    set_title(l10n_util::GetStringFUTF16(
-        IDS_REGISTER_PROTOCOL_HANDLER_CONFIRM_REPLACE,
-        base::UTF8ToUTF16(pending_handler_.url().host()),
-        protocol,
-        base::UTF8ToUTF16(previous_handler_.url().host())));
-  }
-
-  base::string16 radio_allow_label =
-      l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_ACCEPT);
-  base::string16 radio_deny_label =
-      l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_DENY);
-  base::string16 radio_ignore_label =
-      l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_IGNORE);
-
-  const GURL& url = web_contents->GetURL();
-  RadioGroup radio_group;
-  radio_group.url = url;
-
-  radio_group.radio_items.push_back(radio_allow_label);
-  radio_group.radio_items.push_back(radio_deny_label);
-  radio_group.radio_items.push_back(radio_ignore_label);
-  ContentSetting setting =
-      content_settings->pending_protocol_handler_setting();
-  if (setting == CONTENT_SETTING_ALLOW)
-    radio_group.default_item = RPH_ALLOW;
-  else if (setting == CONTENT_SETTING_BLOCK)
-    radio_group.default_item = RPH_BLOCK;
-  else
-    radio_group.default_item = RPH_IGNORE;
-
-  selected_item_ = radio_group.default_item;
-  set_radio_group_enabled(true);
-  set_radio_group(radio_group);
-}
-
-ContentSettingRPHBubbleModel::~ContentSettingRPHBubbleModel() {
-  if (!web_contents() || !interacted_)
-    return;
-
-  // The user has one chance to deal with the RPH content setting UI,
-  // then we remove it.
-  auto* settings = TabSpecificContentSettings::FromWebContents(web_contents());
-  settings->ClearPendingProtocolHandler();
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
-      content::Source<WebContents>(web_contents()),
-      content::NotificationService::NoDetails());
-}
-
-void ContentSettingRPHBubbleModel::OnRadioClicked(int radio_index) {
-  if (selected_item_ == radio_index)
-    return;
-
-  interacted_ = true;
-  selected_item_ = radio_index;
-
-  if (radio_index == RPH_ALLOW)
-    RegisterProtocolHandler();
-  else if (radio_index == RPH_BLOCK)
-    UnregisterProtocolHandler();
-  else if (radio_index == RPH_IGNORE)
-    IgnoreProtocolHandler();
-  else
-    NOTREACHED();
-}
-
-void ContentSettingRPHBubbleModel::OnDoneClicked() {
-  interacted_ = true;
-}
-
-void ContentSettingRPHBubbleModel::RegisterProtocolHandler() {
-  if (!web_contents())
-    return;
-
-  // A no-op if the handler hasn't been ignored, but needed in case the user
-  // selects sequences like register/ignore/register.
-  registry_->RemoveIgnoredHandler(pending_handler_);
-
-  registry_->OnAcceptRegisterProtocolHandler(pending_handler_);
-  TabSpecificContentSettings::FromWebContents(web_contents())->
-      set_pending_protocol_handler_setting(CONTENT_SETTING_ALLOW);
-}
-
-void ContentSettingRPHBubbleModel::UnregisterProtocolHandler() {
-  if (!web_contents())
-    return;
-
-  registry_->OnDenyRegisterProtocolHandler(pending_handler_);
-  auto* settings = TabSpecificContentSettings::FromWebContents(web_contents());
-  settings->set_pending_protocol_handler_setting(CONTENT_SETTING_BLOCK);
-  ClearOrSetPreviousHandler();
-}
-
-void ContentSettingRPHBubbleModel::IgnoreProtocolHandler() {
-  if (!web_contents())
-    return;
-
-  registry_->OnIgnoreRegisterProtocolHandler(pending_handler_);
-  auto* settings = TabSpecificContentSettings::FromWebContents(web_contents());
-  settings->set_pending_protocol_handler_setting(CONTENT_SETTING_DEFAULT);
-  ClearOrSetPreviousHandler();
-}
-
-void ContentSettingRPHBubbleModel::ClearOrSetPreviousHandler() {
-  if (previous_handler_.IsEmpty()) {
-    registry_->ClearDefault(pending_handler_.protocol());
-  } else {
-    registry_->OnAcceptRegisterProtocolHandler(previous_handler_);
-  }
 }
 
 // ContentSettingSubresourceFilterBubbleModel ----------------------------------
@@ -1240,14 +1437,16 @@ ContentSettingSubresourceFilterBubbleModel::
   // TODO(csharrison): The learn more link UI layout is non ideal. Make it align
   // with the future Harmony UI version with a link icon in the bottom left of
   // the bubble.
-  set_learn_more_link(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+  set_show_learn_more(true);
   ChromeSubresourceFilterClient::LogAction(kActionDetailsShown);
 }
 
 ContentSettingSubresourceFilterBubbleModel::
     ~ContentSettingSubresourceFilterBubbleModel() {}
 
-void ContentSettingSubresourceFilterBubbleModel::SetTitle() {}
+void ContentSettingSubresourceFilterBubbleModel::SetTitle() {
+  set_title(l10n_util::GetStringUTF16(IDS_BLOCKED_ADS_PROMPT_TITLE));
+}
 
 void ContentSettingSubresourceFilterBubbleModel::SetManageText() {
   // The experimental UI includes the permission UI, which allows us to
@@ -1259,7 +1458,7 @@ void ContentSettingSubresourceFilterBubbleModel::SetManageText() {
           subresource_filter::kSafeBrowsingSubresourceFilterExperimentalUI)
           ? IDS_ALWAYS_ALLOW_ADS
           : IDS_ALLOW_ADS));
-  set_show_manage_text_as_checkbox(true);
+  set_manage_text_style(ContentSettingBubbleModel::ManageTextStyle::kCheckbox);
 }
 
 void ContentSettingSubresourceFilterBubbleModel::SetMessage() {
@@ -1273,7 +1472,7 @@ void ContentSettingSubresourceFilterBubbleModel::OnManageCheckboxChecked(
   is_checked_ = is_checked;
 }
 
-void ContentSettingSubresourceFilterBubbleModel::OnLearnMoreLinkClicked() {
+void ContentSettingSubresourceFilterBubbleModel::OnLearnMoreClicked() {
   DCHECK(delegate());
   ChromeSubresourceFilterClient::LogAction(kActionClickedLearnMore);
   delegate()->ShowLearnMorePage(CONTENT_SETTINGS_TYPE_ADS);
@@ -1289,94 +1488,6 @@ void ContentSettingSubresourceFilterBubbleModel::OnDoneClicked() {
 ContentSettingSubresourceFilterBubbleModel*
 ContentSettingSubresourceFilterBubbleModel::AsSubresourceFilterBubbleModel() {
   return this;
-}
-
-// ContentSettingMidiSysExBubbleModel ------------------------------------------
-
-class ContentSettingMidiSysExBubbleModel
-    : public ContentSettingSimpleBubbleModel {
- public:
-  ContentSettingMidiSysExBubbleModel(Delegate* delegate,
-                                     WebContents* web_contents,
-                                     Profile* profile);
-  ~ContentSettingMidiSysExBubbleModel() override {}
-
- private:
-  void MaybeAddDomainList(const std::set<std::string>& hosts, int title_id);
-  void SetDomainsAndCustomLink();
-  void OnCustomLinkClicked() override;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentSettingMidiSysExBubbleModel);
-};
-
-ContentSettingMidiSysExBubbleModel::ContentSettingMidiSysExBubbleModel(
-    Delegate* delegate,
-    WebContents* web_contents,
-    Profile* profile)
-    : ContentSettingSimpleBubbleModel(delegate,
-                                      web_contents,
-                                      profile,
-                                      CONTENT_SETTINGS_TYPE_MIDI_SYSEX) {
-  SetDomainsAndCustomLink();
-}
-
-void ContentSettingMidiSysExBubbleModel::MaybeAddDomainList(
-    const std::set<std::string>& hosts, int title_id) {
-  if (!hosts.empty()) {
-    DomainList domain_list;
-    domain_list.title = l10n_util::GetStringUTF16(title_id);
-    domain_list.hosts = hosts;
-    add_domain_list(domain_list);
-  }
-}
-
-void ContentSettingMidiSysExBubbleModel::SetDomainsAndCustomLink() {
-  TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(web_contents());
-  const ContentSettingsUsagesState& usages_state =
-      content_settings->midi_usages_state();
-  ContentSettingsUsagesState::FormattedHostsPerState formatted_hosts_per_state;
-  unsigned int tab_state_flags = 0;
-  usages_state.GetDetailedInfo(&formatted_hosts_per_state, &tab_state_flags);
-  // Divide the tab's current MIDI sysex users into sets according to their
-  // permission state.
-  MaybeAddDomainList(formatted_hosts_per_state[CONTENT_SETTING_ALLOW],
-                     IDS_MIDI_SYSEX_BUBBLE_ALLOWED);
-
-  MaybeAddDomainList(formatted_hosts_per_state[CONTENT_SETTING_BLOCK],
-                     IDS_MIDI_SYSEX_BUBBLE_DENIED);
-
-  if (tab_state_flags & ContentSettingsUsagesState::TABSTATE_HAS_EXCEPTION) {
-    set_custom_link(
-        l10n_util::GetStringUTF16(IDS_MIDI_SYSEX_BUBBLE_CLEAR_LINK));
-    set_custom_link_enabled(true);
-  } else if (tab_state_flags &
-             ContentSettingsUsagesState::TABSTATE_HAS_CHANGED) {
-    set_custom_link(l10n_util::GetStringUTF16(
-        IDS_MIDI_SYSEX_BUBBLE_REQUIRE_RELOAD_TO_CLEAR));
-  }
-}
-
-void ContentSettingMidiSysExBubbleModel::OnCustomLinkClicked() {
-  if (!web_contents())
-    return;
-  // Reset this embedder's entry to default for each of the requesting
-  // origins currently on the page.
-  const GURL& embedder_url = web_contents()->GetURL();
-  TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(web_contents());
-  const ContentSettingsUsagesState::StateMap& state_map =
-      content_settings->midi_usages_state().state_map();
-  HostContentSettingsMap* map =
-      HostContentSettingsMapFactory::GetForProfile(profile());
-  for (const std::pair<GURL, ContentSetting>& map_entry : state_map) {
-    PermissionUtil::ScopedRevocationReporter(
-        profile(), map_entry.first, embedder_url,
-        CONTENT_SETTINGS_TYPE_MIDI_SYSEX, PermissionSourceUI::PAGE_ACTION);
-    map->SetContentSettingDefaultScope(map_entry.first, embedder_url,
-                                       CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
-                                       std::string(), CONTENT_SETTING_DEFAULT);
-  }
 }
 
 // ContentSettingDownloadsBubbleModel ------------------------------------------
@@ -1423,22 +1534,22 @@ void ContentSettingDownloadsBubbleModel::SetRadioGroup() {
 
   RadioGroup radio_group;
   radio_group.url = url;
-  switch (download_request_limiter->GetDownloadStatus(web_contents())) {
-    case DownloadRequestLimiter::ALLOW_ALL_DOWNLOADS:
+  switch (download_request_limiter->GetDownloadUiStatus(web_contents())) {
+    case DownloadRequestLimiter::DOWNLOAD_UI_ALLOWED:
       radio_group.radio_items.push_back(
           l10n_util::GetStringUTF16(IDS_ALLOWED_DOWNLOAD_NO_ACTION));
       radio_group.radio_items.push_back(
           l10n_util::GetStringFUTF16(IDS_ALLOWED_DOWNLOAD_BLOCK, display_host));
       radio_group.default_item = kAllowButtonIndex;
       break;
-    case DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED:
+    case DownloadRequestLimiter::DOWNLOAD_UI_BLOCKED:
       radio_group.radio_items.push_back(l10n_util::GetStringFUTF16(
           IDS_BLOCKED_DOWNLOAD_UNBLOCK, display_host));
       radio_group.radio_items.push_back(
           l10n_util::GetStringUTF16(IDS_BLOCKED_DOWNLOAD_NO_ACTION));
       radio_group.default_item = 1;
       break;
-    default:
+    case DownloadRequestLimiter::DOWNLOAD_UI_DEFAULT:
       NOTREACHED();
       return;
   }
@@ -1470,30 +1581,117 @@ void ContentSettingDownloadsBubbleModel::SetTitle() {
       g_browser_process->download_request_limiter();
   DCHECK(download_request_limiter);
 
-  switch (download_request_limiter->GetDownloadStatus(web_contents())) {
-    case DownloadRequestLimiter::ALLOW_ALL_DOWNLOADS:
+  switch (download_request_limiter->GetDownloadUiStatus(web_contents())) {
+    case DownloadRequestLimiter::DOWNLOAD_UI_ALLOWED:
       set_title(l10n_util::GetStringUTF16(IDS_ALLOWED_DOWNLOAD_TITLE));
       return;
-    case DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED:
+    case DownloadRequestLimiter::DOWNLOAD_UI_BLOCKED:
       set_title(l10n_util::GetStringUTF16(IDS_BLOCKED_DOWNLOAD_TITLE));
       return;
-    default:
+    case DownloadRequestLimiter::DOWNLOAD_UI_DEFAULT:
       // No title otherwise.
       return;
   }
 }
 
 void ContentSettingDownloadsBubbleModel::SetManageText() {
-  set_manage_text(l10n_util::GetStringUTF16(IDS_BLOCKED_DOWNLOADS_LINK));
+  set_manage_text(l10n_util::GetStringUTF16(IDS_MANAGE));
 }
 
-void ContentSettingDownloadsBubbleModel::OnManageLinkClicked() {
+void ContentSettingDownloadsBubbleModel::OnManageButtonClicked() {
   if (delegate())
     delegate()->ShowContentSettingsPage(
         CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS);
 }
 
+// ContentSettingFramebustBlockBubbleModel -------------------------------------
+
+ContentSettingFramebustBlockBubbleModel::
+    ContentSettingFramebustBlockBubbleModel(Delegate* delegate,
+                                            WebContents* web_contents,
+                                            Profile* profile)
+    : ContentSettingBubbleModel(delegate, web_contents, profile) {
+  if (!web_contents)
+    return;
+
+  set_manage_text_style(ContentSettingBubbleModel::ManageTextStyle::kNone);
+  set_show_learn_more(false);
+  set_title(l10n_util::GetStringUTF16(IDS_REDIRECT_BLOCKED_MESSAGE));
+  set_done_button_text(l10n_util::GetStringUTF16(IDS_REDIRECT_BLOCKED_GOT_IT));
+
+  auto* helper = FramebustBlockTabHelper::FromWebContents(web_contents);
+
+  // Build the blocked urls list.
+  for (const auto& blocked_url : helper->blocked_urls())
+    AddListItem(CreateListItem(blocked_url));
+
+  helper->SetObserver(this);
+}
+
+ContentSettingFramebustBlockBubbleModel::
+    ~ContentSettingFramebustBlockBubbleModel() {
+  if (web_contents())
+    FramebustBlockTabHelper::FromWebContents(web_contents())->ClearObserver();
+}
+
+void ContentSettingFramebustBlockBubbleModel::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  // The order is important because ContentSettingBubbleModel::Observer() clears
+  // the value of |web_contents()|.
+  if (type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED)
+    FramebustBlockTabHelper::FromWebContents(web_contents())->ClearObserver();
+  ContentSettingBubbleModel::Observe(type, source, details);
+}
+
+void ContentSettingFramebustBlockBubbleModel::OnListItemClicked(
+    int index,
+    int event_flags) {
+  if (!web_contents())
+    return;
+
+  FramebustBlockTabHelper::FromWebContents(web_contents())
+      ->OnBlockedUrlClicked(index);
+}
+
+ContentSettingFramebustBlockBubbleModel*
+ContentSettingFramebustBlockBubbleModel::AsFramebustBlockBubbleModel() {
+  return this;
+}
+
+void ContentSettingFramebustBlockBubbleModel::OnBlockedUrlAdded(
+    const GURL& blocked_url) {
+  AddListItem(CreateListItem(blocked_url));
+}
+
+ContentSettingBubbleModel::ListItem
+ContentSettingFramebustBlockBubbleModel::CreateListItem(const GURL& url) {
+  // Skip empty URLS.
+  base::string16 title = !url.spec().empty()
+                             ? base::UTF8ToUTF16(url.spec())
+                             : l10n_util::GetStringUTF16(IDS_TAB_LOADING_TITLE);
+
+  const bool use_md = ui::MaterialDesignController::IsSecondaryUiMaterial();
+  if (use_md) {
+    // Format the title to include the unicode single dot bullet code-point
+    // \u2022 and two spaces.
+    title = l10n_util::GetStringFUTF16(IDS_LIST_BULLET, title);
+  }
+
+  gfx::Image image =
+      use_md ? gfx::Image()
+             : ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+                   IDR_DEFAULT_FAVICON);
+  return ListItem(image, title, true, 0);
+}
+
 // ContentSettingBubbleModel ---------------------------------------------------
+
+// This class must be placed last because it needs the definition of the other
+// classes declared in this file.
+
+const int ContentSettingBubbleModel::kAllowButtonIndex = 0;
 
 // static
 ContentSettingBubbleModel*
@@ -1532,7 +1730,9 @@ ContentSettingBubbleModel*
   }
   if (content_type == CONTENT_SETTINGS_TYPE_IMAGES ||
       content_type == CONTENT_SETTINGS_TYPE_JAVASCRIPT ||
-      content_type == CONTENT_SETTINGS_TYPE_PPAPI_BROKER) {
+      content_type == CONTENT_SETTINGS_TYPE_PPAPI_BROKER ||
+      content_type == CONTENT_SETTINGS_TYPE_SOUND ||
+      content_type == CONTENT_SETTINGS_TYPE_CLIPBOARD_READ) {
     return new ContentSettingSingleRadioGroup(delegate, web_contents, profile,
                                               content_type);
   }
@@ -1549,6 +1749,7 @@ ContentSettingBubbleModel::ContentSettingBubbleModel(Delegate* delegate,
                                                      Profile* profile)
     : web_contents_(web_contents),
       profile_(profile),
+      owner_(nullptr),
       delegate_(delegate),
       rappor_service_(g_browser_process->rappor_service()) {
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
@@ -1617,4 +1818,22 @@ ContentSettingBubbleModel::AsSubresourceFilterBubbleModel() {
 ContentSettingDownloadsBubbleModel*
 ContentSettingBubbleModel::AsDownloadsBubbleModel() {
   return nullptr;
+}
+
+ContentSettingFramebustBlockBubbleModel*
+ContentSettingBubbleModel::AsFramebustBlockBubbleModel() {
+  return nullptr;
+}
+
+void ContentSettingBubbleModel::AddListItem(const ListItem& item) {
+  bubble_content_.list_items.push_back(item);
+  if (owner_)
+    owner_->OnListItemAdded(item);
+}
+
+void ContentSettingBubbleModel::RemoveListItem(int index) {
+  if (owner_)
+    owner_->OnListItemRemovedAt(index);
+
+  bubble_content_.list_items.erase(bubble_content_.list_items.begin() + index);
 }

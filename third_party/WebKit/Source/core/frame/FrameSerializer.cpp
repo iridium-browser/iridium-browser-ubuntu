@@ -30,17 +30,15 @@
 
 #include "core/frame/FrameSerializer.h"
 
-#include "core/HTMLNames.h"
-#include "core/InputTypeNames.h"
 #include "core/css/CSSFontFaceRule.h"
 #include "core/css/CSSFontFaceSrcValue.h"
 #include "core/css/CSSImageValue.h"
 #include "core/css/CSSImportRule.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/CSSRuleList.h"
 #include "core/css/CSSStyleDeclaration.h"
 #include "core/css/CSSStyleRule.h"
 #include "core/css/CSSValueList.h"
-#include "core/css/StylePropertySet.h"
 #include "core/css/StyleRule.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/dom/Document.h"
@@ -50,11 +48,13 @@
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLFrameElementBase.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLLinkElement.h"
 #include "core/html/HTMLMetaElement.h"
 #include "core/html/HTMLStyleElement.h"
 #include "core/html/ImageDocument.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html_names.h"
+#include "core/input_type_names.h"
 #include "core/loader/resource/FontResource.h"
 #include "core/loader/resource/ImageResourceContent.h"
 #include "core/style/StyleFetchedImage.h"
@@ -133,7 +133,7 @@ SerializerMarkupAccumulator::SerializerMarkupAccumulator(
       document_(&document),
       nodes_(nodes) {}
 
-SerializerMarkupAccumulator::~SerializerMarkupAccumulator() {}
+SerializerMarkupAccumulator::~SerializerMarkupAccumulator() = default;
 
 void SerializerMarkupAccumulator::AppendCustomAttributes(
     StringBuilder& result,
@@ -157,12 +157,12 @@ bool SerializerMarkupAccumulator::ShouldIgnoreAttribute(
 
 bool SerializerMarkupAccumulator::ShouldIgnoreElement(
     const Element& element) const {
-  if (isHTMLScriptElement(element))
+  if (IsHTMLScriptElement(element))
     return true;
-  if (isHTMLNoScriptElement(element))
+  if (IsHTMLNoScriptElement(element))
     return true;
-  if (isHTMLMetaElement(element) &&
-      toHTMLMetaElement(element).ComputeEncoding().IsValid()) {
+  if (IsHTMLMetaElement(element) &&
+      ToHTMLMetaElement(element).ComputeEncoding().IsValid()) {
     return true;
   }
   return delegate_.ShouldIgnoreElement(element);
@@ -175,7 +175,7 @@ void SerializerMarkupAccumulator::AppendElement(StringBuilder& result,
 
   // TODO(tiger): Refactor MarkupAccumulator so it is easier to append an
   // element like this, without special cases for XHTML
-  if (isHTMLHeadElement(element)) {
+  if (IsHTMLHeadElement(element)) {
     result.Append("<meta http-equiv=\"Content-Type\" content=\"");
     AppendAttributeValue(result, document_->SuggestedMIMEType());
     result.Append("; charset=");
@@ -328,31 +328,24 @@ void FrameSerializer::SerializeFrame(const LocalFrame& frame) {
                                      document);
     }
 
-    if (isHTMLImageElement(element)) {
-      HTMLImageElement& image_element = toHTMLImageElement(element);
-      KURL url =
-          document.CompleteURL(image_element.getAttribute(HTMLNames::srcAttr));
-      ImageResourceContent* cached_image = image_element.CachedImage();
+    if (auto* image = ToHTMLImageElementOrNull(element)) {
+      KURL url = document.CompleteURL(image->getAttribute(HTMLNames::srcAttr));
+      ImageResourceContent* cached_image = image->CachedImage();
       AddImageToResources(cached_image, url);
-    } else if (isHTMLInputElement(element)) {
-      HTMLInputElement& input_element = toHTMLInputElement(element);
-      if (input_element.type() == InputTypeNames::image &&
-          input_element.ImageLoader()) {
-        KURL url = input_element.Src();
-        ImageResourceContent* cached_image =
-            input_element.ImageLoader()->GetImage();
+    } else if (auto* input = ToHTMLInputElementOrNull(element)) {
+      if (input->type() == InputTypeNames::image && input->ImageLoader()) {
+        KURL url = input->Src();
+        ImageResourceContent* cached_image = input->ImageLoader()->GetContent();
         AddImageToResources(cached_image, url);
       }
-    } else if (isHTMLLinkElement(element)) {
-      HTMLLinkElement& link_element = toHTMLLinkElement(element);
-      if (CSSStyleSheet* sheet = link_element.sheet()) {
-        KURL url = document.CompleteURL(
-            link_element.getAttribute(HTMLNames::hrefAttr));
+    } else if (auto* link = ToHTMLLinkElementOrNull(element)) {
+      if (CSSStyleSheet* sheet = link->sheet()) {
+        KURL url =
+            document.CompleteURL(link->getAttribute(HTMLNames::hrefAttr));
         SerializeCSSStyleSheet(*sheet, url);
       }
-    } else if (isHTMLStyleElement(element)) {
-      HTMLStyleElement& style_element = toHTMLStyleElement(element);
-      if (CSSStyleSheet* sheet = style_element.sheet())
+    } else if (auto* style = ToHTMLStyleElementOrNull(element)) {
+      if (CSSStyleSheet* sheet = style->sheet())
         SerializeCSSStyleSheet(*sheet, NullURL());
     }
   }
@@ -413,7 +406,7 @@ void FrameSerializer::SerializeCSSStyleSheet(CSSStyleSheet& style_sheet,
   double css_start_time = 0;
   if (!is_serializing_css_) {
     is_serializing_css_ = true;
-    css_start_time = MonotonicallyIncreasingTime();
+    css_start_time = CurrentTimeTicksInSeconds();
   }
 
   // If this CSS is inlined its definition was already serialized with the frame
@@ -456,7 +449,7 @@ void FrameSerializer::SerializeCSSStyleSheet(CSSStyleSheet& style_sheet,
                         ("PageSerialization.SerializationTime.CSSElement", 0,
                          maxSerializationTimeUmaMicroseconds, 50));
     css_histogram.Count(
-        static_cast<int64_t>((MonotonicallyIncreasingTime() - css_start_time) *
+        static_cast<int64_t>((CurrentTimeTicksInSeconds() - css_start_time) *
                              secondsToMicroseconds));
   }
 }
@@ -514,7 +507,7 @@ bool FrameSerializer::ShouldAddURL(const KURL& url) {
 void FrameSerializer::AddToResources(
     const String& mime_type,
     ResourceHasCacheControlNoStoreHeader has_cache_control_no_store_header,
-    PassRefPtr<const SharedBuffer> data,
+    scoped_refptr<const SharedBuffer> data,
     const KURL& url) {
   if (delegate_.ShouldSkipResource(has_cache_control_no_store_header))
     return;
@@ -541,9 +534,9 @@ void FrameSerializer::AddImageToResources(ImageResourceContent* image,
 
   TRACE_EVENT2("page-serialization", "FrameSerializer::addImageToResources",
                "type", "image", "url", url.ElidedString().Utf8().data());
-  double image_start_time = MonotonicallyIncreasingTime();
+  double image_start_time = CurrentTimeTicksInSeconds();
 
-  RefPtr<const SharedBuffer> data = image->GetImage()->Data();
+  scoped_refptr<const SharedBuffer> data = image->GetImage()->Data();
   AddToResources(image->GetResponse().MimeType(),
                  image->HasCacheControlNoStoreHeader()
                      ? kHasCacheControlNoStoreHeader
@@ -556,30 +549,30 @@ void FrameSerializer::AddImageToResources(ImageResourceContent* image,
     DEFINE_STATIC_LOCAL(CustomCountHistogram, image_histogram,
                         ("PageSerialization.SerializationTime.ImageElement", 0,
                          maxSerializationTimeUmaMicroseconds, 50));
-    image_histogram.Count(static_cast<int64_t>(
-        (MonotonicallyIncreasingTime() - image_start_time) *
-        secondsToMicroseconds));
+    image_histogram.Count(
+        static_cast<int64_t>((CurrentTimeTicksInSeconds() - image_start_time) *
+                             secondsToMicroseconds));
   }
 }
 
-void FrameSerializer::AddFontToResources(FontResource* font) {
-  if (!font || !ShouldAddURL(font->Url()))
+void FrameSerializer::AddFontToResources(FontResource& font) {
+  if (!ShouldAddURL(font.Url()))
     return;
-  resource_urls_.insert(font->Url());
-  if (!font || !font->IsLoaded() || !font->ResourceBuffer())
+  resource_urls_.insert(font.Url());
+  if (!font.IsLoaded() || !font.ResourceBuffer())
     return;
 
-  RefPtr<const SharedBuffer> data(font->ResourceBuffer());
+  scoped_refptr<const SharedBuffer> data(font.ResourceBuffer());
 
-  AddToResources(font->GetResponse().MimeType(),
-                 font->HasCacheControlNoStoreHeader()
+  AddToResources(font.GetResponse().MimeType(),
+                 font.HasCacheControlNoStoreHeader()
                      ? kHasCacheControlNoStoreHeader
                      : kNoCacheControlNoStoreHeader,
-                 data, font->Url());
+                 data, font.Url());
 }
 
 void FrameSerializer::RetrieveResourcesForProperties(
-    const StylePropertySet* style_declaration,
+    const CSSPropertyValueSet* style_declaration,
     Document& document) {
   if (!style_declaration)
     return;
@@ -613,7 +606,7 @@ void FrameSerializer::RetrieveResourcesForCSSValue(const CSSValue& css_value,
       return;
     }
 
-    AddFontToResources(font_face_src_value.Fetch(&document));
+    AddFontToResources(font_face_src_value.Fetch(&document, nullptr));
   } else if (css_value.IsValueList()) {
     const CSSValueList& css_value_list = ToCSSValueList(css_value);
     for (unsigned i = 0; i < css_value_list.length(); i++)

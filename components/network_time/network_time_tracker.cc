@@ -4,6 +4,7 @@
 
 #include "components/network_time/network_time_tracker.h"
 
+#include <memory>
 #include <stdint.h>
 #include <string>
 #include <utility>
@@ -11,9 +12,8 @@
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -197,7 +197,7 @@ void RecordFetchValidHistogram(bool valid) {
 // static
 void NetworkTimeTracker::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(prefs::kNetworkTimeMapping,
-                                   base::MakeUnique<base::DictionaryValue>());
+                                   std::make_unique<base::DictionaryValue>());
   registry->RegisterBooleanPref(prefs::kNetworkTimeQueriesEnabled, true);
 }
 
@@ -306,13 +306,12 @@ bool NetworkTimeTracker::AreTimeFetchesEnabled() const {
 NetworkTimeTracker::FetchBehavior NetworkTimeTracker::GetFetchBehavior() const {
   const std::string param = variations::GetVariationParamValueByFeature(
       kNetworkTimeServiceQuerying, kVariationsServiceFetchBehavior);
-  if (param == "background-only") {
+  if (param == "background-only")
     return FETCHES_IN_BACKGROUND_ONLY;
-  } else if (param == "on-demand-only") {
+  if (param == "on-demand-only")
     return FETCHES_ON_DEMAND_ONLY;
-  } else if (param == "background-and-on-demand") {
+  if (param == "background-and-on-demand")
     return FETCHES_IN_BACKGROUND_AND_ON_DEMAND;
-  }
   return FETCHES_ON_DEMAND_ONLY;
 }
 
@@ -484,7 +483,7 @@ void NetworkTimeTracker::CheckTime() {
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting: "This feature cannot be disabled by settings."
           chrome_policy {
             BrowserNetworkTimeQueriesEnabled {
@@ -527,8 +526,8 @@ bool NetworkTimeTracker::UpdateTimeFromResponse() {
              << ",code=" << time_fetcher_->GetResponseCode();
     // The error code is negated because net errors are negative, but
     // the corresponding histogram enum is positive.
-    UMA_HISTOGRAM_SPARSE_SLOWLY("NetworkTimeTracker.UpdateTimeFetchFailed",
-                                -time_fetcher_->GetStatus().error());
+    base::UmaHistogramSparse("NetworkTimeTracker.UpdateTimeFetchFailed",
+                             -time_fetcher_->GetStatus().error());
     return false;
   }
 

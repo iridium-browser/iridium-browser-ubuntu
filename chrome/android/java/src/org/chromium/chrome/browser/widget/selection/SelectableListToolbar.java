@@ -9,6 +9,7 @@ import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.support.annotation.CallSuper;
+import android.support.annotation.StringRes;
 import android.support.v4.view.GravityCompat;
 import android.support.v4.widget.DrawerLayout;
 import android.support.v7.app.ActionBarDrawerToggle;
@@ -34,6 +35,8 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.toolbar.ActionModeController;
 import org.chromium.chrome.browser.toolbar.ToolbarActionModeCallback;
+import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.vr_shell.VrShellDelegate;
 import org.chromium.chrome.browser.widget.NumberRollView;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 import org.chromium.chrome.browser.widget.TintedImageButton;
@@ -54,9 +57,9 @@ import javax.annotation.Nullable;
  *
  * @param <E> The type of the selectable items this toolbar interacts with.
  */
-public class SelectableListToolbar<E> extends Toolbar implements SelectionObserver<E>,
-        OnClickListener, OnEditorActionListener, DisplayStyleObserver {
-
+public class SelectableListToolbar<E>
+        extends Toolbar implements SelectionObserver<E>, OnClickListener, OnEditorActionListener,
+                                   DisplayStyleObserver, VrShellDelegate.VrModeObserver {
     /**
      * A delegate that handles searching the list of selectable items associated with this toolbar.
      */
@@ -113,6 +116,8 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
     private TintedImageButton mClearTextButton;
     private SearchDelegate mSearchDelegate;
     private boolean mIsLightTheme = true;
+    private boolean mSelectableListHasItems;
+    private boolean mIsVrEnabled = false;
 
     protected NumberRollView mNumberRollView;
     private DrawerLayout mDrawerLayout;
@@ -132,14 +137,11 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
     private int mSearchBackgroundColor;
 
     private UiConfig mUiConfig;
-    private int mDefaultTitleMarginStartPx;
-    private int mWideDisplayLateralOffsetPx;
-    private int mWideDisplayEndOffsetPx;
-    private int mWideDisplayNavButtonOffsetPx;
-    private int mOriginalContentInsetStart;
-    private int mOriginalContentInsetEnd;
-    private int mOriginalContentInsetStartWithNavigation;
-    private int mOriginalContentInsetEndWithActions;
+    private int mWideDisplayStartOffsetPx;
+    private int mModernSearchViewStartOffsetPx;
+    private int mModernNavButtonStartOffsetPx;
+    private int mModernToolbarActionMenuEndOffsetPx;
+    private int mModernToolbarSearchIconOffsetPx;
 
     private boolean mIsDestroyed;
 
@@ -158,6 +160,7 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
         if (mSelectionDelegate != null) mSelectionDelegate.removeObserver(this);
         mObservers.clear();
         UiUtils.hideKeyboard(mSearchEditText);
+        VrShellDelegate.unregisterVrModeObserver(this);
     }
 
     /**
@@ -186,11 +189,21 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
         mSelectionDelegate = delegate;
         mSelectionDelegate.addObserver(this);
 
+        mModernSearchViewStartOffsetPx = getResources().getDimensionPixelSize(
+                R.dimen.toolbar_modern_search_view_start_offset);
+        mModernNavButtonStartOffsetPx = getResources().getDimensionPixelSize(
+                R.dimen.selectable_list_toolbar_nav_button_start_offset);
+        mModernToolbarActionMenuEndOffsetPx = getResources().getDimensionPixelSize(
+                R.dimen.selectable_list_action_bar_end_padding);
+        mModernToolbarSearchIconOffsetPx = getResources().getDimensionPixelSize(
+                R.dimen.selectable_list_search_icon_end_padding);
+
         if (mDrawerLayout != null) initActionBarDrawerToggle();
 
         normalBackgroundColorResId = normalBackgroundColorResId != null
                 ? normalBackgroundColorResId
-                : R.color.default_primary_color;
+                : FeatureUtilities.isChromeModernDesignEnabled() ? R.color.modern_primary_color
+                                                                 : R.color.default_primary_color;
         mNormalBackgroundColor =
                 ApiCompatibilityUtils.getColor(getResources(), normalBackgroundColorResId);
         setBackgroundColor(mNormalBackgroundColor);
@@ -202,10 +215,28 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
 
         // TODO(twellington): add the concept of normal & selected tint to apply to all toolbar
         //                    buttons.
-        mNormalMenuButton = TintedDrawable.constructTintedDrawable(getResources(),
-                R.drawable.btn_menu);
-        mSelectionMenuButton = TintedDrawable.constructTintedDrawable(getResources(),
-                R.drawable.btn_menu, android.R.color.white);
+        mNormalMenuButton = TintedDrawable.constructTintedDrawable(
+                getResources(), R.drawable.ic_more_vert_black_24dp);
+        mSelectionMenuButton = TintedDrawable.constructTintedDrawable(
+                getResources(), R.drawable.ic_more_vert_black_24dp, android.R.color.white);
+
+        if (!FeatureUtilities.isChromeModernDesignEnabled()) {
+            setTitleTextAppearance(getContext(), R.style.BlackHeadline2);
+        }
+    }
+
+    @Override
+    public void onEnterVr() {
+        // TODO(https://crbug.com/817177): Editing text is not supported in VR, so we disable
+        // searching.
+        mIsVrEnabled = true;
+        if (mHasSearchView) updateSearchMenuItem();
+    }
+
+    @Override
+    public void onExitVr() {
+        mIsVrEnabled = false;
+        if (mHasSearchView) updateSearchMenuItem();
     }
 
     /**
@@ -253,6 +284,16 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
                 mSearchEditText.setText("");
             }
         });
+
+        if (FeatureUtilities.isChromeModernDesignEnabled()) {
+            mClearTextButton.setPadding(ApiCompatibilityUtils.getPaddingStart(mClearTextButton),
+                    mClearTextButton.getPaddingTop(),
+                    getResources().getDimensionPixelSize(R.dimen.clear_text_button_end_padding),
+                    mClearTextButton.getPaddingBottom());
+        }
+
+        VrShellDelegate.registerVrModeObserver(this);
+        if (VrShellDelegate.isInVr()) onEnterVr();
     }
 
     @Override
@@ -262,11 +303,6 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
         LayoutInflater.from(getContext()).inflate(R.layout.number_roll_view, this);
         mNumberRollView = (NumberRollView) findViewById(R.id.selection_mode_number);
         mNumberRollView.setString(R.plurals.selected_items);
-
-        mOriginalContentInsetStart = getContentInsetStart();
-        mOriginalContentInsetEnd = getContentInsetEnd();
-        mOriginalContentInsetStartWithNavigation = getContentInsetStartWithNavigation();
-        mOriginalContentInsetEndWithActions = getContentInsetEndWithActions();
     }
 
     @Override
@@ -289,14 +325,19 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
             showNormalView();
         }
 
-        if (mIsSelectionEnabled && !wasSelectionEnabled) {
+        if (mIsSelectionEnabled) {
+            @StringRes
+            int resId = wasSelectionEnabled ? R.string.accessibility_toolbar_multi_select
+                                            : R.string.accessibility_toolbar_screen_position;
             announceForAccessibility(
-                    getResources().getString(R.string.accessibility_toolbar_screen_position));
+                    getContext().getString(resId, Integer.toString(selectedItems.size())));
         }
     }
 
     @Override
     public void onClick(View view) {
+        if (mIsDestroyed) return;
+
         switch (mNavigationButton) {
             case NAVIGATION_BUTTON_NONE:
                 break;
@@ -428,8 +469,8 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
      */
     protected void onDataChanged(int numItems) {
         if (mHasSearchView) {
-            getMenu().findItem(mSearchMenuItemId).setVisible(
-                    !mIsSelectionEnabled && !mIsSearching && numItems != 0);
+            mSelectableListHasItems = numItems != 0;
+            updateSearchMenuItem();
         }
     }
 
@@ -458,21 +499,14 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
      * UiConfig#WIDE_DISPLAY_STYLE_MIN_WIDTH_DP, the toolbar contents will be visually centered by
      * adding padding to both sides.
      *
-     * @param wideDisplayLateralOffsetPx The offset to use for the lateral padding when in
-     *                                   {@link HorizontalDisplayStyle#WIDE}.
      * @param uiConfig The UiConfig used to observe display style changes.
      */
-    public void configureWideDisplayStyle(int wideDisplayLateralOffsetPx, UiConfig uiConfig) {
-        mWideDisplayLateralOffsetPx = wideDisplayLateralOffsetPx;
-        mDefaultTitleMarginStartPx = getTitleMarginStart();
-        mWideDisplayNavButtonOffsetPx =
-                getResources().getDimensionPixelSize(R.dimen.toolbar_wide_display_nav_icon_offset);
-        mWideDisplayEndOffsetPx = getResources().getDimensionPixelSize(
-                R.dimen.toolbar_wide_display_end_offset);
+    public void configureWideDisplayStyle(UiConfig uiConfig) {
+        mWideDisplayStartOffsetPx =
+                getResources().getDimensionPixelSize(R.dimen.toolbar_wide_display_start_offset);
 
         mUiConfig = uiConfig;
         mUiConfig.addObserver(this);
-
     }
 
     @Override
@@ -480,40 +514,39 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
         int padding =
                 SelectableListLayout.getPaddingForDisplayStyle(newDisplayStyle, getResources());
         int paddingStartOffset = 0;
-        int paddingEndOffset = 0;
-        int contentInsetStart = mOriginalContentInsetStart;
-        int contentInsetStartWithNavigation = mOriginalContentInsetStartWithNavigation;
-        int contentInsetEnd = mOriginalContentInsetEnd;
-        int contentInsetEndWithActions = mOriginalContentInsetEndWithActions;
+        boolean isModernSearchViewEnabled = mIsSearching && !mIsSelectionEnabled
+                && FeatureUtilities.isChromeModernDesignEnabled();
+        MarginLayoutParams params = (MarginLayoutParams) getLayoutParams();
 
-        if (newDisplayStyle.horizontal == HorizontalDisplayStyle.WIDE) {
-            paddingStartOffset = mWideDisplayLateralOffsetPx;
-
-            // The title and nav buttons are inset in the normal display style. In the wide display
-            // style they should be aligned with the starting edge of the list elements.
-            if (mIsSearching || mIsSelectionEnabled
-                    || mNavigationButton != NAVIGATION_BUTTON_NONE) {
-                paddingStartOffset += mWideDisplayNavButtonOffsetPx;
-            } else {
-                paddingStartOffset -= mDefaultTitleMarginStartPx;
-            }
-
-            // The end button is also inset in the normal display. In the wide display it should be
-            // aligned with the ending edge of the list elements.
-            paddingEndOffset = mWideDisplayLateralOffsetPx + mWideDisplayEndOffsetPx;
-
-            contentInsetStart = 0;
-            contentInsetStartWithNavigation = 0;
-            contentInsetEnd = 0;
-            contentInsetEndWithActions = 0;
+        if (newDisplayStyle.horizontal == HorizontalDisplayStyle.WIDE
+                && !(mIsSearching || mIsSelectionEnabled
+                           || mNavigationButton != NAVIGATION_BUTTON_NONE)) {
+            // The title in the wide display should be aligned with the texts of the list elements.
+            paddingStartOffset = mWideDisplayStartOffsetPx;
         }
 
+        // The margin instead of padding will be set to adjust the modern search view background
+        // in search mode.
+        if (newDisplayStyle.horizontal == HorizontalDisplayStyle.WIDE
+                && isModernSearchViewEnabled) {
+            params.setMargins(padding, params.topMargin, padding, params.bottomMargin);
+            padding = 0;
+        } else {
+            params.setMargins(0, params.topMargin, 0, params.bottomMargin);
+        }
+        setLayoutParams(params);
+        // Navigation button should have more padding start in the modern search view.
+        if (isModernSearchViewEnabled) paddingStartOffset += mModernSearchViewStartOffsetPx;
+
+        int navigationButtonStartOffsetPx =
+                mNavigationButton != NAVIGATION_BUTTON_NONE ? mModernNavButtonStartOffsetPx : 0;
+
+        int actionMenuBarEndOffsetPx = mIsSelectionEnabled ? mModernToolbarActionMenuEndOffsetPx
+                                                           : mModernToolbarSearchIconOffsetPx;
+
         ApiCompatibilityUtils.setPaddingRelative(this,
-                padding + paddingStartOffset, this.getPaddingTop(),
-                padding + paddingEndOffset, this.getPaddingBottom());
-        setContentInsetsRelative(contentInsetStart, contentInsetEnd);
-        setContentInsetStartWithNavigation(contentInsetStartWithNavigation);
-        setContentInsetEndWithActions(contentInsetEndWithActions);
+                padding + paddingStartOffset + navigationButtonStartOffsetPx, this.getPaddingTop(),
+                padding + actionMenuBarEndOffsetPx, this.getPaddingBottom());
     }
 
     /**
@@ -560,7 +593,10 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
     protected void showNormalView() {
         getMenu().setGroupVisible(mNormalGroupResId, true);
         getMenu().setGroupVisible(mSelectedGroupResId, false);
-        if (mHasSearchView) mSearchView.setVisibility(View.GONE);
+        if (mHasSearchView) {
+            mSearchView.setVisibility(View.GONE);
+            updateSearchMenuItem();
+        }
 
         setNavigationButton(NAVIGATION_BUTTON_MENU);
         setBackgroundColor(mNormalBackgroundColor);
@@ -598,10 +634,23 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
         mSearchView.setVisibility(View.VISIBLE);
 
         setNavigationButton(NAVIGATION_BUTTON_BACK);
-        setBackgroundColor(mSearchBackgroundColor);
+        if (FeatureUtilities.isChromeModernDesignEnabled()) {
+            setBackgroundResource(R.drawable.search_toolbar_modern_bg);
+        } else {
+            setBackgroundColor(mSearchBackgroundColor);
+        }
 
         onThemeChanged(true);
         updateDisplayStyleIfNecessary();
+    }
+
+    private void updateSearchMenuItem() {
+        if (!mHasSearchView) return;
+        MenuItem searchMenuItem = getMenu().findItem(mSearchMenuItemId);
+        if (searchMenuItem != null) {
+            searchMenuItem.setVisible(mSelectableListHasItems && !mIsSelectionEnabled
+                    && !mIsSearching && !mIsVrEnabled);
+        }
     }
 
     protected void switchToNumberRollView(List<E> selectedItems, boolean wasSelectionEnabled) {
@@ -650,6 +699,15 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
         }
     }
 
+    @Override
+    public void setTitle(CharSequence title) {
+        super.setTitle(title);
+
+        // The super class adds an AppCompatTextView for the title which not focusable by default.
+        // Set TextView children to focusable so the title can gain focus in accessibility mode.
+        makeTextViewChildrenAccessible();
+    }
+
     @VisibleForTesting
     public View getSearchViewForTests() {
         return mSearchView;
@@ -658,5 +716,20 @@ public class SelectableListToolbar<E> extends Toolbar implements SelectionObserv
     @VisibleForTesting
     public int getNavigationButtonForTests() {
         return mNavigationButton;
+    }
+
+    /** Ends any in-progress animations. */
+    @VisibleForTesting
+    public void endAnimationsForTesting() {
+        mNumberRollView.endAnimationsForTesting();
+    }
+
+    private void makeTextViewChildrenAccessible() {
+        for (int i = 0; i < getChildCount(); i++) {
+            View child = getChildAt(i);
+            if (!(child instanceof TextView)) continue;
+            child.setFocusable(true);
+            child.setFocusableInTouchMode(true);
+        }
     }
 }

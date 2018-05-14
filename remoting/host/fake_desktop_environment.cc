@@ -6,9 +6,9 @@
 
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/desktop_capturer_proxy.h"
+#include "remoting/host/file_proxy_wrapper.h"
 #include "remoting/host/input_injector.h"
 #include "remoting/proto/event.pb.h"
 #include "remoting/protocol/fake_desktop_capturer.h"
@@ -16,7 +16,7 @@
 namespace remoting {
 
 FakeInputInjector::FakeInputInjector() : weak_factory_(this) {}
-FakeInputInjector::~FakeInputInjector() {}
+FakeInputInjector::~FakeInputInjector() = default;
 
 void FakeInputInjector::Start(
     std::unique_ptr<protocol::ClipboardStub> client_clipboard) {}
@@ -47,8 +47,8 @@ void FakeInputInjector::InjectClipboardEvent(
     clipboard_events_->push_back(event);
 }
 
-FakeScreenControls::FakeScreenControls() {}
-FakeScreenControls::~FakeScreenControls() {}
+FakeScreenControls::FakeScreenControls() = default;
+FakeScreenControls::~FakeScreenControls() = default;
 
 void FakeScreenControls::SetScreenResolution(
     const ScreenResolution& resolution) {
@@ -75,7 +75,7 @@ std::unique_ptr<InputInjector> FakeDesktopEnvironment::CreateInputInjector() {
 }
 
 std::unique_ptr<ScreenControls> FakeDesktopEnvironment::CreateScreenControls() {
-  return base::MakeUnique<FakeScreenControls>();
+  return std::make_unique<FakeScreenControls>();
 }
 
 std::unique_ptr<webrtc::DesktopCapturer>
@@ -93,7 +93,12 @@ FakeDesktopEnvironment::CreateVideoCapturer() {
 
 std::unique_ptr<webrtc::MouseCursorMonitor>
 FakeDesktopEnvironment::CreateMouseCursorMonitor() {
-  return base::MakeUnique<FakeMouseCursorMonitor>();
+  return std::make_unique<FakeMouseCursorMonitor>();
+}
+
+std::unique_ptr<FileProxyWrapper>
+FakeDesktopEnvironment::CreateFileProxyWrapper() {
+  return nullptr;
 }
 
 std::string FakeDesktopEnvironment::GetCapabilities() const {

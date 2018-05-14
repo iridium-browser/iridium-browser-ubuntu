@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -60,7 +61,7 @@ Builder base class.
       commit_label: Commit label used for build archive path naming.
 
     Returns:
-      Path to build to deploy.
+      Path to build to deploy. None if the commit fails to build.
     """
 
   def Deploy(self, remote, build_to_deploy, commit_label):
@@ -70,7 +71,14 @@ Builder base class.
       remote: DUT to deploy (refer lib.commandline.Device).
       build_to_deploy: Path to build to deploy.
       commit_label: Commit label used for logging.
+
+    Returns:
+      True if it deploys successfully. False otherwise.
     """
 
-  def SyncToHead(self):
-    """Syncs the repo to origin/master."""
+  def SyncToHead(self, fetch_tags=False):
+    """Syncs the repo to origin/master.
+
+    Args:
+      fetch_tags: if set, also fetch tags.
+    """

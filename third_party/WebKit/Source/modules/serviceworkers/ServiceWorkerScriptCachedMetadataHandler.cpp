@@ -22,9 +22,9 @@ ServiceWorkerScriptCachedMetadataHandler::
 }
 
 ServiceWorkerScriptCachedMetadataHandler::
-    ~ServiceWorkerScriptCachedMetadataHandler() {}
+    ~ServiceWorkerScriptCachedMetadataHandler() = default;
 
-DEFINE_TRACE(ServiceWorkerScriptCachedMetadataHandler) {
+void ServiceWorkerScriptCachedMetadataHandler::Trace(blink::Visitor* visitor) {
   visitor->Trace(worker_global_scope_);
   CachedMetadataHandler::Trace(visitor);
 }
@@ -52,7 +52,7 @@ void ServiceWorkerScriptCachedMetadataHandler::ClearCachedMetadata(
       ->ClearCachedMetadata(script_url_);
 }
 
-RefPtr<CachedMetadata>
+scoped_refptr<CachedMetadata>
 ServiceWorkerScriptCachedMetadataHandler::GetCachedMetadata(
     uint32_t data_type_id) const {
   if (!cached_metadata_ || cached_metadata_->DataTypeID() != data_type_id)
@@ -62,6 +62,11 @@ ServiceWorkerScriptCachedMetadataHandler::GetCachedMetadata(
 
 String ServiceWorkerScriptCachedMetadataHandler::Encoding() const {
   return g_empty_string;
+}
+
+bool ServiceWorkerScriptCachedMetadataHandler::IsServedFromCacheStorage()
+    const {
+  return false;
 }
 
 }  // namespace blink

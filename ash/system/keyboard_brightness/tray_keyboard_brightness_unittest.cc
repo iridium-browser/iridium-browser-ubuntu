@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "ash/shell.h"
-#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
@@ -17,8 +16,8 @@ namespace ash {
 
 class TrayKeyboardBrightnessTest : public AshTestBase {
  public:
-  TrayKeyboardBrightnessTest() {}
-  ~TrayKeyboardBrightnessTest() override {}
+  TrayKeyboardBrightnessTest() = default;
+  ~TrayKeyboardBrightnessTest() override = default;
 
  protected:
   views::View* CreateDetailedView() {

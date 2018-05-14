@@ -25,15 +25,16 @@
 
 #include "core/layout/LayoutTreeAsText.h"
 
-#include "core/HTMLNames.h"
-#include "core/css/StylePropertySet.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/dom/Document.h"
 #include "core/dom/PseudoElement.h"
 #include "core/editing/FrameSelection.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLElement.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutDetailsMarker.h"
 #include "core/layout/LayoutEmbeddedContent.h"
@@ -43,10 +44,10 @@
 #include "core/layout/LayoutListMarker.h"
 #include "core/layout/LayoutTableCell.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/api/LayoutViewItem.h"
-#include "core/layout/compositing/CompositedLayerMapping.h"
 #include "core/layout/line/InlineTextBox.h"
-#include "core/layout/svg/LayoutSVGGradientStop.h"
+#include "core/layout/ng/inline/ng_inline_fragment_traversal.h"
+#include "core/layout/ng/inline/ng_text_fragment.h"
+#include "core/layout/ng/list/layout_ng_list_item.h"
 #include "core/layout/svg/LayoutSVGImage.h"
 #include "core/layout/svg/LayoutSVGInline.h"
 #include "core/layout/svg/LayoutSVGInlineText.h"
@@ -56,6 +57,7 @@
 #include "core/layout/svg/SVGLayoutTreeAsText.h"
 #include "core/page/PrintContext.h"
 #include "core/paint/PaintLayer.h"
+#include "core/paint/compositing/CompositedLayerMapping.h"
 #include "platform/LayoutUnit.h"
 #include "platform/wtf/HexNumber.h"
 #include "platform/wtf/Vector.h"
@@ -170,27 +172,28 @@ void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
                 ToLayoutFileUploadControl(&o)->FileTextValue());
 
     if (o.Parent()) {
-      Color color = o.ResolveColor(CSSPropertyColor);
-      if (o.Parent()->ResolveColor(CSSPropertyColor) != color)
+      Color color = o.ResolveColor(GetCSSPropertyColor());
+      if (o.Parent()->ResolveColor(GetCSSPropertyColor()) != color)
         ts << " [color=" << color << "]";
 
       // Do not dump invalid or transparent backgrounds, since that is the
       // default.
-      Color background_color = o.ResolveColor(CSSPropertyBackgroundColor);
-      if (o.Parent()->ResolveColor(CSSPropertyBackgroundColor) !=
+      Color background_color = o.ResolveColor(GetCSSPropertyBackgroundColor());
+      if (o.Parent()->ResolveColor(GetCSSPropertyBackgroundColor()) !=
               background_color &&
           background_color.Rgb())
         ts << " [bgcolor=" << background_color << "]";
 
-      Color text_fill_color = o.ResolveColor(CSSPropertyWebkitTextFillColor);
-      if (o.Parent()->ResolveColor(CSSPropertyWebkitTextFillColor) !=
+      Color text_fill_color =
+          o.ResolveColor(GetCSSPropertyWebkitTextFillColor());
+      if (o.Parent()->ResolveColor(GetCSSPropertyWebkitTextFillColor()) !=
               text_fill_color &&
           text_fill_color != color && text_fill_color.Rgb())
         ts << " [textFillColor=" << text_fill_color << "]";
 
       Color text_stroke_color =
-          o.ResolveColor(CSSPropertyWebkitTextStrokeColor);
-      if (o.Parent()->ResolveColor(CSSPropertyWebkitTextStrokeColor) !=
+          o.ResolveColor(GetCSSPropertyWebkitTextStrokeColor());
+      if (o.Parent()->ResolveColor(GetCSSPropertyWebkitTextStrokeColor()) !=
               text_stroke_color &&
           text_stroke_color != color && text_stroke_color.Rgb())
         ts << " [textStrokeColor=" << text_stroke_color << "]";
@@ -215,7 +218,7 @@ void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
       } else {
         ts << " (" << box.BorderTop() << "px ";
         PrintBorderStyle(ts, o.Style()->BorderTopStyle());
-        ts << o.ResolveColor(CSSPropertyBorderTopColor) << ")";
+        ts << o.ResolveColor(GetCSSPropertyBorderTopColor()) << ")";
       }
 
       if (!o.Style()->BorderRightEquals(prev_border)) {
@@ -225,7 +228,7 @@ void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
         } else {
           ts << " (" << box.BorderRight() << "px ";
           PrintBorderStyle(ts, o.Style()->BorderRightStyle());
-          ts << o.ResolveColor(CSSPropertyBorderRightColor) << ")";
+          ts << o.ResolveColor(GetCSSPropertyBorderRightColor()) << ")";
         }
       }
 
@@ -236,7 +239,7 @@ void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
         } else {
           ts << " (" << box.BorderBottom() << "px ";
           PrintBorderStyle(ts, o.Style()->BorderBottomStyle());
-          ts << o.ResolveColor(CSSPropertyBorderBottomColor) << ")";
+          ts << o.ResolveColor(GetCSSPropertyBorderBottomColor()) << ")";
         }
       }
 
@@ -247,7 +250,7 @@ void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
         } else {
           ts << " (" << box.BorderLeft() << "px ";
           PrintBorderStyle(ts, o.Style()->BorderLeftStyle());
-          ts << o.ResolveColor(CSSPropertyBorderLeftColor) << ")";
+          ts << o.ResolveColor(GetCSSPropertyBorderLeftColor()) << ")";
         }
       }
 
@@ -258,7 +261,7 @@ void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
   if (o.IsTableCell()) {
     const LayoutTableCell& c = ToLayoutTableCell(o);
     ts << " [r=" << c.RowIndex() << " c=" << c.AbsoluteColumnIndex()
-       << " rs=" << c.RowSpan() << " cs=" << c.ColSpan() << "]";
+       << " rs=" << c.ResolvedRowSpan() << " cs=" << c.ColSpan() << "]";
   }
 
   if (o.IsDetailsMarker()) {
@@ -442,16 +445,58 @@ static void WriteTextRun(TextStream& ts,
   ts << "\n";
 }
 
+static void WriteTextFragment(TextStream& ts,
+                              const NGPhysicalFragment& physical_fragment,
+                              NGPhysicalOffset offset_to_container_box) {
+  if (!physical_fragment.IsText())
+    return;
+  const NGPhysicalTextFragment& physical_text_fragment =
+      ToNGPhysicalTextFragment(physical_fragment);
+  NGTextFragment fragment(physical_fragment.Style().GetWritingMode(),
+                          physical_text_fragment);
+  // See WriteTextRun() for why we convert to int.
+  int x = offset_to_container_box.left.ToInt();
+  int y = offset_to_container_box.top.ToInt();
+  int logical_width =
+      (offset_to_container_box.left + fragment.InlineSize()).Ceil() - x;
+  ts << "text run at (" << x << "," << y << ") width " << logical_width;
+  ts << ": "
+     << QuoteAndEscapeNonPrintables(physical_text_fragment.Text().ToString());
+  ts << "\n";
+}
+
+static void WritePaintProperties(TextStream& ts,
+                                 const LayoutObject& o,
+                                 int indent) {
+  bool has_fragments = o.FirstFragment().NextFragment();
+  if (has_fragments) {
+    WriteIndent(ts, indent);
+    ts << "fragments:\n";
+  }
+  int fragment_index = 0;
+  for (const auto *fragment = &o.FirstFragment(); fragment;
+       fragment = fragment->NextFragment(), ++fragment_index) {
+    WriteIndent(ts, indent);
+    if (has_fragments)
+      ts << " " << fragment_index << ":";
+    ts << " paint_offset=(" << fragment->PaintOffset().ToString()
+       << ") visual_rect=(" << fragment->VisualRect().ToString() << ")";
+    if (fragment->HasLocalBorderBoxProperties()) {
+      // To know where they point into the paint property tree, you can dump
+      // the tree using ShowAllPropertyTrees(frame_view).
+      ts << " state=(" << fragment->LocalBorderBoxProperties().ToString()
+         << ")";
+    }
+    ts << "\n";
+  }
+}
+
 void Write(TextStream& ts,
            const LayoutObject& o,
            int indent,
            LayoutAsTextBehavior behavior) {
   if (o.IsSVGShape()) {
     Write(ts, ToLayoutSVGShape(o), indent);
-    return;
-  }
-  if (o.IsSVGGradientStop()) {
-    WriteSVGGradientStop(ts, ToLayoutSVGGradientStop(o), indent);
     return;
   }
   if (o.IsSVGResourceContainer()) {
@@ -488,16 +533,29 @@ void Write(TextStream& ts,
   LayoutTreeAsText::WriteLayoutObject(ts, o, behavior);
   ts << "\n";
 
+  if (behavior & kLayoutAsTextShowPaintProperties) {
+    WritePaintProperties(ts, o, indent + 1);
+  }
+
   if ((behavior & kLayoutAsTextShowLineTrees) && o.IsLayoutBlockFlow()) {
     LayoutTreeAsText::WriteLineBoxTree(ts, ToLayoutBlockFlow(o), indent + 1);
   }
 
   if (o.IsText() && !o.IsBR()) {
     const LayoutText& text = ToLayoutText(o);
-    for (InlineTextBox* box = text.FirstTextBox(); box;
-         box = box->NextTextBox()) {
-      WriteIndent(ts, indent + 1);
-      WriteTextRun(ts, text, *box);
+    if (const NGPhysicalBoxFragment* box_fragment =
+            text.EnclosingBlockFlowFragment()) {
+      for (const auto& child :
+           NGInlineFragmentTraversal::SelfFragmentsOf(*box_fragment, &text)) {
+        WriteIndent(ts, indent + 1);
+        WriteTextFragment(ts, *child.fragment, child.offset_to_container_box);
+      }
+    } else {
+      for (InlineTextBox* box = text.FirstTextBox(); box;
+           box = box->NextTextBox()) {
+        WriteIndent(ts, indent + 1);
+        WriteTextRun(ts, text, *box);
+      }
     }
   }
 
@@ -509,15 +567,15 @@ void Write(TextStream& ts,
   }
 
   if (o.IsLayoutEmbeddedContent()) {
-    LocalFrameView* frame_view = ToLayoutEmbeddedContent(o).ChildFrameView();
-    if (frame_view) {
-      LayoutViewItem root_item = frame_view->GetLayoutViewItem();
-      if (!root_item.IsNull()) {
-        root_item.UpdateStyleAndLayout();
-        PaintLayer* layer = root_item.Layer();
-        if (layer)
-          LayoutTreeAsText::WriteLayers(ts, layer, layer, layer->Rect(),
-                                        indent + 1, behavior);
+    FrameView* frame_view = ToLayoutEmbeddedContent(o).ChildFrameView();
+    if (frame_view && frame_view->IsLocalFrameView()) {
+      if (auto* layout_view = ToLocalFrameView(frame_view)->GetLayoutView()) {
+        layout_view->GetDocument().UpdateStyleAndLayout();
+        if (auto* layer = layout_view->Layer()) {
+          LayoutTreeAsText::WriteLayers(
+              ts, layer, layer, layer->RectIgnoringNeedsPositionUpdate(),
+              indent + 1, behavior);
+        }
       }
     }
   }
@@ -657,10 +715,10 @@ void LayoutTreeAsText::WriteLayers(TextStream& ts,
   // Calculate the clip rects we should use.
   LayoutRect layer_bounds;
   ClipRect damage_rect, clip_rect_to_apply;
-  layer->Clipper(PaintLayer::kDoNotUseGeometryMapper)
+  layer->Clipper(PaintLayer::kUseGeometryMapper)
       .CalculateRects(ClipRectsContext(root_layer, kUncachedClipRects),
-                      paint_rect, layer_bounds, damage_rect,
-                      clip_rect_to_apply);
+                      &layer->GetLayoutObject().FirstFragment(), paint_rect,
+                      layer_bounds, damage_rect, clip_rect_to_apply);
 
   // Ensure our lists are up to date.
   layer->StackingNode()->UpdateLayerListsIfNeeded();
@@ -676,6 +734,13 @@ void LayoutTreeAsText::WriteLayers(TextStream& ts,
   if (layer->GetLayoutObject().IsLayoutEmbeddedContent() &&
       ToLayoutEmbeddedContent(layer->GetLayoutObject()).IsThrottledFrameView())
     should_paint = false;
+
+#if DCHECK_IS_ON()
+  if (layer->NeedsPositionUpdate()) {
+    WriteIndent(ts, indent);
+    ts << " NEEDS POSITION UPDATE\n";
+  }
+#endif
 
   Vector<PaintLayerStackingNode*>* neg_list =
       layer->StackingNode()->NegZOrderList();
@@ -776,8 +841,8 @@ static void WriteSelection(TextStream& ts, const LayoutObject* o) {
   if (!frame)
     return;
 
-  VisibleSelection selection =
-      frame->Selection().ComputeVisibleSelectionInDOMTreeDeprecated();
+  const VisibleSelection& selection =
+      frame->Selection().ComputeVisibleSelectionInDOMTree();
   if (selection.IsCaret()) {
     ts << "caret: position " << selection.Start().ComputeEditingOffset()
        << " of " << NodePosition(selection.Start().AnchorNode());
@@ -801,8 +866,9 @@ static String ExternalRepresentation(LayoutBox* layout_object,
     return ts.Release();
 
   PaintLayer* layer = layout_object->Layer();
-  LayoutTreeAsText::WriteLayers(ts, layer, layer, layer->Rect(), 0, behavior,
-                                marked_layer);
+  LayoutTreeAsText::WriteLayers(ts, layer, layer,
+                                layer->RectIgnoringNeedsPositionUpdate(), 0,
+                                behavior, marked_layer);
   WriteSelection(ts, layout_object);
   return ts.Release();
 }
@@ -810,18 +876,26 @@ static String ExternalRepresentation(LayoutBox* layout_object,
 String ExternalRepresentation(LocalFrame* frame,
                               LayoutAsTextBehavior behavior,
                               const PaintLayer* marked_layer) {
-  if (!(behavior & kLayoutAsTextDontUpdateLayout))
-    frame->GetDocument()->UpdateStyleAndLayout();
+  if (!(behavior & kLayoutAsTextDontUpdateLayout)) {
+    bool success = frame->View()->UpdateLifecycleToPrePaintClean();
+    DCHECK(success);
+  };
 
   LayoutObject* layout_object = frame->ContentLayoutObject();
   if (!layout_object || !layout_object->IsBox())
     return String();
+  LayoutBox* layout_box = ToLayoutBox(layout_object);
 
-  PrintContext print_context(frame);
+  PrintContext print_context(frame, /*use_printing_layout=*/true);
   bool is_text_printing_mode = !!(behavior & kLayoutAsTextPrintingMode);
   if (is_text_printing_mode) {
-    FloatSize size(ToLayoutBox(layout_object)->Size());
-    print_context.BeginPrintMode(size.Width(), size.Height());
+    print_context.BeginPrintMode(layout_box->ClientWidth(),
+                                 layout_box->ClientHeight());
+
+    // The lifecycle needs to be run again after changing printing mode,
+    // to account for any style updates due to media query change.
+    if (!(behavior & kLayoutAsTextDontUpdateLayout))
+      frame->View()->UpdateLifecyclePhasesForPrinting();
   }
 
   String representation = ExternalRepresentation(ToLayoutBox(layout_object),
@@ -878,10 +952,13 @@ String MarkerTextForListItem(Element* element) {
   element->GetDocument().UpdateStyleAndLayout();
 
   LayoutObject* layout_object = element->GetLayoutObject();
-  if (!layout_object || !layout_object->IsListItem())
-    return String();
-
-  return ToLayoutListItem(layout_object)->MarkerText();
+  if (layout_object) {
+    if (layout_object->IsListItem())
+      return ToLayoutListItem(layout_object)->MarkerText();
+    if (layout_object->IsLayoutNGListItem())
+      return ToLayoutNGListItem(layout_object)->MarkerTextWithoutSuffix();
+  }
+  return String();
 }
 
 }  // namespace blink

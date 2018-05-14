@@ -9,14 +9,13 @@
 #include "ash/metrics/user_metrics_action.h"
 #include "ash/metrics/user_metrics_recorder.h"
 #include "ash/resources/grit/ash_resources.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/system/system_notifier.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/notification.h"
+#include "ui/message_center/public/cpp/notification.h"
 
 using message_center::Notification;
 
@@ -24,6 +23,7 @@ namespace ash {
 namespace {
 
 const char kScreenCaptureNotificationId[] = "chrome://screen/capture";
+const char kNotifierScreenCapture[] = "ash.screen-capture";
 
 }  // namespace
 
@@ -49,15 +49,19 @@ void ScreenCaptureTrayItem::CreateOrUpdateNotification() {
   message_center::RichNotificationData data;
   data.buttons.push_back(message_center::ButtonInfo(
       l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SCREEN_CAPTURE_STOP)));
-  ui::ResourceBundle& resource_bundle = ui::ResourceBundle::GetSharedInstance();
-  std::unique_ptr<Notification> notification(new Notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE, kScreenCaptureNotificationId,
-      screen_capture_status_, base::string16() /* body is blank */,
-      resource_bundle.GetImageNamed(IDR_AURA_UBER_TRAY_SCREENSHARE_DARK),
-      base::string16() /* display_source */, GURL(),
-      message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
-                                 system_notifier::kNotifierScreenCapture),
-      data, new tray::ScreenNotificationDelegate(this)));
+  std::unique_ptr<Notification> notification =
+      Notification::CreateSystemNotification(
+          message_center::NOTIFICATION_TYPE_SIMPLE,
+          kScreenCaptureNotificationId,
+          l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SCREEN_SHARE_TITLE),
+          screen_capture_status_, gfx::Image(),
+          base::string16() /* display_source */, GURL(),
+          message_center::NotifierId(
+              message_center::NotifierId::SYSTEM_COMPONENT,
+              kNotifierScreenCapture),
+          data, new tray::ScreenNotificationDelegate(this),
+          kNotificationScreenshareIcon,
+          message_center::SystemNotificationWarningLevel::NORMAL);
   notification->SetSystemPriority();
   message_center::MessageCenter::Get()->AddNotification(
       std::move(notification));

@@ -4,22 +4,25 @@
 
 #import "ios/chrome/browser/ui/tools_menu/tools_menu_view_controller.h"
 
-#import "base/mac/scoped_nsobject.h"
 #include "ios/chrome/browser/experimental_flags.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
+#import "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
+#import "ios/chrome/browser/ui/tools_menu/tools_menu_configuration.h"
 #import "ios/chrome/browser/ui/tools_menu/tools_menu_view_item.h"
-#import "ios/shared/chrome/browser/ui/tools_menu/tools_menu_configuration.h"
 #include "ios/web/public/user_agent.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 class ToolsMenuViewControllerTest : public PlatformTest {
  protected:
   void SetUp() override {
     PlatformTest::SetUp();
-    configuration_.reset(
-        [[ToolsMenuConfiguration alloc] initWithDisplayView:nil]);
-    controller_.reset([[ToolsMenuViewController alloc] init]);
+    configuration_ = [[ToolsMenuConfiguration alloc] initWithDisplayView:nil
+                                                      baseViewController:nil];
+    controller_ = [[ToolsMenuViewController alloc] init];
   }
 
   // Returns tools menu view item by IDC value, null if not exit.
@@ -32,8 +35,8 @@ class ToolsMenuViewControllerTest : public PlatformTest {
     return nullptr;
   }
 
-  base::scoped_nsobject<ToolsMenuConfiguration> configuration_;
-  base::scoped_nsobject<ToolsMenuViewController> controller_;
+  ToolsMenuConfiguration* configuration_;
+  ToolsMenuViewController* controller_;
 };
 
 // Tests that "Request Desktop Site" is visible and enabled, and
@@ -41,15 +44,15 @@ class ToolsMenuViewControllerTest : public PlatformTest {
 // whose user agent type is NONE.
 TEST_F(ToolsMenuViewControllerTest, TestUserAgentTypeNONE) {
   [configuration_ setUserAgentType:web::UserAgentType::NONE];
-  [controller_ initializeMenuWithConfiguration:configuration_.get()];
+  [controller_ initializeMenuWithConfiguration:configuration_];
 
   ToolsMenuViewItem* desktop_item =
-      GetToolsMenuViewItemWithTag(IDC_REQUEST_DESKTOP_SITE);
+      GetToolsMenuViewItemWithTag(TOOLS_REQUEST_DESKTOP_SITE);
   ASSERT_TRUE(desktop_item);
   EXPECT_FALSE(desktop_item.active);
 
   ToolsMenuViewItem* mobile_item =
-      GetToolsMenuViewItemWithTag(IDC_REQUEST_MOBILE_SITE);
+      GetToolsMenuViewItemWithTag(TOOLS_REQUEST_MOBILE_SITE);
   EXPECT_FALSE(mobile_item);
 }
 
@@ -58,15 +61,15 @@ TEST_F(ToolsMenuViewControllerTest, TestUserAgentTypeNONE) {
 // uses MOBILE user agent.
 TEST_F(ToolsMenuViewControllerTest, TestUserAgentTypeMOBILE) {
   [configuration_ setUserAgentType:web::UserAgentType::MOBILE];
-  [controller_ initializeMenuWithConfiguration:configuration_.get()];
+  [controller_ initializeMenuWithConfiguration:configuration_];
 
   ToolsMenuViewItem* desktop_item =
-      GetToolsMenuViewItemWithTag(IDC_REQUEST_DESKTOP_SITE);
+      GetToolsMenuViewItemWithTag(TOOLS_REQUEST_DESKTOP_SITE);
   ASSERT_TRUE(desktop_item);
   EXPECT_TRUE(desktop_item.active);
 
   ToolsMenuViewItem* mobile_item =
-      GetToolsMenuViewItemWithTag(IDC_REQUEST_MOBILE_SITE);
+      GetToolsMenuViewItemWithTag(TOOLS_REQUEST_MOBILE_SITE);
   EXPECT_FALSE(mobile_item);
 }
 
@@ -77,20 +80,14 @@ TEST_F(ToolsMenuViewControllerTest, TestUserAgentTypeMOBILE) {
 // is invisible.
 TEST_F(ToolsMenuViewControllerTest, TestUserAgentTypeDESKTOP) {
   [configuration_ setUserAgentType:web::UserAgentType::DESKTOP];
-  [controller_ initializeMenuWithConfiguration:configuration_.get()];
+  [controller_ initializeMenuWithConfiguration:configuration_];
 
   ToolsMenuViewItem* desktop_item =
-      GetToolsMenuViewItemWithTag(IDC_REQUEST_DESKTOP_SITE);
+      GetToolsMenuViewItemWithTag(TOOLS_REQUEST_DESKTOP_SITE);
   ToolsMenuViewItem* mobile_item =
-      GetToolsMenuViewItemWithTag(IDC_REQUEST_MOBILE_SITE);
+      GetToolsMenuViewItemWithTag(TOOLS_REQUEST_MOBILE_SITE);
 
-  if (experimental_flags::IsRequestMobileSiteEnabled()) {
-    EXPECT_FALSE(desktop_item);
-    ASSERT_TRUE(mobile_item);
-    EXPECT_TRUE(mobile_item.active);
-  } else {
-    ASSERT_TRUE(desktop_item);
-    EXPECT_FALSE(desktop_item.active);
-    EXPECT_FALSE(mobile_item);
-  }
+  EXPECT_FALSE(desktop_item);
+  ASSERT_TRUE(mobile_item);
+  EXPECT_TRUE(mobile_item.active);
 }

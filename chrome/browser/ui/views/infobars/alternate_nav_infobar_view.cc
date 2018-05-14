@@ -9,8 +9,9 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/omnibox/alternate_nav_infobar_delegate.h"
+#include "chrome/browser/ui/views_mode_controller.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/views/controls/label.h"
@@ -22,7 +23,12 @@
 // static
 std::unique_ptr<infobars::InfoBar> AlternateNavInfoBarDelegate::CreateInfoBar(
     std::unique_ptr<AlternateNavInfoBarDelegate> delegate) {
-  return base::MakeUnique<AlternateNavInfoBarView>(std::move(delegate));
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return CreateInfoBarCocoa(std::move(delegate));
+  }
+#endif
+  return std::make_unique<AlternateNavInfoBarView>(std::move(delegate));
 }
 
 

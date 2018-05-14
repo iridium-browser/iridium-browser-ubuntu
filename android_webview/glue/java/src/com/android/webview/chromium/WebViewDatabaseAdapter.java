@@ -4,11 +4,11 @@
 
 package com.android.webview.chromium;
 
+import android.os.Build;
 import android.webkit.WebViewDatabase;
 
 import org.chromium.android_webview.AwFormDatabase;
 import org.chromium.android_webview.HttpAuthDatabase;
-import org.chromium.base.BuildInfo;
 import org.chromium.base.ThreadUtils;
 
 import java.util.concurrent.Callable;
@@ -68,7 +68,7 @@ final class WebViewDatabaseAdapter extends WebViewDatabase {
         mHttpAuthDatabase.clearHttpAuthUsernamePassword();
     }
 
-    // TODO(ntfschr): add @Override once the next Android is released (http://crbug.com/616583)
+    @Override
     public void setHttpAuthUsernamePassword(
             final String host, final String realm, final String username, final String password) {
         if (checkNeedsPost()) {
@@ -83,7 +83,7 @@ final class WebViewDatabaseAdapter extends WebViewDatabase {
         mHttpAuthDatabase.setHttpAuthUsernamePassword(host, realm, username, password);
     }
 
-    // TODO(ntfschr): add @Override once the next Android is released (http://crbug.com/616583)
+    @Override
     public String[] getHttpAuthUsernamePassword(final String host, final String realm) {
         if (checkNeedsPost()) {
             return mFactory.runOnUiThreadBlocking(new Callable<String[]>() {
@@ -98,7 +98,7 @@ final class WebViewDatabaseAdapter extends WebViewDatabase {
 
     @Override
     public boolean hasFormData() {
-        if (BuildInfo.isAtLeastO()) return false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) return false;
 
         if (checkNeedsPost()) {
             return mFactory.runOnUiThreadBlocking(new Callable<Boolean>() {
@@ -114,7 +114,7 @@ final class WebViewDatabaseAdapter extends WebViewDatabase {
 
     @Override
     public void clearFormData() {
-        if (BuildInfo.isAtLeastO()) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) return;
 
         if (checkNeedsPost()) {
             mFactory.addTask(new Runnable() {

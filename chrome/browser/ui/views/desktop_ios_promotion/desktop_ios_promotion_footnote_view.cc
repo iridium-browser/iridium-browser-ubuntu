@@ -6,11 +6,14 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/strings/string16.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/desktop_ios_promotion/desktop_ios_promotion_controller.h"
 #include "chrome/browser/ui/desktop_ios_promotion/desktop_ios_promotion_footnote_delegate.h"
 #include "chrome/browser/ui/desktop_ios_promotion/desktop_ios_promotion_util.h"
+#include "chrome/browser/ui/views/harmony/chrome_typography.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -23,7 +26,7 @@ DesktopIOSPromotionFootnoteView::DesktopIOSPromotionFootnoteView(
     Profile* profile,
     DesktopIOSPromotionFootnoteDelegate* delegate)
     : StyledLabel(base::string16(), this),
-      promotion_controller_(base::MakeUnique<DesktopIOSPromotionController>(
+      promotion_controller_(std::make_unique<DesktopIOSPromotionController>(
           profile,
           desktop_ios_promotion::PromotionEntryPoint::BOOKMARKS_FOOTNOTE)),
       delegate_(delegate) {
@@ -34,13 +37,11 @@ DesktopIOSPromotionFootnoteView::DesktopIOSPromotionFootnoteView(
       IDS_BOOKMARK_FOOTNOTE_DESKTOP_TO_IOS_PROMO_MESSAGE, link_text, &offset);
   SetText(promo_text);
 
-  views::StyledLabel::RangeStyleInfo link_style =
-      views::StyledLabel::RangeStyleInfo::CreateForLink();
-  link_style.font_style = gfx::Font::NORMAL;
-  AddStyleRange(gfx::Range(offset, offset + link_text.length()), link_style);
+  AddStyleRange(gfx::Range(offset, offset + link_text.length()),
+                views::StyledLabel::RangeStyleInfo::CreateForLink());
 
   views::StyledLabel::RangeStyleInfo promo_style;
-  promo_style.color = SkColorSetRGB(102, 102, 102);
+  promo_style.text_style = STYLE_SECONDARY;
   gfx::Range before_link_range(0, offset);
   if (!before_link_range.is_empty())
     AddStyleRange(before_link_range, promo_style);

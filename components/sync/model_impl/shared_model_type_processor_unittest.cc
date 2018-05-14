@@ -12,13 +12,10 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
-#include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "components/sync/base/time.h"
 #include "components/sync/engine/activation_context.h"
-#include "components/sync/engine/commit_queue.h"
 #include "components/sync/model/fake_model_type_sync_bridge.h"
 #include "components/sync/test/engine/mock_model_type_worker.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -61,8 +58,13 @@ std::unique_ptr<EntityData> GenerateEntityData(const std::string& key,
 
 std::unique_ptr<ModelTypeChangeProcessor>
 CreateProcessor(bool commit_only, ModelType type, ModelTypeSyncBridge* bridge) {
-  return base::MakeUnique<SharedModelTypeProcessor>(
+  return std::make_unique<SharedModelTypeProcessor>(
       type, bridge, base::RepeatingClosure(), commit_only);
+}
+
+void CaptureCommitRequest(CommitRequestDataList* dst,
+                          CommitRequestDataList&& src) {
+  *dst = std::move(src);
 }
 
 class TestModelTypeSyncBridge : public FakeModelTypeSyncBridge {
@@ -179,7 +181,7 @@ class TestModelTypeSyncBridge : public FakeModelTypeSyncBridge {
 class SharedModelTypeProcessorTest : public ::testing::Test {
  public:
   SharedModelTypeProcessorTest()
-      : bridge_(base::MakeUnique<TestModelTypeSyncBridge>(false)) {}
+      : bridge_(std::make_unique<TestModelTypeSyncBridge>(false)) {}
 
   ~SharedModelTypeProcessorTest() override { CheckPostConditions(); }
 
@@ -225,10 +227,20 @@ class SharedModelTypeProcessorTest : public ::testing::Test {
     return specifics;
   }
 
+  void WriteItemAndAck(const std::string& key,
+                       std::unique_ptr<EntityData> entity_data) {
+    bridge()->WriteItem(key, std::move(entity_data));
+    worker()->VerifyPendingCommits(
+        {FakeModelTypeSyncBridge::TagHashFromKey(key)});
+    worker()->AckOnePendingCommit();
+    EXPECT_EQ(0U, worker()->GetNumPendingCommits());
+    return;
+  }
+
   void ResetState(bool keep_db, bool commit_only = false) {
-    bridge_ = keep_db ? base::MakeUnique<TestModelTypeSyncBridge>(
+    bridge_ = keep_db ? std::make_unique<TestModelTypeSyncBridge>(
                             std::move(bridge_), commit_only)
-                      : base::MakeUnique<TestModelTypeSyncBridge>(commit_only);
+                      : std::make_unique<TestModelTypeSyncBridge>(commit_only);
     worker_ = nullptr;
     CheckPostConditions();
   }
@@ -388,7 +400,7 @@ TEST_F(SharedModelTypeProcessorTest, MergeError) {
 
 // Test that errors before it's called are passed to |start_callback| correctly.
 TEST_F(SharedModelTypeProcessorTest, StartErrors) {
-  type_processor()->ReportError(FROM_HERE, "boom");
+  type_processor()->ReportError({FROM_HERE, "boom"});
   ExpectError();
   OnSyncStarting();
 
@@ -396,7 +408,7 @@ TEST_F(SharedModelTypeProcessorTest, StartErrors) {
   ResetState(false);
   OnSyncStarting();
   ExpectError();
-  type_processor()->ReportError(FROM_HERE, "boom");
+  type_processor()->ReportError({FROM_HERE, "boom"});
 
   // Test an error loading pending data.
   ResetStateWriteItem(kKey1, kValue1);
@@ -407,7 +419,7 @@ TEST_F(SharedModelTypeProcessorTest, StartErrors) {
 
   // Test an error prior to metadata load.
   ResetState(false);
-  type_processor()->ReportError(FROM_HERE, "boom");
+  type_processor()->ReportError({FROM_HERE, "boom"});
   ExpectError();
   OnSyncStarting();
   ModelReadyToSync();
@@ -415,7 +427,7 @@ TEST_F(SharedModelTypeProcessorTest, StartErrors) {
   // Test an error prior to pending data load.
   ResetStateWriteItem(kKey1, kValue1);
   InitializeToMetadataLoaded();
-  type_processor()->ReportError(FROM_HERE, "boom");
+  type_processor()->ReportError({FROM_HERE, "boom"});
   ExpectError();
   OnSyncStarting();
   OnPendingCommitDataLoaded();
@@ -702,10 +714,10 @@ TEST_F(SharedModelTypeProcessorTest, CommitOnlySimple) {
   InitializeToReadyState();
 
   bridge()->WriteItem(kKey1, kValue1);
+  worker()->VerifyPendingCommits({kHash1});
   EXPECT_EQ(1U, db().data_count());
   EXPECT_EQ(1U, db().metadata_count());
 
-  worker()->VerifyPendingCommits({kHash1});
   worker()->AckOnePendingCommit();
   EXPECT_EQ(0U, db().data_count());
   EXPECT_EQ(0U, db().metadata_count());
@@ -732,8 +744,10 @@ TEST_F(SharedModelTypeProcessorTest, CommitOnlyUnsyncedChanges) {
   EXPECT_EQ(1U, db().data_count());
   EXPECT_EQ(1U, db().metadata_count());
 
-  worker()->AckOnePendingCommit();
-  worker()->VerifyPendingCommits(std::vector<std::string>());
+  // The version field isn't meaningful on commit only types, so force a value
+  // that isn't incremented to verify everything still works.
+  worker()->AckOnePendingCommit(0 /* version_offset */);
+  worker()->VerifyPendingCommits({});
   EXPECT_EQ(0U, db().data_count());
   EXPECT_EQ(0U, db().metadata_count());
 }
@@ -757,7 +771,7 @@ TEST_F(SharedModelTypeProcessorTest, LocalUpdateItemWithOverrides) {
   InitializeToReadyState();
   EXPECT_EQ(0U, worker()->GetNumPendingCommits());
 
-  std::unique_ptr<EntityData> entity_data = base::MakeUnique<EntityData>();
+  std::unique_ptr<EntityData> entity_data = std::make_unique<EntityData>();
   entity_data->specifics.mutable_preference()->set_name(kKey1);
   entity_data->specifics.mutable_preference()->set_value(kValue1);
 
@@ -780,7 +794,7 @@ TEST_F(SharedModelTypeProcessorTest, LocalUpdateItemWithOverrides) {
   EXPECT_EQ(kId1, metadata_v1.server_id());
   EXPECT_EQ(metadata_v1.client_tag_hash(), out_entity1.client_tag_hash);
 
-  entity_data = base::MakeUnique<EntityData>();
+  entity_data = std::make_unique<EntityData>();
   // This is a sketchy move here, changing the name will change the generated
   // storage key and client tag values.
   entity_data->specifics.mutable_preference()->set_name(kKey2);
@@ -973,6 +987,16 @@ TEST_F(SharedModelTypeProcessorTest, LocalDeleteItem) {
   EXPECT_EQ(3, metadata_v3.server_version());
 }
 
+// Tests that item created and deleted before sync cycle doesn't get committed.
+TEST_F(SharedModelTypeProcessorTest, LocalDeleteItemUncommitted) {
+  InitializeToMetadataLoaded();
+  bridge()->WriteItem(kKey1, kValue1);
+  bridge()->DeleteItem(kKey1);
+
+  OnSyncStarting();
+  EXPECT_EQ(0U, worker()->GetNumPendingCommits());
+}
+
 // Tests creating and deleting an item locally before receiving a commit
 // response, then getting the commit responses.
 TEST_F(SharedModelTypeProcessorTest, LocalDeleteItemInterleaved) {
@@ -1069,6 +1093,41 @@ TEST_F(SharedModelTypeProcessorTest, ServerDeleteUnknown) {
   EXPECT_EQ(0U, db().metadata_count());
   EXPECT_EQ(0U, ProcessorEntityCount());
   EXPECT_EQ(0U, worker()->GetNumPendingCommits());
+}
+
+// Tests that after committing entity fails, processor includes this entity in
+// consecutive commits.
+TEST_F(SharedModelTypeProcessorTest, CommitFailedOnServer) {
+  InitializeToReadyState();
+  bridge()->WriteItem(kKey1, kValue1);
+  worker()->VerifyPendingCommits({kHash1});
+
+  // Entity is sent to server. Processor shouldn't include it in local changes.
+  CommitRequestDataList commit_request;
+  type_processor()->GetLocalChanges(
+      INT_MAX, base::Bind(&CaptureCommitRequest, &commit_request));
+  EXPECT_TRUE(commit_request.empty());
+
+  // Fail commit from worker side indicating this entity was not committed.
+  // Processor should include it in consecutive GetLocalChanges responses.
+  worker()->FailOneCommit();
+  type_processor()->GetLocalChanges(
+      INT_MAX, base::Bind(&CaptureCommitRequest, &commit_request));
+  EXPECT_EQ(1U, commit_request.size());
+  EXPECT_EQ(kHash1, commit_request[0].entity->client_tag_hash);
+}
+
+// Tests that GetLocalChanges honors max_entries parameter.
+TEST_F(SharedModelTypeProcessorTest, LocalChangesPagination) {
+  InitializeToMetadataLoaded();
+  bridge()->WriteItem(kKey1, kValue1);
+  bridge()->WriteItem(kKey2, kValue2);
+
+  // Reqeust at most one intity per batch, ensure that only one was returned.
+  CommitRequestDataList commit_request;
+  type_processor()->GetLocalChanges(
+      1, base::Bind(&CaptureCommitRequest, &commit_request));
+  EXPECT_EQ(1U, commit_request.size());
 }
 
 // Creates two different sync items.
@@ -1521,6 +1580,111 @@ TEST_F(SharedModelTypeProcessorTest, UntrackEntity) {
   EXPECT_FALSE(db().HasMetadata(kHash1));
   EXPECT_EQ(0U, db().metadata_count());
   EXPECT_EQ(0, bridge()->get_storage_key_call_count());
+}
+
+// Tests that SharedModelTypeProcessor can do garbage collection by version.
+// Create 2 entries, one is version 1, another is version 3. Check if sync
+// will delete version 1 entry when server set expired version is 2.
+TEST_F(SharedModelTypeProcessorTest, GarbageCollectionByVersion) {
+  InitializeToReadyState();
+
+  // Create 2 entries, one is version 3, another is version 1.
+  WriteItemAndAck(kKey1, kValue1);
+  worker()->UpdateFromServer(kHash1, GenerateSpecifics(kKey1, kValue2));
+  worker()->UpdateFromServer(kHash1, GenerateSpecifics(kKey1, kValue3));
+  WriteItemAndAck(kKey2, kValue2);
+
+  // Verify entries are created correctly.
+  EXPECT_EQ(3, db().GetMetadata(kKey1).server_version());
+  EXPECT_EQ(1, db().GetMetadata(kKey2).server_version());
+  EXPECT_EQ(2U, ProcessorEntityCount());
+  EXPECT_EQ(2U, db().metadata_count());
+  EXPECT_EQ(2U, db().data_count());
+  EXPECT_EQ(0U, worker()->GetNumPendingCommits());
+
+  // Expired the entries which are older than version 2.
+  sync_pb::GarbageCollectionDirective garbage_collection_directive;
+  garbage_collection_directive.set_version_watermark(2);
+  worker()->UpdateWithGarbageConllection(garbage_collection_directive);
+
+  EXPECT_EQ(1U, ProcessorEntityCount());
+  EXPECT_EQ(1U, db().metadata_count());
+  EXPECT_EQ(2U, db().data_count());
+  EXPECT_EQ(0U, worker()->GetNumPendingCommits());
+}
+
+// Tests that SharedModelTypeProcessor can do garbage collection by age.
+// Create 2 entries, one is 15-days-old, another is 5-days-old. Check if sync
+// will delete 15-days-old entry when server set expired age is 10 days.
+TEST_F(SharedModelTypeProcessorTest, GarbageCollectionByAge) {
+  InitializeToReadyState();
+
+  // Create 2 entries, one is 15-days-old, another is 5-days-old.
+  std::unique_ptr<EntityData> entity_data =
+      bridge()->GenerateEntityData(kKey1, kValue1);
+  entity_data->modification_time =
+      base::Time::Now() - base::TimeDelta::FromDays(15);
+  WriteItemAndAck(kKey1, std::move(entity_data));
+  entity_data = bridge()->GenerateEntityData(kKey2, kValue2);
+  entity_data->modification_time =
+      base::Time::Now() - base::TimeDelta::FromDays(5);
+  WriteItemAndAck(kKey2, std::move(entity_data));
+
+  // Verify entries are created correctly.
+  EXPECT_EQ(2U, ProcessorEntityCount());
+  EXPECT_EQ(2U, db().metadata_count());
+  EXPECT_EQ(2U, db().data_count());
+  EXPECT_EQ(0U, worker()->GetNumPendingCommits());
+
+  // Expired the entries which are older than 10 days.
+  sync_pb::GarbageCollectionDirective garbage_collection_directive;
+  garbage_collection_directive.set_age_watermark_in_days(10);
+  worker()->UpdateWithGarbageConllection(garbage_collection_directive);
+
+  EXPECT_EQ(1U, ProcessorEntityCount());
+  EXPECT_EQ(1U, db().metadata_count());
+  EXPECT_EQ(2U, db().data_count());
+  EXPECT_EQ(0U, worker()->GetNumPendingCommits());
+}
+
+// Tests that SharedModelTypeProcessor can do garbage collection by item limit.
+// Create 3 entries, one is 15-days-old, one is 10-days-old, another is
+// 5-days-old. Check if sync will delete 15-days-old entry when server set
+// limited item is 2 days.
+TEST_F(SharedModelTypeProcessorTest, GarbageCollectionByItemLimit) {
+  InitializeToReadyState();
+
+  // Create 3 entries, one is 15-days-old, one is 10-days-old, another is
+  // 5-days-old.
+  std::unique_ptr<EntityData> entity_data =
+      bridge()->GenerateEntityData(kKey1, kValue1);
+  entity_data->modification_time =
+      base::Time::Now() - base::TimeDelta::FromDays(15);
+  WriteItemAndAck(kKey1, std::move(entity_data));
+  entity_data = bridge()->GenerateEntityData(kKey2, kValue2);
+  entity_data->modification_time =
+      base::Time::Now() - base::TimeDelta::FromDays(5);
+  WriteItemAndAck(kKey2, std::move(entity_data));
+  entity_data = bridge()->GenerateEntityData(kKey3, kValue3);
+  entity_data->modification_time =
+      base::Time::Now() - base::TimeDelta::FromDays(10);
+  WriteItemAndAck(kKey3, std::move(entity_data));
+
+  // Verify entries are created correctly.
+  EXPECT_EQ(3U, ProcessorEntityCount());
+  EXPECT_EQ(3U, db().metadata_count());
+  EXPECT_EQ(3U, db().data_count());
+  EXPECT_EQ(0U, worker()->GetNumPendingCommits());
+
+  // Expired the entries which are older than 10 days.
+  sync_pb::GarbageCollectionDirective garbage_collection_directive;
+  garbage_collection_directive.set_max_number_of_items(2);
+  worker()->UpdateWithGarbageConllection(garbage_collection_directive);
+
+  EXPECT_EQ(2U, ProcessorEntityCount());
+  EXPECT_EQ(2U, db().metadata_count());
+  EXPECT_EQ(3U, db().data_count());
+  EXPECT_EQ(0U, worker()->GetNumPendingCommits());
 }
 
 }  // namespace syncer

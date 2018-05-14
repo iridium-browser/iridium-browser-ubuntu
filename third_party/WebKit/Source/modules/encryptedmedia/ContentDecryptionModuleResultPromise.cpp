@@ -38,7 +38,8 @@ ContentDecryptionModuleResultPromise::ContentDecryptionModuleResultPromise(
     ScriptState* script_state)
     : resolver_(ScriptPromiseResolver::Create(script_state)) {}
 
-ContentDecryptionModuleResultPromise::~ContentDecryptionModuleResultPromise() {}
+ContentDecryptionModuleResultPromise::~ContentDecryptionModuleResultPromise() =
+    default;
 
 void ContentDecryptionModuleResultPromise::Complete() {
   NOTREACHED();
@@ -120,7 +121,7 @@ bool ContentDecryptionModuleResultPromise::IsValidToFulfillPromise() {
   return GetExecutionContext() && !GetExecutionContext()->IsContextDestroyed();
 }
 
-DEFINE_TRACE(ContentDecryptionModuleResultPromise) {
+void ContentDecryptionModuleResultPromise::Trace(blink::Visitor* visitor) {
   visitor->Trace(resolver_);
   ContentDecryptionModuleResult::Trace(visitor);
 }

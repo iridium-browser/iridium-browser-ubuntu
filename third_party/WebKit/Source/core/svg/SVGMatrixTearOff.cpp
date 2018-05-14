@@ -38,19 +38,22 @@
 namespace blink {
 
 SVGMatrixTearOff::SVGMatrixTearOff(const AffineTransform& static_value)
-    : static_value_(static_value), context_transform_(this, nullptr) {}
+    : static_value_(static_value) {}
 
 SVGMatrixTearOff::SVGMatrixTearOff(SVGTransformTearOff* transform)
-    : context_transform_(this, transform) {
+    : context_transform_(transform) {
   DCHECK(transform);
 }
 
-DEFINE_TRACE(SVGMatrixTearOff) {
+void SVGMatrixTearOff::Trace(blink::Visitor* visitor) {
   visitor->Trace(context_transform_);
+  ScriptWrappable::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(SVGMatrixTearOff) {
+void SVGMatrixTearOff::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(context_transform_);
+  ScriptWrappable::TraceWrappers(visitor);
 }
 
 const AffineTransform& SVGMatrixTearOff::Value() const {

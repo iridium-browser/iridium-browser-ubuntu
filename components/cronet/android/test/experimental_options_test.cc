@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/cronet/android/test/experimental_options_test.h"
-
 #include <jni.h>
 
 #include "base/android/jni_android.h"
@@ -41,7 +39,8 @@ void WriteToHostCacheOnNetworkThread(jlong jcontext_adapter,
   CHECK(address.AssignFromIPLiteral(address_string));
   net::AddressList address_list =
       net::AddressList::CreateFromIPAddress(address, 0);
-  net::HostCache::Entry entry(net::OK, address_list);
+  net::HostCache::Entry entry(net::OK, address_list,
+                              net::HostCache::Entry::SOURCE_UNKNOWN);
   cache->Set(key1, entry, base::TimeTicks::Now(),
              base::TimeDelta::FromSeconds(1));
   cache->Set(key2, entry, base::TimeTicks::Now(),
@@ -49,18 +48,15 @@ void WriteToHostCacheOnNetworkThread(jlong jcontext_adapter,
 }
 }  // namespace
 
-static void WriteToHostCache(JNIEnv* env,
-                             const JavaParamRef<jclass>& jcaller,
-                             jlong jcontext_adapter,
-                             const JavaParamRef<jstring>& jaddress) {
+static void JNI_ExperimentalOptionsTest_WriteToHostCache(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& jcaller,
+    jlong jcontext_adapter,
+    const JavaParamRef<jstring>& jaddress) {
   TestUtil::RunAfterContextInit(
       jcontext_adapter,
       base::Bind(&WriteToHostCacheOnNetworkThread, jcontext_adapter,
                  base::android::ConvertJavaStringToUTF8(env, jaddress)));
-}
-
-bool RegisterExperimentalOptionsTest(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace cronet

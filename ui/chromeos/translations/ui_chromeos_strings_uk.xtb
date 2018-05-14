@@ -22,6 +22,7 @@
 <translation id="158809615184981282">Фарерська клавіатура</translation>
 <translation id="1646136617204068573">Угорська розкладка</translation>
 <translation id="164729547906544836">Тамільська клавіатура (індійська транслітерація)</translation>
+<translation id="164969095109328410">Пристрій Chrome</translation>
 <translation id="1829129547161959350">Пінгвін</translation>
 <translation id="184633654410729720">Тайська клавіатура (кедмані)</translation>
 <translation id="1921986354447415460">Турецька клавіатура F</translation>
@@ -67,7 +68,7 @@
 <translation id="3116361045094675131">Британська розкладка</translation>
 <translation id="3157729859914172001">Американська міжнародна клавіатура (ПК)</translation>
 <translation id="3187212781151025377">Розкладка для івриту</translation>
-<translation id="3197563288998582412">Розкладка Дворака (Великобританія)</translation>
+<translation id="3197563288998582412">Розкладка Дворака (Велика Британія)</translation>
 <translation id="3224239078034945833">Канадська (багатомовна)</translation>
 <translation id="3241720467332021590">Ірландська</translation>
 <translation id="3252266817569339921">Французька</translation>
@@ -114,6 +115,7 @@
 <translation id="4694604912444486114">Мавпа</translation>
 <translation id="4711094779914110278">Турецька</translation>
 <translation id="4725511304875193254">Коргі</translation>
+<translation id="4737050008115666127">Посадка</translation>
 <translation id="4747271164117300400">Македонська</translation>
 <translation id="4749157430980974800">Грузинська клавіатура</translation>
 <translation id="4755240240651974342">Фінська розкладка</translation>
@@ -125,6 +127,7 @@
 <translation id="4943368462779413526">Футбольний м’яч</translation>
 <translation id="497244430928947428">Малаяламська клавіатура (фонетична)</translation>
 <translation id="498902553138568924">Червоний метелик</translation>
+<translation id="5011233892417813670">Chromebook</translation>
 <translation id="5068919226082848014">Піца</translation>
 <translation id="5098629044894065541">Іврит</translation>
 <translation id="5123433949759960244">Баскетбол</translation>
@@ -146,6 +149,7 @@
 <translation id="5465122519792752163">Непальська клавіатура (індійські шрифти)</translation>
 <translation id="5469868506864199649">Італійська</translation>
 <translation id="5500122897333236901">Ісландська</translation>
+<translation id="5508696409934741614">Крапки</translation>
 <translation id="5533555070048896610">Транслітерація (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">Розкладка Дворака (США)</translation>
 <translation id="5640179856859982418">Швейцарська розкладка</translation>
@@ -157,7 +161,9 @@
 <translation id="5819442873484330149">Клавіатура хангул із 3 наборами клавіш (остаточна)</translation>
 <translation id="5838825566232597749">US Workman, міжнародна</translation>
 <translation id="5892290200158927959">Французька клавіатура BÉPO</translation>
+<translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">Латиноамериканська розкладка</translation>
+<translation id="6012987430370760224">Клавіатура маратхі (фонетична)</translation>
 <translation id="60357267506638014">Чеська (QWERTY)</translation>
 <translation id="6054173164583630569">Французька розкладка</translation>
 <translation id="6111770213269631447">Транслітерація (namaskar → নমস্কার)</translation>
@@ -183,30 +189,35 @@
 <translation id="6876155724392614295">Велосипед</translation>
 <translation id="6878261347041253038">Клавіатура деванагарі (фонетична)</translation>
 <translation id="6885780034956018177">Равлик</translation>
+<translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">US Workman</translation>
 <translation id="6935521024859866267">Догори дригом</translation>
 <translation id="6937152069980083337">Метод введення Google для японської мови (клавіатура США)</translation>
 <translation id="6939777852457331078">Клавіатура US Workman</translation>
 <translation id="6970230597523682626">Болгарська</translation>
+<translation id="714034171374937760">Chromebase</translation>
 <translation id="7170467426996704624">Транслітерація (salam → ሰላም)</translation>
 <translation id="7172053773111046550">Естонська розкладка</translation>
 <translation id="719009910964971313">Розкладка Дворака для програмістів (США)</translation>
 <translation id="7222624196722476520">Болгарська клавіатура (фонетична)</translation>
 <translation id="7348749398828259943">Міжнародна клавіатура US Workman</translation>
 <translation id="7389722738210761877">Тайська клавіатура (TIS 820-2531)</translation>
+<translation id="7396038720194014279">Клавіатура гінді (фонетична)</translation>
 <translation id="7417453074306512035">Ефіопська клавіатура</translation>
 <translation id="7419631653042041064">Каталонська розкладка</translation>
-<translation id="7434823369735508263">Розкладка Дворака (Великобританія)</translation>
+<translation id="7434823369735508263">Розкладка Дворака (Велика Британія)</translation>
 <translation id="7460898608667578234">Українська</translation>
 <translation id="7474889694310679759">Англійська розкладка (Канада)</translation>
 <translation id="751507702149411736">Білоруська</translation>
 <translation id="7547811415869834682">Нідерландська</translation>
+<translation id="7603724359189955920">Сітка</translation>
 <translation id="770015031906360009">Грецька</translation>
 <translation id="7706319470528945664">Португальська розкладка</translation>
 <translation id="7774365994322694683">Птах</translation>
 <translation id="7825423931463735974">Тамільська клавіатура (Tamil99)</translation>
 <translation id="7853966320808728790">Французька клавіатура BÉPO</translation>
 <translation id="7896906914454843592">Американська клавіатура (розширена)</translation>
+<translation id="7898607018410277265">Клавіатура гуджараті (нова фонетична)</translation>
 <translation id="7917972308273378936">Литовська розкладка</translation>
 <translation id="7943385054491506837">Розкладка Colemak (США)</translation>
 <translation id="7969525169268594403">Словенська</translation>
@@ -230,7 +241,8 @@
 <translation id="8432745813735585631">Розкладка клавіатури Colemak (США)</translation>
 <translation id="8437209419043462667">Американська</translation>
 <translation id="8467473010914675605">Метод введення для корейської мови</translation>
-<translation id="8521441079177373948">Англійська (Великобританія)</translation>
+<translation id="8477649328507734757">Концентричні кола</translation>
+<translation id="8521441079177373948">Англійська (Велика Британія)</translation>
 <translation id="8551494947769799688">Латвійська</translation>
 <translation id="8561206103590473338">Слон</translation>
 <translation id="8714406895390098252">Велосипед</translation>
@@ -248,4 +260,5 @@
 <translation id="913758436357682283">Мʼянмська клавіатура мʼянсан</translation>
 <translation id="9153744823707037316">Метод введення еррей</translation>
 <translation id="9206487995878691001">Метод введення для стандарту цанцзє</translation>
+<translation id="9219908252191632183">Місячний ландшафт</translation>
 </translationbundle>

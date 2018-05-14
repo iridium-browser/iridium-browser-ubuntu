@@ -14,8 +14,8 @@
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/device/public/interfaces/battery_monitor.mojom.h"
-#include "services/device/public/interfaces/constants.mojom.h"
+#include "services/device/public/mojom/battery_monitor.mojom.h"
+#include "services/device/public/mojom/constants.mojom.h"
 #include "services/service_manager/public/cpp/service_context.h"
 
 namespace content {
@@ -74,7 +74,7 @@ class BatteryMonitorTest : public ContentBrowserTest {
   BatteryMonitorTest() = default;
 
   void SetUpOnMainThread() override {
-    mock_battery_monitor_ = base::MakeUnique<MockBatteryMonitor>();
+    mock_battery_monitor_ = std::make_unique<MockBatteryMonitor>();
     // Because Device Service also runs in this process(browser process), here
     // we can directly set our binder to intercept interface requests against
     // it.

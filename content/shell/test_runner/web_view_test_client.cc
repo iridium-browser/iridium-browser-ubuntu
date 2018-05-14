@@ -40,12 +40,6 @@ WebViewTestClient::~WebViewTestClient() {}
 // The output from these methods in layout test mode should match that
 // expected by the layout tests. See EditingDelegate.m in DumpRenderTree.
 
-void WebViewTestClient::DidChangeContents() {
-  if (test_runner()->shouldDumpEditingCallbacks())
-    delegate()->PrintMessage(
-        "EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification\n");
-}
-
 blink::WebView* WebViewTestClient::CreateView(
     blink::WebLocalFrame* frame,
     const blink::WebURLRequest& request,
@@ -83,40 +77,6 @@ void WebViewTestClient::PrintPage(blink::WebLocalFrame* frame) {
   frame->PrintEnd();
 }
 
-void WebViewTestClient::ShowValidationMessage(
-    const blink::WebRect& anchor_in_root_view,
-    const blink::WebString& main_message,
-    blink::WebTextDirection main_message_hint,
-    const blink::WebString& sub_message,
-    blink::WebTextDirection sub_message_hint) {
-  if (test_runner()->is_web_platform_tests_mode())
-    return;
-
-  base::string16 wrapped_main_text = main_message.Utf16();
-  base::string16 wrapped_sub_text = sub_message.Utf16();
-
-  if (main_message_hint == blink::kWebTextDirectionLeftToRight) {
-    wrapped_main_text =
-        base::i18n::GetDisplayStringInLTRDirectionality(wrapped_main_text);
-  } else if (main_message_hint == blink::kWebTextDirectionRightToLeft &&
-             !base::i18n::IsRTL()) {
-    base::i18n::WrapStringWithRTLFormatting(&wrapped_main_text);
-  }
-
-  if (!wrapped_sub_text.empty()) {
-    if (sub_message_hint == blink::kWebTextDirectionLeftToRight) {
-      wrapped_sub_text =
-          base::i18n::GetDisplayStringInLTRDirectionality(wrapped_sub_text);
-    } else if (sub_message_hint == blink::kWebTextDirectionRightToLeft) {
-      base::i18n::WrapStringWithRTLFormatting(&wrapped_sub_text);
-    }
-  }
-  delegate()->PrintMessage("ValidationMessageClient: main-message=" +
-                           base::UTF16ToUTF8(wrapped_main_text) +
-                           " sub-message=" +
-                           base::UTF16ToUTF8(wrapped_sub_text) + "\n");
-}
-
 blink::WebSpeechRecognizer* WebViewTestClient::SpeechRecognizer() {
   return test_runner()->getMockWebSpeechRecognizer();
 }
@@ -129,7 +89,7 @@ WebTestDelegate* WebViewTestClient::delegate() {
   return web_view_test_proxy_base_->delegate();
 }
 
-void WebViewTestClient::DidFocus() {
+void WebViewTestClient::DidFocus(blink::WebLocalFrame* calling_frame) {
   test_runner()->SetFocus(web_view_test_proxy_base_->web_view(), true);
 }
 

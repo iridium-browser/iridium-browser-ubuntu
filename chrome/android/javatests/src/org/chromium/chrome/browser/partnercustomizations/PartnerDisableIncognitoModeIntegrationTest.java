@@ -7,16 +7,25 @@ package org.chromium.chrome.browser.partnercustomizations;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
+import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.widget.PopupMenu;
 
+import org.junit.Assert;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.partnercustomizations.TestPartnerBrowserCustomizationsProvider;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -28,13 +37,12 @@ import java.util.concurrent.ExecutionException;
 /**
  * Integration tests for the partner disabling incognito mode feature.
  */
-public class PartnerDisableIncognitoModeIntegrationTest extends
-        BasePartnerBrowserCustomizationIntegrationTest {
-
-    @Override
-    public void startMainActivity() throws InterruptedException {
-        // Each test will launch main activity, so purposefully omit here.
-    }
+@RunWith(ChromeJUnit4ClassRunner.class)
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+public class PartnerDisableIncognitoModeIntegrationTest {
+    @Rule
+    public BasePartnerBrowserCustomizationIntegrationTestRule mActivityTestRule =
+            new BasePartnerBrowserCustomizationIntegrationTestRule();
 
     private void setParentalControlsEnabled(boolean enabled) {
         Uri uri = PartnerBrowserCustomizations.buildQueryUri(
@@ -42,7 +50,7 @@ public class PartnerDisableIncognitoModeIntegrationTest extends
         Bundle bundle = new Bundle();
         bundle.putBoolean(
                 TestPartnerBrowserCustomizationsProvider.INCOGNITO_MODE_DISABLED_KEY, enabled);
-        Context context = getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
         context.getContentResolver().call(uri, "setIncognitoModeDisabled", null, bundle);
     }
 
@@ -51,19 +59,20 @@ public class PartnerDisableIncognitoModeIntegrationTest extends
             @Override
             public Menu call() throws Exception {
                 // PopupMenu is a convenient way of building a temp menu.
-                PopupMenu tempMenu = new PopupMenu(
-                        getActivity(), getActivity().findViewById(R.id.menu_anchor_stub));
+                PopupMenu tempMenu = new PopupMenu(mActivityTestRule.getActivity(),
+                        mActivityTestRule.getActivity().findViewById(R.id.menu_anchor_stub));
                 tempMenu.inflate(R.menu.main_menu);
                 Menu menu = tempMenu.getMenu();
 
-                getActivity().prepareMenu(menu);
+                mActivityTestRule.getActivity().prepareMenu(menu);
                 return menu;
             }
         });
         for (int i = 0; i < menu.size(); ++i) {
             MenuItem item = menu.getItem(i);
             if (item.getItemId() == R.id.new_incognito_tab_menu_id && item.isVisible()) {
-                assertEquals("Menu item enabled state is not correct.", enabled, item.isEnabled());
+                Assert.assertEquals(
+                        "Menu item enabled state is not correct.", enabled, item.isEnabled());
             }
         }
     }
@@ -85,48 +94,30 @@ public class PartnerDisableIncognitoModeIntegrationTest extends
     }
 
     private void toggleActivityForegroundState() {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                getActivity().onPause();
-            }
-        });
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                getActivity().onStop();
-            }
-        });
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                getActivity().onStart();
-            }
-        });
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                getActivity().onResume();
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(() -> mActivityTestRule.getActivity().onPause());
+        ThreadUtils.runOnUiThreadBlocking(() -> mActivityTestRule.getActivity().onStop());
+        ThreadUtils.runOnUiThreadBlocking(() -> mActivityTestRule.getActivity().onStart());
+        ThreadUtils.runOnUiThreadBlocking(() -> mActivityTestRule.getActivity().onResume());
     }
 
+    @Test
     @MediumTest
     @Feature({"DisableIncognitoMode"})
     @RetryOnFailure
     public void testIncognitoEnabledIfNoParentalControls() throws InterruptedException {
         setParentalControlsEnabled(false);
-        startMainActivityOnBlankPage();
+        mActivityTestRule.startMainActivityOnBlankPage();
         waitForParentalControlsEnabledState(false);
-        newIncognitoTabFromMenu();
+        mActivityTestRule.newIncognitoTabFromMenu();
     }
 
+    @Test
     @MediumTest
     @Feature({"DisableIncognitoMode"})
     public void testIncognitoMenuItemEnabledBasedOnParentalControls()
             throws InterruptedException, ExecutionException {
         setParentalControlsEnabled(true);
-        startMainActivityOnBlankPage();
+        mActivityTestRule.startMainActivityOnBlankPage();
         waitForParentalControlsEnabledState(true);
         assertIncognitoMenuItemEnabled(false);
 
@@ -136,11 +127,12 @@ public class PartnerDisableIncognitoModeIntegrationTest extends
         assertIncognitoMenuItemEnabled(true);
     }
 
+    @Test
     @MediumTest
     @Feature({"DisableIncognitoMode"})
     public void testEnabledParentalControlsClosesIncognitoTabs() throws InterruptedException {
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
-                getInstrumentation().getContext());
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
 
         try {
             String[] testUrls = {
@@ -150,24 +142,20 @@ public class PartnerDisableIncognitoModeIntegrationTest extends
             };
 
             setParentalControlsEnabled(false);
-            startMainActivityOnBlankPage();
+            mActivityTestRule.startMainActivityOnBlankPage();
             waitForParentalControlsEnabledState(false);
 
-            loadUrlInNewTab(testUrls[0], true);
-            loadUrlInNewTab(testUrls[1], true);
-            loadUrlInNewTab(testUrls[2], true);
-            loadUrlInNewTab(testUrls[0], false);
+            mActivityTestRule.loadUrlInNewTab(testUrls[0], true);
+            mActivityTestRule.loadUrlInNewTab(testUrls[1], true);
+            mActivityTestRule.loadUrlInNewTab(testUrls[2], true);
+            mActivityTestRule.loadUrlInNewTab(testUrls[0], false);
 
             setParentalControlsEnabled(true);
             toggleActivityForegroundState();
             waitForParentalControlsEnabledState(true);
 
-            CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
-                @Override
-                public Integer call() {
-                    return incognitoTabsCount();
-                }
-            }));
+            CriteriaHelper.pollInstrumentationThread(
+                    Criteria.equals(0, () -> mActivityTestRule.incognitoTabsCount()));
         } finally {
             testServer.stopAndDestroyServer();
         }

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind_helpers.h"
 #include "base/run_loop.h"
 #include "services/video_capture/test/fake_device_descriptor_test.h"
 #include "services/video_capture/test/mock_receiver.h"
@@ -68,10 +69,8 @@ TEST_F(FakeVideoCaptureDeviceDescriptorTest, AccessIsRevokedOnSecondAccess) {
 // Tests that a second proxy requested for a device can be used successfully.
 TEST_F(FakeVideoCaptureDeviceDescriptorTest, CanUseSecondRequestedProxy) {
   mojom::DevicePtr device_proxy_1;
-  factory_->CreateDevice(
-      fake_device_info_.descriptor.device_id,
-      mojo::MakeRequest(&device_proxy_1),
-      base::Bind([](mojom::DeviceAccessResultCode result_code) {}));
+  factory_->CreateDevice(fake_device_info_.descriptor.device_id,
+                         mojo::MakeRequest(&device_proxy_1), base::DoNothing());
 
   base::RunLoop wait_loop;
   mojom::DevicePtr device_proxy_2;
@@ -88,7 +87,7 @@ TEST_F(FakeVideoCaptureDeviceDescriptorTest, CanUseSecondRequestedProxy) {
   arbitrary_requested_settings.requested_format.frame_size.SetSize(640, 480);
   arbitrary_requested_settings.requested_format.frame_rate = 15;
   arbitrary_requested_settings.resolution_change_policy =
-      media::RESOLUTION_POLICY_FIXED_RESOLUTION;
+      media::ResolutionChangePolicy::FIXED_RESOLUTION;
   arbitrary_requested_settings.power_line_frequency =
       media::PowerLineFrequency::FREQUENCY_DEFAULT;
 

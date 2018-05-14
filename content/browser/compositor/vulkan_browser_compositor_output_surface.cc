@@ -5,14 +5,14 @@
 #include "content/browser/compositor/vulkan_browser_compositor_output_surface.h"
 
 #include "base/threading/thread_task_runner_handle.h"
-#include "cc/output/output_surface_client.h"
+#include "components/viz/service/display/output_surface_client.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "gpu/vulkan/vulkan_surface.h"
 
 namespace content {
 
 VulkanBrowserCompositorOutputSurface::VulkanBrowserCompositorOutputSurface(
-    scoped_refptr<cc::VulkanContextProvider> context,
+    scoped_refptr<viz::VulkanContextProvider> context,
     const UpdateVSyncParametersCallback& update_vsync_parameters_callback)
     : BrowserCompositorOutputSurface(std::move(context),
                                      update_vsync_parameters_callback),
@@ -44,7 +44,7 @@ void VulkanBrowserCompositorOutputSurface::Destroy() {
 }
 
 void VulkanBrowserCompositorOutputSurface::BindToClient(
-    cc::OutputSurfaceClient* client) {
+    viz::OutputSurfaceClient* client) {
   DCHECK(client);
   DCHECK(!client_);
   client_ = client;
@@ -87,8 +87,14 @@ void VulkanBrowserCompositorOutputSurface::Reshape(
     const gfx::Size& size,
     float device_scale_factor,
     const gfx::ColorSpace& color_space,
-    bool has_alpha) {
+    bool has_alpha,
+    bool use_stencil) {
   NOTIMPLEMENTED();
+}
+
+void VulkanBrowserCompositorOutputSurface::SetDrawRectangle(
+    const gfx::Rect& rect) {
+  NOTREACHED();
 }
 
 uint32_t
@@ -98,18 +104,23 @@ VulkanBrowserCompositorOutputSurface::GetFramebufferCopyTextureFormat() {
 }
 
 void VulkanBrowserCompositorOutputSurface::SwapBuffers(
-    cc::OutputSurfaceFrame frame) {
+    viz::OutputSurfaceFrame frame) {
   surface_->SwapBuffers();
+  ++swap_id_;
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&VulkanBrowserCompositorOutputSurface::SwapBuffersAck,
-                 weak_ptr_factory_.GetWeakPtr()));
+                 weak_ptr_factory_.GetWeakPtr(), swap_id_));
 }
 
-void VulkanBrowserCompositorOutputSurface::SwapBuffersAck() {
+void VulkanBrowserCompositorOutputSurface::SwapBuffersAck(uint64_t swap_id) {
   DCHECK(client_);
-  client_->DidReceiveSwapBuffersAck();
+  client_->DidReceiveSwapBuffersAck(swap_id);
+}
+
+gpu::VulkanSurface* VulkanBrowserCompositorOutputSurface::GetVulkanSurface() {
+  return surface_.get();
 }
 
 }  // namespace content

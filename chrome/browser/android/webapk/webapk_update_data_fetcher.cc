@@ -35,10 +35,11 @@ bool IsInScope(const GURL& url, const GURL& scope) {
 
 }  // anonymous namespace
 
-jlong Initialize(JNIEnv* env,
-                 const JavaParamRef<jobject>& obj,
-                 const JavaParamRef<jstring>& java_scope_url,
-                 const JavaParamRef<jstring>& java_web_manifest_url) {
+jlong JNI_WebApkUpdateDataFetcher_Initialize(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& java_scope_url,
+    const JavaParamRef<jstring>& java_web_manifest_url) {
   GURL scope(base::android::ConvertJavaStringToUTF8(env, java_scope_url));
   GURL web_manifest_url(
       base::android::ConvertJavaStringToUTF8(env, java_web_manifest_url));
@@ -54,7 +55,6 @@ WebApkUpdateDataFetcher::WebApkUpdateDataFetcher(JNIEnv* env,
     : content::WebContentsObserver(nullptr),
       scope_(scope),
       web_manifest_url_(web_manifest_url),
-      is_initial_fetch_(false),
       info_(GURL()),
       weak_ptr_factory_(this) {
   java_ref_.Reset(env, obj);
@@ -96,26 +96,18 @@ void WebApkUpdateDataFetcher::FetchInstallableData() {
   // installable data the first time.
   if (url == last_fetched_url_)
     return;
-  is_initial_fetch_ = last_fetched_url_.is_empty();
+
   last_fetched_url_ = url;
 
-  if (!IsInScope(url, scope_)) {
-    OnWebManifestNotWebApkCompatible();
+  if (!IsInScope(url, scope_))
     return;
-  }
 
   InstallableParams params;
-  params.ideal_primary_icon_size_in_px =
-      ShortcutHelper::GetIdealHomescreenIconSizeInPx();
-  params.minimum_primary_icon_size_in_px =
-      ShortcutHelper::GetMinimumHomescreenIconSizeInPx();
-  params.ideal_badge_icon_size_in_px =
-      ShortcutHelper::GetIdealBadgeIconSizeInPx();
-  params.minimum_badge_icon_size_in_px =
-      ShortcutHelper::GetIdealBadgeIconSizeInPx();
-  params.check_installable = true;
-  params.fetch_valid_primary_icon = true;
-  params.fetch_valid_badge_icon = true;
+  params.valid_manifest = true;
+  params.has_worker = true;
+  params.valid_primary_icon = true;
+  params.valid_badge_icon = true;
+  params.wait_for_worker = true;
   InstallableManager* installable_manager =
       InstallableManager::FromWebContents(web_contents());
   installable_manager->GetData(
@@ -139,14 +131,13 @@ void WebApkUpdateDataFetcher::OnDidGetInstallableData(
   // observing too. It is based on our assumption that it is invalid for
   // web developers to change the Web Manifest location. When it does
   // change, we will treat the new Web Manifest as the one of another WebAPK.
-  if (data.error_code != NO_ERROR_DETECTED || data.manifest.IsEmpty() ||
+  if (data.error_code != NO_ERROR_DETECTED || data.manifest->IsEmpty() ||
       web_manifest_url_ != data.manifest_url ||
-      !AreWebManifestUrlsWebApkCompatible(data.manifest)) {
-    OnWebManifestNotWebApkCompatible();
+      !AreWebManifestUrlsWebApkCompatible(*data.manifest)) {
     return;
   }
 
-  info_.UpdateFromManifest(data.manifest);
+  info_.UpdateFromManifest(*data.manifest);
   info_.manifest_url = data.manifest_url;
   info_.best_primary_icon_url = data.primary_icon_url;
   primary_icon_ = *data.primary_icon;
@@ -167,10 +158,8 @@ void WebApkUpdateDataFetcher::OnDidGetInstallableData(
 
 void WebApkUpdateDataFetcher::OnGotPrimaryIconMurmur2Hash(
     const std::string& primary_icon_murmur2_hash) {
-  if (primary_icon_murmur2_hash.empty()) {
-    OnWebManifestNotWebApkCompatible();
+  if (primary_icon_murmur2_hash.empty())
     return;
-  }
 
   if (!info_.best_badge_icon_url.is_empty() &&
       info_.best_badge_icon_url != info_.best_primary_icon_url) {
@@ -191,10 +180,8 @@ void WebApkUpdateDataFetcher::OnDataAvailable(
     const std::string& primary_icon_murmur2_hash,
     bool did_fetch_badge_icon,
     const std::string& badge_icon_murmur2_hash) {
-  if (did_fetch_badge_icon && badge_icon_murmur2_hash.empty()) {
-    OnWebManifestNotWebApkCompatible();
+  if (did_fetch_badge_icon && badge_icon_murmur2_hash.empty())
     return;
-  }
 
   JNIEnv* env = base::android::AttachCurrentThread();
 
@@ -232,12 +219,4 @@ void WebApkUpdateDataFetcher::OnDataAvailable(
       java_primary_icon, java_badge_icon_url, java_badge_icon_murmur2_hash,
       java_badge_icon, java_icon_urls, info_.display, info_.orientation,
       info_.theme_color, info_.background_color);
-}
-
-void WebApkUpdateDataFetcher::OnWebManifestNotWebApkCompatible() {
-  if (!is_initial_fetch_)
-    return;
-
-  Java_WebApkUpdateDataFetcher_onWebManifestForInitialUrlNotWebApkCompatible(
-      base::android::AttachCurrentThread(), java_ref_);
 }

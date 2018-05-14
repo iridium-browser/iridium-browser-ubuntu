@@ -26,6 +26,7 @@
 #include "base/compiler_specific.h"
 #include "base/i18n/rtl.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/test/test_windows.h"
@@ -60,8 +61,8 @@ using aura::test::WindowIsAbove;
 
 class PanelLayoutManagerTest : public AshTestBase {
  public:
-  PanelLayoutManagerTest() {}
-  ~PanelLayoutManagerTest() override {}
+  PanelLayoutManagerTest() = default;
+  ~PanelLayoutManagerTest() override = default;
 
   void SetUp() override {
     AshTestBase::SetUp();
@@ -116,7 +117,7 @@ class PanelLayoutManagerTest : public AshTestBase {
 
   void PanelInScreen(aura::Window* panel) {
     gfx::Rect panel_bounds = panel->GetBoundsInRootWindow();
-    gfx::Point root_point = gfx::Point(panel_bounds.x(), panel_bounds.y());
+    gfx::Point root_point = panel_bounds.origin();
     display::Display display =
         display::Screen::GetScreen()->GetDisplayNearestPoint(root_point);
 
@@ -265,7 +266,7 @@ class PanelLayoutManagerTextDirectionTest
       public testing::WithParamInterface<bool> {
  public:
   PanelLayoutManagerTextDirectionTest() : is_rtl_(GetParam()) {}
-  virtual ~PanelLayoutManagerTextDirectionTest() {}
+  virtual ~PanelLayoutManagerTextDirectionTest() = default;
 
   void SetUp() override {
     original_locale_ = base::i18n::GetConfiguredLocale();
@@ -300,11 +301,6 @@ TEST_P(PanelLayoutManagerTextDirectionTest, AddOnePanel) {
 // Tests for crashes during undocking.
 // See https://crbug.com/632755
 TEST_F(PanelLayoutManagerTest, UndockTest) {
-  // TODO: mash doesn't support SetFirstDisplayAsInternalDisplay().
-  // http://crbug.com/698091.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   std::vector<display::ManagedDisplayInfo> info_list;
 
   const int64_t internal_display_id =
@@ -336,11 +332,6 @@ TEST_F(PanelLayoutManagerTest, UndockTest) {
 // Tests for any crash during docking and then undocking.
 // See https://crbug.com/632755
 TEST_F(PanelLayoutManagerTest, DockUndockTest) {
-  // TODO: mash doesn't support SetFirstDisplayAsInternalDisplay().
-  // http://crbug.com/698091.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   std::vector<display::ManagedDisplayInfo> info_list;
 
   const int64_t internal_display_id =
@@ -479,15 +470,11 @@ TEST_F(PanelLayoutManagerTest, MultiplePanelStackingVertical) {
   wm::ActivateWindow(w1.get());
   shelf_view_test()->RunMessageLoopUntilAnimationsDone();
   EXPECT_TRUE(WindowIsAbove(w1.get(), w2.get()));
-  // TODO(crbug.com/698887): investigate failure in Mash.
-  if (Shell::GetAshConfig() != Config::MASH)
-    EXPECT_TRUE(WindowIsAbove(w2.get(), w3.get()));
+  EXPECT_TRUE(WindowIsAbove(w2.get(), w3.get()));
 
   wm::ActivateWindow(w2.get());
   shelf_view_test()->RunMessageLoopUntilAnimationsDone();
-  // TODO(crbug.com/698887): investigate failure in Mash.
-  if (Shell::GetAshConfig() != Config::MASH)
-    EXPECT_TRUE(WindowIsAbove(w1.get(), w3.get()));
+  EXPECT_TRUE(WindowIsAbove(w1.get(), w3.get()));
   EXPECT_TRUE(WindowIsAbove(w2.get(), w3.get()));
   EXPECT_TRUE(WindowIsAbove(w2.get(), w1.get()));
 
@@ -506,10 +493,6 @@ TEST_F(PanelLayoutManagerTest, MultiplePanelCallout) {
   EXPECT_TRUE(IsPanelCalloutVisible(w1.get()));
   EXPECT_TRUE(IsPanelCalloutVisible(w2.get()));
   EXPECT_TRUE(IsPanelCalloutVisible(w3.get()));
-
-  // TODO(crbug.com/698887): investigate failure in Mash.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
 
   wm::ActivateWindow(w1.get());
   EXPECT_NO_FATAL_FAILURE(IsCalloutAboveLauncherIcon(w1.get()));
@@ -542,10 +525,6 @@ TEST_F(PanelLayoutManagerTest, RemoveLeftPanel) {
 }
 
 TEST_F(PanelLayoutManagerTest, RemoveMiddlePanel) {
-  // TODO: fails because of ShelfModel. http://crbug.com/698878.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   gfx::Rect bounds(0, 0, 201, 201);
   std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
   std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
@@ -561,10 +540,6 @@ TEST_F(PanelLayoutManagerTest, RemoveMiddlePanel) {
 }
 
 TEST_F(PanelLayoutManagerTest, RemoveRightPanel) {
-  // TODO: fails because of ShelfModel. http://crbug.com/698878.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   gfx::Rect bounds(0, 0, 201, 201);
   std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
   std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
@@ -580,10 +555,6 @@ TEST_F(PanelLayoutManagerTest, RemoveRightPanel) {
 }
 
 TEST_F(PanelLayoutManagerTest, RemoveNonActivePanel) {
-  // TODO: fails because of ShelfModel. http://crbug.com/698878.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   gfx::Rect bounds(0, 0, 201, 201);
   std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
   std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
@@ -628,9 +599,7 @@ TEST_F(PanelLayoutManagerTest, FanWindows) {
   Shelf* shelf = GetPrimaryShelf();
   int icon_x1 = shelf->GetScreenBoundsOfItemIconForWindow(w1.get()).x();
   int icon_x2 = shelf->GetScreenBoundsOfItemIconForWindow(w2.get()).x();
-  // TODO(crbug.com/698887): investigate failure in Mash.
-  if (Shell::GetAshConfig() != Config::MASH)
-    EXPECT_EQ(window_x2 - window_x1, window_x3 - window_x2);
+  EXPECT_EQ(window_x2 - window_x1, window_x3 - window_x2);
   // New shelf items for panels are inserted before existing panel items.
   EXPECT_LT(window_x2, window_x1);
   EXPECT_LT(window_x3, window_x2);
@@ -679,10 +648,6 @@ TEST_F(PanelLayoutManagerTest, MinimizeRestorePanel) {
 }
 
 TEST_F(PanelLayoutManagerTest, PanelMoveBetweenMultipleDisplays) {
-  // TODO: fails because of ShelfModel. http://crbug.com/698878.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   // Keep the displays wide so that shelves have enough space for launcher
   // buttons.
   UpdateDisplay("600x400,600x400");
@@ -849,15 +814,9 @@ TEST_F(PanelLayoutManagerTest, PanelsHideAndRestoreWithShelf) {
   aura::Window::Windows switchable_window_list =
       Shell::Get()->mru_window_tracker()->BuildMruWindowList();
   EXPECT_EQ(3u, switchable_window_list.size());
-  EXPECT_NE(switchable_window_list.end(),
-            std::find(switchable_window_list.begin(),
-                      switchable_window_list.end(), w1.get()));
-  EXPECT_NE(switchable_window_list.end(),
-            std::find(switchable_window_list.begin(),
-                      switchable_window_list.end(), w2.get()));
-  EXPECT_NE(switchable_window_list.end(),
-            std::find(switchable_window_list.begin(),
-                      switchable_window_list.end(), w3.get()));
+  EXPECT_TRUE(base::ContainsValue(switchable_window_list, w1.get()));
+  EXPECT_TRUE(base::ContainsValue(switchable_window_list, w2.get()));
+  EXPECT_TRUE(base::ContainsValue(switchable_window_list, w3.get()));
 
   SetShelfVisibilityState(Shell::GetPrimaryRootWindow(), SHELF_VISIBLE);
   RunAllPendingInMessageLoop();

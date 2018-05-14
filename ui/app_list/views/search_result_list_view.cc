@@ -5,17 +5,16 @@
 #include "ui/app_list/views/search_result_list_view.h"
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
+#include "ash/app_list/model/search/search_result.h"
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
-#include "third_party/skia/include/core/SkColor.h"
-#include "ui/app_list/app_list_features.h"
-#include "ui/app_list/app_list_switches.h"
+#include "ui/app_list/app_list_metrics.h"
 #include "ui/app_list/app_list_view_delegate.h"
-#include "ui/app_list/search_result.h"
-#include "ui/app_list/views/search_result_list_view_delegate.h"
+#include "ui/app_list/views/app_list_main_view.h"
 #include "ui/app_list/views/search_result_view.h"
 #include "ui/events/event.h"
 #include "ui/gfx/animation/linear_animation.h"
@@ -25,39 +24,25 @@
 
 namespace {
 
-constexpr int kMaxResults = 6;
-constexpr int kMaxResultsFullscreen = 5;
-constexpr int kTimeoutIndicatorHeight = 2;
-constexpr int kTimeoutFramerate = 60;
-constexpr SkColor kTimeoutIndicatorColor =
-    SkColorSetARGBMacro(255, 30, 144, 255);
+constexpr int kMaxResults = 5;
 
 }  // namespace
 
 namespace app_list {
 
-SearchResultListView::SearchResultListView(
-    SearchResultListViewDelegate* delegate,
-    AppListViewDelegate* view_delegate)
-    : delegate_(delegate),
+SearchResultListView::SearchResultListView(AppListMainView* main_view,
+                                           AppListViewDelegate* view_delegate)
+    : main_view_(main_view),
       view_delegate_(view_delegate),
-      results_container_(new views::View),
-      auto_launch_indicator_(new views::View),
-      is_fullscreen_app_list_enabled_(features::IsFullscreenAppListEnabled()) {
+      results_container_(new views::View) {
   results_container_->SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kVertical));
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
 
-  const int max_results =
-      is_fullscreen_app_list_enabled_ ? kMaxResultsFullscreen : kMaxResults;
-  for (int i = 0; i < max_results; ++i)
-    results_container_->AddChildView(new SearchResultView(this));
+  for (int i = 0; i < kMaxResults; ++i) {
+    search_result_views_.emplace_back(new SearchResultView(this));
+    results_container_->AddChildView(search_result_views_.back());
+  }
   AddChildView(results_container_);
-
-  auto_launch_indicator_->SetBackground(
-      views::CreateSolidBackground(kTimeoutIndicatorColor));
-  auto_launch_indicator_->SetVisible(false);
-
-  AddChildView(auto_launch_indicator_);
 }
 
 SearchResultListView::~SearchResultListView() {}
@@ -71,80 +56,13 @@ bool SearchResultListView::IsResultViewSelected(
              results_container_->child_at(selected_index())) == result_view;
 }
 
-void SearchResultListView::UpdateAutoLaunchState() {
-  SetAutoLaunchTimeout(view_delegate_->GetAutoLaunchTimeout());
-}
-
-bool SearchResultListView::OnKeyPressed(const ui::KeyEvent& event) {
-  if (selected_index() >= 0 &&
-      results_container_->child_at(selected_index())->OnKeyPressed(event)) {
-    return true;
-  }
-
-  int selection_index = -1;
-  const int forward_dir = base::i18n::IsRTL() ? -1 : 1;
-  switch (event.key_code()) {
-    case ui::VKEY_TAB:
-      if (event.IsShiftDown())
-        selection_index = selected_index() - 1;
-      else
-        selection_index = selected_index() + 1;
-      break;
-    case ui::VKEY_UP:
-      selection_index = selected_index() - 1;
-      break;
-    case ui::VKEY_DOWN:
-      selection_index = selected_index() + 1;
-      break;
-    case ui::VKEY_LEFT:
-      if (is_fullscreen_app_list_enabled_)
-        selection_index = selected_index() - forward_dir;
-      break;
-    case ui::VKEY_RIGHT:
-      if (is_fullscreen_app_list_enabled_)
-        selection_index = selected_index() + forward_dir;
-      break;
-    default:
-      break;
-  }
-
-  if (IsValidSelectionIndex(selection_index)) {
-    SetSelectedIndex(selection_index);
-    if (auto_launch_animation_)
-      CancelAutoLaunchTimeout();
-    return true;
-  }
-
-  return false;
-}
-
-void SearchResultListView::SetAutoLaunchTimeout(
-    const base::TimeDelta& timeout) {
-  if (timeout > base::TimeDelta()) {
-    auto_launch_indicator_->SetVisible(true);
-    auto_launch_indicator_->SetBounds(0, 0, 0, kTimeoutIndicatorHeight);
-    auto_launch_animation_.reset(
-        new gfx::LinearAnimation(timeout, kTimeoutFramerate, this));
-    auto_launch_animation_->Start();
-  } else {
-    auto_launch_indicator_->SetVisible(false);
-    auto_launch_animation_.reset();
-  }
-}
-
-void SearchResultListView::CancelAutoLaunchTimeout() {
-  SetAutoLaunchTimeout(base::TimeDelta());
-  view_delegate_->AutoLaunchCanceled();
-}
-
-SearchResultView* SearchResultListView::GetResultViewAt(int index) const {
-  DCHECK(index >= 0 && index < results_container_->child_count());
-  return static_cast<SearchResultView*>(results_container_->child_at(index));
+SearchResultView* SearchResultListView::GetResultViewAt(size_t index) {
+  DCHECK(index >= 0 && index < search_result_views_.size());
+  return search_result_views_[index];
 }
 
 void SearchResultListView::ListItemsRemoved(size_t start, size_t count) {
-  size_t last = std::min(
-      start + count, static_cast<size_t>(results_container_->child_count()));
+  size_t last = std::min(start + count, search_result_views_.size());
   for (size_t i = start; i < last; ++i)
     GetResultViewAt(i)->ClearResultNoRepaint();
 
@@ -168,15 +86,20 @@ int SearchResultListView::GetYSize() {
   return num_results();
 }
 
-views::View* SearchResultListView::GetSelectedView() const {
+views::View* SearchResultListView::GetSelectedView() {
   return IsValidSelectionIndex(selected_index())
              ? GetResultViewAt(selected_index())
              : nullptr;
 }
 
+SearchResultBaseView* SearchResultListView::GetFirstResultView() {
+  DCHECK(results_container_->has_children());
+  return num_results() <= 0 ? nullptr : search_result_views_[0];
+}
+
 int SearchResultListView::DoUpdate() {
   std::vector<SearchResult*> display_results =
-      AppListModel::FilterSearchResultsByDisplayType(
+      SearchModel::FilterSearchResultsByDisplayType(
           results(), SearchResult::DISPLAY_LIST,
           results_container_->child_count());
 
@@ -192,7 +115,6 @@ int SearchResultListView::DoUpdate() {
       result_view->SetVisible(false);
     }
   }
-  UpdateAutoLaunchState();
 
   set_container_score(
       display_results.empty() ? 0 : display_results.front()->relevance());
@@ -213,13 +135,8 @@ void SearchResultListView::UpdateSelectedIndex(int old_selected,
     ScrollRectToVisible(selected_view->bounds());
     selected_view->ClearSelectedAction();
     selected_view->SchedulePaint();
-    selected_view->NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
+    selected_view->NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
   }
-}
-
-void SearchResultListView::ForceAutoLaunchForTest() {
-  if (auto_launch_animation_)
-    AnimationEnded(auto_launch_animation_.get());
 }
 
 void SearchResultListView::Layout() {
@@ -230,61 +147,35 @@ gfx::Size SearchResultListView::CalculatePreferredSize() const {
   return results_container_->GetPreferredSize();
 }
 
+const char* SearchResultListView::GetClassName() const {
+  return "SearchResultListView";
+}
+
 int SearchResultListView::GetHeightForWidth(int w) const {
   return results_container_->GetHeightForWidth(w);
 }
 
-void SearchResultListView::VisibilityChanged(views::View* starting_from,
-                                             bool is_visible) {
-  if (is_visible)
-    UpdateAutoLaunchState();
-  else
-    CancelAutoLaunchTimeout();
-}
-
-void SearchResultListView::AnimationEnded(const gfx::Animation* animation) {
-  DCHECK_EQ(auto_launch_animation_.get(), animation);
-  if (results()->item_count() > 0) {
-    view_delegate_->OpenSearchResult(results()->GetItemAt(0), true,
-                                     ui::EF_NONE);
-  }
-
-  // The auto-launch has to be canceled explicitly. Think that one of searcher
-  // is extremely slow. Sometimes the events would happen in the following
-  // order:
-  //  1. The search results arrive, auto-launch is dispatched
-  //  2. Timed out and auto-launch the first search result
-  //  3. Then another searcher adds search results more
-  // At the step 3, we shouldn't dispatch the auto-launch again.
-  CancelAutoLaunchTimeout();
-}
-
-void SearchResultListView::AnimationProgressed(
-    const gfx::Animation* animation) {
-  DCHECK_EQ(auto_launch_animation_.get(), animation);
-  int indicator_width = auto_launch_animation_->CurrentValueBetween(0, width());
-  auto_launch_indicator_->SetBounds(0, 0, indicator_width,
-                                    kTimeoutIndicatorHeight);
-}
-
 void SearchResultListView::SearchResultActivated(SearchResultView* view,
                                                  int event_flags) {
-  if (view_delegate_ && view->result())
-    view_delegate_->OpenSearchResult(view->result(), false, event_flags);
+  if (view_delegate_ && view->result()) {
+    RecordSearchResultOpenSource(view->result(), view_delegate_->GetModel(),
+                                 view_delegate_->GetSearchModel());
+    view_delegate_->OpenSearchResult(view->result()->id(), event_flags);
+  }
 }
 
 void SearchResultListView::SearchResultActionActivated(SearchResultView* view,
                                                        size_t action_index,
                                                        int event_flags) {
   if (view_delegate_ && view->result()) {
-    view_delegate_->InvokeSearchResultAction(view->result(), action_index,
+    view_delegate_->InvokeSearchResultAction(view->result()->id(), action_index,
                                              event_flags);
   }
 }
 
 void SearchResultListView::OnSearchResultInstalled(SearchResultView* view) {
-  if (delegate_ && view->result())
-    delegate_->OnResultInstalled(view->result());
+  if (main_view_ && view->result())
+    main_view_->OnResultInstalled(view->result());
 }
 
 }  // namespace app_list

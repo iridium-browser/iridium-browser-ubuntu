@@ -12,7 +12,6 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
@@ -115,7 +114,7 @@ bool OpenMultipleTabs(int index, const std::vector<GURL>& urls) {
        it != urls.end(); ++it) {
     DVLOG(1) << "Opening tab: " << it->spec() << " using browser " << index
              << ".";
-    chrome::ShowSingletonTab(browser, *it);
+    ShowSingletonTab(browser, *it);
   }
   return WaitForTabsToLoad(index, urls);
 }
@@ -134,7 +133,7 @@ bool OpenTabFromSourceIndex(int index,
   open_url_params.source_render_frame_id =
       source_contents->GetMainFrame()->GetRoutingID();
   open_url_params.source_render_process_id =
-      source_contents->GetRenderProcessHost()->GetID();
+      source_contents->GetMainFrame()->GetProcess()->GetID();
 
   content::WebContents* new_contents =
       source_contents->OpenURL(open_url_params);
@@ -158,8 +157,8 @@ void MoveTab(int from_index, int to_index, int tab_index) {
 }
 
 bool NavigateTab(int index, const GURL& url) {
-  chrome::NavigateParams params(test()->GetBrowser(index), url,
-                                ui::PAGE_TRANSITION_LINK);
+  NavigateParams params(test()->GetBrowser(index), url,
+                        ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::CURRENT_TAB;
 
   ui_test_utils::NavigateToURL(&params);
@@ -232,12 +231,12 @@ bool GetLocalWindows(int index, ScopedWindowMap* local_windows) {
        w != local_session->windows.end(); ++w) {
     const sessions::SessionWindow& window = w->second->wrapped_window;
     std::unique_ptr<sync_sessions::SyncedSessionWindow> new_window =
-        base::MakeUnique<sync_sessions::SyncedSessionWindow>();
+        std::make_unique<sync_sessions::SyncedSessionWindow>();
     new_window->wrapped_window.window_id.set_id(window.window_id.id());
     for (size_t t = 0; t < window.tabs.size(); ++t) {
       const sessions::SessionTab& tab = *window.tabs.at(t);
       std::unique_ptr<sessions::SessionTab> new_tab =
-          base::MakeUnique<sessions::SessionTab>();
+          std::make_unique<sessions::SessionTab>();
       new_tab->navigations.resize(tab.navigations.size());
       std::copy(tab.navigations.begin(), tab.navigations.end(),
                 new_tab->navigations.begin());

@@ -75,6 +75,7 @@ class RecordTest;
 class SequenceTest;
 class SerializedScriptValue;
 class ShadowRoot;
+class StaticSelection;
 class TypeConversions;
 class UnionTypesTest;
 class ScrollState;
@@ -82,8 +83,7 @@ template <typename NodeType>
 class StaticNodeTypeList;
 using StaticNodeList = StaticNodeTypeList<Node>;
 
-class Internals final : public GarbageCollected<Internals>,
-                        public ScriptWrappable {
+class Internals final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -104,18 +104,18 @@ class Internals final : public GarbageCollected<Internals>,
   int getResourcePriority(const String& url, Document*);
   String getResourceHeader(const String& url, const String& header, Document*);
 
-  bool isSharingStyle(Element*, Element*) const;
-
   CSSStyleDeclaration* computedStyleIncludingVisitedInfo(Node*) const;
 
-  void setBrowserControlsState(float height, bool shrinks_layout);
+  void setBrowserControlsState(float top_height,
+                               float bottom_height,
+                               bool shrinks_layout);
+  void setBrowserControlsShownRatio(float);
+
+  Node* effectiveRootScroller(Document*);
 
   ShadowRoot* createUserAgentShadowRoot(Element* host);
 
   ShadowRoot* shadowRoot(Element* host);
-  ShadowRoot* youngestShadowRoot(Element* host);
-  ShadowRoot* oldestShadowRoot(Element* host);
-  ShadowRoot* youngerShadowRoot(Node* shadow, ExceptionState&);
   String shadowRootType(const Node*, ExceptionState&) const;
   bool hasShadowInsertionPoint(const Node*, ExceptionState&) const;
   bool hasContentElement(const Node*, ExceptionState&) const;
@@ -154,7 +154,6 @@ class Internals final : public GarbageCollected<Internals>,
 
   unsigned updateStyleAndReturnAffectedElementCount(ExceptionState&) const;
   unsigned needsLayoutCount(ExceptionState&) const;
-  unsigned forceLayoutCount(ExceptionState&) const;
   unsigned hitTestCount(Document*, ExceptionState&) const;
   unsigned hitTestCacheHits(Document*, ExceptionState&) const;
   Element* elementFromPoint(Document*,
@@ -165,7 +164,10 @@ class Internals final : public GarbageCollected<Internals>,
                             ExceptionState&) const;
   void clearHitTestCache(Document*, ExceptionState&) const;
 
+  Element* innerEditorElement(Element* container, ExceptionState&) const;
+
   String visiblePlaceholder(Element*);
+  bool isValidationMessageVisible(Element*);
   void selectColorInColorChooser(Element*, const String& color_value);
   void endColorChooser(Element*);
   bool hasAutofocusRequest(Document*);
@@ -189,6 +191,14 @@ class Internals final : public GarbageCollected<Internals>,
                                   const String& marker_type,
                                   unsigned index,
                                   ExceptionState&);
+  unsigned markerBackgroundColorForNode(Node*,
+                                        const String& marker_type,
+                                        unsigned index,
+                                        ExceptionState&);
+  unsigned markerUnderlineColorForNode(Node*,
+                                       const String& marker_type,
+                                       unsigned index,
+                                       ExceptionState&);
   void addTextMatchMarker(const Range*,
                           const String& match_status,
                           ExceptionState&);
@@ -202,6 +212,13 @@ class Internals final : public GarbageCollected<Internals>,
                                  const String& thickness_value,
                                  const String& background_color_value,
                                  ExceptionState&);
+  void addSuggestionMarker(const Range*,
+                           const Vector<String>& suggestions,
+                           const String& suggestion_highlight_color_value,
+                           const String& underline_color_value,
+                           const String& thickness_value,
+                           const String& background_color_value,
+                           ExceptionState&);
   void setTextMatchMarkersActive(Node*,
                                  unsigned start_offset,
                                  unsigned end_offset,
@@ -218,6 +235,7 @@ class Internals final : public GarbageCollected<Internals>,
   bool elementShouldAutoComplete(Element* input_element, ExceptionState&);
   String suggestedValue(Element*, ExceptionState&);
   void setSuggestedValue(Element*, const String&, ExceptionState&);
+  void setAutofilledValue(Element*, const String&, ExceptionState&);
   void setEditingValue(Element* input_element, const String&, ExceptionState&);
   void setAutofilled(Element*, bool enabled, ExceptionState&);
 
@@ -252,15 +270,10 @@ class Internals final : public GarbageCollected<Internals>,
                                                long height,
                                                Document*,
                                                ExceptionState&);
-  DOMRectReadOnly* bestZoomableAreaForTouchPoint(long x,
-                                                 long y,
-                                                 long width,
-                                                 long height,
-                                                 Document*,
-                                                 ExceptionState&);
 
   int lastSpellCheckRequestSequence(Document*, ExceptionState&);
   int lastSpellCheckProcessedSequence(Document*, ExceptionState&);
+  void cancelCurrentSpellCheckRequest(Document*, ExceptionState&);
   String idleTimeSpellCheckerState(Document*, ExceptionState&);
   void runIdleTimeSpellChecker(Document*, ExceptionState&);
 
@@ -269,7 +282,7 @@ class Internals final : public GarbageCollected<Internals>,
 
   unsigned mediaKeysCount();
   unsigned mediaKeySessionCount();
-  unsigned suspendableObjectCount(Document*);
+  unsigned pausableObjectCount(Document*);
   unsigned wheelEventHandlerCount(Document*) const;
   unsigned scrollEventHandlerCount(Document*) const;
   unsigned touchStartOrMoveEventHandlerCount(Document*) const;
@@ -303,7 +316,6 @@ class Internals final : public GarbageCollected<Internals>,
 
   bool hasSpellingMarker(Document*, int from, int length, ExceptionState&);
   bool hasGrammarMarker(Document*, int from, int length, ExceptionState&);
-  void setSpellCheckingEnabled(bool, ExceptionState&);
   void replaceMisspelled(Document*, const String&, ExceptionState&);
 
   bool canHyphenate(const AtomicString& locale);
@@ -338,6 +350,7 @@ class Internals final : public GarbageCollected<Internals>,
 
   String scrollingStateTreeAsText(Document*) const;
   String mainThreadScrollingReasons(Document*, ExceptionState&) const;
+  void markGestureScrollRegionDirty(Document*, ExceptionState&) const;
   DOMRectList* nonFastScrollableRects(Document*, ExceptionState&) const;
 
   void evictAllResources() const;
@@ -385,6 +398,8 @@ class Internals final : public GarbageCollected<Internals>,
   void mediaPlayerPlayingRemotelyChanged(HTMLMediaElement*, bool);
   void setMediaElementNetworkState(HTMLMediaElement*, int state);
   void setPersistent(HTMLVideoElement*, bool);
+  void forceStaleStateForMediaElement(HTMLMediaElement*);
+  bool isMediaElementSuspended(HTMLMediaElement*);
 
   void registerURLSchemeAsBypassingContentSecurityPolicy(const String& scheme);
   void registerURLSchemeAsBypassingContentSecurityPolicy(
@@ -413,8 +428,8 @@ class Internals final : public GarbageCollected<Internals>,
   DOMRectList* draggableRegions(Document*, ExceptionState&);
   DOMRectList* nonDraggableRegions(Document*, ExceptionState&);
 
-  DOMArrayBuffer* serializeObject(PassRefPtr<SerializedScriptValue>) const;
-  PassRefPtr<SerializedScriptValue> deserializeBuffer(DOMArrayBuffer*) const;
+  DOMArrayBuffer* serializeObject(scoped_refptr<SerializedScriptValue>) const;
+  scoped_refptr<SerializedScriptValue> deserializeBuffer(DOMArrayBuffer*) const;
 
   DOMArrayBuffer* serializeWithInlineWasm(ScriptValue) const;
   ScriptValue deserializeBufferContainingWasm(ScriptState*,
@@ -439,6 +454,7 @@ class Internals final : public GarbageCollected<Internals>,
   int selectPopupItemStyleFontHeight(Node*, int);
   void resetTypeAheadSession(HTMLSelectElement*);
 
+  StaticSelection* getSelectionInFlatTree(DOMWindow*, ExceptionState&);
   Node* visibleSelectionAnchorNode();
   unsigned visibleSelectionAnchorOffset();
   Node* visibleSelectionFocusNode();
@@ -473,11 +489,9 @@ class Internals final : public GarbageCollected<Internals>,
   ScriptPromise promiseCheckOverload(ScriptState*, Document*);
   ScriptPromise promiseCheckOverload(ScriptState*, Location*, long, long);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   void setValueForUser(HTMLInputElement*, const String&);
-
-  String textSurroundingNode(Node*, int x, int y, unsigned long max_length);
 
   void setFocused(bool);
   void setInitialFocus(bool);
@@ -486,12 +500,12 @@ class Internals final : public GarbageCollected<Internals>,
 
   void setNetworkConnectionInfoOverride(bool,
                                         const String&,
+                                        const String&,
+                                        unsigned long http_rtt_msec,
                                         double downlink_max_mbps,
                                         ExceptionState&);
-  void setNetworkQualityInfoOverride(const String&,
-                                     unsigned long transport_rtt_msec,
-                                     double downlink_throughput_mbps,
-                                     ExceptionState&);
+  void setSaveDataEnabled(bool);
+
   void clearNetworkConnectionInfoOverride();
 
   unsigned countHitRegions(CanvasRenderingContext*);
@@ -568,10 +582,22 @@ class Internals final : public GarbageCollected<Internals>,
   // Intentional crash.
   void crash();
 
+  // Exposed for testing of inspector overlay.
+  String evaluateInInspectorOverlay(const String& script);
+
   // Overrides if the device is low-end (low on memory).
   void setIsLowEndDevice(bool);
   // Returns if the device is low-end.
   bool isLowEndDevice() const;
+
+  // Returns a list of the supported text encoding aliases ("UTF-8", "GBK",
+  // "windows-1252", "Latin-1", "iso-8859-1", etc).
+  // The order is not defined.
+  Vector<String> supportedTextEncodingLabels() const;
+
+  void simulateRasterUnderInvalidations(bool enable);
+
+  void BypassLongCompileThresholdOnce(ExceptionState&);
 
  private:
   explicit Internals(ExecutionContext*);

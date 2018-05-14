@@ -4,6 +4,8 @@
 
 #include "ash/wm/native_cursor_manager_ash_mus.h"
 
+#include <memory>
+
 #include "ash/display/cursor_window_controller.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/shell.h"
@@ -13,47 +15,12 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/cursor/image_cursors.h"
+#include "ui/base/cursor/ozone/cursor_data_factory_ozone.h"
 #include "ui/base/layout.h"
 #include "ui/wm/core/cursor_manager.h"
 
-#if defined(USE_OZONE)
-#include "ui/base/cursor/ozone/cursor_data_factory_ozone.h"
-#endif
-
 namespace ash {
 namespace {
-
-// We want to forward these things to the window tree client.
-
-void SetCursorOnAllRootWindows(gfx::NativeCursor cursor) {
-  ui::CursorData mojo_cursor;
-  if (cursor.platform()) {
-#if defined(USE_OZONE)
-    mojo_cursor = ui::CursorDataFactoryOzone::GetCursorData(cursor.platform());
-#else
-    NOTIMPLEMENTED()
-        << "Can't pass native platform cursors on non-ozone platforms";
-    mojo_cursor = ui::CursorData(ui::CursorType::kPointer);
-#endif
-  } else {
-    mojo_cursor = ui::CursorData(cursor.native_type());
-  }
-
-  // As the window manager, tell mus to use |mojo_cursor| everywhere. We do
-  // this instead of trying to set per-window because otherwise we run into the
-  // event targeting issue.
-  Shell::window_manager_client()->SetGlobalOverrideCursor(mojo_cursor);
-
-  // Make sure the local state is set properly, so that local queries show that
-  // we set the cursor.
-  for (aura::Window* root : Shell::Get()->GetAllRootWindows())
-    root->GetHost()->SetCursor(cursor);
-
-  Shell::Get()
-      ->window_tree_host_manager()
-      ->cursor_window_controller()
-      ->SetCursor(cursor);
-}
 
 void NotifyCursorVisibilityChange(bool visible) {
   // Communicate the cursor visibility state to the mus server.
@@ -82,16 +49,14 @@ void NotifyMouseEventsEnableStateChange(bool enabled) {
 }  // namespace
 
 NativeCursorManagerAshMus::NativeCursorManagerAshMus() {
-#if defined(USE_OZONE)
   // If we're in a mus client, we aren't going to have all of ozone initialized
   // even though we're in an ozone build. All the hard coded USE_OZONE ifdefs
-  // that handle cursor code expect that there will be a CursorFactoryOzone
-  // instance. Partially initialize the ozone cursor internals here, like we
-  // partially initialize other ozone subsystems in
+  // that handle cursor code in //content/ expect that there will be a
+  // CursorFactoryOzone instance. Partially initialize the ozone cursor
+  // internals here, like we partially initialize other ozone subsystems in
   // ChromeBrowserMainExtraPartsViews.
-  cursor_factory_ozone_ = base::MakeUnique<ui::CursorDataFactoryOzone>();
-  image_cursors_ = base::MakeUnique<ui::ImageCursors>();
-#endif
+  cursor_factory_ozone_ = std::make_unique<ui::CursorDataFactoryOzone>();
+  image_cursors_ = std::make_unique<ui::ImageCursors>();
 }
 
 NativeCursorManagerAshMus::~NativeCursorManagerAshMus() = default;
@@ -204,6 +169,44 @@ void NativeCursorManagerAshMus::SetMouseEventsEnabled(
   SetVisibility(delegate->IsCursorVisible(), delegate);
 
   NotifyMouseEventsEnableStateChange(enabled);
+}
+
+void NativeCursorManagerAshMus::SetCursorOnAllRootWindows(
+    gfx::NativeCursor cursor) {
+  ui::CursorData mojo_cursor;
+
+  // Only send a real mojo cursor to the window server when native cursors are
+  // enabled. Otherwise send a kNone cursor as the global override cursor. If
+  // you need to debug window manager side cursor window positioning, setting
+  // |native_cursor_enabled| to always be true will display both.
+  if (native_cursor_enabled_) {
+    if (cursor.platform()) {
+      mojo_cursor =
+          ui::CursorDataFactoryOzone::GetCursorData(cursor.platform());
+    } else {
+      mojo_cursor = ui::CursorData(cursor.native_type());
+    }
+  } else {
+    mojo_cursor = ui::CursorData(ui::CursorType::kNone);
+  }
+
+  if (!mojo_cursor.IsSameAs(last_cursor_sent_to_window_server_)) {
+    // As the window manager, tell mus to use |mojo_cursor| everywhere. We do
+    // this instead of trying to set per-window because otherwise we run into
+    // the event targeting issue.
+    last_cursor_sent_to_window_server_ = mojo_cursor;
+    Shell::window_manager_client()->SetGlobalOverrideCursor(mojo_cursor);
+  }
+
+  // Make sure the local state is set properly, so that local queries show that
+  // we set the cursor.
+  for (aura::Window* root : Shell::Get()->GetAllRootWindows())
+    root->GetHost()->SetCursor(cursor);
+
+  Shell::Get()
+      ->window_tree_host_manager()
+      ->cursor_window_controller()
+      ->SetCursor(cursor);
 }
 
 }  // namespace ash

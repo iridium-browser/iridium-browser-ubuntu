@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 
 #include <stddef.h>
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -14,7 +15,6 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
@@ -280,7 +280,7 @@ void ExtractUrls(scoped_refptr<Action> action, Profile* profile) {
       if (action->args()->GetString(url_index, &url_string) &&
           ResolveUrl(action->page_url(), url_string, &arg_url)) {
         action->mutable_args()->Set(
-            url_index, base::MakeUnique<base::Value>(kArgUrlPlaceholder));
+            url_index, std::make_unique<base::Value>(kArgUrlPlaceholder));
       }
       break;
     }
@@ -312,7 +312,7 @@ void ExtractUrls(scoped_refptr<Action> action, Profile* profile) {
         GetUrlForTabId(tab_id, profile, &arg_url, &arg_incognito);
         if (arg_url.is_valid()) {
           action->mutable_args()->Set(
-              url_index, base::MakeUnique<base::Value>(kArgUrlPlaceholder));
+              url_index, std::make_unique<base::Value>(kArgUrlPlaceholder));
         }
       } else if (action->mutable_args()->GetList(url_index, &tab_list)) {
         // A list of possible IDs to translate.  Work through in reverse order
@@ -322,13 +322,13 @@ void ExtractUrls(scoped_refptr<Action> action, Profile* profile) {
           if (tab_list->GetInteger(i, &tab_id) &&
               GetUrlForTabId(tab_id, profile, &arg_url, &arg_incognito)) {
             if (!arg_incognito)
-              tab_list->Set(i, base::MakeUnique<base::Value>(arg_url.spec()));
+              tab_list->Set(i, std::make_unique<base::Value>(arg_url.spec()));
             extracted_index = i;
           }
         }
         if (extracted_index >= 0) {
           tab_list->Set(extracted_index,
-                        base::MakeUnique<base::Value>(kArgUrlPlaceholder));
+                        std::make_unique<base::Value>(kArgUrlPlaceholder));
         }
       }
       break;
@@ -439,8 +439,7 @@ void LogApiActivity(content::BrowserContext* browser_context,
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::BindOnce(&LogApiActivityOnUI, browser_context, extension_id,
-                       activity_name, base::Passed(args.CreateDeepCopy()),
-                       type));
+                       activity_name, args.CreateDeepCopy(), type));
     return;
   }
   LogApiActivityOnUI(browser_context, extension_id, activity_name,
@@ -502,7 +501,7 @@ void LogWebRequestActivity(content::BrowserContext* browser_context,
         BrowserThread::UI, FROM_HERE,
         base::BindOnce(&LogWebRequestActivityOnUI, browser_context,
                        extension_id, url, is_incognito, api_call,
-                       base::Passed(&details)));
+                       std::move(details)));
     return;
   }
   LogWebRequestActivityOnUI(browser_context, extension_id, url, is_incognito,
@@ -538,12 +537,11 @@ void SetActivityHandlers() {
 
 // SET THINGS UP. --------------------------------------------------------------
 
-static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<ActivityLog>>::DestructorAtExit g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<ActivityLog>>::
+    DestructorAtExit g_activity_log_factory = LAZY_INSTANCE_INITIALIZER;
 
 BrowserContextKeyedAPIFactory<ActivityLog>* ActivityLog::GetFactoryInstance() {
-  return g_factory.Pointer();
+  return g_activity_log_factory.Pointer();
 }
 
 // static
@@ -560,7 +558,6 @@ ActivityLog::ActivityLog(content::BrowserContext* context)
       extension_system_(ExtensionSystem::Get(context)),
       db_enabled_(false),
       testing_mode_(false),
-      has_threads_(true),
       extension_registry_observer_(this),
       active_consumers_(0),
       cached_consumer_count_(0),
@@ -577,14 +574,6 @@ ActivityLog::ActivityLog(content::BrowserContext* context)
       profile_->GetPrefs()->GetInteger(prefs::kWatchdogExtensionActive);
 
   observers_ = new base::ObserverListThreadSafe<Observer>;
-
-  // Check that the right threads exist for logging to the database.
-  // If not, we shouldn't try to do things that require them.
-  if (!BrowserThread::IsMessageLoopValid(BrowserThread::DB) ||
-      !BrowserThread::IsMessageLoopValid(BrowserThread::FILE) ||
-      !BrowserThread::IsMessageLoopValid(BrowserThread::IO)) {
-    has_threads_ = false;
-  }
 
   extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
   CheckActive(true);  // use cached
@@ -645,8 +634,6 @@ void ActivityLog::ChooseDatabasePolicy() {
 }
 
 bool ActivityLog::IsDatabaseEnabled() {
-  // Make sure we are not enabled when there are no threads.
-  DCHECK(has_threads_ || !db_enabled_);
   return db_enabled_;
 }
 
@@ -859,9 +846,8 @@ void ActivityLog::CheckActive(bool use_cached) {
   bool has_consumer =
       active_consumers_ || (use_cached && cached_consumer_count_);
   bool needs_db =
-      has_threads_ && (has_consumer ||
-                       base::CommandLine::ForCurrentProcess()->HasSwitch(
-                           switches::kEnableExtensionActivityLogging));
+      has_consumer || base::CommandLine::ForCurrentProcess()->HasSwitch(
+                          switches::kEnableExtensionActivityLogging);
   bool should_be_active = needs_db || has_consumer;
 
   if (should_be_active == is_active_)

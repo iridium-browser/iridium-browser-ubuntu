@@ -45,7 +45,7 @@ class ServiceClient::Core
 
  private:
   friend class base::RefCountedThreadSafe<Core>;
-  ~Core() override {}
+  ~Core() override = default;
 
   enum PendingRequestType {
     PENDING_REQUEST_NONE,
@@ -150,8 +150,7 @@ void ServiceClient::Core::HandleResponse(const net::URLFetcher* source) {
               base::JSONReader::Read(data);
           base::DictionaryValue *dict;
           std::string code;
-          if (message_value.get() &&
-              message_value->IsType(base::Value::Type::DICTIONARY) &&
+          if (message_value.get() && message_value->is_dict() &&
               message_value->GetAsDictionary(&dict) &&
               dict->GetString("data.authorizationCode", &code)) {
             delegate_->OnHostRegistered(code);
@@ -174,8 +173,7 @@ ServiceClient::ServiceClient(const std::string& chromoting_hosts_url,
   core_ = new Core(chromoting_hosts_url, context_getter);
 }
 
-ServiceClient::~ServiceClient() {
-}
+ServiceClient::~ServiceClient() = default;
 
 void ServiceClient::RegisterHost(
     const std::string& host_id,

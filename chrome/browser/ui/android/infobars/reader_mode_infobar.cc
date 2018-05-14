@@ -7,7 +7,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "components/infobars/core/infobar_delegate.h"
@@ -60,12 +59,12 @@ base::android::ScopedJavaLocalRef<jobject> ReaderModeInfoBar::GetTab(
 
 void ReaderModeInfoBar::ProcessButton(int action) {}
 
-void Create(JNIEnv* env,
-            const JavaParamRef<jclass>& j_caller,
-            const JavaParamRef<jobject>& j_tab) {
+void JNI_ReaderModeInfoBar_Create(JNIEnv* env,
+                                  const JavaParamRef<jclass>& j_caller,
+                                  const JavaParamRef<jobject>& j_tab) {
   InfoBarService* service = InfoBarService::FromWebContents(
       TabAndroid::GetNativeTab(env, j_tab)->web_contents());
 
-  service->AddInfoBar(base::MakeUnique<ReaderModeInfoBar>(
-      base::MakeUnique<ReaderModeInfoBarDelegate>()));
+  service->AddInfoBar(std::make_unique<ReaderModeInfoBar>(
+      std::make_unique<ReaderModeInfoBarDelegate>()));
 }

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/sync/android/model_type_helper.h"
-
 #include <string>
 
 #include "base/android/jni_android.h"
@@ -16,7 +14,8 @@ using base::android::ScopedJavaLocalRef;
 
 namespace syncer {
 
-static ScopedJavaLocalRef<jstring> ModelTypeToNotificationType(
+static ScopedJavaLocalRef<jstring>
+JNI_ModelTypeHelper_ModelTypeToNotificationType(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz,
     jint model_type_int) {
@@ -26,10 +25,6 @@ static ScopedJavaLocalRef<jstring> ModelTypeToNotificationType(
     NOTREACHED() << "No string representation of model type " << model_type;
   }
   return base::android::ConvertUTF8ToJavaString(env, model_type_string);
-}
-
-bool RegisterModelTypeHelperJni(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace syncer

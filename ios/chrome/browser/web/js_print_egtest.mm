@@ -9,12 +9,21 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/testing/earl_grey/disabled_test_macros.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+namespace {
+// Matcher for the cancel button on the printer options view.
+id<GREYMatcher> PrintOptionsCancelButton() {
+  return grey_allOf(grey_accessibilityLabel(@"Cancel"),
+                    grey_kindOfClass([UIButton class]), nil);
+}
+}  // namespace
 
 // Test case for bringing up the print dialog when a web site's JavaScript runs
 // "window.print".
@@ -42,17 +51,12 @@
   [ChromeEarlGrey tapWebViewElementWithID:@"printButton"];
 
   // Test if print dialog appeared.
-  id<GREYMatcher> printerOption = grey_allOf(
-      grey_accessibilityLabel(@"Printer Options"),
-      grey_not(grey_accessibilityTrait(UIAccessibilityTraitHeader)), nil);
-  [[EarlGrey selectElementWithMatcher:printerOption]
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Printer Options")]
       assertWithMatcher:grey_sufficientlyVisible()];
 
   // Clean up and close print dialog.
-  id<GREYMatcher> cancelButton =
-      grey_allOf(grey_accessibilityLabel(@"Cancel"),
-                 grey_accessibilityTrait(UIAccessibilityTraitButton), nil);
-  [[EarlGrey selectElementWithMatcher:cancelButton] performAction:grey_tap()];
+  [[EarlGrey selectElementWithMatcher:PrintOptionsCancelButton()]
+      performAction:grey_tap()];
 }
 
 @end

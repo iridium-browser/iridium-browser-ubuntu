@@ -8,7 +8,7 @@
 #import "ios/chrome/browser/ui/stack_view/card_set.h"
 #import "ios/chrome/browser/ui/stack_view/stack_view_controller.h"
 
-@class ToolbarController;
+@class ToolbarController, ToolsMenuCoordinator;
 
 namespace {
 // Styles used to specify the transition animation type for presenting and
@@ -41,9 +41,6 @@ typedef enum {
 // initial size configuration, adding as subviews of the scroll view, and
 // attaching to the card sets.
 - (void)setUpDisplayViews;
-
-// Registers listeners for the appropriate notifications.
-- (void)registerForNotifications;
 
 // Used during |-dealloc| and |-didReceiveMemoryWaring| to clear any references
 // to the cards and removes |self| as an observer to any notifications.
@@ -82,14 +79,11 @@ typedef enum {
 // The owner of |transitionToolbarController|.
 @property(nonatomic, strong) id<ToolbarOwner> transitionToolbarOwner;
 
-// The toolbar controller used in transition animations.
-@property(nonatomic, strong) ToolbarController* transitionToolbarController;
+// Snapshot of the toolbar, used in transition.
+@property(nonatomic, strong) UIView* transitionToolbarSnapshot;
 
 // The dummy view used in the transition animation.
 @property(nonatomic, strong) UIView* dummyToolbarBackgroundView;
-
-// The cached frame of the transition toolbar's frame.
-@property(nonatomic, assign) CGRect transitionToolbarFrame;
 
 // Records which card was tapped mid-presentation animation, if any.
 // TODO(crbug.com/546209): Implement reversed animations for dismissing with a
@@ -98,6 +92,10 @@ typedef enum {
 
 // |YES| if there is card set animation being processed.
 @property(nonatomic, readonly) BOOL inActiveDeckChangeAnimation;
+
+// Coordinator for the tools menu UI.
+@property(nonatomic, readonly, strong)
+    ToolsMenuCoordinator* toolsMenuCoordinator;
 
 @end
 

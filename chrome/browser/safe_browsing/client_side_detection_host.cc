@@ -22,25 +22,24 @@
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/common/safebrowsing_messages.h"
-#include "components/safe_browsing/csd.pb.h"
-#include "components/safe_browsing_db/database_manager.h"
+#include "components/safe_browsing/db/database_manager.h"
+#include "components/safe_browsing/db/whitelist_checker_client.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "content/public/common/url_constants.h"
 #include "net/http/http_response_headers.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "url/gurl.h"
 
 using content::BrowserThread;
 using content::NavigationEntry;
-using content::ResourceRequestDetails;
 using content::ResourceType;
 using content::WebContents;
 
@@ -213,24 +212,39 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
 
   void CheckSafeBrowsingDatabase(const GURL& url) {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
-    // We don't want to call the classification callbacks from the IO
-    // thread so we simply pass the results of this method to CheckCache()
-    // which is called on the UI thread;
     PreClassificationCheckFailures phishing_reason = NO_CLASSIFY_MAX;
     PreClassificationCheckFailures malware_reason = NO_CLASSIFY_MAX;
     if (!database_manager_.get()) {
       // We cannot check the Safe Browsing whitelists so we stop here
       // for safety.
-      malware_reason = phishing_reason = NO_CLASSIFY_NO_DATABASE_MANAGER;
-    } else {
-      if (database_manager_->MatchCsdWhitelistUrl(url)) {
-        DVLOG(1) << "Skipping phishing classification for URL: " << url
-                 << " because it matches the csd whitelist";
-        phishing_reason = NO_CLASSIFY_MATCH_CSD_WHITELIST;
-      }
-      if (database_manager_->IsMalwareKillSwitchOn()) {
-        malware_reason = NO_CLASSIFY_KILLSWITCH;
-      }
+      OnWhitelistCheckDoneOnIO(url, NO_CLASSIFY_NO_DATABASE_MANAGER,
+                               NO_CLASSIFY_NO_DATABASE_MANAGER,
+                               /*match_whitelist=*/false);
+      return;
+    }
+
+    // Query the CSD Whitelist asynchronously. We're already on the IO thread so
+    // can call WhitelistCheckerClient directly.
+    base::Callback<void(bool)> result_callback =
+        base::Bind(&ClientSideDetectionHost::ShouldClassifyUrlRequest::
+                       OnWhitelistCheckDoneOnIO,
+                   this, url, phishing_reason, malware_reason);
+    WhitelistCheckerClient::StartCheckCsdWhitelist(database_manager_, url,
+                                                   result_callback);
+  }
+
+  void OnWhitelistCheckDoneOnIO(const GURL& url,
+                                PreClassificationCheckFailures phishing_reason,
+                                PreClassificationCheckFailures malware_reason,
+                                bool match_whitelist) {
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+    // We don't want to call the classification callbacks from the IO
+    // thread so we simply pass the results of this method to CheckCache()
+    // which is called on the UI thread;
+    if (match_whitelist) {
+      DVLOG(1) << "Skipping phishing classification for URL: " << url
+               << " because it matches the csd whitelist";
+      phishing_reason = NO_CLASSIFY_MATCH_CSD_WHITELIST;
     }
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
@@ -337,6 +351,9 @@ ClientSideDetectionHost::ClientSideDetectionHost(WebContents* tab)
     database_manager_ = sb_service->database_manager();
     ui_manager_->AddObserver(this);
   }
+  registry_.AddInterface(base::BindRepeating(
+      &ClientSideDetectionHost::PhishingDetectorClientRequest,
+      base::Unretained(this)));
 }
 
 ClientSideDetectionHost::~ClientSideDetectionHost() {
@@ -344,20 +361,32 @@ ClientSideDetectionHost::~ClientSideDetectionHost() {
     ui_manager_->RemoveObserver(this);
 }
 
-bool ClientSideDetectionHost::OnMessageReceived(
-    const IPC::Message& message,
-    content::RenderFrameHost* render_frame_host) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(ClientSideDetectionHost, message)
-    IPC_MESSAGE_HANDLER(SafeBrowsingHostMsg_PhishingDetectionDone,
-                        OnPhishingDetectionDone)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
+void ClientSideDetectionHost::PhishingDetectorClientRequest(
+    mojom::PhishingDetectorClientRequest request) {
+  phishing_detector_client_bindings_.AddBinding(this, std::move(request));
+}
+
+void ClientSideDetectionHost::OnInterfaceRequestFromFrame(
+    content::RenderFrameHost* render_frame_host,
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle* interface_pipe) {
+  registry_.TryBindInterface(interface_name, interface_pipe);
 }
 
 void ClientSideDetectionHost::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
+  if (browse_info_.get() && should_extract_malware_features_ &&
+      navigation_handle->HasCommitted() && !navigation_handle->IsDownload() &&
+      !navigation_handle->IsSameDocument()) {
+    content::ResourceType resource_type =
+        navigation_handle->IsInMainFrame() ? content::RESOURCE_TYPE_MAIN_FRAME
+                                           : content::RESOURCE_TYPE_SUB_FRAME;
+    UpdateIPUrlMap(navigation_handle->GetSocketAddress().host() /* ip */,
+                   navigation_handle->GetURL().spec() /* url */,
+                   navigation_handle->IsPost() ? "POST" : "GET",
+                   navigation_handle->GetReferrer().url.spec(), resource_type);
+  }
+
   if (!navigation_handle->IsInMainFrame() || !navigation_handle->HasCommitted())
     return;
 
@@ -378,7 +407,7 @@ void ClientSideDetectionHost::DidFinishNavigation(
   // report request we have to cancel it to make sure we don't display
   // an interstitial for the wrong page.  Note that this won't cancel
   // the server ping back but only cancel the showing of the
-  // interstial.
+  // interstitial.
   weak_factory_.InvalidateWeakPtrs();
 
   if (!csd_service_) {
@@ -413,6 +442,16 @@ void ClientSideDetectionHost::DidFinishNavigation(
                  weak_factory_.GetWeakPtr()),
       web_contents(), csd_service_, database_manager_.get(), this);
   classification_request_->Start();
+}
+
+void ClientSideDetectionHost::SubresourceResponseStarted(
+    const GURL& url,
+    const GURL& referrer,
+    const std::string& method,
+    content::ResourceType resource_type,
+    const std::string& ip) {
+  if (browse_info_.get() && should_extract_malware_features_ && url.is_valid())
+    UpdateIPUrlMap(ip, url.spec(), method, referrer.spec(), resource_type);
 }
 
 void ClientSideDetectionHost::OnSafeBrowsingHit(
@@ -463,8 +502,9 @@ void ClientSideDetectionHost::OnPhishingPreClassificationDone(
     DVLOG(1) << "Instruct renderer to start phishing detection for URL: "
              << browse_info_->url;
     content::RenderFrameHost* rfh = web_contents()->GetMainFrame();
-    rfh->Send(new SafeBrowsingMsg_StartPhishingDetection(rfh->GetRoutingID(),
-                                                         browse_info_->url));
+    safe_browsing::mojom::PhishingDetectorPtr phishing_detector;
+    rfh->GetRemoteInterfaces()->GetInterface(&phishing_detector);
+    phishing_detector->StartPhishingDetection(browse_info_->url);
   }
 }
 
@@ -513,7 +553,7 @@ void ClientSideDetectionHost::MaybeStartMalwareFeatureExtraction() {
   }
 }
 
-void ClientSideDetectionHost::OnPhishingDetectionDone(
+void ClientSideDetectionHost::PhishingDetectionDone(
     const std::string& verdict_str) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // There is something seriously wrong if there is no service class but
@@ -571,10 +611,10 @@ void ClientSideDetectionHost::MaybeShowPhishingWarning(GURL phishing_url,
           safe_browsing::ThreatSource::CLIENT_SIDE_DETECTION;
       resource.web_contents_getter = safe_browsing::SafeBrowsingUIManager::
           UnsafeResource::GetWebContentsGetter(
-              web_contents()->GetRenderProcessHost()->GetID(),
+              web_contents()->GetMainFrame()->GetProcess()->GetID(),
               web_contents()->GetMainFrame()->GetRoutingID());
       if (!ui_manager_->IsWhitelisted(resource)) {
-        // We need to stop any pending navigations, otherwise the interstital
+        // We need to stop any pending navigations, otherwise the interstitial
         // might not get created properly.
         web_contents()->GetController().DiscardNonCommittedEntries();
       }
@@ -607,11 +647,11 @@ void ClientSideDetectionHost::MaybeShowMalwareWarning(GURL original_url,
           safe_browsing::ThreatSource::CLIENT_SIDE_DETECTION;
       resource.web_contents_getter = safe_browsing::SafeBrowsingUIManager::
           UnsafeResource::GetWebContentsGetter(
-              web_contents()->GetRenderProcessHost()->GetID(),
+              web_contents()->GetMainFrame()->GetProcess()->GetID(),
               web_contents()->GetMainFrame()->GetRoutingID());
 
       if (!ui_manager_->IsWhitelisted(resource)) {
-        // We need to stop any pending navigations, otherwise the interstital
+        // We need to stop any pending navigations, otherwise the interstitial
         // might not get created properly.
         web_contents()->GetController().DiscardNonCommittedEntries();
       }
@@ -680,18 +720,6 @@ void ClientSideDetectionHost::UpdateIPUrlMap(const std::string& ip,
     }
   } else if (it->second.size() < kMaxUrlsPerIP) {
     it->second.push_back(IPUrlInfo(url, method, referrer, resource_type));
-  }
-}
-
-void ClientSideDetectionHost::DidGetResourceResponseStart(
-    const content::ResourceRequestDetails& details) {
-  if (browse_info_.get() && should_extract_malware_features_ &&
-      details.url.is_valid()) {
-    UpdateIPUrlMap(details.socket_address.host() /* ip */,
-                   details.url.spec() /* url */,
-                   details.method,
-                   details.referrer,
-                   details.resource_type);
   }
 }
 

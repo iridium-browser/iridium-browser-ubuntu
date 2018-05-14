@@ -15,7 +15,6 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/console_message_level.h"
 
 namespace subresource_filter {
@@ -63,7 +62,7 @@ content::NavigationThrottle::ThrottleCheckResult
 SubframeNavigationFilteringThrottle::WillProcessResponse() {
   DCHECK_NE(load_policy_, LoadPolicy::DISALLOW);
   NotifyLoadPolicy();
-  return content::NavigationThrottle::ThrottleCheckResult::PROCEED;
+  return PROCEED;
 }
 
 const char* SubframeNavigationFilteringThrottle::GetNameForLogging() {
@@ -75,13 +74,13 @@ SubframeNavigationFilteringThrottle::DeferToCalculateLoadPolicy(
     ThrottlingStage stage) {
   DCHECK_NE(load_policy_, LoadPolicy::DISALLOW);
   if (load_policy_ == LoadPolicy::WOULD_DISALLOW)
-    return content::NavigationThrottle::ThrottleCheckResult::PROCEED;
+    return PROCEED;
   parent_frame_filter_->GetLoadPolicyForSubdocument(
       navigation_handle()->GetURL(),
       base::Bind(&SubframeNavigationFilteringThrottle::OnCalculatedLoadPolicy,
                  weak_ptr_factory_.GetWeakPtr(), stage));
   last_defer_timestamp_ = base::TimeTicks::Now();
-  return content::NavigationThrottle::ThrottleCheckResult::DEFER;
+  return DEFER;
 }
 
 void SubframeNavigationFilteringThrottle::OnCalculatedLoadPolicy(
@@ -107,13 +106,7 @@ void SubframeNavigationFilteringThrottle::OnCalculatedLoadPolicy(
     // Other load policies will be reported in WillProcessResponse.
     NotifyLoadPolicy();
 
-    const bool block_and_collapse_is_supported =
-        content::IsBrowserSideNavigationEnabled() ||
-        stage == ThrottlingStage::WillStartRequest;
-    CancelDeferredNavigation(
-        block_and_collapse_is_supported
-            ? content::NavigationThrottle::BLOCK_REQUEST_AND_COLLAPSE
-            : content::NavigationThrottle::CANCEL);
+    CancelDeferredNavigation(BLOCK_REQUEST_AND_COLLAPSE);
   } else {
     Resume();
   }

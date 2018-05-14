@@ -15,7 +15,7 @@
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
-#include "third_party/WebKit/public/platform/WebMediaPlayer.h"
+#include "third_party/WebKit/public/platform/WebFullscreenVideoStatus.h"
 #include "third_party/WebKit/public/web/WebScopedUserGesture.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -38,8 +38,7 @@ RendererWebMediaPlayerDelegate::RendererWebMediaPlayerDelegate(
     : RenderFrameObserver(render_frame),
       allow_idle_cleanup_(
           content::GetContentClient()->renderer()->AllowIdleMediaSuspend()),
-      default_tick_clock_(new base::DefaultTickClock()),
-      tick_clock_(default_tick_clock_.get()) {
+      tick_clock_(base::DefaultTickClock::GetInstance()) {
   idle_cleanup_interval_ = base::TimeDelta::FromSeconds(5);
   idle_timeout_ = base::TimeDelta::FromSeconds(15);
 
@@ -50,6 +49,9 @@ RendererWebMediaPlayerDelegate::RendererWebMediaPlayerDelegate(
   // consider all pre-KitKat devices to be potentially buggy.
   is_jelly_bean_ |= base::android::BuildInfo::GetInstance()->sdk_int() <= 18;
 #endif
+
+  idle_cleanup_timer_.SetTaskRunner(
+      render_frame->GetTaskRunner(blink::TaskType::kUnthrottled));
 }
 
 RendererWebMediaPlayerDelegate::~RendererWebMediaPlayerDelegate() {}
@@ -166,7 +168,16 @@ void RendererWebMediaPlayerDelegate::ClearStaleFlag(int player_id) {
   // time idle cleanup runs.
   idle_player_map_[player_id] = tick_clock_->NowTicks() - idle_timeout_;
 
-  ScheduleUpdateTask();
+  // No need to call Update immediately, just make sure the idle
+  // timer is running. Calling ScheduleUpdateTask() here will cause
+  // immediate cleanup, and if that fails, this function gets called
+  // again which uses 100% cpu until resolved.
+  if (!idle_cleanup_timer_.IsRunning() && !pending_update_task_) {
+    idle_cleanup_timer_.Start(
+        FROM_HERE, idle_cleanup_interval_,
+        base::Bind(&RendererWebMediaPlayerDelegate::UpdateTask,
+                   base::Unretained(this)));
+  }
 }
 
 bool RendererWebMediaPlayerDelegate::IsStale(int player_id) {
@@ -175,9 +186,9 @@ bool RendererWebMediaPlayerDelegate::IsStale(int player_id) {
 
 void RendererWebMediaPlayerDelegate::SetIsEffectivelyFullscreen(
     int player_id,
-    bool is_fullscreen) {
+    blink::WebFullscreenVideoStatus fullscreen_video_status) {
   Send(new MediaPlayerDelegateHostMsg_OnMediaEffectivelyFullscreenChanged(
-      routing_id(), player_id, is_fullscreen));
+      routing_id(), player_id, fullscreen_video_status));
 }
 
 void RendererWebMediaPlayerDelegate::DidPlayerSizeChange(
@@ -190,7 +201,8 @@ void RendererWebMediaPlayerDelegate::DidPlayerSizeChange(
 void RendererWebMediaPlayerDelegate::WasHidden() {
   RecordAction(base::UserMetricsAction("Media.Hidden"));
 
-  for (IDMap<Observer*>::iterator it(&id_map_); !it.IsAtEnd(); it.Advance())
+  for (base::IDMap<Observer*>::iterator it(&id_map_); !it.IsAtEnd();
+       it.Advance())
     it.GetCurrentValue()->OnFrameHidden();
 
   ScheduleUpdateTask();
@@ -200,7 +212,8 @@ void RendererWebMediaPlayerDelegate::WasShown() {
   RecordAction(base::UserMetricsAction("Media.Shown"));
   is_frame_closed_ = false;
 
-  for (IDMap<Observer*>::iterator it(&id_map_); !it.IsAtEnd(); it.Advance())
+  for (base::IDMap<Observer*>::iterator it(&id_map_); !it.IsAtEnd();
+       it.Advance())
     it.GetCurrentValue()->OnFrameShown();
 
   ScheduleUpdateTask();
@@ -211,6 +224,10 @@ bool RendererWebMediaPlayerDelegate::OnMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(RendererWebMediaPlayerDelegate, msg)
     IPC_MESSAGE_HANDLER(MediaPlayerDelegateMsg_Pause, OnMediaDelegatePause)
     IPC_MESSAGE_HANDLER(MediaPlayerDelegateMsg_Play, OnMediaDelegatePlay)
+    IPC_MESSAGE_HANDLER(MediaPlayerDelegateMsg_SeekForward,
+                        OnMediaDelegateSeekForward)
+    IPC_MESSAGE_HANDLER(MediaPlayerDelegateMsg_SeekBackward,
+                        OnMediaDelegateSeekBackward)
     IPC_MESSAGE_HANDLER(MediaPlayerDelegateMsg_SuspendAllMediaPlayers,
                         OnMediaDelegateSuspendAllMediaPlayers)
     IPC_MESSAGE_HANDLER(MediaPlayerDelegateMsg_UpdateVolumeMultiplier,
@@ -224,9 +241,10 @@ bool RendererWebMediaPlayerDelegate::OnMessageReceived(
 
 void RendererWebMediaPlayerDelegate::SetIdleCleanupParamsForTesting(
     base::TimeDelta idle_timeout,
+    base::TimeDelta idle_cleanup_interval,
     base::TickClock* tick_clock,
     bool is_jelly_bean) {
-  idle_cleanup_interval_ = base::TimeDelta();
+  idle_cleanup_interval_ = idle_cleanup_interval;
   idle_timeout_ = idle_timeout;
   tick_clock_ = tick_clock;
   is_jelly_bean_ = is_jelly_bean;
@@ -276,10 +294,31 @@ void RendererWebMediaPlayerDelegate::OnMediaDelegatePlay(int player_id) {
   }
 }
 
+void RendererWebMediaPlayerDelegate::OnMediaDelegateSeekForward(
+    int player_id,
+    base::TimeDelta seek_time) {
+  RecordAction(base::UserMetricsAction("Media.Controls.RemoteSeekForward"));
+
+  Observer* observer = id_map_.Lookup(player_id);
+  if (observer)
+    observer->OnSeekForward(seek_time.InSecondsF());
+}
+
+void RendererWebMediaPlayerDelegate::OnMediaDelegateSeekBackward(
+    int player_id,
+    base::TimeDelta seek_time) {
+  RecordAction(base::UserMetricsAction("Media.Controls.RemoteSeekBackward"));
+
+  Observer* observer = id_map_.Lookup(player_id);
+  if (observer)
+    observer->OnSeekBackward(seek_time.InSecondsF());
+}
+
 void RendererWebMediaPlayerDelegate::OnMediaDelegateSuspendAllMediaPlayers() {
   is_frame_closed_ = true;
 
-  for (IDMap<Observer*>::iterator it(&id_map_); !it.IsAtEnd(); it.Advance())
+  for (base::IDMap<Observer*>::iterator it(&id_map_); !it.IsAtEnd();
+       it.Advance())
     it.GetCurrentValue()->OnFrameClosed();
 }
 
@@ -302,8 +341,8 @@ void RendererWebMediaPlayerDelegate::OnMediaDelegateBecamePersistentVideo(
 void RendererWebMediaPlayerDelegate::ScheduleUpdateTask() {
   if (!pending_update_task_) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&RendererWebMediaPlayerDelegate::UpdateTask, AsWeakPtr()));
+        FROM_HERE, base::BindOnce(&RendererWebMediaPlayerDelegate::UpdateTask,
+                                  AsWeakPtr()));
     pending_update_task_ = true;
   }
 }

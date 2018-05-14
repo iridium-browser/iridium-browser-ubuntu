@@ -4,7 +4,9 @@
 
 #include "ash/shelf/shelf_widget.h"
 
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/root_window_controller.h"
+#include "ash/shelf/login_shelf_view.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_layout_manager.h"
@@ -12,10 +14,12 @@
 #include "ash/shelf/shelf_view_test_api.h"
 #include "ash/shell.h"
 #include "ash/system/status_area_widget.h"
+#include "ash/system/tray/system_tray.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ash_test_helper.h"
 #include "ash/test_shell_delegate.h"
 #include "ash/wm/window_util.h"
+#include "components/session_manager/session_manager_types.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/display/display.h"
 #include "ui/events/event_utils.h"
@@ -43,6 +47,7 @@ void TestLauncherAlignment(aura::Window* root,
                                      .ToString());
 }
 
+using SessionState = session_manager::SessionState;
 using ShelfWidgetTest = AshTestBase;
 
 TEST_F(ShelfWidgetTest, TestAlignment) {
@@ -145,7 +150,7 @@ TEST_F(ShelfWidgetTest, DontReferenceShelfAfterDeletion) {
 // container and status widget has finished sizing.
 // See http://crbug.com/252533
 TEST_F(ShelfWidgetTest, ShelfInitiallySizedAfterLogin) {
-  SetUserLoggedIn(false);
+  ClearLogin();
   UpdateDisplay("300x200,400x300");
 
   // Both displays have a shelf controller.
@@ -162,8 +167,7 @@ TEST_F(ShelfWidgetTest, ShelfInitiallySizedAfterLogin) {
   ASSERT_TRUE(shelf_widget2);
 
   // Simulate login.
-  SetUserLoggedIn(true);
-  SetSessionStarted(true);
+  CreateUserSessions(1);
 
   // The shelf view and status area horizontally fill the shelf widget.
   const int status_width1 =
@@ -330,8 +334,7 @@ class ShelfWidgetAfterLoginTest : public AshTestBase {
                  ShelfVisibilityState expected_shelf_visibility_state,
                  ShelfAutoHideState expected_shelf_auto_hide_state) {
     // Simulate login.
-    SetUserLoggedIn(true);
-    SetSessionStarted(true);
+    CreateUserSessions(1);
 
     // Simulate shelf settings being applied from profile prefs.
     Shelf* shelf = GetPrimaryShelf();
@@ -358,6 +361,7 @@ TEST_F(ShelfWidgetAfterLoginTest, InitialValues) {
   ShelfWidget* shelf_widget = GetShelfWidget();
   ASSERT_NE(nullptr, shelf_widget);
   ASSERT_NE(nullptr, shelf_widget->shelf_view_for_testing());
+  ASSERT_NE(nullptr, shelf_widget->login_shelf_view_for_testing());
   ASSERT_NE(nullptr, shelf_widget->shelf_layout_manager());
 
   // Ensure settings are correct before login.
@@ -367,8 +371,7 @@ TEST_F(ShelfWidgetAfterLoginTest, InitialValues) {
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
 
   // Simulate login.
-  SetUserLoggedIn(true);
-  SetSessionStarted(true);
+  CreateUserSessions(1);
 
   // Ensure settings are correct after login.
   EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
@@ -402,5 +405,121 @@ TEST_F(ShelfWidgetAfterLoginTest, CreateLockedShelf) {
             SHELF_VISIBLE, SHELF_AUTO_HIDE_HIDDEN);
 }
 
+class ShelfWidgetViewsVisibilityTest : public AshTestBase {
+ public:
+  ShelfWidgetViewsVisibilityTest() { set_start_session(false); }
+  ~ShelfWidgetViewsVisibilityTest() override = default;
+
+  enum ShelfVisibility {
+    kNone,        // Shelf views hidden.
+    kShelf,       // ShelfView visible.
+    kLoginShelf,  // LoginShelfView visible.
+  };
+
+  void InitShelfVariables() {
+    // Create setup with 2 displays primary and secondary.
+    UpdateDisplay("800x600,800x600");
+    aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+    ASSERT_EQ(2u, root_windows.size());
+    primary_shelf_widget_ = Shelf::ForWindow(root_windows[0])->shelf_widget();
+    ASSERT_NE(nullptr, primary_shelf_widget_);
+    secondary_shelf_widget_ = Shelf::ForWindow(root_windows[1])->shelf_widget();
+    ASSERT_NE(nullptr, secondary_shelf_widget_);
+  };
+
+  void ExpectVisible(session_manager::SessionState state,
+                     ShelfVisibility primary_shelf_visibility,
+                     ShelfVisibility secondary_shelf_visibility) {
+    GetSessionControllerClient()->SetSessionState(state);
+    EXPECT_EQ(primary_shelf_visibility == kNone,
+              !primary_shelf_widget_->IsVisible());
+    if (primary_shelf_visibility != kNone) {
+      EXPECT_EQ(
+          primary_shelf_visibility == kLoginShelf,
+          primary_shelf_widget_->login_shelf_view_for_testing()->visible());
+      EXPECT_EQ(primary_shelf_visibility == kShelf,
+                primary_shelf_widget_->shelf_view_for_testing()->visible());
+    }
+    EXPECT_EQ(secondary_shelf_visibility == kNone,
+              !secondary_shelf_widget_->IsVisible());
+    if (secondary_shelf_visibility != kNone) {
+      EXPECT_EQ(
+          secondary_shelf_visibility == kLoginShelf,
+          secondary_shelf_widget_->login_shelf_view_for_testing()->visible());
+      EXPECT_EQ(secondary_shelf_visibility == kShelf,
+                secondary_shelf_widget_->shelf_view_for_testing()->visible());
+    }
+  }
+
+ private:
+  ShelfWidget* primary_shelf_widget_ = nullptr;
+  ShelfWidget* secondary_shelf_widget_ = nullptr;
+
+  DISALLOW_COPY_AND_ASSIGN(ShelfWidgetViewsVisibilityTest);
+};
+
+TEST_F(ShelfWidgetViewsVisibilityTest, LoginWebUiLockViews) {
+  // Web UI login enabled by default. Views lock enabled by default.
+  ASSERT_NO_FATAL_FAILURE(InitShelfVariables());
+
+  // Both shelf views are hidden when session state hasn't been initialized.
+  ExpectVisible(SessionState::UNKNOWN, kNone /*primary*/, kNone /*secondary*/);
+  // Web UI login is used, so views shelf is not visible during login.
+  ExpectVisible(SessionState::OOBE, kNone, kNone);
+  ExpectVisible(SessionState::LOGIN_PRIMARY, kNone, kNone);
+
+  SimulateUserLogin("user1@test.com");
+
+  ExpectVisible(SessionState::LOGGED_IN_NOT_ACTIVE, kNone, kNone);
+  ExpectVisible(SessionState::ACTIVE, kShelf, kShelf);
+  ExpectVisible(SessionState::LOCKED, kLoginShelf, kNone);
+  ExpectVisible(SessionState::ACTIVE, kShelf, kShelf);
+  ExpectVisible(SessionState::LOGIN_SECONDARY, kLoginShelf, kNone);
+  ExpectVisible(SessionState::ACTIVE, kShelf, kShelf);
+}
+
+TEST_F(ShelfWidgetViewsVisibilityTest, LoginViewsLockViews) {
+  // Enable views login. Views lock enabled by default.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kShowViewsLogin);
+  ASSERT_NO_FATAL_FAILURE(InitShelfVariables());
+
+  ExpectVisible(SessionState::UNKNOWN, kNone /*primary*/, kNone /*secondary*/);
+  ExpectVisible(SessionState::OOBE, kNone, kNone);
+  ExpectVisible(SessionState::LOGIN_PRIMARY, kLoginShelf, kNone);
+
+  SimulateUserLogin("user1@test.com");
+
+  ExpectVisible(SessionState::LOGGED_IN_NOT_ACTIVE, kLoginShelf, kNone);
+  ExpectVisible(SessionState::ACTIVE, kShelf, kShelf);
+  ExpectVisible(SessionState::LOCKED, kLoginShelf, kNone);
+  ExpectVisible(SessionState::ACTIVE, kShelf, kShelf);
+  ExpectVisible(SessionState::LOGIN_SECONDARY, kLoginShelf, kNone);
+  ExpectVisible(SessionState::ACTIVE, kShelf, kShelf);
+}
+
+TEST_F(ShelfWidgetViewsVisibilityTest, LoginWebUiLockWebUi) {
+  // Enable web UI lock. Web UI login enabled by default.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kShowWebUiLock);
+  ASSERT_NO_FATAL_FAILURE(InitShelfVariables());
+
+  // Views based shelf is never visible.
+  ExpectVisible(SessionState::UNKNOWN, kNone /*primary*/, kNone /*secondary*/);
+  ExpectVisible(SessionState::OOBE, kNone, kNone);
+  ExpectVisible(SessionState::LOGIN_PRIMARY, kNone, kNone);
+
+  SimulateUserLogin("user1@test.com");
+
+  // Views based shelf is only visible on non-lock screen (ACTIVE session).
+  ExpectVisible(SessionState::LOGGED_IN_NOT_ACTIVE, kNone, kNone);
+  ExpectVisible(SessionState::ACTIVE, kShelf, kShelf);
+  ExpectVisible(SessionState::LOCKED, kNone, kNone);
+  ExpectVisible(SessionState::ACTIVE, kShelf, kShelf);
+  ExpectVisible(SessionState::LOGIN_SECONDARY, kNone, kNone);
+  ExpectVisible(SessionState::ACTIVE, kShelf, kShelf);
+}
+
 }  // namespace
+
 }  // namespace ash

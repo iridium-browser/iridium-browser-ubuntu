@@ -15,9 +15,9 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_result_codes.h"
-#include "chrome/common/crash_keys.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "components/crash/core/common/crash_keys.h"
 #include "content/public/common/content_switches.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -90,10 +90,6 @@ bool ChromeCrashReporterClient::GetCrashDumpLocation(
   return PathService::Get(chrome::DIR_CRASH_DUMPS, crash_dir);
 }
 
-size_t ChromeCrashReporterClient::RegisterCrashKeys() {
-  return crash_keys::RegisterChromeCrashKeys();
-}
-
 bool ChromeCrashReporterClient::IsRunningUnattended() {
   std::unique_ptr<base::Environment> env(base::Environment::Create());
   return env->HasVar(env_vars::kHeadless);
@@ -138,5 +134,6 @@ bool ChromeCrashReporterClient::EnableBreakpadForProcess(
   return process_type == switches::kRendererProcess ||
          process_type == switches::kPpapiPluginProcess ||
          process_type == switches::kZygoteProcess ||
-         process_type == switches::kGpuProcess;
+         process_type == switches::kGpuProcess ||
+         process_type == switches::kUtilityProcess;
 }

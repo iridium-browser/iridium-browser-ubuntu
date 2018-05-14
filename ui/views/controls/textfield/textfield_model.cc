@@ -256,8 +256,8 @@ namespace {
 // representing the target clause (on Windows). Returns an invalid range if
 // there is no such a range.
 gfx::Range GetFirstEmphasizedRange(const ui::CompositionText& composition) {
-  for (size_t i = 0; i < composition.underlines.size(); ++i) {
-    const ui::CompositionUnderline& underline = composition.underlines[i];
+  for (size_t i = 0; i < composition.ime_text_spans.size(); ++i) {
+    const ui::ImeTextSpan& underline = composition.ime_text_spans[i];
     if (underline.thick)
       return gfx::Range(underline.start_offset, underline.end_offset);
   }
@@ -317,9 +317,8 @@ TextfieldModel::Delegate::~Delegate() {}
 
 TextfieldModel::TextfieldModel(Delegate* delegate)
     : delegate_(delegate),
-      render_text_(gfx::RenderText::CreateInstanceForEditing()),
-      current_edit_(edit_history_.end()) {
-}
+      render_text_(gfx::RenderText::CreateHarfBuzzInstance()),
+      current_edit_(edit_history_.end()) {}
 
 TextfieldModel::~TextfieldModel() {
   ClearEditHistory();
@@ -439,16 +438,16 @@ bool TextfieldModel::MoveCursorTo(const gfx::SelectionModel& cursor) {
     gfx::Range range(render_text_->selection().start(), cursor.caret_pos());
     if (!range.is_empty())
       return render_text_->SelectRange(range);
-    return render_text_->MoveCursorTo(
+    return render_text_->SetSelection(
         gfx::SelectionModel(cursor.caret_pos(), cursor.caret_affinity()));
   }
-  return render_text_->MoveCursorTo(cursor);
+  return render_text_->SetSelection(cursor);
 }
 
 bool TextfieldModel::MoveCursorTo(const gfx::Point& point, bool select) {
   if (HasCompositionText())
     ConfirmCompositionText();
-  return render_text_->MoveCursorTo(point, select);
+  return render_text_->MoveCursorToPoint(point, select);
 }
 
 base::string16 TextfieldModel::GetSelectedText() const {
@@ -464,7 +463,7 @@ void TextfieldModel::SelectRange(const gfx::Range& range) {
 void TextfieldModel::SelectSelectionModel(const gfx::SelectionModel& sel) {
   if (HasCompositionText())
     ConfirmCompositionText();
-  render_text_->MoveCursorTo(sel);
+  render_text_->SetSelection(sel);
 }
 
 void TextfieldModel::SelectAll(bool reversed) {
@@ -659,8 +658,9 @@ void TextfieldModel::SetCompositionText(
   base::string16 new_text = text();
   render_text_->SetText(new_text.insert(cursor, composition.text));
   composition_range_ = gfx::Range(cursor, cursor + composition.text.length());
-  // Don't render transparent composition underlines.
-  if (composition.underlines.size() > 0 && composition.underlines[0].color != 0)
+  // Don't render transparent IME spans.
+  if (composition.ime_text_spans.size() > 0 &&
+      composition.ime_text_spans[0].underline_color != 0)
     render_text_->SetCompositionRange(composition_range_);
   else
     render_text_->SetCompositionRange(gfx::Range::InvalidRange());
@@ -688,7 +688,7 @@ void TextfieldModel::ConfirmCompositionText() {
       composition_range_.start(), composition_range_.length());
   // TODO(oshima): current behavior on ChromeOS is a bit weird and not
   // sure exactly how this should work. Find out and fix if necessary.
-  AddOrMergeEditHistory(base::MakeUnique<InsertEdit>(
+  AddOrMergeEditHistory(std::make_unique<InsertEdit>(
       false, composition, composition_range_.start()));
   render_text_->SetCursorPosition(composition_range_.end());
   ClearComposition();
@@ -753,7 +753,7 @@ void TextfieldModel::ReplaceTextInternal(const base::string16& new_text,
     size_t next =
         render_text_->IndexOfAdjacentGrapheme(cursor, gfx::CURSOR_FORWARD);
     if (next == model.caret_pos())
-      render_text_->MoveCursorTo(model);
+      render_text_->SetSelection(model);
     else
       render_text_->SelectRange(gfx::Range(next, model.caret_pos()));
   }
@@ -777,7 +777,7 @@ void TextfieldModel::ExecuteAndRecordDelete(gfx::Range range, bool mergeable) {
   size_t old_text_start = range.GetMin();
   const base::string16 old_text = text().substr(old_text_start, range.length());
   bool backward = range.is_reversed();
-  auto edit = base::MakeUnique<DeleteEdit>(mergeable, old_text, old_text_start,
+  auto edit = std::make_unique<DeleteEdit>(mergeable, old_text, old_text_start,
                                            backward);
   edit->Redo(this);
   AddOrMergeEditHistory(std::move(edit));
@@ -802,7 +802,7 @@ void TextfieldModel::ExecuteAndRecordReplace(MergeType merge_type,
                                              size_t new_text_start) {
   size_t old_text_start = render_text_->selection().GetMin();
   bool backward = render_text_->selection().is_reversed();
-  auto edit = base::MakeUnique<ReplaceEdit>(
+  auto edit = std::make_unique<ReplaceEdit>(
       merge_type, GetSelectedText(), old_cursor_pos, old_text_start, backward,
       new_cursor_pos, new_text, new_text_start);
   edit->Redo(this);
@@ -812,7 +812,7 @@ void TextfieldModel::ExecuteAndRecordReplace(MergeType merge_type,
 void TextfieldModel::ExecuteAndRecordInsert(const base::string16& new_text,
                                             bool mergeable) {
   auto edit =
-      base::MakeUnique<InsertEdit>(mergeable, new_text, GetCursorPosition());
+      std::make_unique<InsertEdit>(mergeable, new_text, GetCursorPosition());
   edit->Redo(this);
   AddOrMergeEditHistory(std::move(edit));
 }

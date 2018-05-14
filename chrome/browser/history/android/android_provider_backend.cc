@@ -126,10 +126,8 @@ void RunNotifyURLsModified(HistoryBackendNotifier* notifier,
 
 void RunNotifyURLsDeleted(HistoryBackendNotifier* notifier,
                           std::unique_ptr<URLRows> rows) {
-  notifier->NotifyURLsDeleted(false /* all_history */,
-                              false /* expired */,
-                              *(rows.get()),
-                              std::set<GURL>());
+  notifier->NotifyURLsDeleted(DeletionTimeRange::Invalid(), false /* expired */,
+                              *(rows.get()), std::set<GURL>());
 }
 
 }  // namespace
@@ -849,8 +847,8 @@ bool AndroidProviderBackend::UpdateFavicon() {
   if (!thumbnail_db_)
     return true;
 
-  if (!thumbnail_db_->InitIconMappingEnumerator(favicon_base::FAVICON,
-                                                &enumerator))
+  if (!thumbnail_db_->InitIconMappingEnumerator(
+          favicon_base::IconType::kFavicon, &enumerator))
     return false;
 
   IconMapping icon_mapping;

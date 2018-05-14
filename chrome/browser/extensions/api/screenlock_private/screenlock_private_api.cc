@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/lazy_instance.h"
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/chrome_proximity_auth_client.h"
@@ -56,7 +55,7 @@ ScreenlockPrivateGetLockedFunction::ScreenlockPrivateGetLockedFunction() {}
 ScreenlockPrivateGetLockedFunction::~ScreenlockPrivateGetLockedFunction() {}
 
 bool ScreenlockPrivateGetLockedFunction::RunAsync() {
-  SetResult(base::MakeUnique<base::Value>(
+  SetResult(std::make_unique<base::Value>(
       proximity_auth::ScreenlockBridge::Get()->IsLocked()));
   SendResponse(error_.empty());
   return true;
@@ -121,14 +120,14 @@ void ScreenlockPrivateEventRouter::OnScreenDidLock(
     proximity_auth::ScreenlockBridge::LockHandler::ScreenType screen_type) {
   DispatchEvent(events::SCREENLOCK_PRIVATE_ON_CHANGED,
                 screenlock::OnChanged::kEventName,
-                base::MakeUnique<base::Value>(true));
+                std::make_unique<base::Value>(true));
 }
 
 void ScreenlockPrivateEventRouter::OnScreenDidUnlock(
     proximity_auth::ScreenlockBridge::LockHandler::ScreenType screen_type) {
   DispatchEvent(events::SCREENLOCK_PRIVATE_ON_CHANGED,
                 screenlock::OnChanged::kEventName,
-                base::MakeUnique<base::Value>(false));
+                std::make_unique<base::Value>(false));
 }
 
 void ScreenlockPrivateEventRouter::OnFocusedUserChanged(
@@ -147,13 +146,13 @@ void ScreenlockPrivateEventRouter::DispatchEvent(
 }
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<
-    ScreenlockPrivateEventRouter>>::DestructorAtExit g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+    ScreenlockPrivateEventRouter>>::DestructorAtExit
+    g_screenlock_private_api_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<ScreenlockPrivateEventRouter>*
 ScreenlockPrivateEventRouter::GetFactoryInstance() {
-  return g_factory.Pointer();
+  return g_screenlock_private_api_factory.Pointer();
 }
 
 void ScreenlockPrivateEventRouter::Shutdown() {

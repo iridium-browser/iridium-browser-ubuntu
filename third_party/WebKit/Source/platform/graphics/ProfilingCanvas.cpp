@@ -30,19 +30,19 @@
 
 #include "platform/graphics/ProfilingCanvas.h"
 
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
 
 namespace blink {
 
 CanvasInterceptor<ProfilingCanvas>::CanvasInterceptor(
     InterceptingCanvasBase* canvas)
     : CanvasInterceptorBase(canvas),
-      start_time_(WTF::MonotonicallyIncreasingTime()) {}
+      start_time_(WTF::CurrentTimeTicksInSeconds()) {}
 
 CanvasInterceptor<ProfilingCanvas>::~CanvasInterceptor() {
   if (!TopLevelCall())
     return;
-  double delta = WTF::MonotonicallyIncreasingTime() - start_time_;
+  double delta = WTF::CurrentTimeTicksInSeconds() - start_time_;
   if (auto timings = Canvas()->timings_) {
     DCHECK_EQ(timings->size(), Canvas()->CallCount());
     timings->push_back(delta);

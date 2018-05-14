@@ -14,9 +14,9 @@ import android.view.inputmethod.InputConnection;
 
 import org.chromium.base.Log;
 import org.chromium.base.annotations.UsedByReflection;
-import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.input.InputMethodManagerWrapper;
 import org.chromium.content.browser.input.Range;
+import org.chromium.content_public.browser.ImeAdapter;
+import org.chromium.content_public.browser.InputMethodManagerWrapper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,10 +25,10 @@ import java.util.List;
  * Overrides InputMethodManagerWrapper for testing purposes.
  */
 @UsedByReflection("ThreadedInputConnectionFactory.java")
-public class TestInputMethodManagerWrapper extends InputMethodManagerWrapper {
+public class TestInputMethodManagerWrapper implements InputMethodManagerWrapper {
     private static final String TAG = "cr_Ime";
 
-    private final ContentViewCore mContentViewCore;
+    private final InputConnectionProvider mInputConnectionProvider;
     private InputConnection mInputConnection;
     private int mRestartInputCounter;
     private int mShowSoftInputCounter;
@@ -39,11 +39,44 @@ public class TestInputMethodManagerWrapper extends InputMethodManagerWrapper {
     private final List<Pair<Range, Range>> mUpdateSelectionList;
     private int mUpdateCursorAnchorInfoCounter;
     private CursorAnchorInfo mLastCursorAnchorInfo;
+    private final ArrayList<EditorInfo> mEditorInfoList = new ArrayList<>();
 
-    public TestInputMethodManagerWrapper(ContentViewCore contentViewCore) {
-        super(null);
+    /**
+     * Interface passed that helps this class create {@link InputConnection} instance.
+     * This helps the wrapper avoid cross-reference {@link ImeAdapter} object.
+     */
+    public interface InputConnectionProvider {
+        /*
+         * @param info {@link EditInfo} object used to create a new {@link InputConnection}.
+         * @return a newly created {@link InputConnection} instance.
+         */
+        InputConnection create(EditorInfo info);
+    }
+
+    /**
+     * Default {@InputConnectionProvider} that uses a given {@link ImeAdapter} to create {@link
+     * InputConnection}.
+     */
+    public static InputConnectionProvider defaultInputConnectionProvider(
+            final ImeAdapter imeAdapter) {
+        return new InputConnectionProvider() {
+            @Override
+            public InputConnection create(EditorInfo info) {
+                return imeAdapter.onCreateInputConnection(info);
+            }
+        };
+    }
+
+    /**
+     * Default {@link TestInputMethodManagerWrapper} instance good enough for most of test cases.
+     */
+    public static TestInputMethodManagerWrapper create(ImeAdapter imeAdapter) {
+        return new TestInputMethodManagerWrapper(defaultInputConnectionProvider(imeAdapter));
+    }
+
+    public TestInputMethodManagerWrapper(InputConnectionProvider provider) {
         Log.d(TAG, "TestInputMethodManagerWrapper constructor");
-        mContentViewCore = contentViewCore;
+        mInputConnectionProvider = provider;
         mUpdateSelectionList = new ArrayList<>();
     }
 
@@ -52,7 +85,8 @@ public class TestInputMethodManagerWrapper extends InputMethodManagerWrapper {
         mRestartInputCounter++;
         Log.d(TAG, "restartInput: count [%d]", mRestartInputCounter);
         EditorInfo editorInfo = new EditorInfo();
-        mInputConnection = mContentViewCore.onCreateInputConnection(editorInfo);
+        mInputConnection = mInputConnectionProvider.create(editorInfo);
+        mEditorInfoList.add(editorInfo);
     }
 
     @Override
@@ -62,7 +96,8 @@ public class TestInputMethodManagerWrapper extends InputMethodManagerWrapper {
         Log.d(TAG, "showSoftInput: count [%d]", mShowSoftInputCounter);
         if (mInputConnection != null) return;
         EditorInfo editorInfo = new EditorInfo();
-        mInputConnection = mContentViewCore.onCreateInputConnection(editorInfo);
+        mInputConnection = mInputConnectionProvider.create(editorInfo);
+        mEditorInfoList.add(editorInfo);
     }
 
     @Override
@@ -107,6 +142,10 @@ public class TestInputMethodManagerWrapper extends InputMethodManagerWrapper {
     }
 
     @Override
+    public void updateExtractedText(
+            View view, int token, android.view.inputmethod.ExtractedText text) {}
+
+    @Override
     public void notifyUserAction() {}
 
     public final List<Pair<Range, Range>> getUpdateSelectionList() {
@@ -138,6 +177,7 @@ public class TestInputMethodManagerWrapper extends InputMethodManagerWrapper {
         mShowSoftInputCounter = 0;
         mHideSoftInputCounter = 0;
         mUpdateSelectionList.clear();
+        mEditorInfoList.clear();
     }
 
     public InputConnection getInputConnection() {
@@ -166,6 +206,10 @@ public class TestInputMethodManagerWrapper extends InputMethodManagerWrapper {
 
     public CursorAnchorInfo getLastCursorAnchorInfo() {
         return mLastCursorAnchorInfo;
+    }
+
+    public ArrayList<EditorInfo> getEditorInfoList() {
+        return mEditorInfoList;
     }
 
     public void onUpdateSelection(Range oldSel, Range oldComp, Range newSel, Range newComp) {}

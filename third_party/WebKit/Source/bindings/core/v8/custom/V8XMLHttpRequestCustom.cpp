@@ -49,21 +49,21 @@ namespace blink {
 
 void V8XMLHttpRequest::responseTextAttributeGetterCustom(
     const v8::FunctionCallbackInfo<v8::Value>& info) {
-  XMLHttpRequest* xml_http_request = V8XMLHttpRequest::toImpl(info.Holder());
+  XMLHttpRequest* xml_http_request = V8XMLHttpRequest::ToImpl(info.Holder());
   ExceptionState exception_state(info.GetIsolate(),
                                  ExceptionState::kGetterContext,
                                  "XMLHttpRequest", "responseText");
-  ScriptString text = xml_http_request->responseText(exception_state);
+  v8::Local<v8::String> text = xml_http_request->responseText(exception_state);
   if (text.IsEmpty()) {
     V8SetReturnValueString(info, g_empty_string, info.GetIsolate());
     return;
   }
-  V8SetReturnValue(info, text.V8Value());
+  V8SetReturnValue(info, text);
 }
 
 void V8XMLHttpRequest::responseAttributeGetterCustom(
     const v8::FunctionCallbackInfo<v8::Value>& info) {
-  XMLHttpRequest* xml_http_request = V8XMLHttpRequest::toImpl(info.Holder());
+  XMLHttpRequest* xml_http_request = V8XMLHttpRequest::ToImpl(info.Holder());
   ExceptionState exception_state(info.GetIsolate(),
                                  ExceptionState::kGetterContext,
                                  "XMLHttpRequest", "response");
@@ -77,7 +77,8 @@ void V8XMLHttpRequest::responseAttributeGetterCustom(
     case XMLHttpRequest::kResponseTypeJSON: {
       v8::Isolate* isolate = info.GetIsolate();
 
-      ScriptString json_source = xml_http_request->ResponseJSONSource();
+      v8::Local<v8::String> json_source =
+          xml_http_request->ResponseJSONSource();
       if (json_source.IsEmpty()) {
         V8SetReturnValue(info, v8::Null(isolate));
         return;
@@ -85,8 +86,9 @@ void V8XMLHttpRequest::responseAttributeGetterCustom(
 
       // Catch syntax error. Swallows an exception (when thrown) as the
       // spec says. https://xhr.spec.whatwg.org/#response-body
-      v8::Local<v8::Value> json = FromJSONString(
-          isolate, ToCoreString(json_source.V8Value()), exception_state);
+      v8::Local<v8::Value> json =
+          FromJSONString(isolate, isolate->GetCurrentContext(),
+                         ToCoreString(json_source), exception_state);
       if (exception_state.HadException()) {
         exception_state.ClearException();
         V8SetReturnValue(info, v8::Null(isolate));

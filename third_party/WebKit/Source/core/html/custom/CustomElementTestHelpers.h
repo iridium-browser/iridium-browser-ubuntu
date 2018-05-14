@@ -5,6 +5,7 @@
 #ifndef CustomElementTestHelpers_h
 #define CustomElementTestHelpers_h
 
+#include "base/macros.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
@@ -27,21 +28,20 @@ class CustomElementDescriptor;
 class TestCustomElementDefinitionBuilder
     : public CustomElementDefinitionBuilder {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(TestCustomElementDefinitionBuilder);
 
  public:
-  TestCustomElementDefinitionBuilder() {}
+  TestCustomElementDefinitionBuilder() = default;
   bool CheckConstructorIntrinsics() override { return true; }
   bool CheckConstructorNotRegistered() override { return true; }
   bool CheckPrototype() override { return true; }
   bool RememberOriginalProperties() override { return true; }
   CustomElementDefinition* Build(const CustomElementDescriptor&,
                                  CustomElementDefinition::Id) override;
+
+  DISALLOW_COPY_AND_ASSIGN(TestCustomElementDefinitionBuilder);
 };
 
 class TestCustomElementDefinition : public CustomElementDefinition {
-  WTF_MAKE_NONCOPYABLE(TestCustomElementDefinition);
-
  public:
   TestCustomElementDefinition(const CustomElementDescriptor& descriptor)
       : CustomElementDefinition(descriptor) {}
@@ -62,8 +62,9 @@ class TestCustomElementDefinition : public CustomElementDefinition {
     return true;
   }
 
-  HTMLElement* CreateElementSync(Document& document,
-                                 const QualifiedName&) override {
+  HTMLElement* CreateAutonomousCustomElementSync(
+      Document& document,
+      const QualifiedName&) override {
     return CreateElementForConstructor(document);
   }
 
@@ -91,6 +92,8 @@ class TestCustomElementDefinition : public CustomElementDefinition {
                                    const AtomicString& new_value) override {
     NOTREACHED() << "definition does not have attribute changed callback";
   }
+
+  DISALLOW_COPY_AND_ASSIGN(TestCustomElementDefinition);
 };
 
 class CreateElement {
@@ -115,18 +118,19 @@ class CreateElement {
     return *this;
   }
 
-  CreateElement& WithIsAttribute(const AtomicString& value) {
-    attributes_.push_back(std::make_pair(HTMLNames::isAttr, value));
+  CreateElement& WithIsValue(const AtomicString& value) {
+    is_value_ = value;
     return *this;
   }
 
   operator Element*() const {
     Document* document = document_.Get();
     if (!document)
-      document = HTMLDocument::Create();
+      document = HTMLDocument::CreateForTest();
     NonThrowableExceptionState no_exceptions;
-    Element* element =
-        document->createElementNS(namespace_uri_, local_name_, no_exceptions);
+    Element* element = document->CreateElement(
+        QualifiedName(g_null_atom, local_name_, namespace_uri_),
+        CreateElementFlags::ByCreateElement(), is_value_);
     for (const auto& attribute : attributes_)
       element->setAttribute(attribute.first, attribute.second);
     return element;
@@ -136,6 +140,7 @@ class CreateElement {
   Member<Document> document_;
   AtomicString namespace_uri_;
   AtomicString local_name_;
+  AtomicString is_value_;
   std::vector<std::pair<QualifiedName, AtomicString>> attributes_;
 };
 

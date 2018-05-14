@@ -12,7 +12,6 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -73,12 +72,12 @@ void RemapProxyPolicies(PolicyMap* policies) {
 
 }  // namespace
 
-PolicyServiceImpl::PolicyServiceImpl(const Providers& providers)
+PolicyServiceImpl::PolicyServiceImpl(Providers providers)
     : update_task_ptr_factory_(this) {
+  providers_ = std::move(providers);
   for (int domain = 0; domain < POLICY_DOMAIN_SIZE; ++domain)
     initialization_complete_[domain] = true;
-  providers_ = providers;
-  for (auto* provider : providers) {
+  for (auto* provider : providers_) {
     provider->AddObserver(this);
     for (int domain = 0; domain < POLICY_DOMAIN_SIZE; ++domain) {
       initialization_complete_[domain] &=
@@ -101,7 +100,7 @@ void PolicyServiceImpl::AddObserver(PolicyDomain domain,
   DCHECK(thread_checker_.CalledOnValidThread());
   std::unique_ptr<Observers>& list = observers_[domain];
   if (!list)
-    list = base::MakeUnique<Observers>();
+    list = std::make_unique<Observers>();
   list->AddObserver(observer);
 }
 

@@ -23,6 +23,10 @@ class TaskRunner;
 class Time;
 }
 
+namespace network {
+class ResourceRequestBody;
+}
+
 namespace storage {
 class BlobStorageContext;
 }
@@ -31,7 +35,6 @@ namespace content {
 class BlobHandle;
 class BrowserContext;
 struct ChromeBlobStorageContextDeleter;
-class ResourceRequestBody;
 class ResourceContext;
 
 // A context class that keeps track of BlobStorageController used by the chrome.
@@ -57,8 +60,10 @@ class CONTENT_EXPORT ChromeBlobStorageContext
   storage::BlobStorageContext* context() const { return context_.get(); }
 
   // Returns a NULL scoped_ptr on failure.
-  std::unique_ptr<BlobHandle> CreateMemoryBackedBlob(const char* data,
-                                                     size_t length);
+  std::unique_ptr<BlobHandle> CreateMemoryBackedBlob(
+      const char* data,
+      size_t length,
+      const std::string& content_type);
 
   // Returns a NULL scoped_ptr on failure.
   std::unique_ptr<BlobHandle> CreateFileBackedBlob(
@@ -97,9 +102,11 @@ using BlobHandles = std::vector<std::unique_ptr<storage::BlobDataHandle>>;
 // Attempts to create a vector of BlobDataHandles that ensure any blob data
 // associated with |body| isn't cleaned up until the handles are destroyed.
 // Returns false on failure. This is used for POST and PUT requests.
-bool GetBodyBlobDataHandles(ResourceRequestBody* body,
+bool GetBodyBlobDataHandles(network::ResourceRequestBody* body,
                             ResourceContext* resource_context,
                             BlobHandles* blob_handles);
+
+extern const char kBlobStorageContextKeyName[];
 
 }  // namespace content
 

@@ -259,6 +259,17 @@ void ProtocolHandlerRegistry::Delegate::RegisterWithOSAsDefaultClient(
       ->StartSetAsDefault();
 }
 
+void ProtocolHandlerRegistry::Delegate::CheckDefaultClientWithOS(
+    const std::string& protocol,
+    ProtocolHandlerRegistry* registry) {
+  // The worker pointer is reference counted. While it is running, the
+  // sequence it runs on will hold references it will be automatically freed
+  // once all its tasks have finished.
+  base::MakeRefCounted<shell_integration::DefaultProtocolClientWorker>(
+      registry->GetDefaultWebClientCallback(protocol), protocol)
+      ->StartCheckIsDefault();
+}
+
 // ProtocolHandlerRegistry -----------------------------------------------------
 
 ProtocolHandlerRegistry::ProtocolHandlerRegistry(
@@ -409,8 +420,7 @@ void ProtocolHandlerRegistry::InitProtocolSettings() {
   if (ShouldRemoveHandlersNotInOS()) {
     for (ProtocolHandlerMap::const_iterator p = default_handlers_.begin();
          p != default_handlers_.end(); ++p) {
-      ProtocolHandler handler = p->second;
-      delegate_->RegisterWithOSAsDefaultClient(handler.protocol(), this);
+      delegate_->CheckDefaultClientWithOS(p->second.protocol(), this);
     }
   }
 }
@@ -557,6 +567,11 @@ bool ProtocolHandlerRegistry::IsHandledProtocol(
 
 void ProtocolHandlerRegistry::RemoveHandler(
     const ProtocolHandler& handler) {
+  if (IsIgnored(handler)) {
+    RemoveIgnoredHandler(handler);
+    return;
+  }
+
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ProtocolHandlerList& handlers = protocol_handlers_[handler.protocol()];
   bool erase_success = false;
@@ -741,7 +756,7 @@ base::Value* ProtocolHandlerRegistry::EncodeRegisteredHandlers() {
          j != i->second.end(); ++j) {
       std::unique_ptr<base::DictionaryValue> encoded = j->Encode();
       if (IsDefault(*j)) {
-        encoded->Set("default", base::MakeUnique<base::Value>(true));
+        encoded->Set("default", std::make_unique<base::Value>(true));
       }
       protocol_handlers->Append(std::move(encoded));
     }
@@ -879,8 +894,10 @@ void ProtocolHandlerRegistry::EraseHandler(const ProtocolHandler& handler,
 void ProtocolHandlerRegistry::OnSetAsDefaultProtocolClientFinished(
     const std::string& protocol,
     shell_integration::DefaultWebClientState state) {
+  // Clear if the default protocol client isn't this installation.
   if (ShouldRemoveHandlersNotInOS() &&
-      state == shell_integration::NOT_DEFAULT) {
+      (state == shell_integration::NOT_DEFAULT ||
+       state == shell_integration::OTHER_MODE_IS_DEFAULT)) {
     ClearDefault(protocol);
   }
 }

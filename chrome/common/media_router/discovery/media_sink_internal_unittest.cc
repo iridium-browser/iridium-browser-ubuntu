@@ -30,7 +30,9 @@ media_router::CastSinkExtraData CreateCastSinkExtraData(
     uint8_t capabilities,
     int cast_channel_id) {
   media_router::CastSinkExtraData cast_extra_data;
-  EXPECT_TRUE(cast_extra_data.ip_address.AssignFromIPLiteral(ip_address));
+  net::IPAddress ip;
+  EXPECT_TRUE(ip.AssignFromIPLiteral(ip_address));
+  cast_extra_data.ip_endpoint = net::IPEndPoint(ip, 1234);
   cast_extra_data.model_name = model_name;
   cast_extra_data.capabilities = 2;
   cast_extra_data.cast_channel_id = 3;
@@ -118,6 +120,22 @@ TEST(MediaSinkInternalTest, TestSetExtraData) {
   MediaSinkInternal cast_sink2(sink, cast_extra_data);
   cast_sink2.set_cast_data(cast_extra_data2);
   ASSERT_EQ(cast_extra_data2, cast_sink2.cast_data());
+}
+
+TEST(MediaSinkInternalTest, TestProcessDeviceUUID) {
+  EXPECT_EQ("de51d94921f15f8af6dbf65592bb3610",
+            MediaSinkInternal::ProcessDeviceUUID(
+                "uuid:de51d949-21f1-5f8a-f6db-f65592bb3610"));
+  EXPECT_EQ("de51d94921f15f8af6dbf65592bb3610",
+            MediaSinkInternal::ProcessDeviceUUID(
+                "de51d94921f1-5f8a-f6db-f65592bb3610"));
+  EXPECT_EQ(
+      "de51d94921f15f8af6dbf65592bb3610",
+      MediaSinkInternal::ProcessDeviceUUID("DE51D94921F15F8AF6DBF65592BB3610"));
+  EXPECT_EQ("abc:de51d94921f15f8af6dbf65592bb3610",
+            MediaSinkInternal::ProcessDeviceUUID(
+                "abc:de51d949-21f1-5f8a-f6db-f65592bb3610"));
+  EXPECT_EQ("", MediaSinkInternal::ProcessDeviceUUID(""));
 }
 
 }  // namespace media_router

@@ -16,12 +16,8 @@
 class GURL;
 
 namespace extensions {
-class ExtensionNavigationUIData;
 class InfoMap;
-}
-
-namespace net {
-class URLRequest;
+struct WebRequestInfo;
 }
 
 // Exposed for unit testing.
@@ -33,16 +29,18 @@ class WebRequestPermissions {
  public:
   // Different host permission checking modes for CanExtensionAccessURL.
   enum HostPermissionsCheck {
-    DO_NOT_CHECK_HOST = 0,    // No check.
-    REQUIRE_HOST_PERMISSION,  // Permission needed for given URL.
-    REQUIRE_ALL_URLS          // Permission needed for <all_urls>.
+    DO_NOT_CHECK_HOST = 0,            // No check.
+    REQUIRE_HOST_PERMISSION_FOR_URL,  // Permission needed for given request
+                                      // URL.
+    REQUIRE_HOST_PERMISSION_FOR_URL_AND_INITIATOR,  // Permission needed for
+                                                    // given request URL and its
+                                                    // initiator.
+    REQUIRE_ALL_URLS  // Permission needed for <all_urls>.
   };
 
   // Returns true if the request shall not be reported to extensions.
-  static bool HideRequest(
-      const extensions::InfoMap* extension_info_map,
-      const net::URLRequest* request,
-      extensions::ExtensionNavigationUIData* navigation_ui_data);
+  static bool HideRequest(const extensions::InfoMap* extension_info_map,
+                          const extensions::WebRequestInfo& request);
 
   // Helper function used only in tests, sets a variable which enables or
   // disables a CHECK.
@@ -58,6 +56,13 @@ class WebRequestPermissions {
       bool crosses_incognito,
       HostPermissionsCheck host_permissions_check,
       const base::Optional<url::Origin>& initiator);
+
+  static bool CanExtensionAccessInitiator(
+      const extensions::InfoMap* extension_info_map,
+      const extensions::ExtensionId extension_id,
+      const base::Optional<url::Origin>& initiator,
+      int tab_id,
+      bool crosses_incognito);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(WebRequestPermissions);

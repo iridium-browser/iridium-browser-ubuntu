@@ -6,19 +6,20 @@
 
 #include <memory>
 #include "core/dom/Document.h"
+#include "core/dom/FlatTreeTraversal.h"
 #include "core/events/TouchEvent.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/EventHandlerRegistry.h"
 #include "core/frame/LocalFrameView.h"
-#include "core/html/HTMLCanvasElement.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
 #include "core/input/EventHandlingUtil.h"
 #include "core/input/TouchActionUtil.h"
 #include "core/layout/HitTestCanvasResult.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "platform/Histogram.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/WebCoalescedInputEvent.h"
 #include "public/platform/WebTouchEvent.h"
 
@@ -88,9 +89,8 @@ WebTouchPoint CreateWebTouchPointFromWebPointerEvent(
   WebTouchPoint web_touch_point(web_pointer_event);
   web_touch_point.state =
       TouchPointStateFromPointerEventType(web_pointer_event.GetType(), stale);
-  // TODO(crbug.com/731725): This mapping needs a division by 2.
-  web_touch_point.radius_x = web_pointer_event.width;
-  web_touch_point.radius_y = web_pointer_event.height;
+  web_touch_point.radius_x = web_pointer_event.width / 2.f;
+  web_touch_point.radius_y = web_pointer_event.height / 2.f;
   web_touch_point.rotation_angle = web_pointer_event.rotation_angle;
   return web_touch_point;
 }
@@ -130,68 +130,6 @@ class ChangedTouches final {
   EventTargetSet targets_;
 };
 
-void ReportMetricsForTouch(const WebPointerEvent& event,
-                           DispatchEventResult dom_dispatch_result,
-                           bool prevent_default_called_on_uncancelable_event,
-                           bool is_frame_loaded) {
-  int64_t latency_in_micros =
-      (TimeTicks::Now() - TimeTicks::FromSeconds(event.TimeStampSeconds()))
-          .InMicroseconds();
-  if (event.IsCancelable()) {
-    if (is_frame_loaded) {
-      DEFINE_STATIC_LOCAL(EnumerationHistogram,
-                          touch_dispositions_after_page_load_histogram,
-                          ("Event.Touch.TouchDispositionsAfterPageLoad",
-                           kTouchEventDispatchResultTypeMax));
-      touch_dispositions_after_page_load_histogram.Count(
-          (dom_dispatch_result != DispatchEventResult::kNotCanceled)
-              ? kHandledTouches
-              : kUnhandledTouches);
-
-      DEFINE_STATIC_LOCAL(
-          CustomCountHistogram, event_latency_after_page_load_histogram,
-          ("Event.Touch.TouchLatencyAfterPageLoad", 1, 100000000, 50));
-      event_latency_after_page_load_histogram.Count(latency_in_micros);
-    } else {
-      DEFINE_STATIC_LOCAL(EnumerationHistogram,
-                          touch_dispositions_before_page_load_histogram,
-                          ("Event.Touch.TouchDispositionsBeforePageLoad",
-                           kTouchEventDispatchResultTypeMax));
-      touch_dispositions_before_page_load_histogram.Count(
-          (dom_dispatch_result != DispatchEventResult::kNotCanceled)
-              ? kHandledTouches
-              : kUnhandledTouches);
-
-      DEFINE_STATIC_LOCAL(
-          CustomCountHistogram, event_latency_before_page_load_histogram,
-          ("Event.Touch.TouchLatencyBeforePageLoad", 1, 100000000, 50));
-      event_latency_before_page_load_histogram.Count(latency_in_micros);
-    }
-    // Report the touch disposition there is no active fling animation.
-    DEFINE_STATIC_LOCAL(EnumerationHistogram,
-                        touch_dispositions_outside_fling_histogram,
-                        ("Event.Touch.TouchDispositionsOutsideFling2",
-                         kTouchEventDispatchResultTypeMax));
-    touch_dispositions_outside_fling_histogram.Count(
-        (dom_dispatch_result != DispatchEventResult::kNotCanceled)
-            ? kHandledTouches
-            : kUnhandledTouches);
-  }
-
-  // Report the touch disposition when there is an active fling
-  // animation.
-  if (event.dispatch_type ==
-      WebInputEvent::kListenersForcedNonBlockingDueToFling) {
-    DEFINE_STATIC_LOCAL(EnumerationHistogram,
-                        touch_dispositions_during_fling_histogram,
-                        ("Event.Touch.TouchDispositionsDuringFling2",
-                         kTouchEventDispatchResultTypeMax));
-    touch_dispositions_during_fling_histogram.Count(
-        prevent_default_called_on_uncancelable_event ? kHandledTouches
-                                                     : kUnhandledTouches);
-  }
-}
-
 }  // namespace
 
 TouchEventManager::TouchEventManager(LocalFrame& frame) : frame_(frame) {
@@ -206,7 +144,7 @@ void TouchEventManager::Clear() {
   current_touch_action_ = TouchAction::kTouchActionAuto;
 }
 
-DEFINE_TRACE(TouchEventManager) {
+void TouchEventManager::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(touch_sequence_document_);
   visitor->Trace(touch_attribute_map_);
@@ -218,8 +156,6 @@ Touch* TouchEventManager::CreateDomTouch(
   Node* touch_node = point_attr->target_;
   String region_id = point_attr->region_;
   *known_target = false;
-  FloatPoint content_point;
-  FloatSize adjusted_radius;
 
   LocalFrame* target_frame = nullptr;
   if (touch_node) {
@@ -253,17 +189,18 @@ Touch* TouchEventManager::CreateDomTouch(
 
   WebPointerEvent transformed_event =
       point_attr->event_.WebPointerEventInRootFrame();
-  // pagePoint should always be in the target element's document coordinates.
-  FloatPoint page_point = target_frame->View()->RootFrameToContents(
-      transformed_event.PositionInWidget());
   float scale_factor = 1.0f / target_frame->PageZoomFactor();
 
-  content_point = page_point.ScaledBy(scale_factor);
-  adjusted_radius = FloatSize(transformed_event.width, transformed_event.height)
-                        .ScaledBy(scale_factor);
+  FloatPoint document_point =
+      target_frame->View()
+          ->RootFrameToDocument(transformed_event.PositionInWidget())
+          .ScaledBy(scale_factor);
+  FloatSize adjusted_radius =
+      FloatSize(transformed_event.width / 2.f, transformed_event.height / 2.f)
+          .ScaledBy(scale_factor);
 
   return Touch::Create(target_frame, touch_node, point_attr->event_.id,
-                       transformed_event.PositionInScreen(), content_point,
+                       transformed_event.PositionInScreen(), document_point,
                        adjusted_radius, transformed_event.rotation_angle,
                        transformed_event.force, region_id);
 }
@@ -522,19 +459,6 @@ TouchEventManager::DispatchTouchEventFromAccumulatdTouchPoints() {
       DispatchEventResult dom_dispatch_result =
           touch_event_target->DispatchEvent(touch_event);
 
-      // Only report for top level documents with a single touch on
-      // touch-start or the first touch-move.
-      if (touch_attribute_map_.size() == 1 && frame_->IsMainFrame()) {
-        const auto& event = touch_attribute_map_.begin()->value->event_;
-        if (event.touch_start_or_first_touch_move) {
-          // Record the disposition and latency of touch starts and first touch
-          // moves before and after the page is fully loaded respectively.
-          ReportMetricsForTouch(
-              event, dom_dispatch_result,
-              touch_event->PreventDefaultCalledOnUncancelableEvent(),
-              frame_->GetDocument()->IsLoadCompleted());
-        }
-      }
       event_result = EventHandlingUtil::MergeEventResult(
           event_result,
           EventHandlingUtil::ToWebInputEventResult(dom_dispatch_result));
@@ -592,9 +516,9 @@ void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
       Node* node = result.InnerNode();
       if (!node)
         return;
-      if (isHTMLCanvasElement(node)) {
+      if (auto* canvas = ToHTMLCanvasElementOrNull(node)) {
         HitTestCanvasResult* hit_test_canvas_result =
-            toHTMLCanvasElement(node)->GetControlAndIdIfHitRegionExists(
+            canvas->GetControlAndIdIfHitRegionExists(
                 result.PointInInnerNodeFrame());
         if (hit_test_canvas_result->GetControl())
           node = hit_test_canvas_result->GetControl();
@@ -640,6 +564,7 @@ void TouchEventManager::HandleTouchPoint(
     const EventHandlingUtil::PointerEventTarget& pointer_event_target) {
   DCHECK_GE(event.GetType(), WebInputEvent::kPointerTypeFirst);
   DCHECK_LE(event.GetType(), WebInputEvent::kPointerTypeLast);
+  DCHECK_NE(event.GetType(), WebInputEvent::kPointerCausedUaAction);
 
   if (touch_attribute_map_.IsEmpty()) {
     // Ideally we'd DCHECK(!m_touchSequenceDocument) here since we should
@@ -656,6 +581,11 @@ void TouchEventManager::HandleTouchPoint(
        !touch_sequence_document_->GetFrame()->View())) {
     // If the active touch document has no frame or view, it's probably being
     // destroyed so we can't dispatch events.
+    // Update the points so they get removed in flush when they are released.
+    if (touch_attribute_map_.Contains(event.id)) {
+      TouchPointAttributes* attributes = touch_attribute_map_.at(event.id);
+      attributes->event_ = event;
+    }
     return;
   }
 

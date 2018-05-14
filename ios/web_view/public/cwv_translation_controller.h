@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef IOS_WEB_VIEW_PUBLIC_CWV_TRANSLATION_CONTROLLER_H
-#define IOS_WEB_VIEW_PUBLIC_CWV_TRANSLATION_CONTROLLER_H
+#ifndef IOS_WEB_VIEW_PUBLIC_CWV_TRANSLATION_CONTROLLER_H_
+#define IOS_WEB_VIEW_PUBLIC_CWV_TRANSLATION_CONTROLLER_H_
 
 #import <Foundation/Foundation.h>
 
@@ -52,6 +52,8 @@ CWV_EXPORT
 @property(nonatomic, readonly)
     NSSet<CWVTranslationLanguage*>* supportedLanguages;
 
+- (instancetype)init NS_UNAVAILABLE;
+
 // Begins translation on the current page from |sourceLanguage| to
 // |targetLanguage|. These language parameters must be chosen from
 // |supportedLanguages|. Set |userInitiated| to YES if translation
@@ -85,4 +87,4 @@ CWV_EXPORT
 
 NS_ASSUME_NONNULL_END
 
-#endif  // IOS_WEB_VIEW_PUBLIC_CWV_TRANSLATION_CONTROLLER_H
+#endif  // IOS_WEB_VIEW_PUBLIC_CWV_TRANSLATION_CONTROLLER_H_

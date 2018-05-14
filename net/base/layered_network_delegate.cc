@@ -12,8 +12,7 @@ LayeredNetworkDelegate::LayeredNetworkDelegate(
     std::unique_ptr<NetworkDelegate> nested_network_delegate)
     : nested_network_delegate_(std::move(nested_network_delegate)) {}
 
-LayeredNetworkDelegate::~LayeredNetworkDelegate() {
-}
+LayeredNetworkDelegate::~LayeredNetworkDelegate() = default;
 
 int LayeredNetworkDelegate::OnBeforeURLRequest(
     URLRequest* request,
@@ -191,17 +190,16 @@ void LayeredNetworkDelegate::OnCanGetCookiesInternal(
 }
 
 bool LayeredNetworkDelegate::OnCanSetCookie(const URLRequest& request,
-                                            const std::string& cookie_line,
+                                            const net::CanonicalCookie& cookie,
                                             CookieOptions* options) {
-  OnCanSetCookieInternal(request, cookie_line, options);
-  return nested_network_delegate_->CanSetCookie(request, cookie_line, options);
+  OnCanSetCookieInternal(request, cookie, options);
+  return nested_network_delegate_->CanSetCookie(request, cookie, options);
 }
 
 void LayeredNetworkDelegate::OnCanSetCookieInternal(
     const URLRequest& request,
-    const std::string& cookie_line,
-    CookieOptions* options) {
-}
+    const net::CanonicalCookie& cookie,
+    CookieOptions* options) {}
 
 bool LayeredNetworkDelegate::OnCanAccessFile(
     const URLRequest& request,
@@ -219,16 +217,14 @@ void LayeredNetworkDelegate::OnCanAccessFileInternal(
 
 bool LayeredNetworkDelegate::OnCanEnablePrivacyMode(
     const GURL& url,
-    const GURL& first_party_for_cookies) const {
-  OnCanEnablePrivacyModeInternal(url, first_party_for_cookies);
-  return nested_network_delegate_->CanEnablePrivacyMode(
-      url, first_party_for_cookies);
+    const GURL& site_for_cookies) const {
+  OnCanEnablePrivacyModeInternal(url, site_for_cookies);
+  return nested_network_delegate_->CanEnablePrivacyMode(url, site_for_cookies);
 }
 
 void LayeredNetworkDelegate::OnCanEnablePrivacyModeInternal(
     const GURL& url,
-    const GURL& first_party_for_cookies) const {
-}
+    const GURL& site_for_cookies) const {}
 
 bool LayeredNetworkDelegate::OnAreExperimentalCookieFeaturesEnabled() const {
   OnAreExperimentalCookieFeaturesEnabledInternal();
@@ -266,14 +262,16 @@ bool LayeredNetworkDelegate::OnCanQueueReportingReport(
 void LayeredNetworkDelegate::OnCanQueueReportingReportInternal(
     const url::Origin& origin) const {}
 
-bool LayeredNetworkDelegate::OnCanSendReportingReport(
-    const url::Origin& origin) const {
-  OnCanSendReportingReportInternal(origin);
-  return nested_network_delegate_->CanSendReportingReport(origin);
+void LayeredNetworkDelegate::OnCanSendReportingReports(
+    std::set<url::Origin> origins,
+    base::OnceCallback<void(std::set<url::Origin>)> result_callback) const {
+  OnCanSendReportingReportsInternal(origins);
+  nested_network_delegate_->CanSendReportingReports(std::move(origins),
+                                                    std::move(result_callback));
 }
 
-void LayeredNetworkDelegate::OnCanSendReportingReportInternal(
-    const url::Origin& origin) const {}
+void LayeredNetworkDelegate::OnCanSendReportingReportsInternal(
+    const std::set<url::Origin>& origins) const {}
 
 bool LayeredNetworkDelegate::OnCanSetReportingClient(
     const url::Origin& origin,

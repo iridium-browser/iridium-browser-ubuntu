@@ -62,7 +62,7 @@ std::unique_ptr<base::DictionaryValue> CopyValuesAndAddDefaults(
       continue;
     }
 
-    CHECK(value->IsType(i.value().GetType()));
+    CHECK(value->type() == i.value().type());
     to->Set(i.key(), value->CreateDeepCopy());
   }
 
@@ -163,14 +163,14 @@ std::unique_ptr<base::DictionaryValue> PolicyWatcher::GetCurrentPolicies() {
 }
 
 std::unique_ptr<base::DictionaryValue> PolicyWatcher::GetDefaultPolicies() {
-  auto result = base::MakeUnique<base::DictionaryValue>();
+  auto result = std::make_unique<base::DictionaryValue>();
   result->SetBoolean(key::kRemoteAccessHostFirewallTraversal, true);
   result->SetBoolean(key::kRemoteAccessHostRequireCurtain, false);
   result->SetBoolean(key::kRemoteAccessHostMatchUsername, false);
   result->Set(key::kRemoteAccessHostClientDomainList,
-              base::MakeUnique<base::ListValue>());
+              std::make_unique<base::ListValue>());
   result->Set(key::kRemoteAccessHostDomainList,
-              base::MakeUnique<base::ListValue>());
+              std::make_unique<base::ListValue>());
   result->SetString(key::kRemoteAccessHostTalkGadgetPrefix,
                     kDefaultHostTalkGadgetPrefix);
   result->SetString(key::kRemoteAccessHostTokenUrl, std::string());
@@ -255,7 +255,7 @@ void PolicyWatcher::HandleDeprecatedPolicies(base::DictionaryValue* dict) {
       std::string domain;
       dict->GetString(policy::key::kRemoteAccessHostDomain, &domain);
       if (!domain.empty()) {
-        auto list = base::MakeUnique<base::ListValue>();
+        auto list = std::make_unique<base::ListValue>();
         list->AppendString(domain);
         dict->Set(policy::key::kRemoteAccessHostDomainList, std::move(list));
       }
@@ -269,7 +269,7 @@ void PolicyWatcher::HandleDeprecatedPolicies(base::DictionaryValue* dict) {
       std::string domain;
       dict->GetString(policy::key::kRemoteAccessHostClientDomain, &domain);
       if (!domain.empty()) {
-        auto list = base::MakeUnique<base::ListValue>();
+        auto list = std::make_unique<base::ListValue>();
         list->AppendString(domain);
         dict->Set(policy::key::kRemoteAccessHostClientDomainList,
                   std::move(list));
@@ -375,8 +375,8 @@ std::unique_ptr<PolicyWatcher> PolicyWatcher::CreateFromPolicyLoader(
 
   policy::PolicyServiceImpl::Providers providers;
   providers.push_back(policy_provider.get());
-  std::unique_ptr<policy::PolicyService> policy_service(
-      new policy::PolicyServiceImpl(providers));
+  std::unique_ptr<policy::PolicyServiceImpl> policy_service =
+      std::make_unique<policy::PolicyServiceImpl>(std::move(providers));
 
   policy::PolicyService* borrowed_policy_service = policy_service.get();
   return base::WrapUnique(new PolicyWatcher(
@@ -399,8 +399,7 @@ std::unique_ptr<PolicyWatcher> PolicyWatcher::CreateWithTaskRunner(
   std::unique_ptr<policy::AsyncPolicyLoader> policy_loader;
 #if defined(OS_WIN)
   policy_loader.reset(new policy::PolicyLoaderWin(
-      file_task_runner, L"SOFTWARE\\Policies\\Google\\Chrome",
-      nullptr));  // nullptr = don't use GPO / always read from the registry.
+      file_task_runner, L"SOFTWARE\\Policies\\Google\\Chrome"));
 #elif defined(OS_MACOSX)
   CFStringRef bundle_id = CFSTR("com.google.Chrome");
   policy_loader.reset(new policy::PolicyLoaderMac(

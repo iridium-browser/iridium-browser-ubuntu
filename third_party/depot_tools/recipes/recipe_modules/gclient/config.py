@@ -18,12 +18,12 @@ def BaseConfig(USE_MIRROR=True, CACHE_DIR=None,
     solutions = ConfigList(
       lambda: ConfigGroup(
         name = Single(basestring),
-        url = Single(basestring),
+        url = Single((basestring, type(None)), empty_val=''),
         deps_file = Single(basestring, empty_val='.DEPS.git', required=False,
                            hidden=False),
         managed = Single(bool, empty_val=True, required=False, hidden=False),
         custom_deps = Dict(value_type=(basestring, types.NoneType)),
-        custom_vars = Dict(value_type=basestring),
+        custom_vars = Dict(value_type=(basestring, types.BooleanType)),
         safesync_url = Single(basestring, required=False),
 
         revision = Single(
@@ -35,6 +35,8 @@ def BaseConfig(USE_MIRROR=True, CACHE_DIR=None,
     hooks = List(basestring),
     target_os = Set(basestring),
     target_os_only = Single(bool, empty_val=False, required=False),
+    target_cpu = Set(basestring),
+    target_cpu_only = Single(bool, empty_val=False, required=False),
     cache_dir = Static(cache_dir, hidden=False),
 
     # If supplied, use this as the source root (instead of the first solution's
@@ -81,6 +83,8 @@ def BaseConfig(USE_MIRROR=True, CACHE_DIR=None,
     # then a patch to Angle project can be applied to a chromium src's
     # checkout after first updating Angle's repo to its master's HEAD.
     patch_projects = Dict(value_type=tuple, hidden=True),
+    # Same as the above, except the keys are full repo URLs.
+    repo_path_map = Dict(value_type=tuple, hidden=True),
 
     # Check out refs/branch-heads.
     # TODO (machenbach): Only implemented for bot_update atm.
@@ -175,6 +179,14 @@ def skia(c):  # pragma: no cover
   m['skia'] = 'got_revision'
 
 @config_ctx()
+def skia_buildbot(c):  # pragma: no cover
+  s = c.solutions.add()
+  s.name = 'skia_buildbot'
+  s.url = 'https://skia.googlesource.com/buildbot.git'
+  m = c.got_revision_mapping
+  m['skia_buildbot'] = 'got_revision'
+
+@config_ctx()
 def chrome_golo(c):  # pragma: no cover
   s = c.solutions.add()
   s.name = 'chrome_golo'
@@ -209,32 +221,34 @@ def build_internal_scripts_slave(c):
 @config_ctx()
 def master_deps(c):
   s = c.solutions.add()
-  s.name = 'build_internal/master.DEPS'
+  s.name = 'master.DEPS'
   s.url = ('https://chrome-internal.googlesource.com/'
            'chrome/tools/build/master.DEPS.git')
-  c.got_revision_mapping['build_internal/master.DEPS'] = 'got_revision'
+  c.got_revision_mapping['master.DEPS'] = 'got_revision'
 
 @config_ctx()
 def slave_deps(c):
   s = c.solutions.add()
-  s.name = 'build_internal/slave.DEPS'
+  s.name = 'slave.DEPS'
   s.url = ('https://chrome-internal.googlesource.com/'
            'chrome/tools/build/slave.DEPS.git')
-  c.got_revision_mapping['build_internal/slave.DEPS'] = 'got_revision'
+  c.got_revision_mapping['slave.DEPS'] = 'got_revision'
 
 @config_ctx()
 def internal_deps(c):
   s = c.solutions.add()
-  s.name = 'build_internal/internal.DEPS'
+  s.name = 'internal.DEPS'
   s.url = ('https://chrome-internal.googlesource.com/'
            'chrome/tools/build/internal.DEPS.git')
-  c.got_revision_mapping['build_internal/internal.DEPS'] = 'got_revision'
+  c.got_revision_mapping['internal.DEPS'] = 'got_revision'
 
 @config_ctx()
 def pdfium(c):
   soln = c.solutions.add()
   soln.name = 'pdfium'
   soln.url = 'https://pdfium.googlesource.com/pdfium.git'
+  m = c.got_revision_mapping
+  m['pdfium'] = 'got_revision'
 
 @config_ctx()
 def mojo(c):
@@ -259,8 +273,7 @@ def boringssl(c):
 def dart(c):
   soln = c.solutions.add()
   soln.name = 'sdk'
-  soln.url = ('https://chromium.googlesource.com/external/github.com/' +
-              'dart-lang/sdk.git')
+  soln.url = ('https://dart.googlesource.com/sdk.git')
   soln.deps_file = 'DEPS'
   soln.managed = False
 
@@ -272,9 +285,9 @@ def infra(c):
   c.got_revision_mapping['infra'] = 'got_revision'
 
   p = c.patch_projects
-  p['luci-py'] = ('infra/luci', 'HEAD')
+  p['infra/luci/luci-py'] = ('infra/luci', 'HEAD')
   # TODO(phajdan.jr): remove recipes-py when it's not used for project name.
-  p['recipes-py'] = ('infra/recipes-py', 'HEAD')
+  p['infra/luci/recipes-py'] = ('infra/recipes-py', 'HEAD')
   p['recipe_engine'] = ('infra/recipes-py', 'HEAD')
 
 @config_ctx()
@@ -289,22 +302,22 @@ def luci_gae(c):
   # luci/gae is checked out as a part of infra.git solution at HEAD.
   c.revisions['infra'] = 'origin/master'
   # luci/gae is developed together with luci-go, which should be at HEAD.
-  c.revisions['infra/go/src/github.com/luci/luci-go'] = 'origin/master'
-  c.revisions['infra/go/src/github.com/luci/gae'] = (
+  c.revisions['infra/go/src/go.chromium.org/luci'] = 'origin/master'
+  c.revisions['infra/go/src/go.chromium.org/gae'] = (
       gclient_api.RevisionFallbackChain('origin/master'))
   m = c.got_revision_mapping
   del m['infra']
-  m['infra/go/src/github.com/luci/gae'] = 'got_revision'
+  m['infra/go/src/go.chromium.org/gae'] = 'got_revision'
 
 @config_ctx(includes=['infra'])
 def luci_go(c):
   # luci-go is checked out as a part of infra.git solution at HEAD.
   c.revisions['infra'] = 'origin/master'
-  c.revisions['infra/go/src/github.com/luci/luci-go'] = (
+  c.revisions['infra/go/src/go.chromium.org/luci'] = (
       gclient_api.RevisionFallbackChain('origin/master'))
   m = c.got_revision_mapping
   del m['infra']
-  m['infra/go/src/github.com/luci/luci-go'] = 'got_revision'
+  m['infra/go/src/go.chromium.org/luci'] = 'got_revision'
 
 @config_ctx(includes=['infra'])
 def luci_py(c):
@@ -332,8 +345,7 @@ def recipes_py(c):
 def recipes_py_bare(c):
   soln = c.solutions.add()
   soln.name = 'recipes-py'
-  soln.url = ('https://chromium.googlesource.com/external/github.com/'
-              'luci/recipes-py')
+  soln.url = 'https://chromium.googlesource.com/infra/luci/recipes-py'
   c.got_revision_mapping['recipes-py'] = 'got_revision'
 
 @config_ctx()

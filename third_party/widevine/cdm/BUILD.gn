@@ -5,9 +5,9 @@
 import("//build/config/chrome_build.gni")
 import("//build/config/features.gni")
 import("//chrome/process_version_rc_template.gni")
-import("//media/cdm/ppapi/cdm_paths.gni")
-import("//media/cdm/ppapi/ppapi_cdm_adapter.gni")
-import("//ppapi/features/features.gni")
+import("//media/cdm/library_cdm/cdm_paths.gni")
+import("//media/cdm/library_cdm/ppapi_cdm_adapter.gni")
+import("//media/media_options.gni")
 import("//third_party/widevine/cdm/widevine.gni")
 
 widevine_arch = current_cpu
@@ -92,9 +92,9 @@ if (widevine_cdm_binary_files != []) {
     # TODO(jrummell)
     # 'COPY_PHASE_STRIP': 'NO',
   }
-} else if (enable_widevine && enable_pepper_cdms) {
+} else if (enable_widevine && enable_library_cdms) {
   assert(!is_chrome_branded, "Branded Chrome should have binary files to copy.")
-  assert(!is_android, "Android should not have enable_pepper_cdms.")
+  assert(!is_android, "Android should not have enable_library_cdms.")
   shared_library("widevinecdm") {
     output_dir = "$root_out_dir/$widevine_cdm_path"
     sources = [
@@ -110,16 +110,12 @@ if (widevine_cdm_binary_files != []) {
       "//build/config:exe_and_shlib_deps",
     ]
 
-    if (is_mac) {
-      ldflags = [
-        # Not to strip important symbols by -Wl,-dead_strip.
-        "-Wl,-exported_symbol,_PPP_GetInterface",
-        "-Wl,-exported_symbol,_PPP_InitializeModule",
-        "-Wl,-exported_symbol,_PPP_ShutdownModule",
-      ]
-      #TODO(jrummell) Mac: 'DYLIB_INSTALL_NAME_BASE': '@loader_path',
-    } else if (is_posix && !is_mac) {
+    if (is_posix && !is_mac) {
       cflags = [ "-fvisibility=hidden" ]
+    }
+
+    if (is_mac) {
+      ldflags = [ "-Wl,-install_name,@loader_path/libwidevinecdm.dylib" ]
     }
   }
 } else {
@@ -141,7 +137,7 @@ if (widevine_cdm_manifest_file != []) {
   }
 }
 
-if ((is_chrome_branded || enable_widevine) && enable_pepper_cdms) {
+if ((is_chrome_branded || enable_widevine) && enable_library_cdms) {
   # Produce and compile the .rc file.
   process_version_rc_template("widevinecdmadapter_resources") {
     visibility = [ ":*" ]

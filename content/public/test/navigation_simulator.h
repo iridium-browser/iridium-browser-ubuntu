@@ -11,16 +11,18 @@
 #include "base/optional.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/navigation_throttle.h"
+#include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/referrer.h"
-#include "content/public/test/navigation_simulator.h"
 #include "net/base/host_port_pair.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "ui/base/page_transition_types.h"
 
 class GURL;
 
 namespace content {
 
+class FrameTreeNode;
 class NavigationHandle;
 class NavigationHandleImpl;
 class RenderFrameHost;
@@ -30,24 +32,93 @@ struct Referrer;
 // An interface for simulating a navigation in unit tests. Currently this only
 // supports renderer-initiated navigations.
 // Note: this should not be used in browser tests.
-// TODO(clamy): support browser-initiated navigations.
 class NavigationSimulator : public WebContentsObserver {
  public:
+  // Simulates a browser-initiated navigation to |url| started in
+  // |web_contents| from start to commit. Returns the RenderFrameHost that
+  // committed the navigation.
+  static RenderFrameHost* NavigateAndCommitFromBrowser(
+      WebContents* web_contents,
+      const GURL& url);
+
+  // Simulates the page reloading. Returns the RenderFrameHost that committed
+  // the navigation.
+  static RenderFrameHost* Reload(WebContents* web_contents);
+
+  // Simulates a back navigation from start to commit. Returns the
+  // RenderFrameHost that committed the navigation.
+  static RenderFrameHost* GoBack(WebContents* web_contents);
+
+  // Simulates a forward navigation from start to commit. Returns the
+  // RenderFrameHost that committed the navigation.
+  static RenderFrameHost* GoForward(WebContents* web_contents);
+
+  // Simulates a navigation to the given offset of the web_contents navigation
+  // controller, from start to finish.
+  static RenderFrameHost* GoToOffset(WebContents* web_contents, int offset);
+
   // Simulates a renderer-initiated navigation to |url| started in
-  // |render_frame_host| from start to commit.
-  static void NavigateAndCommitFromDocument(const GURL& original_url,
-                                            RenderFrameHost* render_frame_host);
+  // |render_frame_host| from start to commit. Returns the RenderFramehost that
+  // committed the navigation.
+  static RenderFrameHost* NavigateAndCommitFromDocument(
+      const GURL& original_url,
+      RenderFrameHost* render_frame_host);
+
+  // Simulates a failed browser-initiated navigation to |url| started in
+  // |web_contents| from start to commit. Returns the RenderFrameHost that
+  // committed the error page for the navigation, or nullptr if the navigation
+  // error did not result in an error page.
+  static RenderFrameHost* NavigateAndFailFromBrowser(WebContents* web_contents,
+                                                     const GURL& url,
+                                                     int net_error_code);
+
+  // Simulates the page reloading and failing. Returns the RenderFrameHost that
+  // committed the error page for the navigation, or nullptr if the navigation
+  // error did not result in an error page.
+  static RenderFrameHost* ReloadAndFail(WebContents* web_contents,
+                                        int net_error_code);
+
+  // Simulates a failed back navigation. Returns the RenderFrameHost that
+  // committed the error page for the navigation, or nullptr if the navigation
+  // error did not result in an error page.
+  static RenderFrameHost* GoBackAndFail(WebContents* web_contents,
+                                        int net_error_code);
+
+  // TODO(clamy, ahemery): Add GoForwardAndFail() if it becomes needed.
+
+  // Simulates a failed offset navigation. Returns the RenderFrameHost that
+  // committed the error page for the navigation, or nullptr if the navigation
+  // error did not result in an error page.
+  static RenderFrameHost* GoToOffsetAndFail(WebContents* web_contents,
+                                            int offset,
+                                            int net_error_code);
 
   // Simulates a failed renderer-initiated navigation to |url| started in
-  // |render_frame_host| from start to commit.
-  static void NavigateAndFailFromDocument(const GURL& original_url,
-                                          int net_error_code,
-                                          RenderFrameHost* render_frame_host);
+  // |render_frame_host| from start to commit. Returns the RenderFramehost that
+  // committed the error page for the navigation, or nullptr if the navigation
+  // error did not result in an error page.
+  static RenderFrameHost* NavigateAndFailFromDocument(
+      const GURL& original_url,
+      int net_error_code,
+      RenderFrameHost* render_frame_host);
 
   // ---------------------------------------------------------------------------
 
   // All the following methods should be used when more precise control over the
   // navigation is needed.
+
+  // Creates a NavigationSimulator that will be used to simulate a
+  // browser-initiated navigation to |original_url| started in |contents|.
+  static std::unique_ptr<NavigationSimulator> CreateBrowserInitiated(
+      const GURL& original_url,
+      WebContents* contents);
+
+  // Creates a NavigationSimulator that will be used to simulate a history
+  // navigation to one of the |web_contents|'s navigation controller |offset|.
+  // E.g. offset -1 for back navigations and 1 for forward navigations.
+  static std::unique_ptr<NavigationSimulator> CreateHistoryNavigation(
+      int offset,
+      WebContents* web_contents);
 
   // Creates a NavigationSimulator that will be used to simulate a
   // renderer-initiated navigation to |original_url| started by
@@ -56,8 +127,6 @@ class NavigationSimulator : public WebContentsObserver {
       const GURL& original_url,
       RenderFrameHost* render_frame_host);
 
-  NavigationSimulator(const GURL& original_url,
-                      TestRenderFrameHost* render_frame_host);
   ~NavigationSimulator() override;
 
   // --------------------------------------------------------------------------
@@ -110,6 +179,10 @@ class NavigationSimulator : public WebContentsObserver {
   // Simulates a redirect to |new_url| for the navigation.
   virtual void Redirect(const GURL& new_url);
 
+  // Simulates receiving the navigation response and choosing a final
+  // RenderFrameHost to commit it.
+  virtual void ReadyToCommit();
+
   // Simulates the commit of the navigation in the RenderFrameHost.
   virtual void Commit();
 
@@ -135,6 +208,13 @@ class NavigationSimulator : public WebContentsObserver {
   // The following parameters are constant during the navigation and may only be
   // specified before calling |Start|.
   virtual void SetTransition(ui::PageTransition transition);
+  virtual void SetHasUserGesture(bool has_user_gesture);
+  // Note: ReloadType should only be specified for browser-initiated
+  // navigations.
+  void SetReloadType(ReloadType reload_type);
+
+  // Sets the HTTP method for the navigation.
+  void SetMethod(const std::string& method);
 
   // The following parameters can change during redirects. They should be
   // specified before calling |Start| if they need to apply to the navigation to
@@ -145,6 +225,20 @@ class NavigationSimulator : public WebContentsObserver {
   // The following parameters can change at any point until the page fails or
   // commits. They should be specified before calling |Fail| or |Commit|.
   virtual void SetSocketAddress(const net::HostPortPair& socket_address);
+
+  // Sets the InterfaceProvider interface request to pass in as an argument to
+  // DidCommitProvisionalLoad for cross-document navigations. If not called,
+  // a stub will be passed in (which will never receive any interface requests).
+  //
+  // This interface connection would normally be created by the RenderFrame,
+  // with the client end bound to |remote_interfaces_| to allow the new document
+  // to access services exposed by the RenderFrameHost.
+  virtual void SetInterfaceProviderRequest(
+      service_manager::mojom::InterfaceProviderRequest request);
+
+  // Provides the contents mime type to be set at commit. It should be
+  // specified before calling |Commit|.
+  virtual void SetContentsMimeType(const std::string& contents_mime_type);
 
   // --------------------------------------------------------------------------
 
@@ -163,7 +257,29 @@ class NavigationSimulator : public WebContentsObserver {
   // callback.
   content::GlobalRequestID GetGlobalRequestID() const;
 
+  // Allows the user of the NavigationSimulator to specify a callback that will
+  // be called if the navigation is deferred by a NavigationThrottle. This is
+  // used for testing deferring NavigationThrottles.
+  //
+  // Example usage:
+  //   void CheckThrottleStateAndResume() {
+  //     // Do some testing here.
+  //     deferring_navigation_throttle->Resume();
+  //   }
+  //   unique_ptr<NavigationSimulator> simulator =
+  //       NavigationSimulator::CreateRendererInitiated(
+  //           original_url, render_frame_host);
+  //   simulator->SetOnDeferCallback(base::Bind(&CheckThrottleStateAndResume));
+  //   simulator->Start();
+  //   simulator->Commit();
+  void SetOnDeferCallback(const base::Closure& on_defer_callback);
+
  private:
+  NavigationSimulator(const GURL& original_url,
+                      bool browser_initiated,
+                      WebContentsImpl* web_contents,
+                      TestRenderFrameHost* render_frame_host);
+
   // WebContentsObserver:
   void DidStartNavigation(NavigationHandle* navigation_handle) override;
   void DidRedirectNavigation(NavigationHandle* navigation_handle) override;
@@ -172,7 +288,16 @@ class NavigationSimulator : public WebContentsObserver {
 
   void OnWillStartRequest();
   void OnWillRedirectRequest();
+  void OnWillFailRequest();
   void OnWillProcessResponse();
+
+  // Simulates a browser-initiated navigation starting. Returns false if the
+  // navigation failed synchronously.
+  bool SimulateBrowserInitiatedStart();
+
+  // Simulates a renderer-initiated navigation starting. Returns false if the
+  // navigation failed synchronously.
+  bool SimulateRendererInitiatedStart();
 
   // This method will block waiting for throttle checks to complete.
   void WaitForThrottleChecksComplete();
@@ -185,36 +310,59 @@ class NavigationSimulator : public WebContentsObserver {
   // NavigationHandle.
   void PrepareCompleteCallbackOnHandle();
 
-  // Simulates the DidFailProvisionalLoad IPC following a NavigationThrottle
-  // cancelling the navigation.
-  // PlzNavigate: this is not needed.
-  void FailFromThrottleCheck(NavigationThrottle::ThrottleCheckResult result);
+  // Check if the navigation corresponds to a same-document navigation.
+  // Only use on renderer-initiated navigations.
+  bool CheckIfSameDocument();
+
+  // Infers from internal parameters whether the navigation created a new
+  // entry.
+  bool DidCreateNewEntry();
+
+  // Set the navigation to be done towards the specified navigation controller
+  // offset. Typically -1 for back navigations or 1 for forward navigations.
+  void SetSessionHistoryOffset(int offset);
 
   enum State {
     INITIALIZATION,
     STARTED,
+    READY_TO_COMMIT,
     FAILED,
     FINISHED,
   };
 
   State state_ = INITIALIZATION;
 
+  // The WebContents in which the navigation is taking place.
+  WebContentsImpl* web_contents_;
+
   // The renderer associated with this navigation.
+  // Note: this can initially be null for browser-initiated navigations.
   TestRenderFrameHost* render_frame_host_;
+
+  FrameTreeNode* frame_tree_node_;
 
   // The NavigationHandle associated with this navigation.
   NavigationHandleImpl* handle_;
 
   GURL navigation_url_;
   net::HostPortPair socket_address_;
+  std::string initial_method_;
+  bool browser_initiated_;
+  bool same_document_ = false;
   Referrer referrer_;
-  ui::PageTransition transition_ = ui::PAGE_TRANSITION_LINK;
+  ui::PageTransition transition_;
+  ReloadType reload_type_ = ReloadType::NONE;
+  int session_history_offset_ = 0;
+  bool has_user_gesture_ = true;
+  service_manager::mojom::InterfaceProviderRequest interface_provider_request_;
+  std::string contents_mime_type_;
 
   // These are used to sanity check the content/public/ API calls emitted as
   // part of the navigation.
   int num_did_start_navigation_called_ = 0;
   int num_will_start_request_called_ = 0;
   int num_will_redirect_request_called_ = 0;
+  int num_will_fail_request_called_ = 0;
   int num_did_redirect_navigation_called_ = 0;
   int num_will_process_response_called_ = 0;
   int num_ready_to_commit_called_ = 0;
@@ -232,6 +380,10 @@ class NavigationSimulator : public WebContentsObserver {
 
   // Closure that is set when WaitForThrottleChecksComplete is called.
   base::Closure throttle_checks_wait_closure_;
+
+  // Temporarily holds a closure that will be called on navigation deferral
+  // until the NavigationHandle for this navigation has been created.
+  base::Closure on_defer_callback_;
 
   base::WeakPtrFactory<NavigationSimulator> weak_factory_;
 };

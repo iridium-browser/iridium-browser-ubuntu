@@ -172,32 +172,26 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
       "application/vnd.apple.mpegurl"));
   EXPECT_EQ(kHlsSupported, IsSupportedMediaMimeType("audio/mpegurl"));
   EXPECT_EQ(kHlsSupported, IsSupportedMediaMimeType("audio/x-mpegurl"));
-
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
   EXPECT_TRUE(IsSupportedMediaMimeType("audio/mp4"));
-  EXPECT_TRUE(IsSupportedMediaMimeType("audio/x-m4a"));
-  EXPECT_TRUE(IsSupportedMediaMimeType("video/mp4"));
-  EXPECT_TRUE(IsSupportedMediaMimeType("video/x-m4v"));
-
   EXPECT_TRUE(IsSupportedMediaMimeType("audio/mp3"));
   EXPECT_TRUE(IsSupportedMediaMimeType("audio/x-mp3"));
   EXPECT_TRUE(IsSupportedMediaMimeType("audio/mpeg"));
+  EXPECT_TRUE(IsSupportedMediaMimeType("video/mp4"));
+
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+  EXPECT_TRUE(IsSupportedMediaMimeType("audio/x-m4a"));
+  EXPECT_TRUE(IsSupportedMediaMimeType("video/x-m4v"));
   EXPECT_TRUE(IsSupportedMediaMimeType("audio/aac"));
 
 #if BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
   EXPECT_TRUE(IsSupportedMediaMimeType("video/mp2t"));
 #else
   EXPECT_FALSE(IsSupportedMediaMimeType("video/mp2t"));
-#endif
-#else
-  EXPECT_FALSE(IsSupportedMediaMimeType("audio/mp4"));
-  EXPECT_FALSE(IsSupportedMediaMimeType("audio/x-m4a"));
-  EXPECT_FALSE(IsSupportedMediaMimeType("video/mp4"));
-  EXPECT_FALSE(IsSupportedMediaMimeType("video/x-m4v"));
+#endif  // BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
 
-  EXPECT_FALSE(IsSupportedMediaMimeType("audio/mp3"));
-  EXPECT_FALSE(IsSupportedMediaMimeType("audio/x-mp3"));
-  EXPECT_FALSE(IsSupportedMediaMimeType("audio/mpeg"));
+#else
+  EXPECT_FALSE(IsSupportedMediaMimeType("audio/x-m4a"));
+  EXPECT_FALSE(IsSupportedMediaMimeType("video/x-m4v"));
   EXPECT_FALSE(IsSupportedMediaMimeType("audio/aac"));
 #endif  // USE_PROPRIETARY_CODECS
   EXPECT_FALSE(IsSupportedMediaMimeType("video/mp3"));
@@ -328,6 +322,14 @@ TEST(MimeUtilTest, ParseAudioCodecString) {
     EXPECT_EQ(kCodecAAC, out_codec);
   }
 
+  // Valid FLAC string with MP4. Neither decoding nor demuxing is proprietary.
+  EXPECT_TRUE(ParseAudioCodecString("audio/mp4", "flac", &out_is_ambiguous,
+                                    &out_codec));
+  if (kUsePropCodecs) {
+    EXPECT_FALSE(out_is_ambiguous);
+    EXPECT_EQ(kCodecFLAC, out_codec);
+  }
+
   // Ambiguous AAC string.
   // TODO(chcunningha): This can probably be allowed. I think we treat all
   // MPEG4_AAC the same.
@@ -358,6 +360,43 @@ TEST(MimeUtilTest, ParseAudioCodecString) {
   // Made up codec is also not valid.
   EXPECT_FALSE(ParseAudioCodecString("audio/webm", "bogus", &out_is_ambiguous,
                                      &out_codec));
+}
+
+// These codecs really only have one profile. Ensure that |out_profile| is
+// correctly mapped.
+TEST(MimeUtilTest, ParseVideoCodecString_SimpleCodecsHaveProfiles) {
+  bool out_is_ambiguous;
+  VideoCodec out_codec;
+  VideoCodecProfile out_profile;
+  uint8_t out_level;
+  VideoColorSpace out_colorspace;
+
+  // Valid VP8 string.
+  EXPECT_TRUE(ParseVideoCodecString("video/webm", "vp8", &out_is_ambiguous,
+                                    &out_codec, &out_profile, &out_level,
+                                    &out_colorspace));
+  EXPECT_FALSE(out_is_ambiguous);
+  EXPECT_EQ(kCodecVP8, out_codec);
+  EXPECT_EQ(VP8PROFILE_ANY, out_profile);
+  EXPECT_EQ(0, out_level);
+  EXPECT_EQ(VideoColorSpace::REC709(), out_colorspace);
+
+// Valid Theora string.
+#if defined(OS_ANDROID)
+  // Theora not supported on Android.
+  EXPECT_FALSE(ParseVideoCodecString("video/ogg", "theora", &out_is_ambiguous,
+                                     &out_codec, &out_profile, &out_level,
+                                     &out_colorspace));
+#else
+  EXPECT_TRUE(ParseVideoCodecString("video/ogg", "theora", &out_is_ambiguous,
+                                    &out_codec, &out_profile, &out_level,
+                                    &out_colorspace));
+  EXPECT_FALSE(out_is_ambiguous);
+  EXPECT_EQ(kCodecTheora, out_codec);
+  EXPECT_EQ(THEORAPROFILE_ANY, out_profile);
+  EXPECT_EQ(0, out_level);
+  EXPECT_EQ(VideoColorSpace::REC709(), out_colorspace);
+#endif
 }
 
 TEST(IsCodecSupportedOnAndroidTest, EncryptedCodecsFailWithoutPlatformSupport) {
@@ -396,6 +435,7 @@ TEST(IsCodecSupportedOnAndroidTest, EncryptedCodecBehavior) {
         switch (codec) {
           // These codecs are never supported by the Android platform.
           case MimeUtil::INVALID_CODEC:
+          case MimeUtil::AV1:
           case MimeUtil::THEORA:
             EXPECT_FALSE(result);
             break;
@@ -455,6 +495,7 @@ TEST(IsCodecSupportedOnAndroidTest, ClearCodecBehavior) {
           // These codecs are never supported by the Android platform.
           case MimeUtil::INVALID_CODEC:
           case MimeUtil::THEORA:
+          case MimeUtil::AV1:
             EXPECT_FALSE(result);
             break;
 

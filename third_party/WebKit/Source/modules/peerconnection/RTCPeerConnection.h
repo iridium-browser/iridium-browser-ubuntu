@@ -32,21 +32,23 @@
 #define RTCPeerConnection_h
 
 #include <memory>
+
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
-#include "core/dom/SuspendableObject.h"
+#include "core/dom/PausableObject.h"
 #include "modules/EventTargetModules.h"
 #include "modules/crypto/NormalizeAlgorithm.h"
 #include "modules/mediastream/MediaStream.h"
 #include "modules/peerconnection/RTCIceCandidate.h"
 #include "platform/AsyncMethodRunner.h"
 #include "platform/WebFrameScheduler.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/heap/HeapAllocator.h"
 #include "public/platform/WebMediaConstraints.h"
 #include "public/platform/WebRTCPeerConnectionHandler.h"
 #include "public/platform/WebRTCPeerConnectionHandlerClient.h"
 
 namespace blink {
+
 class ExceptionState;
 class MediaStreamTrack;
 class RTCAnswerOptions;
@@ -56,23 +58,23 @@ class RTCDataChannel;
 class RTCDataChannelInit;
 class RTCIceCandidateInitOrRTCIceCandidate;
 class RTCOfferOptions;
-class RTCPeerConnectionErrorCallback;
 class RTCPeerConnectionTest;
 class RTCRtpReceiver;
 class RTCRtpSender;
 class RTCSessionDescription;
-class RTCSessionDescriptionCallback;
 class RTCSessionDescriptionInit;
-class RTCStatsCallback;
 class ScriptState;
-class VoidCallback;
+class V8RTCPeerConnectionErrorCallback;
+class V8RTCSessionDescriptionCallback;
+class V8RTCStatsCallback;
+class V8VoidFunction;
 struct WebRTCConfiguration;
 
 class MODULES_EXPORT RTCPeerConnection final
     : public EventTargetWithInlineData,
       public WebRTCPeerConnectionHandlerClient,
       public ActiveScriptWrappable<RTCPeerConnection>,
-      public SuspendableObject,
+      public PausableObject,
       public MediaStreamObserver {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(RTCPeerConnection);
@@ -87,31 +89,31 @@ class MODULES_EXPORT RTCPeerConnection final
 
   ScriptPromise createOffer(ScriptState*, const RTCOfferOptions&);
   ScriptPromise createOffer(ScriptState*,
-                            RTCSessionDescriptionCallback*,
-                            RTCPeerConnectionErrorCallback*,
+                            V8RTCSessionDescriptionCallback*,
+                            V8RTCPeerConnectionErrorCallback*,
                             const Dictionary&,
                             ExceptionState&);
 
   ScriptPromise createAnswer(ScriptState*, const RTCAnswerOptions&);
   ScriptPromise createAnswer(ScriptState*,
-                             RTCSessionDescriptionCallback*,
-                             RTCPeerConnectionErrorCallback*,
+                             V8RTCSessionDescriptionCallback*,
+                             V8RTCPeerConnectionErrorCallback*,
                              const Dictionary&);
 
   ScriptPromise setLocalDescription(ScriptState*,
                                     const RTCSessionDescriptionInit&);
   ScriptPromise setLocalDescription(ScriptState*,
                                     const RTCSessionDescriptionInit&,
-                                    VoidCallback*,
-                                    RTCPeerConnectionErrorCallback*);
+                                    V8VoidFunction*,
+                                    V8RTCPeerConnectionErrorCallback*);
   RTCSessionDescription* localDescription();
 
   ScriptPromise setRemoteDescription(ScriptState*,
                                      const RTCSessionDescriptionInit&);
   ScriptPromise setRemoteDescription(ScriptState*,
                                      const RTCSessionDescriptionInit&,
-                                     VoidCallback*,
-                                     RTCPeerConnectionErrorCallback*);
+                                     V8VoidFunction*,
+                                     V8RTCPeerConnectionErrorCallback*);
   RTCSessionDescription* remoteDescription();
 
   String signalingState() const;
@@ -129,8 +131,8 @@ class MODULES_EXPORT RTCPeerConnection final
                                 const RTCIceCandidateInitOrRTCIceCandidate&);
   ScriptPromise addIceCandidate(ScriptState*,
                                 const RTCIceCandidateInitOrRTCIceCandidate&,
-                                VoidCallback*,
-                                RTCPeerConnectionErrorCallback*);
+                                V8VoidFunction*,
+                                V8RTCPeerConnectionErrorCallback*);
 
   String iceGatheringState() const;
 
@@ -139,8 +141,11 @@ class MODULES_EXPORT RTCPeerConnection final
   MediaStreamVector getLocalStreams() const;
 
   MediaStreamVector getRemoteStreams() const;
-
-  MediaStream* getStreamById(const String& stream_id);
+  // Returns the remote stream for the descriptor, if one exists.
+  MediaStream* getRemoteStream(MediaStreamDescriptor*) const;
+  // Counts the number of receivers that have a remote stream for the descriptor
+  // in its set of associated remote streams.
+  size_t getRemoteStreamUsageCount(MediaStreamDescriptor*) const;
 
   void addStream(ScriptState*,
                  MediaStream*,
@@ -150,14 +155,15 @@ class MODULES_EXPORT RTCPeerConnection final
   void removeStream(MediaStream*, ExceptionState&);
 
   ScriptPromise getStats(ScriptState*,
-                         RTCStatsCallback* success_callback,
+                         V8RTCStatsCallback* success_callback,
                          MediaStreamTrack* selector = nullptr);
   ScriptPromise getStats(ScriptState*);
 
-  HeapVector<Member<RTCRtpSender>> getSenders();
-  HeapVector<Member<RTCRtpReceiver>> getReceivers();
+  const HeapVector<Member<RTCRtpSender>>& getSenders() const;
+  const HeapVector<Member<RTCRtpReceiver>>& getReceivers() const;
   RTCRtpSender* addTrack(MediaStreamTrack*, MediaStreamVector, ExceptionState&);
   void removeTrack(RTCRtpSender*, ExceptionState&);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(track);
 
   RTCDataChannel* createDataChannel(ScriptState*,
                                     String label,
@@ -166,7 +172,8 @@ class MODULES_EXPORT RTCPeerConnection final
 
   RTCDTMFSender* createDTMFSender(MediaStreamTrack*, ExceptionState&);
 
-  void close(ExceptionState&);
+  bool IsClosed() { return closed_; }
+  void close();
 
   // We allow getStats after close, but not other calls or callbacks.
   bool ShouldFireDefaultCallbacks() { return !closed_ && !stopped_; }
@@ -187,12 +194,12 @@ class MODULES_EXPORT RTCPeerConnection final
 
   // WebRTCPeerConnectionHandlerClient
   void NegotiationNeeded() override;
-  void DidGenerateICECandidate(const WebRTCICECandidate&) override;
+  void DidGenerateICECandidate(scoped_refptr<WebRTCICECandidate>) override;
   void DidChangeSignalingState(SignalingState) override;
   void DidChangeICEGatheringState(ICEGatheringState) override;
   void DidChangeICEConnectionState(ICEConnectionState) override;
-  void DidAddRemoteStream(const WebMediaStream&) override;
-  void DidRemoveRemoteStream(const WebMediaStream&) override;
+  void DidAddRemoteTrack(std::unique_ptr<WebRTCRtpReceiver>) override;
+  void DidRemoveRemoteTrack(std::unique_ptr<WebRTCRtpReceiver>) override;
   void DidAddRemoteDataChannel(WebRTCDataChannelHandler*) override;
   void ReleasePeerConnectionHandler() override;
   void ClosePeerConnection() override;
@@ -201,16 +208,20 @@ class MODULES_EXPORT RTCPeerConnection final
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
-  // SuspendableObject
-  void Suspend() override;
-  void Resume() override;
+  // PausableObject
+  void Pause() override;
+  void Unpause() override;
   void ContextDestroyed(ExecutionContext*) override;
 
   // ScriptWrappable
   // We keep the this object alive until either stopped or closed.
   bool HasPendingActivity() const final { return !closed_ && !stopped_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  // For testing; exported to testing/InternalWebRTCPeerConnection
+  static int PeerConnectionCount();
+  static int PeerConnectionCountLimit();
+
+  virtual void Trace(blink::Visitor*);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(RTCPeerConnectionTest, GetAudioTrack);
@@ -222,20 +233,20 @@ class MODULES_EXPORT RTCPeerConnection final
   FRIEND_TEST_ALL_PREFIXES(RTCPeerConnectionTest,
                            GetTrackRemoveStreamAndGCWithPersistentStream);
 
-  typedef Function<bool()> BoolFunction;
+  typedef base::OnceCallback<bool()> BoolFunction;
   class EventWrapper : public GarbageCollectedFinalized<EventWrapper> {
    public:
-    EventWrapper(Event*, std::unique_ptr<BoolFunction>);
+    EventWrapper(Event*, BoolFunction);
     // Returns true if |m_setupFunction| returns true or it is null.
     // |m_event| will only be fired if setup() returns true;
     bool Setup();
 
-    DECLARE_TRACE();
+    void Trace(blink::Visitor*);
 
     Member<Event> event_;
 
    private:
-    std::unique_ptr<BoolFunction> setup_function_;
+    BoolFunction setup_function_;
   };
 
   RTCPeerConnection(ExecutionContext*,
@@ -245,9 +256,15 @@ class MODULES_EXPORT RTCPeerConnection final
   void Dispose();
 
   void ScheduleDispatchEvent(Event*);
-  void ScheduleDispatchEvent(Event*, std::unique_ptr<BoolFunction>);
+  void ScheduleDispatchEvent(Event*, BoolFunction);
   void DispatchScheduledEvent();
-  MediaStreamTrack* GetTrack(const WebMediaStreamTrack& web_track) const;
+  void MaybeFireNegotiationNeeded();
+  MediaStreamTrack* GetTrack(const WebMediaStreamTrack&) const;
+  RTCRtpSender* FindSenderForTrackAndStream(MediaStreamTrack*, MediaStream*);
+  HeapVector<Member<RTCRtpSender>>::iterator FindSender(
+      const WebRTCRtpSender& web_sender);
+  HeapVector<Member<RTCRtpReceiver>>::iterator FindReceiver(
+      const WebRTCRtpReceiver& web_receiver);
 
   // The "Change" methods set the state asynchronously and fire the
   // corresponding event immediately after changing the state (if it was really
@@ -289,15 +306,12 @@ class MODULES_EXPORT RTCPeerConnection final
   ICEGatheringState ice_gathering_state_;
   ICEConnectionState ice_connection_state_;
 
-  MediaStreamVector local_streams_;
-  MediaStreamVector remote_streams_;
   // A map containing any track that is in use by the peer connection. This
-  // includes tracks of |local_streams_|, |remote_streams_|, |rtp_senders_| and
-  // |rtp_receivers_|.
+  // includes tracks of |rtp_senders_| and |rtp_receivers_|.
   HeapHashMap<WeakMember<MediaStreamComponent>, WeakMember<MediaStreamTrack>>
       tracks_;
-  HeapHashMap<uintptr_t, WeakMember<RTCRtpSender>> rtp_senders_;
-  HeapHashMap<uintptr_t, WeakMember<RTCRtpReceiver>> rtp_receivers_;
+  HeapVector<Member<RTCRtpSender>> rtp_senders_;
+  HeapVector<Member<RTCRtpReceiver>> rtp_receivers_;
 
   std::unique_ptr<WebRTCPeerConnectionHandler> peer_handler_;
 
@@ -309,6 +323,7 @@ class MODULES_EXPORT RTCPeerConnection final
   std::unique_ptr<WebFrameScheduler::ActiveConnectionHandle>
       connection_handle_for_scheduler_;
 
+  bool negotiation_needed_;
   bool stopped_;
   bool closed_;
 

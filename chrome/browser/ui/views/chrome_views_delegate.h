@@ -10,7 +10,7 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "build/build_config.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/views/views_delegate.h"
 
 class ScopedKeepAlive;
@@ -30,7 +30,7 @@ class ChromeViewsDelegate : public views::ViewsDelegate {
                                gfx::Rect* bounds,
                                ui::WindowShowState* show_state) const override;
   void NotifyAccessibilityEvent(views::View* view,
-                                ui::AXEvent event_type) override;
+                                ax::mojom::Event event_type) override;
 #if defined(OS_CHROMEOS)
   ProcessMenuAcceleratorResult ProcessAcceleratorWhileMenuShowing(
       const ui::Accelerator& accelerator) override;
@@ -56,7 +56,10 @@ class ChromeViewsDelegate : public views::ViewsDelegate {
   ui::ContextFactory* GetContextFactory() override;
   ui::ContextFactoryPrivate* GetContextFactoryPrivate() override;
   std::string GetApplicationName() override;
-  scoped_refptr<base::TaskRunner> GetBlockingPoolTaskRunner() override;
+
+#if defined(OS_MACOSX)
+  bool ShouldMirrorArrowsInRTL() const override;
+#endif
 
  private:
 #if defined(OS_WIN)

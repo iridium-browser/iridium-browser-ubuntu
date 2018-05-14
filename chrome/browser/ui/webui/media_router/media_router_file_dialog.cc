@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/media_router/media_router_file_dialog.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/task_scheduler/post_task.h"
@@ -108,7 +110,7 @@ void MediaRouterFileDialog::FileSystemDelegate::OpenFileDialog(
     const base::FilePath& default_directory,
     const ui::SelectFileDialog::FileTypeInfo* file_type_info) {
   select_file_dialog_ = ui::SelectFileDialog::Create(
-      listener, new ChromeSelectFilePolicy(
+      listener, std::make_unique<ChromeSelectFilePolicy>(
                     browser->tab_strip_model()->GetActiveWebContents()));
 
   gfx::NativeWindow parent_window = browser->window()->GetNativeWindow();
@@ -122,7 +124,7 @@ void MediaRouterFileDialog::FileSystemDelegate::OpenFileDialog(
 
 MediaRouterFileDialog::MediaRouterFileDialog(
     MediaRouterFileDialogDelegate* delegate)
-    : MediaRouterFileDialog(delegate, base::MakeUnique<FileSystemDelegate>()) {}
+    : MediaRouterFileDialog(delegate, std::make_unique<FileSystemDelegate>()) {}
 
 // Used for tests
 MediaRouterFileDialog::MediaRouterFileDialog(
@@ -250,6 +252,7 @@ IssueInfo MediaRouterFileDialog::CreateIssue(
       // Create issue shouldn't be called with FILE_OK, but to ensure things
       // compile, fall through sets |issue_title| to the generic error.
       NOTREACHED();
+      FALLTHROUGH;
     case MediaRouterFileDialog::UNKNOWN_FAILURE:
       issue_title = l10n_util::GetStringUTF8(
           IDS_MEDIA_ROUTER_ISSUE_FILE_CAST_GENERIC_ERROR);

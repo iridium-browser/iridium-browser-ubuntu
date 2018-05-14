@@ -828,7 +828,7 @@ importer.RuntimeLogger.prototype.catcher = function(context) {
     var message = prefix + 'Caught error in promise chain.';
     // Append error info, if provided, then output the error.
     if (error) {
-      message += ' Error: ' + error.message || error;
+      message += ' Error: ' + (error.message || error);
     }
     this.error(message);
 
@@ -874,13 +874,13 @@ importer.RuntimeLogger.prototype.writeLine_ = function(type, line, writer) {
        * @param {function()} reject
        * @this {importer.RuntimeLogger}
        */
-      function(resolve, reject) {
+      (function(resolve, reject) {
         writer.onwriteend = resolve;
         writer.onerror = reject;
 
         writer.seek(writer.length);
         writer.write(blob);
-      }.bind(this));
+      }).bind(this));
 };
 
 /** @private {importer.Logger} */

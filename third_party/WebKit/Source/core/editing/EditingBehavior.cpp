@@ -29,7 +29,9 @@
 #include "build/build_config.h"
 #include "core/events/KeyboardEvent.h"
 #include "platform/KeyboardCodes.h"
+#include "platform/wtf/Assertions.h"
 #include "public/platform/WebInputEvent.h"
+#include "public/web/WebSettings.h"
 
 namespace blink {
 
@@ -239,7 +241,7 @@ const char* EditingBehavior::InterpretKeyEvent(
   }
 
   int map_key = modifiers << 16 | event.charCode();
-  return map_key ? key_press_commands_map->at(map_key) : 0;
+  return map_key ? key_press_commands_map->at(map_key) : nullptr;
 }
 
 bool EditingBehavior::ShouldInsertCharacter(const KeyboardEvent& event) const {
@@ -289,4 +291,11 @@ bool EditingBehavior::ShouldInsertCharacter(const KeyboardEvent& event) const {
 
   return true;
 }
+
+STATIC_ASSERT_ENUM(WebSettings::kEditingBehaviorMac, kEditingMacBehavior);
+STATIC_ASSERT_ENUM(WebSettings::kEditingBehaviorWin, kEditingWindowsBehavior);
+STATIC_ASSERT_ENUM(WebSettings::kEditingBehaviorUnix, kEditingUnixBehavior);
+STATIC_ASSERT_ENUM(WebSettings::kEditingBehaviorAndroid,
+                   kEditingAndroidBehavior);
+
 }  // namespace blink

@@ -4,12 +4,11 @@
 
 static_library("renderer") {
   sources = [
-    "print_web_view_helper.cc",
-    "print_web_view_helper.h",
-    "print_web_view_helper_android.cc",
-    "print_web_view_helper_linux.cc",
-    "print_web_view_helper_mac.mm",
-    "print_web_view_helper_pdf_win.cc",
+    "print_render_frame_helper.cc",
+    "print_render_frame_helper.h",
+    "print_render_frame_helper_android.cc",
+    "print_render_frame_helper_linux.cc",
+    "print_render_frame_helper_mac.mm",
   ]
 
   deps = [
@@ -21,6 +20,7 @@ static_library("renderer") {
     "//net",
     "//printing",
     "//third_party/WebKit/public:blink",
+    "//third_party/WebKit/public/common",
     "//ui/base",
   ]
 }

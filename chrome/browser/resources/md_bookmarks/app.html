@@ -23,14 +23,14 @@
         display: flex;
         flex-direction: column;
         height: 100%;
-        line-height: 154%;  /* 20px. */
+        line-height: 1.54;  /* 20px. */
       }
 
       #main-container {
         display: flex;
         flex-direction: row;
         flex-grow: 1;
-        overflow: auto;
+        overflow: hidden;
       }
 
       #splitter {
@@ -56,7 +56,6 @@
         display: block;
         max-width: 40%;
         min-width: var(--min-sidebar-width);
-        overflow-x: hidden;
         overflow-y: auto;
         padding-top: 8px;
         user-select: none;
@@ -65,13 +64,14 @@
 
       bookmarks-list {
         flex: 1;
-        min-width: 550px;
+        overflow-x: hidden;
       }
     </style>
-    <bookmarks-toolbar sidebar-width="[[sidebarWidth_]]"></bookmarks-toolbar>
+    <bookmarks-toolbar sidebar-width="[[sidebarWidth_]]" role="banner">
+    </bookmarks-toolbar>
     <div id="main-container">
-       <div id="sidebar" role="tree">
-        <bookmarks-folder-node item-id="0" depth="-1"></bookmarks-folder-node>
+       <div id="sidebar" role="navigation" aria-label="$i18n{sidebarAxLabel}">
+         <bookmarks-folder-node item-id="0" depth="-1"></bookmarks-folder-node>
       </div>
       <div id="splitter"></div>
       <bookmarks-list></bookmarks-list>

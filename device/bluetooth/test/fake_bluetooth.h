@@ -8,16 +8,18 @@
 
 #include "base/compiler_specific.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
-#include "device/bluetooth/public/interfaces/test/fake_bluetooth.mojom.h"
+#include "device/bluetooth/public/mojom/test/fake_bluetooth.mojom.h"
 #include "device/bluetooth/test/fake_central.h"
 
 namespace bluetooth {
 
 // Implementation of FakeBluetooth in
-// src/device/bluetooth/public/interfaces/test/fake_bluetooth.mojom.
+// src/device/bluetooth/public/mojom/test/fake_bluetooth.mojom.
 // Implemented on top of the C++ device/bluetooth API, mainly
 // device/bluetooth/bluetooth_adapter_factory.h.
-class FakeBluetooth : NON_EXPORTED_BASE(public mojom::FakeBluetooth) {
+//
+// Not intended for direct use by clients.  See README.md.
+class FakeBluetooth : public mojom::FakeBluetooth {
  public:
   FakeBluetooth();
   ~FakeBluetooth() override;
@@ -27,6 +29,7 @@ class FakeBluetooth : NON_EXPORTED_BASE(public mojom::FakeBluetooth) {
   void SetLESupported(bool available, SetLESupportedCallback callback) override;
   void SimulateCentral(mojom::CentralState state,
                        SimulateCentralCallback callback) override;
+  void AllResponsesConsumed(AllResponsesConsumedCallback callback) override;
 
  private:
   std::unique_ptr<device::BluetoothAdapterFactory::GlobalValuesForTesting>

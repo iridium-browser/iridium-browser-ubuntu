@@ -42,7 +42,7 @@ struct WebPoint;
 // time, for example in the instance of an <img> inside an <a>.
 class WebHitTestResult {
  public:
-  WebHitTestResult() {}
+  WebHitTestResult() = default;
   WebHitTestResult(const WebHitTestResult& info) { Assign(info); }
   ~WebHitTestResult() { Reset(); }
 
@@ -69,7 +69,7 @@ class WebHitTestResult {
   // Return whether an editable input element was hit.
   BLINK_EXPORT bool IsContentEditable() const;
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   BLINK_EXPORT WebHitTestResult(const HitTestResult&);
   BLINK_EXPORT WebHitTestResult& operator=(const HitTestResult&);
 #endif

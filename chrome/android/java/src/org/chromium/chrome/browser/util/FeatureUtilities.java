@@ -12,22 +12,18 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.StrictMode;
 import android.os.UserManager;
 import android.speech.RecognizerIntent;
-import android.text.TextUtils;
 
 import org.chromium.base.CommandLine;
-import org.chromium.base.ContextUtils;
-import org.chromium.base.FieldTrialList;
-import org.chromium.base.Log;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.firstrun.FirstRunGlueImpl;
-import org.chromium.chrome.browser.omnibox.OmniboxPlaceholderFieldTrial;
+import org.chromium.chrome.browser.firstrun.FirstRunUtils;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.tabmodel.DocumentModeAssassin;
 import org.chromium.components.signin.AccountManagerFacade;
@@ -41,19 +37,14 @@ import java.util.List;
  */
 public class FeatureUtilities {
     private static final String TAG = "FeatureUtilities";
-    private static final String HERB_EXPERIMENT_NAME = "TabManagementExperiment";
-    private static final String HERB_EXPERIMENT_FLAVOR_PARAM = "type";
 
     private static Boolean sHasGoogleAccountAuthenticator;
     private static Boolean sHasRecognitionIntentHandler;
-    private static Boolean sChromeHomeEnabled;
     private static String sChromeHomeSwipeLogicType;
 
-    private static String sCachedHerbFlavor;
-    private static boolean sIsHerbFlavorCached;
-
-    /** Used to track if cached command line flags should be refreshed. */
-    private static CommandLine.ResetListener sResetListener;
+    private static Boolean sIsSoleEnabled;
+    private static Boolean sIsChromeModernDesignEnabled;
+    private static Boolean sIsHomePageButtonForceEnabled;
 
     /**
      * Determines whether or not the {@link RecognizerIntent#ACTION_WEB_SEARCH} {@link Intent}
@@ -151,85 +142,22 @@ public class FeatureUtilities {
         nativeSetIsInMultiWindowMode(isInMultiWindowMode);
     }
 
-    private static boolean isHerbDisallowed(Context context) {
-        return isDocumentMode(context);
-    }
-
-    /**
-     * @return Which flavor of Herb is being tested.
-     *         See {@link ChromeSwitches#HERB_FLAVOR_ELDERBERRY} and its related switches.
-     */
-    public static String getHerbFlavor() {
-        Context context = ContextUtils.getApplicationContext();
-        if (isHerbDisallowed(context)) return ChromeSwitches.HERB_FLAVOR_DISABLED;
-
-        if (!sIsHerbFlavorCached) {
-            sCachedHerbFlavor = null;
-
-            // Allowing disk access for preferences while prototyping.
-            StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-            try {
-                sCachedHerbFlavor = ChromePreferenceManager.getInstance().getCachedHerbFlavor();
-            } finally {
-                StrictMode.setThreadPolicy(oldPolicy);
-            }
-
-            sIsHerbFlavorCached = true;
-            Log.d(TAG, "Retrieved cached Herb flavor: " + sCachedHerbFlavor);
-        }
-
-        return sCachedHerbFlavor;
-    }
-
     /**
      * Caches flags that must take effect on startup but are set via native code.
      */
     public static void cacheNativeFlags() {
-        cacheHerbFlavor();
         cacheChromeHomeEnabled();
-        FirstRunGlueImpl.cacheFirstRunPrefs();
-        OmniboxPlaceholderFieldTrial.cacheOmniboxPlaceholderGroup();
+        cacheSoleEnabled();
+        cacheCommandLineOnNonRootedEnabled();
+        FirstRunUtils.cacheFirstRunPrefs();
+        cacheChromeModernDesignEnabled();
+        cacheHomePageButtonForceEnabled();
 
         // Propagate DONT_PREFETCH_LIBRARIES feature value to LibraryLoader. This can't
         // be done in LibraryLoader itself because it lives in //base and can't depend
         // on ChromeFeatureList.
         LibraryLoader.setDontPrefetchLibrariesOnNextRuns(
                 ChromeFeatureList.isEnabled(ChromeFeatureList.DONT_PREFETCH_LIBRARIES));
-    }
-
-    /**
-     * Caches which flavor of Herb the user prefers from native.
-     */
-    private static void cacheHerbFlavor() {
-        Context context = ContextUtils.getApplicationContext();
-        if (isHerbDisallowed(context)) return;
-
-        String oldFlavor = getHerbFlavor();
-
-        // Check the experiment value before the command line to put the user in the correct group.
-        // The first clause does the null checks so so we can freely use the startsWith() function.
-        String newFlavor = FieldTrialList.findFullName(HERB_EXPERIMENT_NAME);
-        Log.d(TAG, "Experiment flavor: " + newFlavor);
-        if (!TextUtils.isEmpty(newFlavor)
-                && newFlavor.startsWith(ChromeSwitches.HERB_FLAVOR_ELDERBERRY)) {
-            newFlavor = ChromeSwitches.HERB_FLAVOR_ELDERBERRY;
-        } else {
-            newFlavor = ChromeSwitches.HERB_FLAVOR_DISABLED;
-        }
-
-        CommandLine instance = CommandLine.getInstance();
-        if (instance.hasSwitch(ChromeSwitches.HERB_FLAVOR_DISABLED_SWITCH)) {
-            newFlavor = ChromeSwitches.HERB_FLAVOR_DISABLED;
-        } else if (instance.hasSwitch(ChromeSwitches.HERB_FLAVOR_ELDERBERRY_SWITCH)) {
-            newFlavor = ChromeSwitches.HERB_FLAVOR_ELDERBERRY;
-        }
-
-        Log.d(TAG, "Caching flavor: " + newFlavor);
-        sCachedHerbFlavor = newFlavor;
-
-        if (!TextUtils.equals(oldFlavor, newFlavor)) {
-            ChromePreferenceManager.getInstance().setCachedHerbFlavor(newFlavor);
-        }
     }
 
     /**
@@ -243,61 +171,93 @@ public class FeatureUtilities {
     }
 
     /**
-     * Cache whether or not Chrome Home is enabled.
+     * Cache whether or not modern design is enabled so on next startup, the value can be made
+     * available immediately.
+     */
+    public static void cacheChromeModernDesignEnabled() {
+        boolean isModernEnabled =
+                ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_MODERN_DESIGN);
+
+        ChromePreferenceManager manager = ChromePreferenceManager.getInstance();
+        manager.setChromeModernDesignEnabled(isModernEnabled);
+    }
+
+    /**
+     * Cache whether or not the home page button is force enabled so on next startup, the value can
+     * be made available immediately.
+     */
+    public static void cacheHomePageButtonForceEnabled() {
+        ChromePreferenceManager.getInstance().setHomePageButtonForceEnabled(
+                ChromeFeatureList.isEnabled(ChromeFeatureList.HOME_PAGE_BUTTON_FORCE_ENABLED));
+    }
+
+    /**
+     * @return Whether or not the home page button is force enabled.
+     */
+    public static boolean isHomePageButtonForceEnabled() {
+        if (sIsHomePageButtonForceEnabled == null) {
+            ChromePreferenceManager prefManager = ChromePreferenceManager.getInstance();
+
+            try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+                sIsHomePageButtonForceEnabled = prefManager.isHomePageButtonForceEnabled();
+            }
+        }
+        return sIsHomePageButtonForceEnabled;
+    }
+
+    /**
+     * Resets whether the home page button is enabled for tests. After this is called, the next
+     * call to #isHomePageButtonForceEnabled() will retrieve the value from shared preferences.
+     */
+    public static void resetHomePageButtonForceEnabledForTests() {
+        sIsHomePageButtonForceEnabled = null;
+    }
+
+    /**
+     * DEPRECATED: DO NOT USE.
+     *
+     * Cache whether or not Chrome Home and related features are enabled. If this method is called
+     * multiple times, the existing cached state is cleared and re-computed.
      */
     public static void cacheChromeHomeEnabled() {
         // Chrome Home doesn't work with tablets.
         if (DeviceFormFactor.isTablet()) return;
-
-        boolean isChromeHomeEnabled = ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_HOME);
-        ChromePreferenceManager manager = ChromePreferenceManager.getInstance();
-        manager.setChromeHomeEnabled(isChromeHomeEnabled);
+        ChromePreferenceManager.getInstance().clearObsoleteChromeHomePrefs();
     }
 
     /**
+     * Cache whether or not command line is enabled on non-rooted devices.
+     */
+    private static void cacheCommandLineOnNonRootedEnabled() {
+        boolean isCommandLineOnNonRootedEnabled =
+                ChromeFeatureList.isEnabled(ChromeFeatureList.COMMAND_LINE_ON_NON_ROOTED);
+        ChromePreferenceManager manager = ChromePreferenceManager.getInstance();
+        manager.setCommandLineOnNonRootedEnabled(isCommandLineOnNonRootedEnabled);
+    }
+
+    /**
+     * DEPRECATED: DO NOT USE.
+     *
      * @return Whether or not chrome should attach the toolbar to the bottom of the screen.
      */
+    @CalledByNative
     public static boolean isChromeHomeEnabled() {
-        if (sChromeHomeEnabled == null) {
-            // Allow disk access for preferences while Chrome Home is in experimentation.
-            StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-            try {
-                sChromeHomeEnabled = ChromePreferenceManager.getInstance().isChromeHomeEnabled();
-            } finally {
-                StrictMode.setThreadPolicy(oldPolicy);
-            }
-
-            // If the browser has been initialized by this point, check the experiment as well to
-            // avoid the restart logic in cacheChromeHomeEnabled.
-            if (ChromeFeatureList.isInitialized()) {
-                boolean chromeHomeExperimentEnabled =
-                        ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_HOME);
-
-                if (chromeHomeExperimentEnabled != sChromeHomeEnabled) {
-                    sChromeHomeEnabled = chromeHomeExperimentEnabled;
-                    ChromePreferenceManager.getInstance().setChromeHomeEnabled(
-                            chromeHomeExperimentEnabled);
-                }
-            }
-        }
-
-        return sChromeHomeEnabled;
+        return false;
     }
 
     /**
      * Resets whether Chrome Home is enabled for tests. After this is called, the next call to
      * #isChromeHomeEnabled() will retrieve the value from shared preferences.
      */
-    public static void resetChromeHomeEnabledForTests() {
-        sChromeHomeEnabled = null;
-    }
+    @Deprecated
+    public static void resetChromeHomeEnabledForTests() {}
 
     /**
-     * @return Whether or not the expand button for Chrome Home is enabled.
+     * @return Whether Chrome Duplex, split toolbar Chrome Home, is enabled.
      */
-    public static boolean isChromeHomeExpandButtonEnabled() {
-        if (!ChromeFeatureList.isInitialized()) return false;
-        return ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_HOME_EXPAND_BUTTON);
+    public static boolean isChromeDuplexEnabled() {
+        return ChromeFeatureList.isInitialized()
+                && ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_DUPLEX);
     }
 
     /**
@@ -305,13 +265,57 @@ public class FeatureUtilities {
      *         returned if the command line is not initialized or no experiment is specified.
      */
     public static String getChromeHomeSwipeLogicType() {
-        if (sChromeHomeSwipeLogicType == null && CommandLine.isInitialized()) {
+        if (sChromeHomeSwipeLogicType == null) {
             CommandLine instance = CommandLine.getInstance();
             sChromeHomeSwipeLogicType =
                     instance.getSwitchValue(ChromeSwitches.CHROME_HOME_SWIPE_LOGIC);
         }
 
         return sChromeHomeSwipeLogicType;
+    }
+
+    /**
+     * Cache whether or not Sole integration is enabled.
+     */
+    public static void cacheSoleEnabled() {
+        boolean featureEnabled = ChromeFeatureList.isEnabled(ChromeFeatureList.SOLE_INTEGRATION);
+        ChromePreferenceManager prefManager = ChromePreferenceManager.getInstance();
+        boolean prefEnabled = prefManager.isSoleEnabled();
+        if (featureEnabled == prefEnabled) return;
+
+        prefManager.setSoleEnabled(featureEnabled);
+    }
+
+    /**
+     * @return Whether or not Sole integration is enabled.
+     */
+    public static boolean isSoleEnabled() {
+        if (sIsSoleEnabled == null) {
+            ChromePreferenceManager prefManager = ChromePreferenceManager.getInstance();
+
+            // Allow disk access for preferences while Sole is in experimentation.
+            try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+                sIsSoleEnabled = prefManager.isSoleEnabled();
+            }
+        }
+        return sIsSoleEnabled;
+    }
+
+    /**
+     * @return Whether Chrome modern design is enabled. This returns true if Chrome Home is enabled.
+     */
+    @CalledByNative
+    public static boolean isChromeModernDesignEnabled() {
+        if (isChromeHomeEnabled()) return true;
+
+        if (sIsChromeModernDesignEnabled == null) {
+            ChromePreferenceManager prefManager = ChromePreferenceManager.getInstance();
+            try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+                sIsChromeModernDesignEnabled = prefManager.isChromeModernDesignEnabled();
+            }
+        }
+
+        return sIsChromeModernDesignEnabled;
     }
 
     private static native void nativeSetCustomTabVisible(boolean visible);

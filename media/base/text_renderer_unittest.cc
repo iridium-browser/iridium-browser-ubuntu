@@ -12,7 +12,6 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "media/base/audio_decoder_config.h"
@@ -21,7 +20,7 @@
 #include "media/base/fake_text_track_stream.h"
 #include "media/base/text_track_config.h"
 #include "media/base/video_decoder_config.h"
-#include "media/filters/webvtt_util.h"
+#include "media/base/webvtt_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -54,7 +53,7 @@ class FakeTextTrack : public TextTrack {
 
 class TextRendererTest : public testing::Test {
  public:
-  TextRendererTest() {}
+  TextRendererTest() = default;
 
   void CreateTextRenderer() {
     DCHECK(!text_renderer_);
@@ -77,7 +76,7 @@ class TextRendererTest : public testing::Test {
                     const std::string& language,
                     bool expect_read) {
     const size_t idx = text_track_streams_.size();
-    text_track_streams_.push_back(base::MakeUnique<FakeTextTrackStream>());
+    text_track_streams_.push_back(std::make_unique<FakeTextTrackStream>());
 
     if (expect_read)
       ExpectRead(idx);

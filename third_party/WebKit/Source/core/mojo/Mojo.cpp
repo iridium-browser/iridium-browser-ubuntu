@@ -19,6 +19,8 @@
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/wtf/text/StringUTF8Adaptor.h"
+#include "public/platform/InterfaceProvider.h"
+#include "public/platform/Platform.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace blink {
@@ -44,6 +46,12 @@ void Mojo::createMessagePipe(MojoCreateMessagePipeResult& result_dict) {
 // static
 void Mojo::createDataPipe(const MojoCreateDataPipeOptions& options_dict,
                           MojoCreateDataPipeResult& result_dict) {
+  if (!options_dict.hasElementNumBytes() ||
+      !options_dict.hasCapacityNumBytes()) {
+    result_dict.setResult(MOJO_RESULT_INVALID_ARGUMENT);
+    return;
+  }
+
   ::MojoCreateDataPipeOptions options = {0};
   options.struct_size = sizeof(options);
   options.flags = MOJO_CREATE_DATA_PIPE_OPTIONS_FLAG_NONE;
@@ -79,25 +87,23 @@ void Mojo::createSharedBuffer(unsigned num_bytes,
 // static
 void Mojo::bindInterface(ScriptState* script_state,
                          const String& interface_name,
-                         MojoHandle* request_handle) {
+                         MojoHandle* request_handle,
+                         const String& scope) {
   std::string name =
       StringUTF8Adaptor(interface_name).AsStringPiece().as_string();
   auto handle =
       mojo::ScopedMessagePipeHandle::From(request_handle->TakeHandle());
 
-  ExecutionContext* context = ExecutionContext::From(script_state);
-  if (context->IsWorkerGlobalScope()) {
-    WorkerThread* thread = ToWorkerGlobalScope(context)->GetThread();
-    thread->GetInterfaceProvider().GetInterface(name, std::move(handle));
+  if (scope == "process") {
+    Platform::Current()->GetInterfaceProvider()->GetInterface(
+        name.c_str(), std::move(handle));
     return;
   }
 
-  LocalFrame* frame = ToDocument(context)->GetFrame();
-  if (!frame)
-    return;  // |handle| will be destroyed, closing the pipe.
-
-  frame->Client()->GetInterfaceProvider()->GetInterface(name,
-                                                        std::move(handle));
+  if (auto* interface_provider =
+          ExecutionContext::From(script_state)->GetInterfaceProvider()) {
+    interface_provider->GetInterfaceByName(name, std::move(handle));
+  }
 }
 
 }  // namespace blink

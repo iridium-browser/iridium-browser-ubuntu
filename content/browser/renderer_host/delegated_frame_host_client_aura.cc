@@ -28,8 +28,7 @@ bool DelegatedFrameHostClientAura::DelegatedFrameHostIsVisible() const {
   return !render_widget_host_view_->host_->is_hidden();
 }
 
-SkColor DelegatedFrameHostClientAura::DelegatedFrameHostGetGutterColor(
-    SkColor color) const {
+SkColor DelegatedFrameHostClientAura::DelegatedFrameHostGetGutterColor() const {
   // When making an element on the page fullscreen the element's background
   // may not match the page's, so use black as the gutter color to avoid
   // flashes of brighter colors during the transition.
@@ -38,12 +37,7 @@ SkColor DelegatedFrameHostClientAura::DelegatedFrameHostGetGutterColor(
           ->IsFullscreenForCurrentTab()) {
     return SK_ColorBLACK;
   }
-  return color;
-}
-
-gfx::Size DelegatedFrameHostClientAura::DelegatedFrameHostDesiredSizeInDIP()
-    const {
-  return render_widget_host_view_->window_->bounds().size();
+  return render_widget_host_view_->background_color_;
 }
 
 bool DelegatedFrameHostClientAura::DelegatedFrameCanCreateResizeLock() const {
@@ -70,15 +64,22 @@ DelegatedFrameHostClientAura::DelegatedFrameHostCreateResizeLock() {
   host->dispatcher()->HoldPointerMoves();
 
   gfx::Size desired_size = render_widget_host_view_->window_->bounds().size();
-  return base::MakeUnique<CompositorResizeLock>(this, desired_size);
+  return std::make_unique<CompositorResizeLock>(this, desired_size);
 }
 
-void DelegatedFrameHostClientAura::OnBeginFrame() {
-  render_widget_host_view_->OnBeginFrame();
+void DelegatedFrameHostClientAura::OnFirstSurfaceActivation(
+    const viz::SurfaceInfo& surface_info) {}
+
+void DelegatedFrameHostClientAura::OnBeginFrame(base::TimeTicks frame_time) {
+  render_widget_host_view_->OnBeginFrame(frame_time);
 }
 
 bool DelegatedFrameHostClientAura::IsAutoResizeEnabled() const {
   return render_widget_host_view_->host_->auto_resize_enabled();
+}
+
+void DelegatedFrameHostClientAura::OnFrameTokenChanged(uint32_t frame_token) {
+  render_widget_host_view_->OnFrameTokenChangedForView(frame_token);
 }
 
 std::unique_ptr<ui::CompositorLock>
@@ -92,6 +93,10 @@ void DelegatedFrameHostClientAura::CompositorResizeLockEnded() {
   auto* window_host = render_widget_host_view_->window_->GetHost();
   window_host->dispatcher()->ReleasePointerMoves();
   render_widget_host_view_->host_->WasResized();
+}
+
+void DelegatedFrameHostClientAura::DidReceiveFirstFrameAfterNavigation() {
+  render_widget_host_view_->host_->DidReceiveFirstFrameAfterNavigation();
 }
 
 }  // namespace content

@@ -15,7 +15,7 @@
 #include "base/time/time.h"
 #include "components/metrics/metrics_log_uploader.h"
 #include "components/metrics/metrics_reporting_default_state.h"
-#include "components/metrics/proto/system_profile.pb.h"
+#include "third_party/metrics_proto/system_profile.pb.h"
 
 namespace base {
 class FilePath;
@@ -77,11 +77,6 @@ class MetricsServiceClient {
   // Called by the metrics service to record a clean shutdown.
   virtual void OnLogCleanShutdown() {}
 
-  // Gathers metrics that will be filled into the system profile protobuf,
-  // calling |done_callback| when complete.
-  virtual void InitializeSystemProfileMetrics(
-      const base::Closure& done_callback) = 0;
-
   // Called prior to a metrics log being closed, allowing the client to collect
   // extra histograms that will go in that log. Asynchronous API - the client
   // implementation should call |done_callback| when complete.
@@ -91,10 +86,14 @@ class MetricsServiceClient {
   // Get the URL of the metrics server.
   virtual std::string GetMetricsServerUrl();
 
+  // Get the fallback HTTP URL of the metrics server.
+  virtual std::string GetInsecureMetricsServerUrl();
+
   // Creates a MetricsLogUploader with the specified parameters (see comments on
   // MetricsLogUploader for details).
   virtual std::unique_ptr<MetricsLogUploader> CreateUploader(
       base::StringPiece server_url,
+      base::StringPiece insecure_server_url,
       base::StringPiece mime_type,
       metrics::MetricsLogUploader::MetricServiceType service_type,
       const MetricsLogUploader::UploadCallback& on_upload_complete) = 0;
@@ -122,6 +121,9 @@ class MetricsServiceClient {
 
   // Returns if history sync is enabled on all active profiles.
   virtual bool IsHistorySyncEnabledOnAllProfiles();
+
+  // Returns if extensions sync is enabled on all active profiles.
+  virtual bool IsExtensionSyncEnabledOnAllProfiles();
 
   // Sets the callback to run MetricsServiceManager::UpdateRunningServices.
   void SetUpdateRunningServicesCallback(const base::Closure& callback);

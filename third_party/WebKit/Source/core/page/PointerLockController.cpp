@@ -26,7 +26,7 @@
 #include "core/page/PointerLockController.h"
 
 #include "core/dom/Element.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/page/ChromeClient.h"
@@ -169,7 +169,7 @@ void PointerLockController::EnqueueEvent(const AtomicString& type,
     document->domWindow()->EnqueueDocumentEvent(Event::Create(type));
 }
 
-DEFINE_TRACE(PointerLockController) {
+void PointerLockController::Trace(blink::Visitor* visitor) {
   visitor->Trace(page_);
   visitor->Trace(element_);
   visitor->Trace(document_of_removed_element_while_waiting_for_unlock_);

@@ -14,6 +14,7 @@
 #include "xfa/fxfa/parser/cxfa_document.h"
 
 class CXFA_FFDocView;
+class CXFA_Graphics;
 enum class FWL_WidgetHit;
 
 class CXFA_FFWidgetHandler {
@@ -53,6 +54,9 @@ class CXFA_FFWidgetHandler {
                        uint32_t dwFlags,
                        const CFX_PointF& point);
 
+  WideString GetSelectedText(CXFA_FFWidget* widget);
+  void PasteText(CXFA_FFWidget* widget, const WideString& text);
+
   bool OnKeyDown(CXFA_FFWidget* hWidget, uint32_t dwKeyCode, uint32_t dwFlags);
   bool OnKeyUp(CXFA_FFWidget* hWidget, uint32_t dwKeyCode, uint32_t dwFlags);
   bool OnChar(CXFA_FFWidget* hWidget, uint32_t dwChar, uint32_t dwFlags);
@@ -60,10 +64,10 @@ class CXFA_FFWidgetHandler {
   bool OnSetCursor(CXFA_FFWidget* hWidget, const CFX_PointF& point);
   void RenderWidget(CXFA_FFWidget* hWidget,
                     CXFA_Graphics* pGS,
-                    CFX_Matrix* pMatrix,
+                    const CFX_Matrix& matrix,
                     bool bHighlight);
-  bool HasEvent(CXFA_WidgetAcc* pWidgetAcc, XFA_EVENTTYPE eEventType);
-  int32_t ProcessEvent(CXFA_WidgetAcc* pWidgetAcc, CXFA_EventParam* pParam);
+  bool HasEvent(CXFA_Node* pNode, XFA_EVENTTYPE eEventType);
+  int32_t ProcessEvent(CXFA_Node* pNode, CXFA_EventParam* pParam);
 
  private:
   CXFA_Node* CreateWidgetFormItem(XFA_WIDGETTYPE eType,

@@ -4,9 +4,9 @@
 
 #include "chrome/browser/chromeos/login/app_launch_signin_screen.h"
 
+#include <memory>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/screens/user_selection_screen.h"
@@ -24,12 +24,9 @@ namespace chromeos {
 
 user_manager::UserManager* AppLaunchSigninScreen::test_user_manager_ = NULL;
 
-AppLaunchSigninScreen::AppLaunchSigninScreen(
-    OobeUI* oobe_ui, Delegate* delegate)
-    : oobe_ui_(oobe_ui),
-      delegate_(delegate),
-      webui_handler_(NULL) {
-}
+AppLaunchSigninScreen::AppLaunchSigninScreen(OobeUI* oobe_ui,
+                                             Delegate* delegate)
+    : oobe_ui_(oobe_ui), delegate_(delegate), webui_handler_(NULL) {}
 
 AppLaunchSigninScreen::~AppLaunchSigninScreen() {
   oobe_ui_->ResetSigninScreenHandlerDelegate();
@@ -50,8 +47,7 @@ void AppLaunchSigninScreen::InitOwnerUserList() {
 
   owner_user_list_.clear();
   for (user_manager::UserList::const_iterator it = all_users.begin();
-       it != all_users.end();
-       ++it) {
+       it != all_users.end(); ++it) {
     user_manager::User* user = *it;
     if (user->GetAccountId().GetUserEmail() == owner_email) {
       owner_user_list_.push_back(user);
@@ -79,10 +75,6 @@ void AppLaunchSigninScreen::CancelUserAdding() {
   NOTREACHED();
 }
 
-void AppLaunchSigninScreen::CompleteLogin(const UserContext& user_context) {
-  NOTREACHED();
-}
-
 void AppLaunchSigninScreen::Login(const UserContext& user_context,
                                   const SigninSpecifics& specifics) {
   // Note: CreateAuthenticator doesn't necessarily create
@@ -98,15 +90,7 @@ void AppLaunchSigninScreen::MigrateUserData(const std::string& old_password) {
   NOTREACHED();
 }
 
-void AppLaunchSigninScreen::LoadWallpaper(const AccountId& account_id) {}
-
-void AppLaunchSigninScreen::LoadSigninWallpaper() {
-}
-
-void AppLaunchSigninScreen::OnSigninScreenReady() {
-}
-
-void AppLaunchSigninScreen::OnGaiaScreenReady() {}
+void AppLaunchSigninScreen::OnSigninScreenReady() {}
 
 void AppLaunchSigninScreen::RemoveUser(const AccountId& account_id) {
   NOTREACHED();
@@ -132,6 +116,10 @@ void AppLaunchSigninScreen::ShowKioskAutolaunchScreen() {
   NOTREACHED();
 }
 
+void AppLaunchSigninScreen::ShowUpdateRequiredScreen() {
+  NOTREACHED();
+}
+
 void AppLaunchSigninScreen::ShowWrongHWIDScreen() {
   NOTREACHED();
 }
@@ -139,12 +127,6 @@ void AppLaunchSigninScreen::ShowWrongHWIDScreen() {
 void AppLaunchSigninScreen::SetWebUIHandler(
     LoginDisplayWebUIHandler* webui_handler) {
   webui_handler_ = webui_handler;
-}
-
-void AppLaunchSigninScreen::ShowSigninScreenForCreds(
-    const std::string& username,
-    const std::string& password) {
-  NOTREACHED();
 }
 
 const user_manager::UserList& AppLaunchSigninScreen::GetUsers() const {
@@ -183,16 +165,6 @@ bool AppLaunchSigninScreen::IsUserSigninCompleted() const {
   return false;
 }
 
-void AppLaunchSigninScreen::SetDisplayEmail(const std::string& email) {
-  return;
-}
-
-void AppLaunchSigninScreen::SetDisplayAndGivenName(
-    const std::string& display_name,
-    const std::string& given_name) {
-  NOTREACHED();
-}
-
 void AppLaunchSigninScreen::Signout() {
   NOTREACHED();
 }
@@ -214,13 +186,12 @@ void AppLaunchSigninScreen::HandleGetUsers() {
   const user_manager::UserList& users = GetUsers();
 
   for (user_manager::UserList::const_iterator it = users.begin();
-       it != users.end();
-       ++it) {
+       it != users.end(); ++it) {
     proximity_auth::mojom::AuthType initial_auth_type =
         UserSelectionScreen::ShouldForceOnlineSignIn(*it)
             ? proximity_auth::mojom::AuthType::ONLINE_SIGN_IN
             : proximity_auth::mojom::AuthType::OFFLINE_PASSWORD;
-    auto user_dict = base::MakeUnique<base::DictionaryValue>();
+    auto user_dict = std::make_unique<base::DictionaryValue>();
     UserSelectionScreen::FillUserDictionary(
         *it, true,               /* is_owner */
         false,                   /* is_signin_to_add */
@@ -233,10 +204,5 @@ void AppLaunchSigninScreen::HandleGetUsers() {
 }
 
 void AppLaunchSigninScreen::CheckUserStatus(const AccountId& account_id) {}
-
-bool AppLaunchSigninScreen::IsUserWhitelisted(const AccountId& account_id) {
-  NOTREACHED();
-  return true;
-}
 
 }  // namespace chromeos

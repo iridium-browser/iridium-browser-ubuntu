@@ -49,9 +49,9 @@ class WebMouseEvent;
 class WebView;
 struct WebPopupMenuInfo;
 
-// The ExternalPopupMenu connects the actual implementation of the popup menu
-// to the WebCore popup menu.
-class CORE_EXPORT ExternalPopupMenu final : NON_EXPORTED_BASE(public PopupMenu),
+// The ExternalPopupMenu is a PopupMenu implementation for macOS and Android.
+// It uses a OS-native menu implementation.
+class CORE_EXPORT ExternalPopupMenu final : public PopupMenu,
                                             public WebExternalPopupMenuClient {
  public:
   ExternalPopupMenu(LocalFrame&, HTMLSelectElement&, WebView&);
@@ -65,7 +65,7 @@ class CORE_EXPORT ExternalPopupMenu final : NON_EXPORTED_BASE(public PopupMenu),
   static int ToPopupMenuItemIndex(int index, HTMLSelectElement&);
   static int ToExternalPopupMenuItemIndex(int index, HTMLSelectElement&);
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   // PopupMenu methods:

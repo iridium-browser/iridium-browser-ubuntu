@@ -25,6 +25,7 @@ settings.PowerSource;
 
 /**
  * @typedef {{
+ *   present: boolean,
  *   charging: boolean,
  *   calculating: boolean,
  *   percent: number,
@@ -184,7 +185,7 @@ cr.define('settings', function() {
 
     /** override */
     handleLinkEvent(e) {
-      // Prevent the link from activating its parent element when tapped or
+      // Prevent the link from activating its parent element when clicked or
       // when Enter is pressed.
       if (e.type != 'keydown' || e.keyCode == 13)
         e.stopPropagation();

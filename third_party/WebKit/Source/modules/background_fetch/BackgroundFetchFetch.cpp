@@ -4,7 +4,7 @@
 
 #include "modules/background_fetch/BackgroundFetchFetch.h"
 
-#include "modules/fetch/Request.h"
+#include "core/fetch/Request.h"
 
 namespace blink {
 
@@ -15,8 +15,9 @@ Request* BackgroundFetchFetch::request() const {
   return request_;
 }
 
-DEFINE_TRACE(BackgroundFetchFetch) {
+void BackgroundFetchFetch::Trace(blink::Visitor* visitor) {
   visitor->Trace(request_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

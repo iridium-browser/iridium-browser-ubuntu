@@ -37,13 +37,18 @@
 
 namespace blink {
 
+class ServiceWorkerGlobalScopeProxy;
 class ServiceWorkerInstalledScriptsManager;
 struct GlobalScopeCreationParams;
 
+// ServiceWorkerThread is an implementation of WorkerThread for service workers.
+// This provides a backing thread and an installed scripts manager.
 class MODULES_EXPORT ServiceWorkerThread final : public WorkerThread {
  public:
+  // ServiceWorkerThread owns a given ServiceWorkerGlobalScopeProxy via
+  // Persistent.
   ServiceWorkerThread(ThreadableLoadingContext*,
-                      WorkerReportingProxy&,
+                      ServiceWorkerGlobalScopeProxy*,
                       std::unique_ptr<ServiceWorkerInstalledScriptsManager>);
   ~ServiceWorkerThread() override;
 
@@ -51,14 +56,18 @@ class MODULES_EXPORT ServiceWorkerThread final : public WorkerThread {
     return *worker_backing_thread_;
   }
   void ClearWorkerBackingThread() override;
+  InstalledScriptsManager* GetInstalledScriptsManager() override;
+  void TerminateForTesting() override;
 
- protected:
+ private:
   WorkerOrWorkletGlobalScope* CreateWorkerGlobalScope(
       std::unique_ptr<GlobalScopeCreationParams>) override;
 
-  InstalledScriptsManager* GetInstalledScriptsManager() override;
+  WebThreadType GetThreadType() const override {
+    return WebThreadType::kServiceWorkerThread;
+  }
 
- private:
+  Persistent<ServiceWorkerGlobalScopeProxy> global_scope_proxy_;
   std::unique_ptr<WorkerBackingThread> worker_backing_thread_;
   std::unique_ptr<ServiceWorkerInstalledScriptsManager>
       installed_scripts_manager_;

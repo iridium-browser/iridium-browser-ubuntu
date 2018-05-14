@@ -24,26 +24,29 @@ void ExpectErrorInMessage(NSError* error,
 }
 }
 
+using AuthenticationUIUtil = PlatformTest;
+
 // Tests the error message with one error with a localized description.
-TEST(AuthenticationUIUtil, DialogMessageFromErrorWithLocalizedDescription) {
+TEST_F(AuthenticationUIUtil, DialogMessageFromErrorWithLocalizedDescription) {
   NSDictionary* userInfo =
       @{NSLocalizedDescriptionKey : @"MyLocalizedDescription"};
   NSError* error =
       [NSError errorWithDomain:@"MyErrorDomain" code:-1234 userInfo:userInfo];
-  NSString* message = ios_internal::DialogMessageFromError(error);
+  NSString* message = DialogMessageFromError(error);
   ExpectErrorInMessage(error, message, YES);
 }
 
 // Tests the error message with one error without a localized description.
-TEST(AuthenticationUIUtil, DialogMessageFromErrorWithoutLocalizedDescription) {
+TEST_F(AuthenticationUIUtil,
+       DialogMessageFromErrorWithoutLocalizedDescription) {
   NSError* error =
       [NSError errorWithDomain:@"MyErrorDomain" code:-1234 userInfo:nil];
-  NSString* message = ios_internal::DialogMessageFromError(error);
+  NSString* message = DialogMessageFromError(error);
   ExpectErrorInMessage(error, message, NO);
 }
 
 // Tests the error message with an error with 2 underlying errors.
-TEST(AuthenticationUIUtil, DialogMessageFromErrorWithUnderlyingErrors) {
+TEST_F(AuthenticationUIUtil, DialogMessageFromErrorWithUnderlyingErrors) {
   // Error 1
   NSDictionary* userInfo1 =
       @{NSLocalizedDescriptionKey : @"MyLocalizedDescription1"};
@@ -66,7 +69,7 @@ TEST(AuthenticationUIUtil, DialogMessageFromErrorWithUnderlyingErrors) {
   NSError* error3 =
       [NSError errorWithDomain:@"MyErrorDomain3" code:-890 userInfo:userInfo3];
 
-  NSString* message = ios_internal::DialogMessageFromError(error3);
+  NSString* message = DialogMessageFromError(error3);
   ExpectErrorInMessage(error3, message, YES);
   ExpectErrorInMessage(error2, message, NO);
   ExpectErrorInMessage(error1, message, NO);

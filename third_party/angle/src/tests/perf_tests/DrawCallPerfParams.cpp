@@ -11,12 +11,6 @@
 
 #include <sstream>
 
-std::ostream &operator<<(std::ostream &os, const DrawCallPerfParams &params)
-{
-    os << params.suffix().substr(1);
-    return os;
-}
-
 std::string DrawCallPerfParams::suffix() const
 {
     std::stringstream strstr;
@@ -59,10 +53,10 @@ DrawCallPerfParams DrawCallPerfD3D9Params(bool useNullDevice, bool renderToTextu
     return params;
 }
 
-DrawCallPerfParams DrawCallPerfOpenGLParams(bool useNullDevice, bool renderToTexture)
+DrawCallPerfParams DrawCallPerfOpenGLOrGLESParams(bool useNullDevice, bool renderToTexture)
 {
     DrawCallPerfParams params;
-    params.eglParameters = useNullDevice ? OPENGL_NULL() : OPENGL();
+    params.eglParameters = OPENGL_OR_GLES(useNullDevice);
     params.useFBO        = renderToTexture;
     return params;
 }

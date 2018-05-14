@@ -135,21 +135,22 @@ D3DTEXTUREADDRESS ConvertTextureWrap(GLenum wrap)
     return d3dWrap;
 }
 
-D3DCULL ConvertCullMode(GLenum cullFace, GLenum frontFace)
+D3DCULL ConvertCullMode(gl::CullFaceMode cullFace, GLenum frontFace)
 {
     D3DCULL cull = D3DCULL_CCW;
     switch (cullFace)
     {
-      case GL_FRONT:
-        cull = (frontFace == GL_CCW ? D3DCULL_CW : D3DCULL_CCW);
-        break;
-      case GL_BACK:
-        cull = (frontFace == GL_CCW ? D3DCULL_CCW : D3DCULL_CW);
-        break;
-      case GL_FRONT_AND_BACK:
-        cull = D3DCULL_NONE; // culling will be handled during draw
-        break;
-      default: UNREACHABLE();
+        case gl::CullFaceMode::Front:
+            cull = (frontFace == GL_CCW ? D3DCULL_CW : D3DCULL_CCW);
+            break;
+        case gl::CullFaceMode::Back:
+            cull = (frontFace == GL_CCW ? D3DCULL_CCW : D3DCULL_CW);
+            break;
+        case gl::CullFaceMode::FrontAndBack:
+            cull = D3DCULL_NONE;  // culling will be handled during draw
+            break;
+        default:
+            UNREACHABLE();
     }
 
     return cull;
@@ -290,6 +291,15 @@ D3DMULTISAMPLE_TYPE GetMultisampleType(GLuint samples)
 
 namespace d3d9_gl
 {
+
+unsigned int GetReservedVaryingVectors()
+{
+    // We reserve two registers for "dx_Position" and "gl_Position". The spec says they
+    // don't count towards the varying limit, so we must make space for them. We also
+    // reserve the last register since it can only pass a PSIZE, and not any arbitrary
+    // varying.
+    return 3;
+}
 
 unsigned int GetReservedVertexUniformVectors()
 {
@@ -471,9 +481,9 @@ void GenerateCaps(IDirect3D9 *d3d9,
 
     caps->maxVertexUniformBlocks = 0;
 
-    // SM3 only supports 11 output variables, with a special 12th register for PSIZE.
-    const size_t MAX_VERTEX_OUTPUT_VECTORS_SM3 = 9;
-    const size_t MAX_VERTEX_OUTPUT_VECTORS_SM2 = 7;
+    // SM3 only supports 12 output variables, but the special 12th register is only for PSIZE.
+    const unsigned int MAX_VERTEX_OUTPUT_VECTORS_SM3 = 12 - GetReservedVaryingVectors();
+    const unsigned int MAX_VERTEX_OUTPUT_VECTORS_SM2 = 10 - GetReservedVaryingVectors();
     caps->maxVertexOutputComponents = ((deviceCaps.VertexShaderVersion >= D3DVS_VERSION(3, 0)) ? MAX_VERTEX_OUTPUT_VECTORS_SM3
                                                                                                : MAX_VERTEX_OUTPUT_VECTORS_SM2) * 4;
 
@@ -576,9 +586,12 @@ void GenerateCaps(IDirect3D9 *d3d9,
     extensions->fence = SUCCEEDED(device->CreateQuery(D3DQUERYTYPE_EVENT, &eventQuery)) && eventQuery;
     SafeRelease(eventQuery);
 
-    extensions->timerQuery = false; // Unimplemented
     extensions->disjointTimerQuery     = false;
     extensions->robustness = true;
+    // It seems that only DirectX 10 and higher enforce the well-defined behavior of always
+    // returning zero values when out-of-bounds reads. See
+    // https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_robustness.txt
+    extensions->robustBufferAccessBehavior = false;
     extensions->blendMinMax = true;
     extensions->framebufferBlit = true;
     extensions->framebufferMultisample = true;
@@ -611,6 +624,10 @@ void GenerateCaps(IDirect3D9 *d3d9,
 
     // D3D9 cannot support constant color and alpha blend funcs together
     limitations->noSimultaneousConstantColorAndAlphaBlendFunc = true;
+
+    // D3D9 cannot support packing more than one variable to a single varying.
+    // TODO(jmadill): Implement more sophisticated component packing in D3D9.
+    limitations->noFlexibleVaryingPacking = true;
 }
 
 }

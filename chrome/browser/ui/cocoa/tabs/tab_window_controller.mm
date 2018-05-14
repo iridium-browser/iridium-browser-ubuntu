@@ -4,25 +4,84 @@
 
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
 
+#import <objc/runtime.h>
+
 #include "base/logging.h"
+#import "base/mac/foundation_util.h"
 #import "base/mac/sdk_forward_declarations.h"
 #import "chrome/browser/ui/cocoa/browser_window_layout.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
 #import "chrome/browser/ui/cocoa/framed_browser_window.h"
+#import "chrome/browser/ui/cocoa/tabbed_browser_window.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_background_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
+#include "chrome/browser/ui/window_sizer/window_sizer.h"
 #import "ui/base/cocoa/focus_tracker.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/theme_provider.h"
 
-@interface TabWindowController ()
+// As of macOS 10.13 NSWindow lifetimes after closing are unpredictable. Chrome
+// frees resources on window close so this new behavior created problems such as
+// browser tests failing to complete (see https://crbug.com/749196 ). To work
+// around this new behavior TabWindowController no longer acts as the NSWindow's
+// NSWindowController or NSWindowDelegate but instead uses a
+// TabWindowControllerProxy instance. The TabWindowController and its subclasses
+// still expect to receive NSWindowDelegate messages, which the
+// TabWindowControllerProxy forwards along.
+@interface TabWindowControllerProxy : NSWindowController<NSWindowDelegate>
+@property(assign, nonatomic) TabWindowController* tabWindowController;
+@end
+
+@implementation TabWindowControllerProxy
+
+@synthesize tabWindowController = tabWindowController_;
+
+- (void)dealloc {
+  // The TabWindowControllerProxy should outlive the TabWindowController.
+  DCHECK(!tabWindowController_);
+  [super dealloc];
+}
+
+- (BOOL)respondsToSelector:(SEL)aSelector {
+  if ([super respondsToSelector:aSelector]) {
+    return YES;
+  }
+
+  // Only forward methods from the NSWindowDelegate protcol.
+  Protocol* nsWindowDelegateProtocol = objc_getProtocol("NSWindowDelegate");
+  struct objc_method_description methodDescription =
+      protocol_getMethodDescription(nsWindowDelegateProtocol, aSelector, NO,
+                                    YES);
+
+  return methodDescription.name
+             ? [self.tabWindowController respondsToSelector:aSelector]
+             : NO;
+}
+
+- (NSMethodSignature*)methodSignatureForSelector:(SEL)aSelector {
+  NSMethodSignature* signature = [super methodSignatureForSelector:aSelector];
+
+  return signature
+             ? signature
+             : [self.tabWindowController methodSignatureForSelector:aSelector];
+}
+
+- (void)forwardInvocation:(NSInvocation*)anInvocation {
+  [anInvocation setTarget:self.tabWindowController];
+  [anInvocation invoke];
+}
+
+@end
+
+@interface TabWindowController () {
+  base::scoped_nsobject<TabWindowControllerProxy> nsWindowController_;
+}
+
 - (void)setUseOverlay:(BOOL)useOverlay;
 
 // The tab strip background view should always be inserted as the back-most
-// subview of the root view. It cannot be a subview of the contentView, as that
-// would cause it to become layer backed, which would cause it to draw on top
-// of non-layer backed content like the window controls.
+// subview of the contentView.
 - (void)insertTabStripBackgroundViewIntoWindow:(NSWindow*)window
                                       titleBar:(BOOL)hasTitleBar;
 
@@ -85,20 +144,53 @@
 
 @implementation TabWindowController
 
++ (TabWindowController*)tabWindowControllerForWindow:(NSWindow*)window {
+  while (window) {
+    TabWindowControllerProxy* nsWindowController =
+        base::mac::ObjCCast<TabWindowControllerProxy>(
+            [window windowController]);
+
+    if (nsWindowController) {
+      return [nsWindowController tabWindowController];
+    }
+    window = [window parentWindow];
+  }
+  return nil;
+}
+
 - (id)initTabWindowControllerWithTabStrip:(BOOL)hasTabStrip
                                  titleBar:(BOOL)hasTitleBar {
-  const CGFloat kDefaultWidth = 750;
+  const CGFloat kDefaultWidth = WindowSizer::kWindowMaxDefaultWidth;
   const CGFloat kDefaultHeight = 600;
 
-  NSRect contentRect = NSMakeRect(60, 229, kDefaultWidth, kDefaultHeight);
-  base::scoped_nsobject<FramedBrowserWindow> window(
-      [[FramedBrowserWindow alloc] initWithContentRect:contentRect
-                                           hasTabStrip:hasTabStrip]);
-  [window setReleasedWhenClosed:YES];
-  [window setAutorecalculatesKeyViewLoop:YES];
+  if (self = [self init]) {
+    NSRect contentRect = NSMakeRect(60, 229, kDefaultWidth, kDefaultHeight);
+    base::scoped_nsobject<FramedBrowserWindow> window(
+        [(hasTabStrip
+              ? [TabbedBrowserWindow alloc]
+              : [FramedBrowserWindow alloc]) initWithContentRect:contentRect]);
+    [window setReleasedWhenClosed:YES];
+    [window setAutorecalculatesKeyViewLoop:YES];
 
-  if ((self = [super initWithWindow:window])) {
-    [[self window] setDelegate:self];
+    nsWindowController_.reset(
+        [[TabWindowControllerProxy alloc] initWithWindow:window]);
+    [nsWindowController_ setTabWindowController:self];
+
+    [[self window] setDelegate:nsWindowController_];
+
+    // Insert ourselves into the repsonder chain. First, find the responder
+    // that comes before nsWindowController_.
+    NSResponder* nextResponderToCheck = [self window];
+    while ([nextResponderToCheck nextResponder] &&
+           [nextResponderToCheck nextResponder] != nsWindowController_.get()) {
+      nextResponderToCheck = [nextResponderToCheck nextResponder];
+    }
+    // If nextResponder is nil, nsWindowController_ is not in the responder
+    // chain.
+    DCHECK([nextResponderToCheck nextResponder]);
+    // Insert before nsWindowController_.
+    [nextResponderToCheck setNextResponder:self];
+    [self setNextResponder:nsWindowController_];
 
     chromeContentView_.reset([[ChromeContentView alloc]
         initWithFrame:NSMakeRect(0, 0, kDefaultWidth, kDefaultHeight)]);
@@ -109,8 +201,8 @@
 
     tabContentArea_.reset(
         [[FastResizeView alloc] initWithFrame:[chromeContentView_ bounds]]);
-    [tabContentArea_ setAutoresizingMask:NSViewWidthSizable |
-                                         NSViewHeightSizable];
+    [tabContentArea_
+        setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
     [chromeContentView_ addSubview:tabContentArea_];
 
     // tabStripBackgroundView_ draws the theme image behind the tab strip area.
@@ -127,38 +219,60 @@
     [self insertTabStripBackgroundViewIntoWindow:window titleBar:hasTitleBar];
 
     tabStripView_.reset([[TabStripView alloc]
-        initWithFrame:NSMakeRect(
-                          0, 0, kDefaultWidth, chrome::kTabStripHeight)]);
-    [tabStripView_ setAutoresizingMask:NSViewWidthSizable |
-                                       NSViewMinYMargin];
+        initWithFrame:NSMakeRect(0, 0, kDefaultWidth,
+                                 chrome::kTabStripHeight)]);
+    [tabStripView_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     if (hasTabStrip)
       [windowView addSubview:tabStripView_];
 
-    if (chrome::ShouldUseFullSizeContentView()) {
-      // |windowWillEnterFullScreen:| and |windowWillExitFullScreen:| are
-      // already called because self is a delegate for the window. However this
-      // class is designed for subclassing and can not implement
-      // NSWindowDelegate methods (because subclasses can do so as well and they
-      // should be able to). TODO(crbug.com/654656): Move |visualEffectView_| to
-      // subclass.
-      [[NSNotificationCenter defaultCenter]
-          addObserver:self
-             selector:@selector(windowWillEnterFullScreenNotification:)
-                 name:NSWindowWillEnterFullScreenNotification
-               object:window];
-      [[NSNotificationCenter defaultCenter]
-          addObserver:self
-             selector:@selector(windowWillExitFullScreenNotification:)
-                 name:NSWindowWillExitFullScreenNotification
-               object:window];
-    }
+    // |windowWillEnterFullScreen:| and |windowWillExitFullScreen:| are
+    // already called because self is a delegate for the window. However this
+    // class is designed for subclassing and can not implement
+    // NSWindowDelegate methods (because subclasses can do so as well and they
+    // should be able to). TODO(crbug.com/654656): Move |visualEffectView_| to
+    // subclass.
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(windowWillEnterFullScreenNotification:)
+               name:NSWindowWillEnterFullScreenNotification
+             object:window];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(windowWillExitFullScreenNotification:)
+               name:NSWindowWillExitFullScreenNotification
+             object:window];
   }
+
   return self;
 }
 
 - (void)dealloc {
+  // Restore the reponder chain. Find the responder before us in the chain.
+  NSResponder* nextResponderToCheck = [self window];
+  while ([nextResponderToCheck nextResponder] &&
+         [nextResponderToCheck nextResponder] != self) {
+    nextResponderToCheck = [nextResponderToCheck nextResponder];
+  }
+  [nextResponderToCheck setNextResponder:[self nextResponder]];
+
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [overlayWindow_ setDelegate:nil];
+  [[self window] setDelegate:nil];
+  [nsWindowController_ setTabWindowController:nil];
+  [nsWindowController_ setWindow:nil];
   [super dealloc];
+}
+
+- (NSWindow*)window {
+  return [nsWindowController_ window];
+}
+
+- (void)setWindow:(NSWindow*)aWindow {
+  [nsWindowController_ setWindow:aWindow];
+}
+
+- (NSWindowController*)nsWindowController {
+  return nsWindowController_;
 }
 
 - (NSVisualEffectView*)visualEffectView {
@@ -242,17 +356,12 @@
     DCHECK(originalContentView_);
 
     // Return the original window's tab strip view and content view to their
-    // places. The TabStripView always needs to be in front of the window's
-    // content view and therefore it should always be added after the content
-    // view is set. It needs to be positioned below the avatar button to ensure
-    // that its overlay will not overlap it.
-    [[window contentView] addSubview:originalContentView_
-                          positioned:NSWindowBelow
-                          relativeTo:nil];
+    // places. The TabStripView should be in front of the content view, and the
+    // avatar button, if present, should be in front of the TabStripView.
+    [[window contentView] addSubview:originalContentView_];
     originalContentView_.frame = [[window contentView] bounds];
-    [[window contentView] addSubview:[self tabStripView]
-                          positioned:NSWindowBelow
-                          relativeTo:[self avatarView]];
+    [[window contentView] addSubview:[self tabStripView]];
+    [[window contentView] addSubview:[self avatarView]];
     [[self tabStripView] setInATabDraggingOverlayWindow:NO];
     [[window contentView] updateTrackingAreas];
 
@@ -262,6 +371,7 @@
     [window display];
     [window removeChildWindow:overlayWindow_];
 
+    [overlayWindow_ setDelegate:nil];
     [overlayWindow_ orderOut:nil];
     [overlayWindow_ release];
     overlayWindow_ = nil;
@@ -422,7 +532,6 @@
 - (void)insertTabStripBackgroundViewIntoWindow:(NSWindow*)window
                                       titleBar:(BOOL)hasTitleBar {
   DCHECK(tabStripBackgroundView_);
-  NSView* rootView = [[window contentView] superview];
 
   // In Material Design on 10.10 and higher, the top portion of the window is
   // blurred using an NSVisualEffectView.
@@ -466,20 +575,14 @@
 
     [visualEffectWrapperView addSubview:visualEffectView_];
 
-    [chrome::ShouldUseFullSizeContentView() ? [window contentView] : rootView
-        addSubview:visualEffectWrapperView
-        positioned:NSWindowBelow
-        relativeTo:nil];
+    [[window contentView] addSubview:visualEffectWrapperView];
 
     // Make the |tabStripBackgroundView_| a child of the NSVisualEffectView.
     [tabStripBackgroundView_ setFrame:[visualEffectView_ bounds]];
     [visualEffectView_ addSubview:tabStripBackgroundView_];
   } else {
     DCHECK(!chrome::ShouldUseFullSizeContentView());
-    [rootView addSubview:tabStripBackgroundView_
-              positioned:NSWindowBelow
-              relativeTo:nil];
-    return;
+    [[window contentView] addSubview:tabStripBackgroundView_];
   }
 }
 
@@ -490,11 +593,13 @@
 }
 
 - (void)windowWillEnterFullScreenNotification:(NSNotification*)notification {
-  [[visualEffectView_ animator] setAlphaValue:0.0];
+  [(visualEffectView_ ? visualEffectView_.get()
+                      : tabStripBackgroundView_.get()) setHidden:YES];
 }
 
 - (void)windowWillExitFullScreenNotification:(NSNotification*)notification {
-  [[visualEffectView_ animator] setAlphaValue:1.0];
+  [(visualEffectView_ ? visualEffectView_.get()
+                      : tabStripBackgroundView_.get()) setHidden:NO];
 }
 
 @end

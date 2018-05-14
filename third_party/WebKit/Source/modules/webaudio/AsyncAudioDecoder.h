@@ -27,16 +27,16 @@
 #define AsyncAudioDecoder_h
 
 #include <memory>
-#include "platform/heap/Handle.h"
-#include "platform/wtf/build_config.h"
+
+#include "base/macros.h"
+#include "bindings/modules/v8/v8_decode_error_callback.h"
+#include "bindings/modules/v8/v8_decode_success_callback.h"
 
 namespace blink {
 
-class BaseAudioContext;
 class AudioBuffer;
 class AudioBus;
-class DecodeErrorCallback;
-class DecodeSuccessCallback;
+class BaseAudioContext;
 class DOMArrayBuffer;
 class ScriptPromiseResolver;
 
@@ -47,11 +47,10 @@ class ScriptPromiseResolver;
 
 class AsyncAudioDecoder {
   DISALLOW_NEW();
-  WTF_MAKE_NONCOPYABLE(AsyncAudioDecoder);
 
  public:
-  AsyncAudioDecoder(){};
-  ~AsyncAudioDecoder(){};
+  AsyncAudioDecoder() = default;
+  ~AsyncAudioDecoder() = default;
 
   // Must be called on the main thread.  |decodeAsync| and callees must not
   // modify any of the parameters except |audioData|.  They are used to
@@ -59,25 +58,29 @@ class AsyncAudioDecoder {
   // appropriately when finished.
   void DecodeAsync(DOMArrayBuffer* audio_data,
                    float sample_rate,
-                   DecodeSuccessCallback*,
-                   DecodeErrorCallback*,
+                   V8PersistentCallbackFunction<V8DecodeSuccessCallback>*,
+                   V8PersistentCallbackFunction<V8DecodeErrorCallback>*,
                    ScriptPromiseResolver*,
                    BaseAudioContext*);
 
  private:
   AudioBuffer* CreateAudioBufferFromAudioBus(AudioBus*);
-  static void DecodeOnBackgroundThread(DOMArrayBuffer* audio_data,
-                                       float sample_rate,
-                                       DecodeSuccessCallback*,
-                                       DecodeErrorCallback*,
-                                       ScriptPromiseResolver*,
-                                       BaseAudioContext*);
-  static void NotifyComplete(DOMArrayBuffer* audio_data,
-                             DecodeSuccessCallback*,
-                             DecodeErrorCallback*,
-                             AudioBus*,
-                             ScriptPromiseResolver*,
-                             BaseAudioContext*);
+  static void DecodeOnBackgroundThread(
+      DOMArrayBuffer* audio_data,
+      float sample_rate,
+      V8PersistentCallbackFunction<V8DecodeSuccessCallback>*,
+      V8PersistentCallbackFunction<V8DecodeErrorCallback>*,
+      ScriptPromiseResolver*,
+      BaseAudioContext*);
+  static void NotifyComplete(
+      DOMArrayBuffer* audio_data,
+      V8PersistentCallbackFunction<V8DecodeSuccessCallback>*,
+      V8PersistentCallbackFunction<V8DecodeErrorCallback>*,
+      AudioBus*,
+      ScriptPromiseResolver*,
+      BaseAudioContext*);
+
+  DISALLOW_COPY_AND_ASSIGN(AsyncAudioDecoder);
 };
 
 }  // namespace blink

@@ -10,7 +10,13 @@
 #include "base/macros.h"
 #include "ui/gfx/native_widget_types.h"
 
+namespace ui {
+class Event;
+}  // namespace ui
+
 namespace chromecast {
+
+class CastSideSwipeGestureHandlerInterface;
 
 // Chromecast's window-manager interface.
 // This declares the interface to add top-level windows to the Chromecast
@@ -26,7 +32,8 @@ class CastWindowManager {
     INFO_OVERLAY,
     SOFT_KEYBOARD,
     VOLUME,
-    TOP = VOLUME
+    MEDIA_INFO,
+    TOP = MEDIA_INFO
   };
 
   // Creates the platform-specific CastWindowManager.
@@ -49,6 +56,20 @@ class CastWindowManager {
 
   // Return the root window that holds all top-level windows.
   virtual gfx::NativeView GetRootWindow() = 0;
+
+  // Inject a UI event into the Cast window.
+  virtual void InjectEvent(ui::Event* event) = 0;
+
+  // Register a new handler for a system side swipe event.
+  virtual void AddSideSwipeGestureHandler(
+      CastSideSwipeGestureHandlerInterface* handler) = 0;
+
+  // Remove the registration of a system side swipe event handler.
+  virtual void RemoveSideSwipeGestureHandler(
+      CastSideSwipeGestureHandlerInterface* handler) = 0;
+
+  // Enable/Disable color inversion.
+  virtual void SetColorInversion(bool enable) = 0;
 };
 
 }  // namespace chromecast

@@ -5,6 +5,7 @@
 #include "ash/system/tray/tray_details_view.h"
 
 #include "ash/ash_view_ids.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_menu_button.h"
@@ -15,7 +16,6 @@
 #include "ash/system/tray/tray_popup_utils.h"
 #include "ash/system/tray/tri_view.h"
 #include "base/containers/adapters.h"
-#include "base/memory/ptr_util.h"
 #include "third_party/skia/include/core/SkDrawLooper.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -53,11 +53,11 @@ const int kTitleRowSeparatorIndex = 1;
 // row use set_id(VIEW_ID_STICKY_HEADER).
 class ScrollContentsView : public views::View {
  public:
-  ScrollContentsView()
-      : box_layout_(new views::BoxLayout(views::BoxLayout::kVertical)) {
-    SetLayoutManager(box_layout_);
+  ScrollContentsView() {
+    box_layout_ = SetLayoutManager(
+        std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
   }
-  ~ScrollContentsView() override {}
+  ~ScrollContentsView() override = default;
 
  protected:
   // views::View:
@@ -65,19 +65,21 @@ class ScrollContentsView : public views::View {
     PositionHeaderRows();
   }
 
-  void PaintChildren(const ui::PaintContext& context) override {
-    views::View::PaintChildren(context);
+  void PaintChildren(const views::PaintInfo& paint_info) override {
+    views::View::PaintChildren(paint_info);
     bool did_draw_shadow = false;
     // Paint header row separators.
     for (auto& header : headers_)
-      did_draw_shadow = PaintDelineation(header, context) || did_draw_shadow;
+      did_draw_shadow =
+          PaintDelineation(header, paint_info.context()) || did_draw_shadow;
 
     // Draw a shadow at the top of the viewport when scrolled, but only if a
     // header didn't already draw one. Overlap the shadow with the separator
     // that's below the header view so we don't get both a separator and a full
     // shadow.
     if (y() != 0 && !did_draw_shadow)
-      DrawShadow(context, gfx::Rect(0, 0, width(), -y() - kSeparatorWidth));
+      DrawShadow(paint_info.context(),
+                 gfx::Rect(0, 0, width(), -y() - kSeparatorWidth));
   }
 
   void Layout() override {
@@ -220,7 +222,7 @@ class ScrollContentsView : public views::View {
     canvas->DrawRect(shadowed_area, flags);
   }
 
-  views::BoxLayout* box_layout_;
+  views::BoxLayout* box_layout_ = nullptr;
 
   // Header child views that stick to the top of visible viewport when scrolled.
   std::vector<Header> headers_;
@@ -243,18 +245,21 @@ const int kTitleRowPaddingBottom =
 
 TrayDetailsView::TrayDetailsView(SystemTrayItem* owner)
     : owner_(owner),
-      box_layout_(new views::BoxLayout(views::BoxLayout::kVertical)),
+      box_layout_(nullptr),
       scroller_(nullptr),
       scroll_content_(nullptr),
       progress_bar_(nullptr),
       tri_view_(nullptr),
       back_button_(nullptr) {
-  SetLayoutManager(box_layout_);
-  SetBackground(views::CreateThemedSolidBackground(
-      this, ui::NativeTheme::kColorId_BubbleBackground));
+  box_layout_ = SetLayoutManager(
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
+  SetBackground(features::IsSystemTrayUnifiedEnabled()
+                    ? views::CreateSolidBackground(kUnifiedMenuBackgroundColor)
+                    : views::CreateThemedSolidBackground(
+                          this, ui::NativeTheme::kColorId_BubbleBackground));
 }
 
-TrayDetailsView::~TrayDetailsView() {}
+TrayDetailsView::~TrayDetailsView() = default;
 
 void TrayDetailsView::OnViewClicked(views::View* sender) {
   HandleViewClicked(sender);
@@ -306,8 +311,12 @@ void TrayDetailsView::CreateScrollableList() {
   scroller_ = new views::ScrollView;
   scroller_->SetContents(scroll_content_);
   // TODO(varkha): Make the sticky rows work with EnableViewPortLayer().
-  scroller_->SetBackgroundThemeColorId(
-      ui::NativeTheme::kColorId_BubbleBackground);
+  if (features::IsSystemTrayUnifiedEnabled()) {
+    scroller_->SetBackgroundColor(kUnifiedMenuBackgroundColor);
+  } else {
+    scroller_->SetBackgroundThemeColorId(
+        ui::NativeTheme::kColorId_BubbleBackground);
+  }
 
   AddChildView(scroller_);
   box_layout_->SetFlexForView(scroller_, 1);
@@ -406,20 +415,18 @@ void TrayDetailsView::ShowProgress(double value, bool visible) {
   child_at(kTitleRowSeparatorIndex)->SetVisible(!visible);
 }
 
-views::CustomButton* TrayDetailsView::CreateSettingsButton(
+views::Button* TrayDetailsView::CreateSettingsButton(
     int setting_accessible_name_id) {
-  SystemMenuButton* button =
-      new SystemMenuButton(this, TrayPopupInkDropStyle::HOST_CENTERED,
-                           kSystemMenuSettingsIcon, setting_accessible_name_id);
+  SystemMenuButton* button = new SystemMenuButton(this, kSystemMenuSettingsIcon,
+                                                  setting_accessible_name_id);
   if (!TrayPopupUtils::CanOpenWebUISettings())
     button->SetEnabled(false);
   return button;
 }
 
-views::CustomButton* TrayDetailsView::CreateHelpButton() {
+views::Button* TrayDetailsView::CreateHelpButton() {
   SystemMenuButton* button =
-      new SystemMenuButton(this, TrayPopupInkDropStyle::HOST_CENTERED,
-                           kSystemMenuHelpIcon, IDS_ASH_STATUS_TRAY_HELP);
+      new SystemMenuButton(this, kSystemMenuHelpIcon, IDS_ASH_STATUS_TRAY_HELP);
   // Help opens a web page, so treat it like Web UI settings.
   if (!TrayPopupUtils::CanOpenWebUISettings())
     button->SetEnabled(false);
@@ -451,14 +458,14 @@ void TrayDetailsView::DoTransitionToDefaultView() {
   // Cache pointer to owner in this function scope. TrayDetailsView will be
   // deleted after called ShowDefaultView.
   SystemTrayItem* owner = owner_;
-  owner->system_tray()->ShowDefaultView(BUBBLE_USE_EXISTING);
+  owner->system_tray()->ShowDefaultView(BUBBLE_USE_EXISTING,
+                                        false /* show_by_click */);
   owner->set_restore_focus(false);
 }
 
 views::Button* TrayDetailsView::CreateBackButton() {
   SystemMenuButton* button = new SystemMenuButton(
-      this, TrayPopupInkDropStyle::HOST_CENTERED, kSystemMenuArrowBackIcon,
-      IDS_ASH_STATUS_TRAY_PREVIOUS_MENU);
+      this, kSystemMenuArrowBackIcon, IDS_ASH_STATUS_TRAY_PREVIOUS_MENU);
   return button;
 }
 

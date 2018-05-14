@@ -21,16 +21,17 @@ class LayoutTestJavaScriptDialogManager : public ShellJavaScriptDialogManager {
 
   // JavaScriptDialogManager:
   void RunJavaScriptDialog(WebContents* web_contents,
-                           const GURL& origin_url,
+                           RenderFrameHost* render_frame_host,
                            JavaScriptDialogType dialog_type,
                            const base::string16& message_text,
                            const base::string16& default_prompt_text,
-                           const DialogClosedCallback& callback,
+                           DialogClosedCallback callback,
                            bool* did_suppress_message) override;
 
   void RunBeforeUnloadDialog(WebContents* web_contents,
+                             RenderFrameHost* render_frame_host,
                              bool is_reload,
-                             const DialogClosedCallback& callback) override;
+                             DialogClosedCallback callback) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(LayoutTestJavaScriptDialogManager);

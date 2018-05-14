@@ -58,7 +58,6 @@ void SessionServiceTestHelper::SetForceBrowserNotAliveWithNoWindows(
 void SessionServiceTestHelper::ReadWindows(
     std::vector<std::unique_ptr<sessions::SessionWindow>>* windows,
     SessionID::id_type* active_window_id) {
-  Time last_time;
   std::vector<std::unique_ptr<sessions::SessionCommand>> read_commands;
   sessions::BaseSessionServiceTestHelper test_helper(
       service_->GetBaseSessionServiceForTest());
@@ -109,7 +108,7 @@ void SessionServiceTestHelper::AssertSingleWindowWithSingleTab(
 void SessionServiceTestHelper::SetService(SessionService* service) {
   service_.reset(service);
   // Execute IO tasks posted by the SessionService.
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
 }
 
 SessionService* SessionServiceTestHelper::ReleaseService() {
@@ -117,7 +116,7 @@ SessionService* SessionServiceTestHelper::ReleaseService() {
 }
 
 void SessionServiceTestHelper::RunTaskOnBackendThread(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     const base::Closure& task) {
   sessions::BaseSessionServiceTestHelper test_helper(
       service_->GetBaseSessionServiceForTest());

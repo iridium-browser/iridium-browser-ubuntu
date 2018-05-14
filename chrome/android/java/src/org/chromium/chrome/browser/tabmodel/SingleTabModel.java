@@ -53,7 +53,7 @@ public class SingleTabModel implements TabModel {
 
     @Override
     public Profile getProfile() {
-        return mTab.getProfile();
+        return mTab == null ? null : mTab.getProfile();
     }
 
     @Override
@@ -187,12 +187,4 @@ public class SingleTabModel implements TabModel {
 
     @Override
     public void openMostRecentlyClosedTab() {}
-
-    @Override
-    public void setIsPendingTabAdd(boolean isPendingTabAdd) {}
-
-    @Override
-    public boolean isPendingTabAdd() {
-        return false;
-    }
 }

@@ -8,16 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_mixer/audio_mixer_impl.h"
+#include "modules/audio_mixer/audio_mixer_impl.h"
 
 #include <algorithm>
 #include <functional>
 #include <iterator>
 #include <utility>
 
-#include "webrtc/modules/audio_mixer/audio_frame_manipulator.h"
-#include "webrtc/modules/audio_mixer/default_output_rate_calculator.h"
-#include "webrtc/rtc_base/logging.h"
+#include "modules/audio_mixer/audio_frame_manipulator.h"
+#include "modules/audio_mixer/default_output_rate_calculator.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/refcountedobject.h"
+#include "system_wrappers/include/field_trial.h"
 
 namespace webrtc {
 namespace {
@@ -88,17 +90,16 @@ AudioMixerImpl::SourceStatusList::const_iterator FindSourceInList(
       });
 }
 
-// TODO(aleloi): remove non-const version when WEBRTC only supports modern STL.
-AudioMixerImpl::SourceStatusList::iterator FindSourceInList(
-    AudioMixerImpl::Source const* audio_source,
-    AudioMixerImpl::SourceStatusList* audio_source_list) {
-  return std::find_if(
-      audio_source_list->begin(), audio_source_list->end(),
-      [audio_source](const std::unique_ptr<AudioMixerImpl::SourceStatus>& p) {
-        return p->audio_source == audio_source;
-      });
+FrameCombiner::LimiterType ChooseLimiterType(bool use_limiter) {
+  using LimiterType = FrameCombiner::LimiterType;
+  if (!use_limiter) {
+    return LimiterType::kNoLimiter;
+  } else if (field_trial::IsEnabled("WebRTC-ApmGainController2Limiter")) {
+    return LimiterType::kApmAgc2Limiter;
+  } else {
+    return LimiterType::kApmAgcLimiter;
+  }
 }
-
 }  // namespace
 
 AudioMixerImpl::AudioMixerImpl(
@@ -108,7 +109,7 @@ AudioMixerImpl::AudioMixerImpl(
       output_frequency_(0),
       sample_size_(0),
       audio_source_list_(),
-      frame_combiner_(use_limiter) {}
+      frame_combiner_(ChooseLimiterType(use_limiter)) {}
 
 AudioMixerImpl::~AudioMixerImpl() {}
 
@@ -124,6 +125,11 @@ rtc::scoped_refptr<AudioMixerImpl> AudioMixerImpl::Create(
   return rtc::scoped_refptr<AudioMixerImpl>(
       new rtc::RefCountedObject<AudioMixerImpl>(
           std::move(output_rate_calculator), use_limiter));
+}
+
+void AudioMixerImpl::SetLimiterType(FrameCombiner::LimiterType limiter_type) {
+  RTC_DCHECK_RUNS_SERIALIZED(&race_checker_);
+  frame_combiner_.SetLimiterType(limiter_type);
 }
 
 void AudioMixerImpl::Mix(size_t number_of_channels,
@@ -196,7 +202,7 @@ AudioFrameList AudioMixerImpl::GetAudioFromSources() {
             OutputFrequency(), &source_and_status->audio_frame);
 
     if (audio_frame_info == Source::AudioFrameInfo::kError) {
-      LOG_F(LS_WARNING) << "failed to GetAudioFrameWithInfo() from source";
+      RTC_LOG_F(LS_WARNING) << "failed to GetAudioFrameWithInfo() from source";
       continue;
     }
     audio_source_mixing_data_list.emplace_back(
@@ -242,7 +248,7 @@ bool AudioMixerImpl::GetAudioSourceMixabilityStatusForTest(
     return (*iter)->is_mixed;
   }
 
-  LOG(LS_ERROR) << "Audio source unknown";
+  RTC_LOG(LS_ERROR) << "Audio source unknown";
   return false;
 }
 }  // namespace webrtc

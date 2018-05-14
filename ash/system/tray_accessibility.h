@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-#include "ash/accessibility_delegate.h"
+#include "ash/accessibility/accessibility_delegate.h"
 #include "ash/system/accessibility_observer.h"
 #include "ash/system/tray/tray_details_view.h"
 #include "ash/system/tray/tray_image_item.h"
@@ -22,11 +22,12 @@ class TrayAccessibilityTest;
 
 namespace views {
 class Button;
-class CustomButton;
+class Button;
 class View;
 }
 
 namespace ash {
+class HoverHighlightView;
 class SystemTrayItem;
 
 namespace tray {
@@ -37,7 +38,11 @@ class AccessibilityDetailedView : public TrayDetailsView {
   explicit AccessibilityDetailedView(SystemTrayItem* owner);
   ~AccessibilityDetailedView() override {}
 
+  void OnAccessibilityStatusChanged();
+
  private:
+  friend class chromeos::TrayAccessibilityTest;
+
   // TrayDetailsView:
   void HandleViewClicked(views::View* view) override;
   void HandleButtonPressed(views::Button* sender,
@@ -53,24 +58,29 @@ class AccessibilityDetailedView : public TrayDetailsView {
   // Add the accessibility feature list.
   void AppendAccessibilityList();
 
-  views::View* spoken_feedback_view_ = nullptr;
-  views::View* high_contrast_view_ = nullptr;
-  views::View* screen_magnifier_view_ = nullptr;
-  views::View* large_cursor_view_ = nullptr;
-  views::CustomButton* help_view_ = nullptr;
-  views::CustomButton* settings_view_ = nullptr;
-  views::View* autoclick_view_ = nullptr;
-  views::View* virtual_keyboard_view_ = nullptr;
-  views::View* mono_audio_view_ = nullptr;
-  views::View* caret_highlight_view_ = nullptr;
-  views::View* highlight_mouse_cursor_view_ = nullptr;
-  views::View* highlight_keyboard_focus_view_ = nullptr;
-  views::View* sticky_keys_view_ = nullptr;
-  views::View* tap_dragging_view_ = nullptr;
+  HoverHighlightView* spoken_feedback_view_ = nullptr;
+  HoverHighlightView* select_to_speak_view_ = nullptr;
+  HoverHighlightView* high_contrast_view_ = nullptr;
+  HoverHighlightView* screen_magnifier_view_ = nullptr;
+  HoverHighlightView* docked_magnifier_view_ = nullptr;
+  HoverHighlightView* large_cursor_view_ = nullptr;
+  HoverHighlightView* autoclick_view_ = nullptr;
+  HoverHighlightView* virtual_keyboard_view_ = nullptr;
+  HoverHighlightView* mono_audio_view_ = nullptr;
+  HoverHighlightView* caret_highlight_view_ = nullptr;
+  HoverHighlightView* highlight_mouse_cursor_view_ = nullptr;
+  HoverHighlightView* highlight_keyboard_focus_view_ = nullptr;
+  HoverHighlightView* sticky_keys_view_ = nullptr;
+  HoverHighlightView* tap_dragging_view_ = nullptr;
+  views::Button* help_view_ = nullptr;
+  views::Button* settings_view_ = nullptr;
 
+  // These exist for tests. The canonical state is stored in prefs.
   bool spoken_feedback_enabled_ = false;
+  bool select_to_speak_enabled_ = false;
   bool high_contrast_enabled_ = false;
   bool screen_magnifier_enabled_ = false;
+  bool docked_magnifier_enabled_ = false;
   bool large_cursor_enabled_ = false;
   bool autoclick_enabled_ = false;
   bool virtual_keyboard_enabled_ = false;
@@ -80,9 +90,9 @@ class AccessibilityDetailedView : public TrayDetailsView {
   bool highlight_keyboard_focus_enabled_ = false;
   bool sticky_keys_enabled_ = false;
   bool tap_dragging_enabled_ = false;
+
   LoginStatus login_;
 
-  friend class chromeos::TrayAccessibilityTest;
   DISALLOW_COPY_AND_ASSIGN(AccessibilityDetailedView);
 };
 
@@ -94,6 +104,8 @@ class TrayAccessibility : public TrayImageItem, public AccessibilityObserver {
   ~TrayAccessibility() override;
 
  private:
+  friend class chromeos::TrayAccessibilityTest;
+
   void SetTrayIconVisible(bool visible);
   tray::AccessibilityDetailedView* CreateDetailedMenu();
 
@@ -106,7 +118,7 @@ class TrayAccessibility : public TrayImageItem, public AccessibilityObserver {
   void UpdateAfterLoginStatusChange(LoginStatus status) override;
 
   // Overridden from AccessibilityObserver.
-  void OnAccessibilityModeChanged(
+  void OnAccessibilityStatusChanged(
       AccessibilityNotificationVisibility notify) override;
 
   views::View* default_;
@@ -121,7 +133,6 @@ class TrayAccessibility : public TrayImageItem, public AccessibilityObserver {
   // A11y feature status on just entering the lock screen.
   bool show_a11y_menu_on_lock_screen_;
 
-  friend class chromeos::TrayAccessibilityTest;
   DISALLOW_COPY_AND_ASSIGN(TrayAccessibility);
 };
 

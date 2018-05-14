@@ -28,10 +28,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// https://w3c.github.io/hr-time/#the-performance-interface
+// https://w3c.github.io/hr-time/#the-performance-attribute
 
 // TODO(foolip): This should be a GlobalPerformance interface implemented by
 // Window and WorkerGlobalScope.
-partial interface WorkerGlobalScope {
+[
+    ImplementedAs=WorkerGlobalScopePerformance
+] partial interface WorkerGlobalScope {
     readonly attribute WorkerPerformance performance;
 };

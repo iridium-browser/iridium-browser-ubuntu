@@ -26,6 +26,7 @@ var BrowserBridge = (function() {
     // List of observers for various bits of browser state.
     this.connectionTestsObservers_ = [];
     this.hstsObservers_ = [];
+    this.expectCTObservers_ = [];
     this.constantsObservers_ = [];
     this.crosONCFileParseObservers_ = [];
     this.storeDebugLogsObservers_ = [];
@@ -52,7 +53,6 @@ var BrowserBridge = (function() {
     this.addNetInfoPollableDataHelper(
         'altSvcMappings', 'onAltSvcMappingsChanged');
     this.addNetInfoPollableDataHelper('quicInfo', 'onQuicInfoChanged');
-    this.addNetInfoPollableDataHelper('sdchInfo', 'onSdchInfoChanged');
     this.addNetInfoPollableDataHelper(
         'httpCacheInfo', 'onHttpCacheInfoChanged');
 
@@ -172,8 +172,20 @@ var BrowserBridge = (function() {
           [domain, sts_include_subdomains, pkp_include_subdomains, pins]);
     },
 
-    sendHSTSDelete: function(domain) {
-      this.send('hstsDelete', [domain]);
+    sendDomainSecurityPolicyDelete: function(domain) {
+      this.send('domainSecurityPolicyDelete', [domain]);
+    },
+
+    sendExpectCTQuery: function(domain) {
+      this.send('expectCTQuery', [domain]);
+    },
+
+    sendExpectCTAdd: function(domain, report_uri, enforce) {
+      this.send('expectCTAdd', [domain, report_uri, enforce]);
+    },
+
+    sendExpectCTTestReport: function(report_uri) {
+      this.send('expectCTTestReport', [report_uri]);
     },
 
     sendGetSessionNetworkStats: function() {
@@ -316,6 +328,16 @@ var BrowserBridge = (function() {
     receivedHSTSResult: function(info) {
       for (var i = 0; i < this.hstsObservers_.length; i++)
         this.hstsObservers_[i].onHSTSQueryResult(info);
+    },
+
+    receivedExpectCTResult: function(info) {
+      for (var i = 0; i < this.expectCTObservers_.length; i++)
+        this.expectCTObservers_[i].onExpectCTQueryResult(info);
+    },
+
+    receivedExpectCTTestReportResult: function(result) {
+      for (var i = 0; i < this.expectCTObservers_.length; i++)
+        this.expectCTObservers_[i].onExpectCTTestReportResult(result);
     },
 
     receivedONCFileParse: function(error) {
@@ -543,6 +565,16 @@ var BrowserBridge = (function() {
     },
 
     /**
+     * Adds a listener for the results of Expect-CT queries. The observer will
+     * be called back with:
+     *
+     *   observer.onExpectCTQueryResult(result);
+     */
+    addExpectCTObserver: function(observer) {
+      this.expectCTObservers_.push(observer);
+    },
+
+    /**
      * Adds a listener for ONC file parse status. The observer will be called
      * back with:
      *
@@ -612,17 +644,6 @@ var BrowserBridge = (function() {
      */
     addDataReductionProxyInfoObserver: function(observer, ignoreWhenUnchanged) {
       this.pollableDataHelpers_.dataReductionProxyInfo.addObserver(
-          observer, ignoreWhenUnchanged);
-    },
-
-    /**
-     * Adds a listener of SDCH information. |observer| will be called
-     * back when data is received, through:
-     *
-     *   observer.onSdchInfoChanged(sdchInfo)
-     */
-    addSdchInfoObserver: function(observer, ignoreWhenUnchanged) {
-      this.pollableDataHelpers_.sdchInfo.addObserver(
           observer, ignoreWhenUnchanged);
     },
 

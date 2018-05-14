@@ -31,13 +31,15 @@
 #include "core/animation/DocumentAnimations.h"
 
 #include "core/animation/AnimationClock.h"
-#include "core/animation/CompositorPendingAnimations.h"
 #include "core/animation/DocumentTimeline.h"
+#include "core/animation/PendingAnimations.h"
+#include "core/animation/WorkletAnimationController.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/Node.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
+#include "platform/animation/CompositorAnimationHost.h"
 
 namespace blink {
 
@@ -70,11 +72,30 @@ void DocumentAnimations::UpdateAnimations(
     Optional<CompositorElementIdSet>& composited_element_ids) {
   DCHECK(document.Lifecycle().GetState() >= required_lifecycle_state);
 
-  if (document.GetCompositorPendingAnimations().Update(
-          composited_element_ids)) {
+  if (document.GetPendingAnimations().Update(composited_element_ids)) {
     DCHECK(document.View());
     document.View()->ScheduleAnimation();
   }
+  if (document.View()) {
+    if (CompositorAnimationHost* host =
+            document.View()->GetCompositorAnimationHost()) {
+      int total_animations_count = 0;
+      int main_thread_compositable_animations_count = 0;
+      if (document.Timeline().HasAnimations()) {
+        total_animations_count = document.Timeline().PendingAnimationsCount();
+        main_thread_compositable_animations_count =
+            document.Timeline().MainThreadCompositableAnimationsCount();
+      }
+      // In the CompositorTimingHistory::DidDraw where we know that there is
+      // visual update, we will use document.CurrentFrameHadRAF as a signal to
+      // record UMA or not.
+      host->SetAnimationCounts(
+          total_animations_count, main_thread_compositable_animations_count,
+          document.CurrentFrameHadRAF(), document.NextFrameHasPendingRAF());
+    }
+  }
+
+  document.GetWorkletAnimationController().Update();
 
   document.Timeline().ScheduleNextService();
 }

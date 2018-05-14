@@ -52,20 +52,12 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/common/net/x509_certificate_model.h"
+#include "chrome/common/net/x509_certificate_model_nss.h"
 #include "chrome/grit/generated_resources.h"
 #include "crypto/scoped_nss_types.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "ui/base/l10n/l10n_util.h"
-
-#if !defined(CERTDB_TERMINAL_RECORD)
-/* NSS 3.13 renames CERTDB_VALID_PEER to CERTDB_TERMINAL_RECORD
- * and marks CERTDB_VALID_PEER as deprecated.
- * If we're using an older version, rename it ourselves.
- */
-#define CERTDB_TERMINAL_RECORD CERTDB_VALID_PEER
-#endif
 
 namespace {
 
@@ -720,7 +712,7 @@ std::string ProcessUserNotice(SECItem* der_notice) {
         if (itemList != notice->noticeReference.noticeNumbers)
           rv += ", ";
         rv += '#';
-        rv += base::UTF16ToUTF8(base::Uint64ToString16(number));
+        rv += base::NumberToString(number);
       }
       itemList++;
     }

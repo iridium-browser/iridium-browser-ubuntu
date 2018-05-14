@@ -37,8 +37,7 @@ import java.util.concurrent.TimeoutException;
  *  hence is tested via content_browsertests.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ShapeDetectionTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -58,8 +57,8 @@ public class ShapeDetectionTest {
     @LargeTest
     @Restriction(ChromeRestriction.RESTRICTION_TYPE_GOOGLE_PLAY_SERVICES)
     public void testBarcodeDetection() throws InterruptedException, TimeoutException {
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         try {
             Tab tab = mActivityTestRule.getActivity().getActivityTab();
             TabTitleObserver titleObserver =
@@ -83,8 +82,8 @@ public class ShapeDetectionTest {
     @LargeTest
     @Restriction(ChromeRestriction.RESTRICTION_TYPE_GOOGLE_PLAY_SERVICES)
     public void testTextDetection() throws InterruptedException, TimeoutException {
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         try {
             Tab tab = mActivityTestRule.getActivity().getActivityTab();
             TabTitleObserver titleObserver =

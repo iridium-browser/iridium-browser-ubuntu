@@ -12,10 +12,11 @@
 #include "base/time/time.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/account_info.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/browser/webdata/token_web_data.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
-#include "net/cookies/cookie_store.h"
+#include "net/cookies/cookie_change_dispatcher.h"
 #include "url/gurl.h"
 
 class PrefService;
@@ -34,12 +35,12 @@ class URLRequestContextGetter;
 class SigninClient : public KeyedService {
  public:
   // The subcription for cookie changed notifications.
-  class CookieChangedSubscription {
+  class CookieChangeSubscription {
    public:
-    virtual ~CookieChangedSubscription() {}
+    virtual ~CookieChangeSubscription() = default;
   };
 
-  ~SigninClient() override {}
+  ~SigninClient() override = default;
 
   // If |for_ephemeral| is true, special kind of device ID for ephemeral users
   // is generated.
@@ -82,11 +83,11 @@ class SigninClient : public KeyedService {
   // Adds a callback to be called each time a cookie for |url| with name |name|
   // changes.
   // Note that |callback| will always be called on the thread that
-  // |AddCookieChangedCallback| was called on.
-  virtual std::unique_ptr<CookieChangedSubscription> AddCookieChangedCallback(
+  // |AddCookieChangeCallback| was called on.
+  virtual std::unique_ptr<CookieChangeSubscription> AddCookieChangeCallback(
       const GURL& url,
       const std::string& name,
-      const net::CookieStore::CookieChangedCallback& callback) = 0;
+      net::CookieChangeCallback callback) = 0;
 
   // Called after Google signin has succeeded.
   virtual void OnSignedIn(const std::string& account_id,
@@ -103,6 +104,10 @@ class SigninClient : public KeyedService {
   // process.
   virtual void PreSignOut(const base::Callback<void()>& sign_out,
                           signin_metrics::ProfileSignout signout_source_metric);
+
+  // Called before calling the GAIA logout endpoint.
+  // For iOS, cookies should be cleaned up.
+  virtual void PreGaiaLogout(base::OnceClosure callback);
 
   virtual bool IsFirstRun() const = 0;
   virtual base::Time GetInstallDate() = 0;
@@ -128,6 +133,9 @@ class SigninClient : public KeyedService {
 
   // Called once the credentials has been copied to another SigninManager.
   virtual void AfterCredentialsCopied() {}
+
+  // Schedules migration to happen at next startup.
+  virtual void SetReadyForDiceMigration(bool is_ready) {}
 
  protected:
   // Returns device id that is scoped to single signin.

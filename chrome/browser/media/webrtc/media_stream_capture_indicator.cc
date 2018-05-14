@@ -12,15 +12,12 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/grit/chromium_strings.h"
-#include "chrome/grit/theme_resources.h"
 #include "components/url_formatter/elide_url.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -28,11 +25,18 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/features/features.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
 
+#if !defined(OS_ANDROID)
+#include "chrome/grit/chromium_strings.h"
+#include "components/vector_icons/vector_icons.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/color_palette.h"
+#include "ui/gfx/paint_vector_icon.h"
+#endif
+
 #if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
@@ -56,20 +60,6 @@ const extensions::Extension* GetExtension(WebContents* web_contents) {
       web_contents->GetURL());
 }
 
-bool IsWhitelistedExtension(const extensions::Extension* extension) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  static const char* const kExtensionWhitelist[] = {
-    extension_misc::kHotwordNewExtensionId,
-  };
-
-  for (size_t i = 0; i < arraysize(kExtensionWhitelist); ++i) {
-    if (extension->id() == kExtensionWhitelist[i])
-      return true;
-  }
-
-  return false;
-}
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 base::string16 GetTitle(WebContents* web_contents) {
@@ -181,7 +171,7 @@ class MediaStreamCaptureIndicator::UIDelegate : public content::MediaStreamUI {
 std::unique_ptr<content::MediaStreamUI>
 MediaStreamCaptureIndicator::WebContentsDeviceUsage::RegisterMediaStream(
     const content::MediaStreamDevices& devices) {
-  return base::MakeUnique<UIDelegate>(weak_factory_.GetWeakPtr(), devices);
+  return std::make_unique<UIDelegate>(weak_factory_.GetWeakPtr(), devices);
 }
 
 void MediaStreamCaptureIndicator::WebContentsDeviceUsage::AddDevices(
@@ -239,11 +229,7 @@ void MediaStreamCaptureIndicator::WebContentsDeviceUsage::NotifyStopped() {
   }
 }
 
-MediaStreamCaptureIndicator::MediaStreamCaptureIndicator()
-    : status_icon_(NULL),
-      mic_image_(NULL),
-      camera_image_(NULL) {
-}
+MediaStreamCaptureIndicator::MediaStreamCaptureIndicator() {}
 
 MediaStreamCaptureIndicator::~MediaStreamCaptureIndicator() {
   // The user is responsible for cleaning up by reporting the closure of any
@@ -261,7 +247,7 @@ MediaStreamCaptureIndicator::RegisterMediaStream(
     const content::MediaStreamDevices& devices) {
   auto& usage = usage_map_[web_contents];
   if (!usage)
-    usage = base::MakeUnique<WebContentsDeviceUsage>(this, web_contents);
+    usage = std::make_unique<WebContentsDeviceUsage>(this, web_contents);
 
   return usage->RegisterMediaStream(devices);
 }
@@ -342,8 +328,6 @@ void MediaStreamCaptureIndicator::MaybeCreateStatusTrayIcon(bool audio,
   if (!status_tray)
     return;
 
-  EnsureStatusTrayIconResources();
-
   gfx::ImageSkia image;
   base::string16 tool_tip;
   GetStatusTrayIconInfo(audio, video, &image, &tool_tip);
@@ -352,22 +336,6 @@ void MediaStreamCaptureIndicator::MaybeCreateStatusTrayIcon(bool audio,
 
   status_icon_ = status_tray->CreateStatusIcon(
       StatusTray::MEDIA_STREAM_CAPTURE_ICON, image, tool_tip);
-}
-
-void MediaStreamCaptureIndicator::EnsureStatusTrayIconResources() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  // TODO(estade): these should use vector icons.
-  if (!mic_image_) {
-    mic_image_ = ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-        IDR_INFOBAR_MEDIA_STREAM_MIC);
-  }
-  if (!camera_image_) {
-    camera_image_ = ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-        IDR_INFOBAR_MEDIA_STREAM_CAMERA);
-  }
-  DCHECK(mic_image_);
-  DCHECK(camera_image_);
 }
 
 void MediaStreamCaptureIndicator::MaybeDestroyStatusTrayIcon() {
@@ -409,7 +377,7 @@ void MediaStreamCaptureIndicator::UpdateNotificationUserInterface() {
     // icon.
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     const extensions::Extension* extension = GetExtension(web_contents);
-    if (!extension || IsWhitelistedExtension(extension))
+    if (!extension)
       continue;
 #endif
 
@@ -445,22 +413,28 @@ void MediaStreamCaptureIndicator::GetStatusTrayIconInfo(
     bool video,
     gfx::ImageSkia* image,
     base::string16* tool_tip) {
+#if defined(OS_ANDROID)
+  NOTREACHED();
+#else   // !defined(OS_ANDROID)
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(audio || video);
   DCHECK(image);
   DCHECK(tool_tip);
 
   int message_id = 0;
+  const gfx::VectorIcon* icon = nullptr;
   if (audio && video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_AND_VIDEO;
-    *image = *camera_image_;
+    icon = &vector_icons::kVideocamIcon;
   } else if (audio && !video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_ONLY;
-    *image = *mic_image_;
+    icon = &vector_icons::kMicIcon;
   } else if (!audio && video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_VIDEO_ONLY;
-    *image = *camera_image_;
+    icon = &vector_icons::kVideocamIcon;
   }
 
   *tool_tip = l10n_util::GetStringUTF16(message_id);
+  *image = gfx::CreateVectorIcon(*icon, 16, gfx::kChromeIconGrey);
+#endif  // !defined(OS_ANDROID)
 }

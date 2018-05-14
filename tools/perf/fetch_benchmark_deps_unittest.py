@@ -57,11 +57,11 @@ class FetchBenchmarkDepsUnittest(unittest.TestCase):
     self._RunFetchBenchmarkDepsTest('smoothness.top_25_smooth')
 
   def testFetchServingDirs(self):
-    self._RunFetchBenchmarkDepsTest('media.tough_video_cases')
+    self._RunFetchBenchmarkDepsTest('media.desktop')
 
   def testFetchOctane(self):
     octane_wpr_path = os.path.join(
-        os.path.dirname(__file__), 'page_sets', 'data', 'octane_002.wpr')
+        os.path.dirname(__file__), 'page_sets', 'data', 'octane_002.wprgo')
     expected = os.path.relpath(octane_wpr_path,
                                path_util.GetChromiumSrcDir())
     self._RunFetchBenchmarkDepsTest('octane', NormPaths(expected))

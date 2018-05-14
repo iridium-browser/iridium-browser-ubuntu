@@ -31,6 +31,8 @@
 
 #include <memory>
 
+#include "platform/heap/Persistent.h"
+#include "platform/wtf/Allocator.h"
 #include "public/platform/modules/indexeddb/WebIDBCallbacks.h"
 
 namespace blink {
@@ -41,7 +43,7 @@ class WebIDBDatabase;
 class WebIDBDatabaseError;
 class WebIDBKey;
 struct WebIDBMetadata;
-struct WebIDBValue;
+class WebIDBValue;
 
 class WebIDBCallbacksImpl final : public WebIDBCallbacks {
   USING_FAST_MALLOC(WebIDBCallbacksImpl);
@@ -55,18 +57,16 @@ class WebIDBCallbacksImpl final : public WebIDBCallbacks {
   void OnError(const WebIDBDatabaseError&) override;
   void OnSuccess(const WebVector<WebString>&) override;
   void OnSuccess(WebIDBCursor*,
-                 const WebIDBKey&,
-                 const WebIDBKey& primary_key,
-                 const WebIDBValue&) override;
+                 WebIDBKey,
+                 WebIDBKey primary_key,
+                 WebIDBValue) override;
   void OnSuccess(WebIDBDatabase*, const WebIDBMetadata&) override;
-  void OnSuccess(const WebIDBKey&) override;
-  void OnSuccess(const WebIDBValue&) override;
-  void OnSuccess(const WebVector<WebIDBValue>&) override;
+  void OnSuccess(WebIDBKey) override;
+  void OnSuccess(WebIDBValue) override;
+  void OnSuccess(WebVector<WebIDBValue>) override;
   void OnSuccess(long long) override;
   void OnSuccess() override;
-  void OnSuccess(const WebIDBKey&,
-                 const WebIDBKey& primary_key,
-                 const WebIDBValue&) override;
+  void OnSuccess(WebIDBKey, WebIDBKey primary_key, WebIDBValue) override;
   void OnBlocked(long long old_version) override;
   void OnUpgradeNeeded(long long old_version,
                        WebIDBDatabase*,

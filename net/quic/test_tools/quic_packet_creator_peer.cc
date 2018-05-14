@@ -48,12 +48,12 @@ void QuicPacketCreatorPeer::FillPacketHeader(QuicPacketCreator* creator,
 // static
 void QuicPacketCreatorPeer::CreateStreamFrame(QuicPacketCreator* creator,
                                               QuicStreamId id,
-                                              QuicIOVector iov,
+                                              size_t write_length,
                                               size_t iov_offset,
                                               QuicStreamOffset offset,
                                               bool fin,
                                               QuicFrame* frame) {
-  creator->CreateStreamFrame(id, iov, iov_offset, offset, fin, frame);
+  creator->CreateStreamFrame(id, write_length, iov_offset, offset, fin, frame);
 }
 
 // static
@@ -77,9 +77,21 @@ SerializedPacket QuicPacketCreatorPeer::SerializeAllFrames(
 }
 
 // static
+OwningSerializedPacketPointer
+QuicPacketCreatorPeer::SerializeConnectivityProbingPacket(
+    QuicPacketCreator* creator) {
+  return creator->SerializeConnectivityProbingPacket();
+}
+
+// static
 EncryptionLevel QuicPacketCreatorPeer::GetEncryptionLevel(
     QuicPacketCreator* creator) {
   return creator->packet_.encryption_level;
+}
+
+// static
+QuicFramer* QuicPacketCreatorPeer::framer(QuicPacketCreator* creator) {
+  return creator->framer_;
 }
 
 }  // namespace test

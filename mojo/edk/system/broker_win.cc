@@ -13,8 +13,8 @@
 #include "mojo/edk/embedder/named_platform_handle.h"
 #include "mojo/edk/embedder/named_platform_handle_utils.h"
 #include "mojo/edk/embedder/platform_handle.h"
-#include "mojo/edk/embedder/platform_handle_vector.h"
 #include "mojo/edk/embedder/platform_shared_buffer.h"
+#include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "mojo/edk/system/broker.h"
 #include "mojo/edk/system/broker_messages.h"
 #include "mojo/edk/system/channel.h"
@@ -35,14 +35,12 @@ bool TakeHandlesFromBrokerMessage(Channel::Message* message,
     return false;
   }
 
-  ScopedPlatformHandleVectorPtr handles = message->TakeHandles();
-  DCHECK(handles);
-  DCHECK_EQ(handles->size(), num_handles);
+  std::vector<ScopedPlatformHandle> handles = message->TakeHandles();
+  DCHECK_EQ(handles.size(), num_handles);
   DCHECK(out_handles);
 
   for (size_t i = 0; i < num_handles; ++i)
-    out_handles[i] = ScopedPlatformHandle((*handles)[i]);
-  handles->clear();
+    out_handles[i] = std::move(handles[i]);
   return true;
 }
 
@@ -67,7 +65,6 @@ Channel::MessagePtr WaitForBrokerMessage(PlatformHandle platform_handle,
 
     base::debug::Alias(&buffer[0]);
     base::debug::Alias(&bytes_read);
-    base::debug::Alias(message.get());
     CHECK(false);
     return nullptr;
   }
@@ -79,7 +76,6 @@ Channel::MessagePtr WaitForBrokerMessage(PlatformHandle platform_handle,
 
     base::debug::Alias(&buffer[0]);
     base::debug::Alias(&bytes_read);
-    base::debug::Alias(message.get());
     CHECK(false);
     return nullptr;
   }
@@ -94,12 +90,12 @@ Broker::Broker(ScopedPlatformHandle handle) : sync_channel_(std::move(handle)) {
   Channel::MessagePtr message =
       WaitForBrokerMessage(sync_channel_.get(), BrokerMessageType::INIT);
 
-  // If we fail to read a message (broken pipe), just return early. The parent
+  // If we fail to read a message (broken pipe), just return early. The inviter
   // handle will be null and callers must handle this gracefully.
   if (!message)
     return;
 
-  if (!TakeHandlesFromBrokerMessage(message.get(), 1, &parent_channel_)) {
+  if (!TakeHandlesFromBrokerMessage(message.get(), 1, &inviter_channel_)) {
     // If the message has no handles, we expect it to carry pipe name instead.
     const BrokerMessageHeader* header =
         static_cast<const BrokerMessageHeader*>(message->payload());
@@ -112,15 +108,15 @@ Broker::Broker(ScopedPlatformHandle handle) : sync_channel_(std::move(handle)) {
     const base::char16* name_data =
         reinterpret_cast<const base::char16*>(data + 1);
     CHECK(data->pipe_name_length);
-    parent_channel_ = CreateClientHandle(NamedPlatformHandle(
+    inviter_channel_ = CreateClientHandle(NamedPlatformHandle(
         base::StringPiece16(name_data, data->pipe_name_length)));
   }
 }
 
 Broker::~Broker() {}
 
-ScopedPlatformHandle Broker::GetParentPlatformHandle() {
-  return std::move(parent_channel_);
+ScopedPlatformHandle Broker::GetInviterPlatformHandle() {
+  return std::move(inviter_channel_);
 }
 
 scoped_refptr<PlatformSharedBuffer> Broker::GetSharedBuffer(size_t num_bytes) {
@@ -135,7 +131,7 @@ scoped_refptr<PlatformSharedBuffer> Broker::GetSharedBuffer(size_t num_bytes) {
                             &bytes_written, nullptr);
   if (!result ||
       static_cast<size_t>(bytes_written) != out_message->data_num_bytes()) {
-    LOG(ERROR) << "Error sending sync broker message";
+    PLOG(ERROR) << "Error sending sync broker message";
     return nullptr;
   }
 

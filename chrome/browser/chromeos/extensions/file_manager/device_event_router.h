@@ -54,9 +54,11 @@ class DeviceEventRouter : public VolumeManagerObserver,
                          const Volume& volume) override;
   void OnFormatStarted(const std::string& device_path, bool success) override;
   void OnFormatCompleted(const std::string& device_path, bool success) override;
+  void OnRenameStarted(const std::string& device_path, bool success) override;
+  void OnRenameCompleted(const std::string& device_path, bool success) override;
 
   // PowerManagerClient::Observer overrides.
-  void SuspendImminent() override;
+  void SuspendImminent(power_manager::SuspendImminent::Reason reason) override;
   void SuspendDone(const base::TimeDelta& sleep_duration) override;
 
   bool is_resuming() const { return is_resuming_; }

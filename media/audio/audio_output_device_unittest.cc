@@ -22,7 +22,7 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "media/audio/audio_output_device.h"
-#include "media/audio/sample_rates.h"
+#include "media/base/sample_rates.h"
 #include "media/base/test_helpers.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gmock_mutant.h"
@@ -48,11 +48,13 @@ const char kNonDefaultDeviceId[] = "valid-nondefault-device-id";
 const char kUnauthorizedDeviceId[] = "unauthorized-device-id";
 const int kAuthTimeoutForTestingMs = 500;
 const int kOutputDelayMs = 20;
+const uint32_t kBitstreamFrames = 1024;
+const size_t kBitstreamDataSize = 512;
 
 class MockRenderCallback : public AudioRendererSink::RenderCallback {
  public:
-  MockRenderCallback() {}
-  virtual ~MockRenderCallback() {}
+  MockRenderCallback() = default;
+  virtual ~MockRenderCallback() = default;
 
   MOCK_METHOD4(Render,
                int(base::TimeDelta delay,
@@ -62,10 +64,20 @@ class MockRenderCallback : public AudioRendererSink::RenderCallback {
   MOCK_METHOD0(OnRenderError, void());
 };
 
+void RenderAudioBus(base::TimeDelta delay,
+                    base::TimeTicks timestamp,
+                    int prior_frames_skipped,
+                    AudioBus* dest) {
+  if (dest->is_bitstream_format()) {
+    dest->SetBitstreamFrames(kBitstreamFrames);
+    dest->SetBitstreamDataSize(kBitstreamDataSize);
+  }
+}
+
 class MockAudioOutputIPC : public AudioOutputIPC {
  public:
-  MockAudioOutputIPC() {}
-  virtual ~MockAudioOutputIPC() {}
+  MockAudioOutputIPC() = default;
+  virtual ~MockAudioOutputIPC() = default;
 
   MOCK_METHOD4(RequestDeviceAuthorization,
                void(AudioOutputIPCDelegate* delegate,
@@ -102,22 +114,23 @@ ACTION_P(QuitLoop, task_runner) {
 
 }  // namespace.
 
-class AudioOutputDeviceTest
-    : public testing::Test,
-      public testing::WithParamInterface<bool> {
+class AudioOutputDeviceTest : public testing::Test {
  public:
   AudioOutputDeviceTest();
   ~AudioOutputDeviceTest();
 
+  void SetupBitstreamParameters();
   void ReceiveAuthorization(OutputDeviceStatus device_status);
   void StartAudioDevice();
   void CreateStream();
   void ExpectRenderCallback();
   void WaitUntilRenderCallback();
+  void WaitForAudioThreadCallbackProcessCompletion();
   void StopAudioDevice();
   void CreateDevice(const std::string& device_id);
   void SetDevice(const std::string& device_id);
   void CheckDeviceStatus(OutputDeviceStatus device_status);
+  void VerifyBitstreamFields();
 
  protected:
   // Used to clean up TLS pointers that the test(s) will initialize.
@@ -139,12 +152,6 @@ class AudioOutputDeviceTest
 
   DISALLOW_COPY_AND_ASSIGN(AudioOutputDeviceTest);
 };
-
-int AudioOutputDeviceTest::CalculateMemorySize() {
-  // Calculate output memory size.
-  return sizeof(AudioOutputBufferParameters) +
-         AudioBus::CalculateMemorySize(default_audio_parameters_);
-}
 
 AudioOutputDeviceTest::AudioOutputDeviceTest()
     : device_status_(OUTPUT_DEVICE_STATUS_ERROR_INTERNAL) {
@@ -213,7 +220,8 @@ void AudioOutputDeviceTest::StartAudioDevice() {
 }
 
 void AudioOutputDeviceTest::CreateStream() {
-  const int kMemorySize = CalculateMemorySize();
+  const uint32_t kMemorySize =
+      ComputeAudioOutputBufferSize(default_audio_parameters_);
 
   ASSERT_TRUE(shared_memory_.CreateAndMapAnonymous(kMemorySize));
   memset(shared_memory_.memory(), 0xff, kMemorySize);
@@ -235,7 +243,7 @@ void AudioOutputDeviceTest::CreateStream() {
   // https://crbug.com/640840.
   audio_device_->OnStreamCreated(
       duplicated_memory_handle,
-      SyncSocket::UnwrapHandle(audio_device_socket_descriptor), kMemorySize);
+      SyncSocket::UnwrapHandle(audio_device_socket_descriptor));
   base::RunLoop().RunUntilIdle();
 }
 
@@ -258,7 +266,7 @@ void AudioOutputDeviceTest::ExpectRenderCallback() {
   EXPECT_CALL(
       callback_,
       Render(base::TimeDelta::FromMilliseconds(kOutputDelayMs), _, _, _))
-      .WillOnce(DoAll(QuitLoop(io_loop_.task_runner()),
+      .WillOnce(DoAll(Invoke(RenderAudioBus), QuitLoop(io_loop_.task_runner()),
                       Return(kNumberOfFramesToProcess)));
 }
 
@@ -270,6 +278,14 @@ void AudioOutputDeviceTest::WaitUntilRenderCallback() {
   base::RunLoop().Run();
 }
 
+void AudioOutputDeviceTest::WaitForAudioThreadCallbackProcessCompletion() {
+  uint32_t buffer_index;
+  size_t bytes_read = browser_socket_.ReceiveWithTimeout(
+      &buffer_index, sizeof(buffer_index),
+      base::TimeDelta::FromMilliseconds(900));
+  EXPECT_EQ(bytes_read, sizeof(buffer_index));
+}
+
 void AudioOutputDeviceTest::StopAudioDevice() {
   if (device_status_ == OUTPUT_DEVICE_STATUS_OK)
     EXPECT_CALL(*audio_output_ipc_, CloseStream());
@@ -278,7 +294,20 @@ void AudioOutputDeviceTest::StopAudioDevice() {
   base::RunLoop().RunUntilIdle();
 }
 
-TEST_P(AudioOutputDeviceTest, Initialize) {
+void AudioOutputDeviceTest::SetupBitstreamParameters() {
+  default_audio_parameters_.Reset(AudioParameters::AUDIO_BITSTREAM_EAC3,
+                                  CHANNEL_LAYOUT_STEREO, 48000, 16, 1024);
+  SetDevice(kNonDefaultDeviceId);
+}
+
+void AudioOutputDeviceTest::VerifyBitstreamFields() {
+  AudioOutputBuffer* buffer =
+      reinterpret_cast<AudioOutputBuffer*>(shared_memory_.memory());
+  EXPECT_EQ(kBitstreamDataSize, buffer->params.bitstream_data_size);
+  EXPECT_EQ(kBitstreamFrames, buffer->params.bitstream_frames);
+}
+
+TEST_F(AudioOutputDeviceTest, Initialize) {
   // Tests that the object can be constructed, initialized and destructed
   // without having ever been started.
   StopAudioDevice();
@@ -286,13 +315,13 @@ TEST_P(AudioOutputDeviceTest, Initialize) {
 
 // Calls Start() followed by an immediate Stop() and check for the basic message
 // filter messages being sent in that case.
-TEST_P(AudioOutputDeviceTest, StartStop) {
+TEST_F(AudioOutputDeviceTest, StartStop) {
   StartAudioDevice();
   StopAudioDevice();
 }
 
 // AudioOutputDevice supports multiple start/stop sequences.
-TEST_P(AudioOutputDeviceTest, StartStopStartStop) {
+TEST_F(AudioOutputDeviceTest, StartStopStartStop) {
   StartAudioDevice();
   StopAudioDevice();
   StartAudioDevice();
@@ -301,7 +330,7 @@ TEST_P(AudioOutputDeviceTest, StartStopStartStop) {
 
 // Simulate receiving OnStreamCreated() prior to processing ShutDownOnIOThread()
 // on the IO loop.
-TEST_P(AudioOutputDeviceTest, StopBeforeRender) {
+TEST_F(AudioOutputDeviceTest, StopBeforeRender) {
   StartAudioDevice();
 
   // Call Stop() but don't run the IO loop yet.
@@ -314,7 +343,7 @@ TEST_P(AudioOutputDeviceTest, StopBeforeRender) {
 }
 
 // Full test with output only.
-TEST_P(AudioOutputDeviceTest, CreateStream) {
+TEST_F(AudioOutputDeviceTest, CreateStream) {
   StartAudioDevice();
   ExpectRenderCallback();
   CreateStream();
@@ -323,7 +352,7 @@ TEST_P(AudioOutputDeviceTest, CreateStream) {
 }
 
 // Full test with output only with nondefault device.
-TEST_P(AudioOutputDeviceTest, NonDefaultCreateStream) {
+TEST_F(AudioOutputDeviceTest, NonDefaultCreateStream) {
   SetDevice(kNonDefaultDeviceId);
   StartAudioDevice();
   ExpectRenderCallback();
@@ -333,7 +362,7 @@ TEST_P(AudioOutputDeviceTest, NonDefaultCreateStream) {
 }
 
 // Multiple start/stop with nondefault device
-TEST_P(AudioOutputDeviceTest, NonDefaultStartStopStartStop) {
+TEST_F(AudioOutputDeviceTest, NonDefaultStartStopStartStop) {
   SetDevice(kNonDefaultDeviceId);
   StartAudioDevice();
   StopAudioDevice();
@@ -347,13 +376,48 @@ TEST_P(AudioOutputDeviceTest, NonDefaultStartStopStartStop) {
   StopAudioDevice();
 }
 
-TEST_P(AudioOutputDeviceTest, UnauthorizedDevice) {
+TEST_F(AudioOutputDeviceTest, UnauthorizedDevice) {
   SetDevice(kUnauthorizedDeviceId);
   StartAudioDevice();
   StopAudioDevice();
 }
 
-TEST_P(AudioOutputDeviceTest, AuthorizationTimedOut) {
+TEST_F(AudioOutputDeviceTest,
+       StartUnauthorizedDeviceAndStopBeforeErrorFires_NoError) {
+  SetDevice(kUnauthorizedDeviceId);
+  audio_device_->Start();
+  // Don't run the runloop. We stop before |audio_device| gets the
+  // authorization error, so it's not allowed to dereference |callback_|.
+  EXPECT_CALL(callback_, OnRenderError()).Times(0);
+  StopAudioDevice();
+}
+
+TEST_F(AudioOutputDeviceTest, AuthorizationFailsBeforeInitialize_NoError) {
+  // Clear audio device set by fixture.
+  StopAudioDevice();
+  audio_output_ipc_ = new MockAudioOutputIPC();
+  audio_device_ = new AudioOutputDevice(
+      base::WrapUnique(audio_output_ipc_), io_loop_.task_runner(), 0,
+      kDefaultDeviceId, url::Origin(),
+      base::TimeDelta::FromMilliseconds(kAuthTimeoutForTestingMs));
+  EXPECT_CALL(
+      *audio_output_ipc_,
+      RequestDeviceAuthorization(audio_device_.get(), 0, kDefaultDeviceId, _));
+
+  audio_device_->RequestDeviceAuthorization();
+  audio_device_->Initialize(default_audio_parameters_, &callback_);
+  base::RunLoop().RunUntilIdle();
+  audio_device_->Stop();
+
+  // We've stopped, so accessing |callback_| isn't ok.
+  EXPECT_CALL(callback_, OnRenderError()).Times(0);
+  audio_device_->OnDeviceAuthorized(OUTPUT_DEVICE_STATUS_ERROR_NOT_AUTHORIZED,
+                                    default_audio_parameters_,
+                                    kDefaultDeviceId);
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(AudioOutputDeviceTest, AuthorizationTimedOut) {
   base::Thread thread("DeviceInfo");
   thread.Start();
 
@@ -384,6 +448,15 @@ TEST_P(AudioOutputDeviceTest, AuthorizationTimedOut) {
   base::RunLoop().RunUntilIdle();
 }
 
-INSTANTIATE_TEST_CASE_P(Render, AudioOutputDeviceTest, Values(false));
+TEST_F(AudioOutputDeviceTest, BitstreamFormatTest) {
+  SetupBitstreamParameters();
+  StartAudioDevice();
+  ExpectRenderCallback();
+  CreateStream();
+  WaitUntilRenderCallback();
+  WaitForAudioThreadCallbackProcessCompletion();
+  VerifyBitstreamFields();
+  StopAudioDevice();
+}
 
 }  // namespace media.

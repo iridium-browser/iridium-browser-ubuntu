@@ -9,9 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/atomicops.h"
 #include "base/base_export.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/task_scheduler/environment_config.h"
@@ -60,21 +58,19 @@ class BASE_EXPORT SchedulerSingleThreadTaskRunnerManager final {
   void Start();
 
   // Creates a SingleThreadTaskRunner which runs tasks with |traits| on a thread
-  // named "TaskSchedulerSingleThread[Shared]" + |name| +
+  // named "TaskSchedulerSingleThread[Shared]" +
   // kEnvironmentParams[GetEnvironmentIndexForTraits(traits)].name_suffix +
   // index.
   scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunnerWithTraits(
-      const std::string& name,
       const TaskTraits& traits,
       SingleThreadTaskRunnerThreadMode thread_mode);
 
 #if defined(OS_WIN)
   // Creates a SingleThreadTaskRunner which runs tasks with |traits| on a COM
-  // STA thread named "TaskSchedulerSingleThreadCOMSTA[Shared]" + |name| +
+  // STA thread named "TaskSchedulerSingleThreadCOMSTA[Shared]" +
   // kEnvironmentParams[GetEnvironmentIndexForTraits(traits)].name_suffix +
   // index.
   scoped_refptr<SingleThreadTaskRunner> CreateCOMSTATaskRunnerWithTraits(
-      const std::string& name,
       const TaskTraits& traits,
       SingleThreadTaskRunnerThreadMode thread_mode);
 #endif  // defined(OS_WIN)
@@ -86,7 +82,6 @@ class BASE_EXPORT SchedulerSingleThreadTaskRunnerManager final {
 
   template <typename DelegateType>
   scoped_refptr<SchedulerSingleThreadTaskRunner> CreateTaskRunnerWithTraitsImpl(
-      const std::string& name,
       const TaskTraits& traits,
       SingleThreadTaskRunnerThreadMode thread_mode);
 
@@ -109,10 +104,6 @@ class BASE_EXPORT SchedulerSingleThreadTaskRunnerManager final {
 
   TaskTracker* const task_tracker_;
   DelayedTaskManager* const delayed_task_manager_;
-
-#if DCHECK_IS_ON()
-  subtle::Atomic32 workers_unregistered_during_join_ = 0;
-#endif
 
   // Synchronizes access to all members below.
   SchedulerLock lock_;

@@ -6,21 +6,15 @@
 
 #include <utility>
 
-#include "ash/accelerators/accelerator_controller.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
-#include "ash/shelf/app_list_shelf_item_delegate.h"
 #include "ash/shell.h"
-#include "ash/shell_delegate.h"
 #include "ash/wm/root_window_finder.h"
-#include "ash/wm/system_modal_container_layout_manager.h"
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
-#include "ui/display/display.h"
 
 namespace ash {
 
@@ -41,9 +35,10 @@ void ShellPort::Shutdown() {}
 
 void ShellPort::ShowContextMenu(const gfx::Point& location_in_screen,
                                 ui::MenuSourceType source_type) {
-  // Bail if there is no active user session or if the screen is locked.
+  // Bail with no active user session, in the lock screen, or in app/kiosk mode.
   if (Shell::Get()->session_controller()->NumberOfLoggedInUsers() < 1 ||
-      Shell::Get()->session_controller()->IsScreenLocked()) {
+      Shell::Get()->session_controller()->IsScreenLocked() ||
+      Shell::Get()->session_controller()->IsRunningInAppMode()) {
     return;
   }
 
@@ -68,56 +63,6 @@ void ShellPort::RemoveLockStateObserver(LockStateObserver* observer) {
 ShellPort::ShellPort() {
   DCHECK(!instance_);
   instance_ = this;
-}
-
-bool ShellPort::IsForceMaximizeOnFirstRun() {
-  return Shell::Get()->shell_delegate()->IsForceMaximizeOnFirstRun();
-}
-
-bool ShellPort::IsSystemModalWindowOpen() {
-  if (simulate_modal_window_open_for_testing_)
-    return true;
-
-  // Traverse all system modal containers, and find its direct child window
-  // with "SystemModal" setting, and visible.
-  for (aura::Window* root : Shell::GetAllRootWindows()) {
-    aura::Window* system_modal =
-        root->GetChildById(kShellWindowId_SystemModalContainer);
-    if (!system_modal)
-      continue;
-    for (const aura::Window* child : system_modal->children()) {
-      if (child->GetProperty(aura::client::kModalKey) ==
-              ui::MODAL_TYPE_SYSTEM &&
-          child->layer()->GetTargetVisibility()) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-void ShellPort::CreateModalBackground(aura::Window* window) {
-  for (aura::Window* root_window : Shell::GetAllRootWindows()) {
-    RootWindowController::ForWindow(root_window)
-        ->GetSystemModalLayoutManager(window)
-        ->CreateModalBackground();
-  }
-}
-
-void ShellPort::OnModalWindowRemoved(aura::Window* removed) {
-  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  for (aura::Window* root_window : root_windows) {
-    if (RootWindowController::ForWindow(root_window)
-            ->GetSystemModalLayoutManager(removed)
-            ->ActivateNextModalWindow()) {
-      return;
-    }
-  }
-  for (aura::Window* root_window : root_windows) {
-    RootWindowController::ForWindow(root_window)
-        ->GetSystemModalLayoutManager(removed)
-        ->DestroyModalBackground();
-  }
 }
 
 }  // namespace ash

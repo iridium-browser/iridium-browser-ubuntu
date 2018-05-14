@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -11,6 +12,7 @@ import cPickle
 import json
 import mock
 
+from chromite.lib.const import waterfall
 from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cros_test_lib
@@ -18,11 +20,10 @@ from chromite.lib import cros_test_lib
 # pylint: disable=protected-access
 
 
-
 def MockBuildConfig():
   """Create a BuildConfig object for convenient testing pleasure."""
   site_config = MockSiteConfig()
-  return site_config['x86-generic-paladin']
+  return site_config['amd64-generic-paladin']
 
 
 def MockSiteConfig():
@@ -34,9 +35,10 @@ def MockSiteConfig():
 
   # Add a single, simple build config.
   result.Add(
-      'x86-generic-paladin',
+      'amd64-generic-paladin',
       active_waterfall='chromiumos',
-      boards=['x86-generic'],
+      boards=['amd64-generic'],
+      display_label='MockLabel',
       build_type='paladin',
       chrome_sdk=True,
       chrome_sdk_build_chrome=False,
@@ -154,7 +156,8 @@ class BuildConfigClassTest(cros_test_lib.TestCase):
 
   def testApplyCallable(self):
     # Callable that adds a configurable amount.
-    append = lambda x: lambda base: base + ' ' + x
+    def append(x):
+      return lambda base: base + ' ' + x
 
     site_config = config_lib.SiteConfig()
 
@@ -287,6 +290,7 @@ class BuildConfigClassTest(cros_test_lib.TestCase):
         self.assertRaises(AssertionError, self.AssertDeepCopy, x,
                           copy_x, copy.copy(x))
 
+
 class SiteParametersClassTest(cros_test_lib.TestCase):
   """SiteParameters tests."""
 
@@ -295,7 +299,7 @@ class SiteParametersClassTest(cros_test_lib.TestCase):
     site_params = config_lib.SiteParameters()
 
     # Ensure our test key is not in site_params.
-    self.assertTrue(site_params.get('foo') is None)
+    self.assertNotIn('foo', site_params)
 
     # Test that we raise when accessing a non-existent value.
     # pylint: disable=pointless-statement
@@ -393,6 +397,11 @@ class SiteConfigTest(cros_test_lib.TestCase):
         hw_tests=[config_lib.HWTestConfig('hw_suite')],
         hw_tests_override=[config_lib.HWTestConfig('hw_override')])
 
+    site_config.Add(
+        'tast_vm_tests',
+        tast_vm_tests=[config_lib.TastVMTestConfig('tast_vm_suite',
+                                                   ['(bvt)'])])
+
     site_config.AddGroup(
         'parent',
         default,
@@ -470,6 +479,12 @@ class SiteConfigTest(cros_test_lib.TestCase):
             'hw_tests': [config_lib.HWTestConfig('hw_suite')],
             'hw_tests_override': [config_lib.HWTestConfig('hw_override')],
         },
+        'tast_vm_tests': {
+            '_template': None,
+            'name': 'tast_vm_tests',
+            'tast_vm_tests': [
+                config_lib.TastVMTestConfig('tast_vm_suite', ['(bvt)'])],
+        },
         'parent': {
             '_template': None,
             'name': 'parent',
@@ -535,7 +550,9 @@ class SiteConfigTest(cros_test_lib.TestCase):
 
     # Try to fetch a non-existent template.
     with self.assertRaises(AttributeError):
-      _ = self.site_config.templates.no_such_template
+      # pylint: disable=pointless-statement
+      self.site_config.templates.no_such_template
+      # pylint: enable=pointless-statement
 
   def testAddForBoards(self):
     per_board = {
@@ -730,7 +747,7 @@ class SiteConfigFindTests(cros_test_lib.TestCase):
     site_config = MockSiteConfig()
     self.assertEqual(
         site_config.GetBoards(),
-        set(['x86-generic']))
+        set(['amd64-generic']))
 
   def testGetBoardsComplexConfig(self):
     site_config = MockSiteConfig()
@@ -740,7 +757,7 @@ class SiteConfigFindTests(cros_test_lib.TestCase):
 
     self.assertEqual(
         site_config.GetBoards(),
-        set(['x86-generic', 'foo_board', 'bar_board', 'car_board']))
+        set(['amd64-generic', 'foo_board', 'bar_board', 'car_board']))
 
   def testGetSlaveConfigMapForMasterAll(self):
     """Test GetSlaveConfigMapForMaster, GetSlavesForMaster all slaves."""
@@ -820,7 +837,7 @@ class OverrideForTrybotTest(cros_test_lib.TestCase):
     return mock_options
 
   def testVmTestOverride(self):
-    """Verify that vm_tests override for trybots pay heed to original config."""
+    """Verify that vm_tests override for trybots reference original config."""
     mock_options = self._createMockOptions(hwtest=False, remote_trybot=False)
 
     result = config_lib.OverrideConfigForTrybot(
@@ -904,6 +921,7 @@ class GetConfigTests(cros_test_lib.TestCase):
     self.assertIsInstance(config_c, config_lib.SiteConfig)
     self.assertIs(config_c, config_d)
 
+
 class ConfigLibHelperTests(cros_test_lib.TestCase):
   """Tests related to helper methods in config_lib."""
 
@@ -911,38 +929,38 @@ class ConfigLibHelperTests(cros_test_lib.TestCase):
     """Test UseBuildbucketScheduler."""
     cq_master_config = config_lib.BuildConfig(
         name=constants.CQ_MASTER,
-        active_waterfall=constants.WATERFALL_INTERNAL)
+        active_waterfall=waterfall.WATERFALL_INTERNAL)
     self.assertTrue(config_lib.UseBuildbucketScheduler(
         cq_master_config))
 
     pre_cq_config = config_lib.BuildConfig(
         name=constants.PRE_CQ_LAUNCHER_NAME,
-        active_waterfall=constants.WATERFALL_INTERNAL)
+        active_waterfall=waterfall.WATERFALL_INTERNAL)
     self.assertTrue(config_lib.UseBuildbucketScheduler(
         pre_cq_config))
 
     pfq_master_config = config_lib.BuildConfig(
         name=constants.PFQ_MASTER,
-        active_waterfall=constants.WATERFALL_INTERNAL)
+        active_waterfall=waterfall.WATERFALL_INTERNAL)
     self.assertTrue(config_lib.UseBuildbucketScheduler(
         pfq_master_config))
 
     toolchain_master = config_lib.BuildConfig(
         name=constants.TOOLCHAIN_MASTTER,
-        active_waterfall=constants.WATERFALL_INTERNAL)
+        active_waterfall=waterfall.WATERFALL_INTERNAL)
     self.assertTrue(config_lib.UseBuildbucketScheduler(
         toolchain_master))
 
     pre_cq_config = config_lib.BuildConfig(
         name=constants.BINHOST_PRE_CQ,
-        active_waterfall=constants.WATERFALL_TRYBOT)
+        active_waterfall=waterfall.WATERFALL_TRYBOT)
     self.assertFalse(config_lib.UseBuildbucketScheduler(
         pre_cq_config))
 
     release_branch_config = config_lib.BuildConfig(
         name=constants.CANARY_MASTER,
-        active_waterfall=constants.WATERFALL_RELEASE)
-    self.assertFalse(config_lib.UseBuildbucketScheduler(
+        active_waterfall=waterfall.WATERFALL_RELEASE)
+    self.assertTrue(config_lib.UseBuildbucketScheduler(
         release_branch_config))
 
   def testScheduledByBuildbucket(self):
@@ -966,35 +984,9 @@ class ConfigLibHelperTests(cros_test_lib.TestCase):
     self.assertFalse(config_lib.ScheduledByBuildbucket(
         pfq_master_config))
 
+
 class GEBuildConfigTests(cros_test_lib.TestCase):
   """Test GE build config related methods."""
-
-  _fake_ge_build_config_json = '''
-{
-  "metadata_version": "1.0",
-  "reference_board_unified_builds": [
-    {
-      "name": "reef-uni",
-      "reference_board_name": "reef-uni",
-      "builder": "RELEASE",
-      "experimental": true,
-      "arch": "X86_INTERNAL",
-      "models" : [
-        {
-          "board_name": "pyro"
-        },
-        {
-          "board_name": "sand"
-        },
-        {
-          "board_name": "snappy"
-        }
-      ]
-    }
-  ]
-}
-  '''
-  _fake_ge_build_config = json.loads(_fake_ge_build_config_json)
 
   def setUp(self):
     self._fake_ge_build_config_json = '''
@@ -1002,8 +994,8 @@ class GEBuildConfigTests(cros_test_lib.TestCase):
   "metadata_version": "1.0",
   "reference_board_unified_builds": [
     {
-      "name": "reef-uni",
-      "reference_board_name": "reef-uni",
+      "name": "reef",
+      "reference_board_name": "reef",
       "builder": "RELEASE",
       "experimental": true,
       "arch": "X86_INTERNAL",
@@ -1045,7 +1037,7 @@ class GEBuildConfigTests(cros_test_lib.TestCase):
     """Test GetArchBoardDict."""
     arch_board_dict = config_lib.GetArchBoardDict(self._fake_ge_build_config)
     self.assertIsNotNone(arch_board_dict)
-    self.assertIs(2, len(arch_board_dict[config_lib.CONFIG_X86_INTERNAL]))
+    self.assertIs(1, len(arch_board_dict[config_lib.CONFIG_X86_INTERNAL]))
 
   def testGetUnifiedBuildConfigAllBuilds(self):
     uni_builds = config_lib.GetUnifiedBuildConfigAllBuilds(

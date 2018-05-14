@@ -13,9 +13,9 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "components/cloud_devices/common/cloud_devices_urls.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/browser/signin_metrics.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
@@ -71,7 +71,7 @@ void CreateCloudPrintSigninTab(Browser* browser,
                                bool add_account,
                                const base::Closure& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (switches::IsAccountConsistencyMirrorEnabled() &&
+  if (signin::IsAccountConsistencyMirrorEnabled() &&
       !browser->profile()->IsOffTheRecord()) {
     browser->window()->ShowAvatarBubbleFromAvatarButton(
         add_account ? BrowserWindow::AVATAR_BUBBLE_MODE_ADD_ACCOUNT

@@ -9,10 +9,31 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
+#include "base/task_scheduler/post_task.h"
+#include "components/offline_pages/core/offline_page_item.h"
+#include "components/offline_pages/core/offline_page_types.h"
 #include "url/gurl.h"
 
+namespace base {
+class SequencedTaskRunner;
+}  // namespace base
+
 namespace offline_pages {
+
+class SystemDownloadManager;
+
+// The results of attempting to move the offline page to a public directory, and
+// registering it with the system download manager.
+struct PublishArchiveResult {
+  SavePageResult move_result;
+  base::FilePath new_file_path;
+  int64_t download_id;
+};
+
+using PublishArchiveDoneCallback =
+    base::OnceCallback<void(const OfflinePageItem&, PublishArchiveResult*)>;
 
 // Interface of a class responsible for creation of the archive for offline use.
 //
@@ -36,7 +57,7 @@ namespace offline_pages {
 // does not happen.
 //
 // If the page is not completely loaded, it is up to the implementation of the
-// archiver whether to respond with ERROR_CONTENT_UNAVAILBLE, wait longer to
+// archiver whether to respond with ERROR_CONTENT_UNAVAILABLE, wait longer to
 // actually snapshot a complete page, or snapshot whatever is available at that
 // point in time (what the user sees).
 class OfflinePageArchiver {
@@ -52,6 +73,9 @@ class OfflinePageArchiver {
                                     // there was a security error.
     ERROR_ERROR_PAGE,               // We detected an error page.
     ERROR_INTERSTITIAL_PAGE,        // We detected an interstitial page.
+    ERROR_SKIPPED,                  // Page shouldn't be archived like NTP or
+                                    // file urls.
+    ERROR_DIGEST_CALCULATION_FAILED,  // Failed to compute digest.
   };
 
   // Describes the parameters to control how to create an archive.
@@ -71,7 +95,8 @@ class OfflinePageArchiver {
                               const GURL& /* url */,
                               const base::FilePath& /* file_path */,
                               const base::string16& /* title */,
-                              int64_t /* file_size */)>
+                              int64_t /* file_size */,
+                              const std::string& /* digest */)>
       CreateArchiveCallback;
 
   virtual ~OfflinePageArchiver() {}
@@ -82,6 +107,15 @@ class OfflinePageArchiver {
   virtual void CreateArchive(const base::FilePath& archives_dir,
                              const CreateArchiveParams& create_archive_params,
                              const CreateArchiveCallback& callback) = 0;
+
+  // Publishes the page on a background thread, then returns to the
+  // OfflinePageModelTaskified's done callback.
+  virtual void PublishArchive(
+      const OfflinePageItem& offline_page,
+      const scoped_refptr<base::SequencedTaskRunner>& background_task_runner,
+      const base::FilePath& publish_directory,
+      SystemDownloadManager* download_manager,
+      PublishArchiveDoneCallback publish_done_callback);
 };
 
 }  // namespace offline_pages

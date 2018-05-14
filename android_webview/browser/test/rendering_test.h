@@ -13,15 +13,11 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "cc/resources/resource.h"
+#include "components/viz/common/resources/resource_id.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
 class MessageLoop;
-}
-
-namespace cc {
-class CompositorFrame;
 }
 
 namespace content {
@@ -31,6 +27,10 @@ class TestSynchronousCompositor;
 
 namespace ui {
 class TouchHandleDrawable;
+}
+
+namespace viz {
+class CompositorFrame;
 }
 
 namespace android_webview {
@@ -86,9 +86,9 @@ class RenderingTest : public testing::Test,
   void InitializeCompositor();
   void EndTest();
   content::SynchronousCompositor* ActiveCompositor() const;
-  std::unique_ptr<cc::CompositorFrame> ConstructEmptyFrame();
-  std::unique_ptr<cc::CompositorFrame> ConstructFrame(
-      cc::ResourceId resource_id);
+  std::unique_ptr<viz::CompositorFrame> ConstructEmptyFrame();
+  std::unique_ptr<viz::CompositorFrame> ConstructFrame(
+      viz::ResourceId resource_id);
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
   std::unique_ptr<FakeWindow> window_;
   std::unique_ptr<FakeFunctor> functor_;

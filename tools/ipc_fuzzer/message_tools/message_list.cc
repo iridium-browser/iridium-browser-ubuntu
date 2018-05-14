@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/stl_util.h"
 #include "build/build_config.h"
 
 // Include once to get the type definitions
@@ -51,10 +52,19 @@ static bool check_msgtable() {
   exemptions.push_back(LayoutTestMsgStart);
   exemptions.push_back(MetroViewerMsgStart);
   exemptions.push_back(CCMsgStart);  // Nothing but param traits.
+  exemptions.push_back(CastCryptoMsgStart);   // Reserved for chromecast.
+  exemptions.push_back(CastChannelMsgStart);  // Reserved for chromecast.
+  exemptions.push_back(CastMediaMsgStart);    // Reserved for chromecast.
+  exemptions.push_back(IPCTestMsgStart);
+  exemptions.push_back(WorkerMsgStart);  // Now only used by tests.
 
-#if defined(DISABLE_NACL)
+#if !BUILDFLAG(ENABLE_NACL)
   exemptions.push_back(NaClMsgStart);
-#endif  // defined(DISABLE_NACL)
+#endif  // !BUILDFLAG(ENABLE_NACL)
+
+#if !BUILDFLAG(ENABLE_WEBRTC)
+  exemptions.push_back(WebRtcLoggingMsgStart);
+#endif
 
 #if !defined(OS_ANDROID)
   exemptions.push_back(JavaBridgeMsgStart);
@@ -62,15 +72,18 @@ static bool check_msgtable() {
   exemptions.push_back(EncryptedMediaMsgStart);
   exemptions.push_back(GinJavaBridgeMsgStart);
   exemptions.push_back(AndroidWebViewMsgStart);
+  exemptions.push_back(SyncCompositorMsgStart);
+  exemptions.push_back(ExtensionWorkerMsgStart);
+  exemptions.push_back(SurfaceViewManagerMsgStart);
 #endif  // !defined(OS_ANDROID)
-
-#if !defined(OS_POSIX)
-  exemptions.push_back(CastMediaMsgStart); // FIXME: Add support for types.
-#endif  // !defined(OS_POSIX)
 
 #if !defined(USE_OZONE)
   exemptions.push_back(OzoneGpuMsgStart);
 #endif  // !defined(USE_OZONE)
+
+#if !defined(OS_WIN)
+  exemptions.push_back(DWriteFontProxyMsgStart);
+#endif
 
   for (size_t i = 0; i < MSGTABLE_SIZE; ++i) {
     int class_id = IPC_MESSAGE_ID_CLASS(msgtable[i].id);
@@ -87,9 +100,7 @@ static bool check_msgtable() {
       result = false;
     }
     while (class_id > previous_class_id + 1) {
-      std::vector<int>::iterator iter;
-      iter = find(exemptions.begin(), exemptions.end(), previous_class_id + 1);
-      if (iter == exemptions.end()) {
+      if (!base::ContainsValue(exemptions, previous_class_id + 1)) {
         std::cout << "Missing message file for enum "
                   << class_id - (previous_class_id + 1)
                   <<  " before enum used by " << file_name << "\n";
@@ -104,9 +115,7 @@ static bool check_msgtable() {
   }
 
   while (LastIPCMsgStart > highest_class_id + 1) {
-    std::vector<int>::iterator iter;
-    iter = find(exemptions.begin(), exemptions.end(), highest_class_id+1);
-    if (iter == exemptions.end()) {
+    if (!base::ContainsValue(exemptions, highest_class_id + 1)) {
       std::cout << "Missing message file for enum "
                 << LastIPCMsgStart - (highest_class_id + 1)
                 << " before enum LastIPCMsgStart\n";
@@ -149,7 +158,7 @@ int main(int argc, char **argv) {
   bool show_ids  = false;
   bool skip_check = false;
   bool show_comma = false;
-  const char *filter = NULL;
+  const char* filter = NULL;
 
   while (--argc > 0) {
     ++argv;

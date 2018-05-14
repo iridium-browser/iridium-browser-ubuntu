@@ -4,15 +4,13 @@
 
 #include "ash/shell_port_classic.h"
 
+#include <memory>
 #include <utility>
 
 #include "ash/accelerators/accelerator_controller.h"
-#include "ash/accelerators/accelerator_controller_delegate_classic.h"
 #include "ash/host/ash_window_tree_host.h"
 #include "ash/host/ash_window_tree_host_init_params.h"
 #include "ash/keyboard/keyboard_ui.h"
-#include "ash/laser/laser_pointer_controller.h"
-#include "ash/magnifier/partial_magnification_controller.h"
 #include "ash/pointer_watcher_adapter_classic.h"
 #include "ash/public/cpp/config.h"
 #include "ash/public/cpp/immersive/immersive_fullscreen_controller.h"
@@ -27,23 +25,17 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/workspace_event_handler_classic.h"
 #include "base/memory/ptr_util.h"
+#include "components/viz/host/host_frame_sink_manager.h"
 #include "ui/aura/env.h"
 #include "ui/display/manager/chromeos/default_touch_transform_setter.h"
 #include "ui/display/types/native_display_delegate.h"
-
-#if defined(USE_X11)
-#include "ui/display/manager/chromeos/x11/native_display_delegate_x11.h"
-#endif
-
-#if defined(USE_OZONE)
 #include "ui/ozone/public/ozone_platform.h"
-#endif
 
 namespace ash {
 
-ShellPortClassic::ShellPortClassic() {}
+ShellPortClassic::ShellPortClassic() = default;
 
-ShellPortClassic::~ShellPortClassic() {}
+ShellPortClassic::~ShellPortClassic() = default;
 
 // static
 ShellPortClassic* ShellPortClassic::Get() {
@@ -63,7 +55,7 @@ Config ShellPortClassic::GetAshConfig() const {
 
 std::unique_ptr<display::TouchTransformSetter>
 ShellPortClassic::CreateTouchTransformDelegate() {
-  return base::MakeUnique<display::DefaultTouchTransformSetter>();
+  return std::make_unique<display::DefaultTouchTransformSetter>();
 }
 
 void ShellPortClassic::LockCursor() {
@@ -98,6 +90,12 @@ bool ShellPortClassic::IsMouseEventsEnabled() {
   return Shell::Get()->cursor_manager()->IsMouseEventsEnabled();
 }
 
+void ShellPortClassic::SetCursorTouchVisible(bool enabled) {
+  // This is only implemented on the mash side; in classic ash we just use the
+  // ::wm::CursorManager.
+  NOTREACHED();
+}
+
 std::unique_ptr<WindowResizer> ShellPortClassic::CreateDragWindowResizer(
     std::unique_ptr<WindowResizer> next_window_resizer,
     wm::WindowState* window_state) {
@@ -107,22 +105,17 @@ std::unique_ptr<WindowResizer> ShellPortClassic::CreateDragWindowResizer(
 
 std::unique_ptr<WindowCycleEventFilter>
 ShellPortClassic::CreateWindowCycleEventFilter() {
-  return base::MakeUnique<WindowCycleEventFilterClassic>();
+  return std::make_unique<WindowCycleEventFilterClassic>();
 }
 
 std::unique_ptr<wm::TabletModeEventHandler>
 ShellPortClassic::CreateTabletModeEventHandler() {
-  return base::WrapUnique(new wm::TabletModeEventHandlerClassic);
+  return std::make_unique<wm::TabletModeEventHandlerClassic>();
 }
 
 std::unique_ptr<WorkspaceEventHandler>
 ShellPortClassic::CreateWorkspaceEventHandler(aura::Window* workspace_window) {
-  return base::MakeUnique<WorkspaceEventHandlerClassic>(workspace_window);
-}
-
-std::unique_ptr<ImmersiveFullscreenController>
-ShellPortClassic::CreateImmersiveFullscreenController() {
-  return base::MakeUnique<ImmersiveFullscreenController>();
+  return std::make_unique<WorkspaceEventHandlerClassic>(workspace_window);
 }
 
 std::unique_ptr<KeyboardUI> ShellPortClassic::CreateKeyboardUI() {
@@ -147,16 +140,8 @@ void ShellPortClassic::ToggleIgnoreExternalKeyboard() {
   Shell::Get()->virtual_keyboard_controller()->ToggleIgnoreExternalKeyboard();
 }
 
-void ShellPortClassic::SetLaserPointerEnabled(bool enabled) {
-  Shell::Get()->laser_pointer_controller()->SetEnabled(enabled);
-}
-
-void ShellPortClassic::SetPartialMagnifierEnabled(bool enabled) {
-  Shell::Get()->partial_magnification_controller()->SetEnabled(enabled);
-}
-
 void ShellPortClassic::CreatePointerWatcherAdapter() {
-  pointer_watcher_adapter_ = base::MakeUnique<PointerWatcherAdapterClassic>();
+  pointer_watcher_adapter_ = std::make_unique<PointerWatcherAdapterClassic>();
 }
 
 std::unique_ptr<AshWindowTreeHost> ShellPortClassic::CreateAshWindowTreeHost(
@@ -168,24 +153,26 @@ std::unique_ptr<AshWindowTreeHost> ShellPortClassic::CreateAshWindowTreeHost(
 void ShellPortClassic::OnCreatedRootWindowContainers(
     RootWindowController* root_window_controller) {}
 
+void ShellPortClassic::UpdateSystemModalAndBlockingContainers() {}
+
 void ShellPortClassic::OnHostsInitialized() {}
 
 std::unique_ptr<display::NativeDisplayDelegate>
 ShellPortClassic::CreateNativeDisplayDelegate() {
-#if defined(USE_OZONE)
   return ui::OzonePlatform::GetInstance()->CreateNativeDisplayDelegate();
-#else
-  return base::MakeUnique<display::NativeDisplayDelegateX11>();
-#endif
 }
 
 std::unique_ptr<AcceleratorController>
 ShellPortClassic::CreateAcceleratorController() {
-  DCHECK(!accelerator_controller_delegate_);
-  accelerator_controller_delegate_ =
-      base::MakeUnique<AcceleratorControllerDelegateClassic>();
-  return base::MakeUnique<AcceleratorController>(
-      accelerator_controller_delegate_.get(), nullptr);
+  return std::make_unique<AcceleratorController>(nullptr);
+}
+
+void ShellPortClassic::AddVideoDetectorObserver(
+    viz::mojom::VideoDetectorObserverPtr observer) {
+  aura::Env::GetInstance()
+      ->context_factory_private()
+      ->GetHostFrameSinkManager()
+      ->AddVideoDetectorObserver(std::move(observer));
 }
 
 }  // namespace ash

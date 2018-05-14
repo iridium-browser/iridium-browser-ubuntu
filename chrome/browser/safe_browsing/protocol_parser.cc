@@ -20,7 +20,7 @@
 #include "base/sys_byteorder.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "components/safe_browsing_db/metadata.pb.h"
+#include "components/safe_browsing/db/metadata.pb.h"
 
 namespace safe_browsing {
 
@@ -326,9 +326,9 @@ bool ParseGetHash(const char* chunk_data,
 // LENGTH     = DIGIT+         # Size of PREFIXES in bytes
 std::string FormatGetHash(const std::vector<SBPrefix>& prefixes) {
   std::string request;
-  request.append(base::Uint64ToString(sizeof(SBPrefix)));
+  request.append(base::NumberToString(sizeof(SBPrefix)));
   request.append(":");
-  request.append(base::Uint64ToString(sizeof(SBPrefix) * prefixes.size()));
+  request.append(base::NumberToString(sizeof(SBPrefix) * prefixes.size()));
   request.append("\n");
 
   // SBPrefix values are read without concern for byte order, so write back the

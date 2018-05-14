@@ -1,17 +1,15 @@
 // Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-/**
- * @unrestricted
- */
+
 Devices.DevicesView = class extends UI.VBox {
   constructor() {
     super(true);
     this.registerRequiredCSS('devices/devicesView.css');
     this.contentElement.classList.add('devices-view');
 
-    var hbox = this.contentElement.createChild('div', 'hbox devices-container');
-    var sidebar = hbox.createChild('div', 'devices-sidebar');
+    const hbox = this.contentElement.createChild('div', 'hbox devices-container');
+    const sidebar = hbox.createChild('div', 'devices-sidebar');
     sidebar.createChild('div', 'devices-view-title').createTextChild(Common.UIString('Devices'));
     this._sidebarList = sidebar.createChild('div', 'devices-sidebar-list');
 
@@ -28,13 +26,17 @@ Devices.DevicesView = class extends UI.VBox {
     this._devices = [];
     /** @type {!Map<string, !Element>} */
     this._listItemById = new Map();
+    /** @type {?Element} */
+    this._selectedListItem = null;
+    /** @type {?UI.Widget} */
+    this._visibleView = null;
 
     this._viewContainer = hbox.createChild('div', 'flex-auto vbox');
 
-    var discoveryFooter = this.contentElement.createChild('div', 'devices-footer');
+    const discoveryFooter = this.contentElement.createChild('div', 'devices-footer');
     this._deviceCountSpan = discoveryFooter.createChild('span');
     discoveryFooter.createChild('span').textContent = Common.UIString(' Read ');
-    discoveryFooter.appendChild(UI.createExternalLink(
+    discoveryFooter.appendChild(UI.XLink.create(
         'https://developers.google.com/chrome-developer-tools/docs/remote-debugging',
         Common.UIString('remote debugging documentation')));
     discoveryFooter.createChild('span').textContent = Common.UIString(' for more information.');
@@ -89,19 +91,19 @@ Devices.DevicesView = class extends UI.VBox {
         /** @type {!Array.<!Adb.Device>} */ (event.data)
             .slice()
             .filter(d => d.adbSerial.toUpperCase() !== 'WEBRTC' && d.adbSerial.toUpperCase() !== 'LOCALHOST');
-    for (var device of this._devices) {
+    for (const device of this._devices) {
       if (!device.adbConnected)
         device.adbModel = Common.UIString('Unknown');
     }
 
-    var ids = new Set();
-    for (var device of this._devices)
+    const ids = new Set();
+    for (const device of this._devices)
       ids.add(device.id);
 
-    var selectedRemoved = false;
-    for (var deviceId of this._viewById.keys()) {
+    let selectedRemoved = false;
+    for (const deviceId of this._viewById.keys()) {
       if (!ids.has(deviceId)) {
-        var listItem = /** @type {!Element} */ (this._listItemById.get(deviceId));
+        const listItem = /** @type {!Element} */ (this._listItemById.get(deviceId));
         this._listItemById.remove(deviceId);
         this._viewById.remove(deviceId);
         listItem.remove();
@@ -110,9 +112,9 @@ Devices.DevicesView = class extends UI.VBox {
       }
     }
 
-    for (var device of this._devices) {
-      var view = this._viewById.get(device.id);
-      var listItem = this._listItemById.get(device.id);
+    for (const device of this._devices) {
+      let view = this._viewById.get(device.id);
+      let listItem = this._listItemById.get(device.id);
 
       if (!view) {
         view = new Devices.DevicesView.DeviceView();
@@ -140,7 +142,7 @@ Devices.DevicesView = class extends UI.VBox {
    * @return {!Element}
    */
   _createSidebarListItem(view) {
-    var listItem = createElementWithClass('div', 'devices-sidebar-item');
+    const listItem = createElementWithClass('div', 'devices-sidebar-item');
     listItem.addEventListener('click', this._selectSidebarListItem.bind(this, listItem, view));
     listItem._title = listItem.createChild('div', 'devices-sidebar-item-title');
     listItem._status = listItem.createChild('div', 'devices-sidebar-item-status');
@@ -151,7 +153,7 @@ Devices.DevicesView = class extends UI.VBox {
    * @param {!Common.Event} event
    */
   _devicesDiscoveryConfigChanged(event) {
-    var config = /** @type {!Adb.Config} */ (event.data);
+    const config = /** @type {!Adb.Config} */ (event.data);
     this._discoveryView.discoveryConfigChanged(config);
   }
 
@@ -159,14 +161,14 @@ Devices.DevicesView = class extends UI.VBox {
    * @param {!Common.Event} event
    */
   _devicesPortForwardingStatusChanged(event) {
-    var status = /** @type {!Adb.PortForwardingStatus} */ (event.data);
-    for (var deviceId in status) {
-      var view = this._viewById.get(deviceId);
+    const status = /** @type {!Adb.PortForwardingStatus} */ (event.data);
+    for (const deviceId in status) {
+      const view = this._viewById.get(deviceId);
       if (view)
         view.portForwardingStatusChanged(status[deviceId]);
     }
-    for (var deviceId of this._viewById.keys()) {
-      var view = this._viewById.get(deviceId);
+    for (const deviceId of this._viewById.keys()) {
+      const view = this._viewById.get(deviceId);
       if (view && !(deviceId in status))
         view.portForwardingStatusChanged({ports: {}, browserId: ''});
     }
@@ -184,9 +186,6 @@ Devices.DevicesView = class extends UI.VBox {
    */
   wasShown() {
     super.wasShown();
-    // Retrigger notification first time.
-    if (Runtime.queryParam('nodeFrontend'))
-      InspectorFrontendHost.setDevicesUpdatesEnabled(false);
     InspectorFrontendHost.setDevicesUpdatesEnabled(true);
   }
 
@@ -194,16 +193,11 @@ Devices.DevicesView = class extends UI.VBox {
    * @override
    */
   willHide() {
-    super.wasShown();
-    if (!Runtime.queryParam('nodeFrontend'))
-      InspectorFrontendHost.setDevicesUpdatesEnabled(false);
+    super.willHide();
+    InspectorFrontendHost.setDevicesUpdatesEnabled(false);
   }
 };
 
-
-/**
- * @unrestricted
- */
 Devices.DevicesView.DiscoveryView = class extends UI.VBox {
   constructor() {
     super();
@@ -213,7 +207,7 @@ Devices.DevicesView.DiscoveryView = class extends UI.VBox {
     this.contentElement.createChild('div', 'hbox device-text-row').createChild('div', 'view-title').textContent =
         Common.UIString('Settings');
 
-    var discoverUsbDevicesCheckbox = UI.CheckboxLabel.create(Common.UIString('Discover USB devices'));
+    const discoverUsbDevicesCheckbox = UI.CheckboxLabel.create(Common.UIString('Discover USB devices'));
     discoverUsbDevicesCheckbox.classList.add('usb-checkbox');
     this.element.appendChild(discoverUsbDevicesCheckbox);
     this._discoverUsbDevicesCheckbox = discoverUsbDevicesCheckbox.checkboxElement;
@@ -222,9 +216,9 @@ Devices.DevicesView.DiscoveryView = class extends UI.VBox {
       InspectorFrontendHost.setDevicesDiscoveryConfig(this._config);
     }, false);
 
-    var help = this.element.createChild('div', 'discovery-help');
+    const help = this.element.createChild('div', 'discovery-help');
     help.createChild('span').textContent = Common.UIString('Need help? Read Chrome ');
-    help.appendChild(UI.createExternalLink(
+    help.appendChild(UI.XLink.create(
         'https://developers.google.com/chrome-developer-tools/docs/remote-debugging',
         Common.UIString('remote debugging documentation.')));
 
@@ -234,18 +228,11 @@ Devices.DevicesView.DiscoveryView = class extends UI.VBox {
     this._portForwardingView = new Devices.DevicesView.PortForwardingView((enabled, config) => {
       this._config.portForwardingEnabled = enabled;
       this._config.portForwardingConfig = {};
-      for (var rule of config)
+      for (const rule of config)
         this._config.portForwardingConfig[rule.port] = rule.address;
       InspectorFrontendHost.setDevicesDiscoveryConfig(this._config);
     });
     this._portForwardingView.show(this.element);
-
-    this._networkDiscoveryView = new Devices.DevicesView.NetworkDiscoveryView(false, (enabled, config) => {
-      this._config.networkDiscoveryEnabled = enabled;
-      this._config.networkDiscoveryConfig = config;
-      InspectorFrontendHost.setDevicesDiscoveryConfig(this._config);
-    });
-    this._networkDiscoveryView.show(this.element);
   }
 
   /**
@@ -255,13 +242,11 @@ Devices.DevicesView.DiscoveryView = class extends UI.VBox {
     this._config = config;
     this._discoverUsbDevicesCheckbox.checked = config.discoverUsbDevices;
     this._portForwardingView.discoveryConfigChanged(config.portForwardingEnabled, config.portForwardingConfig);
-    this._networkDiscoveryView.discoveryConfigChanged(config.networkDiscoveryEnabled, config.networkDiscoveryConfig);
   }
 };
 
 /**
- * @implements {UI.ListWidget.Delegate}
- * @unrestricted
+ * @implements {UI.ListWidget.Delegate<Adb.PortForwardingRule>}
  */
 Devices.DevicesView.PortForwardingView = class extends UI.VBox {
   /**
@@ -272,26 +257,29 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
     this._callback = callback;
     this.element.classList.add('port-forwarding-view');
 
-    var portForwardingHeader = this.element.createChild('div', 'port-forwarding-header');
-    var portForwardingEnabledCheckbox = UI.CheckboxLabel.create(Common.UIString('Port forwarding'));
+    const portForwardingHeader = this.element.createChild('div', 'port-forwarding-header');
+    const portForwardingEnabledCheckbox = UI.CheckboxLabel.create(Common.UIString('Port forwarding'));
     portForwardingEnabledCheckbox.classList.add('port-forwarding-checkbox');
     portForwardingHeader.appendChild(portForwardingEnabledCheckbox);
     this._portForwardingEnabledCheckbox = portForwardingEnabledCheckbox.checkboxElement;
     this._portForwardingEnabledCheckbox.addEventListener('click', this._update.bind(this), false);
 
-    var portForwardingFooter = this.element.createChild('div', 'port-forwarding-footer');
+    const portForwardingFooter = this.element.createChild('div', 'port-forwarding-footer');
     portForwardingFooter.createChild('span').textContent = Common.UIString(
         'Define the listening port on your device that maps to a port accessible from your development machine. ');
-    portForwardingFooter.appendChild(UI.createExternalLink(
+    portForwardingFooter.appendChild(UI.XLink.create(
         'https://developer.chrome.com/devtools/docs/remote-debugging#port-forwarding', Common.UIString('Learn more')));
 
+    /** @type {!UI.ListWidget<!Adb.PortForwardingRule>} */
     this._list = new UI.ListWidget(this);
     this._list.registerRequiredCSS('devices/devicesView.css');
     this._list.element.classList.add('port-forwarding-list');
-    var placeholder = createElementWithClass('div', 'port-forwarding-list-empty');
+    const placeholder = createElementWithClass('div', 'port-forwarding-list-empty');
     placeholder.textContent = Common.UIString('No rules');
     this._list.setEmptyPlaceholder(placeholder);
     this._list.show(this.element);
+    /** @type {?UI.ListWidget.Editor<!Adb.PortForwardingRule>} */
+    this._editor = null;
 
     this.element.appendChild(
         UI.createTextButton(Common.UIString('Add rule'), this._addRuleButtonClicked.bind(this), 'add-rule-button'));
@@ -316,8 +304,8 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
     this._portForwardingEnabledCheckbox.checked = portForwardingEnabled;
     this._portForwardingConfig = [];
     this._list.clear();
-    for (var key of Object.keys(portForwardingConfig)) {
-      var rule = /** @type {!Adb.PortForwardingRule} */ ({port: key, address: portForwardingConfig[key]});
+    for (const key of Object.keys(portForwardingConfig)) {
+      const rule = /** @type {!Adb.PortForwardingRule} */ ({port: key, address: portForwardingConfig[key]});
       this._portForwardingConfig.push(rule);
       this._list.appendItem(rule, true);
     }
@@ -325,14 +313,13 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
 
   /**
    * @override
-   * @param {*} item
+   * @param {!Adb.PortForwardingRule} rule
    * @param {boolean} editable
    * @return {!Element}
    */
-  renderItem(item, editable) {
-    var rule = /** @type {!Adb.PortForwardingRule} */ (item);
-    var element = createElementWithClass('div', 'port-forwarding-list-item');
-    var port = element.createChild('div', 'port-forwarding-value port-forwarding-port');
+  renderItem(rule, editable) {
+    const element = createElementWithClass('div', 'port-forwarding-list-item');
+    const port = element.createChild('div', 'port-forwarding-value port-forwarding-port');
     port.createChild('span', 'port-localhost').textContent = Common.UIString('localhost:');
     port.createTextChild(rule.port);
     element.createChild('div', 'port-forwarding-separator');
@@ -342,10 +329,10 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
 
   /**
    * @override
-   * @param {*} item
+   * @param {!Adb.PortForwardingRule} rule
    * @param {number} index
    */
-  removeItemRequested(item, index) {
+  removeItemRequested(rule, index) {
     this._portForwardingConfig.splice(index, 1);
     this._list.removeItem(index);
     this._update();
@@ -353,12 +340,11 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
 
   /**
    * @override
-   * @param {*} item
+   * @param {!Adb.PortForwardingRule} rule
    * @param {!UI.ListWidget.Editor} editor
    * @param {boolean} isNew
    */
-  commitEdit(item, editor, isNew) {
-    var rule = /** @type {!Adb.PortForwardingRule} */ (item);
+  commitEdit(rule, editor, isNew) {
     rule.port = editor.control('port').value.trim();
     rule.address = editor.control('address').value.trim();
     if (isNew)
@@ -368,28 +354,27 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
 
   /**
    * @override
-   * @param {*} item
+   * @param {!Adb.PortForwardingRule} rule
    * @return {!UI.ListWidget.Editor}
    */
-  beginEdit(item) {
-    var rule = /** @type {!Adb.PortForwardingRule} */ (item);
-    var editor = this._createEditor();
+  beginEdit(rule) {
+    const editor = this._createEditor();
     editor.control('port').value = rule.port;
     editor.control('address').value = rule.address;
     return editor;
   }
 
   /**
-   * @return {!UI.ListWidget.Editor}
+   * @return {!UI.ListWidget.Editor<!Adb.PortForwardingRule>}
    */
   _createEditor() {
     if (this._editor)
       return this._editor;
 
-    var editor = new UI.ListWidget.Editor();
+    const editor = new UI.ListWidget.Editor();
     this._editor = editor;
-    var content = editor.contentElement();
-    var fields = content.createChild('div', 'port-forwarding-edit-row');
+    const content = editor.contentElement();
+    const fields = content.createChild('div', 'port-forwarding-edit-row');
     fields.createChild('div', 'port-forwarding-value port-forwarding-port')
         .appendChild(editor.createInput('port', 'text', 'Device port (3333)', portValidator.bind(this)));
     fields.createChild('div', 'port-forwarding-separator port-forwarding-separator-invisible');
@@ -398,21 +383,21 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
     return editor;
 
     /**
-     * @param {*} item
+     * @param {!Adb.PortForwardingRule} rule
      * @param {number} index
      * @param {!HTMLInputElement|!HTMLSelectElement} input
      * @this {Devices.DevicesView.PortForwardingView}
      * @return {boolean}
      */
-    function portValidator(item, index, input) {
-      var value = input.value.trim();
-      var match = value.match(/^(\d+)$/);
+    function portValidator(rule, index, input) {
+      const value = input.value.trim();
+      const match = value.match(/^(\d+)$/);
       if (!match)
         return false;
-      var port = parseInt(match[1], 10);
+      const port = parseInt(match[1], 10);
       if (port < 1024 || port > 65535)
         return false;
-      for (var i = 0; i < this._portForwardingConfig.length; ++i) {
+      for (let i = 0; i < this._portForwardingConfig.length; ++i) {
         if (i !== index && this._portForwardingConfig[i].port === value)
           return false;
       }
@@ -420,202 +405,28 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
     }
 
     /**
-     * @param {*} item
+     * @param {!Adb.PortForwardingRule} rule
      * @param {number} index
      * @param {!HTMLInputElement|!HTMLSelectElement} input
      * @return {boolean}
      */
-    function addressValidator(item, index, input) {
-      var match = input.value.trim().match(/^([a-zA-Z0-9\.\-_]+):(\d+)$/);
+    function addressValidator(rule, index, input) {
+      const match = input.value.trim().match(/^([a-zA-Z0-9\.\-_]+):(\d+)$/);
       if (!match)
         return false;
-      var port = parseInt(match[2], 10);
+      const port = parseInt(match[2], 10);
       return port <= 65535;
     }
   }
 };
 
-/**
- * @implements {UI.ListWidget.Delegate}
- * @unrestricted
- */
-Devices.DevicesView.NetworkDiscoveryView = class extends UI.VBox {
-  /**
-   * @param {boolean} nodeFrontend
-   * @param {function(boolean, !Adb.NetworkDiscoveryConfig)} callback
-   */
-  constructor(nodeFrontend, callback) {
-    super();
-    this._nodeFrontend = nodeFrontend;
-    this._callback = callback;
-    this.element.classList.add('network-discovery-view');
-
-    var networkDiscoveryHeader = this.element.createChild('div', 'network-discovery-header');
-    var networkDiscoveryEnabledCheckbox = UI.CheckboxLabel.create(Common.UIString('Network targets'));
-    networkDiscoveryEnabledCheckbox.classList.add('network-discovery-checkbox');
-    networkDiscoveryHeader.appendChild(networkDiscoveryEnabledCheckbox);
-    this._networkDiscoveryEnabledCheckbox = networkDiscoveryEnabledCheckbox.checkboxElement;
-    this._networkDiscoveryEnabledCheckbox.disabled = !!Runtime.queryParam('nodeFrontend');
-    this._networkDiscoveryEnabledCheckbox.checked = !!Runtime.queryParam('nodeFrontend');
-    this._networkDiscoveryEnabledCheckbox.addEventListener('click', this._enabledCheckboxClicked.bind(this), false);
-
-    var networkDiscoveryFooter = this.element.createChild('div', 'network-discovery-footer');
-    if (nodeFrontend) {
-      networkDiscoveryFooter.createChild('span').textContent =
-          Common.UIString('Specify network endpoint and DevTools will connect to it automatically. ');
-      var link = networkDiscoveryFooter.createChild('span', 'link');
-      link.textContent = Common.UIString('Learn more');
-      link.addEventListener('click', () => InspectorFrontendHost.openInNewTab('https://nodejs.org/en/docs/inspector/'));
-    } else {
-      networkDiscoveryFooter.createChild('span').textContent = Common.UIString('Define the target connection address');
-    }
-
-    this._list = new UI.ListWidget(this);
-    this._list.registerRequiredCSS('devices/devicesView.css');
-    this._list.element.classList.add('network-discovery-list');
-    var placeholder = createElementWithClass('div', 'network-discovery-list-empty');
-    placeholder.textContent =
-        nodeFrontend ? Common.UIString('No connections specified') : Common.UIString('No addresses defined');
-    this._list.setEmptyPlaceholder(placeholder);
-    this._list.show(this.element);
-
-    var addButton = UI.createTextButton(
-        nodeFrontend ? Common.UIString('Add connection') : Common.UIString('Add address'),
-        this._addNetworkTargetButtonClicked.bind(this), 'add-network-target-button', true /* primary */);
-    this.element.appendChild(addButton);
-
-    /** @type {!Array<{address: string}>} */
-    this._networkDiscoveryConfig = [];
-    this._networkDiscoveryEnabled = false;
-
-    if (nodeFrontend) {
-      this.element.classList.add('node-frontend');
-      this._list.element.classList.add('node-frontend');
-    }
-  }
-
-  _update() {
-    var config = this._networkDiscoveryConfig.map(item => item.address);
-    this._callback.call(null, this._networkDiscoveryEnabled, config);
-  }
-
-  _addNetworkTargetButtonClicked() {
-    this._list.addNewItem(this._networkDiscoveryConfig.length, {address: ''});
-  }
-
-  /**
-   * @param {boolean} networkDiscoveryEnabled
-   * @param {!Adb.NetworkDiscoveryConfig} networkDiscoveryConfig
-   */
-  discoveryConfigChanged(networkDiscoveryEnabled, networkDiscoveryConfig) {
-    this._networkDiscoveryEnabled = networkDiscoveryEnabled;
-    if (!Runtime.queryParam('nodeFrontend'))
-      this._networkDiscoveryEnabledCheckbox.checked = networkDiscoveryEnabled;
-    this._networkDiscoveryConfig = [];
-    this._list.clear();
-    for (var address of networkDiscoveryConfig) {
-      var item = {address: address};
-      this._networkDiscoveryConfig.push(item);
-      this._list.appendItem(item, true);
-    }
-  }
-
-  _enabledCheckboxClicked() {
-    if (!Runtime.queryParam('nodeFrontend')) {
-      this._networkDiscoveryEnabled = this._networkDiscoveryEnabledCheckbox.checked;
-      this._update();
-    }
-  }
-
-  /**
-   * @override
-   * @param {*} item
-   * @param {boolean} editable
-   * @return {!Element}
-   */
-  renderItem(item, editable) {
-    var element = createElementWithClass('div', 'network-discovery-list-item');
-    element.createChild('div', 'network-discovery-value network-discovery-address').textContent =
-        /** @type {string} */ (item.address);
-    return element;
-  }
-
-  /**
-   * @override
-   * @param {*} item
-   * @param {number} index
-   */
-  removeItemRequested(item, index) {
-    this._networkDiscoveryConfig.splice(index, 1);
-    this._list.removeItem(index);
-    this._update();
-  }
-
-  /**
-   * @override
-   * @param {*} item
-   * @param {!UI.ListWidget.Editor} editor
-   * @param {boolean} isNew
-   */
-  commitEdit(item, editor, isNew) {
-    item.address = editor.control('address').value.trim();
-    if (isNew)
-      this._networkDiscoveryConfig.push(/** @type {{address: string}} */ (item));
-    this._update();
-  }
-
-  /**
-   * @override
-   * @param {*} item
-   * @return {!UI.ListWidget.Editor}
-   */
-  beginEdit(item) {
-    var editor = this._createEditor();
-    editor.control('address').value = item.address;
-    return editor;
-  }
-
-  /**
-   * @return {!UI.ListWidget.Editor}
-   */
-  _createEditor() {
-    if (this._editor)
-      return this._editor;
-
-    var editor = new UI.ListWidget.Editor();
-    this._editor = editor;
-    var content = editor.contentElement();
-    var fields = content.createChild('div', 'network-discovery-edit-row');
-    var input = editor.createInput('address', 'text', 'Network address (e.g. localhost:9229)', addressValidator);
-    fields.createChild('div', 'network-discovery-value network-discovery-address').appendChild(input);
-    return editor;
-
-    /**
-     * @param {*} item
-     * @param {number} index
-     * @param {!HTMLInputElement|!HTMLSelectElement} input
-     * @return {boolean}
-     */
-    function addressValidator(item, index, input) {
-      var match = input.value.trim().match(/^([a-zA-Z0-9\.\-_]+):(\d+)$/);
-      if (!match)
-        return false;
-      var port = parseInt(match[2], 10);
-      return port <= 65535;
-    }
-  }
-};
-
-/**
- * @unrestricted
- */
 Devices.DevicesView.DeviceView = class extends UI.VBox {
   constructor() {
     super();
     this.setMinimumSize(100, 100);
     this.contentElement.classList.add('device-view');
 
-    var topRow = this.contentElement.createChild('div', 'hbox device-text-row');
+    const topRow = this.contentElement.createChild('div', 'hbox device-text-row');
     this._deviceTitle = topRow.createChild('div', 'view-title');
     this._deviceSerial = topRow.createChild('div', 'device-serial');
     this._portStatus = this.contentElement.createChild('div', 'device-port-status hidden');
@@ -632,6 +443,9 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
     /** @type {!Map<string, !Devices.DevicesView.BrowserSection>} */
     this._browserById = new Map();
 
+    /** @type {?string} */
+    this._cachedPortStatus = null;
+    /** @type {?Adb.Device} */
     this._device = null;
   }
 
@@ -649,19 +463,19 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
     this._noBrowsers.classList.toggle('hidden', !device.adbConnected || !!device.browsers.length);
     this._browsers.classList.toggle('hidden', !device.adbConnected || !device.browsers.length);
 
-    var browserIds = new Set();
-    for (var browser of device.browsers)
+    const browserIds = new Set();
+    for (const browser of device.browsers)
       browserIds.add(browser.id);
 
-    for (var browserId of this._browserById.keys()) {
+    for (const browserId of this._browserById.keys()) {
       if (!browserIds.has(browserId)) {
         this._browserById.get(browserId).element.remove();
         this._browserById.remove(browserId);
       }
     }
 
-    for (var browser of device.browsers) {
-      var section = this._browserById.get(browser.id);
+    for (const browser of device.browsers) {
+      let section = this._browserById.get(browser.id);
       if (!section) {
         section = this._createBrowserSection();
         this._browserById.set(browser.id, section);
@@ -677,26 +491,26 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
    * @return {!Devices.DevicesView.BrowserSection}
    */
   _createBrowserSection() {
-    var element = createElementWithClass('div', 'vbox flex-none');
-    var topRow = element.createChild('div', '');
-    var title = topRow.createChild('div', 'device-browser-title');
+    const element = createElementWithClass('div', 'vbox flex-none');
+    const topRow = element.createChild('div', '');
+    const title = topRow.createChild('div', 'device-browser-title');
 
-    var newTabRow = element.createChild('div', 'device-browser-new-tab');
+    const newTabRow = element.createChild('div', 'device-browser-new-tab');
     newTabRow.createChild('div', '').textContent = Common.UIString('New tab:');
-    var newTabInput = UI.createInput('', 'text');
+    const newTabInput = UI.createInput('', 'text');
     newTabRow.appendChild(newTabInput);
     newTabInput.placeholder = Common.UIString('Enter URL');
     newTabInput.addEventListener('keydown', newTabKeyDown, false);
-    var newTabButton = UI.createTextButton(Common.UIString('Open'), openNewTab);
+    const newTabButton = UI.createTextButton(Common.UIString('Open'), openNewTab);
     newTabRow.appendChild(newTabButton);
 
-    var pages = element.createChild('div', 'device-page-list vbox');
+    const pages = element.createChild('div', 'device-page-list vbox');
 
-    var viewMore = element.createChild('div', 'device-view-more');
+    const viewMore = element.createChild('div', 'device-view-more');
     viewMore.addEventListener('click', viewMoreClick, false);
     updateViewMoreTitle();
 
-    var section = {
+    const section = {
       browser: null,
       element: element,
       title: title,
@@ -749,20 +563,20 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
         section.title.textContent = browser.adbBrowserName;
     }
 
-    var pageIds = new Set();
-    for (var page of browser.pages)
+    const pageIds = new Set();
+    for (const page of browser.pages)
       pageIds.add(page.id);
 
-    for (var pageId of section.pageSections.keys()) {
+    for (const pageId of section.pageSections.keys()) {
       if (!pageIds.has(pageId)) {
         section.pageSections.get(pageId).element.remove();
         section.pageSections.remove(pageId);
       }
     }
 
-    for (var index = 0; index < browser.pages.length; ++index) {
-      var page = browser.pages[index];
-      var pageSection = section.pageSections.get(page.id);
+    for (let index = 0; index < browser.pages.length; ++index) {
+      const page = browser.pages[index];
+      let pageSection = section.pageSections.get(page.id);
       if (!pageSection) {
         pageSection = this._createPageSection();
         section.pageSections.set(page.id, pageSection);
@@ -773,8 +587,8 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
         section.pages.insertBefore(pageSection.element, section.pages.firstChild);
     }
 
-    var kViewMoreCount = 3;
-    for (var index = 0, element = section.pages.firstChild; element; element = element.nextSibling, ++index)
+    const kViewMoreCount = 3;
+    for (let index = 0, element = section.pages.firstChild; element; element = element.nextSibling, ++index)
       element.classList.toggle('device-view-more-page', index >= kViewMoreCount);
     section.viewMore.classList.toggle('device-needs-view-more', browser.pages.length > kViewMoreCount);
     section.newTab.classList.toggle('hidden', !browser.adbBrowserChromeVersion);
@@ -785,28 +599,28 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
    * @return {!Devices.DevicesView.PageSection}
    */
   _createPageSection() {
-    var element = createElementWithClass('div', 'vbox');
+    const element = createElementWithClass('div', 'vbox');
 
-    var titleRow = element.createChild('div', 'device-page-title-row');
-    var title = titleRow.createChild('div', 'device-page-title');
-    var inspect = UI.createTextButton(Common.UIString('Inspect'), doAction.bind(null, 'inspect'));
+    const titleRow = element.createChild('div', 'device-page-title-row');
+    const title = titleRow.createChild('div', 'device-page-title');
+    const inspect = UI.createTextButton(Common.UIString('Inspect'), doAction.bind(null, 'inspect'));
     titleRow.appendChild(inspect);
 
-    var toolbar = new UI.Toolbar('');
+    const toolbar = new UI.Toolbar('');
     toolbar.appendToolbarItem(new UI.ToolbarMenuButton(appendActions));
     titleRow.appendChild(toolbar.element);
 
-    var url = element.createChild('div', 'device-page-url');
-    var section = {page: null, element: element, title: title, url: url, inspect: inspect};
+    const url = element.createChild('div', 'device-page-url');
+    const section = {page: null, element: element, title: title, url: url, inspect: inspect};
     return section;
 
     /**
      * @param {!UI.ContextMenu} contextMenu
      */
     function appendActions(contextMenu) {
-      contextMenu.appendItem(Common.UIString('Reload'), doAction.bind(null, 'reload'));
-      contextMenu.appendItem(Common.UIString('Focus'), doAction.bind(null, 'activate'));
-      contextMenu.appendItem(Common.UIString('Close'), doAction.bind(null, 'close'));
+      contextMenu.defaultSection().appendItem(Common.UIString('Reload'), doAction.bind(null, 'reload'));
+      contextMenu.defaultSection().appendItem(Common.UIString('Focus'), doAction.bind(null, 'activate'));
+      contextMenu.defaultSection().appendItem(Common.UIString('Close'), doAction.bind(null, 'close'));
     }
 
     /**
@@ -829,7 +643,7 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
     }
     if (!section.page || section.page.url !== page.url) {
       section.url.textContent = '';
-      section.url.appendChild(UI.createExternalLink(page.url));
+      section.url.appendChild(UI.XLink.create(page.url));
     }
     section.inspect.disabled = page.attached;
 
@@ -840,31 +654,31 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
    * @param {!Adb.DevicePortForwardingStatus} status
    */
   portForwardingStatusChanged(status) {
-    var json = JSON.stringify(status);
+    const json = JSON.stringify(status);
     if (json === this._cachedPortStatus)
       return;
     this._cachedPortStatus = json;
 
     this._portStatus.removeChildren();
     this._portStatus.createChild('div', 'device-port-status-text').textContent = Common.UIString('Port Forwarding:');
-    var connected = [];
-    var transient = [];
-    var error = [];
-    var empty = true;
-    for (var port in status.ports) {
+    const connected = [];
+    const transient = [];
+    const error = [];
+    let empty = true;
+    for (const port in status.ports) {
       if (!status.ports.hasOwnProperty(port))
         continue;
 
       empty = false;
-      var portStatus = status.ports[port];
-      var portNumber = createElementWithClass('div', 'device-view-port-number monospace');
+      const portStatus = status.ports[port];
+      const portNumber = createElementWithClass('div', 'device-view-port-number monospace');
       portNumber.textContent = ':' + port;
       if (portStatus >= 0)
         this._portStatus.appendChild(portNumber);
       else
         this._portStatus.insertBefore(portNumber, this._portStatus.firstChild);
 
-      var portIcon = createElementWithClass('div', 'device-view-port-icon');
+      const portIcon = createElementWithClass('div', 'device-view-port-icon');
       if (portStatus >= 0) {
         connected.push(port);
       } else if (portStatus === -1 || portStatus === -2) {
@@ -877,7 +691,7 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
       this._portStatus.insertBefore(portIcon, portNumber);
     }
 
-    var title = [];
+    const title = [];
     if (connected.length)
       title.push(Common.UIString('Connected: %s', connected.join(', ')));
     if (transient.length)
@@ -894,46 +708,3 @@ Devices.DevicesView.BrowserSection;
 
 /** @typedef {!{page: ?Adb.Page, element: !Element, title: !Element, url: !Element, inspect: !Element}} */
 Devices.DevicesView.PageSection;
-
-
-Devices.DevicesView.Panel = class extends UI.Panel {
-  constructor() {
-    super('node-connection');
-    this.registerRequiredCSS('devices/devicesView.css');
-    this.contentElement.classList.add('devices-view-panel');
-
-    var container = this.contentElement.createChild('div', 'devices-view-panel-center');
-
-    var image = container.createChild('img', 'devices-view-panel-logo');
-    image.src = 'https://nodejs.org/static/images/logos/nodejs-new-pantone-black.png';
-
-    InspectorFrontendHost.events.addEventListener(
-        InspectorFrontendHostAPI.Events.DevicesDiscoveryConfigChanged, this._devicesDiscoveryConfigChanged, this);
-
-    /** @type {!Adb.Config} */
-    this._config;
-
-    this.contentElement.tabIndex = 0;
-    this.setDefaultFocusedElement(this.contentElement);
-
-    // Trigger notification once.
-    InspectorFrontendHost.setDevicesUpdatesEnabled(false);
-    InspectorFrontendHost.setDevicesUpdatesEnabled(true);
-
-    this._networkDiscoveryView = new Devices.DevicesView.NetworkDiscoveryView(true, (enabled, config) => {
-      this._config.networkDiscoveryEnabled = enabled;
-      this._config.networkDiscoveryConfig = config;
-      InspectorFrontendHost.setDevicesDiscoveryConfig(this._config);
-    });
-    this._networkDiscoveryView.show(container);
-  }
-
-  /**
-   * @param {!Common.Event} event
-   */
-  _devicesDiscoveryConfigChanged(event) {
-    this._config = /** @type {!Adb.Config} */ (event.data);
-    this._networkDiscoveryView.discoveryConfigChanged(
-        this._config.networkDiscoveryEnabled, this._config.networkDiscoveryConfig);
-  }
-};

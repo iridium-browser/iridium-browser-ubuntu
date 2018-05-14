@@ -4,11 +4,11 @@
 
 #include "components/password_manager/core/browser/site_affiliation/asset_link_retriever.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/task_runner_util.h"
 #include "base/task_scheduler/post_task.h"
 #include "net/base/load_flags.h"
@@ -45,7 +45,7 @@ void AssetLinkRetriever::Start(net::URLRequestContextGetter* context_getter) {
           destination: WEBSITE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting: "No setting"
           policy_exception_justification:
             "The file is considered to be a resource of the page loaded."
@@ -76,14 +76,14 @@ void AssetLinkRetriever::OnURLFetchComplete(const net::URLFetcher* source) {
     source->GetResponseAsString(&response_string);
     scoped_refptr<base::TaskRunner> task_runner =
         base::CreateTaskRunnerWithTraits({base::TaskPriority::USER_BLOCKING});
-    auto data = base::MakeUnique<AssetLinkData>();
+    auto data = std::make_unique<AssetLinkData>();
     AssetLinkData* data_raw = data.get();
     base::PostTaskAndReplyWithResult(
         task_runner.get(), FROM_HERE,
         base::BindOnce(&AssetLinkData::Parse, base::Unretained(data_raw),
                        std::move(response_string)),
         base::BindOnce(&AssetLinkRetriever::OnResponseParsed, this,
-                       base::Passed(&data)));
+                       std::move(data)));
   }
   fetcher_.reset();
 }

@@ -30,12 +30,13 @@
 #include "base/task_scheduler/post_task.h"
 #include "base/task_scheduler/task_traits.h"
 #include "base/win/scoped_co_mem.h"
+#include "components/update_client/task_traits.h"
 #include "components/update_client/update_client_errors.h"
 #include "components/update_client/utils.h"
 #include "url/gurl.h"
 
-using base::win::ScopedCoMem;
 using Microsoft::WRL::ComPtr;
+using base::win::ScopedCoMem;
 
 // The class BackgroundDownloader in this module is an adapter between
 // the CrxDownloader interface and the BITS service interfaces.
@@ -398,13 +399,10 @@ void CleanupJob(const ComPtr<IBackgroundCopyJob>& job) {
 }  // namespace
 
 BackgroundDownloader::BackgroundDownloader(
-    std::unique_ptr<CrxDownloader> successor,
-    net::URLRequestContextGetter* context_getter)
+    std::unique_ptr<CrxDownloader> successor)
     : CrxDownloader(std::move(successor)),
       com_task_runner_(base::CreateCOMSTATaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
-           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})),
-      context_getter_(context_getter),
+          kTaskTraitsBackgroundDownloader)),
       git_cookie_bits_manager_(0),
       git_cookie_job_(0) {}
 
@@ -422,15 +420,15 @@ void BackgroundDownloader::StartTimer() {
 void BackgroundDownloader::OnTimer() {
   DCHECK(thread_checker_.CalledOnValidThread());
   com_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&BackgroundDownloader::OnDownloading, base::Unretained(this)));
+      FROM_HERE, base::BindOnce(&BackgroundDownloader::OnDownloading,
+                                base::Unretained(this)));
 }
 
 void BackgroundDownloader::DoStartDownload(const GURL& url) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  com_task_runner_->PostTask(FROM_HERE,
-                             base::Bind(&BackgroundDownloader::BeginDownload,
-                                        base::Unretained(this), url));
+  com_task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&BackgroundDownloader::BeginDownload,
+                                base::Unretained(this), url));
 }
 
 // Called one time when this class is asked to do a download.
@@ -447,9 +445,9 @@ void BackgroundDownloader::BeginDownload(const GURL& url) {
   }
 
   ResetInterfacePointers();
-  main_task_runner()->PostTask(
-      FROM_HERE,
-      base::Bind(&BackgroundDownloader::StartTimer, base::Unretained(this)));
+  main_task_runner()->PostTask(FROM_HERE,
+                               base::BindOnce(&BackgroundDownloader::StartTimer,
+                                              base::Unretained(this)));
 }
 
 // Creates or opens an existing BITS job to download the |url|, and handles
@@ -538,9 +536,9 @@ void BackgroundDownloader::OnDownloading() {
     return;
 
   ResetInterfacePointers();
-  main_task_runner()->PostTask(
-      FROM_HERE,
-      base::Bind(&BackgroundDownloader::StartTimer, base::Unretained(this)));
+  main_task_runner()->PostTask(FROM_HERE,
+                               base::BindOnce(&BackgroundDownloader::StartTimer,
+                                              base::Unretained(this)));
 }
 
 // Completes the BITS download, picks up the file path of the response, and
@@ -570,6 +568,8 @@ void BackgroundDownloader::EndDownload(HRESULT error) {
 
   const int error_to_report = SUCCEEDED(error) ? 0 : error;
 
+  DCHECK(static_cast<bool>(error_to_report) == !base::PathExists(response_));
+
   DownloadMetrics download_metrics;
   download_metrics.url = url();
   download_metrics.downloader = DownloadMetrics::kBits;
@@ -580,13 +580,14 @@ void BackgroundDownloader::EndDownload(HRESULT error) {
 
   Result result;
   result.error = error_to_report;
-  result.response = response_;
+  if (!result.error)
+    result.response = response_;
   result.downloaded_bytes = downloaded_bytes;
   result.total_bytes = total_bytes;
   main_task_runner()->PostTask(
-      FROM_HERE,
-      base::Bind(&BackgroundDownloader::OnDownloadComplete,
-                 base::Unretained(this), is_handled, result, download_metrics));
+      FROM_HERE, base::BindOnce(&BackgroundDownloader::OnDownloadComplete,
+                                base::Unretained(this), is_handled, result,
+                                download_metrics));
 
   // Once the task is posted to the the main thread, this object may be deleted
   // by its owner. It is not safe to access members of this object on this task
@@ -674,8 +675,8 @@ bool BackgroundDownloader::OnStateTransferring() {
   result.total_bytes = total_bytes;
 
   main_task_runner()->PostTask(
-      FROM_HERE, base::Bind(&BackgroundDownloader::OnDownloadProgress,
-                            base::Unretained(this), result));
+      FROM_HERE, base::BindOnce(&BackgroundDownloader::OnDownloadProgress,
+                                base::Unretained(this), result));
   return false;
 }
 
@@ -683,19 +684,21 @@ HRESULT BackgroundDownloader::QueueBitsJob(const GURL& url,
                                            ComPtr<IBackgroundCopyJob>* job) {
   DCHECK(com_task_runner_->RunsTasksInCurrentSequence());
 
-  size_t num_jobs = 0;
-  GetBackgroundDownloaderJobCount(&num_jobs);
+  size_t num_jobs = std::numeric_limits<size_t>::max();
+  HRESULT hr = GetBackgroundDownloaderJobCount(&num_jobs);
+
+  // The metric records a large number if the job count can't be read.
   UMA_HISTOGRAM_COUNTS_100("UpdateClient.BackgroundDownloaderJobs", num_jobs);
 
   // Remove some old jobs from the BITS queue before creating new jobs.
   CleanupStaleJobs();
 
-  if (num_jobs >= kMaxQueuedJobs)
+  if (FAILED(hr) || num_jobs >= kMaxQueuedJobs)
     return MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF,
                         CrxDownloaderError::BITS_TOO_MANY_JOBS);
 
   ComPtr<IBackgroundCopyJob> local_job;
-  HRESULT hr = CreateOrOpenJob(url, &local_job);
+  hr = CreateOrOpenJob(url, &local_job);
   if (FAILED(hr)) {
     CleanupJob(local_job);
     return hr;

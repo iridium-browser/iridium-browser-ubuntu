@@ -5,9 +5,9 @@
 #ifndef COMPONENTS_PROXIMITY_AUTH_MESSENGER_IMPL_H
 #define COMPONENTS_PROXIMITY_AUTH_MESSENGER_IMPL_H
 
-#include <deque>
 #include <memory>
 
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -87,10 +87,6 @@ class MessengerImpl : public Messenger, public cryptauth::ConnectionObserver {
   // response.
   void HandleUnlockResponseMessage(const base::DictionaryValue& message);
 
-  // For iOS, we need to poll the phone every few seconds to keep the app alive
-  // in the background. This function starts the poll loop.
-  void PollScreenStateForIOS();
-
   // cryptauth::ConnectionObserver:
   void OnConnectionStatusChanged(
       cryptauth::Connection* connection,
@@ -113,7 +109,7 @@ class MessengerImpl : public Messenger, public cryptauth::ConnectionObserver {
   base::ObserverList<MessengerObserver> observers_;
 
   // Queue of messages to send to the remote device.
-  std::deque<PendingMessage> queued_messages_;
+  base::circular_deque<PendingMessage> queued_messages_;
 
   // The current message being sent or waiting on the remote device for a
   // response. Null if there is no message currently in this state.

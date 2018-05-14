@@ -5,9 +5,9 @@
 #ifndef CC_TEST_FAKE_LAYER_TREE_FRAME_SINK_CLIENT_H_
 #define CC_TEST_FAKE_LAYER_TREE_FRAME_SINK_CLIENT_H_
 
-#include "cc/output/layer_tree_frame_sink_client.h"
+#include "cc/trees/layer_tree_frame_sink_client.h"
 
-#include "cc/output/managed_memory_policy.h"
+#include "cc/trees/managed_memory_policy.h"
 
 namespace cc {
 
@@ -15,10 +15,15 @@ class FakeLayerTreeFrameSinkClient : public LayerTreeFrameSinkClient {
  public:
   FakeLayerTreeFrameSinkClient() : memory_policy_(0) {}
 
-  void SetBeginFrameSource(BeginFrameSource* source) override;
+  void SetBeginFrameSource(viz::BeginFrameSource* source) override;
   void DidReceiveCompositorFrameAck() override;
+  void DidPresentCompositorFrame(uint32_t presentation_token,
+                                 base::TimeTicks time,
+                                 base::TimeDelta refresh,
+                                 uint32_t flags) override {}
+  void DidDiscardCompositorFrame(uint32_t presentation_token) override {}
   void ReclaimResources(
-      const std::vector<ReturnedResource>& resources) override {}
+      const std::vector<viz::ReturnedResource>& resources) override {}
   void DidLoseLayerTreeFrameSink() override;
   void SetExternalTilePriorityConstraints(
       const gfx::Rect& viewport_rect_for_tile_priority,
@@ -37,13 +42,15 @@ class FakeLayerTreeFrameSinkClient : public LayerTreeFrameSinkClient {
 
   const ManagedMemoryPolicy& memory_policy() const { return memory_policy_; }
 
-  BeginFrameSource* begin_frame_source() const { return begin_frame_source_; }
+  viz::BeginFrameSource* begin_frame_source() const {
+    return begin_frame_source_;
+  }
 
  private:
   int ack_count_ = 0;
   bool did_lose_layer_tree_frame_sink_called_ = false;
   ManagedMemoryPolicy memory_policy_;
-  BeginFrameSource* begin_frame_source_;
+  viz::BeginFrameSource* begin_frame_source_;
 };
 
 }  // namespace cc

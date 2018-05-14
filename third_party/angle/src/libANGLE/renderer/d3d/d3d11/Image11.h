@@ -31,7 +31,7 @@ class Image11 : public ImageD3D
 {
   public:
     Image11(Renderer11 *renderer);
-    virtual ~Image11();
+    ~Image11() override;
 
     static gl::Error GenerateMipmap(const gl::Context *context,
                                     Image11 *dest,
@@ -47,7 +47,7 @@ class Image11 : public ImageD3D
                                bool unpackUnmultiplyAlpha,
                                const Renderer11DeviceCaps &rendererCaps);
 
-    virtual bool isDirty() const;
+    bool isDirty() const override;
 
     gl::Error copyToStorage(const gl::Context *context,
                             TextureStorage *storage,

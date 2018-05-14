@@ -7,6 +7,7 @@
 #include "compiler/translator/IntermTraverse.h"
 
 #include "compiler/translator/InfoSink.h"
+#include "compiler/translator/IntermNode_util.h"
 #include "compiler/translator/SymbolTable.h"
 
 namespace sh
@@ -112,13 +113,21 @@ TIntermTraverser::TIntermTraverser(bool preVisit,
       mDepth(-1),
       mMaxDepth(0),
       mInGlobalScope(true),
-      mSymbolTable(symbolTable),
-      mTemporaryId(nullptr)
+      mSymbolTable(symbolTable)
 {
 }
 
 TIntermTraverser::~TIntermTraverser()
 {
+}
+
+const TIntermBlock *TIntermTraverser::getParentBlock() const
+{
+    if (!mParentBlockStack.empty())
+    {
+        return mParentBlockStack.back().node;
+    }
+    return nullptr;
 }
 
 void TIntermTraverser::pushParentBlock(TIntermBlock *node)
@@ -165,91 +174,6 @@ void TIntermTraverser::insertStatementInParentBlock(TIntermNode *statement)
     TIntermSequence insertions;
     insertions.push_back(statement);
     insertStatementsInParentBlock(insertions);
-}
-
-TIntermSymbol *TIntermTraverser::createTempSymbol(const TType &type, TQualifier qualifier)
-{
-    // Each traversal uses at most one temporary variable, so the index stays the same within a
-    // single traversal.
-    TInfoSinkBase symbolNameOut;
-    ASSERT(mTemporaryId != nullptr);
-    symbolNameOut << "s" << (mTemporaryId->get());
-    TString symbolName = symbolNameOut.c_str();
-
-    TIntermSymbol *node = new TIntermSymbol(mTemporaryId->get(), symbolName, type);
-    node->setInternal(true);
-
-    ASSERT(qualifier == EvqTemporary || qualifier == EvqConst || qualifier == EvqGlobal);
-    node->getTypePointer()->setQualifier(qualifier);
-    // TODO(oetuaho): Might be useful to sanitize layout qualifier etc. on the type of the created
-    // symbol. This might need to be done in other places as well.
-    return node;
-}
-
-TIntermSymbol *TIntermTraverser::createTempSymbol(const TType &type)
-{
-    return createTempSymbol(type, EvqTemporary);
-}
-
-TIntermDeclaration *TIntermTraverser::createTempDeclaration(const TType &type)
-{
-    TIntermDeclaration *tempDeclaration = new TIntermDeclaration();
-    tempDeclaration->appendDeclarator(createTempSymbol(type));
-    return tempDeclaration;
-}
-
-TIntermDeclaration *TIntermTraverser::createTempInitDeclaration(TIntermTyped *initializer,
-                                                                TQualifier qualifier)
-{
-    ASSERT(initializer != nullptr);
-    TIntermSymbol *tempSymbol           = createTempSymbol(initializer->getType(), qualifier);
-    TIntermDeclaration *tempDeclaration = new TIntermDeclaration();
-    TIntermBinary *tempInit             = new TIntermBinary(EOpInitialize, tempSymbol, initializer);
-    tempDeclaration->appendDeclarator(tempInit);
-    return tempDeclaration;
-}
-
-TIntermDeclaration *TIntermTraverser::createTempInitDeclaration(TIntermTyped *initializer)
-{
-    return createTempInitDeclaration(initializer, EvqTemporary);
-}
-
-TIntermBinary *TIntermTraverser::createTempAssignment(TIntermTyped *rightNode)
-{
-    ASSERT(rightNode != nullptr);
-    TIntermSymbol *tempSymbol = createTempSymbol(rightNode->getType());
-    TIntermBinary *assignment = new TIntermBinary(EOpAssign, tempSymbol, rightNode);
-    return assignment;
-}
-
-void TIntermTraverser::nextTemporaryId()
-{
-    ASSERT(mSymbolTable);
-    if (!mTemporaryId)
-    {
-        mTemporaryId = new TSymbolUniqueId(mSymbolTable);
-        return;
-    }
-    *mTemporaryId = TSymbolUniqueId(mSymbolTable);
-}
-
-void TLValueTrackingTraverser::addToFunctionMap(const TSymbolUniqueId &id,
-                                                TIntermSequence *paramSequence)
-{
-    mFunctionMap[id.get()] = paramSequence;
-}
-
-bool TLValueTrackingTraverser::isInFunctionMap(const TIntermAggregate *callNode) const
-{
-    ASSERT(callNode->getOp() == EOpCallFunctionInAST);
-    return (mFunctionMap.find(callNode->getFunctionSymbolInfo()->getId().get()) !=
-            mFunctionMap.end());
-}
-
-TIntermSequence *TLValueTrackingTraverser::getFunctionParameters(const TIntermAggregate *callNode)
-{
-    ASSERT(isInFunctionMap(callNode));
-    return mFunctionMap[callNode->getFunctionSymbolInfo()->getId().get()];
 }
 
 void TLValueTrackingTraverser::setInFunctionCallOutParameter(bool inOutParameter)
@@ -720,22 +644,12 @@ void TIntermTraverser::queueReplacementWithParent(TIntermNode *parent,
 TLValueTrackingTraverser::TLValueTrackingTraverser(bool preVisit,
                                                    bool inVisit,
                                                    bool postVisit,
-                                                   TSymbolTable *symbolTable,
-                                                   int shaderVersion)
+                                                   TSymbolTable *symbolTable)
     : TIntermTraverser(preVisit, inVisit, postVisit, symbolTable),
       mOperatorRequiresLValue(false),
-      mInFunctionCallOutParameter(false),
-      mShaderVersion(shaderVersion)
+      mInFunctionCallOutParameter(false)
 {
     ASSERT(symbolTable);
-}
-
-void TLValueTrackingTraverser::traverseFunctionPrototype(TIntermFunctionPrototype *node)
-{
-    TIntermSequence *sequence = node->getSequence();
-    addToFunctionMap(node->getFunctionSymbolInfo()->getId(), sequence);
-
-    TIntermTraverser::traverseFunctionPrototype(node);
 }
 
 void TLValueTrackingTraverser::traverseAggregate(TIntermAggregate *node)
@@ -751,81 +665,31 @@ void TLValueTrackingTraverser::traverseAggregate(TIntermAggregate *node)
 
     if (visit)
     {
-        if (node->getOp() == EOpCallFunctionInAST)
+        size_t paramIndex = 0u;
+        for (auto *child : *sequence)
         {
-            if (isInFunctionMap(node))
+            if (node->getFunction())
             {
-                TIntermSequence *params             = getFunctionParameters(node);
-                TIntermSequence::iterator paramIter = params->begin();
-                for (auto *child : *sequence)
-                {
-                    ASSERT(paramIter != params->end());
-                    TQualifier qualifier = (*paramIter)->getAsTyped()->getQualifier();
-                    setInFunctionCallOutParameter(qualifier == EvqOut || qualifier == EvqInOut);
-
-                    child->traverse(this);
-                    if (visit && inVisit)
-                    {
-                        if (child != sequence->back())
-                            visit = visitAggregate(InVisit, node);
-                    }
-
-                    ++paramIter;
-                }
+                // Both built-ins and user defined functions should have the function symbol set.
+                ASSERT(paramIndex < node->getFunction()->getParamCount());
+                TQualifier qualifier =
+                    node->getFunction()->getParam(paramIndex).type->getQualifier();
+                setInFunctionCallOutParameter(qualifier == EvqOut || qualifier == EvqInOut);
+                ++paramIndex;
             }
             else
             {
-                // The node might not be in the function map in case we're in the middle of
-                // transforming the AST, and have inserted function call nodes without inserting the
-                // function definitions yet.
-                setInFunctionCallOutParameter(false);
-                for (auto *child : *sequence)
-                {
-                    child->traverse(this);
-                    if (visit && inVisit)
-                    {
-                        if (child != sequence->back())
-                            visit = visitAggregate(InVisit, node);
-                    }
-                }
+                ASSERT(node->isConstructor());
             }
 
-            setInFunctionCallOutParameter(false);
-        }
-        else
-        {
-            // Find the built-in function corresponding to this op so that we can determine the
-            // in/out qualifiers of its parameters.
-            TFunction *builtInFunc = nullptr;
-            if (!node->isFunctionCall() && !node->isConstructor())
+            child->traverse(this);
+            if (visit && inVisit)
             {
-                builtInFunc = static_cast<TFunction *>(
-                    mSymbolTable->findBuiltIn(node->getSymbolTableMangledName(), mShaderVersion));
+                if (child != sequence->back())
+                    visit = visitAggregate(InVisit, node);
             }
-
-            size_t paramIndex = 0;
-
-            for (auto *child : *sequence)
-            {
-                // This assumes that raw functions called with
-                // EOpCallInternalRawFunction don't have out parameters.
-                TQualifier qualifier = EvqIn;
-                if (builtInFunc != nullptr)
-                    qualifier = builtInFunc->getParam(paramIndex).type->getQualifier();
-                setInFunctionCallOutParameter(qualifier == EvqOut || qualifier == EvqInOut);
-                child->traverse(this);
-
-                if (visit && inVisit)
-                {
-                    if (child != sequence->back())
-                        visit = visitAggregate(InVisit, node);
-                }
-
-                ++paramIndex;
-            }
-
-            setInFunctionCallOutParameter(false);
         }
+        setInFunctionCallOutParameter(false);
     }
 
     if (visit && postVisit)

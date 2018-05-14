@@ -13,28 +13,35 @@ package org.appspot.apprtc;
 import android.content.Context;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
+import android.preference.PreferenceManager;
 import android.util.Log;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.EnumSet;
+import java.util.Date;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.appspot.apprtc.AppRTCClient.SignalingParameters;
+import org.appspot.apprtc.RecordedAudioToFileController;
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
 import org.webrtc.CameraVideoCapturer;
 import org.webrtc.DataChannel;
+import org.webrtc.DefaultVideoDecoderFactory;
+import org.webrtc.DefaultVideoEncoderFactory;
 import org.webrtc.EglBase;
 import org.webrtc.IceCandidate;
 import org.webrtc.Logging;
@@ -48,18 +55,23 @@ import org.webrtc.RtpReceiver;
 import org.webrtc.RtpSender;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
+import org.webrtc.SoftwareVideoDecoderFactory;
+import org.webrtc.SoftwareVideoEncoderFactory;
 import org.webrtc.StatsObserver;
 import org.webrtc.StatsReport;
 import org.webrtc.VideoCapturer;
+import org.webrtc.VideoDecoderFactory;
+import org.webrtc.VideoEncoderFactory;
 import org.webrtc.VideoRenderer;
+import org.webrtc.VideoSink;
 import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
 import org.webrtc.voiceengine.WebRtcAudioManager;
 import org.webrtc.voiceengine.WebRtcAudioRecord;
-import org.webrtc.voiceengine.WebRtcAudioTrack;
 import org.webrtc.voiceengine.WebRtcAudioRecord.AudioRecordStartErrorCode;
 import org.webrtc.voiceengine.WebRtcAudioRecord.WebRtcAudioRecordErrorCallback;
-import org.webrtc.voiceengine.WebRtcAudioTrack.WebRtcAudioTrackErrorCallback;
+import org.webrtc.voiceengine.WebRtcAudioTrack;
+import org.webrtc.voiceengine.WebRtcAudioTrack.AudioTrackStartErrorCode;
 import org.webrtc.voiceengine.WebRtcAudioUtils;
 
 /**
@@ -99,12 +111,18 @@ public class PeerConnectionClient {
   private static final int HD_VIDEO_WIDTH = 1280;
   private static final int HD_VIDEO_HEIGHT = 720;
   private static final int BPS_IN_KBPS = 1000;
+  private static final String RTCEVENTLOG_OUTPUT_DIR_NAME = "rtc_event_log";
 
-  private static final PeerConnectionClient instance = new PeerConnectionClient();
+  // Executor thread is started once in private ctor and is used for all
+  // peer connection API calls to ensure new peer connection factory is
+  // created on the same thread as previously destroyed factory.
+  private static final ExecutorService executor = Executors.newSingleThreadExecutor();
+
   private final PCObserver pcObserver = new PCObserver();
   private final SDPObserver sdpObserver = new SDPObserver();
-  private final ExecutorService executor;
 
+  private final EglBase rootEglBase;
+  private final Context appContext;
   private PeerConnectionFactory factory;
   private PeerConnection peerConnection;
   PeerConnectionFactory.Options options = null;
@@ -116,21 +134,19 @@ public class PeerConnectionClient {
   private boolean videoCapturerStopped;
   private boolean isError;
   private Timer statsTimer;
-  private VideoRenderer.Callbacks localRender;
+  private VideoSink localRender;
   private List<VideoRenderer.Callbacks> remoteRenders;
   private SignalingParameters signalingParameters;
-  private MediaConstraints pcConstraints;
   private int videoWidth;
   private int videoHeight;
   private int videoFps;
   private MediaConstraints audioConstraints;
-  private ParcelFileDescriptor aecDumpFileDescriptor;
   private MediaConstraints sdpMediaConstraints;
   private PeerConnectionParameters peerConnectionParameters;
   // Queued remote ICE candidates are consumed only after both local and
   // remote descriptions are set. Similarly local ICE candidates are sent to
   // remote peer after both local and remote description are set.
-  private LinkedList<IceCandidate> queuedRemoteCandidates;
+  private List<IceCandidate> queuedRemoteCandidates;
   private PeerConnectionEvents events;
   private boolean isInitiator;
   private SessionDescription localSdp; // either offer or answer SDP
@@ -146,6 +162,11 @@ public class PeerConnectionClient {
   private AudioTrack localAudioTrack;
   private DataChannel dataChannel;
   private boolean dataChannelEnabled;
+  // Enable RtcEventLog.
+  private RtcEventLog rtcEventLog;
+  // Implements the WebRtcAudioRecordSamplesReadyCallback interface and writes
+  // recorded audio samples to an output file.
+  private RecordedAudioToFileController saveRecordedAudioToFile = null;
 
   /**
    * Peer connection parameters.
@@ -187,33 +208,23 @@ public class PeerConnectionClient {
     public final String audioCodec;
     public final boolean noAudioProcessing;
     public final boolean aecDump;
+    public final boolean saveInputAudioToFile;
     public final boolean useOpenSLES;
     public final boolean disableBuiltInAEC;
     public final boolean disableBuiltInAGC;
     public final boolean disableBuiltInNS;
     public final boolean enableLevelControl;
     public final boolean disableWebRtcAGCAndHPF;
+    public final boolean enableRtcEventLog;
     private final DataChannelParameters dataChannelParameters;
 
     public PeerConnectionParameters(boolean videoCallEnabled, boolean loopback, boolean tracing,
         int videoWidth, int videoHeight, int videoFps, int videoMaxBitrate, String videoCodec,
         boolean videoCodecHwAcceleration, boolean videoFlexfecEnabled, int audioStartBitrate,
-        String audioCodec, boolean noAudioProcessing, boolean aecDump, boolean useOpenSLES,
-        boolean disableBuiltInAEC, boolean disableBuiltInAGC, boolean disableBuiltInNS,
-        boolean enableLevelControl, boolean disableWebRtcAGCAndHPF) {
-      this(videoCallEnabled, loopback, tracing, videoWidth, videoHeight, videoFps, videoMaxBitrate,
-          videoCodec, videoCodecHwAcceleration, videoFlexfecEnabled, audioStartBitrate, audioCodec,
-          noAudioProcessing, aecDump, useOpenSLES, disableBuiltInAEC, disableBuiltInAGC,
-          disableBuiltInNS, enableLevelControl, disableWebRtcAGCAndHPF, null);
-    }
-
-    public PeerConnectionParameters(boolean videoCallEnabled, boolean loopback, boolean tracing,
-        int videoWidth, int videoHeight, int videoFps, int videoMaxBitrate, String videoCodec,
-        boolean videoCodecHwAcceleration, boolean videoFlexfecEnabled, int audioStartBitrate,
-        String audioCodec, boolean noAudioProcessing, boolean aecDump, boolean useOpenSLES,
-        boolean disableBuiltInAEC, boolean disableBuiltInAGC, boolean disableBuiltInNS,
-        boolean enableLevelControl, boolean disableWebRtcAGCAndHPF,
-        DataChannelParameters dataChannelParameters) {
+        String audioCodec, boolean noAudioProcessing, boolean aecDump, boolean saveInputAudioToFile,
+        boolean useOpenSLES, boolean disableBuiltInAEC, boolean disableBuiltInAGC,
+        boolean disableBuiltInNS, boolean enableLevelControl, boolean disableWebRtcAGCAndHPF,
+        boolean enableRtcEventLog, DataChannelParameters dataChannelParameters) {
       this.videoCallEnabled = videoCallEnabled;
       this.loopback = loopback;
       this.tracing = tracing;
@@ -228,12 +239,14 @@ public class PeerConnectionClient {
       this.audioCodec = audioCodec;
       this.noAudioProcessing = noAudioProcessing;
       this.aecDump = aecDump;
+      this.saveInputAudioToFile = saveInputAudioToFile;
       this.useOpenSLES = useOpenSLES;
       this.disableBuiltInAEC = disableBuiltInAEC;
       this.disableBuiltInAGC = disableBuiltInAGC;
       this.disableBuiltInNS = disableBuiltInNS;
       this.enableLevelControl = enableLevelControl;
       this.disableWebRtcAGCAndHPF = disableWebRtcAGCAndHPF;
+      this.enableRtcEventLog = enableRtcEventLog;
       this.dataChannelParameters = dataChannelParameters;
     }
   }
@@ -285,22 +298,19 @@ public class PeerConnectionClient {
     void onPeerConnectionError(final String description);
   }
 
-  private PeerConnectionClient() {
-    // Executor thread is started once in private ctor and is used for all
-    // peer connection API calls to ensure new peer connection factory is
-    // created on the same thread as previously destroyed factory.
-    executor = Executors.newSingleThreadExecutor();
-  }
-
-  public static PeerConnectionClient getInstance() {
-    return instance;
+  public PeerConnectionClient(Context appContext) {
+    if (appContext == null) {
+      throw new NullPointerException("The application context is null");
+    }
+    rootEglBase = EglBase.create();
+    this.appContext = appContext;
   }
 
   public void setPeerConnectionFactoryOptions(PeerConnectionFactory.Options options) {
     this.options = options;
   }
 
-  public void createPeerConnectionFactory(final Context context,
+  public void createPeerConnectionFactory(
       final PeerConnectionParameters peerConnectionParameters, final PeerConnectionEvents events) {
     this.peerConnectionParameters = peerConnectionParameters;
     this.events = events;
@@ -327,20 +337,21 @@ public class PeerConnectionClient {
     executor.execute(new Runnable() {
       @Override
       public void run() {
-        createPeerConnectionFactoryInternal(context);
+        createPeerConnectionFactoryInternal();
       }
     });
   }
 
-  public void createPeerConnection(final EglBase.Context renderEGLContext,
-      final VideoRenderer.Callbacks localRender, final VideoRenderer.Callbacks remoteRender,
-      final VideoCapturer videoCapturer, final SignalingParameters signalingParameters) {
-    createPeerConnection(renderEGLContext, localRender, Collections.singletonList(remoteRender),
-        videoCapturer, signalingParameters);
+  public void createPeerConnection(final VideoSink localRender,
+      final VideoRenderer.Callbacks remoteRender, final VideoCapturer videoCapturer,
+      final SignalingParameters signalingParameters) {
+    createPeerConnection(
+        localRender, Collections.singletonList(remoteRender), videoCapturer, signalingParameters);
   }
-  public void createPeerConnection(final EglBase.Context renderEGLContext,
-      final VideoRenderer.Callbacks localRender, final List<VideoRenderer.Callbacks> remoteRenders,
-      final VideoCapturer videoCapturer, final SignalingParameters signalingParameters) {
+
+  public void createPeerConnection(final VideoSink localRender,
+      final List<VideoRenderer.Callbacks> remoteRenders, final VideoCapturer videoCapturer,
+      final SignalingParameters signalingParameters) {
     if (peerConnectionParameters == null) {
       Log.e(TAG, "Creating peer connection without initializing factory.");
       return;
@@ -354,7 +365,8 @@ public class PeerConnectionClient {
       public void run() {
         try {
           createMediaConstraintsInternal();
-          createPeerConnectionInternal(renderEGLContext);
+          createPeerConnectionInternal();
+          maybeCreateAndStartRtcEventLog();
         } catch (Exception e) {
           reportError("Failed to create peer connection: " + e.getMessage());
           throw e;
@@ -376,15 +388,7 @@ public class PeerConnectionClient {
     return videoCallEnabled;
   }
 
-  private void createPeerConnectionFactoryInternal(Context context) {
-    PeerConnectionFactory.initializeInternalTracer();
-    if (peerConnectionParameters.tracing) {
-      PeerConnectionFactory.startInternalTracingCapture(
-          Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator
-          + "webrtc-trace.txt");
-    }
-    Log.d(TAG,
-        "Create peer connection factory. Use video: " + peerConnectionParameters.videoCallEnabled);
+  private void createPeerConnectionFactoryInternal() {
     isError = false;
 
     // Initialize field trials.
@@ -422,8 +426,22 @@ public class PeerConnectionClient {
       }
     }
     Log.d(TAG, "Preferred video codec: " + preferredVideoCodec);
-    PeerConnectionFactory.initializeFieldTrials(fieldTrials);
-    Log.d(TAG, "Field trials: " + fieldTrials);
+
+    // Initialize WebRTC
+    Log.d(TAG,
+        "Initialize WebRTC. Field trials: " + fieldTrials + " Enable video HW acceleration: "
+            + peerConnectionParameters.videoCodecHwAcceleration);
+    PeerConnectionFactory.initialize(
+        PeerConnectionFactory.InitializationOptions.builder(appContext)
+            .setFieldTrials(fieldTrials)
+            .setEnableVideoHwAcceleration(peerConnectionParameters.videoCodecHwAcceleration)
+            .setEnableInternalTracer(true)
+            .createInitializationOptions());
+    if (peerConnectionParameters.tracing) {
+      PeerConnectionFactory.startInternalTracingCapture(
+          Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator
+          + "webrtc-trace.txt");
+    }
 
     // Check if ISAC is used by default.
     preferIsac = peerConnectionParameters.audioCodec != null
@@ -484,45 +502,66 @@ public class PeerConnectionClient {
       }
     });
 
-    WebRtcAudioTrack.setErrorCallback(new WebRtcAudioTrackErrorCallback() {
+    // It is possible to save a copy in raw PCM format on a file by checking
+    // the "Save input audio to file" checkbox in the Settings UI. A callback
+    // interface is set when this flag is enabled. As a result, a copy of recorded
+    // audio samples are provided to this client directly from the native audio
+    // layer in Java.
+    if (peerConnectionParameters.saveInputAudioToFile) {
+      if (!peerConnectionParameters.useOpenSLES) {
+        Log.d(TAG, "Enable recording of microphone input audio to file");
+        saveRecordedAudioToFile = new RecordedAudioToFileController(executor);
+      } else {
+        // TODO(henrika): ensure that the UI reflects that if OpenSL ES is selected,
+        // then the "Save inut audio to file" option shall be grayed out.
+        Log.e(TAG, "Recording of input audio is not supported for OpenSL ES");
+      }
+    }
+
+    WebRtcAudioTrack.setErrorCallback(new WebRtcAudioTrack.ErrorCallback() {
       @Override
       public void onWebRtcAudioTrackInitError(String errorMessage) {
+        Log.e(TAG, "onWebRtcAudioTrackInitError: " + errorMessage);
         reportError(errorMessage);
       }
 
       @Override
-      public void onWebRtcAudioTrackStartError(String errorMessage) {
+      public void onWebRtcAudioTrackStartError(
+          AudioTrackStartErrorCode errorCode, String errorMessage) {
+        Log.e(TAG, "onWebRtcAudioTrackStartError: " + errorCode + ". " + errorMessage);
         reportError(errorMessage);
       }
 
       @Override
       public void onWebRtcAudioTrackError(String errorMessage) {
+        Log.e(TAG, "onWebRtcAudioTrackError: " + errorMessage);
         reportError(errorMessage);
       }
     });
 
     // Create peer connection factory.
-    PeerConnectionFactory.initializeAndroidGlobals(
-        context, peerConnectionParameters.videoCodecHwAcceleration);
     if (options != null) {
       Log.d(TAG, "Factory networkIgnoreMask option: " + options.networkIgnoreMask);
     }
-    factory = new PeerConnectionFactory(options);
+    final boolean enableH264HighProfile =
+        VIDEO_CODEC_H264_HIGH.equals(peerConnectionParameters.videoCodec);
+    final VideoEncoderFactory encoderFactory;
+    final VideoDecoderFactory decoderFactory;
+
+    if (peerConnectionParameters.videoCodecHwAcceleration) {
+      encoderFactory = new DefaultVideoEncoderFactory(
+          rootEglBase.getEglBaseContext(), true /* enableIntelVp8Encoder */, enableH264HighProfile);
+      decoderFactory = new DefaultVideoDecoderFactory(rootEglBase.getEglBaseContext());
+    } else {
+      encoderFactory = new SoftwareVideoEncoderFactory();
+      decoderFactory = new SoftwareVideoDecoderFactory();
+    }
+
+    factory = new PeerConnectionFactory(options, encoderFactory, decoderFactory);
     Log.d(TAG, "Peer connection factory created.");
   }
 
   private void createMediaConstraintsInternal() {
-    // Create peer connection constraints.
-    pcConstraints = new MediaConstraints();
-    // Enable DTLS for normal calls and disable for loopback calls.
-    if (peerConnectionParameters.loopback) {
-      pcConstraints.optional.add(
-          new MediaConstraints.KeyValuePair(DTLS_SRTP_KEY_AGREEMENT_CONSTRAINT, "false"));
-    } else {
-      pcConstraints.optional.add(
-          new MediaConstraints.KeyValuePair(DTLS_SRTP_KEY_AGREEMENT_CONSTRAINT, "true"));
-    }
-
     // Check if there is a camera on device and disable video call if not.
     if (videoCapturer == null) {
       Log.w(TAG, "No camera on device. Switch to audio only call.");
@@ -579,19 +618,18 @@ public class PeerConnectionClient {
     }
   }
 
-  private void createPeerConnectionInternal(EglBase.Context renderEGLContext) {
+  private void createPeerConnectionInternal() {
     if (factory == null || isError) {
       Log.e(TAG, "Peerconnection factory is not created");
       return;
     }
     Log.d(TAG, "Create peer connection.");
 
-    Log.d(TAG, "PCConstraints: " + pcConstraints.toString());
-    queuedRemoteCandidates = new LinkedList<IceCandidate>();
+    queuedRemoteCandidates = new ArrayList<>();
 
     if (videoCallEnabled) {
-      Log.d(TAG, "EGLContext: " + renderEGLContext);
-      factory.setVideoHwAccelerationOptions(renderEGLContext, renderEGLContext);
+      factory.setVideoHwAccelerationOptions(
+          rootEglBase.getEglBaseContext(), rootEglBase.getEglBaseContext());
     }
 
     PeerConnection.RTCConfiguration rtcConfig =
@@ -604,8 +642,10 @@ public class PeerConnectionClient {
     rtcConfig.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
     // Use ECDSA encryption.
     rtcConfig.keyType = PeerConnection.KeyType.ECDSA;
+    // Enable DTLS for normal calls and disable for loopback calls.
+    rtcConfig.enableDtlsSrtp = !peerConnectionParameters.loopback;
 
-    peerConnection = factory.createPeerConnection(rtcConfig, pcConstraints, pcObserver);
+    peerConnection = factory.createPeerConnection(rtcConfig, pcObserver);
 
     if (dataChannelEnabled) {
       DataChannel.Init init = new DataChannel.Init();
@@ -619,9 +659,8 @@ public class PeerConnectionClient {
     }
     isInitiator = false;
 
-    // Set default WebRTC tracing and INFO libjingle logging.
+    // Set INFO libjingle logging.
     // NOTE: this _must_ happen while |factory| is alive!
-    Logging.enableTracing("logcat:", EnumSet.of(Logging.TraceLevel.TRACE_DEFAULT));
     Logging.enableLogToDebugOutput(Logging.Severity.LS_INFO);
 
     mediaStream = factory.createLocalMediaStream("ARDAMS");
@@ -637,18 +676,43 @@ public class PeerConnectionClient {
 
     if (peerConnectionParameters.aecDump) {
       try {
-        aecDumpFileDescriptor =
+        ParcelFileDescriptor aecDumpFileDescriptor =
             ParcelFileDescriptor.open(new File(Environment.getExternalStorageDirectory().getPath()
                                           + File.separator + "Download/audio.aecdump"),
                 ParcelFileDescriptor.MODE_READ_WRITE | ParcelFileDescriptor.MODE_CREATE
                     | ParcelFileDescriptor.MODE_TRUNCATE);
-        factory.startAecDump(aecDumpFileDescriptor.getFd(), -1);
+        factory.startAecDump(aecDumpFileDescriptor.detachFd(), -1);
       } catch (IOException e) {
         Log.e(TAG, "Can not open aecdump file", e);
       }
     }
 
+    if (saveRecordedAudioToFile != null) {
+      if (saveRecordedAudioToFile.start()) {
+        Log.d(TAG, "Recording input audio to file is activated");
+      }
+    }
     Log.d(TAG, "Peer connection created.");
+  }
+
+  private File createRtcEventLogOutputFile() {
+    DateFormat dateFormat = new SimpleDateFormat("yyyyMMdd_hhmm_ss", Locale.getDefault());
+    Date date = new Date();
+    final String outputFileName = "event_log_" + dateFormat.format(date) + ".log";
+    return new File(
+        appContext.getDir(RTCEVENTLOG_OUTPUT_DIR_NAME, Context.MODE_PRIVATE), outputFileName);
+  }
+
+  private void maybeCreateAndStartRtcEventLog() {
+    if (appContext == null || peerConnection == null) {
+      return;
+    }
+    if (!peerConnectionParameters.enableRtcEventLog) {
+      Log.d(TAG, "RtcEventLog is disabled.");
+      return;
+    }
+    rtcEventLog = new RtcEventLog(peerConnection);
+    rtcEventLog.start(createRtcEventLogOutputFile());
   }
 
   private void closeInternal() {
@@ -660,6 +724,11 @@ public class PeerConnectionClient {
     if (dataChannel != null) {
       dataChannel.dispose();
       dataChannel = null;
+    }
+    if (rtcEventLog != null) {
+      // RtcEventLog should stop before the peer connection is disposed.
+      rtcEventLog.stop();
+      rtcEventLog = null;
     }
     if (peerConnection != null) {
       peerConnection.dispose();
@@ -686,6 +755,11 @@ public class PeerConnectionClient {
       videoSource.dispose();
       videoSource = null;
     }
+    if (saveRecordedAudioToFile != null) {
+      Log.d(TAG, "Closing audio file for recorded input audio.");
+      saveRecordedAudioToFile.stop();
+      saveRecordedAudioToFile = null;
+    }
     localRender = null;
     remoteRenders = null;
     Log.d(TAG, "Closing peer connection factory.");
@@ -694,6 +768,7 @@ public class PeerConnectionClient {
       factory = null;
     }
     options = null;
+    rootEglBase.release();
     Log.d(TAG, "Closing peer connection done.");
     events.onPeerConnectionClosed();
     PeerConnectionFactory.stopInternalTracingCapture();
@@ -702,13 +777,14 @@ public class PeerConnectionClient {
   }
 
   public boolean isHDVideo() {
-    if (!videoCallEnabled) {
-      return false;
-    }
-
-    return videoWidth * videoHeight >= 1280 * 720;
+    return videoCallEnabled && videoWidth * videoHeight >= 1280 * 720;
   }
 
+  public EglBase.Context getRenderContext() {
+    return rootEglBase.getEglBaseContext();
+  }
+
+  @SuppressWarnings("deprecation") // TODO(sakal): getStats is deprecated.
   private void getStats() {
     if (peerConnection == null || isError) {
       return;
@@ -940,7 +1016,7 @@ public class PeerConnectionClient {
 
     localVideoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, videoSource);
     localVideoTrack.setEnabled(renderVideo);
-    localVideoTrack.addRenderer(new VideoRenderer(localRender));
+    localVideoTrack.addSink(localRender);
     return localVideoTrack;
   }
 
@@ -956,6 +1032,7 @@ public class PeerConnectionClient {
     }
   }
 
+  @SuppressWarnings("StringSplitter")
   private static String setStartBitrate(
       String codec, boolean isVideoCodec, String sdpDescription, int bitrateKbps) {
     String[] lines = sdpDescription.split("\r\n");
@@ -1055,11 +1132,11 @@ public class PeerConnectionClient {
     }
     final List<String> header = origLineParts.subList(0, 3);
     final List<String> unpreferredPayloadTypes =
-        new ArrayList<String>(origLineParts.subList(3, origLineParts.size()));
+        new ArrayList<>(origLineParts.subList(3, origLineParts.size()));
     unpreferredPayloadTypes.removeAll(preferredPayloadTypes);
     // Reconstruct the line with |preferredPayloadTypes| moved to the beginning of the payload
     // types.
-    final List<String> newLineParts = new ArrayList<String>();
+    final List<String> newLineParts = new ArrayList<>();
     newLineParts.addAll(header);
     newLineParts.addAll(preferredPayloadTypes);
     newLineParts.addAll(unpreferredPayloadTypes);
@@ -1075,11 +1152,11 @@ public class PeerConnectionClient {
     }
     // A list with all the payload types with name |codec|. The payload types are integers in the
     // range 96-127, but they are stored as strings here.
-    final List<String> codecPayloadTypes = new ArrayList<String>();
+    final List<String> codecPayloadTypes = new ArrayList<>();
     // a=rtpmap:<payload type> <encoding name>/<clock rate> [/<encoding parameters>]
     final Pattern codecPattern = Pattern.compile("^a=rtpmap:(\\d+) " + codec + "(/\\d+)+[\r]?$");
-    for (int i = 0; i < lines.length; ++i) {
-      Matcher codecMatcher = codecPattern.matcher(lines[i]);
+    for (String line : lines) {
+      Matcher codecMatcher = codecPattern.matcher(line);
       if (codecMatcher.matches()) {
         codecPayloadTypes.add(codecMatcher.group(1));
       }
@@ -1110,7 +1187,7 @@ public class PeerConnectionClient {
 
   private void switchCameraInternal() {
     if (videoCapturer instanceof CameraVideoCapturer) {
-      if (!videoCallEnabled || isError || videoCapturer == null) {
+      if (!videoCallEnabled || isError) {
         Log.e(TAG, "Failed to switch camera. Video: " + videoCallEnabled + ". Error : " + isError);
         return; // No video is sent or only one camera is available or error happened.
       }
@@ -1245,6 +1322,7 @@ public class PeerConnectionClient {
         return;
 
       dc.registerObserver(new DataChannel.Observer() {
+        @Override
         public void onBufferedAmountChange(long previousAmount) {
           Log.d(TAG, "Data channel buffered amount changed: " + dc.label() + ": " + dc.state());
         }
@@ -1263,7 +1341,7 @@ public class PeerConnectionClient {
           ByteBuffer data = buffer.data;
           final byte[] bytes = new byte[data.capacity()];
           data.get(bytes);
-          String strData = new String(bytes);
+          String strData = new String(bytes, Charset.forName("UTF-8"));
           Log.d(TAG, "Got msg: " + strData + " over " + dc);
         }
       });

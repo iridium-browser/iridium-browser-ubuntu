@@ -15,8 +15,8 @@ class HTMLFrameElementTest : public ::testing::Test {};
 // Frame elements do not have any container-policy related attributes, but the
 // fullscreen feature should be unconditionally disabled.
 TEST_F(HTMLFrameElementTest, DefaultContainerPolicy) {
-  Document* document = Document::Create();
-  KURL document_url = KURL(NullURL(), "http://example.com");
+  Document* document = Document::CreateForTest();
+  const KURL document_url("http://example.com");
   document->SetURL(document_url);
   document->UpdateSecurityOrigin(SecurityOrigin::Create(document_url));
 
@@ -25,11 +25,12 @@ TEST_F(HTMLFrameElementTest, DefaultContainerPolicy) {
   frame_element->setAttribute(HTMLNames::srcAttr, "http://example.net/");
   frame_element->UpdateContainerPolicyForTests();
 
-  const WebParsedFeaturePolicy& container_policy =
+  const ParsedFeaturePolicy& container_policy =
       frame_element->ContainerPolicy();
   EXPECT_EQ(1UL, container_policy.size());
   // Fullscreen should be disabled in this frame
-  EXPECT_EQ(WebFeaturePolicyFeature::kFullscreen, container_policy[0].feature);
+  EXPECT_EQ(mojom::FeaturePolicyFeature::kFullscreen,
+            container_policy[0].feature);
   EXPECT_FALSE(container_policy[0].matches_all_origins);
   EXPECT_EQ(0UL, container_policy[0].origins.size());
 }

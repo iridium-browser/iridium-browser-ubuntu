@@ -26,6 +26,10 @@ SyncPrefs::SyncPrefs(PrefService* pref_service) : pref_service_(pref_service) {
   pref_sync_managed_.Init(
       prefs::kSyncManaged, pref_service_,
       base::Bind(&SyncPrefs::OnSyncManagedPrefChanged, base::Unretained(this)));
+  // Cache the value of the kEnableLocalSyncBackend pref to avoid it flipping
+  // during the lifetime of the service.
+  local_sync_enabled_ =
+      pref_service_->GetBoolean(prefs::kEnableLocalSyncBackend);
 }
 
 SyncPrefs::SyncPrefs() : pref_service_(nullptr) {}
@@ -169,7 +173,7 @@ void SyncPrefs::SetLastSyncedTime(base::Time time) {
 base::Time SyncPrefs::GetLastPollTime() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return base::Time::FromInternalValue(
-      pref_service_->GetInt64(prefs::kSyncLastSyncedTime));
+      pref_service_->GetInt64(prefs::kSyncLastPollTime));
 }
 
 void SyncPrefs::SetLastPollTime(base::Time time) {
@@ -559,7 +563,7 @@ void SyncPrefs::GetNigoriSpecificsForPassphraseTransition(
 }
 
 bool SyncPrefs::IsLocalSyncEnabled() const {
-  return pref_service_->GetBoolean(prefs::kEnableLocalSyncBackend);
+  return local_sync_enabled_;
 }
 
 base::FilePath SyncPrefs::GetLocalSyncBackendDir() const {

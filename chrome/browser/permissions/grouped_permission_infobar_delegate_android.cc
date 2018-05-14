@@ -24,18 +24,12 @@ infobars::InfoBar* GroupedPermissionInfoBarDelegate::Create(
     const base::WeakPtr<PermissionPromptAndroid>& permission_prompt,
     InfoBarService* infobar_service) {
   return infobar_service->AddInfoBar(
-      base::MakeUnique<GroupedPermissionInfoBar>(base::WrapUnique(
+      std::make_unique<GroupedPermissionInfoBar>(base::WrapUnique(
           new GroupedPermissionInfoBarDelegate(permission_prompt))));
 }
 
 size_t GroupedPermissionInfoBarDelegate::PermissionCount() const {
   return permission_prompt_->PermissionCount();
-}
-
-bool GroupedPermissionInfoBarDelegate::ShouldShowPersistenceToggle() const {
-  if (!permission_prompt_)
-    return false;
-  return permission_prompt_->ShouldShowPersistenceToggle();
 }
 
 ContentSettingsType GroupedPermissionInfoBarDelegate::GetContentSettingType(
@@ -52,20 +46,14 @@ base::string16 GroupedPermissionInfoBarDelegate::GetMessageText() const {
 }
 
 bool GroupedPermissionInfoBarDelegate::Accept() {
-  if (permission_prompt_) {
-    if (permission_prompt_->ShouldShowPersistenceToggle())
-      permission_prompt_->TogglePersist(persist_);
+  if (permission_prompt_)
     permission_prompt_->Accept();
-  }
   return true;
 }
 
 bool GroupedPermissionInfoBarDelegate::Cancel() {
-  if (permission_prompt_) {
-    if (permission_prompt_->ShouldShowPersistenceToggle())
-      permission_prompt_->TogglePersist(persist_);
+  if (permission_prompt_)
     permission_prompt_->Deny();
-  }
   return true;
 }
 
@@ -74,24 +62,15 @@ void GroupedPermissionInfoBarDelegate::InfoBarDismissed() {
     permission_prompt_->Closing();
 }
 
-base::string16 GroupedPermissionInfoBarDelegate::GetLinkText() const {
-  return permission_prompt_->GetLinkText();
-}
-
 GroupedPermissionInfoBarDelegate::GroupedPermissionInfoBarDelegate(
     const base::WeakPtr<PermissionPromptAndroid>& permission_prompt)
-    : persist_(true), permission_prompt_(permission_prompt) {
+    : permission_prompt_(permission_prompt) {
   DCHECK(permission_prompt);
 }
 
 infobars::InfoBarDelegate::InfoBarIdentifier
 GroupedPermissionInfoBarDelegate::GetIdentifier() const {
   return GROUPED_PERMISSION_INFOBAR_DELEGATE_ANDROID;
-}
-
-infobars::InfoBarDelegate::Type
-GroupedPermissionInfoBarDelegate::GetInfoBarType() const {
-  return PAGE_ACTION_TYPE;
 }
 
 int GroupedPermissionInfoBarDelegate::GetButtons() const {
@@ -102,10 +81,6 @@ base::string16 GroupedPermissionInfoBarDelegate::GetButtonLabel(
     InfoBarButton button) const {
   return l10n_util::GetStringUTF16((button == BUTTON_OK) ? IDS_PERMISSION_ALLOW
                                                          : IDS_PERMISSION_DENY);
-}
-
-GURL GroupedPermissionInfoBarDelegate::GetLinkURL() const {
-  return permission_prompt_->GetLinkURL();
 }
 
 bool GroupedPermissionInfoBarDelegate::EqualsDelegate(

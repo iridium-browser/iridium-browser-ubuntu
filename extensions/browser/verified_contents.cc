@@ -5,6 +5,7 @@
 #include "extensions/browser/verified_contents.h"
 
 #include <stddef.h>
+#include <algorithm>
 
 #include "base/base64url.h"
 #include "base/files/file_util.h"
@@ -96,7 +97,7 @@ bool VerifiedContents::InitFrom(const base::FilePath& path) {
     return false;
 
   std::unique_ptr<base::Value> value(base::JSONReader::Read(payload));
-  if (!value.get() || !value->IsType(Value::Type::DICTIONARY))
+  if (!value.get() || !value->is_dict())
     return false;
   DictionaryValue* dictionary = static_cast<DictionaryValue*>(value.get());
 
@@ -178,10 +179,11 @@ bool VerifiedContents::TreeHashRootEquals(const base::FilePath& relative_path,
                                           const std::string& expected) const {
   base::FilePath::StringType path = base::ToLowerASCII(
       relative_path.NormalizePathSeparatorsTo('/').value());
-  for (RootHashes::const_iterator i = root_hashes_.find(path);
-       i != root_hashes_.end();
-       ++i) {
-    if (expected == i->second)
+  std::pair<RootHashes::const_iterator, RootHashes::const_iterator> hashes =
+      root_hashes_.equal_range(path);
+  for (RootHashes::const_iterator iter = hashes.first; iter != hashes.second;
+       ++iter) {
+    if (expected == iter->second)
       return true;
   }
   return false;
@@ -234,7 +236,7 @@ bool VerifiedContents::GetPayload(const base::FilePath& path,
   if (!base::ReadFileToString(path, &contents))
     return false;
   std::unique_ptr<base::Value> value(base::JSONReader::Read(contents));
-  if (!value.get() || !value->IsType(Value::Type::LIST))
+  if (!value.get() || !value->is_list())
     return false;
   ListValue* top_list = static_cast<ListValue*>(value.get());
 

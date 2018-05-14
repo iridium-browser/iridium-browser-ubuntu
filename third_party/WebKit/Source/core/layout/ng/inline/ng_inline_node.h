@@ -6,11 +6,10 @@
 #define NGInlineNode_h
 
 #include "core/CoreExport.h"
+#include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/ng/inline/ng_inline_item.h"
 #include "core/layout/ng/inline/ng_inline_node_data.h"
-#include "core/layout/ng/layout_ng_block_flow.h"
 #include "core/layout/ng/ng_layout_input_node.h"
-#include "platform/heap/Handle.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
@@ -20,36 +19,40 @@ class NGInlineItemsBuilderTemplate;
 
 class EmptyOffsetMappingBuilder;
 class LayoutBlockFlow;
-class LayoutNGBlockFlow;
-struct MinMaxContentSize;
+struct MinMaxSize;
 class NGConstraintSpace;
 class NGInlineItem;
 class NGInlineItemRange;
 using NGInlineItemsBuilder =
     NGInlineItemsBuilderTemplate<EmptyOffsetMappingBuilder>;
+struct NGInlineNodeData;
 class NGLayoutResult;
-struct NGOffsetMappingResult;
+class NGOffsetMapping;
+class NGInlineNodeLegacy;
 
 // Represents an anonymous block box to be laid out, that contains consecutive
 // inline nodes and their descendants.
 class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
  public:
-  NGInlineNode(LayoutNGBlockFlow*);
+  NGInlineNode(LayoutBlockFlow*);
 
   LayoutBlockFlow* GetLayoutBlockFlow() const {
     return ToLayoutBlockFlow(box_);
   }
-  NGLayoutInputNode NextSibling();
+  NGLayoutInputNode NextSibling() { return nullptr; }
 
-  RefPtr<NGLayoutResult> Layout(NGConstraintSpace*, NGBreakToken* = nullptr);
+  // True in quirks mode or limited-quirks mode, which require line-height
+  // quirks.
+  // https://quirks.spec.whatwg.org/#the-line-height-calculation-quirk
+  bool InLineHeightQuirksMode() const;
+
+  scoped_refptr<NGLayoutResult> Layout(const NGConstraintSpace&,
+                                       NGBreakToken* = nullptr);
 
   // Computes the value of min-content and max-content for this anonymous block
   // box. min-content is the inline size when lines wrap at every break
   // opportunity, and max-content is when lines do not wrap at all.
-  MinMaxContentSize ComputeMinMaxContentSize();
-
-  // Copy fragment data of all lines to LayoutBlockFlow.
-  void CopyFragmentDataToLayoutBox(const NGConstraintSpace&, NGLayoutResult*);
+  MinMaxSize ComputeMinMaxSize(const MinMaxSizeInput&);
 
   // Instruct to re-compute |PrepareLayout| on the next layout.
   void InvalidatePrepareLayout();
@@ -60,20 +63,18 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
                       end_offset - start_offset);
   }
 
-  const Vector<NGInlineItem>& Items() const { return Data().items_; }
+  const Vector<NGInlineItem>& Items(bool is_first_line = false) const;
   NGInlineItemRange Items(unsigned start_index, unsigned end_index);
-
-  void GetLayoutTextOffsets(Vector<unsigned, 32>*);
 
   // Returns the DOM to text content offset mapping of this block. If it is not
   // computed before, compute and store it in NGInlineNodeData.
   // This funciton must be called with clean layout.
-  const NGOffsetMappingResult& ComputeOffsetMappingIfNeeded();
+  const NGOffsetMapping* ComputeOffsetMappingIfNeeded();
 
   bool IsBidiEnabled() const { return Data().is_bidi_enabled_; }
   TextDirection BaseDirection() const { return Data().BaseDirection(); }
 
-  bool IsEmptyInline() const { return Data().is_empty_inline_; }
+  bool IsEmptyInline() { return EnsureData().is_empty_inline_; }
 
   void AssertOffset(unsigned index, unsigned offset) const;
   void AssertEndOffset(unsigned index, unsigned offset) const;
@@ -82,23 +83,24 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   String ToString() const;
 
  protected:
+  bool IsPrepareLayoutFinished() const;
+
   // Prepare inline and text content for layout. Must be called before
   // calling the Layout method.
-  void PrepareLayout();
-  bool IsPrepareLayoutFinished() const { return !Text().IsNull(); }
+  void PrepareLayoutIfNeeded();
 
-  void CollectInlines();
-  void SegmentText();
-  void ShapeText();
+  void CollectInlines(NGInlineNodeData*);
+  void SegmentText(NGInlineNodeData*);
+  void ShapeText(NGInlineNodeData*);
+  void ShapeText(const String&, Vector<NGInlineItem>*);
+  void ShapeTextForFirstLineIfNeeded(NGInlineNodeData*);
 
-  NGInlineNodeData& MutableData() {
-    return ToLayoutNGBlockFlow(box_)->GetNGInlineNodeData();
-  }
-  const NGInlineNodeData& Data() const {
-    return ToLayoutNGBlockFlow(box_)->GetNGInlineNodeData();
-  }
+  NGInlineNodeData* MutableData();
+  const NGInlineNodeData& Data() const;
+  const NGInlineNodeData& EnsureData();
 
   friend class NGLineBreakerTest;
+  friend class NGInlineNodeLegacy;
 };
 
 inline void NGInlineNode::AssertOffset(unsigned index, unsigned offset) const {

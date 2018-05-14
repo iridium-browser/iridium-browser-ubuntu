@@ -15,6 +15,7 @@
 
 #include "angle_gl.h"
 #include "common/angleutils.h"
+#include "compiler/translator/IntermNodePatternMatcher.h"
 #include "compiler/translator/IntermNode_util.h"
 #include "compiler/translator/IntermTraverse.h"
 
@@ -23,28 +24,6 @@ namespace sh
 
 namespace
 {
-
-bool ContainsMatrixNode(const TIntermSequence &sequence)
-{
-    for (size_t ii = 0; ii < sequence.size(); ++ii)
-    {
-        TIntermTyped *node = sequence[ii]->getAsTyped();
-        if (node && node->isMatrix())
-            return true;
-    }
-    return false;
-}
-
-bool ContainsVectorNode(const TIntermSequence &sequence)
-{
-    for (size_t ii = 0; ii < sequence.size(); ++ii)
-    {
-        TIntermTyped *node = sequence[ii]->getAsTyped();
-        if (node && node->isVector())
-            return true;
-    }
-    return false;
-}
 
 TIntermBinary *ConstructVectorIndexBinaryNode(TIntermSymbol *symbolNode, int index)
 {
@@ -66,7 +45,8 @@ class ScalarizeArgsTraverser : public TIntermTraverser
                            TSymbolTable *symbolTable)
         : TIntermTraverser(true, false, false, symbolTable),
           mShaderType(shaderType),
-          mFragmentPrecisionHigh(fragmentPrecisionHigh)
+          mFragmentPrecisionHigh(fragmentPrecisionHigh),
+          mNodesToScalarize(IntermNodePatternMatcher::kScalarizedVecOrMatConstructor)
     {
     }
 
@@ -86,22 +66,30 @@ class ScalarizeArgsTraverser : public TIntermTraverser
     //   vec4 v(1, s0[0][0], s0[0][1], s0[0][2]);
     // This function is to create nodes for "mat4 s0 = m;" and insert it to the code sequence. This
     // way the possible side effects of the constructor argument will only be evaluated once.
-    void createTempVariable(TIntermTyped *original);
+    TVariable *createTempVariable(TIntermTyped *original);
 
     std::vector<TIntermSequence> mBlockStack;
 
     sh::GLenum mShaderType;
     bool mFragmentPrecisionHigh;
+
+    IntermNodePatternMatcher mNodesToScalarize;
 };
 
 bool ScalarizeArgsTraverser::visitAggregate(Visit visit, TIntermAggregate *node)
 {
-    if (visit == PreVisit && node->getOp() == EOpConstruct)
+    ASSERT(visit == PreVisit);
+    if (mNodesToScalarize.match(node, getParentNode()))
     {
-        if (node->getType().isVector() && ContainsMatrixNode(*(node->getSequence())))
+        if (node->getType().isVector())
+        {
             scalarizeArgs(node, false, true);
-        else if (node->getType().isMatrix() && ContainsVectorNode(*(node->getSequence())))
+        }
+        else
+        {
+            ASSERT(node->getType().isMatrix());
             scalarizeArgs(node, true, false);
+        }
     }
     return true;
 }
@@ -134,55 +122,55 @@ void ScalarizeArgsTraverser::scalarizeArgs(TIntermAggregate *aggregate,
     ASSERT(!aggregate->isArray());
     int size                  = static_cast<int>(aggregate->getType().getObjectSize());
     TIntermSequence *sequence = aggregate->getSequence();
-    TIntermSequence original(*sequence);
+    TIntermSequence originalArgs(*sequence);
     sequence->clear();
-    for (size_t ii = 0; ii < original.size(); ++ii)
+    for (TIntermNode *originalArgNode : originalArgs)
     {
         ASSERT(size > 0);
-        TIntermTyped *node = original[ii]->getAsTyped();
-        ASSERT(node);
-        createTempVariable(node);
-        if (node->isScalar())
+        TIntermTyped *originalArg = originalArgNode->getAsTyped();
+        ASSERT(originalArg);
+        TVariable *argVariable = createTempVariable(originalArg);
+        if (originalArg->isScalar())
         {
-            sequence->push_back(createTempSymbol(node->getType()));
+            sequence->push_back(CreateTempSymbolNode(argVariable));
             size--;
         }
-        else if (node->isVector())
+        else if (originalArg->isVector())
         {
             if (scalarizeVector)
             {
-                int repeat = std::min(size, node->getNominalSize());
+                int repeat = std::min(size, originalArg->getNominalSize());
                 size -= repeat;
                 for (int index = 0; index < repeat; ++index)
                 {
-                    TIntermSymbol *symbolNode = createTempSymbol(node->getType());
+                    TIntermSymbol *symbolNode = CreateTempSymbolNode(argVariable);
                     TIntermBinary *newNode    = ConstructVectorIndexBinaryNode(symbolNode, index);
                     sequence->push_back(newNode);
                 }
             }
             else
             {
-                TIntermSymbol *symbolNode = createTempSymbol(node->getType());
+                TIntermSymbol *symbolNode = CreateTempSymbolNode(argVariable);
                 sequence->push_back(symbolNode);
-                size -= node->getNominalSize();
+                size -= originalArg->getNominalSize();
             }
         }
         else
         {
-            ASSERT(node->isMatrix());
+            ASSERT(originalArg->isMatrix());
             if (scalarizeMatrix)
             {
                 int colIndex = 0, rowIndex = 0;
-                int repeat = std::min(size, node->getCols() * node->getRows());
+                int repeat = std::min(size, originalArg->getCols() * originalArg->getRows());
                 size -= repeat;
                 while (repeat > 0)
                 {
-                    TIntermSymbol *symbolNode = createTempSymbol(node->getType());
+                    TIntermSymbol *symbolNode = CreateTempSymbolNode(argVariable);
                     TIntermBinary *newNode =
                         ConstructMatrixIndexBinaryNode(symbolNode, colIndex, rowIndex);
                     sequence->push_back(newNode);
                     rowIndex++;
-                    if (rowIndex >= node->getRows())
+                    if (rowIndex >= originalArg->getRows())
                     {
                         rowIndex = 0;
                         colIndex++;
@@ -192,36 +180,37 @@ void ScalarizeArgsTraverser::scalarizeArgs(TIntermAggregate *aggregate,
             }
             else
             {
-                TIntermSymbol *symbolNode = createTempSymbol(node->getType());
+                TIntermSymbol *symbolNode = CreateTempSymbolNode(argVariable);
                 sequence->push_back(symbolNode);
-                size -= node->getCols() * node->getRows();
+                size -= originalArg->getCols() * originalArg->getRows();
             }
         }
     }
 }
 
-void ScalarizeArgsTraverser::createTempVariable(TIntermTyped *original)
+TVariable *ScalarizeArgsTraverser::createTempVariable(TIntermTyped *original)
 {
     ASSERT(original);
-    nextTemporaryId();
-    TIntermDeclaration *decl = createTempInitDeclaration(original);
 
-    TType type = original->getType();
-    if (mShaderType == GL_FRAGMENT_SHADER && type.getBasicType() == EbtFloat &&
-        type.getPrecision() == EbpUndefined)
+    TType *type = new TType(original->getType());
+    type->setQualifier(EvqTemporary);
+    if (mShaderType == GL_FRAGMENT_SHADER && type->getBasicType() == EbtFloat &&
+        type->getPrecision() == EbpUndefined)
     {
         // We use the highest available precision for the temporary variable
         // to avoid computing the actual precision using the rules defined
         // in GLSL ES 1.0 Section 4.5.2.
-        TIntermBinary *init = decl->getSequence()->at(0)->getAsBinaryNode();
-        init->getTypePointer()->setPrecision(mFragmentPrecisionHigh ? EbpHigh : EbpMedium);
-        init->getLeft()->getTypePointer()->setPrecision(mFragmentPrecisionHigh ? EbpHigh
-                                                                               : EbpMedium);
+        type->setPrecision(mFragmentPrecisionHigh ? EbpHigh : EbpMedium);
     }
+
+    TVariable *variable = CreateTempVariable(mSymbolTable, type);
 
     ASSERT(mBlockStack.size() > 0);
     TIntermSequence &sequence = mBlockStack.back();
-    sequence.push_back(decl);
+    TIntermDeclaration *declaration = CreateTempInitDeclarationNode(variable, original);
+    sequence.push_back(declaration);
+
+    return variable;
 }
 
 }  // namespace anonymous

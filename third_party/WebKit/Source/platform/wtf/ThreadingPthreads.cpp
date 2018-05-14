@@ -34,18 +34,18 @@
 
 #if defined(OS_POSIX)
 
-#include "platform/wtf/CurrentTime.h"
+#include <errno.h>
+#include <limits.h>
+#include <sched.h>
+#include <sys/time.h>
 #include "platform/wtf/DateMath.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "platform/wtf/ThreadSpecific.h"
 #include "platform/wtf/ThreadingPrimitives.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/WTFThreadData.h"
 #include "platform/wtf/dtoa/double-conversion.h"
-#include <errno.h>
-#include <limits.h>
-#include <sched.h>
-#include <sys/time.h>
 
 #if defined(OS_MACOSX)
 #include <objc/objc-auto.h>
@@ -204,7 +204,7 @@ ThreadCondition::~ThreadCondition() {
   pthread_cond_destroy(&condition_);
 }
 
-void ThreadCondition::Wait(MutexBase& mutex) {
+void ThreadCondition::Wait(Mutex& mutex) {
   PlatformMutex& platform_mutex = mutex.Impl();
   int result = pthread_cond_wait(&condition_, &platform_mutex.internal_mutex_);
   DCHECK_EQ(result, 0);
@@ -213,7 +213,7 @@ void ThreadCondition::Wait(MutexBase& mutex) {
 #endif
 }
 
-bool ThreadCondition::TimedWait(MutexBase& mutex, double absolute_time) {
+bool ThreadCondition::TimedWait(Mutex& mutex, double absolute_time) {
   if (absolute_time < CurrentTime())
     return false;
 

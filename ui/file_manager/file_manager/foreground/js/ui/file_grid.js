@@ -84,10 +84,9 @@ FileGrid.decorate = function(
 
   self.itemConstructor = function(entry) {
     var item = self.ownerDocument.createElement('li');
-    FileGrid.Item.decorate(
-        item,
-        entry,
-        /** @type {FileGrid} */ (self));
+    item.__proto__ = FileGrid.Item.prototype;
+    item = /** @type {!FileGrid.Item} */ (item);
+    self.decorateThumbnail_(item, entry);
     return item;
   };
 
@@ -133,6 +132,25 @@ FileGrid.prototype.setListThumbnailLoader = function(listThumbnailLoader) {
     this.listThumbnailLoader_.setHighPriorityRange(
         this.beginIndex_, this.endIndex_);
   }
+};
+
+/**
+ * Returns the element containing the thumbnail of a certain list item as
+ * background image.
+ * @param {number} index The index of the item containing the desired thumbnail.
+ * @return {?Element} The element containing the thumbnail, or null, if an error
+ *     occurred.
+ */
+FileGrid.prototype.getThumbnail = function(index) {
+  var listItem = this.getListItemByIndex(index);
+  if (!listItem) {
+    return null;
+  }
+  var container = listItem.querySelector('.img-container');
+  if (!container) {
+    return null;
+  }
+  return container.querySelector('.thumbnail');
 };
 
 /**
@@ -537,12 +555,12 @@ FileGrid.prototype.decorateThumbnail_ = function(li, entry) {
 
   var isDirectory = entry && entry.isDirectory;
   if (!isDirectory) {
-    var active_checkmark = li.ownerDocument.createElement('div');
-    active_checkmark.className = 'checkmark active';
-    frame.appendChild(active_checkmark);
-    var inactive_checkmark = li.ownerDocument.createElement('div');
-    inactive_checkmark.className = 'checkmark inactive';
-    frame.appendChild(inactive_checkmark);
+    var activeCheckmark = li.ownerDocument.createElement('div');
+    activeCheckmark.className = 'checkmark active';
+    frame.appendChild(activeCheckmark);
+    var inactiveCheckmark = li.ownerDocument.createElement('div');
+    inactiveCheckmark.className = 'checkmark inactive';
+    frame.appendChild(inactiveCheckmark);
   }
 
   var badge = li.ownerDocument.createElement('div');
@@ -786,18 +804,25 @@ Object.defineProperty(FileGrid.Item.prototype, 'label', {
 });
 
 /**
- * @param {Element} li List item element.
- * @param {!Entry} entry File entry.
- * @param {FileGrid} grid Owner.
+ * @override
  */
-FileGrid.Item.decorate = function(li, entry, grid) {
-  li.__proto__ = FileGrid.Item.prototype;
-  li = /** @type {!FileGrid.Item} */ (li);
-  grid.decorateThumbnail_(li, entry);
-
+FileGrid.Item.prototype.decorate = function() {
+  cr.ui.ListItem.prototype.decorate.apply(this);
   // Override the default role 'listitem' to 'option' to match the parent's
   // role (listbox).
-  li.setAttribute('role', 'option');
+  this.setAttribute('role', 'option');
+};
+
+/**
+ * Returns whether the drag event is inside a file entry in the list (and not
+ * the background padding area).
+ * @param {MouseEvent} event Drag start event.
+ * @return {boolean} True if the mouse is over an element in the list, False if
+ *                   it is in the background.
+ */
+FileGrid.prototype.hasDragHitElement = function(event) {
+  var pos = DragSelector.getScrolledPosition(this, event);
+  return this.getHitElements(pos.x, pos.y).length !== 0;
 };
 
 /**
@@ -807,8 +832,8 @@ FileGrid.Item.decorate = function(li, entry, grid) {
  * @return {boolean} True if the mouse is hit to the background of the list.
  */
 FileGrid.prototype.shouldStartDragSelection = function(event) {
-  var pos = DragSelector.getScrolledPosition(this, event);
-  return this.getHitElements(pos.x, pos.y).length === 0;
+  // Start dragging area if the drag starts outside of the contents of the grid.
+  return !this.hasDragHitElement(event);
 };
 
 /**

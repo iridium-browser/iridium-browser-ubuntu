@@ -5,13 +5,15 @@
 #include "content/renderer/dom_storage/dom_storage_cached_area.h"
 
 #include <stdint.h>
-
 #include <list>
+#include <memory>
 
 #include "base/bind.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/renderer/dom_storage/dom_storage_proxy.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/scheduler/test/fake_renderer_scheduler.h"
 
 namespace content {
 
@@ -37,6 +39,7 @@ class MockProxy : public DOMStorageProxy {
   void SetItem(int connection_id,
                const base::string16& key,
                const base::string16& value,
+               const base::NullableString16& old_value,
                const GURL& page_url,
                const CompletionCallback& callback) override {
     pending_callbacks_.push_back(callback);
@@ -49,6 +52,7 @@ class MockProxy : public DOMStorageProxy {
 
   void RemoveItem(int connection_id,
                   const base::string16& key,
+                  const base::NullableString16& old_value,
                   const GURL& page_url,
                   const CompletionCallback& callback) override {
     pending_callbacks_.push_back(callback);
@@ -113,20 +117,23 @@ class MockProxy : public DOMStorageProxy {
 class DOMStorageCachedAreaTest : public testing::Test {
  public:
   DOMStorageCachedAreaTest()
-    : kNamespaceId(10),
-      kOrigin("http://dom_storage/"),
-      kKey(base::ASCIIToUTF16("key")),
-      kValue(base::ASCIIToUTF16("value")),
-      kPageUrl("http://dom_storage/page") {
-  }
+      : kNamespaceId("id"),
+        kOrigin("http://dom_storage/"),
+        kKey(base::ASCIIToUTF16("key")),
+        kValue(base::ASCIIToUTF16("value")),
+        kPageUrl("http://dom_storage/page") {}
 
-  const int64_t kNamespaceId;
+  const std::string kNamespaceId;
   const GURL kOrigin;
   const base::string16 kKey;
   const base::string16 kValue;
   const GURL kPageUrl;
 
-  void SetUp() override { mock_proxy_ = new MockProxy(); }
+  void SetUp() override {
+    renderer_scheduler_ =
+        std::make_unique<blink::scheduler::FakeRendererScheduler>();
+    mock_proxy_ = new MockProxy();
+  }
 
   bool IsPrimed(DOMStorageCachedArea* cached_area) {
     return cached_area->map_.get();
@@ -152,13 +159,15 @@ class DOMStorageCachedAreaTest : public testing::Test {
   }
 
  protected:
+  base::MessageLoop message_loop_;  // Needed to construct a RendererScheduler.
+  std::unique_ptr<blink::scheduler::RendererScheduler> renderer_scheduler_;
   scoped_refptr<MockProxy> mock_proxy_;
 };
 
 TEST_F(DOMStorageCachedAreaTest, Basics) {
   EXPECT_TRUE(mock_proxy_->HasOneRef());
-  scoped_refptr<DOMStorageCachedArea> cached_area =
-      new DOMStorageCachedArea(kNamespaceId, kOrigin, mock_proxy_.get());
+  scoped_refptr<DOMStorageCachedArea> cached_area = new DOMStorageCachedArea(
+      kNamespaceId, kOrigin, mock_proxy_.get(), renderer_scheduler_.get());
   EXPECT_EQ(kNamespaceId, cached_area->namespace_id());
   EXPECT_EQ(kOrigin, cached_area->origin());
   EXPECT_FALSE(mock_proxy_->HasOneRef());
@@ -182,8 +191,8 @@ TEST_F(DOMStorageCachedAreaTest, Basics) {
 
 TEST_F(DOMStorageCachedAreaTest, Getters) {
   const int kConnectionId = 7;
-  scoped_refptr<DOMStorageCachedArea> cached_area =
-      new DOMStorageCachedArea(kNamespaceId, kOrigin, mock_proxy_.get());
+  scoped_refptr<DOMStorageCachedArea> cached_area = new DOMStorageCachedArea(
+      kNamespaceId, kOrigin, mock_proxy_.get(), renderer_scheduler_.get());
 
   // GetLength, we expect to see one call to load in the proxy.
   EXPECT_FALSE(IsPrimed(cached_area.get()));
@@ -217,8 +226,8 @@ TEST_F(DOMStorageCachedAreaTest, Getters) {
 
 TEST_F(DOMStorageCachedAreaTest, Setters) {
   const int kConnectionId = 7;
-  scoped_refptr<DOMStorageCachedArea> cached_area =
-      new DOMStorageCachedArea(kNamespaceId, kOrigin, mock_proxy_.get());
+  scoped_refptr<DOMStorageCachedArea> cached_area = new DOMStorageCachedArea(
+      kNamespaceId, kOrigin, mock_proxy_.get(), renderer_scheduler_.get());
 
   // SetItem, we expect a call to load followed by a call to set item
   // in the proxy.
@@ -272,8 +281,8 @@ TEST_F(DOMStorageCachedAreaTest, Setters) {
 
 TEST_F(DOMStorageCachedAreaTest, MutationsAreIgnoredUntilLoadCompletion) {
   const int kConnectionId = 7;
-  scoped_refptr<DOMStorageCachedArea> cached_area =
-      new DOMStorageCachedArea(kNamespaceId, kOrigin, mock_proxy_.get());
+  scoped_refptr<DOMStorageCachedArea> cached_area = new DOMStorageCachedArea(
+      kNamespaceId, kOrigin, mock_proxy_.get(), renderer_scheduler_.get());
   EXPECT_TRUE(cached_area->GetItem(kConnectionId, kKey).is_null());
   EXPECT_TRUE(IsPrimed(cached_area.get()));
   EXPECT_TRUE(IsIgnoringAllMutations(cached_area.get()));
@@ -295,8 +304,8 @@ TEST_F(DOMStorageCachedAreaTest, MutationsAreIgnoredUntilLoadCompletion) {
 
 TEST_F(DOMStorageCachedAreaTest, MutationsAreIgnoredUntilClearCompletion) {
   const int kConnectionId = 4;
-  scoped_refptr<DOMStorageCachedArea> cached_area =
-      new DOMStorageCachedArea(kNamespaceId, kOrigin, mock_proxy_.get());
+  scoped_refptr<DOMStorageCachedArea> cached_area = new DOMStorageCachedArea(
+      kNamespaceId, kOrigin, mock_proxy_.get(), renderer_scheduler_.get());
   cached_area->Clear(kConnectionId, kPageUrl);
   EXPECT_TRUE(IsIgnoringAllMutations(cached_area.get()));
   mock_proxy_->CompleteOnePendingCallback(true);
@@ -317,8 +326,8 @@ TEST_F(DOMStorageCachedAreaTest, MutationsAreIgnoredUntilClearCompletion) {
 
 TEST_F(DOMStorageCachedAreaTest, KeyMutationsAreIgnoredUntilCompletion) {
   const int kConnectionId = 8;
-  scoped_refptr<DOMStorageCachedArea> cached_area =
-      new DOMStorageCachedArea(kNamespaceId, kOrigin, mock_proxy_.get());
+  scoped_refptr<DOMStorageCachedArea> cached_area = new DOMStorageCachedArea(
+      kNamespaceId, kOrigin, mock_proxy_.get(), renderer_scheduler_.get());
 
   // SetItem
   EXPECT_TRUE(cached_area->SetItem(kConnectionId, kKey, kValue, kPageUrl));

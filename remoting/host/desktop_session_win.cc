@@ -6,6 +6,7 @@
 
 #include <objbase.h>
 #include <sddl.h>
+#include <wrl/client.h>
 
 #include <limits>
 #include <memory>
@@ -16,7 +17,6 @@
 #include "base/files/file_path.h"
 #include "base/guid.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/stringprintf.h"
@@ -25,7 +25,6 @@
 #include "base/timer/timer.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_bstr.h"
-#include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
 #include "ipc/ipc_message_macros.h"
@@ -38,6 +37,7 @@
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/sas_injector.h"
 #include "remoting/host/screen_resolution.h"
+#include "remoting/host/switches.h"
 // MIDL-generated declarations and definitions.
 #include "remoting/host/win/chromoting_lib.h"
 #include "remoting/host/win/host_service.h"
@@ -205,7 +205,7 @@ class RdpSession : public DesktopSessionWin {
                                   DWORD* value);
 
   // Used to create an RDP desktop session.
-  base::win::ScopedComPtr<IRdpDesktopSession> rdp_desktop_session_;
+  Microsoft::WRL::ComPtr<IRdpDesktopSession> rdp_desktop_session_;
 
   // Used to match |rdp_desktop_session_| with the session it is attached to.
   std::string terminal_id_;
@@ -303,7 +303,7 @@ bool RdpSession::Initialize(const ScreenResolution& resolution) {
   }
 
   // Create an RDP session.
-  base::win::ScopedComPtr<IRdpDesktopSessionEventHandler> event_handler(
+  Microsoft::WRL::ComPtr<IRdpDesktopSessionEventHandler> event_handler(
       new EventHandler(weak_factory_.GetWeakPtr()));
   terminal_id_ = base::GenerateGUID();
   base::win::ScopedBstr terminal_id(base::UTF8ToUTF16(terminal_id_).c_str());
@@ -481,7 +481,7 @@ std::unique_ptr<DesktopSession> DesktopSessionWin::CreateForConsole(
     DaemonProcess* daemon_process,
     int id,
     const ScreenResolution& resolution) {
-  return base::MakeUnique<ConsoleSession>(caller_task_runner, io_task_runner,
+  return std::make_unique<ConsoleSession>(caller_task_runner, io_task_runner,
                                           daemon_process, id,
                                           HostService::GetInstance());
 }
@@ -678,8 +678,7 @@ void DesktopSessionWin::OnDesktopSessionAgentAttached(
   }
 }
 
-void DesktopSessionWin::CrashDesktopProcess(
-    const tracked_objects::Location& location) {
+void DesktopSessionWin::CrashDesktopProcess(const base::Location& location) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   launcher_->Crash(location);

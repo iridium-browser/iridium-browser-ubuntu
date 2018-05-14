@@ -52,7 +52,7 @@ template <typename T>
 class Resetter {
  public:
   explicit Resetter(T* value) : value_(*value) { *value = 0; }
-  ~Resetter() {}
+  ~Resetter() = default;
   T value() { return value_; }
 
  private:
@@ -65,16 +65,7 @@ class TestObserver : public WindowTreeHostManager::Observer,
                      public aura::client::FocusChangeObserver,
                      public ::wm::ActivationChangeObserver {
  public:
-  TestObserver()
-      : changing_count_(0),
-        changed_count_(0),
-        bounds_changed_count_(0),
-        rotation_changed_count_(0),
-        workarea_changed_count_(0),
-        primary_changed_count_(0),
-        changed_display_id_(0),
-        focus_changed_count_(0),
-        activation_changed_count_(0) {
+  TestObserver() {
     Shell::Get()->window_tree_host_manager()->AddObserver(this);
     display::Screen::GetScreen()->AddObserver(this);
     aura::client::GetFocusClient(Shell::GetPrimaryRootWindow())
@@ -162,17 +153,17 @@ class TestObserver : public WindowTreeHostManager::Observer,
   }
 
  private:
-  int changing_count_;
-  int changed_count_;
+  int changing_count_ = 0;
+  int changed_count_ = 0;
 
-  int bounds_changed_count_;
-  int rotation_changed_count_;
-  int workarea_changed_count_;
-  int primary_changed_count_;
-  int64_t changed_display_id_;
+  int bounds_changed_count_ = 0;
+  int rotation_changed_count_ = 0;
+  int workarea_changed_count_ = 0;
+  int primary_changed_count_ = 0;
+  int64_t changed_display_id_ = 0;
 
-  int focus_changed_count_;
-  int activation_changed_count_;
+  int focus_changed_count_ = 0;
+  int activation_changed_count_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(TestObserver);
 };
@@ -198,7 +189,7 @@ class TestHelper {
 };
 
 TestHelper::TestHelper(AshTestBase* delegate) : delegate_(delegate) {}
-TestHelper::~TestHelper() {}
+TestHelper::~TestHelper() = default;
 
 void TestHelper::SetSecondaryDisplayLayoutAndOffset(
     display::DisplayPlacement::Position position,
@@ -230,7 +221,7 @@ class WindowTreeHostManagerShutdownTest : public AshTestBase,
                                           public TestHelper {
  public:
   WindowTreeHostManagerShutdownTest() : TestHelper(this) {}
-  ~WindowTreeHostManagerShutdownTest() override {}
+  ~WindowTreeHostManagerShutdownTest() override = default;
 
   void TearDown() override {
     AshTestBase::TearDown();
@@ -250,7 +241,7 @@ class StartupHelper : public TestShellDelegate,
                       public WindowTreeHostManager::Observer {
  public:
   StartupHelper() : displays_initialized_(false) {}
-  ~StartupHelper() override {}
+  ~StartupHelper() override = default;
 
   // ShellDelegate:
   void PreInit() override {
@@ -275,7 +266,7 @@ class WindowTreeHostManagerStartupTest : public AshTestBase, public TestHelper {
  public:
   WindowTreeHostManagerStartupTest()
       : TestHelper(this), startup_helper_(new StartupHelper) {}
-  ~WindowTreeHostManagerStartupTest() override {}
+  ~WindowTreeHostManagerStartupTest() override = default;
 
   // AshTestBase:
   void SetUp() override {
@@ -305,7 +296,7 @@ class TestEventHandler : public ui::EventHandler {
         scroll_y_offset_(0.0),
         scroll_x_offset_ordinal_(0.0),
         scroll_y_offset_ordinal_(0.0) {}
-  ~TestEventHandler() override {}
+  ~TestEventHandler() override = default;
 
   void OnMouseEvent(ui::MouseEvent* event) override {
     if (event->flags() & ui::EF_IS_SYNTHESIZED &&
@@ -377,7 +368,7 @@ class TestEventHandler : public ui::EventHandler {
 
 class TestMouseWatcherListener : public views::MouseWatcherListener {
  public:
-  TestMouseWatcherListener() {}
+  TestMouseWatcherListener() = default;
 
  private:
   // views::MouseWatcherListener:
@@ -391,7 +382,7 @@ class TestMouseWatcherListener : public views::MouseWatcherListener {
 class WindowTreeHostManagerTest : public AshTestBase, public TestHelper {
  public:
   WindowTreeHostManagerTest() : TestHelper(this) {}
-  ~WindowTreeHostManagerTest() override {}
+  ~WindowTreeHostManagerTest() override = default;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WindowTreeHostManagerTest);
@@ -552,7 +543,7 @@ display::ManagedDisplayInfo
 CreateDisplayInfo(int64_t id, int y, display::Display::Rotation rotation) {
   display::ManagedDisplayInfo info(id, "", false);
   info.SetBounds(gfx::Rect(0, y, 500, 500));
-  info.SetRotation(rotation, display::Display::ROTATION_SOURCE_ACTIVE);
+  info.SetRotation(rotation, display::Display::RotationSource::ACTIVE);
   return info;
 }
 
@@ -677,14 +668,14 @@ TEST_F(WindowTreeHostManagerTest, BoundsUpdated) {
   int64_t primary_id = GetPrimaryDisplay().id();
   display_manager()->SetDisplayRotation(
       primary_id, display::Display::ROTATE_90,
-      display::Display::ROTATION_SOURCE_ACTIVE);
+      display::Display::RotationSource::ACTIVE);
   EXPECT_EQ(1, observer.GetRotationChangedCountAndReset());
   EXPECT_EQ(1, observer.CountAndReset());
   EXPECT_EQ(0, observer.GetFocusChangedCountAndReset());
   EXPECT_EQ(0, observer.GetActivationChangedCountAndReset());
   display_manager()->SetDisplayRotation(
       primary_id, display::Display::ROTATE_90,
-      display::Display::ROTATION_SOURCE_ACTIVE);
+      display::Display::RotationSource::ACTIVE);
   EXPECT_EQ(0, observer.GetRotationChangedCountAndReset());
   EXPECT_EQ(0, observer.CountAndReset());
   EXPECT_EQ(0, observer.GetFocusChangedCountAndReset());
@@ -1232,7 +1223,7 @@ TEST_F(WindowTreeHostManagerTest, Rotate) {
 
   display_manager()->SetDisplayRotation(
       display1.id(), display::Display::ROTATE_90,
-      display::Display::ROTATION_SOURCE_ACTIVE);
+      display::Display::RotationSource::ACTIVE);
   EXPECT_EQ("200x120", root_windows[0]->bounds().size().ToString());
   EXPECT_EQ("150x200", root_windows[1]->bounds().size().ToString());
   EXPECT_EQ("200,0 150x200",
@@ -1252,7 +1243,7 @@ TEST_F(WindowTreeHostManagerTest, Rotate) {
 
   display_manager()->SetDisplayRotation(
       display2_id, display::Display::ROTATE_270,
-      display::Display::ROTATION_SOURCE_ACTIVE);
+      display::Display::RotationSource::ACTIVE);
   EXPECT_EQ("200x120", root_windows[0]->bounds().size().ToString());
   EXPECT_EQ("200x150", root_windows[1]->bounds().size().ToString());
   EXPECT_EQ("50,120 200x150",
@@ -1268,7 +1259,7 @@ TEST_F(WindowTreeHostManagerTest, Rotate) {
   EXPECT_EQ("180,25", event_handler.GetLocationAndReset());
   display_manager()->SetDisplayRotation(
       display1.id(), display::Display::ROTATE_180,
-      display::Display::ROTATION_SOURCE_ACTIVE);
+      display::Display::RotationSource::ACTIVE);
 
   EXPECT_EQ("120x200", root_windows[0]->bounds().size().ToString());
   EXPECT_EQ("200x150", root_windows[1]->bounds().size().ToString());
@@ -1484,13 +1475,14 @@ namespace {
 
 class RootWindowTestObserver : public aura::WindowObserver {
  public:
-  RootWindowTestObserver() {}
-  ~RootWindowTestObserver() override {}
+  RootWindowTestObserver() = default;
+  ~RootWindowTestObserver() override = default;
 
   void OnWindowBoundsChanged(aura::Window* window,
                              const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds) override {
-    shelf_display_bounds_ = ScreenUtil::GetDisplayBoundsWithShelf(window);
+                             const gfx::Rect& new_bounds,
+                             ui::PropertyChangeReason reason) override {
+    shelf_display_bounds_ = screen_util::GetDisplayBoundsWithShelf(window);
   }
 
   const gfx::Rect& shelf_display_bounds() const {
@@ -1577,6 +1569,33 @@ TEST_F(WindowTreeHostManagerTest, UpdateMouseLocationAfterDisplayChange) {
   // The mouse pointer is now on 2nd display.
   UpdateDisplay("300x280,200x200");
   EXPECT_EQ("450,10", env->last_mouse_location().ToString());
+}
+
+TEST_F(WindowTreeHostManagerTest,
+       DontUpdateInvisibleCursorLocationAfterDisplayChange) {
+  UpdateDisplay("500x300");
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+
+  aura::Env* env = aura::Env::GetInstance();
+
+  ui::test::EventGenerator generator(root_windows[0]);
+
+  // Logical cursor location is updated to keep the same physical location.
+  generator.MoveMouseToInHost(350, 150);
+  EXPECT_EQ("350,150", env->last_mouse_location().ToString());
+
+  UpdateDisplay("300x500/r");
+  EXPECT_EQ("250,150", env->last_mouse_location().ToString());
+
+  // Logical cursor location change shouldn't change when the cursor isn't
+  // visible.
+  UpdateDisplay("500x300");
+  generator.MoveMouseToInHost(350, 150);
+  EXPECT_EQ("350,150", env->last_mouse_location().ToString());
+
+  Shell::Get()->cursor_manager()->HideCursor();
+  UpdateDisplay("300x500/r");
+  EXPECT_EQ("350,150", env->last_mouse_location().ToString());
 }
 
 TEST_F(WindowTreeHostManagerTest,
@@ -1689,7 +1708,8 @@ TEST_F(WindowTreeHostManagerTest,
 
   TestMouseWatcherListener listener;
   views::MouseWatcher watcher(
-      new views::MouseWatcherViewHost(view, gfx::Insets()), &listener);
+      std::make_unique<views::MouseWatcherViewHost>(view, gfx::Insets()),
+      &listener);
   watcher.Start();
 
   ui::test::EventGenerator event_generator(
@@ -1707,7 +1727,7 @@ TEST_F(WindowTreeHostManagerTest, KeyEventFromSecondaryDisplay) {
   ui::KeyEvent key_event(ui::ET_KEY_PRESSED, ui::VKEY_RETURN, 0);
   ui::Event::DispatcherApi dispatcher_api(&key_event);
   // Set the target to the second display. WindowTreeHostManager will end up
-  // targetting the primary display.
+  // targeting the primary display.
   dispatcher_api.set_target(
       Shell::Get()->window_tree_host_manager()->GetRootWindowForDisplayId(
           GetSecondaryDisplay().id()));

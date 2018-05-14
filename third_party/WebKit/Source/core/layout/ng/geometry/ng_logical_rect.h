@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,52 +8,34 @@
 #include "core/CoreExport.h"
 #include "core/layout/ng/geometry/ng_logical_offset.h"
 #include "core/layout/ng/geometry/ng_logical_size.h"
-#include "platform/LayoutUnit.h"
 
 namespace blink {
 
+class LayoutRect;
+
 // NGLogicalRect is the position and size of a rect (typically a fragment)
-// relative to its parent rect in the logical coordinate system.
+// relative to the parent.
 struct CORE_EXPORT NGLogicalRect {
-  NGLogicalRect() {}
+  NGLogicalRect() = default;
   NGLogicalRect(const NGLogicalOffset& offset, const NGLogicalSize& size)
       : offset(offset), size(size) {}
-  NGLogicalRect(LayoutUnit inline_offset,
-                LayoutUnit block_offset,
-                LayoutUnit inline_size,
-                LayoutUnit block_size)
-      : offset(inline_offset, block_offset), size(inline_size, block_size) {}
 
-  bool IsEmpty() const;
-
-  // Whether this rectangle is contained by the provided rectangle.
-  bool IsContained(const NGLogicalRect& other) const;
-
-  LayoutUnit InlineStartOffset() const { return offset.inline_offset; }
-  LayoutUnit InlineEndOffset() const {
-    return offset.inline_offset + size.inline_size;
-  }
-  LayoutUnit BlockStartOffset() const { return offset.block_offset; }
-  LayoutUnit BlockEndOffset() const {
-    return offset.block_offset + size.block_size;
-  }
-
-  NGLogicalOffset InlineStartBlockStartOffset() const {
-    return {InlineStartOffset(), BlockStartOffset()};
-  }
-
-  NGLogicalOffset InlineEndBlockStartOffset() const {
-    return {InlineEndOffset(), BlockStartOffset()};
-  }
-
-  LayoutUnit BlockSize() const { return size.block_size; }
-  LayoutUnit InlineSize() const { return size.inline_size; }
-
-  String ToString() const;
-  bool operator==(const NGLogicalRect& other) const;
+  explicit NGLogicalRect(const LayoutRect&);
+  LayoutRect ToLayoutRect() const;
 
   NGLogicalOffset offset;
   NGLogicalSize size;
+
+  NGLogicalOffset EndOffset() const { return offset + size; }
+  bool IsEmpty() const { return size.IsEmpty(); }
+
+  bool operator==(const NGLogicalRect& other) const;
+
+  NGLogicalRect operator+(const NGLogicalOffset&) const;
+
+  void Unite(const NGLogicalRect&);
+
+  String ToString() const;
 };
 
 CORE_EXPORT std::ostream& operator<<(std::ostream&, const NGLogicalRect&);

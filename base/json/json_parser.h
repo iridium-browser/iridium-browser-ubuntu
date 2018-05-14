@@ -16,7 +16,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
-#include "base/memory/manual_constructor.h"
+#include "base/optional.h"
 #include "base/strings/string_piece.h"
 
 namespace base {
@@ -30,14 +30,11 @@ class JSONParserTest;
 // The implementation behind the JSONReader interface. This class is not meant
 // to be used directly; it encapsulates logic that need not be exposed publicly.
 //
-// This parser guarantees O(n) time through the input string. It also optimizes
-// base::Value by using StringPiece where possible when returning Value
-// objects by using "hidden roots," discussed in the implementation.
-//
-// Iteration happens on the byte level, with the functions CanConsume and
-// NextChar. The conversion from byte to JSON token happens without advancing
-// the parser in GetNextToken/ParseToken, that is tokenization operates on
-// the current parser position without advancing.
+// This parser guarantees O(n) time through the input string. Iteration happens
+// on the byte level, with the functions CanConsume and NextChar. The conversion
+// from byte to JSON token happens without advancing the parser in
+// GetNextToken/ParseToken, that is tokenization operates on the current parser
+// position without advancing.
 //
 // Built on top of these are a family of Consume functions that iterate
 // internally. Invariant: on entry of a Consume function, the parser is wound
@@ -47,14 +44,14 @@ class JSONParserTest;
 // next token.
 class BASE_EXPORT JSONParser {
  public:
-  explicit JSONParser(int options);
+  JSONParser(int options, int max_depth = JSONReader::kStackMaxDepth);
   ~JSONParser();
 
   // Parses the input string according to the set options and returns the
   // result as a Value.
   // Wrap this in base::FooValue::From() to check the Value is of type Foo and
   // convert to a FooValue at the same time.
-  std::unique_ptr<Value> Parse(StringPiece input);
+  Optional<Value> Parse(StringPiece input);
 
   // Returns the error code.
   JSONReader::JsonParseError error_code() const;
@@ -102,7 +99,7 @@ class BASE_EXPORT JSONParser {
 
     ~StringBuilder();
 
-    void operator=(StringBuilder&& other);
+    StringBuilder& operator=(StringBuilder&& other);
 
     // Either increases the |length_| of the string or copies the character if
     // the StringBuilder has been converted. |c| must be in the basic ASCII
@@ -136,10 +133,9 @@ class BASE_EXPORT JSONParser {
     // Number of bytes in |pos_| that make up the string being built.
     size_t length_;
 
-    // The copied string representation. Will be uninitialized until Convert()
-    // is called, which will set has_string_ to true.
-    bool has_string_;
-    base::ManualConstructor<std::string> string_;
+    // The copied string representation. Will be unset until Convert() is
+    // called.
+    base::Optional<std::string> string_;
   };
 
   // Quick check that the stream has capacity to consume |length| more bytes.
@@ -164,22 +160,22 @@ class BASE_EXPORT JSONParser {
   bool EatComment();
 
   // Calls GetNextToken() and then ParseToken().
-  std::unique_ptr<Value> ParseNextToken();
+  Optional<Value> ParseNextToken();
 
   // Takes a token that represents the start of a Value ("a structural token"
   // in RFC terms) and consumes it, returning the result as a Value.
-  std::unique_ptr<Value> ParseToken(Token token);
+  Optional<Value> ParseToken(Token token);
 
   // Assuming that the parser is currently wound to '{', this parses a JSON
-  // object into a DictionaryValue.
-  std::unique_ptr<Value> ConsumeDictionary();
+  // object into a Value.
+  Optional<Value> ConsumeDictionary();
 
   // Assuming that the parser is wound to '[', this parses a JSON list into a
-  // std::unique_ptr<ListValue>.
-  std::unique_ptr<Value> ConsumeList();
+  // Value.
+  Optional<Value> ConsumeList();
 
   // Calls through ConsumeStringRaw and wraps it in a value.
-  std::unique_ptr<Value> ConsumeString();
+  Optional<Value> ConsumeString();
 
   // Assuming that the parser is wound to a double quote, this parses a string,
   // decoding any escape sequences and converts UTF-16 to UTF-8. Returns true on
@@ -199,14 +195,14 @@ class BASE_EXPORT JSONParser {
 
   // Assuming that the parser is wound to the start of a valid JSON number,
   // this parses and converts it to either an int or double value.
-  std::unique_ptr<Value> ConsumeNumber();
+  Optional<Value> ConsumeNumber();
   // Helper that reads characters that are ints. Returns true if a number was
   // read and false on error.
   bool ReadInt(bool allow_leading_zeros);
 
   // Consumes the literal values of |true|, |false|, and |null|, assuming the
   // parser is wound to the first character of any of those.
-  std::unique_ptr<Value> ConsumeLiteral();
+  Optional<Value> ConsumeLiteral();
 
   // Compares two string buffers of a given length.
   static bool StringsAreEqual(const char* left, const char* right, size_t len);
@@ -223,6 +219,9 @@ class BASE_EXPORT JSONParser {
 
   // base::JSONParserOptions that control parsing.
   const int options_;
+
+  // Maximum depth to parse.
+  const int max_depth_;
 
   // Pointer to the start of the input data.
   const char* start_pos_;

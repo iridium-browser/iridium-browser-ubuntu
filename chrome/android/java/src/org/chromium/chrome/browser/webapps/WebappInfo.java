@@ -5,14 +5,20 @@
 package org.chromium.chrome.browser.webapps;
 
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.support.customtabs.CustomTabsSessionToken;
 import android.text.TextUtils;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.ShortcutSource;
+import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.content_public.common.ScreenOrientationValues;
 
@@ -60,12 +66,14 @@ public class WebappInfo {
     private Uri mScopeUri;
     private String mName;
     private String mShortName;
-    private int mDisplayMode;
+    private @WebDisplayMode int mDisplayMode;
     private int mOrientation;
     private int mSource;
     private long mThemeColor;
     private long mBackgroundColor;
+    private Uri mSplashScreenUri;
     private boolean mIsIconGenerated;
+    private boolean mForceNavigation;
 
     public static WebappInfo createEmpty() {
         return new WebappInfo();
@@ -102,15 +110,44 @@ public class WebappInfo {
         return shortName == null ? titleFromIntent(intent) : shortName;
     }
 
+    public static WebappInfo create(Intent intent, CustomTabsSessionToken session) {
+        CustomTabsConnection connection = CustomTabsConnection.getInstance();
+        String url = intent.getDataString();
+
+        PackageManager pm = ContextUtils.getApplicationContext().getPackageManager();
+        String packageName = connection.getClientPackageNameForSession(session);
+        intent.putExtra(ShortcutHelper.EXTRA_ID, packageName);
+        intent.putExtra(ShortcutHelper.EXTRA_URL, url);
+        // TODO(yusufo): This should be based on scope defined by Android Manifest intent filters.
+        intent.putExtra(ShortcutHelper.EXTRA_SCOPE, url);
+        intent.putExtra(ShortcutHelper.EXTRA_SOURCE, ShortcutSource.TRUSTED_WEB_ACTIVITY);
+        intent.setClassName(ContextUtils.getApplicationContext(), WebappActivity.class.getName());
+        ApplicationInfo info = null;
+        try {
+            info = pm.getApplicationInfo(packageName, 0);
+            if (info != null) {
+                String label = pm.getApplicationLabel(info).toString();
+                intent.putExtra(ShortcutHelper.EXTRA_NAME, label);
+                intent.putExtra(ShortcutHelper.EXTRA_SHORT_NAME, label);
+            }
+        } catch (NameNotFoundException e) {
+            // Failing gracefully below. This is a best effort.
+        }
+
+        return create(intent);
+    }
+
     /**
      * Construct a WebappInfo.
      * @param intent Intent containing info about the app.
      */
     public static WebappInfo create(Intent intent) {
-        String id = IntentUtils.safeGetStringExtra(intent, ShortcutHelper.EXTRA_ID);
-        String icon = IntentUtils.safeGetStringExtra(intent, ShortcutHelper.EXTRA_ICON);
+        String id = idFromIntent(intent);
         String url = urlFromIntent(intent);
+
+        String icon = IntentUtils.safeGetStringExtra(intent, ShortcutHelper.EXTRA_ICON);
         String scope = IntentUtils.safeGetStringExtra(intent, ShortcutHelper.EXTRA_SCOPE);
+        @WebDisplayMode
         int displayMode = IntentUtils.safeGetIntExtra(
                 intent, ShortcutHelper.EXTRA_DISPLAY_MODE, WebDisplayMode.STANDALONE);
         int orientation = IntentUtils.safeGetIntExtra(
@@ -122,14 +159,19 @@ public class WebappInfo {
         long backgroundColor = IntentUtils.safeGetLongExtra(intent,
                 ShortcutHelper.EXTRA_BACKGROUND_COLOR,
                 ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING);
+        String splashScreenUrl =
+                IntentUtils.safeGetStringExtra(intent, ShortcutHelper.EXTRA_SPLASH_SCREEN_URL);
         boolean isIconGenerated = IntentUtils.safeGetBooleanExtra(intent,
                 ShortcutHelper.EXTRA_IS_ICON_GENERATED, false);
+        boolean forceNavigation = IntentUtils.safeGetBooleanExtra(
+                intent, ShortcutHelper.EXTRA_FORCE_NAVIGATION, false);
 
         String name = nameFromIntent(intent);
         String shortName = shortNameFromIntent(intent);
 
-        return create(id, url, scope, new Icon(icon), name, shortName, displayMode,
-                orientation, source, themeColor, backgroundColor, isIconGenerated);
+        return create(id, url, scope, new Icon(icon), name, shortName, displayMode, orientation,
+                source, themeColor, backgroundColor, splashScreenUrl, isIconGenerated,
+                forceNavigation);
     }
 
     /**
@@ -145,23 +187,29 @@ public class WebappInfo {
      * @param source          Source where the webapp was added from.
      * @param themeColor      The theme color of the webapp.
      * @param backgroundColor The background color of the webapp.
+     * @param splashScreenUrl URL of the HTML splash screen.
      * @param isIconGenerated Whether the |icon| was generated by Chromium.
+     * @param forceNavigation Whether the webapp should navigate to {@link url} if the
+     *                        webapp is already open.
      */
     public static WebappInfo create(String id, String url, String scope, Icon icon, String name,
-            String shortName, int displayMode, int orientation, int source, long themeColor,
-            long backgroundColor, boolean isIconGenerated) {
+            String shortName, @WebDisplayMode int displayMode, int orientation, int source,
+            long themeColor, long backgroundColor, String splashScreenUrl, boolean isIconGenerated,
+            boolean forceNavigation) {
         if (id == null || url == null) {
             Log.e(TAG, "Incomplete data provided: " + id + ", " + url);
             return null;
         }
 
         return new WebappInfo(id, url, scope, icon, name, shortName, displayMode, orientation,
-                source, themeColor, backgroundColor, isIconGenerated);
+                source, themeColor, backgroundColor, splashScreenUrl, isIconGenerated,
+                forceNavigation);
     }
 
     protected WebappInfo(String id, String url, String scope, Icon icon, String name,
-            String shortName, int displayMode, int orientation, int source, long themeColor,
-            long backgroundColor, boolean isIconGenerated) {
+            String shortName, @WebDisplayMode int displayMode, int orientation, int source,
+            long themeColor, long backgroundColor, String splashScreenUrl, boolean isIconGenerated,
+            boolean forceNavigation) {
         Uri uri = Uri.parse(url);
         if (TextUtils.isEmpty(scope)) {
             scope = ShortcutHelper.getScopeFromUrl(url);
@@ -179,7 +227,9 @@ public class WebappInfo {
         mSource = source;
         mThemeColor = themeColor;
         mBackgroundColor = backgroundColor;
+        mSplashScreenUri = Uri.parse(splashScreenUrl != null ? splashScreenUrl : "");
         mIsIconGenerated = isIconGenerated;
+        mForceNavigation = forceNavigation;
         mIsInitialized = mUri != null;
     }
 
@@ -203,9 +253,11 @@ public class WebappInfo {
      * Chrome receives a ACTION_START_WEBAPP intent.
      */
     public boolean shouldForceNavigation() {
-        return false;
+        return mForceNavigation;
     }
 
+    // TODO(yusufo) : Plumb the scope for the Webapp through the support library/client Android
+    // manifest for TrustedWebActivity.
     public Uri scopeUri() {
         return mScopeUri;
     }
@@ -218,11 +270,11 @@ public class WebappInfo {
         return mShortName;
     }
 
-    public int displayMode() {
+    public @WebDisplayMode int displayMode() {
         return mDisplayMode;
     }
 
-    public String webApkPackageName() {
+    public String apkPackageName() {
         return null;
     }
 
@@ -277,6 +329,20 @@ public class WebappInfo {
         return hasValidBackgroundColor() ? (int) mBackgroundColor : fallback;
     }
 
+    /**
+     * Returns the Splash Screen URL, or empty if not specified.
+     */
+    public Uri splashScreenUri() {
+        return mSplashScreenUri;
+    }
+
+    /**
+     * Returns whether a non-empty Splash Screen URL has been specified.
+     */
+    public boolean hasSplashScreenUri() {
+        return !mSplashScreenUri.equals(Uri.EMPTY);
+    }
+
     // This is needed for clients that want to send the icon through an intent.
     public String encodedIcon() {
         return (mIcon == null) ? null : mIcon.encoded();
@@ -286,6 +352,7 @@ public class WebappInfo {
      * Returns the icon in Bitmap form.
      */
     public Bitmap icon() {
+        // TODO(yusufo) : Add a way to plumb this through for Trusted Web Activity.
         return (mIcon == null) ? null : mIcon.decoded();
     }
 
@@ -303,6 +370,7 @@ public class WebappInfo {
     public void setWebappIntentExtras(Intent intent) {
         intent.putExtra(ShortcutHelper.EXTRA_ID, id());
         intent.putExtra(ShortcutHelper.EXTRA_URL, uri().toString());
+        intent.putExtra(ShortcutHelper.EXTRA_FORCE_NAVIGATION, shouldForceNavigation());
         intent.putExtra(ShortcutHelper.EXTRA_SCOPE, scopeUri().toString());
         intent.putExtra(ShortcutHelper.EXTRA_ICON, encodedIcon());
         intent.putExtra(ShortcutHelper.EXTRA_VERSION, ShortcutHelper.WEBAPP_SHORTCUT_VERSION);
@@ -313,15 +381,21 @@ public class WebappInfo {
         intent.putExtra(ShortcutHelper.EXTRA_SOURCE, source());
         intent.putExtra(ShortcutHelper.EXTRA_THEME_COLOR, themeColor());
         intent.putExtra(ShortcutHelper.EXTRA_BACKGROUND_COLOR, backgroundColor());
+        intent.putExtra(ShortcutHelper.EXTRA_SPLASH_SCREEN_URL, splashScreenUri().toString());
         intent.putExtra(ShortcutHelper.EXTRA_IS_ICON_GENERATED, isIconGenerated());
     }
 
+    public static String idFromIntent(Intent intent) {
+        return IntentUtils.safeGetStringExtra(intent, ShortcutHelper.EXTRA_ID);
+    }
     /**
      * Returns true if the WebappInfo was created for an Intent fired from a launcher shortcut (as
      * opposed to an intent from a push notification or other internal source).
      */
     public boolean isLaunchedFromHomescreen() {
         int source = source();
-        return source != ShortcutSource.NOTIFICATION && source != ShortcutSource.EXTERNAL_INTENT;
+        return source != ShortcutSource.NOTIFICATION && source != ShortcutSource.EXTERNAL_INTENT
+                && source != ShortcutSource.EXTERNAL_INTENT_FROM_CHROME
+                && source != ShortcutSource.WEBAPK_SHARE_TARGET;
     }
 }

@@ -11,14 +11,15 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/synchronization/lock.h"
 #include "chrome/browser/chromeos/printing/printer_detector.h"
 #include "chromeos/printing/printer_configuration.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "components/metrics/proto/printer_event.pb.h"
+#include "third_party/metrics_proto/printer_event.pb.h"
 
 namespace chromeos {
 
-// Aggregates printer events for logging.
+// Aggregates printer events for logging.  This class is thread-safe.
 class PrinterEventTracker : public KeyedService {
  public:
   enum SetupMode {
@@ -63,6 +64,7 @@ class PrinterEventTracker : public KeyedService {
   // Records logs if true.  Discards logs if false.
   bool logging_ = false;
   std::vector<metrics::PrinterEventProto> events_;
+  base::Lock lock_;
 
   DISALLOW_COPY_AND_ASSIGN(PrinterEventTracker);
 };

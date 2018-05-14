@@ -7,29 +7,36 @@
 
 #include "base/macros.h"
 #include "base/scoped_observer.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/ui/avatar_button_error_controller.h"
 #include "chrome/browser/ui/avatar_button_error_controller_delegate.h"
 #include "chrome/browser/ui/views/profiles/avatar_button_style.h"
 #include "components/keyed_service/core/keyed_service_shutdown_notifier.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/menu_button.h"
 #include "ui/views/widget/widget_observer.h"
 
+class AvatarButtonManager;
 class Profile;
 
 // Base class for avatar buttons that display the active profile's name in the
 // caption area.
-class AvatarButton : public views::LabelButton,
+class AvatarButton : public views::MenuButton,
                      public AvatarButtonErrorControllerDelegate,
                      public ProfileAttributesStorage::Observer,
                      public views::WidgetObserver {
  public:
-  AvatarButton(views::ButtonListener* listener,
+  AvatarButton(views::MenuButtonListener* listener,
                AvatarButtonStyle button_style,
-               Profile* profile);
+               Profile* profile,
+               AvatarButtonManager* manager);
   ~AvatarButton() override;
 
   void SetupThemeColorButton();
+
+  // Called by AvatarButtonManager when the profile chooser menu is
+  // shown or hidden.
+  void OnAvatarButtonPressed(const ui::Event* event);
 
   // views::LabelButton:
   void AddedToWidget() override;
@@ -39,7 +46,9 @@ class AvatarButton : public views::LabelButton,
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override;
   std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
-  void NotifyClick(const ui::Event& event) override;
+#if defined(OS_MACOSX)
+  SkColor GetInkDropBaseColor() const override;
+#endif
 
  protected:
   // views::LabelButton:
@@ -78,6 +87,9 @@ class AvatarButton : public views::LabelButton,
   // browser frame.
   bool IsCondensible() const;
 
+  // Returns true if this button should show an ink drop on hover.
+  bool ShouldApplyInkDrop() const;
+
   AvatarButtonErrorController error_controller_;
   Profile* profile_;
 
@@ -93,6 +105,13 @@ class AvatarButton : public views::LabelButton,
   gfx::ImageSkia generic_avatar_;
 
   AvatarButtonStyle button_style_;
+
+  // Set on desktop Linux to indicate if the avatar button should be
+  // drawn using the system theme.
+  bool render_native_nav_buttons_ = false;
+
+  // Shows the button in a pressed state while the bubble is open.
+  std::unique_ptr<PressedLock> pressed_lock_;
 
   ScopedObserver<views::Widget, views::WidgetObserver> widget_observer_;
 

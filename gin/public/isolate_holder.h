@@ -53,18 +53,21 @@ class GIN_EXPORT IsolateHolder {
     kStableAndExperimentalV8Extras,
   };
 
+  // Indicates how the Isolate instance will be created.
+  enum class IsolateCreationMode {
+    kNormal,
+    kCreateSnapshot,
+  };
+
   explicit IsolateHolder(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   IsolateHolder(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
                 AccessMode access_mode);
-  IsolateHolder(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-                AccessMode access_mode,
-                AllowAtomicsWaitMode atomics_wait_mode);
-
-  // This constructor is to create V8 snapshot for Blink.
-  // Note this constructor calls isolate->Enter() internally.
-  IsolateHolder(intptr_t* reference_table, v8::StartupData* existing_blob);
-
+  IsolateHolder(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      AccessMode access_mode,
+      AllowAtomicsWaitMode atomics_wait_mode,
+      IsolateCreationMode isolate_creation_mode = IsolateCreationMode::kNormal);
   ~IsolateHolder();
 
   // Should be invoked once before creating IsolateHolder instances to
@@ -75,9 +78,13 @@ class GIN_EXPORT IsolateHolder {
   // snapshot file is available, it should also be loaded (by calling
   // V8Initializer::LoadV8SnapshotFromFD or
   // V8Initializer::LoadV8Snapshot) before calling this method.
+  // If the snapshot file contains customised contexts which have static
+  // external references, |reference_table| needs to point an array of those
+  // reference pointers. Otherwise, it can be nullptr.
   static void Initialize(ScriptMode mode,
                          V8ExtrasMode v8_extras_mode,
-                         v8::ArrayBuffer::Allocator* allocator);
+                         v8::ArrayBuffer::Allocator* allocator,
+                         const intptr_t* reference_table = nullptr);
 
   v8::Isolate* isolate() { return isolate_; }
 
@@ -110,11 +117,13 @@ class GIN_EXPORT IsolateHolder {
   }
 
  private:
+  void SetUp(scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+
+  std::unique_ptr<v8::SnapshotCreator> snapshot_creator_;
   v8::Isolate* isolate_;
   std::unique_ptr<PerIsolateData> isolate_data_;
   std::unique_ptr<RunMicrotasksObserver> task_observer_;
   std::unique_ptr<V8IsolateMemoryDumpProvider> isolate_memory_dump_provider_;
-  std::unique_ptr<v8::SnapshotCreator> snapshot_creator_;
   AccessMode access_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(IsolateHolder);

@@ -7,9 +7,8 @@
 #include <algorithm>
 #include <memory>
 
-#include "ash/app_list/test_app_list_view_presenter_impl.h"
+#include "ash/app_list/test_app_list_presenter_impl.h"
 #include "ash/focus_cycler.h"
-#include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/scoped_root_window_for_new_windows.h"
@@ -46,7 +45,7 @@ namespace {
 class EventCounter : public ui::EventHandler {
  public:
   EventCounter() : key_events_(0), mouse_events_(0) {}
-  ~EventCounter() override {}
+  ~EventCounter() override = default;
 
   int GetKeyEventCountAndReset() {
     int count = key_events_;
@@ -83,8 +82,8 @@ using aura::Window;
 
 class WindowCycleControllerTest : public AshTestBase {
  public:
-  WindowCycleControllerTest() {}
-  ~WindowCycleControllerTest() override {}
+  WindowCycleControllerTest() = default;
+  ~WindowCycleControllerTest() override = default;
 
   void SetUp() override {
     AshTestBase::SetUp();
@@ -491,19 +490,14 @@ TEST_F(WindowCycleControllerTest, MostRecentlyUsed) {
 
 // Tests that beginning window selection hides the app list.
 TEST_F(WindowCycleControllerTest, SelectingHidesAppList) {
-  // TODO: fails in mash because of AppListPresenter. http://crbug.com/696028.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   // The tested behavior relies on the app list presenter implementation.
-  TestAppListViewPresenterImpl app_list_presenter_impl;
+  TestAppListPresenterImpl app_list_presenter_impl;
 
   WindowCycleController* controller = Shell::Get()->window_cycle_controller();
 
   std::unique_ptr<aura::Window> window0(CreateTestWindowInShellWithId(0));
   std::unique_ptr<aura::Window> window1(CreateTestWindowInShellWithId(1));
-  app_list_presenter_impl.Show(
-      display::Screen::GetScreen()->GetPrimaryDisplay().id());
+  app_list_presenter_impl.ShowAndRunLoop(GetPrimaryDisplay().id());
   EXPECT_TRUE(app_list_presenter_impl.IsVisible());
   controller->HandleCycleWindow(WindowCycleController::FORWARD);
   EXPECT_FALSE(app_list_presenter_impl.IsVisible());
@@ -623,10 +617,6 @@ TEST_F(WindowCycleControllerTest, CycleMruPanelDestroyed) {
 
 // Tests that the tab key events are not sent to the window.
 TEST_F(WindowCycleControllerTest, TabKeyNotLeaked) {
-  // TODO: investigate failure in mash. http://crbug.com/698894.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   std::unique_ptr<Window> w0(CreateTestWindowInShellWithId(0));
   std::unique_ptr<Window> w1(CreateTestWindowInShellWithId(1));
   EventCounter event_count;
@@ -647,10 +637,6 @@ TEST_F(WindowCycleControllerTest, TabKeyNotLeaked) {
 
 // While the UI is active, mouse events are captured.
 TEST_F(WindowCycleControllerTest, MouseEventsCaptured) {
-  // TODO: investigate failure in mash. http://crbug.com/698894.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   // This delegate allows the window to receive mouse events.
   aura::test::TestWindowDelegate delegate;
   std::unique_ptr<Window> w0(CreateTestWindowInShellWithDelegate(
@@ -725,11 +711,7 @@ TEST_F(WindowCycleControllerTest, TabPastFullscreenWindow) {
 // Tests that the Alt+Tab UI's position isn't affected by the origin of the
 // display it's on. See crbug.com/675718
 TEST_F(WindowCycleControllerTest, MultiDisplayPositioning) {
-  // TODO: investigate failure in mash. http://crbug.com/698894.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
-  int64_t primary_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  int64_t primary_id = GetPrimaryDisplay().id();
   display::DisplayIdList list =
       display::test::CreateDisplayIdListN(2, primary_id, primary_id + 1);
 

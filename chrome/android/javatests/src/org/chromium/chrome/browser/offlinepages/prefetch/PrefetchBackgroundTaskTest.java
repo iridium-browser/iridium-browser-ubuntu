@@ -8,7 +8,6 @@ import android.content.Context;
 import android.support.test.filters.SmallTest;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -20,16 +19,16 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.components.background_task_scheduler.BackgroundTask.TaskFinishedCallback;
 import org.chromium.components.background_task_scheduler.BackgroundTaskScheduler;
-import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerDelegate;
+import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerFactory;
 import org.chromium.components.background_task_scheduler.TaskIds;
 import org.chromium.components.background_task_scheduler.TaskInfo;
 import org.chromium.components.background_task_scheduler.TaskParameters;
+import org.chromium.components.offlinepages.PrefetchBackgroundTaskRescheduleType;
 
 import java.util.HashMap;
 import java.util.concurrent.Semaphore;
@@ -38,12 +37,10 @@ import java.util.concurrent.TimeUnit;
 /** Unit tests for {@link PrefetchBackgroundTask}. */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
         "enable-features=OfflinePagesPrefetching"})
 public class PrefetchBackgroundTaskTest {
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     private static final double BACKOFF_JITTER_FACTOR = 0.33;
     private static final int SEMAPHORE_TIMEOUT_MS = 5000;
@@ -51,7 +48,6 @@ public class PrefetchBackgroundTaskTest {
 
     private static class TestPrefetchBackgroundTask extends PrefetchBackgroundTask {
         private TaskInfo mTaskInfo;
-        private boolean mNeedsReschedule;
         private Semaphore mStopSemaphore = new Semaphore(0);
 
         public TestPrefetchBackgroundTask(TaskInfo taskInfo) {
@@ -65,7 +61,6 @@ public class PrefetchBackgroundTaskTest {
             onStartTask(context, params, new TaskFinishedCallback() {
                 @Override
                 public void taskFinished(boolean needsReschedule) {
-                    mNeedsReschedule = needsReschedule;
                     callback.taskFinished(needsReschedule);
                     mStopSemaphore.release();
                 }
@@ -93,11 +88,11 @@ public class PrefetchBackgroundTaskTest {
             });
         }
 
-        public void setTaskRescheduling(final boolean reschedule, final boolean backoff) {
+        public void setTaskRescheduling(int rescheduleType) {
             ThreadUtils.runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    setTaskReschedulingForTesting(reschedule, backoff);
+                    setTaskReschedulingForTesting(rescheduleType);
                 }
             });
         }
@@ -109,31 +104,13 @@ public class PrefetchBackgroundTaskTest {
         public TaskInfo taskInfo() {
             return mTaskInfo;
         }
-        public boolean needsReschedule() {
-            return mNeedsReschedule;
-        }
     }
 
-    private static class NoopBackgroundTaskSchedulerDelegate
-            implements BackgroundTaskSchedulerDelegate {
-        @Override
-        public boolean schedule(Context context, TaskInfo taskInfo) {
-            return true;
-        }
-
-        @Override
-        public void cancel(Context context, int taskId) {}
-    }
-
-    private static class TestBackgroundTaskScheduler extends BackgroundTaskScheduler {
+    private static class TestBackgroundTaskScheduler implements BackgroundTaskScheduler {
         private HashMap<Integer, TestPrefetchBackgroundTask> mTasks = new HashMap<>();
         private Semaphore mStartSemaphore = new Semaphore(0);
         private int mAddCount = 0;
         private int mRemoveCount = 0;
-
-        public TestBackgroundTaskScheduler() {
-            super(new NoopBackgroundTaskSchedulerDelegate());
-        }
 
         @Override
         public boolean schedule(final Context context, final TaskInfo taskInfo) {
@@ -159,6 +136,12 @@ public class PrefetchBackgroundTaskTest {
         public void cancel(Context context, int taskId) {
             removeTask(taskId);
         }
+
+        @Override
+        public void checkForOSUpgrade(Context context) {}
+
+        @Override
+        public void reschedule(Context context) {}
 
         public void waitForTaskStarted() throws Exception {
             assertTrue(mStartSemaphore.tryAcquire(SEMAPHORE_TIMEOUT_MS, TimeUnit.MILLISECONDS));
@@ -191,8 +174,8 @@ public class PrefetchBackgroundTaskTest {
         assertEquals(true, scheduledTaskInfo.isPersisted());
         assertEquals(TaskInfo.NETWORK_TYPE_UNMETERED, scheduledTaskInfo.getRequiredNetworkType());
 
-        long defaultTaskStartTimeMs =
-                TimeUnit.SECONDS.toMillis(PrefetchBackgroundTask.DEFAULT_START_DELAY_SECONDS);
+        long defaultTaskStartTimeMs = TimeUnit.SECONDS.toMillis(
+                PrefetchBackgroundTaskScheduler.DEFAULT_START_DELAY_SECONDS);
         long currentTaskStartTimeMs = scheduledTaskInfo.getOneOffInfo().getWindowStartTimeMs();
         if (additionalDelaySeconds == 0) {
             assertEquals(defaultTaskStartTimeMs, currentTaskStartTimeMs);
@@ -213,7 +196,16 @@ public class PrefetchBackgroundTaskTest {
             @Override
             public void run() {
                 mScheduler = new TestBackgroundTaskScheduler();
-                PrefetchBackgroundTask.setSchedulerForTesting(mScheduler);
+                BackgroundTaskSchedulerFactory.setSchedulerForTesting(mScheduler);
+            }
+        });
+    }
+
+    private void scheduleTask(int additionalDelaySeconds) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                PrefetchBackgroundTaskScheduler.scheduleTask(additionalDelaySeconds);
             }
         });
     }
@@ -221,56 +213,54 @@ public class PrefetchBackgroundTaskTest {
     @Test
     @SmallTest
     public void testSchedule() throws Exception {
-        PrefetchBackgroundTask.scheduleTask(0);
+        PrefetchBackgroundTask.skipConditionCheckingForTesting();
+        scheduleTask(0);
         mScheduler.waitForTaskStarted();
         TestPrefetchBackgroundTask task = validateAndGetScheduledTask(0);
         task.signalTaskFinished();
         task.waitForTaskFinished();
-        assertFalse(task.needsReschedule());
     }
 
     @Test
     @SmallTest
     public void testScheduleWithAdditionalDelay() throws Exception {
         final int additionalDelaySeconds = 15;
-        PrefetchBackgroundTask.scheduleTask(additionalDelaySeconds);
+        PrefetchBackgroundTask.skipConditionCheckingForTesting();
+        scheduleTask(additionalDelaySeconds);
         mScheduler.waitForTaskStarted();
         TestPrefetchBackgroundTask task = validateAndGetScheduledTask(additionalDelaySeconds);
         task.signalTaskFinished();
         task.waitForTaskFinished();
-        assertFalse(task.needsReschedule());
     }
 
     @Test
     @SmallTest
     public void testReschedule() throws Exception {
-        PrefetchBackgroundTask.scheduleTask(0);
+        PrefetchBackgroundTask.skipConditionCheckingForTesting();
+        scheduleTask(0);
         mScheduler.waitForTaskStarted();
         TestPrefetchBackgroundTask task = validateAndGetScheduledTask(0);
 
         // Requests a reschedule without backoff.
-        task.setTaskRescheduling(/*reschedule*/ true, /*backoff*/ false);
+        task.setTaskRescheduling(PrefetchBackgroundTaskRescheduleType.RESCHEDULE_WITHOUT_BACKOFF);
         task.signalTaskFinished();
         task.waitForTaskFinished();
-        assertTrue(task.needsReschedule());
         mScheduler.waitForTaskStarted();
         // No additional delay due to no backoff asked.
         task = validateAndGetScheduledTask(0);
 
         // Requests a reschedule with backoff.
-        task.setTaskRescheduling(/*reschedule*/ true, /*backoff*/ true);
+        task.setTaskRescheduling(PrefetchBackgroundTaskRescheduleType.RESCHEDULE_WITH_BACKOFF);
         task.signalTaskFinished();
         task.waitForTaskFinished();
-        assertTrue(task.needsReschedule());
         mScheduler.waitForTaskStarted();
         // Adding initial delay due to backoff.
         task = validateAndGetScheduledTask(30);
 
         // Requests another reschedule with backoff.
-        task.setTaskRescheduling(/*reschedule*/ true, /*backoff*/ true);
+        task.setTaskRescheduling(PrefetchBackgroundTaskRescheduleType.RESCHEDULE_WITH_BACKOFF);
         task.signalTaskFinished();
         task.waitForTaskFinished();
-        assertTrue(task.needsReschedule());
         mScheduler.waitForTaskStarted();
         // Delay doubled due to exponential backoff.
         task = validateAndGetScheduledTask(60);
@@ -278,18 +268,48 @@ public class PrefetchBackgroundTaskTest {
         // Simulate killing the task by the system.
         task.stopTask();
         task.waitForTaskFinished();
-        assertTrue(task.needsReschedule());
         mScheduler.waitForTaskStarted();
         // Additional delay is removed if it is killed by the system.
         task = validateAndGetScheduledTask(0);
 
         // Finishes the task without rescheduling.
-        task.setTaskRescheduling(/*reschedule*/ false, /*backoff*/ false);
+        task.setTaskRescheduling(PrefetchBackgroundTaskRescheduleType.NO_RESCHEDULE);
         task.signalTaskFinished();
         task.waitForTaskFinished();
-        assertFalse(task.needsReschedule());
 
         assertEquals(5, mScheduler.addCount());
         assertEquals(5, mScheduler.removeCount());
+    }
+
+    @Test
+    @SmallTest
+    public void testSuspend() throws Exception {
+        PrefetchBackgroundTask.skipConditionCheckingForTesting();
+        scheduleTask(0);
+        mScheduler.waitForTaskStarted();
+        TestPrefetchBackgroundTask task = validateAndGetScheduledTask(0);
+
+        // Requests a suspension.
+        task.setTaskRescheduling(PrefetchBackgroundTaskRescheduleType.SUSPEND);
+        // The suspension will not be affected by requesting retry with or without backof.
+        task.setTaskRescheduling(PrefetchBackgroundTaskRescheduleType.RESCHEDULE_WITHOUT_BACKOFF);
+        task.setTaskRescheduling(PrefetchBackgroundTaskRescheduleType.RESCHEDULE_WITH_BACKOFF);
+
+        task.signalTaskFinished();
+        task.waitForTaskFinished();
+        mScheduler.waitForTaskStarted();
+        // Delay for 1 day due to suspension.
+        task = validateAndGetScheduledTask(3600 * 24);
+
+        // The previous suspension should be removed. Rescheduling with backoff should work.
+        task.setTaskRescheduling(PrefetchBackgroundTaskRescheduleType.RESCHEDULE_WITH_BACKOFF);
+        task.signalTaskFinished();
+        task.waitForTaskFinished();
+        mScheduler.waitForTaskStarted();
+        // Adding initial delay due to backoff.
+        task = validateAndGetScheduledTask(30);
+
+        task.signalTaskFinished();
+        task.waitForTaskFinished();
     }
 }

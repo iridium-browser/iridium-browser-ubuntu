@@ -17,29 +17,29 @@ CacheTestUtil::CacheTestUtil(content::StoragePartition* partition)
   done_callback_ =
       base::Bind(&CacheTestUtil::DoneCallback, base::Unretained(this));
   // UI and IO thread synchronization.
-  waitable_event_ = base::MakeUnique<base::WaitableEvent>(
+  waitable_event_ = std::make_unique<base::WaitableEvent>(
       base::WaitableEvent::ResetPolicy::AUTOMATIC,
       base::WaitableEvent::InitialState::NOT_SIGNALED);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&CacheTestUtil::SetUpOnIOThread, base::Unretained(this)));
+      base::BindOnce(&CacheTestUtil::SetUpOnIOThread, base::Unretained(this)));
   WaitForTasksOnIOThread();
 }
 
 CacheTestUtil::~CacheTestUtil() {
   // The cache iterator must be deleted on the thread where it was created,
   // which is the IO thread.
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&CacheTestUtil::TearDownOnIOThread, base::Unretained(this)));
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::BindOnce(&CacheTestUtil::TearDownOnIOThread,
+                                         base::Unretained(this)));
   WaitForTasksOnIOThread();
 }
 
 void CacheTestUtil::CreateCacheEntries(const std::set<std::string>& keys) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&CacheTestUtil::CreateCacheEntriesOnIOThread,
-                 base::Unretained(this), base::ConstRef(keys)));
+      base::BindOnce(&CacheTestUtil::CreateCacheEntriesOnIOThread,
+                     base::Unretained(this), base::ConstRef(keys)));
   WaitForTasksOnIOThread();
 }
 
@@ -115,8 +115,8 @@ void CacheTestUtil::DoneCallback(int value) {
 std::vector<std::string> CacheTestUtil::GetEntryKeys() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::Bind(&CacheTestUtil::GetEntryKeysOnIOThread,
-                                     base::Unretained(this)));
+                          base::BindOnce(&CacheTestUtil::GetEntryKeysOnIOThread,
+                                         base::Unretained(this)));
   WaitForTasksOnIOThread();
   return keys_;
 }

@@ -7,7 +7,6 @@
 
 #include "core/CoreExport.h"
 #include "core/layout/ng/ng_layout_input_node.h"
-#include "platform/heap/Handle.h"
 #include "platform/wtf/RefCounted.h"
 
 namespace blink {
@@ -33,7 +32,7 @@ namespace blink {
 // The break token should encapsulate enough information to "resume" the layout.
 class CORE_EXPORT NGBreakToken : public RefCounted<NGBreakToken> {
  public:
-  virtual ~NGBreakToken() {}
+  virtual ~NGBreakToken() = default;
 
   enum NGBreakTokenType { kBlockBreakToken, kInlineBreakToken };
   NGBreakTokenType Type() const { return static_cast<NGBreakTokenType>(type_); }
@@ -49,6 +48,11 @@ class CORE_EXPORT NGBreakToken : public RefCounted<NGBreakToken> {
   // Returns the node associated with this break token. A break token cannot be
   // used with any other node.
   NGLayoutInputNode InputNode() const { return node_; }
+
+#ifndef NDEBUG
+  virtual String ToString() const;
+  void ShowBreakTokenTree() const;
+#endif  // NDEBUG
 
  protected:
   NGBreakToken(NGBreakTokenType type,

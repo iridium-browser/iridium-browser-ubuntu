@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
@@ -66,11 +67,25 @@ class CustomManagePasswordsUIController : public ManagePasswordsUIController {
 
   void WaitForState(password_manager::ui::State target_state);
 
+  void WaitForFallbackForSaving();
+
+  bool was_prompt_automatically_shown() {
+    return was_prompt_automatically_shown_;
+  }
+
  private:
   // PasswordsClientUIDelegate:
   void OnPasswordSubmitted(
       std::unique_ptr<password_manager::PasswordFormManager> form_manager)
       override;
+  void OnUpdatePasswordSubmitted(
+      std::unique_ptr<password_manager::PasswordFormManager> form_manager)
+      override;
+  void OnShowManualFallbackForSaving(
+      std::unique_ptr<password_manager::PasswordFormManager> form_manager,
+      bool has_generated_password,
+      bool is_update) override;
+  void OnHideManualFallbackForSaving() override;
   bool OnChooseCredentials(
       std::vector<std::unique_ptr<autofill::PasswordForm>> local_credentials,
       const GURL& origin,
@@ -81,12 +96,31 @@ class CustomManagePasswordsUIController : public ManagePasswordsUIController {
       const GURL& origin,
       const std::vector<const autofill::PasswordForm*>* federated_matches)
       override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
-  // The loop to be stopped when the target state is observed.
+  // Should not be used for manual fallback events.
+  bool IsTargetStateObserved(
+      const password_manager::ui::State target_state,
+      const password_manager::ui::State current_state) const;
+
+  void ProcessStateExpectations(
+      const password_manager::ui::State current_state);
+
+  // Quits |run_loop_| and clears expectations.
+  void QuitRunLoop();
+
+  // The loop to be stopped when the target state or fallback is observed.
   base::RunLoop* run_loop_;
 
   // The state CustomManagePasswordsUIController is currently waiting for.
-  password_manager::ui::State target_state_;
+  base::Optional<password_manager::ui::State> target_state_;
+
+  // True iff showing fallback is waited.
+  bool wait_for_fallback_;
+
+  // True iff a prompt was automatically shown.
+  bool was_prompt_automatically_shown_;
 
   DISALLOW_COPY_AND_ASSIGN(CustomManagePasswordsUIController);
 };
@@ -95,7 +129,8 @@ CustomManagePasswordsUIController::CustomManagePasswordsUIController(
     content::WebContents* web_contents)
     : ManagePasswordsUIController(web_contents),
       run_loop_(nullptr),
-      target_state_(password_manager::ui::INACTIVE_STATE) {
+      wait_for_fallback_(false),
+      was_prompt_automatically_shown_(false) {
   // Attach CustomManagePasswordsUIController to |web_contents| so the default
   // ManagePasswordsUIController isn't created.
   // Do not silently replace an existing ManagePasswordsUIController because it
@@ -106,32 +141,63 @@ CustomManagePasswordsUIController::CustomManagePasswordsUIController(
 
 void CustomManagePasswordsUIController::WaitForState(
     password_manager::ui::State target_state) {
+  if (IsTargetStateObserved(target_state, GetState()))
+    return;
+
   base::RunLoop run_loop;
   target_state_ = target_state;
   run_loop_ = &run_loop;
   run_loop_->Run();
 }
 
+void CustomManagePasswordsUIController::WaitForFallbackForSaving() {
+  if (!was_prompt_automatically_shown_ &&
+      GetState() == password_manager::ui::PENDING_PASSWORD_STATE)
+    return;
+
+  base::RunLoop run_loop;
+  wait_for_fallback_ = true;
+  run_loop_ = &run_loop;
+  run_loop_->Run();
+}
+
 void CustomManagePasswordsUIController::OnPasswordSubmitted(
     std::unique_ptr<password_manager::PasswordFormManager> form_manager) {
-  if (target_state_ == password_manager::ui::PENDING_PASSWORD_STATE) {
-    run_loop_->Quit();
-    run_loop_ = nullptr;
-    target_state_ = password_manager::ui::INACTIVE_STATE;
-  }
+  was_prompt_automatically_shown_ = true;
+  ProcessStateExpectations(password_manager::ui::PENDING_PASSWORD_STATE);
   return ManagePasswordsUIController::OnPasswordSubmitted(
       std::move(form_manager));
+}
+
+void CustomManagePasswordsUIController::OnUpdatePasswordSubmitted(
+    std::unique_ptr<password_manager::PasswordFormManager> form_manager) {
+  was_prompt_automatically_shown_ = true;
+  ProcessStateExpectations(password_manager::ui::PENDING_PASSWORD_UPDATE_STATE);
+  return ManagePasswordsUIController::OnUpdatePasswordSubmitted(
+      std::move(form_manager));
+}
+
+void CustomManagePasswordsUIController::OnShowManualFallbackForSaving(
+    std::unique_ptr<password_manager::PasswordFormManager> form_manager,
+    bool has_generated_password,
+    bool is_update) {
+  if (wait_for_fallback_)
+    QuitRunLoop();
+
+  ManagePasswordsUIController::OnShowManualFallbackForSaving(
+      std::move(form_manager), has_generated_password, is_update);
+}
+
+void CustomManagePasswordsUIController::OnHideManualFallbackForSaving() {
+  ManagePasswordsUIController::OnHideManualFallbackForSaving();
+  ProcessStateExpectations(GetState());
 }
 
 bool CustomManagePasswordsUIController::OnChooseCredentials(
     std::vector<std::unique_ptr<autofill::PasswordForm>> local_credentials,
     const GURL& origin,
     const ManagePasswordsState::CredentialsCallback& callback) {
-  if (target_state_ == password_manager::ui::CREDENTIAL_REQUEST_STATE) {
-    run_loop_->Quit();
-    run_loop_ = nullptr;
-    target_state_ = password_manager::ui::INACTIVE_STATE;
-  }
+  ProcessStateExpectations(password_manager::ui::CREDENTIAL_REQUEST_STATE);
   return ManagePasswordsUIController::OnChooseCredentials(
       std::move(local_credentials), origin, callback);
 }
@@ -141,13 +207,49 @@ void CustomManagePasswordsUIController::OnPasswordAutofilled(
         password_form_map,
     const GURL& origin,
     const std::vector<const autofill::PasswordForm*>* federated_matches) {
-  if (target_state_ == password_manager::ui::MANAGE_STATE) {
-    run_loop_->Quit();
-    run_loop_ = nullptr;
-    target_state_ = password_manager::ui::INACTIVE_STATE;
-  }
+  ProcessStateExpectations(password_manager::ui::MANAGE_STATE);
   return ManagePasswordsUIController::OnPasswordAutofilled(
       password_form_map, origin, federated_matches);
+}
+
+void CustomManagePasswordsUIController::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  ManagePasswordsUIController::DidFinishNavigation(navigation_handle);
+  if (GetState() != password_manager::ui::PENDING_PASSWORD_STATE &&
+      GetState() != password_manager::ui::PENDING_PASSWORD_UPDATE_STATE) {
+    // Navigation cleared the state, an automatic prompt disappears.
+    was_prompt_automatically_shown_ = false;
+  }
+  ProcessStateExpectations(GetState());
+}
+
+bool CustomManagePasswordsUIController::IsTargetStateObserved(
+    const password_manager::ui::State target_state,
+    const password_manager::ui::State current_state) const {
+  // This function should not be used for manual fallback expectations.
+  DCHECK(!wait_for_fallback_);
+
+  bool should_wait_for_automatic_prompt =
+      target_state == password_manager::ui::PENDING_PASSWORD_STATE ||
+      target_state == password_manager::ui::PENDING_PASSWORD_UPDATE_STATE;
+  return target_state == current_state &&
+         (!should_wait_for_automatic_prompt || was_prompt_automatically_shown_);
+}
+
+void CustomManagePasswordsUIController::ProcessStateExpectations(
+    const password_manager::ui::State current_state) {
+  if (!target_state_)
+    return;
+
+  if (IsTargetStateObserved(*target_state_, current_state))
+    QuitRunLoop();
+}
+
+void CustomManagePasswordsUIController::QuitRunLoop() {
+  run_loop_->Quit();
+  run_loop_ = nullptr;
+  wait_for_fallback_ = false;
+  target_state_.reset();
 }
 
 void AddHSTSHostImpl(
@@ -166,6 +268,13 @@ void AddHSTSHostImpl(
   transport_security_state->AddHSTS(host, expiry, include_subdomains);
   EXPECT_TRUE(transport_security_state->ShouldUpgradeToSSL(host));
 }
+
+enum ReturnCodes {  // Possible results of the JavaScript code.
+  RETURN_CODE_OK,
+  RETURN_CODE_NO_ELEMENT,
+  RETURN_CODE_WRONG_VALUE,
+  RETURN_CODE_INVALID,
+};
 
 }  // namespace
 
@@ -204,14 +313,30 @@ BubbleObserver::BubbleObserver(content::WebContents* web_contents)
     : passwords_ui_controller_(
           ManagePasswordsUIController::FromWebContents(web_contents)) {}
 
-bool BubbleObserver::IsShowingSavePrompt() const {
+bool BubbleObserver::IsSavePromptAvailable() const {
   return passwords_ui_controller_->GetState() ==
       password_manager::ui::PENDING_PASSWORD_STATE;
 }
 
-bool BubbleObserver::IsShowingUpdatePrompt() const {
+bool BubbleObserver::IsUpdatePromptAvailable() const {
   return passwords_ui_controller_->GetState() ==
       password_manager::ui::PENDING_PASSWORD_UPDATE_STATE;
+}
+
+bool BubbleObserver::IsSavePromptShownAutomatically() const {
+  if (!IsSavePromptAvailable())
+    return false;
+  return static_cast<CustomManagePasswordsUIController*>(
+             passwords_ui_controller_)
+      ->was_prompt_automatically_shown();
+}
+
+bool BubbleObserver::IsUpdatePromptShownAutomatically() const {
+  if (!IsUpdatePromptAvailable())
+    return false;
+  return static_cast<CustomManagePasswordsUIController*>(
+             passwords_ui_controller_)
+      ->was_prompt_automatically_shown();
 }
 
 void BubbleObserver::Dismiss() const  {
@@ -221,44 +346,48 @@ void BubbleObserver::Dismiss() const  {
 }
 
 void BubbleObserver::AcceptSavePrompt() const {
-  ASSERT_TRUE(IsShowingSavePrompt());
+  ASSERT_TRUE(IsSavePromptAvailable());
   passwords_ui_controller_->SavePassword(
-      passwords_ui_controller_->GetPendingPassword().username_value);
-  EXPECT_FALSE(IsShowingSavePrompt());
+      passwords_ui_controller_->GetPendingPassword().username_value,
+      passwords_ui_controller_->GetPendingPassword().password_value);
+  EXPECT_FALSE(IsSavePromptAvailable());
 }
 
 void BubbleObserver::AcceptUpdatePrompt(
     const autofill::PasswordForm& form) const {
-  ASSERT_TRUE(IsShowingUpdatePrompt());
+  ASSERT_TRUE(IsUpdatePromptAvailable());
   passwords_ui_controller_->UpdatePassword(form);
-  EXPECT_FALSE(IsShowingUpdatePrompt());
+  EXPECT_FALSE(IsUpdatePromptAvailable());
 }
 
 void BubbleObserver::WaitForAccountChooser() const {
-  if (passwords_ui_controller_->GetState() ==
-      password_manager::ui::CREDENTIAL_REQUEST_STATE)
-    return;
   CustomManagePasswordsUIController* controller =
       static_cast<CustomManagePasswordsUIController*>(passwords_ui_controller_);
   controller->WaitForState(password_manager::ui::CREDENTIAL_REQUEST_STATE);
 }
 
+void BubbleObserver::WaitForInactiveState() const {
+  CustomManagePasswordsUIController* controller =
+      static_cast<CustomManagePasswordsUIController*>(passwords_ui_controller_);
+  controller->WaitForState(password_manager::ui::INACTIVE_STATE);
+}
+
 void BubbleObserver::WaitForManagementState() const {
-  if (passwords_ui_controller_->GetState() ==
-      password_manager::ui::MANAGE_STATE)
-    return;
   CustomManagePasswordsUIController* controller =
       static_cast<CustomManagePasswordsUIController*>(passwords_ui_controller_);
   controller->WaitForState(password_manager::ui::MANAGE_STATE);
 }
 
-void BubbleObserver::WaitForSavePrompt() const {
-  if (passwords_ui_controller_->GetState() ==
-      password_manager::ui::PENDING_PASSWORD_STATE)
-    return;
+void BubbleObserver::WaitForAutomaticSavePrompt() const {
   CustomManagePasswordsUIController* controller =
       static_cast<CustomManagePasswordsUIController*>(passwords_ui_controller_);
   controller->WaitForState(password_manager::ui::PENDING_PASSWORD_STATE);
+}
+
+void BubbleObserver::WaitForFallbackForSaving() const {
+  CustomManagePasswordsUIController* controller =
+      static_cast<CustomManagePasswordsUIController*>(passwords_ui_controller_);
+  controller->WaitForFallbackForSaving();
 }
 
 PasswordManagerBrowserTestBase::PasswordManagerBrowserTestBase()
@@ -294,7 +423,7 @@ void PasswordManagerBrowserTestBase::SetUpOnMainThread() {
   verify_result.cert_status = 0;
   verify_result.is_issued_by_known_root = true;
   verify_result.verified_cert = cert;
-  mock_cert_verifier().AddResultForCert(cert.get(), verify_result, net::OK);
+  mock_cert_verifier()->AddResultForCert(cert.get(), verify_result, net::OK);
 
   // Add a tab with a customized ManagePasswordsUIController. Thus, we can
   // intercept useful UI events.
@@ -326,23 +455,21 @@ void PasswordManagerBrowserTestBase::TearDownOnMainThread() {
   ASSERT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
 }
 
-void PasswordManagerBrowserTestBase::SetUpInProcessBrowserTestFixture() {
-  ProfileIOData::SetCertVerifierForTesting(&mock_cert_verifier_);
-}
-
 void PasswordManagerBrowserTestBase::TearDownInProcessBrowserTestFixture() {
   ProfileIOData::SetCertVerifierForTesting(nullptr);
 }
 
-content::WebContents* PasswordManagerBrowserTestBase::WebContents() {
+content::WebContents* PasswordManagerBrowserTestBase::WebContents() const {
   return web_contents_;
 }
 
-content::RenderViewHost* PasswordManagerBrowserTestBase::RenderViewHost() {
+content::RenderViewHost* PasswordManagerBrowserTestBase::RenderViewHost()
+    const {
   return WebContents()->GetRenderViewHost();
 }
 
-content::RenderFrameHost* PasswordManagerBrowserTestBase::RenderFrameHost() {
+content::RenderFrameHost* PasswordManagerBrowserTestBase::RenderFrameHost()
+    const {
   return WebContents()->GetMainFrame();
 }
 
@@ -401,12 +528,6 @@ void PasswordManagerBrowserTestBase::WaitForElementValue(
     const std::string& iframe_id,
     const std::string& element_id,
     const std::string& expected_value) {
-  enum ReturnCodes {  // Possible results of the JavaScript code.
-    RETURN_CODE_OK,
-    RETURN_CODE_NO_ELEMENT,
-    RETURN_CODE_WRONG_VALUE,
-    RETURN_CODE_INVALID,
-  };
   const std::string value_check_function = base::StringPrintf(
       "function valueCheck() {"
       "  if (%s)"
@@ -439,6 +560,12 @@ void PasswordManagerBrowserTestBase::WaitForElementValue(
           "    } else {"
           "      window.domAutomationController.send(%d);"
           "    }"
+          // This script should never send more than one message because only 1
+          // message is expected. Any further messages might be processed in
+          // subsequent script executions, that could lead to failures or
+          // flakiness. Leaving onchange handler would cause sending messages
+          // on any further onchange events.
+          "    element.onchange = undefined;"
           "  };"
           "}",
           RETURN_CODE_OK, iframe_id.c_str(), iframe_id.c_str(),
@@ -449,6 +576,51 @@ void PasswordManagerBrowserTestBase::WaitForElementValue(
       RenderFrameHost(), script, &return_value));
   EXPECT_EQ(RETURN_CODE_OK, return_value)
       << "element_id = " << element_id
+      << ", expected_value = " << expected_value;
+}
+
+void PasswordManagerBrowserTestBase::WaitForElementValue(
+    const std::string& form_id,
+    size_t elements_index,
+    const std::string& expected_value) {
+  const std::string value_check_function = base::StringPrintf(
+      "function valueCheck() {"
+      "  var element = document.getElementById('%s').elements['%zu'];"
+      "  return element && element.value == '%s';"
+      "}",
+      form_id.c_str(), elements_index, expected_value.c_str());
+  const std::string script =
+      value_check_function +
+      base::StringPrintf(
+          "if (valueCheck()) {"
+          "  /* Spin the event loop with setTimeout. */"
+          "  setTimeout(window.domAutomationController.send(%d), 0);"
+          "} else {"
+          "  var element = document.getElementById('%s').elements['%zu'];"
+          "  if (!element)"
+          "    window.domAutomationController.send(%d);"
+          "  element.onchange = function() {"
+          "    if (valueCheck()) {"
+          "      /* Spin the event loop with setTimeout. */"
+          "      setTimeout(window.domAutomationController.send(%d), 0);"
+          "    } else {"
+          "      window.domAutomationController.send(%d);"
+          "    }"
+          // This script should never send more than one message because only 1
+          // message is expected. Any further messages might be processed in
+          // subsequent script executions, that could lead to failures or
+          // flakiness. Leaving onchange handler would cause sending messages
+          // on any further onchange events.
+          "    element.onchange = undefined;"
+          "  };"
+          "}",
+          RETURN_CODE_OK, form_id.c_str(), elements_index,
+          RETURN_CODE_NO_ELEMENT, RETURN_CODE_OK, RETURN_CODE_WRONG_VALUE);
+  int return_value = RETURN_CODE_INVALID;
+  ASSERT_TRUE(content::ExecuteScriptWithoutUserGestureAndExtractInt(
+      RenderFrameHost(), script, &return_value));
+  EXPECT_EQ(RETURN_CODE_OK, return_value)
+      << "form_id = " << form_id << "elements_index=" << elements_index
       << ", expected_value = " << expected_value;
 }
 
@@ -495,8 +667,26 @@ void PasswordManagerBrowserTestBase::AddHSTSHost(const std::string& host) {
       content::BrowserThread::IO, FROM_HERE,
       base::BindOnce(
           &AddHSTSHostImpl,
-          make_scoped_refptr(browser()->profile()->GetRequestContext()), host),
+          base::WrapRefCounted(browser()->profile()->GetRequestContext()),
+          host),
       run_loop.QuitClosure());
 
   run_loop.Run();
+}
+
+void PasswordManagerBrowserTestBase::CheckThatCredentialsStored(
+    const base::string16& username,
+    const base::string16& password) {
+  scoped_refptr<password_manager::TestPasswordStore> password_store =
+      static_cast<password_manager::TestPasswordStore*>(
+          PasswordStoreFactory::GetForProfile(
+              browser()->profile(), ServiceAccessType::IMPLICIT_ACCESS)
+              .get());
+  auto& passwords_map = password_store->stored_passwords();
+  ASSERT_EQ(1u, passwords_map.size());
+  auto& passwords_vector = passwords_map.begin()->second;
+  ASSERT_EQ(1u, passwords_vector.size());
+  const autofill::PasswordForm& form = passwords_vector[0];
+  EXPECT_EQ(username, form.username_value);
+  EXPECT_EQ(password, form.password_value);
 }

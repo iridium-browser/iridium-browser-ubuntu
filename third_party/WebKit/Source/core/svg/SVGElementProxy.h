@@ -78,7 +78,7 @@ class SVGElementProxy : public GarbageCollectedFinalized<SVGElementProxy> {
   }
   virtual ~SVGElementProxy();
 
-  void AddClient(SVGResourceClient*);
+  void AddClient(SVGResourceClient*, base::SingleThreadTaskRunner*);
   void RemoveClient(SVGResourceClient*);
 
   // Resolve a potentially external document reference.
@@ -93,7 +93,7 @@ class SVGElementProxy : public GarbageCollectedFinalized<SVGElementProxy> {
 
   const AtomicString& Id() const { return id_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit SVGElementProxy(const AtomicString&);
@@ -126,7 +126,7 @@ class SVGElementProxySet : public GarbageCollected<SVGElementProxySet> {
   // changed.
   void NotifyContentChanged(TreeScope&);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   using ProxySet = HeapHashSet<WeakMember<SVGElementProxy>>;

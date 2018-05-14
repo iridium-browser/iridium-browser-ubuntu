@@ -90,6 +90,11 @@ CSSPropertyID CSSParserToken::ParseAsUnresolvedCSSPropertyID() const {
   return UnresolvedCSSPropertyID(Value());
 }
 
+AtRuleDescriptorID CSSParserToken::ParseAsAtRuleDescriptorID() const {
+  DCHECK_EQ(type_, static_cast<unsigned>(kIdentToken));
+  return AsAtRuleDescriptorID(Value());
+}
+
 CSSValueID CSSParserToken::Id() const {
   if (type_ != kIdentToken)
     return CSSValueInvalid;
@@ -157,7 +162,7 @@ bool CSSParserToken::operator==(const CSSParserToken& other) const {
     case kHashToken:
       if (hash_token_type_ != other.hash_token_type_)
         return false;
-    // fallthrough
+      FALLTHROUGH;
     case kIdentToken:
     case kFunctionToken:
     case kStringToken:
@@ -166,7 +171,7 @@ bool CSSParserToken::operator==(const CSSParserToken& other) const {
     case kDimensionToken:
       if (!ValueDataCharRawEqual(other))
         return false;
-    // fallthrough
+      FALLTHROUGH;
     case kNumberToken:
     case kPercentageToken:
       return numeric_sign_ == other.numeric_sign_ &&

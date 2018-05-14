@@ -8,11 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/rtp_rtcp/source/packet_loss_stats.h"
+#include "modules/rtp_rtcp/source/packet_loss_stats.h"
 
 #include <vector>
 
-#include "webrtc/rtc_base/checks.h"
+#include "rtc_base/checks.h"
 
 // After this many packets are added, adding additional packets will cause the
 // oldest packets to be pruned from the buffer.
@@ -25,6 +25,8 @@ PacketLossStats::PacketLossStats()
       multiple_loss_historic_event_count_(0),
       multiple_loss_historic_packet_count_(0) {
 }
+
+PacketLossStats::~PacketLossStats() = default;
 
 void PacketLossStats::AddLostPacket(uint16_t sequence_number) {
   // Detect sequence number wrap around.
@@ -77,7 +79,7 @@ void PacketLossStats::ComputeLossCounts(
   std::vector<const std::set<uint16_t>*> buffers;
   buffers.push_back(&lost_packets_buffer_);
   buffers.push_back(&lost_packets_wrapped_buffer_);
-  for (auto buffer : buffers) {
+  for (const auto* buffer : buffers) {
     for (auto it = buffer->begin(); it != buffer->end(); ++it) {
       uint16_t current_num = *it;
       if (sequential_count > 0 && current_num != ((last_num + 1) & 0xFFFF)) {

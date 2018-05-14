@@ -4,15 +4,19 @@
 
 #include "ash/wm/window_util.h"
 
+#include <memory>
 #include <vector>
 
 #include "ash/ash_constants.h"
 #include "ash/public/cpp/config.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
+#include "ash/session/session_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/wm/resize_handle_window_targeter.h"
 #include "ash/wm/widget_finder.h"
+#include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/wm_event.h"
@@ -27,6 +31,8 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/hit_test.h"
 #include "ui/compositor/dip_util.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/view.h"
@@ -90,6 +96,21 @@ aura::Window* GetCaptureWindow() {
   return aura::client::GetCaptureWindow(Shell::GetPrimaryRootWindow());
 }
 
+void GetBlockingContainersForRoot(aura::Window* root_window,
+                                  aura::Window** min_container,
+                                  aura::Window** system_modal_container) {
+  if (Shell::Get()->session_controller()->IsUserSessionBlocked()) {
+    *min_container =
+        root_window->GetChildById(kShellWindowId_LockScreenContainersContainer);
+    *system_modal_container =
+        root_window->GetChildById(kShellWindowId_LockSystemModalContainer);
+  } else {
+    *min_container = nullptr;
+    *system_modal_container =
+        root_window->GetChildById(kShellWindowId_SystemModalContainer);
+  }
+}
+
 bool IsWindowUserPositionable(aura::Window* window) {
   return GetWindowState(window)->IsUserPositionable();
 }
@@ -108,6 +129,20 @@ void SetAutoHideShelf(aura::Window* window, bool autohide) {
 
 bool MoveWindowToDisplay(aura::Window* window, int64_t display_id) {
   DCHECK(window);
+  WindowState* window_state = GetWindowState(window);
+  if (window_state->allow_set_bounds_direct()) {
+    aura::Window* root = Shell::GetRootWindowForDisplayId(display_id);
+    if (root) {
+      gfx::Rect bounds = window->bounds();
+      MoveWindowToRoot(window, root);
+      // Client controlled won't update the bounds upon the root window
+      // Change. Explicitly update the bounds so that the client can
+      // make decision.
+      window->SetBounds(bounds);
+      return true;
+    }
+    return false;
+  }
   aura::Window* root = Shell::GetRootWindowForDisplayId(display_id);
   return root && MoveWindowToRoot(window, root);
 }
@@ -157,7 +192,7 @@ void SetChildrenUseExtendedHitRegionForWindow(aura::Window* window) {
   // frame. Mus needs to support an api for the WindowManager that enables
   // events to be dispatched to windows outside the windows bounds that this
   // function calls into. http://crbug.com/679056.
-  window->SetEventTargeter(base::MakeUnique<::wm::EasyResizeWindowTargeter>(
+  window->SetEventTargeter(std::make_unique<::wm::EasyResizeWindowTargeter>(
       window, mouse_extend, touch_extend));
 }
 
@@ -194,7 +229,7 @@ void RemoveLimitedPreTargetHandlerForWindow(ui::EventHandler* handler,
 void InstallResizeHandleWindowTargeterForWindow(
     aura::Window* window,
     ImmersiveFullscreenController* immersive_fullscreen_controller) {
-  window->SetEventTargeter(base::MakeUnique<ResizeHandleWindowTargeter>(
+  window->SetEventTargeter(std::make_unique<ResizeHandleWindowTargeter>(
       window, immersive_fullscreen_controller));
 }
 

@@ -17,7 +17,6 @@
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
@@ -25,7 +24,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_scheduler/post_task.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
@@ -336,7 +334,7 @@ void CheckVersion(const base::FilePath& pnacl_path, std::string* version) {
   JSONFileValueDeserializer deserializer(pnacl_json_path);
   std::string error;
   std::unique_ptr<base::Value> root = deserializer.Deserialize(NULL, &error);
-  if (!root || !root->IsType(base::Value::Type::DICTIONARY))
+  if (!root || !root->is_dict())
     return;
 
   // Now try to get the field. This may leave version empty if the
@@ -388,7 +386,7 @@ void NaClDomHandler::MaybeRespondToPage() {
 NaClUI::NaClUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   base::RecordAction(UserMetricsAction("ViewAboutNaCl"));
 
-  web_ui->AddMessageHandler(base::MakeUnique<NaClDomHandler>());
+  web_ui->AddMessageHandler(std::make_unique<NaClDomHandler>());
 
   // Set up the about:nacl source.
   Profile* profile = Profile::FromWebUI(web_ui);

@@ -15,14 +15,13 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_util.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/signin/core/browser/fake_auth_status_provider.h"
-#include "components/sync/model/attachments/attachment_service_proxy_for_test.h"
 #include "components/sync/model/fake_sync_change_processor.h"
 #include "components/sync/model/sync_data.h"
 #include "components/sync/model/sync_error_factory_mock.h"
@@ -73,12 +72,7 @@ syncer::SyncData CreateSyncData(const std::string& id,
   specifics.mutable_managed_user()->set_acknowledged(true);
   specifics.mutable_managed_user()->set_chrome_avatar(chrome_avatar);
 
-  return syncer::SyncData::CreateRemoteData(
-      1,
-      specifics,
-      base::Time(),
-      syncer::AttachmentIdList(),
-      syncer::AttachmentServiceProxyForTest::Create());
+  return syncer::SyncData::CreateRemoteData(1, specifics, base::Time());
 }
 #endif
 
@@ -171,10 +165,7 @@ class SigninCreateProfileHandlerTest : public BrowserWithTestWindowTest {
 
   void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
-
-    profile_manager_.reset(
-        new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
-    ASSERT_TRUE(profile_manager_->SetUp());
+    profile_manager()->DeleteAllTestingProfiles();
 
     handler_.reset(new TestSigninCreateProfileHandler(web_ui(),
                                                       profile_manager()));
@@ -182,7 +173,7 @@ class SigninCreateProfileHandlerTest : public BrowserWithTestWindowTest {
     TestingProfile::TestingFactories factories;
     factories.push_back(std::make_pair(SigninManagerFactory::GetInstance(),
                                        BuildFakeSigninManagerBase));
-    custodian_ = profile_manager_.get()->CreateTestingProfile(
+    custodian_ = profile_manager()->CreateTestingProfile(
         "custodian-profile",
         std::unique_ptr<sync_preferences::TestingPrefServiceSyncable>(),
         base::UTF8ToUTF16("custodian-profile"), 0, std::string(), factories);
@@ -229,7 +220,6 @@ class SigninCreateProfileHandlerTest : public BrowserWithTestWindowTest {
 
   void TearDown() override {
     handler_.reset();
-    profile_manager_.reset();
     BrowserWithTestWindowTest::TearDown();
   }
 
@@ -239,10 +229,6 @@ class SigninCreateProfileHandlerTest : public BrowserWithTestWindowTest {
 
   TestSigninCreateProfileHandler* handler() {
     return handler_.get();
-  }
-
-  TestingProfileManager* profile_manager() {
-    return profile_manager_.get();
   }
 
   TestingProfile* custodian() {
@@ -255,7 +241,6 @@ class SigninCreateProfileHandlerTest : public BrowserWithTestWindowTest {
 
  private:
   std::unique_ptr<content::TestWebUI> web_ui_;
-  std::unique_ptr<TestingProfileManager> profile_manager_;
   TestingProfile* custodian_;
   FakeSigninManagerForTesting* fake_signin_manager_;
   std::unique_ptr<TestSigninCreateProfileHandler> handler_;

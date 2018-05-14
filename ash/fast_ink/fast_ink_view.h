@@ -11,14 +11,12 @@
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "components/viz/common/resources/resource_id.h"
+#include "ui/gfx/canvas.h"
 #include "ui/views/view.h"
 
 namespace aura {
 class Window;
-}
-
-namespace cc {
-struct ReturnedResource;
 }
 
 namespace gfx {
@@ -30,52 +28,67 @@ class Widget;
 }
 
 namespace ash {
-class FastInkLayerTreeFrameSinkHolder;
-struct FastInkResource;
 
-// FastInkView is a view supporting low-latency rendering.
+// FastInkView is a view supporting low-latency rendering. The view can enter
+// 'auto-refresh' mode in order to provide minimum latency updates for the
+// associated widget. 'auto-refresh' mode will take advantage of HW overlays
+// when possible and trigger continious updates.
 class FastInkView : public views::View {
  public:
   // Creates a FastInkView filling the bounds of |root_window|.
   // If |root_window| is resized (e.g. due to a screen size change),
   // a new instance of FastInkView should be created.
-  explicit FastInkView(aura::Window* root_window);
+  explicit FastInkView(aura::Window* container);
   ~FastInkView() override;
 
  protected:
-  // Unions |rect| with the current damage rect.
-  void UpdateDamageRect(const gfx::Rect& rect);
+  // Helper class that provides flicker free painting to a GPU memory buffer.
+  class ScopedPaint {
+   public:
+    ScopedPaint(gfx::GpuMemoryBuffer* gpu_memory_buffer,
+                const gfx::Transform& screen_to_buffer_transform,
+                const gfx::Rect& rect);
+    ~ScopedPaint();
 
-  void RequestRedraw();
+    gfx::Canvas& canvas() { return canvas_; }
 
-  // Draw the contents of the view in the provided canvas.
-  virtual void OnRedraw(gfx::Canvas& canvas) = 0;
+   private:
+    gfx::GpuMemoryBuffer* const gpu_memory_buffer_;
+    const gfx::Rect buffer_rect_;
+    gfx::Canvas canvas_;
+
+    DISALLOW_COPY_AND_ASSIGN(ScopedPaint);
+  };
+
+  // Update content and damage rectangles for surface. |auto_refresh| should
+  // be set to true if continous updates are expected within content rectangle.
+  void UpdateSurface(const gfx::Rect& content_rect,
+                     const gfx::Rect& damage_rect,
+                     bool auto_refresh);
+
+  // Constants initialized in constructor.
+  gfx::Transform screen_to_buffer_transform_;
+  gfx::Size buffer_size_;
+  std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer_;
 
  private:
-  friend class FastInkLayerTreeFrameSinkHolder;
+  class LayerTreeFrameSinkHolder;
+  struct Resource;
 
-  // Call this to indicate that the previous frame has been processed.
+  void SubmitCompositorFrame();
+  void SubmitPendingCompositorFrame();
+  void ReclaimResource(std::unique_ptr<Resource> resource);
   void DidReceiveCompositorFrameAck();
 
-  // Call this to return resources so they can be reused or freed.
-  void ReclaimResources(const std::vector<cc::ReturnedResource>& resources);
-
-  void UpdateBuffer();
-  void UpdateSurface();
-  void OnDidDrawSurface();
-
   std::unique_ptr<views::Widget> widget_;
-  gfx::Transform screen_to_buffer_transform_;
-  std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer_;
-  gfx::Rect buffer_damage_rect_;
-  bool pending_update_buffer_ = false;
-  gfx::Rect surface_damage_rect_;
-  bool needs_update_surface_ = false;
-  bool pending_draw_surface_ = false;
-  std::unique_ptr<FastInkLayerTreeFrameSinkHolder> frame_sink_holder_;
+  gfx::Rect content_rect_;
+  gfx::Rect damage_rect_;
+  bool auto_refresh_ = false;
+  bool pending_compositor_frame_ = false;
+  bool pending_compositor_frame_ack_ = false;
   int next_resource_id_ = 1;
-  base::flat_map<int, std::unique_ptr<FastInkResource>> resources_;
-  std::vector<std::unique_ptr<FastInkResource>> returned_resources_;
+  std::vector<std::unique_ptr<Resource>> returned_resources_;
+  std::unique_ptr<LayerTreeFrameSinkHolder> frame_sink_holder_;
   base::WeakPtrFactory<FastInkView> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FastInkView);

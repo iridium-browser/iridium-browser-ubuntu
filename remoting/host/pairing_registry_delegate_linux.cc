@@ -4,6 +4,7 @@
 
 #include "remoting/host/pairing_registry_delegate_linux.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -13,7 +14,6 @@
 #include "base/json/json_file_value_serializer.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "remoting/host/branding.h"
@@ -32,11 +32,9 @@ namespace remoting {
 
 using protocol::PairingRegistry;
 
-PairingRegistryDelegateLinux::PairingRegistryDelegateLinux() {
-}
+PairingRegistryDelegateLinux::PairingRegistryDelegateLinux() = default;
 
-PairingRegistryDelegateLinux::~PairingRegistryDelegateLinux() {
-}
+PairingRegistryDelegateLinux::~PairingRegistryDelegateLinux() = default;
 
 std::unique_ptr<base::ListValue> PairingRegistryDelegateLinux::LoadAll() {
   std::unique_ptr<base::ListValue> pairings(new base::ListValue());
@@ -159,7 +157,7 @@ void PairingRegistryDelegateLinux::SetRegistryPathForTesting(
 }
 
 std::unique_ptr<PairingRegistry::Delegate> CreatePairingRegistryDelegate() {
-  return base::MakeUnique<PairingRegistryDelegateLinux>();
+  return std::make_unique<PairingRegistryDelegateLinux>();
 }
 
 }  // namespace remoting

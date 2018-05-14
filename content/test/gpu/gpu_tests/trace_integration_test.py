@@ -30,8 +30,6 @@ test_harness_script = r"""
 
   domAutomationController._finished = false;
 
-  domAutomationController.setAutomationId = function(id) {}
-
   domAutomationController.send = function(msg) {
     // Issue a read pixel to synchronize the gpu process to ensure
     // the asynchronous category enabling is finished.
@@ -95,7 +93,7 @@ class TraceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       'domAutomationController._finished', timeout=30)
 
     # Stop tracing.
-    timeline_data = tab.browser.platform.tracing_controller.StopTracing()
+    timeline_data = tab.browser.platform.tracing_controller.StopTracing()[0]
 
     # Evaluate success.
     timeline_model = model_module.TimelineModel(timeline_data)

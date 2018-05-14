@@ -11,11 +11,13 @@
 #include "ui/platform_window/platform_window.h"
 #include "ui/platform_window/win/win_window_export.h"
 
+#include <windows.h>
+
 namespace ui {
 
 class PlatformWindowDelegate;
 
-class WIN_WINDOW_EXPORT WinWindow : public NON_EXPORTED_BASE(PlatformWindow),
+class WIN_WINDOW_EXPORT WinWindow : public PlatformWindow,
                                     public gfx::WindowImpl {
  public:
   WinWindow(PlatformWindowDelegate* delegate, const gfx::Rect& bounds);

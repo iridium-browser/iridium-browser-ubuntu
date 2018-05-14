@@ -11,6 +11,7 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#import "base/ios/crb_protocol_observers.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/mac/bind_objc_block.h"
@@ -25,6 +26,7 @@
 #include "ios/chrome/browser/experimental_flags.h"
 #import "ios/chrome/browser/snapshots/lru_cache.h"
 #import "ios/chrome/browser/snapshots/snapshot_cache_internal.h"
+#import "ios/chrome/browser/snapshots/snapshot_cache_observer.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 
@@ -32,7 +34,22 @@
 #error "This file requires ARC support."
 #endif
 
+// Protocol observers subclass that explicitly implements
+// <SnapshotCacheObserver>.
+@interface SnapshotCacheObservers : CRBProtocolObservers<SnapshotCacheObserver>
++ (instancetype)observers;
+@end
+
+@implementation SnapshotCacheObservers
++ (instancetype)observers {
+  return [self observersWithProtocol:@protocol(SnapshotCacheObserver)];
+}
+@end
+
 @interface SnapshotCache ()
+// List of observers to be notified of changes to the snapshot cache.
+@property(nonatomic, strong) SnapshotCacheObservers* observers;
+
 // Remove all UIImages from |lruCache_|.
 - (void)handleEnterBackground;
 // Remove all but adjacent UIImages from |lruCache_|.
@@ -140,7 +157,7 @@ UIImage* ReadImageForSessionFromDisk(NSString* session_id,
                                      ImageType image_type,
                                      ImageScale image_scale,
                                      const base::FilePath& cache_directory) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   // TODO(crbug.com/295891): consider changing back to -imageWithContentsOfFile
   // instead of -imageWithData if both rdar://15747161 and the bug incorrectly
   // reporting the image as damaged https://stackoverflow.com/q/5081297/5353
@@ -155,7 +172,7 @@ UIImage* ReadImageForSessionFromDisk(NSString* session_id,
 }
 
 void WriteImageToDisk(UIImage* image, const base::FilePath& file_path) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   if (!image)
     return;
 
@@ -192,7 +209,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
                              ImageScale image_scale,
                              UIImage* color_image,
                              const base::FilePath& cache_directory) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   if (!color_image) {
     color_image = ReadImageForSessionFromDisk(session_id, IMAGE_TYPE_COLOR,
                                               image_scale, cache_directory);
@@ -243,6 +260,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
 }
 
 @synthesize pinnedIDs = pinnedIDs_;
+@synthesize observers = observers_;
 
 - (instancetype)init {
   base::FilePath cacheDirectory;
@@ -263,6 +281,8 @@ void ConvertAndSaveGreyImage(NSString* session_id,
 
     taskRunner_ = base::CreateSequencedTaskRunnerWithTraits(
         {base::MayBlock(), base::TaskPriority::USER_VISIBLE});
+
+    observers_ = [SnapshotCacheObservers observers];
 
     [[NSNotificationCenter defaultCenter]
         addObserver:self
@@ -308,11 +328,10 @@ void ConvertAndSaveGreyImage(NSString* session_id,
                          callback:(void (^)(UIImage*))callback {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequenceChecker_);
   DCHECK(sessionID);
+  DCHECK(callback);
 
-  UIImage* image = [lruCache_ objectForKey:sessionID];
-  if (image) {
-    if (callback)
-      callback(image);
+  if (UIImage* image = [lruCache_ objectForKey:sessionID]) {
+    callback(image);
     return;
   }
 
@@ -325,7 +344,7 @@ void ConvertAndSaveGreyImage(NSString* session_id,
   const base::FilePath cacheDirectory = cacheDirectory_;
   const ImageScale snapshotsScale = snapshotsScale_;
 
-  __weak SnapshotCache* weakSelf = self;
+  __weak LRUCache* weakLRUCache = lruCache_;
   base::PostTaskAndReplyWithResult(
       taskRunner_.get(), FROM_HERE,
       base::BindBlockArc(^base::scoped_nsobject<UIImage>() {
@@ -334,11 +353,9 @@ void ConvertAndSaveGreyImage(NSString* session_id,
             sessionID, IMAGE_TYPE_COLOR, snapshotsScale, cacheDirectory));
       }),
       base::BindBlockArc(^(base::scoped_nsobject<UIImage> image) {
-        __strong SnapshotCache* strongSelf = weakSelf;
-        if (image && strongSelf)
-          [strongSelf->lruCache_ setObject:image forKey:sessionID];
-        if (callback)
-          callback(image);
+        if (image)
+          [weakLRUCache setObject:image forKey:sessionID];
+        callback(image);
       }));
 }
 
@@ -348,6 +365,8 @@ void ConvertAndSaveGreyImage(NSString* session_id,
     return;
 
   [lruCache_ setObject:image forKey:sessionID];
+
+  [self.observers snapshotCache:self didUpdateSnapshotForTab:sessionID];
 
   // Copy ivars used by the block so that it does not reference |self|.
   const base::FilePath cacheDirectory = cacheDirectory_;
@@ -464,7 +483,9 @@ void ConvertAndSaveGreyImage(NSString* session_id,
 - (void)handleBecomeActive {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequenceChecker_);
   for (NSString* sessionID in pinnedIDs_)
-    [self retrieveImageForSessionID:sessionID callback:nil];
+    [self retrieveImageForSessionID:sessionID
+                           callback:^(UIImage*){
+                           }];
 }
 
 - (void)saveGreyImage:(UIImage*)greyImage forKey:(NSString*)sessionID {
@@ -495,15 +516,15 @@ void ConvertAndSaveGreyImage(NSString* session_id,
   base::PostTaskAndReplyWithResult(
       taskRunner_.get(), FROM_HERE,
       base::BindBlockArc(^base::scoped_nsobject<UIImage>() {
-        base::scoped_nsobject<UIImage> result(image);
         // If the image is not in the cache, load it from disk.
-        if (!result) {
-          result.reset(ReadImageForSessionFromDisk(
-              sessionID, IMAGE_TYPE_COLOR, snapshotsScale, cacheDirectory));
+        UIImage* localImage = image;
+        if (!localImage) {
+          localImage = ReadImageForSessionFromDisk(
+              sessionID, IMAGE_TYPE_COLOR, snapshotsScale, cacheDirectory);
         }
-        if (result)
-          result.reset(GreyImage(result));
-        return result;
+        if (localImage)
+          localImage = GreyImage(localImage);
+        return base::scoped_nsobject<UIImage>(localImage);
       }),
       base::BindBlockArc(^(base::scoped_nsobject<UIImage> greyImage) {
         [weakSelf saveGreyImage:greyImage forKey:sessionID];
@@ -534,8 +555,10 @@ void ConvertAndSaveGreyImage(NSString* session_id,
                      callback:(void (^)(UIImage*))callback {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequenceChecker_);
   DCHECK(greyImageDictionary_);
-  UIImage* image = [greyImageDictionary_ objectForKey:sessionID];
-  if (image) {
+  DCHECK(sessionID);
+  DCHECK(callback);
+
+  if (UIImage* image = [greyImageDictionary_ objectForKey:sessionID]) {
     callback(image);
     [self clearGreySessionInfo];
   } else {
@@ -547,9 +570,11 @@ void ConvertAndSaveGreyImage(NSString* session_id,
 - (void)retrieveGreyImageForSessionID:(NSString*)sessionID
                              callback:(void (^)(UIImage*))callback {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequenceChecker_);
+  DCHECK(sessionID);
+  DCHECK(callback);
+
   if (greyImageDictionary_) {
-    UIImage* image = [greyImageDictionary_ objectForKey:sessionID];
-    if (image) {
+    if (UIImage* image = [greyImageDictionary_ objectForKey:sessionID]) {
       callback(image);
       return;
     }
@@ -574,14 +599,14 @@ void ConvertAndSaveGreyImage(NSString* session_id,
       }),
       base::BindBlockArc(^(base::scoped_nsobject<UIImage> image) {
         if (image) {
-          if (callback)
-            callback(image);
+          callback(image);
           return;
         }
         [weakSelf retrieveImageForSessionID:sessionID
-                                   callback:^(UIImage* local_image) {
-                                     if (callback && local_image)
-                                       callback(GreyImage(local_image));
+                                   callback:^(UIImage* localImage) {
+                                     if (localImage)
+                                       localImage = GreyImage(localImage);
+                                     callback(localImage);
                                    }];
       }));
 }
@@ -612,6 +637,14 @@ void ConvertAndSaveGreyImage(NSString* session_id,
         ConvertAndSaveGreyImage(sessionID, snapshotsScale,
                                 backgroundingColorImage, cacheDirectory);
       }));
+}
+
+- (void)addObserver:(id<SnapshotCacheObserver>)observer {
+  [self.observers addObserver:observer];
+}
+
+- (void)removeObserver:(id<SnapshotCacheObserver>)observer {
+  [self.observers removeObserver:observer];
 }
 
 - (void)shutdown {

@@ -7,6 +7,7 @@ from telemetry.timeline import chrome_trace_category_filter
 from telemetry.web_perf import timeline_based_measurement
 import page_sets
 from telemetry import benchmark
+from telemetry import story
 
 
 # TODO(rnephew): Remove BattOr naming from all benchmarks once the BattOr tests
@@ -27,18 +28,10 @@ class _BattOrBenchmark(perf_benchmark.PerfBenchmark):
         ['powerMetric', 'clockSyncLatencyMetric', 'cpuTimeMetric'])
     return options
 
-  @classmethod
-  def ShouldDisable(cls, possible_browser):
-    return not possible_browser.platform.HasBattOrConnected()
 
-  @classmethod
-  def ShouldTearDownStateAfterEachStoryRun(cls):
-    return True
-
-
-@benchmark.Enabled('mac')
 @benchmark.Owner(emails=['charliea@chromium.org'])
 class BattOrTrivialPages(_BattOrBenchmark):
+  SUPPORTED_PLATFORMS = [story.expectations.ALL_MAC]
 
   def CreateStorySet(self, options):
     # We want it to wait for 30 seconds to be comparable to legacy power tests.
@@ -48,13 +41,10 @@ class BattOrTrivialPages(_BattOrBenchmark):
   def Name(cls):
     return 'battor.trivial_pages'
 
-  def GetExpectations(self):
-    return page_sets.TrivialStoryExpectations()
 
-
-@benchmark.Enabled('mac')
 @benchmark.Owner(emails=['charliea@chromium.org'])
 class BattOrSteadyStatePages(_BattOrBenchmark):
+  SUPPORTED_PLATFORMS = [story.expectations.ALL_MAC]
 
   def CreateStorySet(self, options):
     # We want it to wait for 30 seconds to be comparable to legacy power tests.
@@ -63,6 +53,3 @@ class BattOrSteadyStatePages(_BattOrBenchmark):
   @classmethod
   def Name(cls):
     return 'battor.steady_state'
-
-  def GetExpectations(self):
-    return page_sets.IdleAfterLoadingStoryExpectations()

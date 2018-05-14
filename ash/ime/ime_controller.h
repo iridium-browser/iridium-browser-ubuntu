@@ -11,6 +11,7 @@
 #include "ash/public/interfaces/ime_controller.mojom.h"
 #include "ash/public/interfaces/ime_info.mojom.h"
 #include "base/macros.h"
+#include "base/observer_list.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 
 namespace ui {
@@ -21,17 +22,32 @@ namespace ash {
 
 // Connects ash IME users (e.g. the system tray) to the IME implementation,
 // which might live in Chrome browser or in a separate mojo service.
-class ASH_EXPORT ImeController
-    : public NON_EXPORTED_BASE(mojom::ImeController) {
+class ASH_EXPORT ImeController : public mojom::ImeController {
  public:
+  class Observer {
+   public:
+    // Called when the caps lock state has changed.
+    virtual void OnCapsLockChanged(bool enabled) = 0;
+  };
+
   ImeController();
   ~ImeController() override;
+
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
 
   const mojom::ImeInfo& current_ime() const { return current_ime_; }
 
   const std::vector<mojom::ImeInfo>& available_imes() const {
     return available_imes_;
   }
+
+  bool is_extra_input_options_enabled() const {
+    return is_extra_input_options_enabled_;
+  }
+  bool is_emoji_enabled() const { return is_emoji_enabled_; }
+  bool is_handwriting_enabled() const { return is_handwriting_enabled_; }
+  bool is_voice_enabled() const { return is_voice_enabled_; }
 
   bool managed_by_policy() const { return managed_by_policy_; }
 
@@ -50,6 +66,7 @@ class ASH_EXPORT ImeController
   void SwitchToPreviousIme();
   void SwitchImeById(const std::string& ime_id, bool show_message);
   void ActivateImeMenuItem(const std::string& key);
+  void SetCapsLockFromTray(bool caps_enabled);
 
   // Returns true if the switch is allowed and the keystroke should be
   // consumed.
@@ -64,6 +81,15 @@ class ASH_EXPORT ImeController
                   std::vector<mojom::ImeMenuItemPtr> menu_items) override;
   void SetImesManagedByPolicy(bool managed) override;
   void ShowImeMenuOnShelf(bool show) override;
+  void SetCapsLockState(bool caps_enabled) override;
+
+  void SetExtraInputOptionsEnabledState(bool is_extra_input_options_enabled,
+                                        bool is_emoji_enabled,
+                                        bool is_handwriting_enabled,
+                                        bool is_voice_enabled) override;
+
+  // Synchronously returns the cached caps lock state.
+  bool IsCapsLockEnabled() const;
 
   void FlushMojoForTesting();
 
@@ -92,6 +118,26 @@ class ASH_EXPORT ImeController
 
   // Additional menu items for properties of the currently selected IME.
   std::vector<mojom::ImeMenuItem> current_ime_menu_items_;
+
+  // A slightly delayed state value that is updated by asynchronously reported
+  // changes from the ImeControllerClient client (source of truth) which is in
+  // another process. This is required for synchronous method calls in ash.
+  bool is_caps_lock_enabled_ = false;
+
+  // True if the extended inputs should be available in general (emoji,
+  // handwriting, voice).
+  bool is_extra_input_options_enabled_ = false;
+
+  // True if emoji input should be available from the IME menu.
+  bool is_emoji_enabled_ = false;
+
+  // True if handwriting input should be available from the IME menu.
+  bool is_handwriting_enabled_ = false;
+
+  // True if voice input should be available from the IME menu.
+  bool is_voice_enabled_ = false;
+
+  base::ObserverList<Observer> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ImeController);
 };

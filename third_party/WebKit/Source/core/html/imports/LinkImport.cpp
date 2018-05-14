@@ -30,13 +30,13 @@
 
 #include "core/html/imports/LinkImport.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/html/HTMLLinkElement.h"
 #include "core/html/imports/HTMLImportChild.h"
 #include "core/html/imports/HTMLImportLoader.h"
 #include "core/html/imports/HTMLImportTreeRoot.h"
 #include "core/html/imports/HTMLImportsController.h"
+#include "core/html_names.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/loader/fetch/ResourceRequest.h"
@@ -54,7 +54,7 @@ LinkImport* LinkImport::Create(HTMLLinkElement* owner) {
 LinkImport::LinkImport(HTMLLinkElement* owner)
     : LinkResource(owner), child_(nullptr) {}
 
-LinkImport::~LinkImport() {}
+LinkImport::~LinkImport() = default;
 
 Document* LinkImport::ImportedDocument() const {
   if (!child_ || !owner_ || !owner_->isConnected())
@@ -72,23 +72,11 @@ void LinkImport::Process() {
   if (!ShouldLoadResource())
     return;
 
-  if (!GetDocument().ImportsController()) {
-    // The document should be the master.
-    Document& master = GetDocument();
-    DCHECK(master.GetFrame());
-    master.CreateImportsController();
-  }
-
-  KURL url = owner_->GetNonEmptyURLAttribute(HTMLNames::hrefAttr);
+  const KURL& url = owner_->GetNonEmptyURLAttribute(HTMLNames::hrefAttr);
   if (url.IsEmpty() || !url.IsValid()) {
     DidFinish();
     return;
   }
-
-  HTMLImportsController* controller = GetDocument().ImportsController();
-  HTMLImportLoader* loader = GetDocument().ImportLoader();
-  HTMLImport* parent = loader ? static_cast<HTMLImport*>(loader->FirstImport())
-                              : static_cast<HTMLImport*>(controller->Root());
 
   ResourceRequest resource_request(GetDocument().CompleteURL(url));
   ReferrerPolicy referrer_policy = owner_->GetReferrerPolicy();
@@ -99,11 +87,13 @@ void LinkImport::Process() {
 
   ResourceLoaderOptions options;
   options.initiator_info.name = owner_->localName();
+
   FetchParameters params(resource_request, options);
   params.SetCharset(GetCharset());
   params.SetContentSecurityPolicyNonce(owner_->nonce());
 
-  child_ = controller->Load(parent, this, params);
+  HTMLImportsController* controller = GetDocument().EnsureImportsController();
+  child_ = controller->Load(GetDocument(), this, params);
   if (!child_) {
     DidFinish();
     return;
@@ -145,7 +135,7 @@ void LinkImport::OwnerRemoved() {
     GetDocument().GetStyleEngine().HtmlImportAddedOrRemoved();
 }
 
-DEFINE_TRACE(LinkImport) {
+void LinkImport::Trace(blink::Visitor* visitor) {
   visitor->Trace(child_);
   HTMLImportChildClient::Trace(visitor);
   LinkResource::Trace(visitor);

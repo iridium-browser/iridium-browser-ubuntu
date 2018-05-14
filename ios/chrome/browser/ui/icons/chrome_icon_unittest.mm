@@ -5,6 +5,8 @@
 #import "ios/chrome/browser/ui/icons/chrome_icon.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/gtest_mac.h"
+#include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/ocmock_extensions.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -19,14 +21,16 @@
 
 namespace {
 
-TEST(ChromeIconTest, NonNilIcons) {
+using ChromeIconTest = PlatformTest;
+
+TEST_F(ChromeIconTest, NonNilIcons) {
   EXPECT_TRUE([ChromeIcon backIcon]);
   EXPECT_TRUE([ChromeIcon closeIcon]);
   EXPECT_TRUE([ChromeIcon infoIcon]);
   EXPECT_TRUE([ChromeIcon searchIcon]);
 }
 
-TEST(ChromeIconTest, Accessibility) {
+TEST_F(ChromeIconTest, Accessibility) {
   EXPECT_TRUE([ChromeIcon backIcon].accessibilityIdentifier);
   EXPECT_TRUE([ChromeIcon backIcon].accessibilityLabel);
 
@@ -40,12 +44,12 @@ TEST(ChromeIconTest, Accessibility) {
   EXPECT_TRUE([ChromeIcon searchIcon].accessibilityLabel);
 }
 
-TEST(ChromeIcontTest, RTL) {
+TEST_F(ChromeIconTest, RTL) {
   EXPECT_TRUE([ChromeIcon backIcon].flipsForRightToLeftLayoutDirection);
   EXPECT_FALSE([ChromeIcon searchIcon].flipsForRightToLeftLayoutDirection);
 }
 
-TEST(ChromeIconTest, TemplateBarButtonItem) {
+TEST_F(ChromeIconTest, TemplateBarButtonItem) {
   UIImage* image = [UIImage imageNamed:@"ic_close"];
   image.accessibilityIdentifier = @"identifier";
   image.accessibilityLabel = @"label";
@@ -57,8 +61,8 @@ TEST(ChromeIconTest, TemplateBarButtonItem) {
                                           target:mockTarget
                                           action:@selector(doSomething)];
 
-  EXPECT_EQ(@"identifier", barButtonItem.accessibilityIdentifier);
-  EXPECT_EQ(@"label", barButtonItem.accessibilityLabel);
+  EXPECT_NSEQ(@"identifier", barButtonItem.accessibilityIdentifier);
+  EXPECT_NSEQ(@"label", barButtonItem.accessibilityLabel);
   EXPECT_EQ(image.size.width, barButtonItem.image.size.width);
   EXPECT_EQ(image.size.height, barButtonItem.image.size.height);
   EXPECT_EQ(image.scale, barButtonItem.image.scale);

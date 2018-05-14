@@ -89,23 +89,28 @@ bool RequestSender::StartRequest(Source* source,
     return false;
 
   GURL source_url;
-  if (blink::WebLocalFrame* webframe = context->web_frame())
+  blink::WebLocalFrame* webframe = context->web_frame();
+  if (webframe)
     source_url = webframe->GetDocument().Url();
 
   InsertRequest(request_id,
-                base::MakeUnique<PendingRequest>(
+                std::make_unique<PendingRequest>(
                     name, source,
                     blink::WebUserGestureIndicator::CurrentUserGestureToken()));
 
-  auto params = base::MakeUnique<ExtensionHostMsg_Request_Params>();
+  auto params = std::make_unique<ExtensionHostMsg_Request_Params>();
   params->name = name;
   params->arguments.Swap(value_args);
   params->extension_id = context->GetExtensionID();
   params->source_url = source_url;
   params->request_id = request_id;
   params->has_callback = has_callback;
+
+  // TODO(mustaq): What to do with extension service workers without
+  // RenderFrames? crbug/733679
   params->user_gesture =
-      blink::WebUserGestureIndicator::IsProcessingUserGestureThreadSafe();
+      blink::WebUserGestureIndicator::IsProcessingUserGestureThreadSafe(
+          webframe);
 
   // Set Service Worker specific params to default values.
   params->worker_thread_id = -1;

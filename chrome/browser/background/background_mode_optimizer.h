@@ -9,8 +9,8 @@
 
 #include "base/macros.h"
 #include "base/time/time.h"
-#include "chrome/browser/lifetime/keep_alive_state_observer.h"
 #include "chrome/browser/ui/browser_list_observer.h"
+#include "components/keep_alive_registry/keep_alive_state_observer.h"
 
 class Browser;
 
@@ -19,7 +19,7 @@ class Browser;
 // It tries to restart the browser to release accumulated memory when it
 // is considered non distruptive.
 class BackgroundModeOptimizer : public KeepAliveStateObserver,
-                                chrome::BrowserListObserver {
+                                BrowserListObserver {
  public:
   ~BackgroundModeOptimizer() override;
 
@@ -31,7 +31,7 @@ class BackgroundModeOptimizer : public KeepAliveStateObserver,
   void OnKeepAliveStateChanged(bool is_keeping_alive) override;
   void OnKeepAliveRestartStateChanged(bool can_restart) override;
 
-  // chrome::BrowserListObserver implementation.
+  // BrowserListObserver implementation.
   void OnBrowserAdded(Browser* browser) override;
 
  private:

@@ -6,22 +6,26 @@
 #define CONTENT_BROWSER_WEBRTC_WEBRTC_INTERNALS_H_
 
 #include <memory>
-#include <queue>
 #include <string>
 
 #include "base/containers/hash_tables.h"
+#include "base/containers/queue.h"
 #include "base/gtest_prod_util.h"
-#include "base/lazy_instance.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/process/process.h"
 #include "base/threading/thread_checker.h"
 #include "base/values.h"
+#include "content/browser/webrtc/webrtc_event_log_manager.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "media/media_features.h"
-#include "services/device/public/interfaces/wake_lock.mojom.h"
+#include "services/device/public/mojom/wake_lock.mojom.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
+
+namespace media {
+class AudioDebugRecordingSession;
+}
 
 namespace content {
 
@@ -35,7 +39,16 @@ class WebRTCInternalsUIObserver;
 class CONTENT_EXPORT WebRTCInternals : public RenderProcessHostObserver,
                                        public ui::SelectFileDialog::Listener {
  public:
+  // Ensures that no previous instantiation of the class was performed, then
+  // instantiates the class and returns the object. Subsequent calls to
+  // GetInstance() will return this object.
+  static WebRTCInternals* CreateSingletonInstance();
+
+  // Returns the object previously constructed using CreateSingletonInstance().
+  // Can be null in tests.
   static WebRTCInternals* GetInstance();
+
+  ~WebRTCInternals() override;
 
   // This method is called when a PeerConnection is created.
   // |render_process_id| is the id of the render process (not OS pid), which is
@@ -101,11 +114,11 @@ class CONTENT_EXPORT WebRTCInternals : public RenderProcessHostObserver,
   const base::FilePath& GetAudioDebugRecordingsFilePath() const;
 
   // Enables or disables diagnostic event log.
-  void EnableEventLogRecordings(content::WebContents* web_contents);
-  void DisableEventLogRecordings();
+  void EnableLocalEventLogRecordings(content::WebContents* web_contents);
+  void DisableLocalEventLogRecordings();
 
   bool IsEventLogRecordingsEnabled() const;
-  const base::FilePath& GetEventLogFilePath() const;
+  bool CanToggleEventLogRecordings() const;
 
   int num_open_connections() const { return num_open_connections_; }
 
@@ -116,12 +129,10 @@ class CONTENT_EXPORT WebRTCInternals : public RenderProcessHostObserver,
   // The default ctor sets |aggregate_updates_ms| to 500ms.
   WebRTCInternals();
   WebRTCInternals(int aggregate_updates_ms, bool should_block_power_saving);
-  ~WebRTCInternals() override;
 
   device::mojom::WakeLockPtr wake_lock_;
 
  private:
-  friend struct base::LazyInstanceTraitsBase<WebRTCInternals>;
   FRIEND_TEST_ALL_PREFIXES(WebRtcAudioDebugRecordingsBrowserTest,
                            CallWithAudioDebugRecordings);
   FRIEND_TEST_ALL_PREFIXES(WebRtcAudioDebugRecordingsBrowserTest,
@@ -130,6 +141,8 @@ class CONTENT_EXPORT WebRTCInternals : public RenderProcessHostObserver,
                            TwoCallsWithAudioDebugRecordings);
   FRIEND_TEST_ALL_PREFIXES(WebRtcInternalsTest,
                            AudioDebugRecordingsFileSelectionCanceled);
+
+  static WebRTCInternals* g_webrtc_internals;
 
   void SendUpdate(const char* command,
                   std::unique_ptr<base::Value> value);
@@ -152,10 +165,6 @@ class CONTENT_EXPORT WebRTCInternals : public RenderProcessHostObserver,
   // Enables diagnostic audio recordings on all render process hosts using
   // |audio_debug_recordings_file_path_|.
   void EnableAudioDebugRecordingsOnAllRenderProcessHosts();
-
-  // Enables event log recordings on all render process hosts using
-  // |event_log_recordings_file_path_|.
-  void EnableEventLogRecordingsOnAllRenderProcessHosts();
 #endif
 
   // Updates the number of open PeerConnections. Called when a PeerConnection
@@ -208,14 +217,23 @@ class CONTENT_EXPORT WebRTCInternals : public RenderProcessHostObserver,
 
   // For managing select file dialog.
   scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
+  enum class SelectionType {
+    kRtcEventLogs,
+    kAudioDebugRecordings
+  } selection_type_;
 
   // Diagnostic audio recording state.
-  bool audio_debug_recordings_;
   base::FilePath audio_debug_recordings_file_path_;
+  std::unique_ptr<media::AudioDebugRecordingSession>
+      audio_debug_recording_session_;
 
-  // Diagnostic event log recording state.
+  // If non-empty, WebRTC (local) event logging should be enabled using this
+  // path, and may not be turned off, except by restarting the browser.
+  const base::FilePath command_line_derived_logging_path_;
+
+  // Diagnostic event log recording state. These are meaningful only when
+  // |command_line_derived_logging_path_| is empty.
   bool event_log_recordings_;
-  bool selecting_event_log_;
   base::FilePath event_log_recordings_file_path_;
 
   // While |num_open_connections_| is greater than zero, request a wake lock
@@ -251,7 +269,7 @@ class CONTENT_EXPORT WebRTCInternals : public RenderProcessHostObserver,
     DISALLOW_COPY_AND_ASSIGN(PendingUpdate);
   };
 
-  std::queue<PendingUpdate> pending_updates_;
+  base::queue<PendingUpdate> pending_updates_;
   const int aggregate_updates_ms_;
 
   // Weak factory for this object that we use for bulking up updates.

@@ -6,10 +6,11 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
-#include "core/editing/EditingTestBase.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/Position.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/VisibleSelection.h"
+#include "core/editing/testing/EditingTestBase.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/testing/DummyPageHolder.h"
@@ -26,15 +27,15 @@ TEST_F(TypingCommandTest, insertLineBreakWithIllFormedHTML) {
   SetBodyContent("<div contenteditable></div>");
 
   // <input><form></form></input>
-  Element* input1 = GetDocument().createElement("input");
-  Element* form = GetDocument().createElement("form");
+  Element* input1 = GetDocument().CreateRawElement(HTMLNames::inputTag);
+  Element* form = GetDocument().CreateRawElement(HTMLNames::formTag);
   input1->AppendChild(form);
 
   // <tr><input><header></header></input><rbc></rbc></tr>
-  Element* tr = GetDocument().createElement("tr");
-  Element* input2 = GetDocument().createElement("input");
-  Element* header = GetDocument().createElement("header");
-  Element* rbc = GetDocument().createElement("rbc");
+  Element* tr = GetDocument().CreateRawElement(HTMLNames::trTag);
+  Element* input2 = GetDocument().CreateRawElement(HTMLNames::inputTag);
+  Element* header = GetDocument().CreateRawElement(HTMLNames::headerTag);
+  Element* rbc = GetDocument().CreateElementForBinding("rbc");
   input2->AppendChild(header);
   tr->AppendChild(input2);
   tr->AppendChild(rbc);
@@ -44,13 +45,52 @@ TEST_F(TypingCommandTest, insertLineBreakWithIllFormedHTML) {
   div->AppendChild(tr);
 
   LocalFrame* frame = GetDocument().GetFrame();
-  frame->Selection().SetSelection(SelectionInDOMTree::Builder()
-                                      .Collapse(Position(form, 0))
-                                      .Extend(Position(header, 0))
-                                      .Build());
+  frame->Selection().SetSelectionAndEndTyping(SelectionInDOMTree::Builder()
+                                                  .Collapse(Position(form, 0))
+                                                  .Extend(Position(header, 0))
+                                                  .Build());
 
   // Inserting line break should not crash or hit assertion.
   TypingCommand::InsertLineBreak(GetDocument());
+}
+
+// http://crbug.com/767599
+TEST_F(TypingCommandTest,
+       DontCrashWhenReplaceSelectionCommandLeavesBadSelection) {
+  Selection().SetSelectionAndEndTyping(
+      SetSelectionTextToBody("<div contenteditable>^<h1>H1</h1>ello|</div>"));
+
+  // This call shouldn't crash.
+  TypingCommand::InsertText(
+      GetDocument(), " ", 0,
+      TypingCommand::TextCompositionType::kTextCompositionUpdate, true);
+  EXPECT_EQ("<div contenteditable>^<h1></h1>|</div>",
+            GetSelectionTextFromBody(Selection().GetSelectionInDOMTree()));
+}
+
+// crbug.com/794397
+TEST_F(TypingCommandTest, ForwardDeleteInvalidatesSelection) {
+  GetDocument().setDesignMode("on");
+  Selection().SetSelectionAndEndTyping(SetSelectionTextToBody(
+      "<blockquote>^"
+      "<q>"
+      "<table contenteditable=\"false\"><colgroup width=\"-1\">\n</table>|"
+      "</q>"
+      "</blockquote>"
+      "<q>\n<svg></svg></q>"));
+
+  EditingState editing_state;
+  TypingCommand::ForwardDeleteKeyPressed(GetDocument(), &editing_state);
+
+  EXPECT_EQ(
+      "<blockquote>|</blockquote>"
+      "<q>"
+      "<table contenteditable=\"false\">"
+      "<colgroup width=\"-1\"></colgroup>"
+      "</table>\n"
+      "<svg></svg>"
+      "</q>",
+      GetSelectionTextFromBody(Selection().GetSelectionInDOMTree()));
 }
 
 }  // namespace blink

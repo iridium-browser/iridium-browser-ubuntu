@@ -26,6 +26,8 @@
 #include "core/editing/commands/CreateLinkCommand.h"
 
 #include "core/dom/Text.h"
+#include "core/editing/SelectionTemplate.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/html/HTMLAnchorElement.h"
 
 namespace blink {
@@ -47,19 +49,19 @@ void CreateLinkCommand::DoApply(EditingState* editing_state) {
     if (editing_state->IsAborted())
       return;
   } else {
-    InsertNodeAt(anchor_element, EndingSelection().Start(), editing_state);
+    InsertNodeAt(anchor_element, EndingVisibleSelection().Start(),
+                 editing_state);
     if (editing_state->IsAborted())
       return;
     Text* text_node = Text::Create(GetDocument(), url_);
     AppendNode(text_node, anchor_element, editing_state);
     if (editing_state->IsAborted())
       return;
-    SetEndingSelection(
+    SetEndingSelection(SelectionForUndoStep::From(
         SelectionInDOMTree::Builder()
             .Collapse(Position::InParentBeforeNode(*anchor_element))
             .Extend(Position::InParentAfterNode(*anchor_element))
-            .SetIsDirectional(EndingSelection().IsDirectional())
-            .Build());
+            .Build()));
   }
 }
 

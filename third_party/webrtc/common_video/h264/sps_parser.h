@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_COMMON_VIDEO_H264_SPS_PARSER_H_
-#define WEBRTC_COMMON_VIDEO_H264_SPS_PARSER_H_
+#ifndef COMMON_VIDEO_H264_SPS_PARSER_H_
+#define COMMON_VIDEO_H264_SPS_PARSER_H_
 
-#include "webrtc/rtc_base/optional.h"
+#include "api/optional.h"
 
 namespace rtc {
 class BitBuffer;
@@ -25,7 +25,7 @@ class SpsParser {
   // The parsed state of the SPS. Only some select values are stored.
   // Add more as they are actually needed.
   struct SpsState {
-    SpsState() = default;
+    SpsState();
 
     uint32_t width = 0;
     uint32_t height = 0;
@@ -50,4 +50,4 @@ class SpsParser {
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_COMMON_VIDEO_H264_SPS_PARSER_H_
+#endif  // COMMON_VIDEO_H264_SPS_PARSER_H_

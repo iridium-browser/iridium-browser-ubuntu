@@ -5,8 +5,9 @@
 #include "chrome/browser/android/browsing_data/browsing_data_counter_bridge.h"
 
 #include "base/android/jni_string.h"
-#include "chrome/browser/browsing_data/browsing_data_counter_factory.h"
-#include "chrome/browser/browsing_data/browsing_data_counter_utils.h"
+#include "base/trace_event/trace_event.h"
+#include "chrome/browser/browsing_data/counters/browsing_data_counter_factory.h"
+#include "chrome/browser/browsing_data/counters/browsing_data_counter_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
@@ -27,6 +28,9 @@ BrowsingDataCounterBridge::BrowsingDataCounterBridge(
   DCHECK_GE(clear_browsing_data_tab, 0);
   DCHECK_LT(clear_browsing_data_tab,
             static_cast<int>(browsing_data::ClearBrowsingDataTab::NUM_TYPES));
+  TRACE_EVENT1("browsing_data",
+               "BrowsingDataCounterBridge::BrowsingDataCounterBridge",
+               "data_type", data_type);
 
   clear_browsing_data_tab_ =
       static_cast<browsing_data::ClearBrowsingDataTab>(clear_browsing_data_tab);
@@ -69,10 +73,11 @@ void BrowsingDataCounterBridge::onCounterFinished(
                                                                result_string);
 }
 
-static jlong Init(JNIEnv* env,
-                  const JavaParamRef<jobject>& obj,
-                  jint data_type,
-                  jint clear_browsing_data_tab) {
+static jlong JNI_BrowsingDataCounterBridge_Init(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jint data_type,
+    jint clear_browsing_data_tab) {
   return reinterpret_cast<intptr_t>(new BrowsingDataCounterBridge(
       env, obj, data_type, clear_browsing_data_tab));
 }

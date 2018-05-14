@@ -103,7 +103,7 @@ IOSSSLBlockingPage::IOSSSLBlockingPage(
     options_mask &= ~SSLErrorUI::SOFT_OVERRIDE_ENABLED;
 
   ssl_error_ui_.reset(new SSLErrorUI(request_url, cert_error, ssl_info,
-                                     options_mask, time_triggered,
+                                     options_mask, time_triggered, GURL(),
                                      controller_.get()));
 
   // Creating an interstitial without showing (e.g. from chrome://interstitials)
@@ -145,7 +145,7 @@ void IOSSSLBlockingPage::CommandReceived(const std::string& command) {
   bool retval = base::StringToInt(command, &cmd);
   DCHECK(retval);
   ssl_error_ui_->HandleCommand(
-      static_cast<security_interstitials::SecurityInterstitialCommands>(cmd));
+      static_cast<security_interstitials::SecurityInterstitialCommand>(cmd));
 }
 
 void IOSSSLBlockingPage::OnProceed() {

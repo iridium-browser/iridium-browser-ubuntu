@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/run_loop.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/extensions/extension_install_prompt_test_helper.h"
 #include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_install_prompt_test_utils.h"
@@ -52,7 +51,7 @@ IN_PROC_BROWSER_TEST_F(WindowedInstallDialogControllerBrowserTest,
       base::Bind(&TestingShowAppListInstallDialogController, &controller));
 
   // The prompt needs to load the image, which happens on the blocking pool.
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   ASSERT_TRUE(controller);
 
   base::scoped_nsobject<NSWindow> window(

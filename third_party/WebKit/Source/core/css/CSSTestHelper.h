@@ -30,9 +30,9 @@
 #ifndef CSSTestHelper_h
 #define CSSTestHelper_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/css/RuleSet.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -53,7 +53,9 @@ class CSSTestHelper {
   CSSTestHelper();
   ~CSSTestHelper();
 
-  void AddCSSRules(const char* rule_text);
+  const Document& GetDocument() { return *document_; };
+
+  void AddCSSRules(const char* rule_text, bool is_empty_sheet = false);
   RuleSet& GetRuleSet();
   CSSRuleList* CssRules();
 

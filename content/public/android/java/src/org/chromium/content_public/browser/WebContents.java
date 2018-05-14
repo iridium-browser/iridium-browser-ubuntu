@@ -7,14 +7,12 @@ package org.chromium.content_public.browser;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Parcelable;
+import android.support.annotation.Nullable;
 
 import org.chromium.base.VisibleForTesting;
-import org.chromium.content.browser.RenderCoordinates;
 import org.chromium.ui.OverscrollRefreshHandler;
 import org.chromium.ui.base.EventForwarder;
 import org.chromium.ui.base.WindowAndroid;
-
-import java.util.List;
 
 /**
  * The WebContents Java wrapper to allow communicating with the native WebContents object.
@@ -41,6 +39,34 @@ import java.util.List;
  * webContents = bundle.get("WEBCONTENTSKEY");
  */
 public interface WebContents extends Parcelable {
+    /**
+     * Interface used to transfer the internal objects (but callers should own) from WebContents.
+     */
+    interface InternalsHolder {
+        /**
+         * Called when WebContents sets the internals to the caller.
+         *
+         * @param internals a {@link WebContentsInternals} object.
+         */
+        void set(WebContentsInternals internals);
+
+        /**
+         * Returns {@link WebContentsInternals} object. Can be {@code null}.
+         */
+        WebContentsInternals get();
+    }
+
+    /**
+     * Sets holder of the objects used internally by WebContents for various features.
+     * This transfers the ownership of the objects to the caller since they will have the same
+     * lifecycle as that of the caller. The caller doesn't have to care about the objects inside
+     * the holder but should hold a reference to it and manage its lifetime.
+     *
+     * @param holder {@link #InternalsHolder} used to transfer the internal objects
+     *        from WebContents to the caller.
+     */
+    void setInternalsHolder(InternalsHolder holder);
+
     /**
      * @return The top level WindowAndroid associated with this WebContents.  This can be null.
      */
@@ -75,6 +101,11 @@ public interface WebContents extends Parcelable {
      * @return The URL for the current visible page.
      */
     String getVisibleUrl();
+
+    /**
+     * @return The character encoding for the current visible page.
+     */
+    String getEncoding();
 
     /**
      * @return Whether this WebContents is loading a resource.
@@ -144,6 +175,12 @@ public interface WebContents extends Parcelable {
      */
     void onShow();
 
+    /**
+     * ChildProcessImportance on Android allows controls of the renderer process bindings
+     * independent of visibility.
+     */
+    void setImportance(@ChildProcessImportance int importance);
+
     // TODO (amaralp): Only used in content. Should be moved out of public interface.
     /**
      * Removes handles used in text selection.
@@ -209,15 +246,6 @@ public interface WebContents extends Parcelable {
     void exitFullscreen();
 
     /**
-     * Changes whether hiding the browser controls is enabled.
-     *
-     * @param enableHiding Whether hiding the browser controls should be enabled or not.
-     * @param enableShowing Whether showing the browser controls should be enabled or not.
-     * @param animate Whether the transition should be animated or not.
-     */
-    void updateBrowserControlsState(boolean enableHiding, boolean enableShowing, boolean animate);
-
-    /**
      * Brings the Editable to the visible area while IME is up to make easier for inputing text.
      */
     void scrollFocusedEditableNodeIntoView();
@@ -234,8 +262,10 @@ public interface WebContents extends Parcelable {
      * amount moves the selection towards the end of the document.
      * @param startAdjust The amount to adjust the start of the selection.
      * @param endAdjust The amount to adjust the end of the selection.
+     * @param showSelectionMenu if true, show selection menu after adjustment.
      */
-    public void adjustSelectionByCharacterOffset(int startAdjust, int endAdjust);
+    void adjustSelectionByCharacterOffset(
+            int startAdjust, int endAdjust, boolean showSelectionMenu);
 
     /**
      * Gets the last committed URL. It represents the current page that is
@@ -335,8 +365,7 @@ public interface WebContents extends Parcelable {
      * Initiate extraction of text, HTML, and other information for clipping puposes (smart clip)
      * from the rectangle area defined by starting positions (x and y), and width and height.
      */
-    void requestSmartClipExtract(
-            int x, int y, int width, int height, RenderCoordinates coordinateSpace);
+    void requestSmartClipExtract(int x, int y, int width, int height);
 
     /**
      * Register a handler to handle smart clip data once extraction is done.
@@ -386,12 +415,12 @@ public interface WebContents extends Parcelable {
      * @param callback May be called synchronously, or at a later point, to deliver the bitmap
      *                 result (or a failure code).
      */
-    public void getContentBitmapAsync(int width, int height, ContentBitmapCallback callback);
+    void getContentBitmapAsync(int width, int height, ContentBitmapCallback callback);
 
     /**
      * Reloads all the Lo-Fi images in this WebContents.
      */
-    public void reloadLoFiImages();
+    void reloadLoFiImages();
 
     /**
      * Sends a request to download the given image {@link url}.
@@ -410,20 +439,33 @@ public interface WebContents extends Parcelable {
      *                 renderer.
      * @return The unique id of the download request
      */
-    public int downloadImage(String url, boolean isFavicon, int maxBitmapSize,
-            boolean bypassCache, ImageDownloadCallback callback);
+    int downloadImage(String url, boolean isFavicon, int maxBitmapSize, boolean bypassCache,
+            ImageDownloadCallback callback);
 
     /**
      * Whether the WebContents has an active fullscreen video with native or custom controls.
-     * The WebContents must be fullscreen when this method is called.
+     * The WebContents must be fullscreen when this method is called. Fullscreen videos may take a
+     * moment to register. This should only be called if AppHooks.shouldDetectVideoFullscreen()
+     * returns true.
      */
-    public boolean hasActiveEffectivelyFullscreenVideo();
+    boolean hasActiveEffectivelyFullscreenVideo();
 
     /**
-     * Gets a Rect containing the size of the currently playing video. The position of the rectangle
-     * is meaningless.
+     * Whether the WebContents is allowed to enter Picture-in-Picture when it has an active
+     * fullscreen video with native or custom controls.
+     * This should only be called if AppHooks.shouldDetectVideoFullscreen()
+     * returns true.
      */
-    public List<Rect> getCurrentlyPlayingVideoSizes();
+    boolean isPictureInPictureAllowedForFullscreenVideo();
+
+    /**
+     * Gets a Rect containing the size of the currently playing fullscreen video. The position of
+     * the rectangle is meaningless. Will return null if there is no such video. Fullscreen videos
+     * may take a moment to register. This should only be called if
+     * AppHooks.shouldDetectVideoFullscreen() returns true.
+     */
+    @Nullable
+    Rect getFullscreenVideoSize();
 
     /**
      * Issues a fake notification about the renderer being killed.
@@ -431,7 +473,7 @@ public interface WebContents extends Parcelable {
      * @param wasOomProtected True if the renderer was protected from the OS out-of-memory killer
      *                        (e.g. renderer for the currently selected tab)
      */
-    public void simulateRendererKilledForTesting(boolean wasOomProtected);
+    void simulateRendererKilledForTesting(boolean wasOomProtected);
 
     /**
      * Notifies the WebContents about the new persistent video status. It should be called whenever
@@ -439,5 +481,27 @@ public interface WebContents extends Parcelable {
      *
      * @param value Whether there is a persistent video associated with this WebContents.
      */
-    public void setHasPersistentVideo(boolean value);
+    void setHasPersistentVideo(boolean value);
+
+    /**
+     * Set the view size of the WebContents. The size is in physical pixels.
+     *
+     * @param width The width of the view.
+     * @param height The height of the view.
+     */
+    void setSize(int width, int height);
+
+    /**
+     * Gets the view size width of the WebContents. The size is in physical pixels.
+     *
+     * @return The width of the view.
+     */
+    int getWidth();
+
+    /**
+     * Gets the view size width of the WebContents. The size is in physical pixels.
+     *
+     * @return The width of the view.
+     */
+    int getHeight();
 }

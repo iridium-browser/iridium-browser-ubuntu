@@ -29,19 +29,16 @@
 #include <memory>
 #include "core/dom/Document.h"
 #include "core/page/Page.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/StdLibExtras.h"
 
 namespace blink {
 
 std::unique_ptr<ContextFeaturesClient> ContextFeaturesClient::Empty() {
-  return WTF::MakeUnique<ContextFeaturesClient>();
+  return std::make_unique<ContextFeaturesClient>();
 }
 
-const char* ContextFeatures::SupplementName() {
-  return "ContextFeatures";
-}
+const char ContextFeatures::kSupplementName[] = "ContextFeatures";
 
 ContextFeatures& ContextFeatures::DefaultSwitch() {
   DEFINE_STATIC_LOCAL(
@@ -66,13 +63,11 @@ bool ContextFeatures::MutationEventsEnabled(Document* document) {
 
 void ProvideContextFeaturesTo(Page& page,
                               std::unique_ptr<ContextFeaturesClient> client) {
-  Supplement<Page>::ProvideTo(page, ContextFeatures::SupplementName(),
-                              ContextFeatures::Create(std::move(client)));
+  Supplement<Page>::ProvideTo(page, ContextFeatures::Create(std::move(client)));
 }
 
 void ProvideContextFeaturesToDocumentFrom(Document& document, Page& page) {
-  ContextFeatures* provided = static_cast<ContextFeatures*>(
-      Supplement<Page>::From(page, ContextFeatures::SupplementName()));
+  ContextFeatures* provided = Supplement<Page>::From<ContextFeatures>(page);
   if (!provided)
     return;
   document.SetContextFeatures(*provided);

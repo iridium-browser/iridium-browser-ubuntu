@@ -31,6 +31,7 @@
 
 namespace blink {
 
+class HTMLOptionElement;
 class HTMLSelectElement;
 class LayoutText;
 
@@ -78,17 +79,17 @@ class CORE_EXPORT LayoutMenuList final : public LayoutFlexibleBox {
   // Flexbox defines baselines differently than regular blocks.
   // For backwards compatibility, menulists need to do the regular block
   // behavior.
-  int BaselinePosition(FontBaseline baseline,
-                       bool first_line,
-                       LineDirectionMode direction,
-                       LinePositionMode position) const override {
+  LayoutUnit BaselinePosition(FontBaseline baseline,
+                              bool first_line,
+                              LineDirectionMode direction,
+                              LinePositionMode position) const override {
     return LayoutBlock::BaselinePosition(baseline, first_line, direction,
                                          position);
   }
-  int FirstLineBoxBaseline() const override {
+  LayoutUnit FirstLineBoxBaseline() const override {
     return LayoutBlock::FirstLineBoxBaseline();
   }
-  int InlineBlockBaseline(LineDirectionMode direction) const override {
+  LayoutUnit InlineBlockBaseline(LineDirectionMode direction) const override {
     return LayoutBlock::InlineBlockBaseline(direction);
   }
 
@@ -113,7 +114,7 @@ class CORE_EXPORT LayoutMenuList final : public LayoutFlexibleBox {
 
   int last_active_index_;
 
-  RefPtr<ComputedStyle> option_style_;
+  scoped_refptr<const ComputedStyle> option_style_;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutMenuList, IsMenuList());

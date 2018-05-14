@@ -7,7 +7,6 @@
 #include "modules/webaudio/AudioBasicProcessorHandler.h"
 #include "modules/webaudio/OfflineAudioContext.h"
 #include "platform/audio/AudioProcessor.h"
-#include "platform/wtf/PtrUtil.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
@@ -25,13 +24,27 @@ class MockAudioProcessor final : public AudioProcessor {
   double LatencyTime() const override { return 0; }
 };
 
+class MockProcessorHandler final : public AudioBasicProcessorHandler {
+ public:
+  static scoped_refptr<MockProcessorHandler> Create(AudioNode& node,
+                                                    float sample_rate) {
+    return base::AdoptRef(new MockProcessorHandler(node, sample_rate));
+  }
+
+ private:
+  MockProcessorHandler(AudioNode& node, float sample_rate)
+      : AudioBasicProcessorHandler(AudioHandler::kNodeTypeWaveShaper,
+                                   node,
+                                   sample_rate,
+                                   std::make_unique<MockAudioProcessor>()) {
+    Initialize();
+  }
+};
+
 class MockProcessorNode final : public AudioNode {
  public:
   MockProcessorNode(BaseAudioContext& context) : AudioNode(context) {
-    SetHandler(AudioBasicProcessorHandler::Create(
-        AudioHandler::kNodeTypeWaveShaper, *this, 48000,
-        WTF::MakeUnique<MockAudioProcessor>()));
-    Handler().Initialize();
+    SetHandler(MockProcessorHandler::Create(*this, 48000));
   }
 };
 
@@ -44,7 +57,7 @@ TEST(AudioBasicProcessorHandlerTest, ProcessorFinalization) {
       static_cast<AudioBasicProcessorHandler&>(node->Handler());
   EXPECT_TRUE(handler.Processor());
   EXPECT_TRUE(handler.Processor()->IsInitialized());
-  BaseAudioContext::AutoLocker locker(context);
+  BaseAudioContext::GraphAutoLocker locker(context);
   handler.Dispose();
   // The AudioProcessor should live after dispose() and should not be
   // finalized because an audio thread is using it.

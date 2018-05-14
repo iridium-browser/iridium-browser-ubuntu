@@ -7,9 +7,12 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
+#include "media/base/overlay_info.h"
+#include "media/media_features.h"
 #include "media/mojo/interfaces/video_decoder.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
 
@@ -17,36 +20,26 @@ namespace base {
 class SingleThreadTaskRunner;
 }
 
-namespace gpu {
-struct SyncToken;
-}
-
 namespace service_manager {
 class Connector;
 namespace mojom {
 class InterfaceProvider;
 }
-}
+}  // namespace service_manager
 
 namespace media {
 
 class AudioDecoder;
 class AudioRendererSink;
 class CdmFactory;
+class CdmProxy;
 class MediaLog;
 class RendererFactory;
 class VideoDecoder;
-class VideoFrame;
 class VideoRendererSink;
 
 class MEDIA_MOJO_EXPORT MojoMediaClient {
  public:
-  // Currently using the same signature as VideoFrame::ReleaseMailboxCB.
-  using ReleaseMailboxCB = base::Callback<void(const gpu::SyncToken&)>;
-
-  using OutputWithReleaseMailboxCB =
-      base::Callback<void(ReleaseMailboxCB, const scoped_refptr<VideoFrame>&)>;
-
   // Called before the host application is scheduled to quit.
   // The application message loop is still valid at this point, so all clean
   // up tasks requiring the message loop must be completed before returning.
@@ -59,13 +52,11 @@ class MEDIA_MOJO_EXPORT MojoMediaClient {
   virtual std::unique_ptr<AudioDecoder> CreateAudioDecoder(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
-  // TODO(sandersd): |output_cb| should not be required.
-  // See https://crbug.com/733828.
   virtual std::unique_ptr<VideoDecoder> CreateVideoDecoder(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       MediaLog* media_log,
       mojom::CommandBufferIdPtr command_buffer_id,
-      OutputWithReleaseMailboxCB output_cb);
+      RequestOverlayInfoCB request_overlay_info_cb);
 
   // Returns the output sink used for rendering audio on |audio_device_id|.
   // May be null if the RendererFactory doesn't need an audio sink.
@@ -86,6 +77,12 @@ class MEDIA_MOJO_EXPORT MojoMediaClient {
   // nullptr if the host chose not to bind the InterfacePtr.
   virtual std::unique_ptr<CdmFactory> CreateCdmFactory(
       service_manager::mojom::InterfaceProvider* host_interfaces);
+
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
+  // Creates a CdmProxy that proxies part of CDM functionalities to a different
+  // entity, e.g. hardware CDM modules.
+  virtual std::unique_ptr<CdmProxy> CreateCdmProxy(const std::string& cdm_guid);
+#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
  protected:
   MojoMediaClient();

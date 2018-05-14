@@ -17,13 +17,14 @@
 #include "cc/base/synced_property.h"
 #include "cc/input/event_listener_properties.h"
 #include "cc/input/layer_selection_bound.h"
+#include "cc/input/overscroll_behavior.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/layer_list_iterator.h"
-#include "cc/output/begin_frame_args.h"
-#include "cc/output/swap_promise.h"
 #include "cc/resources/ui_resource_client.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/property_tree.h"
+#include "cc/trees/swap_promise.h"
+#include "components/viz/common/frame_sinks/begin_frame_args.h"
 
 namespace base {
 namespace trace_event {
@@ -43,11 +44,11 @@ class HeadsUpDisplayLayerImpl;
 class ImageDecodeCache;
 class LayerTreeDebugState;
 class LayerTreeImpl;
+class LayerTreeResourceProvider;
 class LayerTreeSettings;
 class MemoryHistory;
 class PictureLayerImpl;
 class TaskRunnerProvider;
-class ResourceProvider;
 class TileManager;
 class UIResourceRequest;
 class VideoFrameControllerClient;
@@ -91,7 +92,7 @@ class CC_EXPORT LayerTreeImpl {
   // This is the number of times a fixed point has to be hit continuously by a
   // layer to consider it as jittering.
   enum : int { kFixedPointHitsThreshold = 3 };
-  LayerTreeImpl(LayerTreeHostImpl* layer_tree_host_impl,
+  LayerTreeImpl(LayerTreeHostImpl* host_impl,
                 scoped_refptr<SyncedProperty<ScaleGroup>> page_scale_factor,
                 scoped_refptr<SyncedBrowserControls> top_controls_shown_ratio,
                 scoped_refptr<SyncedElasticOverscroll> elastic_overscroll);
@@ -107,9 +108,11 @@ class CC_EXPORT LayerTreeImpl {
   const LayerTreeSettings& settings() const;
   const LayerTreeDebugState& debug_state() const;
   viz::ContextProvider* context_provider() const;
-  ResourceProvider* resource_provider() const;
+  viz::SharedBitmapManager* shared_bitmap_manager() const;
+  LayerTreeResourceProvider* resource_provider() const;
   TileManager* tile_manager() const;
   ImageDecodeCache* image_decode_cache() const;
+  ImageAnimationController* image_animation_controller() const;
   FrameRateCounter* frame_rate_counter() const;
   MemoryHistory* memory_history() const;
   gfx::Size device_viewport_size() const;
@@ -121,7 +124,7 @@ class CC_EXPORT LayerTreeImpl {
   LayerImpl* FindActiveTreeLayerById(int id);
   LayerImpl* FindPendingTreeLayerById(int id);
   bool PinchGestureActive() const;
-  BeginFrameArgs CurrentBeginFrameArgs() const;
+  viz::BeginFrameArgs CurrentBeginFrameArgs() const;
   base::TimeDelta CurrentBeginFrameInterval() const;
   gfx::Rect DeviceViewport() const;
   const gfx::Rect ViewportRectForTilePriority() const;
@@ -135,9 +138,11 @@ class CC_EXPORT LayerTreeImpl {
   bool RequiresHighResToDraw() const;
   bool SmoothnessTakesPriority() const;
   VideoFrameControllerClient* GetVideoFrameControllerClient() const;
-  MutatorHost* mutator_host() const {
-    return layer_tree_host_impl_->mutator_host();
-  }
+  MutatorHost* mutator_host() const { return host_impl_->mutator_host(); }
+  void UpdateImageDecodingHints(
+      base::flat_map<PaintImage::Id, PaintImage::DecodingMode>
+          decoding_mode_map);
+  bool IsActivelyScrolling() const;
 
   // Tree specific methods exposed to layer-impl tree.
   // ---------------------------------------------------------------------------
@@ -168,6 +173,7 @@ class CC_EXPORT LayerTreeImpl {
     // DCHECK(lifecycle().AllowsPropertyTreeAccess());
     return &property_trees_;
   }
+  const PropertyTrees* property_trees() const { return &property_trees_; }
 
   void PushPropertyTreesTo(LayerTreeImpl* tree_impl);
   void PushPropertiesTo(LayerTreeImpl* tree_impl);
@@ -201,6 +207,7 @@ class CC_EXPORT LayerTreeImpl {
         is_first_frame_after_commit ? -1 : source_frame_number_;
   }
 
+  const HeadsUpDisplayLayerImpl* hud_layer() const { return hud_layer_; }
   HeadsUpDisplayLayerImpl* hud_layer() { return hud_layer_; }
   void set_hud_layer(HeadsUpDisplayLayerImpl* layer_impl) {
     hud_layer_ = layer_impl;
@@ -212,7 +219,7 @@ class CC_EXPORT LayerTreeImpl {
   ScrollNode* CurrentlyScrollingNode();
   const ScrollNode* CurrentlyScrollingNode() const;
   int LastScrolledScrollNodeIndex() const;
-  void SetCurrentlyScrollingNode(ScrollNode* node);
+  void SetCurrentlyScrollingNode(const ScrollNode* node);
   void ClearCurrentlyScrollingNode();
 
   struct ViewportLayerIds {
@@ -258,14 +265,8 @@ class CC_EXPORT LayerTreeImpl {
   SkColor background_color() const { return background_color_; }
   void set_background_color(SkColor color) { background_color_ = color; }
 
-  bool has_transparent_background() const {
-    return has_transparent_background_;
-  }
-  void set_has_transparent_background(bool transparent) {
-    has_transparent_background_ = transparent;
-  }
-
   void UpdatePropertyTreeAnimationFromMainThread();
+
   void SetPageScaleOnActiveTree(float active_page_scale);
   void PushPageScaleFromMainThread(float page_scale_factor,
                                    float min_page_scale_factor,
@@ -301,10 +302,12 @@ class CC_EXPORT LayerTreeImpl {
     return local_surface_id_;
   }
 
-  void SetRasterColorSpace(const gfx::ColorSpace& raster_color_space);
+  void SetRasterColorSpace(int raster_color_space_id,
+                           const gfx::ColorSpace& raster_color_space);
   const gfx::ColorSpace& raster_color_space() const {
     return raster_color_space_;
   }
+  int raster_color_space_id() const { return raster_color_space_id_; }
 
   SyncedElasticOverscroll* elastic_overscroll() {
     return elastic_overscroll_.get();
@@ -325,7 +328,7 @@ class CC_EXPORT LayerTreeImpl {
   // Updates draw properties and render surface layer list, as well as tile
   // priorities. Returns false if it was unable to update.  Updating lcd
   // text may cause invalidations, so should only be done after a commit.
-  bool UpdateDrawProperties();
+  bool UpdateDrawProperties(bool update_image_animation_controller = true);
   void UpdateCanUseLCDText();
   void BuildPropertyTreesForTesting();
   void BuildLayerListAndPropertyTreesForTesting();
@@ -338,8 +341,7 @@ class CC_EXPORT LayerTreeImpl {
   }
 
   bool is_in_resourceless_software_draw_mode() {
-    return (layer_tree_host_impl_->GetDrawMode() ==
-            DRAW_MODE_RESOURCELESS_SOFTWARE);
+    return (host_impl_->GetDrawMode() == DRAW_MODE_RESOURCELESS_SOFTWARE);
   }
 
   void set_needs_full_tree_sync(bool needs) { needs_full_tree_sync_ = needs; }
@@ -371,10 +373,8 @@ class CC_EXPORT LayerTreeImpl {
 
   LayerImpl* LayerById(int id) const;
 
-  int LayerIdByElementId(ElementId element_id) const;
   // TODO(jaydasika): this is deprecated. It is used by
-  // animation/compositor-worker to look up layers to mutate, but in future, we
-  // will update property trees.
+  // scrolling animation to look up layers to mutate.
   LayerImpl* LayerByElementId(ElementId element_id) const;
   void AddToElementMap(LayerImpl* layer);
   void RemoveFromElementMap(LayerImpl* layer);
@@ -415,7 +415,7 @@ class CC_EXPORT LayerTreeImpl {
   bool DistributeRootScrollOffset(const gfx::ScrollOffset& root_offset);
 
   void ApplyScroll(ScrollNode* scroll_node, ScrollState* scroll_state) {
-    layer_tree_host_impl_->ApplyScroll(scroll_node, scroll_state);
+    host_impl_->ApplyScroll(scroll_node, scroll_state);
   }
 
   // Call this function when you expect there to be a swap buffer.
@@ -446,13 +446,13 @@ class CC_EXPORT LayerTreeImpl {
       std::vector<std::unique_ptr<SwapPromise>> new_swap_promises);
   void AppendSwapPromises(
       std::vector<std::unique_ptr<SwapPromise>> new_swap_promises);
-  void FinishSwapPromises(CompositorFrameMetadata* metadata);
+  void FinishSwapPromises(viz::CompositorFrameMetadata* metadata);
   void ClearSwapPromises();
   void BreakSwapPromises(SwapPromise::DidNotSwapReason reason);
 
   void DidModifyTilePriorities();
 
-  ResourceId ResourceIdForUIResource(UIResourceId uid) const;
+  viz::ResourceId ResourceIdForUIResource(UIResourceId uid) const;
   void ProcessUIResourceRequestQueue();
 
   bool IsUIResourceOpaque(UIResourceId uid) const;
@@ -477,11 +477,12 @@ class CC_EXPORT LayerTreeImpl {
 
   void RegisterSelection(const LayerSelection& selection);
 
-  bool GetAndResetHandleVisibilityChanged();
+  bool HandleVisibilityChanged() const { return handle_visibility_changed_; }
+  void ResetHandleVisibilityChanged();
 
   // Compute the current selection handle location and visbility with respect to
   // the viewport.
-  void GetViewportSelection(Selection<gfx::SelectionBound>* selection);
+  void GetViewportSelection(viz::Selection<gfx::SelectionBound>* selection);
 
   void set_browser_controls_shrink_blink_size(bool shrink);
   bool browser_controls_shrink_blink_size() const {
@@ -496,6 +497,11 @@ class CC_EXPORT LayerTreeImpl {
   void PushBrowserControlsFromMainThread(float top_controls_shown_ratio);
   void set_bottom_controls_height(float bottom_controls_height);
   float bottom_controls_height() const { return bottom_controls_height_; }
+
+  void set_overscroll_behavior(const OverscrollBehavior& behavior);
+  OverscrollBehavior overscroll_behavior() const {
+    return overscroll_behavior_;
+  }
 
   void SetPendingPageScaleAnimation(
       std::unique_ptr<PendingPageScaleAnimation> pending_animation);
@@ -551,6 +557,11 @@ class CC_EXPORT LayerTreeImpl {
 
   LayerTreeLifecycle& lifecycle() { return lifecycle_; }
 
+  bool request_presentation_time() const { return request_presentation_time_; }
+  void set_request_presentation_time(bool value) {
+    request_presentation_time_ = value;
+  }
+
  protected:
   float ClampPageScaleFactorToLimits(float page_scale_factor) const;
   void PushPageScaleFactorAndLimits(const float* page_scale_factor,
@@ -562,14 +573,17 @@ class CC_EXPORT LayerTreeImpl {
   void PushBrowserControls(const float* top_controls_shown_ratio);
   bool ClampBrowserControlsShownRatio();
 
-  LayerTreeHostImpl* layer_tree_host_impl_;
+ private:
+  ElementListType GetElementTypeForAnimation() const;
+  void UpdateTransformAnimation(ElementId element_id, int transform_node_index);
+
+  LayerTreeHostImpl* host_impl_;
   int source_frame_number_;
   int is_first_frame_after_commit_tracker_;
   LayerImpl* root_layer_for_testing_;
   HeadsUpDisplayLayerImpl* hud_layer_;
   PropertyTrees property_trees_;
   SkColor background_color_;
-  bool has_transparent_background_;
 
   int last_scrolled_scroll_node_index_;
 
@@ -583,6 +597,7 @@ class CC_EXPORT LayerTreeImpl {
 
   float device_scale_factor_;
   float painted_device_scale_factor_;
+  int raster_color_space_id_ = -1;
   gfx::ColorSpace raster_color_space_;
 
   uint32_t content_source_id_;
@@ -658,6 +673,8 @@ class CC_EXPORT LayerTreeImpl {
   float top_controls_height_;
   float bottom_controls_height_;
 
+  OverscrollBehavior overscroll_behavior_;
+
   // The amount that the browser controls are shown from 0 (hidden) to 1 (fully
   // shown).
   scoped_refptr<SyncedBrowserControls> top_controls_shown_ratio_;
@@ -668,7 +685,10 @@ class CC_EXPORT LayerTreeImpl {
   // lifecycle states. See: |LayerTreeLifecycle|.
   LayerTreeLifecycle lifecycle_;
 
- private:
+  // If true LayerTreeHostImpl requests a presentation token for the current
+  // frame.
+  bool request_presentation_time_ = false;
+
   DISALLOW_COPY_AND_ASSIGN(LayerTreeImpl);
 };
 

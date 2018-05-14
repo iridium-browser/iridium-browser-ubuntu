@@ -6,20 +6,18 @@
 
 #include <stdlib.h>
 
-#include <deque>
 #include <utility>
 
 #include "ash/shell.h"
 #include "ash/wallpaper/wallpaper_controller.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/task_scheduler/post_task.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
-#include "chrome/browser/image_decoder.h"
+#include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
 #include "components/signin/core/account_id/account_id.h"
+#include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/wallpaper/wallpaper_files_id.h"
 #include "components/wallpaper/wallpaper_info.h"
@@ -43,13 +41,21 @@ constexpr char kAndroidWallpaperFilename[] = "android.jpg";
 struct PrimaryAccount {
   const AccountId& id;
   const bool is_active;
+  const bool is_ephemeral;
+  const user_manager::UserType type;
 };
 
 PrimaryAccount GetPrimaryAccount() {
   UserManager* const user_manager = UserManager::Get();
-  const AccountId& account_id = user_manager->GetPrimaryUser()->GetAccountId();
+  const user_manager::User* const primary_user = user_manager->GetPrimaryUser();
+  DCHECK(primary_user);
+  const AccountId& account_id = primary_user->GetAccountId();
+  const bool is_ephemeral =
+      user_manager->IsUserNonCryptohomeDataEphemeral(account_id);
+  const user_manager::UserType type = primary_user->GetType();
   return {account_id,
-          account_id == user_manager->GetActiveUser()->GetAccountId()};
+          account_id == user_manager->GetActiveUser()->GetAccountId(),
+          is_ephemeral, type};
 }
 
 std::vector<uint8_t> EncodeImagePng(const gfx::ImageSkia image) {
@@ -81,6 +87,16 @@ class ArcWallpaperServiceFactory
   friend base::DefaultSingletonTraits<ArcWallpaperServiceFactory>;
   ArcWallpaperServiceFactory() = default;
   ~ArcWallpaperServiceFactory() override = default;
+};
+
+class DecodeRequestSenderImpl
+    : public ArcWallpaperService::DecodeRequestSender {
+ public:
+  void SendDecodeRequest(ImageDecoder::ImageRequest* request,
+                         const std::vector<uint8_t>& data) override {
+    ImageDecoder::StartWithOptions(request, data, ImageDecoder::DEFAULT_CODEC,
+                                   true, gfx::Size());
+  }
 };
 
 }  // namespace
@@ -116,23 +132,37 @@ class ArcWallpaperService::DecodeRequest : public ImageDecoder::ImageRequest {
     DCHECK_NE(pair.image_id, 0u)
         << "image_id should not be 0 as we succeeded to decode image here.";
 
-    chromeos::WallpaperManager* const wallpaper_manager =
-        chromeos::WallpaperManager::Get();
     const PrimaryAccount& account = GetPrimaryAccount();
     wallpaper::WallpaperFilesId wallpaper_files_id =
-        wallpaper_manager->GetFilesId(account.id);
-    // TODO(crbug.com/618922): Allow specifying layout.
-    wallpaper_manager->SetCustomWallpaper(
-        account.id, wallpaper_files_id, kAndroidWallpaperFilename,
-        wallpaper::WALLPAPER_LAYOUT_CENTER_CROPPED, wallpaper::CUSTOMIZED,
-        image, account.is_active /*update_wallpaper*/);
-    // When kiosk app is running, or wallpaper cannot be changed due to policy,
-    // or we are running child profile, WallpaperManager don't submit wallpaper
-    // change requests.
-    if (wallpaper_manager->IsPendingWallpaper(pair.image_id))
-      service_->id_pairs_.push_back(pair);
-    else
+        WallpaperControllerClient::Get()->GetFilesId(account.id);
+    ash::WallpaperController* wallpaper_controller = GetWallpaperController();
+    // Decode request is only created when GetWallpaperController() returns
+    // non-null, so we can get the pointer here.
+    DCHECK(wallpaper_controller);
+
+    // TODO(crbug.com/776464): Replace |CanSetUserWallpaper| with mojo callback.
+    if (!wallpaper_controller->CanSetUserWallpaper(account.id,
+                                                   account.is_ephemeral)) {
+      // When kiosk app is running or policy is enforced, WallpaperController
+      // doesn't process custom wallpaper requests.
       service_->NotifyWallpaperChangedAndReset(android_id_);
+    } else {
+      bool show_wallpaper = account.is_active;
+      // When |show_wallpaper| is false, WallpaperController still saves custom
+      // wallpaper for this user, but the wallpaper won't be shown right away.
+      // |SetArcWallpaper| calls |OnWallpaperDataChanged| synchronously, so the
+      // id pair should be added to the queue first.
+      if (show_wallpaper)
+        service_->id_pairs_.push_back(pair);
+      else
+        service_->NotifyWallpaperChangedAndReset(android_id_);
+      // TODO(crbug.com/618922): Allow specifying layout.
+      wallpaper_controller->SetArcWallpaper(
+          account.id, account.type, wallpaper_files_id.id(),
+          kAndroidWallpaperFilename, image,
+          wallpaper::WALLPAPER_LAYOUT_CENTER_CROPPED, account.is_ephemeral,
+          show_wallpaper);
+    }
 
     // TODO(crbug.com/618922): Register the wallpaper to Chrome OS wallpaper
     // picker. Currently the new wallpaper does not appear there. The best way
@@ -154,6 +184,13 @@ class ArcWallpaperService::DecodeRequest : public ImageDecoder::ImageRequest {
   DISALLOW_COPY_AND_ASSIGN(DecodeRequest);
 };
 
+ArcWallpaperService::DecodeRequestSender::~DecodeRequestSender() = default;
+
+void ArcWallpaperService::SetDecodeRequestSenderForTesting(
+    std::unique_ptr<DecodeRequestSender> sender) {
+  decode_request_sender_ = std::move(sender);
+}
+
 // static
 ArcWallpaperService* ArcWallpaperService::GetForBrowserContext(
     content::BrowserContext* context) {
@@ -162,7 +199,9 @@ ArcWallpaperService* ArcWallpaperService::GetForBrowserContext(
 
 ArcWallpaperService::ArcWallpaperService(content::BrowserContext* context,
                                          ArcBridgeService* bridge_service)
-    : arc_bridge_service_(bridge_service), binding_(this) {
+    : arc_bridge_service_(bridge_service),
+      decode_request_sender_(std::make_unique<DecodeRequestSenderImpl>()) {
+  arc_bridge_service_->wallpaper()->SetHost(this);
   arc_bridge_service_->wallpaper()->AddObserver(this);
 }
 
@@ -172,28 +211,19 @@ ArcWallpaperService::~ArcWallpaperService() {
   if (wc)
     wc->RemoveObserver(this);
 
-  // TODO(hidehiko): Currently, the lifetime of ArcBridgeService and
-  // BrowserContextKeyedService is not nested.
-  // If ArcServiceManager::Get() returns nullptr, it is already destructed,
-  // so do not touch it.
-  if (ArcServiceManager::Get())
-    arc_bridge_service_->wallpaper()->RemoveObserver(this);
+  arc_bridge_service_->wallpaper()->RemoveObserver(this);
+  arc_bridge_service_->wallpaper()->SetHost(nullptr);
 }
 
-void ArcWallpaperService::OnInstanceReady() {
+void ArcWallpaperService::OnConnectionReady() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  mojom::WallpaperInstance* wallpaper_instance =
-      ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service_->wallpaper(), Init);
-  DCHECK(wallpaper_instance);
-  mojom::WallpaperHostPtr host_proxy;
-  binding_.Bind(mojo::MakeRequest(&host_proxy));
-  wallpaper_instance->Init(std::move(host_proxy));
   ash::WallpaperController* wc = GetWallpaperController();
-  DCHECK(wc);
-  wc->AddObserver(this);
+  // TODO(mash): Support this functionality without ash::Shell access in Chrome.
+  if (wc)
+    wc->AddObserver(this);
 }
 
-void ArcWallpaperService::OnInstanceClosed() {
+void ArcWallpaperService::OnConnectionClosed() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   ash::WallpaperController* wc = GetWallpaperController();
   if (wc)
@@ -205,12 +235,16 @@ void ArcWallpaperService::SetWallpaper(const std::vector<uint8_t>& data,
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (wallpaper_id == 0)
     wallpaper_id = -1;
+  if (!GetWallpaperController()) {
+    NotifyWallpaperChangedAndReset(wallpaper_id);
+    return;
+  }
+
   // Previous request will be cancelled at destructor of
   // ImageDecoder::ImageRequest.
-  decode_request_ = base::MakeUnique<DecodeRequest>(this, wallpaper_id);
-  ImageDecoder::StartWithOptions(decode_request_.get(), data,
-                                 ImageDecoder::DEFAULT_CODEC, true,
-                                 gfx::Size());
+  decode_request_ = std::make_unique<DecodeRequest>(this, wallpaper_id);
+  DCHECK(decode_request_sender_);
+  decode_request_sender_->SendDecodeRequest(decode_request_.get(), data);
 }
 
 void ArcWallpaperService::SetDefaultWallpaper() {
@@ -219,17 +253,18 @@ void ArcWallpaperService::SetDefaultWallpaper() {
   // ImageDecoder::ImageRequest.
   decode_request_.reset();
   const PrimaryAccount& account = GetPrimaryAccount();
-  chromeos::WallpaperManager::Get()->SetDefaultWallpaper(account.id,
-                                                         account.is_active);
+  WallpaperControllerClient::Get()->SetDefaultWallpaper(
+      account.id, account.is_active /* show_wallpaper */);
 }
 
-void ArcWallpaperService::GetWallpaper(const GetWallpaperCallback& callback) {
+void ArcWallpaperService::GetWallpaper(GetWallpaperCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  ash::WallpaperController* wc = ash::Shell::Get()->wallpaper_controller();
+  ash::WallpaperController* const wc = GetWallpaperController();
+  DCHECK(wc);
   gfx::ImageSkia wallpaper = wc->GetWallpaper();
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
-      base::Bind(&EncodeImagePng, wallpaper), callback);
+      base::BindOnce(&EncodeImagePng, wallpaper), std::move(callback));
 }
 
 void ArcWallpaperService::OnWallpaperDataChanged() {
@@ -238,30 +273,21 @@ void ArcWallpaperService::OnWallpaperDataChanged() {
   // OnWallpaperDataChanged is invoked from WallpaperController so
   // we should be able to get the pointer.
   ash::WallpaperController* const wallpaper_controller =
-      ash::Shell::Get()->wallpaper_controller();
-  CHECK(wallpaper_controller);
+      GetWallpaperController();
+  DCHECK(wallpaper_controller);
   const uint32_t current_image_id =
       wallpaper_controller->GetWallpaperOriginalImageId();
 
-  chromeos::WallpaperManager* const wallpaper_manager =
-      chromeos::WallpaperManager::Get();
   bool current_wallppaer_notified = false;
   for (auto it = id_pairs_.begin(); it != id_pairs_.end();) {
     int32_t const android_id = it->android_id;
-    bool should_notify = false;
     if (it->image_id == current_image_id) {
-      should_notify = true;
       current_wallppaer_notified = true;
       it = id_pairs_.erase(it);
-    } else if (!wallpaper_manager->IsPendingWallpaper(it->image_id)) {
-      should_notify = true;
-      it = id_pairs_.erase(it);
+      NotifyWallpaperChanged(android_id);
     } else {
       ++it;
     }
-
-    if (should_notify)
-      NotifyWallpaperChanged(android_id);
   }
 
   if (!current_wallppaer_notified)

@@ -24,6 +24,7 @@
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/signin/token_handle_util.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
+#include "chrome/browser/chromeos/policy/minimum_version_policy_handler.h"
 #include "chrome/browser/chromeos/policy/pre_signin_policy_fetcher.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
@@ -47,7 +48,6 @@ class CloudPolicySettings;
 
 namespace chromeos {
 
-class BootstrapUserContextInitializer;
 class CrosSettings;
 class LoginDisplayHost;
 class OAuth2TokenInitializer;
@@ -68,7 +68,8 @@ class ExistingUserController
       public content::NotificationObserver,
       public LoginPerformer::Delegate,
       public UserSessionManagerDelegate,
-      public ArcKioskAppManager::ArcKioskAppManagerObserver {
+      public ArcKioskAppManager::ArcKioskAppManagerObserver,
+      public policy::MinimumVersionPolicyHandler::Observer {
  public:
   // All UI initialization is deferred till Init() call.
   explicit ExistingUserController(LoginDisplayHost* host);
@@ -90,26 +91,28 @@ class ExistingUserController
 
   // LoginDisplay::Delegate: implementation
   void CancelPasswordChangedFlow() override;
-  void CompleteLogin(const UserContext& user_context) override;
   base::string16 GetConnectedNetworkName() override;
   bool IsSigninInProgress() const override;
   void Login(const UserContext& user_context,
              const SigninSpecifics& specifics) override;
   void MigrateUserData(const std::string& old_password) override;
   void OnSigninScreenReady() override;
-  void OnGaiaScreenReady() override;
   void OnStartEnterpriseEnrollment() override;
   void OnStartEnableDebuggingScreen() override;
   void OnStartKioskEnableScreen() override;
   void OnStartKioskAutolaunchScreen() override;
   void ResetAutoLoginTimer() override;
   void ResyncUserData() override;
-  void SetDisplayEmail(const std::string& email) override;
-  void SetDisplayAndGivenName(const std::string& display_name,
-                              const std::string& given_name) override;
   void ShowWrongHWIDScreen() override;
+  void ShowUpdateRequiredScreen() override;
   void Signout() override;
-  bool IsUserWhitelisted(const AccountId& account_id) override;
+
+  void CompleteLogin(const UserContext& user_context);
+  void OnGaiaScreenReady();
+  void SetDisplayEmail(const std::string& email);
+  void SetDisplayAndGivenName(const std::string& display_name,
+                              const std::string& given_name);
+  bool IsUserWhitelisted(const AccountId& account_id);
 
   // content::NotificationObserver implementation.
   void Observe(int type,
@@ -119,6 +122,9 @@ class ExistingUserController
   // ArcKioskAppManager::ArcKioskAppManagerObserver overrides.
   void OnArcKioskAppsChanged() override;
 
+  // policy::MinimumVersionPolicyHandler::Observer overrides.
+  void OnMinimumVersionStateChanged() override;
+
   // Set a delegate that we will pass AuthStatusConsumer events to.
   // Used for testing.
   void set_login_status_consumer(AuthStatusConsumer* consumer) {
@@ -127,14 +133,10 @@ class ExistingUserController
 
   // Returns the LoginDisplay created and owned by this controller.
   // Used for testing.
-  LoginDisplay* login_display() {
-    return login_display_.get();
-  }
+  LoginDisplay* login_display() { return login_display_.get(); }
 
   // Returns the LoginDisplayHost for this controller.
-  LoginDisplayHost* login_display_host() {
-    return host_;
-  }
+  LoginDisplayHost* login_display_host() { return host_; }
 
   // Returns value of LoginPerformer::auth_mode() (cached if performer is
   // destroyed).
@@ -202,9 +204,6 @@ class ExistingUserController
 
   // Enters the enterprise enrollment screen.
   void ShowEnrollmentScreen();
-
-  // Shows "reset device" screen.
-  void ShowResetScreen();
 
   // Shows "enable developer features" screen.
   void ShowEnableDebuggingScreen();
@@ -283,10 +282,6 @@ class ExistingUserController
   // invoked after it has been verified that the device is not disabled.
   void DoLogin(const UserContext& user_context,
                const SigninSpecifics& specifics);
-
-  // Callback invoked when |bootstrap_user_context_initializer_| has finished.
-  void OnBootstrapUserContextInitialized(bool success,
-                                         const UserContext& user_context);
 
   // Callback invoked when |oauth2_token_initializer_| has finished.
   void OnOAuth2TokensFetched(bool success, const UserContext& user_context);
@@ -416,9 +411,8 @@ class ExistingUserController
       local_account_auto_login_id_subscription_;
   std::unique_ptr<CrosSettings::ObserverSubscription>
       local_account_auto_login_delay_subscription_;
-
-  std::unique_ptr<BootstrapUserContextInitializer>
-      bootstrap_user_context_initializer_;
+  std::unique_ptr<policy::MinimumVersionPolicyHandler>
+      minimum_version_policy_handler_;
 
   std::unique_ptr<OAuth2TokenInitializer> oauth2_token_initializer_;
 

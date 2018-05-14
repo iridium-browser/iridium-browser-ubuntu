@@ -4,13 +4,11 @@
 
 #include "net/reporting/reporting_uploader.h"
 
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/callback_helpers.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "net/base/elements_upload_data_stream.h"
 #include "net/base/load_flags.h"
@@ -24,6 +22,15 @@
 namespace net {
 
 namespace {
+
+class UploadUserData : public base::SupportsUserData::Data {
+ public:
+  static const void* const kUserDataKey;
+};
+
+// SetUserData needs a unique const void* to serve as the key, so create a const
+// void* and use its own address as the unique pointer.
+const void* const UploadUserData::kUserDataKey = &UploadUserData::kUserDataKey;
 
 ReportingUploader::Outcome ResponseCodeToOutcome(int response_code) {
   if (response_code >= 200 && response_code <= 299)
@@ -49,7 +56,7 @@ class ReportingUploaderImpl : public ReportingUploader, URLRequest::Delegate {
 
   void StartUpload(const GURL& url,
                    const std::string& json,
-                   const Callback& callback) override {
+                   UploadCallback callback) override {
     net::NetworkTrafficAnnotationTag traffic_annotation =
         net::DefineNetworkTrafficAnnotation("reporting", R"(
         semantics {
@@ -66,7 +73,7 @@ class ReportingUploaderImpl : public ReportingUploader, URLRequest::Delegate {
           destination: OTHER
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting: "This feature cannot be disabled by settings."
           policy_exception_justification: "Not implemented."
         })");
@@ -87,6 +94,9 @@ class ReportingUploaderImpl : public ReportingUploader, URLRequest::Delegate {
     request->set_upload(
         ElementsUploadDataStream::CreateWithReader(std::move(reader), 0));
 
+    request->SetUserData(UploadUserData::kUserDataKey,
+                         std::make_unique<UploadUserData>());
+
     // This inherently sets mode = "no-cors", but that doesn't matter, because
     // the origins that are included in the upload don't actually get to see
     // the response.
@@ -97,7 +107,12 @@ class ReportingUploaderImpl : public ReportingUploader, URLRequest::Delegate {
     // Have to grab the unique_ptr* first to ensure request.get() happens
     // before std::move(request).
     std::unique_ptr<Upload>* upload = &uploads_[request.get()];
-    *upload = base::MakeUnique<Upload>(std::move(request), callback);
+    *upload = std::make_unique<Upload>(std::move(request), std::move(callback));
+  }
+
+  // static
+  bool RequestIsUpload(const net::URLRequest& request) override {
+    return request.GetUserData(UploadUserData::kUserDataKey);
   }
 
   // URLRequest::Delegate implementation:
@@ -142,7 +157,7 @@ class ReportingUploaderImpl : public ReportingUploader, URLRequest::Delegate {
     int response_code = headers ? headers->response_code() : 0;
     Outcome outcome = ResponseCodeToOutcome(response_code);
 
-    upload->second.Run(outcome);
+    std::move(upload->second).Run(outcome);
 
     request->Cancel();
   }
@@ -154,7 +169,7 @@ class ReportingUploaderImpl : public ReportingUploader, URLRequest::Delegate {
   }
 
  private:
-  using Upload = std::pair<std::unique_ptr<URLRequest>, Callback>;
+  using Upload = std::pair<std::unique_ptr<URLRequest>, UploadCallback>;
 
   const URLRequestContext* context_;
   std::map<const URLRequest*, std::unique_ptr<Upload>> uploads_;
@@ -165,12 +180,12 @@ class ReportingUploaderImpl : public ReportingUploader, URLRequest::Delegate {
 // static
 const char ReportingUploader::kUploadContentType[] = "application/report";
 
-ReportingUploader::~ReportingUploader() {}
+ReportingUploader::~ReportingUploader() = default;
 
 // static
 std::unique_ptr<ReportingUploader> ReportingUploader::Create(
     const URLRequestContext* context) {
-  return base::MakeUnique<ReportingUploaderImpl>(context);
+  return std::make_unique<ReportingUploaderImpl>(context);
 }
 
 }  // namespace net

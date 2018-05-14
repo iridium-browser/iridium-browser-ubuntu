@@ -7,10 +7,12 @@
 #include <utility>
 
 #include "base/files/file_path.h"
-#include "base/memory/ptr_util.h"
+#include "base/sys_info.h"
+#include "base/task_scheduler/post_task.h"
 #include "components/leveldb_proto/proto_database_impl.h"
 #include "components/ntp_snippets/remote/proto/ntp_snippets.pb.h"
 
+using leveldb_proto::ProtoDatabase;
 using leveldb_proto::ProtoDatabaseImpl;
 
 namespace {
@@ -24,36 +26,51 @@ const char kImageDatabaseUMAClientName[] = "NTPSnippetImages";
 const char kSnippetDatabaseFolder[] = "snippets";
 const char kImageDatabaseFolder[] = "images";
 
-const size_t kSuggestionDatabaseReadCacheSizeBytes = 512 << 10;
-const size_t kImageDatabaseReadCacheSizeBytes = 2 << 20;
-
 const size_t kDatabaseWriteBufferSizeBytes = 512 << 10;
+const size_t kDatabaseWriteBufferSizeBytesForLowEndDevice = 128 << 10;
 }  // namespace
 
 namespace ntp_snippets {
 
 RemoteSuggestionsDatabase::RemoteSuggestionsDatabase(
-    const base::FilePath& database_dir,
-    scoped_refptr<base::SequencedTaskRunner> file_task_runner)
-    : database_(new ProtoDatabaseImpl<SnippetProto>(file_task_runner)),
+    const base::FilePath& database_dir)
+    : RemoteSuggestionsDatabase(
+          base::CreateSequencedTaskRunnerWithTraits(
+              {base::MayBlock(), base::TaskPriority::BACKGROUND,
+               base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}),
+          database_dir) {}
+
+RemoteSuggestionsDatabase::RemoteSuggestionsDatabase(
+    scoped_refptr<base::SequencedTaskRunner> task_runner,
+    const base::FilePath& database_dir)
+    : RemoteSuggestionsDatabase(
+          std::make_unique<ProtoDatabaseImpl<SnippetProto>>(task_runner),
+          std::make_unique<ProtoDatabaseImpl<SnippetImageProto>>(task_runner),
+          database_dir) {}
+
+RemoteSuggestionsDatabase::RemoteSuggestionsDatabase(
+    std::unique_ptr<ProtoDatabase<SnippetProto>> database,
+    std::unique_ptr<ProtoDatabase<SnippetImageProto>> image_database,
+    const base::FilePath& database_dir)
+    : database_(std::move(database)),
       database_initialized_(false),
-      image_database_(
-          new ProtoDatabaseImpl<SnippetImageProto>(file_task_runner)),
+      image_database_(std::move(image_database)),
       image_database_initialized_(false),
       weak_ptr_factory_(this) {
   base::FilePath snippet_dir = database_dir.AppendASCII(kSnippetDatabaseFolder);
-  database_->InitWithOptions(
-      kDatabaseUMAClientName,
-      leveldb_proto::Options(snippet_dir, kDatabaseWriteBufferSizeBytes,
-                             kSuggestionDatabaseReadCacheSizeBytes),
-      base::Bind(&RemoteSuggestionsDatabase::OnDatabaseInited,
-                 weak_ptr_factory_.GetWeakPtr()));
+  leveldb_env::Options options = leveldb_proto::CreateSimpleOptions();
+  if (base::SysInfo::IsLowEndDevice()) {
+    options.write_buffer_size = kDatabaseWriteBufferSizeBytesForLowEndDevice;
+  } else {
+    options.write_buffer_size = kDatabaseWriteBufferSizeBytes;
+  }
+  database_->Init(kDatabaseUMAClientName, snippet_dir, options,
+                  base::Bind(&RemoteSuggestionsDatabase::OnDatabaseInited,
+                             weak_ptr_factory_.GetWeakPtr()));
 
   base::FilePath image_dir = database_dir.AppendASCII(kImageDatabaseFolder);
-  image_database_->InitWithOptions(
-      kImageDatabaseUMAClientName,
-      leveldb_proto::Options(image_dir, kDatabaseWriteBufferSizeBytes,
-                             kImageDatabaseReadCacheSizeBytes),
+  image_database_->Init(
+      kImageDatabaseUMAClientName, image_dir, options,
       base::Bind(&RemoteSuggestionsDatabase::OnImageDatabaseInited,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -104,7 +121,7 @@ void RemoteSuggestionsDatabase::SaveSnippets(
 }
 
 void RemoteSuggestionsDatabase::DeleteSnippet(const std::string& snippet_id) {
-  DeleteSnippets(base::MakeUnique<std::vector<std::string>>(1, snippet_id));
+  DeleteSnippets(std::make_unique<std::vector<std::string>>(1, snippet_id));
 }
 
 void RemoteSuggestionsDatabase::DeleteSnippets(
@@ -140,20 +157,20 @@ void RemoteSuggestionsDatabase::SaveImage(const std::string& snippet_id,
   entries_to_save->emplace_back(snippet_id, std::move(image_proto));
 
   image_database_->UpdateEntries(
-      std::move(entries_to_save), base::MakeUnique<std::vector<std::string>>(),
+      std::move(entries_to_save), std::make_unique<std::vector<std::string>>(),
       base::Bind(&RemoteSuggestionsDatabase::OnImageDatabaseSaved,
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
 void RemoteSuggestionsDatabase::DeleteImage(const std::string& snippet_id) {
-  DeleteImages(base::MakeUnique<std::vector<std::string>>(1, snippet_id));
+  DeleteImages(std::make_unique<std::vector<std::string>>(1, snippet_id));
 }
 
 void RemoteSuggestionsDatabase::DeleteImages(
     std::unique_ptr<std::vector<std::string>> snippet_ids) {
   DCHECK(IsInitialized());
   image_database_->UpdateEntries(
-      base::MakeUnique<ImageKeyEntryVector>(), std::move(snippet_ids),
+      std::make_unique<ImageKeyEntryVector>(), std::move(snippet_ids),
       base::Bind(&RemoteSuggestionsDatabase::OnImageDatabaseSaved,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -161,10 +178,9 @@ void RemoteSuggestionsDatabase::DeleteImages(
 void RemoteSuggestionsDatabase::GarbageCollectImages(
     std::unique_ptr<std::set<std::string>> alive_snippet_ids) {
   DCHECK(image_database_initialized_);
-  image_database_->LoadKeys(
-      base::Bind(&RemoteSuggestionsDatabase::DeleteUnreferencedImages,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(std::move(alive_snippet_ids))));
+  image_database_->LoadKeys(base::BindOnce(
+      &RemoteSuggestionsDatabase::DeleteUnreferencedImages,
+      weak_ptr_factory_.GetWeakPtr(), std::move(alive_snippet_ids)));
 }
 
 void RemoteSuggestionsDatabase::OnDatabaseInited(bool success) {
@@ -325,12 +341,14 @@ void RemoteSuggestionsDatabase::DeleteUnreferencedImages(
     OnDatabaseError();
     return;
   }
-  auto keys_to_remove = base::MakeUnique<std::vector<std::string>>();
+  auto keys_to_remove = std::make_unique<std::vector<std::string>>();
   for (const std::string& key : *image_keys) {
     if (references->count(key) == 0) {
       keys_to_remove->emplace_back(key);
     }
   }
+  if (keys_to_remove->empty())
+    return;
   DeleteImages(std::move(keys_to_remove));
 }
 

@@ -1,13 +1,10 @@
 include_rules = [
-  "+components/webdata/common",
   "+content/public/browser",
   "+crypto/random.h",
-  "+device/geolocation",
-  "+google_apis/gaia",
-  "+google_apis/google_api_keys.h",
+  "+device/geolocation/public",
   "+gpu/config/gpu_info.h",
-  "+sql",
-  "+third_party/libphonenumber",  # For phone number i18n.
+  "+services/device/public",
+  "+services/service_manager/public/mojom",
   "+third_party/WebKit/public/platform/WebRect.h",
 ]
 

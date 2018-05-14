@@ -168,9 +168,6 @@ below:
       <message name="IDS_DETAILS_WITHOUT_SUMMARY_LABEL" desc="Clickable label to show detailed information or to hide the detailed information.">
         Details
       </message>
-      <message name="IDS_DOWNLOAD_BUTTON_LABEL" desc="Clickable button label to download media file.">
-        Save
-      </message>
       <message name="IDS_FORM_CALENDAR_CLEAR" desc="Label for a button which clears a date input field.">
         Clear
       </message>
@@ -341,14 +338,8 @@ below:
         <message name="IDS_AX_ROLE_BLOCKQUOTE" desc="Accessibility role description for a blockquote">
           blockquote
         </message>
-        <message name="IDS_AX_ROLE_BUSY_INDICATOR" desc="Accessibility role description for a busy indicator">
-          busy indicator
-        </message>
         <message name="IDS_AX_ROLE_BUTTON" desc="Accessibility role description for a button">
           button
-        </message>
-        <message name="IDS_AX_ROLE_BUTTON_DROP_DOWN" desc="Accessibility role description for a button that drops down">
-          drop down button
         </message>
         <message name="IDS_AX_ROLE_CELL" desc="Accessibility role description for a cell, like in a table or grid">
           cell
@@ -416,9 +407,6 @@ below:
         <message name="IDS_AX_ROLE_NOTE" desc="Accessibility role description for a note">
           note
         </message>
-        <message name="IDS_AX_ROLE_OUTLINE" desc="Accessibility role description for an outline, a presentation of information in a tree-like structure">
-          outline
-        </message>
         <message name="IDS_AX_ROLE_POP_UP_BUTTON" desc="Accessibility role description for a pop up button">
           pop up button
         </message>
@@ -433,9 +421,6 @@ below:
         </message>
         <message name="IDS_AX_ROLE_ROW_HEADER" desc="Accessibility role description for a row header in a table">
           row header
-        </message>
-        <message name="IDS_AX_ROLE_RULER" desc="Accessibility role description for a ruler">
-          ruler
         </message>
         <message name="IDS_AX_ROLE_SCROLL_BAR" desc="Accessibility role description for a scroll bar">
           scroll bar
@@ -686,7 +671,7 @@ below:
       <message name="IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL_INVALID_LOCAL" desc="Heading or short sentence shown when there is an email field in a form and a user specified an invalid value like 'us,er@example.com'.">
         A part followed by '<ph name="ATSIGN">$1<ex>@</ex></ph>' should not contain the symbol '<ph name="INVALIDCHARACTER">$2<ex>,</ex></ph>'.
       </message>
-      <message name="IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL_NO_AT_SIGN" desc="Heading or short sentence shown when there is an email field in a form and a user specified an invalid value liek 'user'.">
+      <message name="IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL_NO_AT_SIGN" desc="Heading or short sentence shown when there is an email field in a form and a user specified an invalid value like 'user'.">
         Please include an '<ph name="ATSIGN">$1<ex>@</ex></ph>' in the email address. '<ph name="INVALIDADDRESS">$2<ex>user</ex></ph>' is missing an '<ph name="ATSIGN">$1<ex>@</ex></ph>'.
       </message>
       <message name="IDS_FORM_VALIDATION_TYPE_MISMATCH_MULTIPLE_EMAIL" desc="Heading or short sentence shown there is a field which accepts multiple e-mail addresses and a user specified a value which is not a comma-separated e-mail addresses.">
@@ -794,6 +779,9 @@ below:
       <message name="IDS_MEDIA_OVERFLOW_MENU_CLOSED_CAPTIONS" desc="Media controls overflow menu item label for a closed captions button. The text for this overflow menu should be short.">
         Captions
       </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_CLOSED_CAPTIONS_SUBMENU_TITLE" desc="Media controls overflow menu title for the closed captions submenu. The text for this overflow menu should be short.">
+        Options
+      </message>
       <message name="IDS_MEDIA_OVERFLOW_MENU_CAST" desc="Media controls overflow menu item label for a cast button.">
         Cast
       </message>
@@ -802,9 +790,6 @@ below:
       </message>
       <message name="IDS_MEDIA_OVERFLOW_MENU_EXIT_FULLSCREEN" desc="Media controls overflow menu item label for a button to exit fullscreen.">
         Exit fullscreen
-      </message>
-      <message name="IDS_MEDIA_OVERFLOW_MENU_STOP_CAST" desc="Media controls overflow menu item label for a button to stop casting.">
-        Stop casting
       </message>
       <message name="IDS_MEDIA_OVERFLOW_MENU_MUTE" desc="Media controls overflow menu item label for a mute button.">
         Mute
@@ -821,11 +806,29 @@ below:
       <message name="IDS_MEDIA_OVERFLOW_MENU_DOWNLOAD" desc="Media controls overflow menu item label for a download button.">
        Download
       </message>
-      <message name="IDS_MEDIA_REMOTING_DISABLE_TEXT" desc="Media remoting disable button label.">
-       Play on both screens
+      <message name="IDS_MEDIA_OVERFLOW_MENU_PICTURE_IN_PICTURE" desc="Media controls overflow menu item label for a picture-in-picture button.">
+        Picture-in-Picture
       </message>
-      <message name="IDS_MEDIA_REMOTING_CAST_TEXT" desc="Media remoting cast video text message.">
+      <message name="IDS_MEDIA_PICTURE_IN_PICTURE_INTERSTITIAL_TEXT" desc="Text message shown to user when in picture in picture mode. When a video is in picture in picture mode, an interstitial with this text appears where the video player is positioned. The video continues to play back in another window that gives the experience that the video is 'popped out'.">
+        Now in Picture-in-Picture mode
+      </message>
+      <message name="IDS_MEDIA_REMOTING_CAST_TEXT" desc="Text message shown to the user when casting a video to a known remote device.">
+       Now casting to <ph name="DEVICE_FRIENDLY_NAME">$1<ex>Living Room TV</ex></ph>
+      </message>
+      <message name="IDS_MEDIA_REMOTING_CAST_TO_UNKNOWN_DEVICE_TEXT" desc="Text message shown to the user when casting a video to an unknown remote device.">
        Now casting to your TV
+      </message>
+      <message name = "IDS_MEDIA_REMOTING_STOP_TEXT" desc="The transient text shown on top of the video when switching from media remoting to mirroring.">
+        Switched to mirroring
+      </message>
+      <message name = "IDS_MEDIA_REMOTING_STOP_BY_PLAYBACK_QUALITY_TEXT" desc="The transient text shown on top of the video when switching from media remoting to mirroring due to poor playback quality.">
+        Poor playback quality
+      </message>
+      <message name = "IDS_MEDIA_REMOTING_STOP_BY_ERROR_TEXT" desc="The transient text shown on top of the video when switching from media remoting to mirroring due to errors.">
+        Video playback error
+      </message>
+      <message name="IDS_MEDIA_SCRUBBING_MESSAGE_TEXT" desc="Message informing the user that they can double tap to skip ten seconds. This should be no longer than twice the length of the English version.">
+        Double tap left or right to skip 10s
       </message>
       <message name="IDS_MEDIA_TRACKS_NO_LABEL" desc="Menu item label for a text track that has no name specified. The number represents the track number in the list of tracks.">
         Track <ph name="NUMBER">$1<ex>1</ex></ph>
@@ -837,6 +840,23 @@ below:
 
       <message name="IDS_PLUGIN_INITIALIZATION_ERROR" desc="A message displayed when a plugin failed to load">
         Couldn't load plugin.
+      </message>
+
+      <!-- Byte size units -->
+      <message name="IDS_UNITS_KIBIBYTES" desc="Units tag indicating a quantity of kilobytes">
+        <ph name="QUANTITY">$1<ex>42.0</ex></ph> KB
+      </message>
+      <message name="IDS_UNITS_MEBIBYTES" desc="Units tag indicating a quantity of megabytes">
+        <ph name="QUANTITY">$1<ex>42.0</ex></ph> MB
+      </message>
+      <message name="IDS_UNITS_GIBIBYTES" desc="Units tag indicating a quantity of gigabytes">
+        <ph name="QUANTITY">$1<ex>42.0</ex></ph> GB
+      </message>
+      <message name="IDS_UNITS_TEBIBYTES" desc="Units tag indicating a quantity of terabytes">
+        <ph name="QUANTITY">$1<ex>42.0</ex></ph> TB
+      </message>
+      <message name="IDS_UNITS_PEBIBYTES" desc="Units tag indicating a quantity of petabytes">
+        <ph name="QUANTITY">$1<ex>42.0</ex></ph> PB
       </message>
 
     </messages>

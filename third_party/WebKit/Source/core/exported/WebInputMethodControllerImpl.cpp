@@ -4,45 +4,47 @@
 
 #include "core/exported/WebInputMethodControllerImpl.h"
 
-#include "core/InputTypeNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/UserGestureIndicator.h"
-#include "core/editing/CompositionUnderlineVectorBuilder.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
 #include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameSelection.h"
-#include "core/editing/InputMethodController.h"
 #include "core/editing/PlainTextRange.h"
+#include "core/editing/ime/ImeTextSpanVectorBuilder.h"
+#include "core/editing/ime/InputMethodController.h"
 #include "core/exported/WebPluginContainerImpl.h"
 #include "core/frame/LocalFrame.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
+#include "core/input_type_names.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
+#include "public/platform/WebRect.h"
 #include "public/platform/WebString.h"
+#include "public/platform/WebVector.h"
 #include "public/web/WebPlugin.h"
 #include "public/web/WebRange.h"
 
 namespace blink {
 
 WebInputMethodControllerImpl::WebInputMethodControllerImpl(
-    WebLocalFrameBase& web_frame)
+    WebLocalFrameImpl& web_frame)
     : web_frame_(&web_frame) {}
 
-WebInputMethodControllerImpl::~WebInputMethodControllerImpl() {}
+WebInputMethodControllerImpl::~WebInputMethodControllerImpl() = default;
 
-DEFINE_TRACE(WebInputMethodControllerImpl) {
+void WebInputMethodControllerImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(web_frame_);
 }
 
 bool WebInputMethodControllerImpl::SetComposition(
     const WebString& text,
-    const WebVector<WebCompositionUnderline>& underlines,
+    const WebVector<WebImeTextSpan>& ime_text_spans,
     const WebRange& replacement_range,
     int selection_start,
     int selection_end) {
   if (WebPlugin* plugin = FocusedPluginIfInputMethodSupported()) {
-    return plugin->SetComposition(text, underlines, replacement_range,
+    return plugin->SetComposition(text, ime_text_spans, replacement_range,
                                   selection_start, selection_end);
   }
 
@@ -53,8 +55,11 @@ bool WebInputMethodControllerImpl::SetComposition(
     return false;
 
   // Select the range to be replaced with the composition later.
-  if (!replacement_range.IsNull())
-    web_frame_->SelectRange(replacement_range);
+  if (!replacement_range.IsNull()) {
+    web_frame_->SelectRange(replacement_range,
+                            WebLocalFrame::kHideSelectionHandle,
+                            blink::mojom::SelectionMenuBehavior::kHide);
+  }
 
   // We should verify the parent node of this IME composition node are
   // editable because JavaScript may delete a parent node of the composition
@@ -69,15 +74,11 @@ bool WebInputMethodControllerImpl::SetComposition(
       return false;
   }
 
-  UserGestureIndicator gesture_indicator(UserGestureToken::Create(
-      GetFrame()->GetDocument(), UserGestureToken::kNewGesture));
+  std::unique_ptr<UserGestureIndicator> gesture_indicator =
+      Frame::NotifyUserActivation(GetFrame(), UserGestureToken::kNewGesture);
 
-  // When the range of composition underlines overlap with the range between
-  // selectionStart and selectionEnd, WebKit somehow won't paint the selection
-  // at all (see InlineTextBox::paint() function in InlineTextBox.cpp).
-  // But the selection range actually takes effect.
   GetInputMethodController().SetComposition(
-      String(text), CompositionUnderlineVectorBuilder::Build(underlines),
+      String(text), ImeTextSpanVectorBuilder::Build(ime_text_spans),
       selection_start, selection_end);
 
   return text.IsEmpty() || GetInputMethodController().HasComposition();
@@ -107,27 +108,30 @@ bool WebInputMethodControllerImpl::FinishComposingText(
 
 bool WebInputMethodControllerImpl::CommitText(
     const WebString& text,
-    const WebVector<WebCompositionUnderline>& underlines,
+    const WebVector<WebImeTextSpan>& ime_text_spans,
     const WebRange& replacement_range,
     int relative_caret_position) {
-  UserGestureIndicator gesture_indicator(UserGestureToken::Create(
-      GetFrame()->GetDocument(), UserGestureToken::kNewGesture));
+  std::unique_ptr<UserGestureIndicator> gesture_indicator =
+      Frame::NotifyUserActivation(GetFrame(), UserGestureToken::kNewGesture);
 
   if (WebPlugin* plugin = FocusedPluginIfInputMethodSupported()) {
-    return plugin->CommitText(text, underlines, replacement_range,
+    return plugin->CommitText(text, ime_text_spans, replacement_range,
                               relative_caret_position);
   }
 
   // Select the range to be replaced with the composition later.
-  if (!replacement_range.IsNull())
-    web_frame_->SelectRange(replacement_range);
+  if (!replacement_range.IsNull()) {
+    web_frame_->SelectRange(replacement_range,
+                            WebLocalFrame::kHideSelectionHandle,
+                            blink::mojom::SelectionMenuBehavior::kHide);
+  }
 
   // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
   // needs to be audited.  See http://crbug.com/590369 for more details.
   GetFrame()->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   return GetInputMethodController().CommitText(
-      text, CompositionUnderlineVectorBuilder::Build(underlines),
+      text, ImeTextSpanVectorBuilder::Build(ime_text_spans),
       relative_caret_position);
 }
 
@@ -135,8 +139,51 @@ WebTextInputInfo WebInputMethodControllerImpl::TextInputInfo() {
   return GetFrame()->GetInputMethodController().TextInputInfo();
 }
 
+int WebInputMethodControllerImpl::ComputeWebTextInputNextPreviousFlags() {
+  return GetFrame()
+      ->GetInputMethodController()
+      .ComputeWebTextInputNextPreviousFlags();
+}
+
 WebTextInputType WebInputMethodControllerImpl::TextInputType() {
   return GetFrame()->GetInputMethodController().TextInputType();
+}
+
+WebRange WebInputMethodControllerImpl::CompositionRange() {
+  EphemeralRange range =
+      GetFrame()->GetInputMethodController().CompositionEphemeralRange();
+
+  if (range.IsNull())
+    return WebRange();
+
+  Element* editable =
+      GetFrame()->Selection().RootEditableElementOrDocumentElement();
+
+  editable->GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  return PlainTextRange::Create(*editable, range);
+}
+
+bool WebInputMethodControllerImpl::GetCompositionCharacterBounds(
+    WebVector<WebRect>& bounds) {
+  WebRange range = CompositionRange();
+  if (range.IsEmpty())
+    return false;
+
+  size_t character_count = range.length();
+  size_t offset = range.StartOffset();
+  WebVector<WebRect> result(character_count);
+  WebRect webrect;
+  for (size_t i = 0; i < character_count; ++i) {
+    if (!web_frame_->FirstRectForCharacterRange(offset + i, 1, webrect)) {
+      DLOG(ERROR) << "Could not retrieve character rectangle at " << i;
+      return false;
+    }
+    result[i] = webrect;
+  }
+
+  bounds.Swap(result);
+  return true;
 }
 
 WebRange WebInputMethodControllerImpl::GetSelectionOffsets() const {

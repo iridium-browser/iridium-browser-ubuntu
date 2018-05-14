@@ -17,8 +17,7 @@ CPDF_Form::CPDF_Form(CPDF_Document* pDoc,
                      CPDF_Dictionary* pPageResources,
                      CPDF_Stream* pFormStream,
                      CPDF_Dictionary* pParentResources)
-    : CPDF_PageObjectHolder(pDoc,
-                            pFormStream ? pFormStream->GetDict() : nullptr) {
+    : CPDF_PageObjectHolder(pDoc, pFormStream->GetDict()) {
   m_pFormStream = pFormStream;
   m_pResources = m_pFormDict->GetDictFor("Resources");
   m_pPageResources = pPageResources;
@@ -26,7 +25,7 @@ CPDF_Form::CPDF_Form(CPDF_Document* pDoc,
     m_pResources = pParentResources;
   if (!m_pResources)
     m_pResources = pPageResources;
-  m_Transparency = 0;
+  m_iTransparency = 0;
   LoadTransInfo();
 }
 
@@ -35,19 +34,29 @@ CPDF_Form::~CPDF_Form() {}
 void CPDF_Form::StartParse(CPDF_AllStates* pGraphicStates,
                            const CFX_Matrix* pParentMatrix,
                            CPDF_Type3Char* pType3Char,
-                           int level) {
+                           std::set<const uint8_t*>* parsedSet) {
   if (m_ParseState == CONTENT_PARSED || m_ParseState == CONTENT_PARSING)
     return;
 
-  m_pParser = pdfium::MakeUnique<CPDF_ContentParser>();
-  m_pParser->Start(this, pGraphicStates, pParentMatrix, pType3Char, level);
+  if (!parsedSet) {
+    if (!m_ParsedSet)
+      m_ParsedSet = pdfium::MakeUnique<std::set<const uint8_t*>>();
+    parsedSet = m_ParsedSet.get();
+  }
+
+  m_pParser = pdfium::MakeUnique<CPDF_ContentParser>(
+      this, pGraphicStates, pParentMatrix, pType3Char, parsedSet);
   m_ParseState = CONTENT_PARSING;
 }
 
-void CPDF_Form::ParseContent(CPDF_AllStates* pGraphicStates,
-                             const CFX_Matrix* pParentMatrix,
-                             CPDF_Type3Char* pType3Char,
-                             int level) {
-  StartParse(pGraphicStates, pParentMatrix, pType3Char, level);
+void CPDF_Form::ParseContent() {
+  ParseContentWithParams(nullptr, nullptr, nullptr, nullptr);
+}
+
+void CPDF_Form::ParseContentWithParams(CPDF_AllStates* pGraphicStates,
+                                       const CFX_Matrix* pParentMatrix,
+                                       CPDF_Type3Char* pType3Char,
+                                       std::set<const uint8_t*>* parsedSet) {
+  StartParse(pGraphicStates, pParentMatrix, pType3Char, parsedSet);
   ContinueParse(nullptr);
 }

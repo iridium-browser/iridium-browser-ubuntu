@@ -11,8 +11,8 @@
 #include <algorithm>
 #include <memory>
 #include <set>
-#include <stack>
 
+#include "base/containers/stack.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
@@ -29,7 +29,7 @@
 
 namespace {
 
-bool PickleFromFileInfo(const storage::SandboxDirectoryDatabase::FileInfo& info,
+void PickleFromFileInfo(const storage::SandboxDirectoryDatabase::FileInfo& info,
                         base::Pickle* pickle) {
   DCHECK(pickle);
   std::string data_path;
@@ -41,14 +41,10 @@ bool PickleFromFileInfo(const storage::SandboxDirectoryDatabase::FileInfo& info,
   data_path = storage::FilePathToString(info.data_path);
   name = storage::FilePathToString(base::FilePath(info.name));
 
-  if (pickle->WriteInt64(info.parent_id) &&
-      pickle->WriteString(data_path) &&
-      pickle->WriteString(name) &&
-      pickle->WriteInt64(time.ToInternalValue()))
-    return true;
-
-  NOTREACHED();
-  return false;
+  pickle->WriteInt64(info.parent_id);
+  pickle->WriteString(data_path);
+  pickle->WriteString(name);
+  pickle->WriteInt64(time.ToInternalValue());
 }
 
 bool FileInfoFromPickle(const base::Pickle& pickle,
@@ -291,7 +287,7 @@ bool DatabaseCheckHelper::ScanDirectory() {
   };
 
   // Any path in |pending_directories| is relative to |path_|.
-  std::stack<base::FilePath> pending_directories;
+  base::stack<base::FilePath> pending_directories;
   pending_directories.push(base::FilePath());
 
   while (!pending_directories.empty()) {
@@ -340,7 +336,7 @@ bool DatabaseCheckHelper::ScanHierarchy() {
   size_t visited_files = 0;
   size_t visited_links = 0;
 
-  std::stack<FileId> directories;
+  base::stack<FileId> directories;
   directories.push(0);
 
   // Check if the root directory exists as a directory.
@@ -421,8 +417,7 @@ namespace storage {
 SandboxDirectoryDatabase::FileInfo::FileInfo() : parent_id(0) {
 }
 
-SandboxDirectoryDatabase::FileInfo::~FileInfo() {
-}
+SandboxDirectoryDatabase::FileInfo::~FileInfo() = default;
 
 SandboxDirectoryDatabase::SandboxDirectoryDatabase(
     const base::FilePath& filesystem_data_directory,
@@ -431,8 +426,7 @@ SandboxDirectoryDatabase::SandboxDirectoryDatabase(
       env_override_(env_override) {
 }
 
-SandboxDirectoryDatabase::~SandboxDirectoryDatabase() {
-}
+SandboxDirectoryDatabase::~SandboxDirectoryDatabase() = default;
 
 bool SandboxDirectoryDatabase::GetChildWithName(
     FileId parent_id,
@@ -637,8 +631,7 @@ bool SandboxDirectoryDatabase::UpdateModificationTime(
     return false;
   info.modification_time = modification_time;
   base::Pickle pickle;
-  if (!PickleFromFileInfo(info, &pickle))
-    return false;
+  PickleFromFileInfo(info, &pickle);
   leveldb::Status status = db_->Put(
       leveldb::WriteOptions(),
       GetFileLookupKey(file_id),
@@ -669,8 +662,7 @@ bool SandboxDirectoryDatabase::OverwritingMoveFile(
   if (!RemoveFileInfoHelper(src_file_id, &batch))
     return false;
   base::Pickle pickle;
-  if (!PickleFromFileInfo(dest_file_info, &pickle))
-    return false;
+  PickleFromFileInfo(dest_file_info, &pickle);
   batch.Put(
       GetFileLookupKey(dest_file_id),
       leveldb::Slice(reinterpret_cast<const char *>(pickle.data()),
@@ -722,7 +714,7 @@ bool SandboxDirectoryDatabase::DestroyDatabase() {
   const std::string path =
       FilePathToString(filesystem_data_directory_.Append(
           kDirectoryDatabaseName));
-  leveldb::Options options;
+  leveldb_env::Options options;
   if (env_override_)
     options.env = env_override_;
   leveldb::Status status = leveldb::DestroyDB(path, options);
@@ -740,10 +732,9 @@ bool SandboxDirectoryDatabase::Init(RecoveryOption recovery_option) {
   std::string path =
       FilePathToString(filesystem_data_directory_.Append(
           kDirectoryDatabaseName));
-  leveldb::Options options;
+  leveldb_env::Options options;
   options.max_open_files = 0;  // Use minimum.
   options.create_if_missing = true;
-  options.reuse_logs = leveldb_env::kDefaultLogReuseOptionValue;
   if (env_override_)
     options.env = env_override_;
   leveldb::Status status = leveldb_env::OpenDB(options, path, &db_);
@@ -773,7 +764,7 @@ bool SandboxDirectoryDatabase::Init(RecoveryOption recovery_option) {
       UMA_HISTOGRAM_ENUMERATION(kDatabaseRepairHistogramLabel,
                                 DB_REPAIR_FAILED, DB_REPAIR_MAX);
       LOG(WARNING) << "Failed to repair SandboxDirectoryDatabase.";
-      // fall through
+      FALLTHROUGH;
     case DELETE_ON_CORRUPTION:
       LOG(WARNING) << "Clearing SandboxDirectoryDatabase.";
       if (!base::DeleteFile(filesystem_data_directory_, true))
@@ -789,7 +780,8 @@ bool SandboxDirectoryDatabase::Init(RecoveryOption recovery_option) {
 
 bool SandboxDirectoryDatabase::RepairDatabase(const std::string& db_path) {
   DCHECK(!db_.get());
-  leveldb::Options options;
+  leveldb_env::Options options;
+  options.reuse_logs = false;
   options.max_open_files = 0;  // Use minimum.
   if (env_override_)
     options.env = env_override_;
@@ -917,8 +909,7 @@ bool SandboxDirectoryDatabase::AddFileInfoHelper(
     batch->Put(child_key, id_string);
   }
   base::Pickle pickle;
-  if (!PickleFromFileInfo(info, &pickle))
-    return false;
+  PickleFromFileInfo(info, &pickle);
   batch->Put(
       id_string,
       leveldb::Slice(reinterpret_cast<const char *>(pickle.data()),
@@ -948,9 +939,8 @@ bool SandboxDirectoryDatabase::RemoveFileInfoHelper(
   return true;
 }
 
-void SandboxDirectoryDatabase::HandleError(
-    const tracked_objects::Location& from_here,
-    const leveldb::Status& status) {
+void SandboxDirectoryDatabase::HandleError(const base::Location& from_here,
+                                           const leveldb::Status& status) {
   LOG(ERROR) << "SandboxDirectoryDatabase failed at: "
              << from_here.ToString() << " with error: " << status.ToString();
   db_.reset();

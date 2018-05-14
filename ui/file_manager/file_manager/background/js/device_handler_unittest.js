@@ -42,7 +42,10 @@ loadTimeData.data = {
   FORMATTING_OF_DEVICE_FINISHED_TITLE: 'FORMATTING_OF_DEVICE_FINISHED_TITLE',
   FORMATTING_FINISHED_SUCCESS_MESSAGE: 'FORMATTING_FINISHED_SUCCESS',
   FORMATTING_OF_DEVICE_FAILED_TITLE: 'FORMATTING_OF_DEVICE_FAILED_TITLE',
-  FORMATTING_FINISHED_FAILURE_MESSAGE: 'FORMATTING_FINISHED_FAILURE'
+  FORMATTING_FINISHED_FAILURE_MESSAGE: 'FORMATTING_FINISHED_FAILURE',
+  RENAMING_OF_DEVICE_FAILED_TITLE: 'RENAMING_OF_DEVICE_FAILED_TITLE',
+  RENAMING_OF_DEVICE_FINISHED_FAILURE_MESSAGE:
+      'RENAMING_OF_DEVICE_FINISHED_FAILURE',
 };
 
 // Set up the test components.
@@ -54,6 +57,10 @@ function setUp() {
   setupChromeApis();
 
   handler = new DeviceHandler();
+}
+
+function setUpInIncognitoContext() {
+  chrome.extension.inIncognitoContext = true;
 }
 
 function testGoodDevice(callback) {
@@ -591,6 +598,29 @@ function testFormatFailed() {
                chrome.notifications.items['formatFail:/device/path'].message);
 }
 
+function testRenameSucceeded() {
+  chrome.fileManagerPrivate.onDeviceChanged.dispatch(
+      {type: 'rename_start', devicePath: '/device/path'});
+  assertEquals(0, Object.keys(chrome.notifications.items).length);
+
+  chrome.fileManagerPrivate.onDeviceChanged.dispatch(
+      {type: 'rename_success', devicePath: '/device/path'});
+  assertEquals(0, Object.keys(chrome.notifications.items).length);
+}
+
+function testRenameFailed() {
+  chrome.fileManagerPrivate.onDeviceChanged.dispatch(
+      {type: 'rename_start', devicePath: '/device/path'});
+  assertEquals(0, Object.keys(chrome.notifications.items).length);
+
+  chrome.fileManagerPrivate.onDeviceChanged.dispatch(
+      {type: 'rename_fail', devicePath: '/device/path'});
+  assertEquals(1, Object.keys(chrome.notifications.items).length);
+  assertEquals(
+      'RENAMING_OF_DEVICE_FINISHED_FAILURE',
+      chrome.notifications.items['renameFail:/device/path'].message);
+}
+
 function testDeviceHardUnplugged() {
   chrome.fileManagerPrivate.onDeviceChanged.dispatch({
     type: 'hard_unplugged',
@@ -627,6 +657,36 @@ function testNotificationClicked(callback) {
       callback);
 }
 
+function testMiscMessagesInIncognito() {
+  setUpInIncognitoContext();
+  chrome.fileManagerPrivate.onDeviceChanged.dispatch(
+      {type: 'format_start', devicePath: '/device/path'});
+  // No notification sent by this instance in incognito context.
+  assertEquals(0, Object.keys(chrome.notifications.items).length);
+  assertFalse(chrome.notifications.resolver.settled);
+}
+
+function testMountCompleteInIncognito() {
+  setUpInIncognitoContext();
+  chrome.fileManagerPrivate.onMountCompleted.dispatch({
+    eventType: 'mount',
+    status: 'success',
+    volumeMetadata: {
+      isParentDevice: false,
+      deviceType: 'usb',
+      devicePath: '/device/path',
+      deviceLabel: 'label'
+    },
+    shouldNotify: true
+  });
+
+  assertEquals(0, Object.keys(chrome.notifications.items).length);
+  // TODO(yamaguchi): I think this test is incomplete.
+  // This looks as if notification is not generated yet because the promise
+  // is not settled yet. Same for testGoodDeviceNotNavigated.
+  assertFalse(chrome.notifications.resolver.settled);
+}
+
 /**
  * @param {!VolumeManagerCommon.VolumeType} volumeType
  * @param {string} volumeId
@@ -652,6 +712,7 @@ function setupChromeApis() {
       },
       cloudImportDisabled: false
     },
+    extension: {inIncognitoContext: false},
     fileManagerPrivate: {
       onDeviceChanged: {
         addListener: function(listener) {
@@ -662,11 +723,14 @@ function setupChromeApis() {
         addListener: function(listener) {
           this.dispatch = listener;
         }
+      },
+      getProfiles: function(callback) {
+        callback([{profileId: 'userid@xyz.domain.org'}]);
       }
     },
     i18n: {
       getUILanguage: function() {
-        return 'en-US'
+        return 'en-US';
       }
     },
     notifications: {
@@ -679,7 +743,10 @@ function setupChromeApis() {
         }
         callback();
       },
-      clear: function(id, callback) { delete this.items[id]; callback(); },
+      clear: function(id, callback) {
+        delete this.items[id];
+        callback();
+      },
       items: {},
       onButtonClicked: {
         addListener: function(listener) {
@@ -696,10 +763,10 @@ function setupChromeApis() {
       }
     },
     runtime: {
-      getURL: function(path) { return path; },
-      onStartup: {
-        addListener: function() {}
-      }
+      getURL: function(path) {
+        return path;
+      },
+      onStartup: {addListener: function() {}}
     }
   };
 }

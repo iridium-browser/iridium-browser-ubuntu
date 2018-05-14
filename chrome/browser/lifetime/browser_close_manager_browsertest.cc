@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/background/background_mode_manager.h"
@@ -22,8 +23,6 @@
 #include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/lifetime/keep_alive_types.h"
-#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
@@ -34,16 +33,19 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/app_modal/javascript_app_modal_dialog.h"
 #include "components/app_modal/native_app_modal_dialog.h"
+#include "components/download/public/common/download_item.h"
+#include "components/keep_alive_registry/keep_alive_types.h"
+#include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/sessions/core/tab_restore_service_observer.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
@@ -52,10 +54,9 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
+#include "content/public/test/slow_download_http_response.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "net/test/url_request/url_request_mock_http_job.h"
-#include "net/test/url_request/url_request_slow_download_job.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/chromeos_switches.h"
@@ -198,12 +199,12 @@ class TestDownloadManagerDelegate : public ChromeDownloadManagerDelegate {
  public:
   explicit TestDownloadManagerDelegate(Profile* profile)
       : ChromeDownloadManagerDelegate(profile) {
-    GetDownloadIdReceiverCallback().Run(content::DownloadItem::kInvalidId + 1);
+    GetDownloadIdReceiverCallback().Run(download::DownloadItem::kInvalidId + 1);
   }
   ~TestDownloadManagerDelegate() override {}
 
   bool DetermineDownloadTarget(
-      content::DownloadItem* item,
+      download::DownloadItem* item,
       const content::DownloadTargetCallback& callback) override {
     content::DownloadTargetCallback dangerous_callback =
         base::Bind(&TestDownloadManagerDelegate::SetDangerous, callback);
@@ -213,15 +214,17 @@ class TestDownloadManagerDelegate : public ChromeDownloadManagerDelegate {
 
   static void SetDangerous(const content::DownloadTargetCallback& callback,
                            const base::FilePath& target_path,
-                           content::DownloadItem::TargetDisposition disp,
-                           content::DownloadDangerType danger_type,
+                           download::DownloadItem::TargetDisposition disp,
+                           download::DownloadDangerType danger_type,
                            const base::FilePath& intermediate_path,
-                           content::DownloadInterruptReason reason) {
-    callback.Run(target_path, disp, content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL,
+                           download::DownloadInterruptReason reason) {
+    callback.Run(target_path, disp,
+                 download::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL,
                  intermediate_path, reason);
   }
 };
 
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
 class FakeBackgroundModeManager : public BackgroundModeManager {
  public:
   FakeBackgroundModeManager()
@@ -249,6 +252,7 @@ class FakeBackgroundModeManager : public BackgroundModeManager {
 
   DISALLOW_COPY_AND_ASSIGN(FakeBackgroundModeManager);
 };
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
 
 }  // namespace
 
@@ -263,6 +267,9 @@ class BrowserCloseManagerBrowserTest
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
         base::BindOnce(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
+    embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
+        &content::SlowDownloadHttpResponse::HandleSlowDownloadRequest));
+    ASSERT_TRUE(embedded_test_server()->Start());
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -275,16 +282,19 @@ class BrowserCloseManagerBrowserTest
   }
 
   void CreateStalledDownload(Browser* browser) {
+    ASSERT_TRUE(embedded_test_server()->Started());
+
+    GURL slow_download_url = embedded_test_server()->GetURL(
+        content::SlowDownloadHttpResponse::kKnownSizeUrl);
+
     content::DownloadTestObserverInProgress observer(
         content::BrowserContext::GetDownloadManager(browser->profile()), 1);
     ui_test_utils::NavigateToURLWithDisposition(
-        browser, GURL(net::URLRequestSlowDownloadJob::kKnownSizeUrl),
-        WindowOpenDisposition::NEW_BACKGROUND_TAB,
+        browser, slow_download_url, WindowOpenDisposition::NEW_BACKGROUND_TAB,
         ui_test_utils::BROWSER_TEST_NONE);
     observer.WaitForFinished();
-    EXPECT_EQ(
-        1UL,
-        observer.NumDownloadsSeenInState(content::DownloadItem::IN_PROGRESS));
+    EXPECT_EQ(1UL, observer.NumDownloadsSeenInState(
+                       download::DownloadItem::IN_PROGRESS));
   }
 
   void PrepareForDialog(content::WebContents* web_contents) {
@@ -300,7 +310,6 @@ class BrowserCloseManagerBrowserTest
 };
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest, TestSingleTabShutdown) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/beforeunload.html")));
   PrepareForDialog(browser());
@@ -324,7 +333,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest, TestSingleTabShutdown) {
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestShutdownMoreThanOnce) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/beforeunload.html")));
   PrepareForDialog(browser());
@@ -350,7 +358,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        PRE_TestSessionRestore) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/beforeunload.html")));
   AddBlankTabAndShow(browser());
@@ -404,7 +411,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // Test that browser windows are only closed if all browsers are ready to close
 // and that all beforeunload dialogs are shown again after a cancel.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest, TestMultipleWindows) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   browsers_.push_back(CreateBrowser(browser()->profile()));
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
@@ -454,7 +460,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest, TestMultipleWindows) {
 // early.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestHangInBeforeUnloadMultipleTabs) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload_hang.html")));
   AddBlankTabAndShow(browsers_[0]);
@@ -490,7 +495,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // early.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestHangInBeforeUnloadMultipleWindows) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   browsers_.push_back(CreateBrowser(browser()->profile()));
   browsers_.push_back(CreateBrowser(browser()->profile()));
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
@@ -526,9 +530,14 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // Test that tabs that are slow to respond are not closed prematurely.
 // Regression for crbug.com/365052 caused some of tabs to be closed even if
 // user chose to cancel browser close.
+// Flaky on ChromeOS ASan. https://crbug.com/805457
+#if defined(OS_CHROMEOS) && defined(ADDRESS_SANITIZER)
+#define MAYBE_TestUnloadMultipleSlowTabs DISABLED_TestUnloadMultipleSlowTabs
+#else
+#define MAYBE_TestUnloadMultipleSlowTabs TestUnloadMultipleSlowTabs
+#endif
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
-                       TestUnloadMultipleSlowTabs) {
-  ASSERT_TRUE(embedded_test_server()->Start());
+                       MAYBE_TestUnloadMultipleSlowTabs) {
   const int kTabCount = 5;
   const int kResposiveTabIndex = 2;
   // Create tab strip with all tabs except one responding after
@@ -575,7 +584,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // Regression for crbug.com/365052 caused CHECK in tabstrip.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestBeforeUnloadMultipleSlowWindows) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   const int kBrowserCount = 5;
   const int kResposiveBrowserIndex = 2;
   // Create multiple browsers with all tabs except one responding after
@@ -618,10 +626,16 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
   EXPECT_TRUE(BrowserList::GetInstance()->empty());
 }
 
+// Flaky on Windows 7 (dbg) trybot, see https://crbug.com/751081.
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_TestAddWindowDuringShutdown DISABLED_TestAddWindowDuringShutdown
+#else
+#define MAYBE_TestAddWindowDuringShutdown TestAddWindowDuringShutdown
+#endif
+
 // Test that a window created during shutdown is closed.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
-                       TestAddWindowDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->Start());
+                       MAYBE_TestAddWindowDuringShutdown) {
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
   PrepareForDialog(browsers_[0]);
@@ -640,7 +654,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // cancel the shutdown.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestAddWindowWithBeforeUnloadDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
   PrepareForDialog(browsers_[0]);
@@ -673,7 +686,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // Test that tabs added during shutdown are closed.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestAddTabDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   browsers_.push_back(CreateBrowser(browser()->profile()));
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
@@ -699,7 +711,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestAddTabWithBeforeUnloadDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   browsers_.push_back(CreateBrowser(browser()->profile()));
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
@@ -755,7 +766,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
   if (GetParam())
     return;
 
-  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/title1.html")));
 
@@ -847,7 +857,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestCloseTabDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
   PrepareForDialog(browsers_[0]);
@@ -882,7 +891,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestOpenAndCloseWindowDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
   PrepareForDialog(browsers_[0]);
@@ -917,7 +925,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestCloseWindowDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
   browsers_.push_back(CreateBrowser(browser()->profile()));
@@ -983,7 +990,6 @@ class BrowserCloseManagerWithDownloadsBrowserTest :
 #if defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
                        TestWithDownloads) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   SetDownloadPathForProfile(browser()->profile());
   ASSERT_NO_FATAL_FAILURE(CreateStalledDownload(browser()));
 
@@ -1006,7 +1012,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
 // Test shutdown with a DANGEROUS_URL download undecided.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
     TestWithDangerousUrlDownload) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   SetDownloadPathForProfile(browser()->profile());
 
   // Set up the fake delegate that forces the download to be malicious.
@@ -1018,8 +1023,8 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
   // Run a dangerous download, but the user doesn't make a decision.
   // This .swf normally would be categorized as DANGEROUS_FILE, but
   // TestDownloadManagerDelegate turns it into DANGEROUS_URL.
-  GURL download_url(net::URLRequestMockHTTPJob::GetMockUrl(
-      "downloads/dangerous/dangerous.swf"));
+  GURL download_url(
+      embedded_test_server()->GetURL("/downloads/dangerous/dangerous.swf"));
   content::DownloadTestObserverInterrupted observer(
       content::BrowserContext::GetDownloadManager(browser()->profile()),
       1,
@@ -1048,7 +1053,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
 // Test shutdown with a download in progress.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
                        TestWithDownloads) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   SetDownloadPathForProfile(browser()->profile());
   ASSERT_NO_FATAL_FAILURE(CreateStalledDownload(browser()));
   content::TestNavigationObserver navigation_observer(
@@ -1077,7 +1081,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
 // Test shutdown with a download in progress in an off-the-record profile.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
                        TestWithOffTheRecordDownloads) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   Profile* otr_profile = browser()->profile()->GetOffTheRecordProfile();
   SetDownloadPathForProfile(otr_profile);
   Browser* otr_browser = CreateBrowser(otr_profile);
@@ -1167,7 +1170,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
   {
     base::FilePath path =
         profile_manager->user_data_dir().AppendASCII("test_profile");
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     if (!base::PathExists(path))
       ASSERT_TRUE(base::CreateDirectory(path));
     other_profile =
@@ -1176,7 +1179,6 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
   profile_manager->RegisterTestingProfile(other_profile, true, false);
   Browser* other_profile_browser = CreateBrowser(other_profile);
 
-  ASSERT_TRUE(embedded_test_server()->Start());
   SetDownloadPathForProfile(browser()->profile());
   SetDownloadPathForProfile(other_profile);
   ASSERT_NO_FATAL_FAILURE(CreateStalledDownload(browser()));
@@ -1215,10 +1217,10 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
     EXPECT_EQ(0, DownloadCoreService::NonMaliciousDownloadCountAllProfiles());
 }
 
+// Fails on ChromeOS and Linux, times out on Win. crbug.com/749098
 // Test shutdown with downloads in progress and beforeunload handlers.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
-                       TestBeforeUnloadAndDownloads) {
-  ASSERT_TRUE(embedded_test_server()->Start());
+                       DISABLED_TestBeforeUnloadAndDownloads) {
   SetDownloadPathForProfile(browser()->profile());
   ASSERT_NO_FATAL_FAILURE(CreateStalledDownload(browser()));
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
@@ -1249,6 +1251,8 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
 INSTANTIATE_TEST_CASE_P(BrowserCloseManagerWithDownloadsBrowserTest,
                         BrowserCloseManagerWithDownloadsBrowserTest,
                         testing::Bool());
+
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
 
 class BrowserCloseManagerWithBackgroundModeBrowserTest
     : public BrowserCloseManagerBrowserTest {
@@ -1346,3 +1350,4 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithBackgroundModeBrowserTest,
 INSTANTIATE_TEST_CASE_P(BrowserCloseManagerWithBackgroundModeBrowserTest,
                         BrowserCloseManagerWithBackgroundModeBrowserTest,
                         testing::Bool());
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)

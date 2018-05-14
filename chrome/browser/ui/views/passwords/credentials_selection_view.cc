@@ -38,8 +38,8 @@ CredentialsSelectionView::CredentialsSelectionView(
   DCHECK(!password_forms_->empty());
 
   // Layout.
-  views::GridLayout* layout = new views::GridLayout(this);
-  SetLayoutManager(layout);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   // ColumnSet.
   int column_set_id = 0;
@@ -47,8 +47,8 @@ CredentialsSelectionView::CredentialsSelectionView(
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
                         views::GridLayout::FIXED, 0, 0);
   ChromeLayoutProvider* layout_provider = ChromeLayoutProvider::Get();
-  const int inner_padding =
-      layout_provider->GetDistanceMetric(DISTANCE_RELATED_LABEL_HORIZONTAL);
+  const int inner_padding = layout_provider->GetDistanceMetric(
+      views::DISTANCE_RELATED_LABEL_HORIZONTAL);
   column_set->AddPaddingColumn(0, inner_padding);
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
                         views::GridLayout::FIXED, 0, 0);

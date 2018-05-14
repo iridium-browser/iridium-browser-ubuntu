@@ -54,10 +54,12 @@ class SigninScreenHandler;
 class SigninScreenHandlerDelegate;
 class SupervisedUserCreationScreenHandler;
 class ResetView;
+class SyncConsentScreenView;
 class TermsOfServiceScreenView;
 class UserBoardView;
 class UserImageView;
 class UpdateView;
+class UpdateRequiredView;
 class VoiceInteractionValuePropScreenView;
 class WaitForContainerReadyScreenView;
 class WrongHWIDScreenView;
@@ -77,12 +79,15 @@ class OobeUI : public content::WebUIController,
   static const char kUserAddingDisplay[];
   static const char kAppLaunchSplashDisplay[];
   static const char kArcKioskSplashDisplay[];
+  static const char kGaiaSigninDisplay[];
 
   class Observer {
    public:
     Observer() {}
     virtual void OnCurrentScreenChanged(OobeScreen current_screen,
                                         OobeScreen new_screen) = 0;
+
+    virtual void OnScreenInitialized(OobeScreen screen) = 0;
 
    protected:
     virtual ~Observer() {}
@@ -102,6 +107,7 @@ class OobeUI : public content::WebUIController,
   KioskAutolaunchScreenView* GetKioskAutolaunchScreenView();
   KioskEnableScreenView* GetKioskEnableScreenView();
   TermsOfServiceScreenView* GetTermsOfServiceScreenView();
+  SyncConsentScreenView* GetSyncConsentScreenView();
   ArcTermsOfServiceScreenView* GetArcTermsOfServiceScreenView();
   UserImageView* GetUserImageView();
   ErrorScreen* GetErrorScreen();
@@ -117,6 +123,7 @@ class OobeUI : public content::WebUIController,
   EncryptionMigrationScreenView* GetEncryptionMigrationScreenView();
   VoiceInteractionValuePropScreenView* GetVoiceInteractionValuePropScreenView();
   WaitForContainerReadyScreenView* GetWaitForContainerReadyScreenView();
+  UpdateRequiredView* GetUpdateRequiredScreenView();
   GaiaView* GetGaiaScreenView();
   UserBoardView* GetUserBoardView();
 
@@ -131,6 +138,11 @@ class OobeUI : public content::WebUIController,
 
   // Called when the screen has changed.
   void CurrentScreenChanged(OobeScreen screen);
+
+  // Called when the screen was initialized.
+  void ScreenInitialized(OobeScreen screen);
+
+  bool IsScreenInitialized(OobeScreen screen);
 
   // Invoked after the async assets load. The screen handler that has the same
   // async assets load id will be initialized.
@@ -212,8 +224,9 @@ class OobeUI : public content::WebUIController,
   // forwards calls from native code to JS side.
   SigninScreenHandler* signin_screen_handler_ = nullptr;
 
-  std::vector<BaseWebUIHandler*> webui_handlers_;    // Non-owning pointers.
-  std::vector<BaseScreenHandler*> screen_handlers_;  // Non-owning pointers.
+  std::vector<BaseWebUIHandler*> webui_handlers_;       // Non-owning pointers.
+  std::vector<BaseWebUIHandler*> webui_only_handlers_;  // Non-owning pointers.
+  std::vector<BaseScreenHandler*> screen_handlers_;     // Non-owning pointers.
 
   KioskAppMenuHandler* kiosk_app_menu_handler_ =
       nullptr;  // Non-owning pointers.

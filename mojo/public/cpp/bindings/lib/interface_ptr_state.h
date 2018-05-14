@@ -104,10 +104,12 @@ class MOJO_CPP_BINDINGS_EXPORT InterfacePtrStateBase {
 template <typename Interface>
 class InterfacePtrState : public InterfacePtrStateBase {
  public:
+  using Proxy = typename Interface::Proxy_;
+
   InterfacePtrState() = default;
   ~InterfacePtrState() = default;
 
-  Interface* instance() {
+  Proxy* instance() {
     ConfigureProxyIfNecessary();
 
     // This will be null if the object is not bound.
@@ -191,9 +193,12 @@ class InterfacePtrState : public InterfacePtrStateBase {
     endpoint_client()->AcceptWithResponder(&message, std::move(responder));
   }
 
- private:
-  using Proxy = typename Interface::Proxy_;
+  void RaiseError() {
+    ConfigureProxyIfNecessary();
+    endpoint_client()->RaiseError();
+  }
 
+ private:
   void ConfigureProxyIfNecessary() {
     // The proxy has been configured.
     if (proxy_) {
@@ -204,9 +209,9 @@ class InterfacePtrState : public InterfacePtrStateBase {
 
     if (InitializeEndpointClient(
             Interface::PassesAssociatedKinds_, Interface::HasSyncMethods_,
-            base::MakeUnique<typename Interface::ResponseValidator_>())) {
+            std::make_unique<typename Interface::ResponseValidator_>())) {
       router()->SetMasterInterfaceName(Interface::Name_);
-      proxy_ = base::MakeUnique<Proxy>(endpoint_client());
+      proxy_ = std::make_unique<Proxy>(endpoint_client());
     }
   }
 

@@ -37,9 +37,9 @@ namespace blink {
 // Noah's Ark of Formatting Elements can fit three of each element.
 static const size_t kNoahsArkCapacity = 3;
 
-HTMLFormattingElementList::HTMLFormattingElementList() {}
+HTMLFormattingElementList::HTMLFormattingElementList() = default;
 
-HTMLFormattingElementList::~HTMLFormattingElementList() {}
+HTMLFormattingElementList::~HTMLFormattingElementList() = default;
 
 Element* HTMLFormattingElementList::ClosestElementInScopeWithName(
     const AtomicString& target_name) {
@@ -98,7 +98,7 @@ void HTMLFormattingElementList::Append(HTMLStackItem* item) {
 void HTMLFormattingElementList::Remove(Element* element) {
   size_t index = entries_.ReverseFind(element);
   if (index != kNotFound)
-    entries_.erase(index);
+    entries_.EraseAt(index);
 }
 
 void HTMLFormattingElementList::AppendMarker() {

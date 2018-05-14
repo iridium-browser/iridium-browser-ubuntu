@@ -7,20 +7,21 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#ifndef WEBRTC_TEST_FAKE_AUDIO_DEVICE_H_
-#define WEBRTC_TEST_FAKE_AUDIO_DEVICE_H_
+#ifndef TEST_FAKE_AUDIO_DEVICE_H_
+#define TEST_FAKE_AUDIO_DEVICE_H_
 
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "webrtc/modules/audio_device/include/fake_audio_device.h"
-#include "webrtc/rtc_base/array_view.h"
-#include "webrtc/rtc_base/buffer.h"
-#include "webrtc/rtc_base/criticalsection.h"
-#include "webrtc/rtc_base/event.h"
-#include "webrtc/rtc_base/platform_thread.h"
-#include "webrtc/typedefs.h"
+#include "api/array_view.h"
+#include "modules/audio_device/include/fake_audio_device.h"
+#include "rtc_base/buffer.h"
+#include "rtc_base/criticalsection.h"
+#include "rtc_base/event.h"
+#include "rtc_base/platform_thread.h"
+#include "rtc_base/random.h"
+#include "typedefs.h"  // NOLINT(build/include)
 
 namespace webrtc {
 
@@ -59,6 +60,26 @@ class FakeAudioDevice : public FakeAudioDeviceModule {
     virtual bool Render(rtc::ArrayView<const int16_t> data) = 0;
   };
 
+  // A fake capturer that generates pulses with random samples between
+  // -max_amplitude and +max_amplitude.
+  class PulsedNoiseCapturer final : public Capturer {
+   public:
+    PulsedNoiseCapturer(int16_t max_amplitude, int sampling_frequency_in_hz);
+
+    int SamplingFrequency() const override { return sampling_frequency_in_hz_; }
+
+    bool Capture(rtc::BufferT<int16_t>* buffer) override;
+
+    void SetMaxAmplitude(int16_t amplitude);
+
+   private:
+    int sampling_frequency_in_hz_;
+    bool fill_with_zero_;
+    Random random_generator_;
+    rtc::CriticalSection lock_;
+    int16_t max_amplitude_ RTC_GUARDED_BY(lock_);
+  };
+
   // Creates a new FakeAudioDevice. When capturing or playing, 10 ms audio
   // frames will be processed every 10ms / |speed|.
   // |capturer| is an object that produces audio data. Can be nullptr if this
@@ -74,8 +95,9 @@ class FakeAudioDevice : public FakeAudioDeviceModule {
   // Returns a Capturer instance that generates a signal where every second
   // frame is zero and every second frame is evenly distributed random noise
   // with max amplitude |max_amplitude|.
-  static std::unique_ptr<Capturer> CreatePulsedNoiseCapturer(
-      int16_t max_amplitude, int sampling_frequency_in_hz);
+  static std::unique_ptr<PulsedNoiseCapturer> CreatePulsedNoiseCapturer(
+      int16_t max_amplitude,
+      int sampling_frequency_in_hz);
 
   // Returns a Capturer instance that gets its data from a file.
   static std::unique_ptr<Capturer> CreateWavFileReader(
@@ -121,19 +143,19 @@ class FakeAudioDevice : public FakeAudioDeviceModule {
   static bool Run(void* obj);
   void ProcessAudio();
 
-  const std::unique_ptr<Capturer> capturer_ GUARDED_BY(lock_);
-  const std::unique_ptr<Renderer> renderer_ GUARDED_BY(lock_);
+  const std::unique_ptr<Capturer> capturer_ RTC_GUARDED_BY(lock_);
+  const std::unique_ptr<Renderer> renderer_ RTC_GUARDED_BY(lock_);
   const float speed_;
 
   rtc::CriticalSection lock_;
-  AudioTransport* audio_callback_ GUARDED_BY(lock_);
-  bool rendering_ GUARDED_BY(lock_);
-  bool capturing_ GUARDED_BY(lock_);
+  AudioTransport* audio_callback_ RTC_GUARDED_BY(lock_);
+  bool rendering_ RTC_GUARDED_BY(lock_);
+  bool capturing_ RTC_GUARDED_BY(lock_);
   rtc::Event done_rendering_;
   rtc::Event done_capturing_;
 
-  std::vector<int16_t> playout_buffer_ GUARDED_BY(lock_);
-  rtc::BufferT<int16_t> recording_buffer_ GUARDED_BY(lock_);
+  std::vector<int16_t> playout_buffer_ RTC_GUARDED_BY(lock_);
+  rtc::BufferT<int16_t> recording_buffer_ RTC_GUARDED_BY(lock_);
 
   std::unique_ptr<EventTimerWrapper> tick_;
   rtc::PlatformThread thread_;
@@ -141,4 +163,4 @@ class FakeAudioDevice : public FakeAudioDeviceModule {
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_FAKE_AUDIO_DEVICE_H_
+#endif  // TEST_FAKE_AUDIO_DEVICE_H_

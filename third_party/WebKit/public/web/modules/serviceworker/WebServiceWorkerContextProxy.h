@@ -31,9 +31,9 @@
 #ifndef WebServiceWorkerContextProxy_h
 #define WebServiceWorkerContextProxy_h
 
-#include "public/platform/WebMessagePortChannel.h"
 #include "public/platform/modules/serviceworker/WebServiceWorker.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerRegistration.h"
+#include "third_party/WebKit/public/common/message_port/transferable_message.h"
 
 #include <memory>
 
@@ -54,7 +54,7 @@ class WebURLResponse;
 // All methods of this class must be called on the worker thread.
 class WebServiceWorkerContextProxy {
  public:
-  virtual ~WebServiceWorkerContextProxy() {}
+  virtual ~WebServiceWorkerContextProxy() = default;
 
   virtual void SetRegistration(
       std::unique_ptr<WebServiceWorkerRegistration::Handle>) = 0;
@@ -63,39 +63,36 @@ class WebServiceWorkerContextProxy {
 
   enum class BackgroundFetchState { kPending, kSucceeded, kFailed };
 
-  virtual void DispatchBackgroundFetchAbortEvent(int event_id,
-                                                 const WebString& tag) = 0;
+  virtual void DispatchBackgroundFetchAbortEvent(
+      int event_id,
+      const WebString& developer_id) = 0;
   virtual void DispatchBackgroundFetchClickEvent(
       int event_id,
-      const WebString& tag,
+      const WebString& developer_id,
       BackgroundFetchState status) = 0;
   virtual void DispatchBackgroundFetchFailEvent(
       int event_id,
-      const WebString& tag,
+      const WebString& developer_id,
       const WebVector<WebBackgroundFetchSettledFetch>& fetches) = 0;
   virtual void DispatchBackgroundFetchedEvent(
       int event_id,
-      const WebString& tag,
+      const WebString& developer_id,
+      const WebString& unique_id,
       const WebVector<WebBackgroundFetchSettledFetch>& fetches) = 0;
   virtual void DispatchExtendableMessageEvent(
       int event_id,
-      const WebString& message,
+      TransferableMessage,
       const WebSecurityOrigin& source_origin,
-      WebMessagePortChannelArray,
       const WebServiceWorkerClientInfo&) = 0;
   virtual void DispatchExtendableMessageEvent(
       int event_id,
-      const WebString& message,
+      TransferableMessage,
       const WebSecurityOrigin& source_origin,
-      WebMessagePortChannelArray,
       std::unique_ptr<WebServiceWorker::Handle>) = 0;
   virtual void DispatchInstallEvent(int event_id) = 0;
   virtual void DispatchFetchEvent(int fetch_event_id,
                                   const WebServiceWorkerRequest& web_request,
                                   bool navigation_preload_sent) = 0;
-  virtual void DispatchForeignFetchEvent(
-      int fetch_event_id,
-      const WebServiceWorkerRequest& web_request) = 0;
   virtual void DispatchNotificationClickEvent(int event_id,
                                               const WebString& notification_id,
                                               const WebNotificationData&,
@@ -108,13 +105,13 @@ class WebServiceWorkerContextProxy {
 
   virtual bool HasFetchEventHandler() = 0;
 
-  enum LastChanceOption { kIsNotLastChance, kIsLastChance };
-
   // Once the ServiceWorker has finished handling the sync event,
   // didHandleSyncEvent is called on the context client.
   virtual void DispatchSyncEvent(int sync_event_id,
                                  const WebString& tag,
-                                 LastChanceOption) = 0;
+                                 bool last_chance) = 0;
+
+  virtual void DispatchAbortPaymentEvent(int event_id) = 0;
 
   virtual void DispatchCanMakePaymentEvent(
       int event_id,

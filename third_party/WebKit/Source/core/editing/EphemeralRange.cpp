@@ -4,6 +4,7 @@
 
 #include "core/editing/EphemeralRange.h"
 
+#include <ostream>  // NOLINT
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/Range.h"
@@ -38,9 +39,9 @@ EphemeralRangeTemplate<Strategy>::EphemeralRangeTemplate(
     return;
   }
   DCHECK(end_position_.IsNotNull());
+  DCHECK(start_position_.IsValidFor(*start_position_.GetDocument()));
+  DCHECK(end_position_.IsValidFor(*end_position_.GetDocument()));
   DCHECK_EQ(start_position_.GetDocument(), end_position_.GetDocument());
-  DCHECK(start_position_.IsConnected());
-  DCHECK(end_position_.IsConnected());
   DCHECK_LE(start_position_, end_position_);
 }
 
@@ -69,10 +70,10 @@ EphemeralRangeTemplate<Strategy>::EphemeralRangeTemplate(const Range* range) {
 }
 
 template <typename Strategy>
-EphemeralRangeTemplate<Strategy>::EphemeralRangeTemplate() {}
+EphemeralRangeTemplate<Strategy>::EphemeralRangeTemplate() = default;
 
 template <typename Strategy>
-EphemeralRangeTemplate<Strategy>::~EphemeralRangeTemplate() {}
+EphemeralRangeTemplate<Strategy>::~EphemeralRangeTemplate() = default;
 
 template <typename Strategy>
 EphemeralRangeTemplate<Strategy>& EphemeralRangeTemplate<Strategy>::operator=(
@@ -160,11 +161,56 @@ bool EphemeralRangeTemplate<Strategy>::IsValid() const {
 }
 #endif
 
+#ifndef NDEBUG
+
+template <typename Strategy>
+void EphemeralRangeTemplate<Strategy>::ShowTreeForThis() const {
+  if (IsNull()) {
+    LOG(INFO) << "<null range>" << std::endl;
+    return;
+  }
+  LOG(INFO) << std::endl
+            << StartPosition()
+                   .AnchorNode()
+                   ->ToMarkedTreeString(StartPosition().AnchorNode(), "S",
+                                        EndPosition().AnchorNode(), "E")
+                   .Utf8()
+                   .data()
+            << "start: "
+            << StartPosition().ToAnchorTypeAndOffsetString().Utf8().data()
+            << std::endl
+            << "end: "
+            << EndPosition().ToAnchorTypeAndOffsetString().Utf8().data();
+}
+
+#endif
+
 Range* CreateRange(const EphemeralRange& range) {
   if (range.IsNull())
     return nullptr;
   return Range::Create(range.GetDocument(), range.StartPosition(),
                        range.EndPosition());
+}
+
+template <typename Strategy>
+static std::ostream& PrintEphemeralRange(
+    std::ostream& ostream,
+    const EphemeralRangeTemplate<Strategy> range) {
+  if (range.IsNull())
+    return ostream << "null";
+  if (range.IsCollapsed())
+    return ostream << range.StartPosition();
+  return ostream << '[' << range.StartPosition() << ", " << range.EndPosition()
+                 << ']';
+}
+
+std::ostream& operator<<(std::ostream& ostream, const EphemeralRange& range) {
+  return PrintEphemeralRange(ostream, range);
+}
+
+std::ostream& operator<<(std::ostream& ostream,
+                         const EphemeralRangeInFlatTree& range) {
+  return PrintEphemeralRange(ostream, range);
 }
 
 template class CORE_TEMPLATE_EXPORT EphemeralRangeTemplate<EditingStrategy>;

@@ -33,21 +33,21 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptController.h"
 #include "core/CSSPropertyNames.h"
-#include "core/InputTypeNames.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/dom/UserGestureIndicator.h"
+#include "core/dom/events/ScopedEventQueue.h"
 #include "core/events/MouseEvent.h"
-#include "core/events/ScopedEventQueue.h"
 #include "core/frame/LocalFrameView.h"
-#include "core/html/HTMLDataListElement.h"
-#include "core/html/HTMLDataListOptionsCollection.h"
+#include "core/frame/UseCounter.h"
+#include "core/frame/WebFeature.h"
 #include "core/html/HTMLDivElement.h"
-#include "core/html/HTMLInputElement.h"
-#include "core/html/HTMLOptionElement.h"
 #include "core/html/forms/ColorChooser.h"
+#include "core/html/forms/HTMLDataListElement.h"
+#include "core/html/forms/HTMLDataListOptionsCollection.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html/forms/HTMLOptionElement.h"
+#include "core/input_type_names.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/page/ChromeClient.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/Color.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -80,9 +80,9 @@ InputType* ColorInputType::Create(HTMLInputElement& element) {
   return new ColorInputType(element);
 }
 
-ColorInputType::~ColorInputType() {}
+ColorInputType::~ColorInputType() = default;
 
-DEFINE_TRACE(ColorInputType) {
+void ColorInputType::Trace(blink::Visitor* visitor) {
   visitor->Trace(chooser_);
   KeyboardClickableInputTypeView::Trace(visitor);
   ColorChooserClient::Trace(visitor);
@@ -123,7 +123,7 @@ Color ColorInputType::ValueAsColor() const {
 }
 
 void ColorInputType::CreateShadowSubtree() {
-  DCHECK(GetElement().Shadow());
+  DCHECK(IsShadowHost(GetElement()));
 
   Document& document = GetElement().GetDocument();
   HTMLDivElement* wrapper_element = HTMLDivElement::Create(document);
@@ -149,13 +149,20 @@ void ColorInputType::HandleDOMActivateEvent(Event* event) {
   if (GetElement().IsDisabledFormControl())
     return;
 
-  if (!UserGestureIndicator::ProcessingUserGesture())
+  Document& document = GetElement().GetDocument();
+  if (!Frame::HasTransientUserActivation(document.GetFrame()))
     return;
 
-  ChromeClient* chrome_client = this->GetChromeClient();
-  if (chrome_client && !chooser_)
-    chooser_ = chrome_client->OpenColorChooser(
-        GetElement().GetDocument().GetFrame(), this, ValueAsColor());
+  ChromeClient* chrome_client = GetChromeClient();
+  if (chrome_client && !chooser_) {
+    UseCounter::Count(
+        document,
+        (event->UnderlyingEvent() && event->UnderlyingEvent()->isTrusted())
+            ? WebFeature::kColorInputTypeChooserByTrustedClick
+            : WebFeature::kColorInputTypeChooserByUntrustedClick);
+    chooser_ = chrome_client->OpenColorChooser(document.GetFrame(), this,
+                                               ValueAsColor());
+  }
 
   event->SetDefaultHandled();
 }
@@ -239,8 +246,8 @@ bool ColorInputType::ShouldShowSuggestions() const {
   return GetElement().FastHasAttribute(listAttr);
 }
 
-Vector<ColorSuggestion> ColorInputType::Suggestions() const {
-  Vector<ColorSuggestion> suggestions;
+Vector<mojom::blink::ColorSuggestionPtr> ColorInputType::Suggestions() const {
+  Vector<mojom::blink::ColorSuggestionPtr> suggestions;
   HTMLDataListElement* data_list = GetElement().DataList();
   if (data_list) {
     HTMLDataListOptionsCollection* options = data_list->options();
@@ -252,9 +259,8 @@ Vector<ColorSuggestion> ColorInputType::Suggestions() const {
       Color color;
       if (!color.SetFromString(option->value()))
         continue;
-      ColorSuggestion suggestion(
-          color, option->label().Left(kMaxSuggestionLabelLength));
-      suggestions.push_back(suggestion);
+      suggestions.push_back(mojom::blink::ColorSuggestion::New(
+          color.Rgb(), option->label().Left(kMaxSuggestionLabelLength)));
       if (suggestions.size() >= kMaxSuggestions)
         break;
     }

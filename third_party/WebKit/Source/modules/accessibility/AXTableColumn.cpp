@@ -39,7 +39,7 @@ using namespace HTMLNames;
 AXTableColumn::AXTableColumn(AXObjectCacheImpl& ax_object_cache)
     : AXMockObject(ax_object_cache) {}
 
-AXTableColumn::~AXTableColumn() {}
+AXTableColumn::~AXTableColumn() = default;
 
 AXTableColumn* AXTableColumn::Create(AXObjectCacheImpl& ax_object_cache) {
   return new AXTableColumn(ax_object_cache);
@@ -87,7 +87,7 @@ void AXTableColumn::HeaderObjectsForColumn(AXObjectVector& headers) {
       if (!layout_cell)
         continue;
 
-      AXObject* cell = AxObjectCache().GetOrCreate(layout_cell->GetNode());
+      AXObject* cell = AXObjectCache().GetOrCreate(layout_cell->GetNode());
       if (!cell || !cell->IsTableCell() || headers.Contains(cell))
         continue;
 
@@ -101,7 +101,7 @@ AXObject* AXTableColumn::HeaderObject() {
   AXObjectVector headers;
   HeaderObjectsForColumn(headers);
   if (!headers.size())
-    return 0;
+    return nullptr;
 
   return headers[0].Get();
 }
@@ -118,6 +118,12 @@ bool AXTableColumn::ComputeAccessibilityIsIgnored(
     parent_->ComputeAccessibilityIsIgnored(ignored_reasons);
 
   return true;
+}
+
+AccessibilityRole AXTableColumn::RoleValue() const {
+  return parent_ && parent_->IsAXTable() && ToAXTable(parent_)->IsDataTable()
+             ? kColumnRole
+             : kLayoutTableColumnRole;
 }
 
 void AXTableColumn::AddChildren() {

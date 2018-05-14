@@ -73,7 +73,7 @@ void RecordIndexAndWriteRulesetResult(
 // ruleset, and it is expected that version updates will be frequent enough.
 class SentinelFile {
  public:
-  SentinelFile(base::FilePath& version_directory)
+  explicit SentinelFile(const base::FilePath& version_directory)
       : path_(IndexedRulesetLocator::GetSentinelFilePath(version_directory)) {}
 
   bool IsPresent() { return base::PathExists(path_); }
@@ -215,10 +215,12 @@ decltype(&base::ReplaceFile) RulesetService::g_replace_file_func =
 RulesetService::RulesetService(
     PrefService* local_state,
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
+    scoped_refptr<base::SequencedTaskRunner> background_task_runner,
     RulesetServiceDelegate* delegate,
     const base::FilePath& indexed_ruleset_base_dir)
     : local_state_(local_state),
-      blocking_task_runner_(blocking_task_runner),
+      blocking_task_runner_(std::move(blocking_task_runner)),
+      background_task_runner_(std::move(background_task_runner)),
       delegate_(delegate),
       is_after_startup_(false),
       indexed_ruleset_base_dir_(indexed_ruleset_base_dir) {
@@ -273,7 +275,7 @@ void RulesetService::IndexAndStoreAndPublishRulesetIfNeeded(
 IndexedRulesetVersion RulesetService::IndexAndWriteRuleset(
     const base::FilePath& indexed_ruleset_base_dir,
     const UnindexedRulesetInfo& unindexed_ruleset_info) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   base::File unindexed_ruleset_file(
       unindexed_ruleset_info.ruleset_path,
@@ -411,13 +413,14 @@ RulesetService::IndexAndWriteRulesetResult RulesetService::WriteRuleset(
   // Due to the same-version check in IndexAndStoreAndPublishRulesetIfNeeded, we
   // would not normally find a pre-existing copy at this point unless the
   // previous write was interrupted.
-  if (!base::DeleteFile(indexed_ruleset_version_dir, true)) {
+  if (!base::DeleteFile(indexed_ruleset_version_dir, true))
     return IndexAndWriteRulesetResult::FAILED_DELETE_PREEXISTING;
-  }
 
+  base::FilePath scratch_dir_with_new_indexed_ruleset = scratch_dir.Take();
   base::File::Error error;
-  if (!(*g_replace_file_func)(scratch_dir.GetPath(),
+  if (!(*g_replace_file_func)(scratch_dir_with_new_indexed_ruleset,
                               indexed_ruleset_version_dir, &error)) {
+    base::DeleteFile(scratch_dir_with_new_indexed_ruleset, true);
     // While enumerators of base::File::Error all have negative values, the
     // histogram records the absolute values.
     UMA_HISTOGRAM_ENUMERATION("SubresourceFilter.WriteRuleset.ReplaceFileError",
@@ -425,7 +428,6 @@ RulesetService::IndexAndWriteRulesetResult RulesetService::WriteRuleset(
     return IndexAndWriteRulesetResult::FAILED_REPLACE_FILE;
   }
 
-  scratch_dir.Take();
   return IndexAndWriteRulesetResult::SUCCESS;
 }
 
@@ -434,7 +436,7 @@ void RulesetService::InitializeAfterStartup() {
 
   IndexedRulesetVersion most_recently_indexed_version;
   most_recently_indexed_version.ReadFromPrefs(local_state_);
-  blocking_task_runner_->PostTask(
+  background_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&IndexedRulesetLocator::DeleteObsoleteRulesets,
                  indexed_ruleset_base_dir_, most_recently_indexed_version));
@@ -452,7 +454,7 @@ void RulesetService::IndexAndStoreRuleset(
     const WriteRulesetCallback& success_callback) {
   DCHECK(!unindexed_ruleset_info.content_version.empty());
   base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(), FROM_HERE,
+      background_task_runner_.get(), FROM_HERE,
       base::Bind(&RulesetService::IndexAndWriteRuleset,
                  indexed_ruleset_base_dir_, unindexed_ruleset_info),
       base::Bind(&RulesetService::OnWrittenRuleset, AsWeakPtr(),

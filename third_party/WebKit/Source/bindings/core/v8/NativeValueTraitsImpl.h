@@ -13,6 +13,8 @@
 
 namespace blink {
 
+class CallbackFunctionBase;
+
 // Boolean
 template <>
 struct CORE_EXPORT NativeValueTraits<IDLBoolean>
@@ -167,27 +169,40 @@ struct CORE_EXPORT NativeValueTraits<IDLUnsignedLongLong>
 };
 
 // Strings
-template <>
-struct CORE_EXPORT NativeValueTraits<IDLByteString>
-    : public NativeValueTraitsBase<IDLByteString> {
+template <V8StringResourceMode Mode>
+struct NativeValueTraits<IDLByteStringBase<Mode>>
+    : public NativeValueTraitsBase<IDLByteStringBase<Mode>> {
+  // http://heycam.github.io/webidl/#es-ByteString
   static String NativeValue(v8::Isolate* isolate,
                             v8::Local<v8::Value> value,
                             ExceptionState& exception_state) {
-    return ToByteString(isolate, value, exception_state);
+    V8StringResource<Mode> string_resource(value);
+    // 1. Let x be ToString(v)
+    if (!string_resource.Prepare(isolate, exception_state))
+      return String();
+    String x = string_resource;
+    // 2. If the value of any element of x is greater than 255, then throw a
+    //    TypeError.
+    if (!x.ContainsOnlyLatin1()) {
+      exception_state.ThrowTypeError("Value is not a valid ByteString.");
+      return String();
+    }
+
+    // 3. Return an IDL ByteString value whose length is the length of x, and
+    //    where the value of each element is the value of the corresponding
+    //    element of x.
+    //    Blink: A ByteString is simply a String with a range constrained per
+    //    the above, so this is the identity operation.
+    return x;
   }
+
+  static String NullValue() { return String(); }
 };
 
-template <>
-struct CORE_EXPORT NativeValueTraits<IDLString>
-    : public NativeValueTraitsBase<IDLString> {
-  static String NativeValue(v8::Isolate* isolate,
-                            v8::Local<v8::Value> value,
-                            ExceptionState& exception_state) {
-    return NativeValue<V8StringResourceMode::kDefaultMode>(isolate, value,
-                                                           exception_state);
-  }
-
-  template <V8StringResourceMode Mode = kDefaultMode>
+template <V8StringResourceMode Mode>
+struct NativeValueTraits<IDLStringBase<Mode>>
+    : public NativeValueTraitsBase<IDLStringBase<Mode>> {
+  // https://heycam.github.io/webidl/#es-DOMString
   static String NativeValue(v8::Isolate* isolate,
                             v8::Local<v8::Value> value,
                             ExceptionState& exception_state) {
@@ -196,16 +211,27 @@ struct CORE_EXPORT NativeValueTraits<IDLString>
       return String();
     return string;
   }
+
+  static String NullValue() { return String(); }
 };
 
-template <>
-struct CORE_EXPORT NativeValueTraits<IDLUSVString>
-    : public NativeValueTraitsBase<IDLUSVString> {
+template <V8StringResourceMode Mode>
+struct NativeValueTraits<IDLUSVStringBase<Mode>>
+    : public NativeValueTraitsBase<IDLUSVStringBase<Mode>> {
+  // http://heycam.github.io/webidl/#es-USVString
   static String NativeValue(v8::Isolate* isolate,
                             v8::Local<v8::Value> value,
                             ExceptionState& exception_state) {
-    return ToUSVString(isolate, value, exception_state);
+    // 1. Let string be the result of converting V to a DOMString.
+    V8StringResource<Mode> string(value);
+    if (!string.Prepare(isolate, exception_state))
+      return String();
+    // 2. Return an IDL USVString value that is the result of converting string
+    //    to a sequence of Unicode scalar values.
+    return ReplaceUnmatchedSurrogates(string);
   }
+
+  static String NullValue() { return String(); }
 };
 
 // Floats and doubles
@@ -351,9 +377,9 @@ struct NativeValueTraits<IDLSequence<T>>
     if (exception_state.HadException())
       return;
 
-    v8::Local<v8::String> next_key = V8String(isolate, "next");
-    v8::Local<v8::String> value_key = V8String(isolate, "value");
-    v8::Local<v8::String> done_key = V8String(isolate, "done");
+    v8::Local<v8::String> next_key = V8AtomicString(isolate, "next");
+    v8::Local<v8::String> value_key = V8AtomicString(isolate, "value");
+    v8::Local<v8::String> done_key = V8AtomicString(isolate, "done");
     v8::Local<v8::Context> context = isolate->GetCurrentContext();
     while (true) {
       v8::Local<v8::Value> next;
@@ -525,6 +551,43 @@ struct NativeValueTraits<IDLRecord<K, V>>
     }
     // "5. Return result."
     return result;
+  }
+};
+
+// Callback functions
+template <typename T>
+struct NativeValueTraits<
+    T,
+    typename std::enable_if<
+        std::is_base_of<CallbackFunctionBase, T>::value>::type>
+    : public NativeValueTraitsBase<T> {
+  static T* NativeValue(v8::Isolate* isolate,
+                        v8::Local<v8::Value> value,
+                        ExceptionState& exception_state) {
+    // Not implemented because of no use case so far.
+    CHECK(false)
+        // Emit a message so that NativeValueTraitsImplTest.IDLCallbackFunction
+        // test can confirm that it's hitting this specific failure. i.e.
+        // the template resolution is working as expected.
+        << "NativeValueTraits<CallbackFunctionBase>::NativeValue "
+        << "is not yet implemented.";
+    return nullptr;
+  }
+};
+
+// Nullable
+template <typename InnerType>
+struct NativeValueTraits<IDLNullable<InnerType>>
+    : public NativeValueTraitsBase<IDLNullable<InnerType>> {
+  // https://heycam.github.io/webidl/#es-nullable-type
+  static typename IDLNullable<InnerType>::ResultType NativeValue(
+      v8::Isolate* isolate,
+      v8::Local<v8::Value> v8_value,
+      ExceptionState& exception_state) {
+    if (v8_value->IsNullOrUndefined())
+      return IDLNullable<InnerType>::NullValue();
+    return NativeValueTraits<InnerType>::NativeValue(isolate, v8_value,
+                                                     exception_state);
   }
 };
 

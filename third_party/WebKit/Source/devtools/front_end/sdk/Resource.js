@@ -69,8 +69,8 @@ SDK.Resource = class {
   lastModified() {
     if (this._lastModified || !this._request)
       return this._lastModified;
-    var lastModifiedHeader = this._request.responseLastModified();
-    var date = lastModifiedHeader ? new Date(lastModifiedHeader) : null;
+    const lastModifiedHeader = this._request.responseLastModified();
+    const date = lastModifiedHeader ? new Date(lastModifiedHeader) : null;
     this._lastModified = date && date.isValid() ? date : null;
     return this._lastModified;
   }
@@ -160,13 +160,6 @@ SDK.Resource = class {
   }
 
   /**
-   * @return {boolean}
-   */
-  get contentEncoded() {
-    return this._contentEncoded;
-  }
-
-  /**
    * @override
    * @return {string}
    */
@@ -186,14 +179,23 @@ SDK.Resource = class {
 
   /**
    * @override
+   * @return {!Promise<boolean>}
+   */
+  async contentEncoded() {
+    await this.requestContent();
+    return this._contentEncoded;
+  }
+
+  /**
+   * @override
    * @return {!Promise<?string>}
    */
   requestContent() {
     if (typeof this._content !== 'undefined')
       return Promise.resolve(this._content);
 
-    var callback;
-    var promise = new Promise(fulfill => callback = fulfill);
+    let callback;
+    const promise = new Promise(fulfill => callback = fulfill);
     this._pendingContentCallbacks.push(callback);
     if (!this._request || this._request.finished)
       this._innerRequestContent();
@@ -217,7 +219,9 @@ SDK.Resource = class {
   async searchInContent(query, caseSensitive, isRegex) {
     if (!this.frameId)
       return [];
-    var result = await this._resourceTreeModel.target().pageAgent().searchInResource(
+    if (this.request)
+      return this.request.searchInContent(query, caseSensitive, isRegex);
+    const result = await this._resourceTreeModel.target().pageAgent().searchInResource(
         this.frameId, this.url, query, caseSensitive, isRegex);
     return result || [];
   }
@@ -231,7 +235,7 @@ SDK.Resource = class {
      * @this {SDK.Resource}
      */
     function onResourceContent(content) {
-      var imageSrc = Common.ContentProvider.contentAsDataURL(content, this._mimeType, true);
+      let imageSrc = Common.ContentProvider.contentAsDataURL(content, this._mimeType, true);
       if (imageSrc === null)
         imageSrc = this._url;
       image.src = imageSrc;
@@ -252,11 +256,11 @@ SDK.Resource = class {
     this._contentRequested = true;
 
     if (this.request) {
-      var contentData = await this.request.contentData();
+      const contentData = await this.request.contentData();
       this._content = contentData.content;
       this._contentEncoded = contentData.encoded;
     } else {
-      var response = await this._resourceTreeModel.target().pageAgent().invoke_getResourceContent(
+      const response = await this._resourceTreeModel.target().pageAgent().invoke_getResourceContent(
           {frameId: this.frameId, url: this.url});
       this._content = response[Protocol.Error] ? null : response.content;
       this._contentEncoded = response.base64Encoded;
@@ -265,7 +269,7 @@ SDK.Resource = class {
     if (this._content === null)
       this._contentEncoded = false;
 
-    for (var callback of this._pendingContentCallbacks.splice(0))
+    for (const callback of this._pendingContentCallbacks.splice(0))
       callback(this._content);
     delete this._contentRequested;
   }

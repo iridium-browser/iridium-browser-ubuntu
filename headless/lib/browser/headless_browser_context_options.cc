@@ -41,8 +41,13 @@ const std::string& HeadlessBrowserContextOptions::product_name_and_version()
                                browser_options_->product_name_and_version);
 }
 
+const std::string& HeadlessBrowserContextOptions::accept_language() const {
+  return ReturnOverriddenValue(accept_language_,
+                               browser_options_->accept_language);
+}
+
 const std::string& HeadlessBrowserContextOptions::user_agent() const {
-  return browser_options_->user_agent;
+  return ReturnOverriddenValue(user_agent_, browser_options_->user_agent);
 }
 
 const net::ProxyConfig* HeadlessBrowserContextOptions::proxy_config() const {
@@ -69,6 +74,27 @@ bool HeadlessBrowserContextOptions::incognito_mode() const {
                                browser_options_->incognito_mode);
 }
 
+bool HeadlessBrowserContextOptions::site_per_process() const {
+  return ReturnOverriddenValue(site_per_process_,
+                               browser_options_->site_per_process);
+}
+
+bool HeadlessBrowserContextOptions::block_new_web_contents() const {
+  return ReturnOverriddenValue(block_new_web_contents_,
+                               browser_options_->block_new_web_contents);
+}
+
+base::Optional<base::Time> HeadlessBrowserContextOptions::initial_virtual_time()
+    const {
+  if (initial_virtual_time_)
+    return initial_virtual_time_;
+  return browser_options_->initial_virtual_time;
+}
+
+bool HeadlessBrowserContextOptions::allow_cookies() const {
+  return ReturnOverriddenValue(allow_cookies_, browser_options_->allow_cookies);
+}
+
 const base::Callback<void(WebPreferences*)>&
 HeadlessBrowserContextOptions::override_web_preferences_callback() const {
   return ReturnOverriddenValue(
@@ -83,6 +109,12 @@ const ProtocolHandlerMap& HeadlessBrowserContextOptions::protocol_handlers()
 
 ProtocolHandlerMap HeadlessBrowserContextOptions::TakeProtocolHandlers() {
   return std::move(protocol_handlers_);
+}
+
+gfx::FontRenderParams::Hinting
+HeadlessBrowserContextOptions::font_render_hinting() const {
+  return ReturnOverriddenValue(font_render_hinting_,
+                               browser_options_->font_render_hinting);
 }
 
 }  // namespace headless

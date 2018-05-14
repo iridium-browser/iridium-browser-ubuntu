@@ -43,8 +43,6 @@
 
 namespace blink {
 
-namespace {
-
 class BlobURLRegistry final : public URLRegistry {
  public:
   // SecurityOrigin is passed together with KURL so that the registry can
@@ -78,12 +76,10 @@ URLRegistry& BlobURLRegistry::Registry() {
   return instance;
 }
 
-}  // namespace
+Blob::Blob(scoped_refptr<BlobDataHandle> data_handle)
+    : blob_data_handle_(std::move(data_handle)) {}
 
-Blob::Blob(PassRefPtr<BlobDataHandle> data_handle)
-    : blob_data_handle_(std::move(data_handle)), is_closed_(false) {}
-
-Blob::~Blob() {}
+Blob::~Blob() = default;
 
 // static
 Blob* Blob::Create(
@@ -127,18 +123,18 @@ void Blob::PopulateBlobData(
     const HeapVector<ArrayBufferOrArrayBufferViewOrBlobOrUSVString>& parts,
     bool normalize_line_endings_to_native) {
   for (const auto& item : parts) {
-    if (item.isArrayBuffer()) {
-      DOMArrayBuffer* array_buffer = item.getAsArrayBuffer();
+    if (item.IsArrayBuffer()) {
+      DOMArrayBuffer* array_buffer = item.GetAsArrayBuffer();
       blob_data->AppendBytes(array_buffer->Data(), array_buffer->ByteLength());
-    } else if (item.isArrayBufferView()) {
+    } else if (item.IsArrayBufferView()) {
       DOMArrayBufferView* array_buffer_view =
-          item.getAsArrayBufferView().View();
+          item.GetAsArrayBufferView().View();
       blob_data->AppendBytes(array_buffer_view->BaseAddress(),
                              array_buffer_view->byteLength());
-    } else if (item.isBlob()) {
-      item.getAsBlob()->AppendTo(*blob_data);
-    } else if (item.isUSVString()) {
-      blob_data->AppendText(item.getAsUSVString(),
+    } else if (item.IsBlob()) {
+      item.GetAsBlob()->AppendTo(*blob_data);
+    } else if (item.IsUSVString()) {
+      blob_data->AppendText(item.GetAsUSVString(),
                             normalize_line_endings_to_native);
     } else {
       NOTREACHED();
@@ -175,12 +171,6 @@ Blob* Blob::slice(long long start,
                   long long end,
                   const String& content_type,
                   ExceptionState& exception_state) const {
-  if (isClosed()) {
-    exception_state.ThrowDOMException(kInvalidStateError,
-                                      "Blob has been closed.");
-    return nullptr;
-  }
-
   long long size = this->size();
   ClampSliceOffsets(size, start, end);
 
@@ -191,34 +181,16 @@ Blob* Blob::slice(long long start,
   return Blob::Create(BlobDataHandle::Create(std::move(blob_data), length));
 }
 
-void Blob::close(ScriptState* script_state, ExceptionState& exception_state) {
-  if (isClosed()) {
-    exception_state.ThrowDOMException(kInvalidStateError,
-                                      "Blob has been closed.");
-    return;
-  }
-
-  // Dereferencing a Blob that has been closed should result in
-  // a network error. Revoke URLs registered against it through
-  // its UUID.
-  DOMURL::RevokeObjectUUID(ExecutionContext::From(script_state), Uuid());
-
-  // A Blob enters a 'readability state' of closed, where it will report its
-  // size as zero. Blob and FileReader operations now throws on
-  // being passed a Blob in that state. Downstream uses of closed Blobs
-  // (e.g., XHR.send()) consider them as empty.
-  std::unique_ptr<BlobData> blob_data = BlobData::Create();
-  blob_data->SetContentType(type());
-  blob_data_handle_ = BlobDataHandle::Create(std::move(blob_data), 0);
-  is_closed_ = true;
-}
-
 void Blob::AppendTo(BlobData& blob_data) const {
   blob_data.AppendBlob(blob_data_handle_, 0, blob_data_handle_->size());
 }
 
 URLRegistry& Blob::Registry() const {
   return BlobURLRegistry::Registry();
+}
+
+mojom::blink::BlobPtr Blob::AsMojoBlob() {
+  return blob_data_handle_->CloneBlobPtr();
 }
 
 // static

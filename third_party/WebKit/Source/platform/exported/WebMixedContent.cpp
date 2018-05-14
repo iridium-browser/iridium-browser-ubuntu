@@ -39,7 +39,6 @@ WebMixedContentContextType WebMixedContent::ContextTypeFromRequestContext(
   switch (context) {
     // "Optionally-blockable" mixed content
     case WebURLRequest::kRequestContextAudio:
-    case WebURLRequest::kRequestContextFavicon:
     case WebURLRequest::kRequestContextImage:
     case WebURLRequest::kRequestContextVideo:
       return WebMixedContentContextType::kOptionallyBlockable;
@@ -56,6 +55,7 @@ WebMixedContentContextType WebMixedContent::ContextTypeFromRequestContext(
     case WebURLRequest::kRequestContextCSPReport:
     case WebURLRequest::kRequestContextEmbed:
     case WebURLRequest::kRequestContextEventSource:
+    case WebURLRequest::kRequestContextFavicon:
     case WebURLRequest::kRequestContextFetch:
     case WebURLRequest::kRequestContextFont:
     case WebURLRequest::kRequestContextForm:
@@ -69,6 +69,7 @@ WebMixedContentContextType WebMixedContent::ContextTypeFromRequestContext(
     case WebURLRequest::kRequestContextManifest:
     case WebURLRequest::kRequestContextObject:
     case WebURLRequest::kRequestContextPing:
+    case WebURLRequest::kRequestContextPrefetch:
     case WebURLRequest::kRequestContextScript:
     case WebURLRequest::kRequestContextServiceWorker:
     case WebURLRequest::kRequestContextSharedWorker:
@@ -83,7 +84,6 @@ WebMixedContentContextType WebMixedContent::ContextTypeFromRequestContext(
     // FIXME: Contexts that we should block, but don't currently.
     // https://crbug.com/388650
     case WebURLRequest::kRequestContextDownload:
-    case WebURLRequest::kRequestContextPrefetch:
       return WebMixedContentContextType::kShouldBeBlockable;
 
     case WebURLRequest::kRequestContextUnspecified:

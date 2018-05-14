@@ -28,7 +28,7 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/events/EventListener.h"
+#include "core/dom/events/EventListener.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/HostsUsingFeatures.h"
 #include "core/frame/LocalFrame.h"
@@ -44,14 +44,14 @@ ApplicationCache::ApplicationCache(LocalFrame* frame) : DOMWindowClient(frame) {
     cache_host->SetApplicationCache(this);
 }
 
-DEFINE_TRACE(ApplicationCache) {
+void ApplicationCache::Trace(blink::Visitor* visitor) {
   EventTargetWithInlineData::Trace(visitor);
   DOMWindowClient::Trace(visitor);
 }
 
 ApplicationCacheHost* ApplicationCache::GetApplicationCacheHost() const {
   if (!GetFrame() || !GetFrame()->Loader().GetDocumentLoader())
-    return 0;
+    return nullptr;
   return GetFrame()->Loader().GetDocumentLoader()->GetApplicationCacheHost();
 }
 

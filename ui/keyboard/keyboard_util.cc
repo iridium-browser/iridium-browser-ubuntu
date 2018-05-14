@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -17,6 +18,7 @@
 #include "ui/base/ime/input_method_base.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/ime/text_input_flags.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/events/event_sink.h"
 #include "ui/events/event_utils.h"
@@ -49,11 +51,11 @@ bool g_keyboard_load_time_logged = false;
 base::LazyInstance<base::Time>::DestructorAtExit g_keyboard_load_time_start =
     LAZY_INSTANCE_INITIALIZER;
 
+struct keyboard::KeyboardConfig g_keyboard_config;
+
 bool g_accessibility_keyboard_enabled = false;
 
 bool g_hotrod_keyboard_enabled = false;
-
-bool g_keyboard_restricted = false;
 
 bool g_touch_keyboard_enabled = false;
 
@@ -65,6 +67,20 @@ KeyboardOverscrolOverride g_keyboard_overscroll_override =
 KeyboardShowOverride g_keyboard_show_override = KEYBOARD_SHOW_OVERRIDE_NONE;
 
 }  // namespace
+
+bool UpdateKeyboardConfig(const KeyboardConfig& keyboard_config) {
+  if (g_keyboard_config == keyboard_config)
+    return false;
+  g_keyboard_config = keyboard_config;
+  keyboard::KeyboardController* controller = KeyboardController::GetInstance();
+  if (controller)
+    controller->NotifyKeyboardConfigChanged();
+  return true;
+}
+
+const KeyboardConfig& GetKeyboardConfig() {
+  return g_keyboard_config;
+}
 
 void SetAccessibilityKeyboardEnabled(bool enabled) {
   g_accessibility_keyboard_enabled = enabled;
@@ -137,10 +153,8 @@ bool IsKeyboardOverscrollEnabled() {
 
   // Users of the sticky accessibility on-screen keyboard are likely to be using
   // mouse input, which may interfere with overscrolling.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          ::switches::kDisableNewVirtualKeyboardBehavior) ||
-      (keyboard::KeyboardController::GetInstance() &&
-       keyboard::KeyboardController::GetInstance()->keyboard_locked())) {
+  if (keyboard::KeyboardController::GetInstance() &&
+      !keyboard::KeyboardController::GetInstance()->IsOverscrollAllowed()) {
     return false;
   }
 
@@ -171,22 +185,13 @@ bool IsInputViewEnabled() {
       switches::kDisableInputView);
 }
 
-void SetKeyboardRestricted(bool restricted) {
-  g_keyboard_restricted = restricted;
-}
-
-bool GetKeyboardRestricted() {
-  return g_keyboard_restricted;
-}
-
 bool IsExperimentalInputViewEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableExperimentalInputViewFeatures);
 }
 
 bool IsFloatingVirtualKeyboardEnabled() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableFloatingVirtualKeyboard);
+  return base::FeatureList::IsEnabled(features::kEnableFloatingVirtualKeyboard);
 }
 
 bool IsGestureTypingEnabled() {
@@ -197,12 +202,6 @@ bool IsGestureTypingEnabled() {
 bool IsGestureEditingEnabled() {
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableGestureEditing);
-}
-
-bool IsVoiceInputEnabled() {
-  return !g_keyboard_restricted &&
-         !base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kDisableVoiceInput);
 }
 
 bool InsertText(const base::string16& text) {
@@ -247,12 +246,14 @@ bool SendKeyEvent(const std::string type,
       if (!input_method)
         return false;
 
+      // This can be null if no text input field is not focused.
       ui::TextInputClient* tic = input_method->GetTextInputClient();
 
       SendProcessKeyEvent(ui::ET_KEY_PRESSED, host);
 
       ui::KeyEvent char_event(key_value, code, ui::EF_NONE);
-      tic->InsertChar(char_event);
+      if (tic)
+        tic->InsertChar(char_event);
       SendProcessKeyEvent(ui::ET_KEY_RELEASED, host);
     }
   } else {

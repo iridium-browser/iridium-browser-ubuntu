@@ -8,6 +8,7 @@
 #include "net/quic/core/crypto/crypto_framer.h"
 #include "net/quic/core/crypto/quic_crypto_server_config.h"
 #include "net/quic/core/quic_packets.h"
+#include "net/quic/platform/api/quic_string.h"
 
 namespace net {
 
@@ -23,8 +24,8 @@ class StatelessRejector {
     REJECTED,     // The CHLO was rejected.
   };
 
-  StatelessRejector(QuicVersion version,
-                    const QuicVersionVector& versions,
+  StatelessRejector(QuicTransportVersion version,
+                    const QuicTransportVersionVector& versions,
                     const QuicCryptoServerConfig* crypto_config,
                     QuicCompressedCertsCache* compressed_certs_cache,
                     const QuicClock* clock,
@@ -36,7 +37,7 @@ class StatelessRejector {
   ~StatelessRejector();
 
   // Called when |chlo| is received for |connection_id|.
-  void OnChlo(QuicVersion version,
+  void OnChlo(QuicTransportVersion version,
               QuicConnectionId connection_id,
               QuicConnectionId server_designated_connection_id,
               const CryptoHandshakeMessage& chlo);
@@ -60,7 +61,7 @@ class StatelessRejector {
   QuicErrorCode error() const { return error_; }
 
   // Returns the error details when state() returns FAILED.
-  std::string error_details() const { return error_details_; }
+  QuicString error_details() const { return error_details_; }
 
   // Returns the connection ID.
   QuicConnectionId connection_id() const { return connection_id_; }
@@ -85,16 +86,16 @@ class StatelessRejector {
 
   void ProcessClientHelloDone(
       QuicErrorCode error,
-      const std::string& error_details,
+      const QuicString& error_details,
       std::unique_ptr<CryptoHandshakeMessage> message,
       std::unique_ptr<StatelessRejector> rejector,
       std::unique_ptr<StatelessRejector::ProcessDoneCallback> done_cb);
 
   State state_;
   QuicErrorCode error_;
-  std::string error_details_;
-  QuicVersion version_;
-  QuicVersionVector versions_;
+  QuicString error_details_;
+  QuicTransportVersion version_;
+  QuicTransportVersionVector versions_;
   QuicConnectionId connection_id_;
   QuicConnectionId server_designated_connection_id_;
   QuicByteCount chlo_packet_size_;

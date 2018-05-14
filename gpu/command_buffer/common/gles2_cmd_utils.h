@@ -13,14 +13,11 @@
 
 #include <limits>
 #include <string>
-#include <vector>
 
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/numerics/safe_math.h"
 #include "gpu/command_buffer/common/gles2_utils_export.h"
-#include "ui/gfx/geometry/size.h"
-#include "ui/gl/gpu_preference.h"
 
 namespace gpu {
 namespace gles2 {
@@ -299,53 +296,6 @@ class GLES2_UTILS_EXPORT GLSLArrayName {
   std::string base_name_;
   int element_index_;
   DISALLOW_COPY_AND_ASSIGN(GLSLArrayName);
-};
-
-enum ContextType {
-  CONTEXT_TYPE_WEBGL1,
-  CONTEXT_TYPE_WEBGL2,
-  CONTEXT_TYPE_OPENGLES2,
-  CONTEXT_TYPE_OPENGLES3,
-  CONTEXT_TYPE_LAST = CONTEXT_TYPE_OPENGLES3
-};
-GLES2_UTILS_EXPORT bool IsWebGLContextType(ContextType context_type);
-GLES2_UTILS_EXPORT bool IsWebGL1OrES2ContextType(ContextType context_type);
-GLES2_UTILS_EXPORT bool IsWebGL2OrES3ContextType(ContextType context_type);
-
-enum ColorSpace {
-  COLOR_SPACE_UNSPECIFIED,
-  COLOR_SPACE_SRGB,
-  COLOR_SPACE_DISPLAY_P3,
-  COLOR_SPACE_LAST = COLOR_SPACE_DISPLAY_P3
-};
-
-struct GLES2_UTILS_EXPORT ContextCreationAttribHelper {
-  ContextCreationAttribHelper();
-  ContextCreationAttribHelper(const ContextCreationAttribHelper& other);
-
-  bool Parse(const std::vector<int32_t>& attribs);
-
-  gfx::Size offscreen_framebuffer_size;
-  gl::GpuPreference gpu_preference;
-  // -1 if invalid or unspecified.
-  int32_t alpha_size;
-  int32_t blue_size;
-  int32_t green_size;
-  int32_t red_size;
-  int32_t depth_size;
-  int32_t stencil_size;
-  int32_t samples;
-  int32_t sample_buffers;
-  bool buffer_preserved;
-  bool bind_generates_resource;
-  bool fail_if_major_perf_caveat;
-  bool lose_context_when_out_of_memory;
-  bool should_use_native_gmb_for_backbuffer;
-  bool own_offscreen_surface;
-  bool single_buffer;
-
-  ContextType context_type;
-  ColorSpace color_space = COLOR_SPACE_UNSPECIFIED;
 };
 
 }  // namespace gles2

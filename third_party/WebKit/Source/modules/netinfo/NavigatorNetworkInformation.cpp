@@ -20,7 +20,7 @@ NavigatorNetworkInformation& NavigatorNetworkInformation::From(
       ToNavigatorNetworkInformation(navigator);
   if (!supplement) {
     supplement = new NavigatorNetworkInformation(navigator);
-    ProvideTo(navigator, SupplementName(), supplement);
+    ProvideTo(navigator, supplement);
   }
   return *supplement;
 }
@@ -28,13 +28,11 @@ NavigatorNetworkInformation& NavigatorNetworkInformation::From(
 NavigatorNetworkInformation*
 NavigatorNetworkInformation::ToNavigatorNetworkInformation(
     Navigator& navigator) {
-  return static_cast<NavigatorNetworkInformation*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  return Supplement<Navigator>::From<NavigatorNetworkInformation>(navigator);
 }
 
-const char* NavigatorNetworkInformation::SupplementName() {
-  return "NavigatorNetworkInformation";
-}
+const char NavigatorNetworkInformation::kSupplementName[] =
+    "NavigatorNetworkInformation";
 
 NetworkInformation* NavigatorNetworkInformation::connection(
     Navigator& navigator) {
@@ -50,7 +48,7 @@ NetworkInformation* NavigatorNetworkInformation::connection() {
   return connection_.Get();
 }
 
-DEFINE_TRACE(NavigatorNetworkInformation) {
+void NavigatorNetworkInformation::Trace(blink::Visitor* visitor) {
   visitor->Trace(connection_);
   Supplement<Navigator>::Trace(visitor);
   ContextClient::Trace(visitor);

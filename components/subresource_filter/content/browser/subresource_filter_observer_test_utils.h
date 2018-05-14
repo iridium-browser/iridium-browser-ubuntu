@@ -6,17 +6,22 @@
 #define COMPONENTS_SUBRESOURCE_FILTER_CONTENT_BROWSER_SUBRESOURCE_FILTER_OBSERVER_TEST_UTILS_H_
 
 #include <map>
+#include <utility>
 
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/scoped_observer.h"
+#include "components/safe_browsing/db/util.h"
+#include "components/safe_browsing/db/v4_protocol_manager_util.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer_manager.h"
 #include "components/subresource_filter/core/common/activation_decision.h"
 #include "components/subresource_filter/core/common/load_policy.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "url/gurl.h"
 
 namespace content {
+class NavigationHandle;
 class WebContents;
 }  // namespace content
 
@@ -25,13 +30,18 @@ namespace subresource_filter {
 // This class can be used to observe subresource filtering events associated
 // with a particular web contents. Particular events can be expected by using
 // the Get* methods.
-class TestSubresourceFilterObserver : public SubresourceFilterObserver {
+class TestSubresourceFilterObserver : public SubresourceFilterObserver,
+                                      public content::WebContentsObserver {
  public:
   TestSubresourceFilterObserver(content::WebContents* web_contents);
   ~TestSubresourceFilterObserver() override;
 
   // SubresourceFilterObserver:
   void OnSubresourceFilterGoingAway() override;
+  void OnSafeBrowsingCheckComplete(
+      content::NavigationHandle* navigation_handle,
+      safe_browsing::SBThreatType threat_type,
+      const safe_browsing::ThreatMetadata& threat_metadata) override;
   void OnPageActivationComputed(
       content::NavigationHandle* navigation_handle,
       ActivationDecision activation_decision,
@@ -40,12 +50,27 @@ class TestSubresourceFilterObserver : public SubresourceFilterObserver {
       content::NavigationHandle* navigation_handle,
       LoadPolicy load_policy) override;
 
-  base::Optional<ActivationDecision> GetPageActivation(const GURL& url);
-  base::Optional<LoadPolicy> GetSubframeLoadPolicy(const GURL& url);
+  // content::WebContentsObserver
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
+
+  base::Optional<ActivationDecision> GetPageActivation(const GURL& url) const;
+  base::Optional<LoadPolicy> GetSubframeLoadPolicy(const GURL& url) const;
+  base::Optional<ActivationDecision> GetPageActivationForLastCommittedLoad()
+      const;
+
+  using SafeBrowsingCheck =
+      std::pair<safe_browsing::SBThreatType, safe_browsing::ThreatMetadata>;
+  base::Optional<SafeBrowsingCheck> GetSafeBrowsingResult(
+      const GURL& url) const;
 
  private:
   std::map<GURL, LoadPolicy> subframe_load_evaluations_;
   std::map<GURL, ActivationDecision> page_activations_;
+  std::map<GURL, SafeBrowsingCheck> safe_browsing_checks_;
+
+  std::map<content::NavigationHandle*, ActivationDecision> pending_activations_;
+  base::Optional<ActivationDecision> last_committed_activation_;
 
   ScopedObserver<SubresourceFilterObserverManager, SubresourceFilterObserver>
       scoped_observer_;

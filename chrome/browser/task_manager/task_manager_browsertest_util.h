@@ -21,6 +21,9 @@ namespace browsertest_util {
 // Specifies some integer-valued column of numeric data reported by the task
 // manager model. Please add more here as needed by tests.
 enum class ColumnSpecifier {
+  PROCESS_ID,
+  MEMORY_FOOTPRINT,
+  PHYSICAL_MEMORY,
   V8_MEMORY,
   V8_MEMORY_USED,
   SQLITE_MEMORY_USED,

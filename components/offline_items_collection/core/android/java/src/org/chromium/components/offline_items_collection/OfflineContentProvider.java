@@ -4,6 +4,8 @@
 
 package org.chromium.components.offline_items_collection;
 
+import org.chromium.base.Callback;
+
 import java.util.ArrayList;
 
 /**
@@ -16,9 +18,6 @@ public interface OfflineContentProvider {
      * (components/offline_items_collection/core/offline_content_provider.h) class.
      */
     interface Observer {
-        /** See OfflineContentProvider::Observer::OnItemsAvailable(...). */
-        void onItemsAvailable();
-
         /** See OfflineContentProvider::Observer::OnItemsAdded(...). */
         void onItemsAdded(ArrayList<OfflineItem> items);
 
@@ -28,9 +27,6 @@ public interface OfflineContentProvider {
         /** See OfflineContentProvider::Observer::OnItemUpdated(...). */
         void onItemUpdated(OfflineItem item);
     }
-
-    /** See OfflineContentProvider::AreItemsAvailable(). */
-    boolean areItemsAvailable();
 
     /** See OfflineContentProvider::OpenItem(...). */
     void openItem(ContentId id);
@@ -45,13 +41,13 @@ public interface OfflineContentProvider {
     void pauseDownload(ContentId id);
 
     /** See OfflineContentProvider::ResumeDownload(...). */
-    void resumeDownload(ContentId id);
+    void resumeDownload(ContentId id, boolean hasUserGesture);
 
     /** See OfflineContentProvider::GetItemById(...). */
-    OfflineItem getItemById(ContentId id);
+    void getItemById(ContentId id, Callback<OfflineItem> callback);
 
     /** See OfflineContentProvider::GetAllItems(). */
-    ArrayList<OfflineItem> getAllItems();
+    void getAllItems(Callback<ArrayList<OfflineItem>> callback);
 
     /** See OfflineContentProvider::GetVisualsForItem(...). */
     void getVisualsForItem(ContentId id, VisualsCallback callback);

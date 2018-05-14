@@ -31,9 +31,10 @@
 #ifndef WebURLLoader_h
 #define WebURLLoader_h
 
+#include <stdint.h>
 #include "WebCommon.h"
 #include "WebURLRequest.h"
-#include <stdint.h>
+#include "base/optional.h"
 
 namespace blink {
 
@@ -45,14 +46,14 @@ struct WebURLError;
 class WebURLLoader {
  public:
   // The WebURLLoader may be deleted in a call to its client.
-  virtual ~WebURLLoader() {}
+  virtual ~WebURLLoader() = default;
 
   // Load the request synchronously, returning results directly to the
   // caller upon completion.  There is no mechanism to interrupt a
   // synchronous load!!
   virtual void LoadSynchronously(const WebURLRequest&,
                                  WebURLResponse&,
-                                 WebURLError&,
+                                 base::Optional<WebURLError>&,
                                  WebData&,
                                  int64_t& encoded_data_length,
                                  int64_t& encoded_body_length) = 0;

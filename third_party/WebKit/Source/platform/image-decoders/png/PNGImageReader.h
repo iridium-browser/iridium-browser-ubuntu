@@ -26,12 +26,15 @@
 #ifndef PNGImageReader_h
 #define PNGImageReader_h
 
+#include "base/macros.h"
 #include "platform/PlatformExport.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/image-decoders/ImageFrame.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/Vector.h"
+
+#define PNG_SET_OPTION_SUPPORTED
 #include "png.h"
 
 #if !defined(PNG_LIBPNG_VER_MAJOR) || !defined(PNG_LIBPNG_VER_MINOR)
@@ -53,7 +56,6 @@ class SegmentReader;
 
 class PLATFORM_EXPORT PNGImageReader final {
   USING_FAST_MALLOC(PNGImageReader);
-  WTF_MAKE_NONCOPYABLE(PNGImageReader);
 
  public:
   PNGImageReader(PNGImageDecoder*, size_t initial_offset);
@@ -96,7 +98,7 @@ class PLATFORM_EXPORT PNGImageReader final {
 
   png_bytep InterlaceBuffer() const { return interlace_buffer_.get(); }
   void CreateInterlaceBuffer(int size) {
-    interlace_buffer_ = WrapArrayUnique(new png_byte[size]);
+    interlace_buffer_ = std::make_unique<png_byte[]>(size);
   }
   void ClearInterlaceBuffer() { interlace_buffer_.reset(); }
 
@@ -113,6 +115,7 @@ class PLATFORM_EXPORT PNGImageReader final {
   // How many bytes have been read during parsing.
   size_t read_offset_;
   size_t progressive_decode_offset_;
+  size_t ihdr_offset_;
   size_t idat_offset_;
 
   bool idat_is_part_of_animation_;
@@ -163,6 +166,8 @@ class PLATFORM_EXPORT PNGImageReader final {
     return !frame_info_.IsEmpty() &&
            frame_info_[0].byte_length != kFirstFrameIndicator;
   }
+
+  DISALLOW_COPY_AND_ASSIGN(PNGImageReader);
 };
 
 }  // namespace blink

@@ -21,6 +21,7 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreference;
@@ -43,8 +44,7 @@ import java.util.concurrent.Callable;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class SiteSettingsPreferencesTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -55,8 +55,7 @@ public class SiteSettingsPreferencesTest {
     @Before
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
     }
 
     @After
@@ -103,9 +102,12 @@ public class SiteSettingsPreferencesTest {
 
     /**
      * Sets Allow Location Enabled to be true and make sure it is set correctly.
+     *
+     * TODO(timloh): Update this test once modals are enabled everywhere.
      */
     @Test
     @SmallTest
+    @CommandLineFlags.Add("disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS)
     @Feature({"Preferences"})
     public void testSetAllowLocationEnabled() throws Exception {
         setAllowLocation(true);
@@ -121,9 +123,12 @@ public class SiteSettingsPreferencesTest {
 
     /**
      * Sets Allow Location Enabled to be false and make sure it is set correctly.
+     *
+     * TODO(timloh): Update this test once modals are enabled everywhere.
      */
     @Test
     @SmallTest
+    @CommandLineFlags.Add("disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS)
     @Feature({"Preferences"})
     public void testSetAllowLocationNotEnabled() throws Exception {
         setAllowLocation(false);
@@ -140,7 +145,7 @@ public class SiteSettingsPreferencesTest {
         Bundle fragmentArgs = new Bundle();
         fragmentArgs.putString(SingleCategoryPreferences.EXTRA_CATEGORY, category);
         Intent intent = PreferencesLauncher.createIntentForSettingsPage(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(),
+                InstrumentationRegistry.getTargetContext(),
                 SiteSettingsPreferences.class.getName());
         intent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, fragmentArgs);
         return (Preferences) InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
@@ -150,7 +155,7 @@ public class SiteSettingsPreferencesTest {
         Bundle fragmentArgs = new Bundle();
         fragmentArgs.putString(SingleCategoryPreferences.EXTRA_CATEGORY, category);
         Intent intent = PreferencesLauncher.createIntentForSettingsPage(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(),
+                InstrumentationRegistry.getTargetContext(),
                 SingleCategoryPreferences.class.getName());
         intent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, fragmentArgs);
         return (Preferences) InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
@@ -160,7 +165,7 @@ public class SiteSettingsPreferencesTest {
         Bundle fragmentArgs = new Bundle();
         fragmentArgs.putSerializable(SingleWebsitePreferences.EXTRA_SITE, site);
         Intent intent = PreferencesLauncher.createIntentForSettingsPage(
-                InstrumentationRegistry.getInstrumentation().getTargetContext(),
+                InstrumentationRegistry.getTargetContext(),
                 SingleWebsitePreferences.class.getName());
         intent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, fragmentArgs);
         return (Preferences) InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
@@ -485,12 +490,16 @@ public class SiteSettingsPreferencesTest {
 
     /**
      * Sets Allow Mic Enabled to be false and make sure it is set correctly.
+     *
+     * TODO(timloh): Update this test once modals are enabled everywhere.
+     *
      * @throws Exception
      */
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    @CommandLineFlags.Add(ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM)
+    @CommandLineFlags.Add({ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM,
+            "disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS})
     public void testMicBlocked() throws Exception {
         setEnableMic(false);
 
@@ -505,12 +514,16 @@ public class SiteSettingsPreferencesTest {
 
     /**
      * Sets Allow Camera Enabled to be true and make sure it is set correctly.
+     *
+     * TODO(timloh): Update this test once modals are enabled everywhere.
+     *
      * @throws Exception
      */
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    @CommandLineFlags.Add(ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM)
+    @CommandLineFlags.Add({ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM,
+            "disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS})
     public void testCameraNotBlocked() throws Exception {
         setEnableCamera(true);
 
@@ -527,12 +540,16 @@ public class SiteSettingsPreferencesTest {
 
     /**
      * Sets Allow Mic Enabled to be true and make sure it is set correctly.
+     *
+     * TODO(timloh): Update this test once modals are enabled everywhere.
+     *
      * @throws Exception
      */
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    @CommandLineFlags.Add(ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM)
+    @CommandLineFlags.Add({ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM,
+            "disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS})
     public void testMicNotBlocked() throws Exception {
         setEnableCamera(true);
 

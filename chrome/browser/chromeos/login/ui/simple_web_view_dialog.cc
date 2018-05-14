@@ -12,7 +12,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/ui/captive_portal_window_proxy.h"
-#include "chrome/browser/command_updater.h"
+#include "chrome/browser/command_updater_impl.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
@@ -67,8 +67,7 @@ class ToolbarRowView : public views::View {
             views::View* forward,
             views::View* reload,
             views::View* location_bar) {
-    GridLayout* layout = new GridLayout(this);
-    SetLayoutManager(layout);
+    GridLayout* layout = SetLayoutManager(std::make_unique<GridLayout>(this));
 
     const int related_horizontal_spacing =
         ChromeLayoutProvider::Get()->GetDistanceMetric(
@@ -127,13 +126,8 @@ class StubBubbleModelDelegate : public ContentSettingBubbleModelDelegate {
 
 SimpleWebViewDialog::SimpleWebViewDialog(Profile* profile)
     : profile_(profile),
-      back_(NULL),
-      forward_(NULL),
-      reload_(NULL),
-      location_bar_(NULL),
-      web_view_(NULL),
       bubble_model_delegate_(new StubBubbleModelDelegate) {
-  command_updater_.reset(new CommandUpdater(this));
+  command_updater_.reset(new CommandUpdaterImpl(this));
   command_updater_->UpdateCommandEnabled(IDC_BACK, true);
   command_updater_->UpdateCommandEnabled(IDC_FORWARD, true);
   command_updater_->UpdateCommandEnabled(IDC_STOP, true);
@@ -144,7 +138,7 @@ SimpleWebViewDialog::SimpleWebViewDialog(Profile* profile)
 
 SimpleWebViewDialog::~SimpleWebViewDialog() {
   if (web_view_ && web_view_->web_contents())
-    web_view_->web_contents()->SetDelegate(NULL);
+    web_view_->web_contents()->SetDelegate(nullptr);
 }
 
 void SimpleWebViewDialog::StartLoad(const GURL& url) {
@@ -193,7 +187,7 @@ void SimpleWebViewDialog::Init() {
   forward_->set_id(VIEW_ID_FORWARD_BUTTON);
 
   // Location bar.
-  location_bar_ = new LocationBarView(NULL, profile_, command_updater_.get(),
+  location_bar_ = new LocationBarView(nullptr, profile_, command_updater_.get(),
                                       this, true);
 
   // Reload button.
@@ -210,8 +204,7 @@ void SimpleWebViewDialog::Init() {
   toolbar_row->Init(back_, forward_, reload_, location_bar_);
 
   // Layout.
-  GridLayout* layout = new GridLayout(this);
-  SetLayoutManager(layout);
+  GridLayout* layout = SetLayoutManager(std::make_unique<GridLayout>(this));
 
   views::ColumnSet* column_set = layout->AddColumnSet(0);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
@@ -262,27 +255,27 @@ content::WebContents* SimpleWebViewDialog::OpenURL(
     const content::OpenURLParams& params) {
   // As there are no Browsers right now, this could not actually ever work.
   NOTIMPLEMENTED();
-  return NULL;
+  return nullptr;
 }
 
 void SimpleWebViewDialog::NavigationStateChanged(
     WebContents* source,
     content::InvalidateTypes changed_flags) {
   if (location_bar_) {
-    location_bar_->Update(NULL);
+    location_bar_->Update(nullptr);
     UpdateButtons();
   }
 }
 
 void SimpleWebViewDialog::LoadingStateChanged(WebContents* source,
-    bool to_different_document) {
+                                              bool to_different_document) {
   bool is_loading = source->IsLoading();
   UpdateReload(is_loading && to_different_document, false);
   command_updater_->UpdateCommandEnabled(IDC_STOP, is_loading);
 }
 
 WebContents* SimpleWebViewDialog::GetWebContents() {
-  return NULL;
+  return nullptr;
 }
 
 ToolbarModel* SimpleWebViewDialog::GetToolbarModel() {
@@ -298,18 +291,12 @@ SimpleWebViewDialog::GetContentSettingBubbleModelDelegate() {
   return bubble_model_delegate_.get();
 }
 
-void SimpleWebViewDialog::ShowPageInfo(content::WebContents* web_contents) {
-  NOTIMPLEMENTED();
-  // TODO (markusheintz@): implement this
-}
-
 content::WebContents* SimpleWebViewDialog::GetActiveWebContents() const {
   return web_view_->web_contents();
 }
 
-void SimpleWebViewDialog::ExecuteCommandWithDisposition(
-    int id,
-    WindowOpenDisposition) {
+void SimpleWebViewDialog::ExecuteCommandWithDisposition(int id,
+                                                        WindowOpenDisposition) {
   WebContents* web_contents = web_view_->web_contents();
   switch (id) {
     case IDC_BACK:
@@ -343,22 +330,21 @@ void SimpleWebViewDialog::ExecuteCommandWithDisposition(
 void SimpleWebViewDialog::LoadImages() {
   const ui::ThemeProvider* tp = GetThemeProvider();
 
-  back_->SetImage(views::CustomButton::STATE_NORMAL,
-                  tp->GetImageSkiaNamed(IDR_BACK));
-  back_->SetImage(views::CustomButton::STATE_HOVERED,
+  back_->SetImage(views::Button::STATE_NORMAL, tp->GetImageSkiaNamed(IDR_BACK));
+  back_->SetImage(views::Button::STATE_HOVERED,
                   tp->GetImageSkiaNamed(IDR_BACK_H));
-  back_->SetImage(views::CustomButton::STATE_PRESSED,
+  back_->SetImage(views::Button::STATE_PRESSED,
                   tp->GetImageSkiaNamed(IDR_BACK_P));
-  back_->SetImage(views::CustomButton::STATE_DISABLED,
+  back_->SetImage(views::Button::STATE_DISABLED,
                   tp->GetImageSkiaNamed(IDR_BACK_D));
 
-  forward_->SetImage(views::CustomButton::STATE_NORMAL,
+  forward_->SetImage(views::Button::STATE_NORMAL,
                      tp->GetImageSkiaNamed(IDR_FORWARD));
-  forward_->SetImage(views::CustomButton::STATE_HOVERED,
+  forward_->SetImage(views::Button::STATE_HOVERED,
                      tp->GetImageSkiaNamed(IDR_FORWARD_H));
-  forward_->SetImage(views::CustomButton::STATE_PRESSED,
+  forward_->SetImage(views::Button::STATE_PRESSED,
                      tp->GetImageSkiaNamed(IDR_FORWARD_P));
-  forward_->SetImage(views::CustomButton::STATE_DISABLED,
+  forward_->SetImage(views::Button::STATE_DISABLED,
                      tp->GetImageSkiaNamed(IDR_FORWARD_D));
 
   reload_->LoadImages();
@@ -374,7 +360,7 @@ void SimpleWebViewDialog::UpdateButtons() {
 void SimpleWebViewDialog::UpdateReload(bool is_loading, bool force) {
   if (reload_) {
     reload_->ChangeMode(
-        is_loading ? ReloadButton::MODE_STOP : ReloadButton::MODE_RELOAD,
+        is_loading ? ReloadButton::Mode::kStop : ReloadButton::Mode::kReload,
         force);
   }
 }

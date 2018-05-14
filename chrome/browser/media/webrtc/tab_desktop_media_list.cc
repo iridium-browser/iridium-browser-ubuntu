@@ -52,13 +52,13 @@ gfx::ImageSkia CreateEnclosedFaviconImage(gfx::Size size,
 }
 
 // Update the list once per second.
-const int kDefaultUpdatePeriod = 1000;
+const int kDefaultTabDesktopMediaListUpdatePeriod = 1000;
 
 }  // namespace
 
 TabDesktopMediaList::TabDesktopMediaList()
-    : DesktopMediaListBase(
-          base::TimeDelta::FromMilliseconds(kDefaultUpdatePeriod)),
+    : DesktopMediaListBase(base::TimeDelta::FromMilliseconds(
+          kDefaultTabDesktopMediaListUpdatePeriod)),
       weak_factory_(this) {
   type_ = DesktopMediaID::TYPE_WEB_CONTENTS;
   thumbnail_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
@@ -153,7 +153,7 @@ void TabDesktopMediaList::Refresh() {
   // to the same sequenced task runner that CreateEnlargedFaviconImag()
   // is posted.
   thumbnail_task_runner_.get()->PostTaskAndReply(
-      FROM_HERE, base::BindOnce(&base::DoNothing),
+      FROM_HERE, base::DoNothing(),
       base::BindOnce(&TabDesktopMediaList::ScheduleNextRefresh,
                      weak_factory_.GetWeakPtr()));
 }

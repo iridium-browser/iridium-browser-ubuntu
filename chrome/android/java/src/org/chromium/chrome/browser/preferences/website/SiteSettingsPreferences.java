@@ -11,10 +11,12 @@ import android.preference.Preference.OnPreferenceClickListener;
 import android.preference.PreferenceFragment;
 
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.preferences.LocationSettings;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.preferences.PreferenceUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +40,7 @@ public class SiteSettingsPreferences extends PreferenceFragment
     static final String AUTOPLAY_KEY = "autoplay";
     static final String BACKGROUND_SYNC_KEY = "background_sync";
     static final String CAMERA_KEY = "camera";
+    static final String CLIPBOARD_KEY = "clipboard";
     static final String COOKIES_KEY = "cookies";
     static final String JAVASCRIPT_KEY = "javascript";
     static final String LOCATION_KEY = "device_location";
@@ -46,6 +49,7 @@ public class SiteSettingsPreferences extends PreferenceFragment
     static final String NOTIFICATIONS_KEY = "notifications";
     static final String POPUPS_KEY = "popups";
     static final String PROTECTED_CONTENT_KEY = "protected_content";
+    static final String SOUND_KEY = "sound";
     static final String STORAGE_KEY = "use_storage";
     static final String TRANSLATE_KEY = "translate";
     static final String USB_KEY = "usb";
@@ -59,7 +63,7 @@ public class SiteSettingsPreferences extends PreferenceFragment
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        addPreferencesFromResource(R.xml.site_settings_preferences);
+        PreferenceUtils.addPreferencesFromResource(this, R.xml.site_settings_preferences);
         getActivity().setTitle(R.string.prefs_site_settings);
 
         mProtectedContentMenuAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT;
@@ -86,6 +90,8 @@ public class SiteSettingsPreferences extends PreferenceFragment
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC;
         } else if (CAMERA_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA;
+        } else if (CLIPBOARD_KEY.equals(key)) {
+            return ContentSettingsType.CONTENT_SETTINGS_TYPE_CLIPBOARD_READ;
         } else if (COOKIES_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_COOKIES;
         } else if (JAVASCRIPT_KEY.equals(key)) {
@@ -100,6 +106,8 @@ public class SiteSettingsPreferences extends PreferenceFragment
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS;
         } else if (PROTECTED_CONTENT_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER;
+        } else if (SOUND_KEY.equals(key)) {
+            return ContentSettingsType.CONTENT_SETTINGS_TYPE_SOUND;
         }
         return -1;
     }
@@ -112,6 +120,7 @@ public class SiteSettingsPreferences extends PreferenceFragment
             getPreferenceScreen().removePreference(findPreference(ADS_KEY));
             getPreferenceScreen().removePreference(findPreference(BACKGROUND_SYNC_KEY));
             getPreferenceScreen().removePreference(findPreference(CAMERA_KEY));
+            getPreferenceScreen().removePreference(findPreference(CLIPBOARD_KEY));
             getPreferenceScreen().removePreference(findPreference(COOKIES_KEY));
             getPreferenceScreen().removePreference(findPreference(JAVASCRIPT_KEY));
             getPreferenceScreen().removePreference(findPreference(LOCATION_KEY));
@@ -119,6 +128,7 @@ public class SiteSettingsPreferences extends PreferenceFragment
             getPreferenceScreen().removePreference(findPreference(MICROPHONE_KEY));
             getPreferenceScreen().removePreference(findPreference(NOTIFICATIONS_KEY));
             getPreferenceScreen().removePreference(findPreference(POPUPS_KEY));
+            getPreferenceScreen().removePreference(findPreference(SOUND_KEY));
             getPreferenceScreen().removePreference(findPreference(STORAGE_KEY));
             getPreferenceScreen().removePreference(findPreference(TRANSLATE_KEY));
             getPreferenceScreen().removePreference(findPreference(USB_KEY));
@@ -137,6 +147,17 @@ public class SiteSettingsPreferences extends PreferenceFragment
             // great to dynamically remove the preference in this way.
             if (!SiteSettingsCategory.adsCategoryEnabled()) {
                 getPreferenceScreen().removePreference(findPreference(ADS_KEY));
+            }
+            if (!ChromeFeatureList.isEnabled(ChromeFeatureList.SOUND_CONTENT_SETTING)) {
+                getPreferenceScreen().removePreference(findPreference(SOUND_KEY));
+            }
+            if (!ChromeFeatureList.isEnabled(ChromeFeatureList.CLIPBOARD_CONTENT_SETTING)) {
+                getPreferenceScreen().removePreference(findPreference(CLIPBOARD_KEY));
+            }
+            // The new Languages Preference *feature* is an advanced version of this translate
+            // preference. Once Languages Preference is enabled, remove this setting.
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.LANGUAGES_PREFERENCE)) {
+                getPreferenceScreen().removePreference(findPreference(TRANSLATE_KEY));
             }
         }
     }
@@ -164,12 +185,18 @@ public class SiteSettingsPreferences extends PreferenceFragment
             if (!mProtectedContentMenuAvailable) websitePrefs.add(AUTOPLAY_KEY);
             websitePrefs.add(BACKGROUND_SYNC_KEY);
             websitePrefs.add(CAMERA_KEY);
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.CLIPBOARD_CONTENT_SETTING)) {
+                websitePrefs.add(CLIPBOARD_KEY);
+            }
             websitePrefs.add(COOKIES_KEY);
             websitePrefs.add(JAVASCRIPT_KEY);
             websitePrefs.add(LOCATION_KEY);
             websitePrefs.add(MICROPHONE_KEY);
             websitePrefs.add(NOTIFICATIONS_KEY);
             websitePrefs.add(POPUPS_KEY);
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.SOUND_CONTENT_SETTING)) {
+                websitePrefs.add(SOUND_KEY);
+            }
         }
 
         // Initialize the summary and icon for all preferences that have an
@@ -185,6 +212,8 @@ public class SiteSettingsPreferences extends PreferenceFragment
                 checked = PrefServiceBridge.getInstance().isBackgroundSyncAllowed();
             } else if (CAMERA_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isCameraEnabled();
+            } else if (CLIPBOARD_KEY.equals(prefName)) {
+                checked = PrefServiceBridge.getInstance().isClipboardEnabled();
             } else if (COOKIES_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isAcceptCookiesEnabled();
             } else if (JAVASCRIPT_KEY.equals(prefName)) {
@@ -199,6 +228,8 @@ public class SiteSettingsPreferences extends PreferenceFragment
                 checked = PrefServiceBridge.getInstance().popupsEnabled();
             } else if (PROTECTED_CONTENT_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isProtectedMediaIdentifierEnabled();
+            } else if (SOUND_KEY.equals(prefName)) {
+                checked = PrefServiceBridge.getInstance().isSoundEnabled();
             }
 
             int contentType = keyToContentSettingsType(prefName);
@@ -213,17 +244,21 @@ public class SiteSettingsPreferences extends PreferenceFragment
             } else if (COOKIES_KEY.equals(prefName) && checked
                     && prefServiceBridge.isBlockThirdPartyCookiesEnabled()) {
                 p.setSummary(ContentSettingsResources.getCookieAllowedExceptThirdPartySummary());
+            } else if (CLIPBOARD_KEY.equals(prefName) && !checked) {
+                p.setSummary(ContentSettingsResources.getClipboardBlockedListSummary());
             } else if (LOCATION_KEY.equals(prefName) && checked
                     && prefServiceBridge.isLocationAllowedByPolicy()) {
                 p.setSummary(ContentSettingsResources.getGeolocationAllowedSummary());
             } else if (ADS_KEY.equals(prefName) && !checked) {
                 p.setSummary(ContentSettingsResources.getAdsBlockedListSummary());
+            } else if (SOUND_KEY.equals(prefName) && !checked) {
+                p.setSummary(ContentSettingsResources.getSoundBlockedListSummary());
             } else {
                 p.setSummary(ContentSettingsResources.getCategorySummary(contentType, checked));
             }
 
             if (p.isEnabled()) {
-                p.setIcon(ContentSettingsResources.getIcon(contentType));
+                p.setIcon(ContentSettingsResources.getTintedIcon(contentType, getResources()));
             } else {
                 p.setIcon(ContentSettingsResources.getDisabledIcon(contentType, getResources()));
             }

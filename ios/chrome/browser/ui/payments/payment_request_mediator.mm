@@ -14,15 +14,18 @@
 #include "components/autofill/core/browser/field_types.h"
 #include "components/payments/core/autofill_payment_instrument.h"
 #include "components/payments/core/currency_formatter.h"
+#include "components/payments/core/payment_item.h"
 #include "components/payments/core/payment_prefs.h"
+#include "components/payments/core/payment_shipping_option.h"
 #include "components/payments/core/strings_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
+#include "ios/chrome/browser/payments/ios_payment_instrument.h"
 #include "ios/chrome/browser/payments/payment_request.h"
-#include "ios/chrome/browser/payments/payment_request_util.h"
-#import "ios/chrome/browser/ui/collection_view/cells/collection_view_detail_item.h"
+#import "ios/chrome/browser/payments/payment_request_util.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_footer_item.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_item.h"
+#import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
 #import "ios/chrome/browser/ui/payments/cells/autofill_profile_item.h"
 #import "ios/chrome/browser/ui/payments/cells/payment_method_item.h"
 #import "ios/chrome/browser/ui/payments/cells/payments_text_item.h"
@@ -51,8 +54,8 @@ using ::payment_request_util::GetShippingSectionTitle;
 
 @interface PaymentRequestMediator ()
 
-// The PaymentRequest object owning an instance of web::PaymentRequest as
-// provided by the page invoking the Payment Request API. This is a weak
+// The PaymentRequest object owning an instance of payments::WebPaymentRequest
+// as provided by the page invoking the Payment Request API. This is a weak
 // pointer and should outlive this class.
 @property(nonatomic, assign) payments::PaymentRequest* paymentRequest;
 
@@ -75,22 +78,13 @@ using ::payment_request_util::GetShippingSectionTitle;
 #pragma mark - PaymentRequestViewControllerDataSource
 
 - (BOOL)canPay {
-  return self.paymentRequest->selected_payment_method() != nullptr &&
-         (self.paymentRequest->selected_shipping_option() != nullptr ||
-          ![self requestShipping]) &&
-         (self.paymentRequest->selected_shipping_profile() != nullptr ||
-          ![self requestShipping]) &&
-         (self.paymentRequest->selected_contact_profile() != nullptr ||
-          ![self requestContactInfo]);
-}
-
-- (BOOL)canShip {
-  return !self.paymentRequest->shipping_options().empty() &&
-         self.paymentRequest->selected_shipping_profile() != nullptr;
+  return self.paymentRequest->IsAbleToPay();
 }
 
 - (BOOL)hasPaymentItems {
-  return !self.paymentRequest->payment_details().display_items.empty();
+  return !self.paymentRequest
+              ->GetDisplayItems(self.paymentRequest->selected_payment_method())
+              .empty();
 }
 
 - (BOOL)requestShipping {
@@ -98,22 +92,21 @@ using ::payment_request_util::GetShippingSectionTitle;
 }
 
 - (BOOL)requestContactInfo {
-  return self.paymentRequest->request_payer_name() ||
-         self.paymentRequest->request_payer_email() ||
-         self.paymentRequest->request_payer_phone();
+  return self.paymentRequest->RequestContactInfo();
 }
 
 - (CollectionViewItem*)paymentSummaryItem {
+  const payments::PaymentItem& total = self.paymentRequest->GetTotal(
+      self.paymentRequest->selected_payment_method());
+
   PriceItem* item = [[PriceItem alloc] init];
-  item.item = base::SysUTF16ToNSString(
-      self.paymentRequest->payment_details().total.label);
+  item.item = base::SysUTF8ToNSString(total.label);
   payments::CurrencyFormatter* currencyFormatter =
       self.paymentRequest->GetOrCreateCurrencyFormatter();
-  item.price = SysUTF16ToNSString(l10n_util::GetStringFUTF16(
+  item.price = base::SysUTF16ToNSString(l10n_util::GetStringFUTF16(
       IDS_PAYMENT_REQUEST_ORDER_SUMMARY_SHEET_TOTAL_FORMAT,
       base::UTF8ToUTF16(currencyFormatter->formatted_currency_code()),
-      currencyFormatter->Format(base::UTF16ToASCII(
-          self.paymentRequest->payment_details().total.amount.value))));
+      currencyFormatter->Format(total.amount->value)));
   item.notification = self.totalValueChanged
                           ? l10n_util::GetNSString(IDS_PAYMENTS_UPDATED_LABEL)
                           : nil;
@@ -124,7 +117,9 @@ using ::payment_request_util::GetShippingSectionTitle;
   return item;
 }
 
-- (CollectionViewItem*)shippingSectionHeaderItem {
+- (PaymentsTextItem*)shippingSectionHeaderItem {
+  if (!self.paymentRequest->selected_shipping_profile())
+    return nil;
   PaymentsTextItem* item = [[PaymentsTextItem alloc] init];
   item.text = GetShippingSectionTitle(self.paymentRequest->shipping_type());
   return item;
@@ -142,40 +137,49 @@ using ::payment_request_util::GetShippingSectionTitle;
     return item;
   }
 
-  CollectionViewDetailItem* item = [[CollectionViewDetailItem alloc] init];
-  item.text = SysUTF16ToNSString(
-      GetShippingAddressSectionString(self.paymentRequest->shipping_type()));
+  PaymentsTextItem* item = [[PaymentsTextItem alloc] init];
   if (self.paymentRequest->shipping_profiles().empty()) {
-    item.detailText = [l10n_util::GetNSString(IDS_ADD)
-        uppercaseStringWithLocale:[NSLocale currentLocale]];
+    item.text = base::SysUTF16ToNSString(
+        GetAddShippingAddressButtonLabel(self.paymentRequest->shipping_type()));
+    item.trailingImage = TintImage([UIImage imageNamed:@"ic_add"],
+                                   [[MDCPalette greyPalette] tint400]);
   } else {
+    item.text = base::SysUTF16ToNSString(GetChooseShippingAddressButtonLabel(
+        self.paymentRequest->shipping_type()));
     item.accessoryType = MDCCollectionViewCellAccessoryDisclosureIndicator;
   }
+  item.cellType = PaymentsTextCellTypeCallToAction;
   return item;
 }
 
 - (CollectionViewItem*)shippingOptionItem {
-  const web::PaymentShippingOption* option =
+  if (!self.paymentRequest->selected_shipping_profile())
+    return nullptr;
+  const payments::PaymentShippingOption* option =
       self.paymentRequest->selected_shipping_option();
   if (option) {
     PaymentsTextItem* item = [[PaymentsTextItem alloc] init];
-    item.text = base::SysUTF16ToNSString(option->label);
+    item.text = base::SysUTF8ToNSString(option->label);
     payments::CurrencyFormatter* currencyFormatter =
         self.paymentRequest->GetOrCreateCurrencyFormatter();
-    item.detailText = SysUTF16ToNSString(
-        currencyFormatter->Format(base::UTF16ToASCII(option->amount.value)));
+    item.detailText = base::SysUTF16ToNSString(
+        currencyFormatter->Format(option->amount->value));
     item.accessoryType = MDCCollectionViewCellAccessoryDisclosureIndicator;
     return item;
   }
 
-  CollectionViewDetailItem* item = [[CollectionViewDetailItem alloc] init];
+  if (self.paymentRequest->shipping_options().empty())
+    return nullptr;
+
+  PaymentsTextItem* item = [[PaymentsTextItem alloc] init];
   item.text = base::SysUTF16ToNSString(
-      GetShippingOptionSectionString(self.paymentRequest->shipping_type()));
+      GetChooseShippingOptionButtonLabel(self.paymentRequest->shipping_type()));
   item.accessoryType = MDCCollectionViewCellAccessoryDisclosureIndicator;
+  item.cellType = PaymentsTextCellTypeCallToAction;
   return item;
 }
 
-- (CollectionViewItem*)paymentMethodSectionHeaderItem {
+- (PaymentsTextItem*)paymentMethodSectionHeaderItem {
   if (!self.paymentRequest->selected_payment_method())
     return nil;
   PaymentsTextItem* item = [[PaymentsTextItem alloc] init];
@@ -185,34 +189,53 @@ using ::payment_request_util::GetShippingSectionTitle;
 }
 
 - (CollectionViewItem*)paymentMethodItem {
-  const payments::PaymentInstrument* paymentMethod =
+  payments::PaymentInstrument* paymentMethod =
       self.paymentRequest->selected_payment_method();
   if (paymentMethod) {
     PaymentMethodItem* item = [[PaymentMethodItem alloc] init];
     item.methodID = base::SysUTF16ToNSString(paymentMethod->GetLabel());
     item.methodDetail = base::SysUTF16ToNSString(paymentMethod->GetSublabel());
-    item.methodTypeIcon = NativeImage(paymentMethod->icon_resource_id());
+
+    switch (paymentMethod->type()) {
+      case payments::PaymentInstrument::Type::AUTOFILL: {
+        item.methodTypeIcon = NativeImage(paymentMethod->icon_resource_id());
+        break;
+      }
+      case payments::PaymentInstrument::Type::NATIVE_MOBILE_APP: {
+        payments::IOSPaymentInstrument* mobileApp =
+            static_cast<payments::IOSPaymentInstrument*>(paymentMethod);
+        item.methodTypeIcon = mobileApp->icon_image();
+        break;
+      }
+      case payments::PaymentInstrument::Type::SERVICE_WORKER_APP: {
+        NOTIMPLEMENTED();
+        break;
+      }
+    }
+
     item.accessoryType = MDCCollectionViewCellAccessoryDisclosureIndicator;
     return item;
   }
 
-  CollectionViewDetailItem* item = [[CollectionViewDetailItem alloc] init];
-  item.text =
-      l10n_util::GetNSString(IDS_PAYMENT_REQUEST_PAYMENT_METHOD_SECTION_NAME);
+  PaymentsTextItem* item = [[PaymentsTextItem alloc] init];
   if (self.paymentRequest->payment_methods().empty()) {
-    item.detailText = [l10n_util::GetNSString(IDS_ADD)
-        uppercaseStringWithLocale:[NSLocale currentLocale]];
+    item.text = l10n_util::GetNSString(IDS_ADD_PAYMENT_METHOD);
+    item.trailingImage = TintImage([UIImage imageNamed:@"ic_add"],
+                                   [[MDCPalette greyPalette] tint400]);
   } else {
+    item.text = l10n_util::GetNSString(IDS_CHOOSE_PAYMENT_METHOD);
     item.accessoryType = MDCCollectionViewCellAccessoryDisclosureIndicator;
   }
+  item.cellType = PaymentsTextCellTypeCallToAction;
   return item;
 }
 
-- (CollectionViewItem*)contactInfoSectionHeaderItem {
+- (PaymentsTextItem*)contactInfoSectionHeaderItem {
   if (!self.paymentRequest->selected_contact_profile())
     return nil;
   PaymentsTextItem* item = [[PaymentsTextItem alloc] init];
-  item.text = l10n_util::GetNSString(IDS_PAYMENTS_CONTACT_DETAILS_LABEL);
+  item.text =
+      l10n_util::GetNSString(IDS_PAYMENT_REQUEST_CONTACT_INFO_SECTION_NAME);
   return item;
 }
 
@@ -235,14 +258,16 @@ using ::payment_request_util::GetShippingSectionTitle;
     return item;
   }
 
-  CollectionViewDetailItem* item = [[CollectionViewDetailItem alloc] init];
-  item.text = l10n_util::GetNSString(IDS_PAYMENTS_CONTACT_DETAILS_LABEL);
+  PaymentsTextItem* item = [[PaymentsTextItem alloc] init];
   if (self.paymentRequest->contact_profiles().empty()) {
-    item.detailText = [l10n_util::GetNSString(IDS_ADD)
-        uppercaseStringWithLocale:[NSLocale currentLocale]];
+    item.text = l10n_util::GetNSString(IDS_PAYMENT_REQUEST_ADD_CONTACT_INFO);
+    item.trailingImage = TintImage([UIImage imageNamed:@"ic_add"],
+                                   [[MDCPalette greyPalette] tint400]);
   } else {
+    item.text = l10n_util::GetNSString(IDS_PAYMENT_REQUEST_CHOOSE_CONTACT_INFO);
     item.accessoryType = MDCCollectionViewCellAccessoryDisclosureIndicator;
   }
+  item.cellType = PaymentsTextCellTypeCallToAction;
   return item;
 }
 

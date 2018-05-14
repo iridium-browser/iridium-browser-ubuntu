@@ -20,7 +20,8 @@ namespace gl
 constexpr ParamTypeInfo ParamsBase::TypeInfo;
 constexpr ParamTypeInfo HasIndexRange::TypeInfo;
 
-ParamsBase::ParamsBase(Context *context, ...)
+HasIndexRange::HasIndexRange()
+    : ParamsBase(nullptr), mContext(nullptr), mCount(0), mType(GL_NONE), mIndices(nullptr)
 {
 }
 
@@ -31,7 +32,7 @@ HasIndexRange::HasIndexRange(Context *context, GLsizei count, GLenum type, const
 
 const Optional<IndexRange> &HasIndexRange::getIndexRange() const
 {
-    if (mIndexRange.valid())
+    if (mIndexRange.valid() || !mContext)
     {
         return mIndexRange;
     }
@@ -46,7 +47,7 @@ const Optional<IndexRange> &HasIndexRange::getIndexRange() const
         uintptr_t offset = reinterpret_cast<uintptr_t>(mIndices);
         IndexRange indexRange;
         Error error =
-            elementArrayBuffer->getIndexRange(mType, static_cast<size_t>(offset), mCount,
+            elementArrayBuffer->getIndexRange(mContext, mType, static_cast<size_t>(offset), mCount,
                                               state.isPrimitiveRestartEnabled(), &indexRange);
         if (error.isError())
         {

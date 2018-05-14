@@ -5,7 +5,8 @@
 #ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_STATS_H_
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_STATS_H_
 
-#include "content/public/browser/download_danger_type.h"
+#include "chrome/browser/download/download_path_reservation_tracker.h"
+#include "components/download/public/common/download_danger_type.h"
 
 // Record the total number of items and the number of in-progress items showing
 // in the shelf when it closes.  Set |autoclose| to true when the shelf is
@@ -38,22 +39,22 @@ enum ChromeDownloadSource {
   // The download was initiated by invoking a context menu within a page.
   DOWNLOAD_INITIATED_BY_CONTEXT_MENU,
 
-  // The download was initiated by the WebStore installer.
-  DOWNLOAD_INITIATED_BY_WEBSTORE_INSTALLER,
+  // Formerly DOWNLOAD_INITIATED_BY_WEBSTORE_INSTALLER.
+  CHROME_DOWNLOAD_SOURCE_UNUSED_2,
 
-  // The download was initiated by the ImageBurner (cros).
-  DOWNLOAD_INITIATED_BY_IMAGE_BURNER,
+  // Formerly DOWNLOAD_INITIATED_BY_IMAGE_BURNER.
+  CHROME_DOWNLOAD_SOURCE_UNUSED_3,
 
-  // The download was initiated by the plugin installer.
-  DOWNLOAD_INITIATED_BY_PLUGIN_INSTALLER,
+  // Formerly DOWNLOAD_INITIATED_BY_PLUGIN_INSTALLER.
+  CHROME_DOWNLOAD_SOURCE_UNUSED_4,
 
-  // The download was initiated by the PDF plugin..
+  // The download was initiated by the PDF plugin.
   DOWNLOAD_INITIATED_BY_PDF_SAVE,
 
-  // The download was initiated by chrome.downloads.download().
-  DOWNLOAD_INITIATED_BY_EXTENSION,
+  // Formerly DOWNLOAD_INITIATED_BY_EXTENSION.
+  CHROME_DOWNLOAD_SOURCE_UNUSED_6,
 
-  CHROME_DOWNLOAD_SOURCE_LAST_ENTRY,
+  CHROME_DOWNLOAD_SOURCE_LAST_ENTRY
 };
 
 // How a download was opened. Note that a download could be opened multiple
@@ -73,6 +74,24 @@ enum ChromeDownloadOpenMethod {
   DOWNLOAD_OPEN_METHOD_LAST_ENTRY
 };
 
+// Records path generation behavior in download target determination process.
+// Used in UMA, do not remove, change or reuse existing entries.
+// Update histograms.xml and enums.xml when adding entries.
+enum class DownloadPathGenerationEvent {
+  // Use existing virtual path provided to download target determiner.
+  USE_EXISTING_VIRTUAL_PATH = 0,
+  // Use the force path provided to download target determiner.
+  USE_FORCE_PATH,
+  // Use last prompt directory.
+  USE_LAST_PROMPT_DIRECTORY,
+  // Use the default download directory.
+  USE_DEFAULTL_DOWNLOAD_DIRECTORY,
+  // No valid target file path is provided, the download will fail soon.
+  NO_VALID_PATH,
+
+  COUNT
+};
+
 // Increment one of the above counts.
 void RecordDownloadCount(ChromeDownloadCountTypes type);
 
@@ -81,11 +100,11 @@ void RecordDownloadSource(ChromeDownloadSource source);
 
 // Record that a download warning was shown.
 void RecordDangerousDownloadWarningShown(
-    content::DownloadDangerType danger_type);
+    download::DownloadDangerType danger_type);
 
 // Record that the user opened the confirmation dialog for a dangerous download.
 void RecordOpenedDangerousConfirmDialog(
-    content::DownloadDangerType danger_type);
+    download::DownloadDangerType danger_type);
 
 // Record how a download was opened.
 void RecordDownloadOpenMethod(ChromeDownloadOpenMethod open_method);
@@ -93,5 +112,31 @@ void RecordDownloadOpenMethod(ChromeDownloadOpenMethod open_method);
 // Record if the database is available to provide the next download id before
 // starting all downloads.
 void RecordDatabaseAvailability(bool is_available);
+
+// Record download path generation event in target determination process.
+void RecordDownloadPathGeneration(DownloadPathGenerationEvent event,
+                                  bool is_transient);
+
+// Record path validation result.
+void RecordDownloadPathValidation(PathValidationResult result,
+                                  bool is_transient);
+
+// Records drags of completed downloads from the shelf. Used in UMA, do not
+// remove, change or reuse existing entries. Update histograms.xml and
+// enums.xml when adding entries.
+enum class DownloadShelfDragEvent {
+  // A download was dragged. All platforms.
+  STARTED,
+  // The download was dropped somewhere that isn't a drag target. Currently
+  // only recorded on Mac.
+  CANCELED,
+  // The download was dropped somewhere useful (a folder, an application,
+  // etc.). Currently only recorded on Mac.
+  DROPPED,
+
+  COUNT
+};
+
+void RecordDownloadShelfDragEvent(DownloadShelfDragEvent drag_event);
 
 #endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_STATS_H_

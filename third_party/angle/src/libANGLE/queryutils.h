@@ -19,7 +19,7 @@ namespace gl
 class Buffer;
 class Context;
 class Error;
-class FenceSync;
+class Sync;
 class Framebuffer;
 class Program;
 class Renderbuffer;
@@ -32,7 +32,8 @@ struct VertexAttribute;
 class VertexBinding;
 struct VertexAttribCurrentValueData;
 
-void QueryFramebufferAttachmentParameteriv(const Framebuffer *framebuffer,
+void QueryFramebufferAttachmentParameteriv(const Context *context,
+                                           const Framebuffer *framebuffer,
                                            GLenum attachment,
                                            GLenum pname,
                                            GLint *params);
@@ -97,11 +98,7 @@ void QueryInternalFormativ(const TextureCaps &format, GLenum pname, GLsizei bufS
 
 void QueryFramebufferParameteriv(const Framebuffer *framebuffer, GLenum pname, GLint *params);
 
-Error QuerySynciv(const FenceSync *sync,
-                  GLenum pname,
-                  GLsizei bufSize,
-                  GLsizei *length,
-                  GLint *values);
+Error QuerySynciv(const Sync *sync, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values);
 
 void SetTexParameterf(Context *context, Texture *texture, GLenum pname, GLfloat param);
 void SetTexParameterfv(Context *context, Texture *texture, GLenum pname, const GLfloat *params);
@@ -117,6 +114,8 @@ void SetFramebufferParameteri(Framebuffer *framebuffer, GLenum pname, GLint para
 
 void SetProgramParameteri(Program *program, GLenum pname, GLint value);
 
+GLint GetUniformResourceProperty(const Program *program, GLuint index, const GLenum prop);
+
 GLuint QueryProgramResourceIndex(const Program *program,
                                  GLenum programInterface,
                                  const GLchar *name);
@@ -131,14 +130,33 @@ void QueryProgramResourceName(const Program *program,
 GLint QueryProgramResourceLocation(const Program *program,
                                    GLenum programInterface,
                                    const GLchar *name);
+void QueryProgramResourceiv(const Program *program,
+                            GLenum programInterface,
+                            GLuint index,
+                            GLsizei propCount,
+                            const GLenum *props,
+                            GLsizei bufSize,
+                            GLsizei *length,
+                            GLint *params);
+
+void QueryProgramInterfaceiv(const Program *program,
+                             GLenum programInterface,
+                             GLenum pname,
+                             GLint *params);
 
 }  // namespace gl
 
 namespace egl
 {
 struct Config;
+class Surface;
 
 void QueryConfigAttrib(const Config *config, EGLint attribute, EGLint *value);
+
+void QueryContextAttrib(const gl::Context *context, EGLint attribute, EGLint *value);
+
+void QuerySurfaceAttrib(const Surface *surface, EGLint attribute, EGLint *value);
+void SetSurfaceAttrib(Surface *surface, EGLint attribute, EGLint value);
 
 }  // namespace egl
 

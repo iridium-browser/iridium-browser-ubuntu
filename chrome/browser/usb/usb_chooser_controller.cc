@@ -8,16 +8,13 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/net/referrer.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/usb/usb_blocklist.h"
 #include "chrome/browser/usb/usb_chooser_context.h"
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
+#include "chrome/browser/usb/usb_util.h"
 #include "chrome/browser/usb/web_usb_histograms.h"
 #include "chrome/browser/usb/web_usb_permission_provider.h"
 #include "chrome/common/url_constants.h"
@@ -36,50 +33,15 @@ using content::RenderFrameHost;
 using content::WebContents;
 using device::UsbDevice;
 
-namespace {
-
-Browser* GetBrowser() {
-  chrome::ScopedTabbedBrowserDisplayer browser_displayer(
-      ProfileManager::GetLastUsedProfileAllowedByPolicy());
-  DCHECK(browser_displayer.browser());
-  return browser_displayer.browser();
-}
-
-base::string16 GetDeviceName(scoped_refptr<UsbDevice> device) {
-  base::string16 device_name = device->product_string();
-  if (device_name.empty()) {
-    uint16_t vendor_id = device->vendor_id();
-    uint16_t product_id = device->product_id();
-    if (const char* product_name =
-            device::UsbIds::GetProductName(vendor_id, product_id)) {
-      device_name = base::UTF8ToUTF16(product_name);
-    } else if (const char* vendor_name =
-                   device::UsbIds::GetVendorName(vendor_id)) {
-      device_name = l10n_util::GetStringFUTF16(
-          IDS_DEVICE_CHOOSER_DEVICE_NAME_UNKNOWN_DEVICE_WITH_VENDOR_NAME,
-          base::UTF8ToUTF16(vendor_name));
-    } else {
-      device_name = l10n_util::GetStringFUTF16(
-          IDS_DEVICE_CHOOSER_DEVICE_NAME_UNKNOWN_DEVICE_WITH_VENDOR_ID_AND_PRODUCT_ID,
-          base::ASCIIToUTF16(base::StringPrintf("%04x", vendor_id)),
-          base::ASCIIToUTF16(base::StringPrintf("%04x", product_id)));
-    }
-  }
-
-  return device_name;
-}
-
-}  // namespace
-
 UsbChooserController::UsbChooserController(
     RenderFrameHost* render_frame_host,
     std::vector<device::mojom::UsbDeviceFilterPtr> device_filters,
-    const device::mojom::UsbChooserService::GetPermissionCallback& callback)
+    device::mojom::UsbChooserService::GetPermissionCallback callback)
     : ChooserController(render_frame_host,
                         IDS_USB_DEVICE_CHOOSER_PROMPT_ORIGIN,
                         IDS_USB_DEVICE_CHOOSER_PROMPT_EXTENSION_NAME),
       filters_(std::move(device_filters)),
-      callback_(callback),
+      callback_(std::move(callback)),
       usb_service_observer_(this),
       weak_factory_(this) {
   device::UsbService* usb_service =
@@ -103,7 +65,7 @@ UsbChooserController::UsbChooserController(
 
 UsbChooserController::~UsbChooserController() {
   if (!callback_.is_null())
-    callback_.Run(nullptr);
+    std::move(callback_).Run(nullptr);
 }
 
 base::string16 UsbChooserController::GetNoOptionsText() const {
@@ -140,12 +102,6 @@ bool UsbChooserController::IsPaired(size_t index) const {
       chooser_context_.get(), requesting_origin_, embedding_origin_, device);
 }
 
-void UsbChooserController::RefreshOptions() {}
-
-base::string16 UsbChooserController::GetStatus() const {
-  return base::string16();
-}
-
 void UsbChooserController::Select(const std::vector<size_t>& indices) {
   DCHECK_EQ(1u, indices.size());
   size_t index = indices[0];
@@ -156,8 +112,8 @@ void UsbChooserController::Select(const std::vector<size_t>& indices) {
         requesting_origin_, embedding_origin_, devices_[index].first->guid());
   }
 
-  callback_.Run(device::mojom::UsbDeviceInfo::From(*devices_[index].first));
-  callback_.Reset();  // |callback_| must only be run once.
+  std::move(callback_).Run(
+      device::mojom::UsbDeviceInfo::From(*devices_[index].first));
 
   RecordWebUsbChooserClosure(
       devices_[index].first->serial_number().empty()
@@ -182,7 +138,7 @@ void UsbChooserController::OpenHelpCenterUrl() const {
 
 void UsbChooserController::OnDeviceAdded(scoped_refptr<UsbDevice> device) {
   if (DisplayDevice(device)) {
-    base::string16 device_name = GetDeviceName(device);
+    base::string16 device_name = FormatUsbDeviceName(device);
     devices_.push_back(std::make_pair(device, device_name));
     ++device_name_map_[device_name];
     if (view())
@@ -211,7 +167,7 @@ void UsbChooserController::GotUsbDeviceList(
     const std::vector<scoped_refptr<UsbDevice>>& devices) {
   for (const auto& device : devices) {
     if (DisplayDevice(device)) {
-      base::string16 device_name = GetDeviceName(device);
+      base::string16 device_name = FormatUsbDeviceName(device);
       devices_.push_back(std::make_pair(device, device_name));
       ++device_name_map_[device_name];
     }

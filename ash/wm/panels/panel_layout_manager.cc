@@ -480,7 +480,7 @@ void PanelLayoutManager::OnWindowPropertyChanged(Window* window,
 
 void PanelLayoutManager::OnPostWindowStateTypeChange(
     wm::WindowState* window_state,
-    wm::WindowStateType old_type) {
+    mojom::WindowStateType old_type) {
   // If the shelf is currently hidden then windows will not actually be shown
   // but the set to restore when the shelf becomes visible is updated.
   if (restore_windows_on_shelf_visible_) {
@@ -902,7 +902,7 @@ void PanelLayoutManager::UpdateCallouts() {
 ////////////////////////////////////////////////////////////////////////////////
 // keyboard::KeyboardControllerObserver implementation:
 
-void PanelLayoutManager::OnKeyboardBoundsChanging(
+void PanelLayoutManager::OnKeyboardWorkspaceOccludedBoundsChanged(
     const gfx::Rect& keyboard_bounds) {
   const gfx::Rect& parent_bounds = panel_container_->bounds();
   int available_space = parent_bounds.height() - keyboard_bounds.height();
@@ -932,7 +932,7 @@ void PanelLayoutManager::OnKeyboardBoundsChanging(
     }
   }
   // This bounds change will have caused a change to the Shelf which does not
-  // propogate automatically to this class, so manually recalculate bounds.
+  // propagate automatically to this class, so manually recalculate bounds.
   OnWindowResized();
 }
 

@@ -14,6 +14,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_utils.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/browser/test/mock_storage_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -30,15 +31,14 @@ class ImportantSitesUsageCounterTest : public testing::Test {
     run_loop_.reset(new base::RunLoop());
   }
 
-  void TearDown() override { base::RunLoop().RunUntilIdle(); }
+  void TearDown() override { content::RunAllTasksUntilIdle(); }
 
   TestingProfile* profile() { return &profile_; }
 
   QuotaManager* CreateQuotaManager() {
     quota_manager_ = new QuotaManager(
         false, temp_dir_.GetPath(),
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO).get(),
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::DB).get(), nullptr,
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO).get(), nullptr,
         storage::GetQuotaSettingsFunc());
     return quota_manager_.get();
   }
@@ -69,7 +69,6 @@ class ImportantSitesUsageCounterTest : public testing::Test {
   }
 
   void FetchCompleted(std::vector<ImportantDomainInfo> domain_info) {
-    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     domain_info_ = domain_info;
     run_loop_->Quit();
   }
@@ -100,10 +99,10 @@ TEST_F(ImportantSitesUsageCounterTest, PopulateUsage) {
   important_sites.push_back(i2);
 
   const std::vector<content::MockOriginData> origins = {
-      {"http://example.com/", storage::kStorageTypeTemporary, 1},
-      {"https://example.com/", storage::kStorageTypeTemporary, 2},
-      {"https://maps.example.com/", storage::kStorageTypeTemporary, 4},
-      {"http://google.com/", storage::kStorageTypePersistent, 8},
+      {"http://example.com/", blink::mojom::StorageType::kTemporary, 1},
+      {"https://example.com/", blink::mojom::StorageType::kTemporary, 2},
+      {"https://maps.example.com/", blink::mojom::StorageType::kTemporary, 4},
+      {"http://google.com/", blink::mojom::StorageType::kPersistent, 8},
   };
 
   QuotaManager* quota_manager = CreateQuotaManager();

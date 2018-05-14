@@ -21,6 +21,7 @@
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/net_log/chrome_net_log.h"
 #include "components/prefs/pref_service.h"
@@ -33,15 +34,24 @@
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/net_features.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/default_channel_id_store.h"
-#include "net/url_request/url_request_context_storage.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "storage/browser/database/database_tracker.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "extensions/common/extension.h"
 #endif
+
+#if BUILDFLAG(ENABLE_REPORTING)
+#include "net/network_error_logging/network_error_logging_delegate.h"
+#include "net/network_error_logging/network_error_logging_service.h"
+#include "net/reporting/reporting_policy.h"
+#include "net/reporting/reporting_service.h"
+#endif  // BUILDFLAG(ENABLE_REPORTING)
 
 using content::BrowserThread;
 
@@ -145,12 +155,6 @@ OffTheRecordProfileIOData::Handle::CreateIsolatedAppRequestContextGetter(
   return context;
 }
 
-DevToolsNetworkControllerHandle*
-OffTheRecordProfileIOData::Handle::GetDevToolsNetworkControllerHandle() const {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  return io_data_->network_controller_handle();
-}
-
 void OffTheRecordProfileIOData::Handle::LazyInitialize() const {
   if (initialized_)
     return;
@@ -162,6 +166,16 @@ void OffTheRecordProfileIOData::Handle::LazyInitialize() const {
       profile_->GetPrefs());
   io_data_->safe_browsing_enabled()->MoveToThread(
       BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
+  io_data_->safe_browsing_whitelist_domains()->Init(
+      prefs::kSafeBrowsingWhitelistDomains, profile_->GetPrefs());
+  io_data_->safe_browsing_whitelist_domains()->MoveToThread(
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
+#if BUILDFLAG(ENABLE_PLUGINS)
+  io_data_->always_open_pdf_externally()->Init(
+      prefs::kPluginsAlwaysOpenPdfExternally, profile_->GetPrefs());
+  io_data_->always_open_pdf_externally()->MoveToThread(
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
+#endif
   io_data_->InitializeOnUIThread(profile_);
 }
 
@@ -192,45 +206,31 @@ OffTheRecordProfileIOData::~OffTheRecordProfileIOData() {
 }
 
 void OffTheRecordProfileIOData::InitializeInternal(
+    net::URLRequestContextBuilder* builder,
     ProfileParams* profile_params,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) const {
-  net::URLRequestContext* main_context = main_request_context();
-  net::URLRequestContextStorage* main_context_storage =
-      main_request_context_storage();
-
-  // For incognito, we use the default non-persistent HttpServerPropertiesImpl.
-  main_context_storage->set_http_server_properties(
-      base::MakeUnique<net::HttpServerPropertiesImpl>());
-
   // For incognito, we use a non-persistent channel ID store.
-  main_context_storage->set_channel_id_service(
-      base::MakeUnique<net::ChannelIDService>(
+  std::unique_ptr<net::ChannelIDService> channel_id_service(
+      std::make_unique<net::ChannelIDService>(
           new net::DefaultChannelIDStore(nullptr)));
 
   using content::CookieStoreConfig;
-  main_context_storage->set_cookie_store(CreateCookieStore(CookieStoreConfig(
-      base::FilePath(), CookieStoreConfig::EPHEMERAL_SESSION_COOKIES, NULL,
-      profile_params->cookie_monster_delegate.get())));
+  std::unique_ptr<net::CookieStore> cookie_store(CreateCookieStore(
+      CookieStoreConfig(base::FilePath(), false, false, nullptr)));
+  cookie_store->SetChannelIDServiceID(channel_id_service->GetUniqueID());
 
-  main_context->cookie_store()->SetChannelIDServiceID(
-      main_context->channel_id_service()->GetUniqueID());
+  builder->SetCookieAndChannelIdStores(std::move(cookie_store),
+                                       std::move(channel_id_service));
 
-  main_context_storage->set_http_network_session(
-      CreateHttpNetworkSession(*profile_params));
-  main_context_storage->set_http_transaction_factory(
-      CreateMainHttpFactory(main_context_storage->http_network_session(),
-                            net::HttpCache::DefaultBackend::InMemory(0)));
+  AddProtocolHandlersToBuilder(builder, protocol_handlers);
+  SetUpJobFactoryDefaultsForBuilder(
+      builder, std::move(request_interceptors),
+      std::move(profile_params->protocol_handler_interceptor));
+}
 
-  std::unique_ptr<net::URLRequestJobFactoryImpl> main_job_factory(
-      new net::URLRequestJobFactoryImpl());
-
-  InstallProtocolHandlers(main_job_factory.get(), protocol_handlers);
-  main_context_storage->set_job_factory(SetUpJobFactoryDefaults(
-      std::move(main_job_factory), std::move(request_interceptors),
-      std::move(profile_params->protocol_handler_interceptor),
-      main_context->network_delegate(), main_context->host_resolver()));
-
+void OffTheRecordProfileIOData::OnMainRequestContextCreated(
+    ProfileParams* profile_params) const {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   InitializeExtensionsRequestContext(profile_params);
 #endif
@@ -272,13 +272,12 @@ net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
   context->SetCookieStore(std::move(cookie_store));
 
   // Build a new HttpNetworkSession that uses the new ChannelIDService.
-  net::HttpNetworkSession::Context session_context =
-      main_request_context_storage()->http_network_session()->context();
+  net::HttpNetworkSession* network_session =
+      main_request_context()->http_transaction_factory()->GetSession();
+  net::HttpNetworkSession::Context session_context = network_session->context();
   session_context.channel_id_service = channel_id_service.get();
   std::unique_ptr<net::HttpNetworkSession> http_network_session(
-      new net::HttpNetworkSession(
-          main_request_context_storage()->http_network_session()->params(),
-          session_context));
+      new net::HttpNetworkSession(network_session->params(), session_context));
 
   // Use a separate in-memory cache for the app.
   std::unique_ptr<net::HttpCache> app_http_cache = CreateMainHttpFactory(
@@ -297,6 +296,19 @@ net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
       std::move(protocol_handler_interceptor), context->network_delegate(),
       context->host_resolver());
   context->SetJobFactory(std::move(top_job_factory));
+#if BUILDFLAG(ENABLE_REPORTING)
+  if (context->reporting_service()) {
+    context->SetReportingService(net::ReportingService::Create(
+        context->reporting_service()->GetPolicy(), context));
+  }
+  if (context->network_error_logging_service()) {
+    context->SetNetworkErrorLoggingService(
+        net::NetworkErrorLoggingService::Create(
+            net::NetworkErrorLoggingDelegate::Create()));
+    context->network_error_logging_service()->SetReportingService(
+        context->reporting_service());
+  }
+#endif  // BUILDFLAG(ENABLE_REPORTING)
   return context;
 }
 

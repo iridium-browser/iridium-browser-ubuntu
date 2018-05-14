@@ -11,10 +11,10 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/simple_test_clock.h"
 #include "base/values.h"
-#include "chrome/browser/history/browsing_history_service.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/fake_signin_manager_builder.h"
@@ -24,6 +24,7 @@
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/browser_sync/test_profile_sync_service.h"
+#include "components/history/core/browser/browsing_history_service.h"
 #include "components/history/core/test/fake_web_history_service.h"
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/fake_signin_manager.h"
@@ -56,8 +57,6 @@ base::Time PretendNow() {
   return out_time;
 }
 
-void IgnoreBoolAndDoNothing(bool ignored_argument) {}
-
 class TestSyncService : public browser_sync::TestProfileSyncService {
  public:
   explicit TestSyncService(Profile* profile)
@@ -83,17 +82,16 @@ class TestSyncService : public browser_sync::TestProfileSyncService {
 class BrowsingHistoryHandlerWithWebUIForTesting
     : public BrowsingHistoryHandler {
  public:
-  explicit BrowsingHistoryHandlerWithWebUIForTesting(content::WebUI* web_ui)
-      : test_clock_(new base::SimpleTestClock()) {
-    set_clock(base::WrapUnique(test_clock_));
+  explicit BrowsingHistoryHandlerWithWebUIForTesting(content::WebUI* web_ui) {
+    set_clock(&test_clock_);
     set_web_ui(web_ui);
-    test_clock_->SetNow(PretendNow());
+    test_clock_.SetNow(PretendNow());
   }
 
-  base::SimpleTestClock* test_clock() { return test_clock_; }
+  base::SimpleTestClock* test_clock() { return &test_clock_; }
 
  private:
-  base::SimpleTestClock* test_clock_;
+  base::SimpleTestClock test_clock_;
 };
 
 }  // namespace
@@ -140,7 +138,7 @@ class BrowsingHistoryHandlerTest : public ::testing::Test {
  private:
   static std::unique_ptr<KeyedService> BuildFakeSyncService(
       content::BrowserContext* context) {
-    return base::MakeUnique<TestSyncService>(
+    return std::make_unique<TestSyncService>(
         static_cast<TestingProfile*>(context));
   }
 
@@ -149,9 +147,7 @@ class BrowsingHistoryHandlerTest : public ::testing::Test {
     Profile* profile = static_cast<TestingProfile*>(context);
 
     std::unique_ptr<history::FakeWebHistoryService> service =
-        base::MakeUnique<history::FakeWebHistoryService>(
-            ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
-            SigninManagerFactory::GetForProfile(profile),
+        std::make_unique<history::FakeWebHistoryService>(
             profile->GetRequestContext());
     service->SetupFakeResponse(true /* success */, net::HTTP_OK);
     return std::move(service);
@@ -168,7 +164,7 @@ class BrowsingHistoryHandlerTest : public ::testing::Test {
 // Tests that BrowsingHistoryHandler is informed about WebHistoryService
 // deletions.
 TEST_F(BrowsingHistoryHandlerTest, ObservingWebHistoryDeletions) {
-  base::Callback<void(bool)> callback = base::Bind(&IgnoreBoolAndDoNothing);
+  base::Callback<void(bool)> callback = base::DoNothing();
 
   // BrowsingHistoryHandler is informed about WebHistoryService history
   // deletions.
@@ -214,7 +210,7 @@ TEST_F(BrowsingHistoryHandlerTest, ObservingWebHistoryDeletions) {
     web_history_service()->ExpireHistoryBetween(
         std::set<GURL>(), base::Time(), base::Time::Max(),
         base::Bind(
-            &BrowsingHistoryService::RemoveWebHistoryComplete,
+            &history::BrowsingHistoryService::RemoveWebHistoryComplete,
             handler.browsing_history_service_->weak_factory_.GetWeakPtr()),
         PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
 
@@ -241,27 +237,23 @@ TEST_F(BrowsingHistoryHandlerTest, ObservingWebHistoryDeletions) {
 
 #if !defined(OS_ANDROID)
 TEST_F(BrowsingHistoryHandlerTest, MdTruncatesTitles) {
-  history::URLResult long_result(
-      GURL("http://looooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+  history::BrowsingHistoryService::HistoryEntry long_url_entry;
+  long_url_entry.url = GURL(
+      "http://loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
       "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
       "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
       "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
       "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
       "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
-      "ngurlislong.com"), base::Time());
-  ASSERT_GT(long_result.url().spec().size(), 300u);
-
-  std::vector<history::URLResult> result_vector;
-  result_vector.push_back(std::move(long_result));
-  history::QueryResults results;
-  results.SetURLResults(std::move(result_vector));
+      "ngurlislong.com");
+  ASSERT_GT(long_url_entry.url.spec().size(), 300U);
 
   BrowsingHistoryHandlerWithWebUIForTesting handler(web_ui());
-  handler.RegisterMessages();  // Needed to create BrowsingHistoryService.
-  web_ui()->ClearTrackedCalls();
+  ASSERT_TRUE(web_ui()->call_data().empty());
 
-  handler.browsing_history_service_->QueryComplete(
-      base::string16(), history::QueryOptions(), &results);
+  handler.OnQueryComplete({long_url_entry},
+                          history::BrowsingHistoryService::QueryResultsInfo(),
+                          base::OnceClosure());
   ASSERT_FALSE(web_ui()->call_data().empty());
 
   const base::ListValue* arg2;

@@ -49,6 +49,9 @@ class ExclusiveAccessBubble : public gfx::AnimationDelegate {
   static const int kSlideInRegionHeightPx;
   static const int kSlideInDurationMs;   // Duration of slide-in animation
   static const int kSlideOutDurationMs;  // Duration of slide-out animation
+  // Duration of the quick slide-out animation. Used when the bubble is
+  // interrupted and needs to be hidden quickly.
+  static const int kQuickSlideOutDurationMs;
   // Space between the popup and the top of the screen (excluding shadow).
   static const int kPopupTopPx;
   // Space between top of screen and popup, in simplified UI.
@@ -73,9 +76,9 @@ class ExclusiveAccessBubble : public gfx::AnimationDelegate {
 
   virtual bool IsAnimating() = 0;
 
-  // True if the mouse position can trigger sliding in the exit fullscreen
-  // bubble when the bubble is hidden.
-  virtual bool CanMouseTriggerSlideIn() const = 0;
+  // True if the mouse position can trigger showing the exit fullscreen bubble
+  // when the bubble is hidden.
+  virtual bool CanTriggerOnMouse() const = 0;
 
   void StartWatchingMouse();
   void StopWatchingMouse();
@@ -97,6 +100,8 @@ class ExclusiveAccessBubble : public gfx::AnimationDelegate {
   // |accelerator| is the name of the key to exit fullscreen mode.
   base::string16 GetInstructionText(const base::string16& accelerator) const;
 
+  bool IsHideTimeoutRunning() const;
+
   // The Manager associated with this bubble.
   ExclusiveAccessManager* const manager_;
 
@@ -107,6 +112,8 @@ class ExclusiveAccessBubble : public gfx::AnimationDelegate {
   ExclusiveAccessBubbleType bubble_type_;
 
  private:
+  friend class FullscreenControllerTest;
+
   // Shows the bubble and sets up timers to auto-hide and prevent re-showing for
   // a certain snooze time.
   void ShowAndStartTimers();

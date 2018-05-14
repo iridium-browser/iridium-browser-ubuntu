@@ -59,37 +59,53 @@ bool EqualIgnoringQueryAndFragment(const KURL& a, const KURL& b) {
 History::History(LocalFrame* frame)
     : DOMWindowClient(frame), last_state_object_requested_(nullptr) {}
 
-DEFINE_TRACE(History) {
+void History::Trace(blink::Visitor* visitor) {
+  ScriptWrappable::Trace(visitor);
   DOMWindowClient::Trace(visitor);
 }
 
-unsigned History::length() const {
-  if (!GetFrame() || !GetFrame()->Client())
+unsigned History::length(ExceptionState& exception_state) const {
+  if (!GetFrame() || !GetFrame()->Client()) {
+    exception_state.ThrowSecurityError(
+        "May not use a History object associated with a Document that is not "
+        "fully active");
     return 0;
+  }
   return GetFrame()->Client()->BackForwardLength();
 }
 
-SerializedScriptValue* History::state() {
+SerializedScriptValue* History::state(ExceptionState& exception_state) {
+  if (!GetFrame()) {
+    exception_state.ThrowSecurityError(
+        "May not use a History object associated with a Document that is not "
+        "fully active");
+    return nullptr;
+  }
   last_state_object_requested_ = StateInternal();
-  return last_state_object_requested_.Get();
+  return last_state_object_requested_.get();
 }
 
 SerializedScriptValue* History::StateInternal() const {
   if (!GetFrame())
-    return 0;
+    return nullptr;
 
   if (HistoryItem* history_item =
           GetFrame()->Loader().GetDocumentLoader()->GetHistoryItem()) {
     return history_item->StateObject();
   }
 
-  return 0;
+  return nullptr;
 }
 
-void History::setScrollRestoration(const String& value) {
+void History::setScrollRestoration(const String& value,
+                                   ExceptionState& exception_state) {
   DCHECK(value == "manual" || value == "auto");
-  if (!GetFrame() || !GetFrame()->Client())
+  if (!GetFrame() || !GetFrame()->Client()) {
+    exception_state.ThrowSecurityError(
+        "May not use a History object associated with a Document that is not "
+        "fully active");
     return;
+  }
 
   HistoryScrollRestorationType scroll_restoration =
       value == "manual" ? kScrollRestorationManual : kScrollRestorationAuto;
@@ -103,7 +119,13 @@ void History::setScrollRestoration(const String& value) {
   }
 }
 
-String History::scrollRestoration() {
+String History::scrollRestoration(ExceptionState& exception_state) {
+  if (!GetFrame() || !GetFrame()->Client()) {
+    exception_state.ThrowSecurityError(
+        "May not use a History object associated with a Document that is not "
+        "fully active");
+    return "auto";
+  }
   return ScrollRestorationInternal() == kScrollRestorationManual ? "manual"
                                                                  : "auto";
 }
@@ -125,7 +147,7 @@ bool History::ShouldThrottleStateObjectChanges() {
   if (state_flood_guard.count > kStateUpdateLimit) {
     static constexpr auto kStateUpdateLimitResetInterval =
         TimeDelta::FromSeconds(10);
-    const auto now = TimeTicks::Now();
+    const auto now = CurrentTimeTicks();
     if (now - state_flood_guard.last_updated > kStateUpdateLimitResetInterval) {
       state_flood_guard.count = 0;
       state_flood_guard.last_updated = now;
@@ -146,17 +168,24 @@ bool History::IsSameAsCurrentState(SerializedScriptValue* state) const {
   return state == StateInternal();
 }
 
-void History::back(ScriptState* script_state) {
-  go(script_state, -1);
+void History::back(ScriptState* script_state, ExceptionState& exception_state) {
+  go(script_state, -1, exception_state);
 }
 
-void History::forward(ScriptState* script_state) {
-  go(script_state, 1);
+void History::forward(ScriptState* script_state,
+                      ExceptionState& exception_state) {
+  go(script_state, 1, exception_state);
 }
 
-void History::go(ScriptState* script_state, int delta) {
-  if (!GetFrame() || !GetFrame()->Client())
+void History::go(ScriptState* script_state,
+                 int delta,
+                 ExceptionState& exception_state) {
+  if (!GetFrame() || !GetFrame()->Client()) {
+    exception_state.ThrowSecurityError(
+        "May not use a History object associated with a Document that is not "
+        "fully active");
     return;
+  }
 
   DCHECK(IsMainThread());
   Document* active_document = ToDocument(ExecutionContext::From(script_state));
@@ -182,7 +211,7 @@ void History::go(ScriptState* script_state, int delta) {
   }
 }
 
-void History::pushState(PassRefPtr<SerializedScriptValue> data,
+void History::pushState(scoped_refptr<SerializedScriptValue> data,
                         const String& title,
                         const String& url,
                         ExceptionState& exception_state) {
@@ -202,7 +231,7 @@ KURL History::UrlForState(const String& url_string) {
 }
 
 bool History::CanChangeToUrl(const KURL& url,
-                             SecurityOrigin* document_origin,
+                             const SecurityOrigin* document_origin,
                              const KURL& document_url) {
   if (!url.IsValid())
     return false;
@@ -219,7 +248,8 @@ bool History::CanChangeToUrl(const KURL& url,
   if (!EqualIgnoringPathQueryAndFragment(url, document_url))
     return false;
 
-  RefPtr<SecurityOrigin> requested_origin = SecurityOrigin::Create(url);
+  scoped_refptr<const SecurityOrigin> requested_origin =
+      SecurityOrigin::Create(url);
   if (requested_origin->IsUnique() ||
       !requested_origin->IsSameSchemeHostPort(document_origin)) {
     return false;
@@ -228,15 +258,19 @@ bool History::CanChangeToUrl(const KURL& url,
   return true;
 }
 
-void History::StateObjectAdded(PassRefPtr<SerializedScriptValue> data,
+void History::StateObjectAdded(scoped_refptr<SerializedScriptValue> data,
                                const String& /* title */,
                                const String& url_string,
                                HistoryScrollRestorationType restoration_type,
                                FrameLoadType type,
                                ExceptionState& exception_state) {
   if (!GetFrame() || !GetFrame()->GetPage() ||
-      !GetFrame()->Loader().GetDocumentLoader())
+      !GetFrame()->Loader().GetDocumentLoader()) {
+    exception_state.ThrowSecurityError(
+        "May not use a History object associated with a Document that is not "
+        "fully active");
     return;
+  }
 
   KURL full_url = UrlForState(url_string);
   if (!CanChangeToUrl(full_url, GetFrame()->GetDocument()->GetSecurityOrigin(),

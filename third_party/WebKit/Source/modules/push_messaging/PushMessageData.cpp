@@ -8,7 +8,7 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8BindingForCore.h"
-#include "bindings/modules/v8/ArrayBufferOrArrayBufferViewOrUSVString.h"
+#include "bindings/modules/v8/array_buffer_or_array_buffer_view_or_usv_string.h"
 #include "core/fileapi/Blob.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "platform/bindings/ScriptState.h"
@@ -26,28 +26,28 @@ PushMessageData* PushMessageData::Create(const String& message_string) {
   if (message_string.IsNull())
     return nullptr;
   return PushMessageData::Create(
-      ArrayBufferOrArrayBufferViewOrUSVString::fromUSVString(message_string));
+      ArrayBufferOrArrayBufferViewOrUSVString::FromUSVString(message_string));
 }
 
 PushMessageData* PushMessageData::Create(
     const ArrayBufferOrArrayBufferViewOrUSVString& message_data) {
-  if (message_data.isArrayBuffer() || message_data.isArrayBufferView()) {
+  if (message_data.IsArrayBuffer() || message_data.IsArrayBufferView()) {
     DOMArrayBuffer* buffer =
-        message_data.isArrayBufferView()
-            ? message_data.getAsArrayBufferView().View()->buffer()
-            : message_data.getAsArrayBuffer();
+        message_data.IsArrayBufferView()
+            ? message_data.GetAsArrayBufferView().View()->buffer()
+            : message_data.GetAsArrayBuffer();
 
     return new PushMessageData(static_cast<const char*>(buffer->Data()),
                                buffer->ByteLength());
   }
 
-  if (message_data.isUSVString()) {
+  if (message_data.IsUSVString()) {
     CString encoded_string = UTF8Encoding().Encode(
-        message_data.getAsUSVString(), WTF::kEntitiesForUnencodables);
+        message_data.GetAsUSVString(), WTF::kEntitiesForUnencodables);
     return new PushMessageData(encoded_string.data(), encoded_string.length());
   }
 
-  DCHECK(message_data.isNull());
+  DCHECK(message_data.IsNull());
   return nullptr;
 }
 
@@ -55,7 +55,7 @@ PushMessageData::PushMessageData(const char* data, unsigned bytes_size) {
   data_.Append(data, bytes_size);
 }
 
-PushMessageData::~PushMessageData() {}
+PushMessageData::~PushMessageData() = default;
 
 DOMArrayBuffer* PushMessageData::arrayBuffer() const {
   return DOMArrayBuffer::Create(data_.data(), data_.size());
@@ -77,7 +77,8 @@ ScriptValue PushMessageData::json(ScriptState* script_state,
                                   ExceptionState& exception_state) const {
   ScriptState::Scope scope(script_state);
   v8::Local<v8::Value> parsed =
-      FromJSONString(script_state->GetIsolate(), text(), exception_state);
+      FromJSONString(script_state->GetIsolate(), script_state->GetContext(),
+                     text(), exception_state);
   if (exception_state.HadException())
     return ScriptValue();
 
@@ -87,7 +88,5 @@ ScriptValue PushMessageData::json(ScriptState* script_state,
 String PushMessageData::text() const {
   return UTF8Encoding().Decode(data_.data(), data_.size());
 }
-
-DEFINE_TRACE(PushMessageData) {}
 
 }  // namespace blink

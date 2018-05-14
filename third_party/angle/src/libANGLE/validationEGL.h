@@ -90,13 +90,13 @@ Error ValidateStreamConsumerGLTextureExternalAttribsNV(const Display *display,
                                                        gl::Context *context,
                                                        const Stream *stream,
                                                        const AttributeMap &attribs);
-Error ValidateCreateStreamProducerD3DTextureNV12ANGLE(const Display *display,
-                                                      const Stream *stream,
-                                                      const AttributeMap &attribs);
-Error ValidateStreamPostD3DTextureNV12ANGLE(const Display *display,
-                                            const Stream *stream,
-                                            void *texture,
-                                            const AttributeMap &attribs);
+Error ValidateCreateStreamProducerD3DTextureANGLE(const Display *display,
+                                                  const Stream *stream,
+                                                  const AttributeMap &attribs);
+Error ValidateStreamPostD3DTextureANGLE(const Display *display,
+                                        const Stream *stream,
+                                        void *texture,
+                                        const AttributeMap &attribs);
 
 Error ValidateGetSyncValuesCHROMIUM(const Display *display,
                                     const Surface *surface,
@@ -146,6 +146,19 @@ Error ValidateProgramCachePopulateANGLE(const Display *display,
                                         EGLint binarysize);
 
 Error ValidateProgramCacheResizeANGLE(const Display *display, EGLint limit, EGLenum mode);
+
+Error ValidateSurfaceAttrib(const Display *display,
+                            const Surface *surface,
+                            EGLint attribute,
+                            EGLint value);
+Error ValidateQuerySurface(const Display *display,
+                           const Surface *surface,
+                           EGLint attribute,
+                           EGLint *value);
+Error ValidateQueryContext(const Display *display,
+                           const gl::Context *context,
+                           EGLint attribute,
+                           EGLint *value);
 
 }  // namespace egl
 

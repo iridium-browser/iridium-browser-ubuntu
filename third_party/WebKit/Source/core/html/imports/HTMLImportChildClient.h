@@ -31,6 +31,8 @@
 #ifndef HTMLImportChildClient_h
 #define HTMLImportChildClient_h
 
+#include "platform/heap/Handle.h"
+
 namespace blink {
 
 class HTMLImportChild;
@@ -38,12 +40,12 @@ class HTMLLinkElement;
 
 class HTMLImportChildClient : public GarbageCollectedMixin {
  public:
-  virtual ~HTMLImportChildClient() {}
+  virtual ~HTMLImportChildClient() = default;
   virtual void DidFinish() = 0;
   virtual void ImportChildWasDisposed(HTMLImportChild*) = 0;
   virtual bool IsSync() const = 0;
   virtual HTMLLinkElement* Link() = 0;
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
 };
 
 }  // namespace blink

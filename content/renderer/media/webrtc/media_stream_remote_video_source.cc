@@ -18,7 +18,7 @@
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
 #include "third_party/webrtc/api/video/i420_buffer.h"
-#include "third_party/webrtc/media/base/videosinkinterface.h"
+#include "third_party/webrtc/api/videosinkinterface.h"
 
 namespace content {
 
@@ -121,29 +121,43 @@ void MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate::OnFrame(
                       ->getMediaVideoFrame();
     video_frame->set_timestamp(elapsed_timestamp);
   } else {
-    scoped_refptr<webrtc::PlanarYuvBuffer> yuv_buffer;
-    media::VideoPixelFormat pixel_format;
-    if (buffer->type() == webrtc::VideoFrameBuffer::Type::kI444) {
-      yuv_buffer = buffer->GetI444();
-      pixel_format = media::PIXEL_FORMAT_YV24;
+    const gfx::Size size(buffer->width(), buffer->height());
+    const bool has_alpha =
+        buffer->type() == webrtc::VideoFrameBuffer::Type::kI420A;
+    if (has_alpha) {
+      const webrtc::I420ABufferInterface* yuva_buffer = buffer->GetI420A();
+      video_frame = media::VideoFrame::WrapExternalYuvaData(
+          media::PIXEL_FORMAT_I420A, size, gfx::Rect(size), size,
+          yuva_buffer->StrideY(), yuva_buffer->StrideU(),
+          yuva_buffer->StrideV(), yuva_buffer->StrideA(),
+          const_cast<uint8_t*>(yuva_buffer->DataY()),
+          const_cast<uint8_t*>(yuva_buffer->DataU()),
+          const_cast<uint8_t*>(yuva_buffer->DataV()),
+          const_cast<uint8_t*>(yuva_buffer->DataA()), elapsed_timestamp);
     } else {
-      yuv_buffer = buffer->ToI420();
-      pixel_format = media::PIXEL_FORMAT_YV12;
+      scoped_refptr<webrtc::PlanarYuvBuffer> yuv_buffer;
+      media::VideoPixelFormat pixel_format;
+      if (buffer->type() == webrtc::VideoFrameBuffer::Type::kI444) {
+        yuv_buffer = buffer->GetI444();
+        pixel_format = media::PIXEL_FORMAT_I444;
+      } else {
+        yuv_buffer = buffer->ToI420();
+        pixel_format = media::PIXEL_FORMAT_I420;
+      }
+      // Make a shallow copy. Both |frame| and |video_frame| will share a single
+      // reference counted frame buffer. Const cast and hope no one will
+      // overwrite the data.
+      video_frame = media::VideoFrame::WrapExternalYuvData(
+          pixel_format, size, gfx::Rect(size), size, yuv_buffer->StrideY(),
+          yuv_buffer->StrideU(), yuv_buffer->StrideV(),
+          const_cast<uint8_t*>(yuv_buffer->DataY()),
+          const_cast<uint8_t*>(yuv_buffer->DataU()),
+          const_cast<uint8_t*>(yuv_buffer->DataV()), elapsed_timestamp);
     }
-    gfx::Size size(yuv_buffer->width(), yuv_buffer->height());
-    // Make a shallow copy. Both |frame| and |video_frame| will share a single
-    // reference counted frame buffer. Const cast and hope no one will overwrite
-    // the data.
-    video_frame = media::VideoFrame::WrapExternalYuvData(
-        pixel_format, size, gfx::Rect(size), size, yuv_buffer->StrideY(),
-        yuv_buffer->StrideU(), yuv_buffer->StrideV(),
-        const_cast<uint8_t*>(yuv_buffer->DataY()),
-        const_cast<uint8_t*>(yuv_buffer->DataU()),
-        const_cast<uint8_t*>(yuv_buffer->DataV()), elapsed_timestamp);
     if (!video_frame)
       return;
     // The bind ensures that we keep a reference to the underlying buffer.
-    video_frame->AddDestructionObserver(base::Bind(&DoNothing, buffer));
+    video_frame->AddDestructionObserver(base::BindOnce(&DoNothing, buffer));
   }
   if (incoming_frame.rotation() != webrtc::kVideoRotation_0) {
     video_frame->metadata()->SetRotation(
@@ -154,8 +168,9 @@ void MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate::OnFrame(
       media::VideoFrameMetadata::REFERENCE_TIME, render_time);
 
   io_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&RemoteVideoSourceDelegate::DoRenderFrameOnIOThread,
-                            this, video_frame));
+      FROM_HERE,
+      base::BindOnce(&RemoteVideoSourceDelegate::DoRenderFrameOnIOThread, this,
+                     video_frame));
 }
 
 void MediaStreamRemoteVideoSource::

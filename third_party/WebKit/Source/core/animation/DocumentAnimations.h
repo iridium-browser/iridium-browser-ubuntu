@@ -47,14 +47,15 @@ class DocumentAnimations {
   static void UpdateAnimationTimingIfNeeded(Document&);
 
   // Updates existing animations as part of generating a new (document
-  // lifecycle) frame.
+  // lifecycle) frame. Note that this considers and updates state for
+  // both composited and non-composited animations.
   static void UpdateAnimations(
       Document&,
       DocumentLifecycle::LifecycleState required_lifecycle_state,
       Optional<CompositorElementIdSet>&);
 
  private:
-  DocumentAnimations() {}
+  DocumentAnimations() = default;
 };
 
 }  // namespace blink

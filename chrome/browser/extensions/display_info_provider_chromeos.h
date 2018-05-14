@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "extensions/browser/api/system_display/display_info_provider.h"
 
-namespace chromeos {
+namespace ash {
 class OverscanCalibrator;
 class TouchCalibratorController;
 }
@@ -26,6 +26,16 @@ class DisplayInfoProviderChromeOS : public DisplayInfoProvider {
   static const char kTouchCalibrationPointsNegativeError[];
   static const char kTouchCalibrationPointsTooLargeError[];
   static const char kNativeTouchCalibrationActiveError[];
+  static const char kNoExternalTouchDevicePresent[];
+  static const char kMirrorModeSourceIdNotSpecifiedError[];
+  static const char kMirrorModeDestinationIdsNotSpecifiedError[];
+  static const char kMirrorModeSourceIdBadFormatError[];
+  static const char kMirrorModeDestinationIdBadFormatError[];
+  static const char kMirrorModeSingleDisplayError[];
+  static const char kMirrorModeSourceIdNotFoundError[];
+  static const char kMirrorModeDestinationIdsEmptyError[];
+  static const char kMirrorModeDestinationIdNotFoundError[];
+  static const char kMirrorModeDuplicateIdError[];
 
   DisplayInfoProviderChromeOS();
   ~DisplayInfoProviderChromeOS() override;
@@ -34,7 +44,8 @@ class DisplayInfoProviderChromeOS : public DisplayInfoProvider {
   bool SetInfo(const std::string& display_id,
                const api::system_display::DisplayProperties& info,
                std::string* error) override;
-  bool SetDisplayLayout(const DisplayLayoutList& layouts) override;
+  bool SetDisplayLayout(const DisplayLayoutList& layouts,
+                        std::string* error) override;
   void UpdateDisplayUnitInfoForPlatform(
       const display::Display& display,
       api::system_display::DisplayUnitInfo* unit) override;
@@ -47,9 +58,9 @@ class DisplayInfoProviderChromeOS : public DisplayInfoProvider {
       const api::system_display::Insets& delta) override;
   bool OverscanCalibrationReset(const std::string& id) override;
   bool OverscanCalibrationComplete(const std::string& id) override;
-  bool ShowNativeTouchCalibration(
-      const std::string& id, std::string* error,
-      const TouchCalibrationCallback& callback) override;
+  bool ShowNativeTouchCalibration(const std::string& id,
+                                  std::string* error,
+                                  TouchCalibrationCallback callback) override;
   bool StartCustomTouchCalibration(const std::string& id,
                                    std::string* error) override;
   bool CompleteCustomTouchCalibration(
@@ -59,16 +70,18 @@ class DisplayInfoProviderChromeOS : public DisplayInfoProvider {
   bool ClearTouchCalibration(const std::string& id,
                              std::string* error) override;
   bool IsNativeTouchCalibrationActive(std::string* error) override;
+  bool SetMirrorMode(const api::system_display::MirrorModeInfo& info,
+                     std::string* out_error) override;
 
  private:
-  chromeos::TouchCalibratorController* GetTouchCalibrator();
+  ash::TouchCalibratorController* GetTouchCalibrator();
 
-  chromeos::OverscanCalibrator* GetOverscanCalibrator(const std::string& id);
+  ash::OverscanCalibrator* GetOverscanCalibrator(const std::string& id);
 
-  std::map<std::string, std::unique_ptr<chromeos::OverscanCalibrator>>
+  std::map<std::string, std::unique_ptr<ash::OverscanCalibrator>>
       overscan_calibrators_;
 
-  std::unique_ptr<chromeos::TouchCalibratorController> touch_calibrator_;
+  std::unique_ptr<ash::TouchCalibratorController> touch_calibrator_;
 
   std::string touch_calibration_target_id_;
   bool custom_touch_calibration_active_ = false;

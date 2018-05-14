@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef MEDIA_CAPTURE_VIDEO_VIDEO_CAPTURE_JPEG_DECODER_H_
+#define MEDIA_CAPTURE_VIDEO_VIDEO_CAPTURE_JPEG_DECODER_H_
+
 #include "base/callback.h"
 #include "media/capture/capture_export.h"
 #include "media/capture/mojo/video_capture_types.mojom.h"
@@ -40,10 +43,12 @@ class CAPTURE_EXPORT VideoCaptureJpegDecoder {
   virtual void DecodeCapturedData(
       const uint8_t* data,
       size_t in_buffer_size,
-      const media::VideoCaptureFormat& frame_format,
+      const VideoCaptureFormat& frame_format,
       base::TimeTicks reference_time,
       base::TimeDelta timestamp,
-      media::VideoCaptureDevice::Client::Buffer out_buffer) = 0;
+      VideoCaptureDevice::Client::Buffer out_buffer) = 0;
 };
 
 }  // namespace media
+
+#endif  // MEDIA_CAPTURE_VIDEO_VIDEO_CAPTURE_JPEG_DECODER_H_

@@ -27,8 +27,8 @@ class BluetoothAdapterMac;
 // Mac implementation of BluetoothTestBase.
 class BluetoothTestMac : public BluetoothTestBase {
  public:
-  static const std::string kTestPeripheralUUID1;
-  static const std::string kTestPeripheralUUID2;
+  static const char kTestPeripheralUUID1[];
+  static const char kTestPeripheralUUID2[];
 
   BluetoothTestMac();
   ~BluetoothTestMac() override;
@@ -127,6 +127,10 @@ class BluetoothTestMac : public BluetoothTestBase {
   void SimulateGattDescriptorReadNSNumberMac(
       BluetoothRemoteGattDescriptor* descriptor,
       short value);
+
+  // Sets the power state of the mock controller to |powered|. Used to override
+  // BluetoothAdapterMac's SetControllerPowerStateFunction.
+  void SetMockControllerPowerState(int powered);
 
   // Adds services in MockCBPeripheral.
   void AddServicesToDeviceMac(BluetoothDevice* device,

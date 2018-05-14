@@ -26,9 +26,11 @@
 #include "modules/indexeddb/IDBKeyPath.h"
 
 #include "platform/wtf/ASCIICType.h"
+#include "platform/wtf/Assertions.h"
 #include "platform/wtf/dtoa.h"
 #include "platform/wtf/text/CharacterNames.h"
 #include "platform/wtf/text/Unicode.h"
+#include "public/platform/modules/indexeddb/WebIDBTypes.h"
 
 namespace blink {
 
@@ -98,12 +100,12 @@ void IDBParseKeyPath(const String& key_path,
   error = kIDBKeyPathParseErrorNone;
 }
 
-IDBKeyPath::IDBKeyPath(const String& string)
+IDBKeyPath::IDBKeyPath(const class String& string)
     : type_(kStringType), string_(string) {
   DCHECK(!string_.IsNull());
 }
 
-IDBKeyPath::IDBKeyPath(const Vector<String>& array)
+IDBKeyPath::IDBKeyPath(const Vector<class String>& array)
     : type_(kArrayType), array_(array) {
 #if DCHECK_IS_ON()
   for (size_t i = 0; i < array_.size(); ++i)
@@ -112,16 +114,16 @@ IDBKeyPath::IDBKeyPath(const Vector<String>& array)
 }
 
 IDBKeyPath::IDBKeyPath(const StringOrStringSequence& key_path) {
-  if (key_path.isNull()) {
+  if (key_path.IsNull()) {
     type_ = kNullType;
-  } else if (key_path.isString()) {
+  } else if (key_path.IsString()) {
     type_ = kStringType;
-    string_ = key_path.getAsString();
+    string_ = key_path.GetAsString();
     DCHECK(!string_.IsNull());
   } else {
-    DCHECK(key_path.isStringSequence());
+    DCHECK(key_path.IsStringSequence());
     type_ = kArrayType;
-    array_ = key_path.getAsStringSequence();
+    array_ = key_path.GetAsStringSequence();
 #if DCHECK_IS_ON()
     for (size_t i = 0; i < array_.size(); ++i)
       DCHECK(!array_[i].IsNull());
@@ -137,7 +139,7 @@ IDBKeyPath::IDBKeyPath(const WebIDBKeyPath& key_path) {
 
     case kWebIDBKeyPathTypeString:
       type_ = kStringType;
-      string_ = key_path.GetString();
+      string_ = key_path.String();
       return;
 
     case kWebIDBKeyPathTypeArray:
@@ -198,5 +200,9 @@ bool IDBKeyPath::operator==(const IDBKeyPath& other) const {
   NOTREACHED();
   return false;
 }
+
+STATIC_ASSERT_ENUM(kWebIDBKeyPathTypeNull, IDBKeyPath::kNullType);
+STATIC_ASSERT_ENUM(kWebIDBKeyPathTypeString, IDBKeyPath::kStringType);
+STATIC_ASSERT_ENUM(kWebIDBKeyPathTypeArray, IDBKeyPath::kArrayType);
 
 }  // namespace blink

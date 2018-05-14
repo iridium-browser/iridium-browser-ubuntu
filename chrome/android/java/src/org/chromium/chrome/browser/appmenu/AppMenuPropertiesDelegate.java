@@ -11,16 +11,20 @@ import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
 import android.os.SystemClock;
 import android.support.annotation.Nullable;
+import android.text.TextUtils;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.View.OnClickListener;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.UrlConstants;
@@ -29,6 +33,7 @@ import org.chromium.chrome.browser.bookmarks.BookmarkBridge;
 import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.omaha.UpdateMenuItemHelper;
+import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.preferences.ManagedPreferencesUtils;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.share.ShareHelper;
@@ -44,14 +49,29 @@ import java.util.concurrent.TimeUnit;
  * App Menu helper that handles hiding and showing menu items based on activity state.
  */
 public class AppMenuPropertiesDelegate {
+    /**
+     * The param name for the "ChromeHomeMenuItemsExpandSheet" experiment. This specifies the number
+     * of times a menu item can be tapped before being hidden.
+     */
+    private static final String CHROME_HOME_MENU_ITEM_TAP_PARAM_NAME = "max_taps";
+
+    /**
+     * The number of times that bookmarks, downloads, and history can be triggered from the overflow
+     * menu in Chrome Home before they are hidden.
+     */
+    private static final int CHROME_HOME_MENU_ITEM_TAP_MAX = 10;
+
+    /**
+     * Whether or not the Chrome Home menu items should be hidden because they have been tapped the
+     * maximum number of times.
+     */
+    private static boolean sHideChromeHomeMenuItems;
+
     protected MenuItem mReloadMenuItem;
 
     protected final ChromeActivity mActivity;
 
     protected BookmarkBridge mBookmarkBridge;
-
-    @Nullable
-    private AppMenuIconRowFooter mAppMenuIconRowFooter;
 
     public AppMenuPropertiesDelegate(ChromeActivity activity) {
         mActivity = activity;
@@ -65,6 +85,20 @@ public class AppMenuPropertiesDelegate {
     }
 
     /**
+     * @return Whether the app menu for a web page should be shown.
+     */
+    public boolean shouldShowPageMenu() {
+        boolean isOverview = mActivity.isInOverviewMode();
+
+        if (mActivity.isTablet()) {
+            boolean hasTabs = mActivity.getCurrentTabModel().getCount() != 0;
+            return hasTabs && !isOverview;
+        } else {
+            return !isOverview && mActivity.getActivityTab() != null;
+        }
+    }
+
+    /**
      * Allows the delegate to show and hide items before the App Menu is shown. It is called every
      * time the menu is shown. This assumes that the provided menu contains all the items expected
      * in the application menu (i.e. that the main menu has been inflated into it).
@@ -72,11 +106,9 @@ public class AppMenuPropertiesDelegate {
      */
     public void prepareMenu(Menu menu) {
         // Exactly one of these will be true, depending on the type of menu showing.
-        boolean isPageMenu;
+        boolean isPageMenu = shouldShowPageMenu();
         boolean isOverviewMenu;
         boolean isTabletEmptyModeMenu;
-        boolean isBottomSheetNtpMenu =
-                mActivity.getBottomSheet() != null && mActivity.getBottomSheet().isShowingNewTab();
 
         boolean isOverview = mActivity.isInOverviewMode();
         boolean isIncognito = mActivity.getCurrentTabModel().isIncognito();
@@ -85,18 +117,18 @@ public class AppMenuPropertiesDelegate {
         // Determine which menu to show.
         if (mActivity.isTablet()) {
             boolean hasTabs = mActivity.getCurrentTabModel().getCount() != 0;
-            isPageMenu = hasTabs && !isOverview;
             isOverviewMenu = hasTabs && isOverview;
             isTabletEmptyModeMenu = !hasTabs;
         } else {
-            isPageMenu = !isBottomSheetNtpMenu && !isOverview;
-            isOverviewMenu = !isBottomSheetNtpMenu && isOverview;
+            isOverviewMenu = isOverview;
             isTabletEmptyModeMenu = false;
         }
+        int visibleMenus =
+                (isPageMenu ? 1 : 0) + (isOverviewMenu ? 1 : 0) + (isTabletEmptyModeMenu ? 1 : 0);
+        assert visibleMenus == 1;
 
         menu.setGroupVisible(R.id.PAGE_MENU, isPageMenu);
         menu.setGroupVisible(R.id.OVERVIEW_MODE_MENU, isOverviewMenu);
-        menu.setGroupVisible(R.id.BOTTOM_SHEET_NTP_MENU, isBottomSheetNtpMenu);
         menu.setGroupVisible(R.id.TABLET_EMPTY_MODE_MENU, isTabletEmptyModeMenu);
 
         if (isPageMenu && currentTab != null) {
@@ -105,13 +137,9 @@ public class AppMenuPropertiesDelegate {
                     || url.startsWith(UrlConstants.CHROME_NATIVE_URL_PREFIX);
             boolean isFileScheme = url.startsWith(UrlConstants.FILE_URL_PREFIX);
             boolean isContentScheme = url.startsWith(UrlConstants.CONTENT_URL_PREFIX);
-
-            // If the BottomSheet is not null, the icon row will be displayed using
-            // AppMenuIconRowFooter as a prompt view.
-            boolean shouldShowIconRow = mActivity.getBottomSheet() == null
-                    && (!mActivity.isTablet()
-                               || mActivity.getWindow().getDecorView().getWidth()
-                                       < DeviceFormFactor.getMinimumTabletWidthPx(mActivity));
+            boolean shouldShowIconRow = !mActivity.isTablet()
+                    || mActivity.getWindow().getDecorView().getWidth()
+                            < DeviceFormFactor.getMinimumTabletWidthPx(mActivity);
 
             // Update the icon row items (shown in narrow form factors).
             menu.findItem(R.id.icon_row_menu_id).setVisible(shouldShowIconRow);
@@ -157,8 +185,9 @@ public class AppMenuPropertiesDelegate {
             MenuItem allBookmarksMenuItem = menu.findItem(R.id.all_bookmarks_menu_id);
             allBookmarksMenuItem.setTitle(mActivity.getString(R.string.menu_bookmarks));
 
-            // Don't allow "chrome://" pages to be shared.
-            menu.findItem(R.id.share_row_menu_id).setVisible(!isChromeScheme);
+            // Don't allow either "chrome://" pages or interstitial pages to be shared.
+            menu.findItem(R.id.share_row_menu_id)
+                    .setVisible(!isChromeScheme && !currentTab.isShowingInterstitialPage());
 
             ShareHelper.configureDirectShareMenuItem(
                     mActivity, menu.findItem(R.id.direct_share_menu_id));
@@ -178,10 +207,11 @@ public class AppMenuPropertiesDelegate {
             //                is not persisted when adding to the homescreen.
             // * If creating shortcuts it not supported by the current home screen.
             boolean canShowHomeScreenMenuItem = ShortcutHelper.isAddToHomeIntentSupported()
-                    && !isChromeScheme && !isFileScheme && !isContentScheme && !isIncognito;
+                    && !isChromeScheme && !isFileScheme && !isContentScheme && !isIncognito
+                    && !TextUtils.isEmpty(url);
             prepareAddToHomescreenMenuItem(menu, currentTab, canShowHomeScreenMenuItem);
 
-            updateRequestDesktopSiteMenuItem(menu, currentTab);
+            updateRequestDesktopSiteMenuItem(menu, currentTab, true /* can show */);
 
             // Only display reader mode settings menu option if the current page is in reader mode.
             menu.findItem(R.id.reader_mode_prefs_id)
@@ -191,7 +221,7 @@ public class AppMenuPropertiesDelegate {
             menu.findItem(R.id.enter_vr_id).setVisible(
                     CommandLine.getInstance().hasSwitch(ChromeSwitches.ENABLE_VR_SHELL_DEV));
 
-            if (FeatureUtilities.isChromeHomeEnabled()) {
+            if (!shouldShowNavMenuItems()) {
                 // History, downloads, and bookmarks are shown in the Chrome Home bottom sheet.
                 menu.findItem(R.id.open_history_menu_id).setVisible(false);
                 menu.findItem(R.id.downloads_menu_id).setVisible(false);
@@ -214,35 +244,14 @@ public class AppMenuPropertiesDelegate {
             }
         }
 
-        if (isBottomSheetNtpMenu) {
-            disableEnableMenuItem(menu, R.id.recent_tabs_menu_id, !isIncognito, true, false);
-            disableEnableMenuItem(menu, R.id.new_tab_menu_id, isIncognito, true, false);
-        }
-
-        boolean incognitoMenuItemVisible = !isBottomSheetNtpMenu || !isIncognito;
         // Disable new incognito tab when it is blocked (e.g. by a policy).
         // findItem(...).setEnabled(...)" is not enough here, because of the inflated
         // main_menu.xml contains multiple items with the same id in different groups
         // e.g.: new_incognito_tab_menu_id.
-        disableEnableMenuItem(menu, R.id.new_incognito_tab_menu_id, incognitoMenuItemVisible,
+        disableEnableMenuItem(menu, R.id.new_incognito_tab_menu_id, true,
                 PrefServiceBridge.getInstance().isIncognitoModeEnabled(),
                 PrefServiceBridge.getInstance().isIncognitoModeManaged());
         mActivity.prepareMenu(menu);
-    }
-
-    /**
-     * Called after the menu has been shown to finish initializing views.
-     * @param menu The {@link AppMenu} that was shown.
-     */
-    public void onShow(final AppMenu menu) {
-        View footerView = menu.getFooterView();
-        if (!(footerView instanceof AppMenuIconRowFooter)) {
-            mAppMenuIconRowFooter = null;
-            return;
-        }
-
-        mAppMenuIconRowFooter = (AppMenuIconRowFooter) footerView;
-        mAppMenuIconRowFooter.initialize(mActivity, menu, mBookmarkBridge);
     }
 
     /**
@@ -297,8 +306,6 @@ public class AppMenuPropertiesDelegate {
                             : resources.getInteger(R.integer.reload_button_level_reload));
             mReloadMenuItem.setTitle(isLoading
                     ? R.string.accessibility_btn_stop_loading : R.string.accessibility_btn_refresh);
-        } else if (mAppMenuIconRowFooter != null) {
-            mAppMenuIconRowFooter.loadingStateChanged(isLoading);
         }
     }
 
@@ -328,18 +335,47 @@ public class AppMenuPropertiesDelegate {
     }
 
     /**
-     * @return Resource layout id for the footer if there should be one. O otherwise.
+     * @return Resource layout id for the footer if there should be one. O otherwise. The footer
+     *         is shown at a fixed position at the bottom the app menu. It is always visible and
+     *         overlays other app menu items if necessary.
      */
     public int getFooterResourceId() {
         return 0;
     }
 
     /**
-     * Determines whether the header should be shown based on the maximum available menu height.
+     * @return The View to use as the app menu header if there should be one. null otherwise. The
+     *         header will be displayed as the first item in the app menu. It will be scrolled off
+     *         as the menu scrolls.
+     */
+    public View getHeaderView() {
+        return null;
+    }
+
+    /**
+     * @return The {@link OnClickListener} to notify when the header view is clicked. May be null if
+     *         nothing should happen when the header is clicked.
+     */
+    @Nullable
+    public OnClickListener getHeaderOnClickListener() {
+        return null;
+    }
+
+    /**
+     * Determines whether the footer should be shown based on the maximum available menu height.
      * @param maxMenuHeight The maximum available height for the menu to draw.
      * @return Whether the footer, as specified in {@link #getFooterResourceId()}, should be shown.
      */
     public boolean shouldShowFooter(int maxMenuHeight) {
+        return true;
+    }
+
+    /**
+     * Determines whether the header should be shown based on the maximum available menu height.
+     * @param maxMenuHeight The maximum available height for the menu to draw.
+     * @return Whether the header, as specified in {@link #getHeaderView()}, should be shown.
+     */
+    public boolean shouldShowHeader(int maxMenuHeight) {
         return true;
     }
 
@@ -374,10 +410,11 @@ public class AppMenuPropertiesDelegate {
     /**
      * Updates the request desktop site item's state.
      *
-     * @param requstMenuItem {@link MenuItem} for request desktop site.
+     * @param menu {@link Menu} for request desktop site.
      * @param currentTab      Current tab being displayed.
      */
-    protected void updateRequestDesktopSiteMenuItem(Menu menu, Tab currentTab) {
+    protected void updateRequestDesktopSiteMenuItem(
+            Menu menu, Tab currentTab, boolean canShowRequestDekstopSite) {
         MenuItem requestMenuRow = menu.findItem(R.id.request_desktop_site_row_menu_id);
         MenuItem requestMenuLabel = menu.findItem(R.id.request_desktop_site_id);
         MenuItem requestMenuCheck = menu.findItem(R.id.request_desktop_site_check_id);
@@ -386,7 +423,13 @@ public class AppMenuPropertiesDelegate {
         String url = currentTab.getUrl();
         boolean isChromeScheme = url.startsWith(UrlConstants.CHROME_URL_PREFIX)
                 || url.startsWith(UrlConstants.CHROME_NATIVE_URL_PREFIX);
-        requestMenuRow.setVisible(!isChromeScheme || currentTab.isNativePage());
+        // Also hide request desktop site on Reader Mode.
+        boolean isDistilledPage = DomDistillerUrlUtils.isDistilledPage(url);
+
+        boolean itemVisible = canShowRequestDekstopSite
+                && (!isChromeScheme || currentTab.isNativePage()) && !isDistilledPage;
+        requestMenuRow.setVisible(itemVisible);
+        if (!itemVisible) return;
 
         // Mark the checkbox if RDS is activated on this page.
         requestMenuCheck.setChecked(currentTab.getUseDesktopUserAgent());
@@ -396,5 +439,33 @@ public class AppMenuPropertiesDelegate {
         requestMenuLabel.setTitleCondensed(requestMenuLabel.isChecked()
                         ? mActivity.getString(R.string.menu_request_desktop_site_on)
                         : mActivity.getString(R.string.menu_request_desktop_site_off));
+    }
+
+    /**
+     * @return Whether bookmarks, downloads, and history should be shown in the menu.
+     */
+    public static boolean shouldShowNavMenuItems() {
+        if (!FeatureUtilities.isChromeHomeEnabled()) return true;
+
+        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+            int maxTapCount = ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
+                    ChromeFeatureList.CHROME_HOME_MENU_ITEMS_EXPAND_SHEET,
+                    CHROME_HOME_MENU_ITEM_TAP_PARAM_NAME, CHROME_HOME_MENU_ITEM_TAP_MAX);
+
+            sHideChromeHomeMenuItems = sHideChromeHomeMenuItems
+                    || ChromePreferenceManager.getInstance().getChromeHomeMenuItemClickCount()
+                            >= maxTapCount;
+        }
+
+        boolean chromeHomeMenuItemFlagEnabled = ChromeFeatureList.isInitialized()
+                && ChromeFeatureList.isEnabled(
+                           ChromeFeatureList.CHROME_HOME_MENU_ITEMS_EXPAND_SHEET);
+
+        // If Chrome Home or the menu item feature is disabled, clear the menu tap preference.
+        if (!chromeHomeMenuItemFlagEnabled) {
+            ChromePreferenceManager.getInstance().clearChromeHomeMenuItemClickCount();
+        }
+
+        return chromeHomeMenuItemFlagEnabled && !sHideChromeHomeMenuItems;
     }
 }

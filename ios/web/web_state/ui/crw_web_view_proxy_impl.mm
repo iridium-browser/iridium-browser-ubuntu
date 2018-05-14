@@ -4,7 +4,6 @@
 
 #import "ios/web/web_state/ui/crw_web_view_proxy_impl.h"
 
-#import "base/mac/scoped_nsobject.h"
 #import "ios/web/public/web_state/ui/crw_content_view.h"
 #import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
@@ -69,10 +68,10 @@ UIView* GetFirstResponderSubview(UIView* view) {
 
 @implementation CRWWebViewProxyImpl {
   __weak CRWWebController* _webController;
-  base::scoped_nsobject<NSMutableDictionary> _registeredInsets;
+  NSMutableDictionary* _registeredInsets;
   // The WebViewScrollViewProxy is a wrapper around the web view's
   // UIScrollView to give components access in a limited and controlled manner.
-  base::scoped_nsobject<CRWWebViewScrollViewProxy> _contentViewScrollViewProxy;
+  CRWWebViewScrollViewProxy* _contentViewScrollViewProxy;
 }
 @synthesize contentView = _contentView;
 
@@ -80,15 +79,15 @@ UIView* GetFirstResponderSubview(UIView* view) {
   self = [super init];
   if (self) {
     DCHECK(webController);
-    _registeredInsets.reset([[NSMutableDictionary alloc] init]);
+    _registeredInsets = [[NSMutableDictionary alloc] init];
     _webController = webController;
-    _contentViewScrollViewProxy.reset([[CRWWebViewScrollViewProxy alloc] init]);
+    _contentViewScrollViewProxy = [[CRWWebViewScrollViewProxy alloc] init];
   }
   return self;
 }
 
 - (CRWWebViewScrollViewProxy*)scrollViewProxy {
-  return _contentViewScrollViewProxy.get();
+  return _contentViewScrollViewProxy;
 }
 
 - (CGRect)bounds {
@@ -99,12 +98,12 @@ UIView* GetFirstResponderSubview(UIView* view) {
   return [_contentView frame];
 }
 
-- (CGFloat)topContentPadding {
-  return [_contentView topContentPadding];
+- (UIEdgeInsets)contentInset {
+  return _contentView.contentInset;
 }
 
-- (void)setTopContentPadding:(CGFloat)newTopContentPadding {
-  [_contentView setTopContentPadding:newTopContentPadding];
+- (void)setContentInset:(UIEdgeInsets)contentInset {
+  _contentView.contentInset = contentInset;
 }
 
 - (NSArray*)gestureRecognizers {
@@ -119,16 +118,16 @@ UIView* GetFirstResponderSubview(UIView* view) {
   [_contentView removeGestureRecognizer:gestureRecognizer];
 }
 
-- (BOOL)shouldUseInsetForTopPadding {
-  SEL shouldUseInsetSelector = @selector(shouldUseInsetForTopPadding);
+- (BOOL)shouldUseViewContentInset {
+  SEL shouldUseInsetSelector = @selector(shouldUseViewContentInset);
   return [_contentView respondsToSelector:shouldUseInsetSelector] &&
-         [_contentView shouldUseInsetForTopPadding];
+         [_contentView shouldUseViewContentInset];
 }
 
-- (void)setShouldUseInsetForTopPadding:(BOOL)shouldUseInsetForTopPadding {
+- (void)setShouldUseViewContentInset:(BOOL)shouldUseViewContentInset {
   if ([_contentView
-          respondsToSelector:@selector(setShouldUseInsetForTopPadding:)]) {
-    [_contentView setShouldUseInsetForTopPadding:shouldUseInsetForTopPadding];
+          respondsToSelector:@selector(setShouldUseViewContentInset:)]) {
+    [_contentView setShouldUseViewContentInset:shouldUseViewContentInset];
   }
 }
 

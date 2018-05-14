@@ -5,12 +5,13 @@
 #ifndef MediaControlsOrientationLockDelegate_h
 #define MediaControlsOrientationLockDelegate_h
 
-#include "core/events/EventListener.h"
-#include "device/screen_orientation/public/interfaces/screen_orientation.mojom-blink.h"
+#include "core/dom/events/EventListener.h"
 #include "modules/ModulesExport.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/wtf/Optional.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/modules/screen_orientation/WebScreenOrientationLockType.h"
+#include "services/device/public/mojom/screen_orientation.mojom-blink.h"
 
 namespace blink {
 
@@ -68,7 +69,7 @@ class MediaControlsOrientationLockDelegate final : public EventListener {
   // EventListener implementation.
   bool operator==(const EventListener&) const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   friend class MediaControlsOrientationLockDelegateTest;

@@ -2,31 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/accessibility_types.h"
 #include "ash/login_status.h"
-#include "ash/magnifier/magnification_controller.h"
+#include "ash/public/cpp/accessibility_types.h"
+#include "ash/public/cpp/ash_pref_names.h"
 #include "ash/shell.h"
 #include "ash/shell_test_api.h"
+#include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_test_api.h"
 #include "ash/system/tray_accessibility.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/run_loop.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/extensions/api/braille_display_private/mock_braille_controller.h"
+#include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/session_controller_client.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/chromeos_switches.h"
@@ -40,16 +38,11 @@
 #include "components/session_manager/core/session_manager.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/message_center/message_center.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/button/custom_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/widget/widget.h"
 
-using extensions::api::braille_display_private::BrailleObserver;
-using extensions::api::braille_display_private::DisplayState;
-using extensions::api::braille_display_private::MockBrailleController;
-using message_center::MessageCenter;
 using testing::Return;
 using testing::_;
 using testing::WithParamInterface;
@@ -61,66 +54,109 @@ enum PrefSettingMechanism {
   POLICY,
 };
 
+////////////////////////////////////////////////////////////////////////////////
+// Changing accessibility settings may change preferences, so these helpers spin
+// the message loop to ensure ash sees the change.
+
 void SetMagnifierEnabled(bool enabled) {
   MagnificationManager::Get()->SetMagnifierEnabled(enabled);
+  base::RunLoop().RunUntilIdle();
 }
 
-// Simulates how UserSessionManager creates and starts a user session.
-void CreateAndStartUserSession(const AccountId& account_id) {
-  using session_manager::SessionManager;
-
-  const std::string user_id_hash =
-      ProfileHelper::GetUserIdHashByUserIdForTesting(account_id.GetUserEmail());
-
-  SessionManager::Get()->CreateSession(account_id, user_id_hash);
-  ProfileHelper::GetProfileByUserIdHashForTest(user_id_hash);
-  SessionManager::Get()->SessionStarted();
+void EnableSpokenFeedback(bool enabled,
+                          ash::AccessibilityNotificationVisibility notify) {
+  AccessibilityManager::Get()->EnableSpokenFeedback(enabled, notify);
+  base::RunLoop().RunUntilIdle();
 }
 
+void EnableSelectToSpeak(bool enabled) {
+  AccessibilityManager::Get()->SetSelectToSpeakEnabled(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void EnableHighContrast(bool enabled) {
+  AccessibilityManager::Get()->EnableHighContrast(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void EnableAutoclick(bool enabled) {
+  AccessibilityManager::Get()->EnableAutoclick(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void EnableVirtualKeyboard(bool enabled) {
+  AccessibilityManager::Get()->EnableVirtualKeyboard(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void EnableLargeCursor(bool enabled) {
+  AccessibilityManager::Get()->EnableLargeCursor(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void EnableMonoAudio(bool enabled) {
+  AccessibilityManager::Get()->EnableMonoAudio(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void SetCaretHighlightEnabled(bool enabled) {
+  AccessibilityManager::Get()->SetCaretHighlightEnabled(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void SetCursorHighlightEnabled(bool enabled) {
+  AccessibilityManager::Get()->SetCursorHighlightEnabled(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void SetFocusHighlightEnabled(bool enabled) {
+  AccessibilityManager::Get()->SetFocusHighlightEnabled(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void EnableStickyKeys(bool enabled) {
+  AccessibilityManager::Get()->EnableStickyKeys(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void EnableTapDragging(bool enabled) {
+  AccessibilityManager::Get()->EnableTapDragging(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+// Uses InProcessBrowserTest instead of OobeBaseTest because most of the tests
+// don't need to test the login screen.
 class TrayAccessibilityTest
     : public InProcessBrowserTest,
       public WithParamInterface<PrefSettingMechanism> {
- protected:
-  TrayAccessibilityTest() {}
-  virtual ~TrayAccessibilityTest() {}
+ public:
+  TrayAccessibilityTest()
+      : disable_animations_(
+            ui::ScopedAnimationDurationScaleMode::ZERO_DURATION) {}
+  ~TrayAccessibilityTest() override = default;
 
   // The profile which should be used by these tests.
   Profile* GetProfile() { return ProfileManager::GetActiveUserProfile(); }
 
   void SetUpInProcessBrowserTestFixture() override {
+    InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
     EXPECT_CALL(provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
-    AccessibilityManager::SetBrailleControllerForTest(&braille_controller_);
-  }
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kLoginManager);
-    command_line->AppendSwitchASCII(switches::kLoginProfile,
-                                    TestingProfile::kTestUserProfileDir);
-  }
-
-  void SetUpOnMainThread() override {
-    AccessibilityManager::Get()->SetProfileForTest(GetProfile());
-    MagnificationManager::Get()->SetProfileForTest(GetProfile());
-    // Need to mark oobe completed to show detailed views.
-    StartupUtils::MarkOobeCompleted();
-  }
-
-  void TearDownOnMainThread() override {
-    AccessibilityManager::SetBrailleControllerForTest(NULL);
   }
 
   void SetShowAccessibilityOptionsInSystemTrayMenu(bool value) {
     if (GetParam() == PREF_SERVICE) {
       PrefService* prefs = GetProfile()->GetPrefs();
-      prefs->SetBoolean(prefs::kShouldAlwaysShowAccessibilityMenu, value);
+      prefs->SetBoolean(ash::prefs::kShouldAlwaysShowAccessibilityMenu, value);
+      // Prefs are sent to ash asynchronously.
+      base::RunLoop().RunUntilIdle();
     } else if (GetParam() == POLICY) {
       policy::PolicyMap policy_map;
       policy_map.Set(policy::key::kShowAccessibilityOptionsInSystemTrayMenu,
                      policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
                      policy::POLICY_SOURCE_CLOUD,
-                     base::MakeUnique<base::Value>(value), nullptr);
+                     std::make_unique<base::Value>(value), nullptr);
       provider_.UpdateChromePolicy(policy_map);
       base::RunLoop().RunUntilIdle();
     } else {
@@ -128,17 +164,13 @@ class TrayAccessibilityTest
     }
   }
 
-  ash::TrayAccessibility* tray() {
-    return const_cast<ash::TrayAccessibility*>(
-        const_cast<const TrayAccessibilityTest*>(this)->tray());
-  }
-
-  const ash::TrayAccessibility* tray() const {
+  static ash::TrayAccessibility* tray() {
     return ash::SystemTrayTestApi(ash::Shell::Get()->GetPrimarySystemTray())
         .tray_accessibility();
   }
 
-  bool IsTrayIconVisible() const { return tray()->tray_icon_visible_; }
+  // The "tray view" is the icon.
+  bool IsTrayIconVisible() const { return tray()->tray_view()->visible(); }
 
   views::View* CreateMenuItem() {
     return tray()->CreateDefaultView(GetLoginStatus());
@@ -149,7 +181,7 @@ class TrayAccessibilityTest
   bool CanCreateMenuItem() {
     views::View* menu_item_view = CreateMenuItem();
     DestroyMenuItem();
-    return menu_item_view != NULL;
+    return menu_item_view != nullptr;
   }
 
   void SetLoginStatus(ash::LoginStatus status) {
@@ -159,8 +191,12 @@ class TrayAccessibilityTest
   ash::LoginStatus GetLoginStatus() { return tray()->login_; }
 
   bool CreateDetailedMenu() {
-    tray()->ShowDetailedView(0, false);
-    return tray()->detailed_menu_ != NULL;
+    tray()->ShowDetailedView(0);
+    return tray()->detailed_menu_ != nullptr;
+  }
+
+  ash::tray::AccessibilityDetailedView* GetDetailedMenu() {
+    return tray()->detailed_menu_;
   }
 
   void CloseDetailMenu() {
@@ -169,81 +205,99 @@ class TrayAccessibilityTest
     EXPECT_FALSE(tray()->detailed_menu_);
   }
 
+  // These helpers may change prefs in ash, so they must spin the message loop
+  // to wait for chrome to observe the change.
   void ClickSpokenFeedbackOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->spoken_feedback_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view =
+        tray()->detailed_menu_->spoken_feedback_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ClickHighContrastOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->high_contrast_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view = tray()->detailed_menu_->high_contrast_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ClickScreenMagnifierOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->screen_magnifier_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view =
+        tray()->detailed_menu_->screen_magnifier_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ClickAutoclickOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->autoclick_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view = tray()->detailed_menu_->autoclick_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ClickVirtualKeyboardOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->virtual_keyboard_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view =
+        tray()->detailed_menu_->virtual_keyboard_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ClickLargeMouseCursorOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->large_cursor_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view = tray()->detailed_menu_->large_cursor_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ClickMonoAudioOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->mono_audio_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view = tray()->detailed_menu_->mono_audio_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ClickCaretHighlightOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->caret_highlight_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view =
+        tray()->detailed_menu_->caret_highlight_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ClickHighlightMouseCursorOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->highlight_mouse_cursor_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view =
+        tray()->detailed_menu_->highlight_mouse_cursor_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
-  void ClickHighlishtKeyboardFocusOnDetailMenu() {
-    views::View* button =
+  void ClickHighlightKeyboardFocusOnDetailMenu() {
+    ash::HoverHighlightView* view =
         tray()->detailed_menu_->highlight_keyboard_focus_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ClickStickyKeysOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->sticky_keys_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view = tray()->detailed_menu_->sticky_keys_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ClickTapDraggingOnDetailMenu() {
-    views::View* button = tray()->detailed_menu_->tap_dragging_view_;
-    ASSERT_TRUE(button);
-    tray()->detailed_menu_->OnViewClicked(button);
+    ash::HoverHighlightView* view = tray()->detailed_menu_->tap_dragging_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
+  }
+
+  void ClickSelectToSpeakOnDetailMenu() {
+    ash::HoverHighlightView* view =
+        tray()->detailed_menu_->select_to_speak_view_;
+    tray()->detailed_menu_->OnViewClicked(view);
+    base::RunLoop().RunUntilIdle();
   }
 
   bool IsSpokenFeedbackEnabledOnDetailMenu() const {
     return tray()->detailed_menu_->spoken_feedback_enabled_;
+  }
+
+  bool IsSelectToSpeakEnabledOnDetailMenu() const {
+    return tray()->detailed_menu_->select_to_speak_enabled_;
   }
 
   bool IsHighContrastEnabledOnDetailMenu() const {
@@ -340,204 +394,210 @@ class TrayAccessibilityTest
 
   // In material design we show the help button but theme it as disabled if
   // it is not possible to load the help page.
-  bool IsHelpAvailableOnDetailMenu() const {
+  static bool IsHelpAvailableOnDetailMenu() {
     return tray()->detailed_menu_->help_view_->state() ==
            views::Button::STATE_NORMAL;
   }
 
   // In material design we show the settings button but theme it as disabled if
   // it is not possible to load the settings page.
-  bool IsSettingsAvailableOnDetailMenu() const {
+  static bool IsSettingsAvailableOnDetailMenu() {
     return tray()->detailed_menu_->settings_view_->state() ==
            views::Button::STATE_NORMAL;
   }
 
-  void SetBrailleConnected(bool connected) {
-    braille_controller_.SetAvailable(connected);
-    braille_controller_.GetObserver()->OnBrailleDisplayStateChanged(
-        *braille_controller_.GetDisplayState());
-  }
+  // Disable animations so that tray icons hide immediately.
+  ui::ScopedAnimationDurationScaleMode disable_animations_;
 
   policy::MockConfigurationPolicyProvider provider_;
-  MockBrailleController braille_controller_;
 };
 
-IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, LoginStatus) {
-  EXPECT_EQ(ash::LoginStatus::NOT_LOGGED_IN, GetLoginStatus());
+using TrayAccessibilityLoginScreenTest = OobeBaseTest;
 
-  CreateAndStartUserSession(AccountId::FromUserEmail("owner@invalid.domain"));
-  // Flush to ensure the session state reaches ash and updates login status.
-  SessionControllerClient::FlushForTesting();
+// Verify the login screen state in a separate test to avoid having to simulate
+// login repeatedly.
+IN_PROC_BROWSER_TEST_F(TrayAccessibilityLoginScreenTest, LoginStatus) {
+  ui::ScopedAnimationDurationScaleMode disable_animations(
+      ui::ScopedAnimationDurationScaleMode::ZERO_DURATION);
+  WaitForSigninScreen();
 
-  EXPECT_EQ(ash::LoginStatus::USER, GetLoginStatus());
+  // By default the icon is not visible at the login screen.
+  views::View* tray_icon = TrayAccessibilityTest::tray()->tray_view();
+  EXPECT_FALSE(tray_icon->visible());
+
+  // Enabling an accessibility feature shows the icon.
+  EnableLargeCursor(true);
+  EXPECT_TRUE(tray_icon->visible());
+
+  // Disabling the accessibility feature hides the icon.
+  EnableLargeCursor(false);
+  EXPECT_FALSE(tray_icon->visible());
+
+  // Settings and help are not available on the login screen because they use
+  // webui.
+  TrayAccessibilityTest::tray()->ShowDetailedView(0);
+  EXPECT_FALSE(TrayAccessibilityTest::IsHelpAvailableOnDetailMenu());
+  EXPECT_FALSE(TrayAccessibilityTest::IsSettingsAvailableOnDetailMenu());
 }
 
 IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowTrayIcon) {
-  SetLoginStatus(ash::LoginStatus::NOT_LOGGED_IN);
-
-  // Confirms that the icon is invisible before login.
-  EXPECT_FALSE(IsTrayIconVisible());
-
-  CreateAndStartUserSession(AccountId::FromUserEmail("owner@invalid.domain"));
-
   // Confirms that the icon is invisible just after login.
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling spoken feedback changes the visibillity of the icon.
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
+  // Toggling spoken feedback changes the visibility of the icon.
+  EnableSpokenFeedback(true, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(false, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling high contrast the visibillity of the icon.
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  // Toggling high contrast changes the visibility of the icon.
+  EnableHighContrast(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableHighContrast(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling magnifier the visibility of the icon.
+  // Toggling magnifier changes the visibility of the icon.
   SetMagnifierEnabled(true);
   EXPECT_TRUE(IsTrayIconVisible());
   SetMagnifierEnabled(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling automatic clicks changes the visibility of the icon
-  AccessibilityManager::Get()->EnableAutoclick(true);
+  // Toggling automatic clicks changes the visibility of the icon.
+  EnableAutoclick(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableAutoclick(false);
+  EnableAutoclick(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
   // Toggling the virtual keyboard setting changes the visibility of the a11y
   // icon.
-  AccessibilityManager::Get()->EnableVirtualKeyboard(true);
+  EnableVirtualKeyboard(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(false);
+  EnableVirtualKeyboard(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling the higlight large cursor changes the visibility of the icon
-  AccessibilityManager::Get()->EnableLargeCursor(true);
+  // Toggling large cursor changes the visibility of the icon.
+  EnableLargeCursor(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableLargeCursor(false);
+  EnableLargeCursor(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling the mono audio changes the visibility of the icon
-  AccessibilityManager::Get()->EnableMonoAudio(true);
+  // Toggling mono audio changes the visibility of the icon.
+  EnableMonoAudio(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableMonoAudio(false);
+  EnableMonoAudio(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling the caret highlight changes the visibility of the icon
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
+  // Toggling caret highlight changes the visibility of the icon.
+  SetCaretHighlightEnabled(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(false);
+  SetCaretHighlightEnabled(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling the highlight mouse cursor changes the visibility of the icon
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(true);
+  // Toggling highlight mouse cursor changes the visibility of the icon.
+  SetCursorHighlightEnabled(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(false);
+  SetCursorHighlightEnabled(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling the highlight keyboard focus changes the visibility of the icon
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(true);
+  // Toggling highlight keyboard focus changes the visibility of the icon.
+  SetFocusHighlightEnabled(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(false);
+  SetFocusHighlightEnabled(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling the sticky keys changes the visibility of the icon.
-  AccessibilityManager::Get()->EnableStickyKeys(true);
+  // Toggling sticky keys changes the visibility of the icon.
+  EnableStickyKeys(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableStickyKeys(false);
+  EnableStickyKeys(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Toggling the tap dragging changes the visibility of the icon.
-  AccessibilityManager::Get()->EnableTapDragging(true);
+  // Toggling tap dragging changes the visibility of the icon.
+  EnableTapDragging(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableTapDragging(false);
+  EnableTapDragging(false);
+  EXPECT_FALSE(IsTrayIconVisible());
+
+  // Toggling select-to-speak changes the visibility of the icon.
+  EnableSelectToSpeak(true);
+  EXPECT_TRUE(IsTrayIconVisible());
+  EnableSelectToSpeak(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
   // Enabling all accessibility features.
   SetMagnifierEnabled(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  EnableHighContrast(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(true, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(true);
+  EnableSelectToSpeak(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableLargeCursor(true);
+  EnableVirtualKeyboard(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableMonoAudio(true);
+  EnableLargeCursor(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
+  EnableMonoAudio(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(true);
+  SetCaretHighlightEnabled(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(true);
+  SetCursorHighlightEnabled(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableStickyKeys(true);
+  SetFocusHighlightEnabled(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableTapDragging(true);
+  EnableStickyKeys(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_NONE);
+  EnableTapDragging(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableSpokenFeedback(false, ash::A11Y_NOTIFICATION_NONE);
+  EXPECT_TRUE(IsTrayIconVisible());
+  EnableSelectToSpeak(false);
+  EXPECT_TRUE(IsTrayIconVisible());
+  EnableHighContrast(false);
   EXPECT_TRUE(IsTrayIconVisible());
   SetMagnifierEnabled(false);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(false);
+  EnableVirtualKeyboard(false);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableLargeCursor(false);
+  EnableLargeCursor(false);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableMonoAudio(false);
+  EnableMonoAudio(false);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(false);
+  SetCaretHighlightEnabled(false);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(false);
+  SetCursorHighlightEnabled(false);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(false);
+  SetFocusHighlightEnabled(false);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableStickyKeys(false);
+  EnableStickyKeys(false);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableTapDragging(false);
+  EnableTapDragging(false);
   EXPECT_FALSE(IsTrayIconVisible());
 
-  // Confirms that prefs::kShouldAlwaysShowAccessibilityMenu doesn't affect
+  // Confirms that ash::prefs::kShouldAlwaysShowAccessibilityMenu doesn't affect
   // the icon on the tray.
   SetShowAccessibilityOptionsInSystemTrayMenu(true);
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  EnableHighContrast(true);
   EXPECT_TRUE(IsTrayIconVisible());
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableHighContrast(false);
   EXPECT_FALSE(IsTrayIconVisible());
 }
 
 IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenu) {
-  // Login
-  CreateAndStartUserSession(AccountId::FromUserEmail("owner@invalid.domain"));
-  // Flush to ensure the session state reaches ash and updates login status.
-  SessionControllerClient::FlushForTesting();
-
   SetShowAccessibilityOptionsInSystemTrayMenu(false);
 
   // Confirms that the menu is hidden.
   EXPECT_FALSE(CanCreateMenuItem());
 
-  // Toggling spoken feedback changes the visibillity of the menu.
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
+  // Toggling spoken feedback changes the visibility of the menu.
+  EnableSpokenFeedback(true, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(false, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_FALSE(CanCreateMenuItem());
 
-  // Toggling high contrast changes the visibillity of the menu.
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  // Toggling high contrast changes the visibility of the menu.
+  EnableHighContrast(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableHighContrast(false);
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Toggling screen magnifier changes the visibility of the menu.
@@ -547,135 +607,136 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenu) {
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Toggling autoclick changes the visibility of the menu.
-  AccessibilityManager::Get()->EnableAutoclick(true);
+  EnableAutoclick(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableAutoclick(false);
+  EnableAutoclick(false);
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Toggling virtual keyboard changes the visibility of the menu.
-  AccessibilityManager::Get()->EnableVirtualKeyboard(true);
+  EnableVirtualKeyboard(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(false);
+  EnableVirtualKeyboard(false);
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Toggling large mouse cursor changes the visibility of the menu.
-  AccessibilityManager::Get()->EnableLargeCursor(true);
+  EnableLargeCursor(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableLargeCursor(false);
+  EnableLargeCursor(false);
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Toggling mono audio changes the visibility of the menu.
-  AccessibilityManager::Get()->EnableMonoAudio(true);
+  EnableMonoAudio(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableMonoAudio(false);
+  EnableMonoAudio(false);
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Toggling caret highlight changes the visibility of the menu.
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
+  SetCaretHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(false);
+  SetCaretHighlightEnabled(false);
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Toggling highlight mouse cursor changes the visibility of the menu.
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(true);
+  SetCursorHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(false);
+  SetCursorHighlightEnabled(false);
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Toggling highlight keyboard focus changes the visibility of the menu.
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(true);
+  SetFocusHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(false);
+  SetFocusHighlightEnabled(false);
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Toggling sticky keys changes the visibility of the menu.
-  AccessibilityManager::Get()->EnableStickyKeys(true);
+  EnableStickyKeys(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableStickyKeys(false);
+  EnableStickyKeys(false);
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Toggling tap dragging changes the visibility of the menu.
-  AccessibilityManager::Get()->EnableTapDragging(true);
+  EnableTapDragging(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableTapDragging(false);
+  EnableTapDragging(false);
+  EXPECT_FALSE(CanCreateMenuItem());
+
+  // Toggling select-to-speak dragging changes the visibility of the menu.
+  EnableSelectToSpeak(true);
+  EXPECT_TRUE(CanCreateMenuItem());
+  EnableSelectToSpeak(false);
   EXPECT_FALSE(CanCreateMenuItem());
 
   // Enabling all accessibility features.
   SetMagnifierEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  EnableHighContrast(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(true, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableAutoclick(true);
+  EnableSelectToSpeak(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(true);
+  EnableAutoclick(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableLargeCursor(true);
+  EnableVirtualKeyboard(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableMonoAudio(true);
+  EnableLargeCursor(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
+  EnableMonoAudio(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(true);
+  SetCaretHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(true);
+  SetCursorHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableStickyKeys(true);
+  SetFocusHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableTapDragging(true);
+  EnableStickyKeys(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(false);
+  EnableTapDragging(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableAutoclick(false);
+  EnableVirtualKeyboard(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_NONE);
+  EnableAutoclick(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableSpokenFeedback(false, ash::A11Y_NOTIFICATION_NONE);
+  EXPECT_TRUE(CanCreateMenuItem());
+  EnableSelectToSpeak(false);
+  EXPECT_TRUE(CanCreateMenuItem());
+  EnableHighContrast(false);
   EXPECT_TRUE(CanCreateMenuItem());
   SetMagnifierEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableLargeCursor(false);
+  EnableLargeCursor(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableMonoAudio(false);
+  EnableMonoAudio(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(false);
+  SetCaretHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(false);
+  SetCursorHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(false);
+  SetFocusHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableStickyKeys(false);
+  EnableStickyKeys(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableTapDragging(false);
+  EnableTapDragging(false);
   EXPECT_FALSE(CanCreateMenuItem());
 }
 
 IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenuWithShowMenuOption) {
-  // Login
-  CreateAndStartUserSession(AccountId::FromUserEmail("owner@invalid.domain"));
-  // Flush to ensure the session state reaches ash and updates login status.
-  SessionControllerClient::FlushForTesting();
-
   SetShowAccessibilityOptionsInSystemTrayMenu(true);
 
   // Confirms that the menu is visible.
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling spoken feedback.
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(true, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(false, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling high contrast.
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  EnableHighContrast(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableHighContrast(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling screen magnifier.
@@ -685,109 +746,117 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenuWithShowMenuOption) {
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling autoclick.
-  AccessibilityManager::Get()->EnableAutoclick(true);
+  EnableAutoclick(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableAutoclick(false);
+  EnableAutoclick(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling on-screen keyboard.
-  AccessibilityManager::Get()->EnableVirtualKeyboard(true);
+  EnableVirtualKeyboard(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(false);
+  EnableVirtualKeyboard(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling large mouse cursor.
-  AccessibilityManager::Get()->EnableLargeCursor(true);
+  EnableLargeCursor(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableLargeCursor(false);
+  EnableLargeCursor(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling mono audio.
-  AccessibilityManager::Get()->EnableMonoAudio(true);
+  EnableMonoAudio(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableMonoAudio(false);
+  EnableMonoAudio(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling caret highlight.
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
+  SetCaretHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(false);
+  SetCaretHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling highlight mouse cursor.
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(true);
+  SetCursorHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(false);
+  SetCursorHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling highlight keyboard focus.
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(true);
+  SetFocusHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(false);
+  SetFocusHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of the toggling sticky keys.
-  AccessibilityManager::Get()->EnableStickyKeys(true);
+  EnableStickyKeys(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableStickyKeys(false);
+  EnableStickyKeys(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of the toggling tap dragging.
-  AccessibilityManager::Get()->EnableTapDragging(true);
+  EnableTapDragging(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableTapDragging(false);
+  EnableTapDragging(false);
+  EXPECT_TRUE(CanCreateMenuItem());
+
+  // The menu remains visible regardless of toggling select-to-speak.
+  EnableSelectToSpeak(true);
+  EXPECT_TRUE(CanCreateMenuItem());
+  EnableSelectToSpeak(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // Enabling all accessibility features.
   SetMagnifierEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  EnableHighContrast(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(true, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableAutoclick(true);
+  EnableSelectToSpeak(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(true);
+  EnableAutoclick(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableLargeCursor(true);
+  EnableVirtualKeyboard(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableMonoAudio(true);
+  EnableLargeCursor(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
+  EnableMonoAudio(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(true);
+  SetCaretHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(true);
+  SetCursorHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableStickyKeys(true);
+  SetFocusHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableTapDragging(true);
+  EnableStickyKeys(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(false);
+  EnableTapDragging(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableAutoclick(false);
+  EnableVirtualKeyboard(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_NONE);
+  EnableAutoclick(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableSpokenFeedback(false, ash::A11Y_NOTIFICATION_NONE);
+  EXPECT_TRUE(CanCreateMenuItem());
+  EnableSelectToSpeak(false);
+  EXPECT_TRUE(CanCreateMenuItem());
+  EnableHighContrast(false);
   EXPECT_TRUE(CanCreateMenuItem());
   SetMagnifierEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableLargeCursor(false);
+  EnableLargeCursor(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableMonoAudio(false);
+  EnableMonoAudio(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(false);
+  SetCaretHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(false);
+  SetCursorHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(false);
+  SetFocusHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableStickyKeys(false);
+  EnableStickyKeys(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableTapDragging(false);
+  EnableTapDragging(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   SetShowAccessibilityOptionsInSystemTrayMenu(false);
@@ -803,17 +872,15 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenuWithShowOnLoginScreen) {
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling spoken feedback.
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(true, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(false, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling high contrast.
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  EnableHighContrast(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableHighContrast(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling screen magnifier.
@@ -823,99 +890,97 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenuWithShowOnLoginScreen) {
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling on-screen keyboard.
-  AccessibilityManager::Get()->EnableVirtualKeyboard(true);
+  EnableVirtualKeyboard(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(false);
+  EnableVirtualKeyboard(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling large mouse cursor.
-  AccessibilityManager::Get()->EnableLargeCursor(true);
+  EnableLargeCursor(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableLargeCursor(false);
+  EnableLargeCursor(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling mono audio.
-  AccessibilityManager::Get()->EnableMonoAudio(true);
+  EnableMonoAudio(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableMonoAudio(false);
+  EnableMonoAudio(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling caret highlight.
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
+  SetCaretHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(false);
+  SetCaretHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling highlight mouse cursor.
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(true);
+  SetCursorHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(false);
+  SetCursorHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling highlight keyboard focus.
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(true);
+  SetFocusHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(false);
+  SetFocusHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling sticky keys.
-  AccessibilityManager::Get()->EnableStickyKeys(true);
+  EnableStickyKeys(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableStickyKeys(false);
+  EnableStickyKeys(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // The menu remains visible regardless of toggling tap dragging.
-  AccessibilityManager::Get()->EnableTapDragging(true);
+  EnableTapDragging(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableTapDragging(false);
+  EnableTapDragging(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // Enabling all accessibility features.
   SetMagnifierEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  EnableHighContrast(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(true, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(true);
+  EnableVirtualKeyboard(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableLargeCursor(true);
+  EnableLargeCursor(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableMonoAudio(true);
+  EnableMonoAudio(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
+  SetCaretHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(true);
+  SetCursorHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(true);
+  SetFocusHighlightEnabled(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableStickyKeys(true);
+  EnableStickyKeys(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableTapDragging(true);
+  EnableTapDragging(true);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableVirtualKeyboard(false);
+  EnableVirtualKeyboard(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(false, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableHighContrast(false);
   EXPECT_TRUE(CanCreateMenuItem());
   SetMagnifierEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableLargeCursor(false);
+  EnableLargeCursor(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableMonoAudio(false);
+  EnableMonoAudio(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(false);
+  SetCaretHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(false);
+  SetCursorHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(false);
+  SetFocusHighlightEnabled(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableStickyKeys(false);
+  EnableStickyKeys(false);
   EXPECT_TRUE(CanCreateMenuItem());
-  AccessibilityManager::Get()->EnableTapDragging(false);
+  EnableTapDragging(false);
   EXPECT_TRUE(CanCreateMenuItem());
 
   SetShowAccessibilityOptionsInSystemTrayMenu(true);
@@ -929,60 +994,9 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenuWithShowOnLoginScreen) {
   EXPECT_TRUE(CanCreateMenuItem());
 }
 
-IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowNotification) {
-  const base::string16 BRAILLE_CONNECTED =
-      base::ASCIIToUTF16("Braille display connected.");
-  const base::string16 CHROMEVOX_ENABLED_TITLE =
-      base::ASCIIToUTF16("ChromeVox enabled");
-  const base::string16 CHROMEVOX_ENABLED =
-      base::ASCIIToUTF16("Press Ctrl + Alt + Z to disable spoken feedback.");
-  const base::string16 BRAILLE_CONNECTED_AND_CHROMEVOX_ENABLED_TITLE =
-      base::ASCIIToUTF16("Braille and ChromeVox are enabled");
-
-  EXPECT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
-
-  // Enabling spoken feedback should show the notification.
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_SHOW);
-  message_center::NotificationList::Notifications notifications =
-      MessageCenter::Get()->GetVisibleNotifications();
-  EXPECT_EQ(1u, notifications.size());
-  EXPECT_EQ(CHROMEVOX_ENABLED_TITLE, (*notifications.begin())->title());
-  EXPECT_EQ(CHROMEVOX_ENABLED, (*notifications.begin())->message());
-
-  // Connecting a braille display when spoken feedback is already enabled
-  // should only show the message about the braille display.
-  SetBrailleConnected(true);
-  notifications = MessageCenter::Get()->GetVisibleNotifications();
-  EXPECT_EQ(1u, notifications.size());
-  EXPECT_EQ(base::string16(), (*notifications.begin())->title());
-  EXPECT_EQ(BRAILLE_CONNECTED, (*notifications.begin())->message());
-
-  // Neither disconnecting a braille display, nor disabling spoken feedback
-  // should show any notification.
-  SetBrailleConnected(false);
-  EXPECT_TRUE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
-  notifications = MessageCenter::Get()->GetVisibleNotifications();
-  EXPECT_EQ(0u, notifications.size());
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_SHOW);
-  notifications = MessageCenter::Get()->GetVisibleNotifications();
-  EXPECT_EQ(0u, notifications.size());
-  EXPECT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
-
-  // Connecting a braille display should enable spoken feedback and show
-  // both messages.
-  SetBrailleConnected(true);
-  EXPECT_TRUE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
-  notifications = MessageCenter::Get()->GetVisibleNotifications();
-  EXPECT_EQ(BRAILLE_CONNECTED_AND_CHROMEVOX_ENABLED_TITLE,
-            (*notifications.begin())->title());
-  EXPECT_EQ(CHROMEVOX_ENABLED, (*notifications.begin())->message());
-}
-
 IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, KeepMenuVisibilityOnLockScreen) {
   // Enables high contrast mode.
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  EnableHighContrast(true);
   EXPECT_TRUE(CanCreateMenuItem());
 
   // Locks the screen.
@@ -990,7 +1004,7 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, KeepMenuVisibilityOnLockScreen) {
   EXPECT_TRUE(CanCreateMenuItem());
 
   // Disables high contrast mode.
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableHighContrast(false);
 
   // Confirms that the menu is still visible.
   EXPECT_TRUE(CanCreateMenuItem());
@@ -1103,11 +1117,11 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ClickDetailMenu) {
   EXPECT_FALSE(AccessibilityManager::Get()->IsFocusHighlightEnabled());
 
   EXPECT_TRUE(CreateDetailedMenu());
-  ClickHighlishtKeyboardFocusOnDetailMenu();
+  ClickHighlightKeyboardFocusOnDetailMenu();
   EXPECT_TRUE(AccessibilityManager::Get()->IsFocusHighlightEnabled());
 
   EXPECT_TRUE(CreateDetailedMenu());
-  ClickHighlishtKeyboardFocusOnDetailMenu();
+  ClickHighlightKeyboardFocusOnDetailMenu();
   EXPECT_FALSE(AccessibilityManager::Get()->IsFocusHighlightEnabled());
 
   // Confirms that the check item toggles sticky keys.
@@ -1131,6 +1145,17 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ClickDetailMenu) {
   EXPECT_TRUE(CreateDetailedMenu());
   ClickTapDraggingOnDetailMenu();
   EXPECT_FALSE(AccessibilityManager::Get()->IsTapDraggingEnabled());
+
+  // Confirms that the check item toggles select-to-speak.
+  EXPECT_FALSE(AccessibilityManager::Get()->IsSelectToSpeakEnabled());
+
+  EXPECT_TRUE(CreateDetailedMenu());
+  ClickSelectToSpeakOnDetailMenu();
+  EXPECT_TRUE(AccessibilityManager::Get()->IsSelectToSpeakEnabled());
+
+  EXPECT_TRUE(CreateDetailedMenu());
+  ClickSelectToSpeakOnDetailMenu();
+  EXPECT_FALSE(AccessibilityManager::Get()->IsSelectToSpeakEnabled());
 }
 
 IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
@@ -1139,6 +1164,7 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   // At first, all of the check is unchecked.
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1153,10 +1179,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling spoken feedback.
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(true, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_TRUE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1171,10 +1197,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling spoken feedback.
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_NONE);
+  EnableSpokenFeedback(false, ash::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1189,9 +1215,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling high contrast.
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  EnableHighContrast(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_TRUE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1206,9 +1233,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling high contrast.
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableHighContrast(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1226,6 +1254,7 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   SetMagnifierEnabled(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_TRUE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1243,6 +1272,7 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   SetMagnifierEnabled(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1257,9 +1287,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling large cursor.
-  AccessibilityManager::Get()->EnableLargeCursor(true);
+  EnableLargeCursor(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_TRUE(IsLargeCursorEnabledOnDetailMenu());
@@ -1274,9 +1305,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling large cursor.
-  AccessibilityManager::Get()->EnableLargeCursor(false);
+  EnableLargeCursor(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1291,9 +1323,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enable on-screen keyboard.
-  AccessibilityManager::Get()->EnableVirtualKeyboard(true);
+  EnableVirtualKeyboard(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1308,9 +1341,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disable on-screen keyboard.
-  AccessibilityManager::Get()->EnableVirtualKeyboard(false);
+  EnableVirtualKeyboard(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1325,9 +1359,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling mono audio.
-  AccessibilityManager::Get()->EnableMonoAudio(true);
+  EnableMonoAudio(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1342,9 +1377,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling mono audio.
-  AccessibilityManager::Get()->EnableMonoAudio(false);
+  EnableMonoAudio(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1359,9 +1395,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling caret highlight.
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
+  SetCaretHighlightEnabled(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1376,9 +1413,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling caret highlight.
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(false);
+  SetCaretHighlightEnabled(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1393,9 +1431,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling highlight mouse cursor.
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(true);
+  SetCursorHighlightEnabled(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1410,9 +1449,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling highlight mouse cursor.
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(false);
+  SetCursorHighlightEnabled(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1427,9 +1467,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling highlight keyboard focus.
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(true);
+  SetFocusHighlightEnabled(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1444,9 +1485,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling highlight keyboard focus.
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(false);
+  SetFocusHighlightEnabled(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1461,9 +1503,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling sticky keys.
-  AccessibilityManager::Get()->EnableStickyKeys(true);
+  EnableStickyKeys(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1478,9 +1521,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling sticky keys.
-  AccessibilityManager::Get()->EnableStickyKeys(false);
+  EnableStickyKeys(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1495,9 +1539,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling tap dragging.
-  AccessibilityManager::Get()->EnableTapDragging(true);
+  EnableTapDragging(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1512,9 +1557,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling tap dragging.
-  AccessibilityManager::Get()->EnableTapDragging(false);
+  EnableTapDragging(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1529,19 +1575,18 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling all of the a11y features.
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
-  AccessibilityManager::Get()->EnableHighContrast(true);
+  EnableSpokenFeedback(true, ash::A11Y_NOTIFICATION_NONE);
+  EnableHighContrast(true);
   SetMagnifierEnabled(true);
-  AccessibilityManager::Get()->EnableLargeCursor(true);
-  AccessibilityManager::Get()->EnableVirtualKeyboard(true);
-  AccessibilityManager::Get()->EnableAutoclick(true);
-  AccessibilityManager::Get()->EnableMonoAudio(true);
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(true);
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(true);
-  AccessibilityManager::Get()->EnableStickyKeys(true);
-  AccessibilityManager::Get()->EnableTapDragging(true);
+  EnableLargeCursor(true);
+  EnableVirtualKeyboard(true);
+  EnableAutoclick(true);
+  EnableMonoAudio(true);
+  SetCaretHighlightEnabled(true);
+  SetCursorHighlightEnabled(true);
+  SetFocusHighlightEnabled(true);
+  EnableStickyKeys(true);
+  EnableTapDragging(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_TRUE(IsSpokenFeedbackEnabledOnDetailMenu());
   EXPECT_TRUE(IsHighContrastEnabledOnDetailMenu());
@@ -1559,19 +1604,18 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling all of the a11y features.
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ash::A11Y_NOTIFICATION_NONE);
-  AccessibilityManager::Get()->EnableHighContrast(false);
+  EnableSpokenFeedback(false, ash::A11Y_NOTIFICATION_NONE);
+  EnableHighContrast(false);
   SetMagnifierEnabled(false);
-  AccessibilityManager::Get()->EnableLargeCursor(false);
-  AccessibilityManager::Get()->EnableVirtualKeyboard(false);
-  AccessibilityManager::Get()->EnableAutoclick(false);
-  AccessibilityManager::Get()->EnableMonoAudio(false);
-  AccessibilityManager::Get()->SetCaretHighlightEnabled(false);
-  AccessibilityManager::Get()->SetCursorHighlightEnabled(false);
-  AccessibilityManager::Get()->SetFocusHighlightEnabled(false);
-  AccessibilityManager::Get()->EnableStickyKeys(false);
-  AccessibilityManager::Get()->EnableTapDragging(false);
+  EnableLargeCursor(false);
+  EnableVirtualKeyboard(false);
+  EnableAutoclick(false);
+  EnableMonoAudio(false);
+  SetCaretHighlightEnabled(false);
+  SetCursorHighlightEnabled(false);
+  SetFocusHighlightEnabled(false);
+  EnableStickyKeys(false);
+  EnableTapDragging(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
@@ -1588,9 +1632,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Enabling autoclick.
-  AccessibilityManager::Get()->EnableAutoclick(true);
+  EnableAutoclick(true);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1605,9 +1650,10 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
   CloseDetailMenu();
 
   // Disabling autoclick.
-  AccessibilityManager::Get()->EnableAutoclick(false);
+  EnableAutoclick(false);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_FALSE(IsSpokenFeedbackEnabledOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_FALSE(IsHighContrastEnabledOnDetailMenu());
   EXPECT_FALSE(IsScreenMagnifierEnabledOnDetailMenu());
   EXPECT_FALSE(IsLargeCursorEnabledOnDetailMenu());
@@ -1625,30 +1671,9 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMarksOnDetailMenu) {
 IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMenuVisibilityOnDetailMenu) {
   // Except help & settings, others should be kept the same
   // in LOGIN | NOT LOGIN | LOCKED. https://crbug.com/632107.
-  SetLoginStatus(ash::LoginStatus::NOT_LOGGED_IN);
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_TRUE(IsSpokenFeedbackMenuShownOnDetailMenu());
-  EXPECT_TRUE(IsHighContrastMenuShownOnDetailMenu());
-  EXPECT_TRUE(IsScreenMagnifierMenuShownOnDetailMenu());
-  EXPECT_TRUE(IsAutoclickMenuShownOnDetailMenu());
-  EXPECT_TRUE(IsVirtualKeyboardMenuShownOnDetailMenu());
-  EXPECT_FALSE(IsHelpAvailableOnDetailMenu());
-  EXPECT_FALSE(IsSettingsAvailableOnDetailMenu());
-  EXPECT_TRUE(IsLargeCursorMenuShownOnDetailMenu());
-  EXPECT_TRUE(IsMonoAudioMenuShownOnDetailMenu());
-  EXPECT_TRUE(IsCaretHighlightMenuShownOnDetailMenu());
-  EXPECT_TRUE(IsHighlightMouseCursorMenuShownOnDetailMenu());
-  EXPECT_TRUE(IsHighlightKeyboardFocusMenuShownOnDetailMenu());
-  EXPECT_TRUE(IsStickyKeysMenuShownOnDetailMenu());
-  EXPECT_TRUE(IsTapDraggingMenuShownOnDetailMenu());
-  CloseDetailMenu();
-
-  // Simulate login.
-  CreateAndStartUserSession(AccountId::FromUserEmail("owner@invalid.domain"));
-  // Flush to ensure the session state reaches ash and updates login status.
-  SessionControllerClient::FlushForTesting();
-  EXPECT_TRUE(CreateDetailedMenu());
-  EXPECT_TRUE(IsSpokenFeedbackMenuShownOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_TRUE(IsHighContrastMenuShownOnDetailMenu());
   EXPECT_TRUE(IsScreenMagnifierMenuShownOnDetailMenu());
   EXPECT_TRUE(IsAutoclickMenuShownOnDetailMenu());
@@ -1671,6 +1696,7 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMenuVisibilityOnDetailMenu) {
   SessionControllerClient::FlushForTesting();
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_TRUE(IsSpokenFeedbackMenuShownOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_TRUE(IsHighContrastMenuShownOnDetailMenu());
   EXPECT_TRUE(IsScreenMagnifierMenuShownOnDetailMenu());
   EXPECT_TRUE(IsAutoclickMenuShownOnDetailMenu());
@@ -1693,6 +1719,7 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMenuVisibilityOnDetailMenu) {
   SessionControllerClient::FlushForTesting();
   EXPECT_TRUE(CreateDetailedMenu());
   EXPECT_TRUE(IsSpokenFeedbackMenuShownOnDetailMenu());
+  EXPECT_FALSE(IsSelectToSpeakEnabledOnDetailMenu());
   EXPECT_TRUE(IsHighContrastMenuShownOnDetailMenu());
   EXPECT_TRUE(IsScreenMagnifierMenuShownOnDetailMenu());
   EXPECT_TRUE(IsAutoclickMenuShownOnDetailMenu());
@@ -1707,6 +1734,29 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, CheckMenuVisibilityOnDetailMenu) {
   EXPECT_TRUE(IsStickyKeysMenuShownOnDetailMenu());
   EXPECT_TRUE(IsTapDraggingMenuShownOnDetailMenu());
   CloseDetailMenu();
+}
+
+// Verify that the accessiblity system detailed menu remains open when an item
+// is selected or deselected.
+IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, DetailMenuRemainsOpen) {
+  EXPECT_TRUE(CreateDetailedMenu());
+  ASSERT_TRUE(IsAutoclickMenuShownOnDetailMenu());
+
+  ClickAutoclickOnDetailMenu();
+  EXPECT_TRUE(IsAutoclickEnabledOnDetailMenu());
+  {
+    base::RunLoop run_loop;
+    run_loop.RunUntilIdle();
+  }
+  EXPECT_TRUE(GetDetailedMenu());
+
+  ClickAutoclickOnDetailMenu();
+  EXPECT_FALSE(IsAutoclickEnabledOnDetailMenu());
+  {
+    base::RunLoop run_loop;
+    run_loop.RunUntilIdle();
+  }
+  EXPECT_TRUE(GetDetailedMenu());
 }
 
 INSTANTIATE_TEST_CASE_P(TrayAccessibilityTestInstance,

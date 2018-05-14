@@ -21,10 +21,11 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
+#include "net/base/proxy_server.h"
 #include "net/cert/cert_database.h"
 #include "net/http/http_stream_factory_impl_request.h"
-#include "net/proxy/proxy_config.h"
-#include "net/proxy/proxy_server.h"
+#include "net/proxy_resolution/proxy_config.h"
+#include "net/spdy/chromium/http2_push_promise_index.h"
 #include "net/spdy/chromium/server_push_delegate.h"
 #include "net/spdy/chromium/spdy_session_key.h"
 #include "net/spdy/core/spdy_protocol.h"
@@ -43,7 +44,6 @@ class ClientSocketHandle;
 class HostResolver;
 class HttpServerProperties;
 class NetLogWithSource;
-class ProxyDelegate;
 class SpdySession;
 class TransportSecurityState;
 
@@ -59,12 +59,12 @@ class NET_EXPORT SpdySessionPool
                   SSLConfigService* ssl_config_service,
                   HttpServerProperties* http_server_properties,
                   TransportSecurityState* transport_security_state,
-                  const QuicVersionVector& quic_supported_versions,
+                  const QuicTransportVersionVector& quic_supported_versions,
                   bool enable_ping_based_connection_checking,
+                  bool support_ietf_format_quic_altsvc,
                   size_t session_max_recv_window_size,
                   const SettingsMap& initial_settings,
-                  SpdySessionPool::TimeFunc time_func,
-                  ProxyDelegate* proxy_delegate);
+                  SpdySessionPool::TimeFunc time_func);
   ~SpdySessionPool() override;
 
   // In the functions below, a session is "available" if this pool has
@@ -83,12 +83,11 @@ class NET_EXPORT SpdySessionPool
   // immediately afterwards if the first read of |connection| fails.
   base::WeakPtr<SpdySession> CreateAvailableSessionFromSocket(
       const SpdySessionKey& key,
+      bool is_trusted_proxy,
       std::unique_ptr<ClientSocketHandle> connection,
       const NetLogWithSource& net_log);
 
-  // If |url| is not empty and there is a session for |key| that has an
-  // unclaimed push stream for |url|, return it.
-  // Otherwise if there is an available session for |key|, return it.
+  // If there is an available session for |key|, return it.
   // Otherwise if there is a session to pool to based on IP address:
   //   * if |enable_ip_based_pooling == true|,
   //     then mark it as available for |key| and return it;
@@ -97,8 +96,8 @@ class NET_EXPORT SpdySessionPool
   // Otherwise return nullptr.
   base::WeakPtr<SpdySession> FindAvailableSession(
       const SpdySessionKey& key,
-      const GURL& url,
       bool enable_ip_based_pooling,
+      bool is_websocket,
       const NetLogWithSource& net_log);
 
   // Remove all mappings and aliases for the given session, which must
@@ -112,6 +111,10 @@ class NET_EXPORT SpdySessionPool
   void RemoveUnavailableSession(
       const base::WeakPtr<SpdySession>& unavailable_session);
 
+  // Note that the next three methods close sessions, potentially notifing
+  // delegates of error or synchronously invoking callbacks, which might trigger
+  // retries, thus opening new sessions.
+
   // Close only the currently existing SpdySessions with |error|.
   // Let any new ones created while this method is running continue to
   // live.
@@ -122,16 +125,10 @@ class NET_EXPORT SpdySessionPool
   // live.
   void CloseCurrentIdleSessions();
 
-  // Close all SpdySessions, including any new ones created in the process of
-  // closing the current ones.
+  // Repeatedly close all SpdySessions until all of them (including new ones
+  // created in the process of closing the current ones, and new ones created in
+  // the process of closing those new ones, etc.) are unavailable.
   void CloseAllSessions();
-
-  // (Un)register a SpdySession with an unclaimed pushed stream for |url|, so
-  // that the right SpdySession can be served by FindAvailableSession.
-  void RegisterUnclaimedPushedStream(GURL url,
-                                     base::WeakPtr<SpdySession> spdy_session);
-  void UnregisterUnclaimedPushedStream(const GURL& url,
-                                       SpdySession* spdy_session);
 
   // Creates a Value summary of the state of the spdy session pool.
   std::unique_ptr<base::Value> SpdySessionPoolInfoToValue() const;
@@ -139,6 +136,8 @@ class NET_EXPORT SpdySessionPool
   HttpServerProperties* http_server_properties() {
     return http_server_properties_;
   }
+
+  Http2PushPromiseIndex* push_promise_index() { return &push_promise_index_; }
 
   void set_server_push_delegate(ServerPushDelegate* push_delegate) {
     push_delegate_ = push_delegate;
@@ -166,10 +165,8 @@ class NET_EXPORT SpdySessionPool
                        const SpdyString& parent_dump_absolute_name) const;
 
   // Called when a SpdySession is ready. It will find appropriate Requests and
-  // fulfill them. |direct| indicates whether or not |spdy_session| uses a
-  // proxy.
+  // fulfill them.
   void OnNewSpdySessionReady(const base::WeakPtr<SpdySession>& spdy_session,
-                             bool direct,
                              const SSLConfig& used_ssl_config,
                              const ProxyInfo& used_proxy_info,
                              bool was_alpn_negotiated,
@@ -206,8 +203,7 @@ class NET_EXPORT SpdySessionPool
   typedef std::vector<base::WeakPtr<SpdySession> > WeakSessionList;
   typedef std::map<SpdySessionKey, base::WeakPtr<SpdySession> >
       AvailableSessionMap;
-  typedef std::map<IPEndPoint, SpdySessionKey> AliasMap;
-  typedef std::map<GURL, WeakSessionList> UnclaimedPushedStreamMap;
+  typedef std::multimap<IPEndPoint, SpdySessionKey> AliasMap;
 
   // Returns true iff |session| is in |available_sessions_|.
   bool IsSessionAvailable(const base::WeakPtr<SpdySession>& session) const;
@@ -256,22 +252,21 @@ class NET_EXPORT SpdySessionPool
   // A map of IPEndPoint aliases for sessions.
   AliasMap aliases_;
 
-  // A map of all SpdySessions owned by |this| that have an unclaimed pushed
-  // streams for a GURL.  Might contain invalid WeakPtr's.
-  // A single SpdySession can only have at most one pushed stream for each GURL,
-  // but it is possible that multiple SpdySessions have pushed streams for the
-  // same GURL.
-  UnclaimedPushedStreamMap unclaimed_pushed_streams_;
+  // The index of all unclaimed pushed streams of all SpdySessions in this pool.
+  Http2PushPromiseIndex push_promise_index_;
 
   const scoped_refptr<SSLConfigService> ssl_config_service_;
   HostResolver* const resolver_;
 
   // Versions of QUIC which may be used.
-  const QuicVersionVector quic_supported_versions_;
+  const QuicTransportVersionVector quic_supported_versions_;
 
   // Defaults to true. May be controlled via SpdySessionPoolPeer for tests.
   bool enable_sending_initial_data_;
   bool enable_ping_based_connection_checking_;
+
+  // If true, alt-svc headers advertising QUIC in IETF format will be supported.
+  bool support_ietf_format_quic_altsvc_;
 
   size_t session_max_recv_window_size_;
 
@@ -289,11 +284,6 @@ class NET_EXPORT SpdySessionPool
 
   TimeFunc time_func_;
   ServerPushDelegate* push_delegate_;
-
-  // Determines if a proxy is a trusted SPDY proxy, which is allowed to push
-  // resources from origins that are different from those of their associated
-  // streams. May be nullptr.
-  ProxyDelegate* proxy_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(SpdySessionPool);
 };

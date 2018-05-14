@@ -23,7 +23,6 @@ ScopeIterator::ScopeIterator(Isolate* isolate, FrameInspector* frame_inspector,
                              ScopeIterator::Option option)
     : isolate_(isolate),
       frame_inspector_(frame_inspector),
-      nested_scope_chain_(4),
       seen_script_scope_(false) {
   if (!frame_inspector->GetContext()->IsContext()) {
     // Optimized frame, context or function cannot be materialized. Give up.
@@ -83,9 +82,9 @@ void ScopeIterator::TryParseAndRetrieveScopes(ScopeIterator::Option option) {
       }
     }
     if (scope_info->scope_type() == FUNCTION_SCOPE) {
-      nested_scope_chain_.Add(ExtendedScopeInfo(scope_info,
-                                                shared_info->start_position(),
-                                                shared_info->end_position()));
+      nested_scope_chain_.emplace_back(scope_info,
+                                       shared_info->start_position(),
+                                       shared_info->end_position());
     }
     if (!collect_non_locals) return;
   }
@@ -106,7 +105,7 @@ void ScopeIterator::TryParseAndRetrieveScopes(ScopeIterator::Option option) {
       // Retrieve it from shared function info.
       info->set_language_mode(shared_info->language_mode());
     } else if (scope_info->scope_type() == MODULE_SCOPE) {
-      info->set_module();
+      DCHECK(info->is_module());
     } else {
       DCHECK(scope_info->scope_type() == SCRIPT_SCOPE);
     }
@@ -114,15 +113,19 @@ void ScopeIterator::TryParseAndRetrieveScopes(ScopeIterator::Option option) {
     // Inner function.
     info.reset(new ParseInfo(shared_info));
   }
-  if (parsing::ParseAny(info.get(), isolate_) &&
-      Rewriter::Rewrite(info.get(), isolate_)) {
+  if (parsing::ParseAny(info.get(), shared_info, isolate_) &&
+      Rewriter::Rewrite(info.get())) {
+    info->ast_value_factory()->Internalize(isolate_);
     DeclarationScope* scope = info->literal()->scope();
     if (!ignore_nested_scopes || collect_non_locals) {
       CollectNonLocals(info.get(), scope);
     }
     if (!ignore_nested_scopes) {
-      DeclarationScope::Analyze(info.get(), isolate_, AnalyzeMode::kDebugger);
-      RetrieveScopeChain(scope);
+      if (DeclarationScope::Analyze(info.get())) {
+        DeclarationScope::AllocateScopeInfos(info.get(), isolate_,
+                                             AnalyzeMode::kDebugger);
+        RetrieveScopeChain(scope);
+      }
     }
   } else {
     // A failed reparse indicates that the preparser has diverged from the
@@ -184,36 +187,49 @@ MUST_USE_RESULT MaybeHandle<JSObject> ScopeIterator::MaterializeScopeDetails() {
   Handle<JSObject> scope_object;
   ASSIGN_RETURN_ON_EXCEPTION(isolate_, scope_object, ScopeObject(), JSObject);
   details->set(kScopeDetailsObjectIndex, *scope_object);
-  Handle<JSFunction> js_function = HasContext()
-                                       ? handle(CurrentContext()->closure())
-                                       : Handle<JSFunction>::null();
   if (Type() == ScopeTypeGlobal || Type() == ScopeTypeScript) {
     return isolate_->factory()->NewJSArrayWithElements(details);
   }
 
-  int start_position = 0;
-  int end_position = 0;
-  if (!nested_scope_chain_.is_empty()) {
-    js_function = GetFunction();
-    start_position = nested_scope_chain_.last().start_position;
-    end_position = nested_scope_chain_.last().end_position;
-  } else if (!js_function.is_null()) {
-    start_position = js_function->shared()->start_position();
-    end_position = js_function->shared()->end_position();
-  }
-
+  Handle<JSFunction> js_function = GetClosure();
   if (!js_function.is_null()) {
     Handle<String> closure_name = JSFunction::GetDebugName(js_function);
     if (!closure_name.is_null() && closure_name->length() != 0) {
       details->set(kScopeDetailsNameIndex, *closure_name);
     }
-    details->set(kScopeDetailsStartPositionIndex, Smi::FromInt(start_position));
-    details->set(kScopeDetailsEndPositionIndex, Smi::FromInt(end_position));
+    details->set(kScopeDetailsStartPositionIndex,
+                 Smi::FromInt(start_position()));
+    details->set(kScopeDetailsEndPositionIndex, Smi::FromInt(end_position()));
     details->set(kScopeDetailsFunctionIndex, *js_function);
   }
   return isolate_->factory()->NewJSArrayWithElements(details);
 }
 
+Handle<JSFunction> ScopeIterator::GetClosure() {
+  if (Type() == ScopeTypeGlobal || Type() == ScopeTypeScript)
+    return Handle<JSFunction>::null();
+  if (HasNestedScopeChain()) return GetFunction();
+  return HasContext() ? handle(CurrentContext()->closure())
+                      : Handle<JSFunction>::null();
+}
+
+int ScopeIterator::start_position() {
+  if (HasNestedScopeChain()) {
+    return LastNestedScopeChain().start_position;
+  }
+  if (!HasContext()) return 0;
+  Handle<JSFunction> js_function = handle(CurrentContext()->closure());
+  return js_function.is_null() ? 0 : js_function->shared()->start_position();
+}
+
+int ScopeIterator::end_position() {
+  if (HasNestedScopeChain()) {
+    return LastNestedScopeChain().end_position;
+  }
+  if (!HasContext()) return 0;
+  Handle<JSFunction> js_function = handle(CurrentContext()->closure());
+  return js_function.is_null() ? 0 : js_function->shared()->end_position();
+}
 
 void ScopeIterator::Next() {
   DCHECK(!Done());
@@ -227,25 +243,24 @@ void ScopeIterator::Next() {
     if (context_->IsScriptContext()) {
       context_ = Handle<Context>(context_->previous(), isolate_);
     }
-    if (!nested_scope_chain_.is_empty()) {
-      DCHECK_EQ(nested_scope_chain_.last().scope_info->scope_type(),
-                SCRIPT_SCOPE);
-      nested_scope_chain_.RemoveLast();
-      DCHECK(nested_scope_chain_.is_empty());
+    if (HasNestedScopeChain()) {
+      DCHECK_EQ(LastNestedScopeChain().scope_info->scope_type(), SCRIPT_SCOPE);
+      nested_scope_chain_.pop_back();
+      DCHECK(!HasNestedScopeChain());
     }
     CHECK(context_->IsNativeContext());
-  } else if (nested_scope_chain_.is_empty()) {
+  } else if (!HasNestedScopeChain()) {
     context_ = Handle<Context>(context_->previous(), isolate_);
   } else {
     do {
-      if (nested_scope_chain_.last().scope_info->HasContext()) {
-        DCHECK(context_->previous() != NULL);
+      if (LastNestedScopeChain().scope_info->HasContext()) {
+        DCHECK(context_->previous() != nullptr);
         context_ = Handle<Context>(context_->previous(), isolate_);
       }
-      nested_scope_chain_.RemoveLast();
-      if (nested_scope_chain_.is_empty()) break;
+      nested_scope_chain_.pop_back();
+      if (!HasNestedScopeChain()) break;
       // Repeat to skip hidden scopes.
-    } while (nested_scope_chain_.last().is_hidden());
+    } while (LastNestedScopeChain().is_hidden());
   }
   UnwrapEvaluationContext();
 }
@@ -254,8 +269,8 @@ void ScopeIterator::Next() {
 // Return the type of the current scope.
 ScopeIterator::ScopeType ScopeIterator::Type() {
   DCHECK(!Done());
-  if (!nested_scope_chain_.is_empty()) {
-    Handle<ScopeInfo> scope_info = nested_scope_chain_.last().scope_info;
+  if (HasNestedScopeChain()) {
+    Handle<ScopeInfo> scope_info = LastNestedScopeChain().scope_info;
     switch (scope_info->scope_type()) {
       case FUNCTION_SCOPE:
         DCHECK(context_->IsFunctionContext() || !scope_info->HasContext());
@@ -316,7 +331,7 @@ MaybeHandle<JSObject> ScopeIterator::ScopeObject() {
       return MaterializeScriptScope();
     case ScopeIterator::ScopeTypeLocal:
       // Materialize the content of the local scope into a JSObject.
-      DCHECK(nested_scope_chain_.length() == 1);
+      DCHECK_EQ(1, nested_scope_chain_.size());
       return MaterializeLocalScope();
     case ScopeIterator::ScopeTypeWith:
       return WithContextExtension();
@@ -339,8 +354,8 @@ bool ScopeIterator::HasContext() {
   ScopeType type = Type();
   if (type == ScopeTypeBlock || type == ScopeTypeLocal ||
       type == ScopeTypeEval) {
-    if (!nested_scope_chain_.is_empty()) {
-      return nested_scope_chain_.last().scope_info->HasContext();
+    if (HasNestedScopeChain()) {
+      return LastNestedScopeChain().scope_info->HasContext();
     }
   }
   return true;
@@ -376,8 +391,8 @@ bool ScopeIterator::SetVariableValue(Handle<String> variable_name,
 
 Handle<ScopeInfo> ScopeIterator::CurrentScopeInfo() {
   DCHECK(!Done());
-  if (!nested_scope_chain_.is_empty()) {
-    return nested_scope_chain_.last().scope_info;
+  if (HasNestedScopeChain()) {
+    return LastNestedScopeChain().scope_info;
   } else if (context_->IsBlockContext() || context_->IsFunctionContext() ||
              context_->IsEvalContext()) {
     return Handle<ScopeInfo>(context_->scope_info());
@@ -389,12 +404,12 @@ Handle<ScopeInfo> ScopeIterator::CurrentScopeInfo() {
 Handle<Context> ScopeIterator::CurrentContext() {
   DCHECK(!Done());
   if (Type() == ScopeTypeGlobal || Type() == ScopeTypeScript ||
-      nested_scope_chain_.is_empty()) {
+      !HasNestedScopeChain()) {
     return context_;
-  } else if (nested_scope_chain_.last().scope_info->HasContext()) {
+  } else if (LastNestedScopeChain().scope_info->HasContext()) {
     return context_;
   } else {
-    return Handle<Context>();
+    return Handle<Context>::null();
   }
 }
 
@@ -635,8 +650,8 @@ Handle<JSObject> ScopeIterator::MaterializeInnerScope() {
       isolate_->factory()->NewJSObjectWithNullProto();
 
   Handle<Context> context = Handle<Context>::null();
-  if (!nested_scope_chain_.is_empty()) {
-    Handle<ScopeInfo> scope_info = nested_scope_chain_.last().scope_info;
+  if (HasNestedScopeChain()) {
+    Handle<ScopeInfo> scope_info = LastNestedScopeChain().scope_info;
     MaterializeStackLocals(inner_scope, scope_info);
     if (scope_info->HasContext()) context = CurrentContext();
   } else {
@@ -950,10 +965,10 @@ void ScopeIterator::GetNestedScopeChain(Isolate* isolate, Scope* scope,
   if (scope->is_hidden()) {
     // We need to add this chain element in case the scope has a context
     // associated. We need to keep the scope chain and context chain in sync.
-    nested_scope_chain_.Add(ExtendedScopeInfo(scope->scope_info()));
+    nested_scope_chain_.emplace_back(scope->scope_info());
   } else {
-    nested_scope_chain_.Add(ExtendedScopeInfo(
-        scope->scope_info(), scope->start_position(), scope->end_position()));
+    nested_scope_chain_.emplace_back(
+        scope->scope_info(), scope->start_position(), scope->end_position());
   }
   for (Scope* inner_scope = scope->inner_scope(); inner_scope != nullptr;
        inner_scope = inner_scope->sibling()) {
@@ -965,6 +980,15 @@ void ScopeIterator::GetNestedScopeChain(Isolate* isolate, Scope* scope,
       return;
     }
   }
+}
+
+bool ScopeIterator::HasNestedScopeChain() {
+  return !nested_scope_chain_.empty();
+}
+
+ScopeIterator::ExtendedScopeInfo& ScopeIterator::LastNestedScopeChain() {
+  DCHECK(HasNestedScopeChain());
+  return nested_scope_chain_.back();
 }
 
 }  // namespace internal

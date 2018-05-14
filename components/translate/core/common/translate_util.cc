@@ -5,34 +5,16 @@
 #include "components/translate/core/common/translate_util.h"
 
 #include <stddef.h>
+#include <algorithm>
+#include <set>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/strings/string_split.h"
+#include "components/language/core/common/locale_util.h"
 #include "components/translate/core/common/translate_switches.h"
 #include "url/gurl.h"
-
-namespace {
-
-// Split the |language| into two parts. For example, if |language| is 'en-US',
-// this will be split into the main part 'en' and the tail part '-US'.
-void SplitIntoMainAndTail(const std::string& language,
-                          std::string* main_part,
-                          std::string* tail_part) {
-  DCHECK(main_part);
-  DCHECK(tail_part);
-
-  std::vector<base::StringPiece> chunks = base::SplitStringPiece(
-      language, "-", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-  if (chunks.empty())
-    return;
-
-  chunks[0].CopyToString(main_part);
-  *tail_part = language.substr(main_part->size());
-}
-
-}  // namespace
 
 namespace translate {
 
@@ -48,7 +30,6 @@ struct LanguageCodePair {
 // are different to be exact.
 //
 // If this table is updated, please sync this with the synonym table in
-// chrome/browser/resources/options/language_options.js and
 // chrome/browser/resources/settings/languages_page/languages.js.
 const LanguageCodePair kLanguageCodeSimilitudes[] = {
   {"no", "nb"},
@@ -59,7 +40,6 @@ const LanguageCodePair kLanguageCodeSimilitudes[] = {
 // codes are used, so we must see them as synonyms.
 //
 // If this table is updated, please sync this with the synonym table in
-// chrome/browser/resources/options/language_options.js and
 // chrome/browser/resources/settings/languages_page/languages.js.
 const LanguageCodePair kLanguageCodeSynonyms[] = {
   {"iw", "he"},
@@ -70,12 +50,11 @@ const LanguageCodePair kLanguageCodeSynonyms[] = {
 // Translate.
 //
 // If this table is updated, please sync this with the synonym table in
-// chrome/browser/resources/options/language_options.js and
 // chrome/browser/resources/settings/languages_page/languages.js.
 const LanguageCodePair kLanguageCodeChineseCompatiblePairs[] = {
-  {"zh-TW", "zh-HK"},
-  {"zh-TW", "zh-MO"},
-  {"zh-CN", "zh-SG"},
+    {"zh-TW", "zh-HK"},
+    {"zh-TW", "zh-MO"},
+    {"zh-CN", "zh-SG"},
 };
 
 const char kSecurityOrigin[] = "trk:220:https://translate.googleapis.com/";
@@ -88,17 +67,27 @@ void ToTranslateLanguageSynonym(std::string* language) {
     }
   }
 
+  std::string main_part, tail_part;
+  language::SplitIntoMainAndTail(*language, &main_part, &tail_part);
+  if (main_part.empty())
+    return;
+
+  // Chinese is a special case: we do not return the main_part only.
+  // There is not a single base language, but two: traditional and simplified.
+  // The kLanguageCodeChineseCompatiblePairs list contains the relation between
+  // various Chinese locales. We need to return the code from that mapping
+  // instead of the main_part.
+  // Note that "zh" does not have any mapping and as such we leave it as is. See
+  // https://crbug/798512 for more info.
   for (size_t i = 0; i < arraysize(kLanguageCodeChineseCompatiblePairs); ++i) {
     if (*language == kLanguageCodeChineseCompatiblePairs[i].chrome_language) {
       *language = kLanguageCodeChineseCompatiblePairs[i].translate_language;
       return;
     }
   }
-
-  std::string main_part, tail_part;
-  SplitIntoMainAndTail(*language, &main_part, &tail_part);
-  if (main_part.empty())
+  if (main_part == "zh") {
     return;
+  }
 
   // Apply linear search here because number of items in the list is just four.
   for (size_t i = 0; i < arraysize(kLanguageCodeSynonyms); ++i) {
@@ -106,11 +95,6 @@ void ToTranslateLanguageSynonym(std::string* language) {
       main_part = std::string(kLanguageCodeSynonyms[i].translate_language);
       break;
     }
-  }
-
-  if (main_part == "zh") {
-    *language = main_part + tail_part;
-    return;
   }
 
   *language = main_part;
@@ -125,7 +109,7 @@ void ToChromeLanguageSynonym(std::string* language) {
   }
 
   std::string main_part, tail_part;
-  SplitIntoMainAndTail(*language, &main_part, &tail_part);
+  language::SplitIntoMainAndTail(*language, &main_part, &tail_part);
   if (main_part.empty())
     return;
 

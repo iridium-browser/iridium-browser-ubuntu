@@ -5,6 +5,8 @@ import("//third_party/WebKit/Source/core/core.gni")
 
 blink_core_sources("exported") {
   sources = [
+    "LocalFrameClientImpl.cpp",
+    "LocalFrameClientImpl.h",
     "SharedWorkerRepositoryClientImpl.cpp",
     "SharedWorkerRepositoryClientImpl.h",
     "WebArrayBuffer.cpp",
@@ -14,24 +16,19 @@ blink_core_sources("exported") {
     "WebAssociatedURLLoaderImpl.h",
     "WebBlob.cpp",
     "WebCSSParser.cpp",
-    "WebColorSuggestion.cpp",
     "WebContextFeatures.cpp",
     "WebCustomElement.cpp",
     "WebDOMActivityLogger.cpp",
     "WebDOMEvent.cpp",
     "WebDOMMessageEvent.cpp",
-    "WebDataSourceImpl.cpp",
-    "WebDataSourceImpl.h",
     "WebDateTimeSuggestion.cpp",
     "WebDevToolsAgentImpl.cpp",
     "WebDevToolsAgentImpl.h",
-    "WebDevToolsFrontendImpl.cpp",
-    "WebDevToolsFrontendImpl.h",
     "WebDocument.cpp",
+    "WebDocumentLoaderImpl.cpp",
+    "WebDocumentLoaderImpl.h",
     "WebElement.cpp",
     "WebElementCollection.cpp",
-    "WebFactory.cpp",
-    "WebFactory.h",
     "WebFileChooserCompletionImpl.cpp",
     "WebFileChooserCompletionImpl.h",
     "WebFormControlElement.cpp",
@@ -39,6 +36,7 @@ blink_core_sources("exported") {
     "WebFormElementObserverImpl.cpp",
     "WebFormElementObserverImpl.h",
     "WebFrame.cpp",
+    "WebFrameClient.cpp",
     "WebFrameContentDumper.cpp",
     "WebFrameSerializer.cpp",
     "WebHeap.cpp",
@@ -84,18 +82,15 @@ blink_core_sources("exported") {
     "WebSharedWorkerImpl.cpp",
     "WebSharedWorkerImpl.h",
     "WebSurroundingText.cpp",
-    "WebTextCheckingCompletionImpl.cpp",
-    "WebTextCheckingCompletionImpl.h",
+    "WebTappedInfo.cpp",
     "WebTextCheckingResult.cpp",
     "WebUserGestureIndicator.cpp",
     "WebUserGestureToken.cpp",
-    "WebViewBase.cpp",
-    "WebViewBase.h",
-  ]
-
-  jumbo_excluded_sources = [
-    # Too many different toElement (ListedElement and Node). https://crbug.com/738389
-    "WebSearchableFormData.cpp",
+    "WebV8ContextSnapshot.cpp",
+    "WebViewImpl.cpp",
+    "WebViewImpl.h",
+    "WorkerShadowPage.cpp",
+    "WorkerShadowPage.h",
   ]
 
   defines = [ "BLINK_IMPLEMENTATION=1" ]

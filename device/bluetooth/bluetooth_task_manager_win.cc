@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
@@ -176,7 +177,7 @@ void CALLBACK OnGetGattEventWin(BTH_LE_GATT_EVENT_TYPE type,
     return;
 
   it->second->callback_task_runner->PostTask(
-      FROM_HERE, base::Bind(it->second->callback, base::Passed(&new_value)));
+      FROM_HERE, base::BindOnce(it->second->callback, std::move(new_value)));
 }
 
 }  // namespace
@@ -228,7 +229,7 @@ BluetoothUUID BluetoothTaskManagerWin::BluetoothLowEnergyUuidToBluetoothUuid(
     return BluetoothUUID(uuid_hex);
   } else {
     return BluetoothUUID(base::StringPrintf(
-        "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        "%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
         bth_le_uuid.Value.LongUuid.Data1, bth_le_uuid.Value.LongUuid.Data2,
         bth_le_uuid.Value.LongUuid.Data3, bth_le_uuid.Value.LongUuid.Data4[0],
         bth_le_uuid.Value.LongUuid.Data4[1],
@@ -467,8 +468,8 @@ void BluetoothTaskManagerWin::DiscoverDevices(int timeout_multiplier) {
   std::vector<std::unique_ptr<DeviceState>> device_list;
   if (SearchDevices(timeout_multiplier, false, &device_list)) {
     ui_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&BluetoothTaskManagerWin::OnDevicesPolled, this,
-                              base::Passed(&device_list)));
+        FROM_HERE, base::BindOnce(&BluetoothTaskManagerWin::OnDevicesPolled,
+                                  this, std::move(device_list)));
   }
 
   if (timeout_multiplier < kMaxDeviceDiscoveryTimeoutMultiplier)
@@ -483,8 +484,8 @@ void BluetoothTaskManagerWin::GetKnownDevices() {
   std::vector<std::unique_ptr<DeviceState>> device_list;
   if (SearchDevices(1, true, &device_list)) {
     ui_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&BluetoothTaskManagerWin::OnDevicesPolled, this,
-                              base::Passed(&device_list)));
+        FROM_HERE, base::BindOnce(&BluetoothTaskManagerWin::OnDevicesPolled,
+                                  this, std::move(device_list)));
   }
 }
 
@@ -529,7 +530,7 @@ bool BluetoothTaskManagerWin::SearchClassicDevices(
   }
 
   while (true) {
-    auto device_state = base::MakeUnique<DeviceState>();
+    auto device_state = std::make_unique<DeviceState>();
     GetDeviceState(device_info, device_state.get());
     device_list->push_back(std::move(device_state));
 
@@ -574,7 +575,7 @@ bool BluetoothTaskManagerWin::SearchLowEnergyDevices(
   }
 
   for (const auto& device_info : btle_devices) {
-    auto device_state = base::MakeUnique<DeviceState>();
+    auto device_state = std::make_unique<DeviceState>();
     device_state->name = device_info->friendly_name;
     device_state->address =
         BluetoothAddressToCanonicalString(device_info->address);
@@ -694,7 +695,7 @@ int BluetoothTaskManagerWin::DiscoverClassicDeviceServicesWorker(
       WSALookupServiceEnd(sdp_handle);
       return last_error;
     }
-    auto service_record_state = base::MakeUnique<ServiceRecordState>();
+    auto service_record_state = std::make_unique<ServiceRecordState>();
     service_record_state->name =
         base::SysWideToUTF8(sdp_result_data->lpszServiceInstanceName);
     for (uint64_t i = 0; i < sdp_result_data->lpBlob->cbSize; i++) {
@@ -731,7 +732,7 @@ bool BluetoothTaskManagerWin::DiscoverLowEnergyDeviceServices(
   }
 
   for (const auto& service : services) {
-    auto service_state = base::MakeUnique<ServiceRecordState>();
+    auto service_state = std::make_unique<ServiceRecordState>();
     service_state->gatt_uuid =
         BluetoothLowEnergyUuidToBluetoothUuid(service->uuid);
     service_state->attribute_handle = service->attribute_handle;
@@ -797,6 +798,14 @@ bool BluetoothTaskManagerWin::SearchForGattServiceDevicePaths(
     }
   }
 
+  // Service devices are known and available for enumeration shortly after a
+  // a service is known.  If we are searching for service device paths in that
+  // short window, we won't have a service device path for every service.
+  for (const auto& service_record_state : *service_record_states) {
+    if (service_record_state->path.empty())
+      return false;
+  }
+
   return true;
 }
 
@@ -821,8 +830,8 @@ void BluetoothTaskManagerWin::GetGattIncludedCharacteristics(
   }
 
   ui_task_runner_->PostTask(
-      FROM_HERE, base::Bind(callback, base::Passed(&win_characteristics_info),
-                            number_of_charateristics, hr));
+      FROM_HERE, base::BindOnce(callback, std::move(win_characteristics_info),
+                                number_of_charateristics, hr));
 }
 
 void BluetoothTaskManagerWin::GetGattIncludedDescriptors(
@@ -839,8 +848,8 @@ void BluetoothTaskManagerWin::GetGattIncludedDescriptors(
               &win_descriptors_info, &number_of_descriptors);
 
   ui_task_runner_->PostTask(
-      FROM_HERE, base::Bind(callback, base::Passed(&win_descriptors_info),
-                            number_of_descriptors, hr));
+      FROM_HERE, base::BindOnce(callback, std::move(win_descriptors_info),
+                                number_of_descriptors, hr));
 }
 
 void BluetoothTaskManagerWin::ReadGattCharacteristicValue(
@@ -855,7 +864,7 @@ void BluetoothTaskManagerWin::ReadGattCharacteristicValue(
 
   ui_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(callback, base::Passed(&win_characteristic_value), hr));
+      base::BindOnce(callback, std::move(win_characteristic_value), hr));
 }
 
 void BluetoothTaskManagerWin::WriteGattCharacteristicValue(

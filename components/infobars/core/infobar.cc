@@ -16,33 +16,22 @@
 namespace infobars {
 
 InfoBar::InfoBar(std::unique_ptr<InfoBarDelegate> delegate)
-    : owner_(NULL),
+    : owner_(nullptr),
       delegate_(std::move(delegate)),
-      container_(NULL),
+      container_(nullptr),
       animation_(this),
       arrow_height_(0),
       arrow_target_height_(0),
       arrow_half_width_(0),
       bar_height_(0),
       bar_target_height_(-1) {
-  DCHECK(delegate_ != NULL);
+  DCHECK(delegate_ != nullptr);
   animation_.SetTweenType(gfx::Tween::LINEAR);
   delegate_->set_infobar(this);
 }
 
 InfoBar::~InfoBar() {
   DCHECK(!owner_);
-}
-
-// static
-SkColor InfoBar::GetBackgroundColor(InfoBarDelegate::Type infobar_type) {
-  static const SkColor kWarningBackgroundColor =
-      SkColorSetRGB(0xFF, 0xEC, 0xB3);  // Yellow
-  static constexpr SkColor kPageActionBackgroundColor = SK_ColorWHITE;
-
-  return infobar_type == InfoBarDelegate::WARNING_TYPE
-             ? kWarningBackgroundColor
-             : kPageActionBackgroundColor;
 }
 
 void InfoBar::SetOwner(InfoBarManager* owner) {
@@ -86,7 +75,7 @@ void InfoBar::SetArrowTargetHeight(int height) {
 }
 
 void InfoBar::CloseSoon() {
-  owner_ = NULL;
+  owner_ = nullptr;
   PlatformSpecificOnCloseSoon();
   MaybeDelete();
 }

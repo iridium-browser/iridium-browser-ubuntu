@@ -20,15 +20,21 @@
 #include "headless/app/headless_shell_switches.h"
 #include "headless/lib/browser/headless_browser_context_impl.h"
 #include "headless/lib/browser/headless_browser_main_parts.h"
-#include "headless/lib/browser/headless_devtools_client_impl.h"
+#include "headless/lib/browser/headless_net_log.h"
 #include "headless/lib/browser/headless_web_contents_impl.h"
 #include "headless/lib/headless_content_main_delegate.h"
+#include "headless/public/internal/headless_devtools_client_impl.h"
 #include "net/http/http_util.h"
+#include "services/network/public/cpp/network_switches.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/events/devices/device_data_manager.h"
 #include "ui/gfx/geometry/size.h"
+
+#if defined(USE_NSS_CERTS)
+#include "net/cert_net/nss_ocsp.h"
+#endif
 
 namespace content {
 class DevToolsAgentHost;
@@ -56,7 +62,7 @@ int RunContentMain(
 
   std::unique_ptr<HeadlessBrowserImpl> browser(
       new HeadlessBrowserImpl(on_browser_start_callback, std::move(options)));
-  headless::HeadlessContentMainDelegate delegate(std::move(browser));
+  HeadlessContentMainDelegate delegate(std::move(browser));
   params.delegate = &delegate;
   return content::ContentMain(params);
 }
@@ -73,7 +79,7 @@ HeadlessBrowserImpl::HeadlessBrowserImpl(
       agent_host_(nullptr),
       weak_ptr_factory_(this) {}
 
-HeadlessBrowserImpl::~HeadlessBrowserImpl() {}
+HeadlessBrowserImpl::~HeadlessBrowserImpl() = default;
 
 HeadlessBrowserContext::Builder
 HeadlessBrowserImpl::CreateBrowserContextBuilder() {
@@ -99,7 +105,10 @@ void HeadlessBrowserImpl::Shutdown() {
   weak_ptr_factory_.InvalidateWeakPtrs();
 
   // Destroy all browser contexts.
-  browser_contexts_.clear();
+  {
+    base::AutoLock lock(browser_contexts_lock_);
+    browser_contexts_.clear();
+  }
 
   BrowserMainThread()->PostTask(FROM_HERE,
                                 base::MessageLoop::QuitWhenIdleClosure());
@@ -108,6 +117,7 @@ void HeadlessBrowserImpl::Shutdown() {
 std::vector<HeadlessBrowserContext*>
 HeadlessBrowserImpl::GetAllBrowserContexts() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  base::AutoLock lock(browser_contexts_lock_);
 
   std::vector<HeadlessBrowserContext*> result;
   result.reserve(browser_contexts_.size());
@@ -130,7 +140,24 @@ void HeadlessBrowserImpl::set_browser_main_parts(
   browser_main_parts_ = browser_main_parts;
 }
 
+void HeadlessBrowserImpl::PreMainMessageLoopRun() {
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(::network::switches::kLogNetLog)) {
+    base::FilePath log_path =
+        command_line->GetSwitchValuePath(::network::switches::kLogNetLog);
+    net_log_.reset(new HeadlessNetLog(log_path));
+  } else {
+    net_log_.reset(new net::NetLog());
+  }
+}
+
 void HeadlessBrowserImpl::RunOnStartCallback() {
+#if defined(USE_NSS_CERTS)
+  content::BrowserThread::PostTask(
+      content::BrowserThread::IO, FROM_HERE,
+      base::Bind(&net::SetMessageLoopForNSSHttpIO));
+#endif
   // We don't support the tethering domain on this agent host.
   agent_host_ = content::DevToolsAgentHost::CreateForBrowser(
       nullptr, content::DevToolsAgentHost::CreateServerSocketCallback());
@@ -153,6 +180,7 @@ HeadlessBrowserContext* HeadlessBrowserImpl::CreateBrowserContext(
 
   HeadlessBrowserContext* result = browser_context.get();
 
+  base::AutoLock lock(browser_contexts_lock_);
   browser_contexts_[browser_context->Id()] = std::move(browser_context);
 
   return result;
@@ -160,6 +188,7 @@ HeadlessBrowserContext* HeadlessBrowserImpl::CreateBrowserContext(
 
 void HeadlessBrowserImpl::DestroyBrowserContext(
     HeadlessBrowserContextImpl* browser_context) {
+  base::AutoLock lock(browser_contexts_lock_);
   auto it = browser_contexts_.find(browser_context->Id());
   DCHECK(it != browser_contexts_.end());
   browser_contexts_.erase(it);
@@ -209,10 +238,24 @@ HeadlessWebContentsImpl* HeadlessBrowserImpl::GetWebContentsForWindowId(
 
 HeadlessBrowserContext* HeadlessBrowserImpl::GetBrowserContextForId(
     const std::string& id) {
+  base::AutoLock lock(browser_contexts_lock_);
   auto find_it = browser_contexts_.find(id);
   if (find_it == browser_contexts_.end())
     return nullptr;
   return find_it->second.get();
+}
+
+LockedPtr<HeadlessBrowserContextImpl>
+HeadlessBrowserImpl::GetBrowserContextForRenderFrame(
+    int render_process_id,
+    int render_frame_id) const {
+  MoveableAutoLock lock(browser_contexts_lock_);
+  for (const auto& pair : browser_contexts_) {
+    if (pair.second->GetDevToolsFrameToken(render_process_id, render_frame_id))
+      return LockedPtr<HeadlessBrowserContextImpl>(std::move(lock),
+                                                   pair.second.get());
+  }
+  return LockedPtr<HeadlessBrowserContextImpl>(std::move(lock), nullptr);
 }
 
 HeadlessDevToolsTarget* HeadlessBrowserImpl::GetDevToolsTarget() {

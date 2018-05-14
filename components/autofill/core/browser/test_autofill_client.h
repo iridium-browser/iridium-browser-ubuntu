@@ -15,10 +15,8 @@
 #include "base/macros.h"
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/prefs/pref_service.h"
-#include "components/rappor/test_rappor_service.h"
 #include "components/ukm/test_ukm_recorder.h"
-#include "google_apis/gaia/fake_identity_provider.h"
-#include "google_apis/gaia/fake_oauth2_token_service.h"
+#include "services/identity/public/cpp/identity_test_environment.h"
 
 namespace autofill {
 
@@ -33,9 +31,9 @@ class TestAutofillClient : public AutofillClient {
   scoped_refptr<AutofillWebDataService> GetDatabase() override;
   PrefService* GetPrefs() override;
   syncer::SyncService* GetSyncService() override;
-  IdentityProvider* GetIdentityProvider() override;
-  rappor::RapporServiceImpl* GetRapporServiceImpl() override;
+  identity::IdentityManager* GetIdentityManager() override;
   ukm::UkmRecorder* GetUkmRecorder() override;
+  AddressNormalizer* GetAddressNormalizer() override;
   SaveCardBubbleController* GetSaveCardBubbleController() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(const CreditCard& card,
@@ -70,31 +68,26 @@ class TestAutofillClient : public AutofillClient {
       const std::vector<autofill::FormStructure*>& forms) override;
   void DidFillOrPreviewField(const base::string16& autofilled_value,
                              const base::string16& profile_full_name) override;
+  void DidInteractWithNonsecureCreditCardInput() override;
   // By default, TestAutofillClient will report that the context is
   // secure. This can be adjusted by calling set_form_origin() with an
   // http:// URL.
   bool IsContextSecure() override;
   bool ShouldShowSigninPromo() override;
-  void StartSigninFlow() override;
-  void ShowHttpNotSecureExplanation() override;
   bool IsAutofillSupported() override;
+  void ExecuteCommand(int id) override;
 
   void SetPrefs(std::unique_ptr<PrefService> prefs) {
     prefs_ = std::move(prefs);
   }
 
-  rappor::TestRapporServiceImpl* test_rappor_service() {
-    return rappor_service_.get();
-  }
-
   void set_form_origin(const GURL& url) { form_origin_ = url; }
 
  private:
+  identity::IdentityTestEnvironment identity_test_env_;
+
   // NULL by default.
   std::unique_ptr<PrefService> prefs_;
-  std::unique_ptr<FakeOAuth2TokenService> token_service_;
-  std::unique_ptr<FakeIdentityProvider> identity_provider_;
-  std::unique_ptr<rappor::TestRapporServiceImpl> rappor_service_;
 #if !defined(OS_ANDROID)
   std::unique_ptr<SaveCardBubbleController> save_card_bubble_controller_;
 #endif

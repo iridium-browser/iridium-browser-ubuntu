@@ -31,6 +31,8 @@
 
 #include <v8-inspector.h>
 #include <memory>
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/InspectorHighlight.h"
@@ -41,7 +43,6 @@
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/Color.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebInputEvent.h"
 
@@ -57,22 +58,21 @@ class Page;
 class PageOverlay;
 class WebGestureEvent;
 class WebMouseEvent;
-class WebLocalFrameBase;
-class WebTouchEvent;
+class WebLocalFrameImpl;
+class WebPointerEvent;
 
 class CORE_EXPORT InspectorOverlayAgent final
-    : public NON_EXPORTED_BASE(InspectorBaseAgent<protocol::Overlay::Metainfo>),
-      public NON_EXPORTED_BASE(InspectorOverlayHost::Listener) {
-  WTF_MAKE_NONCOPYABLE(InspectorOverlayAgent);
+    : public InspectorBaseAgent<protocol::Overlay::Metainfo>,
+      public InspectorOverlayHost::Listener {
   USING_GARBAGE_COLLECTED_MIXIN(InspectorOverlayAgent);
 
  public:
-  InspectorOverlayAgent(WebLocalFrameBase*,
+  InspectorOverlayAgent(WebLocalFrameImpl*,
                         InspectedFrames*,
                         v8_inspector::V8InspectorSession*,
                         InspectorDOMAgent*);
   ~InspectorOverlayAgent() override;
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*) override;
 
   // protocol::Dispatcher::OverlayCommandHandler implementation.
   protocol::Response enable() override;
@@ -118,6 +118,7 @@ class CORE_EXPORT InspectorOverlayAgent final
   void Dispose() override;
 
   void Inspect(Node*);
+  void DispatchBufferedTouchEvents();
   bool HandleInputEvent(const WebInputEvent&);
   void PageLayoutInvalidated(bool resized);
   void ShowReloadingBlanket();
@@ -146,6 +147,7 @@ class CORE_EXPORT InspectorOverlayAgent final
   void DrawQuadHighlight();
   void DrawPausedInDebuggerMessage();
   void DrawViewSize();
+  void DrawScreenshotBorder();
 
   float WindowToViewportScale() const;
 
@@ -163,10 +165,10 @@ class CORE_EXPORT InspectorOverlayAgent final
   void ClearInternal();
   void UpdateAllLifecyclePhases();
 
-  bool HandleMouseDown();
-  bool HandleMouseUp();
+  bool HandleMouseDown(const WebMouseEvent&);
+  bool HandleMouseUp(const WebMouseEvent&);
   bool HandleGestureEvent(const WebGestureEvent&);
-  bool HandleTouchEvent(const WebTouchEvent&);
+  bool HandlePointerEvent(const WebPointerEvent&);
   bool HandleMouseMove(const WebMouseEvent&);
 
   protocol::Response CompositingEnabled();
@@ -189,7 +191,7 @@ class CORE_EXPORT InspectorOverlayAgent final
                           bool omit_tooltip);
   void InnerHideHighlight();
 
-  Member<WebLocalFrameBase> frame_impl_;
+  Member<WebLocalFrameImpl> frame_impl_;
   Member<InspectedFrames> inspected_frames_;
   bool enabled_;
   String paused_in_debugger_message_;
@@ -219,6 +221,10 @@ class CORE_EXPORT InspectorOverlayAgent final
   SearchMode inspect_mode_;
   std::unique_ptr<InspectorHighlightConfig> inspect_mode_highlight_config_;
   int backend_node_id_to_inspect_;
+  bool screenshot_mode_ = false;
+  IntPoint screenshot_anchor_;
+  IntPoint screenshot_position_;
+  DISALLOW_COPY_AND_ASSIGN(InspectorOverlayAgent);
 };
 
 }  // namespace blink

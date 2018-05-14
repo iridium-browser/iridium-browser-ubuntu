@@ -27,6 +27,11 @@
 #ifndef ResourceResponse_h
 #define ResourceResponse_h
 
+#include <memory>
+#include <utility>
+
+#include "base/memory/scoped_refptr.h"
+#include "base/time/time.h"
 #include "platform/PlatformExport.h"
 #include "platform/blob/BlobData.h"
 #include "platform/loader/fetch/ResourceLoadInfo.h"
@@ -34,13 +39,13 @@
 #include "platform/network/HTTPHeaderMap.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/weborigin/KURL.h"
+#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/RefCounted.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Time.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/CString.h"
 #include "public/platform/WebURLResponse.h"
-#include "public/platform/modules/serviceworker/WebServiceWorkerResponseType.h"
+#include "services/network/public/mojom/fetch_api.mojom-blink.h"
 
 namespace blink {
 
@@ -70,8 +75,13 @@ class PLATFORM_EXPORT ResourceResponse final {
     kSecurityStyleUnknown,
     kSecurityStyleUnauthenticated,
     kSecurityStyleAuthenticationBroken,
-    kSecurityStyleWarning,
     kSecurityStyleAuthenticated
+  };
+
+  enum CTPolicyCompliance {
+    kCTPolicyComplianceDetailsNotAvailable,
+    kCTPolicyComplies,
+    kCTPolicyDoesNotComply
   };
 
   class PLATFORM_EXPORT SignedCertificateTimestamp final {
@@ -136,7 +146,7 @@ class PLATFORM_EXPORT ResourceResponse final {
 
   class ExtraData : public RefCounted<ExtraData> {
    public:
-    virtual ~ExtraData() {}
+    virtual ~ExtraData() = default;
   };
 
   explicit ResourceResponse(CrossThreadResourceResponseData*);
@@ -145,10 +155,11 @@ class PLATFORM_EXPORT ResourceResponse final {
   std::unique_ptr<CrossThreadResourceResponseData> CopyData() const;
 
   ResourceResponse();
-  ResourceResponse(const KURL&,
-                   const AtomicString& mime_type,
-                   long long expected_length,
-                   const AtomicString& text_encoding_name);
+  explicit ResourceResponse(
+      const KURL&,
+      const AtomicString& mime_type = g_null_atom,
+      long long expected_length = 0,
+      const AtomicString& text_encoding_name = g_null_atom);
   ResourceResponse(const ResourceResponse&);
   ResourceResponse& operator=(const ResourceResponse&);
 
@@ -222,10 +233,10 @@ class PLATFORM_EXPORT ResourceResponse final {
   void SetWasCached(bool);
 
   ResourceLoadTiming* GetResourceLoadTiming() const;
-  void SetResourceLoadTiming(RefPtr<ResourceLoadTiming>);
+  void SetResourceLoadTiming(scoped_refptr<ResourceLoadTiming>);
 
-  RefPtr<ResourceLoadInfo> GetResourceLoadInfo() const;
-  void SetResourceLoadInfo(RefPtr<ResourceLoadInfo>);
+  scoped_refptr<ResourceLoadInfo> GetResourceLoadInfo() const;
+  void SetResourceLoadInfo(scoped_refptr<ResourceLoadInfo>);
 
   HTTPVersion HttpVersion() const { return http_version_; }
   void SetHTTPVersion(HTTPVersion version) { http_version_ = version; }
@@ -235,6 +246,16 @@ class PLATFORM_EXPORT ResourceResponse final {
   }
   void SetHasMajorCertificateErrors(bool has_major_certificate_errors) {
     has_major_certificate_errors_ = has_major_certificate_errors;
+  }
+
+  CTPolicyCompliance GetCTPolicyCompliance() const {
+    return ct_policy_compliance_;
+  }
+  void SetCTPolicyCompliance(CTPolicyCompliance);
+
+  bool IsLegacySymantecCert() const { return is_legacy_symantec_cert_; }
+  void SetIsLegacySymantecCert(bool is_legacy_symantec_cert) {
+    is_legacy_symantec_cert_ = is_legacy_symantec_cert;
   }
 
   SecurityStyle GetSecurityStyle() const { return security_style_; }
@@ -277,13 +298,6 @@ class PLATFORM_EXPORT ResourceResponse final {
     was_fetched_via_service_worker_ = value;
   }
 
-  bool WasFetchedViaForeignFetch() const {
-    return was_fetched_via_foreign_fetch_;
-  }
-  void SetWasFetchedViaForeignFetch(bool value) {
-    was_fetched_via_foreign_fetch_ = value;
-  }
-
   // See ServiceWorkerResponseInfo::was_fallback_required.
   bool WasFallbackRequiredByServiceWorker() const {
     return was_fallback_required_by_service_worker_;
@@ -292,12 +306,14 @@ class PLATFORM_EXPORT ResourceResponse final {
     was_fallback_required_by_service_worker_ = value;
   }
 
-  WebServiceWorkerResponseType ServiceWorkerResponseType() const {
-    return service_worker_response_type_;
+  network::mojom::FetchResponseType ResponseTypeViaServiceWorker() const {
+    return response_type_via_service_worker_;
   }
-  void SetServiceWorkerResponseType(WebServiceWorkerResponseType value) {
-    service_worker_response_type_ = value;
+  void SetResponseTypeViaServiceWorker(
+      network::mojom::FetchResponseType value) {
+    response_type_via_service_worker_ = value;
   }
+  bool IsOpaqueResponseFromServiceWorker() const;
 
   // See ServiceWorkerResponseInfo::url_list_via_service_worker.
   const Vector<KURL>& UrlListViaServiceWorker() const {
@@ -378,8 +394,8 @@ class PLATFORM_EXPORT ResourceResponse final {
   void SetDownloadedFilePath(const String&);
 
   // Extra data associated with this response.
-  ExtraData* GetExtraData() const { return extra_data_.Get(); }
-  void SetExtraData(RefPtr<ExtraData> extra_data) {
+  ExtraData* GetExtraData() const { return extra_data_.get(); }
+  void SetExtraData(scoped_refptr<ExtraData> extra_data) {
     extra_data_ = std::move(extra_data);
   }
 
@@ -406,8 +422,9 @@ class PLATFORM_EXPORT ResourceResponse final {
   AtomicString mime_type_;
   long long expected_content_length_;
   AtomicString text_encoding_name_;
-  unsigned connection_id_;
-  int http_status_code_;
+
+  unsigned connection_id_ = 0;
+  int http_status_code_ = 0;
   AtomicString http_status_text_;
   HTTPHeaderMap http_header_fields_;
 
@@ -415,68 +432,78 @@ class PLATFORM_EXPORT ResourceResponse final {
   AtomicString remote_ip_address_;
 
   // Remote port number of the socket which fetched this resource.
-  unsigned short remote_port_;
+  unsigned short remote_port_ = 0;
 
-  bool was_cached_ : 1;
-  bool connection_reused_ : 1;
-  bool is_null_ : 1;
-  mutable bool have_parsed_age_header_ : 1;
-  mutable bool have_parsed_date_header_ : 1;
-  mutable bool have_parsed_expires_header_ : 1;
-  mutable bool have_parsed_last_modified_header_ : 1;
+  bool was_cached_ = false;
+  bool connection_reused_ = false;
+  bool is_null_;
+  mutable bool have_parsed_age_header_ = false;
+  mutable bool have_parsed_date_header_ = false;
+  mutable bool have_parsed_expires_header_ = false;
+  mutable bool have_parsed_last_modified_header_ = false;
 
   // True if the resource was retrieved by the embedder in spite of
   // certificate errors.
-  bool has_major_certificate_errors_ : 1;
+  bool has_major_certificate_errors_ = false;
+
+  // The Certificate Transparency policy compliance status of the resource.
+  CTPolicyCompliance ct_policy_compliance_ =
+      kCTPolicyComplianceDetailsNotAvailable;
+
+  // True if the resource was retrieved with a legacy Symantec certificate which
+  // is slated for distrust in future.
+  bool is_legacy_symantec_cert_ = false;
+
+  // The time at which the resource's certificate expires. Null if there was no
+  // certificate.
+  base::Time cert_validity_start_;
 
   // Was the resource fetched over SPDY.  See http://dev.chromium.org/spdy
-  bool was_fetched_via_spdy_ : 1;
+  bool was_fetched_via_spdy_ = false;
 
   // Was the resource fetched over an explicit proxy (HTTP, SOCKS, etc).
-  bool was_fetched_via_proxy_ : 1;
+  bool was_fetched_via_proxy_ = false;
 
   // Was the resource fetched over a ServiceWorker.
-  bool was_fetched_via_service_worker_ : 1;
-
-  // Was the resource fetched using a foreign fetch service worker.
-  bool was_fetched_via_foreign_fetch_ : 1;
+  bool was_fetched_via_service_worker_ = false;
 
   // Was the fallback request with skip service worker flag required.
-  bool was_fallback_required_by_service_worker_ : 1;
+  bool was_fallback_required_by_service_worker_ = false;
 
   // True if service worker navigation preload was performed due to
   // the request for this resource.
-  bool did_service_worker_navigation_preload_ : 1;
+  bool did_service_worker_navigation_preload_ = false;
 
-  // The type of the response which was fetched by the ServiceWorker.
-  WebServiceWorkerResponseType service_worker_response_type_;
+  // The type of the response which was returned by the ServiceWorker.
+  network::mojom::FetchResponseType response_type_via_service_worker_ =
+      network::mojom::FetchResponseType::kDefault;
 
   // HTTP version used in the response, if known.
-  HTTPVersion http_version_;
+  HTTPVersion http_version_ = kHTTPVersionUnknown;
 
   // The security style of the resource.
   // This only contains a valid value when the DevTools Network domain is
   // enabled. (Otherwise, it contains a default value of Unknown.)
-  SecurityStyle security_style_;
+  SecurityStyle security_style_ = kSecurityStyleUnknown;
 
   // Security details of this request's connection.
   // If m_securityStyle is Unknown or Unauthenticated, this does not contain
   // valid data.
   SecurityDetails security_details_;
 
-  RefPtr<ResourceLoadTiming> resource_load_timing_;
-  RefPtr<ResourceLoadInfo> resource_load_info_;
+  scoped_refptr<ResourceLoadTiming> resource_load_timing_;
+  scoped_refptr<ResourceLoadInfo> resource_load_info_;
 
   mutable CacheControlHeader cache_control_header_;
 
-  mutable double age_;
-  mutable double date_;
-  mutable double expires_;
-  mutable double last_modified_;
+  mutable double age_ = 0.0;
+  mutable double date_ = 0.0;
+  mutable double expires_ = 0.0;
+  mutable double last_modified_ = 0.0;
 
   // The id of the appcache this response was retrieved from, or zero if
   // the response was not retrieved from an appcache.
-  long long app_cache_id_;
+  long long app_cache_id_ = 0;
 
   // The manifest url of the appcache this response was retrieved from, if any.
   // Note: only valid for main resource responses.
@@ -505,27 +532,28 @@ class PLATFORM_EXPORT ResourceResponse final {
   AtomicString alpn_negotiated_protocol_;
 
   // Information about the type of connection used to fetch this resource.
-  net::HttpResponseInfo::ConnectionInfo connection_info_;
+  net::HttpResponseInfo::ConnectionInfo connection_info_ =
+      net::HttpResponseInfo::ConnectionInfo::CONNECTION_INFO_UNKNOWN;
 
   // Size of the response in bytes prior to decompression.
-  long long encoded_data_length_;
+  long long encoded_data_length_ = 0;
 
   // Size of the response body in bytes prior to decompression.
-  long long encoded_body_length_;
+  long long encoded_body_length_ = 0;
 
   // Sizes of the response body in bytes after any content-encoding is
   // removed.
-  long long decoded_body_length_;
+  long long decoded_body_length_ = 0;
 
   // The downloaded file path if the load streamed to a file.
   String downloaded_file_path_;
 
   // The handle to the downloaded file to ensure the underlying file will not
   // be deleted.
-  RefPtr<BlobDataHandle> downloaded_file_handle_;
+  scoped_refptr<BlobDataHandle> downloaded_file_handle_;
 
   // ExtraData associated with the response.
-  RefPtr<ExtraData> extra_data_;
+  scoped_refptr<ExtraData> extra_data_;
 
   // PlzNavigate: the redirect responses are transmitted
   // inside the final response.
@@ -552,7 +580,7 @@ struct CrossThreadResourceResponseData {
   USING_FAST_MALLOC(CrossThreadResourceResponseData);
 
  public:
-  CrossThreadResourceResponseData() {}
+  CrossThreadResourceResponseData() = default;
   KURL url_;
   String mime_type_;
   long long expected_content_length_;
@@ -560,8 +588,11 @@ struct CrossThreadResourceResponseData {
   int http_status_code_;
   String http_status_text_;
   std::unique_ptr<CrossThreadHTTPHeaderMapData> http_headers_;
-  RefPtr<ResourceLoadTiming> resource_load_timing_;
+  scoped_refptr<ResourceLoadTiming> resource_load_timing_;
   bool has_major_certificate_errors_;
+  ResourceResponse::CTPolicyCompliance ct_policy_compliance_;
+  bool is_legacy_symantec_cert_;
+  base::Time cert_validity_start_;
   ResourceResponse::SecurityStyle security_style_;
   ResourceResponse::SecurityDetails security_details_;
   // This is |certificate| from SecurityDetails since that structure should
@@ -574,9 +605,8 @@ struct CrossThreadResourceResponseData {
   bool was_fetched_via_spdy_;
   bool was_fetched_via_proxy_;
   bool was_fetched_via_service_worker_;
-  bool was_fetched_via_foreign_fetch_;
   bool was_fallback_required_by_service_worker_;
-  WebServiceWorkerResponseType service_worker_response_type_;
+  network::mojom::FetchResponseType response_type_via_service_worker_;
   Vector<KURL> url_list_via_service_worker_;
   String cache_storage_cache_name_;
   bool did_service_worker_navigation_preload_;
@@ -587,7 +617,7 @@ struct CrossThreadResourceResponseData {
   long long encoded_body_length_;
   long long decoded_body_length_;
   String downloaded_file_path_;
-  RefPtr<BlobDataHandle> downloaded_file_handle_;
+  scoped_refptr<BlobDataHandle> downloaded_file_handle_;
 };
 
 }  // namespace blink

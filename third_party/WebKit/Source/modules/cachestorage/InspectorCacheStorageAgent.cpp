@@ -7,24 +7,33 @@
 #include <algorithm>
 #include <memory>
 #include <utility>
+#include "base/memory/scoped_refptr.h"
+#include "core/dom/Document.h"
+#include "core/dom/ExecutionContext.h"
+#include "core/fileapi/FileReaderLoader.h"
+#include "core/fileapi/FileReaderLoaderClient.h"
+#include "core/frame/LocalFrame.h"
+#include "core/inspector/InspectedFrames.h"
+#include "core/typed_arrays/DOMArrayBuffer.h"
+#include "platform/SharedBuffer.h"
+#include "platform/blob/BlobData.h"
 #include "platform/heap/Handle.h"
+#include "platform/network/HTTPHeaderMap.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
+#include "platform/wtf/Functional.h"
 #include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/RefCounted.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Time.h"
 #include "platform/wtf/Vector.h"
-#include "platform/wtf/text/StringBuilder.h"
+#include "platform/wtf/text/Base64.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebVector.h"
+#include "public/platform/modules/cache_storage/cache_storage.mojom-blink.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCache.h"
-#include "public/platform/modules/serviceworker/WebServiceWorkerCacheError.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCacheStorage.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerRequest.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponse.h"
@@ -32,19 +41,24 @@
 using blink::protocol::Array;
 // Renaming Cache since there is another blink::Cache.
 using ProtocolCache = blink::protocol::CacheStorage::Cache;
+using blink::protocol::CacheStorage::Cache;
+using blink::protocol::CacheStorage::CachedResponse;
 using blink::protocol::CacheStorage::DataEntry;
+using blink::protocol::CacheStorage::Header;
 // Renaming Response since there is another blink::Response.
 using ProtocolResponse = blink::protocol::Response;
 
-typedef blink::protocol::CacheStorage::Backend::DeleteCacheCallback
-    DeleteCacheCallback;
-typedef blink::protocol::CacheStorage::Backend::DeleteEntryCallback
-    DeleteEntryCallback;
-typedef blink::protocol::CacheStorage::Backend::RequestCacheNamesCallback
-    RequestCacheNamesCallback;
-typedef blink::protocol::CacheStorage::Backend::RequestEntriesCallback
-    RequestEntriesCallback;
-typedef blink::WebServiceWorkerCache::BatchOperation BatchOperation;
+using DeleteCacheCallback =
+    blink::protocol::CacheStorage::Backend::DeleteCacheCallback;
+using DeleteEntryCallback =
+    blink::protocol::CacheStorage::Backend::DeleteEntryCallback;
+using RequestCacheNamesCallback =
+    blink::protocol::CacheStorage::Backend::RequestCacheNamesCallback;
+using RequestEntriesCallback =
+    blink::protocol::CacheStorage::Backend::RequestEntriesCallback;
+using RequestCachedResponseCallback =
+    blink::protocol::CacheStorage::Backend::RequestCachedResponseCallback;
+using BatchOperation = blink::WebServiceWorkerCache::BatchOperation;
 
 namespace blink {
 
@@ -70,8 +84,8 @@ ProtocolResponse ParseCacheId(const String& id,
 
 ProtocolResponse AssertCacheStorage(
     const String& security_origin,
-    std::unique_ptr<WebServiceWorkerCacheStorage>& result) {
-  RefPtr<SecurityOrigin> sec_origin =
+    std::unique_ptr<WebServiceWorkerCacheStorage>* result) {
+  scoped_refptr<const SecurityOrigin> sec_origin =
       SecurityOrigin::CreateFromString(security_origin);
 
   // Cache Storage API is restricted to trustworthy origins.
@@ -84,14 +98,14 @@ ProtocolResponse AssertCacheStorage(
       Platform::Current()->CreateCacheStorage(WebSecurityOrigin(sec_origin));
   if (!cache)
     return ProtocolResponse::Error("Could not find cache storage.");
-  result = std::move(cache);
+  *result = std::move(cache);
   return ProtocolResponse::OK();
 }
 
 ProtocolResponse AssertCacheStorageAndNameForId(
     const String& cache_id,
     String* cache_name,
-    std::unique_ptr<WebServiceWorkerCacheStorage>& result) {
+    std::unique_ptr<WebServiceWorkerCacheStorage>* result) {
   String security_origin;
   ProtocolResponse response =
       ParseCacheId(cache_id, &security_origin, cache_name);
@@ -100,26 +114,50 @@ ProtocolResponse AssertCacheStorageAndNameForId(
   return AssertCacheStorage(security_origin, result);
 }
 
-CString ServiceWorkerCacheErrorString(WebServiceWorkerCacheError error) {
+CString CacheStorageErrorString(mojom::CacheStorageError error) {
   switch (error) {
-    case kWebServiceWorkerCacheErrorNotImplemented:
+    case mojom::CacheStorageError::kErrorNotImplemented:
       return CString("not implemented.");
-      break;
-    case kWebServiceWorkerCacheErrorNotFound:
+    case mojom::CacheStorageError::kErrorNotFound:
       return CString("not found.");
-      break;
-    case kWebServiceWorkerCacheErrorExists:
+    case mojom::CacheStorageError::kErrorExists:
       return CString("cache already exists.");
-      break;
-    case kWebServiceWorkerCacheErrorQuotaExceeded:
+    case mojom::CacheStorageError::kErrorQuotaExceeded:
       return CString("quota exceeded.");
-    case kWebServiceWorkerCacheErrorCacheNameNotFound:
+    case mojom::CacheStorageError::kErrorCacheNameNotFound:
       return CString("cache not found.");
-    case kWebServiceWorkerCacheErrorTooLarge:
+    case mojom::CacheStorageError::kErrorQueryTooLarge:
       return CString("operation too large.");
+    case mojom::CacheStorageError::kErrorStorage:
+      return CString("storage failure.");
+    case mojom::CacheStorageError::kSuccess:
+      // This function should only be called upon error.
+      break;
   }
   NOTREACHED();
   return "";
+}
+
+ProtocolResponse GetExecutionContext(InspectedFrames* frames,
+                                     const String& cache_id,
+                                     ExecutionContext** context) {
+  String origin;
+  String id;
+  ProtocolResponse res = ParseCacheId(cache_id, &origin, &id);
+  if (!res.isSuccess())
+    return res;
+
+  LocalFrame* frame = frames->FrameWithSecurityOrigin(origin);
+  if (!frame)
+    return ProtocolResponse::Error("No frame with origin " + origin);
+
+  blink::Document* document = frame->GetDocument();
+  if (!document)
+    return ProtocolResponse::Error("No execution context found");
+
+  *context = document;
+
+  return ProtocolResponse::OK();
 }
 
 class RequestCacheNames
@@ -131,7 +169,7 @@ class RequestCacheNames
                     std::unique_ptr<RequestCacheNamesCallback> callback)
       : security_origin_(security_origin), callback_(std::move(callback)) {}
 
-  ~RequestCacheNames() override {}
+  ~RequestCacheNames() override = default;
 
   void OnSuccess(const WebVector<WebString>& caches) override {
     std::unique_ptr<Array<ProtocolCache>> array =
@@ -149,10 +187,10 @@ class RequestCacheNames
     callback_->sendSuccess(std::move(array));
   }
 
-  void OnError(WebServiceWorkerCacheError error) override {
+  void OnError(mojom::CacheStorageError error) override {
     callback_->sendFailure(ProtocolResponse::Error(
         String::Format("Error requesting cache names: %s",
-                       ServiceWorkerCacheErrorString(error).data())));
+                       CacheStorageErrorString(error).data())));
   }
 
  private:
@@ -167,12 +205,13 @@ struct DataRequestParams {
 };
 
 struct RequestResponse {
-  RequestResponse() {}
-  RequestResponse(const String& request, const String& response)
-      : request(request), response(response) {}
-  String request;
-  String response;
+  String request_url;
+  String request_method;
+  HTTPHeaderMap request_headers;
+  int response_status;
+  String response_status_text;
   double response_time;
+  HTTPHeaderMap response_headers;
 };
 
 class ResponsesAccumulator : public RefCounted<ResponsesAccumulator> {
@@ -192,32 +231,44 @@ class ResponsesAccumulator : public RefCounted<ResponsesAccumulator> {
     DCHECK_GT(num_responses_left_, 0);
     RequestResponse& request_response =
         responses_.at(responses_.size() - num_responses_left_);
-    request_response.request = request.Url().GetString();
-    request_response.response = response.StatusText();
+
+    request_response.request_url = request.Url().GetString();
+    request_response.request_method = request.Method();
+    request_response.request_headers = request.Headers();
+    request_response.response_status = response.Status();
+    request_response.response_status_text = response.StatusText();
     request_response.response_time = response.ResponseTime().ToDoubleT();
+    request_response.response_headers = response.Headers();
 
     if (--num_responses_left_ != 0)
       return;
 
     std::sort(responses_.begin(), responses_.end(),
               [](const RequestResponse& a, const RequestResponse& b) {
-                return WTF::CodePointCompareLessThan(a.request, b.request);
+                return WTF::CodePointCompareLessThan(a.request_url,
+                                                     b.request_url);
               });
     if (params_.skip_count > 0)
-      responses_.erase(0, params_.skip_count);
+      responses_.EraseAt(0, params_.skip_count);
     bool has_more = false;
     if (static_cast<size_t>(params_.page_size) < responses_.size()) {
-      responses_.erase(params_.page_size,
-                       responses_.size() - params_.page_size);
+      responses_.EraseAt(params_.page_size,
+                         responses_.size() - params_.page_size);
       has_more = true;
     }
     std::unique_ptr<Array<DataEntry>> array = Array<DataEntry>::create();
     for (const auto& request_response : responses_) {
       std::unique_ptr<DataEntry> entry =
           DataEntry::create()
-              .setRequest(request_response.request)
-              .setResponse(request_response.response)
+              .setRequestURL(request_response.request_url)
+              .setRequestMethod(request_response.request_method)
+              .setRequestHeaders(
+                  SerializeHeaders(request_response.request_headers))
+              .setResponseStatus(request_response.response_status)
+              .setResponseStatusText(request_response.response_status_text)
               .setResponseTime(request_response.response_time)
+              .setResponseHeaders(
+                  SerializeHeaders(request_response.response_headers))
               .build();
       array->addItem(std::move(entry));
     }
@@ -226,6 +277,18 @@ class ResponsesAccumulator : public RefCounted<ResponsesAccumulator> {
 
   void SendFailure(const ProtocolResponse& error) {
     callback_->sendFailure(error);
+  }
+
+  std::unique_ptr<Array<Header>> SerializeHeaders(
+      const HTTPHeaderMap& headers) {
+    std::unique_ptr<Array<Header>> result = Array<Header>::create();
+    for (HTTPHeaderMap::const_iterator it = headers.begin(),
+                                       end = headers.end();
+         it != end; ++it) {
+      result->addItem(
+          Header::create().setName(it->key).setValue(it->value).build());
+    }
+    return result;
   }
 
  private:
@@ -242,25 +305,25 @@ class GetCacheResponsesForRequestData
  public:
   GetCacheResponsesForRequestData(const DataRequestParams& params,
                                   const WebServiceWorkerRequest& request,
-                                  PassRefPtr<ResponsesAccumulator> accum)
+                                  scoped_refptr<ResponsesAccumulator> accum)
       : params_(params), request_(request), accumulator_(std::move(accum)) {}
-  ~GetCacheResponsesForRequestData() override {}
+  ~GetCacheResponsesForRequestData() override = default;
 
   void OnSuccess(const WebServiceWorkerResponse& response) override {
     accumulator_->AddRequestResponsePair(request_, response);
   }
 
-  void OnError(WebServiceWorkerCacheError error) override {
+  void OnError(mojom::CacheStorageError error) override {
     accumulator_->SendFailure(ProtocolResponse::Error(
         String::Format("Error requesting responses for cache  %s: %s",
                        params_.cache_name.Utf8().data(),
-                       ServiceWorkerCacheErrorString(error).data())));
+                       CacheStorageErrorString(error).data())));
   }
 
  private:
   DataRequestParams params_;
   WebServiceWorkerRequest request_;
-  RefPtr<ResponsesAccumulator> accumulator_;
+  scoped_refptr<ResponsesAccumulator> accumulator_;
 };
 
 class GetCacheKeysForRequestData
@@ -274,7 +337,7 @@ class GetCacheKeysForRequestData
       : params_(params),
         cache_(std::move(cache)),
         callback_(std::move(callback)) {}
-  ~GetCacheKeysForRequestData() override {}
+  ~GetCacheKeysForRequestData() override = default;
 
   WebServiceWorkerCache* Cache() { return cache_.get(); }
   void OnSuccess(const WebVector<WebServiceWorkerRequest>& requests) override {
@@ -283,24 +346,24 @@ class GetCacheKeysForRequestData
       callback_->sendSuccess(std::move(array), false);
       return;
     }
-    RefPtr<ResponsesAccumulator> accumulator =
-        AdoptRef(new ResponsesAccumulator(requests.size(), params_,
-                                          std::move(callback_)));
+    scoped_refptr<ResponsesAccumulator> accumulator =
+        base::AdoptRef(new ResponsesAccumulator(requests.size(), params_,
+                                                std::move(callback_)));
 
     for (size_t i = 0; i < requests.size(); i++) {
       const auto& request = requests[i];
-      auto cache_request = WTF::MakeUnique<GetCacheResponsesForRequestData>(
+      auto cache_request = std::make_unique<GetCacheResponsesForRequestData>(
           params_, request, accumulator);
       cache_->DispatchMatch(std::move(cache_request), request,
                             WebServiceWorkerCache::QueryParams());
     }
   }
 
-  void OnError(WebServiceWorkerCacheError error) override {
+  void OnError(mojom::CacheStorageError error) override {
     callback_->sendFailure(ProtocolResponse::Error(
         String::Format("Error requesting requests for cache %s: %s",
                        params_.cache_name.Utf8().data(),
-                       ServiceWorkerCacheErrorString(error).data())));
+                       CacheStorageErrorString(error).data())));
   }
 
  private:
@@ -317,20 +380,20 @@ class GetCacheForRequestData
   GetCacheForRequestData(const DataRequestParams& params,
                          std::unique_ptr<RequestEntriesCallback> callback)
       : params_(params), callback_(std::move(callback)) {}
-  ~GetCacheForRequestData() override {}
+  ~GetCacheForRequestData() override = default;
 
   void OnSuccess(std::unique_ptr<WebServiceWorkerCache> cache) override {
-    auto cache_request = WTF::MakeUnique<GetCacheKeysForRequestData>(
+    auto cache_request = std::make_unique<GetCacheKeysForRequestData>(
         params_, std::move(cache), std::move(callback_));
     cache_request->Cache()->DispatchKeys(std::move(cache_request),
                                          WebServiceWorkerRequest(),
                                          WebServiceWorkerCache::QueryParams());
   }
 
-  void OnError(WebServiceWorkerCacheError error) override {
+  void OnError(mojom::CacheStorageError error) override {
     callback_->sendFailure(ProtocolResponse::Error(String::Format(
         "Error requesting cache %s: %s", params_.cache_name.Utf8().data(),
-        ServiceWorkerCacheErrorString(error).data())));
+        CacheStorageErrorString(error).data())));
   }
 
  private:
@@ -342,16 +405,16 @@ class DeleteCache : public WebServiceWorkerCacheStorage::CacheStorageCallbacks {
   WTF_MAKE_NONCOPYABLE(DeleteCache);
 
  public:
-  DeleteCache(std::unique_ptr<DeleteCacheCallback> callback)
+  explicit DeleteCache(std::unique_ptr<DeleteCacheCallback> callback)
       : callback_(std::move(callback)) {}
-  ~DeleteCache() override {}
+  ~DeleteCache() override = default;
 
   void OnSuccess() override { callback_->sendSuccess(); }
 
-  void OnError(WebServiceWorkerCacheError error) override {
+  void OnError(mojom::CacheStorageError error) override {
     callback_->sendFailure(ProtocolResponse::Error(
         String::Format("Error requesting cache names: %s",
-                       ServiceWorkerCacheErrorString(error).data())));
+                       CacheStorageErrorString(error).data())));
   }
 
  private:
@@ -362,16 +425,16 @@ class DeleteCacheEntry : public WebServiceWorkerCache::CacheBatchCallbacks {
   WTF_MAKE_NONCOPYABLE(DeleteCacheEntry);
 
  public:
-  DeleteCacheEntry(std::unique_ptr<DeleteEntryCallback> callback)
+  explicit DeleteCacheEntry(std::unique_ptr<DeleteEntryCallback> callback)
       : callback_(std::move(callback)) {}
-  ~DeleteCacheEntry() override {}
+  ~DeleteCacheEntry() override = default;
 
   void OnSuccess() override { callback_->sendSuccess(); }
 
-  void OnError(WebServiceWorkerCacheError error) override {
+  void OnError(mojom::CacheStorageError error) override {
     callback_->sendFailure(ProtocolResponse::Error(
         String::Format("Error requesting cache names: %s",
-                       ServiceWorkerCacheErrorString(error).data())));
+                       CacheStorageErrorString(error).data())));
   }
 
  private:
@@ -389,25 +452,25 @@ class GetCacheForDeleteEntry
       : request_spec_(request_spec),
         cache_name_(cache_name),
         callback_(std::move(callback)) {}
-  ~GetCacheForDeleteEntry() override {}
+  ~GetCacheForDeleteEntry() override = default;
 
   void OnSuccess(std::unique_ptr<WebServiceWorkerCache> cache) override {
     auto delete_request =
-        WTF::MakeUnique<DeleteCacheEntry>(std::move(callback_));
+        std::make_unique<DeleteCacheEntry>(std::move(callback_));
     BatchOperation delete_operation;
     delete_operation.operation_type =
         WebServiceWorkerCache::kOperationTypeDelete;
-    delete_operation.request.SetURL(KURL(kParsedURLString, request_spec_));
+    delete_operation.request.SetURL(KURL(request_spec_));
     Vector<BatchOperation> operations;
     operations.push_back(delete_operation);
     cache.release()->DispatchBatch(std::move(delete_request),
                                    WebVector<BatchOperation>(operations));
   }
 
-  void OnError(WebServiceWorkerCacheError error) override {
+  void OnError(mojom::CacheStorageError error) override {
     callback_->sendFailure(ProtocolResponse::Error(String::Format(
         "Error requesting cache %s: %s", cache_name_.Utf8().data(),
-        ServiceWorkerCacheErrorString(error).data())));
+        CacheStorageErrorString(error).data())));
   }
 
  private:
@@ -416,20 +479,110 @@ class GetCacheForDeleteEntry
   std::unique_ptr<DeleteEntryCallback> callback_;
 };
 
+class CachedResponseFileReaderLoaderClient final
+    : private FileReaderLoaderClient {
+  WTF_MAKE_NONCOPYABLE(CachedResponseFileReaderLoaderClient);
+
+ public:
+  static void Load(ExecutionContext* context,
+                   scoped_refptr<BlobDataHandle> blob,
+                   std::unique_ptr<RequestCachedResponseCallback> callback) {
+    new CachedResponseFileReaderLoaderClient(context, std::move(blob),
+                                             std::move(callback));
+  }
+
+  void DidStartLoading() override {}
+
+  void DidFinishLoading() override {
+    std::unique_ptr<CachedResponse> response =
+        CachedResponse::create()
+            .setBody(Base64Encode(data_->Data(), data_->size()))
+            .build();
+    callback_->sendSuccess(std::move(response));
+    dispose();
+  }
+
+  void DidFail(FileError::ErrorCode error) {
+    callback_->sendFailure(ProtocolResponse::Error(String::Format(
+        "Unable to read the cached response, error code: %d", error)));
+    dispose();
+  }
+
+  void DidReceiveDataForClient(const char* data,
+                               unsigned data_length) override {
+    data_->Append(data, data_length);
+  }
+
+ private:
+  CachedResponseFileReaderLoaderClient(
+      ExecutionContext* context,
+      scoped_refptr<BlobDataHandle>&& blob,
+      std::unique_ptr<RequestCachedResponseCallback>&& callback)
+      : loader_(
+            FileReaderLoader::Create(FileReaderLoader::kReadByClient, this)),
+        callback_(std::move(callback)),
+        data_(SharedBuffer::Create()) {
+    loader_->Start(context, std::move(blob));
+  }
+
+  ~CachedResponseFileReaderLoaderClient() = default;
+
+  void dispose() { delete this; }
+
+  std::unique_ptr<FileReaderLoader> loader_;
+  std::unique_ptr<RequestCachedResponseCallback> callback_;
+  scoped_refptr<SharedBuffer> data_;
+};
+
+class CachedResponseMatchCallback
+    : public WebServiceWorkerCacheStorage::CacheStorageMatchCallbacks {
+  WTF_MAKE_NONCOPYABLE(CachedResponseMatchCallback);
+
+ public:
+  CachedResponseMatchCallback(
+      ExecutionContext* context,
+      std::unique_ptr<RequestCachedResponseCallback> callback)
+      : callback_(std::move(callback)), context_(context) {}
+
+  void OnSuccess(const WebServiceWorkerResponse& response) override {
+    std::unique_ptr<protocol::DictionaryValue> headers =
+        protocol::DictionaryValue::create();
+    if (!response.GetBlobDataHandle()) {
+      callback_->sendSuccess(CachedResponse::create()
+                                 .setBody("")
+                                 .build());
+      return;
+    }
+    CachedResponseFileReaderLoaderClient::Load(
+        context_, response.GetBlobDataHandle(), std::move(callback_));
+  }
+
+  void OnError(mojom::CacheStorageError error) override {
+    callback_->sendFailure(ProtocolResponse::Error(
+        String::Format("Unable to read cached response: %s",
+                       CacheStorageErrorString(error).data())));
+  }
+
+ private:
+  std::unique_ptr<RequestCachedResponseCallback> callback_;
+  Persistent<ExecutionContext> context_;
+};
 }  // namespace
 
-InspectorCacheStorageAgent::InspectorCacheStorageAgent() = default;
+InspectorCacheStorageAgent::InspectorCacheStorageAgent(InspectedFrames* frames)
+    : frames_(frames) {}
 
 InspectorCacheStorageAgent::~InspectorCacheStorageAgent() = default;
 
-DEFINE_TRACE(InspectorCacheStorageAgent) {
+void InspectorCacheStorageAgent::Trace(blink::Visitor* visitor) {
+  visitor->Trace(frames_);
   InspectorBaseAgent::Trace(visitor);
 }
 
 void InspectorCacheStorageAgent::requestCacheNames(
     const String& security_origin,
     std::unique_ptr<RequestCacheNamesCallback> callback) {
-  RefPtr<SecurityOrigin> sec_origin =
+  scoped_refptr<const SecurityOrigin> sec_origin =
       SecurityOrigin::CreateFromString(security_origin);
 
   // Cache Storage API is restricted to trustworthy origins.
@@ -441,13 +594,13 @@ void InspectorCacheStorageAgent::requestCacheNames(
   }
 
   std::unique_ptr<WebServiceWorkerCacheStorage> cache;
-  ProtocolResponse response = AssertCacheStorage(security_origin, cache);
+  ProtocolResponse response = AssertCacheStorage(security_origin, &cache);
   if (!response.isSuccess()) {
     callback->sendFailure(response);
     return;
   }
-  cache->DispatchKeys(
-      WTF::MakeUnique<RequestCacheNames>(security_origin, std::move(callback)));
+  cache->DispatchKeys(std::make_unique<RequestCacheNames>(security_origin,
+                                                          std::move(callback)));
 }
 
 void InspectorCacheStorageAgent::requestEntries(
@@ -458,7 +611,7 @@ void InspectorCacheStorageAgent::requestEntries(
   String cache_name;
   std::unique_ptr<WebServiceWorkerCacheStorage> cache;
   ProtocolResponse response =
-      AssertCacheStorageAndNameForId(cache_id, &cache_name, cache);
+      AssertCacheStorageAndNameForId(cache_id, &cache_name, &cache);
   if (!response.isSuccess()) {
     callback->sendFailure(response);
     return;
@@ -468,7 +621,7 @@ void InspectorCacheStorageAgent::requestEntries(
   params.page_size = page_size;
   params.skip_count = skip_count;
   cache->DispatchOpen(
-      WTF::MakeUnique<GetCacheForRequestData>(params, std::move(callback)),
+      std::make_unique<GetCacheForRequestData>(params, std::move(callback)),
       WebString(cache_name));
 }
 
@@ -478,12 +631,12 @@ void InspectorCacheStorageAgent::deleteCache(
   String cache_name;
   std::unique_ptr<WebServiceWorkerCacheStorage> cache;
   ProtocolResponse response =
-      AssertCacheStorageAndNameForId(cache_id, &cache_name, cache);
+      AssertCacheStorageAndNameForId(cache_id, &cache_name, &cache);
   if (!response.isSuccess()) {
     callback->sendFailure(response);
     return;
   }
-  cache->DispatchDelete(WTF::MakeUnique<DeleteCache>(std::move(callback)),
+  cache->DispatchDelete(std::make_unique<DeleteCache>(std::move(callback)),
                         WebString(cache_name));
 }
 
@@ -494,14 +647,37 @@ void InspectorCacheStorageAgent::deleteEntry(
   String cache_name;
   std::unique_ptr<WebServiceWorkerCacheStorage> cache;
   ProtocolResponse response =
-      AssertCacheStorageAndNameForId(cache_id, &cache_name, cache);
+      AssertCacheStorageAndNameForId(cache_id, &cache_name, &cache);
   if (!response.isSuccess()) {
     callback->sendFailure(response);
     return;
   }
-  cache->DispatchOpen(WTF::MakeUnique<GetCacheForDeleteEntry>(
+  cache->DispatchOpen(std::make_unique<GetCacheForDeleteEntry>(
                           request, cache_name, std::move(callback)),
                       WebString(cache_name));
 }
 
+void InspectorCacheStorageAgent::requestCachedResponse(
+    const String& cache_id,
+    const String& request_url,
+    std::unique_ptr<RequestCachedResponseCallback> callback) {
+  String cache_name;
+  std::unique_ptr<WebServiceWorkerCacheStorage> cache;
+  ProtocolResponse response =
+      AssertCacheStorageAndNameForId(cache_id, &cache_name, &cache);
+  if (!response.isSuccess()) {
+    callback->sendFailure(response);
+    return;
+  }
+  WebServiceWorkerRequest request;
+  request.SetURL(KURL(request_url));
+  ExecutionContext* context = nullptr;
+  response = GetExecutionContext(frames_, cache_id, &context);
+  if (!response.isSuccess())
+    return callback->sendFailure(response);
+
+  cache->DispatchMatch(std::make_unique<CachedResponseMatchCallback>(
+                           context, std::move(callback)),
+                       request, WebServiceWorkerCache::QueryParams());
+}
 }  // namespace blink

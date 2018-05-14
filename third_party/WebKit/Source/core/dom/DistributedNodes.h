@@ -41,7 +41,7 @@ class DistributedNodes final {
   DISALLOW_NEW();
 
  public:
-  DistributedNodes() {}
+  DistributedNodes() = default;
 
   Node* First() const { return nodes_.front(); }
   Node* Last() const { return nodes_.back(); }
@@ -64,7 +64,7 @@ class DistributedNodes final {
 
   void Swap(DistributedNodes& other);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   HeapVector<Member<Node>> nodes_;

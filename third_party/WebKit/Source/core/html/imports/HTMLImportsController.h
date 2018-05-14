@@ -58,23 +58,21 @@ class HTMLImportsController final
   HTMLImportTreeRoot* Root() const { return root_; }
 
   bool ShouldBlockScriptExecution(const Document&) const;
-  HTMLImportChild* Load(HTMLImport* parent,
+  HTMLImportChild* Load(const Document&,
                         HTMLImportChildClient*,
-                        FetchParameters);
+                        FetchParameters&);
 
   Document* Master() const;
-
-  HTMLImportLoader* CreateLoader();
 
   size_t LoaderCount() const { return loaders_.size(); }
   HTMLImportLoader* LoaderAt(size_t i) const { return loaders_[i]; }
   HTMLImportLoader* LoaderFor(const Document&) const;
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   void Dispose();
 
-  DECLARE_TRACE_WRAPPERS();
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   explicit HTMLImportsController(Document&);

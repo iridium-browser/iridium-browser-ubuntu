@@ -7,11 +7,11 @@
 #include "base/command_line.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/base/switches.h"
-#include "cc/output/compositor_frame.h"
-#include "cc/output/layer_tree_frame_sink_client.h"
-#include "cc/scheduler/begin_frame_source.h"
-#include "cc/scheduler/delay_based_time_source.h"
 #include "cc/test/fake_layer_tree_frame_sink.h"
+#include "cc/trees/layer_tree_frame_sink_client.h"
+#include "components/viz/common/frame_sinks/begin_frame_source.h"
+#include "components/viz/common/frame_sinks/delay_based_time_source.h"
+#include "components/viz/common/quads/compositor_frame.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/display/display_switches.h"
 #include "ui/gfx/switches.h"
@@ -24,24 +24,11 @@ FakeContextFactory::FakeContextFactory() {
 #elif defined(OS_MACOSX)
   renderer_settings_.release_overlay_resources_after_gpu_query = true;
 #endif
-  // Populate buffer_to_texture_target_map for all buffer usage/formats.
-  for (int usage_idx = 0; usage_idx <= static_cast<int>(gfx::BufferUsage::LAST);
-       ++usage_idx) {
-    gfx::BufferUsage usage = static_cast<gfx::BufferUsage>(usage_idx);
-    for (int format_idx = 0;
-         format_idx <= static_cast<int>(gfx::BufferFormat::LAST);
-         ++format_idx) {
-      gfx::BufferFormat format = static_cast<gfx::BufferFormat>(format_idx);
-      renderer_settings_.resource_settings
-          .buffer_to_texture_target_map[std::make_pair(usage, format)] =
-          GL_TEXTURE_2D;
-    }
-  }
 }
 
 FakeContextFactory::~FakeContextFactory() = default;
 
-const cc::CompositorFrame& FakeContextFactory::GetLastCompositorFrame() const {
+const viz::CompositorFrame& FakeContextFactory::GetLastCompositorFrame() const {
   return *frame_sink_->last_sent_frame();
 }
 
@@ -71,10 +58,6 @@ gpu::GpuMemoryBufferManager* FakeContextFactory::GetGpuMemoryBufferManager() {
 
 cc::TaskGraphRunner* FakeContextFactory::GetTaskGraphRunner() {
   return &task_graph_runner_;
-}
-
-const viz::ResourceSettings& FakeContextFactory::GetResourceSettings() const {
-  return renderer_settings_.resource_settings;
 }
 
 }  // namespace ui

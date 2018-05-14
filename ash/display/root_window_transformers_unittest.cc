@@ -47,7 +47,7 @@ class TestEventHandler : public ui::EventHandler {
         scroll_y_offset_(0.0),
         scroll_x_offset_ordinal_(0.0),
         scroll_y_offset_ordinal_(0.0) {}
-  ~TestEventHandler() override {}
+  ~TestEventHandler() override = default;
 
   void OnMouseEvent(ui::MouseEvent* event) override {
     if (event->flags() & ui::EF_IS_SYNTHESIZED)
@@ -115,8 +115,8 @@ class TestEventHandler : public ui::EventHandler {
 
 class RootWindowTransformersTest : public AshTestBase {
  public:
-  RootWindowTransformersTest() {}
-  ~RootWindowTransformersTest() override {}
+  RootWindowTransformersTest() = default;
+  ~RootWindowTransformersTest() override = default;
 
   float GetStoredUIScale(int64_t id) {
     return display_manager()->GetDisplayInfo(id).GetEffectiveUIScale();
@@ -127,7 +127,7 @@ class RootWindowTransformersTest : public AshTestBase {
     DCHECK(display_manager()->IsInMirrorMode());
     const display::ManagedDisplayInfo& mirror_display_info =
         display_manager()->GetDisplayInfo(
-            display_manager()->mirroring_display_id());
+            display_manager()->GetMirroringDestinationDisplayIdList()[0]);
     const display::ManagedDisplayInfo& source_display_info =
         display_manager()->GetDisplayInfo(
             display::Screen::GetScreen()->GetPrimaryDisplay().id());
@@ -172,7 +172,7 @@ TEST_F(RootWindowTransformersTest, RotateAndMagnify) {
 
   display_manager()->SetDisplayRotation(
       display1.id(), display::Display::ROTATE_90,
-      display::Display::ROTATION_SOURCE_ACTIVE);
+      display::Display::RotationSource::ACTIVE);
   // Move the cursor to the center of the first root window.
   generator1.MoveMouseToInHost(59, 100);
 
@@ -199,7 +199,7 @@ TEST_F(RootWindowTransformersTest, RotateAndMagnify) {
 
   display_manager()->SetDisplayRotation(
       display2_id, display::Display::ROTATE_270,
-      display::Display::ROTATION_SOURCE_ACTIVE);
+      display::Display::RotationSource::ACTIVE);
   // Move the cursor to the center of the second root window.
   generator2.MoveMouseToInHost(151, 199);
 
@@ -220,7 +220,7 @@ TEST_F(RootWindowTransformersTest, RotateAndMagnify) {
 
   display_manager()->SetDisplayRotation(
       display1.id(), display::Display::ROTATE_180,
-      display::Display::ROTATION_SOURCE_ACTIVE);
+      display::Display::RotationSource::ACTIVE);
   // Move the cursor to the center of the first root window.
   generator1.MoveMouseToInHost(59, 99);
 
@@ -405,8 +405,8 @@ TEST_F(RootWindowTransformersTest, ConvertHostToRootCoords) {
 
 TEST_F(RootWindowTransformersTest, LetterBoxPillarBox) {
   MirrorWindowTestApi test_api;
-  display_manager()->SetMultiDisplayMode(display::DisplayManager::MIRRORING);
   UpdateDisplay("400x200,500x500");
+  display_manager()->SetMirrorMode(display::MirrorMode::kNormal, base::nullopt);
   std::unique_ptr<RootWindowTransformer> transformer(
       CreateCurrentRootWindowTransformerForMirroring());
   // Y margin must be margin is (500 - 500/400 * 200) / 2 = 125.

@@ -7,12 +7,10 @@
 #ifndef XFA_FWL_CFWL_THEMEBACKGROUND_H_
 #define XFA_FWL_CFWL_THEMEBACKGROUND_H_
 
-#include "core/fxge/fx_dib.h"
 #include "xfa/fwl/cfwl_themepart.h"
 
-class CFX_DIBitmpa;
 class CXFA_Graphics;
-class CXFA_Path;
+class CXFA_GEPath;
 
 class CFWL_ThemeBackground : public CFWL_ThemePart {
  public:
@@ -20,8 +18,7 @@ class CFWL_ThemeBackground : public CFWL_ThemePart {
   ~CFWL_ThemeBackground();
 
   CXFA_Graphics* m_pGraphics;
-  CXFA_Path* m_pPath;
-  CFX_RetainPtr<CFX_DIBitmap> m_pImage;
+  CXFA_GEPath* m_pPath;
 };
 
 inline CFWL_ThemeBackground::CFWL_ThemeBackground()

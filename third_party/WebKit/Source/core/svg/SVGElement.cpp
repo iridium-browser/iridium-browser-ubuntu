@@ -25,9 +25,6 @@
 #include "core/svg/SVGElement.h"
 
 #include "bindings/core/v8/ScriptEventListener.h"
-#include "core/HTMLNames.h"
-#include "core/SVGNames.h"
-#include "core/XMLNames.h"
 #include "core/animation/DocumentAnimations.h"
 #include "core/animation/EffectStack.h"
 #include "core/animation/ElementAnimations.h"
@@ -37,12 +34,14 @@
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
+#include "core/dom/NodeComputedStyle.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLElement.h"
+#include "core/html_names.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/LayoutObject.h"
 #include "core/layout/svg/LayoutSVGResourceContainer.h"
@@ -51,9 +50,10 @@
 #include "core/svg/SVGGraphicsElement.h"
 #include "core/svg/SVGSVGElement.h"
 #include "core/svg/SVGTitleElement.h"
-#include "core/svg/SVGTreeScopeResources.h"
 #include "core/svg/SVGUseElement.h"
 #include "core/svg/properties/SVGProperty.h"
+#include "core/svg_names.h"
+#include "core/xml_names.h"
 #include "platform/wtf/AutoReset.h"
 #include "platform/wtf/Threading.h"
 
@@ -111,23 +111,14 @@ void SVGElement::WillRecalcStyle(StyleRecalcChange change) {
     SvgRareData()->SetNeedsOverrideComputedStyleUpdate();
 }
 
-void SVGElement::BuildPendingResourcesIfNeeded() {
-  if (!NeedsPendingResourceHandling() || !isConnected() || InUseShadowTree())
-    return;
-  GetTreeScope().EnsureSVGTreeScopedResources().NotifyResourceAvailable(
-      GetIdAttribute());
-}
-
 SVGElementRareData* SVGElement::EnsureSVGRareData() {
-  if (HasSVGRareData())
-    return SvgRareData();
-
-  svg_rare_data_ = new SVGElementRareData(this);
+  if (!svg_rare_data_)
+    svg_rare_data_ = new SVGElementRareData();
   return svg_rare_data_.Get();
 }
 
 bool SVGElement::IsOutermostSVGSVGElement() const {
-  if (!isSVGSVGElement(*this))
+  if (!IsSVGSVGElement(*this))
     return false;
 
   // Element may not be in the document, pretend we're outermost for viewport(),
@@ -137,7 +128,7 @@ bool SVGElement::IsOutermostSVGSVGElement() const {
 
   // We act like an outermost SVG element, if we're a direct child of a
   // <foreignObject> element.
-  if (isSVGForeignObjectElement(*parentNode()))
+  if (IsSVGForeignObjectElement(*parentNode()))
     return true;
 
   // If we're living in a shadow tree, we're a <svg> element that got created as
@@ -167,9 +158,9 @@ void SVGElement::ReportAttributeParsingError(SVGParsingError error,
 
 String SVGElement::title() const {
   // According to spec, we should not return titles when hovering over root
-  // <svg> elements (those <title> elements are the title of the document, not a
-  // tooltip) so we instantly return.
-  if (IsOutermostSVGSVGElement())
+  // <svg> elements imported as a standalone document(those <title> elements
+  // are the title of the document, not a tooltip) so we instantly return.
+  if (IsSVGSVGElement(*this) && this == GetDocument().documentElement())
     return String();
 
   if (InUseShadowTree()) {
@@ -302,12 +293,9 @@ bool SVGElement::HasTransform(
           HasSVGRareData());
 }
 
-static inline bool TransformUsesBoxSize(
-    const ComputedStyle& style,
-    ComputedStyle::ApplyTransformOrigin apply_transform_origin) {
-  if (apply_transform_origin == ComputedStyle::kIncludeTransformOrigin &&
-      (style.TransformOriginX().GetType() == kPercent ||
-       style.TransformOriginY().GetType() == kPercent) &&
+static inline bool TransformUsesBoxSize(const ComputedStyle& style) {
+  if ((style.TransformOriginX().IsPercent() ||
+       style.TransformOriginY().IsPercent()) &&
       style.RequireTransformOrigin(ComputedStyle::kIncludeTransformOrigin,
                                    ComputedStyle::kExcludeMotionPath))
     return true;
@@ -336,8 +324,7 @@ static FloatRect ComputeTransformReferenceBox(const SVGElement& element) {
   }
   if (style.TransformBox() == ETransformBox::kFillBox)
     return layout_object.ObjectBoundingBox();
-  DCHECK(style.TransformBox() == ETransformBox::kBorderBox ||
-         style.TransformBox() == ETransformBox::kViewBox);
+  DCHECK_EQ(style.TransformBox(), ETransformBox::kViewBox);
   SVGLengthContext length_context(&element);
   FloatSize viewport_size;
   length_context.DetermineViewport(viewport_size);
@@ -354,16 +341,7 @@ AffineTransform SVGElement::CalculateTransform(
   AffineTransform matrix;
   if (style && style->HasTransform()) {
     FloatRect reference_box = ComputeTransformReferenceBox(*this);
-    ComputedStyle::ApplyTransformOrigin apply_transform_origin =
-        ComputedStyle::kIncludeTransformOrigin;
-    // SVGTextElements need special handling for the text positioning code.
-    if (isSVGTextElement(this)) {
-      // Do not take into account transform-origin, or percentage values.
-      reference_box = FloatRect();
-      apply_transform_origin = ComputedStyle::kExcludeTransformOrigin;
-    }
-
-    if (TransformUsesBoxSize(*style, apply_transform_origin))
+    if (TransformUsesBoxSize(*style))
       UseCounter::Count(GetDocument(), WebFeature::kTransformUsesBoxSizeOnSVG);
 
     // CSS transforms operate with pre-scaled lengths. To make this work with
@@ -379,20 +357,14 @@ AffineTransform SVGElement::CalculateTransform(
     // http://dev.w3.org/csswg/css3-transforms/
     float zoom = style->EffectiveZoom();
     TransformationMatrix transform;
-    if (zoom != 1) {
+    if (zoom != 1)
       reference_box.Scale(zoom);
-      transform.Scale(1 / zoom);
-      style->ApplyTransform(
-          transform, reference_box, apply_transform_origin,
-          ComputedStyle::kIncludeMotionPath,
-          ComputedStyle::kIncludeIndependentTransformProperties);
-      transform.Scale(zoom);
-    } else {
-      style->ApplyTransform(
-          transform, reference_box, apply_transform_origin,
-          ComputedStyle::kIncludeMotionPath,
-          ComputedStyle::kIncludeIndependentTransformProperties);
-    }
+    style->ApplyTransform(
+        transform, reference_box, ComputedStyle::kIncludeTransformOrigin,
+        ComputedStyle::kIncludeMotionPath,
+        ComputedStyle::kIncludeIndependentTransformProperties);
+    if (zoom != 1)
+      transform.Zoom(1 / zoom);
     // Flatten any 3D transform.
     matrix = transform.ToAffineTransform();
   }
@@ -408,17 +380,15 @@ Node::InsertionNotificationRequest SVGElement::InsertedInto(
     ContainerNode* root_parent) {
   Element::InsertedInto(root_parent);
   UpdateRelativeLengthsInformation();
-  BuildPendingResourcesIfNeeded();
 
-  if (hasAttribute(nonceAttr) && getAttribute(nonceAttr) != g_empty_atom) {
-    setNonce(getAttribute(nonceAttr));
-    if (RuntimeEnabledFeatures::HideNonceContentAttributeEnabled() &&
-        InActiveDocument() &&
+  const AtomicString& nonce_value = FastGetAttribute(nonceAttr);
+  if (!nonce_value.IsEmpty()) {
+    setNonce(nonce_value);
+    if (InActiveDocument() &&
         GetDocument().GetContentSecurityPolicy()->HasHeaderDeliveredPolicy()) {
       setAttribute(nonceAttr, g_empty_atom);
     }
   }
-
   return kInsertionDone;
 }
 
@@ -457,8 +427,7 @@ void SVGElement::ChildrenChanged(const ChildrenChange& change) {
   Element::ChildrenChanged(change);
 
   // Invalidate all instances associated with us.
-  if (!change.by_parser)
-    InvalidateInstances();
+  InvalidateInstances();
 }
 
 CSSPropertyID SVGElement::CssPropertyIdForSVGAttributeName(
@@ -466,7 +435,7 @@ CSSPropertyID SVGElement::CssPropertyIdForSVGAttributeName(
   if (!attr_name.NamespaceURI().IsNull())
     return CSSPropertyInvalid;
 
-  static HashMap<StringImpl*, CSSPropertyID>* property_name_to_id_map = 0;
+  static HashMap<StringImpl*, CSSPropertyID>* property_name_to_id_map = nullptr;
   if (!property_name_to_id_map) {
     property_name_to_id_map = new HashMap<StringImpl*, CSSPropertyID>;
     // This is a list of all base CSS and SVG CSS properties which are exposed
@@ -587,14 +556,12 @@ void SVGElement::UpdateRelativeLengthsInformation(
   }
 
   // Register root SVG elements for top level viewport change notifications.
-  if (isSVGSVGElement(*client_element)) {
+  if (auto* svg = ToSVGSVGElementOrNull(*client_element)) {
     SVGDocumentExtensions& svg_extensions = GetDocument().AccessSVGExtensions();
     if (client_element->HasRelativeLengths())
-      svg_extensions.AddSVGRootWithRelativeLengthDescendents(
-          toSVGSVGElement(client_element));
+      svg_extensions.AddSVGRootWithRelativeLengthDescendents(svg);
     else
-      svg_extensions.RemoveSVGRootWithRelativeLengthDescendents(
-          toSVGSVGElement(client_element));
+      svg_extensions.RemoveSVGRootWithRelativeLengthDescendents(svg);
   }
 }
 
@@ -610,13 +577,15 @@ void SVGElement::InvalidateRelativeLengthClients(
 #endif
 
   if (LayoutObject* layout_object = this->GetLayoutObject()) {
-    if (HasRelativeLengths() && layout_object->IsSVGResourceContainer())
+    if (HasRelativeLengths() && layout_object->IsSVGResourceContainer()) {
       ToLayoutSVGResourceContainer(layout_object)
-          ->InvalidateCacheAndMarkForLayout(layout_scope);
-    else if (SelfHasRelativeLengths())
+          ->InvalidateCacheAndMarkForLayout(
+              LayoutInvalidationReason::kSizeChanged, layout_scope);
+    } else if (SelfHasRelativeLengths()) {
       layout_object->SetNeedsLayoutAndFullPaintInvalidation(
           LayoutInvalidationReason::kUnknown, kMarkContainerChain,
           layout_scope);
+    }
   }
 
   for (SVGElement* element : elements_with_relative_lengths_) {
@@ -628,8 +597,8 @@ void SVGElement::InvalidateRelativeLengthClients(
 SVGSVGElement* SVGElement::ownerSVGElement() const {
   ContainerNode* n = ParentOrShadowHostNode();
   while (n) {
-    if (isSVGSVGElement(*n))
-      return toSVGSVGElement(n);
+    if (IsSVGSVGElement(*n))
+      return ToSVGSVGElement(n);
 
     n = n->ParentOrShadowHostNode();
   }
@@ -643,7 +612,7 @@ SVGElement* SVGElement::viewportElement() const {
   // work otherwhise.
   ContainerNode* n = ParentOrShadowHostNode();
   while (n) {
-    if (isSVGSVGElement(*n) || isSVGImageElement(*n) || isSVGSymbolElement(*n))
+    if (IsSVGSVGElement(*n) || IsSVGImageElement(*n) || IsSVGSymbolElement(*n))
       return ToSVGElement(n);
 
     n = n->ParentOrShadowHostNode();
@@ -692,13 +661,13 @@ const HeapHashSet<WeakMember<SVGElement>>& SVGElement::InstancesForElement()
 SVGElement* SVGElement::CorrespondingElement() const {
   DCHECK(!HasSVGRareData() || !SvgRareData()->CorrespondingElement() ||
          ContainingShadowRoot());
-  return HasSVGRareData() ? SvgRareData()->CorrespondingElement() : 0;
+  return HasSVGRareData() ? SvgRareData()->CorrespondingElement() : nullptr;
 }
 
 SVGUseElement* SVGElement::CorrespondingUseElement() const {
   if (ShadowRoot* root = ContainingShadowRoot()) {
-    if (isSVGUseElement(root->host()))
-      return &toSVGUseElement(root->host());
+    if (IsSVGUseElement(root->host()))
+      return &ToSVGUseElement(root->host());
   }
   return nullptr;
 }
@@ -861,7 +830,7 @@ bool SVGElement::IsPresentationAttributeWithSVGDOM(
 void SVGElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   CSSPropertyID property_id = CssPropertyIdForSVGAttributeName(name);
   if (property_id > 0)
     AddPropertyToPresentationAttributeStyle(style, property_id, value);
@@ -898,7 +867,7 @@ void SVGElement::AddedEventListener(
   HeapHashSet<WeakMember<SVGElement>> instances;
   CollectInstancesForSVGElement(this, instances);
   AddEventListenerOptionsResolved options = registered_listener.Options();
-  EventListener* listener = registered_listener.Listener();
+  EventListener* listener = registered_listener.Callback();
   for (SVGElement* element : instances) {
     bool result =
         element->Node::AddEventListenerInternal(event_type, listener, options);
@@ -915,7 +884,7 @@ void SVGElement::RemovedEventListener(
   HeapHashSet<WeakMember<SVGElement>> instances;
   CollectInstancesForSVGElement(this, instances);
   EventListenerOptions options = registered_listener.Options();
-  const EventListener* listener = registered_listener.Listener();
+  const EventListener* listener = registered_listener.Callback();
   for (SVGElement* shadow_tree_element : instances) {
     DCHECK(shadow_tree_element);
 
@@ -946,7 +915,7 @@ static bool HasLoadListener(Element* element) {
 bool SVGElement::SendSVGLoadEventIfPossible() {
   if (!HaveLoadedRequiredResources())
     return false;
-  if ((IsStructurallyExternal() || isSVGSVGElement(*this)) &&
+  if ((IsStructurallyExternal() || IsSVGSVGElement(*this)) &&
       HasLoadListener(this))
     DispatchEvent(Event::Create(EventTypeNames::load));
   return true;
@@ -980,16 +949,6 @@ void SVGElement::AttributeChanged(const AttributeModificationParams& params) {
 
   if (params.name == HTMLNames::idAttr) {
     RebuildAllIncomingReferences();
-
-    LayoutObject* object = GetLayoutObject();
-    // Notify resources about id changes, this is important as we cache
-    // resources by id in SVGDocumentExtensions
-    if (object && object->IsSVGResourceContainer()) {
-      ToLayoutSVGResourceContainer(object)->IdChanged(params.old_value,
-                                                      params.new_value);
-    }
-    if (isConnected())
-      BuildPendingResourcesIfNeeded();
     InvalidateInstances();
     return;
   }
@@ -1070,18 +1029,16 @@ void SVGElement::SynchronizeAnimatedSVGAttribute(
   }
 }
 
-PassRefPtr<ComputedStyle> SVGElement::CustomStyleForLayoutObject() {
+scoped_refptr<ComputedStyle> SVGElement::CustomStyleForLayoutObject() {
   if (!CorrespondingElement())
     return GetDocument().EnsureStyleResolver().StyleForElement(this);
 
   const ComputedStyle* style = nullptr;
-  if (Element* parent = ParentOrShadowHostElement()) {
-    if (LayoutObject* layout_object = parent->GetLayoutObject())
-      style = layout_object->Style();
-  }
+  if (Element* parent = ParentOrShadowHostElement())
+    style = parent->GetComputedStyle();
 
   return GetDocument().EnsureStyleResolver().StyleForElement(
-      CorrespondingElement(), style, style, kDisallowStyleSharing);
+      CorrespondingElement(), style, style);
 }
 
 bool SVGElement::LayoutObjectIsNeeded(const ComputedStyle& style) {
@@ -1095,13 +1052,13 @@ bool SVGElement::HasSVGParent() const {
          ParentOrShadowHostElement()->IsSVGElement();
 }
 
-MutableStylePropertySet* SVGElement::AnimatedSMILStyleProperties() const {
+MutableCSSPropertyValueSet* SVGElement::AnimatedSMILStyleProperties() const {
   if (HasSVGRareData())
     return SvgRareData()->AnimatedSMILStyleProperties();
   return nullptr;
 }
 
-MutableStylePropertySet* SVGElement::EnsureAnimatedSMILStyleProperties() {
+MutableCSSPropertyValueSet* SVGElement::EnsureAnimatedSMILStyleProperties() {
   return EnsureSVGRareData()->EnsureAnimatedSMILStyleProperties();
 }
 
@@ -1132,8 +1089,7 @@ bool SVGElement::HasFocusEventListeners() const {
 }
 
 void SVGElement::MarkForLayoutAndParentResourceInvalidation(
-    LayoutObject* layout_object) {
-  DCHECK(layout_object);
+    LayoutObject& layout_object) {
   LayoutSVGResourceContainer::MarkForLayoutAndParentResourceInvalidation(
       layout_object, true);
 }
@@ -1148,7 +1104,7 @@ void SVGElement::InvalidateInstances() {
 
   // Mark all use elements referencing 'element' for rebuilding
   for (SVGElement* instance : set) {
-    instance->SetCorrespondingElement(0);
+    instance->SetCorrespondingElement(nullptr);
 
     if (SVGUseElement* element = instance->CorrespondingUseElement()) {
       if (element->isConnected())
@@ -1290,7 +1246,7 @@ bool SVGElement::IsAnimatableAttribute(const QualifiedName& name) const {
 
 SVGElementProxySet* SVGElement::ElementProxySet() {
   // Limit to specific element types.
-  if (!isSVGFilterElement(*this) && !isSVGClipPathElement(*this))
+  if (!IsSVGFilterElement(*this) && !IsSVGClipPathElement(*this))
     return nullptr;
   return &EnsureSVGRareData()->EnsureElementProxySet();
 }
@@ -1306,6 +1262,35 @@ void SVGElement::AddReferenceTo(SVGElement* target_element) {
 
   EnsureSVGRareData()->OutgoingReferences().insert(target_element);
   target_element->EnsureSVGRareData()->IncomingReferences().insert(this);
+}
+
+void SVGElement::NotifyIncomingReferences(bool needs_layout) {
+  if (!HasSVGRareData())
+    return;
+
+  SVGElementSet& dependencies = SvgRareData()->IncomingReferences();
+  if (dependencies.IsEmpty())
+    return;
+
+  // We allow cycles in the reference graph in order to avoid expensive
+  // adjustments on changes, so we need to break possible cycles here.
+  // This strong reference is safe, as it is guaranteed that this set will be
+  // emptied at the end of recursion.
+  DEFINE_STATIC_LOCAL(SVGElementSet, invalidating_dependencies,
+                      (new SVGElementSet));
+
+  for (SVGElement* element : dependencies) {
+    if (LayoutObject* layout_object = element->GetLayoutObject()) {
+      if (UNLIKELY(!invalidating_dependencies.insert(element).is_new_entry)) {
+        // Reference cycle: we are in process of invalidating this dependant.
+        continue;
+      }
+
+      LayoutSVGResourceContainer::MarkForLayoutAndParentResourceInvalidation(
+          *layout_object, needs_layout);
+      invalidating_dependencies.erase(element);
+    }
+  }
 }
 
 void SVGElement::RebuildAllIncomingReferences() {
@@ -1352,7 +1337,7 @@ void SVGElement::RemoveAllOutgoingReferences() {
   outgoing_references.clear();
 }
 
-DEFINE_TRACE(SVGElement) {
+void SVGElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(elements_with_relative_lengths_);
   visitor->Trace(attribute_to_property_map_);
   visitor->Trace(svg_rare_data_);

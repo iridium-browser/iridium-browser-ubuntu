@@ -11,11 +11,12 @@
 #include <memory>
 #include <vector>
 
-#include "webrtc/common_audio/vad/mock/mock_vad.h"
-#include "webrtc/modules/audio_coding/codecs/cng/audio_encoder_cng.h"
-#include "webrtc/rtc_base/constructormagic.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/mock_audio_encoder.h"
+#include "common_audio/vad/mock/mock_vad.h"
+#include "modules/audio_coding/codecs/cng/audio_encoder_cng.h"
+#include "rtc_base/constructormagic.h"
+#include "rtc_base/numerics/safe_conversions.h"
+#include "test/gtest.h"
+#include "test/mock_audio_encoder.h"
 
 using ::testing::Return;
 using ::testing::_;
@@ -42,7 +43,6 @@ class AudioEncoderCngTest : public ::testing::Test {
         sample_rate_hz_(8000) {
     memset(audio_, 0, kMaxNumSamples * 2);
     EXPECT_CALL(*mock_encoder_, NumChannels()).WillRepeatedly(Return(1));
-    EXPECT_CALL(*mock_encoder_, Die()).Times(1);
   }
 
   void TearDown() override {
@@ -221,7 +221,7 @@ TEST_F(AudioEncoderCngTest, CheckTargetAudioBitratePropagation) {
   CreateCng(MakeCngConfig());
   EXPECT_CALL(*mock_encoder_,
               OnReceivedUplinkBandwidth(4711, rtc::Optional<int64_t>()));
-  cng_->OnReceivedUplinkBandwidth(4711, rtc::Optional<int64_t>());
+  cng_->OnReceivedUplinkBandwidth(4711, rtc::nullopt);
 }
 
 TEST_F(AudioEncoderCngTest, CheckPacketLossFractionPropagation) {
@@ -290,7 +290,8 @@ TEST_F(AudioEncoderCngTest, EncodePassive) {
                   encoded_info_.encoded_bytes);
         EXPECT_EQ(expected_timestamp, encoded_info_.encoded_timestamp);
       }
-      expected_timestamp += kBlocksPerFrame * num_audio_samples_10ms_;
+      expected_timestamp += rtc::checked_cast<uint32_t>(
+          kBlocksPerFrame * num_audio_samples_10ms_);
     } else {
       // Otherwise, expect no output.
       EXPECT_EQ(0u, encoded_info_.encoded_bytes);

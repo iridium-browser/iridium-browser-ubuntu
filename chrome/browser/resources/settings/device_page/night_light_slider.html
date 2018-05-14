@@ -1,15 +1,15 @@
-<html><head>
 <link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-a11y-keys-behavior/iron-a11y-keys-behavior.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-resizable-behavior/iron-resizable-behavior.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-behaviors/paper-inky-focus-behavior.html">
 <link rel="import" href="../prefs/prefs_behavior.html">
-<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
-</head><body><dom-module id="night-light-slider">
+
+<dom-module id="night-light-slider">
   <template>
     <style>
       :host {
         cursor: default;
-        font-family: 'Roboto', sans-serif;
+        font-weight: 500;
         text-align: center;
         user-select: none;
       }
@@ -18,7 +18,7 @@
         display: inline-block;
         position: relative;
         user-select: none;
-        width: 570px;
+        width: 100%;
       }
 
       #sliderBar {
@@ -36,6 +36,7 @@
         margin-top: -15px;
         position: absolute;
         width: 32px;
+        z-index: 3;
       }
 
       .knob:focus {
@@ -47,8 +48,7 @@
         border-radius: 6px;
         height: 12px;
         left: 0;
-        margin-left: 10px;
-        margin-top: 10px;
+        margin: 10px;
         position: absolute;
         width: 12px;
         z-index: 3;
@@ -145,11 +145,13 @@
       <div id="labelContainer">
         <div id="startLabel" class="label"
             aria-label="$i18n{displayNightLightStartTime}">
-          [[startTime_]]
+          [[getTimeString_(prefs.ash.night_light.custom_start_time.value,
+                           shouldUse24Hours_)]]
         </div>
         <div id="endLabel" class="label"
             aria-label="$i18n{displayNightLightStopTime}">
-          [[endTime_]]
+          [[getTimeString_(prefs.ash.night_light.custom_end_time.value,
+                           shouldUse24Hours_)]]
         </div>
       </div>
       <div id="sliderBar">
@@ -191,5 +193,5 @@
     </div>
 
   </template>
+  <script src="night_light_slider.js"></script>
 </dom-module>
-<script src="night_light_slider.js"></script></body></html>

@@ -6,7 +6,6 @@
 #define WIDEVINE_CDM_WIDEVINE_CDM_COMMON_H_
 
 #include "media/media_features.h"
-#include "ppapi/features/features.h"
 
 // This file defines constants common to all Widevine CDM versions.
 
@@ -16,10 +15,11 @@ const int kWidevineCdmVersionNumComponents = 4;
 // "alpha" is a temporary name until a convention is defined.
 const char kWidevineKeySystem[] = "com.widevine.alpha";
 
-// This type is used to register the Widevine CDM.
-const char kWidevineCdmType[] = "Widevine";
+const char kWidevineCdmGuid[] = "AD87877A-0213-49A8-8849-9E93B075E477";
 
-// Widevine CDM files are in a directory with this name.
+// Widevine CDM files are in a directory with this name. This path is also
+// hardcoded in some build files and changing it requires changing the build
+// files as well.
 const char kWidevineCdmBaseDirectory[] = "WidevineCdm";
 
 // This name is used by UMA. Do not change it!
@@ -31,10 +31,17 @@ const char kWidevineCdmDisplayName[] = "Widevine Content Decryption Module";
 const char kWidevineCdmDescription[] =
     "Enables Widevine licenses for playback of HTML audio/video content.";
 
-#if BUILDFLAG(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 const char kWidevineCdmPluginMimeType[] = "application/x-ppapi-widevine-cdm";
 const char kWidevineCdmPluginMimeTypeDescription[] =
     "Widevine Content Decryption Module";
+
+// Identifier used by the PluginPrivateFileSystem to identify the files stored
+// for the Widevine CDM. This is used to store persistent files. As the files
+// were initially used by the CDM running as a pepper plugin, this ID is based
+// on the pepper plugin MIME type. Changing this will result in any existing
+// saved files becoming inaccesssible.
+const char kWidevineCdmFileSystemId[] = "application_x-ppapi-widevine-cdm";
 
 // Name of the CDM library.
 const char kWidevineCdmLibraryName[] = "widevinecdm";
@@ -49,20 +56,10 @@ const char kWidevineCdmAdapterFileName[] =
     "libwidevinecdmadapter.so";
 #endif
 
-// The following strings are used to communicate supported codecs (from the
-// component manifest) via WebPluginInfo::WebPluginMimeType's additional params.
-const char kCdmSupportedCodecsParamName[] = "codecs";
-const char kCdmSupportedCodecsValueDelimiter = ',';
-const char kCdmSupportedCodecVp8[] = "vp8";
-const char kCdmSupportedCodecVp9[] = "vp9.0";
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
-const char kCdmSupportedCodecAvc1[] = "avc1";
-#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
-
 #if defined(OS_MACOSX) || defined(OS_WIN)
 // CDM is installed by the component installer instead of the Chrome installer.
 #define WIDEVINE_CDM_IS_COMPONENT
 #endif  // defined(OS_MACOSX) || defined(OS_WIN)
-#endif  // BUILDFLAG(ENABLE_PEPPER_CDMS)
+#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
 #endif  // WIDEVINE_CDM_WIDEVINE_CDM_COMMON_H_

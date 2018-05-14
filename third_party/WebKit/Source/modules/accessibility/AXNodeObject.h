@@ -29,9 +29,9 @@
 #ifndef AXNodeObject_h
 #define AXNodeObject_h
 
+#include "base/macros.h"
 #include "modules/ModulesExport.h"
 #include "modules/accessibility/AXObject.h"
-#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -41,19 +41,15 @@ class HTMLLabelElement;
 class Node;
 
 class MODULES_EXPORT AXNodeObject : public AXObject {
-  WTF_MAKE_NONCOPYABLE(AXNodeObject);
-
  protected:
   AXNodeObject(Node*, AXObjectCacheImpl&);
 
  public:
   static AXNodeObject* Create(Node*, AXObjectCacheImpl&);
   ~AXNodeObject() override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
-  // Protected data.
-  AccessibilityRole aria_role_;
   bool children_dirty_;
 #if DCHECK_IS_ON()
   bool initialized_ = false;
@@ -61,15 +57,14 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
 
   bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
   const AXObject* InheritsPresentationalRoleFrom() const override;
-  virtual AccessibilityRole DetermineAccessibilityRole();
+  AccessibilityRole DetermineAccessibilityRole() override;
   virtual AccessibilityRole NativeAccessibilityRoleIgnoringAria() const;
   String AccessibilityDescriptionForElements(
       HeapVector<Member<Element>>& elements) const;
-  void AlterSliderValue(bool increase);
+  void AlterSliderOrSpinButtonValue(bool increase);
   AXObject* ActiveDescendant() override;
   String AriaAccessibilityDescription() const;
   String AriaAutoComplete() const;
-  AccessibilityRole DetermineAriaRoleAttribute() const;
   void AccessibilityChildrenFromAOMProperty(AOMRelationListProperty,
                                             AXObject::AXObjectVector&) const;
 
@@ -79,9 +74,9 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   // not a control or ARIA control.
   bool IsGenericFocusableElement() const;
   AXObject* MenuButtonForMenu() const;
+  AXObject* MenuButtonForMenuIfExists() const;
   Element* MenuItemElementForMenu() const;
   Element* MouseButtonListener() const;
-  AccessibilityRole RemapAriaRoleDueToParent(AccessibilityRole) const;
   bool IsNativeCheckboxOrRadio() const;
   void SetNode(Node*);
   AXObject* CorrespondingControlForLabelElement() const;
@@ -96,13 +91,12 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   bool IsDetached() const override { return !node_; }
   bool IsAXNodeObject() const final { return true; }
 
-  void GetSparseAXAttributes(AXSparseAttributeClient&) const override;
-
   // Check object role or purpose.
   bool IsAnchor() const final;
   bool IsControllingVideoElement() const;
   bool IsMultiline() const override;
   bool IsEditable() const override { return IsNativeTextControl(); }
+  bool ComputeIsEditableRoot() const override;
   bool IsEmbeddedObject() const final;
   bool IsFieldset() const final;
   bool IsHeading() const final;
@@ -123,7 +117,9 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   bool IsProgressIndicator() const override;
   bool IsRichlyEditable() const override;
   bool IsSlider() const override;
+  bool IsSpinButton() const override;
   bool IsNativeSlider() const override;
+  bool IsNativeSpinButton() const override;
   bool IsMoveableSplitter() const override;
 
   // Check object state.
@@ -132,7 +128,6 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   bool IsModal() const final;
   bool IsRequired() const final;
   bool IsControl() const;
-  bool CanSupportAriaReadOnly() const;
   AXRestriction Restriction() const override;
 
   // Properties of static elements.
@@ -155,9 +150,10 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   // Only used when invalidState() returns InvalidStateOther.
   String AriaInvalidValue() const final;
   String ValueDescription() const override;
-  float ValueForRange() const override;
-  float MaxValueForRange() const override;
-  float MinValueForRange() const override;
+  bool ValueForRange(float* out_value) const override;
+  bool MaxValueForRange(float* out_value) const override;
+  bool MinValueForRange(float* out_value) const override;
+  bool StepValueForRange(float* out_value) const override;
   String StringValue() const override;
 
   // ARIA attributes.
@@ -183,7 +179,8 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   // Location
   void GetRelativeBounds(AXObject** out_container,
                          FloatRect& out_bounds_in_container,
-                         SkMatrix44& out_container_transform) const override;
+                         SkMatrix44& out_container_transform,
+                         bool* clips_children = nullptr) const override;
 
   // High-level accessibility tree access.
   AXObject* ComputeParent() const override;
@@ -204,20 +201,24 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   Node* GetNode() const override { return node_; }
 
   // Modify or take an action on an object.
-  void SetFocused(bool) final;
-  void Increment() final;
-  void Decrement() final;
-  void SetSequentialFocusNavigationStartingPoint() final;
+  bool OnNativeFocusAction() final;
+  bool OnNativeIncrementAction() final;
+  bool OnNativeDecrementAction() final;
+  bool OnNativeSetSequentialFocusNavigationStartingPointAction() final;
 
   // Notifications that this object may have changed.
   void ChildrenChanged() override;
   void SelectionChanged() final;
   void TextChanged() override;
-  void UpdateAccessibilityRole() final;
 
   // Position in set and Size of set
   int PosInSet() const override;
   int SetSize() const override;
+  // Compute the number of siblings that have the same role before |this|,
+  // following rules for counting the number of items in a set.
+  int AutoPosInSet() const;
+  // Compute the number of unignored siblings with the same role as |this|.
+  int AutoSetSize() const;
 
   // Aria-owns.
   void ComputeAriaOwnsChildren(
@@ -234,9 +235,10 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
                                AXRelatedObjectVector*,
                                NameSources*,
                                bool* found_text_alternative) const;
-  float StepValueForRange() const;
   bool IsDescendantOfElementType(HashSet<QualifiedName>& tag_names) const;
   String PlaceholderFromNativeAttribute() const;
+
+  DISALLOW_COPY_AND_ASSIGN(AXNodeObject);
 };
 
 }  // namespace blink

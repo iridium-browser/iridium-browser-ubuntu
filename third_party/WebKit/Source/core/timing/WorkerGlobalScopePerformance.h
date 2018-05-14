@@ -47,19 +47,21 @@ class CORE_EXPORT WorkerGlobalScopePerformance final
   USING_GARBAGE_COLLECTED_MIXIN(WorkerGlobalScopePerformance);
 
  public:
+  static const char kSupplementName[];
+
   static WorkerGlobalScopePerformance& From(WorkerGlobalScope&);
 
   static WorkerPerformance* performance(WorkerGlobalScope&);
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  private:
   explicit WorkerGlobalScopePerformance(WorkerGlobalScope&);
 
   WorkerPerformance* performance(WorkerGlobalScope*);
-  static const char* SupplementName();
 
-  Member<WorkerPerformance> performance_;
+  TraceWrapperMember<WorkerPerformance> performance_;
 };
 
 }  // namespace blink

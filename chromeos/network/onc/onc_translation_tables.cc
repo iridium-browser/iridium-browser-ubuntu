@@ -23,7 +23,7 @@ namespace {
 const FieldTranslationEntry eap_fields[] = {
     {::onc::eap::kAnonymousIdentity, shill::kEapAnonymousIdentityProperty},
     // This field is converted during translation, see onc_translator_*.
-    // { ::onc::eap::kClientCertPKCS11Id, shill::kEapCertIdProperty },
+    // { ::onc::client_cert::kClientCertPKCS11Id, shill::kEapCertIdProperty },
     {::onc::eap::kIdentity, shill::kEapIdentityProperty},
     // This field is converted during translation, see onc_translator_*.
     // { ::onc::eap::kInner, shill::kEapPhase2AuthProperty },
@@ -33,6 +33,7 @@ const FieldTranslationEntry eap_fields[] = {
     {::onc::eap::kSaveCredentials, shill::kSaveCredentialsProperty},
     {::onc::eap::kServerCAPEMs, shill::kEapCaCertPemProperty},
     {::onc::eap::kSubjectMatch, shill::kEapSubjectMatchProperty},
+    {::onc::eap::kTLSVersionMax, shill::kEapTLSVersionMaxProperty},
     {::onc::eap::kUseSystemCAs, shill::kEapUseSystemCasProperty},
     {::onc::eap::kUseProactiveKeyCaching,
      shill::kEapUseProactiveKeyCachingProperty},
@@ -42,6 +43,8 @@ const FieldTranslationEntry ipsec_fields[] = {
     // This field is converted during translation, see onc_translator_*.
     // { ::onc::ipsec::kAuthenticationType, shill::kL2tpIpsecAuthenticationType
     // },
+    // {::onc::client_cert::kClientCertPKCS11Id,
+    //  shill::kL2tpIpsecClientCertIdProperty},
     {::onc::ipsec::kGroup, shill::kL2tpIpsecTunnelGroupProperty},
     // Ignored by Shill, not necessary to synchronize.
     // { ::onc::ipsec::kIKEVersion, shill::kL2tpIpsecIkeVersion },
@@ -70,8 +73,12 @@ const FieldTranslationEntry openvpn_fields[] = {
     {::onc::openvpn::kAuthNoCache, shill::kOpenVPNAuthNoCacheProperty},
     {::onc::openvpn::kAuthRetry, shill::kOpenVPNAuthRetryProperty},
     {::onc::openvpn::kCipher, shill::kOpenVPNCipherProperty},
+    // This field is converted during translation, see onc_translator_*.
+    // {::onc::client_cert::kClientCertPKCS11Id,
+    //  shill::kOpenVPNClientCertIdProperty},
     {::onc::openvpn::kCompLZO, shill::kOpenVPNCompLZOProperty},
     {::onc::openvpn::kCompNoAdapt, shill::kOpenVPNCompNoAdaptProperty},
+    {::onc::openvpn::kExtraHosts, shill::kOpenVPNExtraHostsProperty},
     {::onc::openvpn::kIgnoreDefaultRoute,
      shill::kOpenVPNIgnoreDefaultRouteProperty},
     {::onc::openvpn::kKeyDirection, shill::kOpenVPNKeyDirectionProperty},
@@ -97,8 +104,14 @@ const FieldTranslationEntry openvpn_fields[] = {
     {::onc::openvpn::kStaticChallenge, shill::kOpenVPNStaticChallengeProperty},
     {::onc::openvpn::kTLSAuthContents, shill::kOpenVPNTLSAuthContentsProperty},
     {::onc::openvpn::kTLSRemote, shill::kOpenVPNTLSRemoteProperty},
+    {::onc::openvpn::kTLSVersionMin, shill::kOpenVPNTLSVersionMinProperty},
     {::onc::vpn::kUsername, shill::kOpenVPNUserProperty},
+    {::onc::openvpn::kVerb, shill::kOpenVPNVerbProperty},
     {::onc::openvpn::kVerifyHash, shill::kOpenVPNVerifyHashProperty},
+    {NULL}};
+
+const FieldTranslationEntry arc_vpn_fields[] = {
+    {::onc::arc_vpn::kTunnelChrome, shill::kArcVpnTunnelChromeProperty},
     {NULL}};
 
 const FieldTranslationEntry verify_x509_fields[] = {
@@ -235,6 +248,9 @@ const FieldTranslationEntry static_or_saved_ipconfig_fields[] = {
     {::onc::ipconfig::kGateway, shill::kGatewayProperty},
     {::onc::ipconfig::kRoutingPrefix, shill::kPrefixlenProperty},
     {::onc::ipconfig::kNameServers, shill::kNameServersProperty},
+    {::onc::ipconfig::kSearchDomains, shill::kSearchDomainsProperty},
+    {::onc::ipconfig::kIncludedRoutes, shill::kIncludedRoutesProperty},
+    {::onc::ipconfig::kExcludedRoutes, shill::kExcludedRoutesProperty},
     {NULL}};
 
 struct OncValueTranslationEntry {
@@ -248,6 +264,7 @@ const OncValueTranslationEntry onc_value_translation_table[] = {
     {&kL2TPSignature, l2tp_fields},
     {&kXAUTHSignature, xauth_fields},
     {&kOpenVPNSignature, openvpn_fields},
+    {&kARCVPNSignature, arc_vpn_fields},
     {&kVerifyX509Signature, verify_x509_fields},
     {&kVPNSignature, vpn_fields},
     {&kTetherSignature, tether_fields},
@@ -303,6 +320,7 @@ const StringTranslationEntry kVPNTypeTable[] = {
     {::onc::vpn::kTypeL2TP_IPsec, shill::kProviderL2tpIpsec},
     {::onc::vpn::kOpenVPN, shill::kProviderOpenVpn},
     {::onc::vpn::kThirdPartyVpn, shill::kProviderThirdPartyVpn},
+    {::onc::vpn::kArcVpn, shill::kProviderArcVpn},
     {NULL}};
 
 const StringTranslationEntry kWiFiSecurityTable[] = {
@@ -385,8 +403,9 @@ const FieldTranslationEntry kCellularDeviceTable[] = {
     {::onc::cellular::kMDN, shill::kMdnProperty},
     {::onc::cellular::kMEID, shill::kMeidProperty},
     {::onc::cellular::kMIN, shill::kMinProperty},
-    {::onc::cellular::kModelID, shill::kModelIDProperty},
+    {::onc::cellular::kModelID, shill::kModelIdProperty},
     {::onc::cellular::kPRLVersion, shill::kPRLVersionProperty},
+    {::onc::cellular::kScanning, shill::kScanningProperty},
     // This field is converted during translation, see onc_translator_*.
     // { ::onc::cellular::kSIMLockStatus, shill::kSIMLockStatusProperty},
     {::onc::cellular::kSIMPresent, shill::kSIMPresentProperty},

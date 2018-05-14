@@ -84,6 +84,7 @@ class URLSchemesRegistry final {
       content_security_policy_bypassing_schemes;
   URLSchemesSet secure_context_bypassing_schemes;
   URLSchemesSet allowed_in_referrer_schemes;
+  URLSchemesSet wasm_eval_csp_schemes;
 
  private:
   friend const URLSchemesRegistry& GetURLSchemesRegistry();
@@ -115,32 +116,32 @@ void SchemeRegistry::Initialize() {
 }
 
 void SchemeRegistry::RegisterURLSchemeAsLocal(const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry().local_schemes.insert(scheme);
 }
 
 bool SchemeRegistry::ShouldTreatURLSchemeAsLocal(const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().local_schemes.Contains(scheme);
 }
 
 bool SchemeRegistry::ShouldTreatURLSchemeAsNoAccess(const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().schemes_with_unique_origins.Contains(scheme);
 }
 
 void SchemeRegistry::RegisterURLSchemeAsDisplayIsolated(const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry().display_isolated_url_schemes.insert(scheme);
 }
 
 bool SchemeRegistry::ShouldTreatURLSchemeAsDisplayIsolated(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().display_isolated_url_schemes.Contains(scheme);
@@ -148,24 +149,24 @@ bool SchemeRegistry::ShouldTreatURLSchemeAsDisplayIsolated(
 
 bool SchemeRegistry::ShouldTreatURLSchemeAsRestrictingMixedContent(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   return scheme == "https";
 }
 
 void SchemeRegistry::RegisterURLSchemeAsSecure(const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry().secure_schemes.insert(scheme);
 }
 
 bool SchemeRegistry::ShouldTreatURLSchemeAsSecure(const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().secure_schemes.Contains(scheme);
 }
 
 bool SchemeRegistry::ShouldLoadURLSchemeAsEmptyDocument(const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().empty_document_schemes.Contains(scheme);
@@ -174,7 +175,7 @@ bool SchemeRegistry::ShouldLoadURLSchemeAsEmptyDocument(const String& scheme) {
 void SchemeRegistry::SetDomainRelaxationForbiddenForURLScheme(
     bool forbidden,
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return;
 
@@ -189,7 +190,7 @@ void SchemeRegistry::SetDomainRelaxationForbiddenForURLScheme(
 
 bool SchemeRegistry::IsDomainRelaxationForbiddenForURLScheme(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry()
@@ -197,28 +198,39 @@ bool SchemeRegistry::IsDomainRelaxationForbiddenForURLScheme(
 }
 
 bool SchemeRegistry::CanDisplayOnlyIfCanRequest(const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   return scheme == "blob" || scheme == "filesystem";
 }
 
 void SchemeRegistry::RegisterURLSchemeAsNotAllowingJavascriptURLs(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry().not_allowing_javascript_urls_schemes.insert(
+      scheme);
+}
+
+void SchemeRegistry::RemoveURLSchemeAsNotAllowingJavascriptURLs(
+    const String& scheme) {
+  GetMutableURLSchemesRegistry().not_allowing_javascript_urls_schemes.erase(
       scheme);
 }
 
 bool SchemeRegistry::ShouldTreatURLSchemeAsNotAllowingJavascriptURLs(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().not_allowing_javascript_urls_schemes.Contains(
       scheme);
 }
 
+void SchemeRegistry::RegisterURLSchemeAsCORSEnabled(const String& scheme) {
+  DCHECK_EQ(scheme, scheme.LowerASCII());
+  GetMutableURLSchemesRegistry().cors_enabled_schemes.insert(scheme);
+}
+
 bool SchemeRegistry::ShouldTreatURLSchemeAsCORSEnabled(const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().cors_enabled_schemes.Contains(scheme);
@@ -243,26 +255,30 @@ bool SchemeRegistry::ShouldTreatURLSchemeAsLegacy(const String& scheme) {
 }
 
 bool SchemeRegistry::ShouldTrackUsageMetricsForScheme(const String& scheme) {
+  // This SchemeRegistry is primarily used by Blink UseCounter, which aims to
+  // match the tracking policy of page_load_metrics (see
+  // pageTrackDecider::ShouldTrack() for more details).
   // The scheme represents content which likely cannot be easily updated.
   // Specifically this includes internal pages such as about, chrome-devtools,
   // etc.
   // "chrome-extension" is not included because they have a single deployment
   // point (the webstore) and are designed specifically for Chrome.
   // "data" is not included because real sites shouldn't be using it for
-  // top-level
-  // pages and Chrome does use it internally (eg. PluginPlaceholder).
-  return scheme == "http" || scheme == "https" || scheme == "file";
+  // top-level pages and Chrome does use it internally (eg. PluginPlaceholder).
+  // "file" is not included because file:// navigations have different loading
+  // behaviors.
+  return scheme == "http" || scheme == "https";
 }
 
 void SchemeRegistry::RegisterURLSchemeAsAllowingServiceWorkers(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry().service_worker_schemes.insert(scheme);
 }
 
 bool SchemeRegistry::ShouldTreatURLSchemeAsAllowingServiceWorkers(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().service_worker_schemes.Contains(scheme);
@@ -270,13 +286,13 @@ bool SchemeRegistry::ShouldTreatURLSchemeAsAllowingServiceWorkers(
 
 void SchemeRegistry::RegisterURLSchemeAsSupportingFetchAPI(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry().fetch_api_schemes.insert(scheme);
 }
 
 bool SchemeRegistry::ShouldTreatURLSchemeAsSupportingFetchAPI(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().fetch_api_schemes.Contains(scheme);
@@ -284,21 +300,21 @@ bool SchemeRegistry::ShouldTreatURLSchemeAsSupportingFetchAPI(
 
 void SchemeRegistry::RegisterURLSchemeAsFirstPartyWhenTopLevel(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry().first_party_when_top_level_schemes.insert(
       scheme);
 }
 
 void SchemeRegistry::RemoveURLSchemeAsFirstPartyWhenTopLevel(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry().first_party_when_top_level_schemes.erase(
       scheme);
 }
 
 bool SchemeRegistry::ShouldTreatURLSchemeAsFirstPartyWhenTopLevel(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().first_party_when_top_level_schemes.Contains(
@@ -307,7 +323,7 @@ bool SchemeRegistry::ShouldTreatURLSchemeAsFirstPartyWhenTopLevel(
 
 void SchemeRegistry::RegisterURLSchemeAsAllowedForReferrer(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry().allowed_in_referrer_schemes.insert(scheme);
 }
 
@@ -317,7 +333,7 @@ void SchemeRegistry::RemoveURLSchemeAsAllowedForReferrer(const String& scheme) {
 
 bool SchemeRegistry::ShouldTreatURLSchemeAsAllowedForReferrer(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   if (scheme.IsEmpty())
     return false;
   return GetURLSchemesRegistry().allowed_in_referrer_schemes.Contains(scheme);
@@ -326,14 +342,14 @@ bool SchemeRegistry::ShouldTreatURLSchemeAsAllowedForReferrer(
 void SchemeRegistry::RegisterURLSchemeAsBypassingContentSecurityPolicy(
     const String& scheme,
     PolicyAreas policy_areas) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry()
       .content_security_policy_bypassing_schemes.insert(scheme, policy_areas);
 }
 
 void SchemeRegistry::RemoveURLSchemeRegisteredAsBypassingContentSecurityPolicy(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry()
       .content_security_policy_bypassing_schemes.erase(scheme);
 }
@@ -354,7 +370,7 @@ bool SchemeRegistry::SchemeShouldBypassContentSecurityPolicy(
 
 void SchemeRegistry::RegisterURLSchemeBypassingSecureContextCheck(
     const String& scheme) {
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   GetMutableURLSchemesRegistry().secure_context_bypassing_schemes.insert(
       scheme);
 }
@@ -363,9 +379,22 @@ bool SchemeRegistry::SchemeShouldBypassSecureContextCheck(
     const String& scheme) {
   if (scheme.IsEmpty())
     return false;
-  DCHECK_EQ(scheme, scheme.DeprecatedLower());
+  DCHECK_EQ(scheme, scheme.LowerASCII());
   return GetURLSchemesRegistry().secure_context_bypassing_schemes.Contains(
       scheme);
+}
+
+void SchemeRegistry::RegisterURLSchemeAsAllowingWasmEvalCSP(
+    const String& scheme) {
+  DCHECK_EQ(scheme, scheme.LowerASCII());
+  GetMutableURLSchemesRegistry().wasm_eval_csp_schemes.insert(scheme);
+}
+
+bool SchemeRegistry::SchemeSupportsWasmEvalCSP(const String& scheme) {
+  if (scheme.IsEmpty())
+    return false;
+  DCHECK_EQ(scheme, scheme.LowerASCII());
+  return GetURLSchemesRegistry().wasm_eval_csp_schemes.Contains(scheme);
 }
 
 }  // namespace blink

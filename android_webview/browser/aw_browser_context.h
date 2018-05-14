@@ -8,7 +8,6 @@
 #include <memory>
 #include <vector>
 
-#include "android_webview/browser/aw_download_manager_delegate.h"
 #include "android_webview/browser/aw_safe_browsing_ui_manager.h"
 #include "android_webview/browser/aw_ssl_host_state_delegate.h"
 #include "base/compiler_specific.h"
@@ -16,7 +15,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "components/prefs/pref_change_registrar.h"
-#include "components/safe_browsing_db/remote_database_manager.h"
+#include "components/safe_browsing/android/remote_database_manager.h"
 #include "components/visitedlink/browser/visitedlink_delegate.h"
 #include "components/web_restrictions/browser/web_restrictions_client.h"
 #include "content/public/browser/browser_context.h"
@@ -33,8 +32,11 @@ class SSLHostStateDelegate;
 class WebContents;
 }
 
+namespace net {
+class NetLog;
+}
+
 namespace policy {
-class URLBlacklistManager;
 class BrowserPolicyConnectorBase;
 }
 
@@ -76,10 +78,8 @@ class AwBrowserContext : public content::BrowserContext,
   static AwBrowserContext* FromWebContents(
       content::WebContents* web_contents);
 
-  static void SetLegacyCacheRemovalDelayForTest(int delay_ms);
-
   // Maps to BrowserMainParts::PreMainMessageLoopRun.
-  void PreMainMessageLoopRun();
+  void PreMainMessageLoopRun(net::NetLog* net_log);
 
   // These methods map to Add methods in visitedlink::VisitedLinkMaster.
   void AddVisitedURLs(const std::vector<GURL>& urls);
@@ -88,7 +88,6 @@ class AwBrowserContext : public content::BrowserContext,
   AwFormDatabaseService* GetFormDatabaseService();
   AwURLRequestContextGetter* GetAwURLRequestContext();
 
-  policy::URLBlacklistManager* GetURLBlacklistManager();
   web_restrictions::WebRestrictionsClient* GetWebRestrictionProvider();
 
   // content::BrowserContext implementation.
@@ -101,6 +100,7 @@ class AwBrowserContext : public content::BrowserContext,
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   content::PermissionManager* GetPermissionManager() override;
+  content::BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
       override;
@@ -129,11 +129,6 @@ class AwBrowserContext : public content::BrowserContext,
   void InitUserPrefService();
   void OnWebRestrictionsAuthorityChanged();
 
-
-  // Delay, in milliseconds, before removing the legacy cache dir.
-  // This is non-const for testing purposes.
-  static int legacy_cache_removal_delay_ms_;
-
   // The file path where data for this context is persisted.
   base::FilePath context_storage_path_;
 
@@ -141,15 +136,11 @@ class AwBrowserContext : public content::BrowserContext,
   scoped_refptr<AwQuotaManagerBridge> quota_manager_bridge_;
   std::unique_ptr<AwFormDatabaseService> form_database_service_;
 
-  AwDownloadManagerDelegate download_manager_delegate_;
-
   std::unique_ptr<visitedlink::VisitedLinkMaster> visitedlink_master_;
   std::unique_ptr<content::ResourceContext> resource_context_;
 
   std::unique_ptr<PrefService> user_pref_service_;
   std::unique_ptr<policy::BrowserPolicyConnectorBase> browser_policy_connector_;
-  std::unique_ptr<policy::URLBlacklistManager> blacklist_manager_;
-
   std::unique_ptr<AwSSLHostStateDelegate> ssl_host_state_delegate_;
   std::unique_ptr<content::PermissionManager> permission_manager_;
   std::unique_ptr<web_restrictions::WebRestrictionsClient>

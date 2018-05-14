@@ -135,7 +135,9 @@ PaymentDetailsModifier BuildPaymentDetailsModifierForTest(
     item = BuildPaymentItemForTest();
 
   PaymentDetailsModifier modifier;
-  modifier.setSupportedMethods(Vector<String>(1, "foo"));
+  StringOrStringSequence supportedMethods;
+  supportedMethods.SetStringSequence(Vector<String>(1, "foo"));
+  modifier.setSupportedMethods(supportedMethods);
   modifier.setTotal(total);
   modifier.setAdditionalDisplayItems(HeapVector<PaymentItem>(1, item));
   return modifier;
@@ -191,7 +193,9 @@ PaymentDetailsUpdate BuildPaymentDetailsErrorMsgForTest(
 
 HeapVector<PaymentMethodData> BuildPaymentMethodDataForTest() {
   HeapVector<PaymentMethodData> method_data(1, PaymentMethodData());
-  method_data[0].setSupportedMethods(Vector<String>(1, "foo"));
+  StringOrStringSequence supportedMethods;
+  supportedMethods.SetStringSequence(Vector<String>(1, "foo"));
+  method_data[0].setSupportedMethods(supportedMethods);
   return method_data;
 }
 
@@ -203,7 +207,8 @@ payments::mojom::blink::PaymentResponsePtr BuildPaymentResponseForTest() {
 
 void MakePaymentRequestOriginSecure(Document& document) {
   document.SetSecurityOrigin(
-      SecurityOrigin::Create(KURL(NullURL(), "https://www.example.com/")));
+      SecurityOrigin::Create(KURL("https://www.example.com/")));
+  document.SetSecureContextStateForTesting(SecureContextState::kSecure);
 }
 
 PaymentRequestMockFunctionScope::PaymentRequestMockFunctionScope(

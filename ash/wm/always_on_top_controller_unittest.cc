@@ -20,8 +20,8 @@ namespace ash {
 
 class VirtualKeyboardAlwaysOnTopControllerTest : public AshTestBase {
  public:
-  VirtualKeyboardAlwaysOnTopControllerTest() {}
-  ~VirtualKeyboardAlwaysOnTopControllerTest() override {}
+  VirtualKeyboardAlwaysOnTopControllerTest() = default;
+  ~VirtualKeyboardAlwaysOnTopControllerTest() override = default;
 
   void SetUp() override {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -38,11 +38,12 @@ class TestLayoutManager : public WorkspaceLayoutManager {
   explicit TestLayoutManager(aura::Window* window)
       : WorkspaceLayoutManager(window), keyboard_bounds_changed_(false) {}
 
-  ~TestLayoutManager() override {}
+  ~TestLayoutManager() override = default;
 
-  void OnKeyboardBoundsChanging(const gfx::Rect& bounds) override {
+  void OnKeyboardWorkspaceDisplacingBoundsChanged(
+      const gfx::Rect& bounds) override {
     keyboard_bounds_changed_ = true;
-    WorkspaceLayoutManager::OnKeyboardBoundsChanging(bounds);
+    WorkspaceLayoutManager::OnKeyboardWorkspaceDisplacingBoundsChanged(bounds);
   }
 
   bool keyboard_bounds_changed() const { return keyboard_bounds_changed_; }
@@ -72,14 +73,13 @@ TEST_F(VirtualKeyboardAlwaysOnTopControllerTest, NotifyKeyboardBoundsChanged) {
   controller->ActivateKeyboard(keyboard_controller);
 
   // Mock a keyboard appearing.
-  aura::Window* keyboard_container =
-      Shell::GetContainer(root_window, kShellWindowId_VirtualKeyboardContainer);
+  aura::Window* keyboard_container = keyboard_controller->GetContainerWindow();
   ASSERT_TRUE(keyboard_container);
   keyboard_container->Show();
   aura::Window* contents_window =
       keyboard_controller->ui()->GetContentsWindow();
   const int kKeyboardHeight = 200;
-  gfx::Rect keyboard_bounds = keyboard::FullWidthKeyboardBoundsFromRootBounds(
+  gfx::Rect keyboard_bounds = keyboard::KeyboardBoundsFromRootBounds(
       root_window->bounds(), kKeyboardHeight);
   contents_window->SetBounds(keyboard_bounds);
   contents_window->Show();

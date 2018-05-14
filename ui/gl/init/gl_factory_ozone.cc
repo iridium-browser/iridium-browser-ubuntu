@@ -8,6 +8,7 @@
 #include "base/trace_event/trace_event.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_context_stub.h"
+#include "ui/gl/gl_egl_api_implementation.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_share_group.h"
 #include "ui/gl/gl_surface.h"
@@ -102,6 +103,35 @@ scoped_refptr<GLSurface> CreateOffscreenGLSurfaceWithFormat(
   }
 
   return nullptr;
+}
+
+void SetDisabledExtensionsPlatform(const std::string& disabled_extensions) {
+  if (HasGLOzone()) {
+    GetGLOzone()->SetDisabledExtensionsPlatform(disabled_extensions);
+    return;
+  }
+
+  switch (GetGLImplementation()) {
+    case kGLImplementationMockGL:
+    case kGLImplementationStubGL:
+      break;
+    default:
+      NOTREACHED();
+  }
+}
+
+bool InitializeExtensionSettingsOneOffPlatform() {
+  if (HasGLOzone())
+    return GetGLOzone()->InitializeExtensionSettingsOneOffPlatform();
+
+  switch (GetGLImplementation()) {
+    case kGLImplementationMockGL:
+    case kGLImplementationStubGL:
+      return true;
+    default:
+      NOTREACHED();
+      return false;
+  }
 }
 
 }  // namespace init

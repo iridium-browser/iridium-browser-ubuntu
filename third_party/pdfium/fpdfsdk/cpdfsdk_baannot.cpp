@@ -61,10 +61,10 @@ CPDF_Annot::Subtype CPDFSDK_BAAnnot::GetAnnotSubtype() const {
 }
 
 void CPDFSDK_BAAnnot::DrawAppearance(CFX_RenderDevice* pDevice,
-                                     const CFX_Matrix* pUser2Device,
+                                     const CFX_Matrix& mtUser2Device,
                                      CPDF_Annot::AppearanceMode mode,
                                      const CPDF_RenderOptions* pOptions) {
-  m_pAnnot->DrawAppearance(m_pPageView->GetPDFPage(), pDevice, pUser2Device,
+  m_pAnnot->DrawAppearance(m_pPageView->GetPDFPage(), pDevice, mtUser2Device,
                            mode, pOptions);
 }
 
@@ -101,7 +101,7 @@ void CPDFSDK_BAAnnot::ClearCachedAP() {
   m_pAnnot->ClearCachedAP();
 }
 
-void CPDFSDK_BAAnnot::SetContents(const CFX_WideString& sContents) {
+void CPDFSDK_BAAnnot::SetContents(const WideString& sContents) {
   if (sContents.IsEmpty()) {
     m_pAnnot->GetAnnotDict()->RemoveFor("Contents");
   } else {
@@ -110,11 +110,11 @@ void CPDFSDK_BAAnnot::SetContents(const CFX_WideString& sContents) {
   }
 }
 
-CFX_WideString CPDFSDK_BAAnnot::GetContents() const {
+WideString CPDFSDK_BAAnnot::GetContents() const {
   return m_pAnnot->GetAnnotDict()->GetUnicodeTextFor("Contents");
 }
 
-void CPDFSDK_BAAnnot::SetAnnotName(const CFX_WideString& sName) {
+void CPDFSDK_BAAnnot::SetAnnotName(const WideString& sName) {
   if (sName.IsEmpty()) {
     m_pAnnot->GetAnnotDict()->RemoveFor("NM");
   } else {
@@ -123,13 +123,13 @@ void CPDFSDK_BAAnnot::SetAnnotName(const CFX_WideString& sName) {
   }
 }
 
-CFX_WideString CPDFSDK_BAAnnot::GetAnnotName() const {
+WideString CPDFSDK_BAAnnot::GetAnnotName() const {
   return m_pAnnot->GetAnnotDict()->GetUnicodeTextFor("NM");
 }
 
 void CPDFSDK_BAAnnot::SetModifiedDate(const FX_SYSTEMTIME& st) {
   CPDFSDK_DateTime dt(st);
-  CFX_ByteString str = dt.ToPDFDateTimeString();
+  ByteString str = dt.ToPDFDateTimeString();
   if (str.IsEmpty())
     m_pAnnot->GetAnnotDict()->RemoveFor("M");
   else
@@ -138,7 +138,7 @@ void CPDFSDK_BAAnnot::SetModifiedDate(const FX_SYSTEMTIME& st) {
 
 FX_SYSTEMTIME CPDFSDK_BAAnnot::GetModifiedDate() const {
   FX_SYSTEMTIME systime;
-  CFX_ByteString str = m_pAnnot->GetAnnotDict()->GetStringFor("M");
+  ByteString str = m_pAnnot->GetAnnotDict()->GetStringFor("M");
   CPDFSDK_DateTime dt(str);
   dt.ToSystemTime(systime);
   return systime;
@@ -153,14 +153,14 @@ uint32_t CPDFSDK_BAAnnot::GetFlags() const {
   return m_pAnnot->GetAnnotDict()->GetIntegerFor("F");
 }
 
-void CPDFSDK_BAAnnot::SetAppState(const CFX_ByteString& str) {
+void CPDFSDK_BAAnnot::SetAppState(const ByteString& str) {
   if (str.IsEmpty())
     m_pAnnot->GetAnnotDict()->RemoveFor("AS");
   else
     m_pAnnot->GetAnnotDict()->SetNewFor<CPDF_String>("AS", str, false);
 }
 
-CFX_ByteString CPDFSDK_BAAnnot::GetAppState() const {
+ByteString CPDFSDK_BAAnnot::GetAppState() const {
   return m_pAnnot->GetAnnotDict()->GetStringFor("AS");
 }
 
@@ -225,7 +225,7 @@ void CPDFSDK_BAAnnot::SetBorderStyle(BorderStyle nStyle) {
 BorderStyle CPDFSDK_BAAnnot::GetBorderStyle() const {
   CPDF_Dictionary* pBSDict = m_pAnnot->GetAnnotDict()->GetDictFor("BS");
   if (pBSDict) {
-    CFX_ByteString sBorderStyle = pBSDict->GetStringFor("S", "S");
+    ByteString sBorderStyle = pBSDict->GetStringFor("S", "S");
     if (sBorderStyle == "S")
       return BorderStyle::SOLID;
     if (sBorderStyle == "D")
@@ -346,10 +346,17 @@ CPDF_Action CPDFSDK_BAAnnot::GetAAction(CPDF_AAction::AActionType eAAT) {
   if (eAAT == CPDF_AAction::ButtonUp)
     return GetAction();
 
-  return CPDF_Action();
+  return CPDF_Action(nullptr);
 }
 
 void CPDFSDK_BAAnnot::SetOpenState(bool bOpenState) {
   if (CPDF_Annot* pAnnot = m_pAnnot->GetPopupAnnot())
     pAnnot->SetOpenState(bOpenState);
+}
+
+int CPDFSDK_BAAnnot::GetLayoutOrder() const {
+  if (m_pAnnot->GetSubtype() == CPDF_Annot::Subtype::POPUP)
+    return 1;
+
+  return CPDFSDK_Annot::GetLayoutOrder();
 }

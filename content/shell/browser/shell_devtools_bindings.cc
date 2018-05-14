@@ -90,9 +90,9 @@ int ResponseWriter::Write(net::IOBuffer* buffer,
 
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&ShellDevToolsBindings::CallClientFunction, devtools_bindings_,
-                 "DevToolsAPI.streamWrite", base::Owned(id),
-                 base::Owned(chunkValue), nullptr));
+      base::BindOnce(&ShellDevToolsBindings::CallClientFunction,
+                     devtools_bindings_, "DevToolsAPI.streamWrite",
+                     base::Owned(id), base::Owned(chunkValue), nullptr));
   return num_bytes;
 }
 
@@ -109,7 +109,7 @@ const size_t kMaxMessageChunkSize = IPC::Channel::kMaximumMessageSize / 4;
 
 void ShellDevToolsBindings::InspectElementAt(int x, int y) {
   if (agent_host_) {
-    agent_host_->InspectElement(this, x, y);
+    agent_host_->InspectElement(inspected_contents_->GetFocusedFrame(), x, y);
   } else {
     inspect_element_at_x_ = x;
     inspect_element_at_y_ = y;
@@ -154,44 +154,31 @@ void ShellDevToolsBindings::ReadyToCommitNavigation(
 #endif
 }
 
-void ShellDevToolsBindings::DocumentAvailableInMainFrame() {
+void ShellDevToolsBindings::Attach() {
+  if (agent_host_)
+    agent_host_->DetachClient(this);
   agent_host_ = DevToolsAgentHost::GetOrCreateFor(inspected_contents_);
   agent_host_->AttachClient(this);
   if (inspect_element_at_x_ != -1) {
-    agent_host_->InspectElement(this, inspect_element_at_x_,
-                                inspect_element_at_y_);
+    agent_host_->InspectElement(inspected_contents_->GetFocusedFrame(),
+                                inspect_element_at_x_, inspect_element_at_y_);
     inspect_element_at_x_ = -1;
     inspect_element_at_y_ = -1;
   }
 }
 
 void ShellDevToolsBindings::WebContentsDestroyed() {
-  if (agent_host_)
+  if (agent_host_) {
     agent_host_->DetachClient(this);
-}
-
-void ShellDevToolsBindings::SetPreferences(const std::string& json) {
-  preferences_.Clear();
-  if (json.empty())
-    return;
-  base::DictionaryValue* dict = nullptr;
-  std::unique_ptr<base::Value> parsed = base::JSONReader::Read(json);
-  if (!parsed || !parsed->GetAsDictionary(&dict))
-    return;
-  for (base::DictionaryValue::Iterator it(*dict); !it.IsAtEnd(); it.Advance()) {
-    if (!it.value().IsType(base::Value::Type::STRING))
-      continue;
-    preferences_.SetWithoutPathExpansion(it.key(), it.value().CreateDeepCopy());
+    agent_host_ = nullptr;
   }
 }
 
 void ShellDevToolsBindings::HandleMessageFromDevToolsFrontend(
     const std::string& message) {
-  if (!agent_host_)
-    return;
   std::string method;
-  base::ListValue* params = NULL;
-  base::DictionaryValue* dict = NULL;
+  base::ListValue* params = nullptr;
+  base::DictionaryValue* dict = nullptr;
   std::unique_ptr<base::Value> parsed_message = base::JSONReader::Read(message);
   if (!parsed_message || !parsed_message->GetAsDictionary(&dict) ||
       !dict->GetString("method", &method)) {
@@ -202,10 +189,8 @@ void ShellDevToolsBindings::HandleMessageFromDevToolsFrontend(
   dict->GetList("params", &params);
 
   if (method == "dispatchProtocolMessage" && params && params->GetSize() == 1) {
-    if (!agent_host_ || !agent_host_->IsAttached())
-      return;
     std::string protocol_message;
-    if (!params->GetString(0, &protocol_message))
+    if (!agent_host_ || !params->GetString(0, &protocol_message))
       return;
     agent_host_->DispatchProtocolMessage(this, protocol_message);
   } else if (method == "loadCompleted") {
@@ -243,7 +228,7 @@ void ShellDevToolsBindings::HandleMessageFromDevToolsFrontend(
               destination: OTHER
             }
             policy {
-              cookies_allowed: true
+              cookies_allowed: YES
               cookies_store: "user"
               setting:
                 "It's not possible to disable this feature from settings."
@@ -277,7 +262,7 @@ void ShellDevToolsBindings::HandleMessageFromDevToolsFrontend(
     if (!params->GetString(0, &name) || !params->GetString(1, &value)) {
       return;
     }
-    preferences_.SetStringWithoutPathExpansion(name, value);
+    preferences_.SetKey(name, base::Value(value));
   } else if (method == "removePreference") {
     std::string name;
     if (!params->GetString(0, &name))
@@ -287,6 +272,8 @@ void ShellDevToolsBindings::HandleMessageFromDevToolsFrontend(
     web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
         base::ASCIIToUTF16("DevToolsAPI.fileSystemsLoaded([]);"));
   } else if (method == "reattach") {
+    if (!agent_host_)
+      return;
     agent_host_->DetachClient(this);
     agent_host_->AttachClient(this);
   } else if (method == "registerExtensionsAPI") {
@@ -335,7 +322,7 @@ void ShellDevToolsBindings::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK(it != pending_requests_.end());
 
   base::DictionaryValue response;
-  auto headers = base::MakeUnique<base::DictionaryValue>();
+  auto headers = std::make_unique<base::DictionaryValue>();
   net::HttpResponseHeaders* rh = source->GetResponseHeaders();
   response.SetInteger("statusCode", rh ? rh->response_code() : 200);
 
@@ -380,8 +367,7 @@ void ShellDevToolsBindings::SendMessageAck(int request_id,
   CallClientFunction("DevToolsAPI.embedderMessageAck", &id_value, arg, nullptr);
 }
 
-void ShellDevToolsBindings::AgentHostClosed(DevToolsAgentHost* agent_host,
-                                            bool replaced) {
+void ShellDevToolsBindings::AgentHostClosed(DevToolsAgentHost* agent_host) {
   agent_host_ = nullptr;
   if (delegate_)
     delegate_->Close();

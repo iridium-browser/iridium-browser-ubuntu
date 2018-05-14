@@ -25,10 +25,10 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.SelectFileDialog;
 
@@ -36,8 +36,7 @@ import org.chromium.ui.base.SelectFileDialog;
  * Integration test for select file dialog used for <input type="file" />
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class SelectFileDialogTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -97,17 +96,14 @@ public class SelectFileDialogTest {
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityWithURL(DATA_URL);
 
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mActivityWindowAndroidForTest =
-                        new ActivityWindowAndroidForTest(mActivityTestRule.getActivity());
-                SelectFileDialog.setWindowAndroidForTests(mActivityWindowAndroidForTest);
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mActivityWindowAndroidForTest =
+                    new ActivityWindowAndroidForTest(mActivityTestRule.getActivity());
+            SelectFileDialog.setWindowAndroidForTests(mActivityWindowAndroidForTest);
 
-                mContentViewCore = mActivityTestRule.getActivity().getCurrentContentViewCore();
-                // TODO(aurimas) remove this wait once crbug.com/179511 is fixed.
-                mActivityTestRule.assertWaitForPageScaleFactorMatch(2);
-            }
+            mContentViewCore = mActivityTestRule.getActivity().getCurrentContentViewCore();
+            // TODO(aurimas) remove this wait once crbug.com/179511 is fixed.
+            mActivityTestRule.assertWaitForPageScaleFactorMatch(2);
         });
         DOMUtils.waitForNonZeroNodeBounds(mContentViewCore.getWebContents(), "input_file");
     }
@@ -191,13 +187,9 @@ public class SelectFileDialogTest {
     }
 
     private void resetActivityWindowAndroidForTest() {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mActivityWindowAndroidForTest.lastCallback.onIntentCompleted(
-                        mActivityWindowAndroidForTest, Activity.RESULT_CANCELED, null);
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> mActivityWindowAndroidForTest.lastCallback.onIntentCompleted(
+                        mActivityWindowAndroidForTest, Activity.RESULT_CANCELED, null));
         mActivityWindowAndroidForTest.lastCallback = null;
         mActivityWindowAndroidForTest.lastIntent = null;
     }

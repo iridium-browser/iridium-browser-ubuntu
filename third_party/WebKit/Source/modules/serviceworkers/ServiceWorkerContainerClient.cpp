@@ -24,11 +24,10 @@ ServiceWorkerContainerClient::ServiceWorkerContainerClient(
     std::unique_ptr<WebServiceWorkerProvider> provider)
     : Supplement<WorkerClients>(clients), provider_(std::move(provider)) {}
 
-ServiceWorkerContainerClient::~ServiceWorkerContainerClient() {}
+ServiceWorkerContainerClient::~ServiceWorkerContainerClient() = default;
 
-const char* ServiceWorkerContainerClient::SupplementName() {
-  return "ServiceWorkerContainerClient";
-}
+const char ServiceWorkerContainerClient::kSupplementName[] =
+    "ServiceWorkerContainerClient";
 
 ServiceWorkerContainerClient* ServiceWorkerContainerClient::From(
     ExecutionContext* context) {
@@ -38,23 +37,22 @@ ServiceWorkerContainerClient* ServiceWorkerContainerClient::From(
     WorkerClients* worker_clients = ToWorkerGlobalScope(context)->Clients();
     DCHECK(worker_clients);
     ServiceWorkerContainerClient* client =
-        static_cast<ServiceWorkerContainerClient*>(
-            Supplement<WorkerClients>::From(worker_clients, SupplementName()));
+        Supplement<WorkerClients>::From<ServiceWorkerContainerClient>(
+            worker_clients);
     DCHECK(client);
     return client;
   }
   Document* document = ToDocument(context);
-  if (!document->GetFrame())
+  if (!document->GetFrame() || !document->GetFrame()->Client())
     return nullptr;
 
   ServiceWorkerContainerClient* client =
-      static_cast<ServiceWorkerContainerClient*>(
-          Supplement<Document>::From(document, SupplementName()));
+      Supplement<Document>::From<ServiceWorkerContainerClient>(document);
   if (!client) {
     client = new ServiceWorkerContainerClient(
         *document,
         document->GetFrame()->Client()->CreateServiceWorkerProvider());
-    Supplement<Document>::ProvideTo(*document, SupplementName(), client);
+    Supplement<Document>::ProvideTo(*document, client);
   }
   return client;
 }
@@ -63,7 +61,6 @@ void ProvideServiceWorkerContainerClientToWorker(
     WorkerClients* clients,
     std::unique_ptr<WebServiceWorkerProvider> provider) {
   clients->ProvideSupplement(
-      ServiceWorkerContainerClient::SupplementName(),
       new ServiceWorkerContainerClient(*clients, std::move(provider)));
 }
 

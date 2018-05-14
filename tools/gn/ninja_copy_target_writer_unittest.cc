@@ -15,7 +15,7 @@ TEST(NinjaCopyTargetWriter, Run) {
   Err err;
   TestWithScope setup;
 
-  Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"), {});
+  Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"));
   target.set_output_type(Target::COPY_FILES);
 
   target.sources().push_back(SourceFile("//foo/input1.txt"));
@@ -45,7 +45,7 @@ TEST(NinjaCopyTargetWriter, ToolchainDeps) {
   Err err;
   TestWithScope setup;
 
-  Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"), {});
+  Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"));
   target.set_output_type(Target::COPY_FILES);
 
   target.sources().push_back(SourceFile("//foo/input1.txt"));
@@ -72,12 +72,12 @@ TEST(NinjaCopyTargetWriter, OrderOnlyDeps) {
   Err err;
   TestWithScope setup;
 
-  Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"), {});
+  Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"));
   target.set_output_type(Target::COPY_FILES);
   target.sources().push_back(SourceFile("//foo/input1.txt"));
   target.action_values().outputs() =
       SubstitutionList::MakeForTest("//out/Debug/{{source_name_part}}.out");
-  target.inputs().push_back(SourceFile("//foo/script.py"));
+  target.config_values().inputs().push_back(SourceFile("//foo/script.py"));
   target.SetToolchain(setup.toolchain());
   ASSERT_TRUE(target.OnResolved(&err));
 

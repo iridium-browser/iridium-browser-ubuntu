@@ -8,6 +8,7 @@
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/views/accessibility/ax_aura_obj_cache.h"
 #include "ui/views/accessibility/ax_aura_obj_wrapper.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -42,18 +43,18 @@ void AXWidgetObjWrapper::GetChildren(
 }
 
 void AXWidgetObjWrapper::Serialize(ui::AXNodeData* out_node_data) {
-  out_node_data->id = GetID();
+  out_node_data->id = GetUniqueId().Get();
   out_node_data->role = widget_->widget_delegate()->GetAccessibleWindowRole();
   out_node_data->AddStringAttribute(
-      ui::AX_ATTR_NAME,
+      ax::mojom::StringAttribute::kName,
       base::UTF16ToUTF8(
           widget_->widget_delegate()->GetAccessibleWindowTitle()));
   out_node_data->location = gfx::RectF(widget_->GetWindowBoundsInScreen());
   out_node_data->state = 0;
 }
 
-int32_t AXWidgetObjWrapper::GetID() {
-  return AXAuraObjCache::GetInstance()->GetID(widget_);
+const ui::AXUniqueId& AXWidgetObjWrapper::GetUniqueId() const {
+  return unique_id_;
 }
 
 void AXWidgetObjWrapper::OnWidgetDestroying(Widget* widget) {

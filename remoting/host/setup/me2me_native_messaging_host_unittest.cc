@@ -188,9 +188,9 @@ class MockDaemonControllerDelegate : public DaemonController::Delegate {
   DISALLOW_COPY_AND_ASSIGN(MockDaemonControllerDelegate);
 };
 
-MockDaemonControllerDelegate::MockDaemonControllerDelegate() {}
+MockDaemonControllerDelegate::MockDaemonControllerDelegate() = default;
 
-MockDaemonControllerDelegate::~MockDaemonControllerDelegate() {}
+MockDaemonControllerDelegate::~MockDaemonControllerDelegate() = default;
 
 DaemonController::State MockDaemonControllerDelegate::GetState() {
   return DaemonController::STATE_STARTED;
@@ -198,7 +198,7 @@ DaemonController::State MockDaemonControllerDelegate::GetState() {
 
 std::unique_ptr<base::DictionaryValue>
 MockDaemonControllerDelegate::GetConfig() {
-  return base::MakeUnique<base::DictionaryValue>();
+  return std::make_unique<base::DictionaryValue>();
 }
 
 void MockDaemonControllerDelegate::SetConfigAndStart(
@@ -288,9 +288,9 @@ class Me2MeNativeMessagingHostTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(Me2MeNativeMessagingHostTest);
 };
 
-Me2MeNativeMessagingHostTest::Me2MeNativeMessagingHostTest() {}
+Me2MeNativeMessagingHostTest::Me2MeNativeMessagingHostTest() = default;
 
-Me2MeNativeMessagingHostTest::~Me2MeNativeMessagingHostTest() {}
+Me2MeNativeMessagingHostTest::~Me2MeNativeMessagingHostTest() = default;
 
 void Me2MeNativeMessagingHostTest::SetUp() {
   base::File input_read_file;
@@ -424,7 +424,7 @@ Me2MeNativeMessagingHostTest::ReadMessageFromOutputPipe() {
     }
 
     std::unique_ptr<base::Value> message = base::JSONReader::Read(message_json);
-    if (!message || !message->IsType(base::Value::Type::DICTIONARY)) {
+    if (!message || !message->is_dict()) {
       return nullptr;
     }
 

@@ -5,6 +5,8 @@
 #ifndef TOOLS_GN_CONFIG_H_
 #define TOOLS_GN_CONFIG_H_
 
+#include <set>
+
 #include "base/logging.h"
 #include "base/macros.h"
 #include "tools/gn/config_values.h"
@@ -21,9 +23,11 @@
 // flags.
 class Config : public Item {
  public:
+  // We track the set of build files that may affect this config, please refer
+  // to Scope for how this is determined.
   Config(const Settings* settings,
          const Label& label,
-         const InputFileSet& input_files);
+         const std::set<SourceFile>& build_dependency_files = {});
   ~Config() override;
 
   // Item implementation.

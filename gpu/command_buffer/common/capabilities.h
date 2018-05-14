@@ -6,8 +6,10 @@
 #define GPU_COMMAND_BUFFER_COMMON_CAPABILITIES_H_
 
 #include <stdint.h>
+#include <vector>
 
 #include "gpu/gpu_export.h"
+#include "ui/gfx/buffer_types.h"
 
 // From gl2.h. We want to avoid including gl headers because client-side and
 // service-side headers conflict.
@@ -46,6 +48,7 @@ struct GPU_EXPORT Capabilities {
 
   Capabilities();
   Capabilities(const Capabilities& other);
+  ~Capabilities();
 
   template <typename T>
   void VisitStagePrecisions(unsigned stage,
@@ -135,7 +138,6 @@ struct GPU_EXPORT Capabilities {
   bool texture_storage = false;
   bool discard_framebuffer = false;
   bool sync_query = false;
-  bool future_sync_points = false;
   bool blend_equation_advanced = false;
   bool blend_equation_advanced_coherent = false;
   bool texture_rg = false;
@@ -144,6 +146,9 @@ struct GPU_EXPORT Capabilities {
   bool color_buffer_half_float_rgba = false;
   bool image_ycbcr_422 = false;
   bool image_ycbcr_420v = false;
+  bool image_ycbcr_420v_disabled_for_video_frames = false;
+  bool image_xr30 = false;
+  bool image_xb30 = false;
   bool render_buffer_format_bgra8888 = false;
   bool occlusion_query = false;
   bool occlusion_query_boolean = false;
@@ -152,13 +157,12 @@ struct GPU_EXPORT Capabilities {
   bool flips_vertically = false;
   bool msaa_is_slow = false;
   bool disable_one_component_textures = false;
-  bool disable_multisampling_color_mask_usage = false;
-  bool disable_webgl_rgb_multisampling_usage = false;
   bool gpu_rasterization = false;
   bool avoid_stencil_buffers = false;
   bool multisample_compatibility = false;
   // True if DirectComposition layers are enabled.
   bool dc_layers = false;
+  bool use_dc_overlays_for_video = false;
 
   // When this parameter is true, a CHROMIUM image created with RGB format will
   // actually have RGBA format. The client is responsible for handling most of
@@ -167,19 +171,25 @@ struct GPU_EXPORT Capabilities {
   // details.
   bool chromium_image_rgb_emulation = false;
 
-  // When true, RGB framebuffer formats are unsupported. Emulate with RGBA to
-  // work around this. See https://crbug.com/449150 for an example.
-  bool emulate_rgb_buffer_with_rgba = false;
-
-  // When true, is safe to convert a canvas from software to accelerated.
-  // See https://crbug.com/710029.
-  bool software_to_accelerated_canvas_upgrade = true;
-
   // When true, non-empty post sub buffer calls are unsupported.
   bool disable_non_empty_post_sub_buffers = false;
 
+  bool disable_2d_canvas_copy_on_write = false;
+
+  bool texture_npot = false;
+
+  bool texture_storage_image = false;
+
+  bool supports_oop_raster = false;
+
+  bool chromium_gpu_fence = false;
+
+  bool unpremultiply_and_dither_copy = false;
+
   int major_version = 2;
   int minor_version = 0;
+
+  std::vector<gfx::BufferUsageAndFormat> texture_target_exception_list;
 };
 
 }  // namespace gpu

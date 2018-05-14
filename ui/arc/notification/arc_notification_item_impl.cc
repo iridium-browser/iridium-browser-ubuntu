@@ -13,10 +13,10 @@
 #include "ui/arc/notification/arc_notification_delegate.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
-#include "ui/message_center/message_center_style.h"
-#include "ui/message_center/notification.h"
-#include "ui/message_center/notification_types.h"
-#include "ui/message_center/notifier_settings.h"
+#include "ui/message_center/public/cpp/message_center_constants.h"
+#include "ui/message_center/public/cpp/notification.h"
+#include "ui/message_center/public/cpp/notification_types.h"
+#include "ui/message_center/public/cpp/notifier_id.h"
 
 namespace arc {
 
@@ -85,12 +85,16 @@ void ArcNotificationItemImpl::OnUpdatedFromAndroid(
         base::ASCIIToUTF16("\n"));
   }
   rich_data.accessible_name = accessible_name_;
+  if (IsOpeningSettingsSupported()) {
+    rich_data.settings_button_handler =
+        message_center::SettingsButtonHandler::DELEGATE;
+  }
 
   message_center::NotifierId notifier_id(
-      message_center::NotifierId::SYSTEM_COMPONENT, kNotifierId);
+      message_center::NotifierId::ARC_APPLICATION, kNotifierId);
   notifier_id.profile_id = profile_id_.GetUserEmail();
 
-  auto notification = base::MakeUnique<message_center::Notification>(
+  auto notification = std::make_unique<message_center::Notification>(
       message_center::NOTIFICATION_TYPE_CUSTOM, notification_id_,
       base::UTF8ToUTF16(data->title), base::UTF8ToUTF16(data->message),
       gfx::Image(),
@@ -100,9 +104,22 @@ void ArcNotificationItemImpl::OnUpdatedFromAndroid(
       new ArcNotificationDelegate(weak_ptr_factory_.GetWeakPtr()));
   notification->set_timestamp(base::Time::FromJavaTime(data->time));
 
-  pinned_ = rich_data.pinned;
+  if (expand_state_ != mojom::ArcNotificationExpandState::FIXED_SIZE &&
+      data->expand_state != mojom::ArcNotificationExpandState::FIXED_SIZE &&
+      expand_state_ != data->expand_state) {
+    // Assuming changing the expand status on Android-side is manually tiggered
+    // by user.
+    manually_expanded_or_collapsed_ = true;
+  }
+
   expand_state_ = data->expand_state;
   shown_contents_ = data->shown_contents;
+  swipe_input_rect_ =
+      data->swipe_input_rect ? *data->swipe_input_rect : gfx::Rect();
+
+  notification->set_never_timeout(
+      data->remote_input_state ==
+      mojom::ArcNotificationRemoteInputState::OPENED);
 
   if (!data->snapshot_image || data->snapshot_image->isNull()) {
     snapshot_ = gfx::ImageSkia();
@@ -147,6 +164,18 @@ bool ArcNotificationItemImpl::IsOpeningSettingsSupported() const {
 }
 
 void ArcNotificationItemImpl::ToggleExpansion() {
+  switch (expand_state_) {
+    case mojom::ArcNotificationExpandState::EXPANDED:
+      expand_state_ = mojom::ArcNotificationExpandState::COLLAPSED;
+      break;
+    case mojom::ArcNotificationExpandState::COLLAPSED:
+      expand_state_ = mojom::ArcNotificationExpandState::EXPANDED;
+      break;
+    case mojom::ArcNotificationExpandState::FIXED_SIZE:
+      // Do not change the state.
+      break;
+  }
+
   manager_->SendNotificationToggleExpansionOnChrome(notification_key_);
 }
 
@@ -175,10 +204,6 @@ void ArcNotificationItemImpl::DecrementWindowRefCount() {
     manager_->CloseNotificationWindow(notification_key_);
 }
 
-bool ArcNotificationItemImpl::GetPinned() const {
-  return pinned_;
-}
-
 const gfx::ImageSkia& ArcNotificationItemImpl::GetSnapshot() const {
   return snapshot_;
 }
@@ -188,9 +213,17 @@ mojom::ArcNotificationExpandState ArcNotificationItemImpl::GetExpandState()
   return expand_state_;
 }
 
+bool ArcNotificationItemImpl::IsManuallyExpandedOrCollapsed() const {
+  return manually_expanded_or_collapsed_;
+}
+
 mojom::ArcNotificationShownContents ArcNotificationItemImpl::GetShownContents()
     const {
   return shown_contents_;
+}
+
+gfx::Rect ArcNotificationItemImpl::GetSwipeInputRect() const {
+  return swipe_input_rect_;
 }
 
 const std::string& ArcNotificationItemImpl::GetNotificationKey() const {

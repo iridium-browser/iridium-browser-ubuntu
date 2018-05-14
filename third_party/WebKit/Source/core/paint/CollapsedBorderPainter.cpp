@@ -76,7 +76,9 @@ void CollapsedBorderPainter::SetupBorders() {
   if (start_.value) {
     const auto* cell_preceding = table_.CellPreceding(cell_);
     if (cell_.StartsAtSameRow(cell_preceding) &&
-        cell_preceding->RowSpan() >= cell_.RowSpan()) {
+        cell_preceding->ResolvedRowSpan() >= cell_.ResolvedRowSpan() &&
+        // |cell_preceding| didn't paint the border if it is invisible.
+        cell_preceding->StyleRef().Visibility() == EVisibility::kVisible) {
       start_.value = nullptr;
       // Otherwise we'll still paint the shared border twice which may cause
       // incorrect border conflict resolution for row/col spanning cells.
@@ -86,14 +88,23 @@ void CollapsedBorderPainter::SetupBorders() {
 
   // Skip painting the before border if it will be painted by the above cell
   // as its after border. If we break page before the row with non-zero strut
-  // (which means a gap between this row and the row above), we need to paint
+  // (which means a gap between this row and the row above), or if we are
+  // painting the top row of a footer that repeats on each page we need to paint
   // the before border separately.
+  // TODO(crbug.com/751177) : This will double-paint the top border of the
+  // footer on the last page.
   if (before_.value && !cell_.Row()->PaginationStrut()) {
     const auto* cell_above = table_.CellAbove(cell_);
     if (cell_.StartsAtSameColumn(cell_above) &&
         cell_above->ColSpan() >= cell_.ColSpan() &&
+        // |cell_above| didn't paint the border if it is invisible.
+        cell_above->StyleRef().Visibility() == EVisibility::kVisible &&
         cell_above->Row()->HasSameDirectionAs(&table_)) {
-      before_.value = nullptr;
+      bool cell_is_top_of_repeating_footer =
+          cell_.Section()->IsRepeatingFooterGroup() &&
+          (!cell_above || cell_above->Section() != cell_.Section());
+      if (!cell_is_top_of_repeating_footer)
+        before_.value = nullptr;
       // Otherwise we'll still paint the shared border twice which may cause
       // incorrect border conflict resolution for row/col spanning cells.
       // TODO(crbug.com/2902 etc.): Paint collapsed borders by grid cells.
@@ -351,29 +362,31 @@ void CollapsedBorderPainter::PaintCollapsedBorders(
     ObjectPainter::DrawLineForBoxSide(
         context, rect.X() - before_.begin_outset,
         rect.Y() - before_.outer_width, rect.MaxX() + before_.end_outset,
-        rect.Y() + before_.inner_width, kBSTop, before_.value->GetColor(),
-        CollapsedBorderStyle(before_.value->Style()), 0, 0, true);
+        rect.Y() + before_.inner_width, BoxSide::kTop,
+        before_.value->GetColor(), CollapsedBorderStyle(before_.value->Style()),
+        0, 0, true);
   }
   if (after_.value) {
     ObjectPainter::DrawLineForBoxSide(
         context, rect.X() - after_.begin_outset,
         rect.MaxY() - after_.inner_width, rect.MaxX() + after_.end_outset,
-        rect.MaxY() + after_.outer_width, kBSBottom, after_.value->GetColor(),
-        CollapsedBorderStyle(after_.value->Style()), 0, 0, true);
+        rect.MaxY() + after_.outer_width, BoxSide::kBottom,
+        after_.value->GetColor(), CollapsedBorderStyle(after_.value->Style()),
+        0, 0, true);
   }
   if (start_.value) {
     ObjectPainter::DrawLineForBoxSide(
         context, rect.X() - start_.outer_width, rect.Y() - start_.begin_outset,
-        rect.X() + start_.inner_width, rect.MaxY() + start_.end_outset, kBSLeft,
-        start_.value->GetColor(), CollapsedBorderStyle(start_.value->Style()),
-        0, 0, true);
+        rect.X() + start_.inner_width, rect.MaxY() + start_.end_outset,
+        BoxSide::kLeft, start_.value->GetColor(),
+        CollapsedBorderStyle(start_.value->Style()), 0, 0, true);
   }
   if (end_.value) {
     ObjectPainter::DrawLineForBoxSide(
         context, rect.MaxX() - end_.inner_width, rect.Y() - end_.begin_outset,
-        rect.MaxX() + end_.outer_width, rect.MaxY() + end_.end_outset, kBSRight,
-        end_.value->GetColor(), CollapsedBorderStyle(end_.value->Style()), 0, 0,
-        true);
+        rect.MaxX() + end_.outer_width, rect.MaxY() + end_.end_outset,
+        BoxSide::kRight, end_.value->GetColor(),
+        CollapsedBorderStyle(end_.value->Style()), 0, 0, true);
   }
 }
 

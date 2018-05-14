@@ -22,6 +22,7 @@
 #include "content/public/common/drop_data.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/mock_render_process_host.h"
+#include "content/test/mock_widget_impl.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
@@ -30,15 +31,6 @@
 #include "ui/base/page_transition_types.h"
 
 namespace content {
-
-class WidgetImpl : public mojom::Widget {
- public:
-  explicit WidgetImpl(mojo::InterfaceRequest<mojom::Widget> request)
-      : binding_(this, std::move(request)) {}
-
- private:
-  mojo::Binding<mojom::Widget> binding_;
-};
 
 class RenderViewHostTestBrowserClient : public TestContentBrowserClient {
  public:
@@ -55,7 +47,7 @@ class RenderViewHostTestBrowserClient : public TestContentBrowserClient {
 
 class RenderViewHostTest : public RenderViewHostImplTestHarness {
  public:
-  RenderViewHostTest() : old_browser_client_(NULL) {}
+  RenderViewHostTest() : old_browser_client_(nullptr) {}
   ~RenderViewHostTest() override {}
 
   void SetUp() override {
@@ -90,8 +82,8 @@ TEST_F(RenderViewHostTest, CreateFullscreenWidget) {
   int32_t routing_id = process()->GetNextRoutingID();
 
   mojom::WidgetPtr widget;
-  std::unique_ptr<WidgetImpl> widget_impl =
-      base::MakeUnique<WidgetImpl>(mojo::MakeRequest(&widget));
+  std::unique_ptr<MockWidgetImpl> widget_impl =
+      std::make_unique<MockWidgetImpl>(mojo::MakeRequest(&widget));
   test_rvh()->CreateNewFullscreenWidget(routing_id, std::move(widget));
 }
 
@@ -169,8 +161,8 @@ TEST_F(RenderViewHostTest, StartDragging) {
 
 TEST_F(RenderViewHostTest, DragEnteredFileURLsStillBlocked) {
   DropData dropped_data;
-  gfx::Point client_point;
-  gfx::Point screen_point;
+  gfx::PointF client_point;
+  gfx::PointF screen_point;
   // We use "//foo/bar" path (rather than "/foo/bar") since dragged paths are
   // expected to be absolute on any platforms.
   base::FilePath highlighted_file_path(FILE_PATH_LITERAL("//tmp/foo.html"));

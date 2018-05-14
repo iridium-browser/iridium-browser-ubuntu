@@ -7,14 +7,17 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/webstore_data_fetcher_delegate.h"
-#include "components/safe_json/safe_json_parser.h"
+#include "components/safe_browsing/features.h"
+#include "content/public/common/service_manager_connection.h"
 #include "extensions/common/extension_urls.h"
 #include "net/base/load_flags.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
+#include "services/data_decoder/public/cpp/safe_json_parser.h"
 
 namespace {
 
@@ -34,18 +37,22 @@ WebstoreDataFetcher::WebstoreDataFetcher(
       referrer_url_(referrer_url),
       id_(webstore_item_id),
       max_auto_retries_(0) {
+  upload_content_type_ =
+      base::FeatureList::IsEnabled(safe_browsing::kAppendRecentNavigationEvents)
+          ? "application/octet-stream"
+          : "application/json";
 }
 
 WebstoreDataFetcher::~WebstoreDataFetcher() {}
 
-void WebstoreDataFetcher::SetJsonPostData(const std::string& json) {
-  json_post_data_ = json;
+void WebstoreDataFetcher::SetPostData(const std::string& data) {
+  post_data_ = data;
 }
 
 void WebstoreDataFetcher::Start() {
   GURL webstore_data_url(extension_urls::GetWebstoreItemJsonDataURL(id_));
   net::URLFetcher::RequestType request_type =
-      json_post_data_.empty() ? net::URLFetcher::GET : net::URLFetcher::POST;
+      post_data_.empty() ? net::URLFetcher::GET : net::URLFetcher::POST;
   net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation("webstore_data_fetcher", R"(
         semantics {
@@ -70,7 +77,7 @@ void WebstoreDataFetcher::Start() {
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "This feature cannot be disabled in settings. It will only be "
             "triggered if the user uses extensions."
@@ -83,10 +90,8 @@ void WebstoreDataFetcher::Start() {
   webstore_data_url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
                                            net::LOAD_DISABLE_CACHE);
 
-  if (!json_post_data_.empty()) {
-    webstore_data_url_fetcher_->SetUploadData("application/json",
-                                              json_post_data_);
-  }
+  if (!post_data_.empty())
+    webstore_data_url_fetcher_->SetUploadData(upload_content_type_, post_data_);
 
   if (max_auto_retries_ > 0) {
     webstore_data_url_fetcher_->SetMaxRetriesOn5xx(max_auto_retries_);
@@ -98,7 +103,7 @@ void WebstoreDataFetcher::Start() {
 
 void WebstoreDataFetcher::OnJsonParseSuccess(
     std::unique_ptr<base::Value> parsed_json) {
-  if (!parsed_json->IsType(base::Value::Type::DICTIONARY)) {
+  if (!parsed_json->is_dict()) {
     OnJsonParseFailure(kInvalidWebstoreResponseError);
     return;
   }
@@ -129,7 +134,8 @@ void WebstoreDataFetcher::OnURLFetchComplete(const net::URLFetcher* source) {
   fetcher->GetResponseAsString(&webstore_json_data);
 
   // The parser will call us back via one of the callbacks.
-  safe_json::SafeJsonParser::Parse(
+  data_decoder::SafeJsonParser::Parse(
+      content::ServiceManagerConnection::GetForProcess()->GetConnector(),
       webstore_json_data,
       base::Bind(&WebstoreDataFetcher::OnJsonParseSuccess, AsWeakPtr()),
       base::Bind(&WebstoreDataFetcher::OnJsonParseFailure, AsWeakPtr()));

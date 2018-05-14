@@ -60,7 +60,7 @@ class BaseRingBufferTest : public testing::Test {
 
   void SetUp() override {
     delay_set_token_ = false;
-    transfer_buffer_manager_ = base::MakeUnique<TransferBufferManager>(nullptr);
+    transfer_buffer_manager_ = std::make_unique<TransferBufferManager>(nullptr);
     command_buffer_.reset(
         new CommandBufferDirect(transfer_buffer_manager_.get()));
     api_mock_.reset(new AsyncAPIMock(true, command_buffer_->service()));
@@ -417,6 +417,15 @@ TEST_F(RingBufferTest, DiscardAllPaddingFromBeginningTest) {
   // Discarding the first allocation should discard the middle padding as well.
   allocator_->DiscardBlock(ptr1);
   EXPECT_EQ(kAlloc1 + kAlloc2, allocator_->GetLargestFreeSizeNoWaiting());
+}
+
+TEST_F(RingBufferTest, LargestFreeSizeNoWaiting) {
+  // GetLargestFreeSizeNoWaiting should return the largest free aligned size.
+  void* ptr = allocator_->Alloc(kBufferSize);
+  EXPECT_EQ(0u, allocator_->GetLargestFreeSizeNoWaiting());
+  allocator_->ShrinkLastBlock(kBufferSize - 2 * kAlignment - 1);
+  EXPECT_EQ(2 * kAlignment, allocator_->GetLargestFreeSizeNoWaiting());
+  allocator_->FreePendingToken(ptr, helper_.get()->InsertToken());
 }
 
 }  // namespace gpu

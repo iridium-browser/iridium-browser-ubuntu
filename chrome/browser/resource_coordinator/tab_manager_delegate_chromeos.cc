@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "ash/shell.h"
+#include "base/barrier_closure.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -31,6 +32,8 @@
 #include "chrome/browser/resource_coordinator/tab_stats.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/sort_windows_by_z_index.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_features.h"
@@ -42,9 +45,11 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/zygote_host_linux.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/wm/public/activation_client.h"
 
 using base::ProcessHandle;
@@ -77,6 +82,81 @@ void OnSetOomScoreAdj(bool success, const std::string& output) {
     LOG(ERROR) << "Set OOM score error: " << output;
   else if (!output.empty())
     LOG(WARNING) << "Set OOM score: " << output;
+}
+
+using LoadTabListAndArcProcessesCallback =
+    base::OnceCallback<void(const TabStatsList&,
+                            const std::vector<arc::ArcProcess>&)>;
+
+// Loads TabStatsList and a list of ARC processes. Invokes |callback| with the
+// result.
+void LoadTabListAndArcProcesses(base::WeakPtr<TabManager> tab_manager,
+                                LoadTabListAndArcProcessesCallback callback) {
+  std::unique_ptr<TabStatsList> tab_stats_list =
+      std::make_unique<TabStatsList>();
+  TabStatsList* const tab_stats_list_raw = tab_stats_list.get();
+
+  std::unique_ptr<std::vector<arc::ArcProcess>> arc_processes =
+      std::make_unique<std::vector<arc::ArcProcess>>();
+  std::vector<arc::ArcProcess>* const arc_processes_raw = arc_processes.get();
+
+  // Invoked when the TabStatsList is loaded and when the list of ARC processes
+  // is loaded. Invokes |callback| the second time it's called (i.e. when both
+  // the lists have been loaded).
+  auto barrier = base::BarrierClosure(
+      2, base::BindOnce(
+             [](std::unique_ptr<TabStatsList> tab_stats_list,
+                std::unique_ptr<std::vector<arc::ArcProcess>> arc_processes,
+                LoadTabListAndArcProcessesCallback callback) {
+               std::move(callback).Run(*tab_stats_list.get(),
+                                       *arc_processes.get());
+             },
+             std::move(tab_stats_list), std::move(arc_processes),
+             std::move(callback)));
+
+  // Invoked when the list of browser windows sorted by z-index is loaded.
+  auto sort_windows_by_z_index_callback = base::BindOnce(
+      [](TabStatsList* tab_stats_list, base::WeakPtr<TabManager> tab_manager,
+         base::RepeatingClosure barrier,
+         std::vector<gfx::NativeWindow> windows_sorted_by_z_index) {
+        if (tab_manager) {
+          *tab_stats_list =
+              tab_manager->GetUnsortedTabStats(windows_sorted_by_z_index);
+        }
+        barrier.Run();
+      },
+      base::Unretained(tab_stats_list_raw), tab_manager, barrier);
+
+  // Start loading the list of browser windows sorted by z-index.
+  std::vector<gfx::NativeWindow> browser_windows;
+  for (Browser* browser : *BrowserList::GetInstance())
+    browser_windows.push_back(browser->window()->GetNativeWindow());
+  // In unit tests, windows can't be sorted because the Shell is not available.
+  if (ash::Shell::HasInstance()) {
+    ui::SortWindowsByZIndex(browser_windows,
+                            std::move(sort_windows_by_z_index_callback));
+  } else {
+    std::move(sort_windows_by_z_index_callback)
+        .Run(std::vector<gfx::NativeWindow>());
+  }
+
+  // Invoked when the list of ARC processes is loaded.
+  auto request_app_process_list_callback = base::BindRepeating(
+      [](std::vector<arc::ArcProcess>* arc_processes_dest,
+         base::RepeatingClosure barrier,
+         std::vector<arc::ArcProcess> arc_processes_src) {
+        *arc_processes_dest = std::move(arc_processes_src);
+        barrier.Run();
+      },
+      base::Unretained(arc_processes_raw), barrier);
+
+  // Start loading the list of ARC processes.
+  arc::ArcProcessService* arc_process_service = arc::ArcProcessService::Get();
+
+  if (!arc_process_service || !arc_process_service->RequestAppProcessList(
+                                  request_app_process_list_callback)) {
+    request_app_process_list_callback.Run(std::vector<arc::ArcProcess>());
+  }
 }
 
 }  // namespace
@@ -302,7 +382,7 @@ void TabManagerDelegate::OnBrowserSetLastActive(Browser* browser) {
   if (!contents)
     return;
 
-  base::ProcessHandle pid = contents->GetRenderProcessHost()->GetHandle();
+  base::ProcessHandle pid = contents->GetMainFrame()->GetProcess()->GetHandle();
   AdjustFocusedTabScore(pid);
 }
 
@@ -343,20 +423,10 @@ void TabManagerDelegate::ScheduleEarlyOomPrioritiesAdjustment() {
 
 // If able to get the list of ARC procsses, prioritize tabs and apps as a whole.
 // Otherwise try to kill tabs only.
-void TabManagerDelegate::LowMemoryKill(
-    const TabStatsList& tab_list,
-    TabManager::DiscardTabCondition condition) {
-  arc::ArcProcessService* arc_process_service = arc::ArcProcessService::Get();
-  if (arc_process_service &&
-      arc_process_service->RequestAppProcessList(
-          base::Bind(&TabManagerDelegate::LowMemoryKillImpl,
-                     weak_ptr_factory_.GetWeakPtr(), tab_list, condition))) {
-    // LowMemoryKillImpl will be called asynchronously so nothing left to do.
-    return;
-  }
-  // If the list of ARC processes is not available, call LowMemoryKillImpl
-  // synchronously with an empty list of apps.
-  LowMemoryKillImpl(tab_list, condition, std::vector<arc::ArcProcess>());
+void TabManagerDelegate::LowMemoryKill(DiscardReason reason) {
+  LoadTabListAndArcProcesses(
+      tab_manager_, base::BindOnce(&TabManagerDelegate::LowMemoryKillImpl,
+                                   weak_ptr_factory_.GetWeakPtr(), reason));
 }
 
 int TabManagerDelegate::GetCachedOomScore(ProcessHandle process_handle) {
@@ -538,10 +608,10 @@ bool TabManagerDelegate::KillArcProcess(const int nspid) {
 }
 
 bool TabManagerDelegate::KillTab(const TabStats& tab_stats,
-                                 TabManager::DiscardTabCondition condition) {
+                                 DiscardReason reason) {
   // Check |tab_manager_| is alive before taking tabs into consideration.
-  return tab_manager_ && tab_manager_->CanDiscardTab(tab_stats) &&
-         tab_manager_->DiscardTabById(tab_stats.tab_contents_id, condition);
+  return tab_manager_ && tab_manager_->CanDiscardTab(tab_stats, reason) &&
+         tab_manager_->DiscardTabById(tab_stats.id, reason);
 }
 
 chromeos::DebugDaemonClient* TabManagerDelegate::GetDebugDaemonClient() {
@@ -549,9 +619,9 @@ chromeos::DebugDaemonClient* TabManagerDelegate::GetDebugDaemonClient() {
 }
 
 void TabManagerDelegate::LowMemoryKillImpl(
+    DiscardReason reason,
     const TabStatsList& tab_list,
-    TabManager::DiscardTabCondition condition,
-    std::vector<arc::ArcProcess> arc_processes) {
+    const std::vector<arc::ArcProcess>& arc_processes) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   VLOG(2) << "LowMemoryKillImpl";
 
@@ -559,19 +629,24 @@ void TabManagerDelegate::LowMemoryKillImpl(
       GetSortedCandidates(tab_list, arc_processes);
 
   // TODO(semenzato): decide if TargetMemoryToFreeKB is doing real
-  // I/O and if it is, move to I/O thread.
-  int target_memory_to_free_kb = mem_stat_->TargetMemoryToFreeKB();
-  const TimeTicks now = TimeTicks::Now();
+  // I/O and if it is, move to I/O thread (crbug.com/778703).
+  int target_memory_to_free_kb = 0;
+  {
+    base::ScopedAllowBlocking allow_blocking;
+    target_memory_to_free_kb = mem_stat_->TargetMemoryToFreeKB();
+  }
 
   MEMORY_LOG(ERROR) << "List of low memory kill candidates "
                        "(sorted from low priority to high priority):";
   for (auto it = candidates.rbegin(); it != candidates.rend(); ++it) {
     MEMORY_LOG(ERROR) << *it;
   }
+
   // Kill processes until the estimated amount of freed memory is sufficient to
   // bring the system memory back to a normal level.
   // The list is sorted by descending importance, so we go through the list
   // backwards.
+  const TimeTicks now = TimeTicks::Now();
   for (auto it = candidates.rbegin(); it != candidates.rend(); ++it) {
     MEMORY_LOG(ERROR) << "Target memory to free: " << target_memory_to_free_kb
                       << " KB";
@@ -616,7 +691,7 @@ void TabManagerDelegate::LowMemoryKillImpl(
       // So |estimated_memory_freed_kb| is an over-estimation.
       int estimated_memory_freed_kb =
           mem_stat_->EstimatedMemoryFreedKB(it->tab()->renderer_handle);
-      if (KillTab(*it->tab(), condition)) {
+      if (KillTab(*it->tab(), reason)) {
         target_memory_to_free_kb -= estimated_memory_freed_kb;
         memory::MemoryKillsMonitor::LogLowMemoryKill("TAB",
                                                      estimated_memory_freed_kb);

@@ -25,19 +25,21 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
 
   void OnError(QuicFramer* framer) override { error_ = framer->error(); }
 
-  bool OnProtocolVersionMismatch(QuicVersion version) override { return false; }
+  bool OnProtocolVersionMismatch(ParsedQuicVersion version) override {
+    return false;
+  }
 
   void OnPacket() override {}
   void OnPublicResetPacket(const QuicPublicResetPacket& packet) override {
-    public_reset_packet_.reset(new QuicPublicResetPacket(packet));
+    public_reset_packet_ = QuicMakeUnique<QuicPublicResetPacket>((packet));
   }
   void OnVersionNegotiationPacket(
       const QuicVersionNegotiationPacket& packet) override {
-    version_negotiation_packet_.reset(new QuicVersionNegotiationPacket(packet));
+    version_negotiation_packet_ =
+        QuicMakeUnique<QuicVersionNegotiationPacket>((packet));
   }
 
-  bool OnUnauthenticatedPublicHeader(
-      const QuicPacketPublicHeader& header) override {
+  bool OnUnauthenticatedPublicHeader(const QuicPacketHeader& header) override {
     return true;
   }
   bool OnUnauthenticatedHeader(const QuicPacketHeader& header) override {
@@ -63,6 +65,23 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
 
   bool OnAckFrame(const QuicAckFrame& frame) override {
     ack_frames_.push_back(frame);
+    return true;
+  }
+
+  bool OnAckFrameStart(QuicPacketNumber largest_acked,
+                       QuicTime::Delta ack_delay_time) override {
+    QuicAckFrame ack_frame;
+    ack_frame.largest_acked = largest_acked;
+    ack_frame.ack_delay_time = ack_delay_time;
+    ack_frames_.push_back(ack_frame);
+    return true;
+  }
+
+  bool OnAckRange(QuicPacketNumber start,
+                  QuicPacketNumber end,
+                  bool /*last_range*/) override {
+    DCHECK(!ack_frames_.empty());
+    ack_frames_[ack_frames_.size() - 1].packets.AddRange(start, end);
     return true;
   }
 
@@ -162,23 +181,25 @@ SimpleQuicFramer::SimpleQuicFramer()
               QuicTime::Zero(),
               Perspective::IS_SERVER) {}
 
-SimpleQuicFramer::SimpleQuicFramer(const QuicVersionVector& supported_versions)
+SimpleQuicFramer::SimpleQuicFramer(
+    const ParsedQuicVersionVector& supported_versions)
     : framer_(supported_versions, QuicTime::Zero(), Perspective::IS_SERVER) {}
 
-SimpleQuicFramer::SimpleQuicFramer(const QuicVersionVector& supported_versions,
-                                   Perspective perspective)
+SimpleQuicFramer::SimpleQuicFramer(
+    const ParsedQuicVersionVector& supported_versions,
+    Perspective perspective)
     : framer_(supported_versions, QuicTime::Zero(), perspective) {}
 
 SimpleQuicFramer::~SimpleQuicFramer() {}
 
 bool SimpleQuicFramer::ProcessPacket(const QuicEncryptedPacket& packet) {
-  visitor_.reset(new SimpleFramerVisitor);
+  visitor_ = QuicMakeUnique<SimpleFramerVisitor>();
   framer_.set_visitor(visitor_.get());
   return framer_.ProcessPacket(packet);
 }
 
 void SimpleQuicFramer::Reset() {
-  visitor_.reset(new SimpleFramerVisitor);
+  visitor_ = QuicMakeUnique<SimpleFramerVisitor>();
 }
 
 const QuicPacketHeader& SimpleQuicFramer::header() const {

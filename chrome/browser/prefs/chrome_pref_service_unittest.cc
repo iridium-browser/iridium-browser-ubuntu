@@ -28,7 +28,7 @@ TEST(ChromePrefServiceTest, UpdateCommandLinePrefStore) {
   ASSERT_TRUE(pref);
   const base::Value* value = pref->GetValue();
   ASSERT_TRUE(value);
-  EXPECT_EQ(base::Value::Type::BOOLEAN, value->GetType());
+  EXPECT_EQ(base::Value::Type::BOOLEAN, value->type());
   bool actual_bool_value = true;
   EXPECT_TRUE(value->GetAsBoolean(&actual_bool_value));
   EXPECT_FALSE(actual_bool_value);
@@ -43,7 +43,7 @@ TEST(ChromePrefServiceTest, UpdateCommandLinePrefStore) {
   ASSERT_TRUE(pref);
   value = pref->GetValue();
   ASSERT_TRUE(value);
-  EXPECT_EQ(base::Value::Type::BOOLEAN, value->GetType());
+  EXPECT_EQ(base::Value::Type::BOOLEAN, value->type());
   actual_bool_value = false;
   EXPECT_TRUE(value->GetAsBoolean(&actual_bool_value));
   EXPECT_TRUE(actual_bool_value);
@@ -61,13 +61,13 @@ class ChromePrefServiceWebKitPrefs : public ChromeRenderViewHostTestHarness {
     sync_preferences::TestingPrefServiceSyncable* pref_services =
         profile()->GetTestingPrefService();
     pref_services->SetUserPref(prefs::kDefaultCharset,
-                               base::MakeUnique<base::Value>("utf8"));
+                               std::make_unique<base::Value>("utf8"));
     pref_services->SetUserPref(prefs::kWebKitDefaultFontSize,
-                               base::MakeUnique<base::Value>(20));
+                               std::make_unique<base::Value>(20));
     pref_services->SetUserPref(prefs::kWebKitTextAreasAreResizable,
-                               base::MakeUnique<base::Value>(false));
+                               std::make_unique<base::Value>(false));
     pref_services->SetUserPref("webkit.webprefs.foo",
-                               base::MakeUnique<base::Value>("bar"));
+                               std::make_unique<base::Value>("bar"));
   }
 };
 

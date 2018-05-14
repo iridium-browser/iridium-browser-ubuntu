@@ -10,8 +10,9 @@ import re
 import subprocess
 import sys
 
+from py_utils import atexit_with_log
 from telemetry.core import util
-from telemetry.internal.util import atexit_with_log
+from telemetry.internal.util import ps_util
 
 import py_utils
 
@@ -25,7 +26,7 @@ def ParseTsProxyPortFromOutput(output_line):
       r'Started Socks5 proxy server on '
       r'(?P<host>[^:]*):'
       r'(?P<port>\d+)')
-  m = port_re.match(output_line.strip())
+  m = port_re.match(output_line)
   if m:
     return int(m.group('port'))
 
@@ -63,7 +64,7 @@ class TsProxyServer(object):
       cmd_line.append('--desthost=%s' % self._host_ip)
     if self._http_port:
       cmd_line.append(
-        '--mapports=443:%s,*:%s' % (self._https_port, self._http_port))
+          '--mapports=443:%s,*:%s' % (self._https_port, self._http_port))
     logging.info('Tsproxy commandline: %r' % cmd_line)
     self._proc = subprocess.Popen(
         cmd_line, stdout=subprocess.PIPE, stdin=subprocess.PIPE,
@@ -74,6 +75,8 @@ class TsProxyServer(object):
       logging.info('TsProxy port: %s', self._port)
       self._is_running = True
     except py_utils.TimeoutException:
+      # TODO(nedn): remove this debug log once crbug.com/766877 is resolved
+      ps_util.ListAllSubprocesses()
       err = self.StopServer()
       raise RuntimeError(
           'Error starting tsproxy: %s' % err)
@@ -84,8 +87,9 @@ class TsProxyServer(object):
     if self._proc.poll() is not None:
       return False
     self._proc.stdout.flush()
-    self._port = ParseTsProxyPortFromOutput(
-          output_line=self._proc.stdout.readline())
+    output_line = self._proc.stdout.readline().strip()
+    logging.debug('TsProxy output: %s', output_line)
+    self._port = ParseTsProxyPortFromOutput(output_line)
     return self._port != None
 
 
@@ -100,10 +104,12 @@ class TsProxyServer(object):
       return (
           command_output[-1] == 'OK' or command_output[-1] == 'ERROR')
     py_utils.WaitFor(CommandStatusIsRead, timeout)
-    if not 'OK' in command_output:
-      raise RuntimeError('Failed to execute command %s:\n%s' %
-                         (repr(command_string), '\n'.join(command_output)))
 
+    success = 'OK' in command_output
+    logging.log(logging.DEBUG if success else logging.ERROR,
+                'TsProxy output:\n%s', '\n'.join(command_output))
+    if not success:
+      raise RuntimeError('Failed to execute command: %s', command_string)
 
   def UpdateOutboundPorts(self, http_port, https_port, timeout=5):
     assert http_port and https_port
@@ -114,7 +120,8 @@ class TsProxyServer(object):
     self._IssueCommand('set mapports 443:%i,*:%i' % (https_port, http_port),
                        timeout)
 
-  def UpdateTrafficSettings(self, round_trip_latency_ms=0,
+  def UpdateTrafficSettings(
+      self, round_trip_latency_ms=0,
       download_bandwidth_kbps=0, upload_bandwidth_kbps=0, timeout=5):
     self._IssueCommand('set rtt %s' % round_trip_latency_ms, timeout)
     self._IssueCommand('set inkbps %s' % download_bandwidth_kbps, timeout)

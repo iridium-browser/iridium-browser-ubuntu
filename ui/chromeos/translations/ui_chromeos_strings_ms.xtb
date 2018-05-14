@@ -22,6 +22,7 @@
 <translation id="158809615184981282">Papan kekunci Faroese</translation>
 <translation id="1646136617204068573">Papan kekunci Hungary</translation>
 <translation id="164729547906544836">Papan kekunci bahasa Tamil (itrans)</translation>
+<translation id="164969095109328410">Peranti Chrome</translation>
 <translation id="1829129547161959350">Penguin</translation>
 <translation id="184633654410729720">Papan kekunci bahasa Thai (Kedmanee)</translation>
 <translation id="1921986354447415460">Papan kekunci Turki-F</translation>
@@ -114,6 +115,7 @@
 <translation id="4694604912444486114">Monyet</translation>
 <translation id="4711094779914110278">Bahasa Turki</translation>
 <translation id="4725511304875193254">Corgi</translation>
+<translation id="4737050008115666127">Mendarat</translation>
 <translation id="4747271164117300400">Macedonia</translation>
 <translation id="4749157430980974800">Papan kekunci bahasa Georgia</translation>
 <translation id="4755240240651974342">Papan kekunci Finland</translation>
@@ -125,6 +127,7 @@
 <translation id="4943368462779413526">Bola Sepak</translation>
 <translation id="497244430928947428">Papan kekunci bahasa Malayalam (Fonetik)</translation>
 <translation id="498902553138568924">Rama-rama merah</translation>
+<translation id="5011233892417813670">Chromebook</translation>
 <translation id="5068919226082848014">Piza</translation>
 <translation id="5098629044894065541">Bahasa Ibrani</translation>
 <translation id="5123433949759960244">Bola Keranjang</translation>
@@ -146,6 +149,7 @@
 <translation id="5465122519792752163">Papan kekunci bahasa Nepal (InSkrip)</translation>
 <translation id="5469868506864199649">Bahasa Itali</translation>
 <translation id="5500122897333236901">Bahasa Iceland</translation>
+<translation id="5508696409934741614">Titik</translation>
 <translation id="5533555070048896610">Pengalihan huruf (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">Dvorak AS</translation>
 <translation id="5640179856859982418">Papan kekunci Switzerland</translation>
@@ -157,7 +161,9 @@
 <translation id="5819442873484330149">Hangul 3 Set (Akhir)</translation>
 <translation id="5838825566232597749">US Workman international</translation>
 <translation id="5892290200158927959">Papan kekunci BEPO Perancis</translation>
+<translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">Papan kekunci Amerika Latin</translation>
+<translation id="6012987430370760224">Papan kekunci bahasa Marathi (Fonetik)</translation>
 <translation id="60357267506638014">QWERTY bahasa Czech</translation>
 <translation id="6054173164583630569">Papan kekunci Perancis</translation>
 <translation id="6111770213269631447">Pengalihan huruf (namaskar → নমস্কার)</translation>
@@ -183,17 +189,20 @@
 <translation id="6876155724392614295">Basikal</translation>
 <translation id="6878261347041253038">Papan kekunci Devanagari (Fonetik)</translation>
 <translation id="6885780034956018177">Siput</translation>
+<translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">US Workman</translation>
 <translation id="6935521024859866267">Terbalik</translation>
 <translation id="6937152069980083337">Input Jepun Google (untuk papan kekunci AS)</translation>
 <translation id="6939777852457331078">Papan kekunci US Workman</translation>
 <translation id="6970230597523682626">Bahasa Bulgaria</translation>
+<translation id="714034171374937760">Chromebase</translation>
 <translation id="7170467426996704624">Pengalihan huruf (salam → ሰላም)</translation>
 <translation id="7172053773111046550">Papan kekunci Estonia</translation>
 <translation id="719009910964971313">Papan kekunci Dvorak Pengatur Cara AS</translation>
 <translation id="7222624196722476520">Papan kekunci Fonetik Bulgaria</translation>
 <translation id="7348749398828259943">Papan kekunci US Workman international</translation>
 <translation id="7389722738210761877">Papan kekunci bahasa Thai (TIS 820-2531)</translation>
+<translation id="7396038720194014279">Papan kekunci bahasa Hindi (Fonetik)</translation>
 <translation id="7417453074306512035">Papan kekunci bahasa Ethiopia</translation>
 <translation id="7419631653042041064">Papan kekunci Catalonia</translation>
 <translation id="7434823369735508263">Papan kekunci Dvorak UK</translation>
@@ -201,12 +210,14 @@
 <translation id="7474889694310679759">Papan kekunci Inggeris Kanada</translation>
 <translation id="751507702149411736">Bahasa Belarus</translation>
 <translation id="7547811415869834682">Bahasa Belanda</translation>
+<translation id="7603724359189955920">Grid</translation>
 <translation id="770015031906360009">Bahasa Greek</translation>
 <translation id="7706319470528945664">Papan kekunci Portugis</translation>
 <translation id="7774365994322694683">Burung</translation>
 <translation id="7825423931463735974">Papan kekunci bahasa Tamil (Tamil99)</translation>
 <translation id="7853966320808728790">BEPO Perancis</translation>
 <translation id="7896906914454843592">Papan kekunci Lanjutan AS</translation>
+<translation id="7898607018410277265">Papan kekunci bahasa Gujarati (Fonetik Baharu)</translation>
 <translation id="7917972308273378936">Papan kekunci Lithuania</translation>
 <translation id="7943385054491506837">Bahasa Colemak AS</translation>
 <translation id="7969525169268594403">Bahasa Slovenia</translation>
@@ -230,6 +241,7 @@
 <translation id="8432745813735585631">Papan kekunci AS Colemak</translation>
 <translation id="8437209419043462667">AS</translation>
 <translation id="8467473010914675605">Kaedah input Korea</translation>
+<translation id="8477649328507734757">Putar</translation>
 <translation id="8521441079177373948">UK</translation>
 <translation id="8551494947769799688">Bahasa Latvia</translation>
 <translation id="8561206103590473338">Gajah</translation>
@@ -248,4 +260,5 @@
 <translation id="913758436357682283">Papan kekunci bahasa Myanmar Myansan</translation>
 <translation id="9153744823707037316">Kaedah input tatasusunan</translation>
 <translation id="9206487995878691001">Kaedah input Cangjie</translation>
+<translation id="9219908252191632183">Qamari</translation>
 </translationbundle>

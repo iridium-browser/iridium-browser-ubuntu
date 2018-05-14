@@ -11,6 +11,7 @@
 #include "modules/vr/NavigatorVR.h"
 #include "modules/vr/VRGetDevicesCallback.h"
 #include "platform/wtf/Assertions.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace blink {
@@ -22,23 +23,24 @@ VRController::VRController(NavigatorVR* navigator_vr)
       binding_(this) {
   navigator_vr->GetDocument()->GetFrame()->GetInterfaceProvider().GetInterface(
       mojo::MakeRequest(&service_));
-  service_.set_connection_error_handler(ConvertToBaseCallback(
-      WTF::Bind(&VRController::Dispose, WrapWeakPersistent(this))));
+  service_.set_connection_error_handler(
+      WTF::Bind(&VRController::Dispose, WrapWeakPersistent(this)));
 
   device::mojom::blink::VRServiceClientPtr client;
   binding_.Bind(mojo::MakeRequest(&client));
-  service_->SetClient(std::move(client), ConvertToBaseCallback(WTF::Bind(
-                                             &VRController::OnDisplaysSynced,
-                                             WrapPersistent(this))));
+  service_->SetClient(
+      std::move(client),
+      WTF::Bind(&VRController::OnDisplaysSynced, WrapPersistent(this)));
 }
 
-VRController::~VRController() {}
+VRController::~VRController() = default;
 
 void VRController::GetDisplays(ScriptPromiseResolver* resolver) {
   // If we've previously synced the VRDisplays or no longer have a valid service
   // connection just return the current list. In the case of the service being
   // disconnected this will be an empty array.
   if (!service_ || display_synced_) {
+    LogGetDisplayResult();
     resolver->Resolve(displays_);
     return;
   }
@@ -46,7 +48,7 @@ void VRController::GetDisplays(ScriptPromiseResolver* resolver) {
   // Otherwise we're still waiting for the full list of displays to be populated
   // so queue up the promise for resolution when onDisplaysSynced is called.
   pending_get_devices_callbacks_.push_back(
-      WTF::MakeUnique<VRGetDevicesCallback>(resolver));
+      std::make_unique<VRGetDevicesCallback>(resolver));
 }
 
 void VRController::SetListeningForActivate(bool listening) {
@@ -54,24 +56,25 @@ void VRController::SetListeningForActivate(bool listening) {
     service_->SetListeningForActivate(listening);
 }
 
-// Each time a new VRDisplay is connected we'll recieve a VRDisplayPtr for it
+// Each time a new VRDisplay is connected we'll receive a VRDisplayPtr for it
 // here. Upon calling SetClient in the constructor we should receive one call
 // for each VRDisplay that was already connected at the time.
 void VRController::OnDisplayConnected(
-    device::mojom::blink::VRDisplayPtr display,
+    device::mojom::blink::VRMagicWindowProviderPtr magic_window_provider,
+    device::mojom::blink::VRDisplayHostPtr display,
     device::mojom::blink::VRDisplayClientRequest request,
     device::mojom::blink::VRDisplayInfoPtr display_info) {
   VRDisplay* vr_display =
-      new VRDisplay(navigator_vr_, std::move(display), std::move(request));
+      new VRDisplay(navigator_vr_, std::move(magic_window_provider),
+                    std::move(display), std::move(request));
   vr_display->Update(display_info);
   vr_display->OnConnected();
   vr_display->FocusChanged();
-  displays_.push_back(vr_display);
 
-  if (displays_.size() == number_of_synced_displays_) {
-    display_synced_ = true;
-    OnGetDisplays();
-  }
+  has_presentation_capable_display_ = display_info->capabilities->canPresent;
+  has_display_ = true;
+
+  displays_.push_back(vr_display);
 }
 
 void VRController::FocusChanged() {
@@ -81,16 +84,26 @@ void VRController::FocusChanged() {
 
 // Called when the VRService has called OnDisplayConnected for all active
 // VRDisplays.
-void VRController::OnDisplaysSynced(unsigned number_of_displays) {
-  number_of_synced_displays_ = number_of_displays;
-  if (number_of_synced_displays_ == displays_.size()) {
-    display_synced_ = true;
-    OnGetDisplays();
+void VRController::OnDisplaysSynced() {
+  display_synced_ = true;
+  OnGetDisplays();
+}
+
+void VRController::LogGetDisplayResult() {
+  Document* doc = navigator_vr_->GetDocument();
+  if (has_display_ && doc && doc->IsInMainFrame()) {
+    ukm::builders::XR_WebXR ukm_builder(doc->UkmSourceID());
+    ukm_builder.SetReturnedDevice(1);
+    if (has_presentation_capable_display_) {
+      ukm_builder.SetReturnedPresentationCapableDevice(1);
+    }
+    ukm_builder.Record(doc->UkmRecorder());
   }
 }
 
 void VRController::OnGetDisplays() {
   while (!pending_get_devices_callbacks_.IsEmpty()) {
+    LogGetDisplayResult();
     std::unique_ptr<VRGetDevicesCallback> callback =
         pending_get_devices_callbacks_.TakeFirst();
     callback->OnSuccess(displays_);
@@ -117,7 +130,7 @@ void VRController::Dispose() {
   OnGetDisplays();
 }
 
-DEFINE_TRACE(VRController) {
+void VRController::Trace(blink::Visitor* visitor) {
   visitor->Trace(navigator_vr_);
   visitor->Trace(displays_);
 

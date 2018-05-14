@@ -31,21 +31,22 @@
 #define SUBMODE_LOWER 1
 #define SUBMODE_MIXED 2
 
-int32_t CBC_PDF417HighLevelEncoder::TEXT_COMPACTION = 0;
-int32_t CBC_PDF417HighLevelEncoder::BYTE_COMPACTION = 1;
-int32_t CBC_PDF417HighLevelEncoder::NUMERIC_COMPACTION = 2;
-int32_t CBC_PDF417HighLevelEncoder::SUBMODE_PUNCTUATION = 3;
-int32_t CBC_PDF417HighLevelEncoder::LATCH_TO_TEXT = 900;
-int32_t CBC_PDF417HighLevelEncoder::LATCH_TO_BYTE_PADDED = 901;
-int32_t CBC_PDF417HighLevelEncoder::LATCH_TO_NUMERIC = 902;
-int32_t CBC_PDF417HighLevelEncoder::SHIFT_TO_BYTE = 913;
-int32_t CBC_PDF417HighLevelEncoder::LATCH_TO_BYTE = 924;
-uint8_t CBC_PDF417HighLevelEncoder::TEXT_MIXED_RAW[] = {
+const int32_t CBC_PDF417HighLevelEncoder::TEXT_COMPACTION = 0;
+const int32_t CBC_PDF417HighLevelEncoder::BYTE_COMPACTION = 1;
+const int32_t CBC_PDF417HighLevelEncoder::NUMERIC_COMPACTION = 2;
+const int32_t CBC_PDF417HighLevelEncoder::SUBMODE_PUNCTUATION = 3;
+const int32_t CBC_PDF417HighLevelEncoder::LATCH_TO_TEXT = 900;
+const int32_t CBC_PDF417HighLevelEncoder::LATCH_TO_BYTE_PADDED = 901;
+const int32_t CBC_PDF417HighLevelEncoder::LATCH_TO_NUMERIC = 902;
+const int32_t CBC_PDF417HighLevelEncoder::SHIFT_TO_BYTE = 913;
+const int32_t CBC_PDF417HighLevelEncoder::LATCH_TO_BYTE = 924;
+const uint8_t CBC_PDF417HighLevelEncoder::TEXT_MIXED_RAW[] = {
     48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 38, 13, 9, 44, 58,
     35, 45, 46, 36, 47, 43, 37, 42, 61, 94, 0,  32, 0, 0,  0};
-uint8_t CBC_PDF417HighLevelEncoder::TEXT_PUNCTUATION_RAW[] = {
+const uint8_t CBC_PDF417HighLevelEncoder::TEXT_PUNCTUATION_RAW[] = {
     59, 60, 62, 64, 91, 92, 93,  95, 96, 126, 33, 13,  9,   44, 58,
     10, 45, 46, 36, 47, 34, 124, 42, 40, 41,  63, 123, 125, 39, 0};
+
 int32_t CBC_PDF417HighLevelEncoder::MIXED[128] = {0};
 int32_t CBC_PDF417HighLevelEncoder::PUNCTUATION[128] = {0};
 
@@ -55,24 +56,23 @@ void CBC_PDF417HighLevelEncoder::Initialize() {
 
 void CBC_PDF417HighLevelEncoder::Finalize() {}
 
-CFX_WideString CBC_PDF417HighLevelEncoder::encodeHighLevel(
-    CFX_WideString wideMsg,
-    Compaction compaction,
-    int32_t& e) {
-  CFX_ByteString bytes;
+WideString CBC_PDF417HighLevelEncoder::encodeHighLevel(WideString wideMsg,
+                                                       Compaction compaction,
+                                                       int32_t& e) {
+  ByteString bytes;
   CBC_UtilCodingConvert::UnicodeToUTF8(wideMsg, bytes);
-  CFX_WideString msg;
+  WideString msg;
   int32_t len = bytes.GetLength();
   for (int32_t i = 0; i < len; i++) {
-    wchar_t ch = (wchar_t)(bytes.GetAt(i) & 0xff);
-    if (ch == '?' && bytes.GetAt(i) != '?') {
+    wchar_t ch = (wchar_t)(bytes[i] & 0xff);
+    if (ch == '?' && bytes[i] != '?') {
       e = BCExceptionCharactersOutsideISO88591Encoding;
-      return CFX_WideString();
+      return WideString();
     }
     msg += ch;
   }
   std::vector<uint8_t> byteArr(bytes.begin(), bytes.end());
-  CFX_WideString sb;
+  WideString sb;
   len = msg.GetLength();
   int32_t p = 0;
   int32_t textSubMode = SUBMODE_ALPHA;
@@ -145,39 +145,37 @@ void CBC_PDF417HighLevelEncoder::Inverse() {
   }
 }
 
-int32_t CBC_PDF417HighLevelEncoder::encodeText(CFX_WideString msg,
+int32_t CBC_PDF417HighLevelEncoder::encodeText(WideString msg,
                                                int32_t startpos,
                                                int32_t count,
-                                               CFX_WideString& sb,
+                                               WideString& sb,
                                                int32_t initialSubmode) {
-  CFX_WideString tmp;
+  WideString tmp;
   int32_t submode = initialSubmode;
   int32_t idx = 0;
   while (true) {
-    wchar_t ch = msg.GetAt(startpos + idx);
+    wchar_t ch = msg[startpos + idx];
     switch (submode) {
       case SUBMODE_ALPHA:
         if (isAlphaUpper(ch)) {
-          if (ch == ' ') {
+          if (ch == ' ')
             tmp += (wchar_t)26;
-          } else {
+          else
             tmp += (wchar_t)(ch - 65);
-          }
-        } else {
-          if (isAlphaLower(ch)) {
-            submode = SUBMODE_LOWER;
-            tmp += (wchar_t)27;
-            continue;
-          } else if (isMixed(ch)) {
-            submode = SUBMODE_MIXED;
-            tmp += (wchar_t)28;
-            continue;
-          } else {
-            tmp += (wchar_t)29;
-            tmp += PUNCTUATION[ch];
-            break;
-          }
+          break;
         }
+        if (isAlphaLower(ch)) {
+          submode = SUBMODE_LOWER;
+          tmp += (wchar_t)27;
+          continue;
+        }
+        if (isMixed(ch)) {
+          submode = SUBMODE_MIXED;
+          tmp += (wchar_t)28;
+          continue;
+        }
+        tmp += (wchar_t)29;
+        tmp += PUNCTUATION[ch];
         break;
       case SUBMODE_LOWER:
         if (isAlphaLower(ch)) {
@@ -186,56 +184,56 @@ int32_t CBC_PDF417HighLevelEncoder::encodeText(CFX_WideString msg,
           } else {
             tmp += (wchar_t)(ch - 97);
           }
-        } else {
-          if (isAlphaUpper(ch)) {
-            tmp += (wchar_t)27;
-            tmp += (wchar_t)(ch - 65);
-            break;
-          } else if (isMixed(ch)) {
-            submode = SUBMODE_MIXED;
-            tmp += (wchar_t)28;
-            continue;
-          } else {
-            tmp += (wchar_t)29;
-            tmp += PUNCTUATION[ch];
-            break;
-          }
+          break;
         }
+        if (isAlphaUpper(ch)) {
+          tmp += (wchar_t)27;
+          tmp += (wchar_t)(ch - 65);
+          break;
+        }
+        if (isMixed(ch)) {
+          submode = SUBMODE_MIXED;
+          tmp += (wchar_t)28;
+          continue;
+        }
+
+        tmp += (wchar_t)29;
+        tmp += PUNCTUATION[ch];
         break;
       case SUBMODE_MIXED:
         if (isMixed(ch)) {
           tmp += MIXED[ch];
-        } else {
-          if (isAlphaUpper(ch)) {
-            submode = SUBMODE_ALPHA;
-            tmp += (wchar_t)28;
+          break;
+        }
+        if (isAlphaUpper(ch)) {
+          submode = SUBMODE_ALPHA;
+          tmp += (wchar_t)28;
+          continue;
+        }
+        if (isAlphaLower(ch)) {
+          submode = SUBMODE_LOWER;
+          tmp += (wchar_t)27;
+          continue;
+        }
+        if (startpos + idx + 1 < count) {
+          wchar_t next = msg[startpos + idx + 1];
+          if (isPunctuation(next)) {
+            submode = SUBMODE_PUNCTUATION;
+            tmp += (wchar_t)25;
             continue;
-          } else if (isAlphaLower(ch)) {
-            submode = SUBMODE_LOWER;
-            tmp += (wchar_t)27;
-            continue;
-          } else {
-            if (startpos + idx + 1 < count) {
-              wchar_t next = msg.GetAt(startpos + idx + 1);
-              if (isPunctuation(next)) {
-                submode = SUBMODE_PUNCTUATION;
-                tmp += (wchar_t)25;
-                continue;
-              }
-            }
-            tmp += (wchar_t)29;
-            tmp += PUNCTUATION[ch];
           }
         }
+        tmp += (wchar_t)29;
+        tmp += PUNCTUATION[ch];
         break;
       default:
         if (isPunctuation(ch)) {
           tmp += PUNCTUATION[ch];
-        } else {
-          submode = SUBMODE_ALPHA;
-          tmp += (wchar_t)29;
-          continue;
+          break;
         }
+        submode = SUBMODE_ALPHA;
+        tmp += (wchar_t)29;
+        continue;
     }
     idx++;
     if (idx >= count) {
@@ -247,10 +245,10 @@ int32_t CBC_PDF417HighLevelEncoder::encodeText(CFX_WideString msg,
   for (int32_t i = 0; i < len; i++) {
     bool odd = (i % 2) != 0;
     if (odd) {
-      h = (wchar_t)((h * 30) + tmp.GetAt(i));
+      h = (wchar_t)((h * 30) + tmp[i]);
       sb += h;
     } else {
-      h = tmp.GetAt(i);
+      h = tmp[i];
     }
   }
   if ((len % 2) != 0) {
@@ -262,7 +260,7 @@ void CBC_PDF417HighLevelEncoder::encodeBinary(std::vector<uint8_t>* bytes,
                                               int32_t startpos,
                                               int32_t count,
                                               int32_t startmode,
-                                              CFX_WideString& sb) {
+                                              WideString& sb) {
   if (count == 1 && startmode == TEXT_COMPACTION) {
     sb += (wchar_t)SHIFT_TO_BYTE;
   }
@@ -295,16 +293,16 @@ void CBC_PDF417HighLevelEncoder::encodeBinary(std::vector<uint8_t>* bytes,
     sb += (wchar_t)ch;
   }
 }
-void CBC_PDF417HighLevelEncoder::encodeNumeric(CFX_WideString msg,
+void CBC_PDF417HighLevelEncoder::encodeNumeric(WideString msg,
                                                int32_t startpos,
                                                int32_t count,
-                                               CFX_WideString& sb) {
+                                               WideString& sb) {
   int32_t idx = 0;
   BigInteger num900 = 900;
   while (idx < count) {
-    CFX_WideString tmp;
+    WideString tmp;
     int32_t len = 44 < count - idx ? 44 : count - idx;
-    CFX_ByteString part =
+    ByteString part =
         ((wchar_t)'1' + msg.Mid(startpos + idx, len)).UTF8Encode();
     BigInteger bigint = stringToBigInteger(part.c_str());
     do {
@@ -313,7 +311,7 @@ void CBC_PDF417HighLevelEncoder::encodeNumeric(CFX_WideString msg,
       bigint = bigint / num900;
     } while (!bigint.isZero());
     for (int32_t i = tmp.GetLength() - 1; i >= 0; i--) {
-      sb += tmp.GetAt(i);
+      sb += tmp[i];
     }
     idx += len;
   }
@@ -337,36 +335,36 @@ bool CBC_PDF417HighLevelEncoder::isText(wchar_t ch) {
   return ch == '\t' || ch == '\n' || ch == '\r' || (ch >= 32 && ch <= 126);
 }
 int32_t CBC_PDF417HighLevelEncoder::determineConsecutiveDigitCount(
-    CFX_WideString msg,
+    WideString msg,
     int32_t startpos) {
   int32_t count = 0;
   int32_t len = msg.GetLength();
   int32_t idx = startpos;
   if (idx < len) {
-    wchar_t ch = msg.GetAt(idx);
+    wchar_t ch = msg[idx];
     while (isDigit(ch) && idx < len) {
       count++;
       idx++;
       if (idx < len) {
-        ch = msg.GetAt(idx);
+        ch = msg[idx];
       }
     }
   }
   return count;
 }
 int32_t CBC_PDF417HighLevelEncoder::determineConsecutiveTextCount(
-    CFX_WideString msg,
+    WideString msg,
     int32_t startpos) {
   int32_t len = msg.GetLength();
   int32_t idx = startpos;
   while (idx < len) {
-    wchar_t ch = msg.GetAt(idx);
+    wchar_t ch = msg[idx];
     int32_t numericCount = 0;
     while (numericCount < 13 && isDigit(ch) && idx < len) {
       numericCount++;
       idx++;
       if (idx < len) {
-        ch = msg.GetAt(idx);
+        ch = msg[idx];
       }
     }
     if (numericCount >= 13) {
@@ -375,7 +373,7 @@ int32_t CBC_PDF417HighLevelEncoder::determineConsecutiveTextCount(
     if (numericCount > 0) {
       continue;
     }
-    ch = msg.GetAt(idx);
+    ch = msg[idx];
     if (!isText(ch)) {
       break;
     }
@@ -384,14 +382,14 @@ int32_t CBC_PDF417HighLevelEncoder::determineConsecutiveTextCount(
   return idx - startpos;
 }
 int32_t CBC_PDF417HighLevelEncoder::determineConsecutiveBinaryCount(
-    CFX_WideString msg,
+    WideString msg,
     std::vector<uint8_t>* bytes,
     int32_t startpos,
     int32_t& e) {
   int32_t len = msg.GetLength();
   int32_t idx = startpos;
   while (idx < len) {
-    wchar_t ch = msg.GetAt(idx);
+    wchar_t ch = msg[idx];
     int32_t numericCount = 0;
     while (numericCount < 13 && isDigit(ch)) {
       numericCount++;
@@ -399,7 +397,7 @@ int32_t CBC_PDF417HighLevelEncoder::determineConsecutiveBinaryCount(
       if (i >= len) {
         break;
       }
-      ch = msg.GetAt(i);
+      ch = msg[i];
     }
     if (numericCount >= 13) {
       return idx - startpos;
@@ -411,12 +409,12 @@ int32_t CBC_PDF417HighLevelEncoder::determineConsecutiveBinaryCount(
       if (i >= len) {
         break;
       }
-      ch = msg.GetAt(i);
+      ch = msg[i];
     }
     if (textCount >= 5) {
       return idx - startpos;
     }
-    ch = msg.GetAt(idx);
+    ch = msg[idx];
     if ((*bytes)[idx] == 63 && ch != '?') {
       e = BCExceptionNonEncodableCharacterDetected;
       return -1;

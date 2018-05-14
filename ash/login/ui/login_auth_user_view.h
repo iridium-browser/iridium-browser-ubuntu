@@ -5,22 +5,30 @@
 #ifndef ASH_LOGIN_UI_LOGIN_AUTH_USER_VIEW_H_
 #define ASH_LOGIN_UI_LOGIN_AUTH_USER_VIEW_H_
 
+#include <stdint.h>
+#include <memory>
+
 #include "ash/ash_export.h"
 #include "ash/login/ui/login_password_view.h"
+#include "ash/login/ui/login_user_view.h"
+#include "ash/login/ui/non_accessible_view.h"
 #include "ash/public/interfaces/user_info.mojom.h"
-#include "base/optional.h"
+#include "base/memory/weak_ptr.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/view.h"
 
 namespace ash {
 
-class LoginUserView;
 class LoginPasswordView;
 class LoginPinView;
 
 // Wraps a UserView which also has authentication available. Adds additional
 // views below the UserView instance which show authentication UIs.
-class ASH_EXPORT LoginAuthUserView : public views::View {
+//
+// This class will make call mojo authentication APIs directly. The embedder can
+// receive some events about the results of those mojo
+// authentication attempts (ie, success/failure).
+class ASH_EXPORT LoginAuthUserView : public NonAccessibleView {
  public:
   // TestApi is used for tests to get internal implementation details.
   class ASH_EXPORT TestApi {
@@ -28,7 +36,9 @@ class ASH_EXPORT LoginAuthUserView : public views::View {
     explicit TestApi(LoginAuthUserView* view);
     ~TestApi();
 
+    LoginUserView* user_view() const;
     LoginPasswordView* password_view() const;
+    LoginPinView* pin_view() const;
 
    private:
     LoginAuthUserView* const view_;
@@ -36,18 +46,29 @@ class ASH_EXPORT LoginAuthUserView : public views::View {
 
   // Flags which describe the set of currently visible auth methods.
   enum AuthMethods {
-    AUTH_NONE = 0,              // No extra auth methods.
-    AUTH_PIN = 1 << 0,          // Display PIN keyboard.
-    AUTH_EASY_UNLOCK = 1 << 1,  // Display easy unlock icon.
-    AUTH_TAP = 1 << 2,          // Tap to unlock.
+    AUTH_NONE = 0,           // No extra auth methods.
+    AUTH_PASSWORD = 1 << 0,  // Display password.
+    AUTH_PIN = 1 << 1,       // Display PIN keyboard.
+    AUTH_TAP = 1 << 2,       // Tap to unlock.
   };
 
   using OnAuthCallback = base::Callback<void(bool auth_success)>;
+  using OnEasyUnlockIconTapped = base::RepeatingClosure;
+  using OnEasyUnlockIconHovered = base::RepeatingClosure;
 
-  // |on_auth| is executed whenever an authentication result is available;
-  // cannot be null.
-  LoginAuthUserView(const mojom::UserInfoPtr& user,
-                    const OnAuthCallback& on_auth);
+  // |on_auth| is executed whenever an authentication result is available, such
+  // as when the user submits a password or taps the user icon when AUTH_TAP is
+  // enabled.
+  //
+  // |on_tap| is called when the user taps the user view and AUTH_TAP is not
+  // enabled.
+  //
+  // None of the callbacks can be null.
+  LoginAuthUserView(const mojom::LoginUserInfoPtr& user,
+                    const OnAuthCallback& on_auth,
+                    const LoginUserView::OnTap& on_tap,
+                    const OnEasyUnlockIconHovered& on_easy_unlock_icon_hovered,
+                    const OnEasyUnlockIconTapped& on_easy_unlock_icon_tapped);
   ~LoginAuthUserView() override;
 
   // Set the displayed set of auth methods. |auth_methods| contains or-ed
@@ -55,25 +76,57 @@ class ASH_EXPORT LoginAuthUserView : public views::View {
   void SetAuthMethods(uint32_t auth_methods);
   AuthMethods auth_methods() const { return auth_methods_; }
 
-  // Update the displayed name, icon, etc to that of |user|.
-  void UpdateForUser(const mojom::UserInfoPtr& user);
+  // Add an easy unlock icon.
+  void SetEasyUnlockIcon(mojom::EasyUnlockIconId id,
+                         const base::string16& accessibility_label);
 
-  const AccountId& current_user() const { return current_user_; }
+  // Captures any metadata about the current view state that will be used for
+  // animation.
+  void CaptureStateForAnimationPreLayout();
+  // Applies animation based on current layout state compared to the most
+  // recently captured state.
+  void ApplyAnimationPostLayout();
+
+  // Update the displayed name, icon, etc to that of |user|.
+  void UpdateForUser(const mojom::LoginUserInfoPtr& user);
+
+  const mojom::LoginUserInfoPtr& current_user() const;
+
+  LoginPasswordView* password_view() { return password_view_; }
 
   // views::View:
-  const char* GetClassName() const override;
   gfx::Size CalculatePreferredSize() const override;
+  void RequestFocus() override;
 
  private:
-  // Called when the user submits an auth method. Runs mojo call.
-  void OnAuthSubmit(bool is_pin, const base::string16& password);
+  struct AnimationState;
 
-  AccountId current_user_;
+  // Called when the user submits an auth method. Runs mojo call.
+  void OnAuthSubmit(const base::string16& password);
+  // Called with the result of the request started in |OnAuthSubmit|.
+  void OnAuthComplete(base::Optional<bool> auth_success);
+
+  // Called when the user view has been tapped. This will run |on_auth_| if tap
+  // to unlock is enabled, otherwise it will run |on_tap_|.
+  void OnUserViewTap();
+
+  // Helper method to check if an auth method is enable. Use it like this:
+  // bool has_tap = HasAuthMethod(AUTH_TAP).
+  bool HasAuthMethod(AuthMethods auth_method) const;
+
   AuthMethods auth_methods_ = AUTH_NONE;
   LoginUserView* user_view_ = nullptr;
   LoginPasswordView* password_view_ = nullptr;
   LoginPinView* pin_view_ = nullptr;
   const OnAuthCallback on_auth_;
+  const LoginUserView::OnTap on_tap_;
+
+  // Animation state that was cached from before a layout. Generated by
+  // |CaptureStateForAnimationPreLayout| and consumed by
+  // |ApplyAnimationPostLayout|.
+  std::unique_ptr<AnimationState> cached_animation_state_;
+
+  base::WeakPtrFactory<LoginAuthUserView> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginAuthUserView);
 };

@@ -33,14 +33,18 @@ namespace blink {
 class PLATFORM_EXPORT PerspectiveTransformOperation final
     : public TransformOperation {
  public:
-  static PassRefPtr<PerspectiveTransformOperation> Create(double p) {
-    return AdoptRef(new PerspectiveTransformOperation(p));
+  static scoped_refptr<PerspectiveTransformOperation> Create(double p) {
+    return base::AdoptRef(new PerspectiveTransformOperation(p));
   }
 
   double Perspective() const { return p_; }
 
   virtual bool CanBlendWith(const TransformOperation& other) const {
     return IsSameType(other);
+  }
+
+  static bool IsMatchingOperationType(OperationType type) {
+    return type == kPerspective;
   }
 
  private:
@@ -58,15 +62,18 @@ class PLATFORM_EXPORT PerspectiveTransformOperation final
     transform.ApplyPerspective(p_);
   }
 
-  PassRefPtr<TransformOperation> Blend(const TransformOperation* from,
-                                       double progress,
-                                       bool blend_to_identity = false) override;
-  PassRefPtr<TransformOperation> Zoom(double factor) final;
+  scoped_refptr<TransformOperation> Blend(
+      const TransformOperation* from,
+      double progress,
+      bool blend_to_identity = false) override;
+  scoped_refptr<TransformOperation> Zoom(double factor) final;
 
   PerspectiveTransformOperation(double p) : p_(p) {}
 
   double p_;
 };
+
+DEFINE_TRANSFORM_TYPE_CASTS(PerspectiveTransformOperation);
 
 }  // namespace blink
 

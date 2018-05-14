@@ -4,11 +4,11 @@
 
 #include "remoting/host/fake_host_extension.h"
 
+#include <memory>
 #include <string>
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "remoting/host/client_session_details.h"
 #include "remoting/host/host_extension_session.h"
 #include "remoting/proto/control.pb.h"
@@ -18,7 +18,7 @@ namespace remoting {
 class FakeExtension::Session : public HostExtensionSession {
  public:
   Session(FakeExtension* extension, const std::string& message_type);
-  ~Session() override {}
+  ~Session() override = default;
 
   // HostExtensionSession interface.
   bool OnExtensionMessage(ClientSessionDetails* client_session_details,
@@ -51,7 +51,7 @@ FakeExtension::FakeExtension(const std::string& message_type,
                              const std::string& capability)
     : message_type_(message_type), capability_(capability) {}
 
-FakeExtension::~FakeExtension() {}
+FakeExtension::~FakeExtension() = default;
 
 std::string FakeExtension::capability() const {
   return capability_;
@@ -62,7 +62,7 @@ std::unique_ptr<HostExtensionSession> FakeExtension::CreateExtensionSession(
     protocol::ClientStub* client_stub) {
   DCHECK(!was_instantiated());
   was_instantiated_ = true;
-  return base::MakeUnique<Session>(this, message_type_);
+  return std::make_unique<Session>(this, message_type_);
 }
 
 } // namespace remoting

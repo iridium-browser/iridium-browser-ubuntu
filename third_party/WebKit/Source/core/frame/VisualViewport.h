@@ -33,10 +33,11 @@
 
 #include <memory>
 #include "core/CoreExport.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/FloatSize.h"
 #include "platform/geometry/IntSize.h"
+#include "platform/graphics/CompositorElementId.h"
 #include "platform/graphics/GraphicsLayerClient.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "public/platform/WebScrollbar.h"
@@ -44,7 +45,6 @@
 
 namespace blink {
 class WebScrollbarLayer;
-class WebLayer;
 }
 
 namespace blink {
@@ -91,7 +91,7 @@ class CORE_EXPORT VisualViewport final
   static VisualViewport* Create(Page& host) { return new VisualViewport(host); }
   ~VisualViewport() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   void CreateLayerTree();
   void AttachLayerTree(GraphicsLayer*);
@@ -137,8 +137,6 @@ class CORE_EXPORT VisualViewport final
   // around the point specified by anchor in window coordinates. Returns false
   // if page scale factor is left unchanged.
   bool MagnifyScaleAroundAnchor(float magnify_delta, const FloatPoint& anchor);
-
-  void SetScrollLayerOnScrollbars(WebLayer*) const;
 
   // The portion of the unzoomed frame visible in the visual viewport,
   // in partial CSS pixels. Relative to the main frame.
@@ -202,6 +200,7 @@ class CORE_EXPORT VisualViewport final
   IntRect ScrollableAreaBoundingBox() const override;
   bool UserInputScrollable(ScrollbarOrientation) const override;
   bool ShouldPlaceVerticalScrollbarOnLeft() const override { return false; }
+  CompositorElementId GetCompositorElementId() const override;
   bool ScrollAnimatorEnabled() const override;
   void ScrollControlWasSetNeedsPaintInvalidation() override {}
   void UpdateScrollOffset(const ScrollOffset&, ScrollType) override;
@@ -214,7 +213,12 @@ class CORE_EXPORT VisualViewport final
   CompositorAnimationTimeline* GetCompositorAnimationTimeline() const override;
   IntRect VisibleContentRect(
       IncludeScrollbarsInRect = kExcludeScrollbars) const override;
-  RefPtr<WebTaskRunner> GetTimerTaskRunner() const final;
+  scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() const final;
+
+  // VisualViewport scrolling may involve pinch zoom and gets routed through
+  // WebViewImpl explicitly rather than via ScrollingCoordinator::DidScroll
+  // since it needs to be set in tandem with the page scale delta.
+  void DidScroll(const gfx::ScrollOffset&) final { NOTREACHED(); }
 
   // Visual Viewport API implementation.
   double OffsetLeft() const;
@@ -235,6 +239,8 @@ class CORE_EXPORT VisualViewport final
   // Heuristic-based function for determining if we should disable workarounds
   // for viewing websites that are not optimized for mobile devices.
   bool ShouldDisableDesktopWorkarounds() const;
+
+  ScrollbarTheme& GetPageScrollbarTheme() const override;
 
  private:
   explicit VisualViewport(Page&);
@@ -289,6 +295,7 @@ class CORE_EXPORT VisualViewport final
   float browser_controls_adjustment_;
   float max_page_scale_;
   bool track_pinch_zoom_stats_for_page_;
+  UniqueObjectId unique_id_;
 };
 
 }  // namespace blink

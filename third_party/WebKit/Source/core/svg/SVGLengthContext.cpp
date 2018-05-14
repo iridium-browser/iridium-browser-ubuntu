@@ -22,13 +22,12 @@
 
 #include "core/svg/SVGLengthContext.h"
 
-#include "core/css/CSSHelper.h"
 #include "core/css/CSSPrimitiveValue.h"
+#include "core/css/CSSResolutionUnits.h"
 #include "core/css/CSSToLengthConversionData.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/api/LayoutViewItem.h"
 #include "core/style/ComputedStyle.h"
 #include "core/svg/SVGSVGElement.h"
 #include "platform/LengthFunctions.h"
@@ -197,6 +196,19 @@ FloatPoint SVGLengthContext::ResolvePoint(const SVGElement* context,
   return FloatPoint(x.ValueAsPercentage(), y.ValueAsPercentage());
 }
 
+FloatPoint SVGLengthContext::ResolveLengthPair(
+    const Length& x_length,
+    const Length& y_length,
+    const ComputedStyle& style) const {
+  FloatSize viewport_size;
+  if (x_length.IsPercentOrCalc() || y_length.IsPercentOrCalc())
+    DetermineViewport(viewport_size);
+
+  float zoom = style.EffectiveZoom();
+  return FloatPoint(ValueForLength(x_length, zoom, viewport_size.Width()),
+                    ValueForLength(y_length, zoom, viewport_size.Height()));
+}
+
 float SVGLengthContext::ResolveLength(const SVGElement* context,
                                       SVGUnitTypes::SVGUnitType type,
                                       const SVGLength& x) {
@@ -285,6 +297,9 @@ float SVGLengthContext::ConvertValueToUserUnits(
     case CSSPrimitiveValue::UnitType::kMillimeters:
       user_units = value * kCssPixelsPerMillimeter;
       break;
+    case CSSPrimitiveValue::UnitType::kQuarterMillimeters:
+      user_units = value * kCssPixelsPerQuarterMillimeter;
+      break;
     case CSSPrimitiveValue::UnitType::kInches:
       user_units = value * kCssPixelsPerInch;
       break;
@@ -352,6 +367,8 @@ float SVGLengthContext::ConvertValueFromUserUnits(
       return value / kCssPixelsPerCentimeter;
     case CSSPrimitiveValue::UnitType::kMillimeters:
       return value / kCssPixelsPerMillimeter;
+    case CSSPrimitiveValue::UnitType::kQuarterMillimeters:
+      return value / kCssPixelsPerQuarterMillimeter;
     case CSSPrimitiveValue::UnitType::kInches:
       return value / kCssPixelsPerInch;
     case CSSPrimitiveValue::UnitType::kPoints:
@@ -433,16 +450,16 @@ bool SVGLengthContext::DetermineViewport(FloatSize& viewport_size) const {
 
   // Root <svg> element lengths are resolved against the top level viewport.
   if (context_->IsOutermostSVGSVGElement()) {
-    viewport_size = toSVGSVGElement(context_)->CurrentViewportSize();
+    viewport_size = ToSVGSVGElement(context_)->CurrentViewportSize();
     return true;
   }
 
   // Take size from nearest viewport element.
   SVGElement* viewport_element = context_->viewportElement();
-  if (!isSVGSVGElement(viewport_element))
+  if (!IsSVGSVGElement(viewport_element))
     return false;
 
-  const SVGSVGElement& svg = toSVGSVGElement(*viewport_element);
+  const SVGSVGElement& svg = ToSVGSVGElement(*viewport_element);
   viewport_size = svg.CurrentViewBoxRect().Size();
   if (viewport_size.IsEmpty())
     viewport_size = svg.CurrentViewportSize();
@@ -461,7 +478,7 @@ float SVGLengthContext::ResolveValue(const CSSPrimitiveValue& primitive_value,
     return 0;
 
   CSSToLengthConversionData conversion_data = CSSToLengthConversionData(
-      style, root_style, context_->GetDocument().GetLayoutViewItem(), 1.0f);
+      style, root_style, context_->GetDocument().GetLayoutView(), 1.0f);
   Length length = primitive_value.ConvertToLength(conversion_data);
   return ValueForLength(length, 1.0f, mode);
 }

@@ -35,8 +35,7 @@ import org.chromium.content.browser.test.util.CriteriaHelper;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class TabTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -98,26 +97,15 @@ public class TabTest {
     @Feature({"Tab"})
     public void testTabRestoredIfKilledWhileActivityStopped() throws Exception {
         // Ensure the tab is showing before stopping the activity.
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mTab.show(TabSelectionType.FROM_NEW);
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(() -> mTab.show(TabSelectionType.FROM_NEW));
 
         Assert.assertFalse(mTab.needsReload());
         Assert.assertFalse(mTab.isHidden());
         Assert.assertFalse(mTab.isShowingSadTab());
 
         // Stop the activity and simulate a killed renderer.
-        ApplicationTestUtils.fireHomeScreenIntent(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mTab.simulateRendererKilledForTesting(false);
-            }
-        });
+        ApplicationTestUtils.fireHomeScreenIntent(InstrumentationRegistry.getTargetContext());
+        ThreadUtils.runOnUiThreadBlocking(() -> mTab.simulateRendererKilledForTesting(false));
 
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
@@ -128,8 +116,7 @@ public class TabTest {
         Assert.assertTrue(mTab.needsReload());
         Assert.assertFalse(mTab.isShowingSadTab());
 
-        ApplicationTestUtils.launchChrome(
-                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        ApplicationTestUtils.launchChrome(InstrumentationRegistry.getTargetContext());
 
         // The tab should be restored and visible.
         CriteriaHelper.pollUiThread(new Criteria() {
@@ -146,11 +133,8 @@ public class TabTest {
     @SmallTest
     @Feature({"Tab"})
     public void testTabSecurityLevel() {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                Assert.assertEquals(ConnectionSecurityLevel.NONE, mTab.getSecurityLevel());
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                (Runnable) () -> Assert.assertEquals(ConnectionSecurityLevel.NONE,
+                        mTab.getSecurityLevel()));
     }
 }

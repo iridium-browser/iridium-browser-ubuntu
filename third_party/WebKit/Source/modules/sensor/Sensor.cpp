@@ -6,58 +6,81 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/timing/DOMWindowPerformance.h"
-#include "core/timing/Performance.h"
+#include "core/timing/WindowPerformance.h"
 #include "modules/sensor/SensorErrorEvent.h"
 #include "modules/sensor/SensorProviderProxy.h"
-#include "services/device/public/interfaces/sensor.mojom-blink.h"
+#include "platform/LayoutTestSupport.h"
+#include "platform/feature_policy/FeaturePolicy.h"
+#include "public/platform/TaskType.h"
+#include "services/device/public/cpp/generic_sensor/sensor_traits.h"
+#include "services/device/public/mojom/sensor.mojom-blink.h"
 
 namespace blink {
 
 namespace {
+const double kWaitingIntervalThreshold = 0.01;
 
-constexpr double kMinWaitingInterval =
-    1 / device::mojom::blink::SensorConfiguration::kMaxAllowedFrequency;
+bool AreFeaturesEnabled(LocalFrame* frame,
+                        const Vector<mojom::FeaturePolicyFeature>& features) {
+  return std::all_of(features.begin(), features.end(),
+                     [frame](mojom::FeaturePolicyFeature feature) {
+                       return frame->IsFeatureEnabled(feature);
+                     });
+}
 
 }  // namespace
 
 Sensor::Sensor(ExecutionContext* execution_context,
                const SensorOptions& sensor_options,
                ExceptionState& exception_state,
-               device::mojom::blink::SensorType type)
+               device::mojom::blink::SensorType type,
+               const Vector<mojom::FeaturePolicyFeature>& features)
     : ContextLifecycleObserver(execution_context),
-      sensor_options_(sensor_options),
+      frequency_(0.0),
       type_(type),
       state_(SensorState::kIdle),
       last_reported_timestamp_(0.0) {
-  // Check secure context.
-  String error_message;
-  if (!execution_context->IsSecureContext(error_message)) {
-    exception_state.ThrowDOMException(kSecurityError, error_message);
-    return;
-  }
+  // [SecureContext] in idl.
+  DCHECK(execution_context->IsSecureContext());
+  DCHECK(!features.IsEmpty());
+  LocalFrame* frame = ToDocument(execution_context)->GetFrame();
 
-  // Check top-level browsing context.
-  if (!ToDocument(execution_context)->domWindow()->GetFrame() ||
-      !ToDocument(execution_context)->GetFrame()->IsMainFrame()) {
+  if (!frame || !AreFeaturesEnabled(frame, features)) {
     exception_state.ThrowSecurityError(
-        "Must be in a top-level browsing context");
+        "Access to sensor features is disallowed by feature policy");
     return;
   }
 
   // Check the given frequency value.
-  if (sensor_options_.hasFrequency()) {
-    double frequency = sensor_options_.frequency();
-    if (frequency > SensorConfiguration::kMaxAllowedFrequency) {
-      sensor_options_.setFrequency(SensorConfiguration::kMaxAllowedFrequency);
-      ConsoleMessage* console_message =
-          ConsoleMessage::Create(kJSMessageSource, kInfoMessageLevel,
-                                 "Frequency is limited to 60 Hz.");
+  if (sensor_options.hasFrequency()) {
+    frequency_ = sensor_options.frequency();
+    const double max_allowed_frequency =
+        device::GetSensorMaxAllowedFrequency(type_);
+    if (frequency_ > max_allowed_frequency) {
+      frequency_ = max_allowed_frequency;
+      String message = String::Format(
+          "Maximum allowed frequency value for this sensor type is %.0f Hz.",
+          max_allowed_frequency);
+      ConsoleMessage* console_message = ConsoleMessage::Create(
+          kJSMessageSource, kInfoMessageLevel, std::move(message));
       execution_context->AddConsoleMessage(console_message);
     }
   }
+}
+
+Sensor::Sensor(ExecutionContext* execution_context,
+               const SpatialSensorOptions& options,
+               ExceptionState& exception_state,
+               device::mojom::blink::SensorType sensor_type,
+               const Vector<mojom::FeaturePolicyFeature>& features)
+    : Sensor(execution_context,
+             static_cast<const SensorOptions&>(options),
+             exception_state,
+             sensor_type,
+             features) {
+  use_screen_coords_ = (options.referenceFrame() == "screen");
 }
 
 Sensor::~Sensor() = default;
@@ -81,9 +104,16 @@ bool Sensor::activated() const {
   return state_ == SensorState::kActivated;
 }
 
+bool Sensor::hasReading() const {
+  if (!IsActivated())
+    return false;
+  DCHECK(sensor_proxy_);
+  return sensor_proxy_->GetReading().timestamp() != 0.0;
+}
+
 DOMHighResTimeStamp Sensor::timestamp(ScriptState* script_state,
                                       bool& is_null) const {
-  if (!CanReturnReadings()) {
+  if (!hasReading()) {
     is_null = true;
     return 0.0;
   }
@@ -94,16 +124,21 @@ DOMHighResTimeStamp Sensor::timestamp(ScriptState* script_state,
     return 0.0;
   }
 
-  Performance* performance = DOMWindowPerformance::performance(*window);
+  WindowPerformance* performance = DOMWindowPerformance::performance(*window);
   DCHECK(performance);
   DCHECK(sensor_proxy_);
   is_null = false;
 
+  if (LayoutTestSupport::IsRunningLayoutTest()) {
+    // In layout tests performance.now() * 0.001 is passed to the shared buffer.
+    return sensor_proxy_->GetReading().timestamp() * 1000;
+  }
+
   return performance->MonotonicTimeToDOMHighResTimeStamp(
-      sensor_proxy_->reading().timestamp);
+      TimeTicksFromSeconds(sensor_proxy_->GetReading().timestamp()));
 }
 
-DEFINE_TRACE(Sensor) {
+void Sensor::Trace(blink::Visitor* visitor) {
   visitor->Trace(sensor_proxy_);
   ActiveScriptWrappable::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);
@@ -123,28 +158,15 @@ auto Sensor::CreateSensorConfig() -> SensorConfigurationPtr {
   double minimum_frequency = sensor_proxy_->FrequencyLimits().first;
   double maximum_frequency = sensor_proxy_->FrequencyLimits().second;
 
-  double frequency = sensor_options_.hasFrequency()
-                         ? sensor_options_.frequency()
-                         : default_frequency;
+  if (frequency_ == 0.0)  // i.e. was never set.
+    frequency_ = default_frequency;
+  if (frequency_ > maximum_frequency)
+    frequency_ = maximum_frequency;
+  if (frequency_ < minimum_frequency)
+    frequency_ = minimum_frequency;
 
-  if (frequency > maximum_frequency)
-    frequency = maximum_frequency;
-  if (frequency < minimum_frequency)
-    frequency = minimum_frequency;
-
-  result->frequency = frequency;
+  result->frequency = frequency_;
   return result;
-}
-
-double Sensor::ReadingValue(int index, bool& is_null) const {
-  is_null = !CanReturnReadings();
-  return is_null ? 0.0 : ReadingValueUnchecked(index);
-}
-
-double Sensor::ReadingValueUnchecked(int index) const {
-  DCHECK(sensor_proxy_);
-  DCHECK(index >= 0 && index < device::SensorReading::kValuesCount);
-  return sensor_proxy_->reading().values[index];
 }
 
 void Sensor::InitSensorProxyIfNeeded() {
@@ -184,7 +206,7 @@ void Sensor::OnSensorReadingChanged() {
     return;
 
   double elapsedTime =
-      sensor_proxy_->reading().timestamp - last_reported_timestamp_;
+      sensor_proxy_->GetReading().timestamp() - last_reported_timestamp_;
   DCHECK_GT(elapsedTime, 0.0);
 
   DCHECK_GT(configuration_->frequency, 0.0);
@@ -195,20 +217,18 @@ void Sensor::OnSensorReadingChanged() {
   // polling period.
   auto sensor_reading_changed =
       WTF::Bind(&Sensor::NotifyReading, WrapWeakPersistent(this));
-  if (waitingTime < kMinWaitingInterval) {
+  if (waitingTime < kWaitingIntervalThreshold) {
     // Invoke JS callbacks in a different callchain to obviate
     // possible modifications of SensorProxy::observers_ container
     // while it is being iterated through.
-    pending_reading_notification_ =
-        TaskRunnerHelper::Get(TaskType::kSensor, GetExecutionContext())
-            ->PostCancellableTask(BLINK_FROM_HERE,
-                                  std::move(sensor_reading_changed));
+    pending_reading_notification_ = PostCancellableTask(
+        *GetExecutionContext()->GetTaskRunner(TaskType::kSensor), FROM_HERE,
+        std::move(sensor_reading_changed));
   } else {
-    pending_reading_notification_ =
-        TaskRunnerHelper::Get(TaskType::kSensor, GetExecutionContext())
-            ->PostDelayedCancellableTask(
-                BLINK_FROM_HERE, std::move(sensor_reading_changed),
-                WTF::TimeDelta::FromSecondsD(waitingTime));
+    pending_reading_notification_ = PostDelayedCancellableTask(
+        *GetExecutionContext()->GetTaskRunner(TaskType::kSensor), FROM_HERE,
+        std::move(sensor_reading_changed),
+        WTF::TimeDelta::FromSecondsD(waitingTime));
   }
 }
 
@@ -230,11 +250,9 @@ void Sensor::OnAddConfigurationRequestCompleted(bool result) {
   if (!GetExecutionContext())
     return;
 
-  pending_activated_notification_ =
-      TaskRunnerHelper::Get(TaskType::kSensor, GetExecutionContext())
-          ->PostCancellableTask(
-              BLINK_FROM_HERE,
-              WTF::Bind(&Sensor::NotifyActivated, WrapWeakPersistent(this)));
+  pending_activated_notification_ = PostCancellableTask(
+      *GetExecutionContext()->GetTaskRunner(TaskType::kSensor), FROM_HERE,
+      WTF::Bind(&Sensor::NotifyActivated, WrapWeakPersistent(this)));
 }
 
 void Sensor::Activate() {
@@ -280,9 +298,10 @@ void Sensor::RequestAddConfiguration() {
   if (!configuration_) {
     configuration_ = CreateSensorConfig();
     DCHECK(configuration_);
-    DCHECK(configuration_->frequency > 0 &&
-           configuration_->frequency <=
-               SensorConfiguration::kMaxAllowedFrequency);
+    DCHECK_GE(configuration_->frequency,
+              sensor_proxy_->FrequencyLimits().first);
+    DCHECK_LE(configuration_->frequency,
+              sensor_proxy_->FrequencyLimits().second);
   }
 
   DCHECK(sensor_proxy_);
@@ -307,17 +326,15 @@ void Sensor::HandleError(ExceptionCode code,
 
   auto error =
       DOMException::Create(code, sanitized_message, unsanitized_message);
-  pending_error_notification_ =
-      TaskRunnerHelper::Get(TaskType::kSensor, GetExecutionContext())
-          ->PostCancellableTask(
-              BLINK_FROM_HERE,
-              WTF::Bind(&Sensor::NotifyError, WrapWeakPersistent(this),
-                        WrapPersistent(error)));
+  pending_error_notification_ = PostCancellableTask(
+      *GetExecutionContext()->GetTaskRunner(TaskType::kSensor), FROM_HERE,
+      WTF::Bind(&Sensor::NotifyError, WrapWeakPersistent(this),
+                WrapPersistent(error)));
 }
 
 void Sensor::NotifyReading() {
   DCHECK_EQ(state_, SensorState::kActivated);
-  last_reported_timestamp_ = sensor_proxy_->reading().timestamp;
+  last_reported_timestamp_ = sensor_proxy_->GetReading().timestamp();
   DispatchEvent(Event::Create(EventTypeNames::reading));
 }
 
@@ -325,15 +342,13 @@ void Sensor::NotifyActivated() {
   DCHECK_EQ(state_, SensorState::kActivating);
   state_ = SensorState::kActivated;
 
-  if (CanReturnReadings()) {
+  if (hasReading()) {
     // If reading has already arrived, send initial 'reading' notification
     // right away.
     DCHECK(!pending_reading_notification_.IsActive());
-    pending_reading_notification_ =
-        TaskRunnerHelper::Get(TaskType::kSensor, GetExecutionContext())
-            ->PostCancellableTask(
-                BLINK_FROM_HERE,
-                WTF::Bind(&Sensor::NotifyReading, WrapWeakPersistent(this)));
+    pending_reading_notification_ = PostCancellableTask(
+        *GetExecutionContext()->GetTaskRunner(TaskType::kSensor), FROM_HERE,
+        WTF::Bind(&Sensor::NotifyReading, WrapWeakPersistent(this)));
   }
 
   DispatchEvent(Event::Create(EventTypeNames::activate));
@@ -345,16 +360,14 @@ void Sensor::NotifyError(DOMException* error) {
   DispatchEvent(SensorErrorEvent::Create(EventTypeNames::error, error));
 }
 
-bool Sensor::CanReturnReadings() const {
-  if (!IsActivated())
-    return false;
-  DCHECK(sensor_proxy_);
-  return sensor_proxy_->reading().timestamp != 0.0;
-}
-
 bool Sensor::IsIdleOrErrored() const {
   return (state_ == SensorState::kIdle) ||
          pending_error_notification_.IsActive();
+}
+
+const device::SensorReading& Sensor::GetReading() const {
+  DCHECK(sensor_proxy_);
+  return sensor_proxy_->GetReading(use_screen_coords_);
 }
 
 }  // namespace blink

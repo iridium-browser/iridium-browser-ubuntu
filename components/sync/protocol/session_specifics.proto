@@ -98,13 +98,13 @@ message TabNavigation {
   // frame.
   // optional string state = 5;  // obsolete.
   // The core transition type.
-  optional SyncEnums.PageTransition page_transition = 6 [default = TYPED];
+  optional SyncEnums.PageTransition page_transition = 6 [default = LINK];
   // If this transition was triggered by a redirect, the redirect type.
   optional SyncEnums.PageTransitionRedirectType redirect_type = 7;
   // The unique navigation id (within this client).
   optional int32 unique_id = 8;
   // Timestamp for when this navigation last occurred (in client time).
-  // If the user goes back/foward in history the timestamp may refresh.
+  // If the user goes back/forward in history the timestamp may refresh.
   optional int64 timestamp_msec = 9;
   // User used the Forward or Back button to navigate among browsing history.
   optional bool navigation_forward_back = 10;
@@ -120,7 +120,7 @@ message TabNavigation {
   // probability.
   optional int64 global_id = 15;
   // Search terms extracted from the URL.
-  optional string search_terms = 16;
+  optional string search_terms = 16 [deprecated = true];
   // The favicon url associated with this page.
   optional string favicon_url = 17;
   enum BlockedState {
@@ -167,10 +167,25 @@ message TabNavigation {
   // B is got by clicking a link on page of A. This relationship is used to
   // define a Chrome Task as a tree rooted by a navigation.
   repeated int64 ancestor_task_id = 28;
+
+  // When a history entry is replaced (e.g. history.replaceState()), this
+  // contains some information about the entry prior to being replaced. Even if
+  // an entry is replaced multiple times, it represents data prior to the
+  // *first* replace.
+  optional ReplacedNavigation replaced_navigation = 29;
 }
 
 // Navigation information for a single redirection within a single navigation.
 message NavigationRedirect {
   // A URL that redirected while navigating to the virtual_url.
   optional string url = 1;
+}
+
+// Subset of TabNavigation fields representing a navigation that was later
+// replaced in history (e.g. history.replaceState()), which allows tracking
+// information about the original navigation prior to the first replacement.
+message ReplacedNavigation {
+  optional string first_committed_url = 1;
+  optional int64 first_timestamp_msec = 2;
+  optional SyncEnums.PageTransition first_page_transition = 3;
 }

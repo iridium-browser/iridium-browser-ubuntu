@@ -59,7 +59,7 @@ bool PrintMockRenderThread::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PrintHostMsg_UpdatePrintSettings, OnUpdatePrintSettings)
     IPC_MESSAGE_HANDLER(PrintHostMsg_DidGetPrintedPagesCount,
                         OnDidGetPrintedPagesCount)
-    IPC_MESSAGE_HANDLER(PrintHostMsg_DidPrintPage, OnDidPrintPage)
+    IPC_MESSAGE_HANDLER(PrintHostMsg_DidPrintDocument, OnDidPrintDocument)
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
     IPC_MESSAGE_HANDLER(PrintHostMsg_DidGetPreviewPageCount,
                         OnDidGetPreviewPageCount)
@@ -93,8 +93,8 @@ void PrintMockRenderThread::OnDidGetPrintedPagesCount(int cookie,
   printer_->SetPrintedPagesCount(cookie, number_pages);
 }
 
-void PrintMockRenderThread::OnDidPrintPage(
-    const PrintHostMsg_DidPrintPage_Params& params) {
+void PrintMockRenderThread::OnDidPrintDocument(
+    const PrintHostMsg_DidPrintDocument_Params& params) {
   printer_->PrintPage(params);
 }
 
@@ -129,16 +129,16 @@ void PrintMockRenderThread::OnUpdatePrintSettings(
   // We don't actually care about the values.
   std::string dummy_string;
   int margins_type = 0;
-  if (!job_settings.GetBoolean(printing::kSettingLandscape, NULL) ||
-      !job_settings.GetBoolean(printing::kSettingCollate, NULL) ||
-      !job_settings.GetInteger(printing::kSettingColor, NULL) ||
-      !job_settings.GetBoolean(printing::kSettingPrintToPDF, NULL) ||
-      !job_settings.GetBoolean(printing::kIsFirstRequest, NULL) ||
+  if (!job_settings.GetBoolean(printing::kSettingLandscape, nullptr) ||
+      !job_settings.GetBoolean(printing::kSettingCollate, nullptr) ||
+      !job_settings.GetInteger(printing::kSettingColor, nullptr) ||
+      !job_settings.GetBoolean(printing::kSettingPrintToPDF, nullptr) ||
+      !job_settings.GetBoolean(printing::kIsFirstRequest, nullptr) ||
       !job_settings.GetString(printing::kSettingDeviceName, &dummy_string) ||
-      !job_settings.GetInteger(printing::kSettingDuplexMode, NULL) ||
-      !job_settings.GetInteger(printing::kSettingCopies, NULL) ||
-      !job_settings.GetInteger(printing::kPreviewUIID, NULL) ||
-      !job_settings.GetInteger(printing::kPreviewRequestID, NULL) ||
+      !job_settings.GetInteger(printing::kSettingDuplexMode, nullptr) ||
+      !job_settings.GetInteger(printing::kSettingCopies, nullptr) ||
+      !job_settings.GetInteger(printing::kPreviewUIID, nullptr) ||
+      !job_settings.GetInteger(printing::kPreviewRequestID, nullptr) ||
       !job_settings.GetInteger(printing::kSettingMarginsType, &margins_type)) {
     return;
   }

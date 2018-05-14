@@ -14,18 +14,26 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/shared_memory.h"
+#include "base/memory/shared_memory_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
+#include "components/printing/browser/print_composite_client.h"
+#include "components/printing/browser/print_manager_utils.h"
 #include "components/printing/common/print_messages.h"
+#include "components/printing/service/public/cpp/pdf_service_mojo_types.h"
+#include "components/printing/service/public/cpp/pdf_service_mojo_utils.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
+#include "printing/print_settings.h"
 
 using content::BrowserThread;
 using content::WebContents;
@@ -69,7 +77,7 @@ scoped_refptr<base::RefCountedBytes> GetDataFromHandle(
 
 PrintPreviewMessageHandler::PrintPreviewMessageHandler(
     WebContents* web_contents)
-    : content::WebContentsObserver(web_contents) {
+    : content::WebContentsObserver(web_contents), weak_ptr_factory_(this) {
   DCHECK(web_contents);
 }
 
@@ -113,32 +121,43 @@ void PrintPreviewMessageHandler::OnDidGetPreviewPageCount(
   if (!print_preview_ui)
     return;
 
-  if (params.clear_preview_data)
-    print_preview_ui->ClearAllPreviewData();
-
+  print_preview_ui->ClearAllPreviewData();
   print_preview_ui->OnDidGetPreviewPageCount(params);
 }
 
 void PrintPreviewMessageHandler::OnDidPreviewPage(
+    content::RenderFrameHost* render_frame_host,
     const PrintHostMsg_DidPreviewPage_Params& params) {
   int page_number = params.page_number;
-  if (page_number < FIRST_PAGE_INDEX || !params.data_size)
+  const PrintHostMsg_DidPrintContent_Params& content = params.content;
+  if (page_number < FIRST_PAGE_INDEX || !content.data_size)
     return;
 
   PrintPreviewUI* print_preview_ui = GetPrintPreviewUI();
   if (!print_preview_ui)
     return;
 
-  scoped_refptr<base::RefCountedBytes> data_bytes =
-      GetDataFromHandle(params.metafile_data_handle, params.data_size);
-  DCHECK(data_bytes);
+  if (IsOopifEnabled() && print_preview_ui->source_is_modifiable()) {
+    auto* client = PrintCompositeClient::FromWebContents(web_contents());
+    DCHECK(client);
 
-  print_preview_ui->SetPrintPreviewDataForIndex(page_number,
-                                                std::move(data_bytes));
-  print_preview_ui->OnDidPreviewPage(page_number, params.preview_request_id);
+    // Use utility process to convert skia metafile to pdf.
+    client->DoCompositePageToPdf(
+        params.document_cookie, render_frame_host, params.page_number,
+        content.metafile_data_handle, content.data_size,
+        content.subframe_content_info,
+        base::BindOnce(&PrintPreviewMessageHandler::OnCompositePdfPageDone,
+                       weak_ptr_factory_.GetWeakPtr(), params.page_number,
+                       params.preview_request_id));
+  } else {
+    NotifyUIPreviewPageReady(
+        page_number, params.preview_request_id,
+        GetDataFromHandle(content.metafile_data_handle, content.data_size));
+  }
 }
 
 void PrintPreviewMessageHandler::OnMetafileReadyForPrinting(
+    content::RenderFrameHost* render_frame_host,
     const PrintHostMsg_DidPreviewDocument_Params& params) {
   // Always try to stop the worker.
   StopWorker(params.document_cookie);
@@ -152,18 +171,22 @@ void PrintPreviewMessageHandler::OnMetafileReadyForPrinting(
   if (!print_preview_ui)
     return;
 
-  // TODO(joth): This seems like a good match for using RefCountedStaticMemory
-  // to avoid the memory copy, but the SetPrintPreviewData call chain below
-  // needs updating to accept the RefCountedMemory* base class.
-  scoped_refptr<base::RefCountedBytes> data_bytes =
-      GetDataFromHandle(params.metafile_data_handle, params.data_size);
-  if (!data_bytes || !data_bytes->size())
-    return;
+  const PrintHostMsg_DidPrintContent_Params& content = params.content;
+  if (IsOopifEnabled() && print_preview_ui->source_is_modifiable()) {
+    auto* client = PrintCompositeClient::FromWebContents(web_contents());
+    DCHECK(client);
 
-  print_preview_ui->SetPrintPreviewDataForIndex(COMPLETE_PREVIEW_DOCUMENT_INDEX,
-                                                std::move(data_bytes));
-  print_preview_ui->OnPreviewDataIsAvailable(
-      params.expected_pages_count, params.preview_request_id);
+    client->DoCompositeDocumentToPdf(
+        params.document_cookie, render_frame_host, content.metafile_data_handle,
+        content.data_size, content.subframe_content_info,
+        base::BindOnce(&PrintPreviewMessageHandler::OnCompositePdfDocumentDone,
+                       weak_ptr_factory_.GetWeakPtr(),
+                       params.expected_pages_count, params.preview_request_id));
+  } else {
+    NotifyUIPreviewDocumentReady(
+        params.expected_pages_count, params.preview_request_id,
+        GetDataFromHandle(content.metafile_data_handle, content.data_size));
+  }
 }
 
 void PrintPreviewMessageHandler::OnPrintPreviewFailed(int document_cookie) {
@@ -214,6 +237,63 @@ void PrintPreviewMessageHandler::OnSetOptionsFromDocument(
   print_preview_ui->OnSetOptionsFromDocument(params);
 }
 
+void PrintPreviewMessageHandler::NotifyUIPreviewPageReady(
+    int page_number,
+    int request_id,
+    scoped_refptr<base::RefCountedBytes> data_bytes) {
+  DCHECK(data_bytes);
+
+  PrintPreviewUI* print_preview_ui = GetPrintPreviewUI();
+  if (!print_preview_ui)
+    return;
+  print_preview_ui->SetPrintPreviewDataForIndex(page_number,
+                                                std::move(data_bytes));
+  print_preview_ui->OnDidPreviewPage(page_number, request_id);
+}
+
+void PrintPreviewMessageHandler::NotifyUIPreviewDocumentReady(
+    int page_count,
+    int request_id,
+    scoped_refptr<base::RefCountedBytes> data_bytes) {
+  if (!data_bytes || !data_bytes->size())
+    return;
+
+  PrintPreviewUI* print_preview_ui = GetPrintPreviewUI();
+  if (!print_preview_ui)
+    return;
+  print_preview_ui->SetPrintPreviewDataForIndex(COMPLETE_PREVIEW_DOCUMENT_INDEX,
+                                                std::move(data_bytes));
+  print_preview_ui->OnPreviewDataIsAvailable(page_count, request_id);
+}
+
+void PrintPreviewMessageHandler::OnCompositePdfPageDone(
+    int page_number,
+    int request_id,
+    mojom::PdfCompositor::Status status,
+    mojo::ScopedSharedBufferHandle handle) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (status != mojom::PdfCompositor::Status::SUCCESS) {
+    DLOG(ERROR) << "Compositing pdf failed with error " << status;
+    return;
+  }
+  NotifyUIPreviewPageReady(page_number, request_id,
+                           GetDataFromMojoHandle(std::move(handle)));
+}
+
+void PrintPreviewMessageHandler::OnCompositePdfDocumentDone(
+    int page_count,
+    int request_id,
+    mojom::PdfCompositor::Status status,
+    mojo::ScopedSharedBufferHandle handle) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (status != mojom::PdfCompositor::Status::SUCCESS) {
+    DLOG(ERROR) << "Compositing pdf failed with error " << status;
+    return;
+  }
+  NotifyUIPreviewDocumentReady(page_count, request_id,
+                               GetDataFromMojoHandle(std::move(handle)));
+}
+
 bool PrintPreviewMessageHandler::OnMessageReceived(
     const IPC::Message& message,
     content::RenderFrameHost* render_frame_host) {
@@ -222,18 +302,18 @@ bool PrintPreviewMessageHandler::OnMessageReceived(
                                    render_frame_host)
     IPC_MESSAGE_HANDLER(PrintHostMsg_RequestPrintPreview,
                         OnRequestPrintPreview)
+    IPC_MESSAGE_HANDLER(PrintHostMsg_DidPreviewPage, OnDidPreviewPage)
+    IPC_MESSAGE_HANDLER(PrintHostMsg_MetafileReadyForPrinting,
+                        OnMetafileReadyForPrinting)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   if (handled)
     return true;
 
+  handled = true;
   IPC_BEGIN_MESSAGE_MAP(PrintPreviewMessageHandler, message)
     IPC_MESSAGE_HANDLER(PrintHostMsg_DidGetPreviewPageCount,
                         OnDidGetPreviewPageCount)
-    IPC_MESSAGE_HANDLER(PrintHostMsg_DidPreviewPage,
-                        OnDidPreviewPage)
-    IPC_MESSAGE_HANDLER(PrintHostMsg_MetafileReadyForPrinting,
-                        OnMetafileReadyForPrinting)
     IPC_MESSAGE_HANDLER(PrintHostMsg_PrintPreviewFailed,
                         OnPrintPreviewFailed)
     IPC_MESSAGE_HANDLER(PrintHostMsg_DidGetDefaultPageLayout,

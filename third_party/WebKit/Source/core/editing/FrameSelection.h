@@ -28,39 +28,37 @@
 #define FrameSelection_h
 
 #include <memory>
+
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/SynchronousMutationObserver.h"
-#include "core/editing/EphemeralRange.h"
-#include "core/editing/VisiblePosition.h"
-#include "core/editing/VisibleSelection.h"
-#include "core/layout/ScrollAlignment.h"
+#include "core/editing/Forward.h"
+#include "core/editing/SetSelectionOptions.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Noncopyable.h"
+#include "platform/scroll/ScrollAlignment.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
 class DisplayItemClient;
+class Element;
 class LayoutBlock;
 class LocalFrame;
 class FrameCaret;
 class GranularityStrategy;
 class GraphicsContext;
+class NGPhysicalTextFragment;
 class Range;
 class SelectionEditor;
 class LayoutSelection;
 enum class SelectionModifyAlteration;
+enum class SelectionModifyDirection;
 class TextIteratorBehavior;
 struct PaintInvalidatorContext;
 
-enum class CursorAlignOnScroll { kIfNeeded, kAlways };
-
-enum EUserTriggered { kNotUserTriggered = 0, kUserTriggered = 1 };
-
 enum RevealExtentOption { kRevealExtent, kDoNotRevealExtent };
-
-enum class SelectionDirectionalMode { kNonDirectional, kDirectional };
 
 enum class CaretVisibility;
 
@@ -69,7 +67,6 @@ enum class HandleVisibility { kNotVisible, kVisible };
 class CORE_EXPORT FrameSelection final
     : public GarbageCollectedFinalized<FrameSelection>,
       public SynchronousMutationObserver {
-  WTF_MAKE_NONCOPYABLE(FrameSelection);
   USING_GARBAGE_COLLECTED_MIXIN(FrameSelection);
 
  public:
@@ -78,43 +75,30 @@ class CORE_EXPORT FrameSelection final
   }
   ~FrameSelection();
 
-  enum SetSelectionOption {
-    // 1 << 0 is reserved for EUserTriggered
-    kCloseTyping = 1 << 1,
-    kClearTypingStyle = 1 << 2,
-    kDoNotSetFocus = 1 << 3,
-    kDoNotClearStrategy = 1 << 4,
-  };
-  // Union of values in SetSelectionOption and EUserTriggered
-  typedef unsigned SetSelectionOptions;
-  static inline EUserTriggered SelectionOptionsToUserTriggered(
-      SetSelectionOptions options) {
-    return static_cast<EUserTriggered>(options & kUserTriggered);
-  }
-
   bool IsAvailable() const { return LifecycleContext(); }
   // You should not call |document()| when |!isAvailable()|.
   Document& GetDocument() const;
   LocalFrame* GetFrame() const { return frame_; }
   Element* RootEditableElementOrDocumentElement() const;
+  size_t CharacterIndexForPoint(const IntPoint&) const;
 
   // An implementation of |WebFrame::moveCaretSelection()|
   void MoveCaretSelection(const IntPoint&);
 
-  const VisibleSelection& ComputeVisibleSelectionInDOMTree() const;
-  const VisibleSelectionInFlatTree& ComputeVisibleSelectionInFlatTree() const;
+  VisibleSelection ComputeVisibleSelectionInDOMTree() const;
+  VisibleSelectionInFlatTree ComputeVisibleSelectionInFlatTree() const;
 
   // TODO(editing-dev): We should replace
   // |computeVisibleSelectionInDOMTreeDeprecated()| with update layout and
   // |computeVisibleSelectionInDOMTree()| to increase places hoisting update
   // layout.
-  const VisibleSelection& ComputeVisibleSelectionInDOMTreeDeprecated() const;
+  VisibleSelection ComputeVisibleSelectionInDOMTreeDeprecated() const;
 
-  void SetSelection(const SelectionInDOMTree&,
-                    SetSelectionOptions = kCloseTyping | kClearTypingStyle,
-                    CursorAlignOnScroll = CursorAlignOnScroll::kIfNeeded,
-                    TextGranularity = TextGranularity::kCharacter);
-  void SelectAll(EUserTriggered = kNotUserTriggered);
+  void SetSelection(const SelectionInDOMTree&, const SetSelectionOptions&);
+  void SetSelectionAndEndTyping(const SelectionInDOMTree&);
+  void SelectAll(SetSelectionBy);
+  void SelectAll();
+  void SelectSubString(const Element&, int offset, int count);
   void Clear();
   bool IsHidden() const;
 
@@ -124,12 +108,8 @@ class CORE_EXPORT FrameSelection final
   // setSelectionDeprecated() returns true if didSetSelectionDeprecated() should
   // be called.
   bool SetSelectionDeprecated(const SelectionInDOMTree&,
-                              SetSelectionOptions = kCloseTyping |
-                                                    kClearTypingStyle,
-                              TextGranularity = TextGranularity::kCharacter);
-  void DidSetSelectionDeprecated(
-      SetSelectionOptions = kCloseTyping | kClearTypingStyle,
-      CursorAlignOnScroll = CursorAlignOnScroll::kIfNeeded);
+                              const SetSelectionOptions&);
+  void DidSetSelectionDeprecated(const SetSelectionOptions&);
 
   // Call this after doing user-triggered selections to make it easy to delete
   // the frame you entirely selected.
@@ -138,17 +118,17 @@ class CORE_EXPORT FrameSelection final
   bool Contains(const LayoutPoint&);
 
   bool Modify(SelectionModifyAlteration,
-              SelectionDirection,
+              SelectionModifyDirection,
               TextGranularity,
-              EUserTriggered = kNotUserTriggered);
+              SetSelectionBy);
 
   // Moves the selection extent based on the selection granularity strategy.
   // This function does not allow the selection to collapse. If the new
   // extent is resolved to the same position as the current base, this
   // function will do nothing.
   void MoveRangeSelectionExtent(const IntPoint&);
-  void MoveRangeSelection(const VisiblePosition& base,
-                          const VisiblePosition& extent,
+  void MoveRangeSelection(const IntPoint& base_point,
+                          const IntPoint& extent_point,
                           TextGranularity);
 
   TextGranularity Granularity() const { return granularity_; }
@@ -158,12 +138,17 @@ class CORE_EXPORT FrameSelection final
   bool ShouldPaintCaret(const LayoutBlock&) const;
 
   // Bounds of (possibly transformed) caret in absolute coords
-  IntRect AbsoluteCaretBounds();
+  IntRect AbsoluteCaretBounds() const;
+
+  // Returns anchor and focus bounds in absolute coords.
+  // If the selection range is empty, returns the caret bounds.
+  // Note: this updates styles and layout, use cautiously.
+  bool ComputeAbsoluteBounds(IntRect& anchor, IntRect& focus) const;
 
   void DidChangeFocus();
 
-  const SelectionInDOMTree& GetSelectionInDOMTree() const;
-  bool IsDirectional() const { return GetSelectionInDOMTree().IsDirectional(); }
+  SelectionInDOMTree GetSelectionInDOMTree() const;
+  bool IsDirectional() const;
 
   void DocumentAttached(Document*);
 
@@ -195,30 +180,29 @@ class CORE_EXPORT FrameSelection final
 
   void SetUseSecureKeyboardEntryWhenActive(bool);
 
-  bool IsHandleVisible() const;
+  bool IsHandleVisible() const { return is_handle_visible_; }
+  bool ShouldShrinkNextTap() const { return should_shrink_next_tap_; }
 
   void UpdateSecureKeyboardEntryIfActive();
 
   // Returns true if a word is selected.
-  bool SelectWordAroundPosition(const VisiblePosition&);
+  bool SelectWordAroundCaret();
 
 #ifndef NDEBUG
   void ShowTreeForThis() const;
 #endif
 
   void SetFocusedNodeIfNeeded();
-  void NotifyTextControlOfSelectionChange(EUserTriggered);
+  void NotifyTextControlOfSelectionChange(SetSelectionBy);
 
   String SelectedHTMLForClipboard() const;
   String SelectedText(const TextIteratorBehavior&) const;
   String SelectedText() const;
   String SelectedTextForClipboard() const;
 
-  // The bounds are clipped to the viewport as this is what callers expect.
   // This returns last layouted selection bounds of LayoutSelection rather than
   // SelectionEditor keeps.
-  LayoutRect Bounds() const;
-  LayoutRect UnclippedBounds() const;
+  LayoutRect AbsoluteUnclippedBounds() const;
 
   // TODO(tkent): This function has a bug that scrolling doesn't work well in
   // a case of RangeSelection. crbug.com/443061
@@ -237,20 +221,19 @@ class CORE_EXPORT FrameSelection final
 
   FrameCaret& FrameCaretForTesting() const { return *frame_caret_; }
 
-  std::pair<int, int> LayoutSelectionStartEnd();
-  base::Optional<int> LayoutSelectionStart() const;
-  base::Optional<int> LayoutSelectionEnd() const;
+  WTF::Optional<unsigned> LayoutSelectionStart() const;
+  WTF::Optional<unsigned> LayoutSelectionEnd() const;
   void ClearLayoutSelection();
+  std::pair<unsigned, unsigned> LayoutSelectionStartEndForNG(
+      const NGPhysicalTextFragment&) const;
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   friend class CaretDisplayItemClientTest;
   friend class FrameSelectionTest;
-  friend class PaintControllerPaintTestForSlimmingPaintV1AndV2;
+  friend class PaintControllerPaintTestBase;
   friend class SelectionControllerTest;
-  FRIEND_TEST_ALL_PREFIXES(PaintControllerPaintTestForSlimmingPaintV1AndV2,
-                           FullDocumentPaintingWithCaret);
 
   explicit FrameSelection(LocalFrame&);
 
@@ -258,7 +241,7 @@ class CORE_EXPORT FrameSelection final
 
   // Note: We have |selectionInFlatTree()| for unit tests, we should
   // use |visibleSelection<EditingInFlatTreeStrategy>()|.
-  const VisibleSelectionInFlatTree& GetSelectionInFlatTree() const;
+  VisibleSelectionInFlatTree GetSelectionInFlatTree() const;
 
   void NotifyAccessibilityForSelectionChange();
   void NotifyCompositorForSelectionChange();
@@ -268,14 +251,11 @@ class CORE_EXPORT FrameSelection final
 
   void SetUseSecureKeyboardEntry(bool);
 
-  void UpdateSelectionIfNeeded(const Position& base,
-                               const Position& extent,
-                               const Position& start,
-                               const Position& end);
-
   GranularityStrategy* GetGranularityStrategy();
 
   IntRect ComputeRectToScroll(RevealExtentOption);
+
+  void MoveRangeSelectionInternal(const SelectionInDOMTree&, TextGranularity);
 
   // Implementation of |SynchronousMutationObserver| member functions.
   void ContextDestroyed(Document*) final;
@@ -290,6 +270,11 @@ class CORE_EXPORT FrameSelection final
   LayoutUnit x_pos_for_vertical_arrow_navigation_;
 
   bool focused_ : 1;
+  bool is_handle_visible_ = false;
+  // TODO(editing-dev): We should change is_directional_ type to enum.
+  // as directional can have three values forward, backward or directionless.
+  bool is_directional_;
+  bool should_shrink_next_tap_ = false;
 
   // Controls text granularity used to adjust the selection's extent in
   // moveRangeSelectionExtent.
@@ -297,6 +282,8 @@ class CORE_EXPORT FrameSelection final
 
   const Member<FrameCaret> frame_caret_;
   bool use_secure_keyboard_entry_when_active_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(FrameSelection);
 };
 
 }  // namespace blink

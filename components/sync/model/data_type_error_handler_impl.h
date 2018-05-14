@@ -9,7 +9,6 @@
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/single_thread_task_runner.h"
 #include "components/sync/model/data_type_error_handler.h"
@@ -28,7 +27,7 @@ class DataTypeErrorHandlerImpl : public DataTypeErrorHandler {
   ~DataTypeErrorHandlerImpl() override;
 
   void OnUnrecoverableError(const SyncError& error) override;
-  SyncError CreateAndUploadError(const tracked_objects::Location& location,
+  SyncError CreateAndUploadError(const base::Location& location,
                                  const std::string& message,
                                  ModelType type) override;
   std::unique_ptr<DataTypeErrorHandler> Copy() const override;

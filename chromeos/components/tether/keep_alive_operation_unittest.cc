@@ -25,11 +25,11 @@ namespace {
 constexpr base::TimeDelta kKeepAliveTickleResponseTime =
     base::TimeDelta::FromSeconds(3);
 
-class TestObserver : public KeepAliveOperation::Observer {
+class TestObserver final : public KeepAliveOperation::Observer {
  public:
   TestObserver() : has_run_callback_(false) {}
 
-  virtual ~TestObserver() {}
+  virtual ~TestObserver() = default;
 
   bool has_run_callback() { return has_run_callback_; }
 
@@ -76,7 +76,7 @@ class KeepAliveOperationTest : public testing::Test {
         test_device_(cryptauth::GenerateTestRemoteDevices(1)[0]) {}
 
   void SetUp() override {
-    fake_ble_connection_manager_ = base::MakeUnique<FakeBleConnectionManager>();
+    fake_ble_connection_manager_ = std::make_unique<FakeBleConnectionManager>();
 
     operation_ = base::WrapUnique(new KeepAliveOperation(
         test_device_, fake_ble_connection_manager_.get()));
@@ -84,9 +84,8 @@ class KeepAliveOperationTest : public testing::Test {
     test_observer_ = base::WrapUnique(new TestObserver());
     operation_->AddObserver(test_observer_.get());
 
-    test_clock_ = new base::SimpleTestClock();
-    test_clock_->SetNow(base::Time::UnixEpoch());
-    operation_->SetClockForTest(base::WrapUnique(test_clock_));
+    test_clock_.SetNow(base::Time::UnixEpoch());
+    operation_->SetClockForTest(&test_clock_);
 
     operation_->Initialize();
   }
@@ -98,7 +97,7 @@ class KeepAliveOperationTest : public testing::Test {
     std::vector<FakeBleConnectionManager::SentMessage>& sent_messages =
         fake_ble_connection_manager_->sent_messages();
     ASSERT_EQ(1u, sent_messages.size());
-    EXPECT_EQ(test_device_, sent_messages[0].remote_device);
+    EXPECT_EQ(test_device_.GetDeviceId(), sent_messages[0].device_id);
     EXPECT_EQ(keep_alive_tickle_string_, sent_messages[0].message);
   }
 
@@ -106,7 +105,7 @@ class KeepAliveOperationTest : public testing::Test {
   const cryptauth::RemoteDevice test_device_;
 
   std::unique_ptr<FakeBleConnectionManager> fake_ble_connection_manager_;
-  base::SimpleTestClock* test_clock_;
+  base::SimpleTestClock test_clock_;
   std::unique_ptr<TestObserver> test_observer_;
 
   std::unique_ptr<KeepAliveOperation> operation_;
@@ -123,10 +122,10 @@ TEST_F(KeepAliveOperationTest, TestSendsKeepAliveTickleAndReceivesResponse) {
   SimulateDeviceAuthenticationAndVerifyMessageSent();
   EXPECT_FALSE(test_observer_->has_run_callback());
 
-  test_clock_->Advance(kKeepAliveTickleResponseTime);
+  test_clock_.Advance(kKeepAliveTickleResponseTime);
 
   fake_ble_connection_manager_->ReceiveMessage(
-      test_device_, CreateKeepAliveTickleResponseString());
+      test_device_.GetDeviceId(), CreateKeepAliveTickleResponseString());
   EXPECT_TRUE(test_observer_->has_run_callback());
   EXPECT_EQ(test_device_, test_observer_->last_remote_device_received());
   ASSERT_TRUE(test_observer_->last_device_status_received());
@@ -140,18 +139,9 @@ TEST_F(KeepAliveOperationTest, TestSendsKeepAliveTickleAndReceivesResponse) {
 
 TEST_F(KeepAliveOperationTest, TestCannotConnect) {
   // Simulate the device failing to connect.
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::CONNECTING);
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::DISCONNECTED);
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::CONNECTING);
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::DISCONNECTED);
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::CONNECTING);
-  fake_ble_connection_manager_->SetDeviceStatus(
-      test_device_, cryptauth::SecureChannel::Status::DISCONNECTED);
+  fake_ble_connection_manager_->SimulateUnansweredConnectionAttempts(
+      test_device_.GetDeviceId(),
+      MessageTransferOperation::kMaxEmptyScansPerDevice);
 
   // The maximum number of connection failures has occurred.
   EXPECT_TRUE(test_observer_->has_run_callback());

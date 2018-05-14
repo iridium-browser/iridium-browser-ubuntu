@@ -6,11 +6,13 @@
 
 #include <algorithm>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/mac/mac_logging.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/macros.h"
 #include "base/memory/free_deleter.h"
@@ -22,8 +24,10 @@
 #include "media/audio/mac/audio_auhal_mac.h"
 #include "media/audio/mac/audio_input_mac.h"
 #include "media/audio/mac/audio_low_latency_input_mac.h"
+#include "media/audio/mac/coreaudio_dispatch_override.h"
 #include "media/audio/mac/scoped_audio_unit.h"
 #include "media/base/audio_parameters.h"
+#include "media/base/audio_timestamp_helper.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/channel_layout.h"
 #include "media/base/limits.h"
@@ -38,6 +42,10 @@ static const int kMaxOutputStreams = 50;
 // Default sample-rate on most Apple hardware.
 static const int kFallbackSampleRate = 44100;
 
+static bool GetDeviceChannels(AudioUnit audio_unit,
+                              AUElement element,
+                              int* channels);
+
 // Helper method to construct AudioObjectPropertyAddress structure given
 // property selector and scope. The property element is always set to
 // kAudioObjectPropertyElementMaster.
@@ -50,6 +58,9 @@ static AudioObjectPropertyAddress GetAudioObjectPropertyAddress(
       selector, scope, kAudioObjectPropertyElementMaster};
   return property_address;
 }
+
+static const AudioObjectPropertyAddress kNoiseReductionPropertyAddress = {
+    'nzca', kAudioDevicePropertyScopeInput, kAudioObjectPropertyElementMaster};
 
 // Get IO buffer size range from HAL given device id and scope.
 static OSStatus GetIOBufferFrameSizeRange(AudioDeviceID device_id,
@@ -159,6 +170,17 @@ static void GetAudioDeviceInfo(bool is_input,
                                             NULL,
                                             &size);
     if (result || !size)
+      continue;
+
+    // Ignore aggregate devices that get created when we use
+    // kAudioUnitSubType_VoiceProcessingIO.
+    property_address.mSelector = kAudioDevicePropertyTransportType;
+    property_address.mScope = kAudioObjectPropertyScopeGlobal;
+    UInt32 transport_type = 0;
+    size = sizeof(transport_type);
+    result = AudioObjectGetPropertyData(device_ids[i], &property_address, 0,
+                                        NULL, &size, &transport_type);
+    if (result == noErr && transport_type == kAudioDeviceTransportTypeAggregate)
       continue;
 
     // Get device UID.
@@ -331,6 +353,27 @@ static bool GetDeviceTotalChannelCount(AudioDeviceID device,
   return true;
 }
 
+// Returns the channel count from the |audio_unit|'s stream format for input
+// scope / input element or output scope / output element.
+static bool GetAudioUnitStreamFormatChannelCount(AudioUnit audio_unit,
+                                                 AUElement element,
+                                                 int* channels) {
+  AudioStreamBasicDescription stream_format;
+  UInt32 size = sizeof(stream_format);
+  OSStatus result =
+      AudioUnitGetProperty(audio_unit, kAudioUnitProperty_StreamFormat,
+                           element == AUElement::OUTPUT ? kAudioUnitScope_Output
+                                                        : kAudioUnitScope_Input,
+                           element, &stream_format, &size);
+  if (result != noErr) {
+    OSSTATUS_DLOG(ERROR, result) << "Failed to get AudioUnit stream format.";
+    return false;
+  }
+
+  *channels = stream_format.mChannelsPerFrame;
+  return true;
+}
+
 // Returns the channel layout for |device| as provided by the AudioUnit attached
 // to that device matching |element|. Returns true if the count could be pulled
 // from the AudioUnit successfully, false otherwise.
@@ -339,6 +382,27 @@ static bool GetDeviceChannels(AudioDeviceID device,
                               int* channels) {
   DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   CHECK(channels);
+
+  // For input, get the channel count directly from the AudioUnit's stream
+  // format.
+  // TODO(https://crbug.com/796163): Find out if we can use channel layout on
+  // input element, or confirm that we can't.
+  if (element == AUElement::INPUT) {
+    ScopedAudioUnit au(device, element);
+    if (!au.is_valid())
+      return false;
+
+    if (!GetAudioUnitStreamFormatChannelCount(au.audio_unit(), element,
+                                              channels)) {
+      return false;
+    }
+
+    DVLOG(1) << "Input channels: " << *channels;
+    return true;
+  }
+
+  // For output, use the channel layout to determine channel count.
+  DCHECK(element == AUElement::OUTPUT);
 
   // If the device has more channels than possible for layouts to express, use
   // the total count of channels on the device; as of this writing, macOS will
@@ -360,6 +424,12 @@ static bool GetDeviceChannels(AudioDeviceID device,
   if (!au.is_valid())
     return false;
 
+  return GetDeviceChannels(au.audio_unit(), element, channels);
+}
+
+static bool GetDeviceChannels(AudioUnit audio_unit,
+                              AUElement element,
+                              int* channels) {
   // Attempt to retrieve the channel layout from the AudioUnit.
   //
   // Note: We don't use kAudioDevicePropertyPreferredChannelLayout on the device
@@ -367,21 +437,20 @@ static bool GetDeviceChannels(AudioDeviceID device,
   UInt32 size;
   Boolean writable;
   OSStatus result = AudioUnitGetPropertyInfo(
-      au.audio_unit(), kAudioUnitProperty_AudioChannelLayout,
-      kAudioUnitScope_Output, element, &size, &writable);
+      audio_unit, kAudioUnitProperty_AudioChannelLayout, kAudioUnitScope_Output,
+      element, &size, &writable);
   if (result != noErr) {
     OSSTATUS_DLOG(ERROR, result)
         << "Failed to get property info for AudioUnit channel layout.";
-    return false;
   }
 
   std::unique_ptr<uint8_t[]> layout_storage(new uint8_t[size]);
   AudioChannelLayout* layout =
       reinterpret_cast<AudioChannelLayout*>(layout_storage.get());
 
-  result = AudioUnitGetProperty(au.audio_unit(),
-                                kAudioUnitProperty_AudioChannelLayout,
-                                kAudioUnitScope_Output, element, layout, &size);
+  result =
+      AudioUnitGetProperty(audio_unit, kAudioUnitProperty_AudioChannelLayout,
+                           kAudioUnitScope_Output, element, layout, &size);
   if (result != noErr) {
     OSSTATUS_LOG(ERROR, result) << "Failed to get AudioUnit channel layout.";
     return false;
@@ -436,8 +505,7 @@ static bool GetDeviceChannels(AudioDeviceID device,
     }
   }
 
-  DVLOG(1) << (element == AUElement::OUTPUT ? "Output" : "Input")
-           << " channels: " << *channels;
+  DVLOG(1) << "Output channels: " << *channels;
   return true;
 }
 
@@ -529,6 +597,33 @@ void AudioManagerMac::ShutdownOnAudioThread() {
   // and IncreaseIOBufferSizeIfPossible() which both touches native Core Audio
   // APIs and they can fail and disrupt tests during shutdown.
   in_shutdown_ = true;
+
+  // Even if tasks to close the streams are enqueued, they would not run
+  // leading to CHECKs getting hit in the destructor about open streams. Close
+  // them explicitly here. crbug.com/608049.
+  for (auto iter = basic_input_streams_.begin();
+       iter != basic_input_streams_.end();) {
+    // Note: Closing the stream will invalidate the iterator.
+    // Increment the iterator before closing the stream.
+    AudioInputStream* stream = *iter++;
+    stream->Close();
+  }
+  for (auto iter = low_latency_input_streams_.begin();
+       iter != low_latency_input_streams_.end();) {
+    // Note: Closing the stream will invalidate the iterator.
+    // Increment the iterator before closing the stream.
+    AudioInputStream* stream = *iter++;
+    stream->Close();
+  }
+  CHECK(basic_input_streams_.empty());
+  CHECK(low_latency_input_streams_.empty());
+
+  // Deinitialize power observer on audio thread, since it's initialized on the
+  // audio thread. Typically, constructor/destructor and
+  // InitializeOnAudioThread/ShutdownOnAudioThread are all run on the main
+  // thread, but this might not be true in testing.
+  power_observer_.reset();
+
   AudioManagerBase::ShutdownOnAudioThread();
 }
 
@@ -617,10 +712,22 @@ AudioParameters AudioManagerMac::GetInputStreamParameters(
   // http://crbug.com/154352.
   const int buffer_size = ChooseBufferSize(true, sample_rate);
 
-  // TODO(xians): query the native channel layout for the specific device.
-  return AudioParameters(
-      AudioParameters::AUDIO_PCM_LOW_LATENCY, channel_layout,
-      sample_rate, 16, buffer_size);
+  // TODO(grunell): query the native channel layout for the specific device.
+  AudioParameters params(AudioParameters::AUDIO_PCM_LOW_LATENCY, channel_layout,
+                         sample_rate, 16, buffer_size);
+
+  if (DeviceSupportsAmbientNoiseReduction(device)) {
+    params.set_effects(AudioParameters::NOISE_SUPPRESSION);
+  }
+
+  if (base::mac::IsAtLeastOS10_12() &&
+      (params.channel_layout() == CHANNEL_LAYOUT_MONO ||
+       params.channel_layout() == CHANNEL_LAYOUT_STEREO)) {
+    params.set_effects(params.effects() |
+                       AudioParameters::EXPERIMENTAL_ECHO_CANCELLER);
+  }
+
+  return params;
 }
 
 std::string AudioManagerMac::GetAssociatedOutputDeviceID(
@@ -650,7 +757,7 @@ std::string AudioManagerMac::GetAssociatedOutputDeviceID(
 
   std::vector<std::string> associated_devices;
   for (int i = 0; i < device_count; ++i) {
-    // Get the number of  output channels of the device.
+    // Get the number of output channels of the device.
     pa.mSelector = kAudioDevicePropertyStreams;
     size = 0;
     result = AudioObjectGetPropertyDataSize(devices.get()[i],
@@ -759,8 +866,18 @@ AudioOutputStream* AudioManagerMac::MakeLowLatencyOutputStream(
 
 std::string AudioManagerMac::GetDefaultOutputDeviceID() {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+  return GetDefaultDeviceID(false /* is_input */);
+}
+
+std::string AudioManagerMac::GetDefaultInputDeviceID() {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+  return GetDefaultDeviceID(true /* is_input */);
+}
+
+std::string AudioManagerMac::GetDefaultDeviceID(bool is_input) {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   AudioDeviceID device_id = kAudioObjectUnknown;
-  if (!GetDefaultOutputDevice(&device_id))
+  if (!GetDefaultDevice(&device_id, is_input))
     return std::string();
 
   const AudioObjectPropertyAddress property_address = {
@@ -805,13 +922,19 @@ AudioInputStream* AudioManagerMac::MakeLowLatencyInputStream(
   // Gets the AudioDeviceID that refers to the AudioInputDevice with the device
   // unique id. This AudioDeviceID is used to set the device for Audio Unit.
   AudioDeviceID audio_device_id = GetAudioDeviceIdByUId(true, device_id);
-  AUAudioInputStream* stream = NULL;
-  if (audio_device_id != kAudioObjectUnknown) {
-    stream =
-        new AUAudioInputStream(this, params, audio_device_id, log_callback);
-    low_latency_input_streams_.push_back(stream);
+  if (audio_device_id == kAudioObjectUnknown) {
+    return nullptr;
   }
 
+  using VoiceProcessingMode = AUAudioInputStream::VoiceProcessingMode;
+  VoiceProcessingMode voice_processing_mode =
+      (params.effects() & AudioParameters::ECHO_CANCELLER)
+          ? VoiceProcessingMode::ENABLED
+          : VoiceProcessingMode::DISABLED;
+
+  auto* stream = new AUAudioInputStream(this, params, audio_device_id,
+                                        log_callback, voice_processing_mode);
+  low_latency_input_streams_.push_back(stream);
   return stream;
 }
 
@@ -870,6 +993,7 @@ AudioParameters AudioManagerMac::GetPreferredOutputStreamParameters(
 
 void AudioManagerMac::InitializeOnAudioThread() {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+  InitializeCoreAudioDispatchOverride();
   power_observer_.reset(new AudioPowerObserver());
 }
 
@@ -1046,6 +1170,134 @@ bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
   return (result == noErr);
 }
 
+// static
+base::TimeDelta AudioManagerMac::GetHardwareLatency(
+    AudioUnit audio_unit,
+    AudioDeviceID device_id,
+    AudioObjectPropertyScope scope,
+    int sample_rate) {
+  if (!audio_unit || device_id == kAudioObjectUnknown) {
+    DLOG(WARNING) << "Audio unit object is NULL or device ID is unknown";
+    return base::TimeDelta();
+  }
+
+  // Get audio unit latency.
+  Float64 audio_unit_latency_sec = 0.0;
+  UInt32 size = sizeof(audio_unit_latency_sec);
+  OSStatus result = AudioUnitGetProperty(audio_unit, kAudioUnitProperty_Latency,
+                                         kAudioUnitScope_Global, 0,
+                                         &audio_unit_latency_sec, &size);
+  OSSTATUS_DLOG_IF(WARNING, result != noErr, result)
+      << "Could not get audio unit latency";
+
+  // Get audio device latency.
+  AudioObjectPropertyAddress property_address = {
+      kAudioDevicePropertyLatency, scope, kAudioObjectPropertyElementMaster};
+  UInt32 device_latency_frames = 0;
+  size = sizeof(device_latency_frames);
+  result = AudioObjectGetPropertyData(device_id, &property_address, 0, nullptr,
+                                      &size, &device_latency_frames);
+  OSSTATUS_DLOG_IF(WARNING, result != noErr, result)
+      << "Could not get audio device latency.";
+
+  // Retrieve stream ids and take the stream latency from the first stream.
+  // There may be multiple streams with different latencies, but since we're
+  // likely using this delay information for a/v sync we must choose one of
+  // them; Apple recommends just taking the first entry.
+  //
+  // TODO(dalecurtis): Refactor all these "get data size" + "get data" calls
+  // into a common utility function that just returns a std::unique_ptr.
+  UInt32 stream_latency_frames = 0;
+  property_address.mSelector = kAudioDevicePropertyStreams;
+  result = AudioObjectGetPropertyDataSize(device_id, &property_address, 0,
+                                          nullptr, &size);
+  if (result == noErr && size >= sizeof(AudioStreamID)) {
+    std::unique_ptr<uint8_t[]> stream_id_storage(new uint8_t[size]);
+    AudioStreamID* stream_ids =
+        reinterpret_cast<AudioStreamID*>(stream_id_storage.get());
+    result = AudioObjectGetPropertyData(device_id, &property_address, 0,
+                                        nullptr, &size, stream_ids);
+    if (result == noErr) {
+      property_address.mSelector = kAudioStreamPropertyLatency;
+      size = sizeof(stream_latency_frames);
+      result =
+          AudioObjectGetPropertyData(stream_ids[0], &property_address, 0,
+                                     nullptr, &size, &stream_latency_frames);
+      OSSTATUS_DLOG_IF(WARNING, result != noErr, result)
+          << "Could not get stream latency for stream #0.";
+    } else {
+      OSSTATUS_DLOG(WARNING, result)
+          << "Could not get audio device stream ids.";
+    }
+  } else {
+    OSSTATUS_DLOG_IF(WARNING, result != noErr, result)
+        << "Could not get audio device stream ids size.";
+  }
+
+  return base::TimeDelta::FromSecondsD(audio_unit_latency_sec) +
+         AudioTimestampHelper::FramesToTime(
+             device_latency_frames + stream_latency_frames, sample_rate);
+}
+
+bool AudioManagerMac::DeviceSupportsAmbientNoiseReduction(
+    AudioDeviceID device_id) {
+  return AudioObjectHasProperty(device_id, &kNoiseReductionPropertyAddress);
+}
+
+bool AudioManagerMac::SuppressNoiseReduction(AudioDeviceID device_id) {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+  DCHECK(DeviceSupportsAmbientNoiseReduction(device_id));
+  NoiseReductionState& state = device_noise_reduction_states_[device_id];
+  if (state.suppression_count == 0) {
+    UInt32 initially_enabled = 0;
+    UInt32 size = sizeof(initially_enabled);
+    OSStatus result =
+        AudioObjectGetPropertyData(device_id, &kNoiseReductionPropertyAddress,
+                                   0, nullptr, &size, &initially_enabled);
+    if (result != noErr)
+      return false;
+
+    if (initially_enabled) {
+      const UInt32 disable = 0;
+      OSStatus result =
+          AudioObjectSetPropertyData(device_id, &kNoiseReductionPropertyAddress,
+                                     0, nullptr, sizeof(disable), &disable);
+      if (result != noErr) {
+        OSSTATUS_DLOG(WARNING, result)
+            << "Failed to disable ambient noise reduction for device: "
+            << std::hex << device_id;
+      }
+      state.initial_state = NoiseReductionState::ENABLED;
+    } else {
+      state.initial_state = NoiseReductionState::DISABLED;
+    }
+  }
+
+  // Only increase the counter if suppression succeeded or is already active.
+  ++state.suppression_count;
+  return true;
+}
+
+void AudioManagerMac::UnsuppressNoiseReduction(AudioDeviceID device_id) {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+  NoiseReductionState& state = device_noise_reduction_states_[device_id];
+  DCHECK_NE(state.suppression_count, 0);
+  --state.suppression_count;
+  if (state.suppression_count == 0) {
+    if (state.initial_state == NoiseReductionState::ENABLED) {
+      const UInt32 enable = 1;
+      OSStatus result =
+          AudioObjectSetPropertyData(device_id, &kNoiseReductionPropertyAddress,
+                                     0, nullptr, sizeof(enable), &enable);
+      if (result != noErr) {
+        OSSTATUS_DLOG(WARNING, result)
+            << "Failed to re-enable ambient noise reduction for device: "
+            << std::hex << device_id;
+      }
+    }
+  }
+}
+
 bool AudioManagerMac::IncreaseIOBufferSizeIfPossible(AudioDeviceID device_id) {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   DVLOG(1) << "IncreaseIOBufferSizeIfPossible(id=0x" << std::hex << device_id
@@ -1180,7 +1432,7 @@ void AudioManagerMac::ReleaseInputStream(AudioInputStream* stream) {
 std::unique_ptr<AudioManager> CreateAudioManager(
     std::unique_ptr<AudioThread> audio_thread,
     AudioLogFactory* audio_log_factory) {
-  return base::MakeUnique<AudioManagerMac>(std::move(audio_thread),
+  return std::make_unique<AudioManagerMac>(std::move(audio_thread),
                                            audio_log_factory);
 }
 

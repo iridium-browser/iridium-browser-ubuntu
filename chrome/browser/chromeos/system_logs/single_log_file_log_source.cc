@@ -22,12 +22,6 @@ using SupportedSource = SingleLogFileLogSource::SupportedSource;
 constexpr char kDefaultSystemLogDirPath[] = "/var/log";
 constexpr int kMaxNumAllowedLogRotationsDuringFileRead = 3;
 
-// For log files that contain old logging, start reading from the first
-// timestamp that is less than this amount of time before the current session of
-// Chrome started.
-constexpr base::TimeDelta kLogCutoffTimeBeforeChromeStart =
-    base::TimeDelta::FromMinutes(10);
-
 // A custom timestamp for when the current Chrome session started. Used during
 // testing to override the actual time.
 const base::Time* g_chrome_start_time_for_test = nullptr;
@@ -35,18 +29,28 @@ const base::Time* g_chrome_start_time_for_test = nullptr;
 // Converts a logs source type to the corresponding file path, relative to the
 // base system log directory path. In the future, if non-file source types are
 // added, this function should return an empty file path.
-base::FilePath GetLogFileSourceRelativeFilePath(
+base::FilePath::StringType GetLogFileSourceRelativeFilePathValue(
     SingleLogFileLogSource::SupportedSource source) {
   switch (source) {
     case SupportedSource::kMessages:
-      return base::FilePath("messages");
+      return "messages";
     case SupportedSource::kUiLatest:
-      return base::FilePath("ui/ui.LATEST");
+      return "ui/ui.LATEST";
     case SupportedSource::kAtrusLog:
-      return base::FilePath("atrus.log");
+      return "atrus.log";
+    case SupportedSource::kNetLog:
+      return "net.log";
+    case SupportedSource::kEventLog:
+      return "eventlog.txt";
+    case SupportedSource::kUpdateEngineLog:
+      return "update_engine.log";
+    case SupportedSource::kPowerdLatest:
+      return "power_manager/powerd.LATEST";
+    case SupportedSource::kPowerdPrevious:
+      return "power_manager/powerd.PREVIOUS";
   }
   NOTREACHED();
-  return base::FilePath();
+  return base::FilePath::StringType();
 }
 
 // Returns the inode value of file at |path|, or 0 if it doesn't exist or is
@@ -71,87 +75,10 @@ void AppendToSystemLogsResponse(SystemLogsResponse* response,
     iter->second += value;
 }
 
-// Returns the time that the current Chrome process started. Will instead return
-// |*g_chrome_start_time_for_test| if it is set.
-base::Time GetChromeStartTime() {
-  if (g_chrome_start_time_for_test)
-    return *g_chrome_start_time_for_test;
-  return base::CurrentProcessInfo::CreationTime();
-}
-
-// Returns true if |source_type| is a log source that should be read starting
-// from a particular timestamp rather than from the beginning of the file.
-bool ShouldReadFromTimestampBasedOffset(SupportedSource source_type) {
-  switch (source_type) {
-    case SupportedSource::kMessages:
-    case SupportedSource::kAtrusLog:
-      return true;
-    case SupportedSource::kUiLatest:
-      return false;
-  }
-  NOTREACHED();
-  return false;
-}
-
-// Returns the file offset into |path| of the first line that starts with a
-// timestamp no earlier than |time|. Returns 0 if no such offset could be
-// determined (e.g. can't open file, no timestamps present).
-size_t GetFirstFileOffsetWithTime(const base::FilePath& path,
-                                  const base::Time& time) {
-  base::File file(path, base::File::FLAG_OPEN | base::File::FLAG_READ);
-  if (!file.IsValid())
-    return 0;
-
-  const size_t file_size = file.GetLength();
-  if (file_size == 0)
-    return 0;
-
-  std::string file_contents;
-  file_contents.resize(file_size);
-  size_t size_read = file.ReadAtCurrentPos(&file_contents[0], file_size);
-
-  if (size_read < file_size)
-    return 0;
-
-  std::vector<base::StringPiece> lines = base::SplitStringPiece(
-      file_contents, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
-
-  bool any_timestamp_found = false;
-
-  // Find the first line with timestamp >= |time|. If a line has no timestamp,
-  // just advance to the next line.
-  size_t offset = 0;
-  base::Time timestamp;
-  for (const auto& line : lines) {
-    if (base::Time::FromString(line.as_string().c_str(), &timestamp)) {
-      any_timestamp_found = true;
-
-      if (timestamp >= time)
-        break;
-    }
-
-    // Include the newline in the offset.
-    offset += line.length() + 1;
-  }
-
-  // If the file does not have any timestamps at all, don't skip any contents.
-  if (!any_timestamp_found)
-    return 0;
-
-  if (offset > 0 && offset >= file_size && lines.back().as_string().empty()) {
-    // The last line may or may not have ended with a newline. If it ended with
-    // a newline, |lines| would end with an extra empty line after the newline.
-    // This would have resulted in an extra nonexistent newline being counted
-    // during the computation of |offset|.
-    --offset;
-  }
-  return offset;
-}
-
 }  // namespace
 
 SingleLogFileLogSource::SingleLogFileLogSource(SupportedSource source_type)
-    : SystemLogsSource(GetLogFileSourceRelativeFilePath(source_type).value()),
+    : SystemLogsSource(GetLogFileSourceRelativeFilePathValue(source_type)),
       source_type_(source_type),
       log_file_dir_path_(kDefaultSystemLogDirPath),
       num_bytes_read_(0),
@@ -166,22 +93,23 @@ void SingleLogFileLogSource::SetChromeStartTimeForTesting(
   g_chrome_start_time_for_test = start_time;
 }
 
-void SingleLogFileLogSource::Fetch(const SysLogsSourceCallback& callback) {
+void SingleLogFileLogSource::Fetch(SysLogsSourceCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!callback.is_null());
 
-  SystemLogsResponse* response = new SystemLogsResponse;
+  auto response = std::make_unique<SystemLogsResponse>();
+  auto* response_ptr = response.get();
   base::PostTaskWithTraitsAndReply(
       FROM_HERE,
       base::TaskTraits(base::MayBlock(), base::TaskPriority::BACKGROUND),
-      base::Bind(&SingleLogFileLogSource::ReadFile,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 kMaxNumAllowedLogRotationsDuringFileRead, response),
-      base::Bind(callback, base::Owned(response)));
+      base::BindOnce(&SingleLogFileLogSource::ReadFile,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     kMaxNumAllowedLogRotationsDuringFileRead, response_ptr),
+      base::BindOnce(std::move(callback), std::move(response)));
 }
 
 base::FilePath SingleLogFileLogSource::GetLogFilePath() const {
-  return base::FilePath(log_file_dir_path_).Append(source_name());
+  return log_file_dir_path_.Append(source_name());
 }
 
 void SingleLogFileLogSource::ReadFile(size_t num_rotations_allowed,
@@ -193,18 +121,7 @@ void SingleLogFileLogSource::ReadFile(size_t num_rotations_allowed,
     if (!file_.IsValid())
       return;
 
-    // Determine actual offset from which to start reading.
-    if (ShouldReadFromTimestampBasedOffset(source_type_)) {
-      const base::Time earliest_log_time =
-          GetChromeStartTime() - kLogCutoffTimeBeforeChromeStart;
-
-      num_bytes_read_ =
-          GetFirstFileOffsetWithTime(GetLogFilePath(), earliest_log_time);
-    } else {
-      num_bytes_read_ = 0;
-    }
-    file_.Seek(base::File::FROM_BEGIN, num_bytes_read_);
-
+    num_bytes_read_ = 0;
     file_inode_ = GetInodeValue(GetLogFilePath());
   }
 
@@ -252,8 +169,7 @@ void SingleLogFileLogSource::ReadFile(size_t num_rotations_allowed,
   num_bytes_read_ += size_read;
 
   // Pass it back to the callback.
-  AppendToSystemLogsResponse(result, source_name(),
-                             anonymizer_.Anonymize(result_string));
+  AppendToSystemLogsResponse(result, source_name(), result_string);
 
   // If the file was rotated, close the file handle and call this function
   // again, to read from the new file.

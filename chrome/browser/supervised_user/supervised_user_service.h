@@ -80,7 +80,7 @@ class SupervisedUserService : public KeyedService,
                               public syncer::SyncTypePreferenceProvider,
 #if !defined(OS_ANDROID)
                               public syncer::SyncServiceObserver,
-                              public chrome::BrowserListObserver,
+                              public BrowserListObserver,
 #endif
                               public SupervisedUserURLFilter::Observer {
  public:
@@ -213,7 +213,7 @@ class SupervisedUserService : public KeyedService,
   // syncer::SyncServiceObserver implementation:
   void OnStateChanged(syncer::SyncService* sync) override;
 
-  // chrome::BrowserListObserver implementation:
+  // BrowserListObserver implementation:
   void OnBrowserSetLastActive(Browser* browser) override;
 #endif  // !defined(OS_ANDROID)
 
@@ -269,7 +269,7 @@ class SupervisedUserService : public KeyedService,
   bool MustRemainInstalled(const extensions::Extension* extension,
                            base::string16* error) const override;
   bool MustRemainDisabled(const extensions::Extension* extension,
-                          extensions::Extension::DisableReason* reason,
+                          extensions::disable_reason::DisableReason* reason,
                           base::string16* error) const override;
 
   // extensions::ExtensionRegistryObserver overrides:

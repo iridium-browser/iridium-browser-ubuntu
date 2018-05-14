@@ -8,11 +8,15 @@
 #include "base/macros.h"
 #include "cc/animation/animation_delegate.h"
 #include "cc/trees/layer_tree_host.h"
+#include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_impl.h"
 
-namespace cc {
-
+namespace viz {
 class CompositorFrame;
+class OutputSurface;
+}
+
+namespace cc {
 
 // Used by test stubs to notify the test when something interesting happens.
 class TestHooks : public AnimationDelegate {
@@ -21,12 +25,10 @@ class TestHooks : public AnimationDelegate {
   ~TestHooks() override;
 
   // Compositor thread hooks.
-  virtual void CreateResourceAndRasterBufferProvider(
-      LayerTreeHostImpl* host_impl,
-      std::unique_ptr<RasterBufferProvider>* raster_buffer_provider,
-      std::unique_ptr<ResourcePool>* resource_pool);
+  virtual std::unique_ptr<RasterBufferProvider> CreateRasterBufferProvider(
+      LayerTreeHostImpl* host_impl);
   virtual void WillBeginImplFrameOnThread(LayerTreeHostImpl* host_impl,
-                                          const BeginFrameArgs& args) {}
+                                          const viz::BeginFrameArgs& args) {}
   virtual void DidFinishImplFrameOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void DidSendBeginMainFrameOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void BeginMainFrameAbortedOnThread(LayerTreeHostImpl* host_impl,
@@ -66,6 +68,7 @@ class TestHooks : public AnimationDelegate {
   virtual void WillAnimateLayers(LayerTreeHostImpl* host_impl,
                                  base::TimeTicks monotonic_time) {}
   virtual void DidInvalidateContentOnImplSide(LayerTreeHostImpl* host_impl) {}
+  virtual void DidInvalidateLayerTreeFrameSink(LayerTreeHostImpl* host_impl) {}
   virtual void DidReceiveImplSideInvalidationRequest(
       LayerTreeHostImpl* host_impl) {}
   virtual void DidRequestImplSideInvalidation(LayerTreeHostImpl* host_impl) {}
@@ -78,10 +81,10 @@ class TestHooks : public AnimationDelegate {
   virtual void DisplayReceivedLocalSurfaceIdOnThread(
       const viz::LocalSurfaceId& local_surface_id) {}
   virtual void DisplayReceivedCompositorFrameOnThread(
-      const CompositorFrame& frame) {}
+      const viz::CompositorFrame& frame) {}
   virtual void DisplayWillDrawAndSwapOnThread(
       bool will_draw_and_swap,
-      const RenderPassList& render_passes) {}
+      const viz::RenderPassList& render_passes) {}
   virtual void DisplayDidDrawAndSwapOnThread() {}
 
   // Main thread hooks.
@@ -92,10 +95,11 @@ class TestHooks : public AnimationDelegate {
       float scale,
       float top_controls_delta) {}
   virtual void BeginMainFrameNotExpectedSoon() {}
-  virtual void BeginMainFrame(const BeginFrameArgs& args) {}
+  virtual void BeginMainFrame(const viz::BeginFrameArgs& args) {}
   virtual void WillBeginMainFrame() {}
   virtual void DidBeginMainFrame() {}
-  virtual void UpdateLayerTreeHost() {}
+  virtual void UpdateLayerTreeHost(
+      LayerTreeHostClient::VisualStateUpdate requested_update) {}
   virtual void DidInitializeLayerTreeFrameSink() {}
   virtual void DidFailToInitializeLayerTreeFrameSink() {}
   virtual void DidAddAnimation() {}
@@ -108,24 +112,25 @@ class TestHooks : public AnimationDelegate {
 
   // AnimationDelegate implementation.
   void NotifyAnimationStarted(base::TimeTicks monotonic_time,
-                              TargetProperty::Type target_property,
+                              int target_property,
                               int group) override {}
   void NotifyAnimationFinished(base::TimeTicks monotonic_time,
-                               TargetProperty::Type target_property,
+                               int target_property,
                                int group) override {}
   void NotifyAnimationAborted(base::TimeTicks monotonic_time,
-                              TargetProperty::Type target_property,
+                              int target_property,
                               int group) override {}
   void NotifyAnimationTakeover(base::TimeTicks monotonic_time,
-                               TargetProperty::Type target_property,
-                               double animation_start_time,
+                               int target_property,
+                               base::TimeTicks animation_start_time,
                                std::unique_ptr<AnimationCurve> curve) override {
   }
 
   // OutputSurface indirections to the LayerTreeTest, that can be further
   // overridden.
   virtual void RequestNewLayerTreeFrameSink() = 0;
-  virtual std::unique_ptr<OutputSurface> CreateDisplayOutputSurfaceOnThread(
+  virtual std::unique_ptr<viz::OutputSurface>
+  CreateDisplayOutputSurfaceOnThread(
       scoped_refptr<viz::ContextProvider> compositor_context_provider) = 0;
 };
 

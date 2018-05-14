@@ -4,7 +4,7 @@
 
 """Start and stop Web Page Replay."""
 
-from telemetry.internal.util import atexit_with_log
+from py_utils import atexit_with_log
 import logging
 import os
 import re
@@ -15,13 +15,14 @@ import tempfile
 import urllib
 
 from telemetry.core import util
-from telemetry.internal import forwarders
 from telemetry.internal.util import binary_manager
 
 import py_utils
 
+
 _WPR_DIR = os.path.abspath(os.path.join(
     util.GetCatapultDir(), 'web_page_replay_go'))
+
 
 class ReplayError(Exception):
   """Catch-all exception for the module."""
@@ -57,6 +58,8 @@ class ReplayServer(object):
        self.WaitUntil(...)
   """
 
+  _go_binary_path = None
+
   def __init__(self, archive_path, replay_host, http_port, https_port,
                replay_options):
     """Initialize ReplayServer.
@@ -78,12 +81,9 @@ class ReplayServer(object):
     # subprocess.
     self._temp_log_file_path = None
 
-    go_binary_path = binary_manager.FetchPath('wpr_go',
-                                              py_utils.GetHostArchName(),
-                                              py_utils.GetHostOsName())
-
     self._cmd_line = self._GetCommandLine(
-        go_binary_path, http_port, https_port, replay_options, archive_path)
+        self._GetGoBinaryPath(), http_port, https_port, replay_options,
+        archive_path)
 
     if 'record' in replay_options:
       self._CheckPath('archive directory', os.path.dirname(self.archive_path))
@@ -91,6 +91,13 @@ class ReplayServer(object):
       self._CheckPath('archive file', self.archive_path)
 
     self.replay_process = None
+
+  @classmethod
+  def _GetGoBinaryPath(cls):
+    if not cls._go_binary_path:
+      cls._go_binary_path = binary_manager.FetchPath(
+          'wpr_go', py_utils.GetHostArchName(), py_utils.GetHostOsName())
+    return cls._go_binary_path
 
   @property
   def http_port(self):
@@ -108,13 +115,14 @@ class ReplayServer(object):
   def _GetCommandLine(go_binary_path, http_port, https_port,
                       replay_options, archive_path):
     """Set WPR command-line options. Can be overridden if needed."""
+    for option in replay_options:
+      if option not in ['--record', '--replay', '--inject_scripts=']:
+        raise ValueError("Invalid replay options %s" % replay_options)
     cmd_line = [go_binary_path]
-    if replay_options == ['--record']:
+    if '--record' in replay_options:
       cmd_line.append('record')
-    elif replay_options == ['--replay'] or replay_options == []:
-      cmd_line.append('replay')
     else:
-      raise ValueError('Invalid replay options: %s' % replay_options)
+      cmd_line.append('replay')
     key_file = os.path.join(_WPR_DIR, 'wpr_key.pem')
     cert_file = os.path.join(_WPR_DIR, 'wpr_cert.pem')
     inject_script = os.path.join(_WPR_DIR, 'deterministic.js')
@@ -122,9 +130,11 @@ class ReplayServer(object):
         '--http_port=%s' % http_port,
         '--https_port=%s' % https_port,
         '--https_key_file=%s' % key_file,
-        '--https_cert_file=%s' % cert_file,
-        '--inject_scripts=%s' % inject_script,
-        ])
+        '--https_cert_file=%s' % cert_file])
+    if '--inject_scripts=' in replay_options:
+      cmd_line.append('--inject_scripts=')
+    else:
+      cmd_line.append('--inject_scripts=%s' % inject_script)
     cmd_line.append(archive_path)
     return cmd_line
 
@@ -141,7 +151,9 @@ class ReplayServer(object):
 
   def _LogLines(self):
     """Yields the log lines."""
-    if not os.path.isfile(self._temp_log_file_path):
+    if (not self._temp_log_file_path or
+        not os.path.isfile(self._temp_log_file_path)):
+      yield '(N/A)'
       return
     with open(self._temp_log_file_path) as f:
       for line in f:
@@ -149,8 +161,7 @@ class ReplayServer(object):
 
   def _IsStarted(self):
     """Returns true if the server is up and running."""
-    if self.replay_process.poll() is not None:
-      # The process terminated.
+    if not self._IsReplayProcessStarted():
       return False
 
     def HasIncompleteStartedPorts():
@@ -202,7 +213,8 @@ class ReplayServer(object):
     """Start Web Page Replay and verify that it started.
 
     Returns:
-      A forwarders.PortSet(http, https, dns) tuple; with dns None if unused.
+      A dictionary mapping the keys 'http', 'https', and (if used) 'dns'
+      to the respective ports of the replay server.
     Raises:
       ReplayNotStartedError: if Replay start-up fails.
     """
@@ -214,27 +226,34 @@ class ReplayServer(object):
           self._cmd_line, stdout=log_fh, stderr=subprocess.STDOUT,
           preexec_fn=(_ResetInterruptHandler if is_posix else None))
     try:
-      py_utils.WaitFor(self._IsStarted, 30)
+      # TODO(crbug.com/805418): consider changing this to wait with I/O timeout.
+      # The 120s timeout is based on past failures (e.g: crbug.com/812639).
+      py_utils.WaitFor(self._IsStarted, timeout=120)
       logging.info('WPR ports: %s' % self._started_ports)
       atexit_with_log.Register(self.StopServer)
-      return forwarders.PortSet(
-          self._started_ports['http'],
-          self._started_ports['https'],
-          self._started_ports.get('dns'),  # None if unused
-          )
-    except py_utils.TimeoutException:
+      return dict(self._started_ports)
+    except Exception:
+      log_output = self.StopServer()
       raise ReplayNotStartedError(
-          'Web Page Replay failed to start. Log output:\n%s' %
-          ''.join(self._LogLines()))
+          'Web Page Replay failed to start. Log output:\n%s' % log_output)
+
+  def _IsReplayProcessStarted(self):
+    if not self.replay_process:
+      return False
+    return self.replay_process and self.replay_process.poll() is None
 
   def StopServer(self):
-    """Stop Web Page Replay."""
-    if self._IsStarted():
-      try:
-        self._StopReplayProcess()
-      finally:
-        # TODO(rnephew): Upload logs to google storage. crbug.com/525787
-        self._CleanUpTempLogFilePath()
+    """Stop Web Page Replay.
+
+    This also attempts to return stdout/stderr logs of wpr process if there is
+    any. If there is none, '(N/A)' string is returned (see _LogLines()
+    implementation).
+    """
+    if self._IsReplayProcessStarted():
+      self._StopReplayProcess()
+    wpr_log_output = ''.join(self._LogLines())
+    self._CleanUpTempLogFilePath()
+    return wpr_log_output
 
   def _StopReplayProcess(self):
     if not self.replay_process:
@@ -252,7 +271,7 @@ class ReplayServer(object):
       try:
         # Use a SIGINT so that it can do graceful cleanup.
         self.replay_process.send_signal(signal.SIGINT)
-      except:  # pylint: disable=bare-except
+      except Exception:  # pylint: disable=broad-except
         # On Windows, we are left with no other option than terminate().
         is_primary_nameserver_changed_by_replay = (
             self._use_dns_server and self._replay_host == '127.0.0.1')
@@ -268,11 +287,12 @@ class ReplayServer(object):
               'Unable to stop Web-Page-Replay gracefully.\n'
               'Replay changed the DNS nameserver configuration to make replay '
               'the primary nameserver. That might not be restored!')
-        try:
-          self.replay_process.terminate()
-        except:  # pylint: disable=bare-except
-          pass
+        self.replay_process.terminate()
       self.replay_process.wait()
+    finally:
+      # Only reset replay_process to None if the process is stopped.
+      if self.replay_process.poll() is not None:
+        self.replay_process = None
 
   def _CreateTempLogFilePath(self):
     assert self._temp_log_file_path is None
@@ -280,7 +300,8 @@ class ReplayServer(object):
     os.close(handle)
 
   def _CleanUpTempLogFilePath(self):
-    assert self._temp_log_file_path
+    if not self._temp_log_file_path:
+      return
     if logging.getLogger('').isEnabledFor(logging.DEBUG):
       with open(self._temp_log_file_path, 'r') as f:
         wpr_log_content = '\n'.join([

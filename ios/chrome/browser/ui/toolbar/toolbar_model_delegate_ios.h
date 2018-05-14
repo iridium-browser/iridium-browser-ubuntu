@@ -5,7 +5,6 @@
 #ifndef IOS_CHROME_BROWSER_UI_TOOLBAR_TOOLBAR_MODEL_DELEGATE_IOS_H_
 #define IOS_CHROME_BROWSER_UI_TOOLBAR_TOOLBAR_MODEL_DELEGATE_IOS_H_
 
-#include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "components/toolbar/toolbar_model_delegate.h"
 
@@ -24,15 +23,6 @@ class ToolbarModelDelegateIOS : public ToolbarModelDelegate {
   explicit ToolbarModelDelegateIOS(WebStateList* web_state_list);
   ~ToolbarModelDelegateIOS() override;
 
-  // Returns the active WebState.
-  web::WebState* GetActiveWebState() const;
-
- private:
-  // Helper method to extract the NavigationItem from which the states are
-  // retrieved. If this returns null (which can happens during initialization),
-  // default values are used.
-  web::NavigationItem* GetNavigationItem() const;
-
   // ToolbarModelDelegate implementation:
   base::string16 FormattedStringWithEquivalentMeaning(
       const GURL& url,
@@ -44,6 +34,15 @@ class ToolbarModelDelegateIOS : public ToolbarModelDelegate {
   bool FailsMalwareCheck() const override;
   const gfx::VectorIcon* GetVectorIconOverride() const override;
   bool IsOfflinePage() const override;
+
+ private:
+  // Helper method to extract the NavigationItem from which the states are
+  // retrieved. If this returns null (which can happens during initialization),
+  // default values are used.
+  web::NavigationItem* GetNavigationItem() const;
+
+  // Returns the active WebState.
+  web::WebState* GetActiveWebState() const;
 
   WebStateList* web_state_list_;  // weak
 

@@ -13,6 +13,7 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -44,11 +45,11 @@ Validator::Validator(bool error_on_unknown_field,
       managed_onc_(managed_onc),
       onc_source_(::onc::ONC_SOURCE_NONE) {}
 
-Validator::~Validator() {}
+Validator::~Validator() = default;
 
 std::unique_ptr<base::DictionaryValue> Validator::ValidateAndRepairObject(
     const OncValueSignature* object_signature,
-    const base::DictionaryValue& onc_object,
+    const base::Value& onc_object,
     Result* result) {
   CHECK(object_signature);
   *result = VALID;
@@ -71,9 +72,9 @@ std::unique_ptr<base::Value> Validator::MapValue(
     const OncValueSignature& signature,
     const base::Value& onc_value,
     bool* error) {
-  if (onc_value.GetType() != signature.onc_type) {
+  if (onc_value.type() != signature.onc_type) {
     LOG(ERROR) << MessageHeader() << "Found value '" << onc_value
-               << "' of type '" << base::Value::GetTypeName(onc_value.GetType())
+               << "' of type '" << base::Value::GetTypeName(onc_value.type())
                << "', but type '"
                << base::Value::GetTypeName(signature.onc_type)
                << "' is required.";
@@ -84,7 +85,7 @@ std::unique_ptr<base::Value> Validator::MapValue(
   std::unique_ptr<base::Value> repaired =
       Mapper::MapValue(signature, onc_value, error);
   if (repaired)
-    CHECK_EQ(repaired->GetType(), signature.onc_type);
+    CHECK_EQ(repaired->type(), signature.onc_type);
   return repaired;
 }
 
@@ -116,6 +117,8 @@ std::unique_ptr<base::DictionaryValue> Validator::MapObject(
       valid = ValidateOpenVPN(repaired.get());
     } else if (&signature == &kThirdPartyVPNSignature) {
       valid = ValidateThirdPartyVPN(repaired.get());
+    } else if (&signature == &kARCVPNSignature) {
+      valid = ValidateARCVPN(repaired.get());
     } else if (&signature == &kVerifyX509Signature) {
       valid = ValidateVerifyX509(repaired.get());
     } else if (&signature == &kCertificatePatternSignature) {
@@ -696,8 +699,8 @@ bool Validator::ValidateWiFi(base::DictionaryValue* result) {
 bool Validator::ValidateVPN(base::DictionaryValue* result) {
   using namespace ::onc::vpn;
 
-  const char* const kValidTypes[] = {
-      kIPsec, kTypeL2TP_IPsec, kOpenVPN, kThirdPartyVpn};
+  const char* const kValidTypes[] = {kIPsec, kTypeL2TP_IPsec, kOpenVPN,
+                                     kThirdPartyVpn, kArcVpn};
   const std::vector<const char*> valid_types(toVector(kValidTypes));
   if (FieldExistsAndHasNoValidValue(*result, ::onc::vpn::kType, valid_types))
     return false;
@@ -714,6 +717,8 @@ bool Validator::ValidateVPN(base::DictionaryValue* result) {
         RequireField(*result, kIPsec) && RequireField(*result, kL2TP);
   } else if (type == kThirdPartyVpn) {
     all_required_exist &= RequireField(*result, kThirdPartyVpn);
+  } else if (type == kArcVpn) {
+    all_required_exist &= RequireField(*result, kArcVpn);
   }
 
   return !error_on_missing_field_ || all_required_exist;
@@ -802,6 +807,26 @@ bool Validator::ValidateOpenVPN(base::DictionaryValue* result) {
     return false;
   }
 
+  if ((onc_source_ == ::onc::ONC_SOURCE_DEVICE_POLICY ||
+       onc_source_ == ::onc::ONC_SOURCE_USER_POLICY) &&
+      !result->FindKeyOfType(::onc::openvpn::kUserAuthenticationType,
+                             base::Value::Type::STRING)) {
+    // If kUserAuthenticationType is unspecified for a policy controlled
+    // network, allow Password and OTP to be specified by the user by adding
+    // them to the recommended list.
+    base::Value* recommended =
+        result->FindKeyOfType(::onc::kRecommended, base::Value::Type::LIST);
+    if (!recommended)
+      recommended = result->SetKey(::onc::kRecommended, base::ListValue());
+    base::Value::ListStorage& result_list = recommended->GetList();
+    base::Value password_value(::onc::openvpn::kPassword);
+    if (!base::ContainsValue(result_list, password_value))
+      result_list.push_back(std::move(password_value));
+    base::Value otp_value(::onc::openvpn::kOTP);
+    if (!base::ContainsValue(result_list, otp_value))
+      result_list.push_back(std::move(otp_value));
+  }
+
   if (result->HasKey(kServerCARefs) && result->HasKey(kServerCARef)) {
     error_or_warning_found_ = true;
     LOG(ERROR) << MessageHeader() << "At most one of " << kServerCARefs
@@ -821,6 +846,13 @@ bool Validator::ValidateOpenVPN(base::DictionaryValue* result) {
 bool Validator::ValidateThirdPartyVPN(base::DictionaryValue* result) {
   const bool all_required_exist =
       RequireField(*result, ::onc::third_party_vpn::kExtensionID);
+
+  return !error_on_missing_field_ || all_required_exist;
+}
+
+bool Validator::ValidateARCVPN(base::DictionaryValue* result) {
+  const bool all_required_exist =
+      RequireField(*result, ::onc::arc_vpn::kTunnelChrome);
 
   return !error_on_missing_field_ || all_required_exist;
 }

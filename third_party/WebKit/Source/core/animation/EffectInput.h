@@ -7,37 +7,43 @@
 
 #include "core/CoreExport.h"
 #include "core/animation/EffectModel.h"
+#include "core/animation/KeyframeEffectModel.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
 
-class EffectModel;
-class DictionarySequenceOrDictionary;
-class Dictionary;
 class Element;
 class ExceptionState;
-class ExecutionContext;
+class ScriptState;
+class ScriptValue;
 
 class CORE_EXPORT EffectInput {
   STATIC_ONLY(EffectInput);
 
  public:
-  // TODO(alancutter): Replace Element* parameter with Document&.
-  static EffectModel* Convert(Element*,
-                              const DictionarySequenceOrDictionary&,
-                              ExecutionContext*,
-                              ExceptionState&);
+  static KeyframeEffectModelBase* Convert(Element*,
+                                          const ScriptValue& keyframes,
+                                          EffectModel::CompositeOperation,
+                                          ScriptState*,
+                                          ExceptionState&);
 
- private:
-  static EffectModel* ConvertArrayForm(Element&,
-                                       const Vector<Dictionary>& keyframes,
-                                       ExecutionContext*,
-                                       ExceptionState&);
-  static EffectModel* ConvertObjectForm(Element&,
-                                        const Dictionary& keyframe,
-                                        ExecutionContext*,
-                                        ExceptionState&);
+  // Implements "Processing a keyframes argument" from the web-animations spec.
+  // https://drafts.csswg.org/web-animations/#processing-a-keyframes-argument
+  static StringKeyframeVector ParseKeyframesArgument(
+      Element*,
+      const ScriptValue& keyframes,
+      ScriptState*,
+      ExceptionState&);
+
+  // Ensures that a CompositeOperation is of an allowed value for a set of
+  // StringKeyframes and the current runtime flags.
+  //
+  // Under certain runtime flags, additive composite operations are not allowed
+  // for CSS properties.
+  static EffectModel::CompositeOperation ResolveCompositeOperation(
+      EffectModel::CompositeOperation,
+      const StringKeyframeVector&);
 };
 
 }  // namespace blink

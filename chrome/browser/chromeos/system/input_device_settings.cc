@@ -7,21 +7,12 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
-#include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/system/statistics_provider.h"
-#include "components/prefs/pref_registry_simple.h"
-#include "components/prefs/pref_service.h"
 
 namespace chromeos {
 namespace system {
 
 namespace {
-
-PrefService* GetActiveProfilePrefs() {
-  Profile* profile = ProfileManager::GetActiveUserProfile();
-  return profile ? profile->GetPrefs() : nullptr;
-}
 
 // Sets |to_set| to |other| if |other| has a value and the value is not equal to
 // |to_set|. This differs from *to_set = other; in so far as nothing is changed
@@ -37,8 +28,7 @@ bool UpdateIfHasValue(const base::Optional<T>& other,
 
 }  // namespace
 
-TouchpadSettings::TouchpadSettings() {
-}
+TouchpadSettings::TouchpadSettings() = default;
 
 TouchpadSettings::TouchpadSettings(const TouchpadSettings& other) = default;
 
@@ -158,8 +148,7 @@ void TouchpadSettings::Apply(const TouchpadSettings& touchpad_settings,
   }
 }
 
-MouseSettings::MouseSettings() {
-}
+MouseSettings::MouseSettings() = default;
 
 MouseSettings::MouseSettings(const MouseSettings& other) = default;
 
@@ -167,6 +156,7 @@ MouseSettings& MouseSettings::operator=(const MouseSettings& other) {
   if (&other != this) {
     sensitivity_ = other.sensitivity_;
     primary_button_right_ = other.primary_button_right_;
+    reverse_scroll_ = other.reverse_scroll_;
   }
   return *this;
 }
@@ -195,12 +185,27 @@ bool MouseSettings::IsPrimaryButtonRightSet() const {
   return primary_button_right_.has_value();
 }
 
+void MouseSettings::SetReverseScroll(bool enabled) {
+  reverse_scroll_ = enabled;
+}
+
+bool MouseSettings::GetReverseScroll() const {
+  return *reverse_scroll_;
+}
+
+bool MouseSettings::IsReverseScrollSet() const {
+  return reverse_scroll_.has_value();
+}
+
 bool MouseSettings::Update(const MouseSettings& settings) {
   bool updated = false;
   if (UpdateIfHasValue(settings.sensitivity_, &sensitivity_))
     updated = true;
   if (UpdateIfHasValue(settings.primary_button_right_,
                        &primary_button_right_)) {
+    updated = true;
+  }
+  if (UpdateIfHasValue(settings.reverse_scroll_, &reverse_scroll_)) {
     updated = true;
   }
   return updated;
@@ -218,6 +223,10 @@ void MouseSettings::Apply(const MouseSettings& mouse_settings,
   if (mouse_settings.primary_button_right_.has_value()) {
     input_device_settings->SetPrimaryButtonRight(
         mouse_settings.primary_button_right_.value());
+  }
+  if (mouse_settings.reverse_scroll_.has_value()) {
+    input_device_settings->SetMouseReverseScroll(
+        mouse_settings.reverse_scroll_.value());
   }
 }
 
@@ -245,86 +254,6 @@ bool InputDeviceSettings::ForceKeyboardDrivenUINavigation() {
   }
 
   return false;
-}
-
-// static
-void InputDeviceSettings::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterBooleanPref(::prefs::kTouchscreenEnabledLocal, true);
-}
-
-// static
-void InputDeviceSettings::RegisterProfilePrefs(PrefRegistrySimple* registry) {
-  registry->RegisterBooleanPref(::prefs::kTouchscreenEnabled, true);
-  registry->RegisterBooleanPref(::prefs::kTouchpadEnabled, true);
-}
-
-void InputDeviceSettings::UpdateTouchDevicesStatusFromPrefs() {
-  UpdateTouchscreenStatusFromPrefs();
-
-  PrefService* user_prefs = GetActiveProfilePrefs();
-  if (!user_prefs)
-    return;
-
-  const bool touchpad_status =
-      user_prefs->HasPrefPath(::prefs::kTouchpadEnabled)
-          ? user_prefs->GetBoolean(::prefs::kTouchpadEnabled)
-          : true;
-  SetInternalTouchpadEnabled(touchpad_status);
-}
-
-bool InputDeviceSettings::IsTouchscreenEnabledInPrefs(
-    bool use_local_state) const {
-  if (use_local_state) {
-    PrefService* local_state = g_browser_process->local_state();
-    DCHECK(local_state);
-
-    return local_state->HasPrefPath(::prefs::kTouchscreenEnabledLocal)
-               ? local_state->GetBoolean(::prefs::kTouchscreenEnabledLocal)
-               : true;
-  } else {
-    PrefService* user_prefs = GetActiveProfilePrefs();
-    if (!user_prefs)
-      return true;
-
-    return user_prefs->HasPrefPath(::prefs::kTouchscreenEnabled)
-               ? user_prefs->GetBoolean(::prefs::kTouchscreenEnabled)
-               : true;
-  }
-}
-
-void InputDeviceSettings::SetTouchscreenEnabledInPrefs(bool enabled,
-                                                       bool use_local_state) {
-  if (use_local_state) {
-    PrefService* local_state = g_browser_process->local_state();
-    DCHECK(local_state);
-    local_state->SetBoolean(::prefs::kTouchscreenEnabledLocal, enabled);
-  } else {
-    PrefService* user_prefs = GetActiveProfilePrefs();
-    if (!user_prefs)
-      return;
-
-    user_prefs->SetBoolean(::prefs::kTouchscreenEnabled, enabled);
-  }
-}
-
-void InputDeviceSettings::UpdateTouchscreenStatusFromPrefs() {
-  bool enabled_in_local_state = IsTouchscreenEnabledInPrefs(true);
-  bool enabled_in_user_prefs = IsTouchscreenEnabledInPrefs(false);
-  SetTouchscreensEnabled(enabled_in_local_state && enabled_in_user_prefs);
-}
-
-void InputDeviceSettings::ToggleTouchpad() {
-  PrefService* user_prefs = GetActiveProfilePrefs();
-  if (!user_prefs)
-    return;
-
-  const bool touchpad_status =
-      user_prefs->HasPrefPath(::prefs::kTouchpadEnabled)
-          ? user_prefs->GetBoolean(::prefs::kTouchpadEnabled)
-          : true;
-
-  user_prefs->SetBoolean(::prefs::kTouchpadEnabled, !touchpad_status);
-  SetInternalTouchpadEnabled(!touchpad_status);
 }
 
 }  // namespace system

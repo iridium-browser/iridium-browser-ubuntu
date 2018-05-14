@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
@@ -30,12 +31,14 @@
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_stats.h"
+#include "chrome/browser/language/language_model_factory.h"
 #include "chrome/browser/media/router/media_router_dialog_controller.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/media/router/media_router_metrics.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
+#include "chrome/browser/picture_in_picture/picture_in_picture_window_controller.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -46,34 +49,40 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/renderer_context_menu/context_menu_content_type_factory.h"
-#include "chrome/browser/renderer_context_menu/open_with_menu_factory.h"
 #include "chrome/browser/renderer_context_menu/spelling_menu_observer.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/translate_service.h"
+#include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_features.h"
+#include "chrome/common/chrome_render_frame.mojom.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_restriction.h"
-#include "chrome/common/image_context_menu_renderer.mojom.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/autofill/core/browser/popup_item_ids.h"
 #include "components/autofill/core/common/password_generation_util.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
+#include "components/download/public/common/download_url_parameters.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/guest_view/browser/guest_view_base.h"
-#include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/common/experiments.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
@@ -83,6 +92,7 @@
 #include "components/spellcheck/browser/spellcheck_host_metrics.h"
 #include "components/spellcheck/common/spellcheck_common.h"
 #include "components/spellcheck/spellcheck_build_features.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/browser/translate_prefs.h"
@@ -91,8 +101,6 @@
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/download_manager.h"
-#include "content/public/browser/download_save_info.h"
-#include "content/public/browser/download_url_parameters.h"
 #include "content/public/browser/guest_mode.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -107,15 +115,18 @@
 #include "content/public/common/menu_item.h"
 #include "content/public/common/url_utils.h"
 #include "extensions/features/features.h"
+#include "media/base/media_switches.h"
 #include "net/base/escape.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "ppapi/features/features.h"
 #include "printing/features/features.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/WebKit/public/public_features.h"
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
 #include "third_party/WebKit/public/web/WebMediaPlayerAction.h"
 #include "third_party/WebKit/public/web/WebPluginAction.h"
+#include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -130,7 +141,11 @@
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/ui/extensions/app_launch_params.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
+#include "chrome/common/extensions/api/url_handlers/url_handlers_parser.h"
 #include "extensions/browser/extension_host.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
@@ -153,6 +168,11 @@
 #include "ui/base/resource/resource_bundle.h"
 #endif
 
+#if defined(OS_CHROMEOS)
+#include "ash/public/cpp/window_pin_type.h"
+#include "chrome/browser/chromeos/arc/intent_helper/open_with_menu.h"
+#endif
+
 using base::UserMetricsAction;
 using blink::WebContextMenuData;
 using blink::WebMediaPlayerAction;
@@ -162,13 +182,13 @@ using blink::WebURL;
 using content::BrowserContext;
 using content::ChildProcessSecurityPolicy;
 using content::DownloadManager;
-using content::DownloadUrlParameters;
 using content::NavigationEntry;
 using content::OpenURLParams;
 using content::RenderFrameHost;
 using content::RenderViewHost;
 using content::SSLStatus;
 using content::WebContents;
+using download::DownloadUrlParameters;
 using extensions::ContextMenuMatcher;
 using extensions::Extension;
 using extensions::MenuItem;
@@ -307,9 +327,13 @@ const struct UmaEnumCommandIdPair {
     {86, -1, IDC_CONTENT_CONTEXT_OPEN_WITH13},
     {87, -1, IDC_CONTENT_CONTEXT_OPEN_WITH14},
     {88, -1, IDC_CONTENT_CONTEXT_EXIT_FULLSCREEN},
+    {89, -1, IDC_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP},
+    {90, -1, IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS},
+    {91, -1, IDC_CONTENT_CONTENT_PICTUREINPICTURE},
     // Add new items here and use |enum_id| from the next line.
-    // Also, add new items to RenderViewContextMenuItem enum in histograms.xml.
-    {89, -1, 0},  // Must be the last. Increment |enum_id| when new IDC
+    // Also, add new items to RenderViewContextMenuItem enum in
+    // tools/metrics/histograms/enums.xml.
+    {92, -1, 0},  // Must be the last. Increment |enum_id| when new IDC
                   // was added.
 };
 
@@ -428,7 +452,7 @@ void WriteURLToClipboard(const GURL& url) {
                 net::UnescapeRule::NONE, nullptr, nullptr, nullptr);
 
   ui::ScopedClipboardWriter scw(ui::CLIPBOARD_TYPE_COPY_PASTE);
-  scw.WriteURL(text);
+  scw.WriteText(text);
 }
 
 bool g_custom_id_ranges_initialized = false;
@@ -470,42 +494,34 @@ void OnProfileCreated(const GURL& link_url,
                       Profile::CreateStatus status) {
   if (status == Profile::CREATE_STATUS_INITIALIZED) {
     Browser* browser = chrome::FindLastActiveWithProfile(profile);
-    chrome::NavigateParams nav_params(browser, link_url,
-                                      ui::PAGE_TRANSITION_LINK);
+    NavigateParams nav_params(browser, link_url, ui::PAGE_TRANSITION_LINK);
     nav_params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
     nav_params.referrer = referrer;
-    nav_params.window_action = chrome::NavigateParams::SHOW_WINDOW;
-    chrome::Navigate(&nav_params);
+    nav_params.window_action = NavigateParams::SHOW_WINDOW;
+    Navigate(&nav_params);
   }
+}
+
+// Returns a Bookmark App that has |url| in its scope.
+const extensions::Extension* GetBookmarkAppForURL(
+    BrowserContext* browser_context,
+    const GURL& target_url) {
+  const extensions::ExtensionSet& enabled_extensions =
+      extensions::ExtensionRegistry::Get(browser_context)->enabled_extensions();
+  for (const auto extension : enabled_extensions) {
+    if (!extension->from_bookmark())
+      continue;
+
+    const extensions::UrlHandlerInfo* handler =
+        extensions::UrlHandlers::FindMatchingUrlHandler(extension.get(),
+                                                        target_url);
+    if (handler)
+      return extension.get();
+  }
+  return nullptr;
 }
 
 }  // namespace
-
-// static
-gfx::Vector2d RenderViewContextMenu::GetOffset(
-    RenderFrameHost* render_frame_host) {
-  gfx::Vector2d offset;
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // When --use-cross-process-frames-for-guests is enabled, the position is
-  // transformed in the browser process hittesting code.
-  WebContents* web_contents =
-      WebContents::FromRenderFrameHost(render_frame_host);
-  // TODO(ekaramad): For now, MimeHandlerView is based on BrowserPlugin even
-  // when guests use OOPIF. Remove the check below when MimeHandlerView is also
-  // based on OOPIF (https://crbug.com/642826).
-  if (!content::GuestMode::IsCrossProcessFrameGuest(web_contents)) {
-    WebContents* top_level_web_contents =
-        guest_view::GuestViewBase::GetTopLevelWebContents(web_contents);
-    if (web_contents && top_level_web_contents &&
-        web_contents != top_level_web_contents) {
-      gfx::Rect bounds = web_contents->GetContainerBounds();
-      gfx::Rect top_level_bounds = top_level_web_contents->GetContainerBounds();
-      offset = bounds.origin() - top_level_bounds.origin();
-    }
-  }
-#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
-  return offset;
-}
 
 // static
 bool RenderViewContextMenu::IsDevToolsURL(const GURL& url) {
@@ -700,10 +716,12 @@ void RenderViewContextMenu::AppendCurrentExtensionItems() {
       extensions::WebViewGuest::FromWebContents(source_web_contents_);
   MenuItem::ExtensionKey key;
   if (web_view_guest) {
-    key = MenuItem::ExtensionKey(
-        extension->id(),
-        web_view_guest->owner_web_contents()->GetRenderProcessHost()->GetID(),
-        web_view_guest->view_instance_id());
+    key = MenuItem::ExtensionKey(extension->id(),
+                                 web_view_guest->owner_web_contents()
+                                     ->GetMainFrame()
+                                     ->GetProcess()
+                                     ->GetID(),
+                                 web_view_guest->view_instance_id());
   } else {
     key = MenuItem::ExtensionKey(extension->id());
   }
@@ -785,7 +803,11 @@ void RenderViewContextMenu::InitMenu() {
     AppendPrintItem();
   }
 
-  if (editable && params_.misspelled_word.empty()) {
+  // Spell check and writing direction options are not currently supported by
+  // pepper plugins.
+  if (editable && params_.misspelled_word.empty() &&
+      !content_type_->SupportsGroup(
+          ContextMenuContentType::ITEM_GROUP_MEDIA_PLUGIN)) {
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
     AppendLanguageSettings();
     AppendPlatformEditableItems();
@@ -907,7 +929,7 @@ void RenderViewContextMenu::AppendPrintPreviewItems() {
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   if (!print_preview_menu_observer_) {
     print_preview_menu_observer_ =
-        base::MakeUnique<PrintPreviewContextMenuObserver>(source_web_contents_);
+        std::make_unique<PrintPreviewContextMenuObserver>(source_web_contents_);
   }
 
   observers_.AddObserver(print_preview_menu_observer_.get());
@@ -917,6 +939,15 @@ void RenderViewContextMenu::AppendPrintPreviewItems() {
 const Extension* RenderViewContextMenu::GetExtension() const {
   return extensions::ProcessManager::Get(browser_context_)
       ->GetExtensionForWebContents(source_web_contents_);
+}
+
+std::string RenderViewContextMenu::GetTargetLanguage() const {
+  std::unique_ptr<translate::TranslatePrefs> prefs(
+      ChromeTranslateClient::CreateTranslatePrefs(GetPrefs(browser_context_)));
+  language::LanguageModel* language_model =
+      LanguageModelFactory::GetForBrowserContext(browser_context_);
+  return translate::TranslateManager::GetTargetLanguage(prefs.get(),
+                                                        language_model);
 }
 
 void RenderViewContextMenu::AppendDeveloperItems() {
@@ -962,16 +993,40 @@ void RenderViewContextMenu::AppendDevtoolsForUnpackedExtensions() {
 
 void RenderViewContextMenu::AppendLinkItems() {
   if (!params_.link_url.is_empty()) {
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
-                                    IDS_CONTENT_CONTEXT_OPENLINKNEWTAB);
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW,
-                                    IDS_CONTENT_CONTEXT_OPENLINKNEWWINDOW);
-    if (params_.link_url.is_valid()) {
-      AppendProtocolHandlerSubMenu();
-    }
+    if (base::FeatureList::IsEnabled(features::kDesktopPWAWindowing)) {
+      AppendOpenInBookmarkAppLinkItems();
 
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD,
-                                    IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD);
+      menu_model_.AddItemWithStringId(
+          IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
+          GetBrowser()->is_app() ? IDS_CONTENT_CONTEXT_OPENLINKNEWTAB_INAPP
+                                 : IDS_CONTENT_CONTEXT_OPENLINKNEWTAB);
+      if (!GetBrowser()->is_app()) {
+        menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW,
+                                        IDS_CONTENT_CONTEXT_OPENLINKNEWWINDOW);
+      }
+
+      if (params_.link_url.is_valid()) {
+        AppendProtocolHandlerSubMenu();
+      }
+
+      menu_model_.AddItemWithStringId(
+          IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD,
+          GetBrowser()->is_app()
+              ? IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD_INAPP
+              : IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD);
+
+    } else {
+      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
+                                      IDS_CONTENT_CONTEXT_OPENLINKNEWTAB);
+      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW,
+                                      IDS_CONTENT_CONTEXT_OPENLINKNEWWINDOW);
+      if (params_.link_url.is_valid()) {
+        AppendProtocolHandlerSubMenu();
+      }
+
+      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD,
+                                      IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD);
+    }
 
     AppendOpenWithLinkItems();
 
@@ -1073,11 +1128,36 @@ void RenderViewContextMenu::AppendLinkItems() {
 }
 
 void RenderViewContextMenu::AppendOpenWithLinkItems() {
-  open_with_menu_observer_.reset(OpenWithMenuFactory::CreateMenu(this));
-  if (open_with_menu_observer_) {
-    observers_.AddObserver(open_with_menu_observer_.get());
-    open_with_menu_observer_->InitMenu(params_);
+#if defined(OS_CHROMEOS)
+  open_with_menu_observer_ =
+      std::make_unique<arc::OpenWithMenu>(browser_context_, this);
+  observers_.AddObserver(open_with_menu_observer_.get());
+  open_with_menu_observer_->InitMenu(params_);
+#endif
+}
+
+void RenderViewContextMenu::AppendOpenInBookmarkAppLinkItems() {
+  const Extension* bookmark_app =
+      GetBookmarkAppForURL(browser_context_, params_.link_url);
+  if (!bookmark_app)
+    return;
+
+  int open_in_app_string_id;
+  if (GetBrowser()->app_name() ==
+      web_app::GenerateApplicationNameFromExtensionId(bookmark_app->id())) {
+    open_in_app_string_id = IDS_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP_SAMEAPP;
+  } else {
+    open_in_app_string_id = IDS_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP;
   }
+
+  menu_model_.AddItem(IDC_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP,
+                      l10n_util::GetStringFUTF16(
+                          open_in_app_string_id,
+                          base::ASCIIToUTF16(bookmark_app->short_name())));
+
+  MenuManager* menu_manager = MenuManager::Get(browser_context_);
+  gfx::Image icon = menu_manager->GetIconForExtension(bookmark_app->id());
+  menu_model_.SetIcon(menu_model_.GetItemCount() - 1, icon);
 }
 
 void RenderViewContextMenu::AppendImageItems() {
@@ -1157,6 +1237,7 @@ void RenderViewContextMenu::AppendVideoItems() {
                                   IDS_CONTENT_CONTEXT_SAVEVIDEOAS);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYAVLOCATION,
                                   IDS_CONTENT_CONTEXT_COPYVIDEOLOCATION);
+  AppendPictureInPictureItem();
   AppendMediaRouterItem();
 }
 
@@ -1173,9 +1254,12 @@ void RenderViewContextMenu::AppendPluginItems() {
        (!embedder_web_contents_ || !embedder_web_contents_->IsSavable()))) {
     // Both full page and embedded plugins are hosted as guest now,
     // the difference is a full page plugin is not considered as savable.
-    // For full page plugin, we show page menu items.
-    if (params_.link_url.is_empty() && params_.selection_text.empty())
+    // For full page plugin, we show page menu items so long as focus is not
+    // within an editable text area.
+    if (params_.link_url.is_empty() && params_.selection_text.empty() &&
+        !params_.is_editable) {
       AppendPageItems();
+    }
   } else {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
                                     IDS_CONTENT_CONTEXT_SAVEPAGEAS);
@@ -1204,16 +1288,18 @@ void RenderViewContextMenu::AppendPageItems() {
     std::unique_ptr<translate::TranslatePrefs> prefs(
         ChromeTranslateClient::CreateTranslatePrefs(
             GetPrefs(browser_context_)));
-    // TODO(crbug.com/711217): We should not allow to use the translate when the
-    // feature is disabled by the PolicyList.
-    std::string locale =
-        translate::TranslateManager::GetTargetLanguage(prefs.get());
-    base::string16 language =
-        l10n_util::GetDisplayNameForLocale(locale, locale, true);
-    menu_model_.AddItem(
-        IDC_CONTENT_CONTEXT_TRANSLATE,
-        l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_TRANSLATE, language));
-    AddGoogleIconToLastMenuItem(&menu_model_);
+    if (prefs->IsTranslateAllowedByPolicy()) {
+      language::LanguageModel* language_model =
+          LanguageModelFactory::GetForBrowserContext(browser_context_);
+      std::string locale = translate::TranslateManager::GetTargetLanguage(
+          prefs.get(), language_model);
+      base::string16 language =
+          l10n_util::GetDisplayNameForLocale(locale, locale, true);
+      menu_model_.AddItem(
+          IDC_CONTENT_CONTEXT_TRANSLATE,
+          l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_TRANSLATE, language));
+      AddGoogleIconToLastMenuItem(&menu_model_);
+    }
   }
 }
 
@@ -1380,7 +1466,7 @@ void RenderViewContextMenu::AppendLanguageSettings() {
   if (!spelling_options_submenu_observer_) {
     const int kLanguageRadioGroup = 1;
     spelling_options_submenu_observer_ =
-        base::MakeUnique<SpellingOptionsSubMenuObserver>(this, this,
+        std::make_unique<SpellingOptionsSubMenuObserver>(this, this,
                                                          kLanguageRadioGroup);
   }
 
@@ -1392,7 +1478,7 @@ void RenderViewContextMenu::AppendLanguageSettings() {
 void RenderViewContextMenu::AppendSpellingSuggestionItems() {
   if (!spelling_suggestions_menu_observer_) {
     spelling_suggestions_menu_observer_ =
-        base::MakeUnique<SpellingMenuObserver>(this);
+        std::make_unique<SpellingMenuObserver>(this);
   }
   observers_.AddObserver(spelling_suggestions_menu_observer_.get());
   spelling_suggestions_menu_observer_->InitMenu(params_);
@@ -1423,23 +1509,49 @@ void RenderViewContextMenu::AppendProtocolHandlerSubMenu() {
 
 void RenderViewContextMenu::AppendPasswordItems() {
   bool add_separator = false;
-  if (password_manager::ForceSavingExperimentEnabled()) {
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD,
-                                    IDS_CONTENT_CONTEXT_FORCESAVEPASSWORD);
+
+  // Don't offer saving or generating passwords in incognito profiles.
+  if (!browser_context_->IsOffTheRecord()) {
+    if (password_manager::ForceSavingExperimentEnabled()) {
+      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD,
+                                      IDS_CONTENT_CONTEXT_FORCESAVEPASSWORD);
+      add_separator = true;
+    }
+    if (password_manager_util::ManualPasswordGenerationEnabled(
+            ProfileSyncServiceFactory::GetSyncServiceForBrowserContext(
+                browser_context_))) {
+      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_GENERATEPASSWORD,
+                                      IDS_CONTENT_CONTEXT_GENERATEPASSWORD);
+      add_separator = true;
+    }
+  }
+  if (password_manager_util::ShowAllSavedPasswordsContextMenuEnabled()) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS,
+                                    IDS_AUTOFILL_SHOW_ALL_SAVED_FALLBACK);
     add_separator = true;
   }
-  if (password_manager::ManualPasswordGenerationEnabled()) {
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_GENERATEPASSWORD,
-                                    IDS_CONTENT_CONTEXT_GENERATEPASSWORD);
-    add_separator = true;
-  }
+
   if (add_separator)
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+}
+
+void RenderViewContextMenu::AppendPictureInPictureItem() {
+  if (base::FeatureList::IsEnabled(media::kPictureInPicture))
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTENT_PICTUREINPICTURE,
+                                    IDS_CONTENT_CONTENT_PICTUREINPICTURE);
 }
 
 // Menu delegate functions -----------------------------------------------------
 
 bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
+#if defined(OS_CHROMEOS)
+  // Disable context menu in locked fullscreen mode (the menu is not really
+  // disabled as the user can still open it, but all the individual context menu
+  // entries are disabled / greyed out).
+  if (GetBrowser() && ash::IsWindowTrustedPinned(GetBrowser()->window()))
+    return false;
+#endif
+
   {
     bool enabled = false;
     if (RenderViewContextMenuBase::IsCommandIdKnown(id, &enabled))
@@ -1464,7 +1576,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
   // Allow Spell Check language items on sub menu for text area context menu.
   if ((id >= IDC_SPELLCHECK_LANGUAGES_FIRST) &&
       (id < IDC_SPELLCHECK_LANGUAGES_LAST)) {
-    return prefs->GetBoolean(spellcheck::prefs::kEnableSpellcheck);
+    return prefs->GetBoolean(spellcheck::prefs::kSpellCheckEnable);
   }
 
   // Extension items.
@@ -1507,6 +1619,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_CONTENT_CONTEXT_OPENLINKNEWTAB:
     case IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW:
     case IDC_CONTENT_CONTEXT_OPENLINKINPROFILE:
+    case IDC_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP:
       return params_.link_url.is_valid();
 
     case IDC_CONTENT_CONTEXT_COPYLINKLOCATION:
@@ -1608,7 +1721,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS:
       return true;
     case IDC_CHECK_SPELLING_WHILE_TYPING:
-      return prefs->GetBoolean(spellcheck::prefs::kEnableSpellcheck);
+      return prefs->GetBoolean(spellcheck::prefs::kSpellCheckEnable);
 
 #if !defined(OS_MACOSX) && defined(OS_POSIX)
     // TODO(suzhe): this should not be enabled for password fields.
@@ -1621,12 +1734,15 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS:
     case IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD:
     case IDC_CONTENT_CONTEXT_GENERATEPASSWORD:
+    case IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS:
       return true;
 
     case IDC_ROUTE_MEDIA:
       return IsRouteMediaEnabled();
 
     case IDC_CONTENT_CONTEXT_EXIT_FULLSCREEN:
+    // TODO(apacible): Update PIP conditions when finalized.
+    case IDC_CONTENT_CONTENT_PICTUREINPICTURE:
       return true;
 
     default:
@@ -1651,6 +1767,12 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
     return extension_items_.IsCommandIdChecked(id);
 
   return false;
+}
+
+bool RenderViewContextMenu::IsCommandIdVisible(int id) const {
+  if (ContextMenuMatcher::IsExtensionsCustomCommandId(id))
+    return extension_items_.IsCommandIdVisible(id);
+  return RenderViewContextMenuBase::IsCommandIdVisible(id);
 }
 
 void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
@@ -1684,19 +1806,28 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
   switch (id) {
     case IDC_CONTENT_CONTEXT_OPENLINKNEWTAB:
-      ExecOpenLinkNewTab();
+      OpenURLWithExtraHeaders(params_.link_url, GetDocumentURL(params_),
+                              WindowOpenDisposition::NEW_BACKGROUND_TAB,
+                              ui::PAGE_TRANSITION_LINK, "" /* extra_headers */,
+                              true /* started_from_context_menu */);
       break;
 
     case IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW:
       OpenURLWithExtraHeaders(params_.link_url, GetDocumentURL(params_),
                               WindowOpenDisposition::NEW_WINDOW,
-                              ui::PAGE_TRANSITION_LINK, "", true);
+                              ui::PAGE_TRANSITION_LINK, "" /* extra_headers */,
+                              true /* started_from_context_menu */);
       break;
 
     case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
       OpenURLWithExtraHeaders(params_.link_url, GURL(),
                               WindowOpenDisposition::OFF_THE_RECORD,
-                              ui::PAGE_TRANSITION_LINK, "", true);
+                              ui::PAGE_TRANSITION_LINK, "" /* extra_headers */,
+                              true /* started_from_context_menu */);
+      break;
+
+    case IDC_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP:
+      ExecOpenBookmarkApp();
       break;
 
     case IDC_CONTENT_CONTEXT_SAVELINKAS:
@@ -1809,7 +1940,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_VIEW_SOURCE:
-      embedder_web_contents_->ViewSource();
+      embedder_web_contents_->GetMainFrame()->ViewSource();
       break;
 
     case IDC_CONTENT_CONTEXT_INSPECTELEMENT:
@@ -1832,8 +1963,8 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE:
-      source_web_contents_->ViewFrameSource(params_.frame_url,
-                                            params_.frame_page_state);
+      if (GetRenderFrameHost())
+        GetRenderFrameHost()->ViewSource();
       break;
 
     case IDC_CONTENT_CONTEXT_UNDO:
@@ -1889,8 +2020,18 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_CONTENT_CONTEXT_GENERATEPASSWORD:
-      ChromePasswordManagerClient::FromWebContents(source_web_contents_)->
-          GeneratePassword();
+      password_manager_util::UserTriggeredManualGenerationFromContextMenu(
+          ChromePasswordManagerClient::FromWebContents(source_web_contents_));
+      break;
+
+    case IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS:
+      password_manager_util::UserTriggeredShowAllSavedPasswordsFromContextMenu(
+          autofill::ChromeAutofillClient::FromWebContents(
+              source_web_contents_));
+      break;
+
+    case IDC_CONTENT_CONTENT_PICTUREINPICTURE:
+      ExecPictureInPicture();
       break;
 
     default:
@@ -1979,11 +2120,7 @@ bool RenderViewContextMenu::IsTranslateEnabled() const {
   }
   std::string original_lang =
       chrome_translate_client->GetLanguageState().original_language();
-  std::unique_ptr<translate::TranslatePrefs> prefs(
-      ChromeTranslateClient::CreateTranslatePrefs(
-          GetPrefs(browser_context_)));
-  std::string target_lang =
-      translate::TranslateManager::GetTargetLanguage(prefs.get());
+  std::string target_lang = GetTargetLanguage();
   // Note that we intentionally enable the menu even if the original and
   // target languages are identical.  This is to give a way to user to
   // translate a page that might contains text fragments in a different
@@ -2120,7 +2257,7 @@ bool RenderViewContextMenu::IsOpenLinkOTREnabled() const {
   if (browser_context_->IsOffTheRecord() || !params_.link_url.is_valid())
     return false;
 
-  if (!chrome::IsURLAllowedInIncognito(params_.link_url, browser_context_))
+  if (!IsURLAllowedInIncognito(params_.link_url, browser_context_))
     return false;
 
   IncognitoModePrefs::Availability incognito_avail =
@@ -2128,13 +2265,19 @@ bool RenderViewContextMenu::IsOpenLinkOTREnabled() const {
   return incognito_avail != IncognitoModePrefs::DISABLED;
 }
 
-void RenderViewContextMenu::ExecOpenLinkNewTab() {
-  Browser* browser = chrome::FindBrowserWithWebContents(source_web_contents_);
-  OpenURLWithExtraHeaders(params_.link_url, GetDocumentURL(params_),
-                          (!browser || browser->is_app())
-                              ? WindowOpenDisposition::NEW_FOREGROUND_TAB
-                              : WindowOpenDisposition::NEW_BACKGROUND_TAB,
-                          ui::PAGE_TRANSITION_LINK, "", true);
+void RenderViewContextMenu::ExecOpenBookmarkApp() {
+  const extensions::Extension* bookmark_app =
+      GetBookmarkAppForURL(browser_context_, params_.link_url);
+  // |bookmark_app| could be null if it has been uninstalled since the user
+  // opened the context menu.
+  if (!bookmark_app)
+    return;
+
+  AppLaunchParams launch_params(
+      GetProfile(), bookmark_app, extensions::LAUNCH_CONTAINER_WINDOW,
+      WindowOpenDisposition::CURRENT_TAB, extensions::SOURCE_CONTEXT_MENU);
+  launch_params.override_url = params_.link_url;
+  OpenApplication(launch_params);
 }
 
 void RenderViewContextMenu::ExecProtocolHandler(int event_flags,
@@ -2223,7 +2366,7 @@ void RenderViewContextMenu::ExecSaveLinkAs() {
           destination: WEBSITE
         }
         policy {
-          cookies_allowed: true
+          cookies_allowed: YES
           cookies_store: "user"
           setting:
             "This feature cannot be disabled by settings. The request is made "
@@ -2231,15 +2374,19 @@ void RenderViewContextMenu::ExecSaveLinkAs() {
           policy_exception_justification: "Not implemented."
         })");
 
-  auto dl_params = base::MakeUnique<DownloadUrlParameters>(
+  auto dl_params = std::make_unique<DownloadUrlParameters>(
       url, render_frame_host->GetProcess()->GetID(),
       render_frame_host->GetRenderViewHost()->GetRoutingID(),
       render_frame_host->GetRoutingID(),
       storage_partition->GetURLRequestContext(), traffic_annotation);
-  dl_params->set_referrer(CreateReferrer(url, params_));
+  content::Referrer referrer = CreateReferrer(url, params_);
+  dl_params->set_referrer(referrer.url);
+  dl_params->set_referrer_policy(
+      content::Referrer::ReferrerPolicyForUrlRequest(referrer.policy));
   dl_params->set_referrer_encoding(params_.frame_charset);
   dl_params->set_suggested_name(params_.suggested_filename);
   dl_params->set_prompt(true);
+  dl_params->set_download_source(download::DownloadSource::CONTEXT_MENU);
 
   BrowserContext::GetDownloadManager(browser_context_)
       ->DownloadUrl(std::move(dl_params));
@@ -2308,9 +2455,10 @@ void RenderViewContextMenu::ExecLoadOriginalImage() {
   RenderFrameHost* render_frame_host = GetRenderFrameHost();
   if (!render_frame_host)
     return;
-  chrome::mojom::ImageContextMenuRendererPtr renderer;
-  render_frame_host->GetRemoteInterfaces()->GetInterface(&renderer);
-  renderer->RequestReloadImageForContextNode();
+  chrome::mojom::ChromeRenderFrameAssociatedPtr chrome_render_frame;
+  render_frame_host->GetRemoteAssociatedInterfaces()->GetInterface(
+      &chrome_render_frame);
+  chrome_render_frame->RequestReloadImageForContextNode();
 }
 
 void RenderViewContextMenu::ExecPlayPause() {
@@ -2430,14 +2578,13 @@ void RenderViewContextMenu::ExecTranslate() {
 
   std::string original_lang =
       chrome_translate_client->GetLanguageState().original_language();
+  std::string target_lang = GetTargetLanguage();
 
   // Since the user decided to translate for that language and site, clears
   // any preferences for not translating them.
   std::unique_ptr<translate::TranslatePrefs> prefs(
       ChromeTranslateClient::CreateTranslatePrefs(
           GetPrefs(browser_context_)));
-  std::string target_lang =
-      translate::TranslateManager::GetTargetLanguage(prefs.get());
   prefs->UnblockLanguage(original_lang);
   prefs->RemoveSiteFromBlacklist(params_.page_url.HostNoBrackets());
 
@@ -2461,6 +2608,16 @@ void RenderViewContextMenu::ExecProtocolHandlerSettings(int event_flags) {
       ForceNewTabDispositionFromEventFlags(event_flags);
   GURL url = chrome::GetSettingsUrl(chrome::kHandlerSettingsSubPage);
   OpenURL(url, GURL(), disposition, ui::PAGE_TRANSITION_LINK);
+}
+
+void RenderViewContextMenu::ExecPictureInPicture() {
+  if (!base::FeatureList::IsEnabled(media::kPictureInPicture))
+    return;
+
+  // TODO(apacible): Re-enable contextual menu entry point for
+  // Picture-in-Picture after end to end flow through the media controls is
+  // stable. http://crbug/817613.
+  NOTIMPLEMENTED();
 }
 
 void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {

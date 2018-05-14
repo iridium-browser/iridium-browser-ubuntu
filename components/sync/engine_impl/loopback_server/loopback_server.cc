@@ -12,7 +12,6 @@
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
@@ -42,7 +41,7 @@ class LoopbackServerEntity;
 namespace {
 
 static const int kCurrentLoopbackServerProtoVersion = 1;
-static const int kKeystoreKeyLenght = 16;
+static const int kKeystoreKeyLength = 16;
 
 // Properties of the bookmark bar permanent folders.
 static const char kBookmarkBarFolderServerTag[] = "bookmark_bar";
@@ -92,7 +91,7 @@ class UpdateSieve {
 
   static UpdateSieve::ModelTypeToVersionMap MessageToVersionMap(
       const sync_pb::GetUpdatesMessage& get_updates_message) {
-    CHECK_GT(get_updates_message.from_progress_marker_size(), 0)
+    DCHECK_GT(get_updates_message.from_progress_marker_size(), 0)
         << "A GetUpdates request must have at least one progress marker.";
     ModelTypeToVersionMap request_version_map;
 
@@ -105,7 +104,7 @@ class UpdateSieve {
       // first request for this type).
       if (marker.has_token() && !marker.token().empty()) {
         bool parsed = base::StringToInt64(marker.token(), &version);
-        CHECK(parsed) << "Unable to parse progress marker token.";
+        DCHECK(parsed) << "Unable to parse progress marker token.";
       }
 
       ModelType model_type =
@@ -137,7 +136,7 @@ LoopbackServer::LoopbackServer(const base::FilePath& persistent_file)
     : version_(0),
       store_birthday_(0),
       persistent_file_(persistent_file),
-      observer_for_tests_(NULL) {
+      observer_for_tests_(nullptr) {
   Init();
 }
 
@@ -155,7 +154,7 @@ void LoopbackServer::Init() {
 
 std::string LoopbackServer::GenerateNewKeystoreKey() const {
   // TODO(pastarmovj): Check if true random bytes is ok or alpha-nums is needed?
-  return base::RandBytesAsString(kKeystoreKeyLenght);
+  return base::RandBytesAsString(kKeystoreKeyLength);
 }
 
 bool LoopbackServer::CreatePermanentBookmarkFolder(
@@ -221,7 +220,7 @@ void LoopbackServer::HandleCommand(
 
   sync_pb::ClientToServerMessage message;
   bool parsed = message.ParseFromString(request);
-  CHECK(parsed) << "Unable to parse the ClientToServerMessage.";
+  DCHECK(parsed) << "Unable to parse the ClientToServerMessage.";
 
   sync_pb::ClientToServerResponse response_proto;
 
@@ -256,6 +255,9 @@ void LoopbackServer::HandleCommand(
       *server_status = HttpResponse::SYNC_SERVER_ERROR;
       *response_code = net::ERR_FAILED;
       *response = string();
+      UMA_HISTOGRAM_ENUMERATION(
+          "Sync.Local.RequestTypeOnError", message.message_contents(),
+          sync_pb::ClientToServerMessage_Contents_Contents_MAX);
       return;
     }
 
@@ -279,7 +281,7 @@ bool LoopbackServer::HandleGetUpdatesRequest(
   // at once.
   response->set_changes_remaining(0);
 
-  auto sieve = base::MakeUnique<UpdateSieve>(get_updates);
+  auto sieve = std::make_unique<UpdateSieve>(get_updates);
 
   // This folder is called "Synced Bookmarks" by sync and is renamed
   // "Mobile Bookmarks" by the mobile client UIs.
@@ -290,9 +292,8 @@ bool LoopbackServer::HandleGetUpdatesRequest(
   }
 
   bool send_encryption_keys_based_on_nigori = false;
-  for (EntityMap::const_iterator it = entities_.begin(); it != entities_.end();
-       ++it) {
-    const LoopbackServerEntity& entity = *it->second;
+  for (const auto& kv : entities_) {
+    const LoopbackServerEntity& entity = *kv.second;
     if (sieve->ClientWantsItem(entity)) {
       sync_pb::SyncEntity* response_entity = response->add_entries();
       entity.SerializeAsProto(response_entity);
@@ -307,9 +308,8 @@ bool LoopbackServer::HandleGetUpdatesRequest(
 
   if (send_encryption_keys_based_on_nigori ||
       get_updates.need_encryption_key()) {
-    for (vector<string>::iterator it = keystore_keys_.begin();
-         it != keystore_keys_.end(); ++it) {
-      response->add_encryption_keys(*it);
+    for (const string& key : keystore_keys_) {
+      response->add_encryption_keys(key);
     }
   }
 
@@ -330,12 +330,14 @@ string LoopbackServer::CommitEntity(
   syncer::ModelType type = GetModelType(client_entity);
   if (client_entity.deleted()) {
     entity = PersistentTombstoneEntity::CreateFromEntity(client_entity);
-    DeleteChildren(client_entity.id_string());
+    if (entity) {
+      DeleteChildren(client_entity.id_string());
+    }
   } else if (type == syncer::NIGORI) {
     // NIGORI is the only permanent item type that should be updated by the
     // client.
     EntityMap::const_iterator iter = entities_.find(client_entity.id_string());
-    CHECK(iter != entities_.end());
+    DCHECK(iter != entities_.end());
     entity = PersistentPermanentEntity::CreateUpdatedNigoriEntity(
         client_entity, *iter->second);
   } else if (type == syncer::BOOKMARKS) {
@@ -352,6 +354,9 @@ string LoopbackServer::CommitEntity(
     entity = PersistentUniqueClientEntity::CreateFromEntity(client_entity);
   }
 
+  if (!entity)
+    return string();
+
   const std::string id = entity->GetId();
   SaveEntity(std::move(entity));
   BuildEntryResponseForSuccessfulCommit(id, entry_response);
@@ -367,7 +372,7 @@ void LoopbackServer::BuildEntryResponseForSuccessfulCommit(
     const std::string& entity_id,
     sync_pb::CommitResponse_EntryResponse* entry_response) {
   EntityMap::const_iterator iter = entities_.find(entity_id);
-  CHECK(iter != entities_.end());
+  DCHECK(iter != entities_.end());
   const LoopbackServerEntity& entity = *iter->second;
   entry_response->set_response_type(response_type_override_
                                         ? response_type_override_.Run(entity)
@@ -399,11 +404,11 @@ bool LoopbackServer::IsChild(const string& id,
   return IsChild(entity.GetParentId(), potential_parent_id);
 }
 
-void LoopbackServer::DeleteChildren(const string& id) {
+void LoopbackServer::DeleteChildren(const string& parent_id) {
   std::vector<sync_pb::SyncEntity> tombstones;
-  // Find all the children of id.
+  // Find all the children of |parent_id|.
   for (auto& entity : entities_) {
-    if (IsChild(entity.first, id)) {
+    if (IsChild(entity.first, parent_id)) {
       sync_pb::SyncEntity proto;
       entity.second->SerializeAsProto(&proto);
       tombstones.emplace_back(proto);
@@ -424,12 +429,10 @@ bool LoopbackServer::HandleCommitRequest(
   ModelTypeSet committed_model_types;
 
   // TODO(pvalenzuela): Add validation of CommitMessage.entries.
-  ::google::protobuf::RepeatedPtrField<sync_pb::SyncEntity>::const_iterator it;
-  for (it = commit.entries().begin(); it != commit.entries().end(); ++it) {
+  for (const sync_pb::SyncEntity& client_entity : commit.entries()) {
     sync_pb::CommitResponse_EntryResponse* entry_response =
         response->add_entryresponse();
 
-    sync_pb::SyncEntity client_entity = *it;
     string parent_id = client_entity.parent_id_string();
     if (client_to_server_ids.find(parent_id) != client_to_server_ids.end()) {
       parent_id = client_to_server_ids[parent_id];
@@ -447,7 +450,7 @@ bool LoopbackServer::HandleCommitRequest(
     }
 
     EntityMap::const_iterator iter = entities_.find(entity_id);
-    CHECK(iter != entities_.end());
+    DCHECK(iter != entities_.end());
     committed_model_types.Put(iter->second->GetModelType());
   }
 
@@ -475,9 +478,8 @@ std::vector<sync_pb::SyncEntity> LoopbackServer::GetSyncEntitiesByModelType(
     ModelType model_type) {
   DCHECK(thread_checker_.CalledOnValidThread());
   std::vector<sync_pb::SyncEntity> sync_entities;
-  for (EntityMap::const_iterator it = entities_.begin(); it != entities_.end();
-       ++it) {
-    const LoopbackServerEntity& entity = *it->second;
+  for (const auto& kv : entities_) {
+    const LoopbackServerEntity& entity = *kv.second;
     if (!(entity.IsDeleted() || entity.IsPermanent()) &&
         entity.GetModelType() == model_type) {
       sync_pb::SyncEntity sync_entity;
@@ -498,12 +500,11 @@ LoopbackServer::GetEntitiesAsDictionaryValue() {
   ModelTypeSet all_types = ModelTypeSet::All();
   for (ModelTypeSet::Iterator it = all_types.First(); it.Good(); it.Inc()) {
     dictionary->Set(ModelTypeToString(it.Get()),
-                    base::MakeUnique<base::ListValue>());
+                    std::make_unique<base::ListValue>());
   }
 
-  for (EntityMap::const_iterator it = entities_.begin(); it != entities_.end();
-       ++it) {
-    const LoopbackServerEntity& entity = *it->second;
+  for (const auto& kv : entities_) {
+    const LoopbackServerEntity& entity = *kv.second;
     if (entity.IsDeleted() || entity.IsPermanent()) {
       // Tombstones are ignored as they don't represent current data. Folders
       // are also ignored as current verification infrastructure does not
@@ -580,17 +581,21 @@ void LoopbackServer::SerializeState(sync_pb::LoopbackServerProto* proto) const {
 bool LoopbackServer::DeSerializeState(
     const sync_pb::LoopbackServerProto& proto) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  CHECK_EQ(proto.version(), kCurrentLoopbackServerProtoVersion);
+  DCHECK_EQ(proto.version(), kCurrentLoopbackServerProtoVersion);
 
   store_birthday_ = proto.store_birthday();
   version_ = proto.last_version_assigned();
   for (int i = 0; i < proto.keystore_keys_size(); ++i)
     keystore_keys_.push_back(proto.keystore_keys(i));
   for (int i = 0; i < proto.entities_size(); ++i) {
-    entities_[proto.entities(i).entity().id_string()] =
+    std::unique_ptr<LoopbackServerEntity> entity =
         LoopbackServerEntity::CreateEntityFromProto(proto.entities(i));
+    // Silently drop entities that cannot be successfully deserialized.
+    if (entity)
+      entities_[proto.entities(i).entity().id_string()] = std::move(entity);
   }
 
+  // Report success regardless of if some entities were dropped.
   return true;
 }
 
@@ -616,8 +621,7 @@ bool LoopbackServer::LoadStateFromFile(const base::FilePath& filename) {
     if (base::ReadFileToString(filename, &serialized)) {
       sync_pb::LoopbackServerProto proto;
       if (serialized.length() > 0 && proto.ParseFromString(serialized)) {
-        DeSerializeState(proto);
-        return true;
+        return DeSerializeState(proto);
       } else {
         LOG(ERROR) << "Loopback sync can not parse the persistent state file.";
         return false;

@@ -205,20 +205,19 @@ bool ExtensionUninstallDialog::Uninstall(base::string16* error) {
     observer_.RemoveAll();
     return ExtensionSystem::Get(profile_)
         ->extension_service()
-        ->UninstallExtension(extension_->id(), uninstall_reason_,
-                             base::Bind(&base::DoNothing), error);
+        ->UninstallExtension(extension_->id(), uninstall_reason_, error);
   }
   *error = base::ASCIIToUTF16(kExtensionRemovedError);
   return false;
 }
 
 void ExtensionUninstallDialog::HandleReportAbuse() {
-  chrome::NavigateParams params(
+  NavigateParams params(
       profile_,
       extension_urls::GetWebstoreReportAbuseUrl(extension_->id(), kReferrerId),
       ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-  chrome::Navigate(&params);
+  Navigate(&params);
 }
 
 }  // namespace extensions

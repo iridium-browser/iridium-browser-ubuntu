@@ -14,7 +14,6 @@
 #include "modules/bluetooth/BluetoothError.h"
 #include "modules/bluetooth/BluetoothRemoteGATTCharacteristic.h"
 #include "modules/bluetooth/BluetoothUUID.h"
-#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -28,8 +27,9 @@ BluetoothRemoteGATTService::BluetoothRemoteGATTService(
       device_instance_id_(device_instance_id),
       device_(device) {}
 
-DEFINE_TRACE(BluetoothRemoteGATTService) {
+void BluetoothRemoteGATTService::Trace(blink::Visitor* visitor) {
   visitor->Trace(device_);
+  ScriptWrappable::Trace(visitor);
 }
 
 // Callback that allows us to resolve the promise with a single characteristic
@@ -147,10 +147,9 @@ ScriptPromise BluetoothRemoteGATTService::GetCharacteristicsImpl(
       device_->GetBluetooth()->Service();
   service->RemoteServiceGetCharacteristics(
       service_->instance_id, quantity, characteristics_uuid,
-      ConvertToBaseCallback(
-          WTF::Bind(&BluetoothRemoteGATTService::GetCharacteristicsCallback,
-                    WrapPersistent(this), service_->instance_id,
-                    characteristics_uuid, quantity, WrapPersistent(resolver))));
+      WTF::Bind(&BluetoothRemoteGATTService::GetCharacteristicsCallback,
+                WrapPersistent(this), service_->instance_id,
+                characteristics_uuid, quantity, WrapPersistent(resolver)));
 
   return promise;
 }

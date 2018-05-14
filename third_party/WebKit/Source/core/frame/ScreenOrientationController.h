@@ -25,6 +25,8 @@ class CORE_EXPORT ScreenOrientationController
   USING_GARBAGE_COLLECTED_MIXIN(ScreenOrientationController);
 
  public:
+  static const char kSupplementName[];
+
   virtual ~ScreenOrientationController() = default;
 
   static ScreenOrientationController* From(LocalFrame&);
@@ -41,16 +43,13 @@ class CORE_EXPORT ScreenOrientationController
   // unlocking.
   virtual bool MaybeHasActiveLock() const = 0;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   explicit ScreenOrientationController(LocalFrame&);
   // To be called by an ScreenOrientationController to register its
   // implementation.
   static void ProvideTo(LocalFrame&, ScreenOrientationController*);
-
- private:
-  static const char* SupplementName();
 };
 
 }  // namespace blink

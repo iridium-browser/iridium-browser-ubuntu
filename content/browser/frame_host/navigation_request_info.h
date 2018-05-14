@@ -10,8 +10,8 @@
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 #include "content/common/navigation_params.h"
+#include "content/common/navigation_params.mojom.h"
 #include "content/public/common/referrer.h"
-#include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -22,23 +22,23 @@ namespace content {
 // to the IO thread by a NavigationRequest object.
 struct CONTENT_EXPORT NavigationRequestInfo {
   NavigationRequestInfo(const CommonNavigationParams& common_params,
-                        const BeginNavigationParams& begin_params,
-                        const GURL& first_party_for_cookies,
+                        mojom::BeginNavigationParamsPtr begin_params,
+                        const GURL& site_for_cookies,
                         bool is_main_frame,
                         bool parent_is_main_frame,
                         bool are_ancestors_secure,
                         int frame_tree_node_id,
                         bool is_for_guests_only,
                         bool report_raw_headers,
-                        blink::WebPageVisibilityState page_visibility_state);
+                        bool is_prerendering);
   ~NavigationRequestInfo();
 
   const CommonNavigationParams common_params;
-  const BeginNavigationParams begin_params;
+  mojom::BeginNavigationParamsPtr begin_params;
 
   // Usually the URL of the document in the top-level window, which may be
   // checked by the third-party cookie blocking policy.
-  const GURL first_party_for_cookies;
+  const GURL site_for_cookies;
 
   const bool is_main_frame;
   const bool parent_is_main_frame;
@@ -53,7 +53,7 @@ struct CONTENT_EXPORT NavigationRequestInfo {
 
   const bool report_raw_headers;
 
-  blink::WebPageVisibilityState page_visibility_state;
+  const bool is_prerendering;
 };
 
 }  // namespace content

@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
-#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_scheduler/post_task.h"
@@ -44,6 +43,7 @@
 #include "components/proximity_auth/screenlock_state.h"
 #include "components/proximity_auth/switches.h"
 #include "components/signin/core/account_id/account_id.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -51,10 +51,10 @@
 #include "ui/gfx/range/range.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/system/devicetype_utils.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager_factory.h"
 #include "components/user_manager/user_manager.h"
+#include "ui/chromeos/devicetype_utils.h"
 #endif
 
 using proximity_auth::ScreenlockState;
@@ -66,7 +66,8 @@ namespace easy_unlock_private = api::easy_unlock_private;
 namespace {
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<EasyUnlockPrivateAPI>>::
-    DestructorAtExit g_factory = LAZY_INSTANCE_INITIALIZER;
+    DestructorAtExit g_easy_unlock_private_api_factory =
+        LAZY_INSTANCE_INITIALIZER;
 
 // Utility method for getting the API's crypto delegate.
 EasyUnlockPrivateCryptoDelegate* GetCryptoDelegate(
@@ -115,7 +116,7 @@ ScreenlockState ToScreenlockState(easy_unlock_private::State state) {
 // static
 BrowserContextKeyedAPIFactory<EasyUnlockPrivateAPI>*
     EasyUnlockPrivateAPI::GetFactoryInstance() {
-  return g_factory.Pointer();
+  return g_easy_unlock_private_api_factory.Pointer();
 }
 
 EasyUnlockPrivateAPI::EasyUnlockPrivateAPI(content::BrowserContext* context)
@@ -138,7 +139,7 @@ ExtensionFunction::ResponseAction EasyUnlockPrivateGetStringsFunction::Run() {
   std::unique_ptr<base::DictionaryValue> strings(new base::DictionaryValue);
 
 #if defined(OS_CHROMEOS)
-  const base::string16 device_type = ash::GetChromeOSDeviceName();
+  const base::string16 device_type = ui::GetChromeOSDeviceName();
 #else
   // TODO(isherman): Set an appropriate device name for non-ChromeOS devices.
   const base::string16 device_type = base::ASCIIToUTF16("Chromeschnozzle");
@@ -157,9 +158,8 @@ ExtensionFunction::ResponseAction EasyUnlockPrivateGetStringsFunction::Run() {
 #endif  // defined(OS_CHROMEOS)
 
   // Common strings.
-  strings->SetString(
-      "learnMoreLinkTitle",
-      l10n_util::GetStringUTF16(IDS_EASY_UNLOCK_LEARN_MORE_LINK_TITLE));
+  strings->SetString("learnMoreLinkTitle",
+                     l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   strings->SetString("deviceType", device_type);
 
   // Setup notification strings.
@@ -302,10 +302,8 @@ ExtensionFunction::ResponseAction EasyUnlockPrivateGetStringsFunction::Run() {
       "setupAndroidSmartLockDoneButtonText",
       l10n_util::GetStringUTF16(
           IDS_EASY_UNLOCK_SETUP_ANDROID_SMART_LOCK_DONE_BUTTON_LABEL));
-  strings->SetString(
-      "setupAndroidSmartLockAboutLinkText",
-      l10n_util::GetStringUTF16(
-          IDS_EASY_UNLOCK_SETUP_ANDROID_SMART_LOCK_ABOUT_LINK_TEXT));
+  strings->SetString("setupAndroidSmartLockAboutLinkText",
+                     l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   // Step 3: Setup completed successfully.
   strings->SetString(
       "setupCompleteHeaderTitle",
@@ -702,7 +700,7 @@ bool EasyUnlockPrivateGetRemoteDevicesFunction::RunAsync() {
     const base::ListValue* devices =
         EasyUnlockService::Get(profile)->GetRemoteDevices();
     SetResult(devices ? devices->CreateDeepCopy()
-                      : base::MakeUnique<base::ListValue>());
+                      : std::make_unique<base::ListValue>());
     SendResponse(true);
   }
 

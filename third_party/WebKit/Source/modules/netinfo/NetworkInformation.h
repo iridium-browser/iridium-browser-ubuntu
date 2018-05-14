@@ -5,9 +5,9 @@
 #ifndef NetworkInformation_h
 #define NetworkInformation_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/events/EventTarget.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
+#include "core/dom/events/EventTarget.h"
 #include "platform/network/NetworkStateNotifier.h"
 #include "platform/wtf/Optional.h"
 #include "platform/wtf/Time.h"
@@ -35,6 +35,7 @@ class NetworkInformation final
   String effectiveType() const;
   unsigned long rtt() const;
   double downlink() const;
+  bool saveData() const;
 
   // NetworkStateObserver overrides.
   void ConnectionChange(WebConnectionType,
@@ -42,7 +43,8 @@ class NetworkInformation final
                         WebEffectiveConnectionType effective_type,
                         const Optional<TimeDelta>& http_rtt,
                         const Optional<TimeDelta>& transport_rtt,
-                        const Optional<double>& downlink_mbps) override;
+                        const Optional<double>& downlink_mbps,
+                        bool save_data) override;
 
   // EventTarget overrides.
   const AtomicString& InterfaceName() const override;
@@ -55,7 +57,7 @@ class NetworkInformation final
   // ContextLifecycleObserver overrides.
   void ContextDestroyed(ExecutionContext*) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(change);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(typechange);  // Deprecated
@@ -71,6 +73,20 @@ class NetworkInformation final
   explicit NetworkInformation(ExecutionContext*);
   void StartObserving();
   void StopObserving();
+
+  // A random number by which the RTT and downlink estimates are multiplied
+  // with. Adding this noise reduces the chances of cross-origin fingerprinting.
+  double GetRandomMultiplier() const;
+
+  // Rounds |rtt| as per the NetInfo spec and to improve privacy.
+  unsigned long RoundRtt(const Optional<TimeDelta>& rtt) const;
+
+  // Rounds |downlink_mbps| as per the NetInfo spec and to improve privacy. The
+  // returned value is in Mbps.
+  double RoundMbps(const Optional<double>& downlink_mbps) const;
+
+  // Whether this object is listening for events from NetworkStateNotifier.
+  bool IsObserving() const;
 
   // Touched only on context thread.
   WebConnectionType type_;
@@ -91,11 +107,14 @@ class NetworkInformation final
   // only on context thread.
   double downlink_mbps_;
 
-  // Whether this object is listening for events from NetworkStateNotifier.
-  bool observing_;
+  // Whether the data saving mode is enabled.
+  bool save_data_;
 
   // Whether ContextLifecycleObserver::contextDestroyed has been called.
   bool context_stopped_;
+
+  std::unique_ptr<NetworkStateNotifier::NetworkStateObserverHandle>
+      connection_observer_handle_;
 };
 
 }  // namespace blink

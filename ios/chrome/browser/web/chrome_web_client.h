@@ -22,7 +22,6 @@ class ChromeWebClient : public web::WebClient {
   std::unique_ptr<web::WebMainParts> CreateWebMainParts() override;
   void PreWebViewCreation() const override;
   void AddAdditionalSchemes(Schemes* schemes) const override;
-  std::string GetAcceptLangs(web::BrowserState* state) const override;
   std::string GetApplicationLocale() const override;
   bool IsAppSpecificURL(const GURL& url) const override;
   base::string16 GetPluginNotSupportedText() const override;
@@ -33,11 +32,14 @@ class ChromeWebClient : public web::WebClient {
       int resource_id,
       ui::ScaleFactor scale_factor) const override;
   base::RefCountedMemory* GetDataResourceBytes(int resource_id) const override;
+  std::unique_ptr<base::Value> GetServiceManifestOverlay(
+      base::StringPiece name) override;
   void GetAdditionalWebUISchemes(
       std::vector<std::string>* additional_schemes) override;
   void PostBrowserURLRewriterCreation(
       web::BrowserURLRewriter* rewriter) override;
-  NSString* GetEarlyPageScript(web::BrowserState* browser_state) const override;
+  NSString* GetDocumentStartScriptForMainFrame(
+      web::BrowserState* browser_state) const override;
   void AllowCertificateError(
       web::WebState* web_state,
       int cert_error,
@@ -45,7 +47,7 @@ class ChromeWebClient : public web::WebClient {
       const GURL& request_url,
       bool overridable,
       const base::Callback<void(bool)>& callback) override;
-  bool IsSlimNavigationManagerEnabled() const override;
+  void RegisterServices(StaticServiceMap* services) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChromeWebClient);

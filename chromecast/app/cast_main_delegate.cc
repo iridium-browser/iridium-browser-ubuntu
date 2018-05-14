@@ -20,11 +20,13 @@
 #include "build/build_config.h"
 #include "chromecast/base/cast_paths.h"
 #include "chromecast/browser/cast_content_browser_client.h"
+#include "chromecast/chromecast_buildflags.h"
 #include "chromecast/common/cast_resource_delegate.h"
 #include "chromecast/common/global_descriptors.h"
 #include "chromecast/renderer/cast_content_renderer_client.h"
 #include "chromecast/utility/cast_content_utility_client.h"
 #include "components/crash/content/app/crash_reporter_client.h"
+#include "components/crash/core/common/crash_key.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/content_switches.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -33,16 +35,17 @@
 #include "base/android/apk_assets.h"
 #include "chromecast/app/android/cast_crash_reporter_client_android.h"
 #include "chromecast/app/android/crash_handler.h"
-#else
+#include "ui/base/resource/resource_bundle_android.h"
+#elif defined(OS_LINUX)
 #include "chromecast/app/linux/cast_crash_reporter_client.h"
-#endif  // defined(OS_ANDROID)
+#endif  // defined(OS_LINUX)
 
 namespace {
 
-#if !defined(OS_ANDROID)
+#if defined(OS_LINUX)
 base::LazyInstance<chromecast::CastCrashReporterClient>::Leaky
     g_crash_reporter_client = LAZY_INSTANCE_INITIALIZER;
-#endif  // !defined(OS_ANDROID)
+#endif  // defined(OS_LINUX)
 
 #if defined(OS_ANDROID)
 const int kMaxCrashFiles = 10;
@@ -53,11 +56,9 @@ const int kMaxCrashFiles = 10;
 namespace chromecast {
 namespace shell {
 
-CastMainDelegate::CastMainDelegate() {
-}
+CastMainDelegate::CastMainDelegate() {}
 
-CastMainDelegate::~CastMainDelegate() {
-}
+CastMainDelegate::~CastMainDelegate() {}
 
 bool CastMainDelegate::BasicStartupComplete(int* exit_code) {
   RegisterPathProvider();
@@ -78,8 +79,12 @@ bool CastMainDelegate::BasicStartupComplete(int* exit_code) {
   }
 #endif  // defined(OS_ANDROID)
   logging::InitLogging(settings);
-  // Time, process, and thread ID are available through logcat.
+#if BUILDFLAG(IS_CAST_DESKTOP_BUILD)
+  logging::SetLogItems(true, true, true, false);
+#else
+  // Timestamp available through logcat -v time.
   logging::SetLogItems(true, true, false, false);
+#endif  // BUILDFLAG(IS_CAST_DESKTOP_BUILD)
 
 #if defined(OS_ANDROID)
   // Only delete the old crash dumps if the current process is the browser
@@ -134,17 +139,20 @@ void CastMainDelegate::PreSandboxStartup() {
   std::string process_type =
       command_line->GetSwitchValueASCII(switches::kProcessType);
 
+// TODO(crbug.com/753619): Enable crash reporting on Fuchsia.
 #if defined(OS_ANDROID)
   base::FilePath log_file;
   PathService::Get(FILE_CAST_ANDROID_LOG, &log_file);
   chromecast::CrashHandler::Initialize(process_type, log_file);
-#else
+#elif defined(OS_LINUX)
   crash_reporter::SetCrashReporterClient(g_crash_reporter_client.Pointer());
 
   if (process_type != switches::kZygoteProcess) {
     CastCrashReporterClient::InitCrashReporter(process_type);
   }
-#endif  // defined(OS_ANDROID)
+#endif  // defined(OS_LINUX)
+
+  crash_reporter::InitializeCrashKeys();
 
   InitializeResourceBundle();
 }
@@ -165,14 +173,14 @@ int CastMainDelegate::RunProcess(
 #endif  // defined(OS_ANDROID)
 }
 
-#if !defined(OS_ANDROID)
+#if defined(OS_LINUX)
 void CastMainDelegate::ZygoteForked() {
   const base::CommandLine* command_line(base::CommandLine::ForCurrentProcess());
   std::string process_type =
       command_line->GetSwitchValueASCII(switches::kProcessType);
   CastCrashReporterClient::InitCrashReporter(process_type);
 }
-#endif  // !defined(OS_ANDROID)
+#endif  // defined(OS_LINUX)
 
 void CastMainDelegate::InitializeResourceBundle() {
   base::FilePath pak_file;
@@ -201,6 +209,8 @@ void CastMainDelegate::InitializeResourceBundle() {
     DCHECK_GE(pak_fd, 0);
     global_descriptors->Set(kAndroidPakDescriptor, pak_fd, pak_region);
   }
+
+  ui::SetLocalePaksStoredInApk(true);
 #endif  // defined(OS_ANDROID)
 
   resource_delegate_.reset(new CastResourceDelegate());

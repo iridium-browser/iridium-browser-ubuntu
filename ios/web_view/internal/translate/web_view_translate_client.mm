@@ -7,8 +7,6 @@
 #include <vector>
 
 #include "base/logging.h"
-#import "base/mac/scoped_nsobject.h"
-#include "base/memory/ptr_util.h"
 #include "components/infobars/core/infobar.h"
 #include "components/prefs/pref_service.h"
 #include "components/translate/core/browser/page_translated_details.h"
@@ -20,6 +18,8 @@
 #include "components/translate/core/common/language_detection_details.h"
 #include "ios/web/public/browser_state.h"
 #import "ios/web/public/web_state/web_state.h"
+#include "ios/web_view/internal/language/web_view_language_model_factory.h"
+#import "ios/web_view/internal/language/web_view_url_language_histogram_factory.h"
 #include "ios/web_view/internal/pref_names.h"
 #import "ios/web_view/internal/translate/cwv_translation_controller_internal.h"
 #include "ios/web_view/internal/translate/web_view_translate_accept_languages_factory.h"
@@ -35,21 +35,23 @@ DEFINE_WEB_STATE_USER_DATA_KEY(ios_web_view::WebViewTranslateClient);
 
 namespace ios_web_view {
 
-// TODO(crbug.com/729859): Support logging histogram data on detected language
-// page, by passing a valid language_histogram, when histogram logging is
-// available on ios/web_view.
 WebViewTranslateClient::WebViewTranslateClient(web::WebState* web_state)
-    : web::WebStateObserver(web_state),
-      translate_manager_(base::MakeUnique<translate::TranslateManager>(
+    : browser_state_(
+          WebViewBrowserState::FromBrowserState(web_state->GetBrowserState())),
+      translate_manager_(std::make_unique<translate::TranslateManager>(
           this,
-          WebViewTranslateRankerFactory::GetForBrowserState(
-              WebViewBrowserState::FromBrowserState(
-                  web_state->GetBrowserState())),
-          prefs::kAcceptLanguages)),
+          WebViewTranslateRankerFactory::GetForBrowserState(browser_state_),
+          WebViewLanguageModelFactory::GetForBrowserState(browser_state_))),
       translate_driver_(web_state,
                         web_state->GetNavigationManager(),
-                        translate_manager_.get(),
-                        nullptr /* language_histogram */) {}
+                        translate_manager_.get()) {
+  web_state->AddObserver(this);
+  language::IOSLanguageDetectionTabHelper::CreateForWebState(
+      web_state, translate_driver_.CreateLanguageDetectionCallback(),
+      ios_web_view::WebViewUrlLanguageHistogramFactory::GetForBrowserState(
+          ios_web_view::WebViewBrowserState::FromBrowserState(
+              web_state->GetBrowserState())));
+}
 
 WebViewTranslateClient::~WebViewTranslateClient() = default;
 
@@ -74,20 +76,18 @@ void WebViewTranslateClient::ShowTranslateUI(
                              triggeredFromMenu:triggered_from_menu];
 }
 
-translate::TranslateDriver* WebViewTranslateClient::GetTranslateDriver() {
+translate::IOSTranslateDriver* WebViewTranslateClient::GetTranslateDriver() {
   return &translate_driver_;
 }
 
 PrefService* WebViewTranslateClient::GetPrefs() {
-  DCHECK(web_state());
-  return WebViewBrowserState::FromBrowserState(web_state()->GetBrowserState())
-      ->GetPrefs();
+  // Use recording browser state to share user settings.
+  return browser_state_->GetRecordingBrowserState()->GetPrefs();
 }
 
 std::unique_ptr<translate::TranslatePrefs>
 WebViewTranslateClient::GetTranslatePrefs() {
-  DCHECK(web_state());
-  return base::MakeUnique<translate::TranslatePrefs>(
+  return std::make_unique<translate::TranslatePrefs>(
       GetPrefs(), prefs::kAcceptLanguages, nullptr);
 }
 
@@ -95,8 +95,7 @@ translate::TranslateAcceptLanguages*
 WebViewTranslateClient::GetTranslateAcceptLanguages() {
   translate::TranslateAcceptLanguages* accept_languages =
       WebViewTranslateAcceptLanguagesFactory::GetForBrowserState(
-          WebViewBrowserState::FromBrowserState(
-              web_state()->GetBrowserState()));
+          browser_state_);
   DCHECK(accept_languages);
   return accept_languages;
 }
@@ -125,7 +124,8 @@ void WebViewTranslateClient::ShowReportLanguageDetectionErrorUI(
   NOTREACHED();
 }
 
-void WebViewTranslateClient::WebStateDestroyed() {
+void WebViewTranslateClient::WebStateDestroyed(web::WebState* web_state) {
+  web_state->RemoveObserver(this);
   // Translation process can be interrupted.
   // Destroying the TranslateManager now guarantees that it never has to deal
   // with nullptr WebState.

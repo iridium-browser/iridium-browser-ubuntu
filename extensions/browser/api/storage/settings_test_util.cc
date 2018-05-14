@@ -50,7 +50,7 @@ ValueStore* GetStorage(scoped_refptr<const Extension> extension,
   ValueStore* storage = NULL;
   frontend->RunWithStorage(
       extension, settings_namespace, base::Bind(&AssignStorage, &storage));
-  content::RunAllBlockingPoolTasksUntilIdle();
+  content::RunAllTasksUntilIdle();
   return storage;
 }
 
@@ -88,8 +88,8 @@ scoped_refptr<const Extension> AddExtensionWithIdAndPermissions(
       break;
 
     case Manifest::TYPE_LEGACY_PACKAGED_APP: {
-      auto app = base::MakeUnique<base::DictionaryValue>();
-      auto app_launch = base::MakeUnique<base::DictionaryValue>();
+      auto app = std::make_unique<base::DictionaryValue>();
+      auto app_launch = std::make_unique<base::DictionaryValue>();
       app_launch->SetString("local_path", "fake.html");
       app->Set("launch", std::move(app_launch));
       manifest.Set("app", std::move(app));

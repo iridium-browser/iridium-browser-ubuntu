@@ -4,14 +4,22 @@
 
 #include "ios/chrome/browser/metrics/tab_usage_recorder.h"
 
+#import <UIKit/UIKit.h>
+
 #include "base/metrics/histogram_macros.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/chrome/browser/metrics/previous_session_info.h"
-#import "ios/chrome/browser/tabs/tab.h"
+#import "ios/chrome/browser/prerender/prerender_service.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/web/public/navigation_item.h"
 #import "ios/web/public/navigation_manager.h"
+#import "ios/web/public/web_state/navigation_context.h"
 #import "ios/web/public/web_state/web_state.h"
-#import "ios/web/web_state/ui/crw_web_controller.h"
+#include "ui/base/page_transition_types.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 // The histogram recording the state of the tab the user switches to.
 const char kSelectedTabHistogramName[] =
@@ -54,19 +62,74 @@ const char kRendererTerminationAliveRenderers[] =
 const char kRendererTerminationRecentlyAliveRenderers[] =
     "Tab.RendererTermination.RecentlyAliveRenderersCount";
 
+// Name of histogram for recording the state of the tab when the renderer is
+// terminated.
+const char kRendererTerminationStateHistogram[] =
+    "Tab.StateAtRendererTermination";
+
 // The recently alive renderer count metric counts all renderers that were alive
 // x seconds before a renderer termination. |kSecondsBeforeRendererTermination|
 // specifies x.
 const int kSecondsBeforeRendererTermination = 2;
 
-TabUsageRecorder::TabUsageRecorder(id<TabUsageRecorderDelegate> delegate)
-    : page_loads_(0), evicted_tab_(NULL), recorder_delegate_(delegate) {
-  restore_start_time_ = base::TimeTicks::Now();
+TabUsageRecorder::TabUsageRecorder(WebStateList* web_state_list,
+                                   PrerenderService* prerender_service)
+    : restore_start_time_(base::TimeTicks::Now()),
+      web_state_list_(web_state_list),
+      prerender_service_(prerender_service) {
+  DCHECK(web_state_list_);
+
+  web_state_list_->AddObserver(this);
+  for (int index = 0; index < web_state_list_->count(); ++index) {
+    web::WebState* web_state = web_state_list_->GetWebStateAt(index);
+    web_state->AddObserver(this);
+  }
+
+  // Register for backgrounding and foregrounding notifications. It is safe for
+  // the block to capture a pointer to |this| as they are unregistered in the
+  // destructor and thus the block are not called after the end of its lifetime.
+  application_backgrounding_observer_ = [[NSNotificationCenter defaultCenter]
+      addObserverForName:UIApplicationDidEnterBackgroundNotification
+                  object:nil
+                   queue:nil
+              usingBlock:^(NSNotification*) {
+                this->AppDidEnterBackground();
+              }];
+
+  application_foregrounding_observer_ = [[NSNotificationCenter defaultCenter]
+      addObserverForName:UIApplicationWillEnterForegroundNotification
+                  object:nil
+                   queue:nil
+              usingBlock:^(NSNotification*) {
+                this->AppWillEnterForeground();
+              }];
 }
 
-TabUsageRecorder::~TabUsageRecorder() {}
+TabUsageRecorder::~TabUsageRecorder() {
+  DCHECK(web_state_list_);
 
-void TabUsageRecorder::InitialRestoredTabs(Tab* active_tab, NSArray* tabs) {
+  for (int index = 0; index < web_state_list_->count(); ++index) {
+    web::WebState* web_state = web_state_list_->GetWebStateAt(index);
+    web_state->RemoveObserver(this);
+  }
+  web_state_list_->RemoveObserver(this);
+
+  if (application_backgrounding_observer_) {
+    [[NSNotificationCenter defaultCenter]
+        removeObserver:application_backgrounding_observer_];
+    application_backgrounding_observer_ = nil;
+  }
+
+  if (application_foregrounding_observer_) {
+    [[NSNotificationCenter defaultCenter]
+        removeObserver:application_foregrounding_observer_];
+    application_foregrounding_observer_ = nil;
+  }
+}
+
+void TabUsageRecorder::InitialRestoredTabs(
+    web::WebState* active_web_state,
+    const std::vector<web::WebState*>& web_states) {
 #if !defined(NDEBUG)
   // Debugging check to ensure this is called at most once per run.
   // Specifically, this function is called in either of two cases:
@@ -86,104 +149,99 @@ void TabUsageRecorder::InitialRestoredTabs(Tab* active_tab, NSArray* tabs) {
 
   // Do not set eviction reason on active tab since it will be reloaded without
   // being processed as a switch to the foreground tab.
-  for (Tab* tab in tabs) {
-    if (tab != active_tab) {
-      base::WeakNSObject<Tab> weak_tab(tab);
-      evicted_tabs_[weak_tab] = EVICTED_DUE_TO_COLD_START;
+  for (web::WebState* web_state : web_states) {
+    if (web_state != active_web_state) {
+      evicted_web_states_[web_state] = EVICTED_DUE_TO_COLD_START;
     }
   }
 }
 
-void TabUsageRecorder::TabCreatedForSelection(Tab* tab) {
-  tab_created_selected_ = tab;
-}
-
-void TabUsageRecorder::SetDelegate(id<TabUsageRecorderDelegate> delegate) {
-  recorder_delegate_.reset(delegate);
-}
-
-void TabUsageRecorder::RecordTabSwitched(Tab* old_tab, Tab* new_tab) {
+void TabUsageRecorder::RecordTabSwitched(web::WebState* old_web_state,
+                                         web::WebState* new_web_state) {
   // If a tab was created to be selected, and is selected shortly thereafter,
   // it should not add its state to the "kSelectedTabHistogramName" metric.
-  // |tab_created_selected_| is reset at the first tab switch seen after it was
-  // created, regardless of whether or not it was the tab selected.
-  bool was_just_created = new_tab == tab_created_selected_;
-  tab_created_selected_ = NULL;
+  // |web_state_created_selected_| is reset at the first tab switch seen after
+  // it was created, regardless of whether or not it was the tab selected.
+  const bool was_just_created = new_web_state == web_state_created_selected_;
+  web_state_created_selected_ = nullptr;
 
   // Disregard reselecting the same tab, but only if the mode has not changed
   // since the last time this tab was selected.  I.e. going to incognito and
   // back to normal mode is an event we want to track, but simply going into
   // stack view and back out, without changing modes, isn't.
-  if (new_tab == old_tab && new_tab != mode_switch_tab_)
+  if (new_web_state == old_web_state && new_web_state != mode_switch_web_state_)
     return;
-  mode_switch_tab_ = NULL;
+  mode_switch_web_state_ = nullptr;
 
-  // Disregard opening a new tab with no previous tab.
-  if (!old_tab)
+  // Disregard opening a new tab with no previous tab. Or closing the last tab.
+  if (!old_web_state || !new_web_state)
     return;
 
-  // Before knowledge of the previous tab, |old_tab|, is lost, see if it is a
-  // previously-evicted tab still reloading.  If it is, record that the
+  // Before knowledge of the previous tab, |old_web_state|, is lost, see if it
+  // is a previously-evicted tab still reloading.  If it is, record that the
   // user did not wait for the evicted tab to finish reloading.
-  if (old_tab == evicted_tab_ && old_tab != new_tab &&
-      evicted_tab_reload_start_time_ != base::TimeTicks()) {
+  if (old_web_state == evicted_web_state_ && old_web_state != new_web_state &&
+      evicted_web_state_reload_start_time_ != base::TimeTicks()) {
     UMA_HISTOGRAM_ENUMERATION(kDidUserWaitForEvictedTabReload,
                               USER_DID_NOT_WAIT, USER_BEHAVIOR_COUNT);
   }
   ResetEvictedTab();
 
-  if (ShouldIgnoreTab(new_tab) || was_just_created)
+  if (ShouldIgnoreWebState(new_web_state) || was_just_created)
     return;
 
   // Should never happen.  Keeping the check to ensure that the prerender logic
   // is never overlooked, should behavior at the tab_model level change.
-  DCHECK(![new_tab isPrerenderTab]);
+  DCHECK(!prerender_service_ ||
+         !prerender_service_->IsWebStatePrerendered(new_web_state));
 
-  TabStateWhenSelected tab_state = ExtractTabState(new_tab);
-  if (tab_state != IN_MEMORY) {
+  TabStateWhenSelected web_state_state = ExtractWebStateState(new_web_state);
+  if (web_state_state != IN_MEMORY) {
     // Keep track of the current 'evicted' tab.
-    evicted_tab_ = new_tab;
-    evicted_tab_state_ = tab_state;
+    evicted_web_state_ = new_web_state;
+    evicted_web_state_state_ = web_state_state;
     UMA_HISTOGRAM_COUNTS(kPageLoadsBeforeEvictedTabSelected, page_loads_);
     ResetPageLoads();
   }
 
-  UMA_HISTOGRAM_ENUMERATION(kSelectedTabHistogramName, tab_state,
+  UMA_HISTOGRAM_ENUMERATION(kSelectedTabHistogramName, web_state_state,
                             TAB_STATE_COUNT);
 }
 
-void TabUsageRecorder::RecordPrimaryTabModelChange(BOOL primary_tab_model,
-                                                   Tab* active_tab) {
+void TabUsageRecorder::RecordPrimaryTabModelChange(
+    bool primary_tab_model,
+    web::WebState* active_web_state) {
   if (primary_tab_model) {
     // User just came back to this tab model, so record a tab selection even
     // though the current tab was reselected.
-    if (mode_switch_tab_ == active_tab)
-      RecordTabSwitched(active_tab, active_tab);
+    if (mode_switch_web_state_ == active_web_state)
+      RecordTabSwitched(active_web_state, active_web_state);
   } else {
     // Keep track of the selected tab when this tab model is moved to
     // background. This way when the tab model is moved to the foreground, and
     // the current tab reselected, it is handled as a tab selection rather than
     // a no-op.
-    mode_switch_tab_ = active_tab;
+    mode_switch_web_state_ = active_web_state;
   }
 }
 
-void TabUsageRecorder::RecordPageLoadStart(Tab* tab) {
-  if (!ShouldIgnoreTab(tab)) {
+void TabUsageRecorder::RecordPageLoadStart(web::WebState* web_state) {
+  if (!ShouldIgnoreWebState(web_state)) {
     page_loads_++;
-    if (![[tab webController] isViewAlive]) {
+    if (web_state->IsEvicted()) {
       // On the iPad, there is no notification that a tab is being re-selected
       // after changing modes.  This catches the case where the pre-incognito
       // selected tab is selected again when leaving incognito mode.
-      if (mode_switch_tab_ == tab)
-        RecordTabSwitched(tab, tab);
-      if (evicted_tab_ == tab)
+      if (mode_switch_web_state_ == web_state)
+        RecordTabSwitched(web_state, web_state);
+      if (evicted_web_state_ == web_state)
         RecordRestoreStartTime();
     }
   } else {
     // If there is a currently-evicted tab reloading, make sure it is recorded
     // that the user did not wait for it to load.
-    if (evicted_tab_ && evicted_tab_reload_start_time_ != base::TimeTicks()) {
+    if (evicted_web_state_ &&
+        evicted_web_state_reload_start_time_ != base::TimeTicks()) {
       UMA_HISTOGRAM_ENUMERATION(kDidUserWaitForEvictedTabReload,
                                 USER_DID_NOT_WAIT, USER_BEHAVIOR_COUNT);
     }
@@ -191,14 +249,15 @@ void TabUsageRecorder::RecordPageLoadStart(Tab* tab) {
   }
 }
 
-void TabUsageRecorder::RecordPageLoadDone(Tab* tab, bool success) {
-  if (!tab)
+void TabUsageRecorder::RecordPageLoadDone(web::WebState* web_state,
+                                          bool success) {
+  if (!web_state)
     return;
-  if (tab == evicted_tab_) {
+  if (web_state == evicted_web_state_) {
     if (success) {
       LOCAL_HISTOGRAM_TIMES(
           kEvictedTabReloadTime,
-          base::TimeTicks::Now() - evicted_tab_reload_start_time_);
+          base::TimeTicks::Now() - evicted_web_state_reload_start_time_);
     }
     UMA_HISTOGRAM_ENUMERATION(kEvictedTabReloadSuccessRate,
                               success ? LOAD_SUCCESS : LOAD_FAILURE,
@@ -210,17 +269,30 @@ void TabUsageRecorder::RecordPageLoadDone(Tab* tab, bool success) {
   }
 }
 
-void TabUsageRecorder::RecordReload(Tab* tab) {
-  if (!ShouldIgnoreTab(tab)) {
+void TabUsageRecorder::RecordReload(web::WebState* web_state) {
+  if (!ShouldIgnoreWebState(web_state)) {
     page_loads_++;
   }
 }
 
-void TabUsageRecorder::RendererTerminated(Tab* terminated_tab, bool visible) {
-  if (!visible) {
-    DCHECK(!TabAlreadyEvicted(terminated_tab));
-    base::WeakNSObject<Tab> weak_tab(terminated_tab);
-    evicted_tabs_[weak_tab] = EVICTED_DUE_TO_RENDERER_TERMINATION;
+void TabUsageRecorder::RendererTerminated(web::WebState* terminated_web_state,
+                                          bool web_state_visible,
+                                          bool application_active) {
+  // Log the tab state for the termination.
+  const RendererTerminationTabState web_state_state =
+      application_active ? (web_state_visible ? FOREGROUND_TAB_FOREGROUND_APP
+                                              : BACKGROUND_TAB_FOREGROUND_APP)
+                         : (web_state_visible ? FOREGROUND_TAB_BACKGROUND_APP
+                                              : BACKGROUND_TAB_BACKGROUND_APP);
+
+  UMA_HISTOGRAM_ENUMERATION(kRendererTerminationStateHistogram,
+                            static_cast<int>(web_state_state),
+                            static_cast<int>(TERMINATION_TAB_STATE_COUNT));
+
+  if (!web_state_visible) {
+    DCHECK(!WebStateAlreadyEvicted(terminated_web_state));
+    evicted_web_states_[terminated_web_state] =
+        EVICTED_DUE_TO_RENDERER_TERMINATION;
   }
   base::TimeTicks now = base::TimeTicks::Now();
   termination_timestamps_.push_back(now);
@@ -234,9 +306,10 @@ void TabUsageRecorder::RendererTerminated(Tab* terminated_tab, bool visible) {
                         saw_memory_warning);
 
   // Log number of live tabs after the renderer termination. This count does not
-  // include |terminated_tab_|.
-  NSUInteger live_tabs_count = [recorder_delegate_ liveTabsCount];
-  UMA_HISTOGRAM_COUNTS_100(kRendererTerminationAliveRenderers, live_tabs_count);
+  // include |terminated_web_state|.
+  int live_web_states_count = GetLiveWebStatesCount();
+  UMA_HISTOGRAM_COUNTS_100(kRendererTerminationAliveRenderers,
+                           live_web_states_count);
 
   // Clear |termination_timestamps_| of timestamps older than
   // |kSecondsBeforeRendererTermination| ago.
@@ -249,26 +322,25 @@ void TabUsageRecorder::RendererTerminated(Tab* terminated_tab, bool visible) {
 
   // Log number of recently alive tabs, where recently alive is defined to mean
   // alive within the past |kSecondsBeforeRendererTermination|.
-  NSUInteger recently_live_tabs_count =
-      live_tabs_count + termination_timestamps_.size();
+  NSUInteger recently_live_web_states_count =
+      live_web_states_count + termination_timestamps_.size();
   UMA_HISTOGRAM_COUNTS_100(kRendererTerminationRecentlyAliveRenderers,
-                           recently_live_tabs_count);
+                           recently_live_web_states_count);
 }
 
 void TabUsageRecorder::AppDidEnterBackground() {
   base::TimeTicks time_now = base::TimeTicks::Now();
   LOCAL_HISTOGRAM_TIMES(kTimeAfterLastRestore, time_now - restore_start_time_);
 
-  if (evicted_tab_ && evicted_tab_reload_start_time_ != base::TimeTicks()) {
+  if (evicted_web_state_ &&
+      evicted_web_state_reload_start_time_ != base::TimeTicks()) {
     UMA_HISTOGRAM_ENUMERATION(kDidUserWaitForEvictedTabReload, USER_LEFT_CHROME,
                               USER_BEHAVIOR_COUNT);
     ResetEvictedTab();
   }
-  ClearDeletedTabs();
 }
 
 void TabUsageRecorder::AppWillEnterForeground() {
-  ClearDeletedTabs();
   restore_start_time_ = base::TimeTicks::Now();
 }
 
@@ -277,49 +349,54 @@ void TabUsageRecorder::ResetPageLoads() {
 }
 
 int TabUsageRecorder::EvictedTabsMapSize() {
-  return evicted_tabs_.size();
+  return evicted_web_states_.size();
 }
 
 void TabUsageRecorder::ResetAll() {
   ResetEvictedTab();
   ResetPageLoads();
-  evicted_tabs_.clear();
+  evicted_web_states_.clear();
 }
 
 void TabUsageRecorder::ResetEvictedTab() {
-  evicted_tab_ = NULL;
-  evicted_tab_state_ = IN_MEMORY;
-  evicted_tab_reload_start_time_ = base::TimeTicks();
+  evicted_web_state_ = nullptr;
+  evicted_web_state_state_ = IN_MEMORY;
+  evicted_web_state_reload_start_time_ = base::TimeTicks();
 }
 
-bool TabUsageRecorder::ShouldIgnoreTab(Tab* tab) {
+bool TabUsageRecorder::ShouldIgnoreWebState(web::WebState* web_state) {
   // Do not count chrome:// urls to avoid data noise.  For example, if they were
   // counted, every new tab created would add noise to the page load count.
   web::NavigationItem* pending_item =
-      tab.webState->GetNavigationManager()->GetPendingItem();
+      web_state->GetNavigationManager()->GetPendingItem();
   if (pending_item)
-    return pending_item->GetURL().SchemeIs(kChromeUIScheme);
-  return tab.lastCommittedURL.SchemeIs(kChromeUIScheme);
+    return pending_item->GetVirtualURL().SchemeIs(kChromeUIScheme);
+
+  web::NavigationItem* last_committed_item =
+      web_state->GetNavigationManager()->GetLastCommittedItem();
+  if (last_committed_item)
+    return last_committed_item->GetVirtualURL().SchemeIs(kChromeUIScheme);
+
+  return false;
 }
 
-bool TabUsageRecorder::TabAlreadyEvicted(Tab* tab) {
-  base::WeakNSObject<Tab> weak_tab(tab);
-  auto tab_item = evicted_tabs_.find(weak_tab);
-  return tab_item != evicted_tabs_.end();
+bool TabUsageRecorder::WebStateAlreadyEvicted(web::WebState* web_state) {
+  auto iter = evicted_web_states_.find(web_state);
+  return iter != evicted_web_states_.end();
 }
 
-TabUsageRecorder::TabStateWhenSelected TabUsageRecorder::ExtractTabState(
-    Tab* tab) {
-  if ([[tab webController] isViewAlive])
+TabUsageRecorder::TabStateWhenSelected TabUsageRecorder::ExtractWebStateState(
+    web::WebState* web_state) {
+  if (!web_state->IsEvicted())
     return IN_MEMORY;
 
-  base::WeakNSObject<Tab> weak_tab(tab);
-  auto tab_item = evicted_tabs_.find(weak_tab);
-  if (tab_item != evicted_tabs_.end()) {
-    TabStateWhenSelected tabState = tab_item->second;
-    evicted_tabs_.erase(weak_tab);
-    return tabState;
+  auto iter = evicted_web_states_.find(web_state);
+  if (iter != evicted_web_states_.end()) {
+    TabStateWhenSelected web_state_state = iter->second;
+    evicted_web_states_.erase(iter);
+    return web_state_state;
   }
+
   return EVICTED;
 }
 
@@ -328,14 +405,105 @@ void TabUsageRecorder::RecordRestoreStartTime() {
   // Record the time delta since the last eviction reload was seen.
   LOCAL_HISTOGRAM_TIMES(kTimeBetweenRestores, time_now - restore_start_time_);
   restore_start_time_ = time_now;
-  evicted_tab_reload_start_time_ = time_now;
+  evicted_web_state_reload_start_time_ = time_now;
 }
 
-void TabUsageRecorder::ClearDeletedTabs() {
-  base::WeakNSObject<Tab> empty_tab(nil);
-  auto tab_item = evicted_tabs_.find(empty_tab);
-  while (tab_item != evicted_tabs_.end()) {
-    evicted_tabs_.erase(empty_tab);
-    tab_item = evicted_tabs_.find(empty_tab);
+int TabUsageRecorder::GetLiveWebStatesCount() const {
+  int count = 0;
+  for (int index = 0; index < web_state_list_->count(); ++index) {
+    if (!web_state_list_->GetWebStateAt(index)->IsEvicted())
+      ++count;
   }
+  return count;
+}
+
+void TabUsageRecorder::OnWebStateDestroyed(web::WebState* web_state) {
+  if (web_state == web_state_created_selected_)
+    web_state_created_selected_ = nullptr;
+
+  if (web_state == evicted_web_state_)
+    evicted_web_state_ = nullptr;
+
+  if (web_state == mode_switch_web_state_)
+    mode_switch_web_state_ = nullptr;
+
+  auto evicted_web_states_iter = evicted_web_states_.find(web_state);
+  if (evicted_web_states_iter != evicted_web_states_.end())
+    evicted_web_states_.erase(evicted_web_states_iter);
+
+  web_state->RemoveObserver(this);
+}
+
+void TabUsageRecorder::DidStartNavigation(
+    web::WebState* web_state,
+    web::NavigationContext* navigation_context) {
+  if (PageTransitionCoreTypeIs(navigation_context->GetPageTransition(),
+                               ui::PAGE_TRANSITION_RELOAD)) {
+    RecordReload(web_state);
+  }
+}
+
+void TabUsageRecorder::PageLoaded(
+    web::WebState* web_state,
+    web::PageLoadCompletionStatus load_completion_status) {
+  RecordPageLoadDone(web_state, load_completion_status ==
+                                    web::PageLoadCompletionStatus::SUCCESS);
+}
+
+void TabUsageRecorder::RenderProcessGone(web::WebState* web_state) {
+  bool is_active;
+  switch ([UIApplication sharedApplication].applicationState) {
+    case UIApplicationStateActive:
+      is_active = true;
+      break;
+    case UIApplicationStateInactive:
+    case UIApplicationStateBackground:
+      is_active = false;
+      break;
+  }
+  RendererTerminated(web_state, web_state->IsVisible(), is_active);
+}
+
+void TabUsageRecorder::WebStateDestroyed(web::WebState* web_state) {
+  // TabUsageRecorder only watches WebState inserted in a WebStateList. The
+  // WebStateList owns the WebStates it manages. TabUsageRecorder removes
+  // itself from WebStates' WebStateObservers when notified by WebStateList
+  // that a WebState is removed, so it should never notice WebStateDestroyed
+  // event. Thus the implementation enforces this with NOTREACHED().
+  NOTREACHED();
+}
+
+void TabUsageRecorder::WebStateInsertedAt(WebStateList* web_state_list,
+                                          web::WebState* web_state,
+                                          int index,
+                                          bool activating) {
+  if (activating)
+    web_state_created_selected_ = web_state;
+
+  web_state->AddObserver(this);
+}
+
+void TabUsageRecorder::WebStateReplacedAt(WebStateList* web_state_list,
+                                          web::WebState* old_web_state,
+                                          web::WebState* new_web_state,
+                                          int index) {
+  OnWebStateDestroyed(old_web_state);
+
+  if (new_web_state)
+    new_web_state->AddObserver(this);
+}
+
+void TabUsageRecorder::WebStateDetachedAt(WebStateList* web_state_list,
+                                          web::WebState* web_state,
+                                          int index) {
+  OnWebStateDestroyed(web_state);
+}
+
+void TabUsageRecorder::WebStateActivatedAt(WebStateList* web_state_list,
+                                           web::WebState* old_web_state,
+                                           web::WebState* new_web_state,
+                                           int active_index,
+                                           int reason) {
+  if (reason & WebStateListObserver::CHANGE_REASON_USER_ACTION)
+    RecordTabSwitched(old_web_state, new_web_state);
 }

@@ -331,48 +331,65 @@ be investigated. When a test fails:
 
 
 ### Disabling Telemetry Tests
-
-If the test is a telemetry test, its name will have a '.' in it, such as
-`thread_times.key_mobile_sites` or `page_cycler.top_10`. The part before the
-first dot will be a python file in [tools/perf/benchmarks](https://code.google.com/p/chromium/codesearch#chromium/src/tools/perf/benchmarks/).
-
 If a telemetry test is failing and there is no clear culprit to revert
-immediately, disable the test. You can do this with the `@benchmark.Disabled`
-decorator. **Always add a comment next to your decorator with the bug id which
-has background on why the test was disabled, and also include a BUG= line in
-the CL.**
+immediately, disable the story on the failing platforms.
 
-Please disable the narrowest set of bots possible; for example, if
-the benchmark only fails on Windows Vista you can use
-`@benchmark.Disabled('vista')`. Supported disabled arguments include:
+You can do this with [Expectations](https://cs.chromium.org/chromium/src/tools/perf/expectations.config).
 
-*   `win`
-*   `mac`
-*   `chromeos`
-*   `linux`
-*   `android`
-*   `vista`
-*   `win7`
-*   `win8`
-*   `yosemite`
-*   `elcapitan`
-*   `all` (please use as a last resort)
+Disabling CLs can be TBR-ed to anyone in
+[tools/perf/OWNERS](https://code.google.com/p/chromium/codesearch#chromium/src/tools/perf/OWNERS).
+As long as the disabling CL touches only tools/perf/expectations.config, you can
+use TBR and NOTRY=true to submit the CL immediately.
 
-If the test fails consistently in a very narrow set of circumstances, you may
-consider implementing a `ShouldDisable` method on the benchmark instead.
-[Here](https://code.google.com/p/chromium/codesearch#chromium/src/tools/perf/benchmarks/power.py&q=svelte%20file:%5Esrc/tools/perf/&sq=package:chromium&type=cs&l=72) is
-and example of disabling a benchmark which OOMs on svelte.
+An expectation is a line in the expectations file in the following format:
+```
+reason [ conditions ] benchmark/story [ Skip ]
+```
 
-As a last resort, if you need to disable a benchmark on a particular Android
-device, you can do so by checking the return value of
-`possible_browser.platform.GetDeviceTypeName()` in `ShouldDisable`. Here are
-some [examples](https://code.google.com/p/chromium/codesearch#search/&q=ShouldDisable%20GetDeviceTypeName%20lang:py&sq=package:chromium&type=cs)
-of this. The type name of the failing device can be found by searching for the
-value of `ro.product.model` under the `provision_devices` step of the failing
-bot.
+Reasons must be in the format `crbug.com/#`. If the same test is failing and
+linked to multiple bugs, an entry for each bug is needed.
 
-Disabling CLs can be TBR-ed to anyone in [tools/perf/OWNERS](https://code.google.com/p/chromium/codesearch#chromium/src/tools/perf/OWNERS),
-but please do **not** submit with NOTRY=true.
+A list of supported conditions can be found [here](https://cs.chromium.org/chromium/src/third_party/catapult/telemetry/telemetry/story/expectations.py).
+
+Multiple conditions when listed in a single expectation are treated as logical
+_AND_ so a platform must meet all conditions to be disabled. Each failing
+platform requires its own expectations entry.
+
+To determine which stories are failing in a given run, go to the buildbot page
+for that run and search for `Unexpected failures` in the failing test entry.
+
+Example:
+On Mac platforms, google\_story is failing on memory\_benchmark.
+
+Buildbot output for failing run on Mac:
+```
+memory_benchmark/google_story
+Bot id: 'buildxxx-xx'
+...
+Unexpected Failures:
+* google_story
+```
+
+Go to the [expectations config file](https://cs.chromium.org/chromium/src/tools/perf/expectations.config).
+Look for a comment showing the benchmarks name. If the benchmark is not present
+in the expectations file, you may need to add a new section. Please keep them in
+alphabetical ordering.
+
+It will look similar to this when the above example is done:
+```
+\# Test Expectation file for telemetry tests.
+\# tags: Mac
+
+\# Benchmark: memory_benchmark
+crbug.com/123 [ Mac ] memory_benchmark/google_story [ Skip ]
+```
+
+In the case that a benchmark is failing in its entirety on a platform that it
+should noramally run on, you can temporarily disable it by using an expectation
+of this format:
+```
+crbug.com/123456 [ CONDITIONS ] memory_benchmark/* [ Skip ]
+```
 
 ### Disabling Other Tests
 

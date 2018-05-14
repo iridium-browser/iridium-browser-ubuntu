@@ -6,7 +6,6 @@ package org.chromium.chrome.browser;
 
 import android.graphics.Rect;
 import android.support.test.filters.MediumTest;
-import android.test.MoreAsserts;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -15,15 +14,17 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content.browser.test.util.Coordinates;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content.browser.test.util.JavaScriptUtils;
+import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.UiUtils;
 
@@ -32,14 +33,12 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
-
 /**
  * Integration test to ensure that OSK resizes only the visual viewport.
  */
 
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class OSKOverscrollTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -95,7 +94,7 @@ public class OSKOverscrollTest {
         try {
             String jsonText = JavaScriptUtils.executeJavaScriptAndWaitForResult(
                     webContents, "window.visualViewport.height");
-            MoreAsserts.assertNotEqual(jsonText.trim().toLowerCase(Locale.US), "null");
+            Assert.assertNotEquals(jsonText.trim().toLowerCase(Locale.US), "null");
             return Integer.parseInt(jsonText);
         } catch (Exception ex) {
             Assert.fail(ex.toString());
@@ -115,6 +114,7 @@ public class OSKOverscrollTest {
      * @throws ExecutionException
      */
     @Test
+    @DisabledTest(message = "crbug.com/773076")
     @MediumTest
     @CommandLineFlags.Add({ChromeSwitches.ENABLE_OSK_OVERSCROLL})
     @RetryOnFailure
@@ -124,12 +124,9 @@ public class OSKOverscrollTest {
 
         final AtomicReference<ContentViewCore> viewCoreRef = new AtomicReference<ContentViewCore>();
         final AtomicReference<WebContents> webContentsRef = new AtomicReference<WebContents>();
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                viewCoreRef.set(mActivityTestRule.getActivity().getCurrentContentViewCore());
-                webContentsRef.set(viewCoreRef.get().getWebContents());
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            viewCoreRef.set(mActivityTestRule.getActivity().getCurrentContentViewCore());
+            webContentsRef.set(viewCoreRef.get().getWebContents());
         });
 
         DOMUtils.waitForNonZeroNodeBounds(webContentsRef.get(), "fn");
@@ -137,8 +134,9 @@ public class OSKOverscrollTest {
         // Get the position of the footer and the viewport height before bringing up the OSK.
         Rect footerPositionBefore = DOMUtils.getNodeBounds(webContentsRef.get(), "footer");
         final int viewportHeightBeforeCss = getViewportHeight(webContentsRef.get());
-        final float cssToDevicePixFactor = viewCoreRef.get().getPageScaleFactor()
-                * viewCoreRef.get().getDeviceScaleFactor();
+        Coordinates coord = Coordinates.createFor(webContentsRef.get());
+        final float cssToDevicePixFactor =
+                coord.getPageScaleFactor() * coord.getDeviceScaleFactor();
 
         // Click on the unfocused input element for the first time to focus on it. This brings up
         // the OSK.

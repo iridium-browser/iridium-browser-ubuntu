@@ -4,7 +4,7 @@
 
 #include "ash/system/palette/tools/metalayer_mode.h"
 
-#include "ash/palette_delegate.h"
+#include "ash/highlighter/highlighter_controller.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
@@ -14,6 +14,7 @@
 #include "ash/system/toast/toast_manager.h"
 #include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/voice_interaction/voice_interaction_controller.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/event.h"
 #include "ui/gfx/paint_vector_icon.h"
@@ -28,16 +29,20 @@ namespace {
 const char kToastId[] = "palette_metalayer_mode";
 const int kToastDurationMs = 2500;
 
+// If the last stroke happened within this amount of time,
+// assume writing/sketching usage.
+const int kMaxStrokeGapWhenWritingMs = 1000;
+
 }  // namespace
 
 MetalayerMode::MetalayerMode(Delegate* delegate)
     : CommonPaletteTool(delegate), weak_factory_(this) {
   Shell::Get()->AddPreTargetHandler(this);
-  Shell::Get()->AddShellObserver(this);
+  Shell::Get()->voice_interaction_controller()->AddObserver(this);
 }
 
 MetalayerMode::~MetalayerMode() {
-  Shell::Get()->RemoveShellObserver(this);
+  Shell::Get()->voice_interaction_controller()->RemoveObserver(this);
   Shell::Get()->RemovePreTargetHandler(this);
 }
 
@@ -52,15 +57,19 @@ PaletteToolId MetalayerMode::GetToolId() const {
 void MetalayerMode::OnEnable() {
   CommonPaletteTool::OnEnable();
 
-  Shell::Get()->palette_delegate()->ShowMetalayer(base::BindOnce(
-      &MetalayerMode::OnMetalayerSessionComplete, weak_factory_.GetWeakPtr()));
+  Shell::Get()->highlighter_controller()->SetExitCallback(
+      base::BindOnce(&MetalayerMode::OnMetalayerSessionComplete,
+                     weak_factory_.GetWeakPtr()),
+      !activated_via_button_ /* no retries if activated via button */);
+  Shell::Get()->highlighter_controller()->SetEnabled(true);
   delegate()->HidePalette();
 }
 
 void MetalayerMode::OnDisable() {
   CommonPaletteTool::OnDisable();
 
-  Shell::Get()->palette_delegate()->HideMetalayer();
+  Shell::Get()->highlighter_controller()->SetEnabled(false);
+  activated_via_button_ = false;
 }
 
 const gfx::VectorIcon& MetalayerMode::GetActiveTrayIcon() const {
@@ -81,6 +90,9 @@ void MetalayerMode::OnTouchEvent(ui::TouchEvent* event) {
   if (!feature_enabled())
     return;
 
+  if (!palette_utils::IsInUserSession())
+    return;
+
   // The metalayer tool is already selected, no need to do anything.
   if (enabled())
     return;
@@ -89,8 +101,20 @@ void MetalayerMode::OnTouchEvent(ui::TouchEvent* event) {
       ui::EventPointerType::POINTER_TYPE_PEN)
     return;
 
+  if (event->type() == ui::ET_TOUCH_RELEASED) {
+    previous_stroke_end_ = event->time_stamp();
+    return;
+  }
+
   if (event->type() != ui::ET_TOUCH_PRESSED)
     return;
+
+  if (event->time_stamp() - previous_stroke_end_ <
+      base::TimeDelta::FromMilliseconds(kMaxStrokeGapWhenWritingMs)) {
+    // The press is happening too soon after the release, the user is most
+    // likely writing/sketching and does not want the metalayer to activate.
+    return;
+  }
 
   // The stylus "barrel" button press is encoded as ui::EF_LEFT_MOUSE_BUTTON
   if (!(event->flags() & ui::EF_LEFT_MOUSE_BUTTON))
@@ -111,24 +135,31 @@ void MetalayerMode::OnTouchEvent(ui::TouchEvent* event) {
     delegate()->RecordPaletteOptionsUsage(
         PaletteToolIdToPaletteTrayOptions(GetToolId()),
         PaletteInvocationMethod::SHORTCUT);
+    activated_via_button_ = true;
     delegate()->EnableTool(GetToolId());
   }
   event->StopPropagation();
 }
 
 void MetalayerMode::OnVoiceInteractionStatusChanged(
-    VoiceInteractionState state) {
+    mojom::VoiceInteractionState state) {
   voice_interaction_state_ = state;
   UpdateState();
 }
 
-void MetalayerMode::OnVoiceInteractionEnabled(bool enabled) {
+void MetalayerMode::OnVoiceInteractionSettingsEnabled(bool enabled) {
   voice_interaction_enabled_ = enabled;
   UpdateState();
 }
 
 void MetalayerMode::OnVoiceInteractionContextEnabled(bool enabled) {
   voice_interaction_context_enabled_ = enabled;
+  UpdateState();
+}
+
+void MetalayerMode::OnAssistantFeatureAllowedChanged(
+    mojom::AssistantAllowedState state) {
+  assistant_allowed_state_ = state;
   UpdateState();
 }
 

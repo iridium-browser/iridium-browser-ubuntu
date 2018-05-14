@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_delegate.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_order_controller.h"
@@ -19,6 +18,20 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+namespace {
+
+// Returns whether the given flag is set in a flagset.
+bool IsInsertionFlagSet(int flagset, WebStateList::InsertionFlags flag) {
+  return (flagset & flag) == flag;
+}
+
+// Returns whether the given flag is set in a flagset.
+bool IsClosingFlagSet(int flagset, WebStateList::ClosingFlags flag) {
+  return (flagset & flag) == flag;
+}
+
+}  // namespace
 
 // Wrapper around a WebState stored in a WebStateList.
 class WebStateList::WebStateWrapper {
@@ -64,7 +77,7 @@ std::unique_ptr<web::WebState> WebStateList::WebStateWrapper::ReplaceWebState(
     std::unique_ptr<web::WebState> web_state) {
   DCHECK_NE(web_state.get(), web_state_.get());
   std::swap(web_state, web_state_);
-  opener_ = WebStateOpener(nullptr);
+  opener_ = WebStateOpener();
   return web_state;
 }
 
@@ -83,12 +96,12 @@ bool WebStateList::WebStateWrapper::WasOpenedBy(const web::WebState* opener,
 
 WebStateList::WebStateList(WebStateListDelegate* delegate)
     : delegate_(delegate),
-      order_controller_(base::MakeUnique<WebStateListOrderController>(this)) {
+      order_controller_(std::make_unique<WebStateListOrderController>(this)) {
   DCHECK(delegate_);
 }
 
 WebStateList::~WebStateList() {
-  CloseAllWebStates();
+  CloseAllWebStates(CLOSE_NO_FLAGS);
 }
 
 bool WebStateList::ContainsIndex(int index) const {
@@ -137,35 +150,41 @@ int WebStateList::GetIndexOfLastWebStateOpenedBy(const web::WebState* opener,
   return GetIndexOfNthWebStateOpenedBy(opener, start_index, use_group, INT_MAX);
 }
 
-void WebStateList::InsertWebState(int index,
-                                  std::unique_ptr<web::WebState> web_state) {
+int WebStateList::InsertWebState(int index,
+                                 std::unique_ptr<web::WebState> web_state,
+                                 int insertion_flags,
+                                 WebStateOpener opener) {
+  if (IsInsertionFlagSet(insertion_flags, INSERT_INHERIT_OPENER))
+    opener = WebStateOpener(GetActiveWebState());
+
+  if (!IsInsertionFlagSet(insertion_flags, INSERT_FORCE_INDEX)) {
+    index = order_controller_->DetermineInsertionIndex(opener.opener);
+    if (index < 0 || count() < index)
+      index = count();
+  }
+
   DCHECK(ContainsIndex(index) || index == count());
   delegate_->WillAddWebState(web_state.get());
 
   web::WebState* web_state_ptr = web_state.get();
   web_state_wrappers_.insert(
       web_state_wrappers_.begin() + index,
-      base::MakeUnique<WebStateWrapper>(std::move(web_state)));
+      std::make_unique<WebStateWrapper>(std::move(web_state)));
 
   if (active_index_ >= index)
     ++active_index_;
 
+  const bool activating = IsInsertionFlagSet(insertion_flags, INSERT_ACTIVATE);
   for (auto& observer : observers_)
-    observer.WebStateInsertedAt(this, web_state_ptr, index);
-}
-
-void WebStateList::AppendWebState(ui::PageTransition transition,
-                                  std::unique_ptr<web::WebState> web_state,
-                                  WebStateOpener opener) {
-  int index =
-      order_controller_->DetermineInsertionIndex(transition, opener.opener);
-  if (index < 0 || count() < index)
-    index = count();
-
-  InsertWebState(index, std::move(web_state));
+    observer.WebStateInsertedAt(this, web_state_ptr, index, activating);
 
   if (opener.opener)
     SetOpenerOfWebStateAt(index, opener);
+
+  if (activating)
+    ActivateWebStateAt(index);
+
+  return index;
 }
 
 void WebStateList::MoveWebStateAt(int from_index, int to_index) {
@@ -207,9 +226,15 @@ std::unique_ptr<web::WebState> WebStateList::ReplaceWebStateAt(
   std::unique_ptr<web::WebState> old_web_state =
       web_state_wrappers_[index]->ReplaceWebState(std::move(web_state));
 
-  for (auto& observer : observers_)
+  for (auto& observer : observers_) {
     observer.WebStateReplacedAt(this, old_web_state.get(), web_state_ptr,
                                 index);
+  }
+
+  // When the active WebState is replaced, notify the observers as nearly
+  // all of them needs to treat a replacement as the selection changed.
+  NotifyIfActiveWebStateChanged(old_web_state.get(),
+                                WebStateListObserver::CHANGE_REASON_REPLACED);
 
   delegate_->WebStateDetached(old_web_state.get());
   return old_web_state;
@@ -240,32 +265,38 @@ std::unique_ptr<web::WebState> WebStateList::DetachWebStateAt(int index) {
   for (auto& observer : observers_)
     observer.WebStateDetachedAt(this, web_state, index);
 
-  if (active_web_state_was_closed)
-    NotifyIfActiveWebStateChanged(web_state, false);
+  if (active_web_state_was_closed) {
+    NotifyIfActiveWebStateChanged(web_state,
+                                  WebStateListObserver::CHANGE_REASON_NONE);
+  }
 
   delegate_->WebStateDetached(web_state);
   return detached_web_state;
 }
 
-void WebStateList::CloseWebStateAt(int index) {
+void WebStateList::CloseWebStateAt(int index, int close_flags) {
   auto detached_web_state = DetachWebStateAt(index);
 
-  for (auto& observer : observers_)
-    observer.WillCloseWebStateAt(this, detached_web_state.get(), index);
+  const bool user_action = IsClosingFlagSet(close_flags, CLOSE_USER_ACTION);
+  for (auto& observer : observers_) {
+    observer.WillCloseWebStateAt(this, detached_web_state.get(), index,
+                                 user_action);
+  }
 
   detached_web_state.reset();
 }
 
-void WebStateList::CloseAllWebStates() {
+void WebStateList::CloseAllWebStates(int close_flags) {
   while (!empty())
-    CloseWebStateAt(count() - 1);
+    CloseWebStateAt(count() - 1, close_flags);
 }
 
 void WebStateList::ActivateWebStateAt(int index) {
   DCHECK(ContainsIndex(index));
   web::WebState* old_web_state = GetActiveWebState();
   active_index_ = index;
-  NotifyIfActiveWebStateChanged(old_web_state, true);
+  NotifyIfActiveWebStateChanged(
+      old_web_state, WebStateListObserver::CHANGE_REASON_USER_ACTION);
 }
 
 void WebStateList::AddObserver(WebStateListObserver* observer) {
@@ -280,19 +311,19 @@ void WebStateList::ClearOpenersReferencing(int index) {
   web::WebState* old_web_state = web_state_wrappers_[index]->web_state();
   for (auto& web_state_wrapper : web_state_wrappers_) {
     if (web_state_wrapper->opener().opener == old_web_state)
-      web_state_wrapper->set_opener(WebStateOpener(nullptr));
+      web_state_wrapper->set_opener(WebStateOpener());
   }
 }
 
 void WebStateList::NotifyIfActiveWebStateChanged(web::WebState* old_web_state,
-                                                 bool user_action) {
+                                                 int reason) {
   web::WebState* new_web_state = GetActiveWebState();
   if (old_web_state == new_web_state)
     return;
 
   for (auto& observer : observers_) {
     observer.WebStateActivatedAt(this, old_web_state, new_web_state,
-                                 active_index_, user_action);
+                                 active_index_, reason);
   }
 }
 

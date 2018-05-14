@@ -30,14 +30,15 @@
 
 #include "core/css/CSSDefaultStyleSheets.h"
 
-#include "core/MathMLNames.h"
 #include "core/css/MediaQueryEvaluator.h"
 #include "core/css/RuleSet.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLHtmlElement.h"
 #include "core/layout/LayoutTheme.h"
+#include "core/mathml_names.h"
 #include "platform/DataResourceHelper.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/LeakAnnotations.h"
 
 namespace blink {
@@ -63,8 +64,10 @@ static const MediaQueryEvaluator& PrintEval() {
 }
 
 static StyleSheetContents* ParseUASheet(const String& str) {
+  // UA stylesheets always parse in the insecure context mode.
   StyleSheetContents* sheet =
-      StyleSheetContents::Create(CSSParserContext::Create(kUASheetMode));
+      StyleSheetContents::Create(CSSParserContext::Create(
+          kUASheetMode, SecureContextMode::kInsecureContext));
   sheet->ParseString(str);
   // User Agent stylesheets are parsed once for the lifetime of the renderer
   // process and are intentionally leaked.
@@ -72,23 +75,19 @@ static StyleSheetContents* ParseUASheet(const String& str) {
   return sheet;
 }
 
-CSSDefaultStyleSheets::CSSDefaultStyleSheets() {
-  default_style_ = RuleSet::Create();
-  default_print_style_ = RuleSet::Create();
-  default_quirks_style_ = RuleSet::Create();
-
+CSSDefaultStyleSheets::CSSDefaultStyleSheets()
+    : media_controls_style_sheet_loader_(nullptr) {
   // Strict-mode rules.
   String default_rules = GetDataResourceAsASCIIString("html.css") +
                          LayoutTheme::GetTheme().ExtraDefaultStyleSheet();
   default_style_sheet_ = ParseUASheet(default_rules);
-  default_style_->AddRulesFromSheet(DefaultStyleSheet(), ScreenEval());
-  default_print_style_->AddRulesFromSheet(DefaultStyleSheet(), PrintEval());
 
   // Quirks-mode rules.
   String quirks_rules = GetDataResourceAsASCIIString("quirks.css") +
                         LayoutTheme::GetTheme().ExtraQuirksStyleSheet();
   quirks_style_sheet_ = ParseUASheet(quirks_rules);
-  default_quirks_style_->AddRulesFromSheet(QuirksStyleSheet(), ScreenEval());
+
+  InitializeDefaultStyles();
 
 #if DCHECK_IS_ON()
   default_style_->CompactRulesIfNeeded();
@@ -98,6 +97,31 @@ CSSDefaultStyleSheets::CSSDefaultStyleSheets() {
   DCHECK(default_print_style_->UniversalRules()->IsEmpty());
   DCHECK(default_quirks_style_->UniversalRules()->IsEmpty());
 #endif
+}
+
+void CSSDefaultStyleSheets::PrepareForLeakDetection() {
+  // Clear the optional style sheets.
+  media_controls_style_sheet_.Clear();
+  mobile_viewport_style_sheet_.Clear();
+  television_viewport_style_sheet_.Clear();
+  xhtml_mobile_profile_style_sheet_.Clear();
+  svg_style_sheet_.Clear();
+  mathml_style_sheet_.Clear();
+  fullscreen_style_sheet_.Clear();
+  // Initialize the styles that have the lazily loaded style sheets.
+  InitializeDefaultStyles();
+  default_view_source_style_.Clear();
+}
+
+void CSSDefaultStyleSheets::InitializeDefaultStyles() {
+  // This must be called only from constructor / PrepareForLeakDetection.
+  default_style_ = RuleSet::Create();
+  default_print_style_ = RuleSet::Create();
+  default_quirks_style_ = RuleSet::Create();
+
+  default_style_->AddRulesFromSheet(DefaultStyleSheet(), ScreenEval());
+  default_print_style_->AddRulesFromSheet(DefaultStyleSheet(), PrintEval());
+  default_quirks_style_->AddRulesFromSheet(QuirksStyleSheet(), ScreenEval());
 }
 
 RuleSet* CSSDefaultStyleSheets::DefaultViewSourceStyle() {
@@ -158,13 +182,12 @@ bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetsForElement(
     changed_default_style = true;
   }
 
-  // FIXME: We should assert that this sheet only contains rules for <video> and
-  // <audio>.
-  if (!media_controls_style_sheet_ &&
-      (isHTMLVideoElement(element) || isHTMLAudioElement(element))) {
-    String media_rules = GetDataResourceAsASCIIString("mediaControls.css") +
-                         LayoutTheme::GetTheme().ExtraMediaControlsStyleSheet();
-    media_controls_style_sheet_ = ParseUASheet(media_rules);
+  if (!media_controls_style_sheet_ && HasMediaControlsStyleSheetLoader() &&
+      (IsHTMLVideoElement(element) || IsHTMLAudioElement(element))) {
+    // FIXME: We should assert that this sheet only contains rules for <video>
+    // and <audio>.
+    media_controls_style_sheet_ =
+        ParseUASheet(media_controls_style_sheet_loader_->GetUAStyleSheet());
     default_style_->AddRulesFromSheet(MediaControlsStyleSheet(), ScreenEval());
     default_print_style_->AddRulesFromSheet(MediaControlsStyleSheet(),
                                             PrintEval());
@@ -172,8 +195,12 @@ bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetsForElement(
   }
 
   DCHECK(!default_style_->Features().HasIdsInSelectors());
-  DCHECK(!default_style_->Features().UsesSiblingRules());
   return changed_default_style;
+}
+
+void CSSDefaultStyleSheets::SetMediaControlsStyleSheetLoader(
+    std::unique_ptr<UAStyleSheetLoader> loader) {
+  media_controls_style_sheet_loader_.swap(loader);
 }
 
 void CSSDefaultStyleSheets::EnsureDefaultStyleSheetForFullscreen() {
@@ -188,7 +215,7 @@ void CSSDefaultStyleSheets::EnsureDefaultStyleSheetForFullscreen() {
                                            ScreenEval());
 }
 
-DEFINE_TRACE(CSSDefaultStyleSheets) {
+void CSSDefaultStyleSheets::Trace(blink::Visitor* visitor) {
   visitor->Trace(default_style_);
   visitor->Trace(default_quirks_style_);
   visitor->Trace(default_print_style_);

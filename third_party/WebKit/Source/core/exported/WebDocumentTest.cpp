@@ -7,17 +7,16 @@
 #include <string>
 
 #include "core/CSSPropertyNames.h"
-#include "core/HTMLNames.h"
+#include "core/css/StyleEngine.h"
 #include "core/dom/NodeComputedStyle.h"
-#include "core/dom/StyleEngine.h"
 #include "core/frame/FrameTestHelpers.h"
 #include "core/frame/LocalFrame.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLLinkElement.h"
+#include "core/html_names.h"
 #include "core/page/Page.h"
 #include "core/style/ComputedStyle.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/Color.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
@@ -55,7 +54,7 @@ void WebDocumentTest::LoadURL(const std::string& url) {
 }
 
 Document* WebDocumentTest::TopDocument() const {
-  return ToLocalFrame(web_view_helper_.WebView()->GetPage()->MainFrame())
+  return ToLocalFrame(web_view_helper_.GetWebView()->GetPage()->MainFrame())
       ->GetDocument();
 }
 
@@ -71,7 +70,7 @@ TEST_F(WebDocumentTest, InsertAndRemoveStyleSheet) {
 
   unsigned start_count = core_doc->GetStyleEngine().StyleForElementCount();
 
-  WebStyleSheetId stylesheet_id =
+  WebStyleSheetKey style_sheet_key =
       web_doc.InsertStyleSheet("body { color: green }");
 
   // Check insertStyleSheet did not cause a synchronous style recalc.
@@ -85,39 +84,39 @@ TEST_F(WebDocumentTest, InsertAndRemoveStyleSheet) {
   const ComputedStyle& style_before_insertion =
       body_element->ComputedStyleRef();
 
-  // Inserted stylesheet not yet applied.
-  ASSERT_EQ(Color(0, 0, 0),
-            style_before_insertion.VisitedDependentColor(CSSPropertyColor));
+  // Inserted style sheet not yet applied.
+  ASSERT_EQ(Color(0, 0, 0), style_before_insertion.VisitedDependentColor(
+                                GetCSSPropertyColor()));
 
-  // Apply inserted stylesheet.
+  // Apply inserted style sheet.
   core_doc->UpdateStyleAndLayoutTree();
 
   const ComputedStyle& style_after_insertion = body_element->ComputedStyleRef();
 
-  // Inserted stylesheet applied.
+  // Inserted style sheet applied.
   ASSERT_EQ(Color(0, 128, 0),
-            style_after_insertion.VisitedDependentColor(CSSPropertyColor));
+            style_after_insertion.VisitedDependentColor(GetCSSPropertyColor()));
 
   start_count = core_doc->GetStyleEngine().StyleForElementCount();
 
   // Check RemoveInsertedStyleSheet did not cause a synchronous style recalc.
-  web_doc.RemoveInsertedStyleSheet(stylesheet_id);
+  web_doc.RemoveInsertedStyleSheet(style_sheet_key);
   element_count =
       core_doc->GetStyleEngine().StyleForElementCount() - start_count;
   ASSERT_EQ(0U, element_count);
 
   const ComputedStyle& style_before_removing = body_element->ComputedStyleRef();
 
-  // Removed stylesheet not yet applied.
+  // Removed style sheet not yet applied.
   ASSERT_EQ(Color(0, 128, 0),
-            style_before_removing.VisitedDependentColor(CSSPropertyColor));
+            style_before_removing.VisitedDependentColor(GetCSSPropertyColor()));
 
-  // Apply removed stylesheet.
+  // Apply removed style sheet.
   core_doc->UpdateStyleAndLayoutTree();
 
   const ComputedStyle& style_after_removing = body_element->ComputedStyleRef();
   ASSERT_EQ(Color(0, 0, 0),
-            style_after_removing.VisitedDependentColor(CSSPropertyColor));
+            style_after_removing.VisitedDependentColor(GetCSSPropertyColor()));
 }
 
 TEST_F(WebDocumentTest, ManifestURL) {
@@ -250,7 +249,7 @@ void WebDocumentFirstPartyTest::Load(const char* file) {
 }
 
 Document* WebDocumentFirstPartyTest::NestedDocument() const {
-  return ToLocalFrame(web_view_helper_.WebView()
+  return ToLocalFrame(web_view_helper_.GetWebView()
                           ->GetPage()
                           ->MainFrame()
                           ->Tree()
@@ -259,7 +258,7 @@ Document* WebDocumentFirstPartyTest::NestedDocument() const {
 }
 
 Document* WebDocumentFirstPartyTest::NestedNestedDocument() const {
-  return ToLocalFrame(web_view_helper_.WebView()
+  return ToLocalFrame(web_view_helper_.GetWebView()
                           ->GetPage()
                           ->MainFrame()
                           ->Tree()
@@ -272,103 +271,98 @@ Document* WebDocumentFirstPartyTest::NestedNestedDocument() const {
 TEST_F(WebDocumentFirstPartyTest, Empty) {
   Load(g_empty_file);
 
-  ASSERT_EQ(ToOriginA(g_empty_file), TopDocument()->FirstPartyForCookies());
+  ASSERT_EQ(ToOriginA(g_empty_file), TopDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest, NestedOriginA) {
   Load(g_nested_origin_a);
 
-  ASSERT_EQ(ToOriginA(g_nested_origin_a),
-            TopDocument()->FirstPartyForCookies());
-  ASSERT_EQ(ToOriginA(g_nested_origin_a),
-            NestedDocument()->FirstPartyForCookies());
+  ASSERT_EQ(ToOriginA(g_nested_origin_a), TopDocument()->SiteForCookies());
+  ASSERT_EQ(ToOriginA(g_nested_origin_a), NestedDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest, NestedOriginSubA) {
   Load(g_nested_origin_sub_a);
 
+  ASSERT_EQ(ToOriginA(g_nested_origin_sub_a), TopDocument()->SiteForCookies());
   ASSERT_EQ(ToOriginA(g_nested_origin_sub_a),
-            TopDocument()->FirstPartyForCookies());
-  ASSERT_EQ(ToOriginA(g_nested_origin_sub_a),
-            NestedDocument()->FirstPartyForCookies());
+            NestedDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest, NestedOriginSecureA) {
   Load(g_nested_origin_secure_a);
 
   ASSERT_EQ(ToOriginA(g_nested_origin_secure_a),
-            TopDocument()->FirstPartyForCookies());
+            TopDocument()->SiteForCookies());
   ASSERT_EQ(ToOriginA(g_nested_origin_secure_a),
-            NestedDocument()->FirstPartyForCookies());
+            NestedDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest, NestedOriginAInOriginA) {
   Load(g_nested_origin_a_in_origin_a);
 
   ASSERT_EQ(ToOriginA(g_nested_origin_a_in_origin_a),
-            TopDocument()->FirstPartyForCookies());
+            TopDocument()->SiteForCookies());
   ASSERT_EQ(ToOriginA(g_nested_origin_a_in_origin_a),
-            NestedDocument()->FirstPartyForCookies());
+            NestedDocument()->SiteForCookies());
   ASSERT_EQ(ToOriginA(g_nested_origin_a_in_origin_a),
-            NestedNestedDocument()->FirstPartyForCookies());
+            NestedNestedDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest, NestedOriginAInOriginB) {
   Load(g_nested_origin_a_in_origin_b);
 
   ASSERT_EQ(ToOriginA(g_nested_origin_a_in_origin_b),
-            TopDocument()->FirstPartyForCookies());
+            TopDocument()->SiteForCookies());
   ASSERT_EQ(SecurityOrigin::UrlWithUniqueSecurityOrigin(),
-            NestedDocument()->FirstPartyForCookies());
+            NestedDocument()->SiteForCookies());
   ASSERT_EQ(SecurityOrigin::UrlWithUniqueSecurityOrigin(),
-            NestedNestedDocument()->FirstPartyForCookies());
+            NestedNestedDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest, NestedOriginB) {
   Load(g_nested_origin_b);
 
-  ASSERT_EQ(ToOriginA(g_nested_origin_b),
-            TopDocument()->FirstPartyForCookies());
+  ASSERT_EQ(ToOriginA(g_nested_origin_b), TopDocument()->SiteForCookies());
   ASSERT_EQ(SecurityOrigin::UrlWithUniqueSecurityOrigin(),
-            NestedDocument()->FirstPartyForCookies());
+            NestedDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest, NestedOriginBInOriginA) {
   Load(g_nested_origin_b_in_origin_a);
 
   ASSERT_EQ(ToOriginA(g_nested_origin_b_in_origin_a),
-            TopDocument()->FirstPartyForCookies());
+            TopDocument()->SiteForCookies());
   ASSERT_EQ(ToOriginA(g_nested_origin_b_in_origin_a),
-            NestedDocument()->FirstPartyForCookies());
+            NestedDocument()->SiteForCookies());
   ASSERT_EQ(SecurityOrigin::UrlWithUniqueSecurityOrigin(),
-            NestedNestedDocument()->FirstPartyForCookies());
+            NestedNestedDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest, NestedOriginBInOriginB) {
   Load(g_nested_origin_b_in_origin_b);
 
   ASSERT_EQ(ToOriginA(g_nested_origin_b_in_origin_b),
-            TopDocument()->FirstPartyForCookies());
+            TopDocument()->SiteForCookies());
   ASSERT_EQ(SecurityOrigin::UrlWithUniqueSecurityOrigin(),
-            NestedDocument()->FirstPartyForCookies());
+            NestedDocument()->SiteForCookies());
   ASSERT_EQ(SecurityOrigin::UrlWithUniqueSecurityOrigin(),
-            NestedNestedDocument()->FirstPartyForCookies());
+            NestedNestedDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest, NestedSrcdoc) {
   Load(g_nested_src_doc);
 
-  ASSERT_EQ(ToOriginA(g_nested_src_doc), TopDocument()->FirstPartyForCookies());
-  ASSERT_EQ(ToOriginA(g_nested_src_doc),
-            NestedDocument()->FirstPartyForCookies());
+  ASSERT_EQ(ToOriginA(g_nested_src_doc), TopDocument()->SiteForCookies());
+  ASSERT_EQ(ToOriginA(g_nested_src_doc), NestedDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest, NestedData) {
   Load(g_nested_data);
 
-  ASSERT_EQ(ToOriginA(g_nested_data), TopDocument()->FirstPartyForCookies());
+  ASSERT_EQ(ToOriginA(g_nested_data), TopDocument()->SiteForCookies());
   ASSERT_EQ(SecurityOrigin::UrlWithUniqueSecurityOrigin(),
-            NestedDocument()->FirstPartyForCookies());
+            NestedDocument()->SiteForCookies());
 }
 
 TEST_F(WebDocumentFirstPartyTest,
@@ -378,11 +372,11 @@ TEST_F(WebDocumentFirstPartyTest,
   SchemeRegistry::RegisterURLSchemeAsFirstPartyWhenTopLevel("http");
 
   ASSERT_EQ(ToOriginA(g_nested_origin_a_in_origin_b),
-            TopDocument()->FirstPartyForCookies());
+            TopDocument()->SiteForCookies());
   ASSERT_EQ(ToOriginA(g_nested_origin_a_in_origin_b),
-            NestedDocument()->FirstPartyForCookies());
+            NestedDocument()->SiteForCookies());
   ASSERT_EQ(ToOriginA(g_nested_origin_a_in_origin_b),
-            NestedNestedDocument()->FirstPartyForCookies());
+            NestedNestedDocument()->SiteForCookies());
 }
 
 }  // namespace blink

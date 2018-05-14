@@ -25,6 +25,7 @@
 
 #include <memory>
 #include "core/CoreExport.h"
+#include "core/css/parser/CSSParserContext.h"
 #include "core/css/parser/CSSParserMode.h"
 #include "core/dom/QualifiedName.h"
 #include "core/style/ComputedStyleConstants.h"
@@ -133,6 +134,7 @@ class CORE_EXPORT CSSSelector {
     // Special cases for shadow DOM related selectors.
     kShadowPiercingDescendant,  // >>> combinator
     kShadowDeep,                // /deep/ combinator
+    kShadowDeepAsDescendant,    // /deep/ as an alias for descendant
     kShadowPseudo,              // ::shadow pseudo element
     kShadowSlot                 // ::slotted() pseudo element
   };
@@ -155,7 +157,9 @@ class CORE_EXPORT CSSSelector {
     kPseudoLink,
     kPseudoVisited,
     kPseudoAny,
+    kPseudoMatches,
     kPseudoAnyLink,
+    kPseudoWebkitAnyLink,
     kPseudoAutofill,
     kPseudoHover,
     kPseudoDrag,
@@ -206,8 +210,12 @@ class CORE_EXPORT CSSSelector {
     kPseudoLeftPage,
     kPseudoRightPage,
     kPseudoFirstPage,
+    // TODO(foolip): When the unprefixed Fullscreen API is enabled, merge
+    // kPseudoFullScreen and kPseudoFullscreen into one. (kPseudoFullscreen is
+    // controlled by the FullscreenUnprefixed REF, but is otherwise an alias.)
     kPseudoFullScreen,
     kPseudoFullScreenAncestor,
+    kPseudoFullscreen,
     kPseudoInRange,
     kPseudoOutOfRange,
     // Pseudo elements in UA ShadowRoots. Available in any stylesheets.
@@ -239,7 +247,11 @@ class CORE_EXPORT CSSSelector {
   PseudoType GetPseudoType() const {
     return static_cast<PseudoType>(pseudo_type_);
   }
-  void UpdatePseudoType(const AtomicString&, bool has_arguments, CSSParserMode);
+
+  void UpdatePseudoType(const AtomicString&,
+                        const CSSParserContext&,
+                        bool has_arguments,
+                        CSSParserMode);
   void UpdatePseudoPage(const AtomicString&);
 
   static PseudoType ParsePseudoType(const AtomicString&, bool has_arguments);
@@ -249,16 +261,17 @@ class CORE_EXPORT CSSSelector {
   // Selectors are kept in an array by CSSSelectorList. The next component of
   // the selector is the next item in the array.
   const CSSSelector* TagHistory() const {
-    return is_last_in_tag_history_ ? 0 : const_cast<CSSSelector*>(this + 1);
+    return is_last_in_tag_history_ ? nullptr : this + 1;
   }
 
+  static const AtomicString& UniversalSelectorAtom() { return g_null_atom; }
   const QualifiedName& TagQName() const;
   const AtomicString& Value() const;
   const AtomicString& SerializingValue() const;
 
   // WARNING: Use of QualifiedName by attribute() is a lie.
   // attribute() will return a QualifiedName with prefix and namespaceURI
-  // set to starAtom to mean "matches any namespace". Be very careful
+  // set to g_star_atom to mean "matches any namespace". Be very careful
   // how you use the returned QualifiedName.
   // http://www.w3.org/TR/css3-selectors/#attrnmsp
   const QualifiedName& Attribute() const;
@@ -320,9 +333,17 @@ class CORE_EXPORT CSSSelector {
   }
 
   bool IsLastInSelectorList() const { return is_last_in_selector_list_; }
-  void SetLastInSelectorList() { is_last_in_selector_list_ = true; }
+  void SetLastInSelectorList(bool is_last) {
+    is_last_in_selector_list_ = is_last;
+  }
+
+  bool IsLastInOriginalList() const { return is_last_in_original_list_; }
+  void SetLastInOriginalList(bool is_last) {
+    is_last_in_original_list_ = is_last;
+  }
+
   bool IsLastInTagHistory() const { return is_last_in_tag_history_; }
-  void SetNotLastInTagHistory() { is_last_in_tag_history_ = false; }
+  void SetLastInTagHistory(bool is_last) { is_last_in_tag_history_ = is_last; }
 
   // http://dev.w3.org/csswg/selectors4/#compound
   bool IsCompound() const;
@@ -332,7 +353,7 @@ class CORE_EXPORT CSSSelector {
     kMatchVisited = 2,
     kMatchAll = kMatchLink | kMatchVisited
   };
-  unsigned ComputeLinkMatchType() const;
+  unsigned ComputeLinkMatchType(unsigned link_match_type) const;
 
   bool IsForPage() const { return is_for_page_; }
   void SetForPage() { is_for_page_ = true; }
@@ -350,6 +371,7 @@ class CORE_EXPORT CSSSelector {
   bool HasSlottedPseudo() const;
   bool HasDeepCombinatorOrShadowPseudo() const;
   bool NeedsUpdatedDistribution() const;
+  bool HasPseudoMatches() const;
 
  private:
   unsigned relation_ : 4;     // enum RelationType
@@ -361,6 +383,7 @@ class CORE_EXPORT CSSSelector {
   unsigned is_for_page_ : 1;
   unsigned tag_is_implicit_ : 1;
   unsigned relation_is_affected_by_pseudo_content_ : 1;
+  unsigned is_last_in_original_list_ : 1;
 
   void SetPseudoType(PseudoType pseudo_type) {
     pseudo_type_ = pseudo_type;
@@ -373,11 +396,11 @@ class CORE_EXPORT CSSSelector {
   const CSSSelector* SerializeCompound(StringBuilder&) const;
 
   // Hide.
-  CSSSelector& operator=(const CSSSelector&);
+  CSSSelector& operator=(const CSSSelector&) = delete;
 
   struct RareData : public RefCounted<RareData> {
-    static PassRefPtr<RareData> Create(const AtomicString& value) {
-      return AdoptRef(new RareData(value));
+    static scoped_refptr<RareData> Create(const AtomicString& value) {
+      return base::AdoptRef(new RareData(value));
     }
     ~RareData();
 
@@ -442,9 +465,9 @@ inline void CSSSelector::SetValue(const AtomicString& value,
   // Need to do ref counting manually for the union.
   if (!has_rare_data_) {
     if (data_.value_)
-      data_.value_->Deref();
+      data_.value_->Release();
     data_.value_ = value.Impl();
-    data_.value_->Ref();
+    data_.value_->AddRef();
     return;
   }
   data_.rare_data_->matching_value_ =
@@ -461,7 +484,8 @@ inline CSSSelector::CSSSelector()
       has_rare_data_(false),
       is_for_page_(false),
       tag_is_implicit_(false),
-      relation_is_affected_by_pseudo_content_(false) {}
+      relation_is_affected_by_pseudo_content_(false),
+      is_last_in_original_list_(false) {}
 
 inline CSSSelector::CSSSelector(const QualifiedName& tag_q_name,
                                 bool tag_is_implicit)
@@ -473,9 +497,10 @@ inline CSSSelector::CSSSelector(const QualifiedName& tag_q_name,
       has_rare_data_(false),
       is_for_page_(false),
       tag_is_implicit_(tag_is_implicit),
-      relation_is_affected_by_pseudo_content_(false) {
+      relation_is_affected_by_pseudo_content_(false),
+      is_last_in_original_list_(false) {
   data_.tag_q_name_ = tag_q_name.Impl();
-  data_.tag_q_name_->Ref();
+  data_.tag_q_name_->AddRef();
 }
 
 inline CSSSelector::CSSSelector(const CSSSelector& o)
@@ -488,26 +513,27 @@ inline CSSSelector::CSSSelector(const CSSSelector& o)
       is_for_page_(o.is_for_page_),
       tag_is_implicit_(o.tag_is_implicit_),
       relation_is_affected_by_pseudo_content_(
-          o.relation_is_affected_by_pseudo_content_) {
+          o.relation_is_affected_by_pseudo_content_),
+      is_last_in_original_list_(o.is_last_in_original_list_) {
   if (o.match_ == kTag) {
     data_.tag_q_name_ = o.data_.tag_q_name_;
-    data_.tag_q_name_->Ref();
+    data_.tag_q_name_->AddRef();
   } else if (o.has_rare_data_) {
     data_.rare_data_ = o.data_.rare_data_;
-    data_.rare_data_->Ref();
+    data_.rare_data_->AddRef();
   } else if (o.data_.value_) {
     data_.value_ = o.data_.value_;
-    data_.value_->Ref();
+    data_.value_->AddRef();
   }
 }
 
 inline CSSSelector::~CSSSelector() {
   if (match_ == kTag)
-    data_.tag_q_name_->Deref();
+    data_.tag_q_name_->Release();
   else if (has_rare_data_)
-    data_.rare_data_->Deref();
+    data_.rare_data_->Release();
   else if (data_.value_)
-    data_.value_->Deref();
+    data_.value_->Release();
 }
 
 inline const QualifiedName& CSSSelector::TagQName() const {

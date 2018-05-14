@@ -9,7 +9,7 @@
 #include <new>
 
 #include "base/allocator/allocator_shim.h"
-#include "base/allocator/features.h"
+#include "base/allocator/buildflags.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -18,6 +18,7 @@
 #include "build/build_config.h"
 
 #if defined(USE_TCMALLOC)
+#include "third_party/tcmalloc/chromium/src/config.h"
 #include "third_party/tcmalloc/chromium/src/gperftools/tcmalloc.h"
 #endif
 
@@ -107,7 +108,7 @@ bool UncheckedMalloc(size_t size, void** result) {
 #elif defined(USE_TCMALLOC)
   *result = tc_malloc_skip_new_handler(size);
 #endif
-  return *result != NULL;
+  return *result != nullptr;
 }
 
 }  // namespace base

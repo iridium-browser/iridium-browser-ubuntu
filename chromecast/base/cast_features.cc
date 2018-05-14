@@ -78,8 +78,8 @@ void SetExperimentIds(const base::ListValue& list) {
 //
 //      std::unique_ptr<Foo> CreateFoo() {
 //        if (base::FeatureList::IsEnabled(kSuperSecretSauce))
-//          return base::MakeUnique<SuperSecretFoo>();
-//        return base::MakeUnique<BoringOldFoo>();
+//          return std::make_unique<SuperSecretFoo>();
+//        return std::make_unique<BoringOldFoo>();
 //      }
 //
 //    base::FeatureList can be called from any thread, in any process, at any
@@ -108,10 +108,27 @@ void SetExperimentIds(const base::ListValue& list) {
 
 // Begin Chromecast Feature definitions.
 
+// Allows applications to access media capture devices (webcams/microphones)
+// through getUserMedia API.
+const base::Feature kAllowUserMediaAccess{"allow_user_media_access",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
 // Enables the use of QUIC in Cast-specific URLRequestContextGetters. See
 // chromecast/browser/url_request_context_factory.cc for usage.
 const base::Feature kEnableQuic{"enable_quic",
                                 base::FEATURE_DISABLED_BY_DEFAULT};
+// Enables triple-buffer 720p graphics (overriding default graphics buffer
+// settings for a platform).
+const base::Feature kTripleBuffer720{"enable_triple_buffer_720",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+// Enables single-buffered graphics (overriding default graphics buffer
+// settings and takes precedence over triple-buffer feature).
+const base::Feature kSingleBuffer{"enable_single_buffer",
+                                  base::FEATURE_DISABLED_BY_DEFAULT};
+// Disable idle sockets closing on memory pressure. See
+// chromecast/browser/url_request_context_factory.cc for usage.
+const base::Feature kDisableIdleSocketsCloseOnMemoryPressure{
+    "disable_idle_sockets_close_on_memory_pressure",
+    base::FEATURE_DISABLED_BY_DEFAULT};
 
 // End Chromecast Feature definitions.
 
@@ -128,7 +145,7 @@ void InitializeFeatureList(const base::DictionaryValue& dcs_features,
   SetExperimentIds(dcs_experiment_ids);
 
   // Initialize the FeatureList from the command line.
-  auto feature_list = base::MakeUnique<base::FeatureList>();
+  auto feature_list = std::make_unique<base::FeatureList>();
   feature_list->InitializeFromCommandLine(cmd_line_enable_features,
                                           cmd_line_disable_features);
 
@@ -222,7 +239,7 @@ base::DictionaryValue GetOverriddenFeaturesForStorage(
 
     const base::DictionaryValue* params_dict;
     if (it.value().GetAsDictionary(&params_dict)) {
-      auto params = base::MakeUnique<base::DictionaryValue>();
+      auto params = std::make_unique<base::DictionaryValue>();
 
       bool bval;
       int ival;
@@ -236,7 +253,7 @@ base::DictionaryValue GetOverriddenFeaturesForStorage(
         } else if (param_val.GetAsInteger(&ival)) {
           params->SetString(param_key, base::IntToString(ival));
         } else if (param_val.GetAsDouble(&dval)) {
-          params->SetString(param_key, base::DoubleToString(dval));
+          params->SetString(param_key, base::NumberToString(dval));
         } else if (param_val.GetAsString(&sval)) {
           params->SetString(param_key, sval);
         } else {

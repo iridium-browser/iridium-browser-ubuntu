@@ -9,11 +9,10 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "chromeos/components/tether/fake_tether_host_fetcher.h"
 #include "components/cryptauth/remote_device.h"
 #include "components/cryptauth/remote_device_test_util.h"
-#include "components/prefs/testing_pref_service.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -43,7 +42,7 @@ struct GetActiveHostResult {
   }
 };
 
-class TestObserver : public ActiveHost::Observer {
+class TestObserver final : public ActiveHost::Observer {
  public:
   void OnActiveHostChanged(
       const ActiveHost::ActiveHostChangeInfo& change_info) override {
@@ -67,12 +66,13 @@ class ActiveHostTest : public testing::Test {
   void SetUp() override {
     get_active_host_results_.clear();
 
-    test_pref_service_ = base::MakeUnique<TestingPrefServiceSimple>();
-    fake_tether_host_fetcher_ = base::MakeUnique<FakeTetherHostFetcher>(
-        test_devices_, false /* synchronously_reply_with_results */);
+    test_pref_service_ =
+        std::make_unique<sync_preferences::TestingPrefServiceSyncable>();
+    fake_tether_host_fetcher_ =
+        std::make_unique<FakeTetherHostFetcher>(test_devices_);
 
     ActiveHost::RegisterPrefs(test_pref_service_->registry());
-    active_host_ = base::MakeUnique<ActiveHost>(fake_tether_host_fetcher_.get(),
+    active_host_ = std::make_unique<ActiveHost>(fake_tether_host_fetcher_.get(),
                                                 test_pref_service_.get());
 
     test_observer_ = base::WrapUnique(new TestObserver);
@@ -97,7 +97,6 @@ class ActiveHostTest : public testing::Test {
 
     active_host_->GetActiveHost(base::Bind(&ActiveHostTest::OnActiveHostFetched,
                                            base::Unretained(this)));
-    fake_tether_host_fetcher_->InvokePendingCallbacks();
     ASSERT_EQ(1u, get_active_host_results_.size());
     EXPECT_EQ((GetActiveHostResult{ActiveHost::ActiveHostStatus::DISCONNECTED,
                                    nullptr, std::string(), std::string()}),
@@ -106,7 +105,8 @@ class ActiveHostTest : public testing::Test {
 
   const std::vector<cryptauth::RemoteDevice> test_devices_;
 
-  std::unique_ptr<TestingPrefServiceSimple> test_pref_service_;
+  std::unique_ptr<sync_preferences::TestingPrefServiceSyncable>
+      test_pref_service_;
   std::unique_ptr<FakeTetherHostFetcher> fake_tether_host_fetcher_;
   std::unique_ptr<TestObserver> test_observer_;
 
@@ -140,7 +140,6 @@ TEST_F(ActiveHostTest, TestConnecting) {
 
   active_host_->GetActiveHost(
       base::Bind(&ActiveHostTest::OnActiveHostFetched, base::Unretained(this)));
-  fake_tether_host_fetcher_->InvokePendingCallbacks();
   ASSERT_EQ(1u, get_active_host_results_.size());
   EXPECT_EQ(
       (GetActiveHostResult{ActiveHost::ActiveHostStatus::CONNECTING,
@@ -163,7 +162,6 @@ TEST_F(ActiveHostTest, TestConnected) {
 
   active_host_->GetActiveHost(
       base::Bind(&ActiveHostTest::OnActiveHostFetched, base::Unretained(this)));
-  fake_tether_host_fetcher_->InvokePendingCallbacks();
   ASSERT_EQ(1u, get_active_host_results_.size());
   EXPECT_EQ(
       (GetActiveHostResult{ActiveHost::ActiveHostStatus::CONNECTED,
@@ -173,35 +171,6 @@ TEST_F(ActiveHostTest, TestConnected) {
       get_active_host_results_[0]);
 }
 
-TEST_F(ActiveHostTest, TestActiveHostChangesDuringFetch) {
-  active_host_->SetActiveHostConnected(test_devices_[0].GetDeviceId(),
-                                       "tetherNetworkGuid", "wifiNetworkGuid");
-
-  EXPECT_EQ(ActiveHost::ActiveHostStatus::CONNECTED,
-            active_host_->GetActiveHostStatus());
-  EXPECT_EQ(test_devices_[0].GetDeviceId(),
-            active_host_->GetActiveHostDeviceId());
-  EXPECT_EQ("tetherNetworkGuid", active_host_->GetTetherNetworkGuid());
-  EXPECT_EQ("wifiNetworkGuid", active_host_->GetWifiNetworkGuid());
-
-  // Start a fetch for the active host.
-  active_host_->GetActiveHost(
-      base::Bind(&ActiveHostTest::OnActiveHostFetched, base::Unretained(this)));
-
-  // While the fetch is in progress, simulate a disconnection occurring.
-  active_host_->SetActiveHostDisconnected();
-
-  // Now, finish the fech.
-  fake_tether_host_fetcher_->InvokePendingCallbacks();
-
-  // The resulting callback should indicate that there is no active host.
-  ASSERT_EQ(1u, get_active_host_results_.size());
-  EXPECT_EQ((GetActiveHostResult{ActiveHost::ActiveHostStatus::DISCONNECTED,
-                                 nullptr, "" /* tether_network_guid */,
-                                 "" /* wifi_network_guid */}),
-            get_active_host_results_[0]);
-}
-
 TEST_F(ActiveHostTest, TestObserverCalls) {
   // Start as DISCONNECTED.
   EXPECT_FALSE(test_observer_->host_changed_updates().size());
@@ -209,13 +178,11 @@ TEST_F(ActiveHostTest, TestObserverCalls) {
   // Go to DISCONNECTED again. This should not cause an observer callback to be
   // invoked.
   active_host_->SetActiveHostDisconnected();
-  fake_tether_host_fetcher_->InvokePendingCallbacks();
   EXPECT_FALSE(test_observer_->host_changed_updates().size());
 
   // Transition to CONNECTING.
   active_host_->SetActiveHostConnecting(test_devices_[0].GetDeviceId(),
                                         "tetherNetworkGuid");
-  fake_tether_host_fetcher_->InvokePendingCallbacks();
   EXPECT_EQ(1u, test_observer_->host_changed_updates().size());
   EXPECT_EQ(ActiveHost::ActiveHostChangeInfo(
                 ActiveHost::ActiveHostStatus::CONNECTING,
@@ -231,7 +198,6 @@ TEST_F(ActiveHostTest, TestObserverCalls) {
   // Transition to CONNECTED.
   active_host_->SetActiveHostConnected(test_devices_[0].GetDeviceId(),
                                        "tetherNetworkGuid", "wifiNetworkGuid");
-  fake_tether_host_fetcher_->InvokePendingCallbacks();
   EXPECT_EQ(2u, test_observer_->host_changed_updates().size());
   EXPECT_EQ(ActiveHost::ActiveHostChangeInfo(
                 ActiveHost::ActiveHostStatus::CONNECTED,
@@ -245,7 +211,6 @@ TEST_F(ActiveHostTest, TestObserverCalls) {
 
   // Transition to DISCONNECTED.
   active_host_->SetActiveHostDisconnected();
-  fake_tether_host_fetcher_->InvokePendingCallbacks();
   EXPECT_EQ(3u, test_observer_->host_changed_updates().size());
   EXPECT_EQ(ActiveHost::ActiveHostChangeInfo(
                 ActiveHost::ActiveHostStatus::DISCONNECTED,
@@ -258,4 +223,4 @@ TEST_F(ActiveHostTest, TestObserverCalls) {
 
 }  // namespace tether
 
-}  // namespace cryptauth
+}  // namespace chromeos

@@ -41,10 +41,10 @@ FilterOperation* FilterOperation::Blend(const FilterOperation* from,
   DCHECK(from || to);
   if (to)
     return to->Blend(from, progress);
-  return from->Blend(0, 1 - progress);
+  return from->Blend(nullptr, 1 - progress);
 }
 
-DEFINE_TRACE(ReferenceFilterOperation) {
+void ReferenceFilterOperation::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_proxy_);
   visitor->Trace(filter_);
   FilterOperation::Trace(visitor);
@@ -62,8 +62,10 @@ ReferenceFilterOperation::ReferenceFilterOperation(
     SVGElementProxy& element_proxy)
     : FilterOperation(REFERENCE), url_(url), element_proxy_(&element_proxy) {}
 
-void ReferenceFilterOperation::AddClient(SVGResourceClient* client) {
-  element_proxy_->AddClient(client);
+void ReferenceFilterOperation::AddClient(
+    SVGResourceClient* client,
+    base::SingleThreadTaskRunner* task_runner) {
+  element_proxy_->AddClient(client, task_runner);
 }
 
 void ReferenceFilterOperation::RemoveClient(SVGResourceClient* client) {

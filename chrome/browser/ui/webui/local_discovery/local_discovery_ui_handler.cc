@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/user_metrics.h"
 #include "base/stl_util.h"
@@ -17,8 +16,6 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/local_discovery/service_discovery_shared_client.h"
-#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
-#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/printing/cloud_print/privet_confirm_api_flow.h"
 #include "chrome/browser/printing/cloud_print/privet_constants.h"
 #include "chrome/browser/printing/cloud_print/privet_device_lister_impl.h"
@@ -40,6 +37,11 @@
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
 #define CLOUD_PRINT_CONNECTOR_UI_AVAILABLE
+#endif
+
+#if defined(CLOUD_PRINT_CONNECTOR_UI_AVAILABLE)
+#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #endif
 
 using cloud_print::CloudPrintPrinterList;
@@ -228,7 +230,7 @@ void LocalDiscoveryUIHandler::HandleRequestDeviceList(
 
   if (cloud_print_printer_list_) {
     cloud_print_printer_list_->Start(
-        base::MakeUnique<CloudPrintPrinterList>(this));
+        std::make_unique<CloudPrintPrinterList>(this));
   }
 
   CheckListingDone();
@@ -291,7 +293,7 @@ void LocalDiscoveryUIHandler::OnPrivetRegisterClaimToken(
     return;
   }
   confirm_api_call_flow_->Start(
-      base::MakeUnique<cloud_print::PrivetConfirmApiCallFlow>(
+      std::make_unique<cloud_print::PrivetConfirmApiCallFlow>(
           token, base::Bind(&LocalDiscoveryUIHandler::OnConfirmDone,
                             base::Unretained(this))));
 }
@@ -362,7 +364,7 @@ void LocalDiscoveryUIHandler::DeviceChanged(
     web_ui()->CallJavascriptFunctionUnsafe(
         "local_discovery.onUnregisteredDeviceUpdate", service_key, info);
   } else {
-    auto null_value = base::MakeUnique<base::Value>();
+    auto null_value = std::make_unique<base::Value>();
 
     web_ui()->CallJavascriptFunctionUnsafe(
         "local_discovery.onUnregisteredDeviceUpdate", service_key, *null_value);
@@ -371,7 +373,7 @@ void LocalDiscoveryUIHandler::DeviceChanged(
 
 void LocalDiscoveryUIHandler::DeviceRemoved(const std::string& name) {
   device_descriptions_.erase(name);
-  auto null_value = base::MakeUnique<base::Value>();
+  auto null_value = std::make_unique<base::Value>();
   base::Value name_value(kKeyPrefixMDns + name);
 
   web_ui()->CallJavascriptFunctionUnsafe(
@@ -593,7 +595,7 @@ void LocalDiscoveryUIHandler::SetupCloudPrintConnectorSection() {
         l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT));
   } else {
     label_str = l10n_util::GetStringFUTF16(
-        IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_ENABLED_LABEL,
+        IDS_CLOUD_PRINT_CONNECTOR_ENABLED_LABEL,
         l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT),
         base::UTF8ToUTF16(email));
   }

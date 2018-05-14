@@ -58,14 +58,14 @@ foo:
 	addq (%rax), %rax
 	movq (%rax), %rax
 	popf
-	movq %rax, %xmm0
+	vmovq %rax, %xmm0
 	popq %rax
 	leaq 128(%rsp), %rsp
 # WAS vmovq foo@GOTPCREL(%rip), %xmm0
 	leaq -128(%rsp), %rsp
 	pushq %rax
 	leaq	.Lfoo_local_target(%rip), %rax
-	movq %rax, %xmm0
+	vmovq %rax, %xmm0
 	popq %rax
 	leaq 128(%rsp), %rsp
 
@@ -98,6 +98,24 @@ foo:
 	leaq	.Lfoo_local_target(%rip), %r11
 999:
 
+# WAS movsd foo@GOTPCREL(%rip), %xmm0
+	leaq -128(%rsp), %rsp
+	pushq %rax
+	leaq	.Lfoo_local_target(%rip), %rax
+	movq %rax, %xmm0
+	popq %rax
+	leaq 128(%rsp), %rsp
+# WAS vmovsd foo@GOTPCREL(%rip), %xmm0
+	leaq -128(%rsp), %rsp
+	pushq %rax
+	leaq	.Lfoo_local_target(%rip), %rax
+	vmovq %rax, %xmm0
+	popq %rax
+	leaq 128(%rsp), %rsp
+
+	# movsd without arguments should be left as-is.
+	movsd
+
 	# Synthesized symbols do not use the GOT.
 # WAS movq BORINGSSL_bcm_text_start@GOTPCREL(%rip), %r11
 	leaq	BORINGSSL_bcm_text_start(%rip), %r11
@@ -105,6 +123,28 @@ foo:
 	leaq	foobar_bss_get(%rip), %r11
 # WAS movq OPENSSL_ia32cap_get@GOTPCREL(%rip), %r11
 	leaq	OPENSSL_ia32cap_get(%rip), %r11
+
+	# Transforming moves run the transform in-place after the load.
+# WAS vpbroadcastq stderr@GOTPCREL(%rip), %xmm0
+	leaq -128(%rsp), %rsp
+	pushq %rax
+	pushf
+	leaq stderr_GOTPCREL_external(%rip), %rax
+	addq (%rax), %rax
+	movq (%rax), %rax
+	popf
+	vmovq %rax, %xmm0
+	popq %rax
+	leaq 128(%rsp), %rsp
+	vpbroadcastq %xmm0, %xmm0
+# WAS vpbroadcastq foo@GOTPCREL(%rip), %xmm0
+	leaq -128(%rsp), %rsp
+	pushq %rax
+	leaq	.Lfoo_local_target(%rip), %rax
+	vmovq %rax, %xmm0
+	popq %rax
+	leaq 128(%rsp), %rsp
+	vpbroadcastq %xmm0, %xmm0
 
 .comm foobar,64,32
 .text

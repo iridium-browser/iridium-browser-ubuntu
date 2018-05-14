@@ -24,7 +24,6 @@ import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.browser.payments.ui.PaymentRequestSection;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.concurrent.ExecutionException;
@@ -35,10 +34,7 @@ import java.util.concurrent.TimeoutException;
  * and user that has a single address stored in autofill settings.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestDynamicShippingSingleAddressTest implements MainActivityStartCallback {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
@@ -229,18 +225,15 @@ public class PaymentRequestDynamicShippingSingleAddressTest implements MainActiv
 
         // Quickly press "add address" and then [X].
         int callCount = mPaymentRequestTestRule.getReadyToEdit().getCallCount();
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getShippingAddressSectionForTest()
-                        .findViewById(R.id.payments_add_option_button)
-                        .performClick();
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getDialogForTest()
-                        .findViewById(R.id.close_button)
-                        .performClick();
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getShippingAddressSectionForTest()
+                    .findViewById(R.id.payments_add_option_button)
+                    .performClick();
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getDialogForTest()
+                    .findViewById(R.id.close_button)
+                    .performClick();
         });
         mPaymentRequestTestRule.getReadyToEdit().waitForCallback(callCount);
 
@@ -263,18 +256,15 @@ public class PaymentRequestDynamicShippingSingleAddressTest implements MainActiv
 
         // Quickly press [X] and then "add address."
         int callCount = mPaymentRequestTestRule.getDismissed().getCallCount();
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getDialogForTest()
-                        .findViewById(R.id.close_button)
-                        .performClick();
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getShippingAddressSectionForTest()
-                        .findViewById(R.id.payments_add_option_button)
-                        .performClick();
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getDialogForTest()
+                    .findViewById(R.id.close_button)
+                    .performClick();
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getShippingAddressSectionForTest()
+                    .findViewById(R.id.payments_add_option_button)
+                    .performClick();
         });
         mPaymentRequestTestRule.getDismissed().waitForCallback(callCount);
 
@@ -293,18 +283,15 @@ public class PaymentRequestDynamicShippingSingleAddressTest implements MainActiv
 
         // Quickly press "add address" and then "cancel."
         int callCount = mPaymentRequestTestRule.getReadyToEdit().getCallCount();
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getShippingAddressSectionForTest()
-                        .findViewById(R.id.payments_add_option_button)
-                        .performClick();
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getDialogForTest()
-                        .findViewById(R.id.button_secondary)
-                        .performClick();
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getShippingAddressSectionForTest()
+                    .findViewById(R.id.payments_add_option_button)
+                    .performClick();
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getDialogForTest()
+                    .findViewById(R.id.button_secondary)
+                    .performClick();
         });
         mPaymentRequestTestRule.getReadyToEdit().waitForCallback(callCount);
 
@@ -327,18 +314,15 @@ public class PaymentRequestDynamicShippingSingleAddressTest implements MainActiv
 
         // Quickly press on "cancel" and then "add address."
         int callCount = mPaymentRequestTestRule.getDismissed().getCallCount();
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getDialogForTest()
-                        .findViewById(R.id.button_secondary)
-                        .performClick();
-                mPaymentRequestTestRule.getPaymentRequestUI()
-                        .getShippingAddressSectionForTest()
-                        .findViewById(R.id.payments_add_option_button)
-                        .performClick();
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getDialogForTest()
+                    .findViewById(R.id.button_secondary)
+                    .performClick();
+            mPaymentRequestTestRule.getPaymentRequestUI()
+                    .getShippingAddressSectionForTest()
+                    .findViewById(R.id.payments_add_option_button)
+                    .performClick();
         });
         mPaymentRequestTestRule.getDismissed().waitForCallback(callCount);
 

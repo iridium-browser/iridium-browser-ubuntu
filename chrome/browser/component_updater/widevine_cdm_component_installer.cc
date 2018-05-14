@@ -18,6 +18,7 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
@@ -30,14 +31,16 @@
 #include "build/build_config.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/widevine_cdm_constants.h"
+#include "components/component_updater/component_installer.h"
 #include "components/component_updater/component_updater_service.h"
-#include "components/component_updater/default_component_installer.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cdm_registry.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/cdm_info.h"
 #include "content/public/common/pepper_plugin_info.h"
+#include "crypto/sha2.h"
+#include "media/base/video_codecs.h"
 #include "media/cdm/supported_cdm_versions.h"
 #include "third_party/widevine/cdm/widevine_cdm_common.h"
 
@@ -54,10 +57,12 @@ namespace component_updater {
 namespace {
 
 // CRX hash. The extension id is: oimompecagnajdejgnnjijobebaeigek.
-const uint8_t kSha2Hash[] = {0xe8, 0xce, 0xcf, 0x42, 0x06, 0xd0, 0x93, 0x49,
-                             0x6d, 0xd9, 0x89, 0xe1, 0x41, 0x04, 0x86, 0x4a,
-                             0x8f, 0xbd, 0x86, 0x12, 0xb9, 0x58, 0x9b, 0xfb,
-                             0x4f, 0xbb, 0x1b, 0xa9, 0xd3, 0x85, 0x37, 0xef};
+const uint8_t kWidevineSha2Hash[] = {
+    0xe8, 0xce, 0xcf, 0x42, 0x06, 0xd0, 0x93, 0x49, 0x6d, 0xd9, 0x89,
+    0xe1, 0x41, 0x04, 0x86, 0x4a, 0x8f, 0xbd, 0x86, 0x12, 0xb9, 0x58,
+    0x9b, 0xfb, 0x4f, 0xbb, 0x1b, 0xa9, 0xd3, 0x85, 0x37, 0xef};
+static_assert(arraysize(kWidevineSha2Hash) == crypto::kSHA256Length,
+              "Wrong hash length");
 
 // File name of the Widevine CDM adapter version file. The CDM adapter shares
 // the same version number with Chromium version.
@@ -87,9 +92,8 @@ const char kWidevineCdmArch[] =
 // All values are strings.
 // All values that are lists are delimited by commas. No trailing commas.
 // For example, "1,2,4".
-const char kCdmValueDelimiter = ',';
-static_assert(kCdmValueDelimiter == kCdmSupportedCodecsValueDelimiter,
-              "cdm delimiters must match");
+const char kCdmValueDelimiter[] = ",";
+
 // The following entries are required.
 //  Interface versions are lists of integers (e.g. "1" or "1,2,4").
 //  These are checked in this file before registering the CDM.
@@ -102,8 +106,18 @@ const char kCdmInterfaceVersionsName[] = "x-cdm-interface-versions";
 //    Matches supported Host_* version(s).
 const char kCdmHostVersionsName[] = "x-cdm-host-versions";
 //  The codecs list is a list of simple codec names (e.g. "vp8,vorbis").
-//  The list is passed to other parts of Chrome.
 const char kCdmCodecsListName[] = "x-cdm-codecs";
+//  Whether persistent license is supported by the CDM: "true" or "false".
+const char kCdmPersistentLicenseSupportName[] =
+    "x-cdm-persistent-license-support";
+
+// The following strings are used to specify supported codecs in the
+// parameter |kCdmCodecsListName|.
+const char kCdmSupportedCodecVp8[] = "vp8";
+const char kCdmSupportedCodecVp9[] = "vp9.0";
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+const char kCdmSupportedCodecAvc1[] = "avc1";
+#endif
 
 // TODO(xhwang): Move this to a common place if needed.
 const base::FilePath::CharType kSignatureFileExtension[] =
@@ -122,6 +136,7 @@ base::FilePath GetPlatformDirectory(const base::FilePath& base_path) {
 bool MakeWidevineCdmPluginInfo(const base::Version& version,
                                const base::FilePath& cdm_install_dir,
                                const std::string& codecs,
+                               bool supports_persistent_license,
                                content::PepperPluginInfo* plugin_info) {
   if (!version.IsValid() ||
       version.components().size() !=
@@ -144,10 +159,6 @@ bool MakeWidevineCdmPluginInfo(const base::Version& version,
       kWidevineCdmPluginMimeType,
       kWidevineCdmPluginExtension,
       kWidevineCdmPluginMimeTypeDescription);
-  widevine_cdm_mime_type.additional_param_names.push_back(
-      base::ASCIIToUTF16(kCdmSupportedCodecsParamName));
-  widevine_cdm_mime_type.additional_param_values.push_back(
-      base::ASCIIToUTF16(codecs));
 
   plugin_info->mime_types.push_back(widevine_cdm_mime_type);
   plugin_info->permissions = kWidevineCdmPluginPermissions;
@@ -168,9 +179,9 @@ bool CheckForCompatibleVersion(const base::DictionaryValue& manifest,
   DVLOG_IF(1, versions_string.empty())
       << "Widevine CDM component manifest has empty " << version_name;
 
-  for (const base::StringPiece& ver_str : base::SplitStringPiece(
-           versions_string, std::string(1, kCdmValueDelimiter),
-           base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
+  for (const base::StringPiece& ver_str :
+       base::SplitStringPiece(versions_string, kCdmValueDelimiter,
+                              base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
     int version = 0;
     if (base::StringToInt(ver_str, &version))
       if (version_check_func(version))
@@ -210,16 +221,43 @@ std::string GetCodecs(const base::DictionaryValue& manifest) {
   return codecs;
 }
 
+std::vector<media::VideoCodec> ConvertCodecsString(const std::string& codecs) {
+  std::vector<media::VideoCodec> supported_video_codecs;
+  const std::vector<base::StringPiece> supported_codecs =
+      base::SplitStringPiece(codecs, kCdmValueDelimiter, base::TRIM_WHITESPACE,
+                             base::SPLIT_WANT_NONEMPTY);
+
+  for (const auto& codec : supported_codecs) {
+    if (codec == kCdmSupportedCodecVp8)
+      supported_video_codecs.push_back(media::VideoCodec::kCodecVP8);
+    else if (codec == kCdmSupportedCodecVp9)
+      supported_video_codecs.push_back(media::VideoCodec::kCodecVP9);
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+    else if (codec == kCdmSupportedCodecAvc1)
+      supported_video_codecs.push_back(media::VideoCodec::kCodecH264);
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
+  }
+
+  return supported_video_codecs;
+}
+
+bool GetPersistentLicenseSupport(const base::DictionaryValue& manifest) {
+  std::string supported;
+  const base::Value* value = manifest.FindKey(kCdmPersistentLicenseSupportName);
+  return value && value->is_bool() && value->GetBool();
+}
+
 void RegisterWidevineCdmWithChrome(
     const base::Version& cdm_version,
     const base::FilePath& cdm_install_dir,
     std::unique_ptr<base::DictionaryValue> manifest) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const std::string codecs = GetCodecs(*manifest);
+  bool supports_persistent_license = GetPersistentLicenseSupport(*manifest);
 
   content::PepperPluginInfo plugin_info;
   if (!MakeWidevineCdmPluginInfo(cdm_version, cdm_install_dir, codecs,
-                                 &plugin_info)) {
+                                 supports_persistent_license, &plugin_info)) {
     return;
   }
 
@@ -237,27 +275,30 @@ void RegisterWidevineCdmWithChrome(
   const base::FilePath cdm_path =
       GetPlatformDirectory(cdm_install_dir)
           .AppendASCII(base::GetNativeLibraryName(kWidevineCdmLibraryName));
-  const std::vector<std::string> supported_codecs = base::SplitString(
-      codecs, std::string(1, kCdmSupportedCodecsValueDelimiter),
-      base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  std::vector<media::VideoCodec> supported_video_codecs =
+      ConvertCodecsString(codecs);
+
   CdmRegistry::GetInstance()->RegisterCdm(content::CdmInfo(
-      kWidevineCdmType, cdm_version, cdm_path, supported_codecs));
+      kWidevineCdmDisplayName, kWidevineCdmGuid, cdm_version, cdm_path,
+      kWidevineCdmFileSystemId, supported_video_codecs,
+      supports_persistent_license, kWidevineKeySystem, false));
 }
 
 }  // namespace
 
-class WidevineCdmComponentInstallerTraits : public ComponentInstallerTraits {
+class WidevineCdmComponentInstallerPolicy : public ComponentInstallerPolicy {
  public:
-  WidevineCdmComponentInstallerTraits();
-  ~WidevineCdmComponentInstallerTraits() override {}
+  WidevineCdmComponentInstallerPolicy();
+  ~WidevineCdmComponentInstallerPolicy() override {}
 
  private:
-  // The following methods override ComponentInstallerTraits.
+  // The following methods override ComponentInstallerPolicy.
   bool SupportsGroupPolicyEnabledComponentUpdates() const override;
   bool RequiresNetworkEncryption() const override;
   update_client::CrxInstaller::Result OnCustomInstall(
       const base::DictionaryValue& manifest,
       const base::FilePath& install_dir) override;
+  void OnCustomUninstall() override;
   bool VerifyInstallation(
       const base::DictionaryValue& manifest,
       const base::FilePath& install_dir) const override;
@@ -279,30 +320,31 @@ class WidevineCdmComponentInstallerTraits : public ComponentInstallerTraits {
                         const base::FilePath& cdm_install_dir,
                         std::unique_ptr<base::DictionaryValue> manifest);
 
-  DISALLOW_COPY_AND_ASSIGN(WidevineCdmComponentInstallerTraits);
+  DISALLOW_COPY_AND_ASSIGN(WidevineCdmComponentInstallerPolicy);
 };
 
-WidevineCdmComponentInstallerTraits::WidevineCdmComponentInstallerTraits() {
-}
+WidevineCdmComponentInstallerPolicy::WidevineCdmComponentInstallerPolicy() {}
 
-bool WidevineCdmComponentInstallerTraits::
+bool WidevineCdmComponentInstallerPolicy::
     SupportsGroupPolicyEnabledComponentUpdates() const {
   return true;
 }
 
-bool WidevineCdmComponentInstallerTraits::RequiresNetworkEncryption() const {
+bool WidevineCdmComponentInstallerPolicy::RequiresNetworkEncryption() const {
   return false;
 }
 
 update_client::CrxInstaller::Result
-WidevineCdmComponentInstallerTraits::OnCustomInstall(
+WidevineCdmComponentInstallerPolicy::OnCustomInstall(
     const base::DictionaryValue& manifest,
     const base::FilePath& install_dir) {
   return update_client::CrxInstaller::Result(0);
 }
 
+void WidevineCdmComponentInstallerPolicy::OnCustomUninstall() {}
+
 // Once the CDM is ready, check the CDM adapter.
-void WidevineCdmComponentInstallerTraits::ComponentReady(
+void WidevineCdmComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& path,
     std::unique_ptr<base::DictionaryValue> manifest) {
@@ -313,12 +355,12 @@ void WidevineCdmComponentInstallerTraits::ComponentReady(
 
   base::PostTaskWithTraits(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
-      base::Bind(&WidevineCdmComponentInstallerTraits::UpdateCdmAdapter,
-                 base::Unretained(this), version, path,
-                 base::Passed(&manifest)));
+      base::BindOnce(&WidevineCdmComponentInstallerPolicy::UpdateCdmAdapter,
+                     base::Unretained(this), version, path,
+                     base::Passed(&manifest)));
 }
 
-bool WidevineCdmComponentInstallerTraits::VerifyInstallation(
+bool WidevineCdmComponentInstallerPolicy::VerifyInstallation(
     const base::DictionaryValue& manifest,
     const base::FilePath& install_dir) const {
   return IsCompatibleWithChrome(manifest) &&
@@ -329,26 +371,27 @@ bool WidevineCdmComponentInstallerTraits::VerifyInstallation(
 
 // The base directory on Windows looks like:
 // <profile>\AppData\Local\Google\Chrome\User Data\WidevineCdm\.
-base::FilePath WidevineCdmComponentInstallerTraits::GetRelativeInstallDir()
+base::FilePath WidevineCdmComponentInstallerPolicy::GetRelativeInstallDir()
     const {
-  return base::FilePath(FILE_PATH_LITERAL("WidevineCdm"));
+  return base::FilePath::FromUTF8Unsafe(kWidevineCdmBaseDirectory);
 }
 
-void WidevineCdmComponentInstallerTraits::GetHash(
+void WidevineCdmComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(kSha2Hash, kSha2Hash + arraysize(kSha2Hash));
+  hash->assign(kWidevineSha2Hash,
+               kWidevineSha2Hash + arraysize(kWidevineSha2Hash));
 }
 
-std::string WidevineCdmComponentInstallerTraits::GetName() const {
+std::string WidevineCdmComponentInstallerPolicy::GetName() const {
   return kWidevineCdmDisplayName;
 }
 
 update_client::InstallerAttributes
-WidevineCdmComponentInstallerTraits::GetInstallerAttributes() const {
+WidevineCdmComponentInstallerPolicy::GetInstallerAttributes() const {
   return update_client::InstallerAttributes();
 }
 
-std::vector<std::string> WidevineCdmComponentInstallerTraits::GetMimeTypes()
+std::vector<std::string> WidevineCdmComponentInstallerPolicy::GetMimeTypes()
     const {
   return std::vector<std::string>();
 }
@@ -362,7 +405,7 @@ static bool HasValidAdapter(const base::FilePath& adapter_version_path,
          base::PathExists(adapter_install_path);
 }
 
-void WidevineCdmComponentInstallerTraits::UpdateCdmAdapter(
+void WidevineCdmComponentInstallerPolicy::UpdateCdmAdapter(
     const base::Version& cdm_version,
     const base::FilePath& cdm_install_dir,
     std::unique_ptr<base::DictionaryValue> manifest) {
@@ -428,10 +471,11 @@ void WidevineCdmComponentInstallerTraits::UpdateCdmAdapter(
     }
   }
 
-  BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&RegisterWidevineCdmWithChrome, cdm_version,
-                 absolute_cdm_install_dir, base::Passed(&manifest)));
+  content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI)
+      ->PostTask(
+          FROM_HERE,
+          base::BindOnce(&RegisterWidevineCdmWithChrome, cdm_version,
+                         absolute_cdm_install_dir, base::Passed(&manifest)));
 }
 
 #endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
@@ -442,12 +486,10 @@ void RegisterWidevineCdmComponent(ComponentUpdateService* cus) {
   PathService::Get(chrome::FILE_WIDEVINE_CDM_ADAPTER, &adapter_source_path);
   if (!base::PathExists(adapter_source_path))
     return;
-  std::unique_ptr<ComponentInstallerTraits> traits(
-      new WidevineCdmComponentInstallerTraits);
-  // |cus| will take ownership of |installer| during installer->Register(cus).
-  DefaultComponentInstaller* installer =
-      new DefaultComponentInstaller(std::move(traits));
-  installer->Register(cus, base::Closure());
+
+  auto installer = base::MakeRefCounted<ComponentInstaller>(
+      std::make_unique<WidevineCdmComponentInstallerPolicy>());
+  installer->Register(cus, base::OnceClosure());
 #endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
 }
 

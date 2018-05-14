@@ -29,11 +29,16 @@
 
 #include <memory>
 
+#include "base/memory/scoped_refptr.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_annotations.h"
+#include "base/unguessable_token.h"
 #include "core/CoreExport.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/loader/ThreadableLoadingContext.h"
 #include "core/workers/ParentFrameTaskRunners.h"
 #include "core/workers/WorkerBackingThreadStartupData.h"
+#include "core/workers/WorkerInspectorProxy.h"
 #include "core/workers/WorkerThreadLifecycleContext.h"
 #include "core/workers/WorkerThreadLifecycleObserver.h"
 #include "platform/WaitableEvent.h"
@@ -42,9 +47,9 @@
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/Functional.h"
 #include "platform/wtf/Optional.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "public/platform/WebThread.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "public/platform/WebThreadType.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -57,11 +62,6 @@ class WorkerInspectorController;
 class WorkerOrWorkletGlobalScope;
 class WorkerReportingProxy;
 struct GlobalScopeCreationParams;
-
-enum WorkerThreadStartMode {
-  kDontPauseWorkerGlobalScopeOnStart,
-  kPauseWorkerGlobalScopeOnStart
-};
 
 // WorkerThread is a kind of WorkerBackingThread client. Each worker mechanism
 // can access the lower thread infrastructure via an implementation of this
@@ -88,23 +88,44 @@ class CORE_EXPORT WorkerThread : public WebThread::TaskObserver {
     kLastEnum,
   };
 
-  virtual ~WorkerThread();
+  ~WorkerThread() override;
 
   // Starts the underlying thread and creates the global scope. Called on the
   // main thread.
-  // Startup data for WorkerBackingThread must be WTF::nullopt if |this| doesn't
-  // own the underlying WorkerBackingThread.
+  // Startup data for WorkerBackingThread is WTF::nullopt if |this| doesn't own
+  // the underlying WorkerBackingThread.
   // TODO(nhiroki): We could separate WorkerBackingThread initialization from
   // GlobalScope initialization sequence, that is, InitializeOnWorkerThread().
   // After that, we could remove this startup data for WorkerBackingThread.
   // (https://crbug.com/710364)
   void Start(std::unique_ptr<GlobalScopeCreationParams>,
              const WTF::Optional<WorkerBackingThreadStartupData>&,
+             WorkerInspectorProxy::PauseOnWorkerStart,
              ParentFrameTaskRunners*);
 
-  // Closes the global scope and terminates the underlying thread. Called on the
-  // main thread.
-  void Terminate();
+  // Posts a task to evaluate a top-level classic script on the worker thread.
+  // Called on the main thread after Start().
+  void EvaluateClassicScript(const KURL& script_url,
+                             const String& source_code,
+                             std::unique_ptr<Vector<char>> cached_meta_data,
+                             const v8_inspector::V8StackTraceId& stack_id);
+
+  // Posts a task to import a top-level module script on the worker thread.
+  // Called on the main thread after start().
+  void ImportModuleScript(const KURL& script_url,
+                          network::mojom::FetchCredentialsMode);
+
+  // Posts a task to the worker thread to close the global scope and terminate
+  // the underlying thread. This task may be blocked by JavaScript execution on
+  // the worker thread, so this function also forcibly terminates JavaScript
+  // execution after a certain grace period.
+  void Terminate() LOCKS_EXCLUDED(mutex_);
+
+  // Terminates the worker thread. Subclasses of WorkerThread can override this
+  // to do cleanup. The default behavior is to call Terminate() and
+  // synchronously call EnsureScriptExecutionTerminates() to ensure the thread
+  // is quickly terminated. Called on the main thread.
+  virtual void TerminateForTesting();
 
   // Called on the main thread for the leak detector. Forcibly terminates the
   // script execution and waits by *blocking* the calling thread until the
@@ -133,7 +154,13 @@ class CORE_EXPORT WorkerThread : public WebThread::TaskObserver {
     return worker_reporting_proxy_;
   }
 
-  void AppendDebuggerTask(std::unique_ptr<CrossThreadClosure>);
+  // Only callable on the main thread.
+  void AppendDebuggerTask(CrossThreadClosure);
+
+  // Only callable on the main thread.
+  const base::UnguessableToken& GetDevToolsWorkerToken() const {
+    return devtools_worker_token_;
+  }
 
   // Runs only debugger tasks while paused in debugger.
   void StartRunningDebuggerTasksOnPauseOnWorkerThread();
@@ -161,40 +188,29 @@ class CORE_EXPORT WorkerThread : public WebThread::TaskObserver {
 
   PlatformThreadId GetPlatformThreadId();
 
-  bool IsForciblyTerminated();
+  bool IsForciblyTerminated() LOCKS_EXCLUDED(mutex_);
 
   void WaitForShutdownForTesting() { shutdown_event_->Wait(); }
-  ExitCode GetExitCodeForTesting();
+  ExitCode GetExitCodeForTesting() LOCKS_EXCLUDED(mutex_);
 
   ParentFrameTaskRunners* GetParentFrameTaskRunners() const {
     return parent_frame_task_runners_.Get();
   }
-
-  scheduler::WorkerGlobalScopeScheduler* GetGlobalScopeScheduler() const {
-    return global_scope_scheduler_.get();
-  }
-
-  service_manager::InterfaceProvider& GetInterfaceProvider();
 
   // For ServiceWorkerScriptStreaming. Returns nullptr otherwise.
   virtual InstalledScriptsManager* GetInstalledScriptsManager() {
     return nullptr;
   }
 
+  // Can be called on both the main thread and the worker thread.
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(TaskType type) {
+    return global_scope_scheduler_->GetTaskRunner(type);
+  }
+
  protected:
   WorkerThread(ThreadableLoadingContext*, WorkerReportingProxy&);
 
-  // Factory method for creating a new worker context for the thread.
-  // Called on the worker thread.
-  virtual WorkerOrWorkletGlobalScope* CreateWorkerGlobalScope(
-      std::unique_ptr<GlobalScopeCreationParams>) = 0;
-
-  // Returns true when this WorkerThread owns the associated
-  // WorkerBackingThread exclusively. If this function returns true, the
-  // WorkerThread initializes / shutdowns the backing thread. Otherwise
-  // workerBackingThread() should be initialized / shutdown properly
-  // out of this class.
-  virtual bool IsOwningBackingThread() const { return true; }
+  virtual WebThreadType GetThreadType() const = 0;
 
   // Official moment of creation of worker: when the worker thread is created.
   // (https://w3c.github.io/hr-time/#time-origin)
@@ -209,73 +225,80 @@ class CORE_EXPORT WorkerThread : public WebThread::TaskObserver {
   FRIEND_TEST_ALL_PREFIXES(WorkerThreadTest,
                            Terminate_WhileDebuggerTaskIsRunning);
 
-  // Represents the state of this worker thread. A caller may need to acquire
-  // a lock |m_threadStateMutex| before accessing this:
-  //   - Only the worker thread can set this with the lock.
-  //   - The worker thread can read this without the lock.
-  //   - The main thread can read this with the lock.
+  // Represents the state of this worker thread.
   enum class ThreadState {
     kNotStarted,
     kRunning,
     kReadyToShutdown,
   };
 
+  // Factory method for creating a new worker context for the thread.
+  // Called on the worker thread.
+  virtual WorkerOrWorkletGlobalScope* CreateWorkerGlobalScope(
+      std::unique_ptr<GlobalScopeCreationParams>) = 0;
+
+  // Returns true when this WorkerThread owns the associated
+  // WorkerBackingThread exclusively. If this function returns true, the
+  // WorkerThread initializes / shutdowns the backing thread. Otherwise
+  // the backing thread should be initialized / shutdown properly out of this
+  // class.
+  virtual bool IsOwningBackingThread() const { return true; }
+
   // Posts a delayed task to forcibly terminate script execution in case the
   // normal shutdown sequence does not start within a certain time period.
   void ScheduleToTerminateScriptExecution();
 
   // Returns true if we should synchronously terminate the script execution so
-  // that a shutdown task can be handled by the thread event loop. This must be
-  // called with |m_threadStateMutex| acquired.
-  bool ShouldTerminateScriptExecution(const MutexLocker&);
+  // that a shutdown task can be handled by the thread event loop.
+  bool ShouldTerminateScriptExecution() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Terminates worker script execution if the worker thread is running and not
   // already shutting down. Does not terminate if a debugger task is running,
   // because the debugger task is guaranteed to finish and it heavily uses V8
   // API calls which would crash after forcible script termination. Called on
   // the main thread.
-  void EnsureScriptExecutionTerminates(ExitCode);
+  void EnsureScriptExecutionTerminates(ExitCode) LOCKS_EXCLUDED(mutex_);
 
+  // These are called in this order during worker thread startup.
   void InitializeSchedulerOnWorkerThread(WaitableEvent*);
   void InitializeOnWorkerThread(
       std::unique_ptr<GlobalScopeCreationParams>,
-      const WTF::Optional<WorkerBackingThreadStartupData>&);
-  void PrepareForShutdownOnWorkerThread();
-  void PerformShutdownOnWorkerThread();
-  template <WTF::FunctionThreadAffinity threadAffinity>
-  void PerformTaskOnWorkerThread(
-      std::unique_ptr<Function<void(), threadAffinity>> task);
-  void PerformDebuggerTaskOnWorkerThread(std::unique_ptr<CrossThreadClosure>);
-  void PerformDebuggerTaskDontWaitOnWorkerThread();
+      const WTF::Optional<WorkerBackingThreadStartupData>&,
+      WorkerInspectorProxy::PauseOnWorkerStart) LOCKS_EXCLUDED(mutex_);
 
-  // These must be called with |m_threadStateMutex| acquired.
-  void SetThreadState(const MutexLocker&, ThreadState);
-  void SetExitCode(const MutexLocker&, ExitCode);
-  bool IsThreadStateMutexLocked(const MutexLocker&);
+  void EvaluateClassicScriptOnWorkerThread(
+      const KURL& script_url,
+      String source_code,
+      std::unique_ptr<Vector<char>> cached_meta_data,
+      const v8_inspector::V8StackTraceId& stack_id);
+  void ImportModuleScriptOnWorkerThread(const KURL& script_url,
+                                        network::mojom::FetchCredentialsMode);
 
-  // This internally acquires |m_threadStateMutex|. If you already have the
-  // lock or you're on the main thread, you should consider directly accessing
-  // |m_requestedToTerminate|.
-  bool CheckRequestedToTerminateOnWorkerThread();
+  // These are called in this order during worker thread termination.
+  void PrepareForShutdownOnWorkerThread() LOCKS_EXCLUDED(mutex_);
+  void PerformShutdownOnWorkerThread() LOCKS_EXCLUDED(mutex_);
+
+  void SetThreadState(ThreadState) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  void SetExitCode(ExitCode) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  bool CheckRequestedToTerminate() LOCKS_EXCLUDED(mutex_);
 
   // A unique identifier among all WorkerThreads.
   const int worker_thread_id_;
 
-  // Set on the main thread and checked on both the main and worker threads.
-  bool requested_to_terminate_ = false;
+  // Set on the main thread.
+  bool requested_to_terminate_ GUARDED_BY(mutex_) = false;
 
   // Accessed only on the worker thread.
   bool paused_in_debugger_ = false;
 
-  // Set on the worker thread and checked on both the main and worker threads.
-  bool running_debugger_task_ = false;
-
-  ThreadState thread_state_ = ThreadState::kNotStarted;
-  ExitCode exit_code_ = ExitCode::kNotTerminated;
+  ThreadState thread_state_ GUARDED_BY(mutex_) = ThreadState::kNotStarted;
+  ExitCode exit_code_ GUARDED_BY(mutex_) = ExitCode::kNotTerminated;
 
   TimeDelta forcible_termination_delay_;
 
-  std::unique_ptr<InspectorTaskRunner> inspector_task_runner_;
+  scoped_refptr<InspectorTaskRunner> inspector_task_runner_;
+  base::UnguessableToken devtools_worker_token_;
 
   // Created on the main thread, passed to the worker thread but should kept
   // being accessed only on the main thread.
@@ -285,18 +308,15 @@ class CORE_EXPORT WorkerThread : public WebThread::TaskObserver {
 
   CrossThreadPersistent<ParentFrameTaskRunners> parent_frame_task_runners_;
 
-  // Mojo interface provider serving interface requests scoped to this worker
-  // context.
-  service_manager::InterfaceProvider interface_provider_;
-
   // Tasks managed by this scheduler are canceled when the global scope is
   // closed.
   std::unique_ptr<scheduler::WorkerGlobalScopeScheduler>
       global_scope_scheduler_;
 
-  // This lock protects |m_globalScope|, |m_requestedToTerminate|,
-  // |m_threadState|, |m_runningDebuggerTask| and |m_exitCode|.
-  Mutex thread_state_mutex_;
+  // This lock protects shared states between the main thread and the worker
+  // thread. See thread-safety annotations (e.g., GUARDED_BY) in this header
+  // file.
+  Mutex mutex_;
 
   CrossThreadPersistent<ConsoleMessageStorage> console_message_storage_;
   CrossThreadPersistent<WorkerOrWorkletGlobalScope> global_scope_;

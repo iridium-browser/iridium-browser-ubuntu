@@ -5,6 +5,9 @@
 #import <Foundation/Foundation.h>
 
 #include "bidirectional_stream_c.h"
+#include "cronet.idl_c.h"
+#include "cronet_c.h"
+#include "cronet_export.h"
 
 // Type of HTTP cache; public interface to private implementation defined in
 // URLRequestContextConfig class.
@@ -55,14 +58,19 @@ GRPC_SUPPORT_EXPORT
 // any effect before |start| is called.
 + (void)setBrotliEnabled:(BOOL)brotliEnabled;
 
+// Sets whether Metrics should be collected by CronetEngine. This method only
+// has any effect before |start| is called.
++ (void)setMetricsEnabled:(BOOL)metricsEnabled;
+
 // Set HTTP Cache type to be used by CronetEngine.  This method only has any
 // effect before |start| is called.  See HttpCacheType enum for available
 // options.
 + (void)setHttpCacheType:(CRNHttpCacheType)httpCacheType;
 
 // Adds hint that host supports QUIC on altPort. This method only has any effect
-// before |start| is called.
-+ (void)addQuicHint:(NSString*)host port:(int)port altPort:(int)altPort;
+// before |start| is called.  Returns NO if it fails to add hint (because the
+// host is invalid).
++ (BOOL)addQuicHint:(NSString*)host port:(int)port altPort:(int)altPort;
 
 // Set experimental Cronet options.  Argument is a JSON string; see
 // |URLRequestContextConfig| for more details.  This method only has
@@ -173,6 +181,11 @@ GRPC_SUPPORT_EXPORT
 // Returns the full user-agent that the stack uses.
 // This is the exact string servers will see.
 + (NSString*)getUserAgent;
+
+// Sets priority of the network thread. The |priority| should be a
+// floating point number between 0.0 to 1.0, where 1.0 is highest priority.
+// This method can be called multiple times before or after |start| method.
++ (void)setNetworkThreadPriority:(double)priority;
 
 // Get a pointer to global instance of cronet_engine for GRPC C API.
 + (stream_engine*)getGlobalEngine;

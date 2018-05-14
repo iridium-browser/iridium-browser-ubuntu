@@ -4,11 +4,13 @@
 #ifndef TerminatedArray_h
 #define TerminatedArray_h
 
+#include <memory>
+
+#include "base/macros.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/VectorTraits.h"
 #include "platform/wtf/allocator/Partitions.h"
-#include <memory>
 
 namespace WTF {
 
@@ -19,12 +21,11 @@ namespace WTF {
 template <typename T>
 class TerminatedArray {
   DISALLOW_NEW();
-  WTF_MAKE_NONCOPYABLE(TerminatedArray);
 
  public:
   // When TerminatedArray::Allocator implementations grow the backing
   // store, old is copied into the new and larger block.
-  static_assert(VectorTraits<T>::kCanCopyWithMemcpy,
+  static_assert(VectorTraits<T>::kCanMoveWithMemcpy,
                 "Array elements must be memory copyable");
 
   T& at(size_t index) { return reinterpret_cast<T*>(this)[index]; }
@@ -39,7 +40,7 @@ class TerminatedArray {
    public:
     iterator_base& operator++() {
       if (val_->IsLastInArray()) {
-        val_ = 0;
+        val_ = nullptr;
       } else {
         ++val_;
       }
@@ -71,8 +72,8 @@ class TerminatedArray {
     return const_iterator(reinterpret_cast<const T*>(this));
   }
 
-  iterator end() { return iterator(0); }
-  const_iterator end() const { return const_iterator(0); }
+  iterator end() { return iterator(nullptr); }
+  const_iterator end() const { return const_iterator(nullptr); }
 
   size_t size() const {
     size_t count = 0;
@@ -90,6 +91,7 @@ class TerminatedArray {
   // of TerminateArray and manage their lifetimes.
   struct Allocator {
     STATIC_ONLY(Allocator);
+    using BackendAllocator = PartitionAllocator;
     using PassPtr = std::unique_ptr<TerminatedArray>;
     using Ptr = std::unique_ptr<TerminatedArray>;
 
@@ -113,10 +115,12 @@ class TerminatedArray {
 
   // Prohibit construction. Allocator makes TerminatedArray instances for
   // TerminatedArrayBuilder by pointer casting.
-  TerminatedArray();
+  TerminatedArray() = delete;
 
   template <typename, template <typename> class>
   friend class TerminatedArrayBuilder;
+
+  DISALLOW_COPY_AND_ASSIGN(TerminatedArray);
 };
 
 }  // namespace WTF

@@ -32,6 +32,8 @@ enum class Format::ID
 {angle_format_enum}
 }};
 
+constexpr uint32_t kNumANGLEFormats = {num_angle_formats};
+
 }}  // namespace angle
 """
 
@@ -64,6 +66,15 @@ constexpr Format g_formatInfoTable[] = {{
     {{ Format::ID::NONE, GL_NONE, GL_NONE, nullptr, NoCopyFunctions, nullptr, nullptr, GL_NONE, 0, 0, 0, 0, 0, 0 }},
 {angle_format_info_cases}    // clang-format on
 }};
+
+// static
+Format::ID Format::InternalFormatToID(GLenum internalFormat)
+{{
+    switch (internalFormat)
+    {{
+{angle_format_switch}
+    }}
+}}
 
 // static
 const Format &Format::Get(ID id)
@@ -216,6 +227,15 @@ def gen_enum_string(all_angle):
         enum_data += ',\n    ' + format_id
     return enum_data
 
+def gen_map_switch_string(gl_to_angle):
+    switch_data = '';
+    for gl_format in gl_to_angle:
+        angle_format = gl_to_angle[gl_format]
+        switch_data += "        case " + gl_format + ":\nreturn Format::ID::" + angle_format + ";\n"
+    switch_data += "        default:\n"
+    switch_data += "            return Format::ID::NONE;"
+    return switch_data;
+
 gl_to_angle = angle_format.load_forward_table('angle_format_map.json')
 angle_to_gl = angle_format.load_inverse_table('angle_format_map.json')
 data_source_name = 'angle_format_data.json'
@@ -224,21 +244,25 @@ all_angle = angle_to_gl.keys()
 
 angle_format_cases = parse_angle_format_table(
     all_angle, json_data, angle_to_gl)
+switch_data = gen_map_switch_string(gl_to_angle)
 output_cpp = template_autogen_inl.format(
     script_name = sys.argv[0],
     copyright_year = date.today().year,
     angle_format_info_cases = angle_format_cases,
+    angle_format_switch = switch_data,
     data_source_name = data_source_name)
 with open('Format_table_autogen.cpp', 'wt') as out_file:
     out_file.write(output_cpp)
     out_file.close()
 
 enum_data = gen_enum_string(all_angle)
+num_angle_formats = len(all_angle)
 output_h = template_autogen_h.format(
     script_name = sys.argv[0],
     copyright_year = date.today().year,
     angle_format_enum = enum_data,
-    data_source_name = data_source_name)
+    data_source_name = data_source_name,
+    num_angle_formats = num_angle_formats)
 with open('Format_ID_autogen.inl', 'wt') as out_file:
     out_file.write(output_h)
     out_file.close()

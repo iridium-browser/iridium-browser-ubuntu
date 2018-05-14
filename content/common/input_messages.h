@@ -2,23 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef CONTENT_COMMON_INPUT_MESSAGES_H_
+#define CONTENT_COMMON_INPUT_MESSAGES_H_
+
 // IPC messages for input events and other messages that require processing in
 // order relative to input events.
-// Multiply-included message file, hence no include guard.
 
 #include "base/strings/string16.h"
 #include "build/build_config.h"
+#include "cc/input/overscroll_behavior.h"
 #include "cc/input/touch_action.h"
 #include "content/common/content_export.h"
 #include "content/common/content_param_traits.h"
 #include "content/common/edit_command.h"
 #include "content/common/input/input_event.h"
 #include "content/common/input/input_event_ack.h"
-#include "content/common/input/input_event_ack_source.h"
-#include "content/common/input/input_event_ack_state.h"
 #include "content/common/input/input_event_dispatch_type.h"
 #include "content/common/input/input_param_traits.h"
-#include "content/common/input/synthetic_gesture_packet.h"
 #include "content/common/input/synthetic_gesture_params.h"
 #include "content/common/input/synthetic_pinch_gesture_params.h"
 #include "content/common/input/synthetic_pointer_action_list_params.h"
@@ -26,6 +26,8 @@
 #include "content/common/input/synthetic_smooth_drag_gesture_params.h"
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
 #include "content/common/input/synthetic_tap_gesture_params.h"
+#include "content/public/common/input_event_ack_source.h"
+#include "content/public/common/input_event_ack_state.h"
 #include "ipc/ipc_message_macros.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/platform/WebPointerProperties.h"
@@ -48,7 +50,7 @@
 #define IPC_MESSAGE_START InputMsgStart
 
 IPC_ENUM_TRAITS_MAX_VALUE(content::InputEventAckSource,
-                          content::InputEventAckSource::MAX)
+                          content::InputEventAckSource::MAX_FROM_RENDERER)
 IPC_ENUM_TRAITS_MAX_VALUE(
     content::SyntheticGestureParams::GestureSourceType,
     content::SyntheticGestureParams::GESTURE_SOURCE_TYPE_MAX)
@@ -81,12 +83,21 @@ IPC_ENUM_TRAITS_MAX_VALUE(
     blink::WebGestureEvent::InertialPhaseState::kLastPhase)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebTouchPoint::State,
                           blink::WebTouchPoint::State::kStateMax)
+IPC_ENUM_TRAITS_MAX_VALUE(
+    cc::OverscrollBehavior::OverscrollBehaviorType,
+    cc::OverscrollBehavior::OverscrollBehaviorType::kOverscrollBehaviorTypeMax)
 
 IPC_STRUCT_TRAITS_BEGIN(ui::DidOverscrollParams)
   IPC_STRUCT_TRAITS_MEMBER(accumulated_overscroll)
   IPC_STRUCT_TRAITS_MEMBER(latest_overscroll_delta)
   IPC_STRUCT_TRAITS_MEMBER(current_fling_velocity)
   IPC_STRUCT_TRAITS_MEMBER(causal_event_viewport_point)
+  IPC_STRUCT_TRAITS_MEMBER(overscroll_behavior)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(cc::OverscrollBehavior)
+  IPC_STRUCT_TRAITS_MEMBER(x)
+  IPC_STRUCT_TRAITS_MEMBER(y)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::EditCommand)
@@ -150,6 +161,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::InputEventAck)
   IPC_STRUCT_TRAITS_MEMBER(latency)
   IPC_STRUCT_TRAITS_MEMBER(overscroll)
   IPC_STRUCT_TRAITS_MEMBER(unique_touch_event_id)
+  IPC_STRUCT_TRAITS_MEMBER(touch_action)
 IPC_STRUCT_TRAITS_END()
 
 // Sends an input event to the render widget. The input event in general
@@ -169,9 +181,9 @@ IPC_MESSAGE_ROUTED1(InputMsg_CursorVisibilityChange,
 // Sets the text composition to be between the given start and end offsets in
 // the currently focused editable field.
 IPC_MESSAGE_ROUTED3(InputMsg_SetCompositionFromExistingText,
-    int /* start */,
-    int /* end */,
-    std::vector<blink::WebCompositionUnderline> /* underlines */)
+                    int /* start */,
+                    int /* end */,
+                    std::vector<blink::WebImeTextSpan> /* ime_text_spans */)
 
 // Deletes the current selection plus the specified number of characters before
 // and after the selection or caret.
@@ -201,22 +213,20 @@ IPC_MESSAGE_ROUTED2(InputMsg_SetEditableSelectionOffsets,
                     int /* end */)
 
 // This message sends a string being composed with an input method.
-IPC_MESSAGE_ROUTED5(
-    InputMsg_ImeSetComposition,
-    base::string16, /* text */
-    std::vector<blink::WebCompositionUnderline>, /* underlines */
-    gfx::Range /* replacement_range */,
-    int, /* selectiont_start */
-    int /* selection_end */)
+IPC_MESSAGE_ROUTED5(InputMsg_ImeSetComposition,
+                    base::string16,                     /* text */
+                    std::vector<blink::WebImeTextSpan>, /* ime_text_spans */
+                    gfx::Range /* replacement_range */,
+                    int, /* selectiont_start */
+                    int /* selection_end */)
 
 // This message deletes the current composition, inserts specified text, and
 // moves the cursor.
-IPC_MESSAGE_ROUTED4(
-    InputMsg_ImeCommitText,
-    base::string16 /* text */,
-    std::vector<blink::WebCompositionUnderline>, /* underlines */
-    gfx::Range /* replacement_range */,
-    int /* relative_cursor_pos */)
+IPC_MESSAGE_ROUTED4(InputMsg_ImeCommitText,
+                    base::string16 /* text */,
+                    std::vector<blink::WebImeTextSpan>, /* ime_text_spans */
+                    gfx::Range /* replacement_range */,
+                    int /* relative_cursor_pos */)
 
 // This message inserts the ongoing composition.
 IPC_MESSAGE_ROUTED1(InputMsg_ImeFinishComposingText, bool /* keep_selection */)
@@ -234,11 +244,6 @@ IPC_MESSAGE_ROUTED1(InputMsg_ImeFinishComposingText, bool /* keep_selection */)
 // This message must be sent just before sending a key event.
 IPC_MESSAGE_ROUTED1(InputMsg_SetEditCommandsForNextKeyEvent,
                     std::vector<content::EditCommand> /* edit_commands */)
-
-// Message payload is the name/value of a WebCore edit command to execute.
-IPC_MESSAGE_ROUTED2(InputMsg_ExecuteEditCommand,
-                    std::string, /* name */
-                    std::string /* value */)
 
 // Message payload is the name of a WebCore edit command to execute.
 IPC_MESSAGE_ROUTED1(InputMsg_ExecuteNoValueEditCommand, std::string /* name */)
@@ -286,10 +291,12 @@ IPC_MESSAGE_ROUTED2(InputMsg_SelectRange,
 // Sent by the browser to ask the renderer to adjust the selection start and
 // end points by the given amounts. A negative amount moves the selection
 // towards the beginning of the document, a positive amount moves the selection
-// towards the end of the document.
-IPC_MESSAGE_ROUTED2(InputMsg_AdjustSelectionByCharacterOffset,
+// towards the end of the document. Will send show selection menu event when
+// needed.
+IPC_MESSAGE_ROUTED3(InputMsg_AdjustSelectionByCharacterOffset,
                     int /* start_adjust*/,
-                    int /* end_adjust */)
+                    int /* end_adjust */,
+                    bool /* show_selection_menu */)
 
 // Requests the renderer to move the selection extent point to a new position.
 // Expects a MoveRangeSelectionExtent_ACK message when finished.
@@ -316,8 +323,6 @@ IPC_MESSAGE_ROUTED2(InputMsg_RequestCompositionUpdates,
                     bool /* immediate_request */,
                     bool /* monitor_updates */)
 
-IPC_MESSAGE_ROUTED0(InputMsg_SyntheticGestureCompleted)
-
 // -----------------------------------------------------------------------------
 // Messages sent from the renderer to the browser.
 
@@ -325,16 +330,20 @@ IPC_MESSAGE_ROUTED0(InputMsg_SyntheticGestureCompleted)
 IPC_MESSAGE_ROUTED1(InputHostMsg_HandleInputEvent_ACK,
                     content::InputEventAck /* ack */)
 
-IPC_MESSAGE_ROUTED1(InputHostMsg_QueueSyntheticGesture,
-                    content::SyntheticGesturePacket)
-
 // Notifies the allowed touch actions for a new touch point.
 IPC_MESSAGE_ROUTED1(InputHostMsg_SetTouchAction,
                     cc::TouchAction /* touch_action */)
 
-// The whitelisted touch action for a new touch point sent by the compositor.
-IPC_MESSAGE_ROUTED1(InputHostMsg_SetWhiteListedTouchAction,
-                    cc::TouchAction /* white_listed_touch_action */)
+// The whitelisted touch action and the associated unique touch event id
+// for a new touch point sent by the compositor. The unique touch event id is
+// only needed to verify that the whitelisted touch action is being associated
+// with the correct touch event. The input event ack state is needed when
+// the touchstart message was not sent to the renderer and the touch
+// actions need to be reset and the touch ack timeout needs to be started.
+IPC_MESSAGE_ROUTED3(InputHostMsg_SetWhiteListedTouchAction,
+                    cc::TouchAction /* white_listed_touch_action */,
+                    uint32_t /* unique_touch_event_id */,
+                    content::InputEventAckState /* ack_result */)
 
 // Sent by the compositor when input scroll events are dropped due to bounds
 // restrictions on the root scroll offset.
@@ -366,3 +375,5 @@ IPC_MESSAGE_ROUTED2(InputHostMsg_ImeCompositionRangeChanged,
 // independent InputMsg, then ifdefs for platform specific InputMsg, then
 // platform independent InputHostMsg, then ifdefs for platform specific
 // InputHostMsg.
+
+#endif  // CONTENT_COMMON_INPUT_MESSAGES_H_

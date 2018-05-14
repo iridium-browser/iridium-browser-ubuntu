@@ -42,8 +42,12 @@ namespace {
 bool RunOneTest(
     const content::TestInfo& test_info,
     bool* ran_at_least_once,
+    content::BlinkTestController* blink_test_controller,
     const std::unique_ptr<content::BrowserMainRunner>& main_runner) {
-  if (!content::BlinkTestController::Get()->PrepareForLayoutTest(
+  DCHECK(ran_at_least_once);
+  DCHECK(blink_test_controller);
+
+  if (!blink_test_controller->PrepareForLayoutTest(
           test_info.url, test_info.current_working_directory,
           test_info.enable_pixel_dumping, test_info.expected_pixel_hash)) {
     return false;
@@ -60,7 +64,7 @@ bool RunOneTest(
   main_runner->Run();
 #endif
 
-  if (!content::BlinkTestController::Get()->ResetAfterLayoutTest())
+  if (!blink_test_controller->ResetAfterLayoutTest())
     return false;
 
 #if defined(OS_ANDROID)
@@ -75,7 +79,7 @@ int RunTests(const std::unique_ptr<content::BrowserMainRunner>& main_runner) {
   content::BlinkTestController test_controller;
   {
     // We're outside of the message loop here, and this is a test.
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     base::FilePath temp_path;
     base::GetTempDir(&temp_path);
     test_controller.SetTempPath(temp_path);
@@ -84,14 +88,15 @@ int RunTests(const std::unique_ptr<content::BrowserMainRunner>& main_runner) {
   std::cout << "#READY\n";
   std::cout.flush();
 
-  base::CommandLine::StringVector args =
-      base::CommandLine::ForCurrentProcess()->GetArgs();
-  content::TestInfoExtractor test_extractor(args);
+  content::TestInfoExtractor test_extractor(
+      *base::CommandLine::ForCurrentProcess());
   bool ran_at_least_once = false;
   std::unique_ptr<content::TestInfo> test_info;
   while ((test_info = test_extractor.GetNextTest())) {
-    if (!RunOneTest(*test_info, &ran_at_least_once, main_runner))
+    if (!RunOneTest(*test_info, &ran_at_least_once, &test_controller,
+                    main_runner)) {
       break;
+    }
   }
   if (!ran_at_least_once) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -138,6 +143,7 @@ int LayoutTestBrowserMain(
     return exit_code;
 
 #if defined(OS_ANDROID)
+  main_runner->SynchronouslyFlushStartupTasks();
   android_configuration.RedirectStreams();
 #endif
 

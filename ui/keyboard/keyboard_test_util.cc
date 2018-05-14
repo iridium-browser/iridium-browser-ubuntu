@@ -49,8 +49,6 @@ class ControllerStateChangeWaiter
   void Wait() { run_loop_.Run(); }
 
  private:
-  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override {}
-  void OnKeyboardClosed() override {}
   void OnStateChanged(const keyboard::KeyboardControllerState state) override {
     if (state == state_) {
       run_loop_.QuitWhenIdle();
@@ -92,26 +90,39 @@ void WaitControllerStateChangesTo(KeyboardControllerState state) {
   waiter.Wait();
 }
 
-gfx::Rect FullWidthKeyboardBoundsFromRootBounds(const gfx::Rect& root_bounds,
-                                                int keyboard_height) {
+gfx::Rect KeyboardBoundsFromRootBounds(const gfx::Rect& root_bounds,
+                                       int keyboard_height) {
   return gfx::Rect(root_bounds.x(), root_bounds.bottom() - keyboard_height,
                    root_bounds.width(), keyboard_height);
 }
 
-bool FakeKeyboardUI::HasContentsWindow() const {
-  return false;
+TestKeyboardUI::TestKeyboardUI(ui::InputMethod* input_method)
+    : input_method_(input_method) {}
+
+TestKeyboardUI::~TestKeyboardUI() {
+  // Destroy the window before the delegate.
+  window_.reset();
 }
 
-bool FakeKeyboardUI::ShouldWindowOverscroll(aura::Window* window) const {
+aura::Window* TestKeyboardUI::GetContentsWindow() {
+  if (!window_) {
+    window_.reset(new aura::Window(&delegate_));
+    window_->Init(ui::LAYER_NOT_DRAWN);
+    window_->set_owned_by_parent(false);
+  }
+  return window_.get();
+}
+
+ui::InputMethod* TestKeyboardUI::GetInputMethod() {
+  return input_method_;
+}
+
+bool TestKeyboardUI::HasContentsWindow() const {
+  return !!window_;
+}
+
+bool TestKeyboardUI::ShouldWindowOverscroll(aura::Window* window) const {
   return true;
-}
-
-aura::Window* FakeKeyboardUI::GetContentsWindow() {
-  return nullptr;
-}
-
-ui::InputMethod* FakeKeyboardUI::GetInputMethod() {
-  return &ime_;
 }
 
 }  // namespace keyboard

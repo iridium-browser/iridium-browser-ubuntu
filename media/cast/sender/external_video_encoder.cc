@@ -9,9 +9,6 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/crash_logging.h"
-#include "base/debug/dump_without_crashing.h"
-#include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/shared_memory.h"
@@ -19,7 +16,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/media_switches.h"
@@ -31,7 +27,7 @@
 #include "media/cast/logging/logging_defines.h"
 #include "media/cast/net/cast_transport_config.h"
 #include "media/cast/sender/vp8_quantizer_parser.h"
-#include "media/filters/h264_parser.h"
+#include "media/video/h264_parser.h"
 
 namespace {
 
@@ -110,7 +106,6 @@ class ExternalVideoEncoder::VEAClientImpl
         codec_profile_(media::VIDEO_CODEC_PROFILE_UNKNOWN),
         key_frame_quantizer_parsable_(false),
         requested_bit_rate_(-1),
-        has_seen_zero_length_encoded_frame_(false),
         max_allowed_input_buffers_(0),
         allocate_input_buffer_in_progress_(false) {}
 
@@ -146,8 +141,10 @@ class ExternalVideoEncoder::VEAClientImpl
     DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
     requested_bit_rate_ = bit_rate;
-    video_encode_accelerator_->RequestEncodingParametersChange(
-        bit_rate, static_cast<uint32_t>(max_frame_rate_ + 0.5));
+    if (encoder_active_) {
+      video_encode_accelerator_->RequestEncodingParametersChange(
+          bit_rate, static_cast<uint32_t>(max_frame_rate_ + 0.5));
+    }
   }
 
   // The destruction call back of the copied video frame to free its use of
@@ -166,12 +163,14 @@ class ExternalVideoEncoder::VEAClientImpl
       const VideoEncoder::FrameEncodedCallback& frame_encoded_callback) {
     DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
-    if (!encoder_active_)
-      return;
-
     in_progress_frame_encodes_.push_back(InProgressFrameEncode(
         video_frame, reference_time, frame_encoded_callback,
         requested_bit_rate_));
+
+    if (!encoder_active_) {
+      ExitEncodingWithErrors();
+      return;
+    }
 
     scoped_refptr<media::VideoFrame> frame = video_frame;
     if (video_frame->coded_size() != frame_coded_size_) {
@@ -308,6 +307,7 @@ class ExternalVideoEncoder::VEAClientImpl
       }
       encoded_frame->data.append(
           static_cast<const char*>(output_buffer->memory()), payload_size);
+      DCHECK(!encoded_frame->data.empty()) << "BUG: Encoder must provide data.";
 
       // If FRAME_DURATION metadata was provided in the source VideoFrame,
       // compute the utilization metrics.
@@ -383,27 +383,6 @@ class ExternalVideoEncoder::VEAClientImpl
         quantizer_estimator_.Reset();
       }
 
-      // TODO(miu): Determine when/why encoding can produce zero-length data,
-      // which causes crypto crashes.  http://crbug.com/519022
-      if (!has_seen_zero_length_encoded_frame_ && encoded_frame->data.empty()) {
-        has_seen_zero_length_encoded_frame_ = true;
-
-        const char kZeroEncodeDetails[] = "zero-encode-details";
-        const std::string details = base::StringPrintf(
-            ("%c/%c,id=%" PRIu32 ",rtp=%" PRIu32 ",br=%d,q=%" PRIuS
-             ",act=%c,ref=%" PRIu32),
-            codec_profile_ == media::VP8PROFILE_ANY ? 'V' : 'H',
-            key_frame ? 'K' : 'D', encoded_frame->frame_id.lower_32_bits(),
-            encoded_frame->rtp_timestamp.lower_32_bits(),
-            request.target_bit_rate / 1000, in_progress_frame_encodes_.size(),
-            encoder_active_ ? 'Y' : 'N',
-            encoded_frame->referenced_frame_id.lower_32_bits() % 1000);
-        base::debug::SetCrashKeyValue(kZeroEncodeDetails, details);
-        // Please forward crash reports to http://crbug.com/519022:
-        base::debug::DumpWithoutCrashing();
-        base::debug::ClearCrashKey(kZeroEncodeDetails);
-      }
-
       encoded_frame->encode_completion_time =
           cast_environment_->Clock()->NowTicks();
       cast_environment_->PostTask(
@@ -419,22 +398,28 @@ class ExternalVideoEncoder::VEAClientImpl
 
     // We need to re-add the output buffer to the encoder after we are done
     // with it.
-    video_encode_accelerator_->UseOutputBitstreamBuffer(media::BitstreamBuffer(
-        bitstream_buffer_id,
-        output_buffers_[bitstream_buffer_id]->handle(),
-        output_buffers_[bitstream_buffer_id]->mapped_size()));
+    if (encoder_active_) {
+      video_encode_accelerator_->UseOutputBitstreamBuffer(
+          media::BitstreamBuffer(
+              bitstream_buffer_id,
+              output_buffers_[bitstream_buffer_id]->handle(),
+              output_buffers_[bitstream_buffer_id]->mapped_size()));
+    }
   }
 
  private:
   friend class base::RefCountedThreadSafe<VEAClientImpl>;
 
   ~VEAClientImpl() final {
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
+
+    while (!in_progress_frame_encodes_.empty())
+      ExitEncodingWithErrors();
+
     // According to the media::VideoEncodeAccelerator interface, Destroy()
     // should be called instead of invoking its private destructor.
-    task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&media::VideoEncodeAccelerator::Destroy,
-                   base::Unretained(video_encode_accelerator_.release())));
+    if (video_encode_accelerator_)
+      video_encode_accelerator_.release()->Destroy();
   }
 
   // Note: This method can be called on any thread.
@@ -495,7 +480,9 @@ class ExternalVideoEncoder::VEAClientImpl
   // Parse H264 SPS, PPS, and Slice header, and return the averaged frame
   // quantizer in the range of [0, 51], or -1 on parse error.
   double GetH264FrameQuantizer(const uint8_t* encoded_data, off_t size) {
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
     DCHECK(encoded_data);
+
     if (!size)
       return -1;
     h264_parser_.SetStream(encoded_data, size);
@@ -586,11 +573,6 @@ class ExternalVideoEncoder::VEAClientImpl
   // Used to compute utilization metrics for each frame.
   QuantizerEstimator quantizer_estimator_;
 
-  // Set to true once a frame with zero-length encoded data has been
-  // encountered.
-  // TODO(miu): Remove after discovering cause.  http://crbug.com/519022
-  bool has_seen_zero_length_encoded_frame_;
-
   // The coded size of the video frame required by Encoder. This size is
   // obtained from VEA through |RequireBitstreamBuffers()|.
   gfx::Size frame_coded_size_;
@@ -650,6 +632,15 @@ ExternalVideoEncoder::ExternalVideoEncoder(
 }
 
 ExternalVideoEncoder::~ExternalVideoEncoder() {
+  DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
+
+  // Ensure |client_| is destroyed from the encoder task runner by dropping the
+  // reference to it within an encoder task.
+  if (client_) {
+    client_->task_runner()->PostTask(
+        FROM_HERE, base::BindOnce([](scoped_refptr<VEAClientImpl> client) {},
+                                  std::move(client_)));
+  }
 }
 
 bool ExternalVideoEncoder::EncodeVideoFrame(
@@ -718,7 +709,7 @@ void ExternalVideoEncoder::OnCreateVideoEncodeAccelerator(
       break;
     case CODEC_VIDEO_FAKE:
       NOTREACHED() << "Fake software video encoder cannot be external";
-      // ...flow through to next case...
+      FALLTHROUGH;
     default:
       cast_environment_->PostTask(
         CastEnvironment::MAIN,
@@ -752,7 +743,8 @@ SizeAdaptableExternalVideoEncoder::SizeAdaptableExternalVideoEncoder(
       create_vea_cb_(create_vea_cb),
       create_video_encode_memory_cb_(create_video_encode_memory_cb) {}
 
-SizeAdaptableExternalVideoEncoder::~SizeAdaptableExternalVideoEncoder() {}
+SizeAdaptableExternalVideoEncoder::~SizeAdaptableExternalVideoEncoder() =
+    default;
 
 std::unique_ptr<VideoEncoder>
 SizeAdaptableExternalVideoEncoder::CreateEncoder() {
@@ -762,9 +754,9 @@ SizeAdaptableExternalVideoEncoder::CreateEncoder() {
       create_video_encode_memory_cb_));
 }
 
-QuantizerEstimator::QuantizerEstimator() {}
+QuantizerEstimator::QuantizerEstimator() = default;
 
-QuantizerEstimator::~QuantizerEstimator() {}
+QuantizerEstimator::~QuantizerEstimator() = default;
 
 void QuantizerEstimator::Reset() {
   last_frame_pixel_buffer_.reset();

@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/files/file.h"
-#include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/profiles/profile.h"
@@ -28,15 +27,14 @@ const int kDefaultTimeout = 10;
 
 RequestManager::RequestManager(
     Profile* profile,
-    const std::string& extension_id,
+    const std::string& provider_id,
     NotificationManagerInterface* notification_manager)
     : profile_(profile),
-      extension_id_(extension_id),
+      provider_id_(provider_id),
       notification_manager_(notification_manager),
       next_id_(1),
       timeout_(base::TimeDelta::FromSeconds(kDefaultTimeout)),
-      weak_ptr_factory_(this) {
-}
+      weak_ptr_factory_(this) {}
 
 RequestManager::~RequestManager() {
   // Abort all of the active requests.
@@ -44,7 +42,7 @@ RequestManager::~RequestManager() {
   while (it != requests_.end()) {
     const int request_id = it->first;
     ++it;
-    RejectRequest(request_id, base::MakeUnique<RequestValue>(),
+    RejectRequest(request_id, std::make_unique<RequestValue>(),
                   base::File::FILE_ERROR_ABORT);
   }
 
@@ -67,7 +65,7 @@ int RequestManager::CreateRequest(RequestType type,
                            "type",
                            type);
 
-  std::unique_ptr<Request> request = base::MakeUnique<Request>();
+  std::unique_ptr<Request> request = std::make_unique<Request>();
   request->handler = std::move(handler);
   requests_[request_id] = std::move(request);
   ResetTimer(request_id);
@@ -167,7 +165,7 @@ void RequestManager::OnRequestTimeout(int request_id) {
     observer.OnRequestTimeouted(request_id);
 
   if (!notification_manager_) {
-    RejectRequest(request_id, base::MakeUnique<RequestValue>(),
+    RejectRequest(request_id, std::make_unique<RequestValue>(),
                   base::File::FILE_ERROR_ABORT);
     return;
   }
@@ -194,7 +192,7 @@ void RequestManager::OnUnresponsiveNotificationResult(
     return;
   }
 
-  RejectRequest(request_id, base::MakeUnique<RequestValue>(),
+  RejectRequest(request_id, std::make_unique<RequestValue>(),
                 base::File::FILE_ERROR_ABORT);
 }
 
@@ -218,7 +216,7 @@ bool RequestManager::IsInteractingWithUser() const {
   const extensions::AppWindowRegistry* const registry =
       extensions::AppWindowRegistry::Get(profile_);
   DCHECK(registry);
-  if (registry->GetCurrentAppWindowForApp(extension_id_))
+  if (registry->GetCurrentAppWindowForApp(provider_id_))
     return true;
 
   // This loop is heavy, but it's not called often. Only when a request timeouts
@@ -236,7 +234,7 @@ bool RequestManager::IsInteractingWithUser() const {
           tabs->GetWebContentsAt(i);
       const GURL& url = web_contents->GetURL();
       if (url.SchemeIs(extensions::kExtensionScheme) &&
-          url.host_piece() == extension_id_) {
+          url.host_piece() == provider_id_) {
         return true;
       }
     }

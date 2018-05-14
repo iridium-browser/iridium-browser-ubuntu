@@ -7,14 +7,18 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
 #include "google_apis/gaia/oauth2_token_service.h"
+#include "net/cookies/cookie_change_dispatcher.h"
+#include "services/network/public/mojom/network_change_manager.mojom.h"
 
 #if !defined(OS_CHROMEOS)
-#include "net/base/network_change_notifier.h"
+#include "content/public/common/network_connection_tracker.h"
 #endif
 
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
@@ -25,7 +29,7 @@ class Profile;
 class ChromeSigninClient
     : public SigninClient,
 #if !defined(OS_CHROMEOS)
-      public net::NetworkChangeNotifier::NetworkChangeObserver,
+      public content::NetworkConnectionTracker::NetworkConnectionObserver,
 #endif
       public SigninErrorController::Observer,
       public gaia::GaiaOAuthClient::Delegate,
@@ -34,7 +38,7 @@ class ChromeSigninClient
   explicit ChromeSigninClient(
       Profile* profile, SigninErrorController* signin_error_controller);
   ~ChromeSigninClient() override;
-  void Shutdown() override;
+
   void DoFinalInit() override;
 
   // Utility method.
@@ -65,10 +69,10 @@ class ChromeSigninClient
   // <Build Info> <OS> <Version number> (<Last change>)<channel or "-devel">
   // If version information is unavailable, returns "invalid."
   std::string GetProductVersion() override;
-  std::unique_ptr<CookieChangedSubscription> AddCookieChangedCallback(
+  std::unique_ptr<CookieChangeSubscription> AddCookieChangeCallback(
       const GURL& url,
       const std::string& name,
-      const net::CookieStore::CookieChangedCallback& callback) override;
+      net::CookieChangeCallback callback) override;
   void OnSignedIn(const std::string& account_id,
                   const std::string& gaia_id,
                   const std::string& username,
@@ -97,12 +101,13 @@ class ChromeSigninClient
                          const GoogleServiceAuthError& error) override;
 
 #if !defined(OS_CHROMEOS)
-  // net::NetworkChangeController::NetworkChangeObserver implementation.
-  void OnNetworkChanged(net::NetworkChangeNotifier::ConnectionType type)
-      override;
+  // content::NetworkConnectionTracker::NetworkConnectionObserver
+  // implementation.
+  void OnConnectionChanged(network::mojom::ConnectionType type) override;
 #endif
 
   void AfterCredentialsCopied() override;
+  void SetReadyForDiceMigration(bool is_ready) override;
 
  protected:
   virtual void ShowUserManager(const base::FilePath& profile_path);
@@ -131,6 +136,8 @@ class ChromeSigninClient
 
   std::unique_ptr<gaia::GaiaOAuthClient> oauth_client_;
   std::unique_ptr<OAuth2TokenService::Request> oauth_request_;
+
+  base::WeakPtrFactory<ChromeSigninClient> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeSigninClient);
 };

@@ -5,7 +5,6 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/service_manager/public/c/main.h"
@@ -50,17 +49,13 @@ class Parent : public service_manager::Service,
     service_manager::test::mojom::LifecycleControlPtr lifecycle;
     context()->connector()->BindInterface("lifecycle_unittest_app", &lifecycle);
     {
-      base::RunLoop loop;
+      base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
       lifecycle->Ping(base::Bind(&QuitLoop, &loop));
-      base::MessageLoop::ScopedNestableTaskAllower allow(
-          base::MessageLoop::current());
       loop.Run();
     }
     std::move(callback).Run();
   }
-  void Quit() override {
-    base::MessageLoop::current()->QuitWhenIdle();
-  }
+  void Quit() override { base::RunLoop::QuitCurrentWhenIdleDeprecated(); }
 
   service_manager::BinderRegistry registry_;
   mojo::BindingSet<service_manager::test::mojom::Parent> parent_bindings_;

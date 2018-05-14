@@ -9,6 +9,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api_helpers.h"
+#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/permissions.h"
@@ -202,7 +203,8 @@ PermissionsUpdater::GetRevokablePermissions(const Extension* extension) const {
       PermissionsParser::GetRequiredPermissions(extension);
   std::unique_ptr<const PermissionSet> granted;
   std::unique_ptr<const PermissionSet> withheld;
-  ScriptingPermissionsModifier(browser_context_, make_scoped_refptr(extension))
+  ScriptingPermissionsModifier(browser_context_,
+                               base::WrapRefCounted(extension))
       .WithholdPermissions(required, &granted, &withheld, true);
   return PermissionSet::CreateDifference(
       extension->permissions_data()->active_permissions(), *granted);
@@ -234,13 +236,25 @@ void PermissionsUpdater::InitializePermissions(const Extension* extension) {
 
   std::unique_ptr<const PermissionSet> granted_permissions;
   std::unique_ptr<const PermissionSet> withheld_permissions;
-  ScriptingPermissionsModifier(browser_context_, make_scoped_refptr(extension))
+  ScriptingPermissionsModifier(browser_context_,
+                               base::WrapRefCounted(extension))
       .WithholdPermissions(*bounded_active, &granted_permissions,
                            &withheld_permissions,
                            (init_flag_ & INIT_FLAG_TRANSIENT) != 0);
 
   if (g_delegate)
     g_delegate->InitializePermissions(extension, &granted_permissions);
+
+  if ((init_flag_ & INIT_FLAG_TRANSIENT) == 0) {
+    // Apply per-extension policy if set.
+    ExtensionManagement* management =
+        ExtensionManagementFactory::GetForBrowserContext(browser_context_);
+    if (!management->UsesDefaultRuntimeHostRestrictions(extension)) {
+      SetPolicyHostRestrictions(extension,
+                                management->GetRuntimeBlockedHosts(extension),
+                                management->GetRuntimeAllowedHosts(extension));
+    }
+  }
 
   SetPermissions(extension, std::move(granted_permissions),
                  std::move(withheld_permissions));
@@ -278,7 +292,7 @@ void PermissionsUpdater::DispatchEvent(
   std::unique_ptr<api::permissions::Permissions> permissions =
       PackPermissionSet(changed_permissions);
   value->Append(permissions->ToValue());
-  auto event = base::MakeUnique<Event>(histogram_value, event_name,
+  auto event = std::make_unique<Event>(histogram_value, event_name,
                                        std::move(value), browser_context_);
   event_router->DispatchEventToExtension(extension_id, std::move(event));
 }

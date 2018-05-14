@@ -4,9 +4,10 @@
 
 #include "net/quic/core/quic_server_id.h"
 
+#include "net/quic/platform/api/quic_estimate_memory_usage.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_test.h"
 
-using std::string;
 
 namespace net {
 
@@ -18,12 +19,22 @@ TEST_F(QuicServerIdTest, ToString) {
   HostPortPair google_host_port_pair("google.com", 10);
 
   QuicServerId google_server_id(google_host_port_pair, PRIVACY_MODE_DISABLED);
-  string google_server_id_str = google_server_id.ToString();
+  QuicString google_server_id_str = google_server_id.ToString();
   EXPECT_EQ("https://google.com:10", google_server_id_str);
 
   QuicServerId private_server_id(google_host_port_pair, PRIVACY_MODE_ENABLED);
-  string private_server_id_str = private_server_id.ToString();
+  QuicString private_server_id_str = private_server_id.ToString();
   EXPECT_EQ("https://google.com:10/private", private_server_id_str);
+}
+
+TEST_F(QuicServerIdTest, HostPortPair) {
+  HostPortPair google_host_port_pair("google.com", 10);
+
+  QuicServerId google_server_id(google_host_port_pair, PRIVACY_MODE_DISABLED);
+  EXPECT_TRUE(google_host_port_pair.Equals(google_server_id.host_port_pair()));
+
+  QuicServerId private_server_id(google_host_port_pair, PRIVACY_MODE_ENABLED);
+  EXPECT_TRUE(google_host_port_pair.Equals(private_server_id.host_port_pair()));
 }
 
 TEST_F(QuicServerIdTest, LessThan) {
@@ -140,6 +151,13 @@ TEST_F(QuicServerIdTest, Equals) {
   QuicServerId new_a_10_https_no_private(HostPortPair("a.com", 10),
                                          PRIVACY_MODE_DISABLED);
   EXPECT_FALSE(new_a_10_https_no_private == a_10_https_private);
+}
+
+TEST_F(QuicServerIdTest, EstimateMemoryUsage) {
+  HostPortPair host_port_pair("this is a rather very quite long hostname", 10);
+  QuicServerId server_id(host_port_pair, PRIVACY_MODE_ENABLED);
+  EXPECT_EQ(QuicEstimateMemoryUsage(host_port_pair),
+            QuicEstimateMemoryUsage(server_id));
 }
 
 }  // namespace

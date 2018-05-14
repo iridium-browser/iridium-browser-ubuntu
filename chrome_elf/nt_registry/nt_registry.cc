@@ -7,6 +7,9 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#include <memory>
+#include <string>
+
 namespace {
 
 // Function pointers used for registry access.
@@ -15,6 +18,8 @@ NtCreateKeyFunction g_nt_create_key = nullptr;
 NtDeleteKeyFunction g_nt_delete_key = nullptr;
 NtOpenKeyExFunction g_nt_open_key_ex = nullptr;
 NtCloseFunction g_nt_close = nullptr;
+NtQueryKeyFunction g_nt_query_key = nullptr;
+NtEnumerateKeyFunction g_nt_enumerate_key = nullptr;
 NtQueryValueKeyFunction g_nt_query_value_key = nullptr;
 NtSetValueKeyFunction g_nt_set_value_key = nullptr;
 
@@ -25,6 +30,10 @@ bool g_wow64_proc = false;
 wchar_t g_kRegPathHKLM[] = L"\\Registry\\Machine\\";
 wchar_t g_kRegPathHKCU[nt::g_kRegMaxPathLen + 1] = L"";
 wchar_t g_current_user_sid_string[nt::g_kRegMaxPathLen + 1] = L"";
+
+// Max number of tries for system API calls when STATUS_BUFFER_OVERFLOW or
+// STATUS_BUFFER_TOO_SMALL can be returned.
+enum { kMaxTries = 5 };
 
 // For testing only.
 wchar_t g_HKLM_override[nt::g_kRegMaxPathLen + 1] = L"";
@@ -86,6 +95,12 @@ bool InitNativeRegApi() {
   g_nt_close =
       reinterpret_cast<NtCloseFunction>(::GetProcAddress(ntdll, "NtClose"));
 
+  g_nt_query_key = reinterpret_cast<NtQueryKeyFunction>(
+      ::GetProcAddress(ntdll, "NtQueryKey"));
+
+  g_nt_enumerate_key = reinterpret_cast<NtEnumerateKeyFunction>(
+      ::GetProcAddress(ntdll, "NtEnumerateKey"));
+
   g_nt_query_value_key = reinterpret_cast<NtQueryValueKeyFunction>(
       ::GetProcAddress(ntdll, "NtQueryValueKey"));
 
@@ -93,8 +108,8 @@ bool InitNativeRegApi() {
       ::GetProcAddress(ntdll, "NtSetValueKey"));
 
   if (!g_rtl_init_unicode_string || !g_nt_create_key || !g_nt_open_key_ex ||
-      !g_nt_delete_key || !g_nt_close || !g_nt_query_value_key ||
-      !g_nt_set_value_key)
+      !g_nt_delete_key || !g_nt_close || !g_nt_query_key ||
+      !g_nt_enumerate_key || !g_nt_query_value_key || !g_nt_set_value_key)
     return false;
 
   // We need to set HKCU based on the sid of the current user account.
@@ -542,6 +557,45 @@ bool ParseFullRegPath(const std::wstring& converted_root,
   return true;
 }
 
+// String safety.
+// - NOTE: only working with wchar_t here.
+// - Also ensures the content of |value_bytes| is at least a terminator.
+// - Pass "true" for |multi| for MULTISZ.
+void EnsureTerminatedSZ(std::vector<BYTE>* value_bytes, bool multi) {
+  DWORD terminator_size = sizeof(wchar_t);
+
+  if (multi)
+    terminator_size = 2 * sizeof(wchar_t);
+
+  // Ensure content is at least the size of a terminator.
+  if (value_bytes->size() < terminator_size) {
+    value_bytes->insert(value_bytes->end(),
+                        terminator_size - value_bytes->size(), 0);
+  }
+
+  // Sanity check content size based on character size.
+  DWORD modulo = value_bytes->size() % sizeof(wchar_t);
+  value_bytes->insert(value_bytes->end(), modulo, 0);
+
+  // Now finally check for trailing terminator.
+  bool terminated = true;
+  size_t last_element = value_bytes->size() - 1;
+  for (size_t i = 0; i < terminator_size; i++) {
+    if ((*value_bytes)[last_element - i] != 0) {
+      terminated = false;
+      break;
+    }
+  }
+
+  if (terminated)
+    return;
+
+  // Append a full terminator to be safe.
+  value_bytes->insert(value_bytes->end(), terminator_size, 0);
+
+  return;
+}
+
 //------------------------------------------------------------------------------
 // Misc wrapper functions - LOCAL
 //------------------------------------------------------------------------------
@@ -579,8 +633,8 @@ bool CreateRegKey(ROOT_KEY root,
       ::wcsnlen(key_path, g_kRegMaxPathLen + 1) == g_kRegMaxPathLen + 1)
     return false;
 
-  if (!g_initialized)
-    InitNativeRegApi();
+  if (!g_initialized && !InitNativeRegApi())
+    return false;
 
   if (root == nt::AUTO)
     root = g_system_install ? nt::HKLM : nt::HKCU;
@@ -670,8 +724,8 @@ bool OpenRegKey(ROOT_KEY root,
       ::wcsnlen(key_path, g_kRegMaxPathLen + 1) == g_kRegMaxPathLen + 1)
     return false;
 
-  if (!g_initialized)
-    InitNativeRegApi();
+  if (!g_initialized && !InitNativeRegApi())
+    return false;
 
   NTSTATUS status = STATUS_UNSUCCESSFUL;
   UNICODE_STRING key_path_uni = {};
@@ -705,17 +759,12 @@ bool OpenRegKey(ROOT_KEY root,
 }
 
 bool DeleteRegKey(HANDLE key) {
-  if (!g_initialized)
-    InitNativeRegApi();
+  if (!g_initialized && !InitNativeRegApi())
+    return false;
 
-  NTSTATUS status = STATUS_UNSUCCESSFUL;
+  NTSTATUS status = g_nt_delete_key(key);
 
-  status = g_nt_delete_key(key);
-
-  if (NT_SUCCESS(status))
-    return true;
-
-  return false;
+  return NT_SUCCESS(status);
 }
 
 // wrapper function
@@ -749,41 +798,45 @@ void CloseRegKey(HANDLE key) {
 bool QueryRegKeyValue(HANDLE key,
                       const wchar_t* value_name,
                       ULONG* out_type,
-                      BYTE** out_buffer,
-                      DWORD* out_size) {
-  if (!g_initialized)
-    InitNativeRegApi();
-
-  NTSTATUS ntstatus = STATUS_UNSUCCESSFUL;
-  UNICODE_STRING value_uni = {};
-  g_rtl_init_unicode_string(&value_uni, value_name);
-  DWORD size_needed = 0;
-  bool success = false;
-
-  // First call to find out how much room we need for the value!
-  ntstatus = g_nt_query_value_key(key, &value_uni, KeyValueFullInformation,
-                                  nullptr, 0, &size_needed);
-  if (ntstatus != STATUS_BUFFER_TOO_SMALL)
+                      std::vector<BYTE>* out_buffer) {
+  if (!g_initialized && !InitNativeRegApi())
     return false;
 
-  KEY_VALUE_FULL_INFORMATION* value_info =
-      reinterpret_cast<KEY_VALUE_FULL_INFORMATION*>(new BYTE[size_needed]);
+  UNICODE_STRING value_uni = {};
+  g_rtl_init_unicode_string(&value_uni, value_name);
 
-  // Second call to get the value.
-  ntstatus = g_nt_query_value_key(key, &value_uni, KeyValueFullInformation,
-                                  value_info, size_needed, &size_needed);
-  if (NT_SUCCESS(ntstatus)) {
-    *out_type = value_info->Type;
-    *out_size = value_info->DataLength;
-    *out_buffer = new BYTE[*out_size];
-    ::memcpy(*out_buffer,
-             (reinterpret_cast<BYTE*>(value_info) + value_info->DataOffset),
-             *out_size);
-    success = true;
+  // Use a loop here, to be a little more tolerant of concurrent registry
+  // changes.
+  NTSTATUS ntstatus = STATUS_UNSUCCESSFUL;
+  int tries = 0;
+  KEY_VALUE_FULL_INFORMATION* value_info = nullptr;
+  DWORD size_needed = sizeof(*value_info);
+  std::vector<BYTE> buffer(size_needed);
+  do {
+    buffer.resize(size_needed);
+    value_info = reinterpret_cast<KEY_VALUE_FULL_INFORMATION*>(buffer.data());
+
+    ntstatus = g_nt_query_value_key(key, &value_uni, KeyValueFullInformation,
+                                    value_info, size_needed, &size_needed);
+  } while ((ntstatus == STATUS_BUFFER_OVERFLOW ||
+            ntstatus == STATUS_BUFFER_TOO_SMALL) &&
+           ++tries < kMaxTries);
+
+  if (!NT_SUCCESS(ntstatus))
+    return false;
+
+  *out_type = value_info->Type;
+  DWORD data_size = value_info->DataLength;
+
+  if (data_size) {
+    // Move the data into |out_buffer| vector.
+    BYTE* data = reinterpret_cast<BYTE*>(value_info) + value_info->DataOffset;
+    out_buffer->assign(data, data + data_size);
+  } else {
+    out_buffer->clear();
   }
 
-  delete[] value_info;
-  return success;
+  return true;
 }
 
 // wrapper function
@@ -791,16 +844,18 @@ bool QueryRegValueDWORD(HANDLE key,
                         const wchar_t* value_name,
                         DWORD* out_dword) {
   ULONG type = REG_NONE;
-  BYTE* value_bytes = nullptr;
-  DWORD ret_size = 0;
+  std::vector<BYTE> value_bytes;
 
-  if (!QueryRegKeyValue(key, value_name, &type, &value_bytes, &ret_size) ||
-      type != REG_DWORD)
+  if (!QueryRegKeyValue(key, value_name, &type, &value_bytes) ||
+      type != REG_DWORD) {
+    return false;
+  }
+
+  if (value_bytes.size() < sizeof(*out_dword))
     return false;
 
-  *out_dword = *(reinterpret_cast<DWORD*>(value_bytes));
+  *out_dword = *(reinterpret_cast<DWORD*>(value_bytes.data()));
 
-  delete[] value_bytes;
   return true;
 }
 
@@ -828,17 +883,18 @@ bool QueryRegValueDWORD(ROOT_KEY root,
 bool QueryRegValueSZ(HANDLE key,
                      const wchar_t* value_name,
                      std::wstring* out_sz) {
-  BYTE* value_bytes = nullptr;
-  DWORD ret_size = 0;
+  std::vector<BYTE> value_bytes;
   ULONG type = REG_NONE;
 
-  if (!QueryRegKeyValue(key, value_name, &type, &value_bytes, &ret_size) ||
-      type != REG_SZ)
+  if (!QueryRegKeyValue(key, value_name, &type, &value_bytes) ||
+      (type != REG_SZ && type != REG_EXPAND_SZ)) {
     return false;
+  }
 
-  *out_sz = reinterpret_cast<wchar_t*>(value_bytes);
+  EnsureTerminatedSZ(&value_bytes, false);
 
-  delete[] value_bytes;
+  *out_sz = reinterpret_cast<wchar_t*>(value_bytes.data());
+
   return true;
 }
 
@@ -866,33 +922,29 @@ bool QueryRegValueSZ(ROOT_KEY root,
 bool QueryRegValueMULTISZ(HANDLE key,
                           const wchar_t* value_name,
                           std::vector<std::wstring>* out_multi_sz) {
-  BYTE* value_bytes = nullptr;
-  DWORD ret_size = 0;
+  std::vector<BYTE> value_bytes;
   ULONG type = REG_NONE;
 
-  if (!QueryRegKeyValue(key, value_name, &type, &value_bytes, &ret_size) ||
-      type != REG_MULTI_SZ)
+  if (!QueryRegKeyValue(key, value_name, &type, &value_bytes) ||
+      type != REG_MULTI_SZ) {
     return false;
+  }
 
-  // Make sure the vector is empty to start.
-  (*out_multi_sz).resize(0);
+  EnsureTerminatedSZ(&value_bytes, true);
 
-  wchar_t* pointer = reinterpret_cast<wchar_t*>(value_bytes);
+  // Make sure the out vector is empty to start.
+  out_multi_sz->clear();
+
+  wchar_t* pointer = reinterpret_cast<wchar_t*>(value_bytes.data());
   std::wstring temp = pointer;
   // Loop.  Each string is separated by '\0'.  Another '\0' at very end (so 2 in
   // a row).
-  while (temp.length() != 0) {
-    (*out_multi_sz).push_back(temp);
-
+  while (!temp.empty()) {
     pointer += temp.length() + 1;
+    out_multi_sz->push_back(std::move(temp));
     temp = pointer;
   }
 
-  // Handle the case of "empty multi_sz".
-  if (out_multi_sz->size() == 0)
-    out_multi_sz->push_back(L"");
-
-  delete[] value_bytes;
   return true;
 }
 
@@ -925,8 +977,8 @@ bool SetRegKeyValue(HANDLE key,
                     ULONG type,
                     const BYTE* data,
                     DWORD data_size) {
-  if (!g_initialized)
-    InitNativeRegApi();
+  if (!g_initialized && !InitNativeRegApi())
+    return false;
 
   NTSTATUS ntstatus = STATUS_UNSUCCESSFUL;
   UNICODE_STRING value_uni = {};
@@ -1051,26 +1103,102 @@ bool SetRegValueMULTISZ(ROOT_KEY root,
 }
 
 //------------------------------------------------------------------------------
+// Enumeration Support
+//------------------------------------------------------------------------------
+
+bool QueryRegEnumerationInfo(HANDLE key, ULONG* out_subkey_count) {
+  if (!g_initialized && !InitNativeRegApi())
+    return false;
+
+  // Use a loop here, to be a little more tolerant of concurrent registry
+  // changes.
+  NTSTATUS ntstatus = STATUS_UNSUCCESSFUL;
+  int tries = 0;
+  // Start with sizeof the structure.  It's very common for the variable sized
+  // "Class" element to be of length 0.
+  KEY_FULL_INFORMATION* key_info = nullptr;
+  DWORD size_needed = sizeof(*key_info);
+  std::vector<BYTE> buffer(size_needed);
+  do {
+    buffer.resize(size_needed);
+    key_info = reinterpret_cast<KEY_FULL_INFORMATION*>(buffer.data());
+
+    ntstatus = g_nt_query_key(key, KeyFullInformation, key_info, size_needed,
+                              &size_needed);
+  } while ((ntstatus == STATUS_BUFFER_OVERFLOW ||
+            ntstatus == STATUS_BUFFER_TOO_SMALL) &&
+           ++tries < kMaxTries);
+
+  if (!NT_SUCCESS(ntstatus))
+    return false;
+
+  // Move desired information to out variables.
+  *out_subkey_count = key_info->SubKeys;
+
+  return true;
+}
+
+bool QueryRegSubkey(HANDLE key,
+                    ULONG subkey_index,
+                    std::wstring* out_subkey_name) {
+  if (!g_initialized && !InitNativeRegApi())
+    return false;
+
+  // Use a loop here, to be a little more tolerant of concurrent registry
+  // changes.
+  NTSTATUS ntstatus = STATUS_UNSUCCESSFUL;
+  int tries = 0;
+  // Start with sizeof the structure, plus 12 characters.  It's very common for
+  // key names to be < 12 characters (without being inefficient as an initial
+  // allocation).
+  KEY_BASIC_INFORMATION* subkey_info = nullptr;
+  DWORD size_needed = sizeof(*subkey_info) + (12 * sizeof(wchar_t));
+  std::vector<BYTE> buffer(size_needed);
+  do {
+    buffer.resize(size_needed);
+    subkey_info = reinterpret_cast<KEY_BASIC_INFORMATION*>(buffer.data());
+
+    ntstatus = g_nt_enumerate_key(key, subkey_index, KeyBasicInformation,
+                                  subkey_info, size_needed, &size_needed);
+  } while ((ntstatus == STATUS_BUFFER_OVERFLOW ||
+            ntstatus == STATUS_BUFFER_TOO_SMALL) &&
+           ++tries < kMaxTries);
+
+  if (!NT_SUCCESS(ntstatus))
+    return false;
+
+  // Move desired information to out variables.
+  // NOTE: NameLength is size of Name array in bytes.  Name array is also
+  //       NOT null terminated!
+  BYTE* name = reinterpret_cast<BYTE*>(subkey_info->Name);
+  std::vector<BYTE> content(name, name + subkey_info->NameLength);
+  EnsureTerminatedSZ(&content, false);
+  out_subkey_name->assign(reinterpret_cast<wchar_t*>(content.data()));
+
+  return true;
+}
+
+//------------------------------------------------------------------------------
 // Utils
 //------------------------------------------------------------------------------
 
 const wchar_t* GetCurrentUserSidString() {
-  if (!g_initialized)
-    InitNativeRegApi();
+  if (!g_initialized && !InitNativeRegApi())
+    return nullptr;
 
   return g_current_user_sid_string;
 }
 
 bool IsCurrentProcWow64() {
-  if (!g_initialized)
-    InitNativeRegApi();
+  if (!g_initialized && !InitNativeRegApi())
+    return false;
 
   return g_wow64_proc;
 }
 
 bool SetTestingOverride(ROOT_KEY root, const std::wstring& new_path) {
-  if (!g_initialized)
-    InitNativeRegApi();
+  if (!g_initialized && !InitNativeRegApi())
+    return false;
 
   std::wstring sani_new_path = new_path;
   SanitizeSubkeyPath(&sani_new_path);
@@ -1086,8 +1214,8 @@ bool SetTestingOverride(ROOT_KEY root, const std::wstring& new_path) {
 }
 
 std::wstring GetTestingOverride(ROOT_KEY root) {
-  if (!g_initialized)
-    InitNativeRegApi();
+  if (!g_initialized && !InitNativeRegApi())
+    return std::wstring();
 
   if (root == HKCU || (root == AUTO && !g_system_install))
     return g_HKCU_override;

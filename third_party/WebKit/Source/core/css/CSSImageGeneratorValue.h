@@ -26,27 +26,65 @@
 #ifndef CSSImageGeneratorValue_h
 #define CSSImageGeneratorValue_h
 
+#include <map>
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSValue.h"
-#include "platform/geometry/IntSizeHash.h"
+#include "platform/geometry/FloatSize.h"
 #include "platform/heap/SelfKeepAlive.h"
-#include "platform/wtf/HashCountedSet.h"
-#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/HashMap.h"
 
 namespace blink {
 
 class Document;
 class Image;
-class FloatSize;
 class ComputedStyle;
 class ImageResourceObserver;
 
+struct FloatSizeCompare {
+  bool operator()(const FloatSize& lhs, const FloatSize& rhs) const {
+    if (lhs.Width() < rhs.Width())
+      return true;
+    if (lhs.Width() > rhs.Width())
+      return false;
+    return lhs.Height() < rhs.Height();
+  }
+};
+
+// Use std::map because the WTF versions require a hashing function, while
+// the stl maps require a weak comparison operator that can be defined for
+// FloatSize. These maps do not contain many objects because we do not expect
+// any particular CSSGeneratedImageValue to have clients at many different
+// sizes at any given time.
+using ImageSizeCountMap = std::map<FloatSize, unsigned, FloatSizeCompare>;
+using GeneratedImageMap =
+    std::map<FloatSize, scoped_refptr<Image>, FloatSizeCompare>;
+
+class GeneratedImageCache {
+ public:
+  void AddSize(const FloatSize&);
+  void RemoveSize(const FloatSize&);
+
+  Image* GetImage(const FloatSize&) const;
+  void PutImage(const FloatSize&, scoped_refptr<Image>);
+
+ private:
+  // A count of how many times a given image size is in use.
+  ImageSizeCountMap sizes_;
+
+  // A cache of Image objects by image size.
+  GeneratedImageMap images_;
+};
+
 struct SizeAndCount {
   DISALLOW_NEW();
-  SizeAndCount(IntSize new_size = IntSize(), int new_count = 0)
-      : size(new_size), count(new_count) {}
+  SizeAndCount() : size(), count(0) {}
 
-  IntSize size;
+  // The non-zero size associated with this client. A client must only
+  // ever be present at one non-zero size, with as many zero sizes as it wants.
+  FloatSize size;
+
+  // The net number of times this client has been added.
   int count;
 };
 
@@ -56,15 +94,18 @@ class CORE_EXPORT CSSImageGeneratorValue : public CSSValue {
  public:
   ~CSSImageGeneratorValue();
 
-  void AddClient(const ImageResourceObserver*, const IntSize&);
+  void AddClient(const ImageResourceObserver*);
+
   void RemoveClient(const ImageResourceObserver*);
-  PassRefPtr<Image> GetImage(const ImageResourceObserver&,
-                             const Document&,
-                             const ComputedStyle&,
-                             const IntSize&);
+  // The |target_size| is the desired image size. Background images should not
+  // be snapped. In other case the target size must be pixel snapped already.
+  scoped_refptr<Image> GetImage(const ImageResourceObserver&,
+                                const Document&,
+                                const ComputedStyle&,
+                                const FloatSize& target_size);
 
   bool IsFixedSize() const;
-  IntSize FixedSize(const Document&, const FloatSize& default_object_size);
+  FloatSize FixedSize(const Document&, const FloatSize& default_object_size);
 
   bool IsPending() const;
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const;
@@ -73,26 +114,22 @@ class CORE_EXPORT CSSImageGeneratorValue : public CSSValue {
 
   CSSImageGeneratorValue* ValueWithURLsMadeAbsolute();
 
-  DEFINE_INLINE_TRACE_AFTER_DISPATCH() {
+  void TraceAfterDispatch(blink::Visitor* visitor) {
     CSSValue::TraceAfterDispatch(visitor);
   }
 
  protected:
   explicit CSSImageGeneratorValue(ClassType);
 
-  Image* GetImage(const ImageResourceObserver*,
-                  const Document&,
-                  const ComputedStyle&,
-                  const IntSize&);
-  void PutImage(const IntSize&, PassRefPtr<Image>);
+  Image* GetImage(const ImageResourceObserver*, const FloatSize&) const;
+  void PutImage(const FloatSize&, scoped_refptr<Image>) const;
   const ClientSizeCountMap& Clients() const { return clients_; }
 
-  HashCountedSet<IntSize>
-      sizes_;  // A count of how many times a given image size is in use.
-  ClientSizeCountMap
-      clients_;  // A map from LayoutObjects (with entry count) to image sizes.
-  HashMap<IntSize, RefPtr<Image>>
-      images_;  // A cache of Image objects by image size.
+  // A map from LayoutObjects (with entry count) to image sizes.
+  mutable ClientSizeCountMap clients_;
+
+  // Cached image instances.
+  mutable GeneratedImageCache cached_images_;
 
   // TODO(Oilpan): when/if we can make the layoutObject point directly to the
   // CSSImageGenerator value using a member we don't need to have this hack

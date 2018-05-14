@@ -20,12 +20,12 @@
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/browser/answers_cache.h"
 #include "components/omnibox/browser/base_search_provider.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service_observer.h"
 #include "net/url_request/url_fetcher_delegate.h"
+#include "third_party/metrics_proto/omnibox_input_type.pb.h"
 
 class AutocompleteProviderClient;
 class AutocompleteProviderListener;
@@ -71,7 +71,7 @@ class SearchProvider : public BaseSearchProvider,
   // |allow_exact_keyword_match| is false, the relevance for complete
   // keywords that support replacements is degraded.
   static int CalculateRelevanceForKeywordVerbatim(
-      metrics::OmniboxInputType::Type type,
+      metrics::OmniboxInputType type,
       bool allow_exact_keyword_match,
       bool prefer_keyword);
 
@@ -98,6 +98,12 @@ class SearchProvider : public BaseSearchProvider,
   FRIEND_TEST_ALL_PREFIXES(SearchProviderTest, RemoveExtraAnswers);
   FRIEND_TEST_ALL_PREFIXES(SearchProviderTest, DoesNotProvideOnFocus);
   FRIEND_TEST_ALL_PREFIXES(SearchProviderTest, SendsWarmUpRequestOnFocus);
+  FRIEND_TEST_ALL_PREFIXES(SearchProviderTest, DoTrimHttpScheme);
+  FRIEND_TEST_ALL_PREFIXES(SearchProviderTest,
+                           DontTrimHttpSchemeIfInputHasScheme);
+  FRIEND_TEST_ALL_PREFIXES(SearchProviderTest,
+                           DontTrimHttpsSchemeIfInputHasScheme);
+  FRIEND_TEST_ALL_PREFIXES(SearchProviderTest, DoTrimHttpsScheme);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedPrefetchTest, ClearPrefetchedResults);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedPrefetchTest, SetPrefetchQuery);
 

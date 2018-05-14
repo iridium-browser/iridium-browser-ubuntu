@@ -10,6 +10,7 @@ Unit tests for the contents of device_utils.py (mostly DeviceUtils).
 # pylint: disable=protected-access
 # pylint: disable=unused-argument
 
+import contextlib
 import json
 import logging
 import os
@@ -29,6 +30,14 @@ from devil.utils import mock_calls
 
 with devil_env.SysPath(devil_env.PYMOCK_PATH):
   import mock  # pylint: disable=import-error
+
+
+def Process(name, pid, ppid='1'):
+  return device_utils.ProcessInfo(name=name, pid=pid, ppid=ppid)
+
+
+def Processes(*args):
+  return [Process(*arg) for arg in args]
 
 
 class AnyStringWith(object):
@@ -1162,57 +1171,59 @@ class DeviceUtilsRunPipedShellCommandTest(DeviceUtilsTest):
 class DeviceUtilsKillAllTest(DeviceUtilsTest):
 
   def testKillAll_noMatchingProcessesFailure(self):
-    with self.assertCall(self.call.device.GetPids('test_process'), {}):
+    with self.assertCall(self.call.device.ListProcesses('test_process'), []):
       with self.assertRaises(device_errors.CommandFailedError):
         self.device.KillAll('test_process')
 
   def testKillAll_noMatchingProcessesQuiet(self):
-    with self.assertCall(self.call.device.GetPids('test_process'), {}):
+    with self.assertCall(self.call.device.ListProcesses('test_process'), []):
       self.assertEqual(0, self.device.KillAll('test_process', quiet=True))
 
   def testKillAll_nonblocking(self):
     with self.assertCalls(
-        (self.call.device.GetPids('some.process'),
-         {'some.process': ['1234'], 'some.processing.thing': ['5678']}),
+        (self.call.device.ListProcesses('some.process'),
+         Processes(('some.process', 1234), ('some.process.thing', 5678))),
         (self.call.adb.Shell('kill -9 1234 5678'), '')):
       self.assertEquals(
           2, self.device.KillAll('some.process', blocking=False))
 
   def testKillAll_blocking(self):
     with self.assertCalls(
-        (self.call.device.GetPids('some.process'),
-         {'some.process': ['1234'], 'some.processing.thing': ['5678']}),
+        (self.call.device.ListProcesses('some.process'),
+         Processes(('some.process', 1234), ('some.process.thing', 5678))),
         (self.call.adb.Shell('kill -9 1234 5678'), ''),
-        (self.call.device.GetPids('some.process'),
-         {'some.processing.thing': ['5678']}),
-        (self.call.device.GetPids('some.process'),
-         {'some.process': ['1111']})):  # Other instance with different pid.
+        (self.call.device.ListProcesses('some.process'),
+         Processes(('some.process.thing', 5678))),
+        (self.call.device.ListProcesses('some.process'),
+         # Other instance with different pid.
+         Processes(('some.process', 111)))):
       self.assertEquals(
           2, self.device.KillAll('some.process', blocking=True))
 
   def testKillAll_exactNonblocking(self):
     with self.assertCalls(
-        (self.call.device.GetPids('some.process'),
-         {'some.process': ['1234'], 'some.processing.thing': ['5678']}),
+        (self.call.device.ListProcesses('some.process'),
+         Processes(('some.process', 1234), ('some.process.thing', 5678))),
         (self.call.adb.Shell('kill -9 1234'), '')):
       self.assertEquals(
           1, self.device.KillAll('some.process', exact=True, blocking=False))
 
   def testKillAll_exactBlocking(self):
     with self.assertCalls(
-        (self.call.device.GetPids('some.process'),
-         {'some.process': ['1234'], 'some.processing.thing': ['5678']}),
+        (self.call.device.ListProcesses('some.process'),
+         Processes(('some.process', 1234), ('some.process.thing', 5678))),
         (self.call.adb.Shell('kill -9 1234'), ''),
-        (self.call.device.GetPids('some.process'),
-         {'some.process': ['1234'], 'some.processing.thing': ['5678']}),
-        (self.call.device.GetPids('some.process'),
-         {'some.processing.thing': ['5678']})):
+        (self.call.device.ListProcesses('some.process'),
+         Processes(('some.process', 1234), ('some.process.thing', 5678))),
+        (self.call.device.ListProcesses('some.process'),
+         Processes(('some.process.thing', 5678)))):
       self.assertEquals(
           1, self.device.KillAll('some.process', exact=True, blocking=True))
 
   def testKillAll_root(self):
     with self.assertCalls(
-        (self.call.device.GetPids('some.process'), {'some.process': ['1234']}),
+        (self.call.device.ListProcesses('some.process'),
+         Processes(('some.process', 1234))),
         (self.call.device.NeedsSU(), True),
         (self.call.device._Su("sh -c 'kill -9 1234'"),
          "su -c sh -c 'kill -9 1234'"),
@@ -1222,16 +1233,16 @@ class DeviceUtilsKillAllTest(DeviceUtilsTest):
 
   def testKillAll_sigterm(self):
     with self.assertCalls(
-        (self.call.device.GetPids('some.process'),
-            {'some.process': ['1234']}),
+        (self.call.device.ListProcesses('some.process'),
+         Processes(('some.process', 1234))),
         (self.call.adb.Shell('kill -15 1234'), '')):
       self.assertEquals(
           1, self.device.KillAll('some.process', signum=device_signal.SIGTERM))
 
   def testKillAll_multipleInstances(self):
     with self.assertCalls(
-        (self.call.device.GetPids('some.process'),
-            {'some.process': ['1234', '4567']}),
+        (self.call.device.ListProcesses('some.process'),
+         Processes(('some.process', 1234), ('some.process', 4567))),
         (self.call.adb.Shell('kill -15 1234 4567'), '')):
       self.assertEquals(
           2, self.device.KillAll('some.process', signum=device_signal.SIGTERM))
@@ -1565,7 +1576,7 @@ class DeviceUtilsForceStopTest(DeviceUtilsTest):
 
   def testForceStop(self):
     with self.assertCalls(
-        (self.call.device.GetPids('test.package'), {'test.package': [1111]}),
+        (self.call.device.GetApplicationPids('test.package'), [1111]),
         (self.call.device.RunShellCommand(
             ['am', 'force-stop', 'test.package'],
             check_return=True),
@@ -1574,7 +1585,7 @@ class DeviceUtilsForceStopTest(DeviceUtilsTest):
 
   def testForceStop_NoProcessFound(self):
     with self.assertCall(
-        self.call.device.GetPids('test.package'), {}):
+        self.call.device.GetApplicationPids('test.package'), []):
       self.device.ForceStop('test.package')
 
 
@@ -1664,32 +1675,28 @@ class DeviceUtilsPushChangedFilesZippedTest(DeviceUtilsTest):
 
   def testPushChangedFilesZipped_noUnzipCommand(self):
     test_files = [('/test/host/path/file1', '/test/device/path/file1')]
-    mock_zip_temp = mock.mock_open()
-    mock_zip_temp.return_value.name = '/test/temp/file/tmp.zip'
     with self.assertCalls(
-        (mock.call.tempfile.NamedTemporaryFile(suffix='.zip'), mock_zip_temp),
-        (mock.call.multiprocessing.Process(
-            target=device_utils.DeviceUtils._CreateDeviceZip,
-            args=('/test/temp/file/tmp.zip', test_files)), mock.Mock()),
         (self.call.device._MaybeInstallCommands(), False)):
       self.assertFalse(self.device._PushChangedFilesZipped(test_files,
                                                            ['/test/dir']))
 
   def _testPushChangedFilesZipped_spec(self, test_files):
-    mock_zip_temp = mock.mock_open()
-    mock_zip_temp.return_value.name = '/test/temp/file/tmp.zip'
+    @contextlib.contextmanager
+    def mock_zip_temp_dir():
+      yield '/test/temp/dir'
+
     with self.assertCalls(
-        (mock.call.tempfile.NamedTemporaryFile(suffix='.zip'), mock_zip_temp),
-        (mock.call.multiprocessing.Process(
-            target=device_utils.DeviceUtils._CreateDeviceZip,
-            args=('/test/temp/file/tmp.zip', test_files)), mock.Mock()),
         (self.call.device._MaybeInstallCommands(), True),
+        (mock.call.py_utils.tempfile_ext.NamedTemporaryDirectory(),
+         mock_zip_temp_dir),
+        (mock.call.devil.utils.zip_utils.WriteZipFile(
+            '/test/temp/dir/tmp.zip', test_files)),
         (self.call.device.NeedsSU(), True),
         (mock.call.devil.android.device_temp_file.DeviceTempFile(self.adb,
                                                                  suffix='.zip'),
              MockTempFile('/test/sdcard/foo123.zip')),
         self.call.adb.Push(
-            '/test/temp/file/tmp.zip', '/test/sdcard/foo123.zip'),
+            '/test/temp/dir/tmp.zip', '/test/sdcard/foo123.zip'),
         self.call.device.RunShellCommand(
             'unzip /test/sdcard/foo123.zip&&chmod -R 777 /test/dir',
             shell=True, as_root=True,
@@ -2004,6 +2011,8 @@ class DeviceUtilsStatDirectoryTest(DeviceUtilsTest):
     'drwxr-xr-x   6 root   root            1970-01-01 00:00 some_dir',
     '-rw-r--r--   1 root   root        723 1971-01-01 07:04 some_file',
     '-rw-r-----   1 root   root        327 2009-02-13 23:30 My Music File',
+    # Some Android versions escape spaces in file names
+    '-rw-rw-rw-   1 root   root          0 2018-01-11 13:35 Local\\ State',
     # Older Android versions do not print st_nlink
     'lrwxrwxrwx root     root              1970-01-01 00:00 lnk -> /some/path',
     'srwxrwx--- system   system            2016-05-31 17:25 a_socket1',
@@ -2015,8 +2024,8 @@ class DeviceUtilsStatDirectoryTest(DeviceUtilsTest):
   ]
 
   FILENAMES = [
-    'some_dir', 'some_file', 'My Music File', 'lnk', 'a_socket1',
-    'tmp', 'my_cmd', 'random', 'block_dev', 'silly']
+    'some_dir', 'some_file', 'My Music File', 'Local State', 'lnk',
+    'a_socket1', 'tmp', 'my_cmd', 'random', 'block_dev', 'silly']
 
   def getStatEntries(self, path_given='/', path_listed='/'):
     with self.assertCall(
@@ -2314,23 +2323,23 @@ class DeviceUtilsSetPropTest(DeviceUtilsTest):
         self.device.SetProp('test.property', 'new_value', check=True)
 
 
-class DeviceUtilsGetPidsTest(DeviceUtilsTest):
+class DeviceUtilsListProcessesTest(DeviceUtilsTest):
   def setUp(self):
-    super(DeviceUtilsGetPidsTest, self).setUp()
+    super(DeviceUtilsListProcessesTest, self).setUp()
     self.sample_output = [
         'USER  PID     PPID  VSIZE RSS   WCHAN          PC  NAME',
         'user  1001    100   1024  1024  ffffffff 00000000 one.match',
         'user  1002    100   1024  1024  ffffffff 00000000 two.match',
-        'user  1003    100   1024  1024  ffffffff 00000000 three.match',
-        'user  1234    100   1024  1024  ffffffff 00000000 my$process',
-        'user  1000    100   1024  1024  ffffffff 00000000 foo',
+        'user  1003    101   1024  1024  ffffffff 00000000 three.match',
+        'user  1234    101   1024  1024  ffffffff 00000000 my$process',
         'user  1236    100   1024  1024  ffffffff 00000000 foo',
+        'user  1578    1236  1024  1024  ffffffff 00000000 foo',
     ]
 
   def _grepOutput(self, substring):
     return [line for line in self.sample_output if substring in line]
 
-  def testGetPids_sdkGreaterThanNougatMR1(self):
+  def testListProcesses_sdkGreaterThanNougatMR1(self):
     with self.patch_call(self.call.device.build_version_sdk,
                          return_value=(version_codes.NOUGAT_MR1 + 1)):
       with self.patch_call(self.call.device.build_id,
@@ -2338,47 +2347,49 @@ class DeviceUtilsGetPidsTest(DeviceUtilsTest):
         with self.assertCall(
             self.call.device._RunPipedShellCommand(
                 'ps -e | grep -F example.process'), []):
-          self.device.GetPids('example.process')
+          self.device.ListProcesses('example.process')
 
-  def testGetPids_noMatches(self):
+  def testListProcesses_noMatches(self):
     with self.patch_call(self.call.device.build_version_sdk,
                          return_value=version_codes.LOLLIPOP):
       with self.assertCall(
           self.call.device._RunPipedShellCommand('ps | grep -F does.not.match'),
           self._grepOutput('does.not.match')):
-        self.assertEqual({}, self.device.GetPids('does.not.match'))
+        self.assertEqual([], self.device.ListProcesses('does.not.match'))
 
-  def testGetPids_oneMatch(self):
+  def testListProcesses_oneMatch(self):
     with self.patch_call(self.call.device.build_version_sdk,
                          return_value=version_codes.LOLLIPOP):
       with self.assertCall(
           self.call.device._RunPipedShellCommand('ps | grep -F one.match'),
           self._grepOutput('one.match')):
         self.assertEqual(
-            {'one.match': ['1001']},
-            self.device.GetPids('one.match'))
+            Processes(('one.match', 1001, 100)),
+            self.device.ListProcesses('one.match'))
 
-  def testGetPids_multipleMatches(self):
+  def testListProcesses_multipleMatches(self):
     with self.patch_call(self.call.device.build_version_sdk,
                          return_value=version_codes.LOLLIPOP):
       with self.assertCall(
           self.call.device._RunPipedShellCommand('ps | grep -F match'),
           self._grepOutput('match')):
         self.assertEqual(
-            {'one.match': ['1001'],
-             'two.match': ['1002'],
-             'three.match': ['1003']},
-            self.device.GetPids('match'))
+            Processes(('one.match', 1001, 100),
+                      ('two.match', 1002, 100),
+                      ('three.match', 1003, 101)),
+            self.device.ListProcesses('match'))
 
-  def testGetPids_quotable(self):
+  def testListProcesses_quotable(self):
     with self.patch_call(self.call.device.build_version_sdk,
                          return_value=version_codes.LOLLIPOP):
       with self.assertCall(
           self.call.device._RunPipedShellCommand("ps | grep -F 'my$process'"),
           self._grepOutput('my$process')):
         self.assertEqual(
-            {'my$process': ['1234']}, self.device.GetPids('my$process'))
+            Processes(('my$process', 1234, 101)),
+            self.device.ListProcesses('my$process'))
 
+  # Tests for the GetPids wrapper interface.
   def testGetPids_multipleInstances(self):
     with self.patch_call(self.call.device.build_version_sdk,
                          return_value=version_codes.LOLLIPOP):
@@ -2386,7 +2397,7 @@ class DeviceUtilsGetPidsTest(DeviceUtilsTest):
           self.call.device._RunPipedShellCommand('ps | grep -F foo'),
           self._grepOutput('foo')):
         self.assertEqual(
-            {'foo': ['1000', '1236']},
+            {'foo': ['1236', '1578']},
             self.device.GetPids('foo'))
 
   def testGetPids_allProcesses(self):
@@ -2401,9 +2412,10 @@ class DeviceUtilsGetPidsTest(DeviceUtilsTest):
              'two.match': ['1002'],
              'three.match': ['1003'],
              'my$process': ['1234'],
-             'foo': ['1000', '1236']},
+             'foo': ['1236', '1578']},
             self.device.GetPids())
 
+  # Tests for the GetApplicationPids wrapper interface.
   def testGetApplicationPids_notFound(self):
     with self.patch_call(self.call.device.build_version_sdk,
                          return_value=version_codes.LOLLIPOP):
@@ -2419,7 +2431,7 @@ class DeviceUtilsGetPidsTest(DeviceUtilsTest):
       with self.assertCall(
           self.call.device._RunPipedShellCommand('ps | grep -F one.match'),
           self._grepOutput('one.match')):
-        self.assertEqual(['1001'], self.device.GetApplicationPids('one.match'))
+        self.assertEqual([1001], self.device.GetApplicationPids('one.match'))
 
   def testGetApplicationPids_foundMany(self):
     with self.patch_call(self.call.device.build_version_sdk,
@@ -2428,7 +2440,7 @@ class DeviceUtilsGetPidsTest(DeviceUtilsTest):
           self.call.device._RunPipedShellCommand('ps | grep -F foo'),
           self._grepOutput('foo')):
         self.assertEqual(
-            ['1000', '1236'],
+            [1236, 1578],
             self.device.GetApplicationPids('foo'))
 
   def testGetApplicationPids_atMostOneNotFound(self):
@@ -2449,7 +2461,7 @@ class DeviceUtilsGetPidsTest(DeviceUtilsTest):
           self.call.device._RunPipedShellCommand('ps | grep -F one.match'),
           self._grepOutput('one.match')):
         self.assertEqual(
-            '1001',
+            1001,
             self.device.GetApplicationPids('one.match', at_most_one=True))
 
   def testGetApplicationPids_atMostOneFoundTooMany(self):
@@ -2525,60 +2537,6 @@ class DeviceUtilsTakeScreenshotTest(DeviceUtilsTest):
         self.call.device.PullFile('/tmp/path/temp-123.png',
                                   '/test/host/screenshot.png')):
       self.device.TakeScreenshot('/test/host/screenshot.png')
-
-
-class DeviceUtilsGetMemoryUsageForPidTest(DeviceUtilsTest):
-
-  def setUp(self):
-    super(DeviceUtilsGetMemoryUsageForPidTest, self).setUp()
-
-  def testGetMemoryUsageForPid_validPid(self):
-    with self.assertCalls(
-        (self.call.device._RunPipedShellCommand(
-            'showmap 1234 | grep TOTAL', as_root=True),
-         ['100 101 102 103 104 105 106 107 TOTAL']),
-        (self.call.device.ReadFile('/proc/1234/status', as_root=True),
-         'VmHWM: 1024 kB\n')):
-      self.assertEqual(
-          {
-            'Size': 100,
-            'Rss': 101,
-            'Pss': 102,
-            'Shared_Clean': 103,
-            'Shared_Dirty': 104,
-            'Private_Clean': 105,
-            'Private_Dirty': 106,
-            'VmHWM': 1024
-          },
-          self.device.GetMemoryUsageForPid(1234))
-
-  def testGetMemoryUsageForPid_noSmaps(self):
-    with self.assertCalls(
-        (self.call.device._RunPipedShellCommand(
-            'showmap 4321 | grep TOTAL', as_root=True),
-         ['cannot open /proc/4321/smaps: No such file or directory']),
-        (self.call.device.ReadFile('/proc/4321/status', as_root=True),
-         'VmHWM: 1024 kb\n')):
-      self.assertEquals({'VmHWM': 1024}, self.device.GetMemoryUsageForPid(4321))
-
-  def testGetMemoryUsageForPid_noStatus(self):
-    with self.assertCalls(
-        (self.call.device._RunPipedShellCommand(
-            'showmap 4321 | grep TOTAL', as_root=True),
-         ['100 101 102 103 104 105 106 107 TOTAL']),
-        (self.call.device.ReadFile('/proc/4321/status', as_root=True),
-         self.CommandError())):
-      self.assertEquals(
-          {
-            'Size': 100,
-            'Rss': 101,
-            'Pss': 102,
-            'Shared_Clean': 103,
-            'Shared_Dirty': 104,
-            'Private_Clean': 105,
-            'Private_Dirty': 106,
-          },
-          self.device.GetMemoryUsageForPid(4321))
 
 
 class DeviceUtilsDismissCrashDialogIfNeededTest(DeviceUtilsTest):
@@ -2706,7 +2664,7 @@ class DeviceUtilsHealthyDevicesTest(mock_calls.TestCase):
         (mock.call.devil.android.sdk.adb_wrapper.AdbWrapper.Devices(),
          [_AdbWrapperMock(s) for s in test_serials])):
       with self.assertRaises(device_errors.NoDevicesError):
-        device_utils.DeviceUtils.HealthyDevices(device_arg=None)
+        device_utils.DeviceUtils.HealthyDevices(device_arg=None, retry=False)
 
   def testHealthyDevices_noneDeviceArg_multiple_attached_ANDROID_SERIAL(self):
     try:
@@ -2745,7 +2703,17 @@ class DeviceUtilsHealthyDevicesTest(mock_calls.TestCase):
         (mock.call.devil.android.sdk.adb_wrapper.AdbWrapper.Devices(),
          [_AdbWrapperMock(s) for s in test_serials])):
       with self.assertRaises(device_errors.NoDevicesError):
-        device_utils.DeviceUtils.HealthyDevices(device_arg=[])
+        device_utils.DeviceUtils.HealthyDevices(device_arg=[], retry=False)
+
+  def testHealthyDevices_EmptyListDeviceArg_no_attached_with_retry(self):
+    test_serials = []
+    with self.assertCalls(
+        (mock.call.devil.android.sdk.adb_wrapper.AdbWrapper.Devices(),
+         [_AdbWrapperMock(s) for s in test_serials]),
+        (mock.call.devil.android.sdk.adb_wrapper.AdbWrapper.Devices(),
+         [_AdbWrapperMock(s) for s in test_serials])):
+      with self.assertRaises(device_errors.NoDevicesError):
+        device_utils.DeviceUtils.HealthyDevices(device_arg=[], retry=True)
 
   def testHealthyDevices_ListDeviceArg(self):
     device_arg = ['0123456789abcdef', 'fedcba9876543210']

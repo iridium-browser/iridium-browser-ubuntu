@@ -168,7 +168,7 @@ void usage_exit(void) {
 static void parse_command_line(int argc, const char **argv_,
                                AppInput *app_input, SvcContext *svc_ctx,
                                vpx_codec_enc_cfg_t *enc_cfg) {
-  struct arg arg = { 0 };
+  struct arg arg;
   char **argv = NULL;
   char **argi = NULL;
   char **argj = NULL;
@@ -429,8 +429,9 @@ static void set_rate_control_stats(struct RateControlStats *rc,
         rc->layer_framerate[layer] = framerate / cfg->ts_rate_decimator[tl];
       if (tl > 0) {
         rc->layer_pfb[layer] =
-            1000.0 * (cfg->layer_target_bitrate[layer] -
-                      cfg->layer_target_bitrate[layer - 1]) /
+            1000.0 *
+            (cfg->layer_target_bitrate[layer] -
+             cfg->layer_target_bitrate[layer - 1]) /
             (rc->layer_framerate[layer] - rc->layer_framerate[layer - 1]);
       } else {
         rc->layer_pfb[layer] = 1000.0 * cfg->layer_target_bitrate[layer] /
@@ -509,7 +510,7 @@ static void printout_rate_control_summary(struct RateControlStats *rc,
 }
 
 vpx_codec_err_t parse_superframe_index(const uint8_t *data, size_t data_sz,
-                                       uint32_t sizes[8], int *count) {
+                                       uint64_t sizes[8], int *count) {
   // A chunk ending with a byte matching 0xc0 is an invalid chunk unless
   // it is a super frame index. If the last byte of real video compression
   // data is 0xc0 the encoder must add a 0 byte. If we have the marker but
@@ -573,8 +574,8 @@ void set_frame_flags_bypass_mode(int sl, int tl, int num_spatial_layers,
       } else {
         if (is_key_frame) {
           ref_frame_config->frame_flags[sl] =
-              VP8_EFLAG_NO_REF_LAST | VP8_EFLAG_NO_REF_ARF |
-              VP8_EFLAG_NO_UPD_GF | VP8_EFLAG_NO_UPD_ARF;
+              VP8_EFLAG_NO_REF_GF | VP8_EFLAG_NO_REF_ARF |
+              VP8_EFLAG_NO_UPD_LAST | VP8_EFLAG_NO_UPD_ARF;
         } else {
           ref_frame_config->frame_flags[sl] =
               VP8_EFLAG_NO_REF_ARF | VP8_EFLAG_NO_UPD_GF | VP8_EFLAG_NO_UPD_ARF;
@@ -588,14 +589,24 @@ void set_frame_flags_bypass_mode(int sl, int tl, int num_spatial_layers,
       } else {
         ref_frame_config->frame_flags[sl] =
             VP8_EFLAG_NO_REF_ARF | VP8_EFLAG_NO_UPD_LAST | VP8_EFLAG_NO_UPD_GF;
+        if (sl == num_spatial_layers - 1)
+          ref_frame_config->frame_flags[sl] =
+              VP8_EFLAG_NO_UPD_ARF | VP8_EFLAG_NO_REF_ARF |
+              VP8_EFLAG_NO_UPD_LAST | VP8_EFLAG_NO_UPD_GF;
       }
     }
     if (tl == 0) {
       ref_frame_config->lst_fb_idx[sl] = sl;
-      if (sl)
-        ref_frame_config->gld_fb_idx[sl] = sl - 1;
-      else
+      if (sl) {
+        if (is_key_frame) {
+          ref_frame_config->lst_fb_idx[sl] = sl - 1;
+          ref_frame_config->gld_fb_idx[sl] = sl;
+        } else {
+          ref_frame_config->gld_fb_idx[sl] = sl - 1;
+        }
+      } else {
         ref_frame_config->gld_fb_idx[sl] = 0;
+      }
       ref_frame_config->alt_fb_idx[sl] = 0;
     } else if (tl == 1) {
       ref_frame_config->lst_fb_idx[sl] = sl;
@@ -606,9 +617,9 @@ void set_frame_flags_bypass_mode(int sl, int tl, int num_spatial_layers,
 }
 
 int main(int argc, const char **argv) {
-  AppInput app_input = { 0 };
+  AppInput app_input;
   VpxVideoWriter *writer = NULL;
-  VpxVideoInfo info = { 0 };
+  VpxVideoInfo info;
   vpx_codec_ctx_t codec;
   vpx_codec_enc_cfg_t enc_cfg;
   SvcContext svc_ctx;
@@ -640,8 +651,9 @@ int main(int argc, const char **argv) {
 
 // Allocate image buffer
 #if CONFIG_VP9_HIGHBITDEPTH
-  if (!vpx_img_alloc(&raw, enc_cfg.g_input_bit_depth == 8 ? VPX_IMG_FMT_I420
-                                                          : VPX_IMG_FMT_I42016,
+  if (!vpx_img_alloc(&raw,
+                     enc_cfg.g_input_bit_depth == 8 ? VPX_IMG_FMT_I420
+                                                    : VPX_IMG_FMT_I42016,
                      enc_cfg.g_w, enc_cfg.g_h, 32)) {
     die("Failed to allocate image %dx%d\n", enc_cfg.g_w, enc_cfg.g_h);
   }
@@ -708,6 +720,7 @@ int main(int argc, const char **argv) {
     vpx_codec_control(&codec, VP9E_SET_AQ_MODE, 3);
   if (svc_ctx.speed >= 5)
     vpx_codec_control(&codec, VP8E_SET_STATIC_THRESHOLD, 1);
+  vpx_codec_control(&codec, VP8E_SET_MAX_INTRA_BITRATE_PCT, 900);
 
   // Encode frames
   while (!end_of_stream) {
@@ -736,6 +749,8 @@ int main(int argc, const char **argv) {
       // the encode for the whole superframe. The encoder will internally loop
       // over all the spatial layers for the current superframe.
       vpx_codec_control(&codec, VP9E_SET_SVC_LAYER_ID, &layer_id);
+      // TODO(jianj): Fix the parameter passing for "is_key_frame" in
+      // set_frame_flags_bypass_model() for case of periodic key frames.
       set_frame_flags_bypass_mode(sl, layer_id.temporal_layer_id,
                                   svc_ctx.spatial_layers, frame_cnt == 0,
                                   &ref_frame_config);
@@ -768,7 +783,7 @@ int main(int argc, const char **argv) {
           SvcInternal_t *const si = (SvcInternal_t *)svc_ctx.internal;
           if (cx_pkt->data.frame.sz > 0) {
 #if OUTPUT_RC_STATS
-            uint32_t sizes[8];
+            uint64_t sizes[8];
             int count = 0;
 #endif
             vpx_video_writer_write_frame(writer, cx_pkt->data.frame.buf,
@@ -780,6 +795,8 @@ int main(int argc, const char **argv) {
               vpx_codec_control(&codec, VP9E_GET_SVC_LAYER_ID, &layer_id);
               parse_superframe_index(cx_pkt->data.frame.buf,
                                      cx_pkt->data.frame.sz, sizes, &count);
+              if (enc_cfg.ss_number_layers == 1)
+                sizes[0] = cx_pkt->data.frame.sz;
               // Note computing input_layer_frames here won't account for frame
               // drops in rate control stats.
               // TODO(marpan): Fix this for non-bypass mode so we can get stats

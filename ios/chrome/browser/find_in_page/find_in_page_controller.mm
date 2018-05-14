@@ -39,8 +39,6 @@ static NSString* gSearchTerm;
 }
 
 @interface FindInPageController () <DOMAltering, CRWWebStateObserver>
-// The find in page controller delegate.  Can be nil.
-@property(nonatomic, readonly) id<FindInPageControllerDelegate> delegate;
 
 // The web view's scroll view.
 - (CRWWebViewScrollViewProxy*)webViewScrollView;
@@ -68,14 +66,11 @@ static NSString* gSearchTerm;
 // Prevent scrolling past the end of the page.
 - (CGPoint)limitOverscroll:(CRWWebViewScrollViewProxy*)scrollViewProxy
                    atPoint:(CGPoint)point;
-// Returns the associated web state. May be null.
-- (web::WebState*)webState;
 @end
 
 @implementation FindInPageController {
   // Object that manages find_in_page.js injection into the web view.
   __weak JsFindinpageManager* _findInPageJsManager;
-  __weak id<FindInPageControllerDelegate> _delegate;
 
   // Access to the web view from the web state.
   id<CRWWebViewProxy> _webViewProxy;
@@ -84,11 +79,14 @@ static NSString* gSearchTerm;
   // disable when there is nothing to clear.
   BOOL _findStringStarted;
 
+  // The WebState this instance is observing. Will be null after
+  // -webStateDestroyed: has been called.
+  web::WebState* _webState;
+
   // Bridge to observe the web state from Objective-C.
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserverBridge;
 }
 
-@synthesize delegate = _delegate;
 @synthesize findInPageModel = _findInPageModel;
 
 + (void)setSearchTerm:(NSString*)string {
@@ -99,19 +97,20 @@ static NSString* gSearchTerm;
   return gSearchTerm;
 }
 
-- (id)initWithWebState:(web::WebState*)webState
-              delegate:(id<FindInPageControllerDelegate>)delegate {
+- (id)initWithWebState:(web::WebState*)webState {
   self = [super init];
   if (self) {
+    DCHECK(webState);
+    _webState = webState;
     _findInPageModel = [[FindInPageModel alloc] init];
     _findInPageJsManager = base::mac::ObjCCastStrict<JsFindinpageManager>(
-        [webState->GetJSInjectionReceiver()
+        [_webState->GetJSInjectionReceiver()
             instanceOfClass:[JsFindinpageManager class]]);
     _findInPageJsManager.findInPageModel = _findInPageModel;
-    _delegate = delegate;
-    _webStateObserverBridge.reset(
-        new web::WebStateObserverBridge(webState, self));
-    _webViewProxy = webState->GetWebViewProxy();
+    _webStateObserverBridge =
+        std::make_unique<web::WebStateObserverBridge>(self);
+    _webState->AddObserver(_webStateObserverBridge.get());
+    _webViewProxy = _webState->GetWebViewProxy();
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(findBarTextFieldWillBecomeFirstResponder:)
@@ -122,13 +121,17 @@ static NSString* gSearchTerm;
            selector:@selector(findBarTextFieldDidResignFirstResponder:)
                name:kFindBarTextFieldDidResignFirstResponderNotification
              object:nil];
-    DOMAlteringLock::CreateForWebState(webState);
+    DOMAlteringLock::CreateForWebState(_webState);
   }
   return self;
 }
 
 - (void)dealloc {
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  if (_webState) {
+    _webState->RemoveObserver(_webStateObserverBridge.get());
+    _webStateObserverBridge.reset();
+    _webState = nullptr;
+  }
 }
 
 - (BOOL)canFindInPage {
@@ -162,7 +165,6 @@ static NSString* gSearchTerm;
               scrollPoint:(CGPoint)scrollPoint
         completionHandler:(ProceduralBlock)completionHandler {
   if (finished) {
-    [_delegate willAdjustScrollPosition];
     scrollPoint = [self limitOverscroll:[_webViewProxy scrollViewProxy]
                                 atPoint:scrollPoint];
     [[_webViewProxy scrollViewProxy] setContentOffset:scrollPoint animated:YES];
@@ -198,7 +200,7 @@ static NSString* gSearchTerm;
                                completionHandler:completionHandler];
                    }];
   };
-  DOMAlteringLock::FromWebState([self webState])->Acquire(self, lockAction);
+  DOMAlteringLock::FromWebState(_webState)->Acquire(self, lockAction);
 }
 
 - (void)startPumpingWithCompletionHandler:(ProceduralBlock)completionHandler {
@@ -225,7 +227,6 @@ static NSString* gSearchTerm;
                                                     CGPoint point) {
     FindInPageController* strongSelf = weakSelf;
     if (finished) {
-      [[strongSelf delegate] willAdjustScrollPosition];
       point = [strongSelf limitOverscroll:[strongSelf webViewScrollView]
                                   atPoint:point];
       [[strongSelf webViewScrollView] setContentOffset:point animated:YES];
@@ -240,7 +241,6 @@ static NSString* gSearchTerm;
   __weak FindInPageController* weakSelf = self;
   [_findInPageJsManager nextMatchWithCompletionHandler:^(CGPoint point) {
     FindInPageController* strongSelf = weakSelf;
-    [[strongSelf delegate] willAdjustScrollPosition];
     point = [strongSelf limitOverscroll:[strongSelf webViewScrollView]
                                 atPoint:point];
     [[strongSelf webViewScrollView] setContentOffset:point animated:YES];
@@ -256,7 +256,6 @@ static NSString* gSearchTerm;
   __weak FindInPageController* weakSelf = self;
   [_findInPageJsManager previousMatchWithCompletionHandler:^(CGPoint point) {
     FindInPageController* strongSelf = weakSelf;
-    [[strongSelf delegate] willAdjustScrollPosition];
     point = [strongSelf limitOverscroll:[strongSelf webViewScrollView]
                                 atPoint:point];
     [[strongSelf webViewScrollView] setContentOffset:point animated:YES];
@@ -278,10 +277,8 @@ static NSString* gSearchTerm;
   __weak FindInPageController* weakSelf = self;
   ProceduralBlock handler = ^{
     FindInPageController* strongSelf = weakSelf;
-    if (strongSelf) {
-      web::WebState* webState = [strongSelf webState];
-      if (webState)
-        DOMAlteringLock::FromWebState(webState)->Release(strongSelf);
+    if (strongSelf && strongSelf->_webState) {
+      DOMAlteringLock::FromWebState(strongSelf->_webState)->Release(strongSelf);
     }
     if (completionHandler)
       completionHandler();
@@ -310,11 +307,6 @@ static NSString* gSearchTerm;
 
   NSString* term = [[self class] searchTerm];
   [[self findInPageModel] updateQuery:(term ? term : @"") matches:0];
-}
-
-- (web::WebState*)webState {
-  return _webStateObserverBridge ? _webStateObserverBridge->web_state()
-                                 : nullptr;
 }
 
 #pragma mark - Notification listeners
@@ -361,12 +353,17 @@ static NSString* gSearchTerm;
 }
 
 - (void)detachFromWebState {
-  _webStateObserverBridge.reset();
+  if (_webState) {
+    _webState->RemoveObserver(_webStateObserverBridge.get());
+    _webStateObserverBridge.reset();
+    _webState = nullptr;
+  }
 }
 
 #pragma mark - CRWWebStateObserver Methods
 
 - (void)webStateDestroyed:(web::WebState*)webState {
+  DCHECK_EQ(_webState, webState);
   [self detachFromWebState];
 }
 

@@ -33,6 +33,7 @@
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "core/CoreExport.h"
 #include "platform/bindings/V8DOMWrapper.h"
+#include "platform/bindings/V8PrivateProperty.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -72,8 +73,6 @@ class CORE_EXPORT V8DOMConfiguration final {
     kAllWorlds = kMainWorld | kNonMainWorlds,
   };
 
-  typedef v8::Local<v8::Private> (*CachedPropertyKey)(v8::Isolate*);
-
   // AttributeConfiguration translates into calls to SetNativeDataProperty() on
   // either of instance or prototype object (or their object template).
   struct AttributeConfiguration {
@@ -83,7 +82,6 @@ class CORE_EXPORT V8DOMConfiguration final {
     v8::AccessorNameGetterCallback getter;
     v8::AccessorNameSetterCallback setter;
 
-    const WrapperTypeInfo* data;
     // v8::PropertyAttribute
     unsigned attribute : 8;
     // PropertyLocationConfiguration
@@ -144,9 +142,8 @@ class CORE_EXPORT V8DOMConfiguration final {
     const char* const name;
     v8::FunctionCallback getter;
     v8::FunctionCallback setter;
-    // The accessor's 'result' is stored in a private property.
-    CachedPropertyKey cached_property_key;
-    const WrapperTypeInfo* data;
+    // V8PrivateProperty::CachedAccessorSymbol
+    unsigned cached_property_key : 1;
     // v8::PropertyAttribute
     unsigned attribute : 8;
     // PropertyLocationConfiguration
@@ -206,12 +203,22 @@ class CORE_EXPORT V8DOMConfiguration final {
   // object's constants. It sets the constant on both the FunctionTemplate and
   // the ObjectTemplate. PropertyAttributes is always ReadOnly.
   struct ConstantConfiguration {
+    constexpr ConstantConfiguration(const char* name,
+                                    ConstantType type,
+                                    int value)
+        : name(name), type(type), ivalue(value) {}
+    constexpr ConstantConfiguration(const char* name,
+                                    ConstantType type,
+                                    double value)
+        : name(name), type(type), dvalue(value) {}
     ConstantConfiguration& operator=(const ConstantConfiguration&) = delete;
     DISALLOW_NEW();
     const char* const name;
-    int ivalue;
-    double dvalue;
     ConstantType type;
+    union {
+      int ivalue;
+      double dvalue;
+    };
   };
 
   // Constant installation

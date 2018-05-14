@@ -13,12 +13,8 @@ var Flags = {
   DEBUG_DEVTOOLS: '--debug-devtools',
   DEBUG_DEVTOOLS_SHORTHAND: '-d',
   FETCH_CONTENT_SHELL: '--fetch-content-shell',
-  CHROMIUM_PATH: '--chromium-path',      // useful for bisecting
-  TARGET: '--target',                    // build sub-directory (e.g. Release, Default)
-};
-
-var COMPAT_URL_MAPPING = {
-  '1.2': 'https://storage.googleapis.com/content-shell-devtools-compat/content_shell_417361.zip',
+  CHROMIUM_PATH: '--chromium-path',  // useful for bisecting
+  TARGET: '--target',                // build sub-directory (e.g. Release, Default)
 };
 
 var IS_DEBUG_ENABLED =
@@ -92,15 +88,6 @@ function onUploadedCommitPosition(commitPosition) {
       .then(extractContentShell)
       .then(() => copyFrontend(contentShellResourcesPath))
       .then(() => runTests(contentShellPath, true));
-}
-
-function copyFrontendToCompatBuildPath(compatBuildPath, latestBuildPath) {
-  var customDevtoolsResourcesPath = path.resolve(compatBuildPath, 'resources');
-  var latestDevtoolsInspectorPath = path.resolve(latestBuildPath, 'resources', 'inspector');
-  var copiedFrontendPath = path.resolve(customDevtoolsResourcesPath, 'inspector');
-  if (utils.isDir(copiedFrontendPath))
-    utils.removeRecursive(copiedFrontendPath);
-  utils.copyRecursive(latestDevtoolsInspectorPath, customDevtoolsResourcesPath);
 }
 
 function copyFrontend(contentShellResourcesPath) {
@@ -251,8 +238,20 @@ function runTests(buildDirectoryPath, useDebugDevtools) {
     testArgs.push('--additional-driver-flag=--remote-debugging-port=9222');
     testArgs.push('--time-out-ms=6000000');
     console.log('\n=============================================');
-    console.log('Go to: http://localhost:9222/');
-    console.log('Click on link and in console execute: test()');
+    var unitTest = testArgs.find(arg => arg.includes('http/tests/devtools/unit/'));
+    if (unitTest) {
+      var unitTestPath = `http://localhost:8080/${unitTest.slice('http/tests/'.length)}`;
+      var link =
+          `http://localhost:8080/inspector-sources/debug/integration_test_runner.html?experiments=true&test=${
+                                                                                                              unitTestPath
+                                                                                                            }`;
+      console.log('1) Go to: ', link);
+      console.log('2) Go to: http://localhost:9222/, click on "inspected-page.html", and copy the ws query parameter');
+      console.log('3) Open DevTools on DevTools and you can refresh to re-run the test')
+    } else {
+      console.log('Go to: http://localhost:9222/');
+      console.log('Click on link and in console execute: test()');
+    }
     console.log('=============================================\n');
   }
   var args = [BLINK_TEST_PATH].concat(testArgs).concat(getTestFlags());

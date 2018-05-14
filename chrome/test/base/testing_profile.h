@@ -18,6 +18,7 @@
 #include "components/domain_reliability/clear_mode.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "extensions/features/features.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
@@ -199,15 +200,6 @@ class TestingProfile : public Profile {
   // for testing error conditions. Returns true on success.
   bool CreateHistoryService(bool delete_file, bool no_db) WARN_UNUSED_RESULT;
 
-  // !!!!!!!! WARNING: THIS IS GENERALLY NOT SAFE TO CALL! !!!!!!!!
-  // This bypasses the BrowserContextDependencyManager and thus may leave other
-  // KeyedServices with dangling pointers; see above. It's also usually not
-  // necessary to explicitly destroy the HistoryService; it'll be destroyed
-  // along with the TestingProfile anyway.
-  // !!!!!!!! WARNING: THIS IS GENERALLY NOT SAFE TO CALL! !!!!!!!!
-  // Shuts down and nulls out the reference to HistoryService.
-  void DestroyHistoryService();
-
   // Creates the BookmarkBarModel. If not invoked the bookmark bar model is
   // NULL. If |delete_file| is true, the bookmarks file is deleted first, then
   // the model is created. As TestingProfile deletes the directory containing
@@ -252,6 +244,7 @@ class TestingProfile : public Profile {
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   content::PermissionManager* GetPermissionManager() override;
+  content::BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
       override;
@@ -295,6 +288,7 @@ class TestingProfile : public Profile {
   void DestroyOffTheRecordProfile() override {}
   bool HasOffTheRecordProfile() override;
   Profile* GetOriginalProfile() override;
+  const Profile* GetOriginalProfile() const override;
   bool IsSupervised() const override;
   bool IsChild() const override;
   bool IsLegacySupervised() const override;
@@ -327,13 +321,12 @@ class TestingProfile : public Profile {
   bool IsGuestSession() const override;
   void SetExitType(ExitType exit_type) override {}
   ExitType GetLastSessionExitType() override;
+  network::mojom::NetworkContextPtr CreateMainNetworkContext() override;
 #if defined(OS_CHROMEOS)
   void ChangeAppLocale(const std::string&, AppLocaleChangedVia) override {}
   void OnLogin() override {}
   void InitChromeOSPreferences() override {}
 #endif  // defined(OS_CHROMEOS)
-
-  PrefProxyConfigTracker* GetProxyConfigTracker() override;
 
   // Schedules a task on the history backend and runs a nested loop until the
   // task is processed.  This has the effect of blocking the caller until the
@@ -341,10 +334,6 @@ class TestingProfile : public Profile {
   void BlockUntilHistoryProcessesPendingRequests();
 
   chrome_browser_net::Predictor* GetNetworkPredictor() override;
-  DevToolsNetworkControllerHandle* GetDevToolsNetworkControllerHandle()
-      override;
-  void ClearNetworkingHistorySince(base::Time time,
-                                   const base::Closure& completion) override;
   GURL GetHomePage() override;
 
   PrefService* GetOffTheRecordPrefs() override;
@@ -415,9 +404,6 @@ class TestingProfile : public Profile {
   scoped_refptr<ExtensionSpecialStoragePolicy>
       extension_special_storage_policy_;
 #endif
-
-  // The proxy prefs tracker.
-  std::unique_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   // The path to this profile. This will be valid in either of the two above
   // cases.

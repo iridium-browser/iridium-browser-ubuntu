@@ -4,11 +4,11 @@
 
 #include "core/workers/SharedWorkerReportingProxy.h"
 
+#include "base/location.h"
 #include "bindings/core/v8/SourceLocation.h"
 #include "core/exported/WebSharedWorkerImpl.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/wtf/WTF.h"
-#include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 
@@ -25,10 +25,10 @@ SharedWorkerReportingProxy::~SharedWorkerReportingProxy() {
 
 void SharedWorkerReportingProxy::CountFeature(WebFeature feature) {
   DCHECK(!IsMainThread());
-  parent_frame_task_runners_->Get(TaskType::kUnspecedTimer)
-      ->PostTask(BLINK_FROM_HERE,
-                 CrossThreadBind(&WebSharedWorkerImpl::CountFeature,
-                                 CrossThreadUnretained(worker_), feature));
+  PostCrossThreadTask(
+      *parent_frame_task_runners_->Get(TaskType::kUnspecedTimer), FROM_HERE,
+      CrossThreadBind(&WebSharedWorkerImpl::CountFeature,
+                      CrossThreadUnretained(worker_), feature));
 }
 
 void SharedWorkerReportingProxy::CountDeprecation(WebFeature feature) {
@@ -61,31 +61,29 @@ void SharedWorkerReportingProxy::PostMessageToPageInspector(
   DCHECK(!IsMainThread());
   // The TaskType of Inspector tasks need to be Unthrottled because they need to
   // run even on a suspended page.
-  parent_frame_task_runners_->Get(TaskType::kUnthrottled)
-      ->PostTask(
-          BLINK_FROM_HERE,
-          CrossThreadBind(&WebSharedWorkerImpl::PostMessageToPageInspector,
-                          CrossThreadUnretained(worker_), session_id, message));
+  PostCrossThreadTask(
+      *parent_frame_task_runners_->Get(TaskType::kUnthrottled), FROM_HERE,
+      CrossThreadBind(&WebSharedWorkerImpl::PostMessageToPageInspector,
+                      CrossThreadUnretained(worker_), session_id, message));
 }
 
 void SharedWorkerReportingProxy::DidCloseWorkerGlobalScope() {
   DCHECK(!IsMainThread());
-  parent_frame_task_runners_->Get(TaskType::kUnspecedTimer)
-      ->PostTask(
-          BLINK_FROM_HERE,
-          CrossThreadBind(&WebSharedWorkerImpl::DidCloseWorkerGlobalScope,
-                          CrossThreadUnretained(worker_)));
+  PostCrossThreadTask(
+      *parent_frame_task_runners_->Get(TaskType::kUnspecedTimer), FROM_HERE,
+      CrossThreadBind(&WebSharedWorkerImpl::DidCloseWorkerGlobalScope,
+                      CrossThreadUnretained(worker_)));
 }
 
 void SharedWorkerReportingProxy::DidTerminateWorkerThread() {
   DCHECK(!IsMainThread());
-  parent_frame_task_runners_->Get(TaskType::kUnspecedTimer)
-      ->PostTask(BLINK_FROM_HERE,
-                 CrossThreadBind(&WebSharedWorkerImpl::DidTerminateWorkerThread,
-                                 CrossThreadUnretained(worker_)));
+  PostCrossThreadTask(
+      *parent_frame_task_runners_->Get(TaskType::kUnspecedTimer), FROM_HERE,
+      CrossThreadBind(&WebSharedWorkerImpl::DidTerminateWorkerThread,
+                      CrossThreadUnretained(worker_)));
 }
 
-DEFINE_TRACE(SharedWorkerReportingProxy) {
+void SharedWorkerReportingProxy::Trace(blink::Visitor* visitor) {
   visitor->Trace(parent_frame_task_runners_);
 }
 

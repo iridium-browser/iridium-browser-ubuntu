@@ -49,6 +49,7 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_system.h"
@@ -206,7 +207,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner(
         base::CreateSequencedTaskRunnerWithTraits(
             {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
-    return base::MakeUnique<gcm::GCMProfileService>(
+    return std::make_unique<gcm::GCMProfileService>(
         profile->GetPrefs(), profile->GetPath(), profile->GetRequestContext(),
         chrome::GetChannel(),
         gcm::GetProductCategoryForSubtypes(profile->GetPrefs()),
@@ -220,20 +221,16 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
   }
 
   ExtensionGCMAppHandlerTest()
-      : extension_service_(NULL),
+      : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD),
+        extension_service_(NULL),
         registration_result_(gcm::GCMClient::UNKNOWN_ERROR),
-        unregistration_result_(gcm::GCMClient::UNKNOWN_ERROR) {
-  }
+        unregistration_result_(gcm::GCMClient::UNKNOWN_ERROR) {}
 
   ~ExtensionGCMAppHandlerTest() override {}
 
   // Overridden from test::Test:
   void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-
-    // Make BrowserThread work in unittest.
-    thread_bundle_.reset(new content::TestBrowserThreadBundle(
-        content::TestBrowserThreadBundle::REAL_IO_THREAD));
 
     // Allow extension update to unpack crx in process.
     in_process_utility_thread_helper_.reset(
@@ -276,6 +273,10 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
 
     waiter_.PumpUILoop();
     gcm_app_handler_->Shutdown();
+    auto* partition =
+        content::BrowserContext::GetDefaultStoragePartition(profile());
+    if (partition)
+      partition->WaitForDeletionTasksForTesting();
   }
 
   // Returns a barebones test extension.
@@ -283,7 +284,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     base::DictionaryValue manifest;
     manifest.SetString(manifest_keys::kVersion, "1.0.0.0");
     manifest.SetString(manifest_keys::kName, kTestExtensionName);
-    auto permission_list = base::MakeUnique<base::ListValue>();
+    auto permission_list = std::make_unique<base::ListValue>();
     permission_list->AppendString("gcm");
     manifest.Set(manifest_keys::kPermissions, std::move(permission_list));
 
@@ -335,8 +336,8 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
   }
 
   void DisableExtension(const Extension* extension) {
-    extension_service_->DisableExtension(
-        extension->id(), Extension::DISABLE_USER_ACTION);
+    extension_service_->DisableExtension(extension->id(),
+                                         disable_reason::DISABLE_USER_ACTION);
   }
 
   void EnableExtension(const Extension* extension) {
@@ -347,7 +348,6 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     extension_service_->UninstallExtension(
         extension->id(),
         extensions::UNINSTALL_REASON_FOR_TESTING,
-        base::Bind(&base::DoNothing),
         NULL);
   }
 
@@ -387,7 +387,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
   }
 
  private:
-  std::unique_ptr<content::TestBrowserThreadBundle> thread_bundle_;
+  content::TestBrowserThreadBundle thread_bundle_;
   std::unique_ptr<content::InProcessUtilityThreadHelper>
       in_process_utility_thread_helper_;
   std::unique_ptr<TestingProfile> profile_;

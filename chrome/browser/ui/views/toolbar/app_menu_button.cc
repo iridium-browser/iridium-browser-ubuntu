@@ -4,9 +4,9 @@
 
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 
-#include "base/command_line.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -25,11 +25,14 @@
 #include "chrome/browser/ui/views/toolbar/app_menu.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_features.h"
+#include "chrome/grit/chromium_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/views/controls/button/label_button_border.h"
@@ -40,6 +43,8 @@ namespace {
 
 constexpr float kIconSize = 16;
 
+constexpr base::TimeDelta kDelayTime = base::TimeDelta::FromMilliseconds(1500);
+
 }  // namespace
 
 // static
@@ -47,14 +52,21 @@ bool AppMenuButton::g_open_app_immediately_for_testing = false;
 
 AppMenuButton::AppMenuButton(ToolbarView* toolbar_view)
     : views::MenuButton(base::string16(), toolbar_view, false),
-      toolbar_view_(toolbar_view) {
+      toolbar_view_(toolbar_view),
+      animation_delay_timer_(FROM_HERE,
+                             kDelayTime,
+                             base::Bind(&AppMenuButton::AnimateIconIfPossible,
+                                        base::Unretained(this),
+                                        false),
+                             false) {
   SetInkDropMode(InkDropMode::ON);
   SetFocusPainter(nullptr);
 
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableNewAppMenuIcon)) {
+  if (base::FeatureList::IsEnabled(features::kAnimatedAppMenuIcon)) {
     toolbar_view_->browser()->tab_strip_model()->AddObserver(this);
     should_use_new_icon_ = true;
+    should_delay_animation_ = base::GetFieldTrialParamByFeatureAsBool(
+        features::kAnimatedAppMenuIcon, "HasDelay", false);
   }
 }
 
@@ -65,7 +77,22 @@ void AppMenuButton::SetSeverity(AppMenuIconController::IconType type,
                                 bool animate) {
   type_ = type;
   severity_ = severity;
+
+  SetTooltipText(
+      severity_ == AppMenuIconController::Severity::NONE
+          ? l10n_util::GetStringUTF16(IDS_APPMENU_TOOLTIP)
+          : l10n_util::GetStringUTF16(IDS_APPMENU_TOOLTIP_UPDATE_AVAILABLE));
   UpdateIcon(animate);
+}
+
+void AppMenuButton::SetIsProminent(bool is_prominent) {
+  if (is_prominent) {
+    SetBackground(views::CreateSolidBackground(GetNativeTheme()->GetSystemColor(
+        ui::NativeTheme::kColorId_ProminentButtonColor)));
+  } else {
+    SetBackground(nullptr);
+  }
+  SchedulePaint();
 }
 
 void AppMenuButton::ShowMenu(bool for_drop) {
@@ -85,6 +112,7 @@ void AppMenuButton::ShowMenu(bool for_drop) {
 
   menu_.reset(new AppMenu(browser, for_drop ? AppMenu::FOR_DROP : 0));
   menu_model_.reset(new AppMenuModel(toolbar_view_, browser));
+  menu_model_->Init();
   menu_->Init(menu_model_.get());
 
   for (views::MenuListener& observer : menu_listeners_)
@@ -101,7 +129,7 @@ void AppMenuButton::ShowMenu(bool for_drop) {
                         base::TimeTicks::Now() - menu_open_time);
   }
 
-  AnimateIconIfPossible();
+  AnimateIconIfPossible(false);
 }
 
 void AppMenuButton::CloseMenu() {
@@ -132,7 +160,7 @@ void AppMenuButton::Layout() {
   if (new_icon_) {
     new_icon_->SetBoundsRect(GetContentsBounds());
     ink_drop_container()->SetBoundsRect(GetLocalBounds());
-    image()->SetBoundsRect(GetLocalBounds());
+    image()->SetBoundsRect(GetContentsBounds());
     return;
   }
 
@@ -147,7 +175,7 @@ void AppMenuButton::TabInsertedAt(TabStripModel* tab_strip_model,
                                   content::WebContents* contents,
                                   int index,
                                   bool foreground) {
-  AnimateIconIfPossible();
+  AnimateIconIfPossible(true);
 }
 
 void AppMenuButton::UpdateIcon(bool should_animate) {
@@ -183,14 +211,15 @@ void AppMenuButton::UpdateIcon(bool should_animate) {
     // Only show a special color for severity when using the classic Chrome
     // theme. Otherwise, we can't be sure that it contrasts with the toolbar
     // background.
-    new_icon_->SetColor(
-        ThemeServiceFactory::GetForProfile(toolbar_view_->browser()->profile())
-                ->UsingDefaultTheme()
-            ? severity_color
-            : toolbar_icon_color);
+    ThemeService* theme_service =
+        ThemeServiceFactory::GetForProfile(toolbar_view_->browser()->profile());
+    new_icon_->SetColor(theme_service->UsingSystemTheme() ||
+                                theme_service->UsingDefaultTheme()
+                            ? severity_color
+                            : toolbar_icon_color);
 
     if (should_animate)
-      AnimateIconIfPossible();
+      AnimateIconIfPossible(true);
 
     return;
   }
@@ -220,13 +249,20 @@ void AppMenuButton::SetTrailingMargin(int margin) {
   InvalidateLayout();
 }
 
-void AppMenuButton::AnimateIconIfPossible() {
+void AppMenuButton::AnimateIconIfPossible(bool with_delay) {
   if (!new_icon_ || !should_use_new_icon_ ||
       severity_ == AppMenuIconController::Severity::NONE) {
     return;
   }
 
-  new_icon_->Animate(views::AnimatedIconView::END);
+  if (!should_delay_animation_ || !with_delay || new_icon_->IsAnimating()) {
+    animation_delay_timer_.Stop();
+    new_icon_->Animate(views::AnimatedIconView::END);
+    return;
+  }
+
+  if (!animation_delay_timer_.IsRunning())
+    animation_delay_timer_.Reset();
 }
 
 const char* AppMenuButton::GetClassName() const {

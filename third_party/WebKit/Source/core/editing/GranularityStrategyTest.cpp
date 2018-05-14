@@ -3,19 +3,21 @@
 // found in the LICENSE file.
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/Text.h"
 #include "core/editing/FrameSelection.h"
+#include "core/editing/SelectionTemplate.h"
+#include "core/editing/VisiblePosition.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLSpanElement.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/testing/PageTestBase.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -34,18 +36,14 @@ IntPoint VisiblePositionToContentsPoint(const VisiblePosition& pos) {
 
 using TextNodeVector = HeapVector<Member<Text>>;
 
-class GranularityStrategyTest : public ::testing::Test {
+class GranularityStrategyTest : public PageTestBase {
  protected:
   void SetUp() override;
 
-  DummyPageHolder& GetDummyPageHolder() const { return *dummy_page_holder_; }
-  Document& GetDocument() const;
-  LocalFrame& GetFrame() const { return dummy_page_holder_->GetFrame(); }
-  void SetSelection(const VisibleSelection&);
-  FrameSelection& Selection() const;
+  void SetSelectionAndEndTyping(const VisibleSelection&);
   Text* AppendTextNode(const String& data);
   int LayoutCount() const {
-    return dummy_page_holder_->GetFrameView().LayoutCount();
+    return GetDummyPageHolder().GetFrameView().LayoutCount();
   }
   void SetInnerHTML(const char*);
   // Parses the text node, appending the info to m_letterPos and m_wordMiddles.
@@ -81,33 +79,17 @@ class GranularityStrategyTest : public ::testing::Test {
   // Pixel coordinates of the middles of the words in the text being tested.
   // (y coordinate is based on y coordinates of m_letterPos)
   Vector<IntPoint> word_middles_;
-
- private:
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
-  Persistent<Document> document_;
 };
 
 void GranularityStrategyTest::SetUp() {
-  dummy_page_holder_ = DummyPageHolder::Create(IntSize(800, 600));
-  document_ = &dummy_page_holder_->GetDocument();
-  DCHECK(document_);
-  GetDummyPageHolder().GetFrame().GetSettings()->SetDefaultFontSize(12);
-  GetDummyPageHolder().GetFrame().GetSettings()->SetSelectionStrategy(
-      SelectionStrategy::kDirection);
+  PageTestBase::SetUp();
+  GetFrame().GetSettings()->SetDefaultFontSize(12);
+  GetFrame().GetSettings()->SetSelectionStrategy(SelectionStrategy::kDirection);
 }
 
-Document& GranularityStrategyTest::GetDocument() const {
-  return *document_;
-}
-
-void GranularityStrategyTest::SetSelection(
+void GranularityStrategyTest::SetSelectionAndEndTyping(
     const VisibleSelection& new_selection) {
-  dummy_page_holder_->GetFrame().Selection().SetSelection(
-      new_selection.AsSelection());
-}
-
-FrameSelection& GranularityStrategyTest::Selection() const {
-  return dummy_page_holder_->GetFrame().Selection();
+  Selection().SetSelectionAndEndTyping(new_selection.AsSelection());
 }
 
 Text* GranularityStrategyTest::AppendTextNode(const String& data) {
@@ -117,7 +99,8 @@ Text* GranularityStrategyTest::AppendTextNode(const String& data) {
 }
 
 void GranularityStrategyTest::SetInnerHTML(const char* html_content) {
-  GetDocument().documentElement()->setInnerHTML(String::FromUTF8(html_content));
+  GetDocument().documentElement()->SetInnerHTMLFromString(
+      String::FromUTF8(html_content));
   GetDocument().View()->UpdateAllLifecyclePhases();
 }
 
@@ -278,7 +261,7 @@ void GranularityStrategyTest::SetupTextSpan(String str1,
   else
     p2 = Position(text3, sel_end - str1.length() - str2.length());
 
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder().SetBaseAndExtent(p1, p2).Build());
 }
 
@@ -505,7 +488,7 @@ TEST_F(GranularityStrategyTest, Character) {
 
   // "Foo B^a|>r Baz," (^ means base, | means extent, , < means start, and >
   // means end).
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 5), Position(text, 6))
           .Build());
@@ -526,7 +509,7 @@ TEST_F(GranularityStrategyTest, DirectionRotate) {
   Text* text = SetupRotate("Foo Bar Baz,");
   // "Foo B^a|>r Baz," (^ means base, | means extent, , < means start, and >
   // means end).
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 5), Position(text, 6))
           .Build());
@@ -549,7 +532,7 @@ TEST_F(GranularityStrategyTest, DirectionExpandTranslateZ) {
   Text* text = SetupTranslateZ("abcdef ghij kl mnopqr stuvwi inm mnii,");
   // "abcdef ghij kl mno^p|>qr stuvwi inm  mnii," (^ means base, | means extent,
   // < means start, and > means end).
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 19))
           .Build());
@@ -561,7 +544,7 @@ TEST_F(GranularityStrategyTest, DirectionExpandTransform) {
   Text* text = SetupTransform("abcdef ghij kl mnopqr stuvwi inm mnii,");
   // "abcdef ghij kl mno^p|>qr stuvwi inm  mnii," (^ means base, | means extent,
   // < means start, and > means end).
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 19))
           .Build());
@@ -585,7 +568,7 @@ TEST_F(GranularityStrategyTest, DirectionExpandFontSizes) {
 
 TEST_F(GranularityStrategyTest, DirectionShrinkTranslateZ) {
   Text* text = SetupTranslateZ("abcdef ghij kl mnopqr iiinmni, abc");
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 21))
           .Build());
@@ -595,7 +578,7 @@ TEST_F(GranularityStrategyTest, DirectionShrinkTranslateZ) {
 
 TEST_F(GranularityStrategyTest, DirectionShrinkTransform) {
   Text* text = SetupTransform("abcdef ghij kl mnopqr iiinmni, abc");
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 21))
           .Build());
@@ -617,7 +600,7 @@ TEST_F(GranularityStrategyTest, DirectionShrinkFontSizes) {
 
 TEST_F(GranularityStrategyTest, DirectionSwitchSideTranslateZ) {
   Text* text = SetupTranslateZ("abcd efgh ijkl mnopqr iiinmni, abc");
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 21))
           .Build());
@@ -627,7 +610,7 @@ TEST_F(GranularityStrategyTest, DirectionSwitchSideTranslateZ) {
 
 TEST_F(GranularityStrategyTest, DirectionSwitchSideTransform) {
   Text* text = SetupTransform("abcd efgh ijkl mnopqr iiinmni, abc");
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 21))
           .Build());
@@ -662,7 +645,7 @@ TEST_F(GranularityStrategyTest, DirectionSwitchSideWordGranularityThenShrink) {
 
   // "abcd efgh ijkl mno^pqr|> iiin, abc" (^ means base, | means extent, < means
   // start, and > means end).
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 21))
           .Build());
@@ -700,7 +683,7 @@ TEST_F(GranularityStrategyTest, DirectionSwitchStartOnBoundary) {
 
   // "ab cd efghijkl ^mnopqr |>stuvwi inm," (^ means base and | means extent,
   // > means end).
-  Selection().SetSelection(
+  Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 15), Position(text, 22))
           .Build());
@@ -713,22 +696,26 @@ TEST_F(GranularityStrategyTest, DirectionSwitchStartOnBoundary) {
 TEST_F(GranularityStrategyTest, UpdateExtentWithNullPositionForCharacter) {
   GetDummyPageHolder().GetFrame().GetSettings()->SetSelectionStrategy(
       SelectionStrategy::kCharacter);
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLFromString(
       "<div id=host></div><div id=sample>ab</div>");
   // Simulate VIDEO element which has a RANGE as slider of video time.
   Element* const host = GetDocument().getElementById("host");
-  ShadowRoot* const shadow_root = host->CreateShadowRootInternal(
-      ShadowRootType::kOpen, ASSERT_NO_EXCEPTION);
-  shadow_root->setInnerHTML("<input type=range>");
+  ShadowRoot& shadow_root =
+      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+  shadow_root.SetInnerHTMLFromString("<input type=range>");
   Element* const sample = GetDocument().getElementById("sample");
   GetDocument().UpdateStyleAndLayout();
   const SelectionInDOMTree& selection_in_dom_tree =
       SelectionInDOMTree::Builder()
           .Collapse(Position(sample->firstChild(), 2))
-          .SetIsDirectional(true)
-          .SetIsHandleVisible(true)
           .Build();
-  Selection().SetSelection(selection_in_dom_tree);
+  Selection().SetSelection(selection_in_dom_tree,
+                           SetSelectionOptions::Builder()
+                               .SetShouldCloseTyping(true)
+                               .SetShouldClearTypingStyle(true)
+                               .SetShouldShowHandle(true)
+                               .SetIsDirectional(true)
+                               .Build());
 
   // Since, it is not obvious that |visiblePositionForContentsPoint()| returns
   // null position, we verify here.
@@ -745,22 +732,26 @@ TEST_F(GranularityStrategyTest, UpdateExtentWithNullPositionForCharacter) {
 
 // For http://crbug.com/704529
 TEST_F(GranularityStrategyTest, UpdateExtentWithNullPositionForDirectional) {
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLFromString(
       "<div id=host></div><div id=sample>ab</div>");
   // Simulate VIDEO element which has a RANGE as slider of video time.
   Element* const host = GetDocument().getElementById("host");
-  ShadowRoot* const shadow_root = host->CreateShadowRootInternal(
-      ShadowRootType::kOpen, ASSERT_NO_EXCEPTION);
-  shadow_root->setInnerHTML("<input type=range>");
+  ShadowRoot& shadow_root =
+      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+  shadow_root.SetInnerHTMLFromString("<input type=range>");
   Element* const sample = GetDocument().getElementById("sample");
   GetDocument().UpdateStyleAndLayout();
   const SelectionInDOMTree& selection_in_dom_tree =
       SelectionInDOMTree::Builder()
           .Collapse(Position(sample->firstChild(), 2))
-          .SetIsDirectional(true)
-          .SetIsHandleVisible(true)
           .Build();
-  Selection().SetSelection(selection_in_dom_tree);
+  Selection().SetSelection(selection_in_dom_tree,
+                           SetSelectionOptions::Builder()
+                               .SetShouldCloseTyping(true)
+                               .SetShouldClearTypingStyle(true)
+                               .SetShouldShowHandle(true)
+                               .SetIsDirectional(true)
+                               .Build());
 
   // Since, it is not obvious that |visiblePositionForContentsPoint()| returns
   // null position, we verify here.

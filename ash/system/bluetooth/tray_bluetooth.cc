@@ -47,6 +47,8 @@ namespace ash {
 namespace tray {
 namespace {
 
+const int kUpdateFrequencyMs = 1000;
+
 // Updates bluetooth device |device| in the |list|. If it is new, append to the
 // end of the |list|; otherwise, keep it at the same place, but update the data
 // with new device info provided by |device|.
@@ -106,12 +108,10 @@ const gfx::VectorIcon& GetBluetoothDeviceIcon(
     case device::BluetoothDeviceType::MODEM:
     case device::BluetoothDeviceType::PERIPHERAL:
       return ash::kSystemMenuBluetoothIcon;
-    case device::BluetoothDeviceType::UNKNOWN:
-      LOG(WARNING) << "Unknown device type icon for Bluetooth was requested.";
-      break;
+    default:
+      return connected ? ash::kSystemMenuBluetoothConnectedIcon
+                       : ash::kSystemMenuBluetoothIcon;
   }
-  return connected ? ash::kSystemMenuBluetoothConnectedIcon
-                   : ash::kSystemMenuBluetoothIcon;
 }
 
 const int kDisabledPanelLabelBaselineY = 20;
@@ -123,7 +123,7 @@ class BluetoothDefaultView : public TrayItemMore {
   explicit BluetoothDefaultView(SystemTrayItem* owner) : TrayItemMore(owner) {
     set_id(VIEW_ID_BLUETOOTH_DEFAULT_VIEW);
   }
-  ~BluetoothDefaultView() override {}
+  ~BluetoothDefaultView() override = default;
 
   void Update() {
     TrayBluetoothHelper* helper = Shell::Get()->tray_bluetooth_helper();
@@ -201,13 +201,22 @@ class BluetoothDetailedView : public TrayDetailsView {
   }
 
   void Update() {
-    BluetoothStartDiscovering();
-    UpdateBluetoothDeviceList();
+    // Update immediately for initial device list and
+    // when bluetooth is disabled.
+    if (device_map_.size() == 0 ||
+        !Shell::Get()->tray_bluetooth_helper()->GetBluetoothEnabled()) {
+      DoUpdate();
+      return;
+    }
 
-    // Update UI.
-    UpdateDeviceScrollList();
-    UpdateHeaderEntry();
-    Layout();
+    // Return here since an update is already queued.
+    if (timer_.IsRunning())
+      return;
+
+    // Update the detailed view after kUpdateFrequencyMs.
+    timer_.Start(FROM_HERE,
+                 base::TimeDelta::FromMilliseconds(kUpdateFrequencyMs), this,
+                 &BluetoothDetailedView::DoUpdate);
   }
 
  private:
@@ -462,11 +471,11 @@ class BluetoothDetailedView : public TrayDetailsView {
 
   views::View* CreateDisabledPanel() {
     views::View* container = new views::View;
-    views::BoxLayout* box_layout =
-        new views::BoxLayout(views::BoxLayout::kVertical);
+    auto box_layout =
+        std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical);
     box_layout->set_main_axis_alignment(
         views::BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
-    container->SetLayoutManager(box_layout);
+    container->SetLayoutManager(std::move(box_layout));
 
     TrayPopupItemStyle style(
         TrayPopupItemStyle::FontStyle::DETAILED_VIEW_LABEL);
@@ -509,6 +518,16 @@ class BluetoothDetailedView : public TrayDetailsView {
     }
   }
 
+  void DoUpdate() {
+    BluetoothStartDiscovering();
+    UpdateBluetoothDeviceList();
+
+    // Update UI.
+    UpdateDeviceScrollList();
+    UpdateHeaderEntry();
+    Layout();
+  }
+
   // TODO(jamescook): Don't cache this.
   LoginStatus login_;
 
@@ -525,6 +544,9 @@ class BluetoothDetailedView : public TrayDetailsView {
   // The container of the message "Bluetooth is disabled" and an icon. It should
   // be shown instead of Bluetooth device list when Bluetooth is disabled.
   views::View* disabled_panel_;
+
+  // Timer used to limit the update frequency.
+  base::OneShotTimer timer_;
 
   DISALLOW_COPY_AND_ASSIGN(BluetoothDetailedView);
 };

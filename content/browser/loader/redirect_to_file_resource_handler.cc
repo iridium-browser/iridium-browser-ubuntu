@@ -13,11 +13,11 @@
 #include "content/browser/loader/resource_controller.h"
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/loader/temporary_file_stream.h"
-#include "content/public/common/resource_response.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/net_errors.h"
+#include "services/network/public/cpp/resource_response.h"
 #include "storage/browser/blob/shareable_file_reference.h"
 
 using storage::ShareableFileReference;
@@ -34,14 +34,13 @@ namespace {
 // somewhat fragile, however, and depending on it is dangerous.  A more
 // principled approach would require significant refactoring, however, so for
 // the moment we're relying on fragile properties.
-class DependentIOBuffer : public net::WrappedIOBuffer {
+class DependentIOBufferForRedirectToFile : public net::WrappedIOBuffer {
  public:
-  DependentIOBuffer(net::IOBuffer* backing, char* memory)
-      : net::WrappedIOBuffer(memory),
-        backing_(backing) {
-  }
+  DependentIOBufferForRedirectToFile(net::IOBuffer* backing, char* memory)
+      : net::WrappedIOBuffer(memory), backing_(backing) {}
+
  private:
-  ~DependentIOBuffer() override {}
+  ~DependentIOBufferForRedirectToFile() override {}
 
   scoped_refptr<net::IOBuffer> backing_;
 };
@@ -78,14 +77,14 @@ class RedirectToFileResourceHandler::Writer {
     DCHECK(handler_);
     int result = file_stream_->Write(
         buf, buf_len,
-        base::Bind(&Writer::DidWriteToFile, base::Unretained(this)));
+        base::BindOnce(&Writer::DidWriteToFile, base::Unretained(this)));
     if (result == net::ERR_IO_PENDING)
       is_writing_ = true;
     return result;
   }
 
   void Close() {
-    handler_ = NULL;
+    handler_ = nullptr;
     if (!is_writing_)
       CloseAndDelete();
   }
@@ -107,8 +106,8 @@ class RedirectToFileResourceHandler::Writer {
 
   void CloseAndDelete() {
     DCHECK(!is_writing_);
-    int result = file_stream_->Close(base::Bind(&Writer::DidClose,
-                                                base::Unretained(this)));
+    int result = file_stream_->Close(
+        base::BindOnce(&Writer::DidClose, base::Unretained(this)));
     if (result != net::ERR_IO_PENDING)
       DidClose(result);
   }
@@ -134,18 +133,13 @@ RedirectToFileResourceHandler::RedirectToFileResourceHandler(
     net::URLRequest* request)
     : LayeredResourceHandler(request, std::move(next_handler)),
       buf_(new net::GrowableIOBuffer()),
-      buf_write_pending_(false),
-      write_cursor_(0),
-      writer_(NULL),
-      next_buffer_size_(kInitialReadBufSize),
-      completed_during_write_(false),
       weak_factory_(this) {}
 
 RedirectToFileResourceHandler::~RedirectToFileResourceHandler() {
   // Orphan the writer to asynchronously close and release the temporary file.
   if (writer_) {
     writer_->Close();
-    writer_ = NULL;
+    writer_ = nullptr;
   }
 }
 
@@ -156,9 +150,14 @@ void RedirectToFileResourceHandler::
 }
 
 void RedirectToFileResourceHandler::OnResponseStarted(
-    ResourceResponse* response,
+    network::ResourceResponse* response,
     std::unique_ptr<ResourceController> controller) {
-  DCHECK(writer_);
+  if (!writer_) {
+    response_pending_file_creation_ = response;
+    HoldController(std::move(controller));
+    request()->LogBlockedBy("RedirectToFileResourceHandler");
+    return;
+  }
   response->head.download_file_path = writer_->path();
   next_handler_->OnResponseStarted(response, std::move(controller));
 }
@@ -168,12 +167,7 @@ void RedirectToFileResourceHandler::OnWillStart(
     std::unique_ptr<ResourceController> controller) {
   DCHECK(!writer_);
 
-  // Defer starting the request until we have created the temporary file.
-  // TODO(darin): This is sub-optimal.  We should not delay starting the
-  // network request like this.
-  will_start_url_ = url;
-  HoldController(std::move(controller));
-  request()->LogBlockedBy("RedirectToFileResourceHandler");
+  // Create the file ASAP but don't block.
   if (create_temporary_file_stream_.is_null()) {
     CreateTemporaryFileStream(
         base::Bind(&RedirectToFileResourceHandler::DidCreateTemporaryFile,
@@ -183,6 +177,7 @@ void RedirectToFileResourceHandler::OnWillStart(
         base::Bind(&RedirectToFileResourceHandler::DidCreateTemporaryFile,
                    weak_factory_.GetWeakPtr()));
   }
+  next_handler_->OnWillStart(url, std::move(controller));
 }
 
 void RedirectToFileResourceHandler::OnWillRead(
@@ -252,23 +247,30 @@ void RedirectToFileResourceHandler::DidCreateTemporaryFile(
     std::unique_ptr<net::FileStream> file_stream,
     ShareableFileReference* deletable_file) {
   DCHECK(!writer_);
-  DCHECK(has_controller());
   if (error_code != base::File::FILE_OK) {
-    CancelWithError(net::FileErrorToNetError(error_code));
+    if (has_controller()) {
+      CancelWithError(net::FileErrorToNetError(error_code));
+    } else {
+      OutOfBandCancel(net::FileErrorToNetError(error_code),
+                      true /* tell_renderer */);
+    }
     return;
   }
 
   writer_ = new Writer(this, std::move(file_stream), deletable_file);
 
-  // Resume the request.
-  request()->LogUnblocked();
-  next_handler_->OnWillStart(std::move(will_start_url_), ReleaseController());
+  if (response_pending_file_creation_) {
+    scoped_refptr<network::ResourceResponse> response =
+        std::move(response_pending_file_creation_);
+    request()->LogUnblocked();
+    OnResponseStarted(response.get(), ReleaseController());
+  }
 }
 
 void RedirectToFileResourceHandler::DidWriteToFile(int result) {
   bool failed = false;
   if (result > 0) {
-    next_handler_->OnDataDownloaded(result);
+    OnDataDownloaded(result);
     write_cursor_ += result;
     // WriteMore will resume the request if the request hasn't completed and
     // there's more buffer space.
@@ -340,8 +342,9 @@ bool RedirectToFileResourceHandler::WriteMore() {
     // Also note that Write may increase the refcount of "wrapped" deep in the
     // bowels of its implementation, the use of scoped_refptr here is not
     // spurious.
-    scoped_refptr<DependentIOBuffer> wrapped = new DependentIOBuffer(
-        buf_.get(), buf_->StartOfBuffer() + write_cursor_);
+    scoped_refptr<DependentIOBufferForRedirectToFile> wrapped =
+        new DependentIOBufferForRedirectToFile(
+            buf_.get(), buf_->StartOfBuffer() + write_cursor_);
     int write_len = buf_->offset() - write_cursor_;
 
     int rv = writer_->Write(wrapped.get(), write_len);
@@ -349,7 +352,7 @@ bool RedirectToFileResourceHandler::WriteMore() {
       break;
     if (rv <= 0)
       return false;
-    next_handler_->OnDataDownloaded(rv);
+    OnDataDownloaded(rv);
     write_cursor_ += rv;
   }
 

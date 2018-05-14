@@ -11,7 +11,6 @@
 #include "base/command_line.h"
 #include "base/ios/device_util.h"
 #include "base/ios/ios_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/string16.h"
@@ -24,12 +23,13 @@
 #include "ios/chrome/browser/autocomplete/autocomplete_scheme_classifier_impl.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/ui/omnibox/chrome_omnibox_client_ios.h"
-#include "ios/chrome/browser/ui/omnibox/omnibox_popup_view_ios.h"
+#include "ios/chrome/browser/ui/omnibox/omnibox_text_field_paste_delegate.h"
 #include "ios/chrome/browser/ui/omnibox/omnibox_util.h"
-#include "ios/chrome/browser/ui/omnibox/preload_provider.h"
+#include "ios/chrome/browser/ui/omnibox/web_omnibox_edit_controller.h"
 #include "ios/chrome/browser/ui/ui_util.h"
+#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
-#include "ios/shared/chrome/browser/ui/omnibox/web_omnibox_edit_controller.h"
 #include "ios/web/public/referrer.h"
 #import "net/base/mac/url_conversions.h"
 #include "skia/ext/skia_utils_ios.h"
@@ -46,6 +46,9 @@
 using base::UserMetricsAction;
 
 namespace {
+const CGFloat kClearTextButtonWidth = 28;
+const CGFloat kClearTextButtonHeight = 28;
+
 // The color of the rest of the URL (i.e. after the TLD) in the omnibox.
 UIColor* BaseTextColor() {
   return [UIColor colorWithWhite:(161 / 255.0) alpha:1.0];
@@ -67,6 +70,8 @@ UIColor* IncognitoSecureTextColor() {
 }
 
 }  // namespace
+
+#pragma mark - AutocompleteTextFieldDelegate
 
 // Simple Obj-C object to forward UITextFieldDelegate method calls back to the
 // OmniboxViewIOS.
@@ -159,29 +164,72 @@ UIColor* IncognitoSecureTextColor() {
 
 @end
 
+#pragma mark - OmniboxClearButtonBridge
+
+// An ObjC bridge class to allow taps on the clear button to be sent to a C++
+// class.
+@interface OmniboxClearButtonBridge : NSObject
+
+- (instancetype)initWithOmniboxView:(OmniboxViewIOS*)omniboxView
+    NS_DESIGNATED_INITIALIZER;
+
+- (instancetype)init NS_UNAVAILABLE;
+
+- (void)clearText;
+
+@end
+
+@implementation OmniboxClearButtonBridge {
+  OmniboxViewIOS* _omniboxView;
+}
+
+- (instancetype)initWithOmniboxView:(OmniboxViewIOS*)omniboxView {
+  self = [super init];
+  if (self) {
+    _omniboxView = omniboxView;
+  }
+  return self;
+}
+
+- (void)clearText {
+  _omniboxView->ClearText();
+}
+
+@end
+
+#pragma mark - OminboxViewIOS
+
 OmniboxViewIOS::OmniboxViewIOS(OmniboxTextFieldIOS* field,
                                WebOmniboxEditController* controller,
-                               ios::ChromeBrowserState* browser_state,
-                               id<PreloadProvider> preloader,
-                               id<OmniboxPopupPositioner> positioner)
+                               LeftImageProvider* left_image_provider,
+                               ios::ChromeBrowserState* browser_state)
     : OmniboxView(
           controller,
-          base::MakeUnique<ChromeOmniboxClientIOS>(controller, browser_state)),
+          std::make_unique<ChromeOmniboxClientIOS>(controller, browser_state)),
       browser_state_(browser_state),
       field_(field),
       controller_(controller),
-      preloader_(preloader),
+      left_image_provider_(left_image_provider),
       ignore_popup_updates_(false),
-      attributing_display_string_(nil) {
+      attributing_display_string_(nil),
+      popup_provider_(nullptr) {
   DCHECK(field_);
-  popup_view_.reset(new OmniboxPopupViewIOS(this, model(), positioner));
-  field_delegate_.reset(
-      [[AutocompleteTextFieldDelegate alloc] initWithEditView:this]);
+  field_delegate_ =
+      [[AutocompleteTextFieldDelegate alloc] initWithEditView:this];
+
+  if (@available(iOS 11.0, *)) {
+    paste_delegate_ = [[OmniboxTextFieldPasteDelegate alloc] init];
+    [field_ setPasteDelegate:paste_delegate_];
+  }
+
   [field_ setDelegate:field_delegate_];
   [field_ addTarget:field_delegate_
                 action:@selector(textFieldDidChange:)
       forControlEvents:UIControlEventEditingChanged];
-  use_strikethrough_workaround_ = base::ios::IsRunningOnOrLater(10, 3, 0);
+  use_strikethrough_workaround_ = base::ios::IsRunningOnOrLater(10, 3, 0) &&
+                                  !base::ios::IsRunningOnOrLater(11, 2, 0);
+
+  CreateClearTextIcon(browser_state->IsOffTheRecord());
 }
 
 OmniboxViewIOS::~OmniboxViewIOS() {
@@ -191,9 +239,6 @@ OmniboxViewIOS::~OmniboxViewIOS() {
   [field_ removeTarget:field_delegate_
                 action:@selector(textFieldDidChange:)
       forControlEvents:UIControlEventEditingChanged];
-
-  // Destroy the model, in case it tries to call back into us when destroyed.
-  popup_view_.reset();
 }
 
 void OmniboxViewIOS::OpenMatch(const AutocompleteMatch& match,
@@ -220,8 +265,9 @@ void OmniboxViewIOS::SetWindowTextAndCaretPos(const base::string16& text,
                                               bool notify_text_changed) {
   // Do not call SetUserText() here, as the user has not triggered this change.
   // Instead, set the field's text directly.
-  // TODO(justincohen): b/5244062 Temporary fix to set the text_field value
-  // before model()->CurrentTextIsUrl(), since that pulls from text_field.value.
+  // Set the field_ value before calling ApplyTextAttributes(), because that
+  // internally calls model()->CurrentTextIsUrl(), which uses the text in the
+  // field_.
   [field_ setText:base::SysUTF16ToNSString(text)];
 
   NSAttributedString* as = ApplyTextAttributes(text);
@@ -257,11 +303,13 @@ void OmniboxViewIOS::UpdatePopup() {
       NSMaxRange(current_selection_) != [[field_ text] length];
   model()->StartAutocomplete(current_selection_.length != 0,
                              prevent_inline_autocomplete);
-  popup_view_->SetTextAlignment([field_ bestTextAlignment]);
+  DCHECK(popup_provider_);
+  popup_provider_->SetTextAlignment([field_ bestTextAlignment]);
 }
 
 void OmniboxViewIOS::OnTemporaryTextMaybeChanged(
     const base::string16& display_text,
+    const AutocompleteMatch& match,
     bool save_original_selection,
     bool notify_text_changed) {
   SetWindowTextAndCaretPos(display_text, display_text.size(), false, false);
@@ -282,7 +330,7 @@ bool OmniboxViewIOS::OnInlineAutocompleteTextMaybeChanged(
 
 void OmniboxViewIOS::OnBeforePossibleChange() {
   GetState(&state_before_change_);
-  marked_text_before_change_.reset([[field_ markedText] copy]);
+  marked_text_before_change_ = [[field_ markedText] copy];
 }
 
 bool OmniboxViewIOS::OnAfterPossibleChange(bool allow_keyword_ui_change) {
@@ -325,7 +373,13 @@ bool OmniboxViewIOS::DeleteAtEndPressed() {
 
 void OmniboxViewIOS::GetSelectionBounds(base::string16::size_type* start,
                                         base::string16::size_type* end) const {
-  *start = *end = 0;
+  if ([field_ isFirstResponder]) {
+    NSRange selected_range = [field_ selectedNSRange];
+    *start = selected_range.location;
+    *end = selected_range.location + selected_range.length;
+  } else {
+    *start = *end = 0;
+  }
 }
 
 gfx::NativeView OmniboxViewIOS::GetNativeView() const {
@@ -349,23 +403,20 @@ void OmniboxViewIOS::OnDidBeginEditing() {
   // If Open from Clipboard offers a suggestion, the popup may be opened when
   // |OnSetFocus| is called on the model. The state of the popup is saved early
   // to ignore that case.
-  bool popup_was_open_before_editing_began = popup_view_->IsOpen();
+  DCHECK(popup_provider_);
+  bool popup_was_open_before_editing_began = popup_provider_->IsPopupOpen();
 
   // Text attributes (e.g. text color) should not be shown while editing, so
   // strip them out by calling setText (as opposed to setAttributedText).
   [field_ setText:[field_ text]];
-  [field_ enableLeftViewButton:NO];
   OnBeforePossibleChange();
   // In the case where the user taps the fakebox on the Google landing page,
-  // the WebToolbarController invokes OnSetFocus before calling
-  // becomeFirstResponder on OmniboxTextFieldIOS (which leads to this method
-  // beting invoked) so there is no need to call OnSetFocus again. In fact,
-  // calling OnSetFocus again here would reset the caret visibility to true and
-  // it would be impossible to tell that the omnibox was focused by a tap in the
-  // fakebox instead of the omnibox.
-  if (!model()->has_focus()) {
-    model()->OnSetFocus(false);
+  // the focus source is already set to FAKEBOX. Otherwise, set it to OMNIBOX.
+  if (model()->focus_source() != OmniboxEditModel::FocusSource::FAKEBOX) {
+    model()->set_focus_source(OmniboxEditModel::FocusSource::OMNIBOX);
   }
+
+  model()->OnSetFocus(false);
 
   // If the omnibox is displaying a URL and the popup is not showing, set the
   // field into pre-editing state.  If the omnibox is displaying search terms,
@@ -376,6 +427,8 @@ void OmniboxViewIOS::OnDidBeginEditing() {
   if (!popup_was_open_before_editing_began)
     [field_ enterPreEditState];
 
+  UpdateRightDecorations();
+
   // The controller looks at the current pre-edit state, so the call to
   // OnSetFocus() must come after entering pre-edit.
   controller_->OnSetFocus();
@@ -383,19 +436,16 @@ void OmniboxViewIOS::OnDidBeginEditing() {
 
 void OmniboxViewIOS::OnDidEndEditing() {
   CloseOmniboxPopup();
-  [field_ enableLeftViewButton:YES];
   model()->OnWillKillFocus();
   model()->OnKillFocus();
   if ([field_ isPreEditing])
     [field_ exitPreEditState];
 
+  UpdateRightDecorations();
+
   // The controller looks at the current pre-edit state, so the call to
   // OnKillFocus() must come after exiting pre-edit.
   controller_->OnKillFocus();
-
-  // Cancel any outstanding preload requests.
-  [preloader_ cancelPrerender];
-  [preloader_ cancelPrefetch];
 
   // Blow away any in-progress edits.
   RevertAll();
@@ -492,9 +542,11 @@ void OmniboxViewIOS::OnDidChange(bool processing_user_event) {
     base::string16 pastedText = base::SysNSStringToUTF16([field_ text]);
     base::string16 newText = OmniboxView::SanitizeTextForPaste(pastedText);
     if (pastedText != newText) {
-      [field_ setText:SysUTF16ToNSString(newText)];
+      [field_ setText:base::SysUTF16ToNSString(newText)];
     }
   }
+
+  UpdateRightDecorations();
 
   // Clear the autocomplete text, since the omnibox model does not expect to see
   // it in OnAfterPossibleChange().  Clearing the text here should not cause
@@ -506,15 +558,13 @@ void OmniboxViewIOS::OnDidChange(bool processing_user_event) {
   // Generally do not notify the autocomplete system of a text change unless the
   // change was a direct result of a user event.  One exception is if the marked
   // text changed, which could happen through a delayed IME recognition
-  // callback.  iOS4 does not provide API access to marked text, so use
-  // |IsImeComposing()| as a proxy.
+  // callback.
   bool proceed_without_user_event = false;
 
   // The IME exception does not work for Korean text, because Korean does not
   // seem to ever have marked text.  It simply replaces or modifies previous
-  // characters as you type.  Always proceed without user input on iOS7 if the
-  // Korean keyboard is currently active.  (This Korean exception is not
-  // possible on iOS6 due to crbug.com/285294.)
+  // characters as you type.  Always proceed without user input if the
+  // Korean keyboard is currently active.
   NSString* current_language = [[field_ textInputMode] primaryLanguage];
 
   if ([current_language hasPrefix:@"ko-"]) {
@@ -644,7 +694,6 @@ void OmniboxViewIOS::UpdateSchemeStyle(const gfx::Range& range) {
     return;
   }
 
-  DCHECK_NE(security_state::SECURITY_WARNING, security_level);
   DCHECK_NE(security_state::SECURE_WITH_POLICY_INSTALLED_CERT, security_level);
 
   if (security_level == security_state::DANGEROUS) {
@@ -658,12 +707,14 @@ void OmniboxViewIOS::UpdateSchemeStyle(const gfx::Range& range) {
     }
 
     NSRange strikethroughRange = range.ToNSRange();
-    // TODO(crbug.com/751801): remove this workaround.
-    // In iOS 11, UITextField has a bug: when the first character has
-    // strikethrough attribute, typing and setting text without strikethrough
-    // attribute will still result in strikethrough. The following is a
-    // workaround that prevents crossing out the first character.
-    if (base::ios::IsRunningOnOrLater(11, 0, 0)) {
+
+    if (base::ios::IsRunningOnOrLater(11, 0, 0) &&
+        !base::ios::IsRunningOnOrLater(11, 2, 0)) {
+      // This is a workaround for an iOS bug (crbug.com/751801) fixed in 11.2.
+      // In iOS 11, UITextField has a bug: when the first character has
+      // strikethrough attribute, typing and setting text without strikethrough
+      // attribute will still result in strikethrough. The following is a
+      // workaround that prevents crossing out the first character.
       if (strikethroughRange.location == 0 && strikethroughRange.length > 0) {
         strikethroughRange.location += 1;
         strikethroughRange.length -= 1;
@@ -694,14 +745,15 @@ NSAttributedString* OmniboxViewIOS::ApplyTextAttributes(
   DCHECK(attributing_display_string_ == nil);
   base::AutoReset<NSMutableAttributedString*> resetter(
       &attributing_display_string_, as);
-  UpdateTextStyle(text, AutocompleteSchemeClassifierImpl());
+  UpdateTextStyle(text, model()->CurrentTextIsURL(),
+                  AutocompleteSchemeClassifierImpl());
   return as;
 }
 
 void OmniboxViewIOS::UpdateAppearance() {
   // If Siri is thinking, treat that as user input being in progress.  It is
   // unsafe to modify the text field while voice entry is pending.
-  if (model()->UpdatePermanentText()) {
+  if (model()->ResetDisplayUrls()) {
     // Revert everything to the baseline look.
     RevertAll();
   } else if (!model()->has_focus() &&
@@ -709,10 +761,50 @@ void OmniboxViewIOS::UpdateAppearance() {
     // Even if the change wasn't "user visible" to the model, it still may be
     // necessary to re-color to the URL string.  Only do this if the omnibox is
     // not currently focused.
-    base::string16 text =
-        controller_->GetToolbarModel()->GetFormattedURL(nullptr);
-    NSAttributedString* as = ApplyTextAttributes(text);
+    NSAttributedString* as =
+        ApplyTextAttributes(model()->GetCurrentPermanentUrlText());
     [field_ setText:as userTextLength:[as length]];
+  }
+}
+
+void OmniboxViewIOS::CreateClearTextIcon(bool is_incognito) {
+  UIButton* button = [UIButton buttonWithType:UIButtonTypeCustom];
+  UIImage* omniBoxClearImage = is_incognito
+                                   ? NativeImage(IDR_IOS_OMNIBOX_CLEAR_OTR)
+                                   : NativeImage(IDR_IOS_OMNIBOX_CLEAR);
+  UIImage* omniBoxClearPressedImage =
+      is_incognito ? NativeImage(IDR_IOS_OMNIBOX_CLEAR_OTR_PRESSED)
+                   : NativeImage(IDR_IOS_OMNIBOX_CLEAR_PRESSED);
+  [button setImage:omniBoxClearImage forState:UIControlStateNormal];
+  [button setImage:omniBoxClearPressedImage forState:UIControlStateHighlighted];
+
+  CGRect frame = CGRectZero;
+  frame.size = CGSizeMake(kClearTextButtonWidth, kClearTextButtonHeight);
+  [button setFrame:frame];
+
+  clear_button_bridge_ =
+      [[OmniboxClearButtonBridge alloc] initWithOmniboxView:this];
+  [button addTarget:clear_button_bridge_
+                action:@selector(clearText)
+      forControlEvents:UIControlEventTouchUpInside];
+  clear_text_button_ = button;
+
+  SetA11yLabelAndUiAutomationName(clear_text_button_,
+                                  IDS_IOS_ACCNAME_CLEAR_TEXT, @"Clear Text");
+}
+
+void OmniboxViewIOS::UpdateRightDecorations() {
+  DCHECK(clear_text_button_);
+  if (!model()->has_focus()) {
+    // Do nothing for iPhone. The right view will be set to nil after the
+    // omnibox animation is completed.
+    if (IsIPadIdiom())
+      [field_ setRightView:nil];
+  } else if ([field_ displayedText].empty()) {
+    [field_ setRightView:nil];
+  } else {
+    [field_ setRightView:clear_text_button_];
+    [clear_text_button_ setAlpha:1];
   }
 }
 
@@ -754,8 +846,8 @@ void OmniboxViewIOS::ClearText() {
     RemoveQueryRefinementChip();
   } else {
     // Otherwise, just remove the text in the omnibox.
-    // Since iOS 6, calling |setText| does not trigger |textDidChange| so it
-    // must be called explicitly.
+    // Calling -[UITextField setText:] does not trigger
+    // -[id<UITextFieldDelegate> textDidChange] so it must be called explicitly.
     OnClear();
     [field_ setText:@""];
     OnDidChange(YES);
@@ -780,7 +872,7 @@ bool OmniboxViewIOS::ShouldIgnoreUserInputDueToPendingVoiceSearch() {
 }
 
 void OmniboxViewIOS::SetLeftImage(int imageId) {
-  [field_ setPlaceholderImage:imageId];
+  left_image_provider_->SetLeftImage(imageId);
 }
 
 void OmniboxViewIOS::HideKeyboardAndEndEditing() {
@@ -803,45 +895,9 @@ void OmniboxViewIOS::FocusOmnibox() {
   [field_ becomeFirstResponder];
 }
 
-// Called whenever the popup results change.  May trigger the URLs of
-// autocomplete results to be prerendered or prefetched.
-void OmniboxViewIOS::OnPopupResultsChanged(const AutocompleteResult& result) {
-  if (!ignore_popup_updates_ && !result.empty()) {
-    const AutocompleteMatch& match = result.match_at(0);
-    bool is_inline_autocomplete = !match.inline_autocompletion.empty();
-
-    // TODO(rohitrao): When prerendering the result of a paste operation, we
-    // should change the transition to LINK instead of TYPED.  b/6143631.
-
-    // Only prerender HISTORY_URL matches, which come from the history DB.  Do
-    // not prerender other types of matches, including matches from the search
-    // provider.
-    if (is_inline_autocomplete &&
-        match.type == AutocompleteMatchType::HISTORY_URL) {
-      ui::PageTransition transition = ui::PageTransitionFromInt(
-          match.transition | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
-      [preloader_ prerenderURL:match.destination_url
-                      referrer:web::Referrer()
-                    transition:transition
-                   immediately:is_inline_autocomplete];
-    } else {
-      [preloader_ cancelPrerender];
-    }
-
-    // If the first autocomplete result is a search suggestion, prefetch the
-    // corresponding search result page.
-    if (match.type == AutocompleteMatchType::SEARCH_SUGGEST) {
-      ui::PageTransition transition = ui::PageTransitionFromInt(
-          match.transition | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
-      [preloader_ prefetchURL:match.destination_url transition:transition];
-    } else {
-      [preloader_ cancelPrefetch];
-    }
-  }
-}
-
 BOOL OmniboxViewIOS::IsPopupOpen() {
-  return popup_view_->IsOpen();
+  DCHECK(popup_provider_);
+  return popup_provider_->IsPopupOpen();
 }
 
 int OmniboxViewIOS::GetIcon(bool offlinePage) const {
@@ -874,4 +930,42 @@ void OmniboxViewIOS::EmphasizeURLComponents() {
   if (!IsEditingOrEmpty())
     SetText(GetText());
 #endif
+}
+
+#pragma mark - OmniboxPopupViewSuggestionsDelegate
+
+void OmniboxViewIOS::OnTopmostSuggestionImageChanged(int imageId) {
+  this->SetLeftImage(imageId);
+}
+
+void OmniboxViewIOS::OnResultsChanged(const AutocompleteResult& result) {
+  if (ignore_popup_updates_) {
+    // Please contact rohitrao@ if the following DCHECK ever fires.  If
+    // |ignore_popup_updates_| is true but |result| is not empty, then the new
+    // prerender code in ChromeOmniboxClientIOS will incorrectly discard its
+    // prerender.
+    // TODO(crbug.com/754050): Remove this whole method once we are reasonably
+    // confident that we are not throwing away prerenders.
+    DCHECK(result.empty());
+  }
+}
+
+void OmniboxViewIOS::OnPopupDidScroll() {
+  if (!IsIPadIdiom()) {
+    this->HideKeyboard();
+  }
+}
+
+void OmniboxViewIOS::OnSelectedMatchForAppending(const base::string16& str) {
+  this->SetUserText(str);
+  this->FocusOmnibox();
+}
+
+void OmniboxViewIOS::OnSelectedMatchForOpening(
+    AutocompleteMatch match,
+    WindowOpenDisposition disposition,
+    const GURL& alternate_nav_url,
+    const base::string16& pasted_text,
+    size_t index) {
+  this->OpenMatch(match, disposition, alternate_nav_url, pasted_text, index);
 }

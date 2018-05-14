@@ -33,7 +33,7 @@ OverscrollController::OverscrollController(
     ChromeClient& chrome_client)
     : visual_viewport_(&visual_viewport), chrome_client_(&chrome_client) {}
 
-DEFINE_TRACE(OverscrollController) {
+void OverscrollController::Trace(blink::Visitor* visitor) {
   visitor->Trace(visual_viewport_);
   visitor->Trace(chrome_client_);
 }
@@ -67,9 +67,17 @@ void OverscrollController::HandleOverscroll(
 
   if (delta_in_viewport != FloatSize()) {
     accumulated_root_overscroll_ += delta_in_viewport;
-    chrome_client_->DidOverscroll(delta_in_viewport,
-                                  accumulated_root_overscroll_,
-                                  position_in_viewport, velocity_in_viewport);
+    chrome_client_->DidOverscroll(
+        delta_in_viewport, accumulated_root_overscroll_, position_in_viewport,
+        velocity_in_viewport, overscroll_behavior_);
+  }
+}
+
+void OverscrollController::SetOverscrollBehavior(
+    const WebOverscrollBehavior& behavior) {
+  if (behavior != overscroll_behavior_) {
+    overscroll_behavior_ = behavior;
+    chrome_client_->SetOverscrollBehavior(behavior);
   }
 }
 

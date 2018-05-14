@@ -21,6 +21,7 @@ WebRTCInternalsMessageHandler::WebRTCInternalsMessageHandler()
 WebRTCInternalsMessageHandler::WebRTCInternalsMessageHandler(
     WebRTCInternals* webrtc_internals)
     : webrtc_internals_(webrtc_internals) {
+  DCHECK(webrtc_internals);
   webrtc_internals_->AddObserver(this);
 }
 
@@ -98,10 +99,16 @@ void WebRTCInternalsMessageHandler::OnSetAudioDebugRecordingsEnabled(
 void WebRTCInternalsMessageHandler::OnSetEventLogRecordingsEnabled(
     bool enable,
     const base::ListValue* /* unused_list */) {
+  if (!webrtc_internals_->CanToggleEventLogRecordings()) {
+    LOG(WARNING) << "Cannot toggle WebRTC event logging.";
+    return;
+  }
+
   if (enable) {
-    webrtc_internals_->EnableEventLogRecordings(web_ui()->GetWebContents());
+    webrtc_internals_->EnableLocalEventLogRecordings(
+        web_ui()->GetWebContents());
   } else {
-    webrtc_internals_->DisableEventLogRecordings();
+    webrtc_internals_->DisableLocalEventLogRecordings();
   }
 }
 
@@ -109,20 +116,27 @@ void WebRTCInternalsMessageHandler::OnDOMLoadDone(
     const base::ListValue* /* unused_list */) {
   webrtc_internals_->UpdateObserver(this);
 
-  if (webrtc_internals_->IsAudioDebugRecordingsEnabled()) {
-    RenderFrameHost* host = GetWebRTCInternalsHost();
-    if (!host)
-      return;
+  if (webrtc_internals_->IsAudioDebugRecordingsEnabled())
+    ExecuteJavascriptCommand("setAudioDebugRecordingsEnabled", nullptr);
 
-    std::vector<const base::Value*> args_vector;
-    base::string16 script =
-        WebUI::GetJavascriptCall("setAudioDebugRecordingsEnabled", args_vector);
-    host->ExecuteJavaScript(script);
-  }
+  if (webrtc_internals_->IsEventLogRecordingsEnabled())
+    ExecuteJavascriptCommand("setEventLogRecordingsEnabled", nullptr);
+
+  const base::Value can_toggle(
+      webrtc_internals_->CanToggleEventLogRecordings());
+  ExecuteJavascriptCommand("setEventLogRecordingsToggleability", &can_toggle);
 }
 
 void WebRTCInternalsMessageHandler::OnUpdate(const char* command,
                                              const base::Value* args) {
+  ExecuteJavascriptCommand(command, args);
+}
+
+// TODO(eladalon): Make this function accept a vector of base::Values.
+// https://crbug.com/817384
+void WebRTCInternalsMessageHandler::ExecuteJavascriptCommand(
+    const char* command,
+    const base::Value* args) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   RenderFrameHost* host = GetWebRTCInternalsHost();
@@ -133,8 +147,8 @@ void WebRTCInternalsMessageHandler::OnUpdate(const char* command,
   if (args)
     args_vector.push_back(args);
 
-  base::string16 update = WebUI::GetJavascriptCall(command, args_vector);
-  host->ExecuteJavaScript(update);
+  base::string16 script = WebUI::GetJavascriptCall(command, args_vector);
+  host->ExecuteJavaScript(script);
 }
 
 }  // namespace content

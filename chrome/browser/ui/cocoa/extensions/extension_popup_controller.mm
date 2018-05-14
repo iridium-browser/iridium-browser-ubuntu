@@ -16,6 +16,7 @@
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
+#import "chrome/browser/ui/cocoa/l10n_util.h"
 #include "chrome/common/url_constants.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_context.h"
@@ -26,6 +27,7 @@
 #include "extensions/browser/notification_types.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
 #include "ui/base/cocoa/window_size_constants.h"
+#include "ui/base/material_design/material_design_controller.h"
 
 using content::BrowserContext;
 using content::RenderViewHost;
@@ -54,7 +56,6 @@ BOOL gAnimationsEnabled = true;
 // Callers should be using the public static method for initialization.
 - (id)initWithParentWindow:(NSWindow*)parentWindow
                 anchoredAt:(NSPoint)anchoredAt
-             arrowLocation:(info_bubble::BubbleArrowLocation)arrowLocation
                    devMode:(BOOL)devMode;
 
 // Set the ExtensionViewHost, taking ownership.
@@ -165,7 +166,6 @@ class ExtensionPopupNotificationBridge :
 
 - (id)initWithParentWindow:(NSWindow*)parentWindow
                 anchoredAt:(NSPoint)anchoredAt
-             arrowLocation:(info_bubble::BubbleArrowLocation)arrowLocation
                    devMode:(BOOL)devMode {
   base::scoped_nsobject<InfoBubbleWindow> window([[InfoBubbleWindow alloc]
       initWithContentRect:ui::kWindowSizeDeterminedLater
@@ -181,7 +181,14 @@ class ExtensionPopupNotificationBridge :
                          anchoredAt:anchoredAt])) {
     beingInspected_ = devMode;
     ignoreWindowDidResignKey_ = NO;
-    [[self bubble] setArrowLocation:arrowLocation];
+    if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+      // Under MD, bubbles never have arrows.
+      [[self bubble] setArrowLocation:info_bubble::kNoArrow];
+      [[self bubble] setAlignment:info_bubble::kAlignTrailingEdgeToAnchorEdge];
+    } else {
+      [[self bubble] setArrowLocation:info_bubble::kTopTrailing];
+      [[self bubble] setAlignment:info_bubble::kAlignArrowToAnchor];
+    }
     if (!gAnimationsEnabled)
       [window setAllowedAnimations:info_bubble::kAnimateNone];
   }
@@ -258,8 +265,6 @@ class ExtensionPopupNotificationBridge :
 + (ExtensionPopupController*)host:(std::unique_ptr<ExtensionViewHost>)host
                         inBrowser:(Browser*)browser
                        anchoredAt:(NSPoint)anchoredAt
-                    arrowLocation:
-                        (info_bubble::BubbleArrowLocation)arrowLocation
                           devMode:(BOOL)devMode {
   DCHECK([NSThread isMainThread]);
   DCHECK(browser);
@@ -274,7 +279,6 @@ class ExtensionPopupNotificationBridge :
   gPopup = [[ExtensionPopupController alloc]
       initWithParentWindow:browser->window()->GetNativeWindow()
                 anchoredAt:anchoredAt
-             arrowLocation:arrowLocation
                    devMode:devMode];
   [gPopup setExtensionViewHost:std::move(host)];
   return gPopup;
@@ -339,18 +343,27 @@ class ExtensionPopupNotificationBridge :
   [extensionView_ setFrameOrigin:NSMakePoint(inset, inset)];
 
   NSRect frame = [extensionView_ frame];
-  frame.size.height += info_bubble::kBubbleArrowHeight +
-                       info_bubble::kBubbleCornerRadius;
+  frame.size.height += info_bubble::kBubbleCornerRadius;
   frame.size.width += info_bubble::kBubbleCornerRadius;
-  frame = [extensionView_ convertRect:frame toView:nil];
+
   // Adjust the origin according to the height and width so that the arrow is
   // positioned correctly at the middle and slightly down from the button.
   NSPoint windowOrigin = self.anchorPoint;
-  NSSize offsets = NSMakeSize(info_bubble::kBubbleArrowXOffset +
-                                  info_bubble::kBubbleArrowWidth / 2.0,
-                              info_bubble::kBubbleArrowHeight / 2.0);
+  NSSize offsets = {0, 0};
+  if ([[self bubble] arrowLocation] != info_bubble::kNoArrow) {
+    frame.size.height += info_bubble::kBubbleArrowHeight;
+    offsets = NSMakeSize(
+        info_bubble::kBubbleArrowXOffset + info_bubble::kBubbleArrowWidth / 2.0,
+        info_bubble::kBubbleArrowHeight / 2.0);
+  }
+
+  frame = [extensionView_ convertRect:frame toView:nil];
   offsets = [extensionView_ convertSize:offsets toView:nil];
-  windowOrigin.x -= NSWidth(frame) - offsets.width;
+  if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout()) {
+    windowOrigin.x -= offsets.width;
+  } else {
+    windowOrigin.x -= NSWidth(frame) - offsets.width;
+  }
   windowOrigin.y -= NSHeight(frame) - offsets.height;
   frame.origin = windowOrigin;
 

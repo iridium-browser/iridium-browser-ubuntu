@@ -6,7 +6,9 @@
 
 #include "base/base_paths.h"
 #include "base/path_service.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "ios/web_view/internal/app/application_context.h"
+#import "ios/web_view/internal/cwv_web_view_configuration_internal.h"
 #include "ios/web_view/internal/translate/web_view_translate_service.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -43,11 +45,15 @@ void WebViewWebMainParts::PreCreateThreads() {
 
 void WebViewWebMainParts::PreMainMessageLoopRun() {
   WebViewTranslateService::GetInstance()->Initialize();
+
+  ContentSettingsPattern::SetNonWildcardDomainNonPortSchemes(
+      /*schemes=*/nullptr, 0);
 }
 
 void WebViewWebMainParts::PostMainMessageLoopRun() {
   WebViewTranslateService::GetInstance()->Shutdown();
   ApplicationContext::GetInstance()->SaveState();
+  [CWVWebViewConfiguration shutDown];
 }
 
 void WebViewWebMainParts::PostDestroyThreads() {

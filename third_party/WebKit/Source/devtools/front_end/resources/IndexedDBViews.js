@@ -40,16 +40,16 @@ Resources.IDBDatabaseView = class extends UI.VBox {
     super();
 
     this._model = model;
-    var databaseName = database ? database.databaseId.name : Common.UIString('Loading\u2026');
+    const databaseName = database ? database.databaseId.name : Common.UIString('Loading\u2026');
 
     this._reportView = new UI.ReportView(databaseName);
     this._reportView.show(this.contentElement);
 
-    var bodySection = this._reportView.appendSection('');
+    const bodySection = this._reportView.appendSection('');
     this._securityOriginElement = bodySection.appendField(Common.UIString('Security origin'));
     this._versionElement = bodySection.appendField(Common.UIString('Version'));
 
-    var footer = this._reportView.appendSection('').appendRow();
+    const footer = this._reportView.appendSection('').appendRow();
     this._clearButton = UI.createTextButton(
         Common.UIString('Delete database'), () => this._deleteDatabase(), Common.UIString('Delete database'));
     footer.appendChild(this._clearButton);
@@ -86,10 +86,11 @@ Resources.IDBDatabaseView = class extends UI.VBox {
     // Sniffed in tests.
   }
 
-  _deleteDatabase() {
-    UI.ConfirmDialog.show(
-        this.element, Common.UIString('Are you sure you want to delete "%s"?', this._database.databaseId.name),
-        () => this._model.deleteDatabase(this._database.databaseId));
+  async _deleteDatabase() {
+    const ok = await UI.ConfirmDialog.show(
+        Common.UIString('Please confirm delete of "%s" database.', this._database.databaseId.name), this.element);
+    if (ok)
+      this._model.deleteDatabase(this._database.databaseId);
   }
 };
 
@@ -102,24 +103,33 @@ Resources.IDBDataView = class extends UI.SimpleView {
    * @param {!Resources.IndexedDBModel.DatabaseId} databaseId
    * @param {!Resources.IndexedDBModel.ObjectStore} objectStore
    * @param {?Resources.IndexedDBModel.Index} index
+   * @param {function()} refreshObjectStoreCallback
    */
-  constructor(model, databaseId, objectStore, index) {
+  constructor(model, databaseId, objectStore, index, refreshObjectStoreCallback) {
     super(Common.UIString('IDB'));
     this.registerRequiredCSS('resources/indexedDBViews.css');
 
     this._model = model;
     this._databaseId = databaseId;
     this._isIndex = !!index;
+    this._refreshObjectStoreCallback = refreshObjectStoreCallback;
 
-    this.element.classList.add('indexed-db-data-view');
-
-    this._createEditorToolbar();
+    this.element.classList.add('indexed-db-data-view', 'storage-view');
 
     this._refreshButton = new UI.ToolbarButton(Common.UIString('Refresh'), 'largeicon-refresh');
     this._refreshButton.addEventListener(UI.ToolbarButton.Events.Click, this._refreshButtonClicked, this);
 
+    this._deleteSelectedButton = new UI.ToolbarButton(Common.UIString('Delete selected'), 'largeicon-delete');
+    this._deleteSelectedButton.addEventListener(UI.ToolbarButton.Events.Click, () => this._deleteButtonClicked(null));
+
     this._clearButton = new UI.ToolbarButton(Common.UIString('Clear object store'), 'largeicon-clear');
     this._clearButton.addEventListener(UI.ToolbarButton.Events.Click, this._clearButtonClicked, this);
+
+    this._needsRefresh = new UI.ToolbarItem(UI.createLabel(Common.UIString('Data may be stale'), 'smallicon-warning'));
+    this._needsRefresh.setVisible(false);
+    this._needsRefresh.setTitle(Common.UIString('Some entries may have been modified'));
+
+    this._createEditorToolbar();
 
     this._pageSize = 50;
     this._skipCount = 0;
@@ -132,9 +142,9 @@ Resources.IDBDataView = class extends UI.SimpleView {
    * @return {!DataGrid.DataGrid}
    */
   _createDataGrid() {
-    var keyPath = this._isIndex ? this._index.keyPath : this._objectStore.keyPath;
+    const keyPath = this._isIndex ? this._index.keyPath : this._objectStore.keyPath;
 
-    var columns = /** @type {!Array<!DataGrid.DataGrid.ColumnDescriptor>} */ ([]);
+    const columns = /** @type {!Array<!DataGrid.DataGrid.ColumnDescriptor>} */ ([]);
     columns.push({id: 'number', title: Common.UIString('#'), sortable: false, width: '50px'});
     columns.push(
         {id: 'key', titleDOMFragment: this._keyColumnHeaderFragment(Common.UIString('Key'), keyPath), sortable: false});
@@ -147,8 +157,10 @@ Resources.IDBDataView = class extends UI.SimpleView {
     }
     columns.push({id: 'value', title: Common.UIString('Value'), sortable: false});
 
-    var dataGrid = new DataGrid.DataGrid(columns);
+    const dataGrid = new DataGrid.DataGrid(
+        columns, undefined, this._deleteButtonClicked.bind(this), this._updateData.bind(this, true));
     dataGrid.setStriped(true);
+    dataGrid.addEventListener(DataGrid.DataGrid.Events.SelectedNode, event => this._updateToolbarEnablement(), this);
     return dataGrid;
   }
 
@@ -158,7 +170,7 @@ Resources.IDBDataView = class extends UI.SimpleView {
    * @return {!DocumentFragment}
    */
   _keyColumnHeaderFragment(prefix, keyPath) {
-    var keyColumnHeaderFragment = createDocumentFragment();
+    const keyColumnHeaderFragment = createDocumentFragment();
     keyColumnHeaderFragment.createTextChild(prefix);
     if (keyPath === null)
       return keyColumnHeaderFragment;
@@ -166,14 +178,14 @@ Resources.IDBDataView = class extends UI.SimpleView {
     keyColumnHeaderFragment.createTextChild(' (' + Common.UIString('Key path: '));
     if (Array.isArray(keyPath)) {
       keyColumnHeaderFragment.createTextChild('[');
-      for (var i = 0; i < keyPath.length; ++i) {
+      for (let i = 0; i < keyPath.length; ++i) {
         if (i !== 0)
           keyColumnHeaderFragment.createTextChild(', ');
         keyColumnHeaderFragment.appendChild(this._keyPathStringFragment(keyPath[i]));
       }
       keyColumnHeaderFragment.createTextChild(']');
     } else {
-      var keyPathString = /** @type {string} */ (keyPath);
+      const keyPathString = /** @type {string} */ (keyPath);
       keyColumnHeaderFragment.appendChild(this._keyPathStringFragment(keyPathString));
     }
     keyColumnHeaderFragment.createTextChild(')');
@@ -185,16 +197,22 @@ Resources.IDBDataView = class extends UI.SimpleView {
    * @return {!DocumentFragment}
    */
   _keyPathStringFragment(keyPathString) {
-    var keyPathStringFragment = createDocumentFragment();
+    const keyPathStringFragment = createDocumentFragment();
     keyPathStringFragment.createTextChild('"');
-    var keyPathSpan = keyPathStringFragment.createChild('span', 'source-code indexed-db-key-path');
+    const keyPathSpan = keyPathStringFragment.createChild('span', 'source-code indexed-db-key-path');
     keyPathSpan.textContent = keyPathString;
     keyPathStringFragment.createTextChild('"');
     return keyPathStringFragment;
   }
 
   _createEditorToolbar() {
-    var editorToolbar = new UI.Toolbar('data-view-toolbar', this.element);
+    const editorToolbar = new UI.Toolbar('data-view-toolbar', this.element);
+
+    editorToolbar.appendToolbarItem(this._refreshButton);
+    editorToolbar.appendToolbarItem(this._clearButton);
+    editorToolbar.appendToolbarItem(this._deleteSelectedButton);
+
+    editorToolbar.appendToolbarItem(new UI.ToolbarSeparator());
 
     this._pageBackButton = new UI.ToolbarButton(Common.UIString('Show previous page'), 'largeicon-play-back');
     this._pageBackButton.addEventListener(UI.ToolbarButton.Events.Click, this._pageBackButtonClicked, this);
@@ -205,13 +223,15 @@ Resources.IDBDataView = class extends UI.SimpleView {
     this._pageForwardButton.addEventListener(UI.ToolbarButton.Events.Click, this._pageForwardButtonClicked, this);
     editorToolbar.appendToolbarItem(this._pageForwardButton);
 
-    this._keyInputElement = UI.createInput('key-input');
-    editorToolbar.element.appendChild(this._keyInputElement);
+    this._keyInputElement = UI.createInput('toolbar-input');
+    editorToolbar.appendToolbarItem(new UI.ToolbarItem(this._keyInputElement));
     this._keyInputElement.placeholder = Common.UIString('Start from key');
     this._keyInputElement.addEventListener('paste', this._keyInputChanged.bind(this), false);
     this._keyInputElement.addEventListener('cut', this._keyInputChanged.bind(this), false);
     this._keyInputElement.addEventListener('keypress', this._keyInputChanged.bind(this), false);
     this._keyInputElement.addEventListener('keydown', this._keyInputChanged.bind(this), false);
+
+    editorToolbar.appendToolbarItem(this._needsRefresh);
   }
 
   /**
@@ -232,6 +252,10 @@ Resources.IDBDataView = class extends UI.SimpleView {
 
   _keyInputChanged() {
     window.setTimeout(this._updateData.bind(this, false), 0);
+  }
+
+  refreshData() {
+    this._updateData(true);
   }
 
   /**
@@ -255,7 +279,7 @@ Resources.IDBDataView = class extends UI.SimpleView {
    * @param {string} keyString
    */
   _parseKey(keyString) {
-    var result;
+    let result;
     try {
       result = JSON.parse(keyString);
     } catch (e) {
@@ -268,9 +292,11 @@ Resources.IDBDataView = class extends UI.SimpleView {
    * @param {boolean} force
    */
   _updateData(force) {
-    var key = this._parseKey(this._keyInputElement.value);
-    var pageSize = this._pageSize;
-    var skipCount = this._skipCount;
+    const key = this._parseKey(this._keyInputElement.value);
+    const pageSize = this._pageSize;
+    let skipCount = this._skipCount;
+    let selected = this._dataGrid.selectedNode ? this._dataGrid.selectedNode.data['number'] : 0;
+    selected = Math.max(selected, this._skipCount);  // Page forward should select top entry
     this._refreshButton.setEnabled(false);
     this._clearButton.setEnabled(!this._isIndex);
 
@@ -294,23 +320,30 @@ Resources.IDBDataView = class extends UI.SimpleView {
       this._refreshButton.setEnabled(true);
       this.clear();
       this._entries = entries;
-      for (var i = 0; i < entries.length; ++i) {
-        var data = {};
+      let selectedNode = null;
+      for (let i = 0; i < entries.length; ++i) {
+        const data = {};
         data['number'] = i + skipCount;
         data['key'] = entries[i].key;
         data['primaryKey'] = entries[i].primaryKey;
         data['value'] = entries[i].value;
 
-        var node = new Resources.IDBDataGridNode(data);
+        const node = new Resources.IDBDataGridNode(data);
         this._dataGrid.rootNode().appendChild(node);
+        if (data['number'] <= selected)
+          selectedNode = node;
       }
 
+      if (selectedNode)
+        selectedNode.select();
       this._pageBackButton.setEnabled(!!skipCount);
       this._pageForwardButton.setEnabled(hasMore);
+      this._needsRefresh.setVisible(false);
+      this._updateToolbarEnablement();
       this._updatedDataForTests();
     }
 
-    var idbKeyRange = key ? window.IDBKeyRange.lowerBound(key) : null;
+    const idbKeyRange = key ? window.IDBKeyRange.lowerBound(key) : null;
     if (this._isIndex) {
       this._model.loadIndexData(
           this._databaseId, this._objectStore.name, this._index.name, idbKeyRange, skipCount, pageSize,
@@ -326,7 +359,7 @@ Resources.IDBDataView = class extends UI.SimpleView {
   }
 
   /**
-   * @param {!Common.Event} event
+   * @param {?Common.Event} event
    */
   _refreshButtonClicked(event) {
     this._updateData(true);
@@ -342,17 +375,34 @@ Resources.IDBDataView = class extends UI.SimpleView {
     this._updateData(true);
   }
 
+  markNeedsRefresh() {
+    this._needsRefresh.setVisible(true);
+  }
+
   /**
-   * @override
-   * @return {!Array.<!UI.ToolbarItem>}
+   * @param {?DataGrid.DataGridNode} node
    */
-  syncToolbarItems() {
-    return [this._refreshButton, this._clearButton];
+  async _deleteButtonClicked(node) {
+    if (!node) {
+      node = this._dataGrid.selectedNode;
+      if (!node)
+        return;
+    }
+    const key = /** @type {!SDK.RemoteObject} */ (this._isIndex ? node.data.primaryKey : node.data.key);
+    const keyValue = /** @type {!Array<?>|!Date|number|string} */ (key.value);
+    await this._model.deleteEntries(this._databaseId, this._objectStore.name, window.IDBKeyRange.only(keyValue));
+    this._refreshObjectStoreCallback();
   }
 
   clear() {
     this._dataGrid.rootNode().removeChildren();
     this._entries = [];
+  }
+
+  _updateToolbarEnablement() {
+    const empty = !this._dataGrid || this._dataGrid.rootNode().children.length === 0;
+    this._clearButton.setEnabled(!empty);
+    this._deleteSelectedButton.setEnabled(!empty && this._dataGrid.selectedNode !== null);
   }
 };
 
@@ -365,7 +415,7 @@ Resources.IDBDataGridNode = class extends DataGrid.DataGridNode {
    */
   constructor(data) {
     super(data, false);
-    this.selectable = false;
+    this.selectable = true;
   }
 
   /**
@@ -373,15 +423,15 @@ Resources.IDBDataGridNode = class extends DataGrid.DataGridNode {
    * @return {!Element}
    */
   createCell(columnIdentifier) {
-    var cell = super.createCell(columnIdentifier);
-    var value = /** @type {!SDK.RemoteObject} */ (this.data[columnIdentifier]);
+    const cell = super.createCell(columnIdentifier);
+    const value = /** @type {!SDK.RemoteObject} */ (this.data[columnIdentifier]);
 
     switch (columnIdentifier) {
       case 'value':
       case 'key':
       case 'primaryKey':
         cell.removeChildren();
-        var objectElement = ObjectUI.ObjectPropertiesSection.defaultObjectPresentation(value, undefined, true);
+        const objectElement = ObjectUI.ObjectPropertiesSection.defaultObjectPresentation(value, undefined, true);
         cell.appendChild(objectElement);
         break;
       default:

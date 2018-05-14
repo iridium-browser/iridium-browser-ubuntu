@@ -42,9 +42,8 @@ class ChromeClient;
 class DateTimeChooserClient;
 class PagePopup;
 
-class CORE_EXPORT DateTimeChooserImpl final
-    : public NON_EXPORTED_BASE(DateTimeChooser),
-      public NON_EXPORTED_BASE(PagePopupClient) {
+class CORE_EXPORT DateTimeChooserImpl final : public DateTimeChooser,
+                                              public PagePopupClient {
  public:
   static DateTimeChooserImpl* Create(ChromeClient*,
                                      DateTimeChooserClient*,
@@ -55,7 +54,7 @@ class CORE_EXPORT DateTimeChooserImpl final
   void EndChooser() override;
   AXObject* RootAXObject() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   DateTimeChooserImpl(ChromeClient*,

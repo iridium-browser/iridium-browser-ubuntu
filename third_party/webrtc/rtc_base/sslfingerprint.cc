@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/sslfingerprint.h"
+#include "rtc_base/sslfingerprint.h"
 
 #include <ctype.h>
 #include <string>
 
-#include "webrtc/rtc_base/helpers.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/messagedigest.h"
-#include "webrtc/rtc_base/stringencode.h"
+#include "rtc_base/helpers.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/messagedigest.h"
+#include "rtc_base/stringencode.h"
 
 namespace rtc {
 
@@ -67,14 +67,15 @@ SSLFingerprint* SSLFingerprint::CreateFromCertificate(
     const RTCCertificate* cert) {
   std::string digest_alg;
   if (!cert->ssl_certificate().GetSignatureDigestAlgorithm(&digest_alg)) {
-    LOG(LS_ERROR) << "Failed to retrieve the certificate's digest algorithm";
+    RTC_LOG(LS_ERROR)
+        << "Failed to retrieve the certificate's digest algorithm";
     return nullptr;
   }
 
   SSLFingerprint* fingerprint = Create(digest_alg, cert->identity());
   if (!fingerprint) {
-    LOG(LS_ERROR) << "Failed to create identity fingerprint, alg="
-                  << digest_alg;
+    RTC_LOG(LS_ERROR) << "Failed to create identity fingerprint, alg="
+                      << digest_alg;
   }
   return fingerprint;
 }

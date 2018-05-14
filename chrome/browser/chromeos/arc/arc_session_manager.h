@@ -15,28 +15,26 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/arc/arc_support_host.h"
 #include "chrome/browser/chromeos/policy/android_management_client.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "components/arc/arc_session_runner.h"
 #include "components/arc/arc_stop_reason.h"
 
 class ArcAppLauncher;
 class Profile;
 
-namespace user_prefs {
-class PrefRegistrySyncable;
-}
-
 namespace arc {
 
 class ArcAndroidManagementChecker;
 class ArcAuthContext;
+class ArcDataRemover;
 class ArcPaiStarter;
 class ArcTermsOfServiceNegotiator;
 enum class ProvisioningResult : int;
 
-// This class proxies the request from the client to fetch an auth code from
-// LSO. It lives on the UI thread.
+// This class is responsible for handing stages of ARC life-cycle.
 class ArcSessionManager : public ArcSessionRunner::Observer,
-                          public ArcSupportHost::ErrorDelegate {
+                          public ArcSupportHost::ErrorDelegate,
+                          public chromeos::SessionManagerClient::Observer {
  public:
   // Represents each State of ARC session.
   // NOT_INITIALIZED: represents the state that the Profile is not yet ready
@@ -110,12 +108,19 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
     // during the opt-in flow.
     virtual void OnArcOptInManagementCheckStarted() {}
 
+    // Called to notify that ARC begins to start.
+    virtual void OnArcStarted() {}
+
     // Called to notify that ARC has been initialized successfully.
     virtual void OnArcInitialStart() {}
 
     // Called when ARC session is stopped, and is not being restarted
     // automatically.
     virtual void OnArcSessionStopped(ArcStopReason stop_reason) {}
+
+    // Called when ARC session is stopped, but is being restarted automatically.
+    // This is called _after_ the container is actually created.
+    virtual void OnArcSessionRestarting() {}
 
     // Called to notify that Android data has been removed. Used in
     // browser_tests
@@ -136,12 +141,6 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   ~ArcSessionManager() override;
 
   static ArcSessionManager* Get();
-
-  // Returns true if OOBE flow is active currently.
-  static bool IsOobeOptInActive();
-
-  // It is called from chrome/browser/prefs/browser_prefs.cc.
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   static void DisableUIForTesting();
   static void EnableCheckAndroidManagementForTesting();
@@ -176,11 +175,6 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // subscribe to ArcSessionManager, and ArcSessionManager proxies the event.
   void NotifyArcPlayStoreEnabledChanged(bool enabled);
 
-  // Returns true if ARC instance is running/stopped, respectively.
-  // See ArcSessionRunner::IsRunning()/IsStopped() for details.
-  bool IsSessionRunning() const;
-  bool IsSessionStopped() const;
-
   // Called from ARC support platform app when user cancels signing.
   void CancelAuthCode();
 
@@ -205,8 +199,10 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // this.
   void RequestArcDataRemoval();
 
-  // Called from the Chrome OS metrics provider to record Arc.State
-  // periodically.
+  // Called from the Chrome OS metrics provider to record Arc.State and similar
+  // values strictly once per every metrics recording interval. This way they
+  // are in every record uploaded to the server and therefore can be used to
+  // split and compare analysis data for all other metrics.
   void RecordArcState();
 
   // ArcSupportHost:::ErrorDelegate:
@@ -250,10 +246,14 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // require ToS acceptance. Returns false in other cases, including one when
   // ARC is not currently running.
   bool is_directly_started() const { return directly_started_; }
+  void set_directly_started_for_testing(bool directly_started) {
+    directly_started_ = directly_started;
+  }
 
   // Injectors for testing.
   void SetArcSessionRunnerForTesting(
       std::unique_ptr<ArcSessionRunner> arc_session_runner);
+  ArcSessionRunner* GetArcSessionRunnerForTesting();
   void SetAttemptUserExitCallbackForTesting(const base::Closure& callback);
 
   // Returns whether the Play Store app is requested to be launched by this
@@ -283,12 +283,8 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   void MaybeStartTermsOfServiceNegotiation();
   void OnTermsOfServiceNegotiated(bool accepted);
 
-  // Returns true if Terms of Service negotiation is needed. Otherwise false.
-  // TODO(crbug.com/698418): Write unittest for this utility after extracting
-  //   ToS related code from ArcSessionManager into a dedicated class.
-  bool IsArcTermsOfServiceNegotiationNeeded() const;
-
   void ShutdownSession();
+  void ResetArcState();
   void OnArcSignInTimeout();
 
   // Starts Android management check. This is for first boot case (= Opt-in
@@ -315,7 +311,7 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   void OnBackgroundAndroidManagementChecked(
       policy::AndroidManagementClient::Result result);
 
-  // Requests to starts ARC instance. Also, update the internal state to
+  // Requests to start ARC instance. Also, updates the internal state to
   // ACTIVE.
   void StartArc();
 
@@ -328,13 +324,14 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
 
   // ArcSessionRunner::Observer:
   void OnSessionStopped(ArcStopReason reason, bool restarting) override;
+  void OnSessionRestarting() override;
 
   // Starts to remove ARC data, if it is requested via RequestArcDataRemoval().
   // On completion, OnArcDataRemoved() is called.
   // If not requested, just skipping the data removal, and moves to
   // MaybeReenableArc() directly.
   void MaybeStartArcDataRemoval();
-  void OnArcDataRemoved(bool success);
+  void OnArcDataRemoved(base::Optional<bool> success);
 
   // On ARC session stopped and/or data removal completion, this is called
   // so that, if necessary, ARC session is restarted.
@@ -347,6 +344,9 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   void ShowArcSupportHostError(ArcSupportHost::Error error,
                                bool should_show_send_feedback);
 
+  // chromeos::SessionManagerClient::Observer:
+  void EmitLoginPromptVisibleCalled() override;
+
   std::unique_ptr<ArcSessionRunner> arc_session_runner_;
 
   // Unowned pointer. Keeps current profile.
@@ -358,19 +358,23 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
 
   // Internal state machine. See also State enum class.
   State state_ = State::NOT_INITIALIZED;
+
   base::ObserverList<Observer> observer_list_;
   std::unique_ptr<ArcAppLauncher> playstore_launcher_;
   bool reenable_arc_ = false;
   bool provisioning_reported_ = false;
   // In case ARC is started from OOBE |oobe_start_|, set to true. This flag is
-  // used to remember |IsOobeOptInActive| state when ARC start request was made.
-  // |IsOobeOptInActive| will be changed by the time when |oobe_start_| is
-  // checked to prevent the Play Store auto-launch.
-  bool oobe_start_ = false;
+  // used to remember |IsArcOobeOptInActive| or
+  // |IsArcOptInWizardForAssistantActive| state when ARC start request was made.
+  // |IsArcOobeOptInActive| or |IsArcOptInWizardForAssistantActive| will be
+  // changed by the time when |oobe_or_opa_start_| is checked to prevent the
+  // Play Store auto-launch.
+  bool oobe_or_assistant_wizard_start_ = false;
   bool directly_started_ = false;
   base::OneShotTimer arc_sign_in_timer_;
 
   std::unique_ptr<ArcSupportHost> support_host_;
+  std::unique_ptr<ArcDataRemover> data_remover_;
 
   std::unique_ptr<ArcTermsOfServiceNegotiator> terms_of_service_negotiator_;
 

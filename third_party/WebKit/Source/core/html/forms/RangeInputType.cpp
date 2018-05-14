@@ -33,23 +33,24 @@
 
 #include <limits>
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
-#include "core/InputTypeNames.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/ShadowRoot.h"
+#include "core/dom/events/ScopedEventQueue.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/events/MouseEvent.h"
-#include "core/events/ScopedEventQueue.h"
-#include "core/html/HTMLDataListElement.h"
-#include "core/html/HTMLDataListOptionsCollection.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLDivElement.h"
-#include "core/html/HTMLInputElement.h"
-#include "core/html/HTMLOptionElement.h"
+#include "core/html/forms/HTMLDataListElement.h"
+#include "core/html/forms/HTMLDataListOptionsCollection.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html/forms/HTMLOptionElement.h"
 #include "core/html/forms/SliderThumbElement.h"
 #include "core/html/forms/StepRange.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/shadow/ShadowElementNames.h"
+#include "core/html_names.h"
+#include "core/input_type_names.h"
 #include "core/layout/LayoutSlider.h"
 #include "platform/wtf/MathExtras.h"
 #include "platform/wtf/NonCopyingSort.h"
@@ -78,7 +79,7 @@ RangeInputType::RangeInputType(HTMLInputElement& element)
       InputTypeView(element),
       tick_mark_values_dirty_(true) {}
 
-DEFINE_TRACE(RangeInputType) {
+void RangeInputType::Trace(blink::Visitor* visitor) {
   InputTypeView::Trace(visitor);
   InputType::Trace(visitor);
 }
@@ -162,7 +163,7 @@ void RangeInputType::HandleMouseDownEvent(MouseEvent* event) {
           static_cast<short>(WebPointerProperties::Button::kLeft) ||
       !target_node)
     return;
-  DCHECK(GetElement().Shadow());
+  DCHECK(IsShadowHost(GetElement()));
   if (target_node != GetElement() &&
       !target_node->IsDescendantOf(GetElement().UserAgentShadowRoot()))
     return;
@@ -239,7 +240,7 @@ void RangeInputType::HandleKeydownEvent(KeyboardEvent* event) {
 }
 
 void RangeInputType::CreateShadowSubtree() {
-  DCHECK(GetElement().Shadow());
+  DCHECK(IsShadowHost(GetElement()));
 
   Document& document = GetElement().GetDocument();
   HTMLDivElement* track = HTMLDivElement::Create(document);
@@ -273,7 +274,7 @@ void RangeInputType::AccessKeyAction(bool send_mouse_events) {
   InputTypeView::AccessKeyAction(send_mouse_events);
 
   GetElement().DispatchSimulatedClick(
-      0, send_mouse_events ? kSendMouseUpDownEvents : kSendNoEvents);
+      nullptr, send_mouse_events ? kSendMouseUpDownEvents : kSendNoEvents);
 }
 
 void RangeInputType::SanitizeValueInResponseToMinOrMaxAttributeChange() {
@@ -344,7 +345,7 @@ void RangeInputType::ListAttributeTargetChanged() {
     GetElement()
         .GetLayoutObject()
         ->SetShouldDoFullPaintInvalidationIncludingNonCompositingDescendants();
-  Element* slider_track_element = this->SliderTrackElement();
+  Element* slider_track_element = SliderTrackElement();
   if (slider_track_element->GetLayoutObject())
     slider_track_element->GetLayoutObject()->SetNeedsLayout(
         LayoutInvalidationReason::kAttributeChanged);
@@ -369,7 +370,7 @@ void RangeInputType::UpdateTickMarkValues() {
     String option_value = option_element->value();
     if (option_element->IsDisabledFormControl() || option_value.IsEmpty())
       continue;
-    if (!this->GetElement().IsValidValue(option_value))
+    if (!GetElement().IsValidValue(option_value))
       continue;
     tick_mark_values_.push_back(ParseToNumber(option_value, Decimal::Nan()));
   }

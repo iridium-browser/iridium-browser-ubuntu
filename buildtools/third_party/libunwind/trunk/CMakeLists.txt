@@ -79,7 +79,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   endif()
 
   set(PACKAGE_NAME libunwind)
-  set(PACKAGE_VERSION 5.0.0svn)
+  set(PACKAGE_VERSION 7.0.0svn)
   set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
   set(PACKAGE_BUGREPORT "llvm-bugs@lists.llvm.org")
 
@@ -133,6 +133,9 @@ option(LIBUNWIND_ENABLE_THREADS "Build libunwind with threading support." ON)
 option(LIBUNWIND_USE_COMPILER_RT "Use compiler-rt instead of libgcc" OFF)
 option(LIBUNWIND_INCLUDE_DOCS "Build the libunwind documentation." ${LLVM_INCLUDE_DOCS})
 
+set(LIBUNWIND_LIBDIR_SUFFIX "${LLVM_LIBDIR_SUFFIX}" CACHE STRING
+    "Define suffix of library directory name (32/64)")
+option(LIBUNWIND_INSTALL_LIBRARY "Install the libunwind library." ON)
 set(LIBUNWIND_TARGET_TRIPLE "" CACHE STRING "Target triple for cross compiling.")
 set(LIBUNWIND_GCC_TOOLCHAIN "" CACHE PATH "GCC toolchain for cross compiling.")
 set(LIBUNWIND_SYSROOT "" CACHE PATH "Sysroot for cross compiling.")
@@ -162,7 +165,22 @@ set(CMAKE_MODULE_PATH
 set(LIBUNWIND_COMPILER    ${CMAKE_CXX_COMPILER})
 set(LIBUNWIND_SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR})
 set(LIBUNWIND_BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR})
-set(LIBUNWIND_LIBRARY_DIR ${CMAKE_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX})
+if (LLVM_LIBRARY_OUTPUT_INTDIR)
+  set(LIBUNWIND_LIBRARY_DIR ${LLVM_LIBRARY_OUTPUT_INTDIR})
+else()
+  set(LIBUNWIND_LIBRARY_DIR ${CMAKE_BINARY_DIR}/lib${LIBUNWIND_LIBDIR_SUFFIX})
+endif()
+
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${LIBUNWIND_LIBRARY_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${LIBUNWIND_LIBRARY_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${LIBUNWIND_LIBRARY_DIR})
+
+set(LIBUNWIND_INSTALL_PREFIX "" CACHE STRING
+    "Define libunwind destination prefix.")
+
+if (NOT LIBUNWIND_INSTALL_PREFIX MATCHES "^$|.*/")
+  message(FATAL_ERROR "LIBUNWIND_INSTALL_PREFIX has to end with \"/\".")
+endif()
 
 set(LIBUNWIND_C_FLAGS "")
 set(LIBUNWIND_CXX_FLAGS "")
@@ -192,6 +210,10 @@ add_target_flags_if(LIBUNWIND_GCC_TOOLCHAIN
           "--gcc-toolchain=${LIBUNWIND_GCC_TOOLCHAIN}")
 add_target_flags_if(LIBUNWIND_SYSROOT
           "--sysroot=${LIBUNWIND_SYSROOT}")
+
+if (LIBUNWIND_TARGET_TRIPLE)
+  set(TARGET_TRIPLE "${LIBUNWIND_TARGET_TRIPLE}")
+endif()
 
 # Configure compiler.
 include(config-ix)
@@ -290,6 +312,11 @@ if (MSVC)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 endif()
 
+# Disable DLL annotations on Windows for static builds.
+if (WIN32 AND LIBUNWIND_ENABLE_STATIC AND NOT LIBUNWIND_ENABLE_SHARED)
+  add_definitions(-D_LIBUNWIND_DISABLE_VISIBILITY_ANNOTATIONS)
+endif()
+
 #===============================================================================
 # Setup Source Code
 #===============================================================================
@@ -302,7 +329,8 @@ find_path(
   PATHS ${LLVM_MAIN_SRC_DIR}/projects/libcxx/include
         ${LLVM_MAIN_SRC_DIR}/runtimes/libcxx/include
   NO_DEFAULT_PATH
-)
+  NO_CMAKE_FIND_ROOT_PATH
+  )
 if ((NOT LIBUNWIND_STANDALONE_BUILD OR HAVE_LIBCXX) AND
     IS_DIRECTORY "${LIBUNWIND_LIBCXX_INCLUDES_INTERNAL}")
   set(LIBUNWIND_CXX_INCLUDE_PATHS_DEFAULT "${LIBUNWIND_LIBCXX_INCLUDES_INTERNAL}")
@@ -321,3 +349,5 @@ add_subdirectory(src)
 if (LIBUNWIND_INCLUDE_DOCS)
   add_subdirectory(docs)
 endif()
+
+add_subdirectory(test)

@@ -26,26 +26,24 @@
 #include "core/layout/LayoutThemeFontProvider.h"
 
 #include "core/CSSValueKeywords.h"
+#include "platform/fonts/FontCache.h"
 #include "platform/fonts/FontDescription.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
-// static
-void LayoutThemeFontProvider::SetDefaultFontSize(int font_size) {
-  default_font_size_ = static_cast<float>(font_size);
-}
+constexpr float kDefaultFontSize = 16.0;
 
 // static
 void LayoutThemeFontProvider::SystemFont(CSSValueID system_font_id,
-                                         FontStyle& font_style,
-                                         FontWeight& font_weight,
+                                         FontSelectionValue& font_slope,
+                                         FontSelectionValue& font_weight,
                                          float& font_size,
                                          AtomicString& font_family) {
-  font_weight = kFontWeightNormal;
-  font_style = kFontStyleNormal;
-  font_size = default_font_size_;
+  font_weight = NormalWeightValue();
+  font_slope = NormalSlopeValue();
+  font_size = kDefaultFontSize;
   font_family = DefaultGUIFont();
 
   switch (system_font_id) {

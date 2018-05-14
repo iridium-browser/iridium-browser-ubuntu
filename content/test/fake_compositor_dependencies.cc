@@ -9,6 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "cc/test/test_ukm_recorder_factory.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "ui/gfx/buffer_types.h"
 
@@ -21,10 +22,6 @@ FakeCompositorDependencies::~FakeCompositorDependencies() {
 }
 
 bool FakeCompositorDependencies::IsGpuRasterizationForced() {
-  return false;
-}
-
-bool FakeCompositorDependencies::IsAsyncWorkerContextEnabled() {
   return false;
 }
 
@@ -56,11 +53,6 @@ bool FakeCompositorDependencies::IsElasticOverscrollEnabled() {
   return true;
 }
 
-const viz::BufferToTextureTargetMap&
-FakeCompositorDependencies::GetBufferToTextureTargetMap() {
-  return buffer_to_texture_target_map_;
-}
-
 scoped_refptr<base::SingleThreadTaskRunner>
 FakeCompositorDependencies::GetCompositorMainThreadTaskRunner() {
   return base::ThreadTaskRunnerHandle::Get();
@@ -86,6 +78,11 @@ bool FakeCompositorDependencies::IsThreadedAnimationEnabled() {
 
 bool FakeCompositorDependencies::IsScrollAnimatorEnabled() {
   return false;
+}
+
+std::unique_ptr<cc::UkmRecorderFactory>
+FakeCompositorDependencies::CreateUkmRecorderFactory() {
+  return std::make_unique<cc::TestUkmRecorderFactory>();
 }
 
 }  // namespace content

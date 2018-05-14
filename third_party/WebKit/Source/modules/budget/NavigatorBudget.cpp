@@ -15,41 +15,37 @@ NavigatorBudget::NavigatorBudget(Navigator& navigator)
     : Supplement<Navigator>(navigator) {}
 
 // static
-const char* NavigatorBudget::SupplementName() {
-  return "NavigatorBudget";
-}
+const char NavigatorBudget::kSupplementName[] = "NavigatorBudget";
 
 // static
 NavigatorBudget& NavigatorBudget::From(Navigator& navigator) {
   // Get the unique NavigatorBudget associated with this navigator.
-  NavigatorBudget* navigator_budget = static_cast<NavigatorBudget*>(
-      Supplement<Navigator>::From(navigator, SupplementName()));
+  NavigatorBudget* navigator_budget =
+      Supplement<Navigator>::From<NavigatorBudget>(navigator);
   if (!navigator_budget) {
     // If there isn't one already, create it now and associate it.
     navigator_budget = new NavigatorBudget(navigator);
-    Supplement<Navigator>::ProvideTo(navigator, SupplementName(),
-                                     navigator_budget);
+    ProvideTo(navigator, navigator_budget);
   }
   return *navigator_budget;
 }
 
-BudgetService* NavigatorBudget::budget() {
+BudgetService* NavigatorBudget::budget(ExecutionContext* context) {
   if (!budget_) {
-    Navigator* navigator = GetSupplementable();
-    if (navigator->GetFrame()) {
-      budget_ = BudgetService::Create(
-          navigator->GetFrame()->Client()->GetInterfaceProvider());
+    if (auto* interface_provider = context->GetInterfaceProvider()) {
+      budget_ = BudgetService::Create(interface_provider);
     }
   }
   return budget_.Get();
 }
 
 // static
-BudgetService* NavigatorBudget::budget(Navigator& navigator) {
-  return NavigatorBudget::From(navigator).budget();
+BudgetService* NavigatorBudget::budget(ExecutionContext* context,
+                                       Navigator& navigator) {
+  return NavigatorBudget::From(navigator).budget(context);
 }
 
-DEFINE_TRACE(NavigatorBudget) {
+void NavigatorBudget::Trace(blink::Visitor* visitor) {
   visitor->Trace(budget_);
   Supplement<Navigator>::Trace(visitor);
 }

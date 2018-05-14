@@ -7,23 +7,22 @@
 
 #import <UIKit/UIKit.h>
 
+#import "ios/chrome/common/highlight_button.h"
+
 // View to show and allow opening of the copied URL. Shows a button with the
 // |copiedURLString| if it has been set. When tapped, |actionSelector| in
 // |target| is called. If no |copiedURLString| was set, the button is replaced
 // by a hairline separation and placeholder text.
-@interface CopiedURLView : UIView
+@interface CopiedURLView : HighlightButton
 
 // The copied URL string to be displayed. nil is a valid value to indicate
 // there is no copied URL to display.
 @property(nonatomic, copy) NSString* copiedURLString;
 
 // Designated initializer, creates the copiedURLView with a |target| to open the
-// URL. The |primaryVibrancyEffect| and |secondaryVibrancyEffect| are used to
-// display view elements.
+// URL.
 - (instancetype)initWithActionTarget:(id)target
                       actionSelector:(SEL)actionSelector
-                       primaryEffect:(UIVisualEffect*)primaryEffect
-                     secondaryEffect:(UIVisualEffect*)secondaryEffect
     NS_DESIGNATED_INITIALIZER;
 - (instancetype)initWithFrame:(CGRect)frame NS_UNAVAILABLE;
 - (instancetype)initWithCoder:(NSCoder*)aDecoder NS_UNAVAILABLE;

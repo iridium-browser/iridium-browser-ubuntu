@@ -10,12 +10,12 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/automation_internal/automation_event_router.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
+#include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -30,7 +30,6 @@
 #include "content/public/browser/browser_plugin_guest_manager.h"
 #include "content/public/browser/media_session.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -39,6 +38,7 @@
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "ui/accessibility/ax_action_data.h"
+#include "ui/accessibility/ax_enum_util.h"
 #include "ui/accessibility/ax_host_delegate.h"
 #include "ui/accessibility/ax_tree_id_registry.h"
 
@@ -61,7 +61,6 @@ const char kCannotRequestAutomationOnPage[] =
     "Cannot request automation tree on url \"*\". "
     "Extension manifest must request permission to access this host.";
 const char kRendererDestroyed[] = "The tab was closed.";
-const char kNoMainFrame[] = "No main frame.";
 const char kNoDocument[] = "No document.";
 const char kNodeDestroyed[] =
     "domQuerySelector sent on node which is no longer in the tree.";
@@ -81,15 +80,16 @@ class QuerySelectorHandler : public content::WebContentsObserver {
       : content::WebContentsObserver(web_contents),
         request_id_(request_id),
         callback_(callback) {
-    content::RenderViewHost* rvh = web_contents->GetRenderViewHost();
+    content::RenderFrameHost* rfh = web_contents->GetMainFrame();
 
-    rvh->Send(new ExtensionMsg_AutomationQuerySelector(
-        rvh->GetRoutingID(), request_id, acc_obj_id, query));
+    rfh->Send(new ExtensionMsg_AutomationQuerySelector(
+        rfh->GetRoutingID(), request_id, acc_obj_id, query));
   }
 
   ~QuerySelectorHandler() override {}
 
-  bool OnMessageReceived(const IPC::Message& message) override {
+  bool OnMessageReceived(const IPC::Message& message,
+                         content::RenderFrameHost* render_frame_host) override {
     if (message.type() != ExtensionHostMsg_AutomationQuerySelector_Result::ID)
       return false;
 
@@ -120,18 +120,14 @@ class QuerySelectorHandler : public content::WebContentsObserver {
                        int result_acc_obj_id) {
     std::string error_string;
     switch (error.value) {
-    case ExtensionHostMsg_AutomationQuerySelector_Error::kNone:
-      error_string = "";
-      break;
-    case ExtensionHostMsg_AutomationQuerySelector_Error::kNoMainFrame:
-      error_string = kNoMainFrame;
-      break;
-    case ExtensionHostMsg_AutomationQuerySelector_Error::kNoDocument:
-      error_string = kNoDocument;
-      break;
-    case ExtensionHostMsg_AutomationQuerySelector_Error::kNodeDestroyed:
-      error_string = kNodeDestroyed;
-      break;
+      case ExtensionHostMsg_AutomationQuerySelector_Error::kNone:
+        break;
+      case ExtensionHostMsg_AutomationQuerySelector_Error::kNoDocument:
+        error_string = kNoDocument;
+        break;
+      case ExtensionHostMsg_AutomationQuerySelector_Error::kNodeDestroyed:
+        error_string = kNodeDestroyed;
+        break;
     }
     callback_.Run(error_string, result_acc_obj_id);
     delete this;
@@ -178,6 +174,7 @@ class AutomationWebContentsObserver
       params.event_type = event.event_type;
       params.update = event.update;
       params.event_from = event.event_from;
+      params.action_request_id = event.action_request_id;
 #if defined(USE_AURA)
       params.mouse_location = aura::Env::GetInstance()->last_mouse_location();
 #endif
@@ -213,17 +210,19 @@ class AutomationWebContentsObserver
     std::vector<content::AXEventNotificationDetails> details;
     content::AXEventNotificationDetails detail;
     detail.ax_tree_id = id.first->GetAXTreeID();
-    detail.event_type = ui::AX_EVENT_MEDIA_STARTED_PLAYING;
+    detail.event_type = ax::mojom::Event::kMediaStartedPlaying;
     details.push_back(detail);
     AccessibilityEventReceived(details);
   }
 
-  void MediaStoppedPlaying(const MediaPlayerInfo& video_type,
-                           const MediaPlayerId& id) override {
+  void MediaStoppedPlaying(
+      const MediaPlayerInfo& video_type,
+      const MediaPlayerId& id,
+      WebContentsObserver::MediaStoppedReason reason) override {
     std::vector<content::AXEventNotificationDetails> details;
     content::AXEventNotificationDetails detail;
     detail.ax_tree_id = id.first->GetAXTreeID();
-    detail.event_type = ui::AX_EVENT_MEDIA_STOPPED_PLAYING;
+    detail.event_type = ax::mojom::Event::kMediaStoppedPlaying;
     details.push_back(detail);
     AccessibilityEventReceived(details);
   }
@@ -242,7 +241,7 @@ class AutomationWebContentsObserver
 
       content::AXEventNotificationDetails detail;
       detail.ax_tree_id = rfh->GetAXTreeID();
-      detail.event_type = ui::AX_EVENT_MEDIA_STARTED_PLAYING;
+      detail.event_type = ax::mojom::Event::kMediaStartedPlaying;
       details.push_back(detail);
       AccessibilityEventReceived(details);
     }
@@ -264,18 +263,19 @@ AutomationInternalEnableTabFunction::Run() {
   content::WebContents* contents = NULL;
   if (params->args.tab_id.get()) {
     int tab_id = *params->args.tab_id;
-    if (!ExtensionTabUtil::GetTabById(tab_id,
-                                      GetProfile(),
-                                      include_incognito(),
-                                      NULL, /* browser out param*/
-                                      NULL, /* tab_strip out param */
-                                      &contents,
-                                      NULL /* tab_index out param */)) {
+    if (!ExtensionTabUtil::GetTabById(
+            tab_id, browser_context(), include_incognito(),
+            NULL, /* browser out param*/
+            NULL, /* tab_strip out param */
+            &contents, NULL /* tab_index out param */)) {
       return RespondNow(
           Error(tabs_constants::kTabNotFoundError, base::IntToString(tab_id)));
     }
   } else {
-    contents = GetCurrentBrowser()->tab_strip_model()->GetActiveWebContents();
+    contents = ChromeExtensionFunctionDetails(this)
+                   .GetCurrentBrowser()
+                   ->tab_strip_model()
+                   ->GetActiveWebContents();
     if (!contents)
       return RespondNow(Error("No active tab"));
   }
@@ -298,7 +298,6 @@ AutomationInternalEnableTabFunction::Run() {
   AutomationEventRouter::GetInstance()->RegisterListenerForOneTree(
       extension_id(),
       source_process_id(),
-      params->args.routing_id,
       ax_tree_id);
 
   return RespondNow(ArgumentList(
@@ -333,20 +332,24 @@ ExtensionFunction::ResponseAction
 AutomationInternalPerformActionFunction::ConvertToAXActionData(
     api::automation_internal::PerformAction::Params* params,
     ui::AXActionData* action) {
+  action->target_tree_id = params->args.tree_id;
+  action->source_extension_id = extension_id();
   action->target_node_id = params->args.automation_node_id;
+  int* request_id = params->args.request_id.get();
+  action->request_id = request_id ? *request_id : -1;
   switch (params->args.action_type) {
     case api::automation_internal::ACTION_TYPE_DODEFAULT:
-      action->action = ui::AX_ACTION_DO_DEFAULT;
+      action->action = ax::mojom::Action::kDoDefault;
       break;
     case api::automation_internal::ACTION_TYPE_FOCUS:
-      action->action = ui::AX_ACTION_FOCUS;
+      action->action = ax::mojom::Action::kFocus;
       break;
     case api::automation_internal::ACTION_TYPE_GETIMAGEDATA: {
       api::automation_internal::GetImageDataParams get_image_data_params;
       EXTENSION_FUNCTION_VALIDATE(
           api::automation_internal::GetImageDataParams::Populate(
               params->opt_args.additional_properties, &get_image_data_params));
-      action->action = ui::AX_ACTION_GET_IMAGE_DATA;
+      action->action = ax::mojom::Action::kGetImageData;
       action->target_rect = gfx::Rect(0, 0, get_image_data_params.max_width,
                                       get_image_data_params.max_height);
       break;
@@ -356,16 +359,34 @@ AutomationInternalPerformActionFunction::ConvertToAXActionData(
       EXTENSION_FUNCTION_VALIDATE(
           api::automation_internal::HitTestParams::Populate(
               params->opt_args.additional_properties, &hit_test_params));
-      action->action = ui::AX_ACTION_HIT_TEST;
+      action->action = ax::mojom::Action::kHitTest;
       action->target_point = gfx::Point(hit_test_params.x, hit_test_params.y);
       action->hit_test_event_to_fire =
-          ui::ParseAXEvent(hit_test_params.event_to_fire);
-      if (action->hit_test_event_to_fire == ui::AX_EVENT_NONE)
+          ui::ParseEvent(hit_test_params.event_to_fire.c_str());
+      if (action->hit_test_event_to_fire == ax::mojom::Event::kNone)
         return RespondNow(NoArguments());
       break;
     }
     case api::automation_internal::ACTION_TYPE_MAKEVISIBLE:
-      action->action = ui::AX_ACTION_SCROLL_TO_MAKE_VISIBLE;
+      action->action = ax::mojom::Action::kScrollToMakeVisible;
+      break;
+    case api::automation_internal::ACTION_TYPE_SCROLLBACKWARD:
+      action->action = ax::mojom::Action::kScrollBackward;
+      break;
+    case api::automation_internal::ACTION_TYPE_SCROLLFORWARD:
+      action->action = ax::mojom::Action::kScrollForward;
+      break;
+    case api::automation_internal::ACTION_TYPE_SCROLLUP:
+      action->action = ax::mojom::Action::kScrollUp;
+      break;
+    case api::automation_internal::ACTION_TYPE_SCROLLDOWN:
+      action->action = ax::mojom::Action::kScrollDown;
+      break;
+    case api::automation_internal::ACTION_TYPE_SCROLLLEFT:
+      action->action = ax::mojom::Action::kScrollLeft;
+      break;
+    case api::automation_internal::ACTION_TYPE_SCROLLRIGHT:
+      action->action = ax::mojom::Action::kScrollRight;
       break;
     case api::automation_internal::ACTION_TYPE_SETSELECTION: {
       api::automation_internal::SetSelectionParams selection_params;
@@ -376,21 +397,17 @@ AutomationInternalPerformActionFunction::ConvertToAXActionData(
       action->anchor_offset = selection_params.anchor_offset;
       action->focus_node_id = selection_params.focus_node_id;
       action->focus_offset = selection_params.focus_offset;
-      action->action = ui::AX_ACTION_SET_SELECTION;
+      action->action = ax::mojom::Action::kSetSelection;
       break;
     }
     case api::automation_internal::ACTION_TYPE_SHOWCONTEXTMENU: {
-      action->action = ui::AX_ACTION_SHOW_CONTEXT_MENU;
-      break;
-    }
-    case api::automation_internal::ACTION_TYPE_SETACCESSIBILITYFOCUS: {
-      action->action = ui::AX_ACTION_SET_ACCESSIBILITY_FOCUS;
+      action->action = ax::mojom::Action::kShowContextMenu;
       break;
     }
     case api::automation_internal::
         ACTION_TYPE_SETSEQUENTIALFOCUSNAVIGATIONSTARTINGPOINT: {
       action->action =
-          ui::AX_ACTION_SET_SEQUENTIAL_FOCUS_NAVIGATION_STARTING_POINT;
+          ax::mojom::Action::kSetSequentialFocusNavigationStartingPoint;
       break;
     }
     case api::automation_internal::ACTION_TYPE_CUSTOMACTION: {
@@ -400,7 +417,7 @@ AutomationInternalPerformActionFunction::ConvertToAXActionData(
           api::automation_internal::PerformCustomActionParams::Populate(
               params->opt_args.additional_properties,
               &perform_custom_action_params));
-      action->action = ui::AX_ACTION_CUSTOM_ACTION;
+      action->action = ax::mojom::Action::kCustomAction;
       action->custom_action_id = perform_custom_action_params.custom_action_id;
       break;
     }
@@ -424,8 +441,10 @@ AutomationInternalPerformActionFunction::Run() {
   if (delegate) {
 #if defined(USE_AURA)
     ui::AXActionData data;
-    ConvertToAXActionData(params.get(), &data);
+    ExtensionFunction::ResponseAction result =
+        ConvertToAXActionData(params.get(), &data);
     delegate->PerformAction(data);
+    return result;
 #else
     NOTREACHED();
     return RespondNow(Error("Unexpected action on desktop automation tree;"
@@ -480,15 +499,9 @@ AutomationInternalEnableDesktopFunction::Run() {
   if (!automation_info || !automation_info->desktop)
     return RespondNow(Error("desktop permission must be requested"));
 
-  using api::automation_internal::EnableDesktop::Params;
-  std::unique_ptr<Params> params(Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-
   // This gets removed when the extension process dies.
   AutomationEventRouter::GetInstance()->RegisterListenerWithDesktopPermission(
-      extension_id(),
-      source_process_id(),
-      params->routing_id);
+      extension_id(), source_process_id());
 
   AutomationManagerAura::GetInstance()->Enable(browser_context());
   return RespondNow(NoArguments());
@@ -538,7 +551,7 @@ void AutomationInternalQuerySelectorFunction::OnResponse(
     return;
   }
 
-  Respond(OneArgument(base::MakeUnique<base::Value>(result_acc_obj_id)));
+  Respond(OneArgument(std::make_unique<base::Value>(result_acc_obj_id)));
 }
 
 }  // namespace extensions

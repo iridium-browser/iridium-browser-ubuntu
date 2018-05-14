@@ -25,23 +25,19 @@ class CubeMapTextureTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        const std::string vsSource = SHADER_SOURCE
-        (
-            attribute highp vec4 position;
+        const std::string vsSource =
+            R"(attribute highp vec4 position;
             void main(void)
             {
                 gl_Position = position;
-            }
-        );
+            })";
 
-        const std::string fsSource = SHADER_SOURCE
-        (
-            uniform highp vec4 color;
+        const std::string fsSource =
+            R"(uniform highp vec4 color;
             void main(void)
             {
                 gl_FragColor = color;
-            }
-        );
+            })";
 
         mProgram = CompileProgram(vsSource, fsSource);
         if (mProgram == 0)
@@ -135,6 +131,7 @@ TEST_P(CubeMapTextureTest, RenderToFacesConsecutively)
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
 ANGLE_INSTANTIATE_TEST(CubeMapTextureTest,
                        ES2_D3D11(),
+                       ES2_D3D11_FL10_0(),
                        ES2_D3D11_FL9_3(),
                        ES2_OPENGL(),
                        ES3_OPENGL(),

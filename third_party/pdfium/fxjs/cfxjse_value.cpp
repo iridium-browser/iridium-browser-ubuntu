@@ -52,7 +52,7 @@ double ftod(float fNumber) {
 
 }  // namespace
 
-void FXJSE_ThrowMessage(const CFX_ByteStringC& utf8Message) {
+void FXJSE_ThrowMessage(const ByteStringView& utf8Message) {
   v8::Isolate* pIsolate = v8::Isolate::GetCurrent();
   ASSERT(pIsolate);
 
@@ -83,20 +83,9 @@ CFXJSE_HostObject* CFXJSE_Value::ToHostObject(CFXJSE_Class* lpClass) const {
 
 void CFXJSE_Value::SetObject(CFXJSE_HostObject* lpObject,
                              CFXJSE_Class* pClass) {
-  if (!pClass) {
-    ASSERT(!lpObject);
-    SetJSObject();
-    return;
-  }
-  SetHostObject(lpObject, pClass);
-}
-
-void CFXJSE_Value::SetHostObject(CFXJSE_HostObject* lpObject,
-                                 CFXJSE_Class* lpClass) {
   CFXJSE_ScopeUtil_IsolateHandleRootContext scope(m_pIsolate);
-  ASSERT(lpClass);
   v8::Local<v8::FunctionTemplate> hClass =
-      v8::Local<v8::FunctionTemplate>::New(m_pIsolate, lpClass->m_hTemplate);
+      v8::Local<v8::FunctionTemplate>::New(m_pIsolate, pClass->m_hTemplate);
   v8::Local<v8::Object> hObject = hClass->InstanceTemplate()->NewInstance();
   FXJSE_UpdateObjectBinding(hObject, lpObject);
   m_hValue.Reset(m_pIsolate, hObject);
@@ -126,7 +115,7 @@ void CFXJSE_Value::SetFloat(float fFloat) {
   m_hValue.Reset(m_pIsolate, pValue);
 }
 
-bool CFXJSE_Value::SetObjectProperty(const CFX_ByteStringC& szPropName,
+bool CFXJSE_Value::SetObjectProperty(const ByteStringView& szPropName,
                                      CFXJSE_Value* lpPropValue) {
   ASSERT(lpPropValue);
   CFXJSE_ScopeUtil_IsolateHandleRootContext scope(m_pIsolate);
@@ -144,7 +133,7 @@ bool CFXJSE_Value::SetObjectProperty(const CFX_ByteStringC& szPropName,
       hPropValue);
 }
 
-bool CFXJSE_Value::GetObjectProperty(const CFX_ByteStringC& szPropName,
+bool CFXJSE_Value::GetObjectProperty(const ByteStringView& szPropName,
                                      CFXJSE_Value* lpPropValue) {
   ASSERT(lpPropValue);
   CFXJSE_ScopeUtil_IsolateHandleRootContext scope(m_pIsolate);
@@ -187,7 +176,7 @@ bool CFXJSE_Value::GetObjectPropertyByIdx(uint32_t uPropIdx,
   return true;
 }
 
-bool CFXJSE_Value::DeleteObjectProperty(const CFX_ByteStringC& szPropName) {
+bool CFXJSE_Value::DeleteObjectProperty(const ByteStringView& szPropName) {
   CFXJSE_ScopeUtil_IsolateHandleRootContext scope(m_pIsolate);
   v8::Local<v8::Value> hObject =
       v8::Local<v8::Value>::New(m_pIsolate, m_hValue);
@@ -200,7 +189,7 @@ bool CFXJSE_Value::DeleteObjectProperty(const CFX_ByteStringC& szPropName) {
   return true;
 }
 
-bool CFXJSE_Value::HasObjectOwnProperty(const CFX_ByteStringC& szPropName,
+bool CFXJSE_Value::HasObjectOwnProperty(const ByteStringView& szPropName,
                                         bool bUseTypeGetter) {
   CFXJSE_ScopeUtil_IsolateHandleRootContext scope(m_pIsolate);
   v8::Local<v8::Value> hObject =
@@ -218,7 +207,7 @@ bool CFXJSE_Value::HasObjectOwnProperty(const CFX_ByteStringC& szPropName,
               .FromMaybe(false));
 }
 
-bool CFXJSE_Value::SetObjectOwnProperty(const CFX_ByteStringC& szPropName,
+bool CFXJSE_Value::SetObjectOwnProperty(const ByteStringView& szPropName,
                                         CFXJSE_Value* lpPropValue) {
   ASSERT(lpPropValue);
   CFXJSE_ScopeUtil_IsolateHandleRootContext scope(m_pIsolate);
@@ -261,88 +250,20 @@ bool CFXJSE_Value::SetFunctionBind(CFXJSE_Value* lpOldFunction,
       v8::String::NewFromUtf8(m_pIsolate,
                               "(function (oldfunction, newthis) { return "
                               "oldfunction.bind(newthis); })");
+  v8::Local<v8::Context> hContext = m_pIsolate->GetCurrentContext();
   v8::Local<v8::Function> hBinderFunc =
-      v8::Script::Compile(hBinderFuncSource)->Run().As<v8::Function>();
+      v8::Script::Compile(hContext, hBinderFuncSource)
+          .ToLocalChecked()
+          ->Run(hContext)
+          .ToLocalChecked()
+          .As<v8::Function>();
   v8::Local<v8::Value> hBoundFunction =
-      hBinderFunc->Call(m_pIsolate->GetCurrentContext()->Global(), 2, rgArgs);
+      hBinderFunc->Call(hContext->Global(), 2, rgArgs);
   if (hBoundFunction.IsEmpty() || !hBoundFunction->IsFunction())
     return false;
 
   m_hValue.Reset(m_pIsolate, hBoundFunction);
   return true;
-}
-
-#define FXJSE_INVALID_PTR ((void*)(intptr_t)-1)
-bool CFXJSE_Value::Call(CFXJSE_Value* lpReceiver,
-                        CFXJSE_Value* lpRetValue,
-                        uint32_t nArgCount,
-                        CFXJSE_Value** lpArgs) {
-  CFXJSE_ScopeUtil_IsolateHandleRootContext scope(m_pIsolate);
-  v8::Local<v8::Value> hFunctionValue =
-      v8::Local<v8::Value>::New(m_pIsolate, DirectGetValue());
-  v8::Local<v8::Object> hFunctionObject =
-      !hFunctionValue.IsEmpty() && hFunctionValue->IsObject()
-          ? hFunctionValue.As<v8::Object>()
-          : v8::Local<v8::Object>();
-
-  v8::TryCatch trycatch(m_pIsolate);
-  if (hFunctionObject.IsEmpty() || !hFunctionObject->IsCallable()) {
-    if (lpRetValue)
-      lpRetValue->ForceSetValue(FXJSE_CreateReturnValue(m_pIsolate, trycatch));
-    return false;
-  }
-
-  v8::Local<v8::Value> hReturnValue;
-  v8::Local<v8::Value>* lpLocalArgs = NULL;
-  if (nArgCount) {
-    lpLocalArgs = FX_Alloc(v8::Local<v8::Value>, nArgCount);
-    for (uint32_t i = 0; i < nArgCount; i++) {
-      new (lpLocalArgs + i) v8::Local<v8::Value>;
-      CFXJSE_Value* lpArg = lpArgs[i];
-      if (lpArg) {
-        lpLocalArgs[i] =
-            v8::Local<v8::Value>::New(m_pIsolate, lpArg->DirectGetValue());
-      }
-      if (lpLocalArgs[i].IsEmpty()) {
-        lpLocalArgs[i] = v8::Undefined(m_pIsolate);
-      }
-    }
-  }
-
-  bool bRetValue = true;
-  if (lpReceiver == FXJSE_INVALID_PTR) {
-    v8::MaybeLocal<v8::Value> maybe_retvalue =
-        hFunctionObject->CallAsConstructor(m_pIsolate->GetCurrentContext(),
-                                           nArgCount, lpLocalArgs);
-    hReturnValue = maybe_retvalue.FromMaybe(v8::Local<v8::Value>());
-  } else {
-    v8::Local<v8::Value> hReceiver;
-    if (lpReceiver) {
-      hReceiver =
-          v8::Local<v8::Value>::New(m_pIsolate, lpReceiver->DirectGetValue());
-    }
-    if (hReceiver.IsEmpty() || !hReceiver->IsObject())
-      hReceiver = v8::Object::New(m_pIsolate);
-
-    v8::MaybeLocal<v8::Value> maybe_retvalue = hFunctionObject->CallAsFunction(
-        m_pIsolate->GetCurrentContext(), hReceiver, nArgCount, lpLocalArgs);
-    hReturnValue = maybe_retvalue.FromMaybe(v8::Local<v8::Value>());
-  }
-
-  if (trycatch.HasCaught()) {
-    hReturnValue = FXJSE_CreateReturnValue(m_pIsolate, trycatch);
-    bRetValue = false;
-  }
-
-  if (lpRetValue)
-    lpRetValue->ForceSetValue(hReturnValue);
-
-  if (lpLocalArgs) {
-    for (uint32_t i = 0; i < nArgCount; i++)
-      lpLocalArgs[i].~Local();
-    FX_Free(lpLocalArgs);
-  }
-  return bRetValue;
 }
 
 bool CFXJSE_Value::IsUndefined() const {
@@ -463,13 +384,13 @@ int32_t CFXJSE_Value::ToInteger() const {
   return static_cast<int32_t>(hValue->NumberValue());
 }
 
-CFX_ByteString CFXJSE_Value::ToString() const {
+ByteString CFXJSE_Value::ToString() const {
   ASSERT(!m_hValue.IsEmpty());
   CFXJSE_ScopeUtil_IsolateHandleRootContext scope(m_pIsolate);
   v8::Local<v8::Value> hValue = v8::Local<v8::Value>::New(m_pIsolate, m_hValue);
   v8::Local<v8::String> hString = hValue->ToString();
-  v8::String::Utf8Value hStringVal(hString);
-  return CFX_ByteString(*hStringVal);
+  v8::String::Utf8Value hStringVal(m_pIsolate, hString);
+  return ByteString(*hStringVal);
 }
 
 void CFXJSE_Value::SetUndefined() {
@@ -502,7 +423,7 @@ void CFXJSE_Value::SetDouble(double dDouble) {
   m_hValue.Reset(m_pIsolate, hValue);
 }
 
-void CFXJSE_Value::SetString(const CFX_ByteStringC& szString) {
+void CFXJSE_Value::SetString(const ByteStringView& szString) {
   CFXJSE_ScopeUtil_IsolateHandle scope(m_pIsolate);
   v8::Local<v8::Value> hValue = v8::String::NewFromUtf8(
       m_pIsolate, reinterpret_cast<const char*>(szString.raw_str()),
@@ -510,8 +431,3 @@ void CFXJSE_Value::SetString(const CFX_ByteStringC& szString) {
   m_hValue.Reset(m_pIsolate, hValue);
 }
 
-void CFXJSE_Value::SetJSObject() {
-  CFXJSE_ScopeUtil_IsolateHandleRootContext scope(m_pIsolate);
-  v8::Local<v8::Value> hValue = v8::Object::New(m_pIsolate);
-  m_hValue.Reset(m_pIsolate, hValue);
-}

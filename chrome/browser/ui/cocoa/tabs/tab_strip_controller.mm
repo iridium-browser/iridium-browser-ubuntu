@@ -11,12 +11,14 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
+#include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
@@ -39,13 +41,13 @@
 #import "chrome/browser/ui/cocoa/tabs/alert_indicator_button_cocoa.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
-#import "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
+#include "chrome/browser/ui/tab_ui_helper.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
@@ -53,7 +55,6 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/grit/components_scaled_resources.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/prefs/pref_service.h"
@@ -63,6 +64,7 @@
 #include "content/public/browser/web_contents.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "ui/base/cocoa/animation_utils.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/tracking_area.h"
@@ -92,7 +94,6 @@ const CGFloat kLastPinnedTabSpacing = 2.0;
 // The amount by which the new tab button is offset (from the tabs).
 const CGFloat kNewTabButtonOffset = 10.0;
 
-// Time (in seconds) in which tabs animate to their final position.
 const NSTimeInterval kAnimationDuration = 0.125;
 
 // Helper class for doing NSAnimationContext calls that takes a bool to disable
@@ -410,6 +411,10 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
 @synthesize leadingIndentForControls = leadingIndentForControls_;
 @synthesize trailingIndentForControls = trailingIndentForControls_;
 
++ (CGFloat)tabAnimationDuration {
+  return kAnimationDuration;
+}
+
 - (id)initWithView:(TabStripView*)view
         switchView:(NSView*)switchView
            browser:(Browser*)browser
@@ -434,7 +439,7 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
     // (see |-addSubviewToPermanentList:|) will be wiped out.
     permanentSubviews_.reset([[NSMutableArray alloc] init]);
 
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     defaultFavicon_.reset(
         rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON).CopyNSImage());
 
@@ -1251,9 +1256,7 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
 - (void)setTabTitle:(TabController*)tab withContents:(WebContents*)contents {
   base::string16 title;
   if (contents)
-    title = contents->GetTitle();
-  if (title.empty())
-    title = l10n_util::GetStringUTF16(IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED);
+    title = TabUIHelper::FromWebContents(contents)->GetTitle();
   [tab setTitle:base::SysUTF16ToNSString(title)];
 
   NSString* toolTip = base::SysUTF16ToNSString(chrome::AssembleTabTooltipText(
@@ -1322,6 +1325,13 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
   [delegate_ onTabInsertedWithContents:contents inForeground:inForeground];
 }
 
+// Called when a notification is received from the model to close the tab with
+// the WebContents.
+- (void)tabClosingWithContents:(content::WebContents*)contents
+                       atIndex:(NSInteger)index {
+  wasHidingThrobberSet_.erase(contents);
+}
+
 // Called before |contents| is deactivated.
 - (void)tabDeactivatedWithContents:(content::WebContents*)contents {
   contents->StoreFocus();
@@ -1333,6 +1343,11 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
                previousContents:(content::WebContents*)oldContents
                         atIndex:(NSInteger)modelIndex
                          reason:(int)reason {
+  // It's possible for |newContents| to be null when the final tab in a tab
+  // strip is closed.
+  if (newContents && modelIndex != TabStripModel::kNoTab)
+    TabUIHelper::FromWebContents(newContents)->set_was_active_at_least_once();
+
   // Take closing tabs into account.
   if (oldContents) {
     int oldModelIndex =
@@ -1412,7 +1427,7 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
   // Fake a tab changed notification to force tab titles and favicons to update.
   [self tabChangedWithContents:newContents
                        atIndex:modelIndex
-                    changeType:TabStripModelObserver::ALL];
+                    changeType:TabChangeType::kAll];
 }
 
 // Remove all knowledge about this tab and its associated controller, and remove
@@ -1563,76 +1578,55 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
   if (!contents)
     return;
 
-  static NSImage* throbberWaitingImage =
-      ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-          IDR_THROBBER_WAITING).CopyNSImage();
-  static NSImage* throbberWaitingIncognitoImage =
-      ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-          IDR_THROBBER_WAITING_INCOGNITO).CopyNSImage();
-  static NSImage* throbberLoadingImage =
-      ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-          IDR_THROBBER).CopyNSImage();
-  static NSImage* throbberLoadingIncognitoImage =
-      ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-          IDR_THROBBER_INCOGNITO).CopyNSImage();
-  static NSImage* sadFaviconImage =
-      ResourceBundle::GetSharedInstance()
-          .GetNativeImageNamed(IDR_CRASH_SAD_FAVICON)
-          .CopyNSImage();
-
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];
   TabController* tabController = [tabArray_ objectAtIndex:index];
+  TabUIHelper* tabUIHelper = TabUIHelper::FromWebContents(contents);
 
-  bool oldHasIcon = [tabController iconView] != nil;
-  bool newHasIcon =
-      favicon::ShouldDisplayFavicon(contents) ||
-      tabStripModel_->IsTabPinned(modelIndex);  // Always show icon if pinned.
+  bool oldShowIcon = [tabController showIcon];
+  bool tabIsCrashed = contents->IsCrashed();
+  bool showIcon = favicon::ShouldDisplayFavicon(contents) || tabIsCrashed ||
+                  tabStripModel_->IsTabPinned(modelIndex);
 
-  TabLoadingState oldState = [tabController loadingState];
-  TabLoadingState newState = kTabDone;
-  NSImage* throbberImage = nil;
-  if (contents->IsCrashed()) {
-    newState = kTabCrashed;
-    newHasIcon = true;
+  TabLoadingState oldLoadingState = [tabController loadingState];
+  TabLoadingState newLoadingState = kTabDone;
+  if (tabIsCrashed) {
+    newLoadingState = kTabCrashed;
   } else if (contents->IsWaitingForResponse()) {
-    newState = kTabWaiting;
-    if ([[[tabController view] window] hasDarkTheme]) {
-      throbberImage = throbberWaitingIncognitoImage;
-    } else {
-      throbberImage = throbberWaitingImage;
-    }
+    newLoadingState = kTabWaiting;
   } else if (contents->IsLoadingToDifferentDocument()) {
-    newState = kTabLoading;
-    if ([[[tabController view] window] hasDarkTheme]) {
-      throbberImage = throbberLoadingIncognitoImage;
-    } else {
-      throbberImage = throbberLoadingImage;
+    newLoadingState = kTabLoading;
+  }
+
+  // Use TabUIHelper to determine if we would like to hide the throbber and
+  // override the favicon. We want to hide the throbber for 2 cases. 1) when a
+  // new tab is opened in the background and its initial navigation is delayed,
+  // and 2) when a tab is created by session restore. For the 1st one, there is
+  // no favicon available when the WebContents' initial navigation is delayed.
+  // So TabUIHelper will fetch the favicon from history if available and use
+  // that. For the 2nd case, TabUIhelper will return an empty favicon, so the
+  // WebContents' favicon is used.
+  NSImage* newImage = nil;
+  if (tabUIHelper->ShouldHideThrobber()) {
+    wasHidingThrobberSet_.insert(contents);
+
+    gfx::Image favicon = tabUIHelper->GetFavicon();
+    newImage = favicon.IsEmpty()
+                   ? [self iconImageForContents:contents atIndex:modelIndex]
+                   : favicon.AsNSImage();
+  } else if (base::ContainsKey(wasHidingThrobberSet_, contents) ||
+             newLoadingState == kTabDone ||
+             oldLoadingState != newLoadingState || oldShowIcon != showIcon) {
+    wasHidingThrobberSet_.erase(contents);
+
+    if (showIcon && newLoadingState == kTabDone) {
+      newImage = [self iconImageForContents:contents atIndex:modelIndex];
     }
   }
 
-  if (oldState != newState)
-    [tabController setLoadingState:newState];
-
-  // While loading, this function is called repeatedly with the same state.
-  // To avoid expensive unnecessary view manipulation, only make changes when
-  // the state is actually changing.  When loading is complete (kTabDone),
-  // every call to this function is significant.
-  if (newState == kTabDone || oldState != newState ||
-      oldHasIcon != newHasIcon) {
-    if (newHasIcon) {
-      if (newState == kTabDone) {
-        [tabController setIconImage:[self iconImageForContents:contents
-                                                       atIndex:modelIndex]];
-      } else if (newState == kTabCrashed) {
-        [tabController setIconImage:sadFaviconImage withToastAnimation:YES];
-      } else {
-        [tabController setIconImage:throbberImage];
-      }
-    } else {
-      [tabController setIconImage:nil];
-    }
-  }
+  [tabController setIconImage:newImage
+              forLoadingState:newLoadingState
+                     showIcon:showIcon];
 
   TabAlertState alertState = [self alertStateForContents:contents];
   [self updateWindowAlertState:alertState forWebContents:contents];
@@ -1646,22 +1640,22 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
 // throbber state, not anything else about the (partially) loading tab.
 - (void)tabChangedWithContents:(content::WebContents*)contents
                        atIndex:(NSInteger)modelIndex
-                    changeType:(TabStripModelObserver::TabChangeType)change {
+                    changeType:(TabChangeType)change {
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];
 
   if (modelIndex == tabStripModel_->active_index())
     [delegate_ onTabChanged:change withContents:contents];
 
-  if (change == TabStripModelObserver::TITLE_NOT_LOADING) {
-    // TODO(sky): make this work.
+  TabController* tabController = [tabArray_ objectAtIndex:index];
+
+  if (change == TabChangeType::kTitleNotLoading) {
+    [tabController titleChangedNotLoading];
     // We'll receive another notification of the change asynchronously.
     return;
   }
 
-  TabController* tabController = [tabArray_ objectAtIndex:index];
-
-  if (change != TabStripModelObserver::LOADING_ONLY)
+  if (change != TabChangeType::kLoadingOnly)
     [self setTabTitle:tabController withContents:contents];
 
   [self updateIconsForContents:contents atIndex:modelIndex];
@@ -1690,8 +1684,8 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
   [tabContentsArray_ insertObject:movedTabContentsController.get()
                           atIndex:to];
   base::scoped_nsobject<TabController> movedTabController(
-      [[tabArray_ objectAtIndex:from] retain]);
-  DCHECK([movedTabController isKindOfClass:[TabController class]]);
+      base::mac::ObjCCastStrict<TabController>(
+          [[tabArray_ objectAtIndex:from] retain]));
   [tabArray_ removeObjectAtIndex:from];
   [tabArray_ insertObject:movedTabController.get() atIndex:to];
 
@@ -1708,8 +1702,8 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];
 
-  TabController* tabController = [tabArray_ objectAtIndex:index];
-  DCHECK([tabController isKindOfClass:[TabController class]]);
+  TabController* tabController =
+      base::mac::ObjCCastStrict<TabController>([tabArray_ objectAtIndex:index]);
 
   // Don't do anything if the change was already picked up by the move event.
   if (tabStripModel_->IsTabPinned(modelIndex) == [tabController pinned])
@@ -1722,6 +1716,27 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
   // the tab has already been rendered, so re-layout the tabstrip. In all other
   // cases, the state is set before the tab is rendered so this isn't needed.
   [self layoutTabs];
+}
+
+- (void)tabBlockedStateChangedWithContents:(content::WebContents*)contents
+                                   atIndex:(NSInteger)modelIndex {
+  // Take closing tabs into account.
+  NSInteger index = [self indexFromModelIndex:modelIndex];
+
+  TabController* tabController =
+      base::mac::ObjCCastStrict<TabController>([tabArray_ objectAtIndex:index]);
+
+  [tabController setBlocked:tabStripModel_->IsTabBlocked(modelIndex)];
+}
+
+- (void)tabAtIndex:(NSInteger)modelIndex needsAttention:(bool)attention {
+  // Take closing tabs into account.
+  NSInteger index = [self indexFromModelIndex:modelIndex];
+
+  TabController* tabController =
+      base::mac::ObjCCastStrict<TabController>([tabArray_ objectAtIndex:index]);
+
+  [tabController setNeedsAttention:attention];
 }
 
 - (void)setFrame:(NSRect)frame ofTabView:(NSView*)view {
@@ -1867,7 +1882,7 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
 }
 
 - (void)mouseMoved:(NSEvent*)event {
-  // We don't want the draggged tab to repeatedly redraw its glow unnecessarily.
+  // We don't want the dragged tab to repeatedly redraw its glow unnecessarily.
   // We also want the dragged tab to keep the glow even when it slides behind
   // another tab.
   if ([dragController_ draggedTab])
@@ -1880,14 +1895,9 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
   BOOL shouldShowHoverImage = [targetView isKindOfClass:[NewTabButton class]];
   [self setNewTabButtonHoverState:shouldShowHoverImage];
 
-  TabView* tabView = (TabView*)targetView;
-  if (![tabView isKindOfClass:[TabView class]]) {
-    if ([[tabView superview] isKindOfClass:[TabView class]]) {
-      tabView = (TabView*)[targetView superview];
-    } else {
-      tabView = nil;
-    }
-  }
+  TabView* tabView = base::mac::ObjCCast<TabView>(targetView);
+  if (!tabView)
+    tabView = base::mac::ObjCCast<TabView>([targetView superview]);
 
   if (hoveredTab_ != tabView) {
     [self setHoveredTab:tabView];
@@ -2052,8 +2062,7 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
   NSInteger i = 0;
   BOOL isRTL = cocoa_l10n_util::ShouldDoExperimentalRTLLayout();
   for (TabController* tab in tabArray_.get()) {
-    NSView* view = [tab view];
-    DCHECK([view isKindOfClass:[TabView class]]);
+    TabView* view = base::mac::ObjCCastStrict<TabView>([tab view]);
 
     // Recall that |-[NSView frame]| is in its superview's coordinates, so a
     // |TabView|'s frame is in the coordinates of the |TabStripView| (which
@@ -2122,13 +2131,12 @@ NSRect FlipRectInView(NSView* view, NSRect rect) {
     case WindowOpenDisposition::NEW_FOREGROUND_TAB:
     case WindowOpenDisposition::NEW_BACKGROUND_TAB: {
       base::RecordAction(UserMetricsAction("Tab_DropURLBetweenTabs"));
-      chrome::NavigateParams params(browser_, *url,
-                                    ui::PAGE_TRANSITION_TYPED);
+      NavigateParams params(browser_, *url, ui::PAGE_TRANSITION_TYPED);
       params.disposition = disposition;
       params.tabstrip_index = index;
       params.tabstrip_add_types =
           TabStripModel::ADD_ACTIVE | TabStripModel::ADD_FORCE_INDEX;
-      chrome::Navigate(&params);
+      Navigate(&params);
       break;
     }
     case WindowOpenDisposition::CURRENT_TAB: {

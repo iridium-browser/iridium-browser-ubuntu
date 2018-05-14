@@ -29,9 +29,6 @@ class LocationBar {
  public:
   explicit LocationBar(Profile* profile);
 
-  // Shows the first run bubble anchored to the location bar.
-  virtual void ShowFirstRunBubble() = 0;
-
   // The details necessary to open the user's desired omnibox match.
   virtual GURL GetDestinationURL() const = 0;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const = 0;
@@ -54,6 +51,9 @@ class LocationBar {
 
   // Updates the visibility and toggled state of the save credit card icon.
   virtual void UpdateSaveCreditCardIcon() = 0;
+
+  // Updates the visibility of the find bar image icon.
+  virtual void UpdateFindBarIconVisibility() = 0;
 
   // Updates the visibility of the bookmark star.
   virtual void UpdateBookmarkStarVisibility() = 0;
@@ -86,12 +86,6 @@ class LocationBar {
   // Checks if any extension has requested that the bookmark star be hidden.
   bool IsBookmarkStarHiddenByExtension() const;
 
-  // If |url| is an extension URL, returns the name of the associated extension,
-  // with whitespace collapsed. Otherwise, returns empty string. |web_contents|
-  // is used to get at the extension registry.
-  static base::string16 GetExtensionName(const GURL& url,
-                                         content::WebContents* web_contents);
-
  private:
   class ExtensionLoadObserver;
 
@@ -110,6 +104,9 @@ class LocationBarTesting {
   // Invokes the content setting image at |index|, displaying the bubble.
   // Returns false if there is none.
   virtual bool TestContentSettingImagePressed(size_t index) = 0;
+
+  // Returns if the content setting image at |index| is displaying a bubble.
+  virtual bool IsContentSettingBubbleShowing(size_t index) = 0;
 
  protected:
   virtual ~LocationBarTesting() {}

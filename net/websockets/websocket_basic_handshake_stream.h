@@ -13,6 +13,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
 #include "net/http/http_basic_state.h"
 #include "net/websockets/websocket_handshake_stream_base.h"
@@ -44,16 +45,17 @@ class NET_EXPORT_PRIVATE WebSocketBasicHandshakeStream
 
   // HttpStreamBase methods
   int InitializeStream(const HttpRequestInfo* request_info,
+                       bool can_send_early,
                        RequestPriority priority,
                        const NetLogWithSource& net_log,
-                       const CompletionCallback& callback) override;
+                       CompletionOnceCallback callback) override;
   int SendRequest(const HttpRequestHeaders& request_headers,
                   HttpResponseInfo* response,
-                  const CompletionCallback& callback) override;
-  int ReadResponseHeaders(const CompletionCallback& callback) override;
+                  CompletionOnceCallback callback) override;
+  int ReadResponseHeaders(CompletionOnceCallback callback) override;
   int ReadResponseBody(IOBuffer* buf,
                        int buf_len,
-                       const CompletionCallback& callback) override;
+                       CompletionOnceCallback callback) override;
   void Close(bool not_reusable) override;
   bool IsResponseBodyComplete() const override;
   bool IsConnectionReused() const override;
@@ -90,8 +92,7 @@ class NET_EXPORT_PRIVATE WebSocketBasicHandshakeStream
  private:
   // A wrapper for the ReadResponseHeaders callback that checks whether or not
   // the connection has been accepted.
-  void ReadResponseHeadersCallback(const CompletionCallback& callback,
-                                   int result);
+  void ReadResponseHeadersCallback(CompletionOnceCallback callback, int result);
 
   void OnFinishOpeningHandshake();
 

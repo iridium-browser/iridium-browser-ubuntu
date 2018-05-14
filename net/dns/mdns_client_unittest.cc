@@ -3,14 +3,12 @@
 // found in the LICENSE file.
 
 #include <memory>
-#include <queue>
 #include <vector>
 
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -332,8 +330,8 @@ std::string MakeString(const uint8_t* data, unsigned size) {
 
 class PtrRecordCopyContainer {
  public:
-  PtrRecordCopyContainer() {}
-  ~PtrRecordCopyContainer() {}
+  PtrRecordCopyContainer() = default;
+  ~PtrRecordCopyContainer() = default;
 
   bool is_set() const { return set_; }
 
@@ -363,10 +361,10 @@ class PtrRecordCopyContainer {
   int ttl_;
 };
 
-class MockClock : public base::DefaultClock {
+class MockClock : public base::Clock {
  public:
-  MockClock() : base::DefaultClock() {}
-  virtual ~MockClock() {}
+  MockClock() = default;
+  virtual ~MockClock() = default;
 
   MOCK_METHOD0(Now, base::Time());
 
@@ -377,9 +375,9 @@ class MockClock : public base::DefaultClock {
 class MockTimer : public base::MockTimer {
  public:
   MockTimer() : base::MockTimer(false, false) {}
-  ~MockTimer() {}
+  ~MockTimer() = default;
 
-  void Start(const tracked_objects::Location& posted_from,
+  void Start(const base::Location& posted_from,
              base::TimeDelta delay,
              const base::Closure& user_task) {
     StartObserver(posted_from, delay, user_task);
@@ -389,7 +387,7 @@ class MockTimer : public base::MockTimer {
   // StartObserver is invoked when MockTimer::Start() is called.
   // Does not replace the behavior of MockTimer::Start().
   MOCK_METHOD3(StartObserver,
-               void(const tracked_objects::Location& posted_from,
+               void(const base::Location& posted_from,
                     base::TimeDelta delay,
                     const base::Closure& user_task));
 
@@ -471,7 +469,7 @@ void MDnsTest::RunFor(base::TimeDelta time_period) {
 }
 
 void MDnsTest::Stop() {
-  base::MessageLoop::current()->QuitWhenIdle();
+  base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 TEST_F(MDnsTest, PassiveListeners) {
@@ -559,15 +557,14 @@ TEST_F(MDnsTest, CacheCleanupWithShortTTL) {
   // Use a nonzero starting time as a base.
   base::Time start_time = base::Time() + base::TimeDelta::FromSeconds(1);
 
-  MockClock* clock = new MockClock;
+  MockClock clock;
   MockTimer* timer = new MockTimer;
 
-  test_client_.reset(
-      new MDnsClientImpl(base::WrapUnique(clock), base::WrapUnique(timer)));
+  test_client_.reset(new MDnsClientImpl(&clock, base::WrapUnique(timer)));
   test_client_->StartListening(&socket_factory_);
 
   EXPECT_CALL(*timer, StartObserver(_, _, _)).Times(1);
-  EXPECT_CALL(*clock, Now())
+  EXPECT_CALL(clock, Now())
       .Times(3)
       .WillRepeatedly(Return(start_time))
       .RetiresOnSaturation();
@@ -602,10 +599,10 @@ TEST_F(MDnsTest, CacheCleanupWithShortTTL) {
   // Set the clock to 2.0s, which should clean up the 'privet' record, but not
   // the printer. The mock clock will change Now() mid-execution from 2s to 4s.
   // Note: expectations are FILO-ordered -- t+2 seconds is returned, then t+4.
-  EXPECT_CALL(*clock, Now())
+  EXPECT_CALL(clock, Now())
       .WillOnce(Return(start_time + base::TimeDelta::FromSeconds(4)))
       .RetiresOnSaturation();
-  EXPECT_CALL(*clock, Now())
+  EXPECT_CALL(clock, Now())
       .WillOnce(Return(start_time + base::TimeDelta::FromSeconds(2)))
       .RetiresOnSaturation();
 

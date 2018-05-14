@@ -18,17 +18,21 @@ namespace extensions {
 
 FileManagerPrivateCustomBindings::FileManagerPrivateCustomBindings(
     ScriptContext* context)
-    : ObjectBackedNativeHandler(context) {
-  RouteFunction("GetFileSystem", "fileManagerPrivate",
-                base::Bind(&FileManagerPrivateCustomBindings::GetFileSystem,
-                           base::Unretained(this)));
-  RouteFunction(
+    : ObjectBackedNativeHandler(context) {}
+
+void FileManagerPrivateCustomBindings::AddRoutes() {
+  RouteHandlerFunction(
+      "GetFileSystem", "fileManagerPrivate",
+      base::Bind(&FileManagerPrivateCustomBindings::GetFileSystem,
+                 base::Unretained(this)));
+  RouteHandlerFunction(
       "GetExternalFileEntry", "fileManagerPrivate",
       base::Bind(&FileManagerPrivateCustomBindings::GetExternalFileEntry,
                  base::Unretained(this)));
-  RouteFunction("GetEntryURL", "fileManagerPrivate",
-                base::Bind(&FileManagerPrivateCustomBindings::GetEntryURL,
-                           base::Unretained(this)));
+  RouteHandlerFunction(
+      "GetEntryURL", "fileManagerPrivate",
+      base::Bind(&FileManagerPrivateCustomBindings::GetEntryURL,
+                 base::Unretained(this)));
 }
 
 void FileManagerPrivateCustomBindings::GetFileSystem(
@@ -36,8 +40,9 @@ void FileManagerPrivateCustomBindings::GetFileSystem(
   DCHECK(args.Length() == 2);
   DCHECK(args[0]->IsString());
   DCHECK(args[1]->IsString());
-  std::string name(*v8::String::Utf8Value(args[0]));
-  std::string root_url(*v8::String::Utf8Value(args[1]));
+  v8::Isolate* isolate = args.GetIsolate();
+  std::string name(*v8::String::Utf8Value(isolate, args[0]));
+  std::string root_url(*v8::String::Utf8Value(isolate, args[1]));
 
   blink::WebLocalFrame* webframe =
       blink::WebLocalFrame::FrameForContext(context()->v8_context());
@@ -46,7 +51,7 @@ void FileManagerPrivateCustomBindings::GetFileSystem(
       blink::WebDOMFileSystem::Create(
           webframe, blink::kWebFileSystemTypeExternal,
           blink::WebString::FromUTF8(name), GURL(root_url))
-          .ToV8Value(context()->v8_context()->Global(), args.GetIsolate()));
+          .ToV8Value(context()->v8_context()->Global(), isolate));
 }
 
 void FileManagerPrivateCustomBindings::GetExternalFileEntry(

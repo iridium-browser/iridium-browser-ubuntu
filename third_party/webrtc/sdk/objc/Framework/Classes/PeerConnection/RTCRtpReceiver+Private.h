@@ -10,7 +10,7 @@
 
 #import "WebRTC/RTCRtpReceiver.h"
 
-#include "webrtc/api/rtpreceiverinterface.h"
+#include "api/rtpreceiverinterface.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -39,6 +39,10 @@ class RtpReceiverDelegateAdapter : public RtpReceiverObserverInterface {
     NS_DESIGNATED_INITIALIZER;
 
 + (RTCRtpMediaType)mediaTypeForNativeMediaType:(cricket::MediaType)nativeMediaType;
+
++ (cricket::MediaType)nativeMediaTypeForMediaType:(RTCRtpMediaType)mediaType;
+
++ (NSString*)stringForMediaType:(RTCRtpMediaType)mediaType;
 
 @end
 

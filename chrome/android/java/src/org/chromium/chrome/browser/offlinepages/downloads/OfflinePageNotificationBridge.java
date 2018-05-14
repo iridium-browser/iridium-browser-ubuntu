@@ -11,6 +11,7 @@ import org.chromium.chrome.browser.download.DownloadInfo;
 import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.download.DownloadNotifier;
 import org.chromium.components.offline_items_collection.LegacyHelpers;
+import org.chromium.components.offline_items_collection.PendingState;
 import org.chromium.ui.widget.Toast;
 
 /**
@@ -111,7 +112,8 @@ public class OfflinePageNotificationBridge {
      * @param displayName Name to be displayed on notification.
      */
     @CalledByNative
-    public static void notifyDownloadInterrupted(String guid, String displayName) {
+    public static void notifyDownloadInterrupted(
+            String guid, String displayName, @PendingState int pendingState) {
         DownloadNotifier notifier = getDownloadNotifier();
         if (notifier == null) return;
 
@@ -122,7 +124,7 @@ public class OfflinePageNotificationBridge {
                                             .setIsResumable(true)
                                             .build();
 
-        notifier.notifyDownloadInterrupted(downloadInfo, true);
+        notifier.notifyDownloadInterrupted(downloadInfo, true, pendingState);
     }
 
     /**

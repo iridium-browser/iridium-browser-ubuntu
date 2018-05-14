@@ -4,9 +4,6 @@
 
 #include "core/layout/ng/inline/ng_bidi_paragraph.h"
 
-#include "core/layout/ng/inline/ng_inline_node.h"
-#include "core/layout/ng/ng_layout_result.h"
-#include "core/layout/ng/ng_unpositioned_float.h"
 #include "core/style/ComputedStyle.h"
 #include "platform/text/ICUError.h"
 
@@ -45,6 +42,15 @@ bool NGBidiParagraph::SetParagraph(const String& text,
     base_direction_ = DirectionFromLevel(ubidi_getParaLevel(ubidi_));
 
   return true;
+}
+
+TextDirection NGBidiParagraph::BaseDirectionForString(const StringView& text) {
+  DCHECK(!text.Is8Bit());
+  if (text.Is8Bit())
+    return TextDirection::kLtr;
+  UBiDiDirection direction =
+      ubidi_getBaseDirection(text.Characters16(), text.length());
+  return direction == UBIDI_RTL ? TextDirection::kRtl : TextDirection::kLtr;
 }
 
 unsigned NGBidiParagraph::GetLogicalRun(unsigned start,

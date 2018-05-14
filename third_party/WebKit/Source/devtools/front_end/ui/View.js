@@ -202,7 +202,7 @@ UI.ProvidedView = class {
    */
   async widget() {
     this._widgetRequested = true;
-    var widget = await this._extension.instance();
+    const widget = await this._extension.instance();
     if (!(widget instanceof UI.Widget))
       throw new Error('view className should point to a UI.Widget');
     widget[UI.View._symbol] = this;
@@ -215,7 +215,7 @@ UI.ProvidedView = class {
   async disposeView() {
     if (!this._widgetRequested)
       return;
-    var widget = await this.widget();
+    const widget = await this.widget();
     widget.ownerViewDisposed();
   }
 };
@@ -294,8 +294,8 @@ UI.ViewManager = class {
     /** @type {!Map<string, string>} */
     this._locationNameByViewId = new Map();
 
-    for (var extension of self.runtime.extensions('view')) {
-      var descriptor = extension.descriptor();
+    for (const extension of self.runtime.extensions('view')) {
+      const descriptor = extension.descriptor();
       this._views.set(descriptor['id'], new UI.ProvidedView(extension));
       this._locationNameByViewId.set(descriptor['id'], descriptor['location']);
     }
@@ -308,9 +308,9 @@ UI.ViewManager = class {
   static _populateToolbar(element, toolbarItems) {
     if (!toolbarItems.length)
       return;
-    var toolbar = new UI.Toolbar('');
+    const toolbar = new UI.Toolbar('');
     element.insertBefore(toolbar.element, element.firstChild);
-    for (var item of toolbarItems)
+    for (const item of toolbarItems)
       toolbar.appendToolbarItem(item);
   }
 
@@ -319,7 +319,7 @@ UI.ViewManager = class {
    * @return {!Promise}
    */
   revealView(view) {
-    var location = /** @type {?UI.ViewManager._Location} */ (view[UI.ViewManager._Location.symbol]);
+    const location = /** @type {?UI.ViewManager._Location} */ (view[UI.ViewManager._Location.symbol]);
     if (!location)
       return Promise.resolve();
     location._reveal();
@@ -339,37 +339,36 @@ UI.ViewManager = class {
    * @return {?UI.Widget}
    */
   materializedWidget(viewId) {
-    var view = this.view(viewId);
+    const view = this.view(viewId);
     return view ? view[UI.View._widgetSymbol] : null;
   }
 
   /**
    * @param {string} viewId
    * @param {boolean=} userGesture
+   * @param {boolean=} omitFocus
    * @return {!Promise}
    */
-  showView(viewId, userGesture) {
-    var view = this._views.get(viewId);
+  showView(viewId, userGesture, omitFocus) {
+    const view = this._views.get(viewId);
     if (!view) {
       console.error('Could not find view for id: \'' + viewId + '\' ' + new Error().stack);
       return Promise.resolve();
     }
 
-    var locationName = this._locationNameByViewId.get(viewId);
-    if (locationName === 'drawer-view')
-      Host.userMetrics.drawerShown(viewId);
+    const locationName = this._locationNameByViewId.get(viewId);
 
-    var location = view[UI.ViewManager._Location.symbol];
+    const location = view[UI.ViewManager._Location.symbol];
     if (location) {
       location._reveal();
-      return location.showView(view, undefined, userGesture);
+      return location.showView(view, undefined, userGesture, omitFocus);
     }
 
     return this._resolveLocation(locationName).then(location => {
       if (!location)
         throw new Error('Could not resolve location for view: ' + viewId);
       location._reveal();
-      return location.showView(view, undefined, userGesture);
+      return location.showView(view, undefined, userGesture, omitFocus);
     });
   }
 
@@ -381,11 +380,11 @@ UI.ViewManager = class {
     if (!location)
       return /** @type {!Promise<?UI.ViewManager._Location>} */ (Promise.resolve(null));
 
-    var resolverExtensions = self.runtime.extensions(UI.ViewLocationResolver)
-                                 .filter(extension => extension.descriptor()['name'] === location);
+    const resolverExtensions = self.runtime.extensions(UI.ViewLocationResolver)
+                                   .filter(extension => extension.descriptor()['name'] === location);
     if (!resolverExtensions.length)
       throw new Error('Unresolved location: ' + location);
-    var resolverExtension = resolverExtensions[0];
+    const resolverExtension = resolverExtensions[0];
     return resolverExtension.instance().then(
         resolver => /** @type {?UI.ViewManager._Location} */ (resolver.resolveLocation(location)));
   }
@@ -414,11 +413,19 @@ UI.ViewManager = class {
 
   /**
    * @param {string} location
+   * @return {boolean}
+   */
+  hasViewsForLocation(location) {
+    return !!this._viewsForLocation(location).length;
+  }
+
+  /**
+   * @param {string} location
    * @return {!Array<!UI.View>}
    */
   _viewsForLocation(location) {
-    var result = [];
-    for (var id of this._views.keys()) {
+    const result = [];
+    for (const id of this._views.keys()) {
       if (this._locationNameByViewId.get(id) === location)
         result.push(this._views.get(id));
     }
@@ -448,11 +455,11 @@ UI.ViewManager._ContainerWidget = class extends UI.VBox {
   _materialize() {
     if (this._materializePromise)
       return this._materializePromise;
-    var promises = [];
+    const promises = [];
     promises.push(this._view.toolbarItems().then(UI.ViewManager._populateToolbar.bind(UI.ViewManager, this.element)));
     promises.push(this._view.widget().then(widget => {
       // Move focus from |this| to loaded |widget| if any.
-      var shouldFocus = this.element.hasFocus();
+      const shouldFocus = this.element.hasFocus();
       this.setDefaultFocusedElement(null);
       this._view[UI.View._widgetSymbol] = widget;
       widget.show(this.element);
@@ -467,7 +474,13 @@ UI.ViewManager._ContainerWidget = class extends UI.VBox {
    * @override
    */
   wasShown() {
-    this._materialize();
+    this._materialize().then(() => {
+      this._wasShownForTest();
+    });
+  }
+
+  _wasShownForTest() {
+    // This method is sniffed in tests.
   }
 };
 
@@ -484,6 +497,7 @@ UI.ViewManager._ExpandableContainerWidget = class extends UI.VBox {
     this.registerRequiredCSS('ui/viewContainers.css');
 
     this._titleElement = createElementWithClass('div', 'expandable-view-title');
+    UI.ARIAUtils.markAsLink(this._titleElement);
     this._titleExpandIcon = UI.Icon.create('smallicon-triangle-right', 'title-expand-icon');
     this._titleElement.appendChild(this._titleExpandIcon);
     this._titleElement.createTextChild(view.title());
@@ -503,7 +517,7 @@ UI.ViewManager._ExpandableContainerWidget = class extends UI.VBox {
   _materialize() {
     if (this._materializePromise)
       return this._materializePromise;
-    var promises = [];
+    const promises = [];
     promises.push(
         this._view.toolbarItems().then(UI.ViewManager._populateToolbar.bind(UI.ViewManager, this._titleElement)));
     promises.push(this._view.widget().then(widget => {
@@ -522,6 +536,7 @@ UI.ViewManager._ExpandableContainerWidget = class extends UI.VBox {
     if (this._titleElement.classList.contains('expanded'))
       return this._materialize();
     this._titleElement.classList.add('expanded');
+    UI.ARIAUtils.setExpanded(this._titleElement, true);
     this._titleExpandIcon.setIconType('smallicon-triangle-down');
     return this._materialize().then(() => this._widget.show(this.element));
   }
@@ -530,6 +545,7 @@ UI.ViewManager._ExpandableContainerWidget = class extends UI.VBox {
     if (!this._titleElement.classList.contains('expanded'))
       return;
     this._titleElement.classList.remove('expanded');
+    UI.ARIAUtils.setExpanded(this._titleElement, false);
     this._titleExpandIcon.setIconType('smallicon-triangle-right');
     this._materialize().then(() => this._widget.detach());
   }
@@ -545,8 +561,16 @@ UI.ViewManager._ExpandableContainerWidget = class extends UI.VBox {
    * @param {!Event} event
    */
   _onTitleKeyDown(event) {
-    if (isEnterKey(event) || event.keyCode === UI.KeyboardShortcut.Keys.Space.code)
+    if (isEnterKey(event) || event.keyCode === UI.KeyboardShortcut.Keys.Space.code) {
       this._toggleExpanded();
+    } else if (event.key === 'ArrowLeft') {
+      this._collapse();
+    } else if (event.key === 'ArrowRight') {
+      if (!this._titleElement.classList.contains('expanded'))
+        this._expand();
+      else if (this._widget)
+        this._widget.focus();
+    }
   }
 };
 
@@ -596,7 +620,7 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
    * @param {?string=} defaultTab
    */
   constructor(manager, revealCallback, location, restoreSelection, allowReorder, defaultTab) {
-    var tabbedPane = new UI.TabbedPane();
+    const tabbedPane = new UI.TabbedPane();
     if (allowReorder)
       tabbedPane.setAllowTabReorder(true);
 
@@ -649,18 +673,18 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
    * @param {string} locationName
    */
   appendApplicableItems(locationName) {
-    var views = this._manager._viewsForLocation(locationName);
+    const views = this._manager._viewsForLocation(locationName);
     if (this._allowReorder) {
-      var i = 0;
-      var persistedOrders = this._tabOrderSetting.get();
-      var orders = new Map();
-      for (var view of views)
+      let i = 0;
+      const persistedOrders = this._tabOrderSetting.get();
+      const orders = new Map();
+      for (const view of views)
         orders.set(view.viewId(), persistedOrders[view.viewId()] || (++i) * UI.ViewManager._TabbedLocation.orderStep);
       views.sort((a, b) => orders.get(a.viewId()) - orders.get(b.viewId()));
     }
 
-    for (var view of views) {
-      var id = view.viewId();
+    for (const view of views) {
+      const id = view.viewId();
       this._views.set(id, view);
       view[UI.ViewManager._Location.symbol] = this;
       if (view.isTransient())
@@ -680,11 +704,11 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
    * @param {!UI.ContextMenu} contextMenu
    */
   _appendTabsToMenu(contextMenu) {
-    var views = Array.from(this._views.values());
+    const views = Array.from(this._views.values());
     views.sort((viewa, viewb) => viewa.title().localeCompare(viewb.title()));
-    for (var view of views) {
-      var title = Common.UIString(view.title());
-      contextMenu.appendItem(title, this.showView.bind(this, view, undefined, true));
+    for (const view of views) {
+      const title = Common.UIString(view.title());
+      contextMenu.defaultSection().appendItem(title, this.showView.bind(this, view, undefined, true));
     }
   }
 
@@ -710,19 +734,19 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
     this._manager._views.set(view.viewId(), view);
     this._views.set(view.viewId(), view);
 
-    var index = undefined;
-    var tabIds = this._tabbedPane.tabIds();
+    let index = undefined;
+    const tabIds = this._tabbedPane.tabIds();
     if (this._allowReorder) {
-      var orderSetting = this._tabOrderSetting.get();
-      var order = orderSetting[view.viewId()];
-      for (var i = 0; order && i < tabIds.length; ++i) {
+      const orderSetting = this._tabOrderSetting.get();
+      const order = orderSetting[view.viewId()];
+      for (let i = 0; order && i < tabIds.length; ++i) {
         if (orderSetting[tabIds[i]] && orderSetting[tabIds[i]] > order) {
           index = i;
           break;
         }
       }
     } else if (insertBefore) {
-      for (var i = 0; i < tabIds.length; ++i) {
+      for (let i = 0; i < tabIds.length; ++i) {
         if (tabIds[i] === insertBefore.viewId()) {
           index = i;
           break;
@@ -732,8 +756,8 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
     this._appendTab(view, index);
 
     if (view.isCloseable()) {
-      var tabs = this._closeableTabSetting.get();
-      var tabId = view.viewId();
+      const tabs = this._closeableTabSetting.get();
+      const tabId = view.viewId();
       if (!tabs[tabId]) {
         tabs[tabId] = true;
         this._closeableTabSetting.set(tabs);
@@ -747,13 +771,15 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
    * @param {!UI.View} view
    * @param {?UI.View=} insertBefore
    * @param {boolean=} userGesture
+   * @param {boolean=} omitFocus
    * @return {!Promise}
    */
-  showView(view, insertBefore, userGesture) {
+  showView(view, insertBefore, userGesture, omitFocus) {
     this.appendView(view, insertBefore);
     this._tabbedPane.selectTab(view.viewId(), userGesture);
-    this._tabbedPane.focus();
-    var widget = /** @type {!UI.ViewManager._ContainerWidget} */ (this._tabbedPane.tabView(view.viewId()));
+    if (!omitFocus)
+      this._tabbedPane.focus();
+    const widget = /** @type {!UI.ViewManager._ContainerWidget} */ (this._tabbedPane.tabView(view.viewId()));
     return widget._materialize();
   }
 
@@ -775,7 +801,7 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
    * @param {!Common.Event} event
    */
   _tabSelected(event) {
-    var tabId = /** @type {string} */ (event.data.tabId);
+    const tabId = /** @type {string} */ (event.data.tabId);
     if (this._lastSelectedTabSetting && event.data['isUserGesture'])
       this._lastSelectedTabSetting.set(tabId);
   }
@@ -784,8 +810,8 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
    * @param {!Common.Event} event
    */
   _tabClosed(event) {
-    var id = /** @type {string} */ (event.data['tabId']);
-    var tabs = this._closeableTabSetting.get();
+    const id = /** @type {string} */ (event.data['tabId']);
+    const tabs = this._closeableTabSetting.get();
     if (tabs[id]) {
       delete tabs[id];
       this._closeableTabSetting.set(tabs);
@@ -794,9 +820,9 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
   }
 
   _persistTabOrder() {
-    var tabIds = this._tabbedPane.tabIds();
-    var tabOrders = {};
-    for (var i = 0; i < tabIds.length; i++)
+    const tabIds = this._tabbedPane.tabIds();
+    const tabOrders = {};
+    for (let i = 0; i < tabIds.length; i++)
       tabOrders[tabIds[i]] = (i + 1) * UI.ViewManager._TabbedLocation.orderStep;
     this._tabOrderSetting.set(tabOrders);
   }
@@ -815,7 +841,7 @@ UI.ViewManager._StackLocation = class extends UI.ViewManager._Location {
    * @param {string=} location
    */
   constructor(manager, revealCallback, location) {
-    var vbox = new UI.VBox();
+    const vbox = new UI.VBox();
     super(manager, vbox, revealCallback);
     this._vbox = vbox;
 
@@ -832,14 +858,14 @@ UI.ViewManager._StackLocation = class extends UI.ViewManager._Location {
    * @param {?UI.View=} insertBefore
    */
   appendView(view, insertBefore) {
-    var container = this._expandableContainers.get(view.viewId());
+    let container = this._expandableContainers.get(view.viewId());
     if (!container) {
       view[UI.ViewManager._Location.symbol] = this;
       this._manager._views.set(view.viewId(), view);
       container = new UI.ViewManager._ExpandableContainerWidget(view);
-      var beforeElement = null;
+      let beforeElement = null;
       if (insertBefore) {
-        var beforeContainer = insertBefore[UI.ViewManager._ExpandableContainerWidget._symbol];
+        const beforeContainer = insertBefore[UI.ViewManager._ExpandableContainerWidget._symbol];
         beforeElement = beforeContainer ? beforeContainer.element : null;
       }
       container.show(this._vbox.contentElement, beforeElement);
@@ -855,7 +881,7 @@ UI.ViewManager._StackLocation = class extends UI.ViewManager._Location {
    */
   showView(view, insertBefore) {
     this.appendView(view, insertBefore);
-    var container = this._expandableContainers.get(view.viewId());
+    const container = this._expandableContainers.get(view.viewId());
     return container._expand();
   }
 
@@ -864,7 +890,7 @@ UI.ViewManager._StackLocation = class extends UI.ViewManager._Location {
    * @override
    */
   removeView(view) {
-    var container = this._expandableContainers.get(view.viewId());
+    const container = this._expandableContainers.get(view.viewId());
     if (!container)
       return;
 
@@ -879,7 +905,7 @@ UI.ViewManager._StackLocation = class extends UI.ViewManager._Location {
    * @param {string} locationName
    */
   appendApplicableItems(locationName) {
-    for (var view of this._manager._viewsForLocation(locationName))
+    for (const view of this._manager._viewsForLocation(locationName))
       this.appendView(view);
   }
 };

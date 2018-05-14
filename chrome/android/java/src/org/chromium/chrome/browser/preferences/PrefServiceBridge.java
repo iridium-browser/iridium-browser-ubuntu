@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.preferences;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.support.annotation.Nullable;
 import android.util.Log;
 
 import org.chromium.base.ContextUtils;
@@ -13,6 +14,8 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.ContentSettingsType;
+import org.chromium.chrome.browser.download.DownloadPromptStatus;
+import org.chromium.chrome.browser.preferences.languages.LanguageItem;
 import org.chromium.chrome.browser.preferences.website.ContentSetting;
 import org.chromium.chrome.browser.preferences.website.ContentSettingException;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
@@ -26,7 +29,7 @@ import java.util.List;
  * preferences should be grouped with their relevant functionality but this is a grab-bag for other
  * preferences.
  */
-public final class PrefServiceBridge {
+public class PrefServiceBridge {
     // These values must match the native enum values in
     // SupervisedUserURLFilter::FilteringBehavior
     public static final int SUPERVISED_USER_FILTERING_ALLOW = 0;
@@ -81,9 +84,9 @@ public final class PrefServiceBridge {
         return new AboutVersionStrings(applicationVersion, osVersion);
     }
 
-    private PrefServiceBridge() {
-        TemplateUrlService.getInstance().load();
-    }
+    // Singleton constructor. Do not call directly unless for testing purpose.
+    @VisibleForTesting
+    protected PrefServiceBridge() {}
 
     private static PrefServiceBridge sInstance;
 
@@ -92,7 +95,12 @@ public final class PrefServiceBridge {
      */
     public static PrefServiceBridge getInstance() {
         ThreadUtils.assertOnUiThread();
-        if (sInstance == null) sInstance = new PrefServiceBridge();
+        if (sInstance == null) {
+            sInstance = new PrefServiceBridge();
+
+            // Put initialization here to make instantiation in unit tests easier.
+            TemplateUrlService.getInstance().load();
+        }
         return sInstance;
     }
 
@@ -101,6 +109,22 @@ public final class PrefServiceBridge {
      */
     public static boolean isInitialized() {
         return sInstance != null;
+    }
+
+    /**
+     * @param preference The name of the preference.
+     * @return Whether the specified preference is enabled.
+     */
+    public boolean getBoolean(@Pref int preference) {
+        return nativeGetBoolean(preference);
+    }
+
+    /**
+     * @param preference The name of the preference.
+     * @param value The value the specified preference will be set to.
+     */
+    public void setBoolean(@Pref int preference, boolean value) {
+        nativeSetBoolean(preference, value);
     }
 
     /**
@@ -168,6 +192,17 @@ public final class PrefServiceBridge {
         ContentSettingException exception = new ContentSettingException(
                 contentSettingsType, pattern, ContentSetting.fromInt(contentSetting), source);
         list.add(exception);
+    }
+
+    @CalledByNative
+    private static void addNewLanguageItemToList(List<LanguageItem> list, String code,
+            String displayName, String nativeDisplayName, boolean supportTranslate) {
+        list.add(new LanguageItem(code, displayName, nativeDisplayName, supportTranslate));
+    }
+
+    @CalledByNative
+    private static void copyStringArrayToList(List<String> list, String[] source) {
+        list.addAll(Arrays.asList(source));
     }
 
     /**
@@ -335,6 +370,20 @@ public final class PrefServiceBridge {
      */
     public boolean isBackgroundSyncAllowed() {
         return nativeGetBackgroundSyncEnabled();
+    }
+
+    /**
+     * @return true if websites are allowed to read from the clipboard.
+     */
+    public boolean isClipboardEnabled() {
+        return isContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_CLIPBOARD_READ);
+    }
+
+    /**
+     * @return true if websites are allowed to play sound.
+     */
+    public boolean isSoundEnabled() {
+        return nativeGetSoundEnabled();
     }
 
     /**
@@ -654,21 +703,6 @@ public final class PrefServiceBridge {
         nativeSetLastClearBrowsingDataTab(tabIndex);
     }
 
-    /**
-     * Migrate browsing data preferences when the new "clear browsing data" dialog with tabs is
-     * visited.
-     */
-    public void migrateBrowsingDataPreferences() {
-        nativeMigrateBrowsingDataPreferences();
-    }
-
-    /**
-     * @return Whether browser history can be deleted by the user.
-     */
-    public boolean canDeleteBrowsingHistory() {
-        return nativeCanDeleteBrowsingHistory();
-    }
-
     public void setAllowCookiesEnabled(boolean allow) {
         nativeSetAllowCookiesEnabled(allow);
     }
@@ -679,6 +713,10 @@ public final class PrefServiceBridge {
 
     public void setBlockThirdPartyCookiesEnabled(boolean enabled) {
         nativeSetBlockThirdPartyCookiesEnabled(enabled);
+    }
+
+    public void setClipboardEnabled(boolean allow) {
+        nativeSetClipboardEnabled(allow);
     }
 
     public void setDoNotTrackEnabled(boolean enabled) {
@@ -707,6 +745,10 @@ public final class PrefServiceBridge {
 
     public void setPasswordEchoEnabled(boolean enabled) {
         nativeSetPasswordEchoEnabled(enabled);
+    }
+
+    public void setSoundEnabled(boolean allow) {
+        nativeSetSoundEnabled(allow);
     }
 
     /**
@@ -889,6 +931,69 @@ public final class PrefServiceBridge {
         return nativeGetSupervisedUserSecondCustodianProfileImageURL();
     }
 
+    public void setChromeHomePersonalizedOmniboxSuggestionsEnabled(boolean enabled) {
+        nativeSetChromeHomePersonalizedOmniboxSuggestionsEnabled(enabled);
+    }
+
+    /**
+     * @return A sorted list of LanguageItems representing the Chrome accept languages with details.
+     *         Languages that are not supported on Android have been filtered out.
+     */
+    public List<LanguageItem> getChromeLanguageList() {
+        List<LanguageItem> list = new ArrayList<>();
+        nativeGetChromeAcceptLanguages(list);
+        return list;
+    }
+
+    /**
+     * @return A sorted list of accept language codes for the current user.
+     *         Note that for the signed-in user, the list might contain some language codes from
+     *         other platforms but not supported on Android.
+     */
+    public List<String> getUserLanguageCodes() {
+        List<String> list = new ArrayList<>();
+        nativeGetUserAcceptLanguages(list);
+        return list;
+    }
+
+    /**
+     * Update accept language for the current user.
+     *
+     * @param languageCode A valid language code to update.
+     * @param add Whether this is an "add" operation or "delete" operation.
+     */
+    public void updateUserAcceptLanguages(String languageCode, boolean add) {
+        nativeUpdateUserAcceptLanguages(languageCode, add);
+    }
+
+    /**
+     * Move a language to the given postion of the user's accept language.
+     *
+     * @param languageCode A valid language code to set.
+     * @param offset The offset from the original position of the language.
+     */
+    public void moveAcceptLanguage(String languageCode, int offset) {
+        nativeMoveAcceptLanguage(languageCode, offset);
+    }
+
+    /**
+     * @param languageCode A valid language code to check.
+     * @return Whether the given language is blocked by the user.
+     */
+    public boolean isBlockedLanguage(String languageCode) {
+        return nativeIsBlockedLanguage(languageCode);
+    }
+
+    /**
+     * Sets the blocked state of a given language.
+     *
+     * @param languageCode A valid language code to change.
+     * @param blocked Whether to set language blocked.
+     */
+    public void setLanguageBlockedState(String languageCode, boolean blocked) {
+        nativeSetLanguageBlockedState(languageCode, blocked);
+    }
+
     private native boolean nativeIsContentSettingEnabled(int contentSettingType);
     private native boolean nativeIsContentSettingManaged(int contentSettingType);
     private native void nativeSetContentSettingEnabled(int contentSettingType, boolean allow);
@@ -953,6 +1058,42 @@ public final class PrefServiceBridge {
         nativeSetSupervisedUserId(supervisedUserId);
     }
 
+    /**
+     * @return The stored download default directory.
+     */
+    public String getDownloadDefaultDirectory() {
+        return nativeGetDownloadDefaultDirectory();
+    }
+
+    /**
+     * @param directory New directory to set as the download default directory.
+     */
+    public void setDownloadAndSaveFileDefaultDirectory(String directory) {
+        nativeSetDownloadAndSaveFileDefaultDirectory(directory);
+    }
+
+    /**
+     * @return The status of prompt for download pref, defined by {@link DownloadPromptStatus}.
+     */
+    @DownloadPromptStatus
+    public int getPromptForDownloadAndroid() {
+        return nativeGetPromptForDownloadAndroid();
+    }
+
+    /**
+     * @param status New status to update the prompt for download preference.
+     */
+    public void setPromptForDownloadAndroid(@DownloadPromptStatus int status) {
+        nativeSetPromptForDownloadAndroid(status);
+    }
+
+    @VisibleForTesting
+    public static void setInstanceForTesting(@Nullable PrefServiceBridge instanceForTesting) {
+        sInstance = instanceForTesting;
+    }
+
+    private native boolean nativeGetBoolean(int preference);
+    private native void nativeSetBoolean(int preference, boolean value);
     private native boolean nativeGetAcceptCookiesEnabled();
     private native boolean nativeGetAcceptCookiesUserModifiable();
     private native boolean nativeGetAcceptCookiesManagedByCustodian();
@@ -987,6 +1128,7 @@ public final class PrefServiceBridge {
     private native boolean nativeGetIncognitoModeManaged();
     private native boolean nativeGetPrintingEnabled();
     private native boolean nativeGetPrintingManaged();
+    private native boolean nativeGetSoundEnabled();
     private native boolean nativeGetSupervisedUserSafeSitesEnabled();
     private native void nativeSetTranslateEnabled(boolean enabled);
     private native void nativeResetTranslateDefaults();
@@ -1000,12 +1142,11 @@ public final class PrefServiceBridge {
             int clearBrowsingDataTab, int timePeriod);
     private native int nativeGetLastClearBrowsingDataTab();
     private native void nativeSetLastClearBrowsingDataTab(int lastTab);
-    private native void nativeMigrateBrowsingDataPreferences();
-    private native boolean nativeCanDeleteBrowsingHistory();
     private native void nativeSetAutoplayEnabled(boolean allow);
     private native void nativeSetAllowCookiesEnabled(boolean allow);
     private native void nativeSetBackgroundSyncEnabled(boolean allow);
     private native void nativeSetBlockThirdPartyCookiesEnabled(boolean enabled);
+    private native void nativeSetClipboardEnabled(boolean allow);
     private native void nativeSetDoNotTrackEnabled(boolean enabled);
     private native void nativeSetRememberPasswordsEnabled(boolean allow);
     private native void nativeSetPasswordManagerAutoSigninEnabled(boolean enabled);
@@ -1017,6 +1158,7 @@ public final class PrefServiceBridge {
     private native void nativeSetNotificationsEnabled(boolean allow);
     private native void nativeSetNotificationsVibrateEnabled(boolean enabled);
     private native void nativeSetPasswordEchoEnabled(boolean enabled);
+    private native void nativeSetSoundEnabled(boolean allow);
     private native boolean nativeCanPrefetchAndPrerender();
     private native AboutVersionStrings nativeGetAboutVersionStrings();
     private native void nativeSetContextualSearchPreference(String preference);
@@ -1056,4 +1198,15 @@ public final class PrefServiceBridge {
     private native void nativeSetLatestVersionWhenClickedUpdateMenuItem(String version);
     private native String nativeGetLatestVersionWhenClickedUpdateMenuItem();
     private native void nativeSetSupervisedUserId(String supervisedUserId);
+    private native void nativeSetChromeHomePersonalizedOmniboxSuggestionsEnabled(boolean enabled);
+    private native void nativeGetChromeAcceptLanguages(List<LanguageItem> list);
+    private native void nativeGetUserAcceptLanguages(List<String> list);
+    private native void nativeUpdateUserAcceptLanguages(String language, boolean add);
+    private native void nativeMoveAcceptLanguage(String language, int offset);
+    private native boolean nativeIsBlockedLanguage(String language);
+    private native void nativeSetLanguageBlockedState(String language, boolean blocked);
+    private native String nativeGetDownloadDefaultDirectory();
+    private native void nativeSetDownloadAndSaveFileDefaultDirectory(String directory);
+    private native int nativeGetPromptForDownloadAndroid();
+    private native void nativeSetPromptForDownloadAndroid(int status);
 }

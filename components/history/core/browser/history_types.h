@@ -8,7 +8,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <map>
 #include <set>
 #include <string>
@@ -298,9 +297,16 @@ struct MostVisitedURL {
   MostVisitedURL(const GURL& url,
                  const base::string16& title,
                  base::Time last_forced_time = base::Time());
+  MostVisitedURL(const GURL& url,
+                 const base::string16& title,
+                 const RedirectList& preceding_redirects);
   MostVisitedURL(const MostVisitedURL& other);
   MostVisitedURL(MostVisitedURL&& other) noexcept;
   ~MostVisitedURL();
+
+  // Initializes |redirects| from |preceding_redirects|, ensuring that |url| is
+  // always present as the last item.
+  void InitRedirects(const RedirectList& preceding_redirects);
 
   GURL url;
   base::string16 title;
@@ -355,7 +361,7 @@ struct HistoryAddPageArgs {
   //   HistoryAddPageArgs(
   //       GURL(), base::Time(), NULL, 0, GURL(),
   //       RedirectList(), ui::PAGE_TRANSITION_LINK,
-  //       SOURCE_BROWSED, false, true)
+  //       false, SOURCE_BROWSED, false, true)
   HistoryAddPageArgs();
   HistoryAddPageArgs(const GURL& url,
                      base::Time time,
@@ -364,6 +370,7 @@ struct HistoryAddPageArgs {
                      const GURL& referrer,
                      const RedirectList& redirects,
                      ui::PageTransition transition,
+                     bool hidden,
                      VisitSource source,
                      bool did_replace_entry,
                      bool consider_for_ntp_most_visited);
@@ -377,6 +384,7 @@ struct HistoryAddPageArgs {
   GURL referrer;
   RedirectList redirects;
   ui::PageTransition transition;
+  bool hidden;
   VisitSource visit_source;
   bool did_replace_entry;
   // Specifies whether a page visit should contribute to the Most Visited tiles
@@ -491,7 +499,7 @@ struct IconMapping {
   GURL icon_url;
 
   // The type of icon.
-  favicon_base::IconType icon_type = favicon_base::INVALID_ICON;
+  favicon_base::IconType icon_type = favicon_base::IconType::kInvalid;
 };
 
 // Defines a favicon bitmap and its associated pixel size.
@@ -522,6 +530,18 @@ enum FaviconBitmapType {
   //   they are always replaced by ON_VISIT favicons whenever their page gets
   //   visited.
   ON_DEMAND
+};
+
+// Defines all associated mappings of a given favicon.
+struct IconMappingsForExpiry {
+  IconMappingsForExpiry();
+  IconMappingsForExpiry(const IconMappingsForExpiry& other);
+  ~IconMappingsForExpiry();
+
+  // URL of a given favicon.
+  GURL icon_url;
+  // URLs of all pages mapped to a given favicon
+  std::vector<GURL> page_urls;
 };
 
 // Defines a favicon bitmap stored in the history backend.
@@ -561,6 +581,45 @@ struct ExpireHistoryArgs {
   std::set<GURL> urls;
   base::Time begin_time;
   base::Time end_time;
+};
+
+// Represents the time range of a history deletion. If |IsValid()| is false,
+// the time range doesn't apply to this deletion e.g. because only a list of
+// urls was deleted.
+class DeletionTimeRange {
+ public:
+  static DeletionTimeRange Invalid();
+
+  static DeletionTimeRange AllTime();
+
+  DeletionTimeRange(base::Time begin, base::Time end)
+      : begin_(begin), end_(end) {
+    DCHECK(IsValid());
+  }
+
+  base::Time begin() const {
+    DCHECK(IsValid());
+    return begin_;
+  }
+
+  base::Time end() const {
+    DCHECK(IsValid());
+    return end_;
+  }
+
+  bool IsValid() const;
+
+  // Returns true if this time range covers history from the beginning of time.
+  bool IsAllTime() const;
+
+ private:
+  // Creates an invalid time range by assigning impossible start and end times.
+  DeletionTimeRange() : begin_(base::Time::Max()), end_(base::Time::Min()) {}
+
+  // Begin of a history deletion.
+  base::Time begin_;
+  // End of a history deletion.
+  base::Time end_;
 };
 
 }  // namespace history

@@ -132,7 +132,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 
 // Flaky: crbug.com/715963
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    CreateNewFolder,
+    DISABLED_CreateNewFolder,
     FileManagerBrowserTest,
     ::testing::Values(
         TestParameter(NOT_IN_GUEST_MODE, "createNewFolderAfterSelectFile"),
@@ -176,11 +176,16 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       "deleteMenuItemIsDisabledWhenNoItemIsSelected"),
         TestParameter(NOT_IN_GUEST_MODE, "deleteOneItemFromToolbar")));
 
+// TODO(yamaguchi):Enable after removing root cause of the test flakiness.
+// http://crbug.com/804413.
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    QuickView,
+    DISABLED_QuickView,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "openQuickView"),
                       TestParameter(NOT_IN_GUEST_MODE, "closeQuickView")));
+// Disabled due to strong flakyness (crbug.com/798772):
+//                      TestParameter(NOT_IN_GUEST_MODE,
+//                                    "openQuickViewForFoldersAfterClose")
 
 #if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_DirectoryTreeContextMenu DISABLED_DirectoryTreeContextMenu
@@ -557,7 +562,8 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     ::testing::Values(
         TestParameter(NOT_IN_GUEST_MODE, "showHiddenFilesOnDownloads"),
         TestParameter(NOT_IN_GUEST_MODE, "showHiddenFilesOnDrive"),
-        TestParameter(NOT_IN_GUEST_MODE, "hideGoogleDocs")));
+        TestParameter(NOT_IN_GUEST_MODE, "hideGoogleDocs"),
+        TestParameter(NOT_IN_GUEST_MODE, "showPasteInGearMenu")));
 
 // Structure to describe an account info.
 struct TestAccountInfo {
@@ -593,6 +599,11 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
                                     kTestAccounts[DUMMY_ACCOUNT_INDEX].email);
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile,
                                     kTestAccounts[DUMMY_ACCOUNT_INDEX].hash);
+    // Don't require policy for our sessions - this is required because
+    // this test creates a secondary profile synchronously, so we need to
+    // let the policy code know not to expect cached policy.
+    command_line->AppendSwitchASCII(chromeos::switches::kProfileRequiresPolicy,
+                                    "false");
   }
 
   // Logs in to the primary profile of this test.
@@ -624,11 +635,12 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
 
   // Adds a new user for testing to the current session.
   void AddUser(const TestAccountInfo& info, bool log_in) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
-    const AccountId account_id(AccountId::FromUserEmail(info.email));
+    base::ScopedAllowBlockingForTesting allow_blocking;
+    const AccountId account_id(
+        AccountId::FromUserEmailGaiaId(info.email, info.gaia_id));
     if (log_in) {
       session_manager::SessionManager::Get()->CreateSession(account_id,
-                                                            info.hash);
+                                                            info.hash, false);
     }
     user_manager::UserManager::Get()->SaveUserDisplayName(
         account_id, base::UTF8ToUTF16(info.display_name));

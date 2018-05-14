@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/compiler_specific.h"
+#include "base/containers/flat_map.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_checker.h"
 #include "base/trace_event/trace_event_impl.h"
@@ -39,7 +41,7 @@ using blink::WebVector;
 using blink::WebRect;
 using blink::WebSize;
 using blink::WebColor;
-using blink::WebScrollBoundaryBehavior;
+using blink::WebOverscrollBehavior;
 
 namespace cc_blink {
 
@@ -106,7 +108,7 @@ bool WebLayerImpl::MasksToBounds() const {
 
 void WebLayerImpl::SetMaskLayer(WebLayer* maskLayer) {
   layer_->SetMaskLayer(
-      maskLayer ? static_cast<WebLayerImpl*>(maskLayer)->layer() : 0);
+      maskLayer ? static_cast<WebLayerImpl*>(maskLayer)->layer() : nullptr);
 }
 
 void WebLayerImpl::SetOpacity(float opacity) {
@@ -133,12 +135,8 @@ bool WebLayerImpl::IsRootForIsolatedGroup() {
   return layer_->is_root_for_isolated_group();
 }
 
-void WebLayerImpl::SetShouldHitTest(bool should_hit_test) {
-  layer_->SetShouldHitTest(should_hit_test);
-}
-
-bool WebLayerImpl::ShouldHitTest() {
-  return layer_->should_hit_test();
+void WebLayerImpl::SetHitTestableWithoutDrawsContent(bool should_hit_test) {
+  layer_->SetHitTestableWithoutDrawsContent(should_hit_test);
 }
 
 void WebLayerImpl::SetOpaque(bool opaque) {
@@ -244,6 +242,10 @@ bool WebLayerImpl::Scrollable() const {
   return layer_->scrollable();
 }
 
+blink::WebSize WebLayerImpl::ScrollContainerBoundsForTesting() const {
+  return layer_->scroll_container_bounds();
+}
+
 void WebLayerImpl::SetUserScrollable(bool horizontal, bool vertical) {
   layer_->SetUserScrollable(horizontal, vertical);
 }
@@ -289,17 +291,15 @@ void WebLayerImpl::SetNonFastScrollableRegion(const WebVector<WebRect>& rects) {
 
 WebVector<WebRect> WebLayerImpl::NonFastScrollableRegion() const {
   size_t num_rects = 0;
-  for (cc::Region::Iterator region_rects(layer_->non_fast_scrollable_region());
-       region_rects.has_rect();
-       region_rects.next())
+  for (gfx::Rect rect : layer_->non_fast_scrollable_region()) {
+    ALLOW_UNUSED_LOCAL(rect);
     ++num_rects;
+  }
 
   WebVector<WebRect> result(num_rects);
   size_t i = 0;
-  for (cc::Region::Iterator region_rects(layer_->non_fast_scrollable_region());
-       region_rects.has_rect();
-       region_rects.next()) {
-    result[i] = region_rects.rect();
+  for (gfx::Rect rect : layer_->non_fast_scrollable_region()) {
+    result[i] = rect;
     ++i;
   }
   return result;
@@ -307,25 +307,43 @@ WebVector<WebRect> WebLayerImpl::NonFastScrollableRegion() const {
 
 void WebLayerImpl::SetTouchEventHandlerRegion(
     const WebVector<blink::WebTouchInfo>& touch_info) {
-  cc::TouchActionRegion touch_action_region;
+  base::flat_map<blink::WebTouchAction, cc::Region> region_map;
   for (size_t i = 0; i < touch_info.size(); ++i)
-    touch_action_region.Union(touch_info[i].touch_action, touch_info[i].rect);
-  layer_->SetTouchActionRegion(std::move(touch_action_region));
+    region_map[touch_info[i].touch_action].Union(touch_info[i].rect);
+  layer_->SetTouchActionRegion(cc::TouchActionRegion(region_map));
 }
 
 WebVector<WebRect> WebLayerImpl::TouchEventHandlerRegion() const {
   size_t num_rects = 0;
-  for (cc::Region::Iterator region_rects(
-           layer_->touch_action_region().region());
-       region_rects.has_rect(); region_rects.next())
+  for (gfx::Rect rect : layer_->touch_action_region().region()) {
+    ALLOW_UNUSED_LOCAL(rect);
     ++num_rects;
+  }
 
   WebVector<WebRect> result(num_rects);
   size_t i = 0;
-  for (cc::Region::Iterator region_rects(
-           layer_->touch_action_region().region());
-       region_rects.has_rect(); region_rects.next()) {
-    result[i] = region_rects.rect();
+  for (gfx::Rect rect : layer_->touch_action_region().region()) {
+    result[i] = rect;
+    ++i;
+  }
+  return result;
+}
+
+WebVector<WebRect>
+WebLayerImpl::TouchEventHandlerRegionForTouchActionForTesting(
+    cc::TouchAction touch_action) const {
+  size_t num_rects = 0;
+  for (gfx::Rect rect :
+       layer_->touch_action_region().GetRegionForTouchAction(touch_action)) {
+    ALLOW_UNUSED_LOCAL(rect);
+    ++num_rects;
+  }
+
+  WebVector<WebRect> result(num_rects);
+  size_t i = 0;
+  for (gfx::Rect rect :
+       layer_->touch_action_region().GetRegionForTouchAction(touch_action)) {
+    result[i] = rect;
     ++i;
   }
   return result;
@@ -337,6 +355,10 @@ void WebLayerImpl::SetIsContainerForFixedPositionLayers(bool enable) {
 
 bool WebLayerImpl::IsContainerForFixedPositionLayers() const {
   return layer_->IsContainerForFixedPositionLayers();
+}
+
+void WebLayerImpl::SetIsResizedByBrowserControls(bool enable) {
+  layer_->SetIsResizedByBrowserControls(enable);
 }
 
 static blink::WebLayerPositionConstraint ToWebLayerPositionConstraint(
@@ -384,10 +406,10 @@ ToWebLayerStickyPositionConstraint(
       constraint.scroll_container_relative_sticky_box_rect;
   web_constraint.scroll_container_relative_containing_block_rect =
       constraint.scroll_container_relative_containing_block_rect;
-  web_constraint.nearest_layer_shifting_sticky_box =
-      constraint.nearest_layer_shifting_sticky_box;
-  web_constraint.nearest_layer_shifting_containing_block =
-      constraint.nearest_layer_shifting_containing_block;
+  web_constraint.nearest_element_shifting_sticky_box =
+      constraint.nearest_element_shifting_sticky_box;
+  web_constraint.nearest_element_shifting_containing_block =
+      constraint.nearest_element_shifting_containing_block;
   return web_constraint;
 }
 static cc::LayerStickyPositionConstraint ToStickyPositionConstraint(
@@ -406,10 +428,10 @@ static cc::LayerStickyPositionConstraint ToStickyPositionConstraint(
       web_constraint.scroll_container_relative_sticky_box_rect;
   constraint.scroll_container_relative_containing_block_rect =
       web_constraint.scroll_container_relative_containing_block_rect;
-  constraint.nearest_layer_shifting_sticky_box =
-      web_constraint.nearest_layer_shifting_sticky_box;
-  constraint.nearest_layer_shifting_containing_block =
-      web_constraint.nearest_layer_shifting_containing_block;
+  constraint.nearest_element_shifting_sticky_box =
+      web_constraint.nearest_element_shifting_sticky_box;
+  constraint.nearest_element_shifting_containing_block =
+      web_constraint.nearest_element_shifting_containing_block;
   return constraint;
 }
 void WebLayerImpl::SetStickyPositionConstraint(
@@ -429,8 +451,13 @@ void WebLayerImpl::SetScrollClient(blink::WebLayerScrollClient* scroll_client) {
                    base::Unretained(scroll_client)));
   } else {
     layer_->set_did_scroll_callback(
-        base::Callback<void(const gfx::ScrollOffset&)>());
+        base::Callback<void(const gfx::ScrollOffset&, const cc::ElementId&)>());
   }
+}
+
+void WebLayerImpl::SetScrollOffsetFromImplSideForTesting(
+    const gfx::ScrollOffset& offset) {
+  layer_->SetScrollOffsetFromImplSide(offset);
 }
 
 void WebLayerImpl::SetLayerClient(cc::LayerClient* client) {
@@ -451,14 +478,6 @@ void WebLayerImpl::SetElementId(const cc::ElementId& id) {
 
 cc::ElementId WebLayerImpl::GetElementId() const {
   return layer_->element_id();
-}
-
-void WebLayerImpl::SetCompositorMutableProperties(uint32_t properties) {
-  layer_->SetMutableProperties(properties);
-}
-
-uint32_t WebLayerImpl::CompositorMutableProperties() const {
-  return layer_->mutable_properties();
 }
 
 void WebLayerImpl::SetScrollParent(blink::WebLayer* parent) {
@@ -491,10 +510,14 @@ void WebLayerImpl::ShowScrollbars() {
   layer_->ShowScrollbars();
 }
 
-void WebLayerImpl::SetScrollBoundaryBehavior(
-    const blink::WebScrollBoundaryBehavior& behavior) {
-  layer_->SetScrollBoundaryBehavior(
-      static_cast<cc::ScrollBoundaryBehavior>(behavior));
+void WebLayerImpl::SetOverscrollBehavior(
+    const blink::WebOverscrollBehavior& behavior) {
+  layer_->SetOverscrollBehavior(static_cast<cc::OverscrollBehavior>(behavior));
+}
+
+void WebLayerImpl::SetSnapContainerData(
+    base::Optional<cc::SnapContainerData> data) {
+  layer_->SetSnapContainerData(std::move(data));
 }
 
 }  // namespace cc_blink

@@ -14,17 +14,17 @@
 #include <crtdbg.h>
 #endif
 
-#include "webrtc/rtc_base/fileutils.h"
-#include "webrtc/rtc_base/flags.h"
-#include "webrtc/rtc_base/gunit.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/ssladapter.h"
-#include "webrtc/rtc_base/sslstreamadapter.h"
-#include "webrtc/test/field_trial.h"
-#include "webrtc/test/testsupport/fileutils.h"
+#include "rtc_base/flags.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/ssladapter.h"
+#include "rtc_base/sslstreamadapter.h"
+#include "system_wrappers/include/field_trial_default.h"
+#include "test/field_trial.h"
+#include "test/testsupport/fileutils.h"
 
 #if defined(WEBRTC_IOS)
-#include "webrtc/test/ios/test_support.h"
+#include "test/ios/test_support.h"
 #endif
 
 DEFINE_bool(help, false, "prints this message");
@@ -45,18 +45,20 @@ void TestInvalidParameterHandler(const wchar_t* expression,
                                  const wchar_t* file,
                                  unsigned int line,
                                  uintptr_t pReserved) {
-  LOG(LS_ERROR) << "InvalidParameter Handler called.  Exiting.";
-  LOG(LS_ERROR) << expression << std::endl << function << std::endl << file
-                << std::endl << line;
+  RTC_LOG(LS_ERROR) << "InvalidParameter Handler called.  Exiting.";
+  RTC_LOG(LS_ERROR) << expression << std::endl
+                    << function << std::endl
+                    << file << std::endl
+                    << line;
   exit(1);
 }
 void TestPureCallHandler() {
-  LOG(LS_ERROR) << "Purecall Handler called.  Exiting.";
+  RTC_LOG(LS_ERROR) << "Purecall Handler called.  Exiting.";
   exit(1);
 }
 int TestCrtReportHandler(int report_type, char* msg, int* retval) {
-    LOG(LS_ERROR) << "CrtReport Handler called...";
-    LOG(LS_ERROR) << msg;
+  RTC_LOG(LS_ERROR) << "CrtReport Handler called...";
+  RTC_LOG(LS_ERROR) << msg;
   if (report_type == _CRT_ASSERT) {
     exit(1);
   } else {
@@ -66,7 +68,7 @@ int TestCrtReportHandler(int report_type, char* msg, int* retval) {
 }
 #endif  // WEBRTC_WIN
 
-int main(int argc, char** argv) {
+int main(int argc, char* argv[]) {
   testing::InitGoogleTest(&argc, argv);
   rtc::FlagList::SetFlagsFromCommandLine(&argc, argv, false);
   if (FLAG_help) {
@@ -75,7 +77,10 @@ int main(int argc, char** argv) {
   }
 
   webrtc::test::SetExecutablePath(argv[0]);
-  webrtc::test::InitFieldTrialsFromString(FLAG_force_fieldtrials);
+  webrtc::test::ValidateFieldTrialsStringOrDie(FLAG_force_fieldtrials);
+  // InitFieldTrialsFromString stores the char*, so the char array must outlive
+  // the application.
+  webrtc::field_trial::InitFieldTrialsFromString(FLAG_force_fieldtrials);
 
 #if defined(WEBRTC_WIN)
   if (!FLAG_default_error_handlers) {
@@ -108,7 +113,7 @@ int main(int argc, char** argv) {
   rtc::SSLStreamAdapter::enable_time_callback_for_testing();
 
 #if defined(WEBRTC_IOS)
-  rtc::test::InitTestSuite(RUN_ALL_TESTS, argc, argv);
+  rtc::test::InitTestSuite(RUN_ALL_TESTS, argc, argv, false);
   rtc::test::RunTestsFromIOSApp();
 #endif
   const int res = RUN_ALL_TESTS();

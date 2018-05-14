@@ -31,7 +31,7 @@
 namespace blink {
 
 WebGLSharedObject::WebGLSharedObject(WebGLRenderingContextBase* context)
-    : WebGLObject(context), context_group_(this, context->ContextGroup()) {}
+    : WebGLObject(context), context_group_(context->ContextGroup()) {}
 
 bool WebGLSharedObject::Validate(const WebGLContextGroup* context_group,
                                  const WebGLRenderingContextBase*) const {
@@ -51,12 +51,13 @@ gpu::gles2::GLES2Interface* WebGLSharedObject::GetAGLInterface() const {
   return context_group_->GetAGLInterface();
 }
 
-DEFINE_TRACE(WebGLSharedObject) {
+void WebGLSharedObject::Trace(blink::Visitor* visitor) {
   visitor->Trace(context_group_);
   WebGLObject::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(WebGLSharedObject) {
+void WebGLSharedObject::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(context_group_);
   WebGLObject::TraceWrappers(visitor);
 }

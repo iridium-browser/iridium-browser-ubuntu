@@ -15,6 +15,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/buildflag.h"
 #include "chrome/browser/ssl/ssl_client_auth_observer.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_mac.h"
 #include "chrome/grit/generated_resources.h"
@@ -30,6 +31,7 @@
 #include "net/ssl/ssl_platform_key_mac.h"
 #include "ui/base/cocoa/window_size_constants.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/base/ui_features.h"
 
 using content::BrowserThread;
 
@@ -79,7 +81,7 @@ class SSLClientAuthObserverCocoaBridge : public SSLClientAuthObserver,
 
 namespace chrome {
 
-void ShowSSLClientCertificateSelector(
+void ShowSSLClientCertificateSelectorCocoa(
     content::WebContents* contents,
     net::SSLCertRequestInfo* cert_request_info,
     net::ClientCertIdentityList client_certs,
@@ -106,6 +108,18 @@ void ShowSSLClientCertificateSelector(
   [selector displayForWebContents:contents clientCerts:std::move(client_certs)];
 }
 
+#if !BUILDFLAG(MAC_VIEWS_BROWSER)
+void ShowSSLClientCertificateSelector(
+    content::WebContents* contents,
+    net::SSLCertRequestInfo* cert_request_info,
+    net::ClientCertIdentityList client_certs,
+    std::unique_ptr<content::ClientCertificateDelegate> delegate) {
+  return ShowSSLClientCertificateSelectorCocoa(contents, cert_request_info,
+                                               std::move(client_certs),
+                                               std::move(delegate));
+}
+#endif
+
 }  // namespace chrome
 
 namespace {
@@ -115,13 +129,12 @@ namespace {
 // an NSTableView. Future events may make cause the table view to query its
 // dataSource, which will have been deallocated.
 //
-// NSTableView.dataSource becomes a zeroing weak reference starting in 10.11,
-// so this workaround can be removed once we're on the 10.11 SDK.
+// Linking against the 10.12 SDK does not "fix" this issue, since
+// NSTableView.dataSource is a "weak" reference, which in non-ARC land still
+// translates to "raw pointer".
 //
-// See https://crbug.com/653093 and rdar://29409207 for more information.
-
-#if !defined(MAC_OS_X_VERSION_10_11) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_11
+// See https://crbug.com/653093, https://crbug.com/750242 and rdar://29409207
+// for more information.
 
 void ClearTableViewDataSources(NSView* view) {
   if (auto table_view = base::mac::ObjCCast<NSTableView>(view)) {
@@ -150,12 +163,6 @@ void ClearTableViewDataSourcesIfNeeded(NSWindow* leaked_window) {
       FROM_HERE, base::Bind(ClearTableViewDataSourcesIfWindowStillExists,
                             base::Unretained(leaked_window)));
 }
-
-#else
-
-void ClearTableViewDataSourcesIfNeeded(NSWindow*) {}
-
-#endif  // MAC_OS_X_VERSION_10_11
 
 }  // namespace
 

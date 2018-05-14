@@ -5,7 +5,6 @@
 #include "platform/graphics/paint/ClipPaintPropertyNode.h"
 
 #include "platform/geometry/LayoutRect.h"
-#include "platform/graphics/paint/PropertyTreeState.h"
 
 namespace blink {
 
@@ -17,21 +16,25 @@ ClipPaintPropertyNode* ClipPaintPropertyNode::Root() {
   return root;
 }
 
-String ClipPaintPropertyNode::ToString() const {
-  return String::Format(
-      "parent=%p localTransformSpace=%p rect=%s directCompositingReasons=%s",
-      Parent(), local_transform_space_.Get(),
-      clip_rect_.ToString().Ascii().data(),
-      CompositingReasonsAsString(direct_compositing_reasons_).Ascii().data());
+std::unique_ptr<JSONObject> ClipPaintPropertyNode::ToJSON() const {
+  auto json = JSONObject::Create();
+  if (Parent())
+    json->SetString("parent", String::Format("%p", Parent()));
+  json->SetString("localTransformSpace",
+                  String::Format("%p", local_transform_space_.get()));
+  json->SetString("rect", clip_rect_.ToString());
+  if (clip_rect_excluding_overlay_scrollbars_ != clip_rect_) {
+    json->SetString("rectExcludingOverlayScrollbars",
+                    clip_rect_excluding_overlay_scrollbars_.ToString());
+  }
+  if (clip_path_) {
+    json->SetBoolean("hasClipPath", true);
+  }
+  if (direct_compositing_reasons_ != CompositingReason::kNone) {
+    json->SetString("directCompositingReasons",
+                    CompositingReason::ToString(direct_compositing_reasons_));
+  }
+  return json;
 }
-
-#if DCHECK_IS_ON()
-
-String ClipPaintPropertyNode::ToTreeString() const {
-  return blink::PropertyTreeStatePrinter<blink::ClipPaintPropertyNode>()
-      .PathAsString(this);
-}
-
-#endif
 
 }  // namespace blink

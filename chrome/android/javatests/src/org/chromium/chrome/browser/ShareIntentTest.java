@@ -12,19 +12,34 @@ import android.os.AsyncTask;
 import android.os.ParcelFileDescriptor;
 import android.support.test.filters.LargeTest;
 
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.share.ShareHelper;
+import org.chromium.chrome.browser.share.ShareMenuActionHandler;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.ChromeFileProvider;
-import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Instrumentation tests for Share intents.
  */
-public class ShareIntentTest extends ChromeTabbedActivityTestBase {
+@RunWith(ChromeJUnit4ClassRunner.class)
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+public class ShareIntentTest {
+    @Rule
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
+
     private static final String TAG = "ShareIntentTest";
 
     /**
@@ -35,7 +50,7 @@ public class ShareIntentTest extends ChromeTabbedActivityTestBase {
      * activity and redirects the calls to the methods to the actual activity.
      */
     private static class MockChromeActivity extends ChromeTabbedActivity {
-        private Object mLock = new Object();
+        private final Object mLock = new Object();
         private boolean mCheckCompleted = false;
         private ChromeActivity mActivity = null;
 
@@ -103,36 +118,36 @@ public class ShareIntentTest extends ChromeTabbedActivityTestBase {
         }
     }
 
+    @Test
     @LargeTest
     @RetryOnFailure
-    public void testShareIntent() {
-        final MockChromeActivity mockActivity = new MockChromeActivity(getActivity());
-        // Sets a test component as last shared and "shareDirectly" option is set so that the share
-        // selector menu is not opened. The start activity is overriden, so the package and class
-        // names do not matter.
+    public void testShareIntent() throws ExecutionException, InterruptedException {
+        MockChromeActivity mockActivity = ThreadUtils.runOnUiThreadBlocking(() -> {
+            // Sets a test component as last shared and "shareDirectly" option is set so that
+            // the share selector menu is not opened. The start activity is overriden, so the
+            // package and class names do not matter.
+            return new MockChromeActivity(mActivityTestRule.getActivity());
+        });
         ShareHelper.setLastShareComponentName(
                 new ComponentName("test.package", "test.activity"), null);
         // Skips the capture of screenshot and notifies with an empty file.
-        mockActivity.setScreenshotCaptureSkippedForTesting(true);
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mockActivity.onShareMenuItemSelected(
-                        true /* shareDirectly */, false /* isIncognito */);
-            }
-        });
+        ShareMenuActionHandler.setScreenshotCaptureSkippedForTesting(true);
 
-        try {
-            mockActivity.waitForFileCheck();
-        } catch (InterruptedException e) {
-            assert false : "Test thread was interrupted while trying to wait.";
-        }
+        ThreadUtils.runOnUiThreadBlocking(() -> mockActivity.onShareMenuItemSelected(
+                    true /* shareDirectly */, false /* isIncognito */));
+
+        mockActivity.waitForFileCheck();
 
         ShareHelper.setLastShareComponentName(new ComponentName("", ""), null);
     }
 
-    @Override
-    public void startMainActivity() throws InterruptedException {
-        startMainActivityOnBlankPage();
+    @Before
+    public void setUp() throws InterruptedException {
+        mActivityTestRule.startMainActivityOnBlankPage();
+    }
+
+    @After
+    public void tearDown() {
+        ShareMenuActionHandler.setScreenshotCaptureSkippedForTesting(false);
     }
 }

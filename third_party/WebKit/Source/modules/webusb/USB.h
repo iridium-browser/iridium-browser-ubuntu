@@ -7,9 +7,9 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/events/EventTarget.h"
-#include "device/usb/public/interfaces/chooser_service.mojom-blink.h"
-#include "device/usb/public/interfaces/device_manager.mojom-blink.h"
+#include "core/dom/events/EventTarget.h"
+#include "device/usb/public/mojom/chooser_service.mojom-blink.h"
+#include "device/usb/public/mojom/device_manager.mojom-blink.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
@@ -67,7 +67,7 @@ class USB final : public EventTargetWithInlineData,
   void OnDeviceManagerConnectionError();
   void OnChooserServiceConnectionError();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   // EventTarget protected overrides.

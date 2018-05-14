@@ -115,7 +115,7 @@ DatabaseContext::~DatabaseContext() {
   DatabaseManager::Manager().DidDestructDatabaseContext();
 }
 
-DEFINE_TRACE(DatabaseContext) {
+void DatabaseContext::Trace(blink::Visitor* visitor) {
   visitor->Trace(database_thread_);
   ContextLifecycleObserver::Trace(visitor);
 }
@@ -178,7 +178,7 @@ bool DatabaseContext::AllowDatabaseAccess() const {
   return ToDocument(GetExecutionContext())->IsActive();
 }
 
-SecurityOrigin* DatabaseContext::GetSecurityOrigin() const {
+const SecurityOrigin* DatabaseContext::GetSecurityOrigin() const {
   return GetExecutionContext()->GetSecurityOrigin();
 }
 

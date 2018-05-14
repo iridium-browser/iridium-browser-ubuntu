@@ -28,9 +28,7 @@ static GURL GetFrontendURL() {
 ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
     WebContents* inspected_contents) {
   Shell* shell = Shell::CreateNewWindow(inspected_contents->GetBrowserContext(),
-                                        GURL(),
-                                        NULL,
-                                        gfx::Size());
+                                        GURL(), nullptr, gfx::Size());
   ShellDevToolsFrontend* devtools_frontend =
       new ShellDevToolsFrontend(shell, inspected_contents);
   shell->LoadURL(GetFrontendURL());
@@ -51,6 +49,10 @@ void ShellDevToolsFrontend::InspectElementAt(int x, int y) {
 
 void ShellDevToolsFrontend::Close() {
   frontend_shell_->Close();
+}
+
+void ShellDevToolsFrontend::DocumentAvailableInMainFrame() {
+  devtools_bindings_->Attach();
 }
 
 void ShellDevToolsFrontend::WebContentsDestroyed() {

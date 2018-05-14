@@ -64,6 +64,11 @@ class NET_EXPORT_PRIVATE WebSocketStreamRequest {
 // be finished synchronously, the function returns ERR_IO_PENDING, and
 // |callback| will be called when the operation is finished. Non-null |callback|
 // must be provided to these functions.
+//
+// Please update the traffic annotations in the websocket_basic_stream.cc and
+// websocket_stream.cc if the class is used for any communication with Google.
+// In such a case, annotation should be passed from the callers to this class
+// and a local annotation can not be used anymore.
 
 class NET_EXPORT_PRIVATE WebSocketStream {
  public:
@@ -117,7 +122,7 @@ class NET_EXPORT_PRIVATE WebSocketStream {
       const GURL& socket_url,
       std::unique_ptr<WebSocketHandshakeStreamCreateHelper> create_helper,
       const url::Origin& origin,
-      const GURL& first_party_for_cookies,
+      const GURL& site_for_cookies,
       const std::string& additional_headers,
       URLRequestContext* url_request_context,
       const NetLogWithSource& net_log,
@@ -130,7 +135,7 @@ class NET_EXPORT_PRIVATE WebSocketStream {
       const GURL& socket_url,
       std::unique_ptr<WebSocketHandshakeStreamCreateHelper> create_helper,
       const url::Origin& origin,
-      const GURL& first_party_for_cookies,
+      const GURL& site_for_cookies,
       const std::string& additional_headers,
       URLRequestContext* url_request_context,
       const NetLogWithSource& net_log,

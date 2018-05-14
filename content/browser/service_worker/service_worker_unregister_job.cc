@@ -11,6 +11,7 @@
 #include "content/browser/service_worker/service_worker_storage.h"
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/common/service_worker/service_worker_utils.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
 
@@ -34,13 +35,12 @@ void ServiceWorkerUnregisterJob::AddCallback(
 
 void ServiceWorkerUnregisterJob::Start() {
   context_->storage()->FindRegistrationForPattern(
-      pattern_,
-      base::Bind(&ServiceWorkerUnregisterJob::OnRegistrationFound,
-                 weak_factory_.GetWeakPtr()));
+      pattern_, base::BindOnce(&ServiceWorkerUnregisterJob::OnRegistrationFound,
+                               weak_factory_.GetWeakPtr()));
 }
 
 void ServiceWorkerUnregisterJob::Abort() {
-  CompleteInternal(kInvalidServiceWorkerRegistrationId,
+  CompleteInternal(blink::mojom::kInvalidServiceWorkerRegistrationId,
                    SERVICE_WORKER_ERROR_ABORT);
 }
 
@@ -60,13 +60,13 @@ void ServiceWorkerUnregisterJob::OnRegistrationFound(
     scoped_refptr<ServiceWorkerRegistration> registration) {
   if (status == SERVICE_WORKER_ERROR_NOT_FOUND) {
     DCHECK(!registration.get());
-    Complete(kInvalidServiceWorkerRegistrationId,
+    Complete(blink::mojom::kInvalidServiceWorkerRegistrationId,
              SERVICE_WORKER_ERROR_NOT_FOUND);
     return;
   }
 
   if (status != SERVICE_WORKER_OK || registration->is_uninstalling()) {
-    Complete(kInvalidServiceWorkerRegistrationId, status);
+    Complete(blink::mojom::kInvalidServiceWorkerRegistrationId, status);
     return;
   }
 

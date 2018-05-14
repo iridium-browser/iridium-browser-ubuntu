@@ -18,9 +18,9 @@
 #include "net/base/request_priority.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_response_headers.h"
-#include "net/proxy/proxy_config_service.h"
-#include "net/proxy/proxy_info.h"
-#include "net/proxy/proxy_retry_info.h"
+#include "net/proxy_resolution/proxy_config_service.h"
+#include "net/proxy_resolution/proxy_info.h"
+#include "net/proxy_resolution/proxy_retry_info.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
@@ -37,7 +37,7 @@ class TestNetworkDelegateImpl : public NetworkDelegateImpl {
   TestNetworkDelegateImpl(CountersMap* layered_network_delegate_counters)
       : layered_network_delegate_counters_(layered_network_delegate_counters) {}
 
-  ~TestNetworkDelegateImpl() override {}
+  ~TestNetworkDelegateImpl() override = default;
 
   // NetworkDelegateImpl implementation:
   int OnBeforeURLRequest(URLRequest* request,
@@ -121,7 +121,7 @@ class TestNetworkDelegateImpl : public NetworkDelegateImpl {
   }
 
   bool OnCanSetCookie(const URLRequest& request,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       CookieOptions* options) override {
     IncrementAndCompareCounter("on_can_set_cookie_count");
     return false;
@@ -134,9 +134,8 @@ class TestNetworkDelegateImpl : public NetworkDelegateImpl {
     return false;
   }
 
-  bool OnCanEnablePrivacyMode(
-      const GURL& url,
-      const GURL& first_party_for_cookies) const override {
+  bool OnCanEnablePrivacyMode(const GURL& url,
+                              const GURL& site_for_cookies) const override {
     IncrementAndCompareCounter("on_can_enable_privacy_mode_count");
     return false;
   }
@@ -173,7 +172,7 @@ class TestLayeredNetworkDelegate : public LayeredNetworkDelegate {
     context_.Init();
   }
 
-  ~TestLayeredNetworkDelegate() override {}
+  ~TestLayeredNetworkDelegate() override = default;
 
   void CallAndVerify() {
     scoped_refptr<AuthChallengeInfo> auth_challenge(new AuthChallengeInfo());
@@ -205,7 +204,7 @@ class TestLayeredNetworkDelegate : public LayeredNetworkDelegate {
         NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION,
         OnAuthRequired(request.get(), *auth_challenge, AuthCallback(), NULL));
     EXPECT_FALSE(OnCanGetCookies(*request, CookieList()));
-    EXPECT_FALSE(OnCanSetCookie(*request, std::string(), NULL));
+    EXPECT_FALSE(OnCanSetCookie(*request, net::CanonicalCookie(), NULL));
     EXPECT_FALSE(OnCanAccessFile(*request, base::FilePath(), base::FilePath()));
     EXPECT_FALSE(OnCanEnablePrivacyMode(GURL(), GURL()));
     EXPECT_FALSE(OnCancelURLRequestWithPolicyViolatingReferrerHeader(
@@ -305,7 +304,7 @@ class TestLayeredNetworkDelegate : public LayeredNetworkDelegate {
   }
 
   void OnCanSetCookieInternal(const URLRequest& request,
-                              const std::string& cookie_line,
+                              const net::CanonicalCookie& cookie,
                               CookieOptions* options) override {
     ++(*counters_)["on_can_set_cookie_count"];
     EXPECT_EQ(1, (*counters_)["on_can_set_cookie_count"]);
@@ -321,7 +320,7 @@ class TestLayeredNetworkDelegate : public LayeredNetworkDelegate {
 
   void OnCanEnablePrivacyModeInternal(
       const GURL& url,
-      const GURL& first_party_for_cookies) const override {
+      const GURL& site_for_cookies) const override {
     ++(*counters_)["on_can_enable_privacy_mode_count"];
     EXPECT_EQ(1, (*counters_)["on_can_enable_privacy_mode_count"]);
   }
@@ -344,8 +343,8 @@ class TestLayeredNetworkDelegate : public LayeredNetworkDelegate {
     EXPECT_EQ(1, (*counters_)["on_can_queue_reporting_report_count"]);
   }
 
-  void OnCanSendReportingReportInternal(
-      const url::Origin& origin) const override {
+  void OnCanSendReportingReportsInternal(
+      const std::set<url::Origin>& origins) const override {
     ++(*counters_)["on_can_send_reporting_report_count"];
     EXPECT_EQ(1, (*counters_)["on_can_send_reporting_report_count"]);
   }

@@ -13,40 +13,44 @@
 namespace blink {
 
 TEST(ComputedStyleTest, ShapeOutsideBoxEqual) {
-  ShapeValue* shape1 = ShapeValue::CreateBoxShapeValue(kContentBox);
-  ShapeValue* shape2 = ShapeValue::CreateBoxShapeValue(kContentBox);
-  RefPtr<ComputedStyle> style1 = ComputedStyle::Create();
-  RefPtr<ComputedStyle> style2 = ComputedStyle::Create();
+  ShapeValue* shape1 = ShapeValue::CreateBoxShapeValue(CSSBoxType::kContent);
+  ShapeValue* shape2 = ShapeValue::CreateBoxShapeValue(CSSBoxType::kContent);
+  scoped_refptr<ComputedStyle> style1 = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style2 = ComputedStyle::Create();
   style1->SetShapeOutside(shape1);
   style2->SetShapeOutside(shape2);
   ASSERT_EQ(*style1, *style2);
 }
 
 TEST(ComputedStyleTest, ShapeOutsideCircleEqual) {
-  RefPtr<BasicShapeCircle> circle1 = BasicShapeCircle::Create();
-  RefPtr<BasicShapeCircle> circle2 = BasicShapeCircle::Create();
-  ShapeValue* shape1 = ShapeValue::CreateShapeValue(circle1, kContentBox);
-  ShapeValue* shape2 = ShapeValue::CreateShapeValue(circle2, kContentBox);
-  RefPtr<ComputedStyle> style1 = ComputedStyle::Create();
-  RefPtr<ComputedStyle> style2 = ComputedStyle::Create();
+  scoped_refptr<BasicShapeCircle> circle1 = BasicShapeCircle::Create();
+  scoped_refptr<BasicShapeCircle> circle2 = BasicShapeCircle::Create();
+  ShapeValue* shape1 =
+      ShapeValue::CreateShapeValue(circle1, CSSBoxType::kContent);
+  ShapeValue* shape2 =
+      ShapeValue::CreateShapeValue(circle2, CSSBoxType::kContent);
+  scoped_refptr<ComputedStyle> style1 = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style2 = ComputedStyle::Create();
   style1->SetShapeOutside(shape1);
   style2->SetShapeOutside(shape2);
   ASSERT_EQ(*style1, *style2);
 }
 
 TEST(ComputedStyleTest, ClipPathEqual) {
-  RefPtr<BasicShapeCircle> shape = BasicShapeCircle::Create();
-  RefPtr<ShapeClipPathOperation> path1 = ShapeClipPathOperation::Create(shape);
-  RefPtr<ShapeClipPathOperation> path2 = ShapeClipPathOperation::Create(shape);
-  RefPtr<ComputedStyle> style1 = ComputedStyle::Create();
-  RefPtr<ComputedStyle> style2 = ComputedStyle::Create();
+  scoped_refptr<BasicShapeCircle> shape = BasicShapeCircle::Create();
+  scoped_refptr<ShapeClipPathOperation> path1 =
+      ShapeClipPathOperation::Create(shape);
+  scoped_refptr<ShapeClipPathOperation> path2 =
+      ShapeClipPathOperation::Create(shape);
+  scoped_refptr<ComputedStyle> style1 = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style2 = ComputedStyle::Create();
   style1->SetClipPath(path1);
   style2->SetClipPath(path2);
   ASSERT_EQ(*style1, *style2);
 }
 
 TEST(ComputedStyleTest, FocusRingWidth) {
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   style->SetEffectiveZoom(3.5);
 #if defined(OS_MACOSX)
   style->SetOutlineStyle(EBorderStyle::kSolid);
@@ -59,9 +63,9 @@ TEST(ComputedStyleTest, FocusRingWidth) {
 }
 
 TEST(ComputedStyleTest, FocusRingOutset) {
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   style->SetOutlineStyle(EBorderStyle::kSolid);
-  style->SetOutlineStyleIsAuto(kOutlineIsAutoOn);
+  style->SetOutlineStyleIsAuto(static_cast<bool>(OutlineIsAuto::kOn));
   style->SetEffectiveZoom(4.75);
 #if defined(OS_MACOSX)
   ASSERT_EQ(4, style->OutlineOutsetExtent());
@@ -71,7 +75,7 @@ TEST(ComputedStyleTest, FocusRingOutset) {
 }
 
 TEST(ComputedStyleTest, Preserve3dForceStackingContext) {
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   style->SetTransformStyle3D(ETransformStyle3D::kPreserve3d);
   style->SetOverflowX(EOverflow::kHidden);
   style->SetOverflowY(EOverflow::kHidden);
@@ -81,14 +85,14 @@ TEST(ComputedStyleTest, Preserve3dForceStackingContext) {
 }
 
 TEST(ComputedStyleTest, FirstPublicPseudoStyle) {
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   style->SetHasPseudoStyle(kPseudoIdFirstLine);
   EXPECT_TRUE(style->HasPseudoStyle(kPseudoIdFirstLine));
   EXPECT_TRUE(style->HasAnyPublicPseudoStyles());
 }
 
 TEST(ComputedStyleTest, LastPublicPseudoStyle) {
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   style->SetHasPseudoStyle(kPseudoIdScrollbar);
   EXPECT_TRUE(style->HasPseudoStyle(kPseudoIdScrollbar));
   EXPECT_TRUE(style->HasAnyPublicPseudoStyles());
@@ -96,16 +100,98 @@ TEST(ComputedStyleTest, LastPublicPseudoStyle) {
 
 TEST(ComputedStyleTest,
      UpdatePropertySpecificDifferencesRespectsTransformAnimation) {
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
-  RefPtr<ComputedStyle> other = ComputedStyle::Clone(*style);
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
   other->SetHasCurrentTransformAnimation(true);
   StyleDifference diff;
   style->UpdatePropertySpecificDifferences(*other, diff);
   EXPECT_TRUE(diff.TransformChanged());
 }
 
+TEST(ComputedStyleTest,
+     UpdatePropertySpecificDifferencesCompositingReasonsTransforom) {
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
+
+  TransformOperations operations(true);
+  style->SetTransform(operations);
+  other->SetTransform(operations);
+
+  other->SetHasCurrentTransformAnimation(true);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_FALSE(diff.TransformChanged());
+  EXPECT_TRUE(diff.CompositingReasonsChanged());
+}
+
+TEST(ComputedStyleTest,
+     UpdatePropertySpecificDifferencesCompositingReasonsOpacity) {
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
+
+  other->SetHasCurrentOpacityAnimation(true);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_TRUE(diff.CompositingReasonsChanged());
+}
+
+TEST(ComputedStyleTest,
+     UpdatePropertySpecificDifferencesCompositingReasonsFilter) {
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
+
+  other->SetHasCurrentFilterAnimation(true);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_TRUE(diff.CompositingReasonsChanged());
+}
+
+TEST(ComputedStyleTest,
+     UpdatePropertySpecificDifferencesCompositingReasonsBackdropFilter) {
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
+
+  other->SetHasCurrentBackdropFilterAnimation(true);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_TRUE(diff.CompositingReasonsChanged());
+}
+
+TEST(ComputedStyleTest,
+     UpdatePropertySpecificDifferencesCompositingReasonsInlineTransform) {
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
+
+  other->SetHasInlineTransform(true);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_TRUE(diff.CompositingReasonsChanged());
+}
+
+TEST(ComputedStyleTest,
+     UpdatePropertySpecificDifferencesCompositingReasonsBackfaceVisibility) {
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
+
+  other->SetBackfaceVisibility(EBackfaceVisibility::kHidden);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_TRUE(diff.CompositingReasonsChanged());
+}
+
+TEST(ComputedStyleTest,
+     UpdatePropertySpecificDifferencesCompositingReasonsWillChange) {
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
+
+  other->SetBackfaceVisibility(EBackfaceVisibility::kHidden);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_TRUE(diff.CompositingReasonsChanged());
+}
+
 TEST(ComputedStyleTest, HasOutlineWithCurrentColor) {
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   EXPECT_FALSE(style->HasOutline());
   EXPECT_FALSE(style->HasOutlineWithCurrentColor());
   style->SetOutlineColor(StyleColor::CurrentColor());
@@ -117,7 +203,7 @@ TEST(ComputedStyleTest, HasOutlineWithCurrentColor) {
 }
 
 TEST(ComputedStyleTest, HasBorderColorReferencingCurrentColor) {
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   EXPECT_FALSE(style->HasBorderColorReferencingCurrentColor());
   style->SetBorderBottomColor(StyleColor::CurrentColor());
   EXPECT_FALSE(style->HasBorderColorReferencingCurrentColor());
@@ -128,7 +214,7 @@ TEST(ComputedStyleTest, HasBorderColorReferencingCurrentColor) {
 }
 
 TEST(ComputedStyleTest, BorderWidth) {
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   style->SetBorderBottomWidth(5);
   EXPECT_EQ(style->BorderBottomWidth(), 0);
   EXPECT_EQ(style->BorderBottom().Width(), 5);

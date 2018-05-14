@@ -34,6 +34,10 @@ class WebTouchEvent : public WebInputEvent {
   // touch-point has moved (by whatever amount).
   bool moved_beyond_slop_region;
 
+  // True for events from devices like some pens that support hovering
+  // over digitizer and the events are sent while the device was hovering.
+  bool hovering;
+
   // Whether this touch event is a touchstart or a first touchmove event per
   // scroll.
   bool touch_start_or_first_touch_move;
@@ -54,8 +58,8 @@ class WebTouchEvent : public WebInputEvent {
 
 #if INSIDE_BLINK
 
-  // Sets any scaled values to be their computed values and sets |frameScale|
-  // back to 1 and |translateX|, |translateY| back to 0.
+  // Sets any scaled values to be their computed values and sets |frame_scale_|
+  // back to 1 and |frame_translate_| X and Y coordinates back to 0.
   BLINK_PLATFORM_EXPORT WebTouchEvent FlattenTransform() const;
 
   // Return a scaled WebTouchPoint in root frame coordinates.

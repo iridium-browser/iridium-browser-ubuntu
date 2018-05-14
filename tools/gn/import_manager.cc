@@ -4,6 +4,8 @@
 
 #include "tools/gn/import_manager.h"
 
+#include <memory>
+
 #include "tools/gn/err.h"
 #include "tools/gn/parse_tree.h"
 #include "tools/gn/scheduler.h"
@@ -24,12 +26,9 @@ std::unique_ptr<Scope> UncachedImport(const Settings* settings,
   if (!node)
     return nullptr;
 
-  std::unique_ptr<Scope> scope(new Scope(settings->base_config()));
+  std::unique_ptr<Scope> scope =
+      std::make_unique<Scope>(settings->base_config());
   scope->set_source_dir(file.GetDir());
-
-  const Location& location = node->GetRange().begin();
-  if (!location.is_null())
-    scope->AddInputFile(location.file());
 
   // Don't allow ScopePerFileProvider to provide target-related variables.
   // These will be relative to the imported file, which is probably not what
@@ -52,8 +51,8 @@ std::unique_ptr<Scope> UncachedImport(const Settings* settings,
 }  // namespace
 
 struct ImportManager::ImportInfo {
-  ImportInfo() {}
-  ~ImportInfo() {}
+  ImportInfo() = default;
+  ~ImportInfo() = default;
 
   // This lock protects the unique_ptr. Once the scope is computed,
   // it is const and can be accessed read-only outside of the lock.
@@ -67,16 +66,18 @@ struct ImportManager::ImportInfo {
   Err load_result;
 };
 
-ImportManager::ImportManager() {
-}
+ImportManager::ImportManager() = default;
 
-ImportManager::~ImportManager() {
-}
+ImportManager::~ImportManager() = default;
 
 bool ImportManager::DoImport(const SourceFile& file,
                              const ParseNode* node_for_err,
                              Scope* scope,
                              Err* err) {
+  // Key for the current import on the current thread in imports_in_progress_.
+  std::string key =
+      std::to_string(base::PlatformThread::CurrentId()) + file.value();
+
   // See if we have a cached import, but be careful to actually do the scope
   // copying outside of the lock.
   ImportInfo* import_info = nullptr;
@@ -84,10 +85,16 @@ bool ImportManager::DoImport(const SourceFile& file,
     base::AutoLock lock(imports_lock_);
     std::unique_ptr<ImportInfo>& info_ptr = imports_[file];
     if (!info_ptr)
-      info_ptr.reset(new ImportInfo);
+      info_ptr = std::make_unique<ImportInfo>();
 
     // Promote the ImportInfo to outside of the imports lock.
     import_info = info_ptr.get();
+
+    if (imports_in_progress_.find(key) != imports_in_progress_.end()) {
+      *err = Err(Location(), file.value() + " is part of an import loop.");
+      return false;
+    }
+    imports_in_progress_.insert(key);
   }
 
   // Now use the per-import-file lock to block this thread if another thread
@@ -131,6 +138,12 @@ bool ImportManager::DoImport(const SourceFile& file,
   Scope::MergeOptions options;
   options.skip_private_vars = true;
   options.mark_dest_used = true;  // Don't require all imported values be used.
+
+  {
+    base::AutoLock lock(imports_lock_);
+    imports_in_progress_.erase(key);
+  }
+
   return import_scope->NonRecursiveMergeTo(scope, options, node_for_err,
                                            "import", err);
 }

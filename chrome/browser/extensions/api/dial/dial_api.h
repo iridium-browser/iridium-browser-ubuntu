@@ -8,12 +8,14 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "chrome/browser/media/router/discovery/dial/dial_device_data.h"
 #include "chrome/browser/media/router/discovery/dial/dial_registry.h"
 #include "chrome/common/extensions/api/dial.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "extensions/browser/api/async_api_function.h"
 #include "extensions/browser/event_router.h"
+#include "net/url_request/url_request_context_getter.h"
 
 namespace media_router {
 class DeviceDescriptionFetcher;
@@ -92,9 +94,17 @@ class DialAPI : public RefcountedKeyedService,
 
   Profile* profile_;
 
+  // Used to get its NetLog on the IOThread. It uses the same NetLog as the
+  // Profile, but the Profile's URLRequestContextGetter isn't ready when DialAPI
+  // is created.
+  scoped_refptr<net::URLRequestContextGetter> system_request_context_;
+
   // Created lazily on first access on the IO thread. Does not take ownership of
   // |dial_registry_|.
   media_router::DialRegistry* dial_registry_;
+
+  // Number of dial.onDeviceList event listeners.
+  int num_on_device_list_listeners_;
 
   // Device data for testing.
   std::unique_ptr<media_router::DialDeviceData> test_device_data_;

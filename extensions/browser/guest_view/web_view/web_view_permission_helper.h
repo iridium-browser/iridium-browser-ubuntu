@@ -5,6 +5,9 @@
 #ifndef EXTENSIONS_BROWSER_GUEST_VIEW_WEB_VIEW_WEB_VIEW_PERMISSION_HELPER_H_
 #define EXTENSIONS_BROWSER_GUEST_VIEW_WEB_VIEW_WEB_VIEW_PERMISSION_HELPER_H_
 
+#include <map>
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/guest_view/common/guest_view_constants.h"
@@ -28,9 +31,9 @@ class WebViewPermissionHelper
  public:
   explicit WebViewPermissionHelper(WebViewGuest* guest);
   ~WebViewPermissionHelper() override;
-  typedef base::Callback<
-      void(bool /* allow */, const std::string& /* user_input */)>
-      PermissionResponseCallback;
+  using PermissionResponseCallback =
+      base::OnceCallback<void(bool /* allow */,
+                              const std::string& /* user_input */)>;
 
   // A map to store the callback for a request keyed by the request's id.
   struct PermissionResponseInfo {
@@ -38,18 +41,18 @@ class WebViewPermissionHelper
     WebViewPermissionType permission_type;
     bool allowed_by_default;
     PermissionResponseInfo();
-    PermissionResponseInfo(const PermissionResponseCallback& callback,
+    PermissionResponseInfo(PermissionResponseCallback callback,
                            WebViewPermissionType permission_type,
                            bool allowed_by_default);
-    PermissionResponseInfo(const PermissionResponseInfo& other);
+    PermissionResponseInfo& operator=(PermissionResponseInfo&& other);
     ~PermissionResponseInfo();
   };
 
-  typedef std::map<int, PermissionResponseInfo> RequestMap;
+  using RequestMap = std::map<int, PermissionResponseInfo>;
 
   int RequestPermission(WebViewPermissionType permission_type,
                         const base::DictionaryValue& request_info,
-                        const PermissionResponseCallback& callback,
+                        PermissionResponseCallback callback,
                         bool allowed_by_default);
 
   static WebViewPermissionHelper* FromWebContents(
@@ -97,23 +100,6 @@ class WebViewPermissionHelper
                                const GURL& url,
                                bool blocked_by_policy);
 
-  // Called when file system access is requested by the guest content using the
-  // synchronous HTML5 file system API in a worker thread or shared worker. The
-  // request is plumbed through the <webview> permission request API. The
-  // request will be:
-  // - Allowed if the embedder explicitly allowed it.
-  // - Denied if the embedder explicitly denied.
-  // - Determined by the guest's content settings if the embedder does not
-  // perform an explicit action.
-  // If access was blocked due to the page's content settings,
-  // |blocked_by_policy| should be true, and this function should invoke
-  // OnContentBlocked.
-  void FileSystemAccessedSync(int render_process_id,
-                              int render_frame_id,
-                              const GURL& url,
-                              bool blocked_by_policy,
-                              IPC::Message* reply_msg);
-
   enum PermissionResponseAction { DENY, ALLOW, DEFAULT };
 
   enum SetPermissionResult {
@@ -143,14 +129,13 @@ class WebViewPermissionHelper
   // content::WebContentsObserver implementation.
   bool OnMessageReceived(const IPC::Message& message,
                          content::RenderFrameHost* render_frame_host) override;
-  bool OnMessageReceived(const IPC::Message& message) override;
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 
   // A counter to generate a unique request id for a permission request.
   // We only need the ids to be unique for a given WebViewGuest.
   int next_permission_request_id_;
 
-  WebViewPermissionHelper::RequestMap pending_permission_requests_;
+  RequestMap pending_permission_requests_;
 
   std::unique_ptr<WebViewPermissionHelperDelegate>
       web_view_permission_helper_delegate_;

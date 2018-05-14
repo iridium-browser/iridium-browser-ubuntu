@@ -5,17 +5,23 @@
 #ifndef CHROME_BROWSER_UPGRADE_DETECTOR_IMPL_H_
 #define CHROME_BROWSER_UPGRADE_DETECTOR_IMPL_H_
 
+#include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequence_checker.h"
 #include "base/timer/timer.h"
 #include "base/version.h"
+#include "build/build_config.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "components/variations/service/variations_service.h"
 
 namespace base {
-template <typename T> struct DefaultSingletonTraits;
+class SequencedTaskRunner;
+class TaskRunner;
 }
 
+// This class contains the non-CrOS desktop implementation of the detector.
 class UpgradeDetectorImpl : public UpgradeDetector,
                             public variations::VariationsService::Observer {
  public:
@@ -23,11 +29,15 @@ class UpgradeDetectorImpl : public UpgradeDetector,
 
   // Returns the currently installed Chrome version, which may be newer than the
   // one currently running. Not supported on Android, iOS or ChromeOS. Must be
-  // run on a thread where I/O operations are allowed (e.g. FILE thread).
+  // run on a thread where I/O operations are allowed.
   static base::Version GetCurrentlyInstalledVersion();
 
-  // Returns the singleton instance.
+  // Returns the global instance.
   static UpgradeDetectorImpl* GetInstance();
+
+  // UpgradeDetector:
+  base::TimeDelta GetHighAnnoyanceLevelDelta() override;
+  base::TimeTicks GetHighAnnoyanceDeadline() override;
 
  protected:
   UpgradeDetectorImpl();
@@ -40,18 +50,28 @@ class UpgradeDetectorImpl : public UpgradeDetector,
   void NotifyOnUpgradeWithTimePassed(base::TimeDelta time_passed);
 
  private:
-  friend struct base::DefaultSingletonTraits<UpgradeDetectorImpl>;
+  // A callback that receives the results of |DetectUpgradeTask|.
+  using UpgradeDetectedCallback = base::OnceCallback<void(UpgradeAvailable)>;
+
+#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+  // Receives the results of AreAutoupdatesEnabled and starts the upgrade check
+  // timer.
+  void OnAutoupdatesEnabledResult(bool auto_updates_enabled);
+#endif
 
   // Start the timer that will call |CheckForUpgrade()|.
   void StartTimerForUpgradeCheck();
 
-  // Launches a task on the file thread to check if we have the latest version.
+  // Launches a background task to check if we have the latest version.
   void CheckForUpgrade();
 
   // Starts the upgrade notification timer that will check periodically whether
   // enough time has elapsed to update the severity (which maps to visual
   // badging) of the notification.
   void StartUpgradeNotificationTimer();
+
+  // Lazy-initialization for the various threshold deltas (idempotent).
+  void InitializeThresholds();
 
   // Sends out a notification and starts a one shot timer to wait until
   // notifying the user.
@@ -65,14 +85,16 @@ class UpgradeDetectorImpl : public UpgradeDetector,
   // user that a new version is available.
   void NotifyOnUpgrade();
 
-  // Called on the FILE thread to detect an upgrade. Calls back UpgradeDetected
-  // on the UI thread if so. Although it looks weird, this needs to be a static
-  // method receiving a WeakPtr<> to this object so that we can interrupt
-  // the UpgradeDetected callback before it runs. Having this method non-static
-  // and using |this| directly wouldn't be thread safe. And keeping it as a
-  // non-class function would prevent it from calling UpgradeDetected.
+  // Determines whether or not an update is available, posting |callback| with
+  // the result to |callback_task_runner| if so.
   static void DetectUpgradeTask(
-      base::WeakPtr<UpgradeDetectorImpl> upgrade_detector);
+      scoped_refptr<base::TaskRunner> callback_task_runner,
+      UpgradeDetectedCallback callback);
+
+  SEQUENCE_CHECKER(sequence_checker_);
+
+  // A sequenced task runner on which blocking tasks run.
+  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
 
   // We periodically check to see if Chrome has been upgraded.
   base::RepeatingTimer detect_upgrade_timer_;
@@ -87,9 +109,11 @@ class UpgradeDetectorImpl : public UpgradeDetector,
   // True if auto update is turned on.
   bool is_auto_update_enabled_;
 
-  // When the upgrade was detected - either a software update or a variations
-  // update, whichever happened first.
-  base::TimeTicks upgrade_detected_time_;
+  // The various deltas from detection time to the different annoyance levels;
+  // lazy-initialized by InitializeThresholds.
+  base::TimeDelta high_threshold_;
+  base::TimeDelta elevated_threshold_;
+  base::TimeDelta low_threshold_;
 
   // The date the binaries were built.
   base::Time build_date_;

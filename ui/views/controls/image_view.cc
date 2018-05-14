@@ -106,7 +106,9 @@ gfx::Point ImageView::ComputeImageOrigin(const gfx::Size& image_size) const {
   switch (actual_horiz_alignment) {
     case LEADING:  x = insets.left();                                 break;
     case TRAILING: x = width() - insets.right() - image_size.width(); break;
-    case CENTER:   x = (width() - image_size.width()) / 2;            break;
+    case CENTER:
+      x = (width() - insets.width() - image_size.width()) / 2 + insets.left();
+      break;
     default:       NOTREACHED(); x = 0;                               break;
   }
 
@@ -114,7 +116,9 @@ gfx::Point ImageView::ComputeImageOrigin(const gfx::Size& image_size) const {
   switch (vert_alignment_) {
     case LEADING:  y = insets.top();                                     break;
     case TRAILING: y = height() - insets.bottom() - image_size.height(); break;
-    case CENTER:   y = (height() - image_size.height()) / 2;             break;
+    case CENTER:
+      y = (height() - insets.height() - image_size.height()) / 2 + insets.top();
+      break;
     default:       NOTREACHED(); y = 0;                                  break;
   }
 
@@ -127,7 +131,7 @@ void ImageView::OnPaint(gfx::Canvas* canvas) {
 }
 
 void ImageView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  node_data->role = ui::AX_ROLE_IMAGE;
+  node_data->role = ax::mojom::Role::kImage;
   node_data->SetName(tooltip_text_);
 }
 
@@ -178,6 +182,19 @@ gfx::Size ImageView::CalculatePreferredSize() const {
   gfx::Size size = GetImageSize();
   size.Enlarge(GetInsets().width(), GetInsets().height());
   return size;
+}
+
+views::PaintInfo::ScaleType ImageView::GetPaintScaleType() const {
+  // ImageView contains an image which is rastered at the device scale factor.
+  // By default, the paint commands are recorded at a scale factor slighlty
+  // different from the device scale factor. Re-rastering the image at this
+  // paint recording scale will result in a distorted image. Paint recording
+  // scale might also not be uniform along the x & y axis, thus resulting in
+  // further distortion in the aspect ratio of the final image.
+  // |kUniformScaling| ensures that the paint recording scale is uniform along
+  // the x & y axis and keeps the scale equal to the device scale factor.
+  // See http://crbug.com/754010 for more details.
+  return views::PaintInfo::ScaleType::kUniformScaling;
 }
 
 void ImageView::OnPaintImage(gfx::Canvas* canvas) {

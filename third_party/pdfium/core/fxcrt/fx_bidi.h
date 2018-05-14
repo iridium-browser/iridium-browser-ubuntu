@@ -13,6 +13,10 @@
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
 
+#ifdef PDF_ENABLE_XFA
+#include "core/fxcrt/cfx_char.h"
+#endif  // PDF_ENABLE_XFA
+
 // Processes characters and group them into segments based on text direction.
 class CFX_BidiChar {
  public:
@@ -50,7 +54,7 @@ class CFX_BidiString {
  public:
   using const_iterator = std::vector<CFX_BidiChar::Segment>::const_iterator;
 
-  explicit CFX_BidiString(const CFX_WideString& str);
+  explicit CFX_BidiString(const WideString& str);
   ~CFX_BidiString();
 
   // Overall direction is always LEFT or RIGHT, never NEUTRAL.
@@ -66,10 +70,14 @@ class CFX_BidiString {
   const_iterator end() const { return m_Order.end(); }
 
  private:
-  const CFX_WideString m_Str;
+  const WideString m_Str;
   std::unique_ptr<CFX_BidiChar> m_pBidiChar;
   std::vector<CFX_BidiChar::Segment> m_Order;
   CFX_BidiChar::Direction m_eOverallDirection;
 };
+
+#if PDF_ENABLE_XFA
+void FX_BidiLine(std::vector<CFX_Char>* chars, size_t iCount);
+#endif  // PDF_ENABLE_XFA
 
 #endif  // CORE_FXCRT_FX_BIDI_H_

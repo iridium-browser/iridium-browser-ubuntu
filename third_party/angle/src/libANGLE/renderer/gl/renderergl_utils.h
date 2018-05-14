@@ -60,6 +60,7 @@ namespace nativegl
 {
 bool SupportsFenceSync(const FunctionsGL *functions);
 bool SupportsOcclusionQueries(const FunctionsGL *functions);
+bool SupportsNativeRendering(const FunctionsGL *functions, GLenum target, GLenum internalFormat);
 }
 
 bool CanMapBufferForRead(const FunctionsGL *functions);
@@ -71,6 +72,7 @@ uint8_t *MapBufferRangeWithFallback(const FunctionsGL *functions,
 
 gl::ErrorOrResult<bool> ShouldApplyLastRowPaddingWorkaround(const gl::Extents &size,
                                                             const gl::PixelStoreStateBase &state,
+                                                            const gl::Buffer *pixelBuffer,
                                                             GLenum format,
                                                             GLenum type,
                                                             bool is3D,

@@ -13,18 +13,19 @@
 #import "ios/chrome/browser/metrics/tab_usage_recorder.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
-#import "ios/chrome/browser/tabs/tab_private.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
-#import "ios/chrome/browser/ui/tabs/tab_strip_controller_private.h"
+#include "ios/chrome/browser/ui/ui_util.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/testing/wait_util.h"
-#import "ios/web/web_state/ui/crw_web_controller.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+using testing::WaitUntilConditionOrTimeout;
 
 namespace chrome_test_util {
 
@@ -129,11 +130,16 @@ BOOL SetCurrentTabsToBeColdStartTabs() {
   if (!GetCurrentTabModel().tabUsageRecorder)
     return NO;
   TabModel* tab_model = GetCurrentTabModel();
-  NSMutableArray* tabs = [NSMutableArray array];
-  for (Tab* tab in tab_model) {
-    [tabs addObject:tab];
+  WebStateList* web_state_list = tab_model.webStateList;
+
+  std::vector<web::WebState*> web_states;
+  web_states.reserve(web_state_list->count());
+  for (int index = 0; index < web_state_list->count(); ++index) {
+    web_states.push_back(web_state_list->GetWebStateAt(index));
   }
-  tab_model.tabUsageRecorder->InitialRestoredTabs(tab_model.currentTab, tabs);
+
+  tab_model.tabUsageRecorder->InitialRestoredTabs(
+      web_state_list->GetActiveWebState(), web_states);
   return YES;
 }
 
@@ -149,14 +155,12 @@ void EvictOtherTabModelTabs() {
       IsIncognitoMode()
           ? [GetMainController().browserViewInformation mainTabModel]
           : [GetMainController().browserViewInformation otrTabModel];
-  NSUInteger count = otherTabModel.count;
-  for (NSUInteger i = 0; i < count; i++) {
-    Tab* tab = [otherTabModel tabAtIndex:i];
-    [tab.webController handleLowMemory];
-  }
+  // Disabling and enabling web usage will evict all web views.
+  otherTabModel.webUsageEnabled = NO;
+  otherTabModel.webUsageEnabled = YES;
 }
 
-void CloseAllIncognitoTabs() {
+BOOL CloseAllIncognitoTabs() {
   MainController* main_controller = chrome_test_util::GetMainController();
   DCHECK(main_controller);
   TabModel* tabModel = [[main_controller browserViewInformation] otrTabModel];
@@ -165,18 +169,11 @@ void CloseAllIncognitoTabs() {
   if (!IsIPadIdiom()) {
     // If the OTR BVC is active, wait until it isn't (since all of the
     // tabs are now closed)
-    testing::WaitUntilConditionOrTimeout(testing::kWaitForUIElementTimeout, ^{
+    return WaitUntilConditionOrTimeout(testing::kWaitForUIElementTimeout, ^{
       return !IsIncognitoMode();
     });
   }
-}
-
-TabView* GetTabViewForTab(Tab* tab) {
-  MainController* main_controller = GetMainController();
-  BrowserViewController* current_bvc =
-      [[main_controller browserViewInformation] currentBVC];
-  TabStripController* tabStrip = [current_bvc tabStripController];
-  return [tabStrip existingTabViewForTab:tab];
+  return YES;
 }
 
 NSUInteger GetEvictedMainTabCount() {
@@ -185,11 +182,6 @@ NSUInteger GetEvictedMainTabCount() {
     return 0;
   return [[GetMainController() browserViewInformation] mainTabModel]
       .tabUsageRecorder->EvictedTabsMapSize();
-}
-
-FormInputAccessoryViewController* GetInputAccessoryViewController() {
-  Tab* current_tab = GetCurrentTab();
-  return [current_tab inputAccessoryViewController];
 }
 
 }  // namespace chrome_test_util

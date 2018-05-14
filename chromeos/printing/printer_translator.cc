@@ -9,7 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chromeos/printing/printer_configuration.h"
 
@@ -31,6 +30,7 @@ const char kModel[] = "model";
 const char kUri[] = "uri";
 const char kUUID[] = "uuid";
 const char kPpdResource[] = "ppd_resource";
+const char kGuid[] = "guid";
 
 // Populates the |printer| object with corresponding fields from |value|.
 // Returns false if |value| is missing a required field.
@@ -85,12 +85,13 @@ const char kPrinterId[] = "id";
 std::unique_ptr<Printer> RecommendedPrinterToPrinter(
     const base::DictionaryValue& pref) {
   std::string id;
-  if (!pref.GetString(kPrinterId, &id)) {
+  // Printer id comes from the id or guid field depending on the source.
+  if (!pref.GetString(kPrinterId, &id) && !pref.GetString(kGuid, &id)) {
     LOG(WARNING) << "Record id required";
     return nullptr;
   }
 
-  std::unique_ptr<Printer> printer = base::MakeUnique<Printer>(id);
+  auto printer = std::make_unique<Printer>(id);
   if (!DictionaryToPrinter(pref, printer.get())) {
     LOG(WARNING) << "Failed to parse policy printer.";
     return nullptr;

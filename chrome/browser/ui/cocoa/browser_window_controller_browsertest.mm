@@ -7,20 +7,24 @@
 #include <stddef.h>
 #import "base/mac/mac_util.h"
 
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
@@ -28,12 +32,12 @@
 #include "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
+#import "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/history_overlay_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_cocoa.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
-#import "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_base_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/overlayable_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
@@ -50,6 +54,8 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/infobars/core/infobar_delegate.h"
 #include "components/infobars/core/simple_alert_infobar_delegate.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/testing_pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -359,7 +365,7 @@ class BrowserWindowControllerTest : public InProcessBrowserTest {
     CGFloat overlapping_tip_height =
         [info_bar_container_controller overlappingTipHeight];
     LocationBarViewMac* location_bar_view = [controller() locationBarBridge];
-    NSPoint icon_bottom = location_bar_view->GetPageInfoBubblePoint();
+    NSPoint icon_bottom = location_bar_view->GetInfoBarAnchorPoint();
 
     NSPoint info_bar_top = NSMakePoint(0,
         NSHeight([info_bar_container_controller view].frame) -
@@ -396,13 +402,36 @@ class BrowserWindowControllerTest : public InProcessBrowserTest {
 
   // NOTIFICATION_FULLSCREEN_CHANGED is sent asynchronously.
   // This method toggles fullscreen and waits for the notification.
-  void ToggleFullscreenAndWaitForNotification() {
+  void ToggleBrowserFullscreenAndWaitForNotification() {
     std::unique_ptr<FullscreenNotificationObserver> waiter(
         new FullscreenNotificationObserver());
     browser()
         ->exclusive_access_manager()
         ->fullscreen_controller()
         ->ToggleBrowserFullscreenMode();
+    waiter->Wait();
+  }
+
+  void EnterTabFullscreenAndWaitForNotification() {
+    std::unique_ptr<FullscreenNotificationObserver> waiter(
+        new FullscreenNotificationObserver());
+    content::WebContents* contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
+    browser()
+        ->exclusive_access_manager()
+        ->fullscreen_controller()
+        ->EnterFullscreenModeForTab(contents, GURL());
+    waiter->Wait();
+  }
+
+  void ToggleExtensionFullscreenAndWaitForNotification() {
+    std::unique_ptr<FullscreenNotificationObserver> waiter(
+        new FullscreenNotificationObserver());
+    browser()
+        ->exclusive_access_manager()
+        ->fullscreen_controller()
+        ->ToggleBrowserFullscreenModeWithExtension(
+            GURL("https://www.google.com"));
     waiter->Wait();
   }
 
@@ -415,10 +444,10 @@ class BrowserWindowControllerTest : public InProcessBrowserTest {
 
   // Inserts a new tab into the tabstrip at the background.
   void AddTabAtBackground(int index, GURL url) {
-    chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
+    NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
     params.tabstrip_index = index;
     params.disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
-    chrome::Navigate(&params);
+    Navigate(&params);
     content::WaitForLoadStopWithoutSuccessCheck(params.target_contents);
   }
 
@@ -610,7 +639,9 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest, SheetPosition) {
   EXPECT_FALSE([popupController hasToolbar]);
 
   // Open sheet in an application window.
-  [popupController showWindow:nil];
+  NSWindowController* nsWindowController = [popupController nsWindowController];
+  EXPECT_TRUE(nsWindowController);
+  [nsWindowController showWindow:nil];
   sheetLocation = [popupController window:popupWindow
                         willPositionSheet:sheet
                                 usingRect:defaultLocation];
@@ -618,7 +649,7 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest, SheetPosition) {
 
   // Close the application window.
   popup_browser->tab_strip_model()->CloseSelectedTabs();
-  [popupController close];
+  [nsWindowController close];
 }
 
 // Verify that the info bar tip is hidden when the toolbar is not visible.
@@ -708,11 +739,11 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest, TrafficLightZOrder) {
 // are reset correctly after the transition.
 IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest, FullscreenResizeFlags) {
   // Enter fullscreen and verify the flags.
-  ToggleFullscreenAndWaitForNotification();
+  ToggleBrowserFullscreenAndWaitForNotification();
   VerifyFullscreenResizeFlagsAfterTransition();
 
   // Exit fullscreen and verify the flags.
-  ToggleFullscreenAndWaitForNotification();
+  ToggleBrowserFullscreenAndWaitForNotification();
   VerifyFullscreenResizeFlagsAfterTransition();
 }
 
@@ -728,7 +759,7 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
   [[controller() fullscreenToolbarController] setMenubarTracker:nil];
 
   // Toggle fullscreen and check if the toolbar is shown.
-  ToggleFullscreenAndWaitForNotification();
+  ToggleBrowserFullscreenAndWaitForNotification();
   EXPECT_EQ(
       FullscreenToolbarStyle::TOOLBAR_PRESENT,
       [[controller() fullscreenToolbarController] computeLayout].toolbarStyle);
@@ -743,8 +774,8 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
 
   // Toggle out and back into fullscreen and verify that the toolbar is still
   // hidden.
-  ToggleFullscreenAndWaitForNotification();
-  ToggleFullscreenAndWaitForNotification();
+  ToggleBrowserFullscreenAndWaitForNotification();
+  ToggleBrowserFullscreenAndWaitForNotification();
   EXPECT_EQ(
       FullscreenToolbarStyle::TOOLBAR_HIDDEN,
       [[controller() fullscreenToolbarController] computeLayout].toolbarStyle);
@@ -764,7 +795,7 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
   [controller()
       setFullscreenToolbarController:fullscreenToolbarController.get()];
 
-  ToggleFullscreenAndWaitForNotification();
+  ToggleBrowserFullscreenAndWaitForNotification();
 
   // Insert a non-NTP new tab in the foreground.
   AddTabAtIndex(0, GURL("http://google.com"), ui::PAGE_TRANSITION_LINK);
@@ -794,4 +825,112 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
   ASSERT_FALSE([[controller() toolbarController] isLocationBarFocused]);
   EXPECT_TRUE([fullscreenToolbarController isRevealingToolbar]);
   [fullscreenToolbarController resetToolbarFlag];
+}
+
+// Tests if entering browser fullscreen would log into the histogram.
+// See https://crbug.com/771993 re disabling.
+IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
+                       DISABLED_FullscreenHistogram) {
+  base::HistogramTester histogram_tester;
+  PrefService* prefs = browser()->profile()->GetPrefs();
+  prefs->SetBoolean(prefs::kShowFullscreenToolbar, true);
+
+  // Enter browser fullscreen.
+  ToggleBrowserFullscreenAndWaitForNotification();
+  histogram_tester.ExpectBucketCount("OSX.Fullscreen.Enter.Source",
+                                     (int)FullscreenSource::BROWSER, 1);
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.WindowLocation", 1);
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.Style", 1);
+  histogram_tester.ExpectBucketCount(
+      "OSX.Fullscreen.ToolbarStyle",
+      (int)FullscreenToolbarStyle::TOOLBAR_PRESENT, 1);
+
+  // Exit browser fullscreen.
+  ToggleBrowserFullscreenAndWaitForNotification();
+
+  prefs->SetBoolean(prefs::kShowFullscreenToolbar, false);
+  ToggleBrowserFullscreenAndWaitForNotification();
+  histogram_tester.ExpectBucketCount("OSX.Fullscreen.Enter.Source",
+                                     (int)FullscreenSource::BROWSER, 2);
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.WindowLocation", 2);
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.Style", 2);
+  histogram_tester.ExpectBucketCount(
+      "OSX.Fullscreen.ToolbarStyle",
+      (int)FullscreenToolbarStyle::TOOLBAR_HIDDEN, 1);
+
+  prefs->SetBoolean(prefs::kShowFullscreenToolbar, true);
+  [[controller() fullscreenToolbarController]
+      layoutToolbarStyleIsExitingTabFullscreen:NO];
+  histogram_tester.ExpectBucketCount(
+      "OSX.Fullscreen.ToolbarStyle",
+      (int)FullscreenToolbarStyle::TOOLBAR_PRESENT, 2);
+
+  // Enter tab fullscreen. Since we're still in browser fullscreen, this
+  // should not log anything to OSX.Fullscreen.Enter.
+  EnterTabFullscreenAndWaitForNotification();
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.Source", 2);
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.WindowLocation", 2);
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.Style", 2);
+
+  histogram_tester.ExpectBucketCount("OSX.Fullscreen.ToolbarStyle",
+                                     (int)FullscreenToolbarStyle::TOOLBAR_NONE,
+                                     1);
+
+  // Exit browser fullscreen. This will also cause tab fullscreen to exit.
+  ToggleBrowserFullscreenAndWaitForNotification();
+
+  EnterTabFullscreenAndWaitForNotification();
+  histogram_tester.ExpectBucketCount("OSX.Fullscreen.Enter.Source",
+                                     (int)FullscreenSource::TAB, 1);
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.WindowLocation", 3);
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.Style", 3);
+  histogram_tester.ExpectBucketCount("OSX.Fullscreen.ToolbarStyle",
+                                     (int)FullscreenToolbarStyle::TOOLBAR_NONE,
+                                     2);
+
+  ToggleBrowserFullscreenAndWaitForNotification();
+
+  // Enter fullscreen for extension.
+  ToggleExtensionFullscreenAndWaitForNotification();
+  EXPECT_TRUE(browser()
+                  ->exclusive_access_manager()
+                  ->fullscreen_controller()
+                  ->IsExtensionFullscreenOrPending());
+  histogram_tester.ExpectBucketCount("OSX.Fullscreen.Enter.Source",
+                                     (int)FullscreenSource::EXTENSION, 1);
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.WindowLocation", 4);
+  histogram_tester.ExpectTotalCount("OSX.Fullscreen.Enter.Style", 4);
+  histogram_tester.ExpectBucketCount("OSX.Fullscreen.ToolbarStyle",
+                                     (int)FullscreenToolbarStyle::TOOLBAR_NONE,
+                                     3);
+}
+
+// Ensure that some steps performed during process shutdown can be performed
+// during a tab drag. Regression test for https://crbug.com/788271.
+IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest, ShutdownDuringTabDrag) {
+  // Rather than trying to trick TabDragController into calling showOverlay,
+  // call it directly. Retain it (as if by the OS). Then remove the overlay (to
+  // trigger the bug).
+  [controller() showOverlay];
+  base::scoped_nsobject<NSWindow> simulate_os_retain(
+      [[controller() overlayWindow] retain]);
+  [controller() removeOverlay];
+  EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
+
+  // To kick things along, close the window rather than waiting for
+  // BrowserCloseManager to do it asynchronously.
+  browser()->tab_strip_model()->CloseAllTabs();
+  [[controller() window] close];
+
+  content::RunAllPendingInMessageLoop();
+  AutoreleasePool()->Recycle();
+  EXPECT_EQ(0u, chrome::GetTotalBrowserCount());
+
+  // All browsers are now closed, so this should immediately invoke
+  // ShutdownIfNoBrowsers() and HandleAppExitingForPlatform(), which invokes
+  // views::Widget::CloseAllSecondaryWidgets(). Must be done via PostTask() to
+  // avoid a DCHECK in BrowserProcessImpl::Unpin(), which checks for a run loop.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&chrome::CloseAllBrowsersAndQuit));
+  content::RunAllPendingInMessageLoop();
 }

@@ -15,19 +15,19 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "extensions/browser/content_hash_fetcher.h"
-#include "extensions/browser/content_hash_reader.h"
 #include "extensions/browser/content_verifier_delegate.h"
 #include "extensions/browser/content_verifier_io_data.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_l10n_util.h"
+#include "extensions/common/file_util.h"
 
 namespace extensions {
 
 namespace {
 
-ContentVerifier::TestObserver* g_test_observer = NULL;
+ContentVerifier::TestObserver* g_content_verifier_test_observer = NULL;
 
 // This function converts paths like "//foo/bar", "./foo/bar", and
 // "/foo/bar" to "foo/bar". It also converts path separators to "/".
@@ -66,7 +66,7 @@ bool ContentVerifier::ShouldRepairIfCorrupted(
 
 // static
 void ContentVerifier::SetObserverForTests(TestObserver* observer) {
-  g_test_observer = observer;
+  g_content_verifier_test_observer = observer;
 }
 
 ContentVerifier::ContentVerifier(
@@ -123,8 +123,8 @@ ContentVerifyJob* ContentVerifier::CreateJobFor(
   // TODO(asargent) - we can probably get some good performance wins by having
   // a cache of ContentHashReader's that we hold onto past the end of each job.
   return new ContentVerifyJob(
-      new ContentHashReader(extension_id, data->version, extension_root,
-                            normalized_unix_path, delegate_->GetPublicKey()),
+      extension_id, data->version, extension_root, normalized_unix_path,
+      delegate_->GetPublicKey(),
       base::BindOnce(&ContentVerifier::VerifyFailed, this, extension_id));
 }
 
@@ -179,9 +179,8 @@ void ContentVerifier::OnExtensionLoaded(
     }
 
     std::unique_ptr<ContentVerifierIOData::ExtensionData> data(
-        new ContentVerifierIOData::ExtensionData(
-            std::move(image_paths),
-            extension->version() ? *extension->version() : base::Version()));
+        new ContentVerifierIOData::ExtensionData(std::move(image_paths),
+                                                 extension->version()));
     content::BrowserThread::PostTask(content::BrowserThread::IO,
                                      FROM_HERE,
                                      base::Bind(&ContentVerifierIOData::AddData,
@@ -219,8 +218,8 @@ void ContentVerifier::OnFetchComplete(
     bool success,
     bool was_force_check,
     const std::set<base::FilePath>& hash_mismatch_unix_paths) {
-  if (g_test_observer)
-    g_test_observer->OnFetchComplete(extension_id, success);
+  if (g_content_verifier_test_observer)
+    g_content_verifier_test_observer->OnFetchComplete(extension_id, success);
 
   if (shutdown_)
     return;
@@ -267,6 +266,9 @@ bool ContentVerifier::ShouldVerifyAnyPaths(
   const base::FilePath manifest_file(kManifestFilename);
   const base::FilePath messages_file(kMessagesFilename);
   for (const base::FilePath& relative_unix_path : relative_unix_paths) {
+    if (relative_unix_path.empty())
+      continue;
+
     if (relative_unix_path == manifest_file)
       continue;
 
@@ -275,6 +277,10 @@ bool ContentVerifier::ShouldVerifyAnyPaths(
 
     base::FilePath full_path =
         extension_root.Append(relative_unix_path.NormalizePathSeparators());
+
+    if (full_path == file_util::GetIndexedRulesetPath(extension_root))
+      continue;
+
     if (locales_dir.IsParent(full_path)) {
       if (!all_locales) {
         // TODO(asargent) - see if we can cache this list longer to avoid

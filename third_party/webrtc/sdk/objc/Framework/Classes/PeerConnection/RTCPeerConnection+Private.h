@@ -10,7 +10,7 @@
 
 #import "WebRTC/RTCPeerConnection.h"
 
-#include "webrtc/api/peerconnectioninterface.h"
+#include "api/peerconnectioninterface.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -32,6 +32,8 @@ class PeerConnectionDelegateAdapter : public PeerConnectionObserver {
   void OnAddStream(rtc::scoped_refptr<MediaStreamInterface> stream) override;
 
   void OnRemoveStream(rtc::scoped_refptr<MediaStreamInterface> stream) override;
+
+  void OnTrack(rtc::scoped_refptr<RtpTransceiverInterface> transceiver) override;
 
   void OnDataChannel(
       rtc::scoped_refptr<DataChannelInterface> data_channel) override;

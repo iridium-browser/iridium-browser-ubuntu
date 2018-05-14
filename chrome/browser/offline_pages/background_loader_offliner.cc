@@ -4,6 +4,8 @@
 
 #include "chrome/browser/offline_pages/background_loader_offliner.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram_functions.h"
@@ -16,12 +18,16 @@
 #include "chrome/browser/offline_pages/offliner_helper.h"
 #include "chrome/browser/offline_pages/offliner_user_data.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_isolated_world_ids.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
+#include "components/offline_pages/content/renovations/render_frame_script_injector.h"
 #include "components/offline_pages/core/background/offliner_policy.h"
 #include "components/offline_pages/core/background/save_page_request.h"
 #include "components/offline_pages/core/client_namespace_constants.h"
 #include "components/offline_pages/core/offline_page_feature.h"
 #include "components/offline_pages/core/offline_page_model.h"
+#include "components/offline_pages/core/renovations/page_renovation_loader.h"
+#include "components/offline_pages/core/renovations/page_renovator.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/mhtml_extra_parts.h"
 #include "content/public/browser/navigation_handle.h"
@@ -51,7 +57,7 @@ std::string AddHistogramSuffix(const ClientId& client_id,
 }
 
 void RecordErrorCauseUMA(const ClientId& client_id, int error_code) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY(
+  base::UmaHistogramSparse(
       AddHistogramSuffix(client_id,
                          "OfflinePages.Background.LoadingErrorStatusCode"),
       error_code);
@@ -205,11 +211,25 @@ bool BackgroundLoaderOffliner::LoadAndSave(
   completion_callback_ = completion_callback;
   progress_callback_ = progress_callback;
 
+  if (IsOfflinePagesRenovationsEnabled()) {
+    // Lazily create PageRenovationLoader
+    if (!page_renovation_loader_)
+      page_renovation_loader_ = std::make_unique<PageRenovationLoader>();
+
+    // Set up PageRenovator for this offlining instance.
+    auto script_injector = std::make_unique<RenderFrameScriptInjector>(
+        loader_->web_contents()->GetMainFrame(),
+        ISOLATED_WORLD_ID_CHROME_INTERNAL);
+    page_renovator_ = std::make_unique<PageRenovator>(
+        page_renovation_loader_.get(), std::move(script_injector),
+        request.url());
+  }
+
   // Load page attempt.
   loader_.get()->LoadPage(request.url());
 
   snapshot_controller_ = SnapshotController::CreateForBackgroundOfflining(
-      base::ThreadTaskRunnerHandle::Get(), this);
+      base::ThreadTaskRunnerHandle::Get(), this, (bool)page_renovator_);
 
   return true;
 }
@@ -261,6 +281,33 @@ bool BackgroundLoaderOffliner::HandleTimeout(int64_t request_id) {
     }
   }
   return false;
+}
+
+void BackgroundLoaderOffliner::CanDownload(
+    const base::Callback<void(bool)>& callback) {
+  if (!pending_request_.get()) {
+    callback.Run(false);  // Shouldn't happen though...
+  }
+
+  bool should_allow_downloads = false;
+  Offliner::RequestStatus final_status =
+      Offliner::RequestStatus::LOADING_FAILED_DOWNLOAD;
+  // Check whether we should allow file downloads for this save page request.
+  // If we want to proceed with the file download, fail with
+  // DOWNLOAD_THROTTLED. If we don't want to proceed with the file download,
+  // fail with LOADING_FAILED_DOWNLOAD.
+  if (offline_page_model_->GetPolicyController()->ShouldAllowDownloads(
+          pending_request_.get()->client_id().name_space)) {
+    should_allow_downloads = true;
+    final_status = Offliner::RequestStatus::DOWNLOAD_THROTTLED;
+  }
+
+  callback.Run(should_allow_downloads);
+  SavePageRequest request(*pending_request_.get());
+  completion_callback_.Run(request, final_status);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&BackgroundLoaderOffliner::ResetState,
+                            weak_ptr_factory_.GetWeakPtr()));
 }
 
 void BackgroundLoaderOffliner::MarkLoadStartTime() {
@@ -469,6 +516,14 @@ void BackgroundLoaderOffliner::StartSnapshot() {
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
+void BackgroundLoaderOffliner::RunRenovations() {
+  if (page_renovator_) {
+    page_renovator_->RunRenovations(
+        base::Bind(&BackgroundLoaderOffliner::RenovationsCompleted,
+                   weak_ptr_factory_.GetWeakPtr()));
+  }
+}
+
 void BackgroundLoaderOffliner::OnPageSaved(SavePageResult save_result,
                                            int64_t offline_id) {
   if (!pending_request_)
@@ -539,6 +594,7 @@ void BackgroundLoaderOffliner::ResetState() {
 void BackgroundLoaderOffliner::ResetLoader() {
   loader_.reset(
       new background_loader::BackgroundLoaderContents(browser_context_));
+  loader_->SetDelegate(this);
 }
 
 void BackgroundLoaderOffliner::AttachObservers() {
@@ -556,6 +612,10 @@ void BackgroundLoaderOffliner::AddLoadingSignal(const char* signal_name) {
   // milliseconds than we can with a 2 bit int, 53 bits vs 32).
   double delay = delay_so_far.InMilliseconds();
   signal_data_.SetDouble(signal_name, delay);
+}
+
+void BackgroundLoaderOffliner::RenovationsCompleted() {
+  snapshot_controller_->RenovationsCompleted();
 }
 
 }  // namespace offline_pages

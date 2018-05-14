@@ -18,7 +18,7 @@ class MessageLoop;
 class RunLoop;
 }
 
-namespace tracked_objects {
+namespace base {
 class Location;
 }
 
@@ -43,6 +43,10 @@ class CONTENT_EXPORT BrowserThreadImpl : public BrowserThread,
   bool Start();
   bool StartWithOptions(const Options& options);
   bool StartAndWaitForTesting();
+  // Called only by the BrowserThread::IO thread to initialize its
+  // BrowserThreadDelegate after the thread is created. See
+  // https://crbug.com/729596.
+  void InitIOThreadDelegate();
 
   // Redirects tasks posted to |identifier| to |task_runner|.
   static void RedirectThreadIDToTaskRunner(
@@ -53,8 +57,6 @@ class CONTENT_EXPORT BrowserThreadImpl : public BrowserThread,
   // any tasks previously posted to it.
   // Can only be called after a matching RedirectThreadIDToTaskRunner call.
   static void StopRedirectionOfThreadID(BrowserThread::ID identifier);
-
-  static void ShutdownThreadPool();
 
   // Resets globals for |identifier|. Used in tests to clear global state that
   // would otherwise leak to the next test. Globals are not otherwise fully
@@ -78,15 +80,11 @@ class CONTENT_EXPORT BrowserThreadImpl : public BrowserThread,
   // The following are unique function names that makes it possible to tell
   // the thread id from the callstack alone in crash dumps.
   void UIThreadRun(base::RunLoop* run_loop);
-  void DBThreadRun(base::RunLoop* run_loop);
-  void FileThreadRun(base::RunLoop* run_loop);
-  void FileUserBlockingThreadRun(base::RunLoop* run_loop);
   void ProcessLauncherThreadRun(base::RunLoop* run_loop);
-  void CacheThreadRun(base::RunLoop* run_loop);
   void IOThreadRun(base::RunLoop* run_loop);
 
   static bool PostTaskHelper(BrowserThread::ID identifier,
-                             const tracked_objects::Location& from_here,
+                             const base::Location& from_here,
                              base::OnceClosure task,
                              base::TimeDelta delay,
                              bool nestable);
@@ -97,7 +95,6 @@ class CONTENT_EXPORT BrowserThreadImpl : public BrowserThread,
   // For testing.
   friend class ContentTestSuiteBaseListener;
   friend class TestBrowserThreadBundle;
-  static void FlushThreadPoolHelperForTesting();
 
   // The identifier of this thread.  Only one thread can exist with a given
   // identifier at a given time.

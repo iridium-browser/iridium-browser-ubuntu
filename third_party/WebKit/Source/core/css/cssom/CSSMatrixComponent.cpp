@@ -29,17 +29,28 @@ DOMMatrix* To2DMatrix(DOMMatrixReadOnly* matrix) {
 CSSMatrixComponent* CSSMatrixComponent::Create(
     DOMMatrixReadOnly* matrix,
     const CSSMatrixComponentOptions& options) {
-  return new CSSMatrixComponent(matrix, options.is2D() || matrix->is2D());
+  return new CSSMatrixComponent(
+      matrix, options.hasIs2D() ? options.is2D() : matrix->is2D());
 }
 
-const DOMMatrix* CSSMatrixComponent::AsMatrix() const {
+DOMMatrix* CSSMatrixComponent::toMatrix(ExceptionState&) const {
   if (is2D() && !matrix_->is2D())
     return To2DMatrix(matrix_);
-
-  return matrix_.Get();
+  return DOMMatrix::Create(matrix_.Get());
 }
 
-CSSFunctionValue* CSSMatrixComponent::ToCSSValue() const {
+CSSMatrixComponent* CSSMatrixComponent::FromCSSValue(
+    const CSSFunctionValue& value) {
+  WTF::Vector<double> entries;
+  for (const auto& item : value)
+    entries.push_back(ToCSSPrimitiveValue(*item).GetDoubleValue());
+
+  return CSSMatrixComponent::Create(
+      DOMMatrixReadOnly::CreateForSerialization(entries.data(), entries.size()),
+      CSSMatrixComponentOptions());
+}
+
+const CSSFunctionValue* CSSMatrixComponent::ToCSSValue() const {
   CSSFunctionValue* result =
       CSSFunctionValue::Create(is2D() ? CSSValueMatrix : CSSValueMatrix3d);
 

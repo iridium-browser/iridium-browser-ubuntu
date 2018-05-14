@@ -12,20 +12,34 @@
 
 namespace blink {
 
+class PrePaintTreeWalk;
 struct CORE_EXPORT PaintInvalidatorContext {
-  USING_FAST_MALLOC(PaintInvalidatorContext);
+  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
  public:
-  PaintInvalidatorContext() : parent_context(nullptr) {}
+  class ParentContextAccessor {
+   public:
+    ParentContextAccessor() = default;
+    ParentContextAccessor(PrePaintTreeWalk* tree_walk,
+                          size_t parent_context_index)
+        : tree_walk_(tree_walk), parent_context_index_(parent_context_index) {}
+    const PaintInvalidatorContext* ParentContext() const;
 
-  PaintInvalidatorContext(const PaintInvalidatorContext& parent_context)
-      : parent_context(&parent_context),
-        subtree_flags(parent_context.subtree_flags),
+   private:
+    PrePaintTreeWalk* tree_walk_ = nullptr;
+    size_t parent_context_index_ = 0u;
+  };
+
+  PaintInvalidatorContext() = default;
+
+  PaintInvalidatorContext(const ParentContextAccessor& parent_context_accessor)
+      : parent_context_accessor_(parent_context_accessor),
+        subtree_flags(ParentContext()->subtree_flags),
         paint_invalidation_container(
-            parent_context.paint_invalidation_container),
+            ParentContext()->paint_invalidation_container),
         paint_invalidation_container_for_stacked_contents(
-            parent_context.paint_invalidation_container_for_stacked_contents),
-        painting_layer(parent_context.painting_layer) {}
+            ParentContext()->paint_invalidation_container_for_stacked_contents),
+        painting_layer(ParentContext()->painting_layer) {}
 
   void MapLocalRectToVisualRectInBacking(const LayoutObject&,
                                          LayoutRect&) const;
@@ -39,8 +53,16 @@ struct CORE_EXPORT PaintInvalidatorContext {
            (subtree_flags & PaintInvalidatorContext::kSubtreeVisualRectUpdate);
   }
 
-  const PaintInvalidatorContext* parent_context;
+  const PaintInvalidatorContext* ParentContext() const {
+    return parent_context_accessor_.ParentContext();
+  }
 
+ private:
+  // Parent context accessor has to be initialized first, so inject the private
+  // access block here for that reason.
+  ParentContextAccessor parent_context_accessor_;
+
+ public:
   enum SubtreeFlag {
     kSubtreeInvalidationChecking = 1 << 0,
     kSubtreeVisualRectUpdate = 1 << 1,
@@ -48,8 +70,7 @@ struct CORE_EXPORT PaintInvalidatorContext {
     kSubtreeFullInvalidationForStackedContents = 1 << 3,
     kSubtreeSVGResourceChange = 1 << 4,
 
-    // TODO(crbug.com/637313): This is temporary before we support filters in
-    // paint property tree.
+    // For repeated objects inside multicolumn.
     kSubtreeSlowPathRect = 1 << 5,
 
     // When this flag is set, no paint or raster invalidation will be issued
@@ -87,20 +108,25 @@ struct CORE_EXPORT PaintInvalidatorContext {
 
   // Store the old visual rect in the paint invalidation backing's coordinates.
   // It does *not* account for composited scrolling.
-  // See LayoutObject::adjustVisualRectForCompositedScrolling().
+  // See LayoutObject::AdjustVisualRectForCompositedScrolling().
   LayoutRect old_visual_rect;
-  // Use LayoutObject::visualRect() to get the new visual rect.
+  // Use LayoutObject::VisualRect() to get the new visual rect.
 
-  // Store the origin of the object's local coordinates in the paint
-  // invalidation backing's coordinates. They are used to detect layoutObject
-  // shifts that force a full invalidation and invalidation check in subtree.
+  // This field and LayoutObject::LocationInBacking() store the old and new
+  // origins of the object's local coordinates in the paint invalidation
+  // backing's coordinates. They are used to detect layoutObject shifts that
+  // force a full invalidation and invalidation check in subtree.
   // The points do *not* account for composited scrolling. See
   // LayoutObject::adjustVisualRectForCompositedScrolling().
+  // This field will be removed for SPv2.
   LayoutPoint old_location;
-  LayoutPoint new_location;
+  // Use LayoutObject::LocationInBacking() to get the new location.
+
+  const FragmentData* fragment_data;
 
  private:
   friend class PaintInvalidator;
+
   const PaintPropertyTreeBuilderFragmentContext* tree_builder_context_ =
       nullptr;
 
@@ -127,6 +153,7 @@ class PaintInvalidator {
 
  private:
   friend struct PaintInvalidatorContext;
+  friend class PrePaintTreeWalk;
   template <typename Rect, typename Point>
   static LayoutRect MapLocalRectToVisualRectInBacking(
       const LayoutObject&,
@@ -144,14 +171,12 @@ class PaintInvalidator {
                                                       PaintInvalidatorContext&);
   ALWAYS_INLINE void UpdateEmptyVisualRectFlag(const LayoutObject&,
                                                PaintInvalidatorContext&);
-  ALWAYS_INLINE void UpdateVisualRectIfNeeded(
-      const LayoutObject&,
-      const PaintPropertyTreeBuilderContext*,
-      PaintInvalidatorContext&);
   ALWAYS_INLINE void UpdateVisualRect(const LayoutObject&,
+                                      FragmentData&,
                                       PaintInvalidatorContext&);
 
   Vector<const LayoutObject*> pending_delayed_paint_invalidations_;
+  bool document_printing_ = false;
 };
 
 }  // namespace blink

@@ -12,7 +12,7 @@
         --avatar-spacing: 24px;
         display: inline-flex;
 
-        @apply(--avatar-selector);
+        @apply --avatar-selector;
       }
 
       #avatar-grid .avatar {
@@ -33,7 +33,7 @@
         padding: 0;
         width: var(--avatar-size);
 
-        @apply(--avatar-selector-avatar);
+        @apply --avatar-selector-avatar;
       }
 
       #avatar-grid .avatar.iron-selected {
@@ -44,7 +44,7 @@
         ignore-modified-key-events="[[ignoreModifiedKeyEvents]]">
       <template is="dom-repeat" items="[[avatars]]">
         <paper-button class="avatar" title="[[item.label]]"
-            style$="background-image: [[getIconImageset_(item.url)]]"
+            style$="background-image: [[getIconImageSet_(item.url)]]"
             on-tap="onAvatarTap_">
         </paper-button>
       </template>

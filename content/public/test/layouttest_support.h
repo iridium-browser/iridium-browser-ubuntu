@@ -9,7 +9,6 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/callback_forward.h"
 #include "cc/layers/texture_layer.h"
@@ -24,7 +23,6 @@ struct WebSize;
 class WebURLRequest;
 class WebView;
 class WebWidget;
-class WebURLResponse;
 }
 
 namespace device {
@@ -44,13 +42,20 @@ class WebWidgetTestProxyBase;
 
 namespace content {
 
-class PageState;
 class RenderFrame;
 class RendererGamepadProvider;
 class RenderView;
+class StoragePartition;
+struct Manifest;
 
 // Turn the browser process into layout test mode.
 void EnableBrowserLayoutTestMode();
+
+// Terminates all workers and notifies when complete. This is used for
+// testing when it is important to make sure that all shared worker activity
+// has stopped.
+void TerminateAllSharedWorkersForTesting(StoragePartition* storage_partition,
+                                         base::OnceClosure callback);
 
 ///////////////////////////////////////////////////////////////////////////////
 // The following methods are meant to be used from a renderer.
@@ -95,10 +100,9 @@ void EnableWebTestProxyCreation(
     const WidgetProxyCreationCallback& widget_proxy_creation_callback,
     const FrameProxyCreationCallback& frame_proxy_creation_callback);
 
-typedef base::Callback<void(const blink::WebURLResponse& response,
-                            const std::string& data)> FetchManifestCallback;
-void FetchManifest(blink::WebView* view, const GURL& url,
-                   const FetchManifestCallback&);
+typedef base::OnceCallback<void(const GURL&, const Manifest&)>
+    FetchManifestCallback;
+void FetchManifest(blink::WebView* view, FetchManifestCallback callback);
 
 // Sets gamepad provider to be used for layout tests.
 void SetMockGamepadProvider(std::unique_ptr<RendererGamepadProvider> provider);
@@ -117,9 +121,6 @@ void SetMockDeviceOrientationData(const device::OrientationData& data);
 
 // Returns the length of the local session history of a render view.
 int GetLocalSessionHistoryLength(RenderView* render_view);
-
-// Sync the current session history to the browser process.
-void SyncNavigationState(RenderView* render_view);
 
 // Sets the focus of the render view depending on |enable|. This only overrides
 // the state of the renderer, and does not sync the focus to the browser
@@ -168,10 +169,6 @@ void EnableAutoResizeMode(RenderView* render_view,
                           const blink::WebSize& max_size);
 void DisableAutoResizeMode(RenderView* render_view,
                            const blink::WebSize& new_size);
-
-// Provides a text dump of the contents of the given page state.
-std::string DumpBackForwardList(std::vector<PageState>& page_state,
-                                size_t current_index);
 
 // Run all pending idle tasks immediately, and then invoke callback.
 void SchedulerRunIdleTasks(const base::Closure& callback);

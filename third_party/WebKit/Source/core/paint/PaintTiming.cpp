@@ -12,11 +12,14 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/loader/DocumentLoader.h"
+#include "core/loader/InteractiveDetector.h"
 #include "core/loader/ProgressTracker.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
+#include "core/probe/CoreProbes.h"
 #include "core/timing/DOMWindowPerformance.h"
-#include "core/timing/Performance.h"
+#include "core/timing/WindowPerformance.h"
+#include "platform/CrossThreadFunctional.h"
 #include "platform/Histogram.h"
 #include "platform/WebFrameScheduler.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
@@ -26,8 +29,8 @@ namespace blink {
 
 namespace {
 
-Performance* GetPerformanceInstance(LocalFrame* frame) {
-  Performance* performance = nullptr;
+WindowPerformance* GetPerformanceInstance(LocalFrame* frame) {
+  WindowPerformance* performance = nullptr;
   if (frame && frame->DomWindow()) {
     performance = DOMWindowPerformance::performance(*frame->DomWindow());
   }
@@ -36,14 +39,15 @@ Performance* GetPerformanceInstance(LocalFrame* frame) {
 
 }  // namespace
 
-static const char kSupplementName[] = "PaintTiming";
+// static
+const char PaintTiming::kSupplementName[] = "PaintTiming";
 
+// static
 PaintTiming& PaintTiming::From(Document& document) {
-  PaintTiming* timing = static_cast<PaintTiming*>(
-      Supplement<Document>::From(document, kSupplementName));
+  PaintTiming* timing = Supplement<Document>::From<PaintTiming>(document);
   if (!timing) {
     timing = new PaintTiming(document);
-    Supplement<Document>::ProvideTo(document, kSupplementName, timing);
+    ProvideTo(document, timing);
   }
   return *timing;
 }
@@ -52,10 +56,9 @@ void PaintTiming::MarkFirstPaint() {
   // Test that m_firstPaint is non-zero here, as well as in setFirstPaint, so
   // we avoid invoking monotonicallyIncreasingTime() on every call to
   // markFirstPaint().
-  if (first_paint_ != 0.0)
+  if (!first_paint_.is_null())
     return;
-  SetFirstPaint(MonotonicallyIncreasingTime());
-  NotifyPaintTimingChanged();
+  SetFirstPaint(CurrentTimeTicks());
 }
 
 void PaintTiming::MarkFirstContentfulPaint() {
@@ -63,36 +66,29 @@ void PaintTiming::MarkFirstContentfulPaint() {
   // setFirstContentfulPaint, so we avoid invoking
   // monotonicallyIncreasingTime() on every call to
   // markFirstContentfulPaint().
-  if (first_contentful_paint_ != 0.0)
+  if (!first_contentful_paint_.is_null())
     return;
-  SetFirstContentfulPaint(MonotonicallyIncreasingTime());
-  NotifyPaintTimingChanged();
+  SetFirstContentfulPaint(CurrentTimeTicks());
 }
 
 void PaintTiming::MarkFirstTextPaint() {
-  if (first_text_paint_ != 0.0)
+  if (!first_text_paint_.is_null())
     return;
-  first_text_paint_ = MonotonicallyIncreasingTime();
+  first_text_paint_ = CurrentTimeTicks();
   SetFirstContentfulPaint(first_text_paint_);
-  TRACE_EVENT_MARK_WITH_TIMESTAMP1(
-      "loading,rail,devtools.timeline", "firstTextPaint",
-      TraceEvent::ToTraceTimestamp(first_text_paint_), "frame", GetFrame());
-  NotifyPaintTimingChanged();
+  RegisterNotifySwapTime(PaintEvent::kFirstTextPaint);
 }
 
 void PaintTiming::MarkFirstImagePaint() {
-  if (first_image_paint_ != 0.0)
+  if (!first_image_paint_.is_null())
     return;
-  first_image_paint_ = MonotonicallyIncreasingTime();
+  first_image_paint_ = CurrentTimeTicks();
   SetFirstContentfulPaint(first_image_paint_);
-  TRACE_EVENT_MARK_WITH_TIMESTAMP1(
-      "loading,rail,devtools.timeline", "firstImagePaint",
-      TraceEvent::ToTraceTimestamp(first_image_paint_), "frame", GetFrame());
-  NotifyPaintTimingChanged();
+  RegisterNotifySwapTime(PaintEvent::kFirstImagePaint);
 }
 
-void PaintTiming::SetFirstMeaningfulPaintCandidate(double timestamp) {
-  if (first_meaningful_paint_candidate_)
+void PaintTiming::SetFirstMeaningfulPaintCandidate(TimeTicks timestamp) {
+  if (!first_meaningful_paint_candidate_.is_null())
     return;
   first_meaningful_paint_candidate_ = timestamp;
   if (GetFrame() && GetFrame()->View() && !GetFrame()->View()->IsAttached()) {
@@ -101,20 +97,31 @@ void PaintTiming::SetFirstMeaningfulPaintCandidate(double timestamp) {
 }
 
 void PaintTiming::SetFirstMeaningfulPaint(
-    double stamp,
-    double swap_stamp,
+    TimeTicks stamp,
+    TimeTicks swap_stamp,
     FirstMeaningfulPaintDetector::HadUserInput had_input) {
-  DCHECK_EQ(first_meaningful_paint_, 0.0);
+  DCHECK(first_meaningful_paint_.is_null());
+  DCHECK(first_meaningful_paint_swap_.is_null());
+  DCHECK(!stamp.is_null());
+  DCHECK(!swap_stamp.is_null());
+
   TRACE_EVENT_MARK_WITH_TIMESTAMP2("loading,rail,devtools.timeline",
-                                   "firstMeaningfulPaint",
-                                   TraceEvent::ToTraceTimestamp(stamp), "frame",
+                                   "firstMeaningfulPaint", swap_stamp, "frame",
                                    GetFrame(), "afterUserInput", had_input);
+
+  InteractiveDetector* interactive_detector(
+      InteractiveDetector::From(*GetSupplementable()));
+  if (interactive_detector) {
+    interactive_detector->OnFirstMeaningfulPaintDetected(swap_stamp, had_input);
+  }
 
   // Notify FMP for UMA only if there's no user input before FMP, so that layout
   // changes caused by user interactions wouldn't be considered as FMP.
   if (had_input == FirstMeaningfulPaintDetector::kNoUserInput) {
     first_meaningful_paint_ = stamp;
     first_meaningful_paint_swap_ = swap_stamp;
+    ReportSwapTimeDeltaHistogram(first_meaningful_paint_,
+                                 first_meaningful_paint_swap_);
     NotifyPaintTimingChanged();
   }
 
@@ -144,7 +151,7 @@ void PaintTiming::NotifyPaint(bool is_first_paint,
   fmp_detector_->NotifyPaint();
 }
 
-DEFINE_TRACE(PaintTiming) {
+void PaintTiming::Trace(blink::Visitor* visitor) {
   visitor->Trace(fmp_detector_);
   Supplement<Document>::Trace(visitor);
 }
@@ -162,35 +169,29 @@ void PaintTiming::NotifyPaintTimingChanged() {
     GetSupplementable()->Loader()->DidChangePerformanceTiming();
 }
 
-void PaintTiming::SetFirstPaint(double stamp) {
-  if (first_paint_ != 0.0)
+void PaintTiming::SetFirstPaint(TimeTicks stamp) {
+  if (!first_paint_.is_null())
     return;
   first_paint_ = stamp;
-  TRACE_EVENT_INSTANT1("loading,rail,devtools.timeline", "firstPaint",
-                       TRACE_EVENT_SCOPE_PROCESS, "frame", GetFrame());
   RegisterNotifySwapTime(PaintEvent::kFirstPaint);
 }
 
-void PaintTiming::SetFirstContentfulPaint(double stamp) {
-  if (first_contentful_paint_ != 0.0)
+void PaintTiming::SetFirstContentfulPaint(TimeTicks stamp) {
+  if (!first_contentful_paint_.is_null())
     return;
   SetFirstPaint(stamp);
   first_contentful_paint_ = stamp;
-  TRACE_EVENT_INSTANT1("loading,rail,devtools.timeline", "firstContentfulPaint",
-                       TRACE_EVENT_SCOPE_PROCESS, "frame", GetFrame());
   RegisterNotifySwapTime(PaintEvent::kFirstContentfulPaint);
-  GetFrame()->Loader().Progress().DidFirstContentfulPaint();
 }
 
 void PaintTiming::RegisterNotifySwapTime(PaintEvent event) {
-  RegisterNotifySwapTime(event,
-                         WTF::Bind(&PaintTiming::ReportSwapTime,
-                                   WrapCrossThreadWeakPersistent(this), event));
+  RegisterNotifySwapTime(
+      event, CrossThreadBind(&PaintTiming::ReportSwapTime,
+                             WrapCrossThreadWeakPersistent(this), event));
 }
 
-void PaintTiming::RegisterNotifySwapTime(
-    PaintEvent event,
-    std::unique_ptr<WTF::Function<void(bool, double)>> callback) {
+void PaintTiming::RegisterNotifySwapTime(PaintEvent event,
+                                         ReportTimeCallback callback) {
   // ReportSwapTime on layerTreeView will queue a swap-promise, the callback is
   // called when the swap for current render frame completes or fails to happen.
   if (!GetFrame() || !GetFrame()->GetPage())
@@ -203,25 +204,103 @@ void PaintTiming::RegisterNotifySwapTime(
 }
 
 void PaintTiming::ReportSwapTime(PaintEvent event,
-                                 bool did_swap,
+                                 WebLayerTreeView::SwapResult result,
                                  double timestamp) {
-  if (!did_swap)
-    return;
-  Performance* performance = GetPerformanceInstance(GetFrame());
+  // If the swap fails for any reason, we use the timestamp when the SwapPromise
+  // was broken. |result| == WebLayerTreeView::SwapResult::kDidNotSwapSwapFails
+  // usually means the compositor decided not swap because there was no actual
+  // damage, which can happen when what's being painted isn't visible. In this
+  // case, the timestamp will be consistent with the case where the swap
+  // succeeds, as they both capture the time up to swap. In other failure cases
+  // (aborts during commit), this timestamp is an improvement over the blink
+  // paint time, but does not capture some time we're interested in, e.g.  image
+  // decoding.
+  //
+  // TODO(crbug.com/738235): Consider not reporting any timestamp when failing
+  // for reasons other than kDidNotSwapSwapFails.
+  TimeTicks time = TimeTicksFromSeconds(timestamp);
+  ReportSwapResultHistogram(result);
   switch (event) {
     case PaintEvent::kFirstPaint:
-      first_paint_swap_ = timestamp;
-      if (performance)
-        performance->AddFirstPaintTiming(first_paint_);
+      SetFirstPaintSwap(time);
       return;
     case PaintEvent::kFirstContentfulPaint:
-      first_contentful_paint_swap_ = timestamp;
-      if (performance)
-        performance->AddFirstContentfulPaintTiming(first_contentful_paint_);
+      SetFirstContentfulPaintSwap(time);
+      return;
+    case PaintEvent::kFirstTextPaint:
+      SetFirstTextPaintSwap(time);
+      return;
+    case PaintEvent::kFirstImagePaint:
+      SetFirstImagePaintSwap(time);
       return;
     default:
       NOTREACHED();
   }
+}
+
+void PaintTiming::SetFirstPaintSwap(TimeTicks stamp) {
+  DCHECK(first_paint_swap_.is_null());
+  first_paint_swap_ = stamp;
+  probe::paintTiming(GetSupplementable(), "firstPaint",
+                     TimeTicksInSeconds(first_paint_swap_));
+  WindowPerformance* performance = GetPerformanceInstance(GetFrame());
+  if (performance)
+    performance->AddFirstPaintTiming(first_paint_swap_);
+  ReportSwapTimeDeltaHistogram(first_paint_, first_paint_swap_);
+  NotifyPaintTimingChanged();
+}
+
+void PaintTiming::SetFirstContentfulPaintSwap(TimeTicks stamp) {
+  DCHECK(first_contentful_paint_swap_.is_null());
+  first_contentful_paint_swap_ = stamp;
+  probe::paintTiming(GetSupplementable(), "firstContentfulPaint",
+                     TimeTicksInSeconds(first_contentful_paint_swap_));
+  WindowPerformance* performance = GetPerformanceInstance(GetFrame());
+  if (performance)
+    performance->AddFirstContentfulPaintTiming(first_contentful_paint_swap_);
+  if (GetFrame())
+    GetFrame()->Loader().Progress().DidFirstContentfulPaint();
+  ReportSwapTimeDeltaHistogram(first_contentful_paint_,
+                               first_contentful_paint_swap_);
+  NotifyPaintTimingChanged();
+  fmp_detector_->NotifyFirstContentfulPaint(first_contentful_paint_swap_);
+}
+
+void PaintTiming::SetFirstTextPaintSwap(TimeTicks stamp) {
+  DCHECK(first_text_paint_swap_.is_null());
+  first_text_paint_swap_ = stamp;
+  probe::paintTiming(GetSupplementable(), "firstTextPaint",
+                     TimeTicksInSeconds(first_text_paint_swap_));
+  ReportSwapTimeDeltaHistogram(first_text_paint_, first_text_paint_swap_);
+  NotifyPaintTimingChanged();
+}
+
+void PaintTiming::SetFirstImagePaintSwap(TimeTicks stamp) {
+  DCHECK(first_image_paint_swap_.is_null());
+  first_image_paint_swap_ = stamp;
+  probe::paintTiming(GetSupplementable(), "firstImagePaint",
+                     TimeTicksInSeconds(first_image_paint_swap_));
+  ReportSwapTimeDeltaHistogram(first_image_paint_, first_image_paint_swap_);
+  NotifyPaintTimingChanged();
+}
+
+void PaintTiming::ReportSwapResultHistogram(
+    const WebLayerTreeView::SwapResult result) {
+  DEFINE_STATIC_LOCAL(EnumerationHistogram, did_swap_histogram,
+                      ("PageLoad.Internal.Renderer.PaintTiming.SwapResult",
+                       WebLayerTreeView::SwapResult::kSwapResultMax));
+  did_swap_histogram.Count(result);
+}
+
+void PaintTiming::ReportSwapTimeDeltaHistogram(TimeTicks timestamp,
+                                               TimeTicks swap_timestamp) {
+  DEFINE_STATIC_LOCAL(
+      CustomCountHistogram, swap_time_diff_histogram,
+      ("PageLoad.Internal.Renderer.PaintTiming.SwapTimeDelta", 0, 10000, 50));
+  DCHECK(!timestamp.is_null());
+  DCHECK(!swap_timestamp.is_null());
+  DCHECK(swap_timestamp >= timestamp);
+  swap_time_diff_histogram.Count((swap_timestamp - timestamp).InMilliseconds());
 }
 
 }  // namespace blink

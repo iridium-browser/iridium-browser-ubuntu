@@ -5,6 +5,10 @@
 package org.chromium.chrome.browser.dom_distiller;
 
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.preferences.Pref;
+import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
 import org.chromium.content_public.browser.WebContents;
 
 /**
@@ -12,6 +16,8 @@ import org.chromium.content_public.browser.WebContents;
  */
 @JNINamespace("android")
 public class DomDistillerTabUtils {
+    // Triggering heuristics encoded in native enum DistillerHeuristicsType.
+    private static Integer sHeuristics;
 
     private DomDistillerTabUtils() {
     }
@@ -28,7 +34,17 @@ public class DomDistillerTabUtils {
     }
 
     /**
-     * Starts distillation in the source @{link WebContents} while navigating the destination
+     * Starts distillation in the source {@link WebContents}. The viewer needs to be handled
+     * elsewhere.
+     *
+     * @param webContents the WebContents to distill.
+     */
+    public static void distillCurrentPage(WebContents webContents) {
+        nativeDistillCurrentPage(webContents);
+    }
+
+    /**
+     * Starts distillation in the source {@link WebContents} while navigating the destination
      * {@link WebContents} to view the distilled content. This does not take ownership of any
      * of the WebContents.
      *
@@ -39,6 +55,7 @@ public class DomDistillerTabUtils {
             WebContents sourceWebContents, WebContents destinationWebContents) {
         nativeDistillAndView(sourceWebContents, destinationWebContents);
     }
+
     /**
      * Returns the formatted version of the original URL of a distillation, given the original URL.
      *
@@ -50,13 +67,13 @@ public class DomDistillerTabUtils {
     }
 
     /**
-     * Detect if any heuristic is being used to determine if a page is distillable. On the native
-     * side, this is testing if the heuristic is not "NONE".
+     * Detect if any heuristic is being used to determine if a page is distillable.
+     * This is testing if the heuristic is not "NONE".
      *
      * @return True if heuristics are being used to detect distillable pages.
      */
     public static boolean isDistillerHeuristicsEnabled() {
-        return nativeIsDistillerHeuristicsEnabled();
+        return getDistillerHeuristics() != DistillerHeuristicsType.NONE;
     }
 
     /**
@@ -65,14 +82,56 @@ public class DomDistillerTabUtils {
      * @return True if heuristic is ALWAYS_TRUE.
      */
     public static boolean isHeuristicAlwaysTrue() {
-        return nativeIsHeuristicAlwaysTrue();
+        return getDistillerHeuristics() == DistillerHeuristicsType.ALWAYS_TRUE;
     }
 
+    /**
+     * Check if the distiller should report mobile-friendly pages as non-distillable.
+     *
+     * @return True if heuristic is ADABOOST_MODEL, and "Simplified view for accessibility"
+     * is disabled.
+     */
+    public static boolean shouldExcludeMobileFriendly() {
+        return !PrefServiceBridge.getInstance().getBoolean(Pref.READER_FOR_ACCESSIBILITY_ENABLED)
+                && getDistillerHeuristics() == DistillerHeuristicsType.ADABOOST_MODEL;
+    }
+
+    /**
+     * Cached version of nativeGetDistillerHeuristics().
+     */
+    public static @DistillerHeuristicsType int getDistillerHeuristics() {
+        if (sHeuristics == null) {
+            sHeuristics = nativeGetDistillerHeuristics();
+        }
+        return sHeuristics;
+    }
+
+    /**
+     * Check if the distilled content should be shown in a Chrome Custom Tab (CCT).
+     *
+     * @return True if it should.
+     */
+    public static boolean isCctMode() {
+        if (!ChromeFeatureList.isInitialized()) return false;
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.READER_MODE_IN_CCT);
+    }
+
+    /**
+     * Set an InterceptNavigationDelegate on a WebContents.
+     * @param delegate The navigation delegate.
+     * @param webContents The WebContents to bind the delegate to.
+     */
+    public static void setInterceptNavigationDelegate(
+            InterceptNavigationDelegate delegate, WebContents webContents) {
+        nativeSetInterceptNavigationDelegate(delegate, webContents);
+    }
 
     private static native void nativeDistillCurrentPageAndView(WebContents webContents);
+    private static native void nativeDistillCurrentPage(WebContents webContents);
     private static native void nativeDistillAndView(
             WebContents sourceWebContents, WebContents destinationWebContents);
     private static native String nativeGetFormattedUrlFromOriginalDistillerUrl(String url);
-    private static native boolean nativeIsDistillerHeuristicsEnabled();
-    private static native boolean nativeIsHeuristicAlwaysTrue();
+    private static native int nativeGetDistillerHeuristics();
+    private static native void nativeSetInterceptNavigationDelegate(
+            InterceptNavigationDelegate delegate, WebContents webContents);
 }

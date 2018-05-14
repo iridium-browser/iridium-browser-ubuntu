@@ -14,12 +14,14 @@
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/ui/card_unmask_prompt_controller_impl.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
 #if !defined(OS_ANDROID)
+#include "components/autofill/core/browser/ui/save_card_bubble_controller.h"
 #include "components/zoom/zoom_observer.h"
 #endif  // !defined(OS_ANDROID)
 
@@ -49,9 +51,9 @@ class ChromeAutofillClient
   scoped_refptr<AutofillWebDataService> GetDatabase() override;
   PrefService* GetPrefs() override;
   syncer::SyncService* GetSyncService() override;
-  IdentityProvider* GetIdentityProvider() override;
-  rappor::RapporServiceImpl* GetRapporServiceImpl() override;
+  identity::IdentityManager* GetIdentityManager() override;
   ukm::UkmRecorder* GetUkmRecorder() override;
+  AddressNormalizer* GetAddressNormalizer() override;
   SaveCardBubbleController* GetSaveCardBubbleController() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(const CreditCard& card,
@@ -86,17 +88,21 @@ class ChromeAutofillClient
       const std::vector<autofill::FormStructure*>& forms) override;
   void DidFillOrPreviewField(const base::string16& autofilled_value,
                              const base::string16& profile_full_name) override;
+  void DidInteractWithNonsecureCreditCardInput() override;
   bool IsContextSecure() override;
   bool ShouldShowSigninPromo() override;
-  void StartSigninFlow() override;
-  void ShowHttpNotSecureExplanation() override;
   bool IsAutofillSupported() override;
+  void ExecuteCommand(int id) override;
 
   // content::WebContentsObserver implementation.
   void MainFrameWasResized(bool width_changed) override;
   void WebContentsDestroyed() override;
   // Hide autofill popup if an interstitial is shown.
   void DidAttachInterstitialPage() override;
+
+  base::WeakPtr<AutofillPopupControllerImpl> popup_controller_for_testing() {
+    return popup_controller_;
+  }
 
 #if !defined(OS_ANDROID)
   // ZoomObserver implementation.
@@ -105,14 +111,14 @@ class ChromeAutofillClient
 #endif  // !defined(OS_ANDROID)
 
  private:
-  explicit ChromeAutofillClient(content::WebContents* web_contents);
   friend class content::WebContentsUserData<ChromeAutofillClient>;
+
+  explicit ChromeAutofillClient(content::WebContents* web_contents);
+
+  void ShowHttpNotSecureExplanation();
 
   base::WeakPtr<AutofillPopupControllerImpl> popup_controller_;
   CardUnmaskPromptControllerImpl unmask_controller_;
-
-  // The identity provider, used for Payments integration.
-  std::unique_ptr<IdentityProvider> identity_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeAutofillClient);
 };

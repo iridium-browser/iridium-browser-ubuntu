@@ -7,10 +7,12 @@
 
 #include <memory>
 
+#include "base/callback.h"
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "content/browser/renderer_host/input/touch_emulator_client.h"
 #include "content/common/cursors/webcursor.h"
-#include "content/common/input/input_event_ack_state.h"
+#include "content/public/common/input_event_ack_state.h"
 #include "third_party/WebKit/public/platform/WebTouchEvent.h"
 #include "ui/events/gesture_detection/filtered_gesture_provider.h"
 #include "ui/events/gesture_detection/gesture_provider_config_helper.h"
@@ -24,13 +26,22 @@ class WebMouseWheelEvent;
 
 namespace content {
 
-// Emulates touch input with mouse and keyboard.
+// Emulates touch input. See TouchEmulator::Mode for more details.
 class CONTENT_EXPORT TouchEmulator : public ui::GestureProviderClient {
  public:
+  enum class Mode {
+    // Emulator will consume incoming mouse events and transform them
+    // into touches and gestures.
+    kEmulatingTouchFromMouse,
+    // Emulator will not consume incoming mouse events and instead will
+    // wait for manually injected touch events.
+    kInjectingTouchEvents
+  };
+
   TouchEmulator(TouchEmulatorClient* client, float device_scale_factor);
   ~TouchEmulator() override;
 
-  void Enable(ui::GestureProviderConfigType config_type);
+  void Enable(Mode mode, ui::GestureProviderConfigType config_type);
   void Disable();
 
   // Call when device scale factor changes.
@@ -51,10 +62,17 @@ class CONTENT_EXPORT TouchEmulator : public ui::GestureProviderClient {
   bool HandleKeyboardEvent(const blink::WebKeyboardEvent& event);
   bool HandleTouchEvent(const blink::WebTouchEvent& event);
 
+  void OnGestureEventAck(const blink::WebGestureEvent& event);
+
   // Returns |true| if the event ack was consumed. Consumed ack should not
   // propagate any further.
   bool HandleTouchEventAck(const blink::WebTouchEvent& event,
                            InputEventAckState ack_result);
+
+  // Injects a touch event to be processed for gestures and optionally
+  // forwarded to the client. Only works in kInjectingTouchEvents mode.
+  void InjectTouchEvent(const blink::WebTouchEvent& event,
+                        base::OnceClosure completion_callback);
 
   // Cancel any touches, for example, when focus is lost.
   void CancelTouch();
@@ -86,8 +104,12 @@ class CONTENT_EXPORT TouchEmulator : public ui::GestureProviderClient {
   void ScrollEnd(const blink::WebGestureEvent& event);
 
   // Offers the emulated event to |gesture_provider_|, conditionally forwarding
-  // it to the client if appropriate.
-  void HandleEmulatedTouchEvent(blink::WebTouchEvent event);
+  // it to the client if appropriate. Returns whether event was handled
+  // synchronously, and there will be no ack.
+  bool HandleEmulatedTouchEvent(blink::WebTouchEvent event);
+
+  // Called when ack for injected touch has been received.
+  void OnInjectedTouchCompleted();
 
   TouchEmulatorClient* const client_;
 
@@ -96,6 +118,7 @@ class CONTENT_EXPORT TouchEmulator : public ui::GestureProviderClient {
   // emulation. It does not intercept any events.
   std::unique_ptr<ui::FilteredGestureProvider> gesture_provider_;
   ui::GestureProviderConfigType gesture_provider_config_type_;
+  Mode mode_;
   bool double_tap_enabled_;
 
   bool use_2x_cursors_;
@@ -117,6 +140,10 @@ class CONTENT_EXPORT TouchEmulator : public ui::GestureProviderClient {
   blink::WebTouchEvent touch_event_;
   int emulated_stream_active_sequence_count_;
   int native_stream_active_sequence_count_;
+  // TODO(einbinder): this relies on synchronous tap gesture generation and does
+  // not work for any other gestures. We should switch to callbacks which go
+  // through touches and gestures once that's available.
+  int pending_taps_count_;
 
   // Whether we should suppress next fling cancel. This may happen when we
   // did not send fling start in pinch mode.
@@ -127,6 +154,8 @@ class CONTENT_EXPORT TouchEmulator : public ui::GestureProviderClient {
   // The cumulative scale change from the start of pinch gesture.
   float pinch_scale_;
   bool pinch_gesture_active_;
+
+  base::queue<base::OnceClosure> injected_touch_completion_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchEmulator);
 };

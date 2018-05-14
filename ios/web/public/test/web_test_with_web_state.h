@@ -5,6 +5,9 @@
 #ifndef IOS_WEB_PUBLIC_TEST_WEB_TEST_WITH_WEB_STATE_H_
 #define IOS_WEB_PUBLIC_TEST_WEB_TEST_WITH_WEB_STATE_H_
 
+#include <memory>
+
+#include "base/compiler_specific.h"
 #import "base/ios/block_types.h"
 #include "base/message_loop/message_loop.h"
 #include "ios/web/public/test/web_test.h"
@@ -13,6 +16,7 @@
 
 namespace web {
 
+class WebClient;
 class WebState;
 
 // Base test fixture that provides WebState for testing.
@@ -20,6 +24,7 @@ class WebTestWithWebState : public WebTest,
                             public base::MessageLoop::TaskObserver {
  protected:
   WebTestWithWebState();
+  explicit WebTestWithWebState(std::unique_ptr<web::WebClient> web_client);
   ~WebTestWithWebState() override;
 
   // WebTest overrides.
@@ -29,12 +34,16 @@ class WebTestWithWebState : public WebTest,
   // Adds a pending item to the NavigationManager associated with the WebState.
   void AddPendingItem(const GURL& url, ui::PageTransition transition);
 
+  // Adds a transient item to the NavigationManager associated with the
+  // WebState.
+  void AddTransientItem(const GURL& url);
+
   // Loads the specified HTML content with URL into the WebState.
   void LoadHtml(NSString* html, const GURL& url);
   // Loads the specified HTML content into the WebState, using test url name.
   void LoadHtml(NSString* html);
   // Loads the specified HTML content into the WebState, using test url name.
-  void LoadHtml(const std::string& html);
+  bool LoadHtml(const std::string& html) WARN_UNUSED_RESULT;
   // Blocks until both known NSRunLoop-based and known message-loop-based
   // background tasks have completed
   void WaitForBackgroundTasks();

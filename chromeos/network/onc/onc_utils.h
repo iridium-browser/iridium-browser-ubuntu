@@ -15,16 +15,13 @@
 #include "chromeos/chromeos_export.h"
 #include "chromeos/network/network_type_pattern.h"
 #include "components/onc/onc_constants.h"
+#include "net/cert/scoped_nss_types.h"
 
 class PrefService;
 
 namespace base {
 class DictionaryValue;
 class ListValue;
-}
-
-namespace net {
-class X509Certificate;
 }
 
 namespace user_manager {
@@ -114,9 +111,12 @@ MaskCredentialsInOncObject(const OncValueSignature& signature,
 // Decrypts |onc_blob| with |passphrase| if necessary. Clears |network_configs|,
 // |global_network_config| and |certificates| and fills them with the validated
 // NetworkConfigurations, GlobalNetworkConfiguration and Certificates of
-// |onc_blob|. Returns false if any validation errors or warnings occurred.
-// Still, some configuration might be added to the output arguments and should
-// be further processed by the caller.
+// |onc_blob|. Callers can pass nullptr as any of |network_configs|,
+// |global_network_config|, |certificates| if they're not interested in the
+// respective values. Returns false if any validation errors or warnings
+// occurred in any segments (i.e. not only those requested by the caller). Even
+// if false is returned, some configuration might be added to the output
+// arguments and should be further processed by the caller.
 CHROMEOS_EXPORT bool ParseAndValidateOncForImport(
     const std::string& onc_blob,
     ::onc::ONCSource onc_source,
@@ -125,9 +125,13 @@ CHROMEOS_EXPORT bool ParseAndValidateOncForImport(
     base::DictionaryValue* global_network_config,
     base::ListValue* certificates);
 
+// Parse the given PEM encoded certificate |pem_encoded| and return the
+// contained DER encoding. Returns an empty string on failure.
+std::string DecodePEM(const std::string& pem_encoded);
+
 // Parse the given PEM encoded certificate |pem_encoded| and create a
-// X509Certificate from it.
-CHROMEOS_EXPORT scoped_refptr<net::X509Certificate> DecodePEMCertificate(
+// CERTCertificate from it.
+CHROMEOS_EXPORT net::ScopedCERTCertificate DecodePEMCertificate(
     const std::string& pem_encoded);
 
 // Replaces all references by GUID to Server or CA certs by their PEM
@@ -205,6 +209,17 @@ CHROMEOS_EXPORT const base::DictionaryValue* GetPolicyForNetwork(
 CHROMEOS_EXPORT bool HasPolicyForNetwork(const PrefService* profile_prefs,
                                          const PrefService* local_state_prefs,
                                          const NetworkState& network);
+
+// Checks whether a WiFi dictionary object has the ${PASSWORD} substitution
+// variable set as the password.
+CHROMEOS_EXPORT bool HasUserPasswordSubsitutionVariable(
+    const OncValueSignature& signature,
+    base::DictionaryValue* onc_object);
+
+// Checks whether a list of network objects has at least one network with the
+// ${PASSWORD} substitution variable set as the password.
+CHROMEOS_EXPORT bool HasUserPasswordSubsitutionVariable(
+    base::ListValue* network_configs);
 
 }  // namespace onc
 }  // namespace chromeos

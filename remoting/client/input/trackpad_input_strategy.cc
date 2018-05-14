@@ -20,7 +20,7 @@ const float kDragFeedbackRadius = 8.f;
 TrackpadInputStrategy::TrackpadInputStrategy(const DesktopViewport& viewport)
     : cursor_position_(viewport.GetViewportCenter()) {}
 
-TrackpadInputStrategy::~TrackpadInputStrategy() {}
+TrackpadInputStrategy::~TrackpadInputStrategy() = default;
 
 void TrackpadInputStrategy::HandleZoom(const ViewMatrix::Point& pivot,
                                        float scale,
@@ -64,6 +64,11 @@ bool TrackpadInputStrategy::TrackTouchInput(
 
 ViewMatrix::Point TrackpadInputStrategy::GetCursorPosition() const {
   return cursor_position_;
+}
+
+void TrackpadInputStrategy::FocusViewportOnCursor(
+    DesktopViewport* viewport) const {
+  viewport->SetViewportCenter(cursor_position_.x, cursor_position_.y);
 }
 
 ViewMatrix::Vector2D TrackpadInputStrategy::MapScreenVectorToDesktop(

@@ -8,6 +8,7 @@
 
 #include "compiler/translator/IntermNode_util.h"
 
+#include "compiler/translator/FunctionLookup.h"
 #include "compiler/translator/SymbolTable.h"
 
 namespace sh
@@ -16,21 +17,13 @@ namespace sh
 namespace
 {
 
-TName GetInternalFunctionName(const char *name)
-{
-    TString nameStr(name);
-    TName nameObj(nameStr);
-    nameObj.setInternal(true);
-    return nameObj;
-}
-
-const TFunction *LookUpBuiltInFunction(const TString &name,
+const TFunction *LookUpBuiltInFunction(const char *name,
                                        const TIntermSequence *arguments,
                                        const TSymbolTable &symbolTable,
                                        int shaderVersion)
 {
-    TString mangledName = TFunction::GetMangledNameFromCall(name, *arguments);
-    TSymbol *symbol     = symbolTable.findBuiltIn(mangledName, shaderVersion);
+    const ImmutableString &mangledName = TFunctionLookup::GetMangledName(name, *arguments);
+    const TSymbol *symbol              = symbolTable.findBuiltIn(mangledName, shaderVersion);
     if (symbol)
     {
         ASSERT(symbol->isFunction());
@@ -41,33 +34,15 @@ const TFunction *LookUpBuiltInFunction(const TString &name,
 
 }  // anonymous namespace
 
-TIntermFunctionPrototype *CreateInternalFunctionPrototypeNode(const TType &returnType,
-                                                              const char *name,
-                                                              const TSymbolUniqueId &functionId)
+TIntermFunctionPrototype *CreateInternalFunctionPrototypeNode(const TFunction &func)
 {
-    TIntermFunctionPrototype *functionNode = new TIntermFunctionPrototype(returnType, functionId);
-    functionNode->getFunctionSymbolInfo()->setNameObj(GetInternalFunctionName(name));
-    return functionNode;
+    return new TIntermFunctionPrototype(&func);
 }
 
-TIntermFunctionDefinition *CreateInternalFunctionDefinitionNode(const TType &returnType,
-                                                                const char *name,
-                                                                TIntermBlock *functionBody,
-                                                                const TSymbolUniqueId &functionId)
+TIntermFunctionDefinition *CreateInternalFunctionDefinitionNode(const TFunction &func,
+                                                                TIntermBlock *functionBody)
 {
-    TIntermFunctionPrototype *prototypeNode =
-        CreateInternalFunctionPrototypeNode(returnType, name, functionId);
-    return new TIntermFunctionDefinition(prototypeNode, functionBody);
-}
-
-TIntermAggregate *CreateInternalFunctionCallNode(const TType &returnType,
-                                                 const char *name,
-                                                 const TSymbolUniqueId &functionId,
-                                                 TIntermSequence *arguments)
-{
-    TIntermAggregate *functionNode = TIntermAggregate::CreateFunctionCall(
-        returnType, functionId, GetInternalFunctionName(name), arguments);
-    return functionNode;
+    return new TIntermFunctionDefinition(new TIntermFunctionPrototype(&func), functionBody);
 }
 
 TIntermTyped *CreateZeroNode(const TType &type)
@@ -116,7 +91,10 @@ TIntermTyped *CreateZeroNode(const TType &type)
         // Void array. This happens only on error condition, similarly to the case above. We don't
         // have a constructor operator for void, so this needs special handling. We'll end up with a
         // value without the array type, but that should not be a problem.
-        constType.clearArrayness();
+        while (constType.isArray())
+        {
+            constType.toArrayElementType();
+        }
         return CreateZeroNode(constType);
     }
 
@@ -125,9 +103,9 @@ TIntermTyped *CreateZeroNode(const TType &type)
     if (type.isArray())
     {
         TType elementType(type);
-        elementType.clearArrayness();
+        elementType.toArrayElementType();
 
-        size_t arraySize = type.getArraySize();
+        size_t arraySize = type.getOutermostArraySize();
         for (size_t i = 0; i < arraySize; ++i)
         {
             arguments->push_back(CreateZeroNode(elementType));
@@ -137,7 +115,7 @@ TIntermTyped *CreateZeroNode(const TType &type)
     {
         ASSERT(type.getBasicType() == EbtStruct);
 
-        TStructure *structure = type.getStruct();
+        const TStructure *structure = type.getStruct();
         for (const auto &field : structure->fields())
         {
             arguments->push_back(CreateZeroNode(*field->type()));
@@ -167,6 +145,81 @@ TIntermConstantUnion *CreateBoolNode(bool value)
     return node;
 }
 
+TVariable *CreateTempVariable(TSymbolTable *symbolTable, const TType *type)
+{
+    ASSERT(symbolTable != nullptr);
+    // TODO(oetuaho): Might be useful to sanitize layout qualifier etc. on the type of the created
+    // variable. This might need to be done in other places as well.
+    return new TVariable(symbolTable, ImmutableString(""), type, SymbolType::AngleInternal);
+}
+
+TVariable *CreateTempVariable(TSymbolTable *symbolTable, const TType *type, TQualifier qualifier)
+{
+    ASSERT(symbolTable != nullptr);
+    if (type->getQualifier() == qualifier)
+    {
+        return CreateTempVariable(symbolTable, type);
+    }
+    TType *typeWithQualifier = new TType(*type);
+    typeWithQualifier->setQualifier(qualifier);
+    return CreateTempVariable(symbolTable, typeWithQualifier);
+}
+
+TIntermSymbol *CreateTempSymbolNode(const TVariable *tempVariable)
+{
+    ASSERT(tempVariable->symbolType() == SymbolType::AngleInternal);
+    ASSERT(tempVariable->getType().getQualifier() == EvqTemporary ||
+           tempVariable->getType().getQualifier() == EvqConst ||
+           tempVariable->getType().getQualifier() == EvqGlobal);
+    return new TIntermSymbol(tempVariable);
+}
+
+TIntermDeclaration *CreateTempDeclarationNode(const TVariable *tempVariable)
+{
+    TIntermDeclaration *tempDeclaration = new TIntermDeclaration();
+    tempDeclaration->appendDeclarator(CreateTempSymbolNode(tempVariable));
+    return tempDeclaration;
+}
+
+TIntermDeclaration *CreateTempInitDeclarationNode(const TVariable *tempVariable,
+                                                  TIntermTyped *initializer)
+{
+    ASSERT(initializer != nullptr);
+    TIntermSymbol *tempSymbol           = CreateTempSymbolNode(tempVariable);
+    TIntermDeclaration *tempDeclaration = new TIntermDeclaration();
+    TIntermBinary *tempInit             = new TIntermBinary(EOpInitialize, tempSymbol, initializer);
+    tempDeclaration->appendDeclarator(tempInit);
+    return tempDeclaration;
+}
+
+TIntermBinary *CreateTempAssignmentNode(const TVariable *tempVariable, TIntermTyped *rightNode)
+{
+    ASSERT(rightNode != nullptr);
+    TIntermSymbol *tempSymbol = CreateTempSymbolNode(tempVariable);
+    return new TIntermBinary(EOpAssign, tempSymbol, rightNode);
+}
+
+TVariable *DeclareTempVariable(TSymbolTable *symbolTable,
+                               const TType *type,
+                               TQualifier qualifier,
+                               TIntermDeclaration **declarationOut)
+{
+    TVariable *variable = CreateTempVariable(symbolTable, type, qualifier);
+    *declarationOut     = CreateTempDeclarationNode(variable);
+    return variable;
+}
+
+TVariable *DeclareTempVariable(TSymbolTable *symbolTable,
+                               TIntermTyped *initializer,
+                               TQualifier qualifier,
+                               TIntermDeclaration **declarationOut)
+{
+    TVariable *variable =
+        CreateTempVariable(symbolTable, new TType(initializer->getType()), qualifier);
+    *declarationOut     = CreateTempInitDeclarationNode(variable, initializer);
+    return variable;
+}
+
 TIntermBlock *EnsureBlock(TIntermNode *node)
 {
     if (node == nullptr)
@@ -181,24 +234,24 @@ TIntermBlock *EnsureBlock(TIntermNode *node)
     return blockNode;
 }
 
-TIntermSymbol *ReferenceGlobalVariable(const TString &name, const TSymbolTable &symbolTable)
+TIntermSymbol *ReferenceGlobalVariable(const ImmutableString &name, const TSymbolTable &symbolTable)
 {
-    TVariable *var = reinterpret_cast<TVariable *>(symbolTable.findGlobal(name));
+    const TVariable *var = reinterpret_cast<const TVariable *>(symbolTable.findGlobal(name));
     ASSERT(var);
-    return new TIntermSymbol(var->getUniqueId(), name, var->getType());
+    return new TIntermSymbol(var);
 }
 
-TIntermSymbol *ReferenceBuiltInVariable(const TString &name,
+TIntermSymbol *ReferenceBuiltInVariable(const ImmutableString &name,
                                         const TSymbolTable &symbolTable,
                                         int shaderVersion)
 {
     const TVariable *var =
-        reinterpret_cast<const TVariable *>(symbolTable.findBuiltIn(name, shaderVersion));
+        reinterpret_cast<const TVariable *>(symbolTable.findBuiltIn(name, shaderVersion, true));
     ASSERT(var);
-    return new TIntermSymbol(var->getUniqueId(), name, var->getType());
+    return new TIntermSymbol(var);
 }
 
-TIntermTyped *CreateBuiltInFunctionCallNode(const TString &name,
+TIntermTyped *CreateBuiltInFunctionCallNode(const char *name,
                                             TIntermSequence *arguments,
                                             const TSymbolTable &symbolTable,
                                             int shaderVersion)
@@ -206,13 +259,9 @@ TIntermTyped *CreateBuiltInFunctionCallNode(const TString &name,
     const TFunction *fn = LookUpBuiltInFunction(name, arguments, symbolTable, shaderVersion);
     ASSERT(fn);
     TOperator op = fn->getBuiltInOp();
-    if (op != EOpNull)
+    if (op != EOpCallBuiltInFunction && arguments->size() == 1)
     {
-        if (arguments->size() == 1)
-        {
-            return new TIntermUnary(op, arguments->at(0)->getAsTyped());
-        }
-        return TIntermAggregate::Create(fn->getReturnType(), op, arguments);
+        return new TIntermUnary(op, arguments->at(0)->getAsTyped());
     }
     return TIntermAggregate::CreateBuiltInFunctionCall(*fn, arguments);
 }

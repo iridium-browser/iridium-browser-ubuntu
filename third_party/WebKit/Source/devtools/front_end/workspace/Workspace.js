@@ -99,7 +99,7 @@ Workspace.Project.prototype = {
 
   /**
    * @param {!Workspace.UISourceCode} uiSourceCode
-   * @param {function(?string)} callback
+   * @param {function(?string,boolean)} callback
    */
   requestFileContent(uiSourceCode, callback) {},
 
@@ -111,9 +111,10 @@ Workspace.Project.prototype = {
   /**
    * @param {!Workspace.UISourceCode} uiSourceCode
    * @param {string} newContent
+   * @param {boolean} isBase64
    * @param {function(?string)} callback
    */
-  setFileContent(uiSourceCode, newContent, callback) {},
+  setFileContent(uiSourceCode, newContent, isBase64, callback) {},
 
   /**
    * @param {!Workspace.UISourceCode} uiSourceCode
@@ -146,11 +147,23 @@ Workspace.Project.prototype = {
 
   /**
    * @param {string} path
+   * @return {boolean}
+   */
+  canExcludeFolder(path) {},
+
+  /**
+   * @param {string} path
    * @param {?string} name
    * @param {string} content
-   * @param {function(?Workspace.UISourceCode)} callback
+   * @param {boolean=} isBase64
+   * @return {!Promise<?Workspace.UISourceCode>}
    */
-  createFile(path, name, content, callback) {},
+  createFile(path, name, content, isBase64) {},
+
+  /**
+   * @return {boolean}
+   */
+  canCreateFile() {},
 
   /**
    * @param {!Workspace.UISourceCode} uiSourceCode
@@ -269,17 +282,12 @@ Workspace.ProjectStore = class {
 
   /**
    * @param {!Workspace.UISourceCode} uiSourceCode
-   * @param {boolean=} replace
    * @return {boolean}
    */
-  addUISourceCode(uiSourceCode, replace) {
-    var url = uiSourceCode.url();
-    if (this.uiSourceCodeForURL(url)) {
-      if (replace)
-        this.removeUISourceCode(url);
-      else
-        return false;
-    }
+  addUISourceCode(uiSourceCode) {
+    const url = uiSourceCode.url();
+    if (this.uiSourceCodeForURL(url))
+      return false;
     this._uiSourceCodesMap.set(url, {uiSourceCode: uiSourceCode, index: this._uiSourceCodesList.length});
     this._uiSourceCodesList.push(uiSourceCode);
     this._workspace.dispatchEventToListeners(Workspace.Workspace.Events.UISourceCodeAdded, uiSourceCode);
@@ -290,14 +298,14 @@ Workspace.ProjectStore = class {
    * @param {string} url
    */
   removeUISourceCode(url) {
-    var uiSourceCode = this.uiSourceCodeForURL(url);
+    const uiSourceCode = this.uiSourceCodeForURL(url);
     if (!uiSourceCode)
       return;
 
-    var entry = this._uiSourceCodesMap.get(url);
-    var movedUISourceCode = this._uiSourceCodesList[this._uiSourceCodesList.length - 1];
+    const entry = this._uiSourceCodesMap.get(url);
+    const movedUISourceCode = this._uiSourceCodesList[this._uiSourceCodesList.length - 1];
     this._uiSourceCodesList[entry.index] = movedUISourceCode;
-    var movedEntry = this._uiSourceCodesMap.get(movedUISourceCode.url());
+    const movedEntry = this._uiSourceCodesMap.get(movedUISourceCode.url());
     movedEntry.index = entry.index;
     this._uiSourceCodesList.splice(this._uiSourceCodesList.length - 1, 1);
     this._uiSourceCodesMap.delete(url);
@@ -315,7 +323,7 @@ Workspace.ProjectStore = class {
    * @return {?Workspace.UISourceCode}
    */
   uiSourceCodeForURL(url) {
-    var entry = this._uiSourceCodesMap.get(url);
+    const entry = this._uiSourceCodesMap.get(url);
     return entry ? entry.uiSourceCode : null;
   }
 
@@ -331,9 +339,9 @@ Workspace.ProjectStore = class {
    * @param {string} newName
    */
   renameUISourceCode(uiSourceCode, newName) {
-    var oldPath = uiSourceCode.url();
-    var newPath = uiSourceCode.parentURL() ? uiSourceCode.parentURL() + '/' + newName : newName;
-    var value =
+    const oldPath = uiSourceCode.url();
+    const newPath = uiSourceCode.parentURL() ? uiSourceCode.parentURL() + '/' + newName : newName;
+    const value =
         /** @type {!{uiSourceCode: !Workspace.UISourceCode, index: number}} */ (this._uiSourceCodesMap.get(oldPath));
     this._uiSourceCodesMap.set(newPath, value);
     this._uiSourceCodesMap.delete(oldPath);
@@ -357,7 +365,7 @@ Workspace.Workspace = class extends Common.Object {
    * @return {?Workspace.UISourceCode}
    */
   uiSourceCode(projectId, url) {
-    var project = this._projects.get(projectId);
+    const project = this._projects.get(projectId);
     return project ? project.uiSourceCodeForURL(url) : null;
   }
 
@@ -366,8 +374,8 @@ Workspace.Workspace = class extends Common.Object {
    * @return {?Workspace.UISourceCode}
    */
   uiSourceCodeForURL(url) {
-    for (var project of this._projects.values()) {
-      var uiSourceCode = project.uiSourceCodeForURL(url);
+    for (const project of this._projects.values()) {
+      const uiSourceCode = project.uiSourceCodeForURL(url);
       if (uiSourceCode)
         return uiSourceCode;
     }
@@ -379,8 +387,8 @@ Workspace.Workspace = class extends Common.Object {
    * @return {!Array.<!Workspace.UISourceCode>}
    */
   uiSourceCodesForProjectType(type) {
-    var result = [];
-    for (var project of this._projects.values()) {
+    let result = [];
+    for (const project of this._projects.values()) {
       if (project.type() === type)
         result = result.concat(project.uiSourceCodes());
     }
@@ -434,8 +442,8 @@ Workspace.Workspace = class extends Common.Object {
    * @return {!Array.<!Workspace.UISourceCode>}
    */
   uiSourceCodes() {
-    var result = [];
-    for (var project of this._projects.values())
+    let result = [];
+    for (const project of this._projects.values())
       result = result.concat(project.uiSourceCodes());
     return result;
   }

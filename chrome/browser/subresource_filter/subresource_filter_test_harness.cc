@@ -10,7 +10,6 @@
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/browser/after_startup_task_utils.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,7 +22,7 @@
 #include "chrome/browser/subresource_filter/test_ruleset_publisher.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/safe_browsing_db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/db/v4_protocol_manager_util.h"
 #include "components/subresource_filter/content/browser/content_ruleset_service.h"
 #include "components/subresource_filter/content/browser/content_subresource_filter_driver_factory.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer_test_utils.h"
@@ -46,7 +45,6 @@ SubresourceFilterTestHarness::~SubresourceFilterTestHarness() = default;
 // ChromeRenderViewHostTestHarness:
 void SubresourceFilterTestHarness::SetUp() {
   ChromeRenderViewHostTestHarness::SetUp();
-  AfterStartupTaskUtils::SetBrowserStartupIsCompleteForTesting();
 
   // Ensure correct features.
   scoped_feature_toggle_.ResetSubresourceFilterState(
@@ -77,12 +75,23 @@ void SubresourceFilterTestHarness::SetUp() {
   ASSERT_TRUE(ruleset_service_dir_.CreateUniqueTempDir());
   subresource_filter::IndexedRulesetVersion::RegisterPrefs(
       pref_service_.registry());
+  // TODO(csharrison): having separated blocking and background task runners
+  // for |ContentRulesetService| and |RulesetService| would be a good idea, but
+  // external unit tests code implicitly uses knowledge that blocking and
+  // background task runners are initiazlied from
+  // |base::ThreadTaskRunnerHandle::Get()|:
+  // 1. |TestRulesetPublisher| uses this knowledge in |SetRuleset| method. It
+  //    is waiting for the ruleset published callback.
+  // 2. Navigation simulator uses this knowledge. It knows that
+  //    |AsyncDocumentSubresourceFilter| posts core initialization tasks on
+  //    blocking task runner and this it is the current thread task runner.
   auto content_service =
-      base::MakeUnique<subresource_filter::ContentRulesetService>(
+      std::make_unique<subresource_filter::ContentRulesetService>(
           base::ThreadTaskRunnerHandle::Get());
-  auto ruleset_service = base::MakeUnique<subresource_filter::RulesetService>(
+  auto ruleset_service = std::make_unique<subresource_filter::RulesetService>(
       &pref_service_, base::ThreadTaskRunnerHandle::Get(),
-      content_service.get(), ruleset_service_dir_.GetPath());
+      base::ThreadTaskRunnerHandle::Get(), content_service.get(),
+      ruleset_service_dir_.GetPath());
   content_service->set_ruleset_service(std::move(ruleset_service));
   TestingBrowserProcess::GetGlobal()->SetRulesetService(
       std::move(content_service));
@@ -125,7 +134,7 @@ SubresourceFilterTestHarness::SimulateNavigateAndCommit(
   auto simulator =
       content::NavigationSimulator::CreateRendererInitiated(url, rfh);
   simulator->Commit();
-  return simulator->GetLastThrottleCheckResult() ==
+  return simulator->GetLastThrottleCheckResult().action() ==
                  content::NavigationThrottle::PROCEED
              ? simulator->GetFinalRenderFrameHost()
              : nullptr;

@@ -7,6 +7,7 @@
 
 namespace blink {
 class WebMediaPlayer;
+enum class WebFullscreenVideoStatus;
 }
 namespace gfx {
 class Size;
@@ -52,6 +53,8 @@ class WebMediaPlayerDelegate {
     // Called when external controls are activated.
     virtual void OnPlay() = 0;
     virtual void OnPause() = 0;
+    virtual void OnSeekForward(double seconds) = 0;
+    virtual void OnSeekBackward(double seconds) = 0;
 
     // Called to control audio ducking. Output volume should be set to
     // |player_volume| * |multiplier|. The range of |multiplier| is [0, 1],
@@ -127,8 +130,11 @@ class WebMediaPlayerDelegate {
 
   // Notifies the delegate that the player has entered fullscreen. This does not
   // differentiate native controls fullscreen and custom controls fullscreen.
-  virtual void SetIsEffectivelyFullscreen(int player_id,
-                                          bool is_fullscreen) = 0;
+  // |fullscreen_video_status| is used by MediaWebContentsObserver to
+  // trigger automatically Picture-in-Picture for fullscreen videos.
+  virtual void SetIsEffectivelyFullscreen(
+      int player_id,
+      blink::WebFullscreenVideoStatus fullscreen_video_status) = 0;
 
  protected:
   WebMediaPlayerDelegate() = default;

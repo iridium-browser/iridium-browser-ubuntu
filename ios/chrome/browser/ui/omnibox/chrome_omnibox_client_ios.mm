@@ -4,10 +4,11 @@
 
 #include "ios/chrome/browser/ui/omnibox/chrome_omnibox_client_ios.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/favicon/ios/web_favicon_driver.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_result.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
 #include "components/search_engines/template_url_service.h"
 #include "ios/chrome/browser/autocomplete/autocomplete_classifier_factory.h"
@@ -16,10 +17,12 @@
 #include "ios/chrome/browser/bookmarks/bookmarks_utils.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#include "ios/chrome/browser/prerender/prerender_service.h"
+#include "ios/chrome/browser/prerender/prerender_service_factory.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #include "ios/chrome/browser/sessions/ios_chrome_session_tab_helper.h"
+#include "ios/chrome/browser/ui/omnibox/web_omnibox_edit_controller.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
-#include "ios/shared/chrome/browser/ui/omnibox/web_omnibox_edit_controller.h"
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/web_state/web_state.h"
 #include "url/gurl.h"
@@ -37,7 +40,7 @@ ChromeOmniboxClientIOS::~ChromeOmniboxClientIOS() {}
 
 std::unique_ptr<AutocompleteProviderClient>
 ChromeOmniboxClientIOS::CreateAutocompleteProviderClient() {
-  return base::MakeUnique<AutocompleteProviderClientImpl>(browser_state_);
+  return std::make_unique<AutocompleteProviderClientImpl>(browser_state_);
 }
 
 std::unique_ptr<OmniboxNavigationObserver>
@@ -75,7 +78,7 @@ bool ChromeOmniboxClientIOS::IsInstantNTP() const {
   // because if they're not using Google the Google landing page is not shown
   // (crbug/315563).
   GURL currentURL = controller_->GetWebState()->GetVisibleURL();
-  return currentURL == GURL(kChromeUINewTabURL);
+  return currentURL == kChromeUINewTabURL;
 }
 
 bool ChromeOmniboxClientIOS::IsSearchResultsPage() const {
@@ -86,11 +89,11 @@ bool ChromeOmniboxClientIOS::IsSearchResultsPage() const {
       ->IsSearchResultsPageFromDefaultSearchProvider(GetURL());
 }
 
-bool ChromeOmniboxClientIOS::IsNewTabPage(const std::string& url) const {
-  return url == kChromeUINewTabURL;
+bool ChromeOmniboxClientIOS::IsNewTabPage(const GURL& url) const {
+  return url.spec() == kChromeUINewTabURL;
 }
 
-bool ChromeOmniboxClientIOS::IsHomePage(const std::string& url) const {
+bool ChromeOmniboxClientIOS::IsHomePage(const GURL& url) const {
   // iOS does not have a notion of home page.
   return false;
 }
@@ -135,12 +138,55 @@ bool ChromeOmniboxClientIOS::ProcessExtensionKeyword(
 void ChromeOmniboxClientIOS::OnInputStateChanged() {}
 
 void ChromeOmniboxClientIOS::OnFocusChanged(OmniboxFocusState state,
-                                            OmniboxFocusChangeReason reason) {}
+                                            OmniboxFocusChangeReason reason) {
+  // TODO(crbug.com/754050): OnFocusChanged is not the correct place to be
+  // canceling prerenders, but this is the closest match to the original
+  // location of this code, which was in OmniboxViewIOS::OnDidEndEditing().  The
+  // goal of this code is to cancel prerenders when the omnibox loses focus.
+  // Otherwise, they will live forever in cases where the user navigates to a
+  // different URL than what is prerendered.
+  if (state == OMNIBOX_FOCUS_NONE) {
+    PrerenderService* service =
+        PrerenderServiceFactory::GetForBrowserState(browser_state_);
+    if (service) {
+      service->CancelPrerender();
+    }
+  }
+}
 
 void ChromeOmniboxClientIOS::OnResultChanged(
     const AutocompleteResult& result,
     bool default_match_changed,
-    const base::Callback<void(const SkBitmap& bitmap)>& on_bitmap_fetched) {}
+    const base::Callback<void(const SkBitmap& bitmap)>& on_bitmap_fetched) {
+  if (result.empty()) {
+    return;
+  }
+
+  PrerenderService* service =
+      PrerenderServiceFactory::GetForBrowserState(browser_state_);
+  if (!service) {
+    return;
+  }
+
+  const AutocompleteMatch& match = result.match_at(0);
+  bool is_inline_autocomplete = !match.inline_autocompletion.empty();
+
+  // TODO(crbug.com/228480): When prerendering the result of a paste
+  // operation, we should change the transition to LINK instead of TYPED.
+
+  // Only prerender HISTORY_URL matches, which come from the history DB.  Do
+  // not prerender other types of matches, including matches from the search
+  // provider.
+  if (is_inline_autocomplete &&
+      match.type == AutocompleteMatchType::HISTORY_URL) {
+    ui::PageTransition transition = ui::PageTransitionFromInt(
+        match.transition | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
+    service->StartPrerender(match.destination_url, web::Referrer(), transition,
+                            is_inline_autocomplete);
+  } else {
+    service->CancelPrerender();
+  }
+}
 
 void ChromeOmniboxClientIOS::OnCurrentMatchChanged(const AutocompleteMatch&) {}
 
@@ -169,7 +215,7 @@ gfx::Image ChromeOmniboxClientIOS::GetFavicon() const {
 void ChromeOmniboxClientIOS::OnTextChanged(
     const AutocompleteMatch& current_match,
     bool user_input_in_progress,
-    base::string16& user_text,
+    const base::string16& user_text,
     const AutocompleteResult& result,
     bool is_popup_open,
     bool has_focus) {}

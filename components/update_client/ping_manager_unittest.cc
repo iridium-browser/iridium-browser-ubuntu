@@ -6,12 +6,14 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
+#include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/version.h"
 #include "components/update_client/component.h"
@@ -31,51 +33,80 @@ class PingManagerTest : public testing::Test {
   PingManagerTest();
   ~PingManagerTest() override {}
 
-  void RunThreadsUntilIdle();
-
+  PingManager::Callback MakePingCallback();
   std::unique_ptr<UpdateContext> MakeFakeUpdateContext() const;
 
   // Overrides from testing::Test.
   void SetUp() override;
   void TearDown() override;
 
+  void PingSentCallback(int error, const std::string& response);
+
  protected:
+  void Quit();
+  void RunThreads();
+
   scoped_refptr<TestConfigurator> config_;
-  std::unique_ptr<PingManager> ping_manager_;
+  scoped_refptr<PingManager> ping_manager_;
+
+  int error_ = -1;
+  std::string response_;
 
  private:
-  base::MessageLoopForIO loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::OnceClosure quit_closure_;
 };
 
-PingManagerTest::PingManagerTest() {}
+PingManagerTest::PingManagerTest()
+    : scoped_task_environment_(
+          base::test::ScopedTaskEnvironment::MainThreadType::IO) {
+  config_ = base::MakeRefCounted<TestConfigurator>();
+}
 
 void PingManagerTest::SetUp() {
-  config_ = new TestConfigurator(base::ThreadTaskRunnerHandle::Get(),
-                                 base::ThreadTaskRunnerHandle::Get());
-  ping_manager_.reset(new PingManager(config_));
+  ping_manager_ = base::MakeRefCounted<PingManager>(config_);
 }
 
 void PingManagerTest::TearDown() {
-  ping_manager_.reset();
-  config_ = nullptr;
+  // Run the threads until they are idle to allow the clean up
+  // of the network interceptors on the IO thread.
+  scoped_task_environment_.RunUntilIdle();
+  ping_manager_ = nullptr;
 }
 
-void PingManagerTest::RunThreadsUntilIdle() {
-  base::RunLoop().RunUntilIdle();
+void PingManagerTest::RunThreads() {
+  base::RunLoop runloop;
+  quit_closure_ = runloop.QuitClosure();
+  runloop.Run();
+}
+
+void PingManagerTest::Quit() {
+  if (!quit_closure_.is_null())
+    std::move(quit_closure_).Run();
+}
+
+PingManager::Callback PingManagerTest::MakePingCallback() {
+  return base::BindOnce(&PingManagerTest::PingSentCallback,
+                        base::Unretained(this));
+}
+
+void PingManagerTest::PingSentCallback(int error, const std::string& response) {
+  error_ = error;
+  response_ = response;
+  Quit();
 }
 
 std::unique_ptr<UpdateContext> PingManagerTest::MakeFakeUpdateContext() const {
-  return base::MakeUnique<UpdateContext>(
+  return std::make_unique<UpdateContext>(
       config_, false, std::vector<std::string>(),
       UpdateClient::CrxDataCallback(), UpdateEngine::NotifyObserversCallback(),
       UpdateEngine::Callback(), nullptr);
 }
 
 TEST_F(PingManagerTest, SendPing) {
-  std::unique_ptr<InterceptorFactory> interceptor_factory(
-      new InterceptorFactory(base::ThreadTaskRunnerHandle::Get()));
-  URLRequestPostInterceptor* interceptor =
-      interceptor_factory->CreateInterceptor();
+  auto interceptor_factory =
+      std::make_unique<InterceptorFactory>(base::ThreadTaskRunnerHandle::Get());
+  auto* interceptor = interceptor_factory->CreateInterceptor();
   EXPECT_TRUE(interceptor);
 
   // Test eventresult="1" is sent for successful updates.
@@ -84,20 +115,32 @@ TEST_F(PingManagerTest, SendPing) {
   {
     Component component(*update_context, "abc");
 
-    component.state_ = base::MakeUnique<Component::StateUpdated>(&component);
+    component.state_ = std::make_unique<Component::StateUpdated>(&component);
     component.previous_version_ = base::Version("1.0");
     component.next_version_ = base::Version("2.0");
     component.AppendEvent(BuildUpdateCompleteEventElement(component));
 
-    ping_manager_->SendPing(component);
-    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(interceptor->ExpectRequest(new AnyMatch));
+    ping_manager_->SendPing(component, MakePingCallback());
+    RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
     EXPECT_NE(string::npos,
-              interceptor->GetRequests()[0].find(
-                  "<app appid=\"abc\" version=\"1.0\" nextversion=\"2.0\">"
-                  "<event eventtype=\"3\" eventresult=\"1\"/></app>"))
+              interceptor->GetRequestBody(0).find(
+                  "<app appid=\"abc\">"
+                  "<event eventtype=\"3\" eventresult=\"1\" "
+                  "previousversion=\"1.0\" nextversion=\"2.0\"/></app>"))
         << interceptor->GetRequestsAsString();
+    EXPECT_NE(string::npos, interceptor->GetRequestBody(0).find(" sessionid="));
+
+    // Check the ping request does not carry the specific extra request headers.
+    EXPECT_FALSE(interceptor->GetRequests()[0].second.HasHeader(
+        "X-GoogleUpdate-Interactivity"));
+    EXPECT_FALSE(interceptor->GetRequests()[0].second.HasHeader(
+        "X-GoogleUpdate-Updater"));
+    EXPECT_FALSE(
+        interceptor->GetRequests()[0].second.HasHeader("X-GoogleUpdate-AppId"));
+
     interceptor->Reset();
   }
 
@@ -105,19 +148,21 @@ TEST_F(PingManagerTest, SendPing) {
     // Test eventresult="0" is sent for failed updates.
     Component component(*update_context, "abc");
     component.state_ =
-        base::MakeUnique<Component::StateUpdateError>(&component);
+        std::make_unique<Component::StateUpdateError>(&component);
     component.previous_version_ = base::Version("1.0");
     component.next_version_ = base::Version("2.0");
     component.AppendEvent(BuildUpdateCompleteEventElement(component));
 
-    ping_manager_->SendPing(component);
-    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(interceptor->ExpectRequest(new AnyMatch));
+    ping_manager_->SendPing(component, MakePingCallback());
+    RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
     EXPECT_NE(string::npos,
-              interceptor->GetRequests()[0].find(
-                  "<app appid=\"abc\" version=\"1.0\" nextversion=\"2.0\">"
-                  "<event eventtype=\"3\" eventresult=\"0\"/></app>"))
+              interceptor->GetRequestBody(0).find(
+                  "<app appid=\"abc\">"
+                  "<event eventtype=\"3\" eventresult=\"0\" "
+                  "previousversion=\"1.0\" nextversion=\"2.0\"/></app>"))
         << interceptor->GetRequestsAsString();
     interceptor->Reset();
   }
@@ -126,7 +171,7 @@ TEST_F(PingManagerTest, SendPing) {
     // Test the error values and the fingerprints.
     Component component(*update_context, "abc");
     component.state_ =
-        base::MakeUnique<Component::StateUpdateError>(&component);
+        std::make_unique<Component::StateUpdateError>(&component);
     component.previous_version_ = base::Version("1.0");
     component.next_version_ = base::Version("2.0");
     component.previous_fp_ = "prev fp";
@@ -140,18 +185,20 @@ TEST_F(PingManagerTest, SendPing) {
     component.crx_diffurls_.push_back(GURL("http://host/path"));
     component.AppendEvent(BuildUpdateCompleteEventElement(component));
 
-    ping_manager_->SendPing(component);
-    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(interceptor->ExpectRequest(new AnyMatch));
+    ping_manager_->SendPing(component, MakePingCallback());
+    RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
     EXPECT_NE(string::npos,
-              interceptor->GetRequests()[0].find(
-                  "<app appid=\"abc\" version=\"1.0\" nextversion=\"2.0\">"
+              interceptor->GetRequestBody(0).find(
+                  "<app appid=\"abc\">"
                   "<event eventtype=\"3\" eventresult=\"0\" errorcat=\"1\" "
                   "errorcode=\"2\" extracode1=\"-1\" diffresult=\"0\" "
                   "differrorcat=\"10\" "
                   "differrorcode=\"20\" diffextracode1=\"-10\" "
-                  "previousfp=\"prev fp\" nextfp=\"next fp\"/></app>"))
+                  "previousfp=\"prev fp\" nextfp=\"next fp\" "
+                  "previousversion=\"1.0\" nextversion=\"2.0\"/></app>"))
         << interceptor->GetRequestsAsString();
     interceptor->Reset();
   }
@@ -160,19 +207,41 @@ TEST_F(PingManagerTest, SendPing) {
     // Test an invalid |next_version| is not serialized.
     Component component(*update_context, "abc");
     component.state_ =
-        base::MakeUnique<Component::StateUpdateError>(&component);
+        std::make_unique<Component::StateUpdateError>(&component);
     component.previous_version_ = base::Version("1.0");
 
     component.AppendEvent(BuildUpdateCompleteEventElement(component));
 
-    ping_manager_->SendPing(component);
-    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(interceptor->ExpectRequest(new AnyMatch));
+    ping_manager_->SendPing(component, MakePingCallback());
+    RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
     EXPECT_NE(string::npos,
-              interceptor->GetRequests()[0].find(
-                  "<app appid=\"abc\" version=\"1.0\">"
-                  "<event eventtype=\"3\" eventresult=\"0\"/></app>"))
+              interceptor->GetRequestBody(0).find(
+                  "<app appid=\"abc\"><event eventtype=\"3\" eventresult=\"0\" "
+                  "previousversion=\"1.0\"/></app>"))
+        << interceptor->GetRequestsAsString();
+    interceptor->Reset();
+  }
+
+  {
+    // Test a valid |previouversion| and |next_version| = base::Version("0")
+    // are serialized correctly under <event...> for uninstall.
+    Component component(*update_context, "abc");
+    component.Uninstall(base::Version("1.2.3.4"), 0);
+    component.AppendEvent(BuildUninstalledEventElement(component));
+
+    EXPECT_TRUE(interceptor->ExpectRequest(new AnyMatch));
+    ping_manager_->SendPing(component, MakePingCallback());
+    RunThreads();
+
+    EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
+    EXPECT_NE(string::npos,
+              interceptor->GetRequestBody(0).find(
+                  "<app appid=\"abc\">"
+                  "<event eventtype=\"4\" eventresult=\"1\" "
+                  "previousversion=\"1.2.3.4\" nextversion=\"0\"/></app>"))
         << interceptor->GetRequestsAsString();
     interceptor->Reset();
   }
@@ -180,7 +249,7 @@ TEST_F(PingManagerTest, SendPing) {
   {
     // Test the download metrics.
     Component component(*update_context, "abc");
-    component.state_ = base::MakeUnique<Component::StateUpdated>(&component);
+    component.state_ = std::make_unique<Component::StateUpdated>(&component);
     component.previous_version_ = base::Version("1.0");
     component.next_version_ = base::Version("2.0");
     component.AppendEvent(BuildUpdateCompleteEventElement(component));
@@ -192,7 +261,8 @@ TEST_F(PingManagerTest, SendPing) {
     download_metrics.downloaded_bytes = 123;
     download_metrics.total_bytes = 456;
     download_metrics.download_time_ms = 987;
-    component.AppendEvent(BuildDownloadCompleteEventElement(download_metrics));
+    component.AppendEvent(
+        BuildDownloadCompleteEventElement(component, download_metrics));
 
     download_metrics = CrxDownloader::DownloadMetrics();
     download_metrics.url = GURL("http://host2/path2");
@@ -201,29 +271,31 @@ TEST_F(PingManagerTest, SendPing) {
     download_metrics.downloaded_bytes = 1230;
     download_metrics.total_bytes = 4560;
     download_metrics.download_time_ms = 9870;
-    component.AppendEvent(BuildDownloadCompleteEventElement(download_metrics));
+    component.AppendEvent(
+        BuildDownloadCompleteEventElement(component, download_metrics));
 
-    ping_manager_->SendPing(component);
-    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(interceptor->ExpectRequest(new AnyMatch));
+    ping_manager_->SendPing(component, MakePingCallback());
+    RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
     EXPECT_NE(
         string::npos,
-        interceptor->GetRequests()[0].find(
-            "<app appid=\"abc\" version=\"1.0\" nextversion=\"2.0\">"
-            "<event eventtype=\"3\" eventresult=\"1\"/>"
+        interceptor->GetRequestBody(0).find(
+            "<app appid=\"abc\">"
+            "<event eventtype=\"3\" eventresult=\"1\" previousversion=\"1.0\" "
+            "nextversion=\"2.0\"/>"
             "<event eventtype=\"14\" eventresult=\"0\" downloader=\"direct\" "
             "errorcode=\"-1\" url=\"http://host1/path1\" downloaded=\"123\" "
-            "total=\"456\" download_time_ms=\"987\"/>"
+            "total=\"456\" download_time_ms=\"987\" previousversion=\"1.0\" "
+            "nextversion=\"2.0\"/>"
             "<event eventtype=\"14\" eventresult=\"1\" downloader=\"bits\" "
             "url=\"http://host2/path2\" downloaded=\"1230\" total=\"4560\" "
-            "download_time_ms=\"9870\"/></app>"))
+            "download_time_ms=\"9870\" previousversion=\"1.0\" "
+            "nextversion=\"2.0\"/></app>"))
         << interceptor->GetRequestsAsString();
     interceptor->Reset();
   }
-
-  interceptor_factory.reset();
-  base::RunLoop().RunUntilIdle();
 }
 
 // Tests that sending the ping fails when the component requires encryption but
@@ -233,18 +305,20 @@ TEST_F(PingManagerTest, RequiresEncryption) {
 
   const auto update_context = MakeFakeUpdateContext();
 
-  {
-    Component component(*update_context, "abc");
-    component.crx_component_.requires_network_encryption = true;
+  Component component(*update_context, "abc");
 
-    EXPECT_FALSE(ping_manager_->SendPing(component));
-  }
+  // The default value for |requires_network_encryption| is true.
+  EXPECT_TRUE(component.crx_component_.requires_network_encryption);
 
-  {
-    // Tests that the default for |requires_network_encryption| is true.
-    Component component(*update_context, "abc");
-    EXPECT_FALSE(ping_manager_->SendPing(component));
-  }
+  component.state_ = std::make_unique<Component::StateUpdated>(&component);
+  component.previous_version_ = base::Version("1.0");
+  component.next_version_ = base::Version("2.0");
+  component.AppendEvent(BuildUpdateCompleteEventElement(component));
+
+  ping_manager_->SendPing(component, MakePingCallback());
+  RunThreads();
+
+  EXPECT_EQ(-2, error_);
 }
 
 }  // namespace update_client

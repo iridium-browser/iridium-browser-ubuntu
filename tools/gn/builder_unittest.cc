@@ -10,12 +10,11 @@
 #include "tools/gn/test_with_scope.h"
 #include "tools/gn/toolchain.h"
 
-namespace {
+namespace gn_builder_unittest {
 
 class MockLoader : public Loader {
  public:
-  MockLoader() {
-  }
+  MockLoader() = default;
 
   // Loader implementation:
   void Load(const SourceFile& file,
@@ -58,7 +57,7 @@ class MockLoader : public Loader {
   }
 
  private:
-  ~MockLoader() override {}
+  ~MockLoader() override = default;
 
   std::vector<SourceFile> files_;
 };
@@ -69,14 +68,14 @@ class BuilderTest : public testing::Test {
       : loader_(new MockLoader),
         builder_(loader_.get()),
         settings_(&build_settings_, std::string()),
-        scope_(&settings_, {}) {
+        scope_(&settings_) {
     build_settings_.SetBuildDir(SourceDir("//out/"));
     settings_.set_toolchain_label(Label(SourceDir("//tc/"), "default"));
     settings_.set_default_toolchain_label(settings_.toolchain_label());
   }
 
   Toolchain* DefineToolchain() {
-    Toolchain* tc = new Toolchain(&settings_, settings_.toolchain_label(), {});
+    Toolchain* tc = new Toolchain(&settings_, settings_.toolchain_label());
     TestWithScope::SetupToolchain(tc);
     builder_.ItemDefined(std::unique_ptr<Item>(tc));
     return tc;
@@ -90,8 +89,6 @@ class BuilderTest : public testing::Test {
   Scope scope_;
 };
 
-}  // namespace
-
 TEST_F(BuilderTest, BasicDeps) {
   SourceDir toolchain_dir = settings_.toolchain_label().dir();
   std::string toolchain_name = settings_.toolchain_label().name();
@@ -104,7 +101,7 @@ TEST_F(BuilderTest, BasicDeps) {
   Label c_label(SourceDir("//c/"), "c", toolchain_dir, toolchain_name);
 
   // The builder will take ownership of the pointers.
-  Target* a = new Target(&settings_, a_label, {});
+  Target* a = new Target(&settings_, a_label);
   a->public_deps().push_back(LabelTargetPair(b_label));
   a->set_output_type(Target::EXECUTABLE);
   builder_.ItemDefined(std::unique_ptr<Item>(a));
@@ -149,7 +146,7 @@ TEST_F(BuilderTest, BasicDeps) {
             b_record->waiting_on_resolution().find(a_record));
 
   // Add the C target.
-  Target* c = new Target(&settings_, c_label, {});
+  Target* c = new Target(&settings_, c_label);
   c->set_output_type(Target::STATIC_LIBRARY);
   c->visibility().SetPublic();
   builder_.ItemDefined(std::unique_ptr<Item>(c));
@@ -159,7 +156,7 @@ TEST_F(BuilderTest, BasicDeps) {
   EXPECT_TRUE(loader_->HasLoadedNone());
 
   // Add the B target.
-  Target* b = new Target(&settings_, b_label, {});
+  Target* b = new Target(&settings_, b_label);
   a->public_deps().push_back(LabelTargetPair(c_label));
   b->set_output_type(Target::SHARED_LIBRARY);
   b->visibility().SetPublic();
@@ -192,7 +189,7 @@ TEST_F(BuilderTest, ShouldGenerate) {
   Settings settings2(&build_settings_, "secondary/");
   Label toolchain_label2(SourceDir("//tc/"), "secondary");
   settings2.set_toolchain_label(toolchain_label2);
-  Toolchain* tc2 = new Toolchain(&settings2, toolchain_label2, {});
+  Toolchain* tc2 = new Toolchain(&settings2, toolchain_label2);
   TestWithScope::SetupToolchain(tc2);
   builder_.ItemDefined(std::unique_ptr<Item>(tc2));
 
@@ -204,7 +201,7 @@ TEST_F(BuilderTest, ShouldGenerate) {
                 toolchain_label2.dir(), toolchain_label2.name());
 
   // First define B.
-  Target* b = new Target(&settings2, b_label, {});
+  Target* b = new Target(&settings2, b_label);
   b->visibility().SetPublic();
   b->set_output_type(Target::EXECUTABLE);
   builder_.ItemDefined(std::unique_ptr<Item>(b));
@@ -214,7 +211,7 @@ TEST_F(BuilderTest, ShouldGenerate) {
   EXPECT_FALSE(b_record->should_generate());
 
   // Define A with a dependency on B.
-  Target* a = new Target(&settings_, a_label, {});
+  Target* a = new Target(&settings_, a_label);
   a->public_deps().push_back(LabelTargetPair(b_label));
   a->set_output_type(Target::EXECUTABLE);
   builder_.ItemDefined(std::unique_ptr<Item>(a));
@@ -240,10 +237,12 @@ TEST_F(BuilderTest, ConfigLoad) {
   Label c_label(SourceDir("//c/"), "c", toolchain_dir, toolchain_name);
 
   // The builder will take ownership of the pointers.
-  Config* a = new Config(&settings_, a_label, {});
+  Config* a = new Config(&settings_, a_label);
   a->configs().push_back(LabelConfigPair(b_label));
   builder_.ItemDefined(std::unique_ptr<Item>(a));
 
   // Should have requested that B is loaded.
   EXPECT_TRUE(loader_->HasLoadedOne(SourceFile("//b/BUILD.gn")));
 }
+
+}  // namespace gn_builder_unittest

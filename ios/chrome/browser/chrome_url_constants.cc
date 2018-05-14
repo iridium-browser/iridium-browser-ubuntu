@@ -9,9 +9,7 @@
 #include "base/macros.h"
 
 const char kChromeUIScheme[] = "chrome";
-const char kDummyExtensionScheme[] = ":no-extension-scheme:";
 
-const char kChromeUIBookmarksURL[] = "chrome://bookmarks/";
 const char kChromeUIChromeURLsURL[] = "chrome://chrome-urls/";
 const char kChromeUICreditsURL[] = "chrome://credits/";
 const char kChromeUIFlagsURL[] = "chrome://flags/";
@@ -19,13 +17,11 @@ const char kChromeUIHistoryURL[] = "chrome://history/";
 const char kChromeUINewTabURL[] = "chrome://newtab/";
 const char kChromeUINTPTilesInternalsURL[] = "chrome://ntp-tiles-internals/";
 const char kChromeUIOfflineURL[] = "chrome://offline/";
-const char kChromeUIPhysicalWebURL[] = "chrome://physical-web/";
 const char kChromeUISettingsURL[] = "chrome://settings/";
 const char kChromeUISuggestionsURL[] = "chrome://suggestions/";
 const char kChromeUITermsURL[] = "chrome://terms/";
 const char kChromeUIVersionURL[] = "chrome://version/";
 
-const char kChromeUIBookmarksHost[] = "bookmarks";
 const char kChromeUIBrowserCrashHost[] = "inducebrowsercrashforrealz";
 const char kChromeUICrashHost[] = "crash";
 const char kChromeUIChromeURLsHost[] = "chrome-urls";
@@ -41,25 +37,33 @@ const char kChromeUINewTabHost[] = "newtab";
 const char kChromeUINTPTilesInternalsHost[] = "ntp-tiles-internals";
 const char kChromeUIOfflineHost[] = "offline";
 const char kChromeUIOmahaHost[] = "omaha";
-const char kChromeUIPhysicalWebHost[] = "physical-web";
+const char kChromeUIPasswordManagerInternalsHost[] =
+    "password-manager-internals";
 const char kChromeUIPolicyHost[] = "policy";
 const char kChromeUISignInInternalsHost[] = "signin-internals";
 const char kChromeUISuggestionsHost[] = "suggestions";
 const char kChromeUISyncInternalsHost[] = "sync-internals";
 const char kChromeUITermsHost[] = "terms";
 const char kChromeUIVersionHost[] = "version";
+const char kChromeUIURLKeyedMetricsHost[] = "ukm";
 
 // Add hosts here to be included in chrome://chrome-urls (about:about).
 // These hosts will also be suggested by BuiltinProvider.
 // 'histograms' is chrome WebUI on iOS, content WebUI on other platforms.
 const char* const kChromeHostURLs[] = {
-    kChromeUIBookmarksHost,       kChromeUIChromeURLsHost,
-    kChromeUICreditsHost,         kChromeUIFlagsHost,
-    kChromeUIHistogramHost,       kChromeUINetExportHost,
-    kChromeUINewTabHost,          kChromeUINTPTilesInternalsHost,
-    kChromeUISignInInternalsHost, kChromeUISuggestionsHost,
-    kChromeUISyncInternalsHost,   kChromeUIPhysicalWebHost,
-    kChromeUITermsHost,           kChromeUIVersionHost,
+    kChromeUIChromeURLsHost,
+    kChromeUICreditsHost,
+    kChromeUIFlagsHost,
+    kChromeUIHistogramHost,
+    kChromeUINetExportHost,
+    kChromeUINewTabHost,
+    kChromeUINTPTilesInternalsHost,
+    kChromeUIPasswordManagerInternalsHost,
+    kChromeUISignInInternalsHost,
+    kChromeUISuggestionsHost,
+    kChromeUISyncInternalsHost,
+    kChromeUITermsHost,
+    kChromeUIVersionHost,
 };
 const size_t kNumberOfChromeHostURLs = arraysize(kChromeHostURLs);
 
@@ -76,9 +80,6 @@ const char kPrivacyLearnMoreURL[] =
 
 const char kDoNotTrackLearnMoreURL[] =
     "https://support.google.com/chrome/answer/2942429?p=mobile_do_not_track";
-
-const char kPhysicalWebLearnMoreURL[] =
-    "https://support.google.com/chrome/answer/6239299?p=physical_web";
 
 const char kSyncEncryptionHelpURL[] =
     "https://support.google.com/chrome/answer/1181035?p=settings_encryption";
@@ -99,3 +100,9 @@ const char kGoogleHistoryURL[] = "https://history.google.com";
 
 const char kGoogleMyAccountURL[] =
     "https://myaccount.google.com/privacy#activitycontrols";
+
+const char kNewTabPageReferrerURL[] =
+    "chrome://do_not_consider_for_most_visited/new_tab_page";
+
+const char kReadingListReferrerURL[] =
+    "chrome://do_not_consider_for_most_visited/reading_list";

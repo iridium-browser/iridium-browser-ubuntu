@@ -10,44 +10,35 @@
 #include <memory>
 
 #include "base/memory/weak_ptr.h"
+#include "components/download/public/common/download_url_parameters.h"
 #include "content/browser/download/download_request_core.h"
-#include "content/public/browser/download_interrupt_reasons.h"
-#include "content/public/browser/download_save_info.h"
-#include "content/public/browser/download_url_parameters.h"
+#include "content/browser/download/url_download_handler.h"
 #include "content/public/common/referrer.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request.h"
 
+namespace download {
+struct DownloadCreateInfo;
+}  // namespace download
+
 namespace content {
 class ByteStreamReader;
-struct DownloadCreateInfo;
 
 class UrlDownloader : public net::URLRequest::Delegate,
-                      public DownloadRequestCore::Delegate {
+                      public DownloadRequestCore::Delegate,
+                      public UrlDownloadHandler {
  public:
-  // Implemented by the owner of UrlDownloader, functions need to be called on
-  // UI thread.
-  class Delegate {
-   public:
-    // Called after response is handled and the byte stream is established.
-    virtual void OnUrlDownloaderStarted(
-        std::unique_ptr<DownloadCreateInfo> download_create_info,
-        std::unique_ptr<ByteStreamReader> stream_reader,
-        const DownloadUrlParameters::OnStartedCallback& callback) = 0;
-
-    // Called after the connection is cannceled or finished.
-    virtual void OnUrlDownloaderStopped(UrlDownloader* downloader) = 0;
-  };
-
   UrlDownloader(std::unique_ptr<net::URLRequest> request,
-                base::WeakPtr<Delegate> delegate,
-                bool is_parallel_request);
+                base::WeakPtr<UrlDownloadHandler::Delegate> delegate,
+                bool is_parallel_request,
+                const std::string& request_origin,
+                download::DownloadSource download_source);
   ~UrlDownloader() override;
 
   static std::unique_ptr<UrlDownloader> BeginDownload(
-      base::WeakPtr<UrlDownloader::Delegate> delegate,
+      base::WeakPtr<UrlDownloadHandler::Delegate> delegate,
       std::unique_ptr<net::URLRequest> request,
-      const Referrer& referrer,
+      download::DownloadUrlParameters* params,
       bool is_parallel_request);
 
  private:
@@ -67,9 +58,10 @@ class UrlDownloader : public net::URLRequest::Delegate,
 
   // DownloadRequestCore::Delegate
   void OnStart(
-      std::unique_ptr<DownloadCreateInfo> download_create_info,
+      std::unique_ptr<download::DownloadCreateInfo> download_create_info,
       std::unique_ptr<ByteStreamReader> stream_reader,
-      const DownloadUrlParameters::OnStartedCallback& callback) override;
+      const download::DownloadUrlParameters::OnStartedCallback& callback)
+      override;
   void OnReadyToRead() override;
 
   void PauseRequest();
@@ -84,7 +76,7 @@ class UrlDownloader : public net::URLRequest::Delegate,
   std::unique_ptr<net::URLRequest> request_;
 
   // Live on UI thread, post task to call |delegate_| functions.
-  base::WeakPtr<Delegate> delegate_;
+  base::WeakPtr<UrlDownloadHandler::Delegate> delegate_;
   DownloadRequestCore core_;
 
   base::WeakPtrFactory<UrlDownloader> weak_ptr_factory_;

@@ -15,10 +15,6 @@ import android.app.Activity;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
 
-import org.chromium.base.ActivityState;
-import org.chromium.base.ApplicationStatus;
-import org.chromium.base.test.util.Feature;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -26,10 +22,17 @@ import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLooper;
 
+import org.chromium.base.ActivityState;
+import org.chromium.base.ApplicationStatus;
+import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.Feature;
+
+import java.util.concurrent.TimeUnit;
+
 /**
  * Tests for {@link GoogleApiClientHelper}
  */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class GoogleApiClientHelperTest {
     private GoogleApiClient mMockClient;
@@ -214,7 +217,7 @@ public class GoogleApiClientHelperTest {
 
         // We go in the background and come back before the end of the timeout.
         ApplicationStatus.onStateChangeForTesting(mockActivity, ActivityState.STOPPED);
-        ShadowLooper.idleMainLooper(disconnectionTimeout - 42);
+        ShadowLooper.idleMainLooper(disconnectionTimeout - 42, TimeUnit.MILLISECONDS);
         ApplicationStatus.onStateChangeForTesting(mockActivity, ActivityState.STARTED);
         ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
 
@@ -238,15 +241,17 @@ public class GoogleApiClientHelperTest {
 
         // We go in the background and extend the delay
         ApplicationStatus.onStateChangeForTesting(mockActivity, ActivityState.STOPPED);
-        ShadowLooper.idleMainLooper(disconnectionTimeout - arbitraryNumberOfSeconds);
+        ShadowLooper.idleMainLooper(
+                disconnectionTimeout - arbitraryNumberOfSeconds, TimeUnit.MILLISECONDS);
         helper.willUseConnection();
 
         // The client should not have been disconnected.
-        ShadowLooper.idleMainLooper(disconnectionTimeout - arbitraryNumberOfSeconds);
+        ShadowLooper.idleMainLooper(
+                disconnectionTimeout - arbitraryNumberOfSeconds, TimeUnit.MILLISECONDS);
         verify(mMockClient, never()).disconnect();
 
         // After the full timeout it should still disconnect though
-        ShadowLooper.idleMainLooper(arbitraryNumberOfSeconds);
+        ShadowLooper.idleMainLooper(arbitraryNumberOfSeconds, TimeUnit.MILLISECONDS);
         verify(mMockClient).disconnect();
 
         // The client is now disconnected then

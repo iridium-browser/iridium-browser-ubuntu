@@ -38,13 +38,12 @@
 #include "core/layout/api/LineLayoutBlockFlow.h"
 #include "platform/LengthFunctions.h"
 #include "platform/wtf/AutoReset.h"
-#include "public/platform/Platform.h"
 
 namespace blink {
 
 CSSBoxType ReferenceBox(const ShapeValue& shape_value) {
-  if (shape_value.CssBox() == kBoxMissing)
-    return kMarginBox;
+  if (shape_value.CssBox() == CSSBoxType::kMissing)
+    return CSSBoxType::kMargin;
   return shape_value.CssBox();
 }
 
@@ -53,7 +52,7 @@ void ShapeOutsideInfo::SetReferenceBoxLogicalSize(
   bool is_horizontal_writing_mode =
       layout_box_.ContainingBlock()->Style()->IsHorizontalWritingMode();
   switch (ReferenceBox(*layout_box_.Style()->ShapeOutside())) {
-    case kMarginBox:
+    case CSSBoxType::kMargin:
       if (is_horizontal_writing_mode)
         new_reference_box_logical_size.Expand(layout_box_.MarginWidth(),
                                               layout_box_.MarginHeight());
@@ -61,9 +60,9 @@ void ShapeOutsideInfo::SetReferenceBoxLogicalSize(
         new_reference_box_logical_size.Expand(layout_box_.MarginHeight(),
                                               layout_box_.MarginWidth());
       break;
-    case kBorderBox:
+    case CSSBoxType::kBorder:
       break;
-    case kPaddingBox:
+    case CSSBoxType::kPadding:
       if (is_horizontal_writing_mode)
         new_reference_box_logical_size.Shrink(layout_box_.BorderWidth(),
                                               layout_box_.BorderHeight());
@@ -71,7 +70,7 @@ void ShapeOutsideInfo::SetReferenceBoxLogicalSize(
         new_reference_box_logical_size.Shrink(layout_box_.BorderHeight(),
                                               layout_box_.BorderWidth());
       break;
-    case kContentBox:
+    case CSSBoxType::kContent:
       if (is_horizontal_writing_mode)
         new_reference_box_logical_size.Shrink(
             layout_box_.BorderAndPaddingWidth(),
@@ -81,7 +80,7 @@ void ShapeOutsideInfo::SetReferenceBoxLogicalSize(
             layout_box_.BorderAndPaddingHeight(),
             layout_box_.BorderAndPaddingWidth());
       break;
-    case kBoxMissing:
+    case CSSBoxType::kMissing:
       NOTREACHED();
       break;
   }
@@ -116,11 +115,10 @@ static bool CheckShapeImageOrigin(Document& document,
 static LayoutRect GetShapeImageMarginRect(
     const LayoutBox& layout_box,
     const LayoutSize& reference_box_logical_size) {
-  LayoutPoint margin_box_origin(-layout_box.MarginLogicalLeft() -
-                                    layout_box.BorderAndPaddingLogicalLeft(),
-                                -layout_box.MarginBefore() -
-                                    layout_box.BorderBefore() -
-                                    layout_box.PaddingBefore());
+  LayoutPoint margin_box_origin(
+      -layout_box.MarginLineLeft() - layout_box.BorderAndPaddingLogicalLeft(),
+      -layout_box.MarginBefore() - layout_box.BorderBefore() -
+          layout_box.PaddingBefore());
   LayoutSize margin_box_size_delta(
       layout_box.MarginLogicalWidth() +
           layout_box.BorderAndPaddingLogicalWidth(),
@@ -132,26 +130,15 @@ static LayoutRect GetShapeImageMarginRect(
   return LayoutRect(margin_box_origin, margin_rect_size);
 }
 
-static bool IsValidRasterShapeRect(const LayoutRect& rect) {
-  static double max_image_size_bytes = 0;
-  if (!max_image_size_bytes) {
-    size_t size32_max_bytes =
-        0xFFFFFFFF / 4;  // Some platforms don't limit maxDecodedImageBytes.
-    max_image_size_bytes =
-        std::min(size32_max_bytes, Platform::Current()->MaxDecodedImageBytes());
-  }
-  return (rect.Width().ToFloat() * rect.Height().ToFloat() * 4.0) <
-         max_image_size_bytes;
-}
-
 std::unique_ptr<Shape> ShapeOutsideInfo::CreateShapeForImage(
     StyleImage* style_image,
     float shape_image_threshold,
     WritingMode writing_mode,
     float margin) const {
-  const LayoutSize& image_size = style_image->ImageSize(
+  DCHECK(!style_image->IsPendingImage());
+  const LayoutSize& image_size = RoundedLayoutSize(style_image->ImageSize(
       layout_box_.GetDocument(), layout_box_.Style()->EffectiveZoom(),
-      reference_box_logical_size_);
+      reference_box_logical_size_));
 
   const LayoutRect& margin_rect =
       GetShapeImageMarginRect(layout_box_, reference_box_logical_size_);
@@ -160,20 +147,11 @@ std::unique_ptr<Shape> ShapeOutsideInfo::CreateShapeForImage(
           ? ToLayoutImage(layout_box_).ReplacedContentRect()
           : LayoutRect(LayoutPoint(), image_size);
 
-  if (!IsValidRasterShapeRect(margin_rect) ||
-      !IsValidRasterShapeRect(image_rect)) {
-    layout_box_.GetDocument().AddConsoleMessage(
-        ConsoleMessage::Create(kRenderingMessageSource, kErrorMessageLevel,
-                               "The shape-outside image is too large."));
-    return Shape::CreateEmptyRasterShape(writing_mode, margin);
-  }
-
-  DCHECK(!style_image->IsPendingImage());
-  RefPtr<Image> image =
+  scoped_refptr<Image> image =
       style_image->GetImage(layout_box_, layout_box_.GetDocument(),
-                            layout_box_.StyleRef(), FlooredIntSize(image_size));
+                            layout_box_.StyleRef(), FloatSize(image_size));
 
-  return Shape::CreateRasterShape(image.Get(), shape_image_threshold,
+  return Shape::CreateRasterShape(image.get(), shape_image_threshold,
                                   image_rect, margin_rect, writing_mode,
                                   margin);
 }
@@ -239,6 +217,9 @@ inline LayoutUnit BorderBeforeInWritingMode(const LayoutBox& layout_box,
       return LayoutUnit(layout_box.BorderLeft());
     case WritingMode::kVerticalRl:
       return LayoutUnit(layout_box.BorderRight());
+    // TODO(layout-dev): Sideways-lr and sideways-rl are not yet supported.
+    default:
+      break;
   }
 
   NOTREACHED();
@@ -255,6 +236,9 @@ inline LayoutUnit BorderAndPaddingBeforeInWritingMode(
       return layout_box.BorderLeft() + layout_box.PaddingLeft();
     case WritingMode::kVerticalRl:
       return layout_box.BorderRight() + layout_box.PaddingRight();
+    // TODO(layout-dev): Sideways-lr and sideways-rl are not yet supported.
+    default:
+      break;
   }
 
   NOTREACHED();
@@ -263,19 +247,19 @@ inline LayoutUnit BorderAndPaddingBeforeInWritingMode(
 
 LayoutUnit ShapeOutsideInfo::LogicalTopOffset() const {
   switch (ReferenceBox(*layout_box_.Style()->ShapeOutside())) {
-    case kMarginBox:
+    case CSSBoxType::kMargin:
       return -layout_box_.MarginBefore(layout_box_.ContainingBlock()->Style());
-    case kBorderBox:
+    case CSSBoxType::kBorder:
       return LayoutUnit();
-    case kPaddingBox:
+    case CSSBoxType::kPadding:
       return BorderBeforeInWritingMode(
           layout_box_,
           layout_box_.ContainingBlock()->Style()->GetWritingMode());
-    case kContentBox:
+    case CSSBoxType::kContent:
       return BorderAndPaddingBeforeInWritingMode(
           layout_box_,
           layout_box_.ContainingBlock()->Style()->GetWritingMode());
-    case kBoxMissing:
+    case CSSBoxType::kMissing:
       break;
   }
 
@@ -315,17 +299,17 @@ inline LayoutUnit BorderAndPaddingStartWithStyleForWritingMode(
 
 LayoutUnit ShapeOutsideInfo::LogicalLeftOffset() const {
   switch (ReferenceBox(*layout_box_.Style()->ShapeOutside())) {
-    case kMarginBox:
+    case CSSBoxType::kMargin:
       return -layout_box_.MarginStart(layout_box_.ContainingBlock()->Style());
-    case kBorderBox:
+    case CSSBoxType::kBorder:
       return LayoutUnit();
-    case kPaddingBox:
+    case CSSBoxType::kPadding:
       return BorderStartWithStyleForWritingMode(
           layout_box_, layout_box_.ContainingBlock()->Style());
-    case kContentBox:
+    case CSSBoxType::kContent:
       return BorderAndPaddingStartWithStyleForWritingMode(
           layout_box_, layout_box_.ContainingBlock()->Style());
-    case kBoxMissing:
+    case CSSBoxType::kMissing:
       break;
   }
 

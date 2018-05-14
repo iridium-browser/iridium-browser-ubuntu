@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_SEARCH_INSTANT_SERVICE_H_
 #define CHROME_BROWSER_SEARCH_INSTANT_SERVICE_H_
 
+#include <map>
 #include <memory>
 #include <set>
 #include <vector>
@@ -15,9 +16,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "build/build_config.h"
-#include "chrome/browser/search/search_engine_base_url_tracker.h"
 #include "components/history/core/browser/history_types.h"
-#include "components/history/core/browser/top_sites_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/ntp_tiles/most_visited_sites.h"
 #include "components/ntp_tiles/ntp_tile.h"
@@ -25,8 +24,11 @@
 #include "content/public/browser/notification_registrar.h"
 #include "url/gurl.h"
 
+#if defined(OS_ANDROID)
+#error "Instant is only used on desktop";
+#endif
+
 class InstantIOContext;
-class InstantSearchPrerenderer;
 class InstantServiceObserver;
 class Profile;
 struct InstantMostVisitedItem;
@@ -36,14 +38,12 @@ namespace content {
 class RenderProcessHost;
 }
 
-namespace history {
-class TopSites;
-}
-
-// Tracks render process host IDs that are associated with Instant.
+// Tracks render process host IDs that are associated with Instant, i.e.
+// processes that are used to render an NTP. Also responsible for keeping
+// necessary information (most visited tiles and theme info) updated in those
+// renderer processes.
 class InstantService : public KeyedService,
                        public content::NotificationObserver,
-                       public history::TopSitesObserver,
                        public ntp_tiles::MostVisitedSites::Observer {
  public:
   explicit InstantService(Profile* profile);
@@ -68,14 +68,12 @@ class InstantService : public KeyedService,
   // items.
   void OnNewTabPageOpened();
 
-  // Most visited item API.
-
+  // Most visited item APIs.
+  //
   // Invoked when the Instant page wants to delete a Most Visited item.
   void DeleteMostVisitedItem(const GURL& url);
-
   // Invoked when the Instant page wants to undo the deletion.
   void UndoMostVisitedDeletion(const GURL& url);
-
   // Invoked when the Instant page wants to undo all Most Visited deletions.
   void UndoAllMostVisitedDeletions();
 
@@ -89,24 +87,15 @@ class InstantService : public KeyedService,
   // NTP.
   void UpdateMostVisitedItemsInfo();
 
-  // Sends the current set of search URLs to a renderer process.
-  void SendSearchURLsToRenderer(content::RenderProcessHost* rph);
-
-  InstantSearchPrerenderer* GetInstantSearchPrerenderer();
+  // Sends the current NTP URL to a renderer process.
+  void SendNewTabPageURLToRenderer(content::RenderProcessHost* rph);
 
  private:
   friend class InstantExtendedTest;
-  friend class InstantServiceTest;
-  friend class InstantTestBase;
   friend class InstantUnitTestBase;
 
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedManualTest,
-                           MANUAL_SearchesFromFakebox);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ProcessIsolation);
-  FRIEND_TEST_ALL_PREFIXES(InstantServiceEnabledTest,
-                           SendsSearchURLsToRenderer);
-  FRIEND_TEST_ALL_PREFIXES(InstantServiceTest, GetSuggestionFromServiceSide);
-  FRIEND_TEST_ALL_PREFIXES(InstantServiceTest, GetSuggestionFromClientSide);
+  FRIEND_TEST_ALL_PREFIXES(InstantServiceTest, GetNTPTileSuggestion);
 
   // KeyedService:
   void Shutdown() override;
@@ -116,45 +105,26 @@ class InstantService : public KeyedService,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
-  // TopSitesObserver:
-  void TopSitesLoaded(history::TopSites* top_sites) override;
-  void TopSitesChanged(history::TopSites* top_sites,
-                       ChangeReason change_reason) override;
-
-  void OnSearchEngineBaseURLChanged(
-      SearchEngineBaseURLTracker::ChangeReason change_reason);
-
   // Called when a renderer process is terminated.
   void OnRendererProcessTerminated(int process_id);
 
-  // Called when we get new most visited items from TopSites, registered as an
-  // async callback. Parses them and sends them to the renderer via
-  // NotifyAboutMostVisitedItems.
-  void OnTopSitesReceived(const history::MostVisitedURLList& data);
-
   // ntp_tiles::MostVisitedSites::Observer implementation.
-  void OnMostVisitedURLsAvailable(
-      const ntp_tiles::NTPTilesVector& tiles) override;
+  void OnURLsAvailable(
+      const std::map<ntp_tiles::SectionType, ntp_tiles::NTPTilesVector>&
+          sections) override;
   void OnIconMadeAvailable(const GURL& site_url) override;
 
-  // Notifies the observer about the last known most visited items.
   void NotifyAboutMostVisitedItems();
+  void NotifyAboutThemeInfo();
 
-#if !defined(OS_ANDROID)
-  // Theme changed notification handler.
-  void OnThemeChanged();
-#endif
-
-  void ResetInstantSearchPrerendererIfNecessary();
+  void BuildThemeInfo();
 
   Profile* const profile_;
-
-  std::unique_ptr<SearchEngineBaseURLTracker> search_engine_base_url_tracker_;
 
   // The process ids associated with Instant processes.
   std::set<int> process_ids_;
 
-  // InstantMostVisitedItems from TopSites.
+  // InstantMostVisitedItems for NTP tiles, received from |most_visited_sites_|.
   std::vector<InstantMostVisitedItem> most_visited_items_;
 
   // Theme-related data for NTP overlay to adopt themes.
@@ -166,16 +136,8 @@ class InstantService : public KeyedService,
 
   scoped_refptr<InstantIOContext> instant_io_context_;
 
-  // Set to NULL if the default search provider does not support Instant.
-  std::unique_ptr<InstantSearchPrerenderer> instant_prerenderer_;
-
-  // Data sources for NTP tiles (aka Most Visited tiles). Only one of these will
-  // be non-null.
+  // Data source for NTP tiles (aka Most Visited tiles). May be null.
   std::unique_ptr<ntp_tiles::MostVisitedSites> most_visited_sites_;
-  scoped_refptr<history::TopSites> top_sites_;
-
-  // Used for Top Sites async retrieval.
-  base::WeakPtrFactory<InstantService> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(InstantService);
 };

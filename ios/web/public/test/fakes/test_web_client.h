@@ -27,15 +27,16 @@ class TestWebClient : public web::WebClient {
   void AddAdditionalSchemes(Schemes* schemes) const override;
   // Returns true for kTestWebUIScheme and kTestNativeContentScheme URL schemes.
   bool IsAppSpecificURL(const GURL& url) const override;
+  std::string GetUserAgent(UserAgentType type) const override;
   base::RefCountedMemory* GetDataResourceBytes(int id) const override;
-  NSString* GetEarlyPageScript(BrowserState* browser_state) const override;
+  NSString* GetDocumentStartScriptForMainFrame(
+      BrowserState* browser_state) const override;
   void AllowCertificateError(WebState*,
                              int cert_error,
                              const net::SSLInfo&,
                              const GURL&,
                              bool overridable,
                              const base::Callback<void(bool)>&) override;
-  bool IsSlimNavigationManagerEnabled() const override;
 
   // Changes Early Page Script for testing purposes.
   void SetEarlyPageScript(NSString* page_script);
@@ -50,9 +51,6 @@ class TestWebClient : public web::WebClient {
   }
   bool last_cert_error_overridable() { return last_cert_error_overridable_; }
 
-  // Makes |IsSlimNavigationManagerEnabled| return the given flag value.
-  void SetIsSlimNavigationManager(bool flag);
-
  private:
   NSString* early_page_script_;
   // Last arguments passed to AllowCertificateError.
@@ -60,7 +58,6 @@ class TestWebClient : public web::WebClient {
   net::SSLInfo last_cert_error_ssl_info_;
   GURL last_cert_error_request_url_;
   bool last_cert_error_overridable_;
-  bool is_slim_navigation_manager_enabled_;
 };
 
 }  // namespace web

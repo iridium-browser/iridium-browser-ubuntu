@@ -12,8 +12,6 @@ static_library("ntp_tiles") {
     "constants.h",
     "country_code_ios.h",
     "country_code_ios.mm",
-    "field_trial.cc",
-    "field_trial.h",
     "icon_cacher.h",
     "icon_cacher_impl.cc",
     "icon_cacher_impl.h",
@@ -23,14 +21,18 @@ static_library("ntp_tiles") {
     "most_visited_sites.h",
     "ntp_tile.cc",
     "ntp_tile.h",
+    "ntp_tile_impression.cc",
+    "ntp_tile_impression.h",
     "popular_sites.h",
     "popular_sites_impl.cc",
     "popular_sites_impl.h",
     "pref_names.cc",
     "pref_names.h",
+    "section_type.h",
     "switches.cc",
     "switches.h",
     "tile_source.h",
+    "tile_title_source.h",
     "tile_visual_type.h",
     "webui/ntp_tiles_internals_message_handler.cc",
     "webui/ntp_tiles_internals_message_handler.h",
@@ -59,10 +61,6 @@ static_library("ntp_tiles") {
     "//components/variations/service",
     "//ui/base",
   ]
-
-  if (is_android) {
-    deps += [ "android:ntp_tiles_jni_headers" ]
-  }
 }
 
 # If you want to use this, let us (ntp-dev@chromium.org) know. In that case, it
@@ -111,7 +109,9 @@ source_set("unit_tests") {
 if (is_android) {
   java_cpp_enum("ntp_tiles_enums_java") {
     sources = [
+      "section_type.h",
       "tile_source.h",
+      "tile_title_source.h",
       "tile_visual_type.h",
     ]
   }

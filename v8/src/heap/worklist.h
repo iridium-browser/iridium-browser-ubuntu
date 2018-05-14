@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef V8_HEAP_WORKLIST_
-#define V8_HEAP_WORKLIST_
+#ifndef V8_HEAP_WORKLIST_H_
+#define V8_HEAP_WORKLIST_H_
 
 #include <cstddef>
-#include <vector>
+#include <utility>
 
+#include "src/base/atomic-utils.h"
 #include "src/base/logging.h"
 #include "src/base/macros.h"
 #include "src/base/platform/mutex.h"
@@ -56,14 +57,14 @@ class Worklist {
   };
 
   static const int kMaxNumTasks = 8;
-  static const int kSegmentCapacity = SEGMENT_SIZE;
+  static const size_t kSegmentCapacity = SEGMENT_SIZE;
 
   Worklist() : Worklist(kMaxNumTasks) {}
 
   explicit Worklist(int num_tasks) : num_tasks_(num_tasks) {
     for (int i = 0; i < num_tasks_; i++) {
-      private_push_segment(i) = new Segment();
-      private_pop_segment(i) = new Segment();
+      private_push_segment(i) = NewSegment();
+      private_pop_segment(i) = NewSegment();
     }
   }
 
@@ -168,6 +169,11 @@ class Worklist {
     PublishPopSegmentToGlobal(task_id);
   }
 
+  void MergeGlobalPool(Worklist* other) {
+    auto pair = other->global_pool_.Extract();
+    global_pool_.MergeList(pair.first, pair.second);
+  }
+
  private:
   FRIEND_TEST(WorkListTest, SegmentCreate);
   FRIEND_TEST(WorkListTest, SegmentPush);
@@ -182,7 +188,7 @@ class Worklist {
 
   class Segment {
    public:
-    static const int kCapacity = kSegmentCapacity;
+    static const size_t kCapacity = kSegmentCapacity;
 
     Segment() : index_(0) {}
 
@@ -243,22 +249,21 @@ class Worklist {
     V8_INLINE void Push(Segment* segment) {
       base::LockGuard<base::Mutex> guard(&lock_);
       segment->set_next(top_);
-      top_ = segment;
+      set_top(segment);
     }
 
     V8_INLINE bool Pop(Segment** segment) {
       base::LockGuard<base::Mutex> guard(&lock_);
       if (top_ != nullptr) {
         *segment = top_;
-        top_ = top_->next();
+        set_top(top_->next());
         return true;
       }
       return false;
     }
 
     V8_INLINE bool IsEmpty() {
-      base::LockGuard<base::Mutex> guard(&lock_);
-      return top_ == nullptr;
+      return base::AsAtomicPointer::Relaxed_Load(&top_) == nullptr;
     }
 
     void Clear() {
@@ -269,7 +274,7 @@ class Worklist {
         current = current->next();
         delete tmp;
       }
-      top_ = nullptr;
+      set_top(nullptr);
     }
 
     // See Worklist::Update.
@@ -306,7 +311,33 @@ class Worklist {
       }
     }
 
+    std::pair<Segment*, Segment*> Extract() {
+      Segment* top = nullptr;
+      {
+        base::LockGuard<base::Mutex> guard(&lock_);
+        if (top_ == nullptr) return std::make_pair(nullptr, nullptr);
+        top = top_;
+        set_top(nullptr);
+      }
+      Segment* end = top;
+      while (end->next() != nullptr) end = end->next();
+      return std::make_pair(top, end);
+    }
+
+    void MergeList(Segment* start, Segment* end) {
+      if (start == nullptr) return;
+      {
+        base::LockGuard<base::Mutex> guard(&lock_);
+        end->set_next(top_);
+        set_top(start);
+      }
+    }
+
    private:
+    void set_top(Segment* segment) {
+      base::AsAtomicPointer::Relaxed_Store(&top_, segment);
+    }
+
     base::Mutex lock_;
     Segment* top_;
   };
@@ -322,18 +353,19 @@ class Worklist {
   V8_INLINE void PublishPushSegmentToGlobal(int task_id) {
     if (!private_push_segment(task_id)->IsEmpty()) {
       global_pool_.Push(private_push_segment(task_id));
-      private_push_segment(task_id) = new Segment();
+      private_push_segment(task_id) = NewSegment();
     }
   }
 
   V8_INLINE void PublishPopSegmentToGlobal(int task_id) {
     if (!private_pop_segment(task_id)->IsEmpty()) {
       global_pool_.Push(private_pop_segment(task_id));
-      private_pop_segment(task_id) = new Segment();
+      private_pop_segment(task_id) = NewSegment();
     }
   }
 
   V8_INLINE bool StealPopSegmentFromGlobal(int task_id) {
+    if (global_pool_.IsEmpty()) return false;
     Segment* new_segment = nullptr;
     if (global_pool_.Pop(&new_segment)) {
       delete private_pop_segment(task_id);
@@ -341,6 +373,11 @@ class Worklist {
       return true;
     }
     return false;
+  }
+
+  V8_INLINE Segment* NewSegment() {
+    // Bottleneck for filtering in crash dumps.
+    return new Segment();
   }
 
   PrivateSegmentHolder private_segments_[kMaxNumTasks];
@@ -351,4 +388,4 @@ class Worklist {
 }  // namespace internal
 }  // namespace v8
 
-#endif  // V8_HEAP_WORKSTEALING_BAG_
+#endif  // V8_HEAP_WORKLIST_H_

@@ -31,11 +31,11 @@
 #include "platform/graphics/DrawLooperBuilder.h"
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "platform/geometry/FloatSize.h"
 #include "platform/graphics/Color.h"
 #include "platform/graphics/skia/SkiaUtils.h"
 #include "platform/wtf/PtrUtil.h"
-#include "platform/wtf/RefPtr.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 #include "third_party/skia/include/core/SkDrawLooper.h"
@@ -44,9 +44,9 @@
 
 namespace blink {
 
-DrawLooperBuilder::DrawLooperBuilder() {}
+DrawLooperBuilder::DrawLooperBuilder() = default;
 
-DrawLooperBuilder::~DrawLooperBuilder() {}
+DrawLooperBuilder::~DrawLooperBuilder() = default;
 
 sk_sp<SkDrawLooper> DrawLooperBuilder::DetachDrawLooper() {
   return sk_draw_looper_builder_.detach();

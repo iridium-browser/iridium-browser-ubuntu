@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/settings/chromeos/device_storage_handler.h"
 
 #include <algorithm>
+#include <limits>
 #include <numeric>
 #include <string>
 
@@ -28,7 +29,9 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/cryptohome/homedir_methods.h"
+#include "chromeos/cryptohome/cryptohome_util.h"
+#include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/arc/arc_util.h"
 #include "components/browsing_data/content/conditional_cache_counting_helper.h"
 #include "components/drive/chromeos/file_system_interface.h"
@@ -277,8 +280,8 @@ void StorageHandler::OnGetBrowsingDataSize(bool is_site_data, int64_t size) {
       size_string = ui::FormatBytes(
           browser_site_data_size_ + browser_cache_size_);
     } else {
-      size_string = l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_STORAGE_SIZE_UNKNOWN);
+      size_string =
+          l10n_util::GetStringUTF16(IDS_SETTINGS_STORAGE_SIZE_UNKNOWN);
     }
     updating_browsing_data_size_ = false;
     FireWebUIListener("storage-browsing-data-size-changed",
@@ -299,10 +302,10 @@ void StorageHandler::UpdateOtherUsersSize() {
     if (user->is_active())
       continue;
     other_users_.push_back(user);
-    cryptohome::HomedirMethods::GetInstance()->GetAccountDiskUsage(
+    DBusThreadManager::Get()->GetCryptohomeClient()->GetAccountDiskUsage(
         cryptohome::Identification(user->GetAccountId()),
-        base::Bind(&StorageHandler::OnGetOtherUserSize,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindOnce(&StorageHandler::OnGetOtherUserSize,
+                       weak_ptr_factory_.GetWeakPtr()));
   }
   // We should show "0 B" if there is no other user.
   if (other_users_.empty()) {
@@ -312,8 +315,9 @@ void StorageHandler::UpdateOtherUsersSize() {
   }
 }
 
-void StorageHandler::OnGetOtherUserSize(bool success, int64_t size) {
-  user_sizes_.push_back(success ? size : -1);
+void StorageHandler::OnGetOtherUserSize(
+    base::Optional<cryptohome::BaseReply> reply) {
+  user_sizes_.push_back(cryptohome::AccountDiskUsageReplyToUsageSize(reply));
   if (user_sizes_.size() == other_users_.size()) {
     base::string16 size_string;
     // If all the requests succeed, shows the total bytes in the UI.
@@ -321,8 +325,8 @@ void StorageHandler::OnGetOtherUserSize(bool success, int64_t size) {
       size_string = ui::FormatBytes(
           std::accumulate(user_sizes_.begin(), user_sizes_.end(), 0LL));
     } else {
-      size_string = l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_STORAGE_SIZE_UNKNOWN);
+      size_string =
+          l10n_util::GetStringUTF16(IDS_SETTINGS_STORAGE_SIZE_UNKNOWN);
     }
     updating_other_users_size_ = false;
     FireWebUIListener("storage-other-users-size-changed",
@@ -347,7 +351,7 @@ void StorageHandler::UpdateAndroidSize() {
   auto* arc_storage_manager =
       arc::ArcStorageManager::GetForBrowserContext(profile);
   if (arc_storage_manager) {
-    success = arc_storage_manager->GetApplicationsSize(base::Bind(
+    success = arc_storage_manager->GetApplicationsSize(base::BindOnce(
         &StorageHandler::OnGetAndroidSize, weak_ptr_factory_.GetWeakPtr()));
   }
   if (!success)
@@ -363,8 +367,7 @@ void StorageHandler::OnGetAndroidSize(bool succeeded,
                            size->total_cache_bytes;
     size_string = ui::FormatBytes(total_bytes);
   } else {
-    size_string = l10n_util::GetStringUTF16(
-        IDS_OPTIONS_SETTINGS_STORAGE_SIZE_UNKNOWN);
+    size_string = l10n_util::GetStringUTF16(IDS_SETTINGS_STORAGE_SIZE_UNKNOWN);
   }
   updating_android_size_ = false;
   FireWebUIListener("storage-android-size-changed", base::Value(size_string));

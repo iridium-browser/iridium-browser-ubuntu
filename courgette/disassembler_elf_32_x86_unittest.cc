@@ -27,7 +27,7 @@ class TestDisassemblerElf32X86 : public DisassemblerElf32X86 {
  public:
   TestDisassemblerElf32X86(const uint8_t* start, size_t length)
       : DisassemblerElf32X86(start, length) {}
-  ~TestDisassemblerElf32X86() override {}
+  ~TestDisassemblerElf32X86() override = default;
 
   void TestSectionHeaderFileOffsetOrder() {
     std::vector<FileOffset> file_offsets;
@@ -70,7 +70,7 @@ void DisassemblerElf32X86Test::TestExe(const char* file_name,
                                        size_t expected_rel_count) const {
   std::string file1 = FileContents(file_name);
 
-  auto disassembler = base::MakeUnique<TestDisassemblerElf32X86>(
+  auto disassembler = std::make_unique<TestDisassemblerElf32X86>(
       reinterpret_cast<const uint8_t*>(file1.c_str()), file1.length());
 
   bool can_parse_header = disassembler->ParseHeader();

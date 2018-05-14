@@ -5,7 +5,7 @@
 #include "core/testing/DummyModulator.h"
 
 #include "bindings/core/v8/ScriptValue.h"
-#include "core/dom/ScriptModuleResolver.h"
+#include "core/script/ScriptModuleResolver.h"
 
 namespace blink {
 
@@ -13,12 +13,17 @@ namespace {
 
 class EmptyScriptModuleResolver final : public ScriptModuleResolver {
  public:
-  EmptyScriptModuleResolver() {}
+  EmptyScriptModuleResolver() = default;
 
   // We ignore {Unr,R}egisterModuleScript() calls caused by
   // ModuleScript::CreateForTest().
   void RegisterModuleScript(ModuleScript*) override {}
   void UnregisterModuleScript(ModuleScript*) override {}
+
+  ModuleScript* GetHostDefined(const ScriptModule&) const override {
+    NOTREACHED();
+    return nullptr;
+  }
 
   ScriptModule Resolve(const String& specifier,
                        const ScriptModule& referrer,
@@ -32,9 +37,9 @@ class EmptyScriptModuleResolver final : public ScriptModuleResolver {
 
 DummyModulator::DummyModulator() : resolver_(new EmptyScriptModuleResolver()) {}
 
-DummyModulator::~DummyModulator() {}
+DummyModulator::~DummyModulator() = default;
 
-DEFINE_TRACE(DummyModulator) {
+void DummyModulator::Trace(blink::Visitor* visitor) {
   visitor->Trace(resolver_);
   Modulator::Trace(visitor);
 }
@@ -44,7 +49,7 @@ ReferrerPolicy DummyModulator::GetReferrerPolicy() {
   return kReferrerPolicyDefault;
 }
 
-SecurityOrigin* DummyModulator::GetSecurityOrigin() {
+const SecurityOrigin* DummyModulator::GetSecurityOriginForFetch() {
   NOTREACHED();
   return nullptr;
 }
@@ -58,7 +63,7 @@ ScriptModuleResolver* DummyModulator::GetScriptModuleResolver() {
   return resolver_.Get();
 }
 
-WebTaskRunner* DummyModulator::TaskRunner() {
+base::SingleThreadTaskRunner* DummyModulator::TaskRunner() {
   NOTREACHED();
   return nullptr;
 };
@@ -67,14 +72,6 @@ void DummyModulator::FetchTree(const ModuleScriptFetchRequest&,
                                ModuleTreeClient*) {
   NOTREACHED();
 }
-
-void DummyModulator::FetchTreeInternal(const ModuleScriptFetchRequest&,
-                                       const AncestorList&,
-                                       ModuleGraphLevel,
-                                       ModuleTreeReachedUrlSet*,
-                                       ModuleTreeClient*) {
-  NOTREACHED();
-};
 
 void DummyModulator::FetchSingle(const ModuleScriptFetchRequest&,
                                  ModuleGraphLevel,
@@ -102,8 +99,23 @@ bool DummyModulator::HasValidContext() {
   return true;
 }
 
+void DummyModulator::ResolveDynamically(const String&,
+                                        const KURL&,
+                                        const ReferrerScriptInfo&,
+                                        ScriptPromiseResolver*) {
+  NOTREACHED();
+}
+
+ModuleImportMeta DummyModulator::HostGetImportMetaProperties(
+    ScriptModule) const {
+  NOTREACHED();
+  return ModuleImportMeta(String());
+}
+
 ScriptModule DummyModulator::CompileModule(const String& script,
-                                           const String& url_str,
+                                           const KURL& source_url,
+                                           const KURL& base_url,
+                                           const ScriptFetchOptions&,
                                            AccessControlStatus,
                                            const TextPosition&,
                                            ExceptionState&) {
@@ -116,24 +128,21 @@ ScriptValue DummyModulator::InstantiateModule(ScriptModule) {
   return ScriptValue();
 }
 
-ScriptModuleState DummyModulator::GetRecordStatus(ScriptModule) {
-  NOTREACHED();
-  return ScriptModuleState::kErrored;
-}
-
-ScriptValue DummyModulator::GetError(const ModuleScript*) {
-  NOTREACHED();
-  return ScriptValue();
-}
-
 Vector<Modulator::ModuleRequest> DummyModulator::ModuleRequestsFromScriptModule(
     ScriptModule) {
   NOTREACHED();
   return Vector<ModuleRequest>();
 }
 
-void DummyModulator::ExecuteModule(const ModuleScript*) {
+ScriptValue DummyModulator::ExecuteModule(const ModuleScript*,
+                                          CaptureEvalErrorFlag) {
   NOTREACHED();
+  return ScriptValue();
+}
+
+ModuleScriptFetcher* DummyModulator::CreateModuleScriptFetcher() {
+  NOTREACHED();
+  return nullptr;
 }
 
 }  // namespace blink

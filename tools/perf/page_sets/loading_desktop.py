@@ -22,7 +22,7 @@ class LoadingDesktopStorySet(story.StorySet):
 
     if cache_temperatures is None:
       cache_temperatures = [
-          cache_temperature_module.PCV1_COLD, cache_temperature_module.PCV1_WARM
+          cache_temperature_module.COLD, cache_temperature_module.WARM
       ]
     # Passed as (story, name) tuple.
     self.AddStories(
@@ -106,11 +106,5 @@ class LoadingDesktopStorySet(story.StorySet):
     for url, name in urls:
       for temp in cache_temperatures:
           self.AddStory(page_cycler_story.PageCyclerStory(url, self,
-              shared_page_state_class=shared_page_state.SharedMobilePageState,
+              shared_page_state_class=shared_page_state.SharedDesktopPageState,
               cache_temperature=temp, tags=tags, name=name))
-
-
-class LoadingDesktopExpectations(story.expectations.StoryExpectations):
-  def SetExpectations(self):
-    self.DisableStory(
-        'uol.com.br', [story.expectations.ALL_LINUX], 'crbug.com/723783')

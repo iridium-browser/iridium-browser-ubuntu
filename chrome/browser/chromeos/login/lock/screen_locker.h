@@ -20,7 +20,7 @@
 #include "chromeos/login/auth/user_context.h"
 #include "components/user_manager/user.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/device/public/interfaces/fingerprint.mojom.h"
+#include "services/device/public/mojom/fingerprint.mojom.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 
@@ -107,10 +107,9 @@ class ScreenLocker : public AuthStatusConsumer,
   explicit ScreenLocker(const user_manager::UserList& users);
 
   // Returns the default instance if it has been created.
-  static ScreenLocker* default_screen_locker() {
-    return screen_locker_;
-  }
+  static ScreenLocker* default_screen_locker() { return screen_locker_; }
 
+  // Returns true if the lock UI has been confirmed as displayed.
   bool locked() const { return locked_; }
 
   // Initialize and show the screen locker.
@@ -180,6 +179,10 @@ class ScreenLocker : public AuthStatusConsumer,
 
   // Returns the tester
   static test::ScreenLockerTester* GetTester();
+
+  // Saves sync password hash and salt to user profile prefs based on
+  // |user_context|.
+  void SaveSyncPasswordHash(const UserContext& user_context);
 
  private:
   friend class base::DeleteHelper<ScreenLocker>;

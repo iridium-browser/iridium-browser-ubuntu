@@ -5,27 +5,35 @@
 module blink.mojom;
 
 import "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom";
-import "url/mojo/origin.mojom";
 
 enum PermissionName {
   GEOLOCATION,
   NOTIFICATIONS,
-  PUSH_NOTIFICATIONS,
   MIDI,
   PROTECTED_MEDIA_IDENTIFIER,
   DURABLE_STORAGE,
   AUDIO_CAPTURE,
   VIDEO_CAPTURE,
   BACKGROUND_SYNC,
+  SENSORS,
+  ACCESSIBILITY_EVENTS,
+  CLIPBOARD_READ,
+  CLIPBOARD_WRITE,
+  PAYMENT_HANDLER,
 };
 
 struct MidiPermissionDescriptor {
   bool sysex;
 };
 
+struct ClipboardPermissionDescriptor {
+  bool allowWithoutGesture;
+};
+
 // Union of possible extensions to the base PermissionDescriptor type.
 union PermissionDescriptorExtension {
   MidiPermissionDescriptor midi;
+  ClipboardPermissionDescriptor clipboard;
 };
 
 // This struct roughly corresponds to the PermissionDescriptor dictionary as
@@ -44,20 +52,16 @@ interface PermissionObserver {
 // methods to check, request, and revoke permissions. It also allows a client to
 // start listening to permission changes.
 interface PermissionService {
-  HasPermission(PermissionDescriptor permission, url.mojom.Origin origin)
-    => (PermissionStatus status);
-  RequestPermission(PermissionDescriptor permission, url.mojom.Origin origin,
-      bool user_gesture)
-    => (PermissionStatus status);
-  RequestPermissions(array<PermissionDescriptor> permission, url.mojom.Origin origin,
-      bool user_gesture)
-    => (array<PermissionStatus> statuses);
-  RevokePermission(PermissionDescriptor permission, url.mojom.Origin origin)
-    => (PermissionStatus status);
-  // Subscribes |observer| to updates about changes to |origin|'s access to
-  // |permission|. Closing the pipe will cancel the subscription.
+  HasPermission(PermissionDescriptor permission) => (PermissionStatus status);
+  RequestPermission(PermissionDescriptor permission, bool user_gesture)
+      => (PermissionStatus status);
+  RequestPermissions(array<PermissionDescriptor> permission, bool user_gesture)
+      => (array<PermissionStatus> statuses);
+  RevokePermission(PermissionDescriptor permission)
+      => (PermissionStatus status);
+  // Subscribes |observer| to updates about changes to the current origin's
+  // access to |permission|. Closing the pipe will cancel the subscription.
   AddPermissionObserver(PermissionDescriptor permission,
-                        url.mojom.Origin origin,
                         PermissionStatus last_known_status,
                         PermissionObserver observer);
 };

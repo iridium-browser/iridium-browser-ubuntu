@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -207,7 +208,11 @@ class USBImager(object):
         '--dst=%s' % device,
         '--skip_postinstall',
     ]
-    cros_build_lib.SudoRunCommand(cmd)
+    cros_build_lib.SudoRunCommand(cmd,
+                                  print_cmd=True,
+                                  debug_level=logging.NOTICE,
+                                  combine_stdout_stderr=True,
+                                  log_output=True)
 
   def CopyImageToDevice(self, image, device):
     """Copies |image| to the removable |device|.
@@ -328,7 +333,7 @@ class RemoteDeviceUpdater(object):
                rootfs_update=True, clobber_stateful=False, reboot=True,
                board=None, src_image_to_delta=None, wipe=True, debug=False,
                yes=False, force=False, ssh_private_key=None, ping=True,
-               disable_verification=False):
+               disable_verification=False, send_payload_in_parallel=False):
     """Initializes RemoteDeviceUpdater"""
     if not stateful_update and not rootfs_update:
       raise ValueError('No update operation to perform; either stateful or'
@@ -351,6 +356,7 @@ class RemoteDeviceUpdater(object):
     self.wipe = wipe and not debug
     self.yes = yes
     self.force = force
+    self.send_payload_in_parallel = send_payload_in_parallel
 
   def Cleanup(self):
     """Cleans up the temporary directory."""
@@ -390,10 +396,15 @@ class RemoteDeviceUpdater(object):
     elif os.path.isfile(self.image):
       # The given path is an image.
       logging.info('Using image %s', self.image)
-      ds_wrapper.GetUpdatePayloadsFromLocalPath(
-          self.image, payload_dir,
-          src_image_to_delta=self.src_image_to_delta,
-          static_dir=DEVSERVER_STATIC_DIR)
+      try:
+        ds_wrapper.GetUpdatePayloadsFromLocalPath(
+            self.image, payload_dir,
+            src_image_to_delta=self.src_image_to_delta,
+            static_dir=DEVSERVER_STATIC_DIR)
+      except:
+        logging.error('Unable to get payloads from local path: %s', payload_dir)
+        raise
+
     else:
       self.board = cros_build_lib.GetBoard(device_board=device.board,
                                            override_board=self.board,
@@ -412,7 +423,7 @@ class RemoteDeviceUpdater(object):
       translated_path, resolved_path = ds_wrapper.GetImagePathWithXbuddy(
           self.image, self.board, static_dir=DEVSERVER_STATIC_DIR,
           lookup_only=True)
-      logging.info('Using image %s', translated_path)
+      logging.notice('Using image %s', translated_path)
       # Convert the translated path to be used in the update request.
       image_path = ds_wrapper.ConvertTranslatedPath(resolved_path,
                                                     translated_path)
@@ -435,37 +446,41 @@ class RemoteDeviceUpdater(object):
     4. After auto-update, all temp files and dir will be cleaned up.
     """
     try:
-      device_connected = False
-
       with remote_access.ChromiumOSDeviceHandler(
           self.ssh_hostname, port=self.ssh_port, base_dir=self.DEVICE_BASE_DIR,
           private_key=self.ssh_private_key, ping=self.ping) as device:
-        device_connected = True
 
-        # Get payload directory
-        payload_dir = self.GetPayloadDir(device)
+        try:
+          # Get payload directory
+          payload_dir = self.GetPayloadDir(device)
 
-        # Do auto-update
-        chromeos_AU = auto_updater.ChromiumOSFlashUpdater(
-            device, payload_dir, self.tempdir,
-            do_rootfs_update=self.do_rootfs_update,
-            do_stateful_update=self.do_stateful_update,
-            reboot=self.reboot,
-            disable_verification=self.disable_verification,
-            clobber_stateful=self.clobber_stateful,
-            yes=self.yes)
-        chromeos_AU.CheckPayloads()
-        chromeos_AU.RunUpdate()
+          # Do auto-update
+          chromeos_AU = auto_updater.ChromiumOSFlashUpdater(
+              device, payload_dir, self.tempdir,
+              do_rootfs_update=self.do_rootfs_update,
+              do_stateful_update=self.do_stateful_update,
+              reboot=self.reboot,
+              disable_verification=self.disable_verification,
+              clobber_stateful=self.clobber_stateful,
+              yes=self.yes,
+              send_payload_in_parallel=self.send_payload_in_parallel)
+          chromeos_AU.CheckPayloads()
+          chromeos_AU.RunUpdate()
 
-    except Exception:
-      logging.error('Device update failed.')
-      if device_connected and device.lsb_release:
-        lsb_entries = sorted(device.lsb_release.items())
-        logging.info('Following are the LSB version details of the device:\n%s',
-                     '\n'.join('%s=%s' % (k, v) for k, v in lsb_entries))
+        except Exception:
+          logging.error('Device update failed.')
+          lsb_entries = sorted(device.lsb_release.items())
+          logging.info(
+              'Following are the LSB version details of the device:\n%s',
+              '\n'.join('%s=%s' % (k, v) for k, v in lsb_entries))
+          raise
+
+        logging.notice('Update performed successfully.')
+
+    except remote_access.RemoteAccessException:
+      logging.error('Remote device failed to initialize.')
       raise
-    else:
-      logging.notice('Update performed successfully.')
+
     finally:
       self.Cleanup()
 
@@ -473,7 +488,7 @@ def Flash(device, image, board=None, install=False, src_image_to_delta=None,
           rootfs_update=True, stateful_update=True, clobber_stateful=False,
           reboot=True, wipe=True, ssh_private_key=None, ping=True,
           disable_rootfs_verification=False, clear_cache=False, yes=False,
-          force=False, debug=False):
+          force=False, debug=False, send_payload_in_parallel=False):
   """Flashes a device, USB drive, or file with an image.
 
   This provides functionality common to `cros flash` and `brillo flash`
@@ -501,6 +516,8 @@ def Flash(device, image, board=None, install=False, src_image_to_delta=None,
     yes: Assume "yes" for any prompt.
     force: Ignore sanity checks and prompts. Overrides |yes| if True.
     debug: Print additional debugging messages.
+    send_payload_in_parallel: Transfer payloads in chunks in parallel to speed
+        up transmissions for long haul between endpoints.
 
   Raises:
     FlashError: An unrecoverable error occured.
@@ -547,7 +564,8 @@ def Flash(device, image, board=None, install=False, src_image_to_delta=None,
         force=force,
         ssh_private_key=ssh_private_key,
         ping=ping,
-        disable_verification=disable_rootfs_verification)
+        disable_verification=disable_rootfs_verification,
+        send_payload_in_parallel=send_payload_in_parallel)
     updater.Run()
   elif device.scheme == commandline.DEVICE_SCHEME_USB:
     path = osutils.ExpandPath(device.path) if device.path else ''

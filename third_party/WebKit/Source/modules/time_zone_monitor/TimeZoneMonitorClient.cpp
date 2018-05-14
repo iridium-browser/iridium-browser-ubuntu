@@ -6,14 +6,14 @@
 
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/workers/WorkerBackingThread.h"
 #include "core/workers/WorkerOrWorkletGlobalScope.h"
 #include "core/workers/WorkerThread.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/bindings/V8PerIsolateData.h"
 #include "public/platform/Platform.h"
-#include "services/device/public/interfaces/constants.mojom-blink.h"
+#include "public/platform/TaskType.h"
+#include "services/device/public/mojom/constants.mojom-blink.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "v8/include/v8.h"
@@ -51,7 +51,7 @@ TimeZoneMonitorClient::TimeZoneMonitorClient() : binding_(this) {
   DCHECK(IsMainThread());
 }
 
-TimeZoneMonitorClient::~TimeZoneMonitorClient() {}
+TimeZoneMonitorClient::~TimeZoneMonitorClient() = default;
 
 void TimeZoneMonitorClient::OnTimeZoneChange(const String& time_zone_info) {
   DCHECK(IsMainThread());
@@ -74,10 +74,10 @@ void TimeZoneMonitorClient::OnTimeZoneChange(const String& time_zone_info) {
     // among multiple WorkerThreads.
     if (posted.Contains(&thread->GetWorkerBackingThread()))
       continue;
-    TaskRunnerHelper::Get(TaskType::kUnspecedTimer, thread)
-        ->PostTask(BLINK_FROM_HERE,
-                   CrossThreadBind(&NotifyTimezoneChangeOnWorkerThread,
-                                   WTF::CrossThreadUnretained(thread)));
+    PostCrossThreadTask(*thread->GetTaskRunner(TaskType::kUnspecedTimer),
+                        FROM_HERE,
+                        CrossThreadBind(&NotifyTimezoneChangeOnWorkerThread,
+                                        WTF::CrossThreadUnretained(thread)));
     posted.insert(&thread->GetWorkerBackingThread());
   }
 }

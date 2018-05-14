@@ -7,7 +7,12 @@
 
 #include "ios/chrome/browser/infobars/infobar_controller.h"
 
+@protocol LanguageSelectionHandler;
+
 @interface BeforeTranslateInfoBarController : InfoBarController
+
+@property(nonatomic, weak) id<LanguageSelectionHandler>
+    languageSelectionHandler;
 
 @end
 

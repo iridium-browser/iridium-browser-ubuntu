@@ -32,15 +32,13 @@ import org.chromium.content.browser.test.util.TouchCommon;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.ArrayList;
-import java.util.concurrent.Callable;
 
 /**
  * Tests whether popup windows appear.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PopupTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -59,15 +57,9 @@ public class PopupTest {
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
 
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                Assert.assertTrue(getNumInfobarsShowing() == 0);
-            }
-        });
+        ThreadUtils.runOnUiThread(() -> Assert.assertTrue(getNumInfobarsShowing() == 0));
 
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mPopupHtmlUrl = mTestServer.getURL(POPUP_HTML_PATH);
     }
 
@@ -81,28 +73,18 @@ public class PopupTest {
     @Feature({"Popup"})
     public void testPopupInfobarAppears() throws Exception {
         mActivityTestRule.loadUrl(mPopupHtmlUrl);
-        CriteriaHelper.pollUiThread(Criteria.equals(1, new Callable<Integer>() {
-            @Override
-            public Integer call() {
-                return getNumInfobarsShowing();
-            }
-        }));
+        CriteriaHelper.pollUiThread(Criteria.equals(1, () -> getNumInfobarsShowing()));
     }
 
     @Test
     @MediumTest
     @Feature({"Popup"})
-    @FlakyTest(message = "crbug.com/733365")
+    @FlakyTest(message = "crbug.com/771103")
     public void testPopupWindowsAppearWhenAllowed() throws Exception {
         final TabModelSelector selector = mActivityTestRule.getActivity().getTabModelSelector();
 
         mActivityTestRule.loadUrl(mPopupHtmlUrl);
-        CriteriaHelper.pollUiThread(Criteria.equals(1, new Callable<Integer>() {
-            @Override
-            public Integer call() {
-                return getNumInfobarsShowing();
-            }
-        }));
+        CriteriaHelper.pollUiThread(Criteria.equals(1, () -> getNumInfobarsShowing()));
         Assert.assertEquals(1, selector.getTotalTabCount());
         final InfoBarContainer container = selector.getCurrentTab().getInfoBarContainer();
         ArrayList<InfoBar> infobars = container.getInfoBarsForTesting();
@@ -124,11 +106,11 @@ public class PopupTest {
             @Override
             public boolean isSatisfied() {
                 if (getNumInfobarsShowing() != 0) return false;
-                return TextUtils.equals("Three", selector.getCurrentTab().getTitle());
+                return TextUtils.equals("Two", selector.getCurrentTab().getTitle());
             }
         }, 7500, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
 
-        Assert.assertEquals(4, selector.getTotalTabCount());
+        Assert.assertEquals(3, selector.getTotalTabCount());
         int currentTabId = selector.getCurrentTab().getId();
 
         // Test that revisiting the original page makes popup windows immediately.
@@ -137,8 +119,8 @@ public class PopupTest {
             @Override
             public boolean isSatisfied() {
                 if (getNumInfobarsShowing() != 0) return false;
-                if (selector.getTotalTabCount() != 7) return false;
-                return TextUtils.equals("Three", selector.getCurrentTab().getTitle());
+                if (selector.getTotalTabCount() != 5) return false;
+                return TextUtils.equals("Two", selector.getCurrentTab().getTitle());
             }
         }, 7500, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
         Assert.assertNotSame(currentTabId, selector.getCurrentTab().getId());

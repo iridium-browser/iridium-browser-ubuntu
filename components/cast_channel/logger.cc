@@ -60,6 +60,10 @@ ChallengeReplyError AuthErrorToChallengeReplyError(
       return ChallengeReplyError::CERT_REVOKED;
     case AuthResult::ERROR_SENDER_NONCE_MISMATCH:
       return ChallengeReplyError::SENDER_NONCE_MISMATCH;
+    case AuthResult::ERROR_SIGNATURE_EMPTY:
+      return ChallengeReplyError::SIGNATURE_EMPTY;
+    case AuthResult::ERROR_DIGEST_UNSUPPORTED:
+      return ChallengeReplyError::DIGEST_UNSUPPORTED;
     default:
       NOTREACHED();
       return ChallengeReplyError::NONE;
@@ -99,11 +103,7 @@ void Logger::LogSocketChallengeReplyEvent(int channel_id,
 
 LastError Logger::GetLastError(int channel_id) const {
   const auto it = last_errors_.find(channel_id);
-  if (it != last_errors_.end()) {
-    return it->second;
-  } else {
-    return LastError();
-  }
+  return it != last_errors_.end() ? it->second : LastError();
 }
 
 void Logger::ClearLastError(int channel_id) {

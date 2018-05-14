@@ -24,16 +24,11 @@ constexpr char kTabMediaUrnFormat[] = "urn:x-org.chromium.media:source:tab:%d";
 constexpr char kDesktopMediaUrn[] = "urn:x-org.chromium.media:source:desktop";
 constexpr char kTabRemotingUrnFormat[] =
     "urn:x-org.chromium.media:source:tab_content_remoting:%d";
-constexpr char kCastPresentationUrlDomain[] = "google.com";
-constexpr char kCastPresentationUrlPath[] = "/cast";
-
-// This value must be the same as |chrome.cast.AUTO_JOIN_PRESENTATION_ID| in the
-// component extension.
-constexpr char kAutoJoinPresentationId[] = "auto-join";
 
 // List of non-http(s) schemes that are allowed in a Presentation URL.
-constexpr std::array<const char* const, 4> kAllowedSchemes{
-    {"cast", "dial", "remote-playback", "test"}};
+constexpr std::array<const char* const, 5> kAllowedSchemes{
+    {kCastPresentationUrlScheme, kCastDialPresentationUrlScheme,
+     kDialPresentationUrlScheme, kRemotePlaybackPresentationUrlScheme, "test"}};
 
 bool IsSchemeAllowed(const GURL& url) {
   return url.SchemeIsHTTPOrHTTPS() ||
@@ -60,6 +55,15 @@ MediaSource MediaSourceForPresentationUrl(const GURL& presentation_url) {
   return MediaSource(presentation_url);
 }
 
+std::vector<MediaSource> MediaSourcesForPresentationUrls(
+    const std::vector<GURL>& presentation_urls) {
+  std::vector<MediaSource> sources;
+  for (const auto& presentation_url : presentation_urls)
+    sources.push_back(MediaSourceForPresentationUrl(presentation_url));
+
+  return sources;
+}
+
 bool IsDesktopMirroringMediaSource(const MediaSource& source) {
   return base::StartsWith(source.id(), kDesktopMediaUrn,
                           base::CompareCase::SENSITIVE);
@@ -76,12 +80,10 @@ bool IsMirroringMediaSource(const MediaSource& source) {
          IsTabMirroringMediaSource(source);
 }
 
-bool CanConnectToMediaSource(const MediaSource& source) {
-  // Compare host, port, scheme, and path prefix for source.url().
-  return source.url().SchemeIs(url::kHttpsScheme) &&
-         source.url().DomainIs(kCastPresentationUrlDomain) &&
-         source.url().has_path() &&
-         source.url().path() == kCastPresentationUrlPath;
+bool IsCastPresentationUrl(const MediaSource& source) {
+  const GURL& url = source.url();
+  return url.SchemeIs(kCastPresentationUrlScheme) ||
+         IsLegacyCastPresentationUrl(url);
 }
 
 int TabIdFromMediaSource(const MediaSource& source) {
@@ -100,12 +102,25 @@ bool IsValidMediaSource(const MediaSource& source) {
          IsValidPresentationUrl(GURL(source.id()));
 }
 
+bool IsLegacyCastPresentationUrl(const GURL& url) {
+  return base::StartsWith(url.spec(), kLegacyCastPresentationUrlPrefix,
+                          base::CompareCase::INSENSITIVE_ASCII);
+}
+
 bool IsValidPresentationUrl(const GURL& url) {
   return url.is_valid() && IsSchemeAllowed(url);
 }
 
 bool IsAutoJoinPresentationId(const std::string& presentation_id) {
   return presentation_id == kAutoJoinPresentationId;
+}
+
+bool IsDialMediaSource(const MediaSource& source) {
+  return source.url().SchemeIs(kCastDialPresentationUrlScheme);
+}
+
+std::string AppNameFromDialMediaSource(const MediaSource& source) {
+  return IsDialMediaSource(source) ? source.url().path() : "";
 }
 
 }  // namespace media_router

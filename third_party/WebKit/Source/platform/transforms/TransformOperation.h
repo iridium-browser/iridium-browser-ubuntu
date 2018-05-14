@@ -25,9 +25,10 @@
 #ifndef TransformOperation_h
 #define TransformOperation_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/geometry/FloatSize.h"
 #include "platform/transforms/TransformationMatrix.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/RefCounted.h"
 
 namespace blink {
@@ -66,8 +67,8 @@ class PLATFORM_EXPORT TransformOperation
     kRotateAroundOrigin,
   };
 
-  TransformOperation() {}
-  virtual ~TransformOperation() {}
+  TransformOperation() = default;
+  virtual ~TransformOperation() = default;
 
   virtual bool operator==(const TransformOperation&) const = 0;
   bool operator!=(const TransformOperation& o) const { return !(*this == o); }
@@ -75,11 +76,11 @@ class PLATFORM_EXPORT TransformOperation
   virtual void Apply(TransformationMatrix&,
                      const FloatSize& border_box_size) const = 0;
 
-  virtual PassRefPtr<TransformOperation> Blend(
+  virtual scoped_refptr<TransformOperation> Blend(
       const TransformOperation* from,
       double progress,
       bool blend_to_identity = false) = 0;
-  virtual PassRefPtr<TransformOperation> Zoom(double factor) = 0;
+  virtual scoped_refptr<TransformOperation> Zoom(double factor) = 0;
 
   virtual OperationType GetType() const = 0;
 
@@ -99,6 +100,8 @@ class PLATFORM_EXPORT TransformOperation
            op_type == kMatrix3D || op_type == kPerspective ||
            op_type == kInterpolated;
   }
+
+  virtual bool HasNonTrivial3DComponent() const { return Is3DOperation(); }
 
   virtual bool DependsOnBoxSize() const { return false; }
 };

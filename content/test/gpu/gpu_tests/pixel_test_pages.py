@@ -7,7 +7,8 @@ class PixelTestPage(object):
   from the old-style GPU tests.
   """
   def __init__(self, url, name, test_rect, revision,
-               tolerance=2, browser_args=None, expected_colors=None):
+               tolerance=2, browser_args=None, expected_colors=None,
+               gpu_process_disabled=False):
     super(PixelTestPage, self).__init__()
     self.url = url
     self.name = name
@@ -22,6 +23,10 @@ class PixelTestPage(object):
     # by contract with _CompareScreenshotSamples in
     # cloud_storage_integration_test_base.py.
     self.expected_colors = expected_colors
+    # Only a couple of tests run with the GPU process completely
+    # disabled. To prevent regressions, only allow the GPU information
+    # to be incomplete in these cases.
+    self.gpu_process_disabled = gpu_process_disabled
 
   def CopyWithNewBrowserArgsAndSuffix(self, browser_args, suffix):
     return PixelTestPage(
@@ -46,6 +51,39 @@ def CopyPagesWithNewBrowserArgsAndPrefix(pages, browser_args, prefix):
     p.CopyWithNewBrowserArgsAndPrefix(browser_args, prefix) for p in pages]
 
 
+# TODO(kbr): consider refactoring this into pixel_integration_test.py.
+SCALE_FACTOR_OVERRIDES = {
+  "comment": "scale factor overrides",
+  "scale_factor_overrides": [
+    {
+      "device_type": "Nexus 5",
+      "scale_factor": 1.105
+    },
+    {
+      "device_type": "Nexus 5X",
+      "scale_factor": 1.105
+    },
+    {
+      "device_type": "Nexus 6",
+      "scale_factor": 1.47436
+    },
+    {
+      "device_type": "Nexus 6P",
+      "scale_factor": 1.472
+    },
+    {
+      "device_type": "Nexus 9",
+      "scale_factor": 1.566
+    },
+    {
+      "comment": "NVIDIA Shield",
+      "device_type": "sb_na_wf",
+      "scale_factor": 1.226
+    }
+  ]
+}
+
+
 def DefaultPages(base_name):
   return [
     PixelTestPage(
@@ -64,13 +102,13 @@ def DefaultPages(base_name):
       'pixel_css3d.html',
       base_name + '_CSS3DBlueBox',
       test_rect=[0, 0, 300, 300],
-      revision=16),
+      revision=18),
 
     PixelTestPage(
       'pixel_webgl_aa_alpha.html',
       base_name + '_WebGLGreenTriangle_AA_Alpha',
       test_rect=[0, 0, 300, 300],
-      revision=1),
+      revision=3),
 
     PixelTestPage(
       'pixel_webgl_noaa_alpha.html',
@@ -82,7 +120,7 @@ def DefaultPages(base_name):
       'pixel_webgl_aa_noalpha.html',
       base_name + '_WebGLGreenTriangle_AA_NoAlpha',
       test_rect=[0, 0, 300, 300],
-      revision=1),
+      revision=4),
 
     PixelTestPage(
       'pixel_webgl_noaa_noalpha.html',
@@ -129,7 +167,7 @@ def DefaultPages(base_name):
       'pixel_canvas2d_webgl.html',
       base_name + '_2DCanvasWebGL',
       test_rect=[0, 0, 300, 300],
-      revision=3),
+      revision=6),
 
     PixelTestPage(
       'pixel_background.html',
@@ -141,13 +179,65 @@ def DefaultPages(base_name):
       'pixel_video_mp4.html',
       base_name + '_Video_MP4',
       test_rect=[0, 0, 300, 300],
-      revision=5),
+      revision=7),
 
     PixelTestPage(
       'pixel_video_vp9.html',
       base_name + '_Video_VP9',
       test_rect=[0, 0, 300, 300],
-      revision=5),
+      revision=7),
+
+    PixelTestPage(
+      'pixel_webgl_premultiplied_alpha_false.html',
+      base_name + '_WebGL_PremultipliedAlpha_False',
+      test_rect=[0, 0, 150, 150],
+      revision=0, # This is not used.
+      expected_colors=[
+        SCALE_FACTOR_OVERRIDES,
+        {
+          'comment': 'brown',
+          'location': [1, 1],
+          'size': [148, 148],
+          # This is the color on an NVIDIA based MacBook Pro if the
+          # sRGB profile's applied correctly.
+          'color': [102, 77, 0],
+          # This is the color if it isn't.
+          # 'color': [101, 76, 12],
+          'tolerance': 3
+        },
+      ]),
+
+    PixelTestPage(
+      'pixel_webgl2_blitframebuffer_result_displayed.html',
+      base_name + '_WebGL2_BlitFramebuffer_Result_Displayed',
+      test_rect=[0, 0, 200, 200],
+      revision=0, # This is not used.
+      expected_colors=[
+        SCALE_FACTOR_OVERRIDES,
+        {
+          'comment': 'green',
+          'location': [1, 1],
+          'size': [180, 180],
+          'color': [0, 255, 0],
+          'tolerance': 3
+        },
+      ]),
+
+    PixelTestPage(
+      'pixel_webgl2_clearbufferfv_result_displayed.html',
+      base_name + '_WebGL2_ClearBufferfv_Result_Displayed',
+      test_rect=[0, 0, 200, 200],
+      revision=0, # This is not used.
+      expected_colors=[
+        SCALE_FACTOR_OVERRIDES,
+        {
+          'comment': 'green',
+          'location': [1, 1],
+          'size': [180, 180],
+          'color': [0, 255, 0],
+          'tolerance': 3
+        },
+      ]),
   ]
 
 
@@ -285,10 +375,10 @@ def GpuRasterizationPages(base_name):
       ])
   ]
 
-
 # Pages that should be run with experimental canvas features.
 def ExperimentalCanvasFeaturesPages(base_name):
-  browser_args = ['--enable-experimental-canvas-features']
+  browser_args = [
+    '--enable-experimental-web-platform-features'] # for lowLatency
   unaccelerated_args = [
     '--disable-accelerated-2d-canvas',
     '--disable-gpu-compositing']
@@ -298,14 +388,14 @@ def ExperimentalCanvasFeaturesPages(base_name):
       'pixel_offscreenCanvas_transfer_after_style_resize.html',
       base_name + '_OffscreenCanvasTransferAfterStyleResize',
       test_rect=[0, 0, 350, 350],
-      revision=1,
+      revision=5,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_transfer_before_style_resize.html',
       base_name + '_OffscreenCanvasTransferBeforeStyleResize',
       test_rect=[0, 0, 350, 350],
-      revision=1,
+      revision=5,
       browser_args=browser_args),
 
     PixelTestPage(
@@ -326,84 +416,84 @@ def ExperimentalCanvasFeaturesPages(base_name):
       'pixel_offscreenCanvas_webgl_commit_main.html',
       base_name + '_OffscreenCanvasWebGLDefault',
       test_rect=[0, 0, 360, 200],
-      revision=4,
+      revision=7,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_webgl_commit_worker.html',
       base_name + '_OffscreenCanvasWebGLDefaultWorker',
       test_rect=[0, 0, 360, 200],
-      revision=4,
+      revision=7,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_webgl_commit_main.html',
       base_name + '_OffscreenCanvasWebGLSoftwareCompositing',
       test_rect=[0, 0, 360, 200],
-      revision=5,
+      revision=7,
       browser_args=browser_args + ['--disable-gpu-compositing']),
 
     PixelTestPage(
       'pixel_offscreenCanvas_webgl_commit_worker.html',
       base_name + '_OffscreenCanvasWebGLSoftwareCompositingWorker',
       test_rect=[0, 0, 360, 200],
-      revision=5,
+      revision=7,
       browser_args=browser_args + ['--disable-gpu-compositing']),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_commit_main.html',
       base_name + '_OffscreenCanvasAccelerated2D',
       test_rect=[0, 0, 360, 200],
-      revision=6,
+      revision=8,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_commit_worker.html',
       base_name + '_OffscreenCanvasAccelerated2DWorker',
       test_rect=[0, 0, 360, 200],
-      revision=6,
+      revision=8,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_commit_main.html',
       base_name + '_OffscreenCanvasUnaccelerated2D',
       test_rect=[0, 0, 360, 200],
-      revision=5,
+      revision=6,
       browser_args=browser_args + unaccelerated_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_commit_worker.html',
       base_name + '_OffscreenCanvasUnaccelerated2DWorker',
       test_rect=[0, 0, 360, 200],
-      revision=5,
+      revision=6,
       browser_args=browser_args + unaccelerated_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_commit_main.html',
       base_name + '_OffscreenCanvasUnaccelerated2DGPUCompositing',
       test_rect=[0, 0, 360, 200],
-      revision=7,
+      revision=9,
       browser_args=browser_args + ['--disable-accelerated-2d-canvas']),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_commit_worker.html',
       base_name + '_OffscreenCanvasUnaccelerated2DGPUCompositingWorker',
       test_rect=[0, 0, 360, 200],
-      revision=7,
+      revision=9,
       browser_args=browser_args + ['--disable-accelerated-2d-canvas']),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_resize_on_worker.html',
       base_name + '_OffscreenCanvas2DResizeOnWorker',
       test_rect=[0, 0, 200, 200],
-      revision=2,
+      revision=4,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_webgl_resize_on_worker.html',
       base_name + '_OffscreenCanvasWebglResizeOnWorker',
       test_rect=[0, 0, 200, 200],
-      revision=1,
+      revision=5,
       browser_args=browser_args),
 
     PixelTestPage(
@@ -426,8 +516,71 @@ def ExperimentalCanvasFeaturesPages(base_name):
       test_rect=[0, 0, 140, 140],
       revision=1,
       browser_args=browser_args + ['--disable-accelerated-2d-canvas']),
-]
 
+    PixelTestPage(
+      'pixel_canvas_low_latency_2d.html',
+      base_name + '_CanvasLowLatency2D',
+      test_rect=[0, 0, 100, 100],
+      revision=1,
+      browser_args=browser_args),
+
+    PixelTestPage(
+      'pixel_canvas_low_latency_2d.html',
+      base_name + '_CanvasUnacceleratedLowLatency2D',
+      test_rect=[0, 0, 100, 100],
+      revision=1,
+      browser_args=browser_args + unaccelerated_args),
+  ]
+
+# Only add these tests on platforms where SwiftShader is enabled.
+# Currently this is Windows and Linux.
+def SwiftShaderPages(base_name):
+  browser_args = ['--disable-gpu']
+  suffix = "_SwiftShader"
+  return [
+    PixelTestPage(
+      'pixel_canvas2d.html',
+      base_name + '_Canvas2DRedBox' + suffix,
+      test_rect=[0, 0, 300, 300],
+      revision=1,
+      browser_args=browser_args),
+
+    PixelTestPage(
+      'pixel_css3d.html',
+      base_name + '_CSS3DBlueBox' + suffix,
+      test_rect=[0, 0, 300, 300],
+      revision=1,
+      browser_args=browser_args),
+
+    PixelTestPage(
+      'pixel_webgl_aa_alpha.html',
+      base_name + '_WebGLGreenTriangle_AA_Alpha' + suffix,
+      test_rect=[0, 0, 300, 300],
+      revision=2,
+      browser_args=browser_args),
+  ]
+
+# Test rendering where GPU process is blocked.
+def NoGpuProcessPages(base_name):
+  browser_args = ['--disable-gpu', '--disable-software-rasterizer']
+  suffix = "_NoGpuProcess"
+  return [
+    PixelTestPage(
+      'pixel_canvas2d.html',
+      base_name + '_Canvas2DRedBox' + suffix,
+      test_rect=[0, 0, 300, 300],
+      revision=2,
+      browser_args=browser_args,
+      gpu_process_disabled=True),
+
+    PixelTestPage(
+      'pixel_css3d.html',
+      base_name + '_CSS3DBlueBox' + suffix,
+      test_rect=[0, 0, 300, 300],
+      revision=2,
+      browser_args=browser_args,
+      gpu_process_disabled=True),
+  ]
 
 # Pages that should be run with various macOS specific command line
 # arguments.
@@ -437,6 +590,11 @@ def MacSpecificPages(base_name):
     '--disable-display-list-2d-canvas']
 
   non_chromium_image_args = ['--disable-webgl-image-chromium']
+
+  # This disables the Core Animation compositor, falling back to the
+  # old GLRenderer path, but continuing to allocate IOSurfaces for
+  # WebGL's back buffer.
+  no_overlays_args = ['--disable-mac-overlays']
 
   return [
     # On macOS, test the IOSurface 2D Canvas compositing path.
@@ -450,7 +608,7 @@ def MacSpecificPages(base_name):
       'pixel_canvas2d_webgl.html',
       base_name + '_IOSurface2DCanvasWebGL',
       test_rect=[0, 0, 300, 300],
-      revision=2,
+      revision=4,
       browser_args=iosurface_2d_canvas_args),
 
     # On macOS, test WebGL non-Chromium Image compositing path.
@@ -458,7 +616,7 @@ def MacSpecificPages(base_name):
       'pixel_webgl_aa_alpha.html',
       base_name + '_WebGLGreenTriangle_NonChromiumImage_AA_Alpha',
       test_rect=[0, 0, 300, 300],
-      revision=1,
+      revision=3,
       browser_args=non_chromium_image_args),
     PixelTestPage(
       'pixel_webgl_noaa_alpha.html',
@@ -470,7 +628,7 @@ def MacSpecificPages(base_name):
       'pixel_webgl_aa_noalpha.html',
       base_name + '_WebGLGreenTriangle_NonChromiumImage_AA_NoAlpha',
       test_rect=[0, 0, 300, 300],
-      revision=1,
+      revision=3,
       browser_args=non_chromium_image_args),
     PixelTestPage(
       'pixel_webgl_noaa_noalpha.html',
@@ -484,14 +642,36 @@ def MacSpecificPages(base_name):
       'filter_effects.html',
       base_name + '_CSSFilterEffects',
       test_rect=[0, 0, 300, 300],
-      revision=5),
+      revision=8),
     PixelTestPage(
       'filter_effects.html',
       base_name + '_CSSFilterEffects_NoOverlays',
       test_rect=[0, 0, 300, 300],
-      revision=5,
+      revision=9,
       tolerance=10,
-      browser_args=['--disable-mac-overlays']),
+      browser_args=no_overlays_args),
+
+    # Test WebGL's premultipliedAlpha:false without the CA compositor.
+    PixelTestPage(
+      'pixel_webgl_premultiplied_alpha_false.html',
+      base_name + '_WebGL_PremultipliedAlpha_False_NoOverlays',
+      test_rect=[0, 0, 150, 150],
+      revision=0, # This is not used.
+      browser_args=no_overlays_args,
+      expected_colors=[
+        SCALE_FACTOR_OVERRIDES,
+        {
+          'comment': 'brown',
+          'location': [1, 1],
+          'size': [148, 148],
+          # This is the color on an NVIDIA based MacBook Pro if the
+          # sRGB profile's applied correctly.
+          'color': [102, 77, 0],
+          # This is the color if it isn't.
+          # 'color': [101, 76, 12],
+          'tolerance': 3
+        },
+      ]),
   ]
 
 def DirectCompositionPages(base_name):
@@ -501,13 +681,13 @@ def DirectCompositionPages(base_name):
       'pixel_video_mp4.html',
       base_name + '_DirectComposition_Video_MP4',
       test_rect=[0, 0, 300, 300],
-      revision=4,
+      revision=6,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_video_vp9.html',
       base_name + '_DirectComposition_Video_VP9',
       test_rect=[0, 0, 300, 300],
-      revision=5,
+      revision=7,
       browser_args=browser_args),
   ]

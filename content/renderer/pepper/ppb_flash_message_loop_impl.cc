@@ -87,11 +87,9 @@ int32_t PPB_Flash_MessageLoop_Impl::InternalRun(
   // destroyed when the nested run loop exits.
   scoped_refptr<State> state_protector(state_);
   {
-    base::MessageLoop::ScopedNestableTaskAllower allow(
-        base::MessageLoop::current());
     blink::WebView::WillEnterModalLoop();
 
-    base::RunLoop().Run();
+    base::RunLoop(base::RunLoop::Type::kNestableTasksAllowed).Run();
 
     blink::WebView::DidExitModalLoop();
   }
@@ -106,7 +104,7 @@ void PPB_Flash_MessageLoop_Impl::InternalQuit(int32_t result) {
   state_->set_quit_called();
   state_->set_result(result);
 
-  base::MessageLoop::current()->QuitNow();
+  base::RunLoop::QuitCurrentDeprecated();
 
   if (!state_->run_callback().is_null())
     state_->run_callback().Run(result);

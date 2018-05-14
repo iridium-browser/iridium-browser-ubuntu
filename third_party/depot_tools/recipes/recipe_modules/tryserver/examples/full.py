@@ -28,8 +28,7 @@ def RunSteps(api):
             'Foo', api.properties['patch_text']))])
     return
 
-  api.tryserver.maybe_apply_issue()
-  if api.tryserver.can_apply_issue:
+  if api.tryserver.is_gerrit_issue:
     api.tryserver.get_footers()
   api.tryserver.get_files_affected_by_patch(
       api.properties.get('test_patch_root'))
@@ -42,6 +41,8 @@ def RunSteps(api):
   api.tryserver.set_test_failure_tryjob_result()
   api.tryserver.set_invalid_test_results_tryjob_result()
 
+  api.tryserver.normalize_footer_name('Cr-Commit-Position')
+
   with api.tryserver.set_failure_hash():
     api.python.failing_step('fail', 'foo')
 
@@ -49,45 +50,29 @@ def RunSteps(api):
 def GenTests(api):
   description_step = api.override_step_data(
       'git_cl description', stdout=api.raw_io.output_text('foobar'))
+  # The 'test_patch_root' property used below is just so that these
+  # tests can avoid using the gclient module to calculate the
+  # patch root. Normal users would use gclient.calculate_patch_root().
   yield (api.test('with_git_patch') +
          api.properties(
-              path_config='buildbot',
-              patch_storage='git',
-              patch_project='v8',
-              patch_repo_url='http://patch.url/',
-              patch_ref='johndoe#123.diff'))
+             path_config='buildbot',
+             patch_storage='git',
+             patch_project='v8',
+             patch_repo_url='http://patch.url/',
+             patch_ref='johndoe#123.diff',
+             test_patch_root='v8'))
 
   yield (api.test('with_git_patch_luci') +
          api.properties(
              patch_storage='git',
              patch_project='v8',
              patch_repo_url='http://patch.url/',
-             patch_ref='johndoe#123.diff'))
+             patch_ref='johndoe#123.diff',
+             test_patch_root='v8'))
 
-  yield (api.test('with_rietveld_patch') +
-         api.properties.tryserver() +
-         description_step)
-
-  yield (api.test('with_wrong_patch') + api.platform('win', 32))
-
-  yield (api.test('with_rietveld_patch_new') +
-         api.properties.tryserver(test_patch_root='sub/project') +
-         description_step)
-
-  yield api.test('with_gerrit_patch_deprecated') + api.properties.tryserver(
-      patch_project='infra/infra',
-      gerrit='https://chromium-review.googlesource.com',
-      patch_storage='gerrit',
-      repository='https://chromium.googlesource.com/infra/infra',
-      rietveld=None,
-      **{
-        'event.change.id': 'infra%2Finfra~master~Ideadbeaf',
-        'event.change.number': 338811,
-        'event.change.url':
-          'https://chromium-review.googlesource.com/#/c/338811',
-        'event.patchSet.ref': 'refs/changes/11/338811/3',
-      }
-  )
+  yield (api.test('with_wrong_patch') +
+         api.platform('win', 32) +
+         api.properties(test_patch_root=''))
 
   yield (api.test('with_gerrit_patch') +
          api.properties.tryserver(gerrit_project='infra/infra'))

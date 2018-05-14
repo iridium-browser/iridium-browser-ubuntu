@@ -3,23 +3,6 @@
 // found in the LICENSE file.
 
 /**
- * Sets 'hidden' property of a cr.ui.Command instance and dispatches
- * 'hiddenChange' event manually so that associated cr.ui.MenuItem can handle
- * the event.
- * TODO(fukino): Remove this workaround when crbug.com/481941 is fixed.
- *
- * @param {boolean} value New value of hidden property.
- */
-cr.ui.Command.prototype.setHidden = function(value) {
-  if (value === this.hidden)
-    return;
-
-  var oldValue = this.hidden;
-  this.hidden = value;
-  cr.dispatchPropertyChange(this, 'hidden', value, oldValue);
-};
-
-/**
  * A command.
  * @interface
  */
@@ -363,7 +346,30 @@ var CommandHandler = function(fileManager, selectionHandler) {
   selectionHandler.addEventListener(
       FileSelectionHandler.EventType.CHANGE_THROTTLED,
       this.updateAvailability.bind(this));
+
+  chrome.commandLinePrivate.hasSwitch(
+      'enable-zip-archiver-packer', function(enabled) {
+        CommandHandler.IS_ZIP_ARCHIVER_PACKER_ENABLED_ = enabled;
+      }.bind(this));
 };
+
+/**
+ * A flag that determines whether zip archiver - packer is enabled or no.
+ * @type {boolean}
+ * @private
+ */
+CommandHandler.IS_ZIP_ARCHIVER_PACKER_ENABLED_ = false;
+
+/**
+ * Supported disk file system types for renaming.
+ * @type {!Array<!VolumeManagerCommon.FileSystemType>}
+ * @const
+ * @private
+ */
+CommandHandler.RENAME_DISK_FILE_SYSYTEM_SUPPORT_ = [
+  VolumeManagerCommon.FileSystemType.EXFAT,
+  VolumeManagerCommon.FileSystemType.VFAT
+];
 
 /**
  * Updates the availability of all commands.
@@ -436,9 +442,15 @@ CommandHandler.COMMANDS_['unmount'] = /** @type {Command} */ ({
    * @param {!CommandHandlerDeps} fileManager The file manager instance.
    */
   execute: function(event, fileManager) {
-    var errorCallback = function() {
-      fileManager.ui.alertDialog.showHtml(
-          '', str('UNMOUNT_FAILED'), null, null, null);
+    /** @param {VolumeManagerCommon.VolumeType=} opt_volumeType */
+    var errorCallback = function(opt_volumeType) {
+      if (opt_volumeType === VolumeManagerCommon.VolumeType.REMOVABLE) {
+        fileManager.ui.alertDialog.showHtml(
+            '', str('UNMOUNT_FAILED'), null, null, null);
+      } else {
+        fileManager.ui.alertDialog.showHtml(
+            '', str('UNMOUNT_PROVIDED_FAILED'), null, null, null);
+      }
     };
 
     var volumeInfo =
@@ -449,7 +461,8 @@ CommandHandler.COMMANDS_['unmount'] = /** @type {Command} */ ({
       return;
     }
 
-    fileManager.volumeManager.unmount(volumeInfo, function() {}, errorCallback);
+    fileManager.volumeManager.unmount(volumeInfo, function() {
+    }, errorCallback.bind(null, volumeInfo.volumeType));
   },
   /**
    * @param {!Event} event Command event.
@@ -581,7 +594,8 @@ CommandHandler.COMMANDS_['new-folder'] = (function() {
               directoryTree.updateAndSelectNewDirectory(
                   targetDirectory, newDirectory);
               fileManager.directoryTreeNamingController.attachAndStart(
-                  assert(fileManager.ui.directoryTree.selectedItem));
+                  assert(fileManager.ui.directoryTree.selectedItem), false,
+                  null);
             } else {
               directoryModel.updateAndSelectNewDirectory(
                   newDirectory).then(function() {
@@ -862,6 +876,33 @@ CommandHandler.COMMANDS_['paste'] = /** @type {Command} */ ({
 });
 
 /**
+ * Pastes files from clipboard. This is basically same as 'paste'.
+ * This command is used for always showing the Paste command to gear menu.
+ * @type {Command}
+ */
+CommandHandler.COMMANDS_['paste-into-current-folder'] =
+    /** @type {Command} */ ({
+      /**
+       * @param {!Event} event Command event.
+       * @param {!CommandHandlerDeps} fileManager CommandHandlerDeps to use.
+       */
+      execute: function(event, fileManager) {
+        fileManager.document.execCommand('paste');
+      },
+      /**
+       * @param {!Event} event Command event.
+       * @param {!CommandHandlerDeps} fileManager CommandHandlerDeps to use.
+       */
+      canExecute: function(event, fileManager) {
+        var fileTransferController = fileManager.fileTransferController;
+
+        event.canExecute = !!fileTransferController &&
+            fileTransferController.queryPasteCommandEnabled(
+                fileManager.directoryModel.getCurrentDirEntry());
+      }
+    });
+
+/**
  * Pastes files from clipboard into the selected folder.
  * @type {Command}
  */
@@ -925,14 +966,31 @@ CommandHandler.COMMANDS_['rename'] = /** @type {Command} */ ({
    * @param {!CommandHandlerDeps} fileManager CommandHandlerDeps to use.
    */
   execute: function(event, fileManager) {
-    if (event.target instanceof DirectoryTree) {
-      var directoryTree = event.target;
-      assert(fileManager.directoryTreeNamingController)
-          .attachAndStart(assert(directoryTree.selectedItem));
-    } else if (event.target instanceof DirectoryItem) {
-      var directoryItem = event.target;
-      assert(fileManager.directoryTreeNamingController)
-          .attachAndStart(directoryItem);
+    if (event.target instanceof DirectoryTree ||
+        event.target instanceof DirectoryItem) {
+      var isRemovableRoot = false;
+      var entry = CommandUtil.getCommandEntry(event.target);
+      if (entry) {
+        var volumeInfo = fileManager.volumeManager.getVolumeInfo(entry);
+        // Checks whether the target is actually external drive or just a folder
+        // inside the drive.
+        if (volumeInfo &&
+            CommandUtil.isRootEntry(fileManager.volumeManager, entry)) {
+          isRemovableRoot = true;
+        }
+      }
+
+      if (event.target instanceof DirectoryTree) {
+        var directoryTree = event.target;
+        assert(fileManager.directoryTreeNamingController)
+            .attachAndStart(
+                assert(directoryTree.selectedItem), isRemovableRoot,
+                volumeInfo);
+      } else if (event.target instanceof DirectoryItem) {
+        var directoryItem = event.target;
+        assert(fileManager.directoryTreeNamingController)
+            .attachAndStart(directoryItem, isRemovableRoot, volumeInfo);
+      }
     } else {
       fileManager.namingController.initiateRename();
     }
@@ -942,6 +1000,26 @@ CommandHandler.COMMANDS_['rename'] = /** @type {Command} */ ({
    * @param {!CommandHandlerDeps} fileManager CommandHandlerDeps to use.
    */
   canExecute: function(event, fileManager) {
+    // Check if it is removable drive
+    var root = CommandUtil.getCommandEntry(event.target);
+    // |root| is null for unrecognized volumes. Do not enable rename command
+    // for such volumes because they need to be formatted prior to rename.
+    if (root != null) {
+      var location = root && fileManager.volumeManager.getLocationInfo(root);
+      var volumeInfo = fileManager.volumeManager.getVolumeInfo(root);
+      var writable = location && !location.isReadOnly;
+      var removable = location &&
+          location.rootType === VolumeManagerCommon.RootType.REMOVABLE;
+      var canExecute = removable && writable && volumeInfo &&
+          CommandHandler.RENAME_DISK_FILE_SYSYTEM_SUPPORT_.indexOf(
+              volumeInfo.diskFileSystemType) > -1;
+      event.canExecute = canExecute;
+      event.command.setHidden(!removable);
+      if (removable)
+        return;
+    }
+
+    // Check if it is file or folder
     var renameTarget = CommandUtil.isFromSelectionMenu(event) ?
         fileManager.ui.listContainer.currentList :
         event.target;
@@ -1248,9 +1326,21 @@ CommandHandler.COMMANDS_['zip-selection'] = /** @type {Command} */ ({
     var dirEntry = fileManager.getCurrentDirectoryEntry();
     if (!dirEntry)
       return;
-    var selectionEntries = fileManager.getSelection().entries;
-    fileManager.fileOperationManager.zipSelection(
-        /** @type {!DirectoryEntry} */ (dirEntry), selectionEntries);
+
+    if (CommandHandler.IS_ZIP_ARCHIVER_PACKER_ENABLED_) {
+      fileManager.taskController.getFileTasks()
+          .then(function(tasks) {
+            tasks.execute(FileTasks.ZIP_ARCHIVER_ZIP_TASK_ID);
+          })
+          .catch(function(error) {
+            if (error)
+              console.error(error.stack || error);
+          });
+    } else {
+      var selectionEntries = fileManager.getSelection().entries;
+      fileManager.fileOperationManager.zipSelection(
+          /** @type {!DirectoryEntry} */ (dirEntry), selectionEntries);
+    }
   },
   /**
    * @param {!Event} event Command event.
@@ -1259,10 +1349,14 @@ CommandHandler.COMMANDS_['zip-selection'] = /** @type {Command} */ ({
   canExecute: function(event, fileManager) {
     var dirEntry = fileManager.getCurrentDirectoryEntry();
     var selection = fileManager.getSelection();
+
+    var isOnEligibleLocation = CommandHandler.IS_ZIP_ARCHIVER_PACKER_ENABLED_ ?
+        true :
+        !fileManager.directoryModel.isOnDrive();
+
     event.canExecute = dirEntry && !fileManager.directoryModel.isReadOnly() &&
-        !fileManager.directoryModel.isOnDrive() &&
-        !fileManager.directoryModel.isOnMTP() && selection &&
-        selection.totalCount > 0;
+        !fileManager.directoryModel.isOnMTP() && isOnEligibleLocation &&
+        selection && selection.totalCount > 0;
   }
 });
 
@@ -1566,6 +1660,32 @@ CommandHandler.COMMANDS_['open-gear-menu'] = /** @type {Command} */ ({
 });
 
 /**
+ * Handle back button.
+ * @type {Command}
+ */
+CommandHandler.COMMANDS_['browser-back'] = /** @type {Command} */ ({
+  /**
+   * @param {!Event} event Command event.
+   * @param {!CommandHandlerDeps} fileManager CommandHandlerDeps to use.
+   */
+  execute: function(event, fileManager) {
+    // TODO(fukino): It should be better to minimize Files app only when there
+    // is no back stack, and otherwise use BrowserBack for history navigation.
+    // https://crbug.com/624100.
+    const currentWindow = chrome.app.window.current();
+    if (currentWindow)
+      currentWindow.minimize();
+  },
+  /**
+   * @param {!Event} event Command event.
+   * @param {!CommandHandlerDeps} fileManager CommandHandlerDeps to use.
+   */
+  canExecute: function(event, fileManager) {
+    event.canExecute = CommandUtil.canExecuteAlways;
+  }
+});
+
+/**
  * Configures the currently selected volume.
  */
 CommandHandler.COMMANDS_['configure'] = /** @type {Command} */ ({
@@ -1633,7 +1753,7 @@ CommandHandler.COMMANDS_['set-wallpaper'] = /** @type {Command} */ ({
           reject(fileReader.error);
         };
         fileReader.readAsArrayBuffer(blob);
-      })
+      });
     }).then(function(/** @type {!ArrayBuffer} */ arrayBuffer) {
       return new Promise(function(resolve, reject) {
         chrome.wallpaper.setWallpaper({

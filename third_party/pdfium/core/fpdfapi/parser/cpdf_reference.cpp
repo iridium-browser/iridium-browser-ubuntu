@@ -7,6 +7,7 @@
 #include "core/fpdfapi/parser/cpdf_reference.h"
 
 #include "core/fpdfapi/parser/cpdf_indirect_object_holder.h"
+#include "core/fxcrt/fx_stream.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
 
@@ -19,9 +20,9 @@ CPDF_Object::Type CPDF_Reference::GetType() const {
   return REFERENCE;
 }
 
-CFX_ByteString CPDF_Reference::GetString() const {
+ByteString CPDF_Reference::GetString() const {
   CPDF_Object* obj = SafeGetDirect();
-  return obj ? obj->GetString() : CFX_ByteString();
+  return obj ? obj->GetString() : ByteString();
 }
 
 float CPDF_Reference::GetNumber() const {

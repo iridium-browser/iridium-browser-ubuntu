@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/views/device_chooser_content_view.h"
 #include "components/bubble/bubble_controller.h"
 #include "ui/views/bubble/bubble_dialog_delegate.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/styled_label.h"
 #include "ui/views/controls/table/table_view_observer.h"
 #include "ui/views/window/dialog_client_view.h"
@@ -47,7 +48,8 @@ class ChooserBubbleUiViewDelegate : public views::BubbleDialogDelegateView,
   // views::DialogDelegate:
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   bool IsDialogButtonEnabled(ui::DialogButton button) const override;
-  views::View* CreateFootnoteView() override;
+  views::View* GetInitiallyFocusedView() override;
+  views::View* CreateExtraView() override;
   bool Accept() override;
   bool Cancel() override;
   bool Close() override;
@@ -108,6 +110,10 @@ base::string16 ChooserBubbleUiViewDelegate::GetWindowTitle() const {
   return device_chooser_content_view_->GetWindowTitle();
 }
 
+views::View* ChooserBubbleUiViewDelegate::GetInitiallyFocusedView() {
+  return GetDialogClientView()->cancel_button();
+}
+
 base::string16 ChooserBubbleUiViewDelegate::GetDialogButtonLabel(
     ui::DialogButton button) const {
   return device_chooser_content_view_->GetDialogButtonLabel(button);
@@ -118,8 +124,10 @@ bool ChooserBubbleUiViewDelegate::IsDialogButtonEnabled(
   return device_chooser_content_view_->IsDialogButtonEnabled(button);
 }
 
-views::View* ChooserBubbleUiViewDelegate::CreateFootnoteView() {
-  return device_chooser_content_view_->footnote_link();
+views::View* ChooserBubbleUiViewDelegate::CreateExtraView() {
+  std::unique_ptr<views::View> extra_view =
+      device_chooser_content_view_->CreateExtraView();
+  return extra_view ? extra_view.release() : nullptr;
 }
 
 bool ChooserBubbleUiViewDelegate::Accept() {
@@ -154,7 +162,7 @@ const views::Widget* ChooserBubbleUiViewDelegate::GetWidget() const {
 }
 
 void ChooserBubbleUiViewDelegate::OnSelectionChanged() {
-  GetDialogClientView()->UpdateDialogButtons();
+  DialogModelChanged();
 }
 
 void ChooserBubbleUiViewDelegate::UpdateAnchor(Browser* browser) {
@@ -167,7 +175,6 @@ void ChooserBubbleUiViewDelegate::UpdateAnchor(Browser* browser) {
 void ChooserBubbleUiViewDelegate::set_bubble_reference(
     BubbleReference bubble_reference) {
   bubble_reference_ = bubble_reference;
-  DCHECK(bubble_reference_);
 }
 
 void ChooserBubbleUiViewDelegate::UpdateTableView() const {

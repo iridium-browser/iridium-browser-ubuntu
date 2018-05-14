@@ -16,9 +16,6 @@
 // Helper for utilizing native FakeServer infrastructure in Android tests.
 class FakeServerHelperAndroid {
  public:
-  // Registers the native methods.
-  static bool Register(JNIEnv* env);
-
   // Creates a FakeServerHelperAndroid.
   FakeServerHelperAndroid(JNIEnv* env, jobject obj);
 
@@ -125,10 +122,12 @@ class FakeServerHelperAndroid {
 
   // Deletes an entity on the server. This is the JNI way of injecting a
   // tombstone.
-  void DeleteEntity(JNIEnv* env,
-                    const base::android::JavaParamRef<jobject>& obj,
-                    jlong fake_server,
-                    const base::android::JavaParamRef<jstring>& id);
+  void DeleteEntity(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jlong fake_server,
+      const base::android::JavaParamRef<jstring>& id,
+      const base::android::JavaParamRef<jstring>& client_defined_unique_tag);
 
   // Simulates a dashboard stop and clear.
   void ClearServerData(JNIEnv* env,

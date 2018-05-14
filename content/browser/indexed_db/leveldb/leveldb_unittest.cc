@@ -17,10 +17,11 @@
 #include "content/browser/indexed_db/leveldb/leveldb_env.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/env_chromium.h"
+#include "third_party/leveldatabase/leveldb_chrome.h"
 
 namespace content {
+namespace leveldb_unittest {
 
-namespace {
 static const size_t kDefaultMaxOpenIteratorsPerDatabase = 50;
 
 class SimpleComparator : public LevelDBComparator {
@@ -32,8 +33,6 @@ class SimpleComparator : public LevelDBComparator {
   }
   const char* Name() const override { return "temp_comparator"; }
 };
-
-}  // namespace
 
 TEST(LevelDBDatabaseTest, CorruptionTest) {
   base::ScopedTempDir temp_directory;
@@ -66,10 +65,8 @@ TEST(LevelDBDatabaseTest, CorruptionTest) {
   leveldb.reset();
   EXPECT_FALSE(leveldb);
 
-  base::FilePath file_path = temp_directory.GetPath().AppendASCII("CURRENT");
-  base::File file(file_path, base::File::FLAG_OPEN | base::File::FLAG_WRITE);
-  file.SetLength(0);
-  file.Close();
+  EXPECT_TRUE(
+      leveldb_chrome::CorruptClosedDBForTesting(temp_directory.GetPath()));
 
   status = LevelDBDatabase::Open(temp_directory.GetPath(), &comparator,
                                  kDefaultMaxOpenIteratorsPerDatabase, &leveldb);
@@ -113,4 +110,5 @@ TEST(LevelDB, Locking) {
   EXPECT_TRUE(status.ok());
 }
 
+}  // namespace leveldb_unittest
 }  // namespace content

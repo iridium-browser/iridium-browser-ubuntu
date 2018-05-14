@@ -38,6 +38,9 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   enum {
     kFrameSizeAlignment = 16,
     kFrameSizePadding = 16,
+
+    // Note: This value is dependent on what's used by ffmpeg, do not change
+    // without inspecting av_frame_get_buffer() first.
     kFrameAddressAlignment = 32
   };
 
@@ -76,7 +79,7 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
 
   // CB to be called on the mailbox backing this frame when the frame is
   // destroyed.
-  typedef base::Callback<void(const gpu::SyncToken&)> ReleaseMailboxCB;
+  typedef base::OnceCallback<void(const gpu::SyncToken&)> ReleaseMailboxCB;
 
   // Interface representing client operations on a SyncToken, i.e. insert one in
   // the GPU Command Buffer and wait for it.
@@ -100,11 +103,10 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
                             const gfx::Rect& visible_rect,
                             const gfx::Size& natural_size);
 
-  // Creates a new YUV frame in system memory with given parameters (|format|
-  // must be YUV). Buffers for the frame are allocated but not initialized. The
-  // caller most not make assumptions about the actual underlying size(s), but
-  // check the returned VideoFrame instead.
-  // TODO(mcasas): implement the RGB version of this factory method.
+  // Creates a new frame in system memory with given parameters. Buffers for the
+  // frame are allocated but not initialized. The caller most not make
+  // assumptions about the actual underlying size(s), but check the returned
+  // VideoFrame instead.
   static scoped_refptr<VideoFrame> CreateFrame(VideoPixelFormat format,
                                                const gfx::Size& coded_size,
                                                const gfx::Rect& visible_rect,
@@ -126,7 +128,7 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   static scoped_refptr<VideoFrame> WrapNativeTextures(
       VideoPixelFormat format,
       const gpu::MailboxHolder (&mailbox_holder)[kMaxPlanes],
-      const ReleaseMailboxCB& mailbox_holders_release_cb,
+      ReleaseMailboxCB mailbox_holders_release_cb,
       const gfx::Size& coded_size,
       const gfx::Rect& visible_rect,
       const gfx::Size& natural_size,
@@ -191,7 +193,7 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
 
 #if defined(OS_LINUX)
   // Wraps provided dmabufs
-  // (https://www.kernel.org/doc/Documentation/dma-buf-sharing.txt) with a
+  // (https://www.kernel.org/doc/html/latest/driver-api/dma-buf.html) with a
   // VideoFrame. The dmabuf fds are dup()ed on creation, so that the VideoFrame
   // retains a reference to them, and are automatically close()d on destruction,
   // dropping the reference. The caller may safely close() its reference after
@@ -295,6 +297,9 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   // accessed via data(), visible_data() etc.
   bool HasTextures() const;
 
+  // Returns the number of native textures.
+  size_t NumTextures() const;
+
   // Returns the color space of this frame's content.
   gfx::ColorSpace ColorSpace() const;
   void set_color_space(const gfx::ColorSpace& color_space);
@@ -363,7 +368,10 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   //
   // WARNING: This method is not thread safe; it should only be called if you
   // are still the only owner of this VideoFrame.
-  void SetReleaseMailboxCB(const ReleaseMailboxCB& release_mailbox_cb);
+  void SetReleaseMailboxCB(ReleaseMailboxCB release_mailbox_cb);
+
+  // Tests whether a mailbox release callback is configured.
+  bool HasReleaseMailboxCB() const;
 
   // Adds a callback to be run when the VideoFrame is about to be destroyed.
   // The callback may be run from ANY THREAD, and so it is up to the client to
@@ -390,11 +398,11 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
     timestamp_ = timestamp;
   }
 
-  // It uses |client| to insert a new sync point and potentially waits on a
-  // older sync point. The final sync point will be used to release this
-  // VideoFrame.
+  // It uses |client| to insert a new sync token and potentially waits on an
+  // older sync token. The final sync point will be used to release this
+  // VideoFrame. Also returns the new sync token.
   // This method is thread safe. Both blink and compositor threads can call it.
-  void UpdateReleaseSyncToken(SyncTokenClient* client);
+  gpu::SyncToken UpdateReleaseSyncToken(SyncTokenClient* client);
 
   // Returns a human-readable string describing |*this|.
   std::string AsHumanReadableString();
@@ -403,8 +411,8 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   // guaranteed to be unique within a single process.
   int unique_id() const { return unique_id_; }
 
-  // Returns the number of bits per channel for given |format|.
-  int BitsPerChannel(VideoPixelFormat format);
+  // Returns the number of bits per channel.
+  size_t BitDepth() const;
 
  protected:
   friend class base::RefCountedThreadSafe<VideoFrame>;
@@ -453,8 +461,8 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
              const gfx::Size& coded_size,
              const gfx::Rect& visible_rect,
              const gfx::Size& natural_size,
-             const gpu::MailboxHolder(&mailbox_holders)[kMaxPlanes],
-             const ReleaseMailboxCB& mailbox_holder_release_cb,
+             const gpu::MailboxHolder (&mailbox_holders)[kMaxPlanes],
+             ReleaseMailboxCB mailbox_holder_release_cb,
              base::TimeDelta timestamp);
 
   static scoped_refptr<VideoFrame> WrapExternalStorage(
@@ -488,7 +496,7 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   // alignment for each individual plane.
   static gfx::Size CommonAlignment(VideoPixelFormat format);
 
-  void AllocateYUV(bool zero_initialize_memory);
+  void AllocateMemory(bool zero_initialize_memory);
 
   // Frame format.
   const VideoPixelFormat format_;

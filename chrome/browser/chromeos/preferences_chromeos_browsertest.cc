@@ -5,58 +5,41 @@
 #include <stddef.h>
 #include <sys/types.h>
 
-#include <set>
-#include <string>
-
-#include "ash/shell.h"
 #include "base/command_line.h"
-#include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/ref_counted.h"
-#include "base/run_loop.h"
-#include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager_impl.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
-#include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
 #include "chrome/browser/chromeos/system/fake_input_device_settings.h"
-#include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_chromeos.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/chromeos_switches.h"
 #include "components/feedback/tracing_manager.h"
 #include "components/prefs/pref_service.h"
-#include "components/prefs/pref_store.h"
-#include "components/prefs/writeable_pref_store.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/common/service_manager_connection.h"
 #include "content/public/test/test_utils.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/fake_ime_keyboard.h"
 #include "ui/events/event_utils.h"
 
 namespace chromeos {
 
-namespace {
-
-const char* const kTestUsers[] = {"test-user1@gmail.com",
-                                  "test-user2@gmail.com"};
-
-}  // namespace
-
 class PreferencesTest : public LoginManagerTest {
  public:
   PreferencesTest()
       : LoginManagerTest(true), input_settings_(nullptr), keyboard_(nullptr) {
+    struct {
+      const char* email;
+      const char* gaia_id;
+    } const kTestUsers[] = {{"test-user1@gmail.com", "1111111111"},
+                            {"test-user2@gmail.com", "2222222222"}};
     for (size_t i = 0; i < arraysize(kTestUsers); ++i) {
-      test_users_.push_back(AccountId::FromUserEmail(kTestUsers[i]));
+      test_users_.push_back(AccountId::FromUserEmailGaiaId(
+          kTestUsers[i].email, kTestUsers[i].gaia_id));
     }
   }
 
@@ -82,12 +65,12 @@ class PreferencesTest : public LoginManagerTest {
   void SetPrefs(PrefService* prefs, bool variant) {
     prefs->SetBoolean(prefs::kTapToClickEnabled, variant);
     prefs->SetBoolean(prefs::kPrimaryMouseButtonRight, !variant);
+    prefs->SetBoolean(prefs::kMouseReverseScroll, variant);
     prefs->SetBoolean(prefs::kTapDraggingEnabled, variant);
     prefs->SetBoolean(prefs::kEnableTouchpadThreeFingerClick, !variant);
     prefs->SetBoolean(prefs::kNaturalScroll, variant);
     prefs->SetInteger(prefs::kMouseSensitivity, !variant);
     prefs->SetInteger(prefs::kTouchpadSensitivity, variant);
-    prefs->SetBoolean(prefs::kTouchHudProjectionEnabled, !variant);
     prefs->SetBoolean(prefs::kLanguageXkbAutoRepeatEnabled, variant);
     prefs->SetInteger(prefs::kLanguageXkbAutoRepeatDelay, variant ? 100 : 500);
     prefs->SetInteger(prefs::kLanguageXkbAutoRepeatInterval, variant ? 1 : 4);
@@ -102,6 +85,8 @@ class PreferencesTest : public LoginManagerTest {
     EXPECT_EQ(prefs->GetBoolean(prefs::kPrimaryMouseButtonRight),
               input_settings_->current_mouse_settings()
                   .GetPrimaryButtonRight());
+    EXPECT_EQ(prefs->GetBoolean(prefs::kMouseReverseScroll),
+              input_settings_->current_mouse_settings().GetReverseScroll());
     EXPECT_EQ(prefs->GetBoolean(prefs::kTapDraggingEnabled),
               input_settings_->current_touchpad_settings().GetTapDragging());
     EXPECT_EQ(prefs->GetBoolean(prefs::kEnableTouchpadThreeFingerClick),
@@ -111,8 +96,6 @@ class PreferencesTest : public LoginManagerTest {
               input_settings_->current_mouse_settings().GetSensitivity());
     EXPECT_EQ(prefs->GetInteger(prefs::kTouchpadSensitivity),
               input_settings_->current_touchpad_settings().GetSensitivity());
-    EXPECT_EQ(prefs->GetBoolean(prefs::kTouchHudProjectionEnabled),
-              ash::Shell::Get()->is_touch_hud_projection_enabled());
     EXPECT_EQ(prefs->GetBoolean(prefs::kLanguageXkbAutoRepeatEnabled),
               keyboard_->auto_repeat_is_enabled_);
     input_method::AutoRepeatRate rate = keyboard_->last_auto_repeat_rate_;
@@ -135,15 +118,6 @@ class PreferencesTest : public LoginManagerTest {
               prefs->GetBoolean(prefs::kPrimaryMouseButtonRight));
   }
 
-  void DisableAnimations() {
-    // Disable animations for user transitions.
-    chrome::MultiUserWindowManagerChromeOS* manager =
-        static_cast<chrome::MultiUserWindowManagerChromeOS*>(
-            chrome::MultiUserWindowManager::GetInstance());
-    manager->SetAnimationSpeedForTest(
-        chrome::MultiUserWindowManagerChromeOS::ANIMATION_SPEED_DISABLED);
-  }
-
   std::vector<AccountId> test_users_;
 
  private:
@@ -153,64 +127,9 @@ class PreferencesTest : public LoginManagerTest {
   DISALLOW_COPY_AND_ASSIGN(PreferencesTest);
 };
 
-class PreferencesServiceBrowserTest : public InProcessBrowserTest {
- public:
-  PreferencesServiceBrowserTest() {}
-
- protected:
-  static service_manager::Connector* connector() {
-    return content::ServiceManagerConnection::GetForProcess()->GetConnector();
-  }
-
-  void WaitForPrefChange(PrefStore* store, const std::string& key) {
-    base::RunLoop run_loop;
-    TestPrefObserver observer(key, run_loop.QuitClosure());
-    store->AddObserver(&observer);
-    run_loop.Run();
-    store->RemoveObserver(&observer);
-  }
-
-  bool GetIntegerPrefValue(PrefStore* store,
-                           const std::string& key,
-                           int* out_value) {
-    const base::Value* value = nullptr;
-    if (!store->GetValue(key, &value))
-      return false;
-    return value->GetAsInteger(out_value);
-  }
-
- private:
-  class TestPrefObserver : public PrefStore::Observer {
-   public:
-    TestPrefObserver(const std::string& pref_name,
-                     const base::Closure& callback)
-        : pref_name_(pref_name), callback_(callback) {}
-
-    ~TestPrefObserver() override {}
-
-    // PrefStore::Observer:
-    void OnPrefValueChanged(const std::string& key) override {
-      if (key == pref_name_)
-        callback_.Run();
-    }
-
-    void OnInitializationCompleted(bool success) override {
-      ASSERT_TRUE(success);
-    }
-
-   private:
-    const std::string pref_name_;
-    const base::Closure callback_;
-
-    DISALLOW_COPY_AND_ASSIGN(TestPrefObserver);
-  };
-
-  DISALLOW_COPY_AND_ASSIGN(PreferencesServiceBrowserTest);
-};
-
 IN_PROC_BROWSER_TEST_F(PreferencesTest, PRE_MultiProfiles) {
-  RegisterUser(test_users_[0].GetUserEmail());
-  RegisterUser(test_users_[1].GetUserEmail());
+  RegisterUser(test_users_[0]);
+  RegisterUser(test_users_[1]);
   chromeos::StartupUtils::MarkOobeCompleted();
 }
 
@@ -219,7 +138,7 @@ IN_PROC_BROWSER_TEST_F(PreferencesTest, MultiProfiles) {
 
   // Add first user and init its preferences. Check that corresponding
   // settings has been changed.
-  LoginUser(test_users_[0].GetUserEmail());
+  LoginUser(test_users_[0]);
   const user_manager::User* user1 = user_manager->FindUser(test_users_[0]);
   PrefService* prefs1 =
       ProfileHelper::Get()->GetProfileByUserUnsafe(user1)->GetPrefs();
@@ -230,8 +149,7 @@ IN_PROC_BROWSER_TEST_F(PreferencesTest, MultiProfiles) {
   // Add second user and init its prefs with different values.
   UserAddingScreen::Get()->Start();
   content::RunAllPendingInMessageLoop();
-  DisableAnimations();
-  AddUser(test_users_[1].GetUserEmail());
+  AddUser(test_users_[1]);
   content::RunAllPendingInMessageLoop();
   const user_manager::User* user2 = user_manager->FindUser(test_users_[1]);
   EXPECT_TRUE(user2->is_active());

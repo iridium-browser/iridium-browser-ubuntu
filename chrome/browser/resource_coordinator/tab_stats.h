@@ -43,15 +43,18 @@ struct TabStats {
   int discard_count = 0;
   bool has_beforeunload_handler = false;
   base::TimeTicks last_active;
-  base::TimeTicks last_hidden;
   content::RenderProcessHost* render_process_host = nullptr;
   base::ProcessHandle renderer_handle = 0;
   int child_process_host_id = 0;
+  std::string tab_url;
+  std::string favicon_url;
   base::string16 title;
 #if defined(OS_CHROMEOS)
   int oom_score = 0;
 #endif
-  int64_t tab_contents_id = 0;  // Unique ID per WebContents.
+  // Unique ID for the tab. This is constant across discards/reloads and
+  // tab strip model manipulations.
+  int32_t id = 0;
   bool is_auto_discardable = true;
 };
 

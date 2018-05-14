@@ -4,11 +4,10 @@
 
 #include "platform/scheduler/renderer/webthread_impl_for_renderer_scheduler.h"
 
+#include "base/location.h"
 #include "platform/scheduler/base/task_queue.h"
-#include "platform/scheduler/child/web_task_runner_impl.h"
 #include "platform/scheduler/renderer/renderer_scheduler_impl.h"
 #include "platform/scheduler/renderer/renderer_web_scheduler_impl.h"
-#include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 namespace scheduler {
@@ -19,11 +18,10 @@ WebThreadImplForRendererScheduler::WebThreadImplForRendererScheduler(
       task_runner_(scheduler->DefaultTaskQueue()),
       idle_task_runner_(scheduler->IdleTaskRunner()),
       scheduler_(scheduler),
-      thread_id_(base::PlatformThread::CurrentId()),
-      web_task_runner_(
-          WebTaskRunnerImpl::Create(scheduler->DefaultTaskQueue())) {}
+      thread_id_(base::PlatformThread::CurrentId()) {}
 
-WebThreadImplForRendererScheduler::~WebThreadImplForRendererScheduler() {}
+WebThreadImplForRendererScheduler::~WebThreadImplForRendererScheduler() =
+    default;
 
 blink::PlatformThreadId WebThreadImplForRendererScheduler::ThreadId() const {
   return thread_id_;
@@ -33,18 +31,14 @@ blink::WebScheduler* WebThreadImplForRendererScheduler::Scheduler() const {
   return web_scheduler_.get();
 }
 
-base::SingleThreadTaskRunner* WebThreadImplForRendererScheduler::GetTaskRunner()
-    const {
-  return task_runner_.get();
-}
-
 SingleThreadIdleTaskRunner*
 WebThreadImplForRendererScheduler::GetIdleTaskRunner() const {
   return idle_task_runner_.get();
 }
 
-blink::WebTaskRunner* WebThreadImplForRendererScheduler::GetWebTaskRunner() {
-  return web_task_runner_.Get();
+scoped_refptr<base::SingleThreadTaskRunner>
+WebThreadImplForRendererScheduler::GetTaskRunner() const {
+  return task_runner_;
 }
 
 void WebThreadImplForRendererScheduler::AddTaskObserverInternal(

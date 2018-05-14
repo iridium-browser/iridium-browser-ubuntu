@@ -15,19 +15,31 @@ group("common") {
 mojom("common_custom_types") {
   sources = [
     "file.mojom",
+    "file_info.mojom",
     "file_path.mojom",
     "memory_allocator_dump_cross_process_uid.mojom",
     "process_id.mojom",
-    "string16.mojom",
     "text_direction.mojom",
+    "thread_priority.mojom",
     "time.mojom",
     "unguessable_token.mojom",
     "values.mojom",
     "version.mojom",
   ]
 
-  # TODO(crbug.com/699569): Convert to use the new JS bindings.
-  js_bindings_mode = "both"
+  if (is_win) {
+    sources += [ "logfont_win.mojom" ]
+  }
+
+  public_deps = [
+    "//mojo/public/mojom/base",
+  ]
+}
+
+mojom("read_only_buffer") {
+  sources = [
+    "read_only_buffer.mojom",
+  ]
 }
 
 component("common_base") {
@@ -66,7 +78,6 @@ test("mojo_common_unittests") {
     ":struct_traits",
     ":test_common_custom_types",
     "//base",
-    "//base:message_loop_tests",
     "//base/test:test_support",
     "//mojo/edk/test:run_all_unittests",
     "//mojo/edk/test:test_support",
@@ -86,10 +97,11 @@ source_set("struct_traits") {
   sources = [
     "common_custom_types_struct_traits.cc",
     "common_custom_types_struct_traits.h",
+    "time_struct_traits.h",
   ]
   deps = [
     ":common_custom_types_shared_cpp_sources",
-    "//base:base",
+    "//base",
     "//mojo/public/cpp/system",
   ]
   public_deps = [

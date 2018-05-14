@@ -26,14 +26,15 @@
 #ifndef CSSReflectValue_h
 #define CSSReflectValue_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/css/CSSValue.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
 class CSSIdentifierValue;
 class CSSPrimitiveValue;
+
+namespace cssvalue {
 
 class CSSReflectValue : public CSSValue {
  public:
@@ -51,7 +52,7 @@ class CSSReflectValue : public CSSValue {
 
   bool Equals(const CSSReflectValue&) const;
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
  private:
   CSSReflectValue(CSSIdentifierValue* direction,
@@ -69,6 +70,7 @@ class CSSReflectValue : public CSSValue {
 
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSReflectValue, IsReflectValue());
 
+}  // namespace cssvalue
 }  // namespace blink
 
 #endif  // CSSReflectValue_h

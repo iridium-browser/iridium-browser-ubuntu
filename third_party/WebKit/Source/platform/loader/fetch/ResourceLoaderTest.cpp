@@ -8,7 +8,7 @@
 #include "platform/loader/fetch/ResourceLoader.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/loader/testing/MockFetchContext.h"
-#include "platform/testing/TestingPlatformSupport.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 #include "platform/wtf/text/StringBuilder.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,10 +20,9 @@ class ResourceLoaderTest : public ::testing::Test {
 
  public:
   ResourceLoaderTest()
-      : foo_url_(kParsedURLString, "https://foo.test"),
-        bar_url_(kParsedURLString, "https://bar.test") {};
+      : foo_url_("https://foo.test"), bar_url_("https://bar.test"){};
 
-  void SetUp() {
+  void SetUp() override {
     context_ =
         MockFetchContext::Create(MockFetchContext::kShouldLoadNewResource);
   }
@@ -118,12 +117,11 @@ TEST_F(ResourceLoaderTest, DetermineCORSStatus) {
     ResourceRequest request;
     request.SetURL(test.target);
 
-    ResourceResponse response;
+    ResourceResponse response(test.target);
     response.SetHTTPStatusCode(200);
-    response.SetURL(test.target);
 
     if (test.allow_origin_url) {
-      request.SetFetchRequestMode(WebURLRequest::kFetchRequestModeCORS);
+      request.SetFetchRequestMode(network::mojom::FetchRequestMode::kCORS);
       resource->MutableOptions().cors_handling_by_resource_fetcher =
           kEnableCORSHandlingByResourceFetcher;
       response.SetHTTPHeaderField(
@@ -138,11 +136,11 @@ TEST_F(ResourceLoaderTest, DetermineCORSStatus) {
       response.SetWasFetchedViaServiceWorker(true);
 
       if (test.service_worker == kSWOpaque) {
-        response.SetServiceWorkerResponseType(
-            WebServiceWorkerResponseType::kWebServiceWorkerResponseTypeOpaque);
+        response.SetResponseTypeViaServiceWorker(
+            network::mojom::FetchResponseType::kOpaque);
       } else {
-        response.SetServiceWorkerResponseType(
-            WebServiceWorkerResponseType::kWebServiceWorkerResponseTypeDefault);
+        response.SetResponseTypeViaServiceWorker(
+            network::mojom::FetchResponseType::kDefault);
       }
     }
 

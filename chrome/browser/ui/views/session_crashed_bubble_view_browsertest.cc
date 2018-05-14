@@ -18,12 +18,12 @@ class SessionCrashedBubbleViewTest : public DialogBrowserTest {
   SessionCrashedBubbleViewTest() {}
   ~SessionCrashedBubbleViewTest() override {}
 
-  void ShowDialog(const std::string& name) override {
+  void ShowUi(const std::string& name) override {
     views::View* anchor_view = BrowserView::GetBrowserViewForBrowser(browser())
                                    ->toolbar()
                                    ->app_menu_button();
-    SessionCrashedBubbleView* crash_bubble =
-        new SessionCrashedBubbleView(anchor_view, browser(), false);
+    SessionCrashedBubbleView* crash_bubble = new SessionCrashedBubbleView(
+        anchor_view, browser(), name == "SessionCrashedBubbleOfferUma");
     views::BubbleDialogDelegateView::CreateBubble(crash_bubble)->Show();
   }
 
@@ -32,6 +32,11 @@ class SessionCrashedBubbleViewTest : public DialogBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(SessionCrashedBubbleViewTest,
-                       InvokeDialog_SessionCrashedBubble) {
-  RunDialog();
+                       InvokeUi_SessionCrashedBubble) {
+  ShowAndVerifyUi();
+}
+
+IN_PROC_BROWSER_TEST_F(SessionCrashedBubbleViewTest,
+                       InvokeUi_SessionCrashedBubbleOfferUma) {
+  ShowAndVerifyUi();
 }

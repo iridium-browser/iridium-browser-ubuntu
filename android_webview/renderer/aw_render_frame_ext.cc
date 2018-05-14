@@ -2,10 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "android_webview/renderer/aw_render_frame_ext.h"
+
+#include <memory>
+
 #include "android_webview/common/aw_hit_test_data.h"
 #include "android_webview/common/render_view_messages.h"
-#include "android_webview/renderer/aw_render_frame_ext.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/autofill/content/renderer/autofill_agent.h"
+#include "components/autofill/content/renderer/password_autofill_agent.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
@@ -137,9 +142,23 @@ void PopulateHitTestData(const GURL& absolute_link_url,
 
 AwRenderFrameExt::AwRenderFrameExt(content::RenderFrame* render_frame)
     : content::RenderFrameObserver(render_frame) {
+  registry_ = std::make_unique<service_manager::BinderRegistry>();
+
+  // TODO(sgurun) do not create a password autofill agent (change
+  // autofill agent to store a weakptr).
+  autofill::PasswordAutofillAgent* password_autofill_agent =
+      new autofill::PasswordAutofillAgent(render_frame, registry_.get());
+  new autofill::AutofillAgent(render_frame, password_autofill_agent, nullptr,
+                              registry_.get());
 }
 
 AwRenderFrameExt::~AwRenderFrameExt() {
+}
+
+void AwRenderFrameExt::OnInterfaceRequestForFrame(
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle* interface_pipe) {
+  registry_->TryBindInterface(interface_name, interface_pipe);
 }
 
 void AwRenderFrameExt::DidCommitProvisionalLoad(
@@ -147,11 +166,9 @@ void AwRenderFrameExt::DidCommitProvisionalLoad(
     bool is_same_document_navigation) {
   blink::WebLocalFrame* frame = render_frame()->GetWebFrame();
   content::DocumentState* document_state =
-      content::DocumentState::FromDataSource(frame->DataSource());
-  if (document_state->can_load_local_resources()) {
-    blink::WebSecurityOrigin origin = frame->GetDocument().GetSecurityOrigin();
-    origin.GrantLoadLocalResources();
-  }
+      content::DocumentState::FromDocumentLoader(frame->GetDocumentLoader());
+  if (document_state->can_load_local_resources())
+    frame->GetDocument().GrantLoadLocalResources();
 
   // Clear the cache when we cross site boundaries in the main frame.
   //
@@ -161,7 +178,7 @@ void AwRenderFrameExt::DidCommitProvisionalLoad(
   // renderer code to say "this navigation would have switched processes" would
   // be disruptive, so this clearing of the cache is the compromise.
   if (!frame->Parent()) {
-    url::Origin new_origin(frame->GetDocument().Url());
+    url::Origin new_origin = url::Origin::Create(frame->GetDocument().Url());
     if (!new_origin.IsSameOriginWith(last_origin_)) {
       last_origin_ = new_origin;
       blink::WebImageCache::Clear();

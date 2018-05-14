@@ -89,8 +89,8 @@ std::unique_ptr<TestRenderViewContextMenu> CreateContextMenu(
     ProtocolHandlerRegistry* registry) {
   content::ContextMenuParams params = CreateParams(MenuItem::LINK);
   params.unfiltered_link_url = params.link_url;
-  std::unique_ptr<TestRenderViewContextMenu> menu(
-      new TestRenderViewContextMenu(web_contents->GetMainFrame(), params));
+  auto menu = std::make_unique<TestRenderViewContextMenu>(
+      web_contents->GetMainFrame(), params);
   menu->set_protocol_handler_registry(registry);
   menu->Init();
   return menu;
@@ -126,8 +126,8 @@ class RenderViewContextMenuTest : public testing::Test {
     bool incognito = false;
     MenuItem::Id id(incognito, key);
     id.uid = uid;
-    return base::MakeUnique<MenuItem>(id, "Added by an extension", false, true,
-                                      type, contexts);
+    return std::make_unique<MenuItem>(id, "Added by an extension", false, true,
+                                      true, type, contexts);
   }
 
  protected:
@@ -312,12 +312,12 @@ class RenderViewContextMenuExtensionsTest : public RenderViewContextMenuTest {
  protected:
   RenderViewContextMenuExtensionsTest()
       : RenderViewContextMenuTest(
-            base::MakeUnique<extensions::TestExtensionEnvironment>()) {}
+            std::make_unique<extensions::TestExtensionEnvironment>()) {}
 
   void SetUp() override {
     RenderViewContextMenuTest::SetUp();
     // TestingProfile does not provide a protocol registry.
-    registry_.reset(new ProtocolHandlerRegistry(profile(), nullptr));
+    registry_ = std::make_unique<ProtocolHandlerRegistry>(profile(), nullptr);
   }
 
   void TearDown() override {
@@ -376,7 +376,7 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
-    registry_.reset(new ProtocolHandlerRegistry(profile(), nullptr));
+    registry_ = std::make_unique<ProtocolHandlerRegistry>(profile(), nullptr);
   }
 
   void TearDown() override {
@@ -393,8 +393,8 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
   std::unique_ptr<TestRenderViewContextMenu> CreateContextMenuOnChromeLink() {
     content::ContextMenuParams params = CreateParams(MenuItem::LINK);
     params.unfiltered_link_url = params.link_url = GURL("chrome://settings");
-    std::unique_ptr<TestRenderViewContextMenu> menu(
-        new TestRenderViewContextMenu(web_contents()->GetMainFrame(), params));
+    auto menu = std::make_unique<TestRenderViewContextMenu>(
+        web_contents()->GetMainFrame(), params);
     menu->set_protocol_handler_registry(registry_.get());
     menu->Init();
     return menu;
@@ -427,7 +427,7 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
     settings->InitDataReductionProxySettings(
         drp_test_context_->io_data(), drp_test_context_->pref_service(),
         drp_test_context_->request_context_getter(),
-        base::MakeUnique<data_reduction_proxy::DataStore>(),
+        std::make_unique<data_reduction_proxy::DataStore>(),
         base::ThreadTaskRunnerHandle::Get(),
         base::ThreadTaskRunnerHandle::Get());
   }
@@ -501,9 +501,8 @@ TEST_F(RenderViewContextMenuPrefsTest, DataSaverEnabledSaveImageAs) {
 
   content::ContextMenuParams params = CreateParams(MenuItem::IMAGE);
   params.unfiltered_link_url = params.link_url;
-  content::WebContents* wc = web_contents();
-  std::unique_ptr<TestRenderViewContextMenu> menu(
-      new TestRenderViewContextMenu(wc->GetMainFrame(), params));
+  auto menu = std::make_unique<TestRenderViewContextMenu>(
+      web_contents()->GetMainFrame(), params);
 
   menu->ExecuteCommand(IDC_CONTENT_CONTEXT_SAVEIMAGEAS, 0);
 
@@ -523,9 +522,8 @@ TEST_F(RenderViewContextMenuPrefsTest, DataSaverDisabledSaveImageAs) {
 
   content::ContextMenuParams params = CreateParams(MenuItem::IMAGE);
   params.unfiltered_link_url = params.link_url;
-  content::WebContents* wc = web_contents();
-  std::unique_ptr<TestRenderViewContextMenu> menu(
-      new TestRenderViewContextMenu(wc->GetMainFrame(), params));
+  auto menu = std::make_unique<TestRenderViewContextMenu>(
+      web_contents()->GetMainFrame(), params);
 
   menu->ExecuteCommand(IDC_CONTENT_CONTEXT_SAVEIMAGEAS, 0);
 
@@ -547,9 +545,8 @@ TEST_F(RenderViewContextMenuPrefsTest, DataSaverLoadImage) {
       data_reduction_proxy::chrome_proxy_content_transform_header()] =
           data_reduction_proxy::empty_image_directive();
   params.unfiltered_link_url = params.link_url;
-  content::WebContents* wc = web_contents();
-  std::unique_ptr<TestRenderViewContextMenu> menu(
-      new TestRenderViewContextMenu(wc->GetMainFrame(), params));
+  auto menu = std::make_unique<TestRenderViewContextMenu>(
+      web_contents()->GetMainFrame(), params);
   AppendImageItems(menu.get());
 
   ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE));

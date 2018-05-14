@@ -10,10 +10,10 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/vr/elements/omnibox_formatting.h"
 #include "chrome/browser/vr/elements/ui_texture.h"
-#include "chrome/browser/vr/toolbar_state.h"
-#include "chrome/browser/vr/ui_interface.h"
+#include "chrome/browser/vr/model/color_scheme.h"
+#include "chrome/browser/vr/model/toolbar_state.h"
 #include "chrome/browser/vr/ui_unsupported_mode.h"
 #include "components/security_state/core/security_state.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -21,13 +21,11 @@
 
 namespace gfx {
 class PointF;
-class RenderText;
 }  // namespace gfx
 
 namespace vr {
 
 class RenderTextWrapper;
-struct ColorScheme;
 
 class UrlBarTexture : public UiTexture {
  public:
@@ -37,32 +35,25 @@ class UrlBarTexture : public UiTexture {
   };
 
   UrlBarTexture(
-      bool web_vr,
       const base::Callback<void(UiUnsupportedMode)>& failure_callback);
   ~UrlBarTexture() override;
   gfx::Size GetPreferredTextureSize(int width) const override;
   gfx::SizeF GetDrawnSize() const override;
 
+  void SetColors(const UrlBarColors& colors);
   void SetToolbarState(const ToolbarState& state);
-  void SetHistoryButtonsEnabled(bool can_go_back);
 
-  bool HitsBackButton(const gfx::PointF& position) const;
-  bool HitsUrlBar(const gfx::PointF& position) const;
   bool HitsSecurityRegion(const gfx::PointF& position) const;
-
-  void SetBackButtonHovered(bool hovered);
-  void SetBackButtonPressed(bool pressed);
 
  protected:
   static void ApplyUrlStyling(const base::string16& formatted_url,
                               const url::Parsed& parsed,
                               security_state::SecurityLevel security_level,
-                              vr::RenderTextWrapper* render_text,
-                              const ColorScheme& color_scheme);
+                              RenderTextWrapper* render_text,
+                              const UrlBarColors& colors);
 
-  std::unique_ptr<gfx::RenderText> url_render_text_;
-
-  // Rendered state for test purposes.
+  // Rendered state for test purposes. The text rectangles represent regions
+  // available to text, not the smaller area of the actual rendered text.
   base::string16 rendered_url_text_;
   gfx::Rect rendered_url_text_rect_;
   base::string16 rendered_security_text_;
@@ -73,24 +64,13 @@ class UrlBarTexture : public UiTexture {
   float ToPixels(float meters) const;
   float ToMeters(float pixels) const;
   bool HitsTransparentRegion(const gfx::PointF& meters, bool left) const;
-  void RenderUrl(const gfx::Size& texture_size, const gfx::Rect& bounds);
-  void OnSetMode() override;
-  SkColor GetLeftCornerColor() const;
 
   gfx::SizeF size_;
-  bool back_hovered_ = false;
-  bool back_pressed_ = false;
-  bool can_go_back_ = false;
-
   ToolbarState state_;
+  UrlBarColors colors_;
 
-  bool url_dirty_ = true;
-
-  bool has_back_button_ = true;
-  bool opaque_background_ = false;
   base::Callback<void(UiUnsupportedMode)> failure_callback_;
-  gfx::RectF security_hit_region_ = gfx::RectF(0, 0, 0, 0);
-  gfx::RectF back_button_hit_region_ = gfx::RectF(0, 0, 0, 0);
+  gfx::RectF security_hit_region_;
 
   DISALLOW_COPY_AND_ASSIGN(UrlBarTexture);
 };

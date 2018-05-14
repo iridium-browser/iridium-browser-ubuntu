@@ -45,7 +45,7 @@ RasterizerState::RasterizerState()
 
     rasterizerDiscard   = false;
     cullFace            = false;
-    cullMode            = GL_BACK;
+    cullMode            = CullFaceMode::Back;
     frontFace           = GL_CCW;
     polygonOffsetFill   = false;
     polygonOffsetFactor = 0.0f;
@@ -77,6 +77,11 @@ BlendState::BlendState()
     blendEquationAlpha    = GL_FUNC_ADD;
     sampleAlphaToCoverage = false;
     dither                = true;
+}
+
+BlendState::BlendState(const BlendState &other)
+{
+    memcpy(this, &other, sizeof(BlendState));
 }
 
 bool operator==(const BlendState &a, const BlendState &b)
@@ -111,6 +116,11 @@ DepthStencilState::DepthStencilState()
     stencilBackPassDepthPass = GL_KEEP;
 }
 
+DepthStencilState::DepthStencilState(const DepthStencilState &other)
+{
+    memcpy(this, &other, sizeof(DepthStencilState));
+}
+
 bool operator==(const DepthStencilState &a, const DepthStencilState &b)
 {
     return memcmp(&a, &b, sizeof(DepthStencilState)) == 0;
@@ -138,14 +148,16 @@ SamplerState::SamplerState()
     sRGBDecode    = GL_DECODE_EXT;
 }
 
+SamplerState::SamplerState(const SamplerState &other) = default;
+
 // static
 SamplerState SamplerState::CreateDefaultForTarget(GLenum target)
 {
     SamplerState state;
 
-    // According to OES_EGL_image_external: For external textures, the default min filter is
-    // GL_LINEAR and the default s and t wrap modes are GL_CLAMP_TO_EDGE.
-    if (target == GL_TEXTURE_EXTERNAL_OES)
+    // According to OES_EGL_image_external and ARB_texture_rectangle: For external textures, the
+    // default min filter is GL_LINEAR and the default s and t wrap modes are GL_CLAMP_TO_EDGE.
+    if (target == GL_TEXTURE_EXTERNAL_OES || target == GL_TEXTURE_RECTANGLE_ANGLE)
     {
         state.minFilter = GL_LINEAR;
         state.wrapS     = GL_CLAMP_TO_EDGE;
@@ -154,6 +166,15 @@ SamplerState SamplerState::CreateDefaultForTarget(GLenum target)
 
     return state;
 }
+
+ImageUnit::ImageUnit()
+    : texture(), level(0), layered(false), layer(0), access(GL_READ_ONLY), format(GL_R32UI)
+{
+}
+
+ImageUnit::ImageUnit(const ImageUnit &other) = default;
+
+ImageUnit::~ImageUnit() = default;
 
 static void MinMax(int a, int b, int *minimum, int *maximum)
 {
@@ -235,4 +256,90 @@ bool operator!=(const Extents &lhs, const Extents &rhs)
 {
     return !(lhs == rhs);
 }
+
+ComponentTypeMask::ComponentTypeMask()
+{
+    mTypeMask.reset();
+}
+
+ComponentTypeMask::ComponentTypeMask(const ComponentTypeMask &other) = default;
+
+ComponentTypeMask::~ComponentTypeMask() = default;
+
+void ComponentTypeMask::reset()
+{
+    mTypeMask.reset();
+}
+
+bool ComponentTypeMask::none()
+{
+    return mTypeMask.none();
+}
+
+void ComponentTypeMask::setIndex(GLenum type, size_t index)
+{
+    ASSERT(index <= MAX_COMPONENT_TYPE_MASK_INDEX);
+
+    mTypeMask &= ~(0x10001 << index);
+
+    uint32_t m = 0;
+    switch (type)
+    {
+        case GL_INT:
+            m = 0x00001;
+            break;
+        case GL_UNSIGNED_INT:
+            m = 0x10000;
+            break;
+        case GL_FLOAT:
+            m = 0x10001;
+            break;
+        case GL_NONE:
+            m = 0x00000;
+            break;
+        default:
+            UNREACHABLE();
+    }
+
+    mTypeMask |= m << index;
+}
+
+unsigned long ComponentTypeMask::to_ulong() const
+{
+    return mTypeMask.to_ulong();
+}
+
+void ComponentTypeMask::from_ulong(unsigned long mask)
+{
+    mTypeMask = mask;
+}
+
+bool ComponentTypeMask::Validate(unsigned long outputTypes,
+                                 unsigned long inputTypes,
+                                 unsigned long outputMask,
+                                 unsigned long inputMask)
+{
+    static_assert(IMPLEMENTATION_MAX_DRAW_BUFFERS <= MAX_COMPONENT_TYPE_MASK_INDEX,
+                  "Output/input masks should fit into 16 bits - 1 bit per draw buffer. The "
+                  "corresponding type masks should fit into 32 bits - 2 bits per draw buffer.");
+    static_assert(MAX_VERTEX_ATTRIBS <= MAX_COMPONENT_TYPE_MASK_INDEX,
+                  "Output/input masks should fit into 16 bits - 1 bit per attrib. The "
+                  "corresponding type masks should fit into 32 bits - 2 bits per attrib.");
+
+    // For performance reasons, draw buffer and attribute type validation is done using bit masks.
+    // We store two bits representing the type split, with the low bit in the lower 16 bits of the
+    // variable, and the high bit in the upper 16 bits of the variable. This is done so we can AND
+    // with the elswewhere used DrawBufferMask or AttributeMask.
+
+    // OR the masks with themselves, shifted 16 bits. This is to match our split type bits.
+    outputMask |= (outputMask << MAX_COMPONENT_TYPE_MASK_INDEX);
+    inputMask |= (inputMask << MAX_COMPONENT_TYPE_MASK_INDEX);
+
+    // To validate:
+    // 1. Remove any indexes that are not enabled in the input (& inputMask)
+    // 2. Remove any indexes that exist in output, but not in input (& outputMask)
+    // 3. Use == to verify equality
+    return (outputTypes & inputMask) == ((inputTypes & outputMask) & inputMask);
+}
+
 }  // namespace gl

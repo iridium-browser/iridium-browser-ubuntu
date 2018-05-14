@@ -8,11 +8,10 @@
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "modules/audio_output_devices/AudioOutputDeviceClient.h"
 #include "modules/audio_output_devices/SetSinkIdCallbacks.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/wtf/PtrUtil.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebSecurityOrigin.h"
 
 namespace blink {
@@ -29,7 +28,7 @@ class SetSinkIdResolver : public ScriptPromiseResolver {
   ~SetSinkIdResolver() override = default;
   void StartAsync();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   SetSinkIdResolver(ScriptState*, HTMLMediaElement&, const String& sink_id);
@@ -45,7 +44,7 @@ SetSinkIdResolver* SetSinkIdResolver::Create(ScriptState* script_state,
                                              const String& sink_id) {
   SetSinkIdResolver* resolver =
       new SetSinkIdResolver(script_state, element, sink_id);
-  resolver->SuspendIfNeeded();
+  resolver->PauseIfNeeded();
   resolver->KeepAliveWhilePending();
   return resolver;
 }
@@ -56,12 +55,13 @@ SetSinkIdResolver::SetSinkIdResolver(ScriptState* script_state,
     : ScriptPromiseResolver(script_state),
       element_(element),
       sink_id_(sink_id),
-      timer_(TaskRunnerHelper::Get(TaskType::kMiscPlatformAPI, script_state),
+      timer_(ExecutionContext::From(script_state)
+                 ->GetTaskRunner(TaskType::kMiscPlatformAPI),
              this,
              &SetSinkIdResolver::TimerFired) {}
 
 void SetSinkIdResolver::StartAsync() {
-  timer_.StartOneShot(0, BLINK_FROM_HERE);
+  timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void SetSinkIdResolver::TimerFired(TimerBase* timer) {
@@ -69,7 +69,7 @@ void SetSinkIdResolver::TimerFired(TimerBase* timer) {
   DCHECK(context);
   DCHECK(context->IsDocument());
   std::unique_ptr<SetSinkIdCallbacks> callbacks =
-      WTF::WrapUnique(new SetSinkIdCallbacks(this, *element_, sink_id_));
+      std::make_unique<SetSinkIdCallbacks>(this, *element_, sink_id_);
   WebMediaPlayer* web_media_player = element_->GetWebMediaPlayer();
   if (web_media_player) {
     // Using release() to transfer ownership because |webMediaPlayer| is a
@@ -93,7 +93,7 @@ void SetSinkIdResolver::TimerFired(TimerBase* timer) {
   }
 }
 
-DEFINE_TRACE(SetSinkIdResolver) {
+void SetSinkIdResolver::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
   ScriptPromiseResolver::Trace(visitor);
 }
@@ -128,23 +128,22 @@ ScriptPromise HTMLMediaElementAudioOutputDevice::setSinkId(
   return promise;
 }
 
-const char* HTMLMediaElementAudioOutputDevice::SupplementName() {
-  return "HTMLMediaElementAudioOutputDevice";
-}
+const char HTMLMediaElementAudioOutputDevice::kSupplementName[] =
+    "HTMLMediaElementAudioOutputDevice";
 
 HTMLMediaElementAudioOutputDevice& HTMLMediaElementAudioOutputDevice::From(
     HTMLMediaElement& element) {
   HTMLMediaElementAudioOutputDevice* supplement =
-      static_cast<HTMLMediaElementAudioOutputDevice*>(
-          Supplement<HTMLMediaElement>::From(element, SupplementName()));
+      Supplement<HTMLMediaElement>::From<HTMLMediaElementAudioOutputDevice>(
+          element);
   if (!supplement) {
     supplement = new HTMLMediaElementAudioOutputDevice();
-    ProvideTo(element, SupplementName(), supplement);
+    ProvideTo(element, supplement);
   }
   return *supplement;
 }
 
-DEFINE_TRACE(HTMLMediaElementAudioOutputDevice) {
+void HTMLMediaElementAudioOutputDevice::Trace(blink::Visitor* visitor) {
   Supplement<HTMLMediaElement>::Trace(visitor);
 }
 

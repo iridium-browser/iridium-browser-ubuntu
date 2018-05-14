@@ -32,13 +32,13 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
     virtual void OnFileCanWriteWithoutBlocking(int fd) = 0;
 
    protected:
-    virtual ~Watcher() {}
+    virtual ~Watcher() = default;
   };
 
   // Object returned by WatchFileDescriptor to manage further watching.
   class FileDescriptorWatcher {
    public:
-    explicit FileDescriptorWatcher(const tracked_objects::Location& from_here);
+    explicit FileDescriptorWatcher(const Location& from_here);
     ~FileDescriptorWatcher();  // Implicitly calls StopWatchingFileDescriptor.
 
     // NOTE: These methods aren't called StartWatching()/StopWatching() to
@@ -48,9 +48,7 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
     // to do.
     bool StopWatchingFileDescriptor();
 
-    const tracked_objects::Location& created_from_location() {
-      return created_from_location_;
-    }
+    const Location& created_from_location() { return created_from_location_; }
 
    private:
     friend class MessagePumpLibevent;
@@ -78,7 +76,7 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
     // destructor.
     bool* was_destroyed_;
 
-    const tracked_objects::Location created_from_location_;
+    const Location created_from_location_;
 
     DISALLOW_COPY_AND_ASSIGN(FileDescriptorWatcher);
   };
@@ -92,18 +90,20 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
   MessagePumpLibevent();
   ~MessagePumpLibevent() override;
 
-  // Have the current thread's message loop watch for a a situation in which
-  // reading/writing to the FD can be performed without blocking.
-  // Callers must provide a preallocated FileDescriptorWatcher object which
-  // can later be used to manage the lifetime of this event.
-  // If a FileDescriptorWatcher is passed in which is already attached to
-  // an event, then the effect is cumulative i.e. after the call |controller|
-  // will watch both the previous event and the new one.
-  // If an error occurs while calling this method in a cumulative fashion, the
-  // event previously attached to |controller| is aborted.
-  // Returns true on success.
-  // Must be called on the same thread the message_pump is running on.
-  // TODO(dkegel): switch to edge-triggered readiness notification
+  // Registers |delegate| with the current thread's message loop so that its
+  // methods are invoked when file descriptor |fd| becomes ready for reading or
+  // writing (or both) without blocking.  |mode| selects ready for reading, for
+  // writing, or both.  (See "enum Mode" above. TODO(unknown): nuke the
+  // plethora of equivalent "enum Mode" declarations.)  |controller| manages
+  // the lifetime of registrations. ("Registrations" are also ambiguously
+  // called "events" in many places, for instance in libevent.)  It is an error
+  // to use the same |controller| for different file descriptors; however, the
+  // same controller can be reused to add registrations with a different
+  // |mode|.  If |controller| is already attached to one or more registrations,
+  // the new registration is added on to those.  If an error occurs while
+  // calling this method, any registration previously attached to |controller|
+  // is removed.  Returns true on success.  Must be called on the same thread
+  // the message_pump is running on.
   bool WatchFileDescriptor(int fd,
                            bool persistent,
                            int mode,

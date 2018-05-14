@@ -6,12 +6,15 @@
 #include <map>
 #include <memory>
 
+#include "build/build_config.h"
 #include "net/quic/core/congestion_control/rtt_stats.h"
 #include "net/quic/core/congestion_control/send_algorithm_interface.h"
 #include "net/quic/core/quic_types.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/platform/api/quic_string.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/quic_config_peer.h"
@@ -21,8 +24,6 @@
 #include "net/quic/test_tools/simulator/quic_endpoint.h"
 #include "net/quic/test_tools/simulator/simulator.h"
 #include "net/quic/test_tools/simulator/switch.h"
-
-using std::string;
 
 namespace net {
 namespace test {
@@ -104,12 +105,8 @@ const QuicTime::Delta kTestLinkSmallRTTDelay =
 
 const char* CongestionControlTypeToString(CongestionControlType cc_type) {
   switch (cc_type) {
-    case kCubic:
-      return "CUBIC_PACKETS";
     case kCubicBytes:
       return "CUBIC_BYTES";
-    case kReno:
-      return "RENO_PACKETS";
     case kRenoBytes:
       return "RENO_BYTES";
     case kBBR:
@@ -123,57 +120,30 @@ const char* CongestionControlTypeToString(CongestionControlType cc_type) {
 }
 
 struct TestParams {
-  explicit TestParams(CongestionControlType congestion_control_type,
-                      bool fix_convex_mode,
-                      bool fix_cubic_quantization,
-                      bool fix_beta_last_max,
-                      bool allow_per_ack_updates)
-      : congestion_control_type(congestion_control_type),
-        fix_convex_mode(fix_convex_mode),
-        fix_cubic_quantization(fix_cubic_quantization),
-        fix_beta_last_max(fix_beta_last_max),
-        allow_per_ack_updates(allow_per_ack_updates) {}
+  explicit TestParams(CongestionControlType congestion_control_type)
+      : congestion_control_type(congestion_control_type) {}
 
   friend std::ostream& operator<<(std::ostream& os, const TestParams& p) {
     os << "{ congestion_control_type: "
        << CongestionControlTypeToString(p.congestion_control_type);
-    os << "  fix_convex_mode: " << p.fix_convex_mode
-       << "  fix_cubic_quantization: " << p.fix_cubic_quantization
-       << "  fix_beta_last_max: " << p.fix_beta_last_max;
-    os << "  allow_per_ack_updates: " << p.allow_per_ack_updates;
     os << " }";
     return os;
   }
 
-  CongestionControlType congestion_control_type;
-  bool fix_convex_mode;
-  bool fix_cubic_quantization;
-  bool fix_beta_last_max;
-  bool allow_per_ack_updates;
+  const CongestionControlType congestion_control_type;
 };
 
-string TestParamToString(const testing::TestParamInfo<TestParams>& params) {
+QuicString TestParamToString(const testing::TestParamInfo<TestParams>& params) {
   return QuicStrCat(
-      CongestionControlTypeToString(params.param.congestion_control_type), "_",
-      "convex_mode_", params.param.fix_convex_mode, "_", "cubic_quantization_",
-      params.param.fix_cubic_quantization, "_", "beta_last_max_",
-      params.param.fix_beta_last_max, "_", "allow_per_ack_updates_",
-      params.param.allow_per_ack_updates);
+      CongestionControlTypeToString(params.param.congestion_control_type), "_");
 }
 
 // Constructs various test permutations.
 std::vector<TestParams> GetTestParams() {
   std::vector<TestParams> params;
   for (const CongestionControlType congestion_control_type :
-       {kBBR, kCubic, kCubicBytes, kReno, kRenoBytes, kPCC}) {
-    params.push_back(
-        TestParams(congestion_control_type, false, false, false, false));
-    if (congestion_control_type != kCubic &&
-        congestion_control_type != kCubicBytes) {
-      continue;
-    }
-    params.push_back(
-        TestParams(congestion_control_type, true, true, true, true));
+       {kBBR, kCubicBytes, kRenoBytes, kPCC}) {
+    params.push_back(TestParams(congestion_control_type));
   }
   return params;
 }
@@ -203,8 +173,6 @@ class SendAlgorithmTest : public QuicTestWithParam<TestParams> {
         GetParam().congestion_control_type, &random_, &stats_,
         kInitialCongestionWindowPackets);
 
-    SetExperimentalOptionsInServerConfig();
-
     QuicConnectionPeer::SetSendAlgorithm(quic_sender_.connection(), sender_);
     // TODO(jokulik):  Remove once b/38032710 is fixed.
     // Disable pacing for PCC.
@@ -221,43 +189,19 @@ class SendAlgorithmTest : public QuicTestWithParam<TestParams> {
     QUIC_LOG(INFO) << "SendAlgorithmTest simulator set up.  Seed: " << seed;
   }
 
-  // Sets experimental options in the server config, as if they had
-  // been sent by the client.
-  void SetExperimentalOptionsInServerConfig() {
-    QuicConfig client_config;
-    QuicTagVector options;
-    if (GetParam().fix_convex_mode) {
-      options.push_back(kCCVX);
-    }
-    if (GetParam().fix_cubic_quantization) {
-      options.push_back(kCBQT);
-    }
-    if (GetParam().fix_beta_last_max) {
-      options.push_back(kBLMX);
-    }
-    if (GetParam().allow_per_ack_updates) {
-      options.push_back(kCPAU);
-    }
-
-    if (!options.empty()) {
-      client_config.SetInitialReceivedConnectionOptions(options);
-      sender_->SetFromConfig(client_config, Perspective::IS_SERVER);
-    }
-  }
-
   // Creates a simulated network, with default settings between the
   // sender and the switch and the given settings from the switch to
   // the receiver.
   void CreateSetup(const QuicBandwidth& test_bandwidth,
                    const QuicTime::Delta& test_link_delay,
                    QuicByteCount bottleneck_queue_length) {
-    switch_.reset(new simulator::Switch(&simulator_, "Switch", 8,
-                                        bottleneck_queue_length));
-    quic_sender_link_.reset(new simulator::SymmetricLink(
+    switch_ = QuicMakeUnique<simulator::Switch>(&simulator_, "Switch", 8,
+                                                bottleneck_queue_length);
+    quic_sender_link_ = QuicMakeUnique<simulator::SymmetricLink>(
         &quic_sender_, switch_->port(1), kLocalLinkBandwidth,
-        kLocalPropagationDelay));
-    receiver_link_.reset(new simulator::SymmetricLink(
-        &receiver_, switch_->port(2), test_bandwidth, test_link_delay));
+        kLocalPropagationDelay);
+    receiver_link_ = QuicMakeUnique<simulator::SymmetricLink>(
+        &receiver_, switch_->port(2), test_bandwidth, test_link_delay);
   }
 
   void DoSimpleTransfer(QuicByteCount transfer_size, QuicTime::Delta deadline) {
@@ -384,7 +328,7 @@ TEST_P(SendAlgorithmTest, AppLimitedBurstsOverWiredNetwork) {
 TEST_P(SendAlgorithmTest, SatelliteNetworkTransfer) {
   CreateSetup(kTestLinkWiredBandwidth, kTestSatellitePropagationDelay,
               kTestWiredBdp);
-  const QuicByteCount kTransferSizeBytes = 20 * 1024 * 1024;
+  const QuicByteCount kTransferSizeBytes = 12 * 1024 * 1024;
   const QuicTime::Delta maximum_elapsed_time =
       EstimatedElapsedTime(kTransferSizeBytes, kTestLinkWiredBandwidth,
                            kTestSatellitePropagationDelay) *

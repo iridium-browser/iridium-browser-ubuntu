@@ -32,7 +32,6 @@
 #define WebDocument_h
 
 #include "WebDraggableRegion.h"
-#include "WebExceptionCode.h"
 #include "WebFrame.h"
 #include "WebNode.h"
 #include "public/platform/WebColor.h"
@@ -56,13 +55,15 @@ class WebString;
 class WebURL;
 struct WebDistillabilityFeatures;
 
-using WebStyleSheetId = unsigned;
+using WebStyleSheetKey = WebString;
 
 // Provides readonly access to some properties of a DOM document.
 class WebDocument : public WebNode {
  public:
-  WebDocument() {}
-  WebDocument(const WebDocument& e) : WebNode(e) {}
+  enum CSSOrigin { kAuthorOrigin, kUserOrigin };
+
+  WebDocument() = default;
+  WebDocument(const WebDocument& e) = default;
 
   WebDocument& operator=(const WebDocument& e) {
     WebNode::Assign(e);
@@ -74,6 +75,7 @@ class WebDocument : public WebNode {
   // Note: Security checks should use the getSecurityOrigin(), not url().
   BLINK_EXPORT WebSecurityOrigin GetSecurityOrigin() const;
   BLINK_EXPORT bool IsSecureContext() const;
+  BLINK_EXPORT void GrantLoadLocalResources();
 
   BLINK_EXPORT WebString Encoding() const;
   BLINK_EXPORT WebString ContentLanguage() const;
@@ -93,7 +95,7 @@ class WebDocument : public WebNode {
   // The firstPartyForCookies is used to compute whether this document
   // appears in a "third-party" context for the purpose of third-party
   // cookie blocking.
-  BLINK_EXPORT WebURL FirstPartyForCookies() const;
+  BLINK_EXPORT WebURL SiteForCookies() const;
 
   BLINK_EXPORT WebElement DocumentElement() const;
   BLINK_EXPORT WebElement Body() const;
@@ -108,13 +110,16 @@ class WebDocument : public WebNode {
   BLINK_EXPORT WebReferrerPolicy GetReferrerPolicy() const;
   BLINK_EXPORT WebString OutgoingReferrer();
 
-  // Inserts the given CSS source code as a stylesheet in the document, and
-  // return its id.
-  BLINK_EXPORT WebStyleSheetId InsertStyleSheet(const WebString& source_code);
+  // Inserts the given CSS source code as a style sheet in the document.
+  BLINK_EXPORT WebStyleSheetKey InsertStyleSheet(
+      const WebString& source_code,
+      const WebStyleSheetKey* = nullptr,
+      CSSOrigin = kAuthorOrigin);
 
   // Removes the CSS which was previously inserted by a call to
   // InsertStyleSheet().
-  BLINK_EXPORT void RemoveInsertedStyleSheet(WebStyleSheetId);
+  BLINK_EXPORT void RemoveInsertedStyleSheet(const WebStyleSheetKey&,
+                                             CSSOrigin = kAuthorOrigin);
 
   // Arranges to call WebFrameClient::didMatchCSS(frame(), ...) when one of
   // the selectors matches or stops matching an element in this document.
@@ -125,14 +130,16 @@ class WebDocument : public WebNode {
 
   BLINK_EXPORT v8::Local<v8::Value> RegisterEmbedderCustomElement(
       const WebString& name,
-      v8::Local<v8::Value> options,
-      WebExceptionCode&);
+      v8::Local<v8::Value> options);
 
   BLINK_EXPORT WebURL ManifestURL() const;
   BLINK_EXPORT bool ManifestUseCredentials() const;
+
+  BLINK_EXPORT WebURL CanonicalUrlForSharing() const;
+
   BLINK_EXPORT WebDistillabilityFeatures DistillabilityFeatures();
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   BLINK_EXPORT WebDocument(Document*);
   BLINK_EXPORT WebDocument& operator=(Document*);
   BLINK_EXPORT operator Document*() const;

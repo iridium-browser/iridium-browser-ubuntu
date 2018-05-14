@@ -15,6 +15,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/timer/timer.h"
 #include "crypto/hmac.h"
+#include "remoting/base/session_options.h"
 #include "remoting/protocol/transport.h"
 #include "remoting/protocol/webrtc_data_stream_adapter.h"
 #include "remoting/protocol/webrtc_dummy_video_encoder.h"
@@ -84,6 +85,8 @@ class WebrtcTransport : public Transport {
   bool ProcessTransportInfo(buzz::XmlElement* transport_info) override;
   void Close(ErrorCode error);
 
+  void ApplySessionOptions(const SessionOptions& options);
+
  private:
   // PeerConnectionWrapper is responsible for PeerConnection creation,
   // ownership. It passes all events to the corresponding methods below. This is
@@ -138,11 +141,15 @@ class WebrtcTransport : public Transport {
 
   bool connected_ = false;
 
+  bool want_ice_restart_ = false;
+
   std::unique_ptr<buzz::XmlElement> pending_transport_info_message_;
   base::OneShotTimer transport_info_timer_;
 
   std::vector<std::unique_ptr<webrtc::IceCandidateInterface>>
       pending_incoming_candidates_;
+
+  std::string preferred_video_codec_;
 
   base::WeakPtrFactory<WebrtcTransport> weak_factory_;
 

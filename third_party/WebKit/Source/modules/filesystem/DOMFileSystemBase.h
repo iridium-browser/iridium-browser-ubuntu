@@ -33,33 +33,29 @@
 
 #include "core/fileapi/FileError.h"
 #include "modules/ModulesExport.h"
+#include "modules/filesystem/FileSystemCallbacks.h"
 #include "modules/filesystem/FileSystemFlags.h"
 #include "platform/FileSystemType.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 class WebFileSystem;
-}
+}  // namespace blink
 
 namespace blink {
 
 class DirectoryReaderBase;
-class EntriesCallback;
 class EntryBase;
-class EntryCallback;
-class ErrorCallbackBase;
+class ExecutionContext;
 class File;
 class FileMetadata;
-class MetadataCallback;
-class ExecutionContext;
 class SecurityOrigin;
-class VoidCallback;
 
 // A common base class for DOMFileSystem and DOMFileSystemSync.
-class MODULES_EXPORT DOMFileSystemBase
-    : public GarbageCollectedFinalized<DOMFileSystemBase> {
+class MODULES_EXPORT DOMFileSystemBase : public ScriptWrappable {
  public:
   enum SynchronousType {
     kSynchronous,
@@ -88,7 +84,7 @@ class MODULES_EXPORT DOMFileSystemBase
   FileSystemType GetType() const { return type_; }
   KURL RootURL() const { return filesystem_root_url_; }
   WebFileSystem* FileSystem() const;
-  SecurityOrigin* GetSecurityOrigin() const;
+  const SecurityOrigin* GetSecurityOrigin() const;
 
   // The clonable flag is used in the structured clone algorithm to test
   // whether the FileSystem API object is permitted to be cloned. It defaults
@@ -115,50 +111,52 @@ class MODULES_EXPORT DOMFileSystemBase
   // Actual FileSystem API implementations. All the validity checks on virtual
   // paths are done at this level.
   void GetMetadata(const EntryBase*,
-                   MetadataCallback*,
+                   MetadataCallbacks::OnDidReadMetadataCallback*,
                    ErrorCallbackBase*,
                    SynchronousType = kAsynchronous);
   void Move(const EntryBase* source,
             EntryBase* parent,
             const String& name,
-            EntryCallback*,
+            EntryCallbacks::OnDidGetEntryCallback*,
             ErrorCallbackBase*,
             SynchronousType = kAsynchronous);
   void Copy(const EntryBase* source,
             EntryBase* parent,
             const String& name,
-            EntryCallback*,
+            EntryCallbacks::OnDidGetEntryCallback*,
             ErrorCallbackBase*,
             SynchronousType = kAsynchronous);
   void Remove(const EntryBase*,
-              VoidCallback*,
+              VoidCallbacks::OnDidSucceedCallback*,
               ErrorCallbackBase*,
               SynchronousType = kAsynchronous);
   void RemoveRecursively(const EntryBase*,
-                         VoidCallback*,
+                         VoidCallbacks::OnDidSucceedCallback*,
                          ErrorCallbackBase*,
                          SynchronousType = kAsynchronous);
-  void GetParent(const EntryBase*, EntryCallback*, ErrorCallbackBase*);
+  void GetParent(const EntryBase*,
+                 EntryCallbacks::OnDidGetEntryCallback*,
+                 ErrorCallbackBase*);
   void GetFile(const EntryBase*,
                const String& path,
                const FileSystemFlags&,
-               EntryCallback*,
+               EntryCallbacks::OnDidGetEntryCallback*,
                ErrorCallbackBase*,
                SynchronousType = kAsynchronous);
   void GetDirectory(const EntryBase*,
                     const String& path,
                     const FileSystemFlags&,
-                    EntryCallback*,
+                    EntryCallbacks::OnDidGetEntryCallback*,
                     ErrorCallbackBase*,
                     SynchronousType = kAsynchronous);
   int ReadDirectory(DirectoryReaderBase*,
                     const String& path,
-                    EntriesCallback*,
+                    EntriesCallbacks::OnDidGetEntriesCallback*,
                     ErrorCallbackBase*,
                     SynchronousType = kAsynchronous);
   bool WaitForAdditionalResult(int callbacks_id);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   DOMFileSystemBase(ExecutionContext*,

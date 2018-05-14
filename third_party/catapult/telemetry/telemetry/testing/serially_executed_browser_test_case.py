@@ -10,12 +10,11 @@ import unittest
 from py_utils import cloud_storage
 from telemetry.internal.browser import browser_finder
 from telemetry.testing import browser_test_context
-from telemetry.util import wpr_modes
 
 
 DEFAULT_LOG_FORMAT = (
-  '(%(levelname)s) %(asctime)s %(module)s.%(funcName)s:%(lineno)d  '
-  '%(message)s')
+    '(%(levelname)s) %(asctime)s %(module)s.%(funcName)s:%(lineno)d  '
+    '%(message)s')
 
 
 class SeriallyExecutedBrowserTestCase(unittest.TestCase):
@@ -70,7 +69,9 @@ class SeriallyExecutedBrowserTestCase(unittest.TestCase):
     cls._browser_to_create = browser_finder.FindBrowser(browser_options)
     if not cls.platform:
       cls.platform = cls._browser_to_create.platform
-      cls.platform.network_controller.InitializeIfNeeded()
+      cls.platform.SetFullPerformanceModeEnabled(
+          browser_options.full_performance_mode)
+      cls.platform.network_controller.Open()
     else:
       assert cls.platform == cls._browser_to_create.platform, (
           'All browser launches within same test suite must use browsers on '
@@ -91,8 +92,7 @@ class SeriallyExecutedBrowserTestCase(unittest.TestCase):
     assert not cls.browser, 'WPR must be started prior to browser being started'
 
     cloud_storage.GetIfChanged(archive_path, archive_bucket)
-    cls.platform.network_controller.Open(wpr_modes.WPR_REPLAY, [])
-    cls.platform.network_controller.StartReplay(archive_path=archive_path)
+    cls.platform.network_controller.StartReplay(archive_path)
 
   @classmethod
   def StopWPRServer(cls):
@@ -105,13 +105,25 @@ class SeriallyExecutedBrowserTestCase(unittest.TestCase):
         'starting WPR')
     assert not cls.browser, 'Browser is started. Must close it first'
 
-    cls.browser = cls._browser_to_create.Create(cls._browser_options)
+    try:
+      # TODO(crbug.com/803104): Note cls._browser_options actually is a
+      # FinderOptions object, and we need to access the real browser_option's
+      # contained inside.
+      cls._browser_to_create.SetUpEnvironment(
+          cls._browser_options.browser_options)
+      cls.browser = cls._browser_to_create.Create()
+    except Exception:
+      cls._browser_to_create.CleanUpEnvironment()
+      raise
 
   @classmethod
   def StopBrowser(cls):
     assert cls.browser, 'Browser is not started'
-    cls.browser.Close()
-    cls.browser = None
+    try:
+      cls.browser.Close()
+      cls.browser = None
+    finally:
+      cls._browser_to_create.CleanUpEnvironment()
 
   @classmethod
   def TearDownProcess(cls):
@@ -119,10 +131,10 @@ class SeriallyExecutedBrowserTestCase(unittest.TestCase):
     This is guaranteed to be called only once for all the tests after the test
     suite finishes running.
     """
-
     if cls.platform:
       cls.platform.StopAllLocalServers()
       cls.platform.network_controller.Close()
+      cls.platform.SetFullPerformanceModeEnabled(False)
     if cls.browser:
       cls.StopBrowser()
 

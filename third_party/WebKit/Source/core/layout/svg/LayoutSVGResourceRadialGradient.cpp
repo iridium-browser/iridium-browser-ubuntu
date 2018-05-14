@@ -30,12 +30,12 @@ LayoutSVGResourceRadialGradient::LayoutSVGResourceRadialGradient(
     : LayoutSVGResourceGradient(node),
       attributes_wrapper_(RadialGradientAttributesWrapper::Create()) {}
 
-LayoutSVGResourceRadialGradient::~LayoutSVGResourceRadialGradient() {}
+LayoutSVGResourceRadialGradient::~LayoutSVGResourceRadialGradient() = default;
 
 bool LayoutSVGResourceRadialGradient::CollectGradientAttributes() {
   DCHECK(GetElement());
   attributes_wrapper_->Set(RadialGradientAttributes());
-  return toSVGRadialGradientElement(GetElement())
+  return ToSVGRadialGradientElement(GetElement())
       ->CollectGradientAttributes(MutableAttributes());
 }
 
@@ -65,9 +65,9 @@ float LayoutSVGResourceRadialGradient::FocalRadius(
       GetElement(), attributes.GradientUnits(), *attributes.Fr());
 }
 
-PassRefPtr<Gradient> LayoutSVGResourceRadialGradient::BuildGradient() const {
-  const RadialGradientAttributes& attributes = this->Attributes();
-  RefPtr<Gradient> gradient = Gradient::CreateRadial(
+scoped_refptr<Gradient> LayoutSVGResourceRadialGradient::BuildGradient() const {
+  const RadialGradientAttributes& attributes = Attributes();
+  scoped_refptr<Gradient> gradient = Gradient::CreateRadial(
       FocalPoint(attributes), FocalRadius(attributes), CenterPoint(attributes),
       Radius(attributes), 1,
       PlatformSpreadMethodFromSVGType(attributes.SpreadMethod()),

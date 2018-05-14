@@ -12,6 +12,7 @@ namespace blink {
 
 class LocalFrameView;
 class LayoutRect;
+struct WebScrollIntoViewParams;
 
 // ScrollableArea for the root frame's viewport. This class ties together the
 // concepts of layout and visual viewports, used in pinch-to-zoom. This class
@@ -33,7 +34,7 @@ class CORE_EXPORT RootFrameViewport final
     return new RootFrameViewport(visual_viewport, layout_viewport);
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   void SetLayoutViewport(ScrollableArea&);
   ScrollableArea& LayoutViewport() const;
@@ -59,13 +60,10 @@ class CORE_EXPORT RootFrameViewport final
                        ScrollType,
                        ScrollBehavior = kScrollBehaviorInstant) override;
   LayoutRect ScrollIntoView(const LayoutRect& rect_in_content,
-                            const ScrollAlignment& align_x,
-                            const ScrollAlignment& align_y,
-                            bool is_smooth,
-                            ScrollType = kProgrammaticScroll,
-                            bool is_for_scroll_sequence = false) override;
+                            const WebScrollIntoViewParams& params) override;
   IntRect VisibleContentRect(
       IncludeScrollbarsInRect = kExcludeScrollbars) const override;
+  LayoutRect VisibleScrollSnapportRect() const override;
   bool ShouldUseIntegerScrollOffset() const override;
   bool IsActive() const override;
   int ScrollSize(ScrollbarOrientation) const override;
@@ -95,6 +93,7 @@ class CORE_EXPORT RootFrameViewport final
       OverlayScrollbarClipBehavior =
           kIgnorePlatformOverlayScrollbarSize) const override;
   ScrollResult UserScroll(ScrollGranularity, const FloatSize&) override;
+  CompositorElementId GetCompositorElementId() const override;
   bool ScrollAnimatorEnabled() const override;
   PlatformChromeClient* GetChromeClient() const override;
   SmoothScrollSequencer* GetSmoothScrollSequencer() const override;
@@ -107,7 +106,8 @@ class CORE_EXPORT RootFrameViewport final
   FloatQuad LocalToVisibleContentQuad(const FloatQuad&,
                                       const LayoutObject*,
                                       unsigned = 0) const final;
-  RefPtr<WebTaskRunner> GetTimerTaskRunner() const final;
+  scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() const final;
+  ScrollbarTheme& GetPageScrollbarTheme() const override;
 
  private:
   RootFrameViewport(ScrollableArea& visual_viewport,

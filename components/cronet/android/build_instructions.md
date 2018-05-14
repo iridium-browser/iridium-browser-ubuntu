@@ -17,24 +17,28 @@ the
 To build Cronet for development and debugging purposes:
 
 ```shell
-$ ./components/cronet/tools/cr_cronet.py gn
-$ ninja -C out/Debug cronet_package
+$ ./components/cronet/tools/cr_cronet.py gn --out_dir=out/Cronet
+$ ninja -C out/Cronet cronet_package
 ```
 
 Note: these commands clobber output of previously executed gn commands in
-out/Debug.
+`out/Cronet`. If `--out_dir` is left out, the output directory defaults to
+`out/Debug`.
+
+If `--x86` option is specified, then native library is built for Intel x86
+architecture, and the output directory defaults to `out/Debug-x86`.
 
 ### Building Cronet for releases
 
 To build Cronet with optimizations and with debug information stripped out:
 
 ```shell
-$ ./components/cronet/tools/cr_cronet.py -r gn 
+$ ./components/cronet/tools/cr_cronet.py gn --release
 $ ninja -C out/Release cronet_package
 ```
 
 Note: these commands clobber output of previously executed gn commands in
-out/Release.
+`out/Release`.
 
 ### Building for other architectures
 
@@ -42,11 +46,9 @@ By default ARMv7 32-bit executables are generated. To generate executables
 targeting other architectures modify [cr_cronet.py](../tools/cr_cronet.py)'s
 `gn_args` variable to include:
 
-*   For ARMv6 32-bit: `arm_version=6`
 *   For ARMv8 64-bit: `target_cpu="arm64"`
 *   For x86 32-bit: `target_cpu="x86"`
 *   For x86 64-bit: `target_cpu="x64"`
-*   For MIPS: `target_cpu="mipsel"`
 
 ## Running tests
 
@@ -72,7 +74,7 @@ command. For example:
 $ ./components/cronet/tools/cr_cronet.py build-test -f QuicTest#testQuicLoadUrl
 ```
 
-#### Running net_unittests and cronet_unittests
+#### Running net_unittests and cronet_unittests_android
 
 To run C++ and Java unit tests of net/ functionality:
 
@@ -85,8 +87,8 @@ $ ./out/Debug/bin/run_net_unittests --fast-local-dev
 For more information about running net_unittests, read
 [Android Test Instructions](../../../docs/android_test_instructions.md).
 
-There are a small number of C++ Cronet unit tests, called cronet_unittests, that
-can be run by following the above instructions and substituting cronet_unittests
+There are a small number of C++ Cronet unit tests, called cronet_unittests_android, that
+can be run by following the above instructions and substituting cronet_unittests_android
 for net_unittests.
 
 #### Running Cronet performance tests
@@ -119,13 +121,13 @@ enable more verbosity:
 $ adb shell setprop log.tag.CronetUrlRequestContext VERBOSE
 ```
 
-#### See VLOG(1) logging: 
+#### See VLOG(1) logging:
 
 ```shell
-$ adb shell setprop log.tag.CronetUrlRequestContext DEBUG 
+$ adb shell setprop log.tag.CronetUrlRequestContext DEBUG
 ```
 
-#### See NO (only FATAL) logging: 
+#### See NO (only FATAL) logging:
 
 ```shell
 $ adb shell setprop log.tag.CronetUrlRequestContext NONE
@@ -143,7 +145,7 @@ CronetEngine.stopNetLog()
 
 Unlike the Android system log which is line-based, the Chromium log is formatted
 in JSON.  As such, it will probably not be well-formed until you have called the
-`stopNetLog()` method, as filesystem buffers will not have been flushed. 
+`stopNetLog()` method, as filesystem buffers will not have been flushed.
 
 Retrieve the file from your device's file system, and import it to chrome
 browser at chrome://net-internals/#import, or

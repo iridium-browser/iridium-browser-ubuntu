@@ -5,10 +5,11 @@
 #ifndef GeoNotifier_h
 #define GeoNotifier_h
 
-#include "modules/geolocation/PositionCallback.h"
-#include "modules/geolocation/PositionErrorCallback.h"
+#include "bindings/modules/v8/v8_position_callback.h"
+#include "bindings/modules/v8/v8_position_error_callback.h"
 #include "modules/geolocation/PositionOptions.h"
 #include "platform/Timer.h"
+#include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -17,16 +18,19 @@ class Geolocation;
 class Geoposition;
 class PositionError;
 
-class GeoNotifier : public GarbageCollectedFinalized<GeoNotifier> {
+class GeoNotifier final : public GarbageCollectedFinalized<GeoNotifier>,
+                          public TraceWrapperBase {
  public:
   static GeoNotifier* Create(Geolocation* geolocation,
-                             PositionCallback* position_callback,
-                             PositionErrorCallback* position_error_callback,
+                             V8PositionCallback* position_callback,
+                             V8PositionErrorCallback* position_error_callback,
                              const PositionOptions& options) {
     return new GeoNotifier(geolocation, position_callback,
                            position_error_callback, options);
   }
-  DECLARE_TRACE();
+  ~GeoNotifier() = default;
+  void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
   const PositionOptions& Options() const { return options_; }
 
@@ -45,23 +49,55 @@ class GeoNotifier : public GarbageCollectedFinalized<GeoNotifier> {
 
   void StartTimer();
   void StopTimer();
+  bool IsTimerActive() const;
+
+ private:
+  // Customized TaskRunnerTimer class that checks the ownership between this
+  // notifier and the Geolocation. The timer should run only when the notifier
+  // is owned by the Geolocation. When the Geolocation removes a notifier, the
+  // timer should be stopped beforehand.
+  class Timer final : public GarbageCollectedFinalized<Timer> {
+   public:
+    static Timer* Create(
+        scoped_refptr<base::SingleThreadTaskRunner> web_task_runner,
+        GeoNotifier* notifier,
+        void (GeoNotifier::*member_func)(TimerBase*)) {
+      return new Timer(web_task_runner, notifier, member_func);
+    }
+
+    void Trace(blink::Visitor*);
+
+    // TimerBase-compatible API
+    void StartOneShot(TimeDelta interval, const base::Location& caller);
+    void StartOneShot(double interval, const base::Location& caller);
+    void Stop();
+    bool IsActive() const { return timer_.IsActive(); }
+
+   private:
+    explicit Timer(scoped_refptr<base::SingleThreadTaskRunner> web_task_runner,
+                   GeoNotifier* notifier,
+                   void (GeoNotifier::*member_func)(TimerBase*))
+        : timer_(web_task_runner, notifier, member_func), notifier_(notifier) {}
+
+    TaskRunnerTimer<GeoNotifier> timer_;
+    Member<GeoNotifier> notifier_;
+  };
+
+  GeoNotifier(Geolocation*,
+              V8PositionCallback*,
+              V8PositionErrorCallback*,
+              const PositionOptions&);
 
   // Runs the error callback if there is a fatal error. Otherwise, if a
   // cached position must be used, registers itself for receiving one.
   // Otherwise, the notifier has expired, and its error callback is run.
   void TimerFired(TimerBase*);
 
- private:
-  GeoNotifier(Geolocation*,
-              PositionCallback*,
-              PositionErrorCallback*,
-              const PositionOptions&);
-
   Member<Geolocation> geolocation_;
-  Member<PositionCallback> success_callback_;
-  Member<PositionErrorCallback> error_callback_;
+  TraceWrapperMember<V8PositionCallback> success_callback_;
+  TraceWrapperMember<V8PositionErrorCallback> error_callback_;
   const PositionOptions options_;
-  Timer<GeoNotifier> timer_;
+  Member<Timer> timer_;
   Member<PositionError> fatal_error_;
   bool use_cached_position_;
 };

@@ -42,20 +42,13 @@ SKIP = {
   # OS dimensions go into the recipe, they're set in the json file, and
   # jelly bean devices are in the pool.  For now, just blacklist.
   'Jelly Bean Tester',
-  'KitKat Tablet Tester',
   'Lollipop Consumer Tester',
   'Lollipop Low-end Tester',
-  'Lollipop Phone Tester',
-  'Lollipop Tablet Tester',
-  'Marshmallow 64 bit Tester',
-  'Marshmallow Tablet Tester',
 
   # Android bots need custom dimension_sets entries for swarming, and capacity
   # is not there yet -- so don't let manage.py add swarming automatically there.
   'Android User Builder Tests',
   'Android GN',
-  'Android Tests',
-  'Android Tests (dbg)',
 
   # http://crbug.com/441429
   'Linux Trusty (32)', 'Linux Trusty (dbg)(32)',
@@ -81,6 +74,8 @@ SKIP = {
 SKIP_GN_ISOLATE_MAP_TARGETS = {
   # This target is magic and not present in gn_isolate_map.pyl.
   'all',
+  'remoting/client:client',
+  'remoting/host:host',
 
   # These targets are listed only in build-side recipes.
   'All_syzygy',
@@ -91,13 +86,15 @@ SKIP_GN_ISOLATE_MAP_TARGETS = {
   'chrome_official_builder_no_unittests',
   'chromium_builder_asan',
   'chromium_builder_perf',
-  'chromium_swarm_tests',
   'chromiumos_preflight',
   'mini_installer',
   'next_version_mini_installer',
 
   # iOS tests are listed in //ios/build/bots.
   'cronet_test',
+  'cronet_unittests_ios',
+  'ios_chrome_adaptive_toolbar_egtests',
+  'ios_chrome_bookmarks_egtests',
   'ios_chrome_integration_egtests',
   'ios_chrome_payments_egtests',
   'ios_chrome_reading_list_egtests',
@@ -108,11 +105,14 @@ SKIP_GN_ISOLATE_MAP_TARGETS = {
   'ios_chrome_web_egtests',
   'ios_components_unittests',
   'ios_net_unittests',
+  "ios_remoting_unittests",
   'ios_showcase_egtests',
   'ios_web_inttests',
   'ios_web_shell_egtests',
   'ios_web_unittests',
   'ios_web_view_inttests',
+  'ios_web_view_unittests',
+  'ocmock_support_unittests',
 
   # These are listed in Builders that are skipped for other reasons.
   'chrome_junit_tests',
@@ -132,8 +132,11 @@ SKIP_GN_ISOLATE_MAP_TARGETS = {
   'net_junit_tests',
   'net_junit_tests',
   'service_junit_tests',
+  'system_webview_apk',
   'ui_junit_tests',
   'vrcore_fps_test',
+  'vr_common_perftests',
+  'vr_perf_tests',
   'webapk_client_junit_tests',
   'webapk_shell_apk_junit_tests',
 

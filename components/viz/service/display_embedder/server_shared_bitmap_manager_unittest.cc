@@ -4,8 +4,8 @@
 
 #include "components/viz/service/display_embedder/server_shared_bitmap_manager.h"
 
-#include "base/memory/ptr_util.h"
 #include "components/viz/service/display_embedder/shared_bitmap_allocation_notifier_impl.h"
+#include "mojo/public/cpp/system/platform_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace viz {
@@ -14,7 +14,7 @@ namespace {
 class ServerSharedBitmapManagerTest : public testing::Test {
  protected:
   void SetUp() override {
-    manager_ = base::MakeUnique<ServerSharedBitmapManager>();
+    manager_ = std::make_unique<ServerSharedBitmapManager>();
   }
 
   void TearDown() override { manager_.reset(); }
@@ -36,35 +36,38 @@ TEST_F(ServerSharedBitmapManagerTest, TestCreate) {
 
   SharedBitmapAllocationNotifierImpl notifier(manager());
   base::SharedMemoryHandle handle = bitmap->handle().Duplicate();
-  notifier.ChildAllocatedSharedBitmap(size_in_bytes, handle, id);
+  mojo::ScopedSharedBufferHandle buffer_handle = mojo::WrapSharedMemoryHandle(
+      handle, size_in_bytes,
+      mojo::UnwrappedSharedMemoryHandleProtection::kReadWrite);
+  notifier.ChildAllocatedSharedBitmap(std::move(buffer_handle), id);
 
   std::unique_ptr<SharedBitmap> large_bitmap;
   large_bitmap = manager()->GetSharedBitmapFromId(gfx::Size(1024, 1024), id);
-  EXPECT_TRUE(large_bitmap.get() == NULL);
+  EXPECT_TRUE(large_bitmap.get() == nullptr);
 
   std::unique_ptr<SharedBitmap> very_large_bitmap;
   very_large_bitmap =
       manager()->GetSharedBitmapFromId(gfx::Size(1, (1 << 30) | 1), id);
-  EXPECT_TRUE(very_large_bitmap.get() == NULL);
+  EXPECT_TRUE(very_large_bitmap.get() == nullptr);
 
   std::unique_ptr<SharedBitmap> negative_size_bitmap;
   negative_size_bitmap =
       manager()->GetSharedBitmapFromId(gfx::Size(-1, 1024), id);
-  EXPECT_TRUE(negative_size_bitmap.get() == NULL);
+  EXPECT_TRUE(negative_size_bitmap.get() == nullptr);
 
   SharedBitmapId id2 = SharedBitmap::GenerateId();
   std::unique_ptr<SharedBitmap> invalid_bitmap;
   invalid_bitmap = manager()->GetSharedBitmapFromId(bitmap_size, id2);
-  EXPECT_TRUE(invalid_bitmap.get() == NULL);
+  EXPECT_TRUE(invalid_bitmap.get() == nullptr);
 
   std::unique_ptr<SharedBitmap> shared_bitmap;
   shared_bitmap = manager()->GetSharedBitmapFromId(bitmap_size, id);
-  ASSERT_TRUE(shared_bitmap.get() != NULL);
+  ASSERT_TRUE(shared_bitmap.get() != nullptr);
   EXPECT_EQ(memcmp(shared_bitmap->pixels(), bitmap->memory(), 4), 0);
 
   std::unique_ptr<SharedBitmap> large_bitmap2;
   large_bitmap2 = manager()->GetSharedBitmapFromId(gfx::Size(1024, 1024), id);
-  EXPECT_TRUE(large_bitmap2.get() == NULL);
+  EXPECT_TRUE(large_bitmap2.get() == nullptr);
 
   std::unique_ptr<SharedBitmap> shared_bitmap2;
   shared_bitmap2 = manager()->GetSharedBitmapFromId(bitmap_size, id);
@@ -98,10 +101,13 @@ TEST_F(ServerSharedBitmapManagerTest, ServiceDestroyed) {
   {
     SharedBitmapAllocationNotifierImpl notifier(manager());
     base::SharedMemoryHandle handle = bitmap->handle().Duplicate();
-    notifier.ChildAllocatedSharedBitmap(size_in_bytes, handle, id);
+    mojo::ScopedSharedBufferHandle buffer_handle = mojo::WrapSharedMemoryHandle(
+        handle, size_in_bytes,
+        mojo::UnwrappedSharedMemoryHandleProtection::kReadWrite);
+    notifier.ChildAllocatedSharedBitmap(std::move(buffer_handle), id);
 
     shared_bitmap = manager()->GetSharedBitmapFromId(bitmap_size, id);
-    ASSERT_TRUE(shared_bitmap.get() != NULL);
+    ASSERT_TRUE(shared_bitmap.get() != nullptr);
 
     EXPECT_EQ(1u, manager()->AllocatedBitmapCount());
   }
@@ -126,17 +132,24 @@ TEST_F(ServerSharedBitmapManagerTest, AddDuplicate) {
   SharedBitmapAllocationNotifierImpl notifier(manager());
 
   base::SharedMemoryHandle handle = bitmap->handle().Duplicate();
-  notifier.ChildAllocatedSharedBitmap(size_in_bytes, handle, id);
+  mojo::ScopedSharedBufferHandle buffer_handle = mojo::WrapSharedMemoryHandle(
+      handle, size_in_bytes,
+      mojo::UnwrappedSharedMemoryHandleProtection::kReadWrite);
+  notifier.ChildAllocatedSharedBitmap(std::move(buffer_handle), id);
 
   std::unique_ptr<base::SharedMemory> bitmap2(new base::SharedMemory());
   bitmap2->CreateAndMapAnonymous(size_in_bytes);
   memset(bitmap2->memory(), 0x00, size_in_bytes);
 
-  notifier.ChildAllocatedSharedBitmap(size_in_bytes, bitmap2->handle(), id);
+  base::SharedMemoryHandle handle2 = bitmap->handle().Duplicate();
+  buffer_handle = mojo::WrapSharedMemoryHandle(
+      handle2, size_in_bytes,
+      mojo::UnwrappedSharedMemoryHandleProtection::kReadWrite);
+  notifier.ChildAllocatedSharedBitmap(std::move(buffer_handle), id);
 
   std::unique_ptr<SharedBitmap> shared_bitmap;
   shared_bitmap = manager()->GetSharedBitmapFromId(bitmap_size, id);
-  ASSERT_TRUE(shared_bitmap.get() != NULL);
+  ASSERT_TRUE(shared_bitmap.get() != nullptr);
   EXPECT_EQ(memcmp(shared_bitmap->pixels(), bitmap->memory(), size_in_bytes),
             0);
   notifier.DidDeleteSharedBitmap(id);
@@ -155,7 +168,10 @@ TEST_F(ServerSharedBitmapManagerTest, SharedMemoryHandle) {
   SharedBitmapAllocationNotifierImpl notifier(manager());
 
   base::SharedMemoryHandle handle = bitmap->handle().Duplicate();
-  notifier.ChildAllocatedSharedBitmap(size_in_bytes, handle, id);
+  mojo::ScopedSharedBufferHandle buffer_handle = mojo::WrapSharedMemoryHandle(
+      handle, size_in_bytes,
+      mojo::UnwrappedSharedMemoryHandleProtection::kReadWrite);
+  notifier.ChildAllocatedSharedBitmap(std::move(buffer_handle), id);
 
   std::unique_ptr<SharedBitmap> shared_bitmap;
   shared_bitmap = manager()->GetSharedBitmapFromId(gfx::Size(1, 1), id);

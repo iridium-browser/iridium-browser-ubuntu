@@ -95,7 +95,6 @@ chrome.developerPrivate.ViewType = {
   EXTENSION_DIALOG: 'EXTENSION_DIALOG',
   EXTENSION_GUEST: 'EXTENSION_GUEST',
   EXTENSION_POPUP: 'EXTENSION_POPUP',
-  LAUNCHER_PAGE: 'LAUNCHER_PAGE',
   PANEL: 'PANEL',
   TAB_CONTENTS: 'TAB_CONTENTS',
 };
@@ -278,7 +277,15 @@ chrome.developerPrivate.DependentExtension;
 
 /**
  * @typedef {{
- *   actionButtonHidden: boolean,
+ *   message: string,
+ *   submessages: !Array<string>
+ * }}
+ * @see https://developer.chrome.com/extensions/developerPrivate#type-Permission
+ */
+chrome.developerPrivate.Permission;
+
+/**
+ * @typedef {{
  *   blacklistText: (string|undefined),
  *   commands: !Array<!chrome.developerPrivate.Command>,
  *   controlledInfo: (!chrome.developerPrivate.ControlledInfo|undefined),
@@ -296,12 +303,13 @@ chrome.developerPrivate.DependentExtension;
  *   location: !chrome.developerPrivate.Location,
  *   locationText: (string|undefined),
  *   manifestErrors: !Array<!chrome.developerPrivate.ManifestError>,
+ *   manifestHomePageUrl: string,
  *   mustRemainInstalled: boolean,
  *   name: string,
  *   offlineEnabled: boolean,
  *   optionsPage: (!chrome.developerPrivate.OptionsPage|undefined),
  *   path: (string|undefined),
- *   permissions: !Array<string>,
+ *   permissions: !Array<!chrome.developerPrivate.Permission>,
  *   prettifiedPath: (string|undefined),
  *   runOnAllUrls: !chrome.developerPrivate.AccessModifier,
  *   runtimeErrors: !Array<!chrome.developerPrivate.RuntimeError>,
@@ -311,7 +319,8 @@ chrome.developerPrivate.DependentExtension;
  *   updateUrl: string,
  *   userMayModify: boolean,
  *   version: string,
- *   views: !Array<!chrome.developerPrivate.ExtensionView>
+ *   views: !Array<!chrome.developerPrivate.ExtensionView>,
+ *   webStoreUrl: string
  * }}
  * @see https://developer.chrome.com/extensions/developerPrivate#type-ExtensionInfo
  */
@@ -406,7 +415,8 @@ chrome.developerPrivate.ExtensionCommandUpdate;
 
 /**
  * @typedef {{
- *   failQuietly: (boolean|undefined)
+ *   failQuietly: (boolean|undefined),
+ *   populateErrorForUnpacked: (boolean|undefined)
  * }}
  * @see https://developer.chrome.com/extensions/developerPrivate#type-ReloadOptions
  */
@@ -416,7 +426,8 @@ chrome.developerPrivate.ReloadOptions;
  * @typedef {{
  *   failQuietly: (boolean|undefined),
  *   populateError: (boolean|undefined),
- *   retryGuid: (string|undefined)
+ *   retryGuid: (string|undefined),
+ *   useDraggedPath: (boolean|undefined)
  * }}
  * @see https://developer.chrome.com/extensions/developerPrivate#type-LoadUnpackedOptions
  */
@@ -569,8 +580,7 @@ chrome.developerPrivate.DeleteExtensionErrorsProperties;
 
 /**
  * Runs auto update for extensions and apps immediately.
- * @param {function(boolean):void=} callback Called with the boolean result,
- *     true if autoUpdate is successful.
+ * @param {function():void=} callback Called after update check completes.
  * @see https://developer.chrome.com/extensions/developerPrivate#method-autoUpdate
  */
 chrome.developerPrivate.autoUpdate = function(callback) {};
@@ -593,6 +603,14 @@ chrome.developerPrivate.getExtensionsInfo = function(options, callback) {};
  * @see https://developer.chrome.com/extensions/developerPrivate#method-getExtensionInfo
  */
 chrome.developerPrivate.getExtensionInfo = function(id, callback) {};
+
+/**
+ * Returns the size of a particular extension on disk (already formatted).
+ * @param {string} id The id of the extension.
+ * @param {function(string):void} callback Called with the result.
+ * @see https://developer.chrome.com/extensions/developerPrivate#method-getExtensionSize
+ */
+chrome.developerPrivate.getExtensionSize = function(id, callback) {};
 
 /**
  * Returns information of all the extensions and apps installed.
@@ -635,7 +653,8 @@ chrome.developerPrivate.showPermissionsDialog = function(extensionId, callback) 
  * @param {string} extensionId The id of the extension to reload.
  * @param {!chrome.developerPrivate.ReloadOptions=} options Additional
  *     configuration parameters.
- * @param {function():void=} callback
+ * @param {function((!chrome.developerPrivate.LoadError|undefined)):void=}
+ *     callback
  * @see https://developer.chrome.com/extensions/developerPrivate#method-reload
  */
 chrome.developerPrivate.reload = function(extensionId, options, callback) {};
@@ -659,6 +678,13 @@ chrome.developerPrivate.updateExtensionConfiguration = function(update, callback
  * @see https://developer.chrome.com/extensions/developerPrivate#method-loadUnpacked
  */
 chrome.developerPrivate.loadUnpacked = function(options, callback) {};
+
+/**
+ * Notifies the browser that a user began a drag in order to install an
+ * extension.
+ * @see https://developer.chrome.com/extensions/developerPrivate#method-notifyDragInstallInProgress
+ */
+chrome.developerPrivate.notifyDragInstallInProgress = function() {};
 
 /**
  * Loads an extension / app.
@@ -717,7 +743,7 @@ chrome.developerPrivate.requestFileSource = function(properties, callback) {};
 chrome.developerPrivate.openDevTools = function(properties, callback) {};
 
 /**
- * Delete reported extension erors.
+ * Delete reported extension errors.
  * @param {!chrome.developerPrivate.DeleteExtensionErrorsProperties} properties
  *     The properties specifying the errors to remove.
  * @param {function():void=} callback

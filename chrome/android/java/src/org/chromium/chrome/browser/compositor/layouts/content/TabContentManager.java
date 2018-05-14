@@ -7,7 +7,6 @@ package org.chromium.chrome.browser.compositor.layouts.content;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.util.SparseArray;
 import android.view.View;
 
 import org.chromium.base.CommandLine;
@@ -35,21 +34,8 @@ public class TabContentManager {
     private int[] mPriorityTabIds;
     private long mNativeTabContentManager;
 
-    /**
-     * A callback interface for decompressing the thumbnail for a tab into a bitmap.
-     */
-    public static interface DecompressThumbnailCallback {
-        /**
-         * Called when the decompression finishes.
-         * @param bitmap     The {@link Bitmap} of the content.  Null will be passed for failure.
-         */
-        public void onFinishGetBitmap(Bitmap bitmap);
-    }
-
     private final ArrayList<ThumbnailChangeListener> mListeners =
             new ArrayList<ThumbnailChangeListener>();
-    private final SparseArray<DecompressThumbnailCallback> mDecompressRequests =
-            new SparseArray<TabContentManager.DecompressThumbnailCallback>();
 
     private boolean mSnapshotsEnabled;
 
@@ -236,27 +222,6 @@ public class TabContentManager {
     }
 
     /**
-     * Send a request to thumbnail store to read and decompress the thumbnail for the given tab id.
-     * @param tabId The tab id for which the thumbnail should be requested.
-     * @param callback The callback to use when the thumbnail bitmap is decompressed and sent back.
-     */
-    public void getThumbnailForId(int tabId, DecompressThumbnailCallback callback) {
-        if (mNativeTabContentManager == 0) return;
-        if (mDecompressRequests.get(tabId) != null) return;
-
-        mDecompressRequests.put(tabId, callback);
-        nativeGetDecompressedThumbnail(mNativeTabContentManager, tabId);
-    }
-
-    @CalledByNative
-    private void notifyDecompressBitmapFinished(int tabId, Bitmap bitmap) {
-        DecompressThumbnailCallback callback = mDecompressRequests.get(tabId);
-        mDecompressRequests.remove(tabId);
-        if (callback == null) return;
-        callback.onFinishGetBitmap(bitmap);
-    }
-
-    /**
      * Invalidate a thumbnail if the content of the tab has been changed.
      * @param tabId The id of the {@link Tab} thumbnail to check.
      * @param url   The current URL of the {@link Tab}.
@@ -327,6 +292,5 @@ public class TabContentManager {
     private native void nativeUpdateVisibleIds(
             long nativeTabContentManager, int[] priority, int primaryTabId);
     private native void nativeRemoveTabThumbnail(long nativeTabContentManager, int tabId);
-    private native void nativeGetDecompressedThumbnail(long nativeTabContentManager, int tabId);
     private static native void nativeDestroy(long nativeTabContentManager);
 }

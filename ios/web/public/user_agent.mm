@@ -11,7 +11,6 @@
 #include <sys/sysctl.h>
 #include <string>
 
-#import "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -45,6 +44,7 @@ const UAVersions& GetUAVersionsForCurrentOS() {
   // Safari version can't be, so a lookup table is used instead (for both, since
   // the reported versions should stay in sync).
   static const OSVersionMap version_map[] = {
+      {11, 0, {"604.1", "604.1.34"}},
       {10, 3, {"602.1", "603.1.30"}},
       {10, 0, {"602.1", "602.1.50"}},
       {9, 0, {"601.1.46", "601.1"}},

@@ -38,7 +38,7 @@ class DrawProperties(legacy_page_test.LegacyPageTest):
 
   def ValidateAndMeasurePage(self, page, tab, results):
     del page  # unused
-    timeline_data = tab.browser.platform.tracing_controller.StopTracing()
+    timeline_data = tab.browser.platform.tracing_controller.StopTracing()[0]
     timeline_model = model.TimelineModel(timeline_data)
 
     pt_avg = self.ComputeAverageOfDurations(

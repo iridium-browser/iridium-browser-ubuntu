@@ -17,16 +17,15 @@
 #include "storage/browser/quota/quota_client.h"
 #include "storage/browser/quota/quota_manager.h"
 #include "storage/browser/quota/quota_task.h"
-#include "storage/common/quota/quota_types.h"
+#include "third_party/WebKit/public/mojom/quota/quota_types.mojom.h"
 #include "url/gurl.h"
 
+using blink::mojom::StorageType;
 using storage::GetOriginsCallback;
 using storage::QuotaClient;
 using storage::QuotaManager;
-using storage::QuotaStatusCode;
 using storage::SpecialStoragePolicy;
 using storage::StatusCallback;
-using storage::StorageType;
 
 namespace content {
 
@@ -47,7 +46,6 @@ class MockQuotaManager : public QuotaManager {
       bool is_incognito,
       const base::FilePath& profile_path,
       const scoped_refptr<base::SingleThreadTaskRunner>& io_thread,
-      const scoped_refptr<base::SequencedTaskRunner>& db_thread,
       const scoped_refptr<SpecialStoragePolicy>& special_storage_policy);
 
   // Overrides QuotaManager's implementation. The internal usage data is
@@ -55,15 +53,15 @@ class MockQuotaManager : public QuotaManager {
   // called.  The internal quota value can be updated by calling
   // a helper method MockQuotaManagerProxy::SetQuota().
   void GetUsageAndQuota(const GURL& origin,
-                        storage::StorageType type,
-                        const UsageAndQuotaCallback& callback) override;
+                        StorageType type,
+                        UsageAndQuotaCallback callback) override;
 
   // Overrides QuotaManager's implementation with a canned implementation that
   // allows clients to set up the origin database that should be queried. This
   // method will only search through the origins added explicitly via AddOrigin.
   void GetOriginsModifiedSince(StorageType type,
                                base::Time modified_since,
-                               const GetOriginsCallback& callback) override;
+                               GetOriginsCallback callback) override;
 
   // Removes an origin from the canned list of origins, but doesn't touch
   // anything on disk. The caller must provide |quota_client_mask| which
@@ -74,7 +72,7 @@ class MockQuotaManager : public QuotaManager {
   void DeleteOriginData(const GURL& origin,
                         StorageType type,
                         int quota_client_mask,
-                        const StatusCallback& callback) override;
+                        StatusCallback callback) override;
 
   // Helper method for updating internal quota info.
   void SetQuota(const GURL& origin, StorageType type, int64_t quota);
@@ -135,11 +133,11 @@ class MockQuotaManager : public QuotaManager {
 
   // This must be called via MockQuotaManagerProxy.
   void UpdateUsage(const GURL& origin, StorageType type, int64_t delta);
-  void DidGetModifiedSince(const GetOriginsCallback& callback,
+  void DidGetModifiedSince(GetOriginsCallback callback,
                            std::set<GURL>* origins,
                            StorageType storage_type);
-  void DidDeleteOriginData(const StatusCallback& callback,
-                           QuotaStatusCode status);
+  void DidDeleteOriginData(StatusCallback callback,
+                           blink::mojom::QuotaStatusCode status);
 
   // The list of stored origins that have been added via AddOrigin.
   std::vector<OriginInfo> origins_;

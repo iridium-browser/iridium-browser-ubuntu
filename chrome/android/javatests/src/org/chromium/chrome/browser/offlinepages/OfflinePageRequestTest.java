@@ -15,7 +15,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.RetryOnFailure;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge.OfflinePageModelObserver;
@@ -33,8 +33,7 @@ import java.util.concurrent.TimeUnit;
 
 /** Unit tests for offline page request handling. */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class OfflinePageRequestTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -80,10 +79,10 @@ public class OfflinePageRequestTest {
 
     @Test
     @SmallTest
-    @RetryOnFailure
+    @DisabledTest(message = "crbug.com/786233")
     public void testLoadOfflinePageOnDisconnectedNetwork() throws Exception {
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL(TEST_PAGE);
         String aboutUrl = testServer.getURL(ABOUT_PAGE);
 
@@ -116,10 +115,10 @@ public class OfflinePageRequestTest {
 
     @Test
     @SmallTest
-    @RetryOnFailure
+    @DisabledTest(message = "crbug.com/786233")
     public void testLoadOfflinePageWithFragmentOnDisconnectedNetwork() throws Exception {
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL(TEST_PAGE);
         String testUrlWithFragment = testUrl + "#ref";
 

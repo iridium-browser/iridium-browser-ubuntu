@@ -102,7 +102,7 @@ UsbServiceLinux::FileThreadHelper::~FileThreadHelper() {
 // static
 void UsbServiceLinux::FileThreadHelper::Start() {
   DCHECK(sequence_checker_.CalledOnValidSequence());
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   watcher_ = UdevWatcher::StartWatching(this);
   watcher_->EnumerateExistingDevices();
@@ -182,7 +182,7 @@ void UsbServiceLinux::FileThreadHelper::OnDeviceRemoved(
 
 UsbServiceLinux::UsbServiceLinux()
     : UsbService(CreateBlockingTaskRunner()), weak_factory_(this) {
-  helper_ = base::MakeUnique<FileThreadHelper>(weak_factory_.GetWeakPtr());
+  helper_ = std::make_unique<FileThreadHelper>(weak_factory_.GetWeakPtr());
   blocking_task_runner()->PostTask(
       FROM_HERE,
       base::Bind(&FileThreadHelper::Start, base::Unretained(helper_.get())));

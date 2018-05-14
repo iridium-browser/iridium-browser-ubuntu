@@ -28,6 +28,7 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/CoreExport.h"
+#include "core/editing/Forward.h"
 #include "core/editing/commands/EditCommand.h"
 #include "core/editing/commands/EditingState.h"
 #include "core/editing/commands/UndoStep.h"
@@ -35,6 +36,7 @@
 
 namespace blink {
 
+class DeleteSelectionOptions;
 class EditingStyle;
 class Element;
 class HTMLBRElement;
@@ -49,16 +51,15 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
 
   ~CompositeEditCommand() override;
 
-  const VisibleSelection& StartingSelection() const {
+  const SelectionForUndoStep& StartingSelection() const {
     return starting_selection_;
   }
-  const VisibleSelection& EndingSelection() const { return ending_selection_; }
+  const SelectionForUndoStep& EndingSelection() const {
+    return ending_selection_;
+  }
 
-  void SetStartingSelection(const VisibleSelection&);
-  void SetEndingSelection(const SelectionInDOMTree&);
-  // TODO(yosin): |setEndingVisibleSelection()| will take |SelectionInUndoStep|
-  // You should not use this function other than copying existing selection.
-  void SetEndingVisibleSelection(const VisibleSelection&);
+  void SetStartingSelection(const SelectionForUndoStep&);
+  void SetEndingSelection(const SelectionForUndoStep&);
 
   void SetParent(CompositeEditCommand*) override;
 
@@ -77,22 +78,19 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
   virtual bool IsCommandGroupWrapper() const;
   virtual bool IsDragAndDropCommand() const;
   virtual bool PreservesTypingStyle() const;
-  virtual void SetShouldRetainAutocorrectionIndicator(bool);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   explicit CompositeEditCommand(Document&);
 
+  VisibleSelection EndingVisibleSelection() const;
   //
   // sugary-sweet convenience functions to help create and apply edit commands
   // in composite commands
   //
   void AppendNode(Node*, ContainerNode* parent, EditingState*);
   void ApplyCommandToComposite(EditCommand*, EditingState*);
-  void ApplyCommandToComposite(CompositeEditCommand*,
-                               const VisibleSelection&,
-                               EditingState*);
   void ApplyStyle(const EditingStyle*, EditingState*);
   void ApplyStyle(const EditingStyle*,
                   const Position& start,
@@ -100,11 +98,8 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
                   EditingState*);
   void ApplyStyledElement(Element*, EditingState*);
   void RemoveStyledElement(Element*, EditingState*);
-  void DeleteSelection(EditingState*,
-                       bool smart_delete = false,
-                       bool merge_blocks_after_delete = true,
-                       bool expand_for_special_elements = true,
-                       bool sanitize_markup = true);
+  // Returns |false| if the EditingState has been aborted.
+  bool DeleteSelection(EditingState*, const DeleteSelectionOptions&);
   virtual void DeleteTextFromNode(Text*, unsigned offset, unsigned count);
   bool IsRemovableBlock(const Node*);
   void InsertNodeAfter(Node*, Node* ref_child, EditingState*);
@@ -208,8 +203,8 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
                                      Node* outer_node,
                                      Element* block_element,
                                      EditingState*);
-  void CleanupAfterDeletion(EditingState*,
-                            VisiblePosition destination = VisiblePosition());
+  void CleanupAfterDeletion(EditingState*, VisiblePosition destination);
+  void CleanupAfterDeletion(EditingState*);
 
   bool BreakOutOfEmptyListItem(EditingState*);
   bool BreakOutOfEmptyMailBlockquotedParagraph(EditingState*);
@@ -219,15 +214,15 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
 
   Node* SplitTreeToNode(Node*, Node*, bool split_ancestor = false);
 
-  static bool IsNodeVisiblyContainedWithin(Node&, const Range&);
+  static bool IsNodeVisiblyContainedWithin(Node&, const EphemeralRange&);
 
   HeapVector<Member<EditCommand>> commands_;
 
  private:
   bool IsCompositeEditCommand() const final { return true; }
 
-  VisibleSelection starting_selection_;
-  VisibleSelection ending_selection_;
+  SelectionForUndoStep starting_selection_;
+  SelectionForUndoStep ending_selection_;
   Member<UndoStep> undo_step_;
 };
 

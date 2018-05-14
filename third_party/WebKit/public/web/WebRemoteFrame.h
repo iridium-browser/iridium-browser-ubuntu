@@ -6,10 +6,10 @@
 #define WebRemoteFrame_h
 
 #include "public/platform/WebContentSecurityPolicy.h"
-#include "public/platform/WebFeaturePolicy.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "public/web/WebFrame.h"
-#include "public/web/WebSandboxFlags.h"
+#include "third_party/WebKit/public/common/feature_policy/feature_policy.h"
+#include "third_party/WebKit/public/common/frame/sandbox_flags.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -21,6 +21,10 @@ class WebLayer;
 class WebRemoteFrameClient;
 class WebString;
 class WebView;
+struct WebIntrinsicSizingInfo;
+struct WebRect;
+struct WebResourceTimingInfo;
+struct WebScrollIntoViewParams;
 
 class WebRemoteFrame : public WebFrame {
  public:
@@ -45,14 +49,14 @@ class WebRemoteFrame : public WebFrame {
                                           WebFrameClient*,
                                           blink::InterfaceRegistry*,
                                           WebFrame* previous_sibling,
-                                          const WebParsedFeaturePolicy&,
+                                          const ParsedFeaturePolicy&,
                                           const WebFrameOwnerProperties&,
                                           WebFrame* opener) = 0;
 
   virtual WebRemoteFrame* CreateRemoteChild(WebTreeScopeType,
                                             const WebString& name,
                                             WebSandboxFlags,
-                                            const WebParsedFeaturePolicy&,
+                                            const ParsedFeaturePolicy&,
                                             WebRemoteFrameClient*,
                                             WebFrame* opener) = 0;
 
@@ -60,7 +64,9 @@ class WebRemoteFrame : public WebFrame {
   virtual void SetWebLayer(WebLayer*) = 0;
 
   // Set security origin replicated from another process.
-  virtual void SetReplicatedOrigin(const WebSecurityOrigin&) = 0;
+  virtual void SetReplicatedOrigin(
+      const WebSecurityOrigin&,
+      bool is_potentially_trustworthy_unique_origin) = 0;
 
   // Set sandbox flags replicated from another process.
   virtual void SetReplicatedSandboxFlags(WebSandboxFlags) = 0;
@@ -69,7 +75,7 @@ class WebRemoteFrame : public WebFrame {
   virtual void SetReplicatedName(const WebString&) = 0;
 
   virtual void SetReplicatedFeaturePolicyHeader(
-      const WebParsedFeaturePolicy& parsed_header) = 0;
+      const ParsedFeaturePolicy& parsed_header) = 0;
 
   // Adds |header| to the set of replicated CSP headers.
   virtual void AddReplicatedContentSecurityPolicyHeader(
@@ -83,12 +89,13 @@ class WebRemoteFrame : public WebFrame {
   // Set frame enforcement of insecure request policy replicated from another
   // process.
   virtual void SetReplicatedInsecureRequestPolicy(WebInsecureRequestPolicy) = 0;
+  virtual void SetReplicatedInsecureNavigationsSet(
+      const std::vector<unsigned>&) = 0;
 
-  // Set the frame to a unique origin that is potentially trustworthy,
-  // replicated from another process.
-  virtual void SetReplicatedPotentiallyTrustworthyUniqueOrigin(bool) = 0;
+  // Reports resource timing info for a navigation in this frame.
+  virtual void ForwardResourceTimingToParent(const WebResourceTimingInfo&) = 0;
 
-  virtual void DispatchLoadEventOnFrameOwner() = 0;
+  virtual void DispatchLoadEventForFrameOwner() = 0;
 
   virtual void DidStartLoading() = 0;
   virtual void DidStopLoading() = 0;
@@ -103,7 +110,17 @@ class WebRemoteFrame : public WebFrame {
   // owner.
   virtual void WillEnterFullscreen() = 0;
 
-  virtual void SetHasReceivedUserGesture() = 0;
+  virtual void SetHasReceivedUserGestureBeforeNavigation(bool value) = 0;
+
+  // Scrolls the given rectangle into view. This kicks off the recursive scroll
+  // into visible starting from the frame's owner element. The coordinates of
+  // the rect are absolute (transforms removed) with respect to the frame in
+  // OOPIF process. The parameters are sent by the OOPIF local root and can be
+  // used to properly chain the recursive scrolling between the two processes.
+  virtual void ScrollRectToVisible(const WebRect&,
+                                   const WebScrollIntoViewParams&) = 0;
+
+  virtual void IntrinsicSizingInfoChanged(const WebIntrinsicSizingInfo&) = 0;
 
  protected:
   explicit WebRemoteFrame(WebTreeScopeType scope) : WebFrame(scope) {}

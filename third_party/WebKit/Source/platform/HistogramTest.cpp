@@ -5,34 +5,11 @@
 #include "platform/Histogram.h"
 
 #include "base/metrics/histogram_samples.h"
+#include "platform/testing/wtf/ScopedMockClock.h"
+#include "platform/wtf/Time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
-
-class ScopedUsHistogramTimerTest : public ::testing::Test {
- public:
-  static void AdvanceClock(double microseconds) {
-    time_elapsed_ += microseconds;
-  }
-
- protected:
-  static double ReturnMockTime() { return time_elapsed_; }
-
-  virtual void SetUp() {
-    time_elapsed_ = 0.0;
-    original_time_function_ = SetTimeFunctionsForTesting(ReturnMockTime);
-  }
-
-  virtual void TearDown() {
-    SetTimeFunctionsForTesting(original_time_function_);
-  }
-
- private:
-  static double time_elapsed_;
-  TimeFunction original_time_function_;
-};
-
-double ScopedUsHistogramTimerTest::time_elapsed_;
 
 class TestCustomCountHistogram : public CustomCountHistogram {
  public:
@@ -45,13 +22,14 @@ class TestCustomCountHistogram : public CustomCountHistogram {
   base::HistogramBase* Histogram() { return histogram_; }
 };
 
-TEST_F(ScopedUsHistogramTimerTest, Basic) {
+TEST(ScopedUsHistogramTimerTest, Basic) {
   TestCustomCountHistogram scoped_us_counter("test", 0, 10000000, 50);
   {
+    WTF::ScopedMockClock clock;
     ScopedUsHistogramTimer timer(scoped_us_counter);
-    AdvanceClock(0.5);
+    clock.Advance(TimeDelta::FromMilliseconds(500));
   }
-  // 0.5s == 500000us
+  // 500ms == 500000us
   EXPECT_EQ(500000, scoped_us_counter.Histogram()->SnapshotSamples()->sum());
 }
 

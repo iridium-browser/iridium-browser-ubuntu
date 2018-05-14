@@ -41,9 +41,9 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.browser.tabmodel.MockTabModel.MockTabModelDelegate;
 import org.chromium.chrome.test.util.browser.tabmodel.MockTabModelSelector;
+import org.chromium.ui.test.util.UiRestriction;
 
 /**
  * Unit tests for {@link org.chromium.chrome.browser.compositor.layouts.LayoutManagerChrome}
@@ -113,8 +113,7 @@ public class LayoutManagerTest implements MockTabModelDelegate {
 
     private void initializeLayoutManagerPhone(int standardTabCount, int incognitoTabCount,
             int standardIndexSelected, int incognitoIndexSelected, boolean incognitoSelected) {
-        Context context =
-                new MockContextForLayout(InstrumentationRegistry.getInstrumentation().getContext());
+        Context context = new MockContextForLayout(InstrumentationRegistry.getContext());
 
         mDpToPx = context.getResources().getDisplayMetrics().density;
 
@@ -135,6 +134,7 @@ public class LayoutManagerTest implements MockTabModelDelegate {
 
         mManagerPhone = new LayoutManagerChromePhone(layoutManagerHost);
         mManager = mManagerPhone;
+        mManager.getAnimationHandler().enableTestingMode();
         mManager.init(mTabModelSelector, null, null, container, null, null);
         initializeMotionEvent();
     }
@@ -209,7 +209,7 @@ public class LayoutManagerTest implements MockTabModelDelegate {
     @SmallTest
     @Feature({"Android-TabSwitcher"})
     @UiThreadTest
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
+    @Restriction({UiRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     public void testCreation() {
         initializeLayoutManagerPhone(0, 0);
     }
@@ -218,7 +218,7 @@ public class LayoutManagerTest implements MockTabModelDelegate {
     @SmallTest
     @Feature({"Android-TabSwitcher"})
     @UiThreadTest
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
+    @Restriction({UiRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     public void testStack() throws Exception {
         initializeLayoutManagerPhone(3, 0);
         mManagerPhone.showOverview(true);
@@ -235,7 +235,7 @@ public class LayoutManagerTest implements MockTabModelDelegate {
     @SmallTest
     @Feature({"Android-TabSwitcher"})
     @UiThreadTest
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
+    @Restriction({UiRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     public void testStackNoAnimation() throws Exception {
         initializeLayoutManagerPhone(1, 0);
         mManagerPhone.showOverview(false);
@@ -252,7 +252,7 @@ public class LayoutManagerTest implements MockTabModelDelegate {
     @SmallTest
     @Feature({"Android-TabSwitcher"})
     @UiThreadTest
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
+    @Restriction({UiRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     public void testStackPinch() throws Exception {
         initializeLayoutManagerPhone(5, 0);
         // Setting the index to the second to last element ensure the stack can be scrolled in both
@@ -507,9 +507,7 @@ public class LayoutManagerTest implements MockTabModelDelegate {
             @Override
             public void run() {
                 try {
-                    ChromeBrowserInitializer
-                            .getInstance(
-                                    InstrumentationRegistry.getInstrumentation().getTargetContext())
+                    ChromeBrowserInitializer.getInstance(InstrumentationRegistry.getTargetContext())
                             .handleSynchronousStartup();
                 } catch (ProcessInitException e) {
                     Assert.fail("Failed to load browser");
@@ -549,6 +547,9 @@ public class LayoutManagerTest implements MockTabModelDelegate {
         final float deltaX = MathUtils.flipSignIf(layoutWidth / 2.f, scrollLeft);
 
         eventHandler.swipeStarted(direction, layoutWidth, 0);
+        // Call swipeUpdated twice since the handler computes direction in that method.
+        // TODO(mdjones): Update implementation of EdgeSwipeHandler to work this way by default.
+        eventHandler.swipeUpdated(deltaX, 0.f, deltaX, 0.f, deltaX, 0.f);
         eventHandler.swipeUpdated(deltaX, 0.f, deltaX, 0.f, deltaX, 0.f);
         eventHandler.swipeFinished();
 

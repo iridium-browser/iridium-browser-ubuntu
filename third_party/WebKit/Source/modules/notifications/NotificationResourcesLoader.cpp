@@ -7,22 +7,22 @@
 #include <cmath>
 #include "platform/Histogram.h"
 #include "platform/weborigin/KURL.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/Threading.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/modules/notifications/WebNotificationData.h"
 #include "public/platform/modules/notifications/WebNotificationResources.h"
 
 namespace blink {
 
 NotificationResourcesLoader::NotificationResourcesLoader(
-    std::unique_ptr<CompletionCallback> completion_callback)
+    CompletionCallback completion_callback)
     : started_(false),
       completion_callback_(std::move(completion_callback)),
       pending_request_count_(0) {
   DCHECK(completion_callback_);
 }
 
-NotificationResourcesLoader::~NotificationResourcesLoader() {}
+NotificationResourcesLoader::~NotificationResourcesLoader() = default;
 
 void NotificationResourcesLoader::Start(
     ExecutionContext* execution_context,
@@ -72,7 +72,7 @@ void NotificationResourcesLoader::Stop() {
     image_loader->Stop();
 }
 
-DEFINE_TRACE(NotificationResourcesLoader) {
+void NotificationResourcesLoader::Trace(blink::Visitor* visitor) {
   visitor->Trace(image_loaders_);
 }
 
@@ -80,7 +80,7 @@ void NotificationResourcesLoader::LoadImage(
     ExecutionContext* execution_context,
     NotificationImageLoader::Type type,
     const KURL& url,
-    std::unique_ptr<NotificationImageLoader::ImageCallback> image_callback) {
+    NotificationImageLoader::ImageCallback image_callback) {
   if (url.IsNull() || url.IsEmpty() || !url.IsValid()) {
     DidFinishRequest();
     return;
@@ -123,7 +123,7 @@ void NotificationResourcesLoader::DidFinishRequest() {
   pending_request_count_--;
   if (!pending_request_count_) {
     Stop();
-    (*completion_callback_)(this);
+    std::move(completion_callback_).Run(this);
     // The |this| pointer may have been deleted now.
   }
 }

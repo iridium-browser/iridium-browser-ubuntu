@@ -4,12 +4,14 @@
 
 #include "chrome/test/base/chrome_unit_test_suite.h"
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/process/process_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/profiles/profile_shortcut_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
 #include "chrome/common/chrome_content_client.h"
@@ -28,7 +30,11 @@
 #include "ui/gl/test/gl_surface_test_support.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/public/cpp/config.h"
+#include "ash/test/ash_test_helper.h"
 #include "chromeos/chromeos_paths.h"
+#include "ui/aura/env.h"
+#include "ui/aura/test/aura_test_context_factory.h"
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -47,6 +53,12 @@ class ChromeUnitTestSuiteInitializer : public testing::EmptyTestEventListener {
   void OnTestStart(const testing::TestInfo& test_info) override {
     content_client_.reset(new ChromeContentClient);
     content::SetContentClient(content_client_.get());
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+    extensions::ExtensionsClient::Get()->InitializeWebStoreUrls(
+        base::CommandLine::ForCurrentProcess());
+
+#endif
+
     browser_content_client_.reset(new ChromeContentBrowserClient());
     content::SetBrowserClientForTesting(browser_content_client_.get());
     utility_content_client_.reset(new ChromeContentUtilityClient());
@@ -61,20 +73,6 @@ class ChromeUnitTestSuiteInitializer : public testing::EmptyTestEventListener {
     content_client_.reset();
     content::SetContentClient(NULL);
 
-    // AsyncPolicyProvider is a lazily created KeyedService that may need to be
-    // shut down here. However, AsyncPolicyProvider::Shutdown() will want to
-    // post tasks to delete its policy loaders. This goes through
-    // BrowserThreadTaskRunner::PostNonNestableDelayedTask(), which can invoke
-    // LazyInstance<BrowserThreadGlobals>::Get() and try to create it for the
-    // first time. It might be created during the test, but it might not (see
-    // comments in TestingBrowserProcess::browser_policy_connector()). Since
-    // creating BrowserThreadGlobals requires creating a SequencedWorkerPool,
-    // and that needs a MessageLoop, make sure there is one here so that tests
-    // don't get obscure errors. Tests can also invoke TestingBrowserProcess::
-    // DeleteInstance() themselves (after ensuring any TestingProfile instances
-    // are deleted). But they shouldn't have to worry about that.
-    DCHECK(!base::MessageLoop::current());
-    base::MessageLoopForUI message_loop;
     TestingBrowserProcess::DeleteInstance();
   }
 
@@ -112,10 +110,21 @@ void ChromeUnitTestSuite::Initialize() {
   InitializeResourceBundle();
 
   base::DiscardableMemoryAllocator::SetInstance(&discardable_memory_allocator_);
+  ProfileShortcutManager::DisableForUnitTests();
+
+#if defined(OS_CHROMEOS)
+  aura::Env* env = aura::Env::GetInstance();
+  if (env->mode() == aura::Env::Mode::MUS) {
+    ash::AshTestHelper::set_config(ash::Config::MUS);
+    context_factory_ = std::make_unique<aura::test::AuraTestContextFactory>();
+    env->set_context_factory(context_factory_.get());
+    env->set_context_factory_private(nullptr);
+  }
+#endif
 }
 
 void ChromeUnitTestSuite::Shutdown() {
-  ResourceBundle::CleanupSharedInstance();
+  ui::ResourceBundle::CleanupSharedInstance();
   ChromeTestSuite::Shutdown();
 }
 
@@ -163,6 +172,6 @@ void ChromeUnitTestSuite::InitializeResourceBundle() {
       "en-US", NULL, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
   base::FilePath resources_pack_path;
   PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
-  ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+  ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
       resources_pack_path, ui::SCALE_FACTOR_NONE);
 }

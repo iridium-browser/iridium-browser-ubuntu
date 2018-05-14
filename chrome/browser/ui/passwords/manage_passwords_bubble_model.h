@@ -21,6 +21,11 @@ namespace content {
 class WebContents;
 }
 
+namespace password_manager {
+class PasswordFormMetricsRecorder;
+}
+
+struct AccountInfo;
 class PasswordsModelDelegate;
 class Profile;
 
@@ -38,6 +43,10 @@ class ManagePasswordsBubbleModel {
                              DisplayReason reason);
   ~ManagePasswordsBubbleModel();
 
+  // The method MAY BE called to record the statistics while the bubble is being
+  // closed. Otherwise, it is called later on when the model is destroyed.
+  void OnBubbleClosing();
+
   // Called by the view code when the "Nope" button in clicked by the user in
   // update bubble.
   void OnNopeUpdateClicked();
@@ -46,9 +55,10 @@ class ManagePasswordsBubbleModel {
   // by the user.
   void OnNeverForThisSiteClicked();
 
-  // Called by the view code when username is corrected using the edit button
-  // in PendingView.
-  void OnUsernameEdited(base::string16 new_username);
+  // Called by the view code when username or password is corrected using
+  // the username correction or password selection features in PendingView.
+  void OnCredentialEdited(base::string16 new_username,
+                          base::string16 new_password);
 
   // Called by the view code when the save button is clicked by the user.
   void OnSaveClicked();
@@ -62,8 +72,8 @@ class ManagePasswordsBubbleModel {
   // Called by the view code when the "OK" button is clicked by the user.
   void OnOKClicked();
 
-  // Called by the view code when the manage link is clicked by the user.
-  void OnManageLinkClicked();
+  // Called by the view code when the manage button is clicked by the user.
+  void OnManageClicked();
 
   // Called by the view code when the navigate to passwords.google.com link is
   // clicked by the user.
@@ -81,9 +91,9 @@ class ManagePasswordsBubbleModel {
   void OnPasswordAction(const autofill::PasswordForm& password_form,
                         PasswordAction action);
 
-  // Called by the view when the "Sign in" button in the promo bubble is
-  // clicked.
-  void OnSignInToChromeClicked();
+  // Called by the view when the "Sign in" button or the "Sync to" button in the
+  // promo bubble is clicked.
+  void OnSignInToChromeClicked(const AccountInfo& account);
 
   // Called by the view when the "No thanks" button in the promo bubble is
   // clicked.
@@ -111,6 +121,22 @@ class ManagePasswordsBubbleModel {
     return title_brand_link_range_;
   }
 
+  bool are_passwords_revealed_when_bubble_is_opened() const {
+    return are_passwords_revealed_when_bubble_is_opened_;
+  }
+
+#if defined(UNIT_TEST)
+  void allow_passwords_revealing() {
+    password_revealing_requires_reauth_ = false;
+  }
+
+  bool password_revealing_requires_reauth() const {
+    return password_revealing_requires_reauth_;
+  }
+#endif
+
+  bool enable_editing() const { return enable_editing_; }
+
   Profile* GetProfile() const;
   content::WebContents* GetWebContents() const;
 
@@ -123,7 +149,14 @@ class ManagePasswordsBubbleModel {
   // returns false and leaves the current state.
   bool ReplaceToShowPromotionIfNeeded();
 
-  void SetClockForTesting(std::unique_ptr<base::Clock> clock);
+  void SetClockForTesting(base::Clock* clock);
+
+  // Returns true if passwords revealing is not locked or re-authentication is
+  // not available on the given platform. Otherwise, the method schedules
+  // re-authentication and bubble reopen (the current bubble will be destroyed),
+  // and returns false immediately. New bubble will reveal the passwords if the
+  // re-authentication is successful.
+  bool RevealPasswords();
 
  private:
   enum UserBehaviorOnUpdateBubble {
@@ -158,6 +191,25 @@ class ManagePasswordsBubbleModel {
 
   // A bridge to ManagePasswordsUIController instance.
   base::WeakPtr<PasswordsModelDelegate> delegate_;
+
+  // True if the model has already recorded all the necessary statistics when
+  // the bubble is closing.
+  bool interaction_reported_;
+
+  // True iff password revealing should require re-auth for privacy reasons.
+  bool password_revealing_requires_reauth_;
+
+  // True iff bubble should pop up with revealed password value.
+  bool are_passwords_revealed_when_bubble_is_opened_;
+
+  // True iff username/password editing should be enabled.
+  bool enable_editing_;
+
+  // Reference to metrics recorder of the PasswordForm presented to the user by
+  // |this|. We hold on to this because |delegate_| may not be able to provide
+  // the reference anymore when we need it.
+  scoped_refptr<password_manager::PasswordFormMetricsRecorder>
+      metrics_recorder_;
 
   DISALLOW_COPY_AND_ASSIGN(ManagePasswordsBubbleModel);
 };

@@ -11,10 +11,10 @@ import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.LargeTest;
 import android.support.test.filters.MediumTest;
 import android.support.test.filters.SmallTest;
-import android.test.MoreAsserts;
 import android.view.ContextMenu;
 import android.view.KeyEvent;
 
+import org.hamcrest.Matchers;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -37,7 +37,6 @@ import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.browser.contextmenu.ContextMenuUtils;
 import org.chromium.content.browser.test.util.Criteria;
@@ -59,9 +58,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-        ChromeSwitches.GOOGLE_BASE_URL + "=http://example.com/",
-        ChromeSwitches.HERB_FLAVOR_DISABLED_SWITCH})
+        ChromeSwitches.GOOGLE_BASE_URL + "=http://example.com/"})
 public class ContextMenuTest implements CustomMainActivityStart {
     @Rule
     public DownloadTestRule mDownloadTestRule = new DownloadTestRule(this);
@@ -104,8 +101,7 @@ public class ContextMenuTest implements CustomMainActivityStart {
 
     @Override
     public void customMainActivityStart() throws InterruptedException {
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mTestUrl = mTestServer.getURL(TEST_PATH);
         deleteTestFiles();
         mDownloadTestRule.startMainActivityWithURL(mTestUrl);
@@ -374,7 +370,8 @@ public class ContextMenuTest implements CustomMainActivityStart {
 
         Integer[] expectedItems = {R.id.contextmenu_open_in_new_tab,
                 R.id.contextmenu_open_in_incognito_tab, R.id.contextmenu_save_link_as,
-                R.id.contextmenu_copy_link_address, R.id.contextmenu_share_link};
+                R.id.contextmenu_copy_link_text, R.id.contextmenu_copy_link_address,
+                R.id.contextmenu_share_link};
         assertMenuItemsAreEqual(menu, expectedItems);
     }
 
@@ -454,7 +451,7 @@ public class ContextMenuTest implements CustomMainActivityStart {
             }
         }
 
-        MoreAsserts.assertContentsInAnyOrder(actualItems, expectedItems);
+        Assert.assertThat(actualItems, Matchers.containsInAnyOrder(expectedItems));
     }
 
     private void saveMediaFromContextMenu(String mediaDOMElement, int saveMenuID,

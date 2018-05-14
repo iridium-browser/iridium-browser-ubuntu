@@ -6,18 +6,25 @@
 
 #include "base/command_line.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
-#include "gpu/command_buffer/service/gpu_preferences.h"
+#include "gpu/command_buffer/service/context_group.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
+#include "gpu/config/gpu_finch_features.h"
 #include "ui/gl/gl_switches.h"
+
+#if defined(USE_EGL)
+#include "ui/gl/gl_surface_egl.h"
+#endif  // defined(USE_EGL)
 
 namespace gpu {
 namespace gles2 {
 
 gl::GLContextAttribs GenerateGLContextAttribs(
-    const ContextCreationAttribHelper& attribs_helper,
-    const GpuPreferences& gpu_preferences) {
+    const ContextCreationAttribs& attribs_helper,
+    const ContextGroup* context_group) {
+  DCHECK(context_group != nullptr);
   gl::GLContextAttribs attribs;
   attribs.gpu_preference = attribs_helper.gpu_preference;
-  if (gpu_preferences.use_passthrough_cmd_decoder) {
+  if (context_group->use_passthrough_cmd_decoder()) {
     attribs.bind_generates_resource = attribs_helper.bind_generates_resource;
     attribs.webgl_compatibility_context =
         IsWebGLContextType(attribs_helper.context_type);
@@ -25,6 +32,9 @@ gl::GLContextAttribs GenerateGLContextAttribs(
     // Always use the global texture share group for the passthrough command
     // decoder
     attribs.global_texture_share_group = true;
+
+    attribs.robust_resource_initialization = true;
+    attribs.robust_buffer_access = true;
 
     // Request a specific context version instead of always 3.0
     if (IsWebGL2OrES3ContextType(attribs_helper.context_type)) {
@@ -49,6 +59,38 @@ gl::GLContextAttribs GenerateGLContextAttribs(
 
   return attribs;
 }
+
+bool UsePassthroughCommandDecoder(const base::CommandLine* command_line) {
+  std::string switch_value;
+  if (command_line->HasSwitch(switches::kUseCmdDecoder)) {
+    switch_value = command_line->GetSwitchValueASCII(switches::kUseCmdDecoder);
+  }
+
+  if (switch_value == kCmdDecoderPassthroughName) {
+    return true;
+  } else if (switch_value == kCmdDecoderValidatingName) {
+    return false;
+  } else {
+    // Unrecognized or missing switch, use the default.
+    return base::FeatureList::IsEnabled(
+        features::kDefaultPassthroughCommandDecoder);
+  }
+}
+
+bool PassthroughCommandDecoderSupported() {
+#if defined(USE_EGL)
+  // Using the passthrough command buffer requires that specific ANGLE
+  // extensions are exposed
+  return gl::GLSurfaceEGL::IsCreateContextBindGeneratesResourceSupported() &&
+         gl::GLSurfaceEGL::IsCreateContextWebGLCompatabilitySupported() &&
+         gl::GLSurfaceEGL::IsRobustResourceInitSupported() &&
+         gl::GLSurfaceEGL::IsDisplayTextureShareGroupSupported() &&
+         gl::GLSurfaceEGL::IsCreateContextClientArraysSupported();
+#else
+  // The passthrough command buffer is only supported on top of ANGLE/EGL
+  return false;
+#endif  // defined(USE_EGL)
+}  // namespace gles2
 
 }  // namespace gles2
 }  // namespace gpu

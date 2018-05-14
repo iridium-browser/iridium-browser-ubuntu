@@ -22,9 +22,9 @@
 #import "ios/chrome/browser/crash_report/crash_report_user_application_state.h"
 
 // TODO(stuartmorgan): Move this up where it belongs once
-// http://code.google.com/p/google-breakpad/issues/detail?id=487
-// is fixed. For now, put it at the end to avoid compiler errors.
-#import "breakpad/src/client/ios/BreakpadController.h"
+// https://crbug.com/google-breakpad/487 is fixed. For now, put it at the end to
+// avoid compiler errors.
+#import "third_party/breakpad/breakpad/src/client/ios/BreakpadController.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -67,18 +67,6 @@ void DeleteAllReportsInDirectory(base::FilePath directory) {
     if (cur_file.BaseName().value() != kReporterLogFilename)
       base::DeleteFile(cur_file, false);
   }
-}
-
-// Callback for base::debug::SetCrashKeyReportingFunctions
-void SetCrashKeyValueImpl(const base::StringPiece& key,
-                          const base::StringPiece& value) {
-  AddReportParameter(base::SysUTF8ToNSString(key.as_string()),
-                     base::SysUTF8ToNSString(value.as_string()), true);
-}
-
-// Callback for base::debug::SetCrashKeyReportingFunctions
-void ClearCrashKeyValueImpl(const base::StringPiece& key) {
-  RemoveReportParameter(base::SysUTF8ToNSString(key.as_string()));
 }
 
 // Callback for logging::SetLogMessageHandler
@@ -131,8 +119,6 @@ void CacheUploadingEnabled(bool uploading_enabled) {
 void Start(const std::string& channel_name) {
   DCHECK(!g_crash_reporter_enabled);
   [[BreakpadController sharedInstance] start:YES];
-  base::debug::SetCrashKeyReportingFunctions(&SetCrashKeyValueImpl,
-                                             &ClearCrashKeyValueImpl);
   logging::SetLogMessageHandler(&FatalMessageHandler);
   g_crash_reporter_enabled = true;
   // Register channel information.

@@ -7,6 +7,8 @@
 #include "base/ios/ios_util.h"
 #include "base/logging.h"
 #import "base/mac/foundation_util.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/handoff/pref_names_ios.h"
 #include "components/metrics/metrics_pref_names.h"
@@ -19,7 +21,6 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/experimental_flags.h"
-#include "ios/chrome/browser/physical_web/physical_web_constants.h"
 #include "ios/chrome/browser/pref_names.h"
 #import "ios/chrome/browser/prefs/pref_observer_bridge.h"
 #import "ios/chrome/browser/ui/collection_view/cells/MDCCollectionViewCell+Chrome.h"
@@ -33,7 +34,6 @@
 #import "ios/chrome/browser/ui/settings/dataplan_usage_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/do_not_track_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/handoff_collection_view_controller.h"
-#import "ios/chrome/browser/ui/settings/physical_web_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
 #import "ios/chrome/browser/ui/settings/settings_utils.h"
 #import "ios/chrome/browser/ui/settings/utils/pref_backed_boolean.h"
@@ -69,7 +69,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeWebServicesShowSuggestions,
   ItemTypeWebServicesSendUsageData,
   ItemTypeWebServicesDoNotTrack,
-  ItemTypeWebServicesPhysicalWeb,
   ItemTypeClearBrowsingDataClear,
 };
 
@@ -99,7 +98,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
 - (CollectionViewItem*)showSuggestionsFooterItem;
 - (CollectionViewItem*)clearBrowsingDetailItem;
 - (CollectionViewItem*)sendUsageDetailItem;
-- (CollectionViewItem*)physicalWebDetailItem;
 - (CollectionViewItem*)doNotTrackDetailItem;
 
 @end
@@ -140,6 +138,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
         prefs::kMetricsReportingWifiOnly,
         &_prefChangeRegistrarApplicationContext);
 
+    // TODO(crbug.com/764578): -loadModel should not be called from
+    // initializer. A possible fix is to move this call to -viewDidLoad.
     [self loadModel];
   }
   return self;
@@ -186,11 +186,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
   if (web::IsDoNotTrackSupported()) {
     [model addItem:[self doNotTrackDetailItem]
-        toSectionWithIdentifier:SectionIdentifierWebServices];
-  }
-
-  if (experimental_flags::IsPhysicalWebEnabled()) {
-    [model addItem:[self physicalWebDetailItem]
         toSectionWithIdentifier:SectionIdentifierWebServices];
   }
 
@@ -263,18 +258,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
   return _sendUsageDetailItem;
 }
 
-- (CollectionViewItem*)physicalWebDetailItem {
-  PrefService* prefService = GetApplicationContext()->GetLocalState();
-  int preferenceState = prefService->GetInteger(prefs::kIosPhysicalWebEnabled);
-  BOOL enabled = [PhysicalWebCollectionViewController
-      shouldEnableForPreferenceState:preferenceState];
-  NSString* detailText = enabled ? l10n_util::GetNSString(IDS_IOS_SETTING_ON)
-                                 : l10n_util::GetNSString(IDS_IOS_SETTING_OFF);
-  return [self detailItemWithType:ItemTypeWebServicesPhysicalWeb
-                          titleId:IDS_IOS_OPTIONS_ENABLE_PHYSICAL_WEB
-                       detailText:detailText];
-}
-
 - (CollectionViewItem*)doNotTrackDetailItem {
   NSString* detailText =
       _browserState->GetPrefs()->GetBoolean(prefs::kEnableDoNotTrack)
@@ -327,7 +310,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
       [self.collectionViewModel itemTypeForIndexPath:indexPath];
 
   // Items that push a new view controller.
-  UIViewController* controller;
+  SettingsRootCollectionViewController* controller;
 
   switch (itemType) {
     case ItemTypeOtherDevicesHandoff:
@@ -346,10 +329,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
       controller = [[DoNotTrackCollectionViewController alloc]
           initWithPrefs:_browserState->GetPrefs()];
       break;
-    case ItemTypeWebServicesPhysicalWeb:
-      controller = [[PhysicalWebCollectionViewController alloc]
-          initWithPrefs:GetApplicationContext()->GetLocalState()];
-      break;
     case ItemTypeClearBrowsingDataClear:
       controller = [[ClearBrowsingDataCollectionViewController alloc]
           initWithBrowserState:_browserState];
@@ -360,6 +339,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   }
 
   if (controller) {
+    controller.dispatcher = self.dispatcher;
     [self.navigationController pushViewController:controller animated:YES];
   }
 }
@@ -438,6 +418,14 @@ typedef NS_ENUM(NSInteger, ItemType) {
   CollectionViewSwitchCell* switchCell =
       base::mac::ObjCCastStrict<CollectionViewSwitchCell>(
           [self.collectionView cellForItemAtIndexPath:switchPath]);
+
+  if (switchCell.switchView.isOn) {
+    base::RecordAction(base::UserMetricsAction(
+        "ContentSuggestions.RemoteSuggestionsPreferenceOn"));
+  } else {
+    base::RecordAction(base::UserMetricsAction(
+        "ContentSuggestions.RemoteSuggestionsPreferenceOff"));
+  }
 
   DCHECK_EQ(switchCell.switchView, sender);
   BOOL isOn = switchCell.switchView.isOn;

@@ -6,17 +6,8 @@
 #define CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_COMMON_H_
 
 #include "base/feature_list.h"
-
-namespace features {
-
-// TODO(miguelg) We can probably get rid of this altogether.
-extern const base::Feature kAllowFullscreenWebNotificationsFeature;
-
-}  // namespace features
-
-namespace content {
-class BrowserContext;
-}  // namespace content
+#include "chrome/browser/notifications/notification_handler.h"
+#include "url/gurl.h"
 
 class GURL;
 class Profile;
@@ -24,33 +15,37 @@ class Profile;
 // Shared functionality for both in page and persistent notification
 class NotificationCommon {
  public:
-  // Things as user can do to a notification.
+  // Things as user can do to a notification. Keep in sync with the
+  // NotificationOperation enumeration in notification_response_builder_mac.h.
   // TODO(peter): Prefix these options with OPERATION_.
   enum Operation {
     CLICK = 0,
     CLOSE = 1,
-    SETTINGS = 2,
+    DISABLE_PERMISSION = 2,
+    SETTINGS = 3,
     OPERATION_MAX = SETTINGS
   };
 
-  // Possible kinds of notifications
-  // TODO(peter): Prefix these options with TYPE_.
-  enum Type {
-    PERSISTENT = 0,
-    NON_PERSISTENT = 1,
-    EXTENSION = 2,
-    TYPE_MAX = EXTENSION
+  // A struct that contains extra data about a notification specific to one of
+  // the above types.
+  struct Metadata {
+    virtual ~Metadata();
+
+    NotificationHandler::Type type;
   };
 
   // Open the Notification settings screen when clicking the right button.
-  // TODO(miguelg) have it take a Profile instead once NotificationObjectProxy
-  // is updated.
-  static void OpenNotificationSettings(
-      content::BrowserContext* browser_context);
+  static void OpenNotificationSettings(Profile* profile, const GURL& origin);
+};
 
-  // Whether a web notification should be displayed when chrome is in full
-  // screen mode.
-  static bool ShouldDisplayOnFullScreen(Profile* profile, const GURL& origin);
+// Metadata for PERSISTENT notifications.
+struct PersistentNotificationMetadata : public NotificationCommon::Metadata {
+  PersistentNotificationMetadata();
+  ~PersistentNotificationMetadata() override;
+
+  static const PersistentNotificationMetadata* From(const Metadata* metadata);
+
+  GURL service_worker_scope;
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_COMMON_H_

@@ -68,8 +68,7 @@ SandboxOriginDatabase::SandboxOriginDatabase(
       env_override_(env_override) {
 }
 
-SandboxOriginDatabase::~SandboxOriginDatabase() {
-}
+SandboxOriginDatabase::~SandboxOriginDatabase() = default;
 
 bool SandboxOriginDatabase::Init(InitOption init_option,
                                  RecoveryOption recovery_option) {
@@ -81,10 +80,9 @@ bool SandboxOriginDatabase::Init(InitOption init_option,
     return false;
 
   std::string path = FilePathToString(db_path);
-  leveldb::Options options;
+  leveldb_env::Options options;
   options.max_open_files = 0;  // Use minimum.
   options.create_if_missing = true;
-  options.reuse_logs = leveldb_env::kDefaultLogReuseOptionValue;
   if (env_override_)
     options.env = env_override_;
   leveldb::Status status = leveldb_env::OpenDB(options, path, &db_);
@@ -114,7 +112,7 @@ bool SandboxOriginDatabase::Init(InitOption init_option,
       }
       UMA_HISTOGRAM_ENUMERATION(kDatabaseRepairHistogramLabel,
                                 DB_REPAIR_FAILED, DB_REPAIR_MAX);
-      // fall through
+      FALLTHROUGH;
     case DELETE_ON_CORRUPTION:
       if (!base::DeleteFile(file_system_directory_, true))
         return false;
@@ -128,7 +126,8 @@ bool SandboxOriginDatabase::Init(InitOption init_option,
 
 bool SandboxOriginDatabase::RepairDatabase(const std::string& db_path) {
   DCHECK(!db_.get());
-  leveldb::Options options;
+  leveldb_env::Options options;
+  options.reuse_logs = false;
   options.max_open_files = 0;  // Use minimum.
   if (env_override_)
     options.env = env_override_;
@@ -189,9 +188,8 @@ bool SandboxOriginDatabase::RepairDatabase(const std::string& db_path) {
   return true;
 }
 
-void SandboxOriginDatabase::HandleError(
-    const tracked_objects::Location& from_here,
-    const leveldb::Status& status) {
+void SandboxOriginDatabase::HandleError(const base::Location& from_here,
+                                        const leveldb::Status& status) {
   db_.reset();
   LOG(ERROR) << "SandboxOriginDatabase failed at: "
              << from_here.ToString() << " with error: " << status.ToString();

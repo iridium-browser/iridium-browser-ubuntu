@@ -5,7 +5,7 @@
 #ifndef IOS_CHROME_BROWSER_UI_PAYMENTS_CREDIT_CARD_EDIT_COORDINATOR_H_
 #define IOS_CHROME_BROWSER_UI_PAYMENTS_CREDIT_CARD_EDIT_COORDINATOR_H_
 
-#import "ios/chrome/browser/chrome_coordinator.h"
+#import "ios/chrome/browser/ui/coordinators/chrome_coordinator.h"
 #import "ios/chrome/browser/ui/payments/address_edit_coordinator.h"
 #import "ios/chrome/browser/ui/payments/billing_address_selection_coordinator.h"
 #import "ios/chrome/browser/ui/payments/payment_request_edit_view_controller.h"
@@ -44,15 +44,14 @@ class PaymentRequest;
 @interface CreditCardEditCoordinator
     : ChromeCoordinator<AddressEditCoordinatorDelegate,
                         BillingAddressSelectionCoordinatorDelegate,
-                        PaymentRequestEditViewControllerDelegate,
-                        PaymentRequestEditViewControllerValidator>
+                        PaymentRequestEditViewControllerDelegate>
 
 // The payment method to be edited, if any. This pointer is not owned by this
 // class and should outlive it.
 @property(nonatomic, assign) payments::AutofillPaymentInstrument* paymentMethod;
 
-// The PaymentRequest object owning an instance of web::PaymentRequest as
-// provided by the page invoking the Payment Request API. This pointer is not
+// The PaymentRequest object owning an instance of payments::WebPaymentRequest
+// as provided by the page invoking the Payment Request API. This pointer is not
 // owned by this class and should outlive it.
 @property(nonatomic, assign) payments::PaymentRequest* paymentRequest;
 

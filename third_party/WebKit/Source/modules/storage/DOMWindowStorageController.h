@@ -22,9 +22,10 @@ class MODULES_EXPORT DOMWindowStorageController final
   USING_GARBAGE_COLLECTED_MIXIN(DOMWindowStorageController);
 
  public:
-  DECLARE_VIRTUAL_TRACE();
+  static const char kSupplementName[];
 
-  static const char* SupplementName();
+  virtual void Trace(blink::Visitor*);
+
   static DOMWindowStorageController& From(Document&);
 
   // Inherited from LocalDOMWindow::EventListenerObserver

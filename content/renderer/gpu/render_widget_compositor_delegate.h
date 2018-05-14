@@ -9,16 +9,20 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "cc/trees/layer_tree_host_client.h"
 #include "content/common/content_export.h"
 
 namespace cc {
-class CopyOutputRequest;
 class LayerTreeFrameSink;
 class SwapPromise;
 }
 
 namespace gfx {
 class Vector2dF;
+}
+
+namespace viz {
+class CopyOutputRequest;
 }
 
 namespace content {
@@ -50,7 +54,6 @@ class CONTENT_EXPORT RenderWidgetCompositorDelegate {
 
   // Requests a LayerTreeFrameSink to submit CompositorFrames to.
   virtual void RequestNewLayerTreeFrameSink(
-      bool fallback,
       const LayerTreeFrameSinkCallback& callback) = 0;
 
   // Notifies that the draw commands for a committed frame have been issued.
@@ -75,7 +78,8 @@ class CONTENT_EXPORT RenderWidgetCompositorDelegate {
 
   // Requests a visual frame-based update to the state of the delegate if there
   // an update available.
-  virtual void UpdateVisualState() = 0;
+  using VisualStateUpdate = cc::LayerTreeHostClient::VisualStateUpdate;
+  virtual void UpdateVisualState(VisualStateUpdate requested_update) = 0;
 
   // Indicates that the compositor is about to begin a frame. This is primarily
   // to signal to flow control mechanisms that a frame is beginning, not to
@@ -85,7 +89,7 @@ class CONTENT_EXPORT RenderWidgetCompositorDelegate {
   // For use in layout test mode only, attempts to copy the full content of the
   // compositor.
   virtual std::unique_ptr<cc::SwapPromise> RequestCopyOfOutputForLayoutTest(
-      std::unique_ptr<cc::CopyOutputRequest> request) = 0;
+      std::unique_ptr<viz::CopyOutputRequest> request) = 0;
 
  protected:
   virtual ~RenderWidgetCompositorDelegate() {}

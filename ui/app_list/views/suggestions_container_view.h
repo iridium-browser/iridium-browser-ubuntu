@@ -12,27 +12,22 @@
 
 namespace app_list {
 
-class AllAppsTileItemView;
 class AppListViewDelegate;
 class ContentsView;
+class PaginationModel;
 class SearchResultTileItemView;
-class TileItemView;
 
 // A container that holds the suggested app tiles. If fullscreen app list is not
 // enabled, it also holds the all apps button.
 class SuggestionsContainerView : public SearchResultContainerView {
  public:
   SuggestionsContainerView(ContentsView* contents_view,
-                           AllAppsTileItemView* all_apps_button);
+                           PaginationModel* pagination_model);
   ~SuggestionsContainerView() override;
-
-  TileItemView* GetTileItemView(int index);
 
   const std::vector<SearchResultTileItemView*>& tile_views() const {
     return search_result_tile_views_;
   }
-
-  AllAppsTileItemView* all_apps_button() { return all_apps_button_; }
 
   // Overridden from SearchResultContainerView:
   int DoUpdate() override;
@@ -41,7 +36,9 @@ class SuggestionsContainerView : public SearchResultContainerView {
                            bool directional_movement) override;
   void NotifyFirstResultYIndex(int y_index) override;
   int GetYSize() override;
-  views::View* GetSelectedView() const override;
+  views::View* GetSelectedView() override;
+  SearchResultBaseView* GetFirstResultView() override;
+  const char* GetClassName() const override;
 
  private:
   void CreateAppsGrid(int apps_num);
@@ -50,9 +47,8 @@ class SuggestionsContainerView : public SearchResultContainerView {
   AppListViewDelegate* view_delegate_ = nullptr;
 
   std::vector<SearchResultTileItemView*> search_result_tile_views_;
-  AllAppsTileItemView* all_apps_button_ = nullptr;
 
-  const bool is_fullscreen_app_list_enabled_;
+  PaginationModel* const pagination_model_;  // Owned by AppsGridView.
 
   DISALLOW_COPY_AND_ASSIGN(SuggestionsContainerView);
 };

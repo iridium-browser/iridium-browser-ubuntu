@@ -4,7 +4,9 @@
 
 #include "chrome/browser/supervised_user/supervised_user_google_auth_navigation_throttle.h"
 
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/supervised_user/child_accounts/child_account_service.h"
@@ -71,10 +73,9 @@ SupervisedUserGoogleAuthNavigationThrottle::WillStartOrRedirectRequest() {
     return content::NavigationThrottle::PROCEED;
   }
 
-  content::NavigationThrottle::ThrottleCheckResult result =
-      ShouldProceed(child_account_service_->IsGoogleAuthenticated());
+  content::NavigationThrottle::ThrottleCheckResult result = ShouldProceed();
 
-  if (result == content::NavigationThrottle::DEFER) {
+  if (result.action() == content::NavigationThrottle::DEFER) {
     google_auth_state_subscription_ =
         child_account_service_->ObserveGoogleAuthState(
             base::Bind(&SupervisedUserGoogleAuthNavigationThrottle::
@@ -85,12 +86,10 @@ SupervisedUserGoogleAuthNavigationThrottle::WillStartOrRedirectRequest() {
   return result;
 }
 
-void SupervisedUserGoogleAuthNavigationThrottle::OnGoogleAuthStateChanged(
-    bool authenticated) {
-  content::NavigationThrottle::ThrottleCheckResult result =
-      ShouldProceed(authenticated);
+void SupervisedUserGoogleAuthNavigationThrottle::OnGoogleAuthStateChanged() {
+  content::NavigationThrottle::ThrottleCheckResult result = ShouldProceed();
 
-  switch (result) {
+  switch (result.action()) {
     case content::NavigationThrottle::PROCEED: {
       google_auth_state_subscription_.reset();
       Resume();
@@ -114,14 +113,20 @@ void SupervisedUserGoogleAuthNavigationThrottle::OnGoogleAuthStateChanged(
 }
 
 content::NavigationThrottle::ThrottleCheckResult
-SupervisedUserGoogleAuthNavigationThrottle::ShouldProceed(bool authenticated) {
-  if (authenticated)
+SupervisedUserGoogleAuthNavigationThrottle::ShouldProceed() {
+  ChildAccountService::AuthState authStatus =
+      child_account_service_->GetGoogleAuthState();
+  if (authStatus == ChildAccountService::AuthState::AUTHENTICATED)
     return content::NavigationThrottle::PROCEED;
+  if (authStatus == ChildAccountService::AuthState::PENDING)
+    return content::NavigationThrottle::DEFER;
 
-#if !defined(OS_ANDROID)
-  // TODO(bauerb): Show a reauthentication dialog.
-  return content::NavigationThrottle::CANCEL_AND_IGNORE;
-#else
+#if defined(OS_CHROMEOS)
+  // A credentials re-mint is already underway when we reach here (Mirror
+  // account reconciliation). Nothing to do here except block the navigation
+  // while re-minting is underway.
+  return content::NavigationThrottle::DEFER;
+#elif defined(OS_ANDROID)
   if (!has_shown_reauth_) {
     has_shown_reauth_ = true;
 
@@ -138,6 +143,12 @@ SupervisedUserGoogleAuthNavigationThrottle::ShouldProceed(bool authenticated) {
                    weak_ptr_factory_.GetWeakPtr()));
   }
   return content::NavigationThrottle::DEFER;
+#else
+  NOTREACHED();
+
+  // This should never happen but needs to be included to avoid compilation
+  // error on debug builds.
+  return content::NavigationThrottle::CANCEL_AND_IGNORE;
 #endif
 }
 

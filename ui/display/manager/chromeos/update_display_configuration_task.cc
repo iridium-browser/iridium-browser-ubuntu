@@ -18,7 +18,6 @@ UpdateDisplayConfigurationTask::UpdateDisplayConfigurationTask(
     MultipleDisplayState new_display_state,
     chromeos::DisplayPowerState new_power_state,
     int power_flags,
-    uint32_t background_color_argb,
     bool force_configure,
     const ResponseCallback& callback)
     : delegate_(delegate),
@@ -26,19 +25,15 @@ UpdateDisplayConfigurationTask::UpdateDisplayConfigurationTask(
       new_display_state_(new_display_state),
       new_power_state_(new_power_state),
       power_flags_(power_flags),
-      background_color_argb_(background_color_argb),
       force_configure_(force_configure),
       callback_(callback),
-      force_dpms_(false),
       requesting_displays_(false),
       weak_ptr_factory_(this) {
-  delegate_->GrabServer();
   delegate_->AddObserver(this);
 }
 
 UpdateDisplayConfigurationTask::~UpdateDisplayConfigurationTask() {
   delegate_->RemoveObserver(this);
-  delegate_->UngrabServer();
 }
 
 void UpdateDisplayConfigurationTask::Run() {
@@ -65,9 +60,6 @@ void UpdateDisplayConfigurationTask::OnDisplaysUpdated(
   cached_displays_ = displays;
   requesting_displays_ = false;
 
-  if (cached_displays_.size() > 1 && background_color_argb_)
-    delegate_->SetBackgroundColor(background_color_argb_);
-
   // If the user hasn't requested a display state, update it using the requested
   // power state.
   if (new_display_state_ == MULTIPLE_DISPLAY_STATE_INVALID)
@@ -79,10 +71,6 @@ void UpdateDisplayConfigurationTask::OnDisplaysUpdated(
           << " flags=" << power_flags_
           << " force_configure=" << force_configure_
           << " display_count=" << cached_displays_.size();
-  // If there has been any change in the requested power state and the displays
-  // aren't being turned off force a change in DPMS state.
-  force_dpms_ = ShouldForceDpms() && ShouldConfigure();
-
   if (ShouldConfigure()) {
     EnterState(base::Bind(&UpdateDisplayConfigurationTask::OnStateEntered,
                           weak_ptr_factory_.GetWeakPtr()));
@@ -99,14 +87,11 @@ void UpdateDisplayConfigurationTask::EnterState(
   VLOG(2) << "EnterState";
   std::vector<DisplayConfigureRequest> requests;
   if (!layout_manager_->GetDisplayLayout(cached_displays_, new_display_state_,
-                                         new_power_state_, &requests,
-                                         &framebuffer_size_)) {
+                                         new_power_state_, &requests)) {
     callback.Run(ConfigureDisplaysTask::ERROR);
     return;
   }
   if (!requests.empty()) {
-    DCHECK(!framebuffer_size_.IsEmpty());
-    delegate_->CreateFrameBuffer(framebuffer_size_);
     configure_task_.reset(
         new ConfigureDisplaysTask(delegate_, requests, callback));
     configure_task_->Run();
@@ -127,10 +112,10 @@ void UpdateDisplayConfigurationTask::OnStateEntered(
     bool enable_software_mirroring = false;
     if (!success && new_display_state_ == MULTIPLE_DISPLAY_STATE_DUAL_MIRROR) {
       if (layout_manager_->GetDisplayState() !=
-              MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED ||
+              MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED ||
           layout_manager_->GetPowerState() != new_power_state_ ||
           force_configure_) {
-        new_display_state_ = MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED;
+        new_display_state_ = MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED;
         EnterState(base::Bind(
             &UpdateDisplayConfigurationTask::OnEnableSoftwareMirroring,
             weak_ptr_factory_.GetWeakPtr()));
@@ -138,10 +123,10 @@ void UpdateDisplayConfigurationTask::OnStateEntered(
       }
 
       success = layout_manager_->GetDisplayState() ==
-                MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED;
+                MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED;
       enable_software_mirroring = success;
       if (success)
-        new_display_state_ = MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED;
+        new_display_state_ = MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED;
     }
 
     layout_manager_->GetSoftwareMirroringController()->SetSoftwareMirroring(
@@ -160,11 +145,8 @@ void UpdateDisplayConfigurationTask::OnEnableSoftwareMirroring(
 }
 
 void UpdateDisplayConfigurationTask::FinishConfiguration(bool success) {
-  if (success && force_dpms_)
-    delegate_->ForceDPMSOn();
-
-  callback_.Run(success, cached_displays_, framebuffer_size_,
-                new_display_state_, new_power_state_);
+  callback_.Run(success, cached_displays_, new_display_state_,
+                new_power_state_);
 }
 
 bool UpdateDisplayConfigurationTask::ShouldForceDpms() const {
@@ -206,22 +188,13 @@ MultipleDisplayState UpdateDisplayConfigurationTask::ChooseDisplayState()
     return MULTIPLE_DISPLAY_STATE_SINGLE;
   }
 
-  if (num_displays == 2 || num_on_displays == 2) {
-    // Try to use the saved configuration; otherwise, default to extended.
-    DisplayConfigurator::StateController* state_controller =
-        layout_manager_->GetStateController();
+  // Try to use the saved configuration; otherwise, default to extended.
+  DisplayConfigurator::StateController* state_controller =
+      layout_manager_->GetStateController();
 
-    if (!state_controller)
-      return MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED;
-    return state_controller->GetStateForDisplayIds(cached_displays_);
-  }
-
-  if (num_displays >= 3) {
-    // 3+ displays are always extended
+  if (!state_controller)
     return MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED;
-  }
-
-  return MULTIPLE_DISPLAY_STATE_INVALID;
+  return state_controller->GetStateForDisplayIds(cached_displays_);
 }
 
 }  // namespace display

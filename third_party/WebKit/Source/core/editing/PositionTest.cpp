@@ -4,7 +4,7 @@
 
 #include "core/editing/Position.h"
 
-#include "core/editing/EditingTestBase.h"
+#include "core/editing/testing/EditingTestBase.h"
 
 namespace blink {
 
@@ -141,6 +141,12 @@ TEST_F(PositionTest, NodeAsRangeLastNodeShadow) {
   EXPECT_EQ(t1, PositionInFlatTree::AfterNode(*host).NodeAsRangeLastNode());
 }
 
+TEST_F(PositionTest, OperatorBool) {
+  SetBodyContent("foo");
+  EXPECT_FALSE(static_cast<bool>(Position()));
+  EXPECT_TRUE(static_cast<bool>(Position(GetDocument().body(), 0)));
+}
+
 TEST_F(PositionTest, ToPositionInFlatTreeWithActiveInsertionPoint) {
   const char* body_content = "<p id='host'>00<b id='one'>11</b>22</p>";
   const char* shadow_content =
@@ -226,6 +232,28 @@ TEST_F(PositionTest, ToPositionInFlatTreeWithEmptyShadowRoot) {
 
   EXPECT_EQ(PositionInFlatTree(host, PositionAnchorType::kAfterChildren),
             ToPositionInFlatTree(Position(shadow_root, 0)));
+}
+
+TEST_F(PositionTest, NullPositionNotConnected) {
+  EXPECT_FALSE(Position().IsConnected());
+  EXPECT_FALSE(PositionInFlatTree().IsConnected());
+}
+
+TEST_F(PositionTest, IsConnectedBasic) {
+  Position position = SetCaretTextToBody("<div>f|oo</div>");
+  EXPECT_TRUE(position.IsConnected());
+  EXPECT_TRUE(ToPositionInFlatTree(position).IsConnected());
+
+  position.AnchorNode()->remove();
+  EXPECT_FALSE(position.IsConnected());
+  EXPECT_FALSE(ToPositionInFlatTree(position).IsConnected());
+}
+
+TEST_F(PositionTest, IsConnectedInFlatTree) {
+  Position position = SetCaretTextToBody(
+      "<div>f|oo<template data-mode=open>bar</template></div>");
+  EXPECT_TRUE(position.IsConnected());
+  EXPECT_FALSE(ToPositionInFlatTree(position).IsConnected());
 }
 
 }  // namespace blink

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -26,7 +27,7 @@ class BuildbucketClientTest(cros_test_lib.MockTestCase):
     self.PatchObject(buildbucket_lib.BuildbucketClient,
                      '_GetHost',
                      return_value=buildbucket_lib.BUILDBUCKET_TEST_HOST)
-    self.client = buildbucket_lib.BuildbucketClient()
+    self.client = buildbucket_lib.BuildbucketClient(mock.Mock(), None)
 
   def testPutBuildRequest(self):
     """Test PutBuildRequest."""
@@ -357,6 +358,30 @@ class GetAttributeTest(cros_test_lib.MockTestCase):
       reason = buildbucket_lib.GetErrorReason(r)
       self.assertEqual(reason, 'error_reason')
 
+  def testGetBuildTag(self):
+    """Test GetbuildTag."""
+    content = {
+        'build': {
+            'bucket': 'master.chromeos',
+            'status': 'COMPLETED',
+            'id': 'bb_id',
+            'tags': [
+                'build_type:paladin',
+                'buildset:buildset_1',
+                'buildset:buildset_2',
+                'master_config:']
+        }
+    }
+    tags = buildbucket_lib.GetBuildTags(content, 'build_type')
+    self.assertItemsEqual(tags, ['paladin'])
+
+    tags = buildbucket_lib.GetBuildTags(content, 'buildset')
+    self.assertItemsEqual(tags, ['buildset_1', 'buildset_2'])
+
+    tags = buildbucket_lib.GetBuildTags(content, 'master_config')
+    self.assertItemsEqual(tags, [''])
+
+
 class BuildbucketLibTest(cros_test_lib.MockTestCase):
   """Test methods in buildbucket_lib."""
 
@@ -422,19 +447,45 @@ class BuildbucketLibTest(cros_test_lib.MockTestCase):
               ('config_1', 'bb_id_2', 1),
               ('config_2', 'bb_id_3', 2)]
     metadata.ExtendKeyListWithList(
-        constants.METADATA_SCHEDULED_SLAVES, slaves)
+        constants.METADATA_SCHEDULED_IMPORTANT_SLAVES, slaves)
 
     buildbucket_info_dict = buildbucket_lib.GetBuildInfoDict(metadata)
-    self.assertEqual(buildbucket_info_dict['config_1'].retry, 1)
-    self.assertEqual(buildbucket_info_dict['config_1'].buildbucket_id,
-                     'bb_id_2')
+    self.assertEqual(len(buildbucket_info_dict), 2)
+    self.assertEqual(
+        buildbucket_info_dict['config_1'],
+        buildbucket_lib.BuildbucketInfo('bb_id_2', 1, 1, None, None, None))
+    self.assertEqual(
+        buildbucket_info_dict['config_2'],
+        buildbucket_lib.BuildbucketInfo('bb_id_3', 0, 2, None, None, None))
+
+    buildbucket_info_dict_with_experimental = (
+        buildbucket_lib.GetBuildInfoDict(metadata, exclude_experimental=False))
+    self.assertEqual(len(buildbucket_info_dict), 2)
+    self.assertEqual(
+        buildbucket_info_dict_with_experimental['config_1'],
+        buildbucket_lib.BuildbucketInfo('bb_id_2', 1, 1, None, None, None))
+    self.assertEqual(
+        buildbucket_info_dict_with_experimental['config_2'],
+        buildbucket_lib.BuildbucketInfo('bb_id_3', 0, 2, None, None, None))
 
     metadata.UpdateWithDict({
         constants.METADATA_EXPERIMENTAL_BUILDERS: ['config_2']
     })
     buildbucket_info_dict = buildbucket_lib.GetBuildInfoDict(metadata)
-    self.assertIn('config_1', buildbucket_info_dict)
-    self.assertNotIn('config_2', buildbucket_info_dict)
+    self.assertEqual(len(buildbucket_info_dict), 1)
+    self.assertEqual(
+        buildbucket_info_dict['config_1'],
+        buildbucket_lib.BuildbucketInfo('bb_id_2', 1, 1, None, None, None))
+
+    buildbucket_info_dict_with_experimental = (
+        buildbucket_lib.GetBuildInfoDict(metadata, exclude_experimental=False))
+    self.assertEqual(len(buildbucket_info_dict_with_experimental), 2)
+    self.assertEqual(
+        buildbucket_info_dict_with_experimental['config_1'],
+        buildbucket_lib.BuildbucketInfo('bb_id_2', 1, 1, None, None, None))
+    self.assertEqual(
+        buildbucket_info_dict_with_experimental['config_2'],
+        buildbucket_lib.BuildbucketInfo('bb_id_3', 0, 2, None, None, None))
 
   def testGetBuildbucketIds(self):
     """Test GetBuildbucketIds with metadata and config."""
@@ -443,7 +494,7 @@ class BuildbucketLibTest(cros_test_lib.MockTestCase):
               ('config_1', 'bb_id_2', 1),
               ('config_2', 'bb_id_3', 2)]
     metadata.ExtendKeyListWithList(
-        constants.METADATA_SCHEDULED_SLAVES, slaves)
+        constants.METADATA_SCHEDULED_IMPORTANT_SLAVES, slaves)
 
     buildbucket_ids = buildbucket_lib.GetBuildbucketIds(metadata)
     self.assertTrue('bb_id_2' in buildbucket_ids)

@@ -20,15 +20,13 @@
       }
 
       #header .title {
-        color: var(--paper-grey-700);
-        font-size: 100%;
-        font-weight: 500;
+        @apply --cr-section-text;
         margin-bottom: 0;
         margin-top: var(--settings-page-vertical-margin);
       }
 
       #card {
-        @apply(--shadow-elevation-2dp);
+        @apply --shadow-elevation-2dp;
         background-color: white;
         border-radius: 2px;
         flex: 1;
@@ -41,7 +39,7 @@
       :host(.expanding) #card,
       :host(.collapsing) #card,
       :host(.expanded) #card {
-        @apply(--shadow-elevation-4dp);
+        @apply --shadow-elevation-4dp;
         overflow: hidden;
         /* A stacking context constrains sliding sub-pages to the card. */
         z-index: 0;
@@ -61,10 +59,11 @@
       }
     </style>
     <div id="header">
-      <h2 class="title">{{pageTitle}}</h2>
+      <h2 class="title"
+          aria-hidden$="[[getTitleHiddenStatus_(pageTitle)]]">[[pageTitle]]</h2>
     </div>
     <div id="card">
-      <content id="content"></content>
+      <slot></slot>
     </div>
   </template>
   <script src="settings_section.js"></script>

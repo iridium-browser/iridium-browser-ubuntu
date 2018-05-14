@@ -25,9 +25,10 @@
 
 #include "core/html/canvas/CanvasRenderingContext.h"
 
-#include "core/html/canvas/CanvasContextCreationAttributes.h"
+#include "core/html/canvas/CanvasContextCreationAttributesCore.h"
 #include "core/html/canvas/CanvasImageSource.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "core/origin_trials/origin_trials.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/Platform.h"
 
@@ -35,42 +36,37 @@ namespace blink {
 
 CanvasRenderingContext::CanvasRenderingContext(
     CanvasRenderingContextHost* host,
-    const CanvasContextCreationAttributes& attrs)
+    const CanvasContextCreationAttributesCore& attrs)
     : host_(host),
-      color_params_(kLegacyCanvasColorSpace, kRGBA8CanvasPixelFormat),
+      color_params_(kSRGBCanvasColorSpace, kRGBA8CanvasPixelFormat, kNonOpaque),
       creation_attributes_(attrs) {
-  if (RuntimeEnabledFeatures::ColorCanvasExtensionsEnabled()) {
-    // Set the default color space to SRGB and continue
-    CanvasColorSpace color_space = kSRGBCanvasColorSpace;
-    if (creation_attributes_.colorSpace() == kRec2020CanvasColorSpaceName)
-      color_space = kRec2020CanvasColorSpace;
-    else if (creation_attributes_.colorSpace() == kP3CanvasColorSpaceName)
-      color_space = kP3CanvasColorSpace;
-
-    // For now, we only support RGBA8 (for SRGB) and F16 (for all). Everything
-    // else falls back to SRGB + RGBA8.
-    CanvasPixelFormat pixel_format = kRGBA8CanvasPixelFormat;
-    if (creation_attributes_.pixelFormat() == kF16CanvasPixelFormatName) {
-      pixel_format = kF16CanvasPixelFormat;
-    } else {
-      color_space = kSRGBCanvasColorSpace;
-      pixel_format = kRGBA8CanvasPixelFormat;
-    }
-
-    color_params_ = CanvasColorParams(color_space, pixel_format);
+  // Supported color spaces: srgb-8888, srgb-f16, p3-f16, rec2020-f16. For wide
+  // gamut color spaces, user must explicitly request for float16 storage.
+  // Otherwise, we fall back to srgb-8888. Invalid requests fall back to
+  // srgb-8888 too.
+  if (creation_attributes_.pixel_format == kF16CanvasPixelFormatName) {
+    color_params_.SetCanvasPixelFormat(kF16CanvasPixelFormat);
+    if (creation_attributes_.color_space == kRec2020CanvasColorSpaceName)
+      color_params_.SetCanvasColorSpace(kRec2020CanvasColorSpace);
+    else if (creation_attributes_.color_space == kP3CanvasColorSpaceName)
+      color_params_.SetCanvasColorSpace(kP3CanvasColorSpace);
   }
 
-  // Make m_creationAttributes reflect the effective colorSpace, pixelFormat and
-  // linearPixelMath rather than the requested one.
-  creation_attributes_.setColorSpace(ColorSpaceAsString());
-  creation_attributes_.setPixelFormat(PixelFormatAsString());
-  creation_attributes_.setLinearPixelMath(color_params_.LinearPixelMath());
+  if (!creation_attributes_.alpha) {
+    color_params_.SetOpacityMode(kOpaque);
+  }
+
+  if (!OriginTrials::lowLatencyCanvasEnabled(host->GetTopExecutionContext()))
+    creation_attributes_.low_latency = false;
+
+  // Make m_creationAttributes reflect the effective colorSpace and pixelFormat
+  // rather than the requested one.
+  creation_attributes_.color_space = ColorSpaceAsString();
+  creation_attributes_.pixel_format = PixelFormatAsString();
 }
 
 WTF::String CanvasRenderingContext::ColorSpaceAsString() const {
-  switch (color_params_.color_space()) {
-    case kLegacyCanvasColorSpace:
-      return kLegacyCanvasColorSpaceName;
+  switch (color_params_.ColorSpace()) {
     case kSRGBCanvasColorSpace:
       return kSRGBCanvasColorSpaceName;
     case kRec2020CanvasColorSpace:
@@ -83,7 +79,7 @@ WTF::String CanvasRenderingContext::ColorSpaceAsString() const {
 }
 
 WTF::String CanvasRenderingContext::PixelFormatAsString() const {
-  switch (color_params_.pixel_format()) {
+  switch (color_params_.PixelFormat()) {
     case kRGBA8CanvasPixelFormat:
       return kRGBA8CanvasPixelFormatName;
     case kRGB10A2CanvasPixelFormat:
@@ -108,19 +104,19 @@ void CanvasRenderingContext::Dispose() {
   // the other in order to break the circular reference.  This is to avoid
   // an error when CanvasRenderingContext::didProcessTask() is invoked
   // after the HTMLCanvasElement is destroyed.
-  if (host()) {
-    host()->DetachContext();
+  if (Host()) {
+    Host()->DetachContext();
     host_ = nullptr;
   }
 }
 
 void CanvasRenderingContext::DidDraw(const SkIRect& dirty_rect) {
-  host()->DidDraw(SkRect::Make(dirty_rect));
+  Host()->DidDraw(SkRect::Make(dirty_rect));
   NeedsFinalizeFrame();
 }
 
 void CanvasRenderingContext::DidDraw() {
-  host()->DidDraw();
+  Host()->DidDraw();
   NeedsFinalizeFrame();
 }
 
@@ -136,8 +132,8 @@ void CanvasRenderingContext::DidProcessTask() {
   finalize_frame_scheduled_ = false;
   // The end of a script task that drew content to the canvas is the point
   // at which the current frame may be considered complete.
-  if (host()) {
-    host()->FinalizeFrame();
+  if (Host()) {
+    Host()->FinalizeFrame();
   }
   FinalizeFrame();
 }
@@ -152,9 +148,11 @@ CanvasRenderingContext::ContextType CanvasRenderingContext::ContextTypeFromId(
     return kContextWebgl;
   if (id == "webgl2")
     return kContextWebgl2;
-  if (id == "bitmaprenderer" &&
-      RuntimeEnabledFeatures::ExperimentalCanvasFeaturesEnabled()) {
+  if (id == "bitmaprenderer") {
     return kContextImageBitmap;
+  }
+  if (id == "xrpresent" && RuntimeEnabledFeatures::WebXREnabled()) {
+    return kContextXRPresent;
   }
   return kContextTypeCount;
 }
@@ -169,7 +167,7 @@ CanvasRenderingContext::ResolveContextTypeAliases(
 
 bool CanvasRenderingContext::WouldTaintOrigin(
     CanvasImageSource* image_source,
-    SecurityOrigin* destination_security_origin) {
+    const SecurityOrigin* destination_security_origin) {
   const KURL& source_url = image_source->SourceURL();
   bool has_url = (source_url.IsValid() && !source_url.IsAboutBlankURL());
 
@@ -192,8 +190,10 @@ bool CanvasRenderingContext::WouldTaintOrigin(
   return taint_origin;
 }
 
-DEFINE_TRACE(CanvasRenderingContext) {
+void CanvasRenderingContext::Trace(blink::Visitor* visitor) {
   visitor->Trace(host_);
+  visitor->Trace(creation_attributes_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

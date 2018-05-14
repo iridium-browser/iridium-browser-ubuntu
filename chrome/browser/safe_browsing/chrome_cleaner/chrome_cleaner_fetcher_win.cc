@@ -18,12 +18,14 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner_util.h"
 #include "base/task_scheduler/post_task.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/srt_field_trial_win.h"
 #include "chrome/install_static/install_details.h"
@@ -33,6 +35,7 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_status_code.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -41,6 +44,20 @@
 namespace safe_browsing {
 
 namespace {
+
+constexpr char kDownloadStatusErrorCodeHistogramName[] =
+    "SoftwareReporter.Cleaner.DownloadStatusErrorCode";
+
+// Indicates the suffix to use for some histograms that depend on the final
+// download status. This is used because UMA histogram macros define static
+// constant strings to represent the name, so they can't be used when a name
+// is dynamically generated. The alternative would be to replicate the logic
+// of those macros, which is not ideal.
+enum class FetchCompletedReasonHistogramSuffix {
+  kDownloadSuccess,
+  kDownloadFailure,
+  kNetworkError,
+};
 
 base::FilePath::StringType CleanerTempDirectoryPrefix() {
   // Create a temporary directory name prefix like "ChromeCleaner_4_", where
@@ -60,9 +77,29 @@ enum CleanerDownloadStatusHistogramValue {
   CLEANER_DOWNLOAD_STATUS_OTHER_FAILURE = 1,
   CLEANER_DOWNLOAD_STATUS_NOT_FOUND_ON_SERVER = 2,
   CLEANER_DOWNLOAD_STATUS_FAILED_TO_CREATE_TEMP_DIR = 3,
+  CLEANER_DOWNLOAD_STATUS_FAILED_TO_SAVE_TO_FILE = 4,
 
   CLEANER_DOWNLOAD_STATUS_MAX,
 };
+
+net::NetworkTrafficAnnotationTag kChromeCleanerTrafficAnnotation =
+    net::DefineNetworkTrafficAnnotation("chrome_cleaner", R"(
+      semantics {
+        sender: "Chrome Cleaner"
+        description:
+          "Chrome Cleaner removes unwanted software that violates Google's "
+          "unwanted software policy."
+        trigger:
+          "Chrome reporter detected unwanted software that the Cleaner can "
+          "remove."
+        data: "No data is sent up, this is just a download."
+        destination: GOOGLE_OWNED_SERVICE
+      }
+      policy {
+        cookies_allowed: NO
+        setting: "This feature cannot be disabled in settings."
+        policy_exception_justification: "Not implemented."
+  })");
 
 void RecordCleanerDownloadStatusHistogram(
     CleanerDownloadStatusHistogramValue value) {
@@ -89,6 +126,14 @@ class ChromeCleanerFetcher : public net::URLFetcherDelegate {
   void PostCallbackAndDeleteSelf(base::FilePath path,
                                  ChromeCleanerFetchStatus fetch_status);
 
+  // Sends a histogram indicating an error and invokes the fetch callback if
+  // the cleaner binary can't be downloaded or saved to the disk.
+  void RecordDownloadStatusAndPostCallback(
+      CleanerDownloadStatusHistogramValue histogram_value,
+      ChromeCleanerFetchStatus fetch_status);
+
+  void RecordTimeToCompleteDownload(FetchCompletedReasonHistogramSuffix suffix);
+
   // net::URLFetcherDelegate overrides.
   void OnURLFetchComplete(const net::URLFetcher* source) override;
 
@@ -107,6 +152,9 @@ class ChromeCleanerFetcher : public net::URLFetcherDelegate {
       scoped_temp_dir_;
   base::FilePath temp_file_;
 
+  // For metrics reporting.
+  base::Time time_fetching_started_;
+
   DISALLOW_COPY_AND_ASSIGN(ChromeCleanerFetcher);
 };
 
@@ -116,7 +164,8 @@ ChromeCleanerFetcher::ChromeCleanerFetcher(
       url_fetcher_(net::URLFetcher::Create(0,
                                            GetSRTDownloadURL(),
                                            net::URLFetcher::GET,
-                                           this)),
+                                           this,
+                                           kChromeCleanerTrafficAnnotation)),
       blocking_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
           {base::MayBlock(), base::TaskPriority::BACKGROUND,
            base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})),
@@ -156,10 +205,14 @@ void ChromeCleanerFetcher::OnTemporaryDirectoryCreated(bool success) {
 
   data_use_measurement::DataUseUserData::AttachToFetcher(
       url_fetcher_.get(), data_use_measurement::DataUseUserData::SAFE_BROWSING);
-  url_fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE | net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES);
+  url_fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE |
+                             net::LOAD_DO_NOT_SEND_COOKIES |
+                             net::LOAD_DO_NOT_SAVE_COOKIES);
   url_fetcher_->SetMaxRetriesOn5xx(3);
   url_fetcher_->SaveResponseToFileAtPath(temp_file_, blocking_task_runner_);
   url_fetcher_->SetRequestContext(g_browser_process->system_request_context());
+
+  time_fetching_started_ = base::Time::Now();
   url_fetcher_->Start();
 }
 
@@ -185,21 +238,45 @@ void ChromeCleanerFetcher::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK(!source->GetStatus().is_io_pending());
   DCHECK(fetched_callback_);
 
-  if (source->GetResponseCode() == net::HTTP_NOT_FOUND) {
-    RecordCleanerDownloadStatusHistogram(
-        CLEANER_DOWNLOAD_STATUS_NOT_FOUND_ON_SERVER);
-    PostCallbackAndDeleteSelf(base::FilePath(),
-                              ChromeCleanerFetchStatus::kNotFoundOnServer);
+  if (!source->GetStatus().is_success()) {
+    base::UmaHistogramSparse(kDownloadStatusErrorCodeHistogramName,
+                             source->GetStatus().error());
+    RecordTimeToCompleteDownload(
+        FetchCompletedReasonHistogramSuffix::kNetworkError);
+    RecordDownloadStatusAndPostCallback(
+        CLEANER_DOWNLOAD_STATUS_OTHER_FAILURE,
+        ChromeCleanerFetchStatus::kOtherFailure);
+    return;
+  }
+
+  const int response_code = source->GetResponseCode();
+  base::UmaHistogramSparse(kDownloadStatusErrorCodeHistogramName,
+                           response_code);
+  const FetchCompletedReasonHistogramSuffix suffix =
+      response_code == net::HTTP_OK
+          ? FetchCompletedReasonHistogramSuffix::kDownloadSuccess
+          : FetchCompletedReasonHistogramSuffix::kDownloadFailure;
+  RecordTimeToCompleteDownload(suffix);
+
+  if (response_code == net::HTTP_NOT_FOUND) {
+    RecordDownloadStatusAndPostCallback(
+        CLEANER_DOWNLOAD_STATUS_NOT_FOUND_ON_SERVER,
+        ChromeCleanerFetchStatus::kNotFoundOnServer);
+    return;
+  }
+
+  if (response_code != net::HTTP_OK) {
+    RecordDownloadStatusAndPostCallback(
+        CLEANER_DOWNLOAD_STATUS_OTHER_FAILURE,
+        ChromeCleanerFetchStatus::kOtherFailure);
     return;
   }
 
   base::FilePath download_path;
-  if (!source->GetStatus().is_success() ||
-      source->GetResponseCode() != net::HTTP_OK ||
-      !source->GetResponseAsFilePath(/*take_ownership=*/true, &download_path)) {
-    RecordCleanerDownloadStatusHistogram(CLEANER_DOWNLOAD_STATUS_OTHER_FAILURE);
-    PostCallbackAndDeleteSelf(base::FilePath(),
-                              ChromeCleanerFetchStatus::kOtherFailure);
+  if (!source->GetResponseAsFilePath(/*take_ownership=*/true, &download_path)) {
+    RecordDownloadStatusAndPostCallback(
+        CLEANER_DOWNLOAD_STATUS_FAILED_TO_SAVE_TO_FILE,
+        ChromeCleanerFetchStatus::kOtherFailure);
     return;
   }
 
@@ -212,6 +289,38 @@ void ChromeCleanerFetcher::OnURLFetchComplete(const net::URLFetcher* source) {
   RecordCleanerDownloadStatusHistogram(CLEANER_DOWNLOAD_STATUS_SUCCEEDED);
   PostCallbackAndDeleteSelf(std::move(download_path),
                             ChromeCleanerFetchStatus::kSuccess);
+}
+
+void ChromeCleanerFetcher::RecordDownloadStatusAndPostCallback(
+    CleanerDownloadStatusHistogramValue histogram_value,
+    ChromeCleanerFetchStatus fetch_status) {
+  RecordCleanerDownloadStatusHistogram(histogram_value);
+  PostCallbackAndDeleteSelf(base::FilePath(), fetch_status);
+}
+
+void ChromeCleanerFetcher::RecordTimeToCompleteDownload(
+    FetchCompletedReasonHistogramSuffix suffix) {
+  const base::TimeDelta time_difference =
+      base::Time::Now() - time_fetching_started_;
+  switch (suffix) {
+    case FetchCompletedReasonHistogramSuffix::kDownloadFailure:
+      UMA_HISTOGRAM_LONG_TIMES_100(
+          "SoftwareReporter.Cleaner.TimeToCompleteDownload_DownloadFailure",
+          time_difference);
+      break;
+
+    case FetchCompletedReasonHistogramSuffix::kDownloadSuccess:
+      UMA_HISTOGRAM_LONG_TIMES_100(
+          "SoftwareReporter.Cleaner.TimeToCompleteDownload_DownloadSuccess",
+          time_difference);
+      break;
+
+    case FetchCompletedReasonHistogramSuffix::kNetworkError:
+      UMA_HISTOGRAM_LONG_TIMES_100(
+          "SoftwareReporter.Cleaner.TimeToCompleteDownload_NetworkError",
+          time_difference);
+      break;
+  }
 }
 
 }  // namespace

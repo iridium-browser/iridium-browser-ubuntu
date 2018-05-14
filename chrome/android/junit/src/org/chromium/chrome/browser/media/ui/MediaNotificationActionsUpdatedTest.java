@@ -9,17 +9,17 @@ import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.doCallRealMethod;
 
 import android.content.Intent;
+import android.os.Build;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 
-import org.chromium.base.BaseChromiumApplication;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.blink.mojom.MediaSessionAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.media.ui.MediaNotificationManager.ListenerService;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -28,8 +28,11 @@ import java.util.Set;
  * Test of media notifications to see whether the control buttons update when MediaSessionActions
  * change or the tab navigates.
  */
-@RunWith(LocalRobolectricTestRunner.class)
-@Config(manifest = Config.NONE, application = BaseChromiumApplication.class,
+@RunWith(BaseRobolectricTestRunner.class)
+@Config(manifest = Config.NONE,
+        // Remove this after updating to a version of Robolectric that supports
+        // notification channel creation. crbug.com/774315
+        sdk = Build.VERSION_CODES.N_MR1,
         shadows = {MediaNotificationTestShadowResources.class,
                 MediaNotificationTestShadowNotificationManager.class})
 public class MediaNotificationActionsUpdatedTest extends MediaNotificationManagerTestBase {

@@ -36,8 +36,6 @@
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/profile_management_switches.h"
-#include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
@@ -114,8 +112,7 @@ IdentityAPI::IdentityAPI(content::BrowserContext* context)
           LoginUIServiceFactory::GetShowLoginPopupCallbackForProfile(
               Profile::FromBrowserContext(context))),
       account_tracker_(&profile_identity_provider_,
-                       g_browser_process->system_request_context()),
-      get_auth_token_function_(nullptr) {
+                       g_browser_process->system_request_context()) {
   account_tracker_.AddObserver(this);
 }
 
@@ -157,19 +154,17 @@ const IdentityAPI::CachedTokens& IdentityAPI::GetAllCachedTokens() {
 }
 
 void IdentityAPI::Shutdown() {
-  if (get_auth_token_function_)
-    get_auth_token_function_->Shutdown();
+  on_shutdown_callback_list_.Notify();
   account_tracker_.RemoveObserver(this);
   account_tracker_.Shutdown();
 }
 
-static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<IdentityAPI>>::DestructorAtExit g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<IdentityAPI>>::
+    DestructorAtExit g_identity_api_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<IdentityAPI>* IdentityAPI::GetFactoryInstance() {
-  return g_factory.Pointer();
+  return g_identity_api_factory.Pointer();
 }
 
 void IdentityAPI::OnAccountSignInChanged(const gaia::AccountIds& ids,
@@ -184,7 +179,19 @@ void IdentityAPI::OnAccountSignInChanged(const gaia::AccountIds& ids,
                 api::identity::OnSignInChanged::kEventName, std::move(args),
                 browser_context_));
 
+  if (on_signin_changed_callback_for_testing_)
+    on_signin_changed_callback_for_testing_.Run(event.get());
+
   EventRouter::Get(browser_context_)->BroadcastEvent(std::move(event));
+}
+
+void IdentityAPI::SetAccountStateForTesting(const std::string& account_id,
+                                         bool signed_in) {
+  gaia::AccountIds ids;
+  ids.account_key = account_id;
+  ids.email = account_id;
+  ids.gaia = account_id;
+  account_tracker_.SetAccountStateForTest(ids, signed_in);
 }
 
 template <>

@@ -8,9 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/base/signalthread.h"
+#include "rtc_base/signalthread.h"
 
-#include "webrtc/base/checks.h"
+#include "rtc_base/checks.h"
 
 namespace rtc {
 
@@ -18,9 +18,9 @@ namespace rtc {
 // SignalThread
 ///////////////////////////////////////////////////////////////////////////////
 
-SignalThread::SignalThread(bool use_socket_server)
+SignalThread::SignalThread()
     : main_(Thread::Current()),
-      worker_(this, use_socket_server),
+      worker_(this),
       state_(kInit),
       refcount_(1) {
   main_->SignalQueueDestroyed.connect(this,

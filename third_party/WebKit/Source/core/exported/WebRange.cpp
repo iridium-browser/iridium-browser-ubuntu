@@ -32,8 +32,10 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/Range.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/PlainTextRange.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/frame/LocalFrame.h"
 
 namespace blink {
@@ -61,8 +63,10 @@ WebRange::WebRange(const PlainTextRange& range) {
 }
 
 EphemeralRange WebRange::CreateEphemeralRange(LocalFrame* frame) const {
+  // TODO(editing-dev): The use of VisibleSelection should be audited. See
+  // crbug.com/657237 for details.
   Element* selection_root = frame->Selection()
-                                .ComputeVisibleSelectionInDOMTreeDeprecated()
+                                .ComputeVisibleSelectionInDOMTree()
                                 .RootEditableElement();
   ContainerNode* scope =
       selection_root ? selection_root : frame->GetDocument()->documentElement();

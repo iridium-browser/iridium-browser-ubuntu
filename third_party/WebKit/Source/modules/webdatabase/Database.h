@@ -26,8 +26,12 @@
 #ifndef Database_h
 #define Database_h
 
+#include "base/single_thread_task_runner.h"
+#include "bindings/modules/v8/v8_database_callback.h"
 #include "modules/webdatabase/DatabaseBasicTypes.h"
 #include "modules/webdatabase/DatabaseError.h"
+#include "modules/webdatabase/SQLTransaction.h"
+#include "modules/webdatabase/SQLTransactionBackend.h"
 #include "modules/webdatabase/sqlite/SQLiteDatabase.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/bindings/TraceWrapperMember.h"
@@ -39,29 +43,22 @@ namespace blink {
 
 class ChangeVersionData;
 class DatabaseAuthorizer;
-class DatabaseCallback;
 class DatabaseContext;
 class ExecutionContext;
-class SQLTransaction;
-class SQLTransactionBackend;
-class SQLTransactionCallback;
 class SQLTransactionClient;
 class SQLTransactionCoordinator;
-class SQLTransactionErrorCallback;
-class VoidCallback;
 
-class Database final : public GarbageCollectedFinalized<Database>,
-                       public ScriptWrappable {
+class Database final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   virtual ~Database();
-  DECLARE_TRACE();
-  DECLARE_TRACE_WRAPPERS();
+  void Trace(blink::Visitor*) override;
 
   bool OpenAndVerifyVersion(bool set_version_in_new_database,
                             DatabaseError&,
-                            String& error_message);
+                            String& error_message,
+                            V8DatabaseCallback* creation_callback);
   void Close();
 
   SQLTransactionBackend* RunTransaction(SQLTransaction*,
@@ -77,20 +74,24 @@ class Database final : public GarbageCollectedFinalized<Database>,
   String version() const;
   void changeVersion(const String& old_version,
                      const String& new_version,
-                     SQLTransactionCallback*,
-                     SQLTransactionErrorCallback*,
-                     VoidCallback* success_callback);
-  void transaction(SQLTransactionCallback*,
-                   SQLTransactionErrorCallback*,
-                   VoidCallback* success_callback);
-  void readTransaction(SQLTransactionCallback*,
-                       SQLTransactionErrorCallback*,
-                       VoidCallback* success_callback);
+                     V8SQLTransactionCallback*,
+                     V8SQLTransactionErrorCallback*,
+                     V8VoidCallback* success_callback);
+  void transaction(V8SQLTransactionCallback*,
+                   V8SQLTransactionErrorCallback*,
+                   V8VoidCallback* success_callback);
+  void readTransaction(V8SQLTransactionCallback*,
+                       V8SQLTransactionErrorCallback*,
+                       V8VoidCallback* success_callback);
+
+  void PerformTransaction(SQLTransaction::OnProcessCallback*,
+                          SQLTransaction::OnErrorCallback*,
+                          SQLTransaction::OnSuccessCallback*);
 
   bool Opened();
   bool IsNew() const { return new_; }
 
-  SecurityOrigin* GetSecurityOrigin() const;
+  const SecurityOrigin* GetSecurityOrigin() const;
   String StringIdentifier() const;
   String DisplayName() const;
   unsigned EstimatedSize() const;
@@ -118,7 +119,7 @@ class Database final : public GarbageCollectedFinalized<Database>,
     return database_context_.Get();
   }
   ExecutionContext* GetExecutionContext() const;
-  WebTaskRunner* GetDatabaseTaskRunner() const;
+  base::SingleThreadTaskRunner* GetDatabaseTaskRunner() const;
 
  private:
   class DatabaseOpenTask;
@@ -130,12 +131,12 @@ class Database final : public GarbageCollectedFinalized<Database>,
            const String& name,
            const String& expected_version,
            const String& display_name,
-           unsigned estimated_size,
-           DatabaseCallback* creation_callback);
+           unsigned estimated_size);
   bool PerformOpenAndVerify(bool set_version_in_new_database,
                             DatabaseError&,
                             String& error_message);
-  void RunCreationCallback();
+  void RunCreationCallback(
+      V8PersistentCallbackFunction<V8DatabaseCallback>* creation_callback);
 
   void ScheduleTransaction();
 
@@ -149,11 +150,11 @@ class Database final : public GarbageCollectedFinalized<Database>,
   void SetCachedVersion(const String&);
   bool GetActualVersionForTransaction(String& version);
 
-  void RunTransaction(SQLTransactionCallback*,
-                      SQLTransactionErrorCallback*,
-                      VoidCallback* success_callback,
+  void RunTransaction(SQLTransaction::OnProcessCallback*,
+                      SQLTransaction::OnErrorCallback*,
+                      SQLTransaction::OnSuccessCallback*,
                       bool read_only,
-                      const ChangeVersionData* = 0);
+                      const ChangeVersionData* = nullptr);
   Vector<String> PerformGetTableNames();
 
   void ReportOpenDatabaseResult(int error_site,
@@ -179,14 +180,14 @@ class Database final : public GarbageCollectedFinalized<Database>,
     return context_thread_security_origin_->ToString() + "::" + name_;
   }
 
-  RefPtr<SecurityOrigin> context_thread_security_origin_;
-  RefPtr<SecurityOrigin> database_thread_security_origin_;
+  scoped_refptr<const SecurityOrigin> context_thread_security_origin_;
+  scoped_refptr<const SecurityOrigin> database_thread_security_origin_;
   Member<DatabaseContext>
       database_context_;  // Associated with m_executionContext.
-  // TaskRunnerHelper::get is not thread-safe, so we save WebTaskRunner for
-  // TaskType::DatabaseAccess for later use as the constructor runs in the main
-  // thread.
-  RefPtr<WebTaskRunner> database_task_runner_;
+  // TaskRunnerHelper::get is not thread-safe, so we save SingleThreadTaskRunner
+  // for TaskType::DatabaseAccess for later use as the constructor runs in the
+  // main thread.
+  scoped_refptr<base::SingleThreadTaskRunner> database_task_runner_;
 
   String name_;
   String expected_version_;
@@ -201,7 +202,6 @@ class Database final : public GarbageCollectedFinalized<Database>,
   SQLiteDatabase sqlite_database_;
 
   Member<DatabaseAuthorizer> database_authorizer_;
-  TraceWrapperMember<DatabaseCallback> creation_callback_;
   Deque<CrossThreadPersistent<SQLTransactionBackend>> transaction_queue_;
   Mutex transaction_in_progress_mutex_;
   bool transaction_in_progress_;

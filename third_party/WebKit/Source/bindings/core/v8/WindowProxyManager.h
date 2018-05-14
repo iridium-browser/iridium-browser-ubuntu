@@ -22,7 +22,7 @@ class SecurityOrigin;
 
 class WindowProxyManager : public GarbageCollected<WindowProxyManager> {
  public:
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   v8::Isolate* GetIsolate() const { return isolate_; }
 
@@ -101,7 +101,7 @@ class LocalWindowProxyManager
 
   // Sets the given security origin to the main world's context.  Also updates
   // the security origin of the context for each isolated world.
-  void UpdateSecurityOrigin(SecurityOrigin*);
+  void UpdateSecurityOrigin(const SecurityOrigin*);
 
  private:
   explicit LocalWindowProxyManager(LocalFrame& frame)

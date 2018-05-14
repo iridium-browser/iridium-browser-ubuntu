@@ -9,6 +9,7 @@
 
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/command_line.h"
@@ -19,42 +20,53 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_isolated_world_ids.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/crash_keys.h"
 #include "chrome/common/open_search_description_document_handler.mojom.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
-#include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #include "chrome/renderer/web_apps.h"
+#include "components/crash/core/common/crash_key.h"
 #include "components/translate/content/renderer/translate_helper.h"
-#include "content/public/common/associated_interface_provider.h"
+#include "content/public/common/bindings_policy.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
+#include "content/public/renderer/window_features_converter.h"
 #include "extensions/common/constants.h"
 #include "printing/features/features.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "skia/ext/image_operations.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_provider.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/WebKit/public/platform/WebImage.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
-#include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebDocumentLoader.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebFrameContentDumper.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "url/gurl.h"
 
-#if BUILDFLAG(ENABLE_PRINTING)
-#include "components/printing/common/print_messages.h"
-#include "components/printing/renderer/print_web_view_helper.h"
+#if !defined(OS_ANDROID)
+#include "chrome/renderer/searchbox/searchbox_extension.h"
+#endif  // !defined(OS_ANDROID)
+
+#if defined(FULL_SAFE_BROWSING)
+#include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #endif
 
-using blink::WebDataSource;
+#if BUILDFLAG(ENABLE_PRINTING)
+#include "components/printing/common/print_messages.h"
+#include "components/printing/renderer/print_render_frame_helper.h"
+#endif
+
+using blink::WebDocumentLoader;
 using blink::WebElement;
 using blink::WebFrameContentDumper;
 using blink::WebLocalFrame;
@@ -122,27 +134,30 @@ ChromeRenderFrameObserver::ChromeRenderFrameObserver(
     : content::RenderFrameObserver(render_frame),
       translate_helper_(nullptr),
       phishing_classifier_(nullptr) {
-  render_frame->GetInterfaceRegistry()->AddInterface(
-      base::Bind(&ChromeRenderFrameObserver::OnImageContextMenuRendererRequest,
+  render_frame->GetAssociatedInterfaceRegistry()->AddInterface(
+      base::Bind(&ChromeRenderFrameObserver::OnRenderFrameObserverRequest,
                  base::Unretained(this)));
-  render_frame->GetInterfaceRegistry()->AddInterface(
-      base::Bind(&ChromeRenderFrameObserver::OnThumbnailCapturerRequest,
-                 base::Unretained(this)));
-
   // Don't do anything else for subframes.
   if (!render_frame->IsMainFrame())
     return;
 
+#if defined(SAFE_BROWSING_CSD)
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (!command_line.HasSwitch(switches::kDisableClientSidePhishingDetection))
-    OnSetClientSidePhishingDetection(true);
+    SetClientSidePhishingDetection(true);
+#endif
   translate_helper_ = new translate::TranslateHelper(
-      render_frame, chrome::ISOLATED_WORLD_ID_TRANSLATE,
-      extensions::kExtensionScheme);
+      render_frame, ISOLATED_WORLD_ID_TRANSLATE, extensions::kExtensionScheme);
 }
 
 ChromeRenderFrameObserver::~ChromeRenderFrameObserver() {
+}
+
+void ChromeRenderFrameObserver::OnInterfaceRequestForFrame(
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle* interface_pipe) {
+  registry_.TryBindInterface(interface_name, interface_pipe);
 }
 
 bool ChromeRenderFrameObserver::OnMessageReceived(const IPC::Message& message) {
@@ -156,10 +171,6 @@ bool ChromeRenderFrameObserver::OnMessageReceived(const IPC::Message& message) {
     return false;
 
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderFrameObserver, message)
-    IPC_MESSAGE_HANDLER(ChromeFrameMsg_GetWebApplicationInfo,
-                        OnGetWebApplicationInfo)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetClientSidePhishingDetection,
-                        OnSetClientSidePhishingDetection)
 #if BUILDFLAG(ENABLE_PRINTING)
     IPC_MESSAGE_HANDLER(PrintMsg_PrintNodeUnderContextMenu,
                         OnPrintNodeUnderContextMenu)
@@ -171,7 +182,8 @@ bool ChromeRenderFrameObserver::OnMessageReceived(const IPC::Message& message) {
 }
 
 void ChromeRenderFrameObserver::OnSetIsPrerendering(
-    prerender::PrerenderMode mode) {
+    prerender::PrerenderMode mode,
+    const std::string& histogram_prefix) {
   if (mode != prerender::NO_PRERENDER) {
     // If the PrerenderHelper for this frame already exists, don't create it. It
     // can already be created for subframes during handling of
@@ -182,7 +194,7 @@ void ChromeRenderFrameObserver::OnSetIsPrerendering(
 
     // The PrerenderHelper will destroy itself either after recording histograms
     // or on destruction of the RenderView.
-    new prerender::PrerenderHelper(render_frame(), mode);
+    new prerender::PrerenderHelper(render_frame(), mode, histogram_prefix);
   }
 }
 
@@ -205,7 +217,8 @@ void ChromeRenderFrameObserver::RequestThumbnailForContextNode(
   SkBitmap thumbnail;
   gfx::Size original_size;
   if (!context_node.IsNull() && context_node.IsElementNode()) {
-    blink::WebImage image = context_node.To<WebElement>().ImageContents();
+    blink::WebImage image =
+        context_node.To<WebElement>().ImageContents();
     original_size = image.Size();
     thumbnail = Downscale(image,
                           thumbnail_min_area_pixels,
@@ -231,28 +244,27 @@ void ChromeRenderFrameObserver::RequestThumbnailForContextNode(
       if (gfx::PNGCodec::EncodeBGRASkBitmap(
               bitmap, kDiscardTransparencyForContextMenu, &data)) {
         thumbnail_data.swap(data);
-        break;
       }
+      break;
     case chrome::mojom::ImageFormat::JPEG:
-      if (gfx::JPEGCodec::Encode(bitmap, kDefaultQuality, &data)) {
+      if (gfx::JPEGCodec::Encode(bitmap, kDefaultQuality, &data))
         thumbnail_data.swap(data);
-        break;
-      }
+      break;
   }
-
   callback.Run(thumbnail_data, original_size);
 }
 
 void ChromeRenderFrameObserver::OnPrintNodeUnderContextMenu() {
 #if BUILDFLAG(ENABLE_PRINTING)
-  printing::PrintWebViewHelper* helper =
-      printing::PrintWebViewHelper::Get(render_frame());
+  printing::PrintRenderFrameHelper* helper =
+      printing::PrintRenderFrameHelper::Get(render_frame());
   if (helper)
     helper->PrintNode(render_frame()->GetWebFrame()->ContextMenuNode());
 #endif
 }
 
-void ChromeRenderFrameObserver::OnGetWebApplicationInfo() {
+void ChromeRenderFrameObserver::GetWebApplicationInfo(
+    const GetWebApplicationInfoCallback& callback) {
   WebLocalFrame* frame = render_frame()->GetWebFrame();
 
   WebApplicationInfo web_app_info;
@@ -289,11 +301,10 @@ void ChromeRenderFrameObserver::OnGetWebApplicationInfo() {
   web_app_info.description =
       web_app_info.description.substr(0, chrome::kMaxMetaTagAttributeLength);
 
-  Send(new ChromeFrameHostMsg_DidGetWebApplicationInfo(routing_id(),
-                                                       web_app_info));
+  std::move(callback).Run(web_app_info);
 }
 
-void ChromeRenderFrameObserver::OnSetClientSidePhishingDetection(
+void ChromeRenderFrameObserver::SetClientSidePhishingDetection(
     bool enable_phishing_detection) {
 #if defined(SAFE_BROWSING_CSD)
   phishing_classifier_ =
@@ -301,6 +312,13 @@ void ChromeRenderFrameObserver::OnSetClientSidePhishingDetection(
           ? safe_browsing::PhishingClassifierDelegate::Create(render_frame(),
                                                               nullptr)
           : nullptr;
+#endif
+}
+
+void ChromeRenderFrameObserver::ExecuteWebUIJavaScript(
+    const base::string16& javascript) {
+#if !defined(OS_ANDROID)
+  webui_javascript_.push_back(javascript);
 #endif
 }
 
@@ -322,7 +340,7 @@ void ChromeRenderFrameObserver::DidFinishLoad() {
 }
 
 void ChromeRenderFrameObserver::DidStartProvisionalLoad(
-    blink::WebDataSource* data_source) {
+    WebDocumentLoader* document_loader) {
   // Let translate_helper do any preparatory work for loading a URL.
   if (!translate_helper_)
     return;
@@ -340,9 +358,27 @@ void ChromeRenderFrameObserver::DidCommitProvisionalLoad(
   if (frame->Parent())
     return;
 
-  base::debug::SetCrashKeyValue(
-      crash_keys::kViewCount,
-      base::SizeTToString(content::RenderView::GetRenderViewCount()));
+  static crash_reporter::CrashKeyString<8> view_count_key("view-count");
+  view_count_key.Set(
+      base::NumberToString(content::RenderView::GetRenderViewCount()));
+
+#if !defined(OS_ANDROID)
+  if ((render_frame()->GetEnabledBindings() &
+       content::BINDINGS_POLICY_WEB_UI)) {
+    for (const auto& script : webui_javascript_)
+      render_frame()->ExecuteJavaScript(script);
+    webui_javascript_.clear();
+  }
+#endif
+}
+
+void ChromeRenderFrameObserver::DidClearWindowObject() {
+#if !defined(OS_ANDROID)
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kInstantProcess))
+    SearchBoxExtension::Install(render_frame()->GetWebFrame());
+#endif  // !defined(OS_ANDROID)
 }
 
 void ChromeRenderFrameObserver::CapturePageText(TextCaptureType capture_type) {
@@ -359,8 +395,8 @@ void ChromeRenderFrameObserver::CapturePageText(TextCaptureType capture_type) {
     return;
 
   // Don't capture text of the error pages.
-  WebDataSource* ds = frame->DataSource();
-  if (ds && ds->HasUnreachableURL())
+  WebDocumentLoader* document_loader = frame->GetDocumentLoader();
+  if (document_loader && document_loader->HasUnreachableURL())
     return;
 
   // Don't index/capture pages that are being prerendered.
@@ -383,8 +419,9 @@ void ChromeRenderFrameObserver::CapturePageText(TextCaptureType capture_type) {
 
   // We should run language detection only once. Parsing finishes before
   // the page loads, so let's pick that timing.
-  if (translate_helper_ && capture_type == PRELIMINARY_CAPTURE)
+  if (translate_helper_ && capture_type == PRELIMINARY_CAPTURE) {
     translate_helper_->PageCaptured(contents);
+  }
 
   TRACE_EVENT0("renderer", "ChromeRenderFrameObserver::CapturePageText");
 
@@ -418,12 +455,23 @@ void ChromeRenderFrameObserver::OnDestruct() {
   delete this;
 }
 
-void ChromeRenderFrameObserver::OnImageContextMenuRendererRequest(
-    chrome::mojom::ImageContextMenuRendererRequest request) {
-  image_context_menu_renderer_bindings_.AddBinding(this, std::move(request));
+void ChromeRenderFrameObserver::OnRenderFrameObserverRequest(
+    chrome::mojom::ChromeRenderFrameAssociatedRequest request) {
+  bindings_.AddBinding(this, std::move(request));
 }
 
-void ChromeRenderFrameObserver::OnThumbnailCapturerRequest(
-    chrome::mojom::ThumbnailCapturerRequest request) {
-  thumbnail_capturer_bindings_.AddBinding(this, std::move(request));
+void ChromeRenderFrameObserver::SetWindowFeatures(
+    blink::mojom::WindowFeaturesPtr window_features) {
+  render_frame()->GetRenderView()->GetWebView()->SetWindowFeatures(
+      content::ConvertMojoWindowFeaturesToWebWindowFeatures(*window_features));
 }
+
+#if defined(OS_ANDROID)
+void ChromeRenderFrameObserver::UpdateBrowserControlsState(
+    content::BrowserControlsState constraints,
+    content::BrowserControlsState current,
+    bool animate) {
+  render_frame()->GetRenderView()->UpdateBrowserControlsState(constraints,
+                                                              current, animate);
+}
+#endif

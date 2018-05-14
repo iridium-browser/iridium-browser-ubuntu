@@ -41,12 +41,14 @@ void TestToV8(V8TestingScope* scope,
   }
 }
 
-class GarbageCollectedHolder : public GarbageCollected<GarbageCollectedHolder> {
+class GarbageCollectedHolderForToV8Test
+    : public GarbageCollected<GarbageCollectedHolderForToV8Test> {
  public:
-  GarbageCollectedHolder(GarbageCollectedScriptWrappable* script_wrappable)
+  GarbageCollectedHolderForToV8Test(
+      GarbageCollectedScriptWrappable* script_wrappable)
       : script_wrappable_(script_wrappable) {}
 
-  DEFINE_INLINE_TRACE() { visitor->Trace(script_wrappable_); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(script_wrappable_); }
 
   // This should be public in order to access a Member<X> object.
   Member<GarbageCollectedScriptWrappable> script_wrappable_;
@@ -66,7 +68,7 @@ TEST(ToV8Test, garbageCollectedScriptWrappable) {
   V8TestingScope scope;
   GarbageCollectedScriptWrappable* object =
       new GarbageCollectedScriptWrappable("world");
-  GarbageCollectedHolder holder(object);
+  GarbageCollectedHolderForToV8Test holder(object);
   OffHeapGarbageCollectedHolder off_heap_holder(object);
 
   TEST_TOV8("world", object);
@@ -300,6 +302,23 @@ TEST(ToV8Test, withScriptState) {
 
   double actual_as_number = actual.As<v8::Number>()->Value();
   EXPECT_EQ(1234.0, actual_as_number);
+}
+
+TEST(ToV8Test, nullableDouble) {
+  V8TestingScope scope;
+  v8::Local<v8::Object> global = scope.GetContext()->Global();
+  v8::Isolate* isolate = scope.GetIsolate();
+  {
+    v8::Local<v8::Value> actual =
+        ToV8(WTF::Optional<double>(42.0), global, isolate);
+    ASSERT_TRUE(actual->IsNumber());
+    EXPECT_EQ(42.0, actual.As<v8::Number>()->Value());
+  }
+  {
+    v8::Local<v8::Value> actual =
+        ToV8(WTF::Optional<double>(), global, isolate);
+    EXPECT_TRUE(actual->IsNull());
+  }
 }
 
 }  // namespace

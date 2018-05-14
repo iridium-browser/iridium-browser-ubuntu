@@ -42,7 +42,8 @@ V0CustomElementMicrotaskImportStep::V0CustomElementMicrotaskImportStep(
     HTMLImportChild* import)
     : import_(import), queue_(import->Loader()->MicrotaskQueue()) {}
 
-V0CustomElementMicrotaskImportStep::~V0CustomElementMicrotaskImportStep() {}
+V0CustomElementMicrotaskImportStep::~V0CustomElementMicrotaskImportStep() =
+    default;
 
 void V0CustomElementMicrotaskImportStep::Invalidate() {
   queue_ = V0CustomElementSyncMicrotaskQueue::Create();
@@ -69,7 +70,7 @@ V0CustomElementMicrotaskImportStep::Process() {
   return kFinishedProcessing;
 }
 
-DEFINE_TRACE(V0CustomElementMicrotaskImportStep) {
+void V0CustomElementMicrotaskImportStep::Trace(blink::Visitor* visitor) {
   visitor->Trace(import_);
   visitor->Trace(queue_);
   V0CustomElementMicrotaskStep::Trace(visitor);

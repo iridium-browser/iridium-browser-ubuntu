@@ -27,14 +27,13 @@ class CONTENT_EXPORT LegacyIPCWidgetInputHandler
   void SetEditCommandsForNextKeyEvent(
       const std::vector<EditCommand>& commands) override;
   void CursorVisibilityChanged(bool visible) override;
-  void ImeSetComposition(
-      const base::string16& text,
-      const std::vector<ui::CompositionUnderline>& underlines,
-      const gfx::Range& range,
-      int32_t start,
-      int32_t end) override;
+  void ImeSetComposition(const base::string16& text,
+                         const std::vector<ui::ImeTextSpan>& ime_text_spans,
+                         const gfx::Range& range,
+                         int32_t start,
+                         int32_t end) override;
   void ImeCommitText(const base::string16& text,
-                     const std::vector<ui::CompositionUnderline>& underlines,
+                     const std::vector<ui::ImeTextSpan>& ime_text_spans,
                      const gfx::Range& range,
                      int32_t relative_cursor_position) override;
   void ImeFinishComposingText(bool keep_selection) override;
@@ -45,6 +44,11 @@ class CONTENT_EXPORT LegacyIPCWidgetInputHandler
                      DispatchEventCallback callback) override;
   void DispatchNonBlockingEvent(
       std::unique_ptr<content::InputEvent> event) override;
+  void AttachSynchronousCompositor(
+      mojom::SynchronousCompositorControlHostPtr control_host,
+      mojom::SynchronousCompositorHostAssociatedPtrInfo host,
+      mojom::SynchronousCompositorAssociatedRequest compositor_request)
+      override;
 
  private:
   void SendInput(std::unique_ptr<IPC::Message> message);

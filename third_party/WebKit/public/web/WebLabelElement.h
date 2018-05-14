@@ -41,7 +41,7 @@ class HTMLLabelElement;
 class WebLabelElement final : public WebElement {
  public:
   WebLabelElement() : WebElement() {}
-  WebLabelElement(const WebLabelElement& element) : WebElement(element) {}
+  WebLabelElement(const WebLabelElement& element) = default;
 
   WebLabelElement& operator=(const WebLabelElement& element) {
     WebElement::Assign(element);
@@ -52,7 +52,7 @@ class WebLabelElement final : public WebElement {
 
   BLINK_EXPORT WebElement CorrespondingControl();
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebLabelElement(HTMLLabelElement*);
   WebLabelElement& operator=(HTMLLabelElement*);
   operator HTMLLabelElement*() const;

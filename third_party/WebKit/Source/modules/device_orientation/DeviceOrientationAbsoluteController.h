@@ -5,7 +5,6 @@
 #ifndef DeviceOrientationAbsoluteController_h
 #define DeviceOrientationAbsoluteController_h
 
-#include "core/dom/Document.h"
 #include "modules/ModulesExport.h"
 #include "modules/device_orientation/DeviceOrientationController.h"
 
@@ -14,16 +13,17 @@ namespace blink {
 class MODULES_EXPORT DeviceOrientationAbsoluteController final
     : public DeviceOrientationController {
  public:
+  static const char kSupplementName[];
+
   ~DeviceOrientationAbsoluteController() override;
 
-  static const char* SupplementName();
   static DeviceOrientationAbsoluteController& From(Document&);
 
   // Inherited from DeviceSingleWindowEventController.
   void DidAddEventListener(LocalDOMWindow*,
                            const AtomicString& event_type) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit DeviceOrientationAbsoluteController(Document&);

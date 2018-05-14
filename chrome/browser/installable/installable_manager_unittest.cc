@@ -13,7 +13,7 @@ using IconPurpose = content::Manifest::Icon::IconPurpose;
 class InstallableManagerUnitTest : public testing::Test {
  public:
   InstallableManagerUnitTest()
-      : manager_(base::MakeUnique<InstallableManager>(nullptr)) {}
+      : manager_(std::make_unique<InstallableManager>(nullptr)) {}
 
  protected:
   static base::NullableString16 ToNullableUTF16(const std::string& str) {
@@ -184,7 +184,7 @@ TEST_F(InstallableManagerUnitTest, ManifestRequiresMinimalSize) {
   EXPECT_EQ(NO_ERROR_DETECTED, GetErrorCode());
 }
 
-TEST_F(InstallableManagerUnitTest, ManifestDisplayStandaloneFullscreen) {
+TEST_F(InstallableManagerUnitTest, ManifestDisplayModes) {
   content::Manifest manifest = GetValidManifest();
 
   manifest.display = blink::kWebDisplayModeUndefined;
@@ -196,8 +196,8 @@ TEST_F(InstallableManagerUnitTest, ManifestDisplayStandaloneFullscreen) {
   EXPECT_EQ(MANIFEST_DISPLAY_NOT_SUPPORTED, GetErrorCode());
 
   manifest.display = blink::kWebDisplayModeMinimalUi;
-  EXPECT_FALSE(IsManifestValid(manifest));
-  EXPECT_EQ(MANIFEST_DISPLAY_NOT_SUPPORTED, GetErrorCode());
+  EXPECT_TRUE(IsManifestValid(manifest));
+  EXPECT_EQ(NO_ERROR_DETECTED, GetErrorCode());
 
   manifest.display = blink::kWebDisplayModeStandalone;
   EXPECT_TRUE(IsManifestValid(manifest));

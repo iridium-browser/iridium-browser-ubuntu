@@ -83,10 +83,8 @@ gl::Error Framebuffer9::readPixelsImpl(const gl::Context *context,
                                        GLenum type,
                                        size_t outputPitch,
                                        const gl::PixelPackState &pack,
-                                       uint8_t *pixels) const
+                                       uint8_t *pixels)
 {
-    ASSERT(pack.pixelBuffer.get() == nullptr);
-
     const gl::FramebufferAttachment *colorbuffer = mState.getColorAttachment(0);
     ASSERT(colorbuffer);
 
@@ -191,7 +189,6 @@ gl::Error Framebuffer9::readPixelsImpl(const gl::Context *context,
     const d3d9::D3DFormat &d3dFormatInfo = d3d9::GetD3DFormatInfo(desc.Format);
     gl::FormatType formatType(format, type);
 
-    // TODO(jmadill): Maybe we can avoid a copy of pack parameters here?
     PackPixelsParams packParams;
     packParams.area.x      = rect.left;
     packParams.area.y      = rect.top;
@@ -200,7 +197,7 @@ gl::Error Framebuffer9::readPixelsImpl(const gl::Context *context,
     packParams.format      = format;
     packParams.type        = type;
     packParams.outputPitch = static_cast<GLuint>(outputPitch);
-    packParams.pack.copyFrom(context, pack);
+    packParams.pack        = pack;
 
     PackPixels(packParams, d3dFormatInfo.info(), inputPitch, source, pixels);
 
@@ -403,6 +400,12 @@ GLenum Framebuffer9::getRenderTargetImplementationFormat(RenderTargetD3D *render
     RenderTarget9 *renderTarget9 = GetAs<RenderTarget9>(renderTarget);
     const d3d9::D3DFormat &d3dFormatInfo = d3d9::GetD3DFormatInfo(renderTarget9->getD3DFormat());
     return d3dFormatInfo.info().glInternalFormat;
+}
+
+gl::Error Framebuffer9::getSamplePosition(size_t index, GLfloat *xy) const
+{
+    UNREACHABLE();
+    return gl::InternalError() << "getSamplePosition is unsupported to d3d9.";
 }
 
 }  // namespace rx

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,6 +10,7 @@ from __future__ import print_function
 import glob
 import multiprocessing
 import os
+import shutil
 
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import goma_util
@@ -131,22 +133,6 @@ class SyncChromeStage(generic_stages.BuilderStage,
     self._WriteChromeVersionToMetadata()
     super(SyncChromeStage, self).Finish()
 
-class PatchChromeStage(generic_stages.BuilderStage):
-  """Stage that applies Chrome patches if needed."""
-
-  option_name = 'rietveld_patches'
-
-  URL_BASE = 'https://codereview.chromium.org/%(id)s'
-
-  def PerformStage(self):
-    for spatch in ' '.join(self._run.options.rietveld_patches).split():
-      patch, colon, subdir = spatch.partition(':')
-      if not colon:
-        subdir = 'src'
-      url = self.URL_BASE % {'id': patch}
-      logging.PrintBuildbotLink(spatch, url)
-      commands.PatchChrome(self._run.options.chrome_root, patch, subdir)
-
 
 class SimpleChromeArtifactsStage(generic_stages.BoardSpecificBuilderStage,
                                  generic_stages.ArchivingStageMixin):
@@ -170,7 +156,7 @@ class SimpleChromeArtifactsStage(generic_stages.BoardSpecificBuilderStage,
       extra_env['USE'] = ' '.join(self._run.config.useflags)
     in_chroot_path = path_util.ToChrootPath(self.archive_path)
     cmd = ['cros_generate_sysroot', '--out-dir', in_chroot_path, '--board',
-           self._current_board, '--package', constants.CHROME_CP]
+           self._current_board, '--deps-only', '--package', constants.CHROME_CP]
     cros_build_lib.RunCommand(cmd, cwd=self._build_root, enter_chroot=True,
                               extra_env=extra_env)
     self._upload_queue.put([constants.CHROME_SYSROOT_TAR])
@@ -267,15 +253,40 @@ class TestSimpleChromeWorkflowStage(generic_stages.BoardSpecificBuilderStage,
 
     self._VerifySDKEnvironment()
 
-    # Build chromium.
     if goma:
+      # If goma is enabled, start goma compiler_proxy here, and record
+      # several information just before building Chrome is started.
       goma.Start()
+      extra_env = goma.GetExtraEnv()
+      ninja_env_path = os.path.join(goma.goma_log_dir, 'ninja_env')
+      sdk_cmd.Run(['env', '--null'],
+                  run_args={'extra_env': extra_env,
+                            'log_stdout_to_file': ninja_env_path})
+      osutils.WriteFile(os.path.join(goma.goma_log_dir, 'ninja_cwd'),
+                        sdk_cmd.cwd)
+      osutils.WriteFile(os.path.join(goma.goma_log_dir, 'ninja_command'),
+                        cros_build_lib.CmdToStr(sdk_cmd.GetNinjaCommand()))
+    else:
+      extra_env = None
+
+    result = None
     try:
-      sdk_cmd.Ninja(
-          run_args={'extra_env': goma.GetExtraEnv() if goma else None})
+      # Build chromium.
+      result = sdk_cmd.Ninja(run_args={'extra_env': extra_env})
     finally:
+      # In teardown, if goma is enabled, stop the goma compiler proxy,
+      # and record/copy some information to log directory, which will be
+      # uploaded to the goma's server in a later stage.
       if goma:
         goma.Stop()
+        ninja_log_path = os.path.join(self.chrome_src,
+                                      sdk_cmd.GetNinjaLogPath())
+        if os.path.exists(ninja_log_path):
+          shutil.copy2(ninja_log_path,
+                       os.path.join(goma.goma_log_dir, 'ninja_log'))
+        if result:
+          osutils.WriteFile(os.path.join(goma.goma_log_dir, 'ninja_exit'),
+                            str(result.returncode))
 
   def _TestDeploy(self, sdk_cmd):
     """Test SDK deployment."""
@@ -292,9 +303,16 @@ class TestSimpleChromeWorkflowStage(generic_stages.BoardSpecificBuilderStage,
       cache_dir = os.path.join(tempdir, 'cache')
       extra_args = ['--cwd', self.chrome_src, '--sdk-path',
                     self.archive_path]
+      # Do not automatically run 'gn gen', that will be done in _BuildChrome.
+      extra_args.extend(['--nogn-gen'])
       if self._ShouldEnableGoma():
-        goma = goma_util.Goma(self._run.options.goma_dir,
-                              self._run.options.goma_client_json)
+        # TODO(crbug.com/751010): Revisit to enable DepsCache for
+        # non-chrome-pfq bots, too.
+        use_goma_deps_cache = self._run.config.name.endswith('chrome-pfq')
+        goma = goma_util.Goma(
+            self._run.options.goma_dir,
+            self._run.options.goma_client_json,
+            stage_name=self.StageNamePrefix() if use_goma_deps_cache else None)
         extra_args.extend(['--nostart-goma', '--gomadir', goma.goma_dir])
         self._run.attrs.metadata.UpdateWithDict(
             {'goma_tmp_dir_for_simple_chrome': goma.goma_tmp_dir})

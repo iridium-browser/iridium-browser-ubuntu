@@ -6,11 +6,11 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "media/cast/constants.h"
@@ -35,7 +35,7 @@ const int kMaxFrameBurst = 5;
 FrameSender::RtcpClient::RtcpClient(base::WeakPtr<FrameSender> frame_sender)
     : frame_sender_(frame_sender) {}
 
-FrameSender::RtcpClient::~RtcpClient() {}
+FrameSender::RtcpClient::~RtcpClient() = default;
 
 void FrameSender::RtcpClient::OnReceivedCastMessage(
     const RtcpCastMessage& cast_message) {
@@ -96,11 +96,10 @@ FrameSender::FrameSender(scoped_refptr<CastEnvironment> cast_environment,
 
   transport_sender->InitializeStream(
       transport_config,
-      base::MakeUnique<FrameSender::RtcpClient>(weak_factory_.GetWeakPtr()));
+      std::make_unique<FrameSender::RtcpClient>(weak_factory_.GetWeakPtr()));
 }
 
-FrameSender::~FrameSender() {
-}
+FrameSender::~FrameSender() = default;
 
 void FrameSender::ScheduleNextRtcpReport() {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));

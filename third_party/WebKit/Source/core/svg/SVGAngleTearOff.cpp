@@ -45,7 +45,7 @@ SVGAngleTearOff::SVGAngleTearOff(SVGAngle* target_property,
                                    property_is_anim_val,
                                    attribute_name) {}
 
-SVGAngleTearOff::~SVGAngleTearOff() {}
+SVGAngleTearOff::~SVGAngleTearOff() = default;
 
 void SVGAngleTearOff::setValue(float value, ExceptionState& exception_state) {
   if (IsImmutable()) {
@@ -132,11 +132,6 @@ void SVGAngleTearOff::setValueAsString(const String& value,
 SVGAngleTearOff* SVGAngleTearOff::CreateDetached() {
   return Create(SVGAngle::Create(), nullptr, kPropertyIsNotAnimVal,
                 QualifiedName::Null());
-}
-
-DEFINE_TRACE_WRAPPERS(SVGAngleTearOff) {
-  SVGPropertyTearOff<SVGAngle>::TraceWrappers(visitor);
-  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

@@ -11,7 +11,7 @@
 
 namespace blink {
 
-class CanvasContextCreationAttributes;
+class CanvasContextCreationAttributesCore;
 class EXTColorBufferFloat;
 class EXTTextureFilterAnisotropic;
 class OESTextureFloatLinear;
@@ -26,12 +26,12 @@ class WebGL2RenderingContext : public WebGL2RenderingContextBase {
     WTF_MAKE_NONCOPYABLE(Factory);
 
    public:
-    Factory() {}
-    ~Factory() override {}
+    Factory() = default;
+    ~Factory() override = default;
 
     CanvasRenderingContext* Create(
         CanvasRenderingContextHost*,
-        const CanvasContextCreationAttributes&) override;
+        const CanvasContextCreationAttributesCore&) override;
     CanvasRenderingContext::ContextType GetContextType() const override {
       return CanvasRenderingContext::kContextWebgl2;
     }
@@ -47,15 +47,16 @@ class WebGL2RenderingContext : public WebGL2RenderingContextBase {
   void SetCanvasGetContextResult(RenderingContext&) final;
   void SetOffscreenCanvasGetContextResult(OffscreenRenderingContext&) final;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  protected:
   WebGL2RenderingContext(
       CanvasRenderingContextHost*,
       std::unique_ptr<WebGraphicsContext3DProvider>,
-      const CanvasContextCreationAttributes& requested_attributes);
+      bool using_gpu_compositing,
+      const CanvasContextCreationAttributesCore& requested_attributes);
 
   Member<EXTColorBufferFloat> ext_color_buffer_float_;
   Member<EXTDisjointTimerQueryWebGL2> ext_disjoint_timer_query_web_gl2_;

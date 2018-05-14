@@ -360,7 +360,7 @@ SpeechRecognitionEngine::ConnectBothStreams(const FSMEventArgs&) {
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "The user must allow the browser to access the microphone in a "
             "permission prompt. This is set per site (hostname pattern). In "
@@ -407,8 +407,8 @@ SpeechRecognitionEngine::ConnectBothStreams(const FSMEventArgs&) {
   }
   upstream_args.push_back("app=chromium");
   for (const SpeechRecognitionGrammar& grammar : config_.grammars) {
-    std::string grammar_value(
-        base::DoubleToString(grammar.weight) + ":" + grammar.url);
+    std::string grammar_value(base::NumberToString(grammar.weight) + ":" +
+                              grammar.url);
     upstream_args.push_back(
         "grammar=" + net::EscapeQueryParamValue(grammar_value, true));
   }
@@ -454,7 +454,7 @@ SpeechRecognitionEngine::ConnectBothStreams(const FSMEventArgs&) {
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "The user must allow the browser to access the microphone in a "
             "permission prompt. This is set per site (hostname pattern). In "

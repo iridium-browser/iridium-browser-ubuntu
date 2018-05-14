@@ -132,11 +132,11 @@ const char kHome[] = "HOME";
 
 }  // namespace env_vars
 
-Environment::~Environment() {}
+Environment::~Environment() = default;
 
 // static
 std::unique_ptr<Environment> Environment::Create() {
-  return MakeUnique<EnvironmentImpl>();
+  return std::make_unique<EnvironmentImpl>();
 }
 
 bool Environment::HasVar(StringPiece variable_name) {

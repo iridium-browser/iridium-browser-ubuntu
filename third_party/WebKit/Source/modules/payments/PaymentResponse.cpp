@@ -15,15 +15,13 @@ namespace blink {
 
 PaymentResponse::PaymentResponse(
     payments::mojom::blink::PaymentResponsePtr response,
+    PaymentAddress* shipping_address,
     PaymentCompleter* payment_completer,
     const String& requestId)
     : requestId_(requestId),
       method_name_(response->method_name),
       stringified_details_(response->stringified_details),
-      shipping_address_(
-          response->shipping_address
-              ? new PaymentAddress(std::move(response->shipping_address))
-              : nullptr),
+      shipping_address_(shipping_address),
       shipping_option_(response->shipping_option),
       payer_name_(response->payer_name),
       payer_email_(response->payer_email),
@@ -32,7 +30,7 @@ PaymentResponse::PaymentResponse(
   DCHECK(payment_completer_);
 }
 
-PaymentResponse::~PaymentResponse() {}
+PaymentResponse::~PaymentResponse() = default;
 
 ScriptValue PaymentResponse::toJSONForBinding(ScriptState* script_state) const {
   V8ObjectBuilder result(script_state);
@@ -56,9 +54,10 @@ ScriptValue PaymentResponse::toJSONForBinding(ScriptState* script_state) const {
 
 ScriptValue PaymentResponse::details(ScriptState* script_state,
                                      ExceptionState& exception_state) const {
-  return ScriptValue(script_state,
-                     FromJSONString(script_state->GetIsolate(),
-                                    stringified_details_, exception_state));
+  return ScriptValue(
+      script_state,
+      FromJSONString(script_state->GetIsolate(), script_state->GetContext(),
+                     stringified_details_, exception_state));
 }
 
 ScriptPromise PaymentResponse::complete(ScriptState* script_state,
@@ -72,9 +71,10 @@ ScriptPromise PaymentResponse::complete(ScriptState* script_state,
   return payment_completer_->Complete(script_state, converted_result);
 }
 
-DEFINE_TRACE(PaymentResponse) {
+void PaymentResponse::Trace(blink::Visitor* visitor) {
   visitor->Trace(shipping_address_);
   visitor->Trace(payment_completer_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

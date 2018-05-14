@@ -13,6 +13,8 @@
 
 namespace offline_pages {
 class OfflineMetricsCollector;
+class PrefetchBackgroundTaskHandler;
+class PrefetchConfiguration;
 class PrefetchDispatcher;
 class PrefetchDownloader;
 class PrefetchGCMHandler;
@@ -45,7 +47,7 @@ class PrefetchServiceTestTaco {
   // Default type: TestNetworkRequestFactory.
   void SetPrefetchNetworkRequestFactory(
       std::unique_ptr<PrefetchNetworkRequestFactory> network_request_factory);
-  void SetPrefetchStoreSql(std::unique_ptr<PrefetchStore> prefetch_store_sql);
+  void SetPrefetchStore(std::unique_ptr<PrefetchStore> prefetch_store_sql);
   // Defaults to SuggestedArticlesObserver.  Initializes the testing suggestions
   // by default, so no ContentSuggestionsService is required..
   void SetSuggestedArticlesObserver(
@@ -53,6 +55,11 @@ class PrefetchServiceTestTaco {
   void SetPrefetchDownloader(
       std::unique_ptr<PrefetchDownloader> prefetch_downloader);
   void SetPrefetchImporter(std::unique_ptr<PrefetchImporter> prefetch_importer);
+  void SetPrefetchBackgroundTaskHandler(
+      std::unique_ptr<PrefetchBackgroundTaskHandler>
+          prefetch_background_task_handler);
+  void SetPrefetchConfiguration(
+      std::unique_ptr<PrefetchConfiguration> prefetch_configuration);
 
   // Creates and caches an instance of PrefetchService, using default or
   // overridden test dependencies.
@@ -74,10 +81,13 @@ class PrefetchServiceTestTaco {
   std::unique_ptr<PrefetchDispatcher> dispatcher_;
   std::unique_ptr<PrefetchGCMHandler> gcm_handler_;
   std::unique_ptr<PrefetchNetworkRequestFactory> network_request_factory_;
-  std::unique_ptr<PrefetchStore> prefetch_store_sql_;
+  std::unique_ptr<PrefetchStore> prefetch_store_;
   std::unique_ptr<SuggestedArticlesObserver> suggested_articles_observer_;
   std::unique_ptr<PrefetchDownloader> prefetch_downloader_;
   std::unique_ptr<PrefetchImporter> prefetch_importer_;
+  std::unique_ptr<PrefetchBackgroundTaskHandler>
+      prefetch_background_task_handler_;
+  std::unique_ptr<PrefetchConfiguration> prefetch_configuration_;
 
   std::unique_ptr<PrefetchService> prefetch_service_;
 };

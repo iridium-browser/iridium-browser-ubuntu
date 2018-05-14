@@ -12,12 +12,12 @@
 #include <memory>
 #include <vector>
 
-#include "webrtc/modules/audio_coding/codecs/pcm16b/audio_encoder_pcm16b.h"
-#include "webrtc/modules/audio_coding/neteq/tools/audio_checksum.h"
-#include "webrtc/modules/audio_coding/neteq/tools/encode_neteq_input.h"
-#include "webrtc/modules/audio_coding/neteq/tools/neteq_test.h"
-#include "webrtc/modules/rtp_rtcp/source/byte_io.h"
-#include "webrtc/rtc_base/array_view.h"
+#include "api/array_view.h"
+#include "modules/audio_coding/codecs/pcm16b/audio_encoder_pcm16b.h"
+#include "modules/audio_coding/neteq/tools/audio_checksum.h"
+#include "modules/audio_coding/neteq/tools/encode_neteq_input.h"
+#include "modules/audio_coding/neteq/tools/neteq_test.h"
+#include "modules/rtp_rtcp/source/byte_io.h"
 
 namespace webrtc {
 namespace test {
@@ -66,7 +66,7 @@ class FuzzRtpInput : public NetEqInput {
   }
 
   rtc::Optional<int64_t> NextPacketTime() const override {
-    return rtc::Optional<int64_t>(packet_->time_ms);
+    return packet_->time_ms;
   }
 
   rtc::Optional<int64_t> NextOutputEventTime() const override {
@@ -87,7 +87,7 @@ class FuzzRtpInput : public NetEqInput {
 
   rtc::Optional<RTPHeader> NextHeader() const override {
     RTC_DCHECK(packet_);
-    return rtc::Optional<RTPHeader>(packet_->header);
+    return packet_->header;
   }
 
  private:
@@ -124,6 +124,10 @@ class FuzzRtpInput : public NetEqInput {
 }  // namespace
 
 void FuzzOneInputTest(const uint8_t* data, size_t size) {
+  // Limit the input size to 100000 bytes to avoid fuzzer timeout.
+  if (size > 100000)
+    return;
+
   std::unique_ptr<FuzzRtpInput> input(
       new FuzzRtpInput(rtc::ArrayView<const uint8_t>(data, size)));
   std::unique_ptr<AudioChecksum> output(new AudioChecksum);

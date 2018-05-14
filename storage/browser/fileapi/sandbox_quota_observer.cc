@@ -27,7 +27,7 @@ SandboxQuotaObserver::SandboxQuotaObserver(
       file_system_usage_cache_(file_system_usage_cache) {
 }
 
-SandboxQuotaObserver::~SandboxQuotaObserver() {}
+SandboxQuotaObserver::~SandboxQuotaObserver() = default;
 
 void SandboxQuotaObserver::OnStartUpdate(const FileSystemURL& url) {
   DCHECK(update_notify_runner_->RunsTasksInCurrentSequence());
@@ -42,10 +42,8 @@ void SandboxQuotaObserver::OnUpdate(const FileSystemURL& url, int64_t delta) {
 
   if (quota_manager_proxy_.get()) {
     quota_manager_proxy_->NotifyStorageModified(
-        storage::QuotaClient::kFileSystem,
-        url.origin(),
-        FileSystemTypeToQuotaStorageType(url.type()),
-        delta);
+        storage::QuotaClient::kFileSystem, url::Origin::Create(url.origin()),
+        FileSystemTypeToQuotaStorageType(url.type()), delta);
   }
 
   base::FilePath usage_file_path = GetUsageCachePath(url);
@@ -84,8 +82,7 @@ void SandboxQuotaObserver::OnEndUpdate(const FileSystemURL& url) {
 void SandboxQuotaObserver::OnAccess(const FileSystemURL& url) {
   if (quota_manager_proxy_.get()) {
     quota_manager_proxy_->NotifyStorageAccessed(
-        storage::QuotaClient::kFileSystem,
-        url.origin(),
+        storage::QuotaClient::kFileSystem, url::Origin::Create(url.origin()),
         FileSystemTypeToQuotaStorageType(url.type()));
   }
 }
@@ -96,10 +93,8 @@ void SandboxQuotaObserver::SetUsageCacheEnabled(
     bool enabled) {
   if (quota_manager_proxy_.get()) {
     quota_manager_proxy_->SetUsageCacheEnabled(
-        storage::QuotaClient::kFileSystem,
-        origin,
-        FileSystemTypeToQuotaStorageType(type),
-        enabled);
+        storage::QuotaClient::kFileSystem, url::Origin::Create(origin),
+        FileSystemTypeToQuotaStorageType(type), enabled);
   }
 }
 

@@ -31,6 +31,7 @@
 #ifndef LayoutSize_h
 #define LayoutSize_h
 
+#include <iosfwd>
 #include "platform/LayoutUnit.h"
 #include "platform/geometry/DoubleSize.h"
 #include "platform/geometry/FloatPoint.h"
@@ -47,7 +48,7 @@ class PLATFORM_EXPORT LayoutSize {
   DISALLOW_NEW();
 
  public:
-  LayoutSize() {}
+  LayoutSize() = default;
   explicit LayoutSize(const IntSize& size)
       : width_(size.Width()), height_(size.Height()) {}
   LayoutSize(LayoutUnit width, LayoutUnit height)
@@ -132,13 +133,17 @@ class PLATFORM_EXPORT LayoutSize {
 
   LayoutSize FitToAspectRatio(const LayoutSize& aspect_ratio,
                               AspectRatioFit fit) const {
-    float height_scale = Height().ToFloat() / aspect_ratio.Height().ToFloat();
-    float width_scale = Width().ToFloat() / aspect_ratio.Width().ToFloat();
-    if ((width_scale > height_scale) != (fit == kAspectRatioFitGrow))
-      return LayoutSize(Height() * aspect_ratio.Width() / aspect_ratio.Height(),
-                        Height());
-    return LayoutSize(Width(),
-                      Width() * aspect_ratio.Height() / aspect_ratio.Width());
+    const float height_float = Height().ToFloat();
+    const float width_float = Width().ToFloat();
+    float height_scale = height_float / aspect_ratio.Height().ToFloat();
+    float width_scale = width_float / aspect_ratio.Width().ToFloat();
+    if ((width_scale > height_scale) != (fit == kAspectRatioFitGrow)) {
+      return LayoutSize(
+          height_float * aspect_ratio.Width() / aspect_ratio.Height(),
+          Height());
+    }
+    return LayoutSize(
+        Width(), width_float * aspect_ratio.Height() / aspect_ratio.Width());
   }
 
   LayoutSize Fraction() const {
@@ -212,6 +217,8 @@ inline IntSize RoundedIntSize(const LayoutSize& s) {
 inline LayoutSize RoundedLayoutSize(const FloatSize& s) {
   return LayoutSize(s);
 }
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, const LayoutSize&);
 
 // Redeclared here to avoid ODR issues.
 // See platform/testing/GeometryPrinters.h.

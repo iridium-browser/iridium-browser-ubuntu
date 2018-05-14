@@ -5,8 +5,8 @@
 #include "remoting/client/chromoting_client_runtime.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
 #include "base/task_scheduler/task_scheduler.h"
@@ -52,9 +52,9 @@ ChromotingClientRuntime::ChromotingClientRuntime() {
   // main thread.  We can not kill the main thread when the message loop becomes
   // idle so the callback function does nothing (as opposed to the typical
   // base::MessageLoop::QuitClosure())
-  ui_task_runner_ = new AutoThreadTaskRunner(ui_loop_->task_runner(),
-                                             base::Bind(&base::DoNothing));
-
+  ui_task_runner_ =
+      new AutoThreadTaskRunner(ui_loop_->task_runner(), base::DoNothing());
+  audio_task_runner_ = AutoThread::Create("native_audio", ui_task_runner_);
   display_task_runner_ = AutoThread::Create("native_disp", ui_task_runner_);
   network_task_runner_ = AutoThread::CreateWithType(
       "native_net", ui_task_runner_, base::MessageLoop::TYPE_IO);
@@ -95,7 +95,7 @@ void ChromotingClientRuntime::CreateLogWriter() {
   }
   log_writer_.reset(new TelemetryLogWriter(
       kTelemetryBaseUrl,
-      base::MakeUnique<ChromiumUrlRequestFactory>(url_requester())));
+      std::make_unique<ChromiumUrlRequestFactory>(url_requester())));
   log_writer_->SetAuthClosure(
       base::Bind(&ChromotingClientRuntime::RequestAuthTokenForLogger,
                  base::Unretained(this)));
@@ -114,5 +114,8 @@ ChromotingEventLogWriter* ChromotingClientRuntime::log_writer() {
   return log_writer_.get();
 }
 
+OAuthTokenGetter* ChromotingClientRuntime::token_getter() {
+  return delegate_->token_getter();
+}
 
 }  // namespace remoting

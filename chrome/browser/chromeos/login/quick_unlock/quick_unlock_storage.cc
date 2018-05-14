@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_storage.h"
 
+#include <memory>
+
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_utils.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
@@ -13,8 +15,8 @@ namespace quick_unlock {
 
 QuickUnlockStorage::QuickUnlockStorage(PrefService* pref_service)
     : pref_service_(pref_service) {
-  fingerprint_storage_ = base::MakeUnique<FingerprintStorage>(pref_service);
-  pin_storage_ = base::MakeUnique<PinStorage>(pref_service);
+  fingerprint_storage_ = std::make_unique<FingerprintStorage>(pref_service);
+  pin_storage_ = std::make_unique<PinStorage>(pref_service);
 }
 
 QuickUnlockStorage::~QuickUnlockStorage() {}
@@ -53,8 +55,9 @@ bool QuickUnlockStorage::IsPinAuthenticationAvailable() const {
   return HasStrongAuth() && pin_storage_->IsPinAuthenticationAvailable();
 }
 
-bool QuickUnlockStorage::TryAuthenticatePin(const std::string& pin) {
-  return HasStrongAuth() && pin_storage()->TryAuthenticatePin(pin);
+bool QuickUnlockStorage::TryAuthenticatePin(const std::string& pin,
+                                            Key::KeyType key_type) {
+  return HasStrongAuth() && pin_storage()->TryAuthenticatePin(pin, key_type);
 }
 
 FingerprintStorage* QuickUnlockStorage::fingerprint_storage() {

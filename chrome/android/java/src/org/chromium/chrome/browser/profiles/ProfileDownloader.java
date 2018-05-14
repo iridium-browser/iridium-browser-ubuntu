@@ -10,7 +10,6 @@ import android.graphics.Bitmap;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.browser.signin.AccountTrackerService;
 
 import java.util.ArrayList;
@@ -73,7 +72,6 @@ public class ProfileDownloader {
             mImageSidePixels = new ArrayList<>();
         }
 
-        @SuppressFBWarnings("LI_LAZY_INIT_UPDATE_STATIC")
         public static PendingProfileDownloads get(Context context) {
             ThreadUtils.assertOnUiThread();
             if (sPendingProfileDownloads == null) {
@@ -116,13 +114,13 @@ public class ProfileDownloader {
     /**
      * Starts fetching the account information for a given account.
      * @param context context associated with the request
-     * @param profile Profile associated with the request
      * @param accountId Account name to fetch the information for
      * @param imageSidePixels Request image side (in pixels)
      */
-    public static void startFetchingAccountInfoFor(Context context, Profile profile,
-            String accountId, int imageSidePixels, boolean isPreSignin) {
+    public static void startFetchingAccountInfoFor(
+            Context context, String accountId, int imageSidePixels, boolean isPreSignin) {
         ThreadUtils.assertOnUiThread();
+        Profile profile = Profile.getLastUsedProfile().getOriginalProfile();
         if (!AccountTrackerService.get().checkAndSeedSystemAccounts()) {
             PendingProfileDownloads.get(context).pendProfileDownload(
                     profile, accountId, imageSidePixels);

@@ -6,12 +6,24 @@
 
 namespace profiling {
 
-AllocationEvent::AllocationEvent(Address addr,
+AllocationEvent::AllocationEvent(AllocatorType allocator,
+                                 Address addr,
                                  size_t sz,
-                                 BacktraceStorage::Key key)
-    : address_(addr), size_(sz), backtrace_key_(key) {}
+                                 const Backtrace* bt,
+                                 int context_id)
+    : allocator_(allocator),
+      address_(addr),
+      size_(sz),
+      backtrace_(bt),
+      context_id_(context_id) {}
 
-AllocationEvent::AllocationEvent(Address addr)
-    : address_(addr), size_(0), backtrace_key_() {}
+AllocationEvent::AllocationEvent(Address addr) : address_(addr) {}
+
+AllocationCountMap AllocationEventSetToCountMap(const AllocationEventSet& set) {
+  AllocationCountMap map;
+  for (const auto& alloc : set)
+    map[alloc]++;
+  return map;
+}
 
 }  // namespace profiling

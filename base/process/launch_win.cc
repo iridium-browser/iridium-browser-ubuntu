@@ -34,14 +34,6 @@ namespace base {
 
 namespace {
 
-// This exit code is used by the Windows task manager when it kills a
-// process.  It's value is obviously not that unique, and it's
-// surprising to me that the task manager uses this value, but it
-// seems to be common practice on Windows to test for it as an
-// indication that the task manager has killed something if the
-// process goes away.
-const DWORD kProcessKilledExitCode = 1;
-
 bool GetAppOutputInternal(const StringPiece16& cl,
                           bool include_stderr,
                           std::string* output,
@@ -114,7 +106,7 @@ bool GetAppOutputInternal(const StringPiece16& cl,
   for (;;) {
     DWORD bytes_read = 0;
     BOOL success =
-        ReadFile(out_read, buffer, kBufferSize, &bytes_read, nullptr);
+        ::ReadFile(out_read, buffer, kBufferSize, &bytes_read, nullptr);
     if (!success || bytes_read == 0)
       break;
     output->append(buffer, bytes_read);
@@ -212,42 +204,40 @@ Process LaunchProcess(const string16& cmdline,
   win::StartupInformation startup_info_wrapper;
   STARTUPINFO* startup_info = startup_info_wrapper.startup_info();
 
-  bool inherit_handles = options.inherit_handles;
+  bool inherit_handles = options.inherit_mode == LaunchOptions::Inherit::kAll;
   DWORD flags = 0;
-  if (options.handles_to_inherit) {
-    if (options.handles_to_inherit->empty()) {
-      inherit_handles = false;
-    } else {
-      if (options.handles_to_inherit->size() >
-              std::numeric_limits<DWORD>::max() / sizeof(HANDLE)) {
-        DLOG(ERROR) << "Too many handles to inherit.";
-        return Process();
-      }
+  if (!options.handles_to_inherit.empty()) {
+    DCHECK_EQ(options.inherit_mode, LaunchOptions::Inherit::kSpecific);
 
-      // Ensure the handles can be inherited.
-      for (HANDLE handle : *options.handles_to_inherit) {
-        BOOL result = SetHandleInformation(handle, HANDLE_FLAG_INHERIT,
-                                           HANDLE_FLAG_INHERIT);
-        PCHECK(result);
-      }
-
-      if (!startup_info_wrapper.InitializeProcThreadAttributeList(1)) {
-        DPLOG(ERROR);
-        return Process();
-      }
-
-      if (!startup_info_wrapper.UpdateProcThreadAttribute(
-              PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-              const_cast<HANDLE*>(&options.handles_to_inherit->at(0)),
-              static_cast<DWORD>(options.handles_to_inherit->size() *
-                  sizeof(HANDLE)))) {
-        DPLOG(ERROR);
-        return Process();
-      }
-
-      inherit_handles = true;
-      flags |= EXTENDED_STARTUPINFO_PRESENT;
+    if (options.handles_to_inherit.size() >
+        std::numeric_limits<DWORD>::max() / sizeof(HANDLE)) {
+      DLOG(ERROR) << "Too many handles to inherit.";
+      return Process();
     }
+
+    // Ensure the handles can be inherited.
+    for (HANDLE handle : options.handles_to_inherit) {
+      BOOL result = SetHandleInformation(handle, HANDLE_FLAG_INHERIT,
+                                         HANDLE_FLAG_INHERIT);
+      PCHECK(result);
+    }
+
+    if (!startup_info_wrapper.InitializeProcThreadAttributeList(1)) {
+      DPLOG(ERROR);
+      return Process();
+    }
+
+    if (!startup_info_wrapper.UpdateProcThreadAttribute(
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+            const_cast<HANDLE*>(&options.handles_to_inherit[0]),
+            static_cast<DWORD>(options.handles_to_inherit.size() *
+                               sizeof(HANDLE)))) {
+      DPLOG(ERROR);
+      return Process();
+    }
+
+    inherit_handles = true;
+    flags |= EXTENDED_STARTUPINFO_PRESENT;
   }
 
   if (options.empty_desktop_name)
@@ -322,7 +312,7 @@ Process LaunchProcess(const string16& cmdline,
                                       process_info.process_handle())) {
       DLOG(ERROR) << "Could not AssignProcessToObject.";
       Process scoped_process(process_info.TakeProcessHandle());
-      scoped_process.Terminate(kProcessKilledExitCode, true);
+      scoped_process.Terminate(win::kProcessKilledExitCode, true);
       return Process();
     }
 

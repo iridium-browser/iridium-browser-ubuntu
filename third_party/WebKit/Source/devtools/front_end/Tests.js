@@ -42,7 +42,7 @@
   /**
    * @unrestricted
    */
-  var TestSuite = class {
+  const TestSuite = class {
     /**
      * Test suite for interactive UI tests.
      * @param {Object} domAutomationController DomAutomationController instance.
@@ -81,7 +81,7 @@
    */
   TestSuite.prototype.assertEquals = function(expected, actual, opt_message) {
     if (expected !== actual) {
-      var message = 'Expected: \'' + expected + '\', but was \'' + actual + '\'';
+      let message = 'Expected: \'' + expected + '\', but was \'' + actual + '\'';
       if (opt_message)
         message = opt_message + '(' + message + ')';
       this.fail(message);
@@ -103,7 +103,7 @@
   TestSuite.prototype.takeControl = function() {
     this.controlTaken_ = true;
     // Set up guard timer.
-    var self = this;
+    const self = this;
     this.timerId_ = setTimeout(function() {
       self.reportFailure_('Timeout exceeded: 20 sec');
     }, 20000);
@@ -144,7 +144,7 @@
    * @param {Array<string>} args method name followed by its parameters.
    */
   TestSuite.prototype.dispatchOnTestSuite = function(args) {
-    var methodName = args.shift();
+    const methodName = args.shift();
     try {
       this[methodName].apply(this, args);
       if (!this.controlTaken_)
@@ -160,7 +160,7 @@
    * @param {Array<string>} args method name followed by its parameters.
    */
   TestSuite.prototype.waitForAsync = function(var_args) {
-    var args = Array.prototype.slice.call(arguments);
+    const args = Array.prototype.slice.call(arguments);
     this.takeControl();
     args.push(this.releaseControl.bind(this));
     this.dispatchOnTestSuite(args);
@@ -176,13 +176,14 @@
    *     or not.
    */
   TestSuite.prototype.addSniffer = function(receiver, methodName, override, opt_sticky) {
-    var orig = receiver[methodName];
+    const orig = receiver[methodName];
     if (typeof orig !== 'function')
       this.fail('Cannot find method to override: ' + methodName);
-    var test = this;
+    const test = this;
     receiver[methodName] = function(var_args) {
+      let result;
       try {
-        var result = orig.apply(this, arguments);
+        result = orig.apply(this, arguments);
       } finally {
         if (!opt_sticky)
           receiver[methodName] = orig;
@@ -203,8 +204,8 @@
    * @param {function()} callback
    */
   TestSuite.prototype.waitForThrottler = function(throttler, callback) {
-    var test = this;
-    var scheduleShouldFail = true;
+    const test = this;
+    let scheduleShouldFail = true;
     test.addSniffer(throttler, 'schedule', onSchedule);
 
     function hasSomethingScheduled() {
@@ -242,7 +243,7 @@
    * Tests that scripts tab can be open and populated with inspected scripts.
    */
   TestSuite.prototype.testShowScriptsTab = function() {
-    var test = this;
+    const test = this;
     this.showPanel('sources').then(function() {
       // There should be at least main page script.
       this._waitUntilScriptsAreParsed(['debugger_test_page.html'], function() {
@@ -259,8 +260,8 @@
    * @see http://crbug.com/26312
    */
   TestSuite.prototype.testScriptsTabIsPopulatedOnInspectedPageRefresh = function() {
-    var test = this;
-    var debuggerModel = SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
+    const test = this;
+    const debuggerModel = SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
     debuggerModel.addEventListener(SDK.DebuggerModel.Events.GlobalObjectCleared, waitUntilScriptIsParsed);
 
     this.showPanel('elements').then(function() {
@@ -285,7 +286,7 @@
    * Tests that scripts list contains content scripts.
    */
   TestSuite.prototype.testContentScriptIsPresent = function() {
-    var test = this;
+    const test = this;
     this.showPanel('sources').then(function() {
       test._waitUntilScriptsAreParsed(['page_with_content_script.html', 'simple_content_script.js'], function() {
         test.releaseControl();
@@ -300,7 +301,7 @@
    * Tests that scripts are not duplicaed on Scripts tab switch.
    */
   TestSuite.prototype.testNoScriptDuplicatesOnPanelSwitch = function() {
-    var test = this;
+    const test = this;
 
     function switchToElementsTab() {
       test.showPanel('elements').then(function() {
@@ -321,9 +322,9 @@
     }
 
     function checkNoDuplicates() {
-      var uiSourceCodes = test.nonAnonymousUISourceCodes_();
-      for (var i = 0; i < uiSourceCodes.length; i++) {
-        for (var j = i + 1; j < uiSourceCodes.length; j++) {
+      const uiSourceCodes = test.nonAnonymousUISourceCodes_();
+      for (let i = 0; i < uiSourceCodes.length; i++) {
+        for (let j = i + 1; j < uiSourceCodes.length; j++) {
           test.assertTrue(
               uiSourceCodes[i].url() !== uiSourceCodes[j].url(),
               'Found script duplicates: ' + test.uiSourceCodesToString_(uiSourceCodes));
@@ -345,7 +346,7 @@
   // Tests that debugger works correctly if pause event occurs when DevTools
   // frontend is being loaded.
   TestSuite.prototype.testPauseWhenLoadingDevTools = function() {
-    var debuggerModel = SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
+    const debuggerModel = SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
     if (debuggerModel.debuggerPausedDetails)
       return;
 
@@ -387,7 +388,7 @@
    * Tests network size.
    */
   TestSuite.prototype.testNetworkSize = function() {
-    var test = this;
+    const test = this;
 
     function finishRequest(request, finishTime) {
       test.assertEquals(25, request.resourceSize, 'Incorrect total data length');
@@ -406,7 +407,7 @@
    * Tests network sync size.
    */
   TestSuite.prototype.testNetworkSyncSize = function() {
-    var test = this;
+    const test = this;
 
     function finishRequest(request, finishTime) {
       test.assertEquals(25, request.resourceSize, 'Incorrect total data length');
@@ -417,7 +418,7 @@
 
     // Send synchronous XHR to sniff network events
     test.evaluateInConsole_(
-        'var xhr = new XMLHttpRequest(); xhr.open("GET", "chunked", false); xhr.send(null);', function() {});
+        'let xhr = new XMLHttpRequest(); xhr.open("GET", "chunked", false); xhr.send(null);', function() {});
 
     this.takeControl();
   };
@@ -426,12 +427,12 @@
    * Tests network raw headers text.
    */
   TestSuite.prototype.testNetworkRawHeadersText = function() {
-    var test = this;
+    const test = this;
 
     function finishRequest(request, finishTime) {
       if (!request.responseHeadersText)
         test.fail('Failure: resource does not have response headers text');
-      var index = request.responseHeadersText.indexOf('Date:');
+      const index = request.responseHeadersText.indexOf('Date:');
       test.assertEquals(
           112, request.responseHeadersText.substring(index).length, 'Incorrect response headers text length');
       test.releaseControl();
@@ -449,7 +450,7 @@
    * Tests network timing.
    */
   TestSuite.prototype.testNetworkTiming = function() {
-    var test = this;
+    const test = this;
 
     function finishRequest(request, finishTime) {
       // Setting relaxed expectations to reduce flakiness.
@@ -481,8 +482,8 @@
   };
 
   TestSuite.prototype.testPushTimes = function(url) {
-    var test = this;
-    var pendingRequestCount = 2;
+    const test = this;
+    let pendingRequestCount = 2;
 
     function finishRequest(request, finishTime) {
       test.assertTrue(
@@ -514,23 +515,19 @@
   TestSuite.prototype.testConsoleOnNavigateBack = function() {
 
     function filteredMessages() {
-      return ConsoleModel.consoleModel.messages().filter(
-          a => a.source !== ConsoleModel.ConsoleMessage.MessageSource.Violation);
+      return SDK.consoleModel.messages().filter(a => a.source !== SDK.ConsoleMessage.MessageSource.Violation);
     }
 
-    if (filteredMessages().length === 1) {
+    if (filteredMessages().length === 1)
       firstConsoleMessageReceived.call(this, null);
-    } else {
-      ConsoleModel.consoleModel.addEventListener(
-          ConsoleModel.ConsoleModel.Events.MessageAdded, firstConsoleMessageReceived, this);
-    }
+    else
+      SDK.consoleModel.addEventListener(SDK.ConsoleModel.Events.MessageAdded, firstConsoleMessageReceived, this);
 
 
     function firstConsoleMessageReceived(event) {
-      if (event && event.data.source === ConsoleModel.ConsoleMessage.MessageSource.Violation)
+      if (event && event.data.source === SDK.ConsoleMessage.MessageSource.Violation)
         return;
-      ConsoleModel.consoleModel.removeEventListener(
-          ConsoleModel.ConsoleModel.Events.MessageAdded, firstConsoleMessageReceived, this);
+      SDK.consoleModel.removeEventListener(SDK.ConsoleModel.Events.MessageAdded, firstConsoleMessageReceived, this);
       this.evaluateInConsole_('clickLink();', didClickLink.bind(this));
     }
 
@@ -577,7 +574,7 @@
     this._waitForTargets(2, callback.bind(this));
 
     function callback() {
-      var debuggerModel = SDK.targetManager.models(SDK.DebuggerModel)[0];
+      const debuggerModel = SDK.targetManager.models(SDK.DebuggerModel)[0];
       if (debuggerModel.isPaused()) {
         this.releaseControl();
         return;
@@ -587,17 +584,13 @@
   };
 
   TestSuite.prototype.enableTouchEmulation = function() {
-    var deviceModeModel = new Emulation.DeviceModeModel(function() {});
+    const deviceModeModel = new Emulation.DeviceModeModel(function() {});
     deviceModeModel._target = SDK.targetManager.mainTarget();
     deviceModeModel._applyTouch(true, true);
   };
 
-  TestSuite.prototype.enableAutoAttachToCreatedPages = function() {
-    Common.settingForTest('autoAttachToCreatedPages').set(true);
-  };
-
   TestSuite.prototype.waitForDebuggerPaused = function() {
-    var debuggerModel = SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
+    const debuggerModel = SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
     if (debuggerModel.debuggerPausedDetails)
       return;
 
@@ -617,7 +610,7 @@
           {width: window.innerWidth, height: window.innerHeight, deviceScaleFactor: window.devicePixelRatio});
     }
 
-    var test = this;
+    const test = this;
 
     async function testOverrides(params, metrics, callback) {
       await SDK.targetManager.mainTarget().emulationAgent().invoke_setDeviceMetricsOverride(params);
@@ -662,6 +655,61 @@
     step1();
   };
 
+  TestSuite.prototype.testDispatchKeyEventShowsAutoFill = function() {
+    const test = this;
+    let receivedReady = false;
+
+    function signalToShowAutofill() {
+      SDK.targetManager.mainTarget().inputAgent().invoke_dispatchKeyEvent(
+          {type: 'rawKeyDown', key: 'Down', windowsVirtualKeyCode: 40, nativeVirtualKeyCode: 40});
+      SDK.targetManager.mainTarget().inputAgent().invoke_dispatchKeyEvent(
+          {type: 'keyUp', key: 'Down', windowsVirtualKeyCode: 40, nativeVirtualKeyCode: 40});
+    }
+
+    function selectTopAutoFill() {
+      SDK.targetManager.mainTarget().inputAgent().invoke_dispatchKeyEvent(
+          {type: 'rawKeyDown', key: 'Down', windowsVirtualKeyCode: 40, nativeVirtualKeyCode: 40});
+      SDK.targetManager.mainTarget().inputAgent().invoke_dispatchKeyEvent(
+          {type: 'keyUp', key: 'Down', windowsVirtualKeyCode: 40, nativeVirtualKeyCode: 40});
+      SDK.targetManager.mainTarget().inputAgent().invoke_dispatchKeyEvent(
+          {type: 'rawKeyDown', key: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13});
+      SDK.targetManager.mainTarget().inputAgent().invoke_dispatchKeyEvent(
+          {type: 'keyUp', key: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13});
+
+      test.evaluateInConsole_('document.getElementById("name").value', onResultOfInput);
+    }
+
+    function onResultOfInput(value) {
+      // Console adds "" around the response.
+      test.assertEquals('"Abbf"', value);
+      test.releaseControl();
+    }
+
+    function onConsoleMessage(event) {
+      const message = event.data.messageText;
+      if (message === 'ready' && !receivedReady) {
+        receivedReady = true;
+        signalToShowAutofill();
+      }
+      // This log comes from the browser unittest code.
+      if (message === 'didShowSuggestions')
+        selectTopAutoFill();
+    }
+
+    this.takeControl();
+
+    // It is possible for the ready console messagage to be already received but not handled
+    // or received later. This ensures we can catch both cases.
+    SDK.consoleModel.addEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
+
+    const messages = SDK.consoleModel.messages();
+    if (messages.length) {
+      const text = messages[0].messageText;
+      this.assertEquals('ready', text);
+      signalToShowAutofill();
+    }
+  };
+
   TestSuite.prototype.testDispatchKeyEventDoesNotCrash = function() {
     SDK.targetManager.mainTarget().inputAgent().invoke_dispatchKeyEvent(
         {type: 'rawKeyDown', windowsVirtualKeyCode: 0x23, key: 'End'});
@@ -669,12 +717,30 @@
         {type: 'keyUp', windowsVirtualKeyCode: 0x23, key: 'End'});
   };
 
+  // Simple sanity check to make sure network throttling is wired up
+  // See crbug.com/747724
+  TestSuite.prototype.testOfflineNetworkConditions = async function() {
+    const test = this;
+    SDK.multitargetNetworkManager.setNetworkConditions(SDK.NetworkManager.OfflineConditions);
+
+    function finishRequest(request) {
+      test.assertEquals(
+          'net::ERR_INTERNET_DISCONNECTED', request.localizedFailDescription, 'Request should have failed');
+      test.releaseControl();
+    }
+
+    this.addSniffer(SDK.NetworkDispatcher.prototype, '_finishNetworkRequest', finishRequest);
+
+    test.takeControl();
+    test.evaluateInConsole_('window.location.reload(true);', function(resultText) {});
+  };
+
   TestSuite.prototype.testEmulateNetworkConditions = function() {
-    var test = this;
+    const test = this;
 
     function testPreset(preset, messages, next) {
       function onConsoleMessage(event) {
-        var index = messages.indexOf(event.data.messageText);
+        const index = messages.indexOf(event.data.messageText);
         if (index === -1) {
           test.fail('Unexpected message: ' + event.data.messageText);
           return;
@@ -682,13 +748,12 @@
 
         messages.splice(index, 1);
         if (!messages.length) {
-          ConsoleModel.consoleModel.removeEventListener(
-              ConsoleModel.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
+          SDK.consoleModel.removeEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
           next();
         }
       }
 
-      ConsoleModel.consoleModel.addEventListener(ConsoleModel.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
+      SDK.consoleModel.addEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
       SDK.multitargetNetworkManager.setNetworkConditions(preset);
     }
 
@@ -698,34 +763,41 @@
     function step1() {
       testPreset(
           MobileThrottling.networkPresets[2],
-          ['offline event: online = false', 'connection change event: type = none; downlinkMax = 0'], step2);
+          [
+            'offline event: online = false', 'connection change event: type = none; downlinkMax = 0; effectiveType = 4g'
+          ],
+          step2);
     }
 
     function step2() {
       testPreset(
           MobileThrottling.networkPresets[1],
-          ['online event: online = true', 'connection change event: type = cellular; downlinkMax = 0.390625'], step3);
+          [
+            'online event: online = true',
+            'connection change event: type = cellular; downlinkMax = 0.390625; effectiveType = 2g'
+          ],
+          step3);
     }
 
     function step3() {
       testPreset(
           MobileThrottling.networkPresets[0],
-          ['connection change event: type = cellular; downlinkMax = 1.4400000000000002'],
+          ['connection change event: type = cellular; downlinkMax = 1.4400000000000002; effectiveType = 3g'],
           test.releaseControl.bind(test));
     }
   };
 
   TestSuite.prototype.testScreenshotRecording = function() {
-    var test = this;
+    const test = this;
 
     function performActionsInPage(callback) {
-      var count = 0;
-      var div = document.createElement('div');
+      let count = 0;
+      const div = document.createElement('div');
       div.setAttribute('style', 'left: 0px; top: 0px; width: 100px; height: 100px; position: absolute;');
       document.body.appendChild(div);
       requestAnimationFrame(frame);
       function frame() {
-        var color = [0, 0, 0];
+        const color = [0, 0, 0];
         color[count % 3] = 255;
         div.style.backgroundColor = 'rgb(' + color.join(',') + ')';
         if (++count > 10)
@@ -735,26 +807,26 @@
       }
     }
 
-    var captureFilmStripSetting = Common.settings.createSetting('timelineCaptureFilmStrip', false);
+    const captureFilmStripSetting = Common.settings.createSetting('timelineCaptureFilmStrip', false);
     captureFilmStripSetting.set(true);
     test.evaluateInConsole_(performActionsInPage.toString(), function() {});
     test.invokeAsyncWithTimeline_('performActionsInPage', onTimelineDone);
 
     function onTimelineDone() {
       captureFilmStripSetting.set(false);
-      var filmStripModel = UI.panels.timeline._performanceModel.filmStripModel();
-      var frames = filmStripModel.frames();
+      const filmStripModel = UI.panels.timeline._performanceModel.filmStripModel();
+      const frames = filmStripModel.frames();
       test.assertTrue(frames.length > 4 && typeof frames.length === 'number');
       loadFrameImages(frames);
     }
 
     function loadFrameImages(frames) {
-      var readyImages = [];
-      for (var frame of frames)
+      const readyImages = [];
+      for (const frame of frames)
         frame.imageDataPromise().then(onGotImageData);
 
       function onGotImageData(data) {
-        var image = new Image();
+        const image = new Image();
         test.assertTrue(!!data, 'No image data for frame');
         image.addEventListener('load', onLoad);
         image.src = 'data:image/jpg;base64,' + data;
@@ -768,20 +840,20 @@
     }
 
     function validateImagesAndCompleteTest(images) {
-      var redCount = 0;
-      var greenCount = 0;
-      var blueCount = 0;
+      let redCount = 0;
+      let greenCount = 0;
+      let blueCount = 0;
 
-      var canvas = document.createElement('canvas');
-      var ctx = canvas.getContext('2d');
-      for (var image of images) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      for (const image of images) {
         test.assertTrue(image.naturalWidth > 10);
         test.assertTrue(image.naturalHeight > 10);
         canvas.width = image.naturalWidth;
         canvas.height = image.naturalHeight;
         ctx.drawImage(image, 0, 0);
-        var data = ctx.getImageData(0, 0, 1, 1);
-        var color = Array.prototype.join.call(data.data, ',');
+        const data = ctx.getImageData(0, 0, 1, 1);
+        const color = Array.prototype.join.call(data.data, ',');
         if (data.data[0] > 200)
           redCount++;
         else if (data.data[1] > 200)
@@ -799,16 +871,16 @@
   };
 
   TestSuite.prototype.testSettings = function() {
-    var test = this;
+    const test = this;
 
     createSettings();
     test.takeControl();
     setTimeout(reset, 0);
 
     function createSettings() {
-      var localSetting = Common.settings.createLocalSetting('local', undefined);
+      const localSetting = Common.settings.createLocalSetting('local', undefined);
       localSetting.set({s: 'local', n: 1});
-      var globalSetting = Common.settings.createSetting('global', undefined);
+      const globalSetting = Common.settings.createSetting('global', undefined);
       globalSetting.set({s: 'global', n: 2});
     }
 
@@ -820,11 +892,11 @@
     function gotPreferences(prefs) {
       Main.Main._instanceForTest._createSettings(prefs);
 
-      var localSetting = Common.settings.createLocalSetting('local', undefined);
+      const localSetting = Common.settings.createLocalSetting('local', undefined);
       test.assertEquals('object', typeof localSetting.get());
       test.assertEquals('local', localSetting.get().s);
       test.assertEquals(1, localSetting.get().n);
-      var globalSetting = Common.settings.createSetting('global', undefined);
+      const globalSetting = Common.settings.createSetting('global', undefined);
       test.assertEquals('object', typeof globalSetting.get());
       test.assertEquals('global', globalSetting.get().s);
       test.assertEquals(2, globalSetting.get().n);
@@ -833,23 +905,32 @@
   };
 
   TestSuite.prototype.testWindowInitializedOnNavigateBack = function() {
-    var messages = ConsoleModel.consoleModel.messages();
-    this.assertEquals(1, messages.length);
-    var text = messages[0].messageText;
-    if (text.indexOf('Uncaught') !== -1)
-      this.fail(text);
+    const test = this;
+    test.takeControl();
+    const messages = SDK.consoleModel.messages();
+    if (messages.length === 1)
+      checkMessages();
+    else
+      SDK.consoleModel.addEventListener(SDK.ConsoleModel.Events.MessageAdded, checkMessages.bind(this), this);
+
+    function checkMessages() {
+      const messages = SDK.consoleModel.messages();
+      test.assertEquals(1, messages.length);
+      test.assertTrue(messages[0].messageText.indexOf('Uncaught') === -1);
+      test.releaseControl();
+    }
   };
 
   TestSuite.prototype.testConsoleContextNames = function() {
-    var test = this;
+    const test = this;
     test.takeControl();
     this.showPanel('console').then(() => this._waitForExecutionContexts(2, onExecutionContexts.bind(this)));
 
     function onExecutionContexts() {
-      var consoleView = Console.ConsoleView.instance();
-      var selector = consoleView._consoleContextSelector;
-      var values = [];
-      for (var item of selector._items)
+      const consoleView = Console.ConsoleView.instance();
+      const selector = consoleView._consoleContextSelector;
+      const values = [];
+      for (const item of selector._items)
         values.push(selector.titleFor(item));
       test.assertEquals('top', values[0]);
       test.assertEquals('Simple content script', values[1]);
@@ -857,10 +938,61 @@
     }
   };
 
+  TestSuite.prototype.testRawHeadersWithHSTS = function(url) {
+    const test = this;
+    test.takeControl();
+    SDK.targetManager.addModelListener(
+        SDK.NetworkManager, SDK.NetworkManager.Events.ResponseReceived, onResponseReceived);
+
+    this.evaluateInConsole_(`
+      let img = document.createElement('img');
+      img.src = "${url}";
+      document.body.appendChild(img);
+    `, () => {});
+
+    let count = 0;
+    function onResponseReceived(event) {
+      const networkRequest = event.data;
+      if (!networkRequest.url().startsWith('http'))
+        return;
+      switch (++count) {
+        case 1:  // Original redirect
+          test.assertEquals(301, networkRequest.statusCode);
+          test.assertEquals('Moved Permanently', networkRequest.statusText);
+          test.assertTrue(url.endsWith(networkRequest.responseHeaderValue('Location')));
+          break;
+
+        case 2:  // HSTS internal redirect
+          test.assertTrue(networkRequest.url().startsWith('http://'));
+          test.assertEquals(undefined, networkRequest.requestHeadersText());
+          test.assertEquals(307, networkRequest.statusCode);
+          test.assertEquals('Internal Redirect', networkRequest.statusText);
+          test.assertEquals('HSTS', networkRequest.responseHeaderValue('Non-Authoritative-Reason'));
+          test.assertTrue(networkRequest.responseHeaderValue('Location').startsWith('https://'));
+          break;
+
+        case 3:  // Final response
+          test.assertTrue(networkRequest.url().startsWith('https://'));
+          test.assertTrue(networkRequest.requestHeaderValue('Referer').startsWith('http://127.0.0.1'));
+          test.assertEquals(200, networkRequest.statusCode);
+          test.assertEquals('OK', networkRequest.statusText);
+          test.assertEquals('132', networkRequest.responseHeaderValue('Content-Length'));
+          test.releaseControl();
+      }
+    }
+  };
+
+  TestSuite.prototype.testDOMWarnings = function() {
+    const messages = SDK.consoleModel.messages();
+    this.assertEquals(1, messages.length);
+    const expectedPrefix = '[DOM] Found 2 elements with non-unique id #dup:';
+    this.assertTrue(messages[0].messageText.startsWith(expectedPrefix));
+  };
+
   TestSuite.prototype.waitForTestResultsInConsole = function() {
-    var messages = ConsoleModel.consoleModel.messages();
-    for (var i = 0; i < messages.length; ++i) {
-      var text = messages[i].messageText;
+    const messages = SDK.consoleModel.messages();
+    for (let i = 0; i < messages.length; ++i) {
+      const text = messages[i].messageText;
       if (text === 'PASS')
         return;
       else if (/^FAIL/.test(text))
@@ -868,26 +1000,27 @@
     }
     // Neither PASS nor FAIL, so wait for more messages.
     function onConsoleMessage(event) {
-      var text = event.data.messageText;
+      const text = event.data.messageText;
       if (text === 'PASS')
         this.releaseControl();
       else if (/^FAIL/.test(text))
         this.fail(text);
     }
 
-    ConsoleModel.consoleModel.addEventListener(ConsoleModel.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
+    SDK.consoleModel.addEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
     this.takeControl();
   };
 
   TestSuite.prototype._overrideMethod = function(receiver, methodName, override) {
-    var original = receiver[methodName];
+    const original = receiver[methodName];
     if (typeof original !== 'function') {
       this.fail(`TestSuite._overrideMethod: $[methodName] is not a function`);
       return;
     }
     receiver[methodName] = function() {
+      let value;
       try {
-        var value = original.apply(receiver, arguments);
+        value = original.apply(receiver, arguments);
       } finally {
         receiver[methodName] = original;
       }
@@ -897,41 +1030,41 @@
   };
 
   TestSuite.prototype.startTimeline = function(callback) {
-    var test = this;
+    const test = this;
     this.showPanel('timeline').then(function() {
-      var timeline = UI.panels.timeline;
+      const timeline = UI.panels.timeline;
       test._overrideMethod(timeline, '_recordingStarted', callback);
       timeline._toggleRecording();
     });
   };
 
   TestSuite.prototype.stopTimeline = function(callback) {
-    var timeline = UI.panels.timeline;
+    const timeline = UI.panels.timeline;
     this._overrideMethod(timeline, 'loadingComplete', callback);
     timeline._toggleRecording();
   };
 
   TestSuite.prototype.invokePageFunctionAsync = function(functionName, opt_args, callback_is_always_last) {
-    var callback = arguments[arguments.length - 1];
-    var doneMessage = `DONE: ${functionName}.${++this._asyncInvocationId}`;
-    var argsString = arguments.length < 3 ?
+    const callback = arguments[arguments.length - 1];
+    const doneMessage = `DONE: ${functionName}.${++this._asyncInvocationId}`;
+    const argsString = arguments.length < 3 ?
         '' :
         Array.prototype.slice.call(arguments, 1, -1).map(arg => JSON.stringify(arg)).join(',') + ',';
     this.evaluateInConsole_(
         `${functionName}(${argsString} function() { console.log('${doneMessage}'); });`, function() {});
-    ConsoleModel.consoleModel.addEventListener(ConsoleModel.ConsoleModel.Events.MessageAdded, onConsoleMessage);
+    SDK.consoleModel.addEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage);
 
     function onConsoleMessage(event) {
-      var text = event.data.messageText;
+      const text = event.data.messageText;
       if (text === doneMessage) {
-        ConsoleModel.consoleModel.removeEventListener(ConsoleModel.ConsoleModel.Events.MessageAdded, onConsoleMessage);
+        SDK.consoleModel.removeEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage);
         callback();
       }
     }
   };
 
   TestSuite.prototype.invokeAsyncWithTimeline_ = function(functionName, callback) {
-    var test = this;
+    const test = this;
 
     this.startTimeline(onRecordingStarted);
 
@@ -949,12 +1082,12 @@
   };
 
   TestSuite.prototype.checkInputEventsPresent = function() {
-    var expectedEvents = new Set(arguments);
-    var model = UI.panels.timeline._performanceModel.timelineModel();
-    var asyncEvents = model.mainThreadAsyncEvents();
-    var input = asyncEvents.get(TimelineModel.TimelineModel.AsyncEventGroup.input) || [];
-    var prefix = 'InputLatency::';
-    for (var e of input) {
+    const expectedEvents = new Set(arguments);
+    const model = UI.panels.timeline._performanceModel.timelineModel();
+    const asyncEvents = model.mainThreadAsyncEvents();
+    const input = asyncEvents.get(TimelineModel.TimelineModel.AsyncEventGroup.input) || [];
+    const prefix = 'InputLatency::';
+    for (const e of input) {
       if (!e.name.startsWith(prefix))
         continue;
       if (e.steps.length < 2)
@@ -968,14 +1101,76 @@
       throw 'Some expected events are not found: ' + Array.from(expectedEvents.keys()).join(',');
   };
 
+  TestSuite.prototype.testInspectedElementIs = async function(nodeName) {
+    this.takeControl();
+    await self.runtime.loadModulePromise('elements');
+    if (!Elements.ElementsPanel._firstInspectElementNodeNameForTest)
+      await new Promise(f => this.addSniffer(Elements.ElementsPanel, '_firstInspectElementCompletedForTest', f));
+    this.assertEquals(nodeName, Elements.ElementsPanel._firstInspectElementNodeNameForTest);
+    this.releaseControl();
+  };
+
+  TestSuite.prototype.testInputDispatchEventsToOOPIF = async function() {
+    this.takeControl();
+
+    await new Promise(callback => this._waitForTargets(2, callback));
+
+    async function takeLogs(target) {
+      const code = `
+        (function() {
+          var result = window.logs.join(' ');
+          window.logs = [];
+          return result;
+        })()
+      `;
+      return (await target.runtimeAgent().invoke_evaluate({expression: code})).result.value;
+    }
+
+    let parentFrameOutput;
+    let childFrameOutput;
+
+    const inputAgent = SDK.targetManager.mainTarget().inputAgent();
+    const runtimeAgent = SDK.targetManager.mainTarget().runtimeAgent();
+    await inputAgent.invoke_dispatchMouseEvent({type: 'mousePressed', button: 'left', clickCount: 1, x: 10, y: 10});
+    await inputAgent.invoke_dispatchMouseEvent({type: 'mouseMoved', button: 'left', clickCount: 1, x: 10, y: 20});
+    await inputAgent.invoke_dispatchMouseEvent({type: 'mouseReleased', button: 'left', clickCount: 1, x: 10, y: 20});
+    await inputAgent.invoke_dispatchMouseEvent({type: 'mousePressed', button: 'left', clickCount: 1, x: 230, y: 140});
+    await inputAgent.invoke_dispatchMouseEvent({type: 'mouseMoved', button: 'left', clickCount: 1, x: 230, y: 150});
+    await inputAgent.invoke_dispatchMouseEvent({type: 'mouseReleased', button: 'left', clickCount: 1, x: 230, y: 150});
+    parentFrameOutput = 'Event type: mousedown button: 0 x: 10 y: 10 Event type: mouseup button: 0 x: 10 y: 20';
+    this.assertEquals(parentFrameOutput, await takeLogs(SDK.targetManager.targets()[0]));
+    childFrameOutput = 'Event type: mousedown button: 0 x: 30 y: 40 Event type: mouseup button: 0 x: 30 y: 50';
+    this.assertEquals(childFrameOutput, await takeLogs(SDK.targetManager.targets()[1]));
+
+
+    await inputAgent.invoke_dispatchKeyEvent({type: 'keyDown', key: 'a'});
+    await runtimeAgent.invoke_evaluate({expression: `document.querySelector('iframe').focus()`});
+    await inputAgent.invoke_dispatchKeyEvent({type: 'keyDown', key: 'a'});
+    parentFrameOutput = 'Event type: keydown';
+    this.assertEquals(parentFrameOutput, await takeLogs(SDK.targetManager.targets()[0]));
+    childFrameOutput = 'Event type: keydown';
+    this.assertEquals(childFrameOutput, await takeLogs(SDK.targetManager.targets()[1]));
+
+    await inputAgent.invoke_dispatchTouchEvent({type: 'touchStart', touchPoints: [{x: 10, y: 10}]});
+    await inputAgent.invoke_dispatchTouchEvent({type: 'touchEnd', touchPoints: []});
+    await inputAgent.invoke_dispatchTouchEvent({type: 'touchStart', touchPoints: [{x: 230, y: 140}]});
+    await inputAgent.invoke_dispatchTouchEvent({type: 'touchEnd', touchPoints: []});
+    parentFrameOutput = 'Event type: touchstart touch x: 10 touch y: 10';
+    this.assertEquals(parentFrameOutput, await takeLogs(SDK.targetManager.targets()[0]));
+    childFrameOutput = 'Event type: touchstart touch x: 30 touch y: 40';
+    this.assertEquals(childFrameOutput, await takeLogs(SDK.targetManager.targets()[1]));
+
+    this.releaseControl();
+  };
+
   /**
    * Serializes array of uiSourceCodes to string.
    * @param {!Array.<!Workspace.UISourceCode>} uiSourceCodes
    * @return {string}
    */
   TestSuite.prototype.uiSourceCodesToString_ = function(uiSourceCodes) {
-    var names = [];
-    for (var i = 0; i < uiSourceCodes.length; i++)
+    const names = [];
+    for (let i = 0; i < uiSourceCodes.length; i++)
       names.push('"' + uiSourceCodes[i].url() + '"');
     return names.join(',');
   };
@@ -992,7 +1187,7 @@
       return !uiSourceCode.project().isServiceProject();
     }
 
-    var uiSourceCodes = Workspace.workspace.uiSourceCodes();
+    const uiSourceCodes = Workspace.workspace.uiSourceCodes();
     return uiSourceCodes.filter(filterOutService);
   };
 
@@ -1005,7 +1200,7 @@
   TestSuite.prototype.evaluateInConsole_ = function(code, callback) {
     function innerEvaluate() {
       UI.context.removeFlavorChangeListener(SDK.ExecutionContext, showConsoleAndEvaluate, this);
-      var consoleView = Console.ConsoleView.instance();
+      const consoleView = Console.ConsoleView.instance();
       consoleView._prompt._appendCommand(code);
 
       this.addSniffer(Console.ConsoleView.prototype, '_consoleMessageAddedForTest', function(viewMessage) {
@@ -1033,11 +1228,11 @@
    *     box
    */
   TestSuite.prototype._scriptsAreParsed = function(expected) {
-    var uiSourceCodes = this.nonAnonymousUISourceCodes_();
+    const uiSourceCodes = this.nonAnonymousUISourceCodes_();
     // Check that at least all the expected scripts are present.
-    var missing = expected.slice(0);
-    for (var i = 0; i < uiSourceCodes.length; ++i) {
-      for (var j = 0; j < missing.length; ++j) {
+    const missing = expected.slice(0);
+    for (let i = 0; i < uiSourceCodes.length; ++i) {
+      for (let j = 0; j < missing.length; ++j) {
         if (uiSourceCodes[i].name().search(missing[j]) !== -1) {
           missing.splice(j, 1);
           break;
@@ -1059,7 +1254,7 @@
    * Waits until all the scripts are parsed and invokes the callback.
    */
   TestSuite.prototype._waitUntilScriptsAreParsed = function(expectedScripts, callback) {
-    var test = this;
+    const test = this;
 
     function waitForAllScripts() {
       if (test._scriptsAreParsed(expectedScripts))
@@ -1078,12 +1273,12 @@
       if (SDK.targetManager.targets().length >= n)
         callback.call(null);
       else
-        this.addSniffer(SDK.TargetManager.prototype, 'addTarget', checkTargets.bind(this));
+        this.addSniffer(SDK.TargetManager.prototype, 'createTarget', checkTargets.bind(this));
     }
   };
 
   TestSuite.prototype._waitForExecutionContexts = function(n, callback) {
-    var runtimeModel = SDK.targetManager.mainTarget().model(SDK.RuntimeModel);
+    const runtimeModel = SDK.targetManager.mainTarget().model(SDK.RuntimeModel);
     checkForExecutionContexts.call(this);
 
     function checkForExecutionContexts() {

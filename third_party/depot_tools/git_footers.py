@@ -15,6 +15,7 @@ import git_common as git
 
 FOOTER_PATTERN = re.compile(r'^\s*([\w-]+): *(.*)$')
 CHROME_COMMIT_POSITION_PATTERN = re.compile(r'^([\w/\-\.]+)@{#(\d+)}$')
+FOOTER_KEY_BLACKLIST = set(['http', 'https'])
 
 
 def normalize_name(header):
@@ -24,10 +25,9 @@ def normalize_name(header):
 def parse_footer(line):
   """Returns footer's (key, value) if footer is valid, else None."""
   match = FOOTER_PATTERN.match(line)
-  if match:
+  if match and match.group(1) not in FOOTER_KEY_BLACKLIST:
     return (match.group(1), match.group(2))
-  else:
-    return None
+  return None
 
 
 def parse_footers(message):
@@ -57,17 +57,27 @@ def split_footers(message):
   """Returns (non_footer_lines, footer_lines, parsed footers).
 
   Guarantees that:
-    (non_footer_lines + footer_lines) == message.splitlines().
+    (non_footer_lines + footer_lines) ~= message.splitlines(), with at
+      most one new newline, if the last paragraph is text followed by footers.
     parsed_footers is parse_footer applied on each line of footer_lines.
       There could be fewer parsed_footers than footer lines if some lines in
       last paragraph are malformed.
   """
   message_lines = list(message.splitlines())
   footer_lines = []
+  maybe_footer_lines = []
   for line in reversed(message_lines):
     if line == '' or line.isspace():
       break
-    footer_lines.append(line)
+    elif parse_footer(line):
+      footer_lines.extend(maybe_footer_lines)
+      maybe_footer_lines = []
+      footer_lines.append(line)
+    else:
+      # We only want to include malformed lines if they are preceeded by
+      # well-formed lines. So keep them in holding until we see a well-formed
+      # line (case above).
+      maybe_footer_lines.append(line)
   else:
     # The whole description was consisting of footers,
     # which means those aren't footers.
@@ -77,6 +87,10 @@ def split_footers(message):
   footers = filter(None, map(parse_footer, footer_lines))
   if not footers:
     return message_lines, [], []
+  if maybe_footer_lines:
+    # If some malformed lines were left over, add a newline to split them
+    # from the well-formed ones.
+    return message_lines[:-len(footer_lines)] + [''], footer_lines, footers
   return message_lines[:-len(footer_lines)], footer_lines, footers
 
 
@@ -146,8 +160,15 @@ def remove_footer(message, key):
   top_lines, footer_lines, _ = split_footers(message)
   if not footer_lines:
     return message
-  new_footer_lines = [
-      l for l in footer_lines if normalize_name(parse_footer(l)[0]) != key]
+  new_footer_lines = []
+  for line in footer_lines:
+    try:
+      f = normalize_name(parse_footer(line)[0])
+      if f != key:
+        new_footer_lines.append(line)
+    except TypeError:
+      # If the footer doesn't parse (i.e. is malformed), just let it carry over.
+      new_footer_lines.append(line)
   return '\n'.join(top_lines + new_footer_lines)
 
 
@@ -185,8 +206,8 @@ def main(args):
   parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
   )
-  parser.add_argument('ref', nargs='?', help="Git ref to retrieve footers from."
-                      " Omit to parse stdin.")
+  parser.add_argument('ref', nargs='?', help='Git ref to retrieve footers from.'
+                      ' Omit to parse stdin.')
 
   g = parser.add_mutually_exclusive_group()
   g.add_argument('--key', metavar='KEY',
@@ -195,14 +216,14 @@ def main(args):
   g.add_argument('--position', action='store_true')
   g.add_argument('--position-ref', action='store_true')
   g.add_argument('--position-num', action='store_true')
-  g.add_argument('--json', help="filename to dump JSON serialized headers to.")
+  g.add_argument('--json', help='filename to dump JSON serialized footers to.')
 
   opts = parser.parse_args(args)
 
   if opts.ref:
     message = git.run('log', '-1', '--format=%B', opts.ref)
   else:
-    message = '\n'.join(l for l in sys.stdin)
+    message = sys.stdin.read()
 
   footers = parse_footers(message)
 

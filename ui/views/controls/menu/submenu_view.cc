@@ -61,6 +61,14 @@ SubmenuView::~SubmenuView() {
   delete scroll_view_container_;
 }
 
+bool SubmenuView::HasVisibleChildren() {
+  for (int i = 0, item_count = GetMenuItemCount(); i < item_count; i++) {
+    if (GetMenuItemAt(i)->visible())
+      return true;
+  }
+  return false;
+}
+
 int SubmenuView::GetMenuItemCount() {
   int count = 0;
   for (int i = 0; i < child_count(); ++i) {
@@ -186,13 +194,13 @@ void SubmenuView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   // the orientation.
   if (GetMenuItem())
     GetMenuItem()->GetAccessibleNodeData(node_data);
-  node_data->role = ui::AX_ROLE_MENU_LIST_POPUP;
+  node_data->role = ax::mojom::Role::kMenuListPopup;
   // Menus in Chrome are always traversed in a vertical direction.
-  node_data->AddState(ui::AX_STATE_VERTICAL);
+  node_data->AddState(ax::mojom::State::kVertical);
 }
 
-void SubmenuView::PaintChildren(const ui::PaintContext& context) {
-  View::PaintChildren(context);
+void SubmenuView::PaintChildren(const PaintInfo& paint_info) {
+  View::PaintChildren(paint_info);
 
   bool paint_drop_indicator = false;
   if (drop_item_) {
@@ -210,7 +218,7 @@ void SubmenuView::PaintChildren(const ui::PaintContext& context) {
 
   if (paint_drop_indicator) {
     gfx::Rect bounds = CalculateDropIndicatorBounds(drop_item_, drop_position_);
-    ui::PaintRecorder recorder(context, size());
+    ui::PaintRecorder recorder(paint_info.context(), size());
     recorder.canvas()->FillRect(bounds, kDropIndicatorColor);
   }
 }
@@ -381,11 +389,8 @@ void SubmenuView::ShowAt(Widget* parent,
   }
 
   GetScrollViewContainer()->NotifyAccessibilityEvent(
-      ui::AX_EVENT_MENU_START,
-      true);
-  NotifyAccessibilityEvent(
-      ui::AX_EVENT_MENU_POPUP_START,
-      true);
+      ax::mojom::Event::kMenuStart, true);
+  NotifyAccessibilityEvent(ax::mojom::Event::kMenuPopupStart, true);
 }
 
 void SubmenuView::Reposition(const gfx::Rect& bounds) {
@@ -395,9 +400,9 @@ void SubmenuView::Reposition(const gfx::Rect& bounds) {
 
 void SubmenuView::Close() {
   if (host_) {
-    NotifyAccessibilityEvent(ui::AX_EVENT_MENU_POPUP_END, true);
+    NotifyAccessibilityEvent(ax::mojom::Event::kMenuPopupEnd, true);
     GetScrollViewContainer()->NotifyAccessibilityEvent(
-        ui::AX_EVENT_MENU_END, true);
+        ax::mojom::Event::kMenuEnd, true);
 
     host_->DestroyMenuHost();
     host_ = NULL;

@@ -28,8 +28,7 @@ namespace blink {
 
 class Node;
 
-class XMLSerializer final : public GarbageCollected<XMLSerializer>,
-                            public ScriptWrappable {
+class XMLSerializer final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -37,10 +36,8 @@ class XMLSerializer final : public GarbageCollected<XMLSerializer>,
 
   String serializeToString(Node*);
 
-  DEFINE_INLINE_TRACE() {}
-
  private:
-  XMLSerializer() {}
+  XMLSerializer() = default;
 };
 
 }  // namespace blink

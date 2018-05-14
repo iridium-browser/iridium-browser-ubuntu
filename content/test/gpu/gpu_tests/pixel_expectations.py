@@ -25,6 +25,19 @@ class PixelExpectations(GpuTestExpectations):
               ['android'])
     self.Skip('Pixel_CanvasDisplayLinearRGBUnaccelerated2D', ['android'])
 
+    # Tests running with SwiftShader are skipped on platforms where SwiftShader
+    # isn't supported.
+    self.Skip('Pixel_Canvas2DRedBox_SwiftShader',
+        ['mac', 'android', 'chromeos'])
+    self.Skip('Pixel_CSS3DBlueBox_SwiftShader',
+        ['mac', 'android', 'chromeos'])
+    self.Skip('Pixel_WebGLGreenTriangle_AA_Alpha_SwiftShader',
+        ['mac', 'android', 'chromeos'])
+    # Tests running in no GPU process mode are skipped on platforms where GPU
+    # process is required.
+    self.Skip('Pixel_Canvas2DRedBox_NoGpuProcess', ['android', 'chromeos'])
+    self.Skip('Pixel_CSS3DBlueBox_NoGpuProcess', ['android', 'chromeos'])
+
     self.Fail('Pixel_ScissorTestWithPreserveDrawingBuffer',
         ['android'], bug=521588)
 
@@ -44,28 +57,85 @@ class PixelExpectations(GpuTestExpectations):
 
     self.Flaky('Pixel_Video_MP4', ['android', 'nvidia'], bug=716564)
 
+    # TODO(junov); validate new test results
+    self.Fail('Pixel_CanvasLowLatency2D',
+        ['mac', 'linux', 'win', 'android', 'chromeos'], bug=788439)
+    self.Fail('Pixel_CanvasUnacceleratedLowLatency2D',
+        ['mac', 'linux', 'win', 'android', 'chromeos'], bug=788439)
+
+    # Rebaseline Pixel_CSS3DBlueBox
+    self.Fail('Pixel_CSS3DBlueBox', bug=796558)
+
     # Flaky for unknown reasons only on macOS. Not planning to investigate
     # further.
     self.Flaky('Pixel_ScissorTestWithPreserveDrawingBuffer', ['mac'],
                bug=660461)
 
     self.Flaky('Pixel_OffscreenCanvas2DResizeOnWorker',
-        ['win10', ('intel', 0x1912)], bug=690663)
-
-    # TODO(zakerinasab): check / generate reference images.
-    self.Fail('Pixel_Canvas2DUntagged', bug=713632)
+        ['win10', ('intel', 0x1912), 'android'], bug=690663)
 
     self.Flaky('Pixel_OffscreenCanvasTransferBeforeStyleResize',
               ['mac', 'linux', 'win', 'android'], bug=735228)
     self.Flaky('Pixel_OffscreenCanvasTransferAfterStyleResize',
               ['mac', 'linux', 'win', 'android'], bug=735171)
+    self.Flaky('Pixel_OffscreenCanvasTransferToImageBitmap',
+              ['linux', 'android'], bug=807742)
 
-    # TODO(junov): update reference images
-    self.Fail('Pixel_CSSFilterEffects', ['mac'], bug=721727)
-    self.Fail('Pixel_CSSFilterEffects_NoOverlays', ['mac'], bug=721727)
+    self.Flaky('Pixel_OffscreenCanvasWebGLSoftwareCompositingWorker',
+        ['mac', ('nvidia', 0xfe9), 'debug'], bug=751328)
 
-    # TODO(dshwang): remove these after new reference images are generated.
-    self.Fail('Pixel_DirectComposition_Video_MP4', bug=615325)
-    self.Fail('Pixel_DirectComposition_Video_VP9', bug=615325)
-    self.Fail('Pixel_Video_MP4', bug=615325)
-    self.Fail('Pixel_Video_VP9', bug=615325)
+    # Failing on Nexus 5; haven't investigated why yet.
+    self.Skip('Pixel_WebGL2_BlitFramebuffer_Result_Displayed',
+        ['android', ('qualcomm', 'Adreno (TM) 330')], bug=773293)
+    self.Skip('Pixel_WebGL2_ClearBufferfv_Result_Displayed',
+        ['android', ('qualcomm', 'Adreno (TM) 330')], bug=773293)
+
+    # Failing on Mac Intel HighSierra
+    self.Fail('Pixel_Video_MP4',
+        ['highsierra', ('intel', 0xa2e)], bug=774809)
+    self.Fail('Pixel_Video_VP9',
+        ['highsierra', ('intel', 0xa2e)], bug=774809)
+    self.Fail('Pixel_WebGLGreenTriangle_NonChromiumImage_NoAA_NoAlpha',
+        ['highsierra', ('intel', 0xa2e)], bug=774809)
+
+    # Failing on NVIDIA Shield TV; not sure why yet.
+    self.Fail('Pixel_WebGL_PremultipliedAlpha_False',
+              ['android', 'nvidia'], bug=791733)
+
+    # Temporary supression to rebaseline Video tests on Windows with the
+    # passthrough command decoder
+    self.Fail('Pixel_Video_MP4', ['win', 'intel'], bug=602688)
+    self.Fail('Pixel_Video_VP9', ['win', 'intel'], bug=602688)
+    self.Fail('Pixel_DirectComposition_Video_VP9', ['win', 'intel'],
+        bug=602688)
+
+    # Prepare for Skia's Delta Anti-Aliasing golden images rebaseline
+    self.Fail('Pixel_OffscreenCanvasAccelerated2D',
+              ['mac', 'linux', 'win', 'android', 'chromeos'], bug=817110)
+    self.Fail('Pixel_OffscreenCanvasAccelerated2DWorker',
+              ['mac', 'linux', 'win', 'android', 'chromeos'], bug=817110)
+    self.Fail('Pixel_OffscreenCanvasUnaccelerated2D',
+              ['mac', 'linux', 'win', 'android', 'chromeos'], bug=817110)
+    self.Fail('Pixel_OffscreenCanvasUnaccelerated2DGPUCompositing',
+              ['mac', 'linux', 'win', 'android', 'chromeos'], bug=817110)
+    self.Fail('Pixel_OffscreenCanvasUnaccelerated2DGPUCompositingWorker',
+              ['mac', 'linux', 'win', 'android', 'chromeos'], bug=817110)
+    self.Fail('Pixel_OffscreenCanvasUnaccelerated2DWorker',
+              ['mac', 'linux', 'win', 'android', 'chromeos'], bug=817110)
+
+    # TODO(zmo): temporarily suppress these two tests until new
+    # reference images with new names are generated.
+    self.Fail('Pixel_Canvas2DRedBox_NoGpuProcess',
+              ['linux', 'mac', 'win'], bug=744658)
+    self.Fail('Pixel_CSS3DBlueBox_NoGpuProcess',
+              ['linux', 'mac', 'win'], bug=744658)
+
+    self.Flaky('Pixel_2DCanvasWebGL', ['android'], bug=807370)
+    self.Flaky('Pixel_Canvas2DRedBox', ['android'], bug=809846)
+    self.Flaky('Pixel_CanvasDisplayLinearRGBAccelerated2D', ['android'],
+               bug=809868)
+    self.Flaky('Pixel_CanvasDisplayLinearRGBUnaccelerated2DGPUCompositing',
+               ['android'], bug=810006)
+
+    self.Fail('Pixel_CSSFilterEffects', ['mac'], bug=815045)
+    self.Fail('Pixel_CSSFilterEffects_NoOverlays', ['mac'], bug=815045)

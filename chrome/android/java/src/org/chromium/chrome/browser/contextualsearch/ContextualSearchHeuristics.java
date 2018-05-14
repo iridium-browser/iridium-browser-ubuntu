@@ -12,6 +12,7 @@ import java.util.Set;
  */
 public class ContextualSearchHeuristics {
     protected Set<ContextualSearchHeuristic> mHeuristics;
+    private QuickAnswersHeuristic mQuickAnswersHeuristic;
 
     /**
      * Manages a set of heuristics.
@@ -28,6 +29,21 @@ public class ContextualSearchHeuristics {
     public void logResultsSeen(boolean wasSearchContentViewSeen, boolean wasActivatedByTap) {
         for (ContextualSearchHeuristic heuristic : mHeuristics) {
             heuristic.logResultsSeen(wasSearchContentViewSeen, wasActivatedByTap);
+        }
+    }
+
+    /**
+     * Optionally logs data about the duration the panel was viewed and /or opened.
+     * Default is to not log anything.
+     * @param panelViewDurationMs The duration that the panel was viewed (Peek and opened) by the
+     *        user.  This should always be a positive number, since this method is only called when
+     *        the panel has been viewed (Peeked).
+     * @param panelOpenDurationMs The duration that the panel was opened, or 0 if it was never
+     *        opened.
+     */
+    public void logPanelViewedDurations(long panelViewDurationMs, long panelOpenDurationMs) {
+        for (ContextualSearchHeuristic heuristic : mHeuristics) {
+            heuristic.logPanelViewedDurations(panelViewDurationMs, panelOpenDurationMs);
         }
     }
 
@@ -80,5 +96,21 @@ public class ContextualSearchHeuristics {
         for (ContextualSearchHeuristic heuristic : mHeuristics) {
             heuristic.logRankerTapSuppressionOutcome(logger);
         }
+    }
+
+    /**
+     * Sets the {@link QuickAnswersHeuristic} so that it can be accessed externally by
+     * {@link #getQuickAnswersHeuristic}.
+     * @param quickAnswersHeuristic The active {@link QuickAnswersHeuristic}.
+     */
+    public void setQuickAnswersHeuristic(QuickAnswersHeuristic quickAnswersHeuristic) {
+        mQuickAnswersHeuristic = quickAnswersHeuristic;
+    }
+
+    /**
+     * @return The active {@link QuickAnswersHeuristic}.
+     */
+    public QuickAnswersHeuristic getQuickAnswersHeuristic() {
+        return mQuickAnswersHeuristic;
     }
 }

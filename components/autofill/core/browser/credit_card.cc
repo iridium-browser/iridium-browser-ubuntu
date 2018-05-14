@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/guid.h"
+#include "base/i18n/string_search.h"
 #include "base/i18n/time_formatting.h"
 #include "base/i18n/unicodestring.h"
 #include "base/logging.h"
@@ -31,7 +32,6 @@
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_clock.h"
-#include "components/autofill/core/common/autofill_l10n_util.h"
 #include "components/autofill/core/common/autofill_regexes.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/grit/components_scaled_resources.h"
@@ -96,6 +96,18 @@ base::string16 NetworkForFill(const std::string& network) {
   // include a new card.
   DCHECK_EQ(kGenericCard, network);
   return base::string16();
+}
+
+// Returns the last four digits of the credit card |number| (fewer if there are
+// not enough characters in |number|).
+base::string16 GetLastFourDigits(const base::string16& number) {
+  static const size_t kNumLastDigits = 4;
+
+  base::string16 stripped = CreditCard::StripSeparators(number);
+  if (stripped.size() <= kNumLastDigits)
+    return stripped;
+
+  return stripped.substr(stripped.size() - kNumLastDigits, kNumLastDigits);
 }
 
 }  // namespace
@@ -394,35 +406,6 @@ void CreditCard::SetRawInfo(ServerFieldType type,
   }
 }
 
-base::string16 CreditCard::GetInfo(const AutofillType& type,
-                                   const std::string& app_locale) const {
-  ServerFieldType storable_type = type.GetStorableType();
-  if (storable_type == CREDIT_CARD_NUMBER) {
-    // Web pages should never actually be filled by a masked server card,
-    // but this function is used at the preview stage.
-    if (record_type() == MASKED_SERVER_CARD)
-      return NetworkAndLastFourDigits();
-
-    return StripSeparators(number_);
-  }
-
-  return GetRawInfo(storable_type);
-}
-
-bool CreditCard::SetInfo(const AutofillType& type,
-                         const base::string16& value,
-                         const std::string& app_locale) {
-  ServerFieldType storable_type = type.GetStorableType();
-  if (storable_type == CREDIT_CARD_NUMBER)
-    SetRawInfo(storable_type, StripSeparators(value));
-  else if (storable_type == CREDIT_CARD_EXP_MONTH)
-    return SetExpirationMonthFromString(value, app_locale);
-  else
-    SetRawInfo(storable_type, value);
-
-  return true;
-}
-
 void CreditCard::GetMatchingTypes(const base::string16& text,
                                   const std::string& app_locale,
                                   ServerFieldTypeSet* matching_types) const {
@@ -430,8 +413,15 @@ void CreditCard::GetMatchingTypes(const base::string16& text,
 
   base::string16 card_number =
       GetInfo(AutofillType(CREDIT_CARD_NUMBER), app_locale);
-  if (!card_number.empty() && StripSeparators(text) == card_number)
-    matching_types->insert(CREDIT_CARD_NUMBER);
+  if (!card_number.empty()) {
+    // We only have the last four digits for masked cards, so match against
+    // that if |this| is a masked card.
+    bool numbers_match = record_type_ == MASKED_SERVER_CARD
+                             ? GetLastFourDigits(text) == LastFourDigits()
+                             : StripSeparators(text) == card_number;
+    if (numbers_match)
+      matching_types->insert(CREDIT_CARD_NUMBER);
+  }
 
   int month;
   if (ConvertMonth(text, app_locale, &month) &&
@@ -634,8 +624,15 @@ bool CreditCard::IsEmpty(const std::string& app_locale) const {
 }
 
 bool CreditCard::IsValid() const {
-  return IsValidCreditCardNumber(number_) &&
-         IsValidCreditCardExpirationDate(expiration_year_, expiration_month_,
+  return HasValidCardNumber() && HasValidExpirationDate();
+}
+
+bool CreditCard::HasValidCardNumber() const {
+  return IsValidCreditCardNumber(number_);
+}
+
+bool CreditCard::HasValidExpirationDate() const {
+  return IsValidCreditCardExpirationDate(expiration_year_, expiration_month_,
                                          AutofillClock::Now());
 }
 
@@ -713,7 +710,7 @@ const std::pair<base::string16, base::string16> CreditCard::LabelPieces()
   if (number().empty())
     return std::make_pair(name_on_card_, base::string16());
 
-  base::string16 obfuscated_cc_number = NetworkAndLastFourDigits();
+  base::string16 obfuscated_cc_number = NetworkOrBankNameAndLastFourDigits();
   // No expiration date set.
   if (!expiration_month_ || !expiration_year_)
     return std::make_pair(obfuscated_cc_number, base::string16());
@@ -731,13 +728,7 @@ const base::string16 CreditCard::Label() const {
 }
 
 base::string16 CreditCard::LastFourDigits() const {
-  static const size_t kNumLastDigits = 4;
-
-  base::string16 number = StripSeparators(number_);
-  if (number.size() <= kNumLastDigits)
-    return number;
-
-  return number.substr(number.size() - kNumLastDigits, kNumLastDigits);
+  return GetLastFourDigits(number_);
 }
 
 base::string16 CreditCard::NetworkForDisplay() const {
@@ -762,6 +753,14 @@ base::string16 CreditCard::BankNameAndLastFourDigits() const {
   if (digits.empty())
     return ASCIIToUTF16(bank_name_);
   return ASCIIToUTF16(bank_name_) + base::string16(kMidlineEllipsis) + digits;
+}
+
+base::string16 CreditCard::NetworkOrBankNameAndLastFourDigits() const {
+  if (IsAutofillCreditCardBankNameDisplayExperimentEnabled() &&
+      !bank_name_.empty()) {
+    return BankNameAndLastFourDigits();
+  }
+  return NetworkAndLastFourDigits();
 }
 
 base::string16 CreditCard::AbbreviatedExpirationDateForDisplay() const {
@@ -869,6 +868,35 @@ void CreditCard::GetSupportedTypes(ServerFieldTypeSet* supported_types) const {
   supported_types->insert(CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR);
 }
 
+base::string16 CreditCard::GetInfoImpl(const AutofillType& type,
+                                       const std::string& app_locale) const {
+  ServerFieldType storable_type = type.GetStorableType();
+  if (storable_type == CREDIT_CARD_NUMBER) {
+    // Web pages should never actually be filled by a masked server card,
+    // but this function is used at the preview stage.
+    if (record_type() == MASKED_SERVER_CARD)
+      return NetworkOrBankNameAndLastFourDigits();
+
+    return StripSeparators(number_);
+  }
+
+  return GetRawInfo(storable_type);
+}
+
+bool CreditCard::SetInfoImpl(const AutofillType& type,
+                             const base::string16& value,
+                             const std::string& app_locale) {
+  ServerFieldType storable_type = type.GetStorableType();
+  if (storable_type == CREDIT_CARD_EXP_MONTH)
+    return SetExpirationMonthFromString(value, app_locale);
+
+  if (storable_type == CREDIT_CARD_NUMBER)
+    SetRawInfo(storable_type, StripSeparators(value));
+  else
+    SetRawInfo(storable_type, value);
+  return true;
+}
+
 base::string16 CreditCard::NetworkForFill() const {
   return ::autofill::NetworkForFill(network_);
 }
@@ -903,34 +931,36 @@ bool CreditCard::ConvertMonth(const base::string16& month,
     return false;
 
   // Otherwise, try parsing the |month| as a named month, e.g. "January" or
-  // "Jan".
-  l10n::CaseInsensitiveCompare compare;
+  // "Jan" in the user's locale.
   UErrorCode status = U_ZERO_ERROR;
   icu::Locale locale(app_locale.c_str());
   icu::DateFormatSymbols date_format_symbols(locale, status);
   DCHECK(status == U_ZERO_ERROR || status == U_USING_FALLBACK_WARNING ||
          status == U_USING_DEFAULT_WARNING);
-
+  // Full months (January, Janvier, etc.)
   int32_t num_months;
   const icu::UnicodeString* months = date_format_symbols.getMonths(num_months);
   for (int32_t i = 0; i < num_months; ++i) {
     const base::string16 icu_month(
         base::i18n::UnicodeStringToString16(months[i]));
-    if (compare.StringsEqual(icu_month, month)) {
+    // We look for the ICU-defined month in |month|.
+    if (base::i18n::StringSearchIgnoringCaseAndAccents(icu_month, month,
+                                                       nullptr, nullptr)) {
       *num = i + 1;  // Adjust from 0-indexed to 1-indexed.
       return true;
     }
   }
-
+  // Abbreviated months (jan., janv., fév.) Some abbreviations have . at the end
+  // (e.g., "janv." in French). The period is removed.
   months = date_format_symbols.getShortMonths(num_months);
-  // Some abbreviations have . at the end (e.g., "janv." in French). We don't
-  // care about matching that.
   base::string16 trimmed_month;
   base::TrimString(month, ASCIIToUTF16("."), &trimmed_month);
   for (int32_t i = 0; i < num_months; ++i) {
     base::string16 icu_month(base::i18n::UnicodeStringToString16(months[i]));
     base::TrimString(icu_month, ASCIIToUTF16("."), &icu_month);
-    if (compare.StringsEqual(icu_month, trimmed_month)) {
+    // We look for the ICU-defined month in |trimmed_month|.
+    if (base::i18n::StringSearchIgnoringCaseAndAccents(icu_month, trimmed_month,
+                                                       nullptr, nullptr)) {
       *num = i + 1;  // Adjust from 0-indexed to 1-indexed.
       return true;
     }

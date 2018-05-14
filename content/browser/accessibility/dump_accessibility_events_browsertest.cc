@@ -77,9 +77,10 @@ class DumpAccessibilityEventsTest : public DumpAccessibilityTestBase {
 std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
   WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
       shell()->web_contents());
+  base::ProcessId pid = base::GetCurrentProcId();
   std::unique_ptr<AccessibilityEventRecorder> event_recorder(
       AccessibilityEventRecorder::Create(
-          web_contents->GetRootBrowserAccessibilityManager()));
+          web_contents->GetRootBrowserAccessibilityManager(), pid));
 
   // Save a copy of the accessibility tree (as a text dump); we'll
   // log this for the user later if the test fails.
@@ -91,7 +92,7 @@ std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
   // a result of this function.
   std::unique_ptr<AccessibilityNotificationWaiter> waiter;
   waiter.reset(new AccessibilityNotificationWaiter(
-      shell()->web_contents(), kAccessibilityModeComplete, ui::AX_EVENT_NONE));
+      shell()->web_contents(), ui::kAXModeComplete, ax::mojom::Event::kNone));
 
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
       base::ASCIIToUTF16("go()"));
@@ -105,7 +106,7 @@ std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
   // sentinel by calling AccessibilityHitTest and waiting for a HOVER
   // event in response.
   waiter.reset(new AccessibilityNotificationWaiter(
-      shell()->web_contents(), kAccessibilityModeComplete, ui::AX_EVENT_HOVER));
+      shell()->web_contents(), ui::kAXModeComplete, ax::mojom::Event::kHover));
   BrowserAccessibilityManager* manager =
       web_contents->GetRootBrowserAccessibilityManager();
   manager->HitTest(gfx::Point(0, 0));
@@ -176,14 +177,20 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
   RunEventTest(FILE_PATH_LITERAL("aria-treeitem-focus.html"));
 }
 
+// http:/crbug.com/791268
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
-                       AccessibilityEventsAriaComboBoxFocus) {
+                       DISABLED_AccessibilityEventsAriaComboBoxFocus) {
   RunEventTest(FILE_PATH_LITERAL("aria-combo-box-focus.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsAriaComboBoxNext) {
   RunEventTest(FILE_PATH_LITERAL("aria-combo-box-next.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAriaSliderValueBothChange) {
+  RunEventTest(FILE_PATH_LITERAL("aria-slider-value-both-change.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
@@ -194,6 +201,21 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsAriaSliderValueTextChange) {
   RunEventTest(FILE_PATH_LITERAL("aria-slider-valuetext-change.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAriaSpinButtonValueBothChange) {
+  RunEventTest(FILE_PATH_LITERAL("aria-spinbutton-value-both-change.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAriaSpinButtonValueChange) {
+  RunEventTest(FILE_PATH_LITERAL("aria-spinbutton-value-change.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAriaSpinButtonValueTextChange) {
+  RunEventTest(FILE_PATH_LITERAL("aria-spinbutton-valuetext-change.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
@@ -239,6 +261,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsDescriptionChange) {
   RunEventTest(FILE_PATH_LITERAL("description-change.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsDescriptionChangeIndirect) {
+  RunEventTest(FILE_PATH_LITERAL("description-change-indirect.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
@@ -292,7 +319,13 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
-                       AccessibilityEventsLiveRegionRemove) {
+                       AccessibilityEventsLiveRegionIgnoresClick) {
+  RunEventTest(FILE_PATH_LITERAL("live-region-ignores-click.html"));
+}
+
+// http:/crbug.com/786848
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       DISABLED_AccessibilityEventsLiveRegionRemove) {
   RunEventTest(FILE_PATH_LITERAL("live-region-remove.html"));
 }
 
@@ -327,6 +360,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsNameChange) {
   RunEventTest(FILE_PATH_LITERAL("name-change.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsNameChangeIndirect) {
+  RunEventTest(FILE_PATH_LITERAL("name-change-indirect.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,

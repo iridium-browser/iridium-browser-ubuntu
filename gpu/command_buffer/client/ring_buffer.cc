@@ -11,28 +11,27 @@
 #include <algorithm>
 
 #include "base/logging.h"
+#include "base/numerics/safe_conversions.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 
 namespace gpu {
 
 RingBuffer::RingBuffer(unsigned int alignment,
                        Offset base_offset,
-                       unsigned int size,
+                       size_t size,
                        CommandBufferHelper* helper,
                        void* base)
     : helper_(helper),
       base_offset_(base_offset),
-      size_(size),
+      size_(base::checked_cast<unsigned int>(size)),
       free_offset_(0),
       in_use_offset_(0),
       alignment_(alignment),
       base_(static_cast<int8_t*>(base) - base_offset) {}
 
 RingBuffer::~RingBuffer() {
-  // Free blocks pending tokens.
-  while (!blocks_.empty()) {
-    FreeOldestBlock();
-  }
+  for (const auto& block : blocks_)
+    DCHECK(block.state != IN_USE);
 }
 
 void RingBuffer::FreeOldestBlock() {
@@ -67,7 +66,7 @@ void* RingBuffer::Alloc(unsigned int size) {
   size = RoundToAlignment(size);
 
   // Wait until there is enough room.
-  while (size > GetLargestFreeSizeNoWaiting()) {
+  while (size > GetLargestFreeSizeNoWaitingInternal()) {
     FreeOldestBlock();
   }
 
@@ -146,6 +145,12 @@ void RingBuffer::DiscardBlock(void* pointer) {
 }
 
 unsigned int RingBuffer::GetLargestFreeSizeNoWaiting() {
+  unsigned int size = GetLargestFreeSizeNoWaitingInternal();
+  DCHECK_EQ(size, RoundToAlignment(size));
+  return size;
+}
+
+unsigned int RingBuffer::GetLargestFreeSizeNoWaitingInternal() {
   while (!blocks_.empty()) {
     Block& block = blocks_.front();
     if (!helper_->HasTokenPassed(block.token) || block.state == IN_USE) break;
@@ -170,13 +175,30 @@ unsigned int RingBuffer::GetLargestFreeSizeNoWaiting() {
 }
 
 unsigned int RingBuffer::GetTotalFreeSizeNoWaiting() {
-  unsigned int largest_free_size = GetLargestFreeSizeNoWaiting();
+  unsigned int largest_free_size = GetLargestFreeSizeNoWaitingInternal();
   if (free_offset_ > in_use_offset_) {
     // It's free from free_offset_ to size_ and from 0 to in_use_offset_.
     return size_ - free_offset_ + in_use_offset_;
   } else {
     return largest_free_size;
   }
+}
+
+void RingBuffer::ShrinkLastBlock(unsigned int new_size) {
+  if (blocks_.empty())
+    return;
+  auto& block = blocks_.back();
+  DCHECK_LT(new_size, block.size);
+  DCHECK_EQ(block.state, IN_USE);
+
+  // Can't shrink to size 0, see comments in Alloc.
+  new_size = std::max(new_size, 1u);
+
+  // Allocate rounded to alignment size so that the offsets are always
+  // memory-aligned.
+  new_size = RoundToAlignment(new_size);
+  free_offset_ = block.offset + new_size;
+  block.size = new_size;
 }
 
 }  // namespace gpu

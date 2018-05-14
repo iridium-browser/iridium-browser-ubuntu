@@ -113,13 +113,15 @@ tr.b.unittest.testSuite(function() {
 
   test('controlSearchQuery', function() {
     const controls = buildControls(this);
-    const search = tr.ui.b.findDeepElementMatchingPredicate(
-        controls, e => e.id === 'search');
+    const search = tr.ui.b.findDeepElementMatching(controls, '#search');
     search.value = 'x';
     const keyupEvent = document.createEvent('KeyboardEvent');
     keyupEvent.initEvent('keyup');
     search.dispatchEvent(keyupEvent);
     assert.strictEqual(controls.viewState.searchQuery, 'x');
+
+    controls.clearSearch_();
+    assert.strictEqual(controls.viewState.searchQuery, '');
   });
 
   test('viewShowAll', function() {
@@ -211,12 +213,12 @@ tr.b.unittest.testSuite(function() {
     assert.strictEqual('block', picker.style.display);
 
     controls.viewState.groupings = [
-      tr.v.HistogramGrouping.STORY_NAME,
+      tr.v.HistogramGrouping.BY_KEY.get(tr.v.d.RESERVED_NAMES.STORIES),
       fooGrouping,
     ];
     assert.lengthOf(picker.currentGroupKeys, 2);
     assert.strictEqual(picker.currentGroupKeys[0],
-        tr.v.HistogramGrouping.STORY_NAME.key);
+        tr.v.d.RESERVED_NAMES.STORIES);
     assert.strictEqual(picker.currentGroupKeys[1], 'foo');
   });
 
@@ -237,10 +239,10 @@ tr.b.unittest.testSuite(function() {
     assert.strictEqual(controls.viewState.groupings[0].key,
         tr.v.HistogramGrouping.HISTOGRAM_NAME.key);
 
-    picker.currentGroupKeys = ['story', 'foo'];
+    picker.currentGroupKeys = [tr.v.d.RESERVED_NAMES.STORIES, 'foo'];
     assert.lengthOf(controls.viewState.groupings, 2);
     assert.strictEqual(controls.viewState.groupings[0],
-        tr.v.HistogramGrouping.STORY_NAME);
+        tr.v.HistogramGrouping.BY_KEY.get(tr.v.d.RESERVED_NAMES.STORIES));
     assert.strictEqual(controls.viewState.groupings[1],
         fooGrouping);
   });

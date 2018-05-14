@@ -5,9 +5,9 @@
 #ifndef COMPONENTS_WEB_MODAL_WEB_CONTENTS_MODAL_DIALOG_MANAGER_H_
 #define COMPONENTS_WEB_MODAL_WEB_CONTENTS_MODAL_DIALOG_MANAGER_H_
 
-#include <deque>
 #include <memory>
 
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "components/web_modal/single_web_contents_dialog_manager.h"
@@ -63,8 +63,9 @@ class WebContentsModalDialogManager
 
     void CloseAllDialogs() { manager_->CloseAllDialogs(); }
     void DidAttachInterstitialPage() { manager_->DidAttachInterstitialPage(); }
-    void WebContentsWasShown() { manager_->WasShown(); }
-    void WebContentsWasHidden() { manager_->WasHidden(); }
+    void WebContentsVisibilityChanged(content::Visibility visibility) {
+      manager_->OnVisibilityChanged(visibility);
+    }
 
    private:
     WebContentsModalDialogManager* manager_;
@@ -79,17 +80,14 @@ class WebContentsModalDialogManager
   struct DialogState {
     DialogState(gfx::NativeWindow dialog,
                 std::unique_ptr<SingleWebContentsDialogManager> manager);
+    DialogState(DialogState&& state);
     ~DialogState();
 
     gfx::NativeWindow dialog;
     std::unique_ptr<SingleWebContentsDialogManager> manager;
   };
 
-  typedef std::deque<DialogState*> WebContentsModalDialogList;
-
-  // Utility function to get the dialog state for a dialog.
-  WebContentsModalDialogList::iterator FindDialogState(
-      gfx::NativeWindow dialog);
+  using WebContentsModalDialogList = base::circular_deque<DialogState>;
 
   // Blocks/unblocks interaction with renderer process.
   void BlockWebContentsInteraction(bool blocked);
@@ -103,8 +101,7 @@ class WebContentsModalDialogManager
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
   void DidGetIgnoredUIEvent() override;
-  void WasShown() override;
-  void WasHidden() override;
+  void OnVisibilityChanged(content::Visibility visibility) override;
   void WebContentsDestroyed() override;
   void DidAttachInterstitialPage() override;
 
@@ -113,6 +110,9 @@ class WebContentsModalDialogManager
 
   // All active dialogs.
   WebContentsModalDialogList child_dialogs_;
+
+  // Whether the WebContents' visibility is content::Visibility::HIDDEN.
+  bool web_contents_is_hidden_;
 
   // True while closing the dialogs on WebContents close.
   bool closing_all_dialogs_;

@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/threading/thread_checker.h"
+#include "base/sequence_checker.h"
 #include "media/audio/audio_output_delegate.h"
 #include "media/mojo/interfaces/audio_output_stream.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
@@ -19,8 +19,8 @@ namespace media {
 // This class handles IPC for single audio output stream by delegating method
 // calls to its AudioOutputDelegate.
 class MEDIA_MOJO_EXPORT MojoAudioOutputStream
-    : NON_EXPORTED_BASE(public mojom::AudioOutputStream),
-      NON_EXPORTED_BASE(public AudioOutputDelegate::EventHandler) {
+    : public mojom::AudioOutputStream,
+      public AudioOutputDelegate::EventHandler {
  public:
   using StreamCreatedCallback =
       mojom::AudioOutputStreamProvider::AcquireCallback;
@@ -34,6 +34,7 @@ class MEDIA_MOJO_EXPORT MojoAudioOutputStream
   // should be removed (stream ended/error). |deleter_callback| is required to
   // destroy |this| synchronously.
   MojoAudioOutputStream(mojom::AudioOutputStreamRequest request,
+                        mojom::AudioOutputStreamClientPtr client,
                         CreateDelegateCallback create_delegate_callback,
                         StreamCreatedCallback stream_created_callback,
                         base::OnceClosure deleter_callback);
@@ -56,10 +57,12 @@ class MEDIA_MOJO_EXPORT MojoAudioOutputStream
   // Closes connection to client and notifies owner.
   void OnError();
 
+  SEQUENCE_CHECKER(sequence_checker_);
+
   StreamCreatedCallback stream_created_callback_;
   base::OnceClosure deleter_callback_;
   mojo::Binding<AudioOutputStream> binding_;
-  base::ThreadChecker thread_checker_;
+  mojom::AudioOutputStreamClientPtr client_;
   std::unique_ptr<AudioOutputDelegate> delegate_;
   base::WeakPtrFactory<MojoAudioOutputStream> weak_factory_;
 

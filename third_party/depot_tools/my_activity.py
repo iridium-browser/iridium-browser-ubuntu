@@ -70,6 +70,7 @@ rietveld_instances = [
     'supports_owner_modified_query': True,
     'requires_auth': False,
     'email_domain': 'chromium.org',
+    'short_url_protocol': 'https',
   },
   {
     'url': 'chromereviews.googleplex.com',
@@ -95,14 +96,19 @@ rietveld_instances = [
 gerrit_instances = [
   {
     'url': 'chromium-review.googlesource.com',
-    'shorturl': 'crosreview.com',
+    'shorturl': 'crrev.com/c',
+    'short_url_protocol': 'https',
   },
   {
     'url': 'chrome-internal-review.googlesource.com',
-    'shorturl': 'crosreview.com/i',
+    'shorturl': 'crrev.com/i',
+    'short_url_protocol': 'https',
   },
   {
     'url': 'android-review.googlesource.com',
+  },
+  {
+    'url': 'pdfium-review.googlesource.com',
   },
 ]
 
@@ -110,6 +116,7 @@ google_code_projects = [
   {
     'name': 'chromium',
     'shorturl': 'crbug.com',
+    'short_url_protocol': 'https',
   },
   {
     'name': 'google-breakpad',
@@ -119,6 +126,11 @@ google_code_projects = [
   },
   {
     'name': 'skia',
+  },
+  {
+    'name': 'pdfium',
+    'shorturl': 'crbug.com/pdfium',
+    'short_url_protocol': 'https',
   },
 ]
 
@@ -265,7 +277,10 @@ class MyActivity(object):
 
     bugs = []
     if description:
-      matches = re.findall('BUG=(((\d+)(,\s?)?)+)', description)
+      # Handle both "Bug: 99999" and "BUG=99999" bug notations
+      # Multiple bugs can be noted on a single line or in multiple ones.
+      matches = re.findall(r'BUG[=:]\s?(((\d+)(,\s?)?)+)', description,
+                           flags=re.IGNORECASE)
       if matches:
         for match in matches:
           bugs.extend(match[0].replace(' ', '').split(','))
@@ -296,11 +311,14 @@ class MyActivity(object):
 
     ret['reviewers'] = set(issue['reviewers'])
 
-    shorturl = instance['url']
     if 'shorturl' in instance:
-      shorturl = instance['shorturl']
+      url = instance['shorturl']
+      protocol = instance.get('short_url_protocol', 'http')
+    else:
+      url = instance['url']
+      protocol = 'https'
 
-    ret['review_url'] = 'http://%s/%d' % (shorturl, issue['issue'])
+    ret['review_url'] = '%s://%s/%d' % (protocol, url, issue['issue'])
 
     # Rietveld sometimes has '\r\n' instead of '\n'.
     ret['header'] = issue['description'].replace('\r', '').split('\n')[0]
@@ -326,24 +344,9 @@ class MyActivity(object):
     return ret
 
   @staticmethod
-  def gerrit_changes_over_ssh(instance, filters):
-    # See https://review.openstack.org/Documentation/cmd-query.html
-    # Gerrit doesn't allow filtering by created time, only modified time.
-    gquery_cmd = ['ssh', '-p', str(instance['port']), instance['host'],
-                  'gerrit', 'query',
-                  '--format', 'JSON',
-                  '--comments',
-                  '--'] + filters
-    (stdout, _) = subprocess.Popen(gquery_cmd, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE).communicate()
-    # Drop the last line of the output with the stats.
-    issues = stdout.splitlines()[:-1]
-    return map(json.loads, issues)
-
-  @staticmethod
   def gerrit_changes_over_rest(instance, filters):
-    # Convert the "key:value" filter to a dictionary.
-    req = dict(f.split(':', 1) for f in filters)
+    # Convert the "key:value" filter to a list of (key, value) pairs.
+    req = list(f.split(':', 1) for f in filters)
     try:
       # Instantiate the generator to force all the requests now and catch the
       # errors here.
@@ -360,17 +363,9 @@ class MyActivity(object):
     user_filter = 'owner:%s' % owner if owner else 'reviewer:%s' % reviewer
     filters = ['-age:%ss' % max_age, user_filter]
 
-    # Determine the gerrit interface to use: SSH or REST API:
-    if 'host' in instance:
-      issues = self.gerrit_changes_over_ssh(instance, filters)
-      issues = [self.process_gerrit_ssh_issue(instance, issue)
-                for issue in issues]
-    elif 'url' in instance:
-      issues = self.gerrit_changes_over_rest(instance, filters)
-      issues = [self.process_gerrit_rest_issue(instance, issue)
-                for issue in issues]
-    else:
-      raise Exception('Invalid gerrit_instances configuration.')
+    issues = self.gerrit_changes_over_rest(instance, filters)
+    issues = [self.process_gerrit_issue(instance, issue)
+              for issue in issues]
 
     # TODO(cjhopman): should we filter abandoned changes?
     issues = filter(self.filter_issue, issues)
@@ -378,63 +373,28 @@ class MyActivity(object):
 
     return issues
 
-  def process_gerrit_ssh_issue(self, instance, issue):
+  def process_gerrit_issue(self, instance, issue):
     ret = {}
     if self.options.deltas:
       ret['delta'] = DefaultFormatter().format(
           '+{insertions},-{deletions}',
           **issue)
     ret['status'] = issue['status']
-    ret['review_url'] = issue['url']
     if 'shorturl' in instance:
-      ret['review_url'] = 'http://%s/%s' % (instance['shorturl'],
-                                            issue['number'])
-    ret['header'] = issue['subject']
-    ret['owner'] = issue['owner']['email']
-    ret['author'] = ret['owner']
-    ret['created'] = datetime.fromtimestamp(issue['createdOn'])
-    ret['modified'] = datetime.fromtimestamp(issue['lastUpdated'])
-    if 'comments' in issue:
-      ret['replies'] = self.process_gerrit_ssh_issue_replies(issue['comments'])
+      protocol = instance.get('short_url_protocol', 'http')
+      url = instance['shorturl']
     else:
-      ret['replies'] = []
-    ret['reviewers'] = set(r['author'] for r in ret['replies'])
-    ret['reviewers'].discard(ret['author'])
-    ret['bug'] = self.extract_bug_number_from_description(issue)
-    return ret
+      protocol = 'https'
+      url = instance['url']
+    ret['review_url'] = '%s://%s/%s' % (protocol, url, issue['_number'])
 
-  @staticmethod
-  def process_gerrit_ssh_issue_replies(replies):
-    ret = []
-    replies = filter(lambda r: 'email' in r['reviewer'], replies)
-    for reply in replies:
-      ret.append({
-        'author': reply['reviewer']['email'],
-        'created': datetime.fromtimestamp(reply['timestamp']),
-        'content': '',
-      })
-    return ret
-
-  def process_gerrit_rest_issue(self, instance, issue):
-    ret = {}
-    if self.options.deltas:
-      ret['delta'] = DefaultFormatter().format(
-          '+{insertions},-{deletions}',
-          **issue)
-    ret['status'] = issue['status']
-    ret['review_url'] = 'https://%s/%s' % (instance['url'], issue['_number'])
-    if 'shorturl' in instance:
-      # TODO(deymo): Move this short link to https once crosreview.com supports
-      # it.
-      ret['review_url'] = 'http://%s/%s' % (instance['shorturl'],
-                                            issue['_number'])
     ret['header'] = issue['subject']
     ret['owner'] = issue['owner']['email']
     ret['author'] = ret['owner']
     ret['created'] = datetime_from_gerrit(issue['created'])
     ret['modified'] = datetime_from_gerrit(issue['updated'])
     if 'messages' in issue:
-      ret['replies'] = self.process_gerrit_rest_issue_replies(issue['messages'])
+      ret['replies'] = self.process_gerrit_issue_replies(issue['messages'])
     else:
       ret['replies'] = []
     ret['reviewers'] = set(r['author'] for r in ret['replies'])
@@ -443,7 +403,7 @@ class MyActivity(object):
     return ret
 
   @staticmethod
-  def process_gerrit_rest_issue_replies(replies):
+  def process_gerrit_issue_replies(replies):
     ret = []
     replies = filter(lambda r: 'author' in r and 'email' in r['author'],
         replies)
@@ -484,7 +444,8 @@ class MyActivity(object):
       items = content['items']
       for item in items:
         if instance.get('shorturl'):
-          item_url = 'https://%s/%d' % (instance['shorturl'], item['id'])
+          protocol = instance.get('short_url_protocol', 'http')
+          item_url = '%s://%s/%d' % (protocol, instance['shorturl'], item['id'])
         else:
           item_url = 'https://bugs.chromium.org/p/%s/issues/detail?id=%d' % (
               instance['name'], item['id'])
@@ -499,9 +460,6 @@ class MyActivity(object):
           'labels': [],
           'components': []
         }
-        if 'shorturl' in instance:
-          issue['url'] = 'http://%s/%d' % (instance['shorturl'], item['id'])
-
         if 'owner' in item:
           issue['owner'] = item['owner']['name']
         else:
@@ -570,8 +528,12 @@ class MyActivity(object):
     optional_values = {
         'created': review['created'].date().isoformat(),
         'modified': review['modified'].date().isoformat(),
+        'status': review['status'],
         'activity': activity,
     }
+    if self.options.deltas:
+      optional_values['delta'] = review['delta']
+
     self.print_generic(self.options.output_format,
                        self.options.output_format_reviews,
                        review['header'],
@@ -739,7 +701,7 @@ def main():
   parser.add_option(
       '-d', '--deltas',
       action='store_true',
-      help='Fetch deltas for changes (slow).')
+      help='Fetch deltas for changes.')
 
   activity_types_group = optparse.OptionGroup(parser, 'Activity Types',
                                'By default, all activity will be looked up and '
@@ -853,9 +815,9 @@ def main():
     else:
       begin, end = (get_week_of(datetime.today() - timedelta(days=1)))
   else:
-    begin = datetime.strptime(options.begin, '%m/%d/%y')
+    begin = dateutil.parser.parse(options.begin)
     if options.end:
-      end = datetime.strptime(options.end, '%m/%d/%y')
+      end = dateutil.parser.parse(options.end)
     else:
       end = datetime.today()
   options.begin, options.end = begin, end
@@ -899,7 +861,7 @@ def main():
       logging.info('Printing output to "%s"', options.output)
       sys.stdout = output_file
   except (IOError, OSError) as e:
-     logging.error('Unable to write output: %s', e)
+    logging.error('Unable to write output: %s', e)
   else:
     if options.json:
       my_activity.dump_json()

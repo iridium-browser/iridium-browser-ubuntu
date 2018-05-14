@@ -26,7 +26,6 @@
 #include "core/editing/PositionWithAffinity.h"
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutBlock.h"
-#include "core/layout/LayoutEmbeddedContent.h"
 #include "core/layout/LayoutImage.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutVideo.h"
@@ -56,7 +55,7 @@ LayoutReplaced::LayoutReplaced(Element* element,
   SetIsAtomicInlineLevel(true);
 }
 
-LayoutReplaced::~LayoutReplaced() {}
+LayoutReplaced::~LayoutReplaced() = default;
 
 void LayoutReplaced::WillBeDestroyed() {
   if (!DocumentBeingDestroyed() && Parent())
@@ -69,9 +68,14 @@ void LayoutReplaced::StyleDidChange(StyleDifference diff,
                                     const ComputedStyle* old_style) {
   LayoutBox::StyleDidChange(diff, old_style);
 
-  bool had_style = (old_style != 0);
-  float old_zoom =
-      had_style ? old_style->EffectiveZoom() : ComputedStyle::InitialZoom();
+  // Replaced elements can have border-radius clips without clipping overflow;
+  // the overflow clipping case is already covered in LayoutBox::StyleDidChange
+  if (old_style && !old_style->RadiiEqual(StyleRef()))
+    SetNeedsPaintPropertyUpdate();
+
+  bool had_style = !!old_style;
+  float old_zoom = had_style ? old_style->EffectiveZoom()
+                             : ComputedStyleInitialValues::InitialZoom();
   if (Style() && Style()->EffectiveZoom() != old_zoom)
     IntrinsicSizeChanged();
 }
@@ -94,8 +98,7 @@ void LayoutReplaced::UpdateLayout() {
 
   ClearNeedsLayout();
 
-  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled() &&
-      ReplacedContentRect() != old_content_rect)
+  if (ReplacedContentRect() != old_content_rect)
     SetShouldDoFullPaintInvalidation();
 }
 
@@ -144,11 +147,8 @@ static inline bool LayoutObjectHasAspectRatio(
 }
 
 void LayoutReplaced::ComputeIntrinsicSizingInfoForReplacedContent(
-    LayoutReplaced* content_layout_object,
     IntrinsicSizingInfo& intrinsic_sizing_info) const {
-  if (content_layout_object) {
-    content_layout_object->ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
-
+  if (GetNestedIntrinsicSizingInfo(intrinsic_sizing_info)) {
     // Handle zoom & vertical writing modes here, as the embedded document
     // doesn't know about them.
     intrinsic_sizing_info.size.Scale(Style()->EffectiveZoom());
@@ -586,7 +586,8 @@ LayoutRect LayoutReplaced::ComputeObjectFit(
   EObjectFit object_fit = Style()->GetObjectFit();
 
   if (object_fit == EObjectFit::kFill &&
-      Style()->ObjectPosition() == ComputedStyle::InitialObjectPosition()) {
+      Style()->ObjectPosition() ==
+          ComputedStyleInitialValues::InitialObjectPosition()) {
     return content_rect;
   }
 
@@ -595,9 +596,8 @@ LayoutRect LayoutReplaced::ComputeObjectFit(
   // intrinsic ratio but no intrinsic size. In order to maintain aspect ratio,
   // the intrinsic size for SVG might be faked from the aspect ratio,
   // see SVGImage::containerSize().
-  LayoutSize intrinsic_size = overridden_intrinsic_size
-                                  ? *overridden_intrinsic_size
-                                  : this->IntrinsicSize();
+  LayoutSize intrinsic_size =
+      overridden_intrinsic_size ? *overridden_intrinsic_size : IntrinsicSize();
   if (!intrinsic_size.Width() || !intrinsic_size.Height())
     return content_rect;
 
@@ -613,7 +613,7 @@ LayoutRect LayoutReplaced::ComputeObjectFit(
       if (object_fit != EObjectFit::kScaleDown ||
           final_rect.Width() <= intrinsic_size.Width())
         break;
-    // fall through
+      FALLTHROUGH;
     case EObjectFit::kNone:
       final_rect.SetSize(intrinsic_size);
       break;
@@ -639,9 +639,6 @@ LayoutRect LayoutReplaced::ReplacedContentRect() const {
 
 void LayoutReplaced::ComputeIntrinsicSizingInfo(
     IntrinsicSizingInfo& intrinsic_sizing_info) const {
-  // If there's an embeddedReplacedContent() of a remote, referenced document
-  // available, this code-path should never be used.
-  DCHECK(!EmbeddedReplacedContent());
   intrinsic_sizing_info.size = FloatSize(IntrinsicLogicalWidth().ToFloat(),
                                          IntrinsicLogicalHeight().ToFloat());
 
@@ -695,13 +692,11 @@ LayoutUnit LayoutReplaced::ComputeReplacedLogicalWidth(
                                          Style()->LogicalWidth()),
         should_compute_preferred);
 
-  LayoutReplaced* content_layout_object = EmbeddedReplacedContent();
-
   // 10.3.2 Inline, replaced elements:
   // http://www.w3.org/TR/CSS21/visudet.html#inline-replaced-width
   IntrinsicSizingInfo intrinsic_sizing_info;
-  ComputeIntrinsicSizingInfoForReplacedContent(content_layout_object,
-                                               intrinsic_sizing_info);
+  ComputeIntrinsicSizingInfoForReplacedContent(intrinsic_sizing_info);
+
   FloatSize constrained_size =
       ConstrainIntrinsicSizeToMinMax(intrinsic_sizing_info);
 
@@ -782,13 +777,11 @@ LayoutUnit LayoutReplaced::ComputeReplacedLogicalHeight(
         ComputeReplacedLogicalHeightUsing(kMainOrPreferredSize,
                                           Style()->LogicalHeight()));
 
-  LayoutReplaced* content_layout_object = EmbeddedReplacedContent();
-
   // 10.6.2 Inline, replaced elements:
   // http://www.w3.org/TR/CSS21/visudet.html#inline-replaced-height
   IntrinsicSizingInfo intrinsic_sizing_info;
-  ComputeIntrinsicSizingInfoForReplacedContent(content_layout_object,
-                                               intrinsic_sizing_info);
+  ComputeIntrinsicSizingInfoForReplacedContent(intrinsic_sizing_info);
+
   FloatSize constrained_size =
       ConstrainIntrinsicSizeToMinMax(intrinsic_sizing_info);
 
@@ -883,10 +876,10 @@ void LayoutReplaced::ComputePreferredLogicalWidths() {
 }
 
 PositionWithAffinity LayoutReplaced::PositionForPoint(
-    const LayoutPoint& point) {
+    const LayoutPoint& point) const {
   // FIXME: This code is buggy if the replaced element is relative positioned.
   InlineBox* box = InlineBoxWrapper();
-  RootInlineBox* root_box = box ? &box->Root() : 0;
+  RootInlineBox* root_box = box ? &box->Root() : nullptr;
 
   LayoutUnit top = root_box ? root_box->SelectionTop() : LogicalTop();
   LayoutUnit bottom = root_box ? root_box->SelectionBottom() : LogicalBottom();
@@ -934,26 +927,6 @@ LayoutRect LayoutReplaced::LocalSelectionRect() const {
                       root.SelectionHeight());
   return LayoutRect(new_logical_top, LayoutUnit(), root.SelectionHeight(),
                     Size().Height());
-}
-
-void LayoutReplaced::SetSelectionState(SelectionState state) {
-  // The selection state for our containing block hierarchy is updated by the
-  // base class call.
-  LayoutBox::SetSelectionState(state);
-
-  if (!InlineBoxWrapper())
-    return;
-
-  if (CanUpdateSelectionOnRootLineBoxes()) {
-    InlineBoxWrapper()->Root().SetHasSelectedChildren(state !=
-                                                      SelectionState::kNone);
-  }
-}
-
-void LayoutReplaced::IntrinsicSizingInfo::Transpose() {
-  size = size.TransposedSize();
-  aspect_ratio = aspect_ratio.TransposedSize();
-  std::swap(has_width, has_height);
 }
 
 }  // namespace blink

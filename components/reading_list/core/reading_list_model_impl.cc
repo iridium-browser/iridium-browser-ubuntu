@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/time/clock.h"
 #include "components/prefs/pref_service.h"
@@ -18,7 +17,7 @@ ReadingListModelImpl::ReadingListModelImpl(
     std::unique_ptr<ReadingListModelStorage> storage,
     PrefService* pref_service,
     std::unique_ptr<base::Clock> clock)
-    : entries_(base::MakeUnique<ReadingListEntries>()),
+    : entries_(std::make_unique<ReadingListEntries>()),
       unread_entry_count_(0),
       read_entry_count_(0),
       unseen_entry_count_(0),
@@ -327,7 +326,12 @@ const ReadingListEntry& ReadingListModelImpl::AddEntry(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(loaded());
   DCHECK(url.SchemeIsHTTPOrHTTPS());
-  RemoveEntryByURL(url);
+  std::unique_ptr<ReadingListModel::ScopedReadingListBatchUpdate>
+      scoped_model_batch_updates = nullptr;
+  if (GetEntryByURL(url)) {
+    scoped_model_batch_updates = BeginBatchUpdates();
+    RemoveEntryByURL(url);
+  }
 
   std::string trimmed_title = base::CollapseWhitespaceASCII(title, false);
 
@@ -485,7 +489,7 @@ void ReadingListModelImpl::SetContentSuggestionsExtra(
 
 std::unique_ptr<ReadingListModel::ScopedReadingListBatchUpdate>
 ReadingListModelImpl::CreateBatchToken() {
-  return base::MakeUnique<ReadingListModelImpl::ScopedReadingListBatchUpdate>(
+  return std::make_unique<ReadingListModelImpl::ScopedReadingListBatchUpdate>(
       this);
 }
 

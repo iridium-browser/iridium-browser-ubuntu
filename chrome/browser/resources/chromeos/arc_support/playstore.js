@@ -13,8 +13,20 @@ function navigateToLanguageAndCountryCode(language, countryCode) {
       doc.getElementById('play-footer').getElementsByTagName('select')[0];
 
   var applyTermsForLangAndZone = function(termsLang) {
+    // Check special case for en_us which may be mapped to en.
+    var matchDefaultUs = null;
+    if (window.location.href ==
+            'https://play.google.com/intl/en_us/about/play-terms.html' &&
+        termsLang == 'en' && countryCode == 'us' &&
+        selectLangZoneTerms.value == '/intl/en/about/play-terms.html') {
+      return true;
+    }
     var matchByLangZone =
         '/intl/' + termsLang + '_' + countryCode + '/about/play-terms.html';
+    if (selectLangZoneTerms.value == matchByLangZone) {
+      // Already selected what is needed.
+      return true;
+    }
     for (var i = selectLangZoneTerms.options.length - 1; i >= 0; --i) {
       var option = selectLangZoneTerms.options[i];
       if (option.value == matchByLangZone) {
@@ -52,6 +64,7 @@ function navigateToLanguageAndCountryCode(language, countryCode) {
 function processLangZoneTerms(initialLoad, language, countryCode) {
   var langSegments = language.split('-');
   if (initialLoad && navigateToLanguageAndCountryCode(language, countryCode)) {
+    document.body.hidden = false;
     return true;
   }
 
@@ -97,6 +110,14 @@ function processLangZoneTerms(initialLoad, language, countryCode) {
     document.body.hidden = false;
   }
   return true;
+}
+
+/**
+ * Returns the raw body HTML of the ToS contents.
+ * @return {string} HTML of document body.
+ */
+function getToSContent() {
+  return document.body.innerHTML;
 }
 
 /**

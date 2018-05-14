@@ -7,50 +7,31 @@
 
 #include <string>
 
-#include "base/files/scoped_file.h"
+#include "base/files/platform_file.h"
 #include "base/macros.h"
-#include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "build/build_config.h"
-#include "mojo/edk/embedder/scoped_platform_handle.h"
-
-namespace base {
-class TaskRunner;
-}  // namespace base
+#include "chrome/profiling/memlog_receiver_pipe.h"
 
 namespace profiling {
 
-class MemlogStreamReceiver;
-
-class MemlogReceiverPipe
-    : public base::RefCountedThreadSafe<MemlogReceiverPipe> {
+class MemlogReceiverPipe : public MemlogReceiverPipeBase,
+                           public base::MessageLoopForIO::Watcher {
  public:
-  explicit MemlogReceiverPipe(base::ScopedFD fd);
+  explicit MemlogReceiverPipe(mojo::edk::ScopedPlatformHandle handle);
 
-  void ReadUntilBlocking();
-
-  void SetReceiver(scoped_refptr<base::TaskRunner> task_runner,
-                   scoped_refptr<MemlogStreamReceiver> receiver);
-
-  // TODO(ajwong): Remove when file watching is moved from the PipeServer to
-  // the MemlogReceiverPipe.
-  base::MessageLoopForIO::FileDescriptorWatcher* controller() {
-    return &controller_;
-  }
+  // Must be called on the IO thread.
+  void StartReadingOnIOThread();
 
  private:
-  friend class base::RefCountedThreadSafe<MemlogReceiverPipe>;
-  ~MemlogReceiverPipe();
+  ~MemlogReceiverPipe() override;
 
-  mojo::edk::ScopedPlatformHandle handle_;
+  // MessageLoopForIO::Watcher implementation.
+  void OnFileCanReadWithoutBlocking(int fd) override;
+  void OnFileCanWriteWithoutBlocking(int fd) override;
+
   base::MessageLoopForIO::FileDescriptorWatcher controller_;
   std::unique_ptr<char[]> read_buffer_;
-
-  scoped_refptr<base::TaskRunner> receiver_task_runner_;
-  scoped_refptr<MemlogStreamReceiver> receiver_;
-
-  // Make base::UnixDomainSocket::RecvMsg happy.
-  std::vector<base::ScopedFD>* dummy_for_receive_;
 
   DISALLOW_COPY_AND_ASSIGN(MemlogReceiverPipe);
 };

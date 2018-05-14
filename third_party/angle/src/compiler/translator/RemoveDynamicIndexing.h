@@ -15,8 +15,11 @@ namespace sh
 
 class TIntermNode;
 class TSymbolTable;
+class PerformanceDiagnostics;
 
-void RemoveDynamicIndexing(TIntermNode *root, TSymbolTable *symbolTable, int shaderVersion);
+void RemoveDynamicIndexing(TIntermNode *root,
+                           TSymbolTable *symbolTable,
+                           PerformanceDiagnostics *perfDiagnostics);
 
 }  // namespace sh
 

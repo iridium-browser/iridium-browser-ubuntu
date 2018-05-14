@@ -92,20 +92,18 @@ bool ShellNetworkDelegate::OnCanGetCookies(const net::URLRequest& request,
       net::StaticCookiePolicy::BLOCK_ALL_THIRD_PARTY_COOKIES :
       net::StaticCookiePolicy::ALLOW_ALL_COOKIES;
   net::StaticCookiePolicy policy(policy_type);
-  int rv =
-      policy.CanAccessCookies(request.url(), request.first_party_for_cookies());
+  int rv = policy.CanAccessCookies(request.url(), request.site_for_cookies());
   return rv == net::OK;
 }
 
 bool ShellNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
-                                          const std::string& cookie_line,
+                                          const net::CanonicalCookie& cookie,
                                           net::CookieOptions* options) {
   net::StaticCookiePolicy::Type policy_type = g_block_third_party_cookies ?
       net::StaticCookiePolicy::BLOCK_ALL_THIRD_PARTY_COOKIES :
       net::StaticCookiePolicy::ALLOW_ALL_COOKIES;
   net::StaticCookiePolicy policy(policy_type);
-  int rv =
-      policy.CanAccessCookies(request.url(), request.first_party_for_cookies());
+  int rv = policy.CanAccessCookies(request.url(), request.site_for_cookies());
   return rv == net::OK;
 }
 

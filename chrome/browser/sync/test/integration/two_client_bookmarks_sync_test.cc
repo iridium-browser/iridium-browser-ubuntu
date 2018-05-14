@@ -37,12 +37,14 @@ using bookmarks_helper::AddURL;
 using bookmarks_helper::AllModelsMatch;
 using bookmarks_helper::AllModelsMatchVerifier;
 using bookmarks_helper::CheckFaviconExpired;
+using bookmarks_helper::CheckHasNoFavicon;
 using bookmarks_helper::ContainsDuplicateBookmarks;
 using bookmarks_helper::CountAllBookmarks;
 using bookmarks_helper::CountBookmarksWithTitlesMatching;
 using bookmarks_helper::CountBookmarksWithUrlsMatching;
 using bookmarks_helper::CountFoldersWithTitlesMatching;
 using bookmarks_helper::CreateFavicon;
+using bookmarks_helper::DeleteFaviconMappings;
 using bookmarks_helper::ExpireFavicon;
 using bookmarks_helper::GetBookmarkBarNode;
 using bookmarks_helper::GetManagedNode;
@@ -304,6 +306,35 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
   const BookmarkNode* bookmark11 = GetUniqueNodeByURL(1, page_url1);
   SetTitle(1, bookmark11, std::string(kNewTitle));
   ASSERT_TRUE(BookmarksMatchVerifierChecker().Wait());
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, SC_DeleteFavicon) {
+  const GURL page_url("http://www.google.com/a");
+  const GURL icon_url("http://www.google.com/favicon.ico");
+
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(AllModelsMatchVerifier());
+
+  const BookmarkNode* bookmark0 = AddURL(0, kGenericURLTitle, page_url);
+  ASSERT_NE(nullptr, bookmark0);
+
+  SetFavicon(0, bookmark0, icon_url, CreateFavicon(SK_ColorWHITE),
+             bookmarks_helper::FROM_UI);
+  ASSERT_TRUE(BookmarksMatchVerifierChecker().Wait());
+
+  DeleteFaviconMappings(0, bookmark0, bookmarks_helper::FROM_UI);
+  ASSERT_TRUE(BookmarksMatchVerifierChecker().Wait());
+
+  // Set the title for |page_url|. This should not revert the deletion of
+  // favicon mappings.
+  const char kNewTitle[] = "New Title";
+  ASSERT_STRNE(kGenericURLTitle, kNewTitle);
+  const BookmarkNode* bookmark1 = GetUniqueNodeByURL(1, page_url);
+  SetTitle(1, bookmark1, std::string(kNewTitle));
+  ASSERT_TRUE(BookmarksMatchVerifierChecker().Wait());
+
+  // |page_url| should still have no mapping.
+  CheckHasNoFavicon(0, page_url);
 }
 
 IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, SC_AddNonHTTPBMs) {
@@ -843,15 +874,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, SC_ReverseTheOrderOf10BMs) {
   ASSERT_TRUE(BookmarksMatchVerifierChecker().Wait());
 }
 
-// flaky on Windows: http://crbug.com/412169
-#if defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_SC_MovingBMsFromBMBarToBMFolder \
-  DISABLED_SC_MovingBMsFromBMBarToBMFolder
-#else
-#define MAYBE_SC_MovingBMsFromBMBarToBMFolder SC_MovingBMsFromBMBarToBMFolder
-#endif
 IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
-                       MAYBE_SC_MovingBMsFromBMBarToBMFolder) {
+                       SC_MovingBMsFromBMBarToBMFolder) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(AllModelsMatchVerifier());
 
@@ -875,15 +899,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
   }
 }
 
-// flaky on Windows and Mac: http://crbug.com/412169
-#if defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_SC_MovingBMsFromBMFoldToBMBar \
-  DISABLED_SC_MovingBMsFromBMFoldToBMBar
-#else
-#define MAYBE_SC_MovingBMsFromBMFoldToBMBar SC_MovingBMsFromBMFoldToBMBar
-#endif
 IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
-                       MAYBE_SC_MovingBMsFromBMFoldToBMBar) {
+                       SC_MovingBMsFromBMFoldToBMBar) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(AllModelsMatchVerifier());
 
@@ -1829,7 +1846,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
   ASSERT_TRUE(IsEncryptionComplete(1));
   ASSERT_TRUE(GetSyncService(1)->IsPassphraseRequired());
 
-  // Client 1 adds bookmarks between the first two and between the second two.
+  // Client 0 adds bookmarks between the first two and between the second two.
   ASSERT_NE(nullptr, AddURL(0, 1, IndexedURLTitle(3), GURL(IndexedURL(3))));
   ASSERT_NE(nullptr, AddURL(0, 3, IndexedURLTitle(4), GURL(IndexedURL(4))));
   EXPECT_FALSE(AllModelsMatchVerifier());

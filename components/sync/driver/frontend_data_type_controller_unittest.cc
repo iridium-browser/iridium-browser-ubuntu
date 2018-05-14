@@ -8,12 +8,10 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/tracked_objects.h"
 #include "components/sync/driver/data_type_controller_mock.h"
 #include "components/sync/driver/fake_sync_client.h"
 #include "components/sync/driver/fake_sync_service.h"
@@ -74,8 +72,8 @@ class SyncFrontendDataTypeControllerTest : public testing::Test {
         sync_client_(&components_factory_) {}
 
   void SetUp() override {
-    dtc_mock_ = base::MakeUnique<StrictMock<FrontendDataTypeControllerMock>>();
-    frontend_dtc_ = base::MakeUnique<FrontendDataTypeControllerFake>(
+    dtc_mock_ = std::make_unique<StrictMock<FrontendDataTypeControllerMock>>();
+    frontend_dtc_ = std::make_unique<FrontendDataTypeControllerFake>(
         &sync_client_, dtc_mock_.get());
   }
 

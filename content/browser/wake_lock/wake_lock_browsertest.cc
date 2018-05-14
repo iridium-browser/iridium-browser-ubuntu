@@ -4,6 +4,7 @@
 
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/test/test_timeouts.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/common/content_switches.h"
@@ -24,7 +25,7 @@ const char kBlinkWakeLockFeature[] = "WakeLock";
 
 void OnHasWakeLock(bool* out, bool has_wakelock) {
   *out = has_wakelock;
-  base::MessageLoop::current()->QuitNow();
+  base::RunLoop::QuitCurrentDeprecated();
 }
 
 }  // namespace
@@ -76,7 +77,7 @@ class WakeLockTest : public ContentBrowserTest {
     base::RunLoop run_loop;
 
     GetRendererWakeLock()->HasWakeLockForTests(
-        base::Bind(&OnHasWakeLock, &has_wakelock));
+        base::BindOnce(&OnHasWakeLock, &has_wakelock));
     run_loop.Run();
     return has_wakelock;
   }

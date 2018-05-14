@@ -10,6 +10,8 @@
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/browser/phone_number_i18n.h"
+#include "components/autofill/core/browser/validation.h"
 #include "components/payments/core/payment_request_data_util.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/payments/payment_request.h"
@@ -24,8 +26,8 @@
 
 @interface ContactInfoEditMediator ()
 
-// The PaymentRequest object owning an instance of web::PaymentRequest as
-// provided by the page invoking the Payment Request API. This is a weak
+// The PaymentRequest object owning an instance of payments::WebPaymentRequest
+// as provided by the page invoking the Payment Request API. This is a weak
 // pointer and should outlive this class.
 @property(nonatomic, assign) payments::PaymentRequest* paymentRequest;
 
@@ -68,11 +70,17 @@
 #pragma mark - PaymentRequestEditViewControllerDataSource
 
 - (NSString*)title {
-  // TODO(crbug.com/602666): Title varies depending on what field is missing.
-  // e.g., Add Email vs. Add Phone Number.
-  return self.profile
-             ? l10n_util::GetNSString(IDS_PAYMENTS_EDIT_CONTACT_DETAILS_LABEL)
-             : l10n_util::GetNSString(IDS_PAYMENTS_ADD_CONTACT_DETAILS_LABEL);
+  if (!self.profile)
+    return l10n_util::GetNSString(IDS_PAYMENTS_ADD_CONTACT_DETAILS_LABEL);
+
+  if (self.paymentRequest->profile_comparator()->IsContactInfoComplete(
+          self.profile)) {
+    return l10n_util::GetNSString(IDS_PAYMENTS_EDIT_CONTACT_DETAILS_LABEL);
+  }
+
+  return base::SysUTF16ToNSString(
+      self.paymentRequest->profile_comparator()
+          ->GetTitleForMissingContactFields(*self.profile));
 }
 
 - (CollectionViewItem*)headerItem {
@@ -83,18 +91,58 @@
   return NO;
 }
 
-- (void)formatValueForEditorField:(EditorField*)field {
-  if (field.autofillUIType == AutofillUITypeProfileHomePhoneWholeNumber) {
+- (BOOL)shouldFormatValueForAutofillUIType:(AutofillUIType)type {
+  return (type == AutofillUITypeProfileHomePhoneWholeNumber);
+}
+
+- (NSString*)formatValue:(NSString*)value autofillUIType:(AutofillUIType)type {
+  if (type == AutofillUITypeProfileHomePhoneWholeNumber) {
     const std::string countryCode =
         autofill::AutofillCountry::CountryCodeForLocale(
             _paymentRequest->GetApplicationLocale());
-    field.value =
-        base::SysUTF8ToNSString(payments::data_util::FormatPhoneForDisplay(
-            base::SysNSStringToUTF8(field.value), countryCode));
+    return base::SysUTF8ToNSString(autofill::i18n::FormatPhoneForDisplay(
+        base::SysNSStringToUTF8(value), countryCode));
   }
+  return nil;
 }
 
 - (UIImage*)iconIdentifyingEditorField:(EditorField*)field {
+  return nil;
+}
+
+#pragma mark - PaymentRequestEditViewControllerValidator
+
+- (NSString*)paymentRequestEditViewController:
+                 (PaymentRequestEditViewController*)controller
+                                validateField:(EditorField*)field {
+  if (field.value.length) {
+    switch (field.autofillUIType) {
+      case AutofillUITypeProfileHomePhoneWholeNumber: {
+        const std::string countryCode =
+            autofill::AutofillCountry::CountryCodeForLocale(
+                self.paymentRequest->GetApplicationLocale());
+        if (!autofill::IsPossiblePhoneNumber(
+                base::SysNSStringToUTF16(field.value), countryCode)) {
+          return l10n_util::GetNSString(
+              IDS_PAYMENTS_PHONE_INVALID_VALIDATION_MESSAGE);
+        }
+        break;
+      }
+      case AutofillUITypeProfileEmailAddress: {
+        if (!autofill::IsValidEmailAddress(
+                base::SysNSStringToUTF16(field.value))) {
+          return l10n_util::GetNSString(
+              IDS_PAYMENTS_EMAIL_INVALID_VALIDATION_MESSAGE);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  } else if (field.isRequired) {
+    return l10n_util::GetNSString(
+        IDS_PAYMENTS_FIELD_REQUIRED_VALIDATION_MESSAGE);
+  }
   return nil;
 }
 
@@ -125,7 +173,7 @@
     NSString* phone =
         self.profile
             ? base::SysUTF16ToNSString(
-                  payments::data_util::GetFormattedPhoneNumberForDisplay(
+                  autofill::i18n::GetFormattedPhoneNumberForDisplay(
                       *self.profile, _paymentRequest->GetApplicationLocale()))
             : nil;
     EditorField* phoneField = [[EditorField alloc]

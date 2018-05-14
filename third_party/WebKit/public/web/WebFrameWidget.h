@@ -33,8 +33,8 @@
 
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebDragOperation.h"
-#include "public/platform/WebPageVisibilityState.h"
 #include "public/web/WebWidget.h"
+#include "third_party/WebKit/public/mojom/page/page_visibility_state.mojom-shared.h"
 
 namespace blink {
 
@@ -42,6 +42,7 @@ class WebDragData;
 class WebLocalFrame;
 class WebInputMethodController;
 class WebWidgetClient;
+struct WebFloatPoint;
 
 class WebFrameWidget : public WebWidget {
  public:
@@ -51,7 +52,8 @@ class WebFrameWidget : public WebWidget {
   // We still track page-level visibility, but additionally we need to notify a
   // WebFrameWidget when its owning RenderWidget receives a Show or Hide
   // directive, so that it knows whether it needs to draw or not.
-  virtual void SetVisibilityState(WebPageVisibilityState visibility_state) {}
+  virtual void SetVisibilityState(mojom::PageVisibilityState visibility_state) {
+  }
 
   // Overrides the WebFrameWidget's background and base background color. You
   // can use this to enforce a transparent background, which is useful if you
@@ -88,25 +90,25 @@ class WebFrameWidget : public WebWidget {
   // on the WebFrameWidget.
   virtual WebDragOperation DragTargetDragEnter(
       const WebDragData&,
-      const WebPoint& point_in_viewport,
-      const WebPoint& screen_point,
+      const WebFloatPoint& point_in_viewport,
+      const WebFloatPoint& screen_point,
       WebDragOperationsMask operations_allowed,
       int modifiers) = 0;
   virtual WebDragOperation DragTargetDragOver(
-      const WebPoint& point_in_viewport,
-      const WebPoint& screen_point,
+      const WebFloatPoint& point_in_viewport,
+      const WebFloatPoint& screen_point,
       WebDragOperationsMask operations_allowed,
       int modifiers) = 0;
-  virtual void DragTargetDragLeave(const WebPoint& point_in_viewport,
-                                   const WebPoint& screen_point) = 0;
+  virtual void DragTargetDragLeave(const WebFloatPoint& point_in_viewport,
+                                   const WebFloatPoint& screen_point) = 0;
   virtual void DragTargetDrop(const WebDragData&,
-                              const WebPoint& point_in_viewport,
-                              const WebPoint& screen_point,
+                              const WebFloatPoint& point_in_viewport,
+                              const WebFloatPoint& screen_point,
                               int modifiers) = 0;
 
   // Notifies the WebFrameWidget that a drag has terminated.
-  virtual void DragSourceEndedAt(const WebPoint& point_in_viewport,
-                                 const WebPoint& screen_point,
+  virtual void DragSourceEndedAt(const WebFloatPoint& point_in_viewport,
+                                 const WebFloatPoint& screen_point,
                                  WebDragOperation) = 0;
 
   // Notifies the WebFrameWidget that the system drag and drop operation has
@@ -121,6 +123,18 @@ class WebFrameWidget : public WebWidget {
   // Sets the inert bit on an out-of-process iframe, causing it to ignore
   // input.
   virtual void SetIsInert(bool) {}
+
+  // Toggles render throttling for an out-of-process iframe. Local frames are
+  // throttled based on their visibility in the viewport, but remote frames
+  // have to have throttling information propagated from parent to child
+  // across processes.
+  virtual void UpdateRenderThrottlingStatus(bool is_throttled,
+                                            bool subtree_throttled) {}
+
+  // Returns the currently focused WebLocalFrame (if any) inside this
+  // WebFrameWidget. That is a WebLocalFrame which is focused and shares the
+  // same LocalRoot() as this WebFrameWidget's LocalRoot().
+  virtual WebLocalFrame* FocusedWebLocalFrameInWidget() const = 0;
 };
 
 }  // namespace blink

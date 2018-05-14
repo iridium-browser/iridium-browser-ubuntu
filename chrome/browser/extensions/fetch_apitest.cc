@@ -5,13 +5,13 @@
 #include "base/files/file_path.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/extensions/test_extension_dir.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/common/extension.h"
+#include "extensions/test/test_extension_dir.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
@@ -63,7 +63,7 @@ class ExtensionFetchTest : public ExtensionApiTest {
   // Opens a tab, puts it in the foreground, navigates it to |url| then returns
   // its WebContents.
   content::WebContents* CreateAndNavigateTab(const GURL& url) {
-    chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
+    NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
     params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
     ui_test_utils::NavigateToURL(&params);
     return browser()->tab_strip_model()->GetActiveWebContents();

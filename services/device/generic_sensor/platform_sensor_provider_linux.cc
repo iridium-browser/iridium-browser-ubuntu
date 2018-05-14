@@ -4,15 +4,36 @@
 
 #include "services/device/generic_sensor/platform_sensor_provider_linux.h"
 
+#include <utility>
+#include <vector>
+
+#include "base/memory/ptr_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
 #include "base/task_runner_util.h"
 #include "base/threading/thread.h"
+#include "services/device/generic_sensor/linear_acceleration_fusion_algorithm_using_accelerometer.h"
 #include "services/device/generic_sensor/linux/sensor_data_linux.h"
+#include "services/device/generic_sensor/orientation_quaternion_fusion_algorithm_using_euler_angles.h"
+#include "services/device/generic_sensor/platform_sensor_fusion.h"
 #include "services/device/generic_sensor/platform_sensor_linux.h"
 #include "services/device/generic_sensor/platform_sensor_reader_linux.h"
+#include "services/device/generic_sensor/relative_orientation_euler_angles_fusion_algorithm_using_accelerometer.h"
 
 namespace device {
+namespace {
+bool IsFusionSensorType(mojom::SensorType type) {
+  switch (type) {
+    case mojom::SensorType::LINEAR_ACCELERATION:
+    case mojom::SensorType::RELATIVE_ORIENTATION_EULER_ANGLES:
+    case mojom::SensorType::RELATIVE_ORIENTATION_QUATERNION:
+      return true;
+    default:
+      return false;
+  }
+}
+}  // namespace
 
 // static
 PlatformSensorProviderLinux* PlatformSensorProviderLinux::GetInstance() {
@@ -32,10 +53,17 @@ PlatformSensorProviderLinux::~PlatformSensorProviderLinux() {
 
 void PlatformSensorProviderLinux::CreateSensorInternal(
     mojom::SensorType type,
-    mojo::ScopedSharedBufferMapping mapping,
+    SensorReadingSharedBuffer* reading_buffer,
     const CreateSensorCallback& callback) {
   if (!sensor_device_manager_)
     sensor_device_manager_.reset(new SensorDeviceManager());
+
+  if (IsFusionSensorType(type)) {
+    // For sensor fusion the device nodes initialization will happen
+    // during fetching the source sensors.
+    CreateFusionSensor(type, reading_buffer, callback);
+    return;
+  }
 
   if (!sensor_nodes_enumerated_) {
     if (!sensor_nodes_enumeration_started_) {
@@ -49,18 +77,16 @@ void PlatformSensorProviderLinux::CreateSensorInternal(
 
   SensorInfoLinux* sensor_device = GetSensorDevice(type);
   if (!sensor_device) {
-    // If there are no sensors, stop polling thread.
-    if (!HasSensors())
-      AllSensorsRemoved();
     callback.Run(nullptr);
     return;
   }
-  SensorDeviceFound(type, std::move(mapping), callback, sensor_device);
+
+  SensorDeviceFound(type, reading_buffer, callback, sensor_device);
 }
 
 void PlatformSensorProviderLinux::SensorDeviceFound(
     mojom::SensorType type,
-    mojo::ScopedSharedBufferMapping mapping,
+    SensorReadingSharedBuffer* reading_buffer,
     const PlatformSensorProviderBase::CreateSensorCallback& callback,
     const SensorInfoLinux* sensor_device) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -72,7 +98,7 @@ void PlatformSensorProviderLinux::SensorDeviceFound(
   }
 
   scoped_refptr<PlatformSensorLinux> sensor =
-      new PlatformSensorLinux(type, std::move(mapping), this, sensor_device,
+      new PlatformSensorLinux(type, reading_buffer, this, sensor_device,
                               polling_thread_->task_runner());
   callback.Run(sensor);
 }
@@ -84,7 +110,7 @@ void PlatformSensorProviderLinux::SetFileTaskRunner(
     file_task_runner_ = file_task_runner;
 }
 
-void PlatformSensorProviderLinux::AllSensorsRemoved() {
+void PlatformSensorProviderLinux::FreeResources() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(file_task_runner_);
   Shutdown();
@@ -159,6 +185,9 @@ void PlatformSensorProviderLinux::ProcessStoredRequests() {
     return;
 
   for (auto const& type : request_types) {
+    if (IsFusionSensorType(type))
+      continue;
+
     SensorInfoLinux* device = nullptr;
     auto device_entry = sensor_devices_by_type_.find(type);
     if (device_entry != sensor_devices_by_type_.end())
@@ -172,11 +201,11 @@ void PlatformSensorProviderLinux::CreateSensorAndNotify(
     SensorInfoLinux* sensor_device) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   scoped_refptr<PlatformSensorLinux> sensor;
-  mojo::ScopedSharedBufferMapping mapping = MapSharedBufferForType(type);
-  if (sensor_device && mapping && StartPollingThread()) {
-    sensor =
-        new PlatformSensorLinux(type, std::move(mapping), this, sensor_device,
-                                polling_thread_->task_runner());
+  SensorReadingSharedBuffer* reading_buffer =
+      GetSensorReadingSharedBufferForType(type);
+  if (sensor_device && reading_buffer && StartPollingThread()) {
+    sensor = new PlatformSensorLinux(type, reading_buffer, this, sensor_device,
+                                     polling_thread_->task_runner());
   }
   NotifySensorCreated(type, sensor);
 }
@@ -207,8 +236,38 @@ void PlatformSensorProviderLinux::OnDeviceRemoved(
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   auto it = sensor_devices_by_type_.find(type);
   if (it != sensor_devices_by_type_.end() &&
-      it->second->device_node == device_node)
+      it->second->device_node == device_node) {
     sensor_devices_by_type_.erase(it);
+  }
+}
+
+void PlatformSensorProviderLinux::CreateFusionSensor(
+    mojom::SensorType type,
+    SensorReadingSharedBuffer* reading_buffer,
+    const CreateSensorCallback& callback) {
+  DCHECK(IsFusionSensorType(type));
+  std::unique_ptr<PlatformSensorFusionAlgorithm> fusion_algorithm;
+  switch (type) {
+    case mojom::SensorType::LINEAR_ACCELERATION:
+      fusion_algorithm = std::make_unique<
+          LinearAccelerationFusionAlgorithmUsingAccelerometer>();
+      break;
+    case mojom::SensorType::RELATIVE_ORIENTATION_EULER_ANGLES:
+      fusion_algorithm = std::make_unique<
+          RelativeOrientationEulerAnglesFusionAlgorithmUsingAccelerometer>();
+      break;
+    case mojom::SensorType::RELATIVE_ORIENTATION_QUATERNION:
+      fusion_algorithm = std::make_unique<
+          OrientationQuaternionFusionAlgorithmUsingEulerAngles>(
+          false /* absolute */);
+      break;
+    default:
+      NOTREACHED();
+  }
+
+  DCHECK(fusion_algorithm);
+  PlatformSensorFusion::Create(reading_buffer, this,
+                               std::move(fusion_algorithm), callback);
 }
 
 }  // namespace device

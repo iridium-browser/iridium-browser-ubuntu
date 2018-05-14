@@ -9,6 +9,7 @@
 #include "base/memory/ref_counted.h"
 #include "components/safe_browsing/browser/url_checker_delegate.h"
 
+class ProfileIOData;
 namespace safe_browsing {
 
 class SafeBrowsingUIManager;
@@ -17,7 +18,8 @@ class UrlCheckerDelegateImpl : public UrlCheckerDelegate {
  public:
   UrlCheckerDelegateImpl(
       scoped_refptr<SafeBrowsingDatabaseManager> database_manager,
-      scoped_refptr<SafeBrowsingUIManager> ui_manager);
+      scoped_refptr<SafeBrowsingUIManager> ui_manager,
+      const ProfileIOData* io_data);
 
  private:
   ~UrlCheckerDelegateImpl() override;
@@ -26,8 +28,20 @@ class UrlCheckerDelegateImpl : public UrlCheckerDelegate {
   void MaybeDestroyPrerenderContents(
       const base::Callback<content::WebContents*()>& web_contents_getter)
       override;
+  // Only uses |resource| and ignores the rest of parameters.
   void StartDisplayingBlockingPageHelper(
-      const security_interstitials::UnsafeResource& resource) override;
+      const security_interstitials::UnsafeResource& resource,
+      const std::string& method,
+      const net::HttpRequestHeaders& headers,
+      bool is_main_frame,
+      bool has_user_gesture) override;
+  bool IsUrlWhitelisted(const GURL& url) override;
+  bool ShouldSkipRequestCheck(content::ResourceContext* resource_context,
+                              const GURL& original_url,
+                              int frame_tree_node_id,
+                              int render_process_id,
+                              int render_frame_id,
+                              bool originated_from_service_worker) override;
   const SBThreatTypeSet& GetThreatTypes() override;
   SafeBrowsingDatabaseManager* GetDatabaseManager() override;
   BaseUIManager* GetUIManager() override;
@@ -35,6 +49,7 @@ class UrlCheckerDelegateImpl : public UrlCheckerDelegate {
   scoped_refptr<SafeBrowsingDatabaseManager> database_manager_;
   scoped_refptr<SafeBrowsingUIManager> ui_manager_;
   SBThreatTypeSet threat_types_;
+  const ProfileIOData* profile_io_data_;
 
   DISALLOW_COPY_AND_ASSIGN(UrlCheckerDelegateImpl);
 };

@@ -4,19 +4,22 @@
 
 #include "base/path_service.h"
 #include "base/posix/global_descriptors.h"
+#include "build/build_config.h"
 #include "content/browser/child_process_launcher.h"
 #include "content/browser/child_process_launcher_helper.h"
 #include "content/browser/child_process_launcher_helper_posix.h"
-#include "content/browser/renderer_host/render_sandbox_host_linux.h"
+#include "content/browser/sandbox_host_linux.h"
 #include "content/browser/zygote_host/zygote_communication_linux.h"
 #include "content/browser/zygote_host/zygote_host_impl_linux.h"
-#include "content/common/sandbox_linux/sandbox_linux.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/zygote_handle_linux.h"
+#include "content/public/common/common_sandbox_support_linux.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+#include "content/public/common/zygote_handle.h"
+#include "gpu/config/gpu_switches.h"
+#include "services/service_manager/sandbox/linux/sandbox_linux.h"
 
 namespace content {
 namespace internal {
@@ -39,23 +42,24 @@ ChildProcessLauncherHelper::GetFilesToMap() {
                                       GetProcessType(), command_line());
 }
 
-void ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
-    const FileDescriptorInfo& files_to_register,
+bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
+    const PosixFileDescriptorInfo& files_to_register,
     base::LaunchOptions* options) {
   // Convert FD mapping to FileHandleMappingVector
-  std::unique_ptr<base::FileHandleMappingVector> fds_to_map =
-      files_to_register.GetMappingWithIDAdjustment(
-          base::GlobalDescriptors::kBaseDescriptor);
+  options->fds_to_remap = files_to_register.GetMappingWithIDAdjustment(
+      base::GlobalDescriptors::kBaseDescriptor);
 
-  if (GetProcessType() == switches::kRendererProcess) {
-    const int sandbox_fd =
-        RenderSandboxHostLinux::GetInstance()->GetRendererSocket();
-    fds_to_map->push_back(std::make_pair(sandbox_fd, GetSandboxFD()));
+  if (GetProcessType() == switches::kRendererProcess ||
+      (GetProcessType() == switches::kGpuProcess &&
+       base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kEnableOOPRasterization))) {
+    const int sandbox_fd = SandboxHostLinux::GetInstance()->GetChildSocket();
+    options->fds_to_remap.push_back(std::make_pair(sandbox_fd, GetSandboxFD()));
   }
 
   options->environ = delegate_->GetEnvironment();
-  // fds_to_remap will de deleted in AfterLaunchOnLauncherThread() below.
-  options->fds_to_remap = fds_to_map.release();
+
+  return true;
 }
 
 ChildProcessLauncherHelper::Process
@@ -75,8 +79,23 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
     // be created lazily here, or in the delegate GetZygote() implementations.
     // Additionally, the delegate could provide a UseGenericZygote() method.
     base::ProcessHandle handle = zygote_handle->ForkRequest(
-        command_line()->argv(), std::move(files_to_register), GetProcessType());
+        command_line()->argv(), files_to_register->GetMapping(),
+        GetProcessType());
     *launch_result = LAUNCH_RESULT_SUCCESS;
+
+#if !defined(OS_OPENBSD)
+    if (handle) {
+      // This is just a starting score for a renderer or extension (the
+      // only types of processes that will be started this way).  It will
+      // get adjusted as time goes on.  (This is the same value as
+      // chrome::kLowestRendererOomScore in chrome/chrome_constants.h, but
+      // that's not something we can include here.)
+      const int kLowestRendererOomScore = 300;
+      ZygoteHostImpl::GetInstance()->AdjustRendererOOMScore(
+          handle, kLowestRendererOomScore);
+    }
+#endif
+
     Process process;
     process.process = base::Process(handle);
     process.zygote = zygote_handle;
@@ -93,7 +112,6 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
 void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
     const ChildProcessLauncherHelper::Process& process,
     const base::LaunchOptions& options) {
-  delete options.fds_to_remap;
 }
 
 base::TerminationStatus ChildProcessLauncherHelper::GetTerminationStatus(
@@ -133,11 +151,10 @@ void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
 
 void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
     base::Process process,
-    bool background,
-    bool boost_for_pending_views) {
+    const ChildProcessLauncherPriority& priority) {
   DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
   if (process.CanBackgroundProcesses())
-    process.SetProcessBackgrounded(background);
+    process.SetProcessBackgrounded(priority.background);
 }
 
 // static

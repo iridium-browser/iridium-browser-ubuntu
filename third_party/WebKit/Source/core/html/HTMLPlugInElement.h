@@ -24,9 +24,10 @@
 #ifndef HTMLPlugInElement_h
 #define HTMLPlugInElement_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/CoreExport.h"
+#include "core/dom/CreateElementFlags.h"
 #include "core/html/HTMLFrameOwnerElement.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/bindings/SharedPersistent.h"
 #include "v8/include/v8.h"
 
@@ -34,12 +35,29 @@ namespace blink {
 
 class HTMLImageLoader;
 class LayoutEmbeddedContent;
-class LayoutEmbeddedItem;
-class PluginView;
+class LayoutEmbeddedObject;
+class WebPluginContainerImpl;
 
 enum PreferPlugInsForImagesOption {
   kShouldPreferPlugInsForImages,
   kShouldNotPreferPlugInsForImages
+};
+
+class PluginParameters {
+ public:
+  PluginParameters() {}
+  PluginParameters(Vector<String>& param_names, Vector<String>& param_values)
+      : names_(param_names), values_(param_values) {}
+
+  const Vector<String>& Names() const;
+  const Vector<String>& Values() const;
+  void AppendAttribute(const Attribute&);
+  void AppendNameWithValue(const String& name, const String& value);
+  int FindStringInNames(const String&);
+
+ private:
+  Vector<String> names_;
+  Vector<String> values_;
 };
 
 class CORE_EXPORT HTMLPlugInElement
@@ -49,7 +67,9 @@ class CORE_EXPORT HTMLPlugInElement
 
  public:
   ~HTMLPlugInElement() override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
+
+  bool IsPlugin() override { return true; }
 
   bool HasPendingActivity() const final;
 
@@ -66,8 +86,8 @@ class CORE_EXPORT HTMLPlugInElement
   // PluginEmbeddedContentView will synchronously create the plugin if required
   // by calling LayoutEmbeddedContentForJSBindings. Possibly the
   // PluginEmbeddedContentView code can be inlined into PluginWrapper.
-  PluginView* PluginEmbeddedContentView() const;
-  PluginView* OwnedPlugin() const;
+  WebPluginContainerImpl* PluginEmbeddedContentView() const;
+  WebPluginContainerImpl* OwnedPlugin() const;
   bool CanProcessDrag() const;
   const String& Url() const { return url_; }
 
@@ -83,13 +103,14 @@ class CORE_EXPORT HTMLPlugInElement
   void RequestPluginCreationWithoutLayoutObjectIfPossible();
   void CreatePluginWithoutLayoutObject();
 
-  virtual Vector<WebParsedFeaturePolicyDeclaration> ConstructContainerPolicy()
-      const;
+  virtual ParsedFeaturePolicy ConstructContainerPolicy(
+      Vector<String>* /* messages */,
+      bool* /* old_syntax */) const;
 
  protected:
   HTMLPlugInElement(const QualifiedName& tag_name,
                     Document&,
-                    bool created_by_parser,
+                    const CreateElementFlags,
                     PreferPlugInsForImagesOption);
 
   // Node functions:
@@ -99,9 +120,10 @@ class CORE_EXPORT HTMLPlugInElement
 
   // Element functions:
   bool IsPresentationAttribute(const QualifiedName&) const override;
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 
   virtual bool HasFallbackContent() const;
   virtual bool UseFallbackContent() const;
@@ -110,10 +132,9 @@ class CORE_EXPORT HTMLPlugInElement
   virtual LayoutEmbeddedContent* LayoutEmbeddedContentForJSBindings() const;
 
   bool IsImageType();
-  LayoutEmbeddedItem GetLayoutEmbeddedItem() const;
+  LayoutEmbeddedObject* GetLayoutEmbeddedObject() const;
   bool AllowedToLoadFrameURL(const String& url);
-  bool RequestObject(const Vector<String>& param_names,
-                     const Vector<String>& param_values);
+  bool RequestObject(const PluginParameters& plugin_params);
 
   void DispatchErrorEvent();
   bool IsErrorplaceholder();
@@ -140,7 +161,7 @@ class CORE_EXPORT HTMLPlugInElement
   // Element overrides:
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
   bool SupportsFocus() const final { return true; }
-  bool LayoutObjectIsFocusable() const final;
+  bool IsFocusableStyle() const final;
   bool IsKeyboardFocusable() const final;
   void DidAddUserAgentShadowRoot(ShadowRoot&) final;
 
@@ -150,6 +171,7 @@ class CORE_EXPORT HTMLPlugInElement
 
   // HTMLFrameOwnerElement overrides:
   void DisconnectContentFrame() override;
+  void IntrinsicSizingInfoChanged() final;
 
   // Return any existing LayoutEmbeddedContent without triggering relayout, or 0
   // if it doesn't yet exist.
@@ -158,8 +180,7 @@ class CORE_EXPORT HTMLPlugInElement
 
   bool LoadPlugin(const KURL&,
                   const String& mime_type,
-                  const Vector<String>& param_names,
-                  const Vector<String>& param_values,
+                  const PluginParameters& plugin_params,
                   bool use_fallback,
                   bool require_layout_object);
   // Perform checks after we have determined that a plugin will be used to
@@ -176,10 +197,9 @@ class CORE_EXPORT HTMLPlugInElement
   };
   ObjectContentType GetObjectContentType();
 
-  void SetPersistedPlugin(PluginView*);
+  void SetPersistedPlugin(WebPluginContainerImpl*);
 
-  bool RequestObjectInternal(const Vector<String>& param_names,
-                             const Vector<String>& param_values);
+  bool RequestObjectInternal(const PluginParameters& plugin_params);
 
   v8::Global<v8::Object> plugin_wrapper_;
   bool needs_plugin_update_;
@@ -195,7 +215,7 @@ class CORE_EXPORT HTMLPlugInElement
   // that OwnedEmbeddedContentView() != null means the frame is active, we save
   // off embedded_content_view_ here while the plugin is persisting but not
   // being displayed.
-  Member<PluginView> persisted_plugin_;
+  Member<WebPluginContainerImpl> persisted_plugin_;
 };
 
 inline bool IsHTMLPlugInElement(const HTMLElement& element) {

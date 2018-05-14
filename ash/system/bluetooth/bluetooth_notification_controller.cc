@@ -8,8 +8,8 @@
 #include <utility>
 
 #include "ash/resources/grit/ash_resources.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/system/system_notifier.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
@@ -18,18 +18,20 @@
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/notification.h"
-#include "ui/message_center/notification_delegate.h"
-#include "ui/message_center/notification_types.h"
+#include "ui/message_center/public/cpp/notification.h"
+#include "ui/message_center/public/cpp/notification_delegate.h"
+#include "ui/message_center/public/cpp/notification_types.h"
 
 using device::BluetoothAdapter;
 using device::BluetoothAdapterFactory;
 using device::BluetoothDevice;
+using message_center::MessageCenter;
 using message_center::Notification;
 
 namespace {
+
+const char kNotifierBluetooth[] = "ash.bluetooth";
 
 // Identifier for the discoverable notification.
 const char kBluetoothDeviceDiscoverableNotificationId[] =
@@ -83,7 +85,8 @@ BluetoothPairingNotificationDelegate::BluetoothPairingNotificationDelegate(
     const std::string& address)
     : adapter_(adapter), address_(address) {}
 
-BluetoothPairingNotificationDelegate::~BluetoothPairingNotificationDelegate() {}
+BluetoothPairingNotificationDelegate::~BluetoothPairingNotificationDelegate() =
+    default;
 
 void BluetoothPairingNotificationDelegate::Close(bool by_user) {
   VLOG(1) << "Pairing notification closed. by_user = " << by_user;
@@ -114,7 +117,7 @@ void BluetoothPairingNotificationDelegate::ButtonClick(int button_index) {
   }
 
   // In any case, remove this pairing notification.
-  message_center::MessageCenter::Get()->RemoveNotification(
+  MessageCenter::Get()->RemoveNotification(
       kBluetoothDevicePairingNotificationId, false /* by_user */);
 }
 
@@ -144,7 +147,7 @@ void BluetoothNotificationController::AdapterDiscoverableChanged(
     NotifyAdapterDiscoverable();
   } else {
     // Clear any previous discoverable notification.
-    message_center::MessageCenter::Get()->RemoveNotification(
+    MessageCenter::Get()->RemoveNotification(
         kBluetoothDeviceDiscoverableNotificationId, false /* by_user */);
   }
 }
@@ -261,21 +264,20 @@ void BluetoothNotificationController::OnGetAdapter(
 void BluetoothNotificationController::NotifyAdapterDiscoverable() {
   message_center::RichNotificationData optional;
 
-  ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-
-  std::unique_ptr<Notification> notification(new Notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      kBluetoothDeviceDiscoverableNotificationId, base::string16() /* title */,
-      l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_BLUETOOTH_DISCOVERABLE,
-                                 base::UTF8ToUTF16(adapter_->GetName()),
-                                 base::UTF8ToUTF16(adapter_->GetAddress())),
-      bundle.GetImageNamed(IDR_AURA_NOTIFICATION_BLUETOOTH),
-      base::string16() /* display source */, GURL(),
-      message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
-                                 system_notifier::kNotifierBluetooth),
-      optional, NULL));
-  message_center::MessageCenter::Get()->AddNotification(
-      std::move(notification));
+  std::unique_ptr<Notification> notification =
+      Notification::CreateSystemNotification(
+          message_center::NOTIFICATION_TYPE_SIMPLE,
+          kBluetoothDeviceDiscoverableNotificationId,
+          base::string16() /* title */,
+          l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_BLUETOOTH_DISCOVERABLE,
+                                     base::UTF8ToUTF16(adapter_->GetName()),
+                                     base::UTF8ToUTF16(adapter_->GetAddress())),
+          gfx::Image(), base::string16() /* display source */, GURL(),
+          message_center::NotifierId(
+              message_center::NotifierId::SYSTEM_COMPONENT, kNotifierBluetooth),
+          optional, nullptr, kNotificationBluetoothIcon,
+          message_center::SystemNotificationWarningLevel::NORMAL);
+  MessageCenter::Get()->AddNotification(std::move(notification));
 }
 
 void BluetoothNotificationController::NotifyPairing(
@@ -290,19 +292,19 @@ void BluetoothNotificationController::NotifyPairing(
         l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_BLUETOOTH_REJECT)));
   }
 
-  ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-
-  std::unique_ptr<Notification> notification(new Notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      kBluetoothDevicePairingNotificationId, base::string16() /* title */,
-      message, bundle.GetImageNamed(IDR_AURA_NOTIFICATION_BLUETOOTH),
-      base::string16() /* display source */, GURL(),
-      message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
-                                 system_notifier::kNotifierBluetooth),
-      optional, new BluetoothPairingNotificationDelegate(
-                    adapter_, device->GetAddress())));
-  message_center::MessageCenter::Get()->AddNotification(
-      std::move(notification));
+  std::unique_ptr<Notification> notification =
+      Notification::CreateSystemNotification(
+          message_center::NOTIFICATION_TYPE_SIMPLE,
+          kBluetoothDevicePairingNotificationId, base::string16() /* title */,
+          message, gfx::Image(), base::string16() /* display source */, GURL(),
+          message_center::NotifierId(
+              message_center::NotifierId::SYSTEM_COMPONENT, kNotifierBluetooth),
+          optional,
+          new BluetoothPairingNotificationDelegate(adapter_,
+                                                   device->GetAddress()),
+          kNotificationBluetoothIcon,
+          message_center::SystemNotificationWarningLevel::NORMAL);
+  MessageCenter::Get()->AddNotification(std::move(notification));
 }
 
 void BluetoothNotificationController::NotifyPairedDevice(
@@ -310,25 +312,23 @@ void BluetoothNotificationController::NotifyPairedDevice(
   // Remove the currently presented pairing notification; since only one
   // pairing request is queued at a time, this is guaranteed to be the device
   // that just became paired.
-  message_center::MessageCenter::Get()->RemoveNotification(
+  MessageCenter::Get()->RemoveNotification(
       kBluetoothDevicePairingNotificationId, false /* by_user */);
 
   message_center::RichNotificationData optional;
 
-  ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-
-  std::unique_ptr<Notification> notification(new Notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      kBluetoothDevicePairedNotificationId, base::string16() /* title */,
-      l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_BLUETOOTH_PAIRED,
-                                 device->GetNameForDisplay()),
-      bundle.GetImageNamed(IDR_AURA_NOTIFICATION_BLUETOOTH),
-      base::string16() /* display source */, GURL(),
-      message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
-                                 system_notifier::kNotifierBluetooth),
-      optional, NULL));
-  message_center::MessageCenter::Get()->AddNotification(
-      std::move(notification));
+  std::unique_ptr<Notification> notification =
+      Notification::CreateSystemNotification(
+          message_center::NOTIFICATION_TYPE_SIMPLE,
+          kBluetoothDevicePairedNotificationId, base::string16() /* title */,
+          l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_BLUETOOTH_PAIRED,
+                                     device->GetNameForDisplay()),
+          gfx::Image(), base::string16() /* display source */, GURL(),
+          message_center::NotifierId(
+              message_center::NotifierId::SYSTEM_COMPONENT, kNotifierBluetooth),
+          optional, nullptr, kNotificationBluetoothIcon,
+          message_center::SystemNotificationWarningLevel::NORMAL);
+  MessageCenter::Get()->AddNotification(std::move(notification));
 }
 
 }  // namespace ash

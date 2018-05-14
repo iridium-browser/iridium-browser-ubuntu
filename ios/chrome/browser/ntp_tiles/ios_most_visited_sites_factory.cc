@@ -4,8 +4,6 @@
 
 #include "ios/chrome/browser/ntp_tiles/ios_most_visited_sites_factory.h"
 
-#include "base/memory/ptr_util.h"
-#include "base/sequenced_task_runner.h"
 #include "base/task_scheduler/post_task.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/image_fetcher/core/image_fetcher_impl.h"
@@ -23,21 +21,17 @@
 std::unique_ptr<ntp_tiles::MostVisitedSites>
 IOSMostVisitedSitesFactory::NewForBrowserState(
     ios::ChromeBrowserState* browser_state) {
-  scoped_refptr<base::SequencedTaskRunner> task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
-           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
-  return base::MakeUnique<ntp_tiles::MostVisitedSites>(
+  return std::make_unique<ntp_tiles::MostVisitedSites>(
       browser_state->GetPrefs(),
       ios::TopSitesFactory::GetForBrowserState(browser_state),
       suggestions::SuggestionsServiceFactory::GetForBrowserState(browser_state),
       IOSPopularSitesFactory::NewForBrowserState(browser_state),
-      base::MakeUnique<ntp_tiles::IconCacherImpl>(
+      std::make_unique<ntp_tiles::IconCacherImpl>(
           ios::FaviconServiceFactory::GetForBrowserState(
               browser_state, ServiceAccessType::IMPLICIT_ACCESS),
           IOSChromeLargeIconServiceFactory::GetForBrowserState(browser_state),
-          base::MakeUnique<image_fetcher::ImageFetcherImpl>(
-              image_fetcher::CreateIOSImageDecoder(task_runner),
+          std::make_unique<image_fetcher::ImageFetcherImpl>(
+              image_fetcher::CreateIOSImageDecoder(),
               browser_state->GetRequestContext())),
       nil);
 }

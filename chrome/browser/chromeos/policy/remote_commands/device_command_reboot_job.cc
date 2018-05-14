@@ -16,16 +16,9 @@
 #include "base/time/time.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "components/policy/proto/device_management_backend.pb.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace policy {
-
-namespace {
-
-// Determines the time, measured from the time of issue, after which the command
-// queue will consider this command expired if the command has not been started.
-const int kCommandExpirationTimeInMinutes = 10;
-
-}  // namespace
 
 DeviceCommandRebootJob::DeviceCommandRebootJob(
     chromeos::PowerManagerClient* power_manager_client)
@@ -39,11 +32,6 @@ DeviceCommandRebootJob::~DeviceCommandRebootJob() {
 enterprise_management::RemoteCommand_Type DeviceCommandRebootJob::GetType()
     const {
   return enterprise_management::RemoteCommand_Type_DEVICE_REBOOT;
-}
-
-bool DeviceCommandRebootJob::IsExpired(base::TimeTicks now) {
-  return now > issued_time() + base::TimeDelta::FromMinutes(
-                                   kCommandExpirationTimeInMinutes);
 }
 
 void DeviceCommandRebootJob::RunImpl(
@@ -68,11 +56,8 @@ void DeviceCommandRebootJob::RunImpl(
   }
 
   SYSLOG(INFO) << "Rebooting immediately.";
-  power_manager_client_->RequestRestart();
-}
-
-base::TimeDelta DeviceCommandRebootJob::GetCommmandTimeout() const {
-  return base::TimeDelta::FromMinutes(kCommandExpirationTimeInMinutes);
+  power_manager_client_->RequestRestart(power_manager::REQUEST_RESTART_OTHER,
+                                        "policy device command");
 }
 
 }  // namespace policy

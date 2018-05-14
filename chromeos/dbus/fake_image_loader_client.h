@@ -25,12 +25,20 @@ class CHROMEOS_EXPORT FakeImageLoaderClient : public ImageLoaderClient {
   void RegisterComponent(const std::string& name,
                          const std::string& version,
                          const std::string& component_folder_abs_path,
-                         const BoolDBusMethodCallback& callback) override;
+                         DBusMethodCallback<bool> callback) override;
   void LoadComponent(const std::string& name,
-                     const StringDBusMethodCallback& callback) override;
+                     DBusMethodCallback<std::string> callback) override;
+  void LoadComponentAtPath(
+      const std::string& name,
+      const base::FilePath& path,
+      DBusMethodCallback<base::FilePath> callback) override;
+  void RemoveComponent(const std::string& name,
+                       DBusMethodCallback<bool> callback) override;
   void RequestComponentVersion(
       const std::string& name,
-      const StringDBusMethodCallback& callback) override;
+      DBusMethodCallback<std::string> callback) override;
+  void UnmountComponent(const std::string& name,
+                        DBusMethodCallback<bool> callback) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeImageLoaderClient);

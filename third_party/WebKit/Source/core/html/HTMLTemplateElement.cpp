@@ -39,11 +39,11 @@ namespace blink {
 using namespace HTMLNames;
 
 inline HTMLTemplateElement::HTMLTemplateElement(Document& document)
-    : HTMLElement(templateTag, document), content_(this, nullptr) {}
+    : HTMLElement(templateTag, document) {}
 
 DEFINE_NODE_FACTORY(HTMLTemplateElement)
 
-HTMLTemplateElement::~HTMLTemplateElement() {}
+HTMLTemplateElement::~HTMLTemplateElement() = default;
 
 DocumentFragment* HTMLTemplateElement::content() const {
   if (!content_)
@@ -54,14 +54,14 @@ DocumentFragment* HTMLTemplateElement::content() const {
   return content_.Get();
 }
 
-Node* HTMLTemplateElement::cloneNode(bool deep, ExceptionState&) {
-  if (!deep)
-    return CloneElementWithoutChildren();
-
-  Node* clone = CloneElementWithChildren();
-  if (content_)
-    content()->CloneChildNodes(toHTMLTemplateElement(clone)->content());
-  return clone;
+// https://html.spec.whatwg.org/multipage/scripting.html#the-template-element:concept-node-clone-ext
+void HTMLTemplateElement::CloneNonAttributePropertiesFrom(
+    const Element& source,
+    CloneChildrenFlag flag) {
+  if (flag == CloneChildrenFlag::kSkip)
+    return;
+  if (ToHTMLTemplateElement(source).content_)
+    content()->CloneChildNodesFrom(*ToHTMLTemplateElement(source).content());
 }
 
 void HTMLTemplateElement::DidMoveToNewDocument(Document& old_document) {
@@ -71,12 +71,13 @@ void HTMLTemplateElement::DidMoveToNewDocument(Document& old_document) {
   GetDocument().EnsureTemplateDocument().AdoptIfNeeded(*content_);
 }
 
-DEFINE_TRACE(HTMLTemplateElement) {
+void HTMLTemplateElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(content_);
   HTMLElement::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(HTMLTemplateElement) {
+void HTMLTemplateElement::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(content_);
   HTMLElement::TraceWrappers(visitor);
 }

@@ -55,16 +55,18 @@ base::FilePath GetSessionLogFile(const base::CommandLine& command_line);
 void CleanupChromeLogging();
 
 // Returns the fully-qualified name of the log file.
-base::FilePath GetLogFileName();
+base::FilePath GetLogFileName(const base::CommandLine& command_line);
 
 // Returns true when error/assertion dialogs are not to be shown, false
 // otherwise.
 bool DialogsAreSuppressed();
 
-// Inserts timestamp before file extension in the format
+#if defined(OS_CHROMEOS)
+// Inserts timestamp before file extension (if any) in the form
 // "_yymmdd-hhmmss".
 base::FilePath GenerateTimestampedName(const base::FilePath& base_path,
                                        base::Time timestamp);
+#endif  // OS_CHROMEOS
 }  // namespace logging
 
 #endif  // CHROME_COMMON_LOGGING_CHROME_H_

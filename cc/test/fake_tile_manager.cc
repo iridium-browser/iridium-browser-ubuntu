@@ -7,7 +7,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <limits>
 
 #include "base/memory/ptr_util.h"
@@ -42,17 +41,17 @@ FakeTileManager::FakeTileManager(TileManagerClient* client,
                   std::numeric_limits<size_t>::max(),
                   TileManagerSettings()),
       image_decode_cache_(
-          viz::ResourceFormat::RGBA_8888,
+          kN32_SkColorType,
           LayerTreeSettings().decoded_image_working_set_budget_bytes) {
   SetDecodedImageTracker(&decoded_image_tracker_);
   SetResources(resource_pool, &image_decode_cache_, GetGlobalTaskGraphRunner(),
                GetGlobalRasterBufferProvider(),
                std::numeric_limits<size_t>::max(),
                false /* use_gpu_rasterization */);
-  SetTileTaskManagerForTesting(base::MakeUnique<FakeTileTaskManagerImpl>());
+  SetTileTaskManagerForTesting(std::make_unique<FakeTileTaskManagerImpl>());
 }
 
-FakeTileManager::~FakeTileManager() {}
+FakeTileManager::~FakeTileManager() = default;
 
 bool FakeTileManager::HasBeenAssignedMemory(Tile* tile) {
   return std::find(tiles_for_raster.begin(),

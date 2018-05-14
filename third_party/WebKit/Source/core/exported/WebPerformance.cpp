@@ -30,7 +30,7 @@
 
 #include "public/web/WebPerformance.h"
 
-#include "core/timing/Performance.h"
+#include "core/timing/WindowPerformance.h"
 
 namespace blink {
 
@@ -166,6 +166,27 @@ double WebPerformance::FirstMeaningfulPaint() const {
   return MillisecondsToSeconds(private_->timing()->FirstMeaningfulPaint());
 }
 
+double WebPerformance::PageInteractive() const {
+  return MillisecondsToSeconds(private_->timing()->PageInteractive());
+}
+
+double WebPerformance::PageInteractiveDetection() const {
+  return MillisecondsToSeconds(private_->timing()->PageInteractiveDetection());
+}
+
+double WebPerformance::FirstInputInvalidatingInteractive() const {
+  return MillisecondsToSeconds(
+      private_->timing()->FirstInputInvalidatingInteractive());
+}
+
+double WebPerformance::FirstInputDelay() const {
+  return MillisecondsToSeconds(private_->timing()->FirstInputDelay());
+}
+
+double WebPerformance::FirstInputTimestamp() const {
+  return MillisecondsToSeconds(private_->timing()->FirstInputTimestamp());
+}
+
 double WebPerformance::ParseStart() const {
   return MillisecondsToSeconds(private_->timing()->ParseStart());
 }
@@ -207,10 +228,10 @@ double WebPerformance::UpdateStyleDurationBeforeFCP() const {
       private_->timing()->UpdateStyleDurationBeforeFCP());
 }
 
-WebPerformance::WebPerformance(Performance* performance)
+WebPerformance::WebPerformance(WindowPerformance* performance)
     : private_(performance) {}
 
-WebPerformance& WebPerformance::operator=(Performance* performance) {
+WebPerformance& WebPerformance::operator=(WindowPerformance* performance) {
   private_ = performance;
   return *this;
 }

@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/test/fake_network_pipe.h"
+#include "test/fake_network_pipe.h"
 
 #include <assert.h>
 #include <math.h>
@@ -17,10 +17,10 @@
 #include <algorithm>
 #include <cmath>
 
-#include "webrtc/call/call.h"
-#include "webrtc/modules/rtp_rtcp/include/rtp_header_parser.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/system_wrappers/include/clock.h"
+#include "call/call.h"
+#include "modules/rtp_rtcp/include/rtp_header_parser.h"
+#include "rtc_base/logging.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 
@@ -53,8 +53,9 @@ void DemuxerImpl::DeliverPacket(const NetworkPacket* packet,
         << "payload type " << static_cast<int>(payload_type) << " unknown.";
     media_type = it->second;
   }
-  packet_receiver_->DeliverPacket(media_type, packet_data, packet_length,
-                                  packet_time);
+  packet_receiver_->DeliverPacket(
+      media_type, rtc::CopyOnWriteBuffer(packet_data, packet_length),
+      packet_time);
 }
 
 FakeNetworkPipe::FakeNetworkPipe(Clock* clock,
@@ -132,8 +133,16 @@ void FakeNetworkPipe::SendPacket(const uint8_t* data, size_t data_length) {
 
   // Delay introduced by the link capacity.
   int64_t capacity_delay_ms = 0;
-  if (config_.link_capacity_kbps > 0)
-    capacity_delay_ms = data_length / (config_.link_capacity_kbps / 8);
+  if (config_.link_capacity_kbps > 0) {
+    const int bytes_per_millisecond = config_.link_capacity_kbps / 8;
+    // To round to the closest millisecond we add half a milliseconds worth of
+    // bytes to the delay calculation.
+    capacity_delay_ms = (data_length + capacity_delay_error_bytes_ +
+                         bytes_per_millisecond / 2) /
+                        bytes_per_millisecond;
+    capacity_delay_error_bytes_ +=
+        data_length - capacity_delay_ms * bytes_per_millisecond;
+  }
   int64_t network_start_time = time_now;
 
   // Check if there already are packets on the link and change network start
@@ -176,7 +185,7 @@ void FakeNetworkPipe::Process() {
       if (!capacity_link_.empty()) {
         queueing_delay_ms = time_now - capacity_link_.front()->send_time();
       }
-      LOG(LS_INFO) << "Network queue: " << queueing_delay_ms << " ms.";
+      RTC_LOG(LS_INFO) << "Network queue: " << queueing_delay_ms << " ms.";
       last_log_time_ = time_now;
     }
     // Check the capacity link first.

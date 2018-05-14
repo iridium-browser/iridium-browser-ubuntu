@@ -26,9 +26,6 @@
         -webkit-margin-start: 16px;
         color: var(--folder-inactive-color);
         font-weight: 500;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
       }
 
       #container {
@@ -43,7 +40,6 @@
         -webkit-padding-end: 8px;
         color: var(--secondary-text-color);
         flex-grow: 1;
-        overflow: hidden;
       }
 
       :host([is-selected-folder_]) .menu-label,
@@ -80,16 +76,20 @@
 
     <div id="container"
         class="v-centered"
-        draggable="true"
-        on-tap="selectFolder_"
+        on-click="selectFolder_"
+        on-dblclick="toggleFolder_"
         on-contextmenu="onContextMenu_"
-        tabindex$="[[getTabIndex_(isSelectedFolder_)]]"
+        tabindex$="[[getTabIndex_(selectedFolder_, itemId)]]"
         hidden="[[isRootFolder_(depth)]]"
         role="treeitem">
       <template is="dom-if" if="[[hasChildFolder_]]">
-        <button is="paper-icon-button-light" id="arrow"
-            on-tap="toggleFolder_" on-mousedown="preventDefault_" tabindex="-1">
-          <iron-icon icon="cr:arrow-drop-down" is-open$="[[!isClosed_]]">
+        <button is="paper-icon-button-light"
+            id="arrow"
+            on-click="toggleFolder_"
+            on-mousedown="preventDefault_"
+            tabindex="-1"
+            aria-label$="[[getButtonAriaLabel_(isOpen, item_)]]">
+          <iron-icon icon="cr:arrow-drop-down" is-open$="[[isOpen]]">
           </iron-icon>
         </button>
       </template>
@@ -98,16 +98,19 @@
             open$="[[isSelectedFolder_]]"
             no-children$="[[!hasChildFolder_]]">
         </div>
-        <div class="menu-label">[[item_.title]]</div>
+        <div class="menu-label elided-text" title="[[item_.title]]">
+          [[item_.title]]
+        </div>
       </div>
     </div>
     <div id="descendants" role="group">
-      <template is="dom-if" if="[[!isClosed_]]">
+      <template is="dom-if" if="[[isOpen]]">
         <template is="dom-repeat"
             items="[[item_.children]]"
             as="child"
             filter="isFolder_">
           <bookmarks-folder-node item-id="[[child]]"
+              draggable="true"
               depth="[[getChildDepth_(depth)]]">
           </bookmarks-folder-node>
         </template>

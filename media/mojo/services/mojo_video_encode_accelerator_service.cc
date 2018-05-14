@@ -21,7 +21,7 @@ void MojoVideoEncodeAcceleratorService::Create(
     const CreateAndInitializeVideoEncodeAcceleratorCallback&
         create_vea_callback,
     const gpu::GpuPreferences& gpu_preferences) {
-  mojo::MakeStrongBinding(base::MakeUnique<MojoVideoEncodeAcceleratorService>(
+  mojo::MakeStrongBinding(std::make_unique<MojoVideoEncodeAcceleratorService>(
                               create_vea_callback, gpu_preferences),
                           std::move(request));
 }
@@ -71,7 +71,6 @@ void MojoVideoEncodeAcceleratorService::Initialize(
       input_visible_size.GetArea() > limits::kMaxCanvas) {
     DLOG(ERROR) << __func__ << "too large input_visible_size "
                 << input_visible_size.ToString();
-    NotifyError(::media::VideoEncodeAccelerator::kInvalidArgumentError);
     std::move(success_callback).Run(false);
     return;
   }
@@ -81,7 +80,6 @@ void MojoVideoEncodeAcceleratorService::Initialize(
                                initial_bitrate, this, gpu_preferences_);
   if (!encoder_) {
     DLOG(ERROR) << __func__ << " Error creating or initializing VEA";
-    NotifyError(::media::VideoEncodeAccelerator::kPlatformFailureError);
     std::move(success_callback).Run(false);
     return;
   }
@@ -138,9 +136,8 @@ void MojoVideoEncodeAcceleratorService::UseOutputBitstreamBuffer(
 
   base::SharedMemoryHandle handle;
   size_t memory_size = 0;
-  bool read_only = false;
   auto result = mojo::UnwrapSharedMemoryHandle(std::move(buffer), &handle,
-                                               &memory_size, &read_only);
+                                               &memory_size, nullptr);
   if (result != MOJO_RESULT_OK || memory_size == 0u) {
     DLOG(ERROR) << __func__ << " mojo::UnwrapSharedMemoryHandle() failed";
     NotifyError(::media::VideoEncodeAccelerator::kPlatformFailureError);

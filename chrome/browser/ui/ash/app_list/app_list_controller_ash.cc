@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/ash/app_list/app_list_controller_ash.h"
 
+#include <utility>
+
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_util.h"
@@ -13,6 +15,8 @@
 #include "extensions/common/extension.h"
 #include "ui/app_list/presenter/app_list_presenter_impl.h"
 #include "ui/app_list/views/app_list_view.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/display/types/display_constants.h"
 
 AppListControllerDelegateAsh::AppListControllerDelegateAsh(
@@ -25,15 +29,21 @@ void AppListControllerDelegateAsh::DismissView() {
   app_list_presenter_->Dismiss();
 }
 
-gfx::NativeWindow AppListControllerDelegateAsh::GetAppListWindow() {
-  return app_list_presenter_->GetWindow();
+int64_t AppListControllerDelegateAsh::GetAppListDisplayId() {
+  return display_id_;
 }
 
-gfx::Rect AppListControllerDelegateAsh::GetAppInfoDialogBounds() {
+void AppListControllerDelegateAsh::SetAppListDisplayId(int64_t display_id) {
+  display_id_ = display_id;
+}
+
+void AppListControllerDelegateAsh::GetAppInfoDialogBounds(
+    GetAppInfoDialogBoundsCallback callback) {
   app_list::AppListView* app_list_view = app_list_presenter_->GetView();
+  gfx::Rect bounds = gfx::Rect();
   if (app_list_view)
-    return app_list_view->GetAppInfoDialogBounds();
-  return gfx::Rect();
+    bounds = app_list_view->GetAppInfoDialogBounds();
+  std::move(callback).Run(bounds);
 }
 
 bool AppListControllerDelegateAsh::IsAppPinned(const std::string& app_id) {
@@ -82,9 +92,9 @@ void AppListControllerDelegateAsh::OpenURL(Profile* profile,
                                            const GURL& url,
                                            ui::PageTransition transition,
                                            WindowOpenDisposition disposition) {
-  chrome::NavigateParams params(profile, url, transition);
+  NavigateParams params(profile, url, transition);
   params.disposition = disposition;
-  chrome::Navigate(&params);
+  Navigate(&params);
 }
 
 void AppListControllerDelegateAsh::ActivateApp(
@@ -101,9 +111,7 @@ void AppListControllerDelegateAsh::ActivateApp(
   }
 
   ChromeLauncherController::instance()->ActivateApp(
-      extension->id(),
-      AppListSourceToLaunchSource(source),
-      event_flags);
+      extension->id(), AppListSourceToLaunchSource(source), event_flags);
 
   DismissView();
 }

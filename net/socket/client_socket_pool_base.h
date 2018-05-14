@@ -26,7 +26,6 @@
 #include <stdint.h>
 
 #include <cstddef>
-#include <deque>
 #include <list>
 #include <map>
 #include <memory>
@@ -90,6 +89,7 @@ class NET_EXPORT_PRIVATE ConnectJob {
   ConnectJob(const std::string& group_name,
              base::TimeDelta timeout_duration,
              RequestPriority priority,
+             const SocketTag& socket_tag,
              ClientSocketPool::RespectLimits respect_limits,
              Delegate* delegate,
              const NetLogWithSource& net_log);
@@ -103,6 +103,10 @@ class NET_EXPORT_PRIVATE ConnectJob {
   // Returns the released socket, or NULL if there was a connection
   // error.
   std::unique_ptr<StreamSocket> PassSocket();
+
+  void set_motivation(HttpRequestInfo::RequestMotivation motivation) {
+    motivation_ = motivation;
+  }
 
   // Begins connecting the socket.  Returns OK on success, ERR_IO_PENDING if it
   // cannot complete synchronously without blocking, or another net error code
@@ -127,6 +131,7 @@ class NET_EXPORT_PRIVATE ConnectJob {
 
  protected:
   RequestPriority priority() const { return priority_; }
+  const SocketTag& socket_tag() const { return socket_tag_; }
   ClientSocketPool::RespectLimits respect_limits() const {
     return respect_limits_;
   }
@@ -151,12 +156,14 @@ class NET_EXPORT_PRIVATE ConnectJob {
   const base::TimeDelta timeout_duration_;
   // TODO(akalin): Support reprioritization.
   const RequestPriority priority_;
+  const SocketTag socket_tag_;
   const ClientSocketPool::RespectLimits respect_limits_;
   // Timer to abort jobs that take too long.
   base::OneShotTimer timer_;
   Delegate* delegate_;
   std::unique_ptr<StreamSocket> socket_;
   NetLogWithSource net_log_;
+  HttpRequestInfo::RequestMotivation motivation_;
   // A ConnectJob is idle until Connect() has been called.
   bool idle_;
 
@@ -187,6 +194,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     Request(ClientSocketHandle* handle,
             const CompletionCallback& callback,
             RequestPriority priority,
+            const SocketTag& socket_tag,
             ClientSocketPool::RespectLimits respect_limits,
             Flags flags,
             const NetLogWithSource& net_log);
@@ -202,6 +210,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     }
     Flags flags() const { return flags_; }
     const NetLogWithSource& net_log() const { return net_log_; }
+    const SocketTag& socket_tag() const { return socket_tag_; }
 
     // TODO(eroman): Temporary until crbug.com/467797 is solved.
     void CrashIfInvalid() const;
@@ -219,6 +228,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     const ClientSocketPool::RespectLimits respect_limits_;
     const Flags flags_;
     const NetLogWithSource net_log_;
+    const SocketTag socket_tag_;
 
     // TODO(eroman): Temporary until crbug.com/467797 is solved.
     Liveness liveness_ = ALIVE;
@@ -271,7 +281,8 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   // See ClientSocketPool::RequestSockets for documentation on this function.
   void RequestSockets(const std::string& group_name,
                       const Request& request,
-                      int num_sockets);
+                      int num_sockets,
+                      HttpRequestInfo::RequestMotivation motivation);
 
   // See ClientSocketPool::SetPriority for documentation on this function.
   void SetPriority(const std::string& group_name,
@@ -597,7 +608,8 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   // it does not handle logging into NetLog of the queueing status of
   // |request|.
   int RequestSocketInternal(const std::string& group_name,
-                            const Request& request);
+                            const Request& request,
+                            HttpRequestInfo::RequestMotivation motivation);
 
   // Assigns an idle socket for the group to the request.
   // Returns |true| if an idle socket is available, false otherwise.
@@ -618,9 +630,12 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
 
   // Posts a task to call InvokeUserCallback() on the next iteration through the
   // current message loop.  Inserts |callback| into |pending_callback_map_|,
-  // keyed by |handle|.
-  void InvokeUserCallbackLater(
-      ClientSocketHandle* handle, const CompletionCallback& callback, int rv);
+  // keyed by |handle|. Apply |socket_tag| to the socket if socket successfully
+  // created.
+  void InvokeUserCallbackLater(ClientSocketHandle* handle,
+                               const CompletionCallback& callback,
+                               int rv,
+                               const SocketTag& socket_tag);
 
   // Invokes the user callback for |handle|.  By the time this task has run,
   // it's possible that the request has been cancelled, so |handle| may not
@@ -696,6 +711,7 @@ class ClientSocketPoolBase {
     Request(ClientSocketHandle* handle,
             const CompletionCallback& callback,
             RequestPriority priority,
+            const SocketTag& socket_tag,
             ClientSocketPool::RespectLimits respect_limits,
             internal::ClientSocketPoolBaseHelper::Flags flags,
             const scoped_refptr<SocketParams>& params,
@@ -703,6 +719,7 @@ class ClientSocketPoolBase {
         : internal::ClientSocketPoolBaseHelper::Request(handle,
                                                         callback,
                                                         priority,
+                                                        socket_tag,
                                                         respect_limits,
                                                         flags,
                                                         net_log),
@@ -769,12 +786,13 @@ class ClientSocketPoolBase {
   int RequestSocket(const std::string& group_name,
                     const scoped_refptr<SocketParams>& params,
                     RequestPriority priority,
+                    const SocketTag& socket_tag,
                     ClientSocketPool::RespectLimits respect_limits,
                     ClientSocketHandle* handle,
                     const CompletionCallback& callback,
                     const NetLogWithSource& net_log) {
     std::unique_ptr<Request> request(new Request(
-        handle, callback, priority, respect_limits,
+        handle, callback, priority, socket_tag, respect_limits,
         internal::ClientSocketPoolBaseHelper::NORMAL, params, net_log));
     return helper_.RequestSocket(group_name, std::move(request));
   }
@@ -785,12 +803,13 @@ class ClientSocketPoolBase {
   void RequestSockets(const std::string& group_name,
                       const scoped_refptr<SocketParams>& params,
                       int num_sockets,
-                      const NetLogWithSource& net_log) {
+                      const NetLogWithSource& net_log,
+                      HttpRequestInfo::RequestMotivation motivation) {
     const Request request(nullptr /* no handle */, CompletionCallback(), IDLE,
-                          ClientSocketPool::RespectLimits::ENABLED,
+                          SocketTag(), ClientSocketPool::RespectLimits::ENABLED,
                           internal::ClientSocketPoolBaseHelper::NO_IDLE_SOCKETS,
                           params, net_log);
-    helper_.RequestSockets(group_name, request, num_sockets);
+    helper_.RequestSockets(group_name, request, num_sockets, motivation);
   }
 
   void SetPriority(const std::string& group_name,

@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
+#include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
@@ -25,7 +26,6 @@
 #include "net/url_request/url_request_status.h"
 
 using GaiaConstants::kChromeSyncSupervisedOAuth2Scope;
-using base::Time;
 using gaia::GaiaOAuthClient;
 using net::URLFetcher;
 using net::URLFetcherDelegate;
@@ -33,7 +33,7 @@ using net::URLRequestContextGetter;
 
 namespace {
 
-const int kNumRetries = 1;
+const int kNumRefreshTokenRetries = 1;
 
 static const char kIssueTokenBodyFormat[] =
     "client_id=%s"
@@ -49,9 +49,6 @@ static const char kIssueTokenBodyFormat[] =
 // (crbug.com/481596)
 static const char kIssueTokenBodyFormatDeviceIdAddendum[] =
     "&device_id=%s&lib_ver=supervised_user";
-
-static const char kAuthorizationHeaderFormat[] =
-    "Authorization: Bearer %s";
 
 static const char kCodeKey[] = "code";
 
@@ -77,7 +74,7 @@ class SupervisedUserRefreshTokenFetcherImpl
   // OAuth2TokenService::Consumer implementation:
   void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
                          const std::string& access_token,
-                         const Time& expiration_time) override;
+                         const base::Time& expiration_time) override;
   void OnGetTokenFailure(const OAuth2TokenService::Request* request,
                          const GoogleServiceAuthError& error) override;
 
@@ -153,7 +150,7 @@ void SupervisedUserRefreshTokenFetcherImpl::StartFetching() {
 void SupervisedUserRefreshTokenFetcherImpl::OnGetTokenSuccess(
     const OAuth2TokenService::Request* request,
     const std::string& access_token,
-    const Time& expiration_time) {
+    const base::Time& expiration_time) {
   DCHECK_EQ(access_token_request_.get(), request);
   access_token_ = access_token;
 
@@ -183,7 +180,7 @@ void SupervisedUserRefreshTokenFetcherImpl::OnGetTokenSuccess(
             destination: GOOGLE_OWNED_SERVICE
           }
           policy {
-            cookies_allowed: false
+            cookies_allowed: NO
             setting:
               "Users can disable this feature by toggling 'Let anyone add a "
               "person to Chrome' in Chromium settings, under People."
@@ -203,9 +200,9 @@ void SupervisedUserRefreshTokenFetcherImpl::OnGetTokenSuccess(
   url_fetcher_->SetRequestContext(context_);
   url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                              net::LOAD_DO_NOT_SAVE_COOKIES);
-  url_fetcher_->SetAutomaticallyRetryOnNetworkChanges(kNumRetries);
-  url_fetcher_->AddExtraRequestHeader(
-      base::StringPrintf(kAuthorizationHeaderFormat, access_token.c_str()));
+  url_fetcher_->SetAutomaticallyRetryOnNetworkChanges(kNumRefreshTokenRetries);
+  url_fetcher_->AddExtraRequestHeader(base::StringPrintf(
+      supervised_users::kAuthorizationHeaderFormat, access_token.c_str()));
 
   std::string body = base::StringPrintf(
       kIssueTokenBodyFormat,
@@ -277,8 +274,8 @@ void SupervisedUserRefreshTokenFetcherImpl::OnURLFetchComplete(
   client_info.client_id = urls->oauth2_chrome_client_id();
   client_info.client_secret = urls->oauth2_chrome_client_secret();
   gaia_oauth_client_.reset(new gaia::GaiaOAuthClient(context_));
-  gaia_oauth_client_->GetTokensFromAuthCode(client_info, auth_code, kNumRetries,
-                                            this);
+  gaia_oauth_client_->GetTokensFromAuthCode(client_info, auth_code,
+                                            kNumRefreshTokenRetries, this);
 }
 
 void SupervisedUserRefreshTokenFetcherImpl::OnGetTokensResponse(

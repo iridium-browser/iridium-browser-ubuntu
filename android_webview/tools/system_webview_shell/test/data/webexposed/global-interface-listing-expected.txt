@@ -31,10 +31,6 @@ interface AnimationEvent : Event
     getter animationName
     getter elapsedTime
     method constructor
-interface AppBannerPromptResult
-    getter outcome
-    getter platform
-    method constructor
 interface ApplicationCache : EventTarget
     attribute CHECKING
     attribute DOWNLOADING
@@ -733,6 +729,7 @@ interface Document : Node
     getter origin
     getter plugins
     getter pointerLockElement
+    getter policy
     getter preferredStylesheetSet
     getter readyState
     getter referrer
@@ -1358,6 +1355,10 @@ interface HTMLDListElement : HTMLElement
     getter compact
     method constructor
     setter compact
+interface HTMLDataElement : HTMLElement
+    getter value
+    method constructor
+    setter value
 interface HTMLDataListElement : HTMLElement
     getter options
     method constructor
@@ -1731,6 +1732,7 @@ interface HTMLIFrameElement : HTMLElement
     getter marginHeight
     getter marginWidth
     getter name
+    getter policy
     getter sandbox
     getter scrolling
     getter src
@@ -2479,6 +2481,11 @@ interface HTMLTextAreaElement : HTMLElement
     setter selectionStart
     setter value
     setter wrap
+interface HTMLTimeElement : HTMLElement
+    attribute @@toStringTag
+    getter dateTime
+    method constructor
+    setter dateTime
 interface HTMLTitleElement : HTMLElement
     getter text
     method constructor
@@ -3004,6 +3011,7 @@ interface Navigator
     getter bluetooth
     getter connection
     getter cookieEnabled
+    getter deviceMemory
     getter doNotTrack
     getter geolocation
     getter hardwareConcurrency
@@ -3163,6 +3171,7 @@ interface Performance : EventTarget
     getter memory
     getter navigation
     getter onresourcetimingbufferfull
+    getter timeOrigin
     getter timing
     method clearMarks
     method clearMeasures
@@ -3210,6 +3219,7 @@ interface PerformanceResourceTiming : PerformanceEntry
     getter secureConnectionStart
     getter workerStart
     method constructor
+    method toJSON
 interface PerformanceTiming
     getter connectEnd
     getter connectStart
@@ -4069,7 +4079,6 @@ interface SVGNumberList
     method replaceItem
 interface SVGPathElement : SVGGeometryElement
     method constructor
-    method getPathSegAtLength
 interface SVGPatternElement : SVGElement
     getter height
     getter href
@@ -4422,7 +4431,6 @@ interface ShadowRoot : DocumentFragment
     getter activeElement
     getter host
     getter innerHTML
-    getter olderShadowRoot
     getter styleSheets
     method cloneNode
     method constructor
@@ -5563,7 +5571,6 @@ interface webkitRTCPeerConnection : EventTarget
     method getLocalStreams
     method getRemoteStreams
     method getStats
-    method getStreamById
     method removeStream
     method setLocalDescription
     method setRemoteDescription

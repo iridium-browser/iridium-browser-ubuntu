@@ -9,6 +9,7 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/time/time.h"
+#include "chrome/browser/android/ntp/get_remote_suggestions_scheduler.h"
 #include "chrome/browser/ntp_snippets/content_suggestions_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -17,6 +18,7 @@
 #include "components/ntp_snippets/remote/remote_suggestions_scheduler.h"
 #include "components/ntp_snippets/user_classifier.h"
 #include "jni/SuggestionsEventReporterBridge_jni.h"
+#include "net/base/network_change_notifier.h"
 #include "ui/base/window_open_disposition.h"
 
 using base::android::AttachCurrentThread;
@@ -25,17 +27,6 @@ using ntp_snippets::Category;
 using ntp_snippets::UserClassifier;
 
 namespace {
-
-ntp_snippets::RemoteSuggestionsScheduler* GetRemoteSuggestionsScheduler() {
-  ntp_snippets::ContentSuggestionsService* content_suggestions_service =
-      ContentSuggestionsServiceFactory::GetForProfile(
-          ProfileManager::GetLastUsedProfile());
-  // Can maybe be null in some cases? (Incognito profile?) crbug.com/647920
-  if (!content_suggestions_service) {
-    return nullptr;
-  }
-  return content_suggestions_service->remote_suggestions_scheduler();
-}
 
 UserClassifier* GetUserClassifier() {
   ntp_snippets::ContentSuggestionsService* content_suggestions_service =
@@ -50,16 +41,17 @@ UserClassifier* GetUserClassifier() {
 
 }  // namespace
 
-static void OnSuggestionTargetVisited(JNIEnv* env,
-                                      const JavaParamRef<jclass>& caller,
-                                      jint j_category_id,
-                                      jlong visit_time_ms) {
+static void JNI_SuggestionsEventReporterBridge_OnSuggestionTargetVisited(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& caller,
+    jint j_category_id,
+    jlong visit_time_ms) {
   ntp_snippets::metrics::OnSuggestionTargetVisited(
       Category::FromIDValue(j_category_id),
       base::TimeDelta::FromMilliseconds(visit_time_ms));
 }
 
-static void OnPageShown(
+static void JNI_SuggestionsEventReporterBridge_OnPageShown(
     JNIEnv* env,
     const JavaParamRef<jclass>& caller,
     const JavaParamRef<jintArray>& jcategories,
@@ -67,30 +59,35 @@ static void OnPageShown(
     const JavaParamRef<jbooleanArray>& jis_category_visible) {
   std::vector<int> categories_int;
   JavaIntArrayToIntVector(env, jcategories, &categories_int);
+
   std::vector<int> suggestions_per_category;
   JavaIntArrayToIntVector(env, jsuggestions_per_category,
                           &suggestions_per_category);
   DCHECK_EQ(categories_int.size(), suggestions_per_category.size());
+
   std::vector<bool> is_category_visible;
   JavaBooleanArrayToBoolVector(env, jis_category_visible, &is_category_visible);
   DCHECK_EQ(categories_int.size(), is_category_visible.size());
+
   std::vector<Category> categories;
   for (size_t i = 0; i < categories_int.size(); i++) {
     categories.push_back(Category::FromIDValue(categories_int[i]));
   }
+
   ntp_snippets::metrics::OnPageShown(categories, suggestions_per_category,
                                      is_category_visible);
   GetUserClassifier()->OnEvent(UserClassifier::Metric::NTP_OPENED);
 }
 
-static void OnSuggestionShown(JNIEnv* env,
-                              const JavaParamRef<jclass>& caller,
-                              jint global_position,
-                              jint j_category_id,
-                              jint position_in_category,
-                              jlong publish_timestamp_ms,
-                              jfloat score,
-                              jlong fetch_timestamp_ms) {
+static void JNI_SuggestionsEventReporterBridge_OnSuggestionShown(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& caller,
+    jint global_position,
+    jint j_category_id,
+    jint position_in_category,
+    jlong publish_timestamp_ms,
+    jfloat score,
+    jlong fetch_timestamp_ms) {
   ntp_snippets::metrics::OnSuggestionShown(
       global_position, Category::FromIDValue(j_category_id),
       position_in_category, base::Time::FromJavaTime(publish_timestamp_ms),
@@ -100,20 +97,23 @@ static void OnSuggestionShown(JNIEnv* env,
   }
 }
 
-static void OnSuggestionOpened(JNIEnv* env,
-                               const JavaParamRef<jclass>& caller,
-                               jint global_position,
-                               jint j_category_id,
-                               jint category_index,
-                               jint position_in_category,
-                               jlong publish_timestamp_ms,
-                               jfloat score,
-                               int windowOpenDisposition) {
+static void JNI_SuggestionsEventReporterBridge_OnSuggestionOpened(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& caller,
+    jint global_position,
+    jint j_category_id,
+    jint category_index,
+    jint position_in_category,
+    jlong publish_timestamp_ms,
+    jfloat score,
+    int windowOpenDisposition,
+    jboolean is_prefetched) {
   const Category category = Category::FromIDValue(j_category_id);
   ntp_snippets::metrics::OnSuggestionOpened(
       global_position, category, category_index, position_in_category,
       base::Time::FromJavaTime(publish_timestamp_ms), score,
-      static_cast<WindowOpenDisposition>(windowOpenDisposition));
+      static_cast<WindowOpenDisposition>(windowOpenDisposition), is_prefetched,
+      net::NetworkChangeNotifier::IsOffline());
   ntp_snippets::ContentSuggestionsService* content_suggestions_service =
       ContentSuggestionsServiceFactory::GetForProfile(
           ProfileManager::GetLastUsedProfile());
@@ -125,37 +125,42 @@ static void OnSuggestionOpened(JNIEnv* env,
       UserClassifier::Metric::SUGGESTIONS_USED);
 }
 
-static void OnSuggestionMenuOpened(JNIEnv* env,
-                                   const JavaParamRef<jclass>& caller,
-                                   jint global_position,
-                                   jint j_category_id,
-                                   jint position_in_category,
-                                   jlong publish_timestamp_ms,
-                                   jfloat score) {
+static void JNI_SuggestionsEventReporterBridge_OnSuggestionMenuOpened(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& caller,
+    jint global_position,
+    jint j_category_id,
+    jint position_in_category,
+    jlong publish_timestamp_ms,
+    jfloat score) {
   ntp_snippets::metrics::OnSuggestionMenuOpened(
       global_position, Category::FromIDValue(j_category_id),
       position_in_category, base::Time::FromJavaTime(publish_timestamp_ms),
       score);
 }
 
-static void OnMoreButtonShown(JNIEnv* env,
-                              const JavaParamRef<jclass>& caller,
-                              jint j_category_id,
-                              jint position) {
+static void JNI_SuggestionsEventReporterBridge_OnMoreButtonShown(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& caller,
+    jint j_category_id,
+    jint position) {
   ntp_snippets::metrics::OnMoreButtonShown(Category::FromIDValue(j_category_id),
                                            position);
 }
 
-static void OnMoreButtonClicked(JNIEnv* env,
-                                const JavaParamRef<jclass>& caller,
-                                jint j_category_id,
-                                jint position) {
+static void JNI_SuggestionsEventReporterBridge_OnMoreButtonClicked(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& caller,
+    jint j_category_id,
+    jint position) {
   ntp_snippets::metrics::OnMoreButtonClicked(
       Category::FromIDValue(j_category_id), position);
   GetUserClassifier()->OnEvent(UserClassifier::Metric::SUGGESTIONS_USED);
 }
 
-static void OnSurfaceOpened(JNIEnv* env, const JavaParamRef<jclass>& caller) {
+static void JNI_SuggestionsEventReporterBridge_OnSurfaceOpened(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& caller) {
   ntp_snippets::RemoteSuggestionsScheduler* scheduler =
       GetRemoteSuggestionsScheduler();
   // Can be null if the feature has been disabled but the scheduler has not been
@@ -167,7 +172,9 @@ static void OnSurfaceOpened(JNIEnv* env, const JavaParamRef<jclass>& caller) {
   scheduler->OnSuggestionsSurfaceOpened();
 }
 
-static void OnColdStart(JNIEnv* env, const JavaParamRef<jclass>& caller) {
+static void JNI_SuggestionsEventReporterBridge_OnColdStart(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& caller) {
   ntp_snippets::RemoteSuggestionsScheduler* scheduler =
       GetRemoteSuggestionsScheduler();
   // TODO(fhorschig): Remove guard when https://crbug.com/678556 is resolved.
@@ -177,8 +184,9 @@ static void OnColdStart(JNIEnv* env, const JavaParamRef<jclass>& caller) {
   scheduler->OnBrowserColdStart();
 }
 
-static void OnActivityWarmResumed(JNIEnv* env,
-                                  const JavaParamRef<jclass>& caller) {
+static void JNI_SuggestionsEventReporterBridge_OnActivityWarmResumed(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& caller) {
   ntp_snippets::RemoteSuggestionsScheduler* scheduler =
       GetRemoteSuggestionsScheduler();
   // TODO(fhorschig): Remove guard when https://crbug.com/678556 is resolved.

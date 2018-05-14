@@ -32,12 +32,12 @@
 #define SourceBuffer_h
 
 #include <memory>
-#include "core/dom/SuspendableObject.h"
+#include "bindings/core/v8/ActiveScriptWrappable.h"
+#include "core/dom/PausableObject.h"
 #include "core/typed_arrays/ArrayBufferViewHelpers.h"
 #include "modules/EventTargetModules.h"
 #include "modules/mediasource/TrackDefaultList.h"
 #include "platform/AsyncMethodRunner.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebSourceBufferClient.h"
@@ -48,7 +48,7 @@ class AudioTrackList;
 class DOMArrayBuffer;
 class DOMArrayBufferView;
 class ExceptionState;
-class GenericEventQueue;
+class MediaElementEventQueue;
 class MediaSource;
 class TimeRanges;
 class VideoTrackList;
@@ -56,7 +56,7 @@ class WebSourceBuffer;
 
 class SourceBuffer final : public EventTargetWithInlineData,
                            public ActiveScriptWrappable<SourceBuffer>,
-                           public SuspendableObject,
+                           public PausableObject,
                            public WebSourceBufferClient {
   USING_GARBAGE_COLLECTED_MIXIN(SourceBuffer);
   DEFINE_WRAPPERTYPEINFO();
@@ -65,7 +65,7 @@ class SourceBuffer final : public EventTargetWithInlineData,
  public:
   static SourceBuffer* Create(std::unique_ptr<WebSourceBuffer>,
                               MediaSource*,
-                              GenericEventQueue*);
+                              MediaElementEventQueue*);
   static const AtomicString& SegmentsKeyword();
   static const AtomicString& SequenceKeyword();
 
@@ -103,9 +103,9 @@ class SourceBuffer final : public EventTargetWithInlineData,
   // ScriptWrappable
   bool HasPendingActivity() const final;
 
-  // SuspendableObject
-  void Suspend() override;
-  void Resume() override;
+  // PausableObject
+  void Pause() override;
+  void Unpause() override;
   void ContextDestroyed(ExecutionContext*) override;
 
   // EventTarget interface
@@ -116,12 +116,12 @@ class SourceBuffer final : public EventTargetWithInlineData,
   bool InitializationSegmentReceived(const WebVector<MediaTrackInfo>&) override;
   void NotifyParseWarning(const ParseWarning) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   SourceBuffer(std::unique_ptr<WebSourceBuffer>,
                MediaSource*,
-               GenericEventQueue*);
+               MediaElementEventQueue*);
   void Dispose();
 
   bool IsRemoved() const;
@@ -160,7 +160,7 @@ class SourceBuffer final : public EventTargetWithInlineData,
   std::unique_ptr<WebSourceBuffer> web_source_buffer_;
   Member<MediaSource> source_;
   Member<TrackDefaultList> track_defaults_;
-  Member<GenericEventQueue> async_event_queue_;
+  Member<MediaElementEventQueue> async_event_queue_;
 
   AtomicString mode_;
   bool updating_;

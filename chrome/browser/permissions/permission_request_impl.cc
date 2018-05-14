@@ -5,11 +5,8 @@
 #include "chrome/browser/permissions/permission_request_impl.h"
 
 #include "build/build_config.h"
-#include "chrome/browser/permissions/permission_decision_auto_blocker.h"
-#include "chrome/browser/permissions/permission_uma_util.h"
 #include "chrome/browser/permissions/permission_util.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
 #include "components/url_formatter/elide_url.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -24,33 +21,18 @@
 PermissionRequestImpl::PermissionRequestImpl(
     const GURL& request_origin,
     ContentSettingsType content_settings_type,
-    Profile* profile,
     bool has_gesture,
     const PermissionDecidedCallback& permission_decided_callback,
     const base::Closure delete_callback)
     : request_origin_(request_origin),
       content_settings_type_(content_settings_type),
-      profile_(profile),
       has_gesture_(has_gesture),
       permission_decided_callback_(permission_decided_callback),
       delete_callback_(delete_callback),
-      is_finished_(false),
-      action_taken_(false) {}
+      is_finished_(false) {}
 
 PermissionRequestImpl::~PermissionRequestImpl() {
   DCHECK(is_finished_);
-  if (!action_taken_) {
-    PermissionUmaUtil::PermissionIgnored(
-        content_settings_type_, GetGestureType(), request_origin_, profile_);
-
-    PermissionEmbargoStatus embargo_status =
-        PermissionEmbargoStatus::NOT_EMBARGOED;
-    if (PermissionDecisionAutoBlocker::GetForProfile(profile_)
-            ->RecordIgnoreAndEmbargo(request_origin_, content_settings_type_)) {
-      embargo_status = PermissionEmbargoStatus::REPEATED_IGNORES;
-    }
-    PermissionUmaUtil::RecordEmbargoStatus(embargo_status);
-  }
 }
 
 PermissionRequest::IconId PermissionRequestImpl::GetIconId() const {
@@ -59,16 +41,22 @@ PermissionRequest::IconId PermissionRequestImpl::GetIconId() const {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
       return IDR_ANDROID_INFOBAR_GEOLOCATION;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       return IDR_ANDROID_INFOBAR_NOTIFICATIONS;
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
       return IDR_ANDROID_INFOBAR_MIDI;
     case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
       return IDR_ANDROID_INFOBAR_PROTECTED_MEDIA_IDENTIFIER;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
-      return IDR_INFOBAR_MEDIA_STREAM_MIC;
+      return IDR_ANDROID_INFOBAR_MEDIA_STREAM_MIC;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-      return IDR_INFOBAR_MEDIA_STREAM_CAMERA;
+      return IDR_ANDROID_INFOBAR_MEDIA_STREAM_CAMERA;
+    case CONTENT_SETTINGS_TYPE_ACCESSIBILITY_EVENTS:
+      return IDR_ANDROID_INFOBAR_ACCESSIBILITY_EVENTS;
+    case CONTENT_SETTINGS_TYPE_CLIPBOARD_READ:
+      return IDR_ANDROID_INFOBAR_CLIPBOARD;
+    case CONTENT_SETTINGS_TYPE_PAYMENT_HANDLER:
+      // TODO(zino): Should update this icon.
+      return IDR_ANDROID_INFOBAR_WARNING;
     default:
       NOTREACHED();
       return IDR_ANDROID_INFOBAR_WARNING;
@@ -78,7 +66,6 @@ PermissionRequest::IconId PermissionRequestImpl::GetIconId() const {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
       return vector_icons::kLocationOnIcon;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       return vector_icons::kNotificationsIcon;
 #if defined(OS_CHROMEOS)
     // TODO(xhwang): fix this icon, see crrev.com/863263007
@@ -90,9 +77,16 @@ PermissionRequest::IconId PermissionRequestImpl::GetIconId() const {
     case CONTENT_SETTINGS_TYPE_PLUGINS:
       return kExtensionIcon;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
-      return vector_icons::kMicrophoneIcon;
+      return vector_icons::kMicIcon;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
       return vector_icons::kVideocamIcon;
+    case CONTENT_SETTINGS_TYPE_ACCESSIBILITY_EVENTS:
+      return vector_icons::kAccessibilityIcon;
+    case CONTENT_SETTINGS_TYPE_CLIPBOARD_READ:
+      return kContentPasteIcon;
+    case CONTENT_SETTINGS_TYPE_PAYMENT_HANDLER:
+      // TODO(zino): Should update this icon.
+      return kProductIcon;
     default:
       NOTREACHED();
       return kExtensionIcon;
@@ -105,23 +99,32 @@ base::string16 PermissionRequestImpl::GetMessageText() const {
   int message_id;
   switch (content_settings_type_) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
-      message_id = IDS_GEOLOCATION_INFOBAR_QUESTION;
+      message_id = IDS_GEOLOCATION_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
-      message_id = IDS_NOTIFICATION_PERMISSIONS;
+      message_id = IDS_NOTIFICATIONS_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
-      message_id = IDS_MIDI_SYSEX_INFOBAR_QUESTION;
+      message_id = IDS_MIDI_SYSEX_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
-      message_id = IDS_PROTECTED_MEDIA_IDENTIFIER_INFOBAR_QUESTION;
+      message_id = IDS_PROTECTED_MEDIA_IDENTIFIER_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
-      message_id = IDS_MEDIA_CAPTURE_AUDIO_ONLY;
+      message_id = IDS_MEDIA_CAPTURE_AUDIO_ONLY_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-      message_id = IDS_MEDIA_CAPTURE_VIDEO_ONLY;
+      message_id = IDS_MEDIA_CAPTURE_VIDEO_ONLY_INFOBAR_TEXT;
+      break;
+    case CONTENT_SETTINGS_TYPE_ACCESSIBILITY_EVENTS:
+      message_id = IDS_ACCESSIBILITY_EVENTS_INFOBAR_TEXT;
+      break;
+    case CONTENT_SETTINGS_TYPE_CLIPBOARD_READ:
+      message_id = IDS_CLIPBOARD_INFOBAR_TEXT;
+      break;
+    case CONTENT_SETTINGS_TYPE_PAYMENT_HANDLER:
+      // TODO(zino): Should update this message.
+      message_id = IDS_CLIPBOARD_INFOBAR_TEXT;
       break;
     default:
       NOTREACHED();
@@ -141,7 +144,6 @@ base::string16 PermissionRequestImpl::GetMessageTextFragment() const {
       message_id = IDS_GEOLOCATION_INFOBAR_PERMISSION_FRAGMENT;
       break;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       message_id = IDS_NOTIFICATION_PERMISSIONS_FRAGMENT;
       break;
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
@@ -161,6 +163,16 @@ base::string16 PermissionRequestImpl::GetMessageTextFragment() const {
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
       message_id = IDS_MEDIA_CAPTURE_VIDEO_ONLY_PERMISSION_FRAGMENT;
       break;
+    case CONTENT_SETTINGS_TYPE_ACCESSIBILITY_EVENTS:
+      message_id = IDS_ACCESSIBILITY_EVENTS_PERMISSION_FRAGMENT;
+      break;
+    case CONTENT_SETTINGS_TYPE_CLIPBOARD_READ:
+      message_id = IDS_CLIPBOARD_PERMISSION_FRAGMENT;
+      break;
+    case CONTENT_SETTINGS_TYPE_PAYMENT_HANDLER:
+      // TODO(zino): Should update this message.
+      message_id = IDS_CLIPBOARD_PERMISSION_FRAGMENT;
+      break;
     default:
       NOTREACHED();
       return base::string16();
@@ -173,27 +185,20 @@ GURL PermissionRequestImpl::GetOrigin() const {
 }
 
 void PermissionRequestImpl::PermissionGranted() {
-  RegisterActionTaken();
-  permission_decided_callback_.Run(persist(), CONTENT_SETTING_ALLOW);
+  permission_decided_callback_.Run(CONTENT_SETTING_ALLOW);
 }
 
 void PermissionRequestImpl::PermissionDenied() {
-  RegisterActionTaken();
-  permission_decided_callback_.Run(persist(), CONTENT_SETTING_BLOCK);
+  permission_decided_callback_.Run(CONTENT_SETTING_BLOCK);
 }
 
 void PermissionRequestImpl::Cancelled() {
-  RegisterActionTaken();
-  permission_decided_callback_.Run(false, CONTENT_SETTING_DEFAULT);
+  permission_decided_callback_.Run(CONTENT_SETTING_DEFAULT);
 }
 
 void PermissionRequestImpl::RequestFinished() {
   is_finished_ = true;
   delete_callback_.Run();
-}
-
-bool PermissionRequestImpl::ShouldShowPersistenceToggle() const {
-  return PermissionUtil::ShouldShowPersistenceToggle(content_settings_type_);
 }
 
 PermissionRequestType PermissionRequestImpl::GetPermissionRequestType()

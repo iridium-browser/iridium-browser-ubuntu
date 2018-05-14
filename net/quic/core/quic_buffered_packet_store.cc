@@ -7,6 +7,7 @@
 #include "net/quic/platform/api/quic_bug_tracker.h"
 #include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_map_util.h"
+#include "net/quic/platform/api/quic_string.h"
 
 namespace net {
 
@@ -81,7 +82,7 @@ EnqueuePacketResult QuicBufferedPacketStore::EnqueuePacket(
     QuicSocketAddress server_address,
     QuicSocketAddress client_address,
     bool is_chlo,
-    const std::string& alpn) {
+    const QuicString& alpn) {
   QUIC_BUG_IF(!FLAGS_quic_allow_chlo_buffering)
       << "Shouldn't buffer packets if disabled via flag.";
   QUIC_BUG_IF(is_chlo && QuicContainsKey(connections_with_chlo_, connection_id))
@@ -197,7 +198,6 @@ bool QuicBufferedPacketStore::ShouldBufferPacket(bool is_chlo) {
   size_t num_connections_without_chlo =
       undecryptable_packets_.size() - connections_with_chlo_.size();
   bool reach_non_chlo_limit =
-      FLAGS_quic_reloadable_flag_quic_limit_num_new_sessions_per_epoll_loop &&
       num_connections_without_chlo >= kMaxConnectionsWithoutCHLO;
 
   return is_store_full || reach_non_chlo_limit;

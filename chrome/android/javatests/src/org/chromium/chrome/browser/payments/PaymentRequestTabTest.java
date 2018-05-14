@@ -25,7 +25,6 @@ import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityS
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content_public.browser.LoadUrlParams;
 
@@ -37,10 +36,7 @@ import java.util.concurrent.TimeoutException;
  * elsewhere.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestTabTest implements MainActivityStartCallback {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
@@ -66,13 +62,10 @@ public class PaymentRequestTabTest implements MainActivityStartCallback {
             throws InterruptedException, ExecutionException, TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyForInput());
         Assert.assertEquals(0, mPaymentRequestTestRule.getDismissed().getCallCount());
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mPaymentRequestTestRule.getActivity().getTabCreator(false).createNewTab(
-                        new LoadUrlParams("about:blank"), TabLaunchType.FROM_CHROME_UI, null);
-            }
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                (Runnable) () -> mPaymentRequestTestRule.getActivity().getTabCreator(
+                        false).createNewTab(
+                        new LoadUrlParams("about:blank"), TabLaunchType.FROM_CHROME_UI, null));
         mPaymentRequestTestRule.getDismissed().waitForCallback(0);
     }
 
@@ -86,12 +79,9 @@ public class PaymentRequestTabTest implements MainActivityStartCallback {
             throws InterruptedException, ExecutionException, TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyForInput());
         Assert.assertEquals(0, mPaymentRequestTestRule.getDismissed().getCallCount());
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                TabModel currentModel = mPaymentRequestTestRule.getActivity().getCurrentTabModel();
-                TabModelUtils.closeCurrentTab(currentModel);
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            TabModel currentModel = mPaymentRequestTestRule.getActivity().getCurrentTabModel();
+            TabModelUtils.closeCurrentTab(currentModel);
         });
         mPaymentRequestTestRule.getDismissed().waitForCallback(0);
     }
@@ -104,12 +94,9 @@ public class PaymentRequestTabTest implements MainActivityStartCallback {
             throws InterruptedException, ExecutionException, TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyForInput());
         Assert.assertEquals(0, mPaymentRequestTestRule.getDismissed().getCallCount());
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                TabModel currentModel = mPaymentRequestTestRule.getActivity().getCurrentTabModel();
-                TabModelUtils.getCurrentTab(currentModel).loadUrl(new LoadUrlParams("about:blank"));
-            }
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            TabModel currentModel = mPaymentRequestTestRule.getActivity().getCurrentTabModel();
+            TabModelUtils.getCurrentTab(currentModel).loadUrl(new LoadUrlParams("about:blank"));
         });
         mPaymentRequestTestRule.getDismissed().waitForCallback(0);
     }

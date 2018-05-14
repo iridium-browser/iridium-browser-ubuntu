@@ -24,6 +24,7 @@
 #include "base/win/scoped_process_information.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
+#include "build/build_config.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version.h"
 #include "chrome/install_static/install_modes.h"
@@ -395,7 +396,9 @@ void RunUserExperiment(const base::CommandLine& command_line,
     return;
   }
 
-  if (base::win::IsTabletDevice(nullptr)) {
+  // Note that the following call will not detect Win10 Tablet mode when
+  // run under a debugger - GetForegroundWindow gets confused.
+  if (base::win::IsTabletDevice(nullptr, ::GetForegroundWindow())) {
     VLOG(1) << "Aborting experiment due to tablet device.";
     experiment.SetState(ExperimentMetrics::kIsTabletDevice);
     storage_lock->StoreExperiment(experiment);
@@ -417,10 +420,18 @@ void RunUserExperiment(const base::CommandLine& command_line,
     return;
   }
 
-  VLOG(1) << "Launching Chrome to show the toast.";
-  experiment.SetState(ExperimentMetrics::kLaunchingChrome);
-  storage_lock->StoreExperiment(experiment);
-  LaunchChrome(*installer_state, experiment);
+  if (experiment.group() != ExperimentMetrics::kHoldbackGroup) {
+    VLOG(1) << "Launching Chrome to show the toast.";
+    experiment.SetState(ExperimentMetrics::kLaunchingChrome);
+    storage_lock->StoreExperiment(experiment);
+    LaunchChrome(*installer_state, experiment);
+  } else {
+    // Move clients in the holdback group directly into the "SelectedClose"
+    // group since they will not be prompted and Chrome will not launch.
+    VLOG(1) << "Skipping Chrome launch for client in the holdback group.";
+    experiment.SetState(ExperimentMetrics::kSelectedClose);
+    storage_lock->StoreExperiment(experiment);
+  }
 }
 
 // Writes the initial state |state| to the registry if there is no existing
@@ -476,15 +487,14 @@ bool IsSelectedForStudy(ExperimentStorage::Lock* lock,
 int PickGroup(ExperimentStorage::Study participation) {
   DCHECK(participation == ExperimentStorage::kStudyOne ||
          participation == ExperimentStorage::kStudyTwo);
-  static constexpr int kHoldbackGroup = ExperimentMetrics::kNumGroups - 1;
-
   if (participation == ExperimentStorage::kStudyOne) {
     // Evenly distrubute clients among the groups.
     return base::RandInt(0, ExperimentMetrics::kNumGroups - 1);
   }
 
   // 1% holdback, 99% in the winning group.
-  return base::RandDouble() < 0.01 ? kHoldbackGroup : kStudyTwoGroup;
+  return base::RandDouble() < 0.01 ? ExperimentMetrics::kHoldbackGroup
+                                   : kStudyTwoGroup;
 }
 
 bool IsUpdateRenamePending() {
@@ -518,8 +528,10 @@ void LaunchChrome(const InstallerState& installer_state,
   const base::FilePath chrome_exe =
       installer_state.target_path().Append(kChromeExe);
   base::CommandLine command_line(chrome_exe);
+#if defined(OS_WIN)
   command_line.AppendSwitchNative(::switches::kTryChromeAgain,
                                   base::IntToString16(experiment.group()));
+#endif  // defined(OS_WIN)
 
   STARTUPINFOW startup_info = {sizeof(startup_info)};
   PROCESS_INFORMATION temp_process_info = {};

@@ -34,7 +34,7 @@
 #include "core/animation/CompositorAnimations.h"
 #include "core/animation/InvalidatableInterpolation.h"
 #include "core/animation/css/CSSAnimations.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/NonCopyingSort.h"
 
 namespace blink {
@@ -42,7 +42,7 @@ namespace blink {
 namespace {
 
 void CopyToActiveInterpolationsMap(
-    const Vector<RefPtr<Interpolation>>& source,
+    const Vector<scoped_refptr<Interpolation>>& source,
     EffectStack::PropertyHandleFilter property_handle_filter,
     ActiveInterpolationsMap& target) {
   for (const auto& interpolation : source) {
@@ -58,9 +58,9 @@ void CopyToActiveInterpolationsMap(
         interpolation->IsInvalidatableInterpolation() &&
         ToInvalidatableInterpolation(*interpolation)
             .DependsOnUnderlyingValue()) {
-      active_interpolations.push_back(interpolation.Get());
+      active_interpolations.push_back(interpolation.get());
     } else {
-      active_interpolations.at(0) = interpolation.Get();
+      active_interpolations.at(0) = interpolation.get();
     }
   }
 }
@@ -76,7 +76,7 @@ void CopyNewAnimationsToActiveInterpolationsMap(
     EffectStack::PropertyHandleFilter property_handle_filter,
     ActiveInterpolationsMap& result) {
   for (const auto& new_animation : new_animations) {
-    Vector<RefPtr<Interpolation>> sample;
+    Vector<scoped_refptr<Interpolation>> sample;
     new_animation->Sample(sample);
     if (!sample.IsEmpty())
       CopyToActiveInterpolationsMap(sample, property_handle_filter, result);
@@ -85,15 +85,13 @@ void CopyNewAnimationsToActiveInterpolationsMap(
 
 }  // namespace
 
-EffectStack::EffectStack() {}
+EffectStack::EffectStack() = default;
 
 bool EffectStack::HasActiveAnimationsOnCompositor(
     const PropertyHandle& property) const {
   for (const auto& sampled_effect : sampled_effects_) {
-    // TODO(dstockwell): move the playing check into AnimationEffectReadOnly and
-    // expose both hasAnimations and hasActiveAnimations
     if (sampled_effect->Effect() &&
-        sampled_effect->Effect()->GetAnimation()->Playing() &&
+        sampled_effect->Effect()->HasPlayingAnimation() &&
         sampled_effect->Effect()->HasActiveAnimationsOnCompositor(property))
       return true;
   }
@@ -127,6 +125,8 @@ ActiveInterpolationsMap EffectStack::ActiveInterpolations(
     effect_stack->RemoveRedundantSampledEffects();
     for (const auto& sampled_effect : sampled_effects) {
       if (sampled_effect->GetPriority() != priority ||
+          // TODO(majidvp): Instead of accessing the effect's animation move the
+          // check inside KeyframeEffectReadOnly. http://crbug.com/812410
           (suppressed_animations && sampled_effect->Effect() &&
            suppressed_animations->Contains(
                sampled_effect->Effect()->GetAnimation())))
@@ -163,29 +163,8 @@ void EffectStack::RemoveRedundantSampledEffects() {
   sampled_effects_.Shrink(new_size);
 }
 
-DEFINE_TRACE(EffectStack) {
+void EffectStack::Trace(blink::Visitor* visitor) {
   visitor->Trace(sampled_effects_);
-}
-
-bool EffectStack::GetAnimatedBoundingBox(FloatBox& box,
-                                         CSSPropertyID property) const {
-  FloatBox original_box(box);
-  for (const auto& sampled_effect : sampled_effects_) {
-    if (sampled_effect->Effect() &&
-        sampled_effect->Effect()->Affects(PropertyHandle(property))) {
-      KeyframeEffectReadOnly* effect = sampled_effect->Effect();
-      const Timing& timing = effect->SpecifiedTiming();
-      double start_range = 0;
-      double end_range = 1;
-      timing.timing_function->Range(&start_range, &end_range);
-      FloatBox expanding_box(original_box);
-      if (!CompositorAnimations::GetAnimatedBoundingBox(
-              expanding_box, *effect->Model(), start_range, end_range))
-        return false;
-      box.ExpandTo(expanding_box);
-    }
-  }
-  return true;
 }
 
 }  // namespace blink

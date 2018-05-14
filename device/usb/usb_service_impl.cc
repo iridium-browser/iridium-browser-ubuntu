@@ -14,6 +14,7 @@
 #include "base/barrier_closure.h"
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -26,7 +27,6 @@
 #include "device/usb/usb_device_handle.h"
 #include "device/usb/usb_error.h"
 #include "device/usb/webusb_descriptors.h"
-#include "net/base/io_buffer.h"
 #include "third_party/libusb/src/libusb/libusb.h"
 
 #if defined(OS_WIN)
@@ -38,8 +38,6 @@
 #include "base/strings/string_util.h"
 #include "device/base/device_info_query_win.h"
 #endif  // OS_WIN
-
-using net::IOBufferWithSize;
 
 namespace device {
 
@@ -98,7 +96,7 @@ void InitializeUsbContextOnBlockingThread(
   }
 
   task_runner->PostTask(FROM_HERE,
-                        base::Bind(callback, base::Passed(&context)));
+                        base::BindOnce(callback, std::move(context)));
 }
 
 void GetDeviceListOnBlockingThread(
@@ -111,7 +109,7 @@ void GetDeviceListOnBlockingThread(
     if (!IsWinUsbInterface(new_device_path)) {
       // Wait to call libusb_get_device_list until libusb will be able to find
       // a WinUSB interface for the device.
-      task_runner->PostTask(FROM_HERE, base::Bind(callback, nullptr, 0));
+      task_runner->PostTask(FROM_HERE, base::BindOnce(callback, nullptr, 0));
       return;
     }
   }
@@ -532,7 +530,7 @@ int LIBUSB_CALL UsbServiceImpl::HotplugCallback(libusb_context* context,
 void UsbServiceImpl::OnPlatformDeviceAdded(PlatformUsbDevice platform_device) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!base::ContainsKey(platform_devices_, platform_device));
-  EnumerateDevice(platform_device, base::Bind(&base::DoNothing));
+  EnumerateDevice(platform_device, base::DoNothing());
   libusb_unref_device(platform_device);
 }
 

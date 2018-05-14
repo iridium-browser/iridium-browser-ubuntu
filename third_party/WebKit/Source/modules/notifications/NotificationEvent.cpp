@@ -28,13 +28,13 @@ NotificationEvent::NotificationEvent(const AtomicString& type,
     notification_ = initializer.notification();
 }
 
-NotificationEvent::~NotificationEvent() {}
+NotificationEvent::~NotificationEvent() = default;
 
 const AtomicString& NotificationEvent::InterfaceName() const {
   return EventNames::NotificationEvent;
 }
 
-DEFINE_TRACE(NotificationEvent) {
+void NotificationEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(notification_);
   ExtendableEvent::Trace(visitor);
 }

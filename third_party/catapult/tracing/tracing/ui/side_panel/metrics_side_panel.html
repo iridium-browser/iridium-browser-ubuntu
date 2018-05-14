@@ -63,6 +63,8 @@ tr.exportTo('tr.ui', function() {
             });
           }, this);
 
+      this.metrics_.sort((x, y) => x.label.localeCompare(y.label));
+
       this.settingsKey_ = 'metrics-side-panel-metric-name';
       this.currentMetricName_ = 'responsivenessMetric';
       const metricSelector = tr.ui.b.createSelector(
@@ -194,13 +196,11 @@ tr.exportTo('tr.ui', function() {
       }
 
       const startDate = new Date();
-      let histograms;
-      try {
-        histograms = tr.metrics.runMetrics(this.model_, options);
-      } catch (err) {
-        Polymer.dom(this.$.error).textContent = err.message;
-        return;
-      }
+      const addFailureCb = failure => {
+        Polymer.dom(this.$.error).textContent = failure.description;
+      };
+      const histograms = tr.metrics.runMetrics(
+          this.model_, options, addFailureCb);
 
       this.metricLatenciesMs_.push(new Date() - startDate);
       while (this.metricLatenciesMs_.length > 20) {

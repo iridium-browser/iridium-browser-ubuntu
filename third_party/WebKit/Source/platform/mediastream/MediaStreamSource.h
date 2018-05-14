@@ -43,6 +43,7 @@
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebMediaConstraints.h"
+#include "public/platform/WebMediaStreamSource.h"
 #include "public/platform/WebMediaStreamTrack.h"
 
 namespace blink {
@@ -52,7 +53,7 @@ class PLATFORM_EXPORT MediaStreamSource final
  public:
   class PLATFORM_EXPORT Observer : public GarbageCollectedMixin {
    public:
-    virtual ~Observer() {}
+    virtual ~Observer() = default;
     virtual void SourceChangedState() = 0;
   };
 
@@ -60,7 +61,7 @@ class PLATFORM_EXPORT MediaStreamSource final
     USING_FAST_MALLOC(ExtraData);
 
    public:
-    virtual ~ExtraData() {}
+    virtual ~ExtraData() = default;
   };
 
   enum StreamType { kTypeAudio, kTypeVideo };
@@ -103,6 +104,13 @@ class PLATFORM_EXPORT MediaStreamSource final
   WebMediaConstraints Constraints() { return constraints_; }
   void GetSettings(WebMediaStreamTrack::Settings&);
 
+  const WebMediaStreamSource::Capabilities& GetCapabilities() {
+    return capabilities_;
+  }
+  void SetCapabilities(const WebMediaStreamSource::Capabilities& capabilities) {
+    capabilities_ = capabilities;
+  }
+
   void SetAudioFormat(size_t number_of_channels, float sample_rate);
   void ConsumeAudio(AudioBus*, size_t number_of_frames);
 
@@ -117,7 +125,7 @@ class PLATFORM_EXPORT MediaStreamSource final
   // destruction.  So this class is eagerly finalized to finalize |m_extraData|
   // promptly.
   EAGERLY_FINALIZE();
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   MediaStreamSource(const String& id,
@@ -138,6 +146,7 @@ class PLATFORM_EXPORT MediaStreamSource final
   HashSet<AudioDestinationConsumer*> audio_consumers_;
   std::unique_ptr<ExtraData> extra_data_;
   WebMediaConstraints constraints_;
+  WebMediaStreamSource::Capabilities capabilities_;
   WTF::Optional<bool> echo_cancellation_;
 };
 

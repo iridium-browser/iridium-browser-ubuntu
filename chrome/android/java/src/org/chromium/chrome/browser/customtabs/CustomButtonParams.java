@@ -24,6 +24,7 @@ import android.view.ViewGroup;
 import android.widget.ImageButton;
 
 import org.chromium.base.Log;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.widget.TintedDrawable;
@@ -39,7 +40,7 @@ import javax.annotation.Nullable;
 /**
  * Container for all parameters related to creating a customizable button.
  */
-class CustomButtonParams {
+public class CustomButtonParams {
     private static final String TAG = "CustomTabs";
 
     private final PendingIntent mPendingIntent;
@@ -48,6 +49,9 @@ class CustomButtonParams {
     private String mDescription;
     private boolean mShouldTint;
     private boolean mIsOnToolbar;
+
+    @VisibleForTesting
+    static final String SHOW_ON_TOOLBAR = "android.support.customtabs.customaction.SHOW_ON_TOOLBAR";
 
     private CustomButtonParams(int id, Bitmap icon, String description,
             @Nullable PendingIntent pendingIntent, boolean tinted, boolean onToolbar) {
@@ -70,7 +74,7 @@ class CustomButtonParams {
     /**
      * @return Whether this button should be shown on the toolbar.
      */
-    boolean showOnToolbar() {
+    public boolean showOnToolbar() {
         return mIsOnToolbar;
     }
 
@@ -78,7 +82,7 @@ class CustomButtonParams {
      * @return The id associated with this button. The custom button on the toolbar always uses
      *         {@link CustomTabsIntent#TOOLBAR_ACTION_BUTTON_ID} as id.
      */
-    int getId() {
+    public int getId() {
         return mId;
     }
 
@@ -101,9 +105,9 @@ class CustomButtonParams {
     }
 
     /**
-    * @return The {@link PendingIntent} that will be sent when user clicks the customized button.
-    */
-    PendingIntent getPendingIntent() {
+     * @return The {@link PendingIntent} that will be sent when user clicks the customized button.
+     */
+    public PendingIntent getPendingIntent() {
         return mPendingIntent;
     }
 
@@ -115,10 +119,10 @@ class CustomButtonParams {
      * @return Parsed list of {@link CustomButtonParams}, which is empty if the input is invalid.
      */
     ImageButton buildBottomBarButton(Context context, ViewGroup parent, OnClickListener listener) {
-        if (mIsOnToolbar) return null;
+        assert !mIsOnToolbar;
 
-        ImageButton button = (ImageButton) LayoutInflater.from(context)
-                .inflate(R.layout.custom_tabs_bottombar_item, parent, false);
+        ImageButton button = (ImageButton) LayoutInflater.from(context).inflate(
+                R.layout.custom_tabs_bottombar_item, parent, false);
         button.setId(mId);
         button.setImageBitmap(mIcon);
         button.setContentDescription(mDescription);
@@ -139,8 +143,7 @@ class CustomButtonParams {
                 Toast toast = Toast.makeText(
                         view.getContext(), view.getContentDescription(), Toast.LENGTH_SHORT);
                 toast.setGravity(Gravity.BOTTOM | Gravity.END,
-                        screenWidth - screenPos[0] - width / 2,
-                        screenHeight - screenPos[1]);
+                        screenWidth - screenPos[0] - width / 2, screenHeight - screenPos[1]);
                 toast.show();
                 return true;
             }
@@ -151,18 +154,20 @@ class CustomButtonParams {
     /**
      * Parses a list of {@link CustomButtonParams} from the intent sent by clients.
      * @param intent The intent sent by the client.
+     * @param isTrustedIntent whether the intent is trusted.
      * @return A list of parsed {@link CustomButtonParams}. Return an empty list if input is invalid
      */
-    static List<CustomButtonParams> fromIntent(Context context, Intent intent) {
+    public static List<CustomButtonParams> fromIntent(
+            Context context, Intent intent, boolean isTrustedIntent) {
         List<CustomButtonParams> paramsList = new ArrayList<>(1);
         if (intent == null) return paramsList;
 
-        Bundle singleBundle = IntentUtils.safeGetBundleExtra(intent,
-                CustomTabsIntent.EXTRA_ACTION_BUTTON_BUNDLE);
-        ArrayList<Bundle> bundleList = IntentUtils.getParcelableArrayListExtra(intent,
-                CustomTabsIntent.EXTRA_TOOLBAR_ITEMS);
-        boolean tinted = IntentUtils.safeGetBooleanExtra(intent,
-                CustomTabsIntent.EXTRA_TINT_ACTION_BUTTON, false);
+        Bundle singleBundle =
+                IntentUtils.safeGetBundleExtra(intent, CustomTabsIntent.EXTRA_ACTION_BUTTON_BUNDLE);
+        ArrayList<Bundle> bundleList = IntentUtils.getParcelableArrayListExtra(
+                intent, CustomTabsIntent.EXTRA_TOOLBAR_ITEMS);
+        boolean tinted = IntentUtils.safeGetBooleanExtra(
+                intent, CustomTabsIntent.EXTRA_TINT_ACTION_BUTTON, false);
         if (singleBundle != null) {
             CustomButtonParams singleParams = fromBundle(context, singleBundle, tinted, false);
             if (singleParams != null) paramsList.add(singleParams);
@@ -190,13 +195,13 @@ class CustomButtonParams {
      * @param fromList Whether the bundle is contained in a list or it is the single bundle that
      *                 directly comes from the intent.
      */
-    private static CustomButtonParams fromBundle(Context context, Bundle bundle, boolean tinted,
-            boolean fromList) {
+    private static CustomButtonParams fromBundle(
+            Context context, Bundle bundle, boolean tinted, boolean fromList) {
         if (bundle == null) return null;
 
         if (fromList && !bundle.containsKey(CustomTabsIntent.KEY_ID)) return null;
-        int id = IntentUtils.safeGetInt(bundle, CustomTabsIntent.KEY_ID,
-                CustomTabsIntent.TOOLBAR_ACTION_BUTTON_ID);
+        int id = IntentUtils.safeGetInt(
+                bundle, CustomTabsIntent.KEY_ID, CustomTabsIntent.TOOLBAR_ACTION_BUTTON_ID);
 
         Bitmap bitmap = parseBitmapFromBundle(bundle);
         if (bitmap == null) {
@@ -212,16 +217,18 @@ class CustomButtonParams {
             return null;
         }
 
-        boolean onToolbar = id == CustomTabsIntent.TOOLBAR_ACTION_BUTTON_ID;
+        boolean onToolbar = id == CustomTabsIntent.TOOLBAR_ACTION_BUTTON_ID
+                || IntentUtils.safeGetBoolean(bundle, SHOW_ON_TOOLBAR, false);
         if (onToolbar && !doesIconFitToolbar(context, bitmap)) {
             onToolbar = false;
-            Log.w(TAG, "Button's icon not suitable for toolbar, putting it to bottom bar instead."
-                    + "See: https://developer.android.com/reference/android/support/customtabs/"
-                    + "CustomTabsIntent.html#KEY_ICON");
+            Log.w(TAG,
+                    "Button's icon not suitable for toolbar, putting it to bottom bar instead."
+                            + "See: https://developer.android.com/reference/android/support/customtabs/"
+                            + "CustomTabsIntent.html#KEY_ICON");
         }
 
-        PendingIntent pendingIntent = IntentUtils.safeGetParcelable(bundle,
-                CustomTabsIntent.KEY_PENDING_INTENT);
+        PendingIntent pendingIntent =
+                IntentUtils.safeGetParcelable(bundle, CustomTabsIntent.KEY_PENDING_INTENT);
         // PendingIntent is a must for buttons on the toolbar, but it's optional for bottom bar.
         if (onToolbar && pendingIntent == null) {
             Log.w(TAG, "Invalid action button on toolbar: pending intent not present in bundle!");

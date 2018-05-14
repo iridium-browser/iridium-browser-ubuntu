@@ -13,7 +13,6 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -80,14 +79,14 @@ class FakeIt2MeConfirmationDialog : public It2MeConfirmationDialog {
   DISALLOW_COPY_AND_ASSIGN(FakeIt2MeConfirmationDialog);
 };
 
-FakeIt2MeConfirmationDialog::FakeIt2MeConfirmationDialog() {}
+FakeIt2MeConfirmationDialog::FakeIt2MeConfirmationDialog() = default;
 
 FakeIt2MeConfirmationDialog::FakeIt2MeConfirmationDialog(
     const std::string& remote_user_email,
     DialogResult dialog_result)
     : remote_user_email_(remote_user_email), dialog_result_(dialog_result) {}
 
-FakeIt2MeConfirmationDialog::~FakeIt2MeConfirmationDialog() {}
+FakeIt2MeConfirmationDialog::~FakeIt2MeConfirmationDialog() = default;
 
 void FakeIt2MeConfirmationDialog::Show(const std::string& remote_user_email,
                                        const ResultCallback& callback) {
@@ -122,11 +121,11 @@ class FakeIt2MeDialogFactory : public It2MeConfirmationDialogFactory {
 FakeIt2MeDialogFactory::FakeIt2MeDialogFactory()
     : remote_user_email_(kTestUserName) {}
 
-FakeIt2MeDialogFactory::~FakeIt2MeDialogFactory() {}
+FakeIt2MeDialogFactory::~FakeIt2MeDialogFactory() = default;
 
 std::unique_ptr<It2MeConfirmationDialog> FakeIt2MeDialogFactory::Create() {
   EXPECT_FALSE(remote_user_email_.empty());
-  return base::MakeUnique<FakeIt2MeConfirmationDialog>(remote_user_email_,
+  return std::make_unique<FakeIt2MeConfirmationDialog>(remote_user_email_,
                                                        dialog_result_);
 }
 
@@ -196,7 +195,7 @@ class It2MeHostTest : public testing::Test, public It2MeHost::Observer {
 };
 
 It2MeHostTest::It2MeHostTest() : weak_factory_(this) {}
-It2MeHostTest::~It2MeHostTest() {}
+It2MeHostTest::~It2MeHostTest() = default;
 
 void It2MeHostTest::SetUp() {
 #if defined(OS_LINUX)
@@ -236,7 +235,7 @@ void It2MeHostTest::OnValidationComplete(const base::Closure& resume_callback,
 void It2MeHostTest::SetPolicies(
     std::initializer_list<std::pair<base::StringPiece, const base::Value&>>
         policies) {
-  policies_ = base::MakeUnique<base::DictionaryValue>();
+  policies_ = std::make_unique<base::DictionaryValue>();
   for (const auto& policy : policies) {
     policies_->Set(policy.first, policy.second.CreateDeepCopy());
   }
@@ -274,12 +273,11 @@ void It2MeHostTest::StartHost() {
       base::Time::Now() + base::TimeDelta::FromHours(1);
 
   auto fake_signal_strategy =
-      base::MakeUnique<FakeSignalStrategy>(SignalingAddress("fake_local_jid"));
+      std::make_unique<FakeSignalStrategy>(SignalingAddress("fake_local_jid"));
   fake_bot_signal_strategy_->ConnectTo(fake_signal_strategy.get());
 
   it2me_host_ = new It2MeHost();
-  it2me_host_->Connect(host_context_->Copy(),
-                       base::MakeUnique<base::DictionaryValue>(*policies_),
+  it2me_host_->Connect(host_context_->Copy(), policies_->CreateDeepCopy(),
                        std::move(dialog_factory), weak_factory_.GetWeakPtr(),
                        std::move(fake_signal_strategy), kTestUserName,
                        "fake_bot_jid", ice_config);

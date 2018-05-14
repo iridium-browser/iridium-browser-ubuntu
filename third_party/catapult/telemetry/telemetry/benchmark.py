@@ -3,19 +3,19 @@
 # found in the LICENSE file.
 
 import optparse
+import sys
 
 from py_utils import class_util
+from py_utils import expectations_parser
 from telemetry import decorators
 from telemetry.internal import story_runner
 from telemetry.internal.util import command_line
 from telemetry.page import legacy_page_test
-from telemetry.story import expectations
+from telemetry.story import expectations as expectations_module
 from telemetry.web_perf import timeline_based_measurement
-from tracing.value import histogram
+from tracing.value.diagnostics import generic_set
 
-Disabled = decorators.Disabled
-Enabled = decorators.Enabled
-Owner = decorators.Owner
+Owner = decorators.Owner # pylint: disable=invalid-name
 
 
 class InvalidOptionsError(Exception):
@@ -63,6 +63,9 @@ class Benchmark(command_line.Command):
   options = {}
   page_set = None
   test = timeline_based_measurement.TimelineBasedMeasurement
+  SUPPORTED_PLATFORMS = [expectations_module.ALL]
+
+  MAX_NUM_VALUES = sys.maxint
 
   def __init__(self, max_failures=None):
     """Creates a new Benchmark.
@@ -71,7 +74,7 @@ class Benchmark(command_line.Command):
       max_failures: The number of story run's failures before bailing
           from executing subsequent page runs. If None, we never bail.
     """
-    self._expectations = None
+    self._expectations = expectations_module.StoryExpectations()
     self._max_failures = max_failures
     # TODO: There should be an assertion here that checks that only one of
     # the following is true:
@@ -82,14 +85,14 @@ class Benchmark(command_line.Command):
     # See https://github.com/catapult-project/catapult/issues/3708
 
 
-  # pylint: disable=unused-argument
-  @classmethod
-  def ShouldDisable(cls, possible_browser):
-    """Override this method to disable a benchmark under specific conditions.
-
-     Supports logic too complex for simple Enabled and Disabled decorators.
-     Decorators are still respected in cases where this function returns False.
-     """
+  def _CanRunOnPlatform(self, platform, finder_options):
+    for p in self.SUPPORTED_PLATFORMS:
+      # This is reusing StoryExpectation code, so it is a bit unintuitive. We
+      # are trying to detect the opposite of the usual case in StoryExpectations
+      # so we want to return True when ShouldDisable returns true, even though
+      # we do not want to disable.
+      if p.ShouldDisable(platform, finder_options):
+        return True
     return False
 
   def Run(self, finder_options):
@@ -103,43 +106,6 @@ class Benchmark(command_line.Command):
   @classmethod
   def Name(cls):
     return '%s.%s' % (cls.__module__.split('.')[-1], cls.__name__)
-
-  @classmethod
-  def ShouldTearDownStateAfterEachStoryRun(cls):
-    """Override to specify whether to tear down state after each story run.
-
-    Tearing down all states after each story run, e.g., clearing profiles,
-    stopping the browser, stopping local server, etc. So the browser will not be
-    reused among multiple stories. This is particularly useful to get the
-    startup part of launching the browser in each story.
-
-    This should only be used by TimelineBasedMeasurement (TBM) benchmarks, but
-    not by PageTest based benchmarks.
-    """
-    return True
-
-  # NOTE: this is a temporary workaround for crbug.com/645329, do not rely on
-  # this as a stable public API as we may remove this without public notice.
-  @classmethod
-  def IsShouldTearDownStateAfterEachStoryRunOverriden(cls):
-    return (cls.ShouldTearDownStateAfterEachStoryRun.__func__ !=
-            Benchmark.ShouldTearDownStateAfterEachStoryRun.__func__)
-
-  @classmethod
-  def ShouldTearDownStateAfterEachStorySetRun(cls):
-    """Override to specify whether to tear down state after each story set run.
-
-    Defaults to True in order to reset the state and make individual story set
-    repeats more independent of each other. The intended effect is to average
-    out noise in measurements between repeats.
-
-    Long running benchmarks willing to stess test the browser and have it run
-    for long periods of time may switch this value to False.
-
-    This should only be used by TimelineBasedMeasurement (TBM) benchmarks, but
-    not by PageTest based benchmarks.
-    """
-    return True
 
   @classmethod
   def AddCommandLineArgs(cls, parser):
@@ -196,21 +162,20 @@ class Benchmark(command_line.Command):
 
   # pylint: disable=unused-argument
   @classmethod
-  def ValueCanBeAddedPredicate(cls, value, is_first_result):
-    """Returns whether |value| can be added to the test results.
+  def ShouldAddValue(cls, name, from_first_story_run):
+    """Returns whether the named value should be added to PageTestResults.
 
     Override this method to customize the logic of adding values to test
-    results.
+    results. SkipValues and TraceValues will be added regardless
+    of logic here.
 
     Args:
-      value: a value.Value instance (except failure.FailureValue,
-        skip.SkipValue or trace.TraceValue which will always be added).
-      is_first_result: True if |value| is the first result for its
-          corresponding story.
+      name: The string name of a value being added.
+      from_first_story_run: True if the named value was produced during the
+          first run of the corresponding story.
 
     Returns:
-      True if |value| should be added to the test results.
-      Otherwise, it returns False.
+      True if the value should be added to the test results, False otherwise.
     """
     return True
 
@@ -221,14 +186,26 @@ class Benchmark(command_line.Command):
     return BenchmarkMetadata(self.Name(), self.__doc__,
                              self.GetTraceRerunCommands())
 
-  def GetOwnership(self):
-    """Returns an Ownership Diagnostic containing the benchmark's information.
+  def GetBugComponents(self):
+    """Returns a GenericSet Diagnostic containing the benchmark's Monorail
+       component.
 
     Returns:
-      Diagnostic with the benchmark's owners' e-mails and component name
+      GenericSet Diagnostic with the benchmark's bug component name
     """
-    return histogram.Ownership(
-        decorators.GetEmails(self), decorators.GetComponent(self))
+    benchmark_component = decorators.GetComponent(self)
+    component_diagnostic_value = (
+        [benchmark_component] if benchmark_component else [])
+    return generic_set.GenericSet(component_diagnostic_value)
+
+  def GetOwners(self):
+    """Returns a Generic Diagnostic containing the benchmark's owners' emails
+       in a list.
+
+    Returns:
+      Diagnostic with a list of the benchmark's owners' emails
+    """
+    return generic_set.GenericSet(decorators.GetEmails(self) or [])
 
   @decorators.Deprecated(
       2017, 7, 29, 'Use CreateCoreTimelineBasedMeasurementOptions instead.')
@@ -302,6 +279,8 @@ class Benchmark(command_line.Command):
         if category not in categories:
           categories.append(category)
       tbm_options.config.atrace_config.categories = categories
+    if options and options.enable_systrace:
+      tbm_options.config.chrome_trace_config.SetEnableSystrace()
     return tbm_options
 
 
@@ -346,31 +325,18 @@ class Benchmark(command_line.Command):
     return self.page_set()  # pylint: disable=not-callable
 
   def GetBrokenExpectations(self, story_set):
-    self.InitializeExpectations()
     if self._expectations:
       return self._expectations.GetBrokenExpectations(story_set)
     return []
 
-  # TODO(rnephew): Rename InitializeExpectations to GetExpectations
-  def InitializeExpectations(self):
-    """Returns StoryExpectation object.
+  def AugmentExpectationsWithParser(self, data):
+    parser = expectations_parser.TestExpectationParser(data)
+    self._expectations.GetBenchmarkExpectationsFromParser(
+        parser.expectations, self.Name())
 
-    This is a wrapper for GetExpectations. The user overrides GetExpectatoins
-    in the benchmark class to have it use the correct expectations. This is what
-    story_runner.py uses to get the expectations.
-    """
-    if not self._expectations:
-      self._expectations = self.GetExpectations()
+  @property
+  def expectations(self):
     return self._expectations
-
-  # TODO(rnephew): Rename GetExpectations to CreateExpectations
-  def GetExpectations(self):
-    """Returns a StoryExpectation object.
-
-    This object is used to determine what stories are disabled. This needs to be
-    overridden by the subclass. It defaults to an empty expectations object.
-    """
-    return expectations.StoryExpectations()
 
 
 def AddCommandLineArgs(parser):

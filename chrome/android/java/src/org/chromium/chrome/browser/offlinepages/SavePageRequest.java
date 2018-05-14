@@ -17,6 +17,7 @@ public class SavePageRequest {
     private long mRequestId;
     private String mUrl;
     private ClientId mClientId;
+    private OfflinePageOrigin mOrigin;
 
     /**
      * Creates a SavePageRequest that's a copy of the C++ side version.
@@ -32,18 +33,20 @@ public class SavePageRequest {
      *     request.
      * @param clientIdId a String that will be the ID of the client ID of this request.
      */
-    @CalledByNative("SavePageRequest")
-    public static SavePageRequest create(
-            int state, long requestId, String url, String clientIdNamespace, String clientIdId) {
-        return new SavePageRequest(
-                state, requestId, url, new ClientId(clientIdNamespace, clientIdId));
+    @CalledByNative
+    public static SavePageRequest create(int state, long requestId, String url,
+            String clientIdNamespace, String clientIdId, String originString) {
+        return new SavePageRequest(state, requestId, url,
+                new ClientId(clientIdNamespace, clientIdId), new OfflinePageOrigin(originString));
     }
 
-    private SavePageRequest(int state, long requestId, String url, ClientId clientId) {
+    private SavePageRequest(
+            int state, long requestId, String url, ClientId clientId, OfflinePageOrigin origin) {
         mRequestState = state;
         mRequestId = requestId;
         mUrl = url;
         mClientId = clientId;
+        mOrigin = origin;
     }
 
     public int getRequestState() {
@@ -60,5 +63,9 @@ public class SavePageRequest {
 
     public ClientId getClientId() {
         return mClientId;
+    }
+
+    public OfflinePageOrigin getOrigin() {
+        return mOrigin;
     }
 }

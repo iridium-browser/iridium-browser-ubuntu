@@ -23,6 +23,9 @@ If you have multiple reviewers, make it clear in the message you send
 requesting review what you expect from each reviewer. Otherwise people might
 assume their input is not required or waste time with redundant reviews.
 
+Please also read [Respectful Changes](cl_respect.md) and
+[Respectful Code Reviews](cr_respect.md).
+
 #### Expectations for all reviewers
 
   * Aim to provide some kind of actionable response within 24 hours of receipt
@@ -92,8 +95,9 @@ owners rather than large directories with many owners. Owners must:
     discourage people from sending reviews, including writing "slow" or
     "emeritus" after your name.
 
-Seldom-updated directories may have exceptions. Directories in `third_party`
-should list those most familiar with the library.
+Seldom-updated directories may have exceptions to the "substantiality" and
+"recency" requirements. Directories in `third_party` should list those most
+familiar with the library, regardless of how often the code is updated.
 
 ## TBR ("To Be Reviewed")
 
@@ -106,7 +110,7 @@ review the change. If there are comments after landing, the author is obligated
 to address them in a followup patch.
 
 Do not use TBR just because a change is urgent or the reviewer is being slow.
-Contact the reviewer directly or find somebody.
+Contact the reviewer directly or find somebody else to review your change.
 
 To send a change TBR, annotate the description and send email like normal.
 Otherwise the reviewer won't know to review the patch.
@@ -192,8 +196,10 @@ A `*` indicates that all committers are owners:
 ```
 
 The text `set noparent` will stop owner propagation from parent directories.
-This is used for specialized code. In this example, only the two listed people
-are owners:
+This should be rarely used. If you want to use `set noparent` except for IPC
+related files, please first reach out to chrome-eng-review@google.com.
+
+In this example, only the two listed people are owners:
 ```
 set noparent
 a@chromium.org
@@ -210,6 +216,13 @@ per-file foo.*=a@chromium.org
 
 per-file readme.txt=*
 ```
+
+Note that `per-file` directives cannot directly specify subdirectories, e.g:
+```
+per-file foo/bar.cc=a@chromium.org
+```
+
+is not OK; instead, place a `per-file` directive in `foo/OWNERS`.
 
 Other `OWNERS` files can be included by reference by listing the path to the
 file with `file://...`. This example indicates that only the people listed in

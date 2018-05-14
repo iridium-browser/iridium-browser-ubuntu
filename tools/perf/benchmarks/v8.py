@@ -8,7 +8,6 @@ from measurements import v8_detached_context_age_in_gc
 import page_sets
 
 from telemetry import benchmark
-from telemetry import story
 from telemetry.timeline import chrome_trace_category_filter
 from telemetry.web_perf import timeline_based_measurement
 
@@ -25,23 +24,8 @@ class V8DetachedContextAgeInGC(perf_benchmark.PerfBenchmark):
   def Name(cls):
     return 'v8.detached_context_age_in_gc'
 
-  @classmethod
-  def ShouldDisable(cls, possible_browser):
-    # http://crbug.com/685350
-    if possible_browser.platform.GetDeviceTypeName() == 'Nexus 9':
-      return True
-    return False
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        pass # Nothing not disabled.
-    return StoryExpectations()
-
 
 class _Top25RuntimeStats(perf_benchmark.PerfBenchmark):
-  options = {'pageset_repeat': 3}
-
   def SetExtraBrowserOptions(self, options):
     options.AppendExtraBrowserArgs(
       '--enable-blink-features=BlinkRuntimeCallStats')
@@ -79,14 +63,7 @@ class _Top25RuntimeStats(perf_benchmark.PerfBenchmark):
     tbm_options.SetTimelineBasedMetrics(['runtimeStatsMetric'])
     return tbm_options
 
-  @classmethod
-  def ShouldDisable(cls, possible_browser):
-    if possible_browser.browser_type == 'reference':
-      return True
-    return False
 
-
-@benchmark.Disabled('android', 'win', 'reference')  # crbug.com/664318
 @benchmark.Owner(emails=['cbruni@chromium.org'])
 class V8Top25RuntimeStats(_Top25RuntimeStats):
   """Runtime Stats benchmark for a 25 top V8 web pages.
@@ -101,9 +78,3 @@ class V8Top25RuntimeStats(_Top25RuntimeStats):
 
   def CreateStorySet(self, options):
     return page_sets.V8Top25StorySet()
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        pass # blank_page.html not disabled.
-    return StoryExpectations()

@@ -2,9 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
 
-source_set("blink") {
+jumbo_source_set("blink") {
   sources = [
     "blink_event_util.cc",
     "blink_event_util.h",
@@ -16,6 +17,8 @@ source_set("blink") {
     "did_overscroll_params.h",
     "event_with_callback.cc",
     "event_with_callback.h",
+    "fling_booster.cc",
+    "fling_booster.h",
     "input_handler_proxy.cc",
     "input_handler_proxy.h",
     "input_handler_proxy_client.h",

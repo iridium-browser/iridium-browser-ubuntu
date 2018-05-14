@@ -7,6 +7,10 @@
 
 namespace tests_hook {
 
+// Returns true if ContentSuggestions should be disabled to allow other tests to
+// run unimpeded.
+bool DisableContentSuggestions();
+
 // Returns true if contextual search should be disabled to allow other tests
 // to run unimpeded.
 bool DisableContextualSearch();
@@ -26,6 +30,11 @@ bool DisableSigninRecallPromo();
 // Returns true if the update service should be disabled so that the update
 // infobar won't be shown during testing.
 bool DisableUpdateService();
+
+// TODO(crbug.com/800266): Removes this hook.
+// Returns true if the first phase of the UI refresh will be displayed,
+// overriding the flag value.
+bool ForceUIRefreshPhase1();
 
 // Global integration tests setup.  This is not used by EarlGrey-based
 // integration tests.

@@ -5,19 +5,20 @@
 #include "chrome/browser/ui/ash/chrome_new_window_client.h"
 
 #include "ash/content/keyboard_overlay/keyboard_overlay_view.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/interfaces/constants.mojom.h"
 #include "base/macros.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/browser/ui/ash/chrome_shell_delegate.h"
+#include "chrome/browser/ui/ash/ksv/keyboard_shortcut_viewer_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
@@ -33,9 +34,10 @@
 #include "extensions/common/constants.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/window_open_disposition.h"
-#include "ui/wm/public/activation_client.h"
 
 namespace {
+
+ChromeNewWindowClient* g_chrome_new_window_client_instance = nullptr;
 
 void RestoreTabUsingProfile(Profile* profile) {
   sessions::TabRestoreService* service =
@@ -43,20 +45,14 @@ void RestoreTabUsingProfile(Profile* profile) {
   service->RestoreMostRecentEntry(nullptr);
 }
 
-}  // namespace
-
-// static
-Browser* ChromeNewWindowClient::GetActiveBrowser() {
-  Browser* browser = BrowserList::GetInstance()->GetLastActive();
-  if (browser) {
-    aura::Window* window = browser->window()->GetNativeWindow();
-    wm::ActivationClient* client =
-        wm::GetActivationClient(window->GetRootWindow());
-    if (client->GetActiveWindow() == window)
-      return browser;
-  }
-  return nullptr;
+bool IsIncognitoAllowed() {
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  return profile && profile->GetProfileType() != Profile::GUEST_PROFILE &&
+         IncognitoModePrefs::GetAvailability(profile->GetPrefs()) !=
+             IncognitoModePrefs::DISABLED;
 }
+
+}  // namespace
 
 ChromeNewWindowClient::ChromeNewWindowClient() : binding_(this) {
   service_manager::Connector* connector =
@@ -67,9 +63,20 @@ ChromeNewWindowClient::ChromeNewWindowClient() : binding_(this) {
   ash::mojom::NewWindowClientAssociatedPtrInfo ptr_info;
   binding_.Bind(mojo::MakeRequest(&ptr_info));
   new_window_controller_->SetClient(std::move(ptr_info));
+
+  DCHECK(!g_chrome_new_window_client_instance);
+  g_chrome_new_window_client_instance = this;
 }
 
-ChromeNewWindowClient::~ChromeNewWindowClient() {}
+ChromeNewWindowClient::~ChromeNewWindowClient() {
+  DCHECK_EQ(g_chrome_new_window_client_instance, this);
+  g_chrome_new_window_client_instance = nullptr;
+}
+
+// static
+ChromeNewWindowClient* ChromeNewWindowClient::Get() {
+  return g_chrome_new_window_client_instance;
+}
 
 // TabRestoreHelper is used to restore a tab. In particular when the user
 // attempts to a restore a tab if the TabRestoreService hasn't finished loading
@@ -115,7 +122,7 @@ class ChromeNewWindowClient::TabRestoreHelper
 };
 
 void ChromeNewWindowClient::NewTab() {
-  Browser* browser = GetActiveBrowser();
+  Browser* browser = chrome::FindBrowserWithActiveWindow();
   if (browser && browser->is_type_tabbed()) {
     chrome::NewTab(browser);
     return;
@@ -133,7 +140,10 @@ void ChromeNewWindowClient::NewTab() {
 }
 
 void ChromeNewWindowClient::NewWindow(bool is_incognito) {
-  Browser* browser = GetActiveBrowser();
+  if (is_incognito && !IsIncognitoAllowed())
+    return;
+
+  Browser* browser = chrome::FindBrowserWithActiveWindow();
   Profile* profile = (browser && browser->profile())
                          ? browser->profile()->GetOriginalProfile()
                          : ProfileManager::GetActiveUserProfile();
@@ -146,9 +156,8 @@ void ChromeNewWindowClient::OpenFileManager() {
   Profile* const profile = ProfileManager::GetActiveUserProfile();
   const ExtensionService* const service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
-  if (!service ||
-      !extensions::util::IsAppLaunchableWithoutEnabling(kFileManagerAppId,
-                                                        profile)) {
+  if (!service || !extensions::util::IsAppLaunchableWithoutEnabling(
+                      kFileManagerAppId, profile)) {
     return;
   }
 
@@ -186,7 +195,7 @@ void ChromeNewWindowClient::RestoreTab() {
     return;
   }
 
-  Browser* browser = GetActiveBrowser();
+  Browser* browser = chrome::FindBrowserWithActiveWindow();
   Profile* profile = browser ? browser->profile() : nullptr;
   if (!profile)
     profile = ProfileManager::GetActiveUserProfile();
@@ -205,7 +214,14 @@ void ChromeNewWindowClient::RestoreTab() {
   }
 }
 
+// TODO(crbug.com/755448): Remove this when the new shortcut viewer is enabled.
 void ChromeNewWindowClient::ShowKeyboardOverlay() {
+  // Show the new keyboard shortcut viewer if the feature is enabled.
+  if (ash::features::IsKeyboardShortcutViewerEnabled()) {
+    keyboard_shortcut_viewer_util::ShowKeyboardShortcutViewer();
+    return;
+  }
+
   // TODO(mazda): Move the show logic to ash (http://crbug.com/124222).
   Profile* profile = ProfileManager::GetActiveUserProfile();
   std::string url(chrome::kChromeUIKeyboardOverlayURL);
@@ -213,10 +229,15 @@ void ChromeNewWindowClient::ShowKeyboardOverlay() {
                                        GURL(url));
 }
 
+void ChromeNewWindowClient::ShowKeyboardShortcutViewer() {
+  keyboard_shortcut_viewer_util::ShowKeyboardShortcutViewer();
+}
+
 void ChromeNewWindowClient::ShowTaskManager() {
   chrome::OpenTaskManager(nullptr);
 }
 
 void ChromeNewWindowClient::OpenFeedbackPage() {
-  chrome::OpenFeedbackDialog(GetActiveBrowser(), chrome::kFeedbackSourceAsh);
+  chrome::OpenFeedbackDialog(chrome::FindBrowserWithActiveWindow(),
+                             chrome::kFeedbackSourceAsh);
 }

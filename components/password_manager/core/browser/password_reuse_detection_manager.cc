@@ -24,7 +24,7 @@ constexpr TimeDelta kMaxInactivityTime = TimeDelta::FromSeconds(10);
 
 PasswordReuseDetectionManager::PasswordReuseDetectionManager(
     PasswordManagerClient* client)
-    : client_(client), clock_(new base::DefaultClock) {
+    : client_(client), clock_(base::DefaultClock::GetInstance()) {
   DCHECK(client_);
 }
 
@@ -32,6 +32,9 @@ PasswordReuseDetectionManager::~PasswordReuseDetectionManager() {}
 
 void PasswordReuseDetectionManager::DidNavigateMainFrame(
     const GURL& main_frame_url) {
+  if (main_frame_url.host() == main_frame_url_.host())
+    return;
+
   main_frame_url_ = main_frame_url;
   input_characters_.clear();
   reuse_on_this_page_was_found_ = false;
@@ -70,17 +73,23 @@ void PasswordReuseDetectionManager::OnKeyPressed(const base::string16& text) {
 }
 
 void PasswordReuseDetectionManager::OnReuseFound(
-    const base::string16& password,
-    const std::string& legitimate_domain,
-    int saved_passwords,
-    int number_matches) {
+    size_t password_length,
+    bool matches_sync_password,
+    const std::vector<std::string>& matching_domains,
+    int saved_passwords) {
   reuse_on_this_page_was_found_ = true;
   std::unique_ptr<BrowserSavePasswordProgressLogger> logger;
   if (password_manager_util::IsLoggingActive(client_)) {
     logger.reset(
         new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
-    logger->LogString(BrowserSavePasswordProgressLogger::STRING_REUSE_FOUND,
-                      legitimate_domain);
+    std::vector<std::string> domains_to_log(matching_domains);
+    if (matches_sync_password)
+      domains_to_log.push_back("CHROME SYNC PASSWORD");
+    // TODO(nparker): Implement LogList() to log all domains in one call.
+    for (const auto& domain : domains_to_log) {
+      logger->LogString(BrowserSavePasswordProgressLogger::STRING_REUSE_FOUND,
+                        domain);
+    }
   }
 
   // PasswordManager could be nullptr in tests.
@@ -89,19 +98,23 @@ void PasswordReuseDetectionManager::OnReuseFound(
           ? client_->GetPasswordManager()->IsPasswordFieldDetectedOnPage()
           : false;
 
-  metrics_util::LogPasswordReuse(password.size(), saved_passwords,
-                                 number_matches, password_field_detected);
+  metrics_util::LogPasswordReuse(password_length, saved_passwords,
+                                 matching_domains.size(),
+                                 password_field_detected);
 #if defined(SAFE_BROWSING_DB_LOCAL)
   // TODO(jialiul): After CSD whitelist being added to Android, we should gate
   // this by either SAFE_BROWSING_DB_LOCAL or SAFE_BROWSING_DB_REMOTE.
-  client_->CheckProtectedPasswordEntry(legitimate_domain,
+  if (matches_sync_password) {
+    client_->LogPasswordReuseDetectedEvent();
+  }
+
+  client_->CheckProtectedPasswordEntry(matches_sync_password, matching_domains,
                                        password_field_detected);
 #endif
 }
 
-void PasswordReuseDetectionManager::SetClockForTesting(
-    std::unique_ptr<base::Clock> clock) {
-  clock_ = std::move(clock);
+void PasswordReuseDetectionManager::SetClockForTesting(base::Clock* clock) {
+  clock_ = clock;
 }
 
 }  // namespace password_manager

@@ -26,6 +26,7 @@
 #ifndef AXMenuListPopup_h
 #define AXMenuListPopup_h
 
+#include "base/macros.h"
 #include "modules/accessibility/AXMockObject.h"
 
 namespace blink {
@@ -35,8 +36,6 @@ class AXMenuListOption;
 class HTMLElement;
 
 class AXMenuListPopup final : public AXMockObject {
-  WTF_MAKE_NONCOPYABLE(AXMenuListPopup);
-
  public:
   static AXMenuListPopup* Create(AXObjectCacheImpl& ax_object_cache) {
     return new AXMenuListPopup(ax_object_cache);
@@ -59,7 +58,7 @@ class AXMenuListPopup final : public AXMockObject {
   AccessibilityRole RoleValue() const override { return kMenuListPopupRole; }
 
   bool IsVisible() const override;
-  bool Press() override;
+  bool OnNativeClickAction() override;
   void AddChildren() override;
   bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 
@@ -68,6 +67,8 @@ class AXMenuListPopup final : public AXMockObject {
 
   // Note that this may be -1 if nothing is selected.
   int active_index_;
+
+  DISALLOW_COPY_AND_ASSIGN(AXMenuListPopup);
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXMenuListPopup, IsMenuListPopup());

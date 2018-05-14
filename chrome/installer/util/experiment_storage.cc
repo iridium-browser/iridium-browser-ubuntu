@@ -229,6 +229,7 @@ bool ExperimentStorage::Lock::LoadExperiment(Experiment* experiment) {
     return false;
 
   *experiment = temp_experiment;
+  experiment->metrics_ = metrics;
   return true;
 }
 
@@ -321,7 +322,8 @@ bool ExperimentStorage::DecodeMetrics(base::StringPiece16 encoded_metrics,
       ReadUint64Bits(metrics_value, ExperimentMetrics::kToastLocationBits,
                      kToastLocationLowestBit));
 
-  static_assert(ExperimentMetrics::State::NUM_STATES <= (1 << 4),
+  static_assert(ExperimentMetrics::State::NUM_STATES <=
+                    (1 << ExperimentMetrics::kStateBits),
                 "Too many states for ExperimentMetrics encoding.");
   result.state = static_cast<ExperimentMetrics::State>(ReadUint64Bits(
       metrics_value, ExperimentMetrics::kStateBits, kStateLowestBit));
@@ -360,7 +362,8 @@ base::string16 ExperimentStorage::EncodeMetrics(
                 kToastCountLowestBit, &metrics_value);
   SetUint64Bits(metrics.toast_location, ExperimentMetrics::kToastLocationBits,
                 kToastLocationLowestBit, &metrics_value);
-  static_assert(ExperimentMetrics::State::NUM_STATES <= (1 << 4),
+  static_assert(ExperimentMetrics::State::NUM_STATES <=
+                    (1 << ExperimentMetrics::kStateBits),
                 "Too many states for ExperimentMetrics encoding.");
   SetUint64Bits(metrics.state, ExperimentMetrics::kStateBits, kStateLowestBit,
                 &metrics_value);

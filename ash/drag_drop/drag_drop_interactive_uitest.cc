@@ -7,7 +7,6 @@
 #include "ash/shell.h"
 #include "ash/test/ash_interactive_ui_test_base.h"
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -21,8 +20,8 @@ namespace {
 
 class DraggableView : public views::View {
  public:
-  DraggableView() {}
-  ~DraggableView() override {}
+  DraggableView() = default;
+  ~DraggableView() override = default;
 
   // views::View overrides:
   int GetDragOperations(const gfx::Point& press_pt) override {
@@ -40,7 +39,7 @@ class DraggableView : public views::View {
 class TargetView : public views::View {
  public:
   TargetView() : dropped_(false) {}
-  ~TargetView() override {}
+  ~TargetView() override = default;
 
   // views::View overrides:
   bool GetDropFormats(
@@ -83,7 +82,7 @@ views::Widget* CreateWidget(views::View* contents_view,
 }
 
 void QuitLoop() {
-  base::MessageLoop::current()->QuitWhenIdle();
+  base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 void DragDropAcrossMultiDisplay_Step4() {

@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/i18n/file_util_icu.h"
@@ -22,6 +24,7 @@
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/save_page_type.h"
 #include "content/public/browser/web_contents.h"
@@ -42,15 +45,14 @@ namespace {
 // exists only for testing.
 bool g_should_prompt_for_filename = true;
 
-void OnSavePackageDownloadCreated(content::DownloadItem* download) {
+void OnSavePackageDownloadCreated(download::DownloadItem* download) {
   ChromeDownloadManagerDelegate::DisableSafeBrowsing(download);
 }
 
 #if defined(OS_CHROMEOS)
-void OnSavePackageDownloadCreatedChromeOS(
-    Profile* profile,
-    const base::FilePath& drive_path,
-    content::DownloadItem* download) {
+void OnSavePackageDownloadCreatedChromeOS(Profile* profile,
+                                          const base::FilePath& drive_path,
+                                          download::DownloadItem* download) {
   drive::DownloadHandler::GetForProfile(profile)->SetDownloadParams(
       drive_path, download);
   OnSavePackageDownloadCreated(download);
@@ -132,7 +134,7 @@ SavePackageFilePicker::SavePackageFilePicker(
     bool can_save_as_complete,
     DownloadPrefs* download_prefs,
     const content::SavePackagePathPickedCallback& callback)
-    : render_process_id_(web_contents->GetRenderProcessHost()->GetID()),
+    : render_process_id_(web_contents->GetMainFrame()->GetProcess()->GetID()),
       can_save_as_complete_(can_save_as_complete),
       download_prefs_(download_prefs),
       callback_(callback) {
@@ -210,7 +212,7 @@ SavePackageFilePicker::SavePackageFilePicker(
 
   if (g_should_prompt_for_filename) {
     select_file_dialog_ = ui::SelectFileDialog::Create(
-        this, new ChromeSelectFilePolicy(web_contents));
+        this, std::make_unique<ChromeSelectFilePolicy>(web_contents));
     select_file_dialog_->SelectFile(
         ui::SelectFileDialog::SELECT_SAVEAS_FILE,
         base::string16(),

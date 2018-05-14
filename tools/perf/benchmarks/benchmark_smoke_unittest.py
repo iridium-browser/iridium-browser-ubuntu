@@ -13,23 +13,25 @@ import os
 import sys
 import unittest
 
+from core import path_util
+
 from telemetry import benchmark as benchmark_module
 from telemetry import decorators
-from telemetry.internal.browser import browser_finder
 from telemetry.testing import options_for_unittests
 from telemetry.testing import progress_reporter
 
 from py_utils import discover
 
 from benchmarks import battor
-from benchmarks import image_decoding
-from benchmarks import indexeddb_perf
 from benchmarks import jetstream
 from benchmarks import kraken
 from benchmarks import octane
 from benchmarks import rasterize_and_record_micro
 from benchmarks import speedometer
 from benchmarks import v8_browsing
+
+
+MAX_NUM_VALUES = 50000
 
 
 def SmokeTestGenerator(benchmark, num_pages=1):
@@ -45,11 +47,16 @@ def SmokeTestGenerator(benchmark, num_pages=1):
   # failing or flaky benchmark would disable a much wider swath of coverage
   # than is usally intended. Instead, if a particular benchmark is failing,
   # disable it in tools/perf/benchmarks/*.
-  @benchmark_module.Disabled('chromeos')  # crbug.com/351114
-  @benchmark_module.Disabled('android')  # crbug.com/641934
+  @decorators.Disabled('chromeos')  # crbug.com/351114
+  @decorators.Disabled('android')  # crbug.com/641934
   def BenchmarkSmokeTest(self):
     # Only measure a single page so that this test cycles reasonably quickly.
     benchmark.options['pageset_repeat'] = 1
+
+    # Some benchmarks are running multiple iterations
+    # which is not needed for a smoke test
+    if hasattr(benchmark, 'enable_smoke_test_mode'):
+      benchmark.enable_smoke_test_mode = True
 
     class SinglePageBenchmark(benchmark):  # pylint: disable=no-init
 
@@ -73,15 +80,25 @@ def SmokeTestGenerator(benchmark, num_pages=1):
     benchmark.SetArgumentDefaults(parser)
     options.MergeDefaultValues(parser.get_default_values())
 
+    # Prevent benchmarks from accidentally trying to upload too much data to the
+    # chromeperf dashboard. The number of values uploaded is equal to (the
+    # average number of values produced by a single story) * (1 + (the number of
+    # stories)). The "1 + " accounts for values summarized across all stories.
+    # We can approximate "the average number of values produced by a single
+    # story" as the number of values produced by the first story.
+    # pageset_repeat doesn't matter because values are summarized across
+    # repetitions before uploading.
+    story_set = benchmark().CreateStorySet(options)
+    SinglePageBenchmark.MAX_NUM_VALUES = MAX_NUM_VALUES / len(story_set.stories)
+
     benchmark.ProcessCommandLineArgs(None, options)
     benchmark_module.ProcessCommandLineArgs(None, options)
 
-    possible_browser = browser_finder.FindBrowser(options)
-    if SinglePageBenchmark.ShouldDisable(possible_browser):
-      self.skipTest('Benchmark %s has ShouldDisable return True' %
-                    SinglePageBenchmark.Name())
+    single_page_benchmark = SinglePageBenchmark()
+    with open(path_util.GetExpectationsPath()) as fp:
+      single_page_benchmark.AugmentExpectationsWithParser(fp.read())
 
-    self.assertEqual(0, SinglePageBenchmark().Run(options),
+    self.assertEqual(0, single_page_benchmark.Run(options),
                      msg='Failed: %s' % benchmark)
 
   return BenchmarkSmokeTest
@@ -89,8 +106,6 @@ def SmokeTestGenerator(benchmark, num_pages=1):
 
 # The list of benchmark modules to be excluded from our smoke tests.
 _BLACK_LIST_TEST_MODULES = {
-    image_decoding,  # Always fails on Mac10.9 Tests builder.
-    indexeddb_perf,  # Always fails on Win7 & Android Tests builder.
     octane,  # Often fails & take long time to timeout on cq bot.
     rasterize_and_record_micro,  # Always fails on cq bot.
     speedometer,  # Takes 101 seconds.
@@ -99,6 +114,13 @@ _BLACK_LIST_TEST_MODULES = {
     v8_browsing, # Flaky on Android, crbug.com/628368.
     battor #Flaky on android, crbug.com/618330.
 }
+
+# The list of benchmark names to be excluded from our smoke tests.
+_BLACK_LIST_TEST_NAMES = [
+   'memory.long_running_idle_gmail_background_tbmv2',
+   'tab_switching.typical_25',
+   'oortonline_tbmv2',
+]
 
 
 def MergeDecorators(method, method_attribute, benchmark, benchmark_attribute):
@@ -123,6 +145,8 @@ def load_tests(loader, standard_tests, pattern):
       index_by_class_name=False).values()
   for benchmark in all_benchmarks:
     if sys.modules[benchmark.__module__] in _BLACK_LIST_TEST_MODULES:
+      continue
+    if benchmark.Name() in _BLACK_LIST_TEST_NAMES:
       continue
 
     class BenchmarkSmokeTest(unittest.TestCase):

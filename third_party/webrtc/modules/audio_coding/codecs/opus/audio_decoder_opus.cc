@@ -8,11 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/codecs/opus/audio_decoder_opus.h"
+#include "modules/audio_coding/codecs/opus/audio_decoder_opus.h"
 
 #include <utility>
 
-#include "webrtc/rtc_base/checks.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -51,9 +51,9 @@ class OpusFrame : public AudioDecoder::EncodedAudioFrame {
     }
 
     if (ret < 0)
-      return rtc::Optional<DecodeResult>();
+      return rtc::nullopt;
 
-    return rtc::Optional<DecodeResult>({static_cast<size_t>(ret), speech_type});
+    return DecodeResult{static_cast<size_t>(ret), speech_type};
   }
 
  private:

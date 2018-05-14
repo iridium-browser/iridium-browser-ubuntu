@@ -34,14 +34,15 @@
 #include "core/animation/animatable/AnimatableDouble.h"
 #include "core/animation/animatable/AnimatableFilterOperations.h"
 #include "core/animation/animatable/AnimatableTransform.h"
+#include "core/css/properties/CSSProperty.h"
 #include "core/style/ComputedStyle.h"
 
 namespace blink {
 
-static PassRefPtr<AnimatableValue> CreateFromTransformProperties(
-    PassRefPtr<TransformOperation> transform,
+static scoped_refptr<AnimatableValue> CreateFromTransformProperties(
+    scoped_refptr<TransformOperation> transform,
     double zoom,
-    PassRefPtr<TransformOperation> initial_transform) {
+    scoped_refptr<TransformOperation> initial_transform) {
   TransformOperations operation;
   bool has_transform = static_cast<bool>(transform);
   if (has_transform || initial_transform) {
@@ -51,12 +52,12 @@ static PassRefPtr<AnimatableValue> CreateFromTransformProperties(
   return AnimatableTransform::Create(operation, has_transform ? zoom : 1);
 }
 
-PassRefPtr<AnimatableValue> CSSAnimatableValueFactory::Create(
-    CSSPropertyID property,
+scoped_refptr<AnimatableValue> CSSAnimatableValueFactory::Create(
+    const CSSProperty& property,
     const ComputedStyle& style) {
-  DCHECK(CSSPropertyMetadata::IsInterpolableProperty(property));
-  DCHECK(CompositorAnimations::IsCompositableProperty(property));
-  switch (property) {
+  DCHECK(property.IsInterpolable());
+  DCHECK(property.IsCompositableProperty());
+  switch (property.PropertyID()) {
     case CSSPropertyOpacity:
       return AnimatableDouble::Create(style.Opacity());
     case CSSPropertyFilter:

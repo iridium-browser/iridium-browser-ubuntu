@@ -29,6 +29,7 @@
 #ifndef StrokeData_h
 #define StrokeData_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/PlatformExport.h"
 #include "platform/graphics/DashArray.h"
 #include "platform/graphics/Gradient.h"
@@ -36,8 +37,6 @@
 #include "platform/graphics/Pattern.h"
 #include "platform/graphics/paint/PaintFlags.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/RefPtr.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPathEffect.h"
 
@@ -74,13 +73,18 @@ class PLATFORM_EXPORT StrokeData final {
   // Sets everything on the paint except the pattern, gradient and color.
   // If a non-zero length is provided, the number of dashes/dots on a
   // dashed/dotted line will be adjusted to start and end that length with a
-  // dash/dot.
-  void SetupPaint(PaintFlags*, int length = 0) const;
+  // dash/dot. If non-zero, dash_thickness is the thickness to use when
+  // deciding on dash sizes. Used in border painting when we stroke thick
+  // to allow for clipping at corners, but still want small dashes.
+  void SetupPaint(PaintFlags*,
+                  const int length = 0,
+                  const int dash_thickess = 0) const;
 
-  // Setup any DashPathEffect on the paint. If a non-zero length is provided,
-  // and no line dash has been set, the number of dashes/dots on a dashed/dotted
-  // line will be adjusted to start and end that length with a dash/dot.
-  void SetupPaintDashPathEffect(PaintFlags*, int) const;
+  // Setup any DashPathEffect on the paint. See SetupPaint above for parameter
+  // information.
+  void SetupPaintDashPathEffect(PaintFlags*,
+                                const int path_length = 0,
+                                const int dash_thickness = 0) const;
 
   // Determine whether a stroked line should be drawn using dashes. In practice,
   // we draw dashes when a dashed stroke is specified or when a dotted stroke

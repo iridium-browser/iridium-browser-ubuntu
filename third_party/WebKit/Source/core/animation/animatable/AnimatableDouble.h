@@ -38,17 +38,17 @@ namespace blink {
 
 class CORE_EXPORT AnimatableDouble final : public AnimatableValue {
  public:
-  ~AnimatableDouble() override {}
+  ~AnimatableDouble() override = default;
 
-  static PassRefPtr<AnimatableDouble> Create(double number) {
-    return AdoptRef(new AnimatableDouble(number));
+  static scoped_refptr<AnimatableDouble> Create(double number) {
+    return base::AdoptRef(new AnimatableDouble(number));
   }
 
   double ToDouble() const { return number_; }
 
  protected:
-  PassRefPtr<AnimatableValue> InterpolateTo(const AnimatableValue*,
-                                            double fraction) const override;
+  scoped_refptr<AnimatableValue> InterpolateTo(const AnimatableValue*,
+                                               double fraction) const override;
 
  private:
   AnimatableDouble(double number) : number_(number) {}

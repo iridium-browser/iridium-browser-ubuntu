@@ -9,8 +9,9 @@ import android.graphics.drawable.Drawable;
 import android.support.annotation.DrawableRes;
 import android.support.annotation.IdRes;
 import android.support.annotation.StringRes;
+import android.support.v7.content.res.AppCompatResources;
 
-import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.Callback;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.DefaultBrowserInfo;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
@@ -35,9 +36,9 @@ public enum ChromeContextMenuItem implements ContextMenuItem {
             R.id.contextmenu_open_in_new_tab),
     OPEN_IN_INCOGNITO_TAB(R.drawable.incognito_statusbar,
             R.string.contextmenu_open_in_incognito_tab, R.id.contextmenu_open_in_incognito_tab),
-    COPY_LINK_ADDRESS(R.drawable.ic_content_copy, R.string.contextmenu_copy_link_address,
+    COPY_LINK_ADDRESS(R.drawable.ic_content_copy_black, R.string.contextmenu_copy_link_address,
             R.id.contextmenu_copy_link_address),
-    COPY_LINK_TEXT(R.drawable.ic_content_copy, R.string.contextmenu_copy_link_text,
+    COPY_LINK_TEXT(R.drawable.ic_content_copy_black, R.string.contextmenu_copy_link_text,
             R.id.contextmenu_copy_link_text),
     SAVE_LINK_AS(R.drawable.ic_file_download_white_24dp, R.string.contextmenu_save_link,
             R.id.contextmenu_save_link_as),
@@ -60,7 +61,7 @@ public enum ChromeContextMenuItem implements ContextMenuItem {
             R.id.contextmenu_send_message),
     ADD_TO_CONTACTS(R.drawable.context_menu_add_to_contacts, R.string.contextmenu_add_to_contacts,
             R.id.contextmenu_add_to_contacts),
-    COPY(R.drawable.ic_content_copy, R.string.contextmenu_copy, R.id.contextmenu_copy),
+    COPY(R.drawable.ic_content_copy_black, R.string.contextmenu_copy, R.id.contextmenu_copy),
 
     // Video Group
     SAVE_VIDEO(R.drawable.ic_file_download_white_24dp, R.string.contextmenu_save_video,
@@ -68,7 +69,7 @@ public enum ChromeContextMenuItem implements ContextMenuItem {
 
     // Other
     OPEN_IN_CHROME(R.drawable.context_menu_new_tab, R.string.menu_open_in_chrome,
-            R.id.menu_id_open_in_chrome),
+            R.id.contextmenu_open_in_chrome),
 
     // Browser Action Items
     BROWSER_ACTIONS_OPEN_IN_BACKGROUND(R.drawable.context_menu_new_tab,
@@ -78,8 +79,8 @@ public enum ChromeContextMenuItem implements ContextMenuItem {
             R.id.browser_actions_open_in_incognito_tab),
     BROWSER_ACTION_SAVE_LINK_AS(R.drawable.ic_file_download_white_24dp,
             R.string.browser_actions_save_link_as, R.id.browser_actions_save_link_as),
-    BROWSER_ACTIONS_COPY_ADDRESS(R.drawable.ic_content_copy, R.string.browser_actions_copy_address,
-            R.id.browser_actions_copy_address);
+    BROWSER_ACTIONS_COPY_ADDRESS(R.drawable.ic_content_copy_black,
+            R.string.browser_actions_copy_address, R.id.browser_actions_copy_address);
 
     @DrawableRes
     private final int mIconId;
@@ -123,23 +124,19 @@ public enum ChromeContextMenuItem implements ContextMenuItem {
         return context.getString(mStringId);
     }
 
-    /**
-     * Returns the drawable and the content description associated with the context menu. If no
-     * drawable is associated with the icon, null is returned for the drawable and the
-     * iconDescription.
-     */
     @Override
-    public Drawable getDrawable(Context context) {
+    public void getDrawableAsync(Context context, Callback<Drawable> callback) {
+        Drawable drawable = null;
         if (mIconId == R.drawable.context_menu_new_tab
                 || mIconId == R.drawable.context_menu_add_to_contacts
-                || mIconId == R.drawable.context_menu_load_image) {
-            return ApiCompatibilityUtils.getDrawable(context.getResources(), mIconId);
-        } else if (mIconId == 0) {
-            return null;
-        } else {
-            return TintedDrawable.constructTintedDrawable(
+                || mIconId == R.drawable.context_menu_load_image
+                || mIconId == R.drawable.ic_content_copy_black) {
+            drawable = AppCompatResources.getDrawable(context, mIconId);
+        } else if (mIconId != 0) {
+            drawable = TintedDrawable.constructTintedDrawable(
                     context.getResources(), mIconId, R.color.light_normal_color);
         }
+        callback.onResult(drawable);
     }
 
     @Override

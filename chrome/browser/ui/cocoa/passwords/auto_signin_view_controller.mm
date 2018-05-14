@@ -17,6 +17,9 @@
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
 #include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/strings/grit/components_strings.h"
+#include "content/public/browser/storage_partition.h"
+#include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -40,10 +43,12 @@ initWithAvatarManager:(AccountAvatarFetcherManager*)avatarManager
 
 - (instancetype)initWithDelegate:
     (id<BasePasswordsContentViewDelegate>)delegate {
-  auto* request_context = delegate.model->GetProfile()->GetRequestContext();
+  auto loader_factory = content::BrowserContext::GetDefaultStoragePartition(
+                            delegate.model->GetProfile())
+                            ->GetURLLoaderFactoryForBrowserProcess();
   base::scoped_nsobject<AccountAvatarFetcherManager> avatarManager(
       [[AccountAvatarFetcherManager alloc]
-          initWithRequestContext:request_context]);
+          initWithLoaderFactory:loader_factory]);
   return [self initWithAvatarManager:avatarManager delegate:delegate];
 }
 

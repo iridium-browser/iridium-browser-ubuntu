@@ -15,7 +15,8 @@ class AwContentGpuClient : public content::ContentGpuClient {
  public:
   using GetSyncPointManagerCallback = base::Callback<gpu::SyncPointManager*()>;
 
-  explicit AwContentGpuClient(const GetSyncPointManagerCallback& callback);
+  explicit AwContentGpuClient(
+      const GetSyncPointManagerCallback& sync_point_manager_callback);
   ~AwContentGpuClient() override;
 
   // content::ContentGpuClient implementation.

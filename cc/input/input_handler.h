@@ -12,6 +12,7 @@
 #include "cc/cc_export.h"
 #include "cc/input/event_listener_properties.h"
 #include "cc/input/main_thread_scrolling_reason.h"
+#include "cc/input/overscroll_behavior.h"
 #include "cc/input/scroll_state.h"
 #include "cc/input/scrollbar.h"
 #include "cc/input/touch_action.h"
@@ -45,6 +46,9 @@ struct CC_EXPORT InputHandlerScrollResult {
   // The amount of the scroll delta argument to this ScrollBy call that was not
   // used for scrolling.
   gfx::Vector2dF unused_scroll_delta;
+  // How the browser should handle the overscroll navigation based on the css
+  // property scroll-boundary-behavior.
+  OverscrollBehavior overscroll_behavior;
 };
 
 class CC_EXPORT InputHandlerClient {
@@ -91,12 +95,14 @@ class CC_EXPORT InputHandler {
     ScrollStatus()
         : thread(SCROLL_ON_IMPL_THREAD),
           main_thread_scrolling_reasons(
-              MainThreadScrollingReason::kNotScrollingOnMain) {}
+              MainThreadScrollingReason::kNotScrollingOnMain),
+          bubble(false) {}
     ScrollStatus(ScrollThread thread, uint32_t main_thread_scrolling_reasons)
         : thread(thread),
           main_thread_scrolling_reasons(main_thread_scrolling_reasons) {}
     ScrollThread thread;
     uint32_t main_thread_scrolling_reasons;
+    bool bubble;
   };
 
   enum ScrollInputType {
@@ -164,8 +170,8 @@ class CC_EXPORT InputHandler {
   virtual void MouseLeave() = 0;
 
   // Stop scrolling the selected layer. Should only be called if ScrollBegin()
-  // returned SCROLL_STARTED.
-  virtual void ScrollEnd(ScrollState* scroll_state) = 0;
+  // returned SCROLL_STARTED. Snap to a snap position if |should_snap| is true.
+  virtual void ScrollEnd(ScrollState* scroll_state, bool should_snap) = 0;
 
   // Requests a callback to UpdateRootLayerStateForSynchronousInputHandler()
   // giving the current root scroll and page scale information.
@@ -179,7 +185,7 @@ class CC_EXPORT InputHandler {
   virtual void PinchGestureBegin() = 0;
   virtual void PinchGestureUpdate(float magnify_delta,
                                   const gfx::Point& anchor) = 0;
-  virtual void PinchGestureEnd() = 0;
+  virtual void PinchGestureEnd(const gfx::Point& anchor, bool snap_to_min) = 0;
 
   // Request another callback to InputHandlerClient::Animate().
   virtual void SetNeedsAnimateInput() = 0;

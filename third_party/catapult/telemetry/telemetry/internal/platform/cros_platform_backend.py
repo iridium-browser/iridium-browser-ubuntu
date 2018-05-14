@@ -11,7 +11,6 @@ from telemetry.core import util
 from telemetry.internal.forwarders import cros_forwarder
 from telemetry.internal.platform import cros_device
 from telemetry.internal.platform import linux_based_platform_backend
-from telemetry.internal.platform.power_monitor import cros_power_monitor
 from telemetry.internal.util import ps_util
 
 
@@ -25,7 +24,9 @@ class CrosPlatformBackend(
       self._cri.TryLogin()
     else:
       self._cri = cros_interface.CrOSInterface()
-    self._powermonitor = cros_power_monitor.CrosPowerMonitor(self)
+
+  def GetDeviceId(self):
+    return self._cri.hostname
 
   @classmethod
   def IsPlatformBackendForHost(cls):
@@ -44,16 +45,17 @@ class CrosPlatformBackend(
   def cri(self):
     return self._cri
 
-  @property
-  def forwarder_factory(self):
-    if not self._forwarder_factory:
-      self._forwarder_factory = cros_forwarder.CrOsForwarderFactory(self._cri)
-    return self._forwarder_factory
+  def _CreateForwarderFactory(self):
+    return cros_forwarder.CrOsForwarderFactory(self._cri)
 
   def GetRemotePort(self, port):
     if self._cri.local:
       return port
     return self._cri.GetRemotePort()
+
+  def IsRemoteDevice(self):
+    # Check if CrOS device is remote.
+    return self._cri and not self._cri.local
 
   def IsThermallyThrottled(self):
     raise NotImplementedError()
@@ -148,13 +150,7 @@ class CrosPlatformBackend(
     self.RunCommand([flush_command, '--recurse', directory])
 
   def CanMonitorPower(self):
-    return self._powermonitor.CanMonitorPower()
-
-  def StartMonitoringPower(self, browser):
-    self._powermonitor.StartMonitoringPower(browser)
-
-  def StopMonitoringPower(self):
-    return self._powermonitor.StopMonitoringPower()
+    return False
 
   def PathExists(self, path, timeout=None, retries=None):
     if timeout or retries:

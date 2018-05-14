@@ -9,6 +9,7 @@
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/history/clear_browsing_bar.h"
 #import "ios/chrome/browser/ui/history/history_collection_view_controller.h"
 #import "ios/chrome/browser/ui/history/history_search_view_controller.h"
@@ -16,9 +17,9 @@
 #import "ios/chrome/browser/ui/keyboard/UIKeyCommand+Chrome.h"
 #import "ios/chrome/browser/ui/material_components/utils.h"
 #import "ios/chrome/browser/ui/ntp/recent_tabs/views/panel_bar_view.h"
-#import "ios/chrome/browser/ui/show_privacy_settings_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/browser/ui/url_loader.h"
+#import "ios/chrome/browser/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/AppBar/src/MaterialAppBar.h"
 #import "ios/third_party/material_components_ios/src/components/NavigationBar/src/MaterialNavigationBar.h"
@@ -46,7 +47,7 @@ CGFloat kShadowOpacity = 0.2f;
   // View controller for the search bar.
   HistorySearchViewController* _searchViewController;
   // Container view for history collection and clear browsing button to enable
-  // use of autolayout in conjuction with Material App Bar.
+  // use of autolayout in conjunction with Material App Bar.
   UIView* _containerView;
   // The header view.
   MDCAppBar* _appBar;
@@ -76,18 +77,26 @@ CGFloat kShadowOpacity = 0.2f;
 // Configures the clear browsing data bar for the current state of the history
 // collection.
 - (void)configureClearBrowsingBar;
+
+// The dispatcher used by this ViewController.
+@property(nonatomic, readonly, weak) id<ApplicationCommands> dispatcher;
+
 @end
 
 @implementation HistoryPanelViewController
 
+@synthesize dispatcher = _dispatcher;
+
 - (instancetype)initWithLoader:(id<UrlLoader>)loader
-                  browserState:(ios::ChromeBrowserState*)browserState {
+                  browserState:(ios::ChromeBrowserState*)browserState
+                    dispatcher:(id<ApplicationCommands>)dispatcher {
   self = [super initWithNibName:nil bundle:nil];
   if (self) {
     _historyCollectionController =
         [[HistoryCollectionViewController alloc] initWithLoader:loader
                                                    browserState:browserState
                                                        delegate:self];
+    _dispatcher = dispatcher;
 
     // Configure modal presentation.
     [self setModalPresentationStyle:UIModalPresentationFormSheet];
@@ -109,15 +118,6 @@ CGFloat kShadowOpacity = 0.2f;
 - (instancetype)initWithCoder:(NSCoder*)aDecoder {
   NOTREACHED();
   return nil;
-}
-
-+ (UIViewController*)controllerToPresentForBrowserState:
-                         (ios::ChromeBrowserState*)browserState
-                                                 loader:(id<UrlLoader>)loader {
-  HistoryPanelViewController* historyPanelController =
-      [[HistoryPanelViewController alloc] initWithLoader:loader
-                                            browserState:browserState];
-  return historyPanelController;
 }
 
 - (void)viewDidLoad {
@@ -151,6 +151,10 @@ CGFloat kShadowOpacity = 0.2f;
   [_appBar headerViewController].headerView.trackingScrollView =
       [_historyCollectionController collectionView];
   [_appBar addSubviewsToParent];
+  // Prevent the touch events on appBar from being forwarded to the
+  // collectionView.  See https://crbug.com/773580
+  [_appBar.headerViewController.headerView
+      stopForwardingTouchEventsForView:_appBar.navigationBar];
 
   // Add navigation bar buttons.
   _leftBarButtonItem =
@@ -173,7 +177,7 @@ CGFloat kShadowOpacity = 0.2f;
     @"clearBrowsingBar" : _clearBrowsingBar,
   };
   NSArray* constraints = @[
-    @"V:|[collectionView][clearBrowsingBar(==48)]|", @"H:|[collectionView]|",
+    @"V:|[collectionView][clearBrowsingBar]|", @"H:|[collectionView]|",
     @"H:|[clearBrowsingBar]|"
   ];
   ApplyVisualConstraints(constraints, views);
@@ -182,6 +186,11 @@ CGFloat kShadowOpacity = 0.2f;
 
 - (BOOL)disablesAutomaticKeyboardDismissal {
   return NO;
+}
+
+- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)orient {
+  [super didRotateFromInterfaceOrientation:orient];
+  [_clearBrowsingBar updateHeight];
 }
 
 #pragma mark - Status bar
@@ -239,7 +248,7 @@ CGFloat kShadowOpacity = 0.2f;
   if (!base::ios::IsRunningOnIOS10OrLater()) {
     // TODO(crbug.com/620361): Remove the entire method override when iOS 9 is
     // dropped.
-    if (IsIPadIdiom() && !IsCompact()) {
+    if (IsIPadIdiom() && !IsCompactWidth()) {
       return UIStatusBarStyleLightContent;
     } else {
       return UIStatusBarStyleDefault;
@@ -314,13 +323,21 @@ CGFloat kShadowOpacity = 0.2f;
 }
 
 - (void)openPrivacySettings {
+  // Ignore the button tap if view controller presenting.
+  if ([self presentedViewController]) {
+    return;
+  }
   [self exitSearchMode];
   base::RecordAction(
       base::UserMetricsAction("HistoryPage_InitClearBrowsingData"));
-  ShowClearBrowsingData();
+  [self.dispatcher showClearBrowsingDataSettingsFromViewController:self];
 }
 
 - (void)enterEditingMode {
+  // Ignore the button tap if view controller presenting.
+  if ([self presentedViewController]) {
+    return;
+  }
   [_historyCollectionController setEditing:YES];
   [_clearBrowsingBar setEditing:YES];
   if (_historyCollectionController.searching) {
@@ -395,7 +412,7 @@ CGFloat kShadowOpacity = 0.2f;
   // The search button should only be enabled if there are history entries to
   // search, and if history is not in edit mode.
   self.navigationItem.leftBarButtonItem.enabled =
-      [_historyCollectionController hasHistoryEntries] &&
+      ![_historyCollectionController isEmpty] &&
       ![_historyCollectionController isEditing];
 }
 
@@ -403,8 +420,7 @@ CGFloat kShadowOpacity = 0.2f;
   _clearBrowsingBar.editing = _historyCollectionController.editing;
   _clearBrowsingBar.deleteButtonEnabled =
       [_historyCollectionController hasSelectedEntries];
-  _clearBrowsingBar.editButtonEnabled =
-      [_historyCollectionController hasHistoryEntries];
+  _clearBrowsingBar.editButtonEnabled = ![_historyCollectionController isEmpty];
 }
 
 #pragma mark - UIResponder

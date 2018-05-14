@@ -22,8 +22,8 @@ from py_utils import discover
 import py_utils
 
 DEFAULT_LOG_FORMAT = (
-  '(%(levelname)s) %(asctime)s %(module)s.%(funcName)s:%(lineno)d  '
-  '%(message)s')
+    '(%(levelname)s) %(asctime)s %(module)s.%(funcName)s:%(lineno)d  '
+    '%(message)s')
 
 
 class RecorderPageTest(legacy_page_test.LegacyPageTest):
@@ -131,7 +131,6 @@ class WprRecorder(object):
     self._base_dir = base_dir
     self._record_page_test = RecorderPageTest()
     self._options = self._CreateOptions()
-    self._expectations = None
 
     self._benchmark = _MaybeGetInstanceOfClass(target, base_dir,
                                                benchmark.Benchmark)
@@ -145,7 +144,6 @@ class WprRecorder(object):
         test = timeline_based_page_test.TimelineBasedPageTest(test)
       # This must be called after the command line args are added.
       self._record_page_test.page_test = test
-      self._expectations = self._benchmark.GetExpectations()
 
     self._page_set_base_dir = (
         self._options.page_set_base_dir if self._options.page_set_base_dir
@@ -234,13 +232,17 @@ class WprRecorder(object):
 
   def Record(self, results):
     assert self._story_set.wpr_archive_info, (
-      'Pageset archive_data_file path must be specified.')
-    self._story_set.wpr_archive_info.is_using_wpr_go_archives = \
-        self._options.use_wpr_go
+        'Pageset archive_data_file path must be specified.')
+
+    # Always record the benchmark one time only.
+    self._options.pageset_repeat = 1
     self._story_set.wpr_archive_info.AddNewTemporaryRecording()
     self._record_page_test.CustomizeBrowserOptions(self._options)
-    story_runner.Run(self._record_page_test, self._story_set,
-        self._options, results, expectations=self._expectations,
+    story_runner.Run(
+        self._record_page_test,
+        self._story_set,
+        self._options,
+        results,
         metadata=self._CreateBenchmarkMetadata())
 
   def HandleResults(self, results, upload_to_cloud_storage):

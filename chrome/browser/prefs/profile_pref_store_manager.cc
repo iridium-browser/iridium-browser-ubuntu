@@ -20,7 +20,7 @@
 #include "components/prefs/persistent_pref_store.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "services/preferences/public/cpp/persistent_pref_store_client.h"
-#include "services/preferences/public/interfaces/preferences.mojom.h"
+#include "services/preferences/public/mojom/preferences.mojom.h"
 #include "services/preferences/tracked/pref_hash_filter.h"
 #include "services/preferences/tracked/tracked_persistent_pref_store_factory.h"
 #include "services/service_manager/public/cpp/connector.h"
@@ -154,5 +154,6 @@ ProfilePrefStoreManager::CreateTrackedPrefStoreConfiguration(
 #else
       base::string16(),
 #endif
-      std::move(validation_delegate), std::move(reset_on_load_observer));
+      validation_delegate.PassInterface(),
+      reset_on_load_observer.PassInterface());
 }

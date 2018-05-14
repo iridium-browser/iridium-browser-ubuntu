@@ -9,15 +9,15 @@
 #include <cstdint>
 
 #include "bindings/core/v8/V8BindingForCore.h"
-#include "core/dom/MessagePort.h"
+#include "build/build_config.h"
 #include "core/frame/Settings.h"
+#include "core/messaging/MessagePort.h"
 #include "core/testing/DummyPageHolder.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/V8PerIsolateData.h"
 #include "platform/testing/BlinkFuzzerTestSupport.h"
 #include "platform/wtf/StringHasher.h"
 #include "public/platform/WebBlobInfo.h"
-#include "public/platform/WebMessagePortChannel.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -34,16 +34,6 @@ enum : uint32_t {
   kFuzzBlobInfo = 1 << 1,
 };
 
-class WebMessagePortChannelImpl final : public WebMessagePortChannel {
- public:
-  // WebMessagePortChannel
-  void SetClient(WebMessagePortChannelClient* client) override {}
-  void PostMessage(const WebString&, WebMessagePortChannelArray) {
-    NOTIMPLEMENTED();
-  }
-  bool TryGetMessage(WebString*, WebMessagePortChannelArray&) { return false; }
-};
-
 }  // namespace
 
 int LLVMFuzzerInitialize(int* argc, char*** argv) {
@@ -54,10 +44,11 @@ int LLVMFuzzerInitialize(int* argc, char*** argv) {
   g_page_holder = DummyPageHolder::Create().release();
   g_page_holder->GetFrame().GetSettings()->SetScriptEnabled(true);
   g_blob_info_array = new WebBlobInfoArray();
-  g_blob_info_array->emplace_back("d875dfc2-4505-461b-98fe-0cf6cc5eaf44",
-                                  "text/plain", 12);
-  g_blob_info_array->emplace_back("d875dfc2-4505-461b-98fe-0cf6cc5eaf44",
-                                  "/native/path", "path", "text/plain");
+  g_blob_info_array->emplace_back(WebBlobInfo::BlobForTesting(
+      "d875dfc2-4505-461b-98fe-0cf6cc5eaf44", "text/plain", 12));
+  g_blob_info_array->emplace_back(
+      WebBlobInfo::FileForTesting("d875dfc2-4505-461b-98fe-0cf6cc5eaf44",
+                                  "/native/path", "path", "text/plain"));
   return 0;
 }
 
@@ -77,7 +68,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     MessagePortArray* message_ports = new MessagePortArray(3);
     std::generate(message_ports->begin(), message_ports->end(), []() {
       MessagePort* port = MessagePort::Create(g_page_holder->GetDocument());
-      port->Entangle(WTF::MakeUnique<WebMessagePortChannelImpl>());
+      port->Entangle(mojo::MessagePipe().handle0);
       return port;
     });
     options.message_ports = message_ports;
@@ -94,7 +85,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   v8::TryCatch try_catch(isolate);
 
   // Deserialize.
-  RefPtr<SerializedScriptValue> serialized_script_value =
+  scoped_refptr<SerializedScriptValue> serialized_script_value =
       SerializedScriptValue::Create(reinterpret_cast<const char*>(data), size);
   serialized_script_value->Deserialize(isolate, options);
   CHECK(!try_catch.HasCaught())
@@ -114,7 +105,14 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
 }  // namespace blink
 
-extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
+// Explicitly specify some attributes to avoid issues with the linker dead-
+// stripping the following function on macOS, as it is not called directly
+// by fuzz target. LibFuzzer runtime uses dlsym() to resolve that function.
+#if defined(OS_MACOSX)
+__attribute__((used)) __attribute__((visibility("default")))
+#endif  // defined(OS_MACOSX)
+extern "C" int
+LLVMFuzzerInitialize(int* argc, char*** argv) {
   return blink::LLVMFuzzerInitialize(argc, argv);
 }
 

@@ -33,37 +33,31 @@ cr.define('offlineInternals', function() {
     var storedPagesTable = $('stored-pages');
     storedPagesTable.textContent = '';
 
-    for (var i = 0; i < pages.length; i++) {
-      var row = document.createElement('tr');
+    var template = $('stored-pages-table-row');
+    var td = template.content.querySelectorAll('td');
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+      var page = pages[pageIndex];
+      td[0].textContent = pageIndex;
+      var checkbox = td[1].querySelector('input');
+      checkbox.setAttribute('value', page.id);
 
-      var checkboxCell = document.createElement('td');
-      var checkbox = document.createElement('input');
-      checkbox.setAttribute('type', 'checkbox');
-      checkbox.setAttribute('name', 'stored');
-      checkbox.setAttribute('value', pages[i].id);
+      var link = td[2].querySelector('a');
+      link.setAttribute('href', page.onlineUrl);
+      var maxUrlCharsPerLine = 50;
+      if (page.onlineUrl.length > maxUrlCharsPerLine) {
+        link.textContent = '';
+        for (let i = 0; i < page.onlineUrl.length; i += maxUrlCharsPerLine) {
+          link.textContent += page.onlineUrl.slice(i, i + maxUrlCharsPerLine);
+          link.textContent += '\r\n';
+        }
+      } else {
+        link.textContent = page.onlineUrl;
+      }
 
-      checkboxCell.appendChild(checkbox);
-      row.appendChild(checkboxCell);
+      td[3].textContent = page.namespace;
+      td[4].textContent = Math.round(page.size / 1024);
 
-      var cell = document.createElement('td');
-      var link = document.createElement('a');
-      link.setAttribute('href', pages[i].onlineUrl);
-      link.textContent = pages[i].onlineUrl;
-      cell.appendChild(link);
-      row.appendChild(cell);
-
-      cell = document.createElement('td');
-      cell.textContent = pages[i].namespace;
-      row.appendChild(cell);
-
-      cell = document.createElement('td');
-      cell.textContent = Math.round(pages[i].size / 1024);
-      row.appendChild(cell);
-
-      cell = document.createElement('td');
-      cell.textContent = pages[i].isExpired;
-      row.appendChild(cell);
-
+      var row = document.importNode(template.content, true);
       storedPagesTable.appendChild(row);
     }
     offlinePages = pages;
@@ -78,30 +72,18 @@ cr.define('offlineInternals', function() {
     var requestQueueTable = $('request-queue');
     requestQueueTable.textContent = '';
 
-    for (var i = 0; i < requests.length; i++) {
-      var row = document.createElement('tr');
+    var template = $('request-queue-table-row');
+    var td = template.content.querySelectorAll('td');
+    for (let request of requests) {
+      var checkbox = td[0].querySelector('input');
+      checkbox.setAttribute('value', request.id);
 
-      var checkboxCell = document.createElement('td');
-      var checkbox = document.createElement('input');
-      checkbox.setAttribute('type', 'checkbox');
-      checkbox.setAttribute('name', 'requests');
-      checkbox.setAttribute('value', requests[i].id);
+      td[1].textContent = request.onlineUrl;
+      td[2].textContent = new Date(request.creationTime);
+      td[3].textContent = request.status;
+      td[4].textContent = request.requestOrigin;
 
-      checkboxCell.appendChild(checkbox);
-      row.appendChild(checkboxCell);
-
-      var cell = document.createElement('td');
-      cell.textContent = requests[i].onlineUrl;
-      row.appendChild(cell);
-
-      cell = document.createElement('td');
-      cell.textContent = new Date(requests[i].creationTime);
-      row.appendChild(cell);
-
-      cell = document.createElement('td');
-      cell.textContent = requests[i].status;
-      row.appendChild(cell);
-
+      var row = document.importNode(template.content, true);
       requestQueueTable.appendChild(row);
     }
     savePageRequests = requests;
@@ -187,16 +169,44 @@ cr.define('offlineInternals', function() {
   }
 
   /**
+   * Error callback for prefetch actions.
+   * @param {*} error The error that resulted from the prefetch call.
+   */
+  function prefetchResultError(error) {
+    var errorText = error && error.message ? error.message : error;
+
+    $('prefetch-actions-info').textContent = 'Error: ' + errorText;
+  }
+
+  /**
    * Downloads all the stored page and request queue information into a file.
+   * Also translates all the fields representing datetime into human-readable
+   * date strings.
    * TODO(chili): Create a CSV writer that can abstract out the line joining.
    */
-  function download() {
+  function dumpAsJson() {
     var json = JSON.stringify(
-        {offlinePages: offlinePages, savePageRequests: savePageRequests}, null,
+        {offlinePages: offlinePages, savePageRequests: savePageRequests},
+        function(key, value) {
+          return key.endsWith('Time') ? new Date(value).toString() : value;
+        },
         2);
 
-    window.open(
-        'data:application/json,' + encodeURIComponent(json), 'dump.json');
+    $('dump-box').value = json;
+    $('dump-info').textContent = '';
+    $('dump-modal').showModal();
+    $('dump-box').select();
+  }
+
+  function closeDump() {
+    $('dump-modal').close();
+    $('dump-box').value = '';
+  }
+
+  function copyDump() {
+    $('dump-box').select();
+    document.execCommand('copy');
+    $('dump-info').textContent = 'Copied to clipboard!';
   }
 
   /**
@@ -277,22 +287,19 @@ cr.define('offlineInternals', function() {
     }
 
     var incognito = loadTimeData.getBoolean('isIncognito');
-    $('delete-all-pages').disabled = incognito;
-    $('delete-selected-pages').disabled = incognito;
-    $('delete-all-requests').disabled = incognito;
-    $('delete-selected-requests').disabled = incognito;
-    $('log-model-on').disabled = incognito;
-    $('log-model-off').disabled = incognito;
-    $('log-request-on').disabled = incognito;
-    $('log-request-off').disabled = incognito;
-    $('refresh').disabled = incognito;
+    ['delete-all-pages', 'delete-selected-pages', 'delete-all-requests',
+     'delete-selected-requests', 'log-model-on', 'log-model-off',
+     'log-request-on', 'log-request-off', 'refresh']
+        .forEach(el => $(el).disabled = incognito);
 
     $('delete-all-pages').onclick = deleteAllPages;
     $('delete-selected-pages').onclick = deleteSelectedPages;
     $('delete-all-requests').onclick = deleteAllRequests;
     $('delete-selected-requests').onclick = deleteSelectedRequests;
     $('refresh').onclick = refreshAll;
-    $('download').onclick = download;
+    $('dump').onclick = dumpAsJson;
+    $('close-dump').onclick = closeDump;
+    $('copy-to-clipboard').onclick = copyDump;
     $('log-model-on').onclick = togglePageModelLog.bind(this, true);
     $('log-model-off').onclick = togglePageModelLog.bind(this, false);
     $('log-request-on').onclick = toggleRequestQueueLog.bind(this, true);
@@ -322,18 +329,27 @@ cr.define('offlineInternals', function() {
       }
     };
     $('schedule-nwake').onclick = function() {
-      browserProxy.scheduleNwake().then(setPrefetchResult);
+      browserProxy.scheduleNwake()
+          .then(setPrefetchResult)
+          .catch(prefetchResultError);
     };
     $('cancel-nwake').onclick = function() {
-      browserProxy.cancelNwake().then(setPrefetchResult);
+      browserProxy.cancelNwake()
+          .then(setPrefetchResult)
+          .catch(prefetchResultError);
+    };
+    $('show-notification').onclick = function() {
+      browserProxy.showPrefetchNotification().then(setPrefetchResult);
     };
     $('generate-page-bundle').onclick = function() {
       browserProxy.generatePageBundle($('generate-urls').value)
-          .then(setPrefetchResult);
+          .then(setPrefetchResult)
+          .catch(prefetchResultError);
     };
     $('get-operation').onclick = function() {
       browserProxy.getOperation($('operation-name').value)
-          .then(setPrefetchResult);
+          .then(setPrefetchResult)
+          .catch(prefetchResultError);
     };
     $('download-archive').onclick = function() {
       browserProxy.downloadArchive($('download-name').value);

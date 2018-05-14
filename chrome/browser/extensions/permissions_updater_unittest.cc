@@ -8,9 +8,7 @@
 
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -103,7 +101,7 @@ class PermissionsUpdaterListener : public content::NotificationObserver {
 
     if (waiting_) {
       waiting_ = false;
-      base::MessageLoopForUI::current()->QuitWhenIdle();
+      base::RunLoop::QuitCurrentWhenIdleDeprecated();
     }
   }
 
@@ -189,41 +187,45 @@ TEST_F(PermissionsUpdaterTest, AddAndRemovePermissions) {
   apis.insert(APIPermission::kNotifications);
   URLPatternSet hosts;
   AddPattern(&hosts, "http://*.c.com/*");
+  URLPatternSet scriptable_hosts;
+  AddPattern(&scriptable_hosts, "http://*.example.com/*");
 
   {
     PermissionSet delta(apis, empty_manifest_permissions, hosts,
-                        URLPatternSet());
+                        scriptable_hosts);
 
-  PermissionsUpdaterListener listener;
-  PermissionsUpdater(profile_.get()).AddPermissions(extension.get(), delta);
+    PermissionsUpdaterListener listener;
+    PermissionsUpdater(profile_.get()).AddPermissions(extension.get(), delta);
 
-  listener.Wait();
+    listener.Wait();
 
-  // Verify that the permission notification was sent correctly.
-  ASSERT_TRUE(listener.received_notification());
-  ASSERT_EQ(extension.get(), listener.extension());
-  ASSERT_EQ(UpdatedExtensionPermissionsInfo::ADDED, listener.reason());
-  ASSERT_EQ(delta, *listener.permissions());
+    // Verify that the permission notification was sent correctly.
+    ASSERT_TRUE(listener.received_notification());
+    ASSERT_EQ(extension.get(), listener.extension());
+    ASSERT_EQ(UpdatedExtensionPermissionsInfo::ADDED, listener.reason());
+    ASSERT_EQ(delta, *listener.permissions());
 
-  // Make sure the extension's active permissions reflect the change.
-  active_permissions = PermissionSet::CreateUnion(default_permissions, delta);
-  ASSERT_EQ(*active_permissions,
-            extension->permissions_data()->active_permissions());
+    // Make sure the extension's active permissions reflect the change.
+    active_permissions = PermissionSet::CreateUnion(default_permissions, delta);
+    ASSERT_EQ(*active_permissions,
+              extension->permissions_data()->active_permissions());
 
-  // Verify that the new granted and active permissions were also stored
-  // in the extension preferences. In this case, the granted permissions should
-  // be equal to the active permissions.
-  ASSERT_EQ(*active_permissions, *prefs->GetActivePermissions(extension->id()));
-  granted_permissions = active_permissions->Clone();
-  ASSERT_EQ(*granted_permissions,
-            *prefs->GetGrantedPermissions(extension->id()));
+    // Verify that the new granted and active permissions were also stored
+    // in the extension preferences. In this case, the granted permissions
+    // should be equal to the active permissions.
+    ASSERT_EQ(*active_permissions,
+              *prefs->GetActivePermissions(extension->id()));
+    granted_permissions = active_permissions->Clone();
+    ASSERT_EQ(*granted_permissions,
+              *prefs->GetGrantedPermissions(extension->id()));
   }
 
   {
   // In the second part of the test, we'll remove the permissions that we
   // just added except for 'notifications'.
   apis.erase(APIPermission::kNotifications);
-  PermissionSet delta(apis, empty_manifest_permissions, hosts, URLPatternSet());
+  PermissionSet delta(apis, empty_manifest_permissions, hosts,
+                      scriptable_hosts);
 
   PermissionsUpdaterListener listener;
   PermissionsUpdater(profile_.get())
@@ -260,7 +262,7 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissions) {
   auto api_permission_set = [](APIPermission::ID id) {
     APIPermissionSet apis;
     apis.insert(id);
-    return base::MakeUnique<PermissionSet>(apis, ManifestPermissionSet(),
+    return std::make_unique<PermissionSet>(apis, ManifestPermissionSet(),
                                            URLPatternSet(), URLPatternSet());
   };
 
@@ -268,7 +270,7 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissions) {
     URLPatternSet set;
     URLPattern pattern(URLPattern::SCHEME_ALL, url.spec());
     set.AddPattern(pattern);
-    return base::MakeUnique<PermissionSet>(
+    return std::make_unique<PermissionSet>(
         APIPermissionSet(), ManifestPermissionSet(), set, URLPatternSet());
   };
 
@@ -500,11 +502,10 @@ TEST_F(PermissionsUpdaterTest, Delegate) {
   required_permissions.Append("tabs").Append("management").Append("cookies");
   scoped_refptr<const Extension> extension =
       CreateExtensionWithOptionalPermissions(
-          base::MakeUnique<base::ListValue>(),
-          required_permissions.Build(),
+          std::make_unique<base::ListValue>(), required_permissions.Build(),
           "My Extension");
 
-  auto test_delegate = base::MakeUnique<PermissionsUpdaterTestDelegate>();
+  auto test_delegate = std::make_unique<PermissionsUpdaterTestDelegate>();
   PermissionsUpdater::SetPlatformDelegate(test_delegate.get());
   PermissionsUpdater updater(profile());
   updater.InitializePermissions(extension.get());

@@ -38,8 +38,7 @@ blink::WebPlugin* ContentRendererClient::CreatePluginReplacement(
   return nullptr;
 }
 
-bool ContentRendererClient::HasErrorPage(int http_status_code,
-                                         std::string* error_domain) {
+bool ContentRendererClient::HasErrorPage(int http_status_code) {
   return false;
 }
 
@@ -48,23 +47,15 @@ bool ContentRendererClient::ShouldSuppressErrorPage(RenderFrame* render_frame,
   return false;
 }
 
+bool ContentRendererClient::ShouldTrackUseCounter(const GURL& url) {
+  return true;
+}
+
 void ContentRendererClient::DeferMediaLoad(
     RenderFrame* render_frame,
     bool has_played_media_before,
     const base::Closure& closure) {
   closure.Run();
-}
-
-std::unique_ptr<blink::WebMediaStreamCenter>
-ContentRendererClient::OverrideCreateWebMediaStreamCenter(
-    blink::WebMediaStreamCenterClient* client) {
-  return nullptr;
-}
-
-std::unique_ptr<blink::WebRTCPeerConnectionHandler>
-ContentRendererClient::OverrideCreateWebRTCPeerConnectionHandler(
-    blink::WebRTCPeerConnectionHandlerClient* client) {
-  return nullptr;
 }
 
 std::unique_ptr<blink::WebMIDIAccessor>
@@ -98,11 +89,14 @@ ContentRendererClient::OverrideSpeechSynthesizer(
   return nullptr;
 }
 
+void ContentRendererClient::PostCompositorThreadCreated(
+    base::SingleThreadTaskRunner* compositor_thread_task_runner) {}
+
 bool ContentRendererClient::RunIdleHandlerWhenWidgetsHidden() {
   return true;
 }
 
-bool ContentRendererClient::AllowTimerSuspensionWhenProcessBackgrounded() {
+bool ContentRendererClient::AllowStoppingWhenProcessBackgrounded() {
   return false;
 }
 
@@ -141,7 +135,6 @@ bool ContentRendererClient::WillSendRequest(
     blink::WebLocalFrame* frame,
     ui::PageTransition transition_type,
     const blink::WebURL& url,
-    std::vector<std::unique_ptr<URLLoaderThrottle>>* throttles,
     GURL* new_url) {
   return false;
 }
@@ -168,7 +161,7 @@ ContentRendererClient::GetPrescientNetworking() {
 
 bool ContentRendererClient::ShouldOverridePageVisibilityState(
     const RenderFrame* render_frame,
-    blink::WebPageVisibilityState* override_state) {
+    blink::mojom::PageVisibilityState* override_state) {
   return false;
 }
 
@@ -260,6 +253,24 @@ ContentRendererClient::GetTaskSchedulerInitParams() {
 
 bool ContentRendererClient::AllowIdleMediaSuspend() {
   return true;
+}
+
+bool ContentRendererClient::OverrideLegacySymantecCertConsoleMessage(
+    const GURL& url,
+    std::string* console_messsage) {
+  return false;
+}
+
+std::unique_ptr<URLLoaderThrottleProvider>
+ContentRendererClient::CreateURLLoaderThrottleProvider(
+    URLLoaderThrottleProviderType provider_type) {
+  return nullptr;
+}
+
+blink::WebFrame* ContentRendererClient::FindFrame(
+    blink::WebLocalFrame* relative_to_frame,
+    const std::string& name) {
+  return nullptr;
 }
 
 }  // namespace content

@@ -320,7 +320,7 @@ bool ConvertProtoToVideoDecoderConfig(
       ToMediaVideoCodec(video_message.codec()).value(),
       ToMediaVideoCodecProfile(video_message.profile()).value(),
       ToMediaVideoPixelFormat(video_message.format()).value(),
-      ToMediaColorSpace(video_message.color_space()).value(),
+      ToMediaColorSpace(video_message.color_space()).value(), VIDEO_ROTATION_0,
       gfx::Size(video_message.coded_size().width(),
                 video_message.coded_size().height()),
       gfx::Rect(video_message.visible_rect().x(),
@@ -348,8 +348,15 @@ void ConvertProtoToPipelineStatistics(
   // media::blink::WebMediaPlayerImpl.
   stats->video_keyframe_distance_average = base::TimeDelta::Max();
 
-  // This field was added after the initial message definition. Check that
-  // sender provided the value.
+  // This field is not used by the rpc field.
+  stats->video_frames_decoded_power_efficient = 0;
+
+  // The following fields were added after the initial message definition. Check
+  // that sender provided the values.
+  if (stats_message.has_audio_decoder_name())
+    stats->audio_decoder_name = stats_message.audio_decoder_name();
+  if (stats_message.has_video_decoder_name())
+    stats->video_decoder_name = stats_message.video_decoder_name();
   if (stats_message.has_video_frame_duration_average_usec()) {
     stats->video_frame_duration_average = base::TimeDelta::FromMicroseconds(
         stats_message.video_frame_duration_average_usec());
@@ -420,7 +427,7 @@ bool ConvertProtoToCdmPromise(const pb::CdmPromise& promise_message,
     return true;
   }
 
-  CdmPromise::Exception exception = CdmPromise::UNKNOWN_ERROR;
+  CdmPromise::Exception exception = CdmPromise::Exception::NOT_SUPPORTED_ERROR;
   uint32_t system_code = 0;
   std::string error_message;
 
@@ -452,7 +459,7 @@ bool ConvertProtoToCdmPromiseWithCdmIdSessionId(const pb::RpcMessage& message,
 
 //==============================================================================
 CdmPromiseResult::CdmPromiseResult()
-    : CdmPromiseResult(CdmPromise::UNKNOWN_ERROR, 0, "") {}
+    : CdmPromiseResult(CdmPromise::Exception::NOT_SUPPORTED_ERROR, 0, "") {}
 
 CdmPromiseResult::CdmPromiseResult(CdmPromise::Exception exception,
                                    uint32_t system_code,

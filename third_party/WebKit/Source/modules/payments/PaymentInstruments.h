@@ -11,6 +11,7 @@
 #include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/modules/payments/payment_app.mojom-blink.h"
+#include "public/platform/modules/permissions/permission.mojom-blink.h"
 
 namespace blink {
 
@@ -20,9 +21,7 @@ class ScriptPromise;
 class ScriptPromiseResolver;
 class ScriptState;
 
-class MODULES_EXPORT PaymentInstruments final
-    : public GarbageCollected<PaymentInstruments>,
-      public ScriptWrappable {
+class MODULES_EXPORT PaymentInstruments final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
   WTF_MAKE_NONCOPYABLE(PaymentInstruments);
 
@@ -39,9 +38,13 @@ class MODULES_EXPORT PaymentInstruments final
                     ExceptionState&);
   ScriptPromise clear(ScriptState*);
 
-  DECLARE_TRACE();
-
  private:
+  mojom::blink::PermissionService* GetPermissionService(ScriptState*);
+  void OnRequestPermission(ScriptPromiseResolver*,
+                           const String&,
+                           const PaymentInstrument&,
+                           mojom::blink::PermissionStatus);
+
   void onDeletePaymentInstrument(ScriptPromiseResolver*,
                                  payments::mojom::blink::PaymentHandlerStatus);
   void onGetPaymentInstrument(ScriptPromiseResolver*,
@@ -58,6 +61,8 @@ class MODULES_EXPORT PaymentInstruments final
                                  payments::mojom::blink::PaymentHandlerStatus);
 
   const payments::mojom::blink::PaymentManagerPtr& manager_;
+
+  mojom::blink::PermissionServicePtr permission_service_;
 };
 
 }  // namespace blink

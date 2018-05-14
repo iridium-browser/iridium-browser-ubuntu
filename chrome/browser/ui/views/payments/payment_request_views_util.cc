@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/views/harmony/chrome_typography.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view_ids.h"
@@ -19,6 +18,7 @@
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/browser/phone_number_i18n.h"
 #include "components/payments/core/payment_options_provider.h"
 #include "components/payments/core/payment_request_data_util.h"
 #include "components/payments/core/payments_profile_comparator.h"
@@ -29,11 +29,13 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/native_theme/native_theme.h"
+#include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/button/button.h"
@@ -63,18 +65,18 @@ std::unique_ptr<views::View> GetBaseProfileLabel(
     base::string16* accessible_content,
     bool enabled = true) {
   DCHECK(accessible_content);
-  std::unique_ptr<views::View> container = base::MakeUnique<views::View>();
-  std::unique_ptr<views::BoxLayout> layout = base::MakeUnique<views::BoxLayout>(
+  std::unique_ptr<views::View> container = std::make_unique<views::View>();
+  std::unique_ptr<views::BoxLayout> layout = std::make_unique<views::BoxLayout>(
       views::BoxLayout::kVertical, gfx::Insets(), 0);
   layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_START);
-  container->SetLayoutManager(layout.release());
+  container->SetLayoutManager(std::move(layout));
 
   if (!s1.empty()) {
     const int text_style = type == AddressStyleType::DETAILED
                                ? static_cast<int>(STYLE_EMPHASIZED)
                                : static_cast<int>(views::style::STYLE_PRIMARY);
-    std::unique_ptr<views::Label> label = base::MakeUnique<views::Label>(
+    std::unique_ptr<views::Label> label = std::make_unique<views::Label>(
         s1, views::style::CONTEXT_LABEL, text_style);
     label->set_id(static_cast<int>(DialogViewID::PROFILE_LABEL_LINE_1));
     label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -86,7 +88,7 @@ std::unique_ptr<views::View> GetBaseProfileLabel(
   }
 
   if (!s2.empty()) {
-    std::unique_ptr<views::Label> label = base::MakeUnique<views::Label>(s2);
+    std::unique_ptr<views::Label> label = std::make_unique<views::Label>(s2);
     label->set_id(static_cast<int>(DialogViewID::PROFILE_LABEL_LINE_2));
     label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     if (!enabled) {
@@ -97,7 +99,7 @@ std::unique_ptr<views::View> GetBaseProfileLabel(
   }
 
   if (!s3.empty()) {
-    std::unique_ptr<views::Label> label = base::MakeUnique<views::Label>(s3);
+    std::unique_ptr<views::Label> label = std::make_unique<views::Label>(s3);
     label->set_id(static_cast<int>(DialogViewID::PROFILE_LABEL_LINE_3));
     label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     if (!enabled) {
@@ -122,14 +124,13 @@ std::unique_ptr<views::View> GetShippingAddressLabel(
     base::string16* accessible_content,
     bool enabled) {
   DCHECK(accessible_content);
-  base::string16 name =
-      profile.GetInfo(autofill::AutofillType(autofill::NAME_FULL), locale);
+  base::string16 name = profile.GetInfo(autofill::NAME_FULL, locale);
 
   base::string16 address =
       GetShippingAddressLabelFormAutofillProfile(profile, locale);
 
   base::string16 phone =
-      data_util::GetFormattedPhoneNumberForDisplay(profile, locale);
+      autofill::i18n::GetFormattedPhoneNumberForDisplay(profile, locale);
 
   return GetBaseProfileLabel(type, name, address, phone, accessible_content,
                              enabled);
@@ -138,7 +139,7 @@ std::unique_ptr<views::View> GetShippingAddressLabel(
 std::unique_ptr<views::Label> GetLabelForMissingInformation(
     const base::string16& missing_info) {
   std::unique_ptr<views::Label> label =
-      base::MakeUnique<views::Label>(missing_info, CONTEXT_DEPRECATED_SMALL);
+      std::make_unique<views::Label>(missing_info, CONTEXT_DEPRECATED_SMALL);
   label->set_id(static_cast<int>(DialogViewID::PROFILE_LABEL_ERROR));
   // Missing information typically has a nice shade of blue.
   label->SetEnabledColor(label->GetNativeTheme()->GetSystemColor(
@@ -180,13 +181,15 @@ int GetActualDialogWidth() {
   return actual_width;
 }
 
-std::unique_ptr<views::View> CreateSheetHeaderView(
-    bool show_back_arrow,
-    const base::string16& title,
-    views::ButtonListener* listener) {
-  std::unique_ptr<views::View> container = base::MakeUnique<views::View>();
-  views::GridLayout* layout = new views::GridLayout(container.get());
-  container->SetLayoutManager(layout);
+void PopulateSheetHeaderView(bool show_back_arrow,
+                             std::unique_ptr<views::View> header_content_view,
+                             views::ButtonListener* listener,
+                             views::View* container,
+                             std::unique_ptr<views::Background> background) {
+  SkColor background_color = background->get_color();
+  container->SetBackground(std::move(background));
+  views::GridLayout* layout = container->SetLayoutManager(
+      std::make_unique<views::GridLayout>(container));
 
   constexpr int kHeaderTopVerticalInset = 14;
   constexpr int kHeaderBottomVerticalInset = 8;
@@ -213,7 +216,9 @@ std::unique_ptr<views::View> CreateSheetHeaderView(
     layout->SkipColumns(1);
   } else {
     views::ImageButton* back_arrow = views::CreateVectorImageButton(listener);
-    views::SetImageFromVectorIcon(back_arrow, vector_icons::kBackArrowIcon);
+    views::SetImageFromVectorIcon(
+        back_arrow, vector_icons::kBackArrowIcon,
+        GetForegroundColorForBackground(background_color));
     constexpr int kBackArrowSize = 16;
     back_arrow->SetSize(gfx::Size(kBackArrowSize, kBackArrowSize));
     back_arrow->SetFocusBehavior(views::View::FocusBehavior::ALWAYS);
@@ -224,48 +229,46 @@ std::unique_ptr<views::View> CreateSheetHeaderView(
     layout->AddView(back_arrow);
   }
 
-  views::Label* title_label =
-      new views::Label(title, views::style::CONTEXT_DIALOG_TITLE);
-  title_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  title_label->set_id(static_cast<int>(DialogViewID::SHEET_TITLE));
-  title_label->SetFocusBehavior(views::View::FocusBehavior::ACCESSIBLE_ONLY);
-  layout->AddView(title_label);
-
-  return container;
+  layout->AddView(header_content_view.release());
 }
 
 std::unique_ptr<views::ImageView> CreateInstrumentIconView(
     int icon_resource_id,
+    const gfx::ImageSkia* img,
     const base::string16& tooltip_text,
     float opacity) {
-  std::unique_ptr<views::ImageView> card_icon_view =
-      base::MakeUnique<views::ImageView>();
-  card_icon_view->set_can_process_events_within_subtree(false);
-  card_icon_view->SetImage(ResourceBundle::GetSharedInstance()
-                               .GetImageNamed(icon_resource_id)
-                               .AsImageSkia());
-  card_icon_view->SetTooltipText(tooltip_text);
-  card_icon_view->SetPaintToLayer();
-  card_icon_view->layer()->SetFillsBoundsOpaquely(false);
-  card_icon_view->layer()->SetOpacity(opacity);
-  return card_icon_view;
+  std::unique_ptr<views::ImageView> icon_view =
+      std::make_unique<views::ImageView>();
+  icon_view->set_can_process_events_within_subtree(false);
+  if (img != nullptr) {
+    icon_view->SetImage(*img);
+  } else {
+    icon_view->SetImage(ui::ResourceBundle::GetSharedInstance()
+                            .GetImageNamed(icon_resource_id)
+                            .AsImageSkia());
+  }
+  icon_view->SetTooltipText(tooltip_text);
+  icon_view->SetPaintToLayer();
+  icon_view->layer()->SetFillsBoundsOpaquely(false);
+  icon_view->layer()->SetOpacity(opacity);
+  return icon_view;
 }
 
 std::unique_ptr<views::View> CreateProductLogoFooterView() {
-  std::unique_ptr<views::View> content_view = base::MakeUnique<views::View>();
+  std::unique_ptr<views::View> content_view = std::make_unique<views::View>();
 
-  views::BoxLayout* layout =
-      new views::BoxLayout(views::BoxLayout::kHorizontal, gfx::Insets(), 0);
+  auto layout = std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kHorizontal, gfx::Insets(), 0);
   layout->set_main_axis_alignment(views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
   layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_START);
-  content_view->SetLayoutManager(layout);
+  content_view->SetLayoutManager(std::move(layout));
 
   // Adds the Chrome logo image.
   std::unique_ptr<views::ImageView> chrome_logo =
-      base::MakeUnique<views::ImageView>();
+      std::make_unique<views::ImageView>();
   chrome_logo->set_can_process_events_within_subtree(false);
-  chrome_logo->SetImage(ResourceBundle::GetSharedInstance()
+  chrome_logo->SetImage(ui::ResourceBundle::GetSharedInstance()
                             .GetImageNamed(IDR_PRODUCT_LOGO_NAME_22)
                             .AsImageSkia());
   chrome_logo->SetTooltipText(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
@@ -304,21 +307,18 @@ std::unique_ptr<views::View> GetContactInfoLabel(
     const PaymentsProfileComparator& comp,
     base::string16* accessible_content) {
   DCHECK(accessible_content);
-  base::string16 name =
-      options.request_payer_name()
-          ? profile.GetInfo(autofill::AutofillType(autofill::NAME_FULL), locale)
-          : base::string16();
+  base::string16 name = options.request_payer_name()
+                            ? profile.GetInfo(autofill::NAME_FULL, locale)
+                            : base::string16();
 
   base::string16 phone =
       options.request_payer_phone()
-          ? data_util::GetFormattedPhoneNumberForDisplay(profile, locale)
+          ? autofill::i18n::GetFormattedPhoneNumberForDisplay(profile, locale)
           : base::string16();
 
-  base::string16 email =
-      options.request_payer_email()
-          ? profile.GetInfo(autofill::AutofillType(autofill::EMAIL_ADDRESS),
-                            locale)
-          : base::string16();
+  base::string16 email = options.request_payer_email()
+                             ? profile.GetInfo(autofill::EMAIL_ADDRESS, locale)
+                             : base::string16();
 
   std::unique_ptr<views::View> base_label =
       GetBaseProfileLabel(type, name, phone, email, accessible_content);
@@ -336,11 +336,11 @@ std::unique_ptr<views::Border> CreatePaymentRequestRowBorder(
     SkColor color,
     const gfx::Insets& insets) {
   return views::CreateBorderPainter(
-      base::MakeUnique<PaymentRequestRowBorderPainter>(color), insets);
+      std::make_unique<PaymentRequestRowBorderPainter>(color), insets);
 }
 
 std::unique_ptr<views::Label> CreateBoldLabel(const base::string16& text) {
-  return base::MakeUnique<views::Label>(text, views::style::CONTEXT_LABEL,
+  return std::make_unique<views::Label>(text, views::style::CONTEXT_LABEL,
                                         STYLE_EMPHASIZED);
 }
 
@@ -348,16 +348,18 @@ std::unique_ptr<views::Label> CreateMediumLabel(const base::string16& text) {
   // TODO(tapted): This should refer to a style in the Chrome typography spec.
   // Also, it needs to handle user setups where the default font is BOLD already
   // since asking for a MEDIUM font will give a lighter font.
-  std::unique_ptr<views::Label> label = base::MakeUnique<views::Label>(text);
-  label->SetFontList(ResourceBundle::GetSharedInstance().GetFontListWithDelta(
-      ui::kLabelFontSizeDelta, gfx::Font::NORMAL, gfx::Font::Weight::MEDIUM));
+  std::unique_ptr<views::Label> label = std::make_unique<views::Label>(text);
+  label->SetFontList(
+      ui::ResourceBundle::GetSharedInstance().GetFontListWithDelta(
+          ui::kLabelFontSizeDelta, gfx::Font::NORMAL,
+          gfx::Font::Weight::MEDIUM));
   return label;
 }
 
 std::unique_ptr<views::Label> CreateHintLabel(
     const base::string16& text,
     gfx::HorizontalAlignment alignment) {
-  std::unique_ptr<views::Label> label = base::MakeUnique<views::Label>(
+  std::unique_ptr<views::Label> label = std::make_unique<views::Label>(
       text, views::style::CONTEXT_LABEL, STYLE_HINT);
   label->SetHorizontalAlignment(alignment);
   return label;
@@ -369,19 +371,19 @@ std::unique_ptr<views::View> CreateShippingOptionLabel(
     bool emphasize_label,
     base::string16* accessible_content) {
   DCHECK(accessible_content);
-  std::unique_ptr<views::View> container = base::MakeUnique<views::View>();
+  std::unique_ptr<views::View> container = std::make_unique<views::View>();
 
-  std::unique_ptr<views::BoxLayout> layout = base::MakeUnique<views::BoxLayout>(
-      views::BoxLayout::kVertical, gfx::Insets(), 0);
+  auto layout = std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical,
+                                                   gfx::Insets(), 0);
   layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_START);
-  container->SetLayoutManager(layout.release());
+  container->SetLayoutManager(std::move(layout));
 
   if (shipping_option) {
     const base::string16& text = base::UTF8ToUTF16(shipping_option->label);
     std::unique_ptr<views::Label> shipping_label =
         emphasize_label ? CreateMediumLabel(text)
-                        : base::MakeUnique<views::Label>(text);
+                        : std::make_unique<views::Label>(text);
     // Strings from the website may not match the locale of the device, so align
     // them according to the language of the text. This will result, for
     // example, in "he" labels being right-aligned in a browser that's using
@@ -392,7 +394,7 @@ std::unique_ptr<views::View> CreateShippingOptionLabel(
     container->AddChildView(shipping_label.release());
 
     std::unique_ptr<views::Label> amount_label =
-        base::MakeUnique<views::Label>(formatted_amount);
+        std::make_unique<views::Label>(formatted_amount);
     amount_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     amount_label->set_id(
         static_cast<int>(DialogViewID::SHIPPING_OPTION_AMOUNT));
@@ -404,6 +406,16 @@ std::unique_ptr<views::View> CreateShippingOptionLabel(
   }
 
   return container;
+}
+
+SkColor GetForegroundColorForBackground(SkColor background_color) {
+  constexpr double kLightForegroundRatioThreshold = 3;
+  if (color_utils::GetContrastRatio(background_color, SK_ColorWHITE) >=
+      kLightForegroundRatioThreshold) {
+    return SK_ColorWHITE;
+  }
+  views::Label label;
+  return label.enabled_color();
 }
 
 }  // namespace payments

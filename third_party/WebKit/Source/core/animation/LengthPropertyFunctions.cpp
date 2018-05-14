@@ -8,8 +8,8 @@
 
 namespace blink {
 
-ValueRange LengthPropertyFunctions::GetValueRange(CSSPropertyID property) {
-  switch (property) {
+ValueRange LengthPropertyFunctions::GetValueRange(const CSSProperty& property) {
+  switch (property.PropertyID()) {
     case CSSPropertyBorderBottomWidth:
     case CSSPropertyBorderLeftWidth:
     case CSSPropertyBorderRightWidth:
@@ -35,6 +35,7 @@ ValueRange LengthPropertyFunctions::GetValueRange(CSSPropertyID property) {
     case CSSPropertyWebkitBorderHorizontalSpacing:
     case CSSPropertyWebkitBorderVerticalSpacing:
     case CSSPropertyColumnGap:
+    case CSSPropertyRowGap:
     case CSSPropertyColumnWidth:
     case CSSPropertyWidth:
       return kValueRangeNonNegative;
@@ -43,14 +44,14 @@ ValueRange LengthPropertyFunctions::GetValueRange(CSSPropertyID property) {
   }
 }
 
-bool LengthPropertyFunctions::IsZoomedLength(CSSPropertyID property) {
-  return property != CSSPropertyStrokeWidth;
+bool LengthPropertyFunctions::IsZoomedLength(const CSSProperty& property) {
+  return property.PropertyID() != CSSPropertyStrokeWidth;
 }
 
-bool LengthPropertyFunctions::GetPixelsForKeyword(CSSPropertyID property,
+bool LengthPropertyFunctions::GetPixelsForKeyword(const CSSProperty& property,
                                                   CSSValueID value_id,
                                                   double& result) {
-  switch (property) {
+  switch (property.PropertyID()) {
     case CSSPropertyBaselineShift:
       if (value_id == CSSValueBaseline) {
         result = 0;
@@ -88,13 +89,9 @@ bool LengthPropertyFunctions::GetPixelsForKeyword(CSSPropertyID property,
   }
 }
 
-static Length LengthFromUnsigned(unsigned short value) {
-  return Length(static_cast<float>(value), kFixed);
-}
-
-bool LengthPropertyFunctions::GetInitialLength(CSSPropertyID property,
+bool LengthPropertyFunctions::GetInitialLength(const CSSProperty& property,
                                                Length& result) {
-  switch (property) {
+  switch (property.PropertyID()) {
     // The computed value of "initial" for the following properties is 0px if
     // the associated *-style property resolves to "none" or "hidden".
     // - border-width:
@@ -109,13 +106,15 @@ bool LengthPropertyFunctions::GetInitialLength(CSSPropertyID property,
     case CSSPropertyBorderLeftWidth:
     case CSSPropertyBorderRightWidth:
     case CSSPropertyBorderTopWidth:
-      result = LengthFromUnsigned(ComputedStyle::InitialBorderWidth());
+      result = Length(ComputedStyleInitialValues::InitialBorderWidth(), kFixed);
       return true;
     case CSSPropertyOutlineWidth:
-      result = LengthFromUnsigned(ComputedStyle::InitialOutlineWidth());
+      result =
+          Length(ComputedStyleInitialValues::InitialOutlineWidth(), kFixed);
       return true;
     case CSSPropertyColumnRuleWidth:
-      result = LengthFromUnsigned(ComputedStyle::InitialColumnRuleWidth());
+      result =
+          Length(ComputedStyleInitialValues::InitialColumnRuleWidth(), kFixed);
       return true;
 
     default:
@@ -123,10 +122,10 @@ bool LengthPropertyFunctions::GetInitialLength(CSSPropertyID property,
   }
 }
 
-bool LengthPropertyFunctions::GetLength(CSSPropertyID property,
+bool LengthPropertyFunctions::GetLength(const CSSProperty& property,
                                         const ComputedStyle& style,
                                         Length& result) {
-  switch (property) {
+  switch (property.PropertyID()) {
     case CSSPropertyBottom:
       result = style.Bottom();
       return true;
@@ -257,8 +256,15 @@ bool LengthPropertyFunctions::GetLength(CSSPropertyID property,
     case CSSPropertyWebkitBorderVerticalSpacing:
       result = Length(style.VerticalBorderSpacing(), kFixed);
       return true;
+    case CSSPropertyRowGap:
+      if (style.RowGap().IsNormal())
+        return false;
+      result = style.RowGap().GetLength();
+      return true;
     case CSSPropertyColumnGap:
-      result = Length(style.ColumnGap(), kFixed);
+      if (style.ColumnGap().IsNormal())
+        return false;
+      result = style.ColumnGap().GetLength();
       return true;
     case CSSPropertyColumnRuleWidth:
       result = Length(style.ColumnRuleWidth(), kFixed);
@@ -287,7 +293,7 @@ bool LengthPropertyFunctions::GetLength(CSSPropertyID property,
       result = Length(style.Perspective(), kFixed);
       return true;
     case CSSPropertyStrokeWidth:
-      DCHECK(!IsZoomedLength(CSSPropertyStrokeWidth));
+      DCHECK(!IsZoomedLength(CSSProperty::Get(CSSPropertyStrokeWidth)));
       result = style.StrokeWidth().length();
       return true;
     case CSSPropertyVerticalAlign:
@@ -305,10 +311,10 @@ bool LengthPropertyFunctions::GetLength(CSSPropertyID property,
   }
 }
 
-bool LengthPropertyFunctions::SetLength(CSSPropertyID property,
+bool LengthPropertyFunctions::SetLength(const CSSProperty& property,
                                         ComputedStyle& style,
                                         const Length& value) {
-  switch (property) {
+  switch (property.PropertyID()) {
     // Setters that take a Length value.
     case CSSPropertyBaselineShift:
       style.SetBaselineShiftValue(value);
@@ -435,6 +441,7 @@ bool LengthPropertyFunctions::SetLength(CSSPropertyID property,
     case CSSPropertyWebkitBorderHorizontalSpacing:
     case CSSPropertyWebkitBorderVerticalSpacing:
     case CSSPropertyColumnGap:
+    case CSSPropertyRowGap:
     case CSSPropertyColumnRuleWidth:
     case CSSPropertyColumnWidth:
     case CSSPropertyWebkitTransformOriginZ:

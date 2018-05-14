@@ -25,7 +25,6 @@
 #include "content/browser/renderer_host/media/video_capture_controller_event_handler.h"
 #include "content/browser/renderer_host/media/video_capture_gpu_jpeg_decoder.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
-#include "content/common/media/media_stream_options.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "media/base/video_frame_metadata.h"
@@ -48,8 +47,8 @@ namespace content {
 
 std::unique_ptr<media::VideoCaptureJpegDecoder> CreateGpuJpegDecoder(
     media::VideoCaptureJpegDecoder::DecodeDoneCB decode_done_cb) {
-  return base::MakeUnique<content::VideoCaptureGpuJpegDecoder>(
-      std::move(decode_done_cb), base::Bind([](const std::string&) {}));
+  return std::make_unique<content::VideoCaptureGpuJpegDecoder>(
+      std::move(decode_done_cb), base::DoNothing());
 }
 
 class MockVideoCaptureControllerEventHandler
@@ -97,18 +96,18 @@ class MockVideoCaptureControllerEventHandler
     DoBufferReady(id, frame_info->coded_size);
     if (enable_auto_return_buffer_on_buffer_ready_) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&VideoCaptureController::ReturnBuffer,
-                                base::Unretained(controller_), id, this,
-                                buffer_id, resource_utilization_));
+          FROM_HERE, base::BindOnce(&VideoCaptureController::ReturnBuffer,
+                                    base::Unretained(controller_), id, this,
+                                    buffer_id, resource_utilization_));
     }
   }
   void OnEnded(VideoCaptureControllerID id) override {
     DoEnded(id);
     // OnEnded() must respond by (eventually) unregistering the client.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(base::IgnoreResult(&VideoCaptureController::RemoveClient),
-                   base::Unretained(controller_), id, this));
+        FROM_HERE, base::BindOnce(base::IgnoreResult(
+                                      &VideoCaptureController::RemoveClient),
+                                  base::Unretained(controller_), id, this));
   }
 
   VideoCaptureController* controller_;
@@ -139,13 +138,14 @@ class VideoCaptureControllerTest
     const MediaStreamType arbitrary_stream_type =
         content::MEDIA_DEVICE_VIDEO_CAPTURE;
     const media::VideoCaptureParams arbitrary_params;
-    auto device_launcher = base::MakeUnique<MockVideoCaptureDeviceLauncher>();
+    auto device_launcher = std::make_unique<MockVideoCaptureDeviceLauncher>();
     controller_ = new VideoCaptureController(
         arbitrary_device_id, arbitrary_stream_type, arbitrary_params,
-        std::move(device_launcher));
+        std::move(device_launcher),
+        base::BindRepeating([](const std::string&) {}));
     InitializeNewDeviceClientAndBufferPoolInstances();
     auto mock_launched_device =
-        base::MakeUnique<MockLaunchedVideoCaptureDevice>();
+        std::make_unique<MockLaunchedVideoCaptureDevice>();
     mock_launched_device_ = mock_launched_device.get();
     controller_->OnDeviceLaunched(std::move(mock_launched_device));
     client_a_.reset(
@@ -158,10 +158,10 @@ class VideoCaptureControllerTest
 
   void InitializeNewDeviceClientAndBufferPoolInstances() {
     buffer_pool_ = new media::VideoCaptureBufferPoolImpl(
-        base::MakeUnique<media::VideoCaptureBufferTrackerFactoryImpl>(),
+        std::make_unique<media::VideoCaptureBufferTrackerFactoryImpl>(),
         kPoolSize);
     device_client_.reset(new media::VideoCaptureDeviceClient(
-        base::MakeUnique<media::VideoFrameReceiverOnTaskRunner>(
+        std::make_unique<media::VideoFrameReceiverOnTaskRunner>(
             controller_->GetWeakPtrForIOThread(),
             BrowserThread::GetTaskRunnerForThread(BrowserThread::IO)),
         buffer_pool_,
@@ -266,17 +266,17 @@ TEST_F(VideoCaptureControllerTest, AddAndRemoveClients) {
   controller_->StopSession(200);  // Session 200 does not exist anymore
   // Clients in controller: [B/2]
   ASSERT_EQ(1, controller_->GetClientCount())
-      << "Stopping non-existant session 200 should be a no-op.";
+      << "Stopping non-existent session 200 should be a no-op.";
   controller_->StopSession(256);  // Session 256 never existed.
   // Clients in controller: [B/2]
   ASSERT_EQ(1, controller_->GetClientCount())
-      << "Stopping non-existant session 256 should be a no-op.";
+      << "Stopping non-existent session 256 should be a no-op.";
   ASSERT_EQ(static_cast<int>(kInvalidMediaCaptureSessionId),
             controller_->RemoveClient(client_a_route_1, client_a_.get()))
       << "Removing already-removed client A/1 should fail.";
   // Clients in controller: [B/2]
   ASSERT_EQ(1, controller_->GetClientCount())
-      << "Removing non-existant session 200 should be a no-op.";
+      << "Removing non-existent session 200 should be a no-op.";
   ASSERT_EQ(400, controller_->RemoveClient(client_b_route_2, client_b_.get()))
       << "Removing client B/2 should return its session_id.";
   // Clients in controller: []
@@ -536,7 +536,7 @@ TEST_F(VideoCaptureControllerTest, ErrorBeforeDeviceCreation) {
 
   media::VideoCaptureFormat device_format(
       capture_resolution, arbitrary_frame_rate_, media::PIXEL_FORMAT_I420,
-      media::PIXEL_STORAGE_CPU);
+      media::VideoPixelStorage::CPU);
   const int arbitrary_frame_feedback_id = 101;
   media::VideoCaptureDevice::Client::Buffer buffer =
       device_client_->ReserveOutputBuffer(

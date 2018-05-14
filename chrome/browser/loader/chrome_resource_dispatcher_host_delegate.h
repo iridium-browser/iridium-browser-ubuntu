@@ -32,6 +32,10 @@ namespace net {
 class URLRequest;
 }
 
+namespace previews {
+class PreviewsDecider;
+}
+
 namespace safe_browsing {
 class SafeBrowsingService;
 }
@@ -62,15 +66,9 @@ class ChromeResourceDispatcherHostDelegate
                         bool is_new_request,
                         std::vector<std::unique_ptr<content::ResourceThrottle>>*
                             throttles) override;
-  content::ResourceDispatcherHostLoginDelegate* CreateLoginDelegate(
-      net::AuthChallengeInfo* auth_info,
-      net::URLRequest* request) override;
   bool HandleExternalProtocol(const GURL& url,
                               content::ResourceRequestInfo* info) override;
-  bool ShouldForceDownloadResource(const GURL& url,
-                                   const std::string& mime_type) override;
   bool ShouldInterceptResourceAsStream(net::URLRequest* request,
-                                       const base::FilePath& plugin_path,
                                        const std::string& mime_type,
                                        GURL* origin,
                                        std::string* payload) override;
@@ -78,23 +76,20 @@ class ChromeResourceDispatcherHostDelegate
                        std::unique_ptr<content::StreamInfo> stream) override;
   void OnResponseStarted(net::URLRequest* request,
                          content::ResourceContext* resource_context,
-                         content::ResourceResponse* response) override;
+                         network::ResourceResponse* response) override;
   void OnRequestRedirected(const GURL& redirect_url,
                            net::URLRequest* request,
                            content::ResourceContext* resource_context,
-                           content::ResourceResponse* response) override;
+                           network::ResourceResponse* response) override;
   void RequestComplete(net::URLRequest* url_request) override;
-  // Returns a bitmask of potentially several Previews optimizations.
-  content::PreviewsState GetPreviewsState(
-      const net::URLRequest& url_request,
+  // Returns a bitmask of potentially several Previews optimizations at the
+  // start of a navigation.
+  content::PreviewsState DetermineEnabledPreviews(
+      net::URLRequest* url_request,
       content::ResourceContext* resource_context,
       content::PreviewsState previews_to_allow) override;
   content::NavigationData* GetNavigationData(
       net::URLRequest* request) const override;
-  std::unique_ptr<net::ClientCertStore> CreateClientCertStore(
-      content::ResourceContext* resource_context) override;
-  void OnAbortedFrameLoad(const GURL& url,
-                          base::TimeDelta request_loading_time) override;
 
   // Called on the UI thread. Allows switching out the
   // ExternalProtocolHandler::Delegate for testing code.
@@ -110,12 +105,22 @@ class ChromeResourceDispatcherHostDelegate
       std::vector<std::unique_ptr<content::ResourceThrottle>>* throttles);
 
  private:
+  friend class ChromeResourceDispatcherHostDelegateTest;
+
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   struct StreamTargetInfo {
     std::string extension_id;
     std::string view_id;
   };
 #endif
+
+  // Returns an updated bitmask of Previews for a committed navigation.
+  // The value is updated from |intial_state| considering navigation data
+  // attached to |request|.
+  static content::PreviewsState DetermineCommittedPreviews(
+      const net::URLRequest* request,
+      const previews::PreviewsDecider* previews_decider,
+      content::PreviewsState initial_state);
 
   scoped_refptr<DownloadRequestLimiter> download_request_limiter_;
   scoped_refptr<safe_browsing::SafeBrowsingService> safe_browsing_;

@@ -20,9 +20,9 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/common/associated_interface_provider.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/base/net_errors.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_provider.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(ENABLE_OFFLINE_PAGES)
@@ -258,8 +258,10 @@ void NetErrorTabHelper::SendInfo() {
 
   DVLOG(1) << "Sending status " << DnsProbeStatusToString(dns_probe_status_);
   content::RenderFrameHost* rfh = web_contents()->GetMainFrame();
-  rfh->Send(new ChromeViewMsg_NetErrorInfo(rfh->GetRoutingID(),
-                                           dns_probe_status_));
+
+  chrome::mojom::NetworkDiagnosticsClientAssociatedPtr client;
+  rfh->GetRemoteAssociatedInterfaces()->GetInterface(&client);
+  client->DNSProbeStatus(dns_probe_status_);
 
   if (!dns_probe_status_snoop_callback_.is_null())
     dns_probe_status_snoop_callback_.Run(dns_probe_status_);

@@ -27,11 +27,20 @@
 #include "core/paint/ClipRect.h"
 
 #include "core/layout/HitTestLocation.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
 bool ClipRect::Intersects(const HitTestLocation& hit_test_location) const {
   return hit_test_location.Intersects(rect_);
+}
+
+String ClipRect::ToString() const {
+  return rect_.ToString() + (has_radius_ ? " hasRadius" : " noRadius");
+}
+
+std::ostream& operator<<(std::ostream& ostream, const ClipRect& rect) {
+  return ostream << rect.ToString();
 }
 
 }  // namespace blink

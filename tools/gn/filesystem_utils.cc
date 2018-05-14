@@ -15,6 +15,10 @@
 #include "tools/gn/settings.h"
 #include "tools/gn/source_dir.h"
 
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
+
 namespace {
 
 enum DotDisposition {
@@ -410,6 +414,47 @@ bool MakeAbsolutePathRelativeIfPossible(const base::StringPiece& source_root,
   }
   return false;
 #endif
+}
+
+base::FilePath MakeAbsoluteFilePathRelativeIfPossible(
+    const base::FilePath& base,
+    const base::FilePath& target) {
+  DCHECK(base.IsAbsolute());
+  DCHECK(target.IsAbsolute());
+  std::vector<base::FilePath::StringType> base_components;
+  std::vector<base::FilePath::StringType> target_components;
+  base.GetComponents(&base_components);
+  target.GetComponents(&target_components);
+#if defined(OS_WIN)
+  // On Windows, it's impossible to have a relative path from C:\foo to D:\bar,
+  // so return the target as an aboslute path instead.
+  if (base_components[0] != target_components[0])
+    return target;
+#endif
+  size_t i;
+  for (i = 0; i < base_components.size() && i < target_components.size(); i++) {
+    if (base_components[i] != target_components[i])
+      break;
+  }
+  std::vector<base::FilePath::StringType> relative_components;
+  for (size_t j = i; j < base_components.size(); j++)
+    relative_components.push_back(base::FilePath::kParentDirectory);
+  for (size_t j = i; j < target_components.size(); j++)
+    relative_components.push_back(target_components[j]);
+  if (relative_components.size() <= 1) {
+    // In case the file pointed-to is an executable, prepend the current
+    // directory to the path -- if the path was "gn", use "./gn" instead.  If
+    // the file path is used in a command, this prevents issues where "gn" might
+    // not be in the PATH (or it is in the path, and the wrong gn is used).
+    relative_components.insert(relative_components.begin(),
+                               base::FilePath::kCurrentDirectory);
+  }
+  // base::FilePath::Append(component) replaces the file path with |component|
+  // if the path is base::Filepath::kCurrentDirectory.  We want to preserve the
+  // leading "./", so we build the path ourselves and use that to construct the
+  // base::FilePath.
+  base::FilePath::StringType separator(&base::FilePath::kSeparators[0], 1);
+  return base::FilePath(base::JoinString(relative_components, separator));
 }
 
 void NormalizePath(std::string* path, const base::StringPiece& source_root) {

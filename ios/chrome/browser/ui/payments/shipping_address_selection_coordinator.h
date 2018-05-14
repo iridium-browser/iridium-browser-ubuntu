@@ -8,7 +8,7 @@
 #import <UIKit/UIKit.h>
 #include <vector>
 
-#import "ios/chrome/browser/chrome_coordinator.h"
+#import "ios/chrome/browser/ui/coordinators/chrome_coordinator.h"
 #import "ios/chrome/browser/ui/payments/address_edit_coordinator.h"
 #import "ios/chrome/browser/ui/payments/payment_request_selector_view_controller.h"
 
@@ -45,9 +45,9 @@ class PaymentRequest;
     : ChromeCoordinator<PaymentRequestSelectorViewControllerDelegate,
                         AddressEditCoordinatorDelegate>
 
-// The PaymentRequest object having a copy of web::PaymentRequest as provided by
-// the page invoking the Payment Request API. This pointer is not owned by this
-// class and should outlive it.
+// The PaymentRequest object having a copy of payments::WebPaymentRequest as
+// provided by the page invoking the Payment Request API. This pointer is not
+// owned by this class and should outlive it.
 @property(nonatomic, assign) payments::PaymentRequest* paymentRequest;
 
 // The delegate to be notified when the user selects a shipping address or

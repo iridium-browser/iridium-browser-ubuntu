@@ -24,17 +24,15 @@ enum Visit
     PostVisit
 };
 
-//
 // For traversing the tree.  User should derive from this class overriding the visit functions,
 // and then pass an object of the subclass to a traverse method of a node.
 //
-// The traverse*() functions may also be overridden do other bookkeeping on the tree to provide
+// The traverse*() functions may also be overridden to do other bookkeeping on the tree to provide
 // contextual information to the visit functions, such as whether the node is the target of an
-// assignment.
+// assignment. This is complex to maintain and so should only be done in special cases.
 //
 // When using this, just fill in the methods for nodes you want visited.
 // Return false from a pre-visit to skip visiting that node's subtree.
-//
 class TIntermTraverser : angle::NonCopyable
 {
   public:
@@ -145,11 +143,14 @@ class TIntermTraverser : angle::NonCopyable
         return nullptr;
     }
 
+    const TIntermBlock *getParentBlock() const;
+
     void pushParentBlock(TIntermBlock *node);
     void incrementParentBlockPos();
     void popParentBlock();
 
-    // To replace a single node with multiple nodes on the parent aggregate node
+    // To replace a single node with multiple nodes in the parent aggregate. May be used with blocks
+    // but also with other nodes like declarations.
     struct NodeReplaceWithMultipleEntry
     {
         NodeReplaceWithMultipleEntry(TIntermAggregateBase *_parent,
@@ -164,30 +165,9 @@ class TIntermTraverser : angle::NonCopyable
         TIntermSequence replacements;
     };
 
-    // To insert multiple nodes on the parent aggregate node
-    struct NodeInsertMultipleEntry
-    {
-        NodeInsertMultipleEntry(TIntermBlock *_parent,
-                                TIntermSequence::size_type _position,
-                                TIntermSequence _insertionsBefore,
-                                TIntermSequence _insertionsAfter)
-            : parent(_parent),
-              position(_position),
-              insertionsBefore(_insertionsBefore),
-              insertionsAfter(_insertionsAfter)
-        {
-        }
-
-        TIntermBlock *parent;
-        TIntermSequence::size_type position;
-        TIntermSequence insertionsBefore;
-        TIntermSequence insertionsAfter;
-    };
-
-    // Helper to insert statements in the parent block (sequence) of the node currently being
-    // traversed.
+    // Helper to insert statements in the parent block of the node currently being traversed.
     // The statements will be inserted before the node being traversed once updateTree is called.
-    // Should only be called during PreVisit or PostVisit from sequence nodes.
+    // Should only be called during PreVisit or PostVisit if called from block nodes.
     // Note that two insertions to the same position in the same block are not supported.
     void insertStatementsInParentBlock(const TIntermSequence &insertions);
 
@@ -198,22 +178,6 @@ class TIntermTraverser : angle::NonCopyable
 
     // Helper to insert a single statement.
     void insertStatementInParentBlock(TIntermNode *statement);
-
-    // Helper to create a temporary symbol node with the given qualifier.
-    TIntermSymbol *createTempSymbol(const TType &type, TQualifier qualifier);
-    // Helper to create a temporary symbol node.
-    TIntermSymbol *createTempSymbol(const TType &type);
-    // Create a node that declares but doesn't initialize a temporary symbol.
-    TIntermDeclaration *createTempDeclaration(const TType &type);
-    // Create a node that initializes the current temporary symbol with initializer having the given
-    // qualifier.
-    TIntermDeclaration *createTempInitDeclaration(TIntermTyped *initializer, TQualifier qualifier);
-    // Create a node that initializes the current temporary symbol with initializer.
-    TIntermDeclaration *createTempInitDeclaration(TIntermTyped *initializer);
-    // Create a node that assigns rightNode to the current temporary symbol.
-    TIntermBinary *createTempAssignment(TIntermTyped *rightNode);
-    // Increment temporary symbol index.
-    void nextTemporaryId();
 
     enum class OriginalNode
     {
@@ -244,11 +208,30 @@ class TIntermTraverser : angle::NonCopyable
     // mReplacements/mMultiReplacements, then do them by calling updateTree().
     // Multi replacements are processed after single replacements.
     std::vector<NodeReplaceWithMultipleEntry> mMultiReplacements;
-    std::vector<NodeInsertMultipleEntry> mInsertions;
 
     TSymbolTable *mSymbolTable;
 
   private:
+    // To insert multiple nodes into the parent block.
+    struct NodeInsertMultipleEntry
+    {
+        NodeInsertMultipleEntry(TIntermBlock *_parent,
+                                TIntermSequence::size_type _position,
+                                TIntermSequence _insertionsBefore,
+                                TIntermSequence _insertionsAfter)
+            : parent(_parent),
+              position(_position),
+              insertionsBefore(_insertionsBefore),
+              insertionsAfter(_insertionsAfter)
+        {
+        }
+
+        TIntermBlock *parent;
+        TIntermSequence::size_type position;
+        TIntermSequence insertionsBefore;
+        TIntermSequence insertionsAfter;
+    };
+
     static bool CompareInsertion(const NodeInsertMultipleEntry &a,
                                  const NodeInsertMultipleEntry &b);
 
@@ -283,6 +266,7 @@ class TIntermTraverser : angle::NonCopyable
         TIntermSequence::size_type pos;
     };
 
+    std::vector<NodeInsertMultipleEntry> mInsertions;
     std::vector<NodeUpdateEntry> mReplacements;
 
     // All the nodes from root to the current node during traversing.
@@ -290,8 +274,6 @@ class TIntermTraverser : angle::NonCopyable
 
     // All the code blocks from the root to the current node's parent during traversal.
     std::vector<ParentBlock> mParentBlockStack;
-
-    TSymbolUniqueId *mTemporaryId;
 };
 
 // Traverser parent class that tracks where a node is a destination of a write operation and so is
@@ -302,13 +284,11 @@ class TLValueTrackingTraverser : public TIntermTraverser
     TLValueTrackingTraverser(bool preVisit,
                              bool inVisit,
                              bool postVisit,
-                             TSymbolTable *symbolTable,
-                             int shaderVersion);
+                             TSymbolTable *symbolTable);
     virtual ~TLValueTrackingTraverser() {}
 
     void traverseBinary(TIntermBinary *node) final;
     void traverseUnary(TIntermUnary *node) final;
-    void traverseFunctionPrototype(TIntermFunctionPrototype *node) final;
     void traverseAggregate(TIntermAggregate *node) final;
 
   protected:
@@ -327,27 +307,12 @@ class TLValueTrackingTraverser : public TIntermTraverser
     }
     bool operatorRequiresLValue() const { return mOperatorRequiresLValue; }
 
-    // Add a function encountered during traversal to the function map.
-    void addToFunctionMap(const TSymbolUniqueId &id, TIntermSequence *paramSequence);
-
-    // Return true if the prototype or definition of the function being called has been encountered
-    // during traversal.
-    bool isInFunctionMap(const TIntermAggregate *callNode) const;
-
-    // Return the parameters sequence from the function definition or prototype.
-    TIntermSequence *getFunctionParameters(const TIntermAggregate *callNode);
-
     // Track whether an l-value is required inside a function call.
     void setInFunctionCallOutParameter(bool inOutParameter);
     bool isInFunctionCallOutParameter() const;
 
     bool mOperatorRequiresLValue;
     bool mInFunctionCallOutParameter;
-
-    // Map from function symbol id values to their parameter sequences
-    TMap<int, TIntermSequence *> mFunctionMap;
-
-    const int mShaderVersion;
 };
 
 }  // namespace sh

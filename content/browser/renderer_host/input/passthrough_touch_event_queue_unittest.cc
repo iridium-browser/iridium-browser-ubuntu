@@ -9,6 +9,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/containers/circular_deque.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
@@ -41,7 +42,7 @@ base::TimeDelta DefaultTouchTimeoutDelay() {
 }  // namespace
 
 class PassthroughTouchEventQueueTest : public testing::Test,
-                                       public TouchEventQueueClient {
+                                       public PassthroughTouchEventQueueClient {
  public:
   PassthroughTouchEventQueueTest()
       : scoped_task_environment_(
@@ -54,13 +55,13 @@ class PassthroughTouchEventQueueTest : public testing::Test,
 
   // testing::Test
   void SetUp() override {
-    ResetQueueWithConfig(TouchEventQueue::Config());
+    ResetQueueWithConfig(PassthroughTouchEventQueue::Config());
     sent_events_ids_.clear();
   }
 
   void TearDown() override { queue_.reset(); }
 
-  // TouchEventQueueClient
+  // PassthroughTouchEventQueueClient
   void SendTouchEventImmediately(
       const TouchEventWithLatencyInfo& event) override {
     sent_events_.push_back(event.event);
@@ -73,6 +74,7 @@ class PassthroughTouchEventQueueTest : public testing::Test,
   }
 
   void OnTouchEventAck(const TouchEventWithLatencyInfo& event,
+                       InputEventAckSource ack_source,
                        InputEventAckState ack_result) override {
     ++acked_event_count_;
     if (followup_touch_event_) {
@@ -100,7 +102,7 @@ class PassthroughTouchEventQueueTest : public testing::Test,
 
   void SetUpForTimeoutTesting(base::TimeDelta desktop_timeout_delay,
                               base::TimeDelta mobile_timeout_delay) {
-    TouchEventQueue::Config config;
+    PassthroughTouchEventQueue::Config config;
     config.desktop_touch_ack_timeout_delay = desktop_timeout_delay;
     config.mobile_touch_ack_timeout_delay = mobile_timeout_delay;
     config.touch_ack_timeout_supported = true;
@@ -138,21 +140,22 @@ class PassthroughTouchEventQueueTest : public testing::Test,
 
   void SendTouchEventAck(InputEventAckState ack_result) {
     DCHECK(!sent_events_ids_.empty());
-    queue_->ProcessTouchAck(ack_result, ui::LatencyInfo(),
-                            sent_events_ids_.front());
+    queue_->ProcessTouchAck(InputEventAckSource::COMPOSITOR_THREAD, ack_result,
+                            ui::LatencyInfo(), sent_events_ids_.front());
     sent_events_ids_.pop_front();
   }
 
   void SendTouchEventAckLast(InputEventAckState ack_result) {
     DCHECK(!sent_events_ids_.empty());
-    queue_->ProcessTouchAck(ack_result, ui::LatencyInfo(),
-                            sent_events_ids_.back());
+    queue_->ProcessTouchAck(InputEventAckSource::COMPOSITOR_THREAD, ack_result,
+                            ui::LatencyInfo(), sent_events_ids_.back());
     sent_events_ids_.pop_back();
   }
 
   void SendTouchEventAckWithID(InputEventAckState ack_result,
                                int unique_event_id) {
-    queue_->ProcessTouchAck(ack_result, ui::LatencyInfo(), unique_event_id);
+    queue_->ProcessTouchAck(InputEventAckSource::COMPOSITOR_THREAD, ack_result,
+                            ui::LatencyInfo(), unique_event_id);
     sent_events_ids_.erase(std::remove(sent_events_ids_.begin(),
                                        sent_events_ids_.end(), unique_event_id),
                            sent_events_ids_.end());
@@ -322,7 +325,7 @@ class PassthroughTouchEventQueueTest : public testing::Test,
     touch_event_.ResetPoints();
   }
 
-  void ResetQueueWithConfig(const TouchEventQueue::Config& config) {
+  void ResetQueueWithConfig(const PassthroughTouchEventQueue::Config& config) {
     queue_.reset(new PassthroughTouchEventQueue(this, config));
     queue_->OnHasTouchEventHandlers(true);
   }
@@ -339,7 +342,7 @@ class PassthroughTouchEventQueueTest : public testing::Test,
   std::unique_ptr<InputEventAckState> sync_ack_result_;
   double slop_length_dips_;
   gfx::PointF anchor_;
-  std::deque<int> sent_events_ids_;
+  base::circular_deque<int> sent_events_ids_;
 };
 
 // Tests that touch-events are queued properly.
@@ -1403,7 +1406,7 @@ TEST_F(PassthroughTouchEventQueueTest,
 
   WebGestureEvent followup_scroll(WebInputEvent::kGestureScrollBegin,
                                   WebInputEvent::kNoModifiers,
-                                  WebInputEvent::kTimeStampForTesting);
+                                  WebInputEvent::GetStaticTimeStampForTests());
   SetFollowupEvent(followup_scroll);
   MoveTouchPoint(0, 20, 5);
   EXPECT_EQ(0U, GetAndResetSentEventCount());
@@ -1448,7 +1451,7 @@ TEST_F(PassthroughTouchEventQueueTest, TouchAbsorptionWithConsumedFirstMove) {
   MoveTouchPoint(0, 20, 5);
   WebGestureEvent followup_scroll(WebInputEvent::kGestureScrollUpdate,
                                   WebInputEvent::kNoModifiers,
-                                  WebInputEvent::kTimeStampForTesting);
+                                  WebInputEvent::GetStaticTimeStampForTests());
   SetFollowupEvent(followup_scroll);
   SendTouchEventAck(INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   SendGestureEventAck(WebInputEvent::kGestureScrollUpdate,
@@ -1682,7 +1685,7 @@ TEST_F(PassthroughTouchEventQueueTest, FilterTouchMovesWhenNoPointerChanged) {
 
   // Do not really move any touch points, but use previous values.
   MoveTouchPoint(0, 10, 10);
-  ChangeTouchPointRadius(1, 1, 1);
+  ChangeTouchPointRadius(1, 20, 20);
   MoveTouchPoint(1, 2, 2);
   EXPECT_EQ(4U, queued_event_count());
   EXPECT_EQ(0U, GetAndResetSentEventCount());

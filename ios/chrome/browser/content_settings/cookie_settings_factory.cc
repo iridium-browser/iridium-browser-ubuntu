@@ -9,7 +9,6 @@
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "ios/chrome/browser/browser_state/browser_state_otr_helper.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
 
 namespace ios {
@@ -54,9 +53,9 @@ CookieSettingsFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
   ios::ChromeBrowserState* browser_state =
       ios::ChromeBrowserState::FromBrowserState(context);
-  return new content_settings::CookieSettings(
+  return base::MakeRefCounted<content_settings::CookieSettings>(
       ios::HostContentSettingsMapFactory::GetForBrowserState(browser_state),
-      browser_state->GetPrefs(), kDummyExtensionScheme);
+      browser_state->GetPrefs());
 }
 
 }  // namespace ios

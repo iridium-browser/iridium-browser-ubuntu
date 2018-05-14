@@ -31,7 +31,7 @@ FEDiffuseLighting::FEDiffuseLighting(Filter* filter,
                                      const Color& lighting_color,
                                      float surface_scale,
                                      float diffuse_constant,
-                                     PassRefPtr<LightSource> light_source)
+                                     scoped_refptr<LightSource> light_source)
     : FELighting(filter,
                  kDiffuseLighting,
                  lighting_color,
@@ -46,12 +46,12 @@ FEDiffuseLighting* FEDiffuseLighting::Create(
     const Color& lighting_color,
     float surface_scale,
     float diffuse_constant,
-    PassRefPtr<LightSource> light_source) {
+    scoped_refptr<LightSource> light_source) {
   return new FEDiffuseLighting(filter, lighting_color, surface_scale,
                                diffuse_constant, std::move(light_source));
 }
 
-FEDiffuseLighting::~FEDiffuseLighting() {}
+FEDiffuseLighting::~FEDiffuseLighting() = default;
 
 Color FEDiffuseLighting::LightingColor() const {
   return lighting_color_;
@@ -88,10 +88,11 @@ bool FEDiffuseLighting::SetDiffuseConstant(float diffuse_constant) {
 }
 
 const LightSource* FEDiffuseLighting::GetLightSource() const {
-  return light_source_.Get();
+  return light_source_.get();
 }
 
-void FEDiffuseLighting::SetLightSource(PassRefPtr<LightSource> light_source) {
+void FEDiffuseLighting::SetLightSource(
+    scoped_refptr<LightSource> light_source) {
   light_source_ = std::move(light_source);
 }
 

@@ -6,9 +6,10 @@
 
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -110,12 +111,6 @@ class AppInfoDialogViewsTest : public BrowserWithTestWindowTest,
     return extension_environment_.profile();
   }
 
-  void DestroyProfile(TestingProfile* profile) override {
-#if defined(OS_CHROMEOS)
-    arc_test_.TearDown();
-#endif
-  }
-
  protected:
   void ShowAppInfo(const std::string& app_id) {
     ShowAppInfoForProfile(app_id, extension_environment_.profile());
@@ -132,7 +127,7 @@ class AppInfoDialogViewsTest : public BrowserWithTestWindowTest,
     widget_ = views::DialogDelegate::CreateDialogWidget(
         new views::DialogDelegateView(), GetContext(), nullptr);
     widget_->AddObserver(this);
-    dialog_ = new AppInfoDialog(widget_->GetNativeWindow(), profile, extension);
+    dialog_ = new AppInfoDialog(profile, extension);
 
     widget_->GetContentsView()->AddChildView(dialog_);
     widget_->Show();
@@ -156,7 +151,7 @@ class AppInfoDialogViewsTest : public BrowserWithTestWindowTest,
         ->extension_service()
         ->UninstallExtension(
             app_id, extensions::UninstallReason::UNINSTALL_REASON_FOR_TESTING,
-            base::Closure(), NULL);
+            NULL);
   }
 
  protected:
@@ -207,8 +202,9 @@ TEST_F(AppInfoDialogViewsTest, DestroyedProfileClosesDialog) {
   browser_window->Close();
   browser_window.reset();
 
-  // This does not actually destroy the profile; see DestroyProfile above.
-  DestroyProfile(profile());
+#if defined(OS_CHROMEOS)
+  arc_test_.TearDown();
+#endif
 
   // The following does nothing: it just ensures the Widget close is being
   // triggered by the DeleteProfile() call rather than the code above.
@@ -294,7 +290,7 @@ TEST_F(AppInfoDialogViewsTest, ArcAppInfoLinks) {
   // Re-show App Info but for non-primary profile.
   CloseAppInfo();
   std::unique_ptr<TestingProfile> other_profile =
-      base::MakeUnique<TestingProfile>();
+      std::make_unique<TestingProfile>();
   extension_environment_.CreateExtensionServiceForProfile(other_profile.get());
   scoped_refptr<const extensions::Extension> other_app =
       extension_environment_.MakePackagedApp(extension_misc::kChromeAppId,

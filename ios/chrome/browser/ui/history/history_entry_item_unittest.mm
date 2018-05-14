@@ -8,13 +8,16 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "ios/chrome/browser/ui/history/history_entry.h"
+#include "components/history/core/browser/browsing_history_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
+#include "testing/platform_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+using history::BrowsingHistoryService;
 
 namespace {
 const char kTestUrl[] = "http://test/";
@@ -25,9 +28,9 @@ const char kTestTitle[] = "Test";
 HistoryEntryItem* GetHistoryEntryItem(const GURL& url,
                                       const char title[],
                                       base::Time timestamp) {
-  history::HistoryEntry entry = history::HistoryEntry(
-      history::HistoryEntry::LOCAL_ENTRY, GURL(url), base::UTF8ToUTF16(title),
-      timestamp, "", false, base::string16(), false);
+  BrowsingHistoryService::HistoryEntry entry(
+      BrowsingHistoryService::HistoryEntry::LOCAL_ENTRY, GURL(url),
+      base::UTF8ToUTF16(title), timestamp, "", false, base::string16(), false);
   HistoryEntryItem* item = [[HistoryEntryItem alloc] initWithType:0
                                                      historyEntry:entry
                                                      browserState:nil
@@ -35,10 +38,12 @@ HistoryEntryItem* GetHistoryEntryItem(const GURL& url,
   return item;
 }
 
+using HistoryEntryItemTest = PlatformTest;
+
 // Tests that -[HistoryEntryItem configureCell:] sets the cell's textLabel text
 // to the item title, the detailTextLabel text to the URL, and the timeLabel
 // text to the timestamp.
-TEST(HistoryEntryItemTest, ConfigureCell) {
+TEST_F(HistoryEntryItemTest, ConfigureCell) {
   base::Time timestamp = base::Time::Now();
   HistoryEntryItem* item =
       GetHistoryEntryItem(GURL(kTestUrl), kTestTitle, timestamp);
@@ -54,7 +59,7 @@ TEST(HistoryEntryItemTest, ConfigureCell) {
 
 // Tests that -[HistoryItem isEqualToHistoryItem:] returns YES if the two items
 // have the same URL and timestamp, and NO otherwise.
-TEST(HistoryEntryItemTest, IsEqual) {
+TEST_F(HistoryEntryItemTest, IsEqual) {
   base::Time timestamp = base::Time::Now();
   base::Time timestamp2 = timestamp - base::TimeDelta::FromMinutes(1);
   HistoryEntryItem* history_entry =

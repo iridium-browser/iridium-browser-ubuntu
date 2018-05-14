@@ -105,75 +105,47 @@ def ComputeEventLatencies(input_events):
   return [(name, latency) for _, name, latency in input_event_latencies]
 
 
-def HasDrmStats(process):
-  """ Return True if the process contains DrmEventFlipComplete event.
+def GetTimeStampEventNameAndProcess(browser_process, surface_flinger_process,
+                                    gpu_process):
+  """ Returns the name of the event used to count frame timestamps, and the
+      process that produced the events.
   """
-  if not process:
-    return False
-  for event in process.IterAllSlicesOfName('DrmEventFlipComplete'):
-    if 'data' in event.args and event.args['data']['frame_count'] == 1:
-      return True
-  return False
+  if surface_flinger_process:
+    return 'vsync_before', surface_flinger_process
 
-def HasRenderingStats(process):
-  """ Returns True if the process contains at least one
-      BenchmarkInstrumentation::*RenderingStats event with a frame.
-  """
-  if not process:
-    return False
-  for event in process.IterAllSlicesOfName(
-      'BenchmarkInstrumentation::DisplayRenderingStats'):
-    if 'data' in event.args and event.args['data']['frame_count'] == 1:
-      return True
-  for event in process.IterAllSlicesOfName(
-      'BenchmarkInstrumentation::ImplThreadRenderingStats'):
-    if 'data' in event.args and event.args['data']['frame_count'] == 1:
-      return True
-  return False
+  drm_event_name = 'DrmEventFlipComplete'
+  display_rendering_stats = 'BenchmarkInstrumentation::DisplayRenderingStats'
+  if gpu_process:
+    # Look for Drm events first. If there are no Drm events, then look for
+    # display rendering stats (which lives in the gpu process with viz).
+    for event_name in (drm_event_name, display_rendering_stats):
+      for event in gpu_process.IterAllSlicesOfName(event_name):
+        if 'data' in event.args and event.args['data']['frame_count'] == 1:
+          return event_name, gpu_process
 
-def GetTimestampEventName(process):
-  """ Returns the name of the events used to count frame timestamps. """
-  if process.name == 'SurfaceFlinger':
-    return 'vsync_before'
+  return display_rendering_stats, browser_process
 
-  if process.name == 'GPU Process':
-    return 'DrmEventFlipComplete'
-
-  event_name = 'BenchmarkInstrumentation::DisplayRenderingStats'
-  for event in process.IterAllSlicesOfName(event_name):
-    if 'data' in event.args and event.args['data']['frame_count'] == 1:
-      return event_name
-
-  return 'BenchmarkInstrumentation::ImplThreadRenderingStats'
 
 class RenderingStats(object):
   def __init__(self, renderer_process, browser_process, surface_flinger_process,
-               gpu_process, timeline_ranges):
+               gpu_process, interaction_records):
     """
     Utility class for extracting rendering statistics from the timeline (or
-    other loggin facilities), and providing them in a common format to classes
+    other logging facilities), and providing them in a common format to classes
     that compute benchmark metrics from this data.
 
     Stats are lists of lists of numbers. The outer list stores one list per
-    timeline range.
+    interaction record.
 
     All *_time values are measured in milliseconds.
     """
-    assert len(timeline_ranges) > 0
+    assert len(interaction_records) > 0
     self.refresh_period = None
 
-    # Find the top level process with rendering stats (browser or renderer).
+    timestamp_event_name, timestamp_process = GetTimeStampEventNameAndProcess(
+        browser_process, surface_flinger_process, gpu_process)
     if surface_flinger_process:
-      timestamp_process = surface_flinger_process
       self._GetRefreshPeriodFromSurfaceFlingerProcess(surface_flinger_process)
-    elif HasDrmStats(gpu_process):
-      timestamp_process = gpu_process
-    elif HasRenderingStats(browser_process):
-      timestamp_process = browser_process
-    else:
-      timestamp_process = renderer_process
-
-    timestamp_event_name = GetTimestampEventName(timestamp_process)
 
     # A lookup from list names below to any errors or exceptions encountered
     # in attempting to generate that list.
@@ -181,6 +153,8 @@ class RenderingStats(object):
 
     self.frame_timestamps = []
     self.frame_times = []
+    self.ui_frame_timestamps = []
+    self.ui_frame_times = []
     self.approximated_pixel_percentages = []
     self.checkerboarded_pixel_percentages = []
     # End-to-end latency for input event - from when input event is
@@ -193,9 +167,12 @@ class RenderingStats(object):
     # Latency for a GestureScrollUpdate input event.
     self.gesture_scroll_update_latency = []
 
-    for timeline_range in timeline_ranges:
+    for record in interaction_records:
+      timeline_range = record.GetBounds()
       self.frame_timestamps.append([])
       self.frame_times.append([])
+      self.ui_frame_timestamps.append([])
+      self.ui_frame_times.append([])
       self.approximated_pixel_percentages.append([])
       self.checkerboarded_pixel_percentages.append([])
       self.input_event_latency.append([])
@@ -204,8 +181,11 @@ class RenderingStats(object):
 
       if timeline_range.is_empty:
         continue
-      self._InitFrameTimestampsFromTimeline(
-          timestamp_process, timestamp_event_name, timeline_range)
+      if timestamp_process:
+        self._InitFrameTimestampsFromTimeline(
+            timestamp_process, timestamp_event_name, timeline_range)
+      if record.label.startswith("ui_"):
+        self._InitUIFrameTimestampsFromTimeline(browser_process, timeline_range)
       self._InitImplThreadRenderingStatsFromTimeline(
           renderer_process, timeline_range)
       self._InitInputLatencyStatsFromTimeline(
@@ -237,11 +217,11 @@ class RenderingStats(object):
         latency for name, latency in event_latencies
         if name == GESTURE_SCROLL_UPDATE_EVENT_NAME]
 
-  def _GatherEvents(self, event_name, process, timeline_range):
+  def _GatherEvents(self, event_name, process, timeline_range, need_data=True):
     events = []
     for event in process.IterAllSlicesOfName(event_name):
       if event.start >= timeline_range.min and event.end <= timeline_range.max:
-        if 'data' not in event.args:
+        if need_data and 'data' not in event.args:
           continue
         events.append(event)
     events.sort(key=attrgetter('start'))
@@ -269,41 +249,49 @@ class RenderingStats(object):
         timestamp_event_name, process, timeline_range):
       self._AddFrameTimestamp(event)
 
+  def _InitUIFrameTimestampsFromTimeline(self, process, timeline_range):
+    event_name = 'FramePresented'
+    for event in self._GatherEvents(event_name, process, timeline_range, False):
+      self.ui_frame_timestamps[-1].append(event.start)
+      if len(self.ui_frame_timestamps[-1]) >= 2:
+        self.ui_frame_times[-1].append(
+            self.ui_frame_timestamps[-1][-1] - self.ui_frame_timestamps[-1][-2])
+
   def _InitImplThreadRenderingStatsFromTimeline(self, process, timeline_range):
     event_name = 'BenchmarkInstrumentation::ImplThreadRenderingStats'
     for event in self._GatherEvents(event_name, process, timeline_range):
       data = event.args['data']
       if VISIBLE_CONTENT_DATA not in data:
         self.errors[APPROXIMATED_PIXEL_ERROR] = (
-          'Calculating approximated_pixel_percentages not possible because '
-          'visible_content_area was missing.')
+            'Calculating approximated_pixel_percentages not possible because '
+            'visible_content_area was missing.')
         self.errors[CHECKERBOARDED_PIXEL_ERROR] = (
-          'Calculating checkerboarded_pixel_percentages not possible because '
-          'visible_content_area was missing.')
+            'Calculating checkerboarded_pixel_percentages not possible '
+            'because visible_content_area was missing.')
         return
       visible_content_area = data[VISIBLE_CONTENT_DATA]
       if visible_content_area == 0:
         self.errors[APPROXIMATED_PIXEL_ERROR] = (
-          'Calculating approximated_pixel_percentages would have caused '
-          'a divide-by-zero')
+            'Calculating approximated_pixel_percentages would have caused '
+            'a divide-by-zero')
         self.errors[CHECKERBOARDED_PIXEL_ERROR] = (
-          'Calculating checkerboarded_pixel_percentages would have caused '
-          'a divide-by-zero')
+            'Calculating checkerboarded_pixel_percentages would have caused '
+            'a divide-by-zero')
         return
       if APPROXIMATED_VISIBLE_CONTENT_DATA in data:
         self.approximated_pixel_percentages[-1].append(
-          round(float(data[APPROXIMATED_VISIBLE_CONTENT_DATA]) /
-                float(data[VISIBLE_CONTENT_DATA]) * 100.0, 3))
+            round(float(data[APPROXIMATED_VISIBLE_CONTENT_DATA]) /
+                  float(data[VISIBLE_CONTENT_DATA]) * 100.0, 3))
       else:
         self.errors[APPROXIMATED_PIXEL_ERROR] = (
-          'approximated_pixel_percentages was not recorded')
+            'approximated_pixel_percentages was not recorded')
       if CHECKERBOARDED_VISIBLE_CONTENT_DATA in data:
         self.checkerboarded_pixel_percentages[-1].append(
-          round(float(data[CHECKERBOARDED_VISIBLE_CONTENT_DATA]) /
-                float(data[VISIBLE_CONTENT_DATA]) * 100.0, 3))
+            round(float(data[CHECKERBOARDED_VISIBLE_CONTENT_DATA]) /
+                  float(data[VISIBLE_CONTENT_DATA]) * 100.0, 3))
       else:
         self.errors[CHECKERBOARDED_PIXEL_ERROR] = (
-          'checkerboarded_pixel_percentages was not recorded')
+            'checkerboarded_pixel_percentages was not recorded')
 
   def _InitFrameQueueingDurationsFromTimeline(self, process, timeline_range):
     try:

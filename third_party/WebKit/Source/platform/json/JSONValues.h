@@ -62,7 +62,7 @@ class PLATFORM_EXPORT JSONValue {
  public:
   static const int kMaxDepth = 1000;
 
-  virtual ~JSONValue() {}
+  virtual ~JSONValue() = default;
 
   static std::unique_ptr<JSONValue> Null() {
     return WTF::WrapUnique(new JSONValue());
@@ -288,6 +288,10 @@ class PLATFORM_EXPORT JSONArray : public JSONValue {
   JSONArray();
   Vector<std::unique_ptr<JSONValue>> data_;
 };
+
+extern const char* kJSONNullString;
+extern const char* kJSONTrueString;
+extern const char* kJSONFalseString;
 
 PLATFORM_EXPORT void EscapeStringForJSON(const String&, StringBuilder*);
 void DoubleQuoteStringForJSON(const String&, StringBuilder*);

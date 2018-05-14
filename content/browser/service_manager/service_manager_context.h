@@ -5,8 +5,12 @@
 #ifndef CONTENT_BROWSER_SERVICE_MANAGER_SERVICE_MANAGER_CONTEXT_H_
 #define CONTENT_BROWSER_SERVICE_MANAGER_SERVICE_MANAGER_CONTEXT_H_
 
+#include <map>
+#include <string>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 
 namespace service_manager {
@@ -27,6 +31,11 @@ class CONTENT_EXPORT ServiceManagerContext {
 
   // Returns a service_manager::Connector that can be used on the IO thread.
   static service_manager::Connector* GetConnectorForIOThread();
+
+  // Returns true if there is a valid process for |process_group_name|. Must be
+  // called on the IO thread.
+  static bool HasValidProcessForProcessGroup(
+      const std::string& process_group_name);
 
  private:
   class InProcessServiceManagerContext;

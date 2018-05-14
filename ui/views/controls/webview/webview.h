@@ -10,7 +10,6 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/gfx/native_widget_types.h"
@@ -36,7 +35,6 @@ class NativeViewHost;
 // the aspect ratio of the capture video resolution, and scaling will be avoided
 // whenever possible.
 class WEBVIEW_EXPORT WebView : public View,
-                               public content::RenderProcessHostObserver,
                                public content::WebContentsDelegate,
                                public content::WebContentsObserver {
  public:
@@ -81,6 +79,11 @@ class WEBVIEW_EXPORT WebView : public View,
   // by default.
   void SetResizeBackgroundColor(SkColor resize_background_color);
 
+  // If provided, this View will be shown in place of the web contents
+  // when the web contents is in a crashed state. This is cleared automatically
+  // if the web contents is changed.
+  void SetCrashedOverlayView(View* crashed_overlay_view);
+
   // When used to host UI, we need to explicitly allow accelerators to be
   // processed. Default is false.
   void set_allow_accelerators(bool allow_accelerators) {
@@ -112,12 +115,6 @@ class WEBVIEW_EXPORT WebView : public View,
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
 
-  // Overridden from content::RenderProcessHostObserver:
-  void RenderProcessExited(content::RenderProcessHost* host,
-                           base::TerminationStatus status,
-                           int exit_code) override;
-  void RenderProcessHostDestroyed(content::RenderProcessHost* host) override;
-
   // Overridden from content::WebContentsDelegate:
   bool EmbedsFullscreenWidget() const override;
 
@@ -140,6 +137,7 @@ class WEBVIEW_EXPORT WebView : public View,
   void OnBadMessageReceived(const IPC::Message& message) override {}
   void OnWebContentsFocused(
       content::RenderWidgetHost* render_widget_host) override;
+  void RenderProcessGone(base::TerminationStatus status) override;
 
  private:
   friend class WebViewUnitTest;
@@ -147,6 +145,7 @@ class WEBVIEW_EXPORT WebView : public View,
   void AttachWebContents();
   void DetachWebContents();
   void ReattachForFullscreenChange(bool enter_fullscreen);
+  void UpdateCrashedOverlayView();
   void NotifyAccessibilityWebContentsChanged();
 
   // Create a regular or test web contents (based on whether we're running
@@ -157,11 +156,6 @@ class WEBVIEW_EXPORT WebView : public View,
   NativeViewHost* const holder_;
   // Non-NULL if |web_contents()| was created and is owned by this WebView.
   std::unique_ptr<content::WebContents> wc_owner_;
-  // The RenderProcessHost to which this RenderProcessHostObserver is added.
-  // Since WebView::GetTextInputClient is relying on RWHV::GetTextInputClient,
-  // we have to observe the lifecycle of the underlying RWHV through
-  // RenderProcessHostObserver.
-  content::RenderProcessHost* observing_render_process_host_;
   // When true, WebView auto-embeds fullscreen widgets as a child view.
   bool embed_fullscreen_widget_mode_enabled_;
   // Set to true while WebView is embedding a fullscreen widget view as a child
@@ -170,6 +164,7 @@ class WEBVIEW_EXPORT WebView : public View,
   bool is_embedding_fullscreen_widget_;
   content::BrowserContext* browser_context_;
   bool allow_accelerators_;
+  View* crashed_overlay_view_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(WebView);
 };

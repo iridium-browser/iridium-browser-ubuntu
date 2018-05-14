@@ -9,8 +9,7 @@ import json
 from telemetry.internal.results import output_formatter
 from telemetry.value import trace
 
-def ResultsAsChartDict(benchmark_metadata, page_specific_values,
-                       summary_values):
+def ResultsAsChartDict(benchmark_metadata, results):
   """Produces a dict for serialization to Chart JSON format from raw values.
 
   Chart JSON is a transformation of the basic Telemetry JSON format that
@@ -23,16 +22,15 @@ def ResultsAsChartDict(benchmark_metadata, page_specific_values,
   Design doc for schema: http://goo.gl/kOtf1Y
 
   Args:
-    page_specific_values: list of page-specific values
-    summary_values: list of summary values
     benchmark_metadata: a benchmark.BenchmarkMetadata object
+    results: an instance of PageTestResults
 
   Returns:
     A Chart JSON dict corresponding to the given data.
   """
   values = itertools.chain(
-      output_formatter.SummarizePageSpecificValues(page_specific_values),
-      summary_values)
+      output_formatter.SummarizePageSpecificValues(results),
+      results.all_summary_values)
   charts = collections.defaultdict(dict)
 
   for value in values:
@@ -58,18 +56,18 @@ def ResultsAsChartDict(benchmark_metadata, page_specific_values,
     charts[chart_name][trace_name] = value.AsDict()
 
   result_dict = {
-    'format_version': '0.1',
-    'next_version': '0.2',
-    # TODO(sullivan): benchmark_name, benchmark_description, and
-    # trace_rerun_options should be removed when incrementing format_version
-    # to 0.1.
-    'benchmark_name': benchmark_metadata.name,
-    'benchmark_description': benchmark_metadata.description,
-    'trace_rerun_options': benchmark_metadata.rerun_options,
-    'benchmark_metadata': benchmark_metadata.AsDict(),
-    'charts': charts,
-    # Need to add this in for compatibility with disabled chartjson results.
-    'enabled': True
+      'format_version': '0.1',
+      'next_version': '0.2',
+      # TODO(sullivan): benchmark_name, benchmark_description, and
+      # trace_rerun_options should be removed when incrementing format_version
+      # to 0.1.
+      'benchmark_name': benchmark_metadata.name,
+      'benchmark_description': benchmark_metadata.description,
+      'trace_rerun_options': benchmark_metadata.rerun_options,
+      'benchmark_metadata': benchmark_metadata.AsDict(),
+      'charts': charts,
+      # Need to add this in for compatibility with disabled chartjson results.
+      'enabled': True
   }
 
   return result_dict
@@ -86,8 +84,8 @@ def DisabledResultsDict(benchmark_name):
     A Chart JSON dict corresponding to a disabled benchmark.
   """
   result_dict = {
-    'benchmark_name': benchmark_name,
-    'enabled': False
+      'benchmark_name': benchmark_name,
+      'enabled': False
   }
 
   return result_dict
@@ -99,16 +97,13 @@ class ChartJsonOutputFormatter(output_formatter.OutputFormatter):
     super(ChartJsonOutputFormatter, self).__init__(output_stream)
     self._benchmark_metadata = benchmark_metadata
 
-  def FormatDisabled(self):
+  def FormatDisabled(self, page_test_results):
     self._Dump(DisabledResultsDict(self._benchmark_metadata.name))
 
   def Format(self, page_test_results):
-    self._Dump(ResultsAsChartDict(
-      self._benchmark_metadata,
-      page_test_results.all_page_specific_values,
-      page_test_results.all_summary_values))
+    self._Dump(ResultsAsChartDict(self._benchmark_metadata, page_test_results))
 
   def _Dump(self, results):
     json.dump(results, self.output_stream, indent=2,
-      separators=(',', ': '))
+              separators=(',', ': '))
     self.output_stream.write('\n')

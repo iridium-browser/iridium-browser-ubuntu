@@ -18,21 +18,19 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.multidex.ShadowMultiDex;
-import org.robolectric.util.ActivityController;
 
-import org.chromium.base.BaseChromiumApplication;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 
 /**
  * Tests FirstRunFlowSequencer which contains the core logic of what should be shown during the
  * first run.
  */
-@RunWith(LocalRobolectricTestRunner.class)
-@Config(manifest = Config.NONE, application = BaseChromiumApplication.class,
-        shadows = {ShadowMultiDex.class})
+@RunWith(BaseRobolectricTestRunner.class)
+@Config(manifest = Config.NONE, shadows = {ShadowMultiDex.class})
 public class FirstRunFlowSequencerTest {
     /** Information for Google OS account */
     private static final String GOOGLE_ACCOUNT_TYPE = "com.google";
@@ -57,8 +55,8 @@ public class FirstRunFlowSequencerTest {
         public boolean shouldShowDataReductionPage;
         public boolean shouldShowSearchEnginePage;
 
-        public TestFirstRunFlowSequencer(Activity activity, Bundle launcherProvidedProperties) {
-            super(activity, launcherProvidedProperties);
+        public TestFirstRunFlowSequencer(Activity activity) {
+            super(activity);
         }
 
         @Override
@@ -130,10 +128,7 @@ public class FirstRunFlowSequencerTest {
     @Before
     public void setUp() throws Exception {
         mActivityController = Robolectric.buildActivity(Activity.class);
-        Bundle launchProperties = new Bundle();
-        launchProperties.putBoolean(FirstRunActivity.EXTRA_USE_FRE_FLOW_SEQUENCER, true);
-        mSequencer =
-                new TestFirstRunFlowSequencer(mActivityController.setup().get(), launchProperties);
+        mSequencer = new TestFirstRunFlowSequencer(mActivityController.setup().get());
     }
 
     @After
@@ -179,10 +174,10 @@ public class FirstRunFlowSequencerTest {
         assertFalse(mSequencer.calledSetFirstRunFlowSignInComplete);
 
         Bundle bundle = mSequencer.returnedBundle;
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_WELCOME_PAGE));
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_SIGNIN_PAGE));
-        assertFalse(bundle.getBoolean(FirstRunActivity.SHOW_DATA_REDUCTION_PAGE));
-        assertFalse(bundle.getBoolean(FirstRunActivity.SHOW_SEARCH_ENGINE_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_WELCOME_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_SIGNIN_PAGE));
+        assertFalse(bundle.getBoolean(FirstRunActivityBase.SHOW_DATA_REDUCTION_PAGE));
+        assertFalse(bundle.getBoolean(FirstRunActivityBase.SHOW_SEARCH_ENGINE_PAGE));
         assertFalse(bundle.getBoolean(AccountFirstRunFragment.IS_CHILD_ACCOUNT));
         assertEquals(5, bundle.size());
     }
@@ -207,10 +202,10 @@ public class FirstRunFlowSequencerTest {
         assertFalse(mSequencer.calledSetFirstRunFlowSignInComplete);
 
         Bundle bundle = mSequencer.returnedBundle;
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_WELCOME_PAGE));
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_SIGNIN_PAGE));
-        assertFalse(bundle.getBoolean(FirstRunActivity.SHOW_DATA_REDUCTION_PAGE));
-        assertFalse(bundle.getBoolean(FirstRunActivity.SHOW_SEARCH_ENGINE_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_WELCOME_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_SIGNIN_PAGE));
+        assertFalse(bundle.getBoolean(FirstRunActivityBase.SHOW_DATA_REDUCTION_PAGE));
+        assertFalse(bundle.getBoolean(FirstRunActivityBase.SHOW_SEARCH_ENGINE_PAGE));
         assertFalse(bundle.getBoolean(AccountFirstRunFragment.IS_CHILD_ACCOUNT));
         assertTrue(bundle.getBoolean(AccountFirstRunFragment.PRESELECT_BUT_ALLOW_TO_CHANGE));
         assertEquals(
@@ -238,10 +233,10 @@ public class FirstRunFlowSequencerTest {
         assertTrue(mSequencer.calledSetFirstRunFlowSignInComplete);
 
         Bundle bundle = mSequencer.returnedBundle;
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_WELCOME_PAGE));
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_SIGNIN_PAGE));
-        assertFalse(bundle.getBoolean(FirstRunActivity.SHOW_DATA_REDUCTION_PAGE));
-        assertFalse(bundle.getBoolean(FirstRunActivity.SHOW_SEARCH_ENGINE_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_WELCOME_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_SIGNIN_PAGE));
+        assertFalse(bundle.getBoolean(FirstRunActivityBase.SHOW_DATA_REDUCTION_PAGE));
+        assertFalse(bundle.getBoolean(FirstRunActivityBase.SHOW_SEARCH_ENGINE_PAGE));
         assertTrue(bundle.getBoolean(AccountFirstRunFragment.IS_CHILD_ACCOUNT));
         assertFalse(bundle.getBoolean(AccountFirstRunFragment.PRESELECT_BUT_ALLOW_TO_CHANGE));
         assertEquals(
@@ -268,10 +263,10 @@ public class FirstRunFlowSequencerTest {
         assertFalse(mSequencer.calledSetFirstRunFlowSignInComplete);
 
         Bundle bundle = mSequencer.returnedBundle;
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_WELCOME_PAGE));
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_SIGNIN_PAGE));
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_DATA_REDUCTION_PAGE));
-        assertFalse(bundle.getBoolean(FirstRunActivity.SHOW_SEARCH_ENGINE_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_WELCOME_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_SIGNIN_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_DATA_REDUCTION_PAGE));
+        assertFalse(bundle.getBoolean(FirstRunActivityBase.SHOW_SEARCH_ENGINE_PAGE));
         assertFalse(bundle.getBoolean(AccountFirstRunFragment.IS_CHILD_ACCOUNT));
         assertEquals(5, bundle.size());
     }
@@ -295,10 +290,10 @@ public class FirstRunFlowSequencerTest {
         assertFalse(mSequencer.calledSetFirstRunFlowSignInComplete);
 
         Bundle bundle = mSequencer.returnedBundle;
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_WELCOME_PAGE));
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_SIGNIN_PAGE));
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_DATA_REDUCTION_PAGE));
-        assertTrue(bundle.getBoolean(FirstRunActivity.SHOW_SEARCH_ENGINE_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_WELCOME_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_SIGNIN_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_DATA_REDUCTION_PAGE));
+        assertTrue(bundle.getBoolean(FirstRunActivityBase.SHOW_SEARCH_ENGINE_PAGE));
         assertFalse(bundle.getBoolean(AccountFirstRunFragment.IS_CHILD_ACCOUNT));
         assertEquals(5, bundle.size());
     }

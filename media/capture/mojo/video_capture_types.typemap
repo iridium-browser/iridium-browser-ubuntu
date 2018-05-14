@@ -13,18 +13,20 @@ public_headers = [
 traits_headers = [
   "//media/capture/ipc/capture_param_traits_macros.h",
   "//media/capture/ipc/capture_param_traits.h",
-  "//media/capture/mojo/video_capture_types_typemap_traits.h",
+  "//media/capture/mojo/video_capture_types_struct_traits.h",
 ]
 
 sources = [
-  "//media/capture/mojo/video_capture_types_typemap_traits.cc",
+  "//media/capture/mojo/video_capture_types_struct_traits.cc",
 ]
 
 deps = [
   "//media",
+  "//media/base/ipc",
   "//media/capture:capture_base",
   "//media/capture/ipc",
   "//media/mojo/interfaces",
+  "//ui/gfx/geometry/mojo:struct_traits",
 ]
 
 type_mappings = [
@@ -33,6 +35,7 @@ type_mappings = [
   "media.mojom.VideoCaptureFormat=media::VideoCaptureFormat",
   "media.mojom.VideoPixelStorage=media::VideoPixelStorage",
   "media.mojom.VideoCaptureParams=media::VideoCaptureParams",
+  "media.mojom.VideoCaptureDeviceDescriptorCameraCalibration=media::VideoCaptureDeviceDescriptor::CameraCalibration",
   "media.mojom.VideoCaptureDeviceDescriptor=media::VideoCaptureDeviceDescriptor",
   "media.mojom.VideoCaptureDeviceInfo=media::VideoCaptureDeviceInfo",
 ]

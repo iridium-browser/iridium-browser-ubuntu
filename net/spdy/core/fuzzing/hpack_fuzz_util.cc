@@ -35,14 +35,14 @@ const size_t kValueLengthMax = 75;
 using base::RandBytesAsString;
 using std::map;
 
-HpackFuzzUtil::GeneratorContext::GeneratorContext() {}
-HpackFuzzUtil::GeneratorContext::~GeneratorContext() {}
+HpackFuzzUtil::GeneratorContext::GeneratorContext() = default;
+HpackFuzzUtil::GeneratorContext::~GeneratorContext() = default;
 
 HpackFuzzUtil::Input::Input() : offset(0) {}
-HpackFuzzUtil::Input::~Input() {}
+HpackFuzzUtil::Input::~Input() = default;
 
-HpackFuzzUtil::FuzzerContext::FuzzerContext() {}
-HpackFuzzUtil::FuzzerContext::~FuzzerContext() {}
+HpackFuzzUtil::FuzzerContext::FuzzerContext() = default;
+HpackFuzzUtil::FuzzerContext::~FuzzerContext() = default;
 
 // static
 void HpackFuzzUtil::InitializeGeneratorContext(GeneratorContext* context) {
@@ -139,10 +139,10 @@ SpdyString HpackFuzzUtil::HeaderBlockPrefix(size_t block_size) {
 
 // static
 void HpackFuzzUtil::InitializeFuzzerContext(FuzzerContext* context) {
-  context->first_stage = SpdyMakeUnique<HpackDecoder3>();
+  context->first_stage = SpdyMakeUnique<HpackDecoderAdapter>();
   context->second_stage =
       SpdyMakeUnique<HpackEncoder>(ObtainHpackHuffmanTable());
-  context->third_stage = SpdyMakeUnique<HpackDecoder3>();
+  context->third_stage = SpdyMakeUnique<HpackDecoderAdapter>();
 }
 
 // static

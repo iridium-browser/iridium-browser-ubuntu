@@ -13,11 +13,11 @@
 #include "base/time/time.h"
 #include "content/browser/service_worker/service_worker_context_request_handler.h"
 #include "content/browser/service_worker/service_worker_database.h"
+#include "content/browser/service_worker/service_worker_installed_script_reader.h"
 #include "content/common/service_worker/embedded_worker.mojom.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/browser/service_worker_context.h"
-#include "content/public/common/service_worker_modes.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerResponseError.h"
+#include "services/network/public/mojom/fetch_api.mojom.h"
 #include "ui/base/page_transition_types.h"
 
 class GURL;
@@ -126,6 +126,8 @@ class ServiceWorkerMetrics {
     BACKGROUND_FETCH_FAIL = 25,
     BACKGROUND_FETCHED = 26,
     NAVIGATION_HINT = 27,
+    CAN_MAKE_PAYMENT = 28,
+    ABORT_PAYMENT = 29,
     // Add new events to record here.
     NUM_TYPES
   };
@@ -259,15 +261,17 @@ class ServiceWorkerMetrics {
   // Counts the number of page loads controlled by a Service Worker.
   static void CountControlledPageLoad(Site site,
                                       const GURL& url,
-                                      bool is_main_frame_load,
-                                      ui::PageTransition page_transition,
-                                      size_t redirect_chain_length);
+                                      bool is_main_frame_load);
 
   // Records the result of trying to start a worker. |is_installed| indicates
   // whether the version has been installed.
   static void RecordStartWorkerStatus(ServiceWorkerStatusCode status,
                                       EventType purpose,
                                       bool is_installed);
+
+  // Records the result of sending installed scripts to the renderer.
+  static void RecordInstalledScriptsSenderStatus(
+      ServiceWorkerInstalledScriptReader::FinishedReason reason);
 
   // Records the time taken to successfully start a worker. |is_installed|
   // indicates whether the version has been installed.
@@ -326,10 +330,11 @@ class ServiceWorkerMetrics {
   // status zero to a fetch request.
   static void RecordStatusZeroResponseError(
       bool is_main_resource,
-      blink::WebServiceWorkerResponseError error);
+      blink::mojom::ServiceWorkerResponseError error);
 
   // Records the mode of request that was fallbacked to the network.
-  static void RecordFallbackedRequestMode(FetchRequestMode mode);
+  static void RecordFallbackedRequestMode(
+      network::mojom::FetchRequestMode mode);
 
   // Called at the beginning of each ServiceWorkerVersion::Dispatch*Event
   // function. Records the time elapsed since idle (generally the time since the
@@ -400,6 +405,9 @@ class ServiceWorkerMetrics {
   // Records the result of starting service worker for a navigation hint.
   static void RecordStartServiceWorkerForNavigationHintResult(
       StartServiceWorkerForNavigationHintResult result);
+
+  // Records the number of origins with a registered service worker.
+  static void RecordRegisteredOriginCount(size_t origin_count);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(ServiceWorkerMetrics);

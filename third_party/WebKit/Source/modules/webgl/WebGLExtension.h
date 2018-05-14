@@ -26,7 +26,7 @@
 #ifndef WebGLExtension_h
 #define WebGLExtension_h
 
-#include "core/html/HTMLCanvasElement.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
 #include "modules/webgl/WebGLExtensionName.h"
 #include "modules/webgl/WebGLRenderingContextBase.h"
 #include "platform/bindings/ScriptWrappable.h"
@@ -49,8 +49,7 @@ class WebGLExtensionScopedContext final {
   Member<WebGLRenderingContextBase> context_;
 };
 
-class WebGLExtension : public GarbageCollected<WebGLExtension>,
-                       public ScriptWrappable {
+class WebGLExtension : public ScriptWrappable {
   WTF_MAKE_NONCOPYABLE(WebGLExtension);
 
  public:
@@ -63,7 +62,7 @@ class WebGLExtension : public GarbageCollected<WebGLExtension>,
 
   bool IsLost() { return !context_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   explicit WebGLExtension(WebGLRenderingContextBase*);

@@ -14,7 +14,6 @@
 #include "platform/bindings/ScriptState.h"
 #include "platform/heap/Persistent.h"
 #include "platform/wtf/Functional.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/InterfaceProvider.h"
 #include "public/platform/Platform.h"
 
@@ -48,8 +47,7 @@ ScriptPromise SyncManager::registerFunction(ScriptState* script_state,
   GetBackgroundSyncServicePtr()->Register(
       std::move(sync_registration),
       registration_->WebRegistration()->RegistrationId(),
-      ConvertToBaseCallback(
-          WTF::Bind(SyncManager::RegisterCallback, WrapPersistent(resolver))));
+      WTF::Bind(SyncManager::RegisterCallback, WrapPersistent(resolver)));
 
   return promise;
 }
@@ -60,8 +58,8 @@ ScriptPromise SyncManager::getTags(ScriptState* script_state) {
 
   GetBackgroundSyncServicePtr()->GetRegistrations(
       registration_->WebRegistration()->RegistrationId(),
-      ConvertToBaseCallback(WTF::Bind(&SyncManager::GetRegistrationsCallback,
-                                      WrapPersistent(resolver))));
+      WTF::Bind(&SyncManager::GetRegistrationsCallback,
+                WrapPersistent(resolver)));
 
   return promise;
 }
@@ -145,8 +143,9 @@ void SyncManager::GetRegistrationsCallback(
   }
 }
 
-DEFINE_TRACE(SyncManager) {
+void SyncManager::Trace(blink::Visitor* visitor) {
   visitor->Trace(registration_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

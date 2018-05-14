@@ -14,7 +14,9 @@ import android.util.AttributeSet;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkItem;
+import org.chromium.chrome.browser.favicon.IconType;
 import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.widget.RoundedIconGenerator;
 import org.chromium.components.bookmarks.BookmarkId;
 
@@ -40,8 +42,10 @@ public class BookmarkItemRow extends BookmarkRow implements LargeIconCallback {
         int textSize = getResources().getDimensionPixelSize(R.dimen.default_favicon_icon_text_size);
         int iconColor = ApiCompatibilityUtils.getColor(
                 getResources(), R.color.default_favicon_background_color);
-        mIconGenerator = new RoundedIconGenerator(mDisplayedIconSize , mDisplayedIconSize,
-                mCornerRadius, iconColor, textSize);
+        mIconGenerator = new RoundedIconGenerator(mDisplayedIconSize, mDisplayedIconSize,
+                FeatureUtilities.isChromeModernDesignEnabled() ? mDisplayedIconSize / 2
+                                                               : mCornerRadius,
+                iconColor, textSize);
     }
 
     // BookmarkRow implementation.
@@ -71,8 +75,9 @@ public class BookmarkItemRow extends BookmarkRow implements LargeIconCallback {
     BookmarkItem setBookmarkId(BookmarkId bookmarkId) {
         BookmarkItem item = super.setBookmarkId(bookmarkId);
         mUrl = item.getUrl();
-        mIconImageView.setImageDrawable(null);
+        mIconView.setImageDrawable(null);
         mTitleView.setText(item.getTitle());
+        mDescriptionView.setText(item.getUrlForDisplay());
         mDelegate.getLargeIconBridge().getLargeIconForUrl(mUrl, mMinIconSize, this);
         return item;
     }
@@ -80,18 +85,18 @@ public class BookmarkItemRow extends BookmarkRow implements LargeIconCallback {
     // LargeIconCallback implementation.
 
     @Override
-    public void onLargeIconAvailable(
-            Bitmap icon, int fallbackColor, boolean isFallbackColorDefault) {
+    public void onLargeIconAvailable(Bitmap icon, int fallbackColor, boolean isFallbackColorDefault,
+            @IconType int iconType) {
         if (icon == null) {
             mIconGenerator.setBackgroundColor(fallbackColor);
             icon = mIconGenerator.generateIconForUrl(mUrl);
-            mIconImageView.setImageDrawable(new BitmapDrawable(getResources(), icon));
+            setIconDrawable(new BitmapDrawable(getResources(), icon));
         } else {
             RoundedBitmapDrawable roundedIcon = RoundedBitmapDrawableFactory.create(
                     getResources(),
                     Bitmap.createScaledBitmap(icon, mDisplayedIconSize, mDisplayedIconSize, false));
             roundedIcon.setCornerRadius(mCornerRadius);
-            mIconImageView.setImageDrawable(roundedIcon);
+            setIconDrawable(roundedIcon);
         }
     }
 }

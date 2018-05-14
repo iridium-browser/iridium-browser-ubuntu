@@ -6,13 +6,16 @@
 #define CHROME_BROWSER_UI_VIEWS_TOOLBAR_TOOLBAR_VIEW_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "chrome/browser/command_observer.h"
 #include "chrome/browser/ui/toolbar/app_menu_icon_controller.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
+#include "chrome/browser/ui/views/frame/browser_view_button_provider.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/upgrade_observer.h"
 #include "components/prefs/pref_member.h"
 #include "components/translate/core/browser/translate_step.h"
@@ -23,17 +26,18 @@
 #include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/view.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/arc/intent_helper/arc_navigation_throttle.h"
+#include "chrome/browser/ui/views/intent_picker_bubble_view.h"
+#include "components/arc/common/intent_helper.mojom.h"  // nogncheck https://crbug.com/784179
+#include "components/arc/intent_helper/arc_intent_helper_bridge.h"
+#endif  // defined(OS_CHROMEOS)
+
 class AppMenuButton;
 class Browser;
-class BrowserActionsContainer;
 class HomeButton;
 class ReloadButton;
 class ToolbarButton;
-
-namespace autofill {
-class SaveCardBubbleController;
-class SaveCardBubbleView;
-}
 
 namespace bookmarks {
 class BookmarkBubbleObserver;
@@ -44,10 +48,12 @@ class ToolbarView : public views::AccessiblePaneView,
                     public views::MenuButtonListener,
                     public ui::AcceleratorProvider,
                     public LocationBarView::Delegate,
+                    public BrowserActionsContainer::Delegate,
                     public CommandObserver,
                     public views::ButtonListener,
                     public AppMenuIconController::Delegate,
-                    public UpgradeObserver {
+                    public UpgradeObserver,
+                    public BrowserViewButtonProvider {
  public:
   // The view class name.
   static const char kViewClassName[];
@@ -77,16 +83,16 @@ class ToolbarView : public views::AccessiblePaneView,
 
   virtual bool GetAcceleratorInfo(int id, ui::Accelerator* accel);
 
+#if defined(OS_CHROMEOS)
+  void ShowIntentPickerBubble(
+      const std::vector<IntentPickerBubbleView::AppInfo>& app_info,
+      IntentPickerResponse callback);
+#endif  // defined(OS_CHROMEOS)
+
   // Shows a bookmark bubble and anchors it appropriately.
   void ShowBookmarkBubble(const GURL& url,
                           bool already_bookmarked,
                           bookmarks::BookmarkBubbleObserver* observer);
-
-  // Shows a bubble offering to save a credit card and anchors it appropriately.
-  autofill::SaveCardBubbleView* ShowSaveCreditCardBubble(
-      content::WebContents* contents,
-      autofill::SaveCardBubbleController* controller,
-      bool is_user_gesture);
 
   // Shows the translate bubble and anchors it appropriately.
   void ShowTranslateBubble(content::WebContents* web_contents,
@@ -94,12 +100,10 @@ class ToolbarView : public views::AccessiblePaneView,
                            translate::TranslateErrors::Type error_type,
                            bool is_user_gesture);
 
-  // Returns the maximum width the browser actions container can have.
-  int GetMaxBrowserActionsWidth() const;
-
   // Accessors.
   Browser* browser() const { return browser_; }
   BrowserActionsContainer* browser_actions() const { return browser_actions_; }
+  ToolbarButton* back_button() const { return back_; }
   ReloadButton* reload_button() const { return reload_; }
   LocationBarView* location_bar() const { return location_bar_; }
   AppMenuButton* app_menu_button() const { return app_menu_button_; }
@@ -110,7 +114,6 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // AccessiblePaneView:
   bool SetPaneFocus(View* initial_focus) override;
-  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
   // views::MenuButtonListener:
   void OnMenuButtonClicked(views::MenuButton* source,
@@ -123,7 +126,14 @@ class ToolbarView : public views::AccessiblePaneView,
   const ToolbarModel* GetToolbarModel() const override;
   ContentSettingBubbleModelDelegate* GetContentSettingBubbleModelDelegate()
       override;
-  void ShowPageInfo(content::WebContents* web_contents) override;
+
+  // BrowserActionsContainer::Delegate:
+  views::MenuButton* GetOverflowReferenceView() override;
+  base::Optional<int> GetMaxBrowserActionsWidth() const override;
+  std::unique_ptr<ToolbarActionsBar> CreateToolbarActionsBar(
+      ToolbarActionsBarDelegate* delegate,
+      Browser* browser,
+      ToolbarActionsBar* main_bar) const override;
 
   // CommandObserver:
   void EnabledStateChangedForCommand(int id, bool enabled) override;
@@ -147,11 +157,16 @@ class ToolbarView : public views::AccessiblePaneView,
   void OnThemeChanged() override;
   const char* GetClassName() const override;
   bool AcceleratorPressed(const ui::Accelerator& acc) override;
+  void ChildPreferredSizeChanged(views::View* child) override;
 
  protected:
   // AccessiblePaneView:
   bool SetPaneFocusAndFocusDefault() override;
   void RemovePaneFocus() override;
+
+  bool is_display_mode_normal() const {
+    return display_mode_ == DISPLAYMODE_NORMAL;
+  }
 
  private:
   // Types of display mode this toolbar can have.
@@ -166,6 +181,10 @@ class ToolbarView : public views::AccessiblePaneView,
                       AppMenuIconController::Severity severity,
                       bool animate) override;
 
+  // BrowserViewButtonProvider:
+  BrowserActionsContainer* GetBrowserActionsContainer() override;
+  views::MenuButton* GetAppMenuButton() override;
+
   // Used to avoid duplicating the near-identical logic of
   // ToolbarView::CalculatePreferredSize() and ToolbarView::GetMinimumSize().
   // These two functions call through to GetSizeInternal(), passing themselves
@@ -178,10 +197,6 @@ class ToolbarView : public views::AccessiblePaneView,
   // Loads the images for all the child views.
   void LoadImages();
 
-  bool is_display_mode_normal() const {
-    return display_mode_ == DISPLAYMODE_NORMAL;
-  }
-
   // Shows the critical notification bubble against the app menu.
   void ShowCriticalNotification();
 
@@ -192,16 +207,17 @@ class ToolbarView : public views::AccessiblePaneView,
   void OnShowHomeButtonChanged();
 
   // Controls. Most of these can be null, e.g. in popup windows. Only
-  // |location_bar_| is guaranteed to exist.
-  ToolbarButton* back_;
-  ToolbarButton* forward_;
-  ReloadButton* reload_;
-  HomeButton* home_;
-  LocationBarView* location_bar_;
-  BrowserActionsContainer* browser_actions_;
-  AppMenuButton* app_menu_button_;
+  // |location_bar_| is guaranteed to exist. These pointers are owned by the
+  // view hierarchy.
+  ToolbarButton* back_ = nullptr;
+  ToolbarButton* forward_ = nullptr;
+  ReloadButton* reload_ = nullptr;
+  HomeButton* home_ = nullptr;
+  LocationBarView* location_bar_ = nullptr;
+  BrowserActionsContainer* browser_actions_ = nullptr;
+  AppMenuButton* app_menu_button_ = nullptr;
 
-  Browser* browser_;
+  Browser* const browser_;
 
   AppMenuIconController app_menu_icon_controller_;
 
@@ -210,6 +226,9 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // The display mode used when laying out the toolbar.
   const DisplayMode display_mode_;
+
+  // Whether this toolbar has been initialized.
+  bool initialized_ = false;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ToolbarView);
 };

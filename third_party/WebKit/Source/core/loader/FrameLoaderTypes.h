@@ -87,11 +87,10 @@ enum HistoryScrollRestorationType {
   kScrollRestorationManual
 };
 
-enum class ProgressBarCompletion {
-  kLoadEvent,
-  kResourcesBeforeDCL,
-  kDOMContentLoaded,
-  kResourcesBeforeDCLAndSameOriginIFrames
+enum class SavePreviousDocumentResources {
+  kNever,
+  kUntilOnDOMContentLoaded,
+  kUntilOnLoad
 };
 
 // This enum is used to index different kinds of single-page-application

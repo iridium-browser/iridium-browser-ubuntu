@@ -38,6 +38,17 @@ void ExtensionsAPIClient::AttachWebContentsHelpers(
     content::WebContents* web_contents) const {
 }
 
+bool ExtensionsAPIClient::ShouldHideResponseHeader(
+    const GURL& url,
+    const std::string& header_name) const {
+  return false;
+}
+
+bool ExtensionsAPIClient::ShouldHideBrowserNetworkRequest(
+    const GURL& url) const {
+  return false;
+}
+
 AppViewGuestDelegate* ExtensionsAPIClient::CreateAppViewGuestDelegate() const {
   return NULL;
 }
@@ -51,7 +62,7 @@ ExtensionsAPIClient::CreateExtensionOptionsGuestDelegate(
 std::unique_ptr<guest_view::GuestViewManagerDelegate>
 ExtensionsAPIClient::CreateGuestViewManagerDelegate(
     content::BrowserContext* context) const {
-  return base::MakeUnique<ExtensionsGuestViewManagerDelegate>(context);
+  return std::make_unique<ExtensionsGuestViewManagerDelegate>(context);
 }
 
 std::unique_ptr<MimeHandlerViewGuestDelegate>
@@ -90,7 +101,8 @@ ExtensionsAPIClient::CreateDevicePermissionsPrompt(
 }
 
 std::unique_ptr<VirtualKeyboardDelegate>
-ExtensionsAPIClient::CreateVirtualKeyboardDelegate() const {
+ExtensionsAPIClient::CreateVirtualKeyboardDelegate(
+    content::BrowserContext* context) const {
   return nullptr;
 }
 
@@ -112,9 +124,22 @@ FileSystemDelegate* ExtensionsAPIClient::GetFileSystemDelegate() {
   return nullptr;
 }
 
+MessagingDelegate* ExtensionsAPIClient::GetMessagingDelegate() {
+  return nullptr;
+}
+
+FeedbackPrivateDelegate* ExtensionsAPIClient::GetFeedbackPrivateDelegate() {
+  return nullptr;
+}
+
 #if defined(OS_CHROMEOS)
 NonNativeFileSystemDelegate*
 ExtensionsAPIClient::GetNonNativeFileSystemDelegate() {
+  return nullptr;
+}
+
+MediaPerceptionAPIDelegate*
+ExtensionsAPIClient::GetMediaPerceptionAPIDelegate() {
   return nullptr;
 }
 

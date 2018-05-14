@@ -14,7 +14,7 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/UserGestureIndicator.h"
+#include "core/frame/Frame.h"
 #include "core/frame/LocalFrame.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "modules/bluetooth/BluetoothDevice.h"
@@ -174,7 +174,8 @@ ScriptPromise Bluetooth::requestDevice(ScriptState* script_state,
 
   // If the algorithm is not allowed to show a popup, reject promise with a
   // SecurityError and abort these steps.
-  if (!UserGestureIndicator::ConsumeUserGesture()) {
+  Document* doc = ToDocumentOrNull(context);
+  if (!Frame::ConsumeTransientUserActivation(doc ? doc->GetFrame() : nullptr)) {
     return ScriptPromise::RejectWithDOMException(
         script_state,
         DOMException::Create(
@@ -182,8 +183,8 @@ ScriptPromise Bluetooth::requestDevice(ScriptState* script_state,
             "Must be handling a user gesture to show a permission request."));
   }
 
-  if (!service_ && context->IsDocument()) {
-    LocalFrame* frame = ToDocument(context)->GetFrame();
+  if (!service_ && doc) {
+    LocalFrame* frame = doc->GetFrame();
     if (frame) {
       frame->GetInterfaceProvider().GetInterface(mojo::MakeRequest(&service_));
     }
@@ -211,18 +212,19 @@ ScriptPromise Bluetooth::requestDevice(ScriptState* script_state,
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  service_->RequestDevice(std::move(device_options),
-                          ConvertToBaseCallback(WTF::Bind(
-                              &Bluetooth::RequestDeviceCallback,
-                              WrapPersistent(this), WrapPersistent(resolver))));
+  service_->RequestDevice(
+      std::move(device_options),
+      WTF::Bind(&Bluetooth::RequestDeviceCallback, WrapPersistent(this),
+                WrapPersistent(resolver)));
   return promise;
 }
 
-DEFINE_TRACE(Bluetooth) {
+void Bluetooth::Trace(blink::Visitor* visitor) {
   visitor->Trace(device_instance_map_);
+  ScriptWrappable::Trace(visitor);
 }
 
-Bluetooth::Bluetooth() {}
+Bluetooth::Bluetooth() = default;
 
 BluetoothDevice* Bluetooth::GetBluetoothDeviceRepresentingDevice(
     mojom::blink::WebBluetoothDevicePtr device_ptr,

@@ -139,6 +139,10 @@ class CHROMEOS_EXPORT ShillPropertyHandler
   // only set it.
   void SetWakeOnLanEnabled(bool enabled);
 
+  // Sets the HostName property. Note: we do not track this property, we
+  // only set it.
+  void SetHostname(const std::string& hostname);
+
   // Calls shill to enable/disable network bandwidth throttling. If |enabled|
   // is true, |upload_rate_kbits| and |download_rate_kbits| specify the rate
   // in kbits/s to throttle to. If |enabled| is false, throttling is disabled
@@ -147,8 +151,8 @@ class CHROMEOS_EXPORT ShillPropertyHandler
                                   uint32_t upload_rate_kbits,
                                   uint32_t download_rate_kbits);
 
-  // Requests an immediate network scan.
-  void RequestScan() const;
+  // Requests an immediate network scan for |type|.
+  void RequestScanByType(const std::string& type) const;
 
   // Requests all properties for the service or device (called for new items).
   void RequestProperties(ManagedState::ManagedType type,
@@ -159,7 +163,7 @@ class CHROMEOS_EXPORT ShillPropertyHandler
                          const base::Value& value) override;
 
  private:
-  typedef std::map<ManagedState::ManagedType, std::set<std::string> >
+  typedef std::map<ManagedState::ManagedType, std::set<std::string>>
       TypeRequestMap;
 
   // Callback for dbus method fetching properties.

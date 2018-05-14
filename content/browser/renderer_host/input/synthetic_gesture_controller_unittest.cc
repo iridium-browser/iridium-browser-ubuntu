@@ -53,6 +53,7 @@ const int kPointerAssumedStoppedTimeMs = 43;
 const float kTouchSlopInDips = 7.0f;
 const float kMinScalingSpanInDips = 27.5f;
 const int kTouchPointersLength = 16;
+const int kMouseWheelTickMultiplier = 0;
 
 enum TouchGestureType { TOUCH_SCROLL, TOUCH_DRAG };
 
@@ -150,6 +151,10 @@ class MockSyntheticGestureTarget : public SyntheticGestureTarget {
   }
 
   float GetTouchSlopInDips() const override { return kTouchSlopInDips; }
+
+  int GetMouseWheelMinimumGranularity() const override {
+    return kMouseWheelTickMultiplier;
+  }
 
   float GetMinScalingSpanInDips() const override {
     return kMinScalingSpanInDips;
@@ -688,14 +693,14 @@ class SyntheticGestureControllerTestBase {
   template<typename MockGestureTarget>
   void CreateControllerAndTarget() {
     target_ = new MockGestureTarget();
-    controller_ = base::MakeUnique<SyntheticGestureController>(
+    controller_ = std::make_unique<SyntheticGestureController>(
         &delegate_, std::unique_ptr<SyntheticGestureTarget>(target_));
   }
 
   void QueueSyntheticGesture(std::unique_ptr<SyntheticGesture> gesture) {
     controller_->QueueSyntheticGesture(
         std::move(gesture),
-        base::Bind(
+        base::BindOnce(
             &SyntheticGestureControllerTestBase::OnSyntheticGestureCompleted,
             base::Unretained(this)));
   }
@@ -703,9 +708,8 @@ class SyntheticGestureControllerTestBase {
   void FlushInputUntilComplete() {
     // Start and stop the timer explicitly here, since the test does not need to
     // wait for begin-frame to start the timer.
-    controller_->dispatch_timer_.Start(FROM_HERE,
-                                       base::TimeDelta::FromSeconds(1),
-                                       base::Bind(&base::DoNothing));
+    controller_->dispatch_timer_.Start(
+        FROM_HERE, base::TimeDelta::FromSeconds(1), base::DoNothing());
     do
       time_ += base::TimeDelta::FromMilliseconds(kFlushInputRateInMs);
     while (controller_->DispatchNextEvent(time_));
@@ -1161,8 +1165,8 @@ TEST_F(SyntheticGestureControllerTest, MultiScrollGestureMouseHorizontal) {
   // floating point precision issues with diagonal scrolls.
   EXPECT_FLOAT_EQ(params.distances[0].Length() + params.distances[1].Length(),
                   scroll_target->total_abs_move_distance_length());
-  EXPECT_EQ(params.distances[0] + params.distances[1],
-            scroll_target->start_to_end_distance());
+  EXPECT_FLOAT_EQ((params.distances[0] + params.distances[1]).x(),
+                  scroll_target->start_to_end_distance().x());
 }
 
 void CheckIsWithinRangeMulti(float scroll_distance,

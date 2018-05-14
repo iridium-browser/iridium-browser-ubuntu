@@ -35,7 +35,11 @@ class ImageSibling : public gl::RefCountObject, public gl::FramebufferAttachment
 {
   public:
     ImageSibling(GLuint id);
-    virtual ~ImageSibling();
+    ~ImageSibling() override;
+
+    bool isEGLImageTarget() const;
+    gl::InitState sourceEGLImageInitState() const;
+    void setSourceEGLImageInitState(gl::InitState initState) const;
 
   protected:
     // Set the image target of this sibling
@@ -60,6 +64,7 @@ class ImageSibling : public gl::RefCountObject, public gl::FramebufferAttachment
 struct ImageState : private angle::NonCopyable
 {
     ImageState(EGLenum target, ImageSibling *buffer, const AttributeMap &attribs);
+    ~ImageState();
 
     gl::ImageIndex imageIndex;
     gl::BindingPointer<ImageSibling> source;
@@ -74,8 +79,8 @@ class Image final : public gl::RefCountObject
           ImageSibling *buffer,
           const AttributeMap &attribs);
 
-    void onDestroy(const gl::Context *context) override;
-    ~Image();
+    gl::Error onDestroy(const gl::Context *context) override;
+    ~Image() override;
 
     const gl::Format &getFormat() const;
     size_t getWidth() const;
@@ -85,6 +90,10 @@ class Image final : public gl::RefCountObject
     Error initialize();
 
     rx::ImageImpl *getImplementation() const;
+
+    bool orphaned() const;
+    gl::InitState sourceInitState() const;
+    void setInitState(gl::InitState initState);
 
   private:
     friend class ImageSibling;
@@ -99,6 +108,7 @@ class Image final : public gl::RefCountObject
 
     ImageState mState;
     rx::ImageImpl *mImplementation;
+    bool mOrphanedAndNeedsInit;
 };
 }  // namespace egl
 

@@ -9,10 +9,12 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
+#include "base/optional.h"
 #include "base/version.h"
 #include "components/sync/model/string_ordinal.h"
 #include "components/sync/model/sync_change.h"
 #include "extensions/common/constants.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "url/gurl.h"
 
 namespace syncer {
@@ -118,8 +120,12 @@ class ExtensionSyncData {
   const std::string& bookmark_app_description() const {
     return bookmark_app_description_;
   }
+  const std::string& bookmark_app_scope() const { return bookmark_app_scope_; }
   const std::string& bookmark_app_icon_color() const {
     return bookmark_app_icon_color_;
+  }
+  base::Optional<SkColor> bookmark_app_theme_color() const {
+    return bookmark_app_theme_color_;
   }
   const std::vector<LinkedAppIconInfo>& linked_icons() const {
     return linked_icons_;
@@ -168,7 +174,9 @@ class ExtensionSyncData {
   extensions::LaunchType launch_type_;
   std::string bookmark_app_url_;
   std::string bookmark_app_description_;
+  std::string bookmark_app_scope_;
   std::string bookmark_app_icon_color_;
+  base::Optional<SkColor> bookmark_app_theme_color_;
   std::vector<LinkedAppIconInfo> linked_icons_;
 };
 

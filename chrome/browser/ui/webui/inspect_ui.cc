@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/webui/inspect_ui.h"
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/user_metrics.h"
 #include "chrome/browser/devtools/devtools_targets_ui.h"
 #include "chrome/browser/devtools/devtools_ui_bindings.h"
@@ -41,6 +40,7 @@ namespace {
 
 const char kInitUICommand[]  = "init-ui";
 const char kInspectCommand[]  = "inspect";
+const char kInspectFallbackCommand[] = "inspect-fallback";
 const char kInspectAdditionalCommand[] = "inspect-additional";
 const char kActivateCommand[]  = "activate";
 const char kCloseCommand[] = "close";
@@ -69,7 +69,7 @@ const char kIsAdditionalField[] = "isAdditional";
 void GetUiDevToolsTargets(base::ListValue& targets) {
   for (const auto& client_pair :
        ui_devtools::UiDevToolsServer::GetClientNamesAndUrls()) {
-    auto target_data = base::MakeUnique<base::DictionaryValue>();
+    auto target_data = std::make_unique<base::DictionaryValue>();
     target_data->SetString(kNameField, client_pair.first);
     target_data->SetString(kUrlField, client_pair.second);
     target_data->SetBoolean(kIsAdditionalField, true);
@@ -91,6 +91,7 @@ class InspectMessageHandler : public WebUIMessageHandler {
 
   void HandleInitUICommand(const base::ListValue* args);
   void HandleInspectCommand(const base::ListValue* args);
+  void HandleInspectFallbackCommand(const base::ListValue* args);
   void HandleInspectAdditionalCommand(const base::ListValue* args);
   void HandleActivateCommand(const base::ListValue* args);
   void HandleCloseCommand(const base::ListValue* args);
@@ -115,6 +116,10 @@ void InspectMessageHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(kInspectCommand,
       base::Bind(&InspectMessageHandler::HandleInspectCommand,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kInspectFallbackCommand,
+      base::BindRepeating(&InspectMessageHandler::HandleInspectFallbackCommand,
+                          base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       kInspectAdditionalCommand,
       base::Bind(&InspectMessageHandler::HandleInspectAdditionalCommand,
@@ -176,6 +181,14 @@ void InspectMessageHandler::HandleInspectCommand(const base::ListValue* args) {
   std::string id;
   if (ParseStringArgs(args, &source, &id))
     inspect_ui_->Inspect(source, id);
+}
+
+void InspectMessageHandler::HandleInspectFallbackCommand(
+    const base::ListValue* args) {
+  std::string source;
+  std::string id;
+  if (ParseStringArgs(args, &source, &id))
+    inspect_ui_->InspectFallback(source, id);
 }
 
 void InspectMessageHandler::HandleInspectAdditionalCommand(
@@ -326,7 +339,7 @@ void DevToolsUIBindingsEnabler::DidFinishNavigation(
 
 InspectUI::InspectUI(content::WebUI* web_ui)
     : WebUIController(web_ui) {
-  web_ui->AddMessageHandler(base::MakeUnique<InspectMessageHandler>(this));
+  web_ui->AddMessageHandler(std::make_unique<InspectMessageHandler>(this));
   Profile* profile = Profile::FromWebUI(web_ui);
   content::WebUIDataSource::Add(profile, CreateInspectUIHTMLSource());
 
@@ -353,42 +366,45 @@ void InspectUI::Inspect(const std::string& source_id,
                         const std::string& target_id) {
   scoped_refptr<DevToolsAgentHost> target = FindTarget(source_id, target_id);
   if (target) {
-    const std::string target_type = target->GetType();
     Profile* profile = Profile::FromBrowserContext(
         web_ui()->GetWebContents()->GetBrowserContext());
     DevToolsWindow::OpenDevToolsWindow(target, profile);
-    ForceUpdateIfNeeded(source_id, target_type);
+  }
+}
+
+void InspectUI::InspectFallback(const std::string& source_id,
+                                const std::string& target_id) {
+  scoped_refptr<DevToolsAgentHost> target = FindTarget(source_id, target_id);
+  if (target) {
+    Profile* profile = Profile::FromBrowserContext(
+        web_ui()->GetWebContents()->GetBrowserContext());
+    DevToolsWindow::OpenDevToolsWindowWithBundledFrontend(target, profile);
   }
 }
 
 void InspectUI::Activate(const std::string& source_id,
                          const std::string& target_id) {
   scoped_refptr<DevToolsAgentHost> target = FindTarget(source_id, target_id);
-  if (target) {
-    const std::string target_type = target->GetType();
+  if (target)
     target->Activate();
-    ForceUpdateIfNeeded(source_id, target_type);
-  }
 }
 
 void InspectUI::Close(const std::string& source_id,
                       const std::string& target_id) {
   scoped_refptr<DevToolsAgentHost> target = FindTarget(source_id, target_id);
   if (target) {
-    const std::string target_type = target->GetType();
     target->Close();
-    ForceUpdateIfNeeded(source_id, target_type);
+    DevToolsTargetsUIHandler* handler = FindTargetHandler(source_id);
+    if (handler)
+      handler->ForceUpdate();
   }
 }
 
 void InspectUI::Reload(const std::string& source_id,
                        const std::string& target_id) {
   scoped_refptr<DevToolsAgentHost> target = FindTarget(source_id, target_id);
-  if (target) {
-    const std::string target_type = target->GetType();
+  if (target)
     target->Reload();
-    ForceUpdateIfNeeded(source_id, target_type);
-  }
 }
 
 void InspectUI::Open(const std::string& source_id,
@@ -435,9 +451,9 @@ void InspectUI::InspectBrowserWithCustomFrontend(
 
 void InspectUI::InspectDevices(Browser* browser) {
   base::RecordAction(base::UserMetricsAction("InspectDevices"));
-  chrome::NavigateParams params(chrome::GetSingletonTabNavigateParams(
+  NavigateParams params(GetSingletonTabNavigateParams(
       browser, GURL(chrome::kChromeUIInspectURL)));
-  params.path_behavior = chrome::NavigateParams::IGNORE_AND_NAVIGATE;
+  params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
   ShowSingletonTabOverwritingNTP(browser, params);
 }
 
@@ -613,17 +629,6 @@ void InspectUI::PopulateTargets(const std::string& source,
 
 void InspectUI::PopulateAdditionalTargets(const base::ListValue& targets) {
   web_ui()->CallJavascriptFunctionUnsafe("populateAdditionalTargets", targets);
-}
-
-void InspectUI::ForceUpdateIfNeeded(const std::string& source_id,
-                                    const std::string& target_type) {
-  // TODO(dgozman): remove this after moving discovery to protocol.
-  // See crbug.com/398049.
-  if (target_type != content::DevToolsAgentHost::kTypeServiceWorker)
-    return;
-  DevToolsTargetsUIHandler* handler = FindTargetHandler(source_id);
-  if (handler)
-    handler->ForceUpdate();
 }
 
 void InspectUI::PopulatePortStatus(const base::Value& status) {

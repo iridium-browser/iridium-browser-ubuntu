@@ -25,7 +25,6 @@
 #include "core/html/HTMLEmbedElement.h"
 
 #include "core/CSSPropertyNames.h"
-#include "core/HTMLNames.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/ShadowRoot.h"
@@ -34,23 +33,24 @@
 #include "core/html/HTMLObjectElement.h"
 #include "core/html/PluginDocument.h"
 #include "core/html/parser/HTMLParserIdioms.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutEmbeddedContent.h"
-#include "core/layout/api/LayoutEmbeddedItem.h"
+#include "core/layout/LayoutEmbeddedObject.h"
 
 namespace blink {
 
 using namespace HTMLNames;
 
 inline HTMLEmbedElement::HTMLEmbedElement(Document& document,
-                                          bool created_by_parser)
+                                          const CreateElementFlags flags)
     : HTMLPlugInElement(embedTag,
                         document,
-                        created_by_parser,
+                        flags,
                         kShouldPreferPlugInsForImages) {}
 
 HTMLEmbedElement* HTMLEmbedElement::Create(Document& document,
-                                           bool created_by_parser) {
-  HTMLEmbedElement* element = new HTMLEmbedElement(document, created_by_parser);
+                                           const CreateElementFlags flags) {
+  auto* element = new HTMLEmbedElement(document, flags);
   element->EnsureUserAgentShadowRoot();
   return element;
 }
@@ -80,7 +80,7 @@ bool HTMLEmbedElement::IsPresentationAttribute(
 void HTMLEmbedElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == hiddenAttr) {
     if (DeprecatedEqualIgnoringCase(value, "yes") ||
         DeprecatedEqualIgnoringCase(value, "true")) {
@@ -132,19 +132,16 @@ void HTMLEmbedElement::ParseAttribute(
   }
 }
 
-void HTMLEmbedElement::ParametersForPlugin(Vector<String>& param_names,
-                                           Vector<String>& param_values) {
-  AttributeCollection attributes = this->Attributes();
-  for (const Attribute& attribute : attributes) {
-    param_names.push_back(attribute.LocalName().GetString());
-    param_values.push_back(attribute.Value().GetString());
-  }
+void HTMLEmbedElement::ParametersForPlugin(PluginParameters& plugin_params) {
+  AttributeCollection attributes = Attributes();
+  for (const Attribute& attribute : attributes)
+    plugin_params.AppendAttribute(attribute);
 }
 
 // FIXME: This should be unified with HTMLObjectElement::updatePlugin and
 // moved down into HTMLPluginElement.cpp
 void HTMLEmbedElement::UpdatePluginInternal() {
-  DCHECK(!GetLayoutEmbeddedItem().ShowsUnavailablePluginIndicator());
+  DCHECK(!GetLayoutEmbeddedObject()->ShowsUnavailablePluginIndicator());
   DCHECK(NeedsPluginUpdate());
   SetNeedsPluginUpdate(false);
 
@@ -156,10 +153,8 @@ void HTMLEmbedElement::UpdatePluginInternal() {
   if (!AllowedToLoadFrameURL(url_))
     return;
 
-  // FIXME: These should be joined into a PluginParameters class.
-  Vector<String> param_names;
-  Vector<String> param_values;
-  ParametersForPlugin(param_names, param_values);
+  PluginParameters plugin_params;
+  ParametersForPlugin(plugin_params);
 
   // FIXME: Can we not have layoutObject here now that beforeload events are
   // gone?
@@ -175,7 +170,7 @@ void HTMLEmbedElement::UpdatePluginInternal() {
     service_type_ = "text/html";
   }
 
-  RequestObject(param_names, param_values);
+  RequestObject(plugin_params);
 }
 
 bool HTMLEmbedElement::LayoutObjectIsNeeded(const ComputedStyle& style) {
@@ -197,11 +192,9 @@ bool HTMLEmbedElement::LayoutObjectIsNeeded(const ComputedStyle& style) {
   // * The element has an ancestor object element that is not showing its
   //   fallback content.
   ContainerNode* p = parentNode();
-  if (isHTMLObjectElement(p)) {
-    DCHECK(p->GetLayoutObject());
-    if (!toHTMLObjectElement(p)->WillUseFallbackContentAtLayout() &&
-        !toHTMLObjectElement(p)->UseFallbackContent()) {
-      DCHECK(!p->GetLayoutObject()->IsEmbeddedObject());
+  if (auto* object = ToHTMLObjectElementOrNull(p)) {
+    if (!object->WillUseFallbackContentAtLayout() &&
+        !object->UseFallbackContent()) {
       return false;
     }
   }

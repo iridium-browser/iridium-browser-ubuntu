@@ -81,12 +81,18 @@ To install You-Complete-Me, enter these commands in a terminal:
 
 ```
 $ git clone https://github.com/Valloric/ycmd.git ~/.ycmd
-$ git submodule update --init --recursive
 $ cd ~/.ycmd
+$ git submodule update --init --recursive
 $ ./build.py --clang-completer
 ```
 If it fails with "Your C++ compiler does NOT fully support C++11." but you know
 you have a good compiler, hack cpp/CMakeLists.txt to set CPP11_AVAILABLE true.
+
+On Mac, replace the last command above with the following.
+
+```
+$ ./build.py --clang-completer --system-libclang
+```
 
 The following extensions might be useful for you as well:
 

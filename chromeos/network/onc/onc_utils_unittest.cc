@@ -85,7 +85,7 @@ const char* kLoginEmail = "hans@my.domain.com";
 
 class StringSubstitutionStub : public StringSubstitution {
  public:
-  StringSubstitutionStub() {}
+  StringSubstitutionStub() = default;
   bool GetSubstitute(const std::string& placeholder,
                      std::string* substitute) const override {
     if (placeholder == ::onc::substitutes::kLoginIDField)
@@ -230,6 +230,49 @@ TEST(ONCUtils, ProxyConfigToOncProxySettings) {
     EXPECT_TRUE(
         test_utils::Equals(onc_proxy_settings, actual_proxy_settings.get()));
   }
+}
+
+TEST(ONCPasswordVariable, PasswordAvailable) {
+  const auto wifi_onc = test_utils::ReadTestDictionary(
+      "wifi_eap_ttls_with_password_variable.onc");
+
+  EXPECT_TRUE(HasUserPasswordSubsitutionVariable(kNetworkConfigurationSignature,
+                                                 wifi_onc.get()));
+}
+
+TEST(ONCPasswordVariable, PasswordNotAvailable) {
+  const auto wifi_onc = test_utils::ReadTestDictionary("wifi_eap_ttls.onc");
+
+  EXPECT_FALSE(HasUserPasswordSubsitutionVariable(
+      kNetworkConfigurationSignature, wifi_onc.get()));
+}
+
+TEST(ONCPasswordVariable, PasswordHarcdoded) {
+  const auto wifi_onc = test_utils::ReadTestDictionary(
+      "wifi_eap_ttls_with_hardcoded_password.onc");
+
+  EXPECT_FALSE(HasUserPasswordSubsitutionVariable(
+      kNetworkConfigurationSignature, wifi_onc.get()));
+}
+
+TEST(ONCPasswordVariable, MultipleNetworksPasswordAvailable) {
+  const auto network_dictionary = test_utils::ReadTestDictionary(
+      "managed_toplevel_with_password_variable.onc");
+
+  const auto network_list = std::make_unique<base::ListValue>(base::ListValue(
+      network_dictionary->FindKey("NetworkConfigurations")->GetList()));
+
+  EXPECT_TRUE(HasUserPasswordSubsitutionVariable(network_list.get()));
+}
+
+TEST(ONCPasswordVariable, MultipleNetworksPasswordNotAvailable) {
+  const auto network_dictionary = test_utils::ReadTestDictionary(
+      "managed_toplevel_with_no_password_variable.onc");
+
+  const auto network_list = std::make_unique<base::ListValue>(base::ListValue(
+      network_dictionary->FindKey("NetworkConfigurations")->GetList()));
+
+  EXPECT_FALSE(HasUserPasswordSubsitutionVariable(network_list.get()));
 }
 
 }  // namespace onc

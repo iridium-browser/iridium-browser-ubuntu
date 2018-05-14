@@ -8,19 +8,20 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_TEST_MOCK_AUDIO_ENCODER_FACTORY_H_
-#define WEBRTC_TEST_MOCK_AUDIO_ENCODER_FACTORY_H_
+#ifndef TEST_MOCK_AUDIO_ENCODER_FACTORY_H_
+#define TEST_MOCK_AUDIO_ENCODER_FACTORY_H_
 
 #include <memory>
 #include <vector>
 
-#include "webrtc/api/audio_codecs/audio_encoder_factory.h"
-#include "webrtc/rtc_base/scoped_ref_ptr.h"
-#include "webrtc/test/gmock.h"
+#include "api/audio_codecs/audio_encoder_factory.h"
+#include "rtc_base/refcountedobject.h"
+#include "rtc_base/scoped_ref_ptr.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
-class MockAudioEncoderFactory : public AudioEncoderFactory {
+class MockAudioEncoderFactory : public testing::NiceMock<AudioEncoderFactory> {
  public:
   MOCK_METHOD0(GetSupportedEncoders, std::vector<AudioCodecSpec>());
   MOCK_METHOD1(QueryAudioEncoder,
@@ -51,7 +52,7 @@ class MockAudioEncoderFactory : public AudioEncoderFactory {
     ON_CALL(*factory.get(), GetSupportedEncoders())
         .WillByDefault(Return(std::vector<webrtc::AudioCodecSpec>()));
     ON_CALL(*factory.get(), QueryAudioEncoder(_))
-        .WillByDefault(Return(rtc::Optional<AudioCodecInfo>()));
+        .WillByDefault(Return(rtc::nullopt));
 
     EXPECT_CALL(*factory.get(), GetSupportedEncoders()).Times(AnyNumber());
     EXPECT_CALL(*factory.get(), QueryAudioEncoder(_)).Times(AnyNumber());
@@ -74,7 +75,7 @@ class MockAudioEncoderFactory : public AudioEncoderFactory {
     ON_CALL(*factory.get(), GetSupportedEncoders())
         .WillByDefault(Return(std::vector<webrtc::AudioCodecSpec>()));
     ON_CALL(*factory.get(), QueryAudioEncoder(_))
-        .WillByDefault(Return(rtc::Optional<AudioCodecInfo>()));
+        .WillByDefault(Return(rtc::nullopt));
     ON_CALL(*factory.get(), MakeAudioEncoderMock(_, _, _))
         .WillByDefault(SetArgPointee<2>(nullptr));
 
@@ -88,4 +89,4 @@ class MockAudioEncoderFactory : public AudioEncoderFactory {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_MOCK_AUDIO_ENCODER_FACTORY_H_
+#endif  // TEST_MOCK_AUDIO_ENCODER_FACTORY_H_

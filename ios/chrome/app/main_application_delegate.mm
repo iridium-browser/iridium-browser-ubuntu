@@ -4,11 +4,9 @@
 
 #import "ios/chrome/app/main_application_delegate.h"
 
-#include "base/ios/ios_util.h"
 #include "base/mac/foundation_util.h"
 #import "ios/chrome/app/application_delegate/app_navigation.h"
 #import "ios/chrome/app/application_delegate/app_state.h"
-#import "ios/chrome/app/application_delegate/background_activity.h"
 #import "ios/chrome/app/application_delegate/browser_launcher.h"
 #import "ios/chrome/app/application_delegate/memory_warning_helper.h"
 #import "ios/chrome/app/application_delegate/metrics_mediator.h"
@@ -22,6 +20,7 @@
 #import "ios/chrome/app/main_controller.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/public/provider/chrome/browser/signin/chrome_identity_service.h"
+#import "ios/testing/perf/startupLoggers.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -92,6 +91,7 @@
 // startup is fast, and the UI appears as soon as possible.
 - (BOOL)application:(UIApplication*)application
     didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
+  startup_loggers::RegisterAppDidFinishLaunchingTime();
   // Main window must be ChromeOverlayWindow or a subclass of it.
   self.window = [[ChromeOverlayWindow alloc]
       initWithFrame:[[UIScreen mainScreen] bounds]];
@@ -103,6 +103,7 @@
 }
 
 - (void)applicationDidBecomeActive:(UIApplication*)application {
+  startup_loggers::RegisterAppDidBecomeActiveTime();
   if ([_appState isInSafeMode])
     return;
 
@@ -167,11 +168,10 @@
     completionHandler(UIBackgroundFetchResultNewData);
     return;
   }
-
-  [BackgroundActivity application:application
-      performFetchWithCompletionHandler:completionHandler
-                        metricsMediator:_metricsMediator
-                        browserLauncher:_browserLauncher];
+  // This initialization to BACKGROUND stage may not be necessary, but is
+  // preserved in case somewhere there is a dependency on this.
+  [_browserLauncher startUpBrowserToStage:INITIALIZATION_STAGE_BACKGROUND];
+  completionHandler(UIBackgroundFetchResultFailed);
 }
 
 - (void)application:(UIApplication*)application
@@ -179,10 +179,10 @@
                       completionHandler:(void (^)(void))completionHandler {
   if ([_appState isInSafeMode])
     return;
-
-  [BackgroundActivity handleEventsForBackgroundURLSession:identifier
-                                        completionHandler:completionHandler
-                                          browserLauncher:_browserLauncher];
+  // This initialization to BACKGROUND stage may not be necessary, but is
+  // preserved in case somewhere there is a dependency on this.
+  [_browserLauncher startUpBrowserToStage:INITIALIZATION_STAGE_BACKGROUND];
+  completionHandler();
 }
 
 #pragma mark Continuing User Activity and Handling Quick Actions
@@ -245,19 +245,12 @@
 
   BOOL applicationActive =
       [application applicationState] == UIApplicationStateActive;
-  DCHECK(applicationActive || !base::ios::IsRunningOnIOS11OrLater());
 
   return [URLOpener openURL:url
           applicationActive:applicationActive
                     options:options
                   tabOpener:_tabOpener
          startupInformation:_startupInformation];
-}
-
-#pragma mark - chromeExecuteCommand
-
-- (void)chromeExecuteCommand:(id)sender {
-  [_mainController chromeExecuteCommand:sender];
 }
 
 #pragma mark - Testing methods

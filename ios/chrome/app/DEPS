@@ -1,5 +1,4 @@
 include_rules = [
-  "+breakpad/src/client/ios",
   "+components/bookmarks/browser",
   "+components/bookmarks/test",
   "+components/browser_sync",
@@ -9,11 +8,12 @@ include_rules = [
   "+components/crash/core/common",
   "+components/favicon/core",
   "+components/favicon_base",
-  "+components/feature_engagement_tracker",
+  "+components/feature_engagement",
   "+components/handoff",
   "+components/history/core/browser",
   "+components/metrics",
   "+components/ntp_snippets",
+  "+components/payments/core",
   "+components/prefs",
   "+components/reading_list/core",
   "+components/signin/core/browser",
@@ -22,11 +22,11 @@ include_rules = [
   "+components/url_formatter",
   "+components/web_resource",
   "+ios/chrome/browser",
-  "+ios/chrome/browser/feature_engagement_tracker",
+  "+ios/chrome/browser/feature_engagement",
   "+ios/net",
   "+ios/public/provider/chrome",
-  "+ios/web/public",
   "+mojo/edk/embedder/embedder.h",
+  "+third_party/breakpad/breakpad/src/client/ios",
 
   # Strings and resources.
   "+components/grit",

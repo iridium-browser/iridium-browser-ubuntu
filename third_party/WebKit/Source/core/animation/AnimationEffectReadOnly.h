@@ -35,10 +35,12 @@
 #include "core/animation/Timing.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
 class Animation;
+class AnimationEffectOwner;
 class AnimationEffectReadOnly;
 class AnimationEffectTimingReadOnly;
 class ComputedTimingProperties;
@@ -58,11 +60,16 @@ static inline double NullValue() {
 
 // Represents the content of an Animation and its fractional timing state.
 // http://w3c.github.io/web-animations/#animation-effect
-class CORE_EXPORT AnimationEffectReadOnly
-    : public GarbageCollectedFinalized<AnimationEffectReadOnly>,
-      public ScriptWrappable {
+class CORE_EXPORT AnimationEffectReadOnly : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
-  friend class Animation;  // Calls attach/detach, updateInheritedTime.
+  // Calls Attach/Detach, GetAnimation, UpdateInheritedTime.
+  friend class Animation;
+
+  // Calls GetAnimation().
+  // TODO(majidvp): Remove this. EffectStack should not need to access animation
+  // directly.
+  friend class EffectStack;
+
  public:
   // Note that logic in CSSAnimations depends on the order of these values.
   enum Phase {
@@ -74,13 +81,13 @@ class CORE_EXPORT AnimationEffectReadOnly
 
   class EventDelegate : public GarbageCollectedFinalized<EventDelegate> {
    public:
-    virtual ~EventDelegate() {}
+    virtual ~EventDelegate() = default;
     virtual bool RequiresIterationEvents(const AnimationEffectReadOnly&) = 0;
     virtual void OnEventCondition(const AnimationEffectReadOnly&) = 0;
-    DEFINE_INLINE_VIRTUAL_TRACE() {}
+    virtual void Trace(blink::Visitor* visitor) {}
   };
 
-  virtual ~AnimationEffectReadOnly() {}
+  virtual ~AnimationEffectReadOnly() = default;
 
   virtual bool IsKeyframeEffectReadOnly() const { return false; }
   virtual bool IsKeyframeEffect() const { return false; }
@@ -93,7 +100,7 @@ class CORE_EXPORT AnimationEffectReadOnly
   double CurrentIteration() const {
     return EnsureCalculated().current_iteration;
   }
-  double Progress() const { return EnsureCalculated().progress; }
+  WTF::Optional<double> Progress() const { return EnsureCalculated().progress; }
   double TimeToForwardsEffectChange() const {
     return EnsureCalculated().time_to_forwards_effect_change;
   }
@@ -108,16 +115,17 @@ class CORE_EXPORT AnimationEffectReadOnly
            SpecifiedTiming().end_delay;
   }
 
-  const Animation* GetAnimation() const { return animation_; }
-  Animation* GetAnimation() { return animation_; }
   const Timing& SpecifiedTiming() const { return timing_; }
   virtual AnimationEffectTimingReadOnly* timing();
   void UpdateSpecifiedTiming(const Timing&);
+  EventDelegate* GetEventDelegate() { return event_delegate_; }
 
   void getComputedTiming(ComputedTimingProperties&);
   ComputedTimingProperties getComputedTiming();
 
-  DECLARE_VIRTUAL_TRACE();
+  const Animation* GetAnimationForTesting() const { return GetAnimation(); }
+
+  virtual void Trace(blink::Visitor*);
 
  protected:
   explicit AnimationEffectReadOnly(const Timing&, EventDelegate* = nullptr);
@@ -132,11 +140,11 @@ class CORE_EXPORT AnimationEffectReadOnly
   }
   void ClearEventDelegate() { event_delegate_ = nullptr; }
 
-  virtual void Attach(Animation* animation) { animation_ = animation; }
+  virtual void Attach(AnimationEffectOwner* owner) { owner_ = owner; }
 
   virtual void Detach() {
-    DCHECK(animation_);
-    animation_ = nullptr;
+    DCHECK(owner_);
+    owner_ = nullptr;
   }
 
   double RepeatedDuration() const;
@@ -147,9 +155,11 @@ class CORE_EXPORT AnimationEffectReadOnly
       bool forwards,
       double local_time,
       double time_to_next_iteration) const = 0;
-  virtual void SpecifiedTimingChanged() {}
 
-  Member<Animation> animation_;
+  const Animation* GetAnimation() const;
+  Animation* GetAnimation();
+
+  Member<AnimationEffectOwner> owner_;
   Timing timing_;
   Member<EventDelegate> event_delegate_;
 
@@ -157,7 +167,7 @@ class CORE_EXPORT AnimationEffectReadOnly
     DISALLOW_NEW();
     Phase phase;
     double current_iteration;
-    double progress;
+    WTF::Optional<double> progress;
     bool is_current;
     bool is_in_effect;
     bool is_in_play;

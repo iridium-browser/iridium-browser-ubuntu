@@ -9,6 +9,7 @@
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/ThreadingPrimitives.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -26,30 +27,31 @@ ParentFrameTaskRunners* ParentFrameTaskRunners::Create() {
 ParentFrameTaskRunners::ParentFrameTaskRunners(LocalFrame* frame)
     : ContextLifecycleObserver(frame ? frame->GetDocument() : nullptr) {
   // For now we only support very limited task types.
-  for (auto type :
-       {TaskType::kUnspecedTimer, TaskType::kUnspecedLoading,
-        TaskType::kNetworking, TaskType::kPostedMessage,
-        TaskType::kCanvasBlobSerialization, TaskType::kUnthrottled}) {
-    auto task_runner =
-        frame ? TaskRunnerHelper::Get(type, frame)
-              : Platform::Current()->MainThread()->GetWebTaskRunner();
+  for (auto type : {TaskType::kUnspecedTimer, TaskType::kUnspecedLoading,
+                    TaskType::kNetworking, TaskType::kPostedMessage,
+                    TaskType::kCanvasBlobSerialization, TaskType::kUnthrottled,
+                    TaskType::kInternalTest}) {
+    auto task_runner = frame
+                           ? frame->GetTaskRunner(type)
+                           : Platform::Current()->MainThread()->GetTaskRunner();
     task_runners_.insert(type, std::move(task_runner));
   }
 }
 
-RefPtr<WebTaskRunner> ParentFrameTaskRunners::Get(TaskType type) {
-  MutexLocker lock(task_runners_mutex_);
+scoped_refptr<base::SingleThreadTaskRunner> ParentFrameTaskRunners::Get(
+    TaskType type) {
+  MutexLocker lock(mutex_);
   return task_runners_.at(type);
 }
 
-DEFINE_TRACE(ParentFrameTaskRunners) {
+void ParentFrameTaskRunners::Trace(blink::Visitor* visitor) {
   ContextLifecycleObserver::Trace(visitor);
 }
 
 void ParentFrameTaskRunners::ContextDestroyed(ExecutionContext*) {
-  MutexLocker lock(task_runners_mutex_);
+  MutexLocker lock(mutex_);
   for (auto& entry : task_runners_)
-    entry.value = Platform::Current()->CurrentThread()->GetWebTaskRunner();
+    entry.value = Platform::Current()->CurrentThread()->GetTaskRunner();
 }
 
 }  // namespace blink

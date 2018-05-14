@@ -24,9 +24,9 @@
 #define HTMLObjectElement_h
 
 #include "core/CoreExport.h"
-#include "core/html/FormAssociated.h"
 #include "core/html/HTMLPlugInElement.h"
-#include "core/html/ListedElement.h"
+#include "core/html/forms/FormAssociated.h"
+#include "core/html/forms/ListedElement.h"
 
 namespace blink {
 
@@ -43,9 +43,9 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
   USING_GARBAGE_COLLECTED_MIXIN(HTMLObjectElement);
 
  public:
-  static HTMLObjectElement* Create(Document&, bool created_by_parser);
+  static HTMLObjectElement* Create(Document&, const CreateElementFlags);
   ~HTMLObjectElement() override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   const String& ClassId() const { return class_id_; }
 
@@ -62,6 +62,8 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
 
   bool IsEnumeratable() const override { return true; }
   bool IsInteractiveContent() const override;
+
+  bool ChildrenCanHaveStyle() const { return WillUseFallbackContentAtLayout(); }
 
   // Implementations of constraint validation API.
   // Note that the object elements are always barred from constraint validation.
@@ -81,13 +83,14 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
   void AttachLayoutTree(AttachContext&) final;
 
  private:
-  HTMLObjectElement(Document&, bool created_by_parser);
+  HTMLObjectElement(Document&, const CreateElementFlags);
 
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;
@@ -110,21 +113,21 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
 
   // FIXME: This function should not deal with url or serviceType
   // so that we can better share code between <object> and <embed>.
-  void ParametersForPlugin(Vector<String>& param_names,
-                           Vector<String>& param_values);
+  void ParametersForPlugin(PluginParameters& plugin_params);
 
   bool HasValidClassId() const;
 
   void ReloadPluginOnAttributeChange(const QualifiedName&);
 
-  bool ShouldRegisterAsNamedItem() const override { return true; }
-  bool ShouldRegisterAsExtraNamedItem() const override { return true; }
+  NamedItemType GetNamedItemType() const override {
+    return NamedItemType::kNameOrId;
+  }
 
   String class_id_;
   bool use_fallback_content_ : 1;
 };
 
-// Like toHTMLObjectElement() but accepts a ListedElement as input
+// Like ToHTMLObjectElement() but accepts a ListedElement as input
 // instead of a Node.
 const HTMLObjectElement* ToHTMLObjectElementFromListedElement(
     const ListedElement*);

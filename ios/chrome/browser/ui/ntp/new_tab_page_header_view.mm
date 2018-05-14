@@ -8,10 +8,11 @@
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/tabs/tab_model_observer.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_collection_utils.h"
-#import "ios/chrome/browser/ui/image_util.h"
-#import "ios/chrome/browser/ui/ntp/google_landing_data_source.h"
+#import "ios/chrome/browser/ui/image_util/image_util.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_header_constants.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_toolbar_controller.h"
+#import "ios/chrome/browser/ui/toolbar/legacy/toolbar_utils.h"
+#import "ios/chrome/browser/ui/toolbar/toolbar_snapshot_providing.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/common/material_timing.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
@@ -21,15 +22,7 @@
 #error "This file requires ARC support."
 #endif
 
-namespace {
-
-const CGFloat kHintLabelSidePadding = 12;
-const CGFloat kMaxConstraintConstantDiff = 5;
-const CGFloat kMaxTopMarginDiff = 4;
-
-}  // namespace
-
-@interface NewTabPageHeaderView () {
+@interface NewTabPageHeaderView ()<ToolbarSnapshotProviding> {
   NewTabPageToolbarController* _toolbarController;
   UIImageView* _searchBoxBorder;
   UIImageView* _shadow;
@@ -38,6 +31,8 @@ const CGFloat kMaxTopMarginDiff = 4;
 @end
 
 @implementation NewTabPageHeaderView
+
+#pragma mark - Public
 
 - (instancetype)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
@@ -52,19 +47,6 @@ const CGFloat kMaxTopMarginDiff = 4;
   return [_toolbarController view];
 }
 
-- (ToolbarController*)relinquishedToolbarController {
-  ToolbarController* relinquishedToolbarController = nil;
-  if ([[_toolbarController view] isDescendantOfView:self]) {
-    // Only relinquish the toolbar controller if it's in the hierarchy.
-    relinquishedToolbarController = _toolbarController;
-  }
-  return relinquishedToolbarController;
-}
-
-- (void)reparentToolbarController {
-  [self addSubview:[_toolbarController view]];
-}
-
 - (void)addToolbarWithReadingListModel:(ReadingListModel*)readingListModel
                             dispatcher:(id)dispatcher {
   DCHECK(!_toolbarController);
@@ -74,13 +56,9 @@ const CGFloat kMaxTopMarginDiff = 4;
       [[NewTabPageToolbarController alloc] initWithDispatcher:dispatcher];
   _toolbarController.readingListModel = readingListModel;
 
-  UIView* toolbarView = [_toolbarController view];
-  CGRect toolbarFrame = self.bounds;
-  toolbarFrame.size.height = ntp_header::kToolbarHeight;
-  toolbarView.frame = toolbarFrame;
-  [toolbarView setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
-
   [self addSubview:[_toolbarController view]];
+
+  [self addConstraintsToToolbar];
 }
 
 - (void)setCanGoForward:(BOOL)canGoForward {
@@ -124,12 +102,20 @@ const CGFloat kMaxTopMarginDiff = 4;
   [_shadow setAlpha:0];
 }
 
+- (CGFloat)searchFieldProgressForOffset:(CGFloat)offset {
+  NOTREACHED();
+  return 0;
+}
+
 - (void)updateSearchFieldWidth:(NSLayoutConstraint*)widthConstraint
                         height:(NSLayoutConstraint*)heightConstraint
                      topMargin:(NSLayoutConstraint*)topMarginConstraint
             subviewConstraints:(NSArray*)constraints
-                 logoIsShowing:(BOOL)logoIsShowing
-                     forOffset:(CGFloat)offset {
+                     forOffset:(CGFloat)offset
+                   screenWidth:(CGFloat)screenWidth
+                safeAreaInsets:(UIEdgeInsets)safeAreaInsets {
+  CGFloat contentWidth = std::max<CGFloat>(
+      0, screenWidth - safeAreaInsets.left - safeAreaInsets.right);
   // The scroll offset at which point searchField's frame should stop growing.
   CGFloat maxScaleOffset =
       self.frame.size.height - ntp_header::kMinHeaderHeight;
@@ -142,19 +128,22 @@ const CGFloat kMaxTopMarginDiff = 4;
     percent = MIN(1, MAX(0, animatingOffset / ntp_header::kAnimationDistance));
   }
 
+  if (screenWidth == 0 || contentWidth == 0)
+    return;
+
   CGFloat searchFieldNormalWidth =
-      content_suggestions::searchFieldWidth(self.bounds.size.width);
+      content_suggestions::searchFieldWidth(contentWidth);
 
   // Calculate the amount to grow the width and height of searchField so that
   // its frame covers the entire toolbar area.
   CGFloat maxXInset = ui::AlignValueToUpperPixel(
-      (searchFieldNormalWidth - self.bounds.size.width) / 2 - 1);
+      (searchFieldNormalWidth - screenWidth) / 2 - 1);
   CGFloat maxHeightDiff =
       ntp_header::kToolbarHeight - content_suggestions::kSearchFieldHeight;
 
   widthConstraint.constant = searchFieldNormalWidth - 2 * maxXInset * percent;
-  topMarginConstraint.constant =
-      content_suggestions::searchFieldTopMargin() + kMaxTopMarginDiff * percent;
+  topMarginConstraint.constant = -content_suggestions::searchFieldTopMargin() -
+                                 ntp_header::kMaxTopMarginDiff * percent;
   heightConstraint.constant =
       content_suggestions::kSearchFieldHeight + maxHeightDiff * percent;
 
@@ -163,13 +152,20 @@ const CGFloat kMaxTopMarginDiff = 4;
 
   // Adjust the position of the search field's subviews by adjusting their
   // constraint constant value.
-  CGFloat constantDiff = percent * kMaxConstraintConstantDiff;
+  CGFloat constantDiff =
+      percent * (ntp_header::kMaxHorizontalMarginDiff + safeAreaInsets.left);
   for (NSLayoutConstraint* constraint in constraints) {
     if (constraint.constant > 0)
-      constraint.constant = constantDiff + kHintLabelSidePadding;
+      constraint.constant = constantDiff + ntp_header::kHintLabelSidePadding;
     else
       constraint.constant = -constantDiff;
   }
+}
+
+- (void)safeAreaInsetsDidChange {
+  [super safeAreaInsetsDidChange];
+  _toolbarController.heightConstraint.constant =
+      ToolbarHeightWithTopOfScreenOffset([_toolbarController statusBarOffset]);
 }
 
 - (void)fadeOutShadow {
@@ -177,6 +173,68 @@ const CGFloat kMaxTopMarginDiff = 4;
                    animations:^{
                      [_shadow setAlpha:0];
                    }];
+}
+
+#pragma mark - ToolbarOwner
+
+- (CGRect)toolbarFrame {
+  return _toolbarController.view.frame;
+}
+
+- (id<ToolbarSnapshotProviding>)toolbarSnapshotProvider {
+  return self;
+}
+
+#pragma mark - ToolbarSnapshotProviding
+
+- (UIView*)snapshotForTabSwitcher {
+  return nil;
+}
+
+- (UIView*)snapshotForStackViewWithWidth:(CGFloat)width
+                          safeAreaInsets:(UIEdgeInsets)safeAreaInsets {
+  UIView* toolbar = _toolbarController.view;
+  CGRect oldFrame = toolbar.frame;
+  CGRect newFrame = oldFrame;
+  newFrame.size.width = width;
+
+  toolbar.frame = newFrame;
+  [_toolbarController activateFakeSafeAreaInsets:safeAreaInsets];
+
+  UIView* toolbarSnapshotView;
+  if ([toolbar window]) {
+    // Take a snapshot only if it has been added to the view hierarchy.
+    toolbarSnapshotView = [toolbar snapshotViewAfterScreenUpdates:NO];
+  } else {
+    toolbarSnapshotView = [[UIView alloc] initWithFrame:toolbar.frame];
+    [toolbarSnapshotView layer].contents = static_cast<id>(
+        CaptureViewWithOption(toolbar, 0, kClientSideRendering).CGImage);
+  }
+
+  toolbar.frame = oldFrame;
+  [_toolbarController deactivateFakeSafeAreaInsets];
+
+  return toolbarSnapshotView;
+}
+
+- (UIColor*)toolbarBackgroundColor {
+  return [UIColor whiteColor];
+}
+
+#pragma mark - Private
+
+- (void)addConstraintsToToolbar {
+  _toolbarController.heightConstraint.constant =
+      ToolbarHeightWithTopOfScreenOffset([_toolbarController statusBarOffset]);
+  _toolbarController.heightConstraint.active = YES;
+  [NSLayoutConstraint activateConstraints:@[
+    [[_toolbarController view].leadingAnchor
+        constraintEqualToAnchor:self.leadingAnchor],
+    [[_toolbarController view].topAnchor
+        constraintEqualToAnchor:self.topAnchor],
+    [[_toolbarController view].trailingAnchor
+        constraintEqualToAnchor:self.trailingAnchor],
+  ]];
 }
 
 @end

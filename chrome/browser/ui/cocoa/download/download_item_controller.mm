@@ -13,28 +13,31 @@
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_shelf_context_menu.h"
-#include "chrome/browser/extensions/api/experience_sampling_private/experience_sampling.h"
 #import "chrome/browser/themes/theme_properties.h"
 #import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/download/download_item_button.h"
-#import "chrome/browser/ui/cocoa/download/download_item_cell.h"
 #include "chrome/browser/ui/cocoa/download/download_item_mac.h"
+#include "chrome/browser/ui/cocoa/download/download_item_view_protocol.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_context_menu_controller.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
+#include "chrome/browser/ui/cocoa/download/md_download_item_view.h"
+#import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/ui_localizer.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/grit/theme_resources.h"
-#include "content/public/browser/download_item.h"
+#include "components/download/public/common/download_item.h"
+#include "content/public/browser/download_item_utils.h"
 #include "content/public/browser/page_navigator.h"
 #include "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+#include "ui/base/cocoa/a11y_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/text_elider.h"
 
-using content::DownloadItem;
-using extensions::ExperienceSamplingEvent;
+using download::DownloadItem;
 
 namespace {
 
@@ -85,16 +88,15 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
 - (void)themeDidChangeNotification:(NSNotification*)aNotification;
 - (void)updateTheme:(const ui::ThemeProvider*)themeProvider;
 - (void)setState:(DownloadItemState)state;
-- (void)initExperienceSamplingEvent:(const char*)event;
-- (void)updateExperienceSamplingEvent:(const char*)event;
 @end
 
 // Implementation of DownloadItemController
 
 @implementation DownloadItemController
 
+@synthesize shelf = shelf_;
+
 - (id)initWithDownload:(DownloadItem*)downloadItem
-                 shelf:(DownloadShelfController*)shelf
              navigator:(content::PageNavigator*)navigator {
   if ((self = [super initWithNibName:@"DownloadItem"
                               bundle:base::mac::FrameworkBundle()])) {
@@ -108,7 +110,6 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
                           name:kBrowserThemeDidChangeNotification
                         object:nil];
 
-    shelf_ = shelf;
     state_ = kNormal;
     creationTime_ = base::Time::Now();
     font_list_.reset(new gfx::FontList(
@@ -119,19 +120,32 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
 }
 
 - (void)dealloc {
-  [self updateExperienceSamplingEvent:ExperienceSamplingEvent::kIgnore];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [progressView_ setController:nil];
+  [progressView_ setTarget:nil];
   [[self view] removeFromSuperview];
   [super dealloc];
 }
 
-- (void)awakeFromNib {
-  [progressView_ setController:self];
+- (void)loadView {
+  if (base::FeatureList::IsEnabled(features::kMacMaterialDesignDownloadShelf)) {
+    base::scoped_nsobject<MDDownloadItemView> progressView(
+        [[MDDownloadItemView alloc] init]);
+    progressView_ = progressView;
+    progressView_.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    progressView_.target = self;
+    progressView_.action = @selector(handleButtonClick:);
+    self.view = progressView_;
+  } else {
+    [super loadView];
+    base::scoped_nsobject<GTMUILocalizerAndLayoutTweaker>
+        localizerAndLayoutTweaker(
+            [[GTMUILocalizerAndLayoutTweaker alloc] init]);
+    [localizerAndLayoutTweaker applyLocalizer:localizer_
+                                   tweakingUI:[self view]];
+  }
 
-  GTMUILocalizerAndLayoutTweaker* localizerAndLayoutTweaker =
-      [[[GTMUILocalizerAndLayoutTweaker alloc] init] autorelease];
-  [localizerAndLayoutTweaker applyLocalizer:localizer_ tweakingUI:[self view]];
+  [progressView_ setController:self];
 
   [self setStateFromDownload:bridge_->download_model()];
 
@@ -146,13 +160,6 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
     return;
 
   [self setState:kDangerous];
-
-  // ExperienceSampling: Dangerous or malicious download warning is being shown
-  // to the user, so we start a new SamplingEvent and track it.
-  const char* event_name = downloadModel->MightBeMalicious()
-                               ? ExperienceSamplingEvent::kMaliciousDownload
-                               : ExperienceSamplingEvent::kDangerousDownload;
-  [self updateExperienceSamplingEvent:event_name];
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   NSImage* alertIcon;
@@ -213,21 +220,28 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
 - (void)setStateFromDownload:(DownloadItemModel*)downloadModel {
   DCHECK_EQ([self download], downloadModel->download());
 
+  if (downloadModel->download()->GetState() != DownloadItem::IN_PROGRESS)
+    ui::a11y_util::PlayElementUpdatedSound(self.view.window);
+
+  if (base::FeatureList::IsEnabled(features::kMacMaterialDesignDownloadShelf)) {
+    [progressView_ setStateFromDownload:downloadModel];
+    CGFloat preferredWidth = progressView_.preferredWidth;
+    if (preferredWidth != NSWidth(progressView_.frame))
+      [shelf_ layoutItems];
+    return;
+  }
+
   // Handle dangerous downloads.
   if (downloadModel->IsDangerous()) {
     [self showDangerousWarning:downloadModel];
     return;
   }
 
-  // Set path to draggable download on completion.
-  if (downloadModel->download()->GetState() == DownloadItem::COMPLETE)
-    [progressView_ setDownload:downloadModel->download()->GetTargetFilePath()];
-
-  [cell_ setStateFromDownload:downloadModel];
+  [progressView_ setStateFromDownload:downloadModel];
 }
 
 - (void)setIcon:(NSImage*)icon {
-  [cell_ setImage:icon];
+  [progressView_ setImage:icon];
 }
 
 - (void)remove {
@@ -244,8 +258,10 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
     [self updateTheme:[[[self view] window] themeProvider]];
 
   NSView* view = [self view];
-  NSRect containerFrame = [[view superview] frame];
-  [view setHidden:(NSMaxX([view frame]) > NSWidth(containerFrame))];
+  [view setHidden:NSMaxX(base::FeatureList::IsEnabled(
+                             features::kMacMaterialDesignDownloadShelf)
+                             ? [view.superview cr_localizedRect:view.frame]
+                             : view.frame) > NSMaxX(view.superview.bounds)];
 }
 
 - (void)downloadWasOpened {
@@ -264,6 +280,10 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
 }
 
 - (NSSize)preferredSize {
+  if (base::FeatureList::IsEnabled(features::kMacMaterialDesignDownloadShelf)) {
+    return NSMakeSize([progressView_ preferredWidth],
+                      NSHeight([progressView_ frame]));
+  }
   if (state_ == kNormal)
     return [progressView_ frame].size;
   DCHECK_EQ(kDangerous, state_);
@@ -328,28 +348,11 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
   [dangerousDownloadLabel_ setTextColor:color];
 }
 
-- (void)initExperienceSamplingEvent:(const char*)event {
-  sampling_event_.reset(new ExperienceSamplingEvent(
-      event,
-      bridge_->download_model()->download()->GetURL(),
-      bridge_->download_model()->download()->GetReferrerUrl(),
-      bridge_->download_model()->download()->GetBrowserContext()));
-}
-
-- (void)updateExperienceSamplingEvent:(const char*)event {
-  if (sampling_event_.get()) {
-    sampling_event_->CreateUserDecisionEvent(event);
-    sampling_event_.reset(NULL);
-  }
-}
-
 - (IBAction)saveDownload:(id)sender {
   // The user has confirmed a dangerous download.  We record how quickly the
   // user did this to detect whether we're being clickjacked.
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.save_download",
                            base::Time::Now() - creationTime_);
-  // ExperienceSampling: User chose to proceed with dangerous download.
-  [self updateExperienceSamplingEvent:ExperienceSamplingEvent::kProceed];
   // This will change the state and notify us.
   bridge_->download_model()->download()->ValidateDangerousDownload();
 }
@@ -363,7 +366,9 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
 }
 
 - (IBAction)showContextMenu:(id)sender {
-  [progressView_ showContextMenu];
+  DCHECK(
+      !base::FeatureList::IsEnabled(features::kMacMaterialDesignDownloadShelf));
+  [static_cast<DownloadItemButton*>(progressView_) showContextMenu];
 }
 
 @end

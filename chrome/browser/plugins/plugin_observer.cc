@@ -11,7 +11,6 @@
 #include "base/debug/crash_logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/browser_process.h"
@@ -22,131 +21,56 @@
 #include "chrome/browser/plugins/plugin_infobar_delegates.h"
 #include "chrome/browser/plugins/plugin_installer.h"
 #include "chrome/browser/plugins/plugin_installer_observer.h"
+#include "chrome/browser/plugins/reload_plugin_infobar_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/infobars/core/confirm_infobar_delegate.h"
-#include "components/infobars/core/infobar.h"
-#include "components/infobars/core/infobar_delegate.h"
 #include "components/infobars/core/simple_alert_infobar_delegate.h"
 #include "components/metrics_services_manager/metrics_services_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/webplugininfo.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::PluginService;
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(PluginObserver);
 
-namespace {
-
-// ReloadPluginInfoBarDelegate -------------------------------------------------
-
-class ReloadPluginInfoBarDelegate : public ConfirmInfoBarDelegate {
- public:
-  static void Create(InfoBarService* infobar_service,
-                     content::NavigationController* controller,
-                     const base::string16& message);
-
- private:
-  ReloadPluginInfoBarDelegate(content::NavigationController* controller,
-                              const base::string16& message);
-  ~ReloadPluginInfoBarDelegate() override;
-
-  // ConfirmInfobarDelegate:
-  infobars::InfoBarDelegate::InfoBarIdentifier GetIdentifier() const override;
-  const gfx::VectorIcon& GetVectorIcon() const override;
-  base::string16 GetMessageText() const override;
-  int GetButtons() const override;
-  base::string16 GetButtonLabel(InfoBarButton button) const override;
-  bool Accept() override;
-
-  content::NavigationController* controller_;
-  base::string16 message_;
-};
-
-// static
-void ReloadPluginInfoBarDelegate::Create(
-    InfoBarService* infobar_service,
-    content::NavigationController* controller,
-    const base::string16& message) {
-  infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
-      std::unique_ptr<ConfirmInfoBarDelegate>(
-          new ReloadPluginInfoBarDelegate(controller, message))));
-}
-
-ReloadPluginInfoBarDelegate::ReloadPluginInfoBarDelegate(
-    content::NavigationController* controller,
-    const base::string16& message)
-    : controller_(controller),
-      message_(message) {}
-
-ReloadPluginInfoBarDelegate::~ReloadPluginInfoBarDelegate() {}
-
-infobars::InfoBarDelegate::InfoBarIdentifier
-ReloadPluginInfoBarDelegate::GetIdentifier() const {
-  return RELOAD_PLUGIN_INFOBAR_DELEGATE;
-}
-
-const gfx::VectorIcon& ReloadPluginInfoBarDelegate::GetVectorIcon() const {
-  return kExtensionCrashedIcon;
-}
-
-base::string16 ReloadPluginInfoBarDelegate::GetMessageText() const {
-  return message_;
-}
-
-int ReloadPluginInfoBarDelegate::GetButtons() const {
-  return BUTTON_OK;
-}
-
-base::string16 ReloadPluginInfoBarDelegate::GetButtonLabel(
-    InfoBarButton button) const {
-  DCHECK_EQ(BUTTON_OK, button);
-  return l10n_util::GetStringUTF16(IDS_RELOAD_PAGE_WITH_PLUGIN);
-}
-
-bool ReloadPluginInfoBarDelegate::Accept() {
-  controller_->Reload(content::ReloadType::NORMAL, true);
-  return true;
-}
-
-}  // namespace
-
 // PluginObserver -------------------------------------------------------------
 
 class PluginObserver::PluginPlaceholderHost : public PluginInstallerObserver {
  public:
-  PluginPlaceholderHost(PluginObserver* observer,
-                        int routing_id,
-                        base::string16 plugin_name,
-                        PluginInstaller* installer)
+  PluginPlaceholderHost(
+      PluginObserver* observer,
+      base::string16 plugin_name,
+      PluginInstaller* installer,
+      chrome::mojom::PluginRendererPtr plugin_renderer_interface)
       : PluginInstallerObserver(installer),
         observer_(observer),
-        routing_id_(routing_id) {
+        plugin_renderer_interface_(std::move(plugin_renderer_interface)) {
+    plugin_renderer_interface_.set_connection_error_handler(
+        base::Bind(&PluginObserver::RemovePluginPlaceholderHost,
+                   base::Unretained(observer_), this));
     DCHECK(installer);
   }
 
   void DownloadFinished() override {
-    observer_->Send(new ChromeViewMsg_FinishedDownloadingPlugin(routing_id_));
+    plugin_renderer_interface_->FinishedDownloading();
   }
 
  private:
-  // Weak pointer; owns us.
   PluginObserver* observer_;
-
-  int routing_id_;
+  chrome::mojom::PluginRendererPtr plugin_renderer_interface_;
 };
 
 class PluginObserver::ComponentObserver
@@ -154,11 +78,14 @@ class PluginObserver::ComponentObserver
  public:
   using Events = update_client::UpdateClient::Observer::Events;
   ComponentObserver(PluginObserver* observer,
-                    int routing_id,
-                    const std::string& component_id)
+                    const std::string& component_id,
+                    chrome::mojom::PluginRendererPtr plugin_renderer_interface)
       : observer_(observer),
-        routing_id_(routing_id),
-        component_id_(component_id) {
+        component_id_(component_id),
+        plugin_renderer_interface_(std::move(plugin_renderer_interface)) {
+    plugin_renderer_interface_.set_connection_error_handler(
+        base::Bind(&PluginObserver::RemoveComponentObserver,
+                   base::Unretained(observer_), this));
     g_browser_process->component_updater()->AddObserver(this);
   }
 
@@ -167,22 +94,24 @@ class PluginObserver::ComponentObserver
   }
 
   void OnEvent(Events event, const std::string& id) override {
+    // TODO(lukasza): https://crbug.com/760637: |routing_id_| might live in a
+    // different process than the RenderViewHost - need to track and use
+    // placeholder's process when calling Send below.
+
     if (id != component_id_)
       return;
     switch (event) {
       case Events::COMPONENT_UPDATED:
-        observer_->Send(
-            new ChromeViewMsg_PluginComponentUpdateSuccess(routing_id_));
-        observer_->RemoveComponentObserver(routing_id_);
+        plugin_renderer_interface_->UpdateSuccess();
+        observer_->RemoveComponentObserver(this);
         break;
       case Events::COMPONENT_UPDATE_FOUND:
-        observer_->Send(
-            new ChromeViewMsg_PluginComponentUpdateDownloading(routing_id_));
+        plugin_renderer_interface_->UpdateDownloading();
         break;
       case Events::COMPONENT_NOT_UPDATED:
-        observer_->Send(
-            new ChromeViewMsg_PluginComponentUpdateFailure(routing_id_));
-        observer_->RemoveComponentObserver(routing_id_);
+      case Events::COMPONENT_UPDATE_ERROR:
+        plugin_renderer_interface_->UpdateFailure();
+        observer_->RemoveComponentObserver(this);
         break;
       default:
         // No message to send.
@@ -192,15 +121,15 @@ class PluginObserver::ComponentObserver
 
  private:
   PluginObserver* observer_;
-  int routing_id_;
   std::string component_id_;
+  chrome::mojom::PluginRendererPtr plugin_renderer_interface_;
   DISALLOW_COPY_AND_ASSIGN(ComponentObserver);
 };
 
 PluginObserver::PluginObserver(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      weak_ptr_factory_(this) {
-}
+      plugin_host_bindings_(web_contents, this),
+      weak_ptr_factory_(this) {}
 
 PluginObserver::~PluginObserver() {
 }
@@ -223,9 +152,10 @@ void PluginObserver::PluginCrashed(const base::FilePath& plugin_path,
                                     PROCESS_QUERY_INFORMATION | SYNCHRONIZE);
   bool is_running = false;
   if (plugin_process.IsValid()) {
-    is_running =
-        base::GetTerminationStatus(plugin_process.Handle(), NULL) ==
-            base::TERMINATION_STATUS_STILL_RUNNING;
+    int unused_exit_code = 0;
+    is_running = base::GetTerminationStatus(plugin_process.Handle(),
+                                            &unused_exit_code) ==
+                 base::TERMINATION_STATUS_STILL_RUNNING;
     plugin_process.Close();
   }
 
@@ -254,45 +184,32 @@ void PluginObserver::PluginCrashed(const base::FilePath& plugin_path,
       infobar_text);
 }
 
-bool PluginObserver::OnMessageReceived(
-      const IPC::Message& message,
-      content::RenderFrameHost* render_frame_host) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(PluginObserver, message)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_BlockedOutdatedPlugin,
-                        OnBlockedOutdatedPlugin)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_BlockedComponentUpdatedPlugin,
-                        OnBlockedComponentUpdatedPlugin)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RemovePluginPlaceholderHost,
-                        OnRemovePluginPlaceholderHost)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ShowFlashPermissionBubble,
-                        OnShowFlashPermissionBubble)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_CouldNotLoadPlugin,
-                        OnCouldNotLoadPlugin)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-
-  if (handled)
-    return true;
-
-  IPC_BEGIN_MESSAGE_MAP_WITH_PARAM(PluginObserver, message, render_frame_host)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_OpenPDF, OnOpenPDF)
-    IPC_MESSAGE_UNHANDLED(return false)
-  IPC_END_MESSAGE_MAP()
-
-  return true;
+// static
+void PluginObserver::CreatePluginObserverInfoBar(
+    InfoBarService* infobar_service,
+    const base::string16& plugin_name) {
+  SimpleAlertInfoBarDelegate::Create(
+      infobar_service,
+      infobars::InfoBarDelegate::PLUGIN_OBSERVER_INFOBAR_DELEGATE,
+      &kExtensionCrashedIcon,
+      l10n_util::GetStringFUTF16(IDS_PLUGIN_INITIALIZATION_ERROR_PROMPT,
+                                 plugin_name),
+      true);
 }
 
-void PluginObserver::OnBlockedOutdatedPlugin(int placeholder_id,
-                                             const std::string& identifier) {
+void PluginObserver::BlockedOutdatedPlugin(
+    chrome::mojom::PluginRendererPtr plugin_renderer,
+    const std::string& identifier) {
   PluginFinder* finder = PluginFinder::GetInstance();
   // Find plugin to update.
   PluginInstaller* installer = NULL;
   std::unique_ptr<PluginMetadata> plugin;
   if (finder->FindPluginWithIdentifier(identifier, &installer, &plugin)) {
-    plugin_placeholders_[placeholder_id] =
-        base::MakeUnique<PluginPlaceholderHost>(this, placeholder_id,
-                                                plugin->name(), installer);
+    auto plugin_placeholder = std::make_unique<PluginPlaceholderHost>(
+        this, plugin->name(), installer, std::move(plugin_renderer));
+    plugin_placeholders_[plugin_placeholder.get()] =
+        std::move(plugin_placeholder);
+
     OutdatedPluginInfoBarDelegate::Create(
         InfoBarService::FromWebContents(web_contents()), installer,
         std::move(plugin));
@@ -301,61 +218,39 @@ void PluginObserver::OnBlockedOutdatedPlugin(int placeholder_id,
   }
 }
 
-void PluginObserver::OnBlockedComponentUpdatedPlugin(
-    int placeholder_id,
+void PluginObserver::BlockedComponentUpdatedPlugin(
+    chrome::mojom::PluginRendererPtr plugin_renderer,
     const std::string& identifier) {
-  component_observers_[placeholder_id] =
-      base::MakeUnique<ComponentObserver>(this, placeholder_id, identifier);
+  auto component_observer = std::make_unique<ComponentObserver>(
+      this, identifier, std::move(plugin_renderer));
+  component_observers_[component_observer.get()] =
+      std::move(component_observer);
   g_browser_process->component_updater()->GetOnDemandUpdater().OnDemandUpdate(
       identifier, component_updater::Callback());
 }
 
-void PluginObserver::RemoveComponentObserver(int placeholder_id) {
-  auto it = component_observers_.find(placeholder_id);
-  DCHECK(it != component_observers_.end());
-  component_observers_.erase(it);
+void PluginObserver::RemoveComponentObserver(
+    ComponentObserver* component_observer) {
+  component_observers_.erase(component_observer);
 }
 
-void PluginObserver::OnRemovePluginPlaceholderHost(int placeholder_id) {
-  auto it = plugin_placeholders_.find(placeholder_id);
-  if (it == plugin_placeholders_.end()) {
-    NOTREACHED();
-    return;
-  }
-  plugin_placeholders_.erase(it);
+void PluginObserver::RemovePluginPlaceholderHost(
+    PluginPlaceholderHost* placeholder) {
+  plugin_placeholders_.erase(placeholder);
 }
 
-void PluginObserver::OnShowFlashPermissionBubble() {
+void PluginObserver::ShowFlashPermissionBubble() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   FlashDownloadInterception::InterceptFlashDownloadNavigation(
       web_contents(), web_contents()->GetLastCommittedURL());
 }
 
-void PluginObserver::OnCouldNotLoadPlugin(const base::FilePath& plugin_path) {
+void PluginObserver::CouldNotLoadPlugin(const base::FilePath& plugin_path) {
   g_browser_process->GetMetricsServicesManager()->OnPluginLoadingError(
       plugin_path);
   base::string16 plugin_name =
       PluginService::GetInstance()->GetPluginDisplayNameByPath(plugin_path);
-  SimpleAlertInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(web_contents()),
-      infobars::InfoBarDelegate::PLUGIN_OBSERVER, &kExtensionCrashedIcon,
-      l10n_util::GetStringFUTF16(IDS_PLUGIN_INITIALIZATION_ERROR_PROMPT,
-                                 plugin_name),
-      true);
-}
-
-void PluginObserver::OnOpenPDF(content::RenderFrameHost* render_frame_host,
-                               const GURL& url) {
-  if (!content::ChildProcessSecurityPolicy::GetInstance()->CanRequestURL(
-          render_frame_host->GetRoutingID(), url))
-    return;
-
-  web_contents()->OpenURL(content::OpenURLParams(
-      url,
-      content::Referrer::SanitizeForRequest(
-          url, content::Referrer(web_contents()->GetURL(),
-                                 blink::kWebReferrerPolicyDefault)),
-      WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui::PAGE_TRANSITION_AUTO_BOOKMARK, false));
+  CreatePluginObserverInfoBar(InfoBarService::FromWebContents(web_contents()),
+                              plugin_name);
 }

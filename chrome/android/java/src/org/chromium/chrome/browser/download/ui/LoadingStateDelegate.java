@@ -14,12 +14,12 @@ package org.chromium.chrome.browser.download.ui;
 public class LoadingStateDelegate {
     public static final int REGULAR_DOWNLOADS = 0b001;
     public static final int INCOGNITO_DOWNLOADS = 0b010;
-    public static final int OFFLINE_PAGES = 0b100;
+    public static final int OFFLINE_ITEMS = 0b100;
 
     private static final int ALL_LOADED = 0b111;
 
     private int mLoadingState;
-    private int mPendingFilter = DownloadFilter.FILTER_ALL;
+    private @DownloadFilter.Type int mPendingFilter = DownloadFilter.FILTER_ALL;
 
     /** @param offTheRecord Whether this delegate needs to consider incognito. */
     public LoadingStateDelegate(boolean offTheRecord) {
@@ -43,12 +43,12 @@ public class LoadingStateDelegate {
     }
 
     /** Caches a filter for when the backends have loaded. */
-    public void setPendingFilter(int filter) {
+    public void setPendingFilter(@DownloadFilter.Type int filter) {
         mPendingFilter = filter;
     }
 
     /** @return The cached filter, or {@link DownloadFilter#FILTER_ALL} if none was set. */
-    public int getPendingFilter() {
+    public @DownloadFilter.Type int getPendingFilter() {
         return mPendingFilter;
     }
 }

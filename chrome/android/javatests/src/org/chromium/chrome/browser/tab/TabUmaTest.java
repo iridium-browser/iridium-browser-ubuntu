@@ -36,8 +36,7 @@ import java.util.concurrent.ExecutionException;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class TabUmaTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -51,8 +50,7 @@ public class TabUmaTest {
     @Before
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mTestUrl = mTestServer.getURL(TEST_PATH);
     }
 
@@ -71,7 +69,7 @@ public class TabUmaTest {
         final Tab tab = ThreadUtils.runOnUiThreadBlocking(new Callable<Tab>() {
             @Override
             public Tab call() {
-                Tab bgTab = Tab.createTabForLazyLoad(mActivityTestRule.getActivity(), false,
+                Tab bgTab = Tab.createTabForLazyLoad(false,
                         mActivityTestRule.getActivity().getWindowAndroid(),
                         TabLaunchType.FROM_LONGPRESS_BACKGROUND, Tab.INVALID_TAB_ID,
                         new LoadUrlParams(mTestUrl));
@@ -126,8 +124,8 @@ public class TabUmaTest {
         final Tab liveBgTab = ThreadUtils.runOnUiThreadBlocking(new Callable<Tab>() {
             @Override
             public Tab call() {
-                Tab bgTab = Tab.createLiveTab(Tab.INVALID_TAB_ID, mActivityTestRule.getActivity(),
-                        false, mActivityTestRule.getActivity().getWindowAndroid(),
+                Tab bgTab = Tab.createLiveTab(Tab.INVALID_TAB_ID, false,
+                        mActivityTestRule.getActivity().getWindowAndroid(),
                         TabLaunchType.FROM_LONGPRESS_BACKGROUND, Tab.INVALID_TAB_ID, true);
                 bgTab.initialize(null, null, new TabDelegateFactory(), true, false);
                 bgTab.loadUrl(new LoadUrlParams(mTestUrl));
@@ -143,8 +141,8 @@ public class TabUmaTest {
         final Tab killedBgTab = ThreadUtils.runOnUiThreadBlocking(new Callable<Tab>() {
             @Override
             public Tab call() {
-                Tab bgTab = Tab.createLiveTab(Tab.INVALID_TAB_ID, mActivityTestRule.getActivity(),
-                        false, mActivityTestRule.getActivity().getWindowAndroid(),
+                Tab bgTab = Tab.createLiveTab(Tab.INVALID_TAB_ID, false,
+                        mActivityTestRule.getActivity().getWindowAndroid(),
                         TabLaunchType.FROM_LONGPRESS_BACKGROUND, Tab.INVALID_TAB_ID, true);
                 bgTab.initialize(null, null, new TabDelegateFactory(), true, false);
                 bgTab.loadUrl(new LoadUrlParams(mTestUrl));
@@ -162,7 +160,7 @@ public class TabUmaTest {
         final Tab frozenBgTab = ThreadUtils.runOnUiThreadBlocking(new Callable<Tab>() {
             @Override
             public Tab call() {
-                Tab bgTab = Tab.createTabForLazyLoad(mActivityTestRule.getActivity(), false,
+                Tab bgTab = Tab.createTabForLazyLoad(false,
                         mActivityTestRule.getActivity().getWindowAndroid(),
                         TabLaunchType.FROM_LONGPRESS_BACKGROUND, Tab.INVALID_TAB_ID,
                         new LoadUrlParams(mTestUrl));

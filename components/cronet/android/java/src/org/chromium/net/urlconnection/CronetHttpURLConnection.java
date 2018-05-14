@@ -4,6 +4,7 @@
 
 package org.chromium.net.urlconnection;
 
+import android.annotation.SuppressLint;
 import android.util.Pair;
 
 import org.chromium.base.Log;
@@ -20,6 +21,7 @@ import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.ProtocolException;
 import java.net.URL;
+import java.net.URLConnection;
 import java.nio.ByteBuffer;
 import java.util.AbstractMap;
 import java.util.ArrayList;
@@ -44,7 +46,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     private CronetInputStream mInputStream;
     private CronetOutputStream mOutputStream;
     private UrlResponseInfo mResponseInfo;
-    private CronetException mException;
+    private IOException mException;
     private boolean mOnRedirectCalled;
     // Whether response headers are received, the request is failed, or the request is canceled.
     private boolean mHasResponseHeadersOrCompleted;
@@ -228,6 +230,8 @@ public class CronetHttpURLConnection extends HttpURLConnection {
      * Helper method to get content length passed in by
      * {@link #setFixedLengthStreamingMode}
      */
+    // TODO(crbug.com/762630): Fix and remove suppression.
+    @SuppressLint("NewApi")
     private long getStreamingModeContentLength() {
         long contentLength = fixedContentLength;
         // Use reflection to see whether fixedContentLengthLong (only added
@@ -239,7 +243,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
             if (superFixedContentLengthLong != -1) {
                 contentLength = superFixedContentLengthLong;
             }
-        } catch (Exception e) {
+        } catch (NoSuchFieldException | IllegalAccessException e) {
             // Ignored.
         }
         return contentLength;
@@ -487,14 +491,13 @@ public class CronetHttpURLConnection extends HttpURLConnection {
                         "Exception cannot be null in onFailed.");
             }
             mResponseInfo = info;
-            mException = exception;
-            setResponseDataCompleted(mException);
+            setResponseDataCompleted(exception);
         }
 
         @Override
         public void onCanceled(UrlRequest request, UrlResponseInfo info) {
             mResponseInfo = info;
-            setResponseDataCompleted(new IOException("stream closed"));
+            setResponseDataCompleted(new IOException("disconnect() called"));
         }
 
         /**
@@ -504,6 +507,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
          *            caller tries to read more data.
          */
         private void setResponseDataCompleted(IOException exception) {
+            mException = exception;
             if (mInputStream != null) {
                 mInputStream.setResponseDataCompleted(exception);
             }

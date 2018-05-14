@@ -166,7 +166,7 @@ class CORE_EXPORT LayoutMultiColumnFlowThread : public LayoutFlowThread,
     // The flow thread is the first child of the multicol container. If the flow
     // thread is also the last child, it means that there are no siblings; i.e.
     // we have no column boxes.
-    return last_sibling_box != this ? last_sibling_box : 0;
+    return last_sibling_box != this ? last_sibling_box : nullptr;
   }
 
   // Find the first set inside which the specified layoutObject (which is a
@@ -229,7 +229,7 @@ class CORE_EXPORT LayoutMultiColumnFlowThread : public LayoutFlowThread,
   LayoutPoint VisualPointToFlowThreadPoint(
       const LayoutPoint& visual_point) const override;
 
-  int InlineBlockBaseline(LineDirectionMode) const override;
+  LayoutUnit InlineBlockBaseline(LineDirectionMode) const override;
 
   LayoutMultiColumnSet* ColumnSetAtBlockOffset(LayoutUnit,
                                                PageBoundaryRule) const final;
@@ -281,6 +281,8 @@ class CORE_EXPORT LayoutMultiColumnFlowThread : public LayoutFlowThread,
   void AppendNewFragmentainerGroupIfNeeded(LayoutUnit offset_in_flow_thread,
                                            PageBoundaryRule);
 
+  void UpdateFromNG();
+
   // Implementing FragmentationContext:
   bool IsFragmentainerLogicalHeightKnown() final;
   LayoutUnit FragmentainerLogicalHeightAt(LayoutUnit block_offset) final;
@@ -300,6 +302,7 @@ class CORE_EXPORT LayoutMultiColumnFlowThread : public LayoutFlowThread,
  private:
   void CalculateColumnHeightAvailable();
   void CalculateColumnCountAndWidth(LayoutUnit& width, unsigned& count) const;
+  static LayoutUnit ColumnGap(const ComputedStyle&, LayoutUnit available_width);
   void CreateAndInsertMultiColumnSet(LayoutBox* insert_before = nullptr);
   void CreateAndInsertSpannerPlaceholder(
       LayoutBox* spanner_object_in_flow_thread,

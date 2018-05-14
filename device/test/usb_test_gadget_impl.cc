@@ -33,7 +33,7 @@
 #include "device/usb/usb_device_handle.h"
 #include "device/usb/usb_service.h"
 #include "net/base/escape.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -146,13 +146,14 @@ class URLRequestContextGetter : public net::URLRequestContextGetter {
       : network_task_runner_(network_task_runner) {}
 
  private:
-  ~URLRequestContextGetter() override {}
+  ~URLRequestContextGetter() override = default;
 
   // net::URLRequestContextGetter implementation
   net::URLRequestContext* GetURLRequestContext() override {
     if (!context_) {
       net::URLRequestContextBuilder context_builder;
-      context_builder.set_proxy_service(net::ProxyService::CreateDirect());
+      context_builder.set_proxy_resolution_service(
+          net::ProxyResolutionService::CreateDirect());
       context_ = context_builder.Build();
     }
     return context_.get();
@@ -169,8 +170,8 @@ class URLRequestContextGetter : public net::URLRequestContextGetter {
 
 class URLFetcherDelegate : public net::URLFetcherDelegate {
  public:
-  URLFetcherDelegate() {}
-  ~URLFetcherDelegate() override {}
+  URLFetcherDelegate() = default;
+  ~URLFetcherDelegate() override = default;
 
   void WaitForCompletion() { run_loop_.Run(); }
 
@@ -209,17 +210,18 @@ class UsbGadgetFactory : public UsbService::Observer,
 
     static uint32_t next_session_id;
     base::ProcessId process_id = base::GetCurrentProcId();
-    session_id_ = base::StringPrintf("%d-%d", process_id, next_session_id++);
+    session_id_ =
+        base::StringPrintf("%" CrPRIdPid "-%d", process_id, next_session_id++);
 
     observer_.Add(usb_service_);
   }
 
-  ~UsbGadgetFactory() override {}
+  ~UsbGadgetFactory() override = default;
 
   std::unique_ptr<UsbTestGadget> WaitForDevice() {
     EnumerateDevices();
     run_loop_.Run();
-    return base::MakeUnique<UsbTestGadgetImpl>(request_context_getter_,
+    return std::make_unique<UsbTestGadgetImpl>(request_context_getter_,
                                                usb_service_, device_);
   }
 
@@ -411,7 +413,7 @@ class DeviceAddListener : public UsbService::Observer {
         weak_factory_(this) {
     observer_.Add(usb_service_);
   }
-  ~DeviceAddListener() override {}
+  ~DeviceAddListener() override = default;
 
   scoped_refptr<UsbDevice> WaitForAdd() {
     usb_service_->GetDevices(base::Bind(&DeviceAddListener::OnDevicesEnumerated,
@@ -477,7 +479,7 @@ class DeviceRemoveListener : public UsbService::Observer {
         weak_factory_(this) {
     observer_.Add(usb_service_);
   }
-  ~DeviceRemoveListener() override {}
+  ~DeviceRemoveListener() override = default;
 
   void WaitForRemove() {
     usb_service_->GetDevices(

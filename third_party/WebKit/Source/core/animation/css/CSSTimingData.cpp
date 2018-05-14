@@ -14,10 +14,7 @@ CSSTimingData::CSSTimingData() {
   timing_function_list_.push_back(InitialTimingFunction());
 }
 
-CSSTimingData::CSSTimingData(const CSSTimingData& other)
-    : delay_list_(other.delay_list_),
-      duration_list_(other.duration_list_),
-      timing_function_list_(other.timing_function_list_) {}
+CSSTimingData::CSSTimingData(const CSSTimingData& other) = default;
 
 Timing CSSTimingData::ConvertToTiming(size_t index) const {
   Timing timing;
@@ -26,6 +23,24 @@ Timing CSSTimingData::ConvertToTiming(size_t index) const {
   timing.timing_function = GetRepeated(timing_function_list_, index);
   timing.AssertValid();
   return timing;
+}
+
+bool CSSTimingData::TimingMatchForStyleRecalc(
+    const CSSTimingData& other) const {
+  if (delay_list_ != other.delay_list_)
+    return false;
+  if (duration_list_ != other.duration_list_)
+    return false;
+  if (timing_function_list_.size() != other.timing_function_list_.size())
+    return false;
+
+  for (size_t i = 0; i < timing_function_list_.size(); i++) {
+    if (!DataEquivalent(timing_function_list_.at(i),
+                        other.timing_function_list_.at(i))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace blink

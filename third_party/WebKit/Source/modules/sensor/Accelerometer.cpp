@@ -9,37 +9,47 @@ using device::mojom::blink::SensorType;
 namespace blink {
 
 Accelerometer* Accelerometer::Create(ExecutionContext* execution_context,
-                                     const SensorOptions& options,
+                                     const SpatialSensorOptions& options,
                                      ExceptionState& exception_state) {
   return new Accelerometer(execution_context, options, exception_state,
-                           SensorType::ACCELEROMETER);
+                           SensorType::ACCELEROMETER,
+                           {mojom::FeaturePolicyFeature::kAccelerometer});
 }
 
 // static
 Accelerometer* Accelerometer::Create(ExecutionContext* execution_context,
                                      ExceptionState& exception_state) {
-  return Create(execution_context, SensorOptions(), exception_state);
+  return Create(execution_context, SpatialSensorOptions(), exception_state);
 }
 
-Accelerometer::Accelerometer(ExecutionContext* execution_context,
-                             const SensorOptions& options,
-                             ExceptionState& exception_state,
-                             SensorType sensor_type)
-    : Sensor(execution_context, options, exception_state, sensor_type) {}
+Accelerometer::Accelerometer(
+    ExecutionContext* execution_context,
+    const SpatialSensorOptions& options,
+    ExceptionState& exception_state,
+    SensorType sensor_type,
+    const Vector<mojom::FeaturePolicyFeature>& features)
+    : Sensor(execution_context,
+             options,
+             exception_state,
+             sensor_type,
+             features) {}
 
 double Accelerometer::x(bool& is_null) const {
-  return ReadingValue(0, is_null);
+  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
+  return GetReading().accel.x;
 }
 
 double Accelerometer::y(bool& is_null) const {
-  return ReadingValue(1, is_null);
+  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
+  return GetReading().accel.y;
 }
 
 double Accelerometer::z(bool& is_null) const {
-  return ReadingValue(2, is_null);
+  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
+  return GetReading().accel.z;
 }
 
-DEFINE_TRACE(Accelerometer) {
+void Accelerometer::Trace(blink::Visitor* visitor) {
   Sensor::Trace(visitor);
 }
 

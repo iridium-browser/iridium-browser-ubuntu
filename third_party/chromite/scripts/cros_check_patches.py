@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -10,7 +11,6 @@ import functools
 import json
 import os
 import parallel_emerge
-import portage  # pylint: disable=import-error
 import re
 import shutil
 import sys
@@ -18,6 +18,7 @@ import tempfile
 
 from chromite.lib import cros_build_lib
 from chromite.lib import osutils
+from chromite.lib import portage_util
 
 
 class PatchReporter(object):
@@ -100,8 +101,8 @@ class PatchReporter(object):
 
   def _ObservePatches(self, temp_space, deps_map):
     for cpv in deps_map:
-      cat, name, _, _ = portage.versions.catpkgsplit(cpv)
-      if self.Ignored('%s/%s' % (cat, name)):
+      split = portage_util.SplitCPV(cpv)
+      if self.Ignored('%s/%s' % (split.category, split.package)):
         continue
       cmd = self.equery_cmd[:]
       cmd.extend(['which', cpv])
@@ -136,11 +137,11 @@ class PatchReporter(object):
     patches = []
     patch_regex = re.compile(patch_regex)
     for line in lines:
-      cat, pkg, _, patchmsg = line.split(':')
+      cat, pv, _, patchmsg = line.split(':')
       cat = os.path.basename(cat)
-      _, pkg, _, _ = portage.versions.catpkgsplit('x-x/%s' % pkg)
+      split = portage_util.SplitCPV('%s/%s' % (cat, pv))
       patch_name = re.sub(patch_regex, r'\1', patchmsg)
-      patches.append('%s/%s %s' % (cat, pkg, patch_name))
+      patches.append('%s/%s %s' % (cat, split.package, patch_name))
 
     return patches
 

@@ -5,6 +5,7 @@
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_footer_item.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/gtest_support.h"
 
@@ -14,51 +15,66 @@
 
 namespace {
 
+using ContentSuggestionsFooterItemTest = PlatformTest;
+
 // Tests that configureCell: sets the title of the button and the action.
-TEST(ContentSuggestionsFooterItemTest, CellIsConfigured) {
+TEST_F(ContentSuggestionsFooterItemTest, CellIsConfigured) {
   // Setup.
   NSString* title = @"testTitle";
-  __block BOOL hasBeenCalled = NO;
-  ProceduralBlock block = ^void() {
-    hasBeenCalled = YES;
-  };
   ContentSuggestionsFooterItem* item =
       [[ContentSuggestionsFooterItem alloc] initWithType:0
                                                    title:title
-                                                   block:block];
+                                                callback:nil];
+  item.loading = YES;
   ContentSuggestionsFooterCell* cell = [[[item cellClass] alloc] init];
   ASSERT_EQ([ContentSuggestionsFooterCell class], [cell class]);
   ASSERT_EQ(nil, [cell.button titleForState:UIControlStateNormal]);
+  id mockCell = OCMPartialMock(cell);
+  OCMExpect([mockCell setLoading:YES]);
 
   // Action.
   [item configureCell:cell];
 
   // Tests.
-  ASSERT_EQ(title, [cell.button titleForState:UIControlStateNormal]);
-  ASSERT_FALSE(hasBeenCalled);
-  [cell.button sendActionsForControlEvents:UIControlEventTouchUpInside];
-  ASSERT_TRUE(hasBeenCalled);
+  EXPECT_EQ(title, [cell.button titleForState:UIControlStateNormal]);
+  EXPECT_EQ(cell, item.configuredCell);
+  EXPECT_OCMOCK_VERIFY(mockCell);
 }
 
-// Tests that when the cell is reused the button's block is removed.
-TEST(ContentSuggestionsFooterItemTest, ReuseCell) {
+// Tests that the item is the delegate for the cell, and when the cell button is
+// tapped, the callback is called.
+TEST_F(ContentSuggestionsFooterItemTest, CellTapped) {
+  NSString* title = @"testTitle";
   __block BOOL hasBeenCalled = NO;
-  ProceduralBlock block = ^void() {
-    hasBeenCalled = YES;
-  };
+  __block ContentSuggestionsFooterCell* blockCell = nil;
+  __block ContentSuggestionsFooterItem* blockItem = nil;
+  void (^block)(ContentSuggestionsFooterItem*, ContentSuggestionsFooterCell*) =
+      ^void(ContentSuggestionsFooterItem* item,
+            ContentSuggestionsFooterCell* cell) {
+        hasBeenCalled = YES;
+        blockCell = cell;
+        blockItem = item;
+      };
   ContentSuggestionsFooterItem* item =
       [[ContentSuggestionsFooterItem alloc] initWithType:0
-                                                   title:@""
-                                                   block:block];
+                                                   title:title
+                                                callback:block];
+  item.loading = NO;
   ContentSuggestionsFooterCell* cell = [[[item cellClass] alloc] init];
-  [item configureCell:cell];
+  id mockCell = OCMPartialMock(cell);
+  OCMExpect([mockCell setLoading:NO]);
 
   // Action.
-  [cell prepareForReuse];
+  [item configureCell:cell];
 
   // Test.
-  ASSERT_FALSE(hasBeenCalled);
+  EXPECT_EQ(title, [cell.button titleForState:UIControlStateNormal]);
+  EXPECT_FALSE(hasBeenCalled);
   [cell.button sendActionsForControlEvents:UIControlEventTouchUpInside];
-  ASSERT_FALSE(hasBeenCalled);
+  EXPECT_TRUE(hasBeenCalled);
+  EXPECT_EQ(item, blockItem);
+  EXPECT_EQ(cell, blockCell);
+  EXPECT_EQ(item, cell.delegate);
+  EXPECT_OCMOCK_VERIFY(mockCell);
 }
 }

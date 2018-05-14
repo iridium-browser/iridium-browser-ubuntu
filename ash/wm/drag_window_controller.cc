@@ -5,17 +5,19 @@
 #include "ash/wm/drag_window_controller.h"
 
 #include <algorithm>
+#include <memory>
 
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
-#include "base/memory/ptr_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/base/hit_test.h"
+#include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_tree_owner.h"
 #include "ui/compositor/paint_context.h"
@@ -90,7 +92,7 @@ class DragWindowController::DragWindowDetails : public aura::WindowDelegate {
     drag_window_->SetProperty(aura::client::kAnimationsDisabledKey, true);
     container->AddChild(drag_window_);
     drag_window_->SetBounds(bounds_in_screen);
-    SetShadowElevation(drag_window_, ::wm::ShadowElevation::LARGE);
+    ::wm::SetShadowElevation(drag_window_, ::wm::kShadowElevationActiveWindow);
 
     RecreateWindowLayers(original_window);
     layer_owner_->root()->SetVisible(true);
@@ -143,7 +145,8 @@ class DragWindowController::DragWindowDetails : public aura::WindowDelegate {
   bool CanFocus() override { return false; }
   void OnCaptureLost() override {}
   void OnPaint(const ui::PaintContext& context) override {}
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
+  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                  float new_device_scale_factor) override {}
   void OnWindowDestroyed(aura::Window* window) override {}
   void OnWindowTargetVisibilityChanged(bool visible) override {}
   bool HasHitTestMask() const override { return false; }
@@ -186,11 +189,11 @@ DragWindowController::DragWindowController(aura::Window* window)
     if (current.id() == display.id())
       continue;
     drag_windows_.push_back(
-        base::MakeUnique<DragWindowDetails>(display, window_));
+        std::make_unique<DragWindowDetails>(display, window_));
   }
 }
 
-DragWindowController::~DragWindowController() {}
+DragWindowController::~DragWindowController() = default;
 
 void DragWindowController::Update(const gfx::Rect& bounds_in_screen,
                                   const gfx::Point& drag_location_in_screen) {
@@ -232,7 +235,8 @@ const ui::LayerTreeOwner* DragWindowController::GetDragLayerOwnerForTest(
 }
 
 void DragWindowController::RequestLayerPaintForTest() {
-  ui::PaintContext context(nullptr, 1.0f, gfx::Rect());
+  ui::PaintContext context(nullptr, 1.0f, gfx::Rect(),
+                           window_->GetHost()->compositor()->is_pixel_canvas());
   for (auto& details : drag_windows_) {
     std::vector<ui::Layer*> layers;
     layers.push_back(details->drag_window_->layer());

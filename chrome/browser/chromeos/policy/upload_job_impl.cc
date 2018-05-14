@@ -10,7 +10,6 @@
 
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/stringprintf.h"
@@ -19,6 +18,7 @@
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "net/base/mime_util.h"
 #include "net/http/http_status_code.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request_status.h"
 
 namespace policy {
@@ -154,6 +154,7 @@ UploadJobImpl::UploadJobImpl(
     scoped_refptr<net::URLRequestContextGetter> url_context_getter,
     Delegate* delegate,
     std::unique_ptr<MimeBoundaryGenerator> boundary_generator,
+    net::NetworkTrafficAnnotationTag traffic_annotation,
     scoped_refptr<base::SequencedTaskRunner> task_runner)
     : OAuth2TokenService::Consumer("cros_upload_job"),
       upload_url_(upload_url),
@@ -162,6 +163,7 @@ UploadJobImpl::UploadJobImpl(
       url_context_getter_(url_context_getter),
       delegate_(delegate),
       boundary_generator_(std::move(boundary_generator)),
+      traffic_annotation_(traffic_annotation),
       state_(IDLE),
       retry_(0),
       task_runner_(task_runner),
@@ -196,7 +198,7 @@ void UploadJobImpl::AddDataSegment(
   if (state_ != IDLE)
     return;
 
-  data_segments_.push_back(base::MakeUnique<DataSegment>(
+  data_segments_.push_back(std::make_unique<DataSegment>(
       name, filename, std::move(data), header_entries));
 }
 
@@ -306,8 +308,8 @@ void UploadJobImpl::CreateAndStartURLFetcher(const std::string& access_token) {
   content_type.append("; boundary=");
   content_type.append(*mime_boundary_.get());
 
-  upload_fetcher_ =
-      net::URLFetcher::Create(upload_url_, net::URLFetcher::POST, this);
+  upload_fetcher_ = net::URLFetcher::Create(upload_url_, net::URLFetcher::POST,
+                                            this, traffic_annotation_);
   upload_fetcher_->SetRequestContext(url_context_getter_.get());
   upload_fetcher_->SetUploadData(content_type, *post_data_);
   upload_fetcher_->AddExtraRequestHeader(
@@ -411,8 +413,9 @@ void UploadJobImpl::OnURLFetchComplete(const net::URLFetcher* source) {
       access_token_.clear();
       post_data_.reset();
       state_ = SUCCESS;
-      UMA_HISTOGRAM_ENUMERATION(kUploadJobSuccessHistogram, retry_,
-                                UploadJobSuccess::REQUEST_MAX);
+      UMA_HISTOGRAM_EXACT_LINEAR(
+          kUploadJobSuccessHistogram, retry_,
+          static_cast<int>(UploadJobSuccess::REQUEST_MAX));
       delegate_->OnSuccess();
     } else if (response_code == net::HTTP_UNAUTHORIZED) {
       SYSLOG(ERROR) << "Unauthorized request.";

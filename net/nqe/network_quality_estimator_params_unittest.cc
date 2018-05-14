@@ -7,6 +7,7 @@
 #include <map>
 #include <string>
 
+#include "net/base/network_change_notifier.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -81,7 +82,7 @@ TEST(NetworkQualityEstimatorParamsTest, TypicalNetworkQualities) {
     // The typical throughput for an effective connection type should not be
     // more than the threshold throughput.
     if (params.ConnectionThreshold(ect).downstream_throughput_kbps() !=
-        nqe::internal::kInvalidThroughput) {
+        nqe::internal::INVALID_RTT_THROUGHPUT) {
       EXPECT_LT(params.TypicalNetworkQuality(ect).downstream_throughput_kbps(),
                 params.ConnectionThreshold(ect).downstream_throughput_kbps());
     }
@@ -97,7 +98,8 @@ TEST(NetworkQualityEstimatorParamsTest, TypicalNetworkQualities) {
           .transport_rtt(),
       params.ConnectionThreshold(EFFECTIVE_CONNECTION_TYPE_3G).transport_rtt());
   if (params.ConnectionThreshold(EFFECTIVE_CONNECTION_TYPE_3G)
-          .downstream_throughput_kbps() != nqe::internal::kInvalidThroughput) {
+          .downstream_throughput_kbps() !=
+      nqe::internal::INVALID_RTT_THROUGHPUT) {
     EXPECT_GT(params.TypicalNetworkQuality(EFFECTIVE_CONNECTION_TYPE_4G)
                   .downstream_throughput_kbps(),
               params.ConnectionThreshold(EFFECTIVE_CONNECTION_TYPE_3G)
@@ -135,6 +137,33 @@ TEST(NetworkQualityEstimatorParamsTest, ObtainAlgorithmToUseFromParams) {
     EXPECT_EQ(test.expected_algorithm,
               params.GetEffectiveConnectionTypeAlgorithm())
         << test.algorithm;
+  }
+}
+
+// Verify ECT when forced ECT is Slow-2G-On-Cellular.
+TEST(NetworkQualityEstimatorParamsTest, GetForcedECTCellularOnly) {
+  std::map<std::string, std::string> variation_params;
+  // Set force-effective-connection-type to Slow-2G-On-Cellular.
+  variation_params[kForceEffectiveConnectionType] =
+      kEffectiveConnectionTypeSlow2GOnCellular;
+
+  NetworkQualityEstimatorParams params(variation_params);
+
+  for (size_t i = 0; i < NetworkChangeNotifier::ConnectionType::CONNECTION_LAST;
+       ++i) {
+    NetworkChangeNotifier::ConnectionType connection_type =
+        static_cast<NetworkChangeNotifier::ConnectionType>(i);
+    base::Optional<EffectiveConnectionType> ect =
+        params.GetForcedEffectiveConnectionType(connection_type);
+
+    if (net::NetworkChangeNotifier::IsConnectionCellular(connection_type)) {
+      // Test for cellular connection types. Make sure that ECT is Slow-2G.
+      EXPECT_EQ(EFFECTIVE_CONNECTION_TYPE_SLOW_2G, ect);
+    } else {
+      // Test for non-cellular connection types. Make sure that there is no
+      // forced ect.
+      EXPECT_EQ(base::nullopt, ect);
+    }
   }
 }
 

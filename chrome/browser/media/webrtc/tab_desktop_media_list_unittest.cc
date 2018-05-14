@@ -31,7 +31,6 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #endif  // defined(OS_CHROMEOS)
@@ -158,7 +157,6 @@ class TabDesktopMediaListTest : public testing::Test {
 #if defined(OS_CHROMEOS)
     base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
     cl->AppendSwitch(switches::kTestType);
-    chromeos::WallpaperManager::Initialize();
 #endif
 
     // Create profile.
@@ -170,7 +168,7 @@ class TabDesktopMediaListTest : public testing::Test {
 
     // Create browser.
     Browser::CreateParams profile_params(profile_, true);
-    browser_ = chrome::CreateBrowserWithTestWindowForParams(&profile_params);
+    browser_ = CreateBrowserWithTestWindowForParams(&profile_params);
     ASSERT_TRUE(browser_);
     for (int i = 0; i < kDefaultSourceCount; i++) {
       AddWebcontents(i + 1);
@@ -183,10 +181,6 @@ class TabDesktopMediaListTest : public testing::Test {
     browser_.reset();
     TestingBrowserProcess::GetGlobal()->SetProfileManager(NULL);
     base::RunLoop().RunUntilIdle();
-
-#if defined(OS_CHROMEOS)
-    chromeos::WallpaperManager::Shutdown();
-#endif
     rvh_test_enabler_.reset();
   }
 

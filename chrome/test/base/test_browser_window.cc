@@ -12,18 +12,13 @@
 
 // Helpers --------------------------------------------------------------------
 
-namespace chrome {
-
 std::unique_ptr<Browser> CreateBrowserWithTestWindowForParams(
     Browser::CreateParams* params) {
   TestBrowserWindow* window = new TestBrowserWindow;
   new TestBrowserWindowOwner(window);
   params->window = window;
-  return base::MakeUnique<Browser>(*params);
+  return std::make_unique<Browser>(*params);
 }
-
-}  // namespace chrome
-
 
 // TestBrowserWindow::TestLocationBar -----------------------------------------
 

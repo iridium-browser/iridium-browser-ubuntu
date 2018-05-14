@@ -11,9 +11,8 @@
 #include <string>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_api.pb.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
 #include "components/password_manager/core/browser/android_affiliation/test_affiliation_fetcher_factory.h"
@@ -47,11 +46,11 @@ void ReportStatistics(AffiliationFetchResult result,
   UMA_HISTOGRAM_ENUMERATION("PasswordManager.AffiliationFetcher.FetchResult",
                             result, AFFILIATION_FETCH_RESULT_MAX);
   if (fetcher) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY(
+    base::UmaHistogramSparse(
         "PasswordManager.AffiliationFetcher.FetchHttpResponseCode",
         fetcher->GetResponseCode());
     // Network error codes are negative. See: src/net/base/net_error_list.h.
-    UMA_HISTOGRAM_SPARSE_SLOWLY(
+    base::UmaHistogramSparse(
         "PasswordManager.AffiliationFetcher.FetchErrorCode",
         -fetcher->GetStatus().error());
   }
@@ -114,7 +113,7 @@ void AffiliationFetcher::StartRequest() {
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "Users can enable or disable this feature either by stoping "
             "syncing passwords to Google (via unchecking 'Passwords' in "
@@ -153,7 +152,7 @@ std::string AffiliationFetcher::PreparePayload() const {
     lookup_request.add_facet(uri.canonical_spec());
 
   // Enable request for branding information.
-  auto mask = base::MakeUnique<affiliation_pb::LookupAffiliationMask>();
+  auto mask = std::make_unique<affiliation_pb::LookupAffiliationMask>();
   mask->set_branding_info(true);
   lookup_request.set_allocated_mask(mask.release());
 

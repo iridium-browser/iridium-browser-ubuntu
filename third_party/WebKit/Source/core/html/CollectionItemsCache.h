@@ -47,7 +47,7 @@ class CollectionItemsCache : public CollectionIndexCache<Collection, NodeType> {
   CollectionItemsCache();
   ~CollectionItemsCache();
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(cached_list_);
     Base::Trace(visitor);
   }
@@ -66,7 +66,7 @@ CollectionItemsCache<Collection, NodeType>::CollectionItemsCache()
     : list_valid_(false) {}
 
 template <typename Collection, typename NodeType>
-CollectionItemsCache<Collection, NodeType>::~CollectionItemsCache() {}
+CollectionItemsCache<Collection, NodeType>::~CollectionItemsCache() = default;
 
 template <typename Collection, typename NodeType>
 void CollectionItemsCache<Collection, NodeType>::Invalidate() {

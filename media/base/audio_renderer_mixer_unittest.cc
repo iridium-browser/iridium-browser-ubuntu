@@ -2,20 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// MSVC++ requires this to be set before any other includes to get M_PI.
-#define _USE_MATH_DEFINES
-
 #include "media/base/audio_renderer_mixer.h"
 
 #include <stddef.h>
 
-#include <cmath>
 #include <memory>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "media/base/audio_renderer_mixer_input.h"
@@ -101,7 +96,9 @@ class AudioRendererMixerTest
     return mixer_.get();
   };
 
-  MOCK_METHOD1(ReturnMixer, void(AudioRendererMixer*));
+  void ReturnMixer(AudioRendererMixer* mixer) {
+    EXPECT_EQ(mixer_.get(), mixer);
+  }
 
   MOCK_METHOD4(
       GetOutputDeviceInfo,
@@ -122,7 +119,7 @@ class AudioRendererMixerTest
            static_cast<double>(output_parameters_.frames_per_buffer()));
 
       for (int j = 0; j < inputs_per_sample_rate; ++j, ++input) {
-        fake_callbacks_.push_back(base::MakeUnique<FakeAudioRenderCallback>(
+        fake_callbacks_.push_back(std::make_unique<FakeAudioRenderCallback>(
             step, output_parameters_.sample_rate()));
         mixer_inputs_.push_back(CreateMixerInput());
         mixer_inputs_[input]->Initialize(input_parameters_[i],
@@ -343,7 +340,7 @@ class AudioRendererMixerTest
   }
 
  protected:
-  virtual ~AudioRendererMixerTest() {}
+  virtual ~AudioRendererMixerTest() = default;
 
   scoped_refptr<MockAudioRendererSink> sink_;
   std::unique_ptr<AudioRendererMixer> mixer_;
@@ -519,7 +516,7 @@ TEST_P(AudioRendererMixerBehavioralTest, MixerPausesStream) {
 }
 
 INSTANTIATE_TEST_CASE_P(
-    AudioRendererMixerTest,
+    /* no prefix */,
     AudioRendererMixerTest,
     testing::Values(
         // No resampling, 1 input sample rate.

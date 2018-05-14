@@ -14,10 +14,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/single_thread_task_runner.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/content_browser_client.h"
 #include "headless/public/headless_browser.h"
-#include "net/proxy/proxy_config.h"
-#include "net/proxy/proxy_config_service.h"
+#include "net/proxy_resolution/proxy_config.h"
+#include "net/proxy_resolution/proxy_config_service.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_job_factory.h"
 
@@ -30,7 +29,9 @@ namespace headless {
 class HeadlessBrowserContextOptions;
 class HeadlessBrowserContextImpl;
 
-class HeadlessURLRequestContextGetter : public net::URLRequestContextGetter {
+class HeadlessURLRequestContextGetter
+    : public net::URLRequestContextGetter,
+      public HeadlessBrowserContext::Observer {
  public:
   HeadlessURLRequestContextGetter(
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
@@ -48,6 +49,11 @@ class HeadlessURLRequestContextGetter : public net::URLRequestContextGetter {
 
   net::HostResolver* host_resolver() const;
 
+  // HeadlessBrowserContext::Observer implementation:
+  void OnHeadlessBrowserContextDestruct() override;
+
+  void NotifyContextShuttingDown();
+
  protected:
   ~HeadlessURLRequestContextGetter() override;
 
@@ -57,6 +63,7 @@ class HeadlessURLRequestContextGetter : public net::URLRequestContextGetter {
   // The |options| object given to the constructor is not guaranteed to outlive
   // this class, so we make copies of the parts we need to access on the IO
   // thread.
+  std::string accept_language_;
   std::string user_agent_;
   std::string host_resolver_rules_;
   const net::ProxyConfig* proxy_config_;  // Not owned.
@@ -65,8 +72,12 @@ class HeadlessURLRequestContextGetter : public net::URLRequestContextGetter {
   std::unique_ptr<net::URLRequestContext> url_request_context_;
   content::ProtocolHandlerMap protocol_handlers_;
   content::URLRequestInterceptorScopedVector request_interceptors_;
-  net::NetLog* net_log_;                                  // Not owned.
+  net::NetLog* net_log_;  // Not owned
+
+  base::Lock lock_;  // Protects |headless_browser_context_|.
   HeadlessBrowserContextImpl* headless_browser_context_;  // Not owned.
+
+  bool shut_down_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(HeadlessURLRequestContextGetter);
 };

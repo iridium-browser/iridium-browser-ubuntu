@@ -4,7 +4,6 @@
 
 #include "ios/chrome/browser/share_extension/share_extension_service_factory.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -12,6 +11,10 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
 #include "ios/chrome/browser/share_extension/share_extension_service.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 // static
 ShareExtensionService* ShareExtensionServiceFactory::GetForBrowserState(
@@ -47,7 +50,7 @@ ShareExtensionServiceFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
   ios::ChromeBrowserState* chrome_browser_state =
       ios::ChromeBrowserState::FromBrowserState(context);
-  return base::MakeUnique<ShareExtensionService>(
+  return std::make_unique<ShareExtensionService>(
       ios::BookmarkModelFactory::GetForBrowserState(chrome_browser_state),
       ReadingListModelFactory::GetForBrowserState(chrome_browser_state));
 }

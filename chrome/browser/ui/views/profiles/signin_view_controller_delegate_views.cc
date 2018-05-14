@@ -5,12 +5,15 @@
 #include "chrome/browser/ui/views/profiles/signin_view_controller_delegate_views.h"
 
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/signin/signin_promo.h"
+#include "chrome/browser/signin/unified_consent_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views_mode_controller.h"
 #include "chrome/browser/ui/webui/signin/sync_confirmation_ui.h"
 #include "chrome/common/url_constants.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -24,6 +27,7 @@ namespace {
 
 const int kFixedGaiaViewHeight = 612;
 const int kModalDialogWidth = 448;
+const int kModalDialogWidthForDice = 512;
 const int kSyncConfirmationDialogHeight = 487;
 const int kSigninErrorDialogHeight = 164;
 
@@ -32,6 +36,14 @@ int GetSyncConfirmationDialogPreferredHeight(Profile* profile) {
   // dialog and thus it has the same preferred size.
   return profile->IsSyncAllowed() ? kSyncConfirmationDialogHeight
                                   : kSigninErrorDialogHeight;
+}
+
+int GetSyncConfirmationDialogPreferredWidth(Profile* profile) {
+  // With Unity-enabled profiles, we show a different sync confirmation dialog
+  // which uses a different width.
+  return IsUnifiedConsentEnabled(profile) && profile->IsSyncAllowed()
+             ? kModalDialogWidthForDice
+             : kModalDialogWidth;
 }
 
 }  // namespace
@@ -98,8 +110,8 @@ void SigninViewControllerDelegateViews::ResizeNativeView(int height) {
                        ->GetWebContentsModalDialogHost()
                        ->GetMaximumDialogSize()
                        .height();
-  content_view_->SetPreferredSize(
-      gfx::Size(kModalDialogWidth, std::min(height, max_height)));
+  content_view_->SetPreferredSize(gfx::Size(
+      content_view_->GetPreferredSize().width(), std::min(height, max_height)));
 
   if (!modal_signin_widget_) {
     // The modal wasn't displayed yet so just show it with the already resized
@@ -175,20 +187,23 @@ SigninViewControllerDelegateViews::CreateSyncConfirmationWebView(
     Browser* browser) {
   return CreateDialogWebView(
       browser, chrome::kChromeUISyncConfirmationURL,
-      GetSyncConfirmationDialogPreferredHeight(browser->profile()));
+      GetSyncConfirmationDialogPreferredHeight(browser->profile()),
+      GetSyncConfirmationDialogPreferredWidth(browser->profile()));
 }
 
 std::unique_ptr<views::WebView>
 SigninViewControllerDelegateViews::CreateSigninErrorWebView(Browser* browser) {
   return CreateDialogWebView(browser, chrome::kChromeUISigninErrorURL,
-                             kSigninErrorDialogHeight);
+                             kSigninErrorDialogHeight, base::nullopt);
 }
 
-// static
 std::unique_ptr<views::WebView>
-SigninViewControllerDelegateViews::CreateDialogWebView(Browser* browser,
-                                                       const std::string& url,
-                                                       int dialog_height) {
+SigninViewControllerDelegateViews::CreateDialogWebView(
+    Browser* browser,
+    const std::string& url,
+    int dialog_height,
+    base::Optional<int> opt_width) {
+  int dialog_width = opt_width.value_or(kModalDialogWidth);
   views::WebView* web_view = new views::WebView(browser->profile());
   web_view->LoadInitialURL(GURL(url));
 
@@ -201,7 +216,7 @@ SigninViewControllerDelegateViews::CreateDialogWebView(Browser* browser,
                        ->GetMaximumDialogSize()
                        .height();
   web_view->SetPreferredSize(
-      gfx::Size(kModalDialogWidth, std::min(dialog_height, max_height)));
+      gfx::Size(dialog_width, std::min(dialog_height, max_height)));
 
   return std::unique_ptr<views::WebView>(web_view);
 }
@@ -212,6 +227,12 @@ SigninViewControllerDelegate::CreateModalSigninDelegate(
     profiles::BubbleViewMode mode,
     Browser* browser,
     signin_metrics::AccessPoint access_point) {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return CreateModalSigninDelegateCocoa(signin_view_controller, mode, browser,
+                                          access_point);
+  }
+#endif
   return new SigninViewControllerDelegateViews(
       signin_view_controller,
       SigninViewControllerDelegateViews::CreateGaiaWebView(
@@ -223,6 +244,11 @@ SigninViewControllerDelegate*
 SigninViewControllerDelegate::CreateSyncConfirmationDelegate(
     SigninViewController* signin_view_controller,
     Browser* browser) {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return CreateSyncConfirmationDelegate(signin_view_controller, browser);
+  }
+#endif
   return new SigninViewControllerDelegateViews(
       signin_view_controller,
       SigninViewControllerDelegateViews::CreateSyncConfirmationWebView(browser),
@@ -233,6 +259,11 @@ SigninViewControllerDelegate*
 SigninViewControllerDelegate::CreateSigninErrorDelegate(
     SigninViewController* signin_view_controller,
     Browser* browser) {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa()) {
+    return CreateSigninErrorDelegateCocoa(signin_view_controller, browser);
+  }
+#endif
   return new SigninViewControllerDelegateViews(
       signin_view_controller,
       SigninViewControllerDelegateViews::CreateSigninErrorWebView(browser),
